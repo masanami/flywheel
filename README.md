@@ -10,4 +10,5 @@
 
 ## 文書
 
-- [docs/architecture.md](docs/architecture.md) — アーキテクチャ設計（draft）。背景・決定済み事項・構成・データモデル・サイクルの再設計・承認ゲート・未決事項・段階計画
+- [docs/architecture.md](docs/architecture.md) — アーキテクチャ設計（確定。2026-09-21 の決定を反映）。背景・決定済み事項・構成・データモデル・サイクルの再設計・承認ゲート・未決事項・段階計画
+- [docs/features/m1-core.md](docs/features/m1-core.md) — M1（core の最小形）の機能仕様（draft）
