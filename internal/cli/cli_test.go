@@ -93,9 +93,12 @@ func TestRun_ExtraPositionalArgIsUsageError(t *testing.T) {
 func TestRun_PlanRequiresExactlyOneOfFileOrStdin(t *testing.T) {
 	requireErrorCode(t, []string{"plan", "C-1"}, 2, CodeUsageError)
 	requireErrorCode(t, []string{"plan", "C-1", "--file", "x.txt", "--stdin"}, 2, CodeUsageError)
-	// exactly one of --file/--stdin: parsing succeeds, then falls through to the
-	// unimplemented stub, which returns internal_error (not usage_error).
-	requireErrorCode(t, []string{"plan", "C-1", "--file", "x.txt"}, 2, CodeInternalError)
+	// exactly one of --file/--stdin: parsing succeeds, then (once a workspace is
+	// resolvable) falls through to the unimplemented stub, which returns
+	// internal_error (not usage_error). plan は RequiresStore のため、ストアの
+	// あるワークスペースを渡さないと store_not_found が先に出てしまう。
+	ws := initializedWorkspace(t)
+	requireErrorCode(t, []string{"plan", "C-1", "--file", "x.txt", "--workspace", ws}, 2, CodeInternalError)
 }
 
 func TestRun_FlagParsesRegardlessOfPositionBeforeOrAfterPositionalArg(t *testing.T) {
@@ -233,9 +236,12 @@ func TestRun_NonObjectSuccessPayloadBecomesInternalError(t *testing.T) {
 	}
 }
 
+// TestRun_AllStubCommandsReturnInternalErrorUnimplemented は init 以外の
+// 未実装コマンド（RequiresStore: true）を対象にする。init 自身は本チケットで
+// 実装済みのため対象から外れ、専用のテスト（init_test.go）で検証する。
 func TestRun_AllStubCommandsReturnInternalErrorUnimplemented(t *testing.T) {
+	ws := initializedWorkspace(t)
 	cases := [][]string{
-		{"init"},
 		{"create", "--title", "t"},
 		{"show", "C-1"},
 		{"list"},
@@ -255,7 +261,7 @@ func TestRun_AllStubCommandsReturnInternalErrorUnimplemented(t *testing.T) {
 	}
 	for _, args := range cases {
 		var stdout, stderr bytes.Buffer
-		full := append(append([]string{}, args...), "--json")
+		full := append(append([]string{}, args...), "--workspace", ws, "--json")
 		code := run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands())
 		if code != 2 {
 			t.Errorf("args=%v exit=%d, want 2 (internal_error stub)", args, code)
@@ -288,6 +294,27 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	}
 	if len(cmds) != len(want) {
 		t.Errorf("defaultCommands() has %d entries, want %d (IF/API 表に無いコマンドを足していないか確認)", len(cmds), len(want))
+	}
+
+	// 上のループ＋件数比較は want と cmds の重複が無い前提でしか集合一致を
+	// 保証しない。集合（map キー）として明示的に一致を取り、取りこぼしを防ぐ。
+	wantSet := map[string]bool{}
+	for _, w := range want {
+		wantSet[strings.Join(w, " ")] = true
+	}
+	gotSet := map[string]bool{}
+	for _, c := range cmds {
+		gotSet[strings.Join(c.Path, " ")] = true
+	}
+	for path := range wantSet {
+		if !gotSet[path] {
+			t.Errorf("IF/API table command %q is not registered in defaultCommands()", path)
+		}
+	}
+	for path := range gotSet {
+		if !wantSet[path] {
+			t.Errorf("defaultCommands() has %q which is not in the IF/API table", path)
+		}
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/masanami/flywheel/internal/core"
 )
 
 // repoRoot はテスト実行時のカレントディレクトリから go.mod を上方へ探し、
@@ -25,4 +27,16 @@ func repoRoot(t *testing.T) string {
 		}
 		dir = parent
 	}
+}
+
+// initializedWorkspace は t.TempDir() に core.Init 済みのワークスペースを作り、
+// その絶対パスを返す。RequiresStore なコマンドを --workspace 付きで叩く
+// テストの共通セットアップとして使う。
+func initializedWorkspace(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if _, err := core.Init(dir); err != nil {
+		t.Fatalf("core.Init(%q) setup error = %v", dir, err)
+	}
+	return dir
 }

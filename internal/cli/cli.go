@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/masanami/flywheel/internal/core"
 )
 
 // Run は cmd/flywheel/main.go から呼ばれる唯一の入口。
@@ -46,6 +48,19 @@ func run(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands [
 	// 解析が成功した後は解析結果を正とする（事前走査はフラグの値としての
 	// "--json" も拾うため、解析に失敗したときの出力形式の判定にだけ使う）。
 	jsonMode = parsed.Bools["json"]
+
+	// RequiresStore なコマンドは、Run を呼ぶ前にワークスペースのストアを開く。
+	// これにより init を含む全コマンドが store_not_found・store_too_new・
+	// store_busy・store_error を一様に返せる（Run 自体がまだスタブでも、この
+	// 事前チェックだけは適用される）。
+	if cmd.RequiresStore {
+		store, storeErr := core.OpenWorkspace(parsed.Values["workspace"])
+		if storeErr != nil {
+			return failErr(stderr, jsonMode, mapCoreErr(storeErr))
+		}
+		defer func() { _ = store.Close() }()
+		parsed.Store = store
+	}
 
 	data, err := cmd.Run(parsed)
 	if err != nil {

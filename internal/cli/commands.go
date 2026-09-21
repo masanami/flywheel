@@ -1,6 +1,10 @@
 package cli
 
-import "io"
+import (
+	"io"
+
+	"github.com/masanami/flywheel/internal/core"
+)
 
 // flagDef は 1 つのフラグの宣言。HasValue が true なら値を取るフラグ
 // （例: --title <t>）、false なら真偽の切り替えフラグ（例: --stdin）。
@@ -21,6 +25,16 @@ type Command struct {
 	MaxPositional int
 	Flags         []flagDef
 	OneOfGroups   [][]string
+	// RequiresStore が true のコマンドは、Run を呼ぶ前に --workspace の解決規則で
+	// ワークスペースのストアを開く（internal/core/internal/store の直輸入は
+	// Go の internal 規則で禁止されているため、internal/core の公開 API 経由）。
+	// 開けなければ Run を呼ばずに store_not_found・store_too_new・store_busy・
+	// store_error を返す（init と読み取りを含む全コマンドが対象＝完了条件）。
+	// init だけは false にし、自分自身でワークスペースの作成を行う（PD6:
+	// init は親へ遡らない。ワークスペースが無くても新規に作るのが init の役目）。
+	// ゼロ値は false（ストアを開かない）。テスト専用のアドホックなコマンドは
+	// この既定を利用し、ストアの有無に影響されない。
+	RequiresStore bool
 	Run           func(Args) (any, error)
 }
 
@@ -30,6 +44,10 @@ type Args struct {
 	Values     map[string]string
 	Bools      map[string]bool
 	Stdin      io.Reader
+	// Store は RequiresStore が true のコマンドにだけ設定される、開いた
+	// ワークスペースのストア。Run は Close してはならない（呼び出し元の run が
+	// 責任を持つ）。
+	Store *core.Store
 }
 
 // commonFlags はすべてのコマンドに共通のフラグ。
@@ -44,16 +62,34 @@ func stubRun(Args) (any, error) {
 	return nil, NewError(CodeInternalError, "未実装（後続チケットで実装）")
 }
 
+// runInit は `flywheel init` の実装。core.Init を呼ぶだけで、遷移や承認の規則は
+// 一切持たない（P2・P4）。
+func runInit(a Args) (any, error) {
+	res, err := core.Init(a.Values["workspace"])
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	return map[string]any{
+		"workspace":  res.Workspace,
+		"store_path": res.StorePath,
+		"created":    res.Created,
+	}, nil
+}
+
 // defaultCommands は docs/features/m1-core.md §IF / API の全コマンドを登録する。
-// この表に無いコマンド（例: version）は足さない。
+// この表に無いコマンド（例: version）は足さない。init 以外はすべて
+// RequiresStore: true（完了条件「init と読み取りを含むすべてのコマンドを
+// store_too_new で拒否する」の対象。init 自身は自分でワークスペースを作る
+// ため false）。
 func defaultCommands() []Command {
 	return []Command{
 		{
 			Path: []string{"init"},
-			Run:  stubRun,
+			Run:  runInit,
 		},
 		{
-			Path: []string{"create"},
+			Path:          []string{"create"},
+			RequiresStore: true,
 			Flags: []flagDef{
 				{Name: "title", HasValue: true, Required: true},
 				{Name: "description", HasValue: true},
@@ -64,17 +100,20 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"show"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			Run:           stubRun,
 		},
 		{
-			Path:  []string{"list"},
-			Flags: []flagDef{{Name: "status", HasValue: true}},
-			Run:   stubRun,
+			Path:          []string{"list"},
+			RequiresStore: true,
+			Flags:         []flagDef{{Name: "status", HasValue: true}},
+			Run:           stubRun,
 		},
 		{
 			Path:          []string{"edit"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags: []flagDef{
@@ -87,6 +126,7 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"classify"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags:         []flagDef{{Name: "priority", HasValue: true, Required: true}},
@@ -94,6 +134,7 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"plan"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags: []flagDef{
@@ -105,12 +146,14 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"submit"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			Run:           stubRun,
 		},
 		{
 			Path:          []string{"verify"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags: []flagDef{
@@ -124,6 +167,7 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"hold"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			// --question の省略も validation_failed（usage_error ではない）。
@@ -132,6 +176,7 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"answer"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags:         []flagDef{{Name: "answer", HasValue: true, Required: true}},
@@ -139,6 +184,7 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"approve"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags:         []flagDef{{Name: "hold-release", HasValue: false}},
@@ -146,6 +192,7 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"reject"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags:         []flagDef{{Name: "reason", HasValue: true, Required: true}},
@@ -153,6 +200,7 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"op", "add"},
+			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags: []flagDef{
@@ -163,11 +211,13 @@ func defaultCommands() []Command {
 			Run: stubRun,
 		},
 		{
-			Path: []string{"status"},
-			Run:  stubRun,
+			Path:          []string{"status"},
+			RequiresStore: true,
+			Run:           stubRun,
 		},
 		{
 			Path:          []string{"log"},
+			RequiresStore: true,
 			MinPositional: 0,
 			MaxPositional: 1,
 			Run:           stubRun,

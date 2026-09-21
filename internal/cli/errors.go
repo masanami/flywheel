@@ -1,5 +1,11 @@
 package cli
 
+import (
+	"errors"
+
+	"github.com/masanami/flywheel/internal/core"
+)
+
 // ErrorCode は CLI が返すエラーの機械可読な識別子の閉集合である。
 // 正本は docs/features/m1-core.md の「CLI 共通」節にあるエラーコード表であり、
 // このファイルの errorCodeTable はその表と 1 対 1 に対応する
@@ -87,4 +93,24 @@ func (e *Error) Error() string {
 // internal/cli/codeusage_test.go が検出する）。
 func NewError(code ErrorCode, message string) *Error {
 	return &Error{Code: code, Message: message}
+}
+
+// mapCoreErr は internal/core が返す sentinel error（errors.go の設計メモの
+// 案 (a)）を、CLI の ErrorCode を持つ *Error へ写像する唯一の箇所。
+// 表に無い・core 由来ではないエラーは internal_error にする（fail-closed）。
+func mapCoreErr(err error) *Error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, core.ErrStoreNotFound):
+		return NewError(CodeStoreNotFound, err.Error())
+	case errors.Is(err, core.ErrStoreTooNew):
+		return NewError(CodeStoreTooNew, err.Error())
+	case errors.Is(err, core.ErrStoreBusy):
+		return NewError(CodeStoreBusy, err.Error())
+	case errors.Is(err, core.ErrStoreError):
+		return NewError(CodeStoreError, err.Error())
+	default:
+		return NewError(CodeInternalError, err.Error())
+	}
 }
