@@ -1,0 +1,9 @@
+# ビルド成果物
+/build/
+/flywheel
+*.test
+coverage.out
+
+# ワークスペースのストア（開発中にリポジトリ直下で init した場合の保険。
+# 通常は internal/core が .flywheel/.gitignore を作る）
+/.flywheel/
