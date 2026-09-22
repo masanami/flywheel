@@ -33,6 +33,16 @@ type Store struct {
 	// nil なら defaultInsertActivity を使う（#9 §A-3 の失敗注入。本番 API には
 	// 注入口を露出しない）。
 	insertActivity func(tx *sql.Tx, row activityRow) error
+
+	// beforeCommit はテストが「1 つの書き込みトランザクションが BEGIN IMMEDIATE の
+	// 書き込みロックを保持したまま止まる」状況を作るためのフック。mutate が
+	// 渡された fn を成功させた直後・コミットする前に呼ぶ。nil なら何もしない
+	// （#10 AC-36 の並行テスト専用。本番 API には注入口を露出しない）。
+	// テスト専用: 非テストコードから設定してはならない（設定すると書き込み
+	// ロックを保持したまま止まり、他プロセスを busy_timeout まで待たせる）。
+	// 本番の生成経路（openExistingAt・openAtForInit）が nil のままであることは
+	// TestStore_ProductionOpenPathsLeaveBeforeCommitNil が固定する。
+	beforeCommit func()
 }
 
 // currentTime は now が設定されていればそれを、なければ time.Now() を返す。

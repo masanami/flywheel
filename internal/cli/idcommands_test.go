@@ -5,15 +5,25 @@ import "testing"
 // idCommandCases は「ID を引数に取る実装済みコマンド」の一覧である
 // （docs/features/m1-core.md AC「存在しない ID を指定したコマンドは、終了コード1・
 // not_found で終わる（§IF / API のうち ID を引数に取る全コマンドを…列挙して
-// 検証する）」の枠組み）。後続チケット（#10 classify・#11 plan/submit/verify・
-// #12 hold/answer/approve/reject・#13 op add/approve(OP-ID)/reject(OP-ID)）が
-// 実装され次第、この一覧に行を足すだけで閉包できるようにする。
+// 検証する）」の枠組み）。後続チケット（#12 answer/approve/reject・#13 op
+// add/approve(OP-ID)/reject(OP-ID)）が実装され次第、この一覧に行を足すだけで
+// 閉包できるようにする。
 //
-// args は --workspace/--json を除いた、対象 ID を含むコマンド引数。
+// args は --workspace/--json を除いた、対象 ID を含むコマンド引数。入力の検証
+// （閉集合・必須値）が ID の存在チェックより先に core で判定される操作
+// （classify・verify・hold）は、検証を通過する値を extraFlags に添えている
+// （空値だと not_found より先に validation_failed になってしまうため）。
+// plan は body の内容が無いと ID の存在チェックへ到達できず、この汎用の
+// 枠組み（stdin を常に空文字列で叩く requireErrorCode）では検証できないため、
+// 専用のテスト（TestRunPlan_NotFoundForMissingOrMalformedID）で別途検証する。
 var idCommandCases = [][]string{
 	{"show"},
 	{"edit", "--title", "x"},
 	{"log"},
+	{"classify", "--priority", "P0"},
+	{"submit"},
+	{"verify", "--result", "met"},
+	{"hold", "--question", "why?"},
 }
 
 // TestIDCommands_NotFoundForMissingAndIrreversibleOperationID は、存在しない

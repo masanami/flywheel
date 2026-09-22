@@ -36,6 +36,12 @@ var (
 	// ErrTerminalState は完了（done）した課題を変えようとしたことを表す。
 	ErrTerminalState = errors.New("core: challenge is in a terminal state")
 
+	// ErrInvalidTransition は遷移表 Table に無い（状態, 操作）の組が要求された
+	// ことを表す（docs/features/m1-core.md §状態機械「遷移表に無い操作は拒否し、
+	// 状態と作業ログを変えない」）。完了状態からの操作は ErrTerminalState と
+	// 区別する（Lookup より先に IsTerminal を判定する）。
+	ErrInvalidTransition = errors.New("core: invalid transition")
+
 	// ErrActorUnavailable は actor（OS のログインユーザー名）を解決できなかった
 	// ことを表す（os/user.Current の Username → 環境変数 USER → LOGNAME の
 	// いずれも得られない場合）。対象は一切変更しない。

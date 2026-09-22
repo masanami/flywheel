@@ -370,6 +370,16 @@ func urgencyEqual(a, b *Urgency) bool {
 	return *a == *b
 }
 
+// nullablePriority は nullableUrgency と同じ規則で p を any 値にする
+// （#10 の classify が優先度を設定するようになったため、SQL のバインド値にも
+// 作業ログ before/after の JSON にも使う）。
+func nullablePriority(p *Priority) any {
+	if p == nil {
+		return nil
+	}
+	return string(*p)
+}
+
 // CreateChallenge は課題を状態 unclassified で作る（T1）。タイトルは
 // strings.TrimSpace が空なら ErrValidation（値はそのまま保存し正規化しない）。
 // 緊急度は指定時のみ閉集合を検査する。起票者（reporter）は actor と同じ値。

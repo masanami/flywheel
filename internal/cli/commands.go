@@ -130,7 +130,7 @@ func defaultCommands() []Command {
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags:         []flagDef{{Name: "priority", HasValue: true, Required: true}},
-			Run:           stubRun,
+			Run:           runClassify,
 		},
 		{
 			Path:          []string{"plan"},
@@ -142,14 +142,14 @@ func defaultCommands() []Command {
 				{Name: "stdin", HasValue: false},
 			},
 			OneOfGroups: [][]string{{"file", "stdin"}},
-			Run:         stubRun,
+			Run:         runPlan,
 		},
 		{
 			Path:          []string{"submit"},
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			Run:           stubRun,
+			Run:           runSubmit,
 		},
 		{
 			Path:          []string{"verify"},
@@ -163,7 +163,7 @@ func defaultCommands() []Command {
 				// 決まっているため、ここでは必須フラグにしない。
 				{Name: "question", HasValue: true},
 			},
-			Run: stubRun,
+			Run: runVerify,
 		},
 		{
 			Path:          []string{"hold"},
@@ -172,7 +172,7 @@ func defaultCommands() []Command {
 			MaxPositional: 1,
 			// --question の省略も validation_failed（usage_error ではない）。
 			Flags: []flagDef{{Name: "question", HasValue: true}},
-			Run:   stubRun,
+			Run:   runHold,
 		},
 		{
 			Path:          []string{"answer"},
