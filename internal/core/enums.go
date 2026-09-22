@@ -155,3 +155,46 @@ func ParseApprovalDecision(s string) (ApprovalDecision, bool) {
 	}
 	return "", false
 }
+
+// OperationState は不可逆操作の状態（§データモデル `operation.state`）。
+// 登録直後は OperationStatePending で、単独の承認・差し戻し
+// （ExecuteOperationApproval）または完了の承認による一括承認（D12）でだけ
+// 変わる。他の閉集合（Status・OperationKind・ApprovalKind・ApprovalDecision）
+// と同じく、値の正本をここ 1 箇所に置く。
+type OperationState string
+
+// OperationState の3値。
+const (
+	OperationStatePending  OperationState = "pending"
+	OperationStateApproved OperationState = "approved"
+	OperationStateRejected OperationState = "rejected"
+)
+
+var operationStateValues = []OperationState{
+	OperationStatePending, OperationStateApproved, OperationStateRejected,
+}
+
+// ParseOperationState は s を不可逆操作の状態として解釈する。
+// 前後の空白を除いた完全一致のみ受理する。
+func ParseOperationState(s string) (OperationState, bool) {
+	trimmed := strings.TrimSpace(s)
+	for _, v := range operationStateValues {
+		if string(v) == trimmed {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// operationStateForDecision は承認の決定（approved／rejected）に対応する
+// 不可逆操作の状態を返す（単独の承認・差し戻しと D12 の一括承認が共有する）。
+func operationStateForDecision(d ApprovalDecision) (OperationState, bool) {
+	switch d {
+	case ApprovalDecisionApproved:
+		return OperationStateApproved, true
+	case ApprovalDecisionRejected:
+		return OperationStateRejected, true
+	default:
+		return "", false
+	}
+}

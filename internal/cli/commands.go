@@ -208,7 +208,7 @@ func defaultCommands() []Command {
 				{Name: "summary", HasValue: true, Required: true},
 				{Name: "ref", HasValue: true},
 			},
-			Run: stubRun,
+			Run: runOpAdd,
 		},
 		{
 			Path:          []string{"status"},

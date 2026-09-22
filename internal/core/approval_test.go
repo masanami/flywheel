@@ -580,3 +580,388 @@ func TestExecuteApproval_DecisionOutsideClosedSetIsValidationError(t *testing.T)
 		t.Fatalf("err = %v, want ErrValidation", err)
 	}
 }
+
+// --- D12: 完了の承認は未承認の release を同じトランザクションで一括承認する（#13） ---
+
+// setUpChallengeAwaitingCompletionWithOperations は、完了確認待ちの課題に
+// pending の release を2件・delete/external_send/other を1件ずつ登録した
+// 状態を作る。D12 のテストが共有する。
+func setUpChallengeAwaitingCompletionWithOperations(t *testing.T, s *Store) (c *Challenge, releases []*IrreversibleOperation, others []*IrreversibleOperation) {
+	t.Helper()
+	c = createAndAdvance(t, s, StatusUnclassified)
+	r1 := createPendingOperation(t, s, c.ID, "release")
+	r2 := createPendingOperation(t, s, c.ID, "release")
+	del := createPendingOperation(t, s, c.ID, "delete")
+	ext := createPendingOperation(t, s, c.ID, "external_send")
+	oth := createPendingOperation(t, s, c.ID, "other")
+	setChallengeStatus(t, s, mustParseChallengeID(t, c.ID), StatusAwaitingCompletionApproval)
+	return c, []*IrreversibleOperation{r1, r2}, []*IrreversibleOperation{del, ext, oth}
+}
+
+func TestPrepareApproval_CompletionListsPendingReleasesAndOtherOperations(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c, releases, others := setUpChallengeAwaitingCompletionWithOperations(t, s)
+
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval() error = %v", err)
+	}
+	if len(prev.PendingReleases) != len(releases) {
+		t.Fatalf("PendingReleases = %+v, want %d entries", prev.PendingReleases, len(releases))
+	}
+	for i, r := range releases {
+		if prev.PendingReleases[i].ID != r.ID {
+			t.Errorf("PendingReleases[%d].ID = %q, want %q", i, prev.PendingReleases[i].ID, r.ID)
+		}
+	}
+	if len(prev.OtherPendingOperations) != len(others) {
+		t.Fatalf("OtherPendingOperations = %+v, want %d entries", prev.OtherPendingOperations, len(others))
+	}
+}
+
+func TestExecuteApproval_CompletionApprovesAllPendingReleasesButNotOtherKinds(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c, releases, others := setUpChallengeAwaitingCompletionWithOperations(t, s)
+
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval() error = %v", err)
+	}
+	att := verifiedAttestationForTest(t, c.ID)
+	c2, approval, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+	}, att)
+	if err != nil {
+		t.Fatalf("ExecuteApproval() error = %v", err)
+	}
+	if c2.Status != StatusDone {
+		t.Fatalf("Status = %q, want done", c2.Status)
+	}
+	if approval.Kind != ApprovalKindCompletion {
+		t.Errorf("approval.Kind = %q, want completion", approval.Kind)
+	}
+
+	detail, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("GetChallenge() error = %v", err)
+	}
+	byID := map[string]IrreversibleOperation{}
+	for _, op := range detail.Operations {
+		byID[op.ID] = op
+	}
+	for _, r := range releases {
+		if got := byID[r.ID]; got.State != "approved" {
+			t.Errorf("release %s state = %q, want approved", r.ID, got.State)
+		}
+	}
+	for _, o := range others {
+		if got := byID[o.ID]; got.State != "pending" {
+			t.Errorf("non-release %s state = %q, want pending (unchanged)", o.ID, got.State)
+		}
+	}
+
+	// D12: 完了の承認と release ごとの承認は別々の approval 記録として残る
+	// （kind=completion が1件、kind=release が release の数だけ）。
+	var completionCount, releaseCount int
+	for _, a := range detail.Approvals {
+		switch a.Kind {
+		case ApprovalKindCompletion:
+			completionCount++
+		case ApprovalKindRelease:
+			releaseCount++
+			if a.OperationID == nil {
+				t.Errorf("release approval missing OperationID: %+v", a)
+			}
+		}
+	}
+	if completionCount != 1 {
+		t.Errorf("completion approval count = %d, want 1", completionCount)
+	}
+	if releaseCount != len(releases) {
+		t.Errorf("release approval count = %d, want %d", releaseCount, len(releases))
+	}
+}
+
+// AC-56 相当（core 側）: 作業ログには完了の承認と release ごとの承認が別々の
+// エントリとして（それぞれ actor・経路・本人確認の方式つきで）残る。
+func TestExecuteApproval_CompletionRecordsSeparateActivityEntriesForEachRelease(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
+
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval() error = %v", err)
+	}
+	att := verifiedAttestationForTest(t, c.ID)
+	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+	}, att); err != nil {
+		t.Fatalf("ExecuteApproval() error = %v", err)
+	}
+
+	var challengeApproveCount int
+	operationApproveCount := map[string]int{}
+	all, err := s.ListActivities(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListActivities() error = %v", err)
+	}
+	for _, a := range all {
+		if a.Entity == "challenge" && a.EntityID == c.ID && a.Action == "approve" {
+			challengeApproveCount++
+			if a.Verification != string(VerificationTTYConfirm) || a.Actor != "alice" {
+				t.Errorf("completion activity actor/verification = %q/%q, unexpected", a.Actor, a.Verification)
+			}
+		}
+		if a.Entity == "operation" && a.Action == "approve" {
+			operationApproveCount[a.EntityID]++
+			if a.Verification != string(VerificationTTYConfirm) || a.Actor != "alice" {
+				t.Errorf("operation activity actor/verification = %q/%q, unexpected", a.Actor, a.Verification)
+			}
+		}
+	}
+	if challengeApproveCount != 1 {
+		t.Errorf("challenge-entity approve activity count = %d, want 1", challengeApproveCount)
+	}
+	for _, r := range releases {
+		if operationApproveCount[r.ID] != 1 {
+			t.Errorf("operation-entity approve activity count for %s = %d, want 1", r.ID, operationApproveCount[r.ID])
+		}
+	}
+}
+
+// T14: `approve --hold-release` は完了だけを承認し release は未承認のまま残す。
+func TestExecuteApproval_HoldReleaseApprovesCompletionOnlyLeavingReleasesPending(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
+
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval() error = %v", err)
+	}
+	att := verifiedAttestationForTest(t, c.ID)
+	c2, approval, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, HoldRelease: true,
+	}, att)
+	if err != nil {
+		t.Fatalf("ExecuteApproval() error = %v", err)
+	}
+	if c2.Status != StatusDone {
+		t.Fatalf("Status = %q, want done", c2.Status)
+	}
+	if approval.Kind != ApprovalKindCompletion {
+		t.Errorf("approval.Kind = %q, want completion", approval.Kind)
+	}
+
+	detail, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("GetChallenge() error = %v", err)
+	}
+	byID := map[string]IrreversibleOperation{}
+	for _, op := range detail.Operations {
+		byID[op.ID] = op
+	}
+	for _, r := range releases {
+		if got := byID[r.ID]; got.State != "pending" {
+			t.Errorf("release %s state = %q, want pending (--hold-release must not approve it)", r.ID, got.State)
+		}
+	}
+	for _, a := range detail.Approvals {
+		if a.Kind == ApprovalKindRelease {
+			t.Errorf("unexpected release approval recorded despite --hold-release: %+v", a)
+		}
+	}
+
+	// T14 の作業ログの action は OpApproveHoldRelease（"approve_hold_release"）
+	// であり、log の action の閉集合に含まれる（self-review 指摘: #13 で初めて
+	// この経路が到達可能になったが、値が仕様の閉集合にもテストにも無かった）。
+	all, err := s.ListActivities(context.Background(), &c.ID)
+	if err != nil {
+		t.Fatalf("ListActivities() error = %v", err)
+	}
+	var holdReleaseEntries int
+	for _, a := range all {
+		if a.Entity == "challenge" && a.Action == string(OpApproveHoldRelease) {
+			holdReleaseEntries++
+		}
+		if a.Entity == "operation" && (a.Action == string(OpApprove) || a.Action == string(OpReject)) {
+			t.Errorf("unexpected operation approve/reject activity despite --hold-release: %+v", a)
+		}
+	}
+	if holdReleaseEntries != 1 {
+		t.Errorf("approve_hold_release activity count = %d, want 1", holdReleaseEntries)
+	}
+}
+
+// TestApprovalPreview_ReleaseEffect は D12 の規則（要約の振り分け）を固定する。
+// self-review 指摘の再発防止: 要約は「同時に承認される release」を示すが、
+// --hold-release・差し戻しでは release は 1 件も承認されない。分類は core が
+// 実挙動と同じ述語で決める。
+func TestApprovalPreview_ReleaseEffect(t *testing.T) {
+	rel := IrreversibleOperation{ID: "OP-1", Kind: OperationKindRelease, State: OperationStatePending}
+	other := IrreversibleOperation{ID: "OP-2", Kind: OperationKindDelete, State: OperationStatePending}
+	completion := &ApprovalPreview{
+		Kind:                   ApprovalKindCompletion,
+		PendingReleases:        []IrreversibleOperation{rel},
+		OtherPendingOperations: []IrreversibleOperation{other},
+	}
+
+	tests := []struct {
+		name            string
+		preview         *ApprovalPreview
+		decision        ApprovalDecision
+		holdRelease     bool
+		wantApproved    []string
+		wantNotApproved []string
+	}{
+		{"完了の承認", completion, ApprovalDecisionApproved, false, []string{"OP-1"}, []string{"OP-2"}},
+		{"完了の承認 --hold-release", completion, ApprovalDecisionApproved, true, nil, []string{"OP-1", "OP-2"}},
+		{"完了の差し戻し", completion, ApprovalDecisionRejected, false, nil, []string{"OP-1", "OP-2"}},
+		{
+			"計画の承認",
+			&ApprovalPreview{Kind: ApprovalKindPlan},
+			ApprovalDecisionApproved, false, nil, nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			effect := tt.preview.ReleaseEffect(tt.decision, tt.holdRelease)
+			if got := operationIDsForTest(effect.Approved); !equalStringsForTest(got, tt.wantApproved) {
+				t.Errorf("Approved = %v, want %v", got, tt.wantApproved)
+			}
+			if got := operationIDsForTest(effect.NotApproved); !equalStringsForTest(got, tt.wantNotApproved) {
+				t.Errorf("NotApproved = %v, want %v", got, tt.wantNotApproved)
+			}
+		})
+	}
+}
+
+func operationIDsForTest(ops []IrreversibleOperation) []string {
+	ids := make([]string, 0, len(ops))
+	for _, op := range ops {
+		ids = append(ids, op.ID)
+	}
+	return ids
+}
+
+func equalStringsForTest(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// T14 は完了確認待ち以外の対象には core レベルでも invalid_transition
+// （終端なら terminal_state）で拒否される。usage_error は CLI 層の責務。
+func TestExecuteApproval_HoldReleaseOnPlanApprovalIsInvalidTransition(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	insertPlanRowForTest(t, s, c.ID, 1, "x")
+
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval() error = %v", err)
+	}
+	att := verifiedAttestationForTest(t, c.ID)
+	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, HoldRelease: true,
+	}, att)
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("err = %v, want ErrInvalidTransition", err)
+	}
+}
+
+func TestExecuteApproval_RejectedWithHoldReleaseIsValidationError(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	insertPlanRowForTest(t, s, c.ID, 1, "x")
+	att := verifiedAttestationForTest(t, c.ID)
+
+	reason := "no"
+	_, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: 1, Decision: ApprovalDecisionRejected, HoldRelease: true, Reason: &reason,
+	}, att)
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation (HoldRelease is only meaningful for an approval)", err)
+	}
+}
+
+// AC-46 相当（D12 の conflict の一方）: 完了の承認の要約表示後・確認前に
+// 別プロセスが対象の release を先に承認すると、完了の承認は成立しない。
+func TestExecuteApproval_ConflictWhenAReleaseIsApprovedStandaloneAfterSummaryShown(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
+
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval() error = %v", err)
+	}
+
+	// 別プロセス: 対象の release の1つを先に単独承認する。
+	opPrev, err := s.PrepareOperationApproval(context.Background(), releases[0].ID)
+	if err != nil {
+		t.Fatalf("PrepareOperationApproval() error = %v", err)
+	}
+	opAtt := verifiedAttestationForTest(t, releases[0].ID)
+	if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
+		OperationID: releases[0].ID, ExpectedVersion: opPrev.Version, ExpectedChallengeVersion: opPrev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+	}, opAtt); err != nil {
+		t.Fatalf("ExecuteOperationApproval() error = %v", err)
+	}
+
+	// 完了の承認は、Prepare 時点の古い版のままでは conflict。
+	att := verifiedAttestationForTest(t, c.ID)
+	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+	}, att)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+
+	detail, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("GetChallenge() error = %v", err)
+	}
+	if detail.Status != StatusAwaitingCompletionApproval {
+		t.Errorf("Status = %q, want awaiting_completion_approval (completion must not have applied)", detail.Status)
+	}
+}
+
+// AC-46 相当（D12 の conflict のもう一方）: 完了の承認の要約表示後・確認前に
+// 別プロセスが op add で不可逆操作を足すと、完了の承認は成立しない。
+func TestExecuteApproval_ConflictWhenOpAddHappensAfterSummaryShown(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c, _, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
+
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval() error = %v", err)
+	}
+
+	// 別プロセス: 新しい不可逆操作を追加する。
+	if _, err := s.CreateOperation(context.Background(), ChannelCLI, OperationInput{
+		ChallengeID: c.ID, Kind: "release", Summary: "late addition",
+	}); err != nil {
+		t.Fatalf("CreateOperation() error = %v", err)
+	}
+
+	att := verifiedAttestationForTest(t, c.ID)
+	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+	}, att)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+}

@@ -217,7 +217,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `holds` | `{"question", "from_status", "from_status_label", "raised_at", "answer", "answered_at", "answered_by"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`） |
 | `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
 
-#9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。#12 で `approvals` への書き込みと `holds` の `answer`・`answered_at`・`answered_by` の記録が入った。`operations` は引き続き #13 が書き込む）。
+#9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。#12 で `approvals` への書き込みと `holds` の `answer`・`answered_at`・`answered_by` の記録が入った。#13 で `operations` への書き込み（`op add`）と、完了の承認による `release` の一括承認（D12）が入った）。
 
 ##### `list`
 
@@ -241,19 +241,27 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `actor` | string | 実行した OS のログインユーザー名 |
 | `channel` | string | 経路（`cli`） |
 | `verification` | string | 本人確認の方式（本人確認の無い操作は `none`） |
-| `entity` | string | `challenge` |
-| `entity_id` | string | `"C-<n>"` |
-| `action` | string | `create`\|`edit`\|`classify`\|`plan`\|`submit`\|`verify_met`\|`verify_not_met`\|`verify_uncertain`\|`hold`\|`approve`\|`reject`\|`answer` |
-| `before` | object \| null | 変わった項目だけの JSON オブジェクト。`create` は常に `null` |
-| `after` | object \| null | 変わった項目だけの JSON オブジェクト。`create` 以外は常に `version` を含む。状態が変わる遷移では `status`（T4 のように状態が変わらない遷移では含まない）、`classify` は `priority`、`plan` は `plan_version`、保留に入る操作（`verify_uncertain`・`hold`）は `question` を含む、`approve`・`reject` は `approval_kind`・`decision`・`target_version`（`reject` はさらに `reason`）を含む、`answer` は `answer` を含む |
+| `entity` | string | `challenge`\|`operation`（`operation` は #13 で追加。不可逆操作の登録・単独の承認・差し戻し・D12 の一括承認のエントリ） |
+| `entity_id` | string | `entity` が `challenge` なら `"C-<n>"`、`operation` なら `"OP-<n>"` |
+| `action` | string | `create`\|`edit`\|`classify`\|`plan`\|`submit`\|`verify_met`\|`verify_not_met`\|`verify_uncertain`\|`hold`\|`approve`\|`approve_hold_release`\|`reject`\|`answer`\|`op_add`（`op_add`・`approve_hold_release` は #13 で追加。`op_add` は `entity=operation` のときだけ、`approve_hold_release` は `entity=challenge` のときだけ〔`approve <C-ID> --hold-release`＝T14〕。`approve`・`reject` は `entity=challenge`・`entity=operation` の両方で使う） |
+| `before` | object \| null | 変わった項目だけの JSON オブジェクト。`create`・`op_add` は常に `null` |
+| `after` | object \| null | 変わった項目だけの JSON オブジェクト。`create`・`op_add` 以外は常に `version` を含む（`entity=operation` の `version` は不可逆操作自身の版）。状態が変わる遷移では `status`（T4 のように状態が変わらない遷移では含まない）、`classify` は `priority`、`plan` は `plan_version`、保留に入る操作（`verify_uncertain`・`hold`）は `question` を含む、`entity=challenge` の `approve`・`approve_hold_release`・`reject` は `approval_kind`・`decision`・`target_version`（`reject` はさらに `reason`）を含む、`answer` は `answer` を含む、`entity=operation` の `op_add` は `operation_id`・`kind`・`summary`・`ref`・`state` を含む、`entity=operation` の `approve`・`reject` は `state`（`reject` はさらに `reason`）を含む |
 
-##### `approve`・`reject`（#12 で追加）
+`log [<C-ID>]` は、`<C-ID>` を指定した場合、その課題自身のエントリ（`entity=challenge`）に加え、その課題が持つ不可逆操作のエントリ（`entity=operation`。`operation.challenge_id` で従属する行）も古い順に含める（#13）。`<C-ID>` を省略した場合は全エンティティを対象にする。
 
-`{"challenge": {…}, "approval": {…}}`。`challenge` は上表と同じ形、`approval` は `show` の `approvals` の要素と同じ形。
+##### `approve`・`reject`（#12 で追加。#13 で `<OP-ID>` を拡張）
+
+`<C-ID>` を対象にした場合: `{"challenge": {…}, "approval": {…}}`。`challenge` は上表と同じ形、`approval` は `show` の `approvals` の要素と同じ形。完了の承認（D12。`<C-ID>` が完了確認待ちの課題）は、同じ呼び出しで未承認の `release` を一括承認するが、この成功出力の `approval` は完了の承認そのもの（`kind=completion`）だけを表す。一括承認された `release` ごとの承認は `show <C-ID>` の `approvals`（`kind=release`・`operation_id` つき）、または `log <C-ID>`（`entity=operation`・`action=approve`）で確認する。
+
+`<OP-ID>` を対象にした場合（#13）: `{"operation": {…}, "approval": {…}}`。`operation` は `show` の `operations` の要素と同じ形、`approval` は `show` の `approvals` の要素と同じ形（`kind` は常に `release`）。`--hold-release` は `<OP-ID>` には指定できない（`usage_error`）。
 
 ##### `answer`（#12 で追加）
 
 `{"challenge": {…}, "hold": {…}}`。`challenge` は上表と同じ形、`hold` は `show` の `holds` の要素と同じ形。
+
+##### `op add`（#13 で追加）
+
+`{"operation": {…}}`。`operation` は `show` の `operations` の要素と同じ形（`state` は常に `"pending"`・`version` は常に `1`）。
 
 ## 非機能要件
 

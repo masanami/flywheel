@@ -81,6 +81,46 @@ type ApprovalPreview struct {
 
 	// Kind == ApprovalKindCompletion のときだけ有効。
 	DoneCriteria string
+	// PendingReleases は、この完了の承認と同時に承認される未承認の release
+	// （D12）。PendingOperations の kind==release の部分集合。
+	PendingReleases []IrreversibleOperation
+	// OtherPendingOperations は、この完了の承認では承認されない未承認の
+	// 不可逆操作（delete・external_send・other。§決定事項の記録 A1）。
+	OtherPendingOperations []IrreversibleOperation
+}
+
+// approvesPendingReleases は D12 の規則の正本: 「その操作が、対象の課題の
+// 未承認の release を同じトランザクションで承認するか」。ExecuteApproval の
+// 実挙動と、①の要約が見せる分類（ApprovalPreview.ReleaseEffect）が同じ
+// 述語を使うことで、要約と実際の結果が食い違わないようにする
+// （self-review 指摘: 以前は要約が --hold-release・reject でも「同時に承認
+// される release」として一覧を出しており、本人確認の要約＝人間が承認判断の
+// 根拠にする唯一のテキスト〔H9〕が事実と異なっていた）。
+func approvesPendingReleases(kind ApprovalKind, decision ApprovalDecision, holdRelease bool) bool {
+	return decision == ApprovalDecisionApproved && kind == ApprovalKindCompletion && !holdRelease
+}
+
+// ReleaseEffect は「この approve／reject を成立させたとき、その課題の未承認の
+// 不可逆操作がどうなるか」を表す（要約テキストの組み立てに使う）。
+type ReleaseEffect struct {
+	// Approved は、この操作と同時に承認される不可逆操作（D12 の release）。
+	Approved []IrreversibleOperation
+	// NotApproved は、この操作では承認されず未承認のまま残る不可逆操作。
+	NotApproved []IrreversibleOperation
+}
+
+// ReleaseEffect は、decision・holdRelease を指定したときの不可逆操作への影響を
+// 返す（D12・A1）。完了の承認（holdRelease==false）なら未承認の release だけが
+// Approved、それ以外（--hold-release＝T14・差し戻し・計画の承認）は未承認の
+// 不可逆操作がすべて NotApproved になる。
+func (p *ApprovalPreview) ReleaseEffect(decision ApprovalDecision, holdRelease bool) ReleaseEffect {
+	if approvesPendingReleases(p.Kind, decision, holdRelease) {
+		return ReleaseEffect{Approved: p.PendingReleases, NotApproved: p.OtherPendingOperations}
+	}
+	notApproved := make([]IrreversibleOperation, 0, len(p.PendingReleases)+len(p.OtherPendingOperations))
+	notApproved = append(notApproved, p.PendingReleases...)
+	notApproved = append(notApproved, p.OtherPendingOperations...)
+	return ReleaseEffect{NotApproved: notApproved}
 }
 
 // prepareApproval は PrepareApproval・PrepareRejection が共有する読み取り。
@@ -139,6 +179,25 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 				return err
 			}
 		}
+
+		if kind == ApprovalKindCompletion {
+			// 完了の承認の要約は、同時に承認される release と、同時には承認
+			// されない不可逆操作の一覧を含む（D12・A1）。
+			ops, err := loadOperations(ctx, tx, cid)
+			if err != nil {
+				return err
+			}
+			for _, op := range ops {
+				if op.State != OperationStatePending {
+					continue
+				}
+				if op.Kind == OperationKindRelease {
+					preview.PendingReleases = append(preview.PendingReleases, op)
+				} else {
+					preview.OtherPendingOperations = append(preview.OtherPendingOperations, op)
+				}
+			}
+		}
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -154,9 +213,14 @@ func (s *Store) PrepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 
 // PrepareRejection は reject の①（読み取り）。reason が
 // strings.TrimSpace で空なら、端末を開く前に ErrValidation で拒否する
-// （「差し戻しは理由を必須とする」。AC-48）。要約の内容自体は
-// PrepareApproval と同じ形（「差し戻しの要約は、対応する承認の要約と同じ
-// 内容に、入力された理由を加えたもの」なので、理由は呼び出し側が保持する）。
+// （「差し戻しは理由を必須とする」。AC-48）。戻り値の形は PrepareApproval と
+// 同じで、理由は呼び出し側が保持する。
+//
+// ただし要約の**表示内容**は完全に同じにはならない: 完了確認待ちの課題への
+// 差し戻しは release を 1 件も承認しないため、ReleaseEffect は未承認の不可逆
+// 操作をすべて「同時には承認されない」側に分類する（要約と実挙動を一致させる
+// ため。AC「差し戻しの要約は、対応する承認の要約と同じ内容に、入力された
+// 理由を加えたもの」【仮定】との差は PR の説明に「仕様への指摘」として挙げる）。
 func (s *Store) PrepareRejection(ctx context.Context, id string, reason string) (*ApprovalPreview, error) {
 	if strings.TrimSpace(reason) == "" {
 		return nil, ErrValidation
@@ -228,18 +292,27 @@ func (s *Store) PrepareAnswer(ctx context.Context, id string, answer string) (*A
 // ApprovalRequest は ExecuteApproval の入力（approve・reject 共通。②
 // ＝書き込み）。Decision が ApprovalDecisionRejected のときだけ Reason が
 // 必須（非 nil かつ trim 非空）。ApprovalDecisionApproved のときは Reason は
-// nil であること。
+// nil であること。HoldRelease は Decision==ApprovalDecisionApproved かつ対象が
+// 完了確認待ち（T14）のときだけ true にできる（それ以外は CLI が usage_error で
+// 先に拒否する＝core.OperationForApprove のコメント）。
 type ApprovalRequest struct {
 	ChallengeID     string
 	ExpectedVersion int
 	Decision        ApprovalDecision
+	HoldRelease     bool
 	Reason          *string
 }
 
-// ExecuteApproval は approve（T5・T13）・reject（T6・T15）の②（書き込み）。
+// ExecuteApproval は approve（T5・T13・T14）・reject（T6・T15）の②（書き込み）。
 // 確認が成立した（att が有効な）ことと、表示時点の版（ExpectedVersion）が
 // まだ最新であることを条件に、承認の記録・遷移・作業ログを 1 つの
 // トランザクションで行う。版が変わっていれば ErrConflict。
+//
+// D12: 完了の承認（T13。Decision==Approved かつ HoldRelease==false）は、
+// 同じトランザクションでその課題の未承認の release をすべて自動承認する
+// （承認の記録・作業ログのエントリは、完了の承認そのものとは別に、release
+// ごとに1件ずつ残る）。HoldRelease==true（T14）では release を一切承認せず
+// 未承認のまま残す。
 func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att Attestation) (*Challenge, *Approval, error) {
 	switch req.Decision {
 	case ApprovalDecisionApproved:
@@ -250,13 +323,16 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		if req.Reason == nil || strings.TrimSpace(*req.Reason) == "" {
 			return nil, nil, ErrValidation
 		}
+		if req.HoldRelease {
+			return nil, nil, ErrValidation
+		}
 	default:
 		return nil, nil, ErrValidation
 	}
 
 	op := OpReject
 	if req.Decision == ApprovalDecisionApproved {
-		op = OperationForApprove(false)
+		op = OperationForApprove(req.HoldRelease)
 	}
 
 	var approvalOut Approval
@@ -301,6 +377,18 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 			Reason:        req.Reason,
 			DecidedAt:     tc.now,
 		}
+
+		// D12: 完了の承認（HoldRelease==false）は、同じトランザクションで
+		// その課題の未承認の release をすべて自動承認する。完了の承認と
+		// release ごとの承認は、それぞれ別の approval 行・別の作業ログの
+		// エントリとして残る（この if の外で1件だけ積んだ上の approvalOut・
+		// activity とは別に、release の数だけ積む）。T14（HoldRelease==true）・
+		// 計画の承認（kind==ApprovalKindPlan）・reject では行わない。
+		if approvesPendingReleases(kind, req.Decision, req.HoldRelease) {
+			if err := autoApproveReleases(ctx, tc, att); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 
@@ -309,6 +397,59 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		return nil, nil, err
 	}
 	return c, &approvalOut, nil
+}
+
+// autoApproveReleases は tc.id の課題が持つ未承認（state="pending"）の
+// release をすべて承認する（D12）。呼び出し元（ExecuteApproval の apply）と
+// 同じトランザクション・同じ nowStr（decided_at・activity.at）を使う。
+// release ごとに: (1) operation.state を "approved" にし version を1増やす、
+// (2) approval 行を1件（operation_id・kind=release つき）記録する、
+// (3) 作業ログへ entity="operation" のエントリを1件記録する。
+func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation) error {
+	rows, err := tc.tx.QueryContext(ctx,
+		`SELECT id, version FROM operation WHERE challenge_id = ? AND kind = ? AND state = ? ORDER BY id ASC`,
+		tc.id, string(OperationKindRelease), string(OperationStatePending),
+	)
+	if err != nil {
+		return err
+	}
+	type pendingRelease struct {
+		id      int64
+		version int
+	}
+	var pending []pendingRelease
+	for rows.Next() {
+		var p pendingRelease
+		if err := rows.Scan(&p.id, &p.version); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		pending = append(pending, p)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for _, p := range pending {
+		// 書き込みの形（operation の更新・approval 行・作業ログのエントリ）は
+		// 単独の承認と同じ実装を共有する（operation.go の
+		// approveOperationInTx。self-review 指摘）。課題の版はこの経路では
+		// 増やさない（完了の遷移そのものが 1 回だけ +1 する）。
+		if _, err := approveOperationInTx(ctx, tc.tx, tc.rec, operationApprovalWrite{
+			opID:        p.id,
+			challengeID: tc.id,
+			version:     p.version,
+			decision:    ApprovalDecisionApproved,
+			att:         att,
+			nowStr:      tc.nowStr,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // AnswerRequest は ExecuteAnswer の入力（②＝書き込み）。

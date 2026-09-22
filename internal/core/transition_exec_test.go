@@ -561,9 +561,9 @@ func TestClassifyChallenge_ActivityInsertFailureRollsBack(t *testing.T) {
 }
 
 // dispatchOp は AC-23/AC-24 の枠組みが使う、Operation → 操作の適用の対応表。
-// #12 で T5・T6・T12・T13・T15（approve・reject・answer）も対象に加えた
-// （フェイク Verifier で確認を成立させて呼ぶ）。T14（approve_hold_release）は
-// #13 が実装するまでここに含まれない。
+// #12 で T5・T6・T12・T13・T15（approve・reject・answer）を、#13 で T14
+// （approve_hold_release）を対象に加えた（フェイク Verifier で確認を成立させて
+// 呼ぶ）。
 type dispatchResult struct {
 	status  Status
 	version int
@@ -614,6 +614,16 @@ func dispatchOperation(t *testing.T, s *Store, id string, op Operation) dispatch
 		att := verifiedAttestationForTest(t, id)
 		c, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
 			ChallengeID: id, ExpectedVersion: prev.Version, Decision: ApprovalDecisionRejected, Reason: &reason,
+		}, att)
+		return resultOf(c, err)
+	case OpApproveHoldRelease:
+		prev, err := s.PrepareApproval(context.Background(), id)
+		if err != nil {
+			return dispatchResult{err: err}
+		}
+		att := verifiedAttestationForTest(t, id)
+		c, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+			ChallengeID: id, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, HoldRelease: true,
 		}, att)
 		return resultOf(c, err)
 	case OpAnswer:
@@ -694,17 +704,16 @@ func resultOf(c *Challenge, err error) dispatchResult {
 // dispatchedOperations は、遷移表 Table から導出した「dispatchOperation が
 // 扱える操作トークン」の集合（T1 の create は #9 の対象なので除く）。#10 の
 // 7 つ（classify・plan・submit・verify_met・verify_not_met・verify_uncertain・
-// hold）に #12 の 3 つ（approve・reject・answer）を加えた 10 個に一致する
-// ことは TestDispatchTable_AC24_* が assert する（Table に操作トークンが
-// 増えたとき AC-24 の直積が黙って狭いまま通らないようにする。
-// design-reviewer 指摘）。approve_hold_release（T14）は #13 の対象なので
-// 除外する。
+// hold）に #12 の 3 つ（approve・reject・answer）・#13 の 1 つ
+// （approve_hold_release）を加えた 11 個に一致することは TestDispatchTable_AC24_*
+// が assert する（Table に操作トークンが増えたとき AC-24 の直積が黙って狭いまま
+// 通らないようにする。design-reviewer 指摘）。
 func dispatchedOperations(t *testing.T) []Operation {
 	t.Helper()
 	seen := map[Operation]bool{}
 	var ops []Operation
 	for _, tr := range Table {
-		if tr.From == NoStatus || tr.Op == OpApproveHoldRelease || seen[tr.Op] {
+		if tr.From == NoStatus || seen[tr.Op] {
 			continue
 		}
 		seen[tr.Op] = true
@@ -713,7 +722,7 @@ func dispatchedOperations(t *testing.T) []Operation {
 	want := map[Operation]bool{
 		OpClassify: true, OpPlan: true, OpSubmit: true,
 		OpVerifyMet: true, OpVerifyNotMet: true, OpVerifyUncertain: true, OpHold: true,
-		OpApprove: true, OpReject: true, OpAnswer: true,
+		OpApprove: true, OpReject: true, OpAnswer: true, OpApproveHoldRelease: true,
 	}
 	if len(ops) != len(want) {
 		t.Fatalf("dispatchable operations derived from Table = %v, want exactly %v (a new operation token needs a dispatch entry)", ops, want)
@@ -737,19 +746,12 @@ func allStatuses() []Status {
 
 // AC-23: 遷移表 T1〜T15 のそれぞれについて、遷移元の状態にある課題へ操作を
 // 行うと課題の状態が遷移先になる（全行を列挙して検証する。本人確認が要る行
-// （T5・T6・T12・T13・T15）はフェイク Verifier で確認を成立させて検証する）。
-// T14（approve_hold_release）だけは #13 の対象なのでスキップし、スキップした
-// ID の集合が正確に {T14} であることを assert する。
+// （T5・T6・T12・T13・T14・T15）はフェイク Verifier で確認を成立させて検証する）。
 func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) {
-	skipped := map[string]bool{}
 	tested := 0
 	for _, tr := range Table {
 		if tr.From == NoStatus {
 			continue // T1: create は #9 の対象
-		}
-		if tr.Op == OpApproveHoldRelease {
-			skipped[tr.ID] = true
-			continue
 		}
 
 		s := newStoreForTest(t)
@@ -798,16 +800,6 @@ func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) 
 
 	if tested == 0 {
 		t.Fatal("no transition rows were tested")
-	}
-
-	wantSkipped := map[string]bool{"T14": true}
-	if len(skipped) != len(wantSkipped) {
-		t.Fatalf("skipped = %+v, want %+v", skipped, wantSkipped)
-	}
-	for id := range wantSkipped {
-		if !skipped[id] {
-			t.Errorf("expected %s to be skipped (not yet implemented; #13), but it was not", id)
-		}
 	}
 }
 
@@ -885,7 +877,7 @@ func TestTransition_MalformedIDTakesPrecedenceOverActorUnavailable(t *testing.T)
 // AC-24: (状態, 操作) の組のうち遷移表に無いものはすべて、invalid_transition
 // （完了の課題に対しては terminal_state）で終わり、課題の状態と作業ログが
 // 変わらない。dispatchedOperations（Table から導出した dispatchOperation が
-// 扱える10操作。T14 を除く）× allStatuses（語彙 8 状態）
+// 扱える11操作。T14=approve_hold_release を含む）× allStatuses（語彙 8 状態）
 // の直積のうち、Lookup が ok=false の全組を検証する。
 func TestDispatchTable_AC24_UndefinedCombinationsAreRejectedAndChangeNothing(t *testing.T) {
 	tested := 0
@@ -898,6 +890,18 @@ func TestDispatchTable_AC24_UndefinedCombinationsAreRejectedAndChangeNothing(t *
 			s := newStoreForTest(t)
 			fixedActor(t, "alice")
 			c := createAndAdvance(t, s, status)
+
+			// approve_hold_release（T14 以外の状態への呼び出し）は
+			// PrepareApproval を経由するため、計画承認待ちの状態では
+			// AC-23 と同じ理由（PrepareApproval が計画承認待ちに計画行を
+			// 要求する）で計画行を用意しておく必要がある（さもないと
+			// Lookup の判定に到達する前に「計画が無い」という別のエラーで
+			// 失敗し、この AC が検証したい invalid_transition の判定を
+			// 確かめられない）。
+			if status == StatusAwaitingPlanApproval {
+				cid, _ := parseChallengeID(c.ID)
+				insertPlanRow(t, s, cid, 1, "plan body")
+			}
 
 			res := dispatchOperation(t, s, c.ID, op)
 			wantErr := ErrInvalidTransition

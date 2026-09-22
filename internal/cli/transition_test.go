@@ -318,6 +318,13 @@ var transitionCommandCases = []transitionCommandCase{
 	{"approve", func(_ *testing.T, id string) []string { return []string{"approve", id} }},
 	{"reject", func(_ *testing.T, id string) []string { return []string{"reject", id, "--reason", "r"} }},
 	{"answer", func(_ *testing.T, id string) []string { return []string{"answer", id, "--answer", "a"} }},
+	// approve --hold-release（T14。#13）: 計画承認待ちの課題への --hold-release は
+	// core.PrepareApproval が端末を開く前に usage_error を返す（runApproveChallenge）ため、
+	// この枠組みでも検証できる。ただし、この枠組みは invalid_transition／
+	// terminal_state だけを期待するため、計画承認待ち（usage_error＝終了コード2）は
+	// wantExit/wantCode の決定ロジック側で特別扱いする
+	// （TestTransitionCommands_UndefinedStatusCombinationsAreRejected を参照）。
+	{"approveHoldRelease", func(_ *testing.T, id string) []string { return []string{"approve", id, "--hold-release"} }},
 }
 
 // operationByCommand は各コマンドが遷移表で引く操作トークン。可否の期待値は
@@ -326,14 +333,15 @@ var transitionCommandCases = []transitionCommandCase{
 // 指摘: CLI 側のテストに遷移表の影を持たない。verify はテストで
 // --result met を使うため OpVerifyMet）。
 var operationByCommand = map[string]core.Operation{
-	"classify": core.OpClassify,
-	"plan":     core.OpPlan,
-	"submit":   core.OpSubmit,
-	"verify":   core.OpVerifyMet,
-	"hold":     core.OpHold,
-	"approve":  core.OpApprove,
-	"reject":   core.OpReject,
-	"answer":   core.OpAnswer,
+	"classify":           core.OpClassify,
+	"plan":               core.OpPlan,
+	"submit":             core.OpSubmit,
+	"verify":             core.OpVerifyMet,
+	"hold":               core.OpHold,
+	"approve":            core.OpApprove,
+	"reject":             core.OpReject,
+	"answer":             core.OpAnswer,
+	"approveHoldRelease": core.OpApproveHoldRelease,
 }
 
 func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T) {
@@ -348,6 +356,16 @@ func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T)
 			status := string(st)
 			if _, defined := core.Lookup(st, op); defined {
 				continue // 遷移表にある組は別のテストが検証する
+			}
+			if tc.name == "approveHoldRelease" && st == core.StatusAwaitingPlanApproval {
+				// 計画承認待ちへの --hold-release は usage_error（core の
+				// Lookup が判定する invalid_transition ではない。CLI の入力
+				// 規則）であり、この汎用枠組み（invalid_transition／
+				// terminal_state だけを期待し、計画行を用意しない）では
+				// 検証できない。TestRunApprove_HoldReleaseOnPlanApprovalIsUsageError
+				// （approval_test.go。計画行つきで usage_error・版不変を検証）が
+				// この組を担う。
+				continue
 			}
 			tested++
 			t.Run(tc.name+"/"+status, func(t *testing.T) {
@@ -374,12 +392,13 @@ func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T)
 			})
 		}
 	}
-	// 8 コマンド × 8 状態 = 64 組のうち、遷移表にある組（T2=1・T3/T4=2・T7=1・
-	// T8=1・T11=4・approve=2〈T5・T13〉・reject=2〈T6・T15〉・answer=1〈T12〉の
-	// 計 14）を除いた 50 組を回したことを固定する（#12 で approve・reject・
-	// answer を追加）。
-	if tested != 50 {
-		t.Fatalf("tested %d undefined (command, status) combinations, want 50", tested)
+	// 9 コマンド（#13 で approveHoldRelease を追加）× 8 状態 = 72 組のうち、
+	// 遷移表にある組（T2=1・T3/T4=2・T7=1・T8=1・T11=4・approve=2〈T5・T13〉・
+	// reject=2〈T6・T15〉・answer=1〈T12〉・approveHoldRelease=1〈T14〉の計 15）と、
+	// この汎用枠組みでは検証できない1組（approveHoldRelease/計画承認待ち。
+	// usage_error であり、専用テストが担う）を除いた 56 組を回したことを固定する。
+	if tested != 56 {
+		t.Fatalf("tested %d undefined (command, status) combinations, want 56", tested)
 	}
 }
 

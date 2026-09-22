@@ -707,6 +707,53 @@ func TestListActivities_FiltersByChallengeID(t *testing.T) {
 	}
 }
 
+// #13: log <C-ID> は、その課題自身のエントリだけでなく、その課題が持つ
+// 不可逆操作（operation）のエントリ（op add・単独の承認・差し戻し）も含む。
+// operation は challenge_id で従属するエンティティであり、他の課題の
+// operation のエントリは含めない。
+func TestListActivities_FiltersByChallengeIDIncludesItsOperations(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c1, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "a"})
+	if err != nil {
+		t.Fatalf("CreateChallenge() error = %v", err)
+	}
+	c2, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "b"})
+	if err != nil {
+		t.Fatalf("CreateChallenge() error = %v", err)
+	}
+	op1, err := s.CreateOperation(context.Background(), ChannelCLI, OperationInput{ChallengeID: c1.ID, Kind: "release", Summary: "s1"})
+	if err != nil {
+		t.Fatalf("CreateOperation() c1 error = %v", err)
+	}
+	if _, err := s.CreateOperation(context.Background(), ChannelCLI, OperationInput{ChallengeID: c2.ID, Kind: "release", Summary: "s2"}); err != nil {
+		t.Fatalf("CreateOperation() c2 error = %v", err)
+	}
+
+	activities, err := s.ListActivities(context.Background(), strPtr(c1.ID))
+	if err != nil {
+		t.Fatalf("ListActivities() error = %v", err)
+	}
+	// create(challenge) + op_add(operation) の2件。c2 の operation は含まない。
+	if len(activities) != 2 {
+		t.Fatalf("len(activities) = %d, want 2: %+v", len(activities), activities)
+	}
+	var sawChallengeCreate, sawOperationAdd bool
+	for _, a := range activities {
+		switch {
+		case a.Entity == "challenge" && a.EntityID == c1.ID && a.Action == "create":
+			sawChallengeCreate = true
+		case a.Entity == "operation" && a.EntityID == op1.ID && a.Action == "op_add":
+			sawOperationAdd = true
+		default:
+			t.Errorf("unexpected activity entry: %+v", a)
+		}
+	}
+	if !sawChallengeCreate || !sawOperationAdd {
+		t.Errorf("activities = %+v, want both a challenge create entry and an operation op_add entry", activities)
+	}
+}
+
 func TestListActivities_NotFoundForMissingOrMalformedChallengeID(t *testing.T) {
 	s := newStoreForTest(t)
 	for _, id := range []string{"C-999", "OP-1", "foo"} {
