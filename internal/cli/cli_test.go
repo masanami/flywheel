@@ -236,36 +236,6 @@ func TestRun_NonObjectSuccessPayloadBecomesInternalError(t *testing.T) {
 	}
 }
 
-// TestRun_AllStubCommandsReturnInternalErrorUnimplemented は init・create・
-// show・list・edit・log・classify・plan・submit・verify・hold・answer・
-// approve・reject・op add 以外の未実装コマンド（RequiresStore: true）を
-// 対象にする。init は本チケットより前（#7）で実装済みのため専用のテスト
-// （init_test.go）で検証する。create・show・list・edit・log は #9 で、
-// classify・plan・submit・verify・hold は #10 で、answer・approve・reject は
-// #12 で、op add は本チケット（#13）で実装済みのため対象から外れ、それぞれ
-// internal/cli/challenge_test.go・internal/cli/transition_test.go・
-// internal/cli/approval_test.go・internal/cli/approval_process_test.go・
-// internal/cli/operation_test.go で検証する。status は #14 の対象のため
-// 引き続きスタブのまま。
-func TestRun_AllStubCommandsReturnInternalErrorUnimplemented(t *testing.T) {
-	ws := initializedWorkspace(t)
-	cases := [][]string{
-		{"status"},
-	}
-	for _, args := range cases {
-		var stdout, stderr bytes.Buffer
-		full := append(append([]string{}, args...), "--workspace", ws, "--json")
-		code := run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands())
-		if code != 2 {
-			t.Errorf("args=%v exit=%d, want 2 (internal_error stub)", args, code)
-			continue
-		}
-		if !strings.Contains(stderr.String(), `"code":"internal_error"`) {
-			t.Errorf("args=%v stderr=%q, want internal_error", args, stderr.String())
-		}
-	}
-}
-
 func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	want := [][]string{
 		{"init"}, {"create"}, {"show"}, {"list"}, {"edit"}, {"classify"}, {"plan"},

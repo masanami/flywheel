@@ -54,11 +54,7 @@ func runList(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	out := make([]map[string]any, 0, len(challenges))
-	for _, c := range challenges {
-		out = append(out, challengeJSON(c))
-	}
-	return textOutput{json: map[string]any{"challenges": out}, text: challengeListText(challenges)}, nil
+	return textOutput{json: map[string]any{"challenges": challengesJSON(challenges)}, text: challengeListText(challenges)}, nil
 }
 
 // runEdit は `flywheel edit <C-ID> […]` の実装。人間記入欄のフラグが1つも

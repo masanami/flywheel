@@ -304,47 +304,61 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 	return holds, nil
 }
 
+// operationSelectColumns は operation テーブルの全カラムを select する共通の頭部。
+// loadOperations（1課題に従属する一覧）・listOperationsInState（overview.go。
+// ストア全体を状態で絞る一覧）が共有する（self-review 指摘: 以前は行の変換
+// （Scan・created_at のパース・Ref の NULL 処理・IrreversibleOperation の組み立て）が
+// 2箇所にほぼ同じ内容で複製されており、operation にカラムが増えたとき片方だけ
+// 直し忘れるおそれがあった）。
+const operationSelectColumns = `SELECT id, challenge_id, kind, summary, ref, state, version, created_at FROM operation`
+
+// scanOperationRow は operationSelectColumns の1行を IrreversibleOperation へ変換する。
+func scanOperationRow(scanner rowScanner) (*IrreversibleOperation, error) {
+	var (
+		id, challengeID int64
+		kind, summary   string
+		ref             sql.NullString
+		state           string
+		version         int
+		createdAtStr    string
+	)
+	if err := scanner.Scan(&id, &challengeID, &kind, &summary, &ref, &state, &version, &createdAtStr); err != nil {
+		return nil, err
+	}
+	createdAt, err := parseTimestamp(createdAtStr)
+	if err != nil {
+		return nil, err
+	}
+	op := &IrreversibleOperation{
+		ID:          formatOperationID(id),
+		ChallengeID: formatChallengeID(challengeID),
+		Kind:        OperationKind(kind),
+		Summary:     summary,
+		State:       OperationState(state),
+		Version:     version,
+		CreatedAt:   createdAt,
+	}
+	if ref.Valid {
+		v := ref.String
+		op.Ref = &v
+	}
+	return op, nil
+}
+
 func loadOperations(ctx context.Context, tx *sql.Tx, challengeID int64) ([]IrreversibleOperation, error) {
-	rows, err := tx.QueryContext(ctx,
-		`SELECT id, kind, summary, ref, state, version, created_at
-		 FROM operation WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
+	rows, err := tx.QueryContext(ctx, operationSelectColumns+` WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
 	ops := make([]IrreversibleOperation, 0)
-	challengeIDStr := formatChallengeID(challengeID)
 	for rows.Next() {
-		var (
-			id            int64
-			kind, summary string
-			ref           sql.NullString
-			state         string
-			version       int
-			createdAtStr  string
-		)
-		if err := rows.Scan(&id, &kind, &summary, &ref, &state, &version, &createdAtStr); err != nil {
-			return nil, err
-		}
-		createdAt, err := parseTimestamp(createdAtStr)
+		op, err := scanOperationRow(rows)
 		if err != nil {
 			return nil, err
 		}
-		op := IrreversibleOperation{
-			ID:          formatOperationID(id),
-			ChallengeID: challengeIDStr,
-			Kind:        OperationKind(kind),
-			Summary:     summary,
-			State:       OperationState(state),
-			Version:     version,
-			CreatedAt:   createdAt,
-		}
-		if ref.Valid {
-			v := ref.String
-			op.Ref = &v
-		}
-		ops = append(ops, op)
+		ops = append(ops, *op)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

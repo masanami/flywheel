@@ -56,12 +56,6 @@ var commonFlags = []flagDef{
 	{Name: "json", HasValue: false},
 }
 
-// stubRun は本チケットでの未実装コマンドの共通の振る舞い。解析を通過しても
-// 何も変更せず internal_error で終わる（後続チケットが実装を差し替える）。
-func stubRun(Args) (any, error) {
-	return nil, NewError(CodeInternalError, "未実装（後続チケットで実装）")
-}
-
 // runInit は `flywheel init` の実装。core.Init を呼ぶだけで、遷移や承認の規則は
 // 一切持たない（P2・P4）。
 func runInit(a Args) (any, error) {
@@ -213,7 +207,7 @@ func defaultCommands() []Command {
 		{
 			Path:          []string{"status"},
 			RequiresStore: true,
-			Run:           stubRun,
+			Run:           runStatus,
 		},
 		{
 			Path:          []string{"log"},
