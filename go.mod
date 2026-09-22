@@ -2,7 +2,11 @@ module github.com/masanami/flywheel
 
 go 1.26.0
 
-require modernc.org/sqlite v1.59.0
+require (
+	github.com/creack/pty v1.1.24
+	golang.org/x/term v0.46.0
+	modernc.org/sqlite v1.59.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

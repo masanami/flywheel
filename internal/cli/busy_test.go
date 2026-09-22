@@ -30,6 +30,10 @@ func TestMain(m *testing.M) {
 		busyHolderMain()
 		return
 	}
+	if os.Getenv(confirmHelperEnvVar) == "1" {
+		confirmHelperMain()
+		return
+	}
 	os.Exit(m.Run())
 }
 

@@ -40,4 +40,20 @@ var (
 	// ことを表す（os/user.Current の Username → 環境変数 USER → LOGNAME の
 	// いずれも得られない場合）。対象は一切変更しない。
 	ErrActorUnavailable = errors.New("core: actor could not be resolved")
+
+	// ErrTTYRequired は本人確認の方式（Verifier）の成立条件を満たさなかった
+	// ことを表す（docs/features/m1-core.md §クリティカル設計決定 1。
+	// tty_confirm では「標準入力が端末」「/dev/tty を開ける」
+	// 「CLAUDECODE が未設定」のいずれかを満たさない場合）。
+	ErrTTYRequired = errors.New("core: a terminal is required for this verification method")
+
+	// ErrConfirmationMismatch は本人確認の入力が対象の ID と完全一致しな
+	// かったことを表す（空行・"y"・別の ID・入力の終端＝EOF を含む）。
+	ErrConfirmationMismatch = errors.New("core: confirmation input did not match the expected ID")
+
+	// ErrVerificationRejected は (Channel, Verification) の組が登録簿に無い
+	// ことを表す。Verifier の Confirm は呼ばれておらず、状態は一切変わらない
+	// （§クリティカル設計決定 1「登録簿に無い組の要求を verification_rejected
+	// で拒否する」）。
+	ErrVerificationRejected = errors.New("core: this (channel, verification) pair is not in the registry")
 )

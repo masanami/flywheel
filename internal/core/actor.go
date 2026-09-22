@@ -37,3 +37,12 @@ func resolveActor() (string, error) {
 	}
 	return "", ErrActorUnavailable
 }
+
+// CurrentActor は resolveActor の公開ラッパー。internal/cli の Verifier 実装
+// （tty_confirm 等）が、本人確認済みの actor を core と同じ規則
+// （os/user.Current().Username → 環境変数 USER → LOGNAME）で解決するために使う
+// （#11。tty_confirm の actor は OS のログインユーザー名＝仕様の actor 規則と
+// 同じ）。
+func CurrentActor() (string, error) {
+	return resolveActor()
+}

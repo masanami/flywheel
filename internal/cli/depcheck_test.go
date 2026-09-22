@@ -130,6 +130,34 @@ func TestSQLiteDriverIsOnlyImportedFromWithinCore(t *testing.T) {
 	}
 }
 
+// creackPTYImportPath は github.com/creack/pty のフルインポートパス。#11 の
+// 疑似端末テストヘルパー（confirm_process_test.go）だけが使うテスト専用の
+// 依存であり、本番バイナリ（cmd/flywheel）の依存グラフに含まれてはならない
+// （CLAUDE.md「本番の依存の上限」。テスト専用の依存は可）。
+const creackPTYImportPath = "github.com/creack/pty"
+
+// TestProductionBinaryDoesNotDependOnCreackPTY は cmd/flywheel の本番依存
+// （-test を付けない go list -deps）に github.com/creack/pty が含まれない
+// ことを検査する（TestProductionBinaryDoesNotDependOnCoretest と同型）。
+func TestProductionBinaryDoesNotDependOnCreackPTY(t *testing.T) {
+	root := repoRoot(t)
+	cmd := exec.Command("go", "list", "-deps", "./cmd/flywheel")
+	cmd.Dir = root
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go list -deps ./cmd/flywheel: %v\n%s", err, stderr.String())
+	}
+
+	deps := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	for _, d := range deps {
+		if d == creackPTYImportPath {
+			t.Fatalf("cmd/flywheel's production dependency graph includes %s (test-only package)", creackPTYImportPath)
+		}
+	}
+}
+
 // TestProductionBinaryDoesNotDependOnCoretest は item 10(iii) の検証:
 // cmd/flywheel の本番依存（-test を付けない go list -deps）に
 // internal/core/coretest が含まれないこと。coretest はテスト支援専用であり
