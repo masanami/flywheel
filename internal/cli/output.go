@@ -8,6 +8,15 @@ import (
 	"time"
 )
 
+// textOutput は、--json 無しのときに人間向けのテキストを持つ成功時のデータ。
+// JSON には json を、テキストには text（末尾に改行を含む）をそのまま使う。
+// テキストの形式は安定を保証しない（docs/features/m1-core.md「--json なしの
+// 出力は人間向けで、形式の安定を保証しない」）。
+type textOutput struct {
+	json any
+	text string
+}
+
 // errorEnvelope は --json 失敗時に標準エラーへ出す固定の形。
 type errorEnvelope struct {
 	Error errorBody `json:"error"`

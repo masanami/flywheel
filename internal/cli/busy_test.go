@@ -92,6 +92,46 @@ func TestRun_InitReturnsStoreBusyWhileAnotherProcessHoldsTheWriteLock(t *testing
 	}
 }
 
+// TestRun_CreateReturnsStoreBusyWhileAnotherProcessHoldsTheWriteLock は、
+// レビュー指摘（internal/core.mutate が store.DB.Write のエラーを
+// classifyReadWriteErr に通していなかったため、書き込みロック競合時の create
+// が store_busy ではなく internal_error になっていた）の再発防止テストである。
+// init と異なり、事前に正常な init で WAL 化済みのストアを用意してから
+// ロックを取らせる（未 WAL 化ファイルへの初回 PRAGMA journal_mode=WAL は
+// busy_timeout を待たず即座に失敗するため、BEGIN IMMEDIATE が実際に
+// busy_timeout の対象になるのは既に WAL 化されたストアに対してだけ、という
+// 上のコメントの挙動メモに従う）。
+func TestRun_CreateReturnsStoreBusyWhileAnotherProcessHoldsTheWriteLock(t *testing.T) {
+	dir := t.TempDir()
+	var initStdout, initStderr bytes.Buffer
+	if code := Run([]string{"init", "--workspace", dir, "--json"}, strings.NewReader(""), &initStdout, &initStderr); code != 0 {
+		t.Fatalf("init setup failed: exit=%d stderr=%s", code, initStderr.String())
+	}
+	dbPath := filepath.Join(dir, ".flywheel", "flywheel.db")
+
+	holder := startCLIBusyHolderProcess(t, dbPath)
+	defer holder.stop(t)
+	holder.waitUntilReady(t)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"create", "--title", "t", "--workspace", dir, "--json"}, strings.NewReader(""), &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2 (stdout=%s stderr=%s)", code, stdout.String(), stderr.String())
+	}
+	var doc struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &doc); err != nil {
+		t.Fatalf("stderr is not valid JSON: %v (%q)", err, stderr.String())
+	}
+	if doc.Error.Code != string(CodeStoreBusy) {
+		t.Fatalf("error code = %q, want %q (stderr=%s)", doc.Error.Code, CodeStoreBusy, stderr.String())
+	}
+}
+
 type cliBusyHolder struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser

@@ -187,6 +187,58 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `store_path` | string | ストアファイル（`<workspace>/.flywheel/flywheel.db`）の絶対パス |
 | `created` | bool | この呼び出しでストアを新規作成したか（`false` は冪等な再実行） |
 
+##### `create`・`edit`（#9 で追加）
+
+`{"challenge": {…}}`。`show`・`list` も同じ課題の形を使う（下記 `challenge` オブジェクトの表）。
+
+| フィールド | 型 | 内容 |
+|---|---|---|
+| `id` | string | `"C-<n>"` |
+| `title` | string | タイトル |
+| `description` | string | 説明 |
+| `done_criteria` | string | 完了条件 |
+| `urgency` | string \| null | `高\|中\|低`。未設定は `null` |
+| `priority` | string \| null | `P0\|P1\|P2`。#9 は設定する操作を持たないため常に `null` |
+| `status` | string | 状態コード |
+| `status_label` | string | 状態の表示名 |
+| `version` | integer | 版 |
+| `reporter` | string | 起票者（OS のログインユーザー名） |
+| `created_at` | string | RFC3339・UTC・ミリ秒固定 |
+| `updated_at` | string | RFC3339・UTC・ミリ秒固定 |
+
+##### `show`
+
+`{"challenge": {…}, "plans": [...], "approvals": [...], "holds": [...], "operations": [...]}`。`challenge` は上表と同じ形。
+
+| 一覧 | 要素の形 |
+|---|---|
+| `plans` | `{"version", "body", "created_at"}` |
+| `approvals` | `{"kind", "decision", "operation_id", "target_version", "actor", "channel", "verification", "reason", "decided_at"}`（`operation_id`・`reason` は `null` 可） |
+| `holds` | `{"question", "from_status", "from_status_label", "raised_at", "answer", "answered_at", "answered_by"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`） |
+| `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
+
+#9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用（値は後続チケットが書き込む）。
+
+##### `list`
+
+`{"challenges": [{…}, ...]}`。要素は `challenge`（上表）と同じ形。
+
+##### `log`
+
+`{"activities": [{…}, ...]}`。
+
+| フィールド | 型 | 内容 |
+|---|---|---|
+| `at` | string | RFC3339・UTC・ミリ秒固定 |
+| `actor` | string | 実行した OS のログインユーザー名 |
+| `channel` | string | 経路（`cli`） |
+| `verification` | string | 本人確認の方式（本人確認の無い操作は `none`） |
+| `entity` | string | `challenge` |
+| `entity_id` | string | `"C-<n>"` |
+| `action` | string | `create`\|`edit` |
+| `before` | object \| null | 変わった項目だけの JSON オブジェクト。`create` は常に `null` |
+| `after` | object \| null | 変わった項目だけの JSON オブジェクト |
+
 ## 非機能要件
 
 - **配布**: `CGO_ENABLED=0` でビルドできる単一バイナリ（D14）。動作環境は **macOS と Linux**【決定 2026-09-21 A2（オーナー）】。受入基準はどちらの OS でも同じく成り立たなければならない。Windows は対象外。

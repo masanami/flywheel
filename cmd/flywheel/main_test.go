@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -144,6 +146,101 @@ func TestBinary_InitCreatesStoreAndStatusSeesIt(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `"code":"internal_error"`) {
 		t.Fatalf("stderr = %q, want internal_error (store found upward, stub reached)", stderr.String())
+	}
+}
+
+// resolveActorLikeCore は internal/core.resolveActor と同じ優先順位
+// （os/user.Current().Username → $USER → $LOGNAME）で、このテストプロセス自身の
+// actor を解決する。userCurrentOK は os/user.Current() 自体が成功したかを表す
+// （CGO_ENABLED=0 でビルドした対象バイナリと、この go test バイナリの cgo 設定が
+// 異なりうるため、この戻り値はあくまで参考値であり完全な代替ではない。既知の
+// 限界として実装依頼の返却に明記する）。
+func resolveActorLikeCore(t *testing.T) (actor string, userCurrentOK bool) {
+	t.Helper()
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username, true
+	}
+	if v := os.Getenv("USER"); v != "" {
+		return v, false
+	}
+	if v := os.Getenv("LOGNAME"); v != "" {
+		return v, false
+	}
+	t.Fatal("could not resolve an actor for the test process (no user.Current, USER, LOGNAME)")
+	return "", false
+}
+
+// createReporter は bin（CGO_ENABLED=0 でビルド済み）で init 済みの ws に対して
+// `create --title x --json` を実行し、返った reporter を返す。
+func createReporter(t *testing.T, bin, ws string, extraEnv ...string) string {
+	t.Helper()
+	cmd := newChildCmd(bin, "create", "--title", "x", "--workspace", ws, "--json")
+	cmd.Env = append(cmd.Env, extraEnv...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("create failed: %v (stderr=%s)", err, stderr.String())
+	}
+	var doc struct {
+		Challenge struct {
+			Reporter string `json:"reporter"`
+		} `json:"challenge"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("parse stdout: %v (%s)", err, stdout.String())
+	}
+	return doc.Challenge.Reporter
+}
+
+// TestBinary_ReporterMatchesTestProcessActorResolution は、CGO_ENABLED=0 で
+// ビルドしたバイナリの `create` が返す reporter が (a) 空でなく (b) このテスト
+// プロセス自身が internal/core.resolveActor と同じ規則で解決した値と一致する
+// ことを確認する（docs/features/m1-core.md §作業ログ・actor の解決規則の
+// 実バイナリでの検証。runtime.GOOS でスキップしない）。
+func TestBinary_ReporterMatchesTestProcessActorResolution(t *testing.T) {
+	bin := buildBinary(t)
+	ws := t.TempDir()
+	runOK(t, bin, "init", "--workspace", ws, "--json")
+
+	wantReporter, userCurrentOK := resolveActorLikeCore(t)
+	reporter := createReporter(t, bin, ws)
+	t.Logf("built-binary reporter = %q; test-process resolution = %q (user.Current ok=%v)", reporter, wantReporter, userCurrentOK)
+
+	if reporter == "" {
+		t.Fatal("reporter is empty")
+	}
+	if reporter != wantReporter {
+		t.Fatalf("reporter = %q, want %q (same os/user.Current -> USER -> LOGNAME resolution rule as the test process)", reporter, wantReporter)
+	}
+}
+
+// TestBinary_ReporterResolutionPrioritizesUserCurrentOverInjectedEnv は、
+// USER・LOGNAME を偽装しても、os/user.Current() が成功する環境では reporter が
+// それらの値にならないことを確認する（優先順位の確認）。go's syscall/os の
+// 環境変数解決は同名キーの最後の出現を優先するため、newChildCmd が返す Env の
+// 末尾に追記した USER/LOGNAME が、この子プロセス（Go バイナリ）の
+// os.Getenv からは有効な上書きとして観測される。
+//
+// 既知の限界: userCurrentOK はこのテストプロセス（go test バイナリ、既定の cgo
+// 設定でビルドされる）で計測した値であり、対象バイナリ（CGO_ENABLED=0）の
+// os/user.Current() の成否そのものではない。両者が食い違う環境
+// （例: cgo 版は成功するが CGO_ENABLED=0 版は失敗する）では、この事前条件つきの
+// assertion が本来検証したい分岐を捉えられない可能性がある。
+func TestBinary_ReporterResolutionPrioritizesUserCurrentOverInjectedEnv(t *testing.T) {
+	bin := buildBinary(t)
+	ws := t.TempDir()
+	runOK(t, bin, "init", "--workspace", ws, "--json")
+
+	_, userCurrentOK := resolveActorLikeCore(t)
+	reporter := createReporter(t, bin, ws, "USER=injected-user", "LOGNAME=injected-logname")
+	t.Logf("reporter with injected USER/LOGNAME = %q (test-process user.Current ok=%v)", reporter, userCurrentOK)
+
+	if reporter == "" {
+		t.Fatal("reporter is empty")
+	}
+	if userCurrentOK && (reporter == "injected-user" || reporter == "injected-logname") {
+		t.Fatalf("reporter = %q: os/user.Current() succeeded for this process, so the injected USER/LOGNAME override must not win (priority order)", reporter)
 	}
 }
 

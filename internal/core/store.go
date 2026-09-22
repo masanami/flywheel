@@ -8,10 +8,12 @@
 package core
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/masanami/flywheel/internal/core/internal/store"
 )
@@ -21,6 +23,24 @@ import (
 type Store struct {
 	db        *store.DB
 	workspace string
+
+	// now はテストが時刻を差し替えるためのフック。nil なら time.Now を使う
+	// （#9 §A-6）。internal/core のテストだけがこのフィールドへ直接代入する
+	// （*Store は同一パッケージから生成されるため、公開セッターは持たない）。
+	now func() time.Time
+
+	// insertActivity はテストが作業ログへの書き込みを失敗させるためのフック。
+	// nil なら defaultInsertActivity を使う（#9 §A-3 の失敗注入。本番 API には
+	// 注入口を露出しない）。
+	insertActivity func(tx *sql.Tx, row activityRow) error
+}
+
+// currentTime は now が設定されていればそれを、なければ time.Now() を返す。
+func (s *Store) currentTime() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }
 
 // Close はストアへの接続を閉じる。
@@ -38,7 +58,10 @@ func (s *Store) Workspace() string { return s.workspace }
 func (s *Store) StorePath() string { return s.db.Path() }
 
 // wrapStoreErr は internal/store の sentinel error を core の sentinel error へ
-// 写像する（internal/cli/errors.go の設計メモにある案 (a)）。
+// 写像する（internal/cli/errors.go の設計メモにある案 (a)）。ストアを開く経路
+// （Init・OpenWorkspace）専用: 開く操作はアプリケーションレベルの sentinel
+// （ErrNotFound 等）を返すことが無いため、既知の2値以外はすべて ErrStoreError に
+// 分類してよい。
 func wrapStoreErr(err error) error {
 	switch {
 	case err == nil:
@@ -49,6 +72,29 @@ func wrapStoreErr(err error) error {
 		return ErrStoreBusy
 	default:
 		return fmt.Errorf("%w: %w", ErrStoreError, err)
+	}
+}
+
+// classifyReadWriteErr は Store.mutate（store.DB.Write 経由）・GetChallenge・
+// ListChallenges・ListActivities（store.DB.Read 経由）が返すエラーを分類する。
+// これらの経路は、開く操作（wrapStoreErr が対象）と異なり、渡した関数
+// （fn）自身がアプリケーションレベルの sentinel（ErrNotFound・ErrValidation・
+// ErrTerminalState・ErrActorUnavailable 等）を意図して返すことがあるため、
+// wrapStoreErr をそのまま使うと store_error に化けてしまう（レビュー指摘:
+// store.ErrBusy が internal/core の sentinel に写像されず、書き込みロック
+// 競合時の create/edit が store_busy ではなく internal_error になっていた）。
+// ここでは低レベルのストアエラー（SQLITE_BUSY・スキーマ版が新しすぎる）だけを
+// 写像し、それ以外（アプリケーションの sentinel を含む）はそのまま返す。
+func classifyReadWriteErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, store.ErrTooNew):
+		return ErrStoreTooNew
+	case errors.Is(err, store.ErrBusy):
+		return ErrStoreBusy
+	default:
+		return err
 	}
 }
 

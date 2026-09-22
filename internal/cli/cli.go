@@ -229,6 +229,13 @@ func failUsage(stderr io.Writer, jsonMode bool, message string) int {
 }
 
 func succeed(stdout, stderr io.Writer, jsonMode bool, data any) int {
+	if to, ok := data.(textOutput); ok {
+		if !jsonMode {
+			_, _ = fmt.Fprint(stdout, to.text)
+			return 0
+		}
+		data = to.json
+	}
 	if !jsonMode {
 		if data == nil {
 			_, _ = fmt.Fprintln(stdout, "ok")

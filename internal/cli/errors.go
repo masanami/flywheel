@@ -110,6 +110,14 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeStoreBusy, err.Error())
 	case errors.Is(err, core.ErrStoreError):
 		return NewError(CodeStoreError, err.Error())
+	case errors.Is(err, core.ErrNotFound):
+		return NewError(CodeNotFound, err.Error())
+	case errors.Is(err, core.ErrValidation):
+		return NewError(CodeValidationFailed, err.Error())
+	case errors.Is(err, core.ErrTerminalState):
+		return NewError(CodeTerminalState, err.Error())
+	case errors.Is(err, core.ErrActorUnavailable):
+		return NewError(CodeInternalError, err.Error())
 	default:
 		return NewError(CodeInternalError, err.Error())
 	}

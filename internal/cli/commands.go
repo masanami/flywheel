@@ -96,20 +96,20 @@ func defaultCommands() []Command {
 				{Name: "done-criteria", HasValue: true},
 				{Name: "urgency", HasValue: true},
 			},
-			Run: stubRun,
+			Run: runCreate,
 		},
 		{
 			Path:          []string{"show"},
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			Run:           stubRun,
+			Run:           runShow,
 		},
 		{
 			Path:          []string{"list"},
 			RequiresStore: true,
 			Flags:         []flagDef{{Name: "status", HasValue: true}},
-			Run:           stubRun,
+			Run:           runList,
 		},
 		{
 			Path:          []string{"edit"},
@@ -122,7 +122,7 @@ func defaultCommands() []Command {
 				{Name: "done-criteria", HasValue: true},
 				{Name: "urgency", HasValue: true},
 			},
-			Run: stubRun,
+			Run: runEdit,
 		},
 		{
 			Path:          []string{"classify"},
@@ -220,7 +220,7 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 0,
 			MaxPositional: 1,
-			Run:           stubRun,
+			Run:           runLog,
 		},
 	}
 }

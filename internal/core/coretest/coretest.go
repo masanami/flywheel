@@ -71,6 +71,21 @@ func InsertChallenge(t *testing.T, workspace, title string) {
 	}
 }
 
+// SetChallengeStatus は id（内部整数 ID。"C-1" なら 1）の課題の status を直接
+// 書き換える。internal/cli のテストが、状態遷移コマンド（#10 で実装）を経由せず
+// 完了（done）状態の課題を用意して edit の terminal_state を検証するために使う。
+func SetChallengeStatus(t *testing.T, workspace string, id int, status string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE challenge SET status = ? WHERE id = ?", status, id)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: SetChallengeStatus(%d, %q): %v", id, status, err)
+	}
+}
+
 // CountChallenges は workspace 配下のストアにある課題の件数を返す。
 func CountChallenges(t *testing.T, workspace string) int {
 	t.Helper()
