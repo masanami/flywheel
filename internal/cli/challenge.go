@@ -190,19 +190,27 @@ func holdsJSON(holds []core.Hold) []map[string]any {
 	return out
 }
 
+// operationJSON は core.IrreversibleOperation を「成功時の JSON 出力の規約」の
+// operation オブジェクトの形へ変換する（show の operations の要素・
+// op add・approve/reject <OP-ID> の単発の成功出力が共有する。internal/cli/
+// operation.go の #13 が実コマンドから使う）。
+func operationJSON(op core.IrreversibleOperation) map[string]any {
+	return map[string]any{
+		"id":           op.ID,
+		"challenge_id": op.ChallengeID,
+		"kind":         string(op.Kind),
+		"summary":      op.Summary,
+		"ref":          nilableString(op.Ref),
+		"state":        string(op.State),
+		"version":      op.Version,
+		"created_at":   FormatTimestamp(op.CreatedAt),
+	}
+}
+
 func operationsJSON(ops []core.IrreversibleOperation) []map[string]any {
 	out := make([]map[string]any, 0, len(ops))
 	for _, op := range ops {
-		out = append(out, map[string]any{
-			"id":           op.ID,
-			"challenge_id": op.ChallengeID,
-			"kind":         string(op.Kind),
-			"summary":      op.Summary,
-			"ref":          nilableString(op.Ref),
-			"state":        op.State,
-			"version":      op.Version,
-			"created_at":   FormatTimestamp(op.CreatedAt),
-		})
+		out = append(out, operationJSON(op))
 	}
 	return out
 }

@@ -91,7 +91,9 @@ func formatEntityID(entity string, id int64) string {
 }
 
 // ListActivities は作業ログを古い順（activity.id 昇順）で返す。challengeID が
-// 非 nil なら、その課題（entity="challenge"）のエントリだけに絞る。
+// 非 nil なら、その課題自身のエントリ（entity="challenge"）に加え、その課題に
+// 従属する不可逆操作のエントリ（entity="operation"。operation.challenge_id で
+// 対応づく）に絞る（#13）。
 // challengeID が指定され、対応する課題が存在しなければ ErrNotFound を返す
 // （形式不正の ID も含め fail-closed）。
 func (s *Store) ListActivities(ctx context.Context, challengeID *string) ([]Activity, error) {
@@ -115,8 +117,13 @@ func (s *Store) ListActivities(ctx context.Context, challengeID *string) ([]Acti
 		query := `SELECT at, actor, channel, verification, entity, entity_id, action, before, after FROM activity`
 		args := []any{}
 		if cid != nil {
-			query += ` WHERE entity = ? AND entity_id = ?`
-			args = append(args, "challenge", *cid)
+			// challenge 自身のエントリに加え、その課題が持つ不可逆操作
+			// （operation）のエントリ（#13: op add・release ごとの承認・
+			// 差し戻し）も含める。operation は challenge に従属するエンティティ
+			// であり、「その課題の作業ログ」に含めないと op add・単独の承認・
+			// 差し戻しが log <C-ID> から見えなくなる。
+			query += ` WHERE (entity = 'challenge' AND entity_id = ?) OR (entity = 'operation' AND entity_id IN (SELECT id FROM operation WHERE challenge_id = ?))`
+			args = append(args, *cid, *cid)
 		}
 		query += ` ORDER BY id ASC`
 

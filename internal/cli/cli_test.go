@@ -238,17 +238,18 @@ func TestRun_NonObjectSuccessPayloadBecomesInternalError(t *testing.T) {
 
 // TestRun_AllStubCommandsReturnInternalErrorUnimplemented は init・create・
 // show・list・edit・log・classify・plan・submit・verify・hold・answer・
-// approve・reject 以外の未実装コマンド（RequiresStore: true）を対象にする。
-// init は本チケットより前（#7）で実装済みのため専用のテスト（init_test.go）で
-// 検証する。create・show・list・edit・log は #9 で、classify・plan・submit・
-// verify・hold は #10 で、answer・approve・reject は本チケット（#12）で
-// 実装済みのため対象から外れ、それぞれ internal/cli/challenge_test.go・
-// internal/cli/transition_test.go・internal/cli/approval_test.go・
-// internal/cli/approval_process_test.go で検証する。
+// approve・reject・op add 以外の未実装コマンド（RequiresStore: true）を
+// 対象にする。init は本チケットより前（#7）で実装済みのため専用のテスト
+// （init_test.go）で検証する。create・show・list・edit・log は #9 で、
+// classify・plan・submit・verify・hold は #10 で、answer・approve・reject は
+// #12 で、op add は本チケット（#13）で実装済みのため対象から外れ、それぞれ
+// internal/cli/challenge_test.go・internal/cli/transition_test.go・
+// internal/cli/approval_test.go・internal/cli/approval_process_test.go・
+// internal/cli/operation_test.go で検証する。status は #14 の対象のため
+// 引き続きスタブのまま。
 func TestRun_AllStubCommandsReturnInternalErrorUnimplemented(t *testing.T) {
 	ws := initializedWorkspace(t)
 	cases := [][]string{
-		{"op", "add", "C-1", "--kind", "release", "--summary", "s"},
 		{"status"},
 	}
 	for _, args := range cases {

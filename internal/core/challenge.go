@@ -87,7 +87,7 @@ type IrreversibleOperation struct {
 	Kind        OperationKind
 	Summary     string
 	Ref         *string
-	State       string
+	State       OperationState
 	Version     int
 	CreatedAt   time.Time
 }
@@ -336,7 +336,7 @@ func loadOperations(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Irrev
 			ChallengeID: challengeIDStr,
 			Kind:        OperationKind(kind),
 			Summary:     summary,
-			State:       state,
+			State:       OperationState(state),
 			Version:     version,
 			CreatedAt:   createdAt,
 		}

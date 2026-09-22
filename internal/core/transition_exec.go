@@ -49,6 +49,12 @@ type transitionCtx struct {
 	priority *Priority // 既定は current.Priority。classify だけが上書きする
 	nowStr   string    // rec.at をミリ秒精度に丸めた文字列（task_plan.created_at・hold.raised_at に使う）
 	now      time.Time // nowStr を parseTimestamp した値（返却する Plan.CreatedAt に使う）
+	// rec は、この遷移が属する書き込みトランザクションの activityRecorder。
+	// apply（操作固有の書き込み）は、当該遷移そのものの1件（entity="challenge"）
+	// とは別に、他エンティティへのエントリを追加で積みたい場合に使う
+	// （#13: D12 の完了の承認が、release ごとに entity="operation" のエントリを
+	// 追加で積む）。
+	rec *activityRecorder
 }
 
 // transitionPrecedingResolver は、遷移先の解決（tr.Target.Resolve）に渡す
@@ -158,6 +164,7 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 			priority: current.Priority,
 			nowStr:   nowStr,
 			now:      now,
+			rec:      rec,
 		}
 		// 状態が変わらない遷移（T4: plan の改訂）では before/after に status を
 		// 含めない（変わっていないため。H7）。

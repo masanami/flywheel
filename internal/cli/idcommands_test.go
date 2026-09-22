@@ -5,9 +5,7 @@ import "testing"
 // idCommandCases は「ID を引数に取る実装済みコマンド」の一覧である
 // （docs/features/m1-core.md AC「存在しない ID を指定したコマンドは、終了コード1・
 // not_found で終わる（§IF / API のうち ID を引数に取る全コマンドを…列挙して
-// 検証する）」の枠組み）。後続チケット（#12 answer/approve/reject・#13 op
-// add/approve(OP-ID)/reject(OP-ID)）が実装され次第、この一覧に行を足すだけで
-// 閉包できるようにする。
+// 検証する）」の枠組み）。
 //
 // args は --workspace/--json を除いた、対象 ID を含むコマンド引数。入力の検証
 // （閉集合・必須値）が ID の存在チェックより先に core で判定される操作
@@ -16,6 +14,11 @@ import "testing"
 // plan は body の内容が無いと ID の存在チェックへ到達できず、この汎用の
 // 枠組み（stdin を常に空文字列で叩く requireErrorCode）では検証できないため、
 // 専用のテスト（TestRunPlan_NotFoundForMissingOrMalformedID）で別途検証する。
+// approve・reject・answer（本人確認つき）は core.Prepare*（①読み取り）が
+// 端末を開く前に ErrNotFound を返すため、この枠組み（stdin は常に空文字列）
+// でも安全に検証できる（#12・#13）。op add は2トークンのコマンド
+// （"op","add"）で、この枠組みは1トークンの cmdName しか想定していないため
+// 対象外とし、専用のテスト（TestRunOpAdd_NotFoundForMissingChallengeID）が担う。
 var idCommandCases = [][]string{
 	{"show"},
 	{"edit", "--title", "x"},
@@ -24,6 +27,9 @@ var idCommandCases = [][]string{
 	{"submit"},
 	{"verify", "--result", "met"},
 	{"hold", "--question", "why?"},
+	{"approve"},
+	{"reject", "--reason", "r"},
+	{"answer", "--answer", "a"},
 }
 
 // TestIDCommands_NotFoundForMissingAndIrreversibleOperationID は、存在しない

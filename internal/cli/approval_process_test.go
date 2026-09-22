@@ -474,3 +474,417 @@ func drainSnapshot(d *ptyDrain) string {
 	defer d.mu.Unlock()
 	return d.buf.String()
 }
+
+// runConfirmedChild は args を疑似端末つきの子プロセスとして起動し、対象 ID
+// （confirmInput）を確認として書き込んでから終了を待つ。#13 の新規テスト
+// （D12・T14・OP-ID の承認・差し戻し）が、approval_process_test.go 冒頭の
+// 成功経路テストと同じ手順を繰り返し書かずに使う共通ヘルパー。
+func runConfirmedChild(t *testing.T, args []string, confirmInput string) (code int, ptyOutput, stdout, stderr string) {
+	t.Helper()
+	cmd, stdoutBuf, stderrBuf := newChildCmd(args)
+	master, err := pty.StartWithAttrs(cmd, nil, &syscall.SysProcAttr{Setsid: true, Setctty: true})
+	if err != nil {
+		t.Fatalf("pty.StartWithAttrs: %v", err)
+	}
+	defer func() { _ = master.Close() }()
+	drain := startPTYDrain(master)
+
+	if _, err := master.Write([]byte(confirmInput + "\n")); err != nil {
+		t.Fatalf("write to master: %v", err)
+	}
+
+	code = waitChild(t, cmd, 10*time.Second)
+	ptyOutput = drain.waitDone(5 * time.Second)
+	return code, ptyOutput, stdoutBuf.String(), stderrBuf.String()
+}
+
+// summaryLine は疑似端末の出力から prefix で始まる行（前後の空白・CR を除いた
+// もの）を返す。見つからなければテストを失敗させる。self-review 指摘の再発防止:
+// 「OP-ID が出力のどこかに現れる」だけの検査では、同時に承認される release と
+// 承認されない不可逆操作の 2 つの一覧を入れ替えても緑のままだった。
+func summaryLine(t *testing.T, ptyOutput, prefix string) string {
+	t.Helper()
+	for _, line := range strings.Split(ptyOutput, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
+			return strings.TrimSpace(line)
+		}
+	}
+	t.Fatalf("pty output = %q, want a line starting with %q", ptyOutput, prefix)
+	return ""
+}
+
+const (
+	approvedReleasesPrefix      = "同時に承認される本番反映 (release):"
+	notApprovedOperationsPrefix = "同時には承認されない不可逆操作:"
+)
+
+// assertOperationListing は、見出し prefix の行に wantIDs がすべて現れ、
+// notWantIDs が 1 つも現れないことを確かめる。
+func assertOperationListing(t *testing.T, ptyOutput, prefix string, wantIDs, notWantIDs []string) {
+	t.Helper()
+	line := summaryLine(t, ptyOutput, prefix)
+	for _, id := range wantIDs {
+		if !strings.Contains(line, id) {
+			t.Errorf("line %q (%s) = want it to contain %q", line, prefix, id)
+		}
+	}
+	for _, id := range notWantIDs {
+		if strings.Contains(line, id) {
+			t.Errorf("line %q (%s) = want it NOT to contain %q", line, prefix, id)
+		}
+	}
+}
+
+// --- D12: 完了の承認は未承認の release を同じトランザクションで一括承認する（#13） ---
+
+func setUpChallengeAwaitingCompletionWithOperationsForCLI(t *testing.T, ws string) (id, release1, release2, del string) {
+	t.Helper()
+	created := runJSON(t, ws, "create", "--title", "t", "--done-criteria", "it works")
+	id = created["challenge"].(map[string]any)["id"].(string)
+	release1 = runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "ship A")["operation"].(map[string]any)["id"].(string)
+	release2 = runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "ship B")["operation"].(map[string]any)["id"].(string)
+	del = runJSON(t, ws, "op", "add", id, "--kind", "delete", "--summary", "remove old data")["operation"].(map[string]any)["id"].(string)
+	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, id), "awaiting_completion_approval")
+	return id, release1, release2, del
+}
+
+func TestApprove_Success_CompletionApprovalAutoApprovesPendingReleasesButNotOtherKinds(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id, release1, release2, del := setUpChallengeAwaitingCompletionWithOperationsForCLI(t, ws)
+
+	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"approve", "--workspace", ws, "--json", id}, id)
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
+	}
+	// AC「完了の承認は…同時に承認される release・同時には承認されない不可逆操作を表示する」。
+	for _, want := range []string{confirmPrompt(id), "it works"} {
+		if !strings.Contains(ptyOutput, want) {
+			t.Errorf("pty output = %q, want it to contain %q", ptyOutput, want)
+		}
+	}
+	// 2 つの一覧は見出しごとに分かれていること（D12・A1 の核心。どちらの行に
+	// 出るかまで検査する）。
+	assertOperationListing(t, ptyOutput, approvedReleasesPrefix, []string{release1, release2}, []string{del})
+	assertOperationListing(t, ptyOutput, notApprovedOperationsPrefix, []string{del}, []string{release1, release2})
+
+	show := runJSON(t, ws, "show", id)
+	c := show["challenge"].(map[string]any)
+	if c["status"] != "done" {
+		t.Errorf("status = %v, want done", c["status"])
+	}
+	ops := map[string]map[string]any{}
+	for _, o := range show["operations"].([]any) {
+		m := o.(map[string]any)
+		ops[m["id"].(string)] = m
+	}
+	if ops[release1]["state"] != "approved" || ops[release2]["state"] != "approved" {
+		t.Errorf("releases = %+v, want both approved", ops)
+	}
+	if ops[del]["state"] != "pending" {
+		t.Errorf("delete = %+v, want pending (unchanged; not auto-approved)", ops[del])
+	}
+
+	var completionApprovals, releaseApprovals int
+	for _, a := range show["approvals"].([]any) {
+		m := a.(map[string]any)
+		switch m["kind"] {
+		case "completion":
+			completionApprovals++
+		case "release":
+			releaseApprovals++
+			if m["operation_id"] == nil {
+				t.Errorf("release approval missing operation_id: %+v", m)
+			}
+		}
+	}
+	if completionApprovals != 1 {
+		t.Errorf("completion approvals = %d, want 1", completionApprovals)
+	}
+	if releaseApprovals != 2 {
+		t.Errorf("release approvals = %d, want 2", releaseApprovals)
+	}
+
+	// AC-56: 作業ログには完了の承認と release ごとの承認が別々のエントリとして
+	// （それぞれ actor・経路・本人確認の方式つきで）残る。
+	log := runJSON(t, ws, "log", id)
+	var challengeApproveEntries, operationApproveEntries int
+	for _, e := range log["activities"].([]any) {
+		m := e.(map[string]any)
+		if m["entity"] == "challenge" && m["action"] == "approve" {
+			challengeApproveEntries++
+			if m["verification"] != "tty_confirm" || m["actor"] == "" {
+				t.Errorf("challenge approve entry missing actor/verification: %+v", m)
+			}
+		}
+		if m["entity"] == "operation" && m["action"] == "approve" {
+			operationApproveEntries++
+			if m["verification"] != "tty_confirm" || m["actor"] == "" {
+				t.Errorf("operation approve entry missing actor/verification: %+v", m)
+			}
+		}
+	}
+	if challengeApproveEntries != 1 {
+		t.Errorf("challenge-entity approve entries = %d, want 1", challengeApproveEntries)
+	}
+	if operationApproveEntries != 2 {
+		t.Errorf("operation-entity approve entries = %d, want 2", operationApproveEntries)
+	}
+}
+
+// T14: `approve --hold-release` は完了だけを承認し release は未承認のまま残す。
+func TestApprove_Success_CompletionApprovalWithHoldRelease(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id, release1, release2, _ := setUpChallengeAwaitingCompletionWithOperationsForCLI(t, ws)
+
+	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"approve", "--hold-release", "--workspace", ws, "--json", id}, id)
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
+	}
+	if !strings.Contains(ptyOutput, confirmPrompt(id)) {
+		t.Errorf("pty output = %q, want it to contain the confirm prompt", ptyOutput)
+	}
+	// self-review 指摘の再発防止: --hold-release では release は 1 件も承認
+	// されないため、要約も「同時に承認される」側へ出してはならない（本人確認の
+	// 要約は人間が承認判断の根拠にする唯一のテキスト＝H9）。
+	assertOperationListing(t, ptyOutput, approvedReleasesPrefix, nil, []string{release1, release2})
+	assertOperationListing(t, ptyOutput, notApprovedOperationsPrefix, []string{release1, release2}, nil)
+
+	show := runJSON(t, ws, "show", id)
+	c := show["challenge"].(map[string]any)
+	if c["status"] != "done" {
+		t.Errorf("status = %v, want done", c["status"])
+	}
+	ops := map[string]map[string]any{}
+	for _, o := range show["operations"].([]any) {
+		m := o.(map[string]any)
+		ops[m["id"].(string)] = m
+	}
+	if ops[release1]["state"] != "pending" || ops[release2]["state"] != "pending" {
+		t.Errorf("releases = %+v, want both still pending (--hold-release)", ops)
+	}
+	for _, a := range show["approvals"].([]any) {
+		m := a.(map[string]any)
+		if m["kind"] == "release" {
+			t.Errorf("unexpected release approval despite --hold-release: %+v", m)
+		}
+	}
+}
+
+// AC-46（D12 の conflict の一方）: 完了の承認の要約表示後・確認の入力前に、
+// 別のプロセスが対象の release を approve <OP-ID> で先に承認すると、完了の
+// 承認は成立しない。
+func TestApprove_ConflictWhenReleaseApprovedStandaloneDuringCompletionApprovalWindow(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id, release1, _, _ := setUpChallengeAwaitingCompletionWithOperationsForCLI(t, ws)
+
+	cmd, stdout, stderr := newChildCmd([]string{"approve", "--workspace", ws, "--json", id})
+	master, err := pty.StartWithAttrs(cmd, nil, &syscall.SysProcAttr{Setsid: true, Setctty: true})
+	if err != nil {
+		t.Fatalf("pty.StartWithAttrs: %v", err)
+	}
+	defer func() { _ = master.Close() }()
+	drain := startPTYDrain(master)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(drainSnapshot(drain), id) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the summary to appear on the pty")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// 別プロセス: 対象の release を単独で先に承認する（別の子プロセス・別の
+	// 疑似端末で approve <OP-ID> を成立させる）。
+	opCode, opPTY, opStdout, opStderr := runConfirmedChild(t, []string{"approve", "--workspace", ws, "--json", release1}, release1)
+	if opCode != 0 {
+		t.Fatalf("standalone approve <OP-ID> exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", opCode, opStdout, opStderr, opPTY)
+	}
+
+	if _, err := master.Write([]byte(id + "\n")); err != nil {
+		t.Fatalf("write to master: %v", err)
+	}
+
+	code := waitChild(t, cmd, 10*time.Second)
+	ptyOutput := drain.waitDone(5 * time.Second)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1 (stdout=%q stderr=%q pty=%q)", code, stdout.String(), stderr.String(), ptyOutput)
+	}
+	if got := readErrorCode(t, stderr.String()); got != string(CodeConflict) {
+		t.Fatalf("error code = %q, want %q (stderr=%s)", got, CodeConflict, stderr.String())
+	}
+
+	show := runJSON(t, ws, "show", id)
+	c := show["challenge"].(map[string]any)
+	if c["status"] != "awaiting_completion_approval" {
+		t.Errorf("status = %v, want awaiting_completion_approval (completion must not have applied)", c["status"])
+	}
+	for _, a := range show["approvals"].([]any) {
+		m := a.(map[string]any)
+		if m["kind"] == "completion" {
+			t.Errorf("unexpected completion approval despite conflict: %+v", m)
+		}
+	}
+}
+
+// AC-46（D12 の conflict のもう一方）: 完了の承認の要約表示後・確認の入力前に、
+// 別のプロセスが op add で不可逆操作を足すと、完了の承認は成立しない。
+func TestApprove_ConflictWhenOpAddHappensDuringCompletionApprovalWindow(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id, _, _, _ := setUpChallengeAwaitingCompletionWithOperationsForCLI(t, ws)
+
+	cmd, stdout, stderr := newChildCmd([]string{"approve", "--workspace", ws, "--json", id})
+	master, err := pty.StartWithAttrs(cmd, nil, &syscall.SysProcAttr{Setsid: true, Setctty: true})
+	if err != nil {
+		t.Fatalf("pty.StartWithAttrs: %v", err)
+	}
+	defer func() { _ = master.Close() }()
+	drain := startPTYDrain(master)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(drainSnapshot(drain), id) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the summary to appear on the pty")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "late addition")
+
+	if _, err := master.Write([]byte(id + "\n")); err != nil {
+		t.Fatalf("write to master: %v", err)
+	}
+
+	code := waitChild(t, cmd, 10*time.Second)
+	ptyOutput := drain.waitDone(5 * time.Second)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1 (stdout=%q stderr=%q pty=%q)", code, stdout.String(), stderr.String(), ptyOutput)
+	}
+	if got := readErrorCode(t, stderr.String()); got != string(CodeConflict) {
+		t.Fatalf("error code = %q, want %q (stderr=%s)", got, CodeConflict, stderr.String())
+	}
+}
+
+// --- 不可逆操作の単独の承認・差し戻し（approve <OP-ID> / reject <OP-ID>）（#13） ---
+
+func TestApproveOperationID_Success(t *testing.T) {
+	ws := initializedWorkspace(t)
+	// タイトルは他の出力（"state"・"tty" など）に偶然含まれない語にする
+	// （self-review 指摘: "t" 1 文字では何を出力しても通る空虚な検査だった）。
+	const title = "deploy the billing job"
+	created := runJSON(t, ws, "create", "--title", title)
+	id := created["challenge"].(map[string]any)["id"].(string)
+	op := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "ship it", "--ref", "https://example.com/pr/9")
+	opID := op["operation"].(map[string]any)["id"].(string)
+
+	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"approve", "--workspace", ws, "--json", opID}, opID)
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
+	}
+	// AC: 操作の ID・種類・要約・参照と、課題の ID・タイトル・状態を表示する。
+	for _, want := range []string{confirmPrompt(opID), "release", "ship it", "https://example.com/pr/9", id, title} {
+		if !strings.Contains(ptyOutput, want) {
+			t.Errorf("pty output = %q, want it to contain %q", ptyOutput, want)
+		}
+	}
+	// 課題の状態の行（AC の「状態」。要約から落ちても気付けるよう、行ごと検査する）。
+	statusLine := summaryLine(t, ptyOutput, "課題の状態:")
+	wantStatus := runJSON(t, ws, "show", id)["challenge"].(map[string]any)["status"].(string)
+	if !strings.Contains(statusLine, wantStatus) {
+		t.Errorf("challenge status line = %q, want it to contain the challenge status %q", statusLine, wantStatus)
+	}
+	// stdout は成功時の JSON 出力（operation.summary を含む）であり、summary が
+	// そこに含まれること自体は「成功時の JSON 出力の規約」どおりで問題ない
+	// （approve <C-ID> の計画本文のように、要約専用の情報ではない）。
+
+	show := runJSON(t, ws, "show", id)
+	var found map[string]any
+	for _, o := range show["operations"].([]any) {
+		m := o.(map[string]any)
+		if m["id"] == opID {
+			found = m
+		}
+	}
+	if found == nil || found["state"] != "approved" {
+		t.Errorf("operation = %+v, want state=approved", found)
+	}
+	// approve <OP-ID> でも課題の版は1増える（親要件チケット #4 §アーキテクチャ決定）。
+	c := show["challenge"].(map[string]any)
+	// create=1 -> op add=2 -> approve <OP-ID>=3。
+	if c["version"] != float64(3) {
+		t.Errorf("challenge version = %v, want 3", c["version"])
+	}
+}
+
+func TestRejectOperationID_Success(t *testing.T) {
+	ws := initializedWorkspace(t)
+	created := runJSON(t, ws, "create", "--title", "t")
+	id := created["challenge"].(map[string]any)["id"].(string)
+	op := runJSON(t, ws, "op", "add", id, "--kind", "external_send", "--summary", "notify partner")
+	opID := op["operation"].(map[string]any)["id"].(string)
+
+	cmd, stdout, stderr := newChildCmd([]string{"reject", "--workspace", ws, "--json", "--reason", "not yet", opID})
+	master, err := pty.StartWithAttrs(cmd, nil, &syscall.SysProcAttr{Setsid: true, Setctty: true})
+	if err != nil {
+		t.Fatalf("pty.StartWithAttrs: %v", err)
+	}
+	defer func() { _ = master.Close() }()
+	drain := startPTYDrain(master)
+
+	if _, err := master.Write([]byte(opID + "\n")); err != nil {
+		t.Fatalf("write to master: %v", err)
+	}
+
+	code := waitChild(t, cmd, 10*time.Second)
+	ptyOutput := drain.waitDone(5 * time.Second)
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", code, stdout.String(), stderr.String(), ptyOutput)
+	}
+	for _, want := range []string{confirmPrompt(opID), "not yet"} {
+		if !strings.Contains(ptyOutput, want) {
+			t.Errorf("pty output = %q, want it to contain %q", ptyOutput, want)
+		}
+	}
+
+	show := runJSON(t, ws, "show", id)
+	var found map[string]any
+	for _, o := range show["operations"].([]any) {
+		m := o.(map[string]any)
+		if m["id"] == opID {
+			found = m
+		}
+	}
+	if found == nil || found["state"] != "rejected" {
+		t.Errorf("operation = %+v, want state=rejected", found)
+	}
+	var rejectedApproval map[string]any
+	for _, a := range show["approvals"].([]any) {
+		m := a.(map[string]any)
+		if m["operation_id"] == opID {
+			rejectedApproval = m
+		}
+	}
+	if rejectedApproval == nil || rejectedApproval["reason"] != "not yet" || rejectedApproval["decision"] != "rejected" {
+		t.Errorf("approval = %+v, want decision=rejected reason='not yet'", rejectedApproval)
+	}
+}
+
+// 未承認の release は課題が完了した後でも単独に承認できる（保留した本番反映のため）。
+func TestApproveOperationID_Success_AfterChallengeIsDone(t *testing.T) {
+	ws := initializedWorkspace(t)
+	created := runJSON(t, ws, "create", "--title", "t")
+	id := created["challenge"].(map[string]any)["id"].(string)
+	op := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "s")
+	opID := op["operation"].(map[string]any)["id"].(string)
+	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, id), "done")
+
+	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"approve", "--workspace", ws, "--json", opID}, opID)
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
+	}
+
+	show := runJSON(t, ws, "show", id)
+	if m := findOperation(t, show, opID); m["state"] != "approved" {
+		t.Errorf("operation = %+v, want state=approved", m)
+	}
+}

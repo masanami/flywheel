@@ -92,6 +92,24 @@ func TestParseOperationKind_RejectsUnknownValue(t *testing.T) {
 	}
 }
 
+// --- OperationState（不可逆操作の状態。pending|approved|rejected） ---
+
+func TestParseOperationState_AcceptsKnownValues(t *testing.T) {
+	for _, s := range []string{"pending", "approved", "rejected"} {
+		if _, ok := ParseOperationState(s); !ok {
+			t.Errorf("ParseOperationState(%q) ok = false, want true", s)
+		}
+	}
+}
+
+func TestParseOperationState_RejectsUnknownValue(t *testing.T) {
+	for _, s := range []string{"executed", "", "PENDING", "approve"} {
+		if _, ok := ParseOperationState(s); ok {
+			t.Errorf("ParseOperationState(%q) ok = true, want false", s)
+		}
+	}
+}
+
 // --- ApprovalKind（承認の種類。plan|completion|release） ---
 
 func TestParseApprovalKind_AcceptsKnownValues(t *testing.T) {
