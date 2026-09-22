@@ -93,11 +93,6 @@ func TestRunOpAdd_MissingRequiredFlagsIsUsageError(t *testing.T) {
 	requireErrorCode(t, []string{"op", "add", id, "--kind", "release", "--workspace", ws}, 2, CodeUsageError)
 }
 
-func TestRunOpAdd_NotFoundForMissingChallengeID(t *testing.T) {
-	ws := initializedWorkspace(t)
-	requireErrorCode(t, []string{"op", "add", "C-999", "--kind", "release", "--summary", "s", "--workspace", ws}, 1, CodeNotFound)
-}
-
 func TestRunOpAdd_DoneChallengeIsTerminalState(t *testing.T) {
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")

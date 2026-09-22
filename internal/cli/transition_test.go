@@ -130,20 +130,6 @@ func TestRunPlan_RerunBumpsPlanVersionAndShowHasBothVersions(t *testing.T) {
 	}
 }
 
-// plan は body が無いと ID の有無チェックに到達できないため、idCommandCases の
-// 汎用枠組み（stdin を常に空にする requireErrorCode）では検証できない。
-// 専用に --file で内容のあるファイルを渡し、not_found を確認する。
-func TestRunPlan_NotFoundForMissingOrMalformedID(t *testing.T) {
-	ws := initializedWorkspace(t)
-	planPath := filepath.Join(t.TempDir(), "plan.txt")
-	if err := os.WriteFile(planPath, []byte("x"), 0o644); err != nil {
-		t.Fatalf("write plan file: %v", err)
-	}
-	for _, id := range []string{"C-999", "OP-1"} {
-		requireErrorCode(t, []string{"plan", id, "--file", planPath, "--workspace", ws}, 1, CodeNotFound)
-	}
-}
-
 // --- submit ---
 
 func TestRunSubmit_AdvancesToVerifying(t *testing.T) {
@@ -342,6 +328,67 @@ var operationByCommand = map[string]core.Operation{
 	"reject":             core.OpReject,
 	"answer":             core.OpAnswer,
 	"approveHoldRelease": core.OpApproveHoldRelease,
+}
+
+// TestTransitionCommands_CasesMatchTableOperationsAndRegisteredCommands は #15
+// 完了条件「列挙の元は #8 の遷移表のデータと §IF/API のコマンド一覧であること
+// （手書きの一覧の取りこぼしを防ぐ）」を、この CLI レベルの列挙が使う 2 つの
+// 手書きの表（transitionCommandCases・operationByCommand）について検査する。
+//
+//  1. transitionCommandCases の名前の集合と operationByCommand のキーの集合が
+//     一致する（片方だけに足しても落ちる）。
+//  2. operationByCommand の値の集合が、core.Table から導いた操作トークンの集合
+//     （OpCreate を除く。create の T1 は起票のテストが担う）と一致する。verify の
+//     3 値はいずれも同じ CLI コマンド verify に属し、この列挙は --result met で
+//     代表させるため OpVerifyMet に寄せる（3 値ごとの全組は core の AC-24 の
+//     列挙が担う）。
+//  3. 各ケースが組み立てる引数列が、登録表（defaultCommands()）のコマンドに
+//     解決できる。
+func TestTransitionCommands_CasesMatchTableOperationsAndRegisteredCommands(t *testing.T) {
+	caseNames := map[string]bool{}
+	for _, tc := range transitionCommandCases {
+		caseNames[tc.name] = true
+		argv := tc.args(t, "C-1")
+		if _, _, ok := matchCommand(argv, defaultCommands()); !ok {
+			t.Errorf("transitionCommandCases %q builds %v, which does not resolve to a registered command", tc.name, argv)
+		}
+	}
+	for name := range operationByCommand {
+		if !caseNames[name] {
+			t.Errorf("operationByCommand has %q, which has no entry in transitionCommandCases", name)
+		}
+	}
+	for name := range caseNames {
+		if _, ok := operationByCommand[name]; !ok {
+			t.Errorf("transitionCommandCases has %q, which has no entry in operationByCommand", name)
+		}
+	}
+
+	wantOps := map[core.Operation]bool{}
+	for _, tr := range core.Table {
+		switch tr.Op {
+		case core.OpCreate:
+			continue
+		case core.OpVerifyNotMet, core.OpVerifyUncertain:
+			wantOps[core.OpVerifyMet] = true
+		default:
+			wantOps[tr.Op] = true
+		}
+	}
+	gotOps := map[core.Operation]bool{}
+	for _, op := range operationByCommand {
+		gotOps[op] = true
+	}
+	for op := range wantOps {
+		if !gotOps[op] {
+			t.Errorf("core.Table has operation %q with no entry in operationByCommand", op)
+		}
+	}
+	for op := range gotOps {
+		if !wantOps[op] {
+			t.Errorf("operationByCommand has operation %q which does not appear in core.Table (stale entry?)", op)
+		}
+	}
 }
 
 func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T) {

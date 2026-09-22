@@ -311,14 +311,9 @@ func TestScanDirectErrorConstruction_NewErrorExceptionOnlyAppliesInErrorsGo(t *t
 	}
 }
 
-// TestErrorCodeUsageInSourcesIsWithinSpec は、現時点で実装が実際に使用している
-// エラーコード（NewError 呼び出しから静的に追跡できるもの）が、仕様のエラーコード表の
-// 部分集合であることを検査する（AC-76 の枠組み）。
-//
-// 本チケット（#5）はスタブのみで usage_error・internal_error しか使っていない。
-// 全コマンドが実装され出そろった後の「表と実装が完全に一致する」という
-// 最終閉包の検査は #15 で行う（このテストはその前段の枠組み）。
-func TestErrorCodeUsageInSourcesIsWithinSpec(t *testing.T) {
+// parseProductionSources は本番コード（テストファイルを除く *.go 全体）を解析する。
+func parseProductionSources(t *testing.T) (*token.FileSet, []*ast.File) {
+	t.Helper()
 	root := repoRoot(t)
 	fset := token.NewFileSet()
 	var files []*ast.File
@@ -345,7 +340,133 @@ func TestErrorCodeUsageInSourcesIsWithinSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}
+	return fset, files
+}
 
+// producibleErrorCodes は、実装が出しうるエラーコードの集合を静的に導く。
+// ①mapCoreErr の外の NewError(Code…) はそのまま出しうる。②mapCoreErr の
+// `case errors.Is(err, core.ErrX): return NewError(CodeY, …)` は、core.ErrX が
+// 本番コード（coretest を除く）のうち、宣言と mapCoreErr 自身以外の箇所から
+// 参照されているときだけ CodeY を出しうるとみなす（写像の分岐だけが残り、
+// もう誰もそのエラーを返さない、という取りこぼしを捕まえる。tty_required・
+// confirmation_mismatch のように internal/cli の Verifier 実装が返す sentinel も
+// あるため、internal/core に限らない）。参照の有無による近似であり、到達可能性
+// までは見ない。
+func producibleErrorCodes(t *testing.T, fset *token.FileSet, files []*ast.File, consts map[string]ErrorCode) map[ErrorCode]bool {
+	t.Helper()
+	root := repoRoot(t)
+	codeOf := func(e ast.Expr) (ErrorCode, bool) {
+		switch a := e.(type) {
+		case *ast.Ident:
+			c, ok := consts[a.Name]
+			return c, ok
+		case *ast.SelectorExpr:
+			c, ok := consts[a.Sel.Name]
+			return c, ok
+		}
+		return "", false
+	}
+
+	produced := map[ErrorCode]bool{}
+	sentinelCode := map[string]ErrorCode{}
+	foundMapper := false
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Body == nil {
+				continue
+			}
+			if fd.Name.Name != "mapCoreErr" {
+				ast.Inspect(fd.Body, func(n ast.Node) bool {
+					if call, ok := n.(*ast.CallExpr); ok && calleeName(call.Fun) == "NewError" && len(call.Args) > 0 {
+						if c, ok := codeOf(call.Args[0]); ok {
+							produced[c] = true
+						}
+					}
+					return true
+				})
+				continue
+			}
+			foundMapper = true
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				cc, ok := n.(*ast.CaseClause)
+				if !ok || len(cc.List) != 1 || len(cc.Body) != 1 {
+					return true
+				}
+				is, ok := cc.List[0].(*ast.CallExpr)
+				if !ok || calleeName(is.Fun) != "Is" || len(is.Args) != 2 {
+					return true
+				}
+				sel, ok := is.Args[1].(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				ret, ok := cc.Body[0].(*ast.ReturnStmt)
+				if !ok || len(ret.Results) != 1 {
+					return true
+				}
+				call, ok := ret.Results[0].(*ast.CallExpr)
+				if !ok || calleeName(call.Fun) != "NewError" || len(call.Args) == 0 {
+					return true
+				}
+				if c, ok := codeOf(call.Args[0]); ok {
+					sentinelCode[sel.Sel.Name] = c
+				}
+				return true
+			})
+		}
+	}
+	if !foundMapper || len(sentinelCode) == 0 {
+		t.Fatal("mapCoreErr or its errors.Is cases were not found; the static scan is broken")
+	}
+
+	coretestDir := filepath.Join(root, "internal", "core", "coretest") + string(filepath.Separator)
+	refs := map[string]int{}
+	for _, f := range files {
+		if strings.HasPrefix(fset.Position(f.Pos()).Filename, coretestDir) {
+			continue
+		}
+		for _, decl := range f.Decls {
+			if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == "mapCoreErr" {
+				continue // 写像の分岐そのものは「返す箇所」に数えない
+			}
+			if gd, ok := decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+				continue // sentinel の宣言は数えない
+			}
+			ast.Inspect(decl, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok {
+					if _, isSentinel := sentinelCode[id.Name]; isSentinel {
+						refs[id.Name]++
+					}
+				}
+				return true
+			})
+		}
+	}
+	for sentinel, c := range sentinelCode {
+		if refs[sentinel] > 0 {
+			produced[c] = true
+		}
+	}
+	return produced
+}
+
+// TestErrorCodeUsageInSourcesMatchesSpecInBothDirections は AC-76「実装が出しうる
+// エラーコードの集合と表の集合が双方向に一致する」を検査する。
+//
+//   - 表 ⊇ 実装: NewError(...) の第 1 引数として静的に追跡できるコードは、すべて
+//     仕様のエラーコード表にある（生成規則違反＝文字列リテラルや型変換によるコード
+//     生成・*Error の直接構築も同時に検査する）。
+//   - 表 ⊆ 実装: 表の全行が producibleErrorCodes（core が実際に返す sentinel を
+//     経由するか、CLI が直接作る）に含まれる。
+//
+// verification_rejected は core.Verify が登録簿に無い (channel, verification)
+// の組に対して返すもので、M1 の唯一の Verifier（tty_confirm）は登録簿にある組
+// しか渡さないため CLI からは到達しない（クリティカル設計決定1の、core の API
+// へ直接要求された場合の防御）。core がこの sentinel を返す箇所は実在するため、
+// 表 ⊆ 実装の側では出しうるものとして数える。
+func TestErrorCodeUsageInSourcesMatchesSpecInBothDirections(t *testing.T) {
+	fset, files := parseProductionSources(t)
 	consts := collectErrorCodeConstants(files)
 	used, violations := scanErrorCodeUsage(files, fset, consts)
 	violations = append(violations, scanDirectErrorConstruction(files, fset)...)
@@ -366,7 +487,10 @@ func TestErrorCodeUsageInSourcesIsWithinSpec(t *testing.T) {
 			t.Errorf("used error code %q is not present in the spec table", code)
 		}
 	}
-	if len(used) == 0 {
-		t.Error("no NewError usage detected at all; expected at least usage_error/internal_error from the command stubs")
+	produced := producibleErrorCodes(t, fset, files, consts)
+	for code := range specCodes {
+		if !produced[code] {
+			t.Errorf("spec error code %q cannot be produced by the implementation (no direct NewError outside mapCoreErr, and no core sentinel mapped to it is referenced outside its declaration and mapCoreErr)", code)
+		}
 	}
 }
