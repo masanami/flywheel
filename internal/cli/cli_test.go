@@ -236,16 +236,14 @@ func TestRun_NonObjectSuccessPayloadBecomesInternalError(t *testing.T) {
 	}
 }
 
-// TestRun_AllStubCommandsReturnInternalErrorUnimplemented は init 以外の
-// 未実装コマンド（RequiresStore: true）を対象にする。init 自身は本チケットで
-// 実装済みのため対象から外れ、専用のテスト（init_test.go）で検証する。
+// TestRun_AllStubCommandsReturnInternalErrorUnimplemented は init・create・
+// show・list・edit・log 以外の未実装コマンド（RequiresStore: true）を対象に
+// する。init は本チケットより前（#7）で実装済みのため専用のテスト
+// （init_test.go）で検証する。create・show・list・edit・log は本チケット（#9）で
+// 実装済みのため対象から外れ、internal/cli/challenge_test.go で検証する。
 func TestRun_AllStubCommandsReturnInternalErrorUnimplemented(t *testing.T) {
 	ws := initializedWorkspace(t)
 	cases := [][]string{
-		{"create", "--title", "t"},
-		{"show", "C-1"},
-		{"list"},
-		{"edit", "C-1"},
 		{"classify", "C-1", "--priority", "P0"},
 		{"plan", "C-1", "--stdin"},
 		{"submit", "C-1"},
@@ -256,8 +254,6 @@ func TestRun_AllStubCommandsReturnInternalErrorUnimplemented(t *testing.T) {
 		{"reject", "C-1", "--reason", "r"},
 		{"op", "add", "C-1", "--kind", "release", "--summary", "s"},
 		{"status"},
-		{"log"},
-		{"log", "C-1"},
 	}
 	for _, args := range cases {
 		var stdout, stderr bytes.Buffer
