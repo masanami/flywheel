@@ -180,7 +180,7 @@ func defaultCommands() []Command {
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags:         []flagDef{{Name: "answer", HasValue: true, Required: true}},
-			Run:           stubRun,
+			Run:           runAnswer,
 		},
 		{
 			Path:          []string{"approve"},
@@ -188,7 +188,7 @@ func defaultCommands() []Command {
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags:         []flagDef{{Name: "hold-release", HasValue: false}},
-			Run:           stubRun,
+			Run:           runApprove,
 		},
 		{
 			Path:          []string{"reject"},
@@ -196,7 +196,7 @@ func defaultCommands() []Command {
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags:         []flagDef{{Name: "reason", HasValue: true, Required: true}},
-			Run:           stubRun,
+			Run:           runReject,
 		},
 		{
 			Path:          []string{"op", "add"},

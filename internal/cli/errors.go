@@ -118,6 +118,8 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeTerminalState, err.Error())
 	case errors.Is(err, core.ErrInvalidTransition):
 		return NewError(CodeInvalidTransition, err.Error())
+	case errors.Is(err, core.ErrConflict):
+		return NewError(CodeConflict, err.Error())
 	case errors.Is(err, core.ErrActorUnavailable):
 		return NewError(CodeInternalError, err.Error())
 	case errors.Is(err, core.ErrTTYRequired):

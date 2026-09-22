@@ -51,37 +51,94 @@ type transitionCtx struct {
 	now      time.Time // nowStr を parseTimestamp した値（返却する Plan.CreatedAt に使う）
 }
 
-// transition は 5 操作（classify・plan・submit・verify・hold）が共有する
-// 判定順序と書き込みを持つ内部ヘルパー。
+// transitionPrecedingResolver は、遷移先の解決（tr.Target.Resolve）に渡す
+// preceding をトランザクションの中で動的に決めるための差し込み口（T12:
+// answer が使う。「保留に入る直前の状態」は静的な値ではなく、その時点で
+// 未回答の保留行から読む必要があるため）。cid は課題の内部整数 ID、current は
+// 直前に読んだ課題。
+type transitionPrecedingResolver func(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge) (Status, error)
+
+// runTransitionParams は runTransition が使う操作固有のパラメータ。
+// expectedVersion が非 nil の呼び出し（#12: 本人確認つきの操作）だけが
+// バージョン不一致を ErrConflict として検出する（§クリティカル設計決定 1）。
+// nil の呼び出し（#10: 本人確認の無い5操作）は PD7 のとおり、
+// BEGIN IMMEDIATE による直列化と最新状態での再検査だけに頼り、conflict は
+// 返さない。
+type runTransitionParams struct {
+	actor            string
+	channel          Channel
+	verification     Verification
+	id               string
+	expectedVersion  *int
+	op               Operation
+	preceding        Status
+	resolvePreceding transitionPrecedingResolver // nil なら preceding をそのまま使う
+}
+
+// runTransition は transition（#10: 本人確認の無い5操作）と verifiedTransition
+// （#12: 本人確認つきの approve・reject・answer）が共有する判定順序と書き込みを
+// 持つ内部ヘルパー。
 //
-// 判定順: ② parseChallengeID 不正は ErrNotFound → ③ mutate 内（BEGIN IMMEDIATE
-// の中）で loadChallenge（無ければ ErrNotFound）→ ④ IsTerminal なら
-// ErrTerminalState → ⑤ Lookup(current.Status, op) が ok=false なら
-// ErrInvalidTransition → ⑥ tr.Target.Resolve で遷移先を確定 → ⑦ apply
-// （操作固有の書き込み）→ ⑧ UPDATE challenge → ⑨ rec.record。
+// 判定順: ② parseChallengeID 不正は ErrNotFound → ③ mutateAs 内
+// （BEGIN IMMEDIATE の中）で loadChallenge（無ければ ErrNotFound）→
+// ④ expectedVersion が非 nil かつ一致しなければ ErrConflict（状態の再判定より
+// 先＝§クリティカル設計決定1）→ ⑤ IsTerminal なら ErrTerminalState →
+// ⑥ Lookup(current.Status, op) が ok=false なら ErrInvalidTransition →
+// ⑦ tr.Target.Resolve で遷移先を確定（resolvePreceding があれば先に
+// preceding を解決する）→ ⑧ apply（操作固有の書き込み）→ ⑨ UPDATE challenge →
+// ⑩ rec.record。
 //
-// 入力の検証（① ClassifyInput.Priority の閉集合等）は呼び出し元の公開メソッドが
-// トランザクションを開く前に行う。
-func (s *Store) transition(ctx context.Context, ch Channel, id string, op Operation, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
-	cid, ok := parseChallengeID(id)
+// 入力の検証（各公開メソッドの閉集合・必須値の検査）は呼び出し元がこの
+// ヘルパーを呼ぶ前に行う。
+func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+	cid, ok := parseChallengeID(p.id)
 	if !ok {
 		return nil, ErrNotFound
 	}
 
 	var result *Challenge
-	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
+	err := s.mutateAs(ctx, p.actor, p.channel, p.verification, func(tx *sql.Tx, rec *activityRecorder) error {
 		current, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
 			return err
 		}
+		if p.expectedVersion != nil && current.Version != *p.expectedVersion {
+			return ErrConflict
+		}
 		if IsTerminal(Table, StatusVocabulary, current.Status) {
 			return ErrTerminalState
 		}
-		tr, ok := Lookup(current.Status, op)
+		tr, ok := Lookup(current.Status, p.op)
 		if !ok {
 			return ErrInvalidTransition
 		}
-		target, err := tr.Target.Resolve(Table, NoStatus)
+		// 遷移表の RequiresVerification と、この呼び出しが本人確認つき
+		// （expectedVersion 非 nil）かどうかは常に一致していなければならない
+		// （self-review 指摘: これが無いと、verifiedTransition を経由せず
+		// transition() から T5・T6・T12・T13・T15 を呼んでも遷移表の検査だけは
+		// 通ってしまい、「承認・差し戻し・保留への回答は本人確認つきの操作
+		// としてだけ成立する」という不変条件がコードで強制されていなかった）。
+		// 到達すれば呼び出し側の実装誤りであり fail-closed に拒否する。
+		//
+		// expectedVersion の有無だけでなく verification（VerificationNone
+		// かどうか）も独立に照合する（self-review 指摘・ラウンド2: どちらか
+		// 一方だけを見る代理検査は、将来 core 内に「expectedVersion は
+		// 渡すが verification は none のまま」のような呼び出し元が増えると
+		// すり抜ける余地を残す）。
+		hasExpectedVersion := p.expectedVersion != nil
+		hasVerification := p.verification != VerificationNone
+		if tr.RequiresVerification != hasExpectedVersion || tr.RequiresVerification != hasVerification {
+			return fmt.Errorf("core: operation %q requires_verification=%v but was invoked with expectedVersion set=%v verification=%q (programming error: verified and unverified transition paths must not cross)", p.op, tr.RequiresVerification, hasExpectedVersion, p.verification)
+		}
+
+		preceding := p.preceding
+		if p.resolvePreceding != nil {
+			preceding, err = p.resolvePreceding(ctx, tx, cid, current)
+			if err != nil {
+				return err
+			}
+		}
+		target, err := tr.Target.Resolve(Table, preceding)
 		if err != nil {
 			return err
 		}
@@ -126,13 +183,13 @@ func (s *Store) transition(ctx context.Context, ch Channel, id string, op Operat
 			return err
 		}
 		if affected != 1 {
-			return fmt.Errorf("core: transition challenge %s: expected to update 1 row, updated %d", id, affected)
+			return fmt.Errorf("core: transition challenge %s: expected to update 1 row, updated %d", p.id, affected)
 		}
 
 		// 課題の版（challenge.version）は状態が変わらない遷移でも常に +1 する
 		// （T4 も改訂として版を進める。edit と同じ規約）。
 		tc.after["version"] = newVersion
-		if err := rec.record("challenge", cid, string(op), tc.before, tc.after); err != nil {
+		if err := rec.record("challenge", cid, string(p.op), tc.before, tc.after); err != nil {
 			return err
 		}
 
@@ -155,6 +212,70 @@ func (s *Store) transition(ctx context.Context, ch Channel, id string, op Operat
 		return nil, err
 	}
 	return result, nil
+}
+
+// transition は 5 操作（classify・plan・submit・verify・hold）が共有する
+// 判定順序と書き込みを持つ内部ヘルパー（実体は runTransition。actor は
+// resolveActor()・verification は VerificationNone に固定し、expectedVersion
+// を持たない＝conflict を返さない。PD7）。
+//
+// 判定順は ID の形式（ErrNotFound）→ actor の解決（ErrActorUnavailable）の
+// 順を保つ（#9・#10 と同じ。self-review 指摘: 以前の実装は resolveActor を
+// 先に呼んでいたため、actor を解決できない環境で不正な ID を渡すと
+// ErrNotFound ではなく ErrActorUnavailable になってしまい、既存5操作の
+// エラー優先順位が変わっていた）。
+func (s *Store) transition(ctx context.Context, ch Channel, id string, op Operation, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+	if _, ok := parseChallengeID(id); !ok {
+		return nil, ErrNotFound
+	}
+	actor, err := resolveActor()
+	if err != nil {
+		return nil, err
+	}
+	return s.runTransition(ctx, runTransitionParams{
+		actor:        actor,
+		channel:      ch,
+		verification: VerificationNone,
+		id:           id,
+		op:           op,
+		preceding:    NoStatus,
+	}, apply)
+}
+
+// verifiedTransition は本人確認つきの操作（#12: approve・reject・answer）が
+// 共有する入口。att を fail-closed で再検査してから runTransition を呼ぶ
+// （§クリティカル設計決定1: 「ゼロ値・登録簿外の Attestation を
+// ErrVerificationRejected で拒否する」。呼び出し側が core.Verify を経由した
+// かどうかに関わらず、この関数自身がもう一度検査する）。expectedVersion を
+// 必ず渡すため、対象の版が Prepare* の時点から変わっていれば ErrConflict に
+// なる。
+func (s *Store) verifiedTransition(ctx context.Context, att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+	if !attestationValid(att, id) {
+		return nil, ErrVerificationRejected
+	}
+	ev := expectedVersion
+	return s.runTransition(ctx, runTransitionParams{
+		actor:            att.actor,
+		channel:          att.channel,
+		verification:     att.verification,
+		id:               id,
+		expectedVersion:  &ev,
+		op:               op,
+		preceding:        preceding,
+		resolvePreceding: resolvePreceding,
+	}, apply)
+}
+
+// attestationValid は att が Verify を経由した登録簿内の (channel,
+// verification) の組を持ち、actor が非空であること、かつ本人確認が id
+// （呼び出し側がこれから書き込もうとしている対象）に対して成立したことを
+// 再検査する。core.Attestation はゼロ値も他パッケージから構築できてしまう
+// うえ（verification.go のコメント）、target を検査しないと「別の対象向けに
+// 成立した Attestation」を Execute* がそのまま受理してしまう
+// （self-review 指摘: 確認の入力は対象の ID の完全一致という設計決定〈H9〉が
+// Verifier の中だけで閉じており、core の API 境界では担保されていなかった）。
+func attestationValid(att Attestation, id string) bool {
+	return att.actor != "" && att.target == id && registryAllows(att.channel, att.verification)
 }
 
 // insertHold は hold テーブルへ 1 行追加する（T10・T11 が共有する）。

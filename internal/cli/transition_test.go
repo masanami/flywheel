@@ -312,6 +312,12 @@ var transitionCommandCases = []transitionCommandCase{
 	{"submit", func(_ *testing.T, id string) []string { return []string{"submit", id} }},
 	{"verify", func(_ *testing.T, id string) []string { return []string{"verify", id, "--result", "met"} }},
 	{"hold", func(_ *testing.T, id string) []string { return []string{"hold", id, "--question", "why?"} }},
+	// approve・reject・answer（#12）: 対象外の状態では、core.Prepare*（①
+	// 読み取り）が端末を開く前に invalid_transition／terminal_state を返す
+	// ため、この in-process の枠組み（stdin は空のまま）でも検証できる。
+	{"approve", func(_ *testing.T, id string) []string { return []string{"approve", id} }},
+	{"reject", func(_ *testing.T, id string) []string { return []string{"reject", id, "--reason", "r"} }},
+	{"answer", func(_ *testing.T, id string) []string { return []string{"answer", id, "--answer", "a"} }},
 }
 
 // operationByCommand は各コマンドが遷移表で引く操作トークン。可否の期待値は
@@ -325,6 +331,9 @@ var operationByCommand = map[string]core.Operation{
 	"submit":   core.OpSubmit,
 	"verify":   core.OpVerifyMet,
 	"hold":     core.OpHold,
+	"approve":  core.OpApprove,
+	"reject":   core.OpReject,
+	"answer":   core.OpAnswer,
 }
 
 func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T) {
@@ -365,10 +374,12 @@ func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T)
 			})
 		}
 	}
-	// 5 コマンド × 8 状態 = 40 組のうち、遷移表にある組（T2=1・T3/T4=2・T7=1・
-	// T8=1・T11=4 の計 9）を除いた 31 組を回したことを固定する。
-	if tested != 31 {
-		t.Fatalf("tested %d undefined (command, status) combinations, want 31", tested)
+	// 8 コマンド × 8 状態 = 64 組のうち、遷移表にある組（T2=1・T3/T4=2・T7=1・
+	// T8=1・T11=4・approve=2〈T5・T13〉・reject=2〈T6・T15〉・answer=1〈T12〉の
+	// 計 14）を除いた 50 組を回したことを固定する（#12 で approve・reject・
+	// answer を追加）。
+	if tested != 50 {
+		t.Fatalf("tested %d undefined (command, status) combinations, want 50", tested)
 	}
 }
 

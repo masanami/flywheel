@@ -62,4 +62,11 @@ var (
 	// （§クリティカル設計決定 1「登録簿に無い組の要求を verification_rejected
 	// で拒否する」）。
 	ErrVerificationRejected = errors.New("core: this (channel, verification) pair is not in the registry")
+
+	// ErrConflict は本人確認つきの操作（#12: approve・reject・answer）で、
+	// 要約を表示した時点（Prepare*）の課題の版と、書き込み（Execute*）の
+	// 時点の版が一致しなかったことを表す（§クリティカル設計決定 1「確認が
+	// 成立したら、表示時点の対象の版を条件にして…版が変わっていれば
+	// conflict」）。承認の記録・遷移・作業ログはいずれも残らない。
+	ErrConflict = errors.New("core: the challenge changed after the approval summary was shown")
 )
