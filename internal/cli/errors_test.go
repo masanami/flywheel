@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/masanami/flywheel/internal/core"
 )
 
 func TestExitCodeFor_KnownCodes(t *testing.T) {
@@ -38,6 +40,33 @@ func TestExitCodeFor_KnownCodes(t *testing.T) {
 func TestExitCodeFor_UnknownCodeFallsBackToInternalError(t *testing.T) {
 	if got := ExitCodeFor(ErrorCode("not_a_real_code")); got != 2 {
 		t.Errorf("ExitCodeFor(unknown) = %d, want 2 (internal_error 相当)", got)
+	}
+}
+
+// TestMapCoreErr_VerificationErrors は #11 で足した 3 つの sentinel error
+// （core.ErrTTYRequired・ErrConfirmationMismatch・ErrVerificationRejected）が
+// mapCoreErr で正しい ErrorCode（終了コード 1）へ写像されることを検証する
+// （AC-37・AC-44・AC-50）。
+func TestMapCoreErr_VerificationErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want ErrorCode
+	}{
+		{"tty required", core.ErrTTYRequired, CodeTTYRequired},
+		{"confirmation mismatch", core.ErrConfirmationMismatch, CodeConfirmationMismatch},
+		{"verification rejected", core.ErrVerificationRejected, CodeVerificationRejected},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := mapCoreErr(c.err)
+			if got.Code != c.want {
+				t.Fatalf("mapCoreErr(%v).Code = %q, want %q", c.err, got.Code, c.want)
+			}
+			if ExitCodeFor(got.Code) != 1 {
+				t.Fatalf("ExitCodeFor(%q) = %d, want 1", got.Code, ExitCodeFor(got.Code))
+			}
+		})
 	}
 }
 

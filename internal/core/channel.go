@@ -17,3 +17,8 @@ type Verification string
 // VerificationNone は本人確認が行われていないことを表す。#9 の操作
 // （create・edit）はすべて本人確認を要さないため、core 内部でこの値に固定する。
 const VerificationNone Verification = "none"
+
+// VerificationTTYConfirm は端末での本人確認の方式（#11。
+// docs/features/m1-core.md §クリティカル設計決定 1）。M1 の登録簿は
+// (ChannelCLI, VerificationTTYConfirm) の 1 組だけを許可する。
+const VerificationTTYConfirm Verification = "tty_confirm"
