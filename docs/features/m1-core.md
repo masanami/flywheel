@@ -198,7 +198,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `description` | string | 説明 |
 | `done_criteria` | string | 完了条件 |
 | `urgency` | string \| null | `高\|中\|低`。未設定は `null` |
-| `priority` | string \| null | `P0\|P1\|P2`。#9 は設定する操作を持たないため常に `null` |
+| `priority` | string \| null | `P0\|P1\|P2`。`classify` が設定する。未設定は `null` |
 | `status` | string | 状態コード |
 | `status_label` | string | 状態の表示名 |
 | `version` | integer | 版 |
@@ -217,11 +217,19 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `holds` | `{"question", "from_status", "from_status_label", "raised_at", "answer", "answered_at", "answered_by"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`） |
 | `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
 
-#9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用（値は後続チケットが書き込む）。
+#9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。`approvals`・`operations` は引き続き後続チケットが書き込む）。
 
 ##### `list`
 
 `{"challenges": [{…}, ...]}`。要素は `challenge`（上表）と同じ形。
+
+##### `classify`・`submit`・`verify`・`hold`（#10 で追加）
+
+`{"challenge": {…}}`。`challenge` は上表（`create`・`edit`）と同じ形。
+
+##### `plan`（#10 で追加）
+
+`{"challenge": {…}, "plan": {"version", "body", "created_at"}}`。`challenge` は上表と同じ形、`plan` は `show` の `plans` の要素と同じ形。
 
 ##### `log`
 
@@ -235,9 +243,9 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `verification` | string | 本人確認の方式（本人確認の無い操作は `none`） |
 | `entity` | string | `challenge` |
 | `entity_id` | string | `"C-<n>"` |
-| `action` | string | `create`\|`edit` |
+| `action` | string | `create`\|`edit`\|`classify`\|`plan`\|`submit`\|`verify_met`\|`verify_not_met`\|`verify_uncertain`\|`hold` |
 | `before` | object \| null | 変わった項目だけの JSON オブジェクト。`create` は常に `null` |
-| `after` | object \| null | 変わった項目だけの JSON オブジェクト |
+| `after` | object \| null | 変わった項目だけの JSON オブジェクト。`create` 以外は常に `version` を含む。状態が変わる遷移では `status`（T4 のように状態が変わらない遷移では含まない）、`classify` は `priority`、`plan` は `plan_version`、保留に入る操作（`verify_uncertain`・`hold`）は `question` を含む |
 
 ## 非機能要件
 

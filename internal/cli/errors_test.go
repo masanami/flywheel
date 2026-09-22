@@ -70,6 +70,18 @@ func TestMapCoreErr_VerificationErrors(t *testing.T) {
 	}
 }
 
+// TestMapCoreErr_InvalidTransition は #10 で足した core.ErrInvalidTransition が
+// CodeInvalidTransition（終了コード 1）へ写像されることを検証する（AC-24）。
+func TestMapCoreErr_InvalidTransition(t *testing.T) {
+	got := mapCoreErr(core.ErrInvalidTransition)
+	if got.Code != CodeInvalidTransition {
+		t.Fatalf("mapCoreErr(ErrInvalidTransition).Code = %q, want %q", got.Code, CodeInvalidTransition)
+	}
+	if ExitCodeFor(got.Code) != 1 {
+		t.Fatalf("ExitCodeFor(%q) = %d, want 1", got.Code, ExitCodeFor(got.Code))
+	}
+}
+
 func TestNewError_SetsCodeAndMessage(t *testing.T) {
 	err := NewError(CodeNotFound, "C-1 not found")
 	if err.Code != CodeNotFound {

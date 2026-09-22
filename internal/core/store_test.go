@@ -397,3 +397,32 @@ func touch(t *testing.T, path string) {
 		t.Fatalf("touch %s: %v", path, err)
 	}
 }
+
+// TestStore_ProductionOpenPathsLeaveBeforeCommitNil は、本番の生成経路
+// （OpenWorkspace＝openExistingAt・Init＝openAtForInit）が開いた Store の
+// テスト専用フック beforeCommit が nil（no-op）のままであることを固定する
+// （design-reviewer 指摘: このフックは書き込みロックを保持したまま制御を
+// 止める力を持つため、非テストコードが設定しないことを検査で担保する）。
+func TestStore_ProductionOpenPathsLeaveBeforeCommitNil(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, flywheelDirName), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	s, _, err := openAtForInit(dir)
+	if err != nil {
+		t.Fatalf("openAtForInit() error = %v", err)
+	}
+	if s.beforeCommit != nil {
+		t.Error("openAtForInit() set beforeCommit; production open paths must leave it nil")
+	}
+	_ = s.Close()
+
+	s2, err := OpenWorkspace(dir)
+	if err != nil {
+		t.Fatalf("OpenWorkspace() error = %v", err)
+	}
+	defer func() { _ = s2.Close() }()
+	if s2.beforeCommit != nil {
+		t.Error("OpenWorkspace() set beforeCommit; production open paths must leave it nil")
+	}
+}

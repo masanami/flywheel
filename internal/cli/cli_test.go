@@ -94,11 +94,11 @@ func TestRun_PlanRequiresExactlyOneOfFileOrStdin(t *testing.T) {
 	requireErrorCode(t, []string{"plan", "C-1"}, 2, CodeUsageError)
 	requireErrorCode(t, []string{"plan", "C-1", "--file", "x.txt", "--stdin"}, 2, CodeUsageError)
 	// exactly one of --file/--stdin: parsing succeeds, then (once a workspace is
-	// resolvable) falls through to the unimplemented stub, which returns
-	// internal_error (not usage_error). plan は RequiresStore のため、ストアの
+	// resolvable) tries to read the (nonexistent) file, which is a usage_error
+	// (誤ったパス。#10 runPlan の規則)。plan は RequiresStore のため、ストアの
 	// あるワークスペースを渡さないと store_not_found が先に出てしまう。
 	ws := initializedWorkspace(t)
-	requireErrorCode(t, []string{"plan", "C-1", "--file", "x.txt", "--workspace", ws}, 2, CodeInternalError)
+	requireErrorCode(t, []string{"plan", "C-1", "--file", "x.txt", "--workspace", ws}, 2, CodeUsageError)
 }
 
 func TestRun_FlagParsesRegardlessOfPositionBeforeOrAfterPositionalArg(t *testing.T) {
@@ -237,18 +237,15 @@ func TestRun_NonObjectSuccessPayloadBecomesInternalError(t *testing.T) {
 }
 
 // TestRun_AllStubCommandsReturnInternalErrorUnimplemented は init・create・
-// show・list・edit・log 以外の未実装コマンド（RequiresStore: true）を対象に
-// する。init は本チケットより前（#7）で実装済みのため専用のテスト
-// （init_test.go）で検証する。create・show・list・edit・log は本チケット（#9）で
-// 実装済みのため対象から外れ、internal/cli/challenge_test.go で検証する。
+// show・list・edit・log・classify・plan・submit・verify・hold 以外の未実装
+// コマンド（RequiresStore: true）を対象にする。init は本チケットより前（#7）で
+// 実装済みのため専用のテスト（init_test.go）で検証する。create・show・list・
+// edit・log は #9 で、classify・plan・submit・verify・hold は本チケット（#10）で
+// 実装済みのため対象から外れ、それぞれ internal/cli/challenge_test.go・
+// internal/cli/transition_test.go で検証する。
 func TestRun_AllStubCommandsReturnInternalErrorUnimplemented(t *testing.T) {
 	ws := initializedWorkspace(t)
 	cases := [][]string{
-		{"classify", "C-1", "--priority", "P0"},
-		{"plan", "C-1", "--stdin"},
-		{"submit", "C-1"},
-		{"verify", "C-1", "--result", "met"},
-		{"hold", "C-1"},
 		{"answer", "C-1", "--answer", "a"},
 		{"approve", "C-1"},
 		{"reject", "C-1", "--reason", "r"},

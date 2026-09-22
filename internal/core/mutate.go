@@ -83,7 +83,16 @@ func (s *Store) mutate(ctx context.Context, ch Channel, fn func(tx *sql.Tx, rec 
 			verification: VerificationNone,
 			insert:       s.insertActivity,
 		}
-		return fn(tx, rec)
+		if err := fn(tx, rec); err != nil {
+			return err
+		}
+		// beforeCommit はテスト専用（#10 AC-36 の並行テスト）。fn が成功した後、
+		// store.DB.Write が実際にコミットする前に呼ぶことで、このトランザクションに
+		// BEGIN IMMEDIATE の書き込みロックを保持させたまま任意の間だけ止められる。
+		if s.beforeCommit != nil {
+			s.beforeCommit()
+		}
+		return nil
 	})
 	// classifyReadWriteErr は SQLITE_BUSY 等の低レベルのストアエラーだけを
 	// ErrStoreBusy 等へ写像し、fn が返したアプリケーションレベルの sentinel

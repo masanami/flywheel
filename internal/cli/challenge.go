@@ -166,11 +166,7 @@ func nilableString(s *string) any {
 func plansJSON(plans []core.Plan) []map[string]any {
 	out := make([]map[string]any, 0, len(plans))
 	for _, p := range plans {
-		out = append(out, map[string]any{
-			"version":    p.Version,
-			"body":       p.Body,
-			"created_at": FormatTimestamp(p.CreatedAt),
-		})
+		out = append(out, planJSON(p))
 	}
 	return out
 }
