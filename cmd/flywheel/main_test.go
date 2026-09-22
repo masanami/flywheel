@@ -82,30 +82,6 @@ func TestBinary_UnknownFlagExitsTwoWithJSONUsageError(t *testing.T) {
 	}
 }
 
-func TestBinary_StubCommandExitsTwoWithJSONInternalError(t *testing.T) {
-	bin := buildBinary(t)
-	// status は RequiresStore（本チケットで init 以外の全コマンドに適用した
-	// ストア事前チェック）のため、先に init でワークスペースを用意する。
-	ws := t.TempDir()
-	runOK(t, bin, "init", "--workspace", ws, "--json")
-
-	cmd := newChildCmd(bin, "status", "--workspace", ws, "--json")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected *exec.ExitError, got %v", err)
-	}
-	if exitErr.ExitCode() != 2 {
-		t.Fatalf("exit code = %d, want 2", exitErr.ExitCode())
-	}
-	if !strings.Contains(stderr.String(), `"code":"internal_error"`) {
-		t.Fatalf("stderr = %q, want internal_error envelope", stderr.String())
-	}
-}
-
 // runOK は bin を args で実行し、終了コード 0 でなければテストを失敗させる。
 func runOK(t *testing.T, bin string, args ...string) {
 	t.Helper()
@@ -139,13 +115,17 @@ func TestBinary_InitCreatesStoreAndStatusSeesIt(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected *exec.ExitError (status is still a stub), got %v (stdout=%s)", err, stdout.String())
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("status from a subdirectory failed: %v (stdout=%s stderr=%s)", err, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), `"code":"internal_error"`) {
-		t.Fatalf("stderr = %q, want internal_error (store found upward, stub reached)", stderr.String())
+	var doc map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("status stdout is not JSON: %v (stdout=%s)", err, stdout.String())
+	}
+	for _, key := range []string{"needs_human", "actionable", "approved"} {
+		if _, ok := doc[key]; !ok {
+			t.Fatalf("status output missing %q (store found upward): %s", key, stdout.String())
+		}
 	}
 }
 
