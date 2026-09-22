@@ -171,20 +171,13 @@ func plansJSON(plans []core.Plan) []map[string]any {
 	return out
 }
 
+// approvalsJSON・holdsJSON は show の一覧を組み立てる。要素の形は
+// approvalJSON・holdJSON（internal/cli/approval.go。#12 が approve/reject/
+// answer の単発の成功出力と共有するために切り出した）と同じ。
 func approvalsJSON(approvals []core.Approval) []map[string]any {
 	out := make([]map[string]any, 0, len(approvals))
 	for _, ap := range approvals {
-		out = append(out, map[string]any{
-			"kind":           string(ap.Kind),
-			"decision":       string(ap.Decision),
-			"operation_id":   nilableString(ap.OperationID),
-			"target_version": ap.TargetVersion,
-			"actor":          ap.Actor,
-			"channel":        ap.Channel,
-			"verification":   ap.Verification,
-			"reason":         nilableString(ap.Reason),
-			"decided_at":     FormatTimestamp(ap.DecidedAt),
-		})
+		out = append(out, approvalJSON(ap))
 	}
 	return out
 }
@@ -192,20 +185,7 @@ func approvalsJSON(approvals []core.Approval) []map[string]any {
 func holdsJSON(holds []core.Hold) []map[string]any {
 	out := make([]map[string]any, 0, len(holds))
 	for _, h := range holds {
-		label, _ := h.FromStatus.Label()
-		var answeredAt any
-		if h.AnsweredAt != nil {
-			answeredAt = FormatTimestamp(*h.AnsweredAt)
-		}
-		out = append(out, map[string]any{
-			"question":          h.Question,
-			"from_status":       string(h.FromStatus),
-			"from_status_label": label,
-			"raised_at":         FormatTimestamp(h.RaisedAt),
-			"answer":            nilableString(h.Answer),
-			"answered_at":       answeredAt,
-			"answered_by":       nilableString(h.AnsweredBy),
-		})
+		out = append(out, holdJSON(h))
 	}
 	return out
 }

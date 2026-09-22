@@ -237,18 +237,17 @@ func TestRun_NonObjectSuccessPayloadBecomesInternalError(t *testing.T) {
 }
 
 // TestRun_AllStubCommandsReturnInternalErrorUnimplemented は init・create・
-// show・list・edit・log・classify・plan・submit・verify・hold 以外の未実装
-// コマンド（RequiresStore: true）を対象にする。init は本チケットより前（#7）で
-// 実装済みのため専用のテスト（init_test.go）で検証する。create・show・list・
-// edit・log は #9 で、classify・plan・submit・verify・hold は本チケット（#10）で
+// show・list・edit・log・classify・plan・submit・verify・hold・answer・
+// approve・reject 以外の未実装コマンド（RequiresStore: true）を対象にする。
+// init は本チケットより前（#7）で実装済みのため専用のテスト（init_test.go）で
+// 検証する。create・show・list・edit・log は #9 で、classify・plan・submit・
+// verify・hold は #10 で、answer・approve・reject は本チケット（#12）で
 // 実装済みのため対象から外れ、それぞれ internal/cli/challenge_test.go・
-// internal/cli/transition_test.go で検証する。
+// internal/cli/transition_test.go・internal/cli/approval_test.go・
+// internal/cli/approval_process_test.go で検証する。
 func TestRun_AllStubCommandsReturnInternalErrorUnimplemented(t *testing.T) {
 	ws := initializedWorkspace(t)
 	cases := [][]string{
-		{"answer", "C-1", "--answer", "a"},
-		{"approve", "C-1"},
-		{"reject", "C-1", "--reason", "r"},
 		{"op", "add", "C-1", "--kind", "release", "--summary", "s"},
 		{"status"},
 	}

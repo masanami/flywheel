@@ -217,7 +217,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `holds` | `{"question", "from_status", "from_status_label", "raised_at", "answer", "answered_at", "answered_by"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`） |
 | `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
 
-#9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。`approvals`・`operations` は引き続き後続チケットが書き込む）。
+#9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。#12 で `approvals` への書き込みと `holds` の `answer`・`answered_at`・`answered_by` の記録が入った。`operations` は引き続き #13 が書き込む）。
 
 ##### `list`
 
@@ -243,9 +243,17 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `verification` | string | 本人確認の方式（本人確認の無い操作は `none`） |
 | `entity` | string | `challenge` |
 | `entity_id` | string | `"C-<n>"` |
-| `action` | string | `create`\|`edit`\|`classify`\|`plan`\|`submit`\|`verify_met`\|`verify_not_met`\|`verify_uncertain`\|`hold` |
+| `action` | string | `create`\|`edit`\|`classify`\|`plan`\|`submit`\|`verify_met`\|`verify_not_met`\|`verify_uncertain`\|`hold`\|`approve`\|`reject`\|`answer` |
 | `before` | object \| null | 変わった項目だけの JSON オブジェクト。`create` は常に `null` |
-| `after` | object \| null | 変わった項目だけの JSON オブジェクト。`create` 以外は常に `version` を含む。状態が変わる遷移では `status`（T4 のように状態が変わらない遷移では含まない）、`classify` は `priority`、`plan` は `plan_version`、保留に入る操作（`verify_uncertain`・`hold`）は `question` を含む |
+| `after` | object \| null | 変わった項目だけの JSON オブジェクト。`create` 以外は常に `version` を含む。状態が変わる遷移では `status`（T4 のように状態が変わらない遷移では含まない）、`classify` は `priority`、`plan` は `plan_version`、保留に入る操作（`verify_uncertain`・`hold`）は `question` を含む、`approve`・`reject` は `approval_kind`・`decision`・`target_version`（`reject` はさらに `reason`）を含む、`answer` は `answer` を含む |
+
+##### `approve`・`reject`（#12 で追加）
+
+`{"challenge": {…}, "approval": {…}}`。`challenge` は上表と同じ形、`approval` は `show` の `approvals` の要素と同じ形。
+
+##### `answer`（#12 で追加）
+
+`{"challenge": {…}, "hold": {…}}`。`challenge` は上表と同じ形、`hold` は `show` の `holds` の要素と同じ形。
 
 ## 非機能要件
 

@@ -32,6 +32,12 @@ type Attestation struct {
 	actor        string
 	channel      Channel
 	verification Verification
+	// target は Confirm に渡された expectedID（本人確認が成立した対象の
+	// 表示形 ID）。Execute*（#12）が、要約を表示した対象と書き込み先の対象が
+	// 一致することを再検査するために使う（self-review 指摘: actor と
+	// 登録簿だけを見る fail-closed 検査は、別の対象向けに成立した
+	// Attestation の使い回しを拒否できていなかった）。
+	target string
 }
 
 // Actor は本人確認が成立した actor を返す。
@@ -91,5 +97,5 @@ func Verify(ch Channel, verifier Verifier, summary, expectedID string) (Attestat
 	if err != nil {
 		return Attestation{}, err
 	}
-	return Attestation{actor: actor, channel: ch, verification: method}, nil
+	return Attestation{actor: actor, channel: ch, verification: method, target: expectedID}, nil
 }

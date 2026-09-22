@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os/user"
 	"sync"
 	"testing"
 	"time"
@@ -560,8 +561,9 @@ func TestClassifyChallenge_ActivityInsertFailureRollsBack(t *testing.T) {
 }
 
 // dispatchOp は AC-23/AC-24 の枠組みが使う、Operation → 操作の適用の対応表。
-// RequiresVerification な行（T5・T6・T12〜T15）はここに含まれない
-// （#12・#15 が後続で実装する）。
+// #12 で T5・T6・T12・T13・T15（approve・reject・answer）も対象に加えた
+// （フェイク Verifier で確認を成立させて呼ぶ）。T14（approve_hold_release）は
+// #13 が実装するまでここに含まれない。
 type dispatchResult struct {
 	status  Status
 	version int
@@ -593,9 +595,92 @@ func dispatchOperation(t *testing.T, s *Store, id string, op Operation) dispatch
 	case OpHold:
 		c, err := s.HoldChallenge(context.Background(), ChannelCLI, id, HoldInput{Question: "why?"})
 		return resultOf(c, err)
+	case OpApprove:
+		prev, err := s.PrepareApproval(context.Background(), id)
+		if err != nil {
+			return dispatchResult{err: err}
+		}
+		att := verifiedAttestationForTest(t, id)
+		c, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+			ChallengeID: id, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		}, att)
+		return resultOf(c, err)
+	case OpReject:
+		reason := "because"
+		prev, err := s.PrepareRejection(context.Background(), id, reason)
+		if err != nil {
+			return dispatchResult{err: err}
+		}
+		att := verifiedAttestationForTest(t, id)
+		c, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+			ChallengeID: id, ExpectedVersion: prev.Version, Decision: ApprovalDecisionRejected, Reason: &reason,
+		}, att)
+		return resultOf(c, err)
+	case OpAnswer:
+		answer := "ans"
+		prev, err := s.PrepareAnswer(context.Background(), id, answer)
+		if err != nil {
+			return dispatchResult{err: err}
+		}
+		att := verifiedAttestationForTest(t, id)
+		c, _, err := s.ExecuteAnswer(context.Background(), AnswerRequest{
+			ChallengeID: id, ExpectedVersion: prev.Version, Answer: answer,
+		}, att)
+		return resultOf(c, err)
 	default:
 		t.Fatalf("dispatchOperation: unsupported op %q", op)
 		return dispatchResult{}
+	}
+}
+
+// verifiedAttestationForTest は fakeVerifier（verification_test.go）を通して
+// 本人確認を成立させ、Attestation を得る。#12 の dispatchOperation（AC-23・
+// AC-24 の列挙テスト）が approve・reject・answer を他の5操作と同じ枠組みで
+// 扱うために使う。
+func verifiedAttestationForTest(t *testing.T, expectedID string) Attestation {
+	t.Helper()
+	fv := &fakeVerifier{method: VerificationTTYConfirm, actor: "alice"}
+	att, err := Verify(ChannelCLI, fv, "summary", expectedID)
+	if err != nil {
+		t.Fatalf("Verify() setup error = %v", err)
+	}
+	return att
+}
+
+// insertUnansweredHold は challengeID（内部整数 ID）に、from_status を持つ
+// 未回答の保留を 1 行だけ追加する。AC-23 の列挙テストが T12（answer）を
+// 他の行と同じ枠組みで検証するために使う（createAndAdvance は生 SQL で
+// status を直接書き換えるだけで、保留行までは作らないため）。
+func insertUnansweredHold(t *testing.T, s *Store, challengeID int64, fromStatus Status, question string) {
+	t.Helper()
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by)
+			 VALUES (?, ?, ?, ?, NULL, NULL, NULL)`,
+			challengeID, question, string(fromStatus), formatTimestamp(s.currentTime()),
+		)
+		return err
+	}); err != nil {
+		t.Fatalf("insertUnansweredHold: %v", err)
+	}
+}
+
+// insertPlanRow は challengeID（内部整数 ID）に task_plan 行を 1 行だけ追加
+// する。AC-23 の列挙テストが T5・T6（計画承認待ちからの approve・reject）を
+// 検証するために使う（createAndAdvance は生 SQL で status を直接書き換える
+// だけで、計画行までは作らないため。PrepareApproval/PrepareRejection は
+// 計画承認待ちの課題に計画行が無いと fail-closed にエラーを返す＝
+// self-review 指摘の修正）。
+func insertPlanRow(t *testing.T, s *Store, challengeID int64, version int, body string) {
+	t.Helper()
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO task_plan (challenge_id, version, body, created_at) VALUES (?, ?, ?, ?)`,
+			challengeID, version, body, formatTimestamp(s.currentTime()),
+		)
+		return err
+	}); err != nil {
+		t.Fatalf("insertPlanRow: %v", err)
 	}
 }
 
@@ -606,18 +691,20 @@ func resultOf(c *Challenge, err error) dispatchResult {
 	return dispatchResult{status: c.Status, version: c.Version}
 }
 
-// dispatchedOperations は、遷移表 Table から導出した「本人確認を要さない行に
-// 現れる操作トークン」の集合（T1 の create は #9 の対象なので除く）。#10 が
-// 実装する 7 つ（classify・plan・submit・verify_met・verify_not_met・
-// verify_uncertain・hold）に一致することは TestDispatchTable_AC24_* が
-// assert する（Table に操作トークンが増えたとき AC-24 の直積が黙って狭いまま
-// 通らないようにする。design-reviewer 指摘）。
+// dispatchedOperations は、遷移表 Table から導出した「dispatchOperation が
+// 扱える操作トークン」の集合（T1 の create は #9 の対象なので除く）。#10 の
+// 7 つ（classify・plan・submit・verify_met・verify_not_met・verify_uncertain・
+// hold）に #12 の 3 つ（approve・reject・answer）を加えた 10 個に一致する
+// ことは TestDispatchTable_AC24_* が assert する（Table に操作トークンが
+// 増えたとき AC-24 の直積が黙って狭いまま通らないようにする。
+// design-reviewer 指摘）。approve_hold_release（T14）は #13 の対象なので
+// 除外する。
 func dispatchedOperations(t *testing.T) []Operation {
 	t.Helper()
 	seen := map[Operation]bool{}
 	var ops []Operation
 	for _, tr := range Table {
-		if tr.From == NoStatus || tr.RequiresVerification || seen[tr.Op] {
+		if tr.From == NoStatus || tr.Op == OpApproveHoldRelease || seen[tr.Op] {
 			continue
 		}
 		seen[tr.Op] = true
@@ -626,13 +713,14 @@ func dispatchedOperations(t *testing.T) []Operation {
 	want := map[Operation]bool{
 		OpClassify: true, OpPlan: true, OpSubmit: true,
 		OpVerifyMet: true, OpVerifyNotMet: true, OpVerifyUncertain: true, OpHold: true,
+		OpApprove: true, OpReject: true, OpAnswer: true,
 	}
 	if len(ops) != len(want) {
-		t.Fatalf("non-verification operations derived from Table = %v, want exactly %v (a new operation token needs a dispatch entry)", ops, want)
+		t.Fatalf("dispatchable operations derived from Table = %v, want exactly %v (a new operation token needs a dispatch entry)", ops, want)
 	}
 	for _, op := range ops {
 		if !want[op] {
-			t.Fatalf("unexpected non-verification operation %q in Table (add it to dispatchOperation and this list)", op)
+			t.Fatalf("unexpected operation %q in Table (add it to dispatchOperation and this list)", op)
 		}
 	}
 	return ops
@@ -647,10 +735,11 @@ func allStatuses() []Status {
 	return out
 }
 
-// AC-23: 遷移表 T1〜T15 のうち、本人確認を要さない行すべてについて、遷移元の
-// 状態にある課題へ操作を行うと課題の状態が遷移先になる（全行を列挙して検証する）。
-// RequiresVerification な行（T5・T6・T12〜T15）はスキップし、スキップした ID の
-// 集合が正確に {T5,T6,T12,T13,T14,T15} であることを assert する。
+// AC-23: 遷移表 T1〜T15 のそれぞれについて、遷移元の状態にある課題へ操作を
+// 行うと課題の状態が遷移先になる（全行を列挙して検証する。本人確認が要る行
+// （T5・T6・T12・T13・T15）はフェイク Verifier で確認を成立させて検証する）。
+// T14（approve_hold_release）だけは #13 の対象なのでスキップし、スキップした
+// ID の集合が正確に {T14} であることを assert する。
 func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) {
 	skipped := map[string]bool{}
 	tested := 0
@@ -658,7 +747,7 @@ func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) 
 		if tr.From == NoStatus {
 			continue // T1: create は #9 の対象
 		}
-		if tr.RequiresVerification {
+		if tr.Op == OpApproveHoldRelease {
 			skipped[tr.ID] = true
 			continue
 		}
@@ -667,7 +756,28 @@ func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) 
 		fixedActor(t, "alice")
 		c := createAndAdvance(t, s, tr.From)
 
-		wantTarget, err := tr.Target.Resolve(Table, NoStatus)
+		// T12（answer）は「保留に入る直前の状態」を実行時の保留行から読むため、
+		// createAndAdvance（生 SQL で status を直接書き換えるだけ）とは別に
+		// 未回答の保留行を用意する必要がある（HoldEntrySources に含まれる
+		// 状態ならどれでもよく、ここでは unclassified を使う。4状態すべての
+		// 網羅は AC-33 の専用テストが担う）。
+		preceding := NoStatus
+		if tr.Op == OpAnswer {
+			preceding = StatusUnclassified
+			cid, _ := parseChallengeID(c.ID)
+			insertUnansweredHold(t, s, cid, preceding, "why?")
+		}
+
+		// T5・T6（計画承認待ちからの approve・reject）は PrepareApproval/
+		// PrepareRejection が計画行を要求する（fail-closed。self-review 指摘:
+		// 計画行が無いまま承認が成立してしまう fail-open を塞いだ）ため、
+		// createAndAdvance とは別に計画行を用意する。
+		if tr.From == StatusAwaitingPlanApproval {
+			cid, _ := parseChallengeID(c.ID)
+			insertPlanRow(t, s, cid, 1, "plan body")
+		}
+
+		wantTarget, err := tr.Target.Resolve(Table, preceding)
 		if err != nil {
 			t.Fatalf("%s: Resolve: %v", tr.ID, err)
 		}
@@ -687,24 +797,95 @@ func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) 
 	}
 
 	if tested == 0 {
-		t.Fatal("no non-verification transition rows were tested")
+		t.Fatal("no transition rows were tested")
 	}
 
-	wantSkipped := map[string]bool{"T5": true, "T6": true, "T12": true, "T13": true, "T14": true, "T15": true}
+	wantSkipped := map[string]bool{"T14": true}
 	if len(skipped) != len(wantSkipped) {
 		t.Fatalf("skipped = %+v, want %+v", skipped, wantSkipped)
 	}
 	for id := range wantSkipped {
 		if !skipped[id] {
-			t.Errorf("expected %s to be skipped (RequiresVerification), but it was not", id)
+			t.Errorf("expected %s to be skipped (not yet implemented; #13), but it was not", id)
 		}
+	}
+}
+
+// TestRunTransition_RequiresVerificationMismatchIsRejected は self-review
+// 指摘の再発防止: 遷移表の RequiresVerification と、呼び出しが本人確認つき
+// （expectedVersion 非 nil）かどうかが食い違う呼び出しを runTransition が
+// fail-closed に拒否すること。以前は runTransition が RequiresVerification
+// を一切参照しておらず、内部の transition()（本人確認なし）から
+// OpApprove・OpReject・OpAnswer のような本人確認つきの操作を呼んでも、
+// 遷移表の検査（Lookup）だけは通ってしまっていた（「承認・差し戻し・保留
+// への回答は本人確認つきの操作としてだけ成立する」という不変条件が、
+// どの内部ヘルパーを呼んだかだけに依存していた）。
+func TestRunTransition_RequiresVerificationMismatchIsRejected(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+
+	t.Run("verification-required op via the unverified path", func(t *testing.T) {
+		c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+		cid, _ := parseChallengeID(c.ID)
+		insertPlanRow(t, s, cid, 1, "x")
+
+		// s.transition は内部でしか呼ばれないヘルパーだが、OpApprove
+		// （RequiresVerification）を誤って渡した場合に fail-closed で
+		// 拒否されることを直接確認する（同一パッケージのテストだからこそ
+		// 検査できる、実装の不変条件）。
+		_, err := s.transition(context.Background(), ChannelCLI, c.ID, OpApprove, func(context.Context, *transitionCtx) error {
+			return nil
+		})
+		if err == nil {
+			t.Fatal("transition() with a RequiresVerification op unexpectedly succeeded")
+		}
+
+		after, getErr := s.GetChallenge(context.Background(), c.ID)
+		if getErr != nil {
+			t.Fatalf("GetChallenge() error = %v", getErr)
+		}
+		if after.Version != 1 || after.Status != StatusAwaitingPlanApproval {
+			t.Fatalf("challenge changed despite the rejected mismatched call: %+v", after)
+		}
+	})
+
+	t.Run("non-verification op via the verified path", func(t *testing.T) {
+		c := createAndAdvance(t, s, StatusUnclassified)
+		att := verifiedAttestationForTest(t, c.ID)
+
+		_, err := s.verifiedTransition(context.Background(), att, c.ID, 1, OpClassify, NoStatus, nil, func(context.Context, *transitionCtx) error {
+			return nil
+		})
+		if err == nil {
+			t.Fatal("verifiedTransition() with a non-RequiresVerification op unexpectedly succeeded")
+		}
+	})
+}
+
+// TestTransition_MalformedIDTakesPrecedenceOverActorUnavailable は
+// self-review 指摘の再発防止（ラウンド2）: 既存5操作（classify・plan・
+// submit・verify・hold）は、不正な ID の検査（ErrNotFound）を actor の解決
+// （ErrActorUnavailable）より先に行う。この順序は以前のリファクタで一度
+// 入れ替わっていた（actor を解決できない環境で不正な ID を渡すと、
+// ErrNotFound〈exit 1〉ではなく internal_error〈exit 2〉になっていた）。
+// 順序をコードで戻しただけでは再発を防げないため、テストで固定する。
+func TestTransition_MalformedIDTakesPrecedenceOverActorUnavailable(t *testing.T) {
+	s := newStoreForTest(t)
+	withActorSource(t, actorSourceFuncs{
+		userCurrent: func() (*user.User, error) { return nil, errors.New("boom") },
+		getenv:      func(string) string { return "" },
+	})
+
+	_, err := s.ClassifyChallenge(context.Background(), ChannelCLI, "not-a-valid-id", ClassifyInput{Priority: "P0"})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound (malformed ID must be checked before actor resolution)", err)
 	}
 }
 
 // AC-24: (状態, 操作) の組のうち遷移表に無いものはすべて、invalid_transition
 // （完了の課題に対しては terminal_state）で終わり、課題の状態と作業ログが
-// 変わらない。dispatchedOperations（Table から導出した本人確認を要さない 7 操作）
-// × allStatuses（語彙 8 状態）
+// 変わらない。dispatchedOperations（Table から導出した dispatchOperation が
+// 扱える10操作。T14 を除く）× allStatuses（語彙 8 状態）
 // の直積のうち、Lookup が ok=false の全組を検証する。
 func TestDispatchTable_AC24_UndefinedCombinationsAreRejectedAndChangeNothing(t *testing.T) {
 	tested := 0

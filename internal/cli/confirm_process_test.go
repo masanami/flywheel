@@ -46,17 +46,27 @@ func confirmChildArgs(id string) []string {
 	return []string{"__confirm", "--json", id}
 }
 
-// newConfirmChildCmd は os.Args[0]（このテストバイナリ自身）を __confirm 子
-// プロセスとして起動する *exec.Cmd を、stdout/stderr をバッファに向けた状態で
-// 組み立てる。stdin・SysProcAttr・ExtraFiles は呼び出し側が設定する。
-func newConfirmChildCmd(id string, extraEnv ...string) (cmd *exec.Cmd, stdout, stderr *bytes.Buffer) {
-	cmd = exec.Command(os.Args[0], confirmChildArgs(id)...)
+// newChildCmd は os.Args[0]（このテストバイナリ自身）を、
+// FLYWHEEL_CLI_TEST_CONFIRM_HELPER=1（confirmHelperMain＝defaultCommands()＋
+// __confirm を知る CLI）として args で起動する *exec.Cmd を、stdout/stderr を
+// バッファに向けた状態で組み立てる。stdin・SysProcAttr・ExtraFiles は呼び出し
+// 側が設定する。#12（approve・reject・answer の実コマンド）の疑似端末テスト
+// （approval_process_test.go）が、__confirm 専用だった newConfirmChildCmd と
+// 同じ子プロセス起動の手法を任意のコマンドへ使うために切り出した。
+func newChildCmd(args []string, extraEnv ...string) (cmd *exec.Cmd, stdout, stderr *bytes.Buffer) {
+	cmd = exec.Command(os.Args[0], args...)
 	cmd.Env = confirmChildEnv(extraEnv...)
 	stdout = &bytes.Buffer{}
 	stderr = &bytes.Buffer{}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd, stdout, stderr
+}
+
+// newConfirmChildCmd は __confirm 子プロセス起動用の newChildCmd の薄い
+// ラッパー（既存テストの呼び出し形を変えないために残す）。
+func newConfirmChildCmd(id string, extraEnv ...string) (cmd *exec.Cmd, stdout, stderr *bytes.Buffer) {
+	return newChildCmd(confirmChildArgs(id), extraEnv...)
 }
 
 // waitChild は cmd.Wait() を timeout つきで待ち、終了コードを返す（0 は

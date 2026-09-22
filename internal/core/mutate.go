@@ -67,20 +67,31 @@ func (r *activityRecorder) record(entity string, entityID int64, action string, 
 //     store.DB.Write がロールバックする（対象の変更も作業ログの追加も
 //     どちらも残らない＝失敗注入テストが検証する）。
 //
-// 後続チケット（#10 状態遷移・#12 承認・#13 不可逆操作）も同じ mutate を使って
-// 「変更と作業ログへの記録を同じトランザクションで行う」という完了条件を満たす。
+// 本人確認の無い操作（#9・#10）は resolveActor() で actor を解決し
+// Verification を VerificationNone に固定する。本人確認つきの操作
+// （#12: approve・reject・answer）は Attestation が持つ actor・channel・
+// verification をそのまま使う必要があるため、その差し替え口として
+// mutateAs を切り出す（mutate はその薄いラッパー）。
 func (s *Store) mutate(ctx context.Context, ch Channel, fn func(tx *sql.Tx, rec *activityRecorder) error) error {
 	actor, err := resolveActor()
 	if err != nil {
 		return err
 	}
-	err = s.db.Write(ctx, func(tx *sql.Tx) error {
+	return s.mutateAs(ctx, actor, ch, VerificationNone, fn)
+}
+
+// mutateAs は mutate と同じ書き込みトランザクションの枠組みを、呼び出し側が
+// actor・channel・verification を明示的に指定できる形で提供する
+// （#12: 本人確認つきの操作は Attestation から得た値を使い、
+// core 内部の resolveActor()／VerificationNone 固定を経由しない）。
+func (s *Store) mutateAs(ctx context.Context, actor string, ch Channel, verification Verification, fn func(tx *sql.Tx, rec *activityRecorder) error) error {
+	err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		rec := &activityRecorder{
 			tx:           tx,
 			at:           s.currentTime(),
 			actor:        actor,
 			channel:      ch,
-			verification: VerificationNone,
+			verification: verification,
 			insert:       s.insertActivity,
 		}
 		if err := fn(tx, rec); err != nil {
