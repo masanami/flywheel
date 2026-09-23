@@ -17,7 +17,10 @@ import (
 // 入力を求める前に、対応する承認と同じ要約と入力された理由を表示する）を、
 // 計画承認待ち・完了承認待ちの両方の課題について、approve の要約と実際に
 // 並べて比べることで確かめる（#33。既存の approval_process_test.go は要約に
-// 特定の文字列が含まれることだけを見ていた）。
+// 特定の文字列が含まれることだけを見ていた）。承認待ちの release がある完了の
+// 承認では、受入基準 41 に明記した例外（D12: 振り分けの 2 行は今回の操作の
+// 結果に従う）のため、approve・reject それぞれの要約を期待する全文と比べる
+// （#40）。
 //
 // approve と reject を同じ課題へ続けて実行できない（どちらも状態を進める）
 // ため、同じ手順で作った 2 つのワークスペースで 1 回ずつ実行する。
@@ -158,60 +161,57 @@ func TestReject_CompletionApproval_ShowsTheApprovalSummaryPlusReason(t *testing.
 	requireRejectIsApprovePlusReason(t, approve, reject, reason)
 }
 
-// TestReject_CompletionApprovalWithPendingRelease_ListsTheSameOperations は、
-// 承認待ちの release がある完了の承認では、approve と reject で要約の
-// 「同時に承認される本番反映」「同時には承認されない不可逆操作」の振り分けが
-// 変わる（D12: 差し戻しでは release も承認されない）ことを踏まえ、その 2 行
-// 以外は同じで、同じ不可逆操作が漏れなく示され、理由が足されていることを
-// 確かめる。受入基準 41 の「同じ要約」をこの振り分けの違いまで含めて文字どおり
-// 一致と読むかは仕様の文言からは決まらない（PR の「仕様への指摘」を参照）。
-func TestReject_CompletionApprovalWithPendingRelease_ListsTheSameOperations(t *testing.T) {
+// TestReject_CompletionApprovalWithPendingRelease_MatchesApprovalWithD12Reassignment
+// は、受入基準 41 の「対応する承認と同じ要約と入力された理由を表示する」を、
+// 承認待ちの release がある完了の承認についても文字どおりの一致で確かめる。
+// docs/features/m1-core.md の §承認・受入基準 41 に明記された例外（D12:
+// 差し戻しでは release も承認されないため、「同時に承認される本番反映」
+// 「同時には承認されない不可逆操作」の 2 行は今回の操作の結果に従う）を踏まえ、
+// approve の要約全体・reject の要約全体をそれぞれ期待する文字列と完全一致で
+// 比較する（Issue #40。以前は 2 行を比較から除いて部分一致だけを見ていた）。
+func TestReject_CompletionApprovalWithPendingRelease_MatchesApprovalWithD12Reassignment(t *testing.T) {
 	const reason = "distinctive release rejection reason"
 	approve, reject := approveAndRejectSummaries(t, func(t *testing.T, ws string) string {
 		created := runJSON(t, ws, "create", "--title", "distinctive-release-title", "--done-criteria", "distinctive done criteria")
 		id := created["challenge"].(map[string]any)["id"].(string)
-		runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "distinctive release op")
-		runJSON(t, ws, "op", "add", id, "--kind", "delete", "--summary", "distinctive delete op")
+		releaseOpID := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "distinctive release op")["operation"].(map[string]any)["id"].(string)
+		deleteOpID := runJSON(t, ws, "op", "add", id, "--kind", "delete", "--summary", "distinctive delete op")["operation"].(map[string]any)["id"].(string)
+		// releaseOpID/deleteOpID は下の期待値に OP-1/OP-2 として埋め込んで
+		// いるため、想定と違えばここで早期に失敗させる（新しいワークスペース
+		// での 1 件目・2 件目の登録。採番が 1 から始まることは op add の
+		// テストが固定している）。
+		if releaseOpID != "OP-1" || deleteOpID != "OP-2" {
+			t.Fatalf("op ids = %s, %s, want OP-1, OP-2", releaseOpID, deleteOpID)
+		}
 		coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, id), "awaiting_completion_approval")
 		return id
 	}, reason)
 
-	const approvedLabel = "同時に承認される本番反映 (release):"
-	const notApprovedLabel = "同時には承認されない不可逆操作:"
-	splitLines := func(s string) (common []string, approved, notApproved string) {
-		for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
-			switch {
-			case strings.HasPrefix(line, approvedLabel):
-				approved = line
-			case strings.HasPrefix(line, notApprovedLabel):
-				notApproved = line
-			default:
-				common = append(common, line)
-			}
-		}
-		return common, approved, notApproved
-	}
-	approveCommon, approveApproved, approveNotApproved := splitLines(approve)
-	rejectCommon, rejectApproved, rejectNotApproved := splitLines(reject)
+	// 要約の後の空行は確認のプロンプトとの区切り（ttyconfirm.go: "%s\n\n%s"）
+	// なので、比較の前に末尾の改行を1本にそろえる。
+	approveBody := strings.TrimRight(approve, "\n") + "\n"
+	rejectBody := strings.TrimRight(reject, "\n") + "\n"
 
-	requireSummaryContains(t, approve, "distinctive-release-title", "承認の種類:  完了", "distinctive done criteria")
-	if !strings.Contains(approveApproved, "distinctive release op") || !strings.Contains(approveNotApproved, "distinctive delete op") {
-		t.Errorf("approve summary operations = %q / %q, want release approved and delete not approved", approveApproved, approveNotApproved)
-	}
-	if !strings.Contains(rejectApproved, "(無し)") || !strings.Contains(rejectNotApproved, "distinctive release op") || !strings.Contains(rejectNotApproved, "distinctive delete op") {
-		t.Errorf("reject summary operations = %q / %q, want none approved and both release and delete not approved", rejectApproved, rejectNotApproved)
+	const wantApprove = "課題 ID:     C-1\n" +
+		"タイトル:    distinctive-release-title\n" +
+		"承認の種類:  完了\n" +
+		"完了条件:    distinctive done criteria\n" +
+		"同時に承認される本番反映 (release): OP-1(release) distinctive release op\n" +
+		"同時には承認されない不可逆操作:     OP-2(delete) distinctive delete op\n"
+	if approveBody != wantApprove {
+		t.Errorf("approve summary = %q, want %q", approveBody, wantApprove)
 	}
 
-	// 2 行以外は approve と同じで、末尾に理由の 1 行だけが足されている。
-	if len(rejectCommon) != len(approveCommon)+1 {
-		t.Fatalf("reject summary lines (excluding operations) = %q, want the approval's %q plus one reason line", rejectCommon, approveCommon)
-	}
-	for i, line := range approveCommon {
-		if rejectCommon[i] != line {
-			t.Errorf("reject summary line %d = %q, want the approval's %q", i, rejectCommon[i], line)
-		}
-	}
-	if last := rejectCommon[len(rejectCommon)-1]; !strings.Contains(last, reason) {
-		t.Errorf("reject summary last line = %q, want it to contain the reason %q", last, reason)
+	// reject は、release の振り分けの 2 行だけを D12 の結果（release も
+	// 未承認のまま残る）に置き換え、末尾に理由の 1 行を足したものになる。
+	const wantReject = "課題 ID:     C-1\n" +
+		"タイトル:    distinctive-release-title\n" +
+		"承認の種類:  完了\n" +
+		"完了条件:    distinctive done criteria\n" +
+		"同時に承認される本番反映 (release): (無し)\n" +
+		"同時には承認されない不可逆操作:     OP-1(release) distinctive release op, OP-2(delete) distinctive delete op\n" +
+		"理由:        " + reason + "\n"
+	if rejectBody != wantReject {
+		t.Errorf("reject summary = %q, want %q", rejectBody, wantReject)
 	}
 }
