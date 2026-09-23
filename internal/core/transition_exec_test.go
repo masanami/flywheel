@@ -173,6 +173,39 @@ func TestPlanChallenge_FirstPlanAdvancesToAwaitingPlanApproval(t *testing.T) {
 	}
 }
 
+// S3（Issue #39）: 未設定から値が入った項目（plan_version が無い→ある）は、
+// before にそのキーを null で載せる（classify の priority・edit の urgency と
+// そろえる）。
+func TestPlanChallenge_FirstPlanBeforeHasNullPlanVersion(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusClassified)
+
+	if _, _, err := s.PlanChallenge(context.Background(), ChannelCLI, c.ID, PlanInput{Body: "do the thing"}); err != nil {
+		t.Fatalf("PlanChallenge() error = %v", err)
+	}
+
+	acts := activitiesFor(t, s, c.ID)
+	last := acts[len(acts)-1]
+	if last.Action != "plan" {
+		t.Fatalf("last action = %q, want plan", last.Action)
+	}
+	if last.Before == nil {
+		t.Fatalf("Before = nil for the first plan, want an object with plan_version:null")
+	}
+	var before map[string]any
+	if err := json.Unmarshal(last.Before, &before); err != nil {
+		t.Fatalf("unmarshal Before: %v", err)
+	}
+	v, ok := before["plan_version"]
+	if !ok {
+		t.Fatalf("Before = %+v, want a plan_version key", before)
+	}
+	if v != nil {
+		t.Errorf("Before[plan_version] = %v, want null", v)
+	}
+}
+
 // AC-35: 計画承認待ちの課題に plan を再度行うと、計画の版が1増え、以前の版も show で読める。
 func TestPlanChallenge_RevisionBumpsPlanVersionAndKeepsPriorVersions(t *testing.T) {
 	s := newStoreForTest(t)

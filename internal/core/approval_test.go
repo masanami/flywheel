@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -201,6 +202,48 @@ func TestExecuteAnswer_ReturnsToPrecedingHoldStatusForAllFourSources(t *testing.
 		if hold.AnsweredBy == nil || *hold.AnsweredBy != "alice" {
 			t.Errorf("from=%q: hold.AnsweredBy = %v, want %q", from, hold.AnsweredBy, "alice")
 		}
+	}
+}
+
+// S3（Issue #39）: 未設定（保留の answer が無い）から値が入る answer も、
+// before にそのキーを null で載せる（plan の plan_version・classify の
+// priority・edit の urgency とそろえる）。
+func TestExecuteAnswer_BeforeHasNullAnswer(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusUnclassified)
+	if _, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "why?"}); err != nil {
+		t.Fatalf("HoldChallenge() error = %v", err)
+	}
+	prev, err := s.PrepareAnswer(context.Background(), c.ID, "because")
+	if err != nil {
+		t.Fatalf("PrepareAnswer() error = %v", err)
+	}
+	att := verifiedAttestationForTest(t, c.ID)
+	if _, _, err := s.ExecuteAnswer(context.Background(), AnswerRequest{
+		ChallengeID: c.ID, ExpectedVersion: prev.Version, Answer: "because",
+	}, att); err != nil {
+		t.Fatalf("ExecuteAnswer() error = %v", err)
+	}
+
+	acts := activitiesFor(t, s, c.ID)
+	last := acts[len(acts)-1]
+	if last.Action != "answer" {
+		t.Fatalf("last action = %q, want answer", last.Action)
+	}
+	if last.Before == nil {
+		t.Fatalf("Before = nil for answer, want an object with answer:null")
+	}
+	var before map[string]any
+	if err := json.Unmarshal(last.Before, &before); err != nil {
+		t.Fatalf("unmarshal Before: %v", err)
+	}
+	v, ok := before["answer"]
+	if !ok {
+		t.Fatalf("Before = %+v, want an answer key", before)
+	}
+	if v != nil {
+		t.Errorf("Before[answer] = %v, want null", v)
 	}
 }
 

@@ -136,6 +136,10 @@ func TestScenario_CLIOnly_InitThroughApprove_ReachesDoneWithConsistentLogAndStat
 		"challenge " + id + " submit",
 		"challenge " + id + " verify_met",
 		"operation " + opID + " op_add",
+		// S2（Issue #39）: op add は課題の版も上げるため、その課題自身の
+		// entity="challenge" のエントリも同じ操作で残る（log <C-ID> で課題の
+		// エントリの version が飛ばないようにするため）。
+		"challenge " + id + " op_add",
 		// 完了の承認（T13）と D12 による release の一括承認は同じ操作で記録され、
 		// 実装は release の承認を先に書く（仕様は両者の順を定めていない）。
 		"operation " + opID + " approve",

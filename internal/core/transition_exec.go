@@ -336,6 +336,12 @@ func (s *Store) PlanChallenge(ctx context.Context, ch Channel, id string, in Pla
 			// before が NULL になり、create 以外で before が null になる）。
 			newPlanVersion = int(maxVersion.Int64) + 1
 			tc.before["plan_version"] = int(maxVersion.Int64)
+		} else {
+			// S3（Issue #39）: 未設定（計画が無い）から値が入る初回（T3）は、
+			// before にそのキーを null で載せる（classify の priority・edit の
+			// urgency とそろえる。キー自体を省く旧挙動は仕様に定めが無く、
+			// 未設定から値が入る項目の書き方が操作ごとに不揃いだった）。
+			tc.before["plan_version"] = nil
 		}
 		if _, err := tc.tx.ExecContext(ctx,
 			`INSERT INTO task_plan (challenge_id, version, body, created_at) VALUES (?, ?, ?, ?)`,

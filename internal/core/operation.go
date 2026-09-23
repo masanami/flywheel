@@ -127,6 +127,21 @@ func (s *Store) CreateOperation(ctx context.Context, ch Channel, in OperationInp
 			return err
 		}
 
+		// S2（Issue #39）: op add は課題の版も1つ上げるため、その課題自身の
+		// entity="challenge" のエントリも同じトランザクションで残す。これが
+		// 無いと log <C-ID> で課題のエントリの version が飛んで見える
+		// （仕様冒頭の「すべての変更を作業ログに残す」と食い違う）。before は
+		// null（変わった項目は版だけで、S1 により版は before に載せない）、
+		// after は新しい課題の版と、原因になった不可逆操作への参照
+		// （operation_id）を持つ。
+		challengeAfter := map[string]any{
+			"version":      newVersion,
+			"operation_id": formatOperationID(opID),
+		}
+		if err := rec.record("challenge", cid, "op_add", nil, challengeAfter); err != nil {
+			return err
+		}
+
 		result = &IrreversibleOperation{
 			ID:          formatOperationID(opID),
 			ChallengeID: current.ID,
@@ -356,6 +371,23 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 		}
 		if caffected != 1 {
 			return fmt.Errorf("core: %s operation %s: expected to bump challenge %d version, updated %d rows", req.Decision, req.OperationID, row.ChallengeID, caffected)
+		}
+
+		// S2（Issue #39）: approve <OP-ID> / reject <OP-ID> も課題の版を上げる
+		// ため、CreateOperation（op add）と同じ規律で entity="challenge" の
+		// エントリを同じトランザクションで残す。action は entity="operation"
+		// 側の approve/reject と紛れないよう op_approve／op_reject を使う
+		// （課題そのものの approve/reject〔approval_kind を持つ〕とも紛れない）。
+		challengeAction := "op_reject"
+		if req.Decision == ApprovalDecisionApproved {
+			challengeAction = "op_approve"
+		}
+		challengeAfter := map[string]any{
+			"version":      challenge.Version + 1,
+			"operation_id": formatOperationID(oid),
+		}
+		if err := rec.record("challenge", row.ChallengeID, challengeAction, nil, challengeAfter); err != nil {
+			return err
 		}
 
 		createdAt, err := parseTimestamp(row.CreatedAt)
