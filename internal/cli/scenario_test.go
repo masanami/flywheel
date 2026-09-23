@@ -148,6 +148,22 @@ func TestScenario_CLIOnly_InitThroughApprove_ReachesDoneWithConsistentLogAndStat
 	if !reflect.DeepEqual(gotLog, wantLog) {
 		t.Fatalf("log (entity entity_id action) =\n%s\nwant\n%s", strings.Join(gotLog, "\n"), strings.Join(wantLog, "\n"))
 	}
+	// S2（Issue #39）: 課題のエントリの after.version は create（版 1）の次から
+	// 飛ばずに 1 ずつ増え（op add・D12 を含む）、最後の値が show の version と一致する。
+	wantVersion := 2.0
+	for _, act := range logDoc["activities"].([]any) {
+		m := act.(map[string]any)
+		if m["entity"] != "challenge" || m["action"] == "create" {
+			continue
+		}
+		if v := m["after"].(map[string]any)["version"]; v != wantVersion {
+			t.Fatalf("challenge entry %v: after.version = %v, want %v (versions must be consecutive)", m["action"], v, wantVersion)
+		}
+		wantVersion++
+	}
+	if fc["version"] != wantVersion-1 {
+		t.Fatalf("final challenge version = %v, want %v (the last challenge entry's version)", fc["version"], wantVersion-1)
+	}
 
 	// --- status の整合: 完了した課題はどの区分にも現れず、承認済みの
 	// release だけが approved.operations に現れる ---

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -617,5 +618,90 @@ func TestListActivities_ChallengeEntryVersionsAreConsecutiveAcrossOperationChang
 	}
 	if detail.Version != 5 {
 		t.Errorf("Version = %d, want 5 (the last challenge entry's version)", detail.Version)
+	}
+}
+
+// failSecondChallengeEntry は、entity="operation" のエントリは実際に書き込み、
+// その後の entity="challenge" のエントリの書き込みだけを失敗させるフック
+// （S2〔Issue #39〕で 1 トランザクションに 2 件のエントリを書くようになった経路の
+// 「1 件目は成功し 2 件目が失敗する」場合を作る）。
+func failSecondChallengeEntry(tx *sql.Tx, row activityRow) error {
+	if row.Entity == "challenge" {
+		return errors.New("boom: injected challenge entry insert failure")
+	}
+	return defaultInsertActivity(tx, row)
+}
+
+// op add で課題のエントリの書き込みだけが失敗しても、不可逆操作の登録・課題の
+// 版・不可逆操作のエントリはすべて残らない（同じトランザクションでロールバック）。
+func TestCreateOperation_ChallengeEntryFailureRollsBackEverything(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusUnclassified) // version=1
+	before := activitiesFor(t, s, c.ID)
+
+	s.insertActivity = failSecondChallengeEntry
+	if _, err := s.CreateOperation(context.Background(), ChannelCLI, OperationInput{ChallengeID: c.ID, Kind: "release", Summary: "s"}); err == nil {
+		t.Fatal("CreateOperation() error = nil, want an error from the injected failure")
+	}
+	s.insertActivity = nil
+
+	detail, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("GetChallenge() error = %v", err)
+	}
+	if detail.Version != 1 || len(detail.Operations) != 0 {
+		t.Errorf("op add was not rolled back: version=%d operations=%+v", detail.Version, detail.Operations)
+	}
+	if got := activitiesFor(t, s, c.ID); len(got) != len(before) {
+		t.Errorf("activities = %+v, want unchanged %+v", got, before)
+	}
+}
+
+// approve／reject <OP-ID> で課題のエントリの書き込みだけが失敗しても、不可逆操作の
+// 状態・版、承認の記録、課題の版、不可逆操作のエントリはすべて残らない。
+func TestExecuteOperationApproval_ChallengeEntryFailureRollsBackEverything(t *testing.T) {
+	for _, decision := range []ApprovalDecision{ApprovalDecisionApproved, ApprovalDecisionRejected} {
+		t.Run(string(decision), func(t *testing.T) {
+			s := newStoreForTest(t)
+			fixedActor(t, "alice")
+			c := createAndAdvance(t, s, StatusUnclassified)
+			op := createPendingOperation(t, s, c.ID, "release") // challenge version: 1 -> 2
+			before := activitiesFor(t, s, c.ID)
+
+			prev, err := s.PrepareOperationApproval(context.Background(), op.ID)
+			if err != nil {
+				t.Fatalf("PrepareOperationApproval() error = %v", err)
+			}
+			var reason *string
+			if decision == ApprovalDecisionRejected {
+				r := "r"
+				reason = &r
+			}
+			s.insertActivity = failSecondChallengeEntry
+			if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
+				OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: decision, Reason: reason,
+			}, verifiedAttestationForTest(t, op.ID)); err == nil {
+				t.Fatal("ExecuteOperationApproval() error = nil, want an error from the injected failure")
+			}
+			s.insertActivity = nil
+
+			detail, err := s.GetChallenge(context.Background(), c.ID)
+			if err != nil {
+				t.Fatalf("GetChallenge() error = %v", err)
+			}
+			if detail.Version != 2 {
+				t.Errorf("challenge Version = %d, want 2 (rolled back)", detail.Version)
+			}
+			if len(detail.Operations) != 1 || detail.Operations[0].State != OperationStatePending || detail.Operations[0].Version != 1 {
+				t.Errorf("Operations = %+v, want OP-1 pending version 1 (rolled back)", detail.Operations)
+			}
+			if len(detail.Approvals) != 0 {
+				t.Errorf("Approvals = %+v, want none (rolled back)", detail.Approvals)
+			}
+			if got := activitiesFor(t, s, c.ID); len(got) != len(before) {
+				t.Errorf("activities = %+v, want unchanged %+v", got, before)
+			}
+		})
 	}
 }
