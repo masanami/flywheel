@@ -1,48 +1,40 @@
 package cli
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-// idCommandCases は「ID を引数に取る実装済みコマンド」の一覧である
-// （docs/features/m1-core.md AC「存在しない ID を指定したコマンドは、終了コード1・
-// not_found で終わる（§IF / API のうち ID を引数に取る全コマンドを…列挙して
-// 検証する）」の枠組み）。
-//
-// args は --workspace/--json を除いた、対象 ID を含むコマンド引数。入力の検証
-// （閉集合・必須値）が ID の存在チェックより先に core で判定される操作
-// （classify・verify・hold）は、検証を通過する値を extraFlags に添えている
-// （空値だと not_found より先に validation_failed になってしまうため）。
-// plan は body の内容が無いと ID の存在チェックへ到達できず、この汎用の
-// 枠組み（stdin を常に空文字列で叩く requireErrorCode）では検証できないため、
-// 専用のテスト（TestRunPlan_NotFoundForMissingOrMalformedID）で別途検証する。
-// approve・reject・answer（本人確認つき）は core.Prepare*（①読み取り）が
-// 端末を開く前に ErrNotFound を返すため、この枠組み（stdin は常に空文字列）
-// でも安全に検証できる（#12・#13）。op add は2トークンのコマンド
-// （"op","add"）で、この枠組みは1トークンの cmdName しか想定していないため
-// 対象外とし、専用のテスト（TestRunOpAdd_NotFoundForMissingChallengeID）が担う。
-var idCommandCases = [][]string{
-	{"show"},
-	{"edit", "--title", "x"},
-	{"log"},
-	{"classify", "--priority", "P0"},
-	{"submit"},
-	{"verify", "--result", "met"},
-	{"hold", "--question", "why?"},
-	{"approve"},
-	{"reject", "--reason", "r"},
-	{"answer", "--answer", "a"},
-}
-
-// TestIDCommands_NotFoundForMissingAndIrreversibleOperationID は、存在しない
-// 課題 ID（C-999）と、不可逆操作の ID 形式（OP-1。#9 の時点ではまだ登録できない
-// ためやはり存在しない）の両方が not_found（終了コード1）になることを検証する。
-func TestIDCommands_NotFoundForMissingAndIrreversibleOperationID(t *testing.T) {
-	ws := initializedWorkspace(t)
-	for _, id := range []string{"C-999", "OP-1"} {
-		for _, base := range idCommandCases {
-			cmdName, extraFlags := base[0], base[1:]
-			args := append([]string{cmdName, id}, extraFlags...)
-			args = append(args, "--workspace", ws)
-			requireErrorCode(t, args, 1, CodeNotFound)
+// AC-18・AC-73: ID を引数に取る全コマンド（登録表で MaxPositional ≥ 1 のもの）は、存在しない課題の ID と不可逆操作の
+// ID のそれぞれで not_found（終了コード 1）。失敗時の --json は標準エラーに
+// error.code と error.message を書き、標準出力は空。本人確認つきのコマンドも
+// 端末を開く前に not_found で決着する（端末なしで検証できる）。対象 ID 以外の
+// 引数は allCommandSuccessCases の成功経路のものを流用する（plan の本文のように、
+// 入力の検証が ID の存在チェックより先に行われる引数も妥当な値になる）。
+func TestIDCommands_NotFoundForMissingChallengeAndOperationID(t *testing.T) {
+	tested := 0
+	for _, name := range sortedCommandNames(registeredCommands()) {
+		cmd := registeredCommands()[name]
+		tc, ok := allCommandSuccessCases[name]
+		if !ok || cmd.MaxPositional < 1 {
+			continue
 		}
+		t.Run(name, func(t *testing.T) {
+			ws := initializedWorkspace(t)
+			args := tc.setup(t, ws)
+			idAt := len(cmd.Path)
+			if idAt >= len(args) || strings.HasPrefix(args[idAt], "--") {
+				t.Fatalf("success case for %q does not put the ID at index %d: %v", name, idAt, args)
+			}
+			for _, missing := range []string{"C-999", "OP-999"} {
+				a := append([]string{}, args...)
+				a[idAt] = missing
+				requireJSONErrorEnvelope(t, append(a, "--workspace", ws), 1, CodeNotFound)
+			}
+		})
+		tested++
+	}
+	if tested == 0 {
+		t.Fatal("no ID-taking commands were derived from the registration table")
 	}
 }

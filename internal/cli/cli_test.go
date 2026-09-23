@@ -3,6 +3,9 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -236,38 +239,169 @@ func TestRun_NonObjectSuccessPayloadBecomesInternalError(t *testing.T) {
 	}
 }
 
-func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
-	want := [][]string{
-		{"init"}, {"create"}, {"show"}, {"list"}, {"edit"}, {"classify"}, {"plan"},
-		{"submit"}, {"verify"}, {"hold"}, {"answer"}, {"approve"}, {"reject"},
-		{"op", "add"}, {"status"}, {"log"},
+// parseIFAPISignatures は docs/features/m1-core.md の「### IF / API」節の表から、
+// コマンドの Path（空白区切り）ごとの書式を導く。各行の `flywheel …` から、最初の
+// 引数・フラグ（<…>・[…]・(…)・--…）の手前までのトークンを Path とし、残りを
+// 書式とする。1 行に `/` で並ぶ複数のコマンド（approve <OP-ID> / reject <OP-ID>）は
+// それぞれ数え、同じ Path の行が複数あれば書式をすべて返す。
+func parseIFAPISignatures(t *testing.T, doc string) map[string][]ifAPISignature {
+	t.Helper()
+	out := map[string][]ifAPISignature{}
+	inSection := false
+	for _, line := range strings.Split(doc, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			inSection = trimmed == "### IF / API"
+			continue
+		}
+		if !inSection || !strings.HasPrefix(trimmed, "|") {
+			continue
+		}
+		// 1 列目だけを取り出す（書式の中の \| は列の区切りではない）。
+		cell := strings.SplitN(strings.ReplaceAll(trimmed[1:], `\|`, "\x00"), "|", 2)[0]
+		cell = strings.ReplaceAll(cell, "\x00", `\|`)
+		for _, part := range strings.Split(cell, "`") {
+			part = strings.TrimSpace(part)
+			if !strings.HasPrefix(part, "flywheel ") {
+				continue
+			}
+			fields := strings.Fields(strings.TrimPrefix(part, "flywheel "))
+			var path []string
+			for _, tok := range fields {
+				if strings.ContainsAny(tok[:1], "<[(-") {
+					break
+				}
+				path = append(path, tok)
+			}
+			if len(path) == 0 {
+				t.Fatalf("no command name in IF/API row: %q", line)
+			}
+			name := strings.Join(path, " ")
+			out[name] = append(out[name], parseIFAPISignature(fields[len(path):]))
+		}
 	}
-	cmds := defaultCommands()
-	for _, w := range want {
-		found := false
-		for _, c := range cmds {
-			if equalStringSlices(c.Path, w) {
-				found = true
-				break
+	if len(out) == 0 {
+		t.Fatal("IF/API table not found in document")
+	}
+	return out
+}
+
+// ifAPISignature は §IF / API の表の 1 コマンドの書式から読み取った、必須の
+// 引数の宣言（[…] の外にある <…> の位置引数の数・--フラグ・(… | …) の組）。
+type ifAPISignature struct {
+	minPositional int
+	required      map[string]bool
+	oneOf         []string // 組ごとにフラグ名を "/" で結合したもの
+}
+
+// parseIFAPISignature は `flywheel <path…> <書式>` の書式部分を読む。[…] の中は
+// 任意なので読み飛ばし、(… | …) の中のフラグはちょうど 1 つを要求する組とする。
+func parseIFAPISignature(tokens []string) ifAPISignature {
+	sig := ifAPISignature{required: map[string]bool{}}
+	optionalDepth := 0
+	var group []string
+	inGroup, prevFlag := false, false
+	for _, tok := range tokens {
+		opens, closes := strings.Count(tok, "["), strings.Count(tok, "]")
+		if optionalDepth == 0 && opens == 0 {
+			if strings.HasPrefix(tok, "(") {
+				inGroup, group = true, nil
+			}
+			word := strings.Trim(tok, "()")
+			switch {
+			case strings.HasPrefix(word, "--"):
+				if inGroup {
+					group = append(group, strings.TrimPrefix(word, "--"))
+				} else {
+					sig.required[strings.TrimPrefix(word, "--")] = true
+				}
+				prevFlag = true
+			case strings.HasPrefix(word, "<") && !prevFlag:
+				sig.minPositional++
+			default:
+				prevFlag = false
+			}
+			if inGroup && strings.HasSuffix(tok, ")") {
+				inGroup = false
+				sig.oneOf = append(sig.oneOf, strings.Join(group, "/"))
 			}
 		}
-		if !found {
-			t.Errorf("command %v is not registered", w)
+		optionalDepth += opens - closes
+	}
+	return sig
+}
+
+// ifAPIRequiredFlagExceptions は §IF / API の書式では必須に見えるが、省略を
+// usage_error ではなく validation_failed にすると仕様で決まっているフラグ
+// （commands.go の該当箇所のコメントを参照）。
+var ifAPIRequiredFlagExceptions = map[string]map[string]bool{
+	"hold": {"question": true},
+}
+
+// TestDefaultCommands_RequiredArgumentsMatchIFAPITable は、登録表の必須の宣言
+// （MinPositional・Required・OneOfGroups）が §IF / API の書式と一致することを
+// 検査する。AC-77 の「必須引数の欠落」の列挙（allcommands_test.go の
+// missingRequiredVariants）は登録表の宣言から導くため、宣言から Required が
+// 落ちると列挙ごと消えて気付けない。その根元を仕様書に結び付ける。
+func TestDefaultCommands_RequiredArgumentsMatchIFAPITable(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m1-core.md"))
+	if err != nil {
+		t.Fatalf("read spec: %v", err)
+	}
+	specSigs := parseIFAPISignatures(t, string(data))
+	for _, cmd := range defaultCommands() {
+		name := strings.Join(cmd.Path, " ")
+		sigs, ok := specSigs[name]
+		if !ok {
+			continue // TestDefaultCommands_MatchIFAPITable が落とす
+		}
+		for _, want := range sigs {
+			for flag := range ifAPIRequiredFlagExceptions[name] {
+				delete(want.required, flag)
+			}
+			if cmd.MinPositional != want.minPositional {
+				t.Errorf("%s: MinPositional = %d, IF/API table says %d", name, cmd.MinPositional, want.minPositional)
+			}
+			got := map[string]bool{}
+			for _, f := range cmd.Flags {
+				if f.Required {
+					got[f.Name] = true
+				}
+			}
+			if !reflect.DeepEqual(got, want.required) {
+				t.Errorf("%s: required flags = %v, IF/API table says %v", name, got, want.required)
+			}
+			var gotOneOf []string
+			for _, g := range cmd.OneOfGroups {
+				gotOneOf = append(gotOneOf, strings.Join(g, "/"))
+			}
+			if !reflect.DeepEqual(gotOneOf, want.oneOf) {
+				t.Errorf("%s: OneOfGroups = %v, IF/API table says %v", name, gotOneOf, want.oneOf)
+			}
 		}
 	}
-	if len(cmds) != len(want) {
-		t.Errorf("defaultCommands() has %d entries, want %d (IF/API 表に無いコマンドを足していないか確認)", len(cmds), len(want))
-	}
+}
 
-	// 上のループ＋件数比較は want と cmds の重複が無い前提でしか集合一致を
-	// 保証しない。集合（map キー）として明示的に一致を取り、取りこぼしを防ぐ。
+// TestDefaultCommands_MatchIFAPITable は登録表（defaultCommands()）のコマンドの
+// 集合が、仕様書 §IF / API の表から導いた集合と一致することを検査する。
+// 横断の列挙テスト（allcommands_test.go など）はすべて登録表を起点にするため、
+// 登録表と仕様書をつなぐこの検査も手書きの一覧を持たない。
+func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m1-core.md"))
+	if err != nil {
+		t.Fatalf("read spec: %v", err)
+	}
 	wantSet := map[string]bool{}
-	for _, w := range want {
-		wantSet[strings.Join(w, " ")] = true
+	for name := range parseIFAPISignatures(t, string(data)) {
+		wantSet[name] = true
 	}
 	gotSet := map[string]bool{}
-	for _, c := range cmds {
-		gotSet[strings.Join(c.Path, " ")] = true
+	for _, c := range defaultCommands() {
+		key := strings.Join(c.Path, " ")
+		if gotSet[key] {
+			t.Errorf("defaultCommands() registers %q twice", key)
+		}
+		gotSet[key] = true
 	}
 	for path := range wantSet {
 		if !gotSet[path] {
@@ -279,18 +413,6 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 			t.Errorf("defaultCommands() has %q which is not in the IF/API table", path)
 		}
 	}
-}
-
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // フラグの値としての "--json" は JSON モードを有効にしない（解析成功後は解析結果が正）。
