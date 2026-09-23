@@ -216,11 +216,12 @@ func (s *Store) PrepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 // （「差し戻しは理由を必須とする」。AC-48）。戻り値の形は PrepareApproval と
 // 同じで、理由は呼び出し側が保持する。
 //
-// ただし要約の**表示内容**は完全に同じにはならない: 完了確認待ちの課題への
-// 差し戻しは release を 1 件も承認しないため、ReleaseEffect は未承認の不可逆
+// 差し戻しは release を承認しない（D12 の一括承認は完了の承認にだけ伴う）
+// ため、完了確認待ちの課題への差し戻しでは ReleaseEffect は未承認の不可逆
 // 操作をすべて「同時には承認されない」側に分類する（要約と実挙動を一致させる
-// ため。AC「差し戻しの要約は、対応する承認の要約と同じ内容に、入力された
-// 理由を加えたもの」【仮定】との差は PR の説明に「仕様への指摘」として挙げる）。
+// ため）。これは「差し戻しの要約は、対応する承認の要約と同じ内容に、入力
+// された理由を加えたもの」という規則の例外として仕様に明記済み
+// （docs/features/m1-core.md の §承認・受入基準 41。Issue #40）。
 func (s *Store) PrepareRejection(ctx context.Context, id string, reason string) (*ApprovalPreview, error) {
 	if strings.TrimSpace(reason) == "" {
 		return nil, ErrValidation
