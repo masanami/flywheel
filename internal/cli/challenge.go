@@ -243,16 +243,42 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	fmt.Fprintf(&b, "作成:          %s\n", FormatTimestamp(c.CreatedAt))
 	fmt.Fprintf(&b, "更新:          %s\n", FormatTimestamp(c.UpdatedAt))
 	fmt.Fprintf(&b, "計画:          %d 版\n", len(d.Plans))
+	// 計画は全版の本文まで出す（受入基準 17・35 の「show で読める」をテキスト
+	// 出力にも適用する【決定 2026-09-23（オーナー）】）。
 	for _, p := range d.Plans {
 		fmt.Fprintf(&b, "  v%d (%s)\n", p.Version, FormatTimestamp(p.CreatedAt))
+		b.WriteString(indentLines(p.Body, "    "))
 	}
 	fmt.Fprintf(&b, "承認・差し戻し: %d 件\n", len(d.Approvals))
 	for _, a := range d.Approvals {
-		fmt.Fprintf(&b, "  %s %s by %s (%s)\n", a.Kind, a.Decision, a.Actor, FormatTimestamp(a.DecidedAt))
+		fmt.Fprintf(&b, "  %s %s by %s (%s)", a.Kind, a.Decision, a.Actor, FormatTimestamp(a.DecidedAt))
+		if a.OperationID != nil {
+			fmt.Fprintf(&b, " %s", *a.OperationID)
+		}
+		b.WriteString("\n")
+		if a.Reason != nil {
+			b.WriteString(indentLines("理由: "+*a.Reason, "    "))
+		}
 	}
+	// 保留は問いと回答（未回答ならその旨）を出す（決定は計画の本文と同じ）。
 	fmt.Fprintf(&b, "保留:          %d 件\n", len(d.Holds))
 	for _, h := range d.Holds {
-		fmt.Fprintf(&b, "  %s (%s)\n", h.Question, FormatTimestamp(h.RaisedAt))
+		fromLabel, _ := h.FromStatus.Label()
+		fmt.Fprintf(&b, "  %s から (%s)\n", fromLabel, FormatTimestamp(h.RaisedAt))
+		b.WriteString(indentLines("問い: "+h.Question, "    "))
+		if h.Answer == nil {
+			b.WriteString("    回答: (未回答)\n")
+			continue
+		}
+		answeredBy, answeredAt := "-", "-"
+		if h.AnsweredBy != nil {
+			answeredBy = *h.AnsweredBy
+		}
+		if h.AnsweredAt != nil {
+			answeredAt = FormatTimestamp(*h.AnsweredAt)
+		}
+		b.WriteString(indentLines("回答: "+*h.Answer, "    "))
+		fmt.Fprintf(&b, "    回答者: %s (%s)\n", answeredBy, answeredAt)
 	}
 	fmt.Fprintf(&b, "不可逆操作:    %d 件\n", len(d.Operations))
 	for _, op := range d.Operations {
@@ -267,6 +293,18 @@ func activitiesText(activities []core.Activity) string {
 	for _, a := range activities {
 		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			FormatTimestamp(a.At), a.Actor, a.Channel+"/"+a.Verification, a.EntityID, a.Action, string(a.After))
+	}
+	return b.String()
+}
+
+// indentLines は s の各行の先頭に prefix を付け、各行を改行で終える
+// （複数行の本文・回答を show のテキスト出力で字下げして示すため）。
+func indentLines(s, prefix string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+		b.WriteString(prefix)
+		b.WriteString(line)
+		b.WriteString("\n")
 	}
 	return b.String()
 }

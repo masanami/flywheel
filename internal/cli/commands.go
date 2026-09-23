@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/masanami/flywheel/internal/core"
@@ -63,11 +64,23 @@ func runInit(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return map[string]any{
-		"workspace":  res.Workspace,
-		"store_path": res.StorePath,
-		"created":    res.Created,
+	return textOutput{
+		json: map[string]any{
+			"workspace":  res.Workspace,
+			"store_path": res.StorePath,
+			"created":    res.Created,
+		},
+		text: initText(res),
 	}, nil
+}
+
+// initText は --json 無しの init の表示（show と同じ「項目: 値」の形）。
+func initText(res *core.InitResult) string {
+	created := "いいえ（既存のストアをそのまま使います）"
+	if res.Created {
+		created = "はい"
+	}
+	return fmt.Sprintf("ワークスペース: %s\nストア:         %s\n新規作成:       %s\n", res.Workspace, res.StorePath, created)
 }
 
 // defaultCommands は docs/features/m1-core.md §IF / API の全コマンドを登録する。
