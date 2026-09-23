@@ -100,22 +100,6 @@ func (s *Store) CreateOperation(ctx context.Context, ch Channel, in OperationInp
 			return err
 		}
 
-		newVersion := current.Version + 1
-		cres, err := tx.ExecContext(ctx,
-			`UPDATE challenge SET version = ?, updated_at = ? WHERE id = ? AND version = ?`,
-			newVersion, nowStr, cid, current.Version,
-		)
-		if err != nil {
-			return err
-		}
-		affected, err := cres.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if affected != 1 {
-			return fmt.Errorf("core: op add for challenge %s: expected to bump 1 row, updated %d", in.ChallengeID, affected)
-		}
-
 		after := map[string]any{
 			"operation_id": formatOperationID(opID),
 			"kind":         string(kind),
@@ -124,6 +108,11 @@ func (s *Store) CreateOperation(ctx context.Context, ch Channel, in OperationInp
 			"state":        string(OperationStatePending),
 		}
 		if err := rec.record("operation", opID, "op_add", nil, after); err != nil {
+			return err
+		}
+
+		// 課題の版を1増やし、その変化を課題のエントリ（action=op_add）として残す。
+		if err := bumpChallengeVersionForOperation(ctx, tx, rec, cid, current.Version, opID, "op_add", nowStr); err != nil {
 			return err
 		}
 
@@ -342,20 +331,15 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 		// 不可逆操作の承認・差し戻しでも課題の版を1増やす（親要件チケット #4
 		// §アーキテクチャ決定）。これにより、完了の承認の要約表示後・確認前に
 		// 別プロセスが対象の release を先に承認した場合、その完了の承認の
-		// ExpectedVersion 比較が ErrConflict を検出できる。
-		cres, err := tx.ExecContext(ctx,
-			`UPDATE challenge SET version = ?, updated_at = ? WHERE id = ? AND version = ?`,
-			challenge.Version+1, nowStr, row.ChallengeID, challenge.Version,
-		)
-		if err != nil {
-			return err
+		// ExpectedVersion 比較が ErrConflict を検出できる。action は
+		// entity="challenge" の approve/reject（課題そのものの承認・差し戻し。
+		// approval_kind を持つ）と紛れないよう op_approve／op_reject を使う。
+		challengeAction := "op_reject"
+		if req.Decision == ApprovalDecisionApproved {
+			challengeAction = "op_approve"
 		}
-		caffected, err := cres.RowsAffected()
-		if err != nil {
+		if err := bumpChallengeVersionForOperation(ctx, tx, rec, row.ChallengeID, challenge.Version, oid, challengeAction, nowStr); err != nil {
 			return err
-		}
-		if caffected != 1 {
-			return fmt.Errorf("core: %s operation %s: expected to bump challenge %d version, updated %d rows", req.Decision, req.OperationID, row.ChallengeID, caffected)
 		}
 
 		createdAt, err := parseTimestamp(row.CreatedAt)
@@ -396,6 +380,37 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 	return &opOut, &approvalOut, nil
 }
 
+// bumpChallengeVersionForOperation は、不可逆操作の登録・単独の承認・差し戻しに
+// 伴って課題の版を1増やし（currentVersion を条件にした楽観ロック）、その変化を
+// 同じトランザクションで課題のエントリ（entity="challenge"）として作業ログへ残す
+// （S2〔Issue #39〕）。版の増分とエントリの記録をこの1か所で対にし、片方だけを
+// 書く経路を作らない（エントリが無いと log <C-ID> で課題の版が飛んで見える）。
+// before は null（変わった項目は版だけで、版は before に載せない＝S1）、after は
+// 新しい課題の版と、原因になった不可逆操作への参照（operation_id）を持つ。
+// D12 の一括承認は、完了の承認の遷移が版の増分と記録を行うため、これを呼ばない。
+func bumpChallengeVersionForOperation(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challengeID int64, currentVersion int, opID int64, action string, nowStr string) error {
+	newVersion := currentVersion + 1
+	res, err := tx.ExecContext(ctx,
+		`UPDATE challenge SET version = ?, updated_at = ? WHERE id = ? AND version = ?`,
+		newVersion, nowStr, challengeID, currentVersion,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return fmt.Errorf("core: %s for operation %s: expected to bump challenge %s version, updated %d rows", action, formatOperationID(opID), formatChallengeID(challengeID), affected)
+	}
+	after := map[string]any{
+		"version":      newVersion,
+		"operation_id": formatOperationID(opID),
+	}
+	return rec.record("challenge", challengeID, action, nil, after)
+}
+
 // operationApprovalWrite は approveOperationInTx の入力（不可逆操作 1 件分の
 // 承認・差し戻し）。
 type operationApprovalWrite struct {
@@ -417,7 +432,8 @@ type operationApprovalWrite struct {
 // （approval.go の autoApproveReleases）が共有する唯一の実装である
 // （self-review 指摘: 以前は同じ 3 つの書き込みが 2 箇所に別実装で存在し、
 // 片方だけを直すと経路によって記録の形がずれる状態だった）。課題の版の増分は
-// 呼び出し元が行う（単独の経路は 1 件ごとに +1、D12 は遷移が 1 回だけ +1 する）。
+// 呼び出し元が行う（単独の経路は 1 件ごとに bumpChallengeVersionForOperation で
+// +1 と課題のエントリの記録を対で行い、D12 は遷移が 1 回だけ +1 して記録する）。
 func approveOperationInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, w operationApprovalWrite) (OperationState, error) {
 	newState, ok := operationStateForDecision(w.decision)
 	if !ok {

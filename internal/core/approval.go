@@ -503,6 +503,10 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return fmt.Errorf("core: answer hold %d: expected to update 1 row, updated %d", holdID, affected)
 		}
 
+		// S3（Issue #39）: 未設定（保留の answer が無い）から値が入るので、
+		// before にそのキーを null で載せる（plan の plan_version・classify の
+		// priority・edit の urgency とそろえる）。
+		tc.before["answer"] = nil
 		tc.after["answer"] = req.Answer
 
 		answer := req.Answer

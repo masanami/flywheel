@@ -734,23 +734,27 @@ func TestListActivities_FiltersByChallengeIDIncludesItsOperations(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ListActivities() error = %v", err)
 	}
-	// create(challenge) + op_add(operation) の2件。c2 の operation は含まない。
-	if len(activities) != 2 {
-		t.Fatalf("len(activities) = %d, want 2: %+v", len(activities), activities)
+	// create(challenge) + op_add(operation) + op_add(challenge、S2〔Issue #39〕:
+	// op add は課題の版も上げるため、その課題自身のエントリも残る) の3件。
+	// c2 の operation は含まない。
+	if len(activities) != 3 {
+		t.Fatalf("len(activities) = %d, want 3: %+v", len(activities), activities)
 	}
-	var sawChallengeCreate, sawOperationAdd bool
+	var sawChallengeCreate, sawOperationAdd, sawChallengeOpAdd bool
 	for _, a := range activities {
 		switch {
 		case a.Entity == "challenge" && a.EntityID == c1.ID && a.Action == "create":
 			sawChallengeCreate = true
 		case a.Entity == "operation" && a.EntityID == op1.ID && a.Action == "op_add":
 			sawOperationAdd = true
+		case a.Entity == "challenge" && a.EntityID == c1.ID && a.Action == "op_add":
+			sawChallengeOpAdd = true
 		default:
 			t.Errorf("unexpected activity entry: %+v", a)
 		}
 	}
-	if !sawChallengeCreate || !sawOperationAdd {
-		t.Errorf("activities = %+v, want both a challenge create entry and an operation op_add entry", activities)
+	if !sawChallengeCreate || !sawOperationAdd || !sawChallengeOpAdd {
+		t.Errorf("activities = %+v, want a challenge create entry, an operation op_add entry, and a challenge op_add entry", activities)
 	}
 }
 

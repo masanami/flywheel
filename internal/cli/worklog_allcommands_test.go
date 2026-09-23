@@ -151,7 +151,10 @@ var worklogCases = []worklogCase{
 		},
 		want: func(string) []wantActivity {
 			return []wantActivity{{"challenge", "C-1", "plan",
-				map[string]any{"status": "classified"},
+				// S3（Issue #39）: 未設定（計画が無い）から値が入る初回は、
+				// before にそのキーを null で載せる（classify の priority・edit
+				// の urgency とそろえる）。
+				map[string]any{"status": "classified", "plan_version": nil},
 				map[string]any{"plan_version": 1.0, "status": "awaiting_plan_approval", "version": 3.0}}}
 		},
 	},
@@ -245,7 +248,9 @@ var worklogCases = []worklogCase{
 		},
 		want: func(string) []wantActivity {
 			return []wantActivity{{"challenge", "C-1", "answer",
-				map[string]any{"status": "awaiting_human"},
+				// S3（Issue #39）: 未設定（保留の answer が無い）から値が入る
+				// ので、before にそのキーを null で載せる。
+				map[string]any{"status": "awaiting_human", "answer": nil},
 				map[string]any{"answer": "a", "status": "verifying", "version": 3.0}}}
 		},
 	},
@@ -302,8 +307,14 @@ var worklogCases = []worklogCase{
 			return []string{"op", "add", createForCase(t, ws), "--kind", "release", "--summary", "s", "--ref", "https://example.com/pr/1"}
 		},
 		want: func(string) []wantActivity {
-			return []wantActivity{{"operation", "OP-1", "op_add", nil,
-				map[string]any{"kind": "release", "operation_id": "OP-1", "ref": "https://example.com/pr/1", "state": "pending", "summary": "s"}}}
+			return []wantActivity{
+				{"operation", "OP-1", "op_add", nil,
+					map[string]any{"kind": "release", "operation_id": "OP-1", "ref": "https://example.com/pr/1", "state": "pending", "summary": "s"}},
+				// S2（Issue #39）: op add は課題の版も上げるため、その課題自身の
+				// entity="challenge" のエントリも同じ操作で残る。
+				{"challenge", "C-1", "op_add", nil,
+					map[string]any{"operation_id": "OP-1", "version": 2.0}},
+			}
 		},
 	},
 	{
@@ -312,8 +323,12 @@ var worklogCases = []worklogCase{
 			return []string{"op", "add", createForCase(t, ws), "--kind", "external_send", "--summary", "s"}
 		},
 		want: func(string) []wantActivity {
-			return []wantActivity{{"operation", "OP-1", "op_add", nil,
-				map[string]any{"kind": "external_send", "operation_id": "OP-1", "ref": nil, "state": "pending", "summary": "s"}}}
+			return []wantActivity{
+				{"operation", "OP-1", "op_add", nil,
+					map[string]any{"kind": "external_send", "operation_id": "OP-1", "ref": nil, "state": "pending", "summary": "s"}},
+				{"challenge", "C-1", "op_add", nil,
+					map[string]any{"operation_id": "OP-1", "version": 2.0}},
+			}
 		},
 	},
 	{
@@ -323,9 +338,17 @@ var worklogCases = []worklogCase{
 			return []string{"approve", op["operation"].(map[string]any)["id"].(string)}
 		},
 		want: func(string) []wantActivity {
-			return []wantActivity{{"operation", "OP-1", "approve",
-				map[string]any{"state": "pending"},
-				map[string]any{"state": "approved", "version": 2.0}}}
+			return []wantActivity{
+				{"operation", "OP-1", "approve",
+					map[string]any{"state": "pending"},
+					map[string]any{"state": "approved", "version": 2.0}},
+				// S2（Issue #39）: approve <OP-ID> も課題の版を上げるため、その
+				// 課題自身の entity="challenge" のエントリも同じ操作で残る
+				// （action は entity=operation 側の approve と紛れないよう
+				// op_approve を使う）。
+				{"challenge", "C-1", "op_approve", nil,
+					map[string]any{"operation_id": "OP-1", "version": 3.0}},
+			}
 		},
 	},
 	{
@@ -335,9 +358,13 @@ var worklogCases = []worklogCase{
 			return []string{"reject", op["operation"].(map[string]any)["id"].(string), "--reason", "r"}
 		},
 		want: func(string) []wantActivity {
-			return []wantActivity{{"operation", "OP-1", "reject",
-				map[string]any{"state": "pending"},
-				map[string]any{"reason": "r", "state": "rejected", "version": 2.0}}}
+			return []wantActivity{
+				{"operation", "OP-1", "reject",
+					map[string]any{"state": "pending"},
+					map[string]any{"reason": "r", "state": "rejected", "version": 2.0}},
+				{"challenge", "C-1", "op_reject", nil,
+					map[string]any{"operation_id": "OP-1", "version": 3.0}},
+			}
 		},
 	},
 }
