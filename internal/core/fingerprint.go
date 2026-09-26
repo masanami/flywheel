@@ -38,6 +38,19 @@ func normalizeFingerprintInput(body string) string {
 	return strings.Trim(joined, asciiWhitespaceCutset)
 }
 
+// fingerprintVersionPrefix は既知の版（FingerprintVersion）のプレフィックス
+// （"2:"）。hasKnownFingerprintVersion が使う。
+var fingerprintVersionPrefix = fmt.Sprintf("%d:", FingerprintVersion)
+
+// hasKnownFingerprintVersion は fp（source_binding.fingerprint に記録された
+// "<版>:<値>"）の版が FingerprintVersion と一致するかを判定する
+// （docs/features/m2-github-issue-ingest.md §冪等な作成と更新「記録された
+// fingerprint の版が2以外なら…fail-closed」）。版が違う・区切りが無い・空文字列は
+// いずれも false（更新しない側＝fail-closed に倒す）。
+func hasKnownFingerprintVersion(fp string) bool {
+	return strings.HasPrefix(fp, fingerprintVersionPrefix)
+}
+
 // Fingerprint は Issue の本文（それだけを入力に。タイトル・ラベル・課題に書いた
 // 値は入力にしない）から fingerprint を算出し、"<版>:<12桁小文字hex>" の形で
 // 返す（docs/features/m2-github-issue-ingest.md §fingerprint。現行 ingest-fp.sh

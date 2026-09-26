@@ -148,6 +148,29 @@ func TestFingerprint_TrailingFullWidthSpaceIsSignificant(t *testing.T) {
 	}
 }
 
+// AC-57 の前提: hasKnownFingerprintVersion は記録された fingerprint の版が
+// FingerprintVersion（2）と一致するかを判定する（#57 の fail-closed 分岐が使う）。
+func TestHasKnownFingerprintVersion(t *testing.T) {
+	cases := []struct {
+		name string
+		fp   string
+		want bool
+	}{
+		{"版2", "2:abcdef012345", true},
+		{"版1", "1:abcdef012345", false},
+		{"版なし・区切りが無い", "abcdef012345", false},
+		{"空文字列", "", false},
+		{"版が3", "3:abcdef012345", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := hasKnownFingerprintVersion(c.fp); got != c.want {
+				t.Errorf("hasKnownFingerprintVersion(%q) = %v, want %v", c.fp, got, c.want)
+			}
+		})
+	}
+}
+
 // 決定性: 同じ入力を2回通しても同じ値。
 func TestFingerprint_Deterministic(t *testing.T) {
 	body := "some body\nwith multiple lines\n"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 // --- 取り込み（ingest）の公開 API と結果の型 ---
@@ -13,15 +14,18 @@ import (
 // ロックなし）→③Issue ごとに書き込みトランザクション（BEGIN IMMEDIATE）の中で
 // 最新の状態を読み直して反映する、の順に進む。
 //
-// この骨格は #56（本チケット）が作る。#56 が実装するのは「対応の無い、
-// ポリシーに合う Issue から課題を作る」（ingest_create）だけで、次は後続
-// チケットがこの同じ骨格に足す:
-//   - #57: 冪等な更新（fingerprint の 3 分岐・ingest_update）。ingestOneIssue の
-//     「対応が既にある」分岐と、並行した取り込みに先を越された分岐に足す
-//   - #58: ポリシーの状態の再判定（policy_state_change）は ingestOneIssue の
-//     「対応が既にある」分岐（resolved のときだけ）に、上流の close の確かめ・
-//     食い違い（discrepancies）は Ingest のリポジトリのループの「一覧に現れ
-//     なかった対応」の分岐点に足す
+// この骨格は #56 が作った。#56 が実装したのは「対応の無い、ポリシーに合う
+// Issue から課題を作る」（ingest_create）だけで、#57（本チケット）が
+// ingestOneIssue の「対応が既にある」分岐と、並行した取り込みに先を越された
+// 分岐に、冪等な更新（reconcileBoundIssue。fingerprint の 3 分岐・完了した課題の
+// スキップ・ingest_update）を足した。次は後続チケットがこの同じ骨格に足す:
+//   - #58: open の一覧に現れた Issue についてのポリシーの状態の再判定
+//     （policy_state_change。resolved のときだけ＝AC-33）と reopen
+//     （upstream_state_change）は、reconcileBoundIssue の 1 つの書き込み
+//     トランザクションの中に足す（1 Issue の反映は 1 トランザクション・版は
+//     1 回だけ増やす＝§作業ログと版）。selfAssignees・resolved はそのとき
+//     reconcileBoundIssue へ通す。open の一覧に現れなかった対応の close の
+//     確かめは、Ingest のリポジトリのループの分岐点（下記）に足す
 //
 // --source の指定（宣言のうちどの取り込み元を処理するか。省略時は全件・
 // 空文字列との区別）は #63（core.SelectSources）の責務。Ingest は「選ばれた
@@ -30,8 +34,9 @@ import (
 
 // IngestOutcome は ingest の JSON の要素の `result` の値
 // （docs/features/m2-github-issue-ingest.md §IF / API `ingest` の JSON 出力）。
-// 本チケット（#56）が生成するのは IngestOutcomeCreated・IngestOutcomeFailed
-// だけ。残りは #57（冪等な更新の 3 分岐）・#58（close の確かめ）が生成する。
+// #56 が IngestOutcomeCreated・IngestOutcomeFailed を、#57 が
+// IngestOutcomeUpdated・IngestOutcomeUnchanged・IngestOutcomeSkippedDone・
+// IngestOutcomeFingerprintUnknownVersion を生成する（reconcileBoundIssue）。
 type IngestOutcome string
 
 // IngestOutcome の値（仕様の列挙の順）。
@@ -163,7 +168,7 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				item, excluded, err := s.ingestOneIssue(ctx, actor, ch, src, selfAssignees, resolved, bound[issue.ExternalKey], issue)
+				item, excluded, err := s.ingestOneIssue(ctx, actor, ch, src, selfAssignees, bound[issue.ExternalKey], issue)
 				switch {
 				case err != nil:
 					msg := err.Error()
@@ -177,10 +182,6 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 				case item != nil:
 					rr.Items = append(rr.Items, *item)
 				}
-				// item == nil && !excluded && err == nil: 対応が既にある Issue
-				// （#57/#58 の分岐点。#56 では何もしない）、または並行した別の
-				// ingest が先に対応を作った（下記 ingestOneIssue のコメント）。
-				// どちらも今回の結果には何も足さない。
 			}
 			// #58 の分岐点: 一覧の取得に成功したこのリポジトリで、①で読んだ
 			// 対応のうち open の一覧に現れなかったもの（upstream_state が open・
@@ -195,25 +196,21 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 }
 
 // ingestOneIssue は 1 件の Issue を判定する:
-//   - 対応が既にあれば、何もしない（#57/#58 の分岐点。§取り込みの対象「対応の
-//     ある課題のポリシーの再判定をしない」とも整合する）
+//   - 対応が既にあれば、reconcileBoundIssue で冪等な更新を行う
 //   - 対応が無く、ポリシーに合わなければ excluded=true
 //   - 対応が無く、ポリシーに合えば課題と対応を作り、item を返す
 //
-// 対応の有無（isBound）は①で読んだ値。実際の作成は createChallengeFromIssue
-// が 1 つの書き込みトランザクションの中で読み直してから行う（③）。
-func (s *Store) ingestOneIssue(ctx context.Context, actor string, ch Channel, src SourceEntry, selfAssignees map[string]bool, resolved, isBound bool, issue UpstreamIssue) (item *IngestItemResult, excluded bool, err error) {
+// 対応の有無（isBound）は①で読んだ値。実際の作成・更新は
+// createChallengeFromIssue／reconcileBoundIssue が 1 つの書き込みトランザクション
+// の中で読み直してから行う（③）。
+//
+// self_assignees の解決に失敗した取り込み元でも、対応のある Issue の冪等な更新は
+// 行う【仮定】。AC-33 が除くのはポリシーの再判定（#58）だけで、fingerprint に
+// よる人間記入欄の置き換えには例外が無いため。
+func (s *Store) ingestOneIssue(ctx context.Context, actor string, ch Channel, src SourceEntry, selfAssignees map[string]bool, isBound bool, issue UpstreamIssue) (item *IngestItemResult, excluded bool, err error) {
 	if isBound {
-		if !resolved {
-			// self_assignees を解決できなかった取り込み元では、対応のある課題の
-			// ポリシーの再判定をしない（AC-33。§ポリシーに合わなくなった課題 の
-			// 規則より優先する）。#58 がポリシーの状態の判定を足すのは、この
-			// 分岐の外（resolved のとき）だけにする。
-			return nil, false, nil
-		}
-		// #57（冪等な更新）・#58（close の確かめ・ポリシーの状態）の分岐点。
-		// #56 では何もしない。
-		return nil, false, nil
+		item, err := s.reconcileBoundIssue(ctx, actor, ch, src, issue)
+		return item, false, err
 	}
 
 	if !issueMatchesAssigneePolicy(src.Policy(), selfAssignees, issue.Assignees) {
@@ -223,16 +220,142 @@ func (s *Store) ingestOneIssue(ctx context.Context, actor string, ch Channel, sr
 	created, err := s.createChallengeFromIssue(ctx, actor, ch, src, issue)
 	if err != nil {
 		if errors.Is(err, errSourceBindingExternalKeyTaken) {
-			// ①の後に並行した別の取り込みがこの外部キーの対応を先に作った。
-			// このトランザクションはロールバックされ課題も作られない（重複を
-			// 作らない）。#57 の分岐点: ここは「対応が既にある」分岐と同じ扱い
-			// （③で読み直した対応に対する冪等な更新）へ回す。#56 では対応の
-			// ある Issue に何もしないので、結果にも何も足さない。
-			return nil, false, nil
+			// ①の後に並行した別の取り込みがこの外部キーの対応を先に作った
+			// （AC-60）。このトランザクションはロールバックされ課題も作られない。
+			// 書き込みトランザクションは BEGIN IMMEDIATE で直列化されるので、
+			// 先に作った側は既にコミット済みで、reconcileBoundIssue の③の読み直し
+			// で必ず見える。「対応が既にある」分岐と同じ冪等な更新へ回す。
+			item, err := s.reconcileBoundIssue(ctx, actor, ch, src, issue)
+			return item, false, err
 		}
 		return nil, false, err
 	}
 	return created, false, nil
+}
+
+// reconcileBoundIssue は対応が既にある Issue を、1 つの書き込みトランザクション
+// の中で最新の状態に読み直してから（③）冪等に反映する（§冪等な作成と更新・
+// §作業ログと版）。result の判定の順（仕様から導いたもの）:
+//  1. 課題が完了している: skipped_done（AC-58）。完了と版未知が重なるときは、
+//     終端状態の課題へ書き込みを試みない側に倒して完了を先に見る【仮定】
+//  2. 記録された fingerprint の版が 2 でない: fingerprint_unknown_version
+//     （AC-57。fail-closed）
+//  3. 本文の fingerprint が記録と一致: unchanged（AC-49）
+//  4. 一致しない: updated。タイトル・説明・緊急度・fingerprint を上流の値に
+//     置き換え、ingest_update を記録し、課題の版を 1 増やす。起票者・完了条件・
+//     優先度・状態・計画、承認・保留・不可逆操作は変えない（AC-50〜55・AC-88）
+//
+// 判定（result を決める）と反映（書き込み）を分けてあり、反映は result が
+// updated のときだけ行う。#58（ポリシーの再判定・reopen）や fingerprint 以外の
+// source_binding の属性の反映は、result が unchanged でも起こりうるので、判定の
+// 後・反映の段に契機として足し、複数の契機が起きても版は 1 回だけ増やす
+// （§作業ログと版）。upstream_state・policy_state は今は読み直した値を結果に
+// 載せるだけで変えない。
+func (s *Store) reconcileBoundIssue(ctx context.Context, actor string, ch Channel, src SourceEntry, issue UpstreamIssue) (*IngestItemResult, error) {
+	var item *IngestItemResult
+	err := s.mutateAs(ctx, actor, ch, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
+		// ③最新の状態を読み直す。
+		sb, err := loadSourceBindingByExternalKey(ctx, tx, issue.ExternalKey)
+		if err != nil {
+			return err
+		}
+		if sb == nil {
+			// M2 は対応を削除する操作を持たないので、①の後に対応が消えることは
+			// 無い想定。防御的にこの Issue だけを失敗させる。
+			return fmt.Errorf("core: ingest: no source_binding for external_key %q", issue.ExternalKey)
+		}
+		cid, ok := parseChallengeID(sb.ChallengeID)
+		if !ok {
+			return fmt.Errorf("core: ingest: malformed challenge id %q", sb.ChallengeID)
+		}
+		current, err := loadChallenge(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+
+		newFP := Fingerprint(issue.Body)
+		var outcome IngestOutcome
+		switch {
+		case IsTerminal(Table, StatusVocabulary, current.Status):
+			outcome = IngestOutcomeSkippedDone
+		case !hasKnownFingerprintVersion(sb.Fingerprint):
+			outcome = IngestOutcomeFingerprintUnknownVersion
+		case newFP == sb.Fingerprint:
+			outcome = IngestOutcomeUnchanged
+		default:
+			outcome = IngestOutcomeUpdated
+		}
+
+		if outcome == IngestOutcomeUpdated {
+			if err := applyIngestUpdate(ctx, tx, rec, cid, current, sb.Fingerprint, newFP, issue, computeIngestUrgency(issue.Labels, src.UrgencyLabels)); err != nil {
+				return err
+			}
+		}
+
+		item = &IngestItemResult{
+			ExternalKey:   sb.ExternalKey,
+			ChallengeID:   sb.ChallengeID,
+			Result:        outcome,
+			UpstreamState: string(sb.UpstreamState),
+			PolicyState:   string(sb.PolicyState),
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+// applyIngestUpdate は課題の人間記入欄（タイトル・説明・緊急度）と対応の
+// fingerprint を上流の値に置き換え、ingest_update を記録し、課題の版を 1 増やす。
+// before/after には変わった項目と fingerprint だけを載せ、after にだけ version を
+// 載せる（M1 の H14・H16）。
+func applyIngestUpdate(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64, current *Challenge, oldFP, newFP string, issue UpstreamIssue, urgency *Urgency) error {
+	before := map[string]any{"fingerprint": oldFP}
+	after := map[string]any{"fingerprint": newFP}
+	newTitle := current.Title
+	if issue.Title != current.Title {
+		before["title"] = current.Title
+		after["title"] = issue.Title
+		newTitle = issue.Title
+	}
+	newDescription := current.Description
+	if issue.Body != current.Description {
+		before["description"] = current.Description
+		after["description"] = issue.Body
+		newDescription = issue.Body
+	}
+	newUrgency := current.Urgency
+	if !urgencyEqual(current.Urgency, urgency) {
+		before["urgency"] = nullableUrgency(current.Urgency)
+		after["urgency"] = nullableUrgency(urgency)
+		newUrgency = urgency
+	}
+
+	newVersion := current.Version + 1
+	res, err := tx.ExecContext(ctx,
+		`UPDATE challenge SET title = ?, description = ?, urgency = ?, version = ?, updated_at = ? WHERE id = ? AND version = ?`,
+		newTitle, newDescription, nullableUrgency(newUrgency), newVersion, formatTimestamp(rec.at), cid, current.Version,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return fmt.Errorf("core: ingest: update challenge %s: expected to update 1 row, updated %d", formatChallengeID(cid), affected)
+	}
+
+	fp := newFP
+	if _, _, err := applySourceBindingUpdate(ctx, tx, rec.at, cid, updateSourceBindingInput{Fingerprint: &fp}); err != nil {
+		return err
+	}
+
+	after["version"] = newVersion
+	return rec.record("challenge", cid, "ingest_update", before, after)
 }
 
 // createChallengeFromIssue は 1 つの書き込みトランザクションの中で、対応が
