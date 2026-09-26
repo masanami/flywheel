@@ -658,9 +658,17 @@ func TestIngest_FailureOnOneIssueDoesNotRollBackEarlierIssues(t *testing.T) {
 	}
 }
 
-// 対応が既にある Issue は、ポリシーに合っても合わなくても、課題・対応・作業ログを
-// 変えず、items にも excluded にも数えない（#56 の骨格。更新は #57、ポリシーの
-// 状態は #58）。self_assignees の解決に失敗した場合も同じ（AC-33 の分岐）。
+// 対応が既にある Issue は、ポリシーに合っても合わなくても、新しい課題として
+// 作られず excluded にも数えない。self_assignees の解決に失敗した回でも、
+// #57 の冪等な更新（fingerprint に基づく反映）は通常どおり働く
+// 【self-review 指摘で訂正。旧版はこの回だけ更新も見送っていたが、①の後に
+// 並行した取り込みに先を越された分岐は resolved を見ずに reconcileBoundIssue を
+// 呼んでおり、同じ状況の Issue が経路の違いだけで結果が変わる不整合があった】。
+// fingerprint が記録と一致していれば、resolved の成否によらず unchanged に
+// なる。対応のポリシーの再判定（#58）はまだ無いので、assignee がポリシーに
+// 合わなくなっていても policy_state は変わらないことをここでも確認する
+// （AC-33 と同じ趣旨。ポリシーの再判定だけは resolved のときに限る設計を
+// #58 が引き継ぐ）。
 func TestIngest_BoundIssuesAreNeitherCreatedNorExcluded(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -674,10 +682,18 @@ func TestIngest_BoundIssuesAreNeitherCreatedNorExcluded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newStoreForTest(t)
 			fixedActor(t, "alice")
+			bodies := map[string]string{"o/r#1": "b1", "o/r#2": "b2"}
 			inPolicy := mustCreateChallenge(t, s, "bound, in policy")
 			outOfPolicy := mustCreateChallenge(t, s, "bound, out of policy")
 			for id, key := range map[string]string{inPolicy.ID: "o/r#1", outOfPolicy.ID: "o/r#2"} {
-				if _, err := createSourceBindingForTest(s, id, time.Now(), validBindingInput(key)); err != nil {
+				// fingerprint は実際の上流の本文（bodies）と一致させる:
+				// #57 の冪等な更新は resolved の成否によらず働くため、一致して
+				// いなければ unchanged ではなく updated になってしまい、この
+				// テストの狙い（対応のある Issue は新しい課題にならない・
+				// ポリシーが再判定されない）を確かめられなくなる。
+				in := validBindingInput(key)
+				in.Fingerprint = Fingerprint(bodies[key])
+				if _, err := createSourceBindingForTest(s, id, time.Now(), in); err != nil {
 					t.Fatalf("insertSourceBinding(%s) error = %v", key, err)
 				}
 			}
@@ -688,15 +704,23 @@ func TestIngest_BoundIssuesAreNeitherCreatedNorExcluded(t *testing.T) {
 
 			up := &fakeUpstream{loginErr: tc.loginErr, issues: map[string][]UpstreamIssue{
 				"o/r": {
-					issueFixture("o/r#1", "https://github.com/o/r/issues/1", "t1", "b1", "carol", []string{"masanami"}, nil),
-					issueFixture("o/r#2", "https://github.com/o/r/issues/2", "t2", "b2", "carol", []string{"eve"}, nil),
+					issueFixture("o/r#1", "https://github.com/o/r/issues/1", "t1", bodies["o/r#1"], "carol", []string{"masanami"}, nil),
+					issueFixture("o/r#2", "https://github.com/o/r/issues/2", "t2", bodies["o/r#2"], "carol", []string{"eve"}, nil),
 				},
 			}}
 			res := runIngestForTest(t, s, []SourceEntry{tc.src}, up)
 
 			repo := findRepoResult(res, "s", "o/r")
-			if repo == nil || len(repo.Items) != 0 || repo.Excluded != 0 {
-				t.Fatalf("repo = %+v, want 0 items and excluded=0 (対応のある Issue は新しい Issue ではない)", repo)
+			if repo == nil || repo.Excluded != 0 {
+				t.Fatalf("repo = %+v, want excluded=0 (対応のある Issue は新しい Issue ではない)", repo)
+			}
+			if len(repo.Items) != 2 {
+				t.Fatalf("items = %+v, want 2 items (unchanged)", repo.Items)
+			}
+			for _, item := range repo.Items {
+				if item.Result != IngestOutcomeUnchanged {
+					t.Errorf("item = %+v, want result %q", item, IngestOutcomeUnchanged)
+				}
 			}
 			all, err := s.ListChallenges(context.Background(), ListOptions{})
 			if err != nil || len(all) != 2 {
@@ -704,11 +728,11 @@ func TestIngest_BoundIssuesAreNeitherCreatedNorExcluded(t *testing.T) {
 			}
 			after, err := s.ListActivities(context.Background(), nil)
 			if err != nil || len(after) != len(before) {
-				t.Fatalf("activities = %d, %v, want %d (作業ログを変えない)", len(after), err, len(before))
+				t.Fatalf("activities = %d, %v, want %d (unchanged は作業ログを残さない)", len(after), err, len(before))
 			}
-			for _, key := range []string{"o/r#1", "o/r#2"} {
+			for key, body := range bodies {
 				sb, err := s.getSourceBindingByExternalKey(context.Background(), key)
-				if err != nil || sb == nil || sb.PolicyState != policyStateInPolicy || sb.Fingerprint != "2:abc" {
+				if err != nil || sb == nil || sb.PolicyState != policyStateInPolicy || sb.Fingerprint != Fingerprint(body) {
 					t.Fatalf("source_binding(%s) = %+v, %v, want unchanged", key, sb, err)
 				}
 			}
