@@ -28,6 +28,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   op add <C-ID> --kind <release|delete|external_send|other> --summary <s> [--ref <r>]
   status
   log [<ID>]
+  ingest [--source <id>]
 
 詳細は docs/features/m1-core.md を参照。
 `
