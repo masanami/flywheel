@@ -23,18 +23,18 @@ const (
 	counterHelperIncrements = "FLYWHEEL_STORE_TEST_COUNTER_INCREMENTS"
 	counterMigrationSQL     = "CREATE TABLE test_counter (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL);\n" +
 		"INSERT INTO test_counter (id, value) VALUES (1, 0);"
-	counterMigrationVersion = 2 // テスト専用の架空の追加版（本番のスキーマ版は 1 のまま）。
 )
 
 // counterMigrations は本番マイグレーションに、テスト専用のカウンターテーブルを
-// 足した集合を返す（本番スキーマ・migrations/*.sql は変えない）。
+// 足した集合を返す（本番スキーマ・migrations/*.sql は変えない）。追加版の番号は
+// 本番の最新版の次にする（本番に版を足しても衝突しない）。
 func counterMigrations() ([]Migration, error) {
 	prod, err := Migrations()
 	if err != nil {
 		return nil, err
 	}
 	return append(append([]Migration(nil), prod...), Migration{
-		Version: counterMigrationVersion,
+		Version: latestVersion(prod) + 1,
 		SQL:     counterMigrationSQL,
 	}), nil
 }
