@@ -34,14 +34,34 @@ func runShow(a Args) (any, error) {
 	}
 	return textOutput{
 		json: map[string]any{
-			"challenge":  challengeJSON(detail.Challenge),
-			"plans":      plansJSON(detail.Plans),
-			"approvals":  approvalsJSON(detail.Approvals),
-			"holds":      holdsJSON(detail.Holds),
-			"operations": operationsJSON(detail.Operations),
+			"challenge":      challengeJSON(detail.Challenge),
+			"plans":          plansJSON(detail.Plans),
+			"approvals":      approvalsJSON(detail.Approvals),
+			"holds":          holdsJSON(detail.Holds),
+			"operations":     operationsJSON(detail.Operations),
+			"source_binding": sourceBindingJSON(detail.SourceBinding),
 		},
 		text: challengeDetailText(detail),
 	}, nil
+}
+
+// sourceBindingJSON は core.SourceBinding を「成功時の JSON 出力の規約」の
+// source_binding オブジェクトの形へ変換する（#56。show の最上位）。対応が無い
+// 課題（b が nil）は null を出力する（AC-48・AC-103）。
+func sourceBindingJSON(b *core.SourceBinding) any {
+	if b == nil {
+		return nil
+	}
+	return map[string]any{
+		"source_id":      b.SourceID,
+		"external_key":   b.ExternalKey,
+		"url":            b.URL,
+		"fingerprint":    b.Fingerprint,
+		"upstream_state": b.UpstreamState,
+		"policy_state":   b.PolicyState,
+		"created_at":     FormatTimestamp(b.CreatedAt),
+		"updated_at":     FormatTimestamp(b.UpdatedAt),
+	}
 }
 
 // runList は `flywheel list [--status <状態>]` の実装。
@@ -283,6 +303,16 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	fmt.Fprintf(&b, "不可逆操作:    %d 件\n", len(d.Operations))
 	for _, op := range d.Operations {
 		fmt.Fprintf(&b, "  %s %s %s [%s]\n", op.ID, op.Kind, op.Summary, op.State)
+	}
+	// GitHub Issue との対応（#56）も JSON と同じ項目を出す（m2 仕様 §食い違いの
+	// 表示「show は、対応のある課題について対応の記録…を出力する」）。
+	if sb := d.SourceBinding; sb == nil {
+		b.WriteString("取り込み元:    -\n")
+	} else {
+		fmt.Fprintf(&b, "取り込み元:    %s %s\n", sb.SourceID, sb.ExternalKey)
+		fmt.Fprintf(&b, "  URL: %s\n", sb.URL)
+		fmt.Fprintf(&b, "  上流: %s  ポリシー: %s  fingerprint: %s\n", sb.UpstreamState, sb.PolicyState, sb.Fingerprint)
+		fmt.Fprintf(&b, "  対応の作成: %s  更新: %s\n", FormatTimestamp(sb.CreatedAt), FormatTimestamp(sb.UpdatedAt))
 	}
 	return b.String()
 }

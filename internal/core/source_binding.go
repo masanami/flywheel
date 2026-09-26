@@ -6,8 +6,10 @@
 // last_synced_at は持たない。
 //
 // ここに置くのは #52 の完了条件の「内部 API」（課題 ID での取得・外部キーでの
-// 取得・作成・更新）で、識別子はすべて非公開にしている（公開 API にするかは
-// #56 が決める）。作成・更新は tx を受け取る関数として置き、作業ログを書かない:
+// 取得・作成・更新）で、識別子はすべて非公開にしている。#56 は読み書きの
+// API と内部の型（sourceBinding・upstreamState・policyState）を非公開のまま
+// 残し、show のための読み取り専用の公開の形 SourceBinding だけを足した（書き
+// 込みは core の取り込み〔Ingest〕だけが行う）。作成・更新は tx を受け取る関数として置き、作業ログを書かない:
 // 対応の変化は QP6 に従って、呼び出し側（#56〜#58）が mutate の同じトランザク
 // ションの中で課題の作成・更新・作業ログ・版の +1 と合わせて扱う（QH1 は
 // source_binding を作業ログ・版の対象外にする案 D を退けている）。
@@ -278,4 +280,37 @@ func (s *Store) getSourceBindingByExternalKey(ctx context.Context, externalKey s
 		return nil, err
 	}
 	return result, nil
+}
+
+// SourceBinding は課題の source_binding の公開の形で、GetChallenge が
+// internal/cli の `show` のために返す（#56。docs/features/m2-github-issue-ingest.md
+// §IF / API「`show` の拡張」）。対応の無い課題（`create` で作った課題・スキーマ版 1
+// から上げたストアの既存の課題）は GetChallenge が nil を返す（AC-48・AC-103）。
+type SourceBinding struct {
+	SourceID      string
+	ExternalKey   string
+	URL           string
+	Fingerprint   string
+	UpstreamState string // "open" | "closed" | "missing"
+	PolicyState   string // "in_policy" | "out_of_policy"
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// toPublic は内部の sourceBinding 行を公開の SourceBinding へ変換する。
+// b が nil なら nil を返す（対応が無いことをそのまま伝える）。
+func (b *sourceBinding) toPublic() *SourceBinding {
+	if b == nil {
+		return nil
+	}
+	return &SourceBinding{
+		SourceID:      b.SourceID,
+		ExternalKey:   b.ExternalKey,
+		URL:           b.URL,
+		Fingerprint:   b.Fingerprint,
+		UpstreamState: string(b.UpstreamState),
+		PolicyState:   string(b.PolicyState),
+		CreatedAt:     b.CreatedAt,
+		UpdatedAt:     b.UpdatedAt,
+	}
 }

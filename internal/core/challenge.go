@@ -93,13 +93,18 @@ type IrreversibleOperation struct {
 }
 
 // ChallengeDetail は show が返す課題の全体像（人間記入欄・状態に加え、計画の
-// 全版・承認と差し戻しの記録・保留の記録・不可逆操作）。
+// 全版・承認と差し戻しの記録・保留の記録・不可逆操作・GitHub Issue との対応）。
 type ChallengeDetail struct {
 	Challenge
 	Plans      []Plan
 	Approvals  []Approval
 	Holds      []Hold
 	Operations []IrreversibleOperation
+	// SourceBinding は課題と上流の GitHub Issue の対応（#56。
+	// docs/features/m2-github-issue-ingest.md §IF / API「`show` の拡張」）。
+	// 対応が無ければ nil（`create` で作った課題・スキーマ版 1 から上げたストアの
+	// 既存の課題。AC-48・AC-103）。
+	SourceBinding *SourceBinding
 }
 
 // CreateInput は CreateChallenge の入力。
@@ -394,6 +399,47 @@ func nullablePriority(p *Priority) any {
 	return string(*p)
 }
 
+// insertChallengeRow は課題を状態 未分類・版 1 で 1 行 INSERT し、割り当てられた
+// id と、実際に永続化されたタイムスタンプ（formatTimestamp → parseTimestamp を
+// 往復させ常にミリ秒精度に丸めたもの。以後 GetChallenge 等でストアから再読込した
+// 値と time.Time.Equal で一致させるため）を返す。CreateChallenge（起票者=actor）と
+// Ingest の課題作成（起票者=Issue の作成者の login。#56）が共有する。
+func insertChallengeRow(ctx context.Context, tx *sql.Tx, at time.Time, title, description, doneCriteria string, urgency *Urgency, reporter string) (id int64, now time.Time, err error) {
+	nowStr := formatTimestamp(at)
+	now, err = parseTimestamp(nowStr)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO challenge (title, description, done_criteria, urgency, status, version, reporter, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+		title, description, doneCriteria, nullableUrgency(urgency), string(StatusUnclassified), reporter, nowStr, nowStr,
+	)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	id, err = res.LastInsertId()
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	return id, now, nil
+}
+
+// createdChallengeAfter は課題を作ったときの作業ログの after（人間記入欄＋
+// 状態 未分類＋起票者の 6 キー。M1 の create の after と同じ形で version は
+// 載せない）を組み立てる。CreateChallenge の create と Ingest の ingest_create
+// が共有する作成専用の形で、更新（edit・ingest_update）の after には使わない。
+func createdChallengeAfter(title, description, doneCriteria string, urgency *Urgency, reporter string) map[string]any {
+	return map[string]any{
+		"title":         title,
+		"description":   description,
+		"done_criteria": doneCriteria,
+		"urgency":       nullableUrgency(urgency),
+		"status":        string(StatusUnclassified),
+		"reporter":      reporter,
+	}
+}
+
 // CreateChallenge は課題を状態 unclassified で作る（T1）。タイトルは
 // strings.TrimSpace が空なら ErrValidation（値はそのまま保存し正規化しない）。
 // 緊急度は指定時のみ閉集合を検査する。起票者（reporter）は actor と同じ値。
@@ -413,36 +459,12 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 
 	var result *Challenge
 	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
-		// rec.at をそのまま返却用の CreatedAt/UpdatedAt に使うと、以後 GetChallenge
-		// 等でストアから再読込した値（parseTimestamp によりミリ秒精度に丸められる）と
-		// 精度が食い違い、time.Time.Equal での比較が一致しなくなる。保存する文字列を
-		// 一度 formatTimestamp → parseTimestamp と往復させ、常にミリ秒精度に揃える。
-		nowStr := formatTimestamp(rec.at)
-		now, err := parseTimestamp(nowStr)
-		if err != nil {
-			return err
-		}
-		res, err := tx.ExecContext(ctx,
-			`INSERT INTO challenge (title, description, done_criteria, urgency, status, version, reporter, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-			in.Title, in.Description, in.DoneCriteria, nullableUrgency(urgency), string(StatusUnclassified), rec.actor, nowStr, nowStr,
-		)
-		if err != nil {
-			return err
-		}
-		id, err := res.LastInsertId()
+		id, now, err := insertChallengeRow(ctx, tx, rec.at, in.Title, in.Description, in.DoneCriteria, urgency, rec.actor)
 		if err != nil {
 			return err
 		}
 
-		after := map[string]any{
-			"title":         in.Title,
-			"description":   in.Description,
-			"done_criteria": in.DoneCriteria,
-			"urgency":       nullableUrgency(urgency),
-			"status":        string(StatusUnclassified),
-			"reporter":      rec.actor,
-		}
+		after := createdChallengeAfter(in.Title, in.Description, in.DoneCriteria, urgency, rec.actor)
 		if err := rec.record("challenge", id, "create", nil, after); err != nil {
 			return err
 		}
@@ -468,7 +490,7 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 }
 
 // GetChallenge は課題の全体像（人間記入欄・状態・計画の全版・承認と差し戻しの
-// 記録・保留の記録・不可逆操作）を返す。id の形式が不正、または存在しなければ
+// 記録・保留の記録・不可逆操作・GitHub Issue との対応）を返す。id の形式が不正、または存在しなければ
 // ErrNotFound。
 func (s *Store) GetChallenge(ctx context.Context, id string) (*ChallengeDetail, error) {
 	cid, ok := parseChallengeID(id)
@@ -507,6 +529,12 @@ func (s *Store) GetChallenge(ctx context.Context, id string) (*ChallengeDetail, 
 			return err
 		}
 		detail.Operations = operations
+
+		sb, err := loadSourceBindingByChallengeID(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		detail.SourceBinding = sb.toPublic()
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
