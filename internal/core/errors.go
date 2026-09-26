@@ -69,4 +69,14 @@ var (
 	// 成立したら、表示時点の対象の版を条件にして…版が変わっていれば
 	// conflict」）。承認の記録・遷移・作業ログはいずれも残らない。
 	ErrConflict = errors.New("core: the challenge changed after the approval summary was shown")
+
+	// ErrConfigNotFound は取り込み元の宣言ファイル（.flywheel/sources.json）が
+	// 見つからないことを表す（docs/features/m2-github-issue-ingest.md §宣言
+	// 「宣言ファイルが無ければ、何も取得・変更せずに config_not_found で終わる」）。
+	ErrConfigNotFound = errors.New("core: sources declaration file not found")
+
+	// ErrConfigInvalid は取り込み元の宣言が規則に反することを表す（未知のキー・
+	// 型違い・解釈できない JSON を含む。fail-closed。
+	// docs/features/m2-github-issue-ingest.md §宣言）。
+	ErrConfigInvalid = errors.New("core: sources declaration is invalid")
 )
