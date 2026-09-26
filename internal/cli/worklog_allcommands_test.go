@@ -46,6 +46,10 @@ var worklogReadOnlyCommands = map[string]bool{
 	"list":   true,
 	"status": true,
 	"log":    true,
+	// ingest（#54）は宣言の読み込みと --source の絞り込みだけを行い、取り込みの
+	// 本体（作業ログを残す ingest_create 等）は #59 で結線するため、現時点では
+	// 変更系ではない。
+	"ingest": true,
 }
 
 // wantActivity は作業ログの 1 エントリの期待値。before・after が nil なら

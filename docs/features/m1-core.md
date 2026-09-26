@@ -164,6 +164,8 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `tty_required` | 1 | 本人確認つきの操作を端末なしで実行した |
 | `confirmation_mismatch` | 1 | 確認の入力が一致しない、または入力が中断された |
 | `verification_rejected` | 1 | 許可していない経路と本人確認の方式の組み合わせ（core の API へ直接要求された場合） |
+| `config_not_found` | 2 | 取り込み元の宣言ファイル（`.flywheel/sources.json`）が無い（#54。docs/features/m2-github-issue-ingest.md §エラーコードの追加） |
+| `config_invalid` | 2 | 取り込み元の宣言が規則に反する（解釈できない JSON を含む。#54。同上） |
 
 #### 成功時の JSON 出力の規約【決定 2026-09-21 #5（実装チケットの意思決定者）】
 
@@ -279,6 +281,10 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `approved.operations` | array | 承認済みの不可逆操作（`state=approved`）。要素は `show` の `operations` の要素と同じ形 |
 
 完了（`done`）の課題と差し戻し済み（`state=rejected`）の不可逆操作はどの一覧にも含めない。各一覧は `id` 昇順。
+
+##### `ingest`（#54 で追加）
+
+`{"sources": [...]}`。取り込みの本体（取得・作成・更新。docs/features/m2-github-issue-ingest.md §IF / API「`ingest` の JSON 出力」）は #59 で結線する。それまでの間、`ingest` は宣言（`.flywheel/sources.json`）の読み込みと検証・`--source` の対象の絞り込みだけを行い、成功時は常に空の結果 `{"sources": []}` を返す【#54 の仮定】。`sources` の要素の形（`id`・`self_assignees_resolved`・`repos` 以下）は #59 が実装するときにこの節へ追記する。
 
 ## 非機能要件
 
@@ -415,6 +421,7 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel approve <OP-ID>` / `flywheel reject <OP-ID> --reason <r>` | 不可逆操作の単独の承認・差し戻し | 要 |
 | `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作 | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |
+| `flywheel ingest [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）。取り込みの本体（取得・作成・更新）は #59 で結線する | — |
 
 共通フラグ: `--workspace <dir>`・`--json`。
 

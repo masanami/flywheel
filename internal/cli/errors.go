@@ -40,6 +40,12 @@ const (
 	CodeTTYRequired          ErrorCode = "tty_required"
 	CodeConfirmationMismatch ErrorCode = "confirmation_mismatch"
 	CodeVerificationRejected ErrorCode = "verification_rejected"
+	// CodeConfigNotFound と CodeConfigInvalid は #54 で追加（取り込み元の宣言
+	// ファイル .flywheel/sources.json。docs/features/m2-github-issue-ingest.md
+	// §エラーコードの追加）。upstream_unavailable は #59 で追加する（取得の結線と
+	// 同じチケットで、実際に返しうる箇所ができてから足す）。
+	CodeConfigNotFound ErrorCode = "config_not_found"
+	CodeConfigInvalid  ErrorCode = "config_invalid"
 )
 
 // codeExit は 1 つのエラーコードと、それに対応する終了コード（0/1/2 のみ）の組。
@@ -65,6 +71,8 @@ var errorCodeTable = []codeExit{
 	{CodeTTYRequired, 1},
 	{CodeConfirmationMismatch, 1},
 	{CodeVerificationRejected, 1},
+	{CodeConfigNotFound, 2},
+	{CodeConfigInvalid, 2},
 }
 
 // ExitCodeFor は既知の ErrorCode に対応する終了コードを返す。
@@ -128,6 +136,10 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeConfirmationMismatch, err.Error())
 	case errors.Is(err, core.ErrVerificationRejected):
 		return NewError(CodeVerificationRejected, err.Error())
+	case errors.Is(err, core.ErrConfigNotFound):
+		return NewError(CodeConfigNotFound, err.Error())
+	case errors.Is(err, core.ErrConfigInvalid):
+		return NewError(CodeConfigInvalid, err.Error())
 	default:
 		return NewError(CodeInternalError, err.Error())
 	}

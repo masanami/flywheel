@@ -117,6 +117,16 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	"log": {setup: func(t *testing.T, ws string) []string {
 		return []string{"log", createForCase(t, ws)}
 	}},
+	"ingest": {setup: func(t *testing.T, ws string) []string {
+		writeSourcesDeclaration(t, ws, validSourcesDeclaration)
+		// self-review 指摘: 取り込みの本体（#59）が結線された後にこの横断テストが
+		// 偽の gh を置き忘れていると、本物の gh・GitHub を呼んでしまう
+		// （m2-github-issue-ingest.md「go test ./... は本物の gh と GitHub を
+		// 呼ばない」）。今は ingest が gh を呼ばないため無害だが、先回りして
+		// 置いておく（戻り値の calls は、この横断テストの枠組みでは使わない）。
+		withFakeGHOnPATH(t)
+		return []string{"ingest"}
+	}},
 }
 
 // registeredCommands は登録表の全コマンドを、Path をスペースで結合した名前で返す。

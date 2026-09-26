@@ -29,6 +29,8 @@ func TestExitCodeFor_KnownCodes(t *testing.T) {
 		{CodeTTYRequired, 1},
 		{CodeConfirmationMismatch, 1},
 		{CodeVerificationRejected, 1},
+		{CodeConfigNotFound, 2},
+		{CodeConfigInvalid, 2},
 	}
 	for _, c := range cases {
 		if got := ExitCodeFor(c.code); got != c.want {
@@ -65,6 +67,31 @@ func TestMapCoreErr_VerificationErrors(t *testing.T) {
 			}
 			if ExitCodeFor(got.Code) != 1 {
 				t.Fatalf("ExitCodeFor(%q) = %d, want 1", got.Code, ExitCodeFor(got.Code))
+			}
+		})
+	}
+}
+
+// TestMapCoreErr_ConfigErrors は #54 で足した core.ErrConfigNotFound・
+// core.ErrConfigInvalid が正しい ErrorCode（終了コード 2）へ写像されることを
+// 検証する（AC-1・AC-2）。
+func TestMapCoreErr_ConfigErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want ErrorCode
+	}{
+		{"config not found", core.ErrConfigNotFound, CodeConfigNotFound},
+		{"config invalid", core.ErrConfigInvalid, CodeConfigInvalid},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := mapCoreErr(c.err)
+			if got.Code != c.want {
+				t.Fatalf("mapCoreErr(%v).Code = %q, want %q", c.err, got.Code, c.want)
+			}
+			if ExitCodeFor(got.Code) != 2 {
+				t.Fatalf("ExitCodeFor(%q) = %d, want 2", got.Code, ExitCodeFor(got.Code))
 			}
 		})
 	}

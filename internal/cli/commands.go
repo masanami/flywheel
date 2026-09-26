@@ -229,5 +229,14 @@ func defaultCommands() []Command {
 			MaxPositional: 1,
 			Run:           runLog,
 		},
+		{
+			// Issue #54: 宣言の読み込み・--source の絞り込み・config_*/store_too_new
+			// の写像だけを行う（取り込みの本体は #59）。--dry-run は S2 のため
+			// ここでは足さない。
+			Path:          []string{"ingest"},
+			RequiresStore: true,
+			Flags:         []flagDef{{Name: "source", HasValue: true}},
+			Run:           runIngest,
+		},
 	}
 }
