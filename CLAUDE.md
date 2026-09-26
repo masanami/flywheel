@@ -17,23 +17,26 @@
 - ワークフローの実行（`gh workflow`）は `.claude/settings.json` の ask のまま。緩めない。
 
 ### モジュール構成の規約
-モジュールは 1 つ（`github.com/masanami/flywheel`）。M1 で置くパッケージは次の 4 つだけ（`internal/core` とその配下は、これから置く構成の意図）。
+モジュールは 1 つ（`github.com/masanami/flywheel`）。M1・M2 で置くパッケージは次のものだけ（`internal/core` とその配下は、これから置く構成の意図）。
 
 | パッケージ | 責務 |
 |---|---|
 | `cmd/flywheel` | バイナリの入口。引数を解釈して `internal/cli` を呼ぶだけ |
 | `internal/core` | 状態機械・承認・作業ログ・課題と不可逆操作の操作。**公開 API はここだけ** |
 | `internal/core/internal/store` | SQLite の接続・PRAGMA・スキーマ・マイグレーション |
+| `internal/core/coretest` | core のテスト支援専用（実ストアのフィクスチャ生成等）。`*_test.go` からだけ import し、本番バイナリの依存に含めない（`internal/cli/depcheck_test.go` が検査） |
 | `internal/cli` | コマンドの定義・JSON／テキスト出力・終了コードとエラーコードの写像・端末での本人確認 |
+| `internal/adapters/github` | `gh` の起動と応答の正規化（GitHub Issue の取得）。core の取得 IF（`internal/core/upstream.go`）だけに依存し、取り込みの規則は持たない。ストアを import しない |
 
 - **CLI は core の公開 API だけを呼ぶ**。遷移の可否・承認の成立条件・作業ログの記録を `internal/cli` に書かない。
+- **adapter の import の向き**: `internal/cli` が `internal/adapters/github` を import してよいのは、adapter を組み立てて core へ渡すこと（`New`）と、`gh` の不在（`ErrGHNotFound`）を `upstream_unavailable` に写すことだけ。`internal/core` は `internal/adapters` を import しない。
 - **ストアを開くのは core だけ**。ストアのパッケージを import できるのは `internal/core` の配下だけ（Go の internal 規則で強制し、`go list` の依存関係でも検査する）。
 - **本番の依存の上限**: 標準ライブラリ・`modernc.org/sqlite`・`golang.org/x/term` に限る（引数の解析も標準ライブラリ）。テスト専用の依存（疑似端末のライブラリなど）は可。
 - **動作環境は macOS と Linux**（Windows は対象外）。受入基準は両方で成り立たせる。OS 依存でテストをスキップせざるを得ないときは、その事実と理由を PR の説明に書く。
 - `Makefile` は macOS の GNU Make 3.81 でも動く書き方を保つ（bash 拡張構文・GNU Make 4 以降専用の機能を使わない）。
 
 ### 新規ファイルの置き場
-- 状態・遷移・承認の規則は `internal/core`、SQL とマイグレーションは `internal/core/internal/store`、表示と引数は `internal/cli`。上の 4 パッケージ以外を新設しない（M1 の範囲）。
+- 状態・遷移・承認の規則は `internal/core`、SQL とマイグレーションは `internal/core/internal/store`、表示と引数は `internal/cli`、GitHub からの取得は `internal/adapters/github`。上の表のパッケージ以外を新設しない（M1・M2 の範囲）。
 
 ## テスト方針
 
