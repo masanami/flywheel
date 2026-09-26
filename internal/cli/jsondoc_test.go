@@ -139,7 +139,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 		}
 	}
 	flush()
-	for _, e := range []string{"challenge", "plan", "approval", "hold", "operation", "activity"} {
+	for _, e := range []string{"challenge", "plan", "approval", "hold", "operation", "activity", "source_binding"} {
 		if len(doc.entity[e]) == 0 {
 			t.Fatalf("documented shape of %q not found in the JSON output section", e)
 		}
@@ -172,7 +172,8 @@ var jsonEntityOf = map[string]string{
 	"approval": "approval", "approvals": "approval",
 	"hold": "hold", "holds": "hold",
 	"operation": "operation", "operations": "operation",
-	"activities": "activity",
+	"activities":     "activity",
+	"source_binding": "source_binding",
 }
 
 // assertDocumentedEntities は出力の中の要素（オブジェクトと配列の要素）の

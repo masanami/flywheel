@@ -210,7 +210,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 
 ##### `show`
 
-`{"challenge": {…}, "plans": [...], "approvals": [...], "holds": [...], "operations": [...]}`。`challenge` は上表と同じ形。
+`{"challenge": {…}, "plans": [...], "approvals": [...], "holds": [...], "operations": [...], "source_binding": {…}}`。`challenge` は上表と同じ形。`source_binding` は下表と同じ形（一覧ではなく単一のオブジェクト。対応の無い課題は `null`。#56 で追加）。
 
 | 一覧 | 要素の形 |
 |---|---|
@@ -218,8 +218,9 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `approvals` | `{"kind", "decision", "operation_id", "target_version", "actor", "channel", "verification", "reason", "decided_at"}`（`operation_id`・`reason` は `null` 可） |
 | `holds` | `{"question", "from_status", "from_status_label", "raised_at", "answer", "answered_at", "answered_by"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`） |
 | `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
+| `source_binding` | `{"source_id", "external_key", "url", "fingerprint", "upstream_state", "policy_state", "created_at", "updated_at"}`（対応の無い課題では `source_binding` 自体が `null`） |
 
-#9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。#12 で `approvals` への書き込みと `holds` の `answer`・`answered_at`・`answered_by` の記録が入った。#13 で `operations` への書き込み（`op add`）と、完了の承認による `release` の一括承認（D12）が入った）。
+#9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。#12 で `approvals` への書き込みと `holds` の `answer`・`answered_at`・`answered_by` の記録が入った。#13 で `operations` への書き込み（`op add`）と、完了の承認による `release` の一括承認（D12）が入った）。`source_binding` は #56（M2）が GitHub Issue から取り込んだ課題に対して作る（`create` で作った課題・スキーマ版 1 から上げたストアの既存の課題は `null`）。
 
 ##### `list`
 

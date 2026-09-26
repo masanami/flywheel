@@ -71,6 +71,26 @@ func InsertChallenge(t *testing.T, workspace, title string) {
 	}
 }
 
+// InsertSourceBinding はテスト専用のフィクスチャとして source_binding を 1 件
+// 挿入する（#56。internal/cli の show のテストが、まだ結線されていない
+// `ingest` コマンド〔#59〕を経由せず、GitHub Issue から取り込まれた課題の形を
+// 作るために使う）。challengeID は内部整数 ID（"C-1" なら 1）。
+func InsertSourceBinding(t *testing.T, workspace string, challengeID int, sourceID, externalKey, url, fingerprint, upstreamState, policyState, at string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO source_binding (challenge_id, source_id, external_key, url, fingerprint, upstream_state, policy_state, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			challengeID, sourceID, externalKey, url, fingerprint, upstreamState, policyState, at, at,
+		)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertSourceBinding(challenge_id=%d): %v", challengeID, err)
+	}
+}
+
 // SetChallengeStatus は id（内部整数 ID。"C-1" なら 1）の課題の status を直接
 // 書き換える。internal/cli のテストが、状態遷移コマンド（#10 で実装）を経由せず
 // 完了（done）状態の課題を用意して edit の terminal_state を検証するために使う。
