@@ -112,6 +112,9 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	}},
 	"status": {setup: func(t *testing.T, ws string) []string {
 		createForCase(t, ws)
+		// needs_human.discrepancies の要素の形も文書と照合されるよう、食い違いの
+		// ある課題を 1 件置く（空配列だと要素の照合が 0 件で終わる）。
+		bindSourceForDiscrepancyCase(t, ws, createForCase(t, ws), "o/r#1", "closed", "out_of_policy")
 		return []string{"status"}
 	}},
 	"log": {setup: func(t *testing.T, ws string) []string {

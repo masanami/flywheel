@@ -42,6 +42,44 @@ type Overview struct {
 	ActionableChallenges []Challenge
 	// ApprovedOperations は承認済み（approved）の不可逆操作（id 昇順）。
 	ApprovedOperations []IrreversibleOperation
+	// Discrepancies は食い違いのある課題（id 昇順。docs/features/
+	// m2-github-issue-ingest.md §食い違いの表示）。#58 は
+	// DiscrepancyKindUpstreamClosed・DiscrepancyKindUpstreamMissing・
+	// DiscrepancyKindOutOfPolicy の 3 種類だけを導く（upstream_commented・
+	// upstream_updated は #65 系のチケットが discrepancyKinds を拡張して足す）。
+	Discrepancies []Discrepancy
+}
+
+// DiscrepancyKind は Discrepancy.Kinds の値（docs/features/
+// m2-github-issue-ingest.md §食い違いの表示・§IF / API「`status` と `show` の
+// 拡張」の閉集合の部分集合。列挙の順で並べる）。
+type DiscrepancyKind string
+
+// DiscrepancyKind の値（#58 が導く 3 種類だけ。仕様の閉集合の順）。
+const (
+	DiscrepancyKindUpstreamClosed  DiscrepancyKind = "upstream_closed"
+	DiscrepancyKindUpstreamMissing DiscrepancyKind = "upstream_missing"
+	DiscrepancyKindOutOfPolicy     DiscrepancyKind = "out_of_policy"
+)
+
+// discrepancyKindValues は DiscrepancyKind の閉集合（#58 が導く分だけ。仕様の
+// 列挙の順）。
+var discrepancyKindValues = []DiscrepancyKind{
+	DiscrepancyKindUpstreamClosed,
+	DiscrepancyKindUpstreamMissing,
+	DiscrepancyKindOutOfPolicy,
+}
+
+// DiscrepancyKindValues は DiscrepancyKind の閉集合の写しを返す（CLI のテストが
+// 仕様の列挙と双方向に照合するため。IngestOutcomeValues と同じ形）。
+func DiscrepancyKindValues() []DiscrepancyKind {
+	return append([]DiscrepancyKind(nil), discrepancyKindValues...)
+}
+
+// Discrepancy は食い違いのある課題 1 件（challenge_id・その種類）。
+type Discrepancy struct {
+	ChallengeID string
+	Kinds       []DiscrepancyKind
 }
 
 // listChallengesInStatuses は statuses のいずれかに一致する課題を id 昇順で返す
@@ -94,6 +132,60 @@ func listOperationsInState(ctx context.Context, tx *sql.Tx, state OperationState
 	return result, rows.Err()
 }
 
+// discrepancyKinds は、対応 1 件の上流の状態・ポリシーの状態から食い違いの
+// 種類を導く（§食い違いの表示「食い違いは記録から導き、別に保存しない」）。
+// この関数だけに閉じておくことで、#65 系のチケットが未読の更新
+// （upstream_commented・upstream_updated）を足すときにここへ追記できる
+// （複数箇所に判定ロジックが散らばらない）。
+func discrepancyKinds(upstream upstreamState, policy policyState) []DiscrepancyKind {
+	var kinds []DiscrepancyKind
+	if upstream == upstreamStateClosed {
+		kinds = append(kinds, DiscrepancyKindUpstreamClosed)
+	}
+	if upstream == upstreamStateMissing {
+		kinds = append(kinds, DiscrepancyKindUpstreamMissing)
+	}
+	if policy == policyStateOutOfPolicy {
+		kinds = append(kinds, DiscrepancyKindOutOfPolicy)
+	}
+	return kinds
+}
+
+// listDiscrepancies は完了していない課題のうち、対応がある（source_binding を
+// 持つ）ものを challenge.id 昇順に読み、discrepancyKinds が非空を返すものだけを
+// Discrepancy として返す（§食い違いの表示）。対応の無い課題（`create` で作った
+// 課題）は source_binding が無いので対象にならない。
+func listDiscrepancies(ctx context.Context, tx *sql.Tx) ([]Discrepancy, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT c.id, c.status, sb.upstream_state, sb.policy_state
+		FROM source_binding sb
+		JOIN challenge c ON c.id = sb.challenge_id
+		ORDER BY c.id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make([]Discrepancy, 0)
+	for rows.Next() {
+		var id int64
+		var status, upstream, policy string
+		if err := rows.Scan(&id, &status, &upstream, &policy); err != nil {
+			return nil, err
+		}
+		if IsTerminal(Table, StatusVocabulary, Status(status)) {
+			continue
+		}
+		kinds := discrepancyKinds(upstreamState(upstream), policyState(policy))
+		if len(kinds) == 0 {
+			continue
+		}
+		result = append(result, Discrepancy{ChallengeID: formatChallengeID(id), Kinds: kinds})
+	}
+	return result, rows.Err()
+}
+
 // GetOverview は `flywheel status` の本体。課題を「人間の操作を待っているもの」
 // （計画承認待ち・完了確認待ち・人間対応待ち）と「システムが次に進められるもの」
 // （未分類・分類済・着手中・検証中）に、不可逆操作を「未承認（pending）」と
@@ -128,6 +220,12 @@ func (s *Store) GetOverview(ctx context.Context) (*Overview, error) {
 			return err
 		}
 		result.ApprovedOperations = approvedOps
+
+		discrepancies, err := listDiscrepancies(ctx, tx)
+		if err != nil {
+			return err
+		}
+		result.Discrepancies = discrepancies
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {

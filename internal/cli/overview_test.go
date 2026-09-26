@@ -28,7 +28,7 @@ func TestRunStatus_EmptyWorkspaceReturnsThreeBucketsWithEmptyArrays(t *testing.T
 			t.Errorf("status[%q] = %v, want empty", path, ids)
 		}
 	}
-	for bucket, want := range map[string]int{"needs_human": 2, "actionable": 1, "approved": 1} {
+	for bucket, want := range map[string]int{"needs_human": 3, "actionable": 1, "approved": 1} {
 		if m := doc[bucket].(map[string]any); len(m) != want {
 			t.Errorf("status[%q] has %d keys, want %d: %+v", bucket, len(m), want, m)
 		}

@@ -270,18 +270,23 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 
 `{"operation": {…}}`。`operation` は `show` の `operations` の要素と同じ形（`state` は常に `"pending"`・`version` は常に `1`）。
 
-##### `status`（#14 で追加）
+##### `status`（#14 で追加。`discrepancies` は #58 で追加）
 
-`{"needs_human": {"challenges": [...], "operations": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題と不可逆操作の 2 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
+`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
 
 | フィールド | 型 | 内容 |
 |---|---|---|
 | `needs_human.challenges` | array | 人間の操作を待っているもの: 計画承認待ち・完了確認待ち・人間対応待ちの課題。要素は `challenge`（上表と同じ形） |
 | `needs_human.operations` | array | 人間の操作を待っているもの: 未承認（`state=pending`）の不可逆操作。要素は `show` の `operations` の要素と同じ形 |
+| `needs_human.discrepancies` | array | 完了していない課題のうち、上流の close・消失（`upstream_state` が `closed`／`missing`）、または取り込み元のポリシーに合わなくなった（`policy_state` が `out_of_policy`）もの（docs/features/m2-github-issue-ingest.md §食い違いの表示）。要素は下表と同じ形。`challenge_id` 昇順。食い違いの無いワークスペースでは `[]` |
 | `actionable.challenges` | array | システムが次に進められるもの: 未分類・分類済・着手中・検証中の課題。要素は `challenge`（上表と同じ形） |
 | `approved.operations` | array | 承認済みの不可逆操作（`state=approved`）。要素は `show` の `operations` の要素と同じ形 |
 
-完了（`done`）の課題と差し戻し済み（`state=rejected`）の不可逆操作はどの一覧にも含めない。各一覧は `id` 昇順。
+| 一覧 | 要素の形 |
+|---|---|
+| `discrepancy`（`needs_human.discrepancies` の要素。1 列目は照合テストが読む要素の名前） | `{"challenge_id", "kinds"}`（`kinds` は `upstream_closed`・`upstream_missing`・`out_of_policy` の空でない部分集合。この列挙の順。#58 が導くのはこの3種類まで） |
+
+完了（`done`）の課題と差し戻し済み（`state=rejected`）の不可逆操作はどの一覧にも含めない。各一覧は `id` 昇順（`discrepancies` は `challenge_id` の昇順）。
 
 ##### `ingest`（#54 で追加）
 
