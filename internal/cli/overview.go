@@ -23,8 +23,9 @@ func runStatus(a Args) (any, error) {
 	return textOutput{
 		json: map[string]any{
 			"needs_human": map[string]any{
-				"challenges": challengesJSON(ov.NeedsHumanChallenges),
-				"operations": operationsJSON(ov.NeedsHumanOperations),
+				"challenges":    challengesJSON(ov.NeedsHumanChallenges),
+				"operations":    operationsJSON(ov.NeedsHumanOperations),
+				"discrepancies": discrepanciesJSON(ov.Discrepancies),
 			},
 			"actionable": map[string]any{
 				"challenges": challengesJSON(ov.ActionableChallenges),
@@ -35,6 +36,20 @@ func runStatus(a Args) (any, error) {
 		},
 		text: overviewText(ov),
 	}, nil
+}
+
+// discrepanciesJSON は食い違いの一覧を「成功時の JSON 出力の規約」の形
+// （`{"challenge_id", "kinds"}`。§食い違いの表示）へ変換する。
+func discrepanciesJSON(discrepancies []core.Discrepancy) []map[string]any {
+	out := make([]map[string]any, 0, len(discrepancies))
+	for _, d := range discrepancies {
+		kinds := make([]string, 0, len(d.Kinds))
+		for _, k := range d.Kinds {
+			kinds = append(kinds, string(k))
+		}
+		out = append(out, map[string]any{"challenge_id": d.ChallengeID, "kinds": kinds})
+	}
+	return out
 }
 
 // challengesJSON は課題の一覧を「成功時の JSON 出力の規約」の課題の形へ変換する
@@ -49,10 +64,12 @@ func challengesJSON(challenges []core.Challenge) []map[string]any {
 }
 
 // overviewText は --json 無しの status の表示。3区分を見出しつきで分けて示す。
+// 食い違い（needs_human.discrepancies）は JSON と同じく「人間の操作を待っている
+// もの」の中に出す（docs/features/m2-github-issue-ingest.md §食い違いの表示）。
 func overviewText(ov *core.Overview) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "人間の操作を待っているもの:\n")
-	if len(ov.NeedsHumanChallenges) == 0 && len(ov.NeedsHumanOperations) == 0 {
+	if len(ov.NeedsHumanChallenges) == 0 && len(ov.NeedsHumanOperations) == 0 && len(ov.Discrepancies) == 0 {
 		fmt.Fprintf(&b, "  (なし)\n")
 	}
 	for _, c := range ov.NeedsHumanChallenges {
@@ -61,6 +78,13 @@ func overviewText(ov *core.Overview) string {
 	}
 	for _, op := range ov.NeedsHumanOperations {
 		fmt.Fprintf(&b, "  %s\t%s\t%s\t%s\n", op.ID, op.ChallengeID, op.Kind, op.Summary)
+	}
+	for _, d := range ov.Discrepancies {
+		kinds := make([]string, 0, len(d.Kinds))
+		for _, k := range d.Kinds {
+			kinds = append(kinds, string(k))
+		}
+		fmt.Fprintf(&b, "  %s\t食い違い\t%s\n", d.ChallengeID, strings.Join(kinds, ","))
 	}
 
 	fmt.Fprintf(&b, "システムが次に進められるもの:\n")

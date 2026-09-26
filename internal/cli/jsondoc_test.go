@@ -139,7 +139,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 		}
 	}
 	flush()
-	for _, e := range []string{"challenge", "plan", "approval", "hold", "operation", "activity", "source_binding"} {
+	for _, e := range []string{"challenge", "plan", "approval", "hold", "operation", "activity", "source_binding", "discrepancy"} {
 		if len(doc.entity[e]) == 0 {
 			t.Fatalf("documented shape of %q not found in the JSON output section", e)
 		}
@@ -174,6 +174,9 @@ var jsonEntityOf = map[string]string{
 	"operation": "operation", "operations": "operation",
 	"activities":     "activity",
 	"source_binding": "source_binding",
+	// discrepancies は status の needs_human 配下の食い違いの一覧
+	// （docs/features/m2-github-issue-ingest.md §食い違いの表示。#58 で追加）。
+	"discrepancies": "discrepancy",
 }
 
 // assertDocumentedEntities は出力の中の要素（オブジェクトと配列の要素）の

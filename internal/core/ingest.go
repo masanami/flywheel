@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 )
 
 // --- 取り込み（ingest）の公開 API と結果の型 ---
@@ -14,18 +17,20 @@ import (
 // ロックなし）→③Issue ごとに書き込みトランザクション（BEGIN IMMEDIATE）の中で
 // 最新の状態を読み直して反映する、の順に進む。
 //
-// この骨格は #56 が作った。#56 が実装したのは「対応の無い、ポリシーに合う
-// Issue から課題を作る」（ingest_create）だけで、#57（本チケット）が
-// ingestOneIssue の「対応が既にある」分岐と、並行した取り込みに先を越された
-// 分岐に、冪等な更新（reconcileBoundIssue。fingerprint の 3 分岐・完了した課題の
-// スキップ・ingest_update）を足した。次は後続チケットがこの同じ骨格に足す:
-//   - #58: open の一覧に現れた Issue についてのポリシーの状態の再判定
-//     （policy_state_change。resolved のときだけ＝AC-33）と reopen
-//     （upstream_state_change）は、reconcileBoundIssue の 1 つの書き込み
-//     トランザクションの中に足す（1 Issue の反映は 1 トランザクション・版は
-//     1 回だけ増やす＝§作業ログと版）。selfAssignees・resolved はそのとき
-//     reconcileBoundIssue へ通す。open の一覧に現れなかった対応の close の
-//     確かめは、Ingest のリポジトリのループの分岐点（下記）に足す
+// この骨格は #56 が作った（対応の無い、ポリシーに合う Issue から課題を作る
+// ＝ingest_create）。#57 が対応のある Issue の冪等な更新（reconcileBoundIssue。
+// fingerprint の 3 分岐・完了した課題のスキップ・ingest_update）を、#58 が次を
+// 足した:
+//   - open の一覧に現れた対応: reconcileBoundIssue の 1 つの書き込みトランザク
+//     ションの中で reopen（upstream_state_change）とポリシーの再判定
+//     （policy_state_change。self_assignees を解決できた回だけ＝AC-33）も判定する
+//   - open の一覧に現れなかった対応: リポジトリのループの後で
+//     checkUnseenOpenBindings → confirmOpenListAbsence が GetIssue で 1 件ずつ
+//     確かめる（§上流の close の検出）
+//   - どちらの経路も、判定した結果を反映の計画（ingestReflection）にして
+//     applyIngestReflection へ渡す。版の加算と作業ログの記録はここ 1 か所に
+//     まとめ、1 回の反映で契機が複数起きても版は 1 だけ増やす（§作業ログと版）。
+//     #65 系の観測値（upstream_observation_change）も、この計画の契機として足す
 //
 // --source の指定（宣言のうちどの取り込み元を処理するか。省略時は全件・
 // 空文字列との区別）は #63（core.SelectSources）の責務。Ingest は「選ばれた
@@ -37,6 +42,10 @@ import (
 // #56 が IngestOutcomeCreated・IngestOutcomeFailed を、#57 が
 // IngestOutcomeUpdated・IngestOutcomeUnchanged・IngestOutcomeSkippedDone・
 // IngestOutcomeFingerprintUnknownVersion を生成する（reconcileBoundIssue）。
+// #58 は新しい IngestOutcome を足さない（close の確かめ・ポリシーの再判定は
+// result とは別の反映で、result は人間記入欄と fingerprint についての結果の
+// ままである。§IF / API「`result` は人間記入欄と fingerprint についての結果
+// であり、`unchanged` は上流の状態・ポリシーの状態が変わった場合も含む」）。
 type IngestOutcome string
 
 // IngestOutcome の値（仕様の列挙の順）。
@@ -132,8 +141,9 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 		return nil, err
 	}
 
-	// ①ストアを読む（書き込みロックなし）: 対応のある外部キーの集合。ここで
-	// 読んだ値は②の後の判定の目安にだけ使い、実際の反映は③で読み直す。
+	// ①ストアを読む（書き込みロックなし）: 対応のある外部キーごとの上流の状態と
+	// 課題が完了しているか。ここで読んだ値は②の後の判定の目安にだけ使い、実際の
+	// 反映は③（reconcileBoundIssue／confirmOpenListAbsence）で読み直す。
 	bound, err := s.loadBoundExternalKeys(ctx)
 	if err != nil {
 		return nil, err
@@ -168,7 +178,8 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				item, excluded, err := s.ingestOneIssue(ctx, actor, ch, src, selfAssignees, bound[issue.ExternalKey], issue)
+				_, isBound := bound[issue.ExternalKey]
+				item, excluded, err := s.ingestOneIssue(ctx, actor, ch, src, selfAssignees, resolved, isBound, issue)
 				switch {
 				case err != nil:
 					msg := err.Error()
@@ -183,11 +194,18 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 					rr.Items = append(rr.Items, *item)
 				}
 			}
-			// #58 の分岐点: 一覧の取得に成功したこのリポジトリで、①で読んだ
-			// 対応のうち open の一覧に現れなかったもの（upstream_state が open・
-			// 未完了）を GetIssue で 1 件ずつ確かめる。対応をリポジトリで選ぶ
-			// ときは、宣言の表記（repo）と external_key の表記（API の正規の
-			// 表記）の違いを考えて大文字小文字を無視する。#56 では何もしない。
+			// #58: 一覧の取得に成功したこのリポジトリで、①で読んだ対応のうち
+			// open の一覧に現れなかったもの（upstream_state が open・未完了）を
+			// GetIssue で 1 件ずつ確かめる（§上流の close の検出）。対応を
+			// リポジトリで選ぶときは、宣言の表記（repo）と external_key の表記
+			// （API の正規の表記）の違いを考えて大文字小文字を無視する。一覧の
+			// 取得に失敗したリポジトリ（rr.Error != nil）はここへ来ない
+			// （AC「一覧の取得に失敗したリポジトリの課題は…変わらない」）。
+			closeItems, err := s.checkUnseenOpenBindings(ctx, actor, ch, repo, bound, issues, in.Upstream)
+			if err != nil {
+				return nil, err
+			}
+			rr.Items = append(rr.Items, closeItems...)
 			sr.Repos = append(sr.Repos, rr)
 		}
 		result.Sources = append(result.Sources, sr)
@@ -207,9 +225,9 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 // self_assignees の解決に失敗した取り込み元でも、対応のある Issue の冪等な更新は
 // 行う【仮定】。AC-33 が除くのはポリシーの再判定（#58）だけで、fingerprint に
 // よる人間記入欄の置き換えには例外が無いため。
-func (s *Store) ingestOneIssue(ctx context.Context, actor string, ch Channel, src SourceEntry, selfAssignees map[string]bool, isBound bool, issue UpstreamIssue) (item *IngestItemResult, excluded bool, err error) {
+func (s *Store) ingestOneIssue(ctx context.Context, actor string, ch Channel, src SourceEntry, selfAssignees map[string]bool, resolved bool, isBound bool, issue UpstreamIssue) (item *IngestItemResult, excluded bool, err error) {
 	if isBound {
-		item, err := s.reconcileBoundIssue(ctx, actor, ch, src, issue)
+		item, err := s.reconcileBoundIssue(ctx, actor, ch, src, selfAssignees, resolved, issue)
 		return item, false, err
 	}
 
@@ -225,7 +243,7 @@ func (s *Store) ingestOneIssue(ctx context.Context, actor string, ch Channel, sr
 			// 書き込みトランザクションは BEGIN IMMEDIATE で直列化されるので、
 			// 先に作った側は既にコミット済みで、reconcileBoundIssue の③の読み直し
 			// で必ず見える。「対応が既にある」分岐と同じ冪等な更新へ回す。
-			item, err := s.reconcileBoundIssue(ctx, actor, ch, src, issue)
+			item, err := s.reconcileBoundIssue(ctx, actor, ch, src, selfAssignees, resolved, issue)
 			return item, false, err
 		}
 		return nil, false, err
@@ -235,23 +253,34 @@ func (s *Store) ingestOneIssue(ctx context.Context, actor string, ch Channel, sr
 
 // reconcileBoundIssue は対応が既にある Issue を、1 つの書き込みトランザクション
 // の中で最新の状態に読み直してから（③）冪等に反映する（§冪等な作成と更新・
-// §作業ログと版）。result の判定の順（仕様から導いたもの）:
+// §ポリシーに合わなくなった課題・§上流の close の検出「reopen」・§作業ログと版）。
+//
+// result の判定の順（仕様から導いたもの。人間記入欄と fingerprint についての
+// 結果だけを表す）:
 //  1. 課題が完了している: skipped_done（AC-58）。完了と版未知が重なるときは、
 //     終端状態の課題へ書き込みを試みない側に倒して完了を先に見る【仮定】
 //  2. 記録された fingerprint の版が 2 でない: fingerprint_unknown_version
-//     （AC-57。fail-closed）
-//  3. 本文の fingerprint が記録と一致: unchanged（AC-49）
+//     （AC-57。fail-closed。fail-closed が凍結するのは人間記入欄と fingerprint
+//     だけなので、下記の reopen・ポリシーの再判定はこの場合も行う）
+//  3. 本文の fingerprint が記録と一致: unchanged（AC-49。上流の状態・ポリシーの
+//     状態が変わっていてもこの値のまま＝§IF / API「`unchanged` は上流の状態・
+//     ポリシーの状態が変わった場合も含む」）
 //  4. 一致しない: updated。タイトル・説明・緊急度・fingerprint を上流の値に
-//     置き換え、ingest_update を記録し、課題の版を 1 増やす。起票者・完了条件・
-//     優先度・状態・計画、承認・保留・不可逆操作は変えない（AC-50〜55・AC-88）
+//     置き換える。起票者・完了条件・優先度・状態・計画、承認・保留・不可逆操作は
+//     変えない（AC-50〜55・AC-88）
 //
-// 判定（result を決める）と反映（書き込み）を分けてあり、反映は result が
-// updated のときだけ行う。#58（ポリシーの再判定・reopen）や fingerprint 以外の
-// source_binding の属性の反映は、result が unchanged でも起こりうるので、判定の
-// 後・反映の段に契機として足し、複数の契機が起きても版は 1 回だけ増やす
-// （§作業ログと版）。upstream_state・policy_state は今は読み直した値を結果に
-// 載せるだけで変えない。
-func (s *Store) reconcileBoundIssue(ctx context.Context, actor string, ch Channel, src SourceEntry, issue UpstreamIssue) (*IngestItemResult, error) {
+// 完了していない課題（1・skipped_done 以外）については、result とは独立に
+// 次の 2 つの契機も判定する（#58）:
+//   - reopen: 上流の状態が closed／missing なら open に戻す（AC-71）
+//   - ポリシーの再判定: selfAssignees の解決に成功した回（resolved）だけ行う
+//     （AC-33 の既存の安全側を引き継ぐ）。ポリシーに合えば in_policy、合わなければ
+//     out_of_policy にする（AC-76〜79）
+//
+// 起きた契機（人間記入欄の更新・上流の状態の変化・ポリシーの状態の変化）は
+// applyIngestReflection が 1 つの UPDATE・1 回の版の増分・契機ごとの作業ログの
+// エントリへまとめる（§作業ログと版「1 回の反映で複数の契機が同時に起きても
+// 版は 1 だけ増やす」）。
+func (s *Store) reconcileBoundIssue(ctx context.Context, actor string, ch Channel, src SourceEntry, selfAssignees map[string]bool, resolved bool, issue UpstreamIssue) (*IngestItemResult, error) {
 	var item *IngestItemResult
 	err := s.mutateAs(ctx, actor, ch, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
 		// ③最新の状態を読み直す。
@@ -286,20 +315,32 @@ func (s *Store) reconcileBoundIssue(ctx context.Context, actor string, ch Channe
 			outcome = IngestOutcomeUpdated
 		}
 
-		if outcome == IngestOutcomeUpdated {
-			if err := applyIngestUpdate(ctx, tx, rec, cid, current, sb.Fingerprint, newFP, issue, computeIngestUrgency(issue.Labels, src.UrgencyLabels)); err != nil {
-				return err
+		newUpstreamState := sb.UpstreamState
+		newPolicyState := sb.PolicyState
+		if outcome != IngestOutcomeSkippedDone {
+			if sb.UpstreamState == upstreamStateClosed || sb.UpstreamState == upstreamStateMissing {
+				newUpstreamState = upstreamStateOpen
+			}
+			if resolved {
+				if issueMatchesAssigneePolicy(src.Policy(), selfAssignees, issue.Assignees) {
+					newPolicyState = policyStateInPolicy
+				} else {
+					newPolicyState = policyStateOutOfPolicy
+				}
 			}
 		}
 
-		item = &IngestItemResult{
-			ExternalKey:   sb.ExternalKey,
-			ChallengeID:   sb.ChallengeID,
-			Result:        outcome,
-			UpstreamState: string(sb.UpstreamState),
-			PolicyState:   string(sb.PolicyState),
+		plan := ingestReflection{outcome: outcome, upstream: newUpstreamState, policy: newPolicyState}
+		if outcome == IngestOutcomeUpdated {
+			plan.human = &humanFieldChange{
+				title:       issue.Title,
+				description: issue.Body,
+				urgency:     computeIngestUrgency(issue.Labels, src.UrgencyLabels),
+				fingerprint: newFP,
+			}
 		}
-		return nil
+		item, err = applyIngestReflection(ctx, tx, rec, cid, current, sb, plan)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -307,30 +348,75 @@ func (s *Store) reconcileBoundIssue(ctx context.Context, actor string, ch Channe
 	return item, nil
 }
 
-// applyIngestUpdate は課題の人間記入欄（タイトル・説明・緊急度）と対応の
-// fingerprint を上流の値に置き換え、ingest_update を記録し、課題の版を 1 増やす。
-// before/after には変わった項目と fingerprint だけを載せ、after にだけ version を
-// 載せる（M1 の H14・H16）。
-func applyIngestUpdate(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64, current *Challenge, oldFP, newFP string, issue UpstreamIssue, urgency *Urgency) error {
-	before := map[string]any{"fingerprint": oldFP}
-	after := map[string]any{"fingerprint": newFP}
-	newTitle := current.Title
-	if issue.Title != current.Title {
-		before["title"] = current.Title
-		after["title"] = issue.Title
-		newTitle = issue.Title
+// ingestReflection は対応 1 件への反映の計画（判定を済ませた値）。判定は
+// reconcileBoundIssue・confirmOpenListAbsence が行い、applyIngestReflection は
+// 計画を書き込みへ写すだけにする（反映の段で上流の応答を読み直さない）。
+type ingestReflection struct {
+	// outcome は item の result（人間記入欄と fingerprint についての結果）。
+	outcome IngestOutcome
+	// human は人間記入欄と fingerprint の置き換え。nil なら変えない。
+	human *humanFieldChange
+	// upstream・policy は反映後の上流の状態・ポリシーの状態（変えないなら
+	// 現在の値を入れる）。
+	upstream upstreamState
+	policy   policyState
+}
+
+// humanFieldChange は人間記入欄（タイトル・説明・緊急度）と fingerprint の
+// 置き換え後の値。
+type humanFieldChange struct {
+	title       string
+	description string
+	urgency     *Urgency
+	fingerprint string
+}
+
+// applyIngestReflection は plan を反映する（呼び出し元は reconcileBoundIssue と
+// confirmOpenListAbsence）。人間記入欄・上流の状態・ポリシーの状態のうち実際に
+// 変わるものをまとめ、変化が 1 つも無ければ何も書き込まない（§作業ログと版
+// 「値が変わらなければ記録しない」）。変化があれば:
+//   - challenge の UPDATE を 1 回（版を 1 だけ増やす）
+//   - source_binding の更新を applySourceBindingUpdate で 1 回
+//   - 変わった契機ごとに作業ログのエントリを 1 つ（順は ingest_update →
+//     upstream_state_change → policy_state_change。§作業ログと版）。各エントリの
+//     after.version はどれも増やした後の同じ版
+func applyIngestReflection(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64, current *Challenge, sb *sourceBinding, plan ingestReflection) (*IngestItemResult, error) {
+	humanChanged := plan.human != nil
+	upstreamChanged := plan.upstream != sb.UpstreamState
+	policyChanged := plan.policy != sb.PolicyState
+
+	if !humanChanged && !upstreamChanged && !policyChanged {
+		return &IngestItemResult{
+			ExternalKey:   sb.ExternalKey,
+			ChallengeID:   sb.ChallengeID,
+			Result:        plan.outcome,
+			UpstreamState: string(sb.UpstreamState),
+			PolicyState:   string(sb.PolicyState),
+		}, nil
 	}
-	newDescription := current.Description
-	if issue.Body != current.Description {
-		before["description"] = current.Description
-		after["description"] = issue.Body
-		newDescription = issue.Body
-	}
-	newUrgency := current.Urgency
-	if !urgencyEqual(current.Urgency, urgency) {
-		before["urgency"] = nullableUrgency(current.Urgency)
-		after["urgency"] = nullableUrgency(urgency)
-		newUrgency = urgency
+
+	newTitle, newDescription, newUrgency := current.Title, current.Description, current.Urgency
+	humanBefore := map[string]any{}
+	humanAfter := map[string]any{}
+	if humanChanged {
+		h := plan.human
+		humanBefore["fingerprint"] = sb.Fingerprint
+		humanAfter["fingerprint"] = h.fingerprint
+		if h.title != current.Title {
+			humanBefore["title"] = current.Title
+			humanAfter["title"] = h.title
+			newTitle = h.title
+		}
+		if h.description != current.Description {
+			humanBefore["description"] = current.Description
+			humanAfter["description"] = h.description
+			newDescription = h.description
+		}
+		if !urgencyEqual(current.Urgency, h.urgency) {
+			humanBefore["urgency"] = nullableUrgency(current.Urgency)
+			humanAfter["urgency"] = nullableUrgency(h.urgency)
+			newUrgency = h.urgency
+		}
 	}
 
 	newVersion := current.Version + 1
@@ -339,23 +425,61 @@ func applyIngestUpdate(ctx context.Context, tx *sql.Tx, rec *activityRecorder, c
 		newTitle, newDescription, nullableUrgency(newUrgency), newVersion, formatTimestamp(rec.at), cid, current.Version,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if affected != 1 {
-		return fmt.Errorf("core: ingest: update challenge %s: expected to update 1 row, updated %d", formatChallengeID(cid), affected)
+		return nil, fmt.Errorf("core: ingest: update challenge %s: expected to update 1 row, updated %d", formatChallengeID(cid), affected)
 	}
 
-	fp := newFP
-	if _, _, err := applySourceBindingUpdate(ctx, tx, rec.at, cid, updateSourceBindingInput{Fingerprint: &fp}); err != nil {
-		return err
+	sbUpdate := updateSourceBindingInput{}
+	if humanChanged {
+		fp := plan.human.fingerprint
+		sbUpdate.Fingerprint = &fp
+	}
+	if upstreamChanged {
+		state := plan.upstream
+		sbUpdate.UpstreamState = &state
+	}
+	if policyChanged {
+		policy := plan.policy
+		sbUpdate.PolicyState = &policy
+	}
+	if _, _, err := applySourceBindingUpdate(ctx, tx, rec.at, cid, sbUpdate); err != nil {
+		return nil, err
 	}
 
-	after["version"] = newVersion
-	return rec.record("challenge", cid, "ingest_update", before, after)
+	if humanChanged {
+		humanAfter["version"] = newVersion
+		if err := rec.record("challenge", cid, "ingest_update", humanBefore, humanAfter); err != nil {
+			return nil, err
+		}
+	}
+	if upstreamChanged {
+		before := map[string]any{"upstream_state": string(sb.UpstreamState)}
+		after := map[string]any{"upstream_state": string(plan.upstream), "version": newVersion}
+		if err := rec.record("challenge", cid, "upstream_state_change", before, after); err != nil {
+			return nil, err
+		}
+	}
+	if policyChanged {
+		before := map[string]any{"policy_state": string(sb.PolicyState)}
+		after := map[string]any{"policy_state": string(plan.policy), "version": newVersion}
+		if err := rec.record("challenge", cid, "policy_state_change", before, after); err != nil {
+			return nil, err
+		}
+	}
+
+	return &IngestItemResult{
+		ExternalKey:   sb.ExternalKey,
+		ChallengeID:   sb.ChallengeID,
+		Result:        plan.outcome,
+		UpstreamState: string(plan.upstream),
+		PolicyState:   string(plan.policy),
+	}, nil
 }
 
 // createChallengeFromIssue は 1 つの書き込みトランザクションの中で、対応が
@@ -490,23 +614,39 @@ func computeIngestUrgency(labels []string, urgencyLabels map[string]string) *Urg
 	return nil
 }
 
-// loadBoundExternalKeys は対応のある外部キーの集合を読む（①。読み取り専用の
-// トランザクションで、書き込みロックを取らない）。照合は external_key だけで
-// 行う（§クリティカル設計決定 1。取り込み元の id では絞らない）。
-func (s *Store) loadBoundExternalKeys(ctx context.Context) (map[string]bool, error) {
-	keys := map[string]bool{}
+// boundExternalKeySnapshot は①で読む対応 1 件分の目安（実際の反映は③で
+// 読み直す）。
+type boundExternalKeySnapshot struct {
+	UpstreamState upstreamState
+	// Terminal は課題が完了しているか（IsTerminal(Table, StatusVocabulary, status)）。
+	Terminal bool
+}
+
+// loadBoundExternalKeys は対応のある外部キーごとの上流の状態と、課題が完了して
+// いるかを読む（①。読み取り専用のトランザクションで、書き込みロックを取らない）。
+// 照合は external_key だけで行う（§クリティカル設計決定 1。取り込み元の id では
+// 絞らない）。
+func (s *Store) loadBoundExternalKeys(ctx context.Context) (map[string]boundExternalKeySnapshot, error) {
+	keys := map[string]boundExternalKeySnapshot{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT external_key FROM source_binding`)
+		rows, err := tx.QueryContext(ctx, `
+			SELECT sb.external_key, sb.upstream_state, c.status
+			FROM source_binding sb
+			JOIN challenge c ON c.id = sb.challenge_id
+		`)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
-			var k string
-			if err := rows.Scan(&k); err != nil {
+			var key, upstream, status string
+			if err := rows.Scan(&key, &upstream, &status); err != nil {
 				return err
 			}
-			keys[k] = true
+			keys[key] = boundExternalKeySnapshot{
+				UpstreamState: upstreamState(upstream),
+				Terminal:      IsTerminal(Table, StatusVocabulary, Status(status)),
+			}
 		}
 		return rows.Err()
 	})
@@ -514,4 +654,151 @@ func (s *Store) loadBoundExternalKeys(ctx context.Context) (map[string]bool, err
 		return nil, err
 	}
 	return keys, nil
+}
+
+// splitExternalKey は "<owner>/<name>#<番号>" を repo（"<owner>/<name>"）と
+// Issue 番号に分ける。形が壊れていれば ok=false（防御的。M2 が書く external_key は
+// 常にこの形なので実運用では起きない想定）。
+func splitExternalKey(externalKey string) (repo string, number int, ok bool) {
+	i := strings.LastIndexByte(externalKey, '#')
+	if i < 0 {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(externalKey[i+1:])
+	if err != nil {
+		return "", 0, false
+	}
+	return externalKey[:i], n, true
+}
+
+// checkUnseenOpenBindings は①で読んだ対応のうち、repo の open の一覧
+// （seenIssues）に現れなかったもの（upstream_state が open・未完了）を、
+// Issue 番号の昇順で 1 件ずつ確かめる（§上流の close の検出）。宣言から外した
+// リポジトリ・取り込み元の対応は repo が一致しないので候補にならない。
+//
+// repo の一致は external_key の repo 部分と大文字小文字を無視して比べる
+// （宣言の表記と API の正規の表記の違いを吸収する。upstream.go の
+// ExternalKey の表記の契約を参照）。一覧に「現れたか」の判定は、一覧・1件の
+// 取得のどちらも同じ adapter が同じ repo に対して返す正規の表記に揃う前提で、
+// external_key の完全一致（大文字小文字を区別）で行う【仮定】。
+func (s *Store) checkUnseenOpenBindings(ctx context.Context, actor string, ch Channel, repo string, bound map[string]boundExternalKeySnapshot, seenIssues []UpstreamIssue, upstream UpstreamIssueSource) ([]IngestItemResult, error) {
+	seen := make(map[string]bool, len(seenIssues))
+	for _, issue := range seenIssues {
+		seen[issue.ExternalKey] = true
+	}
+
+	type candidate struct {
+		key    string
+		repo   string // external_key の repo 部分（API の正規の表記。GetIssue へそのまま渡す）
+		number int
+	}
+	var candidates []candidate
+	for key, snap := range bound {
+		if snap.Terminal || snap.UpstreamState != upstreamStateOpen || seen[key] {
+			continue
+		}
+		keyRepo, number, ok := splitExternalKey(key)
+		if !ok || !strings.EqualFold(keyRepo, repo) {
+			continue
+		}
+		candidates = append(candidates, candidate{key: key, repo: keyRepo, number: number})
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].number < candidates[j].number })
+
+	items := make([]IngestItemResult, 0, len(candidates))
+	for _, c := range candidates {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		// GetIssue には external_key に記録された表記（c.repo）をそのまま渡す
+		// （宣言側の表記 repo を使わない。ExternalKey の正規表記の契約と同じ
+		// 理由。TestIngest_CloseDetection_RepoMatchIsCaseInsensitive が検証する）。
+		item, err := s.confirmOpenListAbsence(ctx, actor, ch, c.key, c.repo, c.number, upstream)
+		switch {
+		case err != nil:
+			msg := err.Error()
+			items = append(items, IngestItemResult{ExternalKey: c.key, Result: IngestOutcomeFailed, Error: &msg})
+		case item != nil:
+			items = append(items, *item)
+		}
+	}
+	return items, nil
+}
+
+// confirmOpenListAbsence は 1 件の対応について、open の一覧に現れなかった
+// 理由を GetIssue で確かめる（§上流の close の検出）。GetIssue はストアの
+// 書き込みロックの外で呼び（②と同じ順序）、応答を 1 つの書き込みトランザク
+// ションの中で読み直してから反映する（③）。
+//
+//   - GetIssue が 404/410（errors.Is(err, ErrUpstreamIssueNotFound)）:
+//     upstream_state を missing にする
+//   - GetIssue がそれ以外で失敗: upstream_state を変えず、結果を failed にする
+//   - GetIssue が成功し、応答が closed: upstream_state を closed にする
+//   - GetIssue が成功し、応答が closed でない（open）: 変えない
+//
+// この経路では人間記入欄・fingerprint・policy_state は変えない（close の確かめは
+// 上流の状態だけを見る）。読み直した時点で対応が消えている・課題が完了している・
+// upstream_state が既に open でなくなっている（並行した別の反映に先を越された）
+// 場合は、冪等に何もしない（item は nil のまま）。
+func (s *Store) confirmOpenListAbsence(ctx context.Context, actor string, ch Channel, externalKey, repo string, number int, upstream UpstreamIssueSource) (*IngestItemResult, error) {
+	issue, getErr := upstream.GetIssue(ctx, repo, number)
+
+	var item *IngestItemResult
+	err := s.mutateAs(ctx, actor, ch, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
+		sb, err := loadSourceBindingByExternalKey(ctx, tx, externalKey)
+		if err != nil {
+			return err
+		}
+		if sb == nil {
+			return nil // 冪等: 対応が消えていれば何もしない
+		}
+		cid, ok := parseChallengeID(sb.ChallengeID)
+		if !ok {
+			return fmt.Errorf("core: ingest: malformed challenge id %q", sb.ChallengeID)
+		}
+		current, err := loadChallenge(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if IsTerminal(Table, StatusVocabulary, current.Status) || sb.UpstreamState != upstreamStateOpen {
+			return nil // 冪等: 読み直した時点で完了している・open でなくなっている
+		}
+
+		var newState upstreamState
+		switch {
+		case errors.Is(getErr, ErrUpstreamIssueNotFound):
+			newState = upstreamStateMissing
+		case getErr != nil:
+			msg := getErr.Error()
+			item = &IngestItemResult{
+				ExternalKey:   sb.ExternalKey,
+				ChallengeID:   sb.ChallengeID,
+				Result:        IngestOutcomeFailed,
+				UpstreamState: string(sb.UpstreamState),
+				PolicyState:   string(sb.PolicyState),
+				Error:         &msg,
+			}
+			return nil
+		case issue.State == "closed":
+			newState = upstreamStateClosed
+		default:
+			newState = upstreamStateOpen
+		}
+
+		// 版の増分・source_binding の更新・upstream_state_change の記録は
+		// reconcileBoundIssue と同じ applyIngestReflection に任せる。この経路は
+		// 人間記入欄・fingerprint・policy_state を変えないので human は nil・policy は
+		// 現状のまま、result は unchanged とする【仮定】（変化が無ければ何も書き込ま
+		// ない）。
+		item, err = applyIngestReflection(ctx, tx, rec, cid, current, sb, ingestReflection{
+			outcome:  IngestOutcomeUnchanged,
+			upstream: newState,
+			policy:   sb.PolicyState,
+		})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return item, nil
 }

@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os/user"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -26,8 +28,16 @@ type fakeUpstream struct {
 	login    string
 	loginErr error
 
-	listCalls  int // ListOpenIssues の呼び出し回数
-	loginCalls int // CurrentLogin の呼び出し回数
+	// getIssue・getIssueErr は GetIssue（#58 の close の確かめ）の固定応答。
+	// キーは "<repo>#<number>"（external_key と同じ形）。getIssueErr が優先。
+	getIssue    map[string]UpstreamIssue
+	getIssueErr map[string]error
+
+	listCalls int // ListOpenIssues の呼び出し回数
+	// getIssueCalls は GetIssue に渡ったキー（呼び出し順）。AC-74（完了した課題は
+	// GetIssue を呼ばない）・候補の順序（Issue 番号の昇順）の検証に使う。
+	getIssueCalls []string
+	loginCalls    int // CurrentLogin の呼び出し回数
 
 	// onListOpenIssues はテストが呼び出しのタイミングを検知・同期するための
 	// フック（AC-21 相当の「取得中は書き込みロックを保持しない」ことの検証に使う）。
@@ -47,8 +57,18 @@ func (f *fakeUpstream) ListOpenIssues(_ context.Context, repo string) ([]Upstrea
 	return f.issues[repo], nil
 }
 
-func (f *fakeUpstream) GetIssue(_ context.Context, _ string, _ int) (UpstreamIssue, error) {
-	return UpstreamIssue{}, errors.New("fakeUpstream.GetIssue: not used by #56 (close の確かめは #58)")
+func (f *fakeUpstream) GetIssue(_ context.Context, repo string, number int) (UpstreamIssue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := repo + "#" + strconv.Itoa(number)
+	f.getIssueCalls = append(f.getIssueCalls, key)
+	if err, ok := f.getIssueErr[key]; ok {
+		return UpstreamIssue{}, err
+	}
+	if issue, ok := f.getIssue[key]; ok {
+		return issue, nil
+	}
+	return UpstreamIssue{}, fmt.Errorf("fakeUpstream.GetIssue: no fixture for %q", key)
 }
 
 func (f *fakeUpstream) CurrentLogin(_ context.Context) (string, error) {
@@ -665,18 +685,20 @@ func TestIngest_FailureOnOneIssueDoesNotRollBackEarlierIssues(t *testing.T) {
 // 並行した取り込みに先を越された分岐は resolved を見ずに reconcileBoundIssue を
 // 呼んでおり、同じ状況の Issue が経路の違いだけで結果が変わる不整合があった】。
 // fingerprint が記録と一致していれば、resolved の成否によらず unchanged に
-// なる。対応のポリシーの再判定（#58）はまだ無いので、assignee がポリシーに
-// 合わなくなっていても policy_state は変わらないことをここでも確認する
-// （AC-33 と同じ趣旨。ポリシーの再判定だけは resolved のときに限る設計を
-// #58 が引き継ぐ）。
+// なる。#58 のポリシーの再判定は resolved のときだけ働く（AC-33・AC-76〜79）:
+// resolved=true の回は、ポリシーに合わなくなった対応（o/r#2）が out_of_policy
+// になり policy_state_change が 1 件記録される。resolved=false の回（AC-33）は
+// 再判定されず in_policy のまま、追加の作業ログも残らない。
 func TestIngest_BoundIssuesAreNeitherCreatedNorExcluded(t *testing.T) {
 	cases := []struct {
-		name     string
-		src      SourceEntry
-		loginErr error
+		name             string
+		src              SourceEntry
+		loginErr         error
+		wantOutOfPolicy2 policyState // o/r#2（selfAssignees に無い eve が assign された対応）の反映後の policy_state
+		wantExtraLogs    int         // 追加で残る作業ログの件数（policy_state_change）
 	}{
-		{"self_assignees を明示", selfOnlySource("s", []string{"o/r"}, []string{"masanami"}), nil},
-		{"self_assignees の解決に失敗", selfOnlySource("s", []string{"o/r"}, nil), errors.New("gh api user failed")},
+		{"self_assignees を明示", selfOnlySource("s", []string{"o/r"}, []string{"masanami"}), nil, policyStateOutOfPolicy, 1},
+		{"self_assignees の解決に失敗", selfOnlySource("s", []string{"o/r"}, nil), errors.New("gh api user failed"), policyStateInPolicy, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -690,7 +712,8 @@ func TestIngest_BoundIssuesAreNeitherCreatedNorExcluded(t *testing.T) {
 				// #57 の冪等な更新は resolved の成否によらず働くため、一致して
 				// いなければ unchanged ではなく updated になってしまい、この
 				// テストの狙い（対応のある Issue は新しい課題にならない・
-				// ポリシーが再判定されない）を確かめられなくなる。
+				// result は human 記入欄について unchanged のまま）を確かめられ
+				// なくなる。
 				in := validBindingInput(key)
 				in.Fingerprint = Fingerprint(bodies[key])
 				if _, err := createSourceBindingForTest(s, id, time.Now(), in); err != nil {
@@ -718,6 +741,9 @@ func TestIngest_BoundIssuesAreNeitherCreatedNorExcluded(t *testing.T) {
 				t.Fatalf("items = %+v, want 2 items (unchanged)", repo.Items)
 			}
 			for _, item := range repo.Items {
+				// result は人間記入欄と fingerprint についての結果であり、
+				// 上流の状態・ポリシーの状態が変わった場合も unchanged のまま
+				// （§IF / API）。
 				if item.Result != IngestOutcomeUnchanged {
 					t.Errorf("item = %+v, want result %q", item, IngestOutcomeUnchanged)
 				}
@@ -727,14 +753,17 @@ func TestIngest_BoundIssuesAreNeitherCreatedNorExcluded(t *testing.T) {
 				t.Fatalf("ListChallenges() = %d, %v, want 2 (課題を作らない)", len(all), err)
 			}
 			after, err := s.ListActivities(context.Background(), nil)
-			if err != nil || len(after) != len(before) {
-				t.Fatalf("activities = %d, %v, want %d (unchanged は作業ログを残さない)", len(after), err, len(before))
+			if err != nil || len(after) != len(before)+tc.wantExtraLogs {
+				t.Fatalf("activities = %d, %v, want %d (%s)", len(after), err, len(before)+tc.wantExtraLogs, tc.name)
 			}
-			for key, body := range bodies {
-				sb, err := s.getSourceBindingByExternalKey(context.Background(), key)
-				if err != nil || sb == nil || sb.PolicyState != policyStateInPolicy || sb.Fingerprint != Fingerprint(body) {
-					t.Fatalf("source_binding(%s) = %+v, %v, want unchanged", key, sb, err)
-				}
+
+			sb1, err := s.getSourceBindingByExternalKey(context.Background(), "o/r#1")
+			if err != nil || sb1 == nil || sb1.PolicyState != policyStateInPolicy || sb1.Fingerprint != Fingerprint(bodies["o/r#1"]) {
+				t.Fatalf("source_binding(o/r#1) = %+v, %v, want in_policy/unchanged fingerprint", sb1, err)
+			}
+			sb2, err := s.getSourceBindingByExternalKey(context.Background(), "o/r#2")
+			if err != nil || sb2 == nil || sb2.PolicyState != tc.wantOutOfPolicy2 || sb2.Fingerprint != Fingerprint(bodies["o/r#2"]) {
+				t.Fatalf("source_binding(o/r#2) = %+v, %v, want policy_state=%q / unchanged fingerprint", sb2, err, tc.wantOutOfPolicy2)
 			}
 		})
 	}
