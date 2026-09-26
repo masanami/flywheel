@@ -296,3 +296,18 @@ func classifyErr(err error) error {
 	}
 	return err
 }
+
+// sqliteConstraintUniqueExtendedResultCode は SQLite の拡張結果コード
+// SQLITE_CONSTRAINT_UNIQUE（2067）。主要結果コード SQLITE_CONSTRAINT（19）は
+// 外部キー（787）・主キー（1555）・NOT NULL・CHECK の違反とも共有されるため、
+// UNIQUE 制約の違反だけを判別するには拡張コードの完全一致で見る。
+const sqliteConstraintUniqueExtendedResultCode = 2067
+
+// IsUniqueViolation は err が UNIQUE 制約の違反（SQLITE_CONSTRAINT_UNIQUE）かを
+// 返す。Write の fn の中（コミット前）で、文の実行が返したエラーに対して使う
+// （呼び出し側が同じトランザクションの中でドメインのエラーへ翻訳するため）。
+// 主キー・外部キーの違反には true を返さない。
+func IsUniqueViolation(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteConstraintUniqueExtendedResultCode
+}

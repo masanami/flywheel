@@ -21,6 +21,25 @@ func prodMigrations(t *testing.T) []Migration {
 	return migrations
 }
 
+// v1OnlyMigrations は本番マイグレーション集合から版 1（M1 の初期スキーマ）だけを
+// 取り出す。0002 を足した後の Migrations() は版 1・2 の両方を返すため、
+// 「版 1 のストア」を再現するテスト（前方マイグレーションの適用・アップグレードの
+// 検証）は本番の Migrations() をそのまま v1 のフィクスチャとして使えなくなった
+// （0002_source_binding.sql を足すチケットでの更新）。
+func v1OnlyMigrations(t *testing.T) []Migration {
+	t.Helper()
+	var v1 []Migration
+	for _, m := range prodMigrations(t) {
+		if m.Version == 1 {
+			v1 = append(v1, m)
+		}
+	}
+	if len(v1) != 1 {
+		t.Fatalf("v1OnlyMigrations: found %d migrations with Version == 1, want 1", len(v1))
+	}
+	return v1
+}
+
 // insertChallenge / countChallenges / tableExists は、Conn() が廃止された後の
 // テストが Write / Read を経由してストアへアクセスするための小さなヘルパー。
 
@@ -158,7 +177,7 @@ func TestOpen_FailedMigrationLeavesVersionAndContentUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "flywheel.db")
 
-	v1 := prodMigrations(t) // version 1 のみ
+	v1 := v1OnlyMigrations(t) // version 1 のみ
 
 	// まず version 1 まで正常に作る。
 	db, err := Open(path, v1)
@@ -208,12 +227,12 @@ func TestOpen_FailedMigrationLeavesVersionAndContentUnchanged(t *testing.T) {
 // TestOpen_UpgradesOldVersionStoreWithInjectedMigration は AC-10 の検証:
 // テスト専用の旧版ストア（version 1）に、実行器へ差し込んだ追加のマイグレーション
 // （version 2, テスト専用）を適用すると、版が最新になり既存の課題が保持される。
-// 本番のスキーマ版は 1 のまま（ここでの version 2 はテスト専用の架空の版）。
+// ここでの version 2 はテスト専用の架空の版（本番の 0002 は使わない）。
 func TestOpen_UpgradesOldVersionStoreWithInjectedMigration(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "flywheel.db")
 
-	v1 := prodMigrations(t)
+	v1 := v1OnlyMigrations(t)
 	db, err := Open(path, v1)
 	if err != nil {
 		t.Fatalf("Open() 旧版の作成 error = %v", err)
@@ -477,7 +496,132 @@ func TestApplyMigrations_ValidatesTheFullSequenceBeforeApplyingAnyVersion(t *tes
 	}
 }
 
+// TestOpen_AppliesSourceBindingMigrationAndReachesVersion2 は 0002 の完了条件:
+// 本番マイグレーション集合で開いた新規ストアは版 2 に達し、source_binding 表が
+// 期待する列を持つ（親要件チケット #51 §クリティカル設計決定 1）。
+func TestOpen_AppliesSourceBindingMigrationAndReachesVersion2(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flywheel.db")
+
+	db, err := Open(path, prodMigrations(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if got, want := userVersion(t, db), 2; got != want {
+		t.Fatalf("user_version = %d, want %d", got, want)
+	}
+	if !tableExists(t, db, "source_binding") {
+		t.Fatal("table source_binding not found")
+	}
+
+	wantColumns := []string{
+		"challenge_id", "source_id", "external_key", "url", "fingerprint",
+		"upstream_state", "policy_state", "created_at", "updated_at",
+	}
+	for _, col := range wantColumns {
+		if !columnExists(t, db, "source_binding", col) {
+			t.Errorf("source_binding.%s not found", col)
+		}
+	}
+	if columnExists(t, db, "source_binding", "last_synced_at") {
+		t.Error("source_binding.last_synced_at exists, want absent (QH1: last_synced_at は持たない)")
+	}
+}
+
+// TestSourceBinding_ConstraintsAndIsUniqueViolation は 0002 の制約の検証:
+// external_key の重複は UNIQUE 制約で拒否され IsUniqueViolation が true になる
+// （AC-104 の下敷き。AC-104 自体は core のテストで検証する）。存在しない課題への
+// 対応（外部キー違反）・同じ課題への 2 つ目の対応（主キー違反）も拒否され、
+// どちらも IsUniqueViolation は false（拡張結果コードの完全一致で判別する）。
+func TestSourceBinding_ConstraintsAndIsUniqueViolation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flywheel.db")
+
+	db, err := Open(path, prodMigrations(t))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	insertChallenge(t, db, "first")
+	insertChallenge(t, db, "second")
+
+	// insertBinding は fn の中（コミット前）で INSERT が返した生のエラーを返す。
+	insertBinding := func(challengeID int64, externalKey string) error {
+		var execErr error
+		_ = db.Write(context.Background(), func(tx *sql.Tx) error {
+			_, execErr = tx.Exec(
+				`INSERT INTO source_binding (challenge_id, source_id, external_key, url, fingerprint, upstream_state, policy_state, created_at, updated_at)
+				 VALUES (?, 'src', ?, 'https://example.invalid/1', '2:abc', 'open', 'in_policy', ?, ?)`,
+				challengeID, externalKey, "2026-09-21T00:00:00.000Z", "2026-09-21T00:00:00.000Z",
+			)
+			return execErr
+		})
+		return execErr
+	}
+
+	if err := insertBinding(1, "owner/repo#1"); err != nil {
+		t.Fatalf("insertBinding(1) error = %v", err)
+	}
+
+	cases := []struct {
+		name        string
+		challengeID int64
+		externalKey string
+		wantUnique  bool
+	}{
+		{"external_key の重複（UNIQUE）", 2, "owner/repo#1", true},
+		{"存在しない課題（外部キー）", 999, "owner/repo#2", false},
+		{"同じ課題に 2 つ目（主キー）", 1, "owner/repo#3", false},
+	}
+	for _, tc := range cases {
+		err := insertBinding(tc.challengeID, tc.externalKey)
+		if err == nil {
+			t.Errorf("%s: INSERT error = nil, want a constraint violation", tc.name)
+			continue
+		}
+		if got := IsUniqueViolation(err); got != tc.wantUnique {
+			t.Errorf("%s: IsUniqueViolation(%v) = %v, want %v", tc.name, err, got, tc.wantUnique)
+		}
+	}
+	if got := countRows(t, db, "source_binding"); got != 1 {
+		t.Fatalf("source_binding rows = %d, want 1（拒否された対応は残らない）", got)
+	}
+}
+
 // --- テスト用フィクスチャのヘルパー ---
+
+// countRows は table の行数を返す（table はテストが渡す固定の名前）。
+func countRows(t *testing.T, db *DB, table string) int {
+	t.Helper()
+	var count int
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
+	}); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return count
+}
+
+// columnExists は table の列 column が存在するかを返す。
+func columnExists(t *testing.T, db *DB, table, column string) bool {
+	t.Helper()
+	var name string
+	err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT name FROM pragma_table_info(?) WHERE name = ?", table, column).Scan(&name)
+	})
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, sql.ErrNoRows):
+		return false
+	default:
+		t.Fatalf("columnExists(%s, %s): %v", table, column, err)
+		return false
+	}
+}
 
 // setUserVersion は本番 API を経由せず、直接 PRAGMA user_version を書き込む。
 // store_too_new のフィクスチャ（バイナリが知らない将来の版）を作るためだけに使う。
