@@ -730,7 +730,9 @@ func (s *Store) checkUnseenOpenBindings(ctx context.Context, actor string, ch Ch
 // 書き込みロックの外で呼び（②と同じ順序）、応答を 1 つの書き込みトランザク
 // ションの中で読み直してから反映する（③）。
 //
-//   - GetIssue が 404/410（errors.Is(err, ErrUpstreamIssueNotFound)）:
+//   - GetIssue が 404/410（errors.Is(err, ErrUpstreamIssueNotFound)）、または
+//     改名・移管の転送を辿って別リポジトリの Issue が返った
+//     （errors.Is(err, ErrUpstreamIssueTransferred)。#69）:
 //     upstream_state を missing にする
 //   - GetIssue がそれ以外で失敗: upstream_state を変えず、結果を failed にする
 //   - GetIssue が成功し、応答が closed: upstream_state を closed にする
@@ -766,7 +768,10 @@ func (s *Store) confirmOpenListAbsence(ctx context.Context, actor string, ch Cha
 
 		var newState upstreamState
 		switch {
-		case errors.Is(getErr, ErrUpstreamIssueNotFound):
+		case errors.Is(getErr, ErrUpstreamIssueNotFound), errors.Is(getErr, ErrUpstreamIssueTransferred):
+			// #69: 改名・移管の転送を辿って別リポジトリの Issue が返った場合も、
+			// 404・410 と同じく missing に写す（削除・移管・閲覧権限の喪失を
+			// 区別しない、という #58 からの方針をそのまま適用する）。
 			newState = upstreamStateMissing
 		case getErr != nil:
 			msg := getErr.Error()
