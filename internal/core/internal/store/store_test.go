@@ -497,10 +497,11 @@ func TestApplyMigrations_ValidatesTheFullSequenceBeforeApplyingAnyVersion(t *tes
 }
 
 // TestOpen_AppliesSourceBindingMigrationAndReachesVersion2 は 0002・0003 の
-// 完了条件: 本番マイグレーション集合で開いた新規ストアは最新版（0003 を足した
-// 後は 3）に達し、source_binding 表が期待する列を持つ（親要件チケット #51
-// §クリティカル設計決定 1）。テスト名は当初の版番号（2）のまま残す（0003 の
-// 追加で最新版がずれても、このテストが検証する内容自体は変わらない）。
+// 完了条件: 本番マイグレーション集合で開いた新規ストアは最新版（0004 を足した
+// 後は 4）に達し、source_binding 表が期待する列を持つ（親要件チケット #51
+// §クリティカル設計決定 1）。テスト名は当初の版番号（2）のまま残す（0003・
+// 0004 の追加で最新版がずれても、このテストが検証する内容自体は変わらない。
+// #72・#78 と同じ改訂）。
 func TestOpen_AppliesSourceBindingMigrationAndReachesVersion2(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "flywheel.db")
@@ -511,7 +512,7 @@ func TestOpen_AppliesSourceBindingMigrationAndReachesVersion2(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	if got, want := userVersion(t, db), 3; got != want {
+	if got, want := userVersion(t, db), 4; got != want {
 		t.Fatalf("user_version = %d, want %d", got, want)
 	}
 	if !tableExists(t, db, "source_binding") {
