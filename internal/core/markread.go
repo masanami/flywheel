@@ -10,8 +10,12 @@
 //  3. 対応（source_binding）が無い → ErrValidation（【仮定】。§受入基準
 //     「対応の無い課題への mark-read は validation_failed」）
 //
-// 未読の更新が無ければ、何も書き込まず（版・作業ログを変えない）成功する
-// （M1「値が変わらない操作は作業ログを残さない」と同じ規則）。
+// 読んだ時点の値が現在の観測値と 1 つでも違えば、必ず観測値へそろえる。未読の
+// 更新（unreadKinds）が無くても、コメントの削除で件数が減っただけの課題は値が
+// 違うのでそろえる（2026-09-27 オーナー決定・PR #74。読んだ時点の件数が大きい
+// まま残ると、その後に足されたコメントに upstream_commented が出ないため）。
+// 値がすべて同じときだけ、何も書き込まず（版・作業ログを変えない）成功する
+// （M1「値が変わらない操作は作業ログを残さない」と同じ規則＝AC-142）。
 
 package core
 
@@ -24,7 +28,8 @@ import (
 // MarkReadResult は Store.MarkRead の結果（§IF / API「`mark-read` の `--json`」）。
 type MarkReadResult struct {
 	ChallengeID string
-	// Changed は読んだ時点の値を実際に変えたか（未読の更新が無ければ false）。
+	// Changed は読んだ時点の値を実際に変えたか（読んだ時点の値が観測値と
+	// すべて同じなら false）。
 	Changed bool
 	// SourceBinding は操作後の対応の記録（`show` と同じ形）。
 	SourceBinding *SourceBinding
@@ -58,15 +63,11 @@ func (s *Store) MarkRead(ctx context.Context, ch Channel, id string) (*MarkReadR
 		}
 
 		result.ChallengeID = current.ID
-		// 「未読の更新が無い」の判定は ingest の unread・status の kinds と同じ
-		// unreadKinds を使う（self-review 指摘: 単純な値の不一致で判定すると、
-		// コメントの削除で comments_count が read_comments_count を下回った
-		// ケース〔未読の更新は無い〕でも「変わった」とみなして書き込んでしまい、
-		// AC-142「未読の更新が無い課題への mark-read は、何も変えずに成功する」に
-		// 反していた）。
-		if len(unreadKinds(sb.CommentsCount, sb.ReadCommentsCount, sb.UpstreamUpdatedAt, sb.ReadUpstreamUpdatedAt)) == 0 {
-			// 未読の更新が無い課題への mark-read は、何も変えずに成功する
-			// （M1「値が変わらない操作は作業ログを残さない」）。
+		// 読んだ時点の値が観測値とすべて同じときだけ、何も変えずに成功する
+		// （AC-142）。未読の更新（unreadKinds）では判定しない: コメントの削除で
+		// 件数が減っただけの課題も、値が違えばそろえる（AC-134・AC-135 を優先
+		// する 2026-09-27 オーナー決定）。
+		if sb.ReadCommentsCount == sb.CommentsCount && sb.ReadUpstreamUpdatedAt == sb.UpstreamUpdatedAt {
 			result.Changed = false
 			result.SourceBinding = sb.toPublic()
 			return nil
