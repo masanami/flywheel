@@ -46,11 +46,12 @@ var worklogReadOnlyCommands = map[string]bool{
 	"list":   true,
 	"status": true,
 	"log":    true,
-	// ingest（#54）は宣言の読み込みと --source の絞り込みだけを行い、取り込みの
-	// 本体（作業ログを残す ingest_create 等）は #59 で結線するため、現時点では
-	// 変更系ではない。
-	"ingest": true,
 }
+
+// worklogIngestRepo は worklogCases の "ingest create" ケースが使う偽の
+// リポジトリ名（#59 で取得と反映を結線した後、ingest は変更系のコマンドに
+// なった。以前はここに列挙し worklogReadOnlyCommands 側だった）。
+const worklogIngestRepo = "owner/worklog-repo"
 
 // wantActivity は作業ログの 1 エントリの期待値。before・after が nil なら
 // JSON の null を期待する。actor・channel・verification・at は全エントリに
@@ -369,6 +370,38 @@ var worklogCases = []worklogCase{
 				{"challenge", "C-1", "op_reject", nil,
 					map[string]any{"operation_id": "OP-1", "version": 3.0}},
 			}
+		},
+	},
+	{
+		// #59: ingest は取得と反映を結線した後、対応の無い・ポリシーに合う
+		// Issue から課題を作るたびに ingest_create を記録する（§作業ログと版）。
+		name: "ingest create", command: "ingest",
+		setup: func(t *testing.T, ws string) []string {
+			decl := `{
+  "version": 1,
+  "sources": [
+    {"id": "worklog-source", "type": "github-issue", "repos": ["` + worklogIngestRepo + `"], "self_assignees": ["someone"]}
+  ]
+}`
+			writeSourcesDeclaration(t, ws, decl)
+			withFakeGHRoutesOnPATH(t, []fakeGHRoute{
+				fakeGHListRoute(worklogIngestRepo, 1, fakeGHIssueListBody(t, []fakeGHIssue{
+					{Number: 1, Title: "ingest smoke title", Body: "ingest smoke body", Reporter: "reporter", Repo: worklogIngestRepo},
+				}), 0),
+			})
+			return []string{"ingest"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"challenge", "C-1", "ingest_create", nil,
+				map[string]any{
+					"title":         "ingest smoke title",
+					"description":   "ingest smoke body",
+					"done_criteria": "",
+					"urgency":       nil,
+					"status":        "unclassified",
+					"reporter":      "reporter",
+					"external_key":  worklogIngestRepo + "#1",
+				}}}
 		},
 	},
 }

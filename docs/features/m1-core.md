@@ -166,6 +166,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `verification_rejected` | 1 | 許可していない経路と本人確認の方式の組み合わせ（core の API へ直接要求された場合） |
 | `config_not_found` | 2 | 取り込み元の宣言ファイル（`.flywheel/sources.json`）が無い（#54。docs/features/m2-github-issue-ingest.md §エラーコードの追加） |
 | `config_invalid` | 2 | 取り込み元の宣言が規則に反する（解釈できない JSON を含む。#54。同上） |
+| `upstream_unavailable` | 2 | 上流へ接続する手段（`gh`）が PATH に無い（#59。同上） |
 
 #### 成功時の JSON 出力の規約【決定 2026-09-21 #5（実装チケットの意思決定者）】
 
@@ -288,9 +289,22 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 
 完了（`done`）の課題と差し戻し済み（`state=rejected`）の不可逆操作はどの一覧にも含めない。各一覧は `id` 昇順（`discrepancies` は `challenge_id` の昇順）。
 
-##### `ingest`（#54 で追加）
+##### `ingest`（#54 で追加。取得・作成・更新の結線は #59）
 
-`{"sources": [...]}`。取り込みの本体（取得・作成・更新。docs/features/m2-github-issue-ingest.md §IF / API「`ingest` の JSON 出力」）は #59 で結線する。それまでの間、`ingest` は宣言（`.flywheel/sources.json`）の読み込みと検証・`--source` の対象の絞り込みだけを行い、成功時は常に空の結果 `{"sources": []}` を返す【#54 の仮定】。`sources` の要素の形（`id`・`self_assignees_resolved`・`repos` 以下）は #59 が実装するときにこの節へ追記する。
+`{"sources": [...]}`。docs/features/m2-github-issue-ingest.md §IF / API「`ingest` の JSON 出力」の形。
+
+| 一覧 | 要素の形 |
+|---|---|
+| `sources`（`ingest` の最上位の一覧。要素の名前は `source`） | `{"id", "self_assignees_resolved", "repos"}` |
+| `repos`（`source` の一覧。要素の名前は `repo`） | `{"repo", "error", "items", "excluded"}` |
+| `items`（`repo` の一覧。要素の名前は `item`） | `{"external_key", "challenge_id", "result", "upstream_state", "policy_state", "error"}` |
+
+- `result` は `created`\|`updated`\|`unchanged`\|`skipped_done`\|`fingerprint_unknown_version`\|`failed` の閉集合（`core.IngestOutcomeValues()` と同じ順）。
+- `items` は課題を作った・対応のある Issue だけを並べる。ポリシーに合わない新しい Issue は `excluded` の件数だけに数える。
+- `error`（`repo` の要素）は一覧の取得の失敗の要約。成功なら `null`。一覧の取得に失敗したリポジトリの `items` は `[]`・`excluded` は `0`。
+- `error`（`item` の要素）は、その要素の反映が失敗した（`result` が `failed`）ことの要約。一覧の取得後・1件の取得（close の確かめ）・書き込みの反映のいずれの失敗も含みうる。成功なら `null`。
+- `challenge_id`・`upstream_state`・`policy_state` は、(1) 新規作成の反映が失敗した場合、(2) 対応（`source_binding`）のある Issue の冪等な更新の反映自体が失敗した場合、(3) close の確かめ（1 件の取得）自体は成功したが、その後の反映（書き込みトランザクションでの読み直し・更新）が失敗した場合、のいずれでも `null` になる（既知の対応の情報を積まずに `failed` を返す実装になっている）。`null` にならないのは、close の確かめの **1 件の取得**（`GetIssue`）自体が失敗した場合だけで、この場合は読み直した対応の値をそのまま出力する。
+- `comments_count`・`upstream_updated_at`・`unread`（docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読）は、core の取り込みの結果（`IngestItemResult`）がまだ持たないため、この節の形に含めない。観測を実装するチケット（#65 系）がこの節へ追記する。
 
 ## 非機能要件
 
@@ -427,7 +441,7 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel approve <OP-ID>` / `flywheel reject <OP-ID> --reason <r>` | 不可逆操作の単独の承認・差し戻し | 要 |
 | `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作 | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |
-| `flywheel ingest [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）。取り込みの本体（取得・作成・更新）は #59 で結線する | — |
+| `flywheel ingest [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・冪等な作成と更新・上流の close の検出（#59） | — |
 
 共通フラグ: `--workspace <dir>`・`--json`。
 

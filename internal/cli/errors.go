@@ -42,10 +42,15 @@ const (
 	CodeVerificationRejected ErrorCode = "verification_rejected"
 	// CodeConfigNotFound と CodeConfigInvalid は #54 で追加（取り込み元の宣言
 	// ファイル .flywheel/sources.json。docs/features/m2-github-issue-ingest.md
-	// §エラーコードの追加）。upstream_unavailable は #59 で追加する（取得の結線と
-	// 同じチケットで、実際に返しうる箇所ができてから足す）。
+	// §エラーコードの追加）。
 	CodeConfigNotFound ErrorCode = "config_not_found"
 	CodeConfigInvalid  ErrorCode = "config_invalid"
+	// CodeUpstreamUnavailable は #59 で追加（`gh` が PATH に無い。
+	// docs/features/m2-github-issue-ingest.md §エラーコードの追加）。core の
+	// sentinel ではなく internal/adapters/github.ErrGHNotFound を runIngest が
+	// 直接 errors.Is で判定して写す（mapCoreErr を経由しない。CLAUDE.md「adapter の
+	// import の向き」）。
+	CodeUpstreamUnavailable ErrorCode = "upstream_unavailable"
 )
 
 // codeExit は 1 つのエラーコードと、それに対応する終了コード（0/1/2 のみ）の組。
@@ -73,6 +78,7 @@ var errorCodeTable = []codeExit{
 	{CodeVerificationRejected, 1},
 	{CodeConfigNotFound, 2},
 	{CodeConfigInvalid, 2},
+	{CodeUpstreamUnavailable, 2},
 }
 
 // ExitCodeFor は既知の ErrorCode に対応する終了コードを返す。

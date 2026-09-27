@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -139,7 +140,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 		}
 	}
 	flush()
-	for _, e := range []string{"challenge", "plan", "approval", "hold", "operation", "activity", "source_binding", "discrepancy"} {
+	for _, e := range []string{"challenge", "plan", "approval", "hold", "operation", "activity", "source_binding", "discrepancy", "source", "repo", "item"} {
 		if len(doc.entity[e]) == 0 {
 			t.Fatalf("documented shape of %q not found in the JSON output section", e)
 		}
@@ -177,6 +178,11 @@ var jsonEntityOf = map[string]string{
 	// discrepancies は status の needs_human 配下の食い違いの一覧
 	// （docs/features/m2-github-issue-ingest.md §食い違いの表示。#58 で追加）。
 	"discrepancies": "discrepancy",
+	// ingest の入れ子の要素（#59）。sources（最上位の一覧）> repos（取り込み元の
+	// 中の一覧）> items（リポジトリの中の一覧）の3段。
+	"sources": "source",
+	"repos":   "repo",
+	"items":   "item",
 }
 
 // assertDocumentedEntities は出力の中の要素（オブジェクトと配列の要素）の
@@ -194,14 +200,26 @@ func assertDocumentedEntities(t *testing.T, doc documentedJSON, where string, v 
 			if got := keysOf(x); !reflect.DeepEqual(got, doc.entity[entity]) {
 				t.Errorf("%s.%s keys = %v, documented %s shape = %v", where, k, sortedKeys(got), entity, sortedKeys(doc.entity[entity]))
 			}
+			// known な単一エンティティの内側も再帰する（今のところ source_binding
+			// に入れ子の既知エンティティは無いが、ingest の source/repo/item と
+			// 同じ規律で将来の追加に備える）。
+			assertDocumentedEntities(t, doc, where+"."+k, x)
 		case []any:
 			if !known {
 				continue
 			}
 			for i, e := range x {
-				if got := keysOf(e.(map[string]any)); !reflect.DeepEqual(got, doc.entity[entity]) {
+				em, ok := e.(map[string]any)
+				if !ok {
+					t.Errorf("%s.%s[%d] is not an object: %#v", where, k, i, e)
+					continue
+				}
+				if got := keysOf(em); !reflect.DeepEqual(got, doc.entity[entity]) {
 					t.Errorf("%s.%s[%d] keys = %v, documented %s shape = %v", where, k, i, sortedKeys(got), entity, sortedKeys(doc.entity[entity]))
 				}
+				// ingest の source/repo/item のように、要素自身がさらに入れ子の
+				// 一覧（repos・items）を持つ場合もここで再帰的に照合する。
+				assertDocumentedEntities(t, doc, fmt.Sprintf("%s.%s[%d]", where, k, i), em)
 			}
 		}
 	}
