@@ -178,3 +178,47 @@ func TestNormalizeIssue_MalformedJSON_Fails(t *testing.T) {
 		t.Fatalf("want wrapped json.SyntaxError, got %v", err)
 	}
 }
+
+func TestNormalizeComment_MapsAllFields(t *testing.T) {
+	raw := []byte(`{
+		"body": "コメント本文",
+		"user": {"login": "Masanami"},
+		"created_at": "2026-09-25T08:00:00Z",
+		"html_url": "https://github.com/masanami/flywheel/issues/49#issuecomment-1"
+	}`)
+
+	comment, err := normalizeComment(raw)
+	if err != nil {
+		t.Fatalf("normalizeComment: %v", err)
+	}
+	if comment.Author != "Masanami" {
+		t.Errorf("Author = %q, want Masanami", comment.Author)
+	}
+	if comment.Body != "コメント本文" {
+		t.Errorf("Body = %q", comment.Body)
+	}
+	if comment.CreatedAt != "2026-09-25T08:00:00Z" {
+		t.Errorf("CreatedAt = %q, want %q (must not be parsed)", comment.CreatedAt, "2026-09-25T08:00:00Z")
+	}
+	if comment.URL != "https://github.com/masanami/flywheel/issues/49#issuecomment-1" {
+		t.Errorf("URL = %q", comment.URL)
+	}
+}
+
+func TestNormalizeComment_NullBodyBecomesEmptyString(t *testing.T) {
+	raw := []byte(`{"body": null, "user": {"login": "u"}, "created_at": "t", "html_url": "u"}`)
+	comment, err := normalizeComment(raw)
+	if err != nil {
+		t.Fatalf("normalizeComment: %v", err)
+	}
+	if comment.Body != "" {
+		t.Errorf("Body = %q, want empty string", comment.Body)
+	}
+}
+
+func TestNormalizeComment_MalformedJSON_Fails(t *testing.T) {
+	_, err := normalizeComment([]byte(`{not json`))
+	if err == nil {
+		t.Fatal("want error for malformed JSON")
+	}
+}
