@@ -53,14 +53,18 @@ func sourceBindingJSON(b *core.SourceBinding) any {
 		return nil
 	}
 	return map[string]any{
-		"source_id":      b.SourceID,
-		"external_key":   b.ExternalKey,
-		"url":            b.URL,
-		"fingerprint":    b.Fingerprint,
-		"upstream_state": b.UpstreamState,
-		"policy_state":   b.PolicyState,
-		"created_at":     FormatTimestamp(b.CreatedAt),
-		"updated_at":     FormatTimestamp(b.UpdatedAt),
+		"source_id":                b.SourceID,
+		"external_key":             b.ExternalKey,
+		"url":                      b.URL,
+		"fingerprint":              b.Fingerprint,
+		"upstream_state":           b.UpstreamState,
+		"policy_state":             b.PolicyState,
+		"comments_count":           b.CommentsCount,
+		"upstream_updated_at":      nullableString(b.UpstreamUpdatedAt),
+		"read_comments_count":      b.ReadCommentsCount,
+		"read_upstream_updated_at": nullableString(b.ReadUpstreamUpdatedAt),
+		"created_at":               FormatTimestamp(b.CreatedAt),
+		"updated_at":               FormatTimestamp(b.UpdatedAt),
 	}
 }
 

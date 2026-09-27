@@ -93,13 +93,27 @@ func ingestResultJSON(res *core.IngestResult) map[string]any {
 		for _, rr := range sr.Repos {
 			items := make([]any, 0, len(rr.Items))
 			for _, item := range rr.Items {
+				// challenge_id・upstream_state・policy_state が null になる
+				// （対応の情報を積まずに failed を返す）反映失敗では、
+				// comments_count も同じく「不明」を表すため null にする
+				// （self-review 指摘: 0 のままだと「コメント 0 件を観測した」と
+				// 区別できず、M1 §成功時の JSON 出力の規約「未設定の任意値は
+				// null」と食い違っていた）。unread は「空の一覧は []」の規則
+				// どおり、この場合も [] のまま（他の一覧フィールドと同じ扱い）。
+				var commentsCount any = item.CommentsCount
+				if item.ChallengeID == "" {
+					commentsCount = nil
+				}
 				items = append(items, map[string]any{
-					"external_key":   item.ExternalKey,
-					"challenge_id":   nullableString(item.ChallengeID),
-					"result":         string(item.Result),
-					"upstream_state": nullableString(item.UpstreamState),
-					"policy_state":   nullableString(item.PolicyState),
-					"error":          nullableStringPtr(item.Error),
+					"external_key":        item.ExternalKey,
+					"challenge_id":        nullableString(item.ChallengeID),
+					"result":              string(item.Result),
+					"upstream_state":      nullableString(item.UpstreamState),
+					"policy_state":        nullableString(item.PolicyState),
+					"comments_count":      commentsCount,
+					"upstream_updated_at": nullableString(item.UpstreamUpdatedAt),
+					"unread":              discrepancyKindsJSON(item.Unread),
+					"error":               nullableStringPtr(item.Error),
 				})
 			}
 			repos = append(repos, map[string]any{

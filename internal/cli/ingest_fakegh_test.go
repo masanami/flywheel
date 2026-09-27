@@ -151,6 +151,12 @@ type fakeGHIssue struct {
 	State       string // "open" | "closed"
 	Repo        string // "<owner>/<name>"（html_url・repository_url の組み立てに使う）
 	PullRequest bool
+	// Comments・UpdatedAt は観測値（docs/features/m2-github-issue-ingest.md
+	// §上流の更新の観測と既読）。UpdatedAt を省略すると既定値
+	// "2026-01-01T00:00:00Z" になる（空文字列は core 内部の「未設定」
+	// センチネルと衝突するため、gh の応答としては使わない）。
+	Comments  int
+	UpdatedAt string
 }
 
 // marshalFakeGHIssue は 1 件の Issue を gh api の応答と同じ JSON（1 行）へ
@@ -164,6 +170,10 @@ func marshalFakeGHIssue(t *testing.T, iss fakeGHIssue) string {
 	state := iss.State
 	if state == "" {
 		state = "open"
+	}
+	updatedAt := iss.UpdatedAt
+	if updatedAt == "" {
+		updatedAt = "2026-01-01T00:00:00Z"
 	}
 	assignees := make([]fakeGHUser, 0, len(iss.Assignees))
 	for _, a := range iss.Assignees {
@@ -183,6 +193,8 @@ func marshalFakeGHIssue(t *testing.T, iss fakeGHIssue) string {
 		"state":          state,
 		"html_url":       fmt.Sprintf("https://github.com/%s/issues/%d", iss.Repo, iss.Number),
 		"repository_url": fmt.Sprintf("https://api.github.com/repos/%s", iss.Repo),
+		"comments":       iss.Comments,
+		"updated_at":     updatedAt,
 	}
 	if iss.PullRequest {
 		payload["pull_request"] = fakeGHPullRequestRef{URL: fmt.Sprintf("https://api.github.com/repos/%s/pulls/%d", iss.Repo, iss.Number)}

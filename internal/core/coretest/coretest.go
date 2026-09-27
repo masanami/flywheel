@@ -91,6 +91,32 @@ func InsertSourceBinding(t *testing.T, workspace string, challengeID int, source
 	}
 }
 
+// SetSourceBindingObservation はテスト専用のフィクスチャとして、challengeID の
+// 対応（source_binding）の観測値・読んだ時点の値を直接書き換える（#72。
+// InsertSourceBinding が既定値（コメント数 0・更新日時未設定）で作った対応に、
+// 未読の更新がある状態を作るために使う）。upstreamUpdatedAt・
+// readUpstreamUpdatedAt が空文字列なら NULL（未設定）にする。
+func SetSourceBindingObservation(t *testing.T, workspace string, challengeID int, commentsCount int, upstreamUpdatedAt string, readCommentsCount int, readUpstreamUpdatedAt string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	nullable := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`UPDATE source_binding SET comments_count = ?, upstream_updated_at = ?, read_comments_count = ?, read_upstream_updated_at = ? WHERE challenge_id = ?`,
+			commentsCount, nullable(upstreamUpdatedAt), readCommentsCount, nullable(readUpstreamUpdatedAt), challengeID,
+		)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: SetSourceBindingObservation(challenge_id=%d): %v", challengeID, err)
+	}
+}
+
 // SetChallengeStatus は id（内部整数 ID。"C-1" なら 1）の課題の status を直接
 // 書き換える。internal/cli のテストが、状態遷移コマンド（#10 で実装）を経由せず
 // 完了（done）状態の課題を用意して edit の terminal_state を検証するために使う。

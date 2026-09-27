@@ -30,7 +30,7 @@ import (
 //   - どちらの経路も、判定した結果を反映の計画（ingestReflection）にして
 //     applyIngestReflection へ渡す。版の加算と作業ログの記録はここ 1 か所に
 //     まとめ、1 回の反映で契機が複数起きても版は 1 だけ増やす（§作業ログと版）。
-//     #65 系の観測値（upstream_observation_change）も、この計画の契機として足す
+//     #72 の観測値（upstream_observation_change）も、この計画の契機の 1 つ
 //
 // --source の指定（宣言のうちどの取り込み元を処理するか。省略時は全件・
 // 空文字列との区別）は #63（core.SelectSources）の責務。Ingest は「選ばれた
@@ -123,8 +123,34 @@ type IngestItemResult struct {
 	Result        IngestOutcome
 	UpstreamState string
 	PolicyState   string
+	// CommentsCount・UpstreamUpdatedAt は反映後の観測値（§IF / API「`ingest` の
+	// JSON 出力」）。UpstreamUpdatedAt は 0003 の前に作られ、まだ観測していない
+	// 対応では ""（cli が null へ変換する）。1 件の反映自体が失敗した要素
+	// （対応の情報を積まない設計。§m1-core.md「`ingest` の JSON 出力」の
+	// null になる条件と同じ）では、この 2 つも既定値（0・""）のままにする
+	// 【仮定】。
+	CommentsCount     int
+	UpstreamUpdatedAt string
+	// Unread は反映後の記録から導いた未読の更新の種類（`upstream_commented |
+	// upstream_updated` の部分集合。無ければ空スライス。§上流の更新の観測と既読）。
+	Unread []DiscrepancyKind
 	// Error は Result が IngestOutcomeFailed のときの失敗の要約。
 	Error *string
+}
+
+// ingestItemFromBinding は sb（反映後の対応）から IngestItemResult を組み立てる
+// （createChallengeFromIssue・applyIngestReflection が共有する）。
+func ingestItemFromBinding(sb *sourceBinding, outcome IngestOutcome) IngestItemResult {
+	return IngestItemResult{
+		ExternalKey:       sb.ExternalKey,
+		ChallengeID:       sb.ChallengeID,
+		Result:            outcome,
+		UpstreamState:     string(sb.UpstreamState),
+		PolicyState:       string(sb.PolicyState),
+		CommentsCount:     sb.CommentsCount,
+		UpstreamUpdatedAt: sb.UpstreamUpdatedAt,
+		Unread:            unreadKinds(sb.CommentsCount, sb.ReadCommentsCount, sb.UpstreamUpdatedAt, sb.ReadUpstreamUpdatedAt),
+	}
 }
 
 // Ingest は in.Sources を宣言の順に処理する 1 回の取り込みの実行本体
@@ -317,6 +343,7 @@ func (s *Store) reconcileBoundIssue(ctx context.Context, actor string, ch Channe
 
 		newUpstreamState := sb.UpstreamState
 		newPolicyState := sb.PolicyState
+		var observation *observationChange
 		if outcome != IngestOutcomeSkippedDone {
 			if sb.UpstreamState == upstreamStateClosed || sb.UpstreamState == upstreamStateMissing {
 				newUpstreamState = upstreamStateOpen
@@ -328,9 +355,12 @@ func (s *Store) reconcileBoundIssue(ctx context.Context, actor string, ch Channe
 					newPolicyState = policyStateOutOfPolicy
 				}
 			}
+			// 観測値の更新は fingerprint の一致・不一致・版が未知・ポリシーの状態・
+			// self_assignees の解決の成否によらない（§上流の更新の観測と既読）。
+			observation = computeObservationChange(sb, issue.Comments, issue.UpdatedAt)
 		}
 
-		plan := ingestReflection{outcome: outcome, upstream: newUpstreamState, policy: newPolicyState}
+		plan := ingestReflection{outcome: outcome, upstream: newUpstreamState, policy: newPolicyState, observation: observation}
 		if outcome == IngestOutcomeUpdated {
 			plan.human = &humanFieldChange{
 				title:       issue.Title,
@@ -360,6 +390,38 @@ type ingestReflection struct {
 	// 現在の値を入れる）。
 	upstream upstreamState
 	policy   policyState
+	// observation は観測値の置き換え。nil なら変えない
+	// （§上流の更新の観測と既読）。
+	observation *observationChange
+}
+
+// observationChange は観測値（コメント数・更新日時）の置き換え後の値。
+type observationChange struct {
+	commentsCount     int
+	upstreamUpdatedAt string
+	// firstObservationReadUpdatedAt が非 nil なら、read_upstream_updated_at も
+	// この値へ置き換える（0003 の前に作られた対応が初めて観測値を得る場合。
+	// §クリティカル設計決定 1）。この場合の読んだ時点のコメント数は 0 のまま
+	// （既定値）にする（QH11 と同じ扱い）。
+	firstObservationReadUpdatedAt *string
+}
+
+// computeObservationChange は sb の観測値と、上流の最新の観測値
+// （newComments・newUpdatedAt）を比べ、変化があれば置き換えの計画を返す
+// （§上流の更新の観測と既読「観測値が記録と違えば、観測値を上流の値で
+// 置き換える」）。sb.ReadUpstreamUpdatedAt が ""（0003 の前に作られ、まだ
+// 観測していない対応）なら、read_upstream_updated_at も同時に埋める
+// （§クリティカル設計決定 1）。変化が無ければ nil。
+func computeObservationChange(sb *sourceBinding, newComments int, newUpdatedAt string) *observationChange {
+	if newComments == sb.CommentsCount && newUpdatedAt == sb.UpstreamUpdatedAt {
+		return nil
+	}
+	oc := &observationChange{commentsCount: newComments, upstreamUpdatedAt: newUpdatedAt}
+	if sb.ReadUpstreamUpdatedAt == "" {
+		v := newUpdatedAt
+		oc.firstObservationReadUpdatedAt = &v
+	}
+	return oc
 }
 
 // humanFieldChange は人間記入欄（タイトル・説明・緊急度）と fingerprint の
@@ -372,27 +434,23 @@ type humanFieldChange struct {
 }
 
 // applyIngestReflection は plan を反映する（呼び出し元は reconcileBoundIssue と
-// confirmOpenListAbsence）。人間記入欄・上流の状態・ポリシーの状態のうち実際に
-// 変わるものをまとめ、変化が 1 つも無ければ何も書き込まない（§作業ログと版
-// 「値が変わらなければ記録しない」）。変化があれば:
+// confirmOpenListAbsence）。人間記入欄・上流の状態・ポリシーの状態・観測値の
+// うち実際に変わるものをまとめ、変化が 1 つも無ければ何も書き込まない
+// （§作業ログと版「値が変わらなければ記録しない」）。変化があれば:
 //   - challenge の UPDATE を 1 回（版を 1 だけ増やす）
 //   - source_binding の更新を applySourceBindingUpdate で 1 回
 //   - 変わった契機ごとに作業ログのエントリを 1 つ（順は ingest_update →
-//     upstream_state_change → policy_state_change。§作業ログと版）。各エントリの
-//     after.version はどれも増やした後の同じ版
+//     upstream_state_change → policy_state_change → upstream_observation_change。
+//     §作業ログと版）。各エントリの after.version はどれも増やした後の同じ版
 func applyIngestReflection(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64, current *Challenge, sb *sourceBinding, plan ingestReflection) (*IngestItemResult, error) {
 	humanChanged := plan.human != nil
 	upstreamChanged := plan.upstream != sb.UpstreamState
 	policyChanged := plan.policy != sb.PolicyState
+	observationChanged := plan.observation != nil
 
-	if !humanChanged && !upstreamChanged && !policyChanged {
-		return &IngestItemResult{
-			ExternalKey:   sb.ExternalKey,
-			ChallengeID:   sb.ChallengeID,
-			Result:        plan.outcome,
-			UpstreamState: string(sb.UpstreamState),
-			PolicyState:   string(sb.PolicyState),
-		}, nil
+	if !humanChanged && !upstreamChanged && !policyChanged && !observationChanged {
+		item := ingestItemFromBinding(sb, plan.outcome)
+		return &item, nil
 	}
 
 	newTitle, newDescription, newUrgency := current.Title, current.Description, current.Urgency
@@ -448,7 +506,17 @@ func applyIngestReflection(ctx context.Context, tx *sql.Tx, rec *activityRecorde
 		policy := plan.policy
 		sbUpdate.PolicyState = &policy
 	}
-	if _, _, err := applySourceBindingUpdate(ctx, tx, rec.at, cid, sbUpdate); err != nil {
+	if observationChanged {
+		cc := plan.observation.commentsCount
+		sbUpdate.CommentsCount = &cc
+		uu := plan.observation.upstreamUpdatedAt
+		sbUpdate.UpstreamUpdatedAt = &uu
+		if plan.observation.firstObservationReadUpdatedAt != nil {
+			sbUpdate.ReadUpstreamUpdatedAt = plan.observation.firstObservationReadUpdatedAt
+		}
+	}
+	_, next, err := applySourceBindingUpdate(ctx, tx, rec.at, cid, sbUpdate)
+	if err != nil {
 		return nil, err
 	}
 
@@ -472,14 +540,32 @@ func applyIngestReflection(ctx context.Context, tx *sql.Tx, rec *activityRecorde
 			return nil, err
 		}
 	}
+	if observationChanged {
+		before := map[string]any{}
+		after := map[string]any{}
+		if plan.observation.commentsCount != sb.CommentsCount {
+			before["comments_count"] = sb.CommentsCount
+			after["comments_count"] = plan.observation.commentsCount
+		}
+		if plan.observation.upstreamUpdatedAt != sb.UpstreamUpdatedAt {
+			before["upstream_updated_at"] = nullableTextColumn(sb.UpstreamUpdatedAt)
+			after["upstream_updated_at"] = nullableTextColumn(plan.observation.upstreamUpdatedAt)
+		}
+		if plan.observation.firstObservationReadUpdatedAt != nil {
+			// §クリティカル設計決定 1: 0003 の前に作られた対応が初めて観測値を
+			// 得るときは、read_upstream_updated_at も同時に埋まるので同じ
+			// エントリに含める（この場合 upstream_read は記録しない）。
+			before["read_upstream_updated_at"] = nil
+			after["read_upstream_updated_at"] = *plan.observation.firstObservationReadUpdatedAt
+		}
+		after["version"] = newVersion
+		if err := rec.record("challenge", cid, "upstream_observation_change", before, after); err != nil {
+			return nil, err
+		}
+	}
 
-	return &IngestItemResult{
-		ExternalKey:   sb.ExternalKey,
-		ChallengeID:   sb.ChallengeID,
-		Result:        plan.outcome,
-		UpstreamState: string(plan.upstream),
-		PolicyState:   string(plan.policy),
-	}, nil
+	item := ingestItemFromBinding(next, plan.outcome)
+	return &item, nil
 }
 
 // createChallengeFromIssue は 1 つの書き込みトランザクションの中で、対応が
@@ -507,33 +593,36 @@ func (s *Store) createChallengeFromIssue(ctx context.Context, actor string, ch C
 			return err
 		}
 
+		// 作成時の観測値は Issue の comments・updated_at、読んだ時点のコメント数は
+		// 0、読んだ時点の更新日時は作成時の観測値の更新日時にする（本文は読んだ
+		// もの、コメントは未読とみなす＝QH11）。
 		sb, err := insertSourceBinding(ctx, tx, rec.at, id, createSourceBindingInput{
-			SourceID:      src.ID,
-			ExternalKey:   issue.ExternalKey,
-			URL:           issue.URL,
-			Fingerprint:   fp,
-			UpstreamState: upstreamStateOpen,
-			PolicyState:   policyStateInPolicy,
+			SourceID:              src.ID,
+			ExternalKey:           issue.ExternalKey,
+			URL:                   issue.URL,
+			Fingerprint:           fp,
+			UpstreamState:         upstreamStateOpen,
+			PolicyState:           policyStateInPolicy,
+			CommentsCount:         issue.Comments,
+			UpstreamUpdatedAt:     issue.UpdatedAt,
+			ReadCommentsCount:     0,
+			ReadUpstreamUpdatedAt: issue.UpdatedAt,
 		})
 		if err != nil {
 			return err
 		}
 
 		// after は課題の人間記入欄と external_key（M1 の create と同じく version
-		// は載せない。§作業ログと版）。
+		// は載せない。§作業ログと版）。観測値は載せない（作成時の観測値は show で
+		// 読める。§作業ログと版の注記）。
 		after := createdChallengeAfter(issue.Title, issue.Body, "", urgency, issue.Reporter)
 		after["external_key"] = sb.ExternalKey
 		if err := rec.record("challenge", id, "ingest_create", nil, after); err != nil {
 			return err
 		}
 
-		item = &IngestItemResult{
-			ExternalKey:   sb.ExternalKey,
-			ChallengeID:   formatChallengeID(id),
-			Result:        IngestOutcomeCreated,
-			UpstreamState: string(sb.UpstreamState),
-			PolicyState:   string(sb.PolicyState),
-		}
+		createdItem := ingestItemFromBinding(sb, IngestOutcomeCreated)
+		item = &createdItem
 		return nil
 	})
 	if err != nil {
@@ -767,27 +856,30 @@ func (s *Store) confirmOpenListAbsence(ctx context.Context, actor string, ch Cha
 		}
 
 		var newState upstreamState
+		var observation *observationChange
 		switch {
 		case errors.Is(getErr, ErrUpstreamIssueNotFound), errors.Is(getErr, ErrUpstreamIssueTransferred):
 			// #69: 改名・移管の転送を辿って別リポジトリの Issue が返った場合も、
 			// 404・410 と同じく missing に写す（削除・移管・閲覧権限の喪失を
-			// 区別しない、という #58 からの方針をそのまま適用する）。
+			// 区別しない、という #58 からの方針をそのまま適用する）。観測値は
+			// 変えない（応答の本文が無い＝§上流の更新の観測と既読【仮定】）。
 			newState = upstreamStateMissing
 		case getErr != nil:
+			// 観測値は変えない（§上流の更新の観測と既読【仮定】）。
 			msg := getErr.Error()
-			item = &IngestItemResult{
-				ExternalKey:   sb.ExternalKey,
-				ChallengeID:   sb.ChallengeID,
-				Result:        IngestOutcomeFailed,
-				UpstreamState: string(sb.UpstreamState),
-				PolicyState:   string(sb.PolicyState),
-				Error:         &msg,
-			}
+			resultItem := ingestItemFromBinding(sb, IngestOutcomeFailed)
+			resultItem.Error = &msg
+			item = &resultItem
 			return nil
 		case issue.State == "closed":
 			newState = upstreamStateClosed
+			// close を確かめる 1 件の取得で open か closed と分かった応答の
+			// comments・updated_at で観測値を置き換える（§上流の更新の観測と
+			// 既読【仮定】）。
+			observation = computeObservationChange(sb, issue.Comments, issue.UpdatedAt)
 		default:
 			newState = upstreamStateOpen
+			observation = computeObservationChange(sb, issue.Comments, issue.UpdatedAt)
 		}
 
 		// 版の増分・source_binding の更新・upstream_state_change の記録は
@@ -796,9 +888,10 @@ func (s *Store) confirmOpenListAbsence(ctx context.Context, actor string, ch Cha
 		// 現状のまま、result は unchanged とする【仮定】（変化が無ければ何も書き込ま
 		// ない）。
 		item, err = applyIngestReflection(ctx, tx, rec, cid, current, sb, ingestReflection{
-			outcome:  IngestOutcomeUnchanged,
-			upstream: newState,
-			policy:   sb.PolicyState,
+			outcome:     IngestOutcomeUnchanged,
+			upstream:    newState,
+			policy:      sb.PolicyState,
+			observation: observation,
 		})
 		return err
 	})

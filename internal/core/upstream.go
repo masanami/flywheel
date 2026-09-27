@@ -74,6 +74,12 @@ type UpstreamIssue struct {
 	// URL は REST API の応答の html_url（"https://github.com/<owner>/<name>/
 	// issues/<番号>" の形。API のエンドポイントを指す url ではない）。
 	URL string
+	// Comments は観測値のコメント数（REST の `comments`。
+	// docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読）。
+	Comments int
+	// UpdatedAt は観測値の更新日時（REST の `updated_at` の文字列をそのまま
+	// 持つ。加工・パースしない＝§クリティカル設計決定 1）。
+	UpdatedAt string
 }
 
 // UpstreamIssueSource は取り込みの規則（core。#56）が呼ぶ、上流（GitHub）取得の

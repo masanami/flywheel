@@ -120,6 +120,14 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	"log": {setup: func(t *testing.T, ws string) []string {
 		return []string{"log", createForCase(t, ws)}
 	}},
+	"mark-read": {setup: func(t *testing.T, ws string) []string {
+		id := createForCase(t, ws)
+		bindSourceForDiscrepancyCase(t, ws, id, "o/r#1", "open", "in_policy")
+		// 未読の更新（comments_count > read_comments_count）がある状態にして、
+		// mark-read が実際に changed=true になる経路を通す。
+		coretest.SetSourceBindingObservation(t, ws, challengeIDToInternalID(t, id), 2, "2026-09-25T08:00:00.000Z", 0, "")
+		return []string{"mark-read", id}
+	}},
 	"ingest": {setup: func(t *testing.T, ws string) []string {
 		writeSourcesDeclaration(t, ws, validSourcesDeclaration)
 		// #59 で取得と反映を結線した後は、この横断テスト（jsondoc の形の照合。

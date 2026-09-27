@@ -121,6 +121,7 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 		{"status"},
 		{"log"},
 		{"ingest"},
+		{"mark-read", "C-1"},
 	}
 
 	assertCasesCoverExactlyDefaultCommandsAndRequireStoreExceptInit(t, cases)

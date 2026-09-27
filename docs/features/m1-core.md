@@ -221,7 +221,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `approvals` | `{"kind", "decision", "operation_id", "target_version", "actor", "channel", "verification", "reason", "decided_at"}`（`operation_id`・`reason` は `null` 可） |
 | `holds` | `{"question", "from_status", "from_status_label", "raised_at", "answer", "answered_at", "answered_by"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`） |
 | `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
-| `source_binding` | `{"source_id", "external_key", "url", "fingerprint", "upstream_state", "policy_state", "created_at", "updated_at"}`（対応の無い課題では `source_binding` 自体が `null`） |
+| `source_binding` | `{"source_id", "external_key", "url", "fingerprint", "upstream_state", "policy_state", "comments_count", "upstream_updated_at", "read_comments_count", "read_upstream_updated_at", "created_at", "updated_at"}`（対応の無い課題では `source_binding` 自体が `null`。`comments_count`・`upstream_updated_at`・`read_comments_count`・`read_upstream_updated_at` は #72（上流の更新の観測と既読）が追加。`upstream_updated_at`・`read_upstream_updated_at` は未設定なら `null`） |
 
 #9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。#12 で `approvals` への書き込みと `holds` の `answer`・`answered_at`・`answered_by` の記録が入った。#13 で `operations` への書き込み（`op add`）と、完了の承認による `release` の一括承認（D12）が入った）。`source_binding` は #56（M2）が GitHub Issue から取り込んだ課題に対して作る（`create` で作った課題・スキーマ版 1 から上げたストアの既存の課題は `null`）。
 
@@ -279,13 +279,13 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 |---|---|---|
 | `needs_human.challenges` | array | 人間の操作を待っているもの: 計画承認待ち・完了確認待ち・人間対応待ちの課題。要素は `challenge`（上表と同じ形） |
 | `needs_human.operations` | array | 人間の操作を待っているもの: 未承認（`state=pending`）の不可逆操作。要素は `show` の `operations` の要素と同じ形 |
-| `needs_human.discrepancies` | array | 完了していない課題のうち、上流の close・消失（`upstream_state` が `closed`／`missing`）、または取り込み元のポリシーに合わなくなった（`policy_state` が `out_of_policy`）もの（docs/features/m2-github-issue-ingest.md §食い違いの表示）。要素は下表と同じ形。`challenge_id` 昇順。食い違いの無いワークスペースでは `[]` |
+| `needs_human.discrepancies` | array | 完了していない課題のうち、上流の close・消失（`upstream_state` が `closed`／`missing`）、取り込み元のポリシーに合わなくなった（`policy_state` が `out_of_policy`）、または未読の更新がある（docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読）もの。要素は下表と同じ形。`challenge_id` 昇順。食い違いの無いワークスペースでは `[]` |
 | `actionable.challenges` | array | システムが次に進められるもの: 未分類・分類済・着手中・検証中の課題。要素は `challenge`（上表と同じ形） |
 | `approved.operations` | array | 承認済みの不可逆操作（`state=approved`）。要素は `show` の `operations` の要素と同じ形 |
 
 | 一覧 | 要素の形 |
 |---|---|
-| `discrepancy`（`needs_human.discrepancies` の要素。1 列目は照合テストが読む要素の名前） | `{"challenge_id", "kinds"}`（`kinds` は `upstream_closed`・`upstream_missing`・`out_of_policy` の空でない部分集合。この列挙の順。#58 が導くのはこの3種類まで） |
+| `discrepancy`（`needs_human.discrepancies` の要素。1 列目は照合テストが読む要素の名前） | `{"challenge_id", "kinds"}`（`kinds` は `upstream_closed`・`upstream_missing`・`out_of_policy`・`upstream_commented`・`upstream_updated` の空でない部分集合。この列挙の順。`upstream_commented`・`upstream_updated` は #72〔上流の更新の観測と既読〕が追加） |
 
 完了（`done`）の課題と差し戻し済み（`state=rejected`）の不可逆操作はどの一覧にも含めない。各一覧は `id` 昇順（`discrepancies` は `challenge_id` の昇順）。
 
@@ -297,14 +297,24 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 |---|---|
 | `sources`（`ingest` の最上位の一覧。要素の名前は `source`） | `{"id", "self_assignees_resolved", "repos"}` |
 | `repos`（`source` の一覧。要素の名前は `repo`） | `{"repo", "error", "items", "excluded"}` |
-| `items`（`repo` の一覧。要素の名前は `item`） | `{"external_key", "challenge_id", "result", "upstream_state", "policy_state", "error"}` |
+| `items`（`repo` の一覧。要素の名前は `item`） | `{"external_key", "challenge_id", "result", "upstream_state", "policy_state", "comments_count", "upstream_updated_at", "unread", "error"}`（`comments_count`・`upstream_updated_at`・`unread` は #72〔上流の更新の観測と既読〕が追加） |
 
 - `result` は `created`\|`updated`\|`unchanged`\|`skipped_done`\|`fingerprint_unknown_version`\|`failed` の閉集合（`core.IngestOutcomeValues()` と同じ順）。
 - `items` は課題を作った・対応のある Issue だけを並べる。ポリシーに合わない新しい Issue は `excluded` の件数だけに数える。
 - `error`（`repo` の要素）は一覧の取得の失敗の要約。成功なら `null`。一覧の取得に失敗したリポジトリの `items` は `[]`・`excluded` は `0`。
 - `error`（`item` の要素）は、その要素の反映が失敗した（`result` が `failed`）ことの要約。一覧の取得後・1件の取得（close の確かめ）・書き込みの反映のいずれの失敗も含みうる。成功なら `null`。
 - `challenge_id`・`upstream_state`・`policy_state` は、(1) 新規作成の反映が失敗した場合、(2) 対応（`source_binding`）のある Issue の冪等な更新の反映自体が失敗した場合、(3) close の確かめ（1 件の取得）自体は成功したが、その後の反映（書き込みトランザクションでの読み直し・更新）が失敗した場合、のいずれでも `null` になる（既知の対応の情報を積まずに `failed` を返す実装になっている）。`null` にならないのは、close の確かめの **1 件の取得**（`GetIssue`）自体が失敗した場合だけで、この場合は読み直した対応の値をそのまま出力する。
-- `comments_count`・`upstream_updated_at`・`unread`（docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読）は、core の取り込みの結果（`IngestItemResult`）がまだ持たないため、この節の形に含めない。観測を実装するチケット（#65 系）がこの節へ追記する。
+- `comments_count`・`upstream_updated_at`・`unread`（docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読）は反映後の観測値・未読の更新の種類。上の3つ（`challenge_id`・`upstream_state`・`policy_state`）が `null` になる場合（対応の情報を積まずに `failed` を返す実装）は、`comments_count`・`upstream_updated_at` も同じく「不明」を表すため `null` になる（#5 の規約「未設定の任意値は `null`」。実装チケットの仮定）。`unread` はこの場合も「空の一覧は `[]`」の規則どおり `[]` のまま（他の一覧フィールドと同じ扱い）。`upstream_updated_at` は、上記以外にも `0003` の前に作られ、まだ観測していない対応では `null`。`unread` は `upstream_commented`\|`upstream_updated` の部分集合（`status` の `kinds` と同じ判定。無ければ `[]`）。
+
+##### `mark-read`（#72で追加）
+
+docs/features/m2-github-issue-ingest.md §IF / API「`mark-read` の `--json`」の形。
+
+| フィールド | 型 | 内容 |
+|---|---|---|
+| `challenge_id` | string | `"C-<n>"` |
+| `changed` | bool | 読んだ時点の値を変えたか（読んだ時点の値が観測値とすべて同じなら `false`。コメントの削除で件数が減っただけの課題も値をそろえて `true`） |
+| `source_binding` | object | 操作後の `show` の `source_binding` と同じ形 |
 
 ## 非機能要件
 
@@ -442,6 +452,7 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作 | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |
 | `flywheel ingest [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・冪等な作成と更新・上流の close の検出（#59） | — |
+| `flywheel mark-read <C-ID>` | 上流を読んだ記録を付ける（読んだ時点の値を現在の観測値で上書きする。上流は取り直さない。docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読） | — |
 
 共通フラグ: `--workspace <dir>`・`--json`。
 

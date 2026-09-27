@@ -16,7 +16,9 @@ func TestNormalizeIssue_MapsAllFields(t *testing.T) {
 		"labels": [{"name": "priority:high"}, "needs-triage"],
 		"state": "open",
 		"html_url": "https://github.com/masanami/flywheel/issues/49",
-		"repository_url": "https://api.github.com/repos/masanami/flywheel"
+		"repository_url": "https://api.github.com/repos/masanami/flywheel",
+		"comments": 5,
+		"updated_at": "2026-09-25T08:00:00Z"
 	}`)
 
 	issue, err := normalizeIssue(raw)
@@ -53,6 +55,39 @@ func TestNormalizeIssue_MapsAllFields(t *testing.T) {
 	}
 	if issue.URL != "https://github.com/masanami/flywheel/issues/49" {
 		t.Errorf("URL = %q", issue.URL)
+	}
+	// docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読: 観測値
+	// （comments・updated_at）は一覧・1件取得のどちらの応答にも含まれる項目を
+	// そのまま正規化する（追加の API 呼び出しは要らない＝QH9）。
+	if issue.Comments != 5 {
+		t.Errorf("Comments = %d, want 5", issue.Comments)
+	}
+	if issue.UpdatedAt != "2026-09-25T08:00:00Z" {
+		t.Errorf("UpdatedAt = %q, want %q", issue.UpdatedAt, "2026-09-25T08:00:00Z")
+	}
+}
+
+// docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読「観測する
+// 機会は、open の一覧の各要素と、close を確かめる1件の取得の応答」: comments・
+// updated_at が応答に無い（省略された）場合は既定値（0・空文字列）になる
+// （fail する必要は無い。normalizeIssue は他の必須フィールドの欠落だけで
+// 失敗する）。
+func TestNormalizeIssue_MissingCommentsAndUpdatedAtDefaultToZeroValues(t *testing.T) {
+	raw := []byte(`{
+		"number": 1, "title": "t", "body": "b", "user": {"login": "u"},
+		"assignees": [], "labels": [], "state": "open",
+		"html_url": "https://github.com/masanami/flywheel/issues/1",
+		"repository_url": "https://api.github.com/repos/masanami/flywheel"
+	}`)
+	issue, err := normalizeIssue(raw)
+	if err != nil {
+		t.Fatalf("normalizeIssue: %v", err)
+	}
+	if issue.Comments != 0 {
+		t.Errorf("Comments = %d, want 0", issue.Comments)
+	}
+	if issue.UpdatedAt != "" {
+		t.Errorf("UpdatedAt = %q, want empty string", issue.UpdatedAt)
 	}
 }
 

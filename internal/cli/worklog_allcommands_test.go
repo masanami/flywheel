@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
 // このファイルは Issue #30 の受入基準（AC-63・AC-64）を、登録表
@@ -370,6 +371,23 @@ var worklogCases = []worklogCase{
 				{"challenge", "C-1", "op_reject", nil,
 					map[string]any{"operation_id": "OP-1", "version": 3.0}},
 			}
+		},
+	},
+	{
+		// #72: mark-read は未読の更新があるとき、読んだ時点の値を現在の
+		// 観測値で上書きし upstream_read を記録する（docs/features/
+		// m2-github-issue-ingest.md §上流の更新の観測と既読）。
+		name: "mark-read", command: "mark-read",
+		setup: func(t *testing.T, ws string) []string {
+			id := createForCase(t, ws)
+			bindSourceForDiscrepancyCase(t, ws, id, "o/r#1", "open", "in_policy")
+			coretest.SetSourceBindingObservation(t, ws, challengeIDToInternalID(t, id), 3, "2026-09-25T08:00:00.000Z", 0, "")
+			return []string{"mark-read", id}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"challenge", "C-1", "upstream_read",
+				map[string]any{"read_comments_count": 0, "read_upstream_updated_at": nil},
+				map[string]any{"read_comments_count": 3, "read_upstream_updated_at": "2026-09-25T08:00:00.000Z", "version": 2.0}}}
 		},
 	},
 	{
