@@ -34,7 +34,14 @@ func TestMain(m *testing.M) {
 		confirmHelperMain()
 		return
 	}
-	os.Exit(m.Run())
+	cleanup, err := installRealGHGuard()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: %v\n", err)
+		os.Exit(1)
+	}
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
 }
 
 func busyHolderMain() {

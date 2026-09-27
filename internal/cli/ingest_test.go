@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/masanami/flywheel/internal/core/coretest"
@@ -34,27 +33,11 @@ func writeFakeGH(t *testing.T) (dir string, calls func() []string) {
 	}
 	dir = t.TempDir()
 	logPath := filepath.Join(dir, "gh-calls.log")
-	script := "#!/bin/sh\nprintf 'CALL %s\\n' \"$*\" >> \"" + logPath + "\"\nexit 0\n"
+	script := "#!/bin/sh\n" + fakeGHLogAppendLine(logPath) + "exit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
-	return dir, func() []string {
-		data, err := os.ReadFile(logPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			t.Fatalf("read fake gh log: %v", err)
-		}
-		// 各呼び出しは必ず1つの "\n" で終わるため、Split は末尾に余分な空要素を
-		// 1つ生む。それだけを取り除く（TrimRight で全体を trim すると、
-		// 引数なしの呼び出し=空行が正当な記録ごと失われる）。
-		lines := strings.Split(string(data), "\n")
-		if len(lines) > 0 && lines[len(lines)-1] == "" {
-			lines = lines[:len(lines)-1]
-		}
-		return lines
-	}
+	return dir, func() []string { return readFakeGHCallLog(t, logPath) }
 }
 
 // withFakeGHOnPATH は fake gh のディレクトリを PATH の先頭に足す。実際に
@@ -230,25 +213,32 @@ func TestIngest_StoreTooNew_DoesNotInvokeGH(t *testing.T) {
 	}
 }
 
-// TestIngest_ValidDeclaration_SucceedsWithEmptyResult は、取り込みの本体
-// （取得・作成・更新）が未結線の間の成功時の振る舞い（完了条件「宣言が妥当なら
-// 空の結果を返す」）を検証する。gh は呼ばれない（本体が未結線のため）。
-func TestIngest_ValidDeclaration_SucceedsWithEmptyResult(t *testing.T) {
+// TestIngest_ValidDeclaration_CallsGHAndReturnsSourceShape は、取得と反映の
+// 結線後（#59）の振る舞い: 宣言と --source の検証を通ったら、実際に gh を
+// 呼び、取り込み元・リポジトリごとの結果を返す（#54 時点の「常に空の結果を
+// 返す」という仮定はここで置き換える。取得・作成・更新の中身そのものの検証は
+// internal/cli/ingest_wiring_test.go・internal/core の各テストが担う）。
+func TestIngest_ValidDeclaration_CallsGHAndReturnsSourceShape(t *testing.T) {
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, validSourcesDeclaration)
-	calls := withFakeGHOnPATH(t)
+	calls := withFakeGHRoutesOnPATH(t, []fakeGHRoute{
+		fakeGHListRoute("example-owner/example-repo", 1, "[]", 0),
+		{match: "api user", stdout: `{"login":"someone"}`, exit: 0},
+	})
 
 	got := runJSON(t, ws, "ingest")
 
 	sources, ok := got["sources"].([]any)
-	if !ok {
-		t.Fatalf(`ingest --json output has no "sources" array: %v`, got)
+	if !ok || len(sources) != 1 {
+		t.Fatalf(`ingest --json "sources" = %v, want exactly the 1 declared source`, got)
 	}
-	if len(sources) != 0 {
-		t.Errorf("sources = %v, want empty (取り込み本体は未結線)", sources)
+	source := findSourceByID(t, sources, "harness-repo-issues")
+	repos := reposOf(t, source)
+	if len(repos) != 1 || repos[0]["repo"] != "example-owner/example-repo" || repos[0]["error"] != nil {
+		t.Errorf("source.repos = %v, want 1 repo (example-owner/example-repo) with error=nil", repos)
 	}
-	if callList := calls(); len(callList) != 0 {
-		t.Errorf("gh must not be invoked while the ingest body is unwired, got calls: %v", callList)
+	if callList := calls(); len(callList) == 0 {
+		t.Errorf("gh must be invoked now that the ingest body is wired, got no calls")
 	}
 }
 
@@ -258,15 +248,15 @@ func TestIngest_ValidDeclaration_SucceedsWithEmptyResult(t *testing.T) {
 func TestIngest_ValidDeclarationWithKnownSource_Succeeds(t *testing.T) {
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, validSourcesDeclaration)
-	calls := withFakeGHOnPATH(t)
+	withFakeGHRoutesOnPATH(t, []fakeGHRoute{
+		fakeGHListRoute("example-owner/example-repo", 1, "[]", 0),
+		{match: "api user", stdout: `{"login":"someone"}`, exit: 0},
+	})
 
 	got := runJSON(t, ws, "ingest", "--source", "harness-repo-issues")
 
 	sources, ok := got["sources"].([]any)
-	if !ok || len(sources) != 0 {
-		t.Errorf(`ingest --source <known id> --json = %v, want {"sources":[]}`, got)
-	}
-	if callList := calls(); len(callList) != 0 {
-		t.Errorf("gh must not be invoked while the ingest body is unwired, got calls: %v", callList)
+	if !ok || len(sources) != 1 {
+		t.Errorf(`ingest --source <known id> --json sources = %v, want exactly 1 source`, sources)
 	}
 }

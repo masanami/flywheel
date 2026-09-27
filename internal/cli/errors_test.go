@@ -31,6 +31,7 @@ func TestExitCodeFor_KnownCodes(t *testing.T) {
 		{CodeVerificationRejected, 1},
 		{CodeConfigNotFound, 2},
 		{CodeConfigInvalid, 2},
+		{CodeUpstreamUnavailable, 2},
 	}
 	for _, c := range cases {
 		if got := ExitCodeFor(c.code); got != c.want {

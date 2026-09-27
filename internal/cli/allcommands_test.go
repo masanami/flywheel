@@ -122,12 +122,14 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	}},
 	"ingest": {setup: func(t *testing.T, ws string) []string {
 		writeSourcesDeclaration(t, ws, validSourcesDeclaration)
-		// self-review 指摘: 取り込みの本体（#59）が結線された後にこの横断テストが
-		// 偽の gh を置き忘れていると、本物の gh・GitHub を呼んでしまう
-		// （m2-github-issue-ingest.md「go test ./... は本物の gh と GitHub を
-		// 呼ばない」）。今は ingest が gh を呼ばないため無害だが、先回りして
-		// 置いておく（戻り値の calls は、この横断テストの枠組みでは使わない）。
-		withFakeGHOnPATH(t)
+		// #59 で取得と反映を結線した後は、この横断テスト（jsondoc の形の照合。
+		// AC-94）が実際に items 配下の要素（item の形）まで踏むよう、偽の gh に
+		// 1 件の Issue を返させる（空の一覧だと item の形が一度も照合されない）。
+		withFakeGHRoutesOnPATH(t, []fakeGHRoute{
+			fakeGHListRoute("example-owner/example-repo", 1, fakeGHIssueListBody(t, []fakeGHIssue{
+				{Number: 1, Title: "allcommands smoke", Body: "body", Repo: "example-owner/example-repo"},
+			}), 0),
+		})
 		return []string{"ingest"}
 	}},
 }
