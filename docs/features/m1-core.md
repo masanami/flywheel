@@ -313,7 +313,7 @@ docs/features/m2-github-issue-ingest.md §IF / API「`mark-read` の `--json`」
 | フィールド | 型 | 内容 |
 |---|---|---|
 | `challenge_id` | string | `"C-<n>"` |
-| `changed` | bool | 読んだ時点の値を変えたか（未読の更新が無ければ `false`） |
+| `changed` | bool | 読んだ時点の値を変えたか（読んだ時点の値が観測値とすべて同じなら `false`。コメントの削除で件数が減っただけの課題も値をそろえて `true`） |
 | `source_binding` | object | 操作後の `show` の `source_binding` と同じ形 |
 
 ## 非機能要件

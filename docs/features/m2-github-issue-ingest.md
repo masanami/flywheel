@@ -126,7 +126,7 @@ GitHub Issue を課題としてストアへ取り込む adapter を、LLM を一
   - `upstream_updated`（上流の何らかの更新。ラベル・assignee の変更でも起きる）: 観測値の更新日時が、読んだ時点の更新日時と違う
 - [ ] 読んだ記録は `flywheel mark-read <C-ID>` で付ける。読んだ時点の値を、ストアにある現在の観測値で上書きする。上流は取り直さない（`gh` を呼ばない）【QH13】
 - [ ] `mark-read` は本人確認のない単発の操作である。経路は `cli`、本人確認の方式は `none`、actor は OS のログインユーザー名【QH13】
-- [ ] 未読の更新が無い課題への `mark-read` は、何も変えずに成功する（M1 の「値が変わらない操作は作業ログを残さない」）
+- [ ] `mark-read` は、読んだ時点の値が観測値と 1 つでも違えば、未読の更新が無くても（コメントの削除で件数が減っただけでも）観測値へそろえる。読んだ時点の値が観測値とすべて同じ課題への `mark-read` だけが、何も変えずに成功する（M1 の「値が変わらない操作は作業ログを残さない」）【決定 2026-09-27 オーナー。PR #74。読んだ時点の件数が大きいまま残ると、その後に足されたコメントに `upstream_commented` が出ないため】
 - [ ] 対応の無い課題への `mark-read` は `validation_failed`、完了した課題への `mark-read` は `terminal_state`、無い ID は `not_found` で拒否する【仮定】
 
 M3 の J2 は、core の同じ公開 API で読んだ記録を付ける（§M3 への申し送り）。
@@ -362,7 +362,7 @@ M1 §成功時の JSON 出力の規約に従う（包みなし・snake_case・�
 
 - `status`: `needs_human` に `discrepancies`（配列）を足す。要素は `{"challenge_id", "kinds"}`。`kinds` は `upstream_closed | upstream_missing | out_of_policy | upstream_commented | upstream_updated` の部分集合（空でない。配列の中の順はこの列挙の順【仮定】）。`upstream_commented`・`upstream_updated` は 2026-09-26 にオーナー QH10 で足した。`challenge_id` の昇順。
 - `show`: 最上位に `source_binding` を足す。対応があれば `{"source_id", "external_key", "url", "fingerprint", "upstream_state", "policy_state", "comments_count", "upstream_updated_at", "read_comments_count", "read_upstream_updated_at", "created_at", "updated_at"}`、無ければ `null`。`upstream_updated_at`・`read_upstream_updated_at` は未設定なら `null`（§クリティカル設計決定 1）。
-- `mark-read` の `--json`: `{"challenge_id", "changed", "source_binding"}`。`changed` は読んだ時点の値を変えたか（未読の更新が無ければ `false`）、`source_binding` は操作後の `show` と同じ形【仮定】。
+- `mark-read` の `--json`: `{"challenge_id", "changed", "source_binding"}`。`changed` は読んだ時点の値を変えたか（読んだ時点の値が観測値とすべて同じなら `false`。2026-09-27 オーナー決定）、`source_binding` は操作後の `show` と同じ形【仮定】。
 - M1 の `internal/cli/jsondoc_test.go`（全コマンドの成功出力の形の照合）に、`ingest`・`mark-read` と上の拡張を足す。
 
 #### 作業ログ【決定 2026-09-24 親 QP6】
@@ -638,7 +638,7 @@ M2 では決めず、M3 の設計への入力として記録する（flywheel#65
 - [ ] `mark-read` で読んだ時点の値が変わると、`action` が `upstream_read`・actor が OS のログインユーザー名・経路が `cli`・本人確認の方式が `none` のエントリが作業ログに残る
 - [ ] `mark-read` の `upstream_read` のエントリの `before`・`after` は、変わった `read_comments_count`・`read_upstream_updated_at` を持つ
 - [ ] `mark-read` で読んだ時点の値が変わると、課題の版が 1 増える
-- [ ] 未読の更新が無い課題への `mark-read` は終了コード 0 で終わり、`changed` が `false` で、課題・対応の記録・作業ログ・版のいずれも変えない
+- [ ] 読んだ時点の値が観測値とすべて同じ課題への `mark-read` は終了コード 0 で終わり、`changed` が `false` で、課題・対応の記録・作業ログ・版のいずれも変えない
 - [ ] 対応の無い課題（`create` で作ったもの）への `mark-read` は、終了コード 1・`validation_failed` で終わる
 - [ ] 完了した課題への `mark-read` は、終了コード 1・`terminal_state` で終わる
 - [ ] 無い ID への `mark-read` は、終了コード 1・`not_found` で終わる
