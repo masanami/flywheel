@@ -70,13 +70,23 @@ var (
 	// conflict」）。承認の記録・遷移・作業ログはいずれも残らない。
 	ErrConflict = errors.New("core: the challenge changed after the approval summary was shown")
 
-	// ErrConfigNotFound は取り込み元の宣言ファイル（.flywheel/sources.json）が
-	// 見つからないことを表す（docs/features/m2-github-issue-ingest.md §宣言
-	// 「宣言ファイルが無ければ、何も取得・変更せずに config_not_found で終わる」）。
-	ErrConfigNotFound = errors.New("core: sources declaration file not found")
+	// ErrConfigNotFound は .flywheel 配下の宣言ファイルが見つからないことを
+	// 表す。sources.json（docs/features/m2-github-issue-ingest.md §宣言
+	// 「宣言ファイルが無ければ、何も取得・変更せずに config_not_found で
+	// 終わる」）・connectors.json（docs/features/m3-invoker-delegation.md
+	// §宣言）が共有する（self-review 指摘: 文言が sources.json 限定だと、
+	// connectors.json の不在時に CLI の表示が誤解を招く。呼び出し側は
+	// fmt.Errorf("%w: %s", ErrConfigNotFound, path) のようにパスを付けて
+	// ラップしてよい〈errors.Is での判定には影響しない〉。agent.json は
+	// 「無ければ全既定値」なのでこのエラーを返さない。position_file の
+	// 要求は AgentDeclaration.RequirePositionFile が ErrConfigInvalid を
+	// 返す）。
+	ErrConfigNotFound = errors.New("core: declaration file not found")
 
-	// ErrConfigInvalid は取り込み元の宣言が規則に反することを表す（未知のキー・
-	// 型違い・解釈できない JSON を含む。fail-closed。
-	// docs/features/m2-github-issue-ingest.md §宣言）。
-	ErrConfigInvalid = errors.New("core: sources declaration is invalid")
+	// ErrConfigInvalid は .flywheel 配下の宣言が規則に反することを表す
+	// （未知のキー・型違い・解釈できない JSON・閉集合外の値・重複を含む。
+	// fail-closed）。sources.json（docs/features/m2-github-issue-ingest.md
+	// §宣言）・agent.json・connectors.json
+	// （docs/features/m3-invoker-delegation.md §宣言）が共有する。
+	ErrConfigInvalid = errors.New("core: declaration is invalid")
 )

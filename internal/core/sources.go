@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -184,24 +183,18 @@ func LoadSourcesDeclaration(base string) (*SourcesDeclaration, error) {
 // デコードする（DisallowUnknownFields は (1) を通り抜けたキーに対する
 // 保険として残す）。
 func parseSourcesDeclaration(data []byte) (*SourcesDeclaration, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	var raw map[string]json.RawMessage
-	if err := dec.Decode(&raw); err != nil {
+	// 末尾のゴミの拒否（"{}garbage"・"{}}"・2つ目の JSON 値）と、キーの完全一致
+	// 検査に使う生のキー集合の取得は、他の宣言ファイル（agent.json・
+	// connectors.json）と共有する jsondecl.go の decodeStrictJSONObject が担う
+	// （self-review 指摘: dec.More() だけでは "{...}}" を見逃す。ここは元の
+	// 挙動を変えない機械的な抽出）。
+	raw, err := decodeStrictJSONObject(data)
+	if err != nil {
 		return nil, err
 	}
-	// dec.Decode は最初の JSON 値までしか読まない。末尾にゴミが残っている
-	// （例: "{}garbage"・"{}}"・2つ目の JSON 値）ケースも「解釈できない JSON」
-	// として拒否する。dec.More() は次のトークンが '}'/']' のとき false を
-	// 返してしまうため使わず、次のトークンを読んで io.EOF になることを確認する
-	// （self-review 指摘: dec.More() だけでは "{...}}" を見逃す）。
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("trailing content after the JSON value")
-	}
 
-	for k := range raw {
-		if !topLevelKeys[k] {
-			return nil, fmt.Errorf("unknown top-level key %q", k)
-		}
+	if err := rejectUnknownKeys(raw, topLevelKeys, "top-level"); err != nil {
+		return nil, err
 	}
 
 	var decl SourcesDeclaration
