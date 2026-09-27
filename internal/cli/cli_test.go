@@ -55,6 +55,27 @@ func requireErrorCode(t *testing.T, args []string, wantExit int, wantCode ErrorC
 	}
 }
 
+// TestUsageText_ListsEveryRegisteredCommand は、登録表（defaultCommands()）の
+// すべてのコマンドが `--help` の「コマンド:」の一覧に行として出ることを検査する
+// （#72 で mark-read を登録したときに help への追記が漏れた。登録表を起点に
+// するので、コマンドを足すたびに手書きの一覧を直す必要は無い）。
+func TestUsageText_ListsEveryRegisteredCommand(t *testing.T) {
+	lines := strings.Split(usageText, "\n")
+	for _, c := range defaultCommands() {
+		name := strings.Join(c.Path, " ")
+		found := false
+		for _, line := range lines {
+			if line == "  "+name || strings.HasPrefix(line, "  "+name+" ") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("usageText does not list registered command %q", name)
+		}
+	}
+}
+
 func TestRun_NoArgsIsUsageError(t *testing.T) {
 	// requireErrorCode は常に --json を末尾へ追加するため nil には使えない
 	// （args=["--json"] になった瞬間、rawArgs は空でなくなり "未知のコマンド" 分岐を

@@ -29,6 +29,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   status
   log [<ID>]
   ingest [--source <id>]
+  mark-read <C-ID>
 
 詳細は docs/features/m1-core.md を参照。
 `

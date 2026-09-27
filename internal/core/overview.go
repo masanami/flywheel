@@ -43,10 +43,9 @@ type Overview struct {
 	// ApprovedOperations は承認済み（approved）の不可逆操作（id 昇順）。
 	ApprovedOperations []IrreversibleOperation
 	// Discrepancies は食い違いのある課題（id 昇順。docs/features/
-	// m2-github-issue-ingest.md §食い違いの表示）。#58 は
-	// DiscrepancyKindUpstreamClosed・DiscrepancyKindUpstreamMissing・
-	// DiscrepancyKindOutOfPolicy の 3 種類だけを導く（upstream_commented・
-	// upstream_updated は #65 系のチケットが discrepancyKinds を拡張して足す）。
+	// m2-github-issue-ingest.md §食い違いの表示）。種類は DiscrepancyKind の
+	// 閉集合（#58 の 3 種類に、#72 が upstream_commented・upstream_updated を
+	// 足した）。
 	Discrepancies []Discrepancy
 }
 
@@ -55,19 +54,23 @@ type Overview struct {
 // 拡張」の閉集合の部分集合。列挙の順で並べる）。
 type DiscrepancyKind string
 
-// DiscrepancyKind の値（#58 が導く 3 種類だけ。仕様の閉集合の順）。
+// DiscrepancyKind の値（仕様の閉集合の順。upstream_commented・upstream_updated
+// は 2026-09-26 にオーナー QH10 で足した＝§上流の更新の観測と既読）。
 const (
-	DiscrepancyKindUpstreamClosed  DiscrepancyKind = "upstream_closed"
-	DiscrepancyKindUpstreamMissing DiscrepancyKind = "upstream_missing"
-	DiscrepancyKindOutOfPolicy     DiscrepancyKind = "out_of_policy"
+	DiscrepancyKindUpstreamClosed    DiscrepancyKind = "upstream_closed"
+	DiscrepancyKindUpstreamMissing   DiscrepancyKind = "upstream_missing"
+	DiscrepancyKindOutOfPolicy       DiscrepancyKind = "out_of_policy"
+	DiscrepancyKindUpstreamCommented DiscrepancyKind = "upstream_commented"
+	DiscrepancyKindUpstreamUpdated   DiscrepancyKind = "upstream_updated"
 )
 
-// discrepancyKindValues は DiscrepancyKind の閉集合（#58 が導く分だけ。仕様の
-// 列挙の順）。
+// discrepancyKindValues は DiscrepancyKind の閉集合（仕様の列挙の順）。
 var discrepancyKindValues = []DiscrepancyKind{
 	DiscrepancyKindUpstreamClosed,
 	DiscrepancyKindUpstreamMissing,
 	DiscrepancyKindOutOfPolicy,
+	DiscrepancyKindUpstreamCommented,
+	DiscrepancyKindUpstreamUpdated,
 }
 
 // DiscrepancyKindValues は DiscrepancyKind の閉集合の写しを返す（CLI のテストが
@@ -132,12 +135,32 @@ func listOperationsInState(ctx context.Context, tx *sql.Tx, state OperationState
 	return result, rows.Err()
 }
 
-// discrepancyKinds は、対応 1 件の上流の状態・ポリシーの状態から食い違いの
-// 種類を導く（§食い違いの表示「食い違いは記録から導き、別に保存しない」）。
-// この関数だけに閉じておくことで、#65 系のチケットが未読の更新
-// （upstream_commented・upstream_updated）を足すときにここへ追記できる
-// （複数箇所に判定ロジックが散らばらない）。
-func discrepancyKinds(upstream upstreamState, policy policyState) []DiscrepancyKind {
+// unreadKinds は観測値と読んだ時点の値から未読の更新の種類を導く
+// （§上流の更新の観測と既読「未読の更新は、記録から導き、別に保存しない」）。
+// ingest の結果（IngestItemResult.Unread）と status の discrepancyKinds が
+// 同じ判定を共有する（§IF / API「`unread` は…`status` の `kinds` と同じ判定」）。
+//
+//   - upstream_commented: 観測値のコメント数が読んだ時点のコメント数より大きい
+//     （`>`。コメントの削除による件数の減少では出さない）
+//   - upstream_updated: 観測値の更新日時が読んだ時点の更新日時と違う（`!=`。
+//     前後は比べない）。どちらも "" なら「まだ観測していない」ことを表し、
+//     0003 の前に作られた対応が初めて観測値を得るまでは差が生じない
+//     （§クリティカル設計決定 1）
+func unreadKinds(commentsCount, readCommentsCount int, upstreamUpdatedAt, readUpstreamUpdatedAt string) []DiscrepancyKind {
+	var kinds []DiscrepancyKind
+	if commentsCount > readCommentsCount {
+		kinds = append(kinds, DiscrepancyKindUpstreamCommented)
+	}
+	if upstreamUpdatedAt != readUpstreamUpdatedAt {
+		kinds = append(kinds, DiscrepancyKindUpstreamUpdated)
+	}
+	return kinds
+}
+
+// discrepancyKinds は、対応 1 件の上流の状態・ポリシーの状態・観測値と読んだ
+// 時点の値から食い違いの種類を導く（§食い違いの表示「食い違いは記録から導き、
+// 別に保存しない」）。
+func discrepancyKinds(upstream upstreamState, policy policyState, commentsCount, readCommentsCount int, upstreamUpdatedAt, readUpstreamUpdatedAt string) []DiscrepancyKind {
 	var kinds []DiscrepancyKind
 	if upstream == upstreamStateClosed {
 		kinds = append(kinds, DiscrepancyKindUpstreamClosed)
@@ -148,6 +171,7 @@ func discrepancyKinds(upstream upstreamState, policy policyState) []DiscrepancyK
 	if policy == policyStateOutOfPolicy {
 		kinds = append(kinds, DiscrepancyKindOutOfPolicy)
 	}
+	kinds = append(kinds, unreadKinds(commentsCount, readCommentsCount, upstreamUpdatedAt, readUpstreamUpdatedAt)...)
 	return kinds
 }
 
@@ -157,7 +181,8 @@ func discrepancyKinds(upstream upstreamState, policy policyState) []DiscrepancyK
 // 課題）は source_binding が無いので対象にならない。
 func listDiscrepancies(ctx context.Context, tx *sql.Tx) ([]Discrepancy, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT c.id, c.status, sb.upstream_state, sb.policy_state
+		SELECT c.id, c.status, sb.upstream_state, sb.policy_state,
+		       sb.comments_count, sb.upstream_updated_at, sb.read_comments_count, sb.read_upstream_updated_at
 		FROM source_binding sb
 		JOIN challenge c ON c.id = sb.challenge_id
 		ORDER BY c.id ASC
@@ -171,13 +196,15 @@ func listDiscrepancies(ctx context.Context, tx *sql.Tx) ([]Discrepancy, error) {
 	for rows.Next() {
 		var id int64
 		var status, upstream, policy string
-		if err := rows.Scan(&id, &status, &upstream, &policy); err != nil {
+		var commentsCount, readCommentsCount int
+		var upstreamUpdatedAt, readUpstreamUpdatedAt sql.NullString
+		if err := rows.Scan(&id, &status, &upstream, &policy, &commentsCount, &upstreamUpdatedAt, &readCommentsCount, &readUpstreamUpdatedAt); err != nil {
 			return nil, err
 		}
 		if IsTerminal(Table, StatusVocabulary, Status(status)) {
 			continue
 		}
-		kinds := discrepancyKinds(upstreamState(upstream), policyState(policy))
+		kinds := discrepancyKinds(upstreamState(upstream), policyState(policy), commentsCount, readCommentsCount, upstreamUpdatedAt.String, readUpstreamUpdatedAt.String)
 		if len(kinds) == 0 {
 			continue
 		}

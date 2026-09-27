@@ -20,6 +20,11 @@ type issuePayload struct {
 	State         string       `json:"state"`
 	HTMLURL       string       `json:"html_url"`
 	RepositoryURL string       `json:"repository_url"`
+	// Comments・UpdatedAt は観測値（docs/features/m2-github-issue-ingest.md
+	// §上流の更新の観測と既読）。一覧・1件取得のどちらの応答にも含まれるため、
+	// 観測のための追加の API 呼び出しは要らない（QH9）。
+	Comments  int    `json:"comments"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 type issueUser struct {
@@ -107,6 +112,8 @@ func normalizeIssue(raw json.RawMessage) (core.UpstreamIssue, error) {
 		Labels:      labels,
 		State:       payload.State,
 		URL:         payload.HTMLURL,
+		Comments:    payload.Comments,
+		UpdatedAt:   payload.UpdatedAt,
 	}, nil
 }
 

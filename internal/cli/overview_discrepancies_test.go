@@ -166,6 +166,14 @@ func TestRunStatus_Discrepancies_KindsMatchCoreClosedSetBothWays(t *testing.T) {
 	bindSourceForDiscrepancyCase(t, ws, closedID, "o/r#1", "closed", "out_of_policy")
 	missingID := createForCase(t, ws)
 	bindSourceForDiscrepancyCase(t, ws, missingID, "o/r#2", "missing", "in_policy")
+	// upstream_commented・upstream_updated（#72）も出す: コメント数が読んだ
+	// 時点より大きい・更新日時が読んだ時点と違う対応を 1 件ずつ用意する。
+	commentedID := createForCase(t, ws)
+	bindSourceForDiscrepancyCase(t, ws, commentedID, "o/r#3", "open", "in_policy")
+	coretest.SetSourceBindingObservation(t, ws, challengeIDToInternalID(t, commentedID), 1, "", 0, "")
+	updatedID := createForCase(t, ws)
+	bindSourceForDiscrepancyCase(t, ws, updatedID, "o/r#4", "open", "in_policy")
+	coretest.SetSourceBindingObservation(t, ws, challengeIDToInternalID(t, updatedID), 0, "2026-09-25T08:00:00.000Z", 0, "2026-09-24T08:00:00.000Z")
 
 	seen := map[string]bool{}
 	for _, e := range discrepancyEntries(t, runJSON(t, ws, "status")) {

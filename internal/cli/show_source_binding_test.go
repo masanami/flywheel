@@ -50,8 +50,15 @@ func TestRunShow_SourceBindingReflectsIngestedChallenge(t *testing.T) {
 		"fingerprint":    fingerprint,
 		"upstream_state": upstreamState,
 		"policy_state":   policyState,
-		"created_at":     at,
-		"updated_at":     at,
+		// coretest.InsertSourceBinding は観測値・読んだ時点の値の列を指定しない
+		// フィクスチャなので、既定値（0003 の前に作られた対応と同じ、コメント数
+		// 0・更新日時未設定）のまま出力される（§クリティカル設計決定 1）。
+		"comments_count":           0.0,
+		"upstream_updated_at":      nil,
+		"read_comments_count":      0.0,
+		"read_upstream_updated_at": nil,
+		"created_at":               at,
+		"updated_at":               at,
 	}
 	for k, v := range want {
 		if sb[k] != v {

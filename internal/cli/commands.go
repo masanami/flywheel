@@ -238,5 +238,15 @@ func defaultCommands() []Command {
 			Flags:         []flagDef{{Name: "source", HasValue: true}},
 			Run:           runIngest,
 		},
+		{
+			// docs/features/m2-github-issue-ingest.md §IF / API「`flywheel mark-read
+			// <C-ID>`」（#72）。ネットワークへ接続しない（core.MarkRead は `gh` を
+			// 呼ばない＝QH13）。
+			Path:          []string{"mark-read"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: 1,
+			Run:           runMarkRead,
+		},
 	}
 }

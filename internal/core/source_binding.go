@@ -72,19 +72,32 @@ func (v policyState) valid() bool {
 }
 
 // sourceBinding は課題と上流の GitHub Issue の対応（§データモデル source_binding）。
+//
+// CommentsCount・ReadCommentsCount は観測値・読んだ時点のコメント数（常に非負の
+// 整数。未観測でも 0）。UpstreamUpdatedAt・ReadUpstreamUpdatedAt は観測値・
+// 読んだ時点の更新日時の文字列で、空文字列 "" を「未設定（NULL）」の内部
+// センチネルとして使う（GitHub の updated_at は常に非空の RFC3339 文字列を
+// 返すため、空文字列と衝突しない。§クリティカル設計決定 1: 0003 の適用前に
+// 作られた対応は NULL で始まる）。ポインタにしないのは、sourceBinding を値で
+// 比較する既存のテスト（== / !=）の互換性を保つため（実装チケットの選択。
+// docs/features/m2-github-issue-ingest.md はこの内部表現までは指定しない）。
 type sourceBinding struct {
-	ChallengeID   string // "C-<n>"
-	SourceID      string
-	ExternalKey   string // "<owner>/<name>#<番号>"
-	URL           string
-	Fingerprint   string // "<版>:<値>"
-	UpstreamState upstreamState
-	PolicyState   policyState
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ChallengeID           string // "C-<n>"
+	SourceID              string
+	ExternalKey           string // "<owner>/<name>#<番号>"
+	URL                   string
+	Fingerprint           string // "<版>:<値>"
+	UpstreamState         upstreamState
+	PolicyState           policyState
+	CommentsCount         int
+	UpstreamUpdatedAt     string // "" = 未設定（NULL）
+	ReadCommentsCount     int
+	ReadUpstreamUpdatedAt string // "" = 未設定（NULL）
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
-const sourceBindingSelectColumns = `SELECT challenge_id, source_id, external_key, url, fingerprint, upstream_state, policy_state, created_at, updated_at FROM source_binding`
+const sourceBindingSelectColumns = `SELECT challenge_id, source_id, external_key, url, fingerprint, upstream_state, policy_state, comments_count, upstream_updated_at, read_comments_count, read_upstream_updated_at, created_at, updated_at FROM source_binding`
 
 // loadSourceBindingWhere は cond（"challenge_id = ?" 等）に合う対応を tx から
 // 読む。対応が無ければ (nil, nil)（課題と対応は 1 対 0/1 の任意の関係なので、
@@ -93,10 +106,14 @@ func loadSourceBindingWhere(ctx context.Context, tx *sql.Tx, cond string, arg an
 	var (
 		challengeID                                               int64
 		sourceID, externalKey, url, fingerprint, upstream, policy string
+		commentsCount, readCommentsCount                          int
+		upstreamUpdatedAt, readUpstreamUpdatedAt                  sql.NullString
 		createdAtStr, updatedAtStr                                string
 	)
 	err := tx.QueryRowContext(ctx, sourceBindingSelectColumns+" WHERE "+cond, arg).
-		Scan(&challengeID, &sourceID, &externalKey, &url, &fingerprint, &upstream, &policy, &createdAtStr, &updatedAtStr)
+		Scan(&challengeID, &sourceID, &externalKey, &url, &fingerprint, &upstream, &policy,
+			&commentsCount, &upstreamUpdatedAt, &readCommentsCount, &readUpstreamUpdatedAt,
+			&createdAtStr, &updatedAtStr)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -112,15 +129,19 @@ func loadSourceBindingWhere(ctx context.Context, tx *sql.Tx, cond string, arg an
 		return nil, err
 	}
 	return &sourceBinding{
-		ChallengeID:   formatChallengeID(challengeID),
-		SourceID:      sourceID,
-		ExternalKey:   externalKey,
-		URL:           url,
-		Fingerprint:   fingerprint,
-		UpstreamState: upstreamState(upstream),
-		PolicyState:   policyState(policy),
-		CreatedAt:     createdAt,
-		UpdatedAt:     updatedAt,
+		ChallengeID:           formatChallengeID(challengeID),
+		SourceID:              sourceID,
+		ExternalKey:           externalKey,
+		URL:                   url,
+		Fingerprint:           fingerprint,
+		UpstreamState:         upstreamState(upstream),
+		PolicyState:           policyState(policy),
+		CommentsCount:         commentsCount,
+		UpstreamUpdatedAt:     upstreamUpdatedAt.String,
+		ReadCommentsCount:     readCommentsCount,
+		ReadUpstreamUpdatedAt: readUpstreamUpdatedAt.String,
+		CreatedAt:             createdAt,
+		UpdatedAt:             updatedAt,
 	}, nil
 }
 
@@ -138,14 +159,21 @@ func loadSourceBindingByExternalKey(ctx context.Context, tx *sql.Tx, externalKey
 	return loadSourceBindingWhere(ctx, tx, "external_key = ?", externalKey)
 }
 
-// createSourceBindingInput は insertSourceBinding の入力。
+// createSourceBindingInput は insertSourceBinding の入力。CommentsCount・
+// UpstreamUpdatedAt・ReadCommentsCount・ReadUpstreamUpdatedAt はゼロ値
+// （0・""）が有効な値なので、他のフィールドと違って ErrValidation の対象に
+// しない（§上流の更新の観測と既読）。
 type createSourceBindingInput struct {
-	SourceID      string
-	ExternalKey   string
-	URL           string
-	Fingerprint   string
-	UpstreamState upstreamState
-	PolicyState   policyState
+	SourceID              string
+	ExternalKey           string
+	URL                   string
+	Fingerprint           string
+	UpstreamState         upstreamState
+	PolicyState           policyState
+	CommentsCount         int
+	UpstreamUpdatedAt     string
+	ReadCommentsCount     int
+	ReadUpstreamUpdatedAt string
 }
 
 // insertSourceBinding は challengeID の課題に新しい対応を作る。呼び出し側は
@@ -174,9 +202,11 @@ func insertSourceBinding(ctx context.Context, tx *sql.Tx, at time.Time, challeng
 
 	nowStr := formatTimestamp(at)
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO source_binding (challenge_id, source_id, external_key, url, fingerprint, upstream_state, policy_state, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		challengeID, in.SourceID, in.ExternalKey, in.URL, in.Fingerprint, string(in.UpstreamState), string(in.PolicyState), nowStr, nowStr,
+		`INSERT INTO source_binding (challenge_id, source_id, external_key, url, fingerprint, upstream_state, policy_state, comments_count, upstream_updated_at, read_comments_count, read_upstream_updated_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		challengeID, in.SourceID, in.ExternalKey, in.URL, in.Fingerprint, string(in.UpstreamState), string(in.PolicyState),
+		in.CommentsCount, nullableTextColumn(in.UpstreamUpdatedAt), in.ReadCommentsCount, nullableTextColumn(in.ReadUpstreamUpdatedAt),
+		nowStr, nowStr,
 	)
 	if store.IsUniqueViolation(err) {
 		return nil, errSourceBindingExternalKeyTaken
@@ -189,12 +219,19 @@ func insertSourceBinding(ctx context.Context, tx *sql.Tx, at time.Time, challeng
 
 // updateSourceBindingInput は applySourceBindingUpdate の入力。nil のフィールドは
 // 「指定なし（変更しない）」を表す（EditInput と同じ規則）。source_id・
-// external_key は対応の同一性なので更新の対象にしない。
+// external_key は対応の同一性なので更新の対象にしない。CommentsCount・
+// UpstreamUpdatedAt・ReadCommentsCount・ReadUpstreamUpdatedAt は 0・"" も
+// 有効な指定値なので、ポインタの非 nil だけで「指定された」ことを表す
+// （URL・Fingerprint と違い、空文字列を拒否しない）。
 type updateSourceBindingInput struct {
-	URL           *string
-	Fingerprint   *string
-	UpstreamState *upstreamState
-	PolicyState   *policyState
+	URL                   *string
+	Fingerprint           *string
+	UpstreamState         *upstreamState
+	PolicyState           *policyState
+	CommentsCount         *int
+	UpstreamUpdatedAt     *string
+	ReadCommentsCount     *int
+	ReadUpstreamUpdatedAt *string
 }
 
 // applySourceBindingUpdate は challengeID の対応を部分更新し、変更前と変更後を
@@ -226,13 +263,27 @@ func applySourceBindingUpdate(ctx context.Context, tx *sql.Tx, at time.Time, cha
 	if in.PolicyState != nil {
 		next.PolicyState = *in.PolicyState
 	}
+	if in.CommentsCount != nil {
+		next.CommentsCount = *in.CommentsCount
+	}
+	if in.UpstreamUpdatedAt != nil {
+		next.UpstreamUpdatedAt = *in.UpstreamUpdatedAt
+	}
+	if in.ReadCommentsCount != nil {
+		next.ReadCommentsCount = *in.ReadCommentsCount
+	}
+	if in.ReadUpstreamUpdatedAt != nil {
+		next.ReadUpstreamUpdatedAt = *in.ReadUpstreamUpdatedAt
+	}
 	if next == *before {
 		return before, before, nil
 	}
 
 	_, err = tx.ExecContext(ctx,
-		`UPDATE source_binding SET url = ?, fingerprint = ?, upstream_state = ?, policy_state = ?, updated_at = ? WHERE challenge_id = ?`,
-		next.URL, next.Fingerprint, string(next.UpstreamState), string(next.PolicyState), formatTimestamp(at), challengeID,
+		`UPDATE source_binding SET url = ?, fingerprint = ?, upstream_state = ?, policy_state = ?, comments_count = ?, upstream_updated_at = ?, read_comments_count = ?, read_upstream_updated_at = ?, updated_at = ? WHERE challenge_id = ?`,
+		next.URL, next.Fingerprint, string(next.UpstreamState), string(next.PolicyState),
+		next.CommentsCount, nullableTextColumn(next.UpstreamUpdatedAt), next.ReadCommentsCount, nullableTextColumn(next.ReadUpstreamUpdatedAt),
+		formatTimestamp(at), challengeID,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -293,8 +344,16 @@ type SourceBinding struct {
 	Fingerprint   string
 	UpstreamState string // "open" | "closed" | "missing"
 	PolicyState   string // "in_policy" | "out_of_policy"
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// CommentsCount・UpstreamUpdatedAt は上流の観測値（コメント数・更新日時）。
+	// ReadCommentsCount・ReadUpstreamUpdatedAt は最後に読んだ時点の値
+	// （§上流の更新の観測と既読）。UpstreamUpdatedAt・ReadUpstreamUpdatedAt は
+	// 未設定なら ""（internal/cli が JSON の null へ変換する）。
+	CommentsCount         int
+	UpstreamUpdatedAt     string
+	ReadCommentsCount     int
+	ReadUpstreamUpdatedAt string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // toPublic は内部の sourceBinding 行を公開の SourceBinding へ変換する。
@@ -304,13 +363,26 @@ func (b *sourceBinding) toPublic() *SourceBinding {
 		return nil
 	}
 	return &SourceBinding{
-		SourceID:      b.SourceID,
-		ExternalKey:   b.ExternalKey,
-		URL:           b.URL,
-		Fingerprint:   b.Fingerprint,
-		UpstreamState: string(b.UpstreamState),
-		PolicyState:   string(b.PolicyState),
-		CreatedAt:     b.CreatedAt,
-		UpdatedAt:     b.UpdatedAt,
+		SourceID:              b.SourceID,
+		ExternalKey:           b.ExternalKey,
+		URL:                   b.URL,
+		Fingerprint:           b.Fingerprint,
+		UpstreamState:         string(b.UpstreamState),
+		PolicyState:           string(b.PolicyState),
+		CommentsCount:         b.CommentsCount,
+		UpstreamUpdatedAt:     b.UpstreamUpdatedAt,
+		ReadCommentsCount:     b.ReadCommentsCount,
+		ReadUpstreamUpdatedAt: b.ReadUpstreamUpdatedAt,
+		CreatedAt:             b.CreatedAt,
+		UpdatedAt:             b.UpdatedAt,
 	}
+}
+
+// nullableTextColumn は s（内部の "" センチネル）を SQL のバインド値
+// （NULL または文字列）へ変換する。
+func nullableTextColumn(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }

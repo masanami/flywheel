@@ -43,11 +43,19 @@ func runStatus(a Args) (any, error) {
 func discrepanciesJSON(discrepancies []core.Discrepancy) []map[string]any {
 	out := make([]map[string]any, 0, len(discrepancies))
 	for _, d := range discrepancies {
-		kinds := make([]string, 0, len(d.Kinds))
-		for _, k := range d.Kinds {
-			kinds = append(kinds, string(k))
-		}
-		out = append(out, map[string]any{"challenge_id": d.ChallengeID, "kinds": kinds})
+		out = append(out, map[string]any{"challenge_id": d.ChallengeID, "kinds": discrepancyKindsJSON(d.Kinds)})
+	}
+	return out
+}
+
+// discrepancyKindsJSON は core.DiscrepancyKind の一覧を文字列の一覧へ変換する
+// （空でも `[]`。`status` の `kinds` と `ingest` の `unread` が共有する。
+// docs/features/m2-github-issue-ingest.md §IF / API「`unread`…`status` の
+// `kinds` と同じ判定」）。
+func discrepancyKindsJSON(kinds []core.DiscrepancyKind) []string {
+	out := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		out = append(out, string(k))
 	}
 	return out
 }
