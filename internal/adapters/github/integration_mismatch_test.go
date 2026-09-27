@@ -11,8 +11,10 @@ import (
 // 要求と別の repo・番号の Issue が返った場合（gh api が改名・移管の 301 を
 // 辿った後の応答）は、別の外部キーの Issue として返さず、「見つからない」
 // でもない失敗にする（同じ Issue の課題の二重作成を防ぐ。repoMismatchError）。
+// #69: 別リポジトリの応答は core.ErrUpstreamIssueTransferred（404・410 とは
+// 別の sentinel）で core 側に伝える。
 
-func TestGetIssue_ResponseFromOtherRepo_IsFailureNotNotFound(t *testing.T) {
+func TestGetIssue_ResponseFromOtherRepo_IsTransferred(t *testing.T) {
 	dir := newFakeGHDir(t)
 	logPath := newFakeGHLogPath(t)
 	t.Setenv(envScenario, "get_redirected_other_repo")
@@ -22,6 +24,9 @@ func TestGetIssue_ResponseFromOtherRepo_IsFailureNotNotFound(t *testing.T) {
 	_, err := c.GetIssue(context.Background(), "masanami/flywheel", 7)
 	if err == nil {
 		t.Fatal("want an error when the response belongs to another repository")
+	}
+	if !errors.Is(err, core.ErrUpstreamIssueTransferred) {
+		t.Fatalf("a response from another repository must be classified as transferred (#69): %v", err)
 	}
 	if errors.Is(err, core.ErrUpstreamIssueNotFound) {
 		t.Fatalf("a response from another repository must not be classified as not found: %v", err)

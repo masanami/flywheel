@@ -79,7 +79,9 @@ func (c *Client) ListOpenIssues(ctx context.Context, repo string) ([]core.Upstre
 // GetIssue は core.UpstreamIssueSource の実装。gh api -i のステータス行
 // （HTTP/1.1・HTTP/2・HTTP/2.0 のいずれの表記でも）から 404・410 を判定し、
 // core.ErrUpstreamIssueNotFound を返す。エラーの文言・stderr の部分一致では
-// 判定しない。
+// 判定しない。応答が改名・移管の転送を辿って要求と別の repo の Issue を
+// 返した場合は core.ErrUpstreamIssueTransferred を返す（#69。同じ repo で
+// 番号だけ違う場合はこの sentinel を返さない）。
 func (c *Client) GetIssue(ctx context.Context, repo string, number int) (core.UpstreamIssue, error) {
 	res := c.run(ctx, "api", "-i", getIssueURL(repo, number))
 	if res.timedOut {
@@ -109,7 +111,11 @@ func (c *Client) GetIssue(ctx context.Context, repo string, number int) (core.Up
 		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: %w", repo, number, err)
 	}
 	if !strings.EqualFold(issue.Repo, repo) {
-		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: %w", repo, number, repoMismatchError(repo, issue.Repo))
+		// #69: 別リポジトリの応答は core.ErrUpstreamIssueTransferred で core 側に
+		// 伝える（404・410 とは別の sentinel。confirmOpenListAbsence が両方を
+		// missing に写す）。同じ repo で番号だけ違う場合（下の issue.Number の
+		// 分岐）はこの sentinel を返さない（移管ではないため）。
+		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: %w: %w", repo, number, repoMismatchError(repo, issue.Repo), core.ErrUpstreamIssueTransferred)
 	}
 	if issue.Number != number {
 		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: response is issue number %d", repo, number, issue.Number)
@@ -122,9 +128,14 @@ func (c *Client) GetIssue(ctx context.Context, repo string, number int) (core.Up
 // （リポジトリの改名・Issue の移管で GitHub が返す 301）を辿るため、要求と
 // 別の repo の Issue が 200 で返りうる。それを別の外部キーとしてそのまま
 // 返すと、同じ Issue の課題が二重に作られうる（internal/core/upstream.go の
-// ExternalKey の契約が防ごうとしている事態）。見つからない（404・410）とも
-// 断定できないため、ErrUpstreamIssueNotFound ではない「それ以外の失敗」に
-// する（呼び出し側は状態を変えない）。
+// ExternalKey の契約が防ごうとしている事態）。
+//
+// GetIssue はこのメッセージに core.ErrUpstreamIssueTransferred を重ねて
+// 返し、core 側が 404・410（ErrUpstreamIssueNotFound）と区別しつつ
+// upstream_state を missing に写せるようにする（#69）。ListOpenIssues は
+// 一覧の 1 要素が別 repo だったときにこのメッセージだけを使い、一覧全体を
+// 失敗として返す（sentinel は付けない。一覧の部分成功は core の関心事では
+// なく、この経路は #69 のスコープ外＝従来どおり sentinel の無い失敗のまま）。
 func repoMismatchError(requested, got string) error {
 	return fmt.Errorf("response belongs to repository %q, not the requested %q (renamed or transferred?)", got, requested)
 }

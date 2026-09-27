@@ -105,6 +105,7 @@ GitHub Issue を課題としてストアへ取り込む adapter を、LLM を一
 - [ ] 一覧の取得に成功したリポジトリについて、上流の状態が `open` と記録され、完了していない課題の Issue が open の一覧に無ければ、その Issue を 1 件ずつ取得して状態を確かめる（一覧に無いことだけで close と推定しない）
 - [ ] 1 件の取得で Issue が closed なら、上流の状態を `closed` にする
 - [ ] 1 件の取得の応答が HTTP 404 または 410 なら、上流の状態を `missing` にする（削除・移管・閲覧権限の喪失を区別しない）
+- [ ] 1 件の取得が、Issue の移管（`gh api` が辿った 301）を経て要求と別のリポジトリの Issue を返したときも、上流の状態を `missing` にする（404・410 と同じ扱い。#69。リポジトリ全体の改名は、通常は一覧の取得の段階で失敗しこの分岐に到達しないが、例外がある＝§やらないこと参照）
 - [ ] 1 件の取得がそれ以外で失敗したら、上流の状態を変えず、結果に失敗として示す
 - [ ] 上流の状態が `closed` か `missing` の完了していない課題の Issue が open の一覧に現れたら、上流の状態を `open` に戻す（reopen）
 - [ ] 宣言から外したリポジトリ・取り込み元に対応する課題は、取得も上流の状態の変更もしない
@@ -117,7 +118,7 @@ GitHub Issue を課題としてストアへ取り込む adapter を、LLM を一
 - [ ] 取り込み時点でコメントのある Issue は、作成の直後から「コメントあり」（`upstream_commented`）として示される。これは意図した挙動である（claude-flywheel#183 では、決定のコメントが取り込みより前から積まれていた）【QH11】
 - [ ] 対応のある完了していない課題の Issue が open の一覧に現れ、観測値が記録と違えば、観測値を上流の値で置き換える。fingerprint の一致・不一致・版が未知（`fingerprint_unknown_version`）、ポリシーの状態、`self_assignees` の解決の成否によらない（版が未知のときの fail-closed が凍結するのは人間記入欄と fingerprint だけである【仮定】）
 - [ ] close を確かめる 1 件の取得（§上流の close の検出）で Issue が open か closed と分かったときは、その応答の `comments`・`updated_at` で観測値を置き換える【仮定】
-- [ ] close を確かめる 1 件の取得が 404・410（`missing`）か、それ以外で失敗したときは、観測値を変えない【仮定】
+- [ ] close を確かめる 1 件の取得が 404・410・移管（いずれも `missing`）か、それ以外で失敗したときは、観測値を変えない【仮定】
 - [ ] 観測値の置き換えは、読んだ時点の値を変えない。次の取り込みで観測値を上書きしても、未読の更新は消えない【QH10】
 - [ ] 完了した課題の観測値は変えない（QP9）
 - [ ] 未読の更新は、記録から導き、別に保存しない。種類は次の 2 つで、それぞれ独立に判定する【QH9】
@@ -255,6 +256,7 @@ M3 の J2 は、core の同じ公開 API で読んだ記録を付ける（§M3 �
   - `gh api` を子プロセスで呼ぶ。一覧は `repos/<owner>/<name>/issues?state=open&per_page=100` を全ページ、1 件は `repos/<owner>/<name>/issues/<番号>`、自分の login は `user`。1 件の取得は `--include` をつけて HTTP のステータス行を読み、404・410 を判定する（エラーの文言の部分一致で判定しない）。
   - 2026-09-24 に実測: `gh api -i repos/masanami/flywheel/issues/999999`（gh 2.67.0・macOS）は、標準出力の 1 行目に `HTTP/2.0 404 Not Found` を出し、終了コード 1 で終わる。
   - 認証・ホスト・プロキシは `gh` の設定に委ねる。flywheel はトークンを読まない・持たない。
+  - `gh api` が Issue の移管の 301 を辿って要求と別リポジトリの Issue を 200 で返したときは、`core.ErrUpstreamIssueTransferred`（404・410 の `ErrUpstreamIssueNotFound` とは別の sentinel）で core に伝え、close の確かめは両方を `missing` に写す（#69・2026-09-27）。リポジトリ全体の改名は、通常は一覧の取得（`ListOpenIssues`）の段階で別リポジトリの応答として検出され、sentinel を付けない一覧全体の失敗のまま（この経路は変更していない）。旧リポジトリ名の open な一覧が空のときは例外で、個々の対応が close の確かめへ進み `missing` になりうる（§やらないこと）。
 - **理由**: 認証の扱いをまるごと `gh` に委ねられ、flywheel にトークンの保管・受け渡しの経路を作らない（現行と同じ運用の資格情報で動く）。依存を足さない。子プロセスの境界は偽の `gh` でそのまま差し替えられる。
 - **代替案**:
   - B: 標準ライブラリの HTTP クライアントで REST API を直接呼び、トークンを環境変数（`GH_TOKEN` など）か `gh auth token` から得る — `gh` への実行時の依存は消えるが、flywheel がトークンを扱う経路ができる。テストは `httptest` で書ける。
@@ -434,7 +436,10 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - 本文に含まれうる秘密情報のマスキング（理由: QH2。LLM を使わずに信頼できる検出ができない）
 - `flywheel cycle` からの呼び出し・実行の記録（`run`）（理由: M3）
 - github.com 以外のホスト（GitHub Enterprise Server）の明示的な対応（理由: `gh` の設定に委ねるだけで、受入基準に含めない）
-- Issue の移管・リポジトリの改名の追跡（理由: 移管・改名された Issue は元の外部キーで `missing` になり、移管先が宣言にあれば新しい課題として取り込まれる。既知の限界として受け入れる）
+- Issue の移管・リポジトリの改名の追跡（理由: 移管先・改名先を能動的に探しにいかない。この「追わない」の範囲は、個々の Issue が別リポジトリへ移管された場合と、リポジトリ全体が改名された場合とで結果が違う点に注意〔2026-09-27 追加。design-review 指摘〕:
+  - 個々の Issue の移管（リポジトリ名自体は変わらない）: 一覧にはもうその Issue が現れないため、close の確かめ（1 件の取得）に辿り着き、応答が別リポジトリの Issue だと分かった時点で `missing` になる（`core.ErrUpstreamIssueTransferred`。#69）。移管先が宣言にあれば新しい課題として取り込まれる。
+  - リポジトリ全体の改名: 旧リポジトリ名で `open` な Issue が 1 件以上残っていれば、宣言に書かれた旧リポジトリ名での一覧の取得（`ListOpenIssues`）自体が、その要素の別リポジトリを検出して**一覧全体を失敗**にする（`repoMismatchError`。sentinel を付けない。#69 のスコープ外）。この場合、旧リポジトリに紐づく対応は 1 件も close の確かめ（1 件の取得）に到達せず、`missing` にはならない。宣言の repo を新しい名前に直すまで、`ingest` のたびにそのリポジトリ全体が失敗として示され続ける。**ただし**旧リポジトリ名の `open` な一覧がたまたま空（Pull Request しか無い場合を含む）だと、一覧の取得自体は要素を検査せずに成功するため、この経路を経ずに個々の対応が close の確かめへ進み、上の「個々の Issue の移管」と同じ経路で `missing` になりうる（宣言の repo を直すべき状況ではあるが、外部キーの表記は旧リポジトリ名のまま。round2 review 指摘。2026-09-27 追加）。
+  既知の限界として受け入れる）
 - `CLAUDE.md` の更新と Issue の起票（理由: 本仕様の承認後に、実装チケットと `/create-ticket` で行う）
 - 上流のコメントの本文・参照先の Issue の取得と保存（理由: M2 は観測値〔件数と更新日時〕だけを持つ。計画時点の上流を読むのは M3 の J2・J3＝§M3 への申し送り）
 - 観測値のための追加の API 呼び出し（コメント一覧・timeline の取得）と、コメントの本文の編集の検出（理由: QH9。一覧の要素に含まれる値だけを使う）
@@ -655,6 +660,15 @@ M2 では決めず、M3 の設計への入力として記録する（flywheel#65
 - [ ] `status` の `kinds` の値は `upstream_closed | upstream_missing | out_of_policy | upstream_commented | upstream_updated` の閉集合に限られる（テストで双方向に照合する）
 - [ ] `flywheel mark-read --json` は、§IF / API の形の JSON を標準出力に 1 つだけ出力する（`internal/cli/jsondoc_test.go` の形の照合に `mark-read` を足して検証する）
 - [ ] （要人間判定）オーナーの環境で、取り込み済みの Issue にコメントを 1 件足した後の `ingest` で、その課題が `status` に `upstream_commented` として出る。あわせて、既存のコメントの本文を編集しただけで Issue の `updated_at` が動くかを記録する（動かなければ既知の限界として §クリティカル設計決定 5 に追記する。コメントの追加・編集は人間が行う）
+
+### 移管された Issue（2026-09-27 追加。既存の序数を保つため末尾に置く）
+
+- [ ] close を確かめる 1 件の取得の応答が、Issue の移管の転送を辿って要求と別のリポジトリの Issue を返すと、その課題の `upstream_state` が `missing` になる
+- [ ] 上記の反映で、課題の状態は変わらない（未分類・着手中・完了確認待ちのそれぞれで検証する）
+- [ ] 上記の反映で、課題の版が 1 増え、作業ログに `upstream_state_change`（`before` が `open`・`after` が `missing`）が 1 件残る
+- [ ] 上記の課題は、`status` の `needs_human.discrepancies` に `kinds` `upstream_missing` つきで出る
+- [ ] adapter の `GetIssue` は、応答が要求と別のリポジトリのとき、404・410（`ErrUpstreamIssueNotFound`）とは `errors.Is` で区別できる別の値（`ErrUpstreamIssueTransferred`）を返す
+- [ ] 応答が要求と同じリポジトリで番号だけ違うときは、`GetIssue` は `ErrUpstreamIssueTransferred`・`ErrUpstreamIssueNotFound` のどちらも返さない（移管でも見つからないのでもない、それ以外の失敗のまま）
 
 ## 決定事項の記録
 

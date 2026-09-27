@@ -21,6 +21,15 @@ import (
 // 失敗」を区別するための契約である。
 var ErrUpstreamIssueNotFound = errors.New("core: upstream issue not found (404 or 410)")
 
+// ErrUpstreamIssueTransferred は 1 件の取得が、改名・移管の転送（GitHub が
+// 返す 301）を辿った結果、要求と別のリポジトリの Issue を返したことを表す
+// （#69。docs/features/m2-github-issue-ingest.md §上流の close の検出）。
+// 削除・閲覧権限の喪失（ErrUpstreamIssueNotFound）とは別の原因であり、
+// errors.Is で互いに一致しない（404 と移管を区別できることが契約）。
+// confirmOpenListAbsence は ErrUpstreamIssueNotFound と同じく、この
+// sentinel も upstream_state を missing に写す。
+var ErrUpstreamIssueTransferred = errors.New("core: upstream issue transferred to another repository")
+
 // UpstreamIssue は adapter が正規化して返す、上流（GitHub）の Issue 1 件
 // （docs/features/m2-github-issue-ingest.md §機能全体の設計
 // 「core の型（外部キー・タイトル・本文・作成者・assignee・ラベル・状態・URL）」）。
@@ -71,7 +80,8 @@ type UpstreamIssue struct {
 // IF。実装は internal/adapters/github（#55）が gh の子プロセス経由で行う。
 // メソッド名は親要件チケット #51 の【仮定】をそのまま採用する。
 // UpstreamIssueSource が返しうる失敗のうち、GetIssue の
-// ErrUpstreamIssueNotFound（404・410）以外は、この IF は個別の sentinel を
+// ErrUpstreamIssueNotFound（404・410）と ErrUpstreamIssueTransferred（移管。
+// #69）以外は、この IF は個別の sentinel を
 // 定義しない（「一覧の取得に失敗したリポジトリは結果に失敗として示し、他は
 // 続行する」という部分成功の扱いは #56 が呼び出し結果から判断する）。
 //
@@ -100,8 +110,10 @@ type UpstreamIssueSource interface {
 
 	// GetIssue は repo の number 番の Issue を1件取得する。見つからない
 	// （HTTP 404・410）場合は errors.Is(err, ErrUpstreamIssueNotFound) が
-	// true になるエラーを返す。それ以外の失敗は ErrUpstreamIssueNotFound に
-	// 一致しない別のエラーを返す（呼び出し側はこの2つを区別する）。
+	// true になるエラーを返す。応答が改名・移管の転送を辿って要求と別の
+	// リポジトリの Issue を返した場合は、errors.Is(err, ErrUpstreamIssueTransferred)
+	// が true になる別のエラーを返す（#69）。それ以外の失敗はどちらの
+	// sentinel にも一致しないエラーを返す（呼び出し側はこの3つを区別する）。
 	GetIssue(ctx context.Context, repo string, number int) (UpstreamIssue, error)
 
 	// CurrentLogin は認証しているアカウントの login を返す（self_assignees を
