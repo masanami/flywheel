@@ -17,6 +17,12 @@ type activityRecorder struct {
 	channel      Channel
 	verification Verification
 	insert       func(tx *sql.Tx, row activityRow) error
+	// runID は、この作業ログの原因になった run（判断の呼び出し・委譲）の内部
+	// 整数 ID（#84。docs/features/m3-invoker-delegation.md §判断点の共通の規則
+	// 「判断点の出力による変更の作業ログは…run_id が原因の run の ID である」）。
+	// nil なら run_id 列は NULL（#9・#10・#12 の既存の呼び出し元は全て nil の
+	// まま。mutateAs はこのフィールドを設定しない）。
+	runID *int64
 }
 
 // record は entity（"challenge" 等）・entityID・action（"create"／"edit" 等）と、
@@ -44,6 +50,7 @@ func (r *activityRecorder) record(entity string, entityID int64, action string, 
 		Action:       action,
 		Before:       beforeVal,
 		After:        afterVal,
+		RunID:        r.runID,
 	}
 
 	insert := r.insert
@@ -83,8 +90,21 @@ func (s *Store) mutate(ctx context.Context, ch Channel, fn func(tx *sql.Tx, rec 
 // mutateAs は mutate と同じ書き込みトランザクションの枠組みを、呼び出し側が
 // actor・channel・verification を明示的に指定できる形で提供する
 // （#12: 本人確認つきの操作は Attestation から得た値を使い、
-// core 内部の resolveActor()／VerificationNone 固定を経由しない）。
+// core 内部の resolveActor()／VerificationNone 固定を経由しない）。run_id は
+// 持たない（既存の呼び出し元〈#9・#10・#12〉はどれも判断の呼び出しに由来しない）。
 func (s *Store) mutateAs(ctx context.Context, actor string, ch Channel, verification Verification, fn func(tx *sql.Tx, rec *activityRecorder) error) error {
+	return s.mutateAsRun(ctx, actor, ch, verification, nil, fn)
+}
+
+// mutateAsRun は mutateAs に runID（この作業ログの原因になった run の内部
+// 整数 ID。nil なら run_id 列は NULL）を足せる形で提供する（#84。
+// transition_exec.go の runTransition（transitionAsInvoker 経由。経路
+// ChannelInvoker・本人確認 VerificationNone・run_id つきで課題を書き換える）
+// だけが runID を非 nil で渡す。design-reviewer 指摘・round2 CONFIRMED:
+// 当初の呼び出し元の見込み〈judgment_common.go・judgment_j1.go が直接
+// 呼ぶ〉から、transitionAsInvoker への一本化〈#84 self-review round1〉で
+// 実際の呼び出し元が変わったのに、このコメントだけ古いままだった）。
+func (s *Store) mutateAsRun(ctx context.Context, actor string, ch Channel, verification Verification, runID *int64, fn func(tx *sql.Tx, rec *activityRecorder) error) error {
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		rec := &activityRecorder{
 			tx:           tx,
@@ -93,6 +113,7 @@ func (s *Store) mutateAs(ctx context.Context, actor string, ch Channel, verifica
 			channel:      ch,
 			verification: verification,
 			insert:       s.insertActivity,
+			runID:        runID,
 		}
 		if err := fn(tx, rec); err != nil {
 			return err

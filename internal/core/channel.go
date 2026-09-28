@@ -9,6 +9,15 @@ type Channel string
 // ChannelCLI は CLI から呼び出されたことを表す唯一の経路（#9 時点）。
 const ChannelCLI Channel = "cli"
 
+// ChannelInvoker は判断点の出力によって core の遷移が呼ばれたことを表す経路
+// （#84。docs/features/m3-invoker-delegation.md §判断点の共通の規則
+// 「判断点の出力による変更の作業ログは、経路を invoker…とし」）。
+// verificationRegistry（verification.go）にこの経路の本人確認つきの組み合わせを
+// 一切登録しないことで、「経路 invoker からは本人確認つきの操作（承認・
+// 差し戻し・保留への回答）を受け付けない」（同節）を、Verify の登録簿検査
+// （既存の fail-closed 機構）だけで満たす。新しい特別扱いのコードは足さない。
+const ChannelInvoker Channel = "invoker"
+
 // Verification は本人確認の方式（§データモデル activity.verification /
 // approval.verification）。本人確認のない操作は VerificationNone を使う
 // （「本人確認のない操作は本人確認の方式を none として記録する」＝仕様）。

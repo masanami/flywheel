@@ -47,6 +47,11 @@ type Overview struct {
 	// 閉集合（#58 の 3 種類に、#72 が upstream_commented・upstream_updated を
 	// 足した）。
 	Discrepancies []Discrepancy
+	// NeedsHumanTriage は §J1「判定が not_mine で自動の対象から外れている
+	// 課題は、status の needs_human.triage に、理由と run の ID つきで出る」
+	// の一覧（challenge_id 昇順。#84）。無ければ空スライス（AC「triage の
+	// 無いワークスペースでは [] である」）。
+	NeedsHumanTriage []TriageItem
 }
 
 // DiscrepancyKind は Discrepancy.Kinds の値（docs/features/
@@ -253,6 +258,12 @@ func (s *Store) GetOverview(ctx context.Context) (*Overview, error) {
 			return err
 		}
 		result.Discrepancies = discrepancies
+
+		triage, err := listJ1Triage(ctx, tx)
+		if err != nil {
+			return err
+		}
+		result.NeedsHumanTriage = triage
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {

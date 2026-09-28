@@ -360,6 +360,70 @@ func TestRunsCommand_RequiredArgumentsMatchM3IFAPITable(t *testing.T) {
 	}
 }
 
+// TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats は、
+// ifAPISkipCommands で汎用比較から外した classify について、m1・m3 それぞれの
+// 書式が仕様書のとおりであること（m1 の行を書き換えていないこと）と、登録表の
+// 宣言がその両方を受け付ける形（--auto が MinPositional を 0 に緩め、
+// priority/auto が OneOfGroups の組であること）になっていることを検査する
+// （#84）。
+func TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats(t *testing.T) {
+	m1Data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m1-core.md"))
+	if err != nil {
+		t.Fatalf("read m1 spec: %v", err)
+	}
+	m1Sigs, ok := parseIFAPISignatures(t, string(m1Data))["classify"]
+	if !ok || len(m1Sigs) == 0 {
+		t.Fatal("m1 spec's IF/API table has no `classify` row")
+	}
+	m1Sig := m1Sigs[0]
+	if m1Sig.minPositional != 1 || !m1Sig.required["priority"] {
+		t.Errorf("m1 classify signature = %+v, want minPositional=1 required={priority:true} (the m1 手動 form must still be documented)", m1Sig)
+	}
+
+	m3Data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m3-invoker-delegation.md"))
+	if err != nil {
+		t.Fatalf("read m3 spec: %v", err)
+	}
+	m3Sigs, ok := parseIFAPISignatures(t, string(m3Data))["classify"]
+	if !ok || len(m3Sigs) == 0 {
+		t.Fatal("m3 spec's IF/API table has no `classify` row")
+	}
+	m3Sig := m3Sigs[0]
+	if m3Sig.minPositional != 0 || !m3Sig.required["auto"] {
+		t.Errorf("m3 classify signature = %+v, want minPositional=0 required={auto:true} (the --auto [<C-ID>] form)", m3Sig)
+	}
+
+	cmd, ok := registeredCommands()["classify"]
+	if !ok {
+		t.Fatal("classify is not registered in defaultCommands()")
+	}
+	if cmd.MinPositional != 0 {
+		t.Errorf("classify: MinPositional = %d, want 0 (--auto omits the ID)", cmd.MinPositional)
+	}
+	wantOneOf := []string{"priority/auto"}
+	var gotOneOf []string
+	for _, g := range cmd.OneOfGroups {
+		gotOneOf = append(gotOneOf, strings.Join(g, "/"))
+	}
+	if !reflect.DeepEqual(gotOneOf, wantOneOf) {
+		t.Errorf("classify: OneOfGroups = %v, want %v", gotOneOf, wantOneOf)
+	}
+	for _, want := range []string{"priority", "auto"} {
+		found := false
+		for _, f := range cmd.Flags {
+			if f.Name == want {
+				found = true
+				if f.Required {
+					t.Errorf("classify: flag %q is declared Required, want false (OneOfGroups enforces presence instead)", want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("classify: flag %q is not declared", want)
+		}
+	}
+}
+
 // ifAPISignature は §IF / API の表の 1 コマンドの書式から読み取った、必須の
 // 引数の宣言（[…] の外にある <…> の位置引数の数・--フラグ・(… | …) の組）。
 type ifAPISignature struct {
@@ -412,6 +476,20 @@ var ifAPIRequiredFlagExceptions = map[string]map[string]bool{
 	"hold": {"question": true},
 }
 
+// ifAPISkipCommands は、m1-core.md の §IF / API の書式だけでは登録表の宣言と
+// もう1対1に対応しないコマンド（#84: `classify` に
+// docs/features/m3-invoker-delegation.md §IF / API「CLI」が
+// `--auto [<C-ID>]` の呼び出し形を足した。m1 の書式〈`<C-ID> --priority
+// <P0|P1|P2>`〉と m3 の書式〈`--auto [<C-ID>]`〉のどちらも受け付けるように
+// なり、単一の Required／OneOfGroups の宣言では m1 単独の書式と一致しない）。
+// これらは TestDefaultCommands_RequiredArgumentsMatchIFAPITable の対象から
+// 除き、専用のテスト
+// （TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats）で m1・m3
+// 両方の書式に対して個別に検証する。
+var ifAPISkipCommands = map[string]bool{
+	"classify": true,
+}
+
 // TestDefaultCommands_RequiredArgumentsMatchIFAPITable は、登録表の必須の宣言
 // （MinPositional・Required・OneOfGroups）が §IF / API の書式と一致することを
 // 検査する。AC-77 の「必須引数の欠落」の列挙（allcommands_test.go の
@@ -425,6 +503,9 @@ func TestDefaultCommands_RequiredArgumentsMatchIFAPITable(t *testing.T) {
 	specSigs := parseIFAPISignatures(t, string(data))
 	for _, cmd := range defaultCommands() {
 		name := strings.Join(cmd.Path, " ")
+		if ifAPISkipCommands[name] {
+			continue
+		}
 		sigs, ok := specSigs[name]
 		if !ok {
 			continue // TestDefaultCommands_MatchIFAPITable が落とす

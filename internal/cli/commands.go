@@ -132,12 +132,23 @@ func defaultCommands() []Command {
 			Run: runEdit,
 		},
 		{
+			// docs/features/m3-invoker-delegation.md §IF / API「CLI」
+			// （#84）が `--auto [<C-ID>]` を足す。`--auto` と `--priority` は
+			// OneOfGroups でちょうど1つを要求する（同時指定・両方省略は
+			// usage_error）。位置引数の数（0〜1）は「--auto は ID を省略
+			// できる・--priority は ID が必須」という条件付きの規則になり
+			// 宣言的な MinPositional では表せないため、runClassify が
+			// --priority のときだけ位置引数の有無を検査する。
 			Path:          []string{"classify"},
 			RequiresStore: true,
-			MinPositional: 1,
+			MinPositional: 0,
 			MaxPositional: 1,
-			Flags:         []flagDef{{Name: "priority", HasValue: true, Required: true}},
-			Run:           runClassify,
+			Flags: []flagDef{
+				{Name: "priority", HasValue: true},
+				{Name: "auto", HasValue: false},
+			},
+			OneOfGroups: [][]string{{"priority", "auto"}},
+			Run:         runClassify,
 		},
 		{
 			Path:          []string{"plan"},

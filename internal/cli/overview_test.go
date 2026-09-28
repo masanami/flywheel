@@ -28,7 +28,13 @@ func TestRunStatus_EmptyWorkspaceReturnsThreeBucketsWithEmptyArrays(t *testing.T
 			t.Errorf("status[%q] = %v, want empty", path, ids)
 		}
 	}
-	for bucket, want := range map[string]int{"needs_human": 3, "actionable": 1, "approved": 1} {
+	// AC「status --json の needs_human.triage の無いワークスペースでは [] で
+	// ある」（#84）。
+	needsHuman := doc["needs_human"].(map[string]any)
+	if triage, ok := needsHuman["triage"].([]any); !ok || len(triage) != 0 {
+		t.Errorf("status[\"needs_human\"][\"triage\"] = %v, want an empty array", needsHuman["triage"])
+	}
+	for bucket, want := range map[string]int{"needs_human": 4, "actionable": 1, "approved": 1} {
 		if m := doc[bucket].(map[string]any); len(m) != want {
 			t.Errorf("status[%q] has %d keys, want %d: %+v", bucket, len(m), want, m)
 		}

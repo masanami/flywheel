@@ -358,6 +358,7 @@ var runLevelUsageErrorCases = [][]string{
 	{"verify", "C-1", "--result", "met", "--question", "q"},     // met と --question の同時指定
 	{"approve", "OP-1", "--hold-release"},                       // 不可逆操作の ID への --hold-release
 	{"approve", "C-2", "--hold-release"},                        // 計画承認待ちの課題への --hold-release
+	{"classify", "--priority", "P0"},                            // --priority に課題の ID が無い（#84。--auto は ID を省略できるため MinPositional では表せない）
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の
