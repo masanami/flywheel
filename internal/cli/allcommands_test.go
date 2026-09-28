@@ -128,6 +128,9 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		coretest.SetSourceBindingObservation(t, ws, challengeIDToInternalID(t, id), 2, "2026-09-25T08:00:00.000Z", 0, "")
 		return []string{"mark-read", id}
 	}},
+	"runs": {setup: func(t *testing.T, ws string) []string {
+		return []string{"runs", createForCase(t, ws)}
+	}},
 	"ingest": {setup: func(t *testing.T, ws string) []string {
 		writeSourcesDeclaration(t, ws, validSourcesDeclaration)
 		// #59 で取得と反映を結線した後は、この横断テスト（jsondoc の形の照合。

@@ -43,6 +43,12 @@ type Store struct {
 	// 本番の生成経路（openExistingAt・openAtForInit）が nil のままであることは
 	// TestStore_ProductionOpenPathsLeaveBeforeCommitNil が固定する。
 	beforeCommit func()
+
+	// heartbeatInterval・staleAfter は #81（judgment.go）のテストが
+	// defaultHeartbeatInterval（60秒）・defaultStaleAfter（300秒）を短く
+	// 差し替えるためのフック。ゼロ値（本番）ならそれぞれの既定値を使う。
+	heartbeatInterval time.Duration
+	staleAfter        time.Duration
 }
 
 // currentTime は now が設定されていればそれを、なければ time.Now() を返す。
@@ -162,8 +168,15 @@ type InitResult struct {
 }
 
 // gitignoreContents は .flywheel/.gitignore の内容（D10: ストアを Git で追跡
-// させない。付随ファイル -wal・-shm も除外する）。
-const gitignoreContents = "# flywheel が生成する。手で編集しない。\nflywheel.db\nflywheel.db-wal\nflywheel.db-shm\n"
+// させない。付随ファイル -wal・-shm も除外する）。runs/ は #81
+// （docs/features/m3-invoker-delegation.md §invoker の共通の規則「run の
+// 保存先を作るとき、.flywheel/.gitignoreにrunsを除外する行が無ければ足す」）
+// が足した。init の時点でこの行を含めておくことで、通常の運用（init が
+// 必ず先に走る）では invoker 側の追記（internal/invoker/gitignore.go の
+// ensureRunsGitignoreEntry。.gitignore が後から削除された場合の保険）に
+// 頼らずに済む（self-review 指摘 round1: 2つの書き手が異なる既定内容で
+// 新規作成すると、先に書いた側の内容だけが残る競合があった）。
+const gitignoreContents = "# flywheel が生成する。手で編集しない。\nflywheel.db\nflywheel.db-wal\nflywheel.db-shm\nruns/\n"
 
 // Init は `flywheel init` の本体。--workspace → 環境変数 FLYWHEEL_WORKSPACE →
 // カレントディレクトリの順で対象のディレクトリを決め（親ディレクトリへの
@@ -219,6 +232,22 @@ func openAtForInit(dir string) (*Store, bool, error) {
 		return nil, false, wrapStoreErr(err)
 	}
 	return &Store{db: db, workspace: dir}, db.WasCreated(), nil
+}
+
+// EnsureWorkspaceGitignore は workspace/.flywheel/.gitignore が無ければ、
+// gitignoreContents（D10。flywheel.db・-wal・-shm・runs/を除外する）で作る。
+// 既にあれば一切変更しない（writeGitignoreIfMissingと同じ規則を、workspace
+// からの相対パスで呼べる形で公開する）。
+//
+// self-review 指摘（round3, code-reviewer PLAUSIBLE）: internal/invoker の
+// ensureRunsGitignoreEntry が「.gitignoreが無ければ何もしない」に倒すと、
+// §invoker の共通の規則「run の保存先を作るとき…runs/を除外する行が
+// 無ければ足す」を「.gitignoreが元から無いケース」で満たせなくなる。
+// invoker はこの関数を呼ぶことで、無ければ core が持つ完全な内容
+// （flywheel.db等を含む）で作る（狭い内容の.gitignoreを作ってD10の保護を
+// 失わせる経路を残さない）。
+func EnsureWorkspaceGitignore(workspace string) error {
+	return writeGitignoreIfMissing(filepath.Join(workspace, flywheelDirName))
 }
 
 func writeGitignoreIfMissing(flywheelDir string) error {

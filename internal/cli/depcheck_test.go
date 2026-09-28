@@ -181,6 +181,46 @@ func TestProductionBinaryDoesNotDependOnCoretest(t *testing.T) {
 	}
 }
 
+// invokerImportPath は #81
+// （docs/features/m3-invoker-delegation.md §技術的な制約・方針「import の向き」
+// 「internal/core は internal/invoker・internal/adapters を import しない」・
+// 受入基準「internal/core は internal/invoker と internal/adapters を
+// import しない（go list の依存関係で検査する）」）の検査対象。
+// adaptersPackagePrefix は depcheck_adapters_test.go が既に定義している。
+const invokerImportPath = "github.com/masanami/flywheel/internal/invoker"
+
+// TestCoreDoesNotImportInvokerOrAdapters は AC-169 相当の検査本体:
+// internal/core（テストファイルを含む）が internal/invoker・
+// internal/adapters/* を import していないことを、go list の依存関係で検証する。
+func TestCoreDoesNotImportInvokerOrAdapters(t *testing.T) {
+	root := repoRoot(t)
+	pkgs := goListJSON(t, root, "./...")
+
+	var sawCorePackageItself bool
+	var violators []string
+	for _, pkg := range pkgs {
+		if !underPackagePrefix(pkg.ImportPath, corePackagePrefix) {
+			continue
+		}
+		sawCorePackageItself = true
+		imports := allImports(pkg)
+		if dependsOn(imports, invokerImportPath) {
+			violators = append(violators, pkg.ImportPath+" -> "+invokerImportPath)
+		}
+		for _, imp := range imports {
+			if underPackagePrefix(imp, adaptersPackagePrefix) {
+				violators = append(violators, pkg.ImportPath+" -> "+imp)
+			}
+		}
+	}
+	if !sawCorePackageItself {
+		t.Fatal("go list did not report any internal/core package; the prefix constant may be stale")
+	}
+	if len(violators) != 0 {
+		t.Errorf("internal/core packages import internal/invoker or internal/adapters: %v", violators)
+	}
+}
+
 func allImports(pkg goListPackage) []string {
 	return append(append(append([]string{}, pkg.Imports...), pkg.TestImports...), pkg.XTestImports...)
 }

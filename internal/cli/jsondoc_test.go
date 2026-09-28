@@ -145,7 +145,68 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 			t.Fatalf("documented shape of %q not found in the JSON output section", e)
 		}
 	}
+
+	addM3RunsShape(t, &doc)
 	return doc
+}
+
+// addM3RunsShape は `runs` コマンドの成功時のJSON形を doc へ足す。m1-core.md の
+// 「成功時のJSON出力の規約」節と違い、m3-invoker-delegation.md の該当箇所
+// （§IF / API「`status`・`show`・`runs`の拡張」）は見出し＋表の形ではなく
+// 箇条書きの1行（“ `runs`: `{"runs": [{...}]}` “）であり、上の汎用パーサ
+// （loadDocumentedJSON。m1-core.md の見出し構造専用）では拾えない。#81
+// （docs/features/m3-invoker-delegation.md §IF / API・受入基準AC-151〜153）の
+// 追加分として、その1行を直接パースして doc へ合成する（第2の正本を持たない
+// よう、逐語をここへ複製せずファイルから読む）。
+func addM3RunsShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m3-invoker-delegation.md"))
+	if err != nil {
+		t.Fatalf("read m3 spec: %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "- `runs`: ") {
+			continue
+		}
+		backticks := backtickRe.FindAllStringSubmatch(trimmed, -1)
+		if len(backticks) < 2 {
+			t.Fatalf("m3 spec `runs` line does not have the expected two backtick spans: %q", trimmed)
+		}
+		shape := backticks[1][1] // 2つ目の`…`が {"runs": [{...}]} の形
+		top := topLevelKeys(shape)
+		doc.topLevel["runs"] = append(doc.topLevel["runs"], top)
+
+		// 要素の形（"runs"配下の配列要素）は、shape内の最初の "[" から対応する
+		// "]" までを抜き出し、その中の最上位のキーを読む。
+		open := strings.Index(shape, "[")
+		if open < 0 {
+			t.Fatalf("m3 spec `runs` shape has no array: %q", shape)
+		}
+		depth := 0
+		closeIdx := -1
+		for i := open; i < len(shape); i++ {
+			switch shape[i] {
+			case '[':
+				depth++
+			case ']':
+				depth--
+				if depth == 0 {
+					closeIdx = i
+				}
+			}
+			if closeIdx >= 0 {
+				break
+			}
+		}
+		if closeIdx < 0 {
+			t.Fatalf("m3 spec `runs` shape has an unbalanced array: %q", shape)
+		}
+		elem := topLevelKeys(shape[open+1 : closeIdx])
+		doc.entity["run"] = elem
+		return
+	}
+	t.Fatal("m3 spec does not document the `runs` JSON shape (expected a line starting with \"- `runs`: \")")
 }
 
 func sortedKeys(m map[string]bool) []string {
@@ -183,6 +244,8 @@ var jsonEntityOf = map[string]string{
 	"sources": "source",
 	"repos":   "repo",
 	"items":   "item",
+	// runs（#81。docs/features/m3-invoker-delegation.md §IF / API「runs」）。
+	"runs": "run",
 }
 
 // assertDocumentedEntities は出力の中の要素（オブジェクトと配列の要素）の
