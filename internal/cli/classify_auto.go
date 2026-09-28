@@ -81,58 +81,7 @@ func runClassifyAuto(a Args) (any, error) {
 	}
 
 	return textOutput{
-		json: map[string]any{"phase": j1PhaseJSON(res)},
-		text: j1PhaseText(res),
+		json: map[string]any{"phase": judgmentPhaseJSON("classify", res)},
+		text: judgmentPhaseText("分類の対象はありませんでした\n", res),
 	}, nil
-}
-
-// j1PhaseJSON は J1AutoResult を §IF / API「`--auto` の個別の操作…は cycle の
-// phases の1要素と同じ形を {"phase": {…}} で返す」の中身へ変換する。
-func j1PhaseJSON(res *core.J1AutoResult) map[string]any {
-	return map[string]any{
-		"phase":       "classify",
-		"skipped":     false,
-		"items":       j1ItemsJSON(res.Items),
-		"not_started": notStartedJSON(res.NotStarted),
-	}
-}
-
-func j1ItemsJSON(items []core.J1AutoItem) []map[string]any {
-	out := make([]map[string]any, 0, len(items))
-	for _, it := range items {
-		out = append(out, map[string]any{
-			"challenge_id": it.ChallengeID,
-			"run_id":       it.RunID,
-			"result":       string(it.Result),
-			"outcome":      nullableString(it.Outcome),
-			"status":       nullableStringPtr(it.Status),
-		})
-	}
-	return out
-}
-
-func notStartedJSON(items []core.NotStarted) []map[string]any {
-	out := make([]map[string]any, 0, len(items))
-	for _, it := range items {
-		out = append(out, map[string]any{
-			"challenge_id": it.ChallengeID,
-			"reason":       string(it.Reason),
-		})
-	}
-	return out
-}
-
-// j1PhaseText は --json 無しの classify --auto の表示（形式の安定は保証しない）。
-func j1PhaseText(res *core.J1AutoResult) string {
-	if len(res.Items) == 0 && len(res.NotStarted) == 0 {
-		return "分類の対象はありませんでした\n"
-	}
-	s := ""
-	for _, it := range res.Items {
-		s += it.ChallengeID + "\t" + it.RunID + "\t" + string(it.Result) + "\t" + it.Outcome + "\n"
-	}
-	for _, ns := range res.NotStarted {
-		s += ns.ChallengeID + "\t(未起動)\t" + string(ns.Reason) + "\n"
-	}
-	return s
 }

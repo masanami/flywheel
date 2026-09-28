@@ -30,11 +30,18 @@ func runClassify(a Args) (any, error) {
 	return textOutput{json: map[string]any{"challenge": challengeJSON(*c)}, text: challengeText(*c)}, nil
 }
 
-// runPlan は `flywheel plan <ID> (--file <path> | --stdin)` の実装（T3・T4）。
+// runPlan は `flywheel plan <ID> (--file <path> | --stdin)` の実装（T3・T4）と
+// `flywheel plan --auto [<ID>]`（#85。J2）の実装を振り分ける。
 // --file はファイルを読んで本文にする（パスが無ければ usage_error。他の
 // 入出力の失敗は internal_error）。--stdin は標準入力を全部読む。ちょうど 1 つの指定は commands.go の
 // OneOfGroups が既に保証している。
 func runPlan(a Args) (any, error) {
+	if a.Bools["auto"] {
+		return runPlanAuto(a)
+	}
+	if len(a.Positional) != 1 {
+		return nil, NewError(CodeUsageError, "plan --file／--stdin には課題の ID が必要です")
+	}
 	body, cliErr := readPlanBody(a)
 	if cliErr != nil {
 		return nil, cliErr

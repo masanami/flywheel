@@ -98,12 +98,9 @@ func (s *Store) mutateAs(ctx context.Context, actor string, ch Channel, verifica
 
 // mutateAsRun は mutateAs に runID（この作業ログの原因になった run の内部
 // 整数 ID。nil なら run_id 列は NULL）を足せる形で提供する（#84。
-// transition_exec.go の runTransition（transitionAsInvoker 経由。経路
-// ChannelInvoker・本人確認 VerificationNone・run_id つきで課題を書き換える）
-// だけが runID を非 nil で渡す。design-reviewer 指摘・round2 CONFIRMED:
-// 当初の呼び出し元の見込み〈judgment_common.go・judgment_j1.go が直接
-// 呼ぶ〉から、transitionAsInvoker への一本化〈#84 self-review round1〉で
-// 実際の呼び出し元が変わったのに、このコメントだけ古いままだった）。
+// runID を非 nil で渡すのは、経路 ChannelInvoker で課題を書き換える呼び出しだけ:
+// transition_exec.go の runTransition〈transitionAsInvoker 経由〉と、markread.go の
+// MarkReadWithValues〈#85: J2 が付ける読んだ記録〉）。
 func (s *Store) mutateAsRun(ctx context.Context, actor string, ch Channel, verification Verification, runID *int64, fn func(tx *sql.Tx, rec *activityRecorder) error) error {
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		rec := &activityRecorder{

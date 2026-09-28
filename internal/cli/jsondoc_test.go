@@ -147,6 +147,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	}
 
 	addM3RunsShape(t, &doc)
+	addM3ShowPlanSpecShape(t, &doc)
 	return doc
 }
 
@@ -209,6 +210,36 @@ func addM3RunsShape(t *testing.T, doc *documentedJSON) {
 	t.Fatal("m3 spec does not document the `runs` JSON shape (expected a line starting with \"- `runs`: \")")
 }
 
+// addM3ShowPlanSpecShape は show の `plans` の要素の形（m1 の plan の形に spec を
+// 足したもの）を doc.entity["show_plan"] へ合成する（#85）。m3-invoker-delegation.md
+// §IF / API「`status`・`show`・`runs` の拡張」の該当の 1 行が、`plans` の要素へ
+// `spec` を足すと書いていることを確かめた上で合成する（第 2 の正本を持たず、
+// 文書の記述が消えたらここで落ちる）。単発の `plan` の成功出力の plan オブジェクト
+// （doc.entity["plan"]）は変えない。
+func addM3ShowPlanSpecShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m3-invoker-delegation.md"))
+	if err != nil {
+		t.Fatalf("read m3 spec: %v", err)
+	}
+	documented := false
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- `show`: ") && strings.Contains(trimmed, "`plans` の要素に `spec`") {
+			documented = true
+			break
+		}
+	}
+	if !documented {
+		t.Fatal("m3 spec does not document that show's `plans` elements gain `spec` (expected a `- `show`: …`plans` の要素に `spec`…` line)")
+	}
+	elem := map[string]bool{"spec": true}
+	for k := range doc.entity["plan"] {
+		elem[k] = true
+	}
+	doc.entity["show_plan"] = elem
+}
+
 func sortedKeys(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -230,7 +261,8 @@ func keysOf(m map[string]any) map[string]bool {
 // 要素の名前を返す。
 var jsonEntityOf = map[string]string{
 	"challenge": "challenge", "challenges": "challenge",
-	"plan": "plan", "plans": "plan",
+	// show の plans の要素は plan に spec を足した形（#85。m3 §IF / API「show」）。
+	"plan": "plan", "plans": "show_plan",
 	"approval": "approval", "approvals": "approval",
 	"hold": "hold", "holds": "hold",
 	"operation": "operation", "operations": "operation",

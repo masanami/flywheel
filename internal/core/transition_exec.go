@@ -378,38 +378,59 @@ func (s *Store) PlanChallenge(ctx context.Context, ch Channel, id string, in Pla
 
 	var plan Plan
 	c, err := s.transition(ctx, ch, id, OpPlan, func(ctx context.Context, tc *transitionCtx) error {
-		var maxVersion sql.NullInt64
-		if err := tc.tx.QueryRowContext(ctx, `SELECT MAX(version) FROM task_plan WHERE challenge_id = ?`, tc.id).Scan(&maxVersion); err != nil {
+		p, err := insertTaskPlanVersion(ctx, tc, in.Body, nil)
+		if err != nil {
 			return err
 		}
-		newPlanVersion := 1
-		if maxVersion.Valid {
-			// 改訂（T4）では、置き換えられた計画の版を before に残す（H7:
-			// 変わった項目の変更前。code-reviewer 指摘: これが無いと T4 の
-			// before が NULL になり、create 以外で before が null になる）。
-			newPlanVersion = int(maxVersion.Int64) + 1
-			tc.before["plan_version"] = int(maxVersion.Int64)
-		} else {
-			// S3（Issue #39）: 未設定（計画が無い）から値が入る初回（T3）は、
-			// before にそのキーを null で載せる（classify の priority・edit の
-			// urgency とそろえる。キー自体を省く旧挙動は仕様に定めが無く、
-			// 未設定から値が入る項目の書き方が操作ごとに不揃いだった）。
-			tc.before["plan_version"] = nil
-		}
-		if _, err := tc.tx.ExecContext(ctx,
-			`INSERT INTO task_plan (challenge_id, version, body, created_at) VALUES (?, ?, ?, ?)`,
-			tc.id, newPlanVersion, in.Body, tc.nowStr,
-		); err != nil {
-			return err
-		}
-		tc.after["plan_version"] = newPlanVersion
-		plan = Plan{Version: newPlanVersion, Body: in.Body, CreatedAt: tc.now}
+		plan = p
 		return nil
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 	return c, &plan, nil
+}
+
+// insertTaskPlanVersion は計画の新しい版（既存の最大版+1。無ければ 1）を task_plan へ
+// 追加し、作業ログの before・after へ plan_version を載せる（T3・T4 が共有する。
+// PlanChallenge〈人が登録する計画。spec は NULL〉と、J2 の写像〈#85。spec に
+// 構造化した出力の JSON を持つ〉が使う）。spec が nil なら spec 列は NULL。
+func insertTaskPlanVersion(ctx context.Context, tc *transitionCtx, body string, spec *string) (Plan, error) {
+	var maxVersion sql.NullInt64
+	if err := tc.tx.QueryRowContext(ctx, `SELECT MAX(version) FROM task_plan WHERE challenge_id = ?`, tc.id).Scan(&maxVersion); err != nil {
+		return Plan{}, err
+	}
+	newPlanVersion := 1
+	if maxVersion.Valid {
+		// 改訂（T4）では、置き換えられた計画の版を before に残す（H7:
+		// 変わった項目の変更前。code-reviewer 指摘: これが無いと T4 の
+		// before が NULL になり、create 以外で before が null になる）。
+		newPlanVersion = int(maxVersion.Int64) + 1
+		tc.before["plan_version"] = int(maxVersion.Int64)
+	} else {
+		// S3（Issue #39）: 未設定（計画が無い）から値が入る初回（T3）は、
+		// before にそのキーを null で載せる（classify の priority・edit の
+		// urgency とそろえる。キー自体を省く旧挙動は仕様に定めが無く、
+		// 未設定から値が入る項目の書き方が操作ごとに不揃いだった）。
+		tc.before["plan_version"] = nil
+	}
+	var specArg any
+	if spec != nil {
+		specArg = *spec
+	}
+	if _, err := tc.tx.ExecContext(ctx,
+		`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (?, ?, ?, ?, ?)`,
+		tc.id, newPlanVersion, body, tc.nowStr, specArg,
+	); err != nil {
+		return Plan{}, err
+	}
+	tc.after["plan_version"] = newPlanVersion
+	plan := Plan{Version: newPlanVersion, Body: body, CreatedAt: tc.now}
+	if spec != nil {
+		v := *spec
+		plan.Spec = &v
+	}
+	return plan, nil
 }
 
 // SubmitChallenge は着手中の課題を検証中へ進める（T7）。操作固有の書き込みは無い。
