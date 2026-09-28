@@ -117,6 +117,37 @@ func normalizeIssue(raw json.RawMessage) (core.UpstreamIssue, error) {
 	}, nil
 }
 
+// commentPayload は gh api の Issue コメント 1 件分の応答のうち、正規化に
+// 必要な項目だけを取り出す（#80）。
+type commentPayload struct {
+	Body      *string   `json:"body"`
+	User      issueUser `json:"user"`
+	CreatedAt string    `json:"created_at"`
+	HTMLURL   string    `json:"html_url"`
+}
+
+// normalizeComment は gh api の応答 1 件分（json.RawMessage）を
+// core.UpstreamComment へ正規化する。CreatedAt は加工・パースしない
+// （UpstreamIssue.UpdatedAt と同じ方針）。
+func normalizeComment(raw json.RawMessage) (core.UpstreamComment, error) {
+	var payload commentPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return core.UpstreamComment{}, fmt.Errorf("adapters/github: decode comment: %w", err)
+	}
+
+	body := ""
+	if payload.Body != nil {
+		body = *payload.Body
+	}
+
+	return core.UpstreamComment{
+		Author:    payload.User.Login,
+		Body:      body,
+		CreatedAt: payload.CreatedAt,
+		URL:       payload.HTMLURL,
+	}, nil
+}
+
 // reposMarker は REST API の応答の repository_url に含まれる区切り
 // （"/repos/<owner>/<name>"）。
 const reposMarker = "/repos/"

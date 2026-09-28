@@ -17,3 +17,11 @@ func TestGetIssueURL(t *testing.T) {
 		t.Errorf("getIssueURL = %q, want %q", got, want)
 	}
 }
+
+func TestListCommentsURL_IncludesPerPage100AndPage(t *testing.T) {
+	got := listCommentsURL("masanami/flywheel", 49, 2)
+	want := "repos/masanami/flywheel/issues/49/comments?per_page=100&page=2"
+	if got != want {
+		t.Errorf("listCommentsURL = %q, want %q", got, want)
+	}
+}

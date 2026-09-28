@@ -76,6 +76,38 @@ func (c *Client) ListOpenIssues(ctx context.Context, repo string) ([]core.Upstre
 	return issues, nil
 }
 
+// fetchIssueRaw は GetIssue・GetReferencedIssue（#80）が共有する「gh api -i で
+// 1 件取得し、ステータス行から 404・410・その他の失敗を判定する」処理
+// （self-review 指摘: GetReferencedIssue を GetIssue の単純なエイリアスに
+// せず、Pull Request の除外という異なる後処理を持たせるための共通部分の
+// 切り出し）。label はエラー文言の呼び出し元識別（"get issue" 等）に使う。
+// 成功時は応答本文（正規化前の json.RawMessage）を返す。
+func (c *Client) fetchIssueRaw(ctx context.Context, repo string, number int, label string) (json.RawMessage, error) {
+	res := c.run(ctx, "api", "-i", getIssueURL(repo, number))
+	if res.timedOut {
+		return nil, fmt.Errorf("adapters/github: %s %s#%d timed out after %s: %w", label, repo, number, c.timeout, context.DeadlineExceeded)
+	}
+	if res.ctxErr != nil {
+		return nil, fmt.Errorf("adapters/github: %s %s#%d: %w", label, repo, number, res.ctxErr)
+	}
+
+	status, body, parseErr := splitHTTPResponse(res.stdout)
+	if parseErr != nil {
+		if res.err != nil {
+			return nil, fmt.Errorf("adapters/github: %s %s#%d: %w (%s)", label, repo, number, res.err, strings.TrimSpace(string(res.stderr)))
+		}
+		return nil, fmt.Errorf("adapters/github: %s %s#%d: %w", label, repo, number, parseErr)
+	}
+
+	if status == 404 || status == 410 {
+		return nil, fmt.Errorf("adapters/github: %s %s#%d: http %d: %w", label, repo, number, status, core.ErrUpstreamIssueNotFound)
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("adapters/github: %s %s#%d: unexpected http status %d", label, repo, number, status)
+	}
+	return body, nil
+}
+
 // GetIssue は core.UpstreamIssueSource の実装。gh api -i のステータス行
 // （HTTP/1.1・HTTP/2・HTTP/2.0 のいずれの表記でも）から 404・410 を判定し、
 // core.ErrUpstreamIssueNotFound を返す。エラーの文言・stderr の部分一致では
@@ -83,27 +115,9 @@ func (c *Client) ListOpenIssues(ctx context.Context, repo string) ([]core.Upstre
 // 返した場合は core.ErrUpstreamIssueTransferred を返す（#69。同じ repo で
 // 番号だけ違う場合はこの sentinel を返さない）。
 func (c *Client) GetIssue(ctx context.Context, repo string, number int) (core.UpstreamIssue, error) {
-	res := c.run(ctx, "api", "-i", getIssueURL(repo, number))
-	if res.timedOut {
-		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d timed out after %s: %w", repo, number, c.timeout, context.DeadlineExceeded)
-	}
-	if res.ctxErr != nil {
-		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: %w", repo, number, res.ctxErr)
-	}
-
-	status, body, parseErr := splitHTTPResponse(res.stdout)
-	if parseErr != nil {
-		if res.err != nil {
-			return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: %w (%s)", repo, number, res.err, strings.TrimSpace(string(res.stderr)))
-		}
-		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: %w", repo, number, parseErr)
-	}
-
-	if status == 404 || status == 410 {
-		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: http %d: %w", repo, number, status, core.ErrUpstreamIssueNotFound)
-	}
-	if status < 200 || status >= 300 {
-		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: unexpected http status %d", repo, number, status)
+	body, err := c.fetchIssueRaw(ctx, repo, number, "get issue")
+	if err != nil {
+		return core.UpstreamIssue{}, err
 	}
 
 	issue, err := normalizeIssue(body)
