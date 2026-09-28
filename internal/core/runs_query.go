@@ -14,21 +14,24 @@ import (
 // Run は ListRuns が返す、run 1 件の表示用の形（§IF / API「runs」）。
 // Judgment は委譲（kind=delegate）では ""。Result・CostUSD・CostSource・
 // EndedAt は終了していない run では未設定（Result・CostSource は ""、
-// CostUSD・EndedAt は nil）。
+// CostUSD・EndedAt は nil）。CycleBudgetUSD は CycleID が nil（#83 決定
+// 2026-09-28 親: 周の外で記録された run。例えば #83 より前の記録）なら nil、
+// そうでなければその周（cycle）の上限額（USD）。
 type Run struct {
-	ID           string
-	Kind         RunKind
-	Judgment     JudgmentPoint
-	ChallengeID  string
-	CycleID      *string
-	SessionID    string
-	Result       RunResult
-	RateLimited  bool
-	CostUSD      *float64
-	CostSource   CostSource
-	MaxBudgetUSD float64
-	StartedAt    time.Time
-	EndedAt      *time.Time
+	ID             string
+	Kind           RunKind
+	Judgment       JudgmentPoint
+	ChallengeID    string
+	CycleID        *string
+	CycleBudgetUSD *float64
+	SessionID      string
+	Result         RunResult
+	RateLimited    bool
+	CostUSD        *float64
+	CostSource     CostSource
+	MaxBudgetUSD   float64
+	StartedAt      time.Time
+	EndedAt        *time.Time
 }
 
 // RunListOptions は ListRuns の絞り込み条件。
@@ -85,15 +88,31 @@ func (s *Store) ListRuns(ctx context.Context, opt RunListOptions) ([]Run, error)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = rows.Close() }()
+		var rawRows []*runRow
 		for rows.Next() {
 			r, err := scanRunRow(rows)
 			if err != nil {
+				_ = rows.Close()
 				return err
 			}
-			result = append(result, toPublicRun(r))
+			rawRows = append(rawRows, r)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+
+		budgets, err := loadCycleBudgetsForRuns(ctx, tx, rawRows)
+		if err != nil {
+			return err
+		}
+		for _, r := range rawRows {
+			result = append(result, toPublicRun(r, budgets))
+		}
+		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
@@ -104,7 +123,7 @@ func (s *Store) ListRuns(ctx context.Context, opt RunListOptions) ([]Run, error)
 	return result, nil
 }
 
-func toPublicRun(r *runRow) Run {
+func toPublicRun(r *runRow, cycleBudgetsMicros map[int64]int64) Run {
 	pub := Run{
 		ID:           r.ID,
 		Kind:         r.Kind,
@@ -123,5 +142,59 @@ func toPublicRun(r *runRow) Run {
 		v := microsToUSD(*r.CostUSD)
 		pub.CostUSD = &v
 	}
+	if r.CycleID != nil {
+		if cid, ok := parseCycleID(*r.CycleID); ok {
+			if budgetMicros, ok := cycleBudgetsMicros[cid]; ok {
+				v := microsToUSD(budgetMicros)
+				pub.CycleBudgetUSD = &v
+			}
+		}
+	}
 	return pub
+}
+
+// loadCycleBudgetsForRuns は rows が参照する（重複を除く）周ごとの
+// budget_usd（USDの100万分の1単位）を1回の問い合わせで返す
+// （#83・§IF / API「runs」の cycle_budget_usd。決定 2026-09-28 親: `--auto`の
+// 個別の操作もcycle表に1行を作るため、runのcycle_idはNULL可のまま――NULLは
+// 周の外で記録されたrunを表す）。
+func loadCycleBudgetsForRuns(ctx context.Context, tx *sql.Tx, rows []*runRow) (map[int64]int64, error) {
+	budgets := map[int64]int64{}
+	seen := map[int64]bool{}
+	var ids []int64
+	for _, r := range rows {
+		if r.CycleID == nil {
+			continue
+		}
+		cid, ok := parseCycleID(*r.CycleID)
+		if !ok || seen[cid] {
+			continue
+		}
+		seen[cid] = true
+		ids = append(ids, cid)
+	}
+	if len(ids) == 0 {
+		return budgets, nil
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := "SELECT id, budget_usd FROM cycle WHERE id IN (" + strings.Join(placeholders, ",") + ")"
+	rowsResult, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rowsResult.Close() }()
+	for rowsResult.Next() {
+		var id, budget int64
+		if err := rowsResult.Scan(&id, &budget); err != nil {
+			return nil, err
+		}
+		budgets[id] = budget
+	}
+	return budgets, rowsResult.Err()
 }

@@ -203,6 +203,14 @@ type RunJudgmentInput struct {
 	// ResumeFromRunID が非nilなら、その run の session_id へ --resume する
 	// （§失敗・差し戻しの上限・§J5検証。S1の呼び出し元はまだこれを使わない）。
 	ResumeFromRunID *string
+	// CycleID が非nilなら、この run を周（cycle）へ紐づけ、起動の前に
+	// §予算ガードの評価式（既消費額＋予約額＋評価額 ＞ 周の上限額）を①の
+	// トランザクションの中で検査する（#83）。真なら run を作らず課題も
+	// 変えずに ErrBudgetExceeded を返す（等号は起動してよい）。周が存在
+	// しない・既に終了していれば ErrValidation。nil なら（#83 より前の
+	// 呼び出し元と同じ）予算の評価を行わず、run の cycle_id は NULL のまま
+	// 記録する。
+	CycleID *string
 }
 
 // RunJudgmentResult は Store.RunJudgment の出力。
@@ -273,12 +281,52 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 	var isResume bool
 	var resumeFromRunIDInt *int64
 	var prevReportedMicros *int64
+	var cycleIDInt *int64
 	var runIDInt int64
 
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		ch, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
 			return err
+		}
+
+		if in.CycleID != nil {
+			// 終了していない run を持つ課題は、予算の評価より先に
+			// ErrRunInProgress にする（予算の不足と取り違えない）。
+			active, err := loadActiveRunByChallengeID(ctx, tx, cid)
+			if err != nil {
+				return err
+			}
+			if active != nil {
+				return errActiveRunExists
+			}
+			cyid, ok := parseCycleID(*in.CycleID)
+			if !ok {
+				return ErrValidation
+			}
+			cyc, err := loadCycleByID(ctx, tx, cyid)
+			if err != nil {
+				return err
+			}
+			if cyc == nil || cyc.EndedAt != nil {
+				return ErrValidation
+			}
+			spent, err := cycleSpentMicros(ctx, tx, cyid)
+			if err != nil {
+				return err
+			}
+			reserved, err := cycleReservedMicros(ctx, tx, cyid)
+			if err != nil {
+				return err
+			}
+			// self-review: 整数（USDの100万分の1）で評価し、丸め誤差を避ける
+			// （§クリティカル設計決定 1）。「＞」だけを拒否し、等号は起動してよい
+			// （§予算ガード「起動の前に…評価し、真なら起動しない」の元の現行の
+			// 評価式）。
+			if spent+reserved+maxBudgetMicros > cyc.BudgetUSD {
+				return ErrBudgetExceeded
+			}
+			cycleIDInt = &cyid
 		}
 
 		if in.ResumeFromRunID != nil {
@@ -312,6 +360,7 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 		}
 
 		row, err := insertRun(ctx, tx, cid, insertRunInput{
+			CycleID:          cycleIDInt,
 			Kind:             runKindJudgment,
 			Judgment:         in.Judgment,
 			ChallengeVersion: int64(ch.Version),

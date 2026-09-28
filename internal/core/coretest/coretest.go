@@ -139,7 +139,8 @@ func SetChallengeStatus(t *testing.T, workspace string, id int, status string) {
 // 終了していない（NULL）ものとして挿入する。金額はUSDの100万分の1を単位と
 // する整数（docs/features/m3-invoker-delegation.md §クリティカル設計決定 1）。
 type InsertRunInput struct {
-	ChallengeID      int // 内部整数ID（"C-1"なら1）
+	ChallengeID      int    // 内部整数ID（"C-1"なら1）
+	CycleID          *int64 // #83。nilならNULL（周の外で記録されたrun）
 	Kind             string
 	Judgment         string // ""ならNULL（委譲。#81の時点では"judgment"のみ使う）
 	ChallengeVersion int
@@ -170,14 +171,19 @@ func InsertRun(t *testing.T, workspace string, in InsertRunInput) int64 {
 		return s
 	}
 
+	var cycleID any
+	if in.CycleID != nil {
+		cycleID = *in.CycleID
+	}
+
 	var id int64
 	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
 		res, err := tx.Exec(
-			`INSERT INTO run (challenge_id, kind, judgment, challenge_version, session_id,
+			`INSERT INTO run (cycle_id, challenge_id, kind, judgment, challenge_version, session_id,
 				session_id_mismatch, pid, host, heartbeat_at, started_at, ended_at, result,
 				rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source)
-			 VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			in.ChallengeID, in.Kind, nullable(in.Judgment), in.ChallengeVersion, in.SessionID,
+			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			cycleID, in.ChallengeID, in.Kind, nullable(in.Judgment), in.ChallengeVersion, in.SessionID,
 			in.PID, in.Host, in.HeartbeatAt, in.StartedAt, nullable(in.EndedAt), nullable(in.Result),
 			in.RateLimited, in.MaxBudgetUSD, in.BudgetBucket, in.CostUSD, nullable(in.CostSource),
 		)
@@ -188,6 +194,33 @@ func InsertRun(t *testing.T, workspace string, in InsertRunInput) int64 {
 		return err
 	}); err != nil {
 		t.Fatalf("coretest: InsertRun: %v", err)
+	}
+	return id
+}
+
+// InsertCycle はテスト専用のフィクスチャとして cycle を1件挿入し、割り当て
+// られた内部整数IDを返す（#83。internal/cli の runs コマンドのテストが、
+// まだ結線されていない `flywheel cycle`〈#86〉を経由せず、cycle_id を持つ
+// run の cycle_budget_usd の表示を検証するために使う）。budgetUSDMicros は
+// USDの100万分の1を単位とする整数。
+func InsertCycle(t *testing.T, workspace, trigger string, budgetUSDMicros int64, startedAt string) int64 {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+
+	var id int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(
+			`INSERT INTO cycle (trigger, started_at, ended_at, result, budget_usd, spent_usd) VALUES (?, ?, NULL, NULL, ?, 0)`,
+			trigger, startedAt, budgetUSDMicros,
+		)
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertCycle: %v", err)
 	}
 	return id
 }

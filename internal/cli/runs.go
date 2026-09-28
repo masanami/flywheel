@@ -33,8 +33,8 @@ func runRuns(a Args) (any, error) {
 
 // runsJSON は run の一覧を §IF / API「runs」の形（要素ごと）へ変換する:
 // {"runs": [{"id", "kind", "judgment", "challenge_id", "cycle_id",
-// "session_id", "result", "rate_limited", "cost_usd", "cost_source",
-// "max_budget_usd", "started_at", "ended_at"}]}
+// "cycle_budget_usd", "session_id", "result", "rate_limited", "cost_usd",
+// "cost_source", "max_budget_usd", "started_at", "ended_at"}]}
 func runsJSON(runs []core.Run) []map[string]any {
 	out := make([]map[string]any, 0, len(runs))
 	for _, r := range runs {
@@ -47,19 +47,20 @@ func runsJSON(runs []core.Run) []map[string]any {
 // stdoutのJSONを返すテストヘルパー）と名前が衝突しないよう別名にする。
 func runEntryJSON(r core.Run) map[string]any {
 	return map[string]any{
-		"id":             r.ID,
-		"kind":           string(r.Kind),
-		"judgment":       nullableString(string(r.Judgment)),
-		"challenge_id":   r.ChallengeID,
-		"cycle_id":       nullableStringPtr(r.CycleID),
-		"session_id":     r.SessionID,
-		"result":         nullableString(string(r.Result)),
-		"rate_limited":   r.RateLimited,
-		"cost_usd":       nullableFloatPtr(r.CostUSD),
-		"cost_source":    nullableString(string(r.CostSource)),
-		"max_budget_usd": r.MaxBudgetUSD,
-		"started_at":     FormatTimestamp(r.StartedAt),
-		"ended_at":       nullableTimePtr(r.EndedAt),
+		"id":               r.ID,
+		"kind":             string(r.Kind),
+		"judgment":         nullableString(string(r.Judgment)),
+		"challenge_id":     r.ChallengeID,
+		"cycle_id":         nullableStringPtr(r.CycleID),
+		"cycle_budget_usd": nullableFloatPtr(r.CycleBudgetUSD),
+		"session_id":       r.SessionID,
+		"result":           nullableString(string(r.Result)),
+		"rate_limited":     r.RateLimited,
+		"cost_usd":         nullableFloatPtr(r.CostUSD),
+		"cost_source":      nullableString(string(r.CostSource)),
+		"max_budget_usd":   r.MaxBudgetUSD,
+		"started_at":       FormatTimestamp(r.StartedAt),
+		"ended_at":         nullableTimePtr(r.EndedAt),
 	}
 }
 
