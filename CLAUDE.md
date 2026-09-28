@@ -27,7 +27,7 @@
 | `internal/core/coretest` | core のテスト支援専用（実ストアのフィクスチャ生成等）。`*_test.go` からだけ import し、本番バイナリの依存に含めない（`internal/cli/depcheck_test.go` が検査） |
 | `internal/cli` | コマンドの定義・JSON／テキスト出力・終了コードとエラーコードの写像・端末での本人確認 |
 | `internal/adapters/github` | `gh` の起動と応答の正規化（GitHub Issue の取得）。core の取得 IF（`internal/core/upstream.go`）だけに依存し、取り込みの規則は持たない。ストアを import しない |
-| `internal/invoker` | `claude` の起動・結果の判別・費用の抽出（生の値）・出力の保存。枠超過の判定規則（`IsRateLimited`）は `internal/core` に置き、invoker は抽出した自由記述をそのまま渡すだけ。core の判断の呼び出し IF（`internal/core/judgment.go` の `JudgmentInvoker`）だけに依存し、対象の選び方・予算の評価・課題への写像といった規則は持たない。ストアを import しない |
+| `internal/invoker` | `claude` の起動・結果の判別・費用の抽出（生の値）・出力の保存。判断点の指示文と J3 ブリーフの固定の節の雛形は `internal/invoker/prompts/` に置き `embed` でバイナリへ埋め込む（`Instructions`・`BriefFixedSections`）。分量の上限検査（`CheckPromptSizes`）・禁止語の生成と照合（`ForbiddenTerms`・`FindForbiddenTerms`。生成元は core・cli の定義を引数で受け取る純粋関数）もここに置く。枠超過の判定規則（`IsRateLimited`）は `internal/core` に置き、invoker は抽出した自由記述をそのまま渡すだけ。core の判断の呼び出し IF（`internal/core/judgment.go` の `JudgmentInvoker`）だけに依存し、対象の選び方・予算の評価・課題への写像といった規則は持たない。ストアを import しない |
 
 - **CLI は core の公開 API だけを呼ぶ**。遷移の可否・承認の成立条件・作業ログの記録を `internal/cli` に書かない。
 - **adapter・invoker の import の向き**: `internal/cli` が `internal/adapters/github`・`internal/invoker` を import してよいのは、それぞれを組み立てて core へ渡すこと（`New`・`NewLauncher`）と、起動不能のエラー（`ErrGHNotFound`・`invoker.ErrClaudeNotFound`）を CLI のエラーコードへ写すことだけ。`internal/core` は `internal/adapters`・`internal/invoker` のどちらも import しない（`internal/cli/depcheck_test.go` が `go list` の依存関係で検査する）。
