@@ -635,3 +635,46 @@ func TestListRuns_ReapsInterruptedRunsFirst(t *testing.T) {
 		t.Fatalf("ListRuns = %+v, want a single interrupted run", runs)
 	}
 }
+
+// 既定の閾値（300 秒）の境界を固定する: s.staleAfter を差し替えず、heartbeat が
+// 301 秒古い run は回収され、299 秒古い run は回収されない。
+func TestReapInterruptedRuns_DefaultThresholdIs300Seconds(t *testing.T) {
+	for _, tc := range []struct {
+		age  time.Duration
+		want RunResult
+	}{
+		{age: 301 * time.Second, want: RunResultInterrupted},
+		{age: 299 * time.Second, want: ""},
+	} {
+		s := newStoreForTest(t)
+		id := createChallengeForJudgmentTest(t, s)
+		cid, _ := parseChallengeID(id)
+		host, err := os.Hostname()
+		if err != nil {
+			t.Fatalf("os.Hostname: %v", err)
+		}
+		base := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+		s.now = func() time.Time { return base }
+		row, err := insertRunForTest(t, s, cid, insertRunInput{
+			Kind: runKindJudgment, Judgment: judgmentJ1, ChallengeVersion: 1,
+			SessionID: "11111111-1111-1111-1111-111111111111",
+			PID:       deadPID(t), Host: host,
+			HeartbeatAt: base, StartedAt: base, MaxBudgetUSD: 500_000, BudgetBucket: budgetBucketJudgment,
+		})
+		if err != nil {
+			t.Fatalf("insertRunForTest: %v", err)
+		}
+		s.now = func() time.Time { return base.Add(tc.age) }
+		if err := s.ReapInterruptedRuns(context.Background()); err != nil {
+			t.Fatalf("ReapInterruptedRuns: %v", err)
+		}
+		runID, _ := parseRunID(row.ID)
+		got, err := loadRunForTest(t, s, runID)
+		if err != nil {
+			t.Fatalf("loadRunForTest: %v", err)
+		}
+		if got.Result != tc.want {
+			t.Errorf("age %v: Result = %q, want %q", tc.age, got.Result, tc.want)
+		}
+	}
+}

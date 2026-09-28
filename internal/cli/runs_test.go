@@ -200,6 +200,6 @@ func TestRuns_ReapsStaleHeartbeatIntoInterrupted(t *testing.T) {
 	runs := doc["runs"].([]any)
 	elem := runs[0].(map[string]any)
 	if elem["result"] != "interrupted" {
-		t.Errorf("result = %v, want interrupted (stale heartbeat + host mismatch)", elem["result"])
+		t.Errorf("result = %v, want interrupted (stale heartbeat + dead process)", elem["result"])
 	}
 }
