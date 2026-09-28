@@ -132,6 +132,66 @@ func SetChallengeStatus(t *testing.T, workspace string, id int, status string) {
 	}
 }
 
+// InsertRunInput はテスト専用のフィクスチャとして run を1件挿入するための
+// 値（#81。internal/cli の runs コマンドのテストが、まだ結線されていない
+// 判断の呼び出し〈#84・#85〉を経由せず、run の一覧の表示を検証するために
+// 使う）。EndedAt・Result・CostUSD・CostSource が空文字列/nilなら、その run は
+// 終了していない（NULL）ものとして挿入する。金額はUSDの100万分の1を単位と
+// する整数（docs/features/m3-invoker-delegation.md §クリティカル設計決定 1）。
+type InsertRunInput struct {
+	ChallengeID      int // 内部整数ID（"C-1"なら1）
+	Kind             string
+	Judgment         string // ""ならNULL（委譲。#81の時点では"judgment"のみ使う）
+	ChallengeVersion int
+	SessionID        string
+	PID              int64
+	Host             string
+	HeartbeatAt      string
+	StartedAt        string
+	EndedAt          string
+	Result           string
+	RateLimited      bool
+	MaxBudgetUSD     int64
+	BudgetBucket     string
+	CostUSD          *int64
+	CostSource       string
+}
+
+// InsertRun は run を1件挿入し、割り当てられた内部整数IDを返す。
+func InsertRun(t *testing.T, workspace string, in InsertRunInput) int64 {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+
+	nullable := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+
+	var id int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(
+			`INSERT INTO run (challenge_id, kind, judgment, challenge_version, session_id,
+				session_id_mismatch, pid, host, heartbeat_at, started_at, ended_at, result,
+				rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source)
+			 VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			in.ChallengeID, in.Kind, nullable(in.Judgment), in.ChallengeVersion, in.SessionID,
+			in.PID, in.Host, in.HeartbeatAt, in.StartedAt, nullable(in.EndedAt), nullable(in.Result),
+			in.RateLimited, in.MaxBudgetUSD, in.BudgetBucket, in.CostUSD, nullable(in.CostSource),
+		)
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertRun: %v", err)
+	}
+	return id
+}
+
 // CountChallenges は workspace 配下のストアにある課題の件数を返す。
 func CountChallenges(t *testing.T, workspace string) int {
 	t.Helper()

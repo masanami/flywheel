@@ -248,5 +248,15 @@ func defaultCommands() []Command {
 			MaxPositional: 1,
 			Run:           runMarkRead,
 		},
+		{
+			// docs/features/m3-invoker-delegation.md §観測・§IF / API「runs」
+			// （#81）。`<C-ID>` は省略できる（全件）。
+			Path:          []string{"runs"},
+			RequiresStore: true,
+			MinPositional: 0,
+			MaxPositional: 1,
+			Flags:         []flagDef{{Name: "open", HasValue: false}},
+			Run:           runRuns,
+		},
 	}
 }

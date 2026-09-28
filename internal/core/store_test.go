@@ -100,7 +100,12 @@ func TestInit_WritesGitignoreExcludingStoreAndItsSidecarFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read .gitignore: %v", err)
 	}
-	for _, want := range []string{"flywheel.db", "flywheel.db-wal", "flywheel.db-shm"} {
+	// runs/ は #81（docs/features/m3-invoker-delegation.md §invoker の
+	// 共通の規則）。self-review 指摘（round2, code-reviewer CONFIRMED）:
+	// init が書く既定の内容に runs/ が含まれることを固定する検査が無いと、
+	// gitignoreContents から runs/ が抜けても他のテストが気付けない
+	// （invoker側の ensureRunsGitignoreEntry が後から足すため隠れてしまう）。
+	for _, want := range []string{"flywheel.db", "flywheel.db-wal", "flywheel.db-shm", "runs/"} {
 		if !strings.Contains(string(content), want) {
 			t.Errorf(".gitignore does not exclude %q:\n%s", want, content)
 		}

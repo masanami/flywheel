@@ -30,6 +30,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   log [<ID>]
   ingest [--source <id>]
   mark-read <C-ID>
+  runs [<C-ID>] [--open]
 
-詳細は docs/features/m1-core.md を参照。
+詳細は docs/features/m1-core.md・docs/features/m3-invoker-delegation.md を参照。
 `

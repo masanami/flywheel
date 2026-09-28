@@ -260,11 +260,18 @@ func TestRun_NonObjectSuccessPayloadBecomesInternalError(t *testing.T) {
 	}
 }
 
-// parseIFAPISignatures は docs/features/m1-core.md の「### IF / API」節の表から、
-// コマンドの Path（空白区切り）ごとの書式を導く。各行の `flywheel …` から、最初の
+// parseIFAPISignatures は doc の「### IF / API」節の表から、コマンドの
+// Path（空白区切り）ごとの書式を導く。各行の `flywheel …` から、最初の
 // 引数・フラグ（<…>・[…]・(…)・--…）の手前までのトークンを Path とし、残りを
 // 書式とする。1 行に `/` で並ぶ複数のコマンド（approve <OP-ID> / reject <OP-ID>）は
 // それぞれ数え、同じ Path の行が複数あれば書式をすべて返す。
+//
+// 節の区切りは見出しレベル3以下（"#"・"##"・"###"）でだけ判定する。
+// docs/features/m3-invoker-delegation.md の「### IF / API」節は、CLI の表
+// （#81 が足す `runs` を含む）を「#### CLI」というレベル4の小見出しの下に
+// 持つため、レベル4以上の見出しで inSection を落とすと m3 の CLI 表を
+// 読み飛ばしてしまう（m1-core.md の「### IF / API」節にはレベル4の小見出しが
+// 無いため、この変更は m1 の読み取り結果を変えない）。
 func parseIFAPISignatures(t *testing.T, doc string) map[string][]ifAPISignature {
 	t.Helper()
 	out := map[string][]ifAPISignature{}
@@ -272,7 +279,9 @@ func parseIFAPISignatures(t *testing.T, doc string) map[string][]ifAPISignature 
 	for _, line := range strings.Split(doc, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
-			inSection = trimmed == "### IF / API"
+			if headingLevel(trimmed) <= 3 {
+				inSection = trimmed == "### IF / API"
+			}
 			continue
 		}
 		if !inSection || !strings.HasPrefix(trimmed, "|") {
@@ -305,6 +314,50 @@ func parseIFAPISignatures(t *testing.T, doc string) map[string][]ifAPISignature 
 		t.Fatal("IF/API table not found in document")
 	}
 	return out
+}
+
+// headingLevel は trimmed（前後の空白を除いたMarkdownの行）の先頭の "#" の
+// 連続数を返す（見出しでなければ0）。
+func headingLevel(trimmed string) int {
+	n := 0
+	for n < len(trimmed) && trimmed[n] == '#' {
+		n++
+	}
+	return n
+}
+
+// TestRunsCommand_RequiredArgumentsMatchM3IFAPITable は runs コマンドについて
+// TestDefaultCommands_RequiredArgumentsMatchIFAPITable と同じ検査を
+// docs/features/m3-invoker-delegation.md に対して行う（m3 の CLI 表は
+// M3 全体〈S1〜S2〉を1つの表にまとめているため、m1 と違い表全体の完全一致は
+// 要求せず、実装済みの `runs` だけを見る。§IF / API「CLI」）。
+func TestRunsCommand_RequiredArgumentsMatchM3IFAPITable(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m3-invoker-delegation.md"))
+	if err != nil {
+		t.Fatalf("read m3 spec: %v", err)
+	}
+	sigs, ok := parseIFAPISignatures(t, string(data))["runs"]
+	if !ok || len(sigs) == 0 {
+		t.Fatal("m3 spec's IF/API table has no `runs` row")
+	}
+	want := sigs[0]
+
+	cmd, ok := registeredCommands()["runs"]
+	if !ok {
+		t.Fatal("runs is not registered in defaultCommands()")
+	}
+	if cmd.MinPositional != want.minPositional {
+		t.Errorf("runs: MinPositional = %d, IF/API table says %d", cmd.MinPositional, want.minPositional)
+	}
+	got := map[string]bool{}
+	for _, f := range cmd.Flags {
+		if f.Required {
+			got[f.Name] = true
+		}
+	}
+	if !reflect.DeepEqual(got, want.required) {
+		t.Errorf("runs: required flags = %v, IF/API table says %v", got, want.required)
+	}
 }
 
 // ifAPISignature は §IF / API の表の 1 コマンドの書式から読み取った、必須の
@@ -416,6 +469,14 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	for name := range parseIFAPISignatures(t, string(data)) {
 		wantSet[name] = true
 	}
+	// #81: m3-invoker-delegation.md §IF / API「CLI」の表は M3 全体（S1〜S2）の
+	// コマンドを1つの表にまとめて文書化しており、本チケットが実装するのは
+	// そのうち `runs` だけである（`classify --auto`・`plan --auto`・`cycle`・
+	// `run`・`verify --auto`・`slot clear`・`budget` は #83〜#86 の範囲）。
+	// m1-core.md と違い「表と登録表が完全一致する」前提を m3 の表全体には
+	// 適用できないため、ここでは実装済みの `runs` だけを個別に足す
+	// （残りの行との整合は、それぞれを実装するチケットが同種の検査を足す）。
+	wantSet["runs"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")
