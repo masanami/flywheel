@@ -35,15 +35,18 @@ type activityRow struct {
 	Action       string
 	Before       any
 	After        any
+	// RunID は原因の run の内部整数 ID（nil なら NULL）。0004（#78）が足した
+	// activity.run_id 列に対応する（#84）。
+	RunID *int64
 }
 
 // defaultInsertActivity は activity テーブルへ 1 行 INSERT する既定の実装。
 // Store.insertActivity が nil のときに使う。
 func defaultInsertActivity(tx *sql.Tx, row activityRow) error {
 	_, err := tx.Exec(
-		`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		row.At, row.Actor, row.Channel, row.Verification, row.Entity, row.EntityID, row.Action, row.Before, row.After,
+		`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after, run_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		row.At, row.Actor, row.Channel, row.Verification, row.Entity, row.EntityID, row.Action, row.Before, row.After, int64PtrColumn(row.RunID),
 	)
 	return err
 }

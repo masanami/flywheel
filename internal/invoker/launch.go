@@ -52,8 +52,16 @@ func (l *Launcher) InvokeJudgment(ctx context.Context, in core.JudgmentLaunchInp
 		}, nil
 	}
 
+	stdin, err := buildJudgmentStdin(in)
+	if err != nil {
+		return core.JudgmentLaunchOutput{
+			Result:       core.RunResultLaunchFailed,
+			ErrorSummary: fmt.Sprintf("invoker: build stdin: %v", err),
+		}, nil
+	}
+
 	args := buildArgs(in)
-	res := runClaude(ctx, claudePath, in.Workspace, args, in.Stdin, timeout)
+	res := runClaude(ctx, claudePath, in.Workspace, args, stdin, timeout)
 
 	var launchErr error
 	if res.launchFailed {
@@ -94,7 +102,7 @@ func (l *Launcher) InvokeJudgment(ctx context.Context, in core.JudgmentLaunchInp
 	// （self-review 指摘 round1: 保存失敗を launch_failed へすり替えると
 	// 実行済みの run の費用が0に落ちる）。保存できなかった事実だけを
 	// ErrorSummary に付記する（既存のエラー要約があれば残しつつ追記する）。
-	if err := saveRunArtifacts(in.RunDir, in.Stdin, res.stdout, res.stderr); err != nil {
+	if err := saveRunArtifacts(in.RunDir, stdin, res.stdout, res.stderr); err != nil {
 		note := fmt.Sprintf("invoker: save run artifacts: %v", err)
 		if out.ErrorSummary == "" {
 			out.ErrorSummary = note
@@ -109,6 +117,28 @@ func (l *Launcher) InvokeJudgment(ctx context.Context, in core.JudgmentLaunchInp
 	_ = ensureRunsGitignoreEntry(in.Workspace)
 
 	return out, nil
+}
+
+// buildJudgmentStdin は標準入力のバイト列を組み立てる（§機能全体の設計
+// 「規則は core、入出力は invoker」の決定〈#84〉: 標準入力の組み立て層は
+// invoker 側の Launcher.InvokeJudgment に置く）。in.Sections が非空なら、
+// in.SessionID が指す判断点の埋め込みの指示文（Instructions）と、
+// in.Sections を core.JudgmentDataSection から invoker.DataSection へ写した
+// ものを BuildStdin へ渡して組み立てる。in.Sections が空なら
+// （#81 の時点の呼び出し元・テストとの互換）in.Stdin をそのまま使う。
+func buildJudgmentStdin(in core.JudgmentLaunchInput) ([]byte, error) {
+	if len(in.Sections) == 0 {
+		return in.Stdin, nil
+	}
+	instructions, err := Instructions(in.Judgment)
+	if err != nil {
+		return nil, err
+	}
+	sections := make([]DataSection, 0, len(in.Sections))
+	for _, s := range in.Sections {
+		sections = append(sections, DataSection{Label: s.Label, Content: s.Content})
+	}
+	return BuildStdin(instructions, sections), nil
 }
 
 // saveRunArtifacts は runDir（.flywheel/runs/<run の ID>/）を作り、渡した

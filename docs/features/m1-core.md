@@ -167,6 +167,9 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `config_not_found` | 2 | 取り込み元の宣言ファイル（`.flywheel/sources.json`）が無い（#54。docs/features/m2-github-issue-ingest.md §エラーコードの追加） |
 | `config_invalid` | 2 | 取り込み元の宣言が規則に反する（解釈できない JSON を含む。#54。同上） |
 | `upstream_unavailable` | 2 | 上流へ接続する手段（`gh`）が PATH に無い（#59。同上） |
+| `invoker_unavailable` | 2 | 判断の呼び出し・委譲を行う手段（`claude`）が PATH に無い（#84。docs/features/m3-invoker-delegation.md §IF / API「エラーコードの追加」） |
+| `run_in_progress` | 1 | 指定した課題に終了していない run がある（#84。同上） |
+| `budget_exceeded` | 1 | 周の上限、または計画の版の枠の残りのため起動できない（#84。同上） |
 
 #### 成功時の JSON 出力の規約【決定 2026-09-21 #5（実装チケットの意思決定者）】
 

@@ -107,6 +107,9 @@ type JudgmentLaunchInput struct {
 	// 起動の引数の形（--session-id と --resume のどちらを使うか）を
 	// 決めてよい（実際の引数の形は【仮定】。args.goを参照）。
 	IsResume bool
+	// Judgment は判断点（J1〜J5）。invoker（#84 以降の Sections を使う経路）が
+	// この値から埋め込みの指示文（Instructions）を選ぶために使う。
+	Judgment JudgmentPoint
 	// Workspace は判断の呼び出しの作業ディレクトリ。
 	Workspace string
 	// RunDir は標準出力・標準エラー・渡した入力の保存先
@@ -119,9 +122,29 @@ type JudgmentLaunchInput struct {
 	// TimeoutSec は1回の起動に置く時間の上限（秒）。
 	TimeoutSec int
 	// Stdin は標準入力にそのまま渡すバイト列（指示文＋区切りの行で囲んだ
-	// データの区画。組み立ては呼び出し元〈#84・#85、または本チケットの
-	// テスト〉の責務で、invoker はその中身を解釈しない）。
+	// データの区画。Sections が空のときだけ使う互換の経路。組み立ては
+	// 呼び出し元〈#81 の時点のテスト等〉の責務で、invoker はその中身を
+	// 解釈しない）。
 	Stdin []byte
+	// Sections は、標準入力に埋め込む外部由来の文字列のデータの区画の一覧
+	// （#84。§機能全体の設計「規則は core、入出力は invoker」の決定: 標準入力の
+	// 組み立て（instructions の埋め込み読み込み・区切りの行での囲い）は
+	// internal/invoker.Launcher.InvokeJudgment が in.Judgment から
+	// invoker.Instructions を引き、invoker.BuildStdin(instructions,
+	// sections) で行う。core はここへ「判断点の種類」と「データの区画の
+	// 一覧」を渡すだけで、指示文の中身・区切りの形式を知らない〈import の
+	// 向きを保つ〉）。非空なら invoker はこちらを優先し、Stdin フィールドは
+	// 無視する（互換: Sections が空のときだけ Stdin をそのまま使う）。
+	Sections []JudgmentDataSection
+}
+
+// JudgmentDataSection は標準入力へ埋め込む、外部由来の文字列 1 件（ラベルと
+// 本文）。internal/invoker.DataSection と同じ形だが、core はストアも
+// invoker も import しないため独立した型として持つ（invoker 側がこの値を
+// invoker.DataSection へ写す）。
+type JudgmentDataSection struct {
+	Label   string
+	Content string
 }
 
 // JudgmentLaunchOutput は JudgmentInvoker が返す、判断の呼び出し1回の結果
@@ -193,8 +216,12 @@ type RunJudgmentInput struct {
 	MaxBudgetUSD float64
 	// TimeoutSec は1回の起動の時間の上限（秒）。
 	TimeoutSec int
-	// Stdin は判断の呼び出しの標準入力。
+	// Stdin は判断の呼び出しの標準入力（Sections が空のときだけ使う互換の経路。
+	// JudgmentLaunchInput.Stdin と同じ規則）。
 	Stdin []byte
+	// Sections は標準入力に埋め込むデータの区画の一覧（#84。非空なら invoker が
+	// これを優先する。JudgmentLaunchInput.Sections と同じ規則）。
+	Sections []JudgmentDataSection
 	// OutputSchema はこの判断点の出力スキーマ。
 	OutputSchema []byte
 	// Invoker は判断の呼び出しの実行者（internal/invoker.Launcher、または
@@ -395,12 +422,14 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 	launchIn := JudgmentLaunchInput{
 		SessionID:    sessionID,
 		IsResume:     isResume,
+		Judgment:     in.Judgment,
 		Workspace:    s.workspace,
 		RunDir:       runDirPath(s.workspace, runIDDisplay),
 		OutputSchema: in.OutputSchema,
 		MaxBudgetUSD: in.MaxBudgetUSD,
 		TimeoutSec:   in.TimeoutSec,
 		Stdin:        in.Stdin,
+		Sections:     in.Sections,
 	}
 
 	output, invokeErr := s.invokeWithHeartbeat(ctx, runIDInt, launchIn, in.Invoker)

@@ -51,6 +51,19 @@ const (
 	// 直接 errors.Is で判定して写す（mapCoreErr を経由しない。CLAUDE.md「adapter の
 	// import の向き」）。
 	CodeUpstreamUnavailable ErrorCode = "upstream_unavailable"
+	// CodeInvokerUnavailable は #84 で追加（`claude` が PATH に無い。
+	// docs/features/m3-invoker-delegation.md §IF / API「エラーコードの追加」）。
+	// core の sentinel ではなく internal/invoker.ErrClaudeNotFound を
+	// runClassifyAuto が直接 errors.Is で判定して写す（mapCoreErr を経由しない。
+	// CodeUpstreamUnavailable と同じ形）。
+	CodeInvokerUnavailable ErrorCode = "invoker_unavailable"
+	// CodeRunInProgress は #84 で追加（指定した課題に終了していない run が
+	// ある。同上「エラーコードの追加」）。core.ErrRunInProgress を写す。
+	CodeRunInProgress ErrorCode = "run_in_progress"
+	// CodeBudgetExceeded は #84 で追加（周の上限、または計画の版の枠の残りの
+	// ため起動できない。同上「エラーコードの追加」）。core.ErrBudgetExceeded を
+	// 写す。
+	CodeBudgetExceeded ErrorCode = "budget_exceeded"
 )
 
 // codeExit は 1 つのエラーコードと、それに対応する終了コード（0/1/2 のみ）の組。
@@ -79,6 +92,9 @@ var errorCodeTable = []codeExit{
 	{CodeConfigNotFound, 2},
 	{CodeConfigInvalid, 2},
 	{CodeUpstreamUnavailable, 2},
+	{CodeInvokerUnavailable, 2},
+	{CodeRunInProgress, 1},
+	{CodeBudgetExceeded, 1},
 }
 
 // ExitCodeFor は既知の ErrorCode に対応する終了コードを返す。
@@ -146,6 +162,10 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeConfigNotFound, err.Error())
 	case errors.Is(err, core.ErrConfigInvalid):
 		return NewError(CodeConfigInvalid, err.Error())
+	case errors.Is(err, core.ErrRunInProgress):
+		return NewError(CodeRunInProgress, err.Error())
+	case errors.Is(err, core.ErrBudgetExceeded):
+		return NewError(CodeBudgetExceeded, err.Error())
 	default:
 		return NewError(CodeInternalError, err.Error())
 	}

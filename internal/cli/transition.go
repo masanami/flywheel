@@ -10,9 +10,17 @@ import (
 	"github.com/masanami/flywheel/internal/core"
 )
 
-// runClassify は `flywheel classify <ID> --priority <P0|P1|P2>` の実装（T2）。
-// 閉集合の検査・遷移の可否・作業ログの記録は core が持つ（core.ClassifyChallenge）。
+// runClassify は `flywheel classify <ID> --priority <P0|P1|P2>`（T2）と
+// `flywheel classify --auto [<ID>]`（#84。J1）の実装を振り分ける。
+// commands.go の OneOfGroups が --priority と --auto のちょうど1つを既に
+// 保証している。
 func runClassify(a Args) (any, error) {
+	if a.Bools["auto"] {
+		return runClassifyAuto(a)
+	}
+	if len(a.Positional) != 1 {
+		return nil, NewError(CodeUsageError, "classify --priority には課題の ID が必要です")
+	}
 	c, err := a.Store.ClassifyChallenge(context.Background(), core.ChannelCLI, a.Positional[0], core.ClassifyInput{
 		Priority: a.Values["priority"],
 	})

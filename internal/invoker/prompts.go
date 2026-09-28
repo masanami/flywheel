@@ -13,20 +13,20 @@ package invoker
 //     CheckPromptSizes が担う。fs.FS を受け取る形にし、本物の embed でも
 //     フィクスチャ（fstest.MapFS）でも同じ関数を通す（検査関数を2つ持たない）。
 //
-// self-review 指摘（round1, design-reviewer PLAUSIBLE・未解決のまま持ち越し）:
-// Instructions・BriefFixedSections を実際に呼んで判断の呼び出しの標準入力を
-// 組み立てるのは誰か（#84・#85 以降）が、本チケットの時点では未確定である。
-// CLAUDE.md の import の向きの規約は「internal/cli が internal/invoker を
-// import してよいのは New・NewLauncher の組み立てと ErrClaudeNotFound の
-// 写像だけ」としており、internal/core は internal/invoker を import しない。
-// したがって Instructions・BuildStdin を呼んで core.RunJudgmentInput.Stdin を
-// 組み立てる処理を internal/cli に書くなら上の規約を広げる決定が要り、
-// internal/core 側に置くなら import の向きの規約自体を見直す決定が要る。
-// このファイルはどちらか一方を先取りして決めず、後続チケットが規約と併せて
-// 決定することを前提にしている（本チケットの範囲は置き場・embed・検査だけ）。
-// 本チケットの internal/cli/prompts_guard_test.go は _test.go からの検査
-// 目的の呼び出しであり、上の「cli が呼んでよい範囲」は本番コードパスに
-// ついての規約であるため、テストからの呼び出しはこの規約の対象外である。
+// 【決定 2026-09-28 親（#84）】Instructions・BuildStdin を呼んで標準入力を
+// 組み立てるのは internal/invoker.Launcher.InvokeJudgment 自身である
+// （launch.go の buildJudgmentStdin）。core.RunJudgmentInput／
+// JudgmentLaunchInput は「判断点の種類」（Judgment）と「データの区画の一覧」
+// （Sections []core.JudgmentDataSection。ラベルと本文の組）だけを invoker へ
+// 渡し、invoker が in.Judgment から Instructions(j) を読み、
+// core.JudgmentDataSection を DataSection へ写して BuildStdin(instructions,
+// sections) を呼ぶ。この形なら CLAUDE.md の import の向きの規約
+// （internal/cli が internal/invoker を import してよいのは New・
+// NewLauncher の組み立てと ErrClaudeNotFound の写像だけ・internal/core は
+// internal/invoker を import しない）をどちらも変えずに済む。呼び出し元
+// （#84 の J1・将来の J2 以降）は Sections を組み立てて RunJudgmentInput へ渡す
+// だけでよい。Sections が空のとき（#81 時点の呼び出し元・テストとの互換）は
+// 既存の Stdin をそのまま使う経路を残す（buildJudgmentStdin 参照）。
 
 import (
 	"embed"
