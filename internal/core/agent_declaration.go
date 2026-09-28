@@ -142,6 +142,29 @@ func LoadAgentDeclaration(base string) (*AgentDeclaration, error) {
 	return decl, nil
 }
 
+// JudgmentBudgetFor は判断点 j（J1〜J5）の1回の呼び出しの上限額
+// （judgment_budget_usd.<j>）を返す（#83・§予算ガード「判断の呼び出しの
+// --max-budget-usd は、judgment_budget_usd の値」）。呼び出し元
+// （#84〜#86の判断点の入口）は、この値を RunJudgmentInput.MaxBudgetUSD に
+// 渡す。j が J1〜J5 の外なら 0 を返す【仮定】（呼び出し元はJ1〜J5のいずれか
+// しか渡さない。core.JudgmentPoint.valid() で事前に検査されている前提）。
+func (d *AgentDeclaration) JudgmentBudgetFor(j JudgmentPoint) float64 {
+	switch j {
+	case JudgmentJ1:
+		return d.JudgmentBudgetUSD.J1
+	case JudgmentJ2:
+		return d.JudgmentBudgetUSD.J2
+	case JudgmentJ3:
+		return d.JudgmentBudgetUSD.J3
+	case JudgmentJ4:
+		return d.JudgmentBudgetUSD.J4
+	case JudgmentJ5:
+		return d.JudgmentBudgetUSD.J5
+	default:
+		return 0
+	}
+}
+
 // RequirePositionFile は d.PositionFile が設定されており、base からの相対
 // パスとして存在するファイルを指すことを確認する。J1・J2 の入口
 // （#84〜#86。ここでは結線しない）がこれを呼ぶことを想定する

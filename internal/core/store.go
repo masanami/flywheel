@@ -49,6 +49,15 @@ type Store struct {
 	// 差し替えるためのフック。ゼロ値（本番）ならそれぞれの既定値を使う。
 	heartbeatInterval time.Duration
 	staleAfter        time.Duration
+
+	// lockHeartbeatInterval・lockStaleAfter は #83（cycle.go）のテストが
+	// defaultLockHeartbeatInterval（60秒）・defaultLockStaleAfter（300秒）を
+	// 短く差し替えるためのフック。ゼロ値（本番）ならそれぞれの既定値を使う。
+	// heartbeatInterval・staleAfter（run の heartbeat・stale の回収）とは別の
+	// 概念（サイクルの排他ロックの heartbeat・stale の回収）のため、値は同じ
+	// 既定でも独立したフィールドとして持つ。
+	lockHeartbeatInterval time.Duration
+	lockStaleAfter        time.Duration
 }
 
 // currentTime は now が設定されていればそれを、なければ time.Now() を返す。

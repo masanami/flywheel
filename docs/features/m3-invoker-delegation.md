@@ -29,7 +29,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 ## 機能要件
 
-用語: **判断点**＝設計書 §7 の J1〜J5。**判断の呼び出し**＝1 つの判断点のための `claude -p` の 1 回の起動。　**委譲**＝接続ツールの宣言に従って、実作業を子セッション（`claude -p`、または `cli` 形態の接続ツール）へ渡すこと。**子**＝委譲先のセッション。　**run**＝判断の呼び出し 1 回、または委譲の起動 1 回（`--resume` による再開も 1 回と数える）の実行記録（設計書 §6 の `run`）。**終了していない run** が「実行中」。　**周**＝`flywheel cycle` の 1 回の実行、または `--auto` つきの個別の操作・`flywheel run` の 1 回の実行（予算の周の上限を評価する単位。§予算ガード）。　**宣言**＝`.flywheel/connectors.json`（接続ツール・対象リポジトリ・人間へ上げる問いの種類）と `.flywheel/agent.json`（ポジション定義の置き場・予算・上限値）。　**スロット**＝委譲の子が作業する作業ツリー（設計書 §11）。　**照合**＝子の報告に依らず、外部の実状態（リモートのブランチ・PR・CI）とスロットのローカルの状態を読み取りで確かめること。　**偽の `claude`**＝テストで PATH の先頭に置く、引数と標準入力を記録して固定の応答を返す実行ファイル（M2 の偽の `gh` と同じ方式）。
+用語: **判断点**＝設計書 §7 の J1〜J5。**判断の呼び出し**＝1 つの判断点のための `claude -p` の 1 回の起動。　**委譲**＝接続ツールの宣言に従って、実作業を子セッション（`claude -p`、または `cli` 形態の接続ツール）へ渡すこと。**子**＝委譲先のセッション。　**run**＝判断の呼び出し 1 回、または委譲の起動 1 回（`--resume` による再開も 1 回と数える）の実行記録（設計書 §6 の `run`）。**終了していない run** が「実行中」。　**周**＝`flywheel cycle` の 1 回の実行、または `--auto` つきの個別の操作・`flywheel run` の 1 回の実行（予算の周の上限を評価する単位。§予算ガード）。`--auto` つきの個別の操作・`flywheel run` の 1 回の実行も `cycle` 表に 1 行を作り（`trigger` はその操作名。例: `classify --auto`）、`flywheel cycle` とは異なりサイクルの排他ロックは取らない【決定 2026-09-28 親】（#83・§サイクルの排他）。　**宣言**＝`.flywheel/connectors.json`（接続ツール・対象リポジトリ・人間へ上げる問いの種類）と `.flywheel/agent.json`（ポジション定義の置き場・予算・上限値）。　**スロット**＝委譲の子が作業する作業ツリー（設計書 §11）。　**照合**＝子の報告に依らず、外部の実状態（リモートのブランチ・PR・CI）とスロットのローカルの状態を読み取りで確かめること。　**偽の `claude`**＝テストで PATH の先頭に置く、引数と標準入力を記録して固定の応答を返す実行ファイル（M2 の偽の `gh` と同じ方式）。
 
 各要件の末尾の `[S1]`〜`[S4]` は、その要件を実装するスライスを表す（§スライス）。
 
@@ -251,6 +251,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 判断の呼び出しの `--max-budget-usd` は、`.flywheel/agent.json` の判断点ごとの上限額（既定 J1: 1・J2: 5・J3: 3・J4: 2・J5: 5。USD）とする【決定 2026-09-28 親 M3P9】[S1]
 - [ ] 周の上限は `.flywheel/agent.json` の周の上限額（既定 300 USD。現行の `cycle_budget_usd` と同じ）とする [S1]
 - [ ] 判断の呼び出しも委譲も、起動の前に「その周の既消費額 ＋ その周の終了していない run に渡した上限額の合計（予約額）＋ これから起動する run の評価額 ＞ 周の上限額」を評価し、真なら起動しない（現行の評価式）[S1]
+  - 「その周」は run.cycle_id が指す `cycle` 表の行である。`flywheel cycle` の run だけでなく、`--auto` の個別の操作が作る run（用語「周」参照）も自分の cycle 行に対してこの評価を受ける【決定 2026-09-28 親】（#83）。
 - [ ] 周の既消費額は、その周に終了した run の費用（§費用の記録）の合計である。run が終わったら、その run を予約額から外し、費用を既消費額へ足す（二重に数えない）[S1]
 - [ ] 判断の呼び出しの評価額は、その呼び出しに渡す上限額である [S1]
 - [ ] 周の上限で起動しなかった判断の呼び出し・委譲は、課題の状態を変えず、周の結果に理由（`cycle_budget`）とともに示す。周は、LLM を呼ばない処理（取り込み・照合）を続ける [S1]
@@ -365,7 +366,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 - **採用案**:
   - マイグレーション `0004`（スキーマ版 3 → 4。S1）で次を足す。
-    - `run`: `id`（`R-<正の整数>`）・`cycle_id`（NULL 可）・`kind`（`judgment | delegate`）・`judgment`（`J1〜J5`。委譲は NULL）・`challenge_id`・`challenge_version`（起動時の課題の版）・`plan_version`（NULL 可）・`session_id`・`session_id_mismatch`・`resumed_from_run_id`（NULL 可）・`pid`・`host`・`heartbeat_at`・`started_at`・`ended_at`・`result`（§結果の判別の閉集合＋`interrupted`。終了していなければ NULL）・`rate_limited`・`max_budget_usd`・`budget_bucket`（`judgment | impl | review`）・`cost_usd`・`cost_source`（`reported | delta | unknown`）・`reported_total_cost_usd`・`output`（検証済みの構造化出力の JSON）・`error`（要約）。**課題ごとに終了していない run は高々 1 つ**（部分一意索引）。
+    - `run`: `id`（`R-<正の整数>`）・`cycle_id`（NULL 可。`flywheel cycle` の run だけでなく、`--auto` の個別の操作が作る run も自分の周の ID を持つ〔用語「周」参照〕。NULL は周の外で記録された run〔例: #83 より前の記録〕を表す【決定 2026-09-28 親】（#83））・`kind`（`judgment | delegate`）・`judgment`（`J1〜J5`。委譲は NULL）・`challenge_id`・`challenge_version`（起動時の課題の版）・`plan_version`（NULL 可）・`session_id`・`session_id_mismatch`・`resumed_from_run_id`（NULL 可）・`pid`・`host`・`heartbeat_at`・`started_at`・`ended_at`・`result`（§結果の判別の閉集合＋`interrupted`。終了していなければ NULL）・`rate_limited`・`max_budget_usd`・`budget_bucket`（`judgment | impl | review`）・`cost_usd`・`cost_source`（`reported | delta | unknown`）・`reported_total_cost_usd`・`output`（検証済みの構造化出力の JSON）・`error`（要約）。**課題ごとに終了していない run は高々 1 つ**（部分一意索引）。
     - `cycle`: `id`（`Y-<正の整数>`）・`trigger`・`started_at`・`ended_at`・`result`（`completed | aborted | interrupted`）・`budget_usd`・`spent_usd`。
     - `lock`: `name`（主キー）・`holder`（周の ID）・`pid`・`host`・`acquired_at`・`heartbeat_at`。
     - `task_plan` に `spec`（J2 の構造化した出力の JSON。人が `plan --file` で登録した計画は NULL）。
@@ -586,8 +587,8 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - `status.needs_human.budget_exhausted`（S2）: `[{"challenge_id", "plan_version", "impl_remaining_usd", "review_remaining_usd"}]`。
 - `status.needs_human.slots`（S2）: `[{"slot_id", "repo", "path", "run_id"}]`。
 - `status.waiting_external`（S2。最上位の 4 つ目のキー）: `{"challenges": [{"challenge_id", "pr_url", "checks": "pending"}]}`。
-- `show`: 最上位に `runs`（新しい順・最大 20 件。要素は `runs` の要素と同じ形）を足し、`plans` の要素に `spec`（J2 の構造化した出力。無ければ `null`）を足す。
-- `runs`: `{"runs": [{"id", "kind", "judgment", "challenge_id", "cycle_id", "session_id", "result", "rate_limited", "cost_usd", "cost_source", "max_budget_usd", "started_at", "ended_at"}]}`。
+- `show`: 最上位に `runs`（新しい順・最大 20 件。要素は `runs` の要素と同じ形で、周の上限額 `cycle_budget_usd` を含む。`--auto` の個別の操作が既定の周の上限額で評価したことは、この値で観測する【決定 2026-09-28 親】（#83））を足し、`plans` の要素に `spec`（J2 の構造化した出力。無ければ `null`）を足す。
+- `runs`: `{"runs": [{"id", "kind", "judgment", "challenge_id", "cycle_id", "cycle_budget_usd", "session_id", "result", "rate_limited", "cost_usd", "cost_source", "max_budget_usd", "started_at", "ended_at"}]}`。`cycle_budget_usd` は `cycle_id` が `null`（周の外で記録された run）なら `null`、そうでなければその周の上限額（USD）【決定 2026-09-28 親】（#83）。
 - M1 の `internal/cli/jsondoc_test.go` に、新しいコマンドと上の拡張を足す。
 
 #### 作業ログ
