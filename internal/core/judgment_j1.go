@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // --- J1 の出力スキーマ・検査 ---
@@ -111,26 +112,11 @@ func validateJ1Output(data []byte) (*j1ValidatedOutput, bool) {
 	if verdict == J1VerdictMine && priority == nil {
 		return nil, false
 	}
-	if verdict == J1VerdictUncertain && (raw.Question == nil || trimSpaceEmpty(*raw.Question)) {
+	if verdict == J1VerdictUncertain && (raw.Question == nil || strings.TrimSpace(*raw.Question) == "") {
 		return nil, false
 	}
 
 	return &j1ValidatedOutput{Verdict: verdict, Priority: priority, Size: size, Reason: raw.Reason, Question: raw.Question}, true
-}
-
-// trimSpaceEmpty は s が空白だけ（空文字列を含む）かを返す（strings を
-// このためだけに import せず、既存の import 済みパッケージで足りる範囲に
-// 収める）。
-func trimSpaceEmpty(s string) bool {
-	for _, r := range s {
-		switch r {
-		case ' ', '\t', '\n', '\r', '\v', '\f':
-			continue
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 // --- J1 の対象の選び方 ---
@@ -152,21 +138,22 @@ func j1NotMineIfCurrent(ctx context.Context, tx *sql.Tx, challengeID int64, vers
 	if err != nil || latest == nil {
 		return nil, err
 	}
-	var raw j1RawOutput
-	if err := json.Unmarshal([]byte(latest.Output), &raw); err != nil {
-		// 記録済みの succeeded な run の output は validateJ1Output を通った
-		// ものだけのはずだが、防御的に「除外しない」側へ倒す（fail-open は
-		// ここでは「対象に含める」＝人手による classify --priority と同じ
-		// 安全側）。
-		return nil, nil
-	}
-	if J1Verdict(raw.Verdict) != J1VerdictNotMine {
+	// code-reviewer 指摘（round1 CONFIRMED）: RunJudgment ③（succeeded の記録）
+	// と finalizeJ1Output の再検査（invalidateRunOutput への書き換え）は別の
+	// 書き込みトランザクションのため、その間（または再検査そのものが失敗
+	// した場合）は閉集合外の出力が succeeded のまま残りうる。ここでも
+	// validateJ1Output を通し、再検査に落ちる出力を not_mine として扱わない
+	// （fail-open で「除外しない」側へ倒す。生の json.Unmarshal と verdict の
+	// 素通しの一致だけでは、優先度が閉集合外の壊れた mine 出力さえ
+	// not_mine と誤認しうる）。
+	validated, ok := validateJ1Output([]byte(latest.Output))
+	if !ok || validated.Verdict != J1VerdictNotMine {
 		return nil, nil
 	}
 	if latest.ChallengeVersion != int64(version) {
 		return nil, nil
 	}
-	return &j1NotMineInfo{RunID: latest.RunID, Reason: raw.Reason}, nil
+	return &j1NotMineInfo{RunID: latest.RunID, Reason: validated.Reason}, nil
 }
 
 // selectJ1AutoTargets は ID を省略した `classify --auto`・`cycle` の分類の段が
@@ -209,6 +196,38 @@ func selectJ1AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 	return out, nil
 }
 
+// j1StillEligibleForAuto は、ID を省略した対象選び（selectJ1AutoTargets）が
+// cid を選んでから実際に起動するまでの間に、上流・ポリシーの状態や
+// not_mine の判定が変わっていないかを、起動の直前に読み直して確かめる
+// （`classify --auto` はサイクルの排他ロックを取らないため、並行する別の
+// `classify --auto`・`cycle`・取り込みの進行と時間差が生じうる。
+// code-reviewer 指摘・round1 PLAUSIBLE）。終了していない run の有無は
+// RunJudgment の①トランザクションが最終防衛として検査するためここでは
+// 見ない（二重化しない）。
+func (s *Store) j1StillEligibleForAuto(ctx context.Context, cid int64, version int) (bool, error) {
+	var eligible bool
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		excluded, err := challengeAutoExcludedByPolicy(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if excluded {
+			eligible = false
+			return nil
+		}
+		notMine, err := j1NotMineIfCurrent(ctx, tx, cid, version)
+		if err != nil {
+			return err
+		}
+		eligible = notMine == nil
+		return nil
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return false, err
+	}
+	return eligible, nil
+}
+
 // TriageItem は `status` の `needs_human.triage` の 1 件（§IF / API
 // 「status.needs_human.triage（S1）: [{"challenge_id", "run_id",
 // "reason"}]」）。
@@ -249,11 +268,12 @@ func listJ1Triage(ctx context.Context, tx *sql.Tx) ([]TriageItem, error) {
 
 // buildJ1Sections は ch・decl から J1 の標準入力のデータの区画の一覧を組み立
 // てる（§J1「J1 の入力は、課題（人間記入欄・緊急度・起票者）・取り込み元の
-// 対応の記録（あれば）・ポジション定義の本文・保留の記録である」）。取り込み
-// 元の対応の記録は本チケットの範囲では課題自身の人間記入欄に含めない
-// （取り込み元の対応がある課題でも、対応の記録＝source_binding 自体は
-// 取り込みの内部状態であり、J1 が読むべき「対応の記録」は課題の記述に
-// 現れる内容で足りると判断した。返却の「仕様への指摘」に記す）。
+// 対応の記録（あれば）・ポジション定義の本文・保留の記録である」）。
+// 取り込み元の対応の記録（URL・外部キー・上流の状態・ポリシーの状態）は
+// source_binding が無い課題（`create` で作った課題）では省く
+// （design-reviewer 指摘・round1 CONFIRMED: 当初は課題の記述で足りると
+// 判断していたが、取り込んだ課題の description に対応の記録が必ず現れる
+// とは限らず、受入基準を満たしていなかった）。
 func (s *Store) buildJ1Sections(ctx context.Context, ch Challenge, decl *AgentDeclaration) ([]JudgmentDataSection, error) {
 	cid, ok := parseChallengeID(ch.ID)
 	if !ok {
@@ -261,9 +281,15 @@ func (s *Store) buildJ1Sections(ctx context.Context, ch Challenge, decl *AgentDe
 	}
 
 	var holds []Hold
+	var sb *sourceBinding
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		hs, err := loadHolds(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
 		holds = hs
+		b, err := loadSourceBindingByChallengeID(ctx, tx, cid)
+		sb = b
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -288,6 +314,12 @@ func (s *Store) buildJ1Sections(ctx context.Context, ch Challenge, decl *AgentDe
 	sections := []JudgmentDataSection{
 		{Label: "課題", Content: issueBody},
 		{Label: "ポジション定義", Content: string(posContent)},
+	}
+	// design-reviewer 指摘（round1 CONFIRMED）: §J1「J1 の入力は…取り込み元の
+	// 対応の記録（あれば）…である」を満たすため、対応（source_binding）が
+	// あれば区画を足す。無い課題（`create` で作った課題）は区画を作らない。
+	if sourceText := formatSourceBindingSection(sb); sourceText != "" {
+		sections = append(sections, JudgmentDataSection{Label: "取り込み元の対応", Content: sourceText})
 	}
 	if holdsText := formatHoldsSection(holds); holdsText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "保留の記録", Content: holdsText})
@@ -317,139 +349,69 @@ func (s *Store) invalidateRunOutput(ctx context.Context, runIDDisplay string) er
 	return classifyReadWriteErr(err)
 }
 
-// applyJ1Mine は判定 mine の出力を課題へ写す（M1 T2。§判断点の共通の規則
-// 「判断点の出力による変更の作業ログは、経路を invoker・本人確認の方式を
-// none・actor を flywheel を起動した OS のログインユーザー名とし、原因の
-// run の ID を持つ」）。写す直前に課題の最新の状態を読み直し、遷移元
-// （未分類）でなくなっていれば写さない（§アーキテクチャ決定 ③。mapped=false
-// を返すだけでエラーにしない: 判断そのものは成功しており、run の記録は既に
-// 残っている）。
+// errJ1MappingNotEligible は、写す直前に読み直した課題が J1 の遷移元
+// （未分類）でなくなっていたことを表す内部の sentinel（applyJ1Uncertain
+// だけが使う。§アーキテクチャ決定③「読み直した状態が遷移元でなくなって
+// いれば写さない」）。ErrInvalidTransition・ErrTerminalState と同じく
+// mapped=false（エラーではない）として扱う。
+var errJ1MappingNotEligible = errors.New("core: j1 mapping is no longer eligible (challenge is not unclassified anymore)")
+
+// applyJ1Mine は判定 mine の出力を課題へ写す（M1 T2。ClassifyChallenge と
+// 同じ遷移を、経路 invoker・本人確認 none・原因の run の ID つきで実行する
+// （transitionAsInvoker。§機能全体の設計「判断点の出力を core の遷移へ写す
+// ときは、M1 の core の公開 API…と同じ遷移を呼ぶ」・self-review 指摘: 以前は
+// runTransition の判定順序〈終端検査・Lookup・楽観的 UPDATE・作業ログの
+// 記録〉をこの関数と applyJ1Uncertain がそれぞれ複製しており、
+// RequiresVerification の不変条件検査を経由しなかった）。T2 の遷移表は
+// From: 未分類の1行しか持たないため、Lookup(current.Status, OpClassify) の
+// 成功自体が「読み直した状態が未分類である」ことを保証する（§アーキテクチャ
+// 決定③はこの Lookup の失敗〈ErrInvalidTransition〉で満たされる）。
 func (s *Store) applyJ1Mine(ctx context.Context, runIDDisplay, challengeIDDisplay string, priority Priority) (mapped bool, err error) {
-	actor, err := resolveActor()
-	if err != nil {
-		return false, err
-	}
-	runIDInt, ok := parseRunID(runIDDisplay)
-	if !ok {
-		return false, ErrValidation
-	}
-	cid, ok := parseChallengeID(challengeIDDisplay)
-	if !ok {
-		return false, ErrValidation
-	}
-
-	err = s.mutateAsRun(ctx, actor, ChannelInvoker, VerificationNone, &runIDInt, func(tx *sql.Tx, rec *activityRecorder) error {
-		current, err := loadChallenge(ctx, tx, cid)
-		if err != nil {
-			return err
-		}
-		if IsTerminal(Table, StatusVocabulary, current.Status) {
-			return nil
-		}
-		tr, ok := Lookup(current.Status, OpClassify)
-		if !ok {
-			return nil
-		}
-		target, err := tr.Target.Resolve(Table, NoStatus)
-		if err != nil {
-			return err
-		}
-
-		newVersion := current.Version + 1
-		nowStr := formatTimestamp(rec.at)
-		res, err := tx.ExecContext(ctx,
-			`UPDATE challenge SET status = ?, priority = ?, version = ?, updated_at = ? WHERE id = ? AND version = ?`,
-			string(target), string(priority), newVersion, nowStr, cid, current.Version,
-		)
-		if err != nil {
-			return err
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if affected != 1 {
-			return fmt.Errorf("core: applyJ1Mine: expected to update 1 row, updated %d", affected)
-		}
-
-		before := map[string]any{"status": string(current.Status), "priority": nullablePriority(current.Priority)}
-		after := map[string]any{"status": string(target), "priority": string(priority), "version": newVersion}
-		if err := rec.record("challenge", cid, string(OpClassify), before, after); err != nil {
-			return err
-		}
+	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpClassify, func(_ context.Context, tc *transitionCtx) error {
+		tc.before["priority"] = nullablePriority(tc.current.Priority)
+		tc.after["priority"] = nullablePriority(&priority)
+		tc.priority = &priority
 		mapped = true
 		return nil
 	})
-	return mapped, err
+	if err != nil {
+		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) {
+			return false, nil
+		}
+		return false, err
+	}
+	return mapped, nil
 }
 
 // applyJ1Uncertain は判定 uncertain の出力を課題へ写す（M1 T11。
-// applyJ1Mine と同じ規則・同じ「写せなければ mapped=false」の扱い）。
+// HoldChallenge と同じ遷移を transitionAsInvoker 経由で実行する）。T11 の
+// 遷移表は未分類・分類済・着手中・検証中の4行を持つため、
+// Lookup(current.Status, OpHold) の成功だけでは「読み直した状態が未分類で
+// なくなっていれば写さない」を保証できない（J1 の対象は常に未分類の課題
+// だけであり、他の3状態からの人間対応待ちへの遷移は M1 の hold・verify が
+// 別に担う）。そのため、写す直前に読み直した状態を明示的に未分類と照合する
+// （code-reviewer 指摘・round1 CONFIRMED: この照合が無いと、J1 の実行中に
+// 人間が別の操作でこの課題を分類済・着手中・検証中へ進めていても、
+// uncertain の出力がその課題を人間対応待ちへ進め、from_status の食い違う
+// 保留を作ってしまっていた）。
 func (s *Store) applyJ1Uncertain(ctx context.Context, runIDDisplay, challengeIDDisplay, question string) (mapped bool, err error) {
-	actor, err := resolveActor()
-	if err != nil {
-		return false, err
-	}
-	runIDInt, ok := parseRunID(runIDDisplay)
-	if !ok {
-		return false, ErrValidation
-	}
-	cid, ok := parseChallengeID(challengeIDDisplay)
-	if !ok {
-		return false, ErrValidation
-	}
-
-	err = s.mutateAsRun(ctx, actor, ChannelInvoker, VerificationNone, &runIDInt, func(tx *sql.Tx, rec *activityRecorder) error {
-		current, err := loadChallenge(ctx, tx, cid)
-		if err != nil {
-			return err
+	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpHold, func(ctx context.Context, tc *transitionCtx) error {
+		if tc.current.Status != StatusUnclassified {
+			return errJ1MappingNotEligible
 		}
-		if IsTerminal(Table, StatusVocabulary, current.Status) {
-			return nil
-		}
-		tr, ok := Lookup(current.Status, OpHold)
-		if !ok {
-			return nil
-		}
-		target, err := tr.Target.Resolve(Table, NoStatus)
-		if err != nil {
-			return err
-		}
-
-		newVersion := current.Version + 1
-		nowStr := formatTimestamp(rec.at)
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id)
-			 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)`,
-			cid, question, string(current.Status), nowStr, runIDInt,
-		); err != nil {
-			return err
-		}
-
-		res, err := tx.ExecContext(ctx,
-			`UPDATE challenge SET status = ?, version = ?, updated_at = ? WHERE id = ? AND version = ?`,
-			string(target), newVersion, nowStr, cid, current.Version,
-		)
-		if err != nil {
-			return err
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if affected != 1 {
-			return fmt.Errorf("core: applyJ1Uncertain: expected to update 1 row, updated %d", affected)
-		}
-
-		before := map[string]any{"status": string(current.Status)}
-		after := map[string]any{"status": string(target), "question": question, "version": newVersion}
-		if err := rec.record("challenge", cid, string(OpHold), before, after); err != nil {
+		if err := insertHold(ctx, tc, question); err != nil {
 			return err
 		}
 		mapped = true
 		return nil
 	})
-	return mapped, err
+	if err != nil {
+		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errJ1MappingNotEligible) {
+			return false, nil
+		}
+		return false, err
+	}
+	return mapped, nil
 }
 
 // finalizeJ1Output は run が succeeded の場合に、core の再検査（閉集合・
@@ -610,6 +572,19 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 		if ch.Status != StatusUnclassified {
 			// 同じ周の中で並行して状態が変わった（例: 人間が classify
 			// --priority で先に分類した）。静かに読み飛ばす。
+			continue
+		}
+		// code-reviewer 指摘（round1 PLAUSIBLE）: selectJ1AutoTargets が対象を
+		// 選んだ時点と、実際にこの課題を起動する時点の間に、並行する別の
+		// `classify --auto`・取り込みが進みうる（このコマンド自身は
+		// サイクルの排他ロックを取らない＝§サイクルの排他「個別の操作は
+		// サイクルのロックを取らない」）。除外条件（上流の状態・ポリシーの
+		// 状態・not_mine）を起動の直前にもう一度確かめる。
+		eligible, err := s.j1StillEligibleForAuto(ctx, cid, ch.Version)
+		if err != nil {
+			return nil, err
+		}
+		if !eligible {
 			continue
 		}
 		sections, err := s.buildJ1Sections(ctx, *ch, in.AgentDecl)

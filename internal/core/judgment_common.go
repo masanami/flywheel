@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sort"
 	"strings"
 )
 
@@ -62,15 +63,13 @@ func loadChallengesByStatusSorted(ctx context.Context, tx *sql.Tx, status Status
 }
 
 // stableSortChallengesByPriority は out を priorityRank で安定ソートする
-// （呼び出し前の並び順〈ID 昇順〉を同順位の中で保つ）。
+// （呼び出し前の並び順〈ID 昇順〉を同順位の中で保つ。design-reviewer 指摘・
+// round1 CONFIRMED: 以前はコメントで sort.SliceStable を使うとしながら
+// 手書きの挿入ソートを実装しており、コメントと実装が食い違っていた）。
 func stableSortChallengesByPriority(out []Challenge) {
-	// sort.SliceStable は N が小さい（周内の対象数）ことを踏まえ、依存を
-	// 増やさない単純な挿入ソートで十分。標準ライブラリの sort を素直に使う。
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && priorityRank(out[j].Priority) < priorityRank(out[j-1].Priority); j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return priorityRank(out[i].Priority) < priorityRank(out[j].Priority)
+	})
 }
 
 // challengeHasActiveRun は challengeID（内部整数 ID）の課題が終了していない
@@ -140,6 +139,21 @@ func latestSucceededJudgmentOutput(ctx context.Context, tx *sql.Tx, challengeID 
 		return nil, nil
 	}
 	return &latestJudgmentRun{RunID: formatRunID(id), ChallengeVersion: version, Output: output.String}, nil
+}
+
+// formatSourceBindingSection は課題の取り込み元の対応（source_binding）を
+// 判断点の入力向けのテキストへ整形する（§判断点の共通の規則・§J1「J1 の
+// 入力は…取り込み元の対応の記録（あれば）…である」）。対応が無い課題
+// （sb が nil。`create` で作った課題）では空文字列を返す（呼び出し側はこの
+// 場合データの区画を作らない）。
+func formatSourceBindingSection(sb *sourceBinding) string {
+	if sb == nil {
+		return ""
+	}
+	return "URL: " + sb.URL + "\n" +
+		"外部キー: " + sb.ExternalKey + "\n" +
+		"上流の状態: " + string(sb.UpstreamState) + "\n" +
+		"ポリシーの状態: " + string(sb.PolicyState)
 }
 
 // formatHoldsSection は保留の記録（問いと回答）を古い順のテキストへ整形する

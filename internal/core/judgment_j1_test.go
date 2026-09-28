@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -173,6 +174,54 @@ func TestBuildJ1Sections_IncludesHoldQuestionsAndAnswers(t *testing.T) {
 	}
 }
 
+// buildJ1Sections が取り込み元の対応の記録（source_binding）を含めることを
+// 検証する（design-reviewer 指摘・round1 CONFIRMED。§J1「J1 の入力は…
+// 取り込み元の対応の記録（あれば）…である」）。
+func TestBuildJ1Sections_IncludesSourceBindingWhenPresent(t *testing.T) {
+	s := newStoreForTest(t)
+	decl := newAgentDeclForJ1Test(t, s, "pos")
+	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
+	if err != nil {
+		t.Fatalf("CreateChallenge: %v", err)
+	}
+	bindSourceForTest(t, s, ch.ID, "open", "in_policy")
+
+	current, err := s.GetChallenge(context.Background(), ch.ID)
+	if err != nil {
+		t.Fatalf("GetChallenge: %v", err)
+	}
+	sections, err := s.buildJ1Sections(context.Background(), current.Challenge, decl)
+	if err != nil {
+		t.Fatalf("buildJ1Sections: %v", err)
+	}
+	var all string
+	for _, sec := range sections {
+		all += sec.Content
+	}
+	if !containsSubstring(all, "https://example.com/issues/") {
+		t.Errorf("sections do not contain the source_binding URL: %+v", sections)
+	}
+}
+
+// 対応の無い課題（`create` で作った課題）では区画を作らない。
+func TestBuildJ1Sections_NoSourceBindingSectionWhenAbsent(t *testing.T) {
+	s := newStoreForTest(t)
+	decl := newAgentDeclForJ1Test(t, s, "pos")
+	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
+	if err != nil {
+		t.Fatalf("CreateChallenge: %v", err)
+	}
+	sections, err := s.buildJ1Sections(context.Background(), *ch, decl)
+	if err != nil {
+		t.Fatalf("buildJ1Sections: %v", err)
+	}
+	for _, sec := range sections {
+		if sec.Label == "取り込み元の対応" {
+			t.Errorf("sections unexpectedly contain a 取り込み元の対応 section for a challenge without a source_binding: %+v", sections)
+		}
+	}
+}
+
 func containsSubstring(haystack, needle string) bool {
 	return len(needle) == 0 || (len(haystack) >= len(needle) && indexOfString(haystack, needle) >= 0)
 }
@@ -290,10 +339,21 @@ func TestSelectJ1AutoTargets_ExcludesChallengeWithActiveRun(t *testing.T) {
 		t.Fatalf("CreateChallenge: %v", err)
 	}
 	insertActiveFakeRunForTest(t, s, ch.ID, judgmentJ1)
+	// code-reviewer 指摘（round1 CONFIRMED）: 除外条件を外した対照群
+	// （終了していない run を持たない課題）が対象に含まれることも確かめる。
+	// selectJ1AutoTargets が常に空を返すような壊れ方でも本テストが通って
+	// しまう「否定判定だけ」を避けるため。
+	control, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "control"})
+	if err != nil {
+		t.Fatalf("CreateChallenge(control): %v", err)
+	}
 
 	ids := listJ1AutoTargetsForTest(t, s)
 	if containsInt64(ids, mustChallengeInternalID(t, ch.ID)) {
 		t.Errorf("targets = %v, want %s excluded (has an active run)", ids, ch.ID)
+	}
+	if !containsInt64(ids, mustChallengeInternalID(t, control.ID)) {
+		t.Errorf("targets = %v, want control challenge %s included (no active run)", ids, control.ID)
 	}
 }
 
@@ -306,10 +366,20 @@ func TestSelectJ1AutoTargets_ExcludesUpstreamClosedOrMissing(t *testing.T) {
 				t.Fatalf("CreateChallenge: %v", err)
 			}
 			bindSourceForTest(t, s, ch.ID, upstream, "in_policy")
+			// code-reviewer 指摘（round1 CONFIRMED）: 対照群（upstream=open）が
+			// 対象に含まれることも確かめる。
+			control, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "control"})
+			if err != nil {
+				t.Fatalf("CreateChallenge(control): %v", err)
+			}
+			bindSourceForTest(t, s, control.ID, "open", "in_policy")
 
 			ids := listJ1AutoTargetsForTest(t, s)
 			if containsInt64(ids, mustChallengeInternalID(t, ch.ID)) {
 				t.Errorf("targets = %v, want %s excluded (upstream=%s)", ids, ch.ID, upstream)
+			}
+			if !containsInt64(ids, mustChallengeInternalID(t, control.ID)) {
+				t.Errorf("targets = %v, want control challenge %s included (upstream=open)", ids, control.ID)
 			}
 		})
 	}
@@ -322,10 +392,20 @@ func TestSelectJ1AutoTargets_ExcludesOutOfPolicy(t *testing.T) {
 		t.Fatalf("CreateChallenge: %v", err)
 	}
 	bindSourceForTest(t, s, ch.ID, "open", "out_of_policy")
+	// code-reviewer 指摘（round1 CONFIRMED）: 対照群（policy=in_policy）が
+	// 対象に含まれることも確かめる。
+	control, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "control"})
+	if err != nil {
+		t.Fatalf("CreateChallenge(control): %v", err)
+	}
+	bindSourceForTest(t, s, control.ID, "open", "in_policy")
 
 	ids := listJ1AutoTargetsForTest(t, s)
 	if containsInt64(ids, mustChallengeInternalID(t, ch.ID)) {
 		t.Errorf("targets = %v, want %s excluded (out_of_policy)", ids, ch.ID)
+	}
+	if !containsInt64(ids, mustChallengeInternalID(t, control.ID)) {
+		t.Errorf("targets = %v, want control challenge %s included (in_policy)", ids, control.ID)
 	}
 }
 
@@ -406,6 +486,10 @@ func TestClassifyAutoJ1_MineWithoutPriority_InvalidOutputLeavesChallengeUnchange
 	if res.Items[0].Result != RunResultInvalidOutput {
 		t.Fatalf("Result = %q, want invalid_output", res.Items[0].Result)
 	}
+	// code-reviewer 指摘（round1 CONFIRMED）: 返り値の J1AutoItem.Result だけで
+	// なく、ストアの run.result が実際に invalid_output へ書き換わって
+	// いることを確かめる。
+	assertStoredRunResultForTest(t, s, res.Items[0].RunID, RunResultInvalidOutput)
 	after, err := s.GetChallenge(context.Background(), ch.ID)
 	if err != nil {
 		t.Fatalf("GetChallenge after: %v", err)
@@ -460,6 +544,7 @@ func TestClassifyAutoJ1_UncertainWithoutQuestion_InvalidOutput(t *testing.T) {
 	if res.Items[0].Result != RunResultInvalidOutput {
 		t.Fatalf("Result = %q, want invalid_output", res.Items[0].Result)
 	}
+	assertStoredRunResultForTest(t, s, res.Items[0].RunID, RunResultInvalidOutput)
 }
 
 func TestClassifyAutoJ1_NotMine_LeavesChallengeUnchanged(t *testing.T) {
@@ -511,6 +596,27 @@ func TestClassifyAutoJ1_UnknownVerdict_InvalidOutput(t *testing.T) {
 	if res.Items[0].Result != RunResultInvalidOutput {
 		t.Fatalf("Result = %q, want invalid_output", res.Items[0].Result)
 	}
+	assertStoredRunResultForTest(t, s, res.Items[0].RunID, RunResultInvalidOutput)
+}
+
+// assertStoredRunResultForTest は、runIDDisplay（"R-<n>"）の run の
+// ストア上の result が want と一致することを確かめる（J1AutoItem.Result の
+// ような戻り値の言明ではなく、実際に UPDATE されたストアの行を見る）。
+func assertStoredRunResultForTest(t *testing.T, s *Store, runIDDisplay string, want RunResult) {
+	t.Helper()
+	runs, err := s.ListRuns(context.Background(), RunListOptions{})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	for _, r := range runs {
+		if r.ID == runIDDisplay {
+			if r.Result != want {
+				t.Errorf("stored run %s result = %q, want %q", runIDDisplay, r.Result, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("run %s not found in ListRuns", runIDDisplay)
 }
 
 // --- not_mine の除外・triage（AC-82・83・84・85） ---
@@ -687,5 +793,196 @@ func TestClassifyAutoJ1_ConcurrentExplicitID_OnlyOneRunStarts(t *testing.T) {
 	}
 	if len(runs) != 1 {
 		t.Fatalf("ListRuns = %d runs, want exactly 1", len(runs))
+	}
+}
+
+// TestApplyJ1Uncertain_ChallengeNoLongerUnclassified_DoesNotMap は
+// §アーキテクチャ決定③「読み直した状態が遷移元でなくなっていれば写さない」を
+// uncertain の写像で固定する（self-review 指摘・round1 CONFIRMED: 以前は
+// Lookup(current.Status, OpHold) の成功だけを見ていたため、T11 が持つ4つの
+// 遷移元〈未分類・分類済・着手中・検証中〉のどれからでも人間対応待ちへ
+// 写してしまい、J1 の実行中に人間が classify --priority で先に分類した
+// 課題にも uncertain の保留を作っていた）。J1 の run が起動してから
+// 出力を写すまでの間に、別の操作（ここでは ClassifyChallenge）が課題を
+// 分類済へ進めた場合、uncertain の出力は課題を人間対応待ちへ進めない
+// ことを検証する。
+func TestApplyJ1Uncertain_ChallengeNoLongerUnclassified_DoesNotMap(t *testing.T) {
+	s := newStoreForTest(t)
+	decl := newAgentDeclForJ1Test(t, s, "pos")
+	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
+	if err != nil {
+		t.Fatalf("CreateChallenge: %v", err)
+	}
+
+	invoked := make(chan struct{})
+	block := make(chan struct{})
+	inv := &fakeJudgmentInvoker{
+		invoked: invoked, block: block,
+		result: JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: j1Output(t, j1RawOutput{Verdict: "uncertain", Question: strPtr("q?"), Reason: "r"})},
+	}
+
+	cycleID := beginJ1Cycle(t, s, 300)
+	id := ch.ID
+	done := make(chan struct {
+		res *J1AutoResult
+		err error
+	}, 1)
+	go func() {
+		res, err := s.ClassifyAutoJ1(context.Background(), J1AutoInput{ChallengeID: &id, AgentDecl: decl, Invoker: inv, CycleID: cycleID})
+		done <- struct {
+			res *J1AutoResult
+			err error
+		}{res, err}
+	}()
+
+	select {
+	case <-invoked:
+	case <-timeoutChan(t, 10):
+		t.Fatal("timed out waiting for the run to reach the invoker")
+	}
+
+	// J1 がまだ結果を返していない間に、人間が別経路で先に分類する。
+	if _, err := s.ClassifyChallenge(context.Background(), ChannelCLI, ch.ID, ClassifyInput{Priority: "P2"}); err != nil {
+		t.Fatalf("ClassifyChallenge (racing the in-flight J1 run): %v", err)
+	}
+
+	close(block)
+	var out struct {
+		res *J1AutoResult
+		err error
+	}
+	select {
+	case out = <-done:
+	case <-timeoutChan(t, 10):
+		t.Fatal("timed out waiting for ClassifyAutoJ1 to finish")
+	}
+	if out.err != nil {
+		t.Fatalf("ClassifyAutoJ1: %v", out.err)
+	}
+	if out.res.Items[0].Outcome != "uncertain" || out.res.Items[0].Status != nil {
+		t.Fatalf("Items[0] = %+v, want outcome=uncertain status=nil (not mapped)", out.res.Items[0])
+	}
+
+	after, err := s.GetChallenge(context.Background(), ch.ID)
+	if err != nil {
+		t.Fatalf("GetChallenge: %v", err)
+	}
+	if after.Status != StatusClassified {
+		t.Errorf("Status = %q, want classified (the earlier manual classify must win; J1 must not overwrite it)", after.Status)
+	}
+	if len(after.Holds) != 0 {
+		t.Errorf("Holds = %+v, want no hold created for a challenge that is no longer unclassified", after.Holds)
+	}
+}
+
+// blockingSequenceInvoker は、1回目の呼び出しだけ firstInvoked を閉じてから
+// firstBlock が閉じられるまで待つ偽の判断の IF。呼び出しの順に results を
+// 返す（countingJudgmentInvoker〈judgment_batch_test.go〉と同じ発想だが、
+// 1回目の呼び出しの最中に外部から状態を変える時間を作るために block を持つ）。
+type blockingSequenceInvoker struct {
+	mu           sync.Mutex
+	calls        int
+	results      []JudgmentLaunchOutput
+	firstInvoked chan struct{}
+	firstBlock   chan struct{}
+}
+
+func (f *blockingSequenceInvoker) Available(_ context.Context) error { return nil }
+
+func (f *blockingSequenceInvoker) InvokeJudgment(_ context.Context, _ JudgmentLaunchInput) (JudgmentLaunchOutput, error) {
+	f.mu.Lock()
+	idx := f.calls
+	f.calls++
+	f.mu.Unlock()
+	if idx == 0 {
+		close(f.firstInvoked)
+		<-f.firstBlock
+	}
+	return f.results[idx], nil
+}
+
+// TestClassifyAutoJ1_AutoMode_ReevaluatesExclusionsAtLaunchTime は
+// j1StillEligibleForAuto（起動の直前の除外条件の再評価）を固定する
+// （code-reviewer 指摘・round2 CONFIRMED: この再評価を丸ごと削除しても
+// 落ちるテストが無かった）。ID を省略した classify --auto が対象を選んでから
+// （selectJ1AutoTargets）実際に2件目を起動するまでの間に、2件目が
+// out_of_policy になった場合、2件目は起動されない（run が作られず、
+// items にも現れない）ことを検証する。1件目は影響を受けず処理される。
+func TestClassifyAutoJ1_AutoMode_ReevaluatesExclusionsAtLaunchTime(t *testing.T) {
+	s := newStoreForTest(t)
+	decl := newAgentDeclForJ1Test(t, s, "pos")
+	ch1, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "first"})
+	if err != nil {
+		t.Fatalf("CreateChallenge(first): %v", err)
+	}
+	ch2, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "second"})
+	if err != nil {
+		t.Fatalf("CreateChallenge(second): %v", err)
+	}
+
+	firstInvoked := make(chan struct{})
+	firstBlock := make(chan struct{})
+	inv := &blockingSequenceInvoker{
+		firstInvoked: firstInvoked,
+		firstBlock:   firstBlock,
+		results: []JudgmentLaunchOutput{
+			{Result: RunResultSucceeded, StructuredOutput: j1Output(t, j1RawOutput{Verdict: "not_mine", Reason: "r1"})},
+			{Result: RunResultSucceeded, StructuredOutput: j1Output(t, j1RawOutput{Verdict: "not_mine", Reason: "r2"})},
+		},
+	}
+
+	cycleID := beginJ1Cycle(t, s, 300)
+	type outcome struct {
+		res *J1AutoResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := s.ClassifyAutoJ1(context.Background(), J1AutoInput{AgentDecl: decl, Invoker: inv, CycleID: cycleID})
+		done <- outcome{res, err}
+	}()
+
+	select {
+	case <-firstInvoked:
+	case <-timeoutChan(t, 10):
+		t.Fatal("timed out waiting for the first (ch1) launch to reach the invoker")
+	}
+
+	// 1件目がまだ結果を返していない間に、2件目を out_of_policy にする。
+	bindSourceForTest(t, s, ch2.ID, "open", "out_of_policy")
+
+	close(firstBlock)
+	var out outcome
+	select {
+	case out = <-done:
+	case <-timeoutChan(t, 10):
+		t.Fatal("timed out waiting for ClassifyAutoJ1 to finish")
+	}
+	if out.err != nil {
+		t.Fatalf("ClassifyAutoJ1: %v", out.err)
+	}
+
+	found1, found2 := false, false
+	for _, it := range out.res.Items {
+		switch it.ChallengeID {
+		case ch1.ID:
+			found1 = true
+		case ch2.ID:
+			found2 = true
+		}
+	}
+	if !found1 {
+		t.Errorf("items = %+v, want %s included (unaffected by the race)", out.res.Items, ch1.ID)
+	}
+	if found2 {
+		t.Errorf("items = %+v, want %s excluded (became out_of_policy before its launch)", out.res.Items, ch2.ID)
+	}
+
+	runs2, err := s.ListRuns(context.Background(), RunListOptions{ChallengeID: &ch2.ID})
+	if err != nil {
+		t.Fatalf("ListRuns(%s): %v", ch2.ID, err)
+	}
+	if len(runs2) != 0 {
+		t.Errorf("ListRuns(%s) = %d runs, want 0 (must not have been launched)", ch2.ID, len(runs2))
 	}
 }

@@ -49,6 +49,10 @@ type transitionCtx struct {
 	priority *Priority // 既定は current.Priority。classify だけが上書きする
 	nowStr   string    // rec.at をミリ秒精度に丸めた文字列（task_plan.created_at・hold.raised_at に使う）
 	now      time.Time // nowStr を parseTimestamp した値（返却する Plan.CreatedAt に使う）
+	// runID は、この遷移の原因になった run の内部整数 ID（rec.runID と同じ値。
+	// nil なら run に由来しない＝#9・#10・#12 の既存の呼び出し元）。
+	// insertHold（#84 の J1 の uncertain）が hold.run_id へ書くために使う。
+	runID *int64
 	// rec は、この遷移が属する書き込みトランザクションの activityRecorder。
 	// apply（操作固有の書き込み）は、当該遷移そのものの1件（entity="challenge"）
 	// とは別に、他エンティティへのエントリを追加で積みたい場合に使う
@@ -79,11 +83,16 @@ type runTransitionParams struct {
 	op               Operation
 	preceding        Status
 	resolvePreceding transitionPrecedingResolver // nil なら preceding をそのまま使う
+	// runID は、この遷移の原因になった run の内部整数 ID（#84。nil なら
+	// run に由来しない＝#9・#10・#12 の既存の呼び出し元）。mutateAsRun・
+	// activityRecorder.runID・transitionCtx.runID へそのまま伝わる。
+	runID *int64
 }
 
-// runTransition は transition（#10: 本人確認の無い5操作）と verifiedTransition
-// （#12: 本人確認つきの approve・reject・answer）が共有する判定順序と書き込みを
-// 持つ内部ヘルパー。
+// runTransition は transition（#10: 本人確認の無い5操作）・verifiedTransition
+// （#12: 本人確認つきの approve・reject・answer）・transitionAsInvoker
+// （#84: 判断点の出力による mine・uncertain の写像）が共有する判定順序と
+// 書き込みを持つ内部ヘルパー。
 //
 // 判定順: ② parseChallengeID 不正は ErrNotFound → ③ mutateAs 内
 // （BEGIN IMMEDIATE の中）で loadChallenge（無ければ ErrNotFound）→
@@ -103,7 +112,7 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 	}
 
 	var result *Challenge
-	err := s.mutateAs(ctx, p.actor, p.channel, p.verification, func(tx *sql.Tx, rec *activityRecorder) error {
+	err := s.mutateAsRun(ctx, p.actor, p.channel, p.verification, p.runID, func(tx *sql.Tx, rec *activityRecorder) error {
 		current, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -164,6 +173,7 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 			priority: current.Priority,
 			nowStr:   nowStr,
 			now:      now,
+			runID:    rec.runID,
 			rec:      rec,
 		}
 		// 状態が変わらない遷移（T4: plan の改訂）では before/after に status を
@@ -249,6 +259,49 @@ func (s *Store) transition(ctx context.Context, ch Channel, id string, op Operat
 	}, apply)
 }
 
+// transitionAsInvoker は判断点の出力による写像（#84: J1 の mine・uncertain。
+// 将来の J2〈#85〉の plan・hold も同じ形になる想定）が共有する入口。
+// transition() と同じ判定順序・書き込みを、経路 ChannelInvoker・本人確認
+// VerificationNone・原因の run の ID（runID）つきで行う（§判断点の共通の規則
+// 「判断点の出力による変更の作業ログは、経路を invoker・本人確認の方式を
+// none…とし、原因の run の ID を持つ」・§機能全体の設計「判断点の出力を
+// core の遷移へ写すときは、M1 の core の公開 API…と同じ遷移を呼ぶ」）。
+//
+// runIDDisplay（"R-<n>"）の形式が不正なら ErrValidation。id（"C-<n>"）の
+// 形式が不正なら ErrNotFound（parseChallengeID を使う他の公開 API と同じ
+// fail-closed の規則。§課題の起票・参照・編集「ID の形式が閉集合に一致
+// しない場合も、存在しない ID と同じく ErrNotFound を返す」。code-reviewer
+// 指摘・round2 CONFIRMED: 以前はここも ErrValidation と書いていたが、実装は
+// ErrNotFound を返していた）。
+// apply が ErrInvalidTransition・ErrTerminalState を返す（遷移表に現在の
+// 状態からの行が無い・完了している）ことは、写す直前に読み直した課題が
+// 判断点の遷移元でなくなっていたことを表す（§アーキテクチャ決定
+// 「読み直した状態が遷移元でなくなっていれば写さず、run の出力だけを
+// 残す」）。呼び出し元（judgment_j1.go の applyJ1Mine・applyJ1Uncertain）は
+// この2つを errors.Is で判別し、mapped=false（エラーではない）として扱う。
+func (s *Store) transitionAsInvoker(ctx context.Context, runIDDisplay, id string, op Operation, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+	runIDInt, ok := parseRunID(runIDDisplay)
+	if !ok {
+		return nil, ErrValidation
+	}
+	if _, ok := parseChallengeID(id); !ok {
+		return nil, ErrNotFound
+	}
+	actor, err := resolveActor()
+	if err != nil {
+		return nil, err
+	}
+	return s.runTransition(ctx, runTransitionParams{
+		actor:        actor,
+		channel:      ChannelInvoker,
+		verification: VerificationNone,
+		id:           id,
+		op:           op,
+		preceding:    NoStatus,
+		runID:        &runIDInt,
+	}, apply)
+}
+
 // verifiedTransition は本人確認つきの操作（#12: approve・reject・answer）が
 // 共有する入口。att を fail-closed で再検査してから runTransition を呼ぶ
 // （§クリティカル設計決定1: 「ゼロ値・登録簿外の Attestation を
@@ -289,9 +342,9 @@ func attestationValid(att Attestation, id string) bool {
 // from_status は遷移前の状態（tc.current.Status）。answer 系は NULL のまま。
 func insertHold(ctx context.Context, tc *transitionCtx, question string) error {
 	if _, err := tc.tx.ExecContext(ctx,
-		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by)
-		 VALUES (?, ?, ?, ?, NULL, NULL, NULL)`,
-		tc.id, question, string(tc.current.Status), tc.nowStr,
+		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id)
+		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)`,
+		tc.id, question, string(tc.current.Status), tc.nowStr, int64PtrColumn(tc.runID),
 	); err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/invoker"
@@ -30,7 +31,17 @@ func runClassifyAuto(a Args) (any, error) {
 
 	launcher := invoker.NewLauncher()
 	if err := launcher.Available(ctx); err != nil {
-		return nil, NewError(CodeInvokerUnavailable, err.Error())
+		// design-reviewer 指摘（round1 CONFIRMED）: CLAUDE.md の import の向きの
+		// 規約「cli が invoker を import してよいのは…起動不能のエラー
+		// （invoker.ErrClaudeNotFound）を CLI のエラーコードへ写すことだけ」に
+		// 合わせ、ingest.go の github.ErrGHNotFound と同じ形で errors.Is
+		// 判定する（Available() が返しうるのは現状 ErrClaudeNotFound だけだが、
+		// 将来別のエラーを返すようになっても internal_error へ fail-closed に
+		// 倒す）。
+		if errors.Is(err, invoker.ErrClaudeNotFound) {
+			return nil, NewError(CodeInvokerUnavailable, err.Error())
+		}
+		return nil, NewError(CodeInternalError, err.Error())
 	}
 
 	cyc, err := a.Store.BeginCycle(ctx, core.BeginCycleInput{

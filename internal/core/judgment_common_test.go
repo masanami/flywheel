@@ -177,3 +177,95 @@ func queryHoldRunIDForTest(t *testing.T, s *Store, challengeDisplayID string) *i
 	}
 	return out
 }
+
+// --- judgment_common.go 自身の検査（design-reviewer 指摘・round1 CONFIRMED:
+// 共有の部品を J1 のヘルパー経由でしか触れていなかったため、優先度の並び順・
+// 保留の複数件の並び順を単体で固定する） ---
+
+func TestPriorityRank_OrdersP0ThenP1ThenP2ThenUnset(t *testing.T) {
+	p0, p1, p2 := PriorityP0, PriorityP1, PriorityP2
+	ranks := []int{priorityRank(&p0), priorityRank(&p1), priorityRank(&p2), priorityRank(nil)}
+	for i := 1; i < len(ranks); i++ {
+		if ranks[i-1] >= ranks[i] {
+			t.Fatalf("priorityRank ranks = %v, want strictly increasing (P0 < P1 < P2 < unset)", ranks)
+		}
+	}
+}
+
+// TestLoadChallengesByStatusSorted_OrdersByPriorityThenID は
+// §一括の操作（サイクル）「各段の対象は、優先度 P0・P1・P2・未設定の順、
+// 同じ優先度では ID の昇順で処理する」を固定する。J1 の対象（未分類）は
+// 優先度が常に未設定なので、この並び順は #85 の J2（分類済の課題。優先度が
+// 混在する）で初めて意味を持つ。
+func TestLoadChallengesByStatusSorted_OrdersByPriorityThenID(t *testing.T) {
+	s := newStoreForTest(t)
+	ctx := context.Background()
+
+	// 作成順は P1・P0・P0・P2 にし、優先度でソートし直すことと、同じ優先度
+	// （P0 の2件）では ID 昇順（＝作成順）が保たれることの両方を確かめる。
+	titles := []string{"c-p1", "c-p0-a", "c-p0-b", "c-p2"}
+	priorities := []string{"P1", "P0", "P0", "P2"}
+	ids := make([]string, len(titles))
+	for i, title := range titles {
+		ch, err := s.CreateChallenge(ctx, ChannelCLI, CreateInput{Title: title})
+		if err != nil {
+			t.Fatalf("CreateChallenge(%s): %v", title, err)
+		}
+		if _, err := s.ClassifyChallenge(ctx, ChannelCLI, ch.ID, ClassifyInput{Priority: priorities[i]}); err != nil {
+			t.Fatalf("ClassifyChallenge(%s): %v", title, err)
+		}
+		ids[i] = ch.ID
+	}
+
+	var got []Challenge
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusClassified)
+		got = challenges
+		return err
+	})
+	if err != nil {
+		t.Fatalf("loadChallengesByStatusSorted: %v", err)
+	}
+
+	wantOrder := []string{ids[1], ids[2], ids[0], ids[3]} // P0,P0(ID昇順),P1,P2
+	if len(got) != len(wantOrder) {
+		t.Fatalf("got %d challenges, want %d", len(got), len(wantOrder))
+	}
+	for i, c := range got {
+		if c.ID != wantOrder[i] {
+			t.Errorf("order[%d] = %s, want %s (got order=%v, want=%v)", i, c.ID, wantOrder[i], challengeIDs(got), wantOrder)
+		}
+	}
+}
+
+func challengeIDs(cs []Challenge) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.ID
+	}
+	return out
+}
+
+// TestFormatHoldsSection_MultipleHoldsAreOldestFirstAndBothIncluded は
+// §判断点の共通の規則「判断点の入力に…すべての保留の問いと回答を古い順に
+// 含める」を、保留が2件以上あるケースで固定する。
+func TestFormatHoldsSection_MultipleHoldsAreOldestFirstAndBothIncluded(t *testing.T) {
+	older := Hold{Question: "UNIQUE-OLDER-Q", Answer: strPtr("UNIQUE-OLDER-A")}
+	newer := Hold{Question: "UNIQUE-NEWER-Q", Answer: strPtr("UNIQUE-NEWER-A")}
+
+	got := formatHoldsSection([]Hold{older, newer})
+
+	olderIdx := indexOfString(got, "UNIQUE-OLDER-Q")
+	newerIdx := indexOfString(got, "UNIQUE-NEWER-Q")
+	if olderIdx < 0 || newerIdx < 0 {
+		t.Fatalf("formatHoldsSection output is missing a question: %q", got)
+	}
+	if olderIdx >= newerIdx {
+		t.Errorf("formatHoldsSection did not keep the oldest-first order: %q", got)
+	}
+	for _, want := range []string{"UNIQUE-OLDER-A", "UNIQUE-NEWER-A"} {
+		if !containsSubstring(got, want) {
+			t.Errorf("formatHoldsSection output is missing %q: %q", want, got)
+		}
+	}
+}

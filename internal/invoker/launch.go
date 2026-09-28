@@ -122,10 +122,12 @@ func (l *Launcher) InvokeJudgment(ctx context.Context, in core.JudgmentLaunchInp
 // buildJudgmentStdin は標準入力のバイト列を組み立てる（§機能全体の設計
 // 「規則は core、入出力は invoker」の決定〈#84〉: 標準入力の組み立て層は
 // invoker 側の Launcher.InvokeJudgment に置く）。in.Sections が非空なら、
-// in.SessionID が指す判断点の埋め込みの指示文（Instructions）と、
+// in.Judgment が指す判断点の埋め込みの指示文（Instructions）と、
 // in.Sections を core.JudgmentDataSection から invoker.DataSection へ写した
-// ものを BuildStdin へ渡して組み立てる。in.Sections が空なら
-// （#81 の時点の呼び出し元・テストとの互換）in.Stdin をそのまま使う。
+// ものを BuildStdin へ渡して組み立てる（code-reviewer 指摘・round1
+// CONFIRMED: 以前はコメントが in.SessionID と書いていたが、実装が参照する
+// のは in.Judgment である）。in.Sections が空なら（#81 の時点の呼び出し元・
+// テストとの互換）in.Stdin をそのまま使う。
 func buildJudgmentStdin(in core.JudgmentLaunchInput) ([]byte, error) {
 	if len(in.Sections) == 0 {
 		return in.Stdin, nil
