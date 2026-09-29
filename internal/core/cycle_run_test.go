@@ -422,7 +422,7 @@ func TestRunCycle_SpentUSDIsTheSumOfRunCosts(t *testing.T) {
 	f.create(t, "t-1")
 	f.create(t, "t-2")
 	cost := 0.4
-	inv := &cycleFakeInvoker{handle: func(c cycleCall) JudgmentLaunchOutput {
+	inv := &cycleFakeInvoker{handle: func(cycleCall) JudgmentLaunchOutput {
 		out := succeeded(j1Output(t, j1RawOutput{Verdict: "not_mine", Reason: "r"}))
 		out.ReportedTotalCostUSD = &cost
 		return out
@@ -520,7 +520,7 @@ func TestRunCycle_HeartbeatsTheLockWhileRunning(t *testing.T) {
 	f.s.lockHeartbeatInterval = 20 * time.Millisecond
 	f.create(t, "t-1")
 	var first, last time.Time
-	inv := &cycleFakeInvoker{handle: func(c cycleCall) JudgmentLaunchOutput {
+	inv := &cycleFakeInvoker{handle: func(cycleCall) JudgmentLaunchOutput {
 		first = lockHeartbeatForTest(t, f.s)
 		time.Sleep(150 * time.Millisecond)
 		last = lockHeartbeatForTest(t, f.s)

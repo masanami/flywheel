@@ -145,3 +145,43 @@ func TestParseApprovalDecision_RejectsUnknownValue(t *testing.T) {
 		}
 	}
 }
+
+// RunResultValues（CLI の閉集合の照合が使う）は、run.result の検査（valid）が受理する値と
+// 一致する（片方だけに値を足す取りこぼしを防ぐ）。
+func TestRunResultValues_MatchWhatTheStoreAccepts(t *testing.T) {
+	values := RunResultValues()
+	if len(values) != 8 {
+		t.Fatalf("len(RunResultValues()) = %d, want 8", len(values))
+	}
+	seen := map[RunResult]bool{}
+	for _, v := range values {
+		if !v.valid() {
+			t.Errorf("RunResultValues has %q, which the store does not accept", v)
+		}
+		if seen[v] {
+			t.Errorf("RunResultValues has %q twice", v)
+		}
+		seen[v] = true
+	}
+	if RunResult("no_such_result").valid() {
+		t.Error("an unlisted result must not be accepted")
+	}
+}
+
+// NotStartedReasonValues は S1 の 3 値で、写しを返す（呼び出し側が書き換えても本体は変わらない）。
+func TestNotStartedReasonValues_AreTheS1ThreeAndACopy(t *testing.T) {
+	got := NotStartedReasonValues()
+	want := []NotStartedReason{NotStartedCycleBudget, NotStartedRateLimited, NotStartedUpstreamFetchFailed}
+	if len(got) != len(want) {
+		t.Fatalf("NotStartedReasonValues() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("NotStartedReasonValues()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	got[0] = "tampered"
+	if NotStartedReasonValues()[0] != NotStartedCycleBudget {
+		t.Error("NotStartedReasonValues returned the internal slice, not a copy")
+	}
+}

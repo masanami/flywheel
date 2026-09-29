@@ -24,6 +24,21 @@ const NotStartedCycleBudget NotStartedReason = "cycle_budget"
 // 取得に失敗したら、J2 を起動せず、その課題の結果に失敗として示す」）。
 const NotStartedUpstreamFetchFailed NotStartedReason = "upstream_fetch_failed"
 
+// notStartedReasonValues は S1 が出す NotStartedReason の閉集合
+// （run_budget・slot_unavailable・failure_limit・rework_limit は S2 の委譲の段が足す）。
+var notStartedReasonValues = []NotStartedReason{
+	NotStartedCycleBudget,
+	NotStartedRateLimited,
+	NotStartedUpstreamFetchFailed,
+}
+
+// NotStartedReasonValues は S1 が出す NotStartedReason の閉集合の写しを返す（CLI の
+// テストが仕様の列挙〈§IF / API「S1 は cycle_budget | rate_limited | upstream_fetch_failed」〉と
+// 双方向に照合するため。IngestOutcomeValues と同じ形）。
+func NotStartedReasonValues() []NotStartedReason {
+	return append([]NotStartedReason(nil), notStartedReasonValues...)
+}
+
 // NotStarted は周で起動しなかった課題 1 件（not_started の 1 要素）。
 type NotStarted struct {
 	ChallengeID string
