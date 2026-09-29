@@ -424,6 +424,69 @@ func TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats(t *testing.T)
 	}
 }
 
+// TestPlanCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats は、
+// ifAPISkipCommands で汎用比較から外した plan について、m1・m3 それぞれの書式が
+// 仕様書のとおりであること（m1 の行を書き換えていないこと）と、登録表の宣言が
+// その両方を受け付ける形（--auto が MinPositional を 0 に緩め、file/stdin/auto が
+// OneOfGroups の組であること）になっていることを検査する（#85。classify の
+// TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats と同じ形）。
+func TestPlanCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats(t *testing.T) {
+	m1Data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m1-core.md"))
+	if err != nil {
+		t.Fatalf("read m1 spec: %v", err)
+	}
+	m1Sigs, ok := parseIFAPISignatures(t, string(m1Data))["plan"]
+	if !ok || len(m1Sigs) == 0 {
+		t.Fatal("m1 spec's IF/API table has no `plan` row")
+	}
+	m1Sig := m1Sigs[0]
+	if m1Sig.minPositional != 1 || !reflect.DeepEqual(m1Sig.oneOf, []string{"file/stdin"}) {
+		t.Errorf("m1 plan signature = %+v, want minPositional=1 oneOf=[file/stdin] (the m1 手動 form must still be documented)", m1Sig)
+	}
+
+	m3Data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m3-invoker-delegation.md"))
+	if err != nil {
+		t.Fatalf("read m3 spec: %v", err)
+	}
+	m3Sigs, ok := parseIFAPISignatures(t, string(m3Data))["plan"]
+	if !ok || len(m3Sigs) == 0 {
+		t.Fatal("m3 spec's IF/API table has no `plan` row")
+	}
+	m3Sig := m3Sigs[0]
+	if m3Sig.minPositional != 0 || !m3Sig.required["auto"] {
+		t.Errorf("m3 plan signature = %+v, want minPositional=0 required={auto:true} (the --auto [<C-ID>] form)", m3Sig)
+	}
+
+	cmd, ok := registeredCommands()["plan"]
+	if !ok {
+		t.Fatal("plan is not registered in defaultCommands()")
+	}
+	if cmd.MinPositional != 0 || cmd.MaxPositional != 1 {
+		t.Errorf("plan: Min/MaxPositional = %d/%d, want 0/1 (--auto omits the ID)", cmd.MinPositional, cmd.MaxPositional)
+	}
+	var gotOneOf []string
+	for _, g := range cmd.OneOfGroups {
+		gotOneOf = append(gotOneOf, strings.Join(g, "/"))
+	}
+	if want := []string{"file/stdin/auto"}; !reflect.DeepEqual(gotOneOf, want) {
+		t.Errorf("plan: OneOfGroups = %v, want %v", gotOneOf, want)
+	}
+	for _, want := range []string{"file", "stdin", "auto"} {
+		found := false
+		for _, f := range cmd.Flags {
+			if f.Name == want {
+				found = true
+				if f.Required {
+					t.Errorf("plan: flag %q is declared Required, want false (OneOfGroups enforces presence instead)", want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("plan: flag %q is not declared", want)
+		}
+	}
+}
+
 // ifAPISignature は §IF / API の表の 1 コマンドの書式から読み取った、必須の
 // 引数の宣言（[…] の外にある <…> の位置引数の数・--フラグ・(… | …) の組）。
 type ifAPISignature struct {
@@ -488,6 +551,10 @@ var ifAPIRequiredFlagExceptions = map[string]map[string]bool{
 // 両方の書式に対して個別に検証する。
 var ifAPISkipCommands = map[string]bool{
 	"classify": true,
+	// #85: `plan` にも m3 の `--auto [<C-ID>]` の書式が足された（classify と同じ
+	// 理由）。専用のテスト TestPlanCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats
+	// で両方の書式に対して個別に検証する。
+	"plan": true,
 }
 
 // TestDefaultCommands_RequiredArgumentsMatchIFAPITable は、登録表の必須の宣言

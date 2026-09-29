@@ -52,6 +52,9 @@ type Plan struct {
 	Version   int
 	Body      string
 	CreatedAt time.Time
+	// Spec は J2 の構造化した出力の JSON（task_plan.spec。#85）。人が
+	// `plan --file`／`--stdin` で登録した計画は nil。
+	Spec *string
 }
 
 // Approval は承認・差し戻しの 1 件（§データモデル approval）。#9 は書き込まない
@@ -190,7 +193,7 @@ func loadChallenge(ctx context.Context, tx *sql.Tx, id int64) (*Challenge, error
 }
 
 func loadPlans(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Plan, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT version, body, created_at FROM task_plan WHERE challenge_id = ? ORDER BY version ASC`, challengeID)
+	rows, err := tx.QueryContext(ctx, `SELECT version, body, created_at, spec FROM task_plan WHERE challenge_id = ? ORDER BY version ASC`, challengeID)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +203,8 @@ func loadPlans(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Plan, erro
 	for rows.Next() {
 		var p Plan
 		var createdAtStr string
-		if err := rows.Scan(&p.Version, &p.Body, &createdAtStr); err != nil {
+		var spec sql.NullString
+		if err := rows.Scan(&p.Version, &p.Body, &createdAtStr, &spec); err != nil {
 			return nil, err
 		}
 		createdAt, err := parseTimestamp(createdAtStr)
@@ -208,6 +212,10 @@ func loadPlans(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Plan, erro
 			return nil, err
 		}
 		p.CreatedAt = createdAt
+		if spec.Valid {
+			v := spec.String
+			p.Spec = &v
+		}
 		plans = append(plans, p)
 	}
 	if err := rows.Err(); err != nil {

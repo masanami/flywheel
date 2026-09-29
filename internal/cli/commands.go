@@ -151,15 +151,23 @@ func defaultCommands() []Command {
 			Run:         runClassify,
 		},
 		{
+			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（#85）が
+			// `--auto [<C-ID>]` を足す。`--auto`・`--file`・`--stdin` は OneOfGroups で
+			// ちょうど 1 つを要求する（同時指定・すべて省略は usage_error）。位置
+			// 引数の数（0〜1）は「--auto は ID を省略できる・--file／--stdin は ID が
+			// 必須」という条件付きの規則になり宣言的な MinPositional では表せない
+			// ため、runPlan が --file／--stdin のときだけ位置引数の有無を検査する
+			// （classify と同じ形）。
 			Path:          []string{"plan"},
 			RequiresStore: true,
-			MinPositional: 1,
+			MinPositional: 0,
 			MaxPositional: 1,
 			Flags: []flagDef{
 				{Name: "file", HasValue: true},
 				{Name: "stdin", HasValue: false},
+				{Name: "auto", HasValue: false},
 			},
-			OneOfGroups: [][]string{{"file", "stdin"}},
+			OneOfGroups: [][]string{{"file", "stdin", "auto"}},
 			Run:         runPlan,
 		},
 		{

@@ -460,6 +460,51 @@ func (s *Store) keepCycleLockWithStoppedSignal(ctx context.Context, cycleID stri
 
 // --- 予算ガード（§予算ガード）の評価に使う、周の既消費額・予約額 ---
 
+// checkCycleBudget は、周 cycleIDDisplay（"Y-<n>"）に評価額 maxBudgetUSD の run を
+// 起動できるかを、読み取りだけで確かめる（§予算ガードの評価式「既消費額 ＋ 予約額 ＋
+// 評価額 ＞ 周の上限額なら起動しない」。RunJudgment の①と同じ式）。起動できなければ
+// ErrBudgetExceeded。周が存在しない・既に終了していれば ErrValidation。起動の前に
+// 高価な前処理（上流の取得）をする判断点が、上限を使い切った周でその前処理を
+// 無駄に行わないための事前検査であり、最終の判定は RunJudgment の①が行う
+// （この検査と①の間に他の run が起動しても、①が拒否する）。
+func (s *Store) checkCycleBudget(ctx context.Context, cycleIDDisplay string, maxBudgetUSD float64) error {
+	cyid, ok := parseCycleID(cycleIDDisplay)
+	if !ok {
+		return ErrValidation
+	}
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		return evalCycleBudgetTx(ctx, tx, cyid, usdToMicros(maxBudgetUSD))
+	})
+	return classifyReadWriteErr(err)
+}
+
+// evalCycleBudgetTx は §予算ガードの評価式「既消費額 ＋ 予約額 ＋ 評価額 ＞ 周の上限額
+// なら起動しない」を、周 cyid（内部整数 ID）について tx の中で評価する
+// （RunJudgment の①〈書き込みトランザクション〉と checkCycleBudget〈読み取り〉が共有する
+// 唯一の実装。評価額 maxBudgetMicros は USD の 100 万分の 1 の整数）。周が存在しない・
+// 既に終了していれば ErrValidation、式が真なら ErrBudgetExceeded（等号は起動してよい）。
+func evalCycleBudgetTx(ctx context.Context, tx *sql.Tx, cyid, maxBudgetMicros int64) error {
+	cyc, err := loadCycleByID(ctx, tx, cyid)
+	if err != nil {
+		return err
+	}
+	if cyc == nil || cyc.EndedAt != nil {
+		return ErrValidation
+	}
+	spent, err := cycleSpentMicros(ctx, tx, cyid)
+	if err != nil {
+		return err
+	}
+	reserved, err := cycleReservedMicros(ctx, tx, cyid)
+	if err != nil {
+		return err
+	}
+	if spent+reserved+maxBudgetMicros > cyc.BudgetUSD {
+		return ErrBudgetExceeded
+	}
+	return nil
+}
+
 // cycleSpentMicros は cycleID の周に属する「終了した run」（ended_at IS NOT
 // NULL）の cost_usd の合計を、USD の100万分の1単位の整数で返す（§予算ガード
 // 「周の既消費額は、その周に終了した run の費用の合計」）。

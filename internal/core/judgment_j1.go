@@ -476,25 +476,12 @@ type J1AutoInput struct {
 	CycleID string
 }
 
-// J1AutoItem は `classify --auto` が処理した課題 1 件の結果（§IF / API
-// 「`--auto` の個別の操作…は cycle の phases の 1 要素と同じ形」の items の
-// 要素）。
-type J1AutoItem struct {
-	ChallengeID string
-	RunID       string
-	Result      RunResult
-	// Outcome は J1 の判定（mine/not_mine/uncertain）。run が succeeded で
-	// なかった・core の再検査に落ちた（invalid_output）場合は空文字列。
-	Outcome string
-	// Status は写した後の課題の状態コード。写さなかった場合は nil。
-	Status *string
-}
+// J1AutoItem は `classify --auto` が処理した課題 1 件の結果（judgment_batch.go の
+// JudgmentAutoItem。`plan --auto` の J2AutoItem と同じ形なので 1 つの型を共有する）。
+type J1AutoItem = JudgmentAutoItem
 
-// J1AutoResult は Store.ClassifyAutoJ1 の出力。
-type J1AutoResult struct {
-	Items      []J1AutoItem
-	NotStarted []NotStarted
-}
+// J1AutoResult は Store.ClassifyAutoJ1 の出力（JudgmentAutoResult）。
+type J1AutoResult = JudgmentAutoResult
 
 // ClassifyAutoJ1 は `flywheel classify --auto [<C-ID>]` の本体。対象の選び方・
 // 起動・出力の写像は core が持ち、呼び出し元（internal/cli）は宣言の読み込み・

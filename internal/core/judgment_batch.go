@@ -6,9 +6,9 @@ import (
 )
 
 // NotStartedReason は周で起動しなかった課題の理由（§IF / API「cycle の JSON
-// 出力」の not_started[].reason の閉集合）。本チケットが置くのは枠超過の
-// rate_limited と、周の上限額（#83）の cycle_budget だけで、
-// upstream_fetch_failed などは後続（#86）が足す。
+// 出力」の not_started[].reason の閉集合）。S1 の値は枠超過の rate_limited・
+// 周の上限額（#83）の cycle_budget・J2 の上流の取得の失敗（#85）の
+// upstream_fetch_failed の 3 つ。
 type NotStartedReason string
 
 // NotStartedRateLimited は、同じ周で枠超過を記録したため起動しなかったことを示す。
@@ -19,10 +19,43 @@ const NotStartedRateLimited NotStartedReason = "rate_limited"
 // 判断の呼び出し・委譲は…理由（cycle_budget）とともに示す」）。
 const NotStartedCycleBudget NotStartedReason = "cycle_budget"
 
+// NotStartedUpstreamFetchFailed は、J2 の起動の直前の上流の取得（本文・全コメント・
+// 参照先の Issue）に失敗したため起動しなかったことを示す（#85・§J2 計画「上流の
+// 取得に失敗したら、J2 を起動せず、その課題の結果に失敗として示す」）。
+const NotStartedUpstreamFetchFailed NotStartedReason = "upstream_fetch_failed"
+
 // NotStarted は周で起動しなかった課題 1 件（not_started の 1 要素）。
 type NotStarted struct {
 	ChallengeID string
 	Reason      NotStartedReason
+	// Detail は人が読む補足（例: 取得の失敗の原因）。JSON 出力の形
+	// （challenge_id・reason）には含めず、テキスト出力にだけ使う。空なら無し。
+	Detail string
+}
+
+// JudgmentAutoItem は `--auto` の個別の操作（`classify --auto`・`plan --auto`）が
+// 処理した課題 1 件の結果（§IF / API「`--auto` の個別の操作…は cycle の phases の
+// 1 要素と同じ形」の items の要素）。判断点ごとに別の型を持たず、1 つの型を共有する
+// （`cycle` の段〈#86〉も同じ形で返す）。
+type JudgmentAutoItem struct {
+	ChallengeID string
+	RunID       string
+	Result      RunResult
+	// Outcome は判断点の判定（J1: mine/not_mine/uncertain、J2: plan/uncertain）。
+	// run が succeeded でなかった・core の再検査に落ちた（invalid_output）場合は
+	// 空文字列。
+	Outcome string
+	// Status は写した後の課題の状態コード。写さなかった場合は nil。
+	Status *string
+	// Note は人が読む補足（例: 計画は登録したが読んだ記録を付けられなかった理由）。
+	// JSON 出力の形には含めず、テキスト出力にだけ使う。空なら無し。
+	Note string
+}
+
+// JudgmentAutoResult は `--auto` の個別の操作の出力（items と not_started）。
+type JudgmentAutoResult struct {
+	Items      []JudgmentAutoItem
+	NotStarted []NotStarted
 }
 
 // JudgmentCycle は 1 つの周の中の判断の呼び出しを束ね、§枠超過の「枠超過を

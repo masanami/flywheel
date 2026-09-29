@@ -165,6 +165,22 @@ func (d *AgentDeclaration) JudgmentBudgetFor(j JudgmentPoint) float64 {
 	}
 }
 
+// SizeBudgetFor はサイズ size の予算の既定（size_budgets_usd.<size>。#85・
+// §J2「実装枠・レビュー対応枠の額が出力に無ければ、サイズとサイズごとの予算の
+// 既定から決める」）を返す。size が S・M・L の外なら ok=false。
+func (d *AgentDeclaration) SizeBudgetFor(size JudgmentSize) (SizeBudgetPair, bool) {
+	switch size {
+	case JudgmentSizeS:
+		return d.SizeBudgetsUSD.S, true
+	case JudgmentSizeM:
+		return d.SizeBudgetsUSD.M, true
+	case JudgmentSizeL:
+		return d.SizeBudgetsUSD.L, true
+	default:
+		return SizeBudgetPair{}, false
+	}
+}
+
 // RequirePositionFile は d.PositionFile が設定されており、base からの相対
 // パスとして存在するファイルを指すことを確認する。J1・J2 の入口
 // （#84〜#86。ここでは結線しない）がこれを呼ぶことを想定する

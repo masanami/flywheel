@@ -331,27 +331,13 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 			if !ok {
 				return ErrValidation
 			}
-			cyc, err := loadCycleByID(ctx, tx, cyid)
-			if err != nil {
-				return err
-			}
-			if cyc == nil || cyc.EndedAt != nil {
-				return ErrValidation
-			}
-			spent, err := cycleSpentMicros(ctx, tx, cyid)
-			if err != nil {
-				return err
-			}
-			reserved, err := cycleReservedMicros(ctx, tx, cyid)
-			if err != nil {
-				return err
-			}
 			// self-review: 整数（USDの100万分の1）で評価し、丸め誤差を避ける
 			// （§クリティカル設計決定 1）。「＞」だけを拒否し、等号は起動してよい
 			// （§予算ガード「起動の前に…評価し、真なら起動しない」の元の現行の
-			// 評価式）。
-			if spent+reserved+maxBudgetMicros > cyc.BudgetUSD {
-				return ErrBudgetExceeded
+			// 評価式）。評価式は evalCycleBudgetTx（事前検査の checkCycleBudget と
+			// 共有）。
+			if err := evalCycleBudgetTx(ctx, tx, cyid, maxBudgetMicros); err != nil {
+				return err
 			}
 			cycleIDInt = &cyid
 		}

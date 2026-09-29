@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -183,12 +184,27 @@ func nilableString(s *string) any {
 	return *s
 }
 
+// plansJSON は show の plans の一覧を組み立てる。要素は planJSON に、J2 の構造化した
+// 出力 spec を足した形（#85。docs/features/m3-invoker-delegation.md §IF / API
+// 「`show`: …`plans` の要素に `spec`（J2 の構造化した出力。無ければ `null`）を足す」）。
+// 単発の `plan` の成功出力の plan オブジェクト（planJSON）は変えない。
 func plansJSON(plans []core.Plan) []map[string]any {
 	out := make([]map[string]any, 0, len(plans))
 	for _, p := range plans {
-		out = append(out, planJSON(p))
+		elem := planJSON(p)
+		elem["spec"] = planSpecJSON(p.Spec)
+		out = append(out, elem)
 	}
 	return out
+}
+
+// planSpecJSON は計画の spec（J2 の構造化した出力の JSON 文字列）を、そのまま JSON の
+// 値として出力するための値にする。人が登録した計画（spec が無い）は null。
+func planSpecJSON(spec *string) any {
+	if spec == nil {
+		return nil
+	}
+	return json.RawMessage(*spec)
 }
 
 // approvalsJSON・holdsJSON は show の一覧を組み立てる。要素の形は
