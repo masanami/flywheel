@@ -685,6 +685,10 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 	if in.AgentDecl == nil || in.ConnDecl == nil || in.Invoker == nil || in.Upstream == nil || in.CycleID == "" {
 		return nil, ErrValidation
 	}
+	if in.Cycle != nil && in.Cycle.cycleID != in.CycleID {
+		// run に紐づける周の ID の出所が 2 つある（CycleID と Cycle）ので、食い違いは拒否する。
+		return nil, ErrValidation
+	}
 
 	result := &J2AutoResult{}
 

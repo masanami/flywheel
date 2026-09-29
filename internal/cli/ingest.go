@@ -60,14 +60,9 @@ func runIngest(a Args) (any, error) {
 	// gh の有無は、宣言・--source の判定の後、core.Ingest（実際の取得）の前に
 	// 確かめる。ここまでの判定はストアを変えないので、upstream_unavailable
 	// でもストアは不変のまま終わる。
-	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
+	client, err := newIngestClient()
 	if err != nil {
-		if errors.Is(err, github.ErrGHNotFound) {
-			return nil, NewError(CodeUpstreamUnavailable, err.Error())
-		}
-		// gh は見つかったが Options の解決自体が失敗する経路は現状無いが、
-		// fail-closed に internal_error へ倒す（防御的）。
-		return nil, NewError(CodeInternalError, err.Error())
+		return nil, err
 	}
 
 	result, err := a.Store.Ingest(context.Background(), core.ChannelCLI, core.IngestInput{
@@ -82,6 +77,21 @@ func runIngest(a Args) (any, error) {
 		json: ingestResultJSON(result),
 		text: ingestResultText(result),
 	}, nil
+}
+
+// newIngestClient は取り込み（`ingest`・`cycle` の取り込みの段）が使う `gh` のクライアントを
+// 組み立てる。`gh` が PATH に無ければ upstream_unavailable（終了 2）、それ以外の組み立ての
+// 失敗は fail-closed に internal_error へ倒す（gh は見つかったが Options の解決自体が
+// 失敗する経路は現状無いが、防御的）。`ingest` と `cycle` が同じ写像を共有する。
+func newIngestClient() (*github.Client, error) {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
+	if err != nil {
+		if errors.Is(err, github.ErrGHNotFound) {
+			return nil, NewError(CodeUpstreamUnavailable, err.Error())
+		}
+		return nil, NewError(CodeInternalError, err.Error())
+	}
+	return client, nil
 }
 
 // ingestResultJSON は core.IngestResult を「成功時の JSON 出力の規約」の

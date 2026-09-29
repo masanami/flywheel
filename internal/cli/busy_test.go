@@ -39,7 +39,14 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "TestMain: %v\n", err)
 		os.Exit(1)
 	}
+	cleanupClaude, err := installRealClaudeGuard()
+	if err != nil {
+		cleanup()
+		fmt.Fprintf(os.Stderr, "TestMain: %v\n", err)
+		os.Exit(1)
+	}
 	code := m.Run()
+	cleanupClaude()
 	cleanup()
 	os.Exit(code)
 }

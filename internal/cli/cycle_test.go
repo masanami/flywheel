@@ -384,10 +384,19 @@ func TestCycle_TriggerIsRecorded(t *testing.T) {
 // （ingest の --source と同じく、指定の有無を区別する）。周は作られない。
 func TestCycle_EmptyTrigger_IsValidationFailedAndCreatesNoCycle(t *testing.T) {
 	ws := setupWorkspaceWithPosition(t)
-	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	createTitled(t, ws, "t")
+	order := filepath.Join(t.TempDir(), "order.log")
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, order)
+	before := storeBytes(t, ws)
+
 	requireJSONErrorEnvelope(t, []string{"cycle", "--trigger", "", "--workspace", ws}, 1, CodeValidationFailed)
-	if _, found := coretest.CycleLockHolder(t, ws); found {
-		t.Error("a lock row remains after a rejected cycle")
+
+	// 周の行も排他も作られず（ストアのファイルが変わらない）、判断も起動されない。
+	if string(storeBytes(t, ws)) != string(before) {
+		t.Error("a rejected --trigger must not change the store (no cycle row, no lock)")
+	}
+	if got := readOrderLog(t, order); len(got) != 0 {
+		t.Errorf("claude was invoked: %v", got)
 	}
 }
 
@@ -539,6 +548,18 @@ func TestCycle_SourcesWithoutGH_UpstreamUnavailable(t *testing.T) {
 	}
 }
 
+// 宣言の不備は環境の不備（gh の不在）より先に報告する: sources.json があり gh が無く、かつ
+// connectors.json が不正なら、upstream_unavailable ではなく config_invalid。
+func TestCycle_InvalidConnectorsIsReportedBeforeMissingGH(t *testing.T) {
+	ws := setupJ2Workspace(t)
+	writeSourcesDeclaration(t, ws, cycleSourcesJSON)
+	writeConnectorsJSONForTest(t, ws, `{"version": 1, "connectors": [], "repos": [], "no_such_key": 1}`)
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	t.Setenv("PATH", strings.SplitN(os.Getenv("PATH"), string(os.PathListSeparator), 2)[0])
+
+	requireJSONErrorEnvelope(t, []string{"cycle", "--workspace", ws}, 2, CodeConfigInvalid)
+}
+
 // --- AC-146〜150: サイクルの排他 ---
 
 func nowStamp() string { return FormatTimestamp(time.Now().UTC()) }
@@ -638,6 +659,9 @@ func TestCycle_RunningCycleDoesNotBlockClassifyAutoByID(t *testing.T) {
 	var cycleExit int
 	var cycleStderr bytes.Buffer
 	var wg sync.WaitGroup
+	// 途中の t.Fatal でも、cycle の goroutine がテストの後始末（一時ディレクトリ・PATH の
+	// 復元）より後まで生き残らないようにする（後始末は登録の逆順に走る）。
+	t.Cleanup(wg.Wait)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

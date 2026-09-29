@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -189,7 +190,7 @@ func TestRunCycle_RunsIngestClassifyPlanInOrder(t *testing.T) {
 	f.upstream.threads["o/r#1"] = simpleThread("body")
 
 	in := f.input(inv)
-	in.Ingest = &CycleIngestInput{Sources: []SourceEntry{selfOnlySource("src", []string{"o/r"}, []string{"masanami"})}, Upstream: up}
+	in.Ingest = &CycleIngestInput{Sources: []SourceEntry{selfOnlySource("src", []string{"o/r"}, []string{"masanami"})}, Upstream: up, Channel: ChannelCLI}
 	// 取り込み元の対応のある課題は operation の invocation が取り込み元の差し込みを持てるので、
 	// J2 の出力は impl（invocation に {issue_number}）を使ってよい。
 	inv.handle = func(c cycleCall) JudgmentLaunchOutput {
@@ -508,22 +509,116 @@ func TestRunCycle_ReleasesTheLockAfterTheCycle(t *testing.T) {
 	if _, err := f.s.RunCycle(context.Background(), f.input(mineThenPlanInvoker(t))); err == nil {
 		t.Fatal("RunCycle err = nil, want an error for the missing position file")
 	}
-	cycles := countLocksForTest(t, f.s)
-	if cycles != 0 {
-		t.Errorf("lock rows after an aborted cycle = %d, want 0", cycles)
+	if locks := countLocksForTest(t, f.s); locks != 0 {
+		t.Errorf("lock rows after an aborted cycle = %d, want 0", locks)
+	}
+	// 失敗した周は aborted で閉じる（ended_at も記録する）。1 周目・2 周目は completed。
+	for id, want := range map[int64]cycleResult{1: cycleResultCompleted, 2: cycleResultCompleted, 3: cycleResultAborted} {
+		row, err := loadCycleForTest(t, f.s, id)
+		if err != nil || row == nil {
+			t.Fatalf("loadCycleForTest(%d) = %v, %v", id, row, err)
+		}
+		if row.Result != want || row.EndedAt == nil {
+			t.Errorf("cycle Y-%d result = %q ended=%v, want %q and ended", id, row.Result, row.EndedAt != nil, want)
+		}
 	}
 }
 
-// 排他ロックの heartbeat（段の実行中）を更新する巡回が動き、終了後に止まる。
+// ctx が段の途中で取り消されても、周を閉じて排他を解放する（解放を ctx に依存させない。
+// 残すと次の cycle が stale の回収を待つまで locked になる）。
+func TestRunCycle_CancelledContextStillEndsTheCycleAndReleasesTheLock(t *testing.T) {
+	f := newCycleFixture(t)
+	f.create(t, "t-1")
+	f.create(t, "t-2")
+	ctx, cancel := context.WithCancel(context.Background())
+	inv := &cycleFakeInvoker{handle: func(cycleCall) JudgmentLaunchOutput {
+		cancel() // 最初の判断の呼び出しの最中に取り消す
+		return JudgmentLaunchOutput{Result: RunResultErrored}
+	}}
+	in := f.input(inv)
+	in.ConnDecl = nil
+
+	_, err := f.s.RunCycle(ctx, in)
+
+	if err == nil {
+		t.Fatal("RunCycle err = nil, want an error once the context is cancelled")
+	}
+	if locks := countLocksForTest(t, f.s); locks != 0 {
+		t.Errorf("lock rows after a cancelled cycle = %d, want 0", locks)
+	}
+	row, lerr := loadCycleForTest(t, f.s, 1)
+	if lerr != nil || row == nil {
+		t.Fatalf("loadCycleForTest(1) = %v, %v", row, lerr)
+	}
+	if row.EndedAt == nil || row.Result != cycleResultAborted {
+		t.Errorf("cycle Y-1 result = %q ended=%v, want aborted and ended", row.Result, row.EndedAt != nil)
+	}
+	if _, err := f.s.RunCycle(context.Background(), in); err != nil {
+		t.Errorf("the next RunCycle err = %v, want nil (the lock must not linger)", err)
+	}
+}
+
+// 周の起動前に actor（OS のログインユーザー名）を解決できなければ、周も排他も作らずに
+// ErrActorUnavailable で終わる（環境の不備で、aborted の周の行を残さない）。
+func TestRunCycle_ActorUnavailable_FailsBeforeStartingACycle(t *testing.T) {
+	f := newCycleFixture(t)
+	f.create(t, "t-1")
+	withActorSource(t, actorSourceFuncs{
+		userCurrent: func() (*user.User, error) { return nil, errors.New("no user") },
+		getenv:      fakeGetenv(map[string]string{}),
+	})
+	inv := mineThenPlanInvoker(t)
+
+	_, err := f.s.RunCycle(context.Background(), f.input(inv))
+
+	if !errors.Is(err, ErrActorUnavailable) {
+		t.Fatalf("err = %v, want ErrActorUnavailable", err)
+	}
+	if got := countCyclesForTest(t, f.s); got != 0 {
+		t.Errorf("cycles recorded = %d, want 0", got)
+	}
+	if got := inv.judgments(); len(got) != 0 {
+		t.Errorf("judgments were invoked: %v", got)
+	}
+}
+
+// J1AutoInput.Cycle・J2AutoInput.Cycle は、CycleID と同じ周の JudgmentCycle でなければ
+// ErrValidation（run に紐づける周の ID の出所が食い違わないようにする）。
+func TestAutoInputs_SharedCycleMustBelongToTheSameCycle(t *testing.T) {
+	f := newCycleFixture(t)
+	f.create(t, "t-1")
+	f.classified(t, "t-2", "P1")
+	inv := mineThenPlanInvoker(t)
+	cyc, err := f.s.BeginCycle(context.Background(), BeginCycleInput{Trigger: "x", BudgetUSD: 10})
+	if err != nil {
+		t.Fatalf("BeginCycle: %v", err)
+	}
+	other := NewJudgmentCycle("Y-99")
+
+	if _, err := f.s.ClassifyAutoJ1(context.Background(), J1AutoInput{AgentDecl: f.agent, Invoker: inv, CycleID: cyc.ID, Cycle: other}); !errors.Is(err, ErrValidation) {
+		t.Errorf("ClassifyAutoJ1 err = %v, want ErrValidation for a JudgmentCycle of another cycle", err)
+	}
+	if _, err := f.s.PlanAutoJ2(context.Background(), J2AutoInput{AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream, CycleID: cyc.ID, Cycle: other}); !errors.Is(err, ErrValidation) {
+		t.Errorf("PlanAutoJ2 err = %v, want ErrValidation for a JudgmentCycle of another cycle", err)
+	}
+	if got := inv.judgments(); len(got) != 0 {
+		t.Errorf("judgments were invoked despite the mismatch: %v", got)
+	}
+}
+
+// 排他ロックの heartbeat（段の実行中）を更新する巡回が動く（stop 後に止まることは
+// TestKeepCycleLock_TicksHeartbeatUntilStopped が検証する）。判断の IF の応答は別の
+// goroutine で呼ばれるので、ここでは t.Fatalf を使わない（Goexit で RunCycle が
+// 戻らなくなる）。
 func TestRunCycle_HeartbeatsTheLockWhileRunning(t *testing.T) {
 	f := newCycleFixture(t)
 	f.s.lockHeartbeatInterval = 20 * time.Millisecond
 	f.create(t, "t-1")
 	var first, last time.Time
 	inv := &cycleFakeInvoker{handle: func(cycleCall) JudgmentLaunchOutput {
-		first = lockHeartbeatForTest(t, f.s)
+		first = lockHeartbeatNoFatal(t, f.s)
 		time.Sleep(150 * time.Millisecond)
-		last = lockHeartbeatForTest(t, f.s)
+		last = lockHeartbeatNoFatal(t, f.s)
 		return succeeded(j1Output(t, j1RawOutput{Verdict: "not_mine", Reason: "r"}))
 	}}
 	in := f.input(inv)
@@ -546,7 +641,10 @@ func TestRunCycle_InvalidInput_IsValidationErrorAndRecordsNothing(t *testing.T) 
 		"nil invoker":                 func(in *CycleRunInput) { in.Invoker = nil },
 		"connectors without upstream": func(in *CycleRunInput) { in.Upstream = nil },
 		"ingest without upstream": func(in *CycleRunInput) {
-			in.Ingest = &CycleIngestInput{Sources: []SourceEntry{selfOnlySource("s", []string{"o/r"}, nil)}}
+			in.Ingest = &CycleIngestInput{Sources: []SourceEntry{selfOnlySource("s", []string{"o/r"}, nil)}, Channel: ChannelCLI}
+		},
+		"ingest without channel": func(in *CycleRunInput) {
+			in.Ingest = &CycleIngestInput{Sources: []SourceEntry{selfOnlySource("s", []string{"o/r"}, nil)}, Upstream: &fakeUpstream{}}
 		},
 	}
 	for name, mutate := range cases {
@@ -580,6 +678,28 @@ func countLocksForTest(t *testing.T, s *Store) int {
 		t.Fatalf("countLocksForTest: %v", err)
 	}
 	return n
+}
+
+// lockHeartbeatNoFatal は lockHeartbeatForTest と同じだが、失敗を t.Errorf で報告し、
+// ゼロ値を返す（テスト goroutine 以外から呼ぶためのもの）。
+func lockHeartbeatNoFatal(t *testing.T, s *Store) time.Time {
+	t.Helper()
+	var at time.Time
+	err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		l, err := loadLockByName(context.Background(), tx, cycleLockName)
+		if err != nil {
+			return err
+		}
+		if l == nil {
+			return fmt.Errorf("no cycle lock row")
+		}
+		at = l.HeartbeatAt
+		return nil
+	})
+	if err != nil {
+		t.Errorf("lockHeartbeatNoFatal: %v", err)
+	}
+	return at
 }
 
 // lockHeartbeatForTest はサイクルの排他ロックの heartbeat_at を返す。

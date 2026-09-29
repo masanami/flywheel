@@ -148,9 +148,8 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 			fakeGHGetIssueStatusLineRoute("o/r", 1, "HTTP/2.0 200 OK", issue, 0),
 			{match: "repos/o/r/issues/1/comments?per_page=100&page=1", stdout: "[]"},
 		})
-		// C-2 は上流を持たず、J2 が上流の取得の失敗ではなく計画を返す。C-1（取り込み）の J2 は
-		// upstream_fetch_failed にせず計画させる。分類・計画の items と not_started の
-		// 両方の形を照合するため、J1 は 2 件目の課題を mine にして、1 件目も含め計画へ進める。
+		// J1 は mine、J2 は plan を返し、取り込んだ課題を同じ周で計画まで進める（items の要素の
+		// 形が照合される）。not_started の要素の形は cycle_closedsets_test.go の観測が照合する。
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, "")
 		return []string{"cycle", "--trigger", "cron"}
 	}},

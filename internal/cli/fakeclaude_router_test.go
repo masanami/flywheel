@@ -24,9 +24,11 @@ type fakeClaudeRoute struct {
 	// Stdout は標準出力にそのまま書く JSON（1 行）。
 	Stdout string
 	// SleepFirstSeconds が正なら、この規則の最初の呼び出しだけ、応答の前にその秒数眠る
-	// （実行中の `cycle` を作るために使う。2 回目以降は眠らない）。
+	// （実行中の `cycle` を作るために使う。2 回目以降は眠らない。「最初」の判定は
+	// mkdir の成否で行い、並行する呼び出しの間でも 1 回だけ眠る）。
 	SleepFirstSeconds int
-	// StartedFile が非空なら、最初の呼び出しの開始時にこのファイルへ touch する。
+	// StartedFile が非空なら、そのファイルへ touch する。SleepFirstSeconds が正の規則では、
+	// 眠る最初の呼び出しの開始時（眠る直前）だけ。そうでない規則では呼び出しのたびに。
 	StartedFile string
 }
 
@@ -60,12 +62,16 @@ func putRoutedFakeClaudeOnPATH(t *testing.T, routes []fakeClaudeRoute, orderLogP
 		if orderLogPath != "" {
 			fmt.Fprintf(&b, "printf 'claude %%s %%s\\n' %s \"$TITLE\" >> %s\n", shellSingleQuote(r.Tag), shellSingleQuote(orderLogPath))
 		}
-		if r.StartedFile != "" {
-			fmt.Fprintf(&b, "touch %s\n", shellSingleQuote(r.StartedFile))
-		}
-		if r.SleepFirstSeconds > 0 {
+		switch {
+		case r.SleepFirstSeconds > 0:
 			marker := filepath.Join(markerDir, fmt.Sprintf("slept-%d", i))
-			fmt.Fprintf(&b, "if [ ! -e %s ]; then touch %s; sleep %d; fi\n", shellSingleQuote(marker), shellSingleQuote(marker), r.SleepFirstSeconds)
+			touch := ""
+			if r.StartedFile != "" {
+				touch = fmt.Sprintf("touch %s; ", shellSingleQuote(r.StartedFile))
+			}
+			fmt.Fprintf(&b, "if mkdir %s 2>/dev/null; then %ssleep %d; fi\n", shellSingleQuote(marker), touch, r.SleepFirstSeconds)
+		case r.StartedFile != "":
+			fmt.Fprintf(&b, "touch %s\n", shellSingleQuote(r.StartedFile))
 		}
 		delim := fmt.Sprintf("FAKECLAUDE_EOF_%d", i)
 		fmt.Fprintf(&b, "cat <<'%s'\n%s\n%s\nexit 0\n;;\n", delim, r.Stdout, delim)

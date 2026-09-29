@@ -32,6 +32,10 @@ type CycleIngestInput struct {
 	Sources []SourceEntry
 	// Upstream は上流（GitHub）の取得の実装。nil は ErrValidation。
 	Upstream UpstreamIssueSource
+	// Channel は取り込みの作業ログに記録する経路（個別の ingest と同じく、呼び出し元の
+	// 入口を表す。CLI は ChannelCLI を渡す）。空は ErrValidation。分類・計画の遷移は
+	// 判断点の出力による変更なので、常に経路 invoker で記録される。
+	Channel Channel
 }
 
 // CycleRunInput は Store.RunCycle の入力。
@@ -99,8 +103,13 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	if in.ConnDecl != nil && in.Upstream == nil {
 		return nil, ErrValidation
 	}
-	if in.Ingest != nil && in.Ingest.Upstream == nil {
+	if in.Ingest != nil && (in.Ingest.Upstream == nil || in.Ingest.Channel == "") {
 		return nil, ErrValidation
+	}
+	// 作業ログの actor（OS のログインユーザー名）を解決できない環境は、周を始める前に
+	// 拒否する（周の行だけが aborted で残る失敗にしない）。
+	if _, err := resolveActor(); err != nil {
+		return nil, err
 	}
 
 	cyc, err := s.BeginCycle(ctx, BeginCycleInput{
@@ -149,10 +158,10 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle) ([]CyclePhaseResult, error) {
 	var phases []CyclePhaseResult
 
-	// 取り込み（M2 の ingest と同じ core の処理。経路は個別の ingest と同じ cli）。
+	// 取り込み（M2 の ingest と同じ core の処理。経路は呼び出し元が渡す）。
 	ingest := CyclePhaseResult{Phase: CyclePhaseIngest, Skipped: in.Ingest == nil}
 	if in.Ingest != nil {
-		res, err := s.Ingest(ctx, ChannelCLI, IngestInput{Sources: in.Ingest.Sources, Upstream: in.Ingest.Upstream})
+		res, err := s.Ingest(ctx, in.Ingest.Channel, IngestInput{Sources: in.Ingest.Sources, Upstream: in.Ingest.Upstream})
 		if err != nil {
 			return nil, err
 		}

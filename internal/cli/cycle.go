@@ -25,6 +25,7 @@ const defaultCycleTrigger = "manual"
 // skipped。不備なら config_invalid）→ connectors.json（無ければ計画の段は skipped。
 // 不備なら config_invalid）→ 取り込みの段があれば gh の有無（無ければ
 // upstream_unavailable）→ claude の有無（無ければ invoker_unavailable）→ RunCycle。
+// 宣言の不備は環境の不備（gh・claude の不在）より先に報告する。
 // 生きている別の cycle があれば core が locked を返す。周の中の run の失敗は結果に示すだけで、
 // 終了コードは 0 のまま。
 func runCycle(a Args) (any, error) {
@@ -46,24 +47,18 @@ func runCycle(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	var ingest *core.CycleIngestInput
-	var ghClient *github.Client
+	// 宣言はすべて読み・検証してから（どれかが不備なら config_invalid）、gh・claude の有無を
+	// 確かめる。読み込みはストアを変えないので、どの失敗でも周は始まらない。
+	var selected []core.SourceEntry
+	hasSources := false
 	sources, err := core.LoadSourcesDeclaration(ws)
 	switch {
 	case err == nil:
-		selected, selErr := core.SelectSources(sources, nil)
+		sel, selErr := core.SelectSources(sources, nil)
 		if selErr != nil {
 			return nil, mapCoreErr(selErr)
 		}
-		client, ghErr := github.New(github.Options{Timeout: ingestGHTimeout})
-		if ghErr != nil {
-			if errors.Is(ghErr, github.ErrGHNotFound) {
-				return nil, NewError(CodeUpstreamUnavailable, ghErr.Error())
-			}
-			return nil, NewError(CodeInternalError, ghErr.Error())
-		}
-		ghClient = client
-		ingest = &core.CycleIngestInput{Sources: selected, Upstream: client}
+		selected, hasSources = sel, true
 	case errors.Is(err, core.ErrConfigNotFound):
 		// sources.json が無い: 取り込みの段は skipped（エラーにしない）。
 	default:
@@ -71,20 +66,34 @@ func runCycle(a Args) (any, error) {
 	}
 
 	var conn *core.ConnectorsDeclaration
-	var threads core.UpstreamThreadSource
+	hasConnectors := false
 	connDecl, err := core.LoadConnectorsDeclaration(ws)
 	switch {
 	case err == nil:
-		conn = connDecl
+		conn, hasConnectors = connDecl, true
+	case errors.Is(err, core.ErrConfigNotFound):
+		// connectors.json が無い: 計画の段は skipped（J2 を起動せず、エラーにしない）。
+	default:
+		return nil, mapCoreErr(err)
+	}
+
+	var ingest *core.CycleIngestInput
+	var ghClient *github.Client
+	if hasSources {
+		client, err := newIngestClient()
+		if err != nil {
+			return nil, err
+		}
+		ghClient = client
+		ingest = &core.CycleIngestInput{Sources: selected, Upstream: client, Channel: core.ChannelCLI}
+	}
+	var threads core.UpstreamThreadSource
+	if hasConnectors {
 		if ghClient != nil {
 			threads = ghClient
 		} else {
 			threads = newUpstreamThreadSource()
 		}
-	case errors.Is(err, core.ErrConfigNotFound):
-		// connectors.json が無い: 計画の段は skipped（J2 を起動せず、エラーにしない）。
-	default:
-		return nil, mapCoreErr(err)
 	}
 
 	launcher := invoker.NewLauncher()

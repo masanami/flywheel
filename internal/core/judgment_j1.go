@@ -508,6 +508,10 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 	if in.AgentDecl == nil || in.Invoker == nil || in.CycleID == "" {
 		return nil, ErrValidation
 	}
+	if in.Cycle != nil && in.Cycle.cycleID != in.CycleID {
+		// run に紐づける周の ID の出所が 2 つある（CycleID と Cycle）ので、食い違いは拒否する。
+		return nil, ErrValidation
+	}
 
 	result := &J1AutoResult{}
 	maxBudget := in.AgentDecl.JudgmentBudgetFor(JudgmentJ1)
