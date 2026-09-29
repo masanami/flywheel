@@ -35,11 +35,14 @@ type fakeGHRoute struct {
 	exit int
 }
 
-// writeFakeGHRoutes は route にマッチする呼び出しへ規則どおりの応答を返し、
+// writeFakeGHRoutesOrdered は route にマッチする呼び出しへ規則どおりの応答を返し、
 // どれにもマッチしない呼び出しは標準エラーへ理由を書いて終了コード 1 で
 // 失敗する偽の `gh` を t.TempDir() に置く。戻り値の calls は、記録した
-// 呼び出しの引数列（"$*" の値。呼ばれた順）を返す。
-func writeFakeGHRoutes(t *testing.T, routes []fakeGHRoute) (dir string, calls func() []string) {
+// 呼び出しの引数列（"$*" の値。呼ばれた順）を返す。orderLogPath が非空なら、加えて、
+// 呼ばれるたびに "gh <引数列>" を orderLogPath へ追記する（偽の claude が同じ
+// ファイルへ "claude <タグ>" を追記すれば、`cycle` の段の順を偽の gh と偽の claude の
+// 呼び出しの順で検証できる。#86 の AC-132。空文字列なら順序ログは書かない）。
+func writeFakeGHRoutesOrdered(t *testing.T, routes []fakeGHRoute, orderLogPath string) (dir string, calls func() []string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("動作環境は macOS と Linux のみ（CLAUDE.md）")
@@ -50,6 +53,9 @@ func writeFakeGHRoutes(t *testing.T, routes []fakeGHRoute) (dir string, calls fu
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString(fakeGHLogAppendLine(logPath))
+	if orderLogPath != "" {
+		b.WriteString("printf 'gh %s\\n' \"$*\" >> " + shellSingleQuote(orderLogPath) + "\n")
+	}
 	b.WriteString("case \"$*\" in\n")
 	for i, r := range routes {
 		// heredoc の終端語はテスト・route ごとに変え、応答本文に偶然同じ行が
@@ -72,7 +78,7 @@ func writeFakeGHRoutes(t *testing.T, routes []fakeGHRoute) (dir string, calls fu
 // fakeGHLogAppendLine は、呼ばれるたびに "$*"（渡された引数列）を1行として
 // logPath へ追記するシェルスクリプトの断片を返す。書式（"CALL " の前置・
 // readFakeGHCallLog が読む形）は、この関数と readFakeGHCallLog の対を
-// writeFakeGH（ingest_test.go）・writeFakeGHRoutes・writeSleepyFakeGH の
+// writeFakeGH（ingest_test.go）・writeFakeGHRoutesOrdered・writeSleepyFakeGH の
 // 3箇所すべてが共有することで1箇所だけに定める（design-reviewer 指摘の
 // 再発防止: 以前はログの書き出し・読み取りが3箇所に逐語コピーされていた）。
 // "CALL " を前置するのは、引数なしの呼び出し（空行）と「1回も呼ばれていない
@@ -120,10 +126,16 @@ func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// withFakeGHRoutesOnPATH は writeFakeGHRoutes の偽の gh を PATH の先頭に足す。
+// withFakeGHRoutesOnPATH は writeFakeGHRoutesOrdered（順序ログ無し）の偽の gh を PATH の先頭に足す。
 func withFakeGHRoutesOnPATH(t *testing.T, routes []fakeGHRoute) func() []string {
 	t.Helper()
-	dir, calls := writeFakeGHRoutes(t, routes)
+	return withFakeGHRoutesOrderedOnPATH(t, routes, "")
+}
+
+// withFakeGHRoutesOrderedOnPATH は writeFakeGHRoutesOrdered の偽の gh を PATH の先頭に足す。
+func withFakeGHRoutesOrderedOnPATH(t *testing.T, routes []fakeGHRoute, orderLogPath string) func() []string {
+	t.Helper()
+	dir, calls := writeFakeGHRoutesOrdered(t, routes, orderLogPath)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return calls
 }

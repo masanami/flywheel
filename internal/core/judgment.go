@@ -49,6 +49,25 @@ const (
 	RunResultInterrupted     RunResult = runResultInterrupted
 )
 
+// runResultValues は RunResult の閉集合（§結果の判別の 7 値＋interrupted。
+// 仕様の列挙の順）。
+var runResultValues = []RunResult{
+	RunResultLaunchFailed,
+	RunResultTimedOut,
+	RunResultMalformed,
+	RunResultBudgetExhausted,
+	RunResultErrored,
+	RunResultInvalidOutput,
+	RunResultSucceeded,
+	RunResultInterrupted,
+}
+
+// RunResultValues は RunResult の閉集合の写しを返す（CLI のテストが仕様の列挙と
+// 双方向に照合するため。IngestOutcomeValues と同じ形）。
+func RunResultValues() []RunResult {
+	return append([]RunResult(nil), runResultValues...)
+}
+
 // CostSource は run.cost_source の閉集合（費用の出所）。
 type CostSource = costSource
 

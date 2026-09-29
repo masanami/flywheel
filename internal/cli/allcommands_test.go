@@ -131,6 +131,28 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	"runs": {setup: func(t *testing.T, ws string) []string {
 		return []string{"runs", createForCase(t, ws)}
 	}},
+	"cycle": {setup: func(t *testing.T, ws string) []string {
+		// cycle --json の出力の形（phases の各段・items・not_started・ingest の result）が
+		// 文書と照合されるよう、取り込みで課題を 1 件作り、同じ周で分類・計画まで進める。
+		// 空の一覧だと要素の形が 1 件も照合されない。
+		writePositionFileForTest(t, ws, "pos")
+		writeAgentJSONForTest(t, ws, `{"position_file": "position.md"}`)
+		writeConnectorsJSONForTest(t, ws, j2ConnectorsFixture)
+		writeSourcesDeclaration(t, ws, `{
+  "version": 1,
+  "sources": [{"id": "src", "type": "github-issue", "repos": ["o/r"], "self_assignees": ["someone"]}]
+}`)
+		issue := marshalFakeGHIssue(t, fakeGHIssue{Number: 1, Title: "allcommands cycle", Body: "body", Repo: "o/r"})
+		withFakeGHRoutesOnPATH(t, []fakeGHRoute{
+			fakeGHListRoute("o/r", 1, "["+issue+"]", 0),
+			fakeGHGetIssueStatusLineRoute("o/r", 1, "HTTP/2.0 200 OK", issue, 0),
+			{match: "repos/o/r/issues/1/comments?per_page=100&page=1", stdout: "[]"},
+		})
+		// J1 は mine、J2 は plan を返し、取り込んだ課題を同じ周で計画まで進める（items の要素の
+		// 形が照合される）。not_started の要素の形は cycle_closedsets_test.go の観測が照合する。
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, "")
+		return []string{"cycle", "--trigger", "cron"}
+	}},
 	"ingest": {setup: func(t *testing.T, ws string) []string {
 		writeSourcesDeclaration(t, ws, validSourcesDeclaration)
 		// #59 で取得と反映を結線した後は、この横断テスト（jsondoc の形の照合。

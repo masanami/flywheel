@@ -360,6 +360,47 @@ func TestRunsCommand_RequiredArgumentsMatchM3IFAPITable(t *testing.T) {
 	}
 }
 
+// TestCycleCommand_RequiredArgumentsMatchM3IFAPITable は cycle コマンドについて
+// TestRunsCommand_RequiredArgumentsMatchM3IFAPITable と同じ検査を m3 の §IF / API「CLI」の表に
+// 対して行う（`flywheel cycle [--trigger <t>]`。#86）。--trigger は任意で、位置引数は取らない。
+func TestCycleCommand_RequiredArgumentsMatchM3IFAPITable(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m3-invoker-delegation.md"))
+	if err != nil {
+		t.Fatalf("read m3 spec: %v", err)
+	}
+	sigs, ok := parseIFAPISignatures(t, string(data))["cycle"]
+	if !ok || len(sigs) == 0 {
+		t.Fatal("m3 spec's IF/API table has no `cycle` row")
+	}
+	want := sigs[0]
+
+	cmd, ok := registeredCommands()["cycle"]
+	if !ok {
+		t.Fatal("cycle is not registered in defaultCommands()")
+	}
+	if cmd.MinPositional != want.minPositional || cmd.MaxPositional != 0 {
+		t.Errorf("cycle: Min/MaxPositional = %d/%d, IF/API table says min %d and no positional argument", cmd.MinPositional, cmd.MaxPositional, want.minPositional)
+	}
+	got := map[string]bool{}
+	for _, f := range cmd.Flags {
+		if f.Required {
+			got[f.Name] = true
+		}
+	}
+	if !reflect.DeepEqual(got, want.required) {
+		t.Errorf("cycle: required flags = %v, IF/API table says %v", got, want.required)
+	}
+	var trigger *flagDef
+	for i := range cmd.Flags {
+		if cmd.Flags[i].Name == "trigger" {
+			trigger = &cmd.Flags[i]
+		}
+	}
+	if trigger == nil || !trigger.HasValue || trigger.Required {
+		t.Errorf("cycle: --trigger = %+v, want an optional flag that takes a value", trigger)
+	}
+}
+
 // TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats は、
 // ifAPISkipCommands で汎用比較から外した classify について、m1・m3 それぞれの
 // 書式が仕様書のとおりであること（m1 の行を書き換えていないこと）と、登録表の
@@ -625,6 +666,9 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	// 適用できないため、ここでは実装済みの `runs` だけを個別に足す
 	// （残りの行との整合は、それぞれを実装するチケットが同種の検査を足す）。
 	wantSet["runs"] = true
+	// #86: 同じ理由で、実装済みの `cycle` を個別に足す（書式は
+	// TestCycleCommand_RequiredArgumentsMatchM3IFAPITable が m3 の表と照合する）。
+	wantSet["cycle"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")

@@ -11,6 +11,7 @@ package coretest
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -223,6 +224,64 @@ func InsertCycle(t *testing.T, workspace, trigger string, budgetUSDMicros int64,
 		t.Fatalf("coretest: InsertCycle: %v", err)
 	}
 	return id
+}
+
+// InsertLock はテスト専用のフィクスチャとして、サイクルの排他ロック（lock 表の
+// name="cycle" の行）を、周 holderCycleID（InsertCycle が返した内部整数ID）が
+// 保持している状態で挿入する（#86。internal/cli の cycle のテストが、生きている
+// 保持者〈自プロセスの pid・現ホスト〉と stale な保持者〈死んだ pid・古い
+// heartbeat〉のいずれも、別プロセスを起動せずに作るために使う）。pid・host・
+// acquiredAt・heartbeatAt は保持者の記録そのもの（時刻は "2026-09-28T00:00:00.000Z"
+// の形式）。
+func InsertLock(t *testing.T, workspace string, holderCycleID int64, pid int64, host, acquiredAt, heartbeatAt string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO lock (name, holder, pid, host, acquired_at, heartbeat_at) VALUES ('cycle', ?, ?, ?, ?, ?)`,
+			holderCycleID, pid, host, acquiredAt, heartbeatAt,
+		)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertLock: %v", err)
+	}
+}
+
+// CycleLockHolder は lock 表の name="cycle" の行の保持者の周の内部整数IDを返す
+// （行が無ければ 0, false）。
+func CycleLockHolder(t *testing.T, workspace string) (int64, bool) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var holder int64
+	found := false
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		err := tx.QueryRow(`SELECT holder FROM lock WHERE name = 'cycle'`).Scan(&holder)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		found = err == nil
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: CycleLockHolder: %v", err)
+	}
+	return holder, found
+}
+
+// CycleResultOf は周 cycleID（内部整数ID）の result と ended_at が NULL でないかを
+// 返す（result が NULL なら ""）。
+func CycleResultOf(t *testing.T, workspace string, cycleID int64) (result string, ended bool) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var res, endedAt sql.NullString
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT result, ended_at FROM cycle WHERE id = ?`, cycleID).Scan(&res, &endedAt)
+	}); err != nil {
+		t.Fatalf("coretest: CycleResultOf: %v", err)
+	}
+	return res.String, endedAt.Valid
 }
 
 // CountChallenges は workspace 配下のストアにある課題の件数を返す。

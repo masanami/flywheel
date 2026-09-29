@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -119,5 +121,82 @@ func TestListRuns_OpenOnlyExcludesEndedRuns(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].Result != "" {
 		t.Fatalf("ListRuns(open) = %+v, want exactly 1 open run", runs)
+	}
+}
+
+// AC-154（core 側）: GetChallenge（show の元）の Runs は、その課題の run を新しい順に
+// 最大 20 件返す。他の課題の run は含めない。
+func TestGetChallenge_RunsAreNewestFirstAndCappedAt20(t *testing.T) {
+	s := newStoreForTest(t)
+	id := createChallengeForJudgmentTest(t, s)
+	other := createChallengeForJudgmentTest(t, s)
+	cid, _ := parseChallengeID(id)
+	ocid, _ := parseChallengeID(other)
+	base := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+
+	endRun := func(runID int64, at time.Time) {
+		t.Helper()
+		cost := int64(1)
+		if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+			_, err := updateRunEnd(context.Background(), tx, runID, updateRunEndInput{
+				EndedAt: at, Result: runResultSucceeded, CostUSD: &cost, CostSource: costSourceReported,
+			})
+			return err
+		}); err != nil {
+			t.Fatalf("updateRunEnd: %v", err)
+		}
+	}
+	insert := func(c int64, i int) int64 {
+		t.Helper()
+		r, err := insertRunForTest(t, s, c, insertRunInput{
+			Kind: runKindJudgment, Judgment: judgmentJ1, ChallengeVersion: 1,
+			SessionID: fmt.Sprintf("11111111-1111-1111-1111-%012d", i), PID: 1, Host: "h",
+			HeartbeatAt: base, StartedAt: base.Add(time.Duration(i) * time.Minute),
+			MaxBudgetUSD: 100_000, BudgetBucket: budgetBucketJudgment,
+		})
+		if err != nil {
+			t.Fatalf("insertRunForTest[%d]: %v", i, err)
+		}
+		n, _ := parseRunID(r.ID)
+		return n
+	}
+	const total = 23
+	var wantNewest []string
+	for i := 0; i < total; i++ {
+		rid := insert(cid, i)
+		endRun(rid, base.Add(time.Hour))
+		wantNewest = append([]string{formatRunID(rid)}, wantNewest...)
+		if i == 5 { // 他の課題の run が混ざっても、この課題の一覧には出ない
+			endRun(insert(ocid, 100+i), base.Add(time.Hour))
+		}
+	}
+
+	detail, err := s.GetChallenge(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetChallenge: %v", err)
+	}
+	if len(detail.Runs) != 20 {
+		t.Fatalf("len(Runs) = %d, want 20 (capped)", len(detail.Runs))
+	}
+	for i, r := range detail.Runs {
+		if r.ID != wantNewest[i] {
+			t.Fatalf("Runs[%d].ID = %s, want %s (newest first)", i, r.ID, wantNewest[i])
+		}
+		if r.ChallengeID != id {
+			t.Errorf("Runs[%d].ChallengeID = %s, want %s", i, r.ChallengeID, id)
+		}
+	}
+}
+
+// AC-154（core 側）: run の無い課題の Runs は空スライス（nil でない）。
+func TestGetChallenge_NoRunsIsEmptySlice(t *testing.T) {
+	s := newStoreForTest(t)
+	id := createChallengeForJudgmentTest(t, s)
+	detail, err := s.GetChallenge(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetChallenge: %v", err)
+	}
+	if detail.Runs == nil || len(detail.Runs) != 0 {
+		t.Errorf("Runs = %#v, want an empty non-nil slice", detail.Runs)
 	}
 }

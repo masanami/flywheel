@@ -32,6 +32,11 @@ func TestExitCodeFor_KnownCodes(t *testing.T) {
 		{CodeConfigNotFound, 2},
 		{CodeConfigInvalid, 2},
 		{CodeUpstreamUnavailable, 2},
+		// M3 S1 の 4 つ（AC-158〜161。#86）。
+		{CodeInvokerUnavailable, 2},
+		{CodeLocked, 1},
+		{CodeRunInProgress, 1},
+		{CodeBudgetExceeded, 1},
 	}
 	for _, c := range cases {
 		if got := ExitCodeFor(c.code); got != c.want {
@@ -93,6 +98,34 @@ func TestMapCoreErr_ConfigErrors(t *testing.T) {
 			}
 			if ExitCodeFor(got.Code) != 2 {
 				t.Fatalf("ExitCodeFor(%q) = %d, want 2", got.Code, ExitCodeFor(got.Code))
+			}
+		})
+	}
+}
+
+// TestMapCoreErr_M3Errors は M3 S1 の core の sentinel（ErrLocked・ErrRunInProgress・
+// ErrBudgetExceeded）が mapCoreErr で正しい ErrorCode（AC-159〜161: いずれも終了コード 1）へ
+// 写像されることを検証する。invoker_unavailable（AC-158: 終了コード 2）は core の sentinel を
+// 経由せず、runClassifyAuto・runPlanAuto・runCycle が invoker.ErrClaudeNotFound から直接作る
+// （その終了コードは各コマンドのテストが検証する）。
+func TestMapCoreErr_M3Errors(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want ErrorCode
+	}{
+		{"locked", core.ErrLocked, CodeLocked},                          // AC-159
+		{"run in progress", core.ErrRunInProgress, CodeRunInProgress},   // AC-160
+		{"budget exceeded", core.ErrBudgetExceeded, CodeBudgetExceeded}, // AC-161
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := mapCoreErr(c.err)
+			if got.Code != c.want {
+				t.Fatalf("mapCoreErr(%v).Code = %q, want %q", c.err, got.Code, c.want)
+			}
+			if ExitCodeFor(got.Code) != 1 {
+				t.Fatalf("ExitCodeFor(%q) = %d, want 1", got.Code, ExitCodeFor(got.Code))
 			}
 		})
 	}
@@ -230,4 +263,69 @@ func parseErrorCodeTable(t *testing.T, doc string) []codeExit {
 		t.Fatal("error code table not found in document")
 	}
 	return table
+}
+
+// m3S2OnlyErrorCodes は m3 の「エラーコードの追加」の表にあるが S2 で足すコード
+// （AC-162 の対象は S1 の 4 つだけ）。
+var m3S2OnlyErrorCodes = map[ErrorCode]bool{"slot_unavailable": true}
+
+// m1BaseErrorCodeCount は M1 の表のうち、M1 自身が定めた行数（`verification_rejected` まで。
+// その後ろの行は M2・M3 の実装チケットが同じ表へ足したもの）。
+const m1BaseErrorCodeCount = 14
+
+// AC-162: 実装が出しうるエラーコードの集合は、M1・M2 の表に S1 の 4 つ（invoker_unavailable・
+// locked・run_in_progress・budget_exceeded）を足した集合と一致する。M1・M2・M3 それぞれの
+// 仕様の表から期待の集合を導き、実装の表（errorCodeTable）と終了コードも含めて双方向に照合する
+// （実装が実際に出しうることの静的な照合は TestErrorCodeUsageInSourcesMatchesSpecInBothDirections が
+// M1 の表との間で行う）。
+func TestErrorCodeSet_IsM1M2PlusS1CodesInBothDirections(t *testing.T) {
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		return string(data)
+	}
+	m1 := parseErrorCodeTable(t, read("m1-core.md"))
+	if len(m1) < m1BaseErrorCodeCount || m1[m1BaseErrorCodeCount-1].Code != "verification_rejected" {
+		t.Fatalf("the M1 error code table does not start with the %d M1 rows ending at verification_rejected: %+v", m1BaseErrorCodeCount, m1)
+	}
+	want := map[ErrorCode]int{}
+	for _, e := range m1[:m1BaseErrorCodeCount] {
+		want[e.Code] = e.ExitCode
+	}
+	m2 := parseErrorCodeTable(t, read("m2-github-issue-ingest.md"))
+	if len(m2) != 3 {
+		t.Fatalf("M2 adds 3 error codes, table has %d: %+v", len(m2), m2)
+	}
+	for _, e := range m2 {
+		want[e.Code] = e.ExitCode
+	}
+	m3 := parseErrorCodeTable(t, read("m3-invoker-delegation.md"))
+	s1 := 0
+	for _, e := range m3 {
+		if m3S2OnlyErrorCodes[e.Code] {
+			continue
+		}
+		want[e.Code] = e.ExitCode
+		s1++
+	}
+	if s1 != 4 {
+		t.Fatalf("M3 S1 adds 4 error codes (invoker_unavailable, locked, run_in_progress, budget_exceeded), table has %d besides the S2-only ones: %+v", s1, m3)
+	}
+
+	got := map[ErrorCode]int{}
+	for _, e := range errorCodeTable {
+		got[e.Code] = e.ExitCode
+	}
+	for code, exit := range want {
+		if g, ok := got[code]; !ok || g != exit {
+			t.Errorf("expected code %q (exit %d) is missing or mismatched in the implementation (got exit=%d, present=%v)", code, exit, g, ok)
+		}
+	}
+	for code, exit := range got {
+		if w, ok := want[code]; !ok || w != exit {
+			t.Errorf("implementation code %q (exit %d) is not in the M1+M2+S1 set (want exit=%d, present=%v)", code, exit, w, ok)
+		}
+	}
 }

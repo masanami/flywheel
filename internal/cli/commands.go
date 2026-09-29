@@ -277,5 +277,13 @@ func defaultCommands() []Command {
 			Flags:         []flagDef{{Name: "open", HasValue: false}},
 			Run:           runRuns,
 		},
+		{
+			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（#86）。位置引数は
+			// 取らない。`--trigger` の省略は manual（runCycle）。
+			Path:          []string{"cycle"},
+			RequiresStore: true,
+			Flags:         []flagDef{{Name: "trigger", HasValue: true}},
+			Run:           runCycle,
+		},
 	}
 }

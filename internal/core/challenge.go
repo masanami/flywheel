@@ -108,6 +108,10 @@ type ChallengeDetail struct {
 	// 対応が無ければ nil（`create` で作った課題・スキーマ版 1 から上げたストアの
 	// 既存の課題。AC-48・AC-103）。
 	SourceBinding *SourceBinding
+	// Runs は課題の run の一覧（新しい順・最大 20 件。#86。docs/features/
+	// m3-invoker-delegation.md §観測「show は、課題の run の一覧…を示す」）。
+	// 無ければ空スライス（nil でない）。
+	Runs []Run
 }
 
 // CreateInput は CreateChallenge の入力。
@@ -498,8 +502,13 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 }
 
 // GetChallenge は課題の全体像（人間記入欄・状態・計画の全版・承認と差し戻しの
-// 記録・保留の記録・不可逆操作・GitHub Issue との対応）を返す。id の形式が不正、または存在しなければ
-// ErrNotFound。
+// 記録・保留の記録・不可逆操作・GitHub Issue との対応・run の一覧〈新しい順・最大 20 件〉）を返す。
+// id の形式が不正、または存在しなければ ErrNotFound。
+//
+// run の一覧は ListRuns と同じく、先に中断した run を interrupted で閉じる（書き込みを
+// 伴いうる。§invoker の共通の規則「次にストアを開いた flywheel のコマンドがその run を
+// interrupted で終了させる」）。課題の詳細と run の一覧は別々のトランザクションで読む
+// （同じ時点の値である保証は無い）。
 func (s *Store) GetChallenge(ctx context.Context, id string) (*ChallengeDetail, error) {
 	cid, ok := parseChallengeID(id)
 	if !ok {
@@ -548,6 +557,13 @@ func (s *Store) GetChallenge(ctx context.Context, id string) (*ChallengeDetail, 
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
+	// run の一覧は、ListRuns と同じく先に中断した run を回収してから読む
+	// （`runs` と `show` で同じ run が同じ結果に見える）。
+	runs, err := s.ListRuns(ctx, RunListOptions{ChallengeID: &id, Limit: showRunsLimit})
+	if err != nil {
+		return nil, err
+	}
+	detail.Runs = runs
 	return &detail, nil
 }
 

@@ -41,6 +41,8 @@ func runShow(a Args) (any, error) {
 			"holds":          holdsJSON(detail.Holds),
 			"operations":     operationsJSON(detail.Operations),
 			"source_binding": sourceBindingJSON(detail.SourceBinding),
+			// 課題の run（新しい順・最大 20 件。#86）。要素は `runs` コマンドと同じ形。
+			"runs": runsJSON(detail.Runs),
 		},
 		text: challengeDetailText(detail),
 	}, nil
