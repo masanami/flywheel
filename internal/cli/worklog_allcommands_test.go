@@ -427,6 +427,43 @@ var worklogCases = []worklogCase{
 				}}}
 		},
 	},
+	{
+		// #86: cycle は取り込みの段で ingest と同じ core の処理を呼ぶので、課題を作るたびに
+		// 経路 cli の ingest_create を記録する。分類・計画の段の遷移は経路 invoker で
+		// 記録される（TestCycle_RecordsNoApprovalRejectionOrAnswerActivity が検証する）が、
+		// この表の検査は経路 cli 固定のため、J1 が not_mine を返して遷移を起こさない設定で
+		// ingest_create だけを記録させる。承認・差し戻し・回答は cycle からは記録されない。
+		name: "cycle ingest create", command: "cycle",
+		setup: func(t *testing.T, ws string) []string {
+			writePositionFileForTest(t, ws, "pos")
+			writeAgentJSONForTest(t, ws, `{"position_file": "position.md"}`)
+			writeSourcesDeclaration(t, ws, `{
+  "version": 1,
+  "sources": [
+    {"id": "worklog-source", "type": "github-issue", "repos": ["`+worklogIngestRepo+`"], "self_assignees": ["someone"]}
+  ]
+}`)
+			withFakeGHRoutesOnPATH(t, []fakeGHRoute{
+				fakeGHListRoute(worklogIngestRepo, 1, fakeGHIssueListBody(t, []fakeGHIssue{
+					{Number: 1, Title: "cycle ingest title", Body: "cycle ingest body", Reporter: "reporter", Repo: worklogIngestRepo},
+				}), 0),
+			})
+			putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{{Match: fakeClaudeJ1Match, Tag: "J1", Stdout: j1NotMineFixture}}, "")
+			return []string{"cycle"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"challenge", "C-1", "ingest_create", nil,
+				map[string]any{
+					"title":         "cycle ingest title",
+					"description":   "cycle ingest body",
+					"done_criteria": "",
+					"urgency":       nil,
+					"status":        "unclassified",
+					"reporter":      "reporter",
+					"external_key":  worklogIngestRepo + "#1",
+				}}}
+		},
+	},
 }
 
 func TestWorklog_CasesCoverRegistrationTable(t *testing.T) {

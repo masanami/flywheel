@@ -17,8 +17,8 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   show <ID>
   list [--status <状態>]
   edit <ID> [--title <t>] [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>]
-  classify <ID> --priority <P0|P1|P2>
-  plan <ID> (--file <path> | --stdin)
+  classify (<ID> --priority <P0|P1|P2> | --auto [<C-ID>])
+  plan (<ID> (--file <path> | --stdin) | --auto [<C-ID>])
   submit <ID>
   verify <ID> --result <met|not_met|uncertain> [--question <q>]
   hold <ID> [--question <q>]
@@ -31,6 +31,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   ingest [--source <id>]
   mark-read <C-ID>
   runs [<C-ID>] [--open]
+  cycle [--trigger <t>]
 
 詳細は docs/features/m1-core.md・docs/features/m3-invoker-delegation.md を参照。
 `

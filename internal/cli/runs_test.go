@@ -203,3 +203,23 @@ func TestRuns_ReapsStaleHeartbeatIntoInterrupted(t *testing.T) {
 		t.Errorf("result = %v, want interrupted (stale heartbeat + dead process)", elem["result"])
 	}
 }
+
+// AC-151（jsondoc_test.go の形の照合）: runs --json の要素は、文書（§IF / API「runs」）の
+// 形と一致する。要素が 1 件も無い成功経路の照合（allCommandSuccessCases）では要素の形は
+// 比べられないため、終了した run と終了していない run を 1 件ずつ置いて照合する。
+func TestRuns_ElementsMatchTheDocumentedShape(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id1 := createForCase(t, ws)
+	id2 := createForCase(t, ws)
+	insertEndedRuns(t, ws, id1, 1)
+	insertRunFixture(t, ws, id2, func(in *coretest.InsertRunInput) {
+		in.SessionID = "22222222-2222-2222-2222-222222222222"
+	})
+
+	doc := runJSON(t, ws, "runs")
+
+	if runs := doc["runs"].([]any); len(runs) != 2 {
+		t.Fatalf("runs = %v, want 2 elements to compare", runs)
+	}
+	assertDocumentedJSON(t, loadDocumentedJSON(t), "runs", doc)
+}

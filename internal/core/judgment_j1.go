@@ -474,6 +474,13 @@ type J1AutoInput struct {
 	// CycleID はこの操作が属する周（`BeginCycle` が返した ID）。空文字列は
 	// ErrValidation。
 	CycleID string
+	// Cycle が非 nil なら、ID を省略した対象の処理の枠超過の状態をこの
+	// JudgmentCycle と共有する（`cycle` の段〈RunCycle〉が、分類の段と計画の段で
+	// 同じ JudgmentCycle を渡し、§枠超過「枠超過を 1 件でも記録した周は、その周の
+	// 残りの判断の呼び出しと委譲を起動しない」を段をまたいで守る）。nil なら
+	// この呼び出しの中だけの JudgmentCycle を作る（個別の操作。ID を指定した
+	// 呼び出しでは使わない）。
+	Cycle *JudgmentCycle
 }
 
 // J1AutoItem は `classify --auto` が処理した課題 1 件の結果（judgment_batch.go の
@@ -550,7 +557,10 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 		return nil, err
 	}
 
-	jc := NewJudgmentCycle(in.CycleID)
+	jc := in.Cycle
+	if jc == nil {
+		jc = NewJudgmentCycle(in.CycleID)
+	}
 	for _, cid := range targetIDs {
 		ch, err := s.loadChallengeForAuto(ctx, formatChallengeID(cid))
 		if err != nil {

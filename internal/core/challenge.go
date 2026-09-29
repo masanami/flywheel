@@ -108,6 +108,10 @@ type ChallengeDetail struct {
 	// 対応が無ければ nil（`create` で作った課題・スキーマ版 1 から上げたストアの
 	// 既存の課題。AC-48・AC-103）。
 	SourceBinding *SourceBinding
+	// Runs は課題の run の一覧（新しい順・最大 20 件。#86。docs/features/
+	// m3-invoker-delegation.md §観測「show は、課題の run の一覧…を示す」）。
+	// 無ければ空スライス（nil でない）。
+	Runs []Run
 }
 
 // CreateInput は CreateChallenge の入力。
@@ -548,6 +552,13 @@ func (s *Store) GetChallenge(ctx context.Context, id string) (*ChallengeDetail, 
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
+	// run の一覧は、ListRuns と同じく先に中断した run を回収してから読む
+	// （`runs` と `show` で同じ run が同じ結果に見える）。
+	runs, err := s.ListRuns(ctx, RunListOptions{ChallengeID: &id, Limit: showRunsLimit})
+	if err != nil {
+		return nil, err
+	}
+	detail.Runs = runs
 	return &detail, nil
 }
 

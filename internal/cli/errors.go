@@ -57,6 +57,9 @@ const (
 	// runClassifyAuto が直接 errors.Is で判定して写す（mapCoreErr を経由しない。
 	// CodeUpstreamUnavailable と同じ形）。
 	CodeInvokerUnavailable ErrorCode = "invoker_unavailable"
+	// CodeLocked は #86 で追加（生きている別の `cycle` がサイクルの排他を保持
+	// している。同上「エラーコードの追加」）。core.ErrLocked を写す。
+	CodeLocked ErrorCode = "locked"
 	// CodeRunInProgress は #84 で追加（指定した課題に終了していない run が
 	// ある。同上「エラーコードの追加」）。core.ErrRunInProgress を写す。
 	CodeRunInProgress ErrorCode = "run_in_progress"
@@ -93,6 +96,7 @@ var errorCodeTable = []codeExit{
 	{CodeConfigInvalid, 2},
 	{CodeUpstreamUnavailable, 2},
 	{CodeInvokerUnavailable, 2},
+	{CodeLocked, 1},
 	{CodeRunInProgress, 1},
 	{CodeBudgetExceeded, 1},
 }
@@ -162,6 +166,8 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeConfigNotFound, err.Error())
 	case errors.Is(err, core.ErrConfigInvalid):
 		return NewError(CodeConfigInvalid, err.Error())
+	case errors.Is(err, core.ErrLocked):
+		return NewError(CodeLocked, err.Error())
 	case errors.Is(err, core.ErrRunInProgress):
 		return NewError(CodeRunInProgress, err.Error())
 	case errors.Is(err, core.ErrBudgetExceeded):

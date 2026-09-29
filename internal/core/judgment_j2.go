@@ -654,6 +654,10 @@ type J2AutoInput struct {
 	Upstream UpstreamThreadSource
 	// CycleID はこの操作が属する周（BeginCycle が返した ID）。空は ErrValidation。
 	CycleID string
+	// Cycle が非 nil なら、ID を省略した対象の処理の枠超過の状態をこの
+	// JudgmentCycle と共有する（J1AutoInput.Cycle と同じ規則。`cycle` の段が
+	// 分類の段と同じものを渡す）。nil ならこの呼び出しの中だけのものを作る。
+	Cycle *JudgmentCycle
 }
 
 // J2AutoItem は `plan --auto` が処理した課題 1 件の結果（judgment_batch.go の
@@ -730,7 +734,10 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 		return nil, err
 	}
 
-	jc := NewJudgmentCycle(in.CycleID)
+	jc := in.Cycle
+	if jc == nil {
+		jc = NewJudgmentCycle(in.CycleID)
+	}
 	for _, cid := range targetIDs {
 		ch, err := s.loadChallengeForAuto(ctx, formatChallengeID(cid))
 		if err != nil {

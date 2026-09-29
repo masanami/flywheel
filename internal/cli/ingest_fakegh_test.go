@@ -41,6 +41,15 @@ type fakeGHRoute struct {
 // 呼び出しの引数列（"$*" の値。呼ばれた順）を返す。
 func writeFakeGHRoutes(t *testing.T, routes []fakeGHRoute) (dir string, calls func() []string) {
 	t.Helper()
+	return writeFakeGHRoutesOrdered(t, routes, "")
+}
+
+// writeFakeGHRoutesOrdered は writeFakeGHRoutes に加え、orderLogPath が非空なら、
+// 呼ばれるたびに "gh <引数列>" を orderLogPath へ追記する（偽の claude が同じ
+// ファイルへ "claude <タグ>" を追記すれば、`cycle` の段の順を偽の gh と偽の claude の
+// 呼び出しの順で検証できる。#86 の AC-132）。
+func writeFakeGHRoutesOrdered(t *testing.T, routes []fakeGHRoute, orderLogPath string) (dir string, calls func() []string) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("動作環境は macOS と Linux のみ（CLAUDE.md）")
 	}
@@ -50,6 +59,9 @@ func writeFakeGHRoutes(t *testing.T, routes []fakeGHRoute) (dir string, calls fu
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString(fakeGHLogAppendLine(logPath))
+	if orderLogPath != "" {
+		b.WriteString("printf 'gh %s\\n' \"$*\" >> " + shellSingleQuote(orderLogPath) + "\n")
+	}
 	b.WriteString("case \"$*\" in\n")
 	for i, r := range routes {
 		// heredoc の終端語はテスト・route ごとに変え、応答本文に偶然同じ行が
@@ -123,7 +135,13 @@ func shellSingleQuote(s string) string {
 // withFakeGHRoutesOnPATH は writeFakeGHRoutes の偽の gh を PATH の先頭に足す。
 func withFakeGHRoutesOnPATH(t *testing.T, routes []fakeGHRoute) func() []string {
 	t.Helper()
-	dir, calls := writeFakeGHRoutes(t, routes)
+	return withFakeGHRoutesOrderedOnPATH(t, routes, "")
+}
+
+// withFakeGHRoutesOrderedOnPATH は writeFakeGHRoutesOrdered の偽の gh を PATH の先頭に足す。
+func withFakeGHRoutesOrderedOnPATH(t *testing.T, routes []fakeGHRoute, orderLogPath string) func() []string {
+	t.Helper()
+	dir, calls := writeFakeGHRoutesOrdered(t, routes, orderLogPath)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return calls
 }
