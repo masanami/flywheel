@@ -680,8 +680,8 @@ func countLocksForTest(t *testing.T, s *Store) int {
 	return n
 }
 
-// lockHeartbeatNoFatal は lockHeartbeatForTest と同じだが、失敗を t.Errorf で報告し、
-// ゼロ値を返す（テスト goroutine 以外から呼ぶためのもの）。
+// lockHeartbeatNoFatal はサイクルの排他ロックの heartbeat_at を返す。失敗は t.Errorf で
+// 報告してゼロ値を返す（判断の IF の応答は別の goroutine で呼ばれるため、t.Fatalf を使わない）。
 func lockHeartbeatNoFatal(t *testing.T, s *Store) time.Time {
 	t.Helper()
 	var at time.Time
@@ -698,26 +698,6 @@ func lockHeartbeatNoFatal(t *testing.T, s *Store) time.Time {
 	})
 	if err != nil {
 		t.Errorf("lockHeartbeatNoFatal: %v", err)
-	}
-	return at
-}
-
-// lockHeartbeatForTest はサイクルの排他ロックの heartbeat_at を返す。
-func lockHeartbeatForTest(t *testing.T, s *Store) time.Time {
-	t.Helper()
-	var at time.Time
-	if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
-		l, err := loadLockByName(context.Background(), tx, cycleLockName)
-		if err != nil {
-			return err
-		}
-		if l == nil {
-			return fmt.Errorf("no cycle lock row")
-		}
-		at = l.HeartbeatAt
-		return nil
-	}); err != nil {
-		t.Fatalf("lockHeartbeatForTest: %v", err)
 	}
 	return at
 }
