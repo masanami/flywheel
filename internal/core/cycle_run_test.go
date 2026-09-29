@@ -593,7 +593,13 @@ func TestAutoInputs_SharedCycleMustBelongToTheSameCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginCycle: %v", err)
 	}
-	other := NewJudgmentCycle("Y-99")
+	// 実在する別の周の JudgmentCycle（存在しない周の ID だと、下流の RunJudgment が
+	// ErrValidation にしてしまい、食い違いの検査そのものを確かめられない）。
+	cyc2, err := f.s.BeginCycle(context.Background(), BeginCycleInput{Trigger: "y", BudgetUSD: 10})
+	if err != nil {
+		t.Fatalf("BeginCycle: %v", err)
+	}
+	other := NewJudgmentCycle(cyc2.ID)
 
 	if _, err := f.s.ClassifyAutoJ1(context.Background(), J1AutoInput{AgentDecl: f.agent, Invoker: inv, CycleID: cyc.ID, Cycle: other}); !errors.Is(err, ErrValidation) {
 		t.Errorf("ClassifyAutoJ1 err = %v, want ErrValidation for a JudgmentCycle of another cycle", err)
