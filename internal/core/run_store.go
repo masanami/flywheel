@@ -31,6 +31,10 @@ var (
 	// errActiveRunExists は、課題に既に終了していない run があることを表す
 	// （AC-168。部分一意索引 idx_run_active_challenge の違反を翻訳する）。
 	errActiveRunExists = errors.New("core: challenge already has an active run")
+
+	// errActiveSlotRunExists は、スロットに既に終了していない run があることを
+	// 表す（AC-280。部分一意索引 idx_run_active_slot の違反を翻訳する）。
+	errActiveSlotRunExists = errors.New("core: slot already has an active run")
 )
 
 // --- ID の表示形 ---
@@ -75,11 +79,14 @@ type runKind string
 const (
 	runKindJudgment runKind = "judgment"
 	runKindDelegate runKind = "delegate"
+	// runKindPredict は衝突の予測（flywheel の predict）の実行。課題・計画・
+	// セッションに結び付かず、repo を必須とする（0005）。
+	runKindPredict runKind = "predict"
 )
 
 func (k runKind) valid() bool {
 	switch k {
-	case runKindJudgment, runKindDelegate:
+	case runKindJudgment, runKindDelegate, runKindPredict:
 		return true
 	}
 	return false
@@ -154,11 +161,40 @@ const (
 	budgetBucketJudgment budgetBucket = "judgment"
 	budgetBucketImpl     budgetBucket = "impl"
 	budgetBucketReview   budgetBucket = "review"
+	budgetBucketPredict  budgetBucket = "predict"
 )
 
 func (b budgetBucket) valid() bool {
 	switch b {
-	case budgetBucketJudgment, budgetBucketImpl, budgetBucketReview:
+	case budgetBucketJudgment, budgetBucketImpl, budgetBucketReview, budgetBucketPredict:
+		return true
+	}
+	return false
+}
+
+// predictRunResultValid は predict の run の result として許される値かを返す
+// （succeeded | launch_failed | timed_out | malformed | errored | interrupted）。
+func predictRunResultValid(r runResult) bool {
+	switch r {
+	case runResultSucceeded, runResultLaunchFailed, runResultTimedOut, runResultMalformed,
+		runResultErrored, runResultInterrupted:
+		return true
+	}
+	return false
+}
+
+// decider は run.decider（その run の意思決定の主体）。
+type decider string
+
+const (
+	deciderHuman  decider = "human"
+	deciderParent decider = "parent"
+	deciderChild  decider = "child"
+)
+
+func (d decider) valid() bool {
+	switch d {
+	case deciderHuman, deciderParent, deciderChild:
 		return true
 	}
 	return false
@@ -213,31 +249,41 @@ type runRow struct {
 	ReportedTotalCostUSD *int64
 	Output               string
 	Error                string
+	// 0005 で足した列。SlotID は表示形（"SL-<n>"）。Decider は "" が NULL、
+	// DeciderRow・Repo は nil / "" が NULL。predict の run は ChallengeID・
+	// SessionID が "" 、ChallengeVersion が 0（NULL）になる。
+	SlotID     *string
+	Decider    decider
+	DeciderRow *int64
+	Repo       string
 }
 
 const runSelectColumns = `SELECT id, cycle_id, kind, judgment, challenge_id, challenge_version, plan_version,
 	session_id, session_id_mismatch, resumed_from_run_id, pid, host, heartbeat_at, started_at, ended_at,
 	result, rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source, reported_total_cost_usd,
-	output, error FROM run`
+	output, error, slot_id, decider, decider_row, repo FROM run`
 
 // scanRunRow は 1 行分の run を Scan して runRow へ変換する。
 func scanRunRow(row interface{ Scan(dest ...any) error }) (*runRow, error) {
 	var (
-		id, challengeID, pid                                   int64
-		cycleID, resumedFromRunID, planVersion, costUSD        sql.NullInt64
-		reportedTotalCostUSD                                   sql.NullInt64
-		kind, judgment, sessionID, host, result, costSourceStr string
-		budgetBucketStr, output, errStr                        sql.NullString
-		heartbeatAtStr, startedAtStr                           string
-		endedAtStr                                             sql.NullString
-		sessionIDMismatch, rateLimited                         bool
-		challengeVersion, maxBudgetUSD                         int64
+		id, pid                                         int64
+		challengeID, challengeVersion                   sql.NullInt64
+		cycleID, resumedFromRunID, planVersion, costUSD sql.NullInt64
+		reportedTotalCostUSD                            sql.NullInt64
+		slotID, deciderRow                              sql.NullInt64
+		kind, judgment, sessionID, host, result         string
+		costSourceStr, deciderStr, repo                 string
+		budgetBucketStr, output, errStr                 sql.NullString
+		heartbeatAtStr, startedAtStr                    string
+		endedAtStr                                      sql.NullString
+		sessionIDMismatch, rateLimited                  bool
+		maxBudgetUSD                                    int64
 	)
 	if err := row.Scan(
 		&id, &cycleID, &kind, &nullString{&judgment}, &challengeID, &challengeVersion, &planVersion,
-		&sessionID, &sessionIDMismatch, &resumedFromRunID, &pid, &host, &heartbeatAtStr, &startedAtStr, &endedAtStr,
+		&nullString{&sessionID}, &sessionIDMismatch, &resumedFromRunID, &pid, &host, &heartbeatAtStr, &startedAtStr, &endedAtStr,
 		&nullString{&result}, &rateLimited, &maxBudgetUSD, &budgetBucketStr, &costUSD, &nullString{&costSourceStr}, &reportedTotalCostUSD,
-		&output, &errStr,
+		&output, &errStr, &slotID, &nullString{&deciderStr}, &deciderRow, &nullString{&repo},
 	); err != nil {
 		return nil, err
 	}
@@ -263,8 +309,7 @@ func scanRunRow(row interface{ Scan(dest ...any) error }) (*runRow, error) {
 		ID:                formatRunID(id),
 		Kind:              runKind(kind),
 		Judgment:          judgmentPoint(judgment),
-		ChallengeID:       formatChallengeID(challengeID),
-		ChallengeVersion:  challengeVersion,
+		ChallengeVersion:  challengeVersion.Int64,
 		SessionID:         sessionID,
 		SessionIDMismatch: sessionIDMismatch,
 		PID:               pid,
@@ -279,6 +324,19 @@ func scanRunRow(row interface{ Scan(dest ...any) error }) (*runRow, error) {
 		CostSource:        costSource(costSourceStr),
 		Output:            output.String,
 		Error:             errStr.String,
+		Decider:           decider(deciderStr),
+		Repo:              repo,
+	}
+	if challengeID.Valid {
+		r.ChallengeID = formatChallengeID(challengeID.Int64)
+	}
+	if slotID.Valid {
+		v := formatSlotID(slotID.Int64)
+		r.SlotID = &v
+	}
+	if deciderRow.Valid {
+		v := deciderRow.Int64
+		r.DeciderRow = &v
 	}
 	if cycleID.Valid {
 		v := formatCycleID(cycleID.Int64)
@@ -334,6 +392,12 @@ type insertRunInput struct {
 	StartedAt        time.Time
 	MaxBudgetUSD     int64
 	BudgetBucket     budgetBucket
+	// 0005 で足した入力。SlotID は slot の内部整数 ID。Decider と DeciderRow は
+	// 両方指定するか両方省略する（DeciderRow は 1〜5）。Repo は predict で必須。
+	SlotID     *int64
+	Decider    decider
+	DeciderRow *int64
+	Repo       string
 }
 
 func (in insertRunInput) valid() bool {
@@ -349,8 +413,29 @@ func (in insertRunInput) valid() bool {
 		if in.Judgment != "" {
 			return false
 		}
+	case runKindPredict:
+		// predict は課題・計画・セッションに結び付かない。repo が必須。
+		if in.Judgment != "" || in.ChallengeVersion != 0 || in.PlanVersion != nil ||
+			in.SessionID != "" || in.ResumedFromRunID != nil || in.Repo == "" || in.BudgetBucket != budgetBucketPredict {
+			return false
+		}
 	}
-	if in.ChallengeVersion <= 0 || in.SessionID == "" || in.PID <= 0 || in.Host == "" {
+	if in.Kind != runKindPredict && (in.ChallengeVersion <= 0 || in.SessionID == "") {
+		return false
+	}
+	if in.Kind != runKindPredict && in.BudgetBucket == budgetBucketPredict {
+		return false
+	}
+	if (in.Decider == "") != (in.DeciderRow == nil) {
+		return false
+	}
+	if in.Decider != "" && (!in.Decider.valid() || *in.DeciderRow < 1 || *in.DeciderRow > 5) {
+		return false
+	}
+	if in.SlotID != nil && *in.SlotID <= 0 {
+		return false
+	}
+	if in.PID <= 0 || in.Host == "" {
 		return false
 	}
 	if in.HeartbeatAt.IsZero() || in.StartedAt.IsZero() {
@@ -369,23 +454,47 @@ func (in insertRunInput) valid() bool {
 //   - 入力が閉集合の外・必須値の欠落なら ErrValidation
 //   - 課題に既に終了していない run があれば errActiveRunExists
 //     （部分一意索引 idx_run_active_challenge の違反を翻訳する。AC-168）
+//
+// predict の run は課題に結び付かないため challengeID は 0 を渡す（NULL で
+// 挿入する）。それ以外の run に 0 以下を渡すと ErrValidation。
+//
+// slot_id を指定し、そのスロットに終了していない run が既にあれば
+// errActiveSlotRunExists（部分一意索引 idx_run_active_slot。AC-280）。
 func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunInput) (*runRow, error) {
 	if !in.valid() {
 		return nil, ErrValidation
+	}
+	if (in.Kind == runKindPredict) != (challengeID == 0) || challengeID < 0 {
+		return nil, ErrValidation
+	}
+	var challengeIDCol, challengeVersionCol, sessionIDCol any
+	if in.Kind != runKindPredict {
+		challengeIDCol, challengeVersionCol, sessionIDCol = challengeID, in.ChallengeVersion, in.SessionID
 	}
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO run (cycle_id, kind, judgment, challenge_id, challenge_version, plan_version,
 			session_id, session_id_mismatch, resumed_from_run_id, pid, host, heartbeat_at, started_at,
 			ended_at, result, rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source,
-			reported_total_cost_usd, output, error)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL)`,
-		int64PtrColumn(in.CycleID), string(in.Kind), nullableTextColumn(string(in.Judgment)), challengeID,
-		in.ChallengeVersion, int64PtrColumn(in.PlanVersion), in.SessionID, int64PtrColumn(in.ResumedFromRunID),
+			reported_total_cost_usd, output, error, slot_id, decider, decider_row, repo)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?)`,
+		int64PtrColumn(in.CycleID), string(in.Kind), nullableTextColumn(string(in.Judgment)), challengeIDCol,
+		challengeVersionCol, int64PtrColumn(in.PlanVersion), sessionIDCol, int64PtrColumn(in.ResumedFromRunID),
 		in.PID, in.Host, formatTimestamp(in.HeartbeatAt), formatTimestamp(in.StartedAt),
 		in.MaxBudgetUSD, string(in.BudgetBucket),
+		int64PtrColumn(in.SlotID), nullableTextColumn(string(in.Decider)), int64PtrColumn(in.DeciderRow),
+		nullableTextColumn(in.Repo),
 	)
 	if store.IsUniqueViolation(err) {
+		// 部分一意索引のどちらに当たったかは、スロットを指定していて、その
+		// スロットに終了していない run があるかで判別する。
+		if in.SlotID != nil {
+			var n int
+			if qerr := tx.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM run WHERE slot_id = ? AND result IS NULL`, *in.SlotID).Scan(&n); qerr == nil && n > 0 {
+				return nil, errActiveSlotRunExists
+			}
+		}
 		return nil, errActiveRunExists
 	}
 	if err != nil {
@@ -456,6 +565,20 @@ func (in updateRunEndInput) valid() bool {
 func updateRunEnd(ctx context.Context, tx *sql.Tx, id int64, in updateRunEndInput) (*runRow, error) {
 	if !in.valid() {
 		return nil, ErrValidation
+	}
+	var kind string
+	if err := tx.QueryRowContext(ctx, `SELECT kind FROM run WHERE id = ?`, id).Scan(&kind); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if runKind(kind) == runKindPredict {
+		// predict の result は 6 値、cost_source は reported か unknown
+		// （delta は使わない）。
+		if !predictRunResultValid(in.Result) || in.CostSource == costSourceDelta {
+			return nil, ErrValidation
+		}
 	}
 	res, err := tx.ExecContext(ctx,
 		`UPDATE run SET ended_at = ?, result = ?, rate_limited = ?, cost_usd = ?, cost_source = ?,

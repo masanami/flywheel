@@ -512,7 +512,7 @@ func TestOpen_AppliesSourceBindingMigrationAndReachesVersion2(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	if got, want := userVersion(t, db), 4; got != want {
+	if got, want := userVersion(t, db), 5; got != want {
 		t.Fatalf("user_version = %d, want %d", got, want)
 	}
 	if !tableExists(t, db, "source_binding") {
