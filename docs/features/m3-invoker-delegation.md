@@ -29,7 +29,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 ## 機能要件
 
-用語: **判断点**＝設計書 §7 の J1〜J5。**判断の呼び出し**＝1 つの判断点のための `claude -p` の 1 回の起動。　**委譲**＝接続ツールの宣言に従って、実作業を子セッション（`claude -p`、または `cli` 形態の接続ツール）へ渡すこと。**子**＝委譲先のセッション。　**run**＝判断の呼び出し 1 回、または委譲の起動 1 回（`--resume` による再開も 1 回と数える）の実行記録（設計書 §6 の `run`）。**終了していない run** が「実行中」。　**周**＝`flywheel cycle` の 1 回の実行、または `--auto` つきの個別の操作・`flywheel run` の 1 回の実行（予算の周の上限を評価する単位。§予算ガード）。`--auto` つきの個別の操作・`flywheel run` の 1 回の実行も `cycle` 表に 1 行を作り（`trigger` はその操作名。例: `classify --auto`）、`flywheel cycle` とは異なりサイクルの排他ロックは取らない【決定 2026-09-28 親】（#83・§サイクルの排他）。　**宣言**＝`.flywheel/connectors.json`（接続ツール・対象リポジトリ・人間へ上げる問いの種類）と `.flywheel/agent.json`（ポジション定義の置き場・予算・上限値）。　**スロット**＝委譲の子が作業する作業ツリー（設計書 §11）。　**照合**＝子の報告に依らず、外部の実状態（リモートのブランチ・PR・CI）とスロットのローカルの状態を読み取りで確かめること。　**偽の `claude`**＝テストで PATH の先頭に置く、引数と標準入力を記録して固定の応答を返す実行ファイル（M2 の偽の `gh` と同じ方式）。
+用語: **判断点**＝設計書 §7 の J1〜J5。**判断の呼び出し**＝1 つの判断点のための `claude -p` の 1 回の起動。　**委譲**＝接続ツールの宣言に従って、実作業を子セッション（`claude -p`、または `cli` 形態の接続ツール）へ渡すこと。**子**＝委譲先のセッション。　**run**＝判断の呼び出し 1 回、委譲の起動 1 回（`--resume` による再開も 1 回と数える）、または衝突の予測の口の呼び出し 1 回（S2）の実行記録（設計書 §6 の `run`）。**終了していない run** が「実行中」。　**周**＝`flywheel cycle` の 1 回の実行、または `--auto` つきの個別の操作・`flywheel run` の 1 回の実行（予算の周の上限を評価する単位。§予算ガード）。`--auto` つきの個別の操作・`flywheel run` の 1 回の実行も `cycle` 表に 1 行を作り（`trigger` はその操作名。例: `classify --auto`）、`flywheel cycle` とは異なりサイクルの排他ロックは取らない【決定 2026-09-28 親】（#83・§サイクルの排他）。　**宣言**＝`.flywheel/connectors.json`（接続ツール・対象リポジトリ・人間へ上げる問いの種類）と `.flywheel/agent.json`（ポジション定義の置き場・予算・上限値）。　**スロット**＝委譲の子が作業する作業ツリー（設計書 §11）。　**照合**＝子の報告に依らず、外部の実状態（リモートのブランチ・PR・CI）とスロットのローカルの状態を読み取りで確かめること。　**偽の `claude`**＝テストで PATH の先頭に置く、引数と標準入力を記録して固定の応答を返す実行ファイル（M2 の偽の `gh` と同じ方式）。
 
 各要件の末尾の `[S1]`〜`[S4]` は、その要件を実装するスライスを表す（§スライス）。
 
@@ -214,7 +214,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 原因の run の `session_id` が無い保留（人間が `hold` で作ったもの・J1・J2・J5 が作ったもの）から戻った課題の委譲は、新しいセッションで始める
 - [ ] 回答を渡す再開は、スロットの空きがあれば、保留の前と同じスロットでなくてよい。再開のブリーフに報告のブランチ名を書き、子にそのブランチから続けさせる【決定 2026-09-28 親 M3P16】
 - [ ] 子の最後の報告のブランチがリモートに無い（push されていない）とき、元のスロットが空いていればそのスロットを使い、空いていなければ再開を起動しない【決定 2026-09-28 親 M3P16】
-- [ ] プロバイダ `worktree` のリポジトリでの再開は、上の 2 項目より優先し、元のスロットの状態が `idle`（§クリティカル設計決定 1 の `slot.state`）ならそのスロットを使い、そうでなければ再開を起動せず `not_started` に理由 `slot_unavailable` で示す（元の作業ツリーがそのブランチを checkout したままだと、git は同じブランチを別の作業ツリーで checkout させないため。【決定 2026-10-01 親 M3P30】）[S2]
+- [ ] プロバイダ `worktree` のリポジトリでの再開は、上の 2 項目より優先し、元のスロットの状態が `idle`（§クリティカル設計決定 1 の `slot.state`）ならそのスロットを使う。元のスロットが `busy` なら、§実行スロットの枠待ちと同じく同じ周の中で空くのを待ち、`needs_attention` なら待たずに再開を起動せず `not_started` に理由 `slot_unavailable` で示す（元の作業ツリーがそのブランチを checkout したままだと、git は同じブランチを別の作業ツリーで checkout させないため。【決定 2026-10-01 親 M3P30】）[S2]
 
 ### 失敗・差し戻しの上限 [S2]
 
@@ -266,9 +266,9 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 ビルド成果物・`node_modules`・ポートの衝突は、S2 では flywheel が手当てしない（§やらないこと）。衝突するリポジトリは、宣言でプロバイダを `clone` にするか `count` を 1 にして避ける。隔離が要るものは S4 の `container`。
 
-#### 同じリポジトリの並列と直列化グループ【決定 2026-10-01 オーナー M3H8】
+#### 同じリポジトリの並列と直列化グループ【決定 2026-10-01 オーナー M3H8／親 M3P25・M3P27・M3P28】
 
-同じリポジトリへ同時に複数の委譲を起動してよいかは、操作ごとの固定の宣言では決めない。委譲の段の実行計画（起動の前）で、そのリポジトリの接続ツールの宣言にある衝突の予測の口（claude-harness の `harness predict-conflicts`＝claude-harness#288）を問い、その結果から core が組ごとに直列化グループを作る。予測の口は予測だけを返し、並列にするか・どの順で入れるかは core が決める。用語: **委譲の候補**＝その周の委譲の段の対象になった課題（§J3 の対象の条件を満たすもの）のうち、スロット・予算による除外の前のもの。**予測できる候補**＝委譲の候補のうち取り込み元の対応があり Issue 番号を渡せるもの。
+同じリポジトリへ同時に複数の委譲を起動してよいかは、操作ごとの固定の宣言では決めない。委譲の段の実行計画（起動の前）で、そのリポジトリの接続ツールの宣言にある衝突の予測の口（claude-harness の `harness predict-conflicts`＝claude-harness#288）を問い、その結果から core が組ごとに直列化グループを作る。予測の口は予測だけを返し、並列にするか・どの順で入れるかは core が決める。用語: **委譲の候補**＝その周の委譲の段の対象になった課題（§J3 の対象の条件を満たすもの）のうち、スロット・予算による除外の前のもの。**予測できる候補**＝委譲の候補のうち取り込み元の対応があり Issue 番号を渡せるもの。個別の操作 `flywheel run`（ID の指定の有無を問わない）も、`cycle` の委譲の段と同じ core の処理（予測と直列化グループ）を通る（§一括の操作「各段は、個別の操作と同じ core の処理を呼ぶ」）。
 
 - [ ] 予測の口に渡す Issue は、そのリポジトリで、その周より前から終了していない委譲の run を持つ課題のうち Issue 番号を渡せるもの（以下「実行中の課題」）を先に、続けて予測できる候補を優先度（`P0`→`P1`→`P2`→未設定）・ID の昇順に並べたものとする [S2]
 - [ ] 渡す Issue が 2 件以上 20 件以下で、予測できる候補が 1 件以上あるときだけ、そのリポジトリについて予測の口を 1 回呼ぶ（口の受け付ける件数が 2〜20 件のため）【仮定】[S2]
@@ -276,8 +276,8 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 予測で共有ファイルを持つ組の課題は同じ直列化グループに入る。グループは組の連結成分とする（A と B、B と C がそれぞれ共有ファイルを持てば、A・B・C が 1 つのグループになる）[S2]
 - [ ] `merge_friendly` か `ignored` の印の付いた共有ファイルだけを持つ組は、その組を理由に同じグループに入れない（【決定 2026-10-01 親 M3P26】）[S2]
 - [ ] 予測が判断できない組（`status` が `unknown`）の 2 つの課題は、同じ直列化グループに入る [S2]
-- [ ] 予測できない候補・予測の `status` が `predicted` でない課題（`failed`・`budget_exhausted`）が 1 件でもあれば、そのリポジトリの委譲の候補はすべて 1 つの直列化グループに入る（fail-closed）[S2]
-- [ ] 予測の口の呼び出し全体が失敗したとき（`command` を起動できない・時間の上限を超えた・終了コードが 0 でない・標準出力が JSON として読めない・出力の `schema` が宣言と違う・出力の `error` が `null` でない）は、そのリポジトリの委譲の候補はすべて 1 つの直列化グループに入る [S2]
+- [ ] 予測できない候補・予測の `status` が `predicted` でない課題（`failed`・`budget_exhausted`）・その周より前から終了していない委譲の run を持つが Issue 番号を渡せない課題が 1 件でもあれば、そのリポジトリの委譲の候補はすべて 1 つの直列化グループに入る（fail-closed）[S2]
+- [ ] 予測の口の呼び出し全体が失敗したとき（`command` を起動できない・時間の上限を超えた・終了コードが 0 でない・標準出力が JSON として読めない・出力の `schema` が宣言と違う・出力の `error` が `null` でない）は、そのリポジトリの委譲の候補はすべて 1 つの直列化グループに入る。出力の `complete` が `false` でも `error` が `null` なら、呼び出し全体の失敗とせず、`issues[].status`・`pairs[].status` の規則に従う [S2]
 - [ ] 接続ツールに衝突の予測の口の宣言が無いリポジトリの委譲の候補は、すべて 1 つの直列化グループに入る [S2]
 - [ ] 周の上限のため予測の口を呼べなかったリポジトリの委譲の候補は、すべて 1 つの直列化グループに入る（委譲は止めず、直列で起動する）[S2]
 - [ ] 予測の `dependency.first` が `null` でない組の課題は、共有ファイルが無くても同じ直列化グループに入る（【決定 2026-10-01 親 M3P32】）[S2]
@@ -285,10 +285,12 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 直列化グループの中で、辺で順が決まらない課題どうしは、優先度・ID の昇順に起動する [S2]
 - [ ] 辺が循環する直列化グループは、そのグループの辺をすべて無視し、優先度・ID の昇順に起動する [S2]
 - [ ] 1 つの直列化グループの中では、前の課題の委譲の run が終わってから次の課題の委譲を起動する。前の run の結果（失敗・保留を含む）は次の起動の条件にしない（枠超過は §枠超過に従う。【決定 2026-10-01 親 M3P34】）[S2]
-- [ ] 同時の起動の上限・空きスロットのためにすぐ起動できない候補は、同じ周の中で枠が空いてから起動する。複数のグループが待っているときは、グループの先頭の課題の優先度・ID の昇順に起動する（【決定 2026-10-01 親 M3P33】）[S2]
+- [ ] 同時の起動の上限・空きスロットのためにすぐ起動できない候補は、同じ周の中で枠が空いてから起動する。待つのは、その枠を占めている終了していない run が 1 件以上ある間だけとする。複数のグループが待っているときは、グループの先頭の課題の優先度・ID の昇順に起動する（【決定 2026-10-01 親 M3P33】）[S2]
 - [ ] 異なる直列化グループの委譲は同時に実行される（グループ 2 つ・空きスロット 2 本以上・`max_parallel_runs` 2 以上のとき、2 つの委譲が同時に終了していない run になる）[S2]
 - [ ] 周の中で同時に終了していない委譲の run の数は、全リポジトリの合計で `.flywheel/agent.json` の `max_parallel_runs`（既定 2）を超えない [S2]
-- [ ] 1 つのリポジトリで同時に終了していない委譲の run の数は、そのリポジトリの使えるスロット（`needs_attention` でないもの）の数を超えない [S2]
+- [ ] 1 つのリポジトリで同時に終了していない委譲の run の数は、そのリポジトリの使えるスロット（`needs_attention` でないもの。未払い出しの `worktree` のスロットを含む）の数を超えない [S2]
+- [ ] 使えるスロットが 1 本も無いリポジトリの委譲の候補、または待っている枠を占める終了していない run が無くなっても起動できない候補は、待たずに `not_started` に理由 `slot_unavailable` で示す [S2]
+- [ ] 枠が空いた時点で周の上限のため起動できない候補は、`not_started` に理由 `cycle_budget` で示し、実装枠の残りのため起動できない候補は理由 `run_budget` で示す [S2]
 - [ ] 実行中の課題と同じ直列化グループに入った委譲の候補は、その周では起動せず、`not_started` に理由 `serialized` で示す（【決定 2026-10-01 親 M3P31】）[S2]
 - [ ] 実行中の課題があるリポジトリで、上の fail-closed の規則により委譲の候補がすべて 1 つのグループに入ったときは、実行中の課題もそのグループに含まれるものとし、候補はすべて `serialized` になる [S2]
 - [ ] `cycle --json` の委譲の段は、直列化グループを `serial_groups` に示す（形・理由の閉集合・規則と理由の対応は §IF / API）[S2]
@@ -316,8 +318,8 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 予算を使い切った課題の予算を増やすのは、人間の本人確認つきの操作 `flywheel budget <C-ID> --impl-usd <額> [--review-usd <額>]` だけである。成立すると、承認の種類 `budget` の記録を残し、その計画の版の枠を指定した額へ置き換える【決定 2026-09-28 オーナー M3H3】[S2]
 - [ ] 衝突の予測の口に渡す上限額（`--max-budget-usd`）は、渡す Issue の件数 × `.flywheel/agent.json` の `conflict_prediction_budget_usd`（1 件あたり。既定 1 USD）とする（【決定 2026-10-01 親 M3P29】）[S2]
 - [ ] 衝突の予測の口の呼び出しの前に、周の既消費額 ＋ 予約額 ＋ 口に渡す上限額 ＞ 周の上限額なら、呼ばない（呼べなかったリポジトリの扱いは §実行スロット）[S2]
-- [ ] 衝突の予測の口の出力に `cost_usd` があれば、その額を周の既消費額に数える [S2]
-- [ ] 衝突の予測の口の出力に `cost_usd` が無い、または呼び出し全体が失敗したときは、渡した上限額を周の既消費額に数える（fail-closed）[S2]
+- [ ] 衝突の予測の口の出力が JSON として読め、`schema` が宣言と一致し、`cost_usd` が 0 以上の数で、`unknown_cost_count` が 0 なら、`cost_usd` の額を周の既消費額に数える（呼び出し全体の成否を問わない）[S2]
+- [ ] 上の条件を満たさない衝突の予測の口の呼び出し（`cost_usd` が無い・数でない・負・`unknown_cost_count` が 0 より大きい・出力を読めない）は、渡した上限額を周の既消費額に数える（fail-closed）[S2]
 - [ ] 同時に起動した委譲の上限額は、それぞれ予約額として周の上限の評価に含める（並列の本数が増えても評価式は変えない＝flywheel#73 論点 7）[S2]
 - [ ] レビュー対応の委譲（PR のレビューへの対応）は、レビュー対応枠の残りを `--max-budget-usd` に渡す [S3]
 
@@ -438,7 +440,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
     - `run` に `slot_id`・`decider`（`human | parent | child`）・`decider_row`（1〜5）。
     - `run_artifact`: `run_id`・`kind`（`branch | pr | commit`）・`ref`・`state`（PR は `open | closed | merged`）・`base`・`verified_at`。
     - `task_plan` の実装枠・レビュー対応枠の額の上書き（`flywheel budget`）を記録する列、または表（実装で決めてよい）。
-    - 衝突の予測の呼び出しの記録（周・リポジトリ・費用・結果の保存先）。`run.kind` の `predict` として持つ（課題に属さない run。`challenge_id` は NULL）【決定 2026-10-01 オーナー M3H10】。
+    - 衝突の予測の呼び出しの記録【決定 2026-10-01 オーナー M3H10】: `run.kind` に `predict`、`budget_bucket` に `predict` を足し、`run` に `repo`（NULL 可。`predict` の run では必須）を足す。`predict` の run は `challenge_id`・`challenge_version`・`plan_version`・`session_id` を NULL とし、`pid`・`host`・`heartbeat_at` は他の run と同じく持つ（中断の回収を共有する）。`result` は `succeeded | launch_failed | timed_out | malformed | errored | interrupted` のいずれかで、`errored` は §実行スロットの「呼び出し全体の失敗」のうち起動・時間・解釈の失敗以外のものを表す（§結果の判別の表は `claude` の出力の判別なので適用しない）。費用は §予算ガードの衝突の予測の 2 項目に従い、`cost_source` は `cost_usd` を数えたら `reported`、渡した上限額を数えたら `unknown`（§費用の記録の `delta` は適用しない）。出力の JSON は `.flywheel/runs/<run の ID>/` に保存する。
   - 金額は USD の 100 万分の 1 を単位とする整数で持つ（和の誤差を避ける）【仮定】。JSON 出力では USD の数値に戻す。
   - `run`・`cycle`・`lock`・`slot` の書き込みは作業ログ（`activity`）に載せない（それ自体が実行の記録である）。課題・計画・保留・承認・不可逆操作の変更は M1 どおり作業ログに載せ、原因の run があれば `run_id` を持つ【決定 2026-09-28 親 M3P11】。
 - **理由**: 設計書 §6 の `run`・`cycle`・`slot`・`lock` を、M1 H1（使う段階で足す）どおり S1・S2 に分けて足す。`run` を判断の呼び出しと委譲で 1 つの表にすると、周の予約額・既消費額・課題ごとの排他を 1 つの問い合わせで評価できる。`challenge_version` を持てば、J1 の `not_mine` の除外（版が変われば再び対象）を別の列なしに導ける。
@@ -465,7 +467,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 - **採用案**:
   - 宣言（`.flywheel/connectors.json`）は、接続ツールごとに形態（`plugin | brief | cli`）・権限モード・操作の一覧を、エージェント全体で人間へ上げる問いの種類を、リポジトリごとに使う接続ツールとスロットを持つ（形は §IF / API）。
-  - 操作は、id・起動形（`plugin` はスキルの呼び出しの文字列、`cli` は引数の配列）・対話前提か・対話相手（`human | parent`）・子に決定を委ねてよいか・成果物の種類（`pr | branch | none`）・束ね（S3）を持つ。スロットの払い出し主体（`slot_owner`）を持たせるかは S2・S3 の分解のときに決める。操作ごとの「並列してよいか」（`parallel_safe`）は持たない（同じリポジトリの並列は §クリティカル設計決定 7 の予測で決める）【決定 2026-10-01 オーナー M3H8】。
+  - 操作は、id・起動形（`plugin` はスキルの呼び出しの文字列、`cli` は引数の配列）・対話前提か・対話相手（`human | parent`）・子に決定を委ねてよいか・成果物の種類（`pr | branch | none`）・束ね（S3）を持つ。スロットの払い出し主体（`slot_owner`）を持たせるかは S2・S3 の分解のときに決める。操作ごとの「並列してよいか」（`parallel_safe`）は持たない（同じリポジトリの並列は §クリティカル設計決定 7 の予測で決める）【決定 2026-10-01 オーナー M3H8／親 M3P27】。
   - 接続ツールは、衝突の予測の口（引数の配列と出力の形の版）を持てる（S2。§クリティカル設計決定 7）。
   - **`cli` 形態の契約は flywheel が定め、接続ツールが合わせる**。flywheel は `start`・`status`・`resume`・`cancel` の 4 つのコマンドを宣言の引数の配列（シェルを介さない。差し込みは閉集合）で呼び、`start`・`status`・`resume` の標準出力に次の JSON（契約の版 1）を求める: `{"contract_version": 1, "run_id", "state": "running|waiting|succeeded|failed|cancelled", "summary", "requested_action": null | {"kind": "answer|approve|observe", "decider": "human|parent|any", "text"}, "artifacts": [{"kind": "pr|branch|commit|other", "ref"}], "cost_usd": number|null}`。終了コードは「JSON を出力できたか」だけを表し（0 = 出力した）、待機・成功・失敗は `state` で表す。`decider` が `human` の `answer`・`approve` は flywheel が回答せず、人間対応待ちにして接続ツール側の承認経路（harness の `approve`・TTY）を案内する。接続ツール内部の手順・判断値は持ち込まない（設計書 §10）。
   - `cli` 形態の委譲は S4 で実装する。S1〜S3 では宣言の検証だけを行う。
@@ -520,7 +522,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 - **採用案**:
   - `worktree` のスロットを S2 に置き、同じリポジトリに複数のスロットを払い出す。払い出しは直列、使用は並列。1 スロット 1 セッションは残す。
-  - 同じリポジトリで並列にしてよいかは、委譲の段の実行計画で接続ツールの衝突の予測の口（claude-harness `harness predict-conflicts`・出力の形 `harness.conflict-prediction/v1`・claude-harness#288／PR #290）を問い、その結果から core が組ごとの直列化グループを作って決める。接続ツールは予測だけを返し、決定（並列にするか・順序）は flywheel が持つ。操作単位の `parallel_safe`（M3P20）は採らない。
+  - 同じリポジトリで並列にしてよいかは、委譲の段の実行計画で接続ツールの衝突の予測の口（claude-harness `harness predict-conflicts`・出力の形 `harness.conflict-prediction/v1`・claude-harness#288／PR #290）を問い、その結果から core が組ごとの直列化グループを作って決める。接続ツールは予測だけを返し、決定（並列にするか・順序）は flywheel が持つ。操作単位の `parallel_safe`（旧 M3P20）は採らない（M3P27）。
   - 予測が得られない課題・判断できない組・予測の口の宣言が無いリポジトリ・周の上限で予測を問えなかったリポジトリは、直列にする（fail-closed）。
   - 予測の口は委譲ではない（run の開始・再開ではない）ので、接続契約 v1（§クリティカル設計決定 3）とは別の口として宣言する。
   - 予測の口の出力の形は、claude-harness の `harness.conflict-prediction/v1` を flywheel が読む形としてそのまま採る（宣言の `schema` の閉集合に置く。flywheel が別の形を定めて harness に合わせさせることはしない）【決定 2026-10-01 オーナー M3H9】。
@@ -530,7 +532,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
   - B: 操作の `parallel_safe` だけ並列にする（旧 M3P20）— 同じ操作の課題どうしの衝突を表せない。仕様の作成のように衝突しにくい工程でも、課題によっては同じ文書を触る。
   - C: 人間が依存・直列化グループを宣言する — 周ごとに人の手間がかかり、自走の律速が人に移る。
   - D: 衝突を許容し、マージの時点で気付く — 衝突した後のやり直しの費用が大きく、子の作業が無駄になる。
-- **影響範囲**: `.flywheel/connectors.json` の検証（`conflict_prediction`・`slots` の `worktree`）・`internal/core`（実行計画・直列化グループ・予算の評価）・`internal/adapters/git`（払い出しと `.git` のポインタの検査）・予測の口を起動する処理（パッケージの置き場は S2 の分解で決める【仮定】）・ストア（`slot.provider` の閉集合に `worktree`・予測の記録。§クリティカル設計決定 1 の拡張＝M3H10）。claude-harness 側の変更は無い（#290 で実装済み）。
+- **影響範囲**: `.flywheel/connectors.json` の検証（`conflict_prediction`・`slots` の `worktree`）・`internal/core`（実行計画・直列化グループ・予算の評価）・`internal/adapters/git`（払い出しと `.git` のポインタの検査）・予測の口を起動する処理（パッケージの置き場は S2 の分解で決める【仮定】。`internal/adapters/git` とあわせて、`CLAUDE.md` のモジュール構成の表と `internal/cli/depcheck_test.go` を S2 の実装チケットで更新する）・ストア（`slot.provider` の閉集合に `worktree`・予測の記録。§クリティカル設計決定 1 の拡張＝M3H10）。claude-harness 側の変更は無い（#290 で実装済み）。
 
 ## 機能全体の設計
 
@@ -602,9 +604,9 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - `interactive` を省略した操作は対話前提（`true`）として扱う。`counterpart` は `human | parent` の閉集合で、省略は `parent`。`child_may_decide` の省略は `false`。
 - `form: brief` の操作は `invocation` を持たない。`form: plugin` の操作は `invocation` を必須とする。
 - `form: cli` の接続ツールは `commands`（`start`・`status`・`resume`・`cancel` の引数の配列）と `contract_version`（`1` だけ）を必須とする（§クリティカル設計決定 3）。
-- S3 で操作に `bundle`（`{"max_parallel": <N>}`。束ねて受け取れる場合だけ）を足す。`slot_owner`（`flywheel | connector`）を足すかは S2・S3 の分解のときに決める【決定 2026-10-01 オーナー M3H8】。操作の `parallel_safe` は足さない（§クリティカル設計決定 7）。
+- S3 で操作に `bundle`（`{"max_parallel": <N>}`。束ねて受け取れる場合だけ）を足す。`slot_owner`（`flywheel | connector`）を足すかは S2・S3 の分解のときに決める【決定 2026-10-01 オーナー M3H8】。操作の `parallel_safe` は足さない（§クリティカル設計決定 7）【決定 2026-10-01 親 M3P27】。
 - `slots` は `provider` で形が分かれる（S2）。`clone` は `paths`（既存の作業用クローンの列挙。数がスロットの数）を、`worktree` は `base`（元のクローンのパス）と `count`（正の整数。スロットの数）を必須とする。どちらもワークスペースからの相対パスで、未知のキー・閉集合の外の `provider` は `config_invalid`。
-- S2 で接続ツールに `conflict_prediction`（`{"command": [<引数の配列>], "schema": "harness.conflict-prediction/v1"}`）を足す。flywheel は `command` の後ろに `--max-budget-usd <額>` と Issue 番号を別々の要素として足し、元のクローン（`worktree`）または最初の作業用クローン（`clone`）を作業ディレクトリにして、シェルを介さずに起動する。`command[0]` は PATH で解決する。時間の上限は `timeout_sec.judgment` とする【仮定】。予測は作業ディレクトリのチェックアウトの手元の HEAD に対するもので、flywheel は fetch しないため古いことがある（出力の `head_sha` を周の結果に残す）【仮定】。`schema` は閉集合（今は `harness.conflict-prediction/v1` だけ）【決定 2026-10-01 オーナー M3H9】。読むのは汎用のフィールド（`issues[].issue`・`issues[].status`・`pairs[].issues`・`pairs[].status`・`pairs[].shared_files[]`〔`path`・`merge_friendly`・`ignored`〕・`pairs[].dependency.first`・`cost_usd`）だけで、接続ツール内部の手順・判断値は持ち込まない（§クリティカル設計決定 7）。
+- S2 で接続ツールに `conflict_prediction`（`{"command": [<引数の配列>], "schema": "harness.conflict-prediction/v1"}`）を足す。flywheel は `command` の後ろに `--max-budget-usd <額>` と Issue 番号を別々の要素として足し、元のクローン（`worktree`）、または状態が `idle` の作業用クローンのうち `paths` の順で最初のもの（`clone`。`idle` のものが無ければ予測の口を呼ばず、呼び出し全体の失敗と同じ扱いにする）を作業ディレクトリにして、シェルを介さずに起動する。`command[0]` は PATH で解決する。時間の上限は `timeout_sec.judgment` とする【仮定】。予測は作業ディレクトリのチェックアウトの手元の HEAD に対するもので、flywheel は fetch しないため古いことがある（出力の `head_sha` を周の結果に残す）【仮定】。`schema` は閉集合（今は `harness.conflict-prediction/v1` だけ）【決定 2026-10-01 オーナー M3H9】。読むのは汎用のフィールド（`issues[].issue`・`issues[].status`・`pairs[].issues`・`pairs[].status`・`pairs[].shared_files[]`〔`path`・`merge_friendly`・`ignored`〕・`pairs[].dependency.first`〔先に入れるべき側の Issue 番号。片方向のときだけ値を持つ〕・`complete`・`error`・`head_sha`・`cost_usd`・`unknown_cost_count`）だけで、`issues[].status` は `predicted | failed | budget_exhausted`、`pairs[].status` は `predicted | unknown` の閉集合として読み（閉集合の外の値は呼び出し全体の失敗とする）、接続ツール内部の手順・判断値は持ち込まない（§クリティカル設計決定 7）。
 
 #### 現行の宣言からの写し方（`positions/<domain>.md` §5 → `connectors.json`）
 
@@ -663,7 +665,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - `phase` は `ingest | classify | plan | run | verify` の閉集合（S1 は前の 3 つ）。`ingest` の `result` は M2 の `ingest --json` と同じ形（`.flywheel/sources.json` が無ければ `skipped: true`・`result: null`）。`plan`・`run`・`verify` の段は `.flywheel/connectors.json` が無ければ `skipped: true`・`items: []`・`not_started: []`。どの段も `skipped` を持つ。
 - `items[].outcome` は判断点の判定（J1・J2・J5）か委譲の結末。`items[].status` は写した後の課題の状態（写さなかったら `null`）。
 - `not_started[].reason` は `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized` の閉集合（S1 は `cycle_budget | rate_limited | upstream_fetch_failed`。`serialized` は S2 で、【決定 2026-10-01 親 M3P31】）。
-- `run` の段（S2）は `serial_groups: [{"repo", "challenges": [<C-ID>…], "reasons": [<理由>…], "prediction_head_sha": string|null}]` を持つ。`challenges` は起動の順。`reasons` は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | running_run` の閉集合で、この定義順に重複なく並べる【仮定: キー名と理由の名前】。1 件だけのグループも載せ、その `reasons` は `[]`。`prediction_head_sha` は予測の口を呼んで `head_sha` を得たときだけ `null` でない。規則と理由の対応: 共有ファイルを持つ組→`shared_files`／`dependency.first` のある組→`dependency`／`unknown` の組→`unknown_pair`／取り込み元の対応が無い候補・20 件を超えて口を呼ばなかった→`not_predictable`／口の呼び出し全体の失敗・`issues[].status` が `failed`→`prediction_failed`／`issues[].status` が `budget_exhausted`・周の上限で口を呼べなかった→`prediction_budget`／口の宣言が無い→`no_prediction_declared`／実行中の課題を含む→`running_run`。
+- `run` の段（S2）は `serial_groups: [{"repo", "challenges": [<C-ID>…], "reasons": [<理由>…], "prediction_head_sha": string|null}]` を持つ。`challenges` は、実行中の課題を先頭に、続けて委譲の候補を起動の順に並べる。`reasons` は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | running_run` の閉集合で、この定義順に重複なく並べる【仮定: キー名と理由の名前】。1 件だけのグループも載せる。`reasons` は、そのグループが成立した規則に対応する理由の和集合であり、予測の結果だけで 1 件になったグループ（実行中の課題を含まず、fail-closed の規則にも当たらないもの。予測の口を呼ばなかった候補も含む）だけが `[]` になる。委譲の段が `skipped: true` なら `serial_groups` は `[]`。`prediction_head_sha` は予測の口を呼んで `head_sha` を得たときだけ `null` でない。規則と理由の対応: 共有ファイルを持つ組→`shared_files`／`dependency.first` のある組→`dependency`／`unknown` の組→`unknown_pair`／取り込み元の対応が無い候補・Issue 番号を渡せない実行中の課題・20 件を超えて口を呼ばなかった→`not_predictable`／口の呼び出し全体の失敗・`idle` の作業用クローンが無く口を呼べなかった・`issues[].status` が `failed`→`prediction_failed`／`issues[].status` が `budget_exhausted`・周の上限で口を呼べなかった→`prediction_budget`／口の宣言が無い→`no_prediction_declared`／実行中の課題を含む→`running_run`。
 - `--auto` の個別の操作と `run` の `--json` は、`cycle` の `phases` の 1 要素と同じ形を `{"phase": {…}}` で返す【仮定】。
 
 #### `status`・`show`・`runs` の拡張
@@ -737,7 +739,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 | スライス | 内容 | 触るファイル数（概算） | 出荷条件 |
 |---|---|---|---|
 | S1（最小） | invoker（`claude -p` の起動・結果の判別・費用の記録・枠超過・時間の上限・中断の回収）・宣言（`agent.json`・`connectors.json` の検証）・指示文の歯止め・J1 分類・J2 計画（上流の最新の取得・読んだ記録）・予算ガード（判断点の分と周の上限）・`flywheel cycle`（取り込み → 分類 → 計画）とサイクルの排他・`runs`・`status`／`show` の拡張・マイグレーション `0004`。**cron から `flywheel cycle` を呼ぶだけで、取り込んだ課題が計画承認待ちまで自走する** | 35-50 | これだけで価値が出る |
-| S2 | 委譲（意思決定の主体の判定・J3・`plugin`／`brief` 形態の起動・合流・照合・`release` の登録・承認なしの本番反映の検出）・保留と再開（子の問いはすべて人間へ）・失敗と差し戻しの上限・J5 検証（CI の待ち）・`clone` と `worktree` のスロット（1 リポジトリ 1 スロット以上）と同じリポジトリの並列（衝突の予測による直列化グループ）【決定 2026-10-01 オーナー M3H8】・予算の 2 枠と `flywheel budget`・`cycle` の委譲と検証の段・マイグレーション `0005`。**M3 の完了の目安「1 件の課題が、取り込みから完了確認待ちまで自走する」を満たす** | 45-65 | S1 がマージされてから |
+| S2 | 委譲（意思決定の主体の判定・J3・`plugin`／`brief` 形態の起動・合流・照合・`release` の登録・承認なしの本番反映の検出）・保留と再開（子の問いはすべて人間へ）・失敗と差し戻しの上限・J5 検証（CI の待ち）・`clone` と `worktree` のスロット（1 リポジトリ 1 スロット以上）と同じリポジトリの並列（衝突の予測による直列化グループ）【決定 2026-10-01 オーナー M3H8／親 M3P28】・予算の 2 枠と `flywheel budget`・`cycle` の委譲と検証の段・マイグレーション `0005`。**M3 の完了の目安「1 件の課題が、取り込みから完了確認待ちまで自走する」を満たす** | 45-65 | S1 がマージされてから |
 | S3 | J4（親として子の問いに答える）・レビュー対応の委譲とレビュー対応枠・束ねた委譲（`bundle`）。`slot_owner` を足すかは S2・S3 の分解のときに決める | 15-25 | S2 がマージされてから |
 | S4 | `cli` 形態の接続ツールの委譲（§クリティカル設計決定 3 の契約。claude-harness の runtime が契約に合わせた後）・`container` スロット | 15-25 | S2 がマージされ、`cli` 形態の接続ツールが契約の版 1 を出力できるようになってから |
 
@@ -1041,7 +1043,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 | M3P25 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | 予測を問う時点 | A: 委譲の段の実行計画（起動の直前）で、その周の候補について問う／B: J2 の計画のときに課題ごとに問い、計画に載せる | **A**。直列化グループは同時に走る候補の組で決まり、組は委譲の段まで分からない。B は計画の承認の時期が課題ごとにずれるため組を作れない |
 | M3P26 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | 共有ファイルのうち `merge_friendly`・`ignored` の印の付いたものの扱い | A: どちらも直列化の理由にしない（lockfile・生成物）／B: `ignored` だけ理由にしない／C: どちらも理由にする | **A**。`/para-impl` も lockfile を交差から除いてきた。マージの時に解ける衝突で並列を止めない |
 | M3P27 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | 操作の `parallel_safe` の扱い | A: 削る（予測だけで決める）／B: 「予測を問わずに並列してよい操作」の意味に狭めて残す | **A**。道が 1 つになり、固定のフラグが組ごとの衝突を見落とす問題（旧 M3P20）を持ち込まない。予測の費用は 1 件 1 USD（harness の既定）で、周の上限の評価を受ける |
-| M3P28 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | S2 の範囲に同じリポジトリの並列（予測と直列化グループ）まで入れるか | A: 入れる（`worktree` と一緒に S2）／B: S2 は `worktree` の払い出しだけとし、同じリポジトリでは直列、予測は S3 | **A**。M3H8 の「払い出しは直列・使用は並列」を S2 で満たすには並列の判定が要る。B は `worktree` を前倒しした効果（並列）が S3 まで出ない。S2 の触るファイル数の見込みは 45-65 に増える |
+| M3P28 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | S2 の範囲に同じリポジトリの並列（予測と直列化グループ）まで入れるか | A: 入れる（`worktree` と一緒に S2）／B: S2 は `worktree` の払い出しだけとし、同じリポジトリでは直列、予測は S3 | **A**。M3H8 の「払い出しは直列・使用は並列」を S2 で満たすには並列の判定が要る。B は `worktree` を前倒しした効果（並列）が S3 まで出ない。S2 の触るファイル数の見込みは 45-65 に増える。M3H8 の「払い出しは直列・使用は並列」を S2 で満たすための細部で、M3H8 の範囲内（M3H6 のスライスの境界は動かさない） |
 | M3P29 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | 予測の口に渡す上限額の出どころ | A: `agent.json` に `conflict_prediction_budget_usd`（1 件あたり・既定 1 USD）を足し、件数 × その値を渡す／B: `connectors[].conflict_prediction` に上限額を持たせる／C: 件数 × 1 USD の固定値 | **A**。予算の値は `agent.json` に集める方針（M3P1）に合う。既定は harness の既定（1 件 1 USD）とそろえる |
 | M3P30 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | `worktree` のスロットで、保留から回答を渡して再開するときのスロット | A: 元のスロットが空いていればそれを使い、空いていなければ再開を起動しない／B: スロットの解放時に flywheel が作業ツリーを分離した HEAD にし、別のスロットでも同じブランチを checkout できるようにする／C: 別のスロットでは子が別名の一時ブランチを切って続ける | **A**。git は同じブランチを 2 つの作業ツリーで checkout させない。B は flywheel が子の作業ツリーを書き換える（照合は読み取りだけの原則から外れる）。C は PR のブランチが分かれる。A は M3P16 の「空いたスロットで続ける」を `worktree` だけ狭めるが、待つのは元のスロットが別の課題に使われている間だけ |
 | M3P31 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | 同じリポジトリで、その周より前から終了していない委譲（個別の `flywheel run` など）がある場合 | A: その課題も予測に含め、同じグループになった候補はその周では起動せず `not_started`（理由 `serialized`）にする／B: そのリポジトリには、その周に新しい委譲を起動しない | **A**。B は個別の操作 1 つでそのリポジトリの並列が周まるごと止まる。A は `not_started` の理由の閉集合に `serialized` を足す |
@@ -1057,7 +1059,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - 子の出力の保存先は `.flywheel/runs/<run の ID>/`。
 - core の IF の名前（`Judge`・`Delegate` など）、出力スキーマ・JSON のフィールド名のうち本文で固定していないもの、偽の `claude` の作り方は実装で決めてよい。
 - `show` の `runs` は最大 20 件。
-- `worktree` のスロットは使い回し、払い出しは初回だけ。作業ツリーの置き場（ワークスペースの中の Git で追跡しない場所）は実装で決めてよい。
+- `worktree` のスロットは使い回し、払い出しは初回の割り当てのときだけ。`slot` の行は、委譲の段（または `run`）の開始時に宣言の `count` に足りない分を `idle`（未払い出し）として作る。払い出しに失敗した行は `needs_attention`。`count` を減らしても、使用中・払い出し済みの行は消さない。作業ツリーの置き場は `.flywheel/worktrees/<リポジトリ名>/<SL-ID>`（Git で追跡させない）とし、変えるなら実装で決めてよい。
 - 衝突の予測は、同じリポジトリの予測できる候補が 2 件以上のときだけ問う。
 - 予測の口の時間の上限は `timeout_sec.judgment`。予測は手元の HEAD に対するもの（fetch しない）。
 - `cycle --json` の `serial_groups` のキー名と理由の名前。
@@ -1075,6 +1077,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - **M2 の `mark-read` の core の API に、読んだ時点の値を渡す形を足す**（M3P14）。CLI の `mark-read`（ストアの観測値でそろえる）は変えない。
 - **M2 の取得の IF を広げる**: 上流のコメント・参照先の Issue・PR・CI の取得（すべて GET。M2 QH5 の書き戻さない方針は変わらない）。
 - **設計書 §6 の `run.kind` の `adhoc` は持たない**（§やらないこと）。
+- **設計書 §6 の `run.kind` に `predict` を足す**（衝突の予測の口の呼び出し。S2・M3H10）。
 - **設計書 §7 の操作表のコマンド名**（`classify [<id>]` など）は例示であり、本仕様では `--auto` の形にした（M3P23）。
 - `CLAUDE.md` の「M1・M2 で置くパッケージ」の表は、S1 の実装チケットで `internal/invoker`（S2 で `internal/adapters/git`）を足して更新する必要がある。
 - flywheel#73 の完了条件（設計書 §11・§17 への反映）は、2026-10-01 の M3H8 の反映と同じ PR で行った。
