@@ -375,7 +375,7 @@ core は接続ツールを知らない。エージェントごとの**宣言**�
 - worktree の `.git` は書き換え可能なポインタファイルである。外側から git を実行するときは `GIT_DIR` / `GIT_WORK_TREE` を明示し、割り当ての前にポインタを検査する（claude-harness#200 の実測）。
 - worktree は同一ファイルシステムのため、ビルド成果物・`node_modules`・ポートが衝突しうる。S2 では flywheel が手当てせず、そのリポジトリを `clone` か 1 本にする宣言で避ける。隔離が要るものは container（S4）。
 - **同じリポジトリで並列にしてよいかは、委譲の前に接続ツールの衝突の予測の口（claude-harness `harness predict-conflicts`・claude-harness#288）を問い、その予測から flywheel が組ごとの直列化グループを作って決める**。接続ツールは予測だけを返し、決定は flywheel が持つ。予測が得られないものは直列にする。
-- 接続ツールは flywheel が払い出した作業ツリーを受け取って使う（claude-harness の `harness run ticket` は渡された作業ツリーを `provided` として受け、消さない）。§10 の宣言で「スロットを接続ツールに任せる」選択肢（`slot_owner: connector`）を持つかは、M3 S2・S3 の分解時に決める。
+- 接続ツールは flywheel が払い出した作業ツリーを受け取って使う（claude-harness の `harness run ticket` は渡された作業ツリーを `provided` として受け、消さない）。§10 の宣言で「スロットを接続ツールに任せる」選択肢（`slot_owner: connector`）は M3 S2 では持たず、持つかは M3 S3 の分解時に決める（M3 仕様 M3P37）。
 
 ---
 

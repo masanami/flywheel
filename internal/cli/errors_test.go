@@ -267,7 +267,7 @@ func parseErrorCodeTable(t *testing.T, doc string) []codeExit {
 
 // m3S2OnlyErrorCodes は m3 の「エラーコードの追加」の表にあるが S2 で足すコード
 // （AC-162 の対象は S1 の 4 つだけ）。
-var m3S2OnlyErrorCodes = map[ErrorCode]bool{"slot_unavailable": true}
+var m3S2OnlyErrorCodes = map[ErrorCode]bool{"slot_unavailable": true, "serialized": true}
 
 // m1BaseErrorCodeCount は M1 の表のうち、M1 自身が定めた行数（`verification_rejected` まで。
 // その後ろの行は M2・M3 の実装チケットが同じ表へ足したもの）。

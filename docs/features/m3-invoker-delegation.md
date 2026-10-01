@@ -1,6 +1,6 @@
 # M3: invoker・判断点 J1〜J5・委譲・スロット・予算ガード
 
-- 状態: **draft（完了承認待ち）**。2026-10-01 に flywheel#73 の決定（M3H8。`worktree` の S2 への前倒し・衝突の予測による直列化グループ）を反映した。2026-09-28 に起草した。2026-09-28 時点の論点 31 件は同日にすべて案 A で決まった。2026-10-01 にオーナーの M3H8 を足し、それに伴う論点をオーナー（M3H9・M3H10）と親（M3P25〜M3P34）が同日に決めた（人間が決めた論点 M3H1〜M3H7 はオーナー、親が決めた論点 M3P1〜M3P24 は親。ほかにオーナーが Q5 と「Q4 は M3 の仕様で決める」を決めた。§決定事項の記録）
+- 状態: **draft（完了承認待ち）**。2026-10-01 に flywheel#73 の決定（M3H8。`worktree` の S2 への前倒し・衝突の予測による直列化グループ）を反映した。2026-09-28 に起草した。2026-09-28 時点の論点 31 件は同日にすべて案 A で決まった。2026-10-01 にオーナーの M3H8 を足し、それに伴う論点をオーナー（M3H9・M3H10）と親（M3P25〜M3P34）が同日に決めた。同日、S2 の分解の前にオーナーの M3H11 で S2 の受入基準（AC-181〜381）を足し、S2 の分解へ送っていた論点を親（M3P35〜M3P37）が決めた（人間が決めた論点 M3H1〜M3H7 はオーナー、親が決めた論点 M3P1〜M3P24 は親。ほかにオーナーが Q5 と「Q4 は M3 の仕様で決める」を決めた。§決定事項の記録）
 - 設計の正本: [docs/architecture.md](../architecture.md)（§7 サイクルの再設計・§8 invoker・§9 承認ゲート・§10 接続ツールとの契約・§11 実行環境・§16 Q4／Q5・§17 M3）
 - 前段: [M1 の機能仕様](m1-core.md)・[M2 の機能仕様](m2-github-issue-ingest.md)（**ここで【決定】済みの事項はすべて前提にし、再検討しない**。M1・M2 の表や集合を広げる箇所は「拡張」と明記し、§決定事項の記録「M1・M2 の仕様との関係（仕様への指摘）」に列挙した）
 - 経緯: [flywheel#75](https://github.com/masanami/flywheel/issues/75)・[flywheel#73](https://github.com/masanami/flywheel/issues/73)（スロットの前倒しの検討）・[claude-flywheel#99](https://github.com/masanami/claude-flywheel/issues/99)・[claude-harness#201](https://github.com/masanami/claude-harness/issues/201)（runtime 化）
@@ -188,7 +188,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 形態 `plugin` の操作では、ブリーフに操作の `invocation` を差し込みを埋めた形で含める（子はそのスキルを実行する）
 - [ ] 形態 `brief` の操作では、接続ツールのスキルを指定せず、ブリーフだけを渡す
 - [ ] 委譲の起動は、スロットの作業ツリーを作業ディレクトリとし、宣言の権限モードで、`claude -p` に委譲の報告のスキーマを `--json-schema` で渡して行う
-- [ ] 委譲の起動には、`flywheel` コマンドの Bash での実行を拒否する権限の指定（`--disallowedTools`）を必ず付ける（設計書 §9「invoker が起動する Claude セッションには承認コマンドの実行を deny する権限設定を渡す」）【決定 2026-09-28 オーナー M3H4】
+- [ ] 委譲の起動には、`flywheel` コマンドの Bash での実行を拒否する権限の指定（`--disallowedTools`）を必ず付ける（設計書 §9「invoker が起動する Claude セッションには承認コマンドの実行を deny する権限設定を渡す」）【決定 2026-09-28 オーナー M3H4】。指定は `Bash(flywheel:*)` とする【決定 2026-10-01 親 M3P46】。前方一致のため絶対パス・`cd <dir> && flywheel`・`env`・`sh -c` などですり抜けうる残余リスクは受け入れる（本人確認つきの操作は端末と経路の検査で別に拒否される）【決定 2026-10-01 オーナー M3H12】
 - [ ] 委譲の報告は、結末（`completed | questions | blocked`）・要約・ブランチ・PR の URL・コミット・品質ゲートの結果・置いた仮定・未検証事項・問いの一覧を持つ（形は §IF / API）
 - [ ] 報告の問いは、それぞれ種類（`requirements | critical_design | acceptance_criteria | safety_tradeoff | cross_repo | scope | product_policy | minor` と、宣言の人間へ上げる問いの種類の id の和集合）・本文・選択肢・推奨を持つ
 - [ ] 実装の委譲の `--max-budget-usd` は、その計画の版の実装枠の残りの額とする（§予算ガード）
@@ -201,7 +201,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 照合では、そのブランチを head とする PR（open・closed・merged のすべて）を `gh` で調べ、URL・状態・base のブランチを run の成果物として記録する
 - [ ] 照合の `gh` の呼び出しはすべて GET である（GitHub へ書き込まない）
 - [ ] スロットの作業ツリーに未コミットの変更が残っていたら、スロットを `needs_attention` にし、人が解除するまでそのスロットへ新しい委譲を割り当てない。flywheel はその変更を消さない（`reset`・`clean`・`checkout --` をしない）
-- [ ] 結果が `succeeded` で結末が `completed` の委譲で、操作の成果物の種類の宣言（`pr | branch | none`）の成果物が照合で確かめられたら、課題を検証中にする（M1 T7）
+- [ ] 結果が `succeeded` で結末が `completed` の委譲で、操作の成果物の種類の宣言（`pr | branch | none`）の成果物が照合で確かめられたら、課題を検証中にする（M1 T7）。`pr` は、報告のブランチ（無ければスロットの現在のブランチ）を head とする open の PR かマージ済みの PR が見つかれば確かめられたとし、未マージの closed の PR だけなら見つからないものとして次項に従う。既定ブランチへの承認なしのマージは、下の本番反映の検出を優先する。`none` は照合で確かめる成果物が無いので検証中にし、中身は J5 が判定する【決定 2026-10-01 親 M3P41】
 - [ ] 結果が `succeeded` で結末が `completed` なのに、宣言の成果物が照合で確かめられなければ、課題を人間対応待ちにし、問いに「子は完了を報告したが成果物が見つからない」ことと照合の結果を書く（M1 T11）
 - [ ] 照合で見つけた PR の base が、そのリポジトリの宣言の既定ブランチなら、課題に不可逆操作 `release`（要約は PR のタイトル、参照は PR の URL）を登録する。同じ PR の URL の `release` が既にあれば登録しない（M1 `op add`・D12）
 - [ ] 照合で見つけた PR が既定ブランチへマージ済みで、その PR の `release` が承認されていなければ、課題を人間対応待ちにし、問いに承認なしの本番反映を検出したことを書く【決定 2026-09-28 親 M3P15】
@@ -213,21 +213,22 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 保留への回答（M1 T12・本人確認つき）で着手中に戻った課題の次の委譲は、保留の原因の run の `session_id` へ `--resume` し、回答を固定の文面とともに渡す（新しいセッションで始めない）
 - [ ] 原因の run の `session_id` が無い保留（人間が `hold` で作ったもの・J1・J2・J5 が作ったもの）から戻った課題の委譲は、新しいセッションで始める
 - [ ] 回答を渡す再開は、スロットの空きがあれば、保留の前と同じスロットでなくてよい。再開のブリーフに報告のブランチ名を書き、子にそのブランチから続けさせる【決定 2026-09-28 親 M3P16】
-- [ ] 子の最後の報告のブランチがリモートに無い（push されていない）とき、元のスロットが空いていればそのスロットを使い、空いていなければ再開を起動しない【決定 2026-09-28 親 M3P16】
+- [ ] 子の最後の報告のブランチがリモートに無い（push されていない）とき、元のスロットが空いていればそのスロットを使い、空いていなければ再開を起動しない【決定 2026-09-28 親 M3P16】。起動しなかった課題は `not_started` に理由 `slot_unavailable` で示す【決定 2026-10-01 親 M3P38】
 - [ ] プロバイダ `worktree` のリポジトリでの再開は、上の 2 項目より優先し、元のスロットの状態が `idle`（§クリティカル設計決定 1 の `slot.state`）ならそのスロットを使う。元のスロットが `busy` なら、§実行スロットの枠待ちと同じく同じ周の中で空くのを待ち、`needs_attention` なら待たずに再開を起動せず `not_started` に理由 `slot_unavailable` で示す（元の作業ツリーがそのブランチを checkout したままだと、git は同じブランチを別の作業ツリーで checkout させないため。【決定 2026-10-01 親 M3P30】）[S2]
 
 ### 失敗・差し戻しの上限 [S2]
 
 - [ ] 結果が `errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` の委譲は、課題の状態を変えず、次の周で同じ `session_id` へ `--resume` して、固定の文面（中断の事実と、状態の報告を求める）で再開する
-- [ ] 同じ計画の版で、上の結果の委譲が連続して 2 回（`.flywheel/agent.json` の連続失敗の上限）に達した課題は、次の周で委譲を起動せず、人間対応待ちにする【決定 2026-09-28 親 M3P17】
-- [ ] 結果が `budget_exhausted` の委譲は、課題の状態を変えず、その計画の版の実装枠の残りを 0 以下として扱う（§予算ガード）
-- [ ] 同じ計画の版で J5 が `not_met` を返した回数が差し戻しの上限（既定 3）に達した課題は、次の周で委譲を起動せず、人間対応待ちにする【決定 2026-09-28 親 M3P17】
+- [ ] 結果が `launch_failed` の委譲は、課題の状態を変えず、次の周で失敗した起動と同じ形（新しいセッションの起動なら新しいセッション、`--resume` なら同じ宛先へ `--resume` し同じ入力を渡す）で起動し直す。`launch_failed` は下の連続失敗の数に数える【決定 2026-10-01 親 M3P40】
+- [ ] 同じ計画の版で、上の 2 項目の結果の委譲が連続して 2 回（`.flywheel/agent.json` の連続失敗の上限）に達した課題は、次の周で委譲を起動せず、人間対応待ちにする【決定 2026-09-28 親 M3P17】。上限を検出した周に、その課題を `not_started` に理由 `failure_limit` で示し、保留の問いに上限の種類と回数を書く。連続の数は、保留への回答の後の run から数え直す【決定 2026-10-01 親 M3P39】
+- [ ] 結果が `budget_exhausted` の委譲は、課題の状態を変えず、その計画の版の実装枠の残りを 0 以下として扱う（§予算ガード）。`flywheel budget` で増やした後の委譲は、その run の `session_id` へ `--resume` し、固定の文面（上限到達で中断した事実と、続行を求める）で再開する【決定 2026-10-01 親 M3P44】
+- [ ] 同じ計画の版で J5 が `not_met` を返した回数が差し戻しの上限（既定 3）に達した課題は、次の周で委譲を起動せず、人間対応待ちにする【決定 2026-09-28 親 M3P17】。上限を検出した周に、その課題を `not_started` に理由 `rework_limit` で示し、保留の問いに上限の種類と回数を書く。回数は、保留への回答の後の J5 から数え直す【決定 2026-10-01 親 M3P39】
 - [ ] J5 の `not_met` で着手中に戻った課題の次の委譲は、直前の委譲の `session_id` へ `--resume` し、J5 の指摘を渡す
 
 ### J5 検証 [S2]
 
 - [ ] J5 の対象にするのは、状態が検証中で、終了していない run を持たない課題に限る
-- [ ] J5 を起動する前に、直前の委譲の成果物の PR の CI（チェック）の状態を `gh` で調べ、1 つでも完了していなければ J5 を起動せず、`status` の `needs_human` とは別の「外部を待っているもの」に出す【決定 2026-09-28 親 M3P18】
+- [ ] J5 を起動する前に、直前の委譲の成果物の PR の CI（チェック）の状態を `gh` で調べ、1 つでも完了していなければ J5 を起動せず、`status` の `needs_human` とは別の「外部を待っているもの」に出す【決定 2026-09-28 親 M3P18】。その周の検証の段では `not_started` に理由 `waiting_external` で示す。直前の委譲の成果物に PR が無い課題（成果物の種類が `branch`・`none`）は、CI を調べずに J5 を起動し、入力に PR が無いことを書く【決定 2026-10-01 親 M3P42】
 - [ ] J5 の入力は、課題・承認済みの計画・完了条件（課題の完了条件が空なら、承認済みの計画の完了条件）・直前の委譲の報告と照合の結果・PR の状態と CI の結果・上流の最新の状態・保留の記録である【決定 2026-09-28 親 M3P19】
 - [ ] J5 の出力は、判定（`met | not_met | uncertain`）・理由・差し戻しの指摘・問いである
 - [ ] 判定が `not_met` の出力は差し戻しの指摘を、`uncertain` の出力は問いを必須とする
@@ -247,11 +248,11 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 2026-10-01 に flywheel#73 の決定（§決定事項の記録 M3H8）で改めた。やめるのは「リポジトリあたりスロット 1 本」の運用で、「1 スロット 1 セッション」（作業ツリー 1 本につき子 1 つ）は残す。複数の課題を並列に実行するのは flywheel の責務で、接続ツールは並列度・直列化・fan-out を持たない（claude-harness#201 のコメント・harness `docs/harness-runtime-design.md` §5.4）。
 
 - [ ] S2 のスロットのプロバイダは `clone` と `worktree` とし、リポジトリごとに宣言で選ぶ【決定 2026-10-01 オーナー M3H8】[S2]
-- [ ] プロバイダ `clone` のスロットは宣言に書いた既存の作業用クローンのパスであり、flywheel はクローンを作らない（無ければそのリポジトリへ委譲しない）[S2]
+- [ ] プロバイダ `clone` のスロットは宣言に書いた既存の作業用クローンのパスであり、flywheel はクローンを作らない（無ければそのリポジトリへ委譲しない。パスが無いスロットは割り当て前の検査の失敗として `needs_attention`〔理由はパスが無いこと〕にする【決定 2026-10-01 親 M3P45】）[S2]
 - [ ] 1 つのスロットに、同時に 1 つの委譲だけを割り当てる（1 スロット 1 セッション）[S2]
 - [ ] スロットの割り当てと解放は、ストアのトランザクションの中で行う（2 つのプロセスが同じスロットを取らない）[S2]
 - [ ] スロットは、委譲の run が終わった時点で解放する（子が問いを出して終わった後、回答を待つ間はスロットを保持しない＝#73 論点 6）[S2]
-- [ ] 委譲を割り当てる前に、スロットの作業ツリーに未コミットの変更が無いこと・宣言のリモートのクローンであることを確かめ、満たさなければ割り当てずにスロットを `needs_attention` にする [S2]
+- [ ] 委譲を割り当てる前に、スロットの作業ツリーに未コミットの変更が無いこと・宣言のリモートのクローンであることを確かめ、満たさなければ割り当てずにスロットを `needs_attention` にする。リモートの照合は、`origin` の URL（https・scp 形式・ssh。`.git` の有無を問わない）を `<owner>/<name>` に正規化し、大文字小文字を無視して宣言の `remote` と比べる（ネットワークを使わない）【決定 2026-10-01 親 M3P47】[S2]
 - [ ] `flywheel slot clear <スロットの ID>` は、`needs_attention` のスロットを使える状態に戻す（人が作業ツリーを確かめた後に使う。本人確認のない単発の操作）[S2]
 #### プロバイダ `worktree`（S2 に入れる手当て）【決定 2026-10-01 オーナー M3H8】
 
@@ -291,13 +292,13 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 1 つのリポジトリで同時に終了していない委譲の run の数は、そのリポジトリの使えるスロット（`needs_attention` でないもの。未払い出しの `worktree` のスロットを含む）の数を超えない [S2]
 - [ ] 使えるスロットが 1 本も無いリポジトリの委譲の候補、または待っている枠を占める終了していない run が無くなっても起動できない候補は、待たずに `not_started` に理由 `slot_unavailable` で示す [S2]
 - [ ] 枠が空いた時点で周の上限のため起動できない候補は、`not_started` に理由 `cycle_budget` で示し、実装枠の残りのため起動できない候補は理由 `run_budget` で示す [S2]
-- [ ] 実行中の課題と同じ直列化グループに入った委譲の候補は、その周では起動せず、`not_started` に理由 `serialized` で示す（【決定 2026-10-01 親 M3P31】）[S2]
+- [ ] 実行中の課題と同じ直列化グループに入った委譲の候補は、その周では起動せず、`not_started` に理由 `serialized` で示す（【決定 2026-10-01 親 M3P31】）。ID を指定した `flywheel run <C-ID>` では、委譲を起動せずエラーコード `serialized` で終わる【決定 2026-10-01 親 M3P43】[S2]
 - [ ] 実行中の課題があるリポジトリで、上の fail-closed の規則により委譲の候補がすべて 1 つのグループに入ったときは、実行中の課題もそのグループに含まれるものとし、候補はすべて `serialized` になる [S2]
 - [ ] `cycle --json` の委譲の段は、直列化グループを `serial_groups` に示す（形・理由の閉集合・規則と理由の対応は §IF / API）[S2]
 
 #### その他
 
-スロットの払い出し主体: 操作の宣言で、スロットを flywheel が払い出すか（`flywheel`）、接続ツールに任せるか（`connector`）を選べるようにするか（`slot_owner: connector` の要否）は、S2・S3 の分解のときに決める。claude-harness の `harness run ticket` は呼び出し元が渡した作業ツリーを `provided` として受けて消さないため、claude-harness には不要になる見込み（flywheel#73 の 2026-09-29 のコメント）【決定 2026-10-01 オーナー M3H8】。決まったら、検証できる要件としてここに書く。
+スロットの払い出し主体: 操作の宣言で、スロットを flywheel が払い出すか（`flywheel`）、接続ツールに任せるか（`connector`）を選べるようにするか（`slot_owner: connector` の要否）は、S3 の分解のときに `bundle` と合わせて決める。S2 では足さない（S2 のスロットは常に flywheel が払い出す）【決定 2026-10-01 親 M3P37】。claude-harness の `harness run ticket` は呼び出し元が渡した作業ツリーを `provided` として受けて消さないため、claude-harness には不要になる見込み（flywheel#73 の 2026-09-29 のコメント）【決定 2026-10-01 オーナー M3H8】。決まったら、検証できる要件としてここに書く。
 
 束ねた委譲（`bundle`・S3）は、接続ツールが 1 回の委譲で複数の課題を受け取る形に限る。並列度・直列化の決定は flywheel が持ち、束ねる課題の組と並列度は直列化グループの結果から渡す（S3 の分解のときに `slot_owner` と合わせて形を決める）。
 
@@ -467,7 +468,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 - **採用案**:
   - 宣言（`.flywheel/connectors.json`）は、接続ツールごとに形態（`plugin | brief | cli`）・権限モード・操作の一覧を、エージェント全体で人間へ上げる問いの種類を、リポジトリごとに使う接続ツールとスロットを持つ（形は §IF / API）。
-  - 操作は、id・起動形（`plugin` はスキルの呼び出しの文字列、`cli` は引数の配列）・対話前提か・対話相手（`human | parent`）・子に決定を委ねてよいか・成果物の種類（`pr | branch | none`）・束ね（S3）を持つ。スロットの払い出し主体（`slot_owner`）を持たせるかは S2・S3 の分解のときに決める。操作ごとの「並列してよいか」（`parallel_safe`）は持たない（同じリポジトリの並列は §クリティカル設計決定 7 の予測で決める）【決定 2026-10-01 オーナー M3H8／親 M3P27】。
+  - 操作は、id・起動形（`plugin` はスキルの呼び出しの文字列、`cli` は引数の配列）・対話前提か・対話相手（`human | parent`）・子に決定を委ねてよいか・成果物の種類（`pr | branch | none`）・束ね（S3）を持つ。スロットの払い出し主体（`slot_owner`）は S2 では持たせず、要否は S3 の分解のときに決める【決定 2026-10-01 親 M3P37】。操作ごとの「並列してよいか」（`parallel_safe`）は持たない（同じリポジトリの並列は §クリティカル設計決定 7 の予測で決める）【決定 2026-10-01 オーナー M3H8／親 M3P27】。
   - 接続ツールは、衝突の予測の口（引数の配列と出力の形の版）を持てる（S2。§クリティカル設計決定 7）。
   - **`cli` 形態の契約は flywheel が定め、接続ツールが合わせる**。flywheel は `start`・`status`・`resume`・`cancel` の 4 つのコマンドを宣言の引数の配列（シェルを介さない。差し込みは閉集合）で呼び、`start`・`status`・`resume` の標準出力に次の JSON（契約の版 1）を求める: `{"contract_version": 1, "run_id", "state": "running|waiting|succeeded|failed|cancelled", "summary", "requested_action": null | {"kind": "answer|approve|observe", "decider": "human|parent|any", "text"}, "artifacts": [{"kind": "pr|branch|commit|other", "ref"}], "cost_usd": number|null}`。終了コードは「JSON を出力できたか」だけを表し（0 = 出力した）、待機・成功・失敗は `state` で表す。`decider` が `human` の `answer`・`approve` は flywheel が回答せず、人間対応待ちにして接続ツール側の承認経路（harness の `approve`・TTY）を案内する。接続ツール内部の手順・判断値は持ち込まない（設計書 §10）。
   - `cli` 形態の委譲は S4 で実装する。S1〜S3 では宣言の検証だけを行う。
@@ -532,7 +533,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
   - B: 操作の `parallel_safe` だけ並列にする（旧 M3P20）— 同じ操作の課題どうしの衝突を表せない。仕様の作成のように衝突しにくい工程でも、課題によっては同じ文書を触る。
   - C: 人間が依存・直列化グループを宣言する — 周ごとに人の手間がかかり、自走の律速が人に移る。
   - D: 衝突を許容し、マージの時点で気付く — 衝突した後のやり直しの費用が大きく、子の作業が無駄になる。
-- **影響範囲**: `.flywheel/connectors.json` の検証（`conflict_prediction`・`slots` の `worktree`）・`internal/core`（実行計画・直列化グループ・予算の評価）・`internal/adapters/git`（払い出しと `.git` のポインタの検査）・予測の口を起動する処理（パッケージの置き場は S2 の分解で決める【仮定】。`internal/adapters/git` とあわせて、`CLAUDE.md` のモジュール構成の表と `internal/cli/depcheck_test.go` を S2 の実装チケットで更新する）・ストア（`slot.provider` の閉集合に `worktree`・予測の記録。§クリティカル設計決定 1 の拡張＝M3H10）。claude-harness 側の変更は無い（#290 で実装済み）。
+- **影響範囲**: `.flywheel/connectors.json` の検証（`conflict_prediction`・`slots` の `worktree`）・`internal/core`（実行計画・直列化グループ・予算の評価）・`internal/adapters/git`（払い出しと `.git` のポインタの検査）・予測の口を起動する処理（`internal/invoker` に置く【決定 2026-10-01 親 M3P36】。`internal/adapters/git` とあわせて、`CLAUDE.md` のモジュール構成の表と `internal/cli/depcheck_test.go` を S2 の実装チケットで更新する）・ストア（`slot.provider` の閉集合に `worktree`・予測の記録。§クリティカル設計決定 1 の拡張＝M3H10）。claude-harness 側の変更は無い（#290 で実装済み）。
 
 ## 機能全体の設計
 
@@ -604,7 +605,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - `interactive` を省略した操作は対話前提（`true`）として扱う。`counterpart` は `human | parent` の閉集合で、省略は `parent`。`child_may_decide` の省略は `false`。
 - `form: brief` の操作は `invocation` を持たない。`form: plugin` の操作は `invocation` を必須とする。
 - `form: cli` の接続ツールは `commands`（`start`・`status`・`resume`・`cancel` の引数の配列）と `contract_version`（`1` だけ）を必須とする（§クリティカル設計決定 3）。
-- S3 で操作に `bundle`（`{"max_parallel": <N>}`。束ねて受け取れる場合だけ）を足す。`slot_owner`（`flywheel | connector`）を足すかは S2・S3 の分解のときに決める【決定 2026-10-01 オーナー M3H8】。操作の `parallel_safe` は足さない（§クリティカル設計決定 7）【決定 2026-10-01 親 M3P27】。
+- S3 で操作に `bundle`（`{"max_parallel": <N>}`。束ねて受け取れる場合だけ）を足す。`slot_owner`（`flywheel | connector`）は S2 では足さず、足すかは S3 の分解のときに `bundle` と合わせて決める【決定 2026-10-01 オーナー M3H8／親 M3P37】。操作の `parallel_safe` は足さない（§クリティカル設計決定 7）【決定 2026-10-01 親 M3P27】。
 - `slots` は `provider` で形が分かれる（S2）。`clone` は `paths`（既存の作業用クローンの列挙。数がスロットの数）を、`worktree` は `base`（元のクローンのパス）と `count`（正の整数。スロットの数）を必須とする。どちらもワークスペースからの相対パスで、未知のキー・閉集合の外の `provider` は `config_invalid`。
 - S2 で接続ツールに `conflict_prediction`（`{"command": [<引数の配列>], "schema": "harness.conflict-prediction/v1"}`）を足す。flywheel は `command` の後ろに `--max-budget-usd <額>` と Issue 番号を別々の要素として足し、元のクローン（`worktree`）、または状態が `idle` の作業用クローンのうち `paths` の順で最初のもの（`clone`。`idle` のものが無ければ予測の口を呼ばず、呼び出し全体の失敗と同じ扱いにする）を作業ディレクトリにして、シェルを介さずに起動する。`command[0]` は PATH で解決する。時間の上限は `timeout_sec.judgment` とする【仮定】。予測は作業ディレクトリのチェックアウトの手元の HEAD に対するもので、flywheel は fetch しないため古いことがある（出力の `head_sha` を周の結果に残す）【仮定】。`schema` は閉集合（今は `harness.conflict-prediction/v1` だけ）【決定 2026-10-01 オーナー M3H9】。読むのは汎用のフィールド（`issues[].issue`・`issues[].status`・`pairs[].issues`・`pairs[].status`・`pairs[].shared_files[]`〔`path`・`merge_friendly`・`ignored`〕・`pairs[].dependency.first`〔先に入れるべき側の Issue 番号。片方向のときだけ値を持つ〕・`complete`・`error`・`head_sha`・`cost_usd`・`unknown_cost_count`）だけで、`issues[].status` は `predicted | failed | budget_exhausted`、`pairs[].status` は `predicted | unknown` の閉集合として読み（閉集合の外の値は呼び出し全体の失敗とする）、接続ツール内部の手順・判断値は持ち込まない（§クリティカル設計決定 7）。
 
@@ -664,7 +665,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 - `phase` は `ingest | classify | plan | run | verify` の閉集合（S1 は前の 3 つ）。`ingest` の `result` は M2 の `ingest --json` と同じ形（`.flywheel/sources.json` が無ければ `skipped: true`・`result: null`）。`plan`・`run`・`verify` の段は `.flywheel/connectors.json` が無ければ `skipped: true`・`items: []`・`not_started: []`。どの段も `skipped` を持つ。
 - `items[].outcome` は判断点の判定（J1・J2・J5）か委譲の結末。`items[].status` は写した後の課題の状態（写さなかったら `null`）。
-- `not_started[].reason` は `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized` の閉集合（S1 は `cycle_budget | rate_limited | upstream_fetch_failed`。`serialized` は S2 で、【決定 2026-10-01 親 M3P31】）。
+- `not_started[].reason` は `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | waiting_external` の閉集合（S1 は `cycle_budget | rate_limited | upstream_fetch_failed`。`serialized` は S2 で、【決定 2026-10-01 親 M3P31】。`waiting_external` は S2 で、【決定 2026-10-01 親 M3P42】）。
 - `run` の段（S2）は `serial_groups: [{"repo", "challenges": [<C-ID>…], "reasons": [<理由>…], "prediction_head_sha": string|null}]` を持つ。`challenges` は、実行中の課題を先頭に、続けて委譲の候補を起動の順に並べる。`reasons` は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | running_run` の閉集合で、この定義順に重複なく並べる【仮定: キー名と理由の名前】。1 件だけのグループも載せる。`reasons` は、そのグループが成立した規則に対応する理由の和集合であり、予測の結果だけで 1 件になったグループ（実行中の課題を含まず、fail-closed の規則にも当たらないもの。予測の口を呼ばなかった候補も含む）だけが `[]` になる。委譲の段が `skipped: true` なら `serial_groups` は `[]`。`prediction_head_sha` は予測の口を呼んで `head_sha` を得たときだけ `null` でない。規則と理由の対応: 共有ファイルを持つ組→`shared_files`／`dependency.first` のある組→`dependency`／`unknown` の組→`unknown_pair`／取り込み元の対応が無い候補・Issue 番号を渡せない実行中の課題・20 件を超えて口を呼ばなかった→`not_predictable`／口の呼び出し全体の失敗・`idle` の作業用クローンが無く口を呼べなかった・`issues[].status` が `failed`→`prediction_failed`／`issues[].status` が `budget_exhausted`・周の上限で口を呼べなかった→`prediction_budget`／口の宣言が無い→`no_prediction_declared`／実行中の課題を含む→`running_run`。
 - `--auto` の個別の操作と `run` の `--json` は、`cycle` の `phases` の 1 要素と同じ形を `{"phase": {…}}` で返す【仮定】。
 
@@ -693,6 +694,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 | `run_in_progress` | 1 | 指定した課題に終了していない run がある |
 | `budget_exceeded` | 1 | 周の上限、または計画の版の枠の残りのため起動できない（ID を指定した個別の操作。一括の対象では結果に示すだけ） |
 | `slot_unavailable` | 1 | 指定した課題のリポジトリに空いているスロットが無い（S2） |
+| `serialized` | 1 | 指定した課題が、終了していない委譲の run を持つ課題と同じ直列化グループに入る（S2。【決定 2026-10-01 親 M3P43】） |
 
 `config_not_found`・`config_invalid` は M2 のものを使う（`.flywheel/agent.json`・`.flywheel/connectors.json` の不備を含む）。
 
@@ -728,11 +730,11 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 
 - **論点 1（いつ入れるか）**: 旧 claude-flywheel へは入れない（保守モード）。M3 の中で `worktree` を S3 から **S2 へ前倒し**する。S2 で、`clone` と `worktree` のスロット・同じリポジトリの並列（衝突の予測による直列化グループ）を持つ【決定 2026-10-01 オーナー M3H8】。
 - **論点 2（プロバイダの既定と最初の範囲）**: S2 は `clone` と `worktree`（リポジトリごとに宣言で選ぶ）、`container` は S4。S2 に入れる手当ては、払い出しの直列化・外側からの git での `GIT_DIR`／`GIT_WORK_TREE` の明示・割り当て前の `.git` のポインタの検査。ビルド成果物・`node_modules`・ポートの衝突は S2 では手当てせず、宣言（`clone` にする・`count` を 1 にする）で避ける（§実行スロット「プロバイダ `worktree`」）【決定 2026-10-01 オーナー M3H8】。
-- **論点 3（接続ツール側の worktree との二重化）**: スロットは flywheel が払い出し、課題ごとに接続ツールへ作業ツリーを渡す（claude-harness の `harness run ticket` は渡された作業ツリーを `provided` として受け、消さない）。`slot_owner: connector` の要否は S2・S3 の分解のときに決める。束ねた委譲（`bundle`・S3）の扱いもそのときに合わせて決める【決定 2026-10-01 オーナー M3H8】。
+- **論点 3（接続ツール側の worktree との二重化）**: スロットは flywheel が払い出し、課題ごとに接続ツールへ作業ツリーを渡す（claude-harness の `harness run ticket` は渡された作業ツリーを `provided` として受け、消さない）。`slot_owner: connector` は S2 では足さず、要否は S3 の分解のときに決める（【決定 2026-10-01 親 M3P37】）。束ねた委譲（`bundle`・S3）の扱いもそのときに合わせて決める【決定 2026-10-01 オーナー M3H8】。
 - **論点 4（同じリポジトリの並列での衝突の判定）**: 委譲の段の実行計画で接続ツールの衝突の予測の口（`harness predict-conflicts`・claude-harness#288）を問い、core が組ごとの直列化グループを作る。決定は flywheel、予測は接続ツール。予測が無いものは直列（§クリティカル設計決定 7）【決定 2026-10-01 オーナー M3H8。M3P20 を置き換える】。
 - **論点 5（対話前提の委譲を並列にしたときの人間の窓口）**: **S2** で扱う。S2 の子の問いはすべて課題ごとの保留（人間対応待ち）になり、戻った順に `status` の `needs_human` に並ぶ（並列でも宛先は課題ごとの `session_id` で混線しない）。親として答える問いの振り分け（J4）は **S3**。複数の課題の問いをまとめて示す仕組みは M4 の UI で扱う【決定 2026-10-01 オーナー M3H8】。
 - **論点 6（回答待ちで空いたスロット）**: 回答を待つ間はスロットを保持せず、別の課題に使ってよい。再開は同じリポジトリの空いたスロットでブランチ名から続ける（§保留と再開）【決定 2026-09-28 親 M3P16】。`worktree` のスロットでも同じ。
-- **論点 7（予算・trust）**: 予算は **S2** で扱う。同時に起動した委譲は、それぞれの上限額を予約額として周の上限に数え、衝突の予測の呼び出しも周の上限の評価を受ける（§予算ガード）。新しいパス（worktree）ごとの Claude Code の trust の承認は **S2 の分解のときに決める**（`claude -p` を新しいパスで起動したときに trust の承認が要るかを実測してから決める。スロットのパスを使い回すので、要るとしても払い出し 1 回につき 1 度＝§実行スロット）【決定 2026-10-01 オーナー M3H8】。
+- **論点 7（予算・trust）**: 予算は **S2** で扱う。同時に起動した委譲は、それぞれの上限額を予約額として周の上限に数え、衝突の予測の呼び出しも周の上限の評価を受ける（§予算ガード）。新しいパス（worktree）ごとの Claude Code の trust の承認は S2 の分解のときに決めるとした（【決定 2026-10-01 オーナー M3H8】）。実測で、trust の記録の無い新しい worktree のパスでも `claude -p` は trust の承認を求めずに起動したため、**trust の手当ては不要**とする【決定 2026-10-01 親 M3P35】（`claude` 2.1.286・`-p --permission-mode auto`・1 回。trust を通らないパスで対象リポジトリの `.claude/settings.json` の deny が読み込まれるかは未検証で、§受入基準の S2 の要人間判定で確かめる）。
 
 ## スライス（出荷の単位）【決定 2026-09-28 オーナー M3H6】
 
@@ -740,10 +742,10 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 |---|---|---|---|
 | S1（最小） | invoker（`claude -p` の起動・結果の判別・費用の記録・枠超過・時間の上限・中断の回収）・宣言（`agent.json`・`connectors.json` の検証）・指示文の歯止め・J1 分類・J2 計画（上流の最新の取得・読んだ記録）・予算ガード（判断点の分と周の上限）・`flywheel cycle`（取り込み → 分類 → 計画）とサイクルの排他・`runs`・`status`／`show` の拡張・マイグレーション `0004`。**cron から `flywheel cycle` を呼ぶだけで、取り込んだ課題が計画承認待ちまで自走する** | 35-50 | これだけで価値が出る |
 | S2 | 委譲（意思決定の主体の判定・J3・`plugin`／`brief` 形態の起動・合流・照合・`release` の登録・承認なしの本番反映の検出）・保留と再開（子の問いはすべて人間へ）・失敗と差し戻しの上限・J5 検証（CI の待ち）・`clone` と `worktree` のスロット（1 リポジトリ 1 スロット以上）と同じリポジトリの並列（衝突の予測による直列化グループ）【決定 2026-10-01 オーナー M3H8／親 M3P28】・予算の 2 枠と `flywheel budget`・`cycle` の委譲と検証の段・マイグレーション `0005`。**M3 の完了の目安「1 件の課題が、取り込みから完了確認待ちまで自走する」を満たす** | 45-65 | S1 がマージされてから |
-| S3 | J4（親として子の問いに答える）・レビュー対応の委譲とレビュー対応枠・束ねた委譲（`bundle`）。`slot_owner` を足すかは S2・S3 の分解のときに決める | 15-25 | S2 がマージされてから |
+| S3 | J4（親として子の問いに答える）・レビュー対応の委譲とレビュー対応枠・束ねた委譲（`bundle`）。`slot_owner` を足すかは S3 の分解のときに決める（S2 では足さない＝M3P37） | 15-25 | S2 がマージされてから |
 | S4 | `cli` 形態の接続ツールの委譲（§クリティカル設計決定 3 の契約。claude-harness の runtime が契約に合わせた後）・`container` スロット | 15-25 | S2 がマージされ、`cli` 形態の接続ツールが契約の版 1 を出力できるようになってから |
 
-実装対象: S1
+実装対象: S1・S2
 
 ## やらないこと
 
@@ -762,7 +764,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 
 ## 受入基準
 
-> 実装対象 S1 の範囲。「偽の `claude`」はテストが PATH の先頭に置く実行ファイル（引数と標準入力を記録し、フィクスチャの結果を返す）、「判断の IF の偽の実装」は core のテストで使うメモリ上の実装を指す。どちらの場合も本物の Claude と GitHub へは接続しない。
+> 実装対象 S1・S2 の範囲。AC の番号は節をまたいだ上からの通し番号で、AC-1〜180 が S1、見出しに「（S2）」を付けた節の AC-181〜381 が S2 である（S2 の分を足しても S1 の番号は変えない）【決定 2026-10-01 オーナー M3H11】。S2 の受入基準は S2 の機能要件（`[S2]` の付いた項目と、節ごと S2 のもの）を写したもので、機能要件の中身は変えていない。「偽の `claude`」はテストが PATH の先頭に置く実行ファイル（引数と標準入力を記録し、フィクスチャの結果を返す）、「判断の IF の偽の実装」は core のテストで使うメモリ上の実装を指す。どちらの場合も本物の Claude と GitHub へは接続しない。
 
 ### 宣言
 
@@ -986,6 +988,262 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] 枠超過の実際の文面が、`result` の先頭の `You've hit your ` で始まる（枠超過を実際に観測した時点で記録する。2026-09-28 時点の根拠は現行 `quota-check.sh` の運用実績）
 - [ ] Linux で、偽の `claude` による受入基準がすべて macOS と同じく通る（CI の 2 OS で確認する）
 
+### 宣言（S2）
+
+- [ ] `conflict_prediction_budget_usd` が 0 以下の `.flywheel/agent.json` は、終了コード 2・`config_invalid` で終わる（0 と負の値を列挙して検証する）
+- [ ] 形態 `plugin` と形態 `brief` の接続ツールのそれぞれに `conflict_prediction` を置いた `.flywheel/connectors.json` は、検証を通る（`cycle` が `config_invalid` で終わらないことで検証する）
+- [ ] `conflict_prediction` の `command` が無い・空の配列・文字列でない要素を含む `.flywheel/connectors.json` は、終了コード 2・`config_invalid` で終わる（3 つのそれぞれで検証する）
+- [ ] `conflict_prediction` の `schema` が無い、または `harness.conflict-prediction/v1` 以外の `.flywheel/connectors.json` は、終了コード 2・`config_invalid` で終わる（2 つのそれぞれで検証する）
+- [ ] `slots.provider` が `clone | worktree` 以外（例: `container`）のリポジトリを含む `.flywheel/connectors.json` は、終了コード 2・`config_invalid` で終わる
+- [ ] `slots.provider: clone`（`paths`）のリポジトリと `slots.provider: worktree`（`base`・`count`）のリポジトリを 1 つずつ持つ `.flywheel/connectors.json` は、検証を通る
+- [ ] `slots.provider: worktree` で `base` が無い、または文字列でない `.flywheel/connectors.json` は、終了コード 2・`config_invalid` で終わる（2 つのそれぞれで検証する）
+- [ ] `slots.provider: worktree` で `count` が正の整数でない `.flywheel/connectors.json` は、終了コード 2・`config_invalid` で終わる（0・負の値・小数を列挙して検証する）
+- [ ] `slots.provider: worktree` のスロットに `paths` を置いた、または `slots.provider: clone` のスロットに `base` を置いた `.flywheel/connectors.json` は、終了コード 2・`config_invalid` で終わる（未知のキー）
+
+### 意思決定の主体の判定（S2）
+
+> 以下、意思決定者と行の番号は、委譲の run の記録（core のテストでストアを読む）で検証する。
+
+- [ ] `interactive: true`・`counterpart: human` の操作を選んだ計画の委譲は、意思決定者が `human`、行が 1 である
+- [ ] J2 の出力の `cross_repo` が真で、`interactive: false`・`child_may_decide: true` の操作を選んだ計画の委譲は、意思決定者が `parent`、行が 2 である
+- [ ] J2 の出力の `cross_repo` が偽で `related_repos` が 2 つ以上の計画の委譲は、意思決定者が `parent`、行が 2 である
+- [ ] `interactive: true`・`counterpart: parent` の操作を選んだ単一リポジトリの計画の委譲は、意思決定者が `parent`、行が 3 である
+- [ ] `interactive: true` で `counterpart` を省略した操作を選んだ単一リポジトリの計画の委譲は、意思決定者が `parent`、行が 3 である
+- [ ] `interactive: false`・`child_may_decide: true` の操作を選んだ単一リポジトリの計画の委譲は、意思決定者が `child`、行が 4 である
+- [ ] `interactive: false` で `child_may_decide` を省略した操作を選んだ単一リポジトリの計画の委譲は、意思決定者が `parent`、行が 5 である
+- [ ] `interactive` を省略し `child_may_decide: true` とした操作を選んだ単一リポジトリの計画の委譲は、意思決定者が `parent`、行が 3 である（省略を対話前提として扱うことの検証）
+- [ ] `interactive: true`・`counterpart: human` の操作を選び、`cross_repo` が真の計画の委譲は、意思決定者が `human`、行が 1 である（上から評価することの検証）
+- [ ] 委譲の標準入力の最初の節は、意思決定者と行の番号を埋め込みの雛形の文面で示す（意思決定者の 3 値のそれぞれで検証する）
+
+### J3 ブリーフと委譲の起動（S2）
+
+- [ ] `flywheel run`（ID の省略）の対象は、着手中で承認済みの計画を持つ課題だけである（未分類・分類済・計画承認待ち・検証中・人間対応待ちの課題を置き、J3 と委譲が起動されないことで検証する）
+- [ ] 終了していない run を持つ着手中の課題は、`flywheel run`（ID の省略）の対象にならない
+- [ ] 終了していない run を持つ課題への `flywheel run <C-ID>` は、終了コード 1・`run_in_progress` で終わる
+- [ ] J3 の標準入力は、承認済みの計画の本文と `spec`、保留の問いと回答、操作の id、意思決定者を含む
+- [ ] 取り込み元の対応のある課題の J3 の起動の前に、偽の `gh` へ Issue の本文とコメントの取得が要求され、その本文とコメントが J3 の標準入力に含まれる
+- [ ] J3 の後、課題の読んだ時点の値（`read_comments_count`・`read_upstream_updated_at`）は変わらない
+- [ ] J3 の出力スキーマは `brief` の文字列だけを持つ。他のキーを含む出力は、run の結果が `invalid_output` になり、委譲が起動されない
+- [ ] J3 の結果が `succeeded` 以外なら、委譲が起動されず、課題の状態と版が変わらない
+- [ ] 委譲の標準入力は、固定の節（意思決定者と該当した行・意思決定者ごとの規律・完了報告の様式・禁止する操作と代替手段・報告の形）を埋め込みの雛形の文面どおりに含み、J3 の出力はその間の区画にだけ現れる
+- [ ] ワークスペースに雛形と同名のファイルを置いても、委譲の標準入力の固定の節は埋め込みの雛形のままである
+- [ ] 形態 `plugin` の操作の委譲の標準入力は、操作の `invocation` の差し込みを埋めた文字列（例: `{issue_number}` を Issue 番号にしたもの）を含む
+- [ ] 形態 `brief` の操作の委譲の標準入力は、接続ツールのスキルの呼び出しを含まない（宣言の他の接続ツールの `invocation` の文字列が現れないことで検証する）
+- [ ] 委譲の作業ディレクトリは、割り当てたスロットの作業ツリーである
+- [ ] 委譲の引数の `--permission-mode` は、接続ツールの宣言の値である（`default`・`acceptEdits`・`auto` のそれぞれで検証する）
+- [ ] 委譲の引数は `-p`・`--session-id <小文字の UUID>`・`--output-format json`・`--json-schema <委譲の報告のスキーマ>` を含む
+- [ ] 委譲の引数の `--disallowedTools` は、`Bash(flywheel:*)` を含む（権限モードの 3 値のそれぞれで検証する）【決定 2026-10-01 親 M3P46】
+- [ ] `outcome` が `completed | questions | blocked` の外の値、または §IF / API の委譲の報告の必須のキーを欠く報告は、run の結果が `invalid_output` になる
+- [ ] 報告の問いの `kind` に、基本の 8 つの値と宣言の `human_question_kinds` の id は使え、それ以外の値は run の結果が `invalid_output` になる
+- [ ] 実装の委譲の `--max-budget-usd` は、その計画の版の実装枠の残りの額である（実装枠 50 の計画で、同じ版の前の実装の委譲の費用が 12 のとき 38 になることで検証する）
+- [ ] J3 の呼び出しの `--max-budget-usd` は `judgment_budget_usd.J3` の値であり、J5 の呼び出しは `judgment_budget_usd.J5` の値である
+
+### 合流と照合（S2）
+
+- [ ] 委譲の run の結果が `succeeded`・`errored`・`malformed`・`invalid_output`・`timed_out`・`budget_exhausted`・`interrupted` のどれでも、終わった後に照合の `gh` の呼び出しが行われる（7 つのそれぞれで検証する）
+- [ ] 委譲の run の結果が `launch_failed` なら、照合の `gh` の呼び出しは行われない
+- [ ] 報告に書かれたブランチと PR の URL があっても、偽の `gh` がそれらを返さなければ、run の成果物に記録されない（照合が報告に依らないことの検証）
+- [ ] 報告のブランチがあるとき、照合はそのブランチ名でリモートのブランチと PR を調べる（偽の `gh` に渡った引数で検証する）
+- [ ] 報告のブランチが `null` のとき（報告を得られない結果を含む）、照合はスロットの作業ツリーの現在のブランチ名でリモートのブランチと PR を調べる
+- [ ] 照合で見つけた PR は、URL・状態・base のブランチとともに run の成果物として記録される（`open`・`closed`・`merged` のそれぞれで検証する）
+- [ ] 照合の間の偽の `gh` の呼び出しは、すべて GET である（書き込みのサブコマンドと `-X`／`--method` の GET 以外の指定が無いことで検証する）
+- [ ] 委譲の後にスロットの作業ツリーへ未コミットの変更が残っていると、スロットが `needs_attention` になり、その変更（ファイルの内容）が残っている
+- [ ] `needs_attention` のスロットには、`slot clear` で戻すまで新しい委譲が割り当てられない
+- [ ] 結果 `succeeded`・結末 `completed`・成果物の種類 `pr` の委譲で、照合が報告のブランチを head とする open の PR を見つけると、課題が検証中になる（作業ログの `action` は `submit`・経路は `invoker`）
+- [ ] 結果 `succeeded`・結末 `completed`・成果物の種類 `pr` の委譲で、照合が報告のブランチを head とするマージ済みの PR（base は既定ブランチでない。例: 統合ブランチ）を見つけると、課題が検証中になる【決定 2026-10-01 親 M3P41】
+- [ ] 結果 `succeeded`・結末 `completed`・成果物の種類 `pr` の委譲で、照合が見つけた PR が未マージの closed だけなら、課題が人間対応待ちになり、保留の問いが「子は完了を報告したが成果物が見つからない」ことと照合の結果を含む【決定 2026-10-01 親 M3P41】
+- [ ] 結果 `succeeded`・結末 `completed`・成果物の種類 `pr` の委譲で、照合が見つけた PR が既定ブランチへマージ済みでその PR の `release` が未承認なら、課題は検証中にならず人間対応待ちになり、保留の問いが承認なしの本番反映を検出したことを含む（本番反映の検出を成果物の確認より優先することの検証）【決定 2026-10-01 親 M3P41】
+- [ ] 結果 `succeeded`・結末 `completed`・成果物の種類 `branch` の委譲で、照合がリモートのブランチを見つけると、課題が検証中になる
+- [ ] 結果 `succeeded`・結末 `completed`・成果物の種類 `none` の委譲は、照合で確かめる成果物が無いため、課題が検証中になる（中身は J5 が判定する）【決定 2026-10-01 親 M3P41】
+- [ ] 結果 `succeeded`・結末 `completed`・成果物の種類 `pr` の委譲で、照合が PR を見つけないと、課題が人間対応待ちになり、保留の問いが「子は完了を報告したが成果物が見つからない」ことと照合の結果を含む
+- [ ] 照合で見つけた PR の base が宣言の既定ブランチなら、課題に不可逆操作 `release`（要約は PR のタイトル、参照は PR の URL）が登録される
+- [ ] 同じ PR を 2 回の照合で見つけても、その PR の URL の `release` は 1 件だけである
+- [ ] 照合で見つけた PR の base が既定ブランチでなければ（例: 統合ブランチ）、`release` は登録されない
+- [ ] 照合で見つけた PR が既定ブランチへマージ済みで、その PR の `release` が未承認なら、課題が人間対応待ちになり、保留の問いが承認なしの本番反映を検出したことを含む
+- [ ] 照合で見つけた PR が既定ブランチへマージ済みでも、その PR の `release` が承認済みなら、この規則では人間対応待ちにならない
+
+### 保留と再開（S2）
+
+- [ ] 結果 `succeeded`・結末 `questions` の委譲で、課題が人間対応待ちになり、保留の問いが報告の各問いの本文を含み、保留の記録が原因の run の ID を持つ
+- [ ] 結果 `succeeded`・結末 `blocked` の委譲で、課題が人間対応待ちになり、保留の問いが報告の要約を含む
+- [ ] 委譲が作った保留への回答で着手中に戻った課題の次の委譲は、引数に `--resume <原因の run の session_id>` を持ち、新しい `--session-id` を持たない
+- [ ] 上の再開の標準入力は、回答の本文と、回答を渡すことを示す埋め込みの固定の文面を含む
+- [ ] 人間の `hold` で作った保留、および J5 の `uncertain` で作った保留から着手中に戻った課題の次の委譲は、`--resume` を持たず、新しい `--session-id` で始まる（2 つのそれぞれで検証する）
+- [ ] `clone` のリポジトリで、報告のブランチがリモートにあり、元のスロットが使用中で別のスロットが空いているとき、回答を渡す再開は空いたスロットで起動され、標準入力が報告のブランチ名を含む
+- [ ] `clone` のリポジトリで、報告のブランチがリモートに無く、元のスロットが空いているとき、回答を渡す再開は元のスロットで起動される
+- [ ] `clone` のリポジトリで、報告のブランチがリモートに無く、元のスロットが空いていないとき、回答を渡す再開は起動されず、課題の状態と版が変わらず、課題が `not_started` に理由 `slot_unavailable` で出る【決定 2026-10-01 親 M3P38】
+- [ ] `worktree` のリポジトリで、元のスロットが `idle` なら、報告のブランチがリモートにあり他のスロットが空いていても、回答を渡す再開は元のスロットで起動される
+- [ ] `worktree` のリポジトリで、元のスロットが `busy` なら、回答を渡す再開は同じ周の中でそのスロットの run が終わるのを待ち、元のスロットで起動される
+- [ ] `worktree` のリポジトリで、元のスロットが `needs_attention` なら、回答を渡す再開は起動されず、課題が `not_started` に理由 `slot_unavailable` で出る
+
+### 失敗・差し戻しの上限（S2）
+
+- [ ] 委譲の run の結果が `launch_failed`・`errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` のとき、課題の状態と版が変わらない（6 つのそれぞれで検証する）
+- [ ] 結果が `errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` の委譲の後、次の周の委譲は、引数に `--resume <同じ session_id>` を持ち、標準入力が中断の事実と状態の報告を求める埋め込みの固定の文面を含む
+- [ ] 新しいセッションの委譲の結果が `launch_failed` だった課題の次の周の委譲は、新しい `--session-id` で起動され、`--resume` を持たない【決定 2026-10-01 親 M3P40】
+- [ ] `--resume` の委譲（回答を渡す再開を含む）の結果が `launch_failed` だった課題の次の周の委譲は、同じ宛先の `session_id` へ `--resume` し、同じ回答・固定の文面を渡す【決定 2026-10-01 親 M3P40】
+- [ ] `failure_limit` が 2 のとき、同じ計画の版で結果 `launch_failed` の委譲が連続して 2 回あった課題は、次の周で委譲が起動されず、人間対応待ちになる（`launch_failed` を連続失敗に数えることの検証）【決定 2026-10-01 親 M3P40】
+- [ ] `failure_limit` が 2 のとき、同じ計画の版で結果が `launch_failed`・`errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` のいずれかの委譲が連続して 2 回あった課題は、次の周で委譲が起動されず、その周の `not_started` に理由 `failure_limit` で出て、同時に人間対応待ちになり、保留の問いが上限の種類（連続失敗）と回数を含む【決定 2026-10-01 親 M3P39】
+- [ ] `failure_limit` が 3 のとき、同じ計画の版で結果が `launch_failed`・`errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` のいずれかの委譲が連続して 2 回あった課題にも、次の周で委譲が起動される
+- [ ] 失敗 → 成功（結末 `questions`）→ 失敗の順の委譲は連続して 2 回と数えず、次の周で委譲が起動される（`failure_limit` 2）
+- [ ] 前の計画の版の失敗は、新しい計画の版の連続失敗の数に数えない
+- [ ] 枠超過を記録した委譲の run は、連続失敗の数に数えない
+- [ ] 連続失敗の上限で人間対応待ちになった課題に回答すると、次の周で委譲が起動される（回答の前の失敗を数えず、回答の後の run から数え直すことの検証）【決定 2026-10-01 親 M3P39】
+- [ ] 委譲の run の結果が `budget_exhausted` のとき、課題の状態と版が変わらず、その計画の版には次の周で委譲が起動されず、`status` の `needs_human.budget_exhausted` に出る
+- [ ] 結果 `budget_exhausted` の委譲の後に `flywheel budget` で実装枠を増やした課題の次の委譲は、その `budget_exhausted` の run の `session_id` へ `--resume` し、標準入力が上限到達で中断した事実と続行を求める埋め込みの固定の文面を含む【決定 2026-10-01 親 M3P44】
+- [ ] `rework_limit` が 3 のとき、同じ計画の版で J5 の `not_met` が 3 回あった課題は、次の周で委譲が起動されず、その周の `not_started` に理由 `rework_limit` で出て、同時に人間対応待ちになり、保留の問いが上限の種類（差し戻し）と回数を含む。2 回では起動される【決定 2026-10-01 親 M3P39】
+- [ ] 差し戻しの上限で人間対応待ちになった課題に回答すると、次の周で委譲が起動される（回答の前の `not_met` を数えず、回答の後の J5 から数え直すことの検証）【決定 2026-10-01 親 M3P39】
+- [ ] J5 の `not_met` で着手中に戻った課題の次の委譲は、引数に `--resume <直前の委譲の session_id>` を持ち、標準入力が J5 の差し戻しの指摘を含む
+
+### J5 検証（S2）
+
+- [ ] `verify --auto`（ID の省略）の対象は、検証中で終了していない run を持たない課題だけである（他の状態の課題と、終了していない run を持つ検証中の課題を置いて検証する）
+- [ ] 直前の委譲の成果物の PR のチェックが 1 つでも完了していなければ、J5 が起動されず、課題の状態と版が変わらず、`status` の `waiting_external.challenges` に課題の ID・PR の URL・`checks: "pending"` で出て、`cycle --json` の検証の段の `not_started` に理由 `waiting_external` で出る【決定 2026-10-01 親 M3P42】
+- [ ] 直前の委譲の成果物の PR のチェックがすべて完了していれば（失敗したチェックを含んでも）、J5 が起動され、その標準入力がチェックの結果を含む
+- [ ] 成果物の種類が `branch`・`none` で PR の無い課題は、CI を調べずに J5 が起動され、その標準入力が PR が無いことを示す（2 つの種類のそれぞれで検証する）【決定 2026-10-01 親 M3P42】
+- [ ] J5 の標準入力は、課題・承認済みの計画・完了条件・直前の委譲の報告・照合の結果・PR の状態・上流の最新の本文とコメント・保留の記録を含む
+- [ ] 課題の完了条件が空のとき、J5 の標準入力の完了条件は承認済みの計画の完了条件である
+- [ ] 判定 `not_met` で差し戻しの指摘が `null` の出力、判定 `uncertain` で問いが `null` の出力は、run の結果が `invalid_output` になり、課題が検証中のまま変わらない（2 つのそれぞれで検証する）
+- [ ] 判定 `met` の出力で、課題が完了確認待ちになる（作業ログの `action` は `verify_met`・経路は `invoker`）
+- [ ] 判定 `not_met` の出力で、課題が着手中に戻る（作業ログの `action` は `verify_not_met`）
+- [ ] 判定 `uncertain` の出力で、課題が人間対応待ちになり、保留の問いが出力の問いになり、保留の記録が原因の run の ID を持つ
+
+### 実行スロット（S2）
+
+- [ ] `clone` のスロットのパスが無いと、委譲が割り当てられず、スロットが `needs_attention`（理由はパスが無いこと）になって `status` の `needs_human.slots` に出て、flywheel はそのパスにディレクトリを作らない。そのリポジトリに使えるスロットが 1 本も無くなれば、委譲の候補は `not_started` に理由 `slot_unavailable` で出る【決定 2026-10-01 親 M3P45】
+- [ ] スロットが 1 本のリポジトリに、直列化グループの異なる委譲の候補が 2 件あり `max_parallel_runs` が 2 でも、そのスロットを使う終了していない run は同時に 1 つだけである（偽の `claude` に遅延を入れて検証する）
+- [ ] 1 つのスロットを使う終了していない run を 2 つ書き込もうとすると、ストアが拒否する（一意制約。core のテストで検証する）
+- [ ] スロットが 1 本のリポジトリの 2 つの課題に、2 つのプロセスから同時に `flywheel run <C-ID>` を実行すると、一方だけが委譲を起動し、もう一方は終了コード 1・`slot_unavailable` で終わる
+- [ ] 結末 `questions` で課題が人間対応待ちになった後、そのスロットは `idle` に戻り、同じ周で同じリポジトリの別の課題の委譲に割り当てられる
+- [ ] 割り当ての前にスロットの作業ツリーに未コミットの変更があると、委譲が割り当てられず、スロットが `needs_attention` になる
+- [ ] 割り当ての前にスロットの作業ツリーの `origin` を `<owner>/<name>` に正規化した値が宣言の `remote` と違うと、委譲が割り当てられず、スロットが `needs_attention` になる【決定 2026-10-01 親 M3P47】
+- [ ] 割り当て前の検査は、`origin` の URL の `https://github.com/<owner>/<name>`・`git@github.com:<owner>/<name>`・`ssh://git@github.com/<owner>/<name>` の各形（それぞれ `.git` の有無の両方）を `<owner>/<name>` に正規化し、大文字小文字を無視して宣言の `remote` と一致とみなして割り当てる。検査はネットワークを使わない（形ごとのフィクスチャで、偽の `gh` が呼ばれないことも検証する）【決定 2026-10-01 親 M3P47】
+- [ ] `flywheel slot clear <SL-ID>` は、`needs_attention` のスロットを `idle` に戻し、標準入力が端末でなくても成功し、作業ログを残さない
+- [ ] `status --json` の `needs_human.slots` は、`needs_attention` のスロットを `slot_id`・`repo`・`path`・`run_id` つきで出し、無ければ `[]` である
+
+### プロバイダ `worktree`（S2）
+
+- [ ] `worktree` のスロットへの初回の割り当てで、スロットのパスに、元のクローンの `refs/heads/<既定ブランチ>` のコミットを分離した HEAD で指す作業ツリーが作られる（`git worktree list --porcelain` で検証する）
+- [ ] 元のクローンに `refs/heads/<既定ブランチ>` が無いと、払い出しが失敗し、スロットが `needs_attention` になり、理由が記録される
+- [ ] スロットのパスにファイルが既にあるなど `git worktree add` が失敗すると、委譲が割り当てられず、スロットが `needs_attention` になり、理由が記録される
+- [ ] `count` が 3 のリポジトリのスロットは 3 本である（`status`・ストアの `slot` の行で検証する）
+- [ ] 同じ元のクローンについて 2 つのプロセスから同時に払い出しを求めると、`git worktree add` の実行が重ならず、両方の払い出しが成功する（起動の時刻を記録して遅延する `git` の包みを PATH の先頭に置いて検証する）
+- [ ] 同じスロットを 2 つ目の課題に割り当てても `git worktree add` は再び実行されず、作業ツリーのパスは変わらない
+- [ ] 払い出し・割り当て前の検査・照合で flywheel が起動する `git` は、環境変数 `GIT_DIR` と `GIT_WORK_TREE` を持つ（環境変数を記録する `git` の包みで検証する）
+- [ ] 作業ツリーの `.git` のポインタが元のクローンのその作業ツリー以外を指していると、委譲が割り当てられず、スロットが `needs_attention` になる
+- [ ] 払い出しと割り当て前の検査の間に、flywheel は `git fetch`・`git clone` を実行しない（サブコマンドを記録する `git` の包みで検証する）
+
+### 同じリポジトリの並列と直列化グループ（S2）
+
+> 以下、予測の口は宣言の `command` に置いた偽の実行ファイル（引数を記録し、フィクスチャの `harness.conflict-prediction/v1` の JSON・終了コード・遅延を返す）で置き換える。
+
+- [ ] 予測の口に渡る Issue 番号は、その周より前から終了していない委譲の run を持つ課題の番号が先で、続けて予測できる候補の番号が優先度（`P0`→`P1`→`P2`→未設定）・ID の昇順に並ぶ
+- [ ] 渡す Issue が 1 件のリポジトリ、および予測できる候補が 0 件のリポジトリでは、予測の口が呼ばれない
+- [ ] 渡す Issue が 2 件のとき、および 20 件のとき、予測の口がそのリポジトリについて 1 回だけ呼ばれる
+- [ ] 渡す Issue が 21 件のリポジトリでは予測の口が呼ばれず、委譲の候補がすべて 1 つの直列化グループに入り、理由が `not_predictable` を含む
+- [ ] A と B、B と C がそれぞれ共有ファイルを持つ予測では、A・B・C が 1 つの直列化グループに入り、理由が `shared_files` である
+- [ ] `merge_friendly` か `ignored` の印の付いた共有ファイルだけを持つ組の 2 つの課題は、別々の直列化グループに入る（2 つの印のそれぞれで検証する）
+- [ ] `pairs[].status` が `unknown` の組の 2 つの課題は、同じ直列化グループに入り、理由が `unknown_pair` を含む
+- [ ] 取り込み元の対応の無い委譲の候補が 1 件でもあるリポジトリでは、委譲の候補がすべて 1 つの直列化グループに入り、理由が `not_predictable` を含む
+- [ ] `issues[].status` が `failed` の課題があるリポジトリでは、委譲の候補がすべて 1 つの直列化グループに入り理由が `prediction_failed` を含み、`budget_exhausted` の課題があれば理由が `prediction_budget` を含む（2 つのそれぞれで検証する）
+- [ ] その周より前から終了していない委譲の run を持ち、Issue 番号を渡せない課題があるリポジトリでは、委譲の候補がすべて 1 つの直列化グループに入る
+- [ ] 予測の口の呼び出し全体の失敗（起動できない・時間の上限を超える・終了コードが 0 でない・標準出力が JSON でない・`schema` が宣言と違う・`error` が `null` でない・`issues[].status` か `pairs[].status` が閉集合の外）のとき、委譲の候補がすべて 1 つの直列化グループに入り、理由が `prediction_failed` を含む（7 つのそれぞれで検証する）
+- [ ] 出力の `complete` が `false` で `error` が `null` の予測は、呼び出し全体の失敗とせず、`issues[].status`・`pairs[].status` の規則でグループを作る
+- [ ] 接続ツールに `conflict_prediction` の宣言が無いリポジトリでは、予測の口が呼ばれず、委譲の候補がすべて 1 つの直列化グループに入り、理由が `no_prediction_declared` を含む
+- [ ] 周の上限のため予測の口を呼べなかったリポジトリでは、委譲の候補がすべて 1 つの直列化グループに入り、理由が `prediction_budget` を含み、委譲はグループの順に 1 件ずつ起動される
+- [ ] `dependency.first` が `null` でなく共有ファイルの無い組の 2 つの課題は、同じ直列化グループに入り、理由が `dependency` を含む
+- [ ] `dependency.first` の辺がある直列化グループでは、優先度が低くても先に入れるべき側の課題が先に起動される
+- [ ] 辺の無い直列化グループの課題は、優先度・ID の昇順に起動される
+- [ ] 辺が循環する直列化グループの課題は、辺を無視して優先度・ID の昇順に起動される
+- [ ] 1 つの直列化グループの次の課題の委譲は、前の課題の委譲の run が終わってから起動される（run の `started_at` と `ended_at` で検証する）
+- [ ] 1 つの直列化グループの前の課題の委譲が `errored`、または結末 `questions` で終わっても、次の課題の委譲は起動される
+- [ ] 1 つの直列化グループの前の課題の委譲で枠超過を記録すると、そのグループの次の課題の委譲は起動されず、`not_started` に理由 `rate_limited` で出る
+- [ ] `max_parallel_runs` が 1 で直列化グループが 2 つあるとき、2 つ目のグループの委譲は同じ周の中で 1 つ目の run が終わった後に起動される
+- [ ] 複数のグループが枠を待っているとき、グループの先頭の課題の優先度・ID の昇順に起動される
+- [ ] 直列化グループが 2 つ・空きスロットが 2 本・`max_parallel_runs` が 2 のとき、2 つの委譲が同時に終了していない run になる（偽の `claude` に遅延を入れ、`runs --open` で検証する）
+- [ ] 2 つのリポジトリに合わせて 3 つの直列化グループと 3 本の空きスロットがあり `max_parallel_runs` が 2 のとき、同時に終了していない委譲の run は 2 つを超えない
+- [ ] 使えるスロットが 1 本（他は `needs_attention`）のリポジトリでは、直列化グループが 2 つあっても同時に終了していない委譲の run は 1 つを超えない
+- [ ] 未払い出しの `worktree` のスロットは使えるスロットに数えられる（`count` 2・未払い出しのリポジトリで 2 つの委譲が同時に終了していない run になる）
+- [ ] 使えるスロットが 1 本も無いリポジトリの委譲の候補は、待たずに `not_started` に理由 `slot_unavailable` で出る
+- [ ] 枠が空いた時点で周の上限のため起動できない候補は `not_started` に理由 `cycle_budget` で、実装枠の残りのため起動できない候補は理由 `run_budget` で出る（2 つのそれぞれで検証する）
+- [ ] その周より前から終了していない委譲の run を持つ課題と同じ直列化グループに入った委譲の候補は起動されず、`not_started` に理由 `serialized` で出る。別のグループの候補は起動される
+- [ ] その周より前から終了していない委譲の run を持つ課題と同じ直列化グループに入る課題への `flywheel run <C-ID>` は、委譲を起動せず、終了コード 1・`serialized` で終わる【決定 2026-10-01 親 M3P43】
+- [ ] 終了していない委譲の run を持つ課題があるリポジトリで fail-closed の規則が当たると、委譲の候補はすべて `not_started` に理由 `serialized` で出て、`serial_groups` のそのグループは実行中の課題を先頭に持ち、理由が `running_run` を含む
+- [ ] `cycle --json` の委譲の段の `serial_groups` は §IF / API の形である（`internal/cli/jsondoc_test.go` の照合に足して検証する）
+- [ ] `serial_groups[].reasons` は閉集合の定義順に重複なく並ぶ（共有ファイルと依存の両方で成立したグループが `["shared_files", "dependency"]` になることで検証する）
+- [ ] 1 件だけの直列化グループも `serial_groups` に載り、予測の結果だけで 1 件になったグループの `reasons` は `[]` である
+- [ ] 委譲の段が `skipped: true` の周の `serial_groups` は `[]` である
+- [ ] `serial_groups[].prediction_head_sha` は、予測の口を呼んで `head_sha` を得たリポジトリのグループではその値で、それ以外では `null` である
+- [ ] 委譲の段で、予測の口の呼び出しはどの委譲の起動よりも先に行われる（偽の予測の口と偽の `claude` の起動の順で検証する）
+- [ ] `flywheel run`（ID の省略）と `flywheel run <C-ID>` も、予測の口を呼び、直列化グループに従う（`serialized` になる候補を置いて、委譲が起動されないことで検証する）
+
+### 予算ガード（S2）
+
+- [ ] 実装の委譲は、周の既消費額＋予約額＋実装枠の残り＋レビュー対応枠の残りが周の上限額を超えると起動されず、`not_started` に理由 `cycle_budget` で出る（実装枠の残りだけなら収まり、レビュー対応枠の残りを足すと超える額で検証する）
+- [ ] 終了していない実装の委譲の run がある間、予約額に数えられるのはその run に渡した実装枠の残りの額だけである（core のテストで評価を検証する）
+- [ ] 計画の版の実装枠の残りは、承認済みの計画の実装枠から同じ版の実装の委譲の run の費用の合計を引いた額であり、計画の新しい版では前の版の費用を引かない
+- [ ] レビュー対応枠の残りが大きくても、実装枠の残りが 1 USD 未満の課題には委譲が起動されない（一方の残りを他方へ融通しないことの検証）
+- [ ] 実装枠の残りが 0.99 USD の課題には委譲が起動されず、`status` の `needs_human.budget_exhausted` に `challenge_id`・`plan_version`・`impl_remaining_usd`・`review_remaining_usd` つきで出る。1.00 USD なら起動される
+- [ ] 実装枠の残りが 1 USD 未満の課題への `flywheel run <C-ID>` は、終了コード 1・`budget_exceeded` で終わる
+- [ ] 端末から本人確認を通した `flywheel budget <C-ID> --impl-usd 80` で、その計画の版の実装枠が 80 に置き換わり、承認の種類 `budget` の記録と、`approval_kind` が `budget` の `approve` の作業ログが残る
+- [ ] `--review-usd` を付けた `flywheel budget` はレビュー対応枠も置き換え、付けなければレビュー対応枠は変わらない
+- [ ] 標準入力が端末でない `flywheel budget`、および `CLAUDECODE` を設定した環境の `flywheel budget` は拒否され、枠が変わらない（2 つのそれぞれで検証する）
+- [ ] core の予算の増額の API に経路 `invoker` で要求すると、`verification_rejected` で拒否される
+- [ ] `flywheel budget` で実装枠の残りが 1 USD 以上になった課題は、`needs_human.budget_exhausted` に出なくなり、次の周で委譲が起動される
+- [ ] 予測の口の引数の `--max-budget-usd` は、渡す Issue の件数 × `conflict_prediction_budget_usd` である（3 件・1.5 で 4.5、`conflict_prediction_budget_usd` の省略で 3 件・3 になることで検証する）
+- [ ] 周の既消費額＋予約額＋予測の口に渡す上限額が周の上限額を超えるとき、予測の口は呼ばれない
+- [ ] 予測の口の出力が JSON で、`schema` が宣言と一致し、`cost_usd` が 0.7、`unknown_cost_count` が 0 なら、周の既消費額に 0.7 が足され、その run の費用の出所は `reported` である（`error` が `null` でない出力でも同じであることを検証する）
+- [ ] 予測の口の出力の `cost_usd` が無い・数でない・負・`unknown_cost_count` が 1 以上・出力が JSON でないときは、渡した上限額が周の既消費額に足され、費用の出所は `unknown` である（5 つのそれぞれで検証する）
+- [ ] 予測の口の呼び出しは `kind` が `predict`・`repo` がそのリポジトリ・`challenge_id` が `null` の run として記録され、`flywheel runs --json` に現れる
+- [ ] 2 つの委譲が同時に終了していない間に評価する判断の呼び出しは、2 つの委譲の上限額の和を予約額に含めて評価される（core のテストで評価を検証する）
+
+### 一括の操作（サイクル）（S2）
+
+- [ ] `.flywheel/sources.json` と `.flywheel/connectors.json` のあるワークスペースの `cycle` は、取り込み・分類・計画・委譲・検証の順に段を実行する（偽の `gh`・偽の `claude` の呼び出しの順で検証する）
+- [ ] 検証の段の最初の J5 は、その周の委譲の段で起動した委譲の run がすべて終わってから起動される（run の `started_at` と `ended_at` で検証する）
+- [ ] 同じ周の委譲の段で検証中になった課題は、同じ周の検証の段で J5 の対象になる（PR のチェックが完了している場合）
+- [ ] `.flywheel/connectors.json` の無いワークスペースの `cycle` の出力で、`run` と `verify` の段は `skipped: true` である
+- [ ] `cycle --json` の `run` の段の `items[].outcome` は委譲の結末、`items[].status` は写した後の課題の状態である
+- [ ] `flywheel run --json` と `flywheel verify --auto --json` は、`cycle` の 1 段と同じ形を `{"phase": {…}}` で出力する（`jsondoc_test.go` に足して検証する）
+
+### 観測（S2）
+
+- [ ] `status --json` の最上位のキーは、M1 の 3 つと `waiting_external` の 4 つである（`jsondoc_test.go` の照合を更新して検証する）
+- [ ] `status --json` の `needs_human.budget_exhausted`・`needs_human.slots`・`waiting_external.challenges` は、該当が無ければ `[]` である
+
+### 外部への書き戻し（S2）
+
+- [ ] 取り込み元の対応のある課題の委譲の標準入力の固定の節は、PR の本文に `Closes #<Issue 番号>` を書くことを求める文面を含む
+- [ ] 委譲と検証を含む 1 周の間に flywheel が起動した偽の `gh` の呼び出しは、すべて GET である
+
+### CLI 共通（S2）
+
+- [ ] `verify --auto --result met` は、終了コード 2・`usage_error` で終わる
+- [ ] `--impl-usd` の無い `flywheel budget <C-ID>` は、終了コード 2・`usage_error` で終わる
+- [ ] `slot_unavailable` は終了コード 1 で終わる（M1 のエラーコードの表の全行の検証に足す）
+- [ ] `serialized` は終了コード 1 で終わる（M1 のエラーコードの表の全行の検証に足す）【決定 2026-10-01 親 M3P43】
+- [ ] 実装が出しうるエラーコードの集合は、S1 の集合に `slot_unavailable`・`serialized` を足した集合と一致する（双方向の照合を更新して検証する）
+- [ ] `cycle --json` の `not_started[].reason` の値は、S2 では `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | waiting_external` の閉集合に限られる（テストで双方向に照合する）
+- [ ] `serial_groups[].reasons` の値は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | running_run` の閉集合に限られる（テストで双方向に照合する）
+
+### ストアと構造（S2）
+
+- [ ] スキーマ版 4 のストアを開くと、スキーマ版が 5 になる
+- [ ] スキーマ版 4 のストアを開いた後も、既存の課題・計画・承認・保留・作業ログ・対応の記録・run・周の記録が保持される（件数と内容の一致で検証する）
+- [ ] `internal/core` は `internal/adapters/git` を import せず、`internal/adapters/git` はストアのパッケージを import しない（`go list` の依存関係で検査する）
+- [ ] `go test ./...` は、PATH に本物の `claude`・`gh`・`harness` があっても、それらを起動しない
+
+### 要人間判定（S2。テストで固定できないもの）
+
+- [ ] オーナーの環境で、本物の `claude`・`gh`・GitHub を使い、取り込んだ 1 件の課題が、計画の承認を挟んで、委譲・照合・J5 を経て完了確認待ちまで自走する（M3 の完了の目安。周ごとの費用・run の記録・作られた PR を記録する）
+- [ ] 本物のスロット（`clone` と `worktree` のそれぞれ）で、対象リポジトリの `.claude/settings.json` の deny に当たる操作が、委譲の子で拒否される（`permission_denials` で確認する。trust を通っていない `worktree` のパスでも deny が読み込まれることの確認を兼ねる＝【決定 2026-10-01 親 M3P35】の未検証の前提）
+- [ ] 本物の `claude`（版を記録する）で、払い出した `worktree` のスロットのパスへの委譲が trust の承認を求めずに起動する（【決定 2026-10-01 親 M3P35】の実測を本物のスロットで確かめる）
+- [ ] 本物の `claude` で、委譲の引数の `--disallowedTools` の指定のもとで、子が Bash で `flywheel` を実行できない。あわせて、絶対パス・`cd <dir> && flywheel`・`env flywheel`・`sh -c` によるすり抜けを試し、結果を記録する（すり抜けたら、そのときに対策を決める＝【決定 2026-10-01 オーナー M3H12】）
+- [ ] 本物の `claude` で、プラグインのスキルを実行する長い委譲でも、`--json-schema` の構造化出力が最終応答として得られる（§未検証事項）
+- [ ] 本物の `harness predict-conflicts`（claude-harness の版を記録する）を 2 件以上の Issue で呼び、flywheel が出力を読んで直列化グループを作れる。報告された `cost_usd` を記録する
+- [ ] 本物の `gh` で、CI が実行中の PR のチェックを未完了と判定し、完了後に J5 が起動する
+- [ ] Linux で、S2 の偽の `claude`・偽の `gh`・偽の予測の口による受入基準がすべて macOS と同じく通る（CI の 2 OS で確認する）
+
 ## 決定事項の記録
 
 > 2026-09-28 に 31 件すべてが案 A で決まった。`M3H` は人間（オーナー）が決めた論点（この周の対話で親が受けた）、`M3P` は親が決めた論点。M1（H・PD・A）・M2（QH・QP）の番号とは別の系列である。
@@ -1011,6 +1269,8 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 | M3H8 | オーナー・2026-10-01（計画の承認。flywheel#73 の 2026-09-29 のコメントの親の案） | **スロットの前倒しと同じリポジトリの並列**（スコープ・3 リポジトリ間の責務境界）。M3H6 の「#73 は前倒ししない」と M3P20 を改める | A: `worktree` を S2 へ前倒しし（払い出しは直列・使用は並列）、同じリポジトリの並列は接続ツールの衝突の予測（`harness predict-conflicts`）から flywheel が直列化グループを作って決める。`slot_owner: connector` の要否は S2・S3 の分解時に決める。論点 5・7 を M3 のスライスへ割り当てる。1 スロット 1 セッションは残す。複数 Issue の並列実行は flywheel の責務／B: 旧来どおり（`worktree` は S3・操作単位の並列の宣言） | **A**（§クリティカル設計決定 7・§flywheel#73 の判断）。旧 claude-flywheel の観測（2026-09-27）で、並列にできる課題がスロット 1 本のため直列に並び、仕様 → 実装の流れを律速していた。claude-harness は `para-impl` の runtime 化を見送り並列度を持たない（claude-harness#201）ため、並列は flywheel が持つ。衝突は課題の組ごとに決まり操作単位のフラグでは表せない |
 | M3H9 | オーナー・2026-10-01（flywheel#73 の反映で生じた論点。親が受けた） | **衝突の予測の口の出力の形を誰が定めるか**（3 リポジトリ間の責務境界） | A: claude-harness の `harness.conflict-prediction/v1` を、flywheel が読む形としてそのまま採る（宣言の `schema` の閉集合に置く。harness の設計 §5.4.1 は「flywheel が契約として定めたら harness が `contract` 側の入口を足す」としており、A ならその入口は要らない）／B: flywheel が別の形（予測の契約の版 1）を定め、harness が `contract` 側の入口を足すのを待つ | **A**。v1 は汎用の語彙だけで、flywheel が読むフィールドは組・共有ファイル・依存の向きに限られる。B は S2 が harness の変更を待つ |
 | M3H10 | オーナー・2026-10-01（flywheel#73 の反映で生じた論点。親が受けた） | **予測の呼び出しの記録の持ち方**（DB スキーマ変更） | A: `run.kind` に `predict` を足す（課題に属さない run。`challenge_id` は NULL）。周の予算の評価・中断の回収・`runs` の表示を既存の run と共有する／B: 別の表を足す／C: 記録せず費用だけを周の既消費額へ足す | **A**。予約額と既消費額の評価式が 1 表のまま保てる（M3H7 の理由と同じ）。C は中断したときに費用を数え損なう |
+| M3H11 | オーナー・2026-10-01（S2 の分解の前に生じた論点。親が受けた） | **S2 の受入基準の作り方**（受入基準） | A: 分解の前に、S2 の受入基準を本仕様の §受入基準へ AC-181 からの通し番号で足し（S2 の要人間判定を含む）、マージの後に S1 と同じ形で分解する／B: `[S2]` の機能要件を文言を変えずに要件チケットで通し番号を振って AC とする／C: 番号を振らず、実装チケットごとに機能要件を完了条件へ写す | **A**。§受入基準は S1 の範囲だけで、S2 には割り当てる AC の番号が無かった。A は S1 と同じく「番号は仕様と同じ」で追跡でき、S2 の要人間判定（M3 の完了の目安の実地確認など）の抜けも埋まる。B は番号が仕様に無く S1 と形がずれ、C は漏れと重複の検算ができない |
+| M3H12 | オーナー・2026-10-01（PR #97 の S2 の受入基準の作成で生じた論点。親が受けた） | **委譲の子からの `flywheel` の実行の拒否のすり抜け**（安全性のトレードオフ） | A: `--disallowedTools` の `Bash(flywheel:*)` だけとし、前方一致のすり抜け（絶対パス・`cd <dir> && flywheel`・`env`・`sh -c` 等）の残余リスクを受け入れる／C: 加えて、core が `CLAUDECODE` のある環境からの本人確認のない書き込みも拒否する | **A**。本人確認つきの操作（承認・保留への回答・予算の増額）は端末と `CLAUDECODE` の検査と経路の拒否で別に守られており、残るのは本人確認のない書き込みに限られる。C は M3H4 と M1 の本人確認の設計を広げ、判断の Claude や対話セッションの Claude が本人確認のない書き込みを使う正当な経路も止める。要人間判定 AC-377 の実測ですり抜けが確かめられたら、そのときに対策を決める |
 
 ### 親が決めた論点
 
@@ -1050,6 +1310,19 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 | M3P32 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | 共有ファイルが無く、依存（`dependency.first`）だけがある組 | A: 同じ直列化グループに入れる（依存を順序として守る）／B: 共有ファイルだけでグループを作り、依存はグループの中の順序にだけ使う | **A**。B では依存先と依存元が同時に走り、依存元が依存先の未マージの変更を前提にできない |
 | M3P33 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | 同時の起動の上限・空きスロットですぐ起動できない候補 | A: 同じ周の中で枠が空いてから起動する（待ち行列）／B: 周の開始時点で起動できる分だけ起動し、残りは `not_started`（理由を足す） | **A**。直列化グループは同じ周の中で順に起動する前提であり、枠待ちも同じ扱いにそろう。周の所要時間は延びる |
 | M3P34 | 親・2026-10-01（flywheel#73 の反映で生じた論点） | 直列化グループの前の課題の run が失敗・保留で終わったとき | A: 結果にかかわらず次を起動する（依存の辺は順序づけで、成否を条件にしない）／B: 依存先の run が成功しなければ依存元を起動しない | **A**。失敗・保留の課題は既存の規則（連続失敗の上限・人間対応待ち）で扱われる。B は理由の閉集合を広げ、1 件の保留でグループ全体が止まる |
+| M3P35 | 親・2026-10-01（S2 の分解へ送られた flywheel#73 論点 7） | 新しい worktree のパスごとの Claude Code の trust の承認 | A: 手当て不要（`-p` は trust の承認を求めない）／B: 払い出しのたびに trust の記録を足す（`~/.claude.json` を書き換える）／C: 宣言でスロットのパスをあらかじめ trust させることを運用の前提にする | **A**。実測（2026-10-01・`claude` 2.1.286）で、trust の記録の無い `$TMPDIR` 配下の新しい worktree で `claude -p --permission-mode auto --output-format json --max-budget-usd 1` を 1 回起動し、承認を求めずに完了し（`subtype: success`・`permission_denials: []`・Bash も実行できた）、実行後も `~/.claude.json` にそのパスの記録は作られなかった。B は利用者の設定ファイルを flywheel が書き換える。ただし trust を通らないパスで対象リポジトリの `.claude/settings.json` の deny が読み込まれるかは未検証（確かめる実測は分類器に拒否された）で、S2 の要人間判定で確かめる |
+| M3P36 | 親・2026-10-01（§クリティカル設計決定 7 の影響範囲の【仮定】） | 衝突の予測の口を起動する処理のパッケージの置き場 | A: `internal/invoker`／B: 新設の `internal/adapters/connector`／C: 決めずに実装チケットで決める | **A**。時間の上限・`.flywheel/runs/<run の ID>/` への保存・子プロセスの扱いをそのまま使え、本仕様は S4 の `cli` 形態の接続ツールの起動も invoker に置いている。`CLAUDE.md` のモジュール構成の表の invoker の責務（`claude` の起動）は、予測の口を実装するチケットで広げる |
+| M3P37 | 親・2026-10-01（S2・S3 の分解へ送られた論点） | `slot_owner` を足すか | A: S2 では足さず、要否は S3 の分解で `bundle` と合わせて決める／B: S2 で足す | **A**。S2 では flywheel が常にスロットを払い出し、claude-harness は渡された作業ツリーを `provided` として受ける。S2 にスロットを接続ツールに任せる必要のある接続ツールが無い |
+| M3P38 | 親・2026-10-01（PR #97 で見つけた機能要件の未定の点 1） | `clone` で未 push の再開時に元のスロットが空いていないときの示し方 | A: `not_started` に理由 `slot_unavailable`／B: 同じ周の中で元のスロットが空くのを待つ／C: 何も出さずに次の周へ送る | **A**。`worktree` の M3P30 と表示がそろい、S1 の「起動しなかった課題とその理由を出す」に沿う。B は FR の「起動しない」を書き換える。C は理由が見えない（AC-248） |
+| M3P39 | 親・2026-10-01（同 2） | 連続失敗・差し戻しの上限に達したときの示し方と、回答の後の数え方 | 示し方 A: 上限を検出した周に `not_started` に理由 `failure_limit`／`rework_limit` を出し、同時に人間対応待ちにし、問いに上限の種類と回数を書く／B: 理由を閉集合から削る／C: 人間対応待ちにせず理由を出し続ける。数え方 A: 保留への回答の後の run（差し戻しは J5）から数え直す／B: 数え直さない | **示し方 A・数え方 A**。示し方 A は FR の「人間対応待ちにする」と閉集合の両方を満たす。数え方 B では、着手中から計画を改訂する遷移が無い（M1）ため、回答しても次の周で再び上限に当たり課題が抜け出せない。費用の歯止めは実装枠と周の上限が別に担う（AC-257・AC-262・AC-265・AC-266） |
+| M3P40 | 親・2026-10-01（同 3） | `launch_failed` の委譲の扱い | A: 状態を変えず、次の周は失敗した起動と同じ形（新規は新しいセッション、再開は同じ宛先へ `--resume`）で起動し直し、連続失敗に数える／B: 連続失敗に数えない／C: 1 回で人間対応待ち | **A**。新規の起動の失敗では `session_id` が使われておらず再開の宛先が無い。再開の失敗では元のセッションが生きている。費用が 0（M3P8）なので、数えないと予算でも止まらず毎周の起動失敗が続く（AC-254・AC-255・AC-256） |
+| M3P41 | 親・2026-10-01（同 4） | 成果物を確かめたとする条件 | `pr` A: open だけ／B: open とマージ済み（未マージの closed は見つからない扱い。既定ブランチへの承認なしのマージは本番反映の検出を優先）／C: 状態を問わない。`none` A: 検証中へ進め J5 が判定／B: 人間対応待ち | **`pr` は B・`none` は A**。統合ブランチへのマージは可逆でサイクル内で自律可（現行の運用）であり、A はその正当な成果を見つからない扱いにする。C は子が閉じた PR でも検証へ進む。`none` を人間対応待ちにすると成果物を持たない操作が自走できない（AC-229〜AC-232・AC-234） |
+| M3P42 | 親・2026-10-01（同 5） | CI を待つ課題の示し方と、PR の無い課題の J5 の前の CI の確認 | 示し方 A: `not_started` の理由に `waiting_external` を足す／B: `status` だけに出す／C: 検証の段の `items` に出す。PR の無い課題 A: CI を調べずに J5 を起動し入力に PR が無いことを書く／B: ブランチの最新のコミットのチェックを調べる／C: 人間対応待ち | **示し方 A・PR の無い課題 A**。示し方 B は S1 の「起動しなかった課題とその理由を出す」に反し、C は判定でないものが `outcome` に混じる。閉集合の拡張は M3P31 と同じ形。PR の無い課題の CI の確認は M3P18 の前提の外で、現行も存在しない CI を待たない（AC-269・AC-271） |
+| M3P43 | 親・2026-10-01（同 6） | ID を指定した `run <C-ID>` が、終了していない委譲の run を持つ課題と同じ直列化グループに入ったとき | A: エラーコード `serialized`（終了コード 1）を足す／B: `run_in_progress` を流用する／C: 終了コード 0 で `not_started` に出す | **A**。M3P3 の「規則による拒否は終了コード 1」と、`budget_exceeded`・`slot_unavailable` の「ID の指定のときだけエラー」の形にそろう。B は意味がずれ、C は指定した操作が行われなかったことを終了コードで区別できない（AC-327・AC-366） |
+| M3P44 | 親・2026-10-01（同 7） | `flywheel budget` で増やした後の委譲 | A: `budget_exhausted` の run のセッションへ `--resume` し、固定の文面で中断の事実と続行を渡す／B: 新しいセッションで始める／C: `budget` に起動の形を選ぶ引数を足す | **A**。現行も上限到達の後は照合して `--resume` で続ける。FR の「中断は同じ `session_id` へ再開」と同じ形。B は文脈を失い二重の作業になりうる（AC-264） |
+| M3P45 | 親・2026-10-01（同 8） | `clone` のスロットのパスが無いとき | A: 割り当て前の検査の失敗として `needs_attention`（理由はパスが無いこと）にし、使えるスロットが 0 なら `slot_unavailable`／B: 宣言の検証で `config_invalid`／C: 黙って飛ばす | **A**。割り当て前の検査・払い出しの失敗と同じ扱いで、`status` に自然に出る。B は 1 つのリポジトリの不備で周全体が止まる。C は人が気付けない（AC-278） |
+| M3P46 | 親・2026-10-01（同 9。残余リスクの受容は M3H12） | 委譲の `--disallowedTools` の指定 | A: `Bash(flywheel:*)` の固定の文字列／B: すり抜けの形を並べたパターンを足す | **A**。B は網羅できない。効き目とすり抜けは要人間判定で確かめる（AC-215・AC-377） |
+| M3P47 | 親・2026-10-01（同 10） | 「宣言のリモートのクローンであること」の判定 | A: `origin` の URL（https・scp 形式・ssh、`.git` の有無）を `<owner>/<name>` に正規化し、大文字小文字を無視して比べる。ネットワークを使わない／B: どれか 1 つの remote が一致すればよい／C: `gh repo view` で正規の名前を引く | **A**。割り当て前の検査で fetch しない方針に合い、決定的に判定できる。B は子が remote を足しただけで通る。C は検査がネットワークに依存する（AC-284・AC-285） |
 
 ### 起草者の仮定（軽微・可逆）
 
@@ -1088,4 +1361,6 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - 長い作業（プラグインのスキルを実行する委譲）でも、`--json-schema` の構造化出力が最終応答として得られること（harness PR-3 の実測は短い呼び出し。S2 の実装の前に確かめる）。
 - `-p` での道具の制限（読み取り専用の道具だけを許す指定）が、Bash・書き込みを確実に拒否すること。
 - 枠超過の文面が `You've hit your ` で始まること（現行の運用実績。CLI のソースに固定文字列としては無い）。
+- trust を通っていないパス（払い出した `worktree` のスロット）で起動した委譲の子に、対象リポジトリの `.claude/settings.json` の deny が効くこと（M3P35 の前提。§受入基準 S2 の要人間判定 AC-375 で確かめる）。
+- 委譲の `--disallowedTools` の `Bash(flywheel:*)` が CLI の引数でも前方一致で効くことと、すり抜けの形（M3H12。要人間判定 AC-377 で確かめる）。
 - `claude` 2.1.283 の `--help` に `--session-id`・`--json-schema`・`--max-budget-usd`・`--output-format`・`--allowedTools`・`--disallowedTools`・`--permission-mode` があることは 2026-09-28 に確かめた。挙動は上のとおり一部が未検証。
