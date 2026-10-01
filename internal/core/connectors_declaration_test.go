@@ -583,3 +583,127 @@ func TestLoadConnectorsDeclaration_InvalidDeclarationChangesNothingOnDisk(t *tes
 		t.Fatalf("workspace changed after a rejected declaration:\nbefore=%s\nafter=%s", before, after)
 	}
 }
+
+// --- #100: conflict_prediction・slots.provider（clone | worktree） ---
+
+// connectorsWithPrediction は接続ツール a（form）に conflict_prediction を置いた宣言を返す。
+func connectorsWithPrediction(form, cp string) string {
+	op := `{"id": "op"}`
+	if form == "plugin" {
+		op = `{"id": "op", "invocation": "/x"}`
+	}
+	return `{"version": 1, "connectors": [{"id": "a", "form": "` + form + `", "permission_mode": "auto", "operations": [` + op + `],
+		"conflict_prediction": ` + cp + `}], "repos": []}`
+}
+
+func TestLoadConnectorsDeclaration_ConflictPrediction_ValidOnPluginAndBrief(t *testing.T) {
+	for _, form := range []string{"plugin", "brief"} {
+		t.Run(form, func(t *testing.T) {
+			dir := writeConnectorsJSON(t, connectorsWithPrediction(form, `{"command": ["predict", "--json"], "schema": "harness.conflict-prediction/v1"}`))
+			d, err := LoadConnectorsDeclaration(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cp := d.Connectors[0].ConflictPrediction
+			if cp == nil || len(cp.Command) != 2 || cp.Schema != "harness.conflict-prediction/v1" {
+				t.Fatalf("ConflictPrediction = %+v", cp)
+			}
+		})
+	}
+}
+
+func TestLoadConnectorsDeclaration_ConflictPrediction_OmittedIsNil(t *testing.T) {
+	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}], "repos": []}`)
+	d, err := LoadConnectorsDeclaration(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Connectors[0].ConflictPrediction != nil {
+		t.Fatalf("want nil")
+	}
+}
+
+func TestLoadConnectorsDeclaration_ConflictPrediction_Invalid(t *testing.T) {
+	const sc = `"schema": "harness.conflict-prediction/v1"`
+	cases := map[string]string{
+		"command missing":       `{` + sc + `}`,
+		"command empty":         `{"command": [], ` + sc + `}`,
+		"command non-string":    `{"command": ["a", 1], ` + sc + `}`,
+		"command empty element": `{"command": [""], ` + sc + `}`,
+		"command null element":  `{"command": ["a", null], ` + sc + `}`,
+		"command not array":     `{"command": "a", ` + sc + `}`,
+		"schema missing":        `{"command": ["a"]}`,
+		"schema outside set":    `{"command": ["a"], "schema": "harness.conflict-prediction/v2"}`,
+		"schema empty":          `{"command": ["a"], "schema": ""}`,
+		"schema non-string":     `{"command": ["a"], "schema": 1}`,
+		"unknown key":           `{"command": ["a"], ` + sc + `, "extra": 1}`,
+		"null":                  `null`,
+	}
+	for name, cp := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := writeConnectorsJSON(t, connectorsWithPrediction("brief", cp))
+			if _, err := LoadConnectorsDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
+				t.Fatalf("error = %v, want ErrConfigInvalid", err)
+			}
+		})
+	}
+}
+
+func reposWithSlots(slots string) string {
+	return `{"version": 1, "connectors": [{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}],
+		"repos": [` + slots + `]}`
+}
+
+func repoWithSlots(name, slots string) string {
+	return `{"name": "` + name + `", "remote": "o/` + name + `", "default_branch": "main", "connector": "a", "slots": ` + slots + `}`
+}
+
+func TestLoadConnectorsDeclaration_SlotsCloneAndWorktreeTogetherAreValid(t *testing.T) {
+	dir := writeConnectorsJSON(t, reposWithSlots(
+		repoWithSlots("c", `{"provider": "clone", "paths": [".flywheel/repos/c1", ".flywheel/repos/c2"]}`)+","+
+			repoWithSlots("w", `{"provider": "worktree", "base": ".flywheel/repos/w", "count": 3}`)))
+	d, err := LoadConnectorsDeclaration(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := d.Repos[1].Slots
+	if w.Provider != "worktree" || w.Base != ".flywheel/repos/w" || w.Count != 3 {
+		t.Fatalf("worktree slots = %+v", w)
+	}
+	if len(d.Repos[0].Slots.Paths) != 2 {
+		t.Fatalf("clone slots = %+v", d.Repos[0].Slots)
+	}
+}
+
+func TestLoadConnectorsDeclaration_Slots_Invalid(t *testing.T) {
+	cases := map[string]string{
+		"container provider":          `{"provider": "container", "paths": ["x"]}`,
+		"clone without paths":         `{"provider": "clone"}`,
+		"clone empty paths":           `{"provider": "clone", "paths": []}`,
+		"clone null paths":            `{"provider": "clone", "paths": null}`,
+		"clone absolute path":         `{"provider": "clone", "paths": ["/abs"]}`,
+		"clone with base":             `{"provider": "clone", "paths": ["x"], "base": "b"}`,
+		"clone with count":            `{"provider": "clone", "paths": ["x"], "count": 1}`,
+		"worktree without base":       `{"provider": "worktree", "count": 2}`,
+		"worktree base non-string":    `{"provider": "worktree", "base": 1, "count": 2}`,
+		"worktree base null":          `{"provider": "worktree", "base": null, "count": 2}`,
+		"worktree absolute base":      `{"provider": "worktree", "base": "/abs", "count": 2}`,
+		"worktree without count":      `{"provider": "worktree", "base": "b"}`,
+		"worktree count zero":         `{"provider": "worktree", "base": "b", "count": 0}`,
+		"worktree count negative":     `{"provider": "worktree", "base": "b", "count": -1}`,
+		"worktree count fractional":   `{"provider": "worktree", "base": "b", "count": 1.5}`,
+		"worktree count string":       `{"provider": "worktree", "base": "b", "count": "2"}`,
+		"no provider with base/count": `{"base": "b", "count": 2}`,
+		"clone parent dir path":       `{"provider": "clone", "paths": ["../x"]}`,
+		"worktree parent dir base":    `{"provider": "worktree", "base": "../b", "count": 2}`,
+		"worktree with paths":         `{"provider": "worktree", "base": "b", "count": 2, "paths": ["x"]}`,
+	}
+	for name, slots := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := writeConnectorsJSON(t, reposWithSlots(repoWithSlots("r", slots)))
+			if _, err := LoadConnectorsDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
+				t.Fatalf("error = %v, want ErrConfigInvalid", err)
+			}
+		})
+	}
+}

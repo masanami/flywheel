@@ -38,6 +38,10 @@ const (
 	defaultMaxParallelRuns    = 2
 	defaultReworkLimit        = 3
 	defaultFailureLimit       = 2
+
+	// defaultConflictPredictionBudgetUSD は conflict_prediction_budget_usd の既定
+	// （衝突の予測 1 件あたりの上限額、USD）。
+	defaultConflictPredictionBudgetUSD = 1.0
 )
 
 var defaultSizeBudgetsUSD = SizeBudgetsUSD{
@@ -87,6 +91,10 @@ type AgentDeclaration struct {
 	ReworkLimit       int
 	FailureLimit      int
 
+	// ConflictPredictionBudgetUSD は conflict_prediction_budget_usd
+	// （衝突の予測 1 件あたりの上限額、USD）。
+	ConflictPredictionBudgetUSD float64
+
 	// DefaultsUsed は、agent.json 自体が無かった、または position_file を除く
 	// いずれかのキー（ネストした葉の値を含む）が省略され既定値を適用した
 	// ことを表す。呼び出し側（#86 の cycle 等）が `config_defaults_used` に
@@ -107,7 +115,9 @@ func defaultAgentDeclaration() *AgentDeclaration {
 		MaxParallelRuns:   defaultMaxParallelRuns,
 		ReworkLimit:       defaultReworkLimit,
 		FailureLimit:      defaultFailureLimit,
-		DefaultsUsed:      true,
+
+		ConflictPredictionBudgetUSD: defaultConflictPredictionBudgetUSD,
+		DefaultsUsed:                true,
 	}
 }
 
@@ -201,6 +211,7 @@ var agentTopLevelKeys = map[string]bool{
 	"version": true, "position_file": true, "cycle_budget_usd": true,
 	"size_budgets_usd": true, "max_run_budget_usd": true, "judgment_budget_usd": true,
 	"timeout_sec": true, "max_parallel_runs": true, "rework_limit": true, "failure_limit": true,
+	"conflict_prediction_budget_usd": true,
 }
 
 var sizeBudgetsSizeKeys = map[string]bool{"S": true, "M": true, "L": true}
@@ -301,6 +312,17 @@ func parseAgentDeclaration(data []byte) (*AgentDeclaration, error) {
 		decl.FailureLimit = i
 	} else {
 		decl.FailureLimit = defaultFailureLimit
+		usedDefault = true
+	}
+
+	if v, ok := raw["conflict_prediction_budget_usd"]; ok {
+		f, err := decodeUSDAmount(v)
+		if err != nil {
+			return nil, fmt.Errorf("conflict_prediction_budget_usd: %w", err)
+		}
+		decl.ConflictPredictionBudgetUSD = f
+	} else {
+		decl.ConflictPredictionBudgetUSD = defaultConflictPredictionBudgetUSD
 		usedDefault = true
 	}
 
@@ -551,6 +573,10 @@ func (d *AgentDeclaration) validate() error {
 	}
 	if d.MaxRunBudgetUSD <= 0 {
 		return fmt.Errorf("%w: max_run_budget_usd must be > 0, got %v", ErrConfigInvalid, d.MaxRunBudgetUSD)
+	}
+
+	if d.ConflictPredictionBudgetUSD <= 0 {
+		return fmt.Errorf("%w: conflict_prediction_budget_usd must be > 0, got %v", ErrConfigInvalid, d.ConflictPredictionBudgetUSD)
 	}
 
 	sizePairs := []struct {

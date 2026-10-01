@@ -151,12 +151,32 @@ type Connector struct {
 	Operations      []ConnectorOperation
 	Commands        *CLICommands // form: cli 以外は通常 nil
 	ContractVersion *int         // form: cli 以外は通常 nil
+
+	// ConflictPrediction は省略できる（nil）。形態 plugin・brief のどちらにも置ける。
+	ConflictPrediction *ConflictPrediction
 }
 
-// ConnectorRepoSlots は repos[].slots。
+// ConnectorRepoSlots は repos[].slots。Paths は provider が clone のとき、
+// Base・Count は worktree のときだけ使う（合わないキーは未知のキーとして拒否）。
 type ConnectorRepoSlots struct {
 	Provider string
 	Paths    []string
+	Base     string
+	Count    int
+}
+
+// conflictPredictionSchemaV1 は conflict_prediction.schema の閉集合の唯一の値。
+const conflictPredictionSchemaV1 = "harness.conflict-prediction/v1"
+
+var conflictPredictionSchemaValues = map[string]bool{conflictPredictionSchemaV1: true}
+
+var conflictPredictionKeys = map[string]bool{"command": true, "schema": true}
+
+// ConflictPrediction は接続ツールの conflict_prediction
+// （予測の口の宣言。起動は別チケットの範囲）。
+type ConflictPrediction struct {
+	Command []string // nil は「キーが無い」（validate が拒否する）
+	Schema  string
 }
 
 // ConnectorRepo は repos の1要素。
@@ -220,7 +240,7 @@ var connectorsTopLevelKeys = map[string]bool{
 var humanQuestionKindKeys = map[string]bool{"id": true, "label": true}
 var connectorKeys = map[string]bool{
 	"id": true, "form": true, "permission_mode": true, "operations": true,
-	"commands": true, "contract_version": true,
+	"commands": true, "contract_version": true, "conflict_prediction": true,
 }
 var operationKeys = map[string]bool{
 	"id": true, "invocation": true, "interactive": true, "counterpart": true,
@@ -230,7 +250,13 @@ var cliCommandsKeys = map[string]bool{"start": true, "status": true, "resume": t
 var connectorRepoKeys = map[string]bool{
 	"name": true, "remote": true, "default_branch": true, "connector": true, "slots": true,
 }
-var connectorRepoSlotsKeys = map[string]bool{"provider": true, "paths": true}
+var connectorRepoSlotsKeys = map[string]bool{"provider": true, "paths": true, "base": true, "count": true}
+
+// slotsKeysByProvider は provider ごとに使えるキー。合わないキーは未知のキー扱い。
+var slotsKeysByProvider = map[string]map[string]bool{
+	"clone":    {"provider": true, "paths": true},
+	"worktree": {"provider": true, "base": true, "count": true},
+}
 
 func parseConnectorsDeclaration(data []byte) (*ConnectorsDeclaration, error) {
 	raw, err := decodeStrictJSONObject(data)
@@ -378,9 +404,59 @@ func parseConnectors(raw json.RawMessage) ([]Connector, bool, error) {
 			}
 			c.ContractVersion = &cv
 		}
+		if v, ok := rc["conflict_prediction"]; ok {
+			cp, err := parseConflictPrediction(v)
+			if err != nil {
+				return nil, false, fmt.Errorf("[%d].conflict_prediction: %w", i, err)
+			}
+			c.ConflictPrediction = cp
+		}
 		conns = append(conns, c)
 	}
 	return conns, defaultsUsed, nil
+}
+
+func parseConflictPrediction(raw json.RawMessage) (*ConflictPrediction, error) {
+	if isJSONNull(raw) {
+		return nil, fmt.Errorf("must not be null")
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	if err := rejectUnknownKeys(m, conflictPredictionKeys, "conflict_prediction"); err != nil {
+		return nil, err
+	}
+	cp := &ConflictPrediction{}
+	if v, ok := m["command"]; ok {
+		if isJSONNull(v) {
+			return nil, fmt.Errorf("command: must not be null")
+		}
+		var elems []json.RawMessage
+		if err := json.Unmarshal(v, &elems); err != nil {
+			return nil, fmt.Errorf("command: %w", err)
+		}
+		cp.Command = make([]string, 0, len(elems))
+		for i, e := range elems {
+			var s string
+			if isJSONNull(e) {
+				return nil, fmt.Errorf("command[%d]: must be a string", i)
+			}
+			if err := json.Unmarshal(e, &s); err != nil {
+				return nil, fmt.Errorf("command[%d]: %w", i, err)
+			}
+			cp.Command = append(cp.Command, s)
+		}
+	}
+	if v, ok := m["schema"]; ok {
+		if isJSONNull(v) {
+			return nil, fmt.Errorf("schema: must not be null")
+		}
+		if err := json.Unmarshal(v, &cp.Schema); err != nil {
+			return nil, fmt.Errorf("schema: %w", err)
+		}
+	}
+	return cp, nil
 }
 
 func parseOperations(raw json.RawMessage) ([]ConnectorOperation, bool, error) {
@@ -555,6 +631,24 @@ func parseConnectorRepoSlots(raw json.RawMessage) (ConnectorRepoSlots, error) {
 	if err := rejectUnknownKeys(m, connectorRepoSlotsKeys, "slots"); err != nil {
 		return ConnectorRepoSlots{}, err
 	}
+	// provider に合わないキーを未知のキーとして拒否する。provider の省略は
+	// paths だけの形（S1 から引き継いだ省略可の仮定）に限り、base・count は
+	// provider が worktree のときだけ受け付ける。閉集合外の provider は
+	// validate が拒否する。
+	allowed := slotsKeysByProvider["clone"]
+	if pv, ok := m["provider"]; ok {
+		var ps string
+		if json.Unmarshal(pv, &ps) == nil {
+			if a, known := slotsKeysByProvider[ps]; known {
+				allowed = a
+			} else {
+				allowed = connectorRepoSlotsKeys
+			}
+		}
+	}
+	if err := rejectUnknownKeys(m, allowed, "slots"); err != nil {
+		return ConnectorRepoSlots{}, err
+	}
 	var s ConnectorRepoSlots
 	if v, ok := m["provider"]; ok {
 		// self-review 指摘（round 2）: null は string 型への Unmarshal で
@@ -572,6 +666,25 @@ func parseConnectorRepoSlots(raw json.RawMessage) (ConnectorRepoSlots, error) {
 		if err := json.Unmarshal(v, &s.Paths); err != nil {
 			return ConnectorRepoSlots{}, fmt.Errorf("paths: %w", err)
 		}
+		if s.Paths == nil {
+			// null は省略と区別できず、clone の必須検査をすり抜けるため拒否する。
+			return ConnectorRepoSlots{}, fmt.Errorf("paths: must not be null")
+		}
+	}
+	if v, ok := m["base"]; ok {
+		if isJSONNull(v) {
+			return ConnectorRepoSlots{}, fmt.Errorf("base: must not be null")
+		}
+		if err := json.Unmarshal(v, &s.Base); err != nil {
+			return ConnectorRepoSlots{}, fmt.Errorf("base: %w", err)
+		}
+	}
+	if v, ok := m["count"]; ok {
+		n, err := decodeIntLiteral(v)
+		if err != nil {
+			return ConnectorRepoSlots{}, fmt.Errorf("count: %w", err)
+		}
+		s.Count = n
 	}
 	return s, nil
 }
@@ -611,11 +724,35 @@ func (d *ConnectorsDeclaration) validate() error {
 	return nil
 }
 
-// slotsProviderValues は repos[].slots.provider の閉集合（S1・S2 では
-// docs/features/m3-invoker-delegation.md §IF / API の例に出てくる "clone" だけ。
-// slots・slots.provider の省略は許す仮定なので、値が明示されている場合だけ
-// 検査する。返却の「置いた仮定」に明記する）。
-var slotsProviderValues = map[string]bool{"clone": true}
+// slotsProviderValues は repos[].slots.provider の閉集合（clone | worktree。
+// container などは拒否する）。slots・slots.provider の省略は許す仮定なので、
+// 値が明示されている場合だけ検査する。
+var slotsProviderValues = map[string]bool{"clone": true, "worktree": true}
+
+// validateSlots は provider ごとの必須キーを検査する。パスはワークスペース
+// からの相対パス。
+func validateSlots(r ConnectorRepo) error {
+	s := r.Slots
+	switch s.Provider {
+	case "clone":
+		if len(s.Paths) == 0 {
+			return fmt.Errorf("%w: repo %q slots.paths is required (non-empty) for provider clone", ErrConfigInvalid, r.Name)
+		}
+		for _, p := range s.Paths {
+			if !filepath.IsLocal(p) {
+				return fmt.Errorf("%w: repo %q slots.paths entry %q must be a non-empty relative path inside the workspace", ErrConfigInvalid, r.Name, p)
+			}
+		}
+	case "worktree":
+		if !filepath.IsLocal(s.Base) {
+			return fmt.Errorf("%w: repo %q slots.base must be a non-empty relative path inside the workspace for provider worktree", ErrConfigInvalid, r.Name)
+		}
+		if s.Count <= 0 {
+			return fmt.Errorf("%w: repo %q slots.count must be a positive integer for provider worktree, got %d", ErrConfigInvalid, r.Name, s.Count)
+		}
+	}
+	return nil
+}
 
 // validateConnectorRepo は1つのリポジトリを検査し、その name を repoNames へ
 // 登録する（重複していれば拒否）。ConnectorsDeclaration.validate から抜き出し
@@ -644,6 +781,9 @@ func validateConnectorRepo(r ConnectorRepo, repoNames map[string]bool, connector
 	}
 	if r.Slots.Provider != "" && !slotsProviderValues[r.Slots.Provider] {
 		return fmt.Errorf("%w: repo %q has invalid slots.provider %q", ErrConfigInvalid, r.Name, r.Slots.Provider)
+	}
+	if err := validateSlots(r); err != nil {
+		return err
 	}
 
 	return nil
@@ -678,6 +818,21 @@ func validateConnector(c Connector, connectorIDs map[string]bool) error {
 	if c.Form == ConnectorFormCLI {
 		if err := validateCLICommands(c); err != nil {
 			return err
+		}
+	}
+
+	if c.ConflictPrediction != nil {
+		cp := c.ConflictPrediction
+		if len(cp.Command) == 0 {
+			return fmt.Errorf("%w: connector %q conflict_prediction.command must be a non-empty array of strings", ErrConfigInvalid, c.ID)
+		}
+		for i, a := range cp.Command {
+			if a == "" {
+				return fmt.Errorf("%w: connector %q conflict_prediction.command[%d] must not be empty", ErrConfigInvalid, c.ID, i)
+			}
+		}
+		if !conflictPredictionSchemaValues[cp.Schema] {
+			return fmt.Errorf("%w: connector %q conflict_prediction.schema %q is not one of [%s]", ErrConfigInvalid, c.ID, cp.Schema, conflictPredictionSchemaV1)
 		}
 	}
 
