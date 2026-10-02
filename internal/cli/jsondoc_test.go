@@ -151,6 +151,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3ShowPlanSpecShape(t, &doc)
 	addM3ShowRunsShape(t, &doc)
 	addM3CycleShape(t, &doc)
+	addM3SlotClearShape(t, &doc)
 	return doc
 }
 
@@ -489,6 +490,8 @@ var jsonEntityOf = map[string]string{
 	"items":   "item",
 	// runs（#81。docs/features/m3-invoker-delegation.md §IF / API「runs」）。
 	"runs": "run",
+	// slot clear の slot（S2。§IF / API の「slot clear」の行）。
+	"slot": "slot",
 }
 
 // assertDocumentedEntities は出力の中の要素（オブジェクトと配列の要素）の
@@ -608,4 +611,39 @@ func TestDocumentedJSON_AutoOperationsReturnAPhaseObject(t *testing.T) {
 			assertDocumentedPhase(t, doc, op+" --auto", pm)
 		})
 	}
+}
+
+// addM3SlotClearShape は `slot clear` の成功時の JSON の形を doc へ足す（#101）。
+// m3-invoker-delegation.md §IF / API「`status`・`show`・`runs` の拡張」の
+// 「- `slot clear`（S2）: `{"slot": {…}}`」の 1 行を直接パースする（第 2 の正本を
+// 持たない。addM3RunsShape と同じ形）。
+func addM3SlotClearShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m3-invoker-delegation.md"))
+	if err != nil {
+		t.Fatalf("read m3 spec: %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "- `slot clear`（S2）: ") {
+			continue
+		}
+		backticks := backtickRe.FindAllStringSubmatch(trimmed, -1)
+		if len(backticks) < 2 {
+			t.Fatalf("m3 spec `slot clear` line does not have the expected backtick spans: %q", trimmed)
+		}
+		shape := backticks[1][1] // {"slot": {"slot_id", …}}
+		doc.topLevel["slot clear"] = append(doc.topLevel["slot clear"], topLevelKeys(shape))
+		open := strings.Index(shape[1:], "{")
+		if open < 0 {
+			t.Fatalf("m3 spec `slot clear` shape has no object: %q", shape)
+		}
+		elem := map[string]bool{}
+		for _, q := range quotedRe.FindAllStringSubmatch(shape[open+2:], -1) {
+			elem[q[1]] = true
+		}
+		doc.entity["slot"] = elem
+		return
+	}
+	t.Fatal("m3 spec does not document the `slot clear` JSON shape (expected a line starting with \"- `slot clear`（S2）: \")")
 }

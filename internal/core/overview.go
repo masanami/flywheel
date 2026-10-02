@@ -52,6 +52,10 @@ type Overview struct {
 	// の一覧（challenge_id 昇順。#84）。無ければ空スライス（AC「triage の
 	// 無いワークスペースでは [] である」）。
 	NeedsHumanTriage []TriageItem
+	// NeedsHumanSlots は needs_attention のスロット（slot の id 昇順。
+	// docs/features/m3-invoker-delegation.md §IF / API の
+	// status.needs_human.slots。S2）。無ければ空スライス。
+	NeedsHumanSlots []SlotAttention
 }
 
 // DiscrepancyKind は Discrepancy.Kinds の値（docs/features/
@@ -264,6 +268,12 @@ func (s *Store) GetOverview(ctx context.Context) (*Overview, error) {
 			return err
 		}
 		result.NeedsHumanTriage = triage
+
+		slots, err := listSlotsNeedingAttention(ctx, tx)
+		if err != nil {
+			return err
+		}
+		result.NeedsHumanSlots = slots
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {

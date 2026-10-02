@@ -285,5 +285,14 @@ func defaultCommands() []Command {
 			Flags:         []flagDef{{Name: "trigger", HasValue: true}},
 			Run:           runCycle,
 		},
+		{
+			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2）。本人確認も
+			// 端末も要らない単発の操作（作業ログには載せない）。
+			Path:          []string{"slot", "clear"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: 1,
+			Run:           runSlotClear,
+		},
 	}
 }

@@ -27,6 +27,7 @@ func runStatus(a Args) (any, error) {
 				"operations":    operationsJSON(ov.NeedsHumanOperations),
 				"discrepancies": discrepanciesJSON(ov.Discrepancies),
 				"triage":        triageJSON(ov.NeedsHumanTriage),
+				"slots":         slotsJSON(ov.NeedsHumanSlots),
 			},
 			"actionable": map[string]any{
 				"challenges": challengesJSON(ov.ActionableChallenges),
@@ -75,6 +76,26 @@ func triageJSON(items []core.TriageItem) []map[string]any {
 	return out
 }
 
+// slotsJSON は §IF / API「status.needs_human.slots（S2）:
+// [{"slot_id", "repo", "path", "run_id"}]」の形へ変換する（run_id は使用中の run。
+// needs_attention のスロットは使用中でないため通常 null）。
+func slotsJSON(items []core.SlotAttention) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		var runID any
+		if it.RunID != nil {
+			runID = *it.RunID
+		}
+		out = append(out, map[string]any{
+			"slot_id": it.SlotID,
+			"repo":    it.Repo,
+			"path":    it.Path,
+			"run_id":  runID,
+		})
+	}
+	return out
+}
+
 // challengesJSON は課題の一覧を「成功時の JSON 出力の規約」の課題の形へ変換する
 // （runList はこれまで同じ変換をインラインで書いていたが、runStatus も同じ変換を
 // 2箇所で必要とするため、ここで共有できるよう切り出す）。
@@ -92,7 +113,7 @@ func challengesJSON(challenges []core.Challenge) []map[string]any {
 func overviewText(ov *core.Overview) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "人間の操作を待っているもの:\n")
-	if len(ov.NeedsHumanChallenges) == 0 && len(ov.NeedsHumanOperations) == 0 && len(ov.Discrepancies) == 0 && len(ov.NeedsHumanTriage) == 0 {
+	if len(ov.NeedsHumanChallenges) == 0 && len(ov.NeedsHumanOperations) == 0 && len(ov.Discrepancies) == 0 && len(ov.NeedsHumanTriage) == 0 && len(ov.NeedsHumanSlots) == 0 {
 		fmt.Fprintf(&b, "  (なし)\n")
 	}
 	for _, c := range ov.NeedsHumanChallenges {
@@ -104,6 +125,9 @@ func overviewText(ov *core.Overview) string {
 	}
 	for _, tr := range ov.NeedsHumanTriage {
 		fmt.Fprintf(&b, "  %s\t仕分け\t%s\t%s\n", tr.ChallengeID, tr.RunID, tr.Reason)
+	}
+	for _, sl := range ov.NeedsHumanSlots {
+		fmt.Fprintf(&b, "  %s\t要確認のスロット\t%s\t%s\t%s\n", sl.SlotID, sl.Repo, sl.Path, sl.Reason)
 	}
 	for _, d := range ov.Discrepancies {
 		kinds := make([]string, 0, len(d.Kinds))

@@ -124,6 +124,7 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 		{"mark-read", "C-1"},
 		{"runs", "C-1"},
 		{"cycle"},
+		{"slot", "clear", "SL-1"},
 	}
 
 	assertCasesCoverExactlyDefaultCommandsAndRequireStoreExceptInit(t, cases)

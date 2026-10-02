@@ -105,7 +105,7 @@ func TestInit_WritesGitignoreExcludingStoreAndItsSidecarFiles(t *testing.T) {
 	// init が書く既定の内容に runs/ が含まれることを固定する検査が無いと、
 	// gitignoreContents から runs/ が抜けても他のテストが気付けない
 	// （invoker側の ensureRunsGitignoreEntry が後から足すため隠れてしまう）。
-	for _, want := range []string{"flywheel.db", "flywheel.db-wal", "flywheel.db-shm", "runs/"} {
+	for _, want := range []string{"flywheel.db", "flywheel.db-wal", "flywheel.db-shm", "runs/", "worktrees/"} {
 		if !strings.Contains(string(content), want) {
 			t.Errorf(".gitignore does not exclude %q:\n%s", want, content)
 		}

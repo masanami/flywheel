@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"os"
 	"path/filepath"
@@ -152,6 +153,11 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		// 形が照合される）。not_started の要素の形は cycle_closedsets_test.go の観測が照合する。
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, "")
 		return []string{"cycle", "--trigger", "cron"}
+	}},
+	"slot clear": {setup: func(t *testing.T, ws string) []string {
+		// needs_attention のスロットを 1 件置き、slot の形が文書と照合されるようにする。
+		id := coretest.InsertSlot(t, ws, "o/r", "clone", filepath.Join(ws, "clone-slot"), "needs_attention", "path is missing")
+		return []string{"slot", "clear", fmt.Sprintf("SL-%d", id)}
 	}},
 	"ingest": {setup: func(t *testing.T, ws string) []string {
 		writeSourcesDeclaration(t, ws, validSourcesDeclaration)
