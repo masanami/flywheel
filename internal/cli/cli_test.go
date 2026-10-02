@@ -669,6 +669,8 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	// #86: 同じ理由で、実装済みの `cycle` を個別に足す（書式は
 	// TestCycleCommand_RequiredArgumentsMatchM3IFAPITable が m3 の表と照合する）。
 	wantSet["cycle"] = true
+	// #101: 同じ理由で、実装済みの `slot clear` を個別に足す。
+	wantSet["slot clear"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")

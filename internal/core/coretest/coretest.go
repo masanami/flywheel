@@ -333,3 +333,50 @@ func HoldRawWriteLock(dbPath string, stdin io.Reader, stdout, stderr io.Writer) 
 	_ = tx.Rollback()
 	return 0
 }
+
+// InsertSlot はテスト専用のフィクスチャとしてスロットを 1 件挿入し、割り当てられた
+// 内部整数 ID を返す（#101。internal/cli の `slot clear`・`status` のテストが、
+// git を使わずに needs_attention のスロットを用意するために使う）。state が
+// needs_attention のとき reason を attention_reason に入れる（それ以外では無視）。
+func InsertSlot(t *testing.T, workspace, repo, provider, path, state, reason string) int64 {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var reasonCol any
+	if state == "needs_attention" {
+		reasonCol = reason
+	}
+	var id int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(
+			`INSERT INTO slot (repo, provider, path, state, run_id, attention_reason) VALUES (?, ?, ?, ?, NULL, ?)`,
+			repo, provider, path, state, reasonCol)
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertSlot: %v", err)
+	}
+	return id
+}
+
+// EndRun はテスト専用のフィクスチャとして run（表示形 "R-<n>"）を終了させる
+// （result = succeeded。#101。スロットの解放は run の終了の後に行う〈idx_run_active_slot〉
+// 手順を、internal/cli のテストが core の公開 API だけで再現するために使う）。
+func EndRun(t *testing.T, workspace, runID string) {
+	t.Helper()
+	var n int64
+	if _, err := fmt.Sscanf(runID, "R-%d", &n); err != nil {
+		t.Fatalf("coretest: EndRun: bad run ID %q", runID)
+	}
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE run SET result = 'succeeded', ended_at = '2026-10-02T00:00:00.000Z' WHERE id = ?`, n)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: EndRun: %v", err)
+	}
+}

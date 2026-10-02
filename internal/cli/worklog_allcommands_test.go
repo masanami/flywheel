@@ -54,6 +54,15 @@ var worklogReadOnlyCommands = map[string]bool{
 	"runs": true,
 }
 
+// worklogNoActivityMutationCommands はストアを変えるが作業ログ（activity）には載せない
+// コマンド。slot clear（S2）は slot 表の書き込みで、docs/features/
+// m3-invoker-delegation.md §作業ログ「flywheel slot clear は slot の変更であり、作業ログに
+// 載せない」。成功しても作業ログを増やさないことを
+// TestWorklog_NoActivityMutationCommandsAddNoActivity で確かめる。
+var worklogNoActivityMutationCommands = map[string]bool{
+	"slot clear": true,
+}
+
 // worklogIngestRepo は worklogCases の "ingest create" ケースが使う偽の
 // リポジトリ名（#59 で取得と反映を結線した後、ingest は変更系のコマンドに
 // なった。以前はここに列挙し worklogReadOnlyCommands 側だった）。
@@ -475,6 +484,11 @@ func TestWorklog_CasesCoverRegistrationTable(t *testing.T) {
 		}
 		mutating[c.command] = true
 	}
+	for name := range worklogNoActivityMutationCommands {
+		if _, ok := registered[name]; !ok {
+			t.Errorf("worklogNoActivityMutationCommands has %q, which is not a registered command (stale entry?)", name)
+		}
+	}
 	for name := range worklogReadOnlyCommands {
 		if _, ok := registered[name]; !ok {
 			t.Errorf("worklogReadOnlyCommands has %q, which is not a registered command (stale entry?)", name)
@@ -482,9 +496,11 @@ func TestWorklog_CasesCoverRegistrationTable(t *testing.T) {
 	}
 	for _, name := range sortedCommandNames(registered) {
 		switch {
-		case mutating[name] && worklogReadOnlyCommands[name]:
-			t.Errorf("command %q is both in worklogCases and worklogReadOnlyCommands", name)
-		case !mutating[name] && !worklogReadOnlyCommands[name]:
+		case mutating[name] && (worklogReadOnlyCommands[name] || worklogNoActivityMutationCommands[name]):
+			t.Errorf("command %q is both in worklogCases and in a no-activity list", name)
+		case worklogReadOnlyCommands[name] && worklogNoActivityMutationCommands[name]:
+			t.Errorf("command %q is in both worklogReadOnlyCommands and worklogNoActivityMutationCommands", name)
+		case !mutating[name] && !worklogReadOnlyCommands[name] && !worklogNoActivityMutationCommands[name]:
 			t.Errorf("registered command %q is neither covered by worklogCases nor listed in worklogReadOnlyCommands", name)
 		}
 	}
@@ -664,6 +680,28 @@ func TestWorklog_ReadOnlyCommandsAddNoActivityAndLeaveStoreUnchanged(t *testing.
 					t.Errorf("%s changed the store file", name)
 				}
 			}
+			if added := allActivities(t, ws)[len(before):]; len(added) != 0 {
+				t.Errorf("%s added %d activities, want 0: %v", name, len(added), added)
+			}
+		})
+	}
+}
+
+// ストアを変えても作業ログに載せないコマンドは、成功しても作業ログを増やさない。
+func TestWorklog_NoActivityMutationCommandsAddNoActivity(t *testing.T) {
+	for _, name := range sortedCommandNames(registeredCommands()) {
+		if !worklogNoActivityMutationCommands[name] {
+			continue
+		}
+		tc := allCommandSuccessCases[name]
+		t.Run(name, func(t *testing.T) {
+			ws := t.TempDir()
+			if _, err := core.Init(ws); err != nil {
+				t.Fatalf("core.Init: %v", err)
+			}
+			args := tc.setup(t, ws)
+			before := allActivities(t, ws)
+			runCommandForWorklog(t, name, args, ws)
 			if added := allActivities(t, ws)[len(before):]; len(added) != 0 {
 				t.Errorf("%s added %d activities, want 0: %v", name, len(added), added)
 			}

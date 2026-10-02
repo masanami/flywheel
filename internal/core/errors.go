@@ -90,3 +90,14 @@ var (
 	// （docs/features/m3-invoker-delegation.md §宣言）が共有する。
 	ErrConfigInvalid = errors.New("core: declaration is invalid")
 )
+
+// ErrGitUnavailable は、スロットの検査・払い出しのために git を起動できない
+// （PATH に無い）ことを表す。作業ツリー側の原因ではないため、スロットを
+// needs_attention にせず AcquireSlot のエラーとして返す。
+var ErrGitUnavailable = errors.New("core: git is not available")
+
+// ErrSlotUnavailable は、リポジトリに使えるスロットが 1 本も無い（すべて使用中・
+// needs_attention・宣言が無い）ため委譲を割り当てられないことを表す
+// （M3P45。CLI の `slot_unavailable`・`not_started` の理由への写像は委譲の
+// 起動の範囲）。
+var ErrSlotUnavailable = errors.New("core: no usable slot for the repository")

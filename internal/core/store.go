@@ -185,7 +185,7 @@ type InitResult struct {
 // ensureRunsGitignoreEntry。.gitignore が後から削除された場合の保険）に
 // 頼らずに済む（self-review 指摘 round1: 2つの書き手が異なる既定内容で
 // 新規作成すると、先に書いた側の内容だけが残る競合があった）。
-const gitignoreContents = "# flywheel が生成する。手で編集しない。\nflywheel.db\nflywheel.db-wal\nflywheel.db-shm\nruns/\n"
+const gitignoreContents = "# flywheel が生成する。手で編集しない。\nflywheel.db\nflywheel.db-wal\nflywheel.db-shm\nruns/\nworktrees/\n"
 
 // Init は `flywheel init` の本体。--workspace → 環境変数 FLYWHEEL_WORKSPACE →
 // カレントディレクトリの順で対象のディレクトリを決め（親ディレクトリへの
