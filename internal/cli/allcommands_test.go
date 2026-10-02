@@ -154,6 +154,18 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, "")
 		return []string{"cycle", "--trigger", "cron"}
 	}},
+	"run": {setup: func(t *testing.T, ws string) []string {
+		// run --json の出力の形（{"phase": {…}} と phase の要素）が文書と照合されるよう、委譲の対象の
+		// 課題を 1 件置き、偽の claude が J3 と委譲に応答する。
+		writePositionFileForTest(t, ws, "pos")
+		writeAgentJSONForTest(t, ws, `{"position_file": "position.md"}`)
+		writeConnectorsJSONForTest(t, ws, runConnectorsFixture)
+		slotClone(t, filepath.Join(ws, "slot-f"), "https://github.com/o/flywheel.git")
+		slotClone(t, filepath.Join(ws, "slot-d"), "git@github.com:o/direct.git")
+		id := newInProgressForRun(t, ws, nil)
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{delegateRoute("completed"), j3Route("b")}, "")
+		return []string{"run", id}
+	}},
 	"slot clear": {setup: func(t *testing.T, ws string) []string {
 		// needs_attention のスロットを 1 件置き、slot の形が文書と照合されるようにする。
 		id := coretest.InsertSlot(t, ws, "o/r", "clone", filepath.Join(ws, "clone-slot"), "needs_attention", "path is missing")

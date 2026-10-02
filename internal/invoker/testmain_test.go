@@ -63,6 +63,8 @@ type fakeClaudeFixture struct {
 	ArgvLogPath string `json:"argv_log_path"`
 	// StdinLogPath が非空なら、受け取った標準入力をそのまま書き出す。
 	StdinLogPath string `json:"stdin_log_path"`
+	// CwdLogPath が非空なら、起動時の作業ディレクトリをこのファイルへ書く。
+	CwdLogPath string `json:"cwd_log_path"`
 }
 
 func runFakeClaude() int {
@@ -84,6 +86,10 @@ func runFakeClaude() int {
 
 	if fx.ArgvLogPath != "" {
 		appendArgvLog(fx.ArgvLogPath, os.Args[1:])
+	}
+	if fx.CwdLogPath != "" {
+		wd, _ := os.Getwd()
+		_ = os.WriteFile(fx.CwdLogPath, []byte(wd), 0o644)
 	}
 	if fx.StdinLogPath != "" {
 		b, _ := io.ReadAll(os.Stdin)

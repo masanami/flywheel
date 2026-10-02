@@ -269,6 +269,10 @@ func parseErrorCodeTable(t *testing.T, doc string) []codeExit {
 // （AC-162 の対象は S1 の 4 つだけ）。
 var m3S2OnlyErrorCodes = map[ErrorCode]bool{"slot_unavailable": true, "serialized": true}
 
+// m3S2ImplementedErrorCodes は m3S2OnlyErrorCodes のうち、実装済みで期待の集合に数えるもの
+// （slot_unavailable は #102、serialized は #106 が実装して足す。閉集合の照合の仕上げは #108）。
+var m3S2ImplementedErrorCodes = map[ErrorCode]bool{"slot_unavailable": true}
+
 // m1BaseErrorCodeCount は M1 の表のうち、M1 自身が定めた行数（`verification_rejected` まで。
 // その後ろの行は M2・M3 の実装チケットが同じ表へ足したもの）。
 const m1BaseErrorCodeCount = 14
@@ -305,6 +309,9 @@ func TestErrorCodeSet_IsM1M2PlusS1CodesInBothDirections(t *testing.T) {
 	s1 := 0
 	for _, e := range m3 {
 		if m3S2OnlyErrorCodes[e.Code] {
+			if m3S2ImplementedErrorCodes[e.Code] {
+				want[e.Code] = e.ExitCode
+			}
 			continue
 		}
 		want[e.Code] = e.ExitCode

@@ -30,6 +30,10 @@ type fakeClaudeRoute struct {
 	// StartedFile が非空なら、そのファイルへ touch する。SleepFirstSeconds が正の規則では、
 	// 眠る最初の呼び出しの開始時（眠る直前）だけ。そうでない規則では呼び出しのたびに。
 	StartedFile string
+	// ArgvLogPath が非空なら、この規則に一致した呼び出しの引数列（"$*"）を 1 行ずつ追記する。
+	ArgvLogPath string
+	// StdinLogPath が非空なら、この規則に一致した呼び出しの標準入力をそのまま書き出す。
+	StdinLogPath string
 }
 
 // fakeClaudeJ1Match・fakeClaudeJ2Match は J1・J2 の起動の引数列を見分ける部分文字列
@@ -61,6 +65,12 @@ func putRoutedFakeClaudeOnPATH(t *testing.T, routes []fakeClaudeRoute, orderLogP
 		fmt.Fprintf(&b, "*%s*)\n", shellSingleQuote(r.Match))
 		if orderLogPath != "" {
 			fmt.Fprintf(&b, "printf 'claude %%s %%s\\n' %s \"$TITLE\" >> %s\n", shellSingleQuote(r.Tag), shellSingleQuote(orderLogPath))
+		}
+		if r.ArgvLogPath != "" {
+			fmt.Fprintf(&b, "printf '%%s\\n' \"$ARGS\" >> %s\n", shellSingleQuote(r.ArgvLogPath))
+		}
+		if r.StdinLogPath != "" {
+			fmt.Fprintf(&b, "printf '%%s' \"$INPUT\" > %s\n", shellSingleQuote(r.StdinLogPath))
 		}
 		switch {
 		case r.SleepFirstSeconds > 0:

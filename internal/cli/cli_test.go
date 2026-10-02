@@ -671,6 +671,8 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	wantSet["cycle"] = true
 	// #101: 同じ理由で、実装済みの `slot clear` を個別に足す。
 	wantSet["slot clear"] = true
+	// #102: 同じ理由で、実装済みの `run` を個別に足す。
+	wantSet["run"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")

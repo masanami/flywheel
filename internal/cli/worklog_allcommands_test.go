@@ -61,6 +61,9 @@ var worklogReadOnlyCommands = map[string]bool{
 // TestWorklog_NoActivityMutationCommandsAddNoActivity で確かめる。
 var worklogNoActivityMutationCommands = map[string]bool{
 	"slot clear": true,
+	// run（#102）は run・cycle・slot 表を書くが、それらの書き込みは作業ログに載せない。J3 と
+	// 委譲の起動までは課題の状態を変えない（結末の写像は #104。そこで変更系のケースへ移す）。
+	"run": true,
 }
 
 // worklogIngestRepo は worklogCases の "ingest create" ケースが使う偽の

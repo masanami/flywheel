@@ -61,7 +61,15 @@ func (l *Launcher) InvokeJudgment(ctx context.Context, in core.JudgmentLaunchInp
 	}
 
 	args := buildArgs(in)
-	res := runClaude(ctx, claudePath, in.Workspace, args, stdin, timeout)
+	return finishClaudeRun(ctx, claudePath, in.Workspace, in.Workspace, in.RunDir, args, stdin, timeout), nil
+}
+
+// finishClaudeRun は claude を args・stdin で起動して待ち、応答を
+// core.JudgmentLaunchOutput へ正規化して、標準入力・標準出力・標準エラーを runDir へ保存する
+// （判断の呼び出しと委譲の起動が共有する）。workDir は子の作業ディレクトリ、workspace は
+// .gitignore の保険の更新先。
+func finishClaudeRun(ctx context.Context, claudePath, workDir, workspace, runDir string, args []string, stdin []byte, timeout time.Duration) core.JudgmentLaunchOutput {
+	res := runClaude(ctx, claudePath, workDir, args, stdin, timeout)
 
 	var launchErr error
 	if res.launchFailed {
@@ -102,7 +110,7 @@ func (l *Launcher) InvokeJudgment(ctx context.Context, in core.JudgmentLaunchInp
 	// （self-review 指摘 round1: 保存失敗を launch_failed へすり替えると
 	// 実行済みの run の費用が0に落ちる）。保存できなかった事実だけを
 	// ErrorSummary に付記する（既存のエラー要約があれば残しつつ追記する）。
-	if err := saveRunArtifacts(in.RunDir, stdin, res.stdout, res.stderr); err != nil {
+	if err := saveRunArtifacts(runDir, stdin, res.stdout, res.stderr); err != nil {
 		note := fmt.Sprintf("invoker: save run artifacts: %v", err)
 		if out.ErrorSummary == "" {
 			out.ErrorSummary = note
@@ -114,9 +122,9 @@ func (l *Launcher) InvokeJudgment(ctx context.Context, in core.JudgmentLaunchInp
 	// 影響させない（ベストエフォート。runs/ の既定はワークスペース初期化
 	// 〈core.Init〉の時点で core が書く。ここは.gitignoreが後から
 	// 削除された場合の保険）。
-	_ = ensureRunsGitignoreEntry(in.Workspace)
+	_ = ensureRunsGitignoreEntry(workspace)
 
-	return out, nil
+	return out
 }
 
 // buildJudgmentStdin は標準入力のバイト列を組み立てる（§機能全体の設計

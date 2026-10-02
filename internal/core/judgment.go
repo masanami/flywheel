@@ -531,6 +531,14 @@ func runDirPath(workspace, runID string) string {
 // ロックを保持しない」（AC）ことを保証する: 保持するのは heartbeat の
 // 更新中だけで、その間は極めて短い。
 func (s *Store) invokeWithHeartbeat(ctx context.Context, runIDInt int64, in JudgmentLaunchInput, invoker JudgmentInvoker) (JudgmentLaunchOutput, error) {
+	return s.invokeFnWithHeartbeat(ctx, runIDInt, func(ctx context.Context) (JudgmentLaunchOutput, error) {
+		return invoker.InvokeJudgment(ctx, in)
+	})
+}
+
+// invokeFnWithHeartbeat は invoke（子の起動）を別 goroutine で実行して待つ間、
+// heartbeat を更新する（判断の呼び出しと委譲の起動が共有する）。
+func (s *Store) invokeFnWithHeartbeat(ctx context.Context, runIDInt int64, invoke func(context.Context) (JudgmentLaunchOutput, error)) (JudgmentLaunchOutput, error) {
 	interval := s.heartbeatInterval
 	if interval <= 0 {
 		interval = defaultHeartbeatInterval
@@ -542,7 +550,7 @@ func (s *Store) invokeWithHeartbeat(ctx context.Context, runIDInt int64, in Judg
 	}
 	done := make(chan invokeResult, 1)
 	go func() {
-		out, err := invoker.InvokeJudgment(ctx, in)
+		out, err := invoke(ctx)
 		done <- invokeResult{out: out, err: err}
 	}()
 
@@ -679,6 +687,20 @@ func (s *Store) ReapInterruptedRuns(ctx context.Context) error {
 				CostSource:  CostSourceUnknown,
 			}); err != nil {
 				return err
+			}
+			// 中断した委譲の子がまだ作業ツリーで動いているかもしれないので、スロットを
+			// idle に戻さず needs_attention にする（人が確かめて `slot clear` で戻す）。
+			if row.SlotID != nil {
+				if sid, ok := parseSlotID(*row.SlotID); ok {
+					if cur, err := loadSlotByID(ctx, tx, sid); err != nil {
+						return err
+					} else if cur != nil && cur.State == slotStateBusy {
+						if _, err := updateSlotState(ctx, tx, sid, slotStateNeedsAttention, nil,
+							"the delegation run was interrupted; its child may still be working in this tree"); err != nil {
+							return err
+						}
+					}
+				}
 			}
 		}
 		return nil
