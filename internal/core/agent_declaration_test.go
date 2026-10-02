@@ -96,7 +96,8 @@ func TestLoadAgentDeclaration_AllKeysExplicit_DefaultsUsedFalse(t *testing.T) {
 		"timeout_sec": {"judgment": 900, "delegate": 14400},
 		"max_parallel_runs": 2,
 		"rework_limit": 3,
-		"failure_limit": 2
+		"failure_limit": 2,
+		"conflict_prediction_budget_usd": 1
 	}`)
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
@@ -385,5 +386,57 @@ func TestLoadAgentDeclaration_InvalidDeclarationChangesNothingOnDisk(t *testing.
 	after := snapshotDir(t, dir)
 	if before != after {
 		t.Fatalf("workspace changed after a rejected declaration:\nbefore=%s\nafter=%s", before, after)
+	}
+}
+
+// --- #100: conflict_prediction_budget_usd ---
+
+func TestLoadAgentDeclaration_ConflictPredictionBudget_DefaultWhenOmitted(t *testing.T) {
+	decl, err := LoadAgentDeclaration(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decl.ConflictPredictionBudgetUSD != 1 {
+		t.Errorf("ConflictPredictionBudgetUSD = %v, want 1", decl.ConflictPredictionBudgetUSD)
+	}
+	// キーだけを省略した宣言でも既定値の使用が示される。
+	dir := writeAgentJSON(t, `{"version": 1, "position_file": "p.md", "cycle_budget_usd": 300,
+		"size_budgets_usd": {"S": {"impl": 30, "review": 25}, "M": {"impl": 50, "review": 30}, "L": {"impl": 100, "review": 40}},
+		"max_run_budget_usd": 200, "judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5},
+		"timeout_sec": {"judgment": 900, "delegate": 14400}, "max_parallel_runs": 2, "rework_limit": 3, "failure_limit": 2}`)
+	d, err := LoadAgentDeclaration(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.DefaultsUsed || d.ConflictPredictionBudgetUSD != 1 {
+		t.Errorf("DefaultsUsed=%v budget=%v, want true/1", d.DefaultsUsed, d.ConflictPredictionBudgetUSD)
+	}
+}
+
+func TestLoadAgentDeclaration_ConflictPredictionBudget_ExplicitValue(t *testing.T) {
+	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{"conflict_prediction_budget_usd": 2.5}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decl.ConflictPredictionBudgetUSD != 2.5 {
+		t.Errorf("got %v, want 2.5", decl.ConflictPredictionBudgetUSD)
+	}
+}
+
+func TestLoadAgentDeclaration_ConflictPredictionBudget_ZeroAndNegativeAreInvalid(t *testing.T) {
+	for name, v := range map[string]string{"zero": "0", "negative": "-1"} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeAgentJSON(t, `{"conflict_prediction_budget_usd": `+v+`}`)
+			if _, err := LoadAgentDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
+				t.Fatalf("error = %v, want ErrConfigInvalid", err)
+			}
+		})
+	}
+}
+
+func TestLoadAgentDeclaration_ConflictPredictionBudget_WrongTypeIsInvalid(t *testing.T) {
+	dir := writeAgentJSON(t, `{"conflict_prediction_budget_usd": "1"}`)
+	if _, err := LoadAgentDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("error = %v, want ErrConfigInvalid", err)
 	}
 }

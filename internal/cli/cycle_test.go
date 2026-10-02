@@ -39,7 +39,8 @@ const cycleFullAgentJSON = `{
   "timeout_sec": {"judgment": 900, "delegate": 14400},
   "max_parallel_runs": 2,
   "rework_limit": 3,
-  "failure_limit": 2
+  "failure_limit": 2,
+  "conflict_prediction_budget_usd": 1
 }`
 
 // cycleDoc は `cycle --json` の出力の最上位（cycle・config_defaults_used・phases・rate_limited）。
