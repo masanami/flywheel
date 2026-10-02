@@ -109,9 +109,10 @@ func TestOpenWorkspace_UpgradesSchemaVersion3StoreToVersion4(t *testing.T) {
 	_, s := openSchemaVersion3Fixture(t)
 	ctx := context.Background()
 
-	// AC-165: 版が 4 になる。
-	if got := schemaVersionForTest(t, s); got != 4 {
-		t.Fatalf("schema version = %d, want 4 (AC-165)", got)
+	// AC-165: 版が 4 になる（0005 を足した後は OpenWorkspace が最新版の 5 まで
+	// 適用する。版 5 への移行は schema_v5_slot_test.go が検証する）。
+	if got := schemaVersionForTest(t, s); got != 5 {
+		t.Fatalf("schema version = %d, want 5 (AC-165 + AC-370)", got)
 	}
 
 	// AC-166: 既存の課題・計画・承認・保留・作業ログ・対応の記録が件数と
@@ -168,59 +169,6 @@ func TestOpenWorkspace_UpgradesSchemaVersion3StoreToVersion4(t *testing.T) {
 	// 生の列を直接読む。
 	if got := loadActivityRunIDForTest(t, s, 1); got != nil {
 		t.Fatalf("activity.run_id = %v, want nil (AC-167)", got)
-	}
-}
-
-// TestOpenWorkspace_Version4ColumnSetIsFixed は列の集合を PRAGMA table_info
-// で固定し、0005（slot・run_artifact・run.slot_id・run.decider・
-// run.decider_row・flywheel budget の上書き）の列が無いことを確認する。
-func TestOpenWorkspace_Version4ColumnSetIsFixed(t *testing.T) {
-	_, s := openSchemaVersion3Fixture(t)
-
-	wantRunColumns := []string{
-		"id", "cycle_id", "kind", "judgment", "challenge_id", "challenge_version", "plan_version",
-		"session_id", "session_id_mismatch", "resumed_from_run_id", "pid", "host", "heartbeat_at",
-		"started_at", "ended_at", "result", "rate_limited", "max_budget_usd", "budget_bucket",
-		"cost_usd", "cost_source", "reported_total_cost_usd", "output", "error",
-	}
-	if got := pragmaTableInfoColumnsForTest(t, s, "run"); !stringSlicesEqual(got, wantRunColumns) {
-		t.Fatalf("run columns = %v, want %v", got, wantRunColumns)
-	}
-
-	wantCycleColumns := []string{"id", "trigger", "started_at", "ended_at", "result", "budget_usd", "spent_usd"}
-	if got := pragmaTableInfoColumnsForTest(t, s, "cycle"); !stringSlicesEqual(got, wantCycleColumns) {
-		t.Fatalf("cycle columns = %v, want %v", got, wantCycleColumns)
-	}
-
-	wantLockColumns := []string{"name", "holder", "pid", "host", "acquired_at", "heartbeat_at"}
-	if got := pragmaTableInfoColumnsForTest(t, s, "lock"); !stringSlicesEqual(got, wantLockColumns) {
-		t.Fatalf("lock columns = %v, want %v", got, wantLockColumns)
-	}
-
-	taskPlanColumns := pragmaTableInfoColumnsForTest(t, s, "task_plan")
-	if !containsString(taskPlanColumns, "spec") {
-		t.Fatalf("task_plan columns = %v, want to contain spec", taskPlanColumns)
-	}
-	holdColumns := pragmaTableInfoColumnsForTest(t, s, "hold")
-	if !containsString(holdColumns, "run_id") {
-		t.Fatalf("hold columns = %v, want to contain run_id", holdColumns)
-	}
-	activityColumns := pragmaTableInfoColumnsForTest(t, s, "activity")
-	if !containsString(activityColumns, "run_id") {
-		t.Fatalf("activity columns = %v, want to contain run_id", activityColumns)
-	}
-
-	// 0005 の列・表が無いこと。
-	for _, col := range []string{"slot_id", "decider", "decider_row"} {
-		if containsString(pragmaTableInfoColumnsForTest(t, s, "run"), col) {
-			t.Fatalf("run columns unexpectedly contain 0005 column %q", col)
-		}
-	}
-	if tableExistsForTest(t, s, "slot") {
-		t.Fatalf("table slot should not exist yet (0005)")
-	}
-	if tableExistsForTest(t, s, "run_artifact") {
-		t.Fatalf("table run_artifact should not exist yet (0005)")
 	}
 }
 
