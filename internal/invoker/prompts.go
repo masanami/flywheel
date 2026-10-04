@@ -95,6 +95,7 @@ var resumePromptFile = map[core.ResumeKind]string{
 	core.ResumeKindAnswer:      "resume/answer.md",
 	core.ResumeKindInterrupted: "resume/interrupted.md",
 	core.ResumeKindBudget:      "resume/budget.md",
+	core.ResumeKindRework:      "resume/rework.md",
 }
 
 const resumePromptLimit = 2048

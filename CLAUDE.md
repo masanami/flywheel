@@ -26,7 +26,7 @@
 | `internal/core/internal/store` | SQLite の接続・PRAGMA・スキーマ・マイグレーション |
 | `internal/core/coretest` | core のテスト支援専用（実ストアのフィクスチャ生成等）。`*_test.go` からだけ import し、本番バイナリの依存に含めない（`internal/cli/depcheck_test.go` が検査） |
 | `internal/cli` | コマンドの定義・JSON／テキスト出力・終了コードとエラーコードの写像・端末での本人確認 |
-| `internal/adapters/github` | `gh` の起動と応答の正規化（GitHub Issue の取得）。core の取得 IF（`internal/core/upstream.go`）だけに依存し、取り込みの規則は持たない。ストアを import しない |
+| `internal/adapters/github` | `gh` の起動と応答の正規化（GitHub Issue・ブランチ・PR・PR のチェックの取得）。core の取得 IF（`internal/core/upstream.go`）だけに依存し、取り込みの規則・CI の完了の判定規則は持たない。ストアを import しない |
 | `internal/adapters/git` | スロットの作業ツリーの検査と `git worktree add` の払い出し（`git` の起動）。core のスロットの IF（`internal/core/slot_git.go` の `SlotGit`）だけに依存し、割り当ての規則・origin の正規化は持たない。ストアを import しない。`GIT_DIR`・`GIT_WORK_TREE` を明示し、`fetch`・`clone` をしない |
 | `internal/invoker` | `claude` の起動（判断の呼び出し〔`InvokeJudgment`〕と委譲〔`InvokeDelegation`〕）・結果の判別・費用の抽出（生の値）・出力の保存。委譲の標準入力は、埋め込んだ固定の節の雛形を差し込んで組み立てる（`BuildDelegationStdin`）。判断点の指示文と J3 ブリーフの固定の節の雛形は `internal/invoker/prompts/` に置き `embed` でバイナリへ埋め込む（`Instructions`・`BriefFixedSections`）。分量の上限検査（`CheckPromptSizes`）・禁止語の生成と照合（`ForbiddenTerms`・`FindForbiddenTerms`。生成元は core・cli の定義を引数で受け取る純粋関数）もここに置く。枠超過の判定規則（`IsRateLimited`）は `internal/core` に置き、invoker は抽出した自由記述をそのまま渡すだけ。core の判断の呼び出し IF（`internal/core/judgment.go` の `JudgmentInvoker`）と委譲の起動 IF（`internal/core/delegate.go` の `DelegationInvoker`）だけに依存し、対象の選び方・予算の評価・課題への写像といった規則は持たない。ストアを import しない |
 

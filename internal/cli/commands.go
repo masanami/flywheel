@@ -178,18 +178,26 @@ func defaultCommands() []Command {
 			Run:           runSubmit,
 		},
 		{
+			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2）が
+			// `--auto [<C-ID>]` を足す。`--auto` と `--result` は OneOfGroups でちょうど
+			// 1 つを要求する（同時指定・両方省略は usage_error）。位置引数の数（0〜1）は
+			// 「--auto は ID を省略できる・--result は ID が必須」という条件付きの規則に
+			// なるため、runVerify が --result のときだけ位置引数の有無を検査する
+			// （classify と同じ形）。
 			Path:          []string{"verify"},
 			RequiresStore: true,
-			MinPositional: 1,
+			MinPositional: 0,
 			MaxPositional: 1,
 			Flags: []flagDef{
-				{Name: "result", HasValue: true, Required: true},
+				{Name: "result", HasValue: true},
 				// --question は T10 (verify --result uncertain) にだけ要るが、
 				// 省略は validation_failed（usage_error ではない）にすると仕様で
 				// 決まっているため、ここでは必須フラグにしない。
 				{Name: "question", HasValue: true},
+				{Name: "auto", HasValue: false},
 			},
-			Run: runVerify,
+			OneOfGroups: [][]string{{"result", "auto"}},
+			Run:         runVerify,
 		},
 		{
 			Path:          []string{"hold"},

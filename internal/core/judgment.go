@@ -257,6 +257,9 @@ type RunJudgmentInput struct {
 	// 呼び出し元と同じ）予算の評価を行わず、run の cycle_id は NULL のまま
 	// 記録する。
 	CycleID *string
+	// PlanVersion が非 nil なら、run の plan_version に記録する（J5 が、同じ計画の版の差し戻しの
+	// 回数を数えるために使う。他の判断点は nil のまま）。
+	PlanVersion *int64
 }
 
 // RunJudgmentResult は Store.RunJudgment の出力。
@@ -396,6 +399,7 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 			Kind:             runKindJudgment,
 			Judgment:         in.Judgment,
 			ChallengeVersion: int64(ch.Version),
+			PlanVersion:      in.PlanVersion,
 			SessionID:        sessionID,
 			ResumedFromRunID: resumeFromRunIDInt,
 			PID:              pid,

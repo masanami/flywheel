@@ -411,3 +411,27 @@ func InsertApprovedPlan(t *testing.T, workspace string, challengeID int, body, s
 		t.Fatalf("coretest: InsertApprovedPlan(%d): %v", challengeID, err)
 	}
 }
+
+// InsertRunArtifact はテスト専用のフィクスチャとして、runID（内部整数 ID）の run の成果物を
+// 1 件挿入する（kind は branch | pr | commit。state・base は PR のときだけ。空は NULL）。
+// internal/cli の `verify --auto` のテストが、委譲の照合を経由せず、PR を成果物に持つ課題を
+// 用意するために使う。
+func InsertRunArtifact(t *testing.T, workspace string, runID int64, kind, ref, state, base string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	nullable := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO run_artifact (run_id, kind, ref, state, base, verified_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			runID, kind, ref, nullable(state), nullable(base), "2026-10-02T00:00:00.000Z")
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertRunArtifact: %v", err)
+	}
+}

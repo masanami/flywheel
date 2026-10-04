@@ -421,6 +421,8 @@ var runLevelUsageErrorCases = [][]string{
 	{"classify", "--priority", "P0"},                            // --priority に課題の ID が無い（#84。--auto は ID を省略できるため MinPositional では表せない）
 	{"plan", "--stdin"},                                         // --file／--stdin に課題の ID が無い（#85。--auto は ID を省略できるため MinPositional では表せない）
 	{"budget", "C-1", "--impl-usd", "x"},                        // --impl-usd が数でない（#105）
+	{"verify", "--result", "met"},                               // --result に課題の ID が無い（--auto は ID を省略できるため MinPositional では表せない）
+	{"verify", "--auto", "--question", "q"},                     // --auto と --question の同時指定（J5 は問いを自分で作る）
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の

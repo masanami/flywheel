@@ -59,6 +59,10 @@ type Overview struct {
 	// NeedsHumanBudgetExhausted は実装枠の残りが 1 USD 未満の着手中の課題（challenge_id 昇順。
 	// status.needs_human.budget_exhausted。S2）。無ければ空スライス。
 	NeedsHumanBudgetExhausted []BudgetExhausted
+	// WaitingExternal は CI の完了を待っている検証中の課題（status.waiting_external.challenges。S2）。
+	// GetOverview は GitHub を呼ばないため空のまま返し、呼び出し元が ListWaitingExternal の結果を
+	// 入れる。
+	WaitingExternal []WaitingExternal
 }
 
 // DiscrepancyKind は Discrepancy.Kinds の値（docs/features/
@@ -241,7 +245,7 @@ func (s *Store) GetOverview(ctx context.Context) (*Overview, error) {
 // agent が nil のときの needs_human.budget_exhausted は、計画の出力が枠の額を明記する課題だけを
 // 判定できる。
 func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*Overview, error) {
-	var result Overview
+	result := Overview{WaitingExternal: []WaitingExternal{}}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		humanChallenges, err := listChallengesInStatuses(ctx, tx, needsHumanStatuses)
 		if err != nil {
