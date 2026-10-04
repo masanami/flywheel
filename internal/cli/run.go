@@ -61,6 +61,7 @@ func runRun(a Args) (any, error) {
 		Delegate:    launcher,
 		Upstream:    newUpstreamThreadSource(),
 		Git:         git.New(),
+		Reconcile:   newBranchSource(),
 		CycleID:     cyc.ID,
 	})
 

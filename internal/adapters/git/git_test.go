@@ -515,3 +515,27 @@ func TestGitNotFoundIsCoreGitUnavailable(t *testing.T) {
 		t.Error("ErrGitNotFound must wrap core.ErrGitUnavailable")
 	}
 }
+
+// 照合が報告のブランチの無いときに使う、作業ツリーの現在のブランチ。detached HEAD は "" になる。
+func TestInspect_ReportsCurrentBranch(t *testing.T) {
+	clone := newClone(t, "https://github.com/o/r.git")
+	g := New()
+	st, err := g.Inspect(context.Background(), core.SlotTree{Path: clone})
+	if err != nil || st.Branch != "main" {
+		t.Fatalf("Branch = %q, err=%v; want main", st.Branch, err)
+	}
+	gitIn(t, clone, "checkout", "-b", "feat/x")
+	if st, err = g.Inspect(context.Background(), core.SlotTree{Path: clone}); err != nil || st.Branch != "feat/x" {
+		t.Fatalf("Branch = %q, err=%v; want feat/x", st.Branch, err)
+	}
+
+	base := newClone(t, "https://github.com/o/r.git")
+	path := filepath.Join(t.TempDir(), "wt", "SL-1")
+	if _, err := g.EnsureWorktree(context.Background(), req(base, path)); err != nil {
+		t.Fatal(err)
+	}
+	st, err = g.Inspect(context.Background(), core.SlotTree{Path: path, BaseClone: base})
+	if err != nil || st.Branch != "" || !st.PointerOK {
+		t.Fatalf("detached worktree state = %+v, err=%v; want empty Branch", st, err)
+	}
+}

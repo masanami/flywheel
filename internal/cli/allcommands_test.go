@@ -163,7 +163,7 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		slotClone(t, filepath.Join(ws, "slot-f"), "https://github.com/o/flywheel.git")
 		slotClone(t, filepath.Join(ws, "slot-d"), "git@github.com:o/direct.git")
 		id := newInProgressForRun(t, ws, nil)
-		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{delegateRoute("completed"), j3Route("b")}, "")
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{delegateRoute("blocked"), j3Route("b")}, "")
 		return []string{"run", id}
 	}},
 	"slot clear": {setup: func(t *testing.T, ws string) []string {

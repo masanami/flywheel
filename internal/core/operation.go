@@ -60,6 +60,18 @@ func nullableRef(r *string) any {
 // （親要件チケット #4 §アーキテクチャ決定: 「未承認の不可逆操作の集合の変化を
 // 課題の版の比較で検出するため」）。
 func (s *Store) CreateOperation(ctx context.Context, ch Channel, in OperationInput) (*IrreversibleOperation, error) {
+	return s.createOperation(ctx, ch, nil, false, in)
+}
+
+// errOperationDuplicate は createOperation が skipDuplicate で、同じ課題に同じ種類・
+// 同じ参照の不可逆操作が既にあったことを表す内部の sentinel（何も書かない）。
+var errOperationDuplicate = errors.New("core: an operation with the same kind and ref already exists")
+
+// createOperation は CreateOperation の本体。runID が非 nil なら作業ログの run_id に
+// その run を書く（委譲の照合が経路 invoker で登録する）。skipDuplicate なら、同じ課題に
+// 同じ種類・同じ参照の操作が既にあるとき（参照が無い入力では判定しない）、同じトランザク
+// ションの中で errOperationDuplicate を返して何も書かない。
+func (s *Store) createOperation(ctx context.Context, ch Channel, runID *int64, skipDuplicate bool, in OperationInput) (*IrreversibleOperation, error) {
 	kind, ok := ParseOperationKind(in.Kind)
 	if !ok {
 		return nil, ErrValidation
@@ -72,14 +84,29 @@ func (s *Store) CreateOperation(ctx context.Context, ch Channel, in OperationInp
 		return nil, ErrNotFound
 	}
 
+	actor, err := resolveActor()
+	if err != nil {
+		return nil, err
+	}
 	var result *IrreversibleOperation
-	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
+	err = s.mutateAsRun(ctx, actor, ch, VerificationNone, runID, func(tx *sql.Tx, rec *activityRecorder) error {
 		current, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
 			return err
 		}
 		if IsTerminal(Table, StatusVocabulary, current.Status) {
 			return ErrTerminalState
+		}
+		if skipDuplicate && in.Ref != nil {
+			var n int
+			if err := tx.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM operation WHERE challenge_id = ? AND kind = ? AND ref = ?`,
+				cid, string(kind), *in.Ref).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return errOperationDuplicate
+			}
 		}
 
 		nowStr := formatTimestamp(rec.at)

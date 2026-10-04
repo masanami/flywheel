@@ -90,6 +90,11 @@ func TestRun_DelegatesAndReturnsAPhaseObject(t *testing.T) {
 	id := newInProgressForRun(t, ws, nil)
 	orderLog := filepath.Join(t.TempDir(), "order.log")
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{delegateRoute("completed"), j3Route("BRIEF-CLI-MARKER")}, orderLog)
+	// 委譲の後の照合（報告にブランチが無いので、スロットの現在のブランチ main で調べる）。
+	ghCalls := withFakeGHRoutesOnPATH(t, []fakeGHRoute{
+		{match: "repos/o/direct/branches/main", stdout: "HTTP/2.0 200 OK\r\n\r\n{\"name\":\"main\"}", exit: 0},
+		{match: "repos/o/direct/pulls?head=o%3Amain&page=1&per_page=100&state=all", stdout: `[{"html_url":"https://github.com/o/flywheel/pull/9","title":"t","state":"open","merged_at":null,"base":{"ref":"develop"}}]`, exit: 0},
+	})
 
 	out := runJSON(t, ws, "run")
 	if len(out) != 1 {
@@ -104,7 +109,7 @@ func TestRun_DelegatesAndReturnsAPhaseObject(t *testing.T) {
 		t.Fatalf("items = %v", items)
 	}
 	it := items[0].(map[string]any)
-	if it["challenge_id"] != id || it["result"] != "succeeded" || it["outcome"] != "completed" || it["status"] != nil {
+	if it["challenge_id"] != id || it["result"] != "succeeded" || it["outcome"] != "completed" || it["status"] != "verifying" {
 		t.Errorf("item = %v", it)
 	}
 	if got := orderLogTags(readOrderLog(t, orderLog)); strings.Join(got, ",") != "claude J3,claude DELEGATE" {
@@ -122,6 +127,17 @@ func TestRun_DelegatesAndReturnsAPhaseObject(t *testing.T) {
 	for _, want := range []string{"BRIEF-CLI-MARKER", "意思決定者: child", "該当した行: 4", "Closes #<Issue 番号>"} {
 		if !strings.Contains(string(stdin), want) {
 			t.Errorf("delegation stdin lacks %q", want)
+		}
+	}
+	// 照合の gh はすべて GET（api サブコマンドで、書き込みのフラグを持たない）。
+	calls := ghCalls()
+	if len(calls) != 2 {
+		t.Fatalf("gh calls = %v, want the branch and the pull request lookups", calls)
+	}
+	for _, c := range calls {
+		c = strings.TrimPrefix(c, "CALL ")
+		if !strings.HasPrefix(c, "api ") || strings.Contains(c, " -X") || strings.Contains(c, "--method") || strings.Contains(c, " -f ") || strings.Contains(c, " -F ") {
+			t.Errorf("gh call is not a plain GET: %q", c)
 		}
 	}
 	// 委譲の後、スロットは idle に戻る。

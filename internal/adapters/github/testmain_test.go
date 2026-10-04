@@ -61,6 +61,24 @@ func runFakeGH(argv []string) int {
 	}
 
 	switch os.Getenv(envScenario) {
+	case "branch_exists":
+		return fakeGHStatusLine("HTTP/2.0 200 OK", `{"name":"feat/x"}`)
+	case "branch_missing":
+		return fakeGHStatusLine("HTTP/2.0 404 Not Found", notFoundBody())
+	case "branch_http500":
+		return fakeGHStatusLine("HTTP/2.0 500 Internal Server Error", `{"message":"boom"}`)
+	case "pulls_three_states":
+		fmt.Print(`[
+{"html_url":"https://github.com/o/r/pull/1","title":"open one","state":"open","merged_at":null,"base":{"ref":"main"}},
+{"html_url":"https://github.com/o/r/pull/2","title":"closed one","state":"closed","merged_at":null,"base":{"ref":"develop"}},
+{"html_url":"https://github.com/o/r/pull/3","title":"merged one","state":"closed","merged_at":"2026-10-01T00:00:00Z","base":{"ref":"main"}}
+]`)
+		return 0
+	case "pulls_two_pages":
+		return fakeGHPullsTwoPages(argv)
+	case "pulls_fail":
+		fmt.Fprintln(os.Stderr, "gh: connection refused")
+		return 1
 	case "sleep":
 		return fakeGHSleep()
 	case "sleep_with_grandchild":
