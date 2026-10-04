@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 )
 
 // NotStartedReason は周で起動しなかった課題の理由（§IF / API「cycle の JSON
@@ -76,12 +77,14 @@ type JudgmentAutoItem struct {
 type JudgmentAutoResult struct {
 	Items      []JudgmentAutoItem
 	NotStarted []NotStarted
+	// SerialGroups は委譲の段（run）が作った直列化グループ（他の段では nil）。
+	SerialGroups []SerialGroup
 }
 
 // JudgmentCycle は 1 つの周の中の判断の呼び出しを束ね、§枠超過の「枠超過を
 // 1 件でも記録した周は、その周の残りの判断の呼び出しと委譲を起動しない」
-// を守る。周ごとにゼロ値で作り、周をまたいで使い回さない。並行に使わない
-// （判断の段は逐次＝§アーキテクチャ決定「委譲の段だけ並列」）。
+// を守る。周ごとにゼロ値で作り、周をまたいで使い回さない。判断の段は逐次、
+// 委譲の段は直列化グループごとに並行に使う（枠超過の記録は並行に呼んでも安全）。
 //
 // #83: NewJudgmentCycle で周の ID（"Y-<n>"）を渡すと、この周が起動する
 // すべての run にその ID を紐づけ、Store.RunJudgment の§予算ガードの評価を
@@ -89,7 +92,7 @@ type JudgmentAutoResult struct {
 // （run の cycle_id は NULL・予算の評価を行わない）を保つ。
 type JudgmentCycle struct {
 	cycleID     string
-	rateLimited bool
+	rateLimited atomic.Bool
 }
 
 // NewJudgmentCycle は、周 cycleID（"Y-<n>"。Store.BeginCycle が返した値）の
@@ -100,7 +103,7 @@ func NewJudgmentCycle(cycleID string) *JudgmentCycle {
 
 // RateLimited は、この周で枠超過を記録した run があったかを返す
 // （cycle の JSON 出力の rate_limited）。
-func (c *JudgmentCycle) RateLimited() bool { return c.rateLimited }
+func (c *JudgmentCycle) RateLimited() bool { return c.rateLimited.Load() }
 
 // RunJudgment は、この周で枠超過が未記録なら s.RunJudgment を呼び、返った
 // run が枠超過なら以後の起動を止める。既に枠超過を記録していれば起動も
@@ -112,7 +115,7 @@ func (c *JudgmentCycle) RateLimited() bool { return c.rateLimited }
 // 処理…を続ける」＝この周の次の課題の評価は独立に行う）。
 // 返り値は run の結果と NotStarted のどちらか一方だけが非 nil（エラー時は両方 nil）。
 func (c *JudgmentCycle) RunJudgment(ctx context.Context, s *Store, in RunJudgmentInput) (*RunJudgmentResult, *NotStarted, error) {
-	if c.rateLimited {
+	if c.rateLimited.Load() {
 		return nil, &NotStarted{ChallengeID: in.ChallengeID, Reason: NotStartedRateLimited}, nil
 	}
 	if c.cycleID != "" {
@@ -127,7 +130,7 @@ func (c *JudgmentCycle) RunJudgment(ctx context.Context, s *Store, in RunJudgmen
 		return nil, nil, err
 	}
 	if res.RateLimited {
-		c.rateLimited = true
+		c.rateLimited.Store(true)
 	}
 	return res, nil, nil
 }

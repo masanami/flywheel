@@ -153,7 +153,11 @@ func cyclePhaseJSON(p core.CyclePhaseResult) map[string]any {
 		}
 		return map[string]any{"phase": string(p.Phase), "skipped": p.Skipped, "result": result}
 	}
-	out := judgmentPhaseJSON(string(p.Phase), &core.JudgmentAutoResult{Items: p.Items, NotStarted: p.NotStarted})
+	res := &core.JudgmentAutoResult{Items: p.Items, NotStarted: p.NotStarted, SerialGroups: p.SerialGroups}
+	out := judgmentPhaseJSON(string(p.Phase), res)
+	if p.Phase == core.CyclePhaseRun {
+		out = delegationPhaseJSON(res)
+	}
 	out["skipped"] = p.Skipped
 	return out
 }

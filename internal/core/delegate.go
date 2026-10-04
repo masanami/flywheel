@@ -96,6 +96,9 @@ type DelegateInput struct {
 	// Reconcile は委譲の後の照合が呼ぶ、リモートのブランチと head ブランチの PR の取得
 	// （GET だけ）。
 	Reconcile UpstreamBranchSource
+	// Predictor は衝突の予測の口の起動（nil なら予測の口を呼べず、予測が要るリポジトリの
+	// 委譲の候補は 1 つの直列化グループに入る）。
+	Predictor ConflictPredictor
 	// CycleID はこの操作が属する周（BeginCycle が返した ID）。空は ErrValidation。
 	CycleID string
 	// Cycle が非 nil なら、枠超過の状態をこの JudgmentCycle と共有する。
@@ -383,8 +386,6 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if in.Cycle != nil && in.Cycle.cycleID != in.CycleID {
 		return nil, ErrValidation
 	}
-	result := &DelegateResult{}
-
 	if in.ChallengeID != nil {
 		ch, err := s.loadChallengeForAuto(ctx, *in.ChallengeID)
 		if err != nil {
@@ -406,12 +407,7 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 		if active {
 			return nil, ErrRunInProgress
 		}
-		item, notStarted, err := s.delegateOne(ctx, in, nil, *ch)
-		if err != nil {
-			return nil, err
-		}
-		appendDelegateOutcome(result, item, notStarted)
-		return result, nil
+		return s.runSingleDelegation(ctx, in, *ch)
 	}
 
 	var targetIDs []int64
@@ -427,26 +423,11 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if jc == nil {
 		jc = NewJudgmentCycle(in.CycleID)
 	}
-	for _, cid := range targetIDs {
-		ch, err := s.loadChallengeForAuto(ctx, formatChallengeID(cid))
-		if err != nil {
-			return nil, err
-		}
-		if ch.Status != StatusInProgress {
-			continue
-		}
-		item, notStarted, err := s.delegateOne(ctx, in, jc, *ch)
-		if err != nil {
-			// 1 件の課題の問題（承認済みの計画が今の宣言と合わない等）で、他の課題の委譲を
-			// 止めない。ストアの障害など、それ以外のエラーだけが全体を打ち切る。
-			if errors.Is(err, ErrRunInProgress) || errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrValidation) {
-				continue
-			}
-			return nil, err
-		}
-		appendDelegateOutcome(result, item, notStarted)
+	plan, err := s.planDelegation(ctx, in, targetIDs)
+	if err != nil {
+		return nil, err
 	}
-	return result, nil
+	return s.executePlan(ctx, in, jc, plan)
 }
 
 func appendDelegateOutcome(r *DelegateResult, item *JudgmentAutoItem, notStarted *NotStarted) {
@@ -461,7 +442,7 @@ func appendDelegateOutcome(r *DelegateResult, item *JudgmentAutoItem, notStarted
 // delegateOne は課題 1 件の J3 と委譲を実行する。jc が非 nil なら周の枠超過・上限・スロットの
 // 不足を NotStarted で返し、nil（ID を指定した個別の操作）ならエラーで返す。item と
 // notStarted はどちらか一方だけが非 nil（エラー時は両方 nil）。
-func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentCycle, ch Challenge) (*JudgmentAutoItem, *NotStarted, error) {
+func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentCycle, ch Challenge, run *delegateRun) (*JudgmentAutoItem, *NotStarted, error) {
 	if jc != nil && jc.RateLimited() {
 		return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedRateLimited}, nil
 	}
@@ -483,6 +464,21 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 		return nil, nil, ErrBudgetExceeded
 	}
 
+	// 同時の起動の上限と使えるスロットの枠。空くまで同じ周の中で待つ（J3 の費用を払う前）。
+	adm, err := run.admit(ctx, jc)
+	if err != nil {
+		if jc != nil && errors.Is(err, ErrSlotUnavailable) {
+			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedSlotUnavailable}, nil
+		}
+		return nil, nil, err
+	}
+	defer adm.finish()
+	// 待っている間に別のグループが枠超過を記録したかもしれない（--resume は J3 を呼ばないので、
+	// ここで確かめ直す）。
+	if jc != nil && jc.RateLimited() {
+		return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedRateLimited}, nil
+	}
+
 	// J3 と実装枠の両方が周の上限に入らないなら、J3 の費用を払う前に起動しない
 	// （最終の評価は、スロットの割り当てと同じトランザクションの中で行う）。
 	// `--resume` の再開は J3 を呼ばない（子は前の文脈を持つ）。
@@ -497,7 +493,7 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 		return nil, nil, err
 	}
 	if dc.Resume != nil {
-		return s.launchDelegation(ctx, in, jc, dc, "")
+		return s.launchDelegation(ctx, in, jc, dc, "", adm)
 	}
 	sections, notStarted, err := s.prepareJ3(ctx, in, dc)
 	if err != nil || notStarted != nil {
@@ -537,12 +533,12 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 		return &JudgmentAutoItem{ChallengeID: j3.ChallengeID, RunID: j3.RunID, Result: RunResultInvalidOutput}, nil, nil
 	}
 
-	return s.launchDelegation(ctx, in, jc, dc, brief)
+	return s.launchDelegation(ctx, in, jc, dc, brief, adm)
 }
 
 // launchDelegation はスロットの割り当てと委譲の run の記録（同じトランザクション）・子の起動・
 // 結果の記録とスロットの解放を行う。
-func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *JudgmentCycle, dc *delegationContext, brief string) (*JudgmentAutoItem, *NotStarted, error) {
+func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *JudgmentCycle, dc *delegationContext, brief string, adm *admission) (*JudgmentAutoItem, *NotStarted, error) {
 	ch := dc.Challenge
 	cid, _ := parseChallengeID(ch.ID)
 	var sessionID string
@@ -603,6 +599,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		return n, nil
 	}
 	assignment, err := s.acquireDelegationSlot(ctx, in, dc, bind)
+	adm.markInserted() // run が記録された（または割り当てに失敗した）。以後は DB の数に入る。
 	switch {
 	case errors.Is(err, ErrSlotUnavailable):
 		if jc != nil {
@@ -745,7 +742,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		return nil, nil, err
 	}
 	if output.RateLimited && jc != nil {
-		jc.rateLimited = true
+		jc.rateLimited.Store(true)
 	}
 
 	if reaped != nil {

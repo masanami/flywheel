@@ -270,8 +270,8 @@ func parseErrorCodeTable(t *testing.T, doc string) []codeExit {
 var m3S2OnlyErrorCodes = map[ErrorCode]bool{"slot_unavailable": true, "serialized": true}
 
 // m3S2ImplementedErrorCodes は m3S2OnlyErrorCodes のうち、実装済みで期待の集合に数えるもの
-// （slot_unavailable は #102、serialized は #106 が実装して足す。閉集合の照合の仕上げは #108）。
-var m3S2ImplementedErrorCodes = map[ErrorCode]bool{"slot_unavailable": true}
+// （slot_unavailable は #102、serialized は #106 が実装した。閉集合の照合の仕上げは #108）。
+var m3S2ImplementedErrorCodes = map[ErrorCode]bool{"slot_unavailable": true, "serialized": true}
 
 // m1BaseErrorCodeCount は M1 の表のうち、M1 自身が定めた行数（`verification_rejected` まで。
 // その後ろの行は M2・M3 の実装チケットが同じ表へ足したもの）。
