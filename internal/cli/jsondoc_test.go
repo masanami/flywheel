@@ -154,6 +154,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3SlotClearShape(t, &doc)
 	addM3RunShape(t, &doc)
 	addM3BudgetShapes(t, &doc)
+	addM3WaitingExternalShapes(t, &doc)
 	return doc
 }
 
@@ -528,6 +529,10 @@ func assertDocumentedEntities(t *testing.T, doc documentedJSON, where string, v 
 	t.Helper()
 	for k, val := range v {
 		entity, known := jsonEntityOf[k]
+		if k == "challenges" && strings.HasSuffix(where, "waiting_external") {
+			// status.waiting_external.challenges の要素は課題の形ではない（S2）。
+			entity, known = "waiting_external_challenge", true
+		}
 		switch x := val.(type) {
 		case map[string]any:
 			if !known {
@@ -724,6 +729,40 @@ func addM3BudgetShapes(t *testing.T, doc *documentedJSON) {
 	doc.topLevel["budget"] = append(doc.topLevel["budget"], map[string]bool{
 		"challenge_id": true, "plan_version": true, "impl_usd": true, "review_usd": true, "approval": true,
 	})
+}
+
+// addM3WaitingExternalShapes は `status.waiting_external` の形（m3 §IF / API「`status`・`show`・
+// `runs` の拡張」の 1 行を直接パースする。第 2 の正本を持たない）を doc へ足す（S2）: status の
+// 最上位のキーに `waiting_external` を足し、`challenges` の要素の形を登録する。
+func addM3WaitingExternalShapes(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	line := m3SpecLine(t, "- `status.waiting_external`（S2。最上位の 4 つ目のキー）: ")
+	backticks := backtickRe.FindAllStringSubmatch(line, -1)
+	if len(backticks) < 2 {
+		t.Fatalf("m3 spec waiting_external line has no shape: %q", line)
+	}
+	shape := backticks[1][1] // {"challenges": [{"challenge_id", "pr_url", "checks": "pending"}]}
+	open := strings.Index(shape, "[{")
+	if open < 0 {
+		t.Fatalf("m3 spec waiting_external shape has no element object: %q", shape)
+	}
+	elem := map[string]bool{}
+	for _, part := range strings.Split(shape[open:], ",") {
+		if q := quotedRe.FindStringSubmatch(part); q != nil {
+			elem[q[1]] = true
+		}
+	}
+	if len(elem) == 0 {
+		t.Fatalf("m3 spec waiting_external element shape has no keys: %q", line)
+	}
+	doc.entity["waiting_external_challenge"] = elem
+	if len(doc.topLevel["status"]) == 0 {
+		t.Fatal("no documented success JSON shape for status")
+	}
+	for _, s := range doc.topLevel["status"] {
+		s["waiting_external"] = true
+	}
+	m3SpecLine(t, "最上位のキーは、M1 の 3 つと `waiting_external` の 4 つである")
 }
 
 // addM3SerialGroupShape は委譲の段の `serial_groups` の要素の形を doc へ足す（#106）。m3 §IF / API

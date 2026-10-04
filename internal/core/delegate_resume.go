@@ -28,6 +28,10 @@ import (
 // 照合は、委譲の段を結線する #108 が行う。
 const NotStartedFailureLimit NotStartedReason = "failure_limit"
 
+// NotStartedReworkLimit は、差し戻しの上限に達したため委譲を起動せず、課題を人間対応待ちに
+// したことを表す（M3P17・M3P39）。閉集合への追加と照合は #108 が行う。
+const NotStartedReworkLimit NotStartedReason = "rework_limit"
+
 // ResumeKind は `--resume` で渡す固定の文面の種類。
 type ResumeKind string
 
@@ -39,6 +43,9 @@ const (
 	// ResumeKindBudget は、実装枠の上限へ到達して止まった run を、`flywheel budget` で枠を増やした
 	// 後に続けさせる再開（上限到達で中断した事実と、続行を求める）。
 	ResumeKindBudget ResumeKind = "budget"
+	// ResumeKindRework は、J5 が達成条件を満たさないと判定して着手中に戻した課題の、直前の委譲の
+	// セッションへの再開（J5 の差し戻しの指摘を渡す）。
+	ResumeKindRework ResumeKind = "rework"
 )
 
 // resumePlan は `--resume` で起動するときの宛先と入力。
@@ -51,6 +58,8 @@ type resumePlan struct {
 	Question string
 	// Branch は子の最後の報告（無ければ照合）のブランチ名。無ければ ""。
 	Branch string
+	// Feedback は Kind が rework のときの J5 の差し戻しの指摘。
+	Feedback string
 }
 
 // failureLimitHit は連続失敗の上限の検出。
@@ -58,6 +67,14 @@ type failureLimitHit struct {
 	Count int
 	Limit int
 	// Last は最後に数えた失敗の run（保留の原因の run になる）。
+	Last runRow
+}
+
+// reworkLimitHit は差し戻しの上限の検出。
+type reworkLimitHit struct {
+	Count int
+	Limit int
+	// Last は最後に数えた J5 の run（保留の原因の run になる）。
 	Last runRow
 }
 
@@ -75,6 +92,8 @@ type holdRef struct {
 type launchHistory struct {
 	Runs  []runRow
 	Holds []holdRef
+	// Verifications は課題の J5 の run（id 昇順。全部の計画の版）。
+	Verifications []runRow
 }
 
 func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*launchHistory, error) {
@@ -104,6 +123,34 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 		}
 		if r != nil {
 			h.Runs = append(h.Runs, *r)
+		}
+	}
+
+	jrows, err := tx.QueryContext(ctx, `SELECT id FROM run WHERE challenge_id = ? AND kind = 'judgment' AND judgment = 'J5' ORDER BY id ASC`, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	var jids []int64
+	for jrows.Next() {
+		var id int64
+		if err := jrows.Scan(&id); err != nil {
+			_ = jrows.Close()
+			return nil, err
+		}
+		jids = append(jids, id)
+	}
+	if err := jrows.Err(); err != nil {
+		_ = jrows.Close()
+		return nil, err
+	}
+	_ = jrows.Close()
+	for _, id := range jids {
+		r, err := loadRunByID(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		if r != nil {
+			h.Verifications = append(h.Verifications, *r)
 		}
 	}
 
@@ -305,6 +352,77 @@ func (h *launchHistory) decideLaunch(planVersion, failureLimit int) (resume *res
 	return nil, nil
 }
 
+// decideRework は J5 の差し戻しに関する 2 つを返す。同じ計画の版の、最後の回答済みの保留より後の
+// J5 の not_met の数が上限に達していれば limit（委譲を起動せず人間対応待ちにする。回数は保留への
+// 回答の後の J5 から数え直す）。そうでなく、最後の J5 が not_met で、その後に委譲の run も回答済みの
+// 保留も無ければ、直前の委譲のセッションを J5 の指摘つきで再開する resume。
+func (h *launchHistory) decideRework(planVersion, reworkLimit int) (resume *resumePlan, limit *reworkLimitHit) {
+	var lastHold *holdRef
+	if n := len(h.Holds); n > 0 && h.Holds[n-1].Answer != nil {
+		lastHold = &h.Holds[n-1]
+	}
+	var verdicts []runRow // 同じ計画の版の、検査を通った J5 の run
+	parsed := map[string]*j5ValidatedOutput{}
+	for _, r := range h.Verifications {
+		if r.PlanVersion == nil || *r.PlanVersion != int64(planVersion) || r.Result != RunResultSucceeded {
+			continue
+		}
+		v, ok := validateJ5Output([]byte(r.Output))
+		if !ok {
+			continue
+		}
+		verdicts = append(verdicts, r)
+		parsed[r.ID] = v
+	}
+
+	count := 0
+	var last *runRow
+	for _, r := range verdicts {
+		if parsed[r.ID].Verdict != J5VerdictNotMet {
+			continue
+		}
+		if lastHold != nil && holdIsAfterRun(*lastHold, r) {
+			continue
+		}
+		count++
+		rr := r
+		last = &rr
+	}
+	if last != nil && count >= reworkLimit {
+		return nil, &reworkLimitHit{Count: count, Limit: reworkLimit, Last: *last}
+	}
+
+	if len(verdicts) == 0 {
+		return nil, nil
+	}
+	latest := verdicts[len(verdicts)-1]
+	if parsed[latest.ID].Verdict != J5VerdictNotMet || (lastHold != nil && holdIsAfterRun(*lastHold, latest)) {
+		return nil, nil
+	}
+	var delegations []runRow
+	for _, r := range h.Runs {
+		if r.PlanVersion != nil && *r.PlanVersion == int64(planVersion) {
+			delegations = append(delegations, r)
+		}
+	}
+	if len(delegations) == 0 {
+		return nil, nil
+	}
+	// J5 の後の委譲が起動に失敗しただけ（launch_failed）なら、指摘はまだ渡せていないので、同じ指摘で
+	// 再開し直す。起動できた委譲（結果が launch_failed 以外）があれば、指摘は渡した後。
+	for _, r := range delegations {
+		if runIntID(r) > runIntID(latest) && r.Result != RunResultLaunchFailed {
+			return nil, nil
+		}
+	}
+	prev := delegations[len(delegations)-1]
+	target := h.effectiveResumeTarget(prev)
+	if target == nil {
+		return nil, nil // セッションが無ければ新しいセッションで始める
+	}
+	return &resumePlan{Kind: ResumeKindRework, Target: *target, Feedback: *parsed[latest.ID].Feedback}, nil
+}
+
 // loadRunBranch は再開元の run の子の最後の報告のブランチ名（報告が無い・ブランチが null の
 // ときは、照合が確かめたリモートのブランチ）を返す。既定ブランチは子が作ったブランチではない
 // ので返さない。無ければ ""。
@@ -357,6 +475,13 @@ func failureLimitQuestion(hit *failureLimitHit) string {
 		hit.Count, hit.Limit, hit.Last.ID, hit.Last.Result)
 }
 
+// reworkLimitQuestion は差し戻しの上限で人間対応待ちにするときの保留の問い。
+func reworkLimitQuestion(hit *reworkLimitHit) string {
+	return fmt.Sprintf("差し戻しの上限に達したため、委譲を起動せず人間対応待ちにした（上限の種類: 差し戻し、回数: %d、上限: %d）。\n"+
+		"直近の検証: %s（達成条件を満たさないと判定された）。回答すると、次の周から数え直して委譲を起動する。",
+		hit.Count, hit.Limit, hit.Last.ID)
+}
+
 // slotWaitInterval は、元のスロットが使用中の間、空くのを待つ確認の間隔（テストが短くする）。
 var slotWaitInterval = 200 * time.Millisecond
 
@@ -375,7 +500,7 @@ func (s *Store) acquireDelegationSlot(ctx context.Context, in DelegateInput, dc 
 	}
 	original := *dc.Resume.Target.SlotID
 	worktree := dc.Repo.Slots.Provider == string(slotProviderWorktree)
-	if !worktree && dc.ResumeBranchPushed && dc.Resume.Kind == ResumeKindAnswer {
+	if !worktree && dc.ResumeBranchPushed && (dc.Resume.Kind == ResumeKindAnswer || dc.Resume.Kind == ResumeKindRework) {
 		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{Prefer: original})
 	}
 	choice := slotChoice{Only: original}
@@ -435,4 +560,19 @@ func (s *Store) holdForFailureLimit(ctx context.Context, dc *delegationContext) 
 	}
 	return nil, &NotStarted{ChallengeID: dc.Challenge.ID, Reason: NotStartedFailureLimit,
 		Detail: fmt.Sprintf("%d consecutive failures (limit %d)", hit.Count, hit.Limit)}, nil
+}
+
+// holdForReworkLimit は差し戻しの上限に達した課題を、委譲を起動せずに人間対応待ちにする
+// （原因の run は最後の J5 の run）。課題が着手中でなくなっていれば何もしない。
+func (s *Store) holdForReworkLimit(ctx context.Context, dc *delegationContext) (*JudgmentAutoItem, *NotStarted, error) {
+	hit := dc.ReworkHit
+	status, _, err := s.mapReconciliation(ctx, dc, hit.Last.ID, OpHold, reworkLimitQuestion(hit))
+	if err != nil {
+		return nil, nil, err
+	}
+	if status == nil {
+		return nil, nil, nil // 課題が着手中でなくなっていた
+	}
+	return nil, &NotStarted{ChallengeID: dc.Challenge.ID, Reason: NotStartedReworkLimit,
+		Detail: fmt.Sprintf("%d J5 rejections (limit %d)", hit.Count, hit.Limit)}, nil
 }

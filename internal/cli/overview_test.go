@@ -13,12 +13,17 @@ import (
 // キー・テキスト形式へ写像していること、コマンドの配線（--json・--workspace）が
 // 機能することを確認する。
 
-func TestRunStatus_EmptyWorkspaceReturnsThreeBucketsWithEmptyArrays(t *testing.T) {
+func TestRunStatus_EmptyWorkspaceReturnsTheBucketsWithEmptyArrays(t *testing.T) {
 	ws := initializedWorkspace(t)
 
 	doc := runJSON(t, ws, "status")
-	if len(doc) != 3 {
-		t.Errorf("status top-level keys = %d, want 3 (one per bucket): %+v", len(doc), doc)
+	if len(doc) != 4 {
+		t.Errorf("status top-level keys = %d, want 4 (the three M1 buckets and waiting_external): %+v", len(doc), doc)
+	}
+	if we, ok := doc["waiting_external"].(map[string]any); !ok || len(we) != 1 {
+		t.Errorf("status[\"waiting_external\"] = %v, want an object with only `challenges`", doc["waiting_external"])
+	} else if ch, ok := we["challenges"].([]any); !ok || len(ch) != 0 {
+		t.Errorf("status[\"waiting_external\"][\"challenges\"] = %v, want an empty array", we["challenges"])
 	}
 	for _, path := range []string{
 		"needs_human.challenges", "needs_human.operations",

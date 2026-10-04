@@ -153,3 +153,36 @@ type UpstreamBranchSource interface {
 	// merged のすべてについて返す。
 	ListPullRequestsByHead(ctx context.Context, repo, branch string) ([]UpstreamPullRequest, error)
 }
+
+// UpstreamCheckStatusLegacy は旧式のコミットステータスを表す UpstreamCheck.Status の値。
+const UpstreamCheckStatusLegacy = "legacy_status"
+
+// UpstreamCheck は PR のチェック 1 件（check run 1 件、または旧式のコミットステータス
+// 1 件）の正規化済みの値。完了したかどうかの判定規則は core が持つ（checkCompleted）。
+type UpstreamCheck struct {
+	// Name はチェックの名前（check run の name、コミットステータスの context）。
+	Name string
+	// Status は check run の status（queued・in_progress・completed 等）。旧式のコミットステータスは
+	// UpstreamCheckStatusLegacy とし、Conclusion に生の state（success・failure・error・pending 等）を入れる。
+	Status string
+	// Conclusion は完了したチェックの結論（success・failure 等。完了していなければ空）。
+	Conclusion string
+}
+
+// UpstreamPullRequestChecks は PR 1 件の現在の状態と、head のコミットのチェック一覧。
+type UpstreamPullRequestChecks struct {
+	URL     string
+	Title   string
+	State   string // "open" | "closed" | "merged"
+	Base    string
+	HeadSHA string
+	Checks  []UpstreamCheck
+}
+
+// UpstreamCheckSource は J5 の起動の前に core が呼ぶ、PR のチェックの取得 IF。実装は
+// internal/adapters/github が `gh api` の GET だけで行い、取得と正規化だけを担う。
+type UpstreamCheckSource interface {
+	// GetPullRequestChecks は repo（"<owner>/<name>"）の number 番の PR の状態と、head の
+	// コミットのチェックの一覧を返す。
+	GetPullRequestChecks(ctx context.Context, repo string, number int) (UpstreamPullRequestChecks, error)
+}

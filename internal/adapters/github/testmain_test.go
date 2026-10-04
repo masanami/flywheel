@@ -76,6 +76,8 @@ func runFakeGH(argv []string) int {
 		return 0
 	case "pulls_two_pages":
 		return fakeGHPullsTwoPages(argv)
+	case "checks_pending", "checks_complete", "checks_merged", "checks_runs_fail":
+		return fakeGHChecks(argv, os.Getenv(envScenario))
 	case "pulls_fail":
 		fmt.Fprintln(os.Stderr, "gh: connection refused")
 		return 1
@@ -467,4 +469,35 @@ func fakeGHContextScenario(argv []string, fx contextFixture) int {
 	}
 	fmt.Print("[]")
 	return 0
+}
+
+// fakeGHChecks は PR のチェックの取得（pulls/N・commits/SHA/check-runs・commits/SHA/status）の偽の応答。
+func fakeGHChecks(argv []string, scenario string) int {
+	endpoint, _ := lastEndpointAndDashI(argv)
+	switch {
+	case strings.HasPrefix(endpoint, "repos/o/r/pulls/7"):
+		merged := "null"
+		state := "open"
+		if scenario == "checks_merged" {
+			merged, state = `"2026-10-01T00:00:00Z"`, "closed"
+		}
+		fmt.Printf(`{"html_url":"https://github.com/o/r/pull/7","title":"t","state":%q,"merged_at":%s,"base":{"ref":"main"},"head":{"sha":"abc123"}}`, state, merged)
+		return 0
+	case strings.HasPrefix(endpoint, "repos/o/r/commits/abc123/check-runs"):
+		if scenario == "checks_runs_fail" {
+			fmt.Fprintln(os.Stderr, "gh: boom")
+			return 1
+		}
+		if scenario == "checks_pending" {
+			fmt.Print(`{"total_count":2,"check_runs":[{"name":"build","status":"completed","conclusion":"success"},{"name":"test","status":"in_progress","conclusion":null}]}`)
+		} else {
+			fmt.Print(`{"total_count":2,"check_runs":[{"name":"build","status":"completed","conclusion":"success"},{"name":"test","status":"completed","conclusion":"failure"}]}`)
+		}
+		return 0
+	case strings.HasPrefix(endpoint, "repos/o/r/commits/abc123/status"):
+		fmt.Print(`{"state":"pending","total_count":2,"statuses":[{"context":"legacy-a","state":"success"},{"context":"legacy-b","state":"pending"}]}`)
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "fake gh: unexpected endpoint %q\n", endpoint)
+	return 1
 }

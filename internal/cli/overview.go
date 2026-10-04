@@ -23,8 +23,14 @@ func runStatus(a Args) (any, error) {
 	if derr != nil {
 		decl = nil
 	}
-	ov, err := a.Store.GetOverviewFor(context.Background(), decl)
+	ctx := context.Background()
+	ov, err := a.Store.GetOverviewFor(ctx, decl)
 	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	// CI の完了を待っている課題は GitHub の現在の状態（GET だけ）から導く。検証中で PR を持つ課題が
+	// 無ければ gh は呼ばれない。
+	if ov.WaitingExternal, err = a.Store.ListWaitingExternal(ctx, newCheckSource()); err != nil {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
@@ -42,6 +48,9 @@ func runStatus(a Args) (any, error) {
 			},
 			"approved": map[string]any{
 				"operations": operationsJSON(ov.ApprovedOperations),
+			},
+			"waiting_external": map[string]any{
+				"challenges": waitingExternalJSON(ov.WaitingExternal),
 			},
 		},
 		text: overviewText(ov),
@@ -99,6 +108,20 @@ func budgetExhaustedJSON(items []core.BudgetExhausted) []map[string]any {
 	return out
 }
 
+// waitingExternalJSON は §IF / API「status.waiting_external（S2。最上位の 4 つ目のキー）:
+// {"challenges": [{"challenge_id", "pr_url", "checks": "pending"}]}」の challenges の形へ変換する。
+func waitingExternalJSON(items []core.WaitingExternal) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		out = append(out, map[string]any{
+			"challenge_id": it.ChallengeID,
+			"pr_url":       it.PRURL,
+			"checks":       "pending",
+		})
+	}
+	return out
+}
+
 // slotsJSON は §IF / API「status.needs_human.slots（S2）:
 // [{"slot_id", "repo", "path", "run_id"}]」の形へ変換する（run_id は使用中の run。
 // needs_attention のスロットは使用中でないため通常 null）。
@@ -130,7 +153,7 @@ func challengesJSON(challenges []core.Challenge) []map[string]any {
 	return out
 }
 
-// overviewText は --json 無しの status の表示。3区分を見出しつきで分けて示す。
+// overviewText は --json 無しの status の表示。区分を見出しつきで分けて示す。
 // 食い違い（needs_human.discrepancies）は JSON と同じく「人間の操作を待っている
 // もの」の中に出す（docs/features/m2-github-issue-ingest.md §食い違いの表示）。
 func overviewText(ov *core.Overview) string {
@@ -171,6 +194,14 @@ func overviewText(ov *core.Overview) string {
 	for _, c := range ov.ActionableChallenges {
 		label, _ := c.Status.Label()
 		fmt.Fprintf(&b, "  %s\t%s\t%s\n", c.ID, label, c.Title)
+	}
+
+	fmt.Fprintf(&b, "外部を待っているもの:\n")
+	if len(ov.WaitingExternal) == 0 {
+		fmt.Fprintf(&b, "  (なし)\n")
+	}
+	for _, w := range ov.WaitingExternal {
+		fmt.Fprintf(&b, "  %s\tチェックの完了待ち\t%s\n", w.ChallengeID, w.PRURL)
 	}
 
 	fmt.Fprintf(&b, "承認済みの不可逆操作:\n")

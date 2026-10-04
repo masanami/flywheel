@@ -64,8 +64,10 @@ type DelegateLaunchInput struct {
 	// ResumeKind は IsResume のとき、渡す固定の文面の種類。
 	ResumeKind ResumeKind
 	// ResumeAnswer は ResumeKind が answer のときの人間の回答、ResumeQuestion はその保留の問い。
+	// ResumeFeedback は ResumeKind が rework のときの J5 の差し戻しの指摘。
 	ResumeAnswer   string
 	ResumeQuestion string
+	ResumeFeedback string
 	// ResumeBranch は再開のブリーフに書く、報告のブランチ名（無ければ空）。
 	ResumeBranch string
 }
@@ -114,11 +116,13 @@ type DelegateResult = JudgmentAutoResult
 // 対象でなくなっていた（着手中でなくなった）ことを表す。
 var errDelegationNotEligible = fmt.Errorf("%w: the challenge is no longer in progress", ErrInvalidTransition)
 
-// approvedPlan は課題の承認済みの計画（最後に承認された版）。
+// approvedPlan は課題の承認済みの計画（最後に承認された版）。HasSpec は構造化した出力
+// （J2 の出力）を持つか（人が `plan --file` で登録した計画は持たない）。
 type approvedPlan struct {
 	Version int
 	Body    string
 	Spec    string
+	HasSpec bool
 }
 
 // delegationContext は 1 件の委譲の起動の前に読む、課題と承認済みの計画と宣言の事実。
@@ -142,6 +146,8 @@ type delegationContext struct {
 	// 連続失敗の上限に達しており、委譲を起動しない。
 	Resume   *resumePlan
 	LimitHit *failureLimitHit
+	// ReworkHit が非 nil なら差し戻しの上限に達しており、委譲を起動しない。
+	ReworkHit *reworkLimitHit
 	// ResumeBranchPushed は Resume のブランチがリモートにあるか（再開のスロットの選び方に使う）。
 	ResumeBranchPushed bool
 }
@@ -152,9 +158,9 @@ func (dc *delegationContext) estimateMicros() int64 {
 	return dc.ImplBudgetMicros + dc.ReviewBudgetMicros
 }
 
-// loadApprovedPlan は challengeID の承認済みの計画（計画の承認の最後の承認が指す版）を
-// 返す。承認が無い・版が無い・spec が無いときは ok=false。
-func loadApprovedPlan(ctx context.Context, tx *sql.Tx, challengeID int64) (approvedPlan, bool, error) {
+// loadApprovedPlanAnySpec は challengeID の承認済みの計画（計画の承認の最後の承認が指す版）を、
+// 構造化した出力の有無を問わずに返す。承認が無い・版が無いときは ok=false。
+func loadApprovedPlanAnySpec(ctx context.Context, tx *sql.Tx, challengeID int64) (approvedPlan, bool, error) {
 	approvals, err := loadApprovals(ctx, tx, challengeID)
 	if err != nil {
 		return approvedPlan{}, false, err
@@ -174,13 +180,24 @@ func loadApprovedPlan(ctx context.Context, tx *sql.Tx, challengeID int64) (appro
 	}
 	for _, p := range plans {
 		if p.Version == version {
-			if p.Spec == nil {
-				return approvedPlan{}, false, nil
+			ap := approvedPlan{Version: p.Version, Body: p.Body}
+			if p.Spec != nil {
+				ap.Spec, ap.HasSpec = *p.Spec, true
 			}
-			return approvedPlan{Version: p.Version, Body: p.Body, Spec: *p.Spec}, true, nil
+			return ap, true, nil
 		}
 	}
 	return approvedPlan{}, false, nil
+}
+
+// loadApprovedPlan は loadApprovedPlanAnySpec のうち、構造化した出力を持つ計画だけを返す
+// （委譲は構造化した出力のない計画を扱えない）。
+func loadApprovedPlan(ctx context.Context, tx *sql.Tx, challengeID int64) (approvedPlan, bool, error) {
+	p, ok, err := loadApprovedPlanAnySpec(ctx, tx, challengeID)
+	if err != nil || !ok || !p.HasSpec {
+		return approvedPlan{}, false, err
+	}
+	return p, true, nil
 }
 
 // selectDelegationTargets は ID を省略した `run` の対象の課題の内部整数 ID を、優先度→ID の
@@ -301,6 +318,11 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	dc.ImplBudgetMicros, dc.ReviewBudgetMicros = rem.Impl, rem.Review
 	dc.Decider, dc.DeciderRow = DecideDecider(dc.Operation, validated.CrossRepo, validated.RelatedRepos)
 	dc.Resume, dc.LimitHit = history.decideLaunch(dc.Plan.Version, in.AgentDecl.FailureLimit)
+	if rework, hit := history.decideRework(dc.Plan.Version, in.AgentDecl.ReworkLimit); hit != nil {
+		dc.ReworkHit = hit
+	} else if rework != nil && dc.LimitHit == nil {
+		dc.Resume = rework
+	}
 	if dc.Resume != nil {
 		err := s.db.Read(ctx, func(tx *sql.Tx) error {
 			b, err := loadRunBranch(ctx, tx, dc.Resume.Target, in.ConnDecl.HumanQuestionKinds, dc.Repo.DefaultBranch)
@@ -453,6 +475,9 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 
 	if dc.LimitHit != nil {
 		return s.holdForFailureLimit(ctx, dc)
+	}
+	if dc.ReworkHit != nil {
+		return s.holdForReworkLimit(ctx, dc)
 	}
 
 	// 実装枠の残りが起動の最小額に満たなければ、J3 の費用を払う前に起動しない。
@@ -642,6 +667,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		launch.ResumeKind = dc.Resume.Kind
 		launch.ResumeAnswer = dc.Resume.Answer
 		launch.ResumeQuestion = dc.Resume.Question
+		launch.ResumeFeedback = dc.Resume.Feedback
 		launch.ResumeBranch = dc.Resume.Branch
 	}
 	output, invokeErr := s.invokeFnWithHeartbeat(ctx, runIDInt, func(ctx context.Context) (JudgmentLaunchOutput, error) {

@@ -91,11 +91,20 @@ func runSubmit(a Args) (any, error) {
 }
 
 // runVerify は `flywheel verify <ID> --result <met|not_met|uncertain> [--question <q>]`
-// の実装（T8・T9・T10）。--result met/not_met に --question を添えると
+// の実装（T8・T9・T10）と `flywheel verify --auto [<ID>]`（J5）の実装を振り分ける。--result met/not_met に --question を添えると
 // usage_error（AC-30）。それ以外の入力規則（閉集合・問いの必須）は core が持つ。
 func runVerify(a Args) (any, error) {
-	result := a.Values["result"]
 	question, hasQuestion := a.Values["question"]
+	if a.Bools["auto"] {
+		if hasQuestion {
+			return nil, NewError(CodeUsageError, "--auto と --question は同時に指定できません")
+		}
+		return runVerifyAuto(a)
+	}
+	if len(a.Positional) != 1 {
+		return nil, NewError(CodeUsageError, "verify --result には課題の ID が必要です")
+	}
+	result := a.Values["result"]
 
 	if hasQuestion {
 		if r, ok := core.ParseVerifyResult(result); ok && r != core.VerifyResultUncertain {

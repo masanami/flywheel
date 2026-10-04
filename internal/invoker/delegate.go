@@ -95,9 +95,9 @@ func BuildDelegationStdin(in DelegationBrief) ([]byte, error) {
 }
 
 // BuildDelegationResumeStdin は `--resume` の再開の標準入力を組み立てる: 種類ごとの固定の文面
-// （埋め込みの雛形のまま）の後に、外部由来の文字列（人間の回答・子の報告のブランチ名）を
-// 区切りの行で囲んだデータの区画として続ける。
-func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch string) ([]byte, error) {
+// （埋め込みの雛形のまま）の後に、外部由来の文字列（人間の回答・子の報告のブランチ名・検証の
+// 差し戻しの指摘）を区切りの行で囲んだデータの区画として続ける。
+func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch, feedback string) ([]byte, error) {
 	text, err := ResumePrompt(kind)
 	if err != nil {
 		return nil, err
@@ -108,12 +108,16 @@ func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch s
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	if branch != "" || (kind == core.ResumeKindAnswer && question != "") {
+	if branch != "" || (kind == core.ResumeKindAnswer && question != "") || (kind == core.ResumeKindRework && feedback != "") {
 		b.WriteString(dataSectionGuardNote)
 		b.WriteString("\n\n")
 	}
 	if branch != "" {
 		b.WriteString(WrapDataSection("続けるブランチ", branch))
+		b.WriteString("\n")
+	}
+	if kind == core.ResumeKindRework && feedback != "" {
+		b.WriteString(WrapDataSection("差し戻しの指摘", feedback))
 		b.WriteString("\n")
 	}
 	if kind == core.ResumeKindAnswer {
@@ -170,7 +174,7 @@ func (l *Launcher) InvokeDelegation(ctx context.Context, in core.DelegateLaunchI
 	var stdin []byte
 	var err error
 	if in.IsResume {
-		stdin, err = BuildDelegationResumeStdin(in.ResumeKind, in.ResumeQuestion, in.ResumeAnswer, in.ResumeBranch)
+		stdin, err = BuildDelegationResumeStdin(in.ResumeKind, in.ResumeQuestion, in.ResumeAnswer, in.ResumeBranch, in.ResumeFeedback)
 	} else {
 		stdin, err = BuildDelegationStdin(DelegationBrief{
 			Decider: string(in.Decider), DeciderRow: in.DeciderRow, Brief: in.Brief, Invocation: in.Invocation,
