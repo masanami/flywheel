@@ -32,6 +32,9 @@ type fakeClaudeRoute struct {
 	StartedFile string
 	// ArgvLogPath が非空なら、この規則に一致した呼び出しの引数列（"$*"）を 1 行ずつ追記する。
 	ArgvLogPath string
+	// ShellBefore が非空なら、応答の前にそのシェルコマンドを実行する（子がスロットの作業ツリーを
+	// 変える＝ブランチを切る、を再現するために使う）。
+	ShellBefore string
 	// StdinLogPath が非空なら、この規則に一致した呼び出しの標準入力をそのまま書き出す。
 	StdinLogPath string
 }
@@ -82,6 +85,9 @@ func putRoutedFakeClaudeOnPATH(t *testing.T, routes []fakeClaudeRoute, orderLogP
 			fmt.Fprintf(&b, "if mkdir %s 2>/dev/null; then %ssleep %d; fi\n", shellSingleQuote(marker), touch, r.SleepFirstSeconds)
 		case r.StartedFile != "":
 			fmt.Fprintf(&b, "touch %s\n", shellSingleQuote(r.StartedFile))
+		}
+		if r.ShellBefore != "" {
+			fmt.Fprintf(&b, "%s\n", r.ShellBefore)
 		}
 		delim := fmt.Sprintf("FAKECLAUDE_EOF_%d", i)
 		fmt.Fprintf(&b, "cat <<'%s'\n%s\n%s\nexit 0\n;;\n", delim, r.Stdout, delim)

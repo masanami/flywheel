@@ -49,6 +49,10 @@ type SlotAssignment struct {
 	Repo   string
 	Path   string
 	RunID  string
+	// BaseBranch は割り当て前の検査で読んだ、スロットの作業ツリーの現在のブランチ
+	// （detached HEAD なら ""）。委譲の後の照合が、報告にブランチが無いときに
+	// 「子が今回作ったブランチか」を判定する基準になる（メモリ上の値）。
+	BaseBranch string
 }
 
 // SlotBinder は AcquireSlot が、スロットを busy にするのと同じトランザクションの
@@ -234,7 +238,7 @@ func (s *Store) ListSlots(ctx context.Context) ([]Slot, error) {
 // git を起動できない（ErrGitUnavailable）・ctx の取り消しのように、スロットの
 // 作業ツリーに原因が無い失敗は理由にせず err で返す（スロットを needs_attention
 // にしない）。
-func (s *Store) prepareSlot(ctx context.Context, git SlotGit, repo ConnectorRepo, slot slotRow) (string, error) {
+func (s *Store) prepareSlot(ctx context.Context, git SlotGit, repo ConnectorRepo, slot slotRow) (string, string, error) {
 	tree := SlotTree{Path: slot.Path}
 	if slot.Provider == slotProviderWorktree {
 		base := filepath.Join(s.workspace, repo.Slots.Base)
@@ -243,28 +247,28 @@ func (s *Store) prepareSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 			BaseClone: base, Path: slot.Path, Ref: "refs/heads/" + repo.DefaultBranch,
 		}); err != nil {
 			if isEnvironmentFailure(ctx, err) {
-				return "", err
+				return "", "", err
 			}
-			return "provisioning the worktree failed: " + oneLine(err.Error()), nil
+			return "provisioning the worktree failed: " + oneLine(err.Error()), "", nil
 		}
 	}
 	st, err := git.Inspect(ctx, tree)
 	if err != nil && isEnvironmentFailure(ctx, err) {
-		return "", err
+		return "", "", err
 	}
 	switch {
 	case err != nil:
-		return "inspecting the working tree failed: " + oneLine(err.Error()), nil
+		return "inspecting the working tree failed: " + oneLine(err.Error()), "", nil
 	case !st.Exists:
-		return "the slot path does not exist: " + slot.Path, nil
+		return "the slot path does not exist: " + slot.Path, "", nil
 	case !st.PointerOK:
-		return "the working tree's .git pointer does not point at this worktree of the base clone: " + oneLine(st.PointerProblem), nil
+		return "the working tree's .git pointer does not point at this worktree of the base clone: " + oneLine(st.PointerProblem), "", nil
 	case st.Dirty:
-		return "the working tree has uncommitted changes", nil
+		return "the working tree has uncommitted changes", "", nil
 	case !remoteMatches(st.OriginURL, repo.Remote):
-		return fmt.Sprintf("origin (%q) is not the declared remote %s", st.OriginURL, repo.Remote), nil
+		return fmt.Sprintf("origin (%q) is not the declared remote %s", st.OriginURL, repo.Remote), "", nil
 	}
-	return "", nil
+	return "", st.Branch, nil
 }
 
 func isEnvironmentFailure(ctx context.Context, err error) bool {
@@ -311,7 +315,7 @@ func (s *Store) acquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 		}
 		tried[next.ID] = true
 
-		reason, err := s.prepareSlot(ctx, git, repo, *next)
+		reason, baseBranch, err := s.prepareSlot(ctx, git, repo, *next)
 		if err != nil {
 			return nil, err
 		}
@@ -326,6 +330,7 @@ func (s *Store) acquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 			return nil, err
 		}
 		if a != nil {
+			a.BaseBranch = baseBranch
 			return a, nil
 		}
 	}

@@ -89,11 +89,14 @@ func TestRun_DelegatesAndReturnsAPhaseObject(t *testing.T) {
 	ws := setupRunWorkspace(t)
 	id := newInProgressForRun(t, ws, nil)
 	orderLog := filepath.Join(t.TempDir(), "order.log")
-	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{delegateRoute("completed"), j3Route("BRIEF-CLI-MARKER")}, orderLog)
-	// 委譲の後の照合（報告にブランチが無いので、スロットの現在のブランチ main で調べる）。
+	child := delegateRoute("completed")
+	// 子がスロットで今回のブランチを切る（割り当て時と異なる現在のブランチが照合先になる）。
+	child.ShellBefore = "git -C " + shellSingleQuote(filepath.Join(ws, "slot-d")) + " checkout -q -b feat/child"
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{child, j3Route("BRIEF-CLI-MARKER")}, orderLog)
+	// 委譲の後の照合（報告にブランチが無いので、スロットの現在のブランチ feat/child で調べる）。
 	ghCalls := withFakeGHRoutesOnPATH(t, []fakeGHRoute{
-		{match: "repos/o/direct/branches/main", stdout: "HTTP/2.0 200 OK\r\n\r\n{\"name\":\"main\"}", exit: 0},
-		{match: "repos/o/direct/pulls?head=o%3Amain&page=1&per_page=100&state=all", stdout: `[{"html_url":"https://github.com/o/flywheel/pull/9","title":"t","state":"open","merged_at":null,"base":{"ref":"develop"}}]`, exit: 0},
+		{match: "repos/o/direct/branches/feat/child", stdout: "HTTP/2.0 200 OK\r\n\r\n{\"name\":\"feat/child\"}", exit: 0},
+		{match: "repos/o/direct/pulls?head=o%3Afeat%2Fchild&page=1&per_page=100&state=all", stdout: `[{"html_url":"https://github.com/o/flywheel/pull/9","title":"t","state":"open","merged_at":null,"base":{"ref":"develop"}}]`, exit: 0},
 	})
 
 	out := runJSON(t, ws, "run")
