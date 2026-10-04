@@ -37,7 +37,10 @@ func TestRunStatus_EmptyWorkspaceReturnsThreeBucketsWithEmptyArrays(t *testing.T
 	if slots, ok := needsHuman["slots"].([]any); !ok || len(slots) != 0 {
 		t.Errorf("status[\"needs_human\"][\"slots\"] = %v, want an empty array", needsHuman["slots"])
 	}
-	for bucket, want := range map[string]int{"needs_human": 5, "actionable": 1, "approved": 1} {
+	if be, ok := needsHuman["budget_exhausted"].([]any); !ok || len(be) != 0 {
+		t.Errorf("status[\"needs_human\"][\"budget_exhausted\"] = %v, want an empty array", needsHuman["budget_exhausted"])
+	}
+	for bucket, want := range map[string]int{"needs_human": 6, "actionable": 1, "approved": 1} {
 		if m := doc[bucket].(map[string]any); len(m) != want {
 			t.Errorf("status[%q] has %d keys, want %d: %+v", bucket, len(m), want, m)
 		}

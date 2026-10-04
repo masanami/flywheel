@@ -217,6 +217,18 @@ func defaultCommands() []Command {
 			Run:           runApprove,
 		},
 		{
+			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2）。本人確認つき。
+			Path:          []string{"budget"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: 1,
+			Flags: []flagDef{
+				{Name: "impl-usd", HasValue: true, Required: true},
+				{Name: "review-usd", HasValue: true},
+			},
+			Run: runBudget,
+		},
+		{
 			Path:          []string{"reject"},
 			RequiresStore: true,
 			MinPositional: 1,

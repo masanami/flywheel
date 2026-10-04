@@ -36,6 +36,9 @@ const (
 	ResumeKindAnswer ResumeKind = "answer"
 	// ResumeKindInterrupted は中断の事実と状態の報告を求める再開。
 	ResumeKindInterrupted ResumeKind = "interrupted"
+	// ResumeKindBudget は、実装枠の上限へ到達して止まった run を、`flywheel budget` で枠を増やした
+	// 後に続けさせる再開（上限到達で中断した事実と、続行を求める）。
+	ResumeKindBudget ResumeKind = "budget"
 )
 
 // resumePlan は `--resume` で起動するときの宛先と入力。
@@ -265,6 +268,12 @@ func (h *launchHistory) decideLaunch(planVersion, failureLimit int) (resume *res
 
 	latest := since[len(since)-1]
 	switch latest.Result {
+	case RunResultBudgetExhausted:
+		// 枠が増やされていなければ、委譲の起動の前に実装枠の残りの検査が止める。
+		if latest.SessionID == "" {
+			return nil, nil
+		}
+		return &resumePlan{Kind: ResumeKindBudget, Target: latest}, nil
 	case RunResultErrored, RunResultMalformed, RunResultInvalidOutput, RunResultTimedOut, RunResultInterrupted:
 		if latest.SessionID == "" {
 			return nil, nil
@@ -279,6 +288,9 @@ func (h *launchHistory) decideLaunch(planVersion, failureLimit int) (resume *res
 			return nil, nil
 		}
 		kind := ResumeKindInterrupted
+		if target.Result == RunResultBudgetExhausted {
+			kind = ResumeKindBudget // 上限到達の後の再開が起動に失敗したら、同じ文面で起動し直す
+		}
 		plan := &resumePlan{Kind: kind, Target: *target}
 		// 失敗した起動が回答を渡す再開だったか: 再開元の run を原因とする回答済みの保留があるか。
 		for i := len(h.Holds) - 1; i >= 0; i-- {

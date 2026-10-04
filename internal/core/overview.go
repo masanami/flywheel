@@ -56,6 +56,9 @@ type Overview struct {
 	// docs/features/m3-invoker-delegation.md §IF / API の
 	// status.needs_human.slots。S2）。無ければ空スライス。
 	NeedsHumanSlots []SlotAttention
+	// NeedsHumanBudgetExhausted は実装枠の残りが 1 USD 未満の着手中の課題（challenge_id 昇順。
+	// status.needs_human.budget_exhausted。S2）。無ければ空スライス。
+	NeedsHumanBudgetExhausted []BudgetExhausted
 }
 
 // DiscrepancyKind は Discrepancy.Kinds の値（docs/features/
@@ -231,6 +234,13 @@ func listDiscrepancies(ctx context.Context, tx *sql.Tx) ([]Discrepancy, error) {
 // 読み取り専用: 状態・版・作業ログを一切変えない（s.db.Read を使い、mutate は
 // 呼ばない）。
 func (s *Store) GetOverview(ctx context.Context) (*Overview, error) {
+	return s.GetOverviewFor(ctx, nil)
+}
+
+// GetOverviewFor は GetOverview に、計画の枠の額を引く宣言（サイズの既定。nil 可）を渡す版。
+// agent が nil のときの needs_human.budget_exhausted は、計画の出力が枠の額を明記する課題だけを
+// 判定できる。
+func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*Overview, error) {
 	var result Overview
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		humanChallenges, err := listChallengesInStatuses(ctx, tx, needsHumanStatuses)
@@ -274,6 +284,12 @@ func (s *Store) GetOverview(ctx context.Context) (*Overview, error) {
 			return err
 		}
 		result.NeedsHumanSlots = slots
+
+		exhausted, err := listBudgetExhausted(ctx, tx, agent)
+		if err != nil {
+			return err
+		}
+		result.NeedsHumanBudgetExhausted = exhausted
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {

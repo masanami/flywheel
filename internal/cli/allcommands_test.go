@@ -62,6 +62,19 @@ func createPlannedForCase(t *testing.T, ws string) string {
 	return id
 }
 
+// budgetCaseSpec は枠の額を明記した、承認済みの計画の構造化した出力（budget の対象の課題の
+// 枠は、宣言を読まなくても決まる）。
+const budgetCaseSpec = `{"verdict":"plan","size":"M","budget_impl_usd":50,"budget_review_usd":30}`
+
+// createBudgetTargetForCase は着手中で承認済みの計画（版 1。実装枠 50・レビュー対応枠 30）を持つ
+// 課題を作る。
+func createBudgetTargetForCase(t *testing.T, ws string) string {
+	t.Helper()
+	id := createForCase(t, ws)
+	coretest.InsertApprovedPlan(t, ws, challengeIDToInternalID(t, id), "PLAN-BODY", budgetCaseSpec)
+	return id
+}
+
 // allCommandSuccessCases のキーは Command.Path をスペースで結合したもの。
 var allCommandSuccessCases = map[string]commandSuccessCase{
 	"init": {uninitialized: true, setup: func(_ *testing.T, _ string) []string {
@@ -107,6 +120,9 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	}},
 	"reject": {needsTTY: true, setup: func(t *testing.T, ws string) []string {
 		return []string{"reject", createPlannedForCase(t, ws), "--reason", "r"}
+	}},
+	"budget": {needsTTY: true, setup: func(t *testing.T, ws string) []string {
+		return []string{"budget", createBudgetTargetForCase(t, ws), "--impl-usd", "80"}
 	}},
 	"op add": {setup: func(t *testing.T, ws string) []string {
 		return []string{"op", "add", createForCase(t, ws), "--kind", "release", "--summary", "s"}
@@ -404,6 +420,7 @@ var runLevelUsageErrorCases = [][]string{
 	{"approve", "C-2", "--hold-release"},                        // 計画承認待ちの課題への --hold-release
 	{"classify", "--priority", "P0"},                            // --priority に課題の ID が無い（#84。--auto は ID を省略できるため MinPositional では表せない）
 	{"plan", "--stdin"},                                         // --file／--stdin に課題の ID が無い（#85。--auto は ID を省略できるため MinPositional では表せない）
+	{"budget", "C-1", "--impl-usd", "x"},                        // --impl-usd が数でない（#105）
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の

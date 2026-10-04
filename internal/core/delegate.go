@@ -13,7 +13,7 @@ package core
 //	⑤ トランザクションの外で委譲の子を待つ（heartbeat を更新する）
 //	⑥ 結果と費用を記録し、スロットを解放する
 //
-// 照合（delegate_reconcile.go）はここに含める。結末の課題の状態への写像（#104）、実装枠の残りの額（#105）、衝突の
+// 照合（delegate_reconcile.go）はここに含める。結末の課題の状態への写像（#104）、衝突の
 // 予測と直列化グループ（#106）はここに含めない。固定の節の組み立て（埋め込みの雛形）
 // と claude の起動は internal/invoker が持ち、core は DelegationInvoker の IF だけを
 // 知る（core は invoker を import しない）。
@@ -128,17 +128,25 @@ type delegationContext struct {
 	Repo      ConnectorRepo
 	Connector Connector
 	Operation ConnectorOperation
-	// ImplBudgetMicros は実装の委譲に渡す上限額（承認済みの計画の実装枠。#105 が残りの額へ置き換える）。
-	ImplBudgetMicros int64
-	Decider          Decider
-	DeciderRow       int
-	Invocation       string
+	// ImplBudgetMicros は実装の委譲に渡す上限額・予約額（その計画の版の実装枠の残り）。
+	// ReviewBudgetMicros はレビュー対応枠の残りで、評価額（実装枠の残りと足した額）にだけ使う。
+	ImplBudgetMicros   int64
+	ReviewBudgetMicros int64
+	Decider            Decider
+	DeciderRow         int
+	Invocation         string
 	// Resume が非 nil なら `--resume` で起動する（J3 は呼ばない）。LimitHit が非 nil なら
 	// 連続失敗の上限に達しており、委譲を起動しない。
 	Resume   *resumePlan
 	LimitHit *failureLimitHit
 	// ResumeBranchPushed は Resume のブランチがリモートにあるか（再開のスロットの選び方に使う）。
 	ResumeBranchPushed bool
+}
+
+// estimateMicros は周の上限の評価額（実装枠の残り ＋ レビュー対応枠の残り）。`--max-budget-usd` と
+// 予約額には実装枠の残りだけを使う（ImplBudgetMicros）。
+func (dc *delegationContext) estimateMicros() int64 {
+	return dc.ImplBudgetMicros + dc.ReviewBudgetMicros
 }
 
 // loadApprovedPlan は challengeID の承認済みの計画（計画の承認の最後の承認が指す版）を
@@ -237,6 +245,7 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	}
 	dc := &delegationContext{Challenge: ch}
 	var override *planBudgetOverride
+	var spend bucketSpend
 	var history *launchHistory
 	var planOK bool
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
@@ -255,6 +264,9 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 			return err
 		}
 		if override, err = loadPlanBudgetOverride(ctx, tx, cid, int64(p.Version)); err != nil {
+			return err
+		}
+		if spend, err = loadBucketSpend(ctx, tx, cid, int64(p.Version)); err != nil {
 			return err
 		}
 		history, err = loadLaunchHistory(ctx, tx, cid)
@@ -282,10 +294,8 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 			dc.Operation = op
 		}
 	}
-	dc.ImplBudgetMicros = usdToMicros(validated.ResolvedImplUSD)
-	if override != nil && override.ImplBudgetUSD != nil {
-		dc.ImplBudgetMicros = *override.ImplBudgetUSD
-	}
+	rem := computeBucketRemaining(applyBudgetOverride(validated.ResolvedImplUSD, validated.ResolvedReviewUSD, override), spend)
+	dc.ImplBudgetMicros, dc.ReviewBudgetMicros = rem.Impl, rem.Review
 	dc.Decider, dc.DeciderRow = DecideDecider(dc.Operation, validated.CrossRepo, validated.RelatedRepos)
 	dc.Resume, dc.LimitHit = history.decideLaunch(dc.Plan.Version, in.AgentDecl.FailureLimit)
 	if dc.Resume != nil {
@@ -464,6 +474,15 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 		return s.holdForFailureLimit(ctx, dc)
 	}
 
+	// 実装枠の残りが起動の最小額に満たなければ、J3 の費用を払う前に起動しない。
+	if dc.ImplBudgetMicros < minImplLaunchMicros {
+		if jc != nil {
+			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedRunBudget,
+				Detail: budgetShortfallDetail(bucketRemaining{Impl: dc.ImplBudgetMicros, Review: dc.ReviewBudgetMicros})}, nil
+		}
+		return nil, nil, ErrBudgetExceeded
+	}
+
 	// J3 と実装枠の両方が周の上限に入らないなら、J3 の費用を払う前に起動しない
 	// （最終の評価は、スロットの割り当てと同じトランザクションの中で行う）。
 	// `--resume` の再開は J3 を呼ばない（子は前の文脈を持つ）。
@@ -471,7 +490,7 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 	if dc.Resume != nil {
 		j3Budget = 0
 	}
-	if err := s.checkCycleBudget(ctx, in.CycleID, j3Budget+microsToUSD(dc.ImplBudgetMicros)); err != nil {
+	if err := s.checkCycleBudget(ctx, in.CycleID, j3Budget+microsToUSD(dc.estimateMicros())); err != nil {
 		if jc != nil && errors.Is(err, ErrBudgetExceeded) {
 			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedCycleBudget}, nil
 		}
@@ -564,7 +583,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 			return 0, errDelegationNotEligible
 		}
 		if cycleIDInt != nil {
-			if err := evalCycleBudgetTx(ctx, tx, *cycleIDInt, dc.ImplBudgetMicros); err != nil {
+			if err := evalCycleBudgetTx(ctx, tx, *cycleIDInt, dc.estimateMicros()); err != nil {
 				return 0, err
 			}
 		}

@@ -153,6 +153,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3CycleShape(t, &doc)
 	addM3SlotClearShape(t, &doc)
 	addM3RunShape(t, &doc)
+	addM3BudgetShapes(t, &doc)
 	return doc
 }
 
@@ -493,6 +494,8 @@ var jsonEntityOf = map[string]string{
 	"runs": "run",
 	// slot clear の slot（S2。§IF / API の「slot clear」の行）。
 	"slot": "slot",
+	// status.needs_human.budget_exhausted（S2。§IF / API の「status.needs_human.budget_exhausted」の行）。
+	"budget_exhausted": "budget_exhausted",
 }
 
 // assertDocumentedEntities は出力の中の要素（オブジェクトと配列の要素）の
@@ -672,4 +675,28 @@ func addM3RunShape(t *testing.T, doc *documentedJSON) {
 		}
 	}
 	t.Fatalf("m3 spec line has no `{\"phase\": …}` shape: %q", line)
+}
+
+// addM3BudgetShapes は `status.needs_human.budget_exhausted` の要素の形（m3 §IF / API「`status`・
+// `show`・`runs` の拡張」の 1 行を直接パースする。第 2 の正本を持たない）と、`budget` の成功時の
+// JSON の形を doc へ足す（#105）。`budget` の成功時の形は仕様に書かれていないため、`approve` の
+// `approval` に課題・計画の版・置き換えた額を足した形をここで定義する（仕様への指摘）。
+func addM3BudgetShapes(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	line := m3SpecLine(t, "- `status.needs_human.budget_exhausted`（S2）: ")
+	backticks := backtickRe.FindAllStringSubmatch(line, -1)
+	if len(backticks) < 2 {
+		t.Fatalf("m3 spec budget_exhausted line has no shape: %q", line)
+	}
+	elem := map[string]bool{}
+	for _, q := range quotedRe.FindAllStringSubmatch(backticks[1][1], -1) {
+		elem[q[1]] = true
+	}
+	if len(elem) == 0 {
+		t.Fatalf("m3 spec budget_exhausted element shape has no keys: %q", line)
+	}
+	doc.entity["budget_exhausted"] = elem
+	doc.topLevel["budget"] = append(doc.topLevel["budget"], map[string]bool{
+		"challenge_id": true, "plan_version": true, "impl_usd": true, "review_usd": true, "approval": true,
+	})
 }
