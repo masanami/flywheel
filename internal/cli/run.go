@@ -62,6 +62,7 @@ func runRun(a Args) (any, error) {
 		Upstream:    newUpstreamThreadSource(),
 		Git:         git.New(),
 		Reconcile:   newBranchSource(),
+		Predictor:   launcher,
 		CycleID:     cyc.ID,
 	})
 
@@ -78,7 +79,7 @@ func runRun(a Args) (any, error) {
 	}
 
 	return textOutput{
-		json: map[string]any{"phase": judgmentPhaseJSON("run", res)},
+		json: map[string]any{"phase": delegationPhaseJSON(res)},
 		text: judgmentPhaseText("委譲の対象はありませんでした\n", res),
 	}, nil
 }

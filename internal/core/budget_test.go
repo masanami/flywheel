@@ -112,6 +112,7 @@ func TestBudget_EstimateIsImplPlusReviewRemainingAgainstTheCycleCap(t *testing.T
 // AC-352: 終了していない委譲の上限額の和が予約額に入り、評価式は並列の数で変わらない。
 func TestBudget_ReservedIsTheSumOfOpenRunsCaps(t *testing.T) {
 	f := newDelegateFixture(t)
+	f.agent.MaxParallelRuns = 10 // 予算の評価式を検査する（同時の起動の上限は delegate_plan_test.go が検査する）
 	f.newInProgress(t, "a", "P1", budgetSpec(50, 30))
 	cyc := f.cycle(t, 183) // J3 3 ＋ 評価額 80 ＋ 予約額 100（終了していない 2 つの委譲の上限額）
 	cyid, _ := parseCycleID(cyc)
@@ -122,6 +123,7 @@ func TestBudget_ReservedIsTheSumOfOpenRunsCaps(t *testing.T) {
 	}
 	// 終了していない run が 1 つ多ければ 50 USD 超える。
 	f2 := newDelegateFixture(t)
+	f2.agent.MaxParallelRuns = 10
 	f2.newInProgress(t, "a", "P1", budgetSpec(50, 30))
 	cyc2 := f2.cycle(t, 183)
 	cyid2, _ := parseCycleID(cyc2)

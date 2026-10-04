@@ -828,8 +828,10 @@ func TestRunDelegation_OneSlotTwoChallenges_OnlyOneLaunches(t *testing.T) {
 	}
 	close(f.deleg.block)
 	second := <-errs
-	if !errors.Is(first, ErrSlotUnavailable) || second != nil {
-		t.Fatalf("results = (%v, %v), want one ErrSlotUnavailable and one success", first, second)
+	// 先に起動した課題は取り込み元の対応が無く Issue 番号を渡せないため、後の呼び出しの計画の時点で
+	// 起動が見えていれば serialized、見えていなければ割り当ての時点で slot_unavailable になる。
+	if (!errors.Is(first, ErrSlotUnavailable) && !errors.Is(first, ErrSerialized)) || second != nil {
+		t.Fatalf("results = (%v, %v), want one ErrSlotUnavailable/ErrSerialized and one success", first, second)
 	}
 	if n := len(f.deleg.launched()); n != 1 {
 		t.Errorf("launches = %d, want 1", n)
@@ -878,6 +880,8 @@ func TestRunDelegation_CycleBudgetTooSmallForImplSlot(t *testing.T) {
 
 func TestRunDelegation_RateLimitedStopsLaterCandidates(t *testing.T) {
 	f := newDelegateFixture(t)
+	// 別のリポジトリの候補は別のグループで並行に起動されうるので、同時の起動を 1 つにして順に処理する。
+	f.agent.MaxParallelRuns = 1
 	a := f.newInProgress(t, "a", "P0", planSpec(nil))
 	b := f.newInProgress(t, "b", "P1", planSpec(func(m map[string]any) { m["repo"] = "sibling" }))
 	f.deleg.result = JudgmentLaunchOutput{Result: RunResultErrored, RateLimited: true}

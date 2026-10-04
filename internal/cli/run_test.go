@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -110,6 +111,11 @@ func TestRun_DelegatesAndReturnsAPhaseObject(t *testing.T) {
 	items := phase["items"].([]any)
 	if len(items) != 1 {
 		t.Fatalf("items = %v", items)
+	}
+	// 直列化グループ: 候補 1 件だけのグループ。取り込み元の対応が無い候補は予測できない（not_predictable）。
+	wantGroups := []any{map[string]any{"repo": "direct-repo", "challenges": []any{id}, "reasons": []any{"not_predictable"}, "prediction_head_sha": nil}}
+	if !reflect.DeepEqual(phase["serial_groups"], wantGroups) {
+		t.Errorf("serial_groups = %#v, want %#v", phase["serial_groups"], wantGroups)
 	}
 	it := items[0].(map[string]any)
 	if it["challenge_id"] != id || it["result"] != "succeeded" || it["outcome"] != "completed" || it["status"] != "verifying" {
@@ -228,7 +234,9 @@ func TestRun_RunInProgress_ExitOneAndNothingStarted(t *testing.T) {
 	}
 }
 
-func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsSlotUnavailable(t *testing.T) {
+// 先に起動した課題は取り込み元の対応が無く Issue 番号を渡せないため、後の呼び出しは同じ直列化グループ
+// （fail-closed）に入り、委譲を起動せず serialized（終了コード 1）で終わる（AC-327・366）。
+func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsSerialized(t *testing.T) {
 	ws := setupRunWorkspace(t)
 	a := newInProgressForRun(t, ws, nil)
 	b := newInProgressForRun(t, ws, nil)
@@ -258,8 +266,8 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsSlotUnavailab
 	if results[0].code != 0 {
 		t.Errorf("first: exit=%d stderr=%s", results[0].code, results[0].stderr)
 	}
-	if results[1].code != 1 || !strings.Contains(results[1].stderr, `"slot_unavailable"`) {
-		t.Errorf("second: exit=%d stderr=%s, want exit 1 slot_unavailable", results[1].code, results[1].stderr)
+	if results[1].code != 1 || !strings.Contains(results[1].stderr, `"serialized"`) {
+		t.Errorf("second: exit=%d stderr=%s, want exit 1 serialized", results[1].code, results[1].stderr)
 	}
 	if n := len(delegateRunsOf(t, ws)); n != 1 {
 		t.Errorf("delegate runs = %d, want 1", n)
@@ -359,5 +367,57 @@ func TestRun_SourceBound_J3GetsUpstreamViaGET_AndReadValuesStay(t *testing.T) {
 	sb, _ := runJSON(t, ws, "show", id)["source_binding"].(map[string]any)
 	if sb == nil || sb["read_comments_count"] != float64(0) {
 		t.Errorf("source_binding = %v, the read values must not change", sb)
+	}
+}
+
+// 衝突の予測の口（宣言の command に置いた偽の実行ファイル）が呼ばれ、結果から直列化グループができる
+// （AC-297・301・334・335・347・351 の CLI 側）。`flywheel run`（ID の省略）も cycle の委譲の段と同じ
+// core の処理を通る。
+func TestRun_PredictionHook_GroupsFromSharedFiles_AndRecordsAPredictRun(t *testing.T) {
+	ws := setupRunWorkspace(t)
+	argvLog := filepath.Join(t.TempDir(), "predict.argv")
+	script := filepath.Join(t.TempDir(), "predict.sh")
+	// PATH が偽の実行ファイルの置き場だけでも動くよう、シェルの組み込みだけを使う。
+	body := "#!/bin/sh\necho \"$@\" >> " + shellSingleQuote(argvLog) + "\n" +
+		"printf '%s' '{\"schema\":\"harness.conflict-prediction/v1\",\"complete\":true,\"error\":null,\"head_sha\":\"cafe01\",\"cost_usd\":0.1,\"unknown_cost_count\":0," +
+		"\"issues\":[{\"issue\":7,\"status\":\"predicted\"},{\"issue\":9,\"status\":\"predicted\"}]," +
+		"\"pairs\":[{\"issues\":[7,9],\"status\":\"predicted\",\"shared_files\":[{\"path\":\"a.go\",\"merge_friendly\":false,\"ignored\":false}],\"dependency\":null}]}'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	conn := strings.Replace(runConnectorsFixture, `{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "operations"`,
+		`{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "conflict_prediction": {"command": ["`+script+`"], "schema": "harness.conflict-prediction/v1"}, "operations"`, 1)
+	// 取り込み元の Issue（o/r）が対象リポジトリの Issue であるときだけ、番号を予測の口へ渡せる。
+	conn = strings.Replace(conn, `"remote": "o/flywheel"`, `"remote": "o/r"`, 1)
+	slotGit(t, filepath.Join(ws, "slot-f"), "remote", "set-url", "origin", "https://github.com/o/r.git")
+	writeConnectorsJSONForTest(t, ws, conn)
+	mut := func(m map[string]any) { m["repo"] = "flywheel-repo"; m["operation"] = "impl-op" }
+	a := newInProgressForRun(t, ws, mut)
+	b := newInProgressForRun(t, ws, mut)
+	bindChallengeToIssue(t, ws, a, 7, 2, "2026-09-25T09:00:00Z")
+	bindChallengeToIssue(t, ws, b, 9, 0, "2026-09-25T09:00:00Z")
+	withFakeGHRoutesOnPATH(t, append(j2GHRoutes(t), fakeGHRoute{match: "repos/o/r/issues/9/comments?per_page=100&page=1", stdout: "[]"}))
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{delegateRoute("completed"), j3Route("b")}, "")
+
+	phase := phaseOf(t, runJSON(t, ws, "run"))
+	groups, _ := phase["serial_groups"].([]any)
+	want := []any{map[string]any{"repo": "flywheel-repo", "challenges": []any{a, b}, "reasons": []any{"shared_files"}, "prediction_head_sha": "cafe01"}}
+	if !reflect.DeepEqual(groups, want) {
+		t.Errorf("serial_groups = %#v, want %#v", groups, want)
+	}
+	if raw, _ := os.ReadFile(argvLog); strings.TrimSpace(string(raw)) != "--max-budget-usd 2 7 9" {
+		t.Errorf("prediction argv = %q, want \"--max-budget-usd 2 7 9\"", raw)
+	}
+	var predict []map[string]any
+	for _, r := range runJSON(t, ws, "runs")["runs"].([]any) {
+		if m := r.(map[string]any); m["kind"] == "predict" {
+			predict = append(predict, m)
+		}
+	}
+	if len(predict) != 1 || predict[0]["challenge_id"] != nil || predict[0]["result"] != "succeeded" {
+		t.Errorf("predict runs = %v", predict)
+	}
+	if n := len(delegateRunsOf(t, ws)); n != 2 {
+		t.Errorf("delegate runs = %d, want both candidates launched one after the other", n)
 	}
 }

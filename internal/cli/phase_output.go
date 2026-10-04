@@ -18,6 +18,30 @@ func judgmentPhaseJSON(phase string, res *core.JudgmentAutoResult) map[string]an
 	}
 }
 
+// delegationPhaseJSON は委譲の段（run）の phase の要素: 判断の段と同じ形に、直列化グループの
+// `serial_groups`（[{"repo", "challenges", "reasons", "prediction_head_sha"}]。無ければ []）を足す。
+func delegationPhaseJSON(res *core.JudgmentAutoResult) map[string]any {
+	out := judgmentPhaseJSON("run", res)
+	out["serial_groups"] = serialGroupsJSON(res.SerialGroups)
+	return out
+}
+
+func serialGroupsJSON(groups []core.SerialGroup) []map[string]any {
+	out := make([]map[string]any, 0, len(groups))
+	for _, g := range groups {
+		challenges := append([]string{}, g.Challenges...)
+		reasons := make([]string, 0, len(g.Reasons))
+		for _, r := range g.Reasons {
+			reasons = append(reasons, string(r))
+		}
+		out = append(out, map[string]any{
+			"repo": g.Repo, "challenges": challenges, "reasons": reasons,
+			"prediction_head_sha": nullableStringPtr(g.PredictionHeadSHA),
+		})
+	}
+	return out
+}
+
 func judgmentItemsJSON(items []core.JudgmentAutoItem) []map[string]any {
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {

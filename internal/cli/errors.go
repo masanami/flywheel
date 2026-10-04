@@ -70,6 +70,9 @@ const (
 	// CodeSlotUnavailable は #102 で追加（指定した課題のリポジトリに空いている
 	// スロットが無い。同上「エラーコードの追加」）。core.ErrSlotUnavailable を写す。
 	CodeSlotUnavailable ErrorCode = "slot_unavailable"
+	// CodeSerialized は #106 で追加（指定した課題が、終了していない委譲の run を持つ課題と同じ
+	// 直列化グループに入る。同上「エラーコードの追加」）。core.ErrSerialized を写す。
+	CodeSerialized ErrorCode = "serialized"
 )
 
 // codeExit は 1 つのエラーコードと、それに対応する終了コード（0/1/2 のみ）の組。
@@ -103,6 +106,7 @@ var errorCodeTable = []codeExit{
 	{CodeRunInProgress, 1},
 	{CodeBudgetExceeded, 1},
 	{CodeSlotUnavailable, 1},
+	{CodeSerialized, 1},
 }
 
 // ExitCodeFor は既知の ErrorCode に対応する終了コードを返す。
@@ -178,6 +182,8 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeBudgetExceeded, err.Error())
 	case errors.Is(err, core.ErrSlotUnavailable):
 		return NewError(CodeSlotUnavailable, err.Error())
+	case errors.Is(err, core.ErrSerialized):
+		return NewError(CodeSerialized, err.Error())
 	default:
 		return NewError(CodeInternalError, err.Error())
 	}

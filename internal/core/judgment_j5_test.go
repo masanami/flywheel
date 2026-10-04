@@ -546,7 +546,7 @@ func TestVerifyAutoJ5_RateLimitedCycleStartsNothing(t *testing.T) {
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	jc := NewJudgmentCycle(f.cycle(t, 300))
-	jc.rateLimited = true
+	jc.rateLimited.Store(true)
 	in := f.input(jc.cycleID, nil)
 	in.Cycle = jc
 	res, err := f.s.VerifyAutoJ5(context.Background(), in)

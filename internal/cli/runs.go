@@ -50,10 +50,10 @@ func runEntryJSON(r core.Run) map[string]any {
 		"id":               r.ID,
 		"kind":             string(r.Kind),
 		"judgment":         nullableString(string(r.Judgment)),
-		"challenge_id":     r.ChallengeID,
+		"challenge_id":     nullableString(r.ChallengeID), // predict の run は課題に属さず null
 		"cycle_id":         nullableStringPtr(r.CycleID),
 		"cycle_budget_usd": nullableFloatPtr(r.CycleBudgetUSD),
-		"session_id":       r.SessionID,
+		"session_id":       nullableString(r.SessionID), // predict の run は null
 		"result":           nullableString(string(r.Result)),
 		"rate_limited":     r.RateLimited,
 		"cost_usd":         nullableFloatPtr(r.CostUSD),
