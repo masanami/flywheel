@@ -25,6 +25,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   answer <ID> --answer <a>
   approve <ID> [--hold-release]
   reject <ID> --reason <r>
+  budget <C-ID> --impl-usd <額> [--review-usd <額>]
   op add <C-ID> --kind <release|delete|external_send|other> --summary <s> [--ref <r>]
   status
   log [<ID>]

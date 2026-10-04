@@ -114,14 +114,15 @@ func ParseOperationKind(s string) (OperationKind, bool) {
 // （H2・H5。docs/features/m1-core.md §承認）。
 type ApprovalKind string
 
-// ApprovalKind の3値。
+// ApprovalKind の4値（budget は `flywheel budget` の承認。M3 S2 が足した）。
 const (
 	ApprovalKindPlan       ApprovalKind = "plan"
 	ApprovalKindCompletion ApprovalKind = "completion"
 	ApprovalKindRelease    ApprovalKind = "release"
+	ApprovalKindBudget     ApprovalKind = "budget"
 )
 
-var approvalKindValues = []ApprovalKind{ApprovalKindPlan, ApprovalKindCompletion, ApprovalKindRelease}
+var approvalKindValues = []ApprovalKind{ApprovalKindPlan, ApprovalKindCompletion, ApprovalKindRelease, ApprovalKindBudget}
 
 // ParseApprovalKind は s を承認の種類として解釈する。前後の空白を除いた完全一致のみ受理する。
 func ParseApprovalKind(s string) (ApprovalKind, bool) {

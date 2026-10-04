@@ -327,6 +327,20 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
+		// flywheel budget（M3 S2）は課題の状態を変えず、承認の種類 budget の承認の記録と
+		// entity=challenge・action=approve の作業ログを残す。
+		name: "budget", command: "budget",
+		setup: func(t *testing.T, ws string) []string {
+			return []string{"budget", createBudgetTargetForCase(t, ws), "--impl-usd", "80", "--review-usd", "20"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"challenge", "C-1", "approve",
+				map[string]any{"impl_budget_usd": nil, "review_budget_usd": nil},
+				map[string]any{"approval_kind": "budget", "decision": "approved", "target_version": 1.0,
+					"impl_budget_usd": 80.0, "review_budget_usd": 20.0}}}
+		},
+	},
+	{
 		name: "op add", command: "op add",
 		setup: func(t *testing.T, ws string) []string {
 			return []string{"op", "add", createForCase(t, ws), "--kind", "release", "--summary", "s", "--ref", "https://example.com/pr/1"}

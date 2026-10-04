@@ -45,10 +45,10 @@ const defaultLockHeartbeatInterval = 60 * time.Second
 // 表す（§IF / API エラーコードの追加「locked」）。
 var ErrLocked = errors.New("core: another cycle holds the exclusive lock")
 
-// ErrBudgetExceeded は、周の上限額（既消費額＋予約額＋評価額）を超えるため
-// run を起動できないことを表す（§IF / API エラーコードの追加
+// ErrBudgetExceeded は、周の上限額（既消費額＋予約額＋評価額）を超える、または計画の版の
+// 実装枠の残りが 1 USD に満たないため run を起動できないことを表す（§IF / API エラーコードの追加
 // 「budget_exceeded」・§予算ガード）。
-var ErrBudgetExceeded = errors.New("core: this run would exceed the cycle budget")
+var ErrBudgetExceeded = errors.New("core: this run would exceed the cycle budget or the plan version's implementation budget")
 
 // ErrLockLost は、サイクルの排他ロックの保持者が別の周に替わっている
 // （stale回収で奪われた等）ことを表す。HeartbeatCycleLock が、渡した周が

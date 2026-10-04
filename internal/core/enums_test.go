@@ -110,10 +110,10 @@ func TestParseOperationState_RejectsUnknownValue(t *testing.T) {
 	}
 }
 
-// --- ApprovalKind（承認の種類。plan|completion|release） ---
+// --- ApprovalKind（承認の種類。plan|completion|release|budget） ---
 
 func TestParseApprovalKind_AcceptsKnownValues(t *testing.T) {
-	for _, s := range []string{"plan", "completion", "release"} {
+	for _, s := range []string{"plan", "completion", "release", "budget"} {
 		if _, ok := ParseApprovalKind(s); !ok {
 			t.Errorf("ParseApprovalKind(%q) ok = false, want true", s)
 		}

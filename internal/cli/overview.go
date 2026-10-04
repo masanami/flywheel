@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
@@ -16,18 +17,25 @@ import (
 // runStatus は `flywheel status` の実装。読み取り専用（core.GetOverview は状態・
 // 作業ログを変えない）。
 func runStatus(a Args) (any, error) {
-	ov, err := a.Store.GetOverview(context.Background())
+	// サイズの既定を引く宣言。読めなくても status は読み取り専用の表示として動かす
+	// （その場合、枠の額を明記しない計画の課題は budget_exhausted の判定の対象外になる）。
+	decl, derr := core.LoadAgentDeclaration(a.Store.Workspace())
+	if derr != nil {
+		decl = nil
+	}
+	ov, err := a.Store.GetOverviewFor(context.Background(), decl)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
 		json: map[string]any{
 			"needs_human": map[string]any{
-				"challenges":    challengesJSON(ov.NeedsHumanChallenges),
-				"operations":    operationsJSON(ov.NeedsHumanOperations),
-				"discrepancies": discrepanciesJSON(ov.Discrepancies),
-				"triage":        triageJSON(ov.NeedsHumanTriage),
-				"slots":         slotsJSON(ov.NeedsHumanSlots),
+				"challenges":       challengesJSON(ov.NeedsHumanChallenges),
+				"operations":       operationsJSON(ov.NeedsHumanOperations),
+				"discrepancies":    discrepanciesJSON(ov.Discrepancies),
+				"triage":           triageJSON(ov.NeedsHumanTriage),
+				"slots":            slotsJSON(ov.NeedsHumanSlots),
+				"budget_exhausted": budgetExhaustedJSON(ov.NeedsHumanBudgetExhausted),
 			},
 			"actionable": map[string]any{
 				"challenges": challengesJSON(ov.ActionableChallenges),
@@ -76,6 +84,21 @@ func triageJSON(items []core.TriageItem) []map[string]any {
 	return out
 }
 
+// budgetExhaustedJSON は §IF / API「status.needs_human.budget_exhausted（S2）:
+// [{"challenge_id", "plan_version", "impl_remaining_usd", "review_remaining_usd"}]」の形へ変換する。
+func budgetExhaustedJSON(items []core.BudgetExhausted) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		out = append(out, map[string]any{
+			"challenge_id":         it.ChallengeID,
+			"plan_version":         it.PlanVersion,
+			"impl_remaining_usd":   it.ImplRemainingUSD,
+			"review_remaining_usd": it.ReviewRemainingUSD,
+		})
+	}
+	return out
+}
+
 // slotsJSON は §IF / API「status.needs_human.slots（S2）:
 // [{"slot_id", "repo", "path", "run_id"}]」の形へ変換する（run_id は使用中の run。
 // needs_attention のスロットは使用中でないため通常 null）。
@@ -113,7 +136,7 @@ func challengesJSON(challenges []core.Challenge) []map[string]any {
 func overviewText(ov *core.Overview) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "人間の操作を待っているもの:\n")
-	if len(ov.NeedsHumanChallenges) == 0 && len(ov.NeedsHumanOperations) == 0 && len(ov.Discrepancies) == 0 && len(ov.NeedsHumanTriage) == 0 && len(ov.NeedsHumanSlots) == 0 {
+	if len(ov.NeedsHumanChallenges) == 0 && len(ov.NeedsHumanOperations) == 0 && len(ov.Discrepancies) == 0 && len(ov.NeedsHumanTriage) == 0 && len(ov.NeedsHumanSlots) == 0 && len(ov.NeedsHumanBudgetExhausted) == 0 {
 		fmt.Fprintf(&b, "  (なし)\n")
 	}
 	for _, c := range ov.NeedsHumanChallenges {
@@ -128,6 +151,10 @@ func overviewText(ov *core.Overview) string {
 	}
 	for _, sl := range ov.NeedsHumanSlots {
 		fmt.Fprintf(&b, "  %s\t要確認のスロット\t%s\t%s\t%s\n", sl.SlotID, sl.Repo, sl.Path, sl.Reason)
+	}
+	for _, be := range ov.NeedsHumanBudgetExhausted {
+		fmt.Fprintf(&b, "  %s\t予算切れ\t計画 v%d\t実装枠の残り %s USD\tレビュー対応枠の残り %s USD\n",
+			be.ChallengeID, be.PlanVersion, strconv.FormatFloat(be.ImplRemainingUSD, 'f', -1, 64), strconv.FormatFloat(be.ReviewRemainingUSD, 'f', -1, 64))
 	}
 	for _, d := range ov.Discrepancies {
 		kinds := make([]string, 0, len(d.Kinds))

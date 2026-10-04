@@ -94,6 +94,7 @@ var briefSectionOrder = []struct {
 var resumePromptFile = map[core.ResumeKind]string{
 	core.ResumeKindAnswer:      "resume/answer.md",
 	core.ResumeKindInterrupted: "resume/interrupted.md",
+	core.ResumeKindBudget:      "resume/budget.md",
 }
 
 const resumePromptLimit = 2048

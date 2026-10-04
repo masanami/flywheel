@@ -653,8 +653,9 @@ func TestRunDelegation_MaxBudgetUsesPlanImplBudgetAndItsOverride(t *testing.T) {
 	if _, err := f.run(t, &id); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.deleg.launched()[1].MaxBudgetUSD; got != 70 {
-		t.Errorf("MaxBudgetUSD after override = %v, want 70", got)
+	// 実装枠の残り ＝ 上書きした額 − その版の実装枠の run の費用（最初の run は 2.5 USD）。
+	if got := f.deleg.launched()[1].MaxBudgetUSD; got != 67.5 {
+		t.Errorf("MaxBudgetUSD after override = %v, want 67.5", got)
 	}
 }
 

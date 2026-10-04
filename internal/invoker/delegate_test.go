@@ -323,6 +323,32 @@ func TestBuildDelegationResumeStdin_InterruptedHasNoAnswerSection(t *testing.T) 
 	}
 }
 
+// 上限到達の後の再開（M3P44）: 固定の文面が、上限到達で中断した事実と続行を求めることを書き、
+// 回答の区画は持たない。ブランチがあれば「続けるブランチ」の区画で渡す。
+func TestBuildDelegationResumeStdin_BudgetStatesTheCapStopAndAsksToContinue(t *testing.T) {
+	got, err := BuildDelegationResumeStdin(core.ResumeKindBudget, "", "", "feat/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed, err := ResumePrompt(core.ResumeKindBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"費用の上限", "中断", "続けて終わらせる"} {
+		if !strings.Contains(fixed, want) {
+			t.Errorf("fixed text lacks %q:\n%s", want, fixed)
+		}
+	}
+	if !strings.HasPrefix(string(got), fixed) || !strings.Contains(string(got), "feat/x") || strings.Contains(string(got), "回答") {
+		t.Errorf("unexpected stdin:\n%s", got)
+	}
+	for _, other := range []core.ResumeKind{core.ResumeKindAnswer, core.ResumeKindInterrupted} {
+		if o, _ := ResumePrompt(other); o == fixed {
+			t.Errorf("the budget text must differ from %s", other)
+		}
+	}
+}
+
 func TestLauncher_InvokeDelegation_ResumeSendsResumeFlagAndTheFixedTextOnStdin(t *testing.T) {
 	setFakeClaudePath(t, newFakeClaudeDir(t))
 	ws := newWorkspace(t)
