@@ -380,3 +380,34 @@ func EndRun(t *testing.T, workspace, runID string) {
 		t.Fatalf("coretest: EndRun: %v", err)
 	}
 }
+
+// InsertApprovedPlan はテスト専用のフィクスチャとして、challengeID（内部整数 ID）の課題に
+// 計画の版 1（body・spec。spec が空なら構造化した出力の無い計画）と、その版の計画の承認を
+// 挿入し、課題を着手中にする（internal/cli の `run` のテストが、本人確認つきの承認を
+// 経由せず、委譲の対象の課題を用意するために使う）。
+func InsertApprovedPlan(t *testing.T, workspace string, challengeID int, body, spec string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var specCol any
+	if spec != "" {
+		specCol = spec
+	}
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(
+			`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (?, 1, ?, ?, ?)`,
+			challengeID, body, "2026-09-25T00:00:00.000Z", specCol); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at)
+			 VALUES (?, 'plan', 'approved', 1, 'tester', 'cli', 'tty_confirm', ?)`,
+			challengeID, "2026-09-25T00:00:00.000Z"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`UPDATE challenge SET status = 'in_progress', version = version + 1 WHERE id = ?`, challengeID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertApprovedPlan(%d): %v", challengeID, err)
+	}
+}

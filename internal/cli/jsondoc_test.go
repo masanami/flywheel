@@ -152,6 +152,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3ShowRunsShape(t, &doc)
 	addM3CycleShape(t, &doc)
 	addM3SlotClearShape(t, &doc)
+	addM3RunShape(t, &doc)
 	return doc
 }
 
@@ -557,9 +558,18 @@ func assertDocumentedJSON(t *testing.T, doc documentedJSON, name string, out map
 		}
 		t.Errorf("%s: top-level keys = %v, documented shapes = %v", name, sortedKeys(got), want)
 	}
-	assertDocumentedEntities(t, doc, name, out)
+	if name != "run" { // run の phase の items は ingest の item と名前が同じなので別に照合する。
+		assertDocumentedEntities(t, doc, name, out)
+	}
 	if name == "cycle" {
 		assertDocumentedCycle(t, doc, out)
+	}
+	if name == "run" {
+		if pm, ok := out["phase"].(map[string]any); ok {
+			assertDocumentedPhase(t, doc, "run", pm)
+		} else {
+			t.Errorf("run: `phase` is not an object: %#v", out["phase"])
+		}
 	}
 }
 
@@ -646,4 +656,20 @@ func addM3SlotClearShape(t *testing.T, doc *documentedJSON) {
 		return
 	}
 	t.Fatal("m3 spec does not document the `slot clear` JSON shape (expected a line starting with \"- `slot clear`（S2）: \")")
+}
+
+// addM3RunShape は `run` の成功時の JSON の形を doc へ足す（#102）。m3 §IF / API「`cycle` の JSON
+// 出力」の「`--auto` の個別の操作と `run` の `--json` は、…`{"phase": {…}}` で返す」の 1 行を直接
+// パースする（第 2 の正本を持たない）。phase の要素の形は cycle_phase_judgment・cycle_item・
+// cycle_not_started の照合（assertDocumentedPhase）が持つ。`jsondoc_test.go` の仕上げは #108。
+func addM3RunShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	line := m3SpecLine(t, "`--auto` の個別の操作と `run` の `--json` は", "`{\"phase\": {…}}`")
+	for _, b := range backtickRe.FindAllStringSubmatch(line, -1) {
+		if strings.HasPrefix(b[1], `{"phase"`) {
+			doc.topLevel["run"] = append(doc.topLevel["run"], topLevelKeys(b[1]))
+			return
+		}
+	}
+	t.Fatalf("m3 spec line has no `{\"phase\": …}` shape: %q", line)
 }

@@ -286,6 +286,15 @@ func defaultCommands() []Command {
 			Run:           runCycle,
 		},
 		{
+			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2。#102）。
+			// `<C-ID>` は省略できる（着手中で承認済みの計画を持つ課題すべて）。
+			Path:          []string{"run"},
+			RequiresStore: true,
+			MinPositional: 0,
+			MaxPositional: 1,
+			Run:           runRun,
+		},
+		{
 			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2）。本人確認も
 			// 端末も要らない単発の操作（作業ログには載せない）。
 			Path:          []string{"slot", "clear"},

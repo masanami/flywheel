@@ -67,6 +67,9 @@ const (
 	// ため起動できない。同上「エラーコードの追加」）。core.ErrBudgetExceeded を
 	// 写す。
 	CodeBudgetExceeded ErrorCode = "budget_exceeded"
+	// CodeSlotUnavailable は #102 で追加（指定した課題のリポジトリに空いている
+	// スロットが無い。同上「エラーコードの追加」）。core.ErrSlotUnavailable を写す。
+	CodeSlotUnavailable ErrorCode = "slot_unavailable"
 )
 
 // codeExit は 1 つのエラーコードと、それに対応する終了コード（0/1/2 のみ）の組。
@@ -99,6 +102,7 @@ var errorCodeTable = []codeExit{
 	{CodeLocked, 1},
 	{CodeRunInProgress, 1},
 	{CodeBudgetExceeded, 1},
+	{CodeSlotUnavailable, 1},
 }
 
 // ExitCodeFor は既知の ErrorCode に対応する終了コードを返す。
@@ -172,6 +176,8 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeRunInProgress, err.Error())
 	case errors.Is(err, core.ErrBudgetExceeded):
 		return NewError(CodeBudgetExceeded, err.Error())
+	case errors.Is(err, core.ErrSlotUnavailable):
+		return NewError(CodeSlotUnavailable, err.Error())
 	default:
 		return NewError(CodeInternalError, err.Error())
 	}

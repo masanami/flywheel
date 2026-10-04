@@ -32,6 +32,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   mark-read <C-ID>
   runs [<C-ID>] [--open]
   cycle [--trigger <t>]
+  run [<C-ID>]
   slot clear <SL-ID>
 
 詳細は docs/features/m1-core.md・docs/features/m3-invoker-delegation.md を参照。

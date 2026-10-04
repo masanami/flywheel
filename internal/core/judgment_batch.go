@@ -24,6 +24,11 @@ const NotStartedCycleBudget NotStartedReason = "cycle_budget"
 // 取得に失敗したら、J2 を起動せず、その課題の結果に失敗として示す」）。
 const NotStartedUpstreamFetchFailed NotStartedReason = "upstream_fetch_failed"
 
+// NotStartedSlotUnavailable は、委譲の候補のリポジトリに使えるスロットが無く起動しなかった
+// ことを表す（S2。`run` の NotStarted だけが使う）。`cycle` の not_started の閉集合
+// （NotStartedReasonValues）への追加と照合は、委譲の段を結線する #108 が行う。
+const NotStartedSlotUnavailable NotStartedReason = "slot_unavailable"
+
 // notStartedReasonValues は S1 が出す NotStartedReason の閉集合
 // （run_budget・slot_unavailable・failure_limit・rework_limit は S2 の委譲の段が足す）。
 var notStartedReasonValues = []NotStartedReason{
