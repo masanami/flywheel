@@ -421,6 +421,30 @@ func assertDocumentedCycle(t *testing.T, doc documentedJSON, out map[string]any)
 // （cycle の phases の要素も、`--auto` の個別の操作の `{"phase": {…}}` の phase も同じ形）。
 func assertDocumentedPhase(t *testing.T, doc documentedJSON, where string, pm map[string]any) {
 	t.Helper()
+	if pm["phase"] == "run" {
+		// 委譲の段は判断の段の形に `serial_groups` を足した形（m3 §IF / API「`cycle` の JSON 出力」）。
+		groups, ok := pm["serial_groups"].([]any)
+		if !ok {
+			t.Errorf("%s: serial_groups = %#v, want an array", where, pm["serial_groups"])
+		}
+		for i, g := range groups {
+			gm, ok := g.(map[string]any)
+			if !ok {
+				t.Errorf("%s.serial_groups[%d] is not an object: %#v", where, i, g)
+				continue
+			}
+			if got := keysOf(gm); !reflect.DeepEqual(got, doc.entity["cycle_serial_group"]) {
+				t.Errorf("%s.serial_groups[%d] keys = %v, documented = %v", where, i, sortedKeys(got), sortedKeys(doc.entity["cycle_serial_group"]))
+			}
+		}
+		rest := map[string]any{}
+		for k, v := range pm {
+			if k != "serial_groups" {
+				rest[k] = v
+			}
+		}
+		pm = rest
+	}
 	if got := keysOf(pm); !reflect.DeepEqual(got, doc.entity["cycle_phase_judgment"]) {
 		t.Errorf("%s keys = %v, documented = %v", where, sortedKeys(got), sortedKeys(doc.entity["cycle_phase_judgment"]))
 	}
@@ -667,6 +691,7 @@ func addM3SlotClearShape(t *testing.T, doc *documentedJSON) {
 // cycle_not_started の照合（assertDocumentedPhase）が持つ。`jsondoc_test.go` の仕上げは #108。
 func addM3RunShape(t *testing.T, doc *documentedJSON) {
 	t.Helper()
+	addM3SerialGroupShape(t, doc)
 	line := m3SpecLine(t, "`--auto` の個別の操作と `run` の `--json` は", "`{\"phase\": {…}}`")
 	for _, b := range backtickRe.FindAllStringSubmatch(line, -1) {
 		if strings.HasPrefix(b[1], `{"phase"`) {
@@ -699,4 +724,29 @@ func addM3BudgetShapes(t *testing.T, doc *documentedJSON) {
 	doc.topLevel["budget"] = append(doc.topLevel["budget"], map[string]bool{
 		"challenge_id": true, "plan_version": true, "impl_usd": true, "review_usd": true, "approval": true,
 	})
+}
+
+// addM3SerialGroupShape は委譲の段の `serial_groups` の要素の形を doc へ足す（#106）。m3 §IF / API
+// 「`cycle` の JSON 出力」の「`run` の段（S2）は `serial_groups: [{…}]` を持つ」の 1 行を直接パース
+// する（第 2 の正本を持たない）。
+func addM3SerialGroupShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	line := m3SpecLine(t, "`run` の段（S2）は `serial_groups:")
+	for _, b := range backtickRe.FindAllStringSubmatch(line, -1) {
+		if !strings.HasPrefix(b[1], "serial_groups:") {
+			continue
+		}
+		elem := map[string]bool{}
+		// 要素の形は `[{"repo", "challenges": …}]` の中の引用符つきのキー。
+		open := strings.Index(b[1], "{")
+		for _, q := range quotedRe.FindAllStringSubmatch(b[1][open:], -1) {
+			elem[q[1]] = true
+		}
+		if len(elem) == 0 {
+			break
+		}
+		doc.entity["cycle_serial_group"] = elem
+		return
+	}
+	t.Fatalf("m3 spec line has no `serial_groups: [{…}]` shape: %q", line)
 }

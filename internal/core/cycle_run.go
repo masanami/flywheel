@@ -22,6 +22,8 @@ const (
 	CyclePhaseIngest   CyclePhase = "ingest"
 	CyclePhaseClassify CyclePhase = "classify"
 	CyclePhasePlan     CyclePhase = "plan"
+	// CyclePhaseRun は委譲の段（S2。結線は cycle の仕上げのチケット）。
+	CyclePhaseRun CyclePhase = "run"
 )
 
 // CycleIngestInput は取り込みの段の入力。`.flywheel/sources.json` があるときだけ
@@ -69,6 +71,8 @@ type CyclePhaseResult struct {
 	Ingest     *IngestResult
 	Items      []JudgmentAutoItem
 	NotStarted []NotStarted
+	// SerialGroups は委譲の段（run）の直列化グループ（他の段・skipped の段は空）。
+	SerialGroups []SerialGroup
 }
 
 // CycleRunResult は Store.RunCycle の出力（`cycle --json` の元になる値）。
