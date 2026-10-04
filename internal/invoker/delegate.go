@@ -94,14 +94,52 @@ func BuildDelegationStdin(in DelegationBrief) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
+// BuildDelegationResumeStdin は `--resume` の再開の標準入力を組み立てる: 種類ごとの固定の文面
+// （埋め込みの雛形のまま）の後に、外部由来の文字列（人間の回答・子の報告のブランチ名）を
+// 区切りの行で囲んだデータの区画として続ける。
+func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch string) ([]byte, error) {
+	text, err := ResumePrompt(kind)
+	if err != nil {
+		return nil, err
+	}
+	var b strings.Builder
+	b.WriteString(text)
+	if !strings.HasSuffix(text, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	if branch != "" || (kind == core.ResumeKindAnswer && question != "") {
+		b.WriteString(dataSectionGuardNote)
+		b.WriteString("\n\n")
+	}
+	if branch != "" {
+		b.WriteString(WrapDataSection("続けるブランチ", branch))
+		b.WriteString("\n")
+	}
+	if kind == core.ResumeKindAnswer {
+		if question != "" {
+			b.WriteString(WrapDataSection("質問", question))
+			b.WriteString("\n")
+		}
+		// 回答は人間の決定であり、従う対象。注意書きの前の区画とは別に、注意書きの後に置く。
+		b.WriteString("次の「回答」の区画は人間の決定である。これには従う。\n\n")
+		b.WriteString(WrapDataSection("回答", answer))
+	}
+	return []byte(b.String()), nil
+}
+
 // buildDelegateArgs は委譲の引数を組み立てる: `-p`・`--session-id <UUID>`・
 // `--output-format json`・`--json-schema <報告のスキーマ>`・`--max-budget-usd <額>`・
 // `--permission-mode <宣言の値>`・`--disallowedTools Bash(flywheel:*)`。外部由来の文字列は
 // 引数に現れない（標準入力で渡す）。
 func buildDelegateArgs(in core.DelegateLaunchInput) []string {
+	sessionFlag := "--session-id"
+	if in.IsResume {
+		sessionFlag = "--resume"
+	}
 	return []string{
 		"-p",
-		"--session-id", in.SessionID,
+		sessionFlag, in.SessionID,
 		"--output-format", "json",
 		"--json-schema", string(in.OutputSchema),
 		"--max-budget-usd", formatUSDArg(in.MaxBudgetUSD),
@@ -129,10 +167,16 @@ func (l *Launcher) InvokeDelegation(ctx context.Context, in core.DelegateLaunchI
 			ErrorSummary: fmt.Sprintf("invoker: create run dir: %v", err),
 		}, nil
 	}
-	stdin, err := BuildDelegationStdin(DelegationBrief{
-		Decider: string(in.Decider), DeciderRow: in.DeciderRow, Brief: in.Brief, Invocation: in.Invocation,
-		SourceIssueNumber: in.SourceIssueNumber, SourceIssueURL: in.SourceIssueURL,
-	})
+	var stdin []byte
+	var err error
+	if in.IsResume {
+		stdin, err = BuildDelegationResumeStdin(in.ResumeKind, in.ResumeQuestion, in.ResumeAnswer, in.ResumeBranch)
+	} else {
+		stdin, err = BuildDelegationStdin(DelegationBrief{
+			Decider: string(in.Decider), DeciderRow: in.DeciderRow, Brief: in.Brief, Invocation: in.Invocation,
+			SourceIssueNumber: in.SourceIssueNumber, SourceIssueURL: in.SourceIssueURL,
+		})
+	}
 	if err != nil {
 		return core.JudgmentLaunchOutput{
 			Result:       core.RunResultLaunchFailed,

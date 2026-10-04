@@ -343,16 +343,8 @@ func TestReconcile_SubmitIsLoggedAsInvokerWithRunID(t *testing.T) {
 	}
 }
 
-// 結末 completed 以外・succeeded 以外では成果物の確認（検証中・保留）をしない。
+// succeeded 以外では成果物の確認（検証中・保留）をしない。
 func TestReconcile_ArtifactCheckOnlyForSucceededCompleted(t *testing.T) {
-	f := newReconFixture(t, "impl")
-	f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) { m["outcome"] = "blocked" })
-	if _, err := f.run(t, nil); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.status(t); got != StatusInProgress {
-		t.Errorf("status = %s", got)
-	}
 	f2 := newReconFixture(t, "impl")
 	f2.deleg.result = JudgmentLaunchOutput{Result: RunResultErrored}
 	if _, err := f2.run(t, nil); err != nil {

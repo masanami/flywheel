@@ -119,6 +119,8 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 			"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/forbidden_operations.md":    &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/delegation_output_shape.md": &fstest.MapFile{Data: repeatBytes(1)},
+			"resume/answer.md":                 &fstest.MapFile{Data: repeatBytes(1)},
+			"resume/interrupted.md":            &fstest.MapFile{Data: repeatBytes(1)},
 		}
 		for name := range limits {
 			size := 1
@@ -160,6 +162,8 @@ func TestCheckPromptSizes_BriefTotal_ExactLimitPasses_OneByteOverFails(t *testin
 			"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/forbidden_operations.md":    &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/delegation_output_shape.md": &fstest.MapFile{Data: repeatBytes(lastFileSize)},
+			"resume/answer.md":                 &fstest.MapFile{Data: repeatBytes(1)},
+			"resume/interrupted.md":            &fstest.MapFile{Data: repeatBytes(1)},
 		}
 	}
 	// 4つの brief ファイルが1バイトずつ(計4)。残りを totalLimit-4 にすれば
@@ -186,6 +190,8 @@ func TestCheckPromptSizes_MissingJudgmentFileFails(t *testing.T) {
 		"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/forbidden_operations.md":    &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/delegation_output_shape.md": &fstest.MapFile{Data: repeatBytes(1)},
+		"resume/answer.md":                 &fstest.MapFile{Data: repeatBytes(1)},
+		"resume/interrupted.md":            &fstest.MapFile{Data: repeatBytes(1)},
 	}
 	if err := CheckPromptSizes(fsys); err == nil {
 		t.Error("CheckPromptSizes(missing j5.md) = nil, want an error")
@@ -229,6 +235,8 @@ func TestCheckPromptSizes_UnexpectedFileFails(t *testing.T) {
 		"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/forbidden_operations.md":    &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/delegation_output_shape.md": &fstest.MapFile{Data: repeatBytes(1)},
+		"resume/answer.md":                 &fstest.MapFile{Data: repeatBytes(1)},
+		"resume/interrupted.md":            &fstest.MapFile{Data: repeatBytes(1)},
 	}
 	if err := CheckPromptSizes(fsys); err == nil {
 		t.Error("CheckPromptSizes(with unexpected j6.md) = nil, want an error")
@@ -249,6 +257,8 @@ func TestCheckPromptSizes_UnexpectedFileInBriefDirFails(t *testing.T) {
 		"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/forbidden_operations.md":    &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/delegation_output_shape.md": &fstest.MapFile{Data: repeatBytes(1)},
+		"resume/answer.md":                 &fstest.MapFile{Data: repeatBytes(1)},
+		"resume/interrupted.md":            &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/extra_unexpected.md":        &fstest.MapFile{Data: repeatBytes(1)},
 	}
 	if err := CheckPromptSizes(fsys); err == nil {

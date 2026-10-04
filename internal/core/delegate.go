@@ -58,6 +58,16 @@ type DelegateLaunchInput struct {
 	// Invocation は形態 plugin の操作の invocation の差し込みを埋めた文字列
 	// （形態 brief、または invocation が無い操作は空）。
 	Invocation string
+	// IsResume が true なら、SessionID は再開元のセッションの ID で、`--resume` で起動する
+	// （Brief・Invocation・Decider は使わない。固定の文面と ResumeAnswer・ResumeBranch を渡す）。
+	IsResume bool
+	// ResumeKind は IsResume のとき、渡す固定の文面の種類。
+	ResumeKind ResumeKind
+	// ResumeAnswer は ResumeKind が answer のときの人間の回答、ResumeQuestion はその保留の問い。
+	ResumeAnswer   string
+	ResumeQuestion string
+	// ResumeBranch は再開のブリーフに書く、報告のブランチ名（無ければ空）。
+	ResumeBranch string
 }
 
 // DelegationInvoker は core が定義する、委譲の起動 1 回の実行の IF
@@ -123,6 +133,12 @@ type delegationContext struct {
 	Decider          Decider
 	DeciderRow       int
 	Invocation       string
+	// Resume が非 nil なら `--resume` で起動する（J3 は呼ばない）。LimitHit が非 nil なら
+	// 連続失敗の上限に達しており、委譲を起動しない。
+	Resume   *resumePlan
+	LimitHit *failureLimitHit
+	// ResumeBranchPushed は Resume のブランチがリモートにあるか（再開のスロットの選び方に使う）。
+	ResumeBranchPushed bool
 }
 
 // loadApprovedPlan は challengeID の承認済みの計画（計画の承認の最後の承認が指す版）を
@@ -221,6 +237,7 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	}
 	dc := &delegationContext{Challenge: ch}
 	var override *planBudgetOverride
+	var history *launchHistory
 	var planOK bool
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		p, ok, err := loadApprovedPlan(ctx, tx, cid)
@@ -237,7 +254,10 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		if dc.Binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
 			return err
 		}
-		override, err = loadPlanBudgetOverride(ctx, tx, cid, int64(p.Version))
+		if override, err = loadPlanBudgetOverride(ctx, tx, cid, int64(p.Version)); err != nil {
+			return err
+		}
+		history, err = loadLaunchHistory(ctx, tx, cid)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -267,6 +287,17 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		dc.ImplBudgetMicros = *override.ImplBudgetUSD
 	}
 	dc.Decider, dc.DeciderRow = DecideDecider(dc.Operation, validated.CrossRepo, validated.RelatedRepos)
+	dc.Resume, dc.LimitHit = history.decideLaunch(dc.Plan.Version, in.AgentDecl.FailureLimit)
+	if dc.Resume != nil {
+		err := s.db.Read(ctx, func(tx *sql.Tx) error {
+			b, err := loadRunBranch(ctx, tx, dc.Resume.Target, in.ConnDecl.HumanQuestionKinds, dc.Repo.DefaultBranch)
+			dc.Resume.Branch = b
+			return err
+		})
+		if err = classifyReadWriteErr(err); err != nil {
+			return nil, err
+		}
+	}
 	if connector.Form == ConnectorFormPlugin {
 		inv, err := fillInvocation(dc.Operation.Invocation, ch.ID, dc.Binding)
 		if err != nil {
@@ -429,14 +460,25 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 		return nil, nil, err
 	}
 
+	if dc.LimitHit != nil {
+		return s.holdForFailureLimit(ctx, dc)
+	}
+
 	// J3 と実装枠の両方が周の上限に入らないなら、J3 の費用を払う前に起動しない
 	// （最終の評価は、スロットの割り当てと同じトランザクションの中で行う）。
+	// `--resume` の再開は J3 を呼ばない（子は前の文脈を持つ）。
 	j3Budget := in.AgentDecl.JudgmentBudgetFor(JudgmentJ3)
+	if dc.Resume != nil {
+		j3Budget = 0
+	}
 	if err := s.checkCycleBudget(ctx, in.CycleID, j3Budget+microsToUSD(dc.ImplBudgetMicros)); err != nil {
 		if jc != nil && errors.Is(err, ErrBudgetExceeded) {
 			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedCycleBudget}, nil
 		}
 		return nil, nil, err
+	}
+	if dc.Resume != nil {
+		return s.launchDelegation(ctx, in, jc, dc, "")
 	}
 	sections, notStarted, err := s.prepareJ3(ctx, in, dc)
 	if err != nil || notStarted != nil {
@@ -484,9 +526,24 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *JudgmentCycle, dc *delegationContext, brief string) (*JudgmentAutoItem, *NotStarted, error) {
 	ch := dc.Challenge
 	cid, _ := parseChallengeID(ch.ID)
-	sessionID, err := newLowercaseUUIDv4()
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err)
+	var sessionID string
+	var resumedFrom *int64
+	var prevReportedMicros *int64
+	if dc.Resume != nil {
+		sessionID = dc.Resume.Target.SessionID
+		v := runIntID(dc.Resume.Target)
+		resumedFrom = &v
+		prevReportedMicros = dc.Resume.Target.ReportedTotalCostUSD
+		if dc.Resume.Branch != "" && dc.Repo.Slots.Provider != string(slotProviderWorktree) {
+			exists, err := in.Reconcile.BranchExists(ctx, dc.Repo.Remote, dc.Resume.Branch)
+			dc.ResumeBranchPushed = err == nil && exists
+		}
+	} else {
+		sid, err := newLowercaseUUIDv4()
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err)
+		}
+		sessionID = sid
 	}
 	host, _ := os.Hostname()
 	pid := int64(os.Getpid())
@@ -513,7 +570,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		}
 		row, err := insertRun(ctx, tx, cid, insertRunInput{
 			CycleID: cycleIDInt, Kind: runKindDelegate, ChallengeVersion: int64(cur.Version),
-			PlanVersion: &planVersion, SessionID: sessionID, PID: pid, Host: host,
+			PlanVersion: &planVersion, SessionID: sessionID, ResumedFromRunID: resumedFrom, PID: pid, Host: host,
 			HeartbeatAt: now, StartedAt: now, MaxBudgetUSD: dc.ImplBudgetMicros, BudgetBucket: budgetBucketImpl,
 			SlotID: &slotID, Decider: dc.Decider, DeciderRow: &deciderRow,
 		})
@@ -526,7 +583,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		}
 		return n, nil
 	}
-	assignment, err := s.AcquireSlot(ctx, in.Git, dc.Repo, bind)
+	assignment, err := s.acquireDelegationSlot(ctx, in, dc, bind)
 	switch {
 	case errors.Is(err, ErrSlotUnavailable):
 		if jc != nil {
@@ -564,6 +621,13 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 			launch.SourceIssueNumber, launch.SourceIssueURL = n, dc.Binding.URL
 		}
 	}
+	if dc.Resume != nil {
+		launch.IsResume = true
+		launch.ResumeKind = dc.Resume.Kind
+		launch.ResumeAnswer = dc.Resume.Answer
+		launch.ResumeQuestion = dc.Resume.Question
+		launch.ResumeBranch = dc.Resume.Branch
+	}
 	output, invokeErr := s.invokeFnWithHeartbeat(ctx, runIDInt, func(ctx context.Context) (JudgmentLaunchOutput, error) {
 		return in.Delegate.InvokeDelegation(ctx, launch)
 	})
@@ -600,7 +664,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		recon = s.gatherReconciliation(recordCtx, in, dc, assignment.Path, reportBranch)
 	}
 	mismatch := output.SessionIDReturned != "" && output.SessionIDReturned != sessionID
-	costMicros, costSource := computeRunCost(result, output.ReportedTotalCostUSD, false, nil, dc.ImplBudgetMicros)
+	costMicros, costSource := computeRunCost(result, output.ReportedTotalCostUSD, dc.Resume != nil, prevReportedMicros, dc.ImplBudgetMicros)
 	var reportedPtr *int64
 	if output.ReportedTotalCostUSD != nil {
 		v := usdToMicros(*output.ReportedTotalCostUSD)

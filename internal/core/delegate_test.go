@@ -51,6 +51,8 @@ type fakeDelegator struct {
 	block    chan struct{}
 	started  chan struct{}
 	onInvoke func(in DelegateLaunchInput)
+	// queue が空でなければ、起動のたびに先頭を返して取り除く（無くなったら result）。
+	queue []JudgmentLaunchOutput
 }
 
 func (f *fakeDelegator) InvokeDelegation(_ context.Context, in DelegateLaunchInput) (JudgmentLaunchOutput, error) {
@@ -65,6 +67,13 @@ func (f *fakeDelegator) InvokeDelegation(_ context.Context, in DelegateLaunchInp
 	}
 	if f.block != nil {
 		<-f.block
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.queue) > 0 {
+		out := f.queue[0]
+		f.queue = f.queue[1:]
+		return out, nil
 	}
 	return f.result, nil
 }
@@ -654,7 +663,7 @@ func ptrInt64(v int64) *int64 { return &v }
 func TestRunDelegation_RecordsResultCostAndReleasesSlot(t *testing.T) {
 	f := newDelegateFixture(t)
 	f.newInProgress(t, "t", "P1", planSpec(nil))
-	// 結末 blocked の写像は #104 の範囲（照合は課題の状態を変えない）。
+	// 結末 blocked は保留（人間対応待ち）になる。
 	f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) { m["outcome"] = "blocked" })
 	var busyDuring string
 	f.deleg.onInvoke = func(DelegateLaunchInput) { busyDuring = f.slotStates(t)["slot1"] }
@@ -672,11 +681,11 @@ func TestRunDelegation_RecordsResultCostAndReleasesSlot(t *testing.T) {
 	if len(runs) != 1 || runs[0].Result != RunResultSucceeded || runs[0].CostUSD == nil || *runs[0].CostUSD != 2_500_000 {
 		t.Fatalf("run = %+v", runs)
 	}
-	if res.Items[0].Outcome != "blocked" || res.Items[0].Status != nil {
-		t.Errorf("item = %+v, want outcome blocked and no status change", res.Items[0])
+	if res.Items[0].Outcome != "blocked" || res.Items[0].Status == nil || *res.Items[0].Status != string(StatusAwaitingHuman) {
+		t.Errorf("item = %+v, want outcome blocked and awaiting_human", res.Items[0])
 	}
-	if d := f.detail(t, "C-1"); d.Status != StatusInProgress {
-		t.Errorf("status = %s; mapping the outcome is out of scope here", d.Status)
+	if d := f.detail(t, "C-1"); d.Status != StatusAwaitingHuman {
+		t.Errorf("status = %s, want awaiting_human", d.Status)
 	}
 }
 
