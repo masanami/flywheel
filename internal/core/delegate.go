@@ -13,7 +13,7 @@ package core
 //	⑤ トランザクションの外で委譲の子を待つ（heartbeat を更新する）
 //	⑥ 結果と費用を記録し、スロットを解放する
 //
-// 照合・結末の課題の状態への写像（#103・#104）、実装枠の残りの額（#105）、衝突の
+// 照合（delegate_reconcile.go）はここに含める。結末の課題の状態への写像（#104）、実装枠の残りの額（#105）、衝突の
 // 予測と直列化グループ（#106）はここに含めない。固定の節の組み立て（埋め込みの雛形）
 // と claude の起動は internal/invoker が持ち、core は DelegationInvoker の IF だけを
 // 知る（core は invoker を import しない）。
@@ -83,6 +83,9 @@ type DelegateInput struct {
 	Upstream UpstreamThreadSource
 	// Git はスロットの作業ツリーの検査と払い出しの口。
 	Git SlotGit
+	// Reconcile は委譲の後の照合が呼ぶ、リモートのブランチと head ブランチの PR の取得
+	// （GET だけ）。
+	Reconcile UpstreamBranchSource
 	// CycleID はこの操作が属する周（BeginCycle が返した ID）。空は ErrValidation。
 	CycleID string
 	// Cycle が非 nil なら、枠超過の状態をこの JudgmentCycle と共有する。
@@ -90,8 +93,8 @@ type DelegateInput struct {
 }
 
 // DelegateResult は Store.RunDelegation の出力。Items の Outcome は、委譲の run が
-// succeeded のときの報告の結末（completed|questions|blocked）。Status は、この
-// チケットでは課題の状態を変えないので常に nil。
+// succeeded のときの報告の結末（completed|questions|blocked）。Status は、照合が課題の
+// 状態を変えたときのその状態（変えなければ nil）。
 type DelegateResult = JudgmentAutoResult
 
 // errDelegationNotEligible は、スロットを割り当てる直前に読み直した課題が、委譲の
@@ -333,7 +336,7 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 //     スロットが無い・上流の取得の失敗で起動しなかった課題は NotStarted へ入れる。
 func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateResult, error) {
 	if in.AgentDecl == nil || in.ConnDecl == nil || in.Judgment == nil || in.Delegate == nil ||
-		in.Upstream == nil || in.Git == nil || in.CycleID == "" {
+		in.Upstream == nil || in.Git == nil || in.Reconcile == nil || in.CycleID == "" {
 		return nil, ErrValidation
 	}
 	if in.Cycle != nil && in.Cycle.cycleID != in.CycleID {
@@ -585,6 +588,17 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		}
 		report = r
 	}
+	// 照合（launch_failed を除くすべての結果。報告に依らない）。スロットを解放する前に、
+	// 作業ツリーの検査と gh の GET を行う。ctx が取り消されても照合する。
+	recordCtx := context.WithoutCancel(ctx)
+	var recon *reconciliation
+	if result != RunResultLaunchFailed {
+		var reportBranch *string
+		if report != nil {
+			reportBranch = report.Branch
+		}
+		recon = s.gatherReconciliation(recordCtx, in, dc, assignment.Path, reportBranch)
+	}
 	mismatch := output.SessionIDReturned != "" && output.SessionIDReturned != sessionID
 	costMicros, costSource := computeRunCost(result, output.ReportedTotalCostUSD, false, nil, dc.ImplBudgetMicros)
 	var reportedPtr *int64
@@ -595,7 +609,6 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 
 	// 子を起動して費用が発生しうる以上、結果の記録とスロットの解放は ctx の取り消しに
 	// 関わらず必ず行う（RunJudgment の③と同じ理由）。
-	recordCtx := context.WithoutCancel(ctx)
 	var reaped *runRow
 	err = s.mutateSlots(recordCtx, func(tx *sql.Tx) error {
 		// 起動の最中に回収（interrupted）された run は上書きせず、割り当て直されたかもしれない
@@ -621,7 +634,28 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		}); err != nil {
 			return err
 		}
+		if recon != nil {
+			verifiedAt := s.currentTime()
+			for _, a := range recon.artifactInputs(&verifiedAt) {
+				if _, err := insertRunArtifact(recordCtx, tx, runIDInt, a); err != nil {
+					return err
+				}
+			}
+		}
 		sid, _ := parseSlotID(assignment.SlotID)
+		if recon != nil && recon.AttentionReason != "" {
+			// 未コミットの変更などが残っている作業ツリーは、人が slot clear するまで
+			// 次の委譲に割り当てない（変更は消さない）。
+			cur, err := loadSlotByID(recordCtx, tx, sid)
+			if err != nil {
+				return err
+			}
+			if cur == nil {
+				return ErrNotFound
+			}
+			_, err = updateSlotState(recordCtx, tx, sid, slotStateNeedsAttention, nil, recon.AttentionReason)
+			return err
+		}
 		return releaseSlot(recordCtx, tx, sid)
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -638,6 +672,13 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	item := &JudgmentAutoItem{ChallengeID: ch.ID, RunID: assignment.RunID, Result: result}
 	if report != nil {
 		item.Outcome = string(report.Outcome)
+	}
+	if recon != nil {
+		status, note, err := s.applyReconciliation(recordCtx, dc, assignment.RunID, recon, result, report)
+		if err != nil {
+			return nil, nil, err
+		}
+		item.Status, item.Note = status, note
 	}
 	return item, nil, nil
 }

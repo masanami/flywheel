@@ -112,3 +112,24 @@ func (u unavailableThreadSource) GetIssueThread(context.Context, string, int) (c
 func (u unavailableThreadSource) GetReferencedIssue(context.Context, string, int) (core.UpstreamIssue, error) {
 	return core.UpstreamIssue{}, fmt.Errorf("上流を取得できません: %w", u.err)
 }
+
+// newBranchSource は委譲の後の照合が使う、リモートのブランチと PR の取得（`gh api` の
+// GET だけ）を組み立てる。`gh` が PATH に無いときは、どの取得も失敗する実装を返す
+// （照合は取得の失敗を結果に書き、成果物を確かめられなかったものとして扱う）。
+func newBranchSource() core.UpstreamBranchSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
+	if err != nil {
+		return unavailableBranchSource{err: err}
+	}
+	return client
+}
+
+type unavailableBranchSource struct{ err error }
+
+func (u unavailableBranchSource) BranchExists(context.Context, string, string) (bool, error) {
+	return false, fmt.Errorf("上流を取得できません: %w", u.err)
+}
+
+func (u unavailableBranchSource) ListPullRequestsByHead(context.Context, string, string) ([]core.UpstreamPullRequest, error) {
+	return nil, fmt.Errorf("上流を取得できません: %w", u.err)
+}

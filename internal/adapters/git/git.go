@@ -197,6 +197,15 @@ func (*Git) Inspect(ctx context.Context, tree core.SlotTree) (core.SlotTreeState
 	}
 	st.Dirty = strings.TrimSpace(out) != ""
 
+	// 現在のブランチ。detached HEAD は symbolic-ref が終了コード 1 で終わる。
+	branch, err := run(ctx, gitDir, tree.Path, "symbolic-ref", "--short", "-q", "HEAD")
+	if err != nil && exitCode(err) != 1 {
+		return st, err
+	}
+	if err == nil {
+		st.Branch = strings.TrimSpace(branch)
+	}
+
 	url, err := run(ctx, gitDir, tree.Path, "config", "--get", "remote.origin.url")
 	if err != nil {
 		if exitCode(err) == 1 { // origin が無い

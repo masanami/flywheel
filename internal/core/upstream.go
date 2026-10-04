@@ -126,3 +126,30 @@ type UpstreamIssueSource interface {
 	// 省略した取り込み元の解決に使う。§取り込みの対象）。
 	CurrentLogin(ctx context.Context) (string, error)
 }
+
+// UpstreamPullRequest は上流（GitHub）の Pull Request 1 件（委譲の後の照合が、
+// ブランチを head とする PR の URL・状態・base を run の成果物へ記録するための
+// 正規化済みの値。docs/features/m3-invoker-delegation.md §合流と照合）。
+type UpstreamPullRequest struct {
+	// URL は PR の html_url。
+	URL string
+	// Title は PR のタイトル（release の要約に使う）。
+	Title string
+	// State は "open" | "closed" | "merged"（マージ済みは merged_at を持つ PR）。
+	State string
+	// Base は PR の base のブランチ名。
+	Base string
+}
+
+// UpstreamBranchSource は委譲の後の照合（core）が呼ぶ、リモートのブランチと
+// head ブランチの PR の取得 IF。実装は internal/adapters/github が `gh api` の
+// GET だけで行う。照合は子の報告に依らず、この IF が返した値だけを記録する。
+type UpstreamBranchSource interface {
+	// BranchExists は repo（"<owner>/<name>"）のリモートに branch があるかを返す
+	// （無いことはエラーではなく false）。
+	BranchExists(ctx context.Context, repo, branch string) (bool, error)
+
+	// ListPullRequestsByHead は repo の、branch を head とする PR を open・closed・
+	// merged のすべてについて返す。
+	ListPullRequestsByHead(ctx context.Context, repo, branch string) ([]UpstreamPullRequest, error)
+}

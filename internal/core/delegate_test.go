@@ -27,6 +27,8 @@ const delegateConnectorsJSON = `{
       {"id": "define-human", "invocation": "/h:def {challenge_id}", "interactive": true, "counterpart": "human", "artifacts": "pr"},
       {"id": "define-parent", "invocation": "/h:def {challenge_id}", "interactive": true, "counterpart": "parent", "artifacts": "pr"},
       {"id": "define-default", "invocation": "/h:def {challenge_id}", "artifacts": "pr"},
+      {"id": "impl-branch", "invocation": "/h:ib {challenge_id}", "interactive": false, "child_may_decide": true, "artifacts": "branch"},
+      {"id": "impl-none", "invocation": "/h:in {challenge_id}", "interactive": false, "child_may_decide": true, "artifacts": "none"},
       {"id": "quiet", "invocation": "/h:q {challenge_id}", "interactive": false, "artifacts": "pr"},
       {"id": "omitted", "invocation": "/h:o {challenge_id}", "child_may_decide": true, "artifacts": "pr"}
     ]},
@@ -93,6 +95,7 @@ type delegateFixture struct {
 	conn     *ConnectorsDeclaration
 	upstream *fakeUpstreamThreads
 	git      *fakeSlotGit
+	branches *fakeBranchSource
 	j3       *fakeJudgmentInvoker
 	deleg    *fakeDelegator
 	j3Inputs []JudgmentLaunchInput
@@ -109,7 +112,7 @@ func newDelegateFixture(t *testing.T) *delegateFixture {
 	if err := conn.validate(); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	f := &delegateFixture{s: s, agent: defaultAgentDeclaration(), conn: conn, upstream: newFakeUpstreamThreads(), git: newFakeSlotGit()}
+	f := &delegateFixture{s: s, agent: defaultAgentDeclaration(), conn: conn, upstream: newFakeUpstreamThreads(), git: newFakeSlotGit(), branches: newFakeBranchSource()}
 	for p, remote := range map[string]string{"slot1": "o/r", "slot-s": "o/s", "slot-d": "o/d"} {
 		f.git.states[filepath.Join(s.Workspace(), p)] = SlotTreeState{Exists: true, PointerOK: true, OriginURL: "https://github.com/" + remote + ".git"}
 	}
@@ -170,7 +173,7 @@ func (f *delegateFixture) newInProgress(t *testing.T, title, priority, spec stri
 
 func (f *delegateFixture) input(cycleID string, id *string) DelegateInput {
 	return DelegateInput{ChallengeID: id, AgentDecl: f.agent, ConnDecl: f.conn, Judgment: f.j3, Delegate: f.deleg,
-		Upstream: f.upstream, Git: f.git, CycleID: cycleID}
+		Upstream: f.upstream, Git: f.git, Reconcile: f.branches, CycleID: cycleID}
 }
 
 func (f *delegateFixture) cycle(t *testing.T, budget float64) string {
@@ -651,6 +654,8 @@ func ptrInt64(v int64) *int64 { return &v }
 func TestRunDelegation_RecordsResultCostAndReleasesSlot(t *testing.T) {
 	f := newDelegateFixture(t)
 	f.newInProgress(t, "t", "P1", planSpec(nil))
+	// 結末 blocked の写像は #104 の範囲（照合は課題の状態を変えない）。
+	f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) { m["outcome"] = "blocked" })
 	var busyDuring string
 	f.deleg.onInvoke = func(DelegateLaunchInput) { busyDuring = f.slotStates(t)["slot1"] }
 	res, err := f.run(t, nil)
@@ -667,8 +672,8 @@ func TestRunDelegation_RecordsResultCostAndReleasesSlot(t *testing.T) {
 	if len(runs) != 1 || runs[0].Result != RunResultSucceeded || runs[0].CostUSD == nil || *runs[0].CostUSD != 2_500_000 {
 		t.Fatalf("run = %+v", runs)
 	}
-	if res.Items[0].Outcome != "completed" || res.Items[0].Status != nil {
-		t.Errorf("item = %+v, want outcome completed and no status change", res.Items[0])
+	if res.Items[0].Outcome != "blocked" || res.Items[0].Status != nil {
+		t.Errorf("item = %+v, want outcome blocked and no status change", res.Items[0])
 	}
 	if d := f.detail(t, "C-1"); d.Status != StatusInProgress {
 		t.Errorf("status = %s; mapping the outcome is out of scope here", d.Status)

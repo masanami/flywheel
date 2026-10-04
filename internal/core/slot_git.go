@@ -35,6 +35,9 @@ type SlotTreeState struct {
 	PointerProblem string
 	Dirty          bool
 	OriginURL      string
+	// Branch は作業ツリーの現在のブランチ名（detached HEAD なら ""）。委譲の後の
+	// 照合が、報告にブランチが無いときの調べる先に使う。
+	Branch string
 }
 
 // WorktreeRequest は SlotGit.EnsureWorktree の入力。Ref は
