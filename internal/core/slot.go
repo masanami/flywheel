@@ -282,6 +282,18 @@ func oneLine(s string) string {
 // needs_attention にして理由を記録し、次の idle のスロットを試す。needs_attention・
 // busy のスロットは選ばない。使えるスロットが無ければ ErrSlotUnavailable。
 func (s *Store) AcquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo, bind SlotBinder) (*SlotAssignment, error) {
+	return s.acquireSlot(ctx, git, repo, bind, slotChoice{})
+}
+
+// slotChoice は AcquireSlot の候補の絞り込み（再開が元のスロットを使うための指定）。
+// Only が空でなければ、そのスロット（表示形）だけを候補にする。Prefer が空でなければ、
+// そのスロットが idle のとき先に試す（他のスロットも候補に残す）。
+type slotChoice struct {
+	Only   string
+	Prefer string
+}
+
+func (s *Store) acquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo, bind SlotBinder, choice slotChoice) (*SlotAssignment, error) {
 	if git == nil || bind == nil {
 		return nil, ErrValidation
 	}
@@ -290,7 +302,7 @@ func (s *Store) AcquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 	}
 	tried := map[string]bool{}
 	for {
-		next, err := s.nextIdleSlot(ctx, repo, tried)
+		next, err := s.nextIdleSlot(ctx, repo, tried, choice)
 		if err != nil {
 			return nil, err
 		}
@@ -319,14 +331,27 @@ func (s *Store) AcquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 	}
 }
 
-func (s *Store) nextIdleSlot(ctx context.Context, repo ConnectorRepo, tried map[string]bool) (*slotRow, error) {
+func (s *Store) nextIdleSlot(ctx context.Context, repo ConnectorRepo, tried map[string]bool, choice slotChoice) (*slotRow, error) {
 	var found *slotRow
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		rows, err := loadSlotRows(ctx, tx)
 		if err != nil {
 			return err
 		}
-		for _, r := range slotCandidates(rows, repo, s.workspace) {
+		cands := slotCandidates(rows, repo, s.workspace)
+		if choice.Prefer != "" {
+			for _, r := range cands {
+				if r.ID == choice.Prefer && r.State == slotStateIdle && !tried[r.ID] {
+					r := r
+					found = &r
+					return nil
+				}
+			}
+		}
+		for _, r := range cands {
+			if choice.Only != "" && r.ID != choice.Only {
+				continue
+			}
 			if r.State == slotStateIdle && !tried[r.ID] {
 				r := r
 				found = &r

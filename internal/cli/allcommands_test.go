@@ -163,7 +163,11 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		slotClone(t, filepath.Join(ws, "slot-f"), "https://github.com/o/flywheel.git")
 		slotClone(t, filepath.Join(ws, "slot-d"), "git@github.com:o/direct.git")
 		id := newInProgressForRun(t, ws, nil)
-		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{delegateRoute("blocked"), j3Route("b")}, "")
+		// 結末 questions・blocked・completed は課題を保留・検証中へ進める（作業ログに載る）ため、
+		// 作業ログを増やさない run の成功経路には、課題の状態を変えない委譲の失敗（errored）を使う。
+		erroredDelegate := fakeClaudeRoute{Match: fakeClaudeDelegateMatch, Tag: "DELEGATE",
+			Stdout: `{"session_id":"s","is_error":true,"total_cost_usd":0.5,"result":"boom"}`}
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{erroredDelegate, j3Route("b")}, "")
 		return []string{"run", id}
 	}},
 	"slot clear": {setup: func(t *testing.T, ws string) []string {

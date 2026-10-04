@@ -89,6 +89,32 @@ var briefSectionOrder = []struct {
 	{ID: "delegation_output_shape", File: "brief/delegation_output_shape.md"},
 }
 
+// resumePromptFile は `--resume` の再開で渡す固定の文面の雛形（種類ごと）。
+// 分量の上限は resumePromptLimit（バイト）。
+var resumePromptFile = map[core.ResumeKind]string{
+	core.ResumeKindAnswer:      "resume/answer.md",
+	core.ResumeKindInterrupted: "resume/interrupted.md",
+}
+
+const resumePromptLimit = 2048
+
+// ResumePrompt は kind の再開の固定の文面を、embed から読んで返す。
+func ResumePrompt(kind core.ResumeKind) (string, error) {
+	file, ok := resumePromptFile[kind]
+	if !ok {
+		return "", fmt.Errorf("invoker: unknown resume kind %q", kind)
+	}
+	fsys, err := promptsSubFS()
+	if err != nil {
+		return "", fmt.Errorf("invoker: prompts fs: %w", err)
+	}
+	b, err := fs.ReadFile(fsys, file)
+	if err != nil {
+		return "", fmt.Errorf("invoker: read resume prompt %s: %w", kind, err)
+	}
+	return string(b), nil
+}
+
 // Instructions は j の指示文の本文を、embed から読んで返す
 // （ワークスペースからは一切読まない）。後続チケット（J1: #84、J2: #85、
 // J3〜J5: S2・S3）は、この関数の戻り値を invoker.BuildStdin の instructions
@@ -151,6 +177,11 @@ func CheckPromptSizes(fsys fs.FS) error {
 		expectedBrief[s.File] = true
 	}
 
+	expectedResume := map[string]bool{}
+	for _, f := range resumePromptFile {
+		expectedResume[f] = true
+	}
+	seenResume := map[string]bool{}
 	seenJudgment := map[string]bool{}
 	seenBrief := map[string]bool{}
 	var briefTotal int64
@@ -175,6 +206,11 @@ func CheckPromptSizes(fsys fs.FS) error {
 		case expectedBrief[path]:
 			seenBrief[path] = true
 			briefTotal += info.Size()
+		case expectedResume[path]:
+			seenResume[path] = true
+			if info.Size() > resumePromptLimit {
+				return fmt.Errorf("invoker: %s is %d bytes, exceeds the limit of %d bytes", path, info.Size(), resumePromptLimit)
+			}
 		default:
 			return fmt.Errorf("invoker: unexpected prompt file %q (not in the size limit table)", path)
 		}
@@ -192,6 +228,11 @@ func CheckPromptSizes(fsys fs.FS) error {
 	}
 	for f := range expectedBrief {
 		if !seenBrief[f] {
+			missing = append(missing, f)
+		}
+	}
+	for f := range expectedResume {
+		if !seenResume[f] {
 			missing = append(missing, f)
 		}
 	}

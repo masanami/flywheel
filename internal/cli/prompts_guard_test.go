@@ -64,7 +64,7 @@ func realForbiddenSources() invoker.ForbiddenSources {
 }
 
 // allEmbeddedPromptContents は J1〜J5 の指示文とブリーフの固定の節5つ、
-// 計10件の埋め込みの実物の中身を、名前つきで返す。
+// 再開の固定の文面2つ、計12件の埋め込みの実物の中身を、名前つきで返す。
 func allEmbeddedPromptContents(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -81,6 +81,13 @@ func allEmbeddedPromptContents(t *testing.T) map[string]string {
 	}
 	for _, s := range sections {
 		out["brief:"+s.ID] = s.Body
+	}
+	for _, k := range []core.ResumeKind{core.ResumeKindAnswer, core.ResumeKindInterrupted} {
+		body, err := invoker.ResumePrompt(k)
+		if err != nil {
+			t.Fatalf("invoker.ResumePrompt(%s): %v", k, err)
+		}
+		out["resume:"+string(k)] = body
 	}
 	return out
 }

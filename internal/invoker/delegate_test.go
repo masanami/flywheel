@@ -266,3 +266,89 @@ func TestLauncher_InvokeDelegation_LaunchFailedWhenRunDirCannotBeCreated(t *test
 		t.Errorf("out = %+v err = %v, want launch_failed", out, err)
 	}
 }
+
+// --- `--resume` の再開（#104。AC-243・244・254・255） ---
+
+func TestBuildDelegateArgs_ResumeUsesResumeFlagInsteadOfSessionID(t *testing.T) {
+	in := baseDelegateInput(t, "/ws", "/slot")
+	in.IsResume = true
+	args := buildDelegateArgs(in)
+	i := slices.Index(args, "--resume")
+	if i < 0 || args[i+1] != in.SessionID {
+		t.Fatalf("args lack --resume <session>: %v", args)
+	}
+	if slices.Contains(args, "--session-id") {
+		t.Errorf("a resume must not pass --session-id: %v", args)
+	}
+	if j := slices.Index(args, "--disallowedTools"); j < 0 || args[j+1] != "Bash(flywheel:*)" {
+		t.Errorf("a resume must keep the flywheel deny: %v", args)
+	}
+}
+
+func TestBuildDelegationResumeStdin_AnswerCarriesFixedTextAnswerAndBranch(t *testing.T) {
+	got, err := BuildDelegationResumeStdin(core.ResumeKindAnswer, "Q-TEXT", "ANSWER-TEXT", "feat/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed, err := ResumePrompt(core.ResumeKindAnswer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(got)
+	if !strings.HasPrefix(s, fixed) {
+		t.Errorf("stdin must start with the embedded fixed text verbatim:\n%s", s)
+	}
+	for _, want := range []string{WrapDataSection("回答", "ANSWER-TEXT"), WrapDataSection("質問", "Q-TEXT"), WrapDataSection("続けるブランチ", "feat/x")} {
+		if !strings.Contains(s, want) {
+			t.Errorf("stdin lacks %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestBuildDelegationResumeStdin_InterruptedHasNoAnswerSection(t *testing.T) {
+	got, err := BuildDelegationResumeStdin(core.ResumeKindInterrupted, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed, _ := ResumePrompt(core.ResumeKindInterrupted)
+	if !strings.Contains(string(got), fixed) || strings.Contains(string(got), "BEGIN DATA") {
+		t.Errorf("unexpected stdin:\n%s", got)
+	}
+	answerFixed, _ := ResumePrompt(core.ResumeKindAnswer)
+	if fixed == answerFixed {
+		t.Error("the two resume texts must differ")
+	}
+	if _, err := BuildDelegationResumeStdin(core.ResumeKind("x"), "", "", ""); err == nil {
+		t.Error("unknown kind must be an error")
+	}
+}
+
+func TestLauncher_InvokeDelegation_ResumeSendsResumeFlagAndTheFixedTextOnStdin(t *testing.T) {
+	setFakeClaudePath(t, newFakeClaudeDir(t))
+	ws := newWorkspace(t)
+	argvLog := filepath.Join(t.TempDir(), "argv.log")
+	stdinLog := filepath.Join(t.TempDir(), "stdin.log")
+	fx := writeFixture(t, fakeClaudeFixture{
+		Stdout:      `{"session_id":"22222222-2222-4222-8222-222222222222","is_error":false,"total_cost_usd":1,"structured_output":{}}`,
+		ArgvLogPath: argvLog, StdinLogPath: stdinLog,
+	})
+	t.Setenv(envFixture, fx)
+	in := baseDelegateInput(t, ws, t.TempDir())
+	in.IsResume, in.ResumeKind, in.ResumeAnswer, in.ResumeBranch = true, core.ResumeKindAnswer, "A1", "feat/y"
+	in.Brief = ""
+	if _, err := NewLauncher().InvokeDelegation(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	var argv []string
+	raw, _ := os.ReadFile(argvLog)
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(raw))), &argv); err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.Index(argv, "--resume"); i < 0 || argv[i+1] != in.SessionID || slices.Contains(argv, "--session-id") {
+		t.Errorf("argv = %v", argv)
+	}
+	stdin, _ := os.ReadFile(stdinLog)
+	if !strings.Contains(string(stdin), "A1") || !strings.Contains(string(stdin), "feat/y") {
+		t.Errorf("stdin = %s", stdin)
+	}
+}

@@ -13,8 +13,8 @@ package core
 //	① gatherReconciliation: スロットの作業ツリーの検査と gh の GET（トランザクションの外）
 //	② run の終了・成果物の記録・スロットの解放（または needs_attention）を 1 つの
 //	   トランザクションで行う（launchDelegation 側）
-//	③ applyReconciliation: release の登録 → 承認なしの本番反映の検出 → 成果物の確認と
-//	   検証中・人間対応待ちへの写像
+//	③ applyReconciliation: release の登録 → 承認なしの本番反映の検出 → 結末 questions・
+//	   blocked の保留 → 成果物の確認と検証中・人間対応待ちへの写像
 
 import (
 	"context"
@@ -182,6 +182,16 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 		}
 		q.WriteString(rec.describe())
 		return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, q.String())
+	}
+
+	// 子の問い・停止の報告（J4 は S3）。保留の原因の run はこの run になる。
+	if result == RunResultSucceeded && report != nil {
+		switch report.Outcome {
+		case DelegationOutcomeQuestions:
+			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatQuestionsHold(report))
+		case DelegationOutcomeBlocked:
+			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatBlockedHold(report))
+		}
 	}
 
 	if result != RunResultSucceeded || report == nil || report.Outcome != DelegationOutcomeCompleted {

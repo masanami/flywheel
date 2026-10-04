@@ -62,7 +62,9 @@ var worklogReadOnlyCommands = map[string]bool{
 var worklogNoActivityMutationCommands = map[string]bool{
 	"slot clear": true,
 	// run（#102）は run・cycle・slot 表を書くが、それらの書き込みは作業ログに載せない。J3 と
-	// 委譲の起動までは課題の状態を変えない（結末の写像は #104。そこで変更系のケースへ移す）。
+	// 委譲の失敗の結果（errored など）は課題の状態を変えない。結末 questions・blocked・
+	// completed の写像（保留・検証中）は経路 invoker の作業ログを残すので、この表の検査
+	// （経路 cli 固定）の対象ではなく、core・cycle のテストが検証する。
 	"run": true,
 }
 
