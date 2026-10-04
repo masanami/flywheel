@@ -66,7 +66,18 @@ func newReconFixture(t *testing.T, operation string) *delegateFixture {
 	return f
 }
 
+// setSlotBranch は、委譲の起動中に子がスロットのブランチを切り替えた（今回の成果物の
+// ブランチを作った）状態を作る。割り当て時のブランチは変えない。
 func (f *delegateFixture) setSlotBranch(branch string) {
+	f.deleg.onInvoke = func(DelegateLaunchInput) { f.setSlotBranchNow(branch) }
+}
+
+// setLeftoverBranch は、割り当て前からスロットに残っているブランチ（前の課題のもの）を作る。
+func (f *delegateFixture) setLeftoverBranch(branch string) { f.setSlotBranchNow(branch) }
+
+func (f *delegateFixture) setSlotBranchNow(branch string) {
+	f.git.mu.Lock()
+	defer f.git.mu.Unlock()
 	for p := range f.git.states {
 		st := f.git.states[p]
 		st.Branch = branch
@@ -491,5 +502,80 @@ func TestReconcile_ReleaseForPRWithoutTitle(t *testing.T) {
 	}
 	if ops := f.detail(t, "C-1").Operations; len(ops) != 1 || ops[0].Summary != pr.URL {
 		t.Fatalf("operations = %+v", ops)
+	}
+}
+
+// M3P41 決定 A: 前の課題のブランチが残ったスロットで、報告にブランチが無い委譲を照合しても、
+// 前の課題の PR を成果物として記録せず、release の登録・検証中への遷移・承認なしの本番反映の
+// 検出も起こさない。
+func TestReconcile_LeftoverSlotBranchIsNotThisDelegationsArtifact(t *testing.T) {
+	f := newReconFixture(t, "impl")
+	f.setLeftoverBranch("feat/previous")
+	f.branches.branches["feat/previous"] = true
+	f.branches.prs["feat/previous"] = []UpstreamPullRequest{mkPR(5, "merged", "main")}
+	f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) { m["branch"] = nil })
+	if _, err := f.run(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.branches.callLog(); len(got) != 0 {
+		t.Errorf("gh calls = %v, want none (no branch to look up)", got)
+	}
+	if a := f.artifacts(t); len(a) != 0 {
+		t.Errorf("artifacts = %+v, want none", a)
+	}
+	d := f.detail(t, "C-1")
+	if d.Status == StatusVerifying || d.Status == StatusAwaitingHuman && !strings.Contains(f.queryString(t, `SELECT question FROM hold ORDER BY id DESC LIMIT 1`), "feat/previous") {
+		t.Errorf("status = %s; the previous challenge's PR must not verify this one", d.Status)
+	}
+	if n := f.queryString(t, `SELECT COUNT(*) FROM operation`); n != "0" {
+		t.Errorf("operations registered = %s, want 0", n)
+	}
+}
+
+// 決定 A: 割り当て時と異なるブランチへ切り替わっていれば、今回の委譲のブランチとして使う。
+func TestReconcile_ChangedSlotBranchFallsBack(t *testing.T) {
+	f := newReconFixture(t, "impl")
+	f.setLeftoverBranch("feat/previous")
+	f.setSlotBranch("feat/new")
+	f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) { m["branch"] = nil })
+	if _, err := f.run(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.branches.callLog(), "|"); got != "exists o/r feat/new|prs o/r feat/new" {
+		t.Errorf("gh calls = %q", got)
+	}
+}
+
+// 前の課題の PR（base は既定ブランチでない）が残っていても、検証中へ遷移しない（遷移の単独の検証）。
+func TestReconcile_LeftoverBranchDoesNotVerifyTheChallenge(t *testing.T) {
+	f := newReconFixture(t, "impl")
+	f.setLeftoverBranch("feat/previous")
+	f.branches.branches["feat/previous"] = true
+	f.branches.prs["feat/previous"] = []UpstreamPullRequest{mkPR(5, "open", "develop")}
+	f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) { m["branch"] = nil })
+	if _, err := f.run(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.status(t); got == StatusVerifying {
+		t.Errorf("status = %s; the previous challenge's open PR must not verify this one", got)
+	}
+}
+
+// 再開では、割り当て時のブランチが再開元（同じ課題）のブランチなら、報告にブランチが無くても
+// そのブランチで照合する（承認なしの本番反映の検出を落とさない）。
+func TestReconcile_ResumeOnTheChallengesOwnBranchStillReconciles(t *testing.T) {
+	f := newResumeFixture(t)
+	id := f.newInProgress(t, "t", "P1", planSpec(nil))
+	f.questionAndAnswer(t, id, "feat/x")
+	f.setLeftoverBranch("feat/x") // 子が切ったブランチが元のスロットに残っている
+	f.deleg.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: reportJSON(func(m map[string]any) { m["branch"] = nil })}
+	f.branches.prs["feat/x"] = []UpstreamPullRequest{mkPR(7, "merged", "main")}
+	f.branches.mu.Lock()
+	f.branches.calls = nil // 1 回目の照合の呼び出しを除く
+	f.branches.mu.Unlock()
+	f.runDelegation(t, id)
+	calls := strings.Join(f.branches.callLog(), "|")
+	if !strings.Contains(calls, "prs o/r feat/x") {
+		t.Errorf("gh calls = %q, want a pull request lookup for feat/x", calls)
 	}
 }

@@ -31,6 +31,9 @@ type reconciliation struct {
 	// Branch は調べたブランチ名。BranchFrom は "report" | "slot" | ""（調べる先が無い）。
 	Branch     string
 	BranchFrom string
+	// UnchangedBranch は、報告にブランチが無く、スロットの現在のブランチが割り当て時と
+	// 同じだったために調べなかったブランチ名。
+	UnchangedBranch string
 	// BranchExists はリモートにそのブランチがあるか（調べられなかったときは false）。
 	BranchExists bool
 	PRs          []UpstreamPullRequest
@@ -42,7 +45,7 @@ type reconciliation struct {
 
 // gatherReconciliation はスロットの作業ツリーを検査し、ブランチと PR を取得する。
 // reportBranch は報告のブランチ（無ければ nil）。
-func (s *Store) gatherReconciliation(ctx context.Context, in DelegateInput, dc *delegationContext, slotPath string, reportBranch *string) *reconciliation {
+func (s *Store) gatherReconciliation(ctx context.Context, in DelegateInput, dc *delegationContext, slotPath, baseBranch string, reportBranch *string) *reconciliation {
 	rec := &reconciliation{}
 	tree := SlotTree{Path: slotPath}
 	if dc.Repo.Slots.Provider == string(slotProviderWorktree) {
@@ -64,7 +67,16 @@ func (s *Store) gatherReconciliation(ctx context.Context, in DelegateInput, dc *
 	if reportBranch != nil && strings.TrimSpace(*reportBranch) != "" {
 		rec.Branch, rec.BranchFrom = strings.TrimSpace(*reportBranch), "report"
 	} else if err == nil && st.Branch != "" {
-		rec.Branch, rec.BranchFrom = st.Branch, "slot"
+		resumedBranch := dc.Resume != nil && dc.Resume.Branch != "" && st.Branch == dc.Resume.Branch
+		if st.Branch != baseBranch || resumedBranch {
+			// 割り当て時と異なる現在のブランチは今回の委譲のもの。再開では、割り当て時の
+			// ブランチが再開元の（同じ課題の）ブランチなら、そのまま今回のもの。
+			rec.Branch, rec.BranchFrom = st.Branch, "slot"
+		} else {
+			// 現在のブランチが割り当て時と同じ: 子はブランチを作らなかった（前の課題の
+			// ブランチが残っているだけ）。今回の成果物として調べない。
+			rec.UnchangedBranch = st.Branch
+		}
 	}
 	if rec.Branch == "" {
 		return rec
@@ -114,7 +126,11 @@ func (r *reconciliation) describe() string {
 	case "slot":
 		fmt.Fprintf(&b, "- 調べたブランチ: %s（報告にブランチが無いため、スロットの現在のブランチ）\n", r.Branch)
 	default:
-		b.WriteString("- 調べたブランチ: なし（報告にブランチが無く、スロットの現在のブランチも得られない）\n")
+		if r.UnchangedBranch != "" {
+			fmt.Fprintf(&b, "- 調べたブランチ: なし（報告にブランチが無く、スロットの現在のブランチ %s は割り当て時から変わっていないため、子はブランチを作らなかったとみなした）\n", r.UnchangedBranch)
+		} else {
+			b.WriteString("- 調べたブランチ: なし（報告にブランチが無く、スロットの現在のブランチも得られない）\n")
+		}
 	}
 	if r.Branch != "" {
 		fmt.Fprintf(&b, "- リモートのブランチ: %s\n", map[bool]string{true: "ある", false: "見つからない"}[r.BranchExists])

@@ -661,7 +661,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		if report != nil {
 			reportBranch = report.Branch
 		}
-		recon = s.gatherReconciliation(recordCtx, in, dc, assignment.Path, reportBranch)
+		recon = s.gatherReconciliation(recordCtx, in, dc, assignment.Path, assignment.BaseBranch, reportBranch)
 	}
 	mismatch := output.SessionIDReturned != "" && output.SessionIDReturned != sessionID
 	costMicros, costSource := computeRunCost(result, output.ReportedTotalCostUSD, dc.Resume != nil, prevReportedMicros, dc.ImplBudgetMicros)
