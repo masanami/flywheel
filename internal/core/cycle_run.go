@@ -7,7 +7,8 @@ package core
 // （`ingest`・`classify --auto`・`plan --auto`）と同じ core の処理
 // （Store.Ingest・ClassifyAutoJ1・PlanAutoJ2）をそのまま呼び、ここは段の順・
 // 排他ロックの取得と解放・heartbeat・枠超過の段をまたぐ伝播だけを持つ。
-// S1 の段は取り込み・分類・計画の 3 つ（委譲と検証の段は S2）。
+// 段は 取り込み → 分類（J1）→ 計画（J2）→ 委譲（run）→ 検証（verify・J5）の順で、
+// 委譲と検証の段は接続ツールの宣言（connectors.json）があるときだけ実行する。
 
 import (
 	"context"
@@ -22,8 +23,10 @@ const (
 	CyclePhaseIngest   CyclePhase = "ingest"
 	CyclePhaseClassify CyclePhase = "classify"
 	CyclePhasePlan     CyclePhase = "plan"
-	// CyclePhaseRun は委譲の段（S2。結線は cycle の仕上げのチケット）。
+	// CyclePhaseRun は委譲の段（RunDelegation と同じ処理）。
 	CyclePhaseRun CyclePhase = "run"
+	// CyclePhaseVerify は検証の段（VerifyAutoJ5 と同じ処理）。
+	CyclePhaseVerify CyclePhase = "verify"
 )
 
 // CycleIngestInput は取り込みの段の入力。`.flywheel/sources.json` があるときだけ
@@ -57,9 +60,20 @@ type CycleRunInput struct {
 	ConnDecl *ConnectorsDeclaration
 	// Invoker は判断の呼び出しの実行者。nil は ErrValidation。
 	Invoker JudgmentInvoker
-	// Upstream は J2 の起動の直前の上流の取得。ConnDecl が非 nil のとき必須
+	// Upstream は J2・J3・J5 の起動の直前の上流の取得。ConnDecl が非 nil のとき必須
 	// （nil は ErrValidation）。
 	Upstream UpstreamThreadSource
+	// Delegate は委譲の起動の実行者。ConnDecl が非 nil のとき必須（nil は ErrValidation）。
+	Delegate DelegationInvoker
+	// Git はスロットの作業ツリーの検査と払い出しの口。ConnDecl が非 nil のとき必須。
+	Git SlotGit
+	// Reconcile は委譲の後の照合が呼ぶ、リモートのブランチと PR の取得（GET だけ）。
+	// ConnDecl が非 nil のとき必須。
+	Reconcile UpstreamBranchSource
+	// Checks は J5 の起動の前の PR のチェックの取得（GET だけ）。ConnDecl が非 nil のとき必須。
+	Checks UpstreamCheckSource
+	// Predictor は衝突の予測の口の起動（nil なら予測の口を呼べない。RunDelegation と同じ）。
+	Predictor ConflictPredictor
 }
 
 // CyclePhaseResult は 1 つの段の結果（§IF / API「cycle の JSON 出力」の phases の
@@ -92,8 +106,9 @@ type CycleRunResult struct {
 //
 //  1. サイクルの排他を取って周を開始する（生きている保持者がいれば ErrLocked。
 //     何も起動・記録しない）。以後、段の実行中は 60 秒ごとにロックの heartbeat を更新する
-//  2. 取り込み（in.Ingest があれば）→ 分類（J1）→ 計画（J2。in.ConnDecl があれば）の順に
-//     段を実行する。各段は個別の操作と同じ core の処理を呼び、前の段で状態が進んだ
+//  2. 取り込み（in.Ingest があれば）→ 分類（J1）→ 計画（J2）→ 委譲 → 検証（J5）の順に
+//     段を実行する（計画・委譲・検証は in.ConnDecl があるときだけ）。検証の段は、委譲の段が
+//     起動した委譲の run がすべて終わってから始まる（RunDelegation は合流して返る）。各段は個別の操作と同じ core の処理を呼び、前の段で状態が進んだ
 //     課題は後の段の対象になる。枠超過は段をまたいで伝播する（同じ JudgmentCycle を渡す）
 //  3. 周を終えて排他を解放する（段の途中でエラーになった周も解放する。周は aborted）
 //
@@ -104,7 +119,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	if in.Trigger == "" || in.AgentDecl == nil || in.Invoker == nil {
 		return nil, ErrValidation
 	}
-	if in.ConnDecl != nil && in.Upstream == nil {
+	if in.ConnDecl != nil && (in.Upstream == nil || in.Delegate == nil || in.Git == nil || in.Reconcile == nil || in.Checks == nil) {
 		return nil, ErrValidation
 	}
 	if in.Ingest != nil && (in.Ingest.Upstream == nil || in.Ingest.Channel == "") {
@@ -157,7 +172,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	}, nil
 }
 
-// runCyclePhases は取り込み・分類・計画の順に段を実行する。どの段の結果も、途中で
+// runCyclePhases は取り込み・分類・計画・委譲・検証の順に段を実行する。どの段の結果も、途中で
 // エラーになるまでの分は返さない（呼び出し元は runErr を返す）。
 func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle) ([]CyclePhaseResult, error) {
 	var phases []CyclePhaseResult
@@ -203,6 +218,49 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 		plan.NotStarted = j2.NotStarted
 	}
 	phases = append(phases, plan)
+
+	// 委譲（flywheel run と同じ処理。着手中で承認済みの計画を持つ課題が対象）。
+	run := CyclePhaseResult{Phase: CyclePhaseRun, Skipped: in.ConnDecl == nil}
+	if in.ConnDecl != nil {
+		res, err := s.RunDelegation(ctx, DelegateInput{
+			AgentDecl: in.AgentDecl,
+			ConnDecl:  in.ConnDecl,
+			Judgment:  in.Invoker,
+			Delegate:  in.Delegate,
+			Upstream:  in.Upstream,
+			Git:       in.Git,
+			Reconcile: in.Reconcile,
+			Predictor: in.Predictor,
+			CycleID:   cycleID,
+			Cycle:     jc,
+		})
+		if err != nil {
+			return nil, err
+		}
+		run.Items = res.Items
+		run.NotStarted = res.NotStarted
+		run.SerialGroups = res.SerialGroups
+	}
+	phases = append(phases, run)
+
+	// 検証（verify --auto と同じ処理。委譲の段で検証中になった課題も対象になる）。
+	verify := CyclePhaseResult{Phase: CyclePhaseVerify, Skipped: in.ConnDecl == nil}
+	if in.ConnDecl != nil {
+		res, err := s.VerifyAutoJ5(ctx, J5AutoInput{
+			AgentDecl: in.AgentDecl,
+			Invoker:   in.Invoker,
+			Upstream:  in.Upstream,
+			Checks:    in.Checks,
+			CycleID:   cycleID,
+			Cycle:     jc,
+		})
+		if err != nil {
+			return nil, err
+		}
+		verify.Items = res.Items
+		verify.NotStarted = res.NotStarted
+	}
+	phases = append(phases, verify)
 
 	return phases, nil
 }

@@ -445,6 +445,11 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if jc == nil {
 		jc = NewJudgmentCycle(in.CycleID)
 	}
+	// 枠超過を記録した周は、残りの判断の呼び出しと委譲を起動しない。予測の口の呼び出しも同じで、
+	// 起動しない候補のために費用を積まない（予測の口が無いときと同じ扱いにする）。
+	if jc.RateLimited() {
+		in.Predictor = nil
+	}
 	plan, err := s.planDelegation(ctx, in, targetIDs)
 	if err != nil {
 		return nil, err

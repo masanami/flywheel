@@ -270,7 +270,7 @@ func parseErrorCodeTable(t *testing.T, doc string) []codeExit {
 var m3S2OnlyErrorCodes = map[ErrorCode]bool{"slot_unavailable": true, "serialized": true}
 
 // m3S2ImplementedErrorCodes は m3S2OnlyErrorCodes のうち、実装済みで期待の集合に数えるもの
-// （slot_unavailable は #102、serialized は #106 が実装した。閉集合の照合の仕上げは #108）。
+// （slot_unavailable は #102、serialized は #106 が実装し、両方が期待の集合に入る。AC-367）。
 var m3S2ImplementedErrorCodes = map[ErrorCode]bool{"slot_unavailable": true, "serialized": true}
 
 // m1BaseErrorCodeCount は M1 の表のうち、M1 自身が定めた行数（`verification_rejected` まで。
@@ -278,7 +278,7 @@ var m3S2ImplementedErrorCodes = map[ErrorCode]bool{"slot_unavailable": true, "se
 const m1BaseErrorCodeCount = 14
 
 // AC-162: 実装が出しうるエラーコードの集合は、M1・M2 の表に S1 の 4 つ（invoker_unavailable・
-// locked・run_in_progress・budget_exceeded）を足した集合と一致する。M1・M2・M3 それぞれの
+// locked・run_in_progress・budget_exceeded）と S2 の 2 つ（slot_unavailable・serialized）を足した集合と一致する。M1・M2・M3 それぞれの
 // 仕様の表から期待の集合を導き、実装の表（errorCodeTable）と終了コードも含めて双方向に照合する
 // （実装が実際に出しうることの静的な照合は TestErrorCodeUsageInSourcesMatchesSpecInBothDirections が
 // M1 の表との間で行う）。

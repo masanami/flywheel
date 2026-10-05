@@ -24,12 +24,11 @@ import (
 )
 
 // NotStartedFailureLimit は、連続失敗の上限に達したため委譲を起動せず、課題を人間対応待ちに
-// したことを表す。`cycle` の not_started の閉集合（NotStartedReasonValues）への追加と
-// 照合は、委譲の段を結線する #108 が行う。
+// したことを表す。`cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
 const NotStartedFailureLimit NotStartedReason = "failure_limit"
 
 // NotStartedReworkLimit は、差し戻しの上限に達したため委譲を起動せず、課題を人間対応待ちに
-// したことを表す（M3P17・M3P39）。閉集合への追加と照合は #108 が行う。
+// したことを表す（M3P17・M3P39）。`cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
 const NotStartedReworkLimit NotStartedReason = "rework_limit"
 
 // ResumeKind は `--resume` で渡す固定の文面の種類。

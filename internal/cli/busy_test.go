@@ -45,7 +45,15 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "TestMain: %v\n", err)
 		os.Exit(1)
 	}
+	cleanupHarness, err := installRealHarnessGuard()
+	if err != nil {
+		cleanupClaude()
+		cleanup()
+		fmt.Fprintf(os.Stderr, "TestMain: %v\n", err)
+		os.Exit(1)
+	}
 	code := m.Run()
+	cleanupHarness()
 	cleanupClaude()
 	cleanup()
 	os.Exit(code)
