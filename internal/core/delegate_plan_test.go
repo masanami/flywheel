@@ -328,15 +328,55 @@ func TestPlan_IssueOrder_RunningFirstThenCandidatesByPriorityThenID(t *testing.T
 }
 
 func TestPlan_NotCalledForOneIssueOrZeroPredictableCandidates(t *testing.T) {
-	f := newPlanFixture(t)
-	f.candidate(t, "multi", "P1", 7)
-	f.mustRunPlan(t)
-	if n := len(f.pred.called()); n != 0 {
-		t.Fatalf("calls = %d with one Issue, want 0", n)
+	assertNotCalled := func(t *testing.T, f *planFixture) {
+		t.Helper()
+		if n := len(f.pred.called()); n != 0 {
+			t.Fatalf("calls = %d, want 0", n)
+		}
+		if got := len(f.predictRuns(t)); got != 0 {
+			t.Errorf("predict runs = %d, want 0", got)
+		}
 	}
-	if got := len(f.predictRuns(t)); got != 0 {
-		t.Errorf("predict runs = %d, want 0", got)
-	}
+	t.Run("one Issue", func(t *testing.T) {
+		f := newPlanFixture(t)
+		f.candidate(t, "multi", "P1", 7)
+		f.mustRunPlan(t)
+		assertNotCalled(t, f)
+	})
+	t.Run("running and candidates that cannot be predicted", func(t *testing.T) {
+		f := newPlanFixture(t)
+		running := f.candidate(t, "multi", "P1", 5)
+		release := f.holdRunning(t, running)
+		defer release()
+		f.candidate(t, "multi", "P1", 0) // 取り込み元の対応が無く、Issue 番号を渡せない
+		before, beforeRuns := len(f.pred.called()), len(f.predictRuns(t))
+		f.mustRunPlan(t)
+		if n := len(f.pred.called()) - before; n != 0 {
+			t.Fatalf("calls = %d with no predictable candidate, want 0", n)
+		}
+		if n := len(f.predictRuns(t)) - beforeRuns; n != 0 {
+			t.Errorf("predict runs = %d, want 0", n)
+		}
+	})
+	t.Run("two running and zero candidates", func(t *testing.T) {
+		f := newPlanFixture(t)
+		a := f.candidate(t, "multi", "P1", 5)
+		b := f.candidate(t, "multi", "P1", 6)
+		releaseA := f.holdRunning(t, a)
+		defer releaseA()
+		releaseB := f.holdRunning(t, b)
+		defer releaseB()
+		// 2 件目を止めるための起動（1 件目が実行中・2 件目が候補）が予測の口を呼んでいるので、
+		// その分を除き、実行中 2 件・候補 0 件の周で増えないことを見る。
+		before, beforeRuns := len(f.pred.called()), len(f.predictRuns(t))
+		f.mustRunPlan(t)
+		if n := len(f.pred.called()) - before; n != 0 {
+			t.Fatalf("calls = %d with two running and no candidates, want 0", n)
+		}
+		if n := len(f.predictRuns(t)) - beforeRuns; n != 0 {
+			t.Errorf("predict runs = %d, want 0", n)
+		}
+	})
 }
 
 func TestPlan_CalledOnceForTwoAndForTwentyIssues(t *testing.T) {

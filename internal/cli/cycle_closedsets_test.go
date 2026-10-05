@@ -203,6 +203,45 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	}
 }
 
+// AC-369: serial_groups[].reasons の値は shared_files | dependency | unknown_pair | not_predictable |
+// prediction_failed | prediction_budget | no_prediction_declared | running_run の閉集合に限られる。
+// 仕様の 2 か所（§IF / API の定義の行と受入基準の行）と core の定義を双方向に照合し、定義順
+// （§IF / API「この定義順に重複なく並べる」）も仕様の行どおりであることを確かめる。
+func TestSerialGroupReasons_AreTheClosedSetInBothDirections(t *testing.T) {
+	var impl []string
+	for _, r := range core.SerialGroupReasonValues() {
+		impl = append(impl, string(r))
+	}
+
+	// 受入基準の行: 2 つ目のバッククォートの span が閉集合（1 つ目はフィールド名）。
+	acLine := m3SpecLine(t, "`serial_groups[].reasons` の値は", "閉集合に限られる")
+	acSpans := backtickSpanRe.FindAllStringSubmatch(acLine, -1)
+	if len(acSpans) != 2 {
+		t.Fatalf("expected the field name and the closed set as backtick spans in %q", acLine)
+	}
+	acSet := pipeSet(acSpans[1][1])
+	if !equalStringSlices(acSet, sortedStrings(impl)) {
+		t.Errorf("core.SerialGroupReasonValues() = %v, acceptance criterion set = %v", sortedStrings(impl), acSet)
+	}
+
+	// §IF / API の定義の行: `reasons` は `a | b | …` の閉集合で、この定義順に並べる。
+	defLine := m3SpecLine(t, "`reasons` は `shared_files", "閉集合で、この定義順に")
+	var defOrder []string
+	for _, sp := range backtickSpanRe.FindAllStringSubmatch(defLine, -1) {
+		if strings.Contains(sp[1], "|") && strings.Contains(sp[1], "shared_files") {
+			for _, part := range strings.Split(sp[1], "|") {
+				defOrder = append(defOrder, strings.TrimSpace(part))
+			}
+		}
+	}
+	if !equalStringSlices(defOrder, impl) {
+		t.Errorf("core.SerialGroupReasonValues() = %v, spec definition order = %v", impl, defOrder)
+	}
+	if !equalStringSlices(sortedStrings(defOrder), acSet) {
+		t.Errorf("spec definition set = %v, acceptance criterion set = %v", sortedStrings(defOrder), acSet)
+	}
+}
+
 // AC-164: run の結果の値は launch_failed | timed_out | malformed | budget_exhausted | errored |
 // invalid_output | succeeded | interrupted の閉集合に限られる（仕様・core の定義・実際の run の
 // 結果を双方向に照合する）。
