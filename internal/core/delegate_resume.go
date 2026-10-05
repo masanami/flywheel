@@ -508,17 +508,31 @@ func (s *Store) acquireDelegationSlot(ctx context.Context, in DelegateInput, dc 
 		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice)
 	}
 	deadline := time.Now().Add(time.Duration(in.AgentDecl.TimeoutSec.Delegate) * time.Second)
+	return waitForOriginalSlot(ctx, deadline,
+		func() (*SlotAssignment, error) { return s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice) },
+		func() (slotState, error) { return s.slotStateOf(ctx, original) })
+}
+
+// waitForOriginalSlot は元のスロットを取れるまで、取り直しを繰り返す。
+// 取れなかった（ErrSlotUnavailable）後に読んだ状態が busy なら待って取り直す。idle なら、取れなかった
+// 後に他のプロセスが解放したということなので、待たずに取り直す。needs_attention・行の欠落・
+// 期限切れは ErrSlotUnavailable のまま返す。
+func waitForOriginalSlot(ctx context.Context, deadline time.Time,
+	acquire func() (*SlotAssignment, error), stateOf func() (slotState, error)) (*SlotAssignment, error) {
 	for {
-		a, err := s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice)
+		a, err := acquire()
 		if !errors.Is(err, ErrSlotUnavailable) {
 			return a, err
 		}
-		state, serr := s.slotStateOf(ctx, original)
+		state, serr := stateOf()
 		if serr != nil {
 			return nil, serr
 		}
-		if state != slotStateBusy || time.Now().After(deadline) {
+		if (state != slotStateBusy && state != slotStateIdle) || time.Now().After(deadline) {
 			return nil, err
+		}
+		if state == slotStateIdle {
+			continue
 		}
 		select {
 		case <-ctx.Done():
