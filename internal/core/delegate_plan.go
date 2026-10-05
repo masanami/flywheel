@@ -516,8 +516,8 @@ func (a *admission) finish() {
 // max_parallel_runs 未満で、そのリポジトリの終了していない委譲の run が使えるスロット未満のとき。
 // 使えるスロットが 1 本も無ければ待たずに ErrSlotUnavailable。wait が false なら、許可できなければ
 // 待たずに ErrSlotUnavailable。待つのは、この呼び出しが起動した終了していない run が枠を占めている間
-// だけ（【仮定】他のプロセスの run は、いつ終わるか分からず周を委譲の時間の上限まで止めうるので、
-// 待たずに ErrSlotUnavailable にする）。複数が待つときは、先頭の課題の優先度・ID の昇順に許可する。
+// だけ（【決定 B 2026-10-05 オーナー M3P33】他のプロセスの run が占めているときは待たずに
+// ErrSlotUnavailable にする）。複数が待つときは、先頭の課題の優先度・ID の昇順に許可する。
 func (sch *delegationScheduler) admit(ctx context.Context, w *schedWaiter, wait bool) (*admission, error) {
 	defer sch.dequeue(w)
 	for {

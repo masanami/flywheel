@@ -987,6 +987,24 @@ func TestPlan_NilPredictor_FailsClosed(t *testing.T) {
 	}
 }
 
+// 枠超過を記録した周には、衝突の予測の口を呼ばない（【決定 A 2026-10-05 オーナー】）。
+func TestPlan_RateLimitedCycle_DoesNotCallThePredictor(t *testing.T) {
+	f := newPlanFixture(t)
+	f.candidate(t, "multi", "P1", 11)
+	f.candidate(t, "multi", "P1", 12)
+	cycleID := f.cycle(t, 300)
+	in := f.in(cycleID, nil)
+	jc := NewJudgmentCycle(cycleID)
+	jc.rateLimited.Store(true)
+	in.Cycle = jc
+	if _, err := f.s.RunDelegation(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.pred.called(); len(got) != 0 {
+		t.Errorf("predictor called %d times in a rate-limited cycle, want 0", len(got))
+	}
+}
+
 // 取り込み元の Issue が対象リポジトリの Issue でなければ、番号は別の Issue を指すので予測できない。
 func TestPlan_SourceIssueOfAnotherRepoIsNotPredictable(t *testing.T) {
 	f := newPlanFixture(t)
