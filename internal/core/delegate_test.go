@@ -592,10 +592,21 @@ func TestRunDelegation_LaunchInput_WorkDirPermissionModeBriefInvocationBudget(t 
 	if _, err := f.run(t, nil); err != nil {
 		t.Fatal(err)
 	}
-	ins := f.deleg.launched()
-	if len(ins) != 2 {
-		t.Fatalf("launches = %d, want 2", len(ins))
+	all := f.deleg.launched()
+	if len(all) != 2 {
+		t.Fatalf("launches = %d, want 2", len(all))
 	}
+	// 委譲は並行に起動するので、記録の順序に依存せず作業ディレクトリで引き当てる。
+	byDir := map[string]DelegateLaunchInput{}
+	for _, in := range all {
+		byDir[in.WorkDir] = in
+	}
+	pluginIn, ok1 := byDir[filepath.Join(f.s.Workspace(), "slot1")]
+	briefIn, ok2 := byDir[filepath.Join(f.s.Workspace(), "slot-d")]
+	if !ok1 || !ok2 {
+		t.Fatalf("launch work dirs = %+v, want slot1 and slot-d", all)
+	}
+	ins := []DelegateLaunchInput{pluginIn, briefIn}
 	if ins[0].WorkDir != filepath.Join(f.s.Workspace(), "slot1") || ins[0].PermissionMode != modes["harness"] {
 		t.Errorf("plugin launch = %+v", ins[0])
 	}
