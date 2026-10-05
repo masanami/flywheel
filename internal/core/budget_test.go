@@ -256,19 +256,51 @@ func TestBudget_ExhaustedRunStopsUntilRaisedThenResumesTheSameSession(t *testing
 	}
 }
 
-// 失敗の run（費用が取れない結果は渡した上限額が費用）は実装枠の残りを使い切るので、人間が
-// flywheel budget で増やすまで次の委譲は run_budget で止まる（再開・連続失敗の上限の検査は
-// refillImplBudget で枠を置き直して行う。この相互作用は PR の説明の「仕様への指摘」）。
-func TestBudget_AFailedRunWithUnknownCostExhaustsTheImplBucket(t *testing.T) {
+// 失敗の run（費用が取れない結果は渡した上限額が費用）は実装枠の残りを使い切るが、その失敗に続く
+// --resume の再開に限り、失敗前の実装枠の残りを上限として 1 回だけ（人間の増額なしに）起動を許す。
+// 再開も費用の取れない失敗で終われば、その後は人間が flywheel budget で増やすまで止まる。
+func TestBudget_AResumeAfterAnUnknownCostFailureIsAllowedOnce(t *testing.T) {
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
+	f.agent.FailureLimit = 5
 	f.deleg.result = failOut(RunResultTimedOut)
 	f.mustRun(t, &id)
+	first := f.lastLaunch(t)
+	if ex := f.overview(t).NeedsHumanBudgetExhausted; len(ex) != 0 {
+		t.Errorf("budget_exhausted = %+v, want none while the one resume is still allowed", ex)
+	}
+
+	f.mustRun(t, &id)
+	got := f.lastLaunch(t)
+	if len(f.deleg.launched()) != 2 || !got.IsResume || got.SessionID != first.SessionID {
+		t.Fatalf("launch = %+v, want a resume of session %s", got, first.SessionID)
+	}
+	if got.MaxBudgetUSD != 50 {
+		t.Errorf("resume cap = %v, want the 50 USD remaining before the failure", got.MaxBudgetUSD)
+	}
+
+	// 許可は 1 回だけ。再開も失敗したら、増額まで止まる。
 	if _, err := f.run(t, &id); !errors.Is(err, ErrBudgetExceeded) {
-		t.Fatalf("second run err = %v, want ErrBudgetExceeded", err)
+		t.Fatalf("third run err = %v, want ErrBudgetExceeded", err)
 	}
 	if ex := f.overview(t).NeedsHumanBudgetExhausted; len(ex) != 1 {
 		t.Errorf("budget_exhausted = %+v, want the challenge", ex)
+	}
+}
+
+// 費用が取れた失敗（出所が reported）は実装枠を尽くさないので許可の対象外であり、
+// 費用が取れない失敗でも、人間が枠を置き直して 1 USD 以上が残っていればその額に従う。
+func TestBudget_NoGrantWhenTheFailureCostWasReported(t *testing.T) {
+	f := newDelegateFixture(t)
+	id := f.newInProgress(t, "t", "P1", budgetSpec(5, 30))
+	f.agent.FailureLimit = 5
+	out := failOut(RunResultErrored)
+	c := 5.0
+	out.ReportedTotalCostUSD = &c
+	f.deleg.result = out
+	f.mustRun(t, &id)
+	if _, err := f.run(t, &id); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("second run err = %v, want ErrBudgetExceeded (a reported cost is not granted)", err)
 	}
 }
 
