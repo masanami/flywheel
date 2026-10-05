@@ -228,6 +228,17 @@ func listBudgetExhausted(ctx context.Context, tx *sql.Tx, agent *AgentDeclaratio
 		if rem.Impl >= minImplLaunchMicros {
 			continue
 		}
+		// 費用が取れない失敗の後の再開が許される間は、人間の増額を待たない。
+		if agent != nil {
+			history, err := loadLaunchHistory(ctx, tx, cid)
+			if err != nil {
+				return nil, err
+			}
+			resume, limit := history.decideLaunch(plan.Version, agent.FailureLimit)
+			if limit == nil && history.resumeBudgetGrant(plan.Version, resume) >= minImplLaunchMicros {
+				continue
+			}
+		}
 		out = append(out, BudgetExhausted{
 			ChallengeID: ch.ID, PlanVersion: plan.Version,
 			ImplRemainingUSD: microsToUSD(rem.Impl), ReviewRemainingUSD: microsToUSD(rem.Review),

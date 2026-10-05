@@ -84,7 +84,6 @@ func (f *delegateFixture) lastLaunch(t *testing.T) DelegateLaunchInput {
 
 func (f *delegateFixture) runDelegation(t *testing.T, id string) *DelegateResult {
 	t.Helper()
-	f.refillImplBudget(t, id)
 	res, err := f.run(t, &id)
 	if err != nil {
 		t.Fatalf("RunDelegation: %v", err)
@@ -223,6 +222,7 @@ func TestResume_HumanHoldAndJudgmentHoldStartANewSession(t *testing.T) {
 				}
 			}
 			f.answerLatestHold(t, id, "ans")
+			f.topUpImplBudget(t, id)
 			f.runDelegation(t, id)
 			got := f.lastLaunch(t)
 			if got.IsResume || got.SessionID == first.SessionID {
@@ -533,6 +533,7 @@ func TestFailureLimit_NotReachedLaunchesAgain(t *testing.T) {
 		f.runDelegation(t, id)
 		f.runDelegation(t, id)
 		n := len(f.deleg.launched())
+		f.topUpImplBudget(t, id)
 		f.runDelegation(t, id)
 		if len(f.deleg.launched()) != n+1 {
 			t.Error("the third launch did not happen")
@@ -545,8 +546,10 @@ func TestFailureLimit_NotReachedLaunchesAgain(t *testing.T) {
 		f.runDelegation(t, id) // 失敗
 		f.runDelegation(t, id) // questions（resume）
 		f.answerLatestHold(t, id, "ANS")
+		f.topUpImplBudget(t, id)
 		f.runDelegation(t, id) // 失敗
 		n := len(f.deleg.launched())
+		f.topUpImplBudget(t, id)
 		res := f.runDelegation(t, id)
 		if len(f.deleg.launched()) != n+1 || len(res.NotStarted) != 0 {
 			t.Errorf("launches %d→%d, notStarted %+v", n, len(f.deleg.launched()), res.NotStarted)
@@ -591,7 +594,7 @@ func TestFailureLimit_PreviousPlanVersionAndRateLimitedRunsAreNotCounted(t *test
 		f.runDelegation(t, id)
 		f.runDelegation(t, id)
 		n := len(f.deleg.launched())
-		f.refillImplBudget(t, id)
+		f.topUpImplBudget(t, id)
 		res, err := f.s.RunDelegation(context.Background(), f.input(f.cycle(t, 300), &id))
 		if err != nil {
 			t.Fatal(err)
@@ -615,6 +618,7 @@ func TestFailureLimit_AnswerRestartsTheCount(t *testing.T) {
 	f.answerLatestHold(t, id, "keep going")
 	f.deleg.queue = []JudgmentLaunchOutput{failOut(RunResultErrored)} // 回答の後の 1 回目の失敗
 	n := len(f.deleg.launched())
+	f.topUpImplBudget(t, id)
 	res := f.runDelegation(t, id)
 	if len(f.deleg.launched()) != n+1 || len(res.NotStarted) != 0 {
 		t.Fatalf("launches %d→%d, notStarted %+v", n, len(f.deleg.launched()), res.NotStarted)
@@ -625,6 +629,7 @@ func TestFailureLimit_AnswerRestartsTheCount(t *testing.T) {
 	}
 	// 回答の後に 1 回失敗しただけでは、再び上限にならない。
 	n = len(f.deleg.launched())
+	f.topUpImplBudget(t, id)
 	f.runDelegation(t, id)
 	if len(f.deleg.launched()) != n+1 {
 		t.Error("one failure after the answer must not hit the limit")
@@ -694,7 +699,6 @@ func TestResume_InterruptedUsesOnlyTheOriginalSlot(t *testing.T) {
 	f.setSlotBranch("feat/x")
 	f.runDelegation(t, id)
 	f.occupy(t, "main-repo", "slot1")
-	f.refillImplBudget(t, id)
 	res, err := f.s.RunDelegation(context.Background(), f.input(f.cycle(t, 300), nil))
 	if err != nil {
 		t.Fatal(err)
@@ -704,10 +708,11 @@ func TestResume_InterruptedUsesOnlyTheOriginalSlot(t *testing.T) {
 	}
 }
 
-// refillImplBudget は、失敗の run の費用（上限額が費用になる）で実装枠が尽きても再開・再起動の
-// 規則を検証できるよう、実装枠の残りを 50 USD に置き直す（flywheel budget と同じく、
-// 計画の版の枠の上書きで行う。枠の残りの規則そのものは budget_test.go が検証する）。
-func (f *delegateFixture) refillImplBudget(t *testing.T, id string) {
+// topUpImplBudget は、費用が取れない失敗が続いて実装枠が尽きた後に、人間が flywheel budget で
+// 枠を増やしたことを表す（実装枠の残りを 50 USD に置き換える。計画の版の枠の上書きで行う）。
+// 費用不明の失敗の後の再開 1 回は枠が尽きても働く（budget_test.go が検証する）ので、
+// それを超えて続けて起動するテストだけが使う。
+func (f *delegateFixture) topUpImplBudget(t *testing.T, id string) {
 	t.Helper()
 	cid, _ := parseChallengeID(id)
 	err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
@@ -732,6 +737,6 @@ func (f *delegateFixture) refillImplBudget(t *testing.T, id string) {
 		return err
 	})
 	if err != nil {
-		t.Fatalf("refill: %v", err)
+		t.Fatalf("top up: %v", err)
 	}
 }

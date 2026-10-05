@@ -323,6 +323,13 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	} else if rework != nil && dc.LimitHit == nil {
 		dc.Resume = rework
 	}
+	// 費用が取れない失敗の後の再開に限り、失敗前の実装枠の残りを上限に 1 回だけ起動を許す。
+	// 人間が flywheel budget で枠を置き直して 1 USD 以上が残っているときは、その額に従う。
+	if dc.ImplBudgetMicros < minImplLaunchMicros && dc.LimitHit == nil && dc.ReworkHit == nil {
+		if grant := history.resumeBudgetGrant(dc.Plan.Version, dc.Resume); grant > dc.ImplBudgetMicros {
+			dc.ImplBudgetMicros = grant
+		}
+	}
 	if dc.Resume != nil {
 		err := s.db.Read(ctx, func(tx *sql.Tx) error {
 			b, err := loadRunBranch(ctx, tx, dc.Resume.Target, in.ConnDecl.HumanQuestionKinds, dc.Repo.DefaultBranch)

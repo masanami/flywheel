@@ -351,6 +351,36 @@ func (h *launchHistory) decideLaunch(planVersion, failureLimit int) (resume *res
 	return nil, nil
 }
 
+// resumeBudgetGrant は、費用が取れない失敗（費用の出所が unknown）に続く `--resume` の再開に限り、
+// その 1 回だけ起動を許す実装枠の上限（USD の 100 万分の 1）を返す。許さないときは 0。上限は
+// 失敗した run に渡した上限額（＝失敗前の実装枠の残り）。失敗が費用の取れたものである・失敗した
+// run 自体が費用の取れない失敗の再開だった（許可は 1 回）・失敗の後に費用を使った run がある、のいずれかなら許さない。
+func (h *launchHistory) resumeBudgetGrant(planVersion int, resume *resumePlan) int64 {
+	if resume == nil || resume.Kind != ResumeKindInterrupted {
+		return 0
+	}
+	t := resume.Target
+	if t.CostSource != costSourceUnknown || !isCountedFailure(t.Result) {
+		return 0
+	}
+	// 失敗した run 自体が、費用の取れない失敗の再開だったなら、許可は使用済み。
+	if t.ResumedFromRunID != nil {
+		src := h.runByDisplayID(*t.ResumedFromRunID)
+		if src == nil || (src.CostSource == costSourceUnknown && isCountedFailure(src.Result)) {
+			return 0
+		}
+	}
+	for _, r := range h.Runs {
+		if r.PlanVersion == nil || *r.PlanVersion != int64(planVersion) || runIntID(r) <= runIntID(t) {
+			continue
+		}
+		if r.CostUSD == nil || *r.CostUSD != 0 {
+			return 0
+		}
+	}
+	return t.MaxBudgetUSD
+}
+
 // decideRework は J5 の差し戻しに関する 2 つを返す。同じ計画の版の、最後の回答済みの保留より後の
 // J5 の not_met の数が上限に達していれば limit（委譲を起動せず人間対応待ちにする。回数は保留への
 // 回答の後の J5 から数え直す）。そうでなく、最後の J5 が not_met で、その後に委譲の run も回答済みの
