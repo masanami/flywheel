@@ -43,3 +43,14 @@ func TestWaitForOriginalSlot_ExpiredDeadlineFailsEvenIfIdle(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+// idle のまま連続して取れない場合は、取り直しに上限を置いて ErrSlotUnavailable を返す。
+func TestWaitForOriginalSlot_IdleForeverStopsAfterBoundedRetries(t *testing.T) {
+	calls := 0
+	_, err := waitForOriginalSlot(context.Background(), time.Now().Add(time.Minute),
+		func() (*SlotAssignment, error) { calls++; return nil, ErrSlotUnavailable },
+		func() (slotState, error) { return slotStateIdle, nil })
+	if !errors.Is(err, ErrSlotUnavailable) || calls != maxIdleRetries+1 {
+		t.Fatalf("err=%v calls=%d, want unavailable after %d acquires", err, calls, maxIdleRetries+1)
+	}
+}

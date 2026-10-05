@@ -735,3 +735,39 @@ func (f *delegateFixture) refillImplBudget(t *testing.T, id string) {
 		t.Fatalf("refill: %v", err)
 	}
 }
+
+// 元のスロットの行が idle のまま宣言から外れた再開（取得は ErrSlotUnavailable を返し続ける）は、
+// 待ちループで空回りせず、有限回の取り直しの後に slot_unavailable になる。
+func TestResume_Worktree_IdleOriginalDroppedFromDeclarationIsSlotUnavailable(t *testing.T) {
+	f := newResumeFixture(t)
+	id := f.worktreeChallenge(t)
+	f.questionAndAnswer(t, id, "feat/w")
+	original := f.slotOfLastRun(t)
+	if st := f.slotStates(t); st[original] != "idle" && len(st) == 0 {
+		t.Fatalf("setup: slot states = %v", st)
+	}
+	for i := range f.conn.Repos {
+		if f.conn.Repos[i].Name == "wt-repo" {
+			f.conn.Repos[i].Slots.Count = 0 // 先頭の 0 本だけが候補 ＝ 元の行は宣言から外れる
+		}
+	}
+	launches := len(f.deleg.launched())
+	done := make(chan struct{})
+	var res *DelegateResult
+	var err error
+	go func() {
+		defer close(done)
+		res, err = f.s.RunDelegation(context.Background(), f.input(f.cycle(t, 300), nil))
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunDelegation did not return: the wait loop is spinning")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedSlotUnavailable || len(f.deleg.launched()) != launches {
+		t.Errorf("notStarted = %+v, launches %d→%d", res.NotStarted, launches, len(f.deleg.launched()))
+	}
+}

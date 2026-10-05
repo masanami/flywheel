@@ -484,6 +484,9 @@ func reworkLimitQuestion(hit *reworkLimitHit) string {
 // slotWaitInterval は、元のスロットが使用中の間、空くのを待つ確認の間隔（テストが短くする）。
 var slotWaitInterval = 200 * time.Millisecond
 
+// maxIdleRetries は、取れなかった後の状態が idle だった場合に、待たずに連続して取り直す回数の上限。
+const maxIdleRetries = 3
+
 // acquireDelegationSlot は委譲のスロットを割り当てる。新しいセッションの起動は通常の割り当て。
 // `--resume` の再開は、元のスロット（再開元の run が使ったもの）を次のように使う
 // （M3P16・M3P30・M3P38）:
@@ -518,6 +521,7 @@ func (s *Store) acquireDelegationSlot(ctx context.Context, in DelegateInput, dc 
 // 期限切れは ErrSlotUnavailable のまま返す。
 func waitForOriginalSlot(ctx context.Context, deadline time.Time,
 	acquire func() (*SlotAssignment, error), stateOf func() (slotState, error)) (*SlotAssignment, error) {
+	idleRetries := 0
 	for {
 		a, err := acquire()
 		if !errors.Is(err, ErrSlotUnavailable) {
@@ -531,8 +535,13 @@ func waitForOriginalSlot(ctx context.Context, deadline time.Time,
 			return nil, err
 		}
 		if state == slotStateIdle {
+			idleRetries++
+			if idleRetries > maxIdleRetries {
+				return nil, err
+			}
 			continue
 		}
+		idleRetries = 0
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
