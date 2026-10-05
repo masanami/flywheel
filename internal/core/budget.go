@@ -225,19 +225,17 @@ func listBudgetExhausted(ctx context.Context, tx *sql.Tx, agent *AgentDeclaratio
 			return nil, err
 		}
 		rem := computeBucketRemaining(applyBudgetOverride(implUSD, reviewUSD, override), sp)
-		if rem.Impl >= minImplLaunchMicros {
-			continue
-		}
+		implRem := rem.Impl
 		// 費用が取れない失敗の後の再開が許される間は、人間の増額を待たない。
 		if agent != nil {
 			history, err := loadLaunchHistory(ctx, tx, cid)
 			if err != nil {
 				return nil, err
 			}
-			resume, limit := history.decideLaunch(plan.Version, agent.FailureLimit)
-			if limit == nil && history.resumeBudgetGrant(plan.Version, resume) >= minImplLaunchMicros {
-				continue
-			}
+			implRem = history.effectiveImplBudget(plan.Version, history.decideLaunchFull(plan.Version, agent), implRem)
+		}
+		if implRem >= minImplLaunchMicros {
+			continue
 		}
 		out = append(out, BudgetExhausted{
 			ChallengeID: ch.ID, PlanVersion: plan.Version,
