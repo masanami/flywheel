@@ -27,20 +27,25 @@ const NotStartedUpstreamFetchFailed NotStartedReason = "upstream_fetch_failed"
 
 // NotStartedSlotUnavailable は、委譲の候補のリポジトリに使えるスロットが無く起動しなかった
 // ことを表す（S2。`run` の NotStarted だけが使う）。`cycle` の not_started の閉集合
-// （NotStartedReasonValues）への追加と照合は、委譲の段を結線する #108 が行う。
+// （NotStartedReasonValues）に含まれる。
 const NotStartedSlotUnavailable NotStartedReason = "slot_unavailable"
 
-// notStartedReasonValues は S1 が出す NotStartedReason の閉集合
-// （run_budget・slot_unavailable・failure_limit・rework_limit は S2 の委譲の段が足す）。
+// notStartedReasonValues は NotStartedReason の閉集合（仕様の列挙の順）。
 var notStartedReasonValues = []NotStartedReason{
 	NotStartedCycleBudget,
 	NotStartedRateLimited,
+	NotStartedRunBudget,
+	NotStartedSlotUnavailable,
+	NotStartedFailureLimit,
+	NotStartedReworkLimit,
 	NotStartedUpstreamFetchFailed,
+	NotStartedSerialized,
+	NotStartedWaitingExternal,
 }
 
-// NotStartedReasonValues は S1 が出す NotStartedReason の閉集合の写しを返す（CLI の
-// テストが仕様の列挙〈§IF / API「S1 は cycle_budget | rate_limited | upstream_fetch_failed」〉と
-// 双方向に照合するため。IngestOutcomeValues と同じ形）。
+// NotStartedReasonValues は NotStartedReason の閉集合（§IF / API「cycle の JSON 出力」の
+// not_started[].reason。S2 の値を含む）の写しを返す（CLI のテストが仕様の列挙と双方向に
+// 照合するため。IngestOutcomeValues と同じ形）。
 func NotStartedReasonValues() []NotStartedReason {
 	return append([]NotStartedReason(nil), notStartedReasonValues...)
 }

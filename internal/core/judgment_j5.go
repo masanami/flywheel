@@ -28,8 +28,7 @@ import (
 )
 
 // NotStartedWaitingExternal は、直前の委譲の成果物の PR のチェックが完了していないため J5 を
-// 起動しなかったことを表す（M3P42）。`cycle` の not_started の閉集合（NotStartedReasonValues）への
-// 追加と照合は、委譲・検証の段を結線する #108 が行う。
+// 起動しなかったことを表す（M3P42）。`cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
 const NotStartedWaitingExternal NotStartedReason = "waiting_external"
 
 // --- J5 の出力スキーマ・検査 ---

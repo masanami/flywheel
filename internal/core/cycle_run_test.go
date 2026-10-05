@@ -136,7 +136,10 @@ func (f *cycleFixture) classified(t *testing.T, title, priority string) *Challen
 }
 
 func (f *cycleFixture) input(inv JudgmentInvoker) CycleRunInput {
-	return CycleRunInput{Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream}
+	return CycleRunInput{
+		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream,
+		Delegate: &fakeDelegator{}, Git: newFakeSlotGit(), Reconcile: newFakeBranchSource(), Checks: newFakeChecks(),
+	}
 }
 
 func (f *cycleFixture) run(t *testing.T, in CycleRunInput) *CycleRunResult {
@@ -201,7 +204,7 @@ func TestRunCycle_RunsIngestClassifyPlanInOrder(t *testing.T) {
 	}
 	res := f.run(t, in)
 
-	want := []CyclePhase{CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan}
+	want := []CyclePhase{CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify}
 	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("phases = %v, want %v", got, want)
 	}
@@ -226,8 +229,8 @@ func TestRunCycle_NoIngestInput_IngestPhaseIsSkipped(t *testing.T) {
 	if !ing.Skipped || ing.Ingest != nil {
 		t.Errorf("ingest phase = %+v, want skipped with no result", ing)
 	}
-	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint([]CyclePhase{CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan}) {
-		t.Errorf("phases = %v, want all three phases listed even when ingest is skipped", got)
+	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint([]CyclePhase{CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify}) {
+		t.Errorf("phases = %v, want all five phases listed even when ingest is skipped", got)
 	}
 }
 
@@ -642,10 +645,14 @@ func TestRunCycle_InvalidInput_IsValidationErrorAndRecordsNothing(t *testing.T) 
 	f := newCycleFixture(t)
 	inv := mineThenPlanInvoker(t)
 	cases := map[string]func(in *CycleRunInput){
-		"empty trigger":               func(in *CycleRunInput) { in.Trigger = "" },
-		"nil agent declaration":       func(in *CycleRunInput) { in.AgentDecl = nil },
-		"nil invoker":                 func(in *CycleRunInput) { in.Invoker = nil },
-		"connectors without upstream": func(in *CycleRunInput) { in.Upstream = nil },
+		"empty trigger":                func(in *CycleRunInput) { in.Trigger = "" },
+		"nil agent declaration":        func(in *CycleRunInput) { in.AgentDecl = nil },
+		"nil invoker":                  func(in *CycleRunInput) { in.Invoker = nil },
+		"connectors without upstream":  func(in *CycleRunInput) { in.Upstream = nil },
+		"connectors without delegate":  func(in *CycleRunInput) { in.Delegate = nil },
+		"connectors without git":       func(in *CycleRunInput) { in.Git = nil },
+		"connectors without reconcile": func(in *CycleRunInput) { in.Reconcile = nil },
+		"connectors without checks":    func(in *CycleRunInput) { in.Checks = nil },
 		"ingest without upstream": func(in *CycleRunInput) {
 			in.Ingest = &CycleIngestInput{Sources: []SourceEntry{selfOnlySource("s", []string{"o/r"}, nil)}, Channel: ChannelCLI}
 		},

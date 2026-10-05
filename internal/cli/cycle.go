@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/masanami/flywheel/internal/adapters/git"
 	"github.com/masanami/flywheel/internal/adapters/github"
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/invoker"
@@ -22,7 +23,7 @@ const defaultCycleTrigger = "manual"
 //
 // 読み込み順（個別の操作と同じ形。どの段で失敗しても、それより後は行わず周も始めない）:
 // agent.json の読み込み・検証 → RequirePositionFile → sources.json（無ければ取り込みの段は
-// skipped。不備なら config_invalid）→ connectors.json（無ければ計画の段は skipped。
+// skipped。不備なら config_invalid）→ connectors.json（無ければ計画・委譲・検証の段は skipped。
 // 不備なら config_invalid）→ 取り込みの段があれば gh の有無（無ければ
 // upstream_unavailable）→ claude の有無（無ければ invoker_unavailable）→ RunCycle。
 // 宣言の不備は環境の不備（gh・claude の不在）より先に報告する。
@@ -72,7 +73,7 @@ func runCycle(a Args) (any, error) {
 	case err == nil:
 		conn, hasConnectors = connDecl, true
 	case errors.Is(err, core.ErrConfigNotFound):
-		// connectors.json が無い: 計画の段は skipped（J2 を起動せず、エラーにしない）。
+		// connectors.json が無い: 計画・委譲・検証の段は skipped（J2・J3・J5 を起動せず、エラーにしない）。
 	default:
 		return nil, mapCoreErr(err)
 	}
@@ -104,6 +105,18 @@ func runCycle(a Args) (any, error) {
 		return nil, NewError(CodeInternalError, err.Error())
 	}
 
+	// 委譲と検証の段の口は、接続ツールの宣言があるときだけ組み立てる（無ければ段は skipped）。
+	// 型つき nil を core へ渡さないよう、宣言が無いときは nil のインターフェース値のままにする。
+	var (
+		delegate  core.DelegationInvoker
+		slotGit   core.SlotGit
+		reconcile core.UpstreamBranchSource
+		checks    core.UpstreamCheckSource
+	)
+	if hasConnectors {
+		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(), newCheckSource()
+	}
+
 	res, err := a.Store.RunCycle(ctx, core.CycleRunInput{
 		Trigger:   trigger,
 		AgentDecl: agent,
@@ -111,6 +124,11 @@ func runCycle(a Args) (any, error) {
 		ConnDecl:  conn,
 		Invoker:   launcher,
 		Upstream:  threads,
+		Delegate:  delegate,
+		Git:       slotGit,
+		Reconcile: reconcile,
+		Checks:    checks,
+		Predictor: launcher,
 	})
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -144,7 +162,8 @@ func cycleResultJSON(res *core.CycleRunResult) map[string]any {
 
 // cyclePhaseJSON は段 1 つを phases の 1 要素の形へ変換する。取り込みの段は
 // {"phase","skipped","result"}（result は ingest --json と同じ形。skipped なら null）、
-// 分類・計画の段は {"phase","skipped","items","not_started"}（skipped なら空）。
+// 分類・計画・委譲・検証の段は {"phase","skipped","items","not_started"}（skipped なら空。
+// 委譲の段は serial_groups も持つ）。
 func cyclePhaseJSON(p core.CyclePhaseResult) map[string]any {
 	if p.Phase == core.CyclePhaseIngest {
 		var result any

@@ -20,8 +20,7 @@ import (
 )
 
 // NotStartedRunBudget は、実装枠の残りが起動の最小額（1 USD）に満たないため委譲を起動しなかった
-// ことを表す。`cycle` の not_started の閉集合（NotStartedReasonValues）への追加と照合は、
-// 委譲の段を結線する #108 が行う。
+// ことを表す。`cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
 const NotStartedRunBudget NotStartedReason = "run_budget"
 
 // minImplLaunchMicros は委譲を起動できる実装枠の残りの下限（1 USD。USD の 100 万分の 1 の単位）。

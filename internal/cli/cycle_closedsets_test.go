@@ -12,7 +12,7 @@ import (
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
-// このファイルは #86 の AC-163・AC-164（閉集合の双方向の照合）を検証する。
+// このファイルは #86 の AC-163・AC-164（閉集合の双方向の照合。AC-163 は #108 で S2 の集合へ広げた）を検証する。
 //   - 表 ⊇ 実装: 実際の出力に現れる値は、すべて仕様の閉集合に含まれる
 //   - 表 ⊆ 実装: 仕様の閉集合の全ての値が、実際の出力に少なくとも 1 回は現れる
 //   - 仕様の列挙・core の定義・実際の出力の 3 者が一致する
@@ -84,41 +84,50 @@ func runResultsOf(t *testing.T, ws string) []string {
 	return out
 }
 
-// AC-163: cycle --json の not_started[].reason は、S1 では cycle_budget | rate_limited |
-// upstream_fetch_failed の閉集合に限られる（仕様・core の定義・実際の出力の 3 者を双方向に照合）。
-func TestCycle_NotStartedReasonsAreTheS1ClosedSetInBothDirections(t *testing.T) {
+// AC-163・AC-367・AC-368: cycle --json の not_started[].reason の値は、S2 では cycle_budget |
+// rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit |
+// upstream_fetch_failed | serialized | waiting_external の閉集合に限られる（仕様・core の定義・実際の
+// 出力の 3 者を双方向に照合する）。
+//
+// 実際の出力（cycle --json）で観測できるものはここで観測する。連続失敗・差し戻しの履歴や、他の
+// 課題の終了していない run を要る failure_limit・rework_limit・serialized は、core のテストが
+// 同じ値を実際の周の対象の選択で観測している（coreObservedReasons に、その根拠のテストを置く）。
+func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	line := m3SpecLine(t, "`not_started[].reason` は", "S1 は ")
-	_, afterS1, _ := strings.Cut(line, "S1 は ")
-	m := backtickSpanRe.FindStringSubmatch(afterS1)
-	if m == nil {
-		t.Fatalf("no backtick span after `S1 は ` in %q", line)
-	}
-	specS1 := pipeSet(m[1])
-	// 行の最初の span は `not_started[].reason` 自身、2 番目が S1〜S2 の全体の閉集合。
 	spans := backtickSpanRe.FindAllStringSubmatch(line, -1)
-	if len(spans) < 3 {
-		t.Fatalf("expected the field name, the full closed set and the S1 set as backtick spans in %q", line)
+	if len(spans) < 2 {
+		t.Fatalf("expected the field name and the closed set as backtick spans in %q", line)
 	}
-	// S1 の集合は、行の前半の閉集合（S1〜S2 の全体）の部分集合である。
-	full := map[string]bool{}
-	for _, v := range pipeSet(spans[1][1]) {
-		full[v] = true
-	}
-	for _, v := range specS1 {
-		if !full[v] {
-			t.Errorf("spec S1 reason %q is not in the documented full closed set %v", v, spans[1][1])
-		}
-	}
+	// 行の最初の span は `not_started[].reason` 自身、2 番目が S2 の全体の閉集合。
+	spec := pipeSet(spans[1][1])
 
 	var impl []string
 	for _, r := range core.NotStartedReasonValues() {
 		impl = append(impl, string(r))
 	}
-	if !equalStringSlices(specS1, sortedStrings(impl)) {
-		t.Fatalf("core.NotStartedReasonValues() = %v, spec S1 set = %v", sortedStrings(impl), specS1)
+	if !equalStringSlices(spec, sortedStrings(impl)) {
+		t.Fatalf("core.NotStartedReasonValues() = %v, spec set = %v", sortedStrings(impl), spec)
 	}
 
+	// core のテストが、実際の周・委譲・検証の対象の選択で観測している値。
+	coreObservedReasons := map[string]string{
+		"failure_limit": "TestFailureLimit_ReachedHoldsWithKindAndCountAndReportsNotStarted (internal/core/delegate_resume_test.go)",
+		"rework_limit":  "TestRework_LimitIsDetectedInTheNextCycle_TwoStillLaunch (internal/core/judgment_j5_test.go)",
+		"serialized":    "TestPlan_RunningInSameGroup_Serialized_OtherGroupStarts (internal/core/delegate_plan_test.go)",
+	}
 	observed := map[string]bool{}
+	for r, ref := range coreObservedReasons {
+		if !containsString(spec, r) {
+			t.Errorf("coreObservedReasons has %q which is not in the spec closed set", r)
+		}
+		// 根拠のテストが実在し、その値の定数を参照していることを確かめる（改名・削除で気付けるように）。
+		testName, file, _ := strings.Cut(ref, " (")
+		src, err := os.ReadFile(filepath.Join(repoRoot(t), strings.TrimSuffix(file, ")")))
+		if err != nil || !strings.Contains(string(src), "func "+testName+"(") || !strings.Contains(string(src), notStartedConstFor(r)) {
+			t.Errorf("coreObservedReasons[%q]: %s must exist and reference %s (err=%v)", r, ref, notStartedConstFor(r), err)
+		}
+		observed[r] = true
+	}
 	observe := func(doc map[string]any) {
 		assertDocumentedCycle(t, loadDocumentedJSON(t), doc)
 		for _, p := range doc["phases"].([]any) {
@@ -161,12 +170,36 @@ func TestCycle_NotStartedReasonsAreTheS1ClosedSetInBothDirections(t *testing.T) 
 		observe(cycleDoc(t, ws))
 	})
 
+	t.Run("slot_unavailable", func(t *testing.T) {
+		ws := setupRunWorkspace(t)
+		newInProgressForRun(t, ws, nil)
+		if err := os.WriteFile(filepath.Join(ws, "slot-d", "dirty.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
+		observe(cycleDoc(t, ws))
+	})
+	t.Run("run_budget", func(t *testing.T) {
+		ws := setupRunWorkspace(t)
+		// 実装枠が起動の最小額（1 USD）に満たない計画。
+		newInProgressForRun(t, ws, func(m map[string]any) { m["budget_impl_usd"] = 0.5 })
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
+		observe(cycleDoc(t, ws))
+	})
+	t.Run("waiting_external", func(t *testing.T) {
+		ws := setupRunWorkspace(t)
+		newVerifyingForCase(t, ws, true)
+		withFakeGHRoutesOnPATH(t, ghChecksRoutes("open", checkRunsPending))
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j5Route("met", nil, nil)}, "")
+		observe(cycleDoc(t, ws))
+	})
+
 	var got []string
 	for r := range observed {
 		got = append(got, r)
 	}
-	if !equalStringSlices(sortedStrings(got), specS1) {
-		t.Errorf("observed not_started reasons = %v, want exactly the S1 closed set %v (each value must appear, and no other)", sortedStrings(got), specS1)
+	if !equalStringSlices(sortedStrings(got), spec) {
+		t.Errorf("observed not_started reasons = %v, want exactly the S2 closed set %v (each value must appear, and no other)", sortedStrings(got), spec)
 	}
 }
 
@@ -254,4 +287,17 @@ func TestRunResults_AreTheDocumentedClosedSetInBothDirections(t *testing.T) {
 	if !equalStringSlices(sortedStrings(got), spec) {
 		t.Errorf("observed run results = %v, want exactly the closed set %v", sortedStrings(got), spec)
 	}
+}
+
+// notStartedConstFor は not_started の理由の値に対応する core の定数名。
+func notStartedConstFor(reason string) string {
+	switch reason {
+	case "failure_limit":
+		return "NotStartedFailureLimit"
+	case "rework_limit":
+		return "NotStartedReworkLimit"
+	case "serialized":
+		return "NotStartedSerialized"
+	}
+	return "?"
 }
