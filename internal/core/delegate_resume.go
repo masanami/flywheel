@@ -381,6 +381,41 @@ func (h *launchHistory) resumeBudgetGrant(planVersion int, resume *resumePlan) i
 	return t.MaxBudgetUSD
 }
 
+// launchDecision は課題の次の委譲の起動の形（再開・連続失敗の上限・差し戻しの上限）。
+type launchDecision struct {
+	Resume    *resumePlan
+	LimitHit  *failureLimitHit
+	ReworkHit *reworkLimitHit
+}
+
+// decideLaunchFull は decideLaunch と decideRework を 1 つにまとめた、起動の形の判定の入口。
+// 差し戻しの再開は、連続失敗の上限に達しておらず他の再開が無いときだけ採る。
+func (h *launchHistory) decideLaunchFull(planVersion int, agent *AgentDeclaration) launchDecision {
+	var d launchDecision
+	d.Resume, d.LimitHit = h.decideLaunch(planVersion, agent.FailureLimit)
+	if rework, hit := h.decideRework(planVersion, agent.ReworkLimit); hit != nil {
+		d.ReworkHit = hit
+	} else if rework != nil && d.LimitHit == nil {
+		d.Resume = rework
+	}
+	return d
+}
+
+// effectiveImplBudget は実装枠の残り implRemaining（USD の 100 万分の 1）に、費用が取れない失敗の
+// 後の再開の許可（決定 C）を適用した額を返す。許可は、残りが 1 USD 未満で、連続失敗・差し戻しの
+// 上限に達しておらず、resumeBudgetGrant が残りを超える額を返すときだけ適用する。
+// status（listBudgetExhausted）と委譲の起動（loadDelegationContext）は、この関数だけで
+// 許可の有無を判定する。
+func (h *launchHistory) effectiveImplBudget(planVersion int, d launchDecision, implRemaining int64) int64 {
+	if implRemaining >= minImplLaunchMicros || d.LimitHit != nil || d.ReworkHit != nil {
+		return implRemaining
+	}
+	if grant := h.resumeBudgetGrant(planVersion, d.Resume); grant > implRemaining {
+		return grant
+	}
+	return implRemaining
+}
+
 // decideRework は J5 の差し戻しに関する 2 つを返す。同じ計画の版の、最後の回答済みの保留より後の
 // J5 の not_met の数が上限に達していれば limit（委譲を起動せず人間対応待ちにする。回数は保留への
 // 回答の後の J5 から数え直す）。そうでなく、最後の J5 が not_met で、その後に委譲の run も回答済みの

@@ -317,19 +317,11 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	rem := computeBucketRemaining(applyBudgetOverride(validated.ResolvedImplUSD, validated.ResolvedReviewUSD, override), spend)
 	dc.ImplBudgetMicros, dc.ReviewBudgetMicros = rem.Impl, rem.Review
 	dc.Decider, dc.DeciderRow = DecideDecider(dc.Operation, validated.CrossRepo, validated.RelatedRepos)
-	dc.Resume, dc.LimitHit = history.decideLaunch(dc.Plan.Version, in.AgentDecl.FailureLimit)
-	if rework, hit := history.decideRework(dc.Plan.Version, in.AgentDecl.ReworkLimit); hit != nil {
-		dc.ReworkHit = hit
-	} else if rework != nil && dc.LimitHit == nil {
-		dc.Resume = rework
-	}
+	decision := history.decideLaunchFull(dc.Plan.Version, in.AgentDecl)
+	dc.Resume, dc.LimitHit, dc.ReworkHit = decision.Resume, decision.LimitHit, decision.ReworkHit
 	// 費用が取れない失敗の後の再開に限り、失敗前の実装枠の残りを上限に 1 回だけ起動を許す。
 	// 人間が flywheel budget で枠を置き直して 1 USD 以上が残っているときは、その額に従う。
-	if dc.ImplBudgetMicros < minImplLaunchMicros && dc.LimitHit == nil && dc.ReworkHit == nil {
-		if grant := history.resumeBudgetGrant(dc.Plan.Version, dc.Resume); grant > dc.ImplBudgetMicros {
-			dc.ImplBudgetMicros = grant
-		}
-	}
+	dc.ImplBudgetMicros = history.effectiveImplBudget(dc.Plan.Version, decision, dc.ImplBudgetMicros)
 	if dc.Resume != nil {
 		err := s.db.Read(ctx, func(tx *sql.Tx) error {
 			b, err := loadRunBranch(ctx, tx, dc.Resume.Target, in.ConnDecl.HumanQuestionKinds, dc.Repo.DefaultBranch)

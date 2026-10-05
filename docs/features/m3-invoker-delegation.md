@@ -120,6 +120,8 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 同じ `session_id` を `--resume` した run の費用は、返り値の `total_cost_usd` から、同じ `session_id` の直前の run が報告した `total_cost_usd` を引いた額とし、出所を `delta` にする（`--resume` の `total_cost_usd` はセッションの累計を返すという実測に基づく＝§要人間判定で確かめる）
 - [ ] 差が負になる・直前の run の報告が無い・返り値に `total_cost_usd` が無い・run が `launch_failed` 以外で結果の JSON を得られなかった（`timed_out`・`malformed`・`interrupted`）ときは、その run に渡した `--max-budget-usd` の額を費用とし、出所を `unknown` にする（fail-closed。harness Q15 と同じ）
 - [ ] 費用の出所が `unknown` の失敗（`timed_out`・`malformed`・`interrupted`、または費用が取れない `errored`・`invalid_output`）の費用は、これまでどおり渡した `--max-budget-usd` の額で数え、実装枠の残りは 0 になる。そのうえで、その失敗に続く `--resume` による再開に限り、人間が `flywheel budget` で枠を増やさなくても、失敗した run に渡した上限額（失敗前の実装枠の残り）を `--max-budget-usd` として 1 回だけ起動を許す（`run_budget`・`budget_exceeded` で止めない）。許可は 1 回に限り、その再開も失敗した場合は、続く起動は連続失敗の上限（M3P17）で人間対応待ちになるか、実装枠の残りの検査で止まる。許可が残っている間は `status` の `needs_human.budget_exhausted` に出さない【決定 2026-10-05 オーナー C】
+- 補足（決定 C の帰結。受入基準の項目ではない）: 許可で起動した再開は、成功しても許可額（渡した `--max-budget-usd`）の全額を費用とし、出所を `unknown` にする。成功した再開の実費では記帳し直さない【決定 2026-10-05 オーナー A】。再開元の報告が無いため §費用の記録の `delta` の差を取れず、上の fail-closed の範囲内であり、実害は増額の往復が 1 回増えうるだけである。帰結として、再開の後は実装枠の残りが 0 になり、続く差し戻し（J5 の `not_met` による `fix`）の起動には人間の `flywheel budget` による増額が要る
+- 補足（受入基準の項目ではない）: 許可を適用するかの判定は 1 つの関数にまとめ、`status` の `needs_human.budget_exhausted` の判定と委譲の起動の判定の両方が同じ関数を使う（両者の結果が食い違わない）
 - [ ] `launch_failed` の run の費用は 0 とする（Claude を呼んでいない）
 
 ### 判断点の共通の規則 [S1]

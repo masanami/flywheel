@@ -478,3 +478,25 @@ func (f *delegateFixture) mustRun(t *testing.T, id *string) {
 		t.Fatalf("RunDelegation: %v", err)
 	}
 }
+
+// status の budget_exhausted と委譲の起動は、再開の許可の有無を同じ判定（effectiveImplBudget）で
+// 決める。各時点で「status に出ない」と「起動が実装枠で止まらない」が一致することを確かめる。
+func TestBudget_StatusAndLaunchAgreeOnTheResumeGrant(t *testing.T) {
+	f := newDelegateFixture(t)
+	id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
+	f.agent.FailureLimit = 5
+	f.deleg.result = failOut(RunResultTimedOut)
+
+	f.mustRun(t, &id) // 最初の失敗（費用 unknown）
+	for step := 0; step < 2; step++ {
+		listed := len(f.overview(t).NeedsHumanBudgetExhausted) == 1
+		_, err := f.run(t, &id)
+		blocked := errors.Is(err, ErrBudgetExceeded)
+		if listed != blocked {
+			t.Fatalf("step %d: status listed=%v but launch blocked=%v (err=%v)", step, listed, blocked, err)
+		}
+		if step == 1 && !blocked {
+			t.Fatal("the second resume must be blocked")
+		}
+	}
+}
