@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -61,5 +62,37 @@ func TestRun_DelegatedMarker_HelpStillWorks(t *testing.T) {
 func TestMain_UnsetsTheDelegatedMarker(t *testing.T) {
 	if _, set := os.LookupEnv(core.DelegatedRunEnvVar); set {
 		t.Fatal("the marker must be unset by TestMain")
+	}
+}
+
+// E2E（AC-219a）: `flywheel run` の一周で、委譲の子（偽の claude）の環境には目印が run の ID で
+// 渡り、判断 J3 の子の環境には渡らない。
+func TestRun_E2E_DelegationChildGetsTheMarkerAndJ3DoesNot(t *testing.T) {
+	ws := setupRunWorkspace(t)
+	id := newInProgressForRun(t, ws, nil)
+	dir := t.TempDir()
+	delegEnv := filepath.Join(dir, "deleg.env")
+	j3Env := filepath.Join(dir, "j3.env")
+	probe := func(path string) string {
+		return `printf '%s' "${` + core.DelegatedRunEnvVar + `-UNSET}" > ` + shellSingleQuote(path)
+	}
+	child := delegateRoute("completed")
+	child.ShellBefore = probe(delegEnv)
+	j3 := j3Route("BRIEF-E2E")
+	j3.ShellBefore = probe(j3Env)
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{child, j3}, "")
+	withFakeGHRoutesOnPATH(t, nil)
+
+	runJSON(t, ws, "run")
+
+	runs := delegateRunsOf(t, ws)
+	if len(runs) != 1 || runs[0]["challenge_id"] != id {
+		t.Fatalf("delegate runs = %v", runs)
+	}
+	if got, _ := os.ReadFile(delegEnv); string(got) != runs[0]["id"].(string) {
+		t.Errorf("delegation child marker = %q, want the run ID %q", got, runs[0]["id"])
+	}
+	if got, _ := os.ReadFile(j3Env); string(got) != "UNSET" {
+		t.Errorf("J3 child marker = %q, want UNSET", got)
 	}
 }
