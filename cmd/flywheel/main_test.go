@@ -22,6 +22,8 @@ import (
 func newChildCmd(bin string, args ...string) *exec.Cmd {
 	cmd := exec.Command(bin, args...)
 	cmd.Env = append(os.Environ(), "FLYWHEEL_WORKSPACE=")
+	// 実行環境（委譲の子が make check を回す場合）に目印があっても落ちないよう外す。
+	cmd.Env = withoutEnv(cmd.Env, "FLYWHEEL_DELEGATED_RUN")
 	return cmd
 }
 
@@ -234,5 +236,50 @@ func TestBinary_NoArgsExitsTwo(t *testing.T) {
 	}
 	if exitErr.ExitCode() != 2 {
 		t.Fatalf("exit code = %d, want 2", exitErr.ExitCode())
+	}
+}
+
+// withoutEnv は env から name=... の要素を取り除く。
+func withoutEnv(env []string, name string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, name+"=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// M3H13: 委譲の目印のある環境では、絶対パス・sh -c・env のどの形で起動しても、
+// help 以外のコマンドは終了コード 1・verification_rejected で拒否される。
+func TestBinary_DelegatedMarker_RejectsEveryInvocationForm(t *testing.T) {
+	bin := buildBinary(t)
+	marked := append(withoutEnv(os.Environ(), "FLYWHEEL_DELEGATED_RUN"), "FLYWHEEL_DELEGATED_RUN=R-7", "FLYWHEEL_WORKSPACE=")
+	forms := map[string][]string{
+		"absolute path": {bin, "status", "--json"},
+		"sh -c":         {"sh", "-c", "'" + bin + "' status --json"},
+		"env":           {"env", bin, "status", "--json"},
+	}
+	for name, argv := range forms {
+		t.Run(name, func(t *testing.T) {
+			cmd := exec.Command(argv[0], argv[1:]...)
+			cmd.Env = marked
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+				t.Fatalf("err = %v, want exit 1 (stderr=%s)", err, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), `"code":"verification_rejected"`) {
+				t.Errorf("stderr = %s", stderr.String())
+			}
+		})
+	}
+	help := exec.Command(bin, "help")
+	help.Env = marked
+	if err := help.Run(); err != nil {
+		t.Errorf("help must still work under the marker: %v", err)
 	}
 }

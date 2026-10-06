@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -400,5 +401,80 @@ func TestBuildDelegationResumeStdin_ReworkCarriesFixedTextAndFeedback(t *testing
 	}
 	if strings.Contains(s, "「回答」の区画") {
 		t.Errorf("a rework resume must not carry an answer section:\n%s", s)
+	}
+}
+
+// 委譲の起動だけが、環境に目印（FLYWHEEL_DELEGATED_RUN=<run の ID>）を渡す（M3H13）。
+func TestLauncher_InvokeDelegation_PassesTheDelegatedRunMarkerWithTheRunID(t *testing.T) {
+	setFakeClaudePath(t, newFakeClaudeDir(t))
+	ws := newWorkspace(t)
+	envLog := filepath.Join(t.TempDir(), "env.log")
+	t.Setenv(envFixture, writeFixture(t, fakeClaudeFixture{
+		Stdout:     `{"session_id":"22222222-2222-4222-8222-222222222222","is_error":false,"structured_output":{"outcome":"completed"}}`,
+		EnvLogPath: envLog,
+	}))
+	in := baseDelegateInput(t, ws, t.TempDir())
+	in.RunID = "R-7"
+	if _, err := NewLauncher().InvokeDelegation(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(envLog)
+	if string(got) != "present=true value=R-7" {
+		t.Errorf("env log = %q, want the marker with the run ID", got)
+	}
+}
+
+// 再開の委譲でも目印を渡す。
+func TestLauncher_InvokeDelegation_ResumePassesTheMarkerToo(t *testing.T) {
+	setFakeClaudePath(t, newFakeClaudeDir(t))
+	ws := newWorkspace(t)
+	envLog := filepath.Join(t.TempDir(), "env.log")
+	t.Setenv(envFixture, writeFixture(t, fakeClaudeFixture{
+		Stdout:     `{"session_id":"22222222-2222-4222-8222-222222222222","is_error":false,"structured_output":{"outcome":"completed"}}`,
+		EnvLogPath: envLog,
+	}))
+	in := baseDelegateInput(t, ws, t.TempDir())
+	in.RunID = "R-8"
+	in.IsResume = true
+	in.ResumeKind = core.ResumeKindInterrupted
+	if _, err := NewLauncher().InvokeDelegation(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(envLog); string(got) != "present=true value=R-8" {
+		t.Errorf("env log = %q", got)
+	}
+}
+
+// 判断（J1〜J5）の起動と衝突予測の起動には目印を渡さない。
+func TestLauncher_InvokeJudgmentAndPredict_DoNotPassTheMarker(t *testing.T) {
+	setFakeClaudePath(t, newFakeClaudeDir(t))
+	ws := newWorkspace(t)
+	envLog := filepath.Join(t.TempDir(), "env.log")
+	t.Setenv(envFixture, writeFixture(t, fakeClaudeFixture{
+		Stdout:     `{"is_error":false,"structured_output":{}}`,
+		EnvLogPath: envLog,
+	}))
+	t.Setenv("FLYWHEEL_DELEGATED_RUN", "R-parent") // 親の環境に目印があっても渡さない
+	if _, err := NewLauncher().InvokeJudgment(context.Background(), baseLaunchInput(t, ws)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(envLog); string(got) != "present=false value=" {
+		t.Errorf("judgment env log = %q, want no marker", got)
+	}
+	_ = os.Remove(envLog)
+	in, _, _ := predictInput(t, fakeClaudeFixture{Stdout: samplePrediction, EnvLogPath: envLog})
+	if _, err := NewLauncher().Predict(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(envLog); string(got) != "present=false value=" {
+		t.Errorf("predict env log = %q, want no marker", got)
+	}
+}
+
+func TestDelegatedEnv_ReplacesAnInheritedMarkerAndKeepsTheRest(t *testing.T) {
+	got := delegatedEnv([]string{"A=1", "FLYWHEEL_DELEGATED_RUN=old", "B=2"}, "R-3")
+	want := []string{"A=1", "B=2", "FLYWHEEL_DELEGATED_RUN=R-3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("env = %v, want %v", got, want)
 	}
 }

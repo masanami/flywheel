@@ -61,15 +61,15 @@ func (l *Launcher) InvokeJudgment(ctx context.Context, in core.JudgmentLaunchInp
 	}
 
 	args := buildArgs(in)
-	return finishClaudeRun(ctx, claudePath, in.Workspace, in.Workspace, in.RunDir, args, stdin, timeout), nil
+	return finishClaudeRun(ctx, claudePath, in.Workspace, in.Workspace, in.RunDir, args, stdin, timeout, withoutDelegatedMarker(os.Environ())), nil
 }
 
 // finishClaudeRun は claude を args・stdin で起動して待ち、応答を
 // core.JudgmentLaunchOutput へ正規化して、標準入力・標準出力・標準エラーを runDir へ保存する
 // （判断の呼び出しと委譲の起動が共有する）。workDir は子の作業ディレクトリ、workspace は
 // .gitignore の保険の更新先。
-func finishClaudeRun(ctx context.Context, claudePath, workDir, workspace, runDir string, args []string, stdin []byte, timeout time.Duration) core.JudgmentLaunchOutput {
-	res := runClaude(ctx, claudePath, workDir, args, stdin, timeout)
+func finishClaudeRun(ctx context.Context, claudePath, workDir, workspace, runDir string, args []string, stdin []byte, timeout time.Duration, env []string) core.JudgmentLaunchOutput {
+	res := runClaude(ctx, claudePath, workDir, args, stdin, timeout, env)
 
 	var launchErr error
 	if res.launchFailed {

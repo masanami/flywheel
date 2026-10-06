@@ -163,7 +163,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `conflict` | 1 | 本人確認つきの操作で、要約の表示後・確認の書き込みまでの間に対象が変わった |
 | `tty_required` | 1 | 本人確認つきの操作を端末なしで実行した |
 | `confirmation_mismatch` | 1 | 確認の入力が一致しない、または入力が中断された |
-| `verification_rejected` | 1 | 許可していない経路と本人確認の方式の組み合わせ（core の API へ直接要求された場合） |
+| `verification_rejected` | 1 | 許可していない経路と本人確認の方式の組み合わせ（core の API へ直接要求された場合）。M3H13 以降は、委譲の目印（`FLYWHEEL_DELEGATED_RUN`）のある環境からの `help` 以外のコマンドの実行も含む |
 | `config_not_found` | 2 | 取り込み元の宣言ファイル（`.flywheel/sources.json`）が無い（#54。docs/features/m2-github-issue-ingest.md §エラーコードの追加） |
 | `config_invalid` | 2 | 取り込み元の宣言が規則に反する（解釈できない JSON を含む。#54。同上） |
 | `upstream_unavailable` | 2 | 上流へ接続する手段（`gh`）が PATH に無い（#59。同上） |

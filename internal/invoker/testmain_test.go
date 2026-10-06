@@ -29,6 +29,8 @@ func TestMain(m *testing.M) {
 	if os.Getenv(envFakeClaudeMode) == "1" {
 		os.Exit(runFakeClaude())
 	}
+	// 委譲の子が flywheel 自身のリポジトリでテストを回しても落ちないよう、委譲の目印を外す（AC-219d）。
+	_ = os.Unsetenv("FLYWHEEL_DELEGATED_RUN")
 	// AC「テストを除くGoのコードに、claudeの絶対パスを含む環境固有の絶対パスが
 	// 含まれない」「go test ./...は、PATHに本物のclaudeがあっても、それを
 	// 起動しない」を裏付ける: 既定のPATHを空のディレクトリにし、テストが
@@ -65,6 +67,9 @@ type fakeClaudeFixture struct {
 	StdinLogPath string `json:"stdin_log_path"`
 	// CwdLogPath が非空なら、起動時の作業ディレクトリをこのファイルへ書く。
 	CwdLogPath string `json:"cwd_log_path"`
+	// EnvLogPath が非空なら、委譲の目印の環境変数（FLYWHEEL_DELEGATED_RUN）の有無と値を
+	// 「present=<true|false> value=<値>」の1行でこのファイルへ書く。
+	EnvLogPath string `json:"env_log_path"`
 }
 
 func runFakeClaude() int {
@@ -90,6 +95,10 @@ func runFakeClaude() int {
 	if fx.CwdLogPath != "" {
 		wd, _ := os.Getwd()
 		_ = os.WriteFile(fx.CwdLogPath, []byte(wd), 0o644)
+	}
+	if fx.EnvLogPath != "" {
+		v, ok := os.LookupEnv("FLYWHEEL_DELEGATED_RUN")
+		_ = os.WriteFile(fx.EnvLogPath, []byte(fmt.Sprintf("present=%t value=%s", ok, v)), 0o644)
 	}
 	if fx.StdinLogPath != "" {
 		b, _ := io.ReadAll(os.Stdin)

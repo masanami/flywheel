@@ -27,6 +27,11 @@ import (
 	"strings"
 )
 
+// DelegatedRunEnvVar は、委譲の子の環境に invoker だけが渡す目印の環境変数名。値は委譲する
+// run の ID。CLI は、この変数が（空文字でも）設定されている環境からの `help` を除く全コマンドを
+// 拒否する。判断 J1〜J5 と衝突予測の起動には渡さない。
+const DelegatedRunEnvVar = "FLYWHEEL_DELEGATED_RUN"
+
 // DelegateLaunchInput は Store.RunDelegation が DelegationInvoker へ渡す、委譲の
 // 起動 1 回ぶんの情報。ストアのハンドルは含まない。
 type DelegateLaunchInput struct {
@@ -34,6 +39,9 @@ type DelegateLaunchInput struct {
 	SessionID string
 	// Workspace はワークスペース（出力の保存の記録に使う）。
 	Workspace string
+	// RunID はこの委譲の run の ID（"R-7" の形）。invoker が子の環境の目印
+	// （DelegatedRunEnvVar）の値にする。
+	RunID string
 	// WorkDir は委譲の作業ディレクトリ（割り当てたスロットの作業ツリー）。
 	WorkDir string
 	// RunDir は標準出力・標準エラー・渡した入力の保存先（.flywheel/runs/<run の ID>/）。
@@ -711,6 +719,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	launch := DelegateLaunchInput{
 		SessionID:      sessionID,
 		Workspace:      s.workspace,
+		RunID:          assignment.RunID,
 		WorkDir:        assignment.Path,
 		RunDir:         runDirPath(s.workspace, assignment.RunID),
 		OutputSchema:   delegationReportSchema(in.ConnDecl.HumanQuestionKinds),

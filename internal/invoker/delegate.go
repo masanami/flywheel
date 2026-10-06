@@ -18,8 +18,29 @@ import (
 
 // disallowedFlywheelTool は委譲の子へ必ず付ける、flywheel コマンドの Bash での実行を拒否する
 // 指定（M3P46。前方一致のため、絶対パス・`cd <dir> && flywheel`・`env`・`sh -c` などで
-// すり抜けうる残余リスクは M3H12 で受け入れ済み）。
+// すり抜けうる残余リスクは M3H12 で受け入れ済みで、M3H13 の目印〔delegatedEnv〕が二重目の歯止めになる）。
 const disallowedFlywheelTool = "Bash(flywheel:*)"
+
+// delegatedEnv は委譲の子の環境を返す: 親の環境に、委譲の目印（core.DelegatedRunEnvVar=<run の ID>）
+// を足す。親の環境に同名の変数が既にあれば取り除いてから足す（値は常に今の run の ID）。
+// 目印を見て拒否する規則は CLI の入口にあり、ここは付与だけを担う。
+func delegatedEnv(base []string, runID string) []string {
+	return append(withoutDelegatedMarker(base), core.DelegatedRunEnvVar+"="+runID)
+}
+
+// withoutDelegatedMarker は base から委譲の目印を取り除いた環境を返す。判断 J1〜J5 と衝突の予測の
+// 起動は、親の環境に目印があっても子へ渡さない。
+func withoutDelegatedMarker(base []string) []string {
+	prefix := core.DelegatedRunEnvVar + "="
+	env := make([]string, 0, len(base)+1)
+	for _, e := range base {
+		if strings.HasPrefix(e, prefix) {
+			continue
+		}
+		env = append(env, e)
+	}
+	return env
+}
 
 // briefRegionBegin・briefRegionEnd は、J3 の出力（課題に固有の依頼）を囲む区切りの行。
 // 外部由来のデータの区画ではなく、委譲先が従う依頼の本体を示す。
@@ -187,5 +208,5 @@ func (l *Launcher) InvokeDelegation(ctx context.Context, in core.DelegateLaunchI
 			ErrorSummary: fmt.Sprintf("invoker: build stdin: %v", err),
 		}, nil
 	}
-	return finishClaudeRun(ctx, claudePath, in.WorkDir, in.Workspace, in.RunDir, buildDelegateArgs(in), stdin, timeout), nil
+	return finishClaudeRun(ctx, claudePath, in.WorkDir, in.Workspace, in.RunDir, buildDelegateArgs(in), stdin, timeout, delegatedEnv(os.Environ(), in.RunID)), nil
 }
