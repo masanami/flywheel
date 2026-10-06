@@ -17,7 +17,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # PR は Linux だけで回し、main への push で macOS も回す。private リポジトリの
+        # Actions は macOS の分数を 10 倍で数え、PR ごとの 2 OS では Free プランの
+        # 月 2,000 分に数日で届くため（2026-10-06 オーナー決定）。
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
