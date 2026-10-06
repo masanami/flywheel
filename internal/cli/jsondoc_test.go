@@ -624,8 +624,8 @@ func TestDocumentedJSON_EveryRegisteredCommandHasASection(t *testing.T) {
 
 // #86（仕様の仮定。受入基準は無い）: `--auto` の個別の操作（classify・plan）の --json は、cycle の
 // phases の 1 要素と同じ形を {"phase": {…}} で返す（m3-invoker-delegation.md §IF / API
-// 「`cycle` の JSON 出力」の最後の行）。`run` の --json も同じ規則だが、`run` コマンドは S2 で
-// 足すため S1 には存在せず、ここでは検査しない（S2 のチケットが同じ照合を足す）。
+// 「`cycle` の JSON 出力」の最後の行）。`run` の --json も同じ規則で、文書との照合は
+// 上の run の項（assertDocumentedPhase(t, doc, "run", …)）が担う。ここは classify・plan・verify の --auto を回す。
 func TestDocumentedJSON_AutoOperationsReturnAPhaseObject(t *testing.T) {
 	m3SpecLine(t, "`--auto` の個別の操作と `run` の `--json` は", "`{\"phase\": {…}}` で返す")
 	doc := loadDocumentedJSON(t)
@@ -653,6 +653,29 @@ func TestDocumentedJSON_AutoOperationsReturnAPhaseObject(t *testing.T) {
 			assertDocumentedPhase(t, doc, op+" --auto", pm)
 		})
 	}
+
+	// verify --auto は、検証中の課題（直前の委譲の PR とそのチェックが揃ったもの）を対象に J5 を呼ぶ。
+	t.Run("verify", func(t *testing.T) {
+		vws := setupWorkspaceWithPosition(t)
+		newVerifyingForCase(t, vws, true)
+		withFakeGHRoutesOnPATH(t, ghChecksRoutes("open", checkRunsComplete))
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j5Route("met", nil, nil)}, "")
+		out := runJSON(t, vws, "verify", "--auto")
+		if got := keysOf(out); !reflect.DeepEqual(got, map[string]bool{"phase": true}) {
+			t.Fatalf("verify --auto --json top-level keys = %v, want exactly [phase]", sortedKeys(got))
+		}
+		pm, ok := out["phase"].(map[string]any)
+		if !ok {
+			t.Fatalf("verify --auto --json: `phase` is not an object: %#v", out["phase"])
+		}
+		if pm["phase"] != "verify" || pm["skipped"] != false {
+			t.Errorf("phase = %v skipped = %v, want %q and false", pm["phase"], pm["skipped"], "verify")
+		}
+		if items, _ := pm["items"].([]any); len(items) != 1 {
+			t.Fatalf("verify --auto items = %v, want 1 item so that the element shape is compared", pm["items"])
+		}
+		assertDocumentedPhase(t, doc, "verify --auto", pm)
+	})
 }
 
 // addM3SlotClearShape は `slot clear` の成功時の JSON の形を doc へ足す（#101）。

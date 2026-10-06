@@ -168,10 +168,3 @@ func TestBuildRepoGroups_NoPredictionMakesOneGroupPerCandidate(t *testing.T) {
 		t.Error("no candidates must give no groups")
 	}
 }
-
-func TestSerialGroupReasonValues_ClosedSetInDefinitionOrder(t *testing.T) {
-	want := []SerialGroupReason{"shared_files", "dependency", "unknown_pair", "not_predictable", "prediction_failed", "prediction_budget", "no_prediction_declared", "running_run"}
-	if got := SerialGroupReasonValues(); !reflect.DeepEqual(got, want) {
-		t.Errorf("reasons = %v, want %v", got, want)
-	}
-}

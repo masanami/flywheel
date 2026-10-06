@@ -274,6 +274,68 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsSerialized(t 
 	}
 }
 
+// 衝突の予測で 2 課題が別のグループになったときは、後の呼び出しは同じ直列化グループに入らず、
+// 空きスロットが無い（他方のプロセスの run が占めている）ので待たずに slot_unavailable（終了コード 1）
+// で終わる（AC-281。fail-closed で同じグループになる上のテストの serialized は AC-327 が優先）。
+func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIsSlotUnavailable(t *testing.T) {
+	ws := setupRunWorkspace(t)
+	script := filepath.Join(t.TempDir(), "predict.sh")
+	// 共有ファイル・依存が無い予測（2 課題は別のグループになる）。
+	body := "#!/bin/sh\n" +
+		"printf '%s' '{\"schema\":\"harness.conflict-prediction/v1\",\"complete\":true,\"error\":null,\"head_sha\":\"cafe01\",\"cost_usd\":0.1,\"unknown_cost_count\":0," +
+		"\"issues\":[{\"issue\":7,\"status\":\"predicted\"},{\"issue\":9,\"status\":\"predicted\"}]," +
+		"\"pairs\":[{\"issues\":[7,9],\"status\":\"predicted\",\"shared_files\":[],\"dependency\":null}]}'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	conn := strings.Replace(runConnectorsFixture, `{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "operations"`,
+		`{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "conflict_prediction": {"command": ["`+script+`"], "schema": "harness.conflict-prediction/v1"}, "operations"`, 1)
+	conn = strings.Replace(conn, `"remote": "o/flywheel"`, `"remote": "o/r"`, 1)
+	// 予測の口の作業ディレクトリは、clone では idle のスロットだけ（1 本が塞がると予測できず fail-closed で
+	// 同じグループになる）。worktree は元のクローンなので、スロットが 1 本でも塞がっていて予測できる。
+	conn = strings.Replace(conn, `"slots": {"provider": "clone", "paths": ["slot-f"]}`, `"slots": {"provider": "worktree", "base": "slot-f", "count": 1}`, 1)
+	slotGit(t, filepath.Join(ws, "slot-f"), "remote", "set-url", "origin", "https://github.com/o/r.git")
+	writeConnectorsJSONForTest(t, ws, conn)
+	mut := func(m map[string]any) { m["repo"] = "flywheel-repo"; m["operation"] = "impl-op" }
+	a := newInProgressForRun(t, ws, mut)
+	b := newInProgressForRun(t, ws, mut)
+	bindChallengeToIssue(t, ws, a, 7, 2, "2026-09-25T09:00:00Z")
+	bindChallengeToIssue(t, ws, b, 9, 0, "2026-09-25T09:00:00Z")
+	withFakeGHRoutesOnPATH(t, append(j2GHRoutes(t), fakeGHRoute{match: "repos/o/r/issues/9/comments?per_page=100&page=1", stdout: "[]"}))
+	started := filepath.Join(t.TempDir(), "started")
+	route := delegateRoute("completed")
+	route.SleepFirstSeconds = 6 // 後続が予測の口と gh を通る間も、先行がスロットを持ち続ける余裕
+	route.StartedFile = started
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{route, j3Route("b")}, "")
+
+	type result struct {
+		code   int
+		stderr string
+	}
+	runOne := func(id string) result {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"run", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+		return result{code, stderr.String()}
+	}
+	var wg sync.WaitGroup
+	results := make([]result, 2)
+	wg.Add(1)
+	go func() { defer wg.Done(); results[0] = runOne(a) }()
+	waitForFileWithTimeout(t, started, 30*time.Second)
+	results[1] = runOne(b) // 最初の委譲がスロットを持っている間に起動する
+	wg.Wait()
+
+	if results[0].code != 0 {
+		t.Errorf("first: exit=%d stderr=%s", results[0].code, results[0].stderr)
+	}
+	if results[1].code != 1 || !strings.Contains(results[1].stderr, `"slot_unavailable"`) {
+		t.Errorf("second: exit=%d stderr=%s, want exit 1 slot_unavailable", results[1].code, results[1].stderr)
+	}
+	if n := len(delegateRunsOf(t, ws)); n != 1 {
+		t.Errorf("delegate runs = %d, want 1", n)
+	}
+}
+
 func TestRun_DirtySlot_NeedsAttentionAndSlotUnavailable(t *testing.T) {
 	ws := setupRunWorkspace(t)
 	id := newInProgressForRun(t, ws, nil)

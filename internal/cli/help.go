@@ -20,7 +20,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   classify (<ID> --priority <P0|P1|P2> | --auto [<C-ID>])
   plan (<ID> (--file <path> | --stdin) | --auto [<C-ID>])
   submit <ID>
-  verify <ID> --result <met|not_met|uncertain> [--question <q>]
+  verify (<ID> --result <met|not_met|uncertain> [--question <q>] | --auto [<C-ID>])
   hold <ID> [--question <q>]
   answer <ID> --answer <a>
   approve <ID> [--hold-release]
