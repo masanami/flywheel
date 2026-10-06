@@ -187,7 +187,7 @@ func lookupApprovedPlan(ctx context.Context, tx *sql.Tx, challengeID int64) (p a
 		return approvedPlan{}, planGapNoApproval, "計画の承認が無い", nil
 	}
 	if last.PlanVersion == nil || *last.PlanVersion <= 0 {
-		return approvedPlan{}, planGapNoVersion, "承認に計画の版が無い（承認し直しが必要）", nil
+		return approvedPlan{}, planGapNoVersion, "承認に計画の版が無い（課題の作り直しが必要）", nil
 	}
 	plans, err := loadPlans(ctx, tx, challengeID)
 	if err != nil {
@@ -513,7 +513,7 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if err != nil {
 		return nil, err
 	}
-	res.NotStarted = append(skipped, res.NotStarted...)
+	res.NotStarted = append(append(skipped, plan.notStarted...), res.NotStarted...)
 	return res, nil
 }
 

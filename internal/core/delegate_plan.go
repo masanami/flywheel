@@ -39,6 +39,8 @@ var delegationWaitInterval = slotWaitInterval
 // delegationPlan は委譲の段の実行計画。
 type delegationPlan struct {
 	groups []plannedGroup
+	// notStarted は、承認済みなのに委譲の候補にできなかった課題（理由つき。黙って除外しない）。
+	notStarted []NotStarted
 }
 
 func (p *delegationPlan) serialGroups() []SerialGroup {
@@ -68,13 +70,13 @@ type planOne struct {
 }
 
 // loadPlanCandidate は課題 cid を委譲の候補として計画に載せるための事実を読む。承認済みの計画が
-// 今の宣言と合わない（委譲できない）課題は ok=false。
-func (s *Store) loadPlanCandidate(ctx context.Context, in DelegateInput, cid int64) (planOne, bool, error) {
+// 今の宣言と合わない（委譲できない）課題は ok=false で、reason に人が読む理由を返す。
+func (s *Store) loadPlanCandidate(ctx context.Context, in DelegateInput, cid int64) (one planOne, ok bool, reason string, err error) {
 	var ch *Challenge
 	var plan approvedPlan
 	var planOK bool
 	var binding *sourceBinding
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+	err = s.db.Read(ctx, func(tx *sql.Tx) error {
 		var err error
 		if ch, err = loadChallenge(ctx, tx, cid); err != nil {
 			return err
@@ -86,21 +88,25 @@ func (s *Store) loadPlanCandidate(ctx context.Context, in DelegateInput, cid int
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
-		return planOne{}, false, err
+		return planOne{}, false, "", err
 	}
 	if ch == nil || !planOK {
-		return planOne{}, false, nil
+		return planOne{}, false, "承認済みの計画を引けない", nil
 	}
-	validated, ok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: binding != nil})
-	if !ok || validated.Verdict != J2VerdictPlan {
-		return planOne{}, false, nil
+	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: binding != nil})
+	if !vok {
+		return planOne{}, false, "承認済みの計画の構造化した出力が今の宣言と合わない", nil
 	}
-	repo, connector := in.ConnDecl.findConnectorRepo(validated.Repo)
-	if repo == nil || connector == nil {
-		return planOne{}, false, nil
+	if validated.Verdict != J2VerdictPlan {
+		return planOne{}, false, "承認済みの計画の verdict が plan でない", nil
+	}
+	// validateJ2Output が、リポジトリと接続ツールが宣言にあることまで検査済み。
+	repo, _ := in.ConnDecl.findConnectorRepo(validated.Repo)
+	if repo == nil {
+		return planOne{}, false, "承認済みの計画のリポジトリが今の宣言に無い", nil
 	}
 	c := planCandidate{ID: ch.ID, Rank: priorityRank(ch.Priority), Seq: cid, Issue: sourceIssueNumber(binding, repo.Remote)}
-	return planOne{cand: c, repo: repo.Name}, true, nil
+	return planOne{cand: c, repo: repo.Name}, true, "", nil
 }
 
 // sourceIssueNumber は取り込み元の対応から予測の口へ渡せる Issue 番号を返す（渡せなければ 0）。
@@ -316,22 +322,25 @@ func reasonIndex(r SerialGroupReason) int {
 
 // planDelegation は targets（課題の内部整数 ID）の委譲の実行計画を作る: 候補をリポジトリごとに
 // 集め、実行中の課題を読み、予測の口を呼び、直列化グループを決める。委譲できない課題
-// （承認済みの計画が宣言と合わない）は候補にしない。
+// （承認済みの計画が宣言と合わない）は候補にせず、理由つきで plan.notStarted に載せる。
 func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []int64) (*delegationPlan, error) {
 	if err := s.ReapInterruptedRuns(ctx); err != nil {
 		return nil, err
 	}
 	byRepo := map[string][]planCandidate{}
+	var notStarted []NotStarted
 	for _, cid := range targets {
-		one, ok, err := s.loadPlanCandidate(ctx, in, cid)
+		one, ok, reason, err := s.loadPlanCandidate(ctx, in, cid)
 		if err != nil {
 			return nil, err
 		}
 		if ok {
 			byRepo[one.repo] = append(byRepo[one.repo], one.cand)
+		} else {
+			notStarted = append(notStarted, NotStarted{ChallengeID: formatChallengeID(cid), Reason: NotStartedPlanUnavailable, Detail: reason})
 		}
 	}
-	plan := &delegationPlan{}
+	plan := &delegationPlan{notStarted: notStarted}
 	if len(byRepo) == 0 {
 		return plan, nil
 	}
@@ -351,7 +360,11 @@ func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []
 		}
 		if err := s.EnsureSlots(ctx, repo); err != nil {
 			if errors.Is(err, ErrValidation) {
-				continue // 委譲できない（従来どおり、この課題は起動せずに飛ばす）
+				// 委譲できない。起動せずに飛ばすが、黙って除外せず理由つきで返す。
+				for _, c := range cands {
+					plan.notStarted = append(plan.notStarted, NotStarted{ChallengeID: c.ID, Reason: NotStartedPlanUnavailable, Detail: err.Error()})
+				}
+				continue
 			}
 			return nil, err
 		}
