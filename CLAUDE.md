@@ -50,7 +50,7 @@
 
 ```
 入口は make check の 1 つ。次の 5 つを順に実行し、1 つでも失敗すれば非 0 で終わる。
-PR ごとの CI（ubuntu-latest / macos-latest）も同じ make check を実行する。
+CI も同じ make check を実行する（PR は ubuntu-latest だけ、main への push は ubuntu-latest / macos-latest。macOS の Actions の分数は 10 倍で数えられるため）。
 
 1. 整形      gofmt -l .                              出力が空
 2. 静的検査  go vet ./...                            終了コード 0
