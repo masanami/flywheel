@@ -117,7 +117,7 @@ func TestRunDelegation_ChallengeApprovedThroughTheApprovalAPIIsDelegatedWithTheA
 }
 
 // 完了条件: 承認済みなのに委譲できない課題は、黙って除外せず not_started に理由つきで出る。
-// 計画の版を持たない既存の承認の行は委譲せず、承認し直しが必要な旨を示す。
+// 計画の版を持たない既存の承認の行は委譲せず、作り直しが必要な旨を示す。
 func TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothingLaunched(t *testing.T) {
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "legacy", "P1", planSpec(nil))
@@ -137,7 +137,7 @@ func TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothing
 		t.Fatalf("items = %+v not_started = %+v, want one not_started", res.Items, res.NotStarted)
 	}
 	ns := res.NotStarted[0]
-	if ns.ChallengeID != id || ns.Reason != NotStartedPlanUnavailable || !strings.Contains(ns.Detail, "承認し直し") {
+	if ns.ChallengeID != id || ns.Reason != NotStartedPlanUnavailable || !strings.Contains(ns.Detail, "作り直し") {
 		t.Errorf("not_started = %+v, want %s plan_unavailable with a re-approve hint", ns, id)
 	}
 	if len(f.j3Inputs) != 0 {
@@ -176,7 +176,7 @@ func TestRunDelegation_ApprovedPlanWithoutSpec_NotStartedWithReason(t *testing.T
 	}
 }
 
-// ID を指定した run も、承認に計画の版が無い理由（承認し直しが必要）を示す。
+// ID を指定した run も、承認に計画の版が無い理由（作り直しが必要）を示す。
 func TestRunDelegation_ExplicitID_ApprovalWithoutPlanVersion_ErrorNamesTheReason(t *testing.T) {
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "legacy", "P1", planSpec(nil))
@@ -188,7 +188,41 @@ func TestRunDelegation_ExplicitID_ApprovalWithoutPlanVersion_ErrorNamesTheReason
 		t.Fatal(err)
 	}
 	_, err := f.run(t, &id)
-	if !errors.Is(err, ErrValidation) || !strings.Contains(err.Error(), "承認し直し") {
+	if !errors.Is(err, ErrValidation) || !strings.Contains(err.Error(), "作り直し") {
 		t.Fatalf("err = %v, want ErrValidation naming the re-approval need", err)
+	}
+}
+
+// 完了条件: 承認済みの計画が今の宣言と合わない・verdict が plan でない課題は、候補から黙って
+// 除外せず、理由つきで not_started（plan_unavailable）に出る。
+func TestRunDelegation_ApprovedPlanNotDelegatable_NotStartedWithReason(t *testing.T) {
+	cases := []struct {
+		name string
+		spec string
+		want string
+	}{
+		{"unknown repo", planSpec(func(m map[string]any) { m["repo"] = "no-such-repo" }), "今の宣言と合わない"},
+		{"not a structured output", `{"verdict":"plan"}`, "今の宣言と合わない"},
+		{"verdict is not plan", `{"verdict":"uncertain","question":"Q?"}`, "verdict が plan でない"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDelegateFixture(t)
+			id := f.newInProgress(t, "x", "P1", tc.spec)
+			res, err := f.run(t, nil)
+			if err != nil {
+				t.Fatalf("RunDelegation: %v", err)
+			}
+			if len(res.Items) != 0 || len(res.NotStarted) != 1 {
+				t.Fatalf("items = %+v not_started = %+v, want one not_started", res.Items, res.NotStarted)
+			}
+			ns := res.NotStarted[0]
+			if ns.ChallengeID != id || ns.Reason != NotStartedPlanUnavailable || ns.Detail == "" || !strings.Contains(ns.Detail, tc.want) {
+				t.Errorf("not_started = %+v, want %s plan_unavailable with a detail containing %q", ns, id, tc.want)
+			}
+			if len(f.j3Inputs) != 0 {
+				t.Error("J3 must not start")
+			}
+		})
 	}
 }

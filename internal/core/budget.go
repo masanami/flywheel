@@ -409,6 +409,8 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 		if err != nil {
 			return err
 		}
+		// 予算の承認は target_version に計画の版を持ち、approval.plan_version は NULL のまま
+		// （計画の承認は target_version に課題の版を持ち、plan_version に計画の版を持つ）。
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at)
 			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?)`,

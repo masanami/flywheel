@@ -388,7 +388,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 ## 技術的な制約・方針
 
 - 使用技術: Go（M1・M2 と同じ）。本番の依存の上限（標準ライブラリ・`modernc.org/sqlite`・`golang.org/x/term`）を変えない。Anthropic の SDK・GitHub のクライアントライブラリを足さない（`claude`・`gh` を子プロセスで呼ぶため）。
-- 変更対象: `internal/core`（判断点の出力の写像・run・周・ロック・スロット・予算の評価・意思決定の主体の判定・照合の規則・宣言の検証）、`internal/core/internal/store`（マイグレーション `0004`〔S1〕・`0005`〔S2〕）、`internal/cli`（`cycle`・`run`・`runs`・`classify --auto`・`plan --auto`・`verify --auto`・`slot clear`・`budget`・`status`／`show` の拡張）、**新設** `internal/invoker`（`claude` の起動と応答の正規化・指示文と雛形・出力スキーマ）、`internal/adapters/github`（上流のコメント・参照先の Issue・PR・CI の取得を足す。すべて GET）、**新設** `internal/adapters/git`（スロットの作業ツリーの検査。S2）【決定 2026-09-28 親 M3P2】。
+- 変更対象: `internal/core`（判断点の出力の写像・run・周・ロック・スロット・予算の評価・意思決定の主体の判定・照合の規則・宣言の検証）、`internal/core/internal/store`（マイグレーション `0004`〔S1〕・`0005`〔S2〕・`0006`〔S2。承認の計画の版〕）、`internal/cli`（`cycle`・`run`・`runs`・`classify --auto`・`plan --auto`・`verify --auto`・`slot clear`・`budget`・`status`／`show` の拡張）、**新設** `internal/invoker`（`claude` の起動と応答の正規化・指示文と雛形・出力スキーマ）、`internal/adapters/github`（上流のコメント・参照先の Issue・PR・CI の取得を足す。すべて GET）、**新設** `internal/adapters/git`（スロットの作業ツリーの検査。S2）【決定 2026-09-28 親 M3P2】。
 - **import の向き**: `internal/core` は `internal/invoker`・`internal/adapters` を import しない。core は判断の呼び出し・委譲・上流の取得・スロットの検査の IF を定義し、invoker と adapter がそれを実装する（M2 の取得の IF と同じ形）。`internal/invoker` と `internal/adapters/*` はストアのパッケージを import しない。`internal/cli` が invoker と adapter を組み立てて core へ渡す。
 - `CLAUDE.md` の「M1・M2 で置くパッケージ」の表は、`internal/invoker`・`internal/adapters/git` を足す実装チケットで同時に更新する（本仕様の PR では変えない）。
 
@@ -446,6 +446,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
     - `run_artifact`: `run_id`・`kind`（`branch | pr | commit`）・`ref`・`state`（PR は `open | closed | merged`）・`base`・`verified_at`。
     - `task_plan` の実装枠・レビュー対応枠の額の上書き（`flywheel budget`）を記録する列、または表（実装で決めてよい）。
     - 衝突の予測の呼び出しの記録【決定 2026-10-01 オーナー M3H10】: `run.kind` に `predict`、`budget_bucket` に `predict` を足し、`run` に `repo`（NULL 可。`predict` の run では必須）を足す。`predict` の run は `challenge_id`・`challenge_version`・`plan_version`・`session_id` を NULL とし、`pid`・`host`・`heartbeat_at` は他の run と同じく持つ（中断の回収を共有する）。`result` は `succeeded | launch_failed | timed_out | malformed | errored | interrupted` のいずれかで、`errored` は §実行スロットの「呼び出し全体の失敗」のうち起動・時間・解釈の失敗以外のものを表す（§結果の判別の表は `claude` の出力の判別なので適用しない）。費用は §予算ガードの衝突の予測の 2 項目に従い、`cost_source` は `cost_usd` を数えたら `reported`、渡した上限額を数えたら `unknown`（§費用の記録の `delta` は適用しない）。出力の JSON は `.flywheel/runs/<run の ID>/` に保存する。
+  - マイグレーション `0006`（スキーマ版 5 → 6。S2）【決定 B 2026-10-06 オーナー】で `approval` に `plan_version`（NULL 可）を足す。計画の承認が、承認した計画の版（`task_plan.version`）を記録する。`target_version` は課題の版のまま変えない。委譲は `target_version` ではなく承認の `plan_version` で計画を引く。予算の承認（`kind=budget`）は `target_version` に計画の版を持ち、`plan_version` は NULL のまま（承認の種類ごとに意味が違う）。計画の版を持たない既存の承認の行は NULL のままにし、推測で計画を割り当てない。そのような承認で着手中・検証中になった課題は、再承認の遷移（着手中 → 計画承認待ち）も版を補うマイグレーションも持たず、**課題を作り直す運用**とする【決定 C 2026-10-06 オーナー】。委譲は `not_started`（`plan_unavailable`）に作り直しが必要な旨を理由つきで出す。着手中から計画を改訂する遷移は M3P39 で扱い、ここではスコープ外とする。
   - 金額は USD の 100 万分の 1 を単位とする整数で持つ（和の誤差を避ける）【仮定】。JSON 出力では USD の数値に戻す。
   - `run`・`cycle`・`lock`・`slot` の書き込みは作業ログ（`activity`）に載せない（それ自体が実行の記録である）。課題・計画・保留・承認・不可逆操作の変更は M1 どおり作業ログに載せ、原因の run があれば `run_id` を持つ【決定 2026-09-28 親 M3P11】。
 - **理由**: 設計書 §6 の `run`・`cycle`・`slot`・`lock` を、M1 H1（使う段階で足す）どおり S1・S2 に分けて足す。`run` を判断の呼び出しと委譲で 1 つの表にすると、周の予約額・既消費額・課題ごとの排他を 1 つの問い合わせで評価できる。`challenge_version` を持てば、J1 の `not_mine` の除外（版が変われば再び対象）を別の列なしに導ける。
@@ -669,7 +670,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 - `phase` は `ingest | classify | plan | run | verify` の閉集合（S1 は前の 3 つ）。`ingest` の `result` は M2 の `ingest --json` と同じ形（`.flywheel/sources.json` が無ければ `skipped: true`・`result: null`）。`plan`・`run`・`verify` の段は `.flywheel/connectors.json` が無ければ `skipped: true`・`items: []`・`not_started: []`。どの段も `skipped` を持つ。
 - `items[].outcome` は判断点の判定（J1・J2・J5）か委譲の結末。`items[].status` は写した後の課題の状態（写さなかったら `null`）。
-- `not_started[].reason` は `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | waiting_external | plan_unavailable` の閉集合（S1 は `cycle_budget | rate_limited | upstream_fetch_failed`。`serialized` は S2 で、【決定 2026-10-01 親 M3P31】。`waiting_external` は S2 で、【決定 2026-10-01 親 M3P42】）。 `plan_unavailable` は、計画の承認が済んでいるのに承認済みの計画を引けない課題（承認に計画の版が無い〔承認し直しが必要〕・版の計画が無い・構造化した出力が無い）を `run` が黙って除外しないための値で、理由は `Detail`（テキスト出力）に付く【決定 2026-10-06 #143 オーナー・承認に計画の版を記録する（`approval.plan_version`・マイグレーション 0006）】。
+- `not_started[].reason` は `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | waiting_external | plan_unavailable` の閉集合（S1 は `cycle_budget | rate_limited | upstream_fetch_failed`。`serialized` は S2 で、【決定 2026-10-01 親 M3P31】。`waiting_external` は S2 で、【決定 2026-10-01 親 M3P42】）。 `plan_unavailable` は、計画の承認が済んでいるのに承認済みの計画を引けない課題（承認に計画の版が無い〔課題の作り直しが必要。再承認の遷移もマイグレーションによる版の補完も持たない〕・版の計画が無い・構造化した出力が無い）と、承認済みの計画が今の宣言と合わない課題（構造化した出力が宣言と合わない・verdict が `plan` でない・リポジトリや接続ツールが宣言に無い）を `run` が黙って除外しないための値で、理由は `Detail`（テキスト出力）に付く【決定 2026-10-06 #143 オーナー・承認に計画の版を記録する（`approval.plan_version`・マイグレーション 0006）】。
 - `run` の段（S2）は `serial_groups: [{"repo", "challenges": [<C-ID>…], "reasons": [<理由>…], "prediction_head_sha": string|null}]` を持つ。`challenges` は、実行中の課題を先頭に、続けて委譲の候補を起動の順に並べる。`reasons` は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | running_run` の閉集合で、この定義順に重複なく並べる【仮定: キー名と理由の名前】。1 件だけのグループも載せる。`reasons` は、そのグループが成立した規則に対応する理由の和集合であり、予測の結果だけで 1 件になったグループ（実行中の課題を含まず、fail-closed の規則にも当たらないもの。予測の口を呼ばなかった候補も含む）だけが `[]` になる。委譲の段が `skipped: true` なら `serial_groups` は `[]`。`prediction_head_sha` は予測の口を呼んで `head_sha` を得たときだけ `null` でない。規則と理由の対応: 共有ファイルを持つ組→`shared_files`／`dependency.first` のある組→`dependency`／`unknown` の組→`unknown_pair`／取り込み元の対応が無い候補・Issue 番号を渡せない実行中の課題・20 件を超えて口を呼ばなかった→`not_predictable`／口の呼び出し全体の失敗・`idle` の作業用クローンが無く口を呼べなかった・`issues[].status` が `failed`→`prediction_failed`／`issues[].status` が `budget_exhausted`・周の上限で口を呼べなかった→`prediction_budget`／口の宣言が無い→`no_prediction_declared`／実行中の課題を含む→`running_run`。
 - `--auto` の個別の操作と `run` の `--json` は、`cycle` の `phases` の 1 要素と同じ形を `{"phase": {…}}` で返す【仮定】。
 
@@ -1238,6 +1239,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 
 - [ ] スキーマ版 4 のストアを開くと、スキーマ版が 5 になる
 - [ ] スキーマ版 4 のストアを開いた後も、既存の課題・計画・承認・保留・作業ログ・対応の記録・run・周の記録が保持される（件数と内容の一致で検証する）
+- [ ] 【AC-371a】スキーマ版 5 のストアを開くとスキーマ版が 6 になり、既存の承認の `plan_version` は NULL のまま、計画の承認は新しく `plan_version` を記録する
 - [ ] `internal/core` は `internal/adapters/git` を import せず、`internal/adapters/git` はストアのパッケージを import しない（`go list` の依存関係で検査する）
 - [ ] `go test ./...` は、PATH に本物の `claude`・`gh`・`harness` があっても、それらを起動しない
 

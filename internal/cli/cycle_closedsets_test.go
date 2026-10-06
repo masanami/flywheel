@@ -114,7 +114,7 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"failure_limit": "TestFailureLimit_ReachedHoldsWithKindAndCountAndReportsNotStarted (internal/core/delegate_resume_test.go)",
 		"rework_limit":  "TestRework_LimitIsDetectedInTheNextCycle_TwoStillLaunch (internal/core/judgment_j5_test.go)",
 		"serialized":    "TestPlan_RunningInSameGroup_Serialized_OtherGroupStarts (internal/core/delegate_plan_test.go)",
-		// 計画の版を持たない承認の行（承認し直しが必要）は、core のテストが実際の対象の選択で観測する。
+		// 計画の版を持たない承認の行（作り直しが必要）は、core のテストが実際の対象の選択で観測する。
 		"plan_unavailable": "TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothingLaunched (internal/core/delegate_plan_approval_test.go)",
 	}
 	observed := map[string]bool{}
