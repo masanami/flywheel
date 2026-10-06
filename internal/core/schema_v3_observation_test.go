@@ -86,8 +86,8 @@ func TestOpenWorkspace_UpgradesSchemaVersion2StoreToVersion3WithDefaults(t *test
 	// フィクスチャは v2OnlyMigrationsForTest で v3 相当まで作るための前提で
 	// あり、v2 → v3 の観測値のテストの主眼は変わらない。OpenWorkspace は
 	// 最新版まで適用するため実際の版は 4 になる。AC-165 は #78 が検証する）。
-	if got := schemaVersionForTest(t, s); got != 5 {
-		t.Fatalf("schema version = %d, want 5 (AC-151 + AC-165 + AC-370)", got)
+	if got := schemaVersionForTest(t, s); got != 6 {
+		t.Fatalf("schema version = %d, want 6 (AC-151 + AC-165 + AC-370)", got)
 	}
 
 	detail, err := s.GetChallenge(context.Background(), "C-1")

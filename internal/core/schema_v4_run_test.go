@@ -111,8 +111,8 @@ func TestOpenWorkspace_UpgradesSchemaVersion3StoreToVersion4(t *testing.T) {
 
 	// AC-165: 版が 4 になる（0005 を足した後は OpenWorkspace が最新版の 5 まで
 	// 適用する。版 5 への移行は schema_v5_slot_test.go が検証する）。
-	if got := schemaVersionForTest(t, s); got != 5 {
-		t.Fatalf("schema version = %d, want 5 (AC-165 + AC-370)", got)
+	if got := schemaVersionForTest(t, s); got != 6 {
+		t.Fatalf("schema version = %d, want 6 (AC-165 + AC-370)", got)
 	}
 
 	// AC-166: 既存の課題・計画・承認・保留・作業ログ・対応の記録が件数と

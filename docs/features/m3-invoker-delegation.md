@@ -669,7 +669,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 - `phase` は `ingest | classify | plan | run | verify` の閉集合（S1 は前の 3 つ）。`ingest` の `result` は M2 の `ingest --json` と同じ形（`.flywheel/sources.json` が無ければ `skipped: true`・`result: null`）。`plan`・`run`・`verify` の段は `.flywheel/connectors.json` が無ければ `skipped: true`・`items: []`・`not_started: []`。どの段も `skipped` を持つ。
 - `items[].outcome` は判断点の判定（J1・J2・J5）か委譲の結末。`items[].status` は写した後の課題の状態（写さなかったら `null`）。
-- `not_started[].reason` は `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | waiting_external` の閉集合（S1 は `cycle_budget | rate_limited | upstream_fetch_failed`。`serialized` は S2 で、【決定 2026-10-01 親 M3P31】。`waiting_external` は S2 で、【決定 2026-10-01 親 M3P42】）。
+- `not_started[].reason` は `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | waiting_external | plan_unavailable` の閉集合（S1 は `cycle_budget | rate_limited | upstream_fetch_failed`。`serialized` は S2 で、【決定 2026-10-01 親 M3P31】。`waiting_external` は S2 で、【決定 2026-10-01 親 M3P42】）。 `plan_unavailable` は、計画の承認が済んでいるのに承認済みの計画を引けない課題（承認に計画の版が無い〔承認し直しが必要〕・版の計画が無い・構造化した出力が無い）を `run` が黙って除外しないための値で、理由は `Detail`（テキスト出力）に付く【決定 2026-10-06 #143 オーナー・承認に計画の版を記録する（`approval.plan_version`・マイグレーション 0006）】。
 - `run` の段（S2）は `serial_groups: [{"repo", "challenges": [<C-ID>…], "reasons": [<理由>…], "prediction_head_sha": string|null}]` を持つ。`challenges` は、実行中の課題を先頭に、続けて委譲の候補を起動の順に並べる。`reasons` は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | running_run` の閉集合で、この定義順に重複なく並べる【仮定: キー名と理由の名前】。1 件だけのグループも載せる。`reasons` は、そのグループが成立した規則に対応する理由の和集合であり、予測の結果だけで 1 件になったグループ（実行中の課題を含まず、fail-closed の規則にも当たらないもの。予測の口を呼ばなかった候補も含む）だけが `[]` になる。委譲の段が `skipped: true` なら `serial_groups` は `[]`。`prediction_head_sha` は予測の口を呼んで `head_sha` を得たときだけ `null` でない。規則と理由の対応: 共有ファイルを持つ組→`shared_files`／`dependency.first` のある組→`dependency`／`unknown` の組→`unknown_pair`／取り込み元の対応が無い候補・Issue 番号を渡せない実行中の課題・20 件を超えて口を呼ばなかった→`not_predictable`／口の呼び出し全体の失敗・`idle` の作業用クローンが無く口を呼べなかった・`issues[].status` が `failed`→`prediction_failed`／`issues[].status` が `budget_exhausted`・周の上限で口を呼べなかった→`prediction_budget`／口の宣言が無い→`no_prediction_declared`／実行中の課題を含む→`running_run`。
 - `--auto` の個別の操作と `run` の `--json` は、`cycle` の `phases` の 1 要素と同じ形を `{"phase": {…}}` で返す【仮定】。
 
@@ -1231,7 +1231,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] `slot_unavailable` は終了コード 1 で終わる（M1 のエラーコードの表の全行の検証に足す）
 - [ ] `serialized` は終了コード 1 で終わる（M1 のエラーコードの表の全行の検証に足す）【決定 2026-10-01 親 M3P43】
 - [ ] 実装が出しうるエラーコードの集合は、S1 の集合に `slot_unavailable`・`serialized` を足した集合と一致する（双方向の照合を更新して検証する）
-- [ ] `cycle --json` の `not_started[].reason` の値は、S2 では `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | waiting_external` の閉集合に限られる（テストで双方向に照合する）
+- [ ] `cycle --json` の `not_started[].reason` の値は、S2 では `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | waiting_external | plan_unavailable` の閉集合に限られる（テストで双方向に照合する）
 - [ ] `serial_groups[].reasons` の値は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | running_run` の閉集合に限られる（テストで双方向に照合する）
 
 ### ストアと構造（S2）

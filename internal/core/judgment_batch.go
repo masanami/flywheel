@@ -30,6 +30,11 @@ const NotStartedUpstreamFetchFailed NotStartedReason = "upstream_fetch_failed"
 // （NotStartedReasonValues）に含まれる。
 const NotStartedSlotUnavailable NotStartedReason = "slot_unavailable"
 
+// NotStartedPlanUnavailable は、計画の承認が済んでいるのに承認済みの計画を引けず（承認に計画の版が
+// 無い・版の計画が無い・構造化した出力が無い）委譲を起動しなかったことを表す。理由は Detail に付く。
+// `cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
+const NotStartedPlanUnavailable NotStartedReason = "plan_unavailable"
+
 // notStartedReasonValues は NotStartedReason の閉集合（仕様の列挙の順）。
 var notStartedReasonValues = []NotStartedReason{
 	NotStartedCycleBudget,
@@ -41,6 +46,7 @@ var notStartedReasonValues = []NotStartedReason{
 	NotStartedUpstreamFetchFailed,
 	NotStartedSerialized,
 	NotStartedWaitingExternal,
+	NotStartedPlanUnavailable,
 }
 
 // NotStartedReasonValues は NotStartedReason の閉集合（§IF / API「cycle の JSON 出力」の
