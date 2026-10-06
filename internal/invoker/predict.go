@@ -135,7 +135,7 @@ func (l *Launcher) Predict(ctx context.Context, in core.PredictLaunchInput) (cor
 		return core.PredictLaunchOutput{Result: core.RunResultLaunchFailed, ErrorSummary: fmt.Sprintf("invoker: create run dir: %v", err)}, nil
 	}
 
-	res := runClaude(ctx, path, in.WorkDir, buildPredictArgs(in.Command, in.MaxBudgetUSD, in.Issues), nil, timeout)
+	res := runClaude(ctx, path, in.WorkDir, buildPredictArgs(in.Command, in.MaxBudgetUSD, in.Issues), nil, timeout, withoutDelegatedMarker(os.Environ()))
 
 	out := core.PredictLaunchOutput{RawOutput: res.stdout}
 	switch {

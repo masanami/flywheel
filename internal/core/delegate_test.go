@@ -619,6 +619,19 @@ func TestRunDelegation_LaunchInput_WorkDirPermissionModeBriefInvocationBudget(t 
 	if ins[1].Invocation != "" {
 		t.Errorf("a brief-form operation must not carry an invocation, got %q", ins[1].Invocation)
 	}
+	// 目印（FLYWHEEL_DELEGATED_RUN）の値になる run の ID が、記録した run の ID と一致する。
+	runIDs := map[string]bool{}
+	for _, r := range f.delegateRuns(t) {
+		runIDs[r.ID] = true
+	}
+	for i, in := range ins {
+		if !runIDs[in.RunID] {
+			t.Errorf("launch %d RunID = %q, want one of the recorded run IDs %v", i, in.RunID, runIDs)
+		}
+	}
+	if ins[0].RunID == ins[1].RunID {
+		t.Errorf("launches share RunID %q", ins[0].RunID)
+	}
 	for i, in := range ins {
 		if in.MaxBudgetUSD != 50 { // サイズ M の実装枠の既定
 			t.Errorf("launch %d MaxBudgetUSD = %v, want 50", i, in.MaxBudgetUSD)

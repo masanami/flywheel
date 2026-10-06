@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
@@ -26,6 +27,10 @@ const (
 )
 
 func TestMain(m *testing.M) {
+	// 委譲の子（flywheel 自身のリポジトリで make check を回す子）の環境に目印があっても、
+	// テストが落ちないよう、最初に外す（confirmChildEnv が CLAUDECODE を外すのと同じ前例）。
+	// 目印の拒否そのものを検査するテストは、t.Setenv で自分の範囲だけに設定する。
+	_ = os.Unsetenv(core.DelegatedRunEnvVar)
 	if os.Getenv(busyHelperEnvVar) == "1" {
 		busyHolderMain()
 		return

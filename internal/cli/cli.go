@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
@@ -25,13 +26,21 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 func run(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands []Command) int {
 	jsonMode := scanJSONFlag(rawArgs)
 
-	if len(rawArgs) == 0 {
-		return failUsage(stderr, jsonMode, "コマンドを指定してください")
-	}
-
-	if isHelpInvocation(rawArgs[0]) {
+	if len(rawArgs) > 0 && isHelpInvocation(rawArgs[0]) {
 		_, _ = fmt.Fprint(stdout, usageText)
 		return 0
+	}
+
+	// 委譲の子の環境（core.DelegatedRunEnvVar が、空文字でも設定されている）からは、`help` を
+	// 除くすべてのコマンドを、コマンドの照合より前に拒否する（読み取りも含む。fail-closed）。
+	// 値はメッセージに出すだけで、判定には使わない。
+	if runID, delegated := os.LookupEnv(core.DelegatedRunEnvVar); delegated {
+		return failErr(stderr, jsonMode, NewError(CodeVerificationRejected, fmt.Sprintf(
+			"委譲の子の環境（%s=%q）からは flywheel のコマンドを実行できない", core.DelegatedRunEnvVar, runID)))
+	}
+
+	if len(rawArgs) == 0 {
+		return failUsage(stderr, jsonMode, "コマンドを指定してください")
 	}
 
 	cmd, rest, ok := matchCommand(rawArgs, commands)
