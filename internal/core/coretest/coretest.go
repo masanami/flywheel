@@ -435,3 +435,32 @@ func InsertRunArtifact(t *testing.T, workspace string, runID int64, kind, ref, s
 		t.Fatalf("coretest: InsertRunArtifact: %v", err)
 	}
 }
+
+// SetPlanSpec はテスト専用のフィクスチャとして、課題（内部整数 ID）の計画の版 version に構造化した出力
+// （spec）を付ける（人が `plan --file` で登録した計画は spec を持たないため、本物の承認の経路で
+// 承認した計画を委譲の対象にするのに使う）。
+func SetPlanSpec(t *testing.T, workspace string, challengeID, version int, spec string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE task_plan SET spec = ? WHERE challenge_id = ? AND version = ?`, spec, challengeID, version)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: SetPlanSpec(%d, %d): %v", challengeID, version, err)
+	}
+}
+
+// ClearApprovalPlanVersion はテスト専用のフィクスチャとして、課題の承認の計画の版を空にする
+// （0006 の前に記録された既存の承認の行を再現する）。
+func ClearApprovalPlanVersion(t *testing.T, workspace string, challengeID int) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE approval SET plan_version = NULL WHERE challenge_id = ?`, challengeID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: ClearApprovalPlanVersion(%d): %v", challengeID, err)
+	}
+}
