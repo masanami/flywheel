@@ -470,7 +470,7 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 |---|---|---|
 | `challenge` | id, title, description, done_criteria, urgency, priority, status, version, reporter, created_at, updated_at | 足す: `version`・`created_at`・`updated_at`。`position`・`size`・`budget_limit` は M3 で足す（H1） |
 | `task_plan` | challenge_id, version, body, created_at | `summary`・`steps` の構造化はしない（本文 1 つ。J2 の出力形式が決まる M3 で見直す） |
-| `approval` | id, challenge_id, operation_id（NULL 可）, kind（plan / completion / release）, decision（approved / rejected）, target_version, actor, channel, verification, reason, decided_at | 足す: `operation_id`・`target_version`・`verification`。改称: `note` → `reason`。`kind` の `irreversible_op` を `release` と読み替え、削除などの不可逆操作もこの種類で扱う（H2・H5） |
+| `approval` | id, challenge_id, operation_id（NULL 可）, kind（plan / completion / release）, decision（approved / rejected）, target_version, plan_version（計画の承認だけ。承認した計画の版。NULL 可。#143 の 0006）, actor, channel, verification, reason, decided_at | 足す: `operation_id`・`target_version`・`verification`。改称: `note` → `reason`。`kind` の `irreversible_op` を `release` と読み替え、削除などの不可逆操作もこの種類で扱う（H2・H5） |
 | `hold` | id, challenge_id, question, from_status, raised_at, answer, answered_at, answered_by | 足す: `id`・`from_status`（H4）・`answered_by`。改称: `resolved_at` → `answered_at`。`session_ref` は M3 で足す |
 | `operation` | id, challenge_id, kind（release / delete / external_send / other）, summary, ref, state（pending / approved / rejected）, version, created_at | **新設**（H2）。実行の記録（executed など）は S2 |
 | `activity` | id, at, actor, channel, verification, entity, entity_id, action, before, after | 足す: `verification`。`before`・`after` は変わった項目だけの JSON（H7） |

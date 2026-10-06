@@ -352,10 +352,29 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 			reasonVal = *req.Reason
 		}
 
+		// 計画の承認は、要約に表示した計画の版（この時点の最新の計画。版が変われば
+		// 課題の版も進み ErrConflict になるので、Prepare が見せた版と同じ）も記録する。
+		// 委譲は target_version（課題の版）ではなくこの値で計画を引く。
+		var planVersionVal any
+		var planVersionOut *int
+		if kind == ApprovalKindPlan && req.Decision == ApprovalDecisionApproved {
+			var pv sql.NullInt64
+			if err := tc.tx.QueryRowContext(ctx,
+				`SELECT MAX(version) FROM task_plan WHERE challenge_id = ?`, tc.id).Scan(&pv); err != nil {
+				return err
+			}
+			if !pv.Valid {
+				return fmt.Errorf("core: challenge %s is awaiting_plan_approval but has no plan", tc.current.ID)
+			}
+			planVersionVal = pv.Int64
+			v := int(pv.Int64)
+			planVersionOut = &v
+		}
+
 		if _, err := tc.tx.ExecContext(ctx,
-			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at)
-			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			tc.id, string(kind), string(req.Decision), tc.current.Version, att.Actor(), string(att.Channel()), string(att.Verification()), reasonVal, tc.nowStr,
+			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at)
+			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			tc.id, string(kind), string(req.Decision), tc.current.Version, planVersionVal, att.Actor(), string(att.Channel()), string(att.Verification()), reasonVal, tc.nowStr,
 		); err != nil {
 			return err
 		}
@@ -372,6 +391,7 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 			Decision:      req.Decision,
 			OperationID:   nil,
 			TargetVersion: tc.current.Version,
+			PlanVersion:   planVersionOut,
 			Actor:         att.Actor(),
 			Channel:       string(att.Channel()),
 			Verification:  string(att.Verification()),

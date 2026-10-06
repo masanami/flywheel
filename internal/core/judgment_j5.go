@@ -185,10 +185,15 @@ func (s *Store) loadJ5Context(ctx context.Context, ch Challenge) (*j5Context, er
 	}
 	vc := &j5Context{Challenge: ch}
 	var planOK bool
+	var unavailable error
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		p, ok, err := loadApprovedPlanAnySpec(ctx, tx, cid)
+		p, gap, detail, err := lookupApprovedPlan(ctx, tx, cid)
 		if err != nil {
 			return err
+		}
+		ok := gap == planGapNone
+		if gap != planGapNone && gap != planGapNoApproval {
+			unavailable = &planUnavailableError{Detail: detail}
 		}
 		vc.Plan, planOK = p, ok
 		if !ok {
@@ -219,6 +224,9 @@ func (s *Store) loadJ5Context(ctx context.Context, ch Challenge) (*j5Context, er
 		return nil, err
 	}
 	if !planOK {
+		if unavailable != nil {
+			return nil, unavailable
+		}
 		return nil, fmt.Errorf("%w: the challenge has no approved plan", ErrValidation)
 	}
 	return vc, nil
@@ -520,6 +528,12 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		item, notStarted, err := s.verifyOne(ctx, in, jc, *ch)
 		if err != nil {
 			// 1 件の課題の問題（承認済みの計画が無い等）で、他の課題の検証を止めない。
+			// 計画の承認が済んでいるのに計画を引けない課題は、黙って除外せず not_started に出す。
+			var pu *planUnavailableError
+			if errors.As(err, &pu) {
+				appendDelegateOutcome(result, nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable, Detail: pu.Detail})
+				continue
+			}
 			if errors.Is(err, ErrRunInProgress) || errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrValidation) {
 				continue
 			}

@@ -86,7 +86,7 @@ func runResultsOf(t *testing.T, ws string) []string {
 
 // AC-163・AC-367・AC-368: cycle --json の not_started[].reason の値は、S2 では cycle_budget |
 // rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit |
-// upstream_fetch_failed | serialized | waiting_external の閉集合に限られる（仕様・core の定義・実際の
+// upstream_fetch_failed | serialized | waiting_external | plan_unavailable の閉集合に限られる（仕様・core の定義・実際の
 // 出力の 3 者を双方向に照合する）。
 //
 // 実際の出力（cycle --json）で観測できるものはここで観測する。連続失敗・差し戻しの履歴や、他の
@@ -114,6 +114,8 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"failure_limit": "TestFailureLimit_ReachedHoldsWithKindAndCountAndReportsNotStarted (internal/core/delegate_resume_test.go)",
 		"rework_limit":  "TestRework_LimitIsDetectedInTheNextCycle_TwoStillLaunch (internal/core/judgment_j5_test.go)",
 		"serialized":    "TestPlan_RunningInSameGroup_Serialized_OtherGroupStarts (internal/core/delegate_plan_test.go)",
+		// 計画の版を持たない承認の行（承認し直しが必要）は、core のテストが実際の対象の選択で観測する。
+		"plan_unavailable": "TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothingLaunched (internal/core/delegate_plan_approval_test.go)",
 	}
 	observed := map[string]bool{}
 	for r, ref := range coreObservedReasons {
@@ -337,6 +339,8 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedReworkLimit"
 	case "serialized":
 		return "NotStartedSerialized"
+	case "plan_unavailable":
+		return "NotStartedPlanUnavailable"
 	}
 	return "?"
 }

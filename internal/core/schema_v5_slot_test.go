@@ -96,8 +96,18 @@ func TestOpenWorkspace_UpgradesSchemaVersion4StoreToVersion5(t *testing.T) {
 	ctx := context.Background()
 
 	// AC-370: 版が 5 になる。
-	if got := schemaVersionForTest(t, s); got != 5 {
-		t.Fatalf("schema version = %d, want 5 (AC-370)", got)
+	if got := schemaVersionForTest(t, s); got != 6 {
+		t.Fatalf("schema version = %d, want 6 (AC-370: 版 5 の表は保たれ、0006 で版 6）", got)
+	}
+	// #143: 既存の承認の行は plan_version が NULL のまま（推測で計画を割り当てない）。
+	var total, nonNull int
+	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*), COUNT(plan_version) FROM approval`).Scan(&total, &nonNull)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if total == 0 || nonNull != 0 {
+		t.Fatalf("approval rows = %d, with plan_version = %d, want >0 rows all NULL", total, nonNull)
 	}
 
 	// AC-371: 既存の課題・計画・承認・保留・作業ログ・対応の記録・run・周が
@@ -208,8 +218,8 @@ func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
 
 func TestSchemaV5_FreshStoreHasSlotTables(t *testing.T) {
 	s := newStoreForTest(t)
-	if got := schemaVersionForTest(t, s); got != 5 {
-		t.Fatalf("schema version = %d, want 5", got)
+	if got := schemaVersionForTest(t, s); got != 6 {
+		t.Fatalf("schema version = %d, want 6", got)
 	}
 	if !tableExistsForTest(t, s, "slot") || !tableExistsForTest(t, s, "run_artifact") {
 		t.Fatalf("slot and run_artifact tables must exist")
@@ -721,5 +731,13 @@ func TestOpenWorkspace_Version5KeepsCycleAndLockColumns(t *testing.T) {
 	if got := pragmaTableInfoColumnsForTest(t, s, "lock"); !stringSlicesEqual(got,
 		[]string{"name", "holder", "pid", "host", "acquired_at", "heartbeat_at"}) {
 		t.Fatalf("lock columns = %v", got)
+	}
+}
+
+// #143: 0006 は approval に計画の版の列（plan_version。NULL 可）を足す。
+func TestSchemaV6_ApprovalHasNullablePlanVersionColumn(t *testing.T) {
+	s := newStoreForTest(t)
+	if cols := pragmaTableInfoColumnsForTest(t, s, "approval"); !containsString(cols, "plan_version") || !containsString(cols, "target_version") {
+		t.Fatalf("approval columns = %v, want plan_version and target_version", cols)
 	}
 }

@@ -802,8 +802,8 @@ func TestRework_LimitCountsOnlyTheSamePlanVersion(t *testing.T) {
 		if _, err := tx.Exec(`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (?, 2, 'P2', '2026-09-26T00:00:00.000Z', ?)`, cid, spec); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at)
-			VALUES (?, 'plan', 'approved', 2, 'alice', 'cli', 'tty_confirm', '2026-09-26T00:00:00.000Z')`, cid)
+		_, err := tx.Exec(`INSERT INTO approval (challenge_id, kind, decision, target_version, plan_version, actor, channel, verification, decided_at)
+			VALUES (?, 'plan', 'approved', 2, 2, 'alice', 'cli', 'tty_confirm', '2026-09-26T00:00:00.000Z')`, cid)
 		return err
 	}); err != nil {
 		t.Fatal(err)

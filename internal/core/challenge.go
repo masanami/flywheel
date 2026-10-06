@@ -64,11 +64,14 @@ type Approval struct {
 	Decision      ApprovalDecision
 	OperationID   *string // "OP-<n>"（nil 可）
 	TargetVersion int
-	Actor         string
-	Channel       string
-	Verification  string
-	Reason        *string
-	DecidedAt     time.Time
+	// PlanVersion は計画の承認が指す計画の版（task_plan.version）。計画の承認以外・計画の版を
+	// 記録しない既存の承認の行は nil。TargetVersion（課題の版）とは別の値。
+	PlanVersion  *int
+	Actor        string
+	Channel      string
+	Verification string
+	Reason       *string
+	DecidedAt    time.Time
 }
 
 // Hold は保留の 1 件（§データモデル hold）。#9 は書き込まない（読み取りだけ実装する）。
@@ -230,7 +233,7 @@ func loadPlans(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Plan, erro
 
 func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approval, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at
+		`SELECT operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at
 		 FROM approval WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -241,12 +244,13 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 	for rows.Next() {
 		var (
 			opID           sql.NullInt64
+			planVersion    sql.NullInt64
 			kind, decision string
 			reason         sql.NullString
 			decidedAtStr   string
 			a              Approval
 		)
-		if err := rows.Scan(&opID, &kind, &decision, &a.TargetVersion, &a.Actor, &a.Channel, &a.Verification, &reason, &decidedAtStr); err != nil {
+		if err := rows.Scan(&opID, &kind, &decision, &a.TargetVersion, &planVersion, &a.Actor, &a.Channel, &a.Verification, &reason, &decidedAtStr); err != nil {
 			return nil, err
 		}
 		a.Kind = ApprovalKind(kind)
@@ -254,6 +258,10 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 		if opID.Valid {
 			s := formatOperationID(opID.Int64)
 			a.OperationID = &s
+		}
+		if planVersion.Valid {
+			v := int(planVersion.Int64)
+			a.PlanVersion = &v
 		}
 		if reason.Valid {
 			r := reason.String

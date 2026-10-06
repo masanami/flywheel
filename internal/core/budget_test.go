@@ -460,8 +460,8 @@ func TestBudget_RemainingIsPerPlanVersion(t *testing.T) {
 		if _, err := tx.Exec(`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) SELECT challenge_id, 2, body, created_at, spec FROM task_plan WHERE challenge_id = ? AND version = 1`, cid); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at)
-			VALUES (?, 'plan', 'approved', 2, 'alice', 'cli', 'tty_confirm', '2026-09-26T00:00:00.000Z')`, cid)
+		_, err := tx.Exec(`INSERT INTO approval (challenge_id, kind, decision, target_version, plan_version, actor, channel, verification, decided_at)
+			VALUES (?, 'plan', 'approved', 2, 2, 'alice', 'cli', 'tty_confirm', '2026-09-26T00:00:00.000Z')`, cid)
 		return err
 	}); err != nil {
 		t.Fatal(err)

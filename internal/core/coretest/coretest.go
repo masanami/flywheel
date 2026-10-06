@@ -400,9 +400,9 @@ func InsertApprovedPlan(t *testing.T, workspace string, challengeID int, body, s
 			return err
 		}
 		if _, err := tx.Exec(
-			`INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at)
-			 VALUES (?, 'plan', 'approved', 1, 'tester', 'cli', 'tty_confirm', ?)`,
-			challengeID, "2026-09-25T00:00:00.000Z"); err != nil {
+			`INSERT INTO approval (challenge_id, kind, decision, target_version, plan_version, actor, channel, verification, decided_at)
+			 VALUES (?, 'plan', 'approved', (SELECT version FROM challenge WHERE id = ?), 1, 'tester', 'cli', 'tty_confirm', ?)`,
+			challengeID, challengeID, "2026-09-25T00:00:00.000Z"); err != nil {
 			return err
 		}
 		_, err := tx.Exec(`UPDATE challenge SET status = 'in_progress', version = version + 1 WHERE id = ?`, challengeID)

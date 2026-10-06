@@ -158,36 +158,72 @@ func (dc *delegationContext) estimateMicros() int64 {
 	return dc.ImplBudgetMicros + dc.ReviewBudgetMicros
 }
 
-// loadApprovedPlanAnySpec は challengeID の承認済みの計画（計画の承認の最後の承認が指す版）を、
-// 構造化した出力の有無を問わずに返す。承認が無い・版が無いときは ok=false。
-func loadApprovedPlanAnySpec(ctx context.Context, tx *sql.Tx, challengeID int64) (approvedPlan, bool, error) {
+// planGap は、承認済みの計画を引けなかった理由（引けたときは空）。
+type planGap string
+
+const (
+	planGapNone        planGap = ""
+	planGapNoApproval  planGap = "no_approval"
+	planGapNoVersion   planGap = "no_plan_version"
+	planGapPlanMissing planGap = "plan_missing"
+	planGapNoSpec      planGap = "no_spec"
+)
+
+// lookupApprovedPlan は challengeID の承認済みの計画を、計画の承認が記録した計画の版
+// （approval.plan_version。課題の版の target_version ではない）で引く。引けなければ理由を返す
+// （推測で計画を割り当てない）。detail は人が読む補足（引けたときは空）。
+func lookupApprovedPlan(ctx context.Context, tx *sql.Tx, challengeID int64) (p approvedPlan, gap planGap, detail string, err error) {
 	approvals, err := loadApprovals(ctx, tx, challengeID)
 	if err != nil {
-		return approvedPlan{}, false, err
+		return approvedPlan{}, planGapNone, "", err
 	}
-	version := 0
-	for _, a := range approvals {
-		if a.Kind == ApprovalKindPlan && a.Decision == ApprovalDecisionApproved {
-			version = a.TargetVersion
+	var last *Approval
+	for i := range approvals {
+		if approvals[i].Kind == ApprovalKindPlan && approvals[i].Decision == ApprovalDecisionApproved {
+			last = &approvals[i]
 		}
 	}
-	if version == 0 {
-		return approvedPlan{}, false, nil
+	if last == nil {
+		return approvedPlan{}, planGapNoApproval, "計画の承認が無い", nil
+	}
+	if last.PlanVersion == nil || *last.PlanVersion <= 0 {
+		return approvedPlan{}, planGapNoVersion, "承認に計画の版が無い（承認し直しが必要）", nil
 	}
 	plans, err := loadPlans(ctx, tx, challengeID)
 	if err != nil {
-		return approvedPlan{}, false, err
+		return approvedPlan{}, planGapNone, "", err
 	}
-	for _, p := range plans {
-		if p.Version == version {
-			ap := approvedPlan{Version: p.Version, Body: p.Body}
-			if p.Spec != nil {
-				ap.Spec, ap.HasSpec = *p.Spec, true
+	for _, pl := range plans {
+		if pl.Version == *last.PlanVersion {
+			ap := approvedPlan{Version: pl.Version, Body: pl.Body}
+			if pl.Spec != nil {
+				ap.Spec, ap.HasSpec = *pl.Spec, true
 			}
-			return ap, true, nil
+			return ap, planGapNone, "", nil
 		}
 	}
-	return approvedPlan{}, false, nil
+	return approvedPlan{}, planGapPlanMissing, fmt.Sprintf("承認が指す計画の版 %d が無い", *last.PlanVersion), nil
+}
+
+// planUnavailableError は、計画の承認が済んでいるのに承認済みの計画を引けないことを表す
+// （ErrValidation として扱える。Detail は人が読む理由）。run・verify の個別の操作の
+// エラーと、周の not_started の Detail が同じ文言を使う。
+type planUnavailableError struct{ Detail string }
+
+func (e *planUnavailableError) Error() string {
+	return "core: validation failed: approved plan unavailable: " + e.Detail
+}
+
+func (e *planUnavailableError) Is(target error) bool { return target == ErrValidation }
+
+// loadApprovedPlanAnySpec は challengeID の承認済みの計画（計画の承認が記録した計画の版の計画）を、
+// 構造化した出力の有無を問わずに返す。承認が無い・計画の版が無い・版の計画が無いときは ok=false。
+func loadApprovedPlanAnySpec(ctx context.Context, tx *sql.Tx, challengeID int64) (approvedPlan, bool, error) {
+	p, gap, _, err := lookupApprovedPlan(ctx, tx, challengeID)
+	if err != nil || gap != planGapNone {
+		return approvedPlan{}, false, err
+	}
+	return p, true, nil
 }
 
 // loadApprovedPlan は loadApprovedPlanAnySpec のうち、構造化した出力を持つ計画だけを返す
@@ -203,12 +239,13 @@ func loadApprovedPlan(ctx context.Context, tx *sql.Tx, challengeID int64) (appro
 // selectDelegationTargets は ID を省略した `run` の対象の課題の内部整数 ID を、優先度→ID の
 // 昇順で返す。対象は着手中で、構造化した出力を持つ承認済みの計画があり、終了していない run を
 // 持たず、上流の状態が closed・missing・ポリシーの状態が out_of_policy でない課題。
-func selectDelegationTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
+// 計画の承認が済んでいるのに計画を引けない（承認に計画の版が無い・版の計画が無い・構造化した
+// 出力が無い）課題は、黙って除外せず skipped に理由つきで返す。
+func selectDelegationTargets(ctx context.Context, tx *sql.Tx) (out []int64, skipped []NotStarted, err error) {
 	challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusInProgress)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []int64
 	for _, ch := range challenges {
 		cid, ok := parseChallengeID(ch.ID)
 		if !ok {
@@ -216,26 +253,36 @@ func selectDelegationTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 		}
 		active, err := challengeHasActiveRun(ctx, tx, cid)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if active {
 			continue
 		}
 		excluded, err := challengeAutoExcludedByPolicy(ctx, tx, cid)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if excluded {
 			continue
 		}
-		if _, ok, err := loadApprovedPlan(ctx, tx, cid); err != nil {
-			return nil, err
-		} else if !ok {
+		p, gap, detail, err := lookupApprovedPlan(ctx, tx, cid)
+		if err != nil {
+			return nil, nil, err
+		}
+		switch {
+		case gap == planGapNoApproval:
+			continue
+		case gap != planGapNone:
+			skipped = append(skipped, NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable, Detail: detail})
+			continue
+		case !p.HasSpec:
+			skipped = append(skipped, NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable,
+				Detail: "承認済みの計画に構造化した出力が無い（人が登録した計画は委譲できない）"})
 			continue
 		}
 		out = append(out, cid)
 	}
-	return out, nil
+	return out, skipped, nil
 }
 
 // fillInvocation は操作の invocation の差し込み（閉集合の 4 つ）を埋める。
@@ -268,11 +315,16 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	var spend bucketSpend
 	var history *launchHistory
 	var planOK bool
+	var unavailable error
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		p, ok, err := loadApprovedPlan(ctx, tx, cid)
+		p, gap, detail, err := lookupApprovedPlan(ctx, tx, cid)
 		if err != nil {
 			return err
 		}
+		if gap != planGapNone && gap != planGapNoApproval {
+			unavailable = &planUnavailableError{Detail: detail}
+		}
+		ok := gap == planGapNone && p.HasSpec
 		dc.Plan, planOK = p, ok
 		if !ok {
 			return nil
@@ -296,6 +348,9 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		return nil, err
 	}
 	if !planOK {
+		if unavailable != nil {
+			return nil, unavailable
+		}
 		return nil, fmt.Errorf("%w: the challenge has no approved plan with a structured spec", ErrValidation)
 	}
 
@@ -432,9 +487,10 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	}
 
 	var targetIDs []int64
+	var skipped []NotStarted
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		ids, err := selectDelegationTargets(ctx, tx)
-		targetIDs = ids
+		ids, sk, err := selectDelegationTargets(ctx, tx)
+		targetIDs, skipped = ids, sk
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -453,7 +509,12 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if err != nil {
 		return nil, err
 	}
-	return s.executePlan(ctx, in, jc, plan)
+	res, err := s.executePlan(ctx, in, jc, plan)
+	if err != nil {
+		return nil, err
+	}
+	res.NotStarted = append(skipped, res.NotStarted...)
+	return res, nil
 }
 
 func appendDelegateOutcome(r *DelegateResult, item *JudgmentAutoItem, notStarted *NotStarted) {
