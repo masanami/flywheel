@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,10 +59,32 @@ func TestRun_DelegatedMarker_HelpStillWorks(t *testing.T) {
 	}
 }
 
-// TestMain が目印を外していること（外れていなければ、他のテストが目印のせいで全滅する）。
+// markerCheckChildEnvVar が "1" のとき、TestMain_UnsetsTheDelegatedMarker は子プロセスとして
+// 目印が外れているかだけを検査する（親が自分自身を再実行するときの合図）。
+const markerCheckChildEnvVar = "FLYWHEEL_CLI_TEST_MARKER_CHECK_CHILD"
+
+// 目印を付けて起動されたテストバイナリでも、TestMain が目印を外すこと（AC-219d。外れていなければ、
+// 他のテストが目印のせいで全滅する）。通常の環境には目印が無く、TestMain の Unsetenv を消しても
+// 通ってしまうため、目印を付けた子プロセスとして自分自身を起動して確かめる（値が空文字でも設定ありとなる）。
 func TestMain_UnsetsTheDelegatedMarker(t *testing.T) {
-	if _, set := os.LookupEnv(core.DelegatedRunEnvVar); set {
-		t.Fatal("the marker must be unset by TestMain")
+	if os.Getenv(markerCheckChildEnvVar) == "1" {
+		if v, set := os.LookupEnv(core.DelegatedRunEnvVar); set {
+			t.Fatalf("the marker must be unset by TestMain, got %q", v)
+		}
+		return
+	}
+	for _, value := range []string{"R-7", ""} {
+		t.Run("value="+value, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestMain_UnsetsTheDelegatedMarker$", "-test.v")
+			cmd.Env = append(os.Environ(), markerCheckChildEnvVar+"=1", core.DelegatedRunEnvVar+"="+value)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("child with the marker set failed: %v\n%s", err, out)
+			}
+			if !strings.Contains(string(out), "--- PASS: TestMain_UnsetsTheDelegatedMarker") {
+				t.Fatalf("child did not run the check:\n%s", out)
+			}
+		})
 	}
 }
 
