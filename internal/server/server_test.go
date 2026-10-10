@@ -2,13 +2,12 @@ package server
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,13 +16,21 @@ import (
 	"github.com/masanami/flywheel/internal/core"
 )
 
+func keys(m map[string]string) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func startServer(t *testing.T) (*Server, int) {
 	t.Helper()
 	ln, err := Listen(0)
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
-	s := New(ln)
+	s := New(ln, nil)
 	errc := make(chan error, 1)
 	go func() { errc <- s.Serve() }()
 	t.Cleanup(func() {
@@ -139,38 +146,24 @@ func assertForbiddenBody(t *testing.T, body string) {
 	}
 }
 
-// 拒否した要求ではストアのファイル（WAL を含む .flywheel 配下）の内容が変わらない。
-// 注: S1 の骨格の server はまだストアを開かない（fleet は後続のチケット）ので、現時点では
-// 変化しないことの回帰の置き場であり、fleet が入ったら束ねたワークスペースで検査し直す。
+// 拒否した要求では core が呼ばれず、束ねたワークスペースのストアのファイル
+// （-wal・-shm を含む .flywheel 配下）の内容が変わらない。拒否の要求がストアを
+// 開けば -wal・-shm が現れるため、ファイル名と内容の両方を比べる。
 func TestRejectedRequestsDoNotChangeStoreFile(t *testing.T) {
-	ws := t.TempDir()
-	res, err := core.Init(ws)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res
-	read := func() []byte {
-		var all []byte
-		entries, err := os.ReadDir(filepath.Join(ws, ".flywheel"))
-		if err != nil {
-			t.Fatal(err)
+	ws := initWorkspace(t)
+	before := snapshotDir(t, filepath.Join(ws, ".flywheel"))
+	_, port := startFleetServer(t, core.FleetWorkspace{Name: "a", Path: ws})
+	p := strconv.Itoa(port)
+	for _, path := range []string{"/api/v1/workspaces", "/api/v1/workspaces/a/status", "/anything"} {
+		if code, _ := getPath(t, port, path, "evil.example:"+p, ""); code != http.StatusForbidden {
+			t.Errorf("%s with a bad Host: status %d, want 403", path, code)
 		}
-		for _, e := range entries {
-			b, err := os.ReadFile(filepath.Join(ws, ".flywheel", e.Name()))
-			if err != nil {
-				t.Fatal(err)
-			}
-			all = append(all, []byte(e.Name())...)
-			all = append(all, b...)
+		if code, _ := getPath(t, port, path, "127.0.0.1:"+p, "http://evil.example"); code != http.StatusForbidden {
+			t.Errorf("%s with a bad Origin: status %d, want 403", path, code)
 		}
-		return all
 	}
-	before := read()
-	_, port := startServer(t)
-	get(t, port, "evil.example:"+strconv.Itoa(port), "")
-	get(t, port, "127.0.0.1:"+strconv.Itoa(port), "http://evil.example")
-	if !bytes.Equal(before, read()) {
-		t.Error("store file changed after rejected requests")
+	if after := snapshotDir(t, filepath.Join(ws, ".flywheel")); !reflect.DeepEqual(before, after) {
+		t.Errorf("store directory changed after rejected requests:\nbefore=%v\nafter=%v", keys(before), keys(after))
 	}
 }
 
@@ -179,7 +172,7 @@ func TestShutdownClosesDoneAndStopsAccepting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(ln)
+	s := New(ln, nil)
 	errc := make(chan error, 1)
 	go func() { errc <- s.Serve() }()
 	select {
@@ -211,7 +204,7 @@ func TestShutdownWaitsForInflightRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(ln)
+	s := New(ln, nil)
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	s.http.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

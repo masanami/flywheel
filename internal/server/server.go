@@ -16,6 +16,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // 要求を拒否するときのエラーコード。internal/cli のエラーコードの表
@@ -42,18 +45,20 @@ func Listen(port int) (net.Listener, error) {
 // Server は 1 つの待ち受けを配信する。
 type Server struct {
 	ln       net.Listener
+	fleet    *Fleet
 	http     *http.Server
 	done     chan struct{}
 	doneOnce sync.Once
 }
 
-// New は ln（Listen の戻り値）を配信する Server を作る。許可する Host と
-// Origin は、ln が実際に bind したポートから導く。
-func New(ln net.Listener) *Server {
-	s := &Server{ln: ln, done: make(chan struct{})}
+// New は ln（Listen の戻り値）で、workspaces（宣言の順）を束ねて配信する Server を
+// 作る。許可する Host と Origin は、ln が実際に bind したポートから導く。ストアは
+// 要求ごとに開く・判定し直す（開けないワークスペースがあっても作れる）。
+func New(ln net.Listener, workspaces []core.FleetWorkspace) *Server {
+	s := &Server{ln: ln, fleet: NewFleet(workspaces), done: make(chan struct{})}
 	port := ln.Addr().(*net.TCPAddr).Port
 	s.http = &http.Server{
-		Handler:           newHandler(port),
+		Handler:           newHandler(port, s.fleet),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	s.http.RegisterOnShutdown(func() { s.doneOnce.Do(func() { close(s.done) }) })
@@ -84,13 +89,21 @@ func (s *Server) Shutdown() error {
 	defer cancel()
 	err := s.http.Shutdown(ctx)
 	if errors.Is(err, context.DeadlineExceeded) {
-		return s.http.Close()
+		err = s.http.Close()
 	}
+	s.fleet.Close()
 	return err
 }
 
-func newHandler(port int) http.Handler {
+func newHandler(port int, fleet *Fleet) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusNotFound, CodeNotFound, "not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, workspaceList(fleet.Statuses(r.Context())))
+	})
 	notFound := func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "not found")
 	}
@@ -141,4 +154,23 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(errorBody{Error: errorDetail{Code: code, Message: message}})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func workspaceList(statuses []WorkspaceStatus) view.WorkspaceList {
+	out := view.WorkspaceList{Workspaces: make([]view.Workspace, 0, len(statuses))}
+	for _, st := range statuses {
+		vw := view.Workspace{Name: st.Name, Path: st.Path, State: st.State}
+		if st.State != StateOK && st.Err != nil {
+			msg := st.Err.Error()
+			vw.Error = &msg
+		}
+		out.Workspaces = append(out.Workspaces, vw)
+	}
+	return out
 }

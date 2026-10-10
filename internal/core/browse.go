@@ -48,6 +48,17 @@ func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
 	return v, nil
 }
 
+// IsCurrent は、このストアを開いたときのファイルが今もワークスペースの
+// ストアのパスにあるか（削除・別のファイルへの差し替えをされていないか）を返す。
+// ファイルを読み書きしない。
+func (s *Store) IsCurrent() bool {
+	if s.file == nil {
+		return true
+	}
+	info, err := os.Stat(storeDBPath(s.workspace))
+	return err == nil && os.SameFile(s.file, info)
+}
+
 // LatestSchemaVersion はこのバイナリが知るスキーマ版の最大値を返す。SchemaVersion が
 // これより大きければ、開いた後にストアが新しい版へ上げられている。
 func LatestSchemaVersion() (int, error) {

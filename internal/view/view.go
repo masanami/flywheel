@@ -413,3 +413,16 @@ type LogResponse struct {
 type RunsResponse struct {
 	Runs []Run `json:"runs"`
 }
+
+// Workspace は `GET /api/v1/workspaces` の 1 要素。Error は State が "ok" のとき null。
+type Workspace struct {
+	Error *string `json:"error"`
+	Name  string  `json:"name"`
+	Path  string  `json:"path"`
+	State string  `json:"state"`
+}
+
+// WorkspaceList は `GET /api/v1/workspaces` の本文。
+type WorkspaceList struct {
+	Workspaces []Workspace `json:"workspaces"`
+}

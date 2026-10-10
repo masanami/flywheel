@@ -14,15 +14,32 @@ import (
 	"testing"
 	"time"
 
+	"github.com/masanami/flywheel/internal/core/coretest"
 	"github.com/masanami/flywheel/internal/server"
 )
 
 // startServeChild は `serve --port 0` を子プロセスで起動し、標準エラーの
 // 「listening on 127.0.0.1:<ポート>」の 1 行からポートを得る。
+//
+// 利用者設定ディレクトリは一時ディレクトリに向ける（開発機の fleet.json を読まない）。
 func startServeChild(t *testing.T, extra ...string) (cmd *exec.Cmd, port int, line string) {
 	t.Helper()
+	return startServeChildIn(t, "", isolatedConfigEnv(t.TempDir()), extra...)
+}
+
+// isolatedConfigEnv は os.UserConfigDir() が configHome の下を指す環境変数
+// （Linux は XDG_CONFIG_HOME、macOS は HOME）。
+func isolatedConfigEnv(configHome string) []string {
+	return []string{"XDG_CONFIG_HOME=" + configHome, "HOME=" + configHome}
+}
+
+// startServeChildIn は startServeChild の、作業ディレクトリ（空なら継承）と環境変数を
+// 指定できる版。
+func startServeChildIn(t *testing.T, dir string, env []string, extra ...string) (cmd *exec.Cmd, port int, line string) {
+	t.Helper()
 	args := append([]string{"serve", "--port", "0"}, extra...)
-	cmd, _, _ = newChildCmd(args)
+	cmd, _, _ = newChildCmd(args, env...)
+	cmd.Dir = dir
 	cmd.Stderr = nil
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -112,6 +129,8 @@ func TestServe_ListenFailed(t *testing.T) {
 	defer func() { _ = occupied.Close() }()
 	port := occupied.Addr().(*net.TCPAddr).Port
 
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"serve", "--port", strconv.Itoa(port), "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
 	if code != 2 {
@@ -126,6 +145,8 @@ func TestServe_ListenFailed(t *testing.T) {
 }
 
 func TestServe_BadPortIsUsageError(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	for _, p := range []string{"abc", "-1", "65536", ""} {
 		var stdout, stderr bytes.Buffer
 		code := run([]string{"serve", "--port", p, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
@@ -135,20 +156,33 @@ func TestServe_BadPortIsUsageError(t *testing.T) {
 	}
 }
 
-// serve を起動したまま、同じワークスペースで create と status が成功する。
-// 注: S1 の骨格の serve はまだストアを開かない（fleet は後続のチケット）ので、このテストは
-// fleet がストアを開くようになった後も成り立つことの回帰の置き場である。
+// serve を起動し、束ねたワークスペースのストアを実際に開かせた状態（API で ok を確認）で、
+// 同じワークスペースの create と status が成功し、server がロックや独自の行を作らない。
 func TestServe_CoexistsWithCreateAndStatus(t *testing.T) {
 	ws := initializedWorkspace(t)
-	cmd, _, _ := startServeChild(t, "--workspace", ws)
+	cmd, port, _ := startServeChild(t, "--workspace", ws)
+	if got := fetchWorkspaces(t, port); len(got) != 1 || got[0].State != "ok" {
+		t.Fatalf("workspaces = %+v, want one ok workspace", got)
+	}
 	for _, args := range [][]string{
 		{"create", "--title", "t", "--workspace", ws, "--json"},
 		{"status", "--workspace", ws, "--json"},
+		{"create", "--title", "u", "--workspace", ws, "--json"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 {
 			t.Errorf("%v: exit=%d stderr=%s", args, code, stderr.String())
 		}
+	}
+	if _, held := coretest.CycleLockHolder(t, ws); held {
+		t.Error("serve (or a read-only path) left a cycle lock row")
+	}
+	if got := coretest.CountChallenges(t, ws); got != 2 {
+		t.Errorf("challenges = %d, want 2", got)
+	}
+	// 同時に開いていても、サーバは引き続き ok を返す。
+	if got := fetchWorkspaces(t, port); got[0].State != "ok" {
+		t.Errorf("state after create = %q, want ok", got[0].State)
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	if code := waitChild(t, cmd, 10*time.Second); code != 0 {
@@ -179,6 +213,16 @@ func TestServe_ForbiddenOriginViaChild(t *testing.T) {
 func TestServeErrorCodes(t *testing.T) {
 	if string(CodeForbiddenOrigin) != server.CodeForbiddenOrigin {
 		t.Errorf("CodeForbiddenOrigin = %q, server = %q", CodeForbiddenOrigin, server.CodeForbiddenOrigin)
+	}
+	for cliCode, serverCode := range map[ErrorCode]string{
+		CodeStoreNotFound: server.CodeStoreNotFound,
+		CodeStoreTooNew:   server.CodeStoreTooNew,
+		CodeStoreError:    server.CodeStoreError,
+		CodeNotFound:      server.CodeNotFound,
+	} {
+		if string(cliCode) != serverCode {
+			t.Errorf("cli %q != server %q", cliCode, serverCode)
+		}
 	}
 	if ExitCodeFor(CodeForbiddenOrigin) != 1 || ExitCodeFor(CodeListenFailed) != 2 {
 		t.Error("exit code mapping wrong")
