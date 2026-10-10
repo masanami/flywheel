@@ -424,8 +424,9 @@ func missingRequiredVariants(cmd Command) map[string][]string {
 // 本番コードの NewError(CodeUsageError, …) の箇所数と件数を照合する。
 // C-1 は課題、OP-1 は C-1 の不可逆操作として実在させておく。
 var runLevelUsageErrorCases = [][]string{
-	{"serve", "--port", "abc"}, // --port が 0〜65535 の整数でない（bind する前に拒否する）
-	{"edit", "C-1"},            // 変更する項目が 1 つも無い
+	{"serve", "--port", "abc"},                                     // --port が 0〜65535 の整数でない（bind する前に拒否する）
+	{"serve", "--port", "0", "--fleet", "/nonexistent/fleet.json"}, // --fleet と --workspace の同時指定（この列挙は --workspace を足して呼ぶ）
+	{"edit", "C-1"}, // 変更する項目が 1 つも無い
 	{"plan", "C-1", "--file", "/nonexistent/flywheel-plan.txt"}, // --file が読めない
 	{"verify", "C-1", "--result", "met", "--question", "q"},     // met と --question の同時指定
 	{"approve", "OP-1", "--hold-release"},                       // 不可逆操作の ID への --hold-release

@@ -23,6 +23,9 @@ import (
 type Store struct {
 	db        *store.DB
 	workspace string
+	// file は OpenWorkspace が開いたときのストアのファイル（IsCurrent が差し替えを
+	// 検出する）。nil なら IsCurrent は常に true。
+	file os.FileInfo
 
 	// now はテストが時刻を差し替えるためのフック。nil なら time.Now を使う
 	// （#9 §A-6）。internal/core のテストだけがこのフィールドへ直接代入する
@@ -132,11 +135,13 @@ func openExistingAt(dir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStoreError, err)
 	}
+	// 開く前に識別する（開く間に差し替えられても、IsCurrent が次に検出する安全側に倒れる）。
+	info, _ := os.Stat(storeDBPath(dir))
 	db, err := store.OpenExisting(storeDBPath(dir), migrations)
 	if err != nil {
 		return nil, wrapStoreErr(err)
 	}
-	return &Store{db: db, workspace: dir}, nil
+	return &Store{db: db, workspace: dir, file: info}, nil
 }
 
 // OpenWorkspace は init 以外のコマンドが使うワークスペースの決定規則で

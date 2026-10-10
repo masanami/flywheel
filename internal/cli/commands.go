@@ -324,10 +324,11 @@ func defaultCommands() []Command {
 		},
 		{
 			// docs/features/m4-ui-server.md §IF / API「flywheel serve の引数」（S1）。
-			// ストアは開かない（fleet は後続のチケット）。bind 先を変える引数は持たない。
+			// ストアは Run の前には開かない（fleet のワークスペースは server が要求ごとに
+			// 開く）。bind 先を変える引数は持たない。
 			Path:          []string{"serve"},
 			RequiresStore: false,
-			Flags:         []flagDef{{Name: "port", HasValue: true}},
+			Flags:         []flagDef{{Name: "port", HasValue: true}, {Name: "fleet", HasValue: true}},
 			Run:           runServe,
 		},
 	}
