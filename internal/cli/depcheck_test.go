@@ -233,3 +233,63 @@ func dependsOn(deps []string, target string) bool {
 	}
 	return false
 }
+
+// TestServerImportDirection は internal/server が、ストアのパッケージ・internal/cli・
+// internal/invoker を（テストファイルを含め）import しないことを検査する。
+// internal/adapters/github は waiting_external の組み立てだけに使えるので禁止しない。
+func TestServerImportDirection(t *testing.T) {
+	pkgs := goListJSON(t, repoRoot(t), "./...")
+	forbidden := []string{storeImportPath, "github.com/masanami/flywheel/internal/cli", invokerImportPath, "github.com/masanami/flywheel/internal/adapters/git"}
+	saw := false
+	var violators []string
+	for _, pkg := range pkgs {
+		if !underPackagePrefix(pkg.ImportPath, serverImportPath) {
+			continue
+		}
+		saw = true
+		imports := allImports(pkg)
+		for _, f := range forbidden {
+			for _, imp := range imports {
+				if underPackagePrefix(imp, f) {
+					violators = append(violators, pkg.ImportPath+" -> "+imp)
+				}
+			}
+		}
+	}
+	if !saw {
+		t.Fatal("go list did not report internal/server; the import path constant may be stale")
+	}
+	if len(violators) != 0 {
+		t.Errorf("internal/server imports a forbidden package: %v", violators)
+	}
+}
+
+// TestProductionDependenciesStayWithinAllowedSet は cmd/flywheel の本番依存のうち、標準ライブラリ・
+// この module 自身以外が modernc.org/sqlite と golang.org/x/term（とそれらの推移的依存）だけであること
+// を、go list -deps -f の Module から検査する（AC-136）。
+func TestProductionDependenciesStayWithinAllowedSet(t *testing.T) {
+	cmd := exec.Command("go", "list", "-deps", "-f", "{{if .Module}}{{.Module.Path}}{{end}}", "./cmd/flywheel")
+	cmd.Dir = repoRoot(t)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go list -deps: %v\n%s", err, stderr.String())
+	}
+	// 許す集合は modernc.org/sqlite と golang.org/x/term の推移的依存だけ。
+	allowed := map[string]bool{"github.com/masanami/flywheel": true}
+	allowedCmd := exec.Command("go", "list", "-deps", "-f", "{{if .Module}}{{.Module.Path}}{{end}}", "modernc.org/sqlite", "golang.org/x/term")
+	allowedCmd.Dir = repoRoot(t)
+	out, err := allowedCmd.Output()
+	if err != nil {
+		t.Fatalf("go list -deps sqlite/term: %v", err)
+	}
+	for _, p := range strings.Fields(string(out)) {
+		allowed[p] = true
+	}
+	for _, m := range strings.Fields(stdout.String()) {
+		if !allowed[m] {
+			t.Errorf("production dependency %q is outside the allowed set", m)
+		}
+	}
+}

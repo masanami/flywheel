@@ -175,6 +175,9 @@ func assertCasesCoverExactlyDefaultCommandsAndRequireStoreExceptInit(t *testing.
 	wantPaths := map[string]bool{}
 	for _, c := range cmds {
 		key := strings.Join(c.Path, " ")
+		if longRunningCommands[key] {
+			continue // serve はストアを開かない（fleet は後続）。serve_test.go が検証する
+		}
 		wantPaths[key] = true
 		if key != "init" && !c.RequiresStore {
 			t.Errorf("command %v is registered but RequiresStore=false (only init may skip the store)", c.Path)

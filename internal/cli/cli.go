@@ -53,6 +53,7 @@ func run(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands [
 		return failErr(stderr, jsonMode, cliErr)
 	}
 	parsed.Stdin = stdin
+	parsed.Stderr = stderr
 
 	// 解析が成功した後は解析結果を正とする（事前走査はフラグの値としての
 	// "--json" も拾うため、解析に失敗したときの出力形式の判定にだけ使う）。

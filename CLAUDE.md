@@ -29,18 +29,19 @@
 | `internal/view` | CLI の `--json` と API が共有する JSON の形の型（`json` タグつきの構造体。フィールドはキーの辞書順）と、core の型からの変換。JSON の形を `map[string]any` で組み立てず、ここへ置く。import してよいのは `internal/core` だけ |
 | `internal/adapters/github` | `gh` の起動と応答の正規化（GitHub Issue・ブランチ・PR・PR のチェックの取得）。core の取得 IF（`internal/core/upstream.go`）だけに依存し、取り込みの規則・CI の完了の判定規則は持たない。ストアを import しない |
 | `internal/adapters/git` | スロットの作業ツリーの検査と `git worktree add` の払い出し（`git` の起動）。core のスロットの IF（`internal/core/slot_git.go` の `SlotGit`）だけに依存し、割り当ての規則・origin の正規化は持たない。ストアを import しない。`GIT_DIR`・`GIT_WORK_TREE` を明示し、`fetch`・`clone` をしない |
+| `internal/server` | `flywheel serve` の HTTP サーバ（server・API・Host と Origin の検査・UI の配信）。`127.0.0.1` だけに bind する。core の公開 API だけを呼び（`internal/adapters/github` は下の import の向きの節の範囲だけ）、ストアのパッケージ・`internal/cli`・`internal/invoker` を import しない。自身の状態をストアの外に持たない（メモリ上の CSRF の値・challenge・セッションを除く） |
 | `internal/invoker` | `claude` の起動（判断の呼び出し〔`InvokeJudgment`〕と委譲〔`InvokeDelegation`〕）・接続ツールの衝突の予測の口の起動（`Predict`。宣言の `command` を作業ディレクトリでシェルを介さず起動し、出力を読むフィールドだけに正規化する。schema の照合・費用の数え方・グループの作り方は core）・結果の判別・費用の抽出（生の値）・出力の保存。委譲の標準入力は、埋め込んだ固定の節の雛形を差し込んで組み立てる（`BuildDelegationStdin`）。判断点の指示文と J3 ブリーフの固定の節の雛形は `internal/invoker/prompts/` に置き `embed` でバイナリへ埋め込む（`Instructions`・`BriefFixedSections`）。分量の上限検査（`CheckPromptSizes`）・禁止語の生成と照合（`ForbiddenTerms`・`FindForbiddenTerms`。生成元は core・cli の定義を引数で受け取る純粋関数）もここに置く。枠超過の判定規則（`IsRateLimited`）は `internal/core` に置き、invoker は抽出した自由記述をそのまま渡すだけ。core の判断の呼び出し IF（`internal/core/judgment.go` の `JudgmentInvoker`）・委譲の起動 IF（`internal/core/delegate.go` の `DelegationInvoker`）・衝突の予測の起動 IF（`internal/core/predict.go` の `ConflictPredictor`）だけに依存し、対象の選び方・予算の評価・課題への写像といった規則は持たない。ストアを import しない |
 
 - **CLI は core の公開 API だけを呼ぶ**。遷移の可否・承認の成立条件・作業ログの記録を `internal/cli` に書かない。
-- **adapter・invoker の import の向き**: `internal/cli` が `internal/adapters/github`・`internal/adapters/git`・`internal/invoker` を import してよいのは、それぞれを組み立てて core へ渡すこと（`New`・`NewLauncher`）と、起動不能のエラー（`ErrGHNotFound`・`invoker.ErrClaudeNotFound`）を CLI のエラーコードへ写すことだけ。`internal/core` は `internal/adapters`・`internal/invoker` のどちらも import しない（`internal/cli/depcheck_test.go` が `go list` の依存関係で検査する）。
-- **`internal/view` の import の向き**: `internal/view` は `internal/core` だけを import する（ストアのパッケージ・`internal/cli`・`internal/server`・adapter・invoker は不可）。`internal/core` は `internal/view`・`internal/server` を import しない。`internal/server`（server の骨格のチケットで新設する）は `internal/cli` を import しない（`serve` のために cli→server の向きがあり循環する。共有の型を view に置くのはこのため）。いずれも `internal/cli/depcheck_view_test.go` が `go list` の依存関係で検査する。
+- **adapter・invoker の import の向き**: `internal/cli` が `internal/adapters/github`・`internal/adapters/git`・`internal/invoker` を import してよいのは、それぞれを組み立てて core へ渡すこと（`New`・`NewLauncher`）と、起動不能のエラー（`ErrGHNotFound`・`invoker.ErrClaudeNotFound`）を CLI のエラーコードへ写すことだけ。`internal/server` が `internal/adapters/github` を import してよいのは、`waiting_external` のために組み立てて core へ渡すことと `ErrGHNotFound` の扱いだけ。`internal/core` は `internal/adapters`・`internal/invoker`・`internal/server` のいずれも import しない（`internal/cli/depcheck_test.go` が `go list` の依存関係で検査する）。
+- **`internal/view` の import の向き**: `internal/view` は `internal/core` だけを import する（ストアのパッケージ・`internal/cli`・`internal/server`・adapter・invoker は不可）。`internal/core` は `internal/view`・`internal/server` を import しない。`internal/server` は `internal/cli` を import しない（`serve` のために cli→server の向きがあり循環する。共有の型を view に置くのはこのため）。いずれも `internal/cli/depcheck_view_test.go` が `go list` の依存関係で検査する。
 - **ストアを開くのは core だけ**。ストアのパッケージを import できるのは `internal/core` の配下だけ（Go の internal 規則で強制し、`go list` の依存関係でも検査する）。`internal/invoker`・`internal/adapters/*` もストアを import しない。
 - **本番の依存の上限**: 標準ライブラリ・`modernc.org/sqlite`・`golang.org/x/term` に限る（引数の解析も標準ライブラリ）。テスト専用の依存（疑似端末のライブラリなど）は可。
 - **動作環境は macOS と Linux**（Windows は対象外）。受入基準は両方で成り立たせる。OS 依存でテストをスキップせざるを得ないときは、その事実と理由を PR の説明に書く。
 - `Makefile` は macOS の GNU Make 3.81 でも動く書き方を保つ（bash 拡張構文・GNU Make 4 以降専用の機能を使わない）。
 
 ### 新規ファイルの置き場
-- 状態・遷移・承認の規則は `internal/core`、SQL とマイグレーションは `internal/core/internal/store`、表示と引数は `internal/cli`、GitHub からの取得は `internal/adapters/github`、スロットの作業ツリーの検査・払い出しは `internal/adapters/git`、`claude` の起動は `internal/invoker`。上の表のパッケージ以外を新設しない（M1・M2・M3 S1・S2・M4 S1 の範囲）。
+- 状態・遷移・承認の規則は `internal/core`、SQL とマイグレーションは `internal/core/internal/store`、表示と引数は `internal/cli`、GitHub からの取得は `internal/adapters/github`、スロットの作業ツリーの検査・払い出しは `internal/adapters/git`、`claude` の起動は `internal/invoker`、HTTP の待ち受けと API は `internal/server`。上の表のパッケージ以外を新設しない（M1・M2・M3 S1・S2・M4 S1 の範囲）。
 
 ## テスト方針
 

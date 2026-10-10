@@ -73,6 +73,12 @@ const (
 	// CodeSerialized は #106 で追加（指定した課題が、終了していない委譲の run を持つ課題と同じ
 	// 直列化グループに入る。同上「エラーコードの追加」）。core.ErrSerialized を写す。
 	CodeSerialized ErrorCode = "serialized"
+	// CodeListenFailed と CodeForbiddenOrigin は M4 S1 で追加（docs/features/m4-ui-server.md
+	// §IF / API「エラーコードの追加」）。listen_failed は `serve` が 127.0.0.1 のポートを
+	// bind できない。forbidden_origin は server が HTTP の応答で使うだけで、CLI は出さない
+	// （値は internal/server.CodeForbiddenOrigin と一致する）。
+	CodeListenFailed    ErrorCode = "listen_failed"
+	CodeForbiddenOrigin ErrorCode = "forbidden_origin"
 )
 
 // codeExit は 1 つのエラーコードと、それに対応する終了コード（0/1/2 のみ）の組。
@@ -107,6 +113,8 @@ var errorCodeTable = []codeExit{
 	{CodeBudgetExceeded, 1},
 	{CodeSlotUnavailable, 1},
 	{CodeSerialized, 1},
+	{CodeListenFailed, 2},
+	{CodeForbiddenOrigin, 1},
 }
 
 // ExitCodeFor は既知の ErrorCode に対応する終了コードを返す。

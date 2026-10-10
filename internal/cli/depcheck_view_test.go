@@ -64,13 +64,20 @@ func TestCoreDoesNotImportViewOrServer(t *testing.T) {
 	}
 }
 
-// TestServerDoesNotImportCLI は internal/server（あれば）が internal/cli を import
-// しないことを検査する（cli→server の向きがあるため循環する）。server の新設時に、
-// 対象を見つけたことの確認（sawServer）を足すこと。
+// TestServerDoesNotImportCLI は internal/server が internal/cli を import しないことを
+// 検査する（cli→server の向きがあるため循環する）。対象を見つけたことも確かめる。
 func TestServerDoesNotImportCLI(t *testing.T) {
+	sawServer := false
 	for _, pkg := range goListJSON(t, repoRoot(t), "./...") {
-		if underPackagePrefix(pkg.ImportPath, serverImportPath) && dependsOn(allImports(pkg), cliImportPath) {
+		if !underPackagePrefix(pkg.ImportPath, serverImportPath) {
+			continue
+		}
+		sawServer = true
+		if dependsOn(allImports(pkg), cliImportPath) {
 			t.Errorf("%s imports internal/cli", pkg.ImportPath)
 		}
+	}
+	if !sawServer {
+		t.Fatal("go list did not report internal/server")
 	}
 }

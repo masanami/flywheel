@@ -740,6 +740,9 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")
+		if longRunningCommands[key] {
+			continue // serve は M4 の仕様（§IF / API）が正本で、serve_test.go が検証する
+		}
 		if gotSet[key] {
 			t.Errorf("defaultCommands() registers %q twice", key)
 		}

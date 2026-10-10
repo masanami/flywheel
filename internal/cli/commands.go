@@ -46,6 +46,8 @@ type Args struct {
 	Values     map[string]string
 	Bools      map[string]bool
 	Stdin      io.Reader
+	// Stderr は標準エラー出力（serve の待ち受けの 1 行など、結果とは別に出す表示用）。
+	Stderr io.Writer
 	// Store は RequiresStore が true のコマンドにだけ設定される、開いた
 	// ワークスペースのストア。Run は Close してはならない（呼び出し元の run が
 	// 責任を持つ）。
@@ -319,6 +321,14 @@ func defaultCommands() []Command {
 			MinPositional: 1,
 			MaxPositional: 1,
 			Run:           runSlotClear,
+		},
+		{
+			// docs/features/m4-ui-server.md §IF / API「flywheel serve の引数」（S1）。
+			// ストアは開かない（fleet は後続のチケット）。bind 先を変える引数は持たない。
+			Path:          []string{"serve"},
+			RequiresStore: false,
+			Flags:         []flagDef{{Name: "port", HasValue: true}},
+			Run:           runServe,
 		},
 	}
 }
