@@ -59,7 +59,13 @@ func (s *Store) ListRuns(ctx context.Context, opt RunListOptions) ([]Run, error)
 	if err := s.ReapInterruptedRuns(ctx); err != nil {
 		return nil, err
 	}
+	return s.ListRunsWithoutReap(ctx, opt)
+}
 
+// ListRunsWithoutReap は ListRuns と同じ絞り込み・並び・形で run を返すが、
+// 中断した run を回収しない（ReapInterruptedRuns を呼ばない）ので、run・activity・
+// lock のどの行も変えない。閲覧だけの経路（server。M4P12）が使う。
+func (s *Store) ListRunsWithoutReap(ctx context.Context, opt RunListOptions) ([]Run, error) {
 	var cid *int64
 	if opt.ChallengeID != nil {
 		id, ok := parseChallengeID(*opt.ChallengeID)
