@@ -104,9 +104,10 @@ func newHandler(port int, fleet *Fleet) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, workspaceList(fleet.Statuses(r.Context())))
 	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+	notFound := func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "not found")
-	})
+	}
+	mux.Handle("/", uiHandler(uiFS(), notFound))
 	return guard(port, mux)
 }
 

@@ -4,11 +4,45 @@
 GOLANGCI_LINT_VERSION := v2.10.1
 BUILD_DIR := build
 BINARY := $(BUILD_DIR)/flywheel
+# UI（web/）。ビルド成果物は internal/server/dist/ui（git の追跡外）へ出て、go:embed で
+# バイナリへ入る。Node が無くても go build は通る（最小の index.html を返す）。
+NPM := npm
+WEB_DIR := web
 
-.PHONY: check fmt-check vet lint test build print-golangci-lint-version clean
+.PHONY: check ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
 
 ## check はすべての品質ゲートを順に実行する。1 つでも失敗すれば非 0 で終わる。
-check: fmt-check vet lint test build
+## UI の lint・テスト・ビルドを先に実行し、その成果物を埋め込んだ状態で go test・go build を行う。
+## コミット済みのファイルは書き換えない（成果物は追跡外の internal/server/dist/ui へ出る）。
+check: ui-lint ui-test ui-build fmt-check vet lint test build
+
+## ui-check: UI のゲート（lint・テスト・ビルド）だけを実行する。
+ui-check: ui-lint ui-test ui-build
+
+## ui-install: npm の依存をロックファイルどおりに入れる（package-lock.json が新しいときだけ）。
+ui-install: $(WEB_DIR)/node_modules/.install-stamp
+
+# 印は npm ci が成功した後にだけ作る（npm ci は node_modules を作り直すため、
+# ディレクトリの更新時刻を印にすると失敗した install が再実行されない）。
+$(WEB_DIR)/node_modules/.install-stamp: $(WEB_DIR)/package-lock.json
+	@echo "==> npm ci (web)"
+	cd $(WEB_DIR) && $(NPM) ci
+	@touch $(WEB_DIR)/node_modules/.install-stamp
+
+## ui-lint: UI の lint（Biome）。
+ui-lint: ui-install
+	@echo "==> npm run lint (web)"
+	cd $(WEB_DIR) && $(NPM) run lint
+
+## ui-test: UI のテスト（Vitest）。
+ui-test: ui-install
+	@echo "==> npm run test (web)"
+	cd $(WEB_DIR) && $(NPM) run test
+
+## ui-build: UI のビルド（Vite）。成果物は internal/server/dist/ui へ出る。
+ui-build: ui-install
+	@echo "==> npm run build (web)"
+	cd $(WEB_DIR) && $(NPM) run build
 
 ## fmt-check: gofmt -l . の出力が空であることを確認する。
 fmt-check:
