@@ -6,6 +6,7 @@ import (
 
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/invoker"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // runClassifyAuto は `flywheel classify --auto [<C-ID>]` の実装
@@ -81,7 +82,7 @@ func runClassifyAuto(a Args) (any, error) {
 	}
 
 	return textOutput{
-		json: map[string]any{"phase": judgmentPhaseJSON("classify", res)},
+		json: view.PhaseResponse{Phase: view.FromJudgmentPhase("classify", false, res)},
 		text: judgmentPhaseText("分類の対象はありませんでした\n", res),
 	}, nil
 }

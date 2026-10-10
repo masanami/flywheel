@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // このファイルは #72（親要件チケット #51 §上流の更新の観測と既読）の
@@ -83,7 +85,14 @@ func TestIngestResultJSON_TotalFailureItem_NullsOutUnknownFields(t *testing.T) {
 		}},
 	}}}
 
-	got := ingestResultJSON(result)
+	raw, err := json.Marshal(view.FromIngestResult(result))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
 	sources := got["sources"].([]any)
 	items := itemsOf(t, repoOf(t, sources[0].(map[string]any), "o/r"))
 	item := findItemByExternalKey(t, items, "o/r#1")
@@ -97,9 +106,7 @@ func TestIngestResultJSON_TotalFailureItem_NullsOutUnknownFields(t *testing.T) {
 	if item["upstream_updated_at"] != nil {
 		t.Errorf("upstream_updated_at = %v, want null", item["upstream_updated_at"])
 	}
-	// ingestResultJSON を直接呼ぶ（JSON へのマーシャルを経由しない）ため、
-	// discrepancyKindsJSON の戻り値の型（[]string）のまま入っている。
-	if unread, ok := item["unread"].([]string); !ok || unread == nil || len(unread) != 0 {
-		t.Errorf("unread = %#v, want a non-nil empty []string (not null)", item["unread"])
+	if unread, ok := item["unread"].([]any); !ok || unread == nil || len(unread) != 0 {
+		t.Errorf("unread = %#v, want an empty array (not null)", item["unread"])
 	}
 }

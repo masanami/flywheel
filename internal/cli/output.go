@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // textOutput は、--json 無しのときに人間向けのテキストを持つ成功時のデータ。
@@ -70,5 +72,5 @@ func writeTextError(w io.Writer, code ErrorCode, message string) {
 // FormatTimestamp は t を UTC・ミリ秒固定の RFC 3339 文字列にする
 // （docs/features/m1-core.md 追記節「成功時の JSON 出力の規約」§日時）。
 func FormatTimestamp(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+	return view.FormatTimestamp(t)
 }

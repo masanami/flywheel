@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // runBudget は `flywheel budget <C-ID> --impl-usd <額> [--review-usd <額>]` の実装
@@ -53,17 +54,12 @@ func runBudget(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	// review_usd は --review-usd を付けたときだけ値を持つ（付けなければ null＝変えていない）。
-	var reviewOut any
-	if review != nil {
-		reviewOut = *review
-	}
-	return textOutput{json: map[string]any{
-		"challenge_id": id,
-		"plan_version": preview.PlanVersion,
-		"impl_usd":     impl,
-		"review_usd":   reviewOut,
-		"approval":     approvalJSON(*approval),
+	return textOutput{json: view.BudgetResponse{
+		Approval:    view.FromApproval(*approval),
+		ChallengeID: id,
+		ImplUSD:     impl,
+		PlanVersion: preview.PlanVersion,
+		ReviewUSD:   review,
 	}, text: id + "\n"}, nil
 }
 
