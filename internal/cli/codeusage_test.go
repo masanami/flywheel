@@ -477,7 +477,7 @@ func TestErrorCodeUsageInSourcesMatchesSpecInBothDirections(t *testing.T) {
 		t.FailNow()
 	}
 
-	spec := loadSpecErrorCodeTable(t)
+	spec := append(loadSpecErrorCodeTable(t), loadM4ErrorCodeTable(t)...)
 	specCodes := map[ErrorCode]bool{}
 	for _, e := range spec {
 		specCodes[e.Code] = true
@@ -489,8 +489,15 @@ func TestErrorCodeUsageInSourcesMatchesSpecInBothDirections(t *testing.T) {
 	}
 	produced := producibleErrorCodes(t, fset, files, consts)
 	for code := range specCodes {
+		if httpOnlyErrorCodes[code] {
+			continue
+		}
 		if !produced[code] {
 			t.Errorf("spec error code %q cannot be produced by the implementation (no direct NewError outside mapCoreErr, and no core sentinel mapped to it is referenced outside its declaration and mapCoreErr)", code)
 		}
 	}
 }
+
+// httpOnlyErrorCodes は仕様の表にあるが HTTP の応答だけで使い、CLI は出さないコード
+// （docs/features/m4-ui-server.md §エラーコードの追加）。「CLI が出しうる」検査の対象外。
+var httpOnlyErrorCodes = map[ErrorCode]bool{CodeForbiddenOrigin: true}

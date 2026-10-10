@@ -205,11 +205,22 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	}},
 }
 
-// registeredCommands は登録表の全コマンドを、Path をスペースで結合した名前で返す。
+// longRunningCommands は成功経路が「シグナルを受けるまで終わらない」ため、各コマンドが
+// 1 回の実行で成功して返る前提の横断の列挙（成功経路・成功時の JSON・作業ログ・
+// 古いストアの拒否・M1 の IF/API の表）から外すコマンド。serve（M4 S1）の検証は
+// serve_test.go が子プロセスで行う。
+var longRunningCommands = map[string]bool{"serve": true}
+
+// registeredCommands は登録表の全コマンド（longRunningCommands を除く）を、Path を
+// スペースで結合した名前で返す。
 func registeredCommands() map[string]Command {
 	out := map[string]Command{}
 	for _, cmd := range defaultCommands() {
-		out[strings.Join(cmd.Path, " ")] = cmd
+		name := strings.Join(cmd.Path, " ")
+		if longRunningCommands[name] {
+			continue
+		}
+		out[name] = cmd
 	}
 	return out
 }
@@ -413,7 +424,8 @@ func missingRequiredVariants(cmd Command) map[string][]string {
 // 本番コードの NewError(CodeUsageError, …) の箇所数と件数を照合する。
 // C-1 は課題、OP-1 は C-1 の不可逆操作として実在させておく。
 var runLevelUsageErrorCases = [][]string{
-	{"edit", "C-1"}, // 変更する項目が 1 つも無い
+	{"serve", "--port", "abc"}, // --port が 0〜65535 の整数でない（bind する前に拒否する）
+	{"edit", "C-1"},            // 変更する項目が 1 つも無い
 	{"plan", "C-1", "--file", "/nonexistent/flywheel-plan.txt"}, // --file が読めない
 	{"verify", "C-1", "--result", "met", "--question", "q"},     // met と --question の同時指定
 	{"approve", "OP-1", "--hold-release"},                       // 不可逆操作の ID への --hold-release

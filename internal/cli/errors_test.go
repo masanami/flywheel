@@ -184,7 +184,7 @@ func TestParseErrorCodeTable_Synthetic(t *testing.T) {
 }
 
 func TestErrorCodeTableMatchesSpec(t *testing.T) {
-	spec := loadSpecErrorCodeTable(t)
+	spec := append(loadSpecErrorCodeTable(t), loadM4ErrorCodeTable(t)...)
 
 	if len(spec) != len(errorCodeTable) {
 		t.Fatalf("spec table has %d rows, implementation has %d (spec=%+v impl=%+v)",
@@ -220,6 +220,16 @@ func loadSpecErrorCodeTable(t *testing.T) []codeExit {
 	t.Helper()
 	path := filepath.Join(repoRoot(t), "docs", "features", "m1-core.md")
 	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read spec: %v", err)
+	}
+	return parseErrorCodeTable(t, string(data))
+}
+
+// loadM4ErrorCodeTable は docs/features/m4-ui-server.md の「エラーコードの追加」の表を読む。
+func loadM4ErrorCodeTable(t *testing.T) []codeExit {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4-ui-server.md"))
 	if err != nil {
 		t.Fatalf("read spec: %v", err)
 	}
@@ -319,6 +329,14 @@ func TestErrorCodeSet_IsM1M2PlusS1CodesInBothDirections(t *testing.T) {
 	}
 	if s1 != 4 {
 		t.Fatalf("M3 S1 adds 4 error codes (invoker_unavailable, locked, run_in_progress, budget_exceeded), table has %d besides the S2-only ones: %+v", s1, m3)
+	}
+
+	m4 := parseErrorCodeTable(t, read("m4-ui-server.md"))
+	if len(m4) != 2 {
+		t.Fatalf("M4 adds 2 error codes (listen_failed, forbidden_origin), table has %d: %+v", len(m4), m4)
+	}
+	for _, e := range m4 {
+		want[e.Code] = e.ExitCode
 	}
 
 	got := map[ErrorCode]int{}
