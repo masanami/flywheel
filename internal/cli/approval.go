@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // このファイルは本人確認つきの操作（approve・reject・answer）の実コマンドを
@@ -74,7 +75,7 @@ func runApproveOperation(a Args, id string, holdRelease bool) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{"operation": operationJSON(*op), "approval": approvalJSON(*approval)},
+		json: view.OperationApprovalResponse{Approval: view.FromApproval(*approval), Operation: view.FromOperation(*op)},
 		text: op.ID + "\n",
 	}, nil
 }
@@ -123,7 +124,7 @@ func runApproveChallenge(a Args, id string, holdRelease bool) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{"challenge": challengeJSON(*c), "approval": approvalJSON(*approval)},
+		json: view.ChallengeApprovalResponse{Approval: view.FromApproval(*approval), Challenge: view.FromChallenge(*c)},
 		text: challengeText(*c),
 	}, nil
 }
@@ -164,7 +165,7 @@ func runRejectOperation(a Args, id string, reason string) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{"operation": operationJSON(*op), "approval": approvalJSON(*approval)},
+		json: view.OperationApprovalResponse{Approval: view.FromApproval(*approval), Operation: view.FromOperation(*op)},
 		text: op.ID + "\n",
 	}, nil
 }
@@ -192,7 +193,7 @@ func runRejectChallenge(a Args, id string, reason string) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{"challenge": challengeJSON(*c), "approval": approvalJSON(*approval)},
+		json: view.ChallengeApprovalResponse{Approval: view.FromApproval(*approval), Challenge: view.FromChallenge(*c)},
 		text: challengeText(*c),
 	}, nil
 }
@@ -222,7 +223,7 @@ func runAnswer(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{"challenge": challengeJSON(*c), "hold": holdJSON(*hold)},
+		json: view.ChallengeHoldResponse{Challenge: view.FromChallenge(*c), Hold: view.FromHold(*hold)},
 		text: challengeText(*c),
 	}, nil
 }
@@ -320,40 +321,4 @@ func answerSummaryText(p *core.AnswerPreview) string {
 	fmt.Fprintf(&b, "問い:     %s\n", p.Question)
 	fmt.Fprintf(&b, "回答:     %s\n", p.Answer)
 	return b.String()
-}
-
-// approvalJSON は core.Approval を「成功時の JSON 出力の規約」の approval
-// オブジェクトの形へ変換する（show の approvals の要素・approve/reject の
-// 単発の成功出力が共有する）。
-func approvalJSON(a core.Approval) map[string]any {
-	return map[string]any{
-		"kind":           string(a.Kind),
-		"decision":       string(a.Decision),
-		"operation_id":   nilableString(a.OperationID),
-		"target_version": a.TargetVersion,
-		"actor":          a.Actor,
-		"channel":        a.Channel,
-		"verification":   a.Verification,
-		"reason":         nilableString(a.Reason),
-		"decided_at":     FormatTimestamp(a.DecidedAt),
-	}
-}
-
-// holdJSON は core.Hold を「成功時の JSON 出力の規約」の hold オブジェクトの
-// 形へ変換する（show の holds の要素・answer の単発の成功出力が共有する）。
-func holdJSON(h core.Hold) map[string]any {
-	label, _ := h.FromStatus.Label()
-	var answeredAt any
-	if h.AnsweredAt != nil {
-		answeredAt = FormatTimestamp(*h.AnsweredAt)
-	}
-	return map[string]any{
-		"question":          h.Question,
-		"from_status":       string(h.FromStatus),
-		"from_status_label": label,
-		"raised_at":         FormatTimestamp(h.RaisedAt),
-		"answer":            nilableString(h.Answer),
-		"answered_at":       answeredAt,
-		"answered_by":       nilableString(h.AnsweredBy),
-	}
 }

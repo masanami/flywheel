@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // runClassify は `flywheel classify <ID> --priority <P0|P1|P2>`（T2）と
@@ -27,7 +28,7 @@ func runClassify(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{json: map[string]any{"challenge": challengeJSON(*c)}, text: challengeText(*c)}, nil
+	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
 }
 
 // runPlan は `flywheel plan <ID> (--file <path> | --stdin)` の実装（T3・T4）と
@@ -52,7 +53,7 @@ func runPlan(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{"challenge": challengeJSON(*c), "plan": planJSON(*plan)},
+		json: view.ChallengeWithPlanResponse{Challenge: view.FromChallenge(*c), Plan: view.FromPlan(*plan)},
 		text: challengeText(*c),
 	}, nil
 }
@@ -87,7 +88,7 @@ func runSubmit(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{json: map[string]any{"challenge": challengeJSON(*c)}, text: challengeText(*c)}, nil
+	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
 }
 
 // runVerify は `flywheel verify <ID> --result <met|not_met|uncertain> [--question <q>]`
@@ -121,7 +122,7 @@ func runVerify(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{json: map[string]any{"challenge": challengeJSON(*c)}, text: challengeText(*c)}, nil
+	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
 }
 
 // runHold は `flywheel hold <ID> [--question <q>]` の実装（T11）。--question の
@@ -134,15 +135,5 @@ func runHold(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{json: map[string]any{"challenge": challengeJSON(*c)}, text: challengeText(*c)}, nil
-}
-
-// planJSON は core.Plan を「成功時の JSON 出力の規約」の plan オブジェクトの形へ
-// 変換する（plan の単発の成功出力・plansJSON の要素と同じ形）。
-func planJSON(p core.Plan) map[string]any {
-	return map[string]any{
-		"version":    p.Version,
-		"body":       p.Body,
-		"created_at": FormatTimestamp(p.CreatedAt),
-	}
+	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
 }

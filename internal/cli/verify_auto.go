@@ -8,6 +8,7 @@ import (
 	"github.com/masanami/flywheel/internal/adapters/github"
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/invoker"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // runVerifyAuto は `flywheel verify --auto [<C-ID>]` の実装（J5。docs/features/
@@ -72,7 +73,7 @@ func runVerifyAuto(a Args) (any, error) {
 	}
 
 	return textOutput{
-		json: map[string]any{"phase": judgmentPhaseJSON("verify", res)},
+		json: view.PhaseResponse{Phase: view.FromJudgmentPhase("verify", false, res)},
 		text: judgmentPhaseText("検証の対象はありませんでした\n", res),
 	}, nil
 }

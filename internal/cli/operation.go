@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // このファイルは不可逆操作の登録 `op add` の実コマンドを持つ（Issue #13）。
@@ -31,7 +32,7 @@ func runOpAdd(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{"operation": operationJSON(*op)},
+		json: view.OperationResponse{Operation: view.FromOperation(*op)},
 		text: op.ID + "\n",
 	}, nil
 }

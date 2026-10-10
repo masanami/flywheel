@@ -8,6 +8,7 @@ import (
 	"github.com/masanami/flywheel/internal/adapters/github"
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/invoker"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // runPlanAuto は `flywheel plan --auto [<C-ID>]` の実装（#85。
@@ -81,7 +82,7 @@ func runPlanAuto(a Args) (any, error) {
 	}
 
 	return textOutput{
-		json: map[string]any{"phase": judgmentPhaseJSON("plan", res)},
+		json: view.PhaseResponse{Phase: view.FromJudgmentPhase("plan", false, res)},
 		text: judgmentPhaseText("計画の対象はありませんでした\n", res),
 	}, nil
 }

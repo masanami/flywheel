@@ -2,11 +2,11 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // runCreate は `flywheel create` の実装（T1）。core.CreateChallenge を呼ぶだけで、
@@ -24,7 +24,7 @@ func runCreate(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{json: map[string]any{"challenge": challengeJSON(*c)}, text: challengeText(*c)}, nil
+	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
 }
 
 // runShow は `flywheel show <C-ID>` の実装。
@@ -34,41 +34,9 @@ func runShow(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{
-			"challenge":      challengeJSON(detail.Challenge),
-			"plans":          plansJSON(detail.Plans),
-			"approvals":      approvalsJSON(detail.Approvals),
-			"holds":          holdsJSON(detail.Holds),
-			"operations":     operationsJSON(detail.Operations),
-			"source_binding": sourceBindingJSON(detail.SourceBinding),
-			// 課題の run（新しい順・最大 20 件。#86）。要素は `runs` コマンドと同じ形。
-			"runs": runsJSON(detail.Runs),
-		},
+		json: view.FromChallengeDetail(detail),
 		text: challengeDetailText(detail),
 	}, nil
-}
-
-// sourceBindingJSON は core.SourceBinding を「成功時の JSON 出力の規約」の
-// source_binding オブジェクトの形へ変換する（#56。show の最上位）。対応が無い
-// 課題（b が nil）は null を出力する（AC-48・AC-103）。
-func sourceBindingJSON(b *core.SourceBinding) any {
-	if b == nil {
-		return nil
-	}
-	return map[string]any{
-		"source_id":                b.SourceID,
-		"external_key":             b.ExternalKey,
-		"url":                      b.URL,
-		"fingerprint":              b.Fingerprint,
-		"upstream_state":           b.UpstreamState,
-		"policy_state":             b.PolicyState,
-		"comments_count":           b.CommentsCount,
-		"upstream_updated_at":      nullableString(b.UpstreamUpdatedAt),
-		"read_comments_count":      b.ReadCommentsCount,
-		"read_upstream_updated_at": nullableString(b.ReadUpstreamUpdatedAt),
-		"created_at":               FormatTimestamp(b.CreatedAt),
-		"updated_at":               FormatTimestamp(b.UpdatedAt),
-	}
 }
 
 // runList は `flywheel list [--status <状態>]` の実装。
@@ -81,7 +49,7 @@ func runList(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{json: map[string]any{"challenges": challengesJSON(challenges)}, text: challengeListText(challenges)}, nil
+	return textOutput{json: view.ListResponse{Challenges: view.FromChallenges(challenges)}, text: challengeListText(challenges)}, nil
 }
 
 // runEdit は `flywheel edit <C-ID> […]` の実装。人間記入欄のフラグが1つも
@@ -115,7 +83,7 @@ func runEdit(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{json: map[string]any{"challenge": challengeJSON(*c)}, text: challengeText(*c)}, nil
+	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
 }
 
 // runLog は `flywheel log [<C-ID>]` の実装。
@@ -128,55 +96,7 @@ func runLog(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	out := make([]map[string]any, 0, len(activities))
-	for _, act := range activities {
-		out = append(out, map[string]any{
-			"at":           FormatTimestamp(act.At),
-			"actor":        act.Actor,
-			"channel":      act.Channel,
-			"verification": act.Verification,
-			"entity":       act.Entity,
-			"entity_id":    act.EntityID,
-			"action":       act.Action,
-			"before":       act.Before,
-			"after":        act.After,
-		})
-	}
-	return textOutput{json: map[string]any{"activities": out}, text: activitiesText(activities)}, nil
-}
-
-// challengeJSON は core.Challenge を「成功時の JSON 出力の規約」の課題の形へ
-// 変換する（create・edit・show・list が共有する）。
-func challengeJSON(c core.Challenge) map[string]any {
-	label, _ := c.Status.Label()
-	return map[string]any{
-		"id":            c.ID,
-		"title":         c.Title,
-		"description":   c.Description,
-		"done_criteria": c.DoneCriteria,
-		"urgency":       urgencyJSON(c.Urgency),
-		"priority":      priorityJSON(c.Priority),
-		"status":        string(c.Status),
-		"status_label":  label,
-		"version":       c.Version,
-		"reporter":      c.Reporter,
-		"created_at":    FormatTimestamp(c.CreatedAt),
-		"updated_at":    FormatTimestamp(c.UpdatedAt),
-	}
-}
-
-func urgencyJSON(u *core.Urgency) any {
-	if u == nil {
-		return nil
-	}
-	return string(*u)
-}
-
-func priorityJSON(p *core.Priority) any {
-	if p == nil {
-		return nil
-	}
-	return string(*p)
+	return textOutput{json: view.LogResponse{Activities: view.FromActivities(activities)}, text: activitiesText(activities)}, nil
 }
 
 func nilableString(s *string) any {
@@ -184,73 +104,6 @@ func nilableString(s *string) any {
 		return nil
 	}
 	return *s
-}
-
-// plansJSON は show の plans の一覧を組み立てる。要素は planJSON に、J2 の構造化した
-// 出力 spec を足した形（#85。docs/features/m3-invoker-delegation.md §IF / API
-// 「`show`: …`plans` の要素に `spec`（J2 の構造化した出力。無ければ `null`）を足す」）。
-// 単発の `plan` の成功出力の plan オブジェクト（planJSON）は変えない。
-func plansJSON(plans []core.Plan) []map[string]any {
-	out := make([]map[string]any, 0, len(plans))
-	for _, p := range plans {
-		elem := planJSON(p)
-		elem["spec"] = planSpecJSON(p.Spec)
-		out = append(out, elem)
-	}
-	return out
-}
-
-// planSpecJSON は計画の spec（J2 の構造化した出力の JSON 文字列）を、そのまま JSON の
-// 値として出力するための値にする。人が登録した計画（spec が無い）は null。
-func planSpecJSON(spec *string) any {
-	if spec == nil {
-		return nil
-	}
-	return json.RawMessage(*spec)
-}
-
-// approvalsJSON・holdsJSON は show の一覧を組み立てる。要素の形は
-// approvalJSON・holdJSON（internal/cli/approval.go。#12 が approve/reject/
-// answer の単発の成功出力と共有するために切り出した）と同じ。
-func approvalsJSON(approvals []core.Approval) []map[string]any {
-	out := make([]map[string]any, 0, len(approvals))
-	for _, ap := range approvals {
-		out = append(out, approvalJSON(ap))
-	}
-	return out
-}
-
-func holdsJSON(holds []core.Hold) []map[string]any {
-	out := make([]map[string]any, 0, len(holds))
-	for _, h := range holds {
-		out = append(out, holdJSON(h))
-	}
-	return out
-}
-
-// operationJSON は core.IrreversibleOperation を「成功時の JSON 出力の規約」の
-// operation オブジェクトの形へ変換する（show の operations の要素・
-// op add・approve/reject <OP-ID> の単発の成功出力が共有する。internal/cli/
-// operation.go の #13 が実コマンドから使う）。
-func operationJSON(op core.IrreversibleOperation) map[string]any {
-	return map[string]any{
-		"id":           op.ID,
-		"challenge_id": op.ChallengeID,
-		"kind":         string(op.Kind),
-		"summary":      op.Summary,
-		"ref":          nilableString(op.Ref),
-		"state":        string(op.State),
-		"version":      op.Version,
-		"created_at":   FormatTimestamp(op.CreatedAt),
-	}
-}
-
-func operationsJSON(ops []core.IrreversibleOperation) []map[string]any {
-	out := make([]map[string]any, 0, len(ops))
-	for _, op := range ops {
-		out = append(out, operationJSON(op))
-	}
-	return out
 }
 
 // challengeText は --json 無しの create・edit の表示（ID を 1 行）。
@@ -272,14 +125,15 @@ func challengeListText(challenges []core.Challenge) string {
 func challengeDetailText(d *core.ChallengeDetail) string {
 	var b strings.Builder
 	c := d.Challenge
+	vc := view.FromChallenge(c)
 	label, _ := c.Status.Label()
 	fmt.Fprintf(&b, "ID:            %s\n", c.ID)
 	fmt.Fprintf(&b, "タイトル:      %s\n", c.Title)
 	fmt.Fprintf(&b, "状態:          %s (%s)\n", label, c.Status)
 	fmt.Fprintf(&b, "版:            %d\n", c.Version)
 	fmt.Fprintf(&b, "起票者:        %s\n", c.Reporter)
-	fmt.Fprintf(&b, "緊急度:        %s\n", textOrDash(urgencyJSON(c.Urgency)))
-	fmt.Fprintf(&b, "優先度:        %s\n", textOrDash(priorityJSON(c.Priority)))
+	fmt.Fprintf(&b, "緊急度:        %s\n", textOrDash(nilableString(vc.Urgency)))
+	fmt.Fprintf(&b, "優先度:        %s\n", textOrDash(nilableString(vc.Priority)))
 	fmt.Fprintf(&b, "説明:          %s\n", c.Description)
 	fmt.Fprintf(&b, "完了条件:      %s\n", c.DoneCriteria)
 	fmt.Fprintf(&b, "作成:          %s\n", FormatTimestamp(c.CreatedAt))

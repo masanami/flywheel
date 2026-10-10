@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // runMarkRead は `flywheel mark-read <C-ID>` の実装。core.Store.MarkRead を
@@ -17,11 +18,7 @@ func runMarkRead(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{
-			"challenge_id":   res.ChallengeID,
-			"changed":        res.Changed,
-			"source_binding": sourceBindingJSON(res.SourceBinding),
-		},
+		json: view.FromMarkReadResult(res),
 		text: markReadText(res),
 	}, nil
 }

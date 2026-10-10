@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // runSlotClear は `flywheel slot clear <SL-ID>` の実装。needs_attention のスロットを
@@ -14,14 +16,7 @@ func runSlotClear(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{
-			"slot": map[string]any{
-				"slot_id": slot.ID,
-				"repo":    slot.Repo,
-				"path":    slot.Path,
-				"state":   slot.State,
-			},
-		},
+		json: view.FromSlot(slot),
 		text: fmt.Sprintf("スロット: %s\nリポジトリ: %s\nパス: %s\n状態: %s\n", slot.ID, slot.Repo, slot.Path, slot.State),
 	}, nil
 }

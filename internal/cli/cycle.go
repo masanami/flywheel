@@ -10,6 +10,7 @@ import (
 	"github.com/masanami/flywheel/internal/adapters/github"
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/invoker"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // defaultCycleTrigger は `--trigger` を省略したときの周の契機
@@ -133,52 +134,7 @@ func runCycle(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{json: cycleResultJSON(res), text: cycleResultText(res)}, nil
-}
-
-// cycleResultJSON は core.CycleRunResult を §IF / API「cycle の JSON 出力」の形へ変換する:
-// {"cycle": {…}, "config_defaults_used": […], "phases": […], "rate_limited": bool}。
-func cycleResultJSON(res *core.CycleRunResult) map[string]any {
-	c := res.Cycle
-	phases := make([]any, 0, len(res.Phases))
-	for _, p := range res.Phases {
-		phases = append(phases, cyclePhaseJSON(p))
-	}
-	return map[string]any{
-		"cycle": map[string]any{
-			"id":         c.ID,
-			"trigger":    c.Trigger,
-			"started_at": FormatTimestamp(c.StartedAt),
-			"ended_at":   nullableTimePtr(c.EndedAt),
-			"result":     string(c.Result),
-			"budget_usd": c.BudgetUSD,
-			"spent_usd":  c.SpentUSD,
-		},
-		"config_defaults_used": res.ConfigDefaultsUsed,
-		"phases":               phases,
-		"rate_limited":         res.RateLimited,
-	}
-}
-
-// cyclePhaseJSON は段 1 つを phases の 1 要素の形へ変換する。取り込みの段は
-// {"phase","skipped","result"}（result は ingest --json と同じ形。skipped なら null）、
-// 分類・計画・委譲・検証の段は {"phase","skipped","items","not_started"}（skipped なら空。
-// 委譲の段は serial_groups も持つ）。
-func cyclePhaseJSON(p core.CyclePhaseResult) map[string]any {
-	if p.Phase == core.CyclePhaseIngest {
-		var result any
-		if p.Ingest != nil {
-			result = ingestResultJSON(p.Ingest)
-		}
-		return map[string]any{"phase": string(p.Phase), "skipped": p.Skipped, "result": result}
-	}
-	res := &core.JudgmentAutoResult{Items: p.Items, NotStarted: p.NotStarted, SerialGroups: p.SerialGroups}
-	out := judgmentPhaseJSON(string(p.Phase), res)
-	if p.Phase == core.CyclePhaseRun {
-		out = delegationPhaseJSON(res)
-	}
-	out["skipped"] = p.Skipped
-	return out
+	return textOutput{json: view.FromCycleRunResult(res), text: cycleResultText(res)}, nil
 }
 
 // cycleResultText は --json 無しの cycle の表示（形式の安定は保証しない）。
