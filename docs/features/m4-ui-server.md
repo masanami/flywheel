@@ -248,7 +248,7 @@ M4 の完了の目安は、設計書 §17 のとおり「UI から承認・優�
 ### アーキテクチャ決定
 
 - CLI の `--json` の形を組み立てる処理（今は `internal/cli` の `challengeJSON`・`runsJSON` などが `map[string]any` で組み立てている）を、新設の `internal/view` へ型つきの構造体（`json` タグつき）として移し、`internal/cli` と `internal/server` の両方がそれを使う。server は `internal/cli` を import しない（`internal/cli` が `serve` のために `internal/server` を import するので、逆向きは循環する）。移しても CLI の出力は変えない（M1〜M3 の `jsondoc_test.go` がそのまま通る）。TypeScript の型は `internal/view` の構造体から生成する【決定 2026-10-09 親 M4P3】。
-- server が使う core の公開 API のうち、新しく足すもの: ⓪ M1 の探索規則でワークスペースのディレクトリだけを解決する関数（ストアが無くてもパスと名前を決めるため）とスキーマ版の読み直し ① 中断した run を回収せずにストアを開く読み取りの開き方 ② ストアの変化の観測（`PRAGMA data_version` を、書き込み・閲覧とは別の専用の 1 本の接続で読んで返す）③ カードの面の導出（課題・`status`・run・現在時刻から）④ 未回答の保留の一覧 ⑤ run の報告の読み取り（形の検査と run の存在の確認つき）。名前は実装で決めてよい【仮定】。
+- server が使う core の公開 API のうち、新しく足すもの: ⓪ M1 の探索規則でワークスペースのディレクトリだけを解決する関数（ストアが無くてもパスと名前を決めるため）とスキーマ版の読み直し ① 中断した run を回収しない run の一覧の読み取り（`OpenWorkspace` は回収しない。回収するのは run の一覧〔`ListRuns`〕・判断の呼び出し・周の開始・委譲の計画で、`status` が呼ぶ関数は回収しない。server が使うのは回収しない一覧の経路〔課題の詳細の run の欄も回収しない版を使う〕で、既存の `ListRuns` と CLI の出力は変えない） ② ストアの変化の観測（`PRAGMA data_version` を、書き込み・閲覧とは別の専用の 1 本の接続で読んで返す）③ カードの面の導出（課題・`status`・run・現在時刻から）④ 未回答の保留の一覧 ⑤ run の報告の読み取り（形の検査と run の存在の確認つき）。名前は実装で決めてよい【仮定】。
 - server が状態を読み書きするのは core の公開 API だけである（P2。`waiting_external` のための `internal/adapters/github` の組み立ては M4P19 のとおり）。ワークスペースごとに core の `Store` を開き、要求ごとにワークスペースの名前から引く。server 自身はストアの外に状態を持たない。例外は、server の起動ごとに生成する CSRF の値（S2）・パスキーの challenge（S3。メモリ上・5 分で失効）・遠隔のサインインのセッション（S5。メモリ上）で、どれも server が落ちれば消えてよい【決定 2026-10-09 親 M4P1】。
 - ライブ更新は、ワークスペースごとに専用の接続で `PRAGMA data_version` を 1 秒ごとに読み（`data_version` は他の接続の commit でだけ変わるので、観測の接続では書かない）、値が変わったら Server-Sent Events で `{"type":"workspace_changed","workspace":"<名前>"}` を送る。UI はその通知を受けて該当のワークスペースを読み直す。`data_version` は別の接続の commit で変わるので、CLI・`cycle`・別の server の書き込みを、作業ログに載らない `run`・`slot` の変化を含めて拾える【決定 2026-10-09 親 M4P4】。
 - UI は単一ページのアプリとし、ビルド成果物をバイナリへ埋め込む。Node が無い環境でも `go build ./...` が通るよう、埋め込み先には「UI がビルドされていない」ことを示す最小の `index.html` をコミットしておき、`make` が UI をビルドして置き換える【決定 2026-10-09 親 M4P13】。
@@ -359,7 +359,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 1. **server の骨格**: `internal/server`・`flywheel serve`・`127.0.0.1` への bind・`--port`・`listen_failed`・Host と Origin の検査・終了のシグナル・`depcheck_test.go` の更新・`CLAUDE.md` のモジュール構成の表
 2. **fleet**: `fleet.json` の読み込みと検証・ワークスペースごとのストアの状態・`store_too_new` への追従
 3. **閲覧の API**: CLI の JSON と同じ形の返却・エラーコードと HTTP の状態コード・`needs-human`・`questions`
-4. **カードの面**: core の導出（`state`・`modifiers`・`next_human_actions`。現在時刻を引数で受け取る）・未回答の保留の一覧・run の報告の読み取り・回収しない読み取りの開き方
+4. **カードの面**: core の導出（`state`・`modifiers`・`next_human_actions`。現在時刻を引数で受け取る）・未回答の保留の一覧・run の報告の読み取り・回収しない run の一覧の読み取り
 5. **ライブ更新**: core の変化の観測（専用の接続の `data_version`）と SSE
 6. **型の生成**: Go の型からの TypeScript の型の生成器と、差を検出するテスト
 7. **UI の土台**: `web/` の Vite・React・Vitest・Biome・`make check` への組み込み・CI の Node・埋め込み
@@ -463,7 +463,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 
 ### 閲覧の API
 
-> 「CLI と JSON として等しい」の項目は、heartbeat が古い終了していない run の無いストアで比べる（CLI のコマンドはストアを開くときに中断した run を回収するが、server は回収しないため）。
+> 「CLI と JSON として等しい」の項目は、heartbeat が古い終了していない run の無いストアで比べる（`runs`・`show` は run の一覧を読むときに中断した run を回収するが、server は回収しないため。`status` は回収しない）。
 
 - [ ] `GET /api/v1/workspaces/{name}/status` の本文は、同じストアでの `flywheel status --json` の標準出力と JSON として等しい（検証中で PR を持つ課題を含むストアで、M3 と同じ偽の `gh` を PATH に置いて比べる）
 - [ ] 検証中で PR を持つ課題を含むストアで、PATH から `gh` だけを除いた環境（`flywheel` は絶対パスで起動する）では、`GET /api/v1/workspaces/{name}/status` は 200 を返し、本文は同じ環境の `flywheel status --json` の標準出力（その課題を `waiting_external` に含まない）と JSON として等しい
@@ -681,7 +681,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - M1 の `Verifier` の形（`Confirm(summary, expectedID)`）と 2 段階の API: 端末向けの形で、ブラウザでは表示（①）と署名（②）が別の要求になり、まとめての承認では対象が集合になる（M4P20）。本仕様は、`Confirm` は ② で受け取った署名の検証だけを行い、`expectedID` には集合の正規形（§本人確認つきの書き込みの定義。1 件の承認も同じ形）を渡す【決定 2026-10-09 親 M4P21】。CLI の `tty_confirm` の `expectedID` は M1 のまま対象の ID 単独とする。core には、集合の承認の要約と版をまとめて得る API と、集合を 1 つの書き込みトランザクションで承認する API を足す（今の `ExecuteApproval` は 1 件ずつのトランザクション）。M1 の承認の規則は 1 件ずつそのまま当てはめる。実装で `Verifier` の形を変える必要が出たら、core の公開 API の変更として親に上げる。
 - M1 H9（確認は対象の ID の入力）は、UI の経路には当てはめない（M4P20）。CLI の `tty_confirm` は変えない。
 - M3 の J1 の出力スキーマを広げる（S4）: `headline`・`context` を足す（M4H7）。J1 の指示文の上限（M3P4 の 4 KiB）は変えない前提である。
-- core の公開 API を足す（S1）: 回収しない読み取りの開き方・ストアの変化の観測・カードの面の導出・未回答の保留の一覧・run の報告の読み取り（§アーキテクチャ決定）。M3 は「次にストアを開いた flywheel のコマンドが中断した run を回収する」としており、server の閲覧はこの「コマンド」に含めない。
+- core の公開 API を足す（S1）: 回収しない run の一覧の読み取り・ストアの変化の観測・カードの面の導出・未回答の保留の一覧・run の報告の読み取り（§アーキテクチャ決定）。M3 は「次にストアを開いた flywheel のコマンドが中断した run を回収する」としているが、実際に回収するのは run の一覧・判断の呼び出し・周の開始・委譲の計画の入口であり、server の閲覧はこの入口を通らない。
 - `internal/cli` の JSON の組み立てを `internal/view` へ移す（S1）。`CLAUDE.md` のモジュール構成の表に `internal/server`・`internal/view` を足し、adapter を組み立ててよい側（今は `internal/cli` だけ）に `internal/server` を足す（S1 の実装チケット。M4P19）。
 - パスキーの登録と削除（S3 の `flywheel passkey enroll`・`remove`）は、M1 の登録簿・承認の種類には入れず、`tty_confirm` の Verifier を CLI の中で使う設定ファイルの操作とする（課題・ストアを変えないので、作業ログにも載らない）【決定 2026-10-09 親 M4P11】。
 - M1 のエラーコードの閉集合を広げる: `listen_failed`・`forbidden_origin`。`internal/cli/errors_test.go` は M1〜M3 の表だけを読むので、実装するチケットで M4 の表を読ませる。

@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // flagDef は 1 つのフラグの宣言。HasValue が true なら値を取るフラグ
@@ -67,11 +68,7 @@ func runInit(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: map[string]any{
-			"workspace":  res.Workspace,
-			"store_path": res.StorePath,
-			"created":    res.Created,
-		},
+		json: view.FromInitResult(res),
 		text: initText(res),
 	}, nil
 }

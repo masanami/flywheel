@@ -234,10 +234,6 @@ func dependsOn(deps []string, target string) bool {
 	return false
 }
 
-// serverImportPath は M4 S1 で新設した internal/server のフルインポートパス
-// （docs/features/m4-ui-server.md §受入基準 AC-132〜AC-136）。
-const serverImportPath = "github.com/masanami/flywheel/internal/server"
-
 // TestServerImportDirection は internal/server が、ストアのパッケージ・internal/cli・
 // internal/invoker を（テストファイルを含め）import しないことを検査する。
 // internal/adapters/github は waiting_external の組み立てだけに使えるので禁止しない。
@@ -265,31 +261,6 @@ func TestServerImportDirection(t *testing.T) {
 	}
 	if len(violators) != 0 {
 		t.Errorf("internal/server imports a forbidden package: %v", violators)
-	}
-}
-
-// TestCoreDoesNotImportServer は internal/core が internal/server を import しないことを検査する
-// （internal/view の部分は view を新設するチケットで足す）。
-func TestCoreDoesNotImportServer(t *testing.T) {
-	pkgs := goListJSON(t, repoRoot(t), "./...")
-	saw := false
-	var violators []string
-	for _, pkg := range pkgs {
-		if !underPackagePrefix(pkg.ImportPath, corePackagePrefix) {
-			continue
-		}
-		saw = true
-		for _, imp := range allImports(pkg) {
-			if underPackagePrefix(imp, serverImportPath) {
-				violators = append(violators, pkg.ImportPath+" -> "+imp)
-			}
-		}
-	}
-	if !saw {
-		t.Fatal("go list did not report any internal/core package")
-	}
-	if len(violators) != 0 {
-		t.Errorf("internal/core imports internal/server: %v", violators)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"github.com/masanami/flywheel/internal/adapters/git"
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/invoker"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // runRun は `flywheel run [<C-ID>]` の実装（#102。docs/features/m3-invoker-delegation.md
@@ -79,7 +80,7 @@ func runRun(a Args) (any, error) {
 	}
 
 	return textOutput{
-		json: map[string]any{"phase": delegationPhaseJSON(res)},
+		json: view.PhaseResponse{Phase: view.FromDelegationPhase(false, res)},
 		text: judgmentPhaseText("委譲の対象はありませんでした\n", res),
 	}, nil
 }

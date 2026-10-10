@@ -518,6 +518,16 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 // interrupted で終了させる」）。課題の詳細と run の一覧は別々のトランザクションで読む
 // （同じ時点の値である保証は無い）。
 func (s *Store) GetChallenge(ctx context.Context, id string) (*ChallengeDetail, error) {
+	return s.getChallenge(ctx, id, true)
+}
+
+// GetChallengeWithoutReap は GetChallenge と同じ形を返すが、run の一覧を読む前に
+// 中断した run を回収しない（閲覧だけの経路。M4P12）。
+func (s *Store) GetChallengeWithoutReap(ctx context.Context, id string) (*ChallengeDetail, error) {
+	return s.getChallenge(ctx, id, false)
+}
+
+func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*ChallengeDetail, error) {
 	cid, ok := parseChallengeID(id)
 	if !ok {
 		return nil, ErrNotFound
@@ -567,7 +577,11 @@ func (s *Store) GetChallenge(ctx context.Context, id string) (*ChallengeDetail, 
 	}
 	// run の一覧は、ListRuns と同じく先に中断した run を回収してから読む
 	// （`runs` と `show` で同じ run が同じ結果に見える）。
-	runs, err := s.ListRuns(ctx, RunListOptions{ChallengeID: &id, Limit: showRunsLimit})
+	list := s.ListRunsWithoutReap
+	if reap {
+		list = s.ListRuns
+	}
+	runs, err := list(ctx, RunListOptions{ChallengeID: &id, Limit: showRunsLimit})
 	if err != nil {
 		return nil, err
 	}

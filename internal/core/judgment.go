@@ -621,16 +621,21 @@ func computeRunCost(result RunResult, reportedUSD *float64, isResume bool, prevR
 
 // --- 中断した run の回収（interrupted への回収） ---
 
+// effectiveStaleAfter は heartbeat が古いとみなす閾値（ReapInterruptedRuns と同じ値）。
+func (s *Store) effectiveStaleAfter() time.Duration {
+	if s.staleAfter <= 0 {
+		return defaultStaleAfter
+	}
+	return s.staleAfter
+}
+
 // ReapInterruptedRuns は、終了していない run のうち heartbeat が
 // defaultStaleAfter（テストは s.staleAfter で差し替え可能）より古く、
 // 記録したプロセスがそのホストで生きていないものを interrupted で閉じる
 // （§invoker の共通の規則）。ListRuns（flywheel runs）・RunJudgment の入口が
 // 呼ぶ。
 func (s *Store) ReapInterruptedRuns(ctx context.Context) error {
-	threshold := s.staleAfter
-	if threshold <= 0 {
-		threshold = defaultStaleAfter
-	}
+	threshold := s.effectiveStaleAfter()
 	now := s.currentTime()
 
 	type candidate struct {

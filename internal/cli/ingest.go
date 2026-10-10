@@ -9,6 +9,7 @@ import (
 
 	"github.com/masanami/flywheel/internal/adapters/github"
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // ingestGHTimeout は `gh` の 1 回の呼び出しの時間の上限（Issue #59
@@ -74,7 +75,7 @@ func runIngest(a Args) (any, error) {
 	}
 
 	return textOutput{
-		json: ingestResultJSON(result),
+		json: view.FromIngestResult(result),
 		text: ingestResultText(result),
 	}, nil
 }
@@ -92,71 +93,6 @@ func newIngestClient() (*github.Client, error) {
 		return nil, NewError(CodeInternalError, err.Error())
 	}
 	return client, nil
-}
-
-// ingestResultJSON は core.IngestResult を「成功時の JSON 出力の規約」の
-// `ingest` の形（docs/features/m1-core.md ##### `ingest`）へ変換する。
-func ingestResultJSON(res *core.IngestResult) map[string]any {
-	sources := make([]any, 0, len(res.Sources))
-	for _, sr := range res.Sources {
-		repos := make([]any, 0, len(sr.Repos))
-		for _, rr := range sr.Repos {
-			items := make([]any, 0, len(rr.Items))
-			for _, item := range rr.Items {
-				// challenge_id・upstream_state・policy_state が null になる
-				// （対応の情報を積まずに failed を返す）反映失敗では、
-				// comments_count も同じく「不明」を表すため null にする
-				// （self-review 指摘: 0 のままだと「コメント 0 件を観測した」と
-				// 区別できず、M1 §成功時の JSON 出力の規約「未設定の任意値は
-				// null」と食い違っていた）。unread は「空の一覧は []」の規則
-				// どおり、この場合も [] のまま（他の一覧フィールドと同じ扱い）。
-				var commentsCount any = item.CommentsCount
-				if item.ChallengeID == "" {
-					commentsCount = nil
-				}
-				items = append(items, map[string]any{
-					"external_key":        item.ExternalKey,
-					"challenge_id":        nullableString(item.ChallengeID),
-					"result":              string(item.Result),
-					"upstream_state":      nullableString(item.UpstreamState),
-					"policy_state":        nullableString(item.PolicyState),
-					"comments_count":      commentsCount,
-					"upstream_updated_at": nullableString(item.UpstreamUpdatedAt),
-					"unread":              discrepancyKindsJSON(item.Unread),
-					"error":               nullableStringPtr(item.Error),
-				})
-			}
-			repos = append(repos, map[string]any{
-				"repo":     rr.Repo,
-				"error":    nullableStringPtr(rr.Error),
-				"items":    items,
-				"excluded": rr.Excluded,
-			})
-		}
-		sources = append(sources, map[string]any{
-			"id":                      sr.ID,
-			"self_assignees_resolved": sr.SelfAssigneesResolved,
-			"repos":                   repos,
-		})
-	}
-	return map[string]any{"sources": sources}
-}
-
-// nullableString は s が空文字列なら null、そうでなければ s 自身を返す
-// （「成功時の JSON 出力の規約」§未設定と空「未設定の任意値は null」）。
-func nullableString(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
-// nullableStringPtr は p が nil なら null、そうでなければ *p を返す。
-func nullableStringPtr(p *string) any {
-	if p == nil {
-		return nil
-	}
-	return *p
 }
 
 // ingestResultText は --json 無しの `ingest` の表示（形式の安定は保証しない。
