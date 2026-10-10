@@ -30,6 +30,7 @@
 | `internal/adapters/github` | `gh` の起動と応答の正規化（GitHub Issue・ブランチ・PR・PR のチェックの取得）。core の取得 IF（`internal/core/upstream.go`）だけに依存し、取り込みの規則・CI の完了の判定規則は持たない。ストアを import しない |
 | `internal/adapters/git` | スロットの作業ツリーの検査と `git worktree add` の払い出し（`git` の起動）。core のスロットの IF（`internal/core/slot_git.go` の `SlotGit`）だけに依存し、割り当ての規則・origin の正規化は持たない。ストアを import しない。`GIT_DIR`・`GIT_WORK_TREE` を明示し、`fetch`・`clone` をしない |
 | `internal/server` | `flywheel serve` の HTTP サーバ（server・API・Host と Origin の検査・UI の配信）。`127.0.0.1` だけに bind する。core の公開 API だけを呼び（`internal/adapters/github` は下の import の向きの節の範囲だけ）、ストアのパッケージ・`internal/cli`・`internal/invoker` を import しない。自身の状態をストアの外に持たない（メモリ上の CSRF の値・challenge・セッションを除く） |
+| `web` | UI のソース（Vite・React・TypeScript・Vitest・Biome）。npm の依存はここだけに置き、ロックファイルで固定する。ビルド成果物は `internal/server/dist/ui`（git の追跡外）へ出て `go:embed` でバイナリへ入る。Node が無くても `go build` は通る（最小の `index.html` を返す） |
 | `internal/invoker` | `claude` の起動（判断の呼び出し〔`InvokeJudgment`〕と委譲〔`InvokeDelegation`〕）・接続ツールの衝突の予測の口の起動（`Predict`。宣言の `command` を作業ディレクトリでシェルを介さず起動し、出力を読むフィールドだけに正規化する。schema の照合・費用の数え方・グループの作り方は core）・結果の判別・費用の抽出（生の値）・出力の保存。委譲の標準入力は、埋め込んだ固定の節の雛形を差し込んで組み立てる（`BuildDelegationStdin`）。判断点の指示文と J3 ブリーフの固定の節の雛形は `internal/invoker/prompts/` に置き `embed` でバイナリへ埋め込む（`Instructions`・`BriefFixedSections`）。分量の上限検査（`CheckPromptSizes`）・禁止語の生成と照合（`ForbiddenTerms`・`FindForbiddenTerms`。生成元は core・cli の定義を引数で受け取る純粋関数）もここに置く。枠超過の判定規則（`IsRateLimited`）は `internal/core` に置き、invoker は抽出した自由記述をそのまま渡すだけ。core の判断の呼び出し IF（`internal/core/judgment.go` の `JudgmentInvoker`）・委譲の起動 IF（`internal/core/delegate.go` の `DelegationInvoker`）・衝突の予測の起動 IF（`internal/core/predict.go` の `ConflictPredictor`）だけに依存し、対象の選び方・予算の評価・課題への写像といった規則は持たない。ストアを import しない |
 
 - **CLI は core の公開 API だけを呼ぶ**。遷移の可否・承認の成立条件・作業ログの記録を `internal/cli` に書かない。
@@ -52,7 +53,7 @@
 ## 品質方針
 
 ```
-入口は make check の 1 つ。次の 5 つを順に実行し、1 つでも失敗すれば非 0 で終わる。
+入口は make check の 1 つ。UI の lint（Biome）・テスト（Vitest）・ビルドを先に実行し、続けて次の 5 つを順に実行し、1 つでも失敗すれば非 0 で終わる。
 CI も同じ make check を実行する（ubuntu-latest だけ。macOS の Actions の分数は 10 倍で数えられるため、macOS はローカルの make check で確かめる）。
 
 1. 整形      gofmt -l .                              出力が空

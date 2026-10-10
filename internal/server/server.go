@@ -91,9 +91,10 @@ func (s *Server) Shutdown() error {
 
 func newHandler(port int) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+	notFound := func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "not found")
-	})
+	}
+	mux.Handle("/", uiHandler(uiFS(), notFound))
 	return guard(port, mux)
 }
 

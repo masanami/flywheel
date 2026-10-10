@@ -7,3 +7,9 @@ coverage.out
 # ワークスペースのストア（開発中にリポジトリ直下で init した場合の保険。
 # 通常は internal/core が .flywheel/.gitignore を作る）
 /.flywheel/
+
+# UI（web/）
+/web/node_modules/
+# UI のビルド成果物（go:embed が読む）。.gitkeep だけ追跡し、成果物は追跡しない
+/internal/server/dist/*
+!/internal/server/dist/.gitkeep
