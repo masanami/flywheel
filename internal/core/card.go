@@ -63,10 +63,15 @@ type Card struct {
 	Context          *string
 }
 
-// DeriveCard は challenge のカードを導く。st は status の結果（GetOverviewFor の結果に
-// ListWaitingExternal の結果を WaitingExternal へ入れたもの）、now は現在時刻。
-// 課題の run（終了済みを含む）だけをストアから読む。
-func (s *Store) DeriveCard(ctx context.Context, challenge Challenge, st *Overview, now time.Time) (*Card, error) {
+// CardRuns は、課題のカードの導出に要る run（終了済みを含む）を、ストアから読んだ時点のまま持つ。
+// ストアの読み取りと、外部（GitHub）の応答を待つ導出を、別の借りに分けずに済ませるために使う。
+type CardRuns struct {
+	runs  []*runRow
+	stale time.Duration
+}
+
+// LoadCardRuns は challenge の run をストアから読む。
+func (s *Store) LoadCardRuns(ctx context.Context, challenge Challenge) (*CardRuns, error) {
 	var runs []*runRow
 	if id, ok := parseChallengeID(challenge.ID); ok {
 		err := s.db.Read(ctx, func(tx *sql.Tx) error {
@@ -88,7 +93,23 @@ func (s *Store) DeriveCard(ctx context.Context, challenge Challenge, st *Overvie
 			return nil, err
 		}
 	}
-	return deriveCard(challenge, st, runs, now, s.effectiveStaleAfter()), nil
+	return &CardRuns{runs: runs, stale: s.effectiveStaleAfter()}, nil
+}
+
+// Derive は読んだ run から challenge のカードを導く（ストアに触れない）。
+func (r *CardRuns) Derive(challenge Challenge, st *Overview, now time.Time) *Card {
+	return deriveCard(challenge, st, r.runs, now, r.stale)
+}
+
+// DeriveCard は challenge のカードを導く。st は status の結果（GetOverviewFor の結果に
+// ListWaitingExternal の結果を WaitingExternal へ入れたもの）、now は現在時刻。
+// 課題の run（終了済みを含む）だけをストアから読む。
+func (s *Store) DeriveCard(ctx context.Context, challenge Challenge, st *Overview, now time.Time) (*Card, error) {
+	r, err := s.LoadCardRuns(ctx, challenge)
+	if err != nil {
+		return nil, err
+	}
+	return r.Derive(challenge, st, now), nil
 }
 
 func deriveCard(c Challenge, st *Overview, runs []*runRow, now time.Time, stale time.Duration) *Card {

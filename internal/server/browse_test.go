@@ -613,3 +613,106 @@ func TestBrowseAPI_NeedsHumanSkipsUnreadableWorkspace(t *testing.T) {
 		t.Errorf("unreadable_workspaces = %v, want [b]", got)
 	}
 }
+
+// AC-53a・54a: 判定の後に借りられなくなったワークスペース（Acquire の失敗）は除いて名前を添え、残りは返す。
+func TestBrowseAPI_AcquireFailureIsUnreadableAndRestIsReturned(t *testing.T) {
+	a := browseWorkspace(t)
+	coretest.InsertHold(t, a, 1, "from-a", "in_progress", "2026-10-05T00:00:00.000Z", nil)
+	s, _ := startFleetServer(t, core.FleetWorkspace{Name: "a", Path: a})
+	// ok と判定された後に fleet から借りられなくなった名前 "gone" を、古い判定結果として混ぜる。
+	stale := append(s.fleet.Statuses(context.Background()), WorkspaceStatus{Name: "gone", State: StateOK})
+
+	nh, err := collectNeedsHuman(context.Background(), s.fleet, stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nh.Workspaces) != 1 || nh.Workspaces[0].Name != "a" || !reflect.DeepEqual(nh.UnreadableWorkspaces, []string{"gone"}) {
+		t.Errorf("needs-human = %+v", nh)
+	}
+	q, err := collectQuestions(context.Background(), s.fleet, stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(q.Questions) != 1 || !reflect.DeepEqual(q.UnreadableWorkspaces, []string{"gone"}) {
+		t.Errorf("questions = %+v", q)
+	}
+}
+
+// 要求が取り消されて借りられなかったときは、unreadable_workspaces に入れて続けず、エラーにする。
+func TestBrowseAPI_AcquireFailureOnCancelledRequestIsAnError(t *testing.T) {
+	a := browseWorkspace(t)
+	s, _ := startFleetServer(t, core.FleetWorkspace{Name: "a", Path: a})
+	stale := []WorkspaceStatus{{Name: "gone", State: StateOK}} // 借りられないのはこの 1 件だけ（後続の読み取りの失敗で通らないように）
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := collectNeedsHuman(ctx, s.fleet, stale); err == nil {
+		t.Error("needs-human: want an error for a cancelled request")
+	}
+	if _, err := collectQuestions(ctx, s.fleet, stale); err == nil {
+		t.Error("questions: want an error for a cancelled request")
+	}
+}
+
+// カードの API も、遅い gh の取得の間はストアの読み取りの借りを持たない（状態更新の Lock が待たされない）。
+func TestBrowseAPI_CardsDoNotHoldStoreLeaseWhileFetchingChecks(t *testing.T) {
+	for _, path := range []string{"/api/v1/workspaces/w/challenges", "/api/v1/workspaces/w/challenges/C-1"} {
+		t.Run(path, func(t *testing.T) {
+			ws := verifyingWorkspace(t)
+			dir, calls := writeFakeGH(t, ghRoutesPending())
+			release := filepath.Join(dir, "release")
+			orig, err := os.ReadFile(filepath.Join(dir, "gh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wrapped := strings.Replace(string(orig), "case ", "while [ ! -e '"+release+"' ]; do sleep 0.05; done\ncase ", 1)
+			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(wrapped), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			withGHOnPATH(t, dir)
+			s, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
+			if e := stateOf(t, port, "w"); e.State != StateOK {
+				t.Fatalf("state = %q", e.State)
+			}
+			type result struct {
+				code int
+				body string
+			}
+			done := make(chan result, 1)
+			go func() {
+				code, body := apiGet(t, port, path)
+				done <- result{code, body}
+			}()
+			deadline := time.Now().Add(10 * time.Second)
+			for calls() == 0 {
+				if time.Now().After(deadline) {
+					t.Fatal("gh was never started")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			dbDir := filepath.Join(ws, ".flywheel")
+			if err := os.Rename(filepath.Join(dbDir, "flywheel.db"), filepath.Join(dbDir, "moved.db")); err != nil {
+				t.Fatal(err)
+			}
+			acquired := make(chan struct{})
+			go func() {
+				if _, rel, le := s.fleet.Acquire(context.Background(), "w"); le == nil {
+					rel()
+				}
+				close(acquired)
+			}()
+			select {
+			case <-acquired:
+			case <-time.After(5 * time.Second):
+				t.Error("state update was blocked while the card request waited for gh")
+			}
+			if err := os.WriteFile(release, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-done: // 状態が変わった後なのでコードは問わない
+			case <-time.After(10 * time.Second):
+				t.Fatal("card request did not finish")
+			}
+		})
+	}
+}

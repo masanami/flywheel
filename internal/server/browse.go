@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"time"
@@ -39,16 +40,50 @@ func withStore(fleet *Fleet, h func(w http.ResponseWriter, r *http.Request, st *
 	}
 }
 
-// overviewFor は status と同じ規則で、waiting_external まで入れた Overview を返す。
-func overviewFor(ctx context.Context, st *core.Store, checks *checkCache) (*core.Overview, error) {
+// cardRead は、ストアの読み取りの借りを持つ間に読むもの（gh の取得は含まない）。
+type cardRead struct {
+	ov    *core.Overview
+	cands []core.WaitingExternalCandidate
+}
+
+// readForCards は name のストアを借りて fn を呼び、fn が返したら借りを返す。
+func readForCards(ctx context.Context, fleet *Fleet, name string, fn func(st *core.Store) error) error {
+	st, release, le := fleet.Acquire(ctx, name)
+	if le != nil {
+		return le
+	}
+	defer release()
+	return fn(st)
+}
+
+// loadCardOverview は status と同じ規則の Overview を読む。借りを持つのは基本の Overview と
+// waiting_external の候補の導出の間だけで、gh によるチェックの取得は借りを返してから行う
+// （遅い gh が状態更新の Lock を待たせないように）。
+func loadCardOverview(ctx context.Context, st *core.Store) (*cardRead, error) {
 	ov, err := baseOverview(ctx, st)
 	if err != nil {
 		return nil, err
 	}
-	if ov.WaitingExternal, err = st.ListWaitingExternal(ctx, checks.checkSource()); err != nil {
+	cands, err := st.WaitingExternalCandidates(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return ov, nil
+	return &cardRead{ov: ov, cands: cands}, nil
+}
+
+func (c *cardRead) resolve(ctx context.Context, checks *checkCache) *core.Overview {
+	c.ov.WaitingExternal = core.ResolveWaitingExternal(ctx, c.cands, checks.checkSource())
+	return c.ov
+}
+
+// writeLookupOrCoreError は借りられなかった（*LookupError）か、core のエラーかに応じて書く。
+func writeLookupOrCoreError(w http.ResponseWriter, err error) {
+	var le *LookupError
+	if errors.As(err, &le) {
+		writeError(w, le.Status, le.Code, le.Message)
+		return
+	}
+	writeCoreError(w, err)
 }
 
 // baseOverview は waiting_external を入れない Overview（宣言を読めなくても動かす。CLI の status と同じ）。
@@ -61,54 +96,73 @@ func baseOverview(ctx context.Context, st *core.Store) (*core.Overview, error) {
 }
 
 func challengesHandler(fleet *Fleet, checks *checkCache, now func() time.Time) http.HandlerFunc {
-	return withStore(fleet, func(w http.ResponseWriter, r *http.Request, st *core.Store) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !getOnly(w, r) {
+			return
+		}
+		ctx := r.Context()
 		opt := core.ListOptions{}
 		if v := r.URL.Query().Get("status"); v != "" {
 			opt.Status = &v
 		}
-		cs, err := st.ListChallenges(r.Context(), opt)
+		var cs []core.Challenge
+		var runs []*core.CardRuns
+		var read *cardRead
+		// ストアを読むのは 1 回の借りの中だけ（1 つの一貫した読み取り）。gh の取得は借りを返してから行う。
+		err := readForCards(ctx, fleet, r.PathValue("name"), func(st *core.Store) (err error) {
+			if cs, err = st.ListChallenges(ctx, opt); err != nil {
+				return err
+			}
+			for _, c := range cs {
+				cr, err := st.LoadCardRuns(ctx, c)
+				if err != nil {
+					return err
+				}
+				runs = append(runs, cr)
+			}
+			read, err = loadCardOverview(ctx, st)
+			return err
+		})
 		if err != nil {
-			writeCoreError(w, err)
+			writeLookupOrCoreError(w, err)
 			return
 		}
-		ov, err := overviewFor(r.Context(), st, checks)
-		if err != nil {
-			writeCoreError(w, err)
-			return
-		}
+		ov := read.resolve(ctx, checks)
 		t := now()
 		out := view.ListCardResponse{Challenges: make([]view.ChallengeCard, 0, len(cs))}
-		for _, c := range cs {
-			card, err := st.DeriveCard(r.Context(), c, ov, t)
-			if err != nil {
-				writeCoreError(w, err)
-				return
-			}
-			out.Challenges = append(out.Challenges, view.FromChallengeCard(c, card))
+		for i, c := range cs {
+			out.Challenges = append(out.Challenges, view.FromChallengeCard(c, runs[i].Derive(c, ov, t)))
 		}
 		writeJSON(w, http.StatusOK, out)
-	})
+	}
 }
 
 func challengeHandler(fleet *Fleet, checks *checkCache, now func() time.Time) http.HandlerFunc {
-	return withStore(fleet, func(w http.ResponseWriter, r *http.Request, st *core.Store) {
-		d, err := st.GetChallengeWithoutReap(r.Context(), r.PathValue("id"))
-		if err != nil {
-			writeCoreError(w, err)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !getOnly(w, r) {
 			return
 		}
-		ov, err := overviewFor(r.Context(), st, checks)
+		ctx := r.Context()
+		var d *core.ChallengeDetail
+		var runs *core.CardRuns
+		var read *cardRead
+		err := readForCards(ctx, fleet, r.PathValue("name"), func(st *core.Store) (err error) {
+			if d, err = st.GetChallengeWithoutReap(ctx, r.PathValue("id")); err != nil {
+				return err
+			}
+			if runs, err = st.LoadCardRuns(ctx, d.Challenge); err != nil {
+				return err
+			}
+			read, err = loadCardOverview(ctx, st)
+			return err
+		})
 		if err != nil {
-			writeCoreError(w, err)
+			writeLookupOrCoreError(w, err)
 			return
 		}
-		card, err := st.DeriveCard(r.Context(), d.Challenge, ov, now())
-		if err != nil {
-			writeCoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, view.FromChallengeDetailCard(d, card))
-	})
+		ov := read.resolve(ctx, checks)
+		writeJSON(w, http.StatusOK, view.FromChallengeDetailCard(d, runs.Derive(d.Challenge, ov, now())))
+	}
 }
 
 func logHandler(fleet *Fleet) http.HandlerFunc {
@@ -161,30 +215,43 @@ func needsHumanHandler(fleet *Fleet) http.HandlerFunc {
 		if !getOnly(w, r) {
 			return
 		}
-		out := view.NeedsHumanResponse{Workspaces: []view.WorkspaceNeedsHuman{}, UnreadableWorkspaces: []string{}}
-		for _, ws := range fleet.Statuses(r.Context()) {
-			if ws.State != StateOK {
-				continue
-			}
-			st, release, le := fleet.Acquire(r.Context(), ws.Name)
-			if le != nil { // 判定の後に状態が変わった。除いて名前を添える
-				out.UnreadableWorkspaces = append(out.UnreadableWorkspaces, ws.Name)
-				continue
-			}
-			ov, err := baseOverview(r.Context(), st)
-			release()
-			if err != nil {
-				if r.Context().Err() != nil {
-					writeCoreError(w, err) // 要求の取り消し。残りを返す意味が無い
-					return
-				}
-				out.UnreadableWorkspaces = append(out.UnreadableWorkspaces, ws.Name)
-				continue
-			}
-			out.Workspaces = append(out.Workspaces, view.WorkspaceNeedsHuman{Name: ws.Name, NeedsHuman: view.FromNeedsHuman(ov)})
+		out, err := collectNeedsHuman(r.Context(), fleet, fleet.Statuses(r.Context()))
+		if err != nil {
+			writeCoreError(w, err)
+			return
 		}
 		writeJSON(w, http.StatusOK, out)
 	}
+}
+
+// collectNeedsHuman は statuses（判定した時点の状態）のうち ok のものを借りて読む。借りるのに失敗したものは、
+// 要求が取り消されていればエラーにし、そうでなければ除いて名前を添える。
+func collectNeedsHuman(ctx context.Context, fleet *Fleet, statuses []WorkspaceStatus) (view.NeedsHumanResponse, error) {
+	out := view.NeedsHumanResponse{Workspaces: []view.WorkspaceNeedsHuman{}, UnreadableWorkspaces: []string{}}
+	for _, ws := range statuses {
+		if ws.State != StateOK {
+			continue
+		}
+		st, release, le := fleet.Acquire(ctx, ws.Name)
+		if le != nil { // 判定の後に状態が変わった。除いて名前を添える
+			if ctx.Err() != nil {
+				return view.NeedsHumanResponse{}, ctx.Err() // 要求の取り消し。残りを返す意味が無い
+			}
+			out.UnreadableWorkspaces = append(out.UnreadableWorkspaces, ws.Name)
+			continue
+		}
+		ov, err := baseOverview(ctx, st)
+		release()
+		if err != nil {
+			if ctx.Err() != nil {
+				return view.NeedsHumanResponse{}, err
+			}
+			out.UnreadableWorkspaces = append(out.UnreadableWorkspaces, ws.Name)
+			continue
+		}
+		out.Workspaces = append(out.Workspaces, view.WorkspaceNeedsHuman{Name: ws.Name, NeedsHuman: view.FromNeedsHuman(ov)})
+	}
+	return out, nil
 }
 
 // questionsHandler は state が ok の全ワークスペースの未回答の保留を、
@@ -195,45 +262,57 @@ func questionsHandler(fleet *Fleet) http.HandlerFunc {
 		if !getOnly(w, r) {
 			return
 		}
-		qs := []view.Question{}
-		unreadable := []string{}
-		for _, ws := range fleet.Statuses(r.Context()) {
-			if ws.State != StateOK {
-				continue
-			}
-			st, release, le := fleet.Acquire(r.Context(), ws.Name)
-			if le != nil {
-				unreadable = append(unreadable, ws.Name)
-				continue
-			}
-			hs, err := st.ListUnansweredHolds(r.Context())
-			release()
-			if err != nil {
-				if r.Context().Err() != nil {
-					writeCoreError(w, err)
-					return
-				}
-				unreadable = append(unreadable, ws.Name)
-				continue
-			}
-			for _, h := range hs {
-				qs = append(qs, view.FromUnansweredHold(ws.Name, h))
-			}
+		out, err := collectQuestions(r.Context(), fleet, fleet.Statuses(r.Context()))
+		if err != nil {
+			writeCoreError(w, err)
+			return
 		}
-		// raised_at は固定幅の UTC 表記なので文字列の比較が時刻の順になる。
-		sort.SliceStable(qs, func(i, j int) bool {
-			a, b := qs[i], qs[j]
-			if a.RaisedAt != b.RaisedAt {
-				return a.RaisedAt < b.RaisedAt
-			}
-			if a.Workspace != b.Workspace {
-				return a.Workspace < b.Workspace
-			}
-			if len(a.ChallengeID) != len(b.ChallengeID) { // C-9 は C-10 より前
-				return len(a.ChallengeID) < len(b.ChallengeID)
-			}
-			return a.ChallengeID < b.ChallengeID
-		})
-		writeJSON(w, http.StatusOK, view.QuestionsResponse{Questions: qs, UnreadableWorkspaces: unreadable})
+		writeJSON(w, http.StatusOK, out)
 	}
+}
+
+// collectQuestions は collectNeedsHuman と同じ規則で、ok のワークスペースの未回答の保留を読む。
+func collectQuestions(ctx context.Context, fleet *Fleet, statuses []WorkspaceStatus) (view.QuestionsResponse, error) {
+	qs := []view.Question{}
+	unreadable := []string{}
+	for _, ws := range statuses {
+		if ws.State != StateOK {
+			continue
+		}
+		st, release, le := fleet.Acquire(ctx, ws.Name)
+		if le != nil {
+			if ctx.Err() != nil {
+				return view.QuestionsResponse{}, ctx.Err()
+			}
+			unreadable = append(unreadable, ws.Name)
+			continue
+		}
+		hs, err := st.ListUnansweredHolds(ctx)
+		release()
+		if err != nil {
+			if ctx.Err() != nil {
+				return view.QuestionsResponse{}, err
+			}
+			unreadable = append(unreadable, ws.Name)
+			continue
+		}
+		for _, h := range hs {
+			qs = append(qs, view.FromUnansweredHold(ws.Name, h))
+		}
+	}
+	// raised_at は固定幅の UTC 表記なので文字列の比較が時刻の順になる。
+	sort.SliceStable(qs, func(i, j int) bool {
+		a, b := qs[i], qs[j]
+		if a.RaisedAt != b.RaisedAt {
+			return a.RaisedAt < b.RaisedAt
+		}
+		if a.Workspace != b.Workspace {
+			return a.Workspace < b.Workspace
+		}
+		if len(a.ChallengeID) != len(b.ChallengeID) { // C-9 は C-10 より前
+			return len(a.ChallengeID) < len(b.ChallengeID)
+		}
+		return a.ChallengeID < b.ChallengeID
+	})
+	return view.QuestionsResponse{Questions: qs, UnreadableWorkspaces: unreadable}, nil
 }
