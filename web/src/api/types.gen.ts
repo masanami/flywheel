@@ -192,6 +192,11 @@ export interface Workspace {
   state: string;
 }
 
+export interface WorkspaceChanged {
+  type: string;
+  workspace: string;
+}
+
 export interface ListCardResponse {
   challenges: ChallengeCard[];
 }
