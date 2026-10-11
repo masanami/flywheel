@@ -111,16 +111,9 @@ func (f *Fleet) Acquire(ctx context.Context, name string) (*core.Store, func(), 
 	s, release, st := e.lease(ctx, f)
 	if st.State != StateOK {
 		release()
-		return nil, nil, &LookupError{Status: statusForState(st.State), Code: st.State, Message: st.Err.Error()}
+		return nil, nil, &LookupError{Status: errorStatus(st.State), Code: st.State, Message: st.Err.Error()}
 	}
 	return s, release, nil
-}
-
-func statusForState(state string) int {
-	if state == StateStoreNotFound {
-		return http.StatusNotFound
-	}
-	return http.StatusServiceUnavailable
 }
 
 // lease は e の状態を判定し直し、ok なら読み取りの借り（RLock）を持ったまま Store を
