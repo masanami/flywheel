@@ -116,6 +116,13 @@ func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done 
 		writeJSON(w, http.StatusOK, workspaceList(fleet.Statuses(r.Context())))
 	})
 	mux.HandleFunc("/api/v1/workspaces/{name}/status", statusHandler(fleet, checks))
+	mux.HandleFunc("/api/v1/workspaces/{name}/challenges", challengesHandler(fleet, checks, time.Now))
+	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}", challengeHandler(fleet, checks, time.Now))
+	mux.HandleFunc("/api/v1/workspaces/{name}/log", logHandler(fleet))
+	mux.HandleFunc("/api/v1/workspaces/{name}/runs", runsHandler(fleet))
+	mux.HandleFunc("/api/v1/workspaces/{name}/runs/{id}/report", runReportHandler(fleet))
+	mux.HandleFunc("/api/v1/needs-human", needsHumanHandler(fleet))
+	mux.HandleFunc("/api/v1/questions", questionsHandler(fleet))
 	notFound := func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "not found")
 	}

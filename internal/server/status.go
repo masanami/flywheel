@@ -112,17 +112,8 @@ func statusHandler(fleet *Fleet, checks *checkCache) http.HandlerFunc {
 		}
 		defer release()
 
-		// CLI の status と同じ規則: 宣言を読めなくても読み取り専用の表示として動かす。
-		decl, derr := core.LoadAgentDeclaration(st.Workspace())
-		if derr != nil {
-			decl = nil
-		}
-		ov, err := st.GetOverviewFor(r.Context(), decl)
+		ov, err := overviewFor(r.Context(), st, checks)
 		if err != nil {
-			writeCoreError(w, err)
-			return
-		}
-		if ov.WaitingExternal, err = st.ListWaitingExternal(r.Context(), checks.checkSource()); err != nil {
 			writeCoreError(w, err)
 			return
 		}
