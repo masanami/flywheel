@@ -1,0 +1,131 @@
+package server
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/masanami/flywheel/internal/adapters/github"
+	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/view"
+)
+
+// defaultCheckTTL は PR ごとのチェックの取得結果（成功・失敗とも）を保持する時間。
+const defaultCheckTTL = 60 * time.Second
+
+// checkCache は PR ごとのチェックの取得結果を、取得した時刻から ttl だけ保持する。
+// 保持するのはこれだけで、waiting_external の候補は要求ごとに core が導き直す。
+type checkCache struct {
+	ttl time.Duration
+	now func() time.Time
+
+	mu      sync.Mutex
+	entries map[checkKey]checkEntry
+}
+
+type checkKey struct {
+	repo   string
+	number int
+}
+
+type checkEntry struct {
+	at     time.Time
+	checks core.UpstreamPullRequestChecks
+	err    error
+}
+
+func newCheckCache(ttl time.Duration) *checkCache {
+	return &checkCache{ttl: ttl, now: time.Now, entries: map[checkKey]checkEntry{}}
+}
+
+// source は src の取得結果をこのキャッシュ越しに返す取得の口。
+func (c *checkCache) source(src core.UpstreamCheckSource) core.UpstreamCheckSource {
+	return cachedChecks{cache: c, src: src}
+}
+
+type cachedChecks struct {
+	cache *checkCache
+	src   core.UpstreamCheckSource
+}
+
+func (cc cachedChecks) GetPullRequestChecks(ctx context.Context, repo string, number int) (core.UpstreamPullRequestChecks, error) {
+	c := cc.cache
+	key := checkKey{repo, number}
+	c.mu.Lock()
+	if e, ok := c.entries[key]; ok {
+		if c.now().Sub(e.at) < c.ttl {
+			c.mu.Unlock()
+			return e.checks, e.err
+		}
+		delete(c.entries, key)
+	}
+	c.mu.Unlock()
+
+	checks, err := cc.src.GetPullRequestChecks(ctx, repo, number)
+	if ctx.Err() != nil {
+		return checks, err // 要求の取り消しによる失敗は保持しない
+	}
+	c.mu.Lock()
+	now := c.now()
+	for k, e := range c.entries { // 期限切れの項目を掃除する（再び要求されない PR が残り続けないように）
+		if now.Sub(e.at) >= c.ttl {
+			delete(c.entries, k)
+		}
+	}
+	c.entries[key] = checkEntry{at: now, checks: checks, err: err}
+	c.mu.Unlock()
+	return checks, err
+}
+
+// unavailableCheckSource は gh を組み立てられないときの、取得を常に失敗させる口
+// （CLI の newCheckSource と同じ）。
+type unavailableCheckSource struct{ err error }
+
+func (u unavailableCheckSource) GetPullRequestChecks(context.Context, string, int) (core.UpstreamPullRequestChecks, error) {
+	return core.UpstreamPullRequestChecks{}, fmt.Errorf("上流を取得できません: %w", u.err)
+}
+
+// checkSource は要求ごとに gh を探して取得の口を作り、PR ごとの保持を通す。
+// 組み立てに失敗（ErrGHNotFound を含む）してもエラーにはしない。
+func (c *checkCache) checkSource() core.UpstreamCheckSource {
+	client, err := github.New(github.Options{})
+	if err != nil {
+		return unavailableCheckSource{err: err}
+	}
+	return c.source(client)
+}
+
+// statusHandler は GET /api/v1/workspaces/{name}/status。本文は
+// `flywheel status --json` と同じ形（internal/view の型）。
+func statusHandler(fleet *Fleet, checks *checkCache) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusNotFound, CodeNotFound, "not found")
+			return
+		}
+		st, release, le := fleet.Acquire(r.Context(), r.PathValue("name"))
+		if le != nil {
+			writeError(w, le.Status, le.Code, le.Message)
+			return
+		}
+		defer release()
+
+		// CLI の status と同じ規則: 宣言を読めなくても読み取り専用の表示として動かす。
+		decl, derr := core.LoadAgentDeclaration(st.Workspace())
+		if derr != nil {
+			decl = nil
+		}
+		ov, err := st.GetOverviewFor(r.Context(), decl)
+		if err != nil {
+			writeCoreError(w, err)
+			return
+		}
+		if ov.WaitingExternal, err = st.ListWaitingExternal(r.Context(), checks.checkSource()); err != nil {
+			writeCoreError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, view.FromOverview(ov))
+	}
+}

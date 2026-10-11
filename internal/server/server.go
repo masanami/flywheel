@@ -46,6 +46,7 @@ func Listen(port int) (net.Listener, error) {
 type Server struct {
 	ln       net.Listener
 	fleet    *Fleet
+	checks   *checkCache
 	http     *http.Server
 	done     chan struct{}
 	doneOnce sync.Once
@@ -55,10 +56,10 @@ type Server struct {
 // 作る。許可する Host と Origin は、ln が実際に bind したポートから導く。ストアは
 // 要求ごとに開く・判定し直す（開けないワークスペースがあっても作れる）。
 func New(ln net.Listener, workspaces []core.FleetWorkspace) *Server {
-	s := &Server{ln: ln, fleet: NewFleet(workspaces), done: make(chan struct{})}
+	s := &Server{ln: ln, fleet: NewFleet(workspaces), checks: newCheckCache(defaultCheckTTL), done: make(chan struct{})}
 	port := ln.Addr().(*net.TCPAddr).Port
 	s.http = &http.Server{
-		Handler:           newHandler(port, s.fleet),
+		Handler:           newHandler(port, s.fleet, s.checks),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	s.http.RegisterOnShutdown(func() { s.doneOnce.Do(func() { close(s.done) }) })
@@ -95,7 +96,7 @@ func (s *Server) Shutdown() error {
 	return err
 }
 
-func newHandler(port int, fleet *Fleet) http.Handler {
+func newHandler(port int, fleet *Fleet, checks *checkCache) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -104,6 +105,7 @@ func newHandler(port int, fleet *Fleet) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, workspaceList(fleet.Statuses(r.Context())))
 	})
+	mux.HandleFunc("/api/v1/workspaces/{name}/status", statusHandler(fleet, checks))
 	notFound := func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "not found")
 	}

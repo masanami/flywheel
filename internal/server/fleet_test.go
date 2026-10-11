@@ -183,15 +183,13 @@ func TestStoreTooNew_AtStartIsReportedAndFileUnchanged(t *testing.T) {
 	ws := initWorkspace(t)
 	coretest.SetStoreVersion(t, ws, latestVersion(t)+1)
 	before := snapshotDir(t, filepath.Join(ws, ".flywheel"))
-	s, port := startFleetServer(t, core.FleetWorkspace{Name: "new", Path: ws})
+	_, port := startFleetServer(t, core.FleetWorkspace{Name: "new", Path: ws})
 	for i := 0; i < 2; i++ { // 要求のたびに開き直しても変わらない
 		if e := stateOf(t, port, "new"); e.State != StateStoreTooNew || e.Error == nil {
 			t.Errorf("entry = %+v, want store_too_new", e)
 		}
 	}
-	if _, _, le := s.fleet.Acquire(t.Context(), "new"); le == nil || le.Code != CodeStoreTooNew || le.Status != http.StatusServiceUnavailable {
-		t.Errorf("Acquire = %+v, want 503 store_too_new", le)
-	}
+	assertStatusError(t, port, "new", http.StatusServiceUnavailable, CodeStoreTooNew)
 	if after := snapshotDir(t, filepath.Join(ws, ".flywheel")); !reflect.DeepEqual(before, after) {
 		t.Errorf("store directory changed: before=%v after=%v", keys(before), keys(after))
 	}
@@ -199,7 +197,7 @@ func TestStoreTooNew_AtStartIsReportedAndFileUnchanged(t *testing.T) {
 
 func TestStoreTooNew_AppearingWhileRunningFollowsAndRecovers(t *testing.T) {
 	ws := initWorkspace(t)
-	s, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
+	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
 	if e := stateOf(t, port, "w"); e.State != StateOK {
 		t.Fatalf("state = %q, want ok", e.State)
 	}
@@ -207,9 +205,7 @@ func TestStoreTooNew_AppearingWhileRunningFollowsAndRecovers(t *testing.T) {
 	if e := stateOf(t, port, "w"); e.State != StateStoreTooNew {
 		t.Fatalf("state = %q, want store_too_new", e.State)
 	}
-	if _, _, le := s.fleet.Acquire(t.Context(), "w"); le == nil || le.Code != CodeStoreTooNew {
-		t.Errorf("Acquire = %+v, want store_too_new", le)
-	}
+	assertStatusError(t, port, "w", http.StatusServiceUnavailable, CodeStoreTooNew)
 	// 最新版のストアのファイルに置き換えると、次の要求から ok に戻る。
 	replacement, err := os.ReadFile(filepath.Join(initWorkspace(t), ".flywheel", "flywheel.db"))
 	if err != nil {
@@ -225,11 +221,9 @@ func TestStoreTooNew_AppearingWhileRunningFollowsAndRecovers(t *testing.T) {
 	if e := stateOf(t, port, "w"); e.State != StateOK || e.Error != nil {
 		t.Errorf("state = %+v, want ok", e)
 	}
-	st, release, le := s.fleet.Acquire(t.Context(), "w")
-	if le != nil || st == nil {
-		t.Fatalf("Acquire = %v", le)
+	if code, body := statusRequest(t, port, "w"); code != http.StatusOK {
+		t.Errorf("GET status = %d (%s), want 200 after recovery", code, body)
 	}
-	release()
 }
 
 func TestStoreCreatedAfterStartBecomesOK(t *testing.T) {
