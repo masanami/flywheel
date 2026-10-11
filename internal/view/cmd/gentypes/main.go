@@ -15,7 +15,8 @@ import (
 	"github.com/masanami/flywheel/internal/view"
 )
 
-// roots は生成の起点。CLI と同じ形の既存の応答（status・list・show・log・runs）。
+// roots は生成の起点。CLI と同じ形の既存の応答（status・list・show・log・runs）と、
+// server が定めた fleet の応答（workspaces）・SSE の通知（workspace_changed）。
 // server が新しく定める応答の型は、それを足すチケットが view に型を置いてからここへ足す。
 var roots = []reflect.Type{
 	reflect.TypeOf(view.StatusResponse{}),
@@ -23,6 +24,8 @@ var roots = []reflect.Type{
 	reflect.TypeOf(view.ShowResponse{}),
 	reflect.TypeOf(view.LogResponse{}),
 	reflect.TypeOf(view.RunsResponse{}),
+	reflect.TypeOf(view.WorkspaceList{}),
+	reflect.TypeOf(view.WorkspaceChanged{}),
 }
 
 const header = "// このファイルは生成物。編集しない。`go generate ./internal/view` で書き出す。\n" +

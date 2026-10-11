@@ -180,3 +180,19 @@ export interface Activity {
 export interface RunsResponse {
   runs: Run[];
 }
+
+export interface WorkspaceList {
+  workspaces: Workspace[];
+}
+
+export interface Workspace {
+  error: string | null;
+  name: string;
+  path: string;
+  state: string;
+}
+
+export interface WorkspaceChanged {
+  type: string;
+  workspace: string;
+}
