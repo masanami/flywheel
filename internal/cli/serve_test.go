@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/core/coretest"
 	"github.com/masanami/flywheel/internal/server"
 )
@@ -215,10 +218,27 @@ func TestServeErrorCodes(t *testing.T) {
 		t.Errorf("CodeForbiddenOrigin = %q, server = %q", CodeForbiddenOrigin, server.CodeForbiddenOrigin)
 	}
 	for cliCode, serverCode := range map[ErrorCode]string{
-		CodeStoreNotFound: server.CodeStoreNotFound,
-		CodeStoreTooNew:   server.CodeStoreTooNew,
-		CodeStoreError:    server.CodeStoreError,
-		CodeNotFound:      server.CodeNotFound,
+		CodeStoreNotFound:        server.CodeStoreNotFound,
+		CodeStoreTooNew:          server.CodeStoreTooNew,
+		CodeStoreError:           server.CodeStoreError,
+		CodeNotFound:             server.CodeNotFound,
+		CodeUsageError:           server.CodeUsageError,
+		CodeStoreBusy:            server.CodeStoreBusy,
+		CodeInternalError:        server.CodeInternalError,
+		CodeValidationFailed:     server.CodeValidationFailed,
+		CodeInvalidTransition:    server.CodeInvalidTransition,
+		CodeTerminalState:        server.CodeTerminalState,
+		CodeConflict:             server.CodeConflict,
+		CodeLocked:               server.CodeLocked,
+		CodeVerificationRejected: server.CodeVerificationRejected,
+		CodeConfirmationMismatch: server.CodeConfirmationMismatch,
+		CodeTTYRequired:          server.CodeTTYRequired,
+		CodeConfigNotFound:       server.CodeConfigNotFound,
+		CodeConfigInvalid:        server.CodeConfigInvalid,
+		CodeRunInProgress:        server.CodeRunInProgress,
+		CodeBudgetExceeded:       server.CodeBudgetExceeded,
+		CodeSlotUnavailable:      server.CodeSlotUnavailable,
+		CodeSerialized:           server.CodeSerialized,
 	} {
 		if string(cliCode) != serverCode {
 			t.Errorf("cli %q != server %q", cliCode, serverCode)
@@ -226,5 +246,22 @@ func TestServeErrorCodes(t *testing.T) {
 	}
 	if ExitCodeFor(CodeForbiddenOrigin) != 1 || ExitCodeFor(CodeListenFailed) != 2 {
 		t.Error("exit code mapping wrong")
+	}
+}
+
+// server の core のエラー → エラーコードの写像は、CLI の mapCoreErr と全 sentinel で一致する。
+func TestServerCoreErrMappingMatchesCLI(t *testing.T) {
+	sentinels := []error{
+		core.ErrStoreNotFound, core.ErrStoreTooNew, core.ErrStoreBusy, core.ErrStoreError, core.ErrNotFound,
+		core.ErrValidation, core.ErrTerminalState, core.ErrInvalidTransition, core.ErrConflict,
+		core.ErrActorUnavailable, core.ErrTTYRequired, core.ErrConfirmationMismatch, core.ErrVerificationRejected,
+		core.ErrConfigNotFound, core.ErrConfigInvalid, core.ErrLocked, core.ErrRunInProgress,
+		core.ErrBudgetExceeded, core.ErrSlotUnavailable, core.ErrSerialized, errors.New("unexpected"),
+	}
+	for _, e := range sentinels {
+		wrapped := fmt.Errorf("wrapped: %w", e)
+		if got, want := server.CodeForCoreErr(wrapped), string(mapCoreErr(wrapped).Code); got != want {
+			t.Errorf("%v: server %q, cli %q", e, got, want)
+		}
 	}
 }

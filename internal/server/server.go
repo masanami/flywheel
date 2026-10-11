@@ -46,6 +46,7 @@ func Listen(port int) (net.Listener, error) {
 type Server struct {
 	ln       net.Listener
 	fleet    *Fleet
+	checks   *checkCache
 	http     *http.Server
 	done     chan struct{}
 	doneOnce sync.Once
@@ -63,10 +64,10 @@ func New(ln net.Listener, workspaces []core.FleetWorkspace) *Server {
 // newServer は New に SSE の時間の設定を渡せる版（テストが間隔を短くする）。
 func newServer(ln net.Listener, workspaces []core.FleetWorkspace, cfg eventsConfig) *Server {
 	cfg = cfg.withDefaults()
-	s := &Server{ln: ln, fleet: NewFleet(workspaces), done: make(chan struct{}), cfg: cfg, hub: newEventHub(workspaces)}
+	s := &Server{ln: ln, fleet: NewFleet(workspaces), checks: newCheckCache(defaultCheckTTL), done: make(chan struct{}), cfg: cfg, hub: newEventHub(workspaces)}
 	port := ln.Addr().(*net.TCPAddr).Port
 	s.http = &http.Server{
-		Handler:           newHandler(port, s.fleet, s.hub, s.done, cfg),
+		Handler:           newHandler(port, s.fleet, s.checks, s.hub, s.done, cfg),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	s.http.RegisterOnShutdown(func() { s.doneOnce.Do(func() { close(s.done) }) })
@@ -104,7 +105,7 @@ func (s *Server) Shutdown() error {
 	return err
 }
 
-func newHandler(port int, fleet *Fleet, hub *eventHub, done <-chan struct{}, cfg eventsConfig) http.Handler {
+func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done <-chan struct{}, cfg eventsConfig) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/events", eventsHandler(hub, done, cfg))
 	mux.HandleFunc("/api/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +115,7 @@ func newHandler(port int, fleet *Fleet, hub *eventHub, done <-chan struct{}, cfg
 		}
 		writeJSON(w, http.StatusOK, workspaceList(fleet.Statuses(r.Context())))
 	})
+	mux.HandleFunc("/api/v1/workspaces/{name}/status", statusHandler(fleet, checks))
 	notFound := func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "not found")
 	}
