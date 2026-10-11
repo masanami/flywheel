@@ -1,5 +1,5 @@
 import type {
-  ListResponse,
+  ListCardResponse,
   StatusResponse,
   WorkspaceChanged,
   WorkspaceList,
@@ -22,8 +22,7 @@ const ws = (name: string) => `/api/v1/workspaces/${encodeURIComponent(name)}`;
 export const api = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
   status: (name: string) => get<StatusResponse>(`${ws(name)}/status`),
-  // 実際の応答は各要素に card が付く。view に型が足されたら差し替える。
-  challenges: (name: string) => get<ListResponse>(`${ws(name)}/challenges`),
+  challenges: (name: string) => get<ListCardResponse>(`${ws(name)}/challenges`),
   // needs-human と questions の応答の型は internal/view にまだ無い（生成されたら差し替える）。
   needsHuman: () => get<unknown>("/api/v1/needs-human"),
   questions: () => get<unknown>("/api/v1/questions"),

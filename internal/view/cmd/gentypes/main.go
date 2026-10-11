@@ -26,6 +26,11 @@ var roots = []reflect.Type{
 	reflect.TypeOf(view.RunsResponse{}),
 	reflect.TypeOf(view.WorkspaceList{}),
 	reflect.TypeOf(view.WorkspaceChanged{}),
+	reflect.TypeOf(view.ListCardResponse{}),
+	reflect.TypeOf(view.ShowCardResponse{}),
+	reflect.TypeOf(view.NeedsHumanResponse{}),
+	reflect.TypeOf(view.QuestionsResponse{}),
+	reflect.TypeOf(view.RunReportResponse{}),
 }
 
 const header = "// このファイルは生成物。編集しない。`go generate ./internal/view` で書き出す。\n" +

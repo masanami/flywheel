@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, eventsPath, parseChanged } from "../api/client.ts";
 import type {
-  ListResponse,
+  ListCardResponse,
   StatusResponse,
   Workspace,
 } from "../api/types.gen.ts";
 
 export interface WorkspaceData {
   status?: StatusResponse;
-  challenges?: ListResponse;
+  challenges?: ListCardResponse;
   error?: string;
 }
 
