@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, eventsPath, parseChanged } from "../api/client.ts";
 import type {
   ListCardResponse,
+  NeedsHumanResponse,
+  QuestionsResponse,
   StatusResponse,
   Workspace,
 } from "../api/types.gen.ts";
@@ -18,8 +20,8 @@ export interface LiveState {
   lastUpdated: Date | null;
   workspaces: Workspace[];
   data: Record<string, WorkspaceData>;
-  needsHuman: unknown;
-  questions: unknown;
+  needsHuman: NeedsHumanResponse | null;
+  questions: QuestionsResponse | null;
   loadError: string | null;
   fleetError: string | null;
 }
