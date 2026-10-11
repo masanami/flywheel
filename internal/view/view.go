@@ -426,3 +426,9 @@ type Workspace struct {
 type WorkspaceList struct {
 	Workspaces []Workspace `json:"workspaces"`
 }
+
+// WorkspaceChanged は `GET /api/v1/events`（SSE）が送る通知。Type は常に "workspace_changed"。
+type WorkspaceChanged struct {
+	Type      string `json:"type"`
+	Workspace string `json:"workspace"`
+}
