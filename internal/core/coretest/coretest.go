@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/masanami/flywheel/internal/core/internal/store"
@@ -462,5 +463,78 @@ func ClearApprovalPlanVersion(t *testing.T, workspace string, challengeID int) {
 		return err
 	}); err != nil {
 		t.Fatalf("coretest: ClearApprovalPlanVersion(%d): %v", challengeID, err)
+	}
+}
+
+// InsertHold はテスト専用のフィクスチャとして未回答の保留を 1 件挿入する。
+// runID が nil なら hold.run_id は NULL。
+func InsertHold(t *testing.T, workspace string, challengeID int, question, fromStatus, raisedAt string, runID *int64) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, run_id) VALUES (?, ?, ?, ?, ?)`,
+			challengeID, question, fromStatus, raisedAt, runID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertHold: %v", err)
+	}
+}
+
+// DumpTables はテスト専用に、tables の全行を ROWID 順の文字列にして返す
+// （閲覧だけの経路がストアの行を変えないことの検査に使う）。
+func DumpTables(t *testing.T, workspace string, tables ...string) string {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var out strings.Builder
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		for _, tbl := range tables {
+			rows, err := tx.Query("SELECT * FROM " + tbl + " ORDER BY ROWID")
+			if err != nil {
+				return err
+			}
+			cols, err := rows.Columns()
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			fmt.Fprintf(&out, "[%s]\n", tbl)
+			for rows.Next() {
+				vals := make([]any, len(cols))
+				ptrs := make([]any, len(cols))
+				for i := range vals {
+					ptrs[i] = &vals[i]
+				}
+				if err := rows.Scan(ptrs...); err != nil {
+					_ = rows.Close()
+					return err
+				}
+				fmt.Fprintf(&out, "%v\n", vals)
+			}
+			err = rows.Err()
+			_ = rows.Close()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("coretest: DumpTables: %v", err)
+	}
+	return out.String()
+}
+
+// InsertAnsweredHold はテスト専用のフィクスチャとして回答済みの保留を 1 件挿入する。
+func InsertAnsweredHold(t *testing.T, workspace string, challengeID int, question, fromStatus, raisedAt string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by) VALUES (?, ?, ?, ?, 'a', ?, 'tester')`,
+			challengeID, question, fromStatus, raisedAt, raisedAt)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertAnsweredHold: %v", err)
 	}
 }

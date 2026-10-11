@@ -180,3 +180,86 @@ export interface Activity {
 export interface RunsResponse {
   runs: Run[];
 }
+
+export interface WorkspaceList {
+  workspaces: Workspace[];
+}
+
+export interface Workspace {
+  error: string | null;
+  name: string;
+  path: string;
+  state: string;
+}
+
+export interface ListCardResponse {
+  challenges: ChallengeCard[];
+}
+
+export interface ChallengeCard {
+  card: Card;
+  created_at: string;
+  description: string;
+  done_criteria: string;
+  id: string;
+  priority: string | null;
+  reporter: string;
+  status: string;
+  status_label: string;
+  title: string;
+  updated_at: string;
+  urgency: string | null;
+  version: number;
+}
+
+export interface Card {
+  context: string | null;
+  headline: string | null;
+  modifiers: string[];
+  next_human_actions: string[];
+  state: string;
+}
+
+export interface ShowCardResponse {
+  approvals: Approval[];
+  card: Card;
+  challenge: Challenge;
+  holds: Hold[];
+  operations: Operation[];
+  plans: PlanDetail[];
+  runs: Run[];
+  source_binding: SourceBinding | null;
+}
+
+export interface NeedsHumanResponse {
+  workspaces: WorkspaceNeedsHuman[];
+}
+
+export interface WorkspaceNeedsHuman {
+  name: string;
+  needs_human: StatusNeedsHuman;
+}
+
+export interface QuestionsResponse {
+  questions: Question[];
+}
+
+export interface Question {
+  challenge_id: string;
+  from_status: string;
+  question: string;
+  raised_at: string;
+  run_id: string | null;
+  title: string;
+  workspace: string;
+}
+
+export interface RunReportResponse {
+  report: RunReport;
+}
+
+export interface RunReport {
+  assumptions: string[];
+  run_id: string;
+  unverified: string[];
+}
