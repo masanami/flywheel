@@ -26,6 +26,14 @@ const (
 	CardActionClearSlot         CardAction = "clear_slot"
 )
 
+// CardActionValues は CardAction の閉集合（導く順）の写しを返す。
+func CardActionValues() []CardAction {
+	return []CardAction{
+		CardActionApprovePlan, CardActionApproveCompletion, CardActionAnswerQuestion, CardActionTriage,
+		CardActionIncreaseBudget, CardActionApproveOperation, CardActionReviewDiscrepancy, CardActionClearSlot,
+	}
+}
+
 // CardModifier は Card.Modifiers の値（閉集合。導く順に並べる）。
 type CardModifier string
 
@@ -37,6 +45,14 @@ const (
 	CardModifierBudgetExhausted CardModifier = "budget_exhausted"
 	CardModifierDiscrepancy     CardModifier = "discrepancy"
 )
+
+// CardModifierValues は CardModifier の閉集合（導く順）の写しを返す。
+func CardModifierValues() []CardModifier {
+	return []CardModifier{
+		CardModifierRunning, CardModifierUnresponsive, CardModifierWaitingCI,
+		CardModifierBudgetExhausted, CardModifierDiscrepancy,
+	}
+}
 
 // Card は課題カードの導出結果。Headline・Context は S1 では常に nil。
 type Card struct {

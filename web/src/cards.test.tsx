@@ -1,7 +1,11 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it } from "vitest";
+import {
+  CARD_ACTION_CODES,
+  CARD_MODIFIER_CODES,
+  DISCREPANCY_KIND_CODES,
+  STATUS_CODES,
+} from "./api/types.gen.ts";
 import { ChallengeCardView } from "./cards.tsx";
 import {
   ACTION_LABELS,
@@ -16,21 +20,11 @@ import {
   STATE_LABELS,
 } from "./labels.ts";
 
-const goSource = (rel: string) =>
-  readFileSync(resolve(import.meta.dirname, "../..", rel), "utf8");
-const goCodes = (src: string, type: string) =>
-  [...src.matchAll(new RegExp(`${type}\\s*=\\s*"([a-z_]+)"`, "g"))].map(
-    (m) => m[1],
-  );
-
 it("AC-102: 閉集合のすべてのコードに文言があり、core の定義と一致する", () => {
-  const card = goSource("internal/core/card.go");
-  const status = goSource("internal/core/status.go");
-  const overview = goSource("internal/core/overview.go");
-  expect([...CARD_ACTIONS]).toEqual(goCodes(card, "CardAction"));
-  expect([...CARD_MODIFIERS]).toEqual(goCodes(card, "CardModifier"));
-  expect([...CARD_STATES]).toEqual(goCodes(status, "Status"));
-  expect([...DISCREPANCY_KINDS]).toEqual(goCodes(overview, "DiscrepancyKind"));
+  expect([...CARD_ACTIONS]).toEqual([...CARD_ACTION_CODES]);
+  expect([...CARD_MODIFIERS]).toEqual([...CARD_MODIFIER_CODES]);
+  expect([...CARD_STATES]).toEqual([...STATUS_CODES]);
+  expect([...DISCREPANCY_KINDS]).toEqual([...DISCREPANCY_KIND_CODES]);
   for (const [codes, table] of [
     [CARD_STATES, STATE_LABELS],
     [CARD_MODIFIERS, MODIFIER_LABELS],

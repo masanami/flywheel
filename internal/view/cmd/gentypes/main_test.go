@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/masanami/flywheel/internal/view"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,7 +12,7 @@ import (
 
 // AC-125: 生成し直した結果とコミット済みの types.gen.ts に差があれば落ちる。
 func TestCommittedTypesAreUpToDate(t *testing.T) {
-	want, err := Generate(roots)
+	want, err := generateAll()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +92,27 @@ func TestRootsCoverCLIResponses(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s が生成の起点に無い", w)
+		}
+	}
+}
+
+// 閉集合の値の一覧が、view.ClosedSets のすべての値を順序どおりに生成物へ出す。
+func TestGenerateAllWritesClosedSets(t *testing.T) {
+	src, err := generateAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cs := range view.ClosedSets() {
+		if len(cs.Codes) == 0 {
+			t.Errorf("%s が空", cs.Name)
+		}
+		want := "export const " + cs.Name + " = [\n"
+		for _, c := range cs.Codes {
+			want += "  \"" + c + "\",\n"
+		}
+		want += "] as const;\n"
+		if !strings.Contains(string(src), want) {
+			t.Errorf("生成物に次のブロックが無い:\n%s", want)
 		}
 	}
 }

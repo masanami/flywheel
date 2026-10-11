@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -135,10 +136,14 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) ([]byte, erro
 	deadline := time.Now().Add(timeout)
 	for {
 		b, err := os.ReadFile(path)
-		if err == nil {
+		// 書き手は作成と書き込みが別なので、存在しても空の間は書き込み前とみなして待つ。
+		if err == nil && len(b) > 0 {
 			return b, nil
 		}
 		if time.Now().After(deadline) {
+			if err == nil {
+				err = errors.New("file is empty")
+			}
 			return nil, err
 		}
 		time.Sleep(20 * time.Millisecond)
