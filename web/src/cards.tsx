@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useContext, useState } from "react";
 import type { Card, Challenge, ChallengeCard } from "./api/types.gen.ts";
 import {
   ACTION_LABELS,
@@ -8,6 +8,7 @@ import {
   STATE_LABELS,
   label,
 } from "./labels.ts";
+import { OpenDetailContext, WorkspaceNameContext } from "./nav.tsx";
 
 const CLAMP_LINES = 3;
 const CLAMP_CHARS = 60;
@@ -59,6 +60,8 @@ export function ChallengeCardView({
   card?: Card;
   children?: ReactNode;
 }) {
+  const open = useContext(OpenDetailContext);
+  const workspace = useContext(WorkspaceNameContext);
   const waiting = (card?.next_human_actions.length ?? 0) > 0;
   const state = card?.state ?? challenge.status;
   return (
@@ -100,6 +103,11 @@ export function ChallengeCardView({
                 .map((a) => label(ACTION_LABELS, a))
                 .join("、")}
       </div>
+      {open && workspace ? (
+        <button type="button" onClick={() => open(workspace, challenge.id)}>
+          詳細を開く
+        </button>
+      ) : null}
       {children}
     </li>
   );

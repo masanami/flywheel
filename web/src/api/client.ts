@@ -1,7 +1,10 @@
 import type {
   ListCardResponse,
+  LogResponse,
   NeedsHumanResponse,
   QuestionsResponse,
+  RunReportResponse,
+  ShowCardResponse,
   StatusResponse,
   WorkspaceChanged,
   WorkspaceList,
@@ -25,6 +28,14 @@ export const api = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
   status: (name: string) => get<StatusResponse>(`${ws(name)}/status`),
   challenges: (name: string) => get<ListCardResponse>(`${ws(name)}/challenges`),
+  challenge: (name: string, id: string) =>
+    get<ShowCardResponse>(`${ws(name)}/challenges/${encodeURIComponent(id)}`),
+  log: (name: string, id: string) =>
+    get<LogResponse>(`${ws(name)}/log?challenge=${encodeURIComponent(id)}`),
+  runReport: (name: string, runId: string) =>
+    get<RunReportResponse>(
+      `${ws(name)}/runs/${encodeURIComponent(runId)}/report`,
+    ),
   needsHuman: () => get<NeedsHumanResponse>("/api/v1/needs-human"),
   questions: () => get<QuestionsResponse>("/api/v1/questions"),
 };

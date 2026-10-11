@@ -1,0 +1,28 @@
+{
+  "outside_note": "本人確認が要る操作です。Claude Code の外の端末で実行してください（この画面からは行えません）。",
+  "templates": [
+    {
+      "id": "approve",
+      "when": {
+        "statuses": ["awaiting_plan_approval", "awaiting_completion_approval"]
+      },
+      "command": ["approve"],
+      "flags": ["workspace"],
+      "template": "flywheel approve <C-ID> --workspace <パス>"
+    },
+    {
+      "id": "answer",
+      "when": { "statuses": ["awaiting_human"] },
+      "command": ["answer"],
+      "flags": ["workspace", "answer"],
+      "template": "flywheel answer <C-ID> --workspace <パス> --answer <回答>"
+    },
+    {
+      "id": "budget",
+      "when": { "modifiers": ["budget_exhausted"] },
+      "command": ["budget"],
+      "flags": ["workspace", "impl-usd"],
+      "template": "flywheel budget <C-ID> --workspace <パス> --impl-usd <額>"
+    }
+  ]
+}

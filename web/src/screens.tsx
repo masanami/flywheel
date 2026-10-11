@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useContext } from "react";
 import type {
   Challenge,
   ChallengeCard,
@@ -8,6 +8,7 @@ import type {
 import { CardById, ClampedText, cardIndex } from "./cards.tsx";
 import { DISCREPANCY_LABELS, STATE_LABELS, label } from "./labels.ts";
 import type { LiveState } from "./live/useLive.ts";
+import { OpenDetailContext, WorkspaceNameContext } from "./nav.tsx";
 
 export interface Screen {
   id: string;
@@ -140,19 +141,21 @@ function Top({ live }: { live: LiveState }) {
         const nh = nhBy.get(w.name);
         return (
           <section key={w.name} aria-label={`${w.name} の対応待ち`}>
-            <h3>{w.name}</h3>
-            {w.state !== "ok" ? (
-              <WorkspaceError w={w} />
-            ) : nh ? (
-              <NeedsHumanBody
-                nh={nh}
-                index={cardIndex(live.data[w.name]?.challenges?.challenges)}
-              />
-            ) : live.fleetError ? (
-              <p role="alert">取得に失敗: {live.fleetError}</p>
-            ) : (
-              <p>読み込み中</p>
-            )}
+            <WorkspaceNameContext.Provider value={w.name}>
+              <h3>{w.name}</h3>
+              {w.state !== "ok" ? (
+                <WorkspaceError w={w} />
+              ) : nh ? (
+                <NeedsHumanBody
+                  nh={nh}
+                  index={cardIndex(live.data[w.name]?.challenges?.challenges)}
+                />
+              ) : live.fleetError ? (
+                <p role="alert">取得に失敗: {live.fleetError}</p>
+              ) : (
+                <p>読み込み中</p>
+              )}
+            </WorkspaceNameContext.Provider>
           </section>
         );
       })}
@@ -223,14 +226,53 @@ function Workspaces({ live }: { live: LiveState }) {
       <h2>ワークスペース</h2>
       {live.workspaces.map((w) => (
         <section key={w.name} aria-label={`${w.name} の状況`}>
-          <h3>{w.name}</h3>
-          {w.state !== "ok" ? (
-            <WorkspaceError w={w} />
-          ) : (
-            <WorkspaceBody w={w} live={live} />
-          )}
+          <WorkspaceNameContext.Provider value={w.name}>
+            <h3>{w.name}</h3>
+            {w.state !== "ok" ? (
+              <WorkspaceError w={w} />
+            ) : (
+              <WorkspaceBody w={w} live={live} />
+            )}
+          </WorkspaceNameContext.Provider>
         </section>
       ))}
+    </section>
+  );
+}
+
+// 問いの一覧: GET /api/v1/questions の要素を返ってきた順に出し、各要素から課題の詳細を開く。
+function Questions({ live }: { live: LiveState }) {
+  const open = useContext(OpenDetailContext);
+  const qs = live.questions?.questions ?? [];
+  return (
+    <section aria-label="問いの一覧">
+      <h2>問いの一覧</h2>
+      {qs.length === 0 ? (
+        <p>なし</p>
+      ) : (
+        <ol>
+          {qs.map((q) => (
+            <li
+              key={`${q.workspace}/${q.challenge_id}/${q.raised_at}`}
+              data-testid="question"
+            >
+              <div>
+                {q.workspace} / <code>{q.challenge_id}</code>:{" "}
+                <ClampedText text={q.title} />
+              </div>
+              <div>
+                <ClampedText text={q.question} />
+              </div>
+              <button
+                type="button"
+                onClick={() => open?.(q.workspace, q.challenge_id)}
+              >
+                課題の詳細を開く
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
     </section>
   );
 }
@@ -246,5 +288,10 @@ export const screens: Screen[] = [
     id: "workspaces",
     title: "ワークスペース",
     render: (live) => <Workspaces live={live} />,
+  },
+  {
+    id: "questions",
+    title: "問いの一覧",
+    render: (live) => <Questions live={live} />,
   },
 ];
