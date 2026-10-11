@@ -1,5 +1,5 @@
 // このファイルは生成物。編集しない。`go generate ./internal/view` で書き出す。
-// 正本は internal/view の構造体（json タグ）。
+// 正本は internal/view の構造体（json タグ）と、view.ClosedSets（core の閉集合の値）。
 
 export interface StatusResponse {
   actionable: StatusActionable;
@@ -268,3 +268,41 @@ export interface RunReport {
   run_id: string;
   unverified: string[];
 }
+
+export const CARD_ACTION_CODES = [
+  "approve_plan",
+  "approve_completion",
+  "answer_question",
+  "triage",
+  "increase_budget",
+  "approve_operation",
+  "review_discrepancy",
+  "clear_slot",
+] as const;
+
+export const CARD_MODIFIER_CODES = [
+  "running",
+  "unresponsive",
+  "waiting_ci",
+  "budget_exhausted",
+  "discrepancy",
+] as const;
+
+export const STATUS_CODES = [
+  "unclassified",
+  "classified",
+  "awaiting_plan_approval",
+  "in_progress",
+  "verifying",
+  "awaiting_completion_approval",
+  "done",
+  "awaiting_human",
+] as const;
+
+export const DISCREPANCY_KIND_CODES = [
+  "upstream_closed",
+  "upstream_missing",
+  "out_of_policy",
+  "upstream_commented",
+  "upstream_updated",
+] as const;

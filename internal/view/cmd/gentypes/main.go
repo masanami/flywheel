@@ -34,14 +34,14 @@ var roots = []reflect.Type{
 }
 
 const header = "// このファイルは生成物。編集しない。`go generate ./internal/view` で書き出す。\n" +
-	"// 正本は internal/view の構造体（json タグ）。\n"
+	"// 正本は internal/view の構造体（json タグ）と、view.ClosedSets（core の閉集合の値）。\n"
 
 func main() {
 	out := "web/src/api/types.gen.ts"
 	if len(os.Args) > 1 {
 		out = os.Args[1]
 	}
-	src, err := Generate(roots)
+	src, err := generateAll()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gentypes:", err)
 		os.Exit(1)
@@ -50,6 +50,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "gentypes:", err)
 		os.Exit(1)
 	}
+}
+
+// generateAll は roots の型と閉集合の一覧を合わせた生成物の全体を返す。
+func generateAll() ([]byte, error) {
+	src, err := Generate(roots)
+	if err != nil {
+		return nil, err
+	}
+	return appendClosedSets(src, view.ClosedSets()), nil
 }
 
 type generator struct {
@@ -77,6 +86,21 @@ func Generate(rootTypes []reflect.Type) ([]byte, error) {
 		buf.WriteString(body)
 	}
 	return buf.Bytes(), nil
+}
+
+// appendClosedSets は閉集合の値の一覧を定数として末尾へ書き出す。
+func appendClosedSets(src []byte, sets []view.ClosedSet) []byte {
+	var buf bytes.Buffer
+	buf.Write(src)
+	for _, cs := range sets {
+		buf.WriteString("\nexport const " + cs.Name + " = [\n")
+		for _, c := range cs.Codes {
+			q, _ := json.Marshal(c)
+			fmt.Fprintf(&buf, "  %s,\n", q)
+		}
+		buf.WriteString("] as const;\n")
+	}
+	return buf.Bytes()
 }
 
 func (g *generator) visit(t reflect.Type) error {
