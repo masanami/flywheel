@@ -123,6 +123,9 @@ async function mount() {
   render(<App />);
   act(() => FakeEventSource.latest.open());
   await screen.findByText("C-1");
+  // 既定はボードの画面。人間の対応待ちの画面（S1 の AC）へ切り替えて検査する。
+  fireEvent.click(screen.getByRole("button", { name: "人間の対応待ち" }));
+  await screen.findByRole("heading", { name: "計画承認待ち（1）" });
 }
 
 it("AC-92〜97: 最上位はワークスペースごとに状態で分けて表示し、ok でないワークスペースはエラー表示で他は続く（AC-122）", async () => {
@@ -184,6 +187,8 @@ it("AC-110a: needs-human・questions から除かれたワークスペースは�
   render(<App />);
   act(() => FakeEventSource.latest.open());
   await screen.findByText("C-1");
+  fireEvent.click(screen.getByRole("button", { name: "人間の対応待ち" }));
+  await screen.findByText(/main へマージ/);
   const g = screen.getByRole("region", { name: "gamma の対応待ち" });
   expect(within(g).getByRole("alert")).toHaveTextContent(
     "読み取れませんでした",

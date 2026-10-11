@@ -1,0 +1,1585 @@
+/* CSS カスタムプロパティによるライト/ダークテーマ。
+ * フラットで控えめなデザイン（影の重ね掛け・バッジの多用はしない）。
+ * 承認待ちグループのみ琥珀系の淡いハイライトを使う。
+ */
+:root {
+  --board-bg: #f7f7f8;
+  --board-fg: #1c1c1f;
+  --board-muted-fg: #6b6b70;
+  --board-border: #dcdce0;
+  --board-column-bg: #ffffff;
+  --board-card-bg: #ffffff;
+  --board-card-border: #e2e2e6;
+  --board-needs-human-bg: #fdf3e0;
+  --board-needs-human-border: #e8b93f;
+  --board-error-bg: #fbfbfc;
+  --board-error-border: #b8b8bf;
+  --board-error-fg: #b3261e;
+  --board-chip-bg: #ffffff;
+  --board-chip-active-bg: #1c1c1f;
+  --board-chip-active-fg: #ffffff;
+  --board-tooltip-bg: #1c1c1f;
+  --board-tooltip-fg: #ffffff;
+  --board-modal-overlay-bg: rgb(0 0 0 / 45%);
+  --board-modal-bg: #ffffff;
+  --board-modal-border: #e2e2e6;
+  --board-source-journal-bg: #eaf1fb;
+  --board-source-journal-fg: #2f5fa8;
+  --board-source-ledger-bg: #eeeeef;
+  --board-source-ledger-fg: #55555b;
+  --board-source-runs-bg: #eafbf1;
+  --board-source-runs-fg: #2f8a55;
+
+  /* カラムヘッダのサイクル状態（P3-2）・実行中セクションの配色。 */
+  --cycle-status-running-fg: #2f5fa8;
+  --cycle-status-idle-fg: #9aa0a6;
+  --cycle-status-stale-fg: #c73e3e;
+  --running-section-border: #2f5fa8;
+  --running-section-stale-border: #c73e3e;
+  --running-section-stale-bg: #fdecec;
+  --running-section-stale-fg: #c73e3e;
+
+  /* ターミナル領域はライト/ダークテーマに関わらずダーク固定（要件どおり）。 */
+  --terminal-bg: #17181c;
+  --terminal-fg: #e7e7ea;
+  --terminal-border: #303138;
+  --terminal-header-bg: #1e1f24;
+  --terminal-tab-fg: #9a9aa2;
+  --terminal-tab-active-bg: #24252b;
+  --terminal-tab-active-fg: #e7e7ea;
+  --terminal-resize-handle-bg: #303138;
+
+  /* エージェントカラムのトラック最小幅（#178）。`.board-columns` の
+     `grid-auto-columns` の下限と `min-width` が同じ値に依存するため、実値を
+     1 箇所へ括り出して連動させる（片方だけ更新されて取り残されるのを防ぐ）。
+     テーマではなくレイアウトの定数なので dark 側の上書きは持たない。 */
+  --board-column-min: 320px;
+
+  --status-未分類: #9aa0a6;
+  --status-分類済: #4a90d9;
+  --status-計画承認待ち: #e8b93f;
+  --status-着手中: #3aa76d;
+  /* 人間対応待ち（masanami/claude-flywheel#116）は「人間の入力待ち」なので
+     承認待ち 2 種と同じ暖色系に寄せる（一目で人間待ちと分かる）。ただし両者が
+     共有する琥珀 #e8b93f とは彩度・色相をずらし、3 つを区別できるようにする。
+     ステータス色は明暗テーマで共有（dark 側に上書きが無い）ため、どちらの背景でも
+     視認できる濃さを選んでいる。 */
+  --status-人間対応待ち: #e07b39;
+  --status-検証中: #8a63d2;
+  --status-完了確認待ち: #e8b93f;
+  --status-完了: #2f9e44;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --board-bg: #17181c;
+    --board-fg: #e7e7ea;
+    --board-muted-fg: #9a9aa2;
+    --board-border: #303138;
+    --board-column-bg: #1e1f24;
+    --board-card-bg: #24252b;
+    --board-card-border: #34353c;
+    --board-needs-human-bg: #3a301a;
+    --board-needs-human-border: #caa03a;
+    --board-error-bg: #201f22;
+    --board-error-border: #45454d;
+    --board-error-fg: #f2b8b5;
+    --board-chip-bg: #24252b;
+    --board-chip-active-bg: #e7e7ea;
+    --board-chip-active-fg: #17181c;
+    --board-tooltip-bg: #e7e7ea;
+    --board-tooltip-fg: #17181c;
+    --board-modal-overlay-bg: rgb(0 0 0 / 65%);
+    --board-modal-bg: #1e1f24;
+    --board-modal-border: #34353c;
+    --board-source-journal-bg: #24314a;
+    --board-source-journal-fg: #9dc0f5;
+    --board-source-ledger-bg: #2c2d33;
+    --board-source-ledger-fg: #c2c2c8;
+    --board-source-runs-bg: #1f3a2b;
+    --board-source-runs-fg: #8fd6ac;
+
+    --cycle-status-running-fg: #9dc0f5;
+    --cycle-status-idle-fg: #9a9aa2;
+    --cycle-status-stale-fg: #f2a3a3;
+    --running-section-border: #9dc0f5;
+    --running-section-stale-border: #f2a3a3;
+    --running-section-stale-bg: #3a2323;
+    --running-section-stale-fg: #f2a3a3;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--board-bg);
+  color: var(--board-fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+}
+
+.app-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.board {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.board-loading {
+  padding: 1rem;
+  color: var(--board-muted-fg);
+}
+
+.filter-bar {
+  display: flex;
+  /* Issue #136 で「＋ エージェント追加」ボタンが加わり同一行のコントロール数
+   * が増えたため、狭幅ウィンドウでの折り返しを許容する（wrap しないと行が
+   * document レベルの横スクロールへ溢れ、下部ターミナル領域を含む画面全体
+   * に影響しうる。#64 で board-columns 側に同種の対策済み）。通常幅では
+   * 折り返さないため、上部バーを1行にまとめる狙い自体は維持される。 */
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--board-border);
+}
+
+.filter-chip,
+.add-agent-button {
+  /* フィルタチップ（丸ピル）と＋エージェント追加ボタン（角丸6px）は同じ行の
+   * 兄弟要素になった（#136）が見た目のグループを区別するため意図的に
+   * border-radius だけを変えている。それ以外の外観プロパティは共通化する
+   * （DRY）。 */
+  border: 1px solid var(--board-border);
+  background: var(--board-chip-bg);
+  color: var(--board-fg);
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.filter-chip {
+  border-radius: 999px;
+}
+
+.filter-chip[aria-pressed="true"] {
+  background: var(--board-chip-active-bg);
+  color: var(--board-chip-active-fg);
+  border-color: var(--board-chip-active-bg);
+}
+
+.filter-toggle {
+  /* すべて/承認待ちの相互排他チップ群とは独立したトグルであることを示すため、
+   * 右端へ寄せて視覚的に分離する。この margin-left: auto が、後続に続く
+   * 「🗄 アーカイブ表示」「＋ エージェント追加」（#136）を含む右端グループ
+   * 全体を成立させるアンカーになっている。この宣言を外す・並び順を変える
+   * 場合は、後続ボタン群の右端寄せが巻き添えで崩れる点に注意すること。 */
+  margin-left: auto;
+}
+
+.filter-toggle:disabled {
+  /* 承認待ちフィルタ選択中は切り替えても表示に反映されない（no-op）ため、
+   * 押しても意味が無いことが視覚的に伝わるよう半透明にする。 */
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* board-columns と PreviewPanel を横並びにする行（#64）。この行だけが
+ * flex row であり、FilterBar は従来通り縦積みの最上部に残る。PreviewPanel
+ * が開いた分だけ board-columns 側が圧縮される（下部ターミナル領域には
+ * 一切影響しない。docs/features/markdown-preview.md「機能全体の設計」節）。
+ */
+.board-main-row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  /* セルフレビュー指摘（2周目）: board-columns に min-width を持たせたこと
+   * で、狭いウィンドウ幅 + 広いパネル幅の組み合わせでは行全体の内容幅が
+   * ビューポートを超えうる。この行自身がスクロールコンテナを持たないと、
+   * はみ出しが document レベルの横スクロールとして board の外（下部
+   * ターミナル領域を含む画面全体）へ漏れてしまう。overflow-x: auto で
+   * はみ出しをこの行の内側に閉じ込め、.terminal-pane 側には一切影響しない
+   * ようにする。
+   */
+  overflow-x: auto;
+}
+
+.board-columns {
+  flex: 1;
+  /* PreviewPanel は最大 800px の固定幅（flex-shrink:0）を持つため、狭い
+   * ウィンドウ幅かつパネルを広げた組み合わせでは board-columns 側が 0px
+   * まで潰れ得る（セルフレビュー指摘: #57 の terminal-pane-panel-shell
+   * min-width と同型の問題）。この min-width は「board-columns 自身が
+   * board-main-row の flex レイアウトで潰れない」ための下限であり、
+   * エージェントカラム1個分のサイズとは独立の防御（Grid 化後も必要）。
+   * padding: 1rem（左右計2rem）を差し引いても最低1カラム分
+   * （--board-column-min）のコンテンツ幅を確保できるよう、その分を上乗せ
+   * する（セルフレビュー指摘: 下限値をそのまま min-width にすると極端に
+   * 狭い環境でコンテンツ幅が下限に満たず、1カラムすら全幅表示できずに
+   * 二重の横スクロールが生じていた）。
+   * #178 で下限を 280px → 320px へ引き上げたことによる再評価: この
+   * min-width は 312px → 352px になり、PreviewPanel を最大幅 800px で開いた
+   * ときに横スクロールが始まるウィンドウ幅は 1112px → 1152px へ上がる。
+   * 増えた分のはみ出しは従来どおり .board-main-row の overflow-x: auto に
+   * 閉じ込められ、document へは漏れない（#57 / #89 の回帰なし）。閾値が
+   * 動くだけで、「PreviewPanel を最大幅で開いても board-columns が
+   * 1カラム未満へ潰れない」保証は新しい下限でも維持される。
+   */
+  min-width: calc(var(--board-column-min) + 2rem);
+  /* #89: 以前は display:flex + agent-column 側の flex:1 1 280px（当時の
+   * 下限値）で幅を配分していたが、.agent-column 自身が overflow: hidden に
+   * よりスクロールコンテナとなっていたため、flexbox の automatic minimum
+   * size 仕様（scroll container なアイテムは既定で 0 になる）により、
+   * flex-shrink の比率に応じて下限を下回るまで比例縮小してしまっていた
+   * （PreviewPanel を広げるとカラム内カードの折り返しが変わる不具合）。
+   * CSS Grid + grid-auto-columns: minmax(var(--board-column-min), 420px) は
+   * 明示的な長さのトラック最小サイズを厳密に守り、比例縮小が起きない。
+   * 割り当て幅が足りない場合はこのコンテナ内でオーバーフローし、下の
+   * overflow-x: auto による横スクロールに委ねる（この行の外・document へは
+   * 漏れない）。トラック自体は下限〜420px の範囲でコンテナ幅に応じて伸縮
+   * する（#41由来の意図: 少数時は420pxまで広がり分け合い、多数時は下限で
+   * 頭打ちして横スクロールに委ねる）ため、パネル幅の変化に応じてカラム幅は
+   * その範囲で変動し続ける。「下限を下回らない」ことが保証範囲であり、
+   * パネル操作でカラム幅が一切変化しないことまでは保証しない（#41 の意図と
+   * 両立しないトレードオフ）。
+   * #178: 下限を 280px → 320px（--board-column-min）へ引き上げ、多数時に
+   * 下限へ張り付いたカラムのカード本文の可読幅を上げた。1920px 幅で並ぶ
+   * カラム数は 6 → 5 に留まる（360px だと 4 まで落ち、一覧性の損失が
+   * 大きい）。上限 420px は #41 の「少数時は広がって分け合う」意図を残す
+   * ため据え置き、上下限の幅が狭まることは受け入れる。
+   */
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(var(--board-column-min), 420px);
+  gap: 1rem;
+  padding: 1rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: start;
+}
+
+.agent-column {
+  /* 幅は親 .board-columns の grid-auto-columns（--board-column-min〜420px。
+   * #41 由来の上下限）に一本化する（#89）。以前ここにあった flex: 1 1 280px は
+   * Grid item には効果を持たないため削除。max-width: 420px は Grid item
+   * にも適用されるが、親の grid-auto-columns の上限（420px）と冗長な
+   * ため削除しても挙動は変わらない。 */
+  background: var(--board-column-bg);
+  border: 1px solid var(--board-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.agent-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* セルフレビュー指摘対応（2周目）: エージェント名・サイクル状態・優先度
+   * 方針バッジ・「＋ 差し込み」ボタンが同一行に並ぶため、狭いカラム幅
+   * （320px〜）では折り返しを許容する（.filter-bar の既存対策と同じ方針）。
+   * wrap しないと、縮小可能な要素（バッジ）だけが際限なく潰れて読めなく
+   * なるか、他要素がクリップされるかの二択になってしまう。 */
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--board-border);
+}
+
+.agent-column-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.agent-column-cycle-status {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--board-muted-fg);
+  white-space: nowrap;
+}
+
+.agent-column-cycle-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  background: currentcolor;
+}
+
+.agent-column-cycle-status[data-cycle-status="running"] {
+  color: var(--cycle-status-running-fg);
+}
+
+.agent-column-cycle-status[data-cycle-status="idle"] {
+  color: var(--cycle-status-idle-fg);
+}
+
+.agent-column-cycle-status[data-cycle-status="stale"] {
+  color: var(--cycle-status-stale-fg);
+  font-weight: 600;
+}
+
+.agent-column-priority-policy-badge {
+  /* セルフレビュー指摘対応: 長いモード名（例: domain-bootstrap:<domain>）で
+     ヘッダが溢れ、右端の「＋ 差し込み」ボタンが押せなくなるのを防ぐため、
+     カラム幅（320px〜）に収まるよう縮小・省略を許可する。狭幅では省略表示
+     になるが、フルテキストは title 属性（クリック時のツールチップ）で
+     読める。
+     セルフレビュー指摘対応（2周目）: min-width: 0 のみだと、他の兄弟要素
+     （エージェント名・サイクル状態・「＋ 差し込み」ボタン）が縮小しない
+     ため、狭幅ではこのバッジだけが際限なく潰れて文字が1文字も見えない
+     空のピルになりうる。上の .agent-column-header 側で flex-wrap: wrap を
+     許容しつつ、ここでは最低限の可読幅（min-width）を設けることで、
+     「折り返して2行になる」か「最低限の省略表示を保つ」のどちらかに
+     倒し、空ピル化を避ける。 */
+  flex-shrink: 1;
+  min-width: 3.5em;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid var(--board-border);
+  background: var(--board-chip-bg);
+  color: var(--board-fg);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.agent-column-priority-policy-badge[data-policy-status="undefined-mode"] {
+  color: var(--cycle-status-stale-fg);
+  font-weight: 600;
+}
+
+.agent-column-insert-button {
+  flex-shrink: 0;
+  border: 1px solid var(--board-border);
+  background: var(--board-chip-bg);
+  color: var(--board-fg);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.agent-column-body {
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+}
+
+.agent-column-needs-human-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--board-needs-human-border);
+  margin: 0.2rem 0;
+}
+
+.agent-column-row-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* 実行中セクション（P3-2）: 1段目（ヘッダ直後・カード一覧より前）に表示する。
+ * runningRuns が空なら見出しごと非表示（親コンポーネント側で分岐）。 */
+.agent-column-running-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--running-section-border);
+  margin: 0.2rem 0;
+}
+
+.agent-column-running-run {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.2rem 0.5rem;
+  border-left: 3px solid var(--running-section-border);
+  background: var(--board-card-bg);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  margin-bottom: 0.4rem;
+}
+
+.agent-column-running-run[data-stale="true"] {
+  border-left-color: var(--running-section-stale-border);
+  background: var(--running-section-stale-bg);
+}
+
+.agent-column-running-run-subject {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-column-running-run-challenge {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.agent-column-running-run-arrow {
+  color: var(--board-muted-fg);
+}
+
+.agent-column-running-run-elapsed {
+  color: var(--board-muted-fg);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.agent-column-running-run[data-stale="true"] .agent-column-running-run-elapsed {
+  color: var(--running-section-stale-fg);
+  font-weight: 600;
+}
+
+.agent-column-running-run-stale-warning {
+  grid-column: 1 / -1;
+  color: var(--running-section-stale-fg);
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+/* 再開コマンドを挿入ボタン（#31・FR-12）: stale な delegate run にのみ表示。 */
+.agent-column-running-run-resume-button {
+  grid-column: 1 / -1;
+  justify-self: start;
+  border: 1px dashed var(--running-section-stale-border);
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  background: transparent;
+  color: var(--running-section-stale-fg);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+/* D&D 並べ替え・差し込み（#16）: 行ラッパーはドロップ先の判定にのみ使う
+ * （台帳の並び替え自体は行わず、指示文生成→prefill のみ）。ドラッグ中の
+ * 対象行にはアクセント色の上辺インジケータを表示する。 */
+.agent-column-row[data-drop-target="true"] {
+  box-shadow: inset 0 2px 0 0 var(--board-needs-human-border);
+}
+
+.agent-column-ghost-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border: 1px dashed var(--board-muted-fg);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  cursor: grab;
+}
+
+.agent-column-ghost-input {
+  font: inherit;
+  color: inherit;
+  background: var(--board-card-bg);
+  border: 1px solid var(--board-card-border);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+}
+
+.agent-column-ghost-hint {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--board-muted-fg);
+}
+
+.task-card {
+  /* カードの見た目を持つコンテナ（#169）。承認ボタンをカードの中へ置くため、
+   * 対話要素ではない <div> にしてある。クリック・ドラッグ・キーボード並べ替えは
+   * 内側の .task-card-body（<button>）が担う。
+   * 余白はここでは持たない — コンテナ側に持たせると、外周の帯が「見た目はカード
+   * なのにクリックもドラッグも効かない」死に領域になる（#169 レビュー指摘）。
+   * 本文の余白は .task-card-body、承認領域の余白は .task-card-approval が持つ。 */
+  display: block;
+  width: 100%;
+  position: relative;
+  background: var(--board-card-bg);
+  border: 1px solid var(--board-card-border);
+  border-radius: 6px;
+}
+
+/* フォーカスリングはカード全体に出す（#169）。内側のクリック領域と承認ボタンの
+ * どちらにフォーカスが入っても、輪郭は 1 枚のカードとして描かれる。
+ * :focus-within ではなく :has(:focus-visible) にしているのは、マウスクリックでは
+ * リングを出さない従来の挙動（.task-card:focus-visible）をそのまま保つため。
+ * :has() は Baseline widely available（Chrome 105 / Safari 15.4 / Firefox 121）で、
+ * board はローカル起動の GUI なので後方互換フォールバックは置かない。 */
+.task-card:has(:focus-visible) {
+  outline: 2px solid var(--board-needs-human-border);
+  outline-offset: 1px;
+}
+
+.task-card-body {
+  /* 内側のクリック領域。ブラウザ既定のボタン装飾をリセットし、コンテナ側の
+   * 見た目をそのまま透かす。カード本文の余白はこの要素が持つ——そうすることで
+   * カード外周までがクリック領域／ドラッグ起点になる（D&D はこの board の
+   * 主要操作。#169 レビュー指摘）。 */
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: grab;
+  background: none;
+  border: 0;
+  padding: 0.5rem 0.65rem;
+}
+
+/* 承認ブロックがあるときは、本文の下余白を「本文と承認領域の間隔」に詰める。
+ * カード下端の余白は承認ブロック側が持つため、合算しても見た目は
+ * 承認ブロックがカードの外にあった頃と同じ（本文との間隔 0.3rem・下端 0.5rem）。 */
+.task-card:has(.task-card-approval) .task-card-body {
+  padding-bottom: 0.3rem;
+}
+
+/* リングはコンテナ側（.task-card:has(:focus-visible)）が描くため、
+ * 内側では出さない（輪郭が二重になるのを防ぐ）。 */
+.task-card-body:focus-visible {
+  outline: none;
+}
+
+.task-card[data-needs-human="true"] {
+  background: var(--board-needs-human-bg);
+  border-left: 3px solid var(--board-needs-human-border);
+}
+
+/* 承認コントロール（#165・FR-20 → #171 で TaskCard / CardDetailModal の共通
+   コンポーネント ApprovalControl.tsx の見た目として抽出）。共通の見た目
+   （レイアウト・ボタン装飾）はここへ集約し、ホスト固有の余白・配置は
+   ホスト側クラス（.task-card-approval / .card-detail-modal-footer）に残す。 */
+.approval-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.approval-control button {
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--board-needs-human-border);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.approval-control button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* 「承認する」（確認フェーズの確定ボタン）の強調配色。セレクタを
+   `.approval-control button.approval-control-confirm` にしているのは詳細度のため——
+   単独クラス `.approval-control-confirm`（0,1,0）では、直前の
+   `.approval-control button`（0,1,1）が持つ `background: transparent` /
+   `color: inherit` に負けて以下の宣言が一切効かない。#168 でこの配色を
+   `.task-card-approval-confirm` として導入したときから同じ詳細度の取り違えがあり、
+   意図した強調色も下記の WCAG AA 対応も死んでいた。#171 でこのルール自体を
+   `.approval-control*` へ移設し、かつ確定ボタンの露出面がカードとモーダルの
+   2 箇所へ増えるため、移設に合わせてここで直す。 */
+.approval-control button.approval-control-confirm {
+  background: var(--board-needs-human-border);
+  /* 背景は両テーマとも暖色系（light #e8b93f / dark #caa03a）。color: inherit の
+     ままだとダークテーマで前景が #e7e7ea になりコントラスト比が約 2.1:1 に落ち、
+     0.72rem の小さいラベルが読めなくなる（WCAG AA の 4.5:1 未満）。承認は
+     誤操作の影響が大きい操作なので、文字色を暗色に固定して両テーマで読めるようにする。 */
+  color: #1c1c1f;
+}
+
+.approval-control-question {
+  font-size: 0.72rem;
+  color: var(--board-muted-fg);
+}
+
+.approval-control-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--board-error-fg);
+}
+
+/* カード（.task-card）の中・本文（.task-card-body）の下に置く（#169）。
+   カードを「コンテナ＋内側のクリック領域」に分けたことで、<button> の入れ子を
+   作らずにカードの内側へ収められる。ここに残すのはカード固有の余白だけ
+   （共通の見た目は .approval-control が持つ。#171・D3）。 */
+.task-card-approval {
+  /* 左右はカード本文と揃え、下はカード下端の余白を兼ねる（.task-card は
+     余白を持たないため。上の間隔は .task-card-body の padding-bottom が担う）。 */
+  padding: 0 0.65rem 0.5rem;
+}
+
+.task-card-tooltip {
+  /* document.body へ portal されるため viewport 基準。top/left/bottom は
+   * TaskCard 側が実測して inline style で与える（#41）。 */
+  position: fixed;
+  max-width: 240px;
+  background: var(--board-tooltip-bg);
+  color: var(--board-tooltip-fg);
+  border-radius: 4px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 20%);
+  z-index: 10;
+}
+
+.task-card-title {
+  font-size: 0.9rem;
+  margin-bottom: 0.3rem;
+}
+
+/* カードの 4 項目（一言で・位置づけ・いまの状態・次に人間がすること。#185）:
+ * カードの最初に見える部分。10 秒で掴めるよう長文でも省略せず（clamp しない）
+ * 折り返して全文を出す。ラベルは小さく、値の上に積む。 */
+.task-card-fields {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.task-card-fields-item + .task-card-fields-item {
+  margin-top: 0.25rem;
+}
+
+.task-card-fields dt {
+  font-size: 0.7rem;
+  color: var(--board-muted-fg);
+}
+
+.task-card-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--board-muted-fg);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--board-muted-fg);
+}
+
+.status-dot[data-status="未分類"] {
+  background: var(--status-未分類);
+}
+.status-dot[data-status="分類済"] {
+  background: var(--status-分類済);
+}
+.status-dot[data-status="計画承認待ち"] {
+  background: var(--status-計画承認待ち);
+}
+.status-dot[data-status="着手中"] {
+  background: var(--status-着手中);
+}
+.status-dot[data-status="人間対応待ち"] {
+  background: var(--status-人間対応待ち);
+}
+.status-dot[data-status="検証中"] {
+  background: var(--status-検証中);
+}
+.status-dot[data-status="完了確認待ち"] {
+  background: var(--status-完了確認待ち);
+}
+.status-dot[data-status="完了"] {
+  background: var(--status-完了);
+}
+
+.error-card {
+  background: var(--board-error-bg);
+  border: 1px dashed var(--board-error-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+}
+
+.error-card-summary {
+  font-size: 0.8rem;
+  margin-bottom: 0.3rem;
+}
+
+.error-card-raw {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* カード詳細モーダル（読み取り専用・NFR-01）。
+ * ネイティブ <dialog> + showModal() を使用する。dialog 自身が中央寄せされた
+ * ボックス（旧オーバーレイ+コンテンツの一体化）を兼ね、背景の暗幕は
+ * ::backdrop 疑似要素で表現する（トップレイヤーに載るため z-index 指定は不要）。
+ */
+
+/* カード詳細モーダル（Issue #153）: 説明・完了条件・タスク案・作業ログを
+ * 折り返し少なく読めるだけの幅を取る。ビューポート比を併用しているため、
+ * 狭い画面（幅 < 880px 相当）では 90vw 側が効いて画面からはみ出さない。
+ * 縦は max-height: 80vh + 内部スクロール（.card-detail-modal-content）のまま。 */
+.card-detail-modal {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  background: var(--board-modal-bg);
+  border: 1px solid var(--board-modal-border);
+  border-radius: 8px;
+  padding: 0;
+  width: 100%;
+  max-width: min(880px, 90vw);
+  max-height: 80vh;
+}
+
+.card-detail-modal::backdrop {
+  background: var(--board-modal-overlay-bg);
+}
+
+.card-detail-modal-content {
+  padding: 1rem 1.2rem;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+/* 承認フッター（#171・D3）。モーダル本文（作業ログのタイムラインを含み長く
+ * なりうる）の末尾に置くが、素直に末尾へ置くと承認のたびに最下部まで
+ * スクロールする必要が生じ、Issue が解こうとしている「判断材料を見ながら
+ * 承認する」が達成できない。position: sticky; bottom: 0 で常に手元に留める。
+ * sticky の基準（スクロールポート）は overflow-y: auto を持つ
+ * .card-detail-modal-content で、その「パディングエッジ」（自身の下パディング
+ * を含む見た目の可視領域の外周）が固定先になる——そのため bottom: 0 だけで
+ * 親の下パディング分のスクロール後の隙間は自然に解消される（margin-bottom
+ * を負値にして下方向にも打ち消そうとすると、sticky の制約は margin box に
+ * 対して働くため逆にスクロールポートの外へはみ出し、フッターが見えなくなる
+ * レビュー指摘あり・修正済み）。左右だけは負のマージン＋同量のパディングで
+ * 親の左右パディング（1.2rem）を打ち消し、フッターの背景がスクロール領域の
+ * 左右の端まで届く（＝浮いた余白を残さない）ようにしている。
+ * 背景を敷いて下にスクロールしてきた本文が透けないようにする。 */
+.card-detail-modal-footer {
+  position: sticky;
+  bottom: 0;
+  margin: 0.75rem -1.2rem 0;
+  padding: 0.6rem 1.2rem;
+  background: var(--board-modal-bg);
+  border-top: 1px solid var(--board-modal-border);
+}
+
+.card-detail-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.card-detail-modal-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.modal-close-button {
+  border: 1px solid var(--board-border);
+  background: var(--board-chip-bg);
+  color: var(--board-fg);
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ラベル列は内容ぶんだけ（auto）・値列が残りすべて（1fr）。モーダル幅が
+ * 広がってもラベル列は伸びないため、増えた幅はそのまま値の可読域になる
+ * （Issue #153 の確認事項）。ラベルは日本語 2〜6 文字なので折り返さない。 */
+.card-detail-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.3rem 0.75rem;
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+}
+
+.card-detail-fields dt {
+  color: var(--board-muted-fg);
+  white-space: nowrap;
+}
+
+.card-detail-fields dd {
+  margin: 0;
+}
+
+/* カードの 4 項目（#185）: 詳細の先頭。カードの面と同じく、ラベルを小さく
+ * 値の上に積み、長文は折り返して全文を出す。 */
+.card-detail-card-fields {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+}
+
+.card-detail-card-fields-item + .card-detail-card-fields-item {
+  margin-top: 0.4rem;
+}
+
+.card-detail-card-fields dt {
+  font-size: 0.75rem;
+  color: var(--board-muted-fg);
+}
+
+.card-detail-card-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 複数行フィールド（説明・完了条件・タスク案。#151）: 台帳の改行とネストの
+ * インデントをそのまま見せる。長い引用ブロック（ingest 由来の説明）でも
+ * 横スクロールを出さないよう、途中でも折り返す。 */
+.card-detail-multiline {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 説明は ingest 由来だと実データで数千文字のブロック引用になる（#151）。
+ * モーダル全体の 1 本スクロールに委ねると、下に続く作業ログまでの距離が伸び、
+ * 説明そのものも読み飛ばしにくくなるため、この欄だけ高さを制限して内部で
+ * スクロールさせる（FR-13 の承認対象は説明より上に並べてある）。 */
+.card-detail-description {
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+/* 課題の一枚絵（fig。#180・FR-14）: dt/dd のラッパ div（dl の子として妥当）は
+ * display: contents にして、中の dt/dd を他のフィールドと同じ親グリッドの
+ * 2 列へ並べる。図が無い課題ではコンポーネントごと描画されないため、この
+ * 行自体が現れず、従来どおりのレイアウトになる。 */
+.card-detail-fig {
+  display: contents;
+}
+
+/* 参照フィールド（関連リポジトリ・関連Issue・関連PR。#155）: 1行に複数の
+ * 参照が並ぶため横並び＋折り返し。マーカーは出さない（値そのものが短い参照）。 */
+.card-detail-ref-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.75rem;
+  margin: 0;
+  padding: 0;
+}
+
+/* resumebox（#31・FR-12）: 更新なし（stale）の delegate 実行中セッションの
+ * 再開コマンドを表示する箱。実行中セクションと同じ青系のアクセントだが、
+ * 「未実行のコマンド」であることを視覚的に区別するため破線ボーダーにする。 */
+.resumebox {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border: 1px dashed var(--running-section-border);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+}
+
+.resumebox-heading {
+  margin: 0;
+  color: var(--running-section-border);
+}
+
+.resumebox-command {
+  width: 100%;
+  border: 1px solid var(--board-card-border);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  background: var(--board-card-bg);
+  color: var(--board-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.resumebox-prefill-button {
+  align-self: flex-start;
+  border: 1px solid var(--running-section-border);
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  background: transparent;
+  color: var(--running-section-border);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+/* 「＋ エージェント追加」ボタン（Issue #123）: FilterBar 行（.filter-bar）内、
+ * アーカイブ表示トグルの後ろに配置する（Issue #136 で専用の board-header 行
+ * を廃止し統合）。filter-toggle の margin-left: auto により後続ボタンも
+ * 自動的に右端グループへ含まれるため、このボタン自体に追加のレイアウト
+ * 指定は不要。フィルタチップ群の相互排他ロジック（liveFiltersDisabled）
+ * には巻き込まない独立操作。共通の外観プロパティは `.filter-chip,
+ * .add-agent-button` （本ファイル上部）にまとめてあり、ここでは
+ * フィルタチップ（丸ピル）と区別するための border-radius のみ上書きする。
+ */
+.add-agent-button {
+  border-radius: 6px;
+}
+
+/* 「＋ エージェント追加」フォーム（Issue #123）: CardDetailModal と同じく
+ * ネイティブ <dialog> + showModal() を採用する。フォーム UI の器のみが
+ * 本チケットのスコープであり、送信ハンドラは仮実装（#124 で API 接続）。
+ */
+.add-agent-form-modal {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  background: var(--board-modal-bg);
+  border: 1px solid var(--board-modal-border);
+  border-radius: 8px;
+  padding: 0;
+  width: 100%;
+  max-width: 420px;
+}
+
+.add-agent-form-modal::backdrop {
+  background: var(--board-modal-overlay-bg);
+}
+
+.add-agent-form-content {
+  padding: 1rem 1.2rem;
+}
+
+.add-agent-form-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.add-agent-form-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.add-agent-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.add-agent-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.add-agent-form-field input {
+  border: 1px solid var(--board-card-border);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  background: var(--board-card-bg);
+  color: var(--board-fg);
+  font-size: 0.85rem;
+}
+
+.add-agent-form-errors {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--board-needs-human-border);
+  font-size: 0.8rem;
+}
+
+.add-agent-form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.add-agent-form-submit {
+  border: 1px solid var(--running-section-border);
+  border-radius: 4px;
+  padding: 0.35rem 0.9rem;
+  background: transparent;
+  color: var(--running-section-border);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+/* 送信中（POST /api/fleet/agents 応答待ち）は disabled 化されるが、既定の
+   color/cursor 指定が UA の disabled 既定表示（GrayText 化等）を上書きして
+   しまい無反応に見えるため、明示的に視覚的フィードバックを与える
+   （セルフレビュー指摘・Issue #124）。 */
+.add-agent-form-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.card-detail-log-heading {
+  font-size: 0.85rem;
+  margin: 0 0 0.5rem;
+}
+
+.card-detail-log-loading,
+.card-detail-log-error,
+.card-detail-log-empty {
+  font-size: 0.8rem;
+  color: var(--board-muted-fg);
+}
+
+.card-detail-log-error {
+  color: var(--board-needs-human-border);
+}
+
+.card-detail-log-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.log-entry-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: start;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.log-entry-ts {
+  color: var(--board-muted-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.log-source-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  background: var(--board-source-ledger-bg);
+  color: var(--board-source-ledger-fg);
+}
+
+.log-source-badge[data-source="journal"] {
+  background: var(--board-source-journal-bg);
+  color: var(--board-source-journal-fg);
+}
+
+.log-source-badge[data-source="ledger"] {
+  background: var(--board-source-ledger-bg);
+  color: var(--board-source-ledger-fg);
+}
+
+.log-source-badge[data-source="runs"] {
+  background: var(--board-source-runs-bg);
+  color: var(--board-source-runs-fg);
+}
+
+.log-entry-text {
+  overflow-wrap: break-word;
+}
+
+/* 課題台帳セクション（#94・#96・#102 FR-B2/FR-B3。challenge prop を直接表示。
+ * join は行わない）・取得元表示セクション（#85・#96 FR-A1/FR-A3/FR-A4）。
+ * クラス名は既存の join 前提の命名を維持している（testid 同様、変更は必須で
+ * はないため）。既存の card-detail-fields dl スタイルを
+ * 流用しつつ、見出し・外枠だけ独自クラスで区切る。両セクションで共通する
+ * 宣言はセレクタリストにまとめ、重複定義を避ける（セルフレビュー指摘対応。
+ * 既存の .card-detail-log-heading 等の書き換えは避け、新規セレクタとして
+ * 追記するに留める）。 */
+.card-detail-ledger-join,
+.card-detail-provenance {
+  margin: 0 0 1rem;
+}
+
+.card-detail-ledger-join-heading,
+.card-detail-provenance-heading {
+  font-size: 0.85rem;
+  margin: 0 0 0.5rem;
+}
+
+.card-detail-raw-record {
+  margin-top: 0.4rem;
+}
+
+.card-detail-raw-record-toggle {
+  border: 1px solid var(--board-card-border);
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem;
+  background: transparent;
+  color: var(--board-fg);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.card-detail-raw-record-content {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem;
+  border: 1px solid var(--board-card-border);
+  border-radius: 4px;
+  background: var(--board-card-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+/* 常設ターミナル領域（P2）。ボードは残り高さに追従し（.board 参照）、
+ * ここは flex-shrink しない固定高さのボックスとして下部を占有する。
+ * ダーク固定背景（ライト/ダークテーマの影響を受けない）。
+ */
+.terminal-pane {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--terminal-bg);
+  color: var(--terminal-fg);
+  border-top: 1px solid var(--terminal-border);
+}
+
+.terminal-pane-resize-handle {
+  height: 4px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  background: var(--terminal-resize-handle-bg);
+}
+
+.terminal-pane-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--terminal-header-bg);
+  border-bottom: 1px solid var(--terminal-border);
+}
+
+.terminal-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.35rem 0.5rem;
+  overflow-x: auto;
+}
+
+.terminal-tab {
+  border: none;
+  background: transparent;
+  color: var(--terminal-tab-fg);
+  border-radius: 6px 6px 0 0;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.terminal-tab[aria-selected="true"] {
+  background: var(--terminal-tab-active-bg);
+  color: var(--terminal-tab-active-fg);
+}
+
+.terminal-collapse-button {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--terminal-tab-fg);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+}
+
+.terminal-pane-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+/* #57: 各エージェントタブは常時「左=エージェント／右=手動シェル」の2分割。
+ * この行（.terminal-pane-split）がタブごとに絶対配置で領域全体を覆い、
+ * アクティブなタブのみ display:flex（他は display:none）で切り替える。
+ */
+.terminal-pane-split {
+  position: absolute;
+  inset: 0;
+}
+
+.terminal-pane-panel {
+  min-width: 0;
+  height: 100%;
+}
+
+.terminal-pane-panel-agent {
+  flex-shrink: 0;
+}
+
+.terminal-pane-panel-shell {
+  flex: 1;
+  /* エージェント（左）ペインは flex-shrink:0 の固定 px 幅（最大
+   * MAX_AGENT_PANE_WIDTH_PX）を持つため、狭いウィンドウ幅かつ左ペイン幅が
+   * 大きい設定の組み合わせでは、残り幅を埋める右（シェル）ペインが 0px まで
+   * 潰れて操作不能になり得る（セルフレビュー指摘: #57）。最低限のターミナル幅を
+   * 確保するための下限。
+   */
+  min-width: 160px;
+}
+
+.terminal-pane-splitter {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--terminal-resize-handle-bg);
+}
+
+/* マークダウンプレビュー左サイドパネル（#64。#112 で右サイドから移動）。
+ * .board-main-row 内で board-columns と横並びになる。閉じている間は幅を
+ * 指定せず、ヘッダ（開くボタンのみ）分の幅に自然に収まる。
+ */
+.preview-panel {
+  flex-shrink: 0;
+  display: flex;
+  background: var(--board-column-bg);
+  border-right: 1px solid var(--board-border);
+}
+
+.preview-panel-resize-handle {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--board-border);
+}
+
+.preview-panel-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--board-border);
+}
+
+.preview-panel-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.preview-panel-refresh-button,
+.preview-panel-toggle-button {
+  border: none;
+  background: transparent;
+  color: var(--board-fg);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+}
+
+.preview-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  font-size: 0.85rem;
+}
+
+/* ファイルツリー（左）とレンダリング結果（右）を横並びにする（#69）。
+ * ファイルツリー側は独自スクロール・固定幅、レンダリング側は残り幅を使う。
+ * ファイルツリー側の文字色は元々 .preview-panel-body の muted-fg を継承
+ * していたため、ここで明示的に引き継ぐ（プレースホルダ的な一覧表示のため
+ * 本文色より薄くしてよい）。
+ */
+.preview-panel-file-tree {
+  flex-shrink: 0;
+  width: 35%;
+  max-width: 180px;
+  padding: 0.75rem;
+  overflow-y: auto;
+  color: var(--board-muted-fg);
+  border-right: 1px solid var(--board-border);
+}
+
+/* レンダリング結果は「読み物」であり、一覧・プレースホルダ用の muted-fg
+ * ではなく本文色（--board-fg）で表示する（セルフレビュー指摘: 実際の
+ * Markdown 本文までミュートグレーで表示され読みにくかった）。
+ * プレースホルダ・ローディング・エラー表示は個別に muted-fg / エラー色を
+ * 指定し直す。
+ */
+.preview-panel-markdown {
+  flex: 1;
+  min-width: 0;
+  padding: 0.75rem;
+  overflow-y: auto;
+  color: var(--board-fg);
+}
+
+.preview-panel-markdown-placeholder,
+.preview-panel-markdown-loading {
+  font-size: 0.8rem;
+  color: var(--board-muted-fg);
+}
+
+.preview-panel-markdown-error,
+.mermaid-diagram-error {
+  font-size: 0.8rem;
+  color: var(--board-needs-human-border);
+}
+
+/* md_subscribe_error 受信時の注記（#70）。エラーではなく「ライブ更新だけ
+ * 無効」という軽い注意喚起のため、エラー色より控えめな枠線で下の
+ * Markdown 本文と区切るだけに留める（KISS）。 */
+.preview-panel-live-update-disabled {
+  font-size: 0.8rem;
+  color: var(--board-needs-human-border);
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--board-border);
+}
+
+/* GFM テーブル・コードブロック・引用の最低限の可読性のみ整える
+ * （見た目の作り込みは本チケットのスコープ外。KISS）。
+ */
+.preview-panel-markdown table {
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+
+.preview-panel-markdown th,
+.preview-panel-markdown td {
+  border: 1px solid var(--board-border);
+  padding: 0.25rem 0.5rem;
+}
+
+.preview-panel-markdown pre {
+  background: var(--board-column-bg);
+  border: 1px solid var(--board-border);
+  border-radius: 4px;
+  padding: 0.5rem;
+  overflow-x: auto;
+}
+
+.preview-panel-markdown code {
+  font-family: monospace;
+}
+
+.preview-panel-markdown blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--board-border);
+  color: var(--board-muted-fg);
+}
+
+/* mermaid 図（マークダウンプレビューのコードブロックとカード詳細の一枚絵で共用。
+ * コンポーネントは MermaidDiagram.tsx）。 */
+.mermaid-diagram-wrapper {
+  margin: 0.5rem 0;
+}
+
+.mermaid-diagram svg {
+  max-width: 100%;
+  /* mermaid の SVG は width/height 属性を持つため、max-width で横に縮んだ
+   * ときに高さを追従させないと図が縦に引き伸ばされる。 */
+  height: auto;
+}
+
+/* mermaid-diagram-error は .preview-panel-markdown-error と同じ規則（上方）で
+ * 色・サイズを与えている。 */
+
+/* 画像プレビュー（#143 / 設計 file-tree-non-md-support.md §3 Phase B）。
+ * パネル幅は可変のため、原寸で溢れさせず幅に合わせて縮める（縦横比は維持）。
+ */
+.preview-panel-image img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ファイルツリー（#68）。repo ごとにファイルパスの一覧を表示するだけの
+ * 平坦なリスト（KISS。過度な階層UIコンポーネントは導入しない）。
+ */
+.file-tree-loading,
+.file-tree-error,
+.file-tree-empty {
+  font-size: 0.8rem;
+  color: var(--board-muted-fg);
+}
+
+.file-tree-error {
+  color: var(--board-needs-human-border);
+}
+
+.file-tree-status {
+  font-size: 0.75rem;
+  color: var(--board-muted-fg);
+  margin-bottom: 0.5rem;
+}
+
+.file-tree-status-error {
+  color: var(--board-needs-human-border);
+}
+
+.file-tree-repo {
+  margin-bottom: 0.5rem;
+}
+
+/* ネストツリー（#110）: repo 見出し・ディレクトリの開閉ボタン共通。 */
+.file-tree-dir-button {
+  display: flex;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--board-fg);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.15rem 0.3rem;
+  border-radius: 3px;
+}
+
+.file-tree-repo-name {
+  font-weight: 600;
+}
+
+.file-tree-toggle-icon {
+  flex: none;
+  width: 1em;
+  color: var(--board-muted-fg);
+}
+
+/* ネスト1段ごとにインデントする（ul の入れ子で表現）。 */
+.file-tree-node-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 0.85rem;
+}
+
+.file-tree-file-button {
+  display: flex;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--board-muted-fg);
+  font-size: 0.8rem;
+  cursor: pointer;
+  /* 開閉アイコン分（.file-tree-toggle-icon の 1em）の左余白を足し、
+   * 同階層のディレクトリ名とファイル名の頭を揃える。 */
+  padding: 0.15rem 0.3rem 0.15rem calc(0.3rem + 1em);
+  border-radius: 3px;
+}
+
+/* ファイル名・ディレクトリ名は空白を含まないことが多く、パネル幅を超えると
+ * 通常の折り返しが効かないため、任意の文字位置での折り返しを許可する
+ * （セルフレビュー指摘: 狭いパネル幅ではみ出す）。 */
+.file-tree-node-name {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.file-tree-file-button[aria-current="true"] {
+  background: var(--board-chip-active-bg);
+  color: var(--board-chip-active-fg);
+}
+
+/* 台帳タイトルの join 表示（Issue #101 / FR-B1）: RunningRunRow の課題ID
+ * （.agent-column-running-run-challenge）の直後に続けて表示する台帳タイトル。
+ * 見つからない場合は「台帳に見つかりません」がここに入る。
+ * min-width: 0 は必須: 親の .agent-column-running-run-subject は
+ * display:flex + overflow:hidden だが、flex アイテムは既定で
+ * min-width:auto（=コンテンツの最小内容幅）のため、これが無いと長い台帳
+ * タイトルが縮まず、後続の「→ repo」（既存表示）が親の overflow:hidden で
+ * 見切れてしまう。flex-grow は指定しない（既定の flex-grow:0 のまま）:
+ * grow させると余白吸収で「→ repo」が右端へ押し出され、既存の左詰め
+ * レイアウトが変わってしまう。この要素だけを縮小対象にすることで、課題ID・
+ * 「→ repo」・経過時間など既存表示の可視性・配置を壊さない。 */
+.agent-column-running-run-ledger-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* join 失敗時（「台帳に見つかりません」）は、実在する台帳タイトルと視覚的に
+ * 区別できるよう、他の副次情報（.agent-column-running-run-arrow 等）と同じ
+ * muted 色で表示する。 */
+.agent-column-running-run-ledger-title[data-ledger-missing="true"] {
+  color: var(--board-muted-fg);
+  font-style: italic;
+}
+
+/* stale 行の取得元インライン表示（Issue #101 / FR-A2）: 更新なし警告と同様、
+ * グリッド全幅で1行表示する。 */
+.agent-column-running-run-provenance {
+  grid-column: 1 / -1;
+  color: var(--board-muted-fg);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+/* 移植に伴う追加（board には無い）: 画面の切り替えと接続状態の細い帯、承認方法の案内 */
+.view-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--board-border, #ccc);
+  font-size: 0.85rem;
+}
+.view-bar h1 {
+  margin: 0;
+  font-size: 1rem;
+}
+.view-bar nav {
+  display: flex;
+  gap: 0.25rem;
+}
+.view-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0.75rem;
+}
+.view-body-board {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.board-screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.approval-control pre {
+  margin: 0.25rem 0 0;
+  overflow-x: auto;
+  font-size: 0.75rem;
+}
