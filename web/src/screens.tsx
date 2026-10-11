@@ -5,6 +5,7 @@ import type {
   StatusNeedsHuman,
   Workspace,
 } from "./api/types.gen.ts";
+import { Board } from "./board/Board.tsx";
 import { CardById, ClampedText, cardIndex } from "./cards.tsx";
 import { DISCREPANCY_LABELS, STATE_LABELS, label } from "./labels.ts";
 import type { LiveState } from "./live/useLive.ts";
@@ -298,6 +299,15 @@ function Questions({ live }: { live: LiveState }) {
 
 // 画面の一覧。後続のチケットは画面をここへ足す。AC-123・AC-124 のテストはこの一覧を順に検査する。
 export const screens: Screen[] = [
+  {
+    id: "board",
+    title: "ボード",
+    render: (live) => (
+      <section aria-label="ボード" className="board-screen">
+        <Board live={live} />
+      </section>
+    ),
+  },
   {
     id: "needs-human",
     title: "人間の対応待ち",

@@ -11,47 +11,58 @@ export function App() {
   const screen = screens.find((s) => s.id === current) ?? screens[0];
 
   return (
-    <main>
-      <h1>flywheel</h1>
-      <output>
-        {live.connected ? "接続中" : "切断中（再接続を試みています）"}
-        {" ・ 最終更新: "}
-        {live.lastUpdated ? live.lastUpdated.toLocaleString() : "未取得"}
-      </output>
+    <main className="app-layout">
+      <div className="view-bar">
+        <h1>flywheel</h1>
+        <nav>
+          {screens.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="filter-chip"
+              aria-pressed={s.id === screen?.id}
+              onClick={() => {
+                setCurrent(s.id);
+                setDetail(null);
+              }}
+            >
+              {s.title}
+            </button>
+          ))}
+        </nav>
+        <output>
+          {live.connected ? "接続中" : "切断中（再接続を試みています）"}
+          {" ・ 最終更新: "}
+          {live.lastUpdated ? live.lastUpdated.toLocaleString() : "未取得"}
+        </output>
+      </div>
       {live.loadError ? (
         <p role="alert">読み込みに失敗: {live.loadError}</p>
       ) : null}
       {live.fleetError ? (
         <p role="alert">集約の読み込みに失敗: {live.fleetError}</p>
       ) : null}
-      <nav>
-        {screens.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            aria-pressed={s.id === screen?.id}
-            onClick={() => {
-              setCurrent(s.id);
-              setDetail(null);
-            }}
-          >
-            {s.title}
-          </button>
-        ))}
-      </nav>
-      <OpenDetailContext.Provider value={(ws, id) => setDetail({ ws, id })}>
-        {detail ? (
-          <DetailScreen
-            workspace={detail.ws}
-            id={detail.id}
-            workspaces={live.workspaces}
-            refreshKey={live.lastUpdated}
-            onClose={() => setDetail(null)}
-          />
-        ) : (
-          screen?.render(live)
-        )}
-      </OpenDetailContext.Provider>
+      <div
+        className={
+          screen?.id === "board" && !detail
+            ? "view-body view-body-board"
+            : "view-body"
+        }
+      >
+        <OpenDetailContext.Provider value={(ws, id) => setDetail({ ws, id })}>
+          {detail ? (
+            <DetailScreen
+              workspace={detail.ws}
+              id={detail.id}
+              workspaces={live.workspaces}
+              refreshKey={live.lastUpdated}
+              onClose={() => setDetail(null)}
+            />
+          ) : (
+            screen?.render(live)
+          )}
+        </OpenDetailContext.Provider>
+      </div>
     </main>
   );
 }

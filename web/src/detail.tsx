@@ -10,7 +10,7 @@ import { ClampedText } from "./cards.tsx";
 import { OUTSIDE_NOTE, guidesFor } from "./guidance.ts";
 import { MODIFIER_LABELS, STATE_LABELS, label } from "./labels.ts";
 
-interface Loaded {
+export interface Loaded {
   show: ShowCardResponse;
   activities: Activity[];
   reports: Record<string, RunReport>;
@@ -18,7 +18,7 @@ interface Loaded {
 
 const byTimeAsc = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-async function load(workspace: string, id: string): Promise<Loaded> {
+export async function load(workspace: string, id: string): Promise<Loaded> {
   const [show, log] = await Promise.all([
     api.challenge(workspace, id),
     api.log(workspace, id),
@@ -126,14 +126,9 @@ function Body({
   workspace: string;
   path: string;
 }) {
-  const { show, activities, reports } = l;
+  const { show } = l;
   const c = show.challenge;
   const guides = guidesFor(c.id, path, c.status, show.card.modifiers);
-  const plans = [...show.plans].sort((a, b) => a.version - b.version);
-  const runs = [...show.runs].sort((a, b) =>
-    byTimeAsc(b.started_at, a.started_at),
-  );
-  const acts = [...activities].sort((a, b) => byTimeAsc(a.at, b.at));
   return (
     <>
       <h2>
@@ -163,6 +158,21 @@ function Body({
         <h3>完了条件</h3>
         <ClampedText text={c.done_criteria} />
       </section>
+      <DetailSections l={l} />
+    </>
+  );
+}
+
+// 計画・承認の記録・保留・不可逆操作・run・作業ログ。課題の詳細の画面とカードのモーダルが共有する。
+export function DetailSections({ l }: { l: Loaded }) {
+  const { show, activities, reports } = l;
+  const plans = [...show.plans].sort((a, b) => a.version - b.version);
+  const runs = [...show.runs].sort((a, b) =>
+    byTimeAsc(b.started_at, a.started_at),
+  );
+  const acts = [...activities].sort((a, b) => byTimeAsc(a.at, b.at));
+  return (
+    <>
       <Section title="計画" count={plans.length}>
         {plans.map((p) => (
           <article key={p.version} data-plan={p.version}>
