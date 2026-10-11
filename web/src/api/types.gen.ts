@@ -237,6 +237,7 @@ export interface ShowCardResponse {
 }
 
 export interface NeedsHumanResponse {
+  unreadable_workspaces: string[];
   workspaces: WorkspaceNeedsHuman[];
 }
 
@@ -247,6 +248,7 @@ export interface WorkspaceNeedsHuman {
 
 export interface QuestionsResponse {
   questions: Question[];
+  unreadable_workspaces: string[];
 }
 
 export interface Question {

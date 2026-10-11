@@ -87,8 +87,10 @@ type WorkspaceNeedsHuman struct {
 }
 
 // NeedsHumanResponse は `GET /api/v1/needs-human` の本文。
+// UnreadableWorkspaces は state が ok と判定されたが、借りる・読むのに失敗して除いたワークスペースの名前。
 type NeedsHumanResponse struct {
-	Workspaces []WorkspaceNeedsHuman `json:"workspaces"`
+	UnreadableWorkspaces []string              `json:"unreadable_workspaces"`
+	Workspaces           []WorkspaceNeedsHuman `json:"workspaces"`
 }
 
 // FromNeedsHuman は status の needs_human の部分だけを取り出す。
@@ -108,8 +110,10 @@ type Question struct {
 }
 
 // QuestionsResponse は `GET /api/v1/questions` の本文。
+// UnreadableWorkspaces は state が ok と判定されたが、借りる・読むのに失敗して除いたワークスペースの名前。
 type QuestionsResponse struct {
-	Questions []Question `json:"questions"`
+	Questions            []Question `json:"questions"`
+	UnreadableWorkspaces []string   `json:"unreadable_workspaces"`
 }
 
 // FromUnansweredHold は未回答の保留を、ワークスペース名つきの Question へ変換する。

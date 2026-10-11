@@ -57,8 +57,8 @@ export function fixtures(): Record<string, unknown> {
     "/api/v1/workspaces/alpha/challenges": { challenges: [] },
     "/api/v1/workspaces/beta/status": emptyStatus,
     "/api/v1/workspaces/beta/challenges": { challenges: [] },
-    "/api/v1/needs-human": { workspaces: [] },
-    "/api/v1/questions": { questions: [] },
+    "/api/v1/needs-human": { unreadable_workspaces: [], workspaces: [] },
+    "/api/v1/questions": { questions: [], unreadable_workspaces: [] },
   };
 }
 

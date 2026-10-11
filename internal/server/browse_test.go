@@ -199,7 +199,10 @@ func TestBrowseAPI_NeedsHuman(t *testing.T) {
 		t.Fatalf("%d %s", code, body)
 	}
 	m := decodeMap(t, body)
-	assertKeys(t, "needs-human", m, "workspaces")
+	assertKeys(t, "needs-human", m, "workspaces", "unreadable_workspaces")
+	if u := m["unreadable_workspaces"].([]any); len(u) != 0 {
+		t.Errorf("unreadable_workspaces = %v, want []", u)
+	}
 	wss := m["workspaces"].([]any)
 	if len(wss) != 2 {
 		t.Fatalf("workspaces = %v, want a and b only", wss)
@@ -281,7 +284,7 @@ func TestBrowseAPI_QuestionsOrderTiesByNumericID(t *testing.T) {
 func TestBrowseAPI_QuestionsEmptyAndAnsweredExcluded(t *testing.T) {
 	ws := browseWorkspace(t)
 	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
-	if _, body := apiGet(t, port, "/api/v1/questions"); strings.TrimSpace(body) != `{"questions":[]}` {
+	if _, body := apiGet(t, port, "/api/v1/questions"); strings.TrimSpace(body) != `{"questions":[],"unreadable_workspaces":[]}` {
 		t.Errorf("body = %s", body)
 	}
 	coretest.InsertHold(t, ws, 1, "open", "in_progress", "2026-10-01T00:00:00.000Z", nil)
@@ -547,4 +550,66 @@ func deadPID(t *testing.T) int64 {
 func dumpRows(t *testing.T, ws string) string {
 	t.Helper()
 	return coretest.DumpTables(t, ws, "activity", "run", "lock")
+}
+
+// breakReads は、ワークスペース ws のストアを「state は ok のまま、読み取りだけが失敗する」
+// 状態にする（スキーマのテーブルを消す。SchemaVersion の判定は通り、課題・保留の読み取りが失敗する）。
+func breakReads(t *testing.T, ws string) {
+	t.Helper()
+	coretest.DropTable(t, ws, "hold")
+}
+
+func unreadableOf(t *testing.T, body string, key string) []string {
+	t.Helper()
+	m := decodeMap(t, body)
+	raw, ok := m["unreadable_workspaces"].([]any)
+	if !ok {
+		t.Fatalf("%s: unreadable_workspaces is not an array: %s", key, body)
+	}
+	out := []string{}
+	for _, v := range raw {
+		out = append(out, v.(string))
+	}
+	return out
+}
+
+// AC-54a
+func TestBrowseAPI_QuestionsSkipsUnreadableWorkspace(t *testing.T) {
+	a := browseWorkspace(t)
+	b := browseWorkspace(t)
+	coretest.InsertHold(t, a, 1, "from-a", "in_progress", "2026-10-05T00:00:00.000Z", nil)
+	breakReads(t, b)
+	_, port := startFleetServer(t, core.FleetWorkspace{Name: "a", Path: a}, core.FleetWorkspace{Name: "b", Path: b})
+
+	code, body := apiGet(t, port, "/api/v1/questions")
+	if code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	qs := decodeMap(t, body)["questions"].([]any)
+	if len(qs) != 1 || qs[0].(map[string]any)["question"] != "from-a" {
+		t.Errorf("questions = %v, want only a's", qs)
+	}
+	if got := unreadableOf(t, body, "questions"); !reflect.DeepEqual(got, []string{"b"}) {
+		t.Errorf("unreadable_workspaces = %v, want [b]", got)
+	}
+}
+
+// AC-53a
+func TestBrowseAPI_NeedsHumanSkipsUnreadableWorkspace(t *testing.T) {
+	a := browseWorkspace(t)
+	b := browseWorkspace(t)
+	coretest.DropTable(t, b, "slot")
+	_, port := startFleetServer(t, core.FleetWorkspace{Name: "a", Path: a}, core.FleetWorkspace{Name: "b", Path: b})
+
+	code, body := apiGet(t, port, "/api/v1/needs-human")
+	if code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	wss := decodeMap(t, body)["workspaces"].([]any)
+	if len(wss) != 1 || wss[0].(map[string]any)["name"] != "a" {
+		t.Errorf("workspaces = %v, want only a", wss)
+	}
+	if got := unreadableOf(t, body, "needs-human"); !reflect.DeepEqual(got, []string{"b"}) {
+		t.Errorf("unreadable_workspaces = %v, want [b]", got)
+	}
 }

@@ -66,7 +66,7 @@ M4 の完了の目安は、設計書 §17 のとおり「UI から承認・優�
 - [ ] API は `/api/v1/` の下に置き、成功は JSON（M1 の「成功時の JSON 出力の規約」：包みを持たない・最上位はオブジェクト・snake_case）で返す【決定 2026-10-09 親 M4P2】
 - [ ] 課題の一覧・詳細・作業ログ・run の一覧・状況の表示は、対応する CLI の `--json` の出力と同じ形を返す（`list`・`show`・`log`・`runs`・`status`）。API のために別の形を作らない【決定 2026-10-09 親 M4P2】
 - [ ] 失敗は CLI と同じエラーコードの閉集合を使い、本文を `{"error":{"code","message"}}` とする。HTTP の状態コードはエラーコードから決める（§IF / API「エラーコードと HTTP の状態コード」）
-- [ ] `status` の `waiting_external`（M3。検証中で PR を持つ課題の CI の状態を `gh` で取る）は、CLI と同じく server が `internal/adapters/github` を組み立てて core へ渡して得る。`gh` が無い・失敗したときの扱いは CLI の `status` と同じにする。CLI の `status` は、`gh` で CI の状態を取れなかった課題を `waiting_external` に載せずに成功する（core の `ListWaitingExternal` が取得の失敗を課題ごとに飛ばす）ので、server も同じ結果を返す。server が保持するのは PR ごとのチェックの取得結果（成功・失敗とも、取得した時刻から 60 秒）で、`waiting_external` の候補（検証中で終了していない run の無い課題）は要求ごとに core が導き直す。`gh` の時間の上限は CLI と同じく `internal/adapters/github` の既定（60 秒）を使う。`github.New` が失敗したとき（`ErrGHNotFound` を含む）は、CLI の `newCheckSource` と同じく取得を常に失敗させる取得の口を core へ渡し、エラーとして返さない。SSE の観測は `gh` を起動しない【決定 2026-10-09 親 M4P19】
+- [ ] `status` の `waiting_external`（M3。検証中で PR を持つ課題の CI の状態を `gh` で取る）は、CLI と同じく server が `internal/adapters/github` を組み立てて core へ渡して得る。`gh` が無い・失敗したときの扱いは CLI の `status` と同じにする。CLI の `status` は、`gh` で CI の状態を取れなかった課題を `waiting_external` に載せずに成功する（core の `ListWaitingExternal` が取得の失敗を課題ごとに飛ばす）ので、server も同じ結果を返す。server が保持するのは PR ごとのチェックの取得結果（成功・失敗とも、取得した時刻から 60 秒）で、`waiting_external` の候補（検証中で終了していない run の無い課題）は要求ごとに core が導き直す。`status` の API は、`gh` によるチェックの取得の間、そのワークスペースのストアの読み取りの借りを持たない（ストアを読む基本の `Overview` と候補の導出が済んだら借りを返してから `gh` を呼ぶ。遅い `gh` がストアの状態更新を待たせないため）。`gh` の時間の上限は CLI と同じく `internal/adapters/github` の既定（60 秒）を使う。`github.New` が失敗したとき（`ErrGHNotFound` を含む）は、CLI の `newCheckSource` と同じく取得を常に失敗させる取得の口を core へ渡し、エラーとして返さない。SSE の観測は `gh` を起動しない【決定 2026-10-09 親 M4P19】
 - [ ] `status` の `needs_human.budget_exhausted` に使うエージェントの宣言（`.flywheel/agent.json`）は、CLI の `status` と同じ規則でワークスペースから読む
 - [ ] 閲覧の API は、ストアを開くときのマイグレーション（M1 の規則）を除いて、ストアへ書き込まない。M3 の中断した run の回収（`interrupted` への書き込み）も server の閲覧では行わない【仮定】
 - [ ] fleet の全ワークスペースにわたって、人間の操作を待っているものを 1 つにまとめて返す API を持つ（§課題カードの面・§問いの一覧）
@@ -293,8 +293,8 @@ CLI に足す本人確認の要らない操作（S2）: `flywheel prioritize <C-
 | `GET /api/v1/workspaces/{name}/challenges/{id}` | `flywheel show --json` と同じ形の最上位に `card` を足したもの |
 | `GET /api/v1/workspaces/{name}/log?challenge={id}` | `flywheel log [<C-ID>] --json` と同じ形 |
 | `GET /api/v1/workspaces/{name}/runs` | `flywheel runs --json` と同じ形 |
-| `GET /api/v1/needs-human` | `{"workspaces": [{"name", "needs_human"}]}`。`needs_human` は各ワークスペースの `status.needs_human` と同じ形。`state` が `ok` でないワークスペースは含めない |
-| `GET /api/v1/questions` | `{"questions": [{"workspace", "challenge_id", "title", "question", "raised_at", "from_status", "run_id"}]}`。値の表現は CLI にそろえる（`run_id` は `runs --json` と同じ `R-<正の整数>` か `null`、`raised_at` と `from_status` は `show --json` の保留と同じ）。未回答の保留だけを `raised_at` の古い順（同時刻は `workspace`、`challenge_id` の順） |
+| `GET /api/v1/needs-human` | `{"workspaces": [{"name", "needs_human"}], "unreadable_workspaces": ["<名前>"]}`。`needs_human` は各ワークスペースの `status.needs_human` と同じ形。`state` が `ok` でないワークスペースは含めない。`state` が `ok` と判定されたが、ストアを借りる・読むのに失敗した（`store_busy` 等）ワークスペースは `workspaces` から除き、名前を `unreadable_workspaces` に入れて残りを 200 で返す（fleet 全体を 1 件のエラーにしない。無ければ `[]`）。要求の取り消しだけは、残りを返さずエラーにする |
+| `GET /api/v1/questions` | `{"questions": [{"workspace", "challenge_id", "title", "question", "raised_at", "from_status", "run_id"}], "unreadable_workspaces": ["<名前>"]}`。`unreadable_workspaces` は `needs-human` と同じ扱い（読めなかったワークスペースの保留は含めず、名前を入れて残りを返す。無ければ `[]`）。値の表現は CLI にそろえる（`run_id` は `runs --json` と同じ `R-<正の整数>` か `null`、`raised_at` と `from_status` は `show --json` の保留と同じ）。未回答の保留だけを `raised_at` の古い順（同時刻は `workspace`、`challenge_id` の順） |
 | `GET /api/v1/workspaces/{name}/runs/{id}/report` | `{"report": {"run_id", "assumptions": [string], "unverified": [string]}}`。報告・キーが無ければ空の配列。`{id}` が `R-<正の整数>` でなければ `validation_failed`、ストアに無ければ `not_found` |
 | `GET /api/v1/events` | Server-Sent Events。`workspace_changed` と、30 秒ごとの keep-alive のコメント行 |
 
@@ -466,12 +466,14 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 > 「CLI と JSON として等しい」の項目は、heartbeat が古い終了していない run の無いストアで比べる（`runs`・`show` は run の一覧を読むときに中断した run を回収するが、server は回収しないため。`status` は回収しない）。
 
 - [ ] `GET /api/v1/workspaces/{name}/status` の本文は、同じストアでの `flywheel status --json` の標準出力と JSON として等しい（検証中で PR を持つ課題を含むストアで、M3 と同じ偽の `gh` を PATH に置いて比べる）
+- [ ] 【AC-38a】`agent.json` の宣言の有無で `needs_human.budget_exhausted` が変わる課題を含むストアで、`agent.json` が読めるときも読めないときも、`GET …/status` の本文は `flywheel status --json` と JSON として等しく、読めるときだけその課題が `budget_exhausted` に載る
 - [ ] 検証中で PR を持つ課題を含むストアで、PATH から `gh` だけを除いた環境（`flywheel` は絶対パスで起動する）では、`GET /api/v1/workspaces/{name}/status` は 200 を返し、本文は同じ環境の `flywheel status --json` の標準出力（その課題を `waiting_external` に含まない）と JSON として等しい
 - [ ] 検証中で PR を持つ課題を含むストアで、60 秒の間に同じワークスペースの `GET …/status` を 2 回呼んでも、その PR の `gh` の起動は 1 回である（偽の `gh` の起動の記録で確かめる）
 - [ ] 検証中で PR を持つ課題をそれぞれ含む 2 つのワークスペースの `GET …/status` を交互に 2 回ずつ呼ぶと、`gh` の起動はワークスペースごとに 1 回ずつである
 - [ ] 保持の時間（既定 60 秒）を過ぎた後の `GET …/status` は、`gh` をもう一度起動する（テストは保持の時間を server の内部の設定で短くして確かめる）
 - [ ] 偽の `gh` が失敗を返した PR は、保持の時間の間の次の `GET …/status` でも `gh` を再起動しない
 - [ ] 保持の時間の間に課題が検証中でなくなると、次の `GET …/status` の `waiting_external` からその課題が外れる
+- [ ] 【AC-44a】`GET …/status` が `gh` の応答を待っている間、そのワークスペースのストアの状態更新（排他の Lock を要する、ストアのファイルの差し替え等）は待たされない（`gh` を解放の合図まで止める偽物にして、その間に状態更新を起こして確かめる）
 - [ ] `GET /api/v1/events` の購読とストアの変化の観測だけでは、`gh` を起動しない
 - [ ] `GET /api/v1/workspaces/{name}/challenges` の本文は、各要素から `card` を除くと、`flywheel list --json` の標準出力と JSON として等しい
 - [ ] `GET /api/v1/workspaces/{name}/challenges/{id}` の本文は、最上位の `card` を除くと、`flywheel show <id> --json` の標準出力と JSON として等しい
@@ -481,7 +483,9 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] 失敗の応答の本文は `{"error":{"code","message"}}` の形で、`code` は §IF / API の表のエラーコードの 1 つである
 - [ ] `GET /api/v1/needs-human` は、`state` が `ok` の各ワークスペースについて、そのワークスペースの `status.needs_human` と JSON として等しい値を `needs_human` に持つ
 - [ ] `GET /api/v1/needs-human` は、`state` が `ok` でないワークスペースを含めない
+- [ ] 【AC-53a】`GET /api/v1/needs-human` は、`state` が `ok` と判定された後に借りる・読むのに失敗したワークスペースを `workspaces` から除き、その名前を `unreadable_workspaces` に入れて、残りのワークスペースの分を 200 で返す（Acquire の失敗と Acquire 後の読み取りの失敗は同じ扱い）。除いたものが無いとき `unreadable_workspaces` は `[]` である
 - [ ] `GET /api/v1/questions` は、fleet の全ワークスペースの未回答の保留だけを返す（回答済みの保留を含めない）
+- [ ] 【AC-54a】`GET /api/v1/questions` は、借りる・読むのに失敗したワークスペースの保留を除き、その名前を `unreadable_workspaces` に入れて、残りの分を 200 で返す。除いたものが無いとき `unreadable_workspaces` は `[]` である
 - [ ] `GET /api/v1/questions` の要素は `raised_at` の古い順に並び、同じ時刻なら `workspace`、次に `challenge_id` の順に並ぶ
 - [ ] `GET /api/v1/questions` の要素は `workspace`・`challenge_id`・`title`・`question`・`raised_at`・`from_status`・`run_id` の 7 つのキーを持つ
 - [ ] 保留を作った run が無い（`hold.run_id` が NULL の）保留の `GET /api/v1/questions` の要素は、`run_id` が `null` である
@@ -553,6 +557,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] 案内のコマンドの `<パス>` は、空白・引用符を含むパスでもシェルにそのまま貼れるよう、単一引用符で囲む（中の単一引用符は `'\''` にする）（UI のテスト）
 - [ ] 案内のコマンドのサブコマンドとフラグ（`approve`・`answer --answer`・`budget --impl-usd`・`--workspace`）は、CLI に実在する（Go のテストで、UI の案内の雛形の定義と CLI のコマンドの定義を照合する）
 - [ ] 問いの一覧の画面は、`GET /api/v1/questions` の要素をその順に表示する（UI のテスト）
+- [ ] 【AC-110a】UI は、`needs-human`・`questions` の `unreadable_workspaces` にあるワークスペースについて、読み取れなかったことを示す（最上位のそのワークスペースの欄と、問いの一覧に示す。UI のテスト）
 - [ ] 問いの一覧の各要素から、その課題の詳細を開ける（UI のテスト）
 - [ ] 課題の詳細には、計画の全版が版の順に表示される（版が 2 つの計画のフィクスチャで確かめる。UI のテスト）
 - [ ] 課題の詳細には、承認と差し戻しの記録が表示される（UI のテスト）

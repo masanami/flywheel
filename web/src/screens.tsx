@@ -129,11 +129,26 @@ function NeedsHumanBody({
   );
 }
 
+// 読み取りに失敗して needs-human・questions の応答から除かれたワークスペースの名前。
+function unreadableFor(live: LiveState, which: "needsHuman" | "questions") {
+  return live[which]?.unreadable_workspaces ?? [];
+}
+
+function UnreadableNote({ names }: { names: string[] }) {
+  if (names.length === 0) return null;
+  return (
+    <p role="alert" data-testid="unreadable-workspaces">
+      読み取れなかったワークスペース（一覧から除いています）: {names.join("、")}
+    </p>
+  );
+}
+
 // 最上位: ワークスペースごとに、人間の操作を待っているものを集める。
 function Top({ live }: { live: LiveState }) {
   const nhBy = new Map(
     (live.needsHuman?.workspaces ?? []).map((w) => [w.name, w.needs_human]),
   );
+  const nhUnreadable = new Set(unreadableFor(live, "needsHuman"));
   return (
     <section aria-label="人間の対応待ち">
       <h2>人間の対応待ち</h2>
@@ -145,6 +160,8 @@ function Top({ live }: { live: LiveState }) {
               <h3>{w.name}</h3>
               {w.state !== "ok" ? (
                 <WorkspaceError w={w} />
+              ) : nhUnreadable.has(w.name) ? (
+                <p role="alert">読み取れませんでした</p>
               ) : nh ? (
                 <NeedsHumanBody
                   nh={nh}
@@ -160,6 +177,7 @@ function Top({ live }: { live: LiveState }) {
         );
       })}
       <h3>未回答の問い</h3>
+      <UnreadableNote names={unreadableFor(live, "questions")} />
       {(live.questions?.questions.length ?? 0) === 0 ? (
         <p>なし</p>
       ) : (
@@ -247,6 +265,7 @@ function Questions({ live }: { live: LiveState }) {
   return (
     <section aria-label="問いの一覧">
       <h2>問いの一覧</h2>
+      <UnreadableNote names={unreadableFor(live, "questions")} />
       {qs.length === 0 ? (
         <p>なし</p>
       ) : (

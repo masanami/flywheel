@@ -65,6 +65,7 @@ function bodies() {
     triage: [{ challenge_id: "C-6", reason: "失敗が続く", run_id: "R-1" }],
   };
   f["/api/v1/needs-human"] = {
+    unreadable_workspaces: [],
     workspaces: [{ name: "alpha", needs_human: needs }],
   };
   f["/api/v1/workspaces"] = {
@@ -162,4 +163,39 @@ it("AC-98〜100: ワークスペースの画面は進められるもの・外部
   expect(within(alpha).getByText("https://x/pr/1")).toBeInTheDocument();
   const beta = screen.getByRole("region", { name: "beta の状況" });
   expect(within(beta).getByRole("alert")).toHaveTextContent("store_error");
+});
+
+it("AC-110a: needs-human・questions から除かれたワークスペースは、読み取れなかったことを画面に示す", async () => {
+  const f = bodies() as Record<string, unknown>;
+  f["/api/v1/workspaces"] = {
+    workspaces: [
+      { error: null, name: "alpha", path: "/w/alpha", state: "ok" },
+      { error: null, name: "gamma", path: "/w/gamma", state: "ok" },
+    ],
+  };
+  f["/api/v1/workspaces/gamma/status"] = f["/api/v1/workspaces/beta/status"];
+  f["/api/v1/workspaces/gamma/challenges"] = { challenges: [] };
+  f["/api/v1/needs-human"] = {
+    ...(f["/api/v1/needs-human"] as Record<string, unknown>),
+    unreadable_workspaces: ["gamma"],
+  };
+  f["/api/v1/questions"] = { questions: [], unreadable_workspaces: ["gamma"] };
+  installFakes(f);
+  render(<App />);
+  act(() => FakeEventSource.latest.open());
+  await screen.findByText("C-1");
+  const g = screen.getByRole("region", { name: "gamma の対応待ち" });
+  expect(within(g).getByRole("alert")).toHaveTextContent(
+    "読み取れませんでした",
+  );
+  expect(screen.queryByText("読み込み中")).toBeNull();
+  expect(screen.getAllByTestId("unreadable-workspaces")[0]).toHaveTextContent(
+    "gamma",
+  );
+  // 読めたワークスペースの分は表示される。
+  expect(
+    within(screen.getByRole("region", { name: "alpha の対応待ち" })).getByText(
+      /main へマージ/,
+    ),
+  ).toBeInTheDocument();
 });
