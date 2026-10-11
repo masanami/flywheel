@@ -1,5 +1,7 @@
 import type {
   ListCardResponse,
+  NeedsHumanResponse,
+  QuestionsResponse,
   StatusResponse,
   WorkspaceChanged,
   WorkspaceList,
@@ -23,9 +25,8 @@ export const api = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
   status: (name: string) => get<StatusResponse>(`${ws(name)}/status`),
   challenges: (name: string) => get<ListCardResponse>(`${ws(name)}/challenges`),
-  // needs-human と questions の応答の型は internal/view にまだ無い（生成されたら差し替える）。
-  needsHuman: () => get<unknown>("/api/v1/needs-human"),
-  questions: () => get<unknown>("/api/v1/questions"),
+  needsHuman: () => get<NeedsHumanResponse>("/api/v1/needs-human"),
+  questions: () => get<QuestionsResponse>("/api/v1/questions"),
 };
 
 export const eventsPath = "/api/v1/events";
