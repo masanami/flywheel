@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -105,18 +106,40 @@ func statusHandler(fleet *Fleet, checks *checkCache) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, CodeNotFound, "not found")
 			return
 		}
-		st, release, le := fleet.Acquire(r.Context(), r.PathValue("name"))
-		if le != nil {
-			writeError(w, le.Status, le.Code, le.Message)
-			return
-		}
-		defer release()
-
-		ov, err := overviewFor(r.Context(), st, checks)
+		ov, err := statusOverview(r.Context(), fleet, r.PathValue("name"), checks)
 		if err != nil {
+			var le *LookupError
+			if errors.As(err, &le) {
+				writeError(w, le.Status, le.Code, le.Message)
+				return
+			}
 			writeCoreError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, view.FromOverview(ov))
 	}
+}
+
+// statusOverview は status の Overview を返す。ストアの読み取りの借りを持つのは、ストアを読む間
+// （基本の Overview と waiting_external の候補の導出）だけで、gh によるチェックの取得は借りを
+// 返した後に行う（遅い gh が、ストアの状態更新の Lock を待たせないように）。
+func statusOverview(ctx context.Context, fleet *Fleet, name string, checks *checkCache) (*core.Overview, error) {
+	st, release, le := fleet.Acquire(ctx, name)
+	if le != nil {
+		return nil, le
+	}
+	ov, cands, err := func() (*core.Overview, []core.WaitingExternalCandidate, error) {
+		defer release()
+		ov, err := baseOverview(ctx, st)
+		if err != nil {
+			return nil, nil, err
+		}
+		cands, err := st.WaitingExternalCandidates(ctx)
+		return ov, cands, err
+	}()
+	if err != nil {
+		return nil, err
+	}
+	ov.WaitingExternal = core.ResolveWaitingExternal(ctx, cands, checks.checkSource())
+	return ov, nil
 }

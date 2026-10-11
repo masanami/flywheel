@@ -154,26 +154,32 @@ func runReportHandler(fleet *Fleet) http.HandlerFunc {
 }
 
 // needsHumanHandler は state が ok の各ワークスペースの status.needs_human を宣言の順に返す。
+// 借りる・読むのに失敗したワークスペースは除き、名前を unreadable_workspaces に添える（残りは返す）。
 // needs_human は GitHub を見ない（waiting_external を入れない）。
 func needsHumanHandler(fleet *Fleet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !getOnly(w, r) {
 			return
 		}
-		out := view.NeedsHumanResponse{Workspaces: []view.WorkspaceNeedsHuman{}}
+		out := view.NeedsHumanResponse{Workspaces: []view.WorkspaceNeedsHuman{}, UnreadableWorkspaces: []string{}}
 		for _, ws := range fleet.Statuses(r.Context()) {
 			if ws.State != StateOK {
 				continue
 			}
 			st, release, le := fleet.Acquire(r.Context(), ws.Name)
-			if le != nil {
-				continue // 判定の後に状態が変わった。含めない
+			if le != nil { // 判定の後に状態が変わった。除いて名前を添える
+				out.UnreadableWorkspaces = append(out.UnreadableWorkspaces, ws.Name)
+				continue
 			}
 			ov, err := baseOverview(r.Context(), st)
 			release()
 			if err != nil {
-				writeCoreError(w, err)
-				return
+				if r.Context().Err() != nil {
+					writeCoreError(w, err) // 要求の取り消し。残りを返す意味が無い
+					return
+				}
+				out.UnreadableWorkspaces = append(out.UnreadableWorkspaces, ws.Name)
+				continue
 			}
 			out.Workspaces = append(out.Workspaces, view.WorkspaceNeedsHuman{Name: ws.Name, NeedsHuman: view.FromNeedsHuman(ov)})
 		}
@@ -182,26 +188,33 @@ func needsHumanHandler(fleet *Fleet) http.HandlerFunc {
 }
 
 // questionsHandler は state が ok の全ワークスペースの未回答の保留を、
-// raised_at 昇順（同時刻は workspace、次に challenge_id）で返す。
+// raised_at 昇順（同時刻は workspace、次に challenge_id）で返す。借りる・読むのに失敗した
+// ワークスペースは除き、名前を unreadable_workspaces に添える。
 func questionsHandler(fleet *Fleet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !getOnly(w, r) {
 			return
 		}
 		qs := []view.Question{}
+		unreadable := []string{}
 		for _, ws := range fleet.Statuses(r.Context()) {
 			if ws.State != StateOK {
 				continue
 			}
 			st, release, le := fleet.Acquire(r.Context(), ws.Name)
 			if le != nil {
+				unreadable = append(unreadable, ws.Name)
 				continue
 			}
 			hs, err := st.ListUnansweredHolds(r.Context())
 			release()
 			if err != nil {
-				writeCoreError(w, err)
-				return
+				if r.Context().Err() != nil {
+					writeCoreError(w, err)
+					return
+				}
+				unreadable = append(unreadable, ws.Name)
+				continue
 			}
 			for _, h := range hs {
 				qs = append(qs, view.FromUnansweredHold(ws.Name, h))
@@ -221,6 +234,6 @@ func questionsHandler(fleet *Fleet) http.HandlerFunc {
 			}
 			return a.ChallengeID < b.ChallengeID
 		})
-		writeJSON(w, http.StatusOK, view.QuestionsResponse{Questions: qs})
+		writeJSON(w, http.StatusOK, view.QuestionsResponse{Questions: qs, UnreadableWorkspaces: unreadable})
 	}
 }

@@ -538,3 +538,17 @@ func InsertAnsweredHold(t *testing.T, workspace string, challengeID int, questio
 		t.Fatalf("coretest: InsertAnsweredHold: %v", err)
 	}
 }
+
+// DropTable は table を削除する。ストアの schema_version は残るので、ワークスペースの state は
+// ok のまま、そのテーブルを読む操作だけが失敗する状態を作る（読み取りの部分失敗のテスト用）。
+func DropTable(t *testing.T, workspace, table string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec("DROP TABLE " + table)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: DropTable(%q): %v", table, err)
+	}
+}

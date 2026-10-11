@@ -637,10 +637,26 @@ type WaitingExternal struct {
 // チェックが 1 つでも完了していない課題を challenge_id の昇順で返す。チェックは GET だけで取得し、
 // 状態・作業ログを変えない。取得に失敗した課題は、待っていると言い切れないため載せない。
 func (s *Store) ListWaitingExternal(ctx context.Context, checks UpstreamCheckSource) ([]WaitingExternal, error) {
-	out := []WaitingExternal{}
 	if checks == nil {
-		return out, nil
+		return []WaitingExternal{}, nil
 	}
+	cands, err := s.WaitingExternalCandidates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return ResolveWaitingExternal(ctx, cands, checks), nil
+}
+
+// WaitingExternalCandidate は waiting_external の候補（検証中で終了していない run を持たない課題）と、
+// その PR の成果物。ストアの読み取りだけで導き、チェックの取得には ResolveWaitingExternal を使う。
+type WaitingExternalCandidate struct {
+	challengeID string
+	artifacts   []runArtifactRow
+}
+
+// WaitingExternalCandidates は ListWaitingExternal のうちストアを読む部分。返した値はストアを
+// 参照しないので、ストアの借りを返した後に ResolveWaitingExternal へ渡してよい。
+func (s *Store) WaitingExternalCandidates(ctx context.Context) ([]WaitingExternalCandidate, error) {
 	var candidates []Challenge
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		all, err := listChallengesInStatuses(ctx, tx, []Status{StatusVerifying})
@@ -665,6 +681,7 @@ func (s *Store) ListWaitingExternal(ctx context.Context, checks UpstreamCheckSou
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
+	var out []WaitingExternalCandidate
 	for _, ch := range candidates {
 		vc, err := s.loadJ5Context(ctx, ch)
 		if err != nil {
@@ -673,13 +690,26 @@ func (s *Store) ListWaitingExternal(ctx context.Context, checks UpstreamCheckSou
 			}
 			return nil, err
 		}
-		prs, err := fetchPullRequestChecks(ctx, checks, vc.Artifacts)
+		out = append(out, WaitingExternalCandidate{challengeID: ch.ID, artifacts: vc.Artifacts})
+	}
+	return out, nil
+}
+
+// ResolveWaitingExternal は候補の PR のチェックを取得し、1 つでも完了していない課題を返す。
+// ストアに触れない。取得に失敗した課題は載せない。
+func ResolveWaitingExternal(ctx context.Context, cands []WaitingExternalCandidate, checks UpstreamCheckSource) []WaitingExternal {
+	out := []WaitingExternal{}
+	if checks == nil {
+		return out
+	}
+	for _, c := range cands {
+		prs, err := fetchPullRequestChecks(ctx, checks, c.artifacts)
 		if err != nil {
 			continue
 		}
 		if waitURL := pendingPullRequestURL(prs); waitURL != "" {
-			out = append(out, WaitingExternal{ChallengeID: ch.ID, PRURL: waitURL})
+			out = append(out, WaitingExternal{ChallengeID: c.challengeID, PRURL: waitURL})
 		}
 	}
-	return out, nil
+	return out
 }

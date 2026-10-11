@@ -228,18 +228,141 @@ func TestStatusAPI_EqualsCLIStatusJSON(t *testing.T) {
 	sameJSON(t, body, cliStatusJSON(t, ws))
 }
 
-// AC-38: agent.json が読めないときも CLI と同じ（budget_exhausted の判定の対象外になるだけ）。
-func TestStatusAPI_UnreadableAgentJSONEqualsCLI(t *testing.T) {
+// budgetWorkspace は、着手中で承認済みの計画（サイズ M・額は agent.json の既定から引く）を持つ課題
+// を含むワークスペース。agent.json の宣言を読めたときだけ needs_human.budget_exhausted に載る
+// （実装枠の既定が 0.5 USD で 1 USD 未満のため）。
+func budgetWorkspace(t *testing.T) string {
+	t.Helper()
 	ws := initWorkspace(t)
-	if err := os.WriteFile(filepath.Join(ws, ".flywheel", "agent.json"), []byte(`{broken`), 0o644); err != nil {
+	st, err := core.OpenWorkspace(ws)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.CreateChallenge(context.Background(), core.ChannelCLI, core.CreateInput{Title: "t", DoneCriteria: "d"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	spec := `{"verdict":"plan","summary":"S","steps":["a","b"],"repo":"r","operation":"op","size":"M","done_criteria":"D","budget_impl_usd":null,"budget_review_usd":null,"cross_repo":false,"related_repos":[],"question":null}`
+	coretest.InsertApprovedPlan(t, ws, 1, "PLAN", spec)
+	coretest.SetChallengeStatus(t, ws, 1, "in_progress")
+	writeAgentJSON(t, ws, validAgentJSON)
+	return ws
+}
+
+const validAgentJSON = `{"position_file":"position.md","size_budgets_usd":{"S":{"impl":0.5,"review":0.5},"M":{"impl":0.5,"review":1},"L":{"impl":0.5,"review":2}}}`
+
+func writeAgentJSON(t *testing.T, ws, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(ws, ".flywheel", "agent.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func budgetExhaustedCount(t *testing.T, body string) int {
+	t.Helper()
+	var doc struct {
+		NeedsHuman struct {
+			BudgetExhausted []json.RawMessage `json:"budget_exhausted"`
+		} `json:"needs_human"`
+	}
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	return len(doc.NeedsHuman.BudgetExhausted)
+}
+
+// AC-38a: agent.json が読めないときも CLI と同じ（budget_exhausted の判定の対象外になるだけ）。
+// フィクスチャは、宣言を読めるときだけ budget_exhausted に載る課題を含む（宣言を常に無視する
+// 実装では、読める側の比較で落ちる）。
+func TestStatusAPI_UnreadableAgentJSONEqualsCLI(t *testing.T) {
+	ws := budgetWorkspace(t)
 	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
+
 	code, body := statusRequest(t, port, "w")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", code, body)
 	}
+	if n := budgetExhaustedCount(t, body); n != 1 {
+		t.Fatalf("with a readable agent.json: budget_exhausted = %d, want 1 (the fixture must depend on the declaration): %s", n, body)
+	}
 	sameJSON(t, body, cliStatusJSON(t, ws))
+
+	writeAgentJSON(t, ws, `{broken`)
+	code, body = statusRequest(t, port, "w")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", code, body)
+	}
+	if n := budgetExhaustedCount(t, body); n != 0 {
+		t.Errorf("with an unreadable agent.json: budget_exhausted = %d, want 0: %s", n, body)
+	}
+	sameJSON(t, body, cliStatusJSON(t, ws))
+}
+
+// AC-44a: 遅い gh の取得の間、ストアの読み取りの借りを持たない（状態更新の Lock が待たされない）。
+func TestStatusAPI_DoesNotHoldStoreLeaseWhileFetchingChecks(t *testing.T) {
+	ws := verifyingWorkspace(t)
+	dir, calls := writeFakeGH(t, ghRoutesPending())
+	// 偽の gh を、release ファイルができるまで待つものに差し替える。
+	release := filepath.Join(dir, "release")
+	orig, err := os.ReadFile(filepath.Join(dir, "gh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped := strings.Replace(string(orig), "case ", "while [ ! -e '"+release+"' ]; do sleep 0.05; done\ncase ", 1)
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(wrapped), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withGHOnPATH(t, dir)
+	s, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
+	if e := stateOf(t, port, "w"); e.State != StateOK {
+		t.Fatalf("state = %q", e.State)
+	}
+
+	type result struct {
+		code int
+		body string
+	}
+	done := make(chan result, 1)
+	go func() {
+		code, body := statusRequest(t, port, "w")
+		done <- result{code, body}
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for calls() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("gh was never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// gh が止まっている間に、ストアの状態更新（Lock）を要する変化を起こして借りに行く。
+	dbDir := filepath.Join(ws, ".flywheel")
+	if err := os.Rename(filepath.Join(dbDir, "flywheel.db"), filepath.Join(dbDir, "moved.db")); err != nil {
+		t.Fatal(err)
+	}
+	acquired := make(chan struct{})
+	go func() {
+		if _, rel, le := s.fleet.Acquire(context.Background(), "w"); le == nil {
+			rel()
+		}
+		close(acquired)
+	}()
+	select {
+	case <-acquired:
+	case <-time.After(5 * time.Second):
+		t.Error("state update was blocked while the status request waited for gh")
+	}
+	if err := os.WriteFile(release, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-done:
+		if r.code != http.StatusOK {
+			t.Errorf("status = %d, body = %s", r.code, r.body)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("status request did not finish")
+	}
 }
 
 // AC-39: PATH に gh が無くても 200 で、本文は同じ環境の flywheel status --json と等しい。
