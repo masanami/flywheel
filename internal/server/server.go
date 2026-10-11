@@ -49,16 +49,24 @@ type Server struct {
 	http     *http.Server
 	done     chan struct{}
 	doneOnce sync.Once
+	hub      *eventHub
+	cfg      eventsConfig
 }
 
 // New は ln（Listen の戻り値）で、workspaces（宣言の順）を束ねて配信する Server を
 // 作る。許可する Host と Origin は、ln が実際に bind したポートから導く。ストアは
 // 要求ごとに開く・判定し直す（開けないワークスペースがあっても作れる）。
 func New(ln net.Listener, workspaces []core.FleetWorkspace) *Server {
-	s := &Server{ln: ln, fleet: NewFleet(workspaces), done: make(chan struct{})}
+	return newServer(ln, workspaces, eventsConfig{})
+}
+
+// newServer は New に SSE の時間の設定を渡せる版（テストが間隔を短くする）。
+func newServer(ln net.Listener, workspaces []core.FleetWorkspace, cfg eventsConfig) *Server {
+	cfg = cfg.withDefaults()
+	s := &Server{ln: ln, fleet: NewFleet(workspaces), done: make(chan struct{}), cfg: cfg, hub: newEventHub(workspaces)}
 	port := ln.Addr().(*net.TCPAddr).Port
 	s.http = &http.Server{
-		Handler:           newHandler(port, s.fleet),
+		Handler:           newHandler(port, s.fleet, s.hub, s.done, cfg),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	s.http.RegisterOnShutdown(func() { s.doneOnce.Do(func() { close(s.done) }) })
@@ -91,12 +99,14 @@ func (s *Server) Shutdown() error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = s.http.Close()
 	}
+	s.hub.wait()
 	s.fleet.Close()
 	return err
 }
 
-func newHandler(port int, fleet *Fleet) http.Handler {
+func newHandler(port int, fleet *Fleet, hub *eventHub, done <-chan struct{}, cfg eventsConfig) http.Handler {
 	mux := http.NewServeMux()
+	mux.Handle("/api/v1/events", eventsHandler(hub, done, cfg))
 	mux.HandleFunc("/api/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusNotFound, CodeNotFound, "not found")
