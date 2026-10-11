@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { DetailScreen } from "./detail.tsx";
 import { useLive } from "./live/useLive.ts";
+import { OpenDetailContext } from "./nav.tsx";
 import { screens } from "./screens.tsx";
 
 export function App() {
   const live = useLive();
   const [current, setCurrent] = useState(screens[0]?.id);
+  const [detail, setDetail] = useState<{ ws: string; id: string } | null>(null);
   const screen = screens.find((s) => s.id === current) ?? screens[0];
 
   return (
@@ -27,13 +30,28 @@ export function App() {
             key={s.id}
             type="button"
             aria-pressed={s.id === screen?.id}
-            onClick={() => setCurrent(s.id)}
+            onClick={() => {
+              setCurrent(s.id);
+              setDetail(null);
+            }}
           >
             {s.title}
           </button>
         ))}
       </nav>
-      {screen?.render(live)}
+      <OpenDetailContext.Provider value={(ws, id) => setDetail({ ws, id })}>
+        {detail ? (
+          <DetailScreen
+            workspace={detail.ws}
+            id={detail.id}
+            workspaces={live.workspaces}
+            refreshKey={live.lastUpdated}
+            onClose={() => setDetail(null)}
+          />
+        ) : (
+          screen?.render(live)
+        )}
+      </OpenDetailContext.Provider>
     </main>
   );
 }
