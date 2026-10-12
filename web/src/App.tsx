@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { DetailScreen } from "./detail.tsx";
 import { useLive } from "./live/useLive.ts";
-import { OpenDetailContext } from "./nav.tsx";
+import { OpenDetailContext, ScreenNavContext } from "./nav.tsx";
 import { screens } from "./screens.tsx";
 
 export function App() {
@@ -49,19 +49,26 @@ export function App() {
             : "view-body"
         }
       >
-        <OpenDetailContext.Provider value={(ws, id) => setDetail({ ws, id })}>
-          {detail ? (
-            <DetailScreen
-              workspace={detail.ws}
-              id={detail.id}
-              workspaces={live.workspaces}
-              refreshKey={live.lastUpdated}
-              onClose={() => setDetail(null)}
-            />
-          ) : (
-            screen?.render(live)
-          )}
-        </OpenDetailContext.Provider>
+        <ScreenNavContext.Provider
+          value={(id) => {
+            setCurrent(id);
+            setDetail(null);
+          }}
+        >
+          <OpenDetailContext.Provider value={(ws, id) => setDetail({ ws, id })}>
+            {detail ? (
+              <DetailScreen
+                workspace={detail.ws}
+                id={detail.id}
+                workspaces={live.workspaces}
+                refreshKey={live.lastUpdated}
+                onClose={() => setDetail(null)}
+              />
+            ) : (
+              screen?.render(live)
+            )}
+          </OpenDetailContext.Provider>
+        </ScreenNavContext.Provider>
       </div>
     </main>
   );
