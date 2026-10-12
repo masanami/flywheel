@@ -1,7 +1,7 @@
 // ブラウザ内の偽のストア。開発時の mock モードだけが読み込む（本番のビルドには入らない）。
 // 返す形は types.gen.ts と仕様の API の節に従う。状態の導出は本物では core がやるが、ここでは同じ表を写す。
 
-import type { CycleInfo } from "../api/proposed.ts";
+import type { ChallengeGraphResponse, CycleInfo } from "../api/proposed.ts";
 import type {
   Approval,
   BudgetExhausted,
@@ -15,6 +15,7 @@ import type {
   StatusResponse,
   Workspace,
 } from "../api/types.gen.ts";
+import { seedGraphs } from "./graph.ts";
 
 export interface Flags {
   running?: boolean;
@@ -42,6 +43,7 @@ export interface MockWorkspace {
   meta: Workspace;
   items: MockChallenge[];
   cycle: CycleInfo;
+  graph: ChallengeGraphResponse;
 }
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -147,6 +149,7 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
 const LONG = `${"この値はカードに全文を出すと幅 320px の列で何行にも伸びる。".repeat(8)}\n2 行目: 外部の Issue 本文をそのまま取り込んだ想定の長い説明。`;
 
 export function seed(): Record<string, MockWorkspace> {
+  const graphs = seedGraphs();
   const alpha: MockChallenge[] = [
     mk("C-1", "ログイン画面の文言を直す", "unclassified", {
       description: "ボタンの文言が「送信」のままになっている。",
@@ -294,6 +297,7 @@ export function seed(): Record<string, MockWorkspace> {
         last_cycle_at: iso(12),
         policy_mode: "優先度方針: 厳格（P0 のみ自走）",
       },
+      graph: graphs.alpha,
     },
     beta: {
       meta: ok("beta"),
@@ -303,6 +307,7 @@ export function seed(): Record<string, MockWorkspace> {
         last_cycle_at: iso(2000),
         policy_mode: "優先度方針: 既定（エージェント裁量）",
       },
+      graph: graphs.beta,
     },
     gamma: {
       meta: {
@@ -317,6 +322,7 @@ export function seed(): Record<string, MockWorkspace> {
         last_cycle_at: null,
         policy_mode: "",
       },
+      graph: { relations: [], repos: [] },
     },
   };
 }

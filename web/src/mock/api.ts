@@ -148,6 +148,10 @@ export function createMockApi(
       await wait();
       return wsOf(name).cycle;
     },
+    async challengeGraph(name) {
+      await wait();
+      return wsOf(name).graph;
+    },
   };
   return api;
 }

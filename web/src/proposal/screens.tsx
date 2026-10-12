@@ -3,6 +3,7 @@ import type { LiveState } from "../live/useLive.ts";
 import type { Screen } from "../screens.tsx";
 import { CycleHeaders } from "./CycleHeaders.tsx";
 import { NeedsHumanStrip } from "./NeedsHumanStrip.tsx";
+import { GRAPH_TITLE, GraphScreen } from "./graph/GraphScreen.tsx";
 
 // UX 案①③: 人間の操作待ちの帯と列の見出しの案つきのボード
 function BoardProposalScreen({ live }: { live: LiveState }) {
@@ -24,5 +25,11 @@ export const proposalScreens: Screen[] = [
     id: "board-proposal",
     title: "ボード（案）",
     render: (live) => <BoardProposalScreen live={live} />,
+  },
+  {
+    // flywheel#176: ワークスペースを選ぶと課題の関係を 1 ページのグラフで示し、区分で色分けする案
+    id: "graph-proposal",
+    title: GRAPH_TITLE,
+    render: (live) => <GraphScreen live={live} />,
   },
 ];
