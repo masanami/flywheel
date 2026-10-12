@@ -102,6 +102,7 @@ export function TaskCard({
             challenge={challenge}
             className="task-card-fields"
             testId="task-card-fields"
+            scope="face"
           />
           <div className="task-card-meta">
             <span className="status-dot" data-status={challenge.status} />

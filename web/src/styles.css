@@ -1758,11 +1758,11 @@ button.primary:disabled {
 .proposal-title {
   margin: 0 0 0.3rem;
   font-size: 1.05rem;
+  font-weight: 700;
 }
 .proposal-open {
   all: unset;
   cursor: pointer;
-  font-weight: 700;
 }
 .proposal-open::after {
   content: "";
@@ -1783,6 +1783,9 @@ button.primary:disabled {
   gap: 0.4rem;
   font-size: 0.8em;
   color: var(--board-muted-fg);
+}
+.proposal-fields {
+  margin: 0.5rem 0 0;
 }
 .proposal-fields > div {
   margin-top: 0.5rem;

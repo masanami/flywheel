@@ -14,7 +14,11 @@ import { CycleHeaders } from "./CycleHeaders.tsx";
 import { DecisionPanel } from "./DecisionPanel.tsx";
 import { EditForm } from "./EditForm.tsx";
 import { NeedsHumanStrip } from "./NeedsHumanStrip.tsx";
-import { ProposalCard, pointsOf } from "./ProposalCard.tsx";
+import {
+  ProposalCard,
+  ProposalDetailFields,
+  pointsOf,
+} from "./ProposalCard.tsx";
 import { WorkspaceSelect, useWorkspaceChoice } from "./common.tsx";
 
 function NoWorkspace() {
@@ -220,12 +224,7 @@ function CardScreen({ live }: { live: LiveState }) {
       </div>
       {card ? (
         <div className={narrow ? "proposal-frame narrow" : "proposal-frame"}>
-          <ProposalCard
-            card={card}
-            extra={extra}
-            points={pointsOf(card, nh, question)}
-            onOpen={() => setOpen(true)}
-          />
+          <ProposalCard card={card} onOpen={() => setOpen(true)} />
         </div>
       ) : (
         <p>課題がありません。</p>
@@ -236,6 +235,13 @@ function CardScreen({ live }: { live: LiveState }) {
             challenge={toChallenge(card)}
             agentName={current.name}
             workspacePath={current.path}
+            extraFields={
+              <ProposalDetailFields
+                card={card}
+                extra={extra}
+                points={pointsOf(card, nh, question)}
+              />
+            }
             onClose={() => setOpen(false)}
           />
         </RefreshKeyContext.Provider>

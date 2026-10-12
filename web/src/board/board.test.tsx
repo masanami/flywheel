@@ -44,7 +44,12 @@ function bodies() {
       }),
       cc("C-3", "in_progress", { modifiers: ["running", "unresponsive"] }),
       cc("C-4", "done"),
-      cc("C-5", "in_progress", { headline: "一言の要約" }, { priority: "P0" }),
+      cc(
+        "C-5",
+        "in_progress",
+        { headline: "一言の要約", context: "位置づけの文" },
+        { priority: "P0" },
+      ),
     ],
   };
   f["/api/v1/workspaces/beta/challenges"] = {
@@ -143,6 +148,28 @@ it("カードを開くと詳細のモーダルに、API から読んだ計画と
   expect(requests.every((r) => r.method === "GET")).toBe(true);
   fireEvent.click(within(modal).getByText("閉じる"));
   expect(screen.queryByTestId("card-detail-content")).toBeNull();
+});
+
+it("カードの面には「一言で」だけを出し、位置づけ・いまの状態・次に人間がすることは詳細のモーダルに出す", async () => {
+  await mount();
+  const alpha = screen.getByRole("region", { name: "alpha の列" });
+  const card = within(alpha).getByTestId("card-C-5");
+  const face = within(card).getByTestId("task-card-fields");
+  expect(within(face).getByText("一言で")).toBeInTheDocument();
+  expect(within(face).getByText("一言の要約")).toBeInTheDocument();
+  expect(card.textContent).not.toContain("位置づけ");
+  expect(card.textContent).not.toContain("いまの状態");
+  expect(card.textContent).not.toContain("次に人間がすること");
+  // 識別子（ID・優先度・状態のバッジ）は面に残る
+  expect(within(card).getByText("C-5")).toBeInTheDocument();
+  expect(within(card).getByText("P0")).toBeInTheDocument();
+  // カード全体のクリックで開く詳細には 4 項目がそろう
+  fireEvent.click(within(card).getByText("題名C-5"));
+  const modal = await screen.findByTestId("card-detail-content");
+  const fields = within(modal).getByTestId("card-detail-card-fields");
+  for (const l of ["一言で", "位置づけ", "いまの状態", "次に人間がすること"])
+    expect(within(fields).getByText(l)).toBeInTheDocument();
+  expect(within(fields).getByText("位置づけの文")).toBeInTheDocument();
 });
 
 it("ok でないワークスペースの列には、状態とエラーが出る", async () => {

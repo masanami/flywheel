@@ -16,7 +16,11 @@ import { CreateForm } from "./CreateForm.tsx";
 import { DecisionAction } from "./DecisionAction.tsx";
 import { EditForm } from "./EditForm.tsx";
 import { NeedsHumanStrip, countsOf } from "./NeedsHumanStrip.tsx";
-import { ProposalCard, pointsOf } from "./ProposalCard.tsx";
+import {
+  ProposalCard,
+  ProposalDetailFields,
+  pointsOf,
+} from "./ProposalCard.tsx";
 
 let store: MockStore;
 let api: ApiClient;
@@ -167,7 +171,7 @@ it("回答: パスキー確認ダイアログで要約を示してから実行�
   await waitFor(() => expect(done).toMatch(/保留への回答を行いました/), slow);
 });
 
-it("S4 のカード: タイトルのクリックで開く。長い値は既定で切り詰める。外部の文字列は HTML にしない", async () => {
+it("S4 のカード: 面には一言で（無ければタイトル）と識別子だけを出し、全体のクリックで開く。長い値は切り詰め、外部の文字列は HTML にしない", async () => {
   const cards = (await api.challenges("alpha")).challenges;
   const c10 = cards.find((c) => c.id === "C-10");
   if (!c10) throw new Error("C-10 が無い");
@@ -175,8 +179,6 @@ it("S4 のカード: タイトルのクリックで開く。長い値は既定�
   const { container } = render(
     <ProposalCard
       card={c10}
-      extra={await api.cardExtra("alpha", "C-10")}
-      points={pointsOf(c10, undefined, undefined)}
       onOpen={() => {
         opened += 1;
       }}
@@ -186,31 +188,63 @@ it("S4 のカード: タイトルのクリックで開く。長い値は既定�
   expect(opened).toBe(1);
   expect(container.querySelector("img")).toBeNull();
   expect(container.textContent).toContain("<img src=x onerror=alert(1)>");
-  // 長いタイトルは切り詰めた表示から始まり、全文を開ける
-  const clamped = container.querySelector('[data-clamped="true"]');
-  expect(clamped).not.toBeNull();
-  const more = screen.getAllByRole("button", { name: "全文を開く" })[0];
-  if (!more) throw new Error("全文を開くボタンが無い");
-  fireEvent.click(more);
-  expect(clamped?.getAttribute("data-clamped")).toBe("false");
-  expect(opened).toBe(1);
+  // 識別子は残り、説明的な欄は面に出さない
+  expect(screen.getByText("C-10")).toBeInTheDocument();
+  expect(container.querySelector("dl")).toBeNull();
+  for (const t of [
+    "位置づけ",
+    "論点",
+    "完了したら見えるもの",
+    "やらないこと",
+    "図",
+  ])
+    expect(container.textContent).not.toContain(t);
+  // 長い値は切り詰めた表示から始まる
+  expect(container.querySelector('[data-clamped="true"]')).not.toBeNull();
 });
 
-it("S4 のカード: 完了したら見えるものは予想と実物を並べ、実物が無ければ完了後に入ると示す", async () => {
+it("S4 のカード: 一言で があれば面にはそれだけを出し、タイトルは面に出さない", async () => {
+  const cards = (await api.challenges("alpha")).challenges;
+  const c3 = cards.find((c) => c.id === "C-3");
+  if (!c3) throw new Error("C-3 が無い");
+  const { container } = render(<ProposalCard card={c3} onOpen={() => {}} />);
+  expect(screen.getByText("通知メールの二重送信を止める")).toBeInTheDocument();
+  expect(container.textContent).not.toContain(c3.title);
+});
+
+it("S4 の詳細: 論点・完了したら見えるもの（予想と実物）・やらないこと・図を詳細側に出す。実物が無ければ完了後に入ると示す", async () => {
   const cards = (await api.challenges("alpha")).challenges;
   const c3 = cards.find((c) => c.id === "C-3");
   if (!c3) throw new Error("C-3 が無い");
   render(
-    <ProposalCard
+    <ProposalDetailFields
       card={c3}
       extra={await api.cardExtra("alpha", "C-3")}
       points={pointsOf(c3, undefined, undefined)}
-      onOpen={() => {}}
     />,
   );
+  for (const t of [
+    "論点（次に人間がすること）",
+    "完了したら見えるもの",
+    "やらないこと",
+    "図",
+  ])
+    expect(screen.getByText(t)).toBeInTheDocument();
   expect(screen.getByText("（完了後に入る）")).toBeInTheDocument();
-  expect(screen.getByText("通知メールの二重送信を止める")).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "同じ通知を 2 回送っても受信箱に届くのは 1 通だけになる。",
+    ),
+  ).toBeInTheDocument();
   expect(screen.getByText("計画を承認する")).toBeInTheDocument();
+});
+
+it("S4 の詳細: 位置づけが未記入なら、その旨を詳細に示す", async () => {
+  const cards = (await api.challenges("alpha")).challenges;
+  const c = cards.find((x) => x.card.context === null);
+  if (!c) throw new Error("位置づけの無いカードが無い");
+  render(<ProposalDetailFields card={c} extra={null} points={[]} />);
+  expect(screen.getByText(/未記入。J1 が書くか/)).toBeInTheDocument();
 });
 
 it("人間の操作待ちの帯: 承認以外の区分も数える", async () => {
