@@ -8,7 +8,7 @@ import (
 )
 
 // API が返すエラーコード。internal/cli のエラーコードの表と同じ値で、cli のテストが
-// 一致を検査する。以降の全 API が errorStatus・CodeForCoreErr を共有する。
+// 一致を検査する。CodeForCoreErr は CLI の写像と同じ（cli のテストが検査）。API の本文は apiCodeForCoreErr で表の閉集合に寄せ、errorStatus と共に以降の全 API が共有する。
 const (
 	CodeUsageError           = "usage_error"
 	CodeStoreBusy            = "store_busy"
@@ -95,8 +95,23 @@ func CodeForCoreErr(err error) string {
 	}
 }
 
+// apiCodeForCoreErr は API の失敗の本文に載せる code。§IF / API の表に列挙した値だけを通し、
+// 表に無いコード（CLI の tty_required・config_*・run_in_progress・budget_exceeded・
+// slot_unavailable・serialized、今後 CodeForCoreErr に足されるものを含む）は internal_error に寄せる。
+func apiCodeForCoreErr(err error) string {
+	switch code := CodeForCoreErr(err); code {
+	case CodeNotFound, CodeStoreNotFound, CodeValidationFailed, CodeUsageError,
+		CodeInvalidTransition, CodeTerminalState, CodeConflict, CodeLocked,
+		CodeVerificationRejected, CodeConfirmationMismatch,
+		CodeStoreTooNew, CodeStoreBusy, CodeStoreError, CodeInternalError:
+		return code
+	default:
+		return CodeInternalError
+	}
+}
+
 // writeCoreError は core のエラーを、写像した状態コードと本文で返す。
 func writeCoreError(w http.ResponseWriter, err error) {
-	code := CodeForCoreErr(err)
+	code := apiCodeForCoreErr(err)
 	writeError(w, errorStatus(code), code, err.Error())
 }

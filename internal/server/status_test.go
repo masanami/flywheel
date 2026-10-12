@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -106,6 +108,7 @@ func assertStatusError(t *testing.T, port int, name string, wantStatus int, want
 	if code != wantStatus || doc.Error.Code != wantCode || doc.Error.Message == "" {
 		t.Errorf("GET %s/status = %d %s, want %d %s (with a message)", name, code, body, wantStatus, wantCode)
 	}
+	assertCodeInTable(t, doc.Error.Code)
 }
 
 // writeFakeGH は route（引数列の末尾一致）に従って応答し、呼ばれるたびに引数列を記録する
@@ -576,6 +579,77 @@ func TestErrorStatusTable(t *testing.T) {
 	for code, status := range want {
 		if got := errorStatus(code); got != status {
 			t.Errorf("errorStatus(%q) = %d, want %d", code, got, status)
+		}
+	}
+}
+
+// specErrorCodes は仕様の「エラーコードと HTTP の状態コード」の表に列挙されたコード
+// （`internal_error とその他` の「その他」は含まない）と forbidden_origin。
+func specErrorCodes(t *testing.T) map[string]bool {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4-ui-server.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, ok := strings.Cut(string(data), "#### エラーコードと HTTP の状態コード\n")
+	if !ok {
+		t.Fatal("error code table heading not found in the spec")
+	}
+	codes := map[string]bool{CodeForbiddenOrigin: true}
+	rowRe := regexp.MustCompile("`([a-z_]+)`")
+	for _, line := range strings.Split(rest, "\n") {
+		if !strings.HasPrefix(line, "|") {
+			if len(codes) > 1 {
+				break
+			}
+			continue
+		}
+		cell, _, _ := strings.Cut(strings.TrimPrefix(line, "|"), "|")
+		for _, m := range rowRe.FindAllStringSubmatch(cell, -1) {
+			codes[m[1]] = true
+		}
+	}
+	if len(codes) < 10 {
+		t.Fatalf("error code table parsed badly: %v", codes)
+	}
+	return codes
+}
+
+// assertCodeInTable は失敗の code が §IF / API の表の閉集合に入ることを確かめる（AC-51）。
+func assertCodeInTable(t *testing.T, code string) {
+	t.Helper()
+	if !specErrorCodes(t)[code] {
+		t.Errorf("error code %q is not in the §IF / API error code table", code)
+	}
+}
+
+// AC-51: 表に無い CLI のコードに当たる core のエラーは、API では internal_error（500）で返る。
+func TestAPICodeForCoreErr_OnlyTableCodes(t *testing.T) {
+	sentinels := []error{
+		core.ErrStoreNotFound, core.ErrStoreTooNew, core.ErrStoreBusy, core.ErrStoreError, core.ErrNotFound,
+		core.ErrValidation, core.ErrTerminalState, core.ErrInvalidTransition, core.ErrConflict,
+		core.ErrActorUnavailable, core.ErrTTYRequired, core.ErrConfirmationMismatch, core.ErrVerificationRejected,
+		core.ErrConfigNotFound, core.ErrConfigInvalid, core.ErrLocked, core.ErrRunInProgress,
+		core.ErrBudgetExceeded, core.ErrSlotUnavailable, core.ErrSerialized, fmt.Errorf("unexpected"),
+	}
+	for _, e := range sentinels {
+		code := apiCodeForCoreErr(fmt.Errorf("wrapped: %w", e))
+		assertCodeInTable(t, code)
+		rec := httptest.NewRecorder()
+		writeCoreError(rec, fmt.Errorf("wrapped: %w", e))
+		var doc struct {
+			Error struct{ Code string } `json:"error"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil || doc.Error.Code != code {
+			t.Errorf("%v: body code = %q (%v), want %q", e, doc.Error.Code, err, code)
+		}
+		if code == CodeInternalError && rec.Code != http.StatusInternalServerError {
+			t.Errorf("%v: status = %d, want 500", e, rec.Code)
+		}
+	}
+	for _, e := range []error{core.ErrTTYRequired, core.ErrConfigNotFound, core.ErrConfigInvalid, core.ErrRunInProgress, core.ErrBudgetExceeded, core.ErrSlotUnavailable, core.ErrSerialized} {
+		if got := apiCodeForCoreErr(e); got != CodeInternalError {
+			t.Errorf("%v: %q, want internal_error", e, got)
 		}
 	}
 }

@@ -40,7 +40,13 @@ func isolatedConfigEnv(configHome string) []string {
 // 指定できる版。
 func startServeChildIn(t *testing.T, dir string, env []string, extra ...string) (cmd *exec.Cmd, port int, line string) {
 	t.Helper()
-	args := append([]string{"serve", "--port", "0"}, extra...)
+	return startServeChildPort(t, "0", dir, env, extra...)
+}
+
+// startServeChildPort は `serve --port <portArg>` を子プロセスで起動する。
+func startServeChildPort(t *testing.T, portArg, dir string, env []string, extra ...string) (cmd *exec.Cmd, port int, line string) {
+	t.Helper()
+	args := append([]string{"serve", "--port", portArg}, extra...)
 	cmd, _, _ = newChildCmd(args, env...)
 	cmd.Dir = dir
 	cmd.Stderr = nil
@@ -96,6 +102,30 @@ func TestServe_ListeningLineAndAddr(t *testing.T) {
 			}
 			break
 		}
+	}
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	waitChild(t, cmd, 10*time.Second)
+}
+
+// AC-2: --port <n> を指定すると、そのポートで待ち受ける。
+func TestServe_ExplicitPortIsListenedOn(t *testing.T) {
+	l, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := l.Addr().(*net.TCPAddr).Port
+	_ = l.Close()
+	cmd, port, line := startServeChildPort(t, strconv.Itoa(want), "", isolatedConfigEnv(t.TempDir()))
+	if port != want || line != "listening on 127.0.0.1:"+strconv.Itoa(want) {
+		t.Errorf("line = %q (port %d), want 127.0.0.1:%d", line, port, want)
+	}
+	resp, err := http.Get("http://127.0.0.1:" + strconv.Itoa(want) + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET / = %d, want 200", resp.StatusCode)
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	waitChild(t, cmd, 10*time.Second)

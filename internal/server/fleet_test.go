@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -235,11 +236,15 @@ func TestStoreCreatedAfterStartBecomesOK(t *testing.T) {
 	if _, _, le := s.fleet.Acquire(t.Context(), "late"); le == nil || le.Code != CodeStoreNotFound || le.Status != http.StatusNotFound {
 		t.Errorf("Acquire = %+v, want 404 store_not_found", le)
 	}
-	if _, err := core.Init(ws); err != nil {
-		t.Fatal(err)
+	// `flywheel init` を別プロセスで実行する（AC-35・AC-36）。
+	if out, err := exec.Command(flywheelBinary(t), "init", "--workspace", ws).CombinedOutput(); err != nil {
+		t.Fatalf("flywheel init: %v (%s)", err, out)
 	}
 	if e := stateOf(t, port, "late"); e.State != StateOK {
 		t.Errorf("state = %q, want ok", e.State)
+	}
+	if code, body := statusRequest(t, port, "late"); code != http.StatusOK {
+		t.Errorf("GET status = %d (%s), want 200 after init", code, body)
 	}
 	st, release, le := s.fleet.Acquire(t.Context(), "late")
 	if le != nil || st == nil {

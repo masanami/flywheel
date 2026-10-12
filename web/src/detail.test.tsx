@@ -281,6 +281,75 @@ it("AC-104/107: 計画承認待ち・完了確認待ちには approve の案内�
   }
 });
 
+it("AC-105/106/107: 詳細に answer・budget のコマンドが差し込み口のまま出て、端末で実行する旨が添えられる", async () => {
+  const cases = [
+    {
+      d: show({
+        card: { ...show().card, state: "awaiting_human" },
+        challenge: { ...show().challenge, status: "awaiting_human" },
+      }),
+      command: "flywheel answer C-1 --workspace '/w/alpha' --answer <回答>",
+      guide: "answer",
+    },
+    {
+      d: show({
+        card: { ...show().card, modifiers: ["budget_exhausted"] },
+      }),
+      command: "flywheel budget C-1 --workspace '/w/alpha' --impl-usd <額>",
+      guide: "budget",
+    },
+  ];
+  for (const c of cases) {
+    installFakes(bodies(c.d));
+    const detail = await openDetail();
+    const g = await within(detail).findByRole("region", {
+      name: "承認方法の案内",
+    });
+    const pre = g.querySelector(`[data-guide="${c.guide}"]`);
+    expect(pre?.textContent).toBe(c.command);
+    expect(g.textContent).toContain("Claude Code の外の端末");
+    expect(
+      within(detail).queryByRole("button", { name: /回答|予算|額/ }),
+    ).toBeNull();
+    cleanup();
+  }
+});
+
+it("AC-113: 承認と差し戻しのそれぞれの記録が詳細に出る", async () => {
+  const approval = (decision: string, reason: string | null, at: string) => ({
+    actor: "me",
+    channel: "tty",
+    decided_at: at,
+    decision,
+    kind: "plan",
+    operation_id: null,
+    reason,
+    target_version: 1,
+    verification: "tty",
+  });
+  installFakes(
+    bodies(
+      show({
+        approvals: [
+          approval("rejected", "差し戻しの理由", "2026-01-02T00:00:00Z"),
+          approval("approved", null, "2026-01-03T00:00:00Z"),
+        ],
+      }),
+    ),
+  );
+  const detail = await openDetail();
+  const rec = await within(detail).findByRole("region", {
+    name: "承認と差し戻しの記録",
+  });
+  const items = within(rec)
+    .getAllByRole("listitem")
+    .map((l) => l.textContent ?? "");
+  expect(items).toHaveLength(2);
+  expect(items[0]).toContain("rejected");
+  expect(items[0]).toContain("差し戻しの理由");
+  expect(items[1]).toContain("approved");
+});
+
 it("AC-105/106: answer・budget の案内は差し込み口 <回答>・<額> のまま", () => {
   const a = guidesFor("C-1", "/w/a", "awaiting_human", []);
   expect(a.map((g) => g.command)).toEqual([
