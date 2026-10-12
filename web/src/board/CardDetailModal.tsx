@@ -1,4 +1,4 @@
-import { type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { DetailSections, type Loaded, load } from "../detail.tsx";
 import { RefreshKeyContext } from "../nav.tsx";
 import { ApprovalGuide } from "./ApprovalGuide.tsx";
@@ -9,8 +9,6 @@ type CardDetailModalProps = {
   challenge: Challenge;
   agentName: string;
   workspacePath: string;
-  // 4 項目の下に足す欄（画面ごとの案の欄を詳細に置くための口）
-  extraFields?: ReactNode;
   onClose: () => void;
 };
 
@@ -23,7 +21,6 @@ export function CardDetailModal({
   challenge,
   agentName,
   workspacePath,
-  extraFields,
   onClose,
 }: CardDetailModalProps) {
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
@@ -109,8 +106,6 @@ export function CardDetailModal({
           className="card-detail-card-fields"
           testId="card-detail-card-fields"
         />
-
-        {extraFields}
 
         <dl className="card-detail-fields">
           <dt>ID</dt>

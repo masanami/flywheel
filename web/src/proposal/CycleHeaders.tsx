@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client.ts";
+import type { CycleInfo } from "../api/proposed.ts";
 import type { Workspace } from "../api/types.gen.ts";
-import type { CycleInfo } from "../api/write.ts";
 
 const CYCLE_TEXT: Record<CycleInfo["cycle_state"], string> = {
   idle: "停止中",
@@ -9,8 +9,8 @@ const CYCLE_TEXT: Record<CycleInfo["cycle_state"], string> = {
   stale: "サイクルが止まっている疑い",
 };
 
-// 案③: 旧 board の列の見出しにあった、サイクルの状態・優先度方針のモード・差し込みの表示の置き場所の案。
-// 列の見出しの直前に 1 行で置く。引き継ぐかどうかはオーナーが画面を見て決める。
+// 案③: 旧 board の列の見出しにあった、サイクルの状態・優先度方針のモードの置き場所の案。
+// 列の見出しの直前に 1 行で置く。差し込みの表示は引き継がない（flywheel#207 の決定 6）。
 export function CycleHeaders({
   workspaces,
   refreshKey,
@@ -47,9 +47,6 @@ export function CycleHeaders({
           <b>{name}</b>
           <span className="cycle-state">{CYCLE_TEXT[i.cycle_state]}</span>
           <span>{i.policy_mode}</span>
-          {i.adhoc_active ? (
-            <span className="cycle-adhoc">{i.adhoc_label ?? "差し込み中"}</span>
-          ) : null}
         </div>
       ))}
     </section>

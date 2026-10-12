@@ -325,7 +325,7 @@ export const screens: Screen[] = [
   },
 ];
 
-// 開発時の mock モードだけが、書き込み・S4 のカード・UX 案の画面をここへ足す（main.tsx）。
+// 開発時の mock モードだけが、UX 案の画面をここへ足す（main.tsx）。
 export function registerScreens(extra: Screen[]): void {
   for (const s of extra) {
     if (!screens.some((x) => x.id === s.id)) screens.push(s);

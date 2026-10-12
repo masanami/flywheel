@@ -1,3 +1,4 @@
+import { ApiError, type ProposedApi } from "./proposed.ts";
 import type {
   ListCardResponse,
   LogResponse,
@@ -9,7 +10,6 @@ import type {
   WorkspaceChanged,
   WorkspaceList,
 } from "./types.gen.ts";
-import { ApiError, type WriteApi } from "./write.ts";
 
 // UI が出す要求は GET だけ。ここ以外で fetch を呼ばない（AC-123）。
 async function get<T>(path: string): Promise<T> {
@@ -36,7 +36,7 @@ export interface ReadApi {
   questions(): Promise<QuestionsResponse>;
 }
 
-export type ApiClient = ReadApi & WriteApi;
+export type ApiClient = ReadApi & ProposedApi;
 
 const readApi: ReadApi = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
@@ -54,27 +54,19 @@ const readApi: ReadApi = {
   questions: () => get<QuestionsResponse>("/api/v1/questions"),
 };
 
-// 書き込み API は server にまだ無い（S2・S3 で作る）。本物の呼び出しは何も送らずに失敗させる。
+// 案の口（proposed.ts）は server にまだ無い。本物の呼び出しは何も送らずに失敗させる。
 const notBuilt = (): Promise<never> =>
   Promise.reject(
     new ApiError(
       "internal_error",
-      "書き込み API はまだありません（開発時の mock モードで確かめてください）",
+      "この API はまだありません（開発時の mock モードで確かめてください）",
       501,
     ),
   );
 
 const realApi: ApiClient = {
   ...readApi,
-  cardExtra: notBuilt,
   cycleInfo: notBuilt,
-  createChallenge: notBuilt,
-  editChallenge: notBuilt,
-  prioritize: notBuilt,
-  prepareApproval: notBuilt,
-  executeApproval: notBuilt,
-  prepareDecision: notBuilt,
-  executeDecision: notBuilt,
 };
 
 // 呼び出し口は差し替えられる。開発時の mock モードだけが setApi でブラウザ内の偽の API を入れる。
@@ -96,15 +88,7 @@ export const api: ApiClient = {
   runReport: (n, r) => impl.runReport(n, r),
   needsHuman: () => impl.needsHuman(),
   questions: () => impl.questions(),
-  cardExtra: (n, id) => impl.cardExtra(n, id),
   cycleInfo: (n) => impl.cycleInfo(n),
-  createChallenge: (n, i) => impl.createChallenge(n, i),
-  editChallenge: (n, id, i) => impl.editChallenge(n, id, i),
-  prioritize: (n, id, i) => impl.prioritize(n, id, i),
-  prepareApproval: (n, t) => impl.prepareApproval(n, t),
-  executeApproval: (n, i) => impl.executeApproval(n, i),
-  prepareDecision: (n, r) => impl.prepareDecision(n, r),
-  executeDecision: (n, i) => impl.executeDecision(n, i),
 };
 
 export const eventsPath = "/api/v1/events";

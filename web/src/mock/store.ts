@@ -1,6 +1,7 @@
 // ブラウザ内の偽のストア。開発時の mock モードだけが読み込む（本番のビルドには入らない）。
 // 返す形は types.gen.ts と仕様の API の節に従う。状態の導出は本物では core がやるが、ここでは同じ表を写す。
 
+import type { CycleInfo } from "../api/proposed.ts";
 import type {
   Approval,
   BudgetExhausted,
@@ -14,7 +15,6 @@ import type {
   StatusResponse,
   Workspace,
 } from "../api/types.gen.ts";
-import type { CardExtra, CycleInfo } from "../api/write.ts";
 
 export interface Flags {
   running?: boolean;
@@ -36,13 +36,11 @@ export interface MockChallenge {
   approvals: Approval[];
   runs: Run[];
   flags: Flags;
-  extra: CardExtra;
 }
 
 export interface MockWorkspace {
   meta: Workspace;
   items: MockChallenge[];
-  next: number;
   cycle: CycleInfo;
 }
 
@@ -60,13 +58,6 @@ export const STATUS_LABEL: Record<string, string> = {
 const T0 = Date.parse("2026-10-12T09:00:00Z");
 const iso = (minAgo: number) => new Date(T0 - minAgo * 60_000).toISOString();
 
-const noExtra = (): CardExtra => ({
-  expected: null,
-  actual: null,
-  not_doing: [],
-  diagram: null,
-});
-
 function mk(
   id: string,
   title: string,
@@ -82,7 +73,6 @@ function mk(
     approvals,
     runs,
     flags,
-    extra,
     ...rest
   } = p;
   return {
@@ -109,7 +99,6 @@ function mk(
     approvals: approvals ?? [],
     runs: runs ?? [],
     flags: flags ?? {},
-    extra: extra ?? noExtra(),
   };
 }
 
@@ -186,12 +175,6 @@ export function seed(): Record<string, MockWorkspace> {
           "1. 送信に冪等キーを足す\n2. キューの再試行で同じキーを使う\n3. 重複送信のテストを足す",
         ),
       ],
-      extra: {
-        expected: "同じ通知を 2 回送っても受信箱に届くのは 1 通だけになる。",
-        actual: null,
-        not_doing: ["通知の文面の変更", "送信基盤の入れ替え"],
-        diagram: "app → queue(key) → mailer\n         └ 同じ key は捨てる",
-      },
     }),
     mk("C-4", "管理画面の権限チェックを直す", "awaiting_plan_approval", {
       priority: "P1",
@@ -219,12 +202,6 @@ export function seed(): Record<string, MockWorkspace> {
       operations: [
         op("O-1", "C-7", "release", "pending", "v1.4.0 を本番へ出す"),
       ],
-      extra: {
-        expected: "画面の合計金額が請求書の合計と 1 円もずれない。",
-        actual: "10 月分 120 件を突き合わせて全件一致した。",
-        not_doing: ["過去の請求書の再発行"],
-        diagram: null,
-      },
     }),
     mk("C-8", "移行スクリプトの失敗調査", "awaiting_human", {
       priority: "P1",
@@ -275,12 +252,6 @@ export function seed(): Record<string, MockWorkspace> {
       priority: "P2",
       version: 6,
       headline: "使われていない設定キーを消す",
-      extra: {
-        expected: "設定ファイルから 12 個のキーが消え、起動に影響がない。",
-        actual: "12 個消えた。起動・テストともに通った。",
-        not_doing: [],
-        diagram: null,
-      },
     }),
     mk("C-13", "トリアージ待ちの run", "in_progress", {
       priority: "P1",
@@ -318,25 +289,19 @@ export function seed(): Record<string, MockWorkspace> {
     alpha: {
       meta: ok("alpha"),
       items: alpha,
-      next: 14,
       cycle: {
         cycle_state: "running",
         last_cycle_at: iso(12),
         policy_mode: "優先度方針: 厳格（P0 のみ自走）",
-        adhoc_active: true,
-        adhoc_label: "差し込み: PR #88 のマージ",
       },
     },
     beta: {
       meta: ok("beta"),
       items: beta,
-      next: 4,
       cycle: {
         cycle_state: "idle",
         last_cycle_at: iso(2000),
         policy_mode: "優先度方針: 既定（エージェント裁量）",
-        adhoc_active: false,
-        adhoc_label: null,
       },
     },
     gamma: {
@@ -347,13 +312,10 @@ export function seed(): Record<string, MockWorkspace> {
         state: "store_not_found",
       },
       items: [],
-      next: 1,
       cycle: {
         cycle_state: "idle",
         last_cycle_at: null,
         policy_mode: "",
-        adhoc_active: false,
-        adhoc_label: null,
       },
     },
   };
@@ -448,22 +410,12 @@ export function statusOf(w: MockWorkspace): StatusResponse {
 export class MockStore {
   workspaces: Record<string, MockWorkspace> = seed();
   private listeners = new Set<(ws: string) => void>();
-  private clock = 0;
 
-  reset(): void {
-    this.workspaces = seed();
-    for (const name of Object.keys(this.workspaces)) this.emit(name);
-  }
   subscribe(fn: (ws: string) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
   emit(ws: string): void {
     for (const fn of this.listeners) fn(ws);
-  }
-  now(): string {
-    // 表示が毎回変わらないよう、操作のたびに 1 分進める疑似時計。
-    this.clock += 1;
-    return new Date(T0 + this.clock * 60_000).toISOString();
   }
 }
