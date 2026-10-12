@@ -18,9 +18,12 @@ const (
 	defaultKeepAliveInterval = 30 * time.Second
 )
 
+// eventsConfig は server の内部設定（SSE の時間と、カードの導出に使う現在時刻）。テストが差し替える。
 type eventsConfig struct {
 	watchInterval     time.Duration
 	keepAliveInterval time.Duration
+	// now はカードの導出に使う現在時刻（既定は time.Now。テストが固定する）。
+	now func() time.Time
 }
 
 func (c eventsConfig) withDefaults() eventsConfig {
@@ -29,6 +32,9 @@ func (c eventsConfig) withDefaults() eventsConfig {
 	}
 	if c.keepAliveInterval <= 0 {
 		c.keepAliveInterval = defaultKeepAliveInterval
+	}
+	if c.now == nil {
+		c.now = time.Now
 	}
 	return c
 }

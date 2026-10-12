@@ -50,6 +50,7 @@ function bodies() {
         { headline: "一言の要約", context: "位置づけの文" },
         { priority: "P0" },
       ),
+      cc("C-6", "in_progress", { modifiers: ["running"] }),
     ],
   };
   f["/api/v1/workspaces/beta/challenges"] = {
@@ -113,6 +114,20 @@ it("実行中の課題は「⚡ 実行中」に出て、応答なしは区別さ
   const row = within(alpha).getByTestId("running-run-C-3");
   expect(row).toHaveAttribute("data-stale", "true");
   expect(row).toHaveTextContent("応答なし");
+});
+
+it("AC-120: running だけを持つ課題も、そのワークスペースの列で実行中の印が出る（応答なしではない）", async () => {
+  await mount();
+  const alpha = screen.getByRole("region", { name: "alpha の列" });
+  const row = within(alpha).getByTestId("running-run-C-6");
+  expect(row).toHaveTextContent("題名C-6");
+  expect(row).not.toHaveAttribute("data-stale", "true");
+  expect(row).not.toHaveTextContent("応答なし");
+  // 実行中の印は running を持つ課題だけ（C-1 などには出ない）
+  expect(within(alpha).queryByTestId("running-run-C-1")).toBeNull();
+  // 他のワークスペースの列には出ない
+  const beta = screen.getByRole("region", { name: "beta の列" });
+  expect(within(beta).queryByText("⚡ 実行中")).toBeNull();
 });
 
 it("「🔔 承認待ち」で絞り込むと、人間の操作待ちだけが残る", async () => {
