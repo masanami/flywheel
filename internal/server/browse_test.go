@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -162,6 +163,7 @@ func TestBrowseAPI_Errors(t *testing.T) {
 		if code != c.status || doc.Error.Code != c.code || doc.Error.Message == "" {
 			t.Errorf("GET %s = %d %s, want %d %s", c.path, code, body, c.status, c.code)
 		}
+		assertCodeInTable(t, doc.Error.Code)
 	}
 	// store_too_new は 503
 	tooNew := initWorkspace(t)
@@ -278,6 +280,27 @@ func TestBrowseAPI_QuestionsOrderTiesByNumericID(t *testing.T) {
 	qs := mustJSON(t, port, "/api/v1/questions")["questions"].([]any)
 	if len(qs) != 2 || qs[0].(map[string]any)["question"] != "nine" {
 		t.Errorf("questions = %v, want C-9 before C-10", qs)
+	}
+}
+
+// AC-55: 同じ時刻なら workspace（名前の順）が challenge_id より先に効く。fleet の宣言の順には依らない。
+func TestBrowseAPI_QuestionsTieBreaksByWorkspaceNameBeforeChallengeID(t *testing.T) {
+	a, b := browseWorkspace(t), browseWorkspace(t)
+	same := "2026-10-05T00:00:00.000Z"
+	coretest.InsertHold(t, a, 2, "wa-C2", "in_progress", same, nil)
+	coretest.InsertHold(t, b, 1, "wb-C1", "in_progress", same, nil)
+	wa, wb := core.FleetWorkspace{Name: "wa", Path: a}, core.FleetWorkspace{Name: "wb", Path: b}
+	for name, decl := range map[string][]core.FleetWorkspace{"declared in name order": {wa, wb}, "declared in reverse name order": {wb, wa}} {
+		t.Run(name, func(t *testing.T) {
+			_, port := startFleetServer(t, decl...)
+			var order []string
+			for _, q := range mustJSON(t, port, "/api/v1/questions")["questions"].([]any) {
+				order = append(order, q.(map[string]any)["question"].(string))
+			}
+			if want := []string{"wa-C2", "wb-C1"}; !reflect.DeepEqual(order, want) {
+				t.Errorf("order = %v, want %v", order, want)
+			}
+		})
 	}
 }
 
@@ -475,6 +498,113 @@ func TestBrowseAPI_CardRunModifiers(t *testing.T) {
 	}
 }
 
+// cardsEndToEndWorkspace は、実ストアで次の課題を持つワークスペースを作る（カードの導出の条件を
+// 実データで当てる。時刻は now を基準にする）。
+//
+//	C-1 検証中・PR あり（waiting_ci。偽の gh は呼び出し元が PATH に置く）
+//	C-2 未分類・J1 が not_mine・未承認の不可逆操作・食い違い（上流が closed）
+//	C-3 着手中・承認済みの計画（実装枠 0.5 USD → 予算の使い切り）・heartbeat が 301 秒前の run が
+//	    needs_attention のスロットに結ばれている・食い違い（上流が closed）
+//	C-4 着手中・heartbeat が 299 秒前の run  C-5 同 300 秒前  C-6 同 301 秒前
+//
+// waiting_ci は終了していない run が無い検証中の課題だけが持つので、running・unresponsive とは
+// 同じ課題に重ならない。実データで 1 つの課題に重なるのは 4 つ（C-3）までで、5 つすべてに当たる課題での
+// 順序の検証（AC-80 の文言どおり）は core の単体テストが担う（仕様への指摘: API では文言どおりに検証できない）。
+func cardsEndToEndWorkspace(t *testing.T, now time.Time) string {
+	t.Helper()
+	ws := verifyingWorkspace(t) // C-1
+	writeAgentJSON(t, ws, validAgentJSON)
+	st, err := core.OpenWorkspace(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for i := 2; i <= 6; i++ {
+		if _, err := st.CreateChallenge(ctx, core.ChannelCLI, core.CreateInput{Title: fmt.Sprintf("c%d", i), DoneCriteria: "d"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.CreateOperation(ctx, core.ChannelCLI, core.OperationInput{ChallengeID: "C-2", Kind: "release", Summary: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := st.GetChallenge(ctx, "C-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	stamp := func(ago time.Duration) string { return now.Add(-ago).Format("2006-01-02T15:04:05.000Z") }
+
+	// C-2: triage・食い違い
+	j1 := coretest.InsertRun(t, ws, coretest.InsertRunInput{
+		ChallengeID: 2, Kind: "judgment", Judgment: "J1", ChallengeVersion: c2.Version, SessionID: "77777777-7777-4777-8777-777777777777",
+		PID: 1, Host: "h", HeartbeatAt: stamp(time.Hour), StartedAt: stamp(time.Hour), EndedAt: stamp(59 * time.Minute),
+		Result: "succeeded", MaxBudgetUSD: 1, BudgetBucket: "none",
+	})
+	coretest.SetRunOutput(t, ws, j1, `{"verdict":"not_mine","priority":null,"size":null,"reason":"fixture","question":null}`)
+	coretest.InsertSourceBinding(t, ws, 2, "gh", "o/r#2", "https://github.com/o/r/issues/2", "fp", "closed", "in_policy", stamp(time.Hour))
+
+	// C-3: 予算の使い切り・応答なし・スロット・食い違い
+	coretest.InsertSourceBinding(t, ws, 3, "gh", "o/r#3", "https://github.com/o/r/issues/3", "fp", "closed", "in_policy", stamp(time.Hour))
+	spec := `{"verdict":"plan","summary":"S","steps":["a","b"],"repo":"r","operation":"op","size":"M","done_criteria":"D","budget_impl_usd":null,"budget_review_usd":null,"cross_repo":false,"related_repos":[],"question":null}`
+	coretest.InsertApprovedPlan(t, ws, 3, "PLAN", spec)
+	slot := coretest.InsertSlot(t, ws, "r", "p", filepath.Join(t.TempDir(), "slot"), "needs_attention", "fixture")
+	open := func(cid int, ago time.Duration) int64 {
+		return coretest.InsertRun(t, ws, coretest.InsertRunInput{
+			ChallengeID: cid, Kind: "delegate", ChallengeVersion: 1, SessionID: fmt.Sprintf("8888888%d-8888-4888-8888-888888888888", cid),
+			PID: 1, Host: "h", HeartbeatAt: stamp(ago), StartedAt: stamp(ago), MaxBudgetUSD: 1, BudgetBucket: "impl",
+		})
+	}
+	coretest.SetRunSlot(t, ws, open(3, 301*time.Second), slot)
+
+	// C-4・C-5・C-6: heartbeat の境界
+	for cid, ago := range map[int]time.Duration{4: 299 * time.Second, 5: 300 * time.Second, 6: 301 * time.Second} {
+		coretest.SetChallengeStatus(t, ws, cid, "in_progress")
+		open(cid, ago)
+	}
+	return ws
+}
+
+// 課題の状態・modifiers・next_human_actions の導出を、実ストアと API の経由で順序つきの完全一致で確かめる
+// （AC-67・68・70・71・73・76・78・79・80〔80 は実データで重なる 4 つまで〕。時刻は server に固定の now を注入する）。
+func TestBrowseAPI_CardsDerivedFromRealStoreData(t *testing.T) {
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	ws := cardsEndToEndWorkspace(t, now)
+	dir, _ := writeFakeGH(t, ghRoutesPending())
+	withGHOnPATH(t, dir)
+	ln, err := Listen(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newServer(ln, []core.FleetWorkspace{{Name: "w", Path: ws}}, eventsConfig{now: func() time.Time { return now }})
+	errc := make(chan error, 1)
+	go func() { errc <- s.Serve() }()
+	t.Cleanup(func() {
+		_ = s.Shutdown()
+		<-errc
+	})
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	want := map[string]map[string][]string{
+		"C-1": {"modifiers": {"waiting_ci"}, "next_human_actions": {}},
+		// 3 つの条件（triage・approve_operation・review_discrepancy）が表の順に並ぶ
+		"C-2": {"modifiers": {"discrepancy"}, "next_human_actions": {"triage", "approve_operation", "review_discrepancy"}},
+		"C-3": {"modifiers": {"running", "unresponsive", "budget_exhausted", "discrepancy"}, "next_human_actions": {"increase_budget", "review_discrepancy", "clear_slot"}},
+		// heartbeat が 299 秒・300 秒ちょうどは応答なしではなく、301 秒から応答なし
+		"C-4": {"modifiers": {"running"}, "next_human_actions": {}},
+		"C-5": {"modifiers": {"running"}, "next_human_actions": {}},
+		"C-6": {"modifiers": {"running", "unresponsive"}, "next_human_actions": {}},
+	}
+	for id, w := range want {
+		c := cardOf(t, port, id)
+		if got := strs(c["modifiers"]); !reflect.DeepEqual(got, w["modifiers"]) {
+			t.Errorf("%s modifiers = %v, want %v", id, got, w["modifiers"])
+		}
+		if got := strs(c["next_human_actions"]); !reflect.DeepEqual(got, w["next_human_actions"]) {
+			t.Errorf("%s next_human_actions = %v, want %v", id, got, w["next_human_actions"])
+		}
+	}
+}
+
 func TestBrowseAPI_CardWaitingCI(t *testing.T) {
 	ws := verifyingWorkspace(t)
 	dir, _ := writeFakeGH(t, ghRoutesPending())
@@ -511,8 +641,11 @@ func TestBrowseAPI_ReadOnlyDoesNotWrite(t *testing.T) {
 		PID: deadPID(t), Host: hostName(t), HeartbeatAt: old, StartedAt: old, MaxBudgetUSD: 1, BudgetBucket: "impl",
 	})
 	coretest.InsertHold(t, ws, 1, "q", "in_progress", old, nil)
+	// 期限切れ（holder の無い古い heartbeat）の lock の行も、回収されずそのまま残る。
+	cyc := coretest.InsertCycle(t, ws, "manual", 1_000_000, old)
+	coretest.InsertLock(t, ws, cyc, deadPID(t), hostName(t), old, old)
 	before := dumpRows(t, ws)
-	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
+	s, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
 	for _, p := range []string{
 		"/api/v1/workspaces", "/api/v1/workspaces/w/status", "/api/v1/workspaces/w/challenges", "/api/v1/workspaces/w/challenges/C-1",
 		"/api/v1/workspaces/w/log", "/api/v1/workspaces/w/log?challenge=C-1", "/api/v1/workspaces/w/runs", "/api/v1/workspaces/w/runs?challenge=C-1",
@@ -524,6 +657,13 @@ func TestBrowseAPI_ReadOnlyDoesNotWrite(t *testing.T) {
 	}
 	if after := dumpRows(t, ws); after != before {
 		t.Errorf("rows changed:\nbefore: %s\nafter:  %s", before, after)
+	}
+	// 終了（Shutdown）の後でも変わらない（終了時に何かを書かない）。
+	if err := s.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	if after := dumpRows(t, ws); after != before {
+		t.Errorf("rows changed by shutdown:\nbefore: %s\nafter:  %s", before, after)
 	}
 }
 
@@ -653,7 +793,7 @@ func TestBrowseAPI_AcquireFailureOnCancelledRequestIsAnError(t *testing.T) {
 	}
 }
 
-// カードの API も、遅い gh の取得の間はストアの読み取りの借りを持たない（状態更新の Lock が待たされない）。
+// AC-44a（カードの API）: 遅い gh の取得の間はストアの読み取りの借りを持たない（状態更新の Lock が待たされない）。
 func TestBrowseAPI_CardsDoNotHoldStoreLeaseWhileFetchingChecks(t *testing.T) {
 	for _, path := range []string{"/api/v1/workspaces/w/challenges", "/api/v1/workspaces/w/challenges/C-1"} {
 		t.Run(path, func(t *testing.T) {

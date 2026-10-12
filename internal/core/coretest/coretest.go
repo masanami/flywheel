@@ -552,3 +552,32 @@ func DropTable(t *testing.T, workspace, table string) {
 		t.Fatalf("coretest: DropTable(%q): %v", table, err)
 	}
 }
+
+// SetRunOutput はテスト専用のフィクスチャとして、runID（内部整数 ID）の run の構造化出力（output 列）を
+// 書き込む。J1 の not_mine の判定（status.needs_human.triage に載る）のような、判断の出力に依る状態を
+// 実際の `claude` の起動なしで作るために使う。
+func SetRunOutput(t *testing.T, workspace string, runID int64, output string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE run SET output = ? WHERE id = ?", output, runID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: SetRunOutput(%d): %v", runID, err)
+	}
+}
+
+// SetRunSlot はテスト専用のフィクスチャとして、runID（内部整数 ID）の run を slotID（InsertSlot が返した
+// 内部整数 ID）のスロットに結ぶ（run.slot_id。課題のカードの clear_slot の導出が使う結び）。
+func SetRunSlot(t *testing.T, workspace string, runID, slotID int64) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE run SET slot_id = ? WHERE id = ?", slotID, runID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: SetRunSlot(%d, %d): %v", runID, slotID, err)
+	}
+}

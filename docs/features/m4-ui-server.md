@@ -66,7 +66,7 @@ M4 の完了の目安は、設計書 §17 のとおり「UI から承認・優�
 - [ ] API は `/api/v1/` の下に置き、成功は JSON（M1 の「成功時の JSON 出力の規約」：包みを持たない・最上位はオブジェクト・snake_case）で返す【決定 2026-10-09 親 M4P2】
 - [ ] 課題の一覧・詳細・作業ログ・run の一覧・状況の表示は、対応する CLI の `--json` の出力と同じ形を返す（`list`・`show`・`log`・`runs`・`status`）。API のために別の形を作らない【決定 2026-10-09 親 M4P2】
 - [ ] 失敗は CLI と同じエラーコードの閉集合を使い、本文を `{"error":{"code","message"}}` とする。HTTP の状態コードはエラーコードから決める（§IF / API「エラーコードと HTTP の状態コード」）
-- [ ] `status` の `waiting_external`（M3。検証中で PR を持つ課題の CI の状態を `gh` で取る）は、CLI と同じく server が `internal/adapters/github` を組み立てて core へ渡して得る。`gh` が無い・失敗したときの扱いは CLI の `status` と同じにする。CLI の `status` は、`gh` で CI の状態を取れなかった課題を `waiting_external` に載せずに成功する（core の `ListWaitingExternal` が取得の失敗を課題ごとに飛ばす）ので、server も同じ結果を返す。server が保持するのは PR ごとのチェックの取得結果（成功・失敗とも、取得した時刻から 60 秒）で、`waiting_external` の候補（検証中で終了していない run の無い課題）は要求ごとに core が導き直す。`status` の API は、`gh` によるチェックの取得の間、そのワークスペースのストアの読み取りの借りを持たない（ストアを読む基本の `Overview` と候補の導出が済んだら借りを返してから `gh` を呼ぶ。遅い `gh` がストアの状態更新を待たせないため）。`gh` の時間の上限は CLI と同じく `internal/adapters/github` の既定（60 秒）を使う。`github.New` が失敗したとき（`ErrGHNotFound` を含む）は、CLI の `newCheckSource` と同じく取得を常に失敗させる取得の口を core へ渡し、エラーとして返さない。SSE の観測は `gh` を起動しない【決定 2026-10-09 親 M4P19】
+- [ ] `status` の `waiting_external`（M3。検証中で PR を持つ課題の CI の状態を `gh` で取る）は、CLI と同じく server が `internal/adapters/github` を組み立てて core へ渡して得る。`gh` が無い・失敗したときの扱いは CLI の `status` と同じにする。CLI の `status` は、`gh` で CI の状態を取れなかった課題を `waiting_external` に載せずに成功する（core の `ListWaitingExternal` が取得の失敗を課題ごとに飛ばす）ので、server も同じ結果を返す。server が保持するのは PR ごとのチェックの取得結果（成功・失敗とも、取得した時刻から 60 秒）で、`waiting_external` の候補（検証中で終了していない run の無い課題）は要求ごとに core が導き直す。`status` の API と課題カードの API（`GET …/challenges`・`GET …/challenges/{id}`）は、`gh` によるチェックの取得の間、そのワークスペースのストアの読み取りの借りを持たない（ストアを読む基本の `Overview` と候補の導出が済んだら借りを返してから `gh` を呼ぶ。遅い `gh` がストアの状態更新を待たせないため）。`gh` の時間の上限は CLI と同じく `internal/adapters/github` の既定（60 秒）を使う。`github.New` が失敗したとき（`ErrGHNotFound` を含む）は、CLI の `newCheckSource` と同じく取得を常に失敗させる取得の口を core へ渡し、エラーとして返さない。SSE の観測は `gh` を起動しない【決定 2026-10-09 親 M4P19／カードの API への適用は 2026-10-12 オーナー】
 - [ ] `status` の `needs_human.budget_exhausted` に使うエージェントの宣言（`.flywheel/agent.json`）は、CLI の `status` と同じ規則でワークスペースから読む
 - [ ] 閲覧の API は、ストアを開くときのマイグレーション（M1 の規則）を除いて、ストアへ書き込まない。M3 の中断した run の回収（`interrupted` への書き込み）も server の閲覧では行わない【仮定】
 - [ ] fleet の全ワークスペースにわたって、人間の操作を待っているものを 1 つにまとめて返す API を持つ（§課題カードの面・§問いの一覧）
@@ -330,6 +330,8 @@ CLI に足す本人確認の要らない操作（S2）: `flywheel prioritize <C-
 | `store_too_new`・`store_busy`・`store_error` | 503 |
 | `internal_error` とその他 | 500 |
 
+API の失敗の `code` は上の表に列挙した値（と `forbidden_origin`）だけである。CLI にあって表に無いコード（`tty_required`・`config_not_found`・`config_invalid`・`run_in_progress`・`budget_exceeded`・`slot_unavailable`・`serialized`）に当たる core のエラーは、API では `internal_error`（500）で返す【決定 2026-10-11 オーナー・AC-51】。
+
 Host・Origin・CSRF の検査で拒否した要求は、core を呼ばずに 403 と `{"error":{"code":"forbidden_origin","message"}}` を返す【仮定: コード名】。
 
 #### エラーコードの追加
@@ -474,7 +476,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] 保持の時間（既定 60 秒）を過ぎた後の `GET …/status` は、`gh` をもう一度起動する（テストは保持の時間を server の内部の設定で短くして確かめる）
 - [ ] 偽の `gh` が失敗を返した PR は、保持の時間の間の次の `GET …/status` でも `gh` を再起動しない
 - [ ] 保持の時間の間に課題が検証中でなくなると、次の `GET …/status` の `waiting_external` からその課題が外れる
-- [ ] 【AC-44a】`GET …/status` が `gh` の応答を待っている間、そのワークスペースのストアの状態更新（排他の Lock を要する、ストアのファイルの差し替え等）は待たされない（`gh` を解放の合図まで止める偽物にして、その間に状態更新を起こして確かめる）
+- [ ] 【AC-44a】`GET …/status`・`GET …/challenges`・`GET …/challenges/{id}` が `gh` の応答を待っている間、そのワークスペースのストアの状態更新（排他の Lock を要する、ストアのファイルの差し替え等）は待たされない（`gh` を解放の合図まで止める偽物にして、その間に状態更新を起こして確かめる）【決定 2026-10-12 オーナー・カードの API を対象に加える】
 - [ ] `GET /api/v1/events` の購読とストアの変化の観測だけでは、`gh` を起動しない
 - [ ] `GET /api/v1/workspaces/{name}/challenges` の本文は、各要素から `card` を除くと、`flywheel list --json` の標準出力と JSON として等しい
 - [ ] `GET /api/v1/workspaces/{name}/challenges/{id}` の本文は、最上位の `card` を除くと、`flywheel show <id> --json` の標準出力と JSON として等しい
@@ -487,7 +489,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] 【AC-53a】`GET /api/v1/needs-human` は、`state` が `ok` と判定された後に借りる・読むのに失敗したワークスペースを `workspaces` から除き、その名前を `unreadable_workspaces` に入れて、残りのワークスペースの分を 200 で返す（Acquire の失敗と Acquire 後の読み取りの失敗は同じ扱い）。除いたものが無いとき `unreadable_workspaces` は `[]` である
 - [ ] `GET /api/v1/questions` は、fleet の全ワークスペースの未回答の保留だけを返す（回答済みの保留を含めない）
 - [ ] 【AC-54a】`GET /api/v1/questions` は、借りる・読むのに失敗したワークスペースの保留を除き、その名前を `unreadable_workspaces` に入れて、残りの分を 200 で返す。除いたものが無いとき `unreadable_workspaces` は `[]` である
-- [ ] `GET /api/v1/questions` の要素は `raised_at` の古い順に並び、同じ時刻なら `workspace`、次に `challenge_id` の順に並ぶ
+- [ ] `GET /api/v1/questions` の要素は `raised_at` の古い順に並び、同じ時刻なら `workspace`（名前の順。fleet の宣言の順には依らない）、次に `challenge_id`（数値の順。C-9 は C-10 より前）の順に並ぶ
 - [ ] `GET /api/v1/questions` の要素は `workspace`・`challenge_id`・`title`・`question`・`raised_at`・`from_status`・`run_id` の 7 つのキーを持つ
 - [ ] 保留を作った run が無い（`hold.run_id` が NULL の）保留の `GET /api/v1/questions` の要素は、`run_id` が `null` である
 - [ ] 委譲の run の `GET /api/v1/workspaces/{name}/runs/{id}/report` は、その run の `.flywheel/runs/<run の ID>/stdout.json` の `structured_output` の `assumptions` と `unverified` を返す
@@ -569,6 +571,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] 課題の詳細の run の欄には、`runs/{id}/report` の `assumptions` と `unverified` が空でなければ、その一覧が表示される（UI のテスト）
 - [ ] 課題の説明が `<script>alert(1)</script>` と `<img src=x onerror=alert(1)>` の課題の詳細では、その文字列が文字として表示され、描画した DOM に `script` 要素と `onerror` 属性が無い（UI のテスト）
 - [ ] `card.modifiers` に `running` を持つ課題は、ワークスペースごとに実行中として表示される（UI のテスト）
+  - 「実行中」の区分は新設しない。ワークスペースの画面（エージェントの列）の中で、`running` を持つ課題のカードに「実行中」の印が出ることをもって満たす【決定 2026-10-11 オーナー・AC-120】。
 - [ ] `card.modifiers` に `unresponsive` を持つ課題は、`running` だけを持つ課題と区別できる表示になる（UI のテスト）
 - [ ] `state` が `ok` でないワークスペースは、その状態を示すエラーの表示になり、他のワークスペースの表示は続く（UI のテスト）
 - [ ] UI が発行する要求は、すべて `GET`（SSE を含む）である（UI のテストで、全画面を操作したときの `fetch` と `EventSource` の呼び出しを記録して確かめる）
@@ -589,6 +592,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] `internal/server` は `internal/invoker` を import しない（`internal/cli/depcheck_test.go` で検査する）
 - [ ] 本番のバイナリの依存は、S1 の前と同じ上限（標準ライブラリ・`modernc.org/sqlite`・`golang.org/x/term`）に収まる（`depcheck_test.go` で検査する）
 - [ ] `internal/view` へ移した後も、既存の CLI の `--json` の出力は変わらない（M1〜M3 の `jsondoc_test.go` と CLI のテストが変更なしで通る）
+  - 出力が変わらないことは、変更のない `jsondoc_test.go` が担保しているとみなす。CLI のテスト 2 本は #179 で機械的に書き換えた（期待する JSON の値は同じ）【決定 2026-10-11 オーナー・AC-137】。
 
 ### 要人間判定（テストで固定できないもの）
 

@@ -92,6 +92,7 @@ func isChange(name string) func(string) bool {
 	return func(l string) bool { return l == want }
 }
 
+// isAnyChange は「何も届かない」ことの確認専用（届いた通知の中身の照合には isChange を使う）。
 func isAnyChange(l string) bool { return strings.HasPrefix(l, "data: ") }
 
 func TestEvents_ContentTypeIsEventStream(t *testing.T) { // AC-82
@@ -110,6 +111,25 @@ func TestEvents_StoreWriteNotifiesWithinTwoIntervals(t *testing.T) { // AC-83（
 	coretest.InsertChallenge(t, ws, "x")
 	if _, ok := st.wait(2*testWatch+100*time.Millisecond, isChange("a")); !ok {
 		t.Fatal("workspace_changed for a not received")
+	}
+}
+
+// AC-45: 検証中で PR を持つ課題があっても、購読とストアの変化の観測だけでは gh を起動しない
+// （/status は呼ばない。起動を記録する偽の gh で数える）。
+func TestEvents_ObservationNeverLaunchesGH(t *testing.T) {
+	ws := verifyingWorkspace(t)
+	dir, calls := writeFakeGH(t, ghRoutesPending())
+	withGHOnPATH(t, dir)
+	_, port := startEventsServer(t, core.FleetWorkspace{Name: "a", Path: ws})
+	st := subscribe(t, port)
+	time.Sleep(3 * testWatch) // 基準が取れるのを待つ
+	coretest.InsertChallenge(t, ws, "x")
+	if _, ok := st.wait(2*testWatch+100*time.Millisecond, isChange("a")); !ok {
+		t.Fatal("workspace_changed for a not received")
+	}
+	time.Sleep(2 * testWatch) // 通知の後の観測も gh を起動しないこと
+	if n := calls(); n != 0 {
+		t.Errorf("gh launched %d times by subscription and observation, want 0", n)
 	}
 }
 
@@ -263,7 +283,12 @@ func TestEvents_RealProcesses_CreateNotifiesNoGHAndSIGTERM(t *testing.T) {
 	if out, err := create.CombinedOutput(); err != nil {
 		t.Fatalf("create: %v\n%s", err, out)
 	}
-	if _, ok := st.wait(2*time.Second+500*time.Millisecond, isAnyChange); !ok {
+	// 通知は {"type":"workspace_changed","workspace":"<名前>"} そのものである。
+	entries, _ := listWorkspaces(t, port)
+	if len(entries) != 1 {
+		t.Fatalf("workspaces = %+v", entries)
+	}
+	if _, ok := st.wait(2*time.Second+500*time.Millisecond, isChange(entries[0].Name)); !ok {
 		t.Fatal("no workspace_changed within 2 observation intervals")
 	}
 	if _, err := os.Stat(marker); err == nil {
