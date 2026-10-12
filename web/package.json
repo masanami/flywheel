@@ -12,7 +12,8 @@
     "test": "vitest run",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:mock": "vite --mode mock"
   },
   "dependencies": {
     "react": "^18.3.1",
