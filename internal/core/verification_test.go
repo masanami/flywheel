@@ -23,7 +23,7 @@ func (f *fakeVerifier) Confirm(_, _ string) (string, error) {
 	return f.actor, f.err
 }
 
-func TestVerificationRegistry_AllowsOnlyCLITTYConfirm(t *testing.T) {
+func TestVerificationRegistry_CLITTYConfirmAllowedAndOthersRejected(t *testing.T) {
 	if !registryAllows(ChannelCLI, VerificationTTYConfirm) {
 		t.Fatal("want (cli, tty_confirm) to be allowed")
 	}
@@ -38,13 +38,12 @@ func TestVerificationRegistry_AllowsOnlyCLITTYConfirm(t *testing.T) {
 	}
 }
 
-func TestVerificationRegistry_HasExactlyOneEntryInM1(t *testing.T) {
-	if len(verificationRegistry) != 1 {
-		t.Fatalf("len(verificationRegistry) = %d, want 1", len(verificationRegistry))
+func TestVerificationRegistry_HasCLITTYConfirmAndUINone(t *testing.T) {
+	if len(verificationRegistry) != 2 {
+		t.Fatalf("len(verificationRegistry) = %d, want 2", len(verificationRegistry))
 	}
-	want := verificationRegistryEntry{Channel: ChannelCLI, Verification: VerificationTTYConfirm}
-	if verificationRegistry[0] != want {
-		t.Fatalf("verificationRegistry[0] = %+v, want %+v", verificationRegistry[0], want)
+	if !registryAllows(ChannelUI, VerificationNone) {
+		t.Fatal("want (ui, none) to be allowed")
 	}
 }
 

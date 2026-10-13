@@ -365,7 +365,7 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 	if !validBudgetAmount(req.ImplUSD) || (req.ReviewUSD != nil && !validBudgetAmount(*req.ReviewUSD)) {
 		return nil, ErrValidation
 	}
-	if !attestationValid(att, req.ChallengeID) {
+	if !attestationPermits(att, req.ChallengeID, actionBudget) {
 		return nil, ErrVerificationRejected
 	}
 	cid, ok := parseChallengeID(req.ChallengeID)

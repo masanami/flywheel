@@ -49,18 +49,59 @@ func (a Attestation) Channel() Channel { return a.channel }
 // Verification は本人確認が成立した方式を返す。
 func (a Attestation) Verification() Verification { return a.verification }
 
-// verificationRegistryEntry は許可した (Channel, Verification) の組。
+// attestedAction は Attestation で成立させる操作の種類（登録簿の行が受けられる
+// 操作の集合の要素。M4P23）。遷移表の Operation とは別に、完了の承認を保留の
+// 有無で、承認と差し戻しを対象で分けて持つ。
+type attestedAction string
+
+const (
+	actionApprovePlan           attestedAction = "approve_plan"            // T5
+	actionApproveCompletion     attestedAction = "approve_completion"      // T13（本番反映の保留を外す）
+	actionApproveCompletionHold attestedAction = "approve_completion_hold" // T14（HoldRelease=true）
+	actionReject                attestedAction = "reject"                  // T6・T15
+	actionAnswer                attestedAction = "answer"                  // T12
+	actionBudget                attestedAction = "budget"
+	actionOperationApprove      attestedAction = "operation_approve"
+	actionOperationReject       attestedAction = "operation_reject"
+)
+
+// actionForTransition は本人確認つきの遷移（遷移表の RequiresVerification）の
+// 行から操作の種類を引く。本人確認つきの行以外は ok=false。
+func actionForTransition(tr Transition) (attestedAction, bool) {
+	switch tr.ID {
+	case "T5":
+		return actionApprovePlan, true
+	case "T13":
+		return actionApproveCompletion, true
+	case "T14":
+		return actionApproveCompletionHold, true
+	case "T6", "T15":
+		return actionReject, true
+	case "T12":
+		return actionAnswer, true
+	}
+	return "", false
+}
+
+// verificationRegistryEntry は許可した (Channel, Verification) の組と、その組が
+// 受けられる操作の集合。
 type verificationRegistryEntry struct {
 	Channel      Channel
 	Verification Verification
+	// anyAction が true なら全操作を受ける。false なら actions だけを受ける。
+	anyAction bool
+	actions   []attestedAction
 }
 
 // verificationRegistry は許可した (経路, 本人確認の方式) の組の登録簿
-// （§クリティカル設計決定 1）。データ（テーブル）として持ち、M4 で経路・方式を
-// 足すときはここに行を足すだけで core の遷移規則は変えない。M1 の登録簿は
-// (cli, tty_confirm) の 1 組だけ。
+// （§クリティカル設計決定 1）。データ（テーブル）として持ち、組ごとに受けられる
+// 操作の集合を持つ（M4P23。検査は core に置き、server を通らない経路でも範囲が
+// 崩れないようにする）。(cli, tty_confirm) は全操作、(ui, none) は計画の承認と
+// 本番反映の保留つきの完了の承認だけ（差し戻し・回答・予算の増額・不可逆操作・
+// 保留を外した完了の承認は受けない）。
 var verificationRegistry = []verificationRegistryEntry{
-	{Channel: ChannelCLI, Verification: VerificationTTYConfirm},
+	{Channel: ChannelCLI, Verification: VerificationTTYConfirm, anyAction: true},
+	{Channel: ChannelUI, Verification: VerificationNone, actions: []attestedAction{actionApprovePlan, actionApproveCompletionHold}},
 }
 
 // registryAllows は (ch, v) の組が登録簿にあるかを判定する。
@@ -69,6 +110,26 @@ func registryAllows(ch Channel, v Verification) bool {
 		if e.Channel == ch && e.Verification == v {
 			return true
 		}
+	}
+	return false
+}
+
+// registryPermits は (ch, v) の組が登録簿にあり、かつ操作 act を受けられるかを
+// 判定する。
+func registryPermits(ch Channel, v Verification, act attestedAction) bool {
+	for _, e := range verificationRegistry {
+		if e.Channel != ch || e.Verification != v {
+			continue
+		}
+		if e.anyAction {
+			return true
+		}
+		for _, a := range e.actions {
+			if a == act {
+				return true
+			}
+		}
+		return false
 	}
 	return false
 }

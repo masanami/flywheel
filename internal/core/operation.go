@@ -301,7 +301,11 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 		return nil, nil, ErrValidation
 	}
 
-	if !attestationValid(att, req.OperationID) {
+	act := actionOperationApprove
+	if req.Decision == ApprovalDecisionRejected {
+		act = actionOperationReject
+	}
+	if !attestationPermits(att, req.OperationID, act) {
 		return nil, nil, ErrVerificationRejected
 	}
 	oid, ok := parseOperationID(req.OperationID)

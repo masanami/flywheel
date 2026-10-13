@@ -331,6 +331,10 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		return nil, nil, ErrValidation
 	}
 
+	if req.Decision == ApprovalDecisionRejected && !attestationPermits(att, req.ChallengeID, actionReject) {
+		return nil, nil, ErrVerificationRejected
+	}
+
 	op := OpReject
 	if req.Decision == ApprovalDecisionApproved {
 		op = OperationForApprove(req.HoldRelease)
@@ -489,6 +493,10 @@ type AnswerRequest struct {
 func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attestation) (*Challenge, *Hold, error) {
 	if strings.TrimSpace(req.Answer) == "" {
 		return nil, nil, ErrValidation
+	}
+
+	if !attestationPermits(att, req.ChallengeID, actionAnswer) {
+		return nil, nil, ErrVerificationRejected
 	}
 
 	var holdOut Hold
