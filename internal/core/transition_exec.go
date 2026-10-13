@@ -87,6 +87,10 @@ type runTransitionParams struct {
 	// run に由来しない＝#9・#10・#12 の既存の呼び出し元）。mutateAsRun・
 	// activityRecorder.runID・transitionCtx.runID へそのまま伝わる。
 	runID *int64
+	// attested は verifiedTransition（Verify を通った Attestation を経由した
+	// 呼び出し）だけが true にする。本人確認つきの遷移かどうかの不変条件は
+	// verification の値（方式 none の (ui, none) も本人確認つき）ではなくこれで判定する。
+	attested bool
 }
 
 // runTransition は transition（#10: 本人確認の無い5操作）・verifiedTransition
@@ -135,15 +139,24 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 		// としてだけ成立する」という不変条件がコードで強制されていなかった）。
 		// 到達すれば呼び出し側の実装誤りであり fail-closed に拒否する。
 		//
-		// expectedVersion の有無だけでなく verification（VerificationNone
-		// かどうか）も独立に照合する（self-review 指摘・ラウンド2: どちらか
+		// expectedVersion の有無だけでなく、Verify を通った Attestation を
+		// 経由したか（p.attested。方式 none の (ui, none) も本人確認つき）も
+		// 独立に照合する（self-review 指摘・ラウンド2: どちらか
 		// 一方だけを見る代理検査は、将来 core 内に「expectedVersion は
 		// 渡すが verification は none のまま」のような呼び出し元が増えると
 		// すり抜ける余地を残す）。
 		hasExpectedVersion := p.expectedVersion != nil
-		hasVerification := p.verification != VerificationNone
+		hasVerification := p.attested
 		if tr.RequiresVerification != hasExpectedVersion || tr.RequiresVerification != hasVerification {
-			return fmt.Errorf("core: operation %q requires_verification=%v but was invoked with expectedVersion set=%v verification=%q (programming error: verified and unverified transition paths must not cross)", p.op, tr.RequiresVerification, hasExpectedVersion, p.verification)
+			return fmt.Errorf("core: operation %q requires_verification=%v but was invoked with expectedVersion set=%v attested=%v (programming error: verified and unverified transition paths must not cross)", p.op, tr.RequiresVerification, hasExpectedVersion, p.attested)
+		}
+		if p.attested {
+			// 登録簿の組が受けられる操作かを、遷移表の行が確定したこの時点で照らす
+			// （何も書く前。拒否は ErrVerificationRejected）。
+			act, ok := actionForTransition(tr)
+			if !ok || !registryPermits(p.channel, p.verification, act) {
+				return ErrVerificationRejected
+			}
 		}
 
 		preceding := p.preceding
@@ -323,13 +336,14 @@ func (s *Store) verifiedTransition(ctx context.Context, att Attestation, id stri
 		op:               op,
 		preceding:        preceding,
 		resolvePreceding: resolvePreceding,
+		attested:         true,
 	}, apply)
 }
 
 // attestationValid は att が Verify を経由した登録簿内の (channel,
 // verification) の組を持ち、actor が非空であること、かつ本人確認が id
 // （呼び出し側がこれから書き込もうとしている対象）に対して成立したことを
-// 再検査する。core.Attestation はゼロ値も他パッケージから構築できてしまう
+// 再検査する。操作の範囲は attestationPermits が照らす。core.Attestation はゼロ値も他パッケージから構築できてしまう
 // うえ（verification.go のコメント）、target を検査しないと「別の対象向けに
 // 成立した Attestation」を Execute* がそのまま受理してしまう
 // （self-review 指摘: 確認の入力は対象の ID の完全一致という設計決定〈H9〉が
@@ -482,4 +496,12 @@ func (s *Store) HoldChallenge(ctx context.Context, ch Channel, id string, in Hol
 	return s.transition(ctx, ch, id, OpHold, func(ctx context.Context, tc *transitionCtx) error {
 		return insertHold(ctx, tc, in.Question)
 	})
+}
+
+// attestationPermits は attestationValid に加えて、att の (channel, verification)
+// の組が操作 act を受けられることを照らす述語。ExecuteBudget・
+// ExecuteOperationApproval の入口と、遷移（ExecuteApproval・ExecuteAnswer）の
+// 判定（runTransition）が同じ registryPermits で照らす。
+func attestationPermits(att Attestation, id string, act attestedAction) bool {
+	return attestationValid(att, id) && registryPermits(att.channel, att.verification, act)
 }
