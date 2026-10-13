@@ -54,7 +54,7 @@ func startFleetServer(t *testing.T, ws ...core.FleetWorkspace) (*Server, int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(ln, ws)
+	s := newServer(ln, ws, eventsConfig{})
 	errc := make(chan error, 1)
 	go func() { errc <- s.Serve() }()
 	t.Cleanup(func() {

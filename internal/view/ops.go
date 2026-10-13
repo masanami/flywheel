@@ -285,3 +285,26 @@ type BudgetResponse struct {
 	PlanVersion int      `json:"plan_version"`
 	ReviewUSD   *float64 `json:"review_usd"`
 }
+
+// CycleStarted は `POST /api/v1/workspaces/{name}/cycle` の成功の形。
+type CycleStarted struct {
+	Started bool `json:"started"`
+}
+
+// CycleStatus は `GET /api/v1/workspaces/{name}/cycle` の形。state は idle・running・stale。
+type CycleStatus struct {
+	LastEndedAt   *string `json:"last_ended_at"`
+	LastResult    *string `json:"last_result"`
+	LastStartedAt *string `json:"last_started_at"`
+	State         string  `json:"state"`
+}
+
+// FromCycleStatus は core.CycleStatus を CycleStatus へ変換する。
+func FromCycleStatus(s *core.CycleStatus) CycleStatus {
+	out := CycleStatus{State: string(s.State), LastStartedAt: ts(s.LastStartedAt), LastEndedAt: ts(s.LastEndedAt)}
+	if s.LastResult != nil {
+		r := string(*s.LastResult)
+		out.LastResult = &r
+	}
+	return out
+}
