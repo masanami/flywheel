@@ -305,6 +305,17 @@ export interface ApprovalRelease {
   summary: string;
 }
 
+export interface CycleStatus {
+  last_ended_at: string | null;
+  last_result: string | null;
+  last_started_at: string | null;
+  state: string;
+}
+
+export interface CycleStarted {
+  started: boolean;
+}
+
 export const CARD_ACTION_CODES = [
   "approve_plan",
   "approve_completion",
