@@ -148,8 +148,12 @@
 .graph-node-stripe {
   fill: var(--c);
 }
-.graph-node[data-category="done"] .graph-node-title {
-  text-decoration: line-through;
+/* 完了は取り消し線を使わず、灰色の枠と淡い文字（グレーアウト）だけで示す */
+.graph-node[data-category="done"] .graph-node-box {
+  fill: color-mix(in srgb, var(--c) 8%, var(--board-card-bg));
+}
+.graph-node[data-category="done"] text {
+  fill: var(--board-muted-fg);
 }
 .graph-node[data-unresponsive] .graph-node-box {
   stroke: var(--cycle-status-stale-fg);

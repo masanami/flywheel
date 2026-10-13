@@ -128,7 +128,7 @@ it("関係グラフ: 区分で色分けし、凡例に件数を出す", async ()
     "人間の操作待ち 7",
     "外部待ち 1",
     "システムが実行中 3",
-    "システムが次に進めるもの 5",
+    "システムが次に進めるもの 7",
     "完了 1",
   ]) {
     expect(within(legend).getByText(text)).toBeInTheDocument();
@@ -142,13 +142,12 @@ it("関係グラフ: 区分で色分けし、凡例に件数を出す", async ()
   fireEvent.click(screen.getByRole("button", { name: /^C-15 を開く/ }));
   expect(node("C-11")).toHaveAttribute("data-category", "external");
   expect(node("C-5")).toHaveAttribute("data-category", "running");
-  fireEvent.click(screen.getByRole("button", { name: /^C-2 を開く/ }));
-  // 先行（C-4）が未完了の C-1 は、システムが進められる区分のまま印を付ける（先行待ちの区分は足さない）
-  expect(node("C-1")).toHaveAttribute("data-category", "system");
-  expect(node("C-1").getAttribute("aria-label")).toContain("先行が未完了");
   fireEvent.click(screen.getByRole("button", { name: /^C-14 を開く/ }));
   expect(node("C-12")).toHaveAttribute("data-category", "done");
   expect(node("C-6").getAttribute("aria-label")).toContain("応答なし");
+  // 先行（実施中の C-6 など）が未完了の C-18 は、システムが進められる区分のまま印を付ける（先行待ちの区分は足さない）
+  expect(node("C-18")).toHaveAttribute("data-category", "system");
+  expect(node("C-18").getAttribute("aria-label")).toContain("先行が未完了");
   // 関係の無い C-3 は下の段にまとめる
   expect(within(region).getByText("関係の無い課題")).toBeInTheDocument();
   // 読めないワークスペースは選べない
@@ -165,8 +164,8 @@ it("関係グラフ: 課題を選ぶと後続・先行を示し、詳細へ移�
     </OpenDetailContext.Provider>,
   );
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
-  fireEvent.click(screen.getByRole("button", { name: /^C-2 を開く/ }));
-  fireEvent.click(node("C-4"));
+  fireEvent.click(screen.getByRole("button", { name: /^C-14 を開く/ }));
+  fireEvent.click(node("C-12"));
   const panel = screen.getByRole("complementary", { name: "選んだ課題" });
   const after = within(panel).getByText("これが終わると進められる課題")
     .nextElementSibling as HTMLElement;
@@ -174,18 +173,19 @@ it("関係グラフ: 課題を選ぶと後続・先行を示し、詳細へ移�
     within(after)
       .getAllByRole("button")
       .map((b) => b.textContent),
-  ).toEqual(["C-1", "C-9", "C-10"]);
-  expect(node("C-9")).toHaveAttribute("data-relation", "downstream");
-  // 親（大枠の見出し）は家族として薄くしない。関係の無い大枠（畳んだ C-14）は薄くする
-  expect(node("C-2")).toHaveAttribute("data-relation", "family");
-  expect(node("C-14")).toHaveAttribute("data-dim", "true");
+  ).toEqual(["C-6", "C-8", "C-13", "C-18"]);
+  // 後続の後続（C-6 → C-18）も連鎖してたどる
+  expect(node("C-18")).toHaveAttribute("data-relation", "downstream");
+  // 親（大枠の見出し）は家族として薄くしない。関係の無い大枠（畳んだ C-2）は薄くする
+  expect(node("C-14")).toHaveAttribute("data-relation", "family");
+  expect(node("C-2")).toHaveAttribute("data-dim", "true");
   // パネルの関係から別の課題へ移る
-  fireEvent.click(within(after).getByRole("button", { name: "C-9" }));
+  fireEvent.click(within(after).getByRole("button", { name: "C-18" }));
   expect(
     within(panel).getByRole("heading", { level: 3 }).textContent,
-  ).toContain("C-9");
+  ).toContain("C-18");
   fireEvent.click(within(panel).getByRole("button", { name: "詳細を開く" }));
-  expect(open).toHaveBeenCalledWith("alpha", "C-9");
+  expect(open).toHaveBeenCalledWith("alpha", "C-18");
   // キーボードでも選べる
   fireEvent.keyDown(node("C-7"), { key: "Enter" });
   expect(

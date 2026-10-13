@@ -181,33 +181,33 @@ it("畳んだ親: 中の件数と、実施中・人間の操作待ちがある�
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   const c14 = node("C-14");
   expect(c14.getAttribute("aria-label")).toContain(
-    "畳んだ子 4 件（実施中 1・人間の操作待ち 2）",
+    "畳んだ子 5 件（実施中 1・人間の操作待ち 2）",
   );
   expect(c14).toHaveAttribute("data-active-inside", "true");
   expect(c14).toHaveAttribute("data-human-inside", "true");
   // 2 段の入れ子（C-15 の中の C-16 の中の C-17）も数える
   expect(node("C-15").getAttribute("aria-label")).toContain(
-    "畳んだ子 4 件（実施中 2）",
+    "畳んだ子 5 件（実施中 2）",
   );
   expect(node("C-15")).not.toHaveAttribute("data-human-inside");
   expect(node("C-2").getAttribute("aria-label")).toContain(
     "畳んだ子 4 件（人間の操作待ち 3）",
   );
   expect(node("C-2")).not.toHaveAttribute("data-active-inside");
-  // 畳んだ大枠の中の課題の依存は、親の箱どうしの線になる
+  // 畳んだ大枠の中の課題の依存は、畳んだ親の箱へつなぎ替える（C-19 → C-2 は C-15 → C-2）
   expect(
-    graphOf().querySelector('path[data-from="C-15"][data-to="C-7"]'),
+    graphOf().querySelector('path[data-from="C-15"][data-to="C-2"]'),
   ).not.toBeNull();
 
   fireEvent.click(
-    screen.getByRole("button", { name: "C-15 を開く（子 4 件）" }),
+    screen.getByRole("button", { name: "C-15 を開く（子 5 件）" }),
   );
   // 開いた親は見出しつきの大枠になり、中の子が箱になる。子の大枠（C-16）は畳んだまま
   expect(node("C-15").getAttribute("aria-label")).toContain("開いた親");
   expect(node("C-5")).toBeInTheDocument();
   expect(node("C-16").getAttribute("aria-label")).toContain("畳んだ子 1 件");
   expect(
-    graphOf().querySelector('path[data-from="C-11"][data-to="C-7"]'),
+    graphOf().querySelector('path[data-from="C-11"][data-to="C-19"]'),
   ).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "C-15 を畳む" }));
   expect(
