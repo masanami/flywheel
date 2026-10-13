@@ -17,6 +17,9 @@ const D: Dims = {
   gapY: 20,
   pad: 5,
   labelH: 20,
+  headH: 20,
+  inset: 5,
+  maxW: 1000,
 };
 const dep = (from: string, to: string): ChallengeRelation => ({
   from,
@@ -107,8 +110,12 @@ beforeEach(() => {
 });
 afterEach(() => resetApi());
 
+// グラフの中の課題の箱（畳む・開くのボタンと、いま実施中の行のボタンは除く）
 const node = (id: string) =>
-  screen.getByRole("button", { name: new RegExp(`^${id} `) });
+  within(screen.getByRole("group", { name: /の課題の関係グラフ$/ })).getByRole(
+    "button",
+    { name: new RegExp(`^${id} (?!を)`) },
+  );
 
 it("関係グラフ: 区分で色分けし、凡例に件数を出す", async () => {
   render(<GraphScreen live={await liveOf()} />);
@@ -120,19 +127,27 @@ it("関係グラフ: 区分で色分けし、凡例に件数を出す", async ()
   for (const text of [
     "人間の操作待ち 7",
     "外部待ち 1",
-    "システムが実行中 2",
-    "システムが次に進めるもの 2",
+    "システムが実行中 3",
+    "システムが次に進めるもの 5",
     "完了 1",
   ]) {
     expect(within(legend).getByText(text)).toBeInTheDocument();
   }
+  // 既定では親を畳むので、一番外の課題だけが箱になる
   expect(node("C-3")).toHaveAttribute("data-category", "human");
+  expect(node("C-7")).toHaveAttribute("data-category", "human");
+  expect(node("C-2")).toHaveAttribute("data-category", "system");
+  expect(screen.queryByRole("button", { name: /^C-4 (?!を)/ })).toBeNull();
+  // 開くと中の区分が見える
+  fireEvent.click(screen.getByRole("button", { name: /^C-15 を開く/ }));
   expect(node("C-11")).toHaveAttribute("data-category", "external");
   expect(node("C-5")).toHaveAttribute("data-category", "running");
-  expect(node("C-2")).toHaveAttribute("data-category", "system");
-  expect(node("C-12")).toHaveAttribute("data-category", "done");
-  // 先行（C-4）が未完了の C-1 は、システムが進められる区分のまま印を付ける
+  fireEvent.click(screen.getByRole("button", { name: /^C-2 を開く/ }));
+  // 先行（C-4）が未完了の C-1 は、システムが進められる区分のまま印を付ける（先行待ちの区分は足さない）
+  expect(node("C-1")).toHaveAttribute("data-category", "system");
   expect(node("C-1").getAttribute("aria-label")).toContain("先行が未完了");
+  fireEvent.click(screen.getByRole("button", { name: /^C-14 を開く/ }));
+  expect(node("C-12")).toHaveAttribute("data-category", "done");
   expect(node("C-6").getAttribute("aria-label")).toContain("応答なし");
   // 関係の無い C-3 は下の段にまとめる
   expect(within(region).getByText("関係の無い課題")).toBeInTheDocument();
@@ -150,6 +165,7 @@ it("関係グラフ: 課題を選ぶと後続・先行を示し、詳細へ移�
     </OpenDetailContext.Provider>,
   );
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
+  fireEvent.click(screen.getByRole("button", { name: /^C-2 を開く/ }));
   fireEvent.click(node("C-4"));
   const panel = screen.getByRole("complementary", { name: "選んだ課題" });
   const after = within(panel).getByText("これが終わると進められる課題")
@@ -160,8 +176,9 @@ it("関係グラフ: 課題を選ぶと後続・先行を示し、詳細へ移�
       .map((b) => b.textContent),
   ).toEqual(["C-1", "C-9", "C-10"]);
   expect(node("C-9")).toHaveAttribute("data-relation", "downstream");
+  // 親（大枠の見出し）は家族として薄くしない。関係の無い大枠（畳んだ C-14）は薄くする
   expect(node("C-2")).toHaveAttribute("data-relation", "family");
-  expect(node("C-12")).toHaveAttribute("data-dim", "true");
+  expect(node("C-14")).toHaveAttribute("data-dim", "true");
   // パネルの関係から別の課題へ移る
   fireEvent.click(within(after).getByRole("button", { name: "C-9" }));
   expect(
@@ -179,15 +196,19 @@ it("関係グラフ: 課題を選ぶと後続・先行を示し、詳細へ移�
 it("関係グラフ: 区分・リポジトリで絞り、ワークスペースを切り替える", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
+  // 畳んだ大枠は、中に当たる課題があれば薄くしない
   fireEvent.click(screen.getByRole("button", { name: /^外部待ち/ }));
-  expect(node("C-11")).not.toHaveAttribute("data-dim");
+  expect(node("C-15")).not.toHaveAttribute("data-dim");
   expect(node("C-3")).toHaveAttribute("data-dim", "true");
   fireEvent.click(screen.getByRole("button", { name: /^外部待ち/ }));
   fireEvent.click(screen.getByRole("button", { name: "mock-org/infra" }));
-  expect(node("C-5")).not.toHaveAttribute("data-dim");
+  expect(node("C-15")).not.toHaveAttribute("data-dim");
+  expect(node("C-3")).toHaveAttribute("data-dim", "true");
+  fireEvent.click(screen.getByRole("button", { name: "親をすべて開く" }));
   expect(node("C-1")).toHaveAttribute("data-dim", "true");
+  expect(node("C-12")).not.toHaveAttribute("data-dim");
   fireEvent.click(screen.getByRole("checkbox", { name: "完了を隠す" }));
-  expect(screen.queryByRole("button", { name: /^C-12 / })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^C-12 (?!を)/ })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "beta" }));
   await screen.findByRole("group", { name: "beta の課題の関係グラフ" });
   expect(node("C-2").getAttribute("aria-label")).toContain(

@@ -265,6 +265,18 @@ export function seed(): Record<string, MockWorkspace> {
         },
       },
     }),
+    // 関係グラフの案（flywheel#176）で親の大枠として見せる課題。人間の操作は待たない。
+    mk("C-14", "旧基盤の撤去", "in_progress", {
+      priority: "P2",
+      headline: "旧バッチ基盤を止めて消す",
+    }),
+    mk("C-15", "CI と配布の改善", "classified", { priority: "P2" }),
+    mk("C-16", "依存のキャッシュ", "classified", { priority: "P2" }),
+    mk("C-17", "キャッシュキーの設計", "in_progress", {
+      priority: "P2",
+      flags: { running: true },
+      runs: [run("R-10", "C-17", { started_at: iso(15) })],
+    }),
   ];
   const beta: MockChallenge[] = [
     mk("C-1", "レポートの CSV 出力", "classified", { priority: "P2" }),

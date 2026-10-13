@@ -7,7 +7,7 @@ import {
 } from "react";
 import { api } from "../../api/client.ts";
 import type { ChallengeGraphResponse } from "../../api/proposed.ts";
-import type { ChallengeCard } from "../../api/types.gen.ts";
+import { Board } from "../../board/Board.tsx";
 import {
   ACTION_LABELS,
   MODIFIER_LABELS,
@@ -17,16 +17,28 @@ import {
 } from "../../labels.ts";
 import type { LiveState } from "../../live/useLive.ts";
 import { OpenDetailContext } from "../../nav.tsx";
+import { CycleHeaders } from "../CycleHeaders.tsx";
+import { NeedsHumanStrip } from "../NeedsHumanStrip.tsx";
+import {
+  type Dimensions,
+  GraphCanvas,
+  type Inside,
+  type NodeInfo,
+} from "./GraphCanvas.tsx";
 import {
   CATEGORIES,
   type Category,
-  type Dims,
   actionableIds,
+  ancestorsOf,
   categoryOf,
+  childrenMap,
   clip,
+  compareIds,
+  descendantsOf,
   downstreamOf,
   layoutGraph,
   neighborsOf,
+  parentMap,
   upstreamOf,
   validRelations,
 } from "./model.ts";
@@ -34,24 +46,32 @@ import "./graph.css";
 
 export const GRAPH_TITLE = "関係グラフ（案）";
 
-const WIDE: Dims & { titleChars: number } = {
+export const WIDE: Dimensions = {
   nodeW: 168,
   nodeH: 60,
   gapX: 20,
-  gapY: 44,
+  gapY: 40,
   pad: 12,
   labelH: 28,
+  headH: 30,
+  inset: 10,
+  maxW: 860,
   titleChars: 12,
+  metaChars: 22,
 };
-// 幅 360px の端末で、層に 3 つ並んでも縮めずに読める大きさ。
-const NARROW: Dims & { titleChars: number } = {
+// 幅 360px の端末で、一番外の段に 3 つ並んでも縮めずに読める大きさ。大枠の中は 2 つで折り返す。
+export const NARROW: Dimensions = {
   nodeW: 104,
   nodeH: 52,
   gapX: 8,
-  gapY: 36,
+  gapY: 30,
   pad: 4,
   labelH: 24,
+  headH: 28,
+  inset: 6,
+  maxW: 328,
   titleChars: 7,
+  metaChars: 9,
 };
 const NARROW_QUERY = "(max-width: 480px)";
 
@@ -70,14 +90,20 @@ function useNarrow(): boolean {
   return narrow;
 }
 
-// 詳細を開くと画面が外れて戻ると作り直されるため、選んだワークスペースと課題をここに覚えておく。
-const memory: { ws: string | null; node: string | null } = {
-  ws: null,
-  node: null,
-};
+type View = "graph" | "board";
+
+// 詳細を開くと画面が外れて戻ると作り直されるため、表示・選んだワークスペースと課題・開いた親をここに覚えておく。
+const memory: {
+  view: View;
+  ws: string | null;
+  node: string | null;
+  open: Record<string, string[]>;
+} = { view: "graph", ws: null, node: null, open: {} };
 export function resetGraphMemory(): void {
+  memory.view = "graph";
   memory.ws = null;
   memory.node = null;
+  memory.open = {};
 }
 
 type GraphState =
@@ -101,14 +127,48 @@ function useGraph(ws: string | null, refreshKey: unknown) {
   return state?.ws === ws ? state : null;
 }
 
-interface NodeInfo {
-  card: ChallengeCard;
-  category: Category;
-  repos: string[];
-  marks: string[];
+// 決定 1（flywheel#176 の 2026-10-13）: グラフと列のボードを同じ画面に置き、既定はグラフ。
+export function GraphScreen({ live }: { live: LiveState }) {
+  const [view, setView] = useState<View>(memory.view);
+  const choose = (v: View) => {
+    memory.view = v;
+    setView(v);
+  };
+  return (
+    <section aria-label={GRAPH_TITLE} className="graph-screen">
+      <fieldset aria-label="表示" className="graph-view-switch">
+        <button
+          type="button"
+          aria-pressed={view === "graph"}
+          onClick={() => choose("graph")}
+        >
+          グラフ
+        </button>
+        <button
+          type="button"
+          aria-pressed={view === "board"}
+          onClick={() => choose("board")}
+        >
+          列のボード
+        </button>
+      </fieldset>
+      {view === "graph" ? (
+        <GraphView live={live} />
+      ) : (
+        <div className="graph-board-view board-screen">
+          <NeedsHumanStrip live={live} />
+          <CycleHeaders
+            workspaces={live.workspaces}
+            refreshKey={live.lastUpdated}
+          />
+          <Board live={live} />
+        </div>
+      )}
+    </section>
+  );
 }
 
-export function GraphScreen({ live }: { live: LiveState }) {
+function GraphView({ live }: { live: LiveState }) {
   const open = useContext(OpenDetailContext);
   const narrow = useNarrow();
   const dims = narrow ? NARROW : WIDE;
@@ -118,24 +178,13 @@ export function GraphScreen({ live }: { live: LiveState }) {
   const ws =
     readable.find((w) => w.name === chosen)?.name ?? readable[0]?.name ?? null;
   const [selected, setSelected] = useState<string | null>(memory.node);
+  const [openParents, setOpenParents] = useState(memory.open);
   const [catFilter, setCatFilter] = useState<Category | null>(null);
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [hideDone, setHideDone] = useState(false);
   const graph = useGraph(ws, live.lastUpdated);
   const wsData = ws ? live.data[ws] : undefined;
-
-  const chooseWs = (name: string) => {
-    memory.ws = name;
-    memory.node = null;
-    setChosen(name);
-    setSelected(null);
-    setCatFilter(null);
-    setRepoFilter(null);
-  };
-  const select = (id: string | null) => {
-    memory.node = id;
-    setSelected(id);
-  };
+  const expanded = new Set(ws ? (openParents[ws] ?? []) : []);
 
   const infos = useMemo(() => {
     const cards = wsData?.challenges?.challenges ?? [];
@@ -164,19 +213,60 @@ export function GraphScreen({ live }: { live: LiveState }) {
       if (approvedOps.has(c.id)) marks.push("承認済みの操作が未実行");
       m.set(c.id, { card: c, category, repos: repoMap.get(c.id) ?? [], marks });
     }
-    return { map: m, rels };
+    const pm = parentMap(all, rels);
+    return { map: m, rels, pm, kids: childrenMap(pm) };
   }, [wsData, graph]);
 
+  const setOpen = (fn: (s: Set<string>) => Set<string>) => {
+    if (!ws) return;
+    const next = [...fn(new Set(openParents[ws] ?? []))].sort(compareIds);
+    const all = { ...openParents, [ws]: next };
+    memory.open = all;
+    setOpenParents(all);
+  };
+  const toggle = (id: string) =>
+    setOpen((s) => {
+      if (s.has(id)) s.delete(id);
+      else s.add(id);
+      return s;
+    });
+  // 選ぶと、畳んだ大枠の中にあっても見えるように祖先を開く。
+  const select = (id: string | null) => {
+    memory.node = id;
+    setSelected(id);
+    if (id) setOpen((s) => new Set([...s, ...ancestorsOf(id, infos.pm)]));
+  };
+  const chooseWs = (name: string) => {
+    memory.ws = name;
+    memory.node = null;
+    setChosen(name);
+    setSelected(null);
+    setCatFilter(null);
+    setRepoFilter(null);
+  };
+
+  // 完了を隠しても、まだ終わっていない子を持つ親（大枠）は残す。
   const shownIds = [...infos.map.values()]
-    .filter((i) => !(hideDone && i.category === "done"))
+    .filter(
+      (i) =>
+        !(
+          hideDone &&
+          i.category === "done" &&
+          descendantsOf(i.card.id, infos.kids).every(
+            (d) => infos.map.get(d)?.category === "done",
+          )
+        ),
+    )
     .map((i) => i.card.id);
-  const layout = layoutGraph(shownIds, infos.rels, dims);
+  const layout = layoutGraph(shownIds, infos.rels, dims, expanded);
+  const pm = layout.parents;
+  const kids = childrenMap(pm);
   const shownRels = validRelations(new Set(shownIds), infos.rels);
-  const sel = selected && infos.map.has(selected) ? selected : null;
+  const sel = selected && shownIds.includes(selected) ? selected : null;
   const up = new Set(sel ? upstreamOf(sel, shownRels) : []);
   const down = new Set(sel ? downstreamOf(sel, shownRels) : []);
-  const near = sel ? neighborsOf(sel, shownRels) : null;
-  const family = new Set([...(near?.parents ?? []), ...(near?.children ?? [])]);
+  const ancestors = new Set(sel ? ancestorsOf(sel, pm) : []);
+  const inner = new Set(sel ? descendantsOf(sel, kids) : []);
   const repos = [
     ...new Set([...infos.map.values()].flatMap((i) => i.repos)),
   ].sort();
@@ -184,27 +274,47 @@ export function GraphScreen({ live }: { live: LiveState }) {
   const counts = new Map<Category, number>();
   for (const i of infos.map.values())
     counts.set(i.category, (counts.get(i.category) ?? 0) + 1);
+  const running = [...infos.map.values()]
+    .filter((i) => i.category === "running")
+    .map((i) => i.card);
 
-  const dimmed = (id: string): boolean => {
+  const relevant = (id: string) =>
+    sel === null ||
+    id === sel ||
+    up.has(id) ||
+    down.has(id) ||
+    ancestors.has(id) ||
+    inner.has(id);
+  const matches = (id: string) => {
     const i = infos.map.get(id);
-    if (!i) return true;
-    if (catFilter && i.category !== catFilter) return true;
-    if (repoFilter && !i.repos.includes(repoFilter)) return true;
-    if (sel && id !== sel && !up.has(id) && !down.has(id) && !family.has(id))
-      return true;
-    return false;
+    if (!i) return false;
+    if (catFilter && i.category !== catFilter) return false;
+    if (repoFilter && !i.repos.includes(repoFilter)) return false;
+    return true;
   };
-  // 選んだ課題・その先行と後続・親子。グラフの線はこの中どうしを結ぶものだけを強く出す。
-  const inChain = (id: string): boolean =>
-    sel !== null &&
-    (id === sel || up.has(id) || down.has(id) || family.has(id));
+  // 箱が表す課題: 自分と、大枠（開いていても畳んでいても）の中の課題すべて。
+  const membersOf = (id: string) => [id, ...descendantsOf(id, kids)];
+  const dimmed = (id: string) =>
+    !membersOf(id).some((m) => matches(m) && relevant(m));
+  const edgeLit = (from: string, to: string) =>
+    membersOf(from).some((m) => sel !== null && relevant(m)) &&
+    membersOf(to).some((m) => sel !== null && relevant(m));
   const relationOf = (id: string): string | undefined => {
     if (!sel) return undefined;
     if (id === sel) return "selected";
     if (down.has(id)) return "downstream";
     if (up.has(id)) return "upstream";
-    if (family.has(id)) return "family";
+    if (ancestors.has(id) || inner.has(id)) return "family";
     return undefined;
+  };
+  const inside = (id: string): Inside | null => {
+    if (!kids.has(id) || expanded.has(id)) return null;
+    const ds = descendantsOf(id, kids).map((d) => infos.map.get(d));
+    return {
+      total: ds.length,
+      active: ds.filter((d) => d?.category === "running").length,
+      human: ds.filter((d) => d?.category === "human").length,
+    };
   };
 
   let body: ReactNode;
@@ -227,138 +337,29 @@ export function GraphScreen({ live }: { live: LiveState }) {
               関係に循環があります。循環に入った課題は最下段に並べています。
             </p>
           ) : null}
-          <svg
-            // biome-ignore lint/a11y/useSemanticElements: 課題のノード（ボタン）を束ねる SVG で、fieldset に置き換えられない
-            role="group"
-            aria-label={`${ws} の課題の関係グラフ`}
-            viewBox={`0 0 ${layout.width} ${layout.height}`}
-            width={layout.width}
-            className={narrow ? "graph-svg is-narrow" : "graph-svg"}
-          >
-            <defs>
-              <marker
-                id="graph-arrow"
-                viewBox="0 0 10 10"
-                refX="9"
-                refY="5"
-                markerWidth="7"
-                markerHeight="7"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 0 L 10 5 L 0 10 z" className="graph-arrow" />
-              </marker>
-            </defs>
-            {layout.edges.map((e) => {
-              const lit = inChain(e.from) && inChain(e.to);
-              return (
-                <path
-                  key={`${e.kind}:${e.from}:${e.to}`}
-                  d={e.path}
-                  className="graph-edge"
-                  data-kind={e.kind}
-                  data-lit={lit || undefined}
-                  data-dim={
-                    (sel !== null && !lit) ||
-                    dimmed(e.from) ||
-                    dimmed(e.to) ||
-                    undefined
-                  }
-                  markerEnd={
-                    e.kind === "depends_on" ? "url(#graph-arrow)" : undefined
-                  }
-                />
-              );
-            })}
-            {layout.isolatedLabelY !== null ? (
-              <text
-                x={dims.pad}
-                y={layout.isolatedLabelY + dims.labelH * 0.65}
-                className="graph-section-label"
-              >
-                関係の無い課題
-              </text>
-            ) : null}
-            {layout.nodes.map((n) => {
-              const i = infos.map.get(n.id);
-              if (!i) return null;
-              const c = i.card;
-              const third = narrow
-                ? (i.marks[0] ?? "")
-                : [
-                    ...i.marks,
-                    i.repos.map((r) => r.split("/").pop()).join("・"),
-                  ]
-                    .filter(Boolean)
-                    .join(" / ");
-              const name = `${c.id} ${c.title}（${CATEGORIES.find((k) => k.key === i.category)?.label}${i.marks.length > 0 ? `・${i.marks.join("・")}` : ""}）`;
-              return (
-                <g
-                  key={n.id}
-                  // biome-ignore lint/a11y/useSemanticElements: SVG の中に button 要素は置けない
-                  role="button"
-                  tabIndex={0}
-                  aria-label={name}
-                  aria-pressed={n.id === sel}
-                  className="graph-node"
-                  data-category={i.category}
-                  data-relation={relationOf(n.id)}
-                  data-dim={dimmed(n.id) || undefined}
-                  data-unresponsive={
-                    c.card.modifiers.includes("unresponsive") || undefined
-                  }
-                  transform={`translate(${n.x} ${n.y})`}
-                  onClick={() => select(n.id === sel ? null : n.id)}
-                  onDoubleClick={() => open?.(ws, n.id)}
-                  onKeyDown={(ev) => {
-                    if (ev.key === "Enter" || ev.key === " ") {
-                      ev.preventDefault();
-                      select(n.id === sel ? null : n.id);
-                    }
-                  }}
-                >
-                  <title>{name}</title>
-                  <rect
-                    className="graph-node-box"
-                    width={dims.nodeW}
-                    height={dims.nodeH}
-                    rx={6}
-                  />
-                  <rect
-                    className="graph-node-stripe"
-                    width={5}
-                    height={dims.nodeH}
-                    rx={2}
-                  />
-                  <text x={11} y={narrow ? 16 : 18} className="graph-node-id">
-                    {c.id}
-                    {c.priority ? ` ${c.priority}` : ""}
-                  </text>
-                  <text
-                    x={11}
-                    y={narrow ? 31 : 35}
-                    className="graph-node-title"
-                  >
-                    {clip(c.title, dims.titleChars)}
-                  </text>
-                  {third ? (
-                    <text
-                      x={11}
-                      y={narrow ? 45 : 51}
-                      className="graph-node-meta"
-                    >
-                      {clip(third, narrow ? 9 : 22)}
-                    </text>
-                  ) : null}
-                </g>
-              );
-            })}
-          </svg>
+          <GraphCanvas
+            ws={ws}
+            layout={layout}
+            dims={dims}
+            narrow={narrow}
+            infos={infos.map}
+            inside={inside}
+            selected={sel}
+            relationOf={relationOf}
+            dimmed={dimmed}
+            edgeLit={edgeLit}
+            onSelect={(id) => select(id === sel ? null : id)}
+            onOpen={(id) => open?.(ws, id)}
+            onToggle={toggle}
+          />
         </div>
         <SelectedPanel
           ws={ws}
           id={sel}
           infos={infos.map}
           relations={shownRels}
+          parent={sel ? (pm.get(sel) ?? null) : null}
+          childIds={sel ? (kids.get(sel) ?? []) : []}
           onSelect={select}
           onOpen={open}
         />
@@ -366,8 +367,9 @@ export function GraphScreen({ live }: { live: LiveState }) {
     );
   }
 
+  const parents = [...kids.keys()];
   return (
-    <section aria-label={GRAPH_TITLE} className="graph-screen">
+    <>
       <div className="graph-toolbar">
         <fieldset aria-label="ワークスペース" className="graph-chips">
           {readable.map((w) => (
@@ -393,57 +395,98 @@ export function GraphScreen({ live }: { live: LiveState }) {
             </button>
           ))}
         </fieldset>
-        <ul aria-label="区分の凡例" className="graph-legend">
-          {CATEGORIES.map((k) => (
-            <li key={k.key}>
+        <section aria-label="いま実施中" className="graph-active-row">
+          <span className="graph-active-label">▶ いま実施中</span>
+          {running.length === 0 ? (
+            <span className="graph-muted">なし</span>
+          ) : (
+            running.map((c) => (
               <button
+                key={c.id}
                 type="button"
-                className="graph-legend-item"
-                data-category={k.key}
-                aria-pressed={catFilter === k.key}
-                title={k.hint}
-                onClick={() => setCatFilter(catFilter === k.key ? null : k.key)}
+                className="graph-active-chip"
+                aria-pressed={c.id === sel}
+                onClick={() => select(c.id)}
               >
-                <span className="graph-swatch" aria-hidden="true" />
-                {k.label} {counts.get(k.key) ?? 0}
+                {c.id} {clip(c.title, narrow ? 8 : 16)}
               </button>
-            </li>
-          ))}
-          <li className="graph-legend-edge" data-kind="depends_on">
-            実線の矢印: 先行 → 後続
-          </li>
-          <li className="graph-legend-edge" data-kind="parent_of">
-            点線: 親 → 子
-          </li>
-        </ul>
-        <div className="graph-chips">
-          {repos.length > 0 ? (
-            <fieldset aria-label="リポジトリ" className="graph-chips">
-              {repos.map((r) => (
+            ))
+          )}
+        </section>
+        {/* 狭い画面ではグラフが下へ押し出されないよう、凡例と絞り込みを畳んで始める */}
+        <details className="graph-filters" open={!narrow || undefined}>
+          <summary>凡例と絞り込み</summary>
+          <ul aria-label="区分の凡例" className="graph-legend">
+            {CATEGORIES.map((k) => (
+              <li key={k.key}>
                 <button
-                  key={r}
                   type="button"
-                  className="filter-chip"
-                  aria-pressed={repoFilter === r}
-                  onClick={() => setRepoFilter(repoFilter === r ? null : r)}
+                  className="graph-legend-item"
+                  data-category={k.key}
+                  aria-pressed={catFilter === k.key}
+                  title={k.hint}
+                  onClick={() =>
+                    setCatFilter(catFilter === k.key ? null : k.key)
+                  }
                 >
-                  {r}
+                  <span className="graph-swatch" aria-hidden="true" />
+                  {k.label} {counts.get(k.key) ?? 0}
                 </button>
-              ))}
-            </fieldset>
-          ) : null}
-          <label className="graph-toggle">
-            <input
-              type="checkbox"
-              checked={hideDone}
-              onChange={(e) => setHideDone(e.target.checked)}
-            />
-            完了を隠す
-          </label>
-        </div>
+              </li>
+            ))}
+            <li className="graph-legend-edge">実線の矢印: 先行 → 後続</li>
+            <li className="graph-legend-edge">
+              大枠: 親課題（中に子課題）。重ねた箱は畳んだ親で、▶
+              は中の実施中・! は中の人間の操作待ちの件数
+            </li>
+          </ul>
+          <div className="graph-chips">
+            {repos.length > 0 ? (
+              <fieldset aria-label="リポジトリ" className="graph-chips">
+                {repos.map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    className="filter-chip"
+                    aria-pressed={repoFilter === r}
+                    onClick={() => setRepoFilter(repoFilter === r ? null : r)}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </fieldset>
+            ) : null}
+            <label className="graph-toggle">
+              <input
+                type="checkbox"
+                checked={hideDone}
+                onChange={(e) => setHideDone(e.target.checked)}
+              />
+              完了を隠す
+            </label>
+          </div>
+        </details>
+        {parents.length > 0 ? (
+          <div className="graph-chips">
+            <button
+              type="button"
+              className="filter-chip"
+              onClick={() => setOpen(() => new Set(parents))}
+            >
+              親をすべて開く
+            </button>
+            <button
+              type="button"
+              className="filter-chip"
+              onClick={() => setOpen(() => new Set())}
+            >
+              親をすべて畳む
+            </button>
+          </div>
+        ) : null}
       </div>
       {body}
-    </section>
+    </>
   );
 }
 
@@ -471,6 +514,7 @@ function IdList({
             </button>{" "}
             {i ? clip(i.card.title, 24) : ""}
             {i?.category === "done" ? "（完了）" : ""}
+            {i?.category === "running" ? "（実施中）" : ""}
           </li>
         );
       })}
@@ -483,6 +527,8 @@ function SelectedPanel({
   id,
   infos,
   relations,
+  parent,
+  childIds,
   onSelect,
   onOpen,
 }: {
@@ -490,6 +536,8 @@ function SelectedPanel({
   id: string | null;
   infos: Map<string, NodeInfo>;
   relations: Parameters<typeof downstreamOf>[1];
+  parent: string | null;
+  childIds: string[];
   onSelect: (id: string | null) => void;
   onOpen: ((ws: string, id: string) => void) | null;
 }) {
@@ -504,7 +552,6 @@ function SelectedPanel({
     );
   }
   const c = i.card;
-  const near = neighborsOf(id, relations);
   const actions = c.card.next_human_actions;
   return (
     <aside aria-label="選んだ課題" className="graph-panel">
@@ -539,11 +586,22 @@ function SelectedPanel({
         onSelect={onSelect}
         empty="なし"
       />
-      {near.parents.length > 0 || near.children.length > 0 ? (
+      {parent ? (
         <>
-          <h4>親・子</h4>
+          <h4>親課題（外側の大枠）</h4>
           <IdList
-            ids={[...near.parents, ...near.children]}
+            ids={[parent]}
+            infos={infos}
+            onSelect={onSelect}
+            empty="なし"
+          />
+        </>
+      ) : null}
+      {childIds.length > 0 ? (
+        <>
+          <h4>子課題（大枠の中）</h4>
+          <IdList
+            ids={childIds}
             infos={infos}
             onSelect={onSelect}
             empty="なし"

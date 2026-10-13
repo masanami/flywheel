@@ -33,6 +33,8 @@ it("本番のビルドに偽の API・モックの画面を含めない", async 
       "優先度方針: 厳格",
       "関係グラフ（案）",
       "関係の無い課題",
+      "親をすべて開く",
+      "旧基盤の撤去",
       "mock-org/",
     ]) {
       expect(code, marker).not.toContain(marker);

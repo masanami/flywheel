@@ -9,6 +9,7 @@
   --graph-other: #c4c4c9;
   --graph-edge: #9a9aa2;
   --graph-edge-lit: #1c1c1f;
+  --graph-frame: #b9b9c0;
   padding: 0.5rem 0;
 }
 @media (prefers-color-scheme: dark) {
@@ -16,6 +17,7 @@
     --graph-edge: #6b6b70;
     --graph-edge-lit: #e7e7ea;
     --graph-other: #5a5a60;
+    --graph-frame: #55555b;
   }
 }
 [data-category="human"] {
@@ -122,9 +124,6 @@
   fill: none;
   stroke: var(--graph-edge);
   stroke-width: 1.5;
-}
-.graph-edge[data-kind="parent_of"] {
-  stroke-dasharray: 4 4;
 }
 .graph-edge[data-lit] {
   stroke: var(--graph-edge-lit);
@@ -233,4 +232,180 @@ fieldset.graph-chips {
   margin: 0;
   padding: 0;
   min-width: 0;
+}
+
+/* 決定 1: グラフと列のボードの切り替え（既定はグラフ） */
+.graph-view-switch {
+  display: inline-flex;
+  border: 0;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  min-width: 0;
+}
+.graph-view-switch button {
+  border: 1px solid var(--board-border);
+  background: var(--board-chip-bg);
+  color: inherit;
+  padding: 0.25rem 0.9rem;
+  cursor: pointer;
+}
+.graph-view-switch button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.graph-view-switch button:last-child {
+  border-radius: 0 6px 6px 0;
+  border-left: 0;
+}
+.graph-view-switch button[aria-pressed="true"] {
+  background: var(--board-fg);
+  color: var(--board-card-bg);
+  font-weight: 600;
+}
+.graph-board-view {
+  min-height: 60vh;
+}
+
+/* 決定 3: いま実施している課題を強調する（一覧の行・ノードの光の輪・「実施中」の札） */
+.graph-active-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85em;
+}
+.graph-active-label {
+  color: var(--graph-running);
+  font-weight: 700;
+}
+.graph-active-chip {
+  border: 1.5px solid var(--graph-running);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--graph-running) 12%, transparent);
+  color: inherit;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+.graph-active-chip[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--graph-running) 30%, transparent);
+}
+.graph-node-halo {
+  fill: none;
+  stroke: var(--graph-running);
+  stroke-width: 3;
+  animation: graph-pulse 1.6s ease-in-out infinite;
+}
+@keyframes graph-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-node-halo {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+.graph-node[data-active] .graph-node-box {
+  stroke-width: 2.5;
+}
+.graph-node-active-tag {
+  fill: var(--graph-running) !important;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 決定 4・追加の指示: 親課題の大枠（開いた親）と、重ねた箱（畳んだ親） */
+.graph-group-box {
+  fill: color-mix(in srgb, var(--c) 5%, transparent);
+  stroke: var(--graph-frame);
+  stroke-width: 1.5;
+}
+.graph-group[data-depth="1"] .graph-group-box,
+.graph-group[data-depth="2"] .graph-group-box {
+  stroke-dasharray: 6 3;
+}
+.graph-group[data-dim] {
+  opacity: 0.35;
+}
+.graph-group-head {
+  cursor: pointer;
+  outline: none;
+}
+.graph-group-head-box {
+  fill: color-mix(in srgb, var(--c) 18%, var(--board-card-bg));
+  stroke: var(--graph-frame);
+  stroke-width: 1.5;
+}
+.graph-group-head[aria-pressed="true"] .graph-group-head-box,
+.graph-group-head:focus-visible .graph-group-head-box {
+  stroke: var(--board-fg);
+  stroke-width: 3;
+}
+.graph-group-head[data-active] .graph-group-head-box {
+  stroke: var(--graph-running);
+  stroke-width: 2.5;
+}
+.graph-group-title {
+  fill: var(--board-fg);
+  font-size: 13px;
+}
+.graph-node-stack {
+  fill: var(--board-card-bg);
+  stroke: var(--c);
+  stroke-width: 1.2;
+}
+.graph-badge rect {
+  fill: color-mix(in srgb, var(--c) 22%, var(--board-card-bg));
+  stroke: var(--c);
+  stroke-width: 1;
+}
+.graph-badge text {
+  font-size: 10px;
+  font-weight: 600;
+}
+.graph-badge[data-badge="all"] rect {
+  fill: transparent;
+  stroke: var(--graph-frame);
+}
+.graph-toggle-btn {
+  cursor: pointer;
+  outline: none;
+}
+.graph-toggle-btn rect {
+  fill: var(--board-card-bg);
+  stroke: var(--graph-frame);
+  stroke-width: 1.2;
+}
+.graph-toggle-btn:focus-visible rect,
+.graph-toggle-btn:hover rect {
+  stroke: var(--board-fg);
+  stroke-width: 2;
+}
+.graph-toggle-btn text {
+  fill: var(--board-fg);
+  font-size: 15px;
+  font-weight: 700;
+}
+.graph-svg.is-narrow .graph-group-title {
+  font-size: 11.5px;
+}
+.graph-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.graph-filters > summary {
+  cursor: pointer;
+  font-size: 0.85em;
+  color: var(--board-muted-fg);
+}
+.graph-filters[open] > summary {
+  margin-bottom: 0.3rem;
+}
+.graph-filters > :not(summary) + :not(summary) {
+  margin-top: 0.4rem;
 }
