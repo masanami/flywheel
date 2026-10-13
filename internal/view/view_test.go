@@ -69,6 +69,7 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 		view.JudgmentPhase{}, view.DelegationPhase{}, view.IngestPhase{}, view.PhaseResponse{}, view.Cycle{},
 		view.CycleResponse{}, view.SlotCleared{}, view.SlotResponse{}, view.InitResponse{},
 		view.MarkReadResponse{}, view.BudgetResponse{},
+		view.ApprovalPlan{}, view.ApprovalRelease{}, view.ApprovalOtherOperation{}, view.ApprovalSummary{}, view.ApprovalSummaryResponse{},
 	}
 	for _, v := range types {
 		rt := reflect.TypeOf(v)
@@ -80,5 +81,30 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 			}
 			prev = key
 		}
+	}
+}
+
+func TestFromApprovalPreview(t *testing.T) {
+	ref := "https://github.com/o/r/pull/3"
+	sha := "abc"
+	p := &core.ApprovalPreview{
+		ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion, Version: 4, DoneCriteria: "d",
+		OtherPendingOperations: []core.IrreversibleOperation{{ID: "OP-2", Kind: core.OperationKindDelete, Summary: "del"}},
+	}
+	heads := []core.ReleaseHead{{Operation: core.IrreversibleOperation{ID: "OP-1", Kind: core.OperationKindRelease, Summary: "rel", Ref: &ref}, HeadSHA: &sha}}
+	b, err := json.Marshal(view.FromApprovalPreview(p, heads))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"approval":{"challenge_id":"C-1","done_criteria":"d","kind":"completion","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"title":"t","version":4}}`
+	if string(b) != want {
+		t.Errorf("got  %s\nwant %s", b, want)
+	}
+
+	plan := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, Version: 2, PlanVersion: 3, PlanBody: "B"}
+	b, _ = json.Marshal(view.FromApprovalPreview(plan, nil))
+	want = `{"approval":{"challenge_id":"C-1","done_criteria":null,"kind":"plan","other_pending_operations":[],"plan":{"body":"B","version":3},"release_held":true,"releases":[],"title":"t","version":2}}`
+	if string(b) != want {
+		t.Errorf("got  %s\nwant %s", b, want)
 	}
 }

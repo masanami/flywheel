@@ -88,14 +88,23 @@ func (u unavailableCheckSource) GetPullRequestChecks(context.Context, string, in
 	return core.UpstreamPullRequestChecks{}, fmt.Errorf("上流を取得できません: %w", u.err)
 }
 
-// checkSource は要求ごとに gh を探して取得の口を作り、PR ごとの保持を通す。
-// 組み立てに失敗（ErrGHNotFound を含む）してもエラーにはしない。
-func (c *checkCache) checkSource() core.UpstreamCheckSource {
+// newGitHubSource は要求ごとに gh を探して取得の口を作る。組み立てに失敗（ErrGHNotFound を含む）
+// してもエラーにはせず、取得を常に失敗させる口を返す。
+func newGitHubSource() core.UpstreamCheckSource {
 	client, err := github.New(github.Options{})
 	if err != nil {
 		return unavailableCheckSource{err: err}
 	}
-	return c.source(client)
+	return client
+}
+
+// checkSource は要求ごとに gh を探して取得の口を作り、PR ごとの保持を通す。
+func (c *checkCache) checkSource() core.UpstreamCheckSource {
+	src := newGitHubSource()
+	if _, failed := src.(unavailableCheckSource); failed {
+		return src
+	}
+	return c.source(src)
 }
 
 // statusHandler は GET /api/v1/workspaces/{name}/status。本文は

@@ -271,6 +271,40 @@ export interface RunReport {
   unverified: string[];
 }
 
+export interface ApprovalSummaryResponse {
+  approval: ApprovalSummary;
+}
+
+export interface ApprovalSummary {
+  challenge_id: string;
+  done_criteria: string | null;
+  kind: string;
+  other_pending_operations: ApprovalOtherOperation[];
+  plan: ApprovalPlan | null;
+  release_held: boolean;
+  releases: ApprovalRelease[];
+  title: string;
+  version: number;
+}
+
+export interface ApprovalOtherOperation {
+  id: string;
+  kind: string;
+  summary: string;
+}
+
+export interface ApprovalPlan {
+  body: string;
+  version: number;
+}
+
+export interface ApprovalRelease {
+  head_sha: string | null;
+  id: string;
+  ref: string | null;
+  summary: string;
+}
+
 export const CARD_ACTION_CODES = [
   "approve_plan",
   "approve_completion",
