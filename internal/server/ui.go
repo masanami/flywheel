@@ -2,9 +2,11 @@ package server
 
 import (
 	"embed"
+	"io"
 	"io/fs"
 	"net/http"
 	"path"
+	"strings"
 )
 
 // dist は UI のビルド成果物（web/ の Vite が internal/server/dist/ui へ出す。
@@ -43,7 +45,7 @@ type emptyFS struct{}
 func (emptyFS) Open(string) (fs.File, error) { return nil, fs.ErrNotExist }
 
 // uiHandler は GET / と UI の静的ファイルを返す。無いパスは notFound に任せる。
-func uiHandler(root fs.FS, notFound http.HandlerFunc) http.Handler {
+func uiHandler(root fs.FS, notFound http.HandlerFunc, token *csrf) http.Handler {
 	files := http.FileServerFS(root)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -52,7 +54,7 @@ func uiHandler(root fs.FS, notFound http.HandlerFunc) http.Handler {
 		}
 		p := path.Clean(r.URL.Path)
 		if p == "/" {
-			serveIndex(w, r, root)
+			serveIndex(w, r, root, token)
 			return
 		}
 		info, err := fs.Stat(root, p[1:])
@@ -64,6 +66,25 @@ func uiHandler(root fs.FS, notFound http.HandlerFunc) http.Handler {
 	})
 }
 
-func serveIndex(w http.ResponseWriter, r *http.Request, root fs.FS) {
-	http.ServeFileFS(w, r, root, "index.html")
+// serveIndex は index.html を読み、CSRF の値を meta で埋め込み cookie に設定して返す。
+func serveIndex(w http.ResponseWriter, r *http.Request, root fs.FS, token *csrf) {
+	b, err := fs.ReadFile(root, "index.html")
+	if err != nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "not found")
+		return
+	}
+	meta := `<meta name="flywheel-csrf" content="` + token.token + `" />`
+	html := string(b)
+	if i := strings.Index(html, "</head>"); i >= 0 {
+		html = html[:i] + meta + html[i:]
+	} else {
+		html = meta + html
+	}
+	token.setCookie(w)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = io.WriteString(w, html)
+	}
 }

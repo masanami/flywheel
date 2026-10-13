@@ -555,14 +555,9 @@ func TestStatusAPI_NotOKWorkspaceReturnsItsStateCode(t *testing.T) {
 
 func TestStatusAPI_NonGETIs404(t *testing.T) {
 	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: initWorkspace(t)})
-	req, _ := http.NewRequest("POST", "http://127.0.0.1:"+strconv.Itoa(port)+"/api/v1/workspaces/w/status", nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("POST status = %d, want 404", resp.StatusCode)
+	token, _ := fetchToken(t, port)
+	if code, _ := post(t, port, "/api/v1/workspaces/w/status", token, token); code != http.StatusNotFound {
+		t.Errorf("POST status = %d, want 404", code)
 	}
 }
 

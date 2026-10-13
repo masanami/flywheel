@@ -106,6 +106,10 @@ func (s *Server) Shutdown() error {
 }
 
 func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done <-chan struct{}, cfg eventsConfig) http.Handler {
+	token, err := newCSRF(port)
+	if err != nil {
+		panic(err) // crypto/rand が読めない環境では安全な値を作れない
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/events", eventsHandler(hub, done, cfg))
 	mux.HandleFunc("/api/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {
@@ -126,8 +130,8 @@ func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done 
 	notFound := func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "not found")
 	}
-	mux.Handle("/", uiHandler(uiFS(), notFound))
-	return guard(port, mux)
+	mux.Handle("/", uiHandler(uiFS(), notFound, token))
+	return guard(port, csrfGuard(token, mux))
 }
 
 // guard は Host と Origin を検査し、許可されない要求を core（next）を
