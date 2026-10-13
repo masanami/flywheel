@@ -18,6 +18,8 @@ func fetch(h http.Handler, path string) (int, string, string) {
 	return rec.Code, string(b), rec.Header().Get("Content-Type")
 }
 
+func testCSRF() *csrf { c, _ := newCSRF(1); return c }
+
 func notFoundForTest(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotFound, CodeNotFound, "not found")
 }
@@ -25,9 +27,9 @@ func notFoundForTest(w http.ResponseWriter, _ *http.Request) {
 func TestPickUIPrefersBuiltDist(t *testing.T) {
 	dist := fstest.MapFS{"dist/ui/index.html": {Data: []byte("BUILT")}}
 	fb := fstest.MapFS{"fallback/index.html": {Data: []byte("FALLBACK")}}
-	h := uiHandler(pickUI(dist, "dist/ui", fb, "fallback"), notFoundForTest)
+	h := uiHandler(pickUI(dist, "dist/ui", fb, "fallback"), notFoundForTest, testCSRF())
 	code, body, ct := fetch(h, "/")
-	if code != 200 || body != "BUILT" || !strings.HasPrefix(ct, "text/html") {
+	if code != 200 || !strings.Contains(body, "BUILT") || !strings.HasPrefix(ct, "text/html") {
 		t.Fatalf("got %d %q %q", code, body, ct)
 	}
 }
@@ -35,8 +37,8 @@ func TestPickUIPrefersBuiltDist(t *testing.T) {
 func TestPickUIFallsBackWhenNotBuilt(t *testing.T) {
 	dist := fstest.MapFS{"dist/.gitkeep": {Data: nil}}
 	fb := fstest.MapFS{"fallback/index.html": {Data: []byte("FALLBACK")}}
-	h := uiHandler(pickUI(dist, "dist/ui", fb, "fallback"), notFoundForTest)
-	if code, body, _ := fetch(h, "/"); code != 200 || body != "FALLBACK" {
+	h := uiHandler(pickUI(dist, "dist/ui", fb, "fallback"), notFoundForTest, testCSRF())
+	if code, body, _ := fetch(h, "/"); code != 200 || !strings.Contains(body, "FALLBACK") {
 		t.Fatalf("got %d %q", code, body)
 	}
 }
@@ -47,7 +49,7 @@ func TestUIHandlerServesAssetsAndRejectsUnknown(t *testing.T) {
 		"manifest.webmanifest": {Data: []byte(`{"display":"standalone"}`)},
 		"assets/a.js":          {Data: []byte("JS")},
 	}
-	h := uiHandler(root, notFoundForTest)
+	h := uiHandler(root, notFoundForTest, testCSRF())
 	if code, body, _ := fetch(h, "/assets/a.js"); code != 200 || body != "JS" {
 		t.Fatalf("asset: %d %q", code, body)
 	}
@@ -80,8 +82,8 @@ func TestEmbeddedFallbackIsTheNotBuiltPage(t *testing.T) {
 		t.Fatalf("fallback index.html = %q", b)
 	}
 	// dist に成果物が無ければ、実際の埋め込みから fallback が選ばれる。
-	got := uiHandler(pickUI(distFS, "dist/nonexistent", fallbackFS, "fallback"), notFoundForTest)
-	if code, body, _ := fetch(got, "/"); code != 200 || body != string(b) {
+	got := uiHandler(pickUI(distFS, "dist/nonexistent", fallbackFS, "fallback"), notFoundForTest, testCSRF())
+	if code, body, _ := fetch(got, "/"); code != 200 || !strings.Contains(body, "UI がビルドされていません") {
 		t.Fatalf("got %d %q", code, body)
 	}
 }

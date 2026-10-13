@@ -178,14 +178,9 @@ func TestBrowseAPI_NonGETIs404(t *testing.T) {
 	ws := browseWorkspace(t)
 	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
 	for _, p := range []string{"/api/v1/workspaces/w/challenges", "/api/v1/needs-human", "/api/v1/questions", "/api/v1/workspaces/w/runs/R-1/report"} {
-		req, _ := http.NewRequest("POST", fmt.Sprintf("http://127.0.0.1:%d%s", port, p), nil)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode != 404 {
-			t.Errorf("POST %s = %d, want 404", p, resp.StatusCode)
+		token, _ := fetchToken(t, port)
+		if code, _ := post(t, port, p, token, token); code != 404 {
+			t.Errorf("POST %s = %d, want 404", p, code)
 		}
 	}
 }

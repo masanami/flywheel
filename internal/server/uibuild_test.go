@@ -209,6 +209,7 @@ func TestServeReturnsBuiltUIIndex(t *testing.T) {
 		}
 		got, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		got = metaRe.ReplaceAll(got, nil) // CSRF の meta は応答ごとに足される
 		if resp.StatusCode != 200 || !bytes.Equal(got, want) {
 			t.Fatalf("GET %s = %d %q, want built index.html", path, resp.StatusCode, got)
 		}
