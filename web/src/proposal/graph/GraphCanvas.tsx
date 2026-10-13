@@ -9,6 +9,8 @@ import {
   type Dims,
   type Layout,
   type LayoutBox,
+  STALE_LABEL,
+  STALE_LONG,
   clip,
 } from "./model.ts";
 
@@ -184,9 +186,12 @@ function NodeBox({
   const inside = p.inside(box.id);
   const selfActive = i.category === "running";
   const active = selfActive || (inside?.active ?? 0) > 0;
+  const stale = c.card.modifiers.includes("unresponsive");
+  // 更新なしは 3 行目を札に使う（旧 board の「⚠ 更新なし（要確認）」と同じく、赤の太字で出す）
+  const marks = i.marks.filter((m) => m !== STALE_LABEL);
   const third = narrow
-    ? (i.marks[0] ?? "")
-    : [...i.marks, i.repos.map((r) => r.split("/").pop()).join("・")]
+    ? (marks[0] ?? "")
+    : [...marks, i.repos.map((r) => r.split("/").pop()).join("・")]
         .filter(Boolean)
         .join(" / ");
   const select = () => p.onSelect(box.id);
@@ -206,9 +211,7 @@ function NodeBox({
         data-active-inside={(inside?.active ?? 0) > 0 || undefined}
         data-human-inside={(inside?.human ?? 0) > 0 || undefined}
         data-collapsed={inside ? true : undefined}
-        data-unresponsive={
-          c.card.modifiers.includes("unresponsive") || undefined
-        }
+        data-unresponsive={stale || undefined}
         onClick={select}
         onDoubleClick={() => p.onOpen(box.id)}
         onKeyDown={onActivate(select)}
@@ -255,6 +258,10 @@ function NodeBox({
         </text>
         {inside ? (
           <InsideBadges n={inside} narrow={narrow} y={narrow ? 36 : 41} />
+        ) : stale ? (
+          <text x={11} y={narrow ? 45 : 51} className="graph-node-stale">
+            {narrow ? STALE_LABEL : STALE_LONG}
+          </text>
         ) : third ? (
           <text x={11} y={narrow ? 45 : 51} className="graph-node-meta">
             {clip(third, dims.metaChars)}

@@ -6,7 +6,8 @@ import type { Workspace } from "../api/types.gen.ts";
 const CYCLE_TEXT: Record<CycleInfo["cycle_state"], string> = {
   idle: "停止中",
   running: "サイクル実行中",
-  stale: "サイクルが止まっている疑い",
+  // 旧 board（claude-flywheel-board の Issue #154）と同じ文言。止まったとは断定しない
+  stale: "⚠ 更新なし",
 };
 
 // 案③: 旧 board の列の見出しにあった、サイクルの状態・優先度方針のモードの置き場所の案。
@@ -45,7 +46,16 @@ export function CycleHeaders({
       {Object.entries(info).map(([name, i]) => (
         <div key={name} className="cycle-header" data-cycle={i.cycle_state}>
           <b>{name}</b>
-          <span className="cycle-state">{CYCLE_TEXT[i.cycle_state]}</span>
+          <span
+            className="cycle-state"
+            title={
+              i.cycle_state === "stale"
+                ? "しきい値を超えて記録がありません。停止したとは限らず、長い委譲でも出ます"
+                : undefined
+            }
+          >
+            {CYCLE_TEXT[i.cycle_state]}
+          </span>
           <span>{i.policy_mode}</span>
         </div>
       ))}

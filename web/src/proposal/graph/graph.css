@@ -155,10 +155,34 @@
 .graph-node[data-category="done"] text {
   fill: var(--board-muted-fg);
 }
+/* 更新なし（unresponsive）: 旧 board の更新の止まった実行中の行と同じく、箱そのものを赤みにする。
+ * 実施中の光の輪は残し、実行中でかつ更新なしであることを両方示す。 */
 .graph-node[data-unresponsive] .graph-node-box {
-  stroke: var(--cycle-status-stale-fg);
-  stroke-dasharray: 5 3;
+  fill: var(--running-section-stale-bg);
+  stroke: var(--running-section-stale-border);
   stroke-width: 2;
+}
+.graph-node[data-unresponsive] .graph-node-stripe {
+  fill: var(--running-section-stale-border);
+}
+.graph-node-stale {
+  fill: var(--running-section-stale-fg) !important;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.graph-svg.is-narrow .graph-node-stale {
+  font-size: 10px;
+}
+.graph-legend-stale {
+  color: var(--running-section-stale-fg);
+  font-weight: 600;
+}
+.graph-panel-stale {
+  color: var(--running-section-stale-fg);
+  font-weight: 600;
+  background: var(--running-section-stale-bg);
+  border-left: 3px solid var(--running-section-stale-border);
+  padding: 0.2rem 0.4rem;
 }
 .graph-node[aria-pressed="true"] .graph-node-box,
 .graph-node:focus-visible .graph-node-box {

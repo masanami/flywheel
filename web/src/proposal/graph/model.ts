@@ -38,6 +38,13 @@ export const CATEGORIES: { key: Category; label: string; hint: string }[] = [
   { key: "other", label: "その他", hint: "上のいずれにも当たらない" },
 ];
 
+// 実行中で、しきい値を超えて記録が無い run（unresponsive）の見せ方。旧 board（claude-flywheel-board の
+// Issue #154）と同じく、死活の断定に読める「応答なし」を避け、事実だけを言う「更新なし」とする。
+export const STALE_LABEL = "⚠ 更新なし";
+export const STALE_LONG = "⚠ 更新なし（要確認）";
+export const STALE_HINT =
+  "実行中だが、しきい値を超えて記録がありません。止まったとは限らず、長い委譲でも出ます";
+
 export function categoryOf(
   c: ChallengeCard,
   actionable: Set<string>,

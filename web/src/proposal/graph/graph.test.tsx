@@ -144,7 +144,7 @@ it("関係グラフ: 区分で色分けし、凡例に件数を出す", async ()
   expect(node("C-5")).toHaveAttribute("data-category", "running");
   fireEvent.click(screen.getByRole("button", { name: /^C-14 を開く/ }));
   expect(node("C-12")).toHaveAttribute("data-category", "done");
-  expect(node("C-6").getAttribute("aria-label")).toContain("応答なし");
+  expect(node("C-6").getAttribute("aria-label")).toContain("⚠ 更新なし");
   // 先行（実施中の C-6 など）が未完了の C-18 は、システムが進められる区分のまま印を付ける（先行待ちの区分は足さない）
   expect(node("C-18")).toHaveAttribute("data-category", "system");
   expect(node("C-18").getAttribute("aria-label")).toContain("先行が未完了");

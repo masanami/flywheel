@@ -7,6 +7,7 @@ import {
 } from "react";
 import { api } from "../../api/client.ts";
 import type { ChallengeGraphResponse } from "../../api/proposed.ts";
+import { StaleLabelContext } from "../../board/AgentColumn.tsx";
 import { Board } from "../../board/Board.tsx";
 import {
   ACTION_LABELS,
@@ -28,6 +29,9 @@ import {
 import {
   CATEGORIES,
   type Category,
+  STALE_HINT,
+  STALE_LABEL,
+  STALE_LONG,
   actionableIds,
   ancestorsOf,
   categoryOf,
@@ -161,7 +165,9 @@ export function GraphScreen({ live }: { live: LiveState }) {
             workspaces={live.workspaces}
             refreshKey={live.lastUpdated}
           />
-          <Board live={live} />
+          <StaleLabelContext.Provider value={STALE_LONG}>
+            <Board live={live} />
+          </StaleLabelContext.Provider>
         </div>
       )}
     </section>
@@ -204,7 +210,7 @@ function GraphView({ live }: { live: LiveState }) {
     for (const c of cards) {
       const category = categoryOf(c, actionable);
       const marks: string[] = [];
-      if (c.card.modifiers.includes("unresponsive")) marks.push("応答なし");
+      if (c.card.modifiers.includes("unresponsive")) marks.push(STALE_LABEL);
       const waitingOn = neighborsOf(c.id, rels).predecessors.filter(
         (p) => !doneIds.has(p),
       );
@@ -434,6 +440,12 @@ function GraphView({ live }: { live: LiveState }) {
                 </button>
               </li>
             ))}
+            <li
+              className="graph-legend-edge graph-legend-stale"
+              title={STALE_HINT}
+            >
+              {STALE_LABEL}: 赤い箱。{STALE_HINT}
+            </li>
             <li className="graph-legend-edge">実線の矢印: 先行 → 後続</li>
             <li className="graph-legend-edge">
               大枠: 親課題（中に子課題）。重ねた箱は畳んだ親で、▶
@@ -563,8 +575,15 @@ function SelectedPanel({
         {CATEGORIES.find((k) => k.key === i.category)?.label}
         {" ・ "}
         {label(STATE_LABELS, c.card.state)}
-        {c.card.modifiers.map((m) => ` [${label(MODIFIER_LABELS, m)}]`)}
+        {c.card.modifiers.map((m) =>
+          m === "unresponsive" ? null : ` [${label(MODIFIER_LABELS, m)}]`,
+        )}
       </p>
+      {c.card.modifiers.includes("unresponsive") ? (
+        <p className="graph-panel-stale" title={STALE_HINT}>
+          {STALE_LONG}
+        </p>
+      ) : null}
       {c.card.headline ? <p>{c.card.headline}</p> : null}
       <h4>次に人間がすること</h4>
       <p>

@@ -1,0 +1,106 @@
+// 2026-10-13 のオーナーの指示（flywheel#176）: 実行中で更新の無い課題（unresponsive）は、旧 board と同じく
+// 箱そのものを赤みにし、「⚠ 更新なし」と出す。凡例・パネル・列のボード・列の見出しの案も同じ文言にそろえる。
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it } from "vitest";
+import { resetApi, setApi } from "../../api/client.ts";
+import type { ApiClient } from "../../api/client.ts";
+import type { LiveState, WorkspaceData } from "../../live/useLive.ts";
+import { createMockApi } from "../../mock/api.ts";
+import { MockStore } from "../../mock/store.ts";
+import { CycleHeaders } from "../CycleHeaders.tsx";
+import { GraphScreen, resetGraphMemory } from "./GraphScreen.tsx";
+
+let api: ApiClient;
+async function liveOf(): Promise<LiveState> {
+  const { workspaces } = await api.workspaces();
+  const data: Record<string, WorkspaceData> = {};
+  for (const w of workspaces.filter((w) => w.state === "ok")) {
+    data[w.name] = {
+      status: await api.status(w.name),
+      challenges: await api.challenges(w.name),
+    };
+  }
+  return {
+    connected: true,
+    lastUpdated: new Date(0),
+    workspaces,
+    data,
+    needsHuman: await api.needsHuman(),
+    questions: null,
+    loadError: null,
+    fleetError: null,
+  };
+}
+
+beforeEach(() => {
+  resetGraphMemory();
+  api = createMockApi(new MockStore(), { latencyMs: 0 });
+  setApi(api);
+});
+afterEach(() => resetApi());
+
+const node = (id: string) =>
+  within(screen.getByRole("group", { name: /の課題の関係グラフ$/ })).getByRole(
+    "button",
+    { name: new RegExp(`^${id} (?!を)`) },
+  );
+
+it("更新なし: ノードを赤みの箱にして札を出し、実施中の印も残す", async () => {
+  render(<GraphScreen live={await liveOf()} />);
+  await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
+  fireEvent.click(screen.getByRole("button", { name: /^C-14 を開く/ }));
+  const c6 = node("C-6");
+  expect(c6).toHaveAttribute("data-unresponsive", "true");
+  expect(c6).toHaveAttribute("data-active", "true");
+  expect(c6.textContent).toContain("⚠ 更新なし（要確認）");
+  expect(c6.textContent).toContain("実施中");
+  expect(c6.querySelector(".graph-node-stale")).not.toBeNull();
+  expect(c6.querySelector(".graph-node-halo")).not.toBeNull();
+  expect(c6.getAttribute("aria-label")).not.toContain("応答なし");
+  // 更新の止まっていない実施中の課題には札を出さない
+  fireEvent.click(screen.getByRole("button", { name: /^C-15 を開く/ }));
+  expect(node("C-5")).not.toHaveAttribute("data-unresponsive");
+  expect(node("C-5").textContent).not.toContain("更新なし");
+  // 凡例にも同じ文言で説明を出す
+  const legend = screen.getByRole("list", { name: "区分の凡例" });
+  expect(legend.textContent).toContain("⚠ 更新なし");
+  expect(legend.textContent).not.toContain("応答なし");
+});
+
+it("更新なし: パネルも同じ文言で示し、「応答なし」を出さない", async () => {
+  render(<GraphScreen live={await liveOf()} />);
+  await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
+  fireEvent.click(
+    within(screen.getByRole("region", { name: "いま実施中" })).getByRole(
+      "button",
+      { name: /^C-6 / },
+    ),
+  );
+  const panel = screen.getByRole("complementary", { name: "選んだ課題" });
+  expect(panel.textContent).toContain("⚠ 更新なし（要確認）");
+  expect(panel.textContent).not.toContain("応答なし");
+});
+
+it("更新なし: 案の画面の列のボードは「更新なし」と出す（本番のボードの文言は変えない）", async () => {
+  render(<GraphScreen live={await liveOf()} />);
+  fireEvent.click(screen.getByRole("button", { name: "列のボード" }));
+  const row = await screen.findByTestId("running-run-C-6");
+  expect(row).toHaveAttribute("data-stale", "true");
+  expect(row).toHaveTextContent("⚠ 更新なし（要確認）");
+  expect(row).not.toHaveTextContent("応答なし");
+});
+
+it("更新なし: 列の見出しの案は、サイクルの記録が途絶えたことを「⚠ 更新なし」と出す", async () => {
+  setApi({
+    ...api,
+    cycleInfo: async () => ({
+      cycle_state: "stale",
+      last_cycle_at: null,
+      policy_mode: "優先度方針: 既定",
+    }),
+  });
+  const { workspaces } = await api.workspaces();
+  render(<CycleHeaders workspaces={workspaces} refreshKey={0} />);
+  const region = screen.getByRole("region", { name: "列の見出しの案" });
+  expect((await within(region).findAllByText("⚠ 更新なし")).length).toBe(2);
+});
