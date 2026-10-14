@@ -1,4 +1,5 @@
 import {
+  type MouseEvent,
   type ReactNode,
   useContext,
   useEffect,
@@ -20,6 +21,12 @@ import type { LiveState } from "../../live/useLive.ts";
 import { OpenDetailContext } from "../../nav.tsx";
 import { CycleHeaders } from "../CycleHeaders.tsx";
 import { NeedsHumanStrip } from "../NeedsHumanStrip.tsx";
+import {
+  AgentDock,
+  AgentPicker,
+  AgentSidebar,
+  summariesOf,
+} from "./AgentLayout.tsx";
 import {
   type Dimensions,
   GraphCanvas,
@@ -99,17 +106,20 @@ function useNarrow(): boolean {
 type View = "graph" | "board";
 
 // 詳細を開くと画面が外れて戻ると作り直されるため、表示・選んだワークスペースと課題・開いた親をここに覚えておく。
+// 選んだエージェント・引き出しの開閉もここに持つ（サーバには持たない）。
 const memory: {
   view: View;
   ws: string | null;
   node: string | null;
   open: Record<string, string[]>;
-} = { view: "graph", ws: null, node: null, open: {} };
+  dock: boolean;
+} = { view: "graph", ws: null, node: null, open: {}, dock: false };
 export function resetGraphMemory(): void {
   memory.view = "graph";
   memory.ws = null;
   memory.node = null;
   memory.open = {};
+  memory.dock = false;
 }
 
 type GraphState =
@@ -134,11 +144,40 @@ function useGraph(ws: string | null, refreshKey: unknown) {
 }
 
 // 決定 1（flywheel#176 の 2026-10-13）: グラフと列のボードを同じ画面に置き、既定はグラフ。
+// 2026-10-14 オーナー: グラフはエージェントごとに出し、エージェントはサイドバーで選ぶ。ターミナル／対話の欄の置き場所も取る。
 export function GraphScreen({ live }: { live: LiveState }) {
   const [view, setView] = useState<View>(memory.view);
   const choose = (v: View) => {
     memory.view = v;
     setView(v);
+  };
+  const narrow = useNarrow();
+  const agents = summariesOf(live);
+  const [chosen, setChosen] = useState<string | null>(memory.ws);
+  const ws =
+    agents.find((a) => a.readable && a.name === chosen)?.name ??
+    agents.find((a) => a.readable)?.name ??
+    null;
+  const chooseWs = (name: string) => {
+    if (name === ws) return;
+    memory.ws = name;
+    memory.node = null;
+    setChosen(name);
+  };
+  const [dock, setDock] = useState(memory.dock);
+  const toggleDock = () => {
+    memory.dock = !dock;
+    setDock(!dock);
+  };
+  // ボードの列の見出しを押すと、そのエージェントを選ぶ（ターミナルの対象を切り替える想定の最小限）。
+  // 列は本番の部品のまま使うので、外側で押された列の見出しを拾う。キーボードでは引き出しの「対象」で選べる。
+  const pickColumn = (e: MouseEvent<HTMLDivElement>) => {
+    const column = (e.target as Element)
+      .closest(".agent-column-header")
+      ?.closest(".agent-column");
+    const name = column?.getAttribute("aria-label")?.replace(/ の列$/, "");
+    if (name && agents.some((a) => a.name === name && a.readable))
+      chooseWs(name);
   };
   return (
     <section aria-label={GRAPH_TITLE} className="graph-screen">
@@ -159,9 +198,27 @@ export function GraphScreen({ live }: { live: LiveState }) {
         </button>
       </fieldset>
       {view === "graph" ? (
-        <GraphView live={live} />
+        <div className="agent-layout">
+          {narrow ? null : (
+            <AgentSidebar agents={agents} ws={ws} onChoose={chooseWs} />
+          )}
+          <div className="agent-content">
+            {narrow ? (
+              <AgentPicker agents={agents} ws={ws} onChoose={chooseWs} />
+            ) : null}
+            <GraphView key={ws ?? ""} live={live} ws={ws} />
+          </div>
+        </div>
       ) : (
-        <div className="graph-board-view board-screen">
+        // biome-ignore lint/a11y/useKeyWithClickEvents: 列の見出しを押す操作の補助。キーボードでは引き出しの「対象」で選べる
+        <div
+          className="graph-board-view board-screen"
+          data-selected-agent={ws ?? undefined}
+          onClick={pickColumn}
+        >
+          {ws ? (
+            <style>{`.graph-board-view .agent-column[aria-label=${JSON.stringify(`${ws} の列`)}] { outline: 2px solid var(--graph-running); outline-offset: 2px; }`}</style>
+          ) : null}
           <NeedsHumanStrip live={live} />
           <CycleHeaders
             workspaces={live.workspaces}
@@ -172,19 +229,22 @@ export function GraphScreen({ live }: { live: LiveState }) {
           </StaleLabelContext.Provider>
         </div>
       )}
+      <AgentDock
+        agents={agents}
+        ws={ws}
+        open={dock}
+        onToggle={toggleDock}
+        onChoose={chooseWs}
+      />
     </section>
   );
 }
 
-function GraphView({ live }: { live: LiveState }) {
+// 選んだエージェント 1 つ分のグラフ。エージェントを切り替えると作り直す（key）ので、選択と絞り込みは持ち越さない。
+function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
   const open = useContext(OpenDetailContext);
   const narrow = useNarrow();
   const dims = narrow ? NARROW : WIDE;
-  const readable = live.workspaces.filter((w) => w.state === "ok");
-  const unreadable = live.workspaces.filter((w) => w.state !== "ok");
-  const [chosen, setChosen] = useState<string | null>(memory.ws);
-  const ws =
-    readable.find((w) => w.name === chosen)?.name ?? readable[0]?.name ?? null;
   const [selected, setSelected] = useState<string | null>(memory.node);
   const [openParents, setOpenParents] = useState(memory.open);
   const [catFilter, setCatFilter] = useState<Category | null>(null);
@@ -258,14 +318,6 @@ function GraphView({ live }: { live: LiveState }) {
     memory.node = id;
     setSelected(id);
     if (id) setOpen((s) => new Set([...s, ...ancestorsOf(id, infos.pm)]));
-  };
-  const chooseWs = (name: string) => {
-    memory.ws = name;
-    memory.node = null;
-    setChosen(name);
-    setSelected(null);
-    setCatFilter(null);
-    setRepoFilter(null);
   };
 
   // 完了を隠しても、まだ終わっていない子を持つ親（大枠）は残す。
@@ -394,30 +446,7 @@ function GraphView({ live }: { live: LiveState }) {
   return (
     <>
       <div className="graph-toolbar">
-        <fieldset aria-label="ワークスペース" className="graph-chips">
-          {readable.map((w) => (
-            <button
-              key={w.name}
-              type="button"
-              className="filter-chip"
-              aria-pressed={w.name === ws}
-              onClick={() => chooseWs(w.name)}
-            >
-              {w.name}
-            </button>
-          ))}
-          {unreadable.map((w) => (
-            <button
-              key={w.name}
-              type="button"
-              className="filter-chip"
-              disabled
-              title={w.error ?? w.state}
-            >
-              {w.name}（読めない: {w.state}）
-            </button>
-          ))}
-        </fieldset>
+        <h3 className="graph-agent-title">{ws} の関係グラフ</h3>
         <section aria-label="いま実施中" className="graph-active-row">
           <span className="graph-active-label">▶ いま実施中</span>
           {running.length === 0 ? (

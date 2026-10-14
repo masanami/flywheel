@@ -455,3 +455,153 @@ fieldset.graph-chips {
 .graph-filters > :not(summary) + :not(summary) {
   margin-top: 0.4rem;
 }
+
+/* 2026-10-14 オーナー: 左のサイドバーでエージェントを選び、中央に選んだエージェントの関係グラフを描く */
+.agent-layout {
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+.agent-content {
+  min-width: 0;
+}
+.agent-sidebar {
+  position: sticky;
+  top: 0;
+  border: 1px solid var(--board-border);
+  border-radius: 6px;
+  background: var(--board-column-bg);
+  padding: 0.4rem;
+}
+.agent-sidebar h3 {
+  margin: 0.1rem 0.3rem 0.4rem;
+  font-size: 0.8em;
+  color: var(--board-muted-fg);
+}
+.agent-sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.agent-sidebar button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+  text-align: left;
+}
+.agent-sidebar button:hover:not(:disabled) {
+  background: var(--board-chip-bg);
+}
+.agent-sidebar button[aria-current="true"] {
+  border-color: var(--board-fg);
+  background: var(--board-card-bg);
+  font-weight: 600;
+}
+.agent-sidebar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.agent-sidebar-name {
+  font-size: 0.95em;
+}
+.agent-sidebar-summary {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.75em;
+  font-weight: 400;
+  color: var(--board-muted-fg);
+}
+.agent-sidebar-summary [data-kind="human"] {
+  color: var(--graph-human);
+  font-weight: 600;
+}
+.agent-sidebar-summary [data-kind="active"] {
+  color: var(--graph-running);
+  font-weight: 600;
+}
+.graph-agent-title {
+  margin: 0 0 0.2rem;
+  font-size: 1em;
+}
+.agent-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+.agent-picker select {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+}
+.agent-content > .agent-picker {
+  margin-bottom: 0.5rem;
+}
+@media (max-width: 480px) {
+  .agent-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ボードの列の見出しを押すとエージェントを選ぶ（将来のターミナルの切り替えの想定） */
+.graph-board-view .agent-column-header {
+  cursor: pointer;
+}
+
+/* 下の引き出し: 選んだエージェントのターミナル／対話の置き場所（中身は作らない） */
+.agent-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: 0.75rem;
+  border: 1px solid var(--board-border);
+  border-radius: 6px 6px 0 0;
+  background: var(--board-column-bg);
+  box-shadow: 0 -2px 6px rgb(0 0 0 / 0.08);
+}
+.agent-dock-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  padding: 0.35rem 0.6rem;
+}
+.agent-dock-bar > button {
+  border: 1px solid var(--board-border);
+  border-radius: 5px;
+  background: var(--board-chip-bg);
+  color: inherit;
+  padding: 0.15rem 0.6rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+.agent-dock-bar .agent-picker {
+  flex: 0 1 22rem;
+  min-width: 0;
+}
+.agent-dock-body {
+  height: 24vh;
+  overflow: auto;
+  border-top: 1px dashed var(--board-border);
+  padding: 0.6rem 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+@media (max-width: 480px) {
+  .agent-dock-body {
+    height: 35vh;
+  }
+}

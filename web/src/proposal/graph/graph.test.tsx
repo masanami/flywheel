@@ -152,7 +152,9 @@ it("関係グラフ: 区分で色分けし、凡例に件数を出す", async ()
   expect(within(region).getByText("関係の無い課題")).toBeInTheDocument();
   // 読めないワークスペースは選べない
   expect(
-    within(region).getByRole("button", { name: /gamma（読めない/ }),
+    within(
+      within(region).getByRole("navigation", { name: "エージェント" }),
+    ).getByRole("button", { name: /^gamma 読めない/ }),
   ).toBeDisabled();
 });
 
@@ -209,7 +211,12 @@ it("関係グラフ: 区分・リポジトリで絞り、ワークスペース�
   expect(node("C-12")).not.toHaveAttribute("data-dim");
   fireEvent.click(screen.getByRole("checkbox", { name: "完了を隠す" }));
   expect(screen.queryByRole("button", { name: /^C-12 (?!を)/ })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "beta" }));
+  fireEvent.click(
+    within(screen.getByRole("navigation", { name: "エージェント" })).getByRole(
+      "button",
+      { name: /^beta / },
+    ),
+  );
   await screen.findByRole("group", { name: "beta の課題の関係グラフ" });
   expect(node("C-2").getAttribute("aria-label")).toContain(
     "デプロイ手順の整理",
