@@ -44,62 +44,110 @@ afterEach(() => {
 
 const sidebar = () => screen.getByRole("navigation", { name: "エージェント" });
 const dock = () =>
-  screen.getByRole("region", { name: "ターミナル／対話（案）" });
+  screen.getByRole("region", { name: "ターミナル／チャット（案）" });
+const openDock = () =>
+  fireEvent.click(
+    within(dock()).getByRole("button", { name: /ターミナル／チャット（案）/ }),
+  );
 
-it("サイドバー: エージェントごとに要約を添えて並べ、選んだエージェントのグラフを描く", async () => {
+it("アイコンの列: 名前と件数を読み上げ名とマウスを重ねたときの吹き出しに持ち、人間の操作待ちを角の数字で示す", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   const alpha = within(sidebar()).getByRole("button", { name: /^alpha / });
   expect(alpha).toHaveAccessibleName("alpha 人間の操作待ち 7・実施中 3");
   expect(alpha).toHaveAttribute("aria-current", "true");
-  expect(
-    within(sidebar()).getByRole("button", { name: /^gamma / }),
-  ).toBeDisabled();
-  fireEvent.click(
-    within(sidebar()).getByRole("button", {
-      name: "beta 人間の操作待ち 2・実施中 0",
-    }),
+  expect(alpha.querySelector(".agent-rail-badge")?.textContent).toBe("7");
+  expect(alpha.querySelector(".agent-rail-active")).not.toBeNull();
+  expect(alpha.querySelector(".agent-rail-tip")?.textContent).toContain(
+    "alpha",
   );
-  await screen.findByRole("group", { name: "beta の課題の関係グラフ" });
+  // アイコンの設定: alpha は絵文字、beta は画像、設定の無い gamma は頭文字
   expect(
-    within(sidebar()).getByRole("button", { name: /^beta / }),
-  ).toHaveAttribute("aria-current", "true");
+    (await within(alpha).findByText("🚀")).classList.contains("agent-icon"),
+  ).toBe(true);
+  const beta = within(sidebar()).getByRole("button", { name: /^beta / });
+  expect(beta.querySelector("img.agent-icon")).not.toBeNull();
+  expect(beta.querySelector(".agent-rail-active")).toBeNull();
+  const gamma = within(sidebar()).getByRole("button", { name: /^gamma / });
+  expect(gamma).toBeDisabled();
+  expect(gamma.querySelector(".agent-icon-initial")?.textContent).toBe("G");
+  fireEvent.click(beta);
+  await screen.findByRole("group", { name: "beta の課題の関係グラフ" });
+  expect(beta).toHaveAttribute("aria-current", "true");
   expect(
     screen.getByRole("heading", { name: "beta の関係グラフ" }),
   ).toBeInTheDocument();
 });
 
-it("引き出し: 既定は閉じ、開くと選んだエージェントの置き場所を示し、対象の切り替えでグラフも切り替わる", async () => {
+it("欄: 既定は閉じ、開くとターミナルとチャットのタブを持ち、選んだエージェントを宛先にする", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   const toggle = within(dock()).getByRole("button", {
-    name: /ターミナル／対話（案）/,
+    name: /ターミナル／チャット（案）/,
   });
   expect(toggle).toHaveAttribute("aria-expanded", "false");
-  expect(dock().textContent).not.toContain(
-    "ターミナル／エージェントとの対話が入る",
-  );
-  fireEvent.click(toggle);
+  expect(within(dock()).queryByRole("tablist")).toBeNull();
+  openDock();
   expect(toggle).toHaveAttribute("aria-expanded", "true");
-  expect(dock().textContent).toContain(
-    "ここに alpha のターミナル／エージェントとの対話が入る",
+  const tabs = within(dock()).getByRole("tablist", { name: "欄の中身（案）" });
+  const term = within(tabs).getByRole("tab", { name: "ターミナル" });
+  expect(term).toHaveAttribute("aria-selected", "true");
+  expect(within(dock()).getByRole("tabpanel").textContent).toContain(
+    "~/work/alpha % claude",
   );
-  // サイドバーで選び直すと欄の対象も切り替わる
+  fireEvent.click(within(tabs).getByRole("tab", { name: "チャット" }));
+  const panel = within(dock()).getByRole("tabpanel");
+  expect(panel.textContent).toContain("宛先: alpha のエージェント");
+  // ツール呼び出しのカード（畳める）・差分・実行の許可・入力欄
+  expect(panel.querySelectorAll("details.chat-tool").length).toBe(2);
+  expect(panel.querySelector(".chat-diff")).not.toBeNull();
+  expect(
+    within(panel).getByRole("button", { name: "許可" }),
+  ).toBeInTheDocument();
+  expect(
+    within(panel).getByRole("textbox", { name: "alpha へのメッセージ" }),
+  ).toBeInTheDocument();
+  // 列で選び直すと宛先も切り替わる
   fireEvent.click(within(sidebar()).getByRole("button", { name: /^beta / }));
-  expect(dock().textContent).toContain("ここに beta のターミナル");
+  expect(within(dock()).getByRole("tabpanel").textContent).toContain(
+    "宛先: beta のエージェント",
+  );
   // 欄の「対象」から選んでも、グラフが切り替わる
   fireEvent.change(within(dock()).getByRole("combobox", { name: "対象" }), {
     target: { value: "alpha" },
   });
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
-  expect(dock().textContent).toContain("ここに alpha のターミナル");
   fireEvent.click(toggle);
-  expect(dock().textContent).not.toContain("ここに alpha");
+  expect(within(dock()).queryByRole("tabpanel")).toBeNull();
 });
 
-it("ボード: 列の見出しを押すとそのエージェントを選び、引き出しの対象が切り替わる", async () => {
+it("欄の位置の 2 案: 下の引き出しと右の分割を切り替えられ、グラフでもボードでも同じ欄が出る", async () => {
+  const { container } = render(<GraphScreen live={await liveOf()} />);
+  await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
+  const shell = container.querySelector(".agent-shell");
+  const pos = screen.getByRole("group", { name: "欄の位置（案）" });
+  expect(shell).toHaveAttribute("data-dock-pos", "bottom");
+  fireEvent.click(within(pos).getByRole("button", { name: "右の分割" }));
+  expect(shell).toHaveAttribute("data-dock-pos", "right");
+  expect(dock()).toHaveAttribute("data-pos", "right");
+  openDock();
+  fireEvent.click(screen.getByRole("button", { name: "列のボード" }));
+  expect(
+    await screen.findByRole("region", { name: "beta の列" }),
+  ).toBeInTheDocument();
+  expect(container.querySelector(".agent-shell")).toHaveAttribute(
+    "data-dock-pos",
+    "right",
+  );
+  expect(within(dock()).getByRole("tabpanel")).toBeInTheDocument();
+  fireEvent.click(within(pos).getByRole("button", { name: "下の引き出し" }));
+  expect(dock()).toHaveAttribute("data-pos", "bottom");
+});
+
+it("ボード: 列の見出しを押すとそのエージェントを選び、欄の対象が切り替わる", async () => {
   render(<GraphScreen live={await liveOf()} />);
   fireEvent.click(screen.getByRole("button", { name: "列のボード" }));
+  openDock();
   const beta = await screen.findByRole("region", { name: "beta の列" });
   const header = beta.querySelector(".agent-column-header");
   if (!header) throw new Error("列の見出しが無い");
@@ -108,11 +156,8 @@ it("ボード: 列の見出しを押すとそのエージェントを選び、�
     "beta",
   );
   // ボードの列の並び（縦割りの列）はそのまま
-  expect(
-    screen.getByRole("region", { name: "alpha の列" }),
-  ).toBeInTheDocument();
-  // 列の中身（カード）を押しても選び直さない
   const alphaCol = screen.getByRole("region", { name: "alpha の列" });
+  // 列の中身（カード）を押しても選び直さない
   const body = alphaCol.querySelector(".agent-column-body");
   if (body) fireEvent.click(body);
   expect(within(dock()).getByRole("combobox", { name: "対象" })).toHaveValue(
@@ -123,7 +168,7 @@ it("ボード: 列の見出しを押すとそのエージェントを選び、�
   await screen.findByRole("group", { name: "beta の課題の関係グラフ" });
 });
 
-it("狭い画面: サイドバーの代わりに上部の選択欄でエージェントを選ぶ", async () => {
+it("狭い画面: アイコンの列の代わりに上部の選択欄でエージェントを選ぶ", async () => {
   window.matchMedia = ((q: string) => ({
     matches: true,
     media: q,

@@ -24,8 +24,11 @@ import { NeedsHumanStrip } from "../NeedsHumanStrip.tsx";
 import {
   AgentDock,
   AgentPicker,
-  AgentSidebar,
+  AgentRail,
+  type DockPosition,
+  type DockTab,
   summariesOf,
+  useAgentIcons,
 } from "./AgentLayout.tsx";
 import {
   type Dimensions,
@@ -113,13 +116,25 @@ const memory: {
   node: string | null;
   open: Record<string, string[]>;
   dock: boolean;
-} = { view: "graph", ws: null, node: null, open: {}, dock: false };
+  dockPos: DockPosition;
+  dockTab: DockTab;
+} = {
+  view: "graph",
+  ws: null,
+  node: null,
+  open: {},
+  dock: false,
+  dockPos: "bottom",
+  dockTab: "terminal",
+};
 export function resetGraphMemory(): void {
   memory.view = "graph";
   memory.ws = null;
   memory.node = null;
   memory.open = {};
   memory.dock = false;
+  memory.dockPos = "bottom";
+  memory.dockTab = "terminal";
 }
 
 type GraphState =
@@ -169,6 +184,18 @@ export function GraphScreen({ live }: { live: LiveState }) {
     memory.dock = !dock;
     setDock(!dock);
   };
+  // 欄の位置の 2 案（試作だけの切り替え。2026-10-14 オーナー: どちらのパターンも見たい）
+  const [dockPos, setDockPos] = useState<DockPosition>(memory.dockPos);
+  const chooseDockPos = (p: DockPosition) => {
+    memory.dockPos = p;
+    setDockPos(p);
+  };
+  const [dockTab, setDockTab] = useState<DockTab>(memory.dockTab);
+  const chooseDockTab = (t: DockTab) => {
+    memory.dockTab = t;
+    setDockTab(t);
+  };
+  const icons = useAgentIcons(live.lastUpdated);
   // ボードの列の見出しを押すと、そのエージェントを選ぶ（ターミナルの対象を切り替える想定の最小限）。
   // 列は本番の部品のまま使うので、外側で押された列の見出しを拾う。キーボードでは引き出しの「対象」で選べる。
   const pickColumn = (e: MouseEvent<HTMLDivElement>) => {
@@ -181,61 +208,99 @@ export function GraphScreen({ live }: { live: LiveState }) {
   };
   return (
     <section aria-label={GRAPH_TITLE} className="graph-screen">
-      <fieldset aria-label="表示" className="graph-view-switch">
-        <button
-          type="button"
-          aria-pressed={view === "graph"}
-          onClick={() => choose("graph")}
+      <div className="graph-topbar">
+        <fieldset aria-label="表示" className="graph-view-switch">
+          <button
+            type="button"
+            aria-pressed={view === "graph"}
+            onClick={() => choose("graph")}
+          >
+            グラフ
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "board"}
+            onClick={() => choose("board")}
+          >
+            列のボード
+          </button>
+        </fieldset>
+        <fieldset
+          aria-label="欄の位置（案）"
+          className="graph-seg graph-seg-small"
         >
-          グラフ
-        </button>
-        <button
-          type="button"
-          aria-pressed={view === "board"}
-          onClick={() => choose("board")}
-        >
-          列のボード
-        </button>
-      </fieldset>
-      {view === "graph" ? (
-        <div className="agent-layout">
-          {narrow ? null : (
-            <AgentSidebar agents={agents} ws={ws} onChoose={chooseWs} />
+          <legend>欄の位置（案）</legend>
+          <button
+            type="button"
+            aria-pressed={dockPos === "bottom"}
+            onClick={() => chooseDockPos("bottom")}
+          >
+            下の引き出し
+          </button>
+          <button
+            type="button"
+            aria-pressed={dockPos === "right"}
+            onClick={() => chooseDockPos("right")}
+          >
+            右の分割
+          </button>
+        </fieldset>
+      </div>
+      <div
+        className="agent-shell"
+        data-dock-pos={dockPos}
+        data-dock-open={dock || undefined}
+      >
+        <div className="agent-main">
+          {view === "graph" ? (
+            <div className="agent-layout">
+              {narrow ? null : (
+                <AgentRail
+                  agents={agents}
+                  icons={icons}
+                  ws={ws}
+                  onChoose={chooseWs}
+                />
+              )}
+              <div className="agent-content">
+                {narrow ? (
+                  <AgentPicker agents={agents} ws={ws} onChoose={chooseWs} />
+                ) : null}
+                <GraphView key={ws ?? ""} live={live} ws={ws} />
+              </div>
+            </div>
+          ) : (
+            // biome-ignore lint/a11y/useKeyWithClickEvents: 列の見出しを押す操作の補助。キーボードでは引き出しの「対象」で選べる
+            <div
+              className="graph-board-view board-screen"
+              data-selected-agent={ws ?? undefined}
+              onClick={pickColumn}
+            >
+              {ws ? (
+                <style>{`.graph-board-view .agent-column[aria-label=${JSON.stringify(`${ws} の列`)}] { outline: 2px solid var(--graph-running); outline-offset: 2px; }`}</style>
+              ) : null}
+              <NeedsHumanStrip live={live} />
+              <CycleHeaders
+                workspaces={live.workspaces}
+                refreshKey={live.lastUpdated}
+              />
+              <StaleLabelContext.Provider value={STALE_LONG}>
+                <Board live={live} />
+              </StaleLabelContext.Provider>
+            </div>
           )}
-          <div className="agent-content">
-            {narrow ? (
-              <AgentPicker agents={agents} ws={ws} onChoose={chooseWs} />
-            ) : null}
-            <GraphView key={ws ?? ""} live={live} ws={ws} />
-          </div>
         </div>
-      ) : (
-        // biome-ignore lint/a11y/useKeyWithClickEvents: 列の見出しを押す操作の補助。キーボードでは引き出しの「対象」で選べる
-        <div
-          className="graph-board-view board-screen"
-          data-selected-agent={ws ?? undefined}
-          onClick={pickColumn}
-        >
-          {ws ? (
-            <style>{`.graph-board-view .agent-column[aria-label=${JSON.stringify(`${ws} の列`)}] { outline: 2px solid var(--graph-running); outline-offset: 2px; }`}</style>
-          ) : null}
-          <NeedsHumanStrip live={live} />
-          <CycleHeaders
-            workspaces={live.workspaces}
-            refreshKey={live.lastUpdated}
-          />
-          <StaleLabelContext.Provider value={STALE_LONG}>
-            <Board live={live} />
-          </StaleLabelContext.Provider>
-        </div>
-      )}
-      <AgentDock
-        agents={agents}
-        ws={ws}
-        open={dock}
-        onToggle={toggleDock}
-        onChoose={chooseWs}
-      />
+        <AgentDock
+          agents={agents}
+          ws={ws}
+          open={dock}
+          position={dockPos}
+          tab={dockTab}
+          onToggle={toggleDock}
+          onChoose={chooseWs}
+          onTab={chooseDockTab}
+        />
+      </div>
     </section>
   );
 }
@@ -442,10 +507,59 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
   }
 
   const parents = [...kids.keys()];
+  // いま効いている絞り込みの数（区分・リポジトリ・完了を隠す）。畳んでいても数で分かるようにする
+  const filtering =
+    (catFilter ? 1 : 0) + (repoFilter ? 1 : 0) + (hideDone ? 1 : 0);
   return (
     <>
       <div className="graph-toolbar">
-        <h3 className="graph-agent-title">{ws} の関係グラフ</h3>
+        <div className="graph-titlebar">
+          <h3 className="graph-agent-title">{ws} の関係グラフ</h3>
+          <div className="graph-titlebar-tools">
+            {parents.length > 0 ? (
+              <>
+                <button
+                  type="button"
+                  className="graph-tool-btn"
+                  onClick={() => setOpen(() => new Set(parents))}
+                >
+                  親をすべて開く
+                </button>
+                <button
+                  type="button"
+                  className="graph-tool-btn"
+                  onClick={() => setOpen(() => new Set())}
+                >
+                  親をすべて畳む
+                </button>
+              </>
+            ) : null}
+            {/* 説明の文は常に並べず、必要なときに開く小さな吹き出しへ移した */}
+            <details className="graph-help">
+              <summary className="graph-tool-btn" title="凡例の説明">
+                ? 凡例
+              </summary>
+              <ul aria-label="凡例の説明" className="graph-help-body">
+                {CATEGORIES.map((k) => (
+                  <li key={k.key} data-category={k.key}>
+                    <span className="graph-swatch" aria-hidden="true" />
+                    <b>{k.label}</b>: {k.hint}
+                  </li>
+                ))}
+                <li className="graph-legend-stale">
+                  <b>{STALE_LABEL}</b>: 赤い箱。{STALE_HINT}
+                </li>
+                <li>
+                  <b>実線の矢印</b>: 先行 → 後続
+                </li>
+                <li>
+                  <b>大枠</b>: 親課題（中に子課題）。重ねた箱は畳んだ親で、▶
+                  は中の実施中・! は中の人間の操作待ちの件数
+                </li>
+              </ul>
+            </details>
+          </div>
+        </div>
         <section aria-label="いま実施中" className="graph-active-row">
           <span className="graph-active-label">▶ いま実施中</span>
           {running.length === 0 ? (
@@ -464,87 +578,82 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
             ))
           )}
         </section>
-        {/* 狭い画面ではグラフが下へ押し出されないよう、凡例と絞り込みを畳んで始める */}
+        {/* 狭い画面ではグラフが下へ押し出されないよう、絞り込みを畳んで始める */}
         <details className="graph-filters" open={!narrow || undefined}>
-          <summary>凡例と絞り込み</summary>
-          <ul aria-label="区分の凡例" className="graph-legend">
-            {CATEGORIES.map((k) => (
-              <li key={k.key}>
-                <button
-                  type="button"
-                  className="graph-legend-item"
-                  data-category={k.key}
-                  aria-pressed={catFilter === k.key}
-                  title={k.hint}
-                  onClick={() =>
-                    setCatFilter(catFilter === k.key ? null : k.key)
-                  }
-                >
-                  <span className="graph-swatch" aria-hidden="true" />
-                  {k.label} {counts.get(k.key) ?? 0}
-                </button>
-              </li>
-            ))}
-            <li
-              className="graph-legend-edge graph-legend-stale"
-              title={STALE_HINT}
-            >
-              {STALE_LABEL}: 赤い箱。{STALE_HINT}
-            </li>
-            <li className="graph-legend-edge">
-              外部待ち:
-              自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など）
-            </li>
-            <li className="graph-legend-edge">実線の矢印: 先行 → 後続</li>
-            <li className="graph-legend-edge">
-              大枠: 親課題（中に子課題）。重ねた箱は畳んだ親で、▶
-              は中の実施中・! は中の人間の操作待ちの件数
-            </li>
-          </ul>
-          <div className="graph-chips">
+          <summary>
+            絞り込み
+            {filtering > 0 ? (
+              <span className="graph-filter-count">{filtering}</span>
+            ) : null}
+          </summary>
+          <div
+            className="graph-filterbar"
+            data-filtering={filtering > 0 || undefined}
+          >
+            <ul aria-label="区分の凡例" className="graph-legend">
+              {CATEGORIES.map((k) => (
+                <li key={k.key}>
+                  <button
+                    type="button"
+                    className="graph-legend-item"
+                    data-category={k.key}
+                    aria-pressed={catFilter === k.key}
+                    title={k.hint}
+                    onClick={() =>
+                      setCatFilter(catFilter === k.key ? null : k.key)
+                    }
+                  >
+                    <span className="graph-swatch" aria-hidden="true" />
+                    {k.label}{" "}
+                    <span className="graph-count">
+                      {counts.get(k.key) ?? 0}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
             {repos.length > 0 ? (
-              <fieldset aria-label="リポジトリ" className="graph-chips">
+              <fieldset aria-label="リポジトリ" className="graph-repos">
+                <legend>リポジトリ</legend>
                 {repos.map((r) => (
                   <button
                     key={r}
                     type="button"
-                    className="filter-chip"
+                    className="graph-repo-chip"
+                    aria-label={r}
+                    title={r}
                     aria-pressed={repoFilter === r}
                     onClick={() => setRepoFilter(repoFilter === r ? null : r)}
                   >
-                    {r}
+                    {r.split("/").pop()}
                   </button>
                 ))}
               </fieldset>
             ) : null}
-            <label className="graph-toggle">
+            <label className="graph-switch">
               <input
                 type="checkbox"
                 checked={hideDone}
                 onChange={(e) => setHideDone(e.target.checked)}
               />
+              <span className="graph-switch-track" aria-hidden="true" />
               完了を隠す
             </label>
+            {filtering > 0 ? (
+              <button
+                type="button"
+                className="graph-clear"
+                onClick={() => {
+                  setCatFilter(null);
+                  setRepoFilter(null);
+                  setHideDone(false);
+                }}
+              >
+                絞り込みを解除
+              </button>
+            ) : null}
           </div>
         </details>
-        {parents.length > 0 ? (
-          <div className="graph-chips">
-            <button
-              type="button"
-              className="filter-chip"
-              onClick={() => setOpen(() => new Set(parents))}
-            >
-              親をすべて開く
-            </button>
-            <button
-              type="button"
-              className="filter-chip"
-              onClick={() => setOpen(() => new Set())}
-            >
-              親をすべて畳む
-            </button>
-          </div>
-        ) : null}
       </div>
       {body}
     </>

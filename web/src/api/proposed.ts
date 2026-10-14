@@ -26,6 +26,18 @@ export interface CycleInfo {
 export interface ProposedApi {
   cycleInfo(ws: string): Promise<CycleInfo>;
   challengeGraph(ws: string): Promise<ChallengeGraphResponse>;
+  agentProfiles(): Promise<AgentProfilesResponse>;
+}
+
+// エージェント（ワークスペース）ごとの見た目の設定の案（2026-10-14 オーナー: Slack のサイドバーのようにアイコンを設定したい）。
+// icon は絵文字 1 つか画像の URL。無ければ UI が名前の頭文字と色で作る。
+export interface AgentProfile {
+  name: string;
+  icon: string | null;
+}
+
+export interface AgentProfilesResponse {
+  agents: AgentProfile[];
 }
 
 // 課題どうしの関係（関係グラフの案・flywheel#176）。本物では core が依存（M4.5 の challenge_dependency）・

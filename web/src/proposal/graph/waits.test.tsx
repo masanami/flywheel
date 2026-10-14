@@ -98,7 +98,9 @@ it("外部待ち: 他チームへの相談待ちを外部待ちの区分で示�
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   const legend = screen.getByRole("list", { name: "区分の凡例" });
-  expect(within(legend).getByText("外部待ち 1")).toBeInTheDocument();
+  expect(
+    within(legend).getByRole("button", { name: "外部待ち 1" }),
+  ).toBeInTheDocument();
   expect(
     within(legend).getByRole("button", { name: /^外部待ち/ }),
   ).toHaveAttribute("title", expect.stringContaining("自動では解けない待ち"));

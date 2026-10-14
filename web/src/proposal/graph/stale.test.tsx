@@ -61,9 +61,12 @@ it("更新なし: ノードを赤みの箱にして札を出し、実施中の�
   fireEvent.click(screen.getByRole("button", { name: /^C-15 を開く/ }));
   expect(node("C-5")).not.toHaveAttribute("data-unresponsive");
   expect(node("C-5").textContent).not.toContain("更新なし");
-  // 凡例にも同じ文言で説明を出す
+  // 区分の一覧には「応答なし」を出さない
   const legend = screen.getByRole("list", { name: "区分の凡例" });
-  expect(legend.textContent).toContain("⚠ 更新なし");
+  // 凡例の説明（吹き出し）にも同じ文言で出す
+  const help = screen.getByRole("list", { name: "凡例の説明" });
+  expect(help.textContent).toContain("⚠ 更新なし");
+  expect(help.textContent).not.toContain("応答なし");
   expect(legend.textContent).not.toContain("応答なし");
 });
 

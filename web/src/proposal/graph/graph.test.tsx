@@ -131,7 +131,9 @@ it("関係グラフ: 区分で色分けし、凡例に件数を出す", async ()
     "システムが次に進めるもの 7",
     "完了 1",
   ]) {
-    expect(within(legend).getByText(text)).toBeInTheDocument();
+    expect(
+      within(legend).getByRole("button", { name: text }),
+    ).toBeInTheDocument();
   }
   // 既定では親を畳むので、一番外の課題だけが箱になる
   expect(node("C-3")).toHaveAttribute("data-category", "human");

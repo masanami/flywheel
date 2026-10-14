@@ -44,6 +44,8 @@ export interface MockWorkspace {
   items: MockChallenge[];
   cycle: CycleInfo;
   graph: ChallengeGraphResponse;
+  // 見た目の設定の案（proposed.ts の AgentProfile）。絵文字か画像の URL、無ければ null
+  icon: string | null;
 }
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -147,6 +149,11 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
 });
 
 const LONG = `${"この値はカードに全文を出すと幅 320px の列で何行にも伸びる。".repeat(8)}\n2 行目: 外部の Issue 本文をそのまま取り込んだ想定の長い説明。`;
+
+// 画像の URL を持つアイコンの例（外へ取りに行かないよう、data URL の SVG にする）
+const BETA_ICON = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="8" fill="#2f6fde"/><path d="M8 28 L16 14 L22 24 L26 18 L32 28 Z" fill="#fff"/></svg>',
+)}`;
 
 export function seed(): Record<string, MockWorkspace> {
   const graphs = seedGraphs();
@@ -318,6 +325,7 @@ export function seed(): Record<string, MockWorkspace> {
         policy_mode: "優先度方針: 厳格（P0 のみ自走）",
       },
       graph: graphs.alpha,
+      icon: "🚀",
     },
     beta: {
       meta: ok("beta"),
@@ -328,6 +336,7 @@ export function seed(): Record<string, MockWorkspace> {
         policy_mode: "優先度方針: 既定（エージェント裁量）",
       },
       graph: graphs.beta,
+      icon: BETA_ICON,
     },
     gamma: {
       meta: {
@@ -343,6 +352,7 @@ export function seed(): Record<string, MockWorkspace> {
         policy_mode: "",
       },
       graph: { relations: [], repos: [], waiting_party: [] },
+      icon: null,
     },
   };
 }
