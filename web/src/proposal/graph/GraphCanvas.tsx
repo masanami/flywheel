@@ -20,9 +20,9 @@ export interface NodeInfo {
   category: Category;
   repos: string[];
   marks: string[];
-  // run が動いている（実施中）・CI の完了待ち・自動では解けない待ちの相手
+  // run が動いている（実施中）・自動の確認待ち（waiting_ci）・自動では解けない待ちの相手
   active: boolean;
-  ci: boolean;
+  autoCheck: boolean;
   party: PartyWait | null;
 }
 
@@ -257,18 +257,6 @@ function NodeBox({
           >
             {narrow ? "▶" : "▶ 実施中"}
           </text>
-        ) : null}
-        {i.ci ? (
-          // CI 待ちの小さな札。実行中の区分の色のまま、光の輪は付けない（run は動いていない）
-          <g
-            className="graph-ci-badge"
-            transform={`translate(${box.w - (inside ? TOGGLE + 10 : 8) - 22} ${narrow ? 5 : 7})`}
-          >
-            <rect width={22} height={14} rx={4} />
-            <text x={11} y={10.5} textAnchor="middle">
-              CI
-            </text>
-          </g>
         ) : null}
         <text x={11} y={narrow ? 31 : 35} className="graph-node-title">
           {clip(c.title, dims.titleChars)}

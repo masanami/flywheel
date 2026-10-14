@@ -52,8 +52,8 @@ export function seedGraphs(): {
         parent("C-2", "C-9"),
         dep("C-10", "C-4"),
         dep("C-9", "C-4"),
-        // 大枠「CI と配布の改善」（C-15）の中に、さらに大枠「依存のキャッシュ」（C-16）を置く。
-        // キャッシュキー（実施中）・ビルドの高速化（実施中）・CI 待ち → 配布手順の更新（分類済）
+        // 大枠「ビルドと配布の改善」（C-15）の中に、さらに大枠「依存のキャッシュ」（C-16）を置く。
+        // キャッシュキー（実施中）・ビルドの高速化（実施中）・自動の確認待ち → 配布手順の更新（分類済）
         parent("C-15", "C-5"),
         parent("C-15", "C-11"),
         parent("C-15", "C-16"),
@@ -87,7 +87,7 @@ export function seedGraphs(): {
         { challenge_id: "C-19", repos: [INFRA, DOCS] },
         { challenge_id: "C-20", repos: [API] },
       ],
-      // 外部待ち（自動では解けない待ち）の例。CI 待ち（C-11 の waiting_ci）はここに入れない
+      // 外部待ち（自動では解けない待ち）の例。自動の確認待ち（C-11 の waiting_ci）はここに入れない
       waiting_party: [
         {
           challenge_id: "C-20",

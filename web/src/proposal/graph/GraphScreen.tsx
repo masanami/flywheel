@@ -34,8 +34,8 @@ import {
   type NodeInfo,
 } from "./GraphCanvas.tsx";
 import {
+  AUTO_CHECK_TEXT,
   CATEGORIES,
-  CI_HINT,
   type Category,
   STALE_HINT,
   STALE_LABEL,
@@ -275,10 +275,9 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
     for (const c of cards) {
       const party = partyMap.get(c.id) ?? null;
       const category = categoryOf(c, actionable, party !== null);
-      const ci = c.card.modifiers.includes("waiting_ci");
+      const autoCheck = c.card.modifiers.includes("waiting_ci");
       const marks: string[] = [];
       if (c.card.modifiers.includes("unresponsive")) marks.push(STALE_LABEL);
-      if (ci) marks.push("CI 待ち");
       if (party) marks.push(`${party.party}の回答待ち`);
       const waitingOn = neighborsOf(c.id, rels).predecessors.filter(
         (p) => !doneIds.has(p),
@@ -292,7 +291,7 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
         repos: repoMap.get(c.id) ?? [],
         marks,
         active: isActive(c),
-        ci,
+        autoCheck,
         party,
       });
     }
@@ -492,9 +491,6 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
             >
               {STALE_LABEL}: 赤い箱。{STALE_HINT}
             </li>
-            <li className="graph-legend-edge graph-legend-ci" title={CI_HINT}>
-              CI の札: CI の完了待ち（実行中の区分に数える。数分で自動で解ける）
-            </li>
             <li className="graph-legend-edge">
               外部待ち:
               自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など）
@@ -580,7 +576,6 @@ function IdList({
             {i ? clip(i.card.title, 24) : ""}
             {i?.category === "done" ? "（完了）" : ""}
             {i?.active ? "（実施中）" : ""}
-            {i?.ci ? "（CI 待ち）" : ""}
           </li>
         );
       })}
@@ -630,7 +625,10 @@ function SelectedPanel({
         {" ・ "}
         {label(STATE_LABELS, c.card.state)}
         {c.card.modifiers.map((m) =>
-          m === "unresponsive" ? null : ` [${label(MODIFIER_LABELS, m)}]`,
+          // 更新なしは下の帯で、自動の確認待ちは利用分野の語（CI）を避けて下の行で示す
+          m === "unresponsive" || m === "waiting_ci"
+            ? null
+            : ` [${label(MODIFIER_LABELS, m)}]`,
         )}
       </p>
       {c.card.modifiers.includes("unresponsive") ? (
@@ -638,10 +636,8 @@ function SelectedPanel({
           {STALE_LONG}
         </p>
       ) : null}
-      {i.ci ? (
-        <p className="graph-panel-ci" title={CI_HINT}>
-          CI の完了待ち（数分で自動で解ける。外部待ちには数えない）
-        </p>
+      {i.autoCheck ? (
+        <p className="graph-panel-autocheck">{AUTO_CHECK_TEXT}</p>
       ) : null}
       {i.party ? (
         <p className="graph-panel-party">

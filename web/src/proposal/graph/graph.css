@@ -1,5 +1,5 @@
 /* 関係グラフの案（flywheel#176）。mock モードの画面からだけ読み込むため、本番の CSS には入らない。
- * 区分の色は承認待ちの暖色・CI 待ちの紫など、ボードの状態の色と同じ系統に寄せる。 */
+ * 区分の色は承認待ちの暖色・外部待ちの紫など、ボードの状態の色と同じ系統に寄せる。 */
 .graph-screen {
   --graph-human: #e07b39;
   --graph-external: #8a63d2;
@@ -340,17 +340,7 @@ fieldset.graph-chips {
 .graph-node[data-active] .graph-node-box {
   stroke-width: 2.5;
 }
-.graph-ci-badge rect {
-  fill: var(--board-card-bg);
-  stroke: var(--graph-running);
-  stroke-width: 1.2;
-}
-.graph-ci-badge text {
-  fill: var(--graph-running) !important;
-  font-size: 9.5px;
-  font-weight: 700;
-}
-.graph-panel-ci {
+.graph-panel-autocheck {
   color: var(--graph-running);
   font-weight: 600;
 }

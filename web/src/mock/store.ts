@@ -188,7 +188,7 @@ export function seed(): Record<string, MockWorkspace> {
       priority: "P2",
       flags: { running: true },
       runs: [run("R-7", "C-5")],
-      headline: "CI のビルド時間を半分にする",
+      headline: "ビルド時間を半分にする",
     }),
     mk("C-6", "古いバッチの撤去", "in_progress", {
       priority: "P2",
@@ -242,7 +242,7 @@ export function seed(): Record<string, MockWorkspace> {
       context: LONG,
       flags: { discrepancy: ["upstream_updated", "upstream_commented"] },
     }),
-    mk("C-11", "CI の完了待ち", "verifying", {
+    mk("C-11", "決済画面の改修", "verifying", {
       priority: "P2",
       flags: {
         waitingCi: {
@@ -270,7 +270,7 @@ export function seed(): Record<string, MockWorkspace> {
       priority: "P2",
       headline: "旧バッチ基盤を止めて消す",
     }),
-    mk("C-15", "CI と配布の改善", "classified", { priority: "P2" }),
+    mk("C-15", "ビルドと配布の改善", "classified", { priority: "P2" }),
     mk("C-16", "依存のキャッシュ", "classified", { priority: "P2" }),
     mk("C-17", "キャッシュキーの設計", "in_progress", {
       priority: "P2",

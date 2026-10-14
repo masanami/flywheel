@@ -27,7 +27,7 @@ export const CATEGORIES: { key: Category; label: string; hint: string }[] = [
   {
     key: "running",
     label: "システムが実行中",
-    hint: "run が動いている（running・unresponsive）か、CI の完了を待っている（waiting_ci。数分で自動で解けるので外部待ちに入れない）",
+    hint: "システムが進めている。run が動いているか、自動の確認の結果を待っていて、結果が出ればシステムが先へ進める",
   },
   {
     key: "system",
@@ -45,10 +45,12 @@ export const STALE_LONG = "⚠ 更新なし（要確認）";
 export const STALE_HINT =
   "実行中だが、しきい値を超えて記録がありません。止まったとは限らず、長い委譲でも出ます";
 
-export const CI_HINT =
-  "CI の完了待ち。数分で自動で解けるので、外部待ちではなく実行中の側に数える";
+// 自動の確認待ち（いまのカードの印は waiting_ci）。人に見せる面では利用分野に固有の語（CI・PR など）を使わず、
+// 「システムが実行中」の区分の色だけで示す（2026-10-14 オーナー: flywheel は汎用の道具）。
+export const AUTO_CHECK_TEXT =
+  "検証中（自動の確認を待っている。結果が出ればシステムが先へ進める）";
 
-// いま run が動いている（実施中）。CI 待ちは実行中の区分に入るが、run は動いていないので実施中ではない。
+// いま run が動いている（実施中）。自動の確認待ちは実行中の区分に入るが、run は動いていないので実施中ではない。
 export const isActive = (c: ChallengeCard) =>
   c.card.modifiers.includes("running") ||
   c.card.modifiers.includes("unresponsive");
