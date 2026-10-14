@@ -25,4 +25,50 @@ export interface CycleInfo {
 // 画面が使う呼び出し口。本物（未実装）とモック（ブラウザ内）が同じ形を実装する。
 export interface ProposedApi {
   cycleInfo(ws: string): Promise<CycleInfo>;
+  challengeGraph(ws: string): Promise<ChallengeGraphResponse>;
+  agentProfiles(): Promise<AgentProfilesResponse>;
+}
+
+// エージェント（ワークスペース）ごとの見た目の設定の案（2026-10-14 オーナー: Slack のサイドバーのようにアイコンを設定したい）。
+// icon は絵文字 1 つか画像の URL。無ければ UI が名前の頭文字と色で作る。
+export interface AgentProfile {
+  name: string;
+  icon: string | null;
+}
+
+export interface AgentProfilesResponse {
+  agents: AgentProfile[];
+}
+
+// 課題どうしの関係（関係グラフの案・flywheel#176）。本物では core が依存（M4.5 の challenge_dependency）・
+// 親子・触るリポジトリの記録から決定的に導く（LLM に書かせない）。案の口は
+// GET /api/v1/workspaces/{name}/graph とし、ワークスペース 1 つ分の関係をまとめて返す。
+export type RelationKind = "depends_on" | "parent_of";
+
+export interface ChallengeRelation {
+  // depends_on は from が先行・to が後続（from が完了すると to が進める）。parent_of は from が親・to が子。
+  from: string;
+  kind: RelationKind;
+  to: string;
+}
+
+export interface ChallengeRepos {
+  challenge_id: string;
+  repos: string[];
+}
+
+// 自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など）の案の印 waiting_party。
+// core にはまだ表す状態・印が無い（足すものは M5 以降に決める）。CI 待ち（waiting_ci）は数分で自動で解けるので
+// ここに入れない（2026-10-14 オーナー）。
+export interface PartyWait {
+  challenge_id: string;
+  // 待っている相手（チーム・ベンダーなど）と、待っている理由
+  party: string;
+  reason: string;
+}
+
+export interface ChallengeGraphResponse {
+  relations: ChallengeRelation[];
+  repos: ChallengeRepos[];
+  waiting_party: PartyWait[];
 }

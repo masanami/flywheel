@@ -20,8 +20,12 @@ it("mock モード: 偽の API で全画面を開ける", async () => {
       expect(screen.getByRole("region", { name: s.title })).toBeInTheDocument(),
     );
   }
-  // ボード（案）には人間の操作待ちの帯がある
-  fireEvent.click(screen.getByRole("button", { name: "ボード（案）" }));
+  // 関係グラフ（案）の既定はグラフで、列のボードへ切り替えると人間の操作待ちの帯がある
+  fireEvent.click(screen.getByRole("button", { name: "関係グラフ（案）" }));
+  expect(
+    await screen.findByRole("group", { name: "alpha の課題の関係グラフ" }),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "列のボード" }));
   expect(
     await screen.findByRole("region", { name: "人間の操作待ち（案）" }),
   ).toBeInTheDocument();

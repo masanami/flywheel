@@ -1,7 +1,7 @@
 // ブラウザ内の偽のストア。開発時の mock モードだけが読み込む（本番のビルドには入らない）。
 // 返す形は types.gen.ts と仕様の API の節に従う。状態の導出は本物では core がやるが、ここでは同じ表を写す。
 
-import type { CycleInfo } from "../api/proposed.ts";
+import type { ChallengeGraphResponse, CycleInfo } from "../api/proposed.ts";
 import type {
   Approval,
   BudgetExhausted,
@@ -15,6 +15,7 @@ import type {
   StatusResponse,
   Workspace,
 } from "../api/types.gen.ts";
+import { seedGraphs } from "./graph.ts";
 
 export interface Flags {
   running?: boolean;
@@ -42,6 +43,9 @@ export interface MockWorkspace {
   meta: Workspace;
   items: MockChallenge[];
   cycle: CycleInfo;
+  graph: ChallengeGraphResponse;
+  // 見た目の設定の案（proposed.ts の AgentProfile）。絵文字か画像の URL、無ければ null
+  icon: string | null;
 }
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -146,7 +150,13 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
 
 const LONG = `${"この値はカードに全文を出すと幅 320px の列で何行にも伸びる。".repeat(8)}\n2 行目: 外部の Issue 本文をそのまま取り込んだ想定の長い説明。`;
 
+// 画像の URL を持つアイコンの例（外へ取りに行かないよう、data URL の SVG にする）
+const BETA_ICON = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="8" fill="#2f6fde"/><path d="M8 28 L16 14 L22 24 L26 18 L32 28 Z" fill="#fff"/></svg>',
+)}`;
+
 export function seed(): Record<string, MockWorkspace> {
+  const graphs = seedGraphs();
   const alpha: MockChallenge[] = [
     mk("C-1", "ログイン画面の文言を直す", "unclassified", {
       description: "ボタンの文言が「送信」のままになっている。",
@@ -185,7 +195,7 @@ export function seed(): Record<string, MockWorkspace> {
       priority: "P2",
       flags: { running: true },
       runs: [run("R-7", "C-5")],
-      headline: "CI のビルド時間を半分にする",
+      headline: "ビルド時間を半分にする",
     }),
     mk("C-6", "古いバッチの撤去", "in_progress", {
       priority: "P2",
@@ -239,7 +249,7 @@ export function seed(): Record<string, MockWorkspace> {
       context: LONG,
       flags: { discrepancy: ["upstream_updated", "upstream_commented"] },
     }),
-    mk("C-11", "CI の完了待ち", "verifying", {
+    mk("C-11", "決済画面の改修", "verifying", {
       priority: "P2",
       flags: {
         waitingCi: {
@@ -261,6 +271,26 @@ export function seed(): Record<string, MockWorkspace> {
           run_id: "R-9",
         },
       },
+    }),
+    // 関係グラフの案（flywheel#176）で親の大枠として見せる課題。人間の操作は待たない。
+    mk("C-14", "旧基盤の撤去", "in_progress", {
+      priority: "P2",
+      headline: "旧バッチ基盤を止めて消す",
+    }),
+    mk("C-15", "ビルドと配布の改善", "classified", { priority: "P2" }),
+    mk("C-16", "依存のキャッシュ", "classified", { priority: "P2" }),
+    mk("C-17", "キャッシュキーの設計", "in_progress", {
+      priority: "P2",
+      flags: { running: true },
+      runs: [run("R-10", "C-17", { started_at: iso(15) })],
+    }),
+    // 先行が終わるのを待つ後続（依存の後続は、先行が完了するまで分類済か計画承認待ちに留まる）
+    mk("C-18", "旧テーブルの削除", "classified", { priority: "P2" }),
+    mk("C-19", "配布手順の更新", "classified", { priority: "P2" }),
+    // 自動では解けない外部待ちの例（他チームへの相談待ち。案の印 waiting_party を graph.ts が持つ）
+    mk("C-20", "返金 API の上限の確認", "in_progress", {
+      priority: "P1",
+      headline: "決済チームに返金 API の上限を問い合わせている",
     }),
   ];
   const beta: MockChallenge[] = [
@@ -294,6 +324,8 @@ export function seed(): Record<string, MockWorkspace> {
         last_cycle_at: iso(12),
         policy_mode: "優先度方針: 厳格（P0 のみ自走）",
       },
+      graph: graphs.alpha,
+      icon: "🚀",
     },
     beta: {
       meta: ok("beta"),
@@ -303,6 +335,8 @@ export function seed(): Record<string, MockWorkspace> {
         last_cycle_at: iso(2000),
         policy_mode: "優先度方針: 既定（エージェント裁量）",
       },
+      graph: graphs.beta,
+      icon: BETA_ICON,
     },
     gamma: {
       meta: {
@@ -317,6 +351,8 @@ export function seed(): Record<string, MockWorkspace> {
         last_cycle_at: null,
         policy_mode: "",
       },
+      graph: { relations: [], repos: [], waiting_party: [] },
+      icon: null,
     },
   };
 }

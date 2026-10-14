@@ -67,6 +67,8 @@ const notBuilt = (): Promise<never> =>
 const realApi: ApiClient = {
   ...readApi,
   cycleInfo: notBuilt,
+  challengeGraph: notBuilt,
+  agentProfiles: notBuilt,
 };
 
 // 呼び出し口は差し替えられる。開発時の mock モードだけが setApi でブラウザ内の偽の API を入れる。
@@ -89,6 +91,8 @@ export const api: ApiClient = {
   needsHuman: () => impl.needsHuman(),
   questions: () => impl.questions(),
   cycleInfo: (n) => impl.cycleInfo(n),
+  challengeGraph: (n) => impl.challengeGraph(n),
+  agentProfiles: () => impl.agentProfiles(),
 };
 
 export const eventsPath = "/api/v1/events";

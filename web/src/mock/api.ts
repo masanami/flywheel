@@ -148,6 +148,19 @@ export function createMockApi(
       await wait();
       return wsOf(name).cycle;
     },
+    async challengeGraph(name) {
+      await wait();
+      return wsOf(name).graph;
+    },
+    async agentProfiles() {
+      await wait();
+      return {
+        agents: Object.values(store.workspaces).map((w) => ({
+          name: w.meta.name,
+          icon: w.icon,
+        })),
+      };
+    },
   };
   return api;
 }

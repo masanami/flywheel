@@ -1,8 +1,14 @@
+import { createContext, useContext } from "react";
 import { ErrorCard } from "./ErrorCard.tsx";
 import { TaskCard } from "./TaskCard.tsx";
 import type { AgentBoard, RunningChallenge } from "./types.ts";
 
+// 実行中で応答のない run の行に出す文言。本番は仕様（M4H24）の「応答なし」のまま。
+// 開発時の mock モードの案の画面だけが、旧 board と同じ「更新なし」に差し替えて見せる（flywheel#176）。
+export const StaleLabelContext = createContext("⚠ 応答なし（要確認）");
+
 function RunningRow({ run }: { run: RunningChallenge }) {
+  const staleLabel = useContext(StaleLabelContext);
   return (
     <div
       className="agent-column-running-run"
@@ -19,7 +25,7 @@ function RunningRow({ run }: { run: RunningChallenge }) {
       </div>
       {run.unresponsive && (
         <div className="agent-column-running-run-stale-warning">
-          ⚠ 応答なし（要確認）
+          {staleLabel}
         </div>
       )}
     </div>
