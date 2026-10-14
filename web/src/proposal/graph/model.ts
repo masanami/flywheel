@@ -22,12 +22,12 @@ export const CATEGORIES: { key: Category; label: string; hint: string }[] = [
   {
     key: "external",
     label: "外部待ち",
-    hint: "CI などの外部の完了を待っている（waiting_ci）",
+    hint: "自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など。案の印 waiting_party）",
   },
   {
     key: "running",
     label: "システムが実行中",
-    hint: "run が動いている（running・unresponsive）",
+    hint: "run が動いている（running・unresponsive）か、CI の完了を待っている（waiting_ci。数分で自動で解けるので外部待ちに入れない）",
   },
   {
     key: "system",
@@ -45,17 +45,23 @@ export const STALE_LONG = "⚠ 更新なし（要確認）";
 export const STALE_HINT =
   "実行中だが、しきい値を超えて記録がありません。止まったとは限らず、長い委譲でも出ます";
 
+export const CI_HINT =
+  "CI の完了待ち。数分で自動で解けるので、外部待ちではなく実行中の側に数える";
+
+// いま run が動いている（実施中）。CI 待ちは実行中の区分に入るが、run は動いていないので実施中ではない。
+export const isActive = (c: ChallengeCard) =>
+  c.card.modifiers.includes("running") ||
+  c.card.modifiers.includes("unresponsive");
+
+// partyWait は自動では解けない待ち（案の印 waiting_party）があるか。
 export function categoryOf(
   c: ChallengeCard,
   actionable: Set<string>,
+  partyWait = false,
 ): Category {
   if (c.card.next_human_actions.length > 0) return "human";
-  if (c.card.modifiers.includes("waiting_ci")) return "external";
-  if (
-    c.card.modifiers.includes("running") ||
-    c.card.modifiers.includes("unresponsive")
-  )
-    return "running";
+  if (partyWait) return "external";
+  if (isActive(c) || c.card.modifiers.includes("waiting_ci")) return "running";
   if (c.card.state === "done") return "done";
   if (actionable.has(c.id)) return "system";
   return "other";

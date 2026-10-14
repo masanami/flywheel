@@ -28,6 +28,7 @@ import {
 } from "./GraphCanvas.tsx";
 import {
   CATEGORIES,
+  CI_HINT,
   type Category,
   STALE_HINT,
   STALE_LABEL,
@@ -40,6 +41,7 @@ import {
   compareIds,
   descendantsOf,
   downstreamOf,
+  isActive,
   layoutGraph,
   neighborsOf,
   parentMap,
@@ -201,6 +203,9 @@ function GraphView({ live }: { live: LiveState }) {
     const repoMap = new Map(
       (graph?.data?.repos ?? []).map((r) => [r.challenge_id, r.repos]),
     );
+    const partyMap = new Map(
+      (graph?.data?.waiting_party ?? []).map((w) => [w.challenge_id, w]),
+    );
     const all = new Set(cards.map((c) => c.id));
     const rels = validRelations(all, graph?.data?.relations ?? []);
     const doneIds = new Set(
@@ -208,16 +213,28 @@ function GraphView({ live }: { live: LiveState }) {
     );
     const m = new Map<string, NodeInfo>();
     for (const c of cards) {
-      const category = categoryOf(c, actionable);
+      const party = partyMap.get(c.id) ?? null;
+      const category = categoryOf(c, actionable, party !== null);
+      const ci = c.card.modifiers.includes("waiting_ci");
       const marks: string[] = [];
       if (c.card.modifiers.includes("unresponsive")) marks.push(STALE_LABEL);
+      if (ci) marks.push("CI 待ち");
+      if (party) marks.push(`${party.party}の回答待ち`);
       const waitingOn = neighborsOf(c.id, rels).predecessors.filter(
         (p) => !doneIds.has(p),
       );
       if (category === "system" && waitingOn.length > 0)
         marks.push("先行が未完了");
       if (approvedOps.has(c.id)) marks.push("承認済みの操作が未実行");
-      m.set(c.id, { card: c, category, repos: repoMap.get(c.id) ?? [], marks });
+      m.set(c.id, {
+        card: c,
+        category,
+        repos: repoMap.get(c.id) ?? [],
+        marks,
+        active: isActive(c),
+        ci,
+        party,
+      });
     }
     const pm = parentMap(all, rels);
     return { map: m, rels, pm, kids: childrenMap(pm) };
@@ -281,7 +298,7 @@ function GraphView({ live }: { live: LiveState }) {
   for (const i of infos.map.values())
     counts.set(i.category, (counts.get(i.category) ?? 0) + 1);
   const running = [...infos.map.values()]
-    .filter((i) => i.category === "running")
+    .filter((i) => i.active)
     .map((i) => i.card);
 
   const relevant = (id: string) =>
@@ -318,7 +335,7 @@ function GraphView({ live }: { live: LiveState }) {
     const ds = descendantsOf(id, kids).map((d) => infos.map.get(d));
     return {
       total: ds.length,
-      active: ds.filter((d) => d?.category === "running").length,
+      active: ds.filter((d) => d?.active).length,
       human: ds.filter((d) => d?.category === "human").length,
     };
   };
@@ -446,6 +463,13 @@ function GraphView({ live }: { live: LiveState }) {
             >
               {STALE_LABEL}: 赤い箱。{STALE_HINT}
             </li>
+            <li className="graph-legend-edge graph-legend-ci" title={CI_HINT}>
+              CI の札: CI の完了待ち（実行中の区分に数える。数分で自動で解ける）
+            </li>
+            <li className="graph-legend-edge">
+              外部待ち:
+              自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など）
+            </li>
             <li className="graph-legend-edge">実線の矢印: 先行 → 後続</li>
             <li className="graph-legend-edge">
               大枠: 親課題（中に子課題）。重ねた箱は畳んだ親で、▶
@@ -526,7 +550,8 @@ function IdList({
             </button>{" "}
             {i ? clip(i.card.title, 24) : ""}
             {i?.category === "done" ? "（完了）" : ""}
-            {i?.category === "running" ? "（実施中）" : ""}
+            {i?.active ? "（実施中）" : ""}
+            {i?.ci ? "（CI 待ち）" : ""}
           </li>
         );
       })}
@@ -582,6 +607,16 @@ function SelectedPanel({
       {c.card.modifiers.includes("unresponsive") ? (
         <p className="graph-panel-stale" title={STALE_HINT}>
           {STALE_LONG}
+        </p>
+      ) : null}
+      {i.ci ? (
+        <p className="graph-panel-ci" title={CI_HINT}>
+          CI の完了待ち（数分で自動で解ける。外部待ちには数えない）
+        </p>
+      ) : null}
+      {i.party ? (
+        <p className="graph-panel-party">
+          外部待ち: {i.party.party}（{i.party.reason}）
         </p>
       ) : null}
       {c.card.headline ? <p>{c.card.headline}</p> : null}

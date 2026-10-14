@@ -280,6 +280,11 @@ export function seed(): Record<string, MockWorkspace> {
     // 先行が終わるのを待つ後続（依存の後続は、先行が完了するまで分類済か計画承認待ちに留まる）
     mk("C-18", "旧テーブルの削除", "classified", { priority: "P2" }),
     mk("C-19", "配布手順の更新", "classified", { priority: "P2" }),
+    // 自動では解けない外部待ちの例（他チームへの相談待ち。案の印 waiting_party を graph.ts が持つ）
+    mk("C-20", "返金 API の上限の確認", "in_progress", {
+      priority: "P1",
+      headline: "決済チームに返金 API の上限を問い合わせている",
+    }),
   ];
   const beta: MockChallenge[] = [
     mk("C-1", "レポートの CSV 出力", "classified", { priority: "P2" }),
@@ -337,7 +342,7 @@ export function seed(): Record<string, MockWorkspace> {
         last_cycle_at: null,
         policy_mode: "",
       },
-      graph: { relations: [], repos: [] },
+      graph: { relations: [], repos: [], waiting_party: [] },
     },
   };
 }

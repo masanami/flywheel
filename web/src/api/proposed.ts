@@ -45,7 +45,18 @@ export interface ChallengeRepos {
   repos: string[];
 }
 
+// 自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など）の案の印 waiting_party。
+// core にはまだ表す状態・印が無い（足すものは M5 以降に決める）。CI 待ち（waiting_ci）は数分で自動で解けるので
+// ここに入れない（2026-10-14 オーナー）。
+export interface PartyWait {
+  challenge_id: string;
+  // 待っている相手（チーム・ベンダーなど）と、待っている理由
+  party: string;
+  reason: string;
+}
+
 export interface ChallengeGraphResponse {
   relations: ChallengeRelation[];
   repos: ChallengeRepos[];
+  waiting_party: PartyWait[];
 }

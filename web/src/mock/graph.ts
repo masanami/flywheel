@@ -85,6 +85,15 @@ export function seedGraphs(): {
         { challenge_id: "C-17", repos: [INFRA] },
         { challenge_id: "C-18", repos: [API, INFRA] },
         { challenge_id: "C-19", repos: [INFRA, DOCS] },
+        { challenge_id: "C-20", repos: [API] },
+      ],
+      // 外部待ち（自動では解けない待ち）の例。CI 待ち（C-11 の waiting_ci）はここに入れない
+      waiting_party: [
+        {
+          challenge_id: "C-20",
+          party: "決済チーム",
+          reason: "返金 API の 1 日あたりの上限を問い合わせ中",
+        },
       ],
     },
     beta: {
@@ -94,6 +103,7 @@ export function seedGraphs(): {
         { challenge_id: "C-2", repos: [INFRA, DOCS] },
         { challenge_id: "C-3", repos: [INFRA] },
       ],
+      waiting_party: [],
     },
   };
 }

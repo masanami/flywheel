@@ -127,7 +127,7 @@ it("関係グラフ: 区分で色分けし、凡例に件数を出す", async ()
   for (const text of [
     "人間の操作待ち 7",
     "外部待ち 1",
-    "システムが実行中 3",
+    "システムが実行中 4",
     "システムが次に進めるもの 7",
     "完了 1",
   ]) {
@@ -140,7 +140,7 @@ it("関係グラフ: 区分で色分けし、凡例に件数を出す", async ()
   expect(screen.queryByRole("button", { name: /^C-4 (?!を)/ })).toBeNull();
   // 開くと中の区分が見える
   fireEvent.click(screen.getByRole("button", { name: /^C-15 を開く/ }));
-  expect(node("C-11")).toHaveAttribute("data-category", "external");
+  expect(node("C-11")).toHaveAttribute("data-category", "running");
   expect(node("C-5")).toHaveAttribute("data-category", "running");
   fireEvent.click(screen.getByRole("button", { name: /^C-14 を開く/ }));
   expect(node("C-12")).toHaveAttribute("data-category", "done");
@@ -197,10 +197,10 @@ it("関係グラフ: 区分・リポジトリで絞り、ワークスペース�
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   // 畳んだ大枠は、中に当たる課題があれば薄くしない
-  fireEvent.click(screen.getByRole("button", { name: /^外部待ち/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^システムが実行中/ }));
   expect(node("C-15")).not.toHaveAttribute("data-dim");
   expect(node("C-3")).toHaveAttribute("data-dim", "true");
-  fireEvent.click(screen.getByRole("button", { name: /^外部待ち/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^システムが実行中/ }));
   fireEvent.click(screen.getByRole("button", { name: "mock-org/infra" }));
   expect(node("C-15")).not.toHaveAttribute("data-dim");
   expect(node("C-3")).toHaveAttribute("data-dim", "true");

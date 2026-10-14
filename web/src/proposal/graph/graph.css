@@ -340,6 +340,24 @@ fieldset.graph-chips {
 .graph-node[data-active] .graph-node-box {
   stroke-width: 2.5;
 }
+.graph-ci-badge rect {
+  fill: var(--board-card-bg);
+  stroke: var(--graph-running);
+  stroke-width: 1.2;
+}
+.graph-ci-badge text {
+  fill: var(--graph-running) !important;
+  font-size: 9.5px;
+  font-weight: 700;
+}
+.graph-panel-ci {
+  color: var(--graph-running);
+  font-weight: 600;
+}
+.graph-panel-party {
+  color: var(--graph-external);
+  font-weight: 600;
+}
 .graph-node-active-tag {
   fill: var(--graph-running) !important;
   font-size: 11px;
