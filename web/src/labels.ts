@@ -56,7 +56,7 @@ export const STATE_LABELS: Record<CardState, string> = {
 export const MODIFIER_LABELS: Record<CardModifier, string> = {
   running: "実行中",
   unresponsive: "応答なし（実行中だが一定時間応答がない）",
-  waiting_ci: "CI 待ち",
+  waiting_ci: "自動の確認待ち",
   budget_exhausted: "予算を使い切った",
   discrepancy: "上流との食い違い",
 };
@@ -78,6 +78,26 @@ export const DISCREPANCY_LABELS: Record<DiscrepancyKind, string> = {
   out_of_policy: "取り込みの方針の範囲外",
   upstream_commented: "上流に新しいコメント",
   upstream_updated: "上流が更新された",
+};
+
+// カードの面に出す区分の印（M4H23）。API の値から UI が導く（board/marks.ts）。
+export const MARK_KINDS = [
+  "needs_human",
+  "external",
+  "actionable",
+  "running",
+  "unresponsive",
+  "approved_operation",
+] as const;
+export type MarkKind = (typeof MARK_KINDS)[number];
+
+export const MARK_LABELS: Record<MarkKind, string> = {
+  needs_human: "人間の操作待ち",
+  external: "外部待ち",
+  actionable: "システムが次に進める",
+  running: "実行中",
+  unresponsive: "応答なし",
+  approved_operation: "承認済みの操作が未実行",
 };
 
 export const NO_ACTION_LABEL = "なし（エージェントが進める）";

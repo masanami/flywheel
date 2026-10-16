@@ -1,35 +1,50 @@
 import { useState } from "react";
-import { DetailScreen } from "./detail.tsx";
+import { CardDetailModal } from "./board/CardDetailModal.tsx";
+import { toAgentBoard } from "./board/adapt.ts";
 import { useLive } from "./live/useLive.ts";
-import { OpenDetailContext, ScreenNavContext } from "./nav.tsx";
+import {
+  OpenDetailContext,
+  RefreshKeyContext,
+  ScreenNavContext,
+} from "./nav.tsx";
 import { screens } from "./screens.tsx";
 
 export function App() {
   const live = useLive();
   const [current, setCurrent] = useState(screens[0]?.id);
+  // 開発時の mock の案の画面が課題の詳細を開く口。ボードのカードは自分でモーダルを開く。
   const [detail, setDetail] = useState<{ ws: string; id: string } | null>(null);
   const screen = screens.find((s) => s.id === current) ?? screens[0];
+
+  const detailWs = detail
+    ? live.workspaces.find((w) => w.name === detail.ws)
+    : undefined;
+  const detailChallenge =
+    detail && detailWs
+      ? toAgentBoard(detailWs, live.data[detailWs.name]).challenges.find(
+          (c) => c.id === detail.id,
+        )
+      : undefined;
 
   return (
     <main className="app-layout">
       <div className="view-bar">
         <h1>flywheel</h1>
-        <nav>
-          {screens.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className="filter-chip"
-              aria-pressed={s.id === screen?.id}
-              onClick={() => {
-                setCurrent(s.id);
-                setDetail(null);
-              }}
-            >
-              {s.title}
-            </button>
-          ))}
-        </nav>
+        {screens.length > 1 ? (
+          <nav>
+            {screens.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className="filter-chip"
+                aria-pressed={s.id === screen?.id}
+                onClick={() => setCurrent(s.id)}
+              >
+                {s.title}
+              </button>
+            ))}
+          </nav>
+        ) : null}
         <output>
           {live.connected ? "接続中" : "切断中（再接続を試みています）"}
           {" ・ 最終更新: "}
@@ -44,32 +59,25 @@ export function App() {
       ) : null}
       <div
         className={
-          screen?.id === "board" && !detail
-            ? "view-body view-body-board"
-            : "view-body"
+          screen?.id === "board" ? "view-body view-body-board" : "view-body"
         }
       >
-        <ScreenNavContext.Provider
-          value={(id) => {
-            setCurrent(id);
-            setDetail(null);
-          }}
-        >
+        <ScreenNavContext.Provider value={setCurrent}>
           <OpenDetailContext.Provider value={(ws, id) => setDetail({ ws, id })}>
-            {detail ? (
-              <DetailScreen
-                workspace={detail.ws}
-                id={detail.id}
-                workspaces={live.workspaces}
-                refreshKey={live.lastUpdated}
-                onClose={() => setDetail(null)}
-              />
-            ) : (
-              screen?.render(live)
-            )}
+            {screen?.render(live)}
           </OpenDetailContext.Provider>
         </ScreenNavContext.Provider>
       </div>
+      {detail && detailWs && detailChallenge ? (
+        <RefreshKeyContext.Provider value={live.lastUpdated}>
+          <CardDetailModal
+            challenge={detailChallenge}
+            agentName={detailWs.name}
+            workspacePath={detailWs.path}
+            onClose={() => setDetail(null)}
+          />
+        </RefreshKeyContext.Provider>
+      ) : null}
     </main>
   );
 }

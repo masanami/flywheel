@@ -3,7 +3,6 @@ import { api, eventsPath, parseChanged } from "../api/client.ts";
 import type {
   ListCardResponse,
   NeedsHumanResponse,
-  QuestionsResponse,
   StatusResponse,
   Workspace,
 } from "../api/types.gen.ts";
@@ -21,7 +20,6 @@ export interface LiveState {
   workspaces: Workspace[];
   data: Record<string, WorkspaceData>;
   needsHuman: NeedsHumanResponse | null;
-  questions: QuestionsResponse | null;
   loadError: string | null;
   fleetError: string | null;
 }
@@ -34,7 +32,6 @@ const initial: LiveState = {
   workspaces: [],
   data: {},
   needsHuman: null,
-  questions: null,
   loadError: null,
   fleetError: null,
 };
@@ -60,25 +57,14 @@ export function useLive(): LiveState {
 
   const refreshFleet = useCallback(async () => {
     const token = ++gen.current.fleet;
-    const [nh, q] = await Promise.allSettled([
-      api.needsHuman(),
-      api.questions(),
-    ]);
+    // 問いの一覧（GET /api/v1/questions）は要求しない。問いは課題の詳細に出す（M4H22・M4H23）。
+    const [nh] = await Promise.allSettled([api.needsHuman()]);
     if (token !== gen.current.fleet) return;
     setState((s) => ({
       ...s,
       needsHuman: nh.status === "fulfilled" ? nh.value : s.needsHuman,
-      questions: q.status === "fulfilled" ? q.value : s.questions,
-      lastUpdated:
-        nh.status === "fulfilled" || q.status === "fulfilled"
-          ? new Date()
-          : s.lastUpdated,
-      fleetError:
-        nh.status === "rejected"
-          ? String(nh.reason)
-          : q.status === "rejected"
-            ? String(q.reason)
-            : null,
+      lastUpdated: nh.status === "fulfilled" ? new Date() : s.lastUpdated,
+      fleetError: nh.status === "rejected" ? String(nh.reason) : null,
     }));
   }, []);
 

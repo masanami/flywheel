@@ -34,6 +34,8 @@ export function Board({ live }: { live: LiveState }) {
     return <div className="board-loading">読み込み中...</div>;
   }
 
+  const unreadable = live.needsHuman?.unreadable_workspaces ?? [];
+
   return (
     <RefreshKeyContext.Provider value={live.lastUpdated}>
       <div className="board">
@@ -43,6 +45,12 @@ export function Board({ live }: { live: LiveState }) {
           showCompleted={showCompleted}
           onShowCompletedChange={setShowCompleted}
         />
+        {unreadable.length > 0 ? (
+          <p role="alert" data-testid="unreadable-workspaces">
+            読み取れなかったワークスペース（集約から除いています）:{" "}
+            {unreadable.join("、")}
+          </p>
+        ) : null}
         <div className="board-main-row">
           <div className="board-columns">
             {live.workspaces.map((w) => {
