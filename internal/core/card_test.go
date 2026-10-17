@@ -102,7 +102,7 @@ func TestDeriveCard_ActionsOrderMultiple(t *testing.T) {
 		NeedsHumanOperations:      []IrreversibleOperation{{ChallengeID: "C-1", State: OperationStatePending}, {ChallengeID: "C-1", State: OperationStatePending}},
 		Discrepancies:             []Discrepancy{{ChallengeID: "C-1"}},
 	}
-	card := deriveCard(c, st, nil, time.Now(), defaultStaleAfter)
+	card := deriveCard(c, st, nil, nil, time.Now(), defaultStaleAfter)
 	want := []CardAction{CardActionApprovePlan, CardActionTriage, CardActionIncreaseBudget, CardActionApproveOperation, CardActionReviewDiscrepancy}
 	if !reflect.DeepEqual(card.NextHumanActions, want) {
 		t.Errorf("actions = %v, want %v", card.NextHumanActions, want)
@@ -114,7 +114,7 @@ func TestDeriveCard_OtherChallengesIgnoredAndCompletedPendingOp(t *testing.T) {
 		NeedsHumanTriage:     []TriageItem{{ChallengeID: "C-2"}},
 		NeedsHumanOperations: []IrreversibleOperation{{ChallengeID: "C-1", State: OperationStatePending}},
 	}
-	card := deriveCard(Challenge{ID: "C-1", Status: StatusDone}, st, nil, time.Now(), defaultStaleAfter)
+	card := deriveCard(Challenge{ID: "C-1", Status: StatusDone}, st, nil, nil, time.Now(), defaultStaleAfter)
 	if !reflect.DeepEqual(card.NextHumanActions, []CardAction{CardActionApproveOperation}) {
 		t.Errorf("actions = %v", card.NextHumanActions)
 	}
@@ -126,7 +126,7 @@ func TestDeriveCard_StateActions(t *testing.T) {
 		StatusAwaitingCompletionApproval: CardActionApproveCompletion,
 		StatusAwaitingHuman:              CardActionAnswerQuestion,
 	} {
-		card := deriveCard(Challenge{ID: "C-1", Status: st}, &Overview{}, nil, time.Now(), defaultStaleAfter)
+		card := deriveCard(Challenge{ID: "C-1", Status: st}, &Overview{}, nil, nil, time.Now(), defaultStaleAfter)
 		if !reflect.DeepEqual(card.NextHumanActions, []CardAction{want}) {
 			t.Errorf("%s: %v", st, card.NextHumanActions)
 		}
@@ -284,5 +284,79 @@ func TestDeriveCard_UsesStoreStaleThreshold(t *testing.T) {
 	}
 	if !reflect.DeepEqual(card.Modifiers, []CardModifier{CardModifierRunning, CardModifierUnresponsive}) {
 		t.Errorf("modifiers = %v", card.Modifiers)
+	}
+}
+
+// スロットは直近の run の課題にだけ結ぶ。過去にそのスロットを使っただけの課題には、
+// SlotIDs も clear_slot も付かない。
+func TestDeriveCard_SlotBindsOnlyToLatestRunChallenge(t *testing.T) {
+	s := newStoreForTest(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	older := cardChallenge(t, s, StatusInProgress)
+	newer := cardChallenge(t, s, StatusInProgress)
+	idle := cardChallenge(t, s, StatusInProgress)
+
+	var slotIDs [2]int64
+	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		for i := range slotIDs {
+			r, err := insertSlot(ctx, tx, insertSlotInput{Repo: "r", Provider: slotProviderWorktree, Path: "/p" + string(rune('a'+i))})
+			if err != nil {
+				return err
+			}
+			slotIDs[i], _ = parseSlotID(r.ID)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// SL-a: older → newer の順に使われた。SL-b: older だけが使った。
+	for _, u := range []struct {
+		c    Challenge
+		ago  time.Duration
+		slot *int64
+	}{
+		{older, 3 * time.Hour, &slotIDs[0]},
+		{older, 2 * time.Hour, &slotIDs[1]},
+		{newer, time.Hour, &slotIDs[0]},
+	} {
+		r := cardInsertRun(t, s, u.c, now.Add(-u.ago), u.slot)
+		id, _ := parseRunID(r.ID)
+		if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+			_, err := updateRunEnd(ctx, tx, id, updateRunEndInput{EndedAt: now, Result: RunResultInterrupted, CostSource: CostSourceUnknown})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE slot SET state = 'needs_attention', attention_reason = 'x'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.GetOverview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.NeedsHumanSlots) != 2 {
+		t.Fatalf("slots = %+v", st.NeedsHumanSlots)
+	}
+	for _, tc := range []struct {
+		c       Challenge
+		slots   []string
+		actions []CardAction
+	}{
+		{older, []string{formatSlotID(slotIDs[1])}, []CardAction{CardActionClearSlot}},
+		{newer, []string{formatSlotID(slotIDs[0])}, []CardAction{CardActionClearSlot}},
+		{idle, []string{}, []CardAction{}},
+	} {
+		card, err := s.DeriveCard(ctx, tc.c, st, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(card.SlotIDs, tc.slots) || !reflect.DeepEqual(card.NextHumanActions, tc.actions) {
+			t.Errorf("%s: slots = %v actions = %v, want %v %v", tc.c.ID, card.SlotIDs, card.NextHumanActions, tc.slots, tc.actions)
+		}
 	}
 }

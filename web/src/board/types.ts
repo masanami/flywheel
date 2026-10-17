@@ -33,6 +33,8 @@ export type Challenge = {
   nextHumanAction?: string;
   modifiers: string[];
   nextHumanActions: string[];
+  // card.slot_ids: スロットごとの直近の run がこの課題の run であるスロットの ID。
+  slotIds: string[];
 };
 
 // 実行中の課題（running 修飾を持つもの）。

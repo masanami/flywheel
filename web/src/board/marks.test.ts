@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import type { ChallengeCard } from "../api/types.gen.ts";
+import { toChallenge } from "./adapt.ts";
 import { faceHeadline, markContext, marksFor } from "./marks.ts";
 
 const card = (
@@ -49,4 +50,10 @@ it("AC-197: 60 文字ちょうどは全文、61 文字は先頭 60 文字と「�
   const sixty = "あ".repeat(60);
   expect(faceHeadline(sixty)).toBe(sixty);
   expect(faceHeadline(`${sixty}い`)).toBe(`${sixty}…`);
+});
+
+it("card.slot_ids を Challenge.slotIds へ写す", () => {
+  const c = card("C-1");
+  (c.card as { slot_ids: string[] }).slot_ids = ["SL-2"];
+  expect(toChallenge(c).slotIds).toEqual(["SL-2"]);
 });

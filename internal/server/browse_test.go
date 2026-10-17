@@ -406,7 +406,7 @@ func cardOf(t *testing.T, port int, id string) map[string]any {
 	t.Helper()
 	m := mustJSON(t, port, "/api/v1/workspaces/w/challenges/"+id)
 	c := m["card"].(map[string]any)
-	assertKeys(t, "card", c, "state", "modifiers", "next_human_actions", "headline", "context")
+	assertKeys(t, "card", c, "state", "modifiers", "next_human_actions", "slot_ids", "headline", "context")
 	if c["headline"] != nil || c["context"] != nil {
 		t.Errorf("headline/context must be null: %v", c)
 	}
@@ -596,6 +596,12 @@ func TestBrowseAPI_CardsDerivedFromRealStoreData(t *testing.T) {
 		}
 		if got := strs(c["next_human_actions"]); !reflect.DeepEqual(got, w["next_human_actions"]) {
 			t.Errorf("%s next_human_actions = %v, want %v", id, got, w["next_human_actions"])
+		}
+	}
+	// slot_ids: スロットの直近の run の課題（C-3）にだけ結ばれたスロットの ID が出る
+	for id, want := range map[string][]string{"C-1": {}, "C-2": {}, "C-3": {"SL-1"}, "C-4": {}, "C-5": {}, "C-6": {}} {
+		if got := strs(cardOf(t, port, id)["slot_ids"]); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s slot_ids = %v, want %v", id, got, want)
 		}
 	}
 }

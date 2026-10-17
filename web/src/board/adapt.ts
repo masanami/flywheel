@@ -45,6 +45,7 @@ export function toChallenge(
         : actions.map((a) => label(ACTION_LABELS, a)).join("、"),
     modifiers,
     nextHumanActions: actions,
+    slotIds: c.card.slot_ids,
   };
 }
 

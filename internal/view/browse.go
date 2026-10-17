@@ -5,12 +5,13 @@ import "github.com/masanami/flywheel/internal/core"
 // このファイルは閲覧の API（docs/features/m4-ui-server.md §IF / API「閲覧の API」）が新しく
 // 定めた応答の型を持つ。CLI の --json と同じ形の応答は view.go にある。
 
-// Card は課題カードの面。Headline・Context は S4 まで常に null。
+// Card は課題カードの面。Headline・Context は S4 まで常に null。SlotIDs は、スロットごとの直近の run がこの課題の run であるスロットの ID（API 専用。CLI の --json には出さない）。
 type Card struct {
 	Context          *string  `json:"context"`
 	Headline         *string  `json:"headline"`
 	Modifiers        []string `json:"modifiers"`
 	NextHumanActions []string `json:"next_human_actions"`
+	SlotIDs          []string `json:"slot_ids"`
 	State            string   `json:"state"`
 }
 
@@ -24,7 +25,7 @@ func FromCard(c *core.Card) Card {
 	for _, a := range c.NextHumanActions {
 		acts = append(acts, string(a))
 	}
-	return Card{Context: c.Context, Headline: c.Headline, Modifiers: mods, NextHumanActions: acts, State: string(c.State)}
+	return Card{Context: c.Context, Headline: c.Headline, Modifiers: mods, NextHumanActions: acts, SlotIDs: append([]string{}, c.SlotIDs...), State: string(c.State)}
 }
 
 // ChallengeCard は `GET …/challenges` の要素。Challenge の各キーに card を足した形。

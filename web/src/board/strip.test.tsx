@@ -131,11 +131,25 @@ it("AC-187: 片づけ待ちのスロットを選ぶと、課題の run に結ば
     unreadable_workspaces: [],
     workspaces: [{ name: "alpha", needs_human: withSlot }],
   };
+  // どのカードにも載らないスロットだけが出る（カードの slot_ids に載るスロットは出ない）
   expect(unboundSlots(withSlot, [])).toEqual(withSlot.slots);
-  const bound = { nextHumanActions: ["clear_slot"] } as never;
-  expect(
-    unboundSlots({ ...nh, slots: withSlot.slots.slice(0, 1) }, [bound]),
-  ).toEqual([]);
+  // 結ばれたスロットと結ばれないスロットが同時にあるとき、結ばれないものだけが残る
+  withSlot.slots.push({
+    path: "/w/bound",
+    repo: "r/bound",
+    run_id: null,
+    slot_id: "S-8",
+  });
+  const ids = withSlot.slots.map((s) => s.slot_id);
+  const bound = {
+    nextHumanActions: ["clear_slot"],
+    slotIds: ["S-8"],
+  } as never;
+  expect(unboundSlots(withSlot, [bound]).map((s) => s.slot_id)).toEqual(
+    ids.filter((id) => id !== "S-8"),
+  );
+  const all = { slotIds: ids } as never;
+  expect(unboundSlots(withSlot, [all])).toEqual([]);
   // 絞り込みは clear_slot を持つ課題だけを残す
   const cards = [
     { id: "A", nextHumanActions: ["clear_slot"] },
