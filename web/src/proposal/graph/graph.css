@@ -1281,3 +1281,30 @@ summary.graph-tool-btn::-webkit-details-marker {
 .graph-svg.is-narrow .graph-callout-text {
   font-size: 12px;
 }
+
+/* 詳細のモーダルに差し込む「待っている理由（直前の先行）」（2026-10-17 オーナー） */
+.graph-waiting h3 {
+  margin: 0.8rem 0 0.3rem;
+  font-size: 1em;
+}
+.graph-waiting ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.graph-waiting li {
+  margin: 0.35rem 0;
+  padding-left: 0.5rem;
+  border-left: 3px solid var(--graph-edge-lit);
+}
+.graph-waiting li[data-basis="conflict"] {
+  border-left-style: dashed;
+}
+.graph-waiting-reason {
+  margin-top: 0.1rem;
+}
+.graph-waiting-kind {
+  margin-right: 0.4rem;
+  font-size: 0.85em;
+  color: var(--board-muted-fg);
+}

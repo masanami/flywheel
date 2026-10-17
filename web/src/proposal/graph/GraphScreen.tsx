@@ -31,6 +31,7 @@ import {
   groupHeadHeight,
 } from "./GraphCanvas.tsx";
 import { RepoFilter } from "./RepoFilter.tsx";
+import { WaitingReasons } from "./WaitingReasons.tsx";
 import {
   BASIS_LABELS,
   CATEGORIES,
@@ -710,6 +711,14 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
             agentName={workspace.name}
             workspacePath={workspace.path}
             onClose={closeDetail}
+            // 本番の部品に、関係グラフの画面からだけ「待っている理由」を差し込む（ボードは渡さない）
+            supplement={
+              <WaitingReasons
+                id={detailChallenge.id}
+                relations={infos.rels}
+                infos={infos.map}
+              />
+            }
           />
         </RefreshKeyContext.Provider>
       ) : null}

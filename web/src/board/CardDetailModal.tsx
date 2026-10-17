@@ -79,6 +79,9 @@ type CardDetailModalProps = {
   agentName: string;
   workspacePath: string;
   onClose: () => void;
+  // 開発時の mock の案の画面（関係グラフ）だけが渡す差し込み口。「課題」の節の後ろに描く。
+  // ボードは渡さないので、省略時は何も描かない（ボードの表示は変わらない）。
+  supplement?: React.ReactNode;
 };
 
 type LoadState =
@@ -91,6 +94,7 @@ export function CardDetailModal({
   agentName,
   workspacePath,
   onClose,
+  supplement,
 }: CardDetailModalProps) {
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const refreshKey = useContext(RefreshKeyContext);
@@ -214,6 +218,8 @@ export function CardDetailModal({
             </dd>
           </dl>
         </section>
+
+        {supplement}
 
         {loadState.status === "loading" && (
           <div className="card-detail-log-loading">読み込み中...</div>
