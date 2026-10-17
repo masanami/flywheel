@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/masanami/flywheel/internal/core"
 )
@@ -27,6 +28,7 @@ func fakeExecutable(t *testing.T) (exe, rec string) {
 		"echo $$ > '" + rec + ".pid'\n" +
 		"{ echo \"$@\"; pwd -P; } > '" + rec + ".tmp'\n" +
 		"mv '" + rec + ".tmp' '" + rec + "'\n" +
+		"echo '周 Y-1 を開始した'\n" +
 		"exec sleep 60\n"
 	if err := os.WriteFile(exe, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -223,5 +225,74 @@ func TestCycleGetStates(t *testing.T) {
 	r, _ = get()
 	if r.State != "idle" || r.LastEndedAt == nil || r.LastResult == nil || *r.LastResult != "completed" {
 		t.Errorf("ended: %+v", r)
+	}
+}
+
+// scriptLauncherServer は script を実行ファイルとして POST を受ける server を立てる。
+func scriptLauncherServer(t *testing.T, script string) (port int, ws string) {
+	t.Helper()
+	ws = initWorkspace(t)
+	exe := filepath.Join(t.TempDir(), "fake-flywheel")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return startCycleServer(t, exe, ws), ws
+}
+
+func TestCyclePostChildExitsBeforeSignalIsInternalError(t *testing.T) {
+	port, _ := scriptLauncherServer(t, "echo 'config_invalid: 宣言の不備' >&2\nexit 3\n")
+	code, body := apiPost(t, port, cyclePath, "")
+	if code != 500 || errCode(t, body) != "internal_error" || strings.Contains(body, "started") {
+		t.Fatalf("POST = %d %s", code, body)
+	}
+	if !strings.Contains(body, "終了コード 3") || !strings.Contains(body, "config_invalid: 宣言の不備") {
+		t.Errorf("message に終了コードと標準エラーが無い: %s", body)
+	}
+}
+
+func TestCyclePostStderrTailIsBoundedAndUTF8Safe(t *testing.T) {
+	// 3 バイト文字 1,000 個 = 3,000 バイト。末尾 2,048 バイトの先頭は文字の途中になる。
+	data := filepath.Join(t.TempDir(), "err.txt")
+	if err := os.WriteFile(data, []byte(strings.Repeat("あ", 1000)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	port, _ := scriptLauncherServer(t, "cat '"+data+"' >&2\nexit 1\n")
+	code, body := apiPost(t, port, cyclePath, "")
+	if code != 500 {
+		t.Fatalf("POST = %d %s", code, body)
+	}
+	var r struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &r); err != nil {
+		t.Fatal(err)
+	}
+	msg := r.Error.Message
+	if !utf8.ValidString(msg) || strings.Contains(msg, "\uFFFD") {
+		t.Errorf("不正な UTF-8: %q", msg)
+	}
+	if n := strings.Count(msg, "あ"); n < 600 || n > 683 {
+		t.Errorf("末尾の文字数 = %d", n)
+	}
+}
+
+func TestCyclePostNoSignalNorExitReturnsStartedWithinFiveSeconds(t *testing.T) {
+	port, _ := scriptLauncherServer(t, "exec sleep 60\n")
+	start := time.Now()
+	code, body := apiPost(t, port, cyclePath, "")
+	if code != 200 || strings.TrimSpace(body) != `{"started":true}` {
+		t.Fatalf("POST = %d %s", code, body)
+	}
+	if d := time.Since(start); d < 2500*time.Millisecond || d > 5*time.Second {
+		t.Errorf("応答までの時間 = %v", d)
+	}
+}
+
+func TestCyclePostSignalThenExitStillStarted(t *testing.T) {
+	port, _ := scriptLauncherServer(t, "echo '周 Y-1 を開始した'\nexit 2\n")
+	if code, body := apiPost(t, port, cyclePath, ""); code != 200 || strings.TrimSpace(body) != `{"started":true}` {
+		t.Fatalf("POST = %d %s", code, body)
 	}
 }

@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/masanami/flywheel/internal/adapters/git"
 	"github.com/masanami/flywheel/internal/adapters/github"
@@ -118,6 +121,16 @@ func runCycle(a Args) (any, error) {
 		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(), newCheckSource()
 	}
 
+	// 周の開始を標準出力へ知らせる（UI の server が起動の合図として読む）。--json では書かない。
+	// 読み手が消えても EPIPE で落ちないよう SIGPIPE を無視し、書き込みの失敗は無視する。
+	var onBegin func(string)
+	if !a.Bools["json"] && a.Stdout != nil {
+		// Ignore ではなく Notify にする（Ignore は exec した子にも引き継がれ、子のパイプ処理を変えてしまう）。
+		// Notify 中は標準出力への書き込みが EPIPE を返すだけで、プロセスは落ちない。
+		signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
+		onBegin = func(id string) { _, _ = fmt.Fprintf(a.Stdout, "周 %s を開始した\n", id) }
+	}
+
 	res, err := a.Store.RunCycle(ctx, core.CycleRunInput{
 		Trigger:   trigger,
 		AgentDecl: agent,
@@ -130,6 +143,7 @@ func runCycle(a Args) (any, error) {
 		Reconcile: reconcile,
 		Checks:    checks,
 		Predictor: launcher,
+		OnBegin:   onBegin,
 	})
 	if err != nil {
 		return nil, mapCoreErr(err)

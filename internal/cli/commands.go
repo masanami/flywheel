@@ -48,6 +48,8 @@ type Args struct {
 	Stdin      io.Reader
 	// Stderr は標準エラー出力（serve の待ち受けの 1 行など、結果とは別に出す表示用）。
 	Stderr io.Writer
+	// Stdout は標準出力（cycle の周の開始の 1 行など、結果の出力より前に書く表示用）。
+	Stdout io.Writer
 	// Store は RequiresStore が true のコマンドにだけ設定される、開いた
 	// ワークスペースのストア。Run は Close してはならない（呼び出し元の run が
 	// 責任を持つ）。

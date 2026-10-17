@@ -14,9 +14,14 @@ var statusBase = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 // seedCycle は周を 1 件作る（result が空なら未終了）。
 func seedCycle(t *testing.T, s *Store, started time.Time, ended *time.Time, result CycleResult) int64 {
 	t.Helper()
+	return seedCycleTrigger(t, s, "t", started, ended, result)
+}
+
+func seedCycleTrigger(t *testing.T, s *Store, trigger string, started time.Time, ended *time.Time, result CycleResult) int64 {
+	t.Helper()
 	var id int64
 	err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		row, err := insertCycle(context.Background(), tx, insertCycleInput{Trigger: "t", StartedAt: started, BudgetUSD: 1000000})
+		row, err := insertCycle(context.Background(), tx, insertCycleInput{Trigger: trigger, StartedAt: started, BudgetUSD: 1000000})
 		if err != nil {
 			return err
 		}
@@ -88,14 +93,44 @@ func TestReadCycleStatus_HeartbeatBoundary(t *testing.T) {
 	}
 }
 
-func TestReadCycleStatus_NoLockOpenCycleIsStale(t *testing.T) {
+func TestReadCycleStatus_NoLockOpenCycleIsIdle(t *testing.T) {
 	s := newStoreForTest(t)
 	seedCycle(t, s, statusBase, nil, "")
 	got, err := s.ReadCycleStatus(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State != CycleStateStale || got.LockHeld {
+	if got.State != CycleStateIdle || got.LockHeld {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestReadCycleStatus_IndividualOpCyclesExcluded(t *testing.T) {
+	triggers := []string{"run", "classify --auto", "plan --auto", "verify --auto"}
+	s := newStoreForTest(t)
+	for i, tr := range triggers {
+		st := statusBase.Add(time.Duration(i) * time.Minute)
+		e := st.Add(time.Second)
+		seedCycleTrigger(t, s, tr, st, &e, CycleResultCompleted)
+	}
+	got, err := s.ReadCycleStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastStartedAt != nil || got.LastEndedAt != nil || got.LastResult != nil {
+		t.Errorf("個別の操作の周だけのとき null: %+v", got)
+	}
+	// ui・manual の周は数え、より新しい個別の操作の周は飛ばす。
+	e := statusBase.Add(time.Hour + time.Second)
+	seedCycleTrigger(t, s, "ui", statusBase.Add(time.Hour), &e, CycleResultAborted)
+	e2 := statusBase.Add(2*time.Hour + time.Second)
+	seedCycleTrigger(t, s, "run", statusBase.Add(2*time.Hour), &e2, CycleResultCompleted)
+	got, err = s.ReadCycleStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastStartedAt == nil || !got.LastStartedAt.Equal(statusBase.Add(time.Hour)) ||
+		got.LastResult == nil || *got.LastResult != CycleResultAborted {
 		t.Errorf("got %+v", got)
 	}
 }
@@ -112,7 +147,7 @@ func TestReadCycleStatus_Last(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State != CycleStateStale {
+	if got.State != CycleStateIdle {
 		t.Errorf("state = %s", got.State)
 	}
 	if got.LastStartedAt == nil || !got.LastStartedAt.Equal(third) {
