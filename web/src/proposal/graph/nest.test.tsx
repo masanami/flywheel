@@ -214,7 +214,7 @@ it("畳んだ親: 中の件数と、実施中・人間の操作待ちがある�
   ).toBeNull();
 });
 
-it("実施中の強調: いま実施中の課題を上に並べ、押すと大枠を開いて選ぶ", async () => {
+it("実施中の強調: いま実施中の課題を上に並べ、押すと大枠を開いて詳細のモーダルを開く", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   const row = screen.getByRole("region", { name: "いま実施中" });
@@ -224,15 +224,14 @@ it("実施中の強調: いま実施中の課題を上に並べ、押すと大�
       .map((b) => b.textContent?.split(" ")[0]),
   ).toEqual(["C-5", "C-6", "C-17"]);
   fireEvent.click(within(row).getByRole("button", { name: /^C-17 / }));
-  // C-17 は C-15 → C-16 の 2 段の大枠の中にある
+  const modal = await screen.findByTestId("card-detail-content");
+  expect(modal.textContent).toContain("C-17");
+  fireEvent.click(within(modal).getByText("閉じる"));
+  // C-17 は C-15 → C-16 の 2 段の大枠の中にあり、閉じたあと見えるように大枠を開いておく
   expect(node("C-17")).toHaveAttribute("data-active", "true");
-  expect(node("C-17")).toHaveAttribute("aria-pressed", "true");
   expect(node("C-17").textContent).toContain("実施中");
   expect(node("C-16").getAttribute("aria-label")).toContain("開いた親");
-  const panel = screen.getByRole("complementary", { name: "選んだ課題" });
-  const parentList = within(panel).getByText("親課題（外側の大枠）")
-    .nextElementSibling as HTMLElement;
-  expect(within(parentList).getByRole("button").textContent).toBe("C-16");
+  expect(node("C-15").getAttribute("aria-label")).toContain("開いた親");
   // 実施中でない課題には印を付けない
   expect(node("C-7")).not.toHaveAttribute("data-active");
 });

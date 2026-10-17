@@ -1,29 +1,23 @@
 import {
   type MouseEvent,
   type ReactNode,
-  useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { api } from "../../api/client.ts";
 import type { ChallengeGraphResponse } from "../../api/proposed.ts";
 import { StaleLabelContext } from "../../board/AgentColumn.tsx";
 import { Board } from "../../board/Board.tsx";
-import {
-  ACTION_LABELS,
-  MODIFIER_LABELS,
-  NO_ACTION_LABEL,
-  STATE_LABELS,
-  label,
-} from "../../labels.ts";
+import { CardDetailModal } from "../../board/CardDetailModal.tsx";
+import { toAgentBoard } from "../../board/adapt.ts";
 import type { LiveState } from "../../live/useLive.ts";
-import { OpenDetailContext } from "../../nav.tsx";
+import { RefreshKeyContext } from "../../nav.tsx";
 import {
   AgentDock,
   AgentPicker,
   AgentRail,
-  type DockPosition,
   type DockTab,
   summariesOf,
   useAgentIcons,
@@ -33,9 +27,13 @@ import {
   GraphCanvas,
   type Inside,
   type NodeInfo,
+  edgeKey,
+  groupHeadHeight,
 } from "./GraphCanvas.tsx";
+import { RepoFilter } from "./RepoFilter.tsx";
+import { WaitingReasons } from "./WaitingReasons.tsx";
 import {
-  AUTO_CHECK_TEXT,
+  BASIS_LABELS,
   CATEGORIES,
   type Category,
   STALE_HINT,
@@ -60,9 +58,10 @@ import "./graph.css";
 
 export const GRAPH_TITLE = "関係グラフ（案）";
 
+// 2026-10-17 オーナー: カードはもう少し大きくてよい。題名を 2 行まで出せる幅にする。
 export const WIDE: Dimensions = {
-  nodeW: 168,
-  nodeH: 60,
+  nodeW: 200,
+  nodeH: 76,
   gapX: 20,
   gapY: 40,
   pad: 12,
@@ -70,8 +69,13 @@ export const WIDE: Dimensions = {
   headH: 30,
   inset: 10,
   maxW: 860,
-  titleChars: 12,
+  titleLines: 2,
   metaChars: 22,
+  ctxCharW: 11,
+  ctxLineH: 16,
+  edgeChars: 16,
+  calloutW: 280,
+  calloutLines: 4,
 };
 // 幅 360px の端末で、一番外の段に 3 つ並んでも縮めずに読める大きさ。大枠の中は 2 つで折り返す。
 export const NARROW: Dimensions = {
@@ -84,8 +88,13 @@ export const NARROW: Dimensions = {
   headH: 28,
   inset: 6,
   maxW: 328,
-  titleChars: 7,
+  titleLines: 1,
   metaChars: 9,
+  ctxCharW: 10,
+  ctxLineH: 15,
+  edgeChars: 9,
+  calloutW: 220,
+  calloutLines: 5,
 };
 const NARROW_QUERY = "(max-width: 480px)";
 
@@ -106,33 +115,32 @@ function useNarrow(): boolean {
 
 type View = "graph" | "board";
 
-// 詳細を開くと画面が外れて戻ると作り直されるため、表示・選んだワークスペースと課題・開いた親をここに覚えておく。
-// 選んだエージェント・引き出しの開閉もここに持つ（サーバには持たない）。
+// 画面を外れて戻ると作り直されるため、表示・選んだワークスペース・開いた親をここに覚えておく。
+// 欄の開閉もここに持つ（サーバには持たない）。
 const memory: {
   view: View;
   ws: string | null;
-  node: string | null;
   open: Record<string, string[]>;
   dock: boolean;
-  dockPos: DockPosition;
   dockTab: DockTab;
+  // 位置づけを広げた大枠
+  context: Record<string, string[]>;
 } = {
   view: "graph",
   ws: null,
-  node: null,
   open: {},
-  dock: false,
-  dockPos: "bottom",
+  // 2026-10-17 オーナー: 欄は右に固定し、以前の右のパネルの場所を欄に充てる。既定で開いておく
+  dock: true,
   dockTab: "terminal",
+  context: {},
 };
 export function resetGraphMemory(): void {
   memory.view = "graph";
   memory.ws = null;
-  memory.node = null;
   memory.open = {};
-  memory.dock = false;
-  memory.dockPos = "bottom";
+  memory.dock = true;
   memory.dockTab = "terminal";
+  memory.context = {};
 }
 
 type GraphState =
@@ -174,19 +182,12 @@ export function GraphScreen({ live }: { live: LiveState }) {
   const chooseWs = (name: string) => {
     if (name === ws) return;
     memory.ws = name;
-    memory.node = null;
     setChosen(name);
   };
   const [dock, setDock] = useState(memory.dock);
   const toggleDock = () => {
     memory.dock = !dock;
     setDock(!dock);
-  };
-  // 欄の位置の 2 案（試作だけの切り替え。2026-10-14 オーナー: どちらのパターンも見たい）
-  const [dockPos, setDockPos] = useState<DockPosition>(memory.dockPos);
-  const chooseDockPos = (p: DockPosition) => {
-    memory.dockPos = p;
-    setDockPos(p);
   };
   const [dockTab, setDockTab] = useState<DockTab>(memory.dockTab);
   const chooseDockTab = (t: DockTab) => {
@@ -223,32 +224,8 @@ export function GraphScreen({ live }: { live: LiveState }) {
             列のボード
           </button>
         </fieldset>
-        <fieldset
-          aria-label="欄の位置（案）"
-          className="graph-seg graph-seg-small"
-        >
-          <legend>欄の位置（案）</legend>
-          <button
-            type="button"
-            aria-pressed={dockPos === "bottom"}
-            onClick={() => chooseDockPos("bottom")}
-          >
-            下の引き出し
-          </button>
-          <button
-            type="button"
-            aria-pressed={dockPos === "right"}
-            onClick={() => chooseDockPos("right")}
-          >
-            右の分割
-          </button>
-        </fieldset>
       </div>
-      <div
-        className="agent-shell"
-        data-dock-pos={dockPos}
-        data-dock-open={dock || undefined}
-      >
+      <div className="agent-shell" data-dock-open={dock || undefined}>
         <div className="agent-main">
           {view === "graph" ? (
             <div className="agent-layout">
@@ -287,7 +264,6 @@ export function GraphScreen({ live }: { live: LiveState }) {
           agents={agents}
           ws={ws}
           open={dock}
-          position={dockPos}
           tab={dockTab}
           onToggle={toggleDock}
           onChoose={chooseWs}
@@ -298,15 +274,23 @@ export function GraphScreen({ live }: { live: LiveState }) {
   );
 }
 
-// 選んだエージェント 1 つ分のグラフ。エージェントを切り替えると作り直す（key）ので、選択と絞り込みは持ち越さない。
+// 選んだエージェント 1 つ分のグラフ。エージェントを切り替えると作り直す（key）ので、絞り込みは持ち越さない。
+// 2026-10-17 オーナー: 課題を押すとボードと同じ詳細のモーダルを開く（右のパネルで選ぶ流れはやめた）。
 function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
-  const open = useContext(OpenDetailContext);
   const narrow = useNarrow();
   const dims = narrow ? NARROW : WIDE;
-  const [selected, setSelected] = useState<string | null>(memory.node);
+  // 押した依存の線（`from:to`。見えている箱どうし。理由の札を出したままにする）と、マウスを重ねた・フォーカスした線
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  const [hoverEdge, setHoverEdge] = useState<string | null>(null);
+  // カーソルを重ねた・キーボードで移った課題（先行・後続の強調と一言での吹き出しの起点）
+  const [hoverNode, setHoverNode] = useState<string | null>(null);
+  // 詳細のモーダルを開いている課題と、閉じたときにフォーカスを戻す要素（ボードのカードと同じ）
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const trigger = useRef<Element | null>(null);
+  const [contextOpenMap, setContextOpenMap] = useState(memory.context);
   const [openParents, setOpenParents] = useState(memory.open);
   const [catFilter, setCatFilter] = useState<Category | null>(null);
-  const [repoFilter, setRepoFilter] = useState<string | null>(null);
+  const [repoFilter, setRepoFilter] = useState<string[]>([]);
   const [hideDone, setHideDone] = useState(false);
   const graph = useGraph(ws, live.lastUpdated);
   const wsData = ws ? live.data[ws] : undefined;
@@ -370,11 +354,24 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
       else s.add(id);
       return s;
     });
-  // 選ぶと、畳んだ大枠の中にあっても見えるように祖先を開く。
-  const select = (id: string | null) => {
-    memory.node = id;
-    setSelected(id);
-    if (id) setOpen((s) => new Set([...s, ...ancestorsOf(id, infos.pm)]));
+  const openDetail = (id: string) => {
+    trigger.current = document.activeElement;
+    setDetailId(id);
+  };
+  const closeDetail = () => {
+    setDetailId(null);
+    const t = trigger.current;
+    if (t instanceof HTMLElement || t instanceof SVGElement) t.focus();
+  };
+  const contextOpen = new Set(ws ? (contextOpenMap[ws] ?? []) : []);
+  const toggleContext = (id: string) => {
+    if (!ws) return;
+    const next = new Set(contextOpen);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    const all = { ...contextOpenMap, [ws]: [...next].sort(compareIds) };
+    memory.context = all;
+    setContextOpenMap(all);
   };
 
   // 完了を隠しても、まだ終わっていない子を持つ親（大枠）は残す。
@@ -390,11 +387,39 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
         ),
     )
     .map((i) => i.card.id);
-  const layout = layoutGraph(shownIds, infos.rels, dims, expanded);
+  // 開いた大枠の見出しは一言でと位置づけの分だけ伸びる。行数は大枠の幅で決まり、幅は見出しの高さに左右されないので、
+  // 一度配置して大枠の幅を得てから、見出しの高さを決めて配置し直す。
+  const cardOf = (id: string) => infos.map.get(id)?.card.card;
+  const headOf = (width: (id: string) => number) => (id: string) =>
+    groupHeadHeight(
+      cardOf(id)?.headline ?? null,
+      cardOf(id)?.context ?? null,
+      width(id),
+      dims,
+      contextOpen.has(id),
+    );
+  const first = layoutGraph(
+    shownIds,
+    infos.rels,
+    dims,
+    expanded,
+    headOf(() => dims.maxW),
+  );
+  const widths = new Map(first.groups.map((g) => [g.id, g.w]));
+  const layout = layoutGraph(
+    shownIds,
+    infos.rels,
+    dims,
+    expanded,
+    headOf((id) => widths.get(id) ?? dims.maxW),
+  );
   const pm = layout.parents;
   const kids = childrenMap(pm);
   const shownRels = validRelations(new Set(shownIds), infos.rels);
-  const sel = selected && shownIds.includes(selected) ? selected : null;
+  const sel = hoverNode && shownIds.includes(hoverNode) ? hoverNode : null;
+  const edgeOf = (key: string | null) =>
+    key ? (layout.edges.find((e) => edgeKey(e) === key) ?? null) : null;
+  const selEdge = edgeOf(selectedEdge);
   const up = new Set(sel ? upstreamOf(sel, shownRels) : []);
   const down = new Set(sel ? downstreamOf(sel, shownRels) : []);
   const ancestors = new Set(sel ? ancestorsOf(sel, pm) : []);
@@ -410,18 +435,31 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
     .filter((i) => i.active)
     .map((i) => i.card);
 
+  // 線を選んだときは、線の両端の箱（とその中の課題）だけを濃く残す
+  const edgeEnds = new Set(
+    selEdge
+      ? [selEdge.from, selEdge.to].flatMap((b) => [
+          b,
+          ...descendantsOf(b, kids),
+        ])
+      : [],
+  );
   const relevant = (id: string) =>
-    sel === null ||
-    id === sel ||
-    up.has(id) ||
-    down.has(id) ||
-    ancestors.has(id) ||
-    inner.has(id);
+    selEdge
+      ? edgeEnds.has(id)
+      : sel === null ||
+        id === sel ||
+        up.has(id) ||
+        down.has(id) ||
+        ancestors.has(id) ||
+        inner.has(id);
   const matches = (id: string) => {
     const i = infos.map.get(id);
     if (!i) return false;
     if (catFilter && i.category !== catFilter) return false;
-    if (repoFilter && !i.repos.includes(repoFilter)) return false;
+    // 選んだリポジトリのどれかを触る課題を残す
+    if (repoFilter.length > 0 && !repoFilter.some((r) => i.repos.includes(r)))
+      return false;
     return true;
   };
   // 箱が表す課題: 自分と、大枠（開いていても畳んでいても）の中の課題すべて。
@@ -448,6 +486,14 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
       human: ds.filter((d) => d?.category === "human").length,
     };
   };
+
+  const workspace = live.workspaces.find((w) => w.name === ws);
+  const detailChallenge =
+    detailId && workspace
+      ? toAgentBoard(workspace, wsData).challenges.find(
+          (c) => c.id === detailId,
+        )
+      : undefined;
 
   let body: ReactNode;
   if (!ws) {
@@ -476,25 +522,27 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
             narrow={narrow}
             infos={infos.map}
             inside={inside}
-            selected={sel}
+            focused={sel}
             relationOf={relationOf}
             dimmed={dimmed}
             edgeLit={edgeLit}
-            onSelect={(id) => select(id === sel ? null : id)}
-            onOpen={(id) => open?.(ws, id)}
+            onOpen={openDetail}
             onToggle={toggle}
+            onHoverNode={setHoverNode}
+            contextOpen={(id) => contextOpen.has(id)}
+            onToggleContext={toggleContext}
+            selectedEdge={selEdge ? selectedEdge : null}
+            // 2026-10-17 オーナー: 札は線を押したときと重ねたときだけ（課題に重ねても出さない）
+            edgeLabeled={(e) => {
+              const key = edgeKey(e);
+              return key === selectedEdge || key === hoverEdge;
+            }}
+            onSelectEdge={(key) =>
+              setSelectedEdge(key === selectedEdge ? null : key)
+            }
+            onHoverEdge={setHoverEdge}
           />
         </div>
-        <SelectedPanel
-          ws={ws}
-          id={sel}
-          infos={infos.map}
-          relations={shownRels}
-          parent={sel ? (pm.get(sel) ?? null) : null}
-          childIds={sel ? (kids.get(sel) ?? []) : []}
-          onSelect={select}
-          onOpen={open}
-        />
       </div>
     );
   }
@@ -502,7 +550,7 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
   const parents = [...kids.keys()];
   // いま効いている絞り込みの数（区分・リポジトリ・完了を隠す）。畳んでいても数で分かるようにする
   const filtering =
-    (catFilter ? 1 : 0) + (repoFilter ? 1 : 0) + (hideDone ? 1 : 0);
+    (catFilter ? 1 : 0) + (repoFilter.length > 0 ? 1 : 0) + (hideDone ? 1 : 0);
   return (
     <>
       <div className="graph-toolbar">
@@ -536,14 +584,26 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
                 {CATEGORIES.map((k) => (
                   <li key={k.key} data-category={k.key}>
                     <span className="graph-swatch" aria-hidden="true" />
-                    <b>{k.label}</b>: {k.hint}
+                    <b>{k.label}</b>
                   </li>
                 ))}
                 <li className="graph-legend-stale">
                   <b>{STALE_LABEL}</b>: 赤い箱。{STALE_HINT}
                 </li>
                 <li>
-                  <b>実線の矢印</b>: 先行 → 後続
+                  <b>実線の矢印</b>: 先行 → 後続。
+                  {BASIS_LABELS.prerequisite}（先行の成果を使う）
+                </li>
+                <li>
+                  <b>破線の矢印</b>: 先行 → 後続。
+                  {BASIS_LABELS.conflict}（同じものを触るので順に走らせる）
+                </li>
+                <li>
+                  <b>矢印の理由</b>: 線を押すか重ねると、なぜ待つのかを出す
+                </li>
+                <li>
+                  <b>一言で</b>:
+                  課題にカーソルを重ねると、課題の一言でを吹き出しで出す。開いた大枠では見出しの欄に位置づけと並べて出す。課題を押すと詳細を開く
                 </li>
                 <li>
                   <b>大枠</b>: 親課題（中に子課題）。重ねた箱は畳んだ親で、▶
@@ -563,8 +623,14 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
                 key={c.id}
                 type="button"
                 className="graph-active-chip"
-                aria-pressed={c.id === sel}
-                onClick={() => select(c.id)}
+                aria-haspopup="dialog"
+                onClick={() => {
+                  // 畳んだ大枠の中にあっても、閉じたあと見えるように祖先を開いてから詳細を開く
+                  setOpen(
+                    (s) => new Set([...s, ...ancestorsOf(c.id, infos.pm)]),
+                  );
+                  openDetail(c.id);
+                }}
               >
                 {c.id} {clip(c.title, narrow ? 8 : 16)}
               </button>
@@ -591,7 +657,6 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
                     className="graph-legend-item"
                     data-category={k.key}
                     aria-pressed={catFilter === k.key}
-                    title={k.hint}
                     onClick={() =>
                       setCatFilter(catFilter === k.key ? null : k.key)
                     }
@@ -606,22 +671,11 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
               ))}
             </ul>
             {repos.length > 0 ? (
-              <fieldset aria-label="リポジトリ" className="graph-repos">
-                <legend>リポジトリ</legend>
-                {repos.map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    className="graph-repo-chip"
-                    aria-label={r}
-                    title={r}
-                    aria-pressed={repoFilter === r}
-                    onClick={() => setRepoFilter(repoFilter === r ? null : r)}
-                  >
-                    {r.split("/").pop()}
-                  </button>
-                ))}
-              </fieldset>
+              <RepoFilter
+                repos={repos}
+                chosen={repoFilter}
+                onChange={setRepoFilter}
+              />
             ) : null}
             <label className="graph-switch">
               <input
@@ -638,7 +692,7 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
                 className="graph-clear"
                 onClick={() => {
                   setCatFilter(null);
-                  setRepoFilter(null);
+                  setRepoFilter([]);
                   setHideDone(false);
                 }}
               >
@@ -649,158 +703,25 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
         </details>
       </div>
       {body}
+      {detailChallenge && workspace ? (
+        // ボードのカード（TaskCard）と同じ部品を同じ渡し方で開く
+        <RefreshKeyContext.Provider value={live.lastUpdated}>
+          <CardDetailModal
+            challenge={detailChallenge}
+            agentName={workspace.name}
+            workspacePath={workspace.path}
+            onClose={closeDetail}
+            // 本番の部品に、関係グラフの画面からだけ「待っている理由」を差し込む（ボードは渡さない）
+            supplement={
+              <WaitingReasons
+                id={detailChallenge.id}
+                relations={infos.rels}
+                infos={infos.map}
+              />
+            }
+          />
+        </RefreshKeyContext.Provider>
+      ) : null}
     </>
-  );
-}
-
-function IdList({
-  ids,
-  infos,
-  onSelect,
-  empty,
-}: {
-  ids: string[];
-  infos: Map<string, NodeInfo>;
-  onSelect: (id: string) => void;
-  empty: string;
-}) {
-  if (ids.length === 0) return <p className="graph-muted">{empty}</p>;
-  return (
-    <ul className="graph-id-list">
-      {ids.map((id) => {
-        const i = infos.get(id);
-        return (
-          <li key={id} data-category={i?.category}>
-            <span className="graph-swatch" aria-hidden="true" />
-            <button type="button" onClick={() => onSelect(id)}>
-              {id}
-            </button>{" "}
-            {i ? clip(i.card.title, 24) : ""}
-            {i?.category === "done" ? "（完了）" : ""}
-            {i?.active ? "（実施中）" : ""}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function SelectedPanel({
-  ws,
-  id,
-  infos,
-  relations,
-  parent,
-  childIds,
-  onSelect,
-  onOpen,
-}: {
-  ws: string;
-  id: string | null;
-  infos: Map<string, NodeInfo>;
-  relations: Parameters<typeof downstreamOf>[1];
-  parent: string | null;
-  childIds: string[];
-  onSelect: (id: string | null) => void;
-  onOpen: ((ws: string, id: string) => void) | null;
-}) {
-  const i = id ? infos.get(id) : undefined;
-  if (!id || !i) {
-    return (
-      <aside aria-label="選んだ課題" className="graph-panel">
-        <p className="graph-muted">
-          課題を選ぶと、その先行・後続（終わると進められるようになる課題）と詳細への入口をここに出します。ダブルクリックでも詳細を開けます。
-        </p>
-      </aside>
-    );
-  }
-  const c = i.card;
-  const actions = c.card.next_human_actions;
-  return (
-    <aside aria-label="選んだ課題" className="graph-panel">
-      <h3>
-        {c.id} {c.title}
-      </h3>
-      <p data-category={i.category}>
-        <span className="graph-swatch" aria-hidden="true" />
-        {CATEGORIES.find((k) => k.key === i.category)?.label}
-        {" ・ "}
-        {label(STATE_LABELS, c.card.state)}
-        {c.card.modifiers.map((m) =>
-          // 更新なしは下の帯で、自動の確認待ちは利用分野の語（CI）を避けて下の行で示す
-          m === "unresponsive" || m === "waiting_ci"
-            ? null
-            : ` [${label(MODIFIER_LABELS, m)}]`,
-        )}
-      </p>
-      {c.card.modifiers.includes("unresponsive") ? (
-        <p className="graph-panel-stale" title={STALE_HINT}>
-          {STALE_LONG}
-        </p>
-      ) : null}
-      {i.autoCheck ? (
-        <p className="graph-panel-autocheck">{AUTO_CHECK_TEXT}</p>
-      ) : null}
-      {i.party ? (
-        <p className="graph-panel-party">
-          外部待ち: {i.party.party}（{i.party.reason}）
-        </p>
-      ) : null}
-      {c.card.headline ? <p>{c.card.headline}</p> : null}
-      <h4>次に人間がすること</h4>
-      <p>
-        {actions.length === 0
-          ? NO_ACTION_LABEL
-          : actions.map((a) => label(ACTION_LABELS, a)).join("、")}
-      </p>
-      <h4>これが終わると進められる課題</h4>
-      <IdList
-        ids={downstreamOf(id, relations)}
-        infos={infos}
-        onSelect={onSelect}
-        empty="なし"
-      />
-      <h4>先に終わる必要がある課題</h4>
-      <IdList
-        ids={upstreamOf(id, relations)}
-        infos={infos}
-        onSelect={onSelect}
-        empty="なし"
-      />
-      {parent ? (
-        <>
-          <h4>親課題（外側の大枠）</h4>
-          <IdList
-            ids={[parent]}
-            infos={infos}
-            onSelect={onSelect}
-            empty="なし"
-          />
-        </>
-      ) : null}
-      {childIds.length > 0 ? (
-        <>
-          <h4>子課題（大枠の中）</h4>
-          <IdList
-            ids={childIds}
-            infos={infos}
-            onSelect={onSelect}
-            empty="なし"
-          />
-        </>
-      ) : null}
-      <h4>触るリポジトリ</h4>
-      <p>{i.repos.length === 0 ? "記録なし" : i.repos.join("、")}</p>
-      <div className="graph-panel-actions">
-        {onOpen ? (
-          <button type="button" onClick={() => onOpen(ws, id)}>
-            詳細を開く
-          </button>
-        ) : null}
-        <button type="button" onClick={() => onSelect(null)}>
-          選択を外す
-        </button>
-      </div>
-    </aside>
   );
 }

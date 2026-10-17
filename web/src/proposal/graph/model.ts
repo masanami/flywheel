@@ -1,7 +1,11 @@
 // 関係グラフの案（flywheel#176）の導出と配置。画面から切り離した純粋な関数だけを置く。
 // 区分は仕様 m4-ui-server.md「状況の表示とライブ更新」のカードの区分の印と同じ値から導く（API に区分を足さない）。
 
-import type { ChallengeRelation, RelationKind } from "../../api/proposed.ts";
+import type {
+  ChallengeRelation,
+  DependencyBasis,
+  RelationKind,
+} from "../../api/proposed.ts";
 import type { ChallengeCard, StatusResponse } from "../../api/types.gen.ts";
 
 // ノードの色の区分。1 つの課題は 1 つの区分だけに入り、上から順に先に当たったものを採る。
@@ -13,29 +17,20 @@ export type Category =
   | "done"
   | "other";
 
-export const CATEGORIES: { key: Category; label: string; hint: string }[] = [
-  {
-    key: "human",
-    label: "人間の操作待ち",
-    hint: "次に人間がすることがある（card.next_human_actions が空でない）",
-  },
-  {
-    key: "external",
-    label: "外部待ち",
-    hint: "自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など。案の印 waiting_party）",
-  },
-  {
-    key: "running",
-    label: "システムが実行中",
-    hint: "システムが進めている。run が動いているか、自動の確認の結果を待っていて、結果が出ればシステムが先へ進める",
-  },
-  {
-    key: "system",
-    label: "システムが次に進めるもの",
-    hint: "次の周でシステムが進められる（status.actionable）",
-  },
-  { key: "done", label: "完了", hint: "完了した課題" },
-  { key: "other", label: "その他", hint: "上のいずれにも当たらない" },
+// 区分の名前。2026-10-17 オーナー: 凡例は区分の名前と色だけにし、実装の語（フィールド名など）の注記を人に見せない。
+// 判定の根拠は categoryOf の注記に置く。
+export const CATEGORIES: { key: Category; label: string }[] = [
+  // card.next_human_actions が空でない
+  { key: "human", label: "人間の操作待ち" },
+  // 自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など。案の印 waiting_party）
+  { key: "external", label: "外部待ち" },
+  // run が動いているか、自動の確認（waiting_ci）の結果を待っていて、結果が出ればシステムが先へ進める
+  { key: "running", label: "システムが実行中" },
+  // 次の周でシステムが進められる（status.actionable）
+  { key: "system", label: "システムが次に進めるもの" },
+  { key: "done", label: "完了" },
+  // 上のいずれにも当たらない
+  { key: "other", label: "その他" },
 ];
 
 // 実行中で、しきい値を超えて記録が無い run（unresponsive）の見せ方。旧 board（claude-flywheel-board の
@@ -245,12 +240,19 @@ export interface LayoutBox {
   depth: number;
   // node は課題の箱（畳んだ親を含む）、group は開いた親の大枠
   kind: "node" | "group";
+  // 開いた親の大枠の見出しの高さ（位置づけを広げると伸びる）。node は d.headH のまま
+  headH: number;
 }
 
 export interface LayoutEdge {
   from: string;
   to: string;
   path: string;
+  // 線の中ほど（理由の札を置く位置）
+  mid: { x: number; y: number };
+  // この線が表す依存（畳んだ親へつなぎ替えると複数になる）。理由と種類はここから引く
+  relations: ChallengeRelation[];
+  basis: DependencyBasis;
 }
 
 export interface Layout {
@@ -288,11 +290,13 @@ interface Arranged {
 }
 
 // expanded は開いている親の集合。ここに無い親は畳んで 1 つの箱にする。
+// headOf は開いた親ごとの見出しの高さ（無ければ d.headH）。大枠の幅は見出しの高さに左右されない。
 export function layoutGraph(
   ids: string[],
   relations: ChallengeRelation[],
   d: Dims,
   expanded: Set<string> = new Set(),
+  headOf: (id: string) => number = () => d.headH,
 ): Layout {
   const order = [...ids].sort(compareIds);
   const rels = validRelations(new Set(order), relations);
@@ -327,7 +331,7 @@ export function layoutGraph(
         inner
           ? {
               w: Math.max(d.nodeW, inner.w + 2 * d.inset),
-              h: d.headH + inner.h + d.inset,
+              h: headOf(m) + inner.h + d.inset,
               inner,
             }
           : { w: d.nodeW, h: d.nodeH, inner: null },
@@ -467,13 +471,14 @@ export function layoutGraph(
         layer: p.layer,
         depth,
         kind: p.inner ? "group" : "node",
+        headH: p.inner ? headOf(p.id) : d.headH,
       };
       if (p.inner) {
         groups.push(box);
         flat(
           p.inner,
           box.x + (p.w - p.inner.w) / 2,
-          box.y + d.headH,
+          box.y + box.headH,
           depth + 1,
         );
       } else nodes.push(box);
@@ -483,7 +488,7 @@ export function layoutGraph(
   groups.sort((a, b) => a.depth - b.depth);
 
   const at = new Map([...groups, ...nodes].map((b) => [b.id, b]));
-  const seen = new Set<string>();
+  const seen = new Map<string, LayoutEdge>();
   const edges: LayoutEdge[] = [];
   for (const r of deps) {
     const a = visibleBoxOf(r.from, pm, expanded);
@@ -496,20 +501,31 @@ export function layoutGraph(
     )
       continue;
     const key = `${a}:${b}`;
+    const merged = seen.get(key);
+    if (merged) {
+      merged.relations.push(r);
+      merged.basis = basisOf(merged.relations);
+      continue;
+    }
     const ba = at.get(a);
     const bb = at.get(b);
-    if (seen.has(key) || !ba || !bb) continue;
-    seen.add(key);
+    if (!ba || !bb) continue;
     const x1 = ba.x + ba.w / 2;
     const y1 = ba.y + ba.h;
     const x2 = bb.x + bb.w / 2;
     const y2 = bb.y;
     const bend = Math.max(d.gapY / 2, Math.abs(y2 - y1) / 2);
-    edges.push({
+    const edge: LayoutEdge = {
       from: a,
       to: b,
       path: `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`,
-    });
+      // 制御点が両端から対称なので、t = 0.5 の点は両端の中点
+      mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+      relations: [r],
+      basis: basisOf([r]),
+    };
+    seen.set(key, edge);
+    edges.push(edge);
   }
 
   return {
@@ -529,4 +545,58 @@ export function layoutGraph(
 export function clip(s: string, n: number): string {
   const chars = Array.from(s);
   return chars.length <= n ? s : `${chars.slice(0, n - 1).join("")}…`;
+}
+
+// 線が表す依存の種類。1 つでも先行の成果を使う依存（種類の無い依存を含む）があれば、終わらないと始められない線として描く。
+// すべてが衝突のための順番なら、衝突の線として描く。
+export function basisOf(rels: ChallengeRelation[]): DependencyBasis {
+  return rels.length > 0 && rels.every((r) => r.basis === "conflict")
+    ? "conflict"
+    : "prerequisite";
+}
+
+export const BASIS_LABELS: Record<DependencyBasis, string> = {
+  prerequisite: "終わらないと始められない",
+  conflict: "同時に走らせると衝突する",
+};
+
+// 依存 1 つを人が読む一文にする。理由が無ければ種類だけを言う。
+export function reasonText(r: ChallengeRelation): string {
+  return r.reason ?? BASIS_LABELS[r.basis ?? "prerequisite"];
+}
+
+// 幅 maxPx に収まるように行へ分ける（SVG の text は折り返さないため）。1 文字の幅は目安で、全角を full、
+// 半角をその 0.55 倍と見る（幅を測らずに置く）。
+export function wrapByWidth(s: string, maxPx: number, full: number): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let w = 0;
+  for (const ch of Array.from(s)) {
+    const cw = ch.charCodeAt(0) > 0xff ? full : full * 0.55;
+    if (cur !== "" && w + cw > maxPx) {
+      out.push(cur);
+      cur = "";
+      w = 0;
+    }
+    cur += ch;
+    w += cw;
+  }
+  if (cur !== "") out.push(cur);
+  return out;
+}
+
+// wrapByWidth の先頭 n 行。続きがあれば最後の行の最後の 1 文字を「…」に替える。
+export function clipLines(
+  s: string,
+  maxPx: number,
+  full: number,
+  n: number,
+): string[] {
+  const lines = wrapByWidth(s, maxPx, full);
+  if (lines.length <= n) return lines;
+  const kept = lines.slice(0, n);
+  kept[n - 1] = `${Array.from(kept[n - 1] ?? "")
+    .slice(0, -1)
+    .join("")}…`;
+  return kept;
 }

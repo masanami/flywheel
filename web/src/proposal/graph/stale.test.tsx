@@ -68,18 +68,13 @@ it("更新なし: ノードを赤みの箱にして札を出し、実施中の�
   expect(legend.textContent).not.toContain("応答なし");
 });
 
-it("更新なし: パネルも同じ文言で示し、「応答なし」を出さない", async () => {
+it("更新なし: 大枠を開くとノードに「⚠ 更新なし（要確認）」と出し、グラフに「応答なし」を出さない", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
-  fireEvent.click(
-    within(screen.getByRole("region", { name: "いま実施中" })).getByRole(
-      "button",
-      { name: /^C-6 / },
-    ),
-  );
-  const panel = screen.getByRole("complementary", { name: "選んだ課題" });
-  expect(panel.textContent).toContain("⚠ 更新なし（要確認）");
-  expect(panel.textContent).not.toContain("応答なし");
+  fireEvent.click(screen.getByRole("button", { name: /^C-14 を開く/ }));
+  expect(node("C-6").textContent).toContain("⚠ 更新なし（要確認）");
+  const graph = screen.getByRole("group", { name: "alpha の課題の関係グラフ" });
+  expect(graph.textContent).not.toContain("応答なし");
 });
 
 it("更新なし: 案の画面の列のボードは「更新なし」と出す（本番のボードの文言は変えない）", async () => {

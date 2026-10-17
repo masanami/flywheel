@@ -84,31 +84,37 @@ it("自動の確認待ち: 実行中の色だけで示し、札も光の輪も�
   );
   const row = screen.getByRole("region", { name: "いま実施中" });
   expect(within(row).queryByRole("button", { name: /^C-11 / })).toBeNull();
-  fireEvent.click(c11);
-  const panel = screen.getByRole("complementary", { name: "選んだ課題" });
-  expect(panel.textContent).toContain("検証中（自動の確認を待っている");
+  // 自動の確認を待っていることは、重ねたときの吹き出しに出す（以前は右のパネルに出していた）
+  fireEvent.mouseEnter(c11);
+  const callout = screen
+    .getByRole("group", { name: "alpha の課題の関係グラフ" })
+    .querySelector(".graph-callout");
+  expect(callout?.textContent).toContain("検証中（自動の確認を待っている");
   const region = screen.getByRole("region", { name: GRAPH_TITLE });
   expect(region.textContent).not.toMatch(/CI/);
   for (const el of region.querySelectorAll("[title]"))
     expect(el.getAttribute("title")).not.toMatch(/CI/);
 });
 
-it("外部待ち: 他チームへの相談待ちを外部待ちの区分で示し、相手と理由をパネルに出す", async () => {
+it("外部待ち: 他チームへの相談待ちを外部待ちの区分で示し、相手と理由を重ねたときの吹き出しに出す", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   const legend = screen.getByRole("list", { name: "区分の凡例" });
   expect(
     within(legend).getByRole("button", { name: "外部待ち 1" }),
   ).toBeInTheDocument();
+  // 凡例は区分の名前と色だけで、説明の吹き出し（title）を持たない
   expect(
     within(legend).getByRole("button", { name: /^外部待ち/ }),
-  ).toHaveAttribute("title", expect.stringContaining("自動では解けない待ち"));
+  ).not.toHaveAttribute("title");
   const c20 = node("C-20");
   expect(c20).toHaveAttribute("data-category", "external");
   expect(c20.getAttribute("aria-label")).toContain("決済チームの回答待ち");
-  fireEvent.click(c20);
-  const panel = screen.getByRole("complementary", { name: "選んだ課題" });
-  expect(panel.textContent).toContain(
-    "外部待ち: 決済チーム（返金 API の 1 日あたりの上限を問い合わせ中）",
+  fireEvent.mouseEnter(c20);
+  const callout = screen
+    .getByRole("group", { name: "alpha の課題の関係グラフ" })
+    .querySelector(".graph-callout");
+  expect(callout?.querySelector('[data-section="外部待ち"]')?.textContent).toBe(
+    "外部待ち決済チーム（返金 API の 1 日あたりの上限を問い合わせ中）",
   );
 });

@@ -1,5 +1,5 @@
 // 2026-10-14 のオーナーの指示（flywheel#176）: 関係グラフはエージェントごとに出し、エージェントは左のサイドバーで選ぶ。
-// 選んだエージェントのターミナル／対話の置き場所（下の引き出し・中身は作らない）を取り、ボードでも列の見出しで選べる。
+// 選んだエージェントのターミナル／対話の置き場所を取り（2026-10-17 オーナー: 右に固定）、ボードでも列の見出しで選べる。
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { resetApi, setApi } from "../../api/client.ts";
@@ -78,15 +78,13 @@ it("アイコンの列: 名前と件数を読み上げ名とマウスを重ね�
   ).toBeInTheDocument();
 });
 
-it("欄: 既定は閉じ、開くとターミナルとチャットのタブを持ち、選んだエージェントを宛先にする", async () => {
+it("欄: 既定で右に開いていて、ターミナルとチャットのタブを持ち、選んだエージェントを宛先にする。閉じられる", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   const toggle = within(dock()).getByRole("button", {
     name: /ターミナル／チャット（案）/,
   });
-  expect(toggle).toHaveAttribute("aria-expanded", "false");
-  expect(within(dock()).queryByRole("tablist")).toBeNull();
-  openDock();
+  // 以前の右のパネルの場所を欄に充てるので、既定で開いておく
   expect(toggle).toHaveAttribute("aria-expanded", "true");
   const tabs = within(dock()).getByRole("tablist", { name: "欄の中身（案）" });
   const term = within(tabs).getByRole("tab", { name: "ターミナル" });
@@ -117,36 +115,33 @@ it("欄: 既定は閉じ、開くとターミナルとチャットのタブを�
   });
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
   expect(within(dock()).queryByRole("tabpanel")).toBeNull();
+  openDock();
+  expect(within(dock()).getByRole("tabpanel")).toBeInTheDocument();
 });
 
-it("欄の位置の 2 案: 下の引き出しと右の分割を切り替えられ、グラフでもボードでも同じ欄が出る", async () => {
-  const { container } = render(<GraphScreen live={await liveOf()} />);
+it("欄の位置: 右に固定し、切り替えは置かない。グラフでもボードでも同じ欄が出る", async () => {
+  render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
-  const shell = container.querySelector(".agent-shell");
-  const pos = screen.getByRole("group", { name: "欄の位置（案）" });
-  expect(shell).toHaveAttribute("data-dock-pos", "bottom");
-  fireEvent.click(within(pos).getByRole("button", { name: "右の分割" }));
-  expect(shell).toHaveAttribute("data-dock-pos", "right");
+  expect(screen.queryByRole("group", { name: "欄の位置（案）" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "下の引き出し" })).toBeNull();
   expect(dock()).toHaveAttribute("data-pos", "right");
-  openDock();
+  // 課題を選ぶ右のパネルは置かない（右は欄の場所）
+  expect(
+    screen.queryByRole("complementary", { name: "選んだ課題" }),
+  ).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "列のボード" }));
   expect(
     await screen.findByRole("region", { name: "beta の列" }),
   ).toBeInTheDocument();
-  expect(container.querySelector(".agent-shell")).toHaveAttribute(
-    "data-dock-pos",
-    "right",
-  );
+  expect(dock()).toHaveAttribute("data-pos", "right");
   expect(within(dock()).getByRole("tabpanel")).toBeInTheDocument();
-  fireEvent.click(within(pos).getByRole("button", { name: "下の引き出し" }));
-  expect(dock()).toHaveAttribute("data-pos", "bottom");
 });
 
 it("ボード: 列の見出しを押すとそのエージェントを選び、欄の対象が切り替わる", async () => {
   render(<GraphScreen live={await liveOf()} />);
   fireEvent.click(screen.getByRole("button", { name: "列のボード" }));
-  openDock();
   const beta = await screen.findByRole("region", { name: "beta の列" });
   const header = beta.querySelector(".agent-column-header");
   if (!header) throw new Error("列の見出しが無い");
