@@ -7,7 +7,10 @@ import {
   useState,
 } from "react";
 import { api } from "../../api/client.ts";
-import type { ChallengeGraphResponse } from "../../api/proposed.ts";
+import type {
+  ChallengeGraphResponse,
+  ChallengeRelation,
+} from "../../api/proposed.ts";
 import { StaleLabelContext } from "../../board/AgentColumn.tsx";
 import { Board } from "../../board/Board.tsx";
 import {
@@ -33,9 +36,13 @@ import {
   GraphCanvas,
   type Inside,
   type NodeInfo,
+  type NodeText,
+  edgeKey,
+  groupHeadHeight,
 } from "./GraphCanvas.tsx";
 import {
   AUTO_CHECK_TEXT,
+  BASIS_LABELS,
   CATEGORIES,
   type Category,
   STALE_HINT,
@@ -53,6 +60,7 @@ import {
   layoutGraph,
   neighborsOf,
   parentMap,
+  reasonText,
   upstreamOf,
   validRelations,
 } from "./model.ts";
@@ -61,8 +69,8 @@ import "./graph.css";
 export const GRAPH_TITLE = "関係グラフ（案）";
 
 export const WIDE: Dimensions = {
-  nodeW: 168,
-  nodeH: 60,
+  nodeW: 176,
+  nodeH: 76,
   gapX: 20,
   gapY: 40,
   pad: 12,
@@ -70,8 +78,12 @@ export const WIDE: Dimensions = {
   headH: 30,
   inset: 10,
   maxW: 860,
-  titleChars: 12,
+  titleLines: 2,
   metaChars: 22,
+  ctxCharW: 11,
+  ctxLineH: 16,
+  edgeChars: 16,
+  compact: false,
 };
 // 幅 360px の端末で、一番外の段に 3 つ並んでも縮めずに読める大きさ。大枠の中は 2 つで折り返す。
 export const NARROW: Dimensions = {
@@ -84,8 +96,37 @@ export const NARROW: Dimensions = {
   headH: 28,
   inset: 6,
   maxW: 328,
-  titleChars: 7,
+  titleLines: 1,
   metaChars: 9,
+  ctxCharW: 10,
+  ctxLineH: 15,
+  edgeChars: 9,
+  compact: false,
+};
+// 縮小（ID と色だけ）。全体の形を一目で見るための大きさで、中身は重ねたときの吹き出しとパネルで読む。
+export const COMPACT: Dimensions = {
+  ...WIDE,
+  nodeW: 76,
+  nodeH: 28,
+  gapX: 10,
+  gapY: 26,
+  headH: 28,
+  inset: 6,
+  titleLines: 0,
+  metaChars: 0,
+  compact: true,
+};
+export const COMPACT_NARROW: Dimensions = {
+  ...NARROW,
+  nodeW: 64,
+  nodeH: 26,
+  gapX: 6,
+  gapY: 22,
+  headH: 26,
+  inset: 5,
+  titleLines: 0,
+  metaChars: 0,
+  compact: true,
 };
 const NARROW_QUERY = "(max-width: 480px)";
 
@@ -105,6 +146,7 @@ function useNarrow(): boolean {
 }
 
 type View = "graph" | "board";
+type Zoom = "normal" | "compact";
 
 // 詳細を開くと画面が外れて戻ると作り直されるため、表示・選んだワークスペースと課題・開いた親をここに覚えておく。
 // 選んだエージェント・引き出しの開閉もここに持つ（サーバには持たない）。
@@ -116,6 +158,11 @@ const memory: {
   dock: boolean;
   dockPos: DockPosition;
   dockTab: DockTab;
+  // 見せ方の案の切り替え（試作だけ）と、位置づけを広げた大枠
+  nodeText: NodeText;
+  edgeKinds: boolean;
+  zoom: Zoom;
+  context: Record<string, string[]>;
 } = {
   view: "graph",
   ws: null,
@@ -124,6 +171,10 @@ const memory: {
   dock: false,
   dockPos: "bottom",
   dockTab: "terminal",
+  nodeText: "headline",
+  edgeKinds: true,
+  zoom: "normal",
+  context: {},
 };
 export function resetGraphMemory(): void {
   memory.view = "graph";
@@ -133,6 +184,10 @@ export function resetGraphMemory(): void {
   memory.dock = false;
   memory.dockPos = "bottom";
   memory.dockTab = "terminal";
+  memory.nodeText = "headline";
+  memory.edgeKinds = true;
+  memory.zoom = "normal";
+  memory.context = {};
 }
 
 type GraphState =
@@ -302,8 +357,22 @@ export function GraphScreen({ live }: { live: LiveState }) {
 function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
   const open = useContext(OpenDetailContext);
   const narrow = useNarrow();
-  const dims = narrow ? NARROW : WIDE;
+  const [nodeText, setNodeText] = useState<NodeText>(memory.nodeText);
+  const [edgeKinds, setEdgeKinds] = useState(memory.edgeKinds);
+  const [zoom, setZoom] = useState<Zoom>(memory.zoom);
+  const dims =
+    zoom === "compact"
+      ? narrow
+        ? COMPACT_NARROW
+        : COMPACT
+      : narrow
+        ? NARROW
+        : WIDE;
   const [selected, setSelected] = useState<string | null>(memory.node);
+  // 選んだ依存の線（`from:to`。見えている箱どうし）と、マウスを重ねた・フォーカスした線
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  const [hoverEdge, setHoverEdge] = useState<string | null>(null);
+  const [contextOpenMap, setContextOpenMap] = useState(memory.context);
   const [openParents, setOpenParents] = useState(memory.open);
   const [catFilter, setCatFilter] = useState<Category | null>(null);
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
@@ -374,7 +443,23 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
   const select = (id: string | null) => {
     memory.node = id;
     setSelected(id);
+    setSelectedEdge(null);
     if (id) setOpen((s) => new Set([...s, ...ancestorsOf(id, infos.pm)]));
+  };
+  const selectEdge = (key: string | null) => {
+    memory.node = null;
+    setSelected(null);
+    setSelectedEdge(key);
+  };
+  const contextOpen = new Set(ws ? (contextOpenMap[ws] ?? []) : []);
+  const toggleContext = (id: string) => {
+    if (!ws) return;
+    const next = new Set(contextOpen);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    const all = { ...contextOpenMap, [ws]: [...next].sort(compareIds) };
+    memory.context = all;
+    setContextOpenMap(all);
   };
 
   // 完了を隠しても、まだ終わっていない子を持つ親（大枠）は残す。
@@ -390,11 +475,31 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
         ),
     )
     .map((i) => i.card.id);
-  const layout = layoutGraph(shownIds, infos.rels, dims, expanded);
+  // 開いた大枠の見出しは位置づけの分だけ伸びる。行数は大枠の幅で決まり、幅は見出しの高さに左右されないので、
+  // 畳んだ位置づけ（1 行）で一度配置して幅を得てから、広げた大枠の高さを決めて配置し直す。
+  const contextOf = (id: string) =>
+    infos.map.get(id)?.card.card.context ?? null;
+  const folded = (id: string) =>
+    groupHeadHeight(contextOf(id), dims.maxW, dims, false);
+  const first = layoutGraph(shownIds, infos.rels, dims, expanded, folded);
+  const widths = new Map(first.groups.map((g) => [g.id, g.w]));
+  const layout = [...contextOpen].some((id) => widths.has(id))
+    ? layoutGraph(shownIds, infos.rels, dims, expanded, (id) =>
+        groupHeadHeight(
+          contextOf(id),
+          widths.get(id) ?? dims.maxW,
+          dims,
+          contextOpen.has(id),
+        ),
+      )
+    : first;
   const pm = layout.parents;
   const kids = childrenMap(pm);
   const shownRels = validRelations(new Set(shownIds), infos.rels);
   const sel = selected && shownIds.includes(selected) ? selected : null;
+  const edgeOf = (key: string | null) =>
+    key ? (layout.edges.find((e) => edgeKey(e) === key) ?? null) : null;
+  const selEdge = edgeOf(selectedEdge);
   const up = new Set(sel ? upstreamOf(sel, shownRels) : []);
   const down = new Set(sel ? downstreamOf(sel, shownRels) : []);
   const ancestors = new Set(sel ? ancestorsOf(sel, pm) : []);
@@ -410,13 +515,24 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
     .filter((i) => i.active)
     .map((i) => i.card);
 
+  // 線を選んだときは、線の両端の箱（とその中の課題）だけを濃く残す
+  const edgeEnds = new Set(
+    selEdge
+      ? [selEdge.from, selEdge.to].flatMap((b) => [
+          b,
+          ...descendantsOf(b, kids),
+        ])
+      : [],
+  );
   const relevant = (id: string) =>
-    sel === null ||
-    id === sel ||
-    up.has(id) ||
-    down.has(id) ||
-    ancestors.has(id) ||
-    inner.has(id);
+    selEdge
+      ? edgeEnds.has(id)
+      : sel === null ||
+        id === sel ||
+        up.has(id) ||
+        down.has(id) ||
+        ancestors.has(id) ||
+        inner.has(id);
   const matches = (id: string) => {
     const i = infos.map.get(id);
     if (!i) return false;
@@ -483,18 +599,48 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
             onSelect={(id) => select(id === sel ? null : id)}
             onOpen={(id) => open?.(ws, id)}
             onToggle={toggle}
+            nodeText={nodeText}
+            edgeKinds={edgeKinds}
+            contextOpen={(id) => contextOpen.has(id)}
+            onToggleContext={toggleContext}
+            selectedEdge={selEdge ? selectedEdge : null}
+            edgeLabeled={(e) => {
+              const key = edgeKey(e);
+              if (key === selectedEdge || key === hoverEdge) return true;
+              // 選んだ課題に直接つながる線には札を出す（縮小では重ねた線と選んだ線だけ）
+              return (
+                !dims.compact &&
+                sel !== null &&
+                (e.from === sel || e.to === sel)
+              );
+            }}
+            onSelectEdge={(key) =>
+              selectEdge(key === selectedEdge ? null : key)
+            }
+            onHoverEdge={setHoverEdge}
           />
         </div>
-        <SelectedPanel
-          ws={ws}
-          id={sel}
-          infos={infos.map}
-          relations={shownRels}
-          parent={sel ? (pm.get(sel) ?? null) : null}
-          childIds={sel ? (kids.get(sel) ?? []) : []}
-          onSelect={select}
-          onOpen={open}
-        />
+        {selEdge ? (
+          <EdgePanel
+            from={selEdge.from}
+            to={selEdge.to}
+            relations={selEdge.relations}
+            infos={infos.map}
+            onSelect={select}
+            onClose={() => selectEdge(null)}
+          />
+        ) : (
+          <SelectedPanel
+            ws={ws}
+            id={sel}
+            infos={infos.map}
+            relations={shownRels}
+            parent={sel ? (pm.get(sel) ?? null) : null}
+            childIds={sel ? (kids.get(sel) ?? []) : []}
+            onSelect={select}
+            onOpen={open}
+          />
+        )}
       </div>
     );
   }
@@ -542,8 +688,25 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
                 <li className="graph-legend-stale">
                   <b>{STALE_LABEL}</b>: 赤い箱。{STALE_HINT}
                 </li>
+                {edgeKinds ? (
+                  <>
+                    <li>
+                      <b>実線の矢印</b>: 先行 → 後続。
+                      {BASIS_LABELS.prerequisite}（先行の成果を使う）
+                    </li>
+                    <li>
+                      <b>破線の矢印</b>: 先行 → 後続。
+                      {BASIS_LABELS.conflict}（同じものを触るので順に走らせる）
+                    </li>
+                  </>
+                ) : (
+                  <li>
+                    <b>実線の矢印</b>: 先行 → 後続
+                  </li>
+                )}
                 <li>
-                  <b>実線の矢印</b>: 先行 → 後続
+                  <b>矢印の理由</b>:
+                  線を押すか重ねると、なぜ待つのかを出す。課題を選ぶと、その課題に直接つながる線にも出す
                 </li>
                 <li>
                   <b>大枠</b>: 親課題（中に子課題）。重ねた箱は畳んだ親で、▶
@@ -553,6 +716,45 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
             </details>
           </div>
         </div>
+        <fieldset aria-label="見せ方（案）" className="graph-variants">
+          <legend>見せ方（案）</legend>
+          <Seg
+            label="ノードの文"
+            value={nodeText}
+            options={[
+              ["headline", "一言で"],
+              ["title", "題名"],
+            ]}
+            onChange={(v) => {
+              memory.nodeText = v;
+              setNodeText(v);
+            }}
+          />
+          <Seg
+            label="依存の線"
+            value={edgeKinds ? "split" : "same"}
+            options={[
+              ["split", "種類で形を分ける"],
+              ["same", "分けない"],
+            ]}
+            onChange={(v) => {
+              memory.edgeKinds = v === "split";
+              setEdgeKinds(v === "split");
+            }}
+          />
+          <Seg
+            label="大きさ"
+            value={zoom}
+            options={[
+              ["normal", "標準"],
+              ["compact", "縮小（ID と色）"],
+            ]}
+            onChange={(v) => {
+              memory.zoom = v;
+              setZoom(v);
+            }}
+          />
+        </fieldset>
         <section aria-label="いま実施中" className="graph-active-row">
           <span className="graph-active-label">▶ いま実施中</span>
           {running.length === 0 ? (
@@ -653,6 +855,132 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
   );
 }
 
+// 見せ方の案の 2 択の切り替え。
+function Seg<T extends string>({
+  label: name,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: [T, string][];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <fieldset aria-label={name} className="graph-seg graph-seg-small">
+      <legend>{name}</legend>
+      {options.map(([v, text]) => (
+        <button
+          key={v}
+          type="button"
+          aria-pressed={value === v}
+          onClick={() => onChange(v)}
+        >
+          {text}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
+// 直接の依存を理由つきで並べる。end は相手の端（先行なら from、後続なら to）。
+function ReasonList({
+  rels,
+  end,
+  infos,
+  onSelect,
+}: {
+  rels: ChallengeRelation[];
+  end: "from" | "to";
+  infos: Map<string, NodeInfo>;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <ul className="graph-reason-list">
+      {rels.map((r) => {
+        const other = r[end];
+        const i = infos.get(other);
+        return (
+          <li
+            key={`${r.from}:${r.to}`}
+            data-category={i?.category}
+            data-basis={r.basis ?? "prerequisite"}
+          >
+            <span className="graph-swatch" aria-hidden="true" />
+            <button type="button" onClick={() => onSelect(other)}>
+              {other}
+            </button>{" "}
+            <span className="graph-reason-kind">
+              {BASIS_LABELS[r.basis ?? "prerequisite"]}
+            </span>
+            {r.reason ? <span className="graph-reason">{r.reason}</span> : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// 選んだ依存の線の理由。畳んだ親へつなぎ替えた線は、中の課題どうしの依存を全部並べる。
+function EdgePanel({
+  from,
+  to,
+  relations,
+  infos,
+  onSelect,
+  onClose,
+}: {
+  from: string;
+  to: string;
+  relations: ChallengeRelation[];
+  infos: Map<string, NodeInfo>;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}) {
+  const title = (id: string) => {
+    const i = infos.get(id);
+    return i ? nodeHeadline(i) : "";
+  };
+  return (
+    <aside aria-label="選んだ依存" className="graph-panel">
+      <h3>
+        依存 {from} → {to}
+      </h3>
+      <p className="graph-muted">
+        {from}（{clip(title(from), 20)}）が先、{to}（{clip(title(to), 20)}
+        ）が後。
+      </p>
+      <ul className="graph-edge-reasons">
+        {relations.map((r) => (
+          <li key={`${r.from}:${r.to}`} data-basis={r.basis ?? "prerequisite"}>
+            <p>
+              <button type="button" onClick={() => onSelect(r.from)}>
+                {r.from}
+              </button>
+              {" → "}
+              <button type="button" onClick={() => onSelect(r.to)}>
+                {r.to}
+              </button>{" "}
+              <span className="graph-reason-kind">
+                {BASIS_LABELS[r.basis ?? "prerequisite"]}
+              </span>
+            </p>
+            <p className="graph-reason">{reasonText(r)}</p>
+          </li>
+        ))}
+      </ul>
+      <div className="graph-panel-actions">
+        <button type="button" onClick={onClose}>
+          選択を外す
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+const nodeHeadline = (i: NodeInfo) => i.card.card.headline ?? i.card.title;
+
 function IdList({
   ids,
   infos,
@@ -716,6 +1044,14 @@ function SelectedPanel({
   }
   const c = i.card;
   const actions = c.card.next_human_actions;
+  const deps = relations.filter((r) => r.kind === "depends_on");
+  const byId =
+    (end: "from" | "to") => (a: ChallengeRelation, b: ChallengeRelation) =>
+      compareIds(a[end], b[end]);
+  const direct = {
+    before: deps.filter((r) => r.to === id).sort(byId("from")),
+    after: deps.filter((r) => r.from === id).sort(byId("to")),
+  };
   return (
     <aside aria-label="選んだ課題" className="graph-panel">
       <h3>
@@ -746,13 +1082,44 @@ function SelectedPanel({
           外部待ち: {i.party.party}（{i.party.reason}）
         </p>
       ) : null}
-      {c.card.headline ? <p>{c.card.headline}</p> : null}
+      <dl className="graph-panel-summary">
+        <dt>一言で</dt>
+        <dd>{c.card.headline ?? "（未設定。題名で代える）"}</dd>
+        {c.card.context ? (
+          <>
+            <dt>位置づけ</dt>
+            <dd>{c.card.context}</dd>
+          </>
+        ) : null}
+      </dl>
       <h4>次に人間がすること</h4>
       <p>
         {actions.length === 0
           ? NO_ACTION_LABEL
           : actions.map((a) => label(ACTION_LABELS, a)).join("、")}
       </p>
+      {direct.before.length > 0 ? (
+        <>
+          <h4>待っている理由（直前の先行）</h4>
+          <ReasonList
+            rels={direct.before}
+            end="from"
+            infos={infos}
+            onSelect={onSelect}
+          />
+        </>
+      ) : null}
+      {direct.after.length > 0 ? (
+        <>
+          <h4>待たせている理由（直後の後続）</h4>
+          <ReasonList
+            rels={direct.after}
+            end="to"
+            infos={infos}
+            onSelect={onSelect}
+          />
+        </>
+      ) : null}
       <h4>これが終わると進められる課題</h4>
       <IdList
         ids={downstreamOf(id, relations)}

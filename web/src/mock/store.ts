@@ -189,6 +189,7 @@ export function seed(): Record<string, MockWorkspace> {
     }),
     mk("C-4", "管理画面の権限チェックを直す", "awaiting_plan_approval", {
       priority: "P1",
+      headline: "閲覧者が編集ボタンを押せてしまう穴をふさぐ",
       version: 2,
       plans: [plan(1, "権限表を一箇所にまとめ、画面ごとの判定を表から引く。")],
     }),
@@ -200,6 +201,7 @@ export function seed(): Record<string, MockWorkspace> {
     }),
     mk("C-6", "古いバッチの撤去", "in_progress", {
       priority: "P2",
+      headline: "夜間の集計バッチを止め、ジョブ定義を消す",
       flags: { running: true, unresponsive: true },
       runs: [run("R-8", "C-6", { started_at: iso(200) })],
     }),
@@ -216,6 +218,7 @@ export function seed(): Record<string, MockWorkspace> {
     }),
     mk("C-8", "移行スクリプトの失敗調査", "awaiting_human", {
       priority: "P1",
+      headline: "旧テーブルの移行が 3 割で止まる原因を突き止める",
       version: 2,
       holds: [
         {
@@ -233,6 +236,7 @@ export function seed(): Record<string, MockWorkspace> {
     }),
     mk("C-9", "画像変換のコスト超過", "in_progress", {
       priority: "P1",
+      headline: "検索結果のサムネイル生成を安い方式へ替える",
       flags: {
         budget: {
           challenge_id: "C-9",
@@ -253,6 +257,7 @@ export function seed(): Record<string, MockWorkspace> {
     }),
     mk("C-11", "決済画面の改修", "verifying", {
       priority: "P2",
+      headline: "決済画面を新しいビルド基盤でビルドし直す",
       flags: {
         waitingCi: {
           checks: "ci/unit: pending, ci/e2e: pending",
@@ -267,6 +272,7 @@ export function seed(): Record<string, MockWorkspace> {
     }),
     mk("C-13", "トリアージ待ちの run", "in_progress", {
       priority: "P1",
+      headline: "旧バッチを呼ぶ API の残りを洗い出す",
       flags: {
         triage: {
           reason: "run が 3 回連続で同じテストで落ちた。仕様の食い違いの疑い。",
@@ -278,17 +284,35 @@ export function seed(): Record<string, MockWorkspace> {
     mk("C-14", "旧基盤の撤去", "in_progress", {
       priority: "P2",
       headline: "旧バッチ基盤を止めて消す",
+      context:
+        "全体計画「運用費の削減」の 2 段目。旧バッチ基盤は月 40 万円の固定費があり、夜間の障害の半分を占める。ここを消すと、後の「監視の一本化」で見る対象が半分になる。設定の削除が済み、いまはバッチ本体の撤去と、移行の失敗の調査を並べて進めている。",
     }),
-    mk("C-15", "ビルドと配布の改善", "classified", { priority: "P2" }),
-    mk("C-16", "依存のキャッシュ", "classified", { priority: "P2" }),
+    mk("C-15", "ビルドと配布の改善", "classified", {
+      priority: "P2",
+      headline: "ビルドを速くし、配布を手順書なしで回せるようにする",
+      context:
+        "開発の待ち時間を減らす計画の土台。検索 API のページング（C-2）の配布もここで整えた手順に乗る。",
+    }),
+    mk("C-16", "依存のキャッシュ", "classified", {
+      priority: "P2",
+      headline: "依存の取得を毎回やり直さない",
+      context: "ビルドの高速化のうち、取得の待ちを削る部分。",
+    }),
     mk("C-17", "キャッシュキーの設計", "in_progress", {
       priority: "P2",
+      headline: "ロックファイルの差だけでキャッシュを捨てる",
       flags: { running: true },
       runs: [run("R-10", "C-17", { started_at: iso(15) })],
     }),
     // 先行が終わるのを待つ後続（依存の後続は、先行が完了するまで分類済か計画承認待ちに留まる）
-    mk("C-18", "旧テーブルの削除", "classified", { priority: "P2" }),
-    mk("C-19", "配布手順の更新", "classified", { priority: "P2" }),
+    mk("C-18", "旧テーブルの削除", "classified", {
+      priority: "P2",
+      headline: "移行が済んだ旧テーブルを消す",
+    }),
+    mk("C-19", "配布手順の更新", "classified", {
+      priority: "P2",
+      headline: "新しいビルドの成果物を出す手順に書き換える",
+    }),
     // 自動では解けない外部待ちの例（他チームへの相談待ち。案の印 waiting_party を graph.ts が持つ）
     mk("C-20", "返金 API の上限の確認", "in_progress", {
       priority: "P1",
@@ -296,13 +320,18 @@ export function seed(): Record<string, MockWorkspace> {
     }),
   ];
   const beta: MockChallenge[] = [
-    mk("C-1", "レポートの CSV 出力", "classified", { priority: "P2" }),
+    mk("C-1", "レポートの CSV 出力", "classified", {
+      priority: "P2",
+      headline: "月次レポートを表計算で開ける形でも出す",
+    }),
     mk("C-2", "デプロイ手順の整理", "awaiting_plan_approval", {
       priority: "P1",
+      headline: "手作業の残るデプロイ手順を 1 本にまとめる",
       plans: [plan(1, "手順書を 1 本にまとめ、手作業の箇所を表にする。")],
     }),
     mk("C-3", "監視のしきい値見直し", "awaiting_completion_approval", {
       priority: "P1",
+      headline: "誤検知の多い警報のしきい値を上げる",
       version: 3,
       done_criteria: "誤検知が週 5 件以下になる。",
       operations: [
