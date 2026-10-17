@@ -84,31 +84,41 @@ const TOGGLE = 20;
 // 位置づけの右に置く「続き」の文字の幅
 const MORE_W = 40;
 
-// 開いた大枠の位置づけを、見出しの幅に収まる文字数で行に分ける（1 行目の頭に「位置づけ:」を付ける）。
-// 右に「続き」の文字の幅を空ける。
-export function contextLines(
+// 開いた大枠の見出しの欄に出す一言でと位置づけを、見出しの幅に収まるように行へ分ける（それぞれ 1 行目の頭に
+// 「一言で:」「位置づけ:」を付ける）。右に「続き」の文字の幅を空ける。
+export function headLines(
+  headline: string | null,
   context: string | null,
   width: number,
   dims: Dimensions,
-): string[] {
-  if (!context) return [];
-  return wrapByWidth(
-    `位置づけ: ${context}`,
-    Math.max(4 * dims.ctxCharW, width - 16 - MORE_W),
-    dims.ctxCharW,
-  );
+): { headline: string[]; context: string[] } {
+  const wrap = (label: string, s: string | null) =>
+    s
+      ? wrapByWidth(
+          `${label}: ${s}`,
+          Math.max(4 * dims.ctxCharW, width - 16 - MORE_W),
+          dims.ctxCharW,
+        )
+      : [];
+  return {
+    headline: wrap("一言で", headline),
+    context: wrap("位置づけ", context),
+  };
 }
 
-// 開いた大枠の見出しの高さ。位置づけがあれば 1 行（畳んだ）か全行（広げた）の分だけ伸ばす。
+// 開いた大枠の見出しの高さ。一言では常に全行、位置づけは畳んだら 1 行・広げたら全行の分だけ伸ばす。
 export function groupHeadHeight(
+  headline: string | null,
   context: string | null,
   width: number,
   dims: Dimensions,
   open: boolean,
 ): number {
-  const lines = contextLines(context, width, dims);
-  if (lines.length === 0) return dims.headH;
-  return dims.headH + dims.ctxLineH * (open ? lines.length : 1) + 4;
+  const l = headLines(headline, context, width, dims);
+  const rows =
+    l.headline.length +
+    (open ? l.context.length : Math.min(1, l.context.length));
+  return rows === 0 ? dims.headH : dims.headH + dims.ctxLineH * rows + 4;
 }
 
 // 10.5px の文字の幅の目安（全角 10.5px・半角 6px）。SVG の text は幅を測らずに置く
@@ -137,9 +147,8 @@ function HeadlineCallout({
   p: CanvasProps;
 }) {
   const c = p.infos.get(id)?.card;
-  const box =
-    p.layout.nodes.find((b) => b.id === id) ??
-    p.layout.groups.find((b) => b.id === id);
+  // 開いた大枠の一言では見出しの欄に出すので、吹き出しは課題のノード（畳んだ親を含む）だけに出す
+  const box = p.layout.nodes.find((b) => b.id === id);
   if (!c?.card.headline || !box) return null;
   const { dims, layout, narrow } = p;
   const font = narrow ? 12 : 13;
@@ -147,7 +156,7 @@ function HeadlineCallout({
   const lines = clipLines(c.card.headline, w - 20, font, dims.calloutLines);
   const lineH = font + 5;
   const h = 22 + lines.length * lineH + 6;
-  const bottom = box.y + (box.kind === "group" ? box.headH : box.h);
+  const bottom = box.y + box.h;
   const y = bottom + 6 + h <= layout.height ? bottom + 6 : box.y - 6 - h;
   const x = Math.max(2, Math.min(box.x, layout.width - 2 - w));
   return (
@@ -454,8 +463,8 @@ function NodeLines({
 }
 
 // 開いた親の大枠。見出し（親課題そのもの）を押すと親を選び、右上のボタンで畳む。
-// 見出しは題名と、その下に位置づけを出す。位置づけが 1 行に収まらなければ畳んで始め、「続き」で広げる。
-// 一言では、ノードと同じく見出しを選ぶか重ねたときに吹き出しで出す。
+// 見出しは題名と、その下の欄に一言で・位置づけの順に出す（2026-10-17 オーナー: 大枠の一言では吹き出しでなくこの欄）。
+// 一言では常に全文を出し、位置づけは 1 行に収まらなければ畳んで始め、「続き」で広げる。
 function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
   const i = p.infos.get(box.id);
   if (!i) return null;
@@ -464,10 +473,17 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
   const selfActive = i.active;
   const select = () => p.onSelect(box.id);
   const chars = Math.max(4, Math.floor((box.w - 90) / (narrow ? 12 : 13)));
-  const lines = contextLines(c.card.context, box.w, dims);
+  const { headline: hl, context: lines } = headLines(
+    c.card.headline,
+    c.card.context,
+    box.w,
+    dims,
+  );
   const ctxOpen = p.contextOpen(box.id);
   const shown = ctxOpen ? lines : lines.slice(0, 1);
   const foldable = lines.length > 1;
+  // 位置づけは一言での行の下から始める
+  const ctxTop = dims.headH + dims.ctxLineH * hl.length;
   return (
     <g
       transform={`translate(${box.x} ${box.y})`}
@@ -490,10 +506,6 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
         onClick={select}
         onDoubleClick={() => p.onOpen(box.id)}
         onKeyDown={onActivate(select)}
-        onMouseEnter={() => p.onHoverNode(box.id)}
-        onMouseLeave={() => p.onHoverNode(null)}
-        onFocus={() => p.onHoverNode(box.id)}
-        onBlur={() => p.onHoverNode(null)}
       >
         <title>{accessibleName(i, "開いた親")}</title>
         <rect
@@ -513,12 +525,23 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
           {` ${clip(c.title, chars)}`}
           {selfActive ? " ▶ 実施中" : ""}
         </text>
+        {hl.map((line, k) => (
+          <text
+            // biome-ignore lint/suspicious/noArrayIndexKey: 幅で切った行の並びで、行の位置そのものが鍵
+            key={k}
+            x={11}
+            y={dims.headH + dims.ctxLineH * (k + 1) - 4}
+            className="graph-group-headline"
+          >
+            {line}
+          </text>
+        ))}
         {shown.map((line, k) => (
           <text
             // biome-ignore lint/suspicious/noArrayIndexKey: 文字数で切った行の並びで、行の位置そのものが鍵
             key={k}
             x={11}
-            y={dims.headH + dims.ctxLineH * (k + 1) - 4}
+            y={ctxTop + dims.ctxLineH * (k + 1) - 4}
             className="graph-group-context"
           >
             {/* 畳んだときは 1 行目の最後の 1 文字を「…」に替え、続きがあることを示す */}
@@ -533,7 +556,7 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
           id={box.id}
           open={ctxOpen}
           x={box.w - MORE_W - 6}
-          y={dims.headH}
+          y={ctxTop}
           h={dims.ctxLineH}
           onToggle={p.onToggleContext}
         />

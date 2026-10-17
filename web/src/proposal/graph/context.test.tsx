@@ -1,5 +1,6 @@
 // 3 巡目（flywheel#176・2026-10-14 オーナー）の検査: 開いた親の大枠の見出しに位置づけを出し、長い位置づけは畳む。
 // 2026-10-17 オーナー: 「続き」はボタンの見た目でなく文字だけにし、キーボードで押せることは保つ。
+// 開いた大枠の一言では吹き出しでなく、見出しの欄の位置づけの上に出す。
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { resetApi, setApi } from "../../api/client.ts";
@@ -7,7 +8,7 @@ import type { ApiClient } from "../../api/client.ts";
 import type { LiveState, WorkspaceData } from "../../live/useLive.ts";
 import { createMockApi } from "../../mock/api.ts";
 import { MockStore } from "../../mock/store.ts";
-import { contextLines, groupHeadHeight } from "./GraphCanvas.tsx";
+import { groupHeadHeight, headLines } from "./GraphCanvas.tsx";
 import { GraphScreen, WIDE, resetGraphMemory } from "./GraphScreen.tsx";
 import { clipLines, wrapByWidth } from "./model.ts";
 
@@ -57,20 +58,31 @@ it("位置づけの行: 見出しの幅で行に分け、畳んだら 1 行、�
   expect(clipLines("あいうえおかきく", 40, 10, 1)).toEqual(["あいう…"]);
   expect(clipLines("あいうえ", 40, 10, 1)).toEqual(["あいうえ"]);
   const long = "あ".repeat(80);
-  const lines = contextLines(long, 400, WIDE);
+  const lines = headLines(null, long, 400, WIDE).context;
   expect(lines.length).toBeGreaterThan(1);
   expect(lines[0]?.startsWith("位置づけ: ")).toBe(true);
-  expect(groupHeadHeight(null, 400, WIDE, true)).toBe(WIDE.headH);
+  expect(groupHeadHeight(null, null, 400, WIDE, true)).toBe(WIDE.headH);
   // 1 行に収まる位置づけは、畳んでも広げても 1 行の高さ
-  expect(contextLines("短い", 400, WIDE)).toEqual(["位置づけ: 短い"]);
-  expect(groupHeadHeight("短い", 400, WIDE, true)).toBe(
+  expect(headLines(null, "短い", 400, WIDE).context).toEqual([
+    "位置づけ: 短い",
+  ]);
+  expect(groupHeadHeight(null, "短い", 400, WIDE, true)).toBe(
     WIDE.headH + WIDE.ctxLineH + 4,
   );
-  expect(groupHeadHeight(long, 400, WIDE, false)).toBe(
+  expect(groupHeadHeight(null, long, 400, WIDE, false)).toBe(
     WIDE.headH + WIDE.ctxLineH + 4,
   );
-  expect(groupHeadHeight(long, 400, WIDE, true)).toBe(
+  expect(groupHeadHeight(null, long, 400, WIDE, true)).toBe(
     WIDE.headH + WIDE.ctxLineH * lines.length + 4,
+  );
+  // 一言では畳まず、位置づけを畳んでも広げても全行の高さを取る
+  const hl = headLines(long, long, 400, WIDE);
+  expect(hl.headline[0]?.startsWith("一言で: ")).toBe(true);
+  expect(groupHeadHeight(long, long, 400, WIDE, false)).toBe(
+    WIDE.headH + WIDE.ctxLineH * (hl.headline.length + 1) + 4,
+  );
+  expect(groupHeadHeight(long, null, 400, WIDE, false)).toBe(
+    WIDE.headH + WIDE.ctxLineH * hl.headline.length + 4,
   );
 });
 
@@ -100,6 +112,38 @@ it("位置づけ: 開いた大枠の見出しに題名と位置づけを出し�
   expect(more.querySelector(".graph-more-hit")).not.toBeNull();
   expect(more.querySelectorAll("rect")).toHaveLength(1);
   expect(more.textContent).toBe("▾ 続き");
+});
+
+it("一言で: 開いた大枠では見出しの欄の位置づけの上に出し、位置づけを畳んでも広げても常に見せる。吹き出しは出さない", async () => {
+  render(<GraphScreen live={await liveOf()} />);
+  await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
+  fireEvent.click(
+    screen.getByRole("button", { name: "C-14 を開く（子 5 件）" }),
+  );
+  const headline = () =>
+    [...group("C-14").querySelectorAll(".graph-group-headline")].map(
+      (t) => t.textContent,
+    );
+  expect(headline()).toEqual(["一言で: 旧バッチ基盤を止めて消す"]);
+  // 一言での行は位置づけの行より上にあり、「続き」は位置づけの行に並ぶ
+  const yOf = (sel: string) =>
+    Number(group("C-14").querySelector(sel)?.getAttribute("y"));
+  expect(yOf(".graph-group-headline")).toBeLessThan(
+    yOf(".graph-group-context"),
+  );
+  const more = screen.getByRole("button", {
+    name: "位置づけの続きを読む（C-14）",
+  });
+  const moreY = Number(
+    /translate\(\S+ (\S+)\)/.exec(more.getAttribute("transform") ?? "")?.[1],
+  );
+  expect(moreY).toBeGreaterThan(yOf(".graph-group-headline"));
+  fireEvent.click(more);
+  expect(headline()).toEqual(["一言で: 旧バッチ基盤を止めて消す"]);
+  // 見出しに重ねても選んでも、大枠には吹き出しを出さない（見出しの欄に出ているため）
+  fireEvent.mouseEnter(node("C-14"));
+  fireEvent.click(node("C-14"));
+  expect(graphOf().querySelector(".graph-callout")).toBeNull();
 });
 
 it("位置づけ: 「続き」はキーボード（Enter・Space）でも広げ・畳める", async () => {

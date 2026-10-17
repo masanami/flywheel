@@ -1228,6 +1228,14 @@ summary.graph-tool-btn::-webkit-details-marker {
   fill: var(--board-muted-fg);
   font-size: 11px;
 }
+/* 大枠の見出しの欄の一言で。位置づけより濃く出す */
+.graph-group-headline {
+  fill: var(--board-fg);
+  font-size: 11px;
+}
+.graph-svg.is-narrow .graph-group-headline {
+  font-size: 10px;
+}
 .graph-svg.is-narrow .graph-group-context {
   font-size: 10px;
 }

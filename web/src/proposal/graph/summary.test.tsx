@@ -115,12 +115,16 @@ it("一言で: 吹き出しでは一言でを切らずに折り返す。一言�
   const tspans = callout()?.querySelectorAll(".graph-callout-text tspan");
   expect(tspans?.length).toBeGreaterThan(1);
   expect(calloutText()).toBe(long);
-  // 開いた大枠の見出しも、重ねると一言でを出す
+  fireEvent.mouseLeave(node("C-15"));
+  // 畳んだ親の箱は子課題のノードと同じく吹き出しを出す。開いた大枠は見出しの欄に出すので吹き出しを出さない
+  fireEvent.mouseEnter(node("C-2"));
+  expect(calloutText()).toBe("検索 API をページングで返せるようにする");
+  fireEvent.mouseLeave(node("C-2"));
   fireEvent.click(
     screen.getByRole("button", { name: "C-2 を開く（子 4 件）" }),
   );
   fireEvent.mouseEnter(node("C-2"));
-  expect(calloutText()).toBe("検索 API をページングで返せるようにする");
+  expect(callout()).toBeNull();
   // C-1 には一言でが無い
   fireEvent.mouseEnter(node("C-1"));
   expect(callout()).toBeNull();

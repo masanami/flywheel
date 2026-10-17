@@ -434,24 +434,32 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
         ),
     )
     .map((i) => i.card.id);
-  // 開いた大枠の見出しは位置づけの分だけ伸びる。行数は大枠の幅で決まり、幅は見出しの高さに左右されないので、
-  // 畳んだ位置づけ（1 行）で一度配置して幅を得てから、広げた大枠の高さを決めて配置し直す。
-  const contextOf = (id: string) =>
-    infos.map.get(id)?.card.card.context ?? null;
-  const folded = (id: string) =>
-    groupHeadHeight(contextOf(id), dims.maxW, dims, false);
-  const first = layoutGraph(shownIds, infos.rels, dims, expanded, folded);
+  // 開いた大枠の見出しは一言でと位置づけの分だけ伸びる。行数は大枠の幅で決まり、幅は見出しの高さに左右されないので、
+  // 一度配置して大枠の幅を得てから、見出しの高さを決めて配置し直す。
+  const cardOf = (id: string) => infos.map.get(id)?.card.card;
+  const headOf = (width: (id: string) => number) => (id: string) =>
+    groupHeadHeight(
+      cardOf(id)?.headline ?? null,
+      cardOf(id)?.context ?? null,
+      width(id),
+      dims,
+      contextOpen.has(id),
+    );
+  const first = layoutGraph(
+    shownIds,
+    infos.rels,
+    dims,
+    expanded,
+    headOf(() => dims.maxW),
+  );
   const widths = new Map(first.groups.map((g) => [g.id, g.w]));
-  const layout = [...contextOpen].some((id) => widths.has(id))
-    ? layoutGraph(shownIds, infos.rels, dims, expanded, (id) =>
-        groupHeadHeight(
-          contextOf(id),
-          widths.get(id) ?? dims.maxW,
-          dims,
-          contextOpen.has(id),
-        ),
-      )
-    : first;
+  const layout = layoutGraph(
+    shownIds,
+    infos.rels,
+    dims,
+    expanded,
+    headOf((id) => widths.get(id) ?? dims.maxW),
+  );
   const pm = layout.parents;
   const kids = childrenMap(pm);
   const shownRels = validRelations(new Set(shownIds), infos.rels);
@@ -657,7 +665,7 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
                 </li>
                 <li>
                   <b>一言で</b>:
-                  課題を選ぶかカーソルを重ねると、課題の一言でを吹き出しで出す
+                  課題を選ぶかカーソルを重ねると、課題の一言でを吹き出しで出す。開いた大枠では見出しの欄に位置づけと並べて出す
                 </li>
                 <li>
                   <b>大枠</b>: 親課題（中に子課題）。重ねた箱は畳んだ親で、▶
