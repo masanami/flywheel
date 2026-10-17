@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, eventsPath, parseChanged } from "../api/client.ts";
 import type {
+  CycleStatus,
   ListCardResponse,
   NeedsHumanResponse,
   StatusResponse,
@@ -10,6 +11,7 @@ import type {
 export interface WorkspaceData {
   status?: StatusResponse;
   challenges?: ListCardResponse;
+  cycle?: CycleStatus;
   error?: string;
 }
 
@@ -38,11 +40,13 @@ const initial: LiveState = {
 
 async function loadWorkspace(name: string): Promise<WorkspaceData> {
   try {
-    const [status, challenges] = await Promise.all([
+    // 列の見出しは補助の表示。cycle だけが失敗しても課題の表示は残し、見出しを出さない。
+    const [status, challenges, cycle] = await Promise.all([
       api.status(name),
       api.challenges(name),
+      api.cycle(name).catch(() => undefined),
     ]);
-    return { status, challenges };
+    return { status, challenges, cycle };
   } catch (e) {
     return { error: String(e) };
   }

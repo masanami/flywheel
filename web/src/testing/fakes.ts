@@ -55,6 +55,18 @@ export function fixtures(): Record<string, unknown> {
     "/api/v1/workspaces": { workspaces: [ws("alpha"), ws("beta")] },
     "/api/v1/workspaces/alpha/status": emptyStatus,
     "/api/v1/workspaces/alpha/challenges": { challenges: [] },
+    "/api/v1/workspaces/alpha/cycle": {
+      last_ended_at: "2026-10-17T01:00:00Z",
+      last_result: "completed",
+      last_started_at: "2026-10-17T00:50:00Z",
+      state: "running",
+    },
+    "/api/v1/workspaces/beta/cycle": {
+      last_ended_at: null,
+      last_result: null,
+      last_started_at: null,
+      state: "idle",
+    },
     "/api/v1/workspaces/beta/status": emptyStatus,
     "/api/v1/workspaces/beta/challenges": { challenges: [] },
     "/api/v1/needs-human": { unreadable_workspaces: [], workspaces: [] },

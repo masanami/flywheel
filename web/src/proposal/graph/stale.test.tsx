@@ -7,7 +7,6 @@ import type { ApiClient } from "../../api/client.ts";
 import type { LiveState, WorkspaceData } from "../../live/useLive.ts";
 import { createMockApi } from "../../mock/api.ts";
 import { MockStore } from "../../mock/store.ts";
-import { CycleHeaders } from "../CycleHeaders.tsx";
 import { GraphScreen, resetGraphMemory } from "./GraphScreen.tsx";
 
 let api: ApiClient;
@@ -90,19 +89,4 @@ it("更新なし: 案の画面の列のボードは「更新なし」と出す�
   expect(row).toHaveAttribute("data-stale", "true");
   expect(row).toHaveTextContent("⚠ 更新なし（要確認）");
   expect(row).not.toHaveTextContent("応答なし");
-});
-
-it("更新なし: 列の見出しの案は、サイクルの記録が途絶えたことを「⚠ 更新なし」と出す", async () => {
-  setApi({
-    ...api,
-    cycleInfo: async () => ({
-      cycle_state: "stale",
-      last_cycle_at: null,
-      policy_mode: "優先度方針: 既定",
-    }),
-  });
-  const { workspaces } = await api.workspaces();
-  render(<CycleHeaders workspaces={workspaces} refreshKey={0} />);
-  const region = screen.getByRole("region", { name: "列の見出しの案" });
-  expect((await within(region).findAllByText("⚠ 更新なし")).length).toBe(2);
 });

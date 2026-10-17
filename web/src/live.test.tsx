@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import { RECONNECT_MS } from "./live/useLive.ts";
@@ -20,7 +20,7 @@ async function mounted() {
   return requests;
 }
 
-it("AC-87/204/206: workspace_changed は該当 ws の status/challenges と fleet の needs-human だけを取り直し、questions は要求しない", async () => {
+it("AC-87/204/206: workspace_changed は該当 ws の status/challenges と fleet の needs-human だけを取り直し、questions は要求しない（cycle も取り直す）", async () => {
   const requests = await mounted();
   requests.length = 0;
   act(() =>
@@ -29,16 +29,48 @@ it("AC-87/204/206: workspace_changed は該当 ws の status/challenges と flee
       workspace: "alpha",
     }),
   );
-  await waitFor(() => expect(requests).toHaveLength(4));
+  await waitFor(() => expect(requests).toHaveLength(5));
   expect(requests.map((r) => r.url).sort()).toEqual(
     [
       "/api/v1/workspaces",
       "/api/v1/workspaces/alpha/status",
       "/api/v1/workspaces/alpha/challenges",
+      "/api/v1/workspaces/alpha/cycle",
       "/api/v1/needs-human",
     ].sort(),
   );
   expect(requests.some((r) => r.url.includes("/beta/"))).toBe(false);
+});
+
+it("AC-205: 他のワークスペースへの通知では alpha の status・challenges・cycle を要求しない", async () => {
+  const requests = await mounted();
+  requests.length = 0;
+  act(() =>
+    FakeEventSource.latest.send({
+      type: "workspace_changed",
+      workspace: "beta",
+    }),
+  );
+  await waitFor(() => expect(requests).toHaveLength(5));
+  expect(requests.some((r) => r.url.includes("/alpha/"))).toBe(false);
+});
+
+it("AC-199/200: 列の見出しに状態と最後の周の終了時刻・結果が出て、周がまだ無ければそう示す", async () => {
+  await mounted();
+  const alpha = await screen.findByRole("region", { name: "alpha の列" });
+  await waitFor(() =>
+    expect(within(alpha).getByTestId("cycle-header")).toHaveTextContent(
+      "実行中",
+    ),
+  );
+  expect(within(alpha).getByTestId("cycle-header")).toHaveTextContent(
+    "2026-10-17T01:00:00Z 完了",
+  );
+  const beta = screen.getByRole("region", { name: "beta の列" });
+  expect(within(beta).getByTestId("cycle-header")).toHaveTextContent("停止中");
+  expect(within(beta).getByTestId("cycle-header")).toHaveTextContent(
+    "周はまだありません",
+  );
 });
 
 it("keep-alive 等の workspace_changed でない通知では何も要求しない", async () => {
@@ -83,7 +115,7 @@ it("AC-90/91: 切断後に再接続を試み、つながったら全ワークス
   expect(FakeEventSource.instances.length).toBe(n + 1);
   requests.length = 0;
   act(() => FakeEventSource.latest.open());
-  await waitFor(() => expect(requests.length).toBe(6));
+  await waitFor(() => expect(requests.length).toBe(8));
   expect(requests.map((r) => r.url)).toEqual(
     expect.arrayContaining([
       "/api/v1/workspaces",
@@ -91,6 +123,8 @@ it("AC-90/91: 切断後に再接続を試み、つながったら全ワークス
       "/api/v1/workspaces/alpha/challenges",
       "/api/v1/workspaces/beta/status",
       "/api/v1/workspaces/beta/challenges",
+      "/api/v1/workspaces/alpha/cycle",
+      "/api/v1/workspaces/beta/cycle",
       "/api/v1/needs-human",
     ]),
   );
@@ -108,4 +142,42 @@ it("fleet の集約の取得に失敗しても、一覧と各ワークスペー�
   await waitFor(() =>
     expect(screen.getAllByRole("alert").length).toBeGreaterThan(0),
   );
+});
+
+it("GET …/cycle だけが失敗しても、その列の課題の表示は残り、見出しだけが出ない", async () => {
+  const b = fixtures();
+  b["/api/v1/workspaces/alpha/cycle"] = () =>
+    new Response("{}", { status: 500 });
+  installFakes(b);
+  render(<App />);
+  act(() => FakeEventSource.latest.open());
+  const beta = await screen.findByRole("region", { name: "beta の列" });
+  await waitFor(() =>
+    expect(within(beta).getByTestId("cycle-header")).toBeInTheDocument(),
+  );
+  const alpha = screen.getByRole("region", { name: "alpha の列" });
+  expect(within(alpha).queryByTestId("cycle-header")).toBeNull();
+  expect(alpha).not.toHaveTextContent("500");
+});
+
+it("読めないワークスペースの列には見出しを出さない", async () => {
+  const b = fixtures();
+  b["/api/v1/workspaces"] = {
+    workspaces: [
+      { error: null, name: "alpha", path: "/w/alpha", state: "ok" },
+      { error: "x", name: "gamma", path: "/w/gamma", state: "store_not_found" },
+    ],
+  };
+  installFakes(b);
+  render(<App />);
+  act(() => FakeEventSource.latest.open());
+  const gamma = await screen.findByRole("region", { name: "gamma の列" });
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "alpha の列" })).getByTestId(
+        "cycle-header",
+      ),
+    ).toBeInTheDocument(),
+  );
+  expect(within(gamma).queryByTestId("cycle-header")).toBeNull();
 });

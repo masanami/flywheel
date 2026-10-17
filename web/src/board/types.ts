@@ -1,6 +1,7 @@
 // board の画面部品が使う表示モデル。新しい API の応答は adapt.ts でこの形へ写す
 // （台帳の語彙は持たず、状態の導出は core が返した値をそのまま使う）。
 
+import type { CycleStatus } from "../api/types.gen.ts";
 import type { MarkKind } from "../labels.ts";
 
 export type ApprovalKind = "plan" | "completion";
@@ -47,4 +48,6 @@ export type AgentBoard = {
   challenges: Challenge[];
   parseErrors: ParseError[];
   runningRuns: RunningChallenge[];
+  // GET …/cycle の応答。まだ読めていない・読めないワークスペースでは無い。
+  cycle?: CycleStatus;
 };

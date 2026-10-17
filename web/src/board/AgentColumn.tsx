@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import { CycleHeader } from "./CycleHeader.tsx";
 import { ErrorCard } from "./ErrorCard.tsx";
 import { TaskCard } from "./TaskCard.tsx";
 import type { AgentBoard, RunningChallenge } from "./types.ts";
@@ -32,13 +33,14 @@ function RunningRow({ run }: { run: RunningChallenge }) {
   );
 }
 
-// ワークスペース 1 つ分の列。差し込み・並べ替え・優先度方針のバッジ・再開コマンドは書き込み系のため持たない。
+// ワークスペース 1 つ分の列。差し込み・並べ替え・優先度方針のバッジ・再開コマンドは持たない。
 export function AgentColumn({ agent }: { agent: AgentBoard }) {
   const firstNeedsHumanIndex = agent.challenges.findIndex((c) => c.needsHuman);
   return (
     <section className="agent-column" aria-label={`${agent.name} の列`}>
       <div className="agent-column-header">
         <h2 className="agent-column-title">{agent.name}</h2>
+        {agent.cycle && <CycleHeader cycle={agent.cycle} />}
       </div>
       <div className="agent-column-body">
         {agent.runningRuns.length > 0 && (
