@@ -814,7 +814,7 @@ func addM3SerialGroupShape(t *testing.T, doc *documentedJSON) {
 	t.Fatalf("m3 spec line has no `serial_groups: [{…}]` shape: %q", line)
 }
 
-// addM4HoldRunIDShape は `show --json` の保留の要素に足した `run_id`（M4P31）を doc へ合成する。
+// addM4HoldRunIDShape は `show --json` の保留の要素に足した `run_id`（M4H35）を doc へ合成する。
 // m4-ui-server.md が「`show --json` の保留の `run_id`」を既存の出力の基準から除くと書いている
 // ことを確かめた上で足す（第 2 の正本を持たず、文書の記述が消えたらここで落ちる）。
 func addM4HoldRunIDShape(t *testing.T, doc *documentedJSON) {
