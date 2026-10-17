@@ -252,7 +252,7 @@ it("表示の切り替え: 既定はグラフで、列のボードへ切り替�
     screen.queryByRole("group", { name: /の課題の関係グラフ$/ }),
   ).toBeNull();
   expect(
-    screen.getByRole("region", { name: "人間の操作待ち（案）" }),
+    screen.getByRole("region", { name: "人間待ちの帯" }),
   ).toBeInTheDocument();
   // 詳細を開いて戻ったとき（画面の作り直し）も、選んだ表示のまま
   unmount();

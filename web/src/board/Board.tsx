@@ -4,8 +4,10 @@ import { RefreshKeyContext } from "../nav.tsx";
 import { AgentColumn } from "./AgentColumn.tsx";
 import type { BoardFilter } from "./FilterBar.tsx";
 import { FilterBar } from "./FilterBar.tsx";
+import { NeedsHumanStrip } from "./NeedsHumanStrip.tsx";
 import { toAgentBoard } from "./adapt.ts";
-import type { Challenge } from "./types.ts";
+import { type HumanKind, filterByKind } from "./filter.ts";
+import type { AgentBoard, Challenge } from "./types.ts";
 
 // 完了は既定で隠す。表示の絞り込みだけで、データには影響しない。
 const COMPLETED_STATE = "done";
@@ -29,12 +31,17 @@ function visibleChallenges(
 export function Board({ live }: { live: LiveState }) {
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [showCompleted, setShowCompleted] = useState(false);
+  const [kind, setKind] = useState<HumanKind | null>(null);
 
   if (live.workspaces.length === 0 && live.lastUpdated === null) {
     return <div className="board-loading">読み込み中...</div>;
   }
 
-  const unreadable = live.needsHuman?.unreadable_workspaces ?? [];
+  const agents = new Map(
+    live.workspaces.map((w) => [w.name, toAgentBoard(w, live.data[w.name])]),
+  );
+  const needsHumanOf = (name: string) =>
+    live.needsHuman?.workspaces.find((w) => w.name === name)?.needs_human;
 
   return (
     <RefreshKeyContext.Provider value={live.lastUpdated}>
@@ -45,28 +52,34 @@ export function Board({ live }: { live: LiveState }) {
           showCompleted={showCompleted}
           onShowCompletedChange={setShowCompleted}
         />
-        {unreadable.length > 0 ? (
-          <p role="alert" data-testid="unreadable-workspaces">
-            読み取れなかったワークスペース（集約から除いています）:{" "}
-            {unreadable.join("、")}
-          </p>
-        ) : null}
+        <NeedsHumanStrip
+          live={live}
+          selected={kind}
+          onSelect={setKind}
+          cardsOf={(name) => agents.get(name)?.challenges ?? []}
+        />
         <div className="board-main-row">
           <div className="board-columns">
             {live.workspaces.map((w) => {
-              const agent = toAgentBoard(w, live.data[w.name]);
+              const agent = agents.get(w.name) as AgentBoard;
               return (
                 <AgentColumn
                   key={w.name}
                   agent={{
                     ...agent,
-                    challenges: visibleChallenges(
-                      agent.challenges,
-                      filter,
-                      showCompleted,
+                    challenges: filterByKind(
+                      visibleChallenges(
+                        agent.challenges,
+                        filter,
+                        showCompleted,
+                      ),
+                      needsHumanOf(w.name),
+                      kind,
                     ),
                     runningRuns:
-                      filter === "needsHuman" ? [] : agent.runningRuns,
+                      filter === "needsHuman" || kind !== null
+                        ? []
+                        : agent.runningRuns,
                   }}
                 />
               );

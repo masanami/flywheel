@@ -18,8 +18,6 @@
   --board-chip-bg: #ffffff;
   --board-chip-active-bg: #1c1c1f;
   --board-chip-active-fg: #ffffff;
-  --board-tooltip-bg: #1c1c1f;
-  --board-tooltip-fg: #ffffff;
   --board-modal-overlay-bg: rgb(0 0 0 / 45%);
   --board-modal-bg: #ffffff;
   --board-modal-border: #e2e2e6;
@@ -54,20 +52,6 @@
      1 箇所へ括り出して連動させる（片方だけ更新されて取り残されるのを防ぐ）。
      テーマではなくレイアウトの定数なので dark 側の上書きは持たない。 */
   --board-column-min: 320px;
-
-  --status-未分類: #9aa0a6;
-  --status-分類済: #4a90d9;
-  --status-計画承認待ち: #e8b93f;
-  --status-着手中: #3aa76d;
-  /* 人間対応待ち（masanami/claude-flywheel#116）は「人間の入力待ち」なので
-     承認待ち 2 種と同じ暖色系に寄せる（一目で人間待ちと分かる）。ただし両者が
-     共有する琥珀 #e8b93f とは彩度・色相をずらし、3 つを区別できるようにする。
-     ステータス色は明暗テーマで共有（dark 側に上書きが無い）ため、どちらの背景でも
-     視認できる濃さを選んでいる。 */
-  --status-人間対応待ち: #e07b39;
-  --status-検証中: #8a63d2;
-  --status-完了確認待ち: #e8b93f;
-  --status-完了: #2f9e44;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -87,8 +71,6 @@
     --board-chip-bg: #24252b;
     --board-chip-active-bg: #e7e7ea;
     --board-chip-active-fg: #17181c;
-    --board-tooltip-bg: #e7e7ea;
-    --board-tooltip-fg: #17181c;
     --board-modal-overlay-bg: rgb(0 0 0 / 65%);
     --board-modal-bg: #1e1f24;
     --board-modal-border: #34353c;
@@ -547,13 +529,6 @@ body {
   padding: 0.5rem 0.65rem;
 }
 
-/* 承認ブロックがあるときは、本文の下余白を「本文と承認領域の間隔」に詰める。
- * カード下端の余白は承認ブロック側が持つため、合算しても見た目は
- * 承認ブロックがカードの外にあった頃と同じ（本文との間隔 0.3rem・下端 0.5rem）。 */
-.task-card:has(.task-card-approval) .task-card-body {
-  padding-bottom: 0.3rem;
-}
-
 /* リングはコンテナ側（.task-card:has(:focus-visible)）が描くため、
  * 内側では出さない（輪郭が二重になるのを防ぐ）。 */
 .task-card-body:focus-visible {
@@ -622,57 +597,9 @@ body {
   color: var(--board-error-fg);
 }
 
-/* カード（.task-card）の中・本文（.task-card-body）の下に置く（#169）。
-   カードを「コンテナ＋内側のクリック領域」に分けたことで、<button> の入れ子を
-   作らずにカードの内側へ収められる。ここに残すのはカード固有の余白だけ
-   （共通の見た目は .approval-control が持つ。#171・D3）。 */
-.task-card-approval {
-  /* 左右はカード本文と揃え、下はカード下端の余白を兼ねる（.task-card は
-     余白を持たないため。上の間隔は .task-card-body の padding-bottom が担う）。 */
-  padding: 0 0.65rem 0.5rem;
-}
-
-.task-card-tooltip {
-  /* document.body へ portal されるため viewport 基準。top/left/bottom は
-   * TaskCard 側が実測して inline style で与える（#41）。 */
-  position: fixed;
-  max-width: 240px;
-  background: var(--board-tooltip-bg);
-  color: var(--board-tooltip-fg);
-  border-radius: 4px;
-  padding: 0.4rem 0.55rem;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  box-shadow: 0 2px 6px rgb(0 0 0 / 20%);
-  z-index: 10;
-}
-
 .task-card-title {
   font-size: 0.9rem;
   margin-bottom: 0.3rem;
-}
-
-/* カードの 4 項目（一言で・位置づけ・いまの状態・次に人間がすること。#185）:
- * カードの最初に見える部分。10 秒で掴めるよう長文でも省略せず（clamp しない）
- * 折り返して全文を出す。ラベルは小さく、値の上に積む。 */
-.task-card-fields {
-  margin: 0 0 0.4rem;
-  font-size: 0.8rem;
-  line-height: 1.4;
-}
-
-.task-card-fields-item + .task-card-fields-item {
-  margin-top: 0.25rem;
-}
-
-.task-card-fields dt {
-  font-size: 0.7rem;
-  color: var(--board-muted-fg);
-}
-
-.task-card-fields dd {
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 
 .task-card-meta {
@@ -681,39 +608,6 @@ body {
   gap: 0.4rem;
   font-size: 0.75rem;
   color: var(--board-muted-fg);
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  background: var(--board-muted-fg);
-}
-
-.status-dot[data-status="未分類"] {
-  background: var(--status-未分類);
-}
-.status-dot[data-status="分類済"] {
-  background: var(--status-分類済);
-}
-.status-dot[data-status="計画承認待ち"] {
-  background: var(--status-計画承認待ち);
-}
-.status-dot[data-status="着手中"] {
-  background: var(--status-着手中);
-}
-.status-dot[data-status="人間対応待ち"] {
-  background: var(--status-人間対応待ち);
-}
-.status-dot[data-status="検証中"] {
-  background: var(--status-検証中);
-}
-.status-dot[data-status="完了確認待ち"] {
-  background: var(--status-完了確認待ち);
-}
-.status-dot[data-status="完了"] {
-  background: var(--status-完了);
 }
 
 .error-card {
@@ -1584,7 +1478,7 @@ body {
   font-size: 0.75rem;
 }
 
-/* ---- UX モック段の案（人間の操作待ちの帯・列の見出しのサイクルの状態） ---- */
+/* ---- 人間待ちの帯（本番）と列の見出しのサイクルの状態（案） ---- */
 .needs-human-strip {
   background: var(--board-needs-human-bg);
   border: 1px solid var(--board-needs-human-border);
@@ -1598,12 +1492,19 @@ body {
   padding: 0;
 }
 .strip-chip {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
   margin-left: 0.5rem;
   border: 1px solid var(--board-needs-human-border);
   border-radius: 10px;
   padding: 0 0.5rem;
   font-size: 0.85em;
   background: var(--board-chip-bg);
+}
+.strip-chip[aria-pressed="true"] {
+  background: var(--board-needs-human-border);
+  color: #1c1c1f;
 }
 .cycle-headers {
   display: flex;
