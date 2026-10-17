@@ -82,6 +82,7 @@ type Hold struct {
 	Answer     *string
 	AnsweredAt *time.Time
 	AnsweredBy *string
+	RunID      *string // 保留の原因の run の ID（"R-<n>"）。無ければ nil
 }
 
 // IrreversibleOperation は不可逆操作の 1 件（§データモデル operation。core 内部の
@@ -282,7 +283,7 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 
 func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT question, from_status, raised_at, answer, answered_at, answered_by
+		`SELECT question, from_status, raised_at, answer, answered_at, answered_by, run_id
 		 FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -295,10 +296,15 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			fromStatus                        string
 			raisedAtStr                       string
 			answer, answeredAtStr, answeredBy sql.NullString
+			runID                             sql.NullInt64
 			h                                 Hold
 		)
-		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy); err != nil {
+		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID); err != nil {
 			return nil, err
+		}
+		if runID.Valid {
+			v := formatRunID(runID.Int64)
+			h.RunID = &v
 		}
 		h.FromStatus = Status(fromStatus)
 		raisedAt, err := parseTimestamp(raisedAtStr)

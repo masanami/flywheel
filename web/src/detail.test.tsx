@@ -136,6 +136,7 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
         from_status_label: "着手中",
         question: "保留の問い",
         raised_at: "t0",
+        run_id: null,
       },
     ],
     operations: [
@@ -209,6 +210,7 @@ it("AC-119: 外部由来の文字列は文字として出し、script 要素と 
         from_status_label: "",
         question: XSS,
         raised_at: "t0",
+        run_id: null,
       },
     ],
   });

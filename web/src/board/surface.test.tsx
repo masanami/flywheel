@@ -96,6 +96,17 @@ function bodies() {
                 from_status_label: "着手中",
                 question: "どちらにしますか",
                 raised_at: "2026-02-01T00:00:00Z",
+                run_id: "R-2",
+              },
+              {
+                answer: null,
+                answered_at: null,
+                answered_by: null,
+                from_status: "in_progress",
+                from_status_label: "着手中",
+                question: "run の無い保留",
+                raised_at: "2026-02-02T00:00:00Z",
+                run_id: null,
               },
             ]
           : [],
@@ -233,8 +244,13 @@ it("AC-203: 未回答の保留の詳細に、問いの文・保留に入った�
   expect(hold.textContent).toContain("どちらにしますか");
   expect(hold.textContent).toContain("2026-02-01T00:00:00Z");
   expect(hold.textContent).toContain("入る直前の状態: 着手中");
-  // 詳細の API は保留の run を返さないため、推測せず「不明」と出す
-  expect(hold.textContent).toContain("原因の run: 不明");
+  expect(hold.textContent).toContain("原因の run: R-2");
+  const noRun = Array.from(modal.querySelectorAll('[data-hold="open"]')).find(
+    (el) => el.textContent?.includes("run の無い保留"),
+  );
+  expect(noRun?.textContent).toContain(
+    "原因の run: なし（原因の run は記録されていない）",
+  );
 });
 
 it("AC-206: UI はどの画面を操作しても GET /api/v1/questions を要求しない", async () => {

@@ -511,7 +511,15 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return "", err
 		}
 		holdID = id
+		var runID sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT run_id FROM hold WHERE id = ?`, id).Scan(&runID); err != nil {
+			return "", err
+		}
 		holdOut = Hold{Question: question, FromStatus: fromStatus, RaisedAt: raisedAt}
+		if runID.Valid {
+			v := formatRunID(runID.Int64)
+			holdOut.RunID = &v
+		}
 		return fromStatus, nil
 	}
 
