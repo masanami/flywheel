@@ -390,6 +390,7 @@ export function cardOf(m: MockChallenge): Card {
     headline: m.headline,
     modifiers,
     next_human_actions: actions,
+    slot_ids: f.slot ? [f.slot.slot_id] : [],
     state: s,
   };
 }

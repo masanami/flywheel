@@ -112,7 +112,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | 上流との食い違い | `needs_human.discrepancies` の各要素 | `challenge_id` の課題 |
 | 予算の使い切り | `needs_human.budget_exhausted` の各要素 | `challenge_id` の課題 |
 | トリアージ | `needs_human.triage` の各要素 | `challenge_id` の課題 |
-| 片づけ待ちのスロット | `needs_human.slots` の各スロット | `card.next_human_actions` に `clear_slot` を持つ課題。課題の run に結ばれないスロットは、ボードの上に一覧で出す |
+| 片づけ待ちのスロット | `needs_human.slots` の各スロット | `card.next_human_actions` に `clear_slot` を持つ課題。どのカードの `card.slot_ids` にも載らないスロット（課題の run に結ばれないスロット）は、ボードの上に一覧で出す【M4H36】 |
 
 - [ ] `needs-human` の `unreadable_workspaces` にあるワークスペースは、帯に読み取れなかったことを示す [S2]
 - [ ] 詳細には、S1 の課題の詳細の中身（計画の全版・承認と差し戻しの記録・保留の問いと回答・不可逆操作・run と報告・作業ログ）に加え、いまの状態・次に人間がすること・（S4 からは）位置づけを示す [S2]【決定 2026-10-12 オーナー M4H23】
@@ -367,7 +367,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 
 #### カードの面（`card`）【決定 2026-10-09 親 M4P7】
 
-`{"state": <コード>, "modifiers": [<コード>…], "next_human_actions": [<コード>…], "headline": string|null, "context": string|null}`（`headline`・`context` は S4 まで常に `null`）。
+`{"state": <コード>, "modifiers": [<コード>…], "next_human_actions": [<コード>…], "slot_ids": ["SL-<n>"…], "headline": string|null, "context": string|null}`（`headline`・`context` は S4 まで常に `null`）。`slot_ids` は、スロットごとの直近の run（`run.slot_id` が一致する run のうち最新）がこの課題の run であるスロットの ID を昇順に並べる（API 専用。CLI の `--json` には出さない。M4H36）。
 
 - `state` は課題の状態のコード（M1 の 8 値）そのもの。
 - `modifiers` は `running`（終了していない run がある）・`unresponsive`（終了していない run の heartbeat が 300 秒より古い。しきい値は M3 の中断の判定と同じ値を core から使い、導出の関数は現在時刻を引数で受け取る）・`waiting_ci`（`status.waiting_external` にある）・`budget_exhausted`（`status.needs_human.budget_exhausted` にある）・`discrepancy`（`status.needs_human.discrepancies` にある）の閉集合で、この順に重複なく並べる。
@@ -382,7 +382,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | `increase_budget` | `status.needs_human.budget_exhausted` にある |
 | `approve_operation` | 未承認（`pending`）の不可逆操作がある（完了した課題を含む） |
 | `review_discrepancy` | `status.needs_human.discrepancies` にある |
-| `clear_slot` | 課題の run の `run.slot_id`（M3 のマイグレーション `0005`）で結ばれたスロットが `status.needs_human.slots` にある |
+| `clear_slot` | `card.slot_ids`（スロットごとの直近の run が課題の run であるスロット。`run.slot_id`〔M3 のマイグレーション `0005`〕で結ぶ）が `status.needs_human.slots` にある |
 
 #### エラーコードと HTTP の状態コード
 
@@ -602,7 +602,8 @@ S1 は 2026-10-12 に出荷の判定（要人間判定）を終えた（flywheel
 - [ ] `status.needs_human.budget_exhausted` にある課題の `card.next_human_actions` は `increase_budget` を含む
 - [ ] 未承認の不可逆操作を持つ完了した課題の `card.next_human_actions` は `["approve_operation"]` である
 - [ ] `status.needs_human.discrepancies` にある課題の `card.next_human_actions` は `review_discrepancy` を含む
-- [ ] `run.slot_id` で結ばれたスロットが `status.needs_human.slots` にある run を持つ課題の `card.next_human_actions` は `clear_slot` を含む
+- [ ] `run.slot_id` で結ばれたスロットが `status.needs_human.slots` にあり、そのスロットの直近の run がこの課題の run である課題の `card.next_human_actions` は `clear_slot` を含み、`card.slot_ids` はそのスロットの ID を含む
+- [ ] 同じスロットをあとの run で別の課題が使ったとき、過去にそのスロットを使っただけの課題の `card.next_human_actions` は `clear_slot` を含まず、`card.slot_ids` にそのスロットの ID を含まない（M4H36）
 - [ ] 分類済みで、保留・未承認の不可逆操作・食い違い・予算の使い切り・`triage` の記録の無い課題の `card.next_human_actions` は `[]` である
 - [ ] 複数の条件に当たる課題の `card.next_human_actions` は、§IF / API「カードの面」の表の順に重複なく並ぶ（表の 8 つの条件のうち 3 つ以上に当たる課題で検証する）
 - [ ] 終了していない run を持つ課題の `card.modifiers` は `running` を含む
@@ -906,6 +907,7 @@ S1 は 2026-10-12 に出荷の判定（要人間判定）を終えた（flywheel
 | M4H33 | オーナー・2026-10-17（flywheel#226 の決定 2） | UI から起動した 1 周の、周を記録する前の失敗（`claude` が無い・設定の不備・`BeginCycle` での `locked`）をどこに残し、UI でどう見せるか | A: server が子の周を記録した合図を短い上限つきで待ち、その前に子が終了したら `POST …/cycle` の応答でエラー（標準エラーの末尾つき）を返す。server に状態を増やさない／B: 子の標準エラーを保存する／C: 起動の記録を先に作る | A。CLI は `BeginCycle` より前の失敗で周の行を作らず、従来は子の標準入出力を捨てていたので、失敗がどこにも残らず UI には `started: true` だけが返っていた（#216・PR #225 の実装者の指摘）。周が始まった後の失敗は従来どおり `last_result` で見る。合図の形・上限の秒数・エラーコードは起草者の仮定（§アーキテクチャ決定） |
 | M4H34 | オーナー・2026-10-17（flywheel#226 の決定 3。flywheel#176 の 2026-10-14 の決定） | 列の見出しの `stale` と、カードの `unresponsive` の印の語 | 「応答なし」のまま／「更新なし」に改める | 「更新なし」。heartbeat が古いことは、プロセスが応答しないことではなく記録の更新が止まったことを表す。旧 board と関係グラフの試作（#210）も「更新なし」を使う。S1 の要件（§状況の表示とライブ更新の 3 つ目）と S1 の受入基準は S1 の出荷の判定のために文言を残す |
 | M4H35 | オーナー・2026-10-17（flywheel#230 の決定。案 A） | 詳細の API の保留に、原因の run の ID を足すか | A: `Hold` に `run_id` を足す（`show --json` の保留にも出る）／B: API 専用の型に分ける（CLI の `--json` は変えない） | A。保留の表に run の ID は保存済みで、スキーマは変えない。`jsondoc_test.go` と `types.gen.ts` を更新する。B は M4P2（API は CLI と同じ形を返し、別の形を作らない）に反する |
+| M4H36 | オーナー・2026-10-17（flywheel#235 の決定。flywheel#184 の決定を含む） | 片づけ待ちのスロット（AC-187）を課題とどう結び付けるか。`clear_slot` を過去にスロットを使っただけの課題にも付けるか（#184） | A: カードに結ぶスロットの ID を持たせる（API 専用の `card.slot_ids`）／B: `needs_human.slots` に `challenge_id` を足す（CLI の `--json` が変わる） | A。結ぶ規則は「スロットごとに直近の run（`run.slot_id` が一致する run のうち最新）の課題だけ」。過去にそのスロットを使っただけの課題には `slot_ids` も `clear_slot` も付けない（#184 は「付けない」）。帯の「片づけ待ちのスロット」は、どのカードの `slot_ids` にも載らない `needs_human.slots` のスロットだけを出す（PR #231 の暫定の全件表示を置き換える）。CLI の `--json`（`status`・`show`）の形とスキーマは変えず、AC-187 の文言も変えない。**既知の限界**: 割り当て前の検査に失敗して片づけ待ちになったスロット（run が割り当てられない経路）は、直近の run の無関係な課題に載ることがある。原因の run を記録する列は足さない |
 
 ### 親が決めてよい論点
 

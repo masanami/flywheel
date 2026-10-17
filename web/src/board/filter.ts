@@ -51,7 +51,7 @@ export function countsOf(nh: StatusNeedsHuman): HumanCounts {
   };
 }
 
-// 区分に当たる課題の ID。スロットは card.next_human_actions に clear_slot を持つ課題。
+// 区分に当たる課題の ID。スロットは card.next_human_actions に clear_slot を持つ課題（スロットの結び付きは card.slot_ids）。
 export function challengeIdsOf(
   nh: StatusNeedsHuman,
   kind: HumanKind,
@@ -91,11 +91,9 @@ export function filterByKind(
   return cards.filter((c) => ids.has(c.id));
 }
 
-// 課題の run に結ばれないスロット。needs_attention のスロットは run_id を持たず、スロットと課題の結び付きは API から導けない。
-// clear_slot を持つ課題の数より多いスロットがあるときだけ、そのワークスペースのスロットを全件出す（結び付きは未判定）。
+// 課題の run に結ばれないスロット。どのカードの card.slot_ids にも載らない needs_human.slots のスロット
+// （スロットごとの直近の run の課題にだけ結ばれる）。
 export function unboundSlots(nh: StatusNeedsHuman, cards: Challenge[]): Slot[] {
-  const bound = cards.filter((c) =>
-    c.nextHumanActions.includes(CLEAR_SLOT),
-  ).length;
-  return nh.slots.length > bound ? nh.slots : [];
+  const bound = new Set(cards.flatMap((c) => c.slotIds));
+  return nh.slots.filter((s) => !bound.has(s.slot_id));
 }

@@ -223,6 +223,7 @@ export interface Card {
   headline: string | null;
   modifiers: string[];
   next_human_actions: string[];
+  slot_ids: string[];
   state: string;
 }
 

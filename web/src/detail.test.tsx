@@ -25,6 +25,7 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
       headline: null,
       modifiers: [],
       next_human_actions: [],
+      slot_ids: [],
       state: "in_progress",
     },
     challenge: {
