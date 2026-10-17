@@ -1,7 +1,13 @@
-import { OUTSIDE_NOTE, guidesFor } from "../guidance.ts";
+import {
+  CONVERSATION_NOTE,
+  OUTSIDE_NOTE,
+  guidesFor,
+  showsConversationNote,
+} from "../guidance.ts";
 import type { Challenge } from "./types.ts";
 
-// 承認ボタンの位置に出す案内。承認は端末の CLI で行う（UI からは書き込まない）。
+// 詳細の操作の案内。ボタンで承認できない操作には端末のコマンドを示し、
+// 対話で伝えれば LLM が記録できる操作にはその旨を添える。
 export function ApprovalGuide({
   challenge,
   workspacePath,
@@ -11,13 +17,10 @@ export function ApprovalGuide({
   workspacePath: string;
   className?: string;
 }) {
-  const guides = guidesFor(
-    challenge.id,
-    workspacePath,
-    challenge.state,
-    challenge.modifiers,
-  );
-  if (guides.length === 0) {
+  const actions = challenge.nextHumanActions;
+  const guides = guidesFor(challenge.id, workspacePath, actions);
+  const conversation = showsConversationNote(actions);
+  if (guides.length === 0 && !conversation) {
     return null;
   }
   return (
@@ -27,12 +30,25 @@ export function ApprovalGuide({
         className ? `approval-control ${className}` : "approval-control"
       }
     >
-      <p className="approval-control-question">{OUTSIDE_NOTE}</p>
+      {guides.length > 0 && (
+        <p className="approval-control-question">{OUTSIDE_NOTE}</p>
+      )}
       {guides.map((g) => (
-        <pre key={g.id} data-guide={g.id}>
-          <code>{g.command}</code>
-        </pre>
+        <div key={g.id} className="approval-guide-item">
+          {g.note && <p className="approval-control-question">{g.note}</p>}
+          <pre data-guide={g.id}>
+            <code>{g.command}</code>
+          </pre>
+        </div>
       ))}
+      {conversation && (
+        <p
+          className="approval-control-question"
+          data-testid="conversation-note"
+        >
+          {CONVERSATION_NOTE}
+        </p>
+      )}
     </section>
   );
 }

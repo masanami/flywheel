@@ -1,25 +1,53 @@
 {
   "outside_note": "本人確認が要る操作です。Claude Code の外の端末で実行してください（この画面からは行えません）。",
+  "conversation_note": "Claude Code との対話で伝えれば、LLM が記録します（端末のコマンドの代わりに使えます）。",
+  "conversation_actions": [
+    "approve_plan",
+    "approve_completion",
+    "answer_question",
+    "approve_operation",
+    "increase_budget"
+  ],
   "templates": [
     {
+      "id": "reject",
+      "when": { "actions": ["approve_plan", "approve_completion"] },
+      "command": ["reject"],
+      "flags": ["workspace", "reason"],
+      "template": "flywheel reject <C-ID> --workspace <パス> --reason <理由>"
+    },
+    {
       "id": "approve",
-      "when": {
-        "statuses": ["awaiting_plan_approval", "awaiting_completion_approval"]
-      },
+      "when": { "actions": ["approve_plan"] },
       "command": ["approve"],
       "flags": ["workspace"],
       "template": "flywheel approve <C-ID> --workspace <パス>"
     },
     {
+      "id": "approve-with-release",
+      "when": { "actions": ["approve_completion"] },
+      "command": ["approve"],
+      "flags": ["workspace"],
+      "template": "flywheel approve <C-ID> --workspace <パス>",
+      "note": "本番反映（release）も同時に承認します"
+    },
+    {
       "id": "answer",
-      "when": { "statuses": ["awaiting_human"] },
+      "when": { "actions": ["answer_question"] },
       "command": ["answer"],
       "flags": ["workspace", "answer"],
       "template": "flywheel answer <C-ID> --workspace <パス> --answer <回答>"
     },
     {
+      "id": "approve-operation",
+      "when": { "actions": ["approve_operation"] },
+      "command": ["approve"],
+      "flags": ["workspace"],
+      "template": "flywheel approve <OP-ID> --workspace <パス>"
+    },
+    {
       "id": "budget",
-      "when": { "modifiers": ["budget_exhausted"] },
+      "when": { "actions": ["increase_budget"] },
       "command": ["budget"],
       "flags": ["workspace", "impl-usd"],
       "template": "flywheel budget <C-ID> --workspace <パス> --impl-usd <額>"

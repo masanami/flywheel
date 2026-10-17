@@ -64,7 +64,13 @@ export function fixtures(): Record<string, unknown> {
 export interface Recorded {
   url: string;
   method: string;
+  headers: Record<string, string>;
+  body: string | null;
 }
+
+// bodies のキーが "POST <url>" なら POST の応答。値が関数なら呼び出しごとに Response を作る
+// （失敗や版の違いを順に返すため）。それ以外の値は 200 の JSON。
+export type FakeResponder = (rec: Recorded) => Response;
 
 // fetch と EventSource を偽物に差し替え、発行した要求を記録する。
 export function installFakes(bodies: Record<string, unknown> = fixtures()) {
@@ -78,8 +84,17 @@ export function installFakes(bodies: Record<string, unknown> = fixtures()) {
       const method = (
         init?.method ?? (input instanceof Request ? input.method : "GET")
       ).toUpperCase();
-      requests.push({ url, method });
-      const body = bodies[url];
+      const rec: Recorded = {
+        url,
+        method,
+        headers: Object.fromEntries(
+          Object.entries((init?.headers ?? {}) as Record<string, string>),
+        ),
+        body: typeof init?.body === "string" ? init.body : null,
+      };
+      requests.push(rec);
+      const body = bodies[method === "GET" ? url : `${method} ${url}`];
+      if (typeof body === "function") return (body as FakeResponder)(rec);
       if (body === undefined) return new Response("{}", { status: 404 });
       return new Response(JSON.stringify(body), { status: 200 });
     }),

@@ -67,6 +67,19 @@ function bodies() {
     source_binding: null,
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-2"] = { activities: [] };
+  f["/api/v1/workspaces/alpha/challenges/C-2/approval"] = {
+    approval: {
+      challenge_id: "C-2",
+      done_criteria: "完了条件C-2",
+      kind: "plan",
+      other_pending_operations: [],
+      plan: { body: "計画の本文", version: 1 },
+      release_held: false,
+      releases: [],
+      title: "題名C-2",
+      version: 1,
+    },
+  };
   return f;
 }
 
@@ -98,17 +111,22 @@ it("承認待ちは「🔔 承認待ち」の見出しの下に先頭で出て�
   const card = within(alpha).getByTestId("card-C-2");
   expect(card).toHaveAttribute("data-needs-human", "true");
   // 面にはコマンドを出さない（M4H23）
-  expect(card.textContent).not.toContain("flywheel approve");
+  expect(card.textContent).not.toContain("flywheel ");
   fireEvent.click(within(card).getByRole("button"));
   const modal = await screen.findByTestId("card-detail-content");
   expect(
-    within(modal).getByText(/flywheel approve C-2 --workspace '\/w\/alpha'/),
+    within(modal).getByText(
+      /flywheel reject C-2 --workspace '\/w\/alpha' --reason <理由>/,
+    ),
   ).toBeInTheDocument();
+  // 承認のボタンは詳細にだけある（面には無い）
+  expect(within(card).queryByRole("button", { name: /承認する/ })).toBeNull();
   expect(
-    within(modal).queryByRole("button", {
-      name: /^(計画を承認|完了を承認|承認する)$/,
+    await within(modal).findByRole("button", {
+      name: "計画を承認する",
+      hidden: true,
     }),
-  ).toBeNull();
+  ).toBeInTheDocument();
 });
 
 it("実行中の課題は「⚡ 実行中」に出て、応答なしは区別される", async () => {
@@ -160,8 +178,8 @@ it("カードを開くと詳細のモーダルに、API から読んだ計画と
   const alpha = screen.getByRole("region", { name: "alpha の列" });
   fireEvent.click(within(alpha).getByText("題名C-2"));
   const modal = await screen.findByTestId("card-detail-content");
-  await within(modal).findByText("計画の本文");
-  expect(within(modal).getByText("完了条件C-2")).toBeInTheDocument();
+  await within(modal).findAllByText("計画の本文");
+  expect(within(modal).getAllByText("完了条件C-2")[0]).toBeInTheDocument();
   expect(within(modal).getByText("説明C-2")).toBeInTheDocument();
   expect(within(modal).getByLabelText("承認方法の案内")).toBeInTheDocument();
   expect(requests.every((r) => r.method === "GET")).toBe(true);

@@ -8,6 +8,7 @@ import type {
 import { STATE_LABELS, label } from "../labels.ts";
 import { RefreshKeyContext } from "../nav.tsx";
 import { ApprovalGuide } from "./ApprovalGuide.tsx";
+import { ApprovalPanel, approvalKindOf } from "./ApprovalPanel.tsx";
 import { CardFields } from "./CardFields.tsx";
 import { ClampedText } from "./ClampedText.tsx";
 import type { Challenge } from "./types.ts";
@@ -93,6 +94,8 @@ export function CardDetailModal({
 }: CardDetailModalProps) {
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const refreshKey = useContext(RefreshKeyContext);
+  const [localReload, setLocalReload] = useState(0);
+  const approvalKind = approvalKindOf(challenge.nextHumanActions);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const mouseDownOnDialog = useRef(false);
   const onCloseRef = useRef(onClose);
@@ -128,7 +131,7 @@ export function CardDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [agentName, challenge.id, refreshKey]);
+  }, [agentName, challenge.id, refreshKey, localReload]);
 
   const close = () => {
     const dialog = dialogRef.current;
@@ -220,6 +223,16 @@ export function CardDetailModal({
         )}
         {loadState.status === "success" && (
           <DetailSections l={loadState.loaded} />
+        )}
+
+        {approvalKind && (
+          <ApprovalPanel
+            key={approvalKind}
+            workspace={agentName}
+            challengeId={challenge.id}
+            kind={approvalKind}
+            onApproved={() => setLocalReload((n) => n + 1)}
+          />
         )}
 
         <ApprovalGuide
