@@ -20,7 +20,6 @@ import {
 import type { LiveState } from "../../live/useLive.ts";
 import { OpenDetailContext } from "../../nav.tsx";
 import { CycleHeaders } from "../CycleHeaders.tsx";
-import { NeedsHumanStrip } from "../NeedsHumanStrip.tsx";
 import {
   AgentDock,
   AgentPicker,
@@ -279,7 +278,6 @@ export function GraphScreen({ live }: { live: LiveState }) {
               {ws ? (
                 <style>{`.graph-board-view .agent-column[aria-label=${JSON.stringify(`${ws} の列`)}] { outline: 2px solid var(--graph-running); outline-offset: 2px; }`}</style>
               ) : null}
-              <NeedsHumanStrip live={live} />
               <CycleHeaders
                 workspaces={live.workspaces}
                 refreshKey={live.lastUpdated}

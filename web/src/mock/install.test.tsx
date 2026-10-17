@@ -27,6 +27,6 @@ it("mock モード: 偽の API で全画面を開ける", async () => {
   ).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "列のボード" }));
   expect(
-    await screen.findByRole("region", { name: "人間の操作待ち（案）" }),
+    await screen.findByRole("region", { name: "人間待ちの帯" }),
   ).toBeInTheDocument();
 });
