@@ -1,12 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { resetApi, setApi } from "../../api/client.ts";
 import type { ApiClient } from "../../api/client.ts";
 import type { ChallengeRelation } from "../../api/proposed.ts";
 import type { LiveState, WorkspaceData } from "../../live/useLive.ts";
 import { createMockApi } from "../../mock/api.ts";
 import { MockStore } from "../../mock/store.ts";
-import { OpenDetailContext } from "../../nav.tsx";
 import { GRAPH_TITLE, GraphScreen, resetGraphMemory } from "./GraphScreen.tsx";
 import { type Dims, downstreamOf, layoutGraph, upstreamOf } from "./model.ts";
 
@@ -159,41 +158,49 @@ it("関係グラフ: 区分で色分けし、凡例に件数を出す", async ()
   ).toBeDisabled();
 });
 
-it("関係グラフ: 課題を選ぶと後続・先行を示し、詳細へ移れる", async () => {
-  const open = vi.fn();
-  render(
-    <OpenDetailContext.Provider value={open}>
-      <GraphScreen live={await liveOf()} />
-    </OpenDetailContext.Provider>,
-  );
+it("関係グラフ: 課題に重ねると後続・先行を示し、押すとボードと同じ詳細のモーダルを開く", async () => {
+  render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   fireEvent.click(screen.getByRole("button", { name: /^C-14 を開く/ }));
-  fireEvent.click(node("C-12"));
-  const panel = screen.getByRole("complementary", { name: "選んだ課題" });
-  const after = within(panel).getByText("これが終わると進められる課題")
-    .nextElementSibling as HTMLElement;
-  expect(
-    within(after)
-      .getAllByRole("button")
-      .map((b) => b.textContent),
-  ).toEqual(["C-6", "C-8", "C-13", "C-18"]);
+  fireEvent.mouseEnter(node("C-12"));
+  expect(node("C-12")).toHaveAttribute("data-relation", "selected");
   // 後続の後続（C-6 → C-18）も連鎖してたどる
   expect(node("C-18")).toHaveAttribute("data-relation", "downstream");
   // 親（大枠の見出し）は家族として薄くしない。関係の無い大枠（畳んだ C-2）は薄くする
   expect(node("C-14")).toHaveAttribute("data-relation", "family");
   expect(node("C-2")).toHaveAttribute("data-dim", "true");
-  // パネルの関係から別の課題へ移る
-  fireEvent.click(within(after).getByRole("button", { name: "C-18" }));
+  fireEvent.mouseLeave(node("C-12"));
+  expect(node("C-12")).not.toHaveAttribute("data-relation");
+  expect(node("C-2")).not.toHaveAttribute("data-dim");
+  // キーボードで移っても同じく強調する
+  fireEvent.focus(node("C-6"));
+  expect(node("C-18")).toHaveAttribute("data-relation", "downstream");
+  expect(node("C-12")).toHaveAttribute("data-relation", "upstream");
+  fireEvent.blur(node("C-6"));
+  // 押すと、ボードのカードと同じ詳細のモーダル（CardDetailModal）を開く。右のパネルは無い
+  expect(node("C-18")).toHaveAttribute("aria-haspopup", "dialog");
+  fireEvent.click(node("C-18"));
+  let modal = await screen.findByTestId("card-detail-content");
+  expect(modal.closest("dialog")).not.toBeNull();
+  expect(modal.textContent).toContain("C-18");
   expect(
-    within(panel).getByRole("heading", { level: 3 }).textContent,
-  ).toContain("C-18");
-  fireEvent.click(within(panel).getByRole("button", { name: "詳細を開く" }));
-  expect(open).toHaveBeenCalledWith("alpha", "C-18");
-  // キーボードでも選べる
+    screen.queryByRole("complementary", { name: "選んだ課題" }),
+  ).toBeNull();
+  // 閉じるとモーダルが消える
+  fireEvent.click(within(modal).getByText("閉じる"));
+  expect(screen.queryByTestId("card-detail-content")).toBeNull();
+  // キーボード（Enter）でも開ける。開いた大枠の見出しも同じ
   fireEvent.keyDown(node("C-7"), { key: "Enter" });
-  expect(
-    within(panel).getByRole("heading", { level: 3 }).textContent,
-  ).toContain("C-7");
+  modal = await screen.findByTestId("card-detail-content");
+  expect(modal.textContent).toContain("C-7");
+  fireEvent.click(within(modal).getByText("閉じる"));
+  fireEvent.click(node("C-14"));
+  modal = await screen.findByTestId("card-detail-content");
+  expect(modal.textContent).toContain("C-14");
+  fireEvent.click(within(modal).getByText("閉じる"));
+  // 開閉のボタンは詳細を開かず、大枠を畳むだけ
+  fireEvent.click(screen.getByRole("button", { name: "C-14 を畳む" }));
+  expect(screen.queryByTestId("card-detail-content")).toBeNull();
 });
 
 it("関係グラフ: 区分・リポジトリで絞り、ワークスペースを切り替える", async () => {
@@ -204,7 +211,9 @@ it("関係グラフ: 区分・リポジトリで絞り、ワークスペース�
   expect(node("C-15")).not.toHaveAttribute("data-dim");
   expect(node("C-3")).toHaveAttribute("data-dim", "true");
   fireEvent.click(screen.getByRole("button", { name: /^システムが実行中/ }));
-  fireEvent.click(screen.getByRole("button", { name: "mock-org/infra" }));
+  const input = screen.getByRole("combobox", { name: "リポジトリ" });
+  fireEvent.change(input, { target: { value: "infra" } });
+  fireEvent.click(screen.getByRole("option", { name: "mock-org/infra" }));
   expect(node("C-15")).not.toHaveAttribute("data-dim");
   expect(node("C-3")).toHaveAttribute("data-dim", "true");
   fireEvent.click(screen.getByRole("button", { name: "親をすべて開く" }));

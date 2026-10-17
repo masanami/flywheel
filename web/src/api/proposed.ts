@@ -41,7 +41,15 @@ export interface ChallengeRelation {
   from: string;
   kind: RelationKind;
   to: string;
+  // 依存（depends_on）だけが持つ、なぜ後続が先行を待つかの案（2026-10-14 オーナー: 矢印だけでは理由が読めない）。
+  // basis は待つ理由の種類、reason は人が読む一文。core にはまだ無く、形は M4.5 の論点で決める。
+  basis?: DependencyBasis;
+  reason?: string;
 }
+
+// prerequisite は先行の成果を使う（終わらないと始められない）。conflict は同じものを触るため、
+// 同時に走らせると衝突する（順に走らせるために後ろへ回した）。
+export type DependencyBasis = "prerequisite" | "conflict";
 
 export interface ChallengeRepos {
   challenge_id: string;
