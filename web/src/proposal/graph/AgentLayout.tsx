@@ -1,4 +1,4 @@
-// 関係グラフの画面の配置の案（flywheel#176・2026-10-14 オーナー）: 左端のアイコンの細い列（Slack のワークスペースの列の形）で
+// 関係グラフの画面の配置の案（flywheel#176・2026-10-14 オーナー）: 左端のアイコンの細い列で
 // エージェント（ワークスペース）を選び、中央に選んだエージェントの関係グラフを描く。選んだエージェントのターミナル／チャットの欄は
 // 下の引き出しか右の分割に置き（試作では見比べられるよう切り替える）、中身は偽の見た目だけを作る。
 // 狭い画面では列の代わりに上部の選択欄で選ぶ。
@@ -53,12 +53,13 @@ export function useAgentIcons(refreshKey: unknown): Map<string, string | null> {
   return icons;
 }
 
-const ICON_COLORS = ["#4a154b", "#1264a3", "#2bac76", "#e01e5a", "#ecb22e"];
+// 頭文字のアイコンの色。Slack の色にせず、ボードの印（出典の札など）と同じ落ち着いた系統から採る（2026-10-17 オーナー）
+const ICON_COLORS = ["#2f5fa8", "#2f8a55", "#7a5bbf", "#b5651d", "#55555b"];
 
 function colorOf(name: string): string {
   let h = 0;
   for (const ch of name) h = (h * 31 + (ch.codePointAt(0) ?? 0)) >>> 0;
-  return ICON_COLORS[h % ICON_COLORS.length] ?? "#4a154b";
+  return ICON_COLORS[h % ICON_COLORS.length] ?? "#55555b";
 }
 
 export function AgentIcon({
@@ -87,7 +88,8 @@ export function AgentIcon({
   );
 }
 
-// 左端のアイコンの細い列。名前と件数はマウスを重ねたとき・キーボードの焦点で出す。
+// 左端のアイコンの列。アイコンの下に名前を出し（長い名前は 2 行で切る）、全文と件数はマウスを重ねたとき・
+// キーボードの焦点で出す。
 export function AgentRail({
   agents,
   icons,
@@ -111,15 +113,20 @@ export function AgentRail({
               disabled={!a.readable}
               onClick={() => onChoose(a.name)}
             >
-              <AgentIcon name={a.name} icon={icons.get(a.name)} />
-              {a.readable && a.human > 0 ? (
-                <span className="agent-rail-badge" aria-hidden="true">
-                  {a.human}
-                </span>
-              ) : null}
-              {a.readable && a.active > 0 ? (
-                <span className="agent-rail-active" aria-hidden="true" />
-              ) : null}
+              <span className="agent-rail-icon">
+                <AgentIcon name={a.name} icon={icons.get(a.name)} />
+                {a.readable && a.human > 0 ? (
+                  <span className="agent-rail-badge" aria-hidden="true">
+                    {a.human}
+                  </span>
+                ) : null}
+                {a.readable && a.active > 0 ? (
+                  <span className="agent-rail-active" aria-hidden="true" />
+                ) : null}
+              </span>
+              <span className="agent-rail-name" aria-hidden="true">
+                {a.name}
+              </span>
               <span className="agent-rail-tip" aria-hidden="true">
                 <b>{a.name}</b>
                 <span>{summaryText(a)}</span>

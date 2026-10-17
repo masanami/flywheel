@@ -10,7 +10,6 @@
   --graph-edge: #9a9aa2;
   --graph-edge-lit: #1c1c1f;
   --graph-frame: #b9b9c0;
-  --agent-rail-bg: #3f0e40;
   --chat-accent: #d97757;
   --code-bg: #f4f4f1;
   padding: 0.5rem 0;
@@ -21,7 +20,6 @@
     --graph-edge-lit: #e7e7ea;
     --graph-other: #5a5a60;
     --graph-frame: #55555b;
-    --agent-rail-bg: #19171d;
     --code-bg: #26262b;
   }
 }
@@ -647,10 +645,11 @@ summary.graph-tool-btn::-webkit-details-marker {
   cursor: pointer;
 }
 
-/* 2026-10-14 オーナー: エージェントは左端のアイコンの細い列（Slack のワークスペースの列の形）で選ぶ */
+/* 2026-10-14 オーナー: エージェントは左端のアイコンの列で選ぶ。
+ * 2026-10-17 オーナー: Slack の見た目に寄せず、ボードの列・パネルと同じ地の色・枠・角丸・文字にし、アイコンの下に名前を出す */
 .agent-layout {
   display: grid;
-  grid-template-columns: 60px minmax(0, 1fr);
+  grid-template-columns: 76px minmax(0, 1fr);
   gap: 0.75rem;
   align-items: start;
 }
@@ -662,81 +661,99 @@ summary.graph-tool-btn::-webkit-details-marker {
   position: sticky;
   top: 0;
   z-index: 3;
-  min-height: 50vh;
-  padding: 12px 0;
-  border-radius: 10px;
-  background: var(--agent-rail-bg);
+  padding: 6px;
+  border: 1px solid var(--board-border);
+  border-radius: 8px;
+  background: var(--board-column-bg);
 }
 .agent-rail ul {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 14px;
+  gap: 4px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 .agent-rail button {
   position: relative;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 0;
-  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 2px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: transparent;
+  color: var(--board-fg);
+  font: inherit;
   cursor: pointer;
 }
-.agent-rail button[aria-current="true"]::before {
-  content: "";
-  position: absolute;
-  left: -10px;
-  top: 6px;
-  bottom: 6px;
-  width: 4px;
-  border-radius: 0 4px 4px 0;
-  background: #fff;
+.agent-rail button:not([aria-current="true"]):not(:disabled):hover {
+  background: color-mix(in srgb, var(--board-fg) 5%, transparent);
 }
-.agent-rail button[aria-current="true"] .agent-icon {
-  box-shadow: 0 0 0 2px var(--agent-rail-bg), 0 0 0 4px #fff;
-}
-.agent-rail button:not([aria-current="true"]):not(:disabled):hover .agent-icon {
-  box-shadow: 0 0 0 2px rgb(255 255 255 / 0.35);
+.agent-rail button[aria-current="true"] {
+  border-color: var(--graph-system);
+  background: color-mix(in srgb, var(--graph-system) 10%, transparent);
 }
 .agent-rail button:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 3px;
+  outline: 2px solid var(--board-fg);
+  outline-offset: 1px;
 }
 .agent-rail button:disabled {
   cursor: not-allowed;
 }
-.agent-rail button:disabled .agent-icon {
-  opacity: 0.35;
+.agent-rail button:disabled .agent-icon,
+.agent-rail button:disabled .agent-rail-name {
+  opacity: 0.45;
+}
+.agent-rail-icon {
+  position: relative;
+  display: block;
 }
 .agent-icon {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
   object-fit: cover;
   color: #fff;
-  font-size: 18px;
-  font-weight: 800;
+  font-size: 16px;
+  font-weight: 700;
 }
 .agent-icon-emoji {
-  background: rgb(255 255 255 / 0.14);
-  font-size: 21px;
+  border: 1px solid var(--board-border);
+  background: var(--board-card-bg);
+  font-size: 19px;
+}
+/* 名前は 2 行まで。超える分は「…」で切り、全文は重ねたときの吹き出しと読み上げの名前に持つ */
+.agent-rail-name {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: center;
+  /* ハイフンの位置で折れて 2 行目が「-…」だけになるのを避け、文字の途中でも折り返して 2 行を埋める */
+  word-break: break-all;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.agent-rail button[aria-current="true"] .agent-rail-name {
+  font-weight: 600;
 }
 .agent-rail-badge {
   position: absolute;
-  top: -7px;
-  right: -9px;
+  top: -6px;
+  right: -8px;
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border: 2px solid var(--agent-rail-bg);
-  border-radius: 10px;
-  background: #e01e5a;
+  border: 2px solid var(--board-column-bg);
+  border-radius: 9px;
+  background: var(--graph-human);
   color: #fff;
   font-size: 11px;
   font-weight: 700;
@@ -749,30 +766,34 @@ summary.graph-tool-btn::-webkit-details-marker {
   bottom: -4px;
   width: 12px;
   height: 12px;
-  border: 2px solid var(--agent-rail-bg);
+  border: 2px solid var(--board-column-bg);
   border-radius: 50%;
-  background: #2bac76;
+  background: var(--graph-running);
 }
 .agent-rail-tip {
   position: absolute;
-  left: calc(100% + 16px);
+  left: calc(100% + 10px);
   top: 50%;
   z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 6px 10px;
+  border: 1px solid var(--board-border);
   border-radius: 6px;
-  background: #1d1c1d;
-  color: #fff;
+  background: var(--board-card-bg);
+  color: var(--board-fg);
   font-size: 12px;
   text-align: left;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
   opacity: 0;
   pointer-events: none;
   transform: translateY(-50%);
   transition: opacity 0.1s;
+}
+.agent-rail-tip span {
+  color: var(--board-muted-fg);
 }
 .agent-rail button:hover .agent-rail-tip,
 .agent-rail button:focus-visible .agent-rail-tip {
