@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 )
 
 // このファイルは verifiedAttestationForTest（transition_exec_test.go。
@@ -1006,5 +1007,42 @@ func TestExecuteApproval_ConflictWhenOpAddHappensAfterSummaryShown(t *testing.T)
 	}, att)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+}
+
+func TestExecuteAnswer_HoldCarriesCauseRunID(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	ctx := context.Background()
+	c := createAndAdvance(t, s, StatusUnclassified)
+	if _, err := s.HoldChallenge(ctx, ChannelCLI, c.ID, HoldInput{Question: "why?"}); err != nil {
+		t.Fatal(err)
+	}
+	cid, _ := parseChallengeID(c.ID)
+	row, err := insertRunForTest(t, s, cid, insertRunInput{
+		Kind: runKindJudgment, Judgment: judgmentJ1, ChallengeVersion: 1,
+		SessionID: "11111111-1111-1111-1111-111111111111", PID: 1, Host: "h",
+		HeartbeatAt: time.Now(), StartedAt: time.Now(), MaxBudgetUSD: 100_000, BudgetBucket: budgetBucketJudgment,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rid, _ := parseRunID(row.ID)
+	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE hold SET run_id = ? WHERE challenge_id = ?`, rid, cid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prev, err := s.PrepareAnswer(ctx, c.ID, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, hold, err := s.ExecuteAnswer(ctx, AnswerRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Answer: "a"}, verifiedAttestationForTest(t, c.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hold.RunID == nil || *hold.RunID != row.ID {
+		t.Fatalf("hold.RunID = %v, want %s", hold.RunID, row.ID)
 	}
 }

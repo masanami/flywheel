@@ -163,6 +163,7 @@ type Hold struct {
 	FromStatusLabel string  `json:"from_status_label"`
 	Question        string  `json:"question"`
 	RaisedAt        string  `json:"raised_at"`
+	RunID           *string `json:"run_id"`
 }
 
 // FromHold は core.Hold を Hold へ変換する。
@@ -176,6 +177,7 @@ func FromHold(h core.Hold) Hold {
 		FromStatusLabel: label,
 		Question:        h.Question,
 		RaisedAt:        FormatTimestamp(h.RaisedAt),
+		RunID:           h.RunID,
 	}
 }
 

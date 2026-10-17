@@ -71,8 +71,8 @@ function Section({
   );
 }
 
-// 保留の原因の run。詳細の API の保留（Hold）には run の ID が無いため、推測で作らず「不明」と出す。
-const CAUSE_RUN_UNKNOWN = "不明（この API は保留の原因の run を返さない）";
+// 保留の原因の run が無い（run_id が null）ときの表示。
+const CAUSE_RUN_NONE = "なし（原因の run は記録されていない）";
 
 type CardDetailModalProps = {
   challenge: Challenge;
@@ -304,7 +304,7 @@ export function DetailSections({ l }: { l: Loaded }) {
                     入る直前の状態:{" "}
                     {h.from_status_label || label(STATE_LABELS, h.from_status)}
                   </div>
-                  <div>原因の run: {CAUSE_RUN_UNKNOWN}</div>
+                  <div>原因の run: {h.run_id ?? CAUSE_RUN_NONE}</div>
                 </>
               ) : null}
             </li>

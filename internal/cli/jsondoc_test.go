@@ -155,6 +155,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3RunShape(t, &doc)
 	addM3BudgetShapes(t, &doc)
 	addM3WaitingExternalShapes(t, &doc)
+	addM4HoldRunIDShape(t, &doc)
 	return doc
 }
 
@@ -811,4 +812,29 @@ func addM3SerialGroupShape(t *testing.T, doc *documentedJSON) {
 		return
 	}
 	t.Fatalf("m3 spec line has no `serial_groups: [{…}]` shape: %q", line)
+}
+
+// addM4HoldRunIDShape は `show --json` の保留の要素に足した `run_id`（M4H35）を doc へ合成する。
+// m4-ui-server.md が「`show --json` の保留の `run_id`」を既存の出力の基準から除くと書いている
+// ことを確かめた上で足す（第 2 の正本を持たず、文書の記述が消えたらここで落ちる）。
+func addM4HoldRunIDShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4-ui-server.md"))
+	if err != nil {
+		t.Fatalf("read m4 spec: %v", err)
+	}
+	documented := false
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "`show --json` の保留の `run_id`") {
+			documented = true
+			break
+		}
+	}
+	if !documented {
+		t.Fatal("m4 spec does not document the hold `run_id` of show --json")
+	}
+	if len(doc.entity["hold"]) == 0 {
+		t.Fatal("documented shape of hold not found")
+	}
+	doc.entity["hold"]["run_id"] = true
 }

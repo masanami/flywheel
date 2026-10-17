@@ -258,6 +258,9 @@ func TestGetChallenge_IncludesPlansApprovalsHoldsAndOperations(t *testing.T) {
 	if h.Answer == nil || *h.Answer != "because" {
 		t.Errorf("Hold.Answer = %v, want %q", h.Answer, "because")
 	}
+	if h.RunID != nil {
+		t.Errorf("Hold.RunID = %v, want nil (run の無い保留)", *h.RunID)
+	}
 
 	if len(detail.Operations) != 1 {
 		t.Fatalf("len(Operations) = %d, want 1", len(detail.Operations))
@@ -765,5 +768,38 @@ func TestListActivities_NotFoundForMissingOrMalformedChallengeID(t *testing.T) {
 		if !errors.Is(err, ErrNotFound) {
 			t.Errorf("id=%q: err = %v, want ErrNotFound", id, err)
 		}
+	}
+}
+
+func TestGetChallenge_HoldCarriesCauseRunID(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	ctx := context.Background()
+	c, err := s.CreateChallenge(ctx, ChannelCLI, CreateInput{Title: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cid, _ := parseChallengeID(c.ID)
+	row, err := insertRunForTest(t, s, cid, insertRunInput{
+		Kind: runKindJudgment, Judgment: judgmentJ1, ChallengeVersion: 1,
+		SessionID: "11111111-1111-1111-1111-111111111111", PID: 1, Host: "h",
+		HeartbeatAt: time.Now(), StartedAt: time.Now(), MaxBudgetUSD: 100_000, BudgetBucket: budgetBucketJudgment,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rid, _ := parseRunID(row.ID)
+	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, run_id) VALUES (?, 'q', 'in_progress', '2026-09-26T00:00:00.000Z', ?)`, cid, rid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.GetChallenge(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Holds) != 1 || d.Holds[0].RunID == nil || *d.Holds[0].RunID != row.ID {
+		t.Fatalf("Holds = %+v, want RunID %s", d.Holds, row.ID)
 	}
 }

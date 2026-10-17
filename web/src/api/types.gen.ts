@@ -120,6 +120,7 @@ export interface Hold {
   from_status_label: string;
   question: string;
   raised_at: string;
+  run_id: string | null;
 }
 
 export interface PlanDetail {
