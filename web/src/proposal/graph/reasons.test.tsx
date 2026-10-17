@@ -1,5 +1,5 @@
 // 3 巡目（flywheel#176・2026-10-14 オーナー）の検査: 依存の矢印に理由を持たせ、選んだとき・重ねたときに出す。
-// 「終わらないと始められない」と「同時に走らせると衝突する」を線の形で分ける案も切り替えで見比べる。
+// 「終わらないと始められない」と「同時に走らせると衝突する」は常に線の形で分ける（2026-10-17 オーナー）。
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { resetApi, setApi } from "../../api/client.ts";
@@ -9,6 +9,7 @@ import type { LiveState, WorkspaceData } from "../../live/useLive.ts";
 import { createMockApi } from "../../mock/api.ts";
 import { seedGraphs } from "../../mock/graph.ts";
 import { MockStore } from "../../mock/store.ts";
+import { placeLabels } from "./GraphCanvas.tsx";
 import { GraphScreen, WIDE, resetGraphMemory } from "./GraphScreen.tsx";
 import { basisOf, layoutGraph, reasonText } from "./model.ts";
 
@@ -44,12 +45,6 @@ const graphOf = () =>
   screen.getByRole("group", { name: /の課題の関係グラフ$/ });
 const node = (id: string) =>
   within(graphOf()).getByRole("button", { name: new RegExp(`^${id} (?!を)`) });
-const variant = (group: string, name: string) =>
-  fireEvent.click(
-    within(screen.getByRole("group", { name: group })).getByRole("button", {
-      name,
-    }),
-  );
 
 const need = (
   from: string,
@@ -139,7 +134,7 @@ it("線の種類: 1 つでも先行の成果を使う依存があれば実線、
   });
 });
 
-it("線の種類: 衝突のための順番は破線の形で描き、切り替えで形を分けないこともできる", async () => {
+it("線の種類: 衝突のための順番は破線と中抜きの矢じりで、先行の成果を使う依存は実線で描く", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   fireEvent.click(screen.getByRole("button", { name: "親をすべて開く" }));
@@ -150,11 +145,11 @@ it("線の種類: 衝突のための順番は破線の形で描き、切り替�
   expect(edgePath("C-12", "C-6")?.getAttribute("data-basis")).toBe(
     "prerequisite",
   );
-  variant("依存の線", "分けない");
-  expect(edgePath("C-12", "C-8")?.hasAttribute("data-basis")).toBe(false);
-  expect(edgePath("C-12", "C-8")?.getAttribute("marker-end")).toBe(
+  expect(edgePath("C-12", "C-6")?.getAttribute("marker-end")).toBe(
     "url(#graph-arrow)",
   );
+  // 線の形の切り替えは置かない
+  expect(screen.queryByRole("group", { name: "依存の線" })).toBeNull();
 });
 
 it("理由: 線は押せて、名前と重ねたときの吹き出しに理由を持つ。重ねると線の中ほどに理由の札が出る", async () => {
@@ -178,7 +173,7 @@ it("理由: 線は押せて、名前と重ねたときの吹き出しに理由�
   expect(labels()).toEqual([]);
 });
 
-it("理由: 線を選ぶとパネルに両端と理由・種類を出し、課題を選ぶとその課題に直接つながる線に札を出す", async () => {
+it("理由: 線を選ぶとパネルに両端と理由・種類を出す。課題を選んでも、つながる線に札は出さない", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   fireEvent.click(screen.getByRole("button", { name: "親をすべて開く" }));
@@ -207,23 +202,35 @@ it("理由: 線を選ぶとパネルに両端と理由・種類を出し、課�
     "C-6 終わらないと始められないバッチが止まらないと旧テーブルへの書き込みが続く",
     "C-8 終わらないと始められない移行が全件済んだと確かめてから消す",
   ]);
-  expect(labels().sort()).toEqual(["C-6>C-18", "C-8>C-18"]);
-  // 同じ後続へ合流する 2 本の線の札は、中ほどが近くても重ならない
-  const boxes = [...graphOf().querySelectorAll(".graph-edge-label")].map(
-    (g) => {
-      const m = /translate\((\S+) (\S+)\)/.exec(
-        g.getAttribute("transform") ?? "",
-      );
-      const w = Number(g.querySelector("rect")?.getAttribute("width"));
-      const h = Number(g.querySelector("rect")?.getAttribute("height"));
-      return { x: Number(m?.[1]), y: Number(m?.[2]), w, h };
-    },
+  expect(labels()).toEqual([]);
+  // 選んだ課題につながる線でも、重ねれば札が出る
+  fireEvent.mouseEnter(edgeButton("C-6", "C-18"));
+  expect(labels()).toEqual(["C-6>C-18"]);
+});
+
+it("札の置き場所: 同じ後続へ合流する 2 本の線の札は、中ほどが近くても重ならない", () => {
+  const alpha = new MockStore().workspaces.alpha;
+  if (!alpha) throw new Error("alpha が無い");
+  const rels = seedGraphs().alpha.relations;
+  const parents = new Set(
+    rels.filter((r) => r.kind === "parent_of").map((r) => r.from),
   );
-  const [a, b] = boxes;
+  const l = layoutGraph(
+    alpha.items.map((m) => m.c.id),
+    rels,
+    WIDE,
+    parents,
+  );
+  const placed = placeLabels(
+    l.edges.filter((e) => e.to === "C-18"),
+    WIDE.edgeChars,
+  );
+  expect(placed.map((q) => q.e.from).sort()).toEqual(["C-6", "C-8"]);
+  const [a, b] = placed;
   if (!a || !b) throw new Error("札が 2 つ無い");
-  const overlap =
-    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-  expect(overlap).toBe(false);
+  const overlap = (h: number) =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + h && b.y < a.y + h;
+  expect(overlap(18)).toBe(false);
 });
 
 it("理由: 畳んだ親へつなぎ替えた線は、中の課題どうしの依存の理由をまとめて持つ", async () => {

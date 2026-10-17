@@ -36,7 +36,6 @@ import {
   GraphCanvas,
   type Inside,
   type NodeInfo,
-  type NodeText,
   edgeKey,
   groupHeadHeight,
 } from "./GraphCanvas.tsx";
@@ -68,8 +67,9 @@ import "./graph.css";
 
 export const GRAPH_TITLE = "関係グラフ（案）";
 
+// 2026-10-17 オーナー: カードはもう少し大きくてよい。題名を 2 行まで出せる幅にする。
 export const WIDE: Dimensions = {
-  nodeW: 176,
+  nodeW: 200,
   nodeH: 76,
   gapX: 20,
   gapY: 40,
@@ -83,7 +83,8 @@ export const WIDE: Dimensions = {
   ctxCharW: 11,
   ctxLineH: 16,
   edgeChars: 16,
-  compact: false,
+  calloutW: 280,
+  calloutLines: 4,
 };
 // 幅 360px の端末で、一番外の段に 3 つ並んでも縮めずに読める大きさ。大枠の中は 2 つで折り返す。
 export const NARROW: Dimensions = {
@@ -101,32 +102,8 @@ export const NARROW: Dimensions = {
   ctxCharW: 10,
   ctxLineH: 15,
   edgeChars: 9,
-  compact: false,
-};
-// 縮小（ID と色だけ）。全体の形を一目で見るための大きさで、中身は重ねたときの吹き出しとパネルで読む。
-export const COMPACT: Dimensions = {
-  ...WIDE,
-  nodeW: 76,
-  nodeH: 28,
-  gapX: 10,
-  gapY: 26,
-  headH: 28,
-  inset: 6,
-  titleLines: 0,
-  metaChars: 0,
-  compact: true,
-};
-export const COMPACT_NARROW: Dimensions = {
-  ...NARROW,
-  nodeW: 64,
-  nodeH: 26,
-  gapX: 6,
-  gapY: 22,
-  headH: 26,
-  inset: 5,
-  titleLines: 0,
-  metaChars: 0,
-  compact: true,
+  calloutW: 220,
+  calloutLines: 5,
 };
 const NARROW_QUERY = "(max-width: 480px)";
 
@@ -146,7 +123,6 @@ function useNarrow(): boolean {
 }
 
 type View = "graph" | "board";
-type Zoom = "normal" | "compact";
 
 // 詳細を開くと画面が外れて戻ると作り直されるため、表示・選んだワークスペースと課題・開いた親をここに覚えておく。
 // 選んだエージェント・引き出しの開閉もここに持つ（サーバには持たない）。
@@ -158,10 +134,7 @@ const memory: {
   dock: boolean;
   dockPos: DockPosition;
   dockTab: DockTab;
-  // 見せ方の案の切り替え（試作だけ）と、位置づけを広げた大枠
-  nodeText: NodeText;
-  edgeKinds: boolean;
-  zoom: Zoom;
+  // 位置づけを広げた大枠
   context: Record<string, string[]>;
 } = {
   view: "graph",
@@ -171,9 +144,6 @@ const memory: {
   dock: false,
   dockPos: "bottom",
   dockTab: "terminal",
-  nodeText: "headline",
-  edgeKinds: true,
-  zoom: "normal",
   context: {},
 };
 export function resetGraphMemory(): void {
@@ -184,9 +154,6 @@ export function resetGraphMemory(): void {
   memory.dock = false;
   memory.dockPos = "bottom";
   memory.dockTab = "terminal";
-  memory.nodeText = "headline";
-  memory.edgeKinds = true;
-  memory.zoom = "normal";
   memory.context = {};
 }
 
@@ -357,21 +324,13 @@ export function GraphScreen({ live }: { live: LiveState }) {
 function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
   const open = useContext(OpenDetailContext);
   const narrow = useNarrow();
-  const [nodeText, setNodeText] = useState<NodeText>(memory.nodeText);
-  const [edgeKinds, setEdgeKinds] = useState(memory.edgeKinds);
-  const [zoom, setZoom] = useState<Zoom>(memory.zoom);
-  const dims =
-    zoom === "compact"
-      ? narrow
-        ? COMPACT_NARROW
-        : COMPACT
-      : narrow
-        ? NARROW
-        : WIDE;
+  const dims = narrow ? NARROW : WIDE;
   const [selected, setSelected] = useState<string | null>(memory.node);
   // 選んだ依存の線（`from:to`。見えている箱どうし）と、マウスを重ねた・フォーカスした線
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [hoverEdge, setHoverEdge] = useState<string | null>(null);
+  // カーソルを重ねた・フォーカスした課題（一言での吹き出しを出す）
+  const [hoverNode, setHoverNode] = useState<string | null>(null);
   const [contextOpenMap, setContextOpenMap] = useState(memory.context);
   const [openParents, setOpenParents] = useState(memory.open);
   const [catFilter, setCatFilter] = useState<Category | null>(null);
@@ -599,20 +558,17 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
             onSelect={(id) => select(id === sel ? null : id)}
             onOpen={(id) => open?.(ws, id)}
             onToggle={toggle}
-            nodeText={nodeText}
-            edgeKinds={edgeKinds}
+            callout={
+              hoverNode && shownIds.includes(hoverNode) ? hoverNode : sel
+            }
+            onHoverNode={setHoverNode}
             contextOpen={(id) => contextOpen.has(id)}
             onToggleContext={toggleContext}
             selectedEdge={selEdge ? selectedEdge : null}
+            // 2026-10-17 オーナー: 札は線を押したときと重ねたときだけ（課題を選んでも出さない）
             edgeLabeled={(e) => {
               const key = edgeKey(e);
-              if (key === selectedEdge || key === hoverEdge) return true;
-              // 選んだ課題に直接つながる線には札を出す（縮小では重ねた線と選んだ線だけ）
-              return (
-                !dims.compact &&
-                sel !== null &&
-                (e.from === sel || e.to === sel)
-              );
+              return key === selectedEdge || key === hoverEdge;
             }}
             onSelectEdge={(key) =>
               selectEdge(key === selectedEdge ? null : key)
@@ -688,25 +644,20 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
                 <li className="graph-legend-stale">
                   <b>{STALE_LABEL}</b>: 赤い箱。{STALE_HINT}
                 </li>
-                {edgeKinds ? (
-                  <>
-                    <li>
-                      <b>実線の矢印</b>: 先行 → 後続。
-                      {BASIS_LABELS.prerequisite}（先行の成果を使う）
-                    </li>
-                    <li>
-                      <b>破線の矢印</b>: 先行 → 後続。
-                      {BASIS_LABELS.conflict}（同じものを触るので順に走らせる）
-                    </li>
-                  </>
-                ) : (
-                  <li>
-                    <b>実線の矢印</b>: 先行 → 後続
-                  </li>
-                )}
                 <li>
-                  <b>矢印の理由</b>:
-                  線を押すか重ねると、なぜ待つのかを出す。課題を選ぶと、その課題に直接つながる線にも出す
+                  <b>実線の矢印</b>: 先行 → 後続。
+                  {BASIS_LABELS.prerequisite}（先行の成果を使う）
+                </li>
+                <li>
+                  <b>破線の矢印</b>: 先行 → 後続。
+                  {BASIS_LABELS.conflict}（同じものを触るので順に走らせる）
+                </li>
+                <li>
+                  <b>矢印の理由</b>: 線を押すか重ねると、なぜ待つのかを出す
+                </li>
+                <li>
+                  <b>一言で</b>:
+                  課題を選ぶかカーソルを重ねると、課題の一言でを吹き出しで出す
                 </li>
                 <li>
                   <b>大枠</b>: 親課題（中に子課題）。重ねた箱は畳んだ親で、▶
@@ -716,45 +667,6 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
             </details>
           </div>
         </div>
-        <fieldset aria-label="見せ方（案）" className="graph-variants">
-          <legend>見せ方（案）</legend>
-          <Seg
-            label="ノードの文"
-            value={nodeText}
-            options={[
-              ["headline", "一言で"],
-              ["title", "題名"],
-            ]}
-            onChange={(v) => {
-              memory.nodeText = v;
-              setNodeText(v);
-            }}
-          />
-          <Seg
-            label="依存の線"
-            value={edgeKinds ? "split" : "same"}
-            options={[
-              ["split", "種類で形を分ける"],
-              ["same", "分けない"],
-            ]}
-            onChange={(v) => {
-              memory.edgeKinds = v === "split";
-              setEdgeKinds(v === "split");
-            }}
-          />
-          <Seg
-            label="大きさ"
-            value={zoom}
-            options={[
-              ["normal", "標準"],
-              ["compact", "縮小（ID と色）"],
-            ]}
-            onChange={(v) => {
-              memory.zoom = v;
-              setZoom(v);
-            }}
-          />
-        </fieldset>
         <section aria-label="いま実施中" className="graph-active-row">
           <span className="graph-active-label">▶ いま実施中</span>
           {running.length === 0 ? (
@@ -852,35 +764,6 @@ function GraphView({ live, ws }: { live: LiveState; ws: string | null }) {
       </div>
       {body}
     </>
-  );
-}
-
-// 見せ方の案の 2 択の切り替え。
-function Seg<T extends string>({
-  label: name,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: [T, string][];
-  onChange: (v: T) => void;
-}) {
-  return (
-    <fieldset aria-label={name} className="graph-seg graph-seg-small">
-      <legend>{name}</legend>
-      {options.map(([v, text]) => (
-        <button
-          key={v}
-          type="button"
-          aria-pressed={value === v}
-          onClick={() => onChange(v)}
-        >
-          {text}
-        </button>
-      ))}
-    </fieldset>
   );
 }
 

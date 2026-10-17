@@ -1162,22 +1162,6 @@ summary.graph-tool-btn::-webkit-details-marker {
 }
 
 /* 3 巡目（2026-10-14 オーナー: ノードが ID と題名だけでは読めない）: 一言で・位置づけ・依存の理由 */
-.graph-variants {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 1rem;
-  border: none;
-  margin: 0 0 0.4rem;
-  padding: 0;
-}
-.graph-variants > legend {
-  float: left;
-  margin-right: 0.25rem;
-  font-size: 12px;
-  color: var(--board-muted-fg);
-}
-
 /* 依存の線の種類: 衝突のための順番は破線と中抜きの矢じり */
 .graph-edge[data-basis="conflict"] {
   stroke-dasharray: 5 4;
@@ -1226,28 +1210,25 @@ summary.graph-tool-btn::-webkit-details-marker {
 .graph-svg.is-narrow .graph-group-context {
   font-size: 10px;
 }
+/* 「続き」はボタンの見た目にせず、リンクのような文字だけにする（2026-10-17 オーナー） */
 .graph-more-btn {
   cursor: pointer;
   outline: none;
 }
-.graph-more-btn rect {
-  fill: var(--board-card-bg);
-  stroke: var(--graph-frame);
-  stroke-width: 1;
-}
-.graph-more-btn:focus-visible rect,
-.graph-more-btn:hover rect {
-  stroke: var(--board-fg);
-  stroke-width: 1.6;
+.graph-more-hit {
+  fill: transparent;
 }
 .graph-more-btn text {
-  fill: var(--board-fg);
-  font-size: 10px;
-}
-
-/* 縮小（ID と色だけ） */
-.graph-node[data-compact] .graph-node-id {
+  fill: var(--graph-system);
   font-size: 11px;
+  text-decoration: underline;
+}
+.graph-more-btn:hover text {
+  fill: var(--board-fg);
+}
+.graph-more-btn:focus-visible .graph-more-hit {
+  stroke: var(--board-fg);
+  stroke-width: 1.5;
 }
 
 /* パネル: 一言で・位置づけと、直接の依存の理由 */
@@ -1287,4 +1268,27 @@ summary.graph-tool-btn::-webkit-details-marker {
 .graph-reason-list .graph-reason {
   display: block;
   margin-left: 1.1rem;
+}
+
+/* 一言での吹き出し（選んだ課題・カーソルを重ねた課題） */
+.graph-callout {
+  pointer-events: none;
+}
+.graph-callout rect {
+  fill: var(--board-card-bg);
+  stroke: var(--board-fg);
+  stroke-width: 1;
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.18));
+}
+.graph-callout-label {
+  fill: var(--board-muted-fg);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.graph-callout-text {
+  fill: var(--board-fg);
+  font-size: 13px;
+}
+.graph-svg.is-narrow .graph-callout-text {
+  font-size: 12px;
 }

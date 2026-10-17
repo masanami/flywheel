@@ -1,7 +1,7 @@
 // 関係グラフの案（flywheel#176）の SVG の描画。親課題は大枠（開いたとき）か重ねた箱（畳んだとき）で示し、
 // 依存だけを線で結ぶ。どの課題を選んでいるか・薄くするかは画面（GraphScreen）が決めて渡す。
-// 2026-10-14 オーナー: ノードは ID と題名だけでは読めない。ノードには「一言で」、開いた大枠の見出しには「位置づけ」、
-// 依存の線には理由を持たせる（題名はマウスを重ねたときと選んだときのパネルへ回す）。
+// 2026-10-14 オーナー: ノードは ID と題名だけでは読めない。開いた大枠の見出しには「位置づけ」、依存の線には理由を持たせる。
+// 2026-10-17 オーナー: ノードには題名を出し、選んだときかカーソルを重ねたときに「一言で」を吹き出しで出す。
 
 import type { KeyboardEvent } from "react";
 import type { PartyWait } from "../../api/proposed.ts";
@@ -39,19 +39,17 @@ export interface Inside {
   human: number;
 }
 
-// titleLines はノードの文（一言でか題名）の行数。ctxCharW・ctxLineH は位置づけの全角 1 文字の幅の目安と行の高さ。
-// edgeChars は依存の理由の札の文字数。compact は縮小（ID と色だけ）。
+// titleLines はノードの題名の行数。ctxCharW・ctxLineH は位置づけの全角 1 文字の幅の目安と行の高さ。
+// edgeChars は依存の理由の札の文字数。calloutW・calloutLines は一言での吹き出しの最小の幅と行数の上限。
 export type Dimensions = Dims & {
   titleLines: number;
   metaChars: number;
   ctxCharW: number;
   ctxLineH: number;
   edgeChars: number;
-  compact: boolean;
+  calloutW: number;
+  calloutLines: number;
 };
-
-// ノードの 2 行目に出す文（試作の切り替え。一言で＝card.headline、無ければ題名）
-export type NodeText = "headline" | "title";
 
 export const edgeKey = (e: { from: string; to: string }) => `${e.from}:${e.to}`;
 
@@ -69,35 +67,31 @@ export interface CanvasProps {
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onToggle: (id: string) => void;
-  nodeText: NodeText;
-  // 依存の種類（先行の成果を使う・衝突のための順番）を線の形で分けるか（試作の切り替え）
-  edgeKinds: boolean;
+  // 一言での吹き出しを出す課題（カーソルを重ねた課題、無ければ選んだ課題）と、重ねた課題の通知
+  callout: string | null;
+  onHoverNode: (id: string | null) => void;
   // 位置づけを全文まで広げた大枠か
   contextOpen: (id: string) => boolean;
   onToggleContext: (id: string) => void;
   selectedEdge: string | null;
-  // 理由の札を出す線（選んだ線・重ねた線・選んだ課題に直接つながる線）
+  // 理由の札を出す線（選んだ線・重ねた線）
   edgeLabeled: (e: LayoutEdge) => boolean;
   onSelectEdge: (key: string) => void;
   onHoverEdge: (key: string | null) => void;
 }
 
 const TOGGLE = 20;
-// 位置づけの右に置く「続き」ボタンの幅
-const MORE_W = 46;
-
-// ノードの 2 行目の文。一言でが無ければ題名に戻る（仕様 m4-ui-server.md の「見出しは card.headline、null ならタイトル」と同じ）。
-export const nodeTextOf = (c: ChallengeCard, t: NodeText) =>
-  t === "headline" ? (c.card.headline ?? c.title) : c.title;
+// 位置づけの右に置く「続き」の文字の幅
+const MORE_W = 40;
 
 // 開いた大枠の位置づけを、見出しの幅に収まる文字数で行に分ける（1 行目の頭に「位置づけ:」を付ける）。
-// 右に「続き」のボタンの幅を空ける。縮小では出さない。
+// 右に「続き」の文字の幅を空ける。
 export function contextLines(
   context: string | null,
   width: number,
   dims: Dimensions,
 ): string[] {
-  if (!context || dims.compact) return [];
+  if (!context) return [];
   return wrapByWidth(
     `位置づけ: ${context}`,
     Math.max(4 * dims.ctxCharW, width - 16 - MORE_W),
@@ -131,6 +125,51 @@ export function edgeName(e: LayoutEdge): string {
     )
     .join("／");
   return `依存 ${e.from} → ${e.to}（${why}）`;
+}
+
+// 重ねた・選んだ課題の一言での吹き出し。箱の下（入らなければ上）に置き、画面の幅に収める。
+// 一言では切らずに折り返し、行数の上限を超えたときだけ「…」で切る。押す操作は下へ通す。
+function HeadlineCallout({
+  id,
+  p,
+}: {
+  id: string;
+  p: CanvasProps;
+}) {
+  const c = p.infos.get(id)?.card;
+  const box =
+    p.layout.nodes.find((b) => b.id === id) ??
+    p.layout.groups.find((b) => b.id === id);
+  if (!c?.card.headline || !box) return null;
+  const { dims, layout, narrow } = p;
+  const font = narrow ? 12 : 13;
+  const w = Math.min(layout.width - 4, Math.max(box.w, dims.calloutW));
+  const lines = clipLines(c.card.headline, w - 20, font, dims.calloutLines);
+  const lineH = font + 5;
+  const h = 22 + lines.length * lineH + 6;
+  const bottom = box.y + (box.kind === "group" ? box.headH : box.h);
+  const y = bottom + 6 + h <= layout.height ? bottom + 6 : box.y - 6 - h;
+  const x = Math.max(2, Math.min(box.x, layout.width - 2 - w));
+  return (
+    <g
+      className="graph-callout"
+      data-callout={id}
+      transform={`translate(${x} ${Math.max(2, y)})`}
+    >
+      <rect width={w} height={h} rx={6} />
+      <text x={10} y={16} className="graph-callout-label">
+        一言で
+      </text>
+      <text x={10} y={22 + lineH - 4} className="graph-callout-text">
+        {lines.map((line, k) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 幅で切った行の並びで、行の位置そのものが鍵
+          <tspan key={k} x={10} dy={k === 0 ? 0 : lineH}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
 }
 
 const categoryLabel = (c: Category) =>
@@ -266,14 +305,12 @@ function NodeBox({
 }) {
   const i = p.infos.get(box.id);
   if (!i) return null;
-  const { dims } = p;
   const c = i.card;
   const inside = p.inside(box.id);
   const selfActive = i.active;
   const active = selfActive || (inside?.active ?? 0) > 0;
   const stale = c.card.modifiers.includes("unresponsive");
   const select = () => p.onSelect(box.id);
-  const text = nodeTextOf(c, p.nodeText);
   return (
     <g transform={`translate(${box.x} ${box.y})`}>
       <g
@@ -291,10 +328,13 @@ function NodeBox({
         data-human-inside={(inside?.human ?? 0) > 0 || undefined}
         data-collapsed={inside ? true : undefined}
         data-unresponsive={stale || undefined}
-        data-compact={dims.compact || undefined}
         onClick={select}
         onDoubleClick={() => p.onOpen(box.id)}
         onKeyDown={onActivate(select)}
+        onMouseEnter={() => p.onHoverNode(box.id)}
+        onMouseLeave={() => p.onHoverNode(null)}
+        onFocus={() => p.onHoverNode(box.id)}
+        onBlur={() => p.onHoverNode(null)}
       >
         <title>{accessibleName(i, inside ? insideText(inside) : null)}</title>
         {active ? (
@@ -319,19 +359,7 @@ function NodeBox({
         ) : null}
         <rect className="graph-node-box" width={box.w} height={box.h} rx={6} />
         <rect className="graph-node-stripe" width={5} height={box.h} rx={2} />
-        {dims.compact ? (
-          // 縮小: ID と色（区分の帯・光の輪・更新なしの赤）だけ。中身は重ねたときの吹き出しとパネルで読む
-          <text
-            x={inside ? (box.w - TOGGLE) / 2 + 1 : box.w / 2 + 2}
-            y={box.h / 2 + 4}
-            textAnchor="middle"
-            className="graph-node-id"
-          >
-            {c.id}
-          </text>
-        ) : (
-          <NodeLines box={box} p={p} i={i} inside={inside} text={text} />
-        )}
+        <NodeLines box={box} p={p} i={i} inside={inside} />
       </g>
       {inside ? (
         <Toggle
@@ -339,7 +367,7 @@ function NodeBox({
           open={false}
           count={inside.total}
           x={box.w - TOGGLE - 4}
-          y={dims.compact ? (box.h - TOGGLE) / 2 : 4}
+          y={4}
           onToggle={p.onToggle}
         />
       ) : null}
@@ -347,19 +375,17 @@ function NodeBox({
   );
 }
 
-// 標準の大きさのノードの 3 行（ID と優先度・一言で（か題名）・印かリポジトリ）。
+// ノードの 3 段（ID と優先度・題名・印かリポジトリ）。
 function NodeLines({
   box,
   p,
   i,
   inside,
-  text,
 }: {
   box: LayoutBox;
   p: CanvasProps;
   i: NodeInfo;
   inside: Inside | null;
-  text: string;
 }) {
   const { dims, narrow } = p;
   const c = i.card;
@@ -367,9 +393,14 @@ function NodeLines({
   const stale = c.card.modifiers.includes("unresponsive");
   // 更新なしは 3 行目を札に使う（旧 board の「⚠ 更新なし（要確認）」と同じく、赤の太字で出す）
   const marks = i.marks.filter((m) => m !== STALE_LABEL);
-  // 文の行が増えた分だけ、3 行目（印・リポジトリ・中の件数の札）を下げる
+  // 題名の行が増えた分だけ、3 段目（印・リポジトリ・中の件数の札）を下げる
   const shift = (dims.titleLines - 1) * 16;
-  const lines = clipLines(text, box.w - 18, narrow ? 12 : 13, dims.titleLines);
+  const lines = clipLines(
+    c.title,
+    box.w - 18,
+    narrow ? 12 : 13,
+    dims.titleLines,
+  );
   const third = narrow
     ? (marks[0] ?? "")
     : [...marks, i.repos.map((r) => r.split("/").pop()).join("・")]
@@ -391,14 +422,7 @@ function NodeLines({
           {narrow ? "▶" : "▶ 実施中"}
         </text>
       ) : null}
-      <text
-        x={11}
-        y={narrow ? 31 : 35}
-        className="graph-node-title"
-        data-text={
-          p.nodeText === "headline" && c.card.headline ? "headline" : "title"
-        }
-      >
+      <text x={11} y={narrow ? 31 : 35} className="graph-node-title">
         {lines.map((line, k) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: 幅で切った行の並びで、行の位置そのものが鍵
           <tspan key={k} x={11} dy={k === 0 ? 0 : 16}>
@@ -430,7 +454,8 @@ function NodeLines({
 }
 
 // 開いた親の大枠。見出し（親課題そのもの）を押すと親を選び、右上のボタンで畳む。
-// 見出しは一言で（無ければ題名）と、その下に位置づけを出す。位置づけが 1 行に収まらなければ畳んで始め、「続き」で広げる。
+// 見出しは題名と、その下に位置づけを出す。位置づけが 1 行に収まらなければ畳んで始め、「続き」で広げる。
+// 一言では、ノードと同じく見出しを選ぶか重ねたときに吹き出しで出す。
 function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
   const i = p.infos.get(box.id);
   if (!i) return null;
@@ -465,6 +490,10 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
         onClick={select}
         onDoubleClick={() => p.onOpen(box.id)}
         onKeyDown={onActivate(select)}
+        onMouseEnter={() => p.onHoverNode(box.id)}
+        onMouseLeave={() => p.onHoverNode(null)}
+        onFocus={() => p.onHoverNode(box.id)}
+        onBlur={() => p.onHoverNode(null)}
       >
         <title>{accessibleName(i, "開いた親")}</title>
         <rect
@@ -481,8 +510,8 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
         />
         <text x={11} y={dims.headH / 2 + 4.5} className="graph-group-title">
           <tspan className="graph-node-id">{c.id}</tspan>
-          {dims.compact ? "" : ` ${clip(nodeTextOf(c, p.nodeText), chars)}`}
-          {selfActive ? (dims.compact ? " ▶" : " ▶ 実施中") : ""}
+          {` ${clip(c.title, chars)}`}
+          {selfActive ? " ▶ 実施中" : ""}
         </text>
         {shown.map((line, k) => (
           <text
@@ -504,8 +533,8 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
           id={box.id}
           open={ctxOpen}
           x={box.w - MORE_W - 6}
-          y={dims.headH + 1}
-          h={dims.ctxLineH - 1}
+          y={dims.headH}
+          h={dims.ctxLineH}
           onToggle={p.onToggleContext}
         />
       ) : null}
@@ -521,7 +550,8 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
   );
 }
 
-// 大枠の位置づけを広げる・畳むボタン。名前は課題のノード（「C-14 …」）と前方一致しないよう、ID を後ろに置く。
+// 大枠の位置づけを広げる・畳む操作。見た目はボタンでなく文字だけ（リンクのような下線）で、キーボードでも押せる。
+// 名前は課題のノード（「C-14 …」）と前方一致しないよう、ID を後ろに置く。
 function MoreButton({
   id,
   open,
@@ -555,8 +585,9 @@ function MoreButton({
       }}
       onKeyDown={onActivate(act)}
     >
-      <rect width={MORE_W} height={h} rx={h / 2} />
-      <text x={MORE_W / 2} y={h / 2 + 3.5} textAnchor="middle">
+      {/* 文字だけでは押せる範囲が狭いので、透明な当たり判定を敷く */}
+      <rect className="graph-more-hit" width={MORE_W} height={h} />
+      <text x={MORE_W} y={h - 4} textAnchor="end">
         {open ? "▴ 畳む" : "▾ 続き"}
       </text>
     </g>
@@ -596,14 +627,14 @@ export function placeLabels(edges: LayoutEdge[], chars: number): PlacedLabel[] {
 }
 
 // 依存の線の理由の札。押せない（線の当たり判定の上に重ねるが、押す操作は下へ通す）。
-function EdgeLabel({ l, p }: { l: PlacedLabel; p: CanvasProps }) {
+function EdgeLabel({ l }: { l: PlacedLabel }) {
   const { e, text, x, y, w } = l;
   return (
     <g
       className="graph-edge-label"
       data-from={e.from}
       data-to={e.to}
-      data-basis={p.edgeKinds ? e.basis : undefined}
+      data-basis={e.basis}
       transform={`translate(${x} ${y})`}
     >
       <rect width={w} height={LABEL_H} rx={LABEL_H / 2} />
@@ -661,7 +692,7 @@ export function GraphCanvas(p: CanvasProps) {
         const picked = p.selectedEdge === key;
         const lit = picked || (p.selected !== null && p.edgeLit(e.from, e.to));
         const focus = p.selected !== null || p.selectedEdge !== null;
-        const conflict = p.edgeKinds && e.basis === "conflict";
+        const conflict = e.basis === "conflict";
         const pick = () => p.onSelectEdge(key);
         const name = edgeName(e);
         return (
@@ -671,7 +702,7 @@ export function GraphCanvas(p: CanvasProps) {
               className="graph-edge"
               data-from={e.from}
               data-to={e.to}
-              data-basis={p.edgeKinds ? e.basis : undefined}
+              data-basis={e.basis}
               data-lit={lit || undefined}
               data-dim={
                 (focus && !lit) ||
@@ -718,9 +749,10 @@ export function GraphCanvas(p: CanvasProps) {
       ))}
       {placeLabels(layout.edges.filter(p.edgeLabeled), dims.edgeChars).map(
         (l) => (
-          <EdgeLabel key={edgeKey(l.e)} l={l} p={p} />
+          <EdgeLabel key={edgeKey(l.e)} l={l} />
         ),
       )}
+      {p.callout ? <HeadlineCallout id={p.callout} p={p} /> : null}
     </svg>
   );
 }

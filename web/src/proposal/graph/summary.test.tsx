@@ -1,4 +1,5 @@
-// 3 巡目（flywheel#176・2026-10-14 オーナー）の検査: ノードに「一言で」を出し、題名は重ねたときとパネルへ回す。縮小は ID と色だけ。
+// 3 巡目（flywheel#176）の検査。2026-10-17 オーナー: ノードには常に題名を出し、選ぶかカーソルを重ねると「一言で」を
+// 吹き出しで出す。一言では切れすぎないようにし、見せ方の切り替え（ノードの文・依存の線・大きさ）は置かない。
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { resetApi, setApi } from "../../api/client.ts";
@@ -41,48 +42,55 @@ const graphOf = () =>
   screen.getByRole("group", { name: /の課題の関係グラフ$/ });
 const node = (id: string) =>
   within(graphOf()).getByRole("button", { name: new RegExp(`^${id} (?!を)`) });
-const variant = (group: string, name: string) =>
-  fireEvent.click(
-    within(screen.getByRole("group", { name: group })).getByRole("button", {
-      name,
-    }),
-  );
 
 const titleLine = (id: string) =>
   node(id).querySelector(".graph-node-title") as SVGTextElement | null;
-// 標準の大きさのノードは、文を幅で 2 行まで出す
+// ノードは題名を幅で 2 行まで出す
 const face = (s: string) =>
   clipLines(s, WIDE.nodeW - 18, 13, WIDE.titleLines).join("");
+const callout = () => graphOf().querySelector(".graph-callout");
+const calloutText = () =>
+  callout()?.querySelector(".graph-callout-text")?.textContent ?? null;
 
-it("一言で: ノードの 2 行目は一言でで、無ければ題名に戻る。題名は重ねたときの吹き出しに残す", async () => {
+it("題名: ノードには常に題名を出し、一言では面に出さない", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
-  // C-4 と C-1 は親 C-2 の大枠の中にある
-  fireEvent.click(
-    screen.getByRole("button", { name: "C-2 を開く（子 4 件）" }),
-  );
-  const c4 = titleLine("C-4");
-  expect(c4?.getAttribute("data-text")).toBe("headline");
-  expect(c4?.textContent).toBe(
-    face("閲覧者が編集ボタンを押せてしまう穴をふさぐ"),
-  );
-  // 題名はノードの面から外れ、重ねたときの吹き出し（SVG の title）に出る
-  const shown = [...node("C-4").querySelectorAll("text")].map(
-    (t) => t.textContent,
-  );
-  expect(shown.join("")).not.toContain("管理画面の権限チェック");
-  expect(node("C-4").querySelector("title")?.textContent).toContain(
-    "管理画面の権限チェックを直す",
-  );
-  // 一言でが無い課題（C-1）は題名を出す
-  expect(titleLine("C-1")?.getAttribute("data-text")).toBe("title");
-  expect(titleLine("C-1")?.textContent).toBe(face("ログイン画面の文言を直す"));
+  expect(titleLine("C-7")?.textContent).toBe(face("料金表の計算を直す"));
+  const shown = [...node("C-7").querySelectorAll("text")]
+    .map((t) => t.textContent)
+    .join("");
+  expect(shown).not.toContain("料金表の丸め");
+  expect(callout()).toBeNull();
+  // 見せ方の切り替えの欄は置かない
+  expect(screen.queryByRole("group", { name: "見せ方（案）" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "ノードの文" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "大きさ" })).toBeNull();
 });
 
-it("一言で: 選んだときのパネルには題名と一言での両方を出す", async () => {
+it("一言で: カーソルを重ねるかフォーカスすると吹き出しに出し、離れると消す", async () => {
+  render(<GraphScreen live={await liveOf()} />);
+  await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
+  fireEvent.mouseEnter(node("C-7"));
+  expect(callout()?.getAttribute("data-callout")).toBe("C-7");
+  expect(calloutText()).toBe("料金表の丸めを請求書とそろえる");
+  fireEvent.mouseLeave(node("C-7"));
+  expect(callout()).toBeNull();
+  fireEvent.focus(node("C-3"));
+  expect(calloutText()).toBe("通知メールの二重送信を止める");
+  fireEvent.blur(node("C-3"));
+  expect(callout()).toBeNull();
+});
+
+it("一言で: 選んだ課題の吹き出しは出したままにし、別の課題を重ねている間はそちらを出す", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   fireEvent.click(node("C-7"));
+  expect(callout()?.getAttribute("data-callout")).toBe("C-7");
+  fireEvent.mouseEnter(node("C-3"));
+  expect(callout()?.getAttribute("data-callout")).toBe("C-3");
+  fireEvent.mouseLeave(node("C-3"));
+  expect(callout()?.getAttribute("data-callout")).toBe("C-7");
+  // 選んだときのパネルには題名・一言で・位置づけを出す
   const panel = screen.getByRole("complementary", { name: "選んだ課題" });
   expect(within(panel).getByRole("heading", { level: 3 }).textContent).toBe(
     "C-7 料金表の計算を直す",
@@ -93,41 +101,32 @@ it("一言で: 選んだときのパネルには題名と一言での両方を�
   expect(
     within(panel).getByText("位置づけ").nextElementSibling?.textContent,
   ).toBe("月次請求の締め前に必要。経理の突合作業が減る。");
+  // 選択を外すと消える
+  fireEvent.click(node("C-7"));
+  expect(callout()).toBeNull();
+});
+
+it("一言で: 吹き出しでは一言でを切らずに折り返す。一言でが無い課題は吹き出しを出さない", async () => {
+  render(<GraphScreen live={await liveOf()} />);
+  await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
+  // C-15 の一言では 25 文字あり、ノードの幅の 1 行には入らない
+  const long = "ビルドを速くし、配布を手順書なしで回せるようにする";
+  fireEvent.mouseEnter(node("C-15"));
+  const tspans = callout()?.querySelectorAll(".graph-callout-text tspan");
+  expect(tspans?.length).toBeGreaterThan(1);
+  expect(calloutText()).toBe(long);
+  // 開いた大枠の見出しも、重ねると一言でを出す
   fireEvent.click(
     screen.getByRole("button", { name: "C-2 を開く（子 4 件）" }),
   );
+  fireEvent.mouseEnter(node("C-2"));
+  expect(calloutText()).toBe("検索 API をページングで返せるようにする");
+  // C-1 には一言でが無い
+  fireEvent.mouseEnter(node("C-1"));
+  expect(callout()).toBeNull();
   fireEvent.click(node("C-1"));
+  const panel = screen.getByRole("complementary", { name: "選んだ課題" });
   expect(
     within(panel).getByText("一言で").nextElementSibling?.textContent,
   ).toContain("未設定");
-});
-
-it("一言で: 見せ方の切り替えで、ノードの文を題名に戻せる", async () => {
-  render(<GraphScreen live={await liveOf()} />);
-  await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
-  expect(titleLine("C-7")?.getAttribute("data-text")).toBe("headline");
-  variant("ノードの文", "題名");
-  expect(titleLine("C-7")?.getAttribute("data-text")).toBe("title");
-  expect(titleLine("C-7")?.textContent).toBe(face("料金表の計算を直す"));
-});
-
-it("縮小: ノードは ID と色（区分・光の輪・更新なし）だけになり、文を出さない", async () => {
-  render(<GraphScreen live={await liveOf()} />);
-  await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
-  variant("大きさ", "縮小（ID と色）");
-  for (const id of ["C-3", "C-7", "C-14"]) {
-    const n = node(id);
-    expect(n).toHaveAttribute("data-compact", "true");
-    expect(n.querySelector(".graph-node-title")).toBeNull();
-    expect(n.querySelector(".graph-node-meta")).toBeNull();
-    // 面に出る文字は ID だけ（吹き出しの title を除く）
-    const shown = [...n.querySelectorAll("text")].map((t) => t.textContent);
-    expect(shown).toEqual([id]);
-    expect(n.getAttribute("data-category")).not.toBeNull();
-  }
-  // 実施中の光の輪は縮小でも残す（C-5 は実施中）
-  expect(node("C-15")).toHaveAttribute("data-active-inside", "true");
-  expect(node("C-15").querySelector(".graph-node-halo")).not.toBeNull();
-  variant("大きさ", "標準");
-  expect(node("C-7")).not.toHaveAttribute("data-compact");
 });
