@@ -17,29 +17,20 @@ export type Category =
   | "done"
   | "other";
 
-export const CATEGORIES: { key: Category; label: string; hint: string }[] = [
-  {
-    key: "human",
-    label: "人間の操作待ち",
-    hint: "次に人間がすることがある（card.next_human_actions が空でない）",
-  },
-  {
-    key: "external",
-    label: "外部待ち",
-    hint: "自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など。案の印 waiting_party）",
-  },
-  {
-    key: "running",
-    label: "システムが実行中",
-    hint: "システムが進めている。run が動いているか、自動の確認の結果を待っていて、結果が出ればシステムが先へ進める",
-  },
-  {
-    key: "system",
-    label: "システムが次に進めるもの",
-    hint: "次の周でシステムが進められる（status.actionable）",
-  },
-  { key: "done", label: "完了", hint: "完了した課題" },
-  { key: "other", label: "その他", hint: "上のいずれにも当たらない" },
+// 区分の名前。2026-10-17 オーナー: 凡例は区分の名前と色だけにし、実装の語（フィールド名など）の注記を人に見せない。
+// 判定の根拠は categoryOf の注記に置く。
+export const CATEGORIES: { key: Category; label: string }[] = [
+  // card.next_human_actions が空でない
+  { key: "human", label: "人間の操作待ち" },
+  // 自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など。案の印 waiting_party）
+  { key: "external", label: "外部待ち" },
+  // run が動いているか、自動の確認（waiting_ci）の結果を待っていて、結果が出ればシステムが先へ進める
+  { key: "running", label: "システムが実行中" },
+  // 次の周でシステムが進められる（status.actionable）
+  { key: "system", label: "システムが次に進めるもの" },
+  { key: "done", label: "完了" },
+  // 上のいずれにも当たらない
+  { key: "other", label: "その他" },
 ];
 
 // 実行中で、しきい値を超えて記録が無い run（unresponsive）の見せ方。旧 board（claude-flywheel-board の

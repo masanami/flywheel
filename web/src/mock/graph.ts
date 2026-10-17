@@ -37,6 +37,16 @@ const WEB = "mock-org/web";
 const API = "mock-org/api";
 const INFRA = "mock-org/infra";
 const DOCS = "mock-org/docs";
+// 2026-10-17 オーナー: リポジトリを多数持つエージェント・名前の長いリポジトリを、絞り込みの入力で確かめられるようにする。
+// alpha は 12 件のリポジトリを触る（うち 2 件は名前が長い）。
+const BATCH = "mock-org/payments-reconciliation-batch-service-legacy-v2";
+const NOTIFY = "mock-org/customer-notification-template-renderer";
+const SEARCH = "mock-org/search-indexer";
+const IMAGE = "mock-org/image-pipeline";
+const ADMIN = "mock-org/admin-console";
+const BILLING = "mock-org/billing";
+const AUTH = "mock-org/auth-gateway";
+const CI = "mock-org/ci-config";
 
 export function seedGraphs(): {
   alpha: ChallengeGraphResponse;
@@ -89,17 +99,17 @@ export function seedGraphs(): {
         need("C-19", "C-2", "ページングの配布は新しい手順で出す"),
       ],
       repos: [
-        { challenge_id: "C-1", repos: [WEB] },
-        { challenge_id: "C-2", repos: [API] },
-        { challenge_id: "C-3", repos: [API] },
-        { challenge_id: "C-4", repos: [WEB, API] },
-        { challenge_id: "C-5", repos: [INFRA] },
-        { challenge_id: "C-6", repos: [INFRA] },
-        { challenge_id: "C-7", repos: [API, WEB] },
-        { challenge_id: "C-8", repos: [API] },
-        { challenge_id: "C-9", repos: [API] },
+        { challenge_id: "C-1", repos: [WEB, AUTH] },
+        { challenge_id: "C-2", repos: [API, SEARCH] },
+        { challenge_id: "C-3", repos: [API, NOTIFY] },
+        { challenge_id: "C-4", repos: [WEB, API, ADMIN] },
+        { challenge_id: "C-5", repos: [INFRA, CI] },
+        { challenge_id: "C-6", repos: [INFRA, BATCH] },
+        { challenge_id: "C-7", repos: [API, WEB, BILLING] },
+        { challenge_id: "C-8", repos: [API, BATCH] },
+        { challenge_id: "C-9", repos: [API, IMAGE] },
         { challenge_id: "C-10", repos: [WEB] },
-        { challenge_id: "C-11", repos: [INFRA] },
+        { challenge_id: "C-11", repos: [INFRA, CI] },
         { challenge_id: "C-12", repos: [INFRA] },
         { challenge_id: "C-13", repos: [API] },
         { challenge_id: "C-14", repos: [INFRA, API] },
@@ -108,7 +118,7 @@ export function seedGraphs(): {
         { challenge_id: "C-17", repos: [INFRA] },
         { challenge_id: "C-18", repos: [API, INFRA] },
         { challenge_id: "C-19", repos: [INFRA, DOCS] },
-        { challenge_id: "C-20", repos: [API] },
+        { challenge_id: "C-20", repos: [API, BILLING] },
       ],
       // 外部待ち（自動では解けない待ち）の例。自動の確認待ち（C-11 の waiting_ci）はここに入れない
       waiting_party: [

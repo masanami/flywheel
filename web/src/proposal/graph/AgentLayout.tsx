@@ -1,6 +1,6 @@
 // 関係グラフの画面の配置の案（flywheel#176・2026-10-14 オーナー）: 左端のアイコンの細い列で
 // エージェント（ワークスペース）を選び、中央に選んだエージェントの関係グラフを描く。選んだエージェントのターミナル／チャットの欄は
-// 下の引き出しか右の分割に置き（試作では見比べられるよう切り替える）、中身は偽の見た目だけを作る。
+// 右に置き（2026-10-17 オーナー: 右に固定）、中身は偽の見た目だけを作る。
 // 狭い画面では列の代わりに上部の選択欄で選ぶ。
 
 import { useEffect, useState } from "react";
@@ -165,7 +165,6 @@ export function AgentPicker({
   );
 }
 
-export type DockPosition = "bottom" | "right";
 export type DockTab = "terminal" | "chat";
 
 const TABS: { key: DockTab; label: string }[] = [
@@ -173,12 +172,11 @@ const TABS: { key: DockTab; label: string }[] = [
   { key: "chat", label: "チャット" },
 ];
 
-// 選んだエージェントのターミナル／チャットの欄。下の引き出しでも右の分割でも同じ部品で、置き場所は外側の配置が決める。
+// 選んだエージェントのターミナル／チャットの欄。2026-10-17 オーナー: 位置は右に固定する（狭い画面では下に置く）。
 export function AgentDock({
   agents,
   ws,
   open,
-  position,
   tab,
   onToggle,
   onChoose,
@@ -187,18 +185,17 @@ export function AgentDock({
   agents: AgentSummary[];
   ws: string | null;
   open: boolean;
-  position: DockPosition;
   tab: DockTab;
   onToggle: () => void;
   onChoose: (name: string) => void;
   onTab: (t: DockTab) => void;
 }) {
-  const arrow = position === "bottom" ? (open ? "▾" : "▴") : open ? "▸" : "◂";
+  const arrow = open ? "▸" : "◂";
   return (
     <section
       aria-label="ターミナル／チャット（案）"
       className="agent-dock"
-      data-pos={position}
+      data-pos="right"
       data-open={open || undefined}
     >
       <div className="agent-dock-bar">

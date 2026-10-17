@@ -81,28 +81,24 @@ it("一言で: カーソルを重ねるかフォーカスすると吹き出し�
   expect(callout()).toBeNull();
 });
 
-it("一言で: 選んだ課題の吹き出しは出したままにし、別の課題を重ねている間はそちらを出す", async () => {
+it("一言で: 吹き出しは重ねている間だけ出し、課題を押すとボードと同じ詳細のモーダルに題名・一言で・位置づけを出す", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
-  fireEvent.click(node("C-7"));
+  fireEvent.mouseEnter(node("C-7"));
   expect(callout()?.getAttribute("data-callout")).toBe("C-7");
   fireEvent.mouseEnter(node("C-3"));
   expect(callout()?.getAttribute("data-callout")).toBe("C-3");
   fireEvent.mouseLeave(node("C-3"));
-  expect(callout()?.getAttribute("data-callout")).toBe("C-7");
-  // 選んだときのパネルには題名・一言で・位置づけを出す
-  const panel = screen.getByRole("complementary", { name: "選んだ課題" });
-  expect(within(panel).getByRole("heading", { level: 3 }).textContent).toBe(
-    "C-7 料金表の計算を直す",
-  );
-  expect(
-    within(panel).getByText("一言で").nextElementSibling?.textContent,
-  ).toBe("料金表の丸めを請求書とそろえる");
-  expect(
-    within(panel).getByText("位置づけ").nextElementSibling?.textContent,
-  ).toBe("月次請求の締め前に必要。経理の突合作業が減る。");
-  // 選択を外すと消える
+  expect(callout()).toBeNull();
+  // 押しても吹き出しを出したままにはしない（選ぶ状態を持たない）。詳細はボードと同じモーダルで読む
   fireEvent.click(node("C-7"));
+  const modal = await screen.findByTestId("card-detail-content");
+  expect(modal.textContent).toContain("料金表の計算を直す");
+  expect(modal.textContent).toContain("料金表の丸めを請求書とそろえる");
+  expect(modal.textContent).toContain(
+    "月次請求の締め前に必要。経理の突合作業が減る。",
+  );
+  fireEvent.click(within(modal).getByText("閉じる"));
   expect(callout()).toBeNull();
 });
 
@@ -125,12 +121,7 @@ it("一言で: 吹き出しでは一言でを切らずに折り返す。一言�
   );
   fireEvent.mouseEnter(node("C-2"));
   expect(callout()).toBeNull();
-  // C-1 には一言でが無い
+  // C-1 には一言でが無い（外部待ち・自動の確認待ちでもない）ので、吹き出しを出さない
   fireEvent.mouseEnter(node("C-1"));
   expect(callout()).toBeNull();
-  fireEvent.click(node("C-1"));
-  const panel = screen.getByRole("complementary", { name: "選んだ課題" });
-  expect(
-    within(panel).getByText("一言で").nextElementSibling?.textContent,
-  ).toContain("未設定");
 });

@@ -63,13 +63,6 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
 }
-/* 選んだ課題のパネルは、画面の幅ではなくグラフの欄の幅で右に並べるか下へ回すかを決める（右の分割で欄が幅を取るため） */
-@container graph-content (min-width: 760px) {
-  .graph-main {
-    grid-template-columns: minmax(0, 1fr) 320px;
-    align-items: start;
-  }
-}
 .graph-canvas {
   min-width: 0;
 }
@@ -141,14 +134,7 @@
   color: var(--running-section-stale-fg);
   font-weight: 600;
 }
-.graph-panel-stale {
-  color: var(--running-section-stale-fg);
-  font-weight: 600;
-  background: var(--running-section-stale-bg);
-  border-left: 3px solid var(--running-section-stale-border);
-  padding: 0.2rem 0.4rem;
-}
-.graph-node[aria-pressed="true"] .graph-node-box,
+.graph-node[data-relation="selected"] .graph-node-box,
 .graph-node:focus-visible .graph-node-box {
   stroke: var(--board-fg);
   stroke-width: 3;
@@ -182,42 +168,8 @@
 .graph-svg.is-narrow .graph-node-meta {
   font-size: 10px;
 }
-
-.graph-panel {
-  border: 1px solid var(--board-border);
-  border-radius: 6px;
-  background: var(--board-column-bg);
-  padding: 0.5rem 0.75rem;
-  font-size: 0.9em;
-  overflow-wrap: anywhere;
-}
-.graph-panel h3 {
-  margin: 0 0 0.3rem;
-  font-size: 1em;
-}
-.graph-panel h4 {
-  margin: 0.6rem 0 0.2rem;
-  font-size: 0.85em;
-  color: var(--board-muted-fg);
-}
-.graph-panel p {
-  margin: 0.2rem 0;
-}
 .graph-muted {
   color: var(--board-muted-fg);
-}
-.graph-id-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.graph-id-list li {
-  margin: 0.15rem 0;
-}
-.graph-panel-actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.6rem;
 }
 
 /* 決定 1: グラフと列のボードの切り替え（既定はグラフ） */
@@ -297,14 +249,6 @@
 }
 .graph-node[data-active] .graph-node-box {
   stroke-width: 2.5;
-}
-.graph-panel-autocheck {
-  color: var(--graph-running);
-  font-weight: 600;
-}
-.graph-panel-party {
-  color: var(--graph-external);
-  font-weight: 600;
 }
 .graph-node-active-tag {
   fill: var(--graph-running) !important;
@@ -563,35 +507,101 @@ summary.graph-tool-btn::-webkit-details-marker {
 .graph-filterbar[data-filtering] .graph-legend-item[aria-pressed="false"] {
   opacity: 0.55;
 }
-.graph-repos {
+/* リポジトリの絞り込み（キーワードを入れて候補から選ぶ。2026-10-17 オーナー） */
+.graph-repo-filter {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.25rem;
-  margin: 0;
-  padding: 0;
-  border: 0;
+  gap: 0.3rem;
   min-width: 0;
   font-size: 0.82em;
 }
-.graph-repos legend {
-  float: left;
-  margin-right: 0.35rem;
-  padding: 0;
+.graph-repo-filter-label {
   color: var(--board-muted-fg);
 }
-.graph-repo-chip {
-  border: 1px solid var(--board-border);
+.graph-repo-chosen {
+  display: contents;
+  list-style: none;
+}
+.graph-repo-chosen li {
+  display: inline-flex;
+  align-items: center;
+  max-width: 16rem;
+  gap: 0.2rem;
+  border: 1px solid var(--board-fg);
   border-radius: 999px;
-  background: var(--board-card-bg);
+  background: var(--board-fg);
+  color: var(--board-card-bg);
+  padding: 0.05rem 0.2rem 0.05rem 0.55rem;
+}
+.graph-repo-chosen-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-repo-chosen button {
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
   color: inherit;
-  padding: 0.1rem 0.55rem;
+  width: 1.3em;
+  height: 1.3em;
+  padding: 0;
   cursor: pointer;
 }
-.graph-repo-chip[aria-pressed="true"] {
-  background: var(--board-fg);
-  border-color: var(--board-fg);
-  color: var(--board-card-bg);
+.graph-repo-chosen button:hover,
+.graph-repo-chosen button:focus-visible {
+  background: rgb(255 255 255 / 0.25);
+}
+.graph-repo-combo {
+  position: relative;
+}
+.graph-repo-combo input {
+  width: 15rem;
+  max-width: 60vw;
+  border: 1px solid var(--board-border);
+  border-radius: 6px;
+  background: var(--board-card-bg);
+  color: inherit;
+  font: inherit;
+  padding: 0.15rem 0.5rem;
+}
+.graph-repo-options,
+.graph-repo-none {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 6;
+  margin: 0;
+  border: 1px solid var(--board-border);
+  border-radius: 6px;
+  background: var(--board-card-bg);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
+}
+.graph-repo-options {
+  width: max(100%, 22rem);
+  max-width: 80vw;
+  padding: 0.2rem;
+  list-style: none;
+}
+.graph-repo-options [role="option"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.graph-repo-options [role="option"][aria-selected="true"] {
+  background: color-mix(in srgb, var(--graph-system) 14%, transparent);
+}
+.graph-repo-more,
+.graph-repo-none {
+  padding: 0.2rem 0.45rem;
+  color: var(--board-muted-fg);
+}
+.graph-repo-none {
+  white-space: nowrap;
 }
 .graph-switch {
   position: relative;
@@ -820,11 +830,11 @@ summary.graph-tool-btn::-webkit-details-marker {
   cursor: pointer;
 }
 
-/* 欄の位置の 2 案: 下の引き出し（既定）と右の分割 */
+/* 欄（ターミナル／チャット）は右に固定する（2026-10-17 オーナー） */
 .agent-main {
   min-width: 0;
 }
-.agent-shell[data-dock-pos="right"] {
+.agent-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.75rem;
@@ -835,14 +845,6 @@ summary.graph-tool-btn::-webkit-details-marker {
   flex-direction: column;
   border: 1px solid var(--board-border);
   background: var(--board-column-bg);
-}
-.agent-dock[data-pos="bottom"] {
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  margin-top: 0.75rem;
-  border-radius: 8px 8px 0 0;
-  box-shadow: 0 -2px 8px rgb(0 0 0 / 0.08);
 }
 .agent-dock[data-pos="right"] {
   position: sticky;
@@ -912,9 +914,6 @@ summary.graph-tool-btn::-webkit-details-marker {
   overflow: hidden;
   border-top: 1px solid var(--board-border);
 }
-.agent-dock[data-pos="bottom"] .agent-dock-body {
-  height: 38vh;
-}
 .agent-dock[data-pos="right"] .agent-dock-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -923,8 +922,8 @@ summary.graph-tool-btn::-webkit-details-marker {
   .agent-layout {
     grid-template-columns: minmax(0, 1fr);
   }
-  /* 狭い画面では右の分割を置く幅が無いので、右の分割の案でも下の引き出しとして出す */
-  .agent-shell[data-dock-pos="right"] {
+  /* 狭い画面では右に置く幅が無いので、下の引き出しとして出す */
+  .agent-shell {
     display: block;
   }
   .agent-dock[data-pos="right"],
@@ -1258,45 +1257,6 @@ summary.graph-tool-btn::-webkit-details-marker {
 .graph-more-btn:focus-visible .graph-more-hit {
   stroke: var(--board-fg);
   stroke-width: 1.5;
-}
-
-/* パネル: 一言で・位置づけと、直接の依存の理由 */
-.graph-panel-summary {
-  margin: 0.4rem 0;
-}
-.graph-panel-summary dt {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--board-muted-fg);
-}
-.graph-panel-summary dd {
-  margin: 0 0 0.35rem;
-}
-.graph-reason-list,
-.graph-edge-reasons {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.graph-reason-list li {
-  margin: 0.2rem 0;
-}
-.graph-edge-reasons li {
-  border-left: 3px solid var(--graph-edge-lit);
-  padding-left: 0.5rem;
-  margin: 0.4rem 0;
-}
-.graph-edge-reasons li[data-basis="conflict"] {
-  border-left-style: dashed;
-}
-.graph-reason-kind {
-  font-size: 11px;
-  color: var(--board-muted-fg);
-  margin-right: 0.35rem;
-}
-.graph-reason-list .graph-reason {
-  display: block;
-  margin-left: 1.1rem;
 }
 
 /* 一言での吹き出し（選んだ課題・カーソルを重ねた課題） */

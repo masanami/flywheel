@@ -173,37 +173,35 @@ it("理由: 線は押せて、名前と重ねたときの吹き出しに理由�
   expect(labels()).toEqual([]);
 });
 
-it("理由: 線を選ぶとパネルに両端と理由・種類を出す。課題を選んでも、つながる線に札は出さない", async () => {
+it("理由: 線を押すと理由の札を出したままにし、もう一度押すと外す。課題に重ねても、つながる線に札は出さない", async () => {
   render(<GraphScreen live={await liveOf()} />);
   await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
   fireEvent.click(screen.getByRole("button", { name: "親をすべて開く" }));
-  fireEvent.click(edgeButton("C-10", "C-4"));
-  const ep = screen.getByRole("complementary", { name: "選んだ依存" });
-  expect(within(ep).getByRole("heading", { level: 3 }).textContent).toBe(
-    "依存 C-10 → C-4",
+  const b = edgeButton("C-10", "C-4");
+  fireEvent.click(b);
+  expect(b).toHaveAttribute("aria-pressed", "true");
+  expect(labels()).toEqual(["C-10>C-4"]);
+  expect(graphOf().querySelector(".graph-edge-label")?.textContent).toContain(
+    "同じ画面の部品",
   );
-  expect(ep.textContent).toContain("同時に走らせると衝突する");
-  expect(ep.textContent).toContain("同じ画面の部品（AdminToolbar）を触る");
   expect(edgePath("C-10", "C-4")).toHaveAttribute("data-lit", "true");
   expect(edgePath("C-9", "C-4")).toHaveAttribute("data-dim", "true");
-  expect(labels()).toEqual(["C-10>C-4"]);
-
-  // 課題を選ぶと、パネルは課題に戻り、直前の先行の理由を並べる
-  fireEvent.click(node("C-18"));
+  // 理由のパネルは置かない（右は欄の場所）。種類と理由の全文は線の名前と吹き出しに持つ
   expect(
     screen.queryByRole("complementary", { name: "選んだ依存" }),
   ).toBeNull();
-  const panel = screen.getByRole("complementary", { name: "選んだ課題" });
-  const before = within(panel).getByText("待っている理由（直前の先行）")
-    .nextElementSibling as HTMLElement;
-  expect(
-    [...before.querySelectorAll("li")].map((li) => li.textContent),
-  ).toEqual([
-    "C-6 終わらないと始められないバッチが止まらないと旧テーブルへの書き込みが続く",
-    "C-8 終わらないと始められない移行が全件済んだと確かめてから消す",
-  ]);
+  expect(b.getAttribute("aria-label")).toBe(
+    "依存 C-10 → C-4（同じ画面の部品（AdminToolbar）を触る）",
+  );
+  fireEvent.click(b);
   expect(labels()).toEqual([]);
-  // 選んだ課題につながる線でも、重ねれば札が出る
+
+  // 課題に重ねると先行・後続を強調するが、つながる線に札は出さない
+  fireEvent.mouseEnter(node("C-18"));
+  expect(edgePath("C-6", "C-18")).toHaveAttribute("data-lit", "true");
+  expect(labels()).toEqual([]);
+  fireEvent.mouseLeave(node("C-18"));
+  // 線に重ねれば札が出る
   fireEvent.mouseEnter(edgeButton("C-6", "C-18"));
   expect(labels()).toEqual(["C-6>C-18"]);
 });
@@ -241,7 +239,9 @@ it("理由: 畳んだ親へつなぎ替えた線は、中の課題どうしの�
   expect(b.getAttribute("aria-label")).toContain(
     "C-19 → C-2: ページングの配布は新しい手順で出す",
   );
+  // 押すと、中の課題どうしの依存の理由を札に出す
   fireEvent.click(b);
-  const ep = screen.getByRole("complementary", { name: "選んだ依存" });
-  expect(ep.textContent).toContain("C-19 → C-2");
+  expect(graphOf().querySelector(".graph-edge-label")?.textContent).toContain(
+    "ページングの配布は新しい手順",
+  );
 });

@@ -1,12 +1,14 @@
 // 関係グラフの案（flywheel#176）の SVG の描画。親課題は大枠（開いたとき）か重ねた箱（畳んだとき）で示し、
 // 依存だけを線で結ぶ。どの課題を選んでいるか・薄くするかは画面（GraphScreen）が決めて渡す。
 // 2026-10-14 オーナー: ノードは ID と題名だけでは読めない。開いた大枠の見出しには「位置づけ」、依存の線には理由を持たせる。
-// 2026-10-17 オーナー: ノードには題名を出し、選んだときかカーソルを重ねたときに「一言で」を吹き出しで出す。
+// 2026-10-17 オーナー: ノードには題名を出し、カーソルを重ねたとき（キーボードで移ったとき）に「一言で」を吹き出しで出す。
+// 課題を押すとボードと同じ詳細のモーダルを開く。先行・後続の強調も重ねたとき・移ったときに出す。
 
 import type { KeyboardEvent } from "react";
 import type { PartyWait } from "../../api/proposed.ts";
 import type { ChallengeCard } from "../../api/types.gen.ts";
 import {
+  AUTO_CHECK_TEXT,
   CATEGORIES,
   type Category,
   type Dims,
@@ -60,15 +62,15 @@ export interface CanvasProps {
   narrow: boolean;
   infos: Map<string, NodeInfo>;
   inside: (id: string) => Inside | null;
-  selected: string | null;
+  // カーソルを重ねた・キーボードで移った課題（先行・後続の強調の起点。一言での吹き出しもこの課題に出す）
+  focused: string | null;
   relationOf: (id: string) => string | undefined;
   dimmed: (id: string) => boolean;
   edgeLit: (from: string, to: string) => boolean;
-  onSelect: (id: string) => void;
+  // 課題を押した（詳細のモーダルを開く）
   onOpen: (id: string) => void;
   onToggle: (id: string) => void;
-  // 一言での吹き出しを出す課題（カーソルを重ねた課題、無ければ選んだ課題）と、重ねた課題の通知
-  callout: string | null;
+  // 重ねた・移った課題の通知
   onHoverNode: (id: string | null) => void;
   // 位置づけを全文まで広げた大枠か
   contextOpen: (id: string) => boolean;
@@ -137,8 +139,10 @@ export function edgeName(e: LayoutEdge): string {
   return `依存 ${e.from} → ${e.to}（${why}）`;
 }
 
-// 重ねた・選んだ課題の一言での吹き出し。箱の下（入らなければ上）に置き、画面の幅に収める。
+// 重ねた・移った課題の一言での吹き出し。箱の下（入らなければ上）に置き、画面の幅に収める。
 // 一言では切らずに折り返し、行数の上限を超えたときだけ「…」で切る。押す操作は下へ通す。
+// 自動では解けない外部待ちの相手と理由・自動の確認を待っていることもここに出す（以前は右のパネルに出していた。
+// 詳細のモーダルは試作の案の印を知らず、自動の確認待ちも利用分野の語で出すため）。
 function HeadlineCallout({
   id,
   p,
@@ -146,16 +150,39 @@ function HeadlineCallout({
   id: string;
   p: CanvasProps;
 }) {
-  const c = p.infos.get(id)?.card;
+  const info = p.infos.get(id);
+  const c = info?.card;
   // 開いた大枠の一言では見出しの欄に出すので、吹き出しは課題のノード（畳んだ親を含む）だけに出す
   const box = p.layout.nodes.find((b) => b.id === id);
-  if (!c?.card.headline || !box) return null;
+  if (!c || !box) return null;
   const { dims, layout, narrow } = p;
   const font = narrow ? 12 : 13;
   const w = Math.min(layout.width - 4, Math.max(box.w, dims.calloutW));
-  const lines = clipLines(c.card.headline, w - 20, font, dims.calloutLines);
   const lineH = font + 5;
-  const h = 22 + lines.length * lineH + 6;
+  const sections = [
+    c.card.headline ? { label: "一言で", text: c.card.headline } : null,
+    info.party
+      ? {
+          label: "外部待ち",
+          text: `${info.party.party}（${info.party.reason}）`,
+        }
+      : null,
+    info.autoCheck ? { label: "自動の確認", text: AUTO_CHECK_TEXT } : null,
+  ]
+    .filter((x) => x !== null)
+    .map((x) => ({
+      ...x,
+      lines: clipLines(x.text, w - 20, font, dims.calloutLines),
+    }));
+  if (sections.length === 0) return null;
+  // 区分ごとに、見出しの行（16px）と文の行を積む
+  let top = 0;
+  const placed = sections.map((x) => {
+    const at = top;
+    top += 22 + x.lines.length * lineH;
+    return { ...x, at };
+  });
+  const h = top + 6;
   const bottom = box.y + box.h;
   const y = bottom + 6 + h <= layout.height ? bottom + 6 : box.y - 6 - h;
   const x = Math.max(2, Math.min(box.x, layout.width - 2 - w));
@@ -166,17 +193,21 @@ function HeadlineCallout({
       transform={`translate(${x} ${Math.max(2, y)})`}
     >
       <rect width={w} height={h} rx={6} />
-      <text x={10} y={16} className="graph-callout-label">
-        一言で
-      </text>
-      <text x={10} y={22 + lineH - 4} className="graph-callout-text">
-        {lines.map((line, k) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: 幅で切った行の並びで、行の位置そのものが鍵
-          <tspan key={k} x={10} dy={k === 0 ? 0 : lineH}>
-            {line}
-          </tspan>
-        ))}
-      </text>
+      {placed.map((x) => (
+        <g key={x.label} data-section={x.label}>
+          <text x={10} y={x.at + 16} className="graph-callout-label">
+            {x.label}
+          </text>
+          <text x={10} y={x.at + 22 + lineH - 4} className="graph-callout-text">
+            {x.lines.map((line, k) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: 幅で切った行の並びで、行の位置そのものが鍵
+              <tspan key={k} x={10} dy={k === 0 ? 0 : lineH}>
+                {line}
+              </tspan>
+            ))}
+          </text>
+        </g>
+      ))}
     </g>
   );
 }
@@ -319,7 +350,7 @@ function NodeBox({
   const selfActive = i.active;
   const active = selfActive || (inside?.active ?? 0) > 0;
   const stale = c.card.modifiers.includes("unresponsive");
-  const select = () => p.onSelect(box.id);
+  const select = () => p.onOpen(box.id);
   return (
     <g transform={`translate(${box.x} ${box.y})`}>
       <g
@@ -327,7 +358,7 @@ function NodeBox({
         role="button"
         tabIndex={0}
         aria-label={accessibleName(i, inside ? insideText(inside) : null)}
-        aria-pressed={box.id === p.selected}
+        aria-haspopup="dialog"
         className="graph-node"
         data-category={i.category}
         data-relation={p.relationOf(box.id)}
@@ -338,7 +369,6 @@ function NodeBox({
         data-collapsed={inside ? true : undefined}
         data-unresponsive={stale || undefined}
         onClick={select}
-        onDoubleClick={() => p.onOpen(box.id)}
         onKeyDown={onActivate(select)}
         onMouseEnter={() => p.onHoverNode(box.id)}
         onMouseLeave={() => p.onHoverNode(null)}
@@ -471,7 +501,7 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
   const { dims, narrow } = p;
   const c = i.card;
   const selfActive = i.active;
-  const select = () => p.onSelect(box.id);
+  const select = () => p.onOpen(box.id);
   const chars = Math.max(4, Math.floor((box.w - 90) / (narrow ? 12 : 13)));
   const { headline: hl, context: lines } = headLines(
     c.card.headline,
@@ -498,14 +528,17 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
         role="button"
         tabIndex={0}
         aria-label={accessibleName(i, "開いた親")}
-        aria-pressed={box.id === p.selected}
+        aria-haspopup="dialog"
         className="graph-group-head"
         data-category={i.category}
         data-relation={p.relationOf(box.id)}
         data-active={selfActive || undefined}
         onClick={select}
-        onDoubleClick={() => p.onOpen(box.id)}
         onKeyDown={onActivate(select)}
+        onMouseEnter={() => p.onHoverNode(box.id)}
+        onMouseLeave={() => p.onHoverNode(null)}
+        onFocus={() => p.onHoverNode(box.id)}
+        onBlur={() => p.onHoverNode(null)}
       >
         <title>{accessibleName(i, "開いた親")}</title>
         <rect
@@ -713,8 +746,8 @@ export function GraphCanvas(p: CanvasProps) {
       {layout.edges.map((e) => {
         const key = edgeKey(e);
         const picked = p.selectedEdge === key;
-        const lit = picked || (p.selected !== null && p.edgeLit(e.from, e.to));
-        const focus = p.selected !== null || p.selectedEdge !== null;
+        const lit = picked || (p.focused !== null && p.edgeLit(e.from, e.to));
+        const focus = p.focused !== null || p.selectedEdge !== null;
         const conflict = e.basis === "conflict";
         const pick = () => p.onSelectEdge(key);
         const name = edgeName(e);
@@ -775,7 +808,7 @@ export function GraphCanvas(p: CanvasProps) {
           <EdgeLabel key={edgeKey(l.e)} l={l} />
         ),
       )}
-      {p.callout ? <HeadlineCallout id={p.callout} p={p} /> : null}
+      {p.focused ? <HeadlineCallout id={p.focused} p={p} /> : null}
     </svg>
   );
 }
