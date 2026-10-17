@@ -1506,27 +1506,10 @@ body {
   background: var(--board-needs-human-border);
   color: #1c1c1f;
 }
-.cycle-headers {
-  display: flex;
+.agent-column-header .agent-column-cycle-status {
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  white-space: normal;
 }
-.cycle-header {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  border: 1px dashed var(--board-border);
-  border-radius: 6px;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.85em;
-}
-.cycle-header[data-cycle="running"] .cycle-state {
-  color: var(--cycle-status-running-fg);
-}
-.cycle-header[data-cycle="stale"] .cycle-state {
-  color: var(--cycle-status-stale-fg);
-}
-.cycle-header[data-cycle="idle"] .cycle-state {
-  color: var(--cycle-status-idle-fg);
+.cycle-last {
+  color: var(--board-muted-fg);
 }

@@ -1,6 +1,7 @@
 import { ApiError, type ProposedApi } from "./proposed.ts";
 import type {
   ApprovalSummaryResponse,
+  CycleStatus,
   ListCardResponse,
   LogResponse,
   NeedsHumanResponse,
@@ -73,6 +74,7 @@ export interface ReadApi {
   workspaces(): Promise<WorkspaceList>;
   status(name: string): Promise<StatusResponse>;
   challenges(name: string): Promise<ListCardResponse>;
+  cycle(name: string): Promise<CycleStatus>;
   challenge(name: string, id: string): Promise<ShowCardResponse>;
   log(name: string, id: string): Promise<LogResponse>;
   runReport(name: string, runId: string): Promise<RunReportResponse>;
@@ -92,6 +94,7 @@ const readApi: ReadApi = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
   status: (name) => get<StatusResponse>(`${ws(name)}/status`),
   challenges: (name) => get<ListCardResponse>(`${ws(name)}/challenges`),
+  cycle: (name) => get<CycleStatus>(`${ws(name)}/cycle`),
   challenge: (name, id) =>
     get<ShowCardResponse>(`${ws(name)}/challenges/${encodeURIComponent(id)}`),
   log: (name, id) =>
@@ -129,7 +132,6 @@ const notBuilt = (): Promise<never> =>
 const realApi: ApiClient = {
   ...readApi,
   ...approvalApi,
-  cycleInfo: notBuilt,
   challengeGraph: notBuilt,
   agentProfiles: notBuilt,
 };
@@ -148,6 +150,7 @@ export const api: ApiClient = {
   workspaces: () => impl.workspaces(),
   status: (n) => impl.status(n),
   challenges: (n) => impl.challenges(n),
+  cycle: (n) => impl.cycle(n),
   challenge: (n, id) => impl.challenge(n, id),
   log: (n, id) => impl.log(n, id),
   runReport: (n, r) => impl.runReport(n, r),
@@ -155,7 +158,6 @@ export const api: ApiClient = {
   questions: () => impl.questions(),
   approvalSummary: (n, id) => impl.approvalSummary(n, id),
   approve: (n, id, v) => impl.approve(n, id, v),
-  cycleInfo: (n) => impl.cycleInfo(n),
   challengeGraph: (n) => impl.challengeGraph(n),
   agentProfiles: () => impl.agentProfiles(),
 };

@@ -214,7 +214,7 @@ export function createMockApi(
         source_binding: null,
       };
     },
-    async cycleInfo(name) {
+    async cycle(name) {
       await wait();
       return wsOf(name).cycle;
     },

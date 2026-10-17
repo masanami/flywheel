@@ -97,5 +97,12 @@ export function toAgentBoard(
       title: c.title,
       unresponsive: c.modifiers.includes("unresponsive"),
     }));
-  return { name: w.name, path: w.path, challenges, parseErrors, runningRuns };
+  return {
+    name: w.name,
+    path: w.path,
+    challenges,
+    parseErrors,
+    runningRuns,
+    cycle: w.state === "ok" ? d?.cycle : undefined,
+  };
 }

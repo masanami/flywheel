@@ -33,15 +33,16 @@ describe("読み取り（types.gen.ts の形）", () => {
     const q = await api.questions();
     expect(q.questions.map((x) => x.challenge_id)).toEqual(["C-8"]);
   });
-  it("列の見出しの材料は、サイクルの状態と方針のモードだけを返す（差し込みは持たない）", async () => {
-    const info = await api.cycleInfo("alpha");
-    expect(info.cycle_state).toBe("running");
-    expect(info.policy_mode).toContain("優先度方針");
-    expect(Object.keys(info).sort()).toEqual([
-      "cycle_state",
-      "last_cycle_at",
-      "policy_mode",
+  it("サイクルの状態は GET …/cycle と同じ形（state・last_*）で返る", async () => {
+    const c = await api.cycle("alpha");
+    expect(c.state).toBe("running");
+    expect(Object.keys(c).sort()).toEqual([
+      "last_ended_at",
+      "last_result",
+      "last_started_at",
+      "state",
     ]);
+    expect((await api.cycle("beta")).state).toBe("idle");
   });
   it("読めないワークスペースは state のコードで失敗する", async () => {
     expect(await codeOf(api.status("gamma"))).toBe("store_not_found");

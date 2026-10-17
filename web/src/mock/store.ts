@@ -1,13 +1,14 @@
 // ブラウザ内の偽のストア。開発時の mock モードだけが読み込む（本番のビルドには入らない）。
 // 返す形は types.gen.ts と仕様の API の節に従う。状態の導出は本物では core がやるが、ここでは同じ表を写す。
 
-import type { ChallengeGraphResponse, CycleInfo } from "../api/proposed.ts";
+import type { ChallengeGraphResponse } from "../api/proposed.ts";
 import type {
   Approval,
   BudgetExhausted,
   Card,
   Challenge,
   ChallengeCard,
+  CycleStatus,
   Hold,
   Operation,
   PlanDetail,
@@ -42,7 +43,7 @@ export interface MockChallenge {
 export interface MockWorkspace {
   meta: Workspace;
   items: MockChallenge[];
-  cycle: CycleInfo;
+  cycle: CycleStatus;
   graph: ChallengeGraphResponse;
   // 見た目の設定の案（proposed.ts の AgentProfile）。絵文字か画像の URL、無ければ null
   icon: string | null;
@@ -321,9 +322,10 @@ export function seed(): Record<string, MockWorkspace> {
       meta: ok("alpha"),
       items: alpha,
       cycle: {
-        cycle_state: "running",
-        last_cycle_at: iso(12),
-        policy_mode: "優先度方針: 厳格（P0 のみ自走）",
+        state: "running",
+        last_started_at: iso(12),
+        last_ended_at: iso(90),
+        last_result: "completed",
       },
       graph: graphs.alpha,
       icon: "🚀",
@@ -332,9 +334,10 @@ export function seed(): Record<string, MockWorkspace> {
       meta: ok("beta"),
       items: beta,
       cycle: {
-        cycle_state: "idle",
-        last_cycle_at: iso(2000),
-        policy_mode: "優先度方針: 既定（エージェント裁量）",
+        state: "idle",
+        last_started_at: iso(2010),
+        last_ended_at: iso(2000),
+        last_result: "completed",
       },
       graph: graphs.beta,
       icon: BETA_ICON,
@@ -348,9 +351,10 @@ export function seed(): Record<string, MockWorkspace> {
       },
       items: [],
       cycle: {
-        cycle_state: "idle",
-        last_cycle_at: null,
-        policy_mode: "",
+        state: "idle",
+        last_started_at: null,
+        last_ended_at: null,
+        last_result: null,
       },
       graph: { relations: [], repos: [], waiting_party: [] },
       icon: null,
