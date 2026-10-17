@@ -731,3 +731,33 @@ func TestCycle_Text_NoStartLineWhenFailingBeforeBeginCycle(t *testing.T) {
 		t.Errorf("exit=%d stdout=%q", code, stdout.String())
 	}
 }
+
+// AC-177b: --json 無しの cycle は、標準出力の読み手が開始の行のあとに消えても SIGPIPE で落ちず、
+// 周を最後まで進める（UI の server は合図を読んだら標準出力を手放す）。
+// 子プロセスの標準出力を、読み口を閉じたパイプにする。signal.Notify を外すと子は SIGPIPE で落ちる。
+func TestCycle_Text_ClosedStdoutReader_DoesNotDieBySIGPIPE(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	id := createTitled(t, ws, "SIGPIPE")
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cmd, _, stderr := newChildCmd([]string{"cycle", "--workspace", ws})
+	cmd.Stdout = w
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+
+	if code := waitChild(t, cmd, 60*time.Second); code != 0 {
+		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
+	}
+	if got := challengeStatusOf(t, ws, id); got != "classified" {
+		t.Errorf("status = %q, want classified (the cycle must run to the end)", got)
+	}
+}
