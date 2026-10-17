@@ -222,35 +222,15 @@ it("AC-119: 外部由来の文字列は文字として出し、script 要素と 
   expect(document.body.querySelector("[onerror]")).toBeNull();
 });
 
-it("AC-104/107: 計画承認待ち・完了確認待ちには approve の案内があり承認のボタンは無い", async () => {
-  for (const status of [
-    "awaiting_plan_approval",
-    "awaiting_completion_approval",
-  ]) {
-    const d = show({
-      card: { ...show().card, state: status },
-      challenge: { ...show().challenge, status },
-    });
-    installFakes(bodies(d));
-    const detail = await openDetail();
-    const g = await within(detail).findByRole("region", {
-      name: "承認方法の案内",
-      hidden: true,
-    });
-    expect(g.textContent).toContain(
-      "flywheel approve C-1 --workspace '/w/alpha'",
-    );
-    expect(g.textContent).toContain("Claude Code の外の端末");
-    expect(within(detail).queryByRole("button", { name: /承認/ })).toBeNull();
-    cleanup();
-  }
-});
-
 it("AC-105/106/107: 詳細に answer・budget のコマンドが差し込み口のまま出て、端末で実行する旨が添えられる", async () => {
   const cases = [
     {
       d: show({
-        card: { ...show().card, state: "awaiting_human" },
+        card: {
+          ...show().card,
+          next_human_actions: ["answer_question"],
+          state: "awaiting_human",
+        },
         challenge: { ...show().challenge, status: "awaiting_human" },
       }),
       command: "flywheel answer C-1 --workspace '/w/alpha' --answer <回答>",
@@ -258,7 +238,11 @@ it("AC-105/106/107: 詳細に answer・budget のコマンドが差し込み口�
     },
     {
       d: show({
-        card: { ...show().card, modifiers: ["budget_exhausted"] },
+        card: {
+          ...show().card,
+          modifiers: ["budget_exhausted"],
+          next_human_actions: ["increase_budget"],
+        },
       }),
       command: "flywheel budget C-1 --workspace '/w/alpha' --impl-usd <額>",
       guide: "budget",
@@ -275,7 +259,7 @@ it("AC-105/106/107: 詳細に answer・budget のコマンドが差し込み口�
     expect(pre?.textContent).toBe(c.command);
     expect(g.textContent).toContain("Claude Code の外の端末");
     expect(
-      within(detail).queryByRole("button", { name: /回答|予算|額/ }),
+      within(detail).queryByRole("button", { name: /回答|予算|額|承認/ }),
     ).toBeNull();
     cleanup();
   }
@@ -317,25 +301,29 @@ it("AC-113: 承認と差し戻しのそれぞれの記録が詳細に出る", as
   expect(items[1]).toContain("approved");
 });
 
-it("AC-105/106: answer・budget の案内は差し込み口 <回答>・<額> のまま", () => {
-  const a = guidesFor("C-1", "/w/a", "awaiting_human", []);
+it("AC-105/106: answer・budget の案内は差し込み口 <回答>・<額> のまま、コードで決まる", () => {
+  const a = guidesFor("C-1", "/w/a", ["answer_question"]);
   expect(a.map((g) => g.command)).toEqual([
     "flywheel answer C-1 --workspace '/w/a' --answer <回答>",
   ]);
-  const b = guidesFor("C-1", "/w/a", "in_progress", ["budget_exhausted"]);
+  const b = guidesFor("C-1", "/w/a", ["increase_budget"]);
   expect(b.map((g) => g.command)).toEqual([
     "flywheel budget C-1 --workspace '/w/a' --impl-usd <額>",
   ]);
-  expect(guidesFor("C-1", "/w/a", "in_progress", [])).toEqual([]);
+  expect(guidesFor("C-1", "/w/a", [])).toEqual([]);
 });
 
 it("AC-108: <パス> は単一引用符で囲み、中の単一引用符は '\\'' にする", () => {
   expect(shellQuote("/a b/c")).toBe("'/a b/c'");
   expect(shellQuote('/it\'s "x"')).toBe("'/it'\\''s \"x\"'");
-  const [d] = guidesFor("C-1", "/tmp/a$$b$&", "awaiting_plan_approval", []);
-  expect(d?.command).toBe("flywheel approve C-1 --workspace '/tmp/a$$b$&'");
-  const [g] = guidesFor("C-1", "/it's here", "awaiting_plan_approval", []);
-  expect(g?.command).toBe("flywheel approve C-1 --workspace '/it'\\''s here'");
+  const [d] = guidesFor("C-1", "/tmp/a$$b$&", ["approve_completion"]);
+  expect(d?.command).toBe(
+    "flywheel reject C-1 --workspace '/tmp/a$$b$&' --reason <理由>",
+  );
+  const [g] = guidesFor("C-1", "/it's here", ["approve_plan"]);
+  expect(g?.command).toBe(
+    "flywheel reject C-1 --workspace '/it'\\''s here' --reason <理由>",
+  );
 });
 
 it("T12: 詳細を開いても fetch は GET だけ、form 要素なし", async () => {

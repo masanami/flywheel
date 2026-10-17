@@ -48,3 +48,16 @@ describe("読み取り（types.gen.ts の形）", () => {
     expect(await codeOf(api.status("nope"))).toBe("not_found");
   });
 });
+
+describe("承認（偽の ① ②）", () => {
+  it("完了確認待ちの ① は release の head を返し、② は版が違えば conflict、合えば進める", async () => {
+    const s = await api.approvalSummary("alpha", "C-7");
+    expect(s.approval.kind).toBe("completion");
+    expect(s.approval.release_held).toBe(true);
+    expect(
+      await codeOf(api.approve("alpha", "C-7", s.approval.version - 1)),
+    ).toBe("conflict");
+    const r = await api.approve("alpha", "C-7", s.approval.version);
+    expect(r.challenge.status).toBe("done");
+  });
+});
