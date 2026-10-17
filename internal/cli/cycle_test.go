@@ -696,3 +696,38 @@ func TestCycle_RunningCycleDoesNotBlockClassifyAutoByID(t *testing.T) {
 		}
 	}
 }
+
+// AC-177b: --json を付けない cycle は、周の開始の直後に 1 行 `周 <ID> を開始した` を最初に書く。
+func TestCycle_Text_StartLineIsWrittenFirst(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+
+	out := runText(t, ws, "cycle")
+
+	first := strings.SplitN(out, "\n", 2)[0]
+	if first != "周 Y-1 を開始した" {
+		t.Errorf("first line = %q", first)
+	}
+}
+
+// AC-177b: --json の出力は開始の行を含まない単一の文書のまま。
+func TestCycle_JSON_HasNoStartLine(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"cycle", "--json", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	if code != 0 || strings.Contains(stdout.String(), "を開始した") || !strings.HasPrefix(stdout.String(), "{") {
+		t.Errorf("exit=%d stdout=%q", code, stdout.String())
+	}
+}
+
+// AC-177b: BeginCycle より前に失敗したときは開始の行を書かない。
+func TestCycle_Text_NoStartLineWhenFailingBeforeBeginCycle(t *testing.T) {
+	ws := setupJ2Workspace(t)
+	emptyPATH(t)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"cycle", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	if code == 0 || stdout.Len() != 0 {
+		t.Errorf("exit=%d stdout=%q", code, stdout.String())
+	}
+}

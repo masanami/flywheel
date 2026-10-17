@@ -74,6 +74,8 @@ type CycleRunInput struct {
 	Checks UpstreamCheckSource
 	// Predictor は衝突の予測の口の起動（nil なら予測の口を呼べない。RunDelegation と同じ）。
 	Predictor ConflictPredictor
+	// OnBegin が非 nil なら、周の開始（BeginCycle の成功）の直後、段を始める前に周の ID で呼ぶ。
+	OnBegin func(cycleID string)
 }
 
 // CyclePhaseResult は 1 つの段の結果（§IF / API「cycle の JSON 出力」の phases の
@@ -140,6 +142,9 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 		return nil, err
 	}
 	stopHeartbeat := s.KeepCycleLock(ctx, cyc.ID)
+	if in.OnBegin != nil {
+		in.OnBegin(cyc.ID)
+	}
 
 	jc := NewJudgmentCycle(cyc.ID)
 	phases, runErr := s.runCyclePhases(ctx, in, cyc.ID, jc)

@@ -1,10 +1,16 @@
 package server
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
+	"time"
+	"unicode/utf8"
 
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/view"
@@ -17,27 +23,103 @@ import (
 // cycleTriggerUI は UI から起動した周の契機。
 const cycleTriggerUI = "ui"
 
-// cycleLauncher は workspacePath のワークスペースで 1 周を別プロセスとして起動し、
-// 終了を待たずに返す。起動できなければエラー。
+// cycleLauncher は workspacePath のワークスペースで 1 周を別プロセスとして起動し、周の開始の合図
+// （子の標準出力の最初の 1 行）か子の終了か待ち時間の経過まで待って返す。合図の前に子が終了した
+// とき、または起動できなかったときはエラー（子の終了コードと標準エラーの末尾を含む）。
 type cycleLauncher func(workspacePath string) error
 
+const (
+	// cycleSignalWait は周の開始の合図を待つ最大の時間。
+	cycleSignalWait = 3 * time.Second
+	// cycleStderrTail はエラーの message に入れる子の標準エラーの末尾の最大バイト数。
+	cycleStderrTail = 2048
+)
+
+// signalWriter は最初の改行までに書かれた行を合図として 1 度だけ通知し、以後は読み捨てる Writer。
+type signalWriter struct {
+	once   sync.Once
+	signal chan struct{}
+	seen   bool
+}
+
+func (w *signalWriter) Write(p []byte) (int, error) {
+	if !w.seen && bytes.IndexByte(p, '\n') >= 0 {
+		w.seen = true
+		w.once.Do(func() { close(w.signal) })
+	}
+	return len(p), nil
+}
+
+// tailWriter は書かれたバイト列の末尾 limit バイトだけを保持する Writer（読み捨てを兼ねる）。
+type tailWriter struct {
+	mu    sync.Mutex
+	limit int
+	buf   []byte
+}
+
+func (w *tailWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, p...)
+	if len(w.buf) > w.limit {
+		w.buf = append([]byte(nil), w.buf[len(w.buf)-w.limit:]...)
+	}
+	return len(p), nil
+}
+
+// String は保持した末尾を、UTF-8 の文字の途中から始まらないよう先頭を詰めて返す。
+func (w *tailWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	b := w.buf
+	for len(b) > 0 && !utf8.RuneStart(b[0]) {
+		b = b[1:]
+	}
+	return string(b)
+}
+
 // execLauncher は executable が返す実行ファイルを `cycle --trigger ui --workspace <path>` で起動する。
-// 標準入出力は捨て、goroutine で Wait して回収する。server の終了で子を止めないよう、
-// 子は別のセッションにする（端末の割り込みや親のプロセスグループへのシグナルを受けない）。
+// 子の標準出力・標準エラーは合図か終了までだけ見て、その後は読み捨てる（記録は残さない）。
+// server の終了で子を止めないよう、子は別のセッションにする。
 func execLauncher(executable func() (string, error)) cycleLauncher {
 	return func(workspacePath string) error {
 		exe, err := executable()
 		if err != nil {
-			return err
+			return fmt.Errorf("サイクルを起動できない: %w", err)
 		}
 		cmd := exec.Command(exe, "cycle", "--trigger", cycleTriggerUI, "--workspace", workspacePath)
 		cmd.Dir = workspacePath
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		out := &signalWriter{signal: make(chan struct{})}
+		errTail := &tailWriter{limit: cycleStderrTail}
+		cmd.Stdout, cmd.Stderr = out, errTail
 		if err := cmd.Start(); err != nil {
-			return err
+			return fmt.Errorf("サイクルを起動できない: %w", err)
 		}
-		go func() { _ = cmd.Wait() }()
-		return nil
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+
+		timer := time.NewTimer(cycleSignalWait)
+		defer timer.Stop()
+		select {
+		case <-out.signal:
+			return nil
+		case werr := <-done:
+			// Wait は出力の複写の終了後に返るので、合図が先に届いていればここで見える。
+			select {
+			case <-out.signal:
+				return nil
+			default:
+			}
+			code := 0
+			var ee *exec.ExitError
+			if errors.As(werr, &ee) {
+				code = ee.ExitCode()
+			}
+			return fmt.Errorf("周の開始の前にサイクルが終了した（終了コード %d）: %s", code, errTail.String())
+		case <-timer.C:
+			return nil // 合図も終了も無い。子は止めない（Wait は goroutine が回収する）。
+		}
 	}
 }
 
@@ -93,7 +175,7 @@ func cycleStartHandler(fleet *Fleet, launch cycleLauncher, w http.ResponseWriter
 		return
 	}
 	if err := launch(path); err != nil {
-		writeError(w, http.StatusInternalServerError, CodeInternalError, "サイクルを起動できない: "+err.Error())
+		writeError(w, http.StatusInternalServerError, CodeInternalError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, view.CycleStarted{Started: true})
