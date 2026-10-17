@@ -1,9 +1,77 @@
 import { useContext, useEffect, useRef, useState } from "react";
-import { DetailSections, type Loaded, load } from "../detail.tsx";
+import { api } from "../api/client.ts";
+import type {
+  Activity,
+  RunReport,
+  ShowCardResponse,
+} from "../api/types.gen.ts";
+import { STATE_LABELS, label } from "../labels.ts";
 import { RefreshKeyContext } from "../nav.tsx";
 import { ApprovalGuide } from "./ApprovalGuide.tsx";
 import { CardFields } from "./CardFields.tsx";
+import { ClampedText } from "./ClampedText.tsx";
 import type { Challenge } from "./types.ts";
+
+export interface Loaded {
+  show: ShowCardResponse;
+  activities: Activity[];
+  reports: Record<string, RunReport>;
+}
+
+const byTimeAsc = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+export async function load(workspace: string, id: string): Promise<Loaded> {
+  const [show, log] = await Promise.all([
+    api.challenge(workspace, id),
+    api.log(workspace, id),
+  ]);
+  const reports: Record<string, RunReport> = {};
+  await Promise.all(
+    show.runs.map(async (r) => {
+      try {
+        reports[r.id] = (await api.runReport(workspace, r.id)).report;
+      } catch {
+        // report の無い run は、assumptions と unverified を出さないだけにする
+      }
+    }),
+  );
+  return { show, activities: log.activities, reports };
+}
+
+function List({ items }: { items: string[] }) {
+  return (
+    <ul>
+      {items.map((x, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: 同じ文言が並びうる固定の一覧
+        <li key={i}>
+          <ClampedText text={x} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Section({
+  title,
+  count,
+  children,
+}: {
+  title: string;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <section aria-label={title}>
+      <h3>
+        {title}（{count}）
+      </h3>
+      {count === 0 ? <p>なし</p> : children}
+    </section>
+  );
+}
+
+// 保留の原因の run。詳細の API の保留（Hold）には run の ID が無いため、推測で作らず「不明」と出す。
+const CAUSE_RUN_UNKNOWN = "不明（この API は保留の原因の run を返さない）";
 
 type CardDetailModalProps = {
   challenge: Challenge;
@@ -94,7 +162,7 @@ export function CardDetailModal({
       >
         <div className="card-detail-modal-header">
           <h2 id="card-detail-modal-title" className="card-detail-modal-title">
-            {challenge.title}
+            {challenge.headline ?? challenge.title}
           </h2>
           <button type="button" className="modal-close-button" onClick={close}>
             閉じる
@@ -118,8 +186,10 @@ export function CardDetailModal({
           <dd>{challenge.priority ?? "-"}</dd>
           <dt>要対応</dt>
           <dd>{challenge.needsHuman ? "はい" : "いいえ"}</dd>
-          <dt>要約</dt>
-          <dd>{challenge.summary ?? "-"}</dd>
+          <dt>見出し</dt>
+          <dd data-testid="detail-headline">
+            {challenge.headline ?? challenge.title}
+          </dd>
         </dl>
 
         <section className="card-detail-ledger-join" data-testid="ledger-join">
@@ -159,5 +229,118 @@ export function CardDetailModal({
         />
       </div>
     </dialog>
+  );
+}
+
+// 計画・承認の記録・保留・不可逆操作・run・作業ログ。カードの詳細のモーダルに出す。
+export function DetailSections({ l }: { l: Loaded }) {
+  const { show, activities, reports } = l;
+  const plans = [...show.plans].sort((a, b) => a.version - b.version);
+  const runs = [...show.runs].sort((a, b) =>
+    byTimeAsc(b.started_at, a.started_at),
+  );
+  const acts = [...activities].sort((a, b) => byTimeAsc(a.at, b.at));
+  return (
+    <>
+      <Section title="計画" count={plans.length}>
+        {plans.map((p) => (
+          <article key={p.version} data-plan={p.version}>
+            <h4>
+              v{p.version}（{p.created_at}）
+            </h4>
+            <pre style={{ whiteSpace: "pre-wrap" }}>{p.body}</pre>
+          </article>
+        ))}
+      </Section>
+      <Section title="承認と差し戻しの記録" count={show.approvals.length}>
+        <ul>
+          {show.approvals.map((a) => (
+            <li
+              key={`${a.kind}/${a.target_version}/${a.decided_at}/${a.operation_id ?? ""}`}
+            >
+              {a.decided_at} {a.kind} v{a.target_version}: {a.decision}（
+              {a.actor}）
+              {a.reason ? (
+                <>
+                  {" "}
+                  <ClampedText text={a.reason} />
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </Section>
+      <Section title="保留の問いと回答" count={show.holds.length}>
+        <ul>
+          {show.holds.map((h) => (
+            <li
+              key={h.raised_at}
+              data-hold={h.answer === null ? "open" : "answered"}
+            >
+              <div>
+                問い（{h.raised_at}）: <ClampedText text={h.question} />
+              </div>
+              <div>
+                回答:{" "}
+                {h.answer === null ? "未回答" : <ClampedText text={h.answer} />}
+              </div>
+              {h.answer === null ? (
+                <>
+                  <div>保留に入った日時: {h.raised_at}</div>
+                  <div>
+                    入る直前の状態:{" "}
+                    {h.from_status_label || label(STATE_LABELS, h.from_status)}
+                  </div>
+                  <div>原因の run: {CAUSE_RUN_UNKNOWN}</div>
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </Section>
+      <Section title="不可逆操作" count={show.operations.length}>
+        <ul>
+          {show.operations.map((o) => (
+            <li key={o.id}>
+              {o.kind} / {o.state}: <ClampedText text={o.summary} />
+            </li>
+          ))}
+        </ul>
+      </Section>
+      <Section title="run" count={runs.length}>
+        <ul>
+          {runs.map((r) => {
+            const rep = reports[r.id];
+            return (
+              <li key={r.id} data-run={r.id}>
+                <code>{r.id}</code> {r.kind} ・ {r.started_at}
+                {r.result ? ` ・ ${r.result}` : ""}
+                {rep && rep.assumptions.length > 0 ? (
+                  <div>
+                    仮定:
+                    <List items={rep.assumptions} />
+                  </div>
+                ) : null}
+                {rep && rep.unverified.length > 0 ? (
+                  <div>
+                    未検証:
+                    <List items={rep.unverified} />
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </Section>
+      <Section title="作業ログ" count={acts.length}>
+        <ol>
+          {acts.map((a) => (
+            <li key={`${a.at}/${a.entity}/${a.entity_id}/${a.action}`}>
+              {a.at} {a.actor} {a.action} {a.entity} {a.entity_id}
+            </li>
+          ))}
+        </ol>
+      </Section>
+    </>
   );
 }

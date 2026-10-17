@@ -1,20 +1,18 @@
-import { type FieldScope, cardFieldItems } from "./card-fields.ts";
+import { cardFieldItems } from "./card-fields.ts";
 import type { Challenge } from "./types.ts";
 
 // カードの 4 項目（一言で・位置づけ・いまの状態・次に人間がすること）。値が無い項目は出さない。
-// 一覧の面（scope="face"）には「一言で」だけを出し、詳細（scope="all"）に 4 項目をそろえる。
+// 詳細のモーダルだけに出す（カードの面には出さない。M4H23）。
 export function CardFields({
   challenge,
   className,
   testId,
-  scope = "all",
 }: {
   challenge: Challenge;
   className: string;
   testId: string;
-  scope?: FieldScope;
 }) {
-  const items = cardFieldItems(challenge, scope);
+  const items = cardFieldItems(challenge);
   if (items.length === 0) {
     return null;
   }

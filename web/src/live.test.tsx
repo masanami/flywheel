@@ -20,7 +20,7 @@ async function mounted() {
   return requests;
 }
 
-it("AC-87: workspace_changed は該当 ws の status/challenges と fleet の集約だけを取り直す", async () => {
+it("AC-87/204/206: workspace_changed は該当 ws の status/challenges と fleet の needs-human だけを取り直し、questions は要求しない", async () => {
   const requests = await mounted();
   requests.length = 0;
   act(() =>
@@ -29,14 +29,13 @@ it("AC-87: workspace_changed は該当 ws の status/challenges と fleet の集
       workspace: "alpha",
     }),
   );
-  await waitFor(() => expect(requests).toHaveLength(5));
+  await waitFor(() => expect(requests).toHaveLength(4));
   expect(requests.map((r) => r.url).sort()).toEqual(
     [
       "/api/v1/workspaces",
       "/api/v1/workspaces/alpha/status",
       "/api/v1/workspaces/alpha/challenges",
       "/api/v1/needs-human",
-      "/api/v1/questions",
     ].sort(),
   );
   expect(requests.some((r) => r.url.includes("/beta/"))).toBe(false);
@@ -84,7 +83,7 @@ it("AC-90/91: 切断後に再接続を試み、つながったら全ワークス
   expect(FakeEventSource.instances.length).toBe(n + 1);
   requests.length = 0;
   act(() => FakeEventSource.latest.open());
-  await waitFor(() => expect(requests.length).toBe(7));
+  await waitFor(() => expect(requests.length).toBe(6));
   expect(requests.map((r) => r.url)).toEqual(
     expect.arrayContaining([
       "/api/v1/workspaces",
@@ -93,7 +92,6 @@ it("AC-90/91: 切断後に再接続を試み、つながったら全ワークス
       "/api/v1/workspaces/beta/status",
       "/api/v1/workspaces/beta/challenges",
       "/api/v1/needs-human",
-      "/api/v1/questions",
     ]),
   );
   expect(screen.getByRole("status")).toHaveTextContent("接続中");
@@ -101,7 +99,7 @@ it("AC-90/91: 切断後に再接続を試み、つながったら全ワークス
 
 it("fleet の集約の取得に失敗しても、一覧と各ワークスペースの表示は残る", async () => {
   const b = Object.fromEntries(
-    Object.entries(fixtures()).filter(([k]) => k !== "/api/v1/questions"),
+    Object.entries(fixtures()).filter(([k]) => k !== "/api/v1/needs-human"),
   );
   installFakes(b);
   render(<App />);

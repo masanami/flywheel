@@ -91,27 +91,8 @@ function bodies(
   for (const w of wsList.workspaces) if (w.name === "alpha") w.path = wsPath;
   return {
     ...f,
-    "/api/v1/questions": {
-      questions: [
-        {
-          challenge_id: "C-2",
-          from_status: "in_progress",
-          question: "二番目に来るべきでない問い",
-          raised_at: "2026-02-02T00:00:00Z",
-          run_id: null,
-          title: "後の課題",
-          workspace: "beta",
-        },
-        {
-          challenge_id: "C-1",
-          from_status: "in_progress",
-          question: "最初の問い",
-          raised_at: "2026-01-01T00:00:00Z",
-          run_id: null,
-          title: "先の課題",
-          workspace: "alpha",
-        },
-      ],
+    "/api/v1/workspaces/alpha/challenges": {
+      challenges: [{ ...detail.challenge, card: detail.card }],
     },
     "/api/v1/workspaces/alpha/challenges/C-1": detail,
     "/api/v1/workspaces/alpha/log?challenge=C-1": { activities: [] },
@@ -122,31 +103,10 @@ function bodies(
 async function openDetail() {
   render(<App />);
   act(() => FakeEventSource.latest.open());
-  fireEvent.click(await screen.findByRole("button", { name: "問いの一覧" }));
-  const items = await screen.findAllByTestId("question");
-  fireEvent.click(
-    within(items[1] as HTMLElement).getByRole("button", {
-      name: "課題の詳細を開く",
-    }),
-  );
-  return await screen.findByRole("region", { name: "課題の詳細" });
+  const card = await screen.findByTestId("card-C-1");
+  fireEvent.click(within(card).getByRole("button"));
+  return await screen.findByTestId("card-detail-content");
 }
-
-it("AC-110/111: 問いの一覧は返ってきた順に出し、要素から詳細を開ける", async () => {
-  installFakes(bodies(show()));
-  const detail = await openDetail();
-  const items = screen.queryAllByTestId("question");
-  expect(items.length).toBe(0); // 詳細を開くと一覧から切り替わる
-  await waitFor(() =>
-    expect(within(detail).getByText("タイトル")).toBeTruthy(),
-  );
-  fireEvent.click(within(detail).getByRole("button", { name: "一覧へ戻る" }));
-  const back = await screen.findAllByTestId("question");
-  expect(back.map((i) => i.textContent)).toEqual([
-    expect.stringContaining("二番目に来るべきでない問い"),
-    expect.stringContaining("最初の問い"),
-  ]);
-});
 
 it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古い順、report の一覧", async () => {
   const d = show({
@@ -222,8 +182,12 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
   expect(text).toContain("不可逆の要約");
   expect(text.indexOf("run-new")).toBeLessThan(text.indexOf("run-old"));
   expect(text).toContain("未検証B");
-  const log = within(within(detail).getByRole("region", { name: "作業ログ" }));
-  const lis = log.getAllByRole("listitem").map((l) => l.textContent ?? "");
+  const log = within(
+    within(detail).getByRole("region", { name: "作業ログ", hidden: true }),
+  );
+  const lis = log
+    .getAllByRole("listitem", { hidden: true })
+    .map((l) => l.textContent ?? "");
   expect(lis[0]).toContain("先");
   expect(lis[1]).toContain("後");
   // 空の assumptions・unverified の run には欄を出さない
@@ -271,6 +235,7 @@ it("AC-104/107: 計画承認待ち・完了確認待ちには approve の案内�
     const detail = await openDetail();
     const g = await within(detail).findByRole("region", {
       name: "承認方法の案内",
+      hidden: true,
     });
     expect(g.textContent).toContain(
       "flywheel approve C-1 --workspace '/w/alpha'",
@@ -304,6 +269,7 @@ it("AC-105/106/107: 詳細に answer・budget のコマンドが差し込み口�
     const detail = await openDetail();
     const g = await within(detail).findByRole("region", {
       name: "承認方法の案内",
+      hidden: true,
     });
     const pre = g.querySelector(`[data-guide="${c.guide}"]`);
     expect(pre?.textContent).toBe(c.command);
@@ -340,9 +306,10 @@ it("AC-113: 承認と差し戻しのそれぞれの記録が詳細に出る", as
   const detail = await openDetail();
   const rec = await within(detail).findByRole("region", {
     name: "承認と差し戻しの記録",
+    hidden: true,
   });
   const items = within(rec)
-    .getAllByRole("listitem")
+    .getAllByRole("listitem", { hidden: true })
     .map((l) => l.textContent ?? "");
   expect(items).toHaveLength(2);
   expect(items[0]).toContain("rejected");
@@ -374,7 +341,7 @@ it("AC-108: <パス> は単一引用符で囲み、中の単一引用符は '\\'
 it("T12: 詳細を開いても fetch は GET だけ、form 要素なし", async () => {
   const { requests } = installFakes(bodies(show()));
   const detail = await openDetail();
-  await within(detail).findByText("タイトル");
+  await within(detail).findByText("計画（0）");
   expect(requests.length).toBeGreaterThan(0);
   expect(requests.every((r) => r.method === "GET")).toBe(true);
   expect(document.querySelector("form")).toBeNull();

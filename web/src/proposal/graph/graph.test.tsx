@@ -97,7 +97,6 @@ async function liveOf(): Promise<LiveState> {
     workspaces,
     data,
     needsHuman: null,
-    questions: null,
     loadError: null,
     fleetError: null,
   };

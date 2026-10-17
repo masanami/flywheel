@@ -83,7 +83,7 @@ it("既定の画面はボード: ワークスペースがエージェントの�
   const alpha = screen.getByRole("region", { name: "alpha の列" });
   expect(screen.getByRole("region", { name: "beta の列" })).toBeInTheDocument();
   expect(within(alpha).getByText("題名C-1")).toBeInTheDocument();
-  expect(within(alpha).getByText("題名C-5")).toBeInTheDocument();
+  expect(within(alpha).getByText("一言の要約")).toBeInTheDocument();
   expect(within(alpha).getByText("P0")).toBeInTheDocument();
   // 完了は既定で隠れ、「完了を表示」で出る
   expect(within(alpha).queryByText("題名C-4")).toBeNull();
@@ -91,17 +91,21 @@ it("既定の画面はボード: ワークスペースがエージェントの�
   expect(within(alpha).getByText("題名C-4")).toBeInTheDocument();
 });
 
-it("承認待ちは「🔔 承認待ち」の見出しの下に先頭で出て、承認の代わりに端末のコマンドを案内する", async () => {
+it("承認待ちは「🔔 承認待ち」の見出しの下に先頭で出て、承認の代わりの端末のコマンドは詳細に出す", async () => {
   await mount();
   const alpha = screen.getByRole("region", { name: "alpha の列" });
   expect(within(alpha).getByText("🔔 承認待ち")).toBeInTheDocument();
   const card = within(alpha).getByTestId("card-C-2");
   expect(card).toHaveAttribute("data-needs-human", "true");
+  // 面にはコマンドを出さない（M4H23）
+  expect(card.textContent).not.toContain("flywheel approve");
+  fireEvent.click(within(card).getByRole("button"));
+  const modal = await screen.findByTestId("card-detail-content");
   expect(
-    within(card).getByText(/flywheel approve C-2 --workspace '\/w\/alpha'/),
+    within(modal).getByText(/flywheel approve C-2 --workspace '\/w\/alpha'/),
   ).toBeInTheDocument();
   expect(
-    within(card).queryByRole("button", {
+    within(modal).queryByRole("button", {
       name: /^(計画を承認|完了を承認|承認する)$/,
     }),
   ).toBeNull();
@@ -163,28 +167,6 @@ it("カードを開くと詳細のモーダルに、API から読んだ計画と
   expect(requests.every((r) => r.method === "GET")).toBe(true);
   fireEvent.click(within(modal).getByText("閉じる"));
   expect(screen.queryByTestId("card-detail-content")).toBeNull();
-});
-
-it("カードの面には「一言で」だけを出し、位置づけ・いまの状態・次に人間がすることは詳細のモーダルに出す", async () => {
-  await mount();
-  const alpha = screen.getByRole("region", { name: "alpha の列" });
-  const card = within(alpha).getByTestId("card-C-5");
-  const face = within(card).getByTestId("task-card-fields");
-  expect(within(face).getByText("一言で")).toBeInTheDocument();
-  expect(within(face).getByText("一言の要約")).toBeInTheDocument();
-  expect(card.textContent).not.toContain("位置づけ");
-  expect(card.textContent).not.toContain("いまの状態");
-  expect(card.textContent).not.toContain("次に人間がすること");
-  // 識別子（ID・優先度・状態のバッジ）は面に残る
-  expect(within(card).getByText("C-5")).toBeInTheDocument();
-  expect(within(card).getByText("P0")).toBeInTheDocument();
-  // カード全体のクリックで開く詳細には 4 項目がそろう
-  fireEvent.click(within(card).getByText("題名C-5"));
-  const modal = await screen.findByTestId("card-detail-content");
-  const fields = within(modal).getByTestId("card-detail-card-fields");
-  for (const l of ["一言で", "位置づけ", "いまの状態", "次に人間がすること"])
-    expect(within(fields).getByText(l)).toBeInTheDocument();
-  expect(within(fields).getByText("位置づけの文")).toBeInTheDocument();
 });
 
 it("ok でないワークスペースの列には、状態とエラーが出る", async () => {

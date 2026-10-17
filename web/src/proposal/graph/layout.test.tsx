@@ -25,7 +25,6 @@ async function liveOf(): Promise<LiveState> {
     workspaces,
     data,
     needsHuman: await api.needsHuman(),
-    questions: null,
     loadError: null,
     fleetError: null,
   };

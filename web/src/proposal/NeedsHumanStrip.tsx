@@ -72,7 +72,7 @@ export function NeedsHumanStrip({ live }: { live: LiveState }) {
         })}
       </ul>
       {go ? (
-        <button type="button" onClick={() => go("needs-human")}>
+        <button type="button" onClick={() => go("board")}>
           一覧で見る
         </button>
       ) : null}
