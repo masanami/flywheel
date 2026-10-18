@@ -156,6 +156,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3BudgetShapes(t, &doc)
 	addM3WaitingExternalShapes(t, &doc)
 	addM4HoldRunIDShape(t, &doc)
+	addM4RelayEvidenceShape(t, &doc)
 	return doc
 }
 
@@ -837,4 +838,34 @@ func addM4HoldRunIDShape(t *testing.T, doc *documentedJSON) {
 		t.Fatal("documented shape of hold not found")
 	}
 	doc.entity["hold"]["run_id"] = true
+}
+
+// addM4RelayEvidenceShape は `show --json` の承認・保留の要素に足した会話の手がかりのキー
+// （AC-252。M4P24）を doc へ合成する。m4-ui-server.md が「S3 で `show --json` に足すキー
+// （AC-252）」を既存の出力の基準から除くと書いていることを確かめた上で足す。
+func addM4RelayEvidenceShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4-ui-server.md"))
+	if err != nil {
+		t.Fatalf("read m4 spec: %v", err)
+	}
+	documented := false
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "S3 で `show --json` に足すキー（AC-252") {
+			documented = true
+			break
+		}
+	}
+	if !documented {
+		t.Fatal("m4 spec does not document the AC-252 keys of show --json")
+	}
+	if len(doc.entity["approval"]) == 0 || len(doc.entity["hold"]) == 0 {
+		t.Fatal("documented shape of approval/hold not found")
+	}
+	for _, k := range []string{"relay_session", "relay_quote"} {
+		doc.entity["approval"][k] = true
+		doc.entity["hold"][k] = true
+	}
+	doc.entity["hold"]["answered_channel"] = true
+	doc.entity["hold"]["answered_verification"] = true
 }

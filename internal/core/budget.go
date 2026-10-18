@@ -432,6 +432,7 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 		}
 		out = Approval{Kind: ApprovalKindBudget, Decision: ApprovalDecisionApproved, TargetVersion: plan.Version,
 			Actor: att.Actor(), Channel: string(att.Channel()), Verification: string(att.Verification()), DecidedAt: now}
+		out.RelaySession, out.RelayQuote = att.relayPtrs()
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {

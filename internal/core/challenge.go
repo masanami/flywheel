@@ -72,6 +72,10 @@ type Approval struct {
 	Verification string
 	Reason       *string
 	DecidedAt    time.Time
+	// RelaySession・RelayQuote は方式 relayed の記録の会話の手がかり（M4P24）。
+	// relayed 以外は nil。
+	RelaySession *string
+	RelayQuote   *string
 }
 
 // Hold は保留の 1 件（§データモデル hold）。#9 は書き込まない（読み取りだけ実装する）。
@@ -83,6 +87,13 @@ type Hold struct {
 	AnsweredAt *time.Time
 	AnsweredBy *string
 	RunID      *string // 保留の原因の run の ID（"R-<n>"）。無ければ nil
+	// AnsweredChannel・AnsweredVerification は回答の経路と本人確認の方式。未回答・
+	// 記録の無い既存の行は nil。RelaySession・RelayQuote は方式 relayed の回答の
+	// 会話の手がかり（M4P24）。relayed 以外は nil。
+	AnsweredChannel      *string
+	AnsweredVerification *string
+	RelaySession         *string
+	RelayQuote           *string
 }
 
 // IrreversibleOperation は不可逆操作の 1 件（§データモデル operation。core 内部の
@@ -234,7 +245,7 @@ func loadPlans(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Plan, erro
 
 func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approval, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at
+		`SELECT operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote
 		 FROM approval WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -248,10 +259,12 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 			planVersion    sql.NullInt64
 			kind, decision string
 			reason         sql.NullString
+			relaySession   sql.NullString
+			relayQuote     sql.NullString
 			decidedAtStr   string
 			a              Approval
 		)
-		if err := rows.Scan(&opID, &kind, &decision, &a.TargetVersion, &planVersion, &a.Actor, &a.Channel, &a.Verification, &reason, &decidedAtStr); err != nil {
+		if err := rows.Scan(&opID, &kind, &decision, &a.TargetVersion, &planVersion, &a.Actor, &a.Channel, &a.Verification, &reason, &decidedAtStr, &relaySession, &relayQuote); err != nil {
 			return nil, err
 		}
 		a.Kind = ApprovalKind(kind)
@@ -268,6 +281,8 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 			r := reason.String
 			a.Reason = &r
 		}
+		a.RelaySession = nullStr(relaySession)
+		a.RelayQuote = nullStr(relayQuote)
 		decidedAt, err := parseTimestamp(decidedAtStr)
 		if err != nil {
 			return nil, err
@@ -283,7 +298,8 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 
 func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT question, from_status, raised_at, answer, answered_at, answered_by, run_id
+		`SELECT question, from_status, raised_at, answer, answered_at, answered_by, run_id,
+		        answered_channel, answered_verification, relay_session, relay_quote
 		 FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -297,9 +313,11 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			raisedAtStr                       string
 			answer, answeredAtStr, answeredBy sql.NullString
 			runID                             sql.NullInt64
+			ansChannel, ansVerif, relSess     sql.NullString
+			relQuote                          sql.NullString
 			h                                 Hold
 		)
-		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID); err != nil {
+		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote); err != nil {
 			return nil, err
 		}
 		if runID.Valid {
@@ -327,6 +345,10 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			v := answeredBy.String
 			h.AnsweredBy = &v
 		}
+		h.AnsweredChannel = nullStr(ansChannel)
+		h.AnsweredVerification = nullStr(ansVerif)
+		h.RelaySession = nullStr(relSess)
+		h.RelayQuote = nullStr(relQuote)
 		holds = append(holds, h)
 	}
 	if err := rows.Err(); err != nil {
@@ -763,4 +785,13 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 		return nil, err
 	}
 	return result, nil
+}
+
+// nullStr は NULL 可の文字列列を *string へ写す（NULL は nil）。
+func nullStr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	s := v.String
+	return &s
 }

@@ -225,6 +225,10 @@ export function seed(): Record<string, MockWorkspace> {
           answer: null,
           answered_at: null,
           answered_by: null,
+          answered_channel: null,
+          answered_verification: null,
+          relay_quote: null,
+          relay_session: null,
           from_status: "in_progress",
           from_status_label: "着手中",
           question:

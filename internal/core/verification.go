@@ -216,3 +216,12 @@ func Verify(ch Channel, verifier Verifier, summary, expectedID string) (Attestat
 	}
 	return Attestation{actor: actor, channel: ch, verification: method, target: expectedID, evidence: evidence}, nil
 }
+
+// relayPtrs は返す Approval・Hold に載せる会話の手がかり（relayed のときだけ非 nil）。
+func (a Attestation) relayPtrs() (session *string, quote *string) {
+	if a.hasEvidence() {
+		s, q := a.evidence.Session, a.evidence.Quote
+		return &s, &q
+	}
+	return nil, nil
+}

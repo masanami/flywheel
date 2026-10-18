@@ -305,3 +305,83 @@ func TestExecute_RelayedAttestationWithoutEvidenceIsRejectedAndWritesNothing(t *
 		t.Errorf("approval rows = %d, want 0", n)
 	}
 }
+
+// AC-252: GetChallenge（show --json の元）が承認・保留の会話の手がかりを返す。
+// relayed は両方に値、tty_confirm・未回答は nil。
+func TestGetChallenge_ExposesRelayEvidenceOfApprovalAndHold(t *testing.T) {
+	ctx := context.Background()
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusUnclassified)
+	if _, err := s.HoldChallenge(ctx, ChannelCLI, c.ID, HoldInput{Question: "why?"}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.GetChallenge(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := d.Holds[0]
+	if h.AnsweredChannel != nil || h.AnsweredVerification != nil || h.RelaySession != nil || h.RelayQuote != nil {
+		t.Errorf("unanswered hold = %+v, want all new fields nil", h)
+	}
+	prev, err := s.PrepareAnswer(ctx, c.ID, "because")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, retHold, err := s.ExecuteAnswer(ctx, AnswerRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Answer: "because"}, relayedAttestation(t, c.ID, "sess", "quote"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retHold.AnsweredChannel == nil || *retHold.AnsweredChannel != "cli" || retHold.AnsweredVerification == nil || *retHold.AnsweredVerification != "relayed" ||
+		retHold.RelaySession == nil || *retHold.RelaySession != "sess" || retHold.RelayQuote == nil || *retHold.RelayQuote != "quote" {
+		t.Errorf("returned hold = %+v, want cli/relayed/sess/quote", retHold)
+	}
+	d, err = s.GetChallenge(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h = d.Holds[0]
+	if h.AnsweredChannel == nil || *h.AnsweredChannel != "cli" || h.AnsweredVerification == nil || *h.AnsweredVerification != "relayed" ||
+		h.RelaySession == nil || *h.RelaySession != "sess" || h.RelayQuote == nil || *h.RelayQuote != "quote" {
+		t.Errorf("answered hold = %+v, want cli/relayed/sess/quote", h)
+	}
+
+	// 承認: relayed と tty_confirm の両方。
+	c2 := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	insertPlanRowForTest(t, s, c2.ID, 1, "x")
+	p2, err := s.PrepareApproval(ctx, c2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, retA, err := s.ExecuteApproval(ctx, ApprovalRequest{ChallengeID: c2.ID, ExpectedVersion: p2.Version, Decision: ApprovalDecisionApproved}, relayedAttestation(t, c2.ID, "s9", "q9"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retA.RelaySession == nil || *retA.RelaySession != "s9" || retA.RelayQuote == nil || *retA.RelayQuote != "q9" {
+		t.Errorf("returned approval = %+v, want relay s9/q9", retA)
+	}
+	d2, err := s.GetChallenge(ctx, c2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := d2.Approvals[0]
+	if a.RelaySession == nil || *a.RelaySession != "s9" || a.RelayQuote == nil || *a.RelayQuote != "q9" || a.Verification != "relayed" {
+		t.Errorf("relayed approval = %+v", a)
+	}
+	c3 := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	insertPlanRowForTest(t, s, c3.ID, 1, "x")
+	p3, err := s.PrepareApproval(ctx, c3.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ExecuteApproval(ctx, ApprovalRequest{ChallengeID: c3.ID, ExpectedVersion: p3.Version, Decision: ApprovalDecisionApproved}, verifiedAttestationForTest(t, c3.ID)); err != nil {
+		t.Fatal(err)
+	}
+	d3, err := s.GetChallenge(ctx, c3.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := d3.Approvals[0]; a.RelaySession != nil || a.RelayQuote != nil {
+		t.Errorf("tty approval = %+v, want nil relay fields", a)
+	}
+}
