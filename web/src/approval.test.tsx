@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { ApprovalSummary } from "./api/types.gen.ts";
+import { CONVERSATION_NOTE } from "./guidance.ts";
 import {
   FakeEventSource,
   type FakeResponder,
@@ -337,7 +338,7 @@ it("AC-214: approve_plan には reject の端末のコマンドと対話の案�
   expect(t).toContain(
     "flywheel reject C-1 --workspace '/w/alpha' --reason <理由>",
   );
-  expect(t).toContain("Claude Code との対話で伝えれば");
+  expect(t).toContain(CONVERSATION_NOTE);
   // AC-214a: 計画の承認は画面のボタンで行うので approve のコマンドは出さない
   expect(t).not.toContain("flywheel approve");
 });
@@ -349,7 +350,7 @@ it("AC-215: approve_completion には本番反映を同時に承認する approv
   const t = await guideText(await open());
   expect(t).toContain("flywheel approve C-1 --workspace '/w/alpha'");
   expect(t).toContain("本番反映");
-  expect(t).toContain("Claude Code との対話で伝えれば");
+  expect(t).toContain(CONVERSATION_NOTE);
 });
 
 it("AC-216: approve_operation には approve <OP-ID> のコマンドと対話の案内（ボタンは無い）", async () => {
@@ -357,20 +358,44 @@ it("AC-216: approve_operation には approve <OP-ID> のコマンドと対話の
   const m = await open();
   const t = await guideText(m);
   expect(t).toContain("flywheel approve <OP-ID> --workspace '/w/alpha'");
-  expect(t).toContain("Claude Code との対話で伝えれば");
+  expect(t).toContain(CONVERSATION_NOTE);
   expect(
     within(m).queryByRole("button", { name: /承認/, hidden: true }),
   ).toBeNull();
 });
 
-it.each(["answer_question", "increase_budget"])(
-  "AC-217: %s にも対話の案内が出る",
-  async (code) => {
-    setup("in_progress", [code]);
-    const t = await guideText(await open());
-    expect(t).toContain("Claude Code との対話で伝えれば");
-  },
-);
+// 案内の文言は UI の定数（CONVERSATION_NOTE）。テストは文言を直書きせず、定数の表示で確かめる。
+it("AC-217: 案内の文言の定数は空でなく、5 つの操作それぞれの詳細に定数の文言がそのまま出る", async () => {
+  expect(CONVERSATION_NOTE.trim()).not.toBe("");
+  const cases: [string, string][] = [
+    ["awaiting_plan_approval", "approve_plan"],
+    ["awaiting_completion_approval", "approve_completion"],
+    ["awaiting_human", "answer_question"],
+    ["in_progress", "approve_operation"],
+    ["in_progress", "increase_budget"],
+  ];
+  for (const [state, code] of cases) {
+    cleanup();
+    setup(
+      state,
+      [code],
+      state === "awaiting_plan_approval"
+        ? { [APPROVAL]: summary({ kind: "plan" }) }
+        : state === "awaiting_completion_approval"
+          ? { [APPROVAL]: summary() }
+          : {},
+    );
+    const m = await open();
+    const note = await within(m).findByTestId(
+      "conversation-note",
+      {},
+      {
+        timeout: 3000,
+      },
+    );
+    expect(note.textContent, code).toBe(CONVERSATION_NOTE);
+  }
+});
 
 it.each(["triage", "review_discrepancy", "clear_slot"])(
   "AC-218: %s だけなら対話の案内は出ない",
@@ -378,7 +403,7 @@ it.each(["triage", "review_discrepancy", "clear_slot"])(
     setup("in_progress", [code]);
     const m = await open();
     await within(m).findByText("計画（0）");
-    expect(m.textContent).not.toContain("Claude Code との対話で伝えれば");
+    expect(m.textContent).not.toContain(CONVERSATION_NOTE);
     expect(within(m).queryByTestId("conversation-note")).toBeNull();
   },
 );

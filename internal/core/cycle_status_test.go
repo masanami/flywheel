@@ -205,3 +205,60 @@ func TestReadCycleStatus_LastIsByIDNotByTime(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+// AC-179: ロックが無ければ、終了していない周が（trigger ui の周でも run の周でも）あっても idle。
+func TestReadCycleStatus_NoLockOpenCycleIsIdleForEachTrigger(t *testing.T) {
+	for _, tr := range []string{"ui", "run", "cron", "classify --auto", "plan --auto", "verify --auto"} {
+		t.Run(tr, func(t *testing.T) {
+			s := newStoreForTest(t)
+			seedCycleTrigger(t, s, tr, statusBase, nil, "")
+			got, err := s.ReadCycleStatus(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.State != CycleStateIdle || got.LockHeld {
+				t.Errorf("got %+v, want idle without lock", got)
+			}
+		})
+	}
+}
+
+// AC-180: cycle の周より ID の大きい個別の操作の周（4 つの trigger のそれぞれ。終了したものと
+// 終了していないもの）は、last_started_at・last_ended_at・last_result に影響しない。
+func TestReadCycleStatus_NewerIndividualOpCyclesNeverAffectLast(t *testing.T) {
+	for _, tr := range []string{"run", "classify --auto", "plan --auto", "verify --auto"} {
+		t.Run(tr+"/cycle は終了済み", func(t *testing.T) {
+			s := newStoreForTest(t)
+			cycleStart := statusBase
+			cycleEnd := statusBase.Add(time.Minute)
+			seedCycleTrigger(t, s, "ui", cycleStart, &cycleEnd, CycleResultCompleted)
+			opEnd := statusBase.Add(11 * time.Minute)
+			seedCycleTrigger(t, s, tr, statusBase.Add(10*time.Minute), &opEnd, CycleResultAborted) // 終了した操作の周
+			seedCycleTrigger(t, s, tr, statusBase.Add(20*time.Minute), nil, "")                    // 終了していない操作の周
+			got, err := s.ReadCycleStatus(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.LastStartedAt == nil || !got.LastStartedAt.Equal(cycleStart) ||
+				got.LastEndedAt == nil || !got.LastEndedAt.Equal(cycleEnd) ||
+				got.LastResult == nil || *got.LastResult != CycleResultCompleted {
+				t.Errorf("got %+v", got)
+			}
+		})
+		t.Run(tr+"/cycle は終了していない", func(t *testing.T) {
+			s := newStoreForTest(t)
+			cycleStart := statusBase
+			seedCycleTrigger(t, s, "cron", cycleStart, nil, "")
+			opEnd := statusBase.Add(11 * time.Minute)
+			seedCycleTrigger(t, s, tr, statusBase.Add(10*time.Minute), &opEnd, CycleResultCompleted)
+			seedCycleTrigger(t, s, tr, statusBase.Add(20*time.Minute), nil, "")
+			got, err := s.ReadCycleStatus(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.LastStartedAt == nil || !got.LastStartedAt.Equal(cycleStart) || got.LastEndedAt != nil || got.LastResult != nil {
+				t.Errorf("got %+v", got)
+			}
+		})
+	}
+}

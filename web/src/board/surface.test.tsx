@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
 import { NO_ACTION_LABEL } from "../labels.ts";
+import { POLL_MS, RECONNECT_MS } from "../live/useLive.ts";
 import { FakeEventSource, fixtures, installFakes } from "../testing/fakes.ts";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -253,22 +254,115 @@ it("AC-203: 未回答の保留の詳細に、問いの文・保留に入った�
   );
 });
 
-it("AC-206: UI はどの画面を操作しても GET /api/v1/questions を要求しない", async () => {
-  const { requests } = await mount();
-  fireEvent.click(within(face("C-9")).getByRole("button"));
-  await screen.findByTestId("card-detail-content");
-  act(() =>
-    FakeEventSource.latest.send({
-      type: "workspace_changed",
-      workspace: "alpha",
-    }),
-  );
-  await vi.waitFor(() =>
+it("AC-206: UI は全画面を操作しても（全カードの詳細・全区分の絞り込み・通知・再接続・定期の取り直し）GET /api/v1/questions を要求しない", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const f = bodies();
+    const nhEmpty = {
+      budget_exhausted: [],
+      challenges: [],
+      discrepancies: [],
+      operations: [],
+      slots: [],
+      triage: [],
+    };
+    f["/api/v1/needs-human"] = {
+      unreadable_workspaces: [],
+      workspaces: [
+        {
+          name: "alpha",
+          needs_human: {
+            ...nhEmpty,
+            challenges: [
+              { id: "C-1", status: "awaiting_plan_approval" },
+              { id: "C-9", status: "awaiting_human" },
+            ],
+          },
+        },
+      ],
+    };
+    const { requests } = installFakes(f);
+    render(<App />);
+    act(() => FakeEventSource.latest.open());
+    await screen.findByText("題名C-1");
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    const ids = Array.from({ length: 9 }, (_, i) => `C-${i + 1}`);
+    // すべてのカードの詳細を開いて閉じる（問いの詳細を含む）
+    for (const id of ids) {
+      fireEvent.click(within(face(id)).getByRole("button"));
+      const modal = await screen.findByTestId("card-detail-content");
+      fireEvent.click(within(modal).getByText("閉じる"));
+      await vi.waitFor(() =>
+        expect(screen.queryByTestId("card-detail-content")).toBeNull(),
+      );
+    }
+    // 帯のすべての区分の押し子を押して絞り込み、解除する
+    const chips = Array.from(document.querySelectorAll(".strip-chip"));
+    expect(chips.length).toBeGreaterThan(0);
+    for (const chip of chips) {
+      fireEvent.click(chip);
+      fireEvent.click(chip);
+    }
+    // ワークスペースごとの変更の通知
+    for (const workspace of ["alpha", "beta"]) {
+      act(() =>
+        FakeEventSource.latest.send({ type: "workspace_changed", workspace }),
+      );
+    }
+    // 接続が切れて再接続し、すべてを読み直す
+    const sources = FakeEventSource.instances.length;
+    act(() => FakeEventSource.latest.fail());
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_MS);
+    });
+    expect(FakeEventSource.instances.length).toBeGreaterThan(sources);
+    const beforeOpen = requests.length;
+    act(() => FakeEventSource.latest.open());
+    // 保留中の読み込み（通知・再接続）が出し切るのを待ち、定期の取り直しと切り分ける
+    let seen = -1;
+    await vi.waitFor(() => {
+      const n = requests.length;
+      const settled = n === seen;
+      seen = n;
+      expect(settled).toBe(true);
+    });
+    expect(requests.length).toBeGreaterThan(beforeOpen);
+    // 定期の取り直し（60 秒ごとの cycle と challenges）
+    const mark = requests.length;
+    act(() => {
+      vi.advanceTimersByTime(POLL_MS * 2);
+    });
+    await vi.waitFor(() =>
+      expect(requests.length - mark).toBeGreaterThanOrEqual(8),
+    );
+    // 60 秒 2 回分 × 2 ワークスペース × (cycle・challenges) だけで、status は要求しない
+    const polled = requests.slice(mark).map((r) => r.url);
+    for (const ws of ["alpha", "beta"])
+      for (const leaf of ["cycle", "challenges"])
+        expect(
+          polled.filter((u) => u === `/api/v1/workspaces/${ws}/${leaf}`),
+        ).toHaveLength(2);
+    expect(polled.some((u) => u.endsWith("/status"))).toBe(false);
+    await vi.waitFor(() =>
+      expect(
+        requests.filter((r) => r.url === "/api/v1/needs-human").length,
+      ).toBeGreaterThan(1),
+    );
+    // 操作が実際に要求を発行したこと（空振りでないこと）
     expect(
-      requests.filter((r) => r.url === "/api/v1/needs-human").length,
-    ).toBeGreaterThan(1),
-  );
-  expect(requests.some((r) => r.url.includes("/questions"))).toBe(false);
+      requests.filter((r) => /question/i.test(r.url)),
+      "questions を要求した",
+    ).toEqual([]);
+    expect(
+      FakeEventSource.instances.filter((e) => /question/i.test(e.url)),
+    ).toEqual([]);
+  } finally {
+    Reflect.deleteProperty(document, "visibilityState");
+    vi.useRealTimers();
+  }
 });
 
 it("集約から除かれたワークスペースは、読み取れなかったことをボードに示す", async () => {

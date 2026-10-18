@@ -146,6 +146,20 @@ func TestCyclePostWithoutCSRFIsForbiddenAndStartsNothing(t *testing.T) {
 	}
 }
 
+// AC-152: cookie はあるがヘッダが無い cycle の要求も拒否し、起動しない。
+func TestCyclePostWithCookieButNoHeaderIsForbiddenAndStartsNothing(t *testing.T) {
+	ws := initWorkspace(t)
+	port, calls := countingServer(t, ws)
+	token, _ := fetchToken(t, port)
+	code, body := post(t, port, cyclePath, token, "")
+	if code != 403 || errCode(t, body) != "forbidden_origin" {
+		t.Fatalf("POST = %d %s", code, body)
+	}
+	if n := atomic.LoadInt32(calls); n != 0 {
+		t.Errorf("起動が %d 回呼ばれた", n)
+	}
+}
+
 func TestCyclePostWithLockIsConflictAndStartsNothing(t *testing.T) {
 	ws := initWorkspace(t)
 	st, err := core.OpenWorkspace(ws)
@@ -250,31 +264,69 @@ func TestCyclePostChildExitsBeforeSignalIsInternalError(t *testing.T) {
 	}
 }
 
-func TestCyclePostStderrTailIsBoundedAndUTF8Safe(t *testing.T) {
-	// 3 バイト文字 1,000 個 = 3,000 バイト。末尾 2,048 バイトの先頭は文字の途中になる。
-	data := filepath.Join(t.TempDir(), "err.txt")
-	if err := os.WriteFile(data, []byte(strings.Repeat("あ", 1000)), 0o644); err != nil {
-		t.Fatal(err)
+// AC-177a: 合図の前に終了コード 1 で終わる偽の実行ファイルでの POST は、500・internal_error で返り、
+// message に終了コードと標準エラーの末尾（2,048 バイト以内）を含み、started を返さない。
+func TestCyclePostExitCode1StderrCases(t *testing.T) {
+	cases := []struct {
+		name   string
+		stderr string
+		want   func(tail string) bool // tail の追加検査
+	}{
+		{"短い標準エラーは全文", "boom: 失敗\n", func(tail string) bool { return strings.Contains(tail, "boom: 失敗") }},
+		{"標準エラーが空", "", func(tail string) bool { return tail == "" }},
+		// 3 バイト文字 1,000 個 = 3,000 バイト。末尾 2,048 バイトの先頭は文字の途中になる。
+		{"3 バイト文字は 682 文字（2,046 バイト）", strings.Repeat("あ", 1000), func(tail string) bool {
+			return strings.Count(tail, "あ") == 682 && len(tail) == 682*3
+		}},
+		{"ASCII は 2,048 バイトちょうど", strings.Repeat("x", 3000), func(tail string) bool {
+			return len(tail) == 2048
+		}},
+		{"先頭が捨てられ末尾が残る", "HEAD" + strings.Repeat("x", 3000) + "TAIL", func(tail string) bool {
+			return strings.HasSuffix(tail, "TAIL") && !strings.Contains(tail, "HEAD") && len(tail) == 2048
+		}},
+		{"ちょうど 2,048 バイトは全文", strings.Repeat("y", 2048), func(tail string) bool {
+			return len(tail) == 2048
+		}},
 	}
-	port, _ := scriptLauncherServer(t, "cat '"+data+"' >&2\nexit 1\n")
-	code, body := apiPost(t, port, cyclePath, "")
-	if code != 500 {
-		t.Fatalf("POST = %d %s", code, body)
-	}
-	var r struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(body), &r); err != nil {
-		t.Fatal(err)
-	}
-	msg := r.Error.Message
-	if !utf8.ValidString(msg) || strings.Contains(msg, "\uFFFD") {
-		t.Errorf("不正な UTF-8: %q", msg)
-	}
-	if n := strings.Count(msg, "あ"); n < 600 || n > 683 {
-		t.Errorf("末尾の文字数 = %d", n)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := filepath.Join(t.TempDir(), "err.txt")
+			if err := os.WriteFile(data, []byte(tc.stderr), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			port, _ := scriptLauncherServer(t, "cat '"+data+"' >&2\nexit 1\n")
+			code, body := apiPost(t, port, cyclePath, "")
+			if code != 500 || errCode(t, body) != "internal_error" || strings.Contains(body, "started") {
+				t.Fatalf("POST = %d %s", code, body)
+			}
+			var r struct {
+				Error struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(body), &r); err != nil {
+				t.Fatal(err)
+			}
+			msg := r.Error.Message
+			const marker = "終了コード 1"
+			_, rest, ok := strings.Cut(msg, marker)
+			if !ok {
+				t.Fatalf("message に終了コードが無い: %q", msg)
+			}
+			_, tail, ok := strings.Cut(rest, "）: ")
+			if !ok {
+				t.Fatalf("message から標準エラーの末尾を取り出せない: %q", msg)
+			}
+			if !utf8.ValidString(msg) || strings.Contains(msg, "\uFFFD") {
+				t.Errorf("不正な UTF-8: %q", msg)
+			}
+			if len(tail) > 2048 {
+				t.Errorf("標準エラーの末尾が %d バイトで 2,048 を超える", len(tail))
+			}
+			if !tc.want(tail) {
+				t.Errorf("tail = %d バイト: %.80q", len(tail), tail)
+			}
+		})
 	}
 }
 
