@@ -26,6 +26,8 @@ type noneVerifier struct{}
 
 func (noneVerifier) Method() core.Verification { return core.VerificationNone }
 
+func (noneVerifier) Evidence() core.RelayEvidence { return core.RelayEvidence{} }
+
 func (noneVerifier) Confirm(string, string) (string, error) { return core.CurrentActor() }
 
 // approvalSummaryHandler は GET …/challenges/{id}/approval。release の PR の head の取得は、

@@ -1,5 +1,7 @@
 package core
 
+import "strings"
+
 // Verifier は本人確認の方式の実装（docs/features/m1-core.md
 // §クリティカル設計決定 1「本人確認の方式は Verifier として実装し、core は
 // Verifier が返した結果（本人確認済みの actor・方式）だけを信用する」）。
@@ -16,6 +18,24 @@ type Verifier interface {
 	//   - 入力が expectedID と一致しない、または入力の終端（EOF）なら
 	//     ErrConfirmationMismatch を返す
 	Confirm(summary string, expectedID string) (actor string, err error)
+
+	// Evidence はこの Verifier が持つ会話の手がかりを返す。方式 relayed
+	// （(cli, relayed)）では空でない Session・Quote が必須で、Verify が
+	// 空の手がかりを verification_rejected で拒否する。他の方式の手がかりは
+	// Verify が捨てる（relayed でない記録の relay_* は NULL）。
+	Evidence() RelayEvidence
+}
+
+// RelayEvidence は対話で受けた操作の会話の手がかり（M4P27）。Session は
+// 会話の識別、Quote は発言の要旨。
+type RelayEvidence struct {
+	Session string
+	Quote   string
+}
+
+// complete は Session・Quote の両方が空白だけでないかを返す。
+func (e RelayEvidence) complete() bool {
+	return strings.TrimSpace(e.Session) != "" && strings.TrimSpace(e.Quote) != ""
 }
 
 // Attestation は本人確認が成立した結果。core が信用する唯一の情報源であり、
@@ -38,6 +58,31 @@ type Attestation struct {
 	// 登録簿だけを見る fail-closed 検査は、別の対象向けに成立した
 	// Attestation の使い回しを拒否できていなかった）。
 	target string
+	// evidence は方式 relayed の会話の手がかり。relayed 以外では常にゼロ値
+	// （Verify が載せるのは relayed のときだけ）。Execute* は空でないときだけ
+	// approval・hold の relay_* と作業ログの after に書く。
+	evidence RelayEvidence
+}
+
+// hasEvidence は att が手がかりを持つかを返す。
+func (a Attestation) hasEvidence() bool { return a.evidence.complete() }
+
+// relayColumns は approval・hold の relay_session・relay_quote 列へ渡す値を返す。
+// 手がかりが無ければ両方 NULL（nil）。
+func (a Attestation) relayColumns() (session any, quote any) {
+	if !a.hasEvidence() {
+		return nil, nil
+	}
+	return a.evidence.Session, a.evidence.Quote
+}
+
+// addRelayTo は手がかりがあるときだけ、作業ログの after の最上位に
+// relay_session・relay_quote を足す。
+func (a Attestation) addRelayTo(after map[string]any) {
+	if a.hasEvidence() {
+		after["relay_session"] = a.evidence.Session
+		after["relay_quote"] = a.evidence.Quote
+	}
 }
 
 // Actor は本人確認が成立した actor を返す。
@@ -96,11 +141,12 @@ type verificationRegistryEntry struct {
 // verificationRegistry は許可した (経路, 本人確認の方式) の組の登録簿
 // （§クリティカル設計決定 1）。データ（テーブル）として持ち、組ごとに受けられる
 // 操作の集合を持つ（M4P23。検査は core に置き、server を通らない経路でも範囲が
-// 崩れないようにする）。(cli, tty_confirm) は全操作、(ui, none) は計画の承認と
+// 崩れないようにする）。(cli, tty_confirm)・(cli, relayed) は全操作、(ui, none) は計画の承認と
 // 本番反映の保留つきの完了の承認だけ（差し戻し・回答・予算の増額・不可逆操作・
 // 保留を外した完了の承認は受けない）。
 var verificationRegistry = []verificationRegistryEntry{
 	{Channel: ChannelCLI, Verification: VerificationTTYConfirm, anyAction: true},
+	{Channel: ChannelCLI, Verification: VerificationRelayed, anyAction: true},
 	{Channel: ChannelUI, Verification: VerificationNone, actions: []attestedAction{actionApprovePlan, actionApproveCompletionHold}},
 }
 
@@ -154,9 +200,19 @@ func Verify(ch Channel, verifier Verifier, summary, expectedID string) (Attestat
 		return Attestation{}, ErrVerificationRejected
 	}
 
+	// 手がかりは relayed のときだけ載せる。手がかりの無い relayed は
+	// Confirm にも触れず何も書かずに拒否する。
+	var evidence RelayEvidence
+	if method == VerificationRelayed {
+		evidence = verifier.Evidence()
+		if !evidence.complete() {
+			return Attestation{}, ErrVerificationRejected
+		}
+	}
+
 	actor, err := verifier.Confirm(summary, expectedID)
 	if err != nil {
 		return Attestation{}, err
 	}
-	return Attestation{actor: actor, channel: ch, verification: method, target: expectedID}, nil
+	return Attestation{actor: actor, channel: ch, verification: method, target: expectedID, evidence: evidence}, nil
 }

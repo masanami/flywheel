@@ -349,6 +349,9 @@ func (s *Store) verifiedTransition(ctx context.Context, att Attestation, id stri
 // （self-review 指摘: 確認の入力は対象の ID の完全一致という設計決定〈H9〉が
 // Verifier の中だけで閉じており、core の API 境界では担保されていなかった）。
 func attestationValid(att Attestation, id string) bool {
+	if att.verification == VerificationRelayed && !att.hasEvidence() {
+		return false
+	}
 	return att.actor != "" && att.target == id && registryAllows(att.channel, att.verification)
 }
 

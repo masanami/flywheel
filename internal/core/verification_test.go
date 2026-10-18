@@ -14,9 +14,11 @@ type fakeVerifier struct {
 	confirmCalls int
 	actor        string
 	err          error
+	evidence     RelayEvidence
 }
 
-func (f *fakeVerifier) Method() Verification { return f.method }
+func (f *fakeVerifier) Method() Verification    { return f.method }
+func (f *fakeVerifier) Evidence() RelayEvidence { return f.evidence }
 
 func (f *fakeVerifier) Confirm(_, _ string) (string, error) {
 	f.confirmCalls++
@@ -38,11 +40,11 @@ func TestVerificationRegistry_CLITTYConfirmAllowedAndOthersRejected(t *testing.T
 	}
 }
 
-func TestVerificationRegistry_HasCLITTYConfirmAndUINone(t *testing.T) {
-	if len(verificationRegistry) != 2 {
-		t.Fatalf("len(verificationRegistry) = %d, want 2", len(verificationRegistry))
+func TestVerificationRegistry_HasCLITTYConfirmRelayedAndUINone(t *testing.T) {
+	if len(verificationRegistry) != 3 {
+		t.Fatalf("len(verificationRegistry) = %d, want 3", len(verificationRegistry))
 	}
-	if !registryAllows(ChannelUI, VerificationNone) {
+	if !registryAllows(ChannelUI, VerificationNone) || !registryAllows(ChannelCLI, VerificationRelayed) {
 		t.Fatal("want (ui, none) to be allowed")
 	}
 }

@@ -139,7 +139,7 @@ func (s *Store) createOperation(ctx context.Context, ch Channel, runID *int64, s
 		}
 
 		// 課題の版を1増やし、その変化を課題のエントリ（action=op_add）として残す。
-		if err := bumpChallengeVersionForOperation(ctx, tx, rec, cid, current.Version, opID, "op_add", nowStr); err != nil {
+		if err := bumpChallengeVersionForOperation(ctx, tx, rec, cid, current.Version, opID, "op_add", nowStr, Attestation{}); err != nil {
 			return err
 		}
 
@@ -369,7 +369,7 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 		if req.Decision == ApprovalDecisionApproved {
 			challengeAction = "op_approve"
 		}
-		if err := bumpChallengeVersionForOperation(ctx, tx, rec, row.ChallengeID, challenge.Version, oid, challengeAction, nowStr); err != nil {
+		if err := bumpChallengeVersionForOperation(ctx, tx, rec, row.ChallengeID, challenge.Version, oid, challengeAction, nowStr, att); err != nil {
 			return err
 		}
 
@@ -419,7 +419,7 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 // before は null（変わった項目は版だけで、版は before に載せない＝S1）、after は
 // 新しい課題の版と、原因になった不可逆操作への参照（operation_id）を持つ。
 // D12 の一括承認は、完了の承認の遷移が版の増分と記録を行うため、これを呼ばない。
-func bumpChallengeVersionForOperation(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challengeID int64, currentVersion int, opID int64, action string, nowStr string) error {
+func bumpChallengeVersionForOperation(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challengeID int64, currentVersion int, opID int64, action string, nowStr string, att Attestation) error {
 	newVersion := currentVersion + 1
 	res, err := tx.ExecContext(ctx,
 		`UPDATE challenge SET version = ?, updated_at = ? WHERE id = ? AND version = ?`,
@@ -439,6 +439,7 @@ func bumpChallengeVersionForOperation(ctx context.Context, tx *sql.Tx, rec *acti
 		"version":      newVersion,
 		"operation_id": formatOperationID(opID),
 	}
+	att.addRelayTo(after)
 	return rec.record("challenge", challengeID, action, nil, after)
 }
 
@@ -494,11 +495,12 @@ func approveOperationInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		}
 		reasonVal = *w.reason
 	}
+	relaySession, relayQuote := w.att.relayColumns()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.challengeID, w.opID, string(ApprovalKindRelease), string(w.decision), w.version,
-		w.att.Actor(), string(w.att.Channel()), string(w.att.Verification()), reasonVal, w.nowStr,
+		w.att.Actor(), string(w.att.Channel()), string(w.att.Verification()), reasonVal, w.nowStr, relaySession, relayQuote,
 	); err != nil {
 		return "", err
 	}
@@ -508,6 +510,7 @@ func approveOperationInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 	if w.decision == ApprovalDecisionRejected {
 		after["reason"] = *w.reason
 	}
+	w.att.addRelayTo(after)
 	// action は decision の値（approved/rejected）ではなく、challenge
 	// エンティティの作業ログと同じ動詞形（approve/reject。transition.go の
 	// OpApprove/OpReject と同じ文字列）を使う（log の action 語彙を
