@@ -16,6 +16,10 @@ import (
 // 枠を置き換える。枠の置き換えの規則・承認の記録・作業ログは core が持つ。
 func runBudget(a Args) (any, error) {
 	id := a.Positional[0]
+	verifier, err := verifierFor(a)
+	if err != nil {
+		return nil, err
+	}
 	impl, err := parseBudgetFlag("impl-usd", a.Values["impl-usd"])
 	if err != nil {
 		return nil, err
@@ -39,7 +43,7 @@ func runBudget(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	att, err := core.Verify(core.ChannelCLI, newTTYConfirmVerifier(a.Stdin), budgetSummaryText(preview), id)
+	att, err := core.Verify(core.ChannelCLI, verifier, budgetSummaryText(preview), id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}

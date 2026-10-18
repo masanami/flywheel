@@ -436,6 +436,9 @@ var runLevelUsageErrorCases = [][]string{
 	{"budget", "C-1", "--impl-usd", "x"},                        // --impl-usd が数でない（#105）
 	{"verify", "--result", "met"},                               // --result に課題の ID が無い（--auto は ID を省略できるため MinPositional では表せない）
 	{"verify", "--auto", "--question", "q"},                     // --auto と --question の同時指定（J5 は問いを自分で作る）
+	{"approve", "C-2", "--session", "s"},                        // --relayed なしの --session・--quote（M4P26）
+	{"approve", "C-2", "--relayed", "--quote", "q"},             // --relayed に --session が無い（空白だけも同じ）
+	{"approve", "C-2", "--relayed", "--session", "s"},           // --relayed に --quote が無い（空白だけも同じ）
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の
