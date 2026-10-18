@@ -55,7 +55,7 @@ export const STATE_LABELS: Record<CardState, string> = {
 
 export const MODIFIER_LABELS: Record<CardModifier, string> = {
   running: "実行中",
-  unresponsive: "応答なし（実行中だが一定時間応答がない）",
+  unresponsive: "更新なし（実行中だが一定時間更新がない）",
   waiting_ci: "自動の確認待ち",
   budget_exhausted: "予算を使い切った",
   discrepancy: "上流との食い違い",
@@ -96,7 +96,7 @@ export const MARK_LABELS: Record<MarkKind, string> = {
   external: "外部待ち",
   actionable: "システムが次に進める",
   running: "実行中",
-  unresponsive: "応答なし",
+  unresponsive: "更新なし",
   approved_operation: "承認済みの操作が未実行",
 };
 
