@@ -27,6 +27,8 @@ export interface LiveState {
 }
 
 export const RECONNECT_MS = 3000;
+// 周のプロセスが落ちたことを再読み込みなしで出すための定期の取り直しの間隔（M4H37）。
+export const POLL_MS = 60_000;
 
 const initial: LiveState = {
   connected: false,
@@ -56,7 +58,12 @@ async function loadWorkspace(name: string): Promise<WorkspaceData> {
 export function useLive(): LiveState {
   const [state, setState] = useState<LiveState>(initial);
   // 要求の世代。遅れて返った古い応答が新しい表示を上書きしないよう、最新の世代の応答だけを反映する。
-  const gen = useRef({ list: 0, fleet: 0, ws: {} as Record<string, number> });
+  const gen = useRef({
+    list: 0,
+    fleet: 0,
+    ws: {} as Record<string, number>,
+    poll: {} as Record<string, number>,
+  });
   const known = useRef<Workspace[]>([]);
 
   const refreshFleet = useCallback(async () => {
@@ -106,6 +113,42 @@ export function useLive(): LiveState {
     }
   }, []);
 
+  // 定期の取り直し。cycle と challenges だけを GET する（status・questions・周の起動はしない）。
+  const pollWorkspace = useCallback(async (name: string) => {
+    // 全体の読み直し（refreshWorkspace）が必ず優先されるよう、その世代は進めず、途中で進んだら捨てる。
+    const wsToken = gen.current.ws[name] ?? 0;
+    const token = (gen.current.poll[name] ?? 0) + 1;
+    gen.current.poll[name] = token;
+    const [challenges, cycle] = await Promise.allSettled([
+      api.challenges(name),
+      api.cycle(name),
+    ]);
+    if (
+      (gen.current.ws[name] ?? 0) !== wsToken ||
+      gen.current.poll[name] !== token
+    )
+      return;
+    setState((s) => {
+      const cur = s.data[name];
+      if (!cur || cur.error) return s;
+      return {
+        ...s,
+        data: {
+          ...s.data,
+          [name]: {
+            ...cur,
+            challenges:
+              challenges.status === "fulfilled"
+                ? challenges.value
+                : cur.challenges,
+            // 取得に失敗したら古い状態を残さず、読み込み時と同じく見出しを出さない。
+            cycle: cycle.status === "fulfilled" ? cycle.value : undefined,
+          },
+        },
+      };
+    });
+  }, []);
+
   const loadAll = useCallback(async () => {
     const list = await refreshList();
     const ok = (list ?? known.current).filter((w) => w.state === "ok");
@@ -127,6 +170,16 @@ export function useLive(): LiveState {
     },
     [refreshList, refreshFleet, refreshWorkspace],
   );
+
+  useEffect(() => {
+    const poll = setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      for (const w of known.current) {
+        if (w.state === "ok") void pollWorkspace(w.name);
+      }
+    }, POLL_MS);
+    return () => clearInterval(poll);
+  }, [pollWorkspace]);
 
   useEffect(() => {
     let closed = false;
