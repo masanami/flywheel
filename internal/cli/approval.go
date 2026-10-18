@@ -12,8 +12,10 @@ import (
 // このファイルは本人確認つきの操作（approve・reject・answer）の実コマンドを
 // 持つ（Issue #12・#13）。core の2段階 API（① Prepare*＝読み取り、②
 // Execute*＝書き込み）を、① の結果から人間向けの要約テキストを組み、
-// core.Verify(core.ChannelCLI, tty_confirm Verifier, summary, 対象ID) で
-// 確認を得てから ② を呼ぶ、という決まった形で使う。遷移の可否・承認の
+// core.Verify(core.ChannelCLI, verifierFor が選んだ Verifier, summary, 対象ID) で
+// 確認を得てから ② を呼ぶ。Verifier は既定が tty_confirm（端末で要約を表示して
+// 対象 ID を入力させる）、--relayed のときは relayed（要約を表示せず、会話の
+// 手がかりを core へ渡すだけ。relayed.go）、という決まった形で使う。遷移の可否・承認の
 // 成立条件・作業ログの記録はすべて core が持ち、ここには書かない（P2・P4）。
 //
 // approve・reject は対象 ID の形（"C-<n>" か "OP-<n>"）で、課題の承認
@@ -36,16 +38,20 @@ func runApprove(a Args) (any, error) {
 	id := a.Positional[0]
 	holdRelease := a.Bools["hold-release"]
 
-	if isOperationID(id) {
-		return runApproveOperation(a, id, holdRelease)
+	verifier, err := verifierFor(a)
+	if err != nil {
+		return nil, err
 	}
-	return runApproveChallenge(a, id, holdRelease)
+	if isOperationID(id) {
+		return runApproveOperation(a, verifier, id, holdRelease)
+	}
+	return runApproveChallenge(a, verifier, id, holdRelease)
 }
 
 // runApproveOperation は `flywheel approve <OP-ID> [--hold-release]` の実装。
 // --hold-release は不可逆操作の ID には指定できない（usage_error。
 // docs/features/m1-core.md §承認・§受入基準「不可逆操作と D12」）。
-func runApproveOperation(a Args, id string, holdRelease bool) (any, error) {
+func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease bool) (any, error) {
 	// --hold-release の可否は ID の形だけで静的に決まるため、ストアへ触れる前に
 	// 拒否する（self-review 指摘: Prepare の後に置くと、存在しない OP-ID では
 	// not_found、承認済みの OP-ID では invalid_transition が先に返り、入力規則の
@@ -60,7 +66,7 @@ func runApproveOperation(a Args, id string, holdRelease bool) (any, error) {
 	}
 
 	summary := operationApprovalSummaryText(preview, nil)
-	att, err := core.Verify(core.ChannelCLI, newTTYConfirmVerifier(a.Stdin), summary, id)
+	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -86,7 +92,7 @@ func runApproveOperation(a Args, id string, holdRelease bool) (any, error) {
 // 呼ぶ前＝端末を開く前に拒否する）。完了確認待ちなら core.ExecuteApproval に
 // HoldRelease をそのまま渡す（T14。D12 の release の一括承認を core 側で
 // 抑止する）。
-func runApproveChallenge(a Args, id string, holdRelease bool) (any, error) {
+func runApproveChallenge(a Args, verifier core.Verifier, id string, holdRelease bool) (any, error) {
 	preview, err := a.Store.PrepareApproval(context.Background(), id)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -109,7 +115,7 @@ func runApproveChallenge(a Args, id string, holdRelease bool) (any, error) {
 	}
 
 	summary := approvalSummaryText(preview, core.ApprovalDecisionApproved, holdRelease, nil)
-	att, err := core.Verify(core.ChannelCLI, newTTYConfirmVerifier(a.Stdin), summary, id)
+	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -135,21 +141,25 @@ func runReject(a Args) (any, error) {
 	id := a.Positional[0]
 	reason := a.Values["reason"]
 
-	if isOperationID(id) {
-		return runRejectOperation(a, id, reason)
+	verifier, err := verifierFor(a)
+	if err != nil {
+		return nil, err
 	}
-	return runRejectChallenge(a, id, reason)
+	if isOperationID(id) {
+		return runRejectOperation(a, verifier, id, reason)
+	}
+	return runRejectChallenge(a, verifier, id, reason)
 }
 
 // runRejectOperation は `flywheel reject <OP-ID> --reason <r>` の実装。
-func runRejectOperation(a Args, id string, reason string) (any, error) {
+func runRejectOperation(a Args, verifier core.Verifier, id string, reason string) (any, error) {
 	preview, err := a.Store.PrepareOperationRejection(context.Background(), id, reason)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
 
 	summary := operationApprovalSummaryText(preview, &reason)
-	att, err := core.Verify(core.ChannelCLI, newTTYConfirmVerifier(a.Stdin), summary, id)
+	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -171,14 +181,14 @@ func runRejectOperation(a Args, id string, reason string) (any, error) {
 }
 
 // runRejectChallenge は `flywheel reject <C-ID> --reason <r>` の実装（T6・T15）。
-func runRejectChallenge(a Args, id string, reason string) (any, error) {
+func runRejectChallenge(a Args, verifier core.Verifier, id string, reason string) (any, error) {
 	preview, err := a.Store.PrepareRejection(context.Background(), id, reason)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
 
 	summary := approvalSummaryText(preview, core.ApprovalDecisionRejected, false, &reason)
-	att, err := core.Verify(core.ChannelCLI, newTTYConfirmVerifier(a.Stdin), summary, id)
+	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -203,13 +213,17 @@ func runAnswer(a Args) (any, error) {
 	id := a.Positional[0]
 	answer := a.Values["answer"]
 
+	verifier, err := verifierFor(a)
+	if err != nil {
+		return nil, err
+	}
 	preview, err := a.Store.PrepareAnswer(context.Background(), id, answer)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
 
 	summary := answerSummaryText(preview)
-	att, err := core.Verify(core.ChannelCLI, newTTYConfirmVerifier(a.Stdin), summary, id)
+	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}

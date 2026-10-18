@@ -214,7 +214,7 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			Flags:         []flagDef{{Name: "answer", HasValue: true, Required: true}},
+			Flags:         append([]flagDef{{Name: "answer", HasValue: true, Required: true}}, relayedFlags()...),
 			Run:           runAnswer,
 		},
 		{
@@ -222,7 +222,7 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			Flags:         []flagDef{{Name: "hold-release", HasValue: false}},
+			Flags:         append([]flagDef{{Name: "hold-release", HasValue: false}}, relayedFlags()...),
 			Run:           runApprove,
 		},
 		{
@@ -231,10 +231,10 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			Flags: []flagDef{
+			Flags: append([]flagDef{
 				{Name: "impl-usd", HasValue: true, Required: true},
 				{Name: "review-usd", HasValue: true},
-			},
+			}, relayedFlags()...),
 			Run: runBudget,
 		},
 		{
@@ -242,7 +242,7 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			Flags:         []flagDef{{Name: "reason", HasValue: true, Required: true}},
+			Flags:         append([]flagDef{{Name: "reason", HasValue: true, Required: true}}, relayedFlags()...),
 			Run:           runReject,
 		},
 		{
