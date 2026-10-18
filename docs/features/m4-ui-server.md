@@ -604,7 +604,7 @@ S1 は 2026-10-12 に出荷の判定（要人間判定）を終えた（flywheel
 - [ ] 未承認の不可逆操作を持つ完了した課題の `card.next_human_actions` は `["approve_operation"]` である
 - [ ] `status.needs_human.discrepancies` にある課題の `card.next_human_actions` は `review_discrepancy` を含む
 - [ ] `run.slot_id` で結ばれたスロットが `status.needs_human.slots` にあり、そのスロットの直近の run がこの課題の run である課題の `card.next_human_actions` は `clear_slot` を含み、`card.slot_ids` はそのスロットの ID を含む
-- [ ] 同じスロットをあとの run で別の課題が使ったとき、過去にそのスロットを使っただけの課題の `card.next_human_actions` は `clear_slot` を含まず、`card.slot_ids` にそのスロットの ID を含まない（M4H36）
+- [ ] 【AC-71a】同じスロットをあとの run で別の課題が使ったとき、過去にそのスロットを使っただけの課題の `card.next_human_actions` は `clear_slot` を含まず、`card.slot_ids` にそのスロットの ID を含まない（M4H36）
 - [ ] 分類済みで、保留・未承認の不可逆操作・食い違い・予算の使い切り・`triage` の記録の無い課題の `card.next_human_actions` は `[]` である
 - [ ] 複数の条件に当たる課題の `card.next_human_actions` は、§IF / API「カードの面」の表の順に重複なく並ぶ（表の 8 つの条件のうち 3 つ以上に当たる課題で検証する）
 - [ ] 終了していない run を持つ課題の `card.modifiers` は `running` を含む
