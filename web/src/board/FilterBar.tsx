@@ -9,7 +9,7 @@ type FilterBarProps = {
 
 const FILTERS: Array<{ value: BoardFilter; label: string }> = [
   { value: "all", label: "すべて" },
-  { value: "needsHuman", label: "🔔 承認待ち" },
+  { value: "needsHuman", label: "🔔 人間の操作待ち" },
 ];
 
 // 新しい API に対応する機能が無い操作（アーカイブ表示・エージェント追加）は、見た目はそのまま押せない状態にする。

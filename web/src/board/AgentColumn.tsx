@@ -56,7 +56,9 @@ export function AgentColumn({ agent }: { agent: AgentBoard }) {
         {agent.challenges.map((challenge, index) => (
           <div key={challenge.id} className="agent-column-row-group">
             {index === firstNeedsHumanIndex && (
-              <h3 className="agent-column-needs-human-heading">🔔 承認待ち</h3>
+              <h3 className="agent-column-needs-human-heading">
+                🔔 人間の操作待ち
+              </h3>
             )}
             <div
               className="agent-column-row"

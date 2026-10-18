@@ -121,7 +121,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 
 | コード | ボタン | 端末のコマンド | 対話の案内 |
 |---|---|---|---|
-| `approve_plan` | 計画の承認 | `flywheel approve <C-ID>`（S1 のまま）・`flywheel reject <C-ID> --reason <理由>` | 出す |
+| `approve_plan` | 計画の承認 | `flywheel reject <C-ID> --reason <理由>`（`flywheel approve` は出さない。計画の承認は画面のボタンで行う）【M4H38】 | 出す |
 | `approve_completion` | 完了の承認（本番反映は保留） | 本番反映を同時に承認する `flywheel approve <C-ID>`・`flywheel reject <C-ID> --reason <理由>` | 出す |
 | `answer_question` | なし | `flywheel answer <C-ID> --answer <回答>`（S1 のまま） | 出す |
 | `approve_operation` | なし | `flywheel approve <OP-ID>` | 出す |
@@ -654,7 +654,7 @@ S1 は 2026-10-12 に出荷の判定（要人間判定）を終えた（flywheel
 - [ ] `card.next_human_actions` が `[]` の課題のカードには「なし（エージェントが進める）」と表示される（UI のテスト）
   - S2 で表示先をカードの面から詳細へ移す（AC-196・AC-202）【2026-10-12 M4H23】
 - [ ] 計画承認待ち・完了確認待ちの課題の詳細には、`flywheel approve <C-ID> --workspace <パス>` のコマンドが表示され、承認のボタンは無い（UI のテスト）
-  - 「承認のボタンは無い」は S2 で AC-207〜AC-209 に改める（`approve` のコマンドの表示は残す）【2026-10-12 M4H23】
+  - 「承認のボタンは無い」は S2 で AC-207〜AC-209 に改める（`approve` のコマンドの表示は残す。ただし `approve_plan` の案内からは M4H38 で `approve` を外す＝AC-214a。`approve_completion` は残す）【2026-10-12 M4H23】
 - [ ] 人間対応待ちの課題の詳細には、`flywheel answer <C-ID> --workspace <パス> --answer <回答>` のコマンドが、`<回答>` を差し込み口のまま表示される（UI のテスト）
 - [ ] `budget_exhausted` にある課題の詳細には、`flywheel budget <C-ID> --workspace <パス> --impl-usd <額>` のコマンドが、`<額>` を差し込み口のまま表示される（UI のテスト）
 - [ ] 上の 3 つのコマンドの案内には、Claude Code の外の端末で実行する旨が添えられる（UI のテスト）
@@ -805,6 +805,8 @@ S1 は 2026-10-12 に出荷の判定（要人間判定）を終えた（flywheel
 - [ ] `POST …/approve` が `conflict` を返したら、UI は ① を読み直して新しい要約を表示し、`POST …/approve` を自動で送り直さない（UI のテスト）
 - [ ] 完了の承認の要約の表示に、`release` の PR の head（`null` なら取得できなかったこと）と、本番反映が保留のまま残ることが出る（UI のテスト）
 - [ ] `approve_plan` を持つ課題の詳細に、端末の `flywheel reject <C-ID> --workspace <パス> --reason <理由>` のコマンドが出る（UI のテスト）
+- [ ] 【AC-214a】`approve_plan` を持つ課題の詳細の端末の案内に `flywheel approve` のコマンドは出ない（`flywheel reject` だけが出る。UI のテスト）【決定 2026-10-18 オーナー M4H38】
+- [ ] 【AC-214b】ボードの列の「🔔 人間の操作待ち」の段と、絞り込みの「🔔 人間の操作待ち」は、`card.next_human_actions` が空でないカードを集める（旧称「🔔 承認待ち」。集める中身と帯の区分「承認待ち」は変えない。UI のテスト）【決定 2026-10-18 オーナー M4H38】
 - [ ] `approve_completion` を持つ課題の詳細に、本番反映を同時に承認する端末の `flywheel approve <C-ID> --workspace <パス>` のコマンドが出る（UI のテスト）
 - [ ] `approve_operation` を持つ課題の詳細に、端末の `flywheel approve <OP-ID> --workspace <パス>` のコマンドが出る（UI のテスト）
 - [ ] `card.next_human_actions` に `approve_plan`・`approve_completion`・`answer_question`・`approve_operation`・`increase_budget` のいずれかを持つ課題の詳細には、Claude Code との対話で伝えれば LLM が記録する旨の案内が出る（5 つを列挙して確かめる。案内の文言は UI の定数とし、テストは定数の表示で確かめる。UI のテスト）
@@ -913,6 +915,7 @@ S1 は 2026-10-12 に出荷の判定（要人間判定）を終えた（flywheel
 | M4H35 | オーナー・2026-10-17（flywheel#230 の決定。案 A） | 詳細の API の保留に、原因の run の ID を足すか | A: `Hold` に `run_id` を足す（`show --json` の保留にも出る）／B: API 専用の型に分ける（CLI の `--json` は変えない） | A。保留の表に run の ID は保存済みで、スキーマは変えない。`jsondoc_test.go` と `types.gen.ts` を更新する。B は M4P2（API は CLI と同じ形を返し、別の形を作らない）に反する |
 | M4H36 | オーナー・2026-10-17（flywheel#235 の決定。flywheel#184 の決定を含む） | 片づけ待ちのスロット（AC-187）を課題とどう結び付けるか。`clear_slot` を過去にスロットを使っただけの課題にも付けるか（#184） | A: カードに結ぶスロットの ID を持たせる（API 専用の `card.slot_ids`）／B: `needs_human.slots` に `challenge_id` を足す（CLI の `--json` が変わる） | A。結ぶ規則は「スロットごとに直近の run（`run.slot_id` が一致する run のうち最新）の課題だけ」。過去にそのスロットを使っただけの課題には `slot_ids` も `clear_slot` も付けない（#184 は「付けない」）。帯の「片づけ待ちのスロット」は、どのカードの `slot_ids` にも載らない `needs_human.slots` のスロットだけを出す（PR #231 の暫定の全件表示を置き換える）。CLI の `--json`（`status`・`show`）の形とスキーマは変えず、AC-187 の文言も変えない。**既知の限界**: 割り当て前の検査に失敗して片づけ待ちになったスロット（run が割り当てられない経路）は、直近の run の無関係な課題に載ることがある。原因の run を記録する列は足さない |
 | M4H37 | オーナー・2026-10-18（flywheel#241 の決定。案 A。PR #238〔#219〕の残指摘 1） | 周のプロセスが落ちたとき、列の見出しの `stale` とカードの `unresponsive` の印を、再読み込みなしでどう変えるか | A: UI が画面を表示している間、一定間隔で `GET …/cycle` とカードの印の元を取り直す／B: server が heartbeat の境界を越えたことを検出して `workspace_changed` を送る／C: いまの限界を仕様に書いて受け入れる | A。間隔は 60 秒で、表示している各ワークスペースの `GET …/cycle` と、カードの `unresponsive` の印が導かれる元の取得（`GET …/challenges`。起草者の仮定）を取り直す。画面が裏に回っている間（`document.visibilityState` が `hidden`）は取り直さない。server は変えない。B は server が状態の導出を二重に持つので退けた。M4H11（周を起動する定期実行を要件にしない）は変えない。この取り直しは `GET` だけを発行し、周を起動しない。`GET /api/v1/questions` を要求しないこと（AC-206）と要求の閉集合（AC-221）も変えない |
+| M4H38 | オーナー・2026-10-18（flywheel#248。Refs flywheel#212） | 列の段と絞り込みの名前「🔔 承認待ち」が、集める中身（人間の操作待ち全般）と食い違う。`approve_plan` の端末の案内に `flywheel approve` を出すか | — | 名前を「🔔 人間の操作待ち」に改める（中身・帯の区分「承認待ち」は変えない）。`approve_plan` の案内は `flywheel reject` だけにし `approve` を外す（計画の承認は画面のボタン）。`approve_completion` の行は変えない。範囲外: 「停止中」と「⚡ 実行中」の並存（M4H32）・詳細の「承認と差し戻しの記録」に経路が出ないこと・押せない「🗄 アーカイブ表示」「＋ エージェント追加」 |
 
 ### 親が決めてよい論点
 

@@ -338,6 +338,8 @@ it("AC-214: approve_plan には reject の端末のコマンドと対話の案�
     "flywheel reject C-1 --workspace '/w/alpha' --reason <理由>",
   );
   expect(t).toContain("Claude Code との対話で伝えれば");
+  // AC-214a: 計画の承認は画面のボタンで行うので approve のコマンドは出さない
+  expect(t).not.toContain("flywheel approve");
 });
 
 it("AC-215: approve_completion には本番反映を同時に承認する approve のコマンドと対話の案内", async () => {
