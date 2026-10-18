@@ -40,7 +40,9 @@ export function AgentColumn({ agent }: { agent: AgentBoard }) {
     <section className="agent-column" aria-label={`${agent.name} の列`}>
       <div className="agent-column-header">
         <h2 className="agent-column-title">{agent.name}</h2>
-        {agent.cycle && <CycleHeader cycle={agent.cycle} />}
+        {agent.cycle && (
+          <CycleHeader cycle={agent.cycle} workspace={agent.name} />
+        )}
       </div>
       <div className="agent-column-body">
         {agent.runningRuns.length > 0 && (

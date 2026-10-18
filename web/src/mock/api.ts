@@ -5,6 +5,7 @@ import type { ApiClient } from "../api/client.ts";
 import { ApiError } from "../api/proposed.ts";
 import type {
   ApprovalSummaryResponse,
+  CycleStarted,
   LogResponse,
   NeedsHumanResponse,
   QuestionsResponse,
@@ -190,6 +191,10 @@ export function createMockApi(
           version: m.c.version,
         },
       };
+    },
+    async startCycle(): Promise<CycleStarted> {
+      await wait();
+      return { started: true };
     },
     // ② 版が違えば conflict。通れば状態を進める（ブラウザ内だけの偽の書き込み）。
     async approve(name, id, version): Promise<ShowCardResponse> {

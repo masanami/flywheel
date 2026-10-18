@@ -1,6 +1,7 @@
 import { ApiError, type ProposedApi } from "./proposed.ts";
 import type {
   ApprovalSummaryResponse,
+  CycleStarted,
   CycleStatus,
   ListCardResponse,
   LogResponse,
@@ -88,7 +89,12 @@ export interface ApprovalApi {
   approve(name: string, id: string, version: number): Promise<ShowCardResponse>;
 }
 
-export type ApiClient = ReadApi & ApprovalApi & ProposedApi;
+// 列の見出しの 1 周の起動（M4H11）。成功は {"started": true}。
+export interface CycleApi {
+  startCycle(name: string): Promise<CycleStarted>;
+}
+
+export type ApiClient = ReadApi & ApprovalApi & CycleApi & ProposedApi;
 
 const readApi: ReadApi = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
@@ -119,6 +125,10 @@ const approvalApi: ApprovalApi = {
     ),
 };
 
+const cycleApi: CycleApi = {
+  startCycle: (name) => post<CycleStarted>(`${ws(name)}/cycle`),
+};
+
 // 案の口（proposed.ts）は server にまだ無い。本物の呼び出しは何も送らずに失敗させる。
 const notBuilt = (): Promise<never> =>
   Promise.reject(
@@ -132,6 +142,7 @@ const notBuilt = (): Promise<never> =>
 const realApi: ApiClient = {
   ...readApi,
   ...approvalApi,
+  ...cycleApi,
   challengeGraph: notBuilt,
   agentProfiles: notBuilt,
 };
@@ -158,6 +169,7 @@ export const api: ApiClient = {
   questions: () => impl.questions(),
   approvalSummary: (n, id) => impl.approvalSummary(n, id),
   approve: (n, id, v) => impl.approve(n, id, v),
+  startCycle: (n) => impl.startCycle(n),
   challengeGraph: (n) => impl.challengeGraph(n),
   agentProfiles: () => impl.agentProfiles(),
 };
