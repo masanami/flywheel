@@ -43,6 +43,7 @@ function bodies() {
         next_human_actions: ["approve_plan"],
       }),
       cc("C-3", "in_progress", { modifiers: ["running", "unresponsive"] }),
+      cc("C-7", "in_progress", { next_human_actions: ["answer_question"] }),
       cc("C-4", "done"),
       cc(
         "C-5",
@@ -104,10 +105,10 @@ it("既定の画面はボード: ワークスペースがエージェントの�
   expect(within(alpha).getByText("題名C-4")).toBeInTheDocument();
 });
 
-it("承認待ちは「🔔 承認待ち」の見出しの下に先頭で出て、承認の代わりの端末のコマンドは詳細に出す", async () => {
+it("人間の操作待ちは「🔔 人間の操作待ち」の見出しの下に先頭で出て、差し戻しの端末のコマンドは詳細に出す", async () => {
   await mount();
   const alpha = screen.getByRole("region", { name: "alpha の列" });
-  expect(within(alpha).getByText("🔔 承認待ち")).toBeInTheDocument();
+  expect(within(alpha).getByText("🔔 人間の操作待ち")).toBeInTheDocument();
   const card = within(alpha).getByTestId("card-C-2");
   expect(card).toHaveAttribute("data-needs-human", "true");
   // 面にはコマンドを出さない（M4H23）
@@ -152,11 +153,13 @@ it("AC-120: running だけを持つ課題も、そのワークスペースの列
   expect(within(beta).queryByText("⚡ 実行中")).toBeNull();
 });
 
-it("「🔔 承認待ち」で絞り込むと、人間の操作待ちだけが残る", async () => {
+it("「🔔 人間の操作待ち」で絞り込むと、人間の操作待ちだけが残る", async () => {
   await mount();
-  fireEvent.click(screen.getByRole("button", { name: "🔔 承認待ち" }));
+  fireEvent.click(screen.getByRole("button", { name: "🔔 人間の操作待ち" }));
   const alpha = screen.getByRole("region", { name: "alpha の列" });
   expect(within(alpha).getByText("題名C-2")).toBeInTheDocument();
+  // 承認以外の操作待ち（answer_question）も集まる（AC-214b）
+  expect(within(alpha).getByText("題名C-7")).toBeInTheDocument();
   expect(within(alpha).queryByText("題名C-1")).toBeNull();
   expect(within(alpha).queryByText("⚡ 実行中")).toBeNull();
 });

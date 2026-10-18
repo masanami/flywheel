@@ -17,13 +17,6 @@
       "template": "flywheel reject <C-ID> --workspace <パス> --reason <理由>"
     },
     {
-      "id": "approve",
-      "when": { "actions": ["approve_plan"] },
-      "command": ["approve"],
-      "flags": ["workspace"],
-      "template": "flywheel approve <C-ID> --workspace <パス>"
-    },
-    {
       "id": "approve-with-release",
       "when": { "actions": ["approve_completion"] },
       "command": ["approve"],
