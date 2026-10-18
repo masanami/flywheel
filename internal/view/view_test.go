@@ -108,3 +108,28 @@ func TestFromApprovalPreview(t *testing.T) {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
 }
+
+// AC-252: FromApproval・FromHold は会話の手がかりと回答の経路・方式を写す（nil は null）。
+func TestFromApprovalAndHoldCopyRelayEvidence(t *testing.T) {
+	sess, quote, ch, ver := "sess", "「承認して」", "cli", "relayed"
+	at := time.Date(2026, 10, 19, 1, 2, 3, 0, time.UTC)
+	a := view.FromApproval(core.Approval{Kind: core.ApprovalKindBudget, Decision: core.ApprovalDecisionApproved, Channel: "cli", Verification: "relayed", DecidedAt: at, RelaySession: &sess, RelayQuote: &quote})
+	if a.RelaySession == nil || *a.RelaySession != sess || a.RelayQuote == nil || *a.RelayQuote != quote {
+		t.Errorf("FromApproval relay = %v/%v, want %q/%q", a.RelaySession, a.RelayQuote, sess, quote)
+	}
+	if got := marshal(t, view.FromApproval(core.Approval{Kind: core.ApprovalKindPlan, Verification: "tty_confirm", DecidedAt: at})); !strings.Contains(got, `"relay_quote":null,"relay_session":null`) {
+		t.Errorf("FromApproval(tty_confirm) = %s, want relay_* null", got)
+	}
+
+	h := view.FromHold(core.Hold{Question: "q", FromStatus: core.StatusUnclassified, RaisedAt: at, AnsweredChannel: &ch, AnsweredVerification: &ver, RelaySession: &sess, RelayQuote: &quote})
+	if h.AnsweredChannel == nil || *h.AnsweredChannel != ch || h.AnsweredVerification == nil || *h.AnsweredVerification != ver ||
+		h.RelaySession == nil || *h.RelaySession != sess || h.RelayQuote == nil || *h.RelayQuote != quote {
+		t.Errorf("FromHold = %+v, want cli/relayed/%q/%q", h, sess, quote)
+	}
+	got := marshal(t, view.FromHold(core.Hold{Question: "q", FromStatus: core.StatusUnclassified, RaisedAt: at}))
+	for _, k := range []string{`"answered_channel":null`, `"answered_verification":null`, `"relay_quote":null`, `"relay_session":null`} {
+		if !strings.Contains(got, k) {
+			t.Errorf("FromHold(unanswered) = %s, want %s", got, k)
+		}
+	}
+}

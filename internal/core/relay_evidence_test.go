@@ -385,3 +385,130 @@ func TestGetChallenge_ExposesRelayEvidenceOfApprovalAndHold(t *testing.T) {
 		t.Errorf("tty approval = %+v, want nil relay fields", a)
 	}
 }
+
+// AC-252: 端末の確認（tty_confirm）で回答した保留は、経路・方式が入り手がかりは nil。
+// 返す Hold と GetChallenge（show --json の元）の両方で確かめる。
+func TestExecuteAnswer_TTYConfirmReturnsChannelVerificationAndNilEvidence(t *testing.T) {
+	ctx := context.Background()
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusUnclassified)
+	if _, err := s.HoldChallenge(ctx, ChannelCLI, c.ID, HoldInput{Question: "why?"}); err != nil {
+		t.Fatal(err)
+	}
+	prev, err := s.PrepareAnswer(ctx, c.ID, "because")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ret, err := s.ExecuteAnswer(ctx, AnswerRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Answer: "because"}, verifiedAttestationForTest(t, c.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.GetChallenge(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, h := range map[string]Hold{"returned": *ret, "show": d.Holds[0]} {
+		if h.AnsweredChannel == nil || *h.AnsweredChannel != "cli" || h.AnsweredVerification == nil || *h.AnsweredVerification != "tty_confirm" {
+			t.Errorf("%s hold channel/verification = %v/%v, want cli/tty_confirm", name, h.AnsweredChannel, h.AnsweredVerification)
+		}
+		if h.RelaySession != nil || h.RelayQuote != nil {
+			t.Errorf("%s hold relay = %v/%v, want nil", name, h.RelaySession, h.RelayQuote)
+		}
+	}
+}
+
+// wantApprovalRelay は承認の会話の手がかりを確かめる（session・quote が "" なら nil を期待）。
+func wantApprovalRelay(t *testing.T, name string, a Approval, verification, session, quote string) {
+	t.Helper()
+	if a.Verification != verification {
+		t.Errorf("%s verification = %q, want %q", name, a.Verification, verification)
+	}
+	if session == "" {
+		if a.RelaySession != nil || a.RelayQuote != nil {
+			t.Errorf("%s relay = %v/%v, want nil", name, a.RelaySession, a.RelayQuote)
+		}
+		return
+	}
+	if a.RelaySession == nil || *a.RelaySession != session || a.RelayQuote == nil || *a.RelayQuote != quote {
+		t.Errorf("%s relay = %v/%v, want %q/%q", name, a.RelaySession, a.RelayQuote, session, quote)
+	}
+}
+
+// AC-252: 不可逆操作（release）の承認が返す Approval と GetChallenge の承認に手がかりが載る。
+func TestExecuteOperationApproval_ReturnsRelayEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name, verification, session, quote string
+	}{{"relayed", "relayed", "so", "qo"}, {"tty_confirm", "tty_confirm", "", ""}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			s := newStoreForTest(t)
+			fixedActor(t, "alice")
+			c := createAndAdvance(t, s, StatusUnclassified)
+			op := createPendingOperation(t, s, c.ID, "release")
+			prev, err := s.PrepareOperationApproval(ctx, op.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			att := verifiedAttestationForTest(t, op.ID)
+			if tc.session != "" {
+				att = relayedAttestation(t, op.ID, tc.session, tc.quote)
+			}
+			_, ret, err := s.ExecuteOperationApproval(ctx, OperationApprovalRequest{
+				OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+			}, att)
+			if err != nil {
+				t.Fatalf("ExecuteOperationApproval() error = %v", err)
+			}
+			wantApprovalRelay(t, "returned", *ret, tc.verification, tc.session, tc.quote)
+			d, err := s.GetChallenge(ctx, c.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(d.Approvals) != 1 {
+				t.Fatalf("approvals = %d, want 1", len(d.Approvals))
+			}
+			wantApprovalRelay(t, "show", d.Approvals[0], tc.verification, tc.session, tc.quote)
+		})
+	}
+}
+
+// AC-252: 予算の承認が返す Approval と GetChallenge の承認に手がかりが載る。
+func TestExecuteBudget_ReturnsRelayEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name, verification, session, quote string
+	}{{"relayed", "relayed", "sb", "qb"}, {"tty_confirm", "tty_confirm", "", ""}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newDelegateFixture(t)
+			id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
+			p, err := f.s.PrepareBudget(ctx, id, f.agent, 80, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			att := verifiedAttestationForTest(t, id)
+			if tc.session != "" {
+				att = relayedAttestation(t, id, tc.session, tc.quote)
+			}
+			ret, err := f.s.ExecuteBudget(ctx, BudgetRequest{ChallengeID: id, ExpectedVersion: p.Version, PlanVersion: p.PlanVersion, ImplUSD: 80}, att)
+			if err != nil {
+				t.Fatalf("ExecuteBudget() error = %v", err)
+			}
+			wantApprovalRelay(t, "returned", *ret, tc.verification, tc.session, tc.quote)
+			d, err := f.s.GetChallenge(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var budget *Approval
+			for i := range d.Approvals {
+				if d.Approvals[i].Kind == ApprovalKindBudget {
+					budget = &d.Approvals[i]
+				}
+			}
+			if budget == nil {
+				t.Fatalf("approvals = %+v, want a budget approval", d.Approvals)
+			}
+			wantApprovalRelay(t, "show", *budget, tc.verification, tc.session, tc.quote)
+		})
+	}
+}
