@@ -324,6 +324,31 @@ func TestApproveConflictAndValidation(t *testing.T) {
 	}
 }
 
+// AC-161: ① の後に別プロセスの `flywheel edit` で版を実際に動かすと、① の版を添えた approve は
+// 409・conflict で拒否され、何も承認しない。
+func TestApproveConflictAfterRealEditInAnotherProcess(t *testing.T) {
+	for _, status := range []string{"awaiting_plan_approval", "awaiting_completion_approval"} {
+		t.Run(status, func(t *testing.T) {
+			ws := initWorkspace(t)
+			approvalFixture(t, ws, status)
+			port := approvalServer(t, ws)
+			v := currentVersion(t, port) // ①
+			cliJSON(t, ws, "edit", "C-1", "--title", "edited in another process")
+			if now := currentVersion(t, port); now == v {
+				t.Fatalf("flywheel edit が版を動かさなかった: %d", v)
+			}
+			code, body := apiPost(t, port, approvePath, `{"version":`+strconv.Itoa(v)+`}`)
+			if code != 409 || errCode(t, body) != "conflict" {
+				t.Fatalf("approve = %d %s", code, body)
+			}
+			d := showApprovals(t, ws)
+			if len(d.Approvals) != 0 || string(d.Status) != status {
+				t.Errorf("何も承認しないはず: status=%s approvals=%+v", d.Status, d.Approvals)
+			}
+		})
+	}
+}
+
 func TestApproveRequiresCSRF(t *testing.T) {
 	ws := initWorkspace(t)
 	approvalFixture(t, ws, "awaiting_plan_approval")
