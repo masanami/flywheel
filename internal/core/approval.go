@@ -375,10 +375,11 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 			planVersionOut = &v
 		}
 
+		relaySession, relayQuote := att.relayColumns()
 		if _, err := tc.tx.ExecContext(ctx,
-			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at)
-			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			tc.id, string(kind), string(req.Decision), tc.current.Version, planVersionVal, att.Actor(), string(att.Channel()), string(att.Verification()), reasonVal, tc.nowStr,
+			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote)
+			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			tc.id, string(kind), string(req.Decision), tc.current.Version, planVersionVal, att.Actor(), string(att.Channel()), string(att.Verification()), reasonVal, tc.nowStr, relaySession, relayQuote,
 		); err != nil {
 			return err
 		}
@@ -386,6 +387,7 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		tc.after["approval_kind"] = string(kind)
 		tc.after["decision"] = string(req.Decision)
 		tc.after["target_version"] = tc.current.Version
+		att.addRelayTo(tc.after)
 		if req.Decision == ApprovalDecisionRejected {
 			tc.after["reason"] = *req.Reason
 		}
@@ -524,9 +526,10 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	}
 
 	apply := func(ctx context.Context, tc *transitionCtx) error {
+		relaySession, relayQuote := att.relayColumns()
 		res, err := tc.tx.ExecContext(ctx,
-			`UPDATE hold SET answer = ?, answered_at = ?, answered_by = ? WHERE id = ? AND answer IS NULL`,
-			req.Answer, tc.nowStr, att.Actor(), holdID,
+			`UPDATE hold SET answer = ?, answered_at = ?, answered_by = ?, answered_channel = ?, answered_verification = ?, relay_session = ?, relay_quote = ? WHERE id = ? AND answer IS NULL`,
+			req.Answer, tc.nowStr, att.Actor(), string(att.Channel()), string(att.Verification()), relaySession, relayQuote, holdID,
 		)
 		if err != nil {
 			return err
@@ -544,6 +547,7 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		// priority・edit の urgency とそろえる）。
 		tc.before["answer"] = nil
 		tc.after["answer"] = req.Answer
+		att.addRelayTo(tc.after)
 
 		answer := req.Answer
 		answeredAt := tc.now

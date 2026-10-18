@@ -40,6 +40,9 @@ func (v *ttyConfirmVerifier) Method() core.Verification {
 	return core.VerificationTTYConfirm
 }
 
+// Evidence は tty_confirm が会話の手がかりを持たないことを表す（空）。
+func (v *ttyConfirmVerifier) Evidence() core.RelayEvidence { return core.RelayEvidence{} }
+
 // Confirm は tty_confirm の成立条件（①標準入力が端末 ②制御端末を開ける
 // ③ CLAUDECODE が未設定）を検査し、成立すれば要約の表示と確認の読み取りを
 // /dev/tty に対して行う（標準入力からは読まない。パイプで流し込んだ入力を

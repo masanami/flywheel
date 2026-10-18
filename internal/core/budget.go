@@ -411,11 +411,12 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 		}
 		// 予算の承認は target_version に計画の版を持ち、approval.plan_version は NULL のまま
 		// （計画の承認は target_version に課題の版を持ち、plan_version に計画の版を持つ）。
+		relaySession, relayQuote := att.relayColumns()
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at)
-			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote)
+			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
 			cid, string(ApprovalKindBudget), string(ApprovalDecisionApproved), plan.Version,
-			att.Actor(), string(att.Channel()), string(att.Verification()), nowStr); err != nil {
+			att.Actor(), string(att.Channel()), string(att.Verification()), nowStr, relaySession, relayQuote); err != nil {
 			return err
 		}
 		before := map[string]any{"impl_budget_usd": overrideUSD(prev.ImplBudgetUSD), "review_budget_usd": overrideUSD(prev.ReviewBudgetUSD)}
@@ -425,6 +426,7 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 			"impl_budget_usd":   overrideUSD(next.ImplBudgetUSD),
 			"review_budget_usd": overrideUSD(next.ReviewBudgetUSD),
 		}
+		att.addRelayTo(after)
 		if err := rec.record("challenge", cid, string(OpApprove), before, after); err != nil {
 			return err
 		}

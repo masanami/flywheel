@@ -36,3 +36,9 @@ const VerificationNone Verification = "none"
 // docs/features/m1-core.md §クリティカル設計決定 1）。M1 の登録簿は
 // (ChannelCLI, VerificationTTYConfirm) の 1 組。M4 で (ui, none) を足した。
 const VerificationTTYConfirm Verification = "tty_confirm"
+
+// VerificationRelayed は、人間と会話しているエージェントが、会話の中で受けた
+// 承認・差し戻し・回答を CLI へ中継する方式（M4H19・M4P27）。登録簿では
+// (cli, relayed) の 1 組で、受けられる操作は (cli, tty_confirm) と同じ（M4H28）。
+// 会話の手がかり（RelayEvidence）が空では成立しない。
+const VerificationRelayed Verification = "relayed"
