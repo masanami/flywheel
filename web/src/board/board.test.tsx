@@ -129,22 +129,22 @@ it("承認待ちは「🔔 承認待ち」の見出しの下に先頭で出て�
   ).toBeInTheDocument();
 });
 
-it("実行中の課題は「⚡ 実行中」に出て、応答なしは区別される", async () => {
+it("実行中の課題は「⚡ 実行中」に出て、更新なしは区別される", async () => {
   await mount();
   const alpha = screen.getByRole("region", { name: "alpha の列" });
   expect(within(alpha).getByText("⚡ 実行中")).toBeInTheDocument();
   const row = within(alpha).getByTestId("running-run-C-3");
   expect(row).toHaveAttribute("data-stale", "true");
-  expect(row).toHaveTextContent("応答なし");
+  expect(row).toHaveTextContent("更新なし");
 });
 
-it("AC-120: running だけを持つ課題も、そのワークスペースの列で実行中の印が出る（応答なしではない）", async () => {
+it("AC-120: running だけを持つ課題も、そのワークスペースの列で実行中の印が出る（更新なしではない）", async () => {
   await mount();
   const alpha = screen.getByRole("region", { name: "alpha の列" });
   const row = within(alpha).getByTestId("running-run-C-6");
   expect(row).toHaveTextContent("題名C-6");
   expect(row).not.toHaveAttribute("data-stale", "true");
-  expect(row).not.toHaveTextContent("応答なし");
+  expect(row).not.toHaveTextContent("更新なし");
   // 実行中の印は running を持つ課題だけ（C-1 などには出ない）
   expect(within(alpha).queryByTestId("running-run-C-1")).toBeNull();
   // 他のワークスペースの列には出ない

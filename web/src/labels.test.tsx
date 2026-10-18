@@ -49,3 +49,10 @@ it("人に見せる語に「CI」を使わない（flywheel は汎用の道具�
   ])
     for (const v of Object.values(table)) expect(v).not.toMatch(/\bCI\b/);
 });
+
+it("M4H34: unresponsive の文言は「更新なし」で、「応答なし」を使わない", () => {
+  expect(MODIFIER_LABELS.unresponsive).toContain("更新なし");
+  expect(MARK_LABELS.unresponsive).toBe("更新なし");
+  expect(MODIFIER_LABELS.unresponsive).not.toContain("応答なし");
+  expect(MARK_LABELS.unresponsive).not.toContain("応答なし");
+});

@@ -177,9 +177,9 @@ it("AC-188〜193: 区分の印 6 種が、それぞれの課題のカードに�
   expect(marksOf("C-2")).toEqual(["external"]);
   expect(marksOf("C-3")).toEqual(["actionable"]);
   expect(marksOf("C-4")).toEqual(["running"]);
-  // 応答なしは実行中の印と区別できる（running の印を持たない）
+  // 更新なしは実行中の印と区別できる（running の印を持たない）
   expect(marksOf("C-5")).toEqual(["unresponsive"]);
-  expect(within(face("C-5")).getByText("応答なし")).toBeInTheDocument();
+  expect(within(face("C-5")).getByText("更新なし")).toBeInTheDocument();
   expect(marksOf("C-6")).toEqual(["approved_operation"]);
   expect(
     within(face("C-6")).getByText("承認済みの操作が未実行"),

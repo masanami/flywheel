@@ -77,7 +77,7 @@ it("更新なし: 大枠を開くとノードに「⚠ 更新なし（要確認�
   expect(graph.textContent).not.toContain("応答なし");
 });
 
-it("更新なし: 案の画面の列のボードは「更新なし」と出す（本番のボードの文言は変えない）", async () => {
+it("更新なし: 案の画面の列のボードは「更新なし」と出す", async () => {
   render(<GraphScreen live={await liveOf()} />);
   fireEvent.click(screen.getByRole("button", { name: "列のボード" }));
   const row = await screen.findByTestId("running-run-C-6");

@@ -4,9 +4,9 @@ import { ErrorCard } from "./ErrorCard.tsx";
 import { TaskCard } from "./TaskCard.tsx";
 import type { AgentBoard, RunningChallenge } from "./types.ts";
 
-// 実行中で応答のない run の行に出す文言。本番は仕様（M4H24）の「応答なし」のまま。
-// 開発時の mock モードの案の画面だけが、旧 board と同じ「更新なし」に差し替えて見せる（flywheel#176）。
-export const StaleLabelContext = createContext("⚠ 応答なし（要確認）");
+// 実行中で更新のない run の行に出す文言（M4H34: 「応答なし」ではなく「更新なし」）。
+// 開発時の mock モードの案の画面が差し替えて見せる場合も、この文言に揃える。
+export const StaleLabelContext = createContext("⚠ 更新なし（要確認）");
 
 function RunningRow({ run }: { run: RunningChallenge }) {
   const staleLabel = useContext(StaleLabelContext);
