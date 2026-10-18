@@ -1513,3 +1513,27 @@ body {
 .cycle-last {
   color: var(--board-muted-fg);
 }
+
+.agent-column-cycle-status:has(.cycle-notice) {
+  flex-wrap: wrap;
+}
+.cycle-start {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cycle-start:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.cycle-notice {
+  flex-basis: 100%;
+  margin-top: 4px;
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.cycle-notice[data-kind="failed"] {
+  color: var(--board-error-fg);
+}
