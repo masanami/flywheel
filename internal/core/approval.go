@@ -404,6 +404,7 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 			Reason:        req.Reason,
 			DecidedAt:     tc.now,
 		}
+		approvalOut.RelaySession, approvalOut.RelayQuote = att.relayPtrs()
 
 		// D12: 完了の承認（HoldRelease==false）は、同じトランザクションで
 		// その課題の未承認の release をすべて自動承認する。完了の承認と
@@ -555,6 +556,9 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		holdOut.Answer = &answer
 		holdOut.AnsweredAt = &answeredAt
 		holdOut.AnsweredBy = &answeredBy
+		ch, ver := string(att.Channel()), string(att.Verification())
+		holdOut.AnsweredChannel, holdOut.AnsweredVerification = &ch, &ver
+		holdOut.RelaySession, holdOut.RelayQuote = att.relayPtrs()
 		return nil
 	}
 

@@ -403,6 +403,7 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 			Reason:        req.Reason,
 			DecidedAt:     now,
 		}
+		approvalOut.RelaySession, approvalOut.RelayQuote = att.relayPtrs()
 		return nil
 	})
 	if err != nil {

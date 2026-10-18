@@ -126,6 +126,8 @@ type Approval struct {
 	Kind          string  `json:"kind"`
 	OperationID   *string `json:"operation_id"`
 	Reason        *string `json:"reason"`
+	RelayQuote    *string `json:"relay_quote"`
+	RelaySession  *string `json:"relay_session"`
 	TargetVersion int     `json:"target_version"`
 	Verification  string  `json:"verification"`
 }
@@ -140,6 +142,8 @@ func FromApproval(a core.Approval) Approval {
 		Kind:          string(a.Kind),
 		OperationID:   a.OperationID,
 		Reason:        a.Reason,
+		RelayQuote:    a.RelayQuote,
+		RelaySession:  a.RelaySession,
 		TargetVersion: a.TargetVersion,
 		Verification:  a.Verification,
 	}
@@ -156,28 +160,36 @@ func FromApprovals(as []core.Approval) []Approval {
 
 // Hold は保留の形。
 type Hold struct {
-	Answer          *string `json:"answer"`
-	AnsweredAt      *string `json:"answered_at"`
-	AnsweredBy      *string `json:"answered_by"`
-	FromStatus      string  `json:"from_status"`
-	FromStatusLabel string  `json:"from_status_label"`
-	Question        string  `json:"question"`
-	RaisedAt        string  `json:"raised_at"`
-	RunID           *string `json:"run_id"`
+	Answer               *string `json:"answer"`
+	AnsweredAt           *string `json:"answered_at"`
+	AnsweredBy           *string `json:"answered_by"`
+	AnsweredChannel      *string `json:"answered_channel"`
+	AnsweredVerification *string `json:"answered_verification"`
+	FromStatus           string  `json:"from_status"`
+	FromStatusLabel      string  `json:"from_status_label"`
+	Question             string  `json:"question"`
+	RaisedAt             string  `json:"raised_at"`
+	RelayQuote           *string `json:"relay_quote"`
+	RelaySession         *string `json:"relay_session"`
+	RunID                *string `json:"run_id"`
 }
 
 // FromHold は core.Hold を Hold へ変換する。
 func FromHold(h core.Hold) Hold {
 	label, _ := h.FromStatus.Label()
 	return Hold{
-		Answer:          h.Answer,
-		AnsweredAt:      ts(h.AnsweredAt),
-		AnsweredBy:      h.AnsweredBy,
-		FromStatus:      string(h.FromStatus),
-		FromStatusLabel: label,
-		Question:        h.Question,
-		RaisedAt:        FormatTimestamp(h.RaisedAt),
-		RunID:           h.RunID,
+		Answer:               h.Answer,
+		AnsweredAt:           ts(h.AnsweredAt),
+		AnsweredBy:           h.AnsweredBy,
+		AnsweredChannel:      h.AnsweredChannel,
+		AnsweredVerification: h.AnsweredVerification,
+		FromStatus:           string(h.FromStatus),
+		FromStatusLabel:      label,
+		Question:             h.Question,
+		RaisedAt:             FormatTimestamp(h.RaisedAt),
+		RelayQuote:           h.RelayQuote,
+		RelaySession:         h.RelaySession,
+		RunID:                h.RunID,
 	}
 }
 

@@ -108,6 +108,8 @@ export interface Approval {
   kind: string;
   operation_id: string | null;
   reason: string | null;
+  relay_quote: string | null;
+  relay_session: string | null;
   target_version: number;
   verification: string;
 }
@@ -116,10 +118,14 @@ export interface Hold {
   answer: string | null;
   answered_at: string | null;
   answered_by: string | null;
+  answered_channel: string | null;
+  answered_verification: string | null;
   from_status: string;
   from_status_label: string;
   question: string;
   raised_at: string;
+  relay_quote: string | null;
+  relay_session: string | null;
   run_id: string | null;
 }
 
