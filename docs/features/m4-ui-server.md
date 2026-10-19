@@ -165,7 +165,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 - [ ] 予算の増額（`flywheel budget`）にも `--relayed` を足す。必須の手がかり・記録の印（`approval` の `verification=relayed`・`relay_session`・`relay_quote`。予算の増額は `approval` の `kind=budget` の行として残る）は承認と同じ扱いとする。予算の増額を UI に置かないことは変えない【決定 2026-10-12 オーナー M4H28】
 - [ ] `--relayed` の操作も M1 の 2 段階の API を使うが、① は版を得るためだけに使い、要約の表示と対象の ID の入力は求めない【仮定】
 - [ ] 委譲の子セッションに付けている `Bash(flywheel:*)` の禁止（`internal/invoker/delegate.go`）と、委譲の目印（`FLYWHEEL_DELEGATED_RUN`）のある環境で全コマンドを拒否する規則（M3H13）は変えない。判断点の呼び出しが Bash を持たないこと（`internal/invoker/args.go`）も変えない【決定 2026-10-12 オーナー M4H21】
-- [ ] `show --json` の承認・保留の要素に、本人確認の方式と（`relayed` のとき）会話の手がかりを足す。オーナーは `flywheel show`・`flywheel log` で、どの承認が対話で受けたものかと、その手がかりを確かめられる【決定 2026-10-12 親 M4P24】
+- [ ] `show --json` の承認・保留の要素に、本人確認の方式と（`relayed` のとき）会話の手がかりを足す。オーナーは `flywheel show --json`・`flywheel log` で、どの承認が対話で受けたものかと、その手がかりを確かめられる【決定 2026-10-12 親 M4P24】
 - [ ] UI は S3 で変えない（承認・回答・差し戻しの口を足さない）【決定 2026-10-12 オーナー M4H19】
 
 ### 遠隔の待ち受けとモバイル（Q9）[S5]

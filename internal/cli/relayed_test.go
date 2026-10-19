@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -210,5 +211,101 @@ func TestRelayed_DelegatedEnvRejectsEvenWithRelayed(t *testing.T) {
 	}
 	if got := workStatus(t, ws, id); got != "awaiting_plan_approval" {
 		t.Errorf("status = %q, want unchanged", got)
+	}
+}
+
+// activityAfters は log --json のうち action が action の作業ログの after を返す。
+func activityAfters(t *testing.T, ws, action string) []map[string]any {
+	t.Helper()
+	var doc struct {
+		Activities []struct {
+			Action string         `json:"action"`
+			After  map[string]any `json:"after"`
+		} `json:"activities"`
+	}
+	if err := json.Unmarshal([]byte(relayedLog(t, ws)), &doc); err != nil {
+		t.Fatalf("log is not JSON: %v", err)
+	}
+	var out []map[string]any
+	for _, a := range doc.Activities {
+		if a.Action == action && a.After != nil {
+			out = append(out, a.After)
+		}
+	}
+	return out
+}
+
+// AC-230: 完了の承認を --relayed --hold-release で受けた後も、未承認の release は未承認のまま残る。
+func TestRelayed_AC230_HoldReleaseLeavesReleasePending(t *testing.T) {
+	t.Setenv(claudeCodeEnvVar, "1")
+	ws := initializedWorkspace(t)
+	id, release1, release2, del := setUpChallengeAwaitingCompletionWithOperationsForCLI(t, ws)
+
+	runJSON(t, ws, "approve", id, "--relayed", "--session", "sess-hold", "--quote", "release は止めて", "--hold-release")
+
+	if got := workStatus(t, ws, id); got != "done" {
+		t.Fatalf("status = %q, want done (completion approved)", got)
+	}
+	states := map[string]string{}
+	for _, o := range runJSON(t, ws, "show", id)["operations"].([]any) {
+		m := o.(map[string]any)
+		states[m["id"].(string)] = m["state"].(string)
+	}
+	for _, op := range []string{release1, release2, del} {
+		if states[op] != "pending" {
+			t.Errorf("operation %s state = %q, want pending (kept by --hold-release)", op, states[op])
+		}
+	}
+	requireRelayedRecorded(t, ws, "sess-hold", "release は止めて")
+}
+
+// AC-246: 予算の使い切りの課題に budget --relayed で実装の枠を増やすと、使い切りから外れる
+// （ストアに保存された枠を status で読み直して確かめる）。
+func TestRelayed_AC246_BudgetRaisesImplBudget(t *testing.T) {
+	t.Setenv(claudeCodeEnvVar, "1")
+	ws := initializedWorkspace(t)
+	id := createExhaustedForCase(t, ws, "0.5")
+	if be := budgetExhaustedOf(t, ws); len(be) != 1 {
+		t.Fatalf("budget_exhausted = %v, want one entry before the budget", be)
+	}
+
+	got := runJSON(t, ws, "budget", id, "--impl-usd", "80", "--relayed", "--session", "sess-bud", "--quote", "80 に増やして")
+	if got["impl_usd"] != float64(80) {
+		t.Fatalf("impl_usd = %v, want 80", got["impl_usd"])
+	}
+	if be := budgetExhaustedOf(t, ws); len(be) != 0 {
+		t.Fatalf("budget_exhausted = %v, want none after raising the impl budget", be)
+	}
+	afters := activityAfters(t, ws, "approve")
+	var found bool
+	for _, a := range afters {
+		if a["approval_kind"] == "budget" {
+			found = true
+			if a["impl_budget_usd"] != float64(80) || a["relay_session"] != "sess-bud" || a["relay_quote"] != "80 に増やして" {
+				t.Errorf("budget log after = %v", a)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no budget approval in the log: %v", afters)
+	}
+}
+
+// 差し戻し（reject --relayed）の作業ログの after に relay_session・relay_quote が載る。
+func TestRelayed_RejectLogAfterCarriesEvidence(t *testing.T) {
+	t.Setenv(claudeCodeEnvVar, "1")
+	ws := initializedWorkspace(t)
+	id := planPendingChallenge(t, ws)
+
+	runJSON(t, ws, "reject", id, "--reason", "no", "--relayed", "--session", "sess-rej", "--quote", "差し戻して")
+
+	var found bool
+	for _, a := range activityAfters(t, ws, "reject") {
+		if a["relay_session"] == "sess-rej" && a["relay_quote"] == "差し戻して" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no reject log after carries relay_session/relay_quote: %s", relayedLog(t, ws))
 	}
 }
