@@ -63,6 +63,11 @@ var (
 	// で拒否する」）。
 	ErrVerificationRejected = errors.New("core: this (channel, verification) pair is not in the registry")
 
+	// ErrRelayEvidenceMissing は方式 relayed の会話の手がかり（session・quote）が
+	// 空であることを表す。errors.Is(err, ErrVerificationRejected) も真で、
+	// 呼び出し側の写像（verification_rejected）は変わらない。文だけが実際の原因を言う。
+	ErrRelayEvidenceMissing error = relayEvidenceMissingError{}
+
 	// ErrConflict は本人確認つきの操作（#12: approve・reject・answer）で、
 	// 要約を表示した時点（Prepare*）の課題の版と、書き込み（Execute*）の
 	// 時点の版が一致しなかったことを表す（§クリティカル設計決定 1「確認が
@@ -101,3 +106,12 @@ var ErrGitUnavailable = errors.New("core: git is not available")
 // （M3P45。CLI の `slot_unavailable`・`not_started` の理由への写像は委譲の
 // 起動の範囲）。
 var ErrSlotUnavailable = errors.New("core: no usable slot for the repository")
+
+// relayEvidenceMissingError は ErrRelayEvidenceMissing の型。
+type relayEvidenceMissingError struct{}
+
+func (relayEvidenceMissingError) Error() string {
+	return "core: relayed verification requires a non-empty session and quote"
+}
+
+func (relayEvidenceMissingError) Unwrap() error { return ErrVerificationRejected }

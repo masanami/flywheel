@@ -186,6 +186,9 @@ func registryPermits(ch Channel, v Verification, act attestedAction) bool {
 // を返す（fail-closed。self-review 指摘: 公開 API が nil Verifier で panic
 // しないようにする）。
 //
+// 方式が relayed で会話の手がかり（session・quote）のどちらかが空白なら、Confirm を
+// 呼ばず ErrRelayEvidenceMissing を返す（errors.Is(err, ErrVerificationRejected) も真）。
+//
 // まず (ch, verifier.Method()) が登録簿に無ければ ErrVerificationRejected を
 // 返し、verifier.Confirm を一切呼ばない（状態を変えない・端末にも触れない）。
 // 登録簿にあれば verifier.Confirm(summary, expectedID) を呼び、エラーは
@@ -206,7 +209,7 @@ func Verify(ch Channel, verifier Verifier, summary, expectedID string) (Attestat
 	if method == VerificationRelayed {
 		evidence = verifier.Evidence()
 		if !evidence.complete() {
-			return Attestation{}, ErrVerificationRejected
+			return Attestation{}, ErrRelayEvidenceMissing
 		}
 	}
 

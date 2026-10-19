@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +82,8 @@ func TestVerify_RelayedWithoutEvidenceIsRejectedWithoutConfirm(t *testing.T) {
 		fv := &fakeVerifier{method: VerificationRelayed, actor: "alice", evidence: ev}
 		if _, err := Verify(ChannelCLI, fv, "s", "C-1"); !errors.Is(err, ErrVerificationRejected) {
 			t.Errorf("evidence %+v: err = %v, want ErrVerificationRejected", ev, err)
+		} else if !errors.Is(err, ErrRelayEvidenceMissing) || strings.Contains(err.Error(), "registry") {
+			t.Errorf("evidence %+v: err = %q, want the empty-evidence message (not the registry one)", ev, err)
 		}
 		if fv.confirmCalls != 0 {
 			t.Errorf("evidence %+v: Confirm called %d times, want 0", ev, fv.confirmCalls)
