@@ -181,7 +181,7 @@ DDL ではなく、何を持つかの合意のための素描である。
 |---|---|---|
 | `challenge` | id, title, description, done_criteria, urgency, status, priority, position, size, budget_limit, reporter, reported_at | 現行台帳の 1 エントリに相当。人間記入欄と分類欄の区別は「誰が書けるか」の権限として core が持つ |
 | `challenge_dependency` | challenge_id, depends_on_id | 現行の `依存` フィールド。M4.5 で作る（旧台帳の `依存` を M5 で移す受け皿。課題どうしの関係のグラフ〔flywheel#176〕のデータにもなる） |
-| 課題カードの段階の欄（D20） | challenge_id, headline, context, issues（論点）, expected（完了したら見えるもの・予想）, actual（同・実物）, non_goals（やらないこと）, figure（図・任意） | M4 の S4 で作る。形（列か別表か・版を持つか）は S4 の仕様で決める。差し戻しの記録（`approval`）に「ずれた欄」を足す |
+| 課題カードの段階の欄（D20） | challenge_id, headline, context, issues（論点）, expected（完了したら見えるもの・予想）, actual（同・実物）, non_goals（やらないこと）, figure（図・任意） | M4 の S4 で作る。`challenge` の列（論点・予想・実物・やらないことは JSON の配列、図は Mermaid のテキスト。論点の回答は保留の記録を正本とし、`issues_hold_id` で参照する）とし、版ごとの履歴は持たず書き換えの前後を作業ログに残す。差し戻しの記録（`approval`）に「ずれた欄」（`rejected_fields`）を足す（[M4 の機能仕様](features/m4-ui-server.md) §クリティカル設計決定 5。2026-10-19 親 M4P33） |
 | `challenge_link` | challenge_id, kind（repo / issue / pr）, ref | 現行の関連リポジトリ・関連 Issue・関連 PR |
 | `task_plan` | challenge_id, version, summary, steps | FR-13 の承認対象。改訂履歴を持てる |
 | `approval` | id, challenge_id, kind（plan / completion / irreversible_op）, decision, actor, channel（ui / cli）, verification（tty_confirm / none / relayed）, decided_at, relay_session, relay_quote | D5。`actor` と `channel` が作業ログを兼ねる。`relay_session`・`relay_quote` は対話で受けた承認（`verification=relayed`）の会話の手がかり（会話の識別とオーナーの発言の要旨）で、それ以外は空。当初の案の `note` に当たる（M4 の S3 で足す。[M4 の機能仕様](features/m4-ui-server.md) M4H21） |
