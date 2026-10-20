@@ -77,7 +77,7 @@ func TestValidateJ1Output_MineRequiresPriority(t *testing.T) {
 	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", Reason: "r"})); ok {
 		t.Error("want ok=false when mine has no priority")
 	}
-	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r"})); !ok {
+	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r", Headline: strPtr("h"), Context: strPtr("c")})); !ok {
 		t.Error("want ok=true when mine has a valid priority")
 	}
 }
@@ -245,7 +245,7 @@ func TestApplyJ1Mine_RecordsActivityWithInvokerChannelAndRunID(t *testing.T) {
 	}
 	runID := insertFakeRunForTest(t, s, ch.ID, judgmentJ1)
 
-	mapped, err := s.applyJ1Mine(context.Background(), formatRunID(runID), ch.ID, PriorityP1)
+	mapped, err := s.applyJ1Mine(context.Background(), formatRunID(runID), ch.ID, PriorityP1, strPtr("h"), strPtr("c"))
 	if err != nil {
 		t.Fatalf("applyJ1Mine: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestApplyJ1Uncertain_RecordsActivityWithInvokerChannelAndRunID(t *testing.T
 	}
 	runID := insertFakeRunForTest(t, s, ch.ID, judgmentJ1)
 
-	mapped, err := s.applyJ1Uncertain(context.Background(), formatRunID(runID), ch.ID, "q?")
+	mapped, err := s.applyJ1Uncertain(context.Background(), formatRunID(runID), ch.ID, "q?", nil, nil)
 	if err != nil {
 		t.Fatalf("applyJ1Uncertain: %v", err)
 	}
@@ -442,7 +442,7 @@ func TestClassifyAutoJ1_Mine_ClassifiesWithPriority(t *testing.T) {
 		t.Fatalf("CreateChallenge: %v", err)
 	}
 	cycleID := beginJ1Cycle(t, s, 300)
-	inv := succeededInvoker(j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r"}))
+	inv := succeededInvoker(j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r", Headline: strPtr("h"), Context: strPtr("c")}))
 	id := ch.ID
 	res, err := s.ClassifyAutoJ1(context.Background(), J1AutoInput{ChallengeID: &id, AgentDecl: decl, Invoker: inv, CycleID: cycleID})
 	if err != nil {

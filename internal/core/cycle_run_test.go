@@ -84,7 +84,7 @@ func succeeded(output []byte) JudgmentLaunchOutput {
 // j1MineP は優先度 p の mine の出力。
 func j1MineP(t *testing.T, p string) []byte {
 	t.Helper()
-	return j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr(p), Reason: "r"})
+	return j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr(p), Reason: "r", Headline: strPtr("h"), Context: strPtr("c")})
 }
 
 // mineThenPlanInvoker は J1 なら mine（優先度 P1）、J2 なら plan（宛先は brief）を返す。
