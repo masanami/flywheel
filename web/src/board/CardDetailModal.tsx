@@ -11,6 +11,7 @@ import { ApprovalGuide } from "./ApprovalGuide.tsx";
 import { ApprovalPanel, approvalKindOf } from "./ApprovalPanel.tsx";
 import { CardFields } from "./CardFields.tsx";
 import { ClampedText } from "./ClampedText.tsx";
+import { StagesDetail } from "./StagesDetail.tsx";
 import type { Challenge } from "./types.ts";
 
 export interface Loaded {
@@ -261,6 +262,7 @@ export function DetailSections({ l }: { l: Loaded }) {
   const acts = [...activities].sort((a, b) => byTimeAsc(a.at, b.at));
   return (
     <>
+      <StagesDetail stages={show.stages} />
       <Section title="計画" count={plans.length}>
         {plans.map((p) => (
           <article key={p.version} data-plan={p.version}>

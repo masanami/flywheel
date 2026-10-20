@@ -78,6 +78,14 @@ function awaitingApproval(): Record<string, unknown> {
       plans: [],
       runs: [],
       source_binding: null,
+      stages: {
+        actual: null,
+        expected: null,
+        figure: null,
+        issues: null,
+        issues_answer: null,
+        non_goals: null,
+      },
     },
     [`${base}/log?challenge=C-1`]: { activities: [] },
     [`${base}/challenges/C-1/approval`]: {

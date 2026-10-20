@@ -122,6 +122,14 @@ function setup(
     plans: [],
     runs: [],
     source_binding: null,
+    stages: {
+      actual: null,
+      expected: null,
+      figure: null,
+      issues: null,
+      issues_answer: null,
+      non_goals: null,
+    },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-1"] = { activities: [] };
   return installFakes({ ...f, ...extra });
@@ -291,6 +299,14 @@ function fixturesFor(): Record<string, unknown> {
     plans: [],
     runs: [],
     source_binding: null,
+    stages: {
+      actual: null,
+      expected: null,
+      figure: null,
+      issues: null,
+      issues_answer: null,
+      non_goals: null,
+    },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-1"] = { activities: [] };
   return f;

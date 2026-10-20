@@ -132,6 +132,14 @@ function bodies() {
         },
       ],
       source_binding: null,
+      stages: {
+        actual: null,
+        expected: null,
+        figure: null,
+        issues: null,
+        issues_answer: null,
+        non_goals: null,
+      },
     };
     f[`/api/v1/workspaces/alpha/log?challenge=${id}`] = { activities: [] };
   }
