@@ -2,7 +2,7 @@ import type { Stages } from "../api/types.gen.ts";
 import { ClampedText } from "./ClampedText.tsx";
 
 // 段階の欄（論点・論点の決定・予想と実物・やらないこと）。すべて null なら何も出さない（欄の見出しも出さない）。
-// recommended は選択肢の 1 から数えた位置。figure はここでは描かない（判定にも入れない）。
+// recommended は選択肢の 1 から数えた位置。figure はここでは描かない（判定にも入れない。描くのは FigureView）。
 // 読み取り専用。選択肢を選ぶボタンも入力欄も置かない（回答は `flywheel answer`）。値はプレーンテキストで出す。
 export function StagesDetail({ stages }: { stages: Stages }) {
   const { issues, issues_answer, expected, actual, non_goals } = stages;

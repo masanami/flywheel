@@ -11,6 +11,7 @@ import { ApprovalGuide } from "./ApprovalGuide.tsx";
 import { ApprovalPanel, approvalKindOf } from "./ApprovalPanel.tsx";
 import { CardFields } from "./CardFields.tsx";
 import { ClampedText } from "./ClampedText.tsx";
+import { FigureView } from "./FigureView.tsx";
 import { StagesDetail } from "./StagesDetail.tsx";
 import type { Challenge } from "./types.ts";
 
@@ -263,6 +264,7 @@ export function DetailSections({ l }: { l: Loaded }) {
   return (
     <>
       <StagesDetail stages={show.stages} />
+      <FigureView figure={show.stages.figure} />
       <Section title="計画" count={plans.length}>
         {plans.map((p) => (
           <article key={p.version} data-plan={p.version}>
