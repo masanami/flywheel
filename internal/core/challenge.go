@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -45,6 +46,8 @@ type Challenge struct {
 	Reporter     string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+	// StageFields は「一言で」「位置づけ」と段階の欄（S4。NULL は nil）。
+	StageFields
 }
 
 // Plan は計画の 1 版（§データモデル task_plan）。
@@ -76,6 +79,8 @@ type Approval struct {
 	// relayed 以外は nil。
 	RelaySession *string
 	RelayQuote   *string
+	// RejectedFields は課題の差し戻しでずれた欄（閉集合の順）。指定の無い差し戻しと承認は nil。
+	RejectedFields []string
 }
 
 // Hold は保留の 1 件（§データモデル hold）。#9 は書き込まない（読み取りだけ実装する）。
@@ -127,6 +132,8 @@ type ChallengeDetail struct {
 	// m3-invoker-delegation.md §観測「show は、課題の run の一覧…を示す」）。
 	// 無ければ空スライス（nil でない）。
 	Runs []Run
+	// IssuesAnswer は IssuesHoldID の保留の回答。論点が無い・未回答なら nil。
+	IssuesAnswer *string
 }
 
 // CreateInput は CreateChallenge の入力。
@@ -144,6 +151,15 @@ type EditInput struct {
 	Description  *string
 	DoneCriteria *string
 	Urgency      *string
+	// Headline・Context・Figure は文字列、Issues・Expected・Actual・NonGoals は JSON の配列の
+	// 文字列（欄の形は stages.go）。空文字は NULL にする。
+	Headline *string
+	Context  *string
+	Issues   *string
+	Expected *string
+	Actual   *string
+	NonGoals *string
+	Figure   *string
 }
 
 // ListOptions は ListChallenges の絞り込み条件。
@@ -151,7 +167,7 @@ type ListOptions struct {
 	Status *string // nil なら絞り込まない
 }
 
-const challengeSelectColumns = `SELECT id, title, description, done_criteria, urgency, priority, status, version, reporter, created_at, updated_at FROM challenge`
+const challengeSelectColumns = `SELECT id, title, description, done_criteria, urgency, priority, status, version, reporter, created_at, updated_at, headline, context, issues, issues_hold_id, expected, actual, non_goals, figure FROM challenge`
 
 // rowScanner は *sql.Row と *sql.Rows の両方が満たすインタフェース。
 type rowScanner interface {
@@ -167,8 +183,10 @@ func scanChallengeRow(scanner rowScanner) (*Challenge, error) {
 		createdAtStr, updatedAtStr                         string
 		urgency, priority                                  sql.NullString
 		version                                            int
+		stages                                             stageScan
 	)
-	if err := scanner.Scan(&id, &title, &description, &doneCriteria, &urgency, &priority, &status, &version, &reporter, &createdAtStr, &updatedAtStr); err != nil {
+	dests := append([]any{&id, &title, &description, &doneCriteria, &urgency, &priority, &status, &version, &reporter, &createdAtStr, &updatedAtStr}, stages.dests()...)
+	if err := scanner.Scan(dests...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -192,6 +210,11 @@ func scanChallengeRow(scanner rowScanner) (*Challenge, error) {
 		p := Priority(priority.String)
 		c.Priority = &p
 	}
+	sf, err := stages.fields()
+	if err != nil {
+		return nil, err
+	}
+	c.StageFields = sf
 	createdAt, err := parseTimestamp(createdAtStr)
 	if err != nil {
 		return nil, err
@@ -245,7 +268,7 @@ func loadPlans(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Plan, erro
 
 func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approval, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote
+		`SELECT operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, rejected_fields
 		 FROM approval WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -261,10 +284,11 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 			reason         sql.NullString
 			relaySession   sql.NullString
 			relayQuote     sql.NullString
+			rejectedFields sql.NullString
 			decidedAtStr   string
 			a              Approval
 		)
-		if err := rows.Scan(&opID, &kind, &decision, &a.TargetVersion, &planVersion, &a.Actor, &a.Channel, &a.Verification, &reason, &decidedAtStr, &relaySession, &relayQuote); err != nil {
+		if err := rows.Scan(&opID, &kind, &decision, &a.TargetVersion, &planVersion, &a.Actor, &a.Channel, &a.Verification, &reason, &decidedAtStr, &relaySession, &relayQuote, &rejectedFields); err != nil {
 			return nil, err
 		}
 		a.Kind = ApprovalKind(kind)
@@ -283,6 +307,11 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 		}
 		a.RelaySession = nullStr(relaySession)
 		a.RelayQuote = nullStr(relayQuote)
+		if rejectedFields.Valid {
+			if err := json.Unmarshal([]byte(rejectedFields.String), &a.RejectedFields); err != nil {
+				return nil, fmt.Errorf("core: decode approval.rejected_fields: %w", err)
+			}
+		}
 		decidedAt, err := parseTimestamp(decidedAtStr)
 		if err != nil {
 			return nil, err
@@ -355,6 +384,23 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 		return nil, err
 	}
 	return holds, nil
+}
+
+// loadIssuesAnswer は論点を出した保留（holdID）の回答の文を返す。参照が無い・未回答・
+// 保留が見つからなければ nil（回答の正本は hold.answer）。
+func loadIssuesAnswer(ctx context.Context, tx *sql.Tx, challengeID int64, holdID *int64) (*string, error) {
+	if holdID == nil {
+		return nil, nil
+	}
+	var answer sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT answer FROM hold WHERE id = ? AND challenge_id = ?`, *holdID, challengeID).Scan(&answer)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return nullStr(answer), nil
 }
 
 // operationSelectColumns は operation テーブルの全カラムを select する共通の頭部。
@@ -598,6 +644,12 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		detail.SourceBinding = sb.toPublic()
+
+		answer, err := loadIssuesAnswer(ctx, tx, cid, c.IssuesHoldID)
+		if err != nil {
+			return err
+		}
+		detail.IssuesAnswer = answer
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -688,13 +740,18 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 		newUrgency = &u
 	}
 
+	patch, err := in.stagePatch()
+	if err != nil {
+		return nil, ErrValidation
+	}
+
 	cid, ok := parseChallengeID(id)
 	if !ok {
 		return nil, ErrNotFound
 	}
 
 	var result *Challenge
-	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
+	err = s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
 		current, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -734,6 +791,8 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 			newUrgencyValue = newUrgency
 		}
 
+		newStage := current.applyPatch(patch, before, after)
+
 		if len(after) == 0 {
 			result = current
 			return nil
@@ -745,10 +804,16 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 		if err != nil {
 			return err
 		}
+		stageArgs, err := newStage.args()
+		if err != nil {
+			return err
+		}
+		args := append([]any{newTitle, newDescription, newDoneCriteria, nullableUrgency(newUrgencyValue), newVersion, nowStr}, stageArgs...)
+		args = append(args, cid, current.Version)
 		res, err := tx.ExecContext(ctx,
-			`UPDATE challenge SET title = ?, description = ?, done_criteria = ?, urgency = ?, version = ?, updated_at = ?
+			`UPDATE challenge SET title = ?, description = ?, done_criteria = ?, urgency = ?, version = ?, updated_at = ?, `+stageUpdateSQL+`
 			 WHERE id = ? AND version = ?`,
-			newTitle, newDescription, newDoneCriteria, nullableUrgency(newUrgencyValue), newVersion, nowStr, cid, current.Version,
+			args...,
 		)
 		if err != nil {
 			return err
@@ -778,6 +843,7 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 			Reporter:     current.Reporter,
 			CreatedAt:    current.CreatedAt,
 			UpdatedAt:    now,
+			StageFields:  newStage,
 		}
 		return nil
 	})
@@ -785,6 +851,70 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 		return nil, err
 	}
 	return result, nil
+}
+
+// stagePatch は EditInput の段階の欄を検査して StagePatch にする。形に合わない値は
+// ErrValidation を包んだエラー。nil の欄は変えない、空文字は NULL。
+func (in EditInput) stagePatch() (StagePatch, error) {
+	var p StagePatch
+	if in.Headline != nil {
+		v, err := NormalizeEditText(*in.Headline, CheckHeadline)
+		if err != nil {
+			return p, err
+		}
+		p.Headline = StageSet(v)
+	}
+	if in.Context != nil {
+		v, err := NormalizeEditText(*in.Context, CheckContext)
+		if err != nil {
+			return p, err
+		}
+		p.Context = StageSet(v)
+	}
+	if in.Figure != nil {
+		v, err := NormalizeEditText(*in.Figure, CheckFigure)
+		if err != nil {
+			return p, err
+		}
+		p.Figure = StageSet(v)
+	}
+	if in.Issues != nil {
+		v, err := parseEditJSON(*in.Issues, ParseIssuesJSON)
+		if err != nil {
+			return p, err
+		}
+		p.Issues = StageSet(v)
+	}
+	if in.Expected != nil {
+		v, err := parseEditJSON(*in.Expected, ParseExpectedJSON)
+		if err != nil {
+			return p, err
+		}
+		p.Expected = StageSet(v)
+	}
+	if in.Actual != nil {
+		v, err := parseEditJSON(*in.Actual, ParseActualJSON)
+		if err != nil {
+			return p, err
+		}
+		p.Actual = StageSet(v)
+	}
+	if in.NonGoals != nil {
+		v, err := parseEditJSON(*in.NonGoals, ParseNonGoalsJSON)
+		if err != nil {
+			return p, err
+		}
+		p.NonGoals = StageSet(v)
+	}
+	return p, nil
+}
+
+// parseEditJSON は edit の JSON の欄を解釈する。空文字は NULL（nil）。
+func parseEditJSON[T any](text string, parse func(string) ([]T, error)) ([]T, error) {
+	if text == "" {
+		return nil, nil
+	}
+	return parse(text)
 }
 
 // nullStr は NULL 可の文字列列を *string へ写す（NULL は nil）。

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -59,7 +60,7 @@ func TestIngest_UnchangedFingerprintLeavesEverythingUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChallenge() error = %v", err)
 	}
-	if afterDetail.Challenge != beforeDetail.Challenge {
+	if !reflect.DeepEqual(afterDetail.Challenge, beforeDetail.Challenge) {
 		t.Errorf("Challenge changed = %+v, want unchanged %+v (AC-49)", afterDetail.Challenge, beforeDetail.Challenge)
 	}
 	if *afterDetail.SourceBinding != *beforeDetail.SourceBinding {
@@ -218,7 +219,7 @@ func TestIngest_UpdateKeepsApprovalsHoldsAndOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChallenge() error = %v", err)
 	}
-	if len(afterDetail.Approvals) != len(beforeDetail.Approvals) || afterDetail.Approvals[0] != beforeDetail.Approvals[0] {
+	if len(afterDetail.Approvals) != len(beforeDetail.Approvals) || !reflect.DeepEqual(afterDetail.Approvals[0], beforeDetail.Approvals[0]) {
 		t.Errorf("Approvals = %+v, want unchanged %+v (AC-54)", afterDetail.Approvals, beforeDetail.Approvals)
 	}
 	// Hold は Answer・AnsweredAt・AnsweredBy がポインタなので、再読込のたびに別の

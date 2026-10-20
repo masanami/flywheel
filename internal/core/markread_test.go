@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -155,7 +156,7 @@ func TestMarkRead_NoUnreadUpdate_NoOpSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChallenge() error = %v", err)
 	}
-	if afterChallenge.Challenge != beforeChallenge.Challenge {
+	if !reflect.DeepEqual(afterChallenge.Challenge, beforeChallenge.Challenge) {
 		t.Errorf("challenge changed = %+v, want unchanged %+v (AC-142)", afterChallenge.Challenge, beforeChallenge.Challenge)
 	}
 	if *afterChallenge.SourceBinding != *beforeChallenge.SourceBinding {

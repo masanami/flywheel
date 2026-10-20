@@ -17,6 +17,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -302,6 +303,9 @@ type ApprovalRequest struct {
 	Decision        ApprovalDecision
 	HoldRelease     bool
 	Reason          *string
+	// RejectedFields は課題の差し戻しでずれた欄（RejectedField の閉集合の値。重複は 1 つにし、
+	// 閉集合の順に記録する）。差し戻し以外・閉集合の外の値は ErrValidation。
+	RejectedFields []string
 }
 
 // ExecuteApproval は approve（T5・T13・T14）・reject（T6・T15）の②（書き込み）。
@@ -329,6 +333,23 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		}
 	default:
 		return nil, nil, ErrValidation
+	}
+
+	rejectedFields, ok := NormalizeRejectedFields(req.RejectedFields)
+	if !ok || (len(rejectedFields) > 0 && req.Decision != ApprovalDecisionRejected) {
+		return nil, nil, ErrValidation
+	}
+	var rejectedFieldsVal any
+	var rejectedFieldsOut []string
+	if len(rejectedFields) > 0 {
+		for _, f := range rejectedFields {
+			rejectedFieldsOut = append(rejectedFieldsOut, string(f))
+		}
+		b, err := json.Marshal(rejectedFieldsOut)
+		if err != nil {
+			return nil, nil, err
+		}
+		rejectedFieldsVal = string(b)
 	}
 
 	if req.Decision == ApprovalDecisionRejected && !attestationPermits(att, req.ChallengeID, actionReject) {
@@ -377,9 +398,9 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 
 		relaySession, relayQuote := att.relayColumns()
 		if _, err := tc.tx.ExecContext(ctx,
-			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote)
-			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			tc.id, string(kind), string(req.Decision), tc.current.Version, planVersionVal, att.Actor(), string(att.Channel()), string(att.Verification()), reasonVal, tc.nowStr, relaySession, relayQuote,
+			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, rejected_fields)
+			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			tc.id, string(kind), string(req.Decision), tc.current.Version, planVersionVal, att.Actor(), string(att.Channel()), string(att.Verification()), reasonVal, tc.nowStr, relaySession, relayQuote, rejectedFieldsVal,
 		); err != nil {
 			return err
 		}
@@ -390,6 +411,9 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		att.addRelayTo(tc.after)
 		if req.Decision == ApprovalDecisionRejected {
 			tc.after["reason"] = *req.Reason
+		}
+		if rejectedFieldsOut != nil {
+			tc.after["rejected_fields"] = rejectedFieldsOut
 		}
 
 		approvalOut = Approval{
@@ -403,6 +427,8 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 			Verification:  string(att.Verification()),
 			Reason:        req.Reason,
 			DecidedAt:     tc.now,
+
+			RejectedFields: rejectedFieldsOut,
 		}
 		approvalOut.RelaySession, approvalOut.RelayQuote = att.relayPtrs()
 

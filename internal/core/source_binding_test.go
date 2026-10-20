@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -313,8 +314,8 @@ func TestOpenWorkspace_UpgradesSchemaVersion1StoreToVersion2AndPreservesExisting
 	ctx := context.Background()
 
 	// 0004（#78）を足した後の最新版は 4（AC-99 の文言と同じ改訂。AC-165）。
-	if got := schemaVersionForTest(t, s); got != 7 {
-		t.Fatalf("schema version = %d, want 7 (AC-99)", got)
+	if got := schemaVersionForTest(t, s); got != 8 {
+		t.Fatalf("schema version = %d, want 8 (AC-99)", got)
 	}
 
 	// AC-100: 課題の件数と内容。
@@ -339,7 +340,7 @@ func TestOpenWorkspace_UpgradesSchemaVersion1StoreToVersion2AndPreservesExisting
 		t.Errorf("C-1 urgency/priority = %v/%v, want high/nil (AC-100)", got.Urgency, got.Priority)
 	}
 	got.Urgency, wantC1.Urgency = nil, nil
-	if got != wantC1 {
+	if !reflect.DeepEqual(got, wantC1) {
 		t.Errorf("C-1 = %+v, want %+v (AC-100)", got, wantC1)
 	}
 	wantC2 := Challenge{
@@ -350,7 +351,7 @@ func TestOpenWorkspace_UpgradesSchemaVersion1StoreToVersion2AndPreservesExisting
 	if err != nil {
 		t.Fatalf("GetChallenge(C-2) error = %v", err)
 	}
-	if detail2.Challenge != wantC2 {
+	if !reflect.DeepEqual(detail2.Challenge, wantC2) {
 		t.Errorf("C-2 = %+v, want %+v (AC-100)", detail2.Challenge, wantC2)
 	}
 
