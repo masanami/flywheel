@@ -66,6 +66,14 @@ function bodies() {
     plans: [{ body: "計画の本文", created_at: "", spec: null, version: 1 }],
     runs: [],
     source_binding: null,
+    stages: {
+      actual: null,
+      expected: null,
+      figure: null,
+      issues: null,
+      issues_answer: null,
+      non_goals: ["やらないこと1"],
+    },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-2"] = { activities: [] };
   f["/api/v1/workspaces/alpha/challenges/C-2/approval"] = {
@@ -184,6 +192,8 @@ it("カードを開くと詳細のモーダルに、API から読んだ計画と
   await within(modal).findAllByText("計画の本文");
   expect(within(modal).getAllByText("完了条件C-2")[0]).toBeInTheDocument();
   expect(within(modal).getByText("説明C-2")).toBeInTheDocument();
+  expect(within(modal).getByText("やらないこと")).toBeInTheDocument();
+  expect(within(modal).getByText("やらないこと1")).toBeInTheDocument();
   expect(within(modal).getByLabelText("承認方法の案内")).toBeInTheDocument();
   expect(requests.every((r) => r.method === "GET")).toBe(true);
   fireEvent.click(within(modal).getByText("閉じる"));
