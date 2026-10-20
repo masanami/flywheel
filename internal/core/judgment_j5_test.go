@@ -891,3 +891,199 @@ func TestCheckCompleted_LegacyStatusesAndCheckRuns(t *testing.T) {
 		}
 	}
 }
+
+// --- 実物（actual）---
+
+func j5OutWithActual(verdict string, actual any) JudgmentLaunchOutput {
+	m := map[string]any{"verdict": verdict, "reason": "REASON-" + verdict, "feedback": nil, "question": nil, "actual": actual}
+	switch verdict {
+	case "not_met":
+		m["feedback"] = "FB"
+	case "uncertain":
+		m["question"] = "Q"
+	}
+	b, _ := json.Marshal(m)
+	return JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: b, ReportedTotalCostUSD: float64Ptr(0.5)}
+}
+
+func (f *j5Fixture) setExpected(t *testing.T, id string, n int) {
+	t.Helper()
+	cid, _ := parseChallengeID(id)
+	var ex []StageExpected
+	for i := 0; i < n; i++ {
+		ex = append(ex, StageExpected{Kind: ExpectedKindBehavior, Scene: "s", Before: "b", After: "a"})
+	}
+	b, _ := json.Marshal(ex)
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE challenge SET expected = ? WHERE id = ?`, string(b), cid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *j5Fixture) setActual(t *testing.T, id, raw string) {
+	t.Helper()
+	cid, _ := parseChallengeID(id)
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE challenge SET actual = ? WHERE id = ?`, raw, cid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// j5TargetFor は判定ごとの遷移先。
+func j5TargetFor(verdict string) Status {
+	if verdict == "met" {
+		return StatusAwaitingCompletionApproval
+	}
+	return StatusInProgress
+}
+
+func actualItems(n int) []map[string]string {
+	var out []map[string]string
+	for i := 0; i < n; i++ {
+		out = append(out, map[string]string{"scene": fmt.Sprintf("S%d", i), "after": fmt.Sprintf("A%d", i)})
+	}
+	return out
+}
+
+func TestValidateJ5Output_Actual(t *testing.T) {
+	long := strings.Repeat("あ", MaxStageRunes+1)
+	cases := []struct {
+		name string
+		raw  string
+		ok   bool
+		n    int
+	}{
+		{"absent", `{"verdict":"met","reason":"r"}`, true, 0},
+		{"null", `{"verdict":"met","reason":"r","actual":null}`, true, 0},
+		{"empty array is NULL", `{"verdict":"met","reason":"r","actual":[]}`, true, 0},
+		{"three", `{"verdict":"met","reason":"r","actual":[{"scene":"a","after":"b"},{"scene":"a","after":"b"},{"scene":"a","after":"b"}]}`, true, 3},
+		{"four", `{"verdict":"met","reason":"r","actual":[{"scene":"a","after":"b"},{"scene":"a","after":"b"},{"scene":"a","after":"b"},{"scene":"a","after":"b"}]}`, false, 0},
+		{"blank scene", `{"verdict":"met","reason":"r","actual":[{"scene":" ","after":"b"}]}`, false, 0},
+		{"missing after", `{"verdict":"met","reason":"r","actual":[{"scene":"a"}]}`, false, 0},
+		{"too long", `{"verdict":"met","reason":"r","actual":[{"scene":"` + long + `","after":"b"}]}`, false, 0},
+		{"not an array", `{"verdict":"met","reason":"r","actual":"x"}`, false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v, ok := validateJ5Output([]byte(tc.raw))
+			if ok != tc.ok || (ok && len(v.Actual) != tc.n) {
+				t.Fatalf("ok = %v actual = %v", ok, v)
+			}
+		})
+	}
+	var schema map[string]any
+	_ = json.Unmarshal(j5OutputSchema(), &schema)
+	if _, ok := schema["properties"].(map[string]any)["actual"]; !ok {
+		t.Error("schema has no actual")
+	}
+}
+
+func TestVerifyAutoJ5_Actual_MetAndNotMetWriteItInTheSameTransaction(t *testing.T) {
+	for _, verdict := range []string{"met", "not_met"} {
+		t.Run(verdict, func(t *testing.T) {
+			f := newJ5Fixture(t, "impl")
+			f.delegateToVerifying(t, "C-1")
+			f.setExpected(t, "C-1", 2)
+			f.j5.result = j5OutWithActual(verdict, actualItems(2))
+			if _, err := f.verify(t, nil); err != nil {
+				t.Fatal(err)
+			}
+			d := f.detail(t, "C-1")
+			want := j5TargetFor(verdict)
+			if d.Status != want {
+				t.Errorf("status = %s, want %s", d.Status, want)
+			}
+			if len(d.Actual) != 2 || d.Actual[0].Scene != "S0" || d.Actual[1].After != "A1" {
+				t.Errorf("actual = %+v", d.Actual)
+			}
+			var after map[string]any
+			_ = json.Unmarshal(lastActivity(t, f.s, "C-1").After, &after)
+			if arr, ok := after["actual"].([]any); !ok || len(arr) != 2 {
+				t.Errorf("after.actual = %T (%v), want a parsed array", after["actual"], after["actual"])
+			}
+		})
+	}
+}
+
+func TestVerifyAutoJ5_Actual_CountMismatchHoldsAndDoesNotWrite(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.setExpected(t, "C-1", 2)
+	f.setActual(t, "C-1", `[{"scene":"OLD","after":"OLD"}]`)
+	f.j5.result = j5OutWithActual("met", actualItems(3))
+	res, err := f.verify(t, nil)
+	if err != nil || len(res.Items) != 1 {
+		t.Fatal(res, err)
+	}
+	it := res.Items[0]
+	if it.Result != RunResultSucceeded || it.Status == nil || *it.Status != string(StatusAwaitingHuman) {
+		t.Errorf("item = %+v", it)
+	}
+	d := f.detail(t, "C-1")
+	if d.Status != StatusAwaitingHuman || len(d.Actual) != 1 || d.Actual[0].Scene != "OLD" {
+		t.Errorf("status = %s actual = %+v", d.Status, d.Actual)
+	}
+	if q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`); !strings.HasPrefix(q, ActualMismatchHoldPreamble) {
+		t.Errorf("question = %q", q)
+	}
+	// 実物なしの met も同じ（予想が非 NULL）。
+	f2 := newJ5Fixture(t, "impl")
+	f2.delegateToVerifying(t, "C-1")
+	f2.setExpected(t, "C-1", 1)
+	if _, err := f2.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f2.detail(t, "C-1").Status; got != StatusAwaitingHuman {
+		t.Errorf("met without actual and with expected: status = %s", got)
+	}
+}
+
+func TestVerifyAutoJ5_Actual_NoExpectedMetWithoutActualStillMovesToT8(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusAwaitingCompletionApproval {
+		t.Errorf("status = %s", got)
+	}
+}
+
+func TestVerifyAutoJ5_Actual_InvalidShapeIsInvalidOutput(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.j5.result = j5OutWithActual("met", actualItems(4))
+	res, _ := f.verify(t, nil)
+	if res.Items[0].Result != RunResultInvalidOutput || f.detail(t, "C-1").Status != StatusVerifying {
+		t.Errorf("item = %+v", res.Items[0])
+	}
+}
+
+func TestVerifyAutoJ5_Actual_StatusChangedWhileJ5Ran_DoesNotWrite(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.j5.result = j5OutWithActual("met", actualItems(1))
+	f.j5.onInvoke = func(JudgmentLaunchInput) { f.setStatus(t, "C-1", "awaiting_human") }
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if d := f.detail(t, "C-1"); len(d.Actual) != 0 {
+		t.Errorf("actual = %+v, want none", d.Actual)
+	}
+}
+
+func TestVerifyAutoJ5_Actual_InputCarriesTheExpected(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.setExpected(t, "C-1", 1)
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if in := f.stdin(t); !strings.Contains(in, "予想の例") || !strings.Contains(in, `"scene":"s"`) {
+		t.Error("J5 input lacks the expected section")
+	}
+}

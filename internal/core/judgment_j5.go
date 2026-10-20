@@ -34,10 +34,11 @@ const NotStartedWaitingExternal NotStartedReason = "waiting_external"
 // --- J5 の出力スキーマ・検査 ---
 
 type j5RawOutput struct {
-	Verdict  string  `json:"verdict"`
-	Reason   *string `json:"reason"`
-	Feedback *string `json:"feedback"`
-	Question *string `json:"question"`
+	Verdict  string         `json:"verdict"`
+	Reason   *string        `json:"reason"`
+	Feedback *string        `json:"feedback"`
+	Question *string        `json:"question"`
+	Actual   *[]StageActual `json:"actual"`
 }
 
 // j5ValidatedOutput は検査を通った J5 の出力。
@@ -46,6 +47,8 @@ type j5ValidatedOutput struct {
 	Reason   string
 	Feedback *string
 	Question *string
+	// Actual は検査済みの実物（無い・0 個は nil）。
+	Actual []StageActual
 }
 
 // j5OutputSchema は J5 の `--json-schema` に渡すスキーマ（§IF / API「判断点の出力」の J5 の行）。
@@ -62,6 +65,19 @@ func j5OutputSchema() []byte {
 			"reason":   map[string]any{"type": "string"},
 			"feedback": map[string]any{"type": []string{"string", "null"}},
 			"question": map[string]any{"type": []string{"string", "null"}},
+			"actual": map[string]any{
+				"type":     []string{"array", "null"},
+				"maxItems": MaxActual,
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"scene": map[string]any{"type": "string"},
+						"after": map[string]any{"type": "string"},
+					},
+					"required":             []string{"scene", "after"},
+					"additionalProperties": false,
+				},
+			},
 		},
 		"required":             []string{"verdict", "reason"},
 		"additionalProperties": false,
@@ -93,7 +109,15 @@ func validateJ5Output(data []byte) (*j5ValidatedOutput, bool) {
 	if verdict == J5VerdictUncertain && blank(raw.Question) {
 		return nil, false
 	}
-	return &j5ValidatedOutput{Verdict: verdict, Reason: *raw.Reason, Feedback: raw.Feedback, Question: raw.Question}, true
+	var actual []StageActual
+	if raw.Actual != nil {
+		n, err := NormalizeActual(*raw.Actual)
+		if err != nil {
+			return nil, false
+		}
+		actual = n
+	}
+	return &j5ValidatedOutput{Verdict: verdict, Reason: *raw.Reason, Feedback: raw.Feedback, Question: raw.Question, Actual: actual}, true
 }
 
 // --- CI の判定規則 ---
@@ -331,6 +355,13 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 	if vc.Plan.HasSpec {
 		sections = append(sections, JudgmentDataSection{Label: "承認済みの計画の構造化した出力", Content: vc.Plan.Spec})
 	}
+	if len(ch.Expected) > 0 {
+		b, err := json.Marshal(ch.Expected)
+		if err != nil {
+			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedUpstreamFetchFailed, Detail: err.Error()}
+		}
+		sections = append(sections, JudgmentDataSection{Label: "予想の例", Content: string(b)})
+	}
 	sections = append(sections,
 		JudgmentDataSection{Label: "直前の委譲の報告", Content: formatDelegationReportSection(vc)},
 		JudgmentDataSection{Label: "照合の結果", Content: formatReconciliationSection(vc)},
@@ -396,30 +427,86 @@ func selectJ5AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 
 // applyJ5 は検査を通った出力を、M1 の verify（T8〜T10）へ経路 invoker・原因の run の ID つきで写す。
 // 写す直前に読み直した課題が検証中でなければ（遷移表に行が無い）写さず、mapped=false を返す。
-func (s *Store) applyJ5(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput) (mapped bool, err error) {
-	var op Operation
-	switch v.Verdict {
-	case J5VerdictMet:
-		op = OpVerifyMet
-	case J5VerdictNotMet:
-		op = OpVerifyNotMet
-	default:
-		op = OpVerifyUncertain
+func (s *Store) applyJ5(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput) (mapped, mismatch bool, err error) {
+	// 操作は事前の読み取りで選ぶ。書き込みトランザクションの中で読み直した予想と判定がずれたら
+	// （間に edit が入った）、書かずに選び直す。
+	for attempt := 0; attempt < 3; attempt++ {
+		mapped, mismatch, err = s.applyJ5Once(ctx, runIDDisplay, challengeIDDisplay, v)
+		if !errors.Is(err, errJ5StaleExpected) {
+			return mapped, mismatch, err
+		}
+	}
+	return false, false, ErrConflict
+}
+
+var errJ5StaleExpected = errors.New("core: expected changed while mapping J5")
+
+func j5ActualMismatch(v *j5ValidatedOutput, expected []StageExpected) bool {
+	return v.Verdict == J5VerdictMet && len(expected) > 0 && len(expected) != len(v.Actual)
+}
+
+func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput) (mapped, mismatch bool, err error) {
+	op, mismatch, err := s.j5Operation(ctx, challengeIDDisplay, v)
+	if err != nil {
+		return false, false, err
 	}
 	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, op, func(ctx context.Context, tc *transitionCtx) error {
+		if j5ActualMismatch(v, tc.current.Expected) != mismatch {
+			return errJ5StaleExpected
+		}
 		mapped = true
+		if mismatch {
+			// 実物は課題へ書かない（前の値のまま）。
+			return insertHold(ctx, tc, ActualMismatchHoldPreamble+" "+v.Reason)
+		}
 		if v.Verdict == J5VerdictUncertain {
 			return insertHold(ctx, tc, *v.Question)
+		}
+		if v.Actual != nil && (v.Verdict == J5VerdictMet || v.Verdict == J5VerdictNotMet) {
+			tc.patchStages(StagePatch{Actual: StageSet(v.Actual)})
 		}
 		return nil
 	})
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) {
-			return false, nil
+			return false, false, nil
 		}
-		return false, err
+		return false, false, err
 	}
-	return mapped, nil
+	return mapped, mismatch, nil
+}
+
+// j5Operation は出力を写す遷移の操作を選ぶ。met で課題の予想が空でなく、実物の個数が予想の個数と
+// 違うときは、完了の確認へ進めず保留（T10）にする（mismatch=true）。予想は写す直前に読み直す。
+func (s *Store) j5Operation(ctx context.Context, challengeIDDisplay string, v *j5ValidatedOutput) (op Operation, mismatch bool, err error) {
+	switch v.Verdict {
+	case J5VerdictMet:
+		op = OpVerifyMet
+	case J5VerdictNotMet:
+		return OpVerifyNotMet, false, nil
+	default:
+		return OpVerifyUncertain, false, nil
+	}
+	cid, ok := parseChallengeID(challengeIDDisplay)
+	if !ok {
+		return op, false, ErrNotFound
+	}
+	var expected []StageExpected
+	err = classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
+		ch, err := loadChallenge(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		expected = ch.Expected
+		return nil
+	}))
+	if err != nil {
+		return op, false, err
+	}
+	if j5ActualMismatch(v, expected) {
+		return OpVerifyUncertain, true, nil
+	}
+	return op, false, nil
 }
 
 // finalizeJ5Output は run が succeeded のときに、出力を検査し直して課題へ写す。検査に落ちたら
@@ -432,7 +519,7 @@ func (s *Store) finalizeJ5Output(ctx context.Context, runIDDisplay, challengeIDD
 		}
 		return "", nil, RunResultInvalidOutput, nil
 	}
-	mapped, err := s.applyJ5(ctx, runIDDisplay, challengeIDDisplay, v)
+	mapped, mismatch, err := s.applyJ5(ctx, runIDDisplay, challengeIDDisplay, v)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -448,7 +535,12 @@ func (s *Store) finalizeJ5Output(ctx context.Context, runIDDisplay, challengeIDD
 	default:
 		st = string(StatusAwaitingHuman)
 	}
-	return string(v.Verdict), &st, RunResultSucceeded, nil
+	outcome = string(v.Verdict)
+	if mismatch {
+		// met だが実物を予想の例ごとに確かめられなかった: uncertain の保留と同じ扱い（成功）。
+		outcome, st = string(J5VerdictUncertain), string(StatusAwaitingHuman)
+	}
+	return outcome, &st, RunResultSucceeded, nil
 }
 
 // --- `verify --auto` の本体 ---
