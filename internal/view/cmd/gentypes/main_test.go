@@ -116,3 +116,24 @@ func TestGenerateAllWritesClosedSets(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateNullableSliceTag(t *testing.T) {
+	type withNull struct {
+		A []string `json:"a" ts:"nullable"`
+		B []string `json:"b"`
+		C *string  `json:"c" ts:"nullable"`
+	}
+	src, err := Generate([]reflect.Type{reflect.TypeOf(withNull{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(src)
+	for _, want := range []string{"  a: string[] | null;", "  b: string[];", "  c: string | null;"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("出力に %q が無い:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "| null | null") {
+		t.Errorf("null が重なっている:\n%s", s)
+	}
+}

@@ -75,8 +75,17 @@ function summary(over: Partial<ApprovalSummary> = {}): {
       other_pending_operations: [
         { id: "O-2", kind: "delete", summary: "古いデータの削除" },
       ],
+      pairs: [],
       plan: null,
       release_held: true,
+      stages: {
+        actual: null,
+        expected: null,
+        figure: null,
+        issues: null,
+        issues_answer: null,
+        non_goals: null,
+      },
       releases: [
         {
           head_sha: "abc123def456",

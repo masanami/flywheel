@@ -84,6 +84,8 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 	}
 }
 
+const emptyStages = `{"actual":null,"expected":null,"figure":null,"issues":null,"issues_answer":null,"non_goals":null}`
+
 func TestFromApprovalPreview(t *testing.T) {
 	ref := "https://github.com/o/r/pull/3"
 	sha := "abc"
@@ -96,14 +98,14 @@ func TestFromApprovalPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"approval":{"challenge_id":"C-1","done_criteria":"d","kind":"completion","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"title":"t","version":4}}`
+	want := `{"approval":{"challenge_id":"C-1","done_criteria":"d","kind":"completion","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"stages":` + emptyStages + `,"title":"t","version":4}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
 
 	plan := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, Version: 2, PlanVersion: 3, PlanBody: "B"}
 	b, _ = json.Marshal(view.FromApprovalPreview(plan, nil))
-	want = `{"approval":{"challenge_id":"C-1","done_criteria":null,"kind":"plan","other_pending_operations":[],"plan":{"body":"B","version":3},"release_held":true,"releases":[],"title":"t","version":2}}`
+	want = `{"approval":{"challenge_id":"C-1","done_criteria":null,"kind":"plan","other_pending_operations":[],"pairs":[],"plan":{"body":"B","version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
@@ -131,5 +133,53 @@ func TestFromApprovalAndHoldCopyRelayEvidence(t *testing.T) {
 		if !strings.Contains(got, k) {
 			t.Errorf("FromHold(unanswered) = %s, want %s", got, k)
 		}
+	}
+}
+
+func TestFromStagesNullsAndShapes(t *testing.T) {
+	if got := marshal(t, view.FromStages(core.StageFields{NonGoals: []string{}, Issues: []core.StageIssue{}}, nil)); got != emptyStages {
+		t.Errorf("empty stages = %s", got)
+	}
+	ans, fig, ex := "答え", "graph TD", "例"
+	f := core.StageFields{
+		Figure:   &fig,
+		Issues:   []core.StageIssue{{Question: "q", Options: []core.StageOption{{Label: "a", Example: &ex}, {Label: "b"}}, Recommended: 2}},
+		Expected: []core.StageExpected{{Kind: core.ExpectedKindCLI, Scene: "s", Before: "b", After: "a"}},
+		Actual:   []core.StageActual{{Scene: "s", After: "a"}},
+		NonGoals: []string{"x"},
+	}
+	want := `{"actual":[{"after":"a","scene":"s"}],"expected":[{"after":"a","before":"b","kind":"cli","scene":"s"}],"figure":"graph TD","issues":[{"options":[{"example":"例","label":"a"},{"example":null,"label":"b"}],"question":"q","recommended":2}],"issues_answer":"答え","non_goals":["x"]}`
+	if got := marshal(t, view.FromStages(f, &ans)); got != want {
+		t.Errorf("stages:\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestFromPairs(t *testing.T) {
+	if got := marshal(t, view.FromPairs(core.Pairs(nil, nil))); got != `[]` {
+		t.Errorf("empty pairs = %s", got)
+	}
+	e := []core.StageExpected{{Kind: core.ExpectedKindUI, Scene: "s1", Before: "b", After: "a"}, {Kind: core.ExpectedKindUI, Scene: "s2", Before: "b", After: "a"}}
+	a := []core.StageActual{{Scene: "s1", After: "x"}}
+	want := `[{"actual":{"after":"x","scene":"s1"},"expected":{"after":"a","before":"b","kind":"ui","scene":"s1"}},{"actual":null,"expected":{"after":"a","before":"b","kind":"ui","scene":"s2"}}]`
+	if got := marshal(t, view.FromPairs(core.Pairs(e, a))); got != want {
+		t.Errorf("pairs:\n got %s\nwant %s", got, want)
+	}
+	want = `[{"actual":{"after":"x","scene":"s1"},"expected":null}]`
+	if got := marshal(t, view.FromPairs(core.Pairs(nil, a))); got != want {
+		t.Errorf("pairs:\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestChallengeAndApprovalCarryS4Keys(t *testing.T) {
+	h, c := "一言", "位置づけ"
+	got := marshal(t, view.FromChallenge(core.Challenge{StageFields: core.StageFields{Headline: &h, Context: &c}}))
+	if !strings.Contains(got, `"context":"位置づけ"`) || !strings.Contains(got, `"headline":"一言"`) {
+		t.Errorf("challenge = %s", got)
+	}
+	if got := marshal(t, view.FromApproval(core.Approval{})); !strings.Contains(got, `"rejected_fields":null`) {
+		t.Errorf("approval = %s", got)
+	}
+	if got := marshal(t, view.FromApproval(core.Approval{RejectedFields: []string{"expected"}})); !strings.Contains(got, `"rejected_fields":["expected"]`) {
+		t.Errorf("approval = %s", got)
 	}
 }

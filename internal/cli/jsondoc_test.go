@@ -157,6 +157,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3WaitingExternalShapes(t, &doc)
 	addM4HoldRunIDShape(t, &doc)
 	addM4RelayEvidenceShape(t, &doc)
+	addM4StageShape(t, &doc)
 	return doc
 }
 
@@ -868,4 +869,32 @@ func addM4RelayEvidenceShape(t *testing.T, doc *documentedJSON) {
 	}
 	doc.entity["hold"]["answered_channel"] = true
 	doc.entity["hold"]["answered_verification"] = true
+}
+
+// addM4StageShape は S4 が `--json` に足すキー（challenge の headline・context、show の最上位の
+// stages、承認の要素の rejected_fields）を doc へ足す。正本は m4-ui-server.md §IF / API「`show --json` と ① に足すもの（S4）」。
+func addM4StageShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4-ui-server.md"))
+	if err != nil {
+		t.Fatalf("read m4 spec: %v", err)
+	}
+	var challengeLine, stagesLine, rejectedLine bool
+	for _, line := range strings.Split(string(data), "\n") {
+		challengeLine = challengeLine || strings.Contains(line, "に `headline`・`context`（string \\| null）を足す")
+		stagesLine = stagesLine || strings.Contains(line, "`show --json` の最上位に `stages` を足す")
+		rejectedLine = rejectedLine || strings.Contains(line, "承認の要素に `rejected_fields`")
+	}
+	if !challengeLine || !stagesLine || !rejectedLine {
+		t.Fatalf("m4 spec does not document the S4 keys of --json (challenge=%v stages=%v rejected_fields=%v)", challengeLine, stagesLine, rejectedLine)
+	}
+	if len(doc.entity["challenge"]) == 0 || len(doc.entity["approval"]) == 0 || len(doc.topLevel["show"]) == 0 {
+		t.Fatal("documented shape of challenge/approval/show not found")
+	}
+	doc.entity["challenge"]["headline"] = true
+	doc.entity["challenge"]["context"] = true
+	doc.entity["approval"]["rejected_fields"] = true
+	for _, keys := range doc.topLevel["show"] {
+		keys["stages"] = true
+	}
 }

@@ -171,6 +171,10 @@ func (g *generator) iface(t reflect.Type) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("%s.%s: %w", t.Name(), f.Name, err)
 		}
+		// 配列が null になりうる欄（Go では nil のスライス）には `ts:"nullable"` を付ける。
+		if f.Tag.Get("ts") == "nullable" && !strings.HasSuffix(ts, " | null") {
+			ts += " | null"
+		}
 		opt := ""
 		if omit {
 			opt = "?"

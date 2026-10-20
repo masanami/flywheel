@@ -82,9 +82,11 @@ function mk(
   } = p;
   return {
     c: {
+      context: context ?? null,
       created_at: iso(600),
       description: "",
       done_criteria: "",
+      headline: headline ?? null,
       id,
       priority: null,
       reporter: "masami",

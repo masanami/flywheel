@@ -54,7 +54,7 @@ func CardModifierValues() []CardModifier {
 	}
 }
 
-// Card は課題カードの導出結果。Headline・Context は S1 では常に nil。
+// Card は課題カードの導出結果。Headline・Context は challenge の列の値（無ければ nil）。
 type Card struct {
 	State            Status
 	Modifiers        []CardModifier
@@ -140,7 +140,7 @@ func deriveCard(c Challenge, st *Overview, runs []*runRow, ownSlots []string, no
 	if st == nil {
 		st = &Overview{}
 	}
-	card := &Card{State: c.Status, Modifiers: []CardModifier{}, NextHumanActions: []CardAction{}, SlotIDs: []string{}}
+	card := &Card{State: c.Status, Modifiers: []CardModifier{}, NextHumanActions: []CardAction{}, SlotIDs: []string{}, Headline: c.Headline, Context: c.Context}
 
 	running, unresponsive := false, false
 	linkedSlots := map[string]bool{}

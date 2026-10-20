@@ -13,9 +13,11 @@ export interface StatusActionable {
 }
 
 export interface Challenge {
+  context: string | null;
   created_at: string;
   description: string;
   done_criteria: string;
+  headline: string | null;
   id: string;
   priority: string | null;
   reporter: string;
@@ -98,6 +100,7 @@ export interface ShowResponse {
   plans: PlanDetail[];
   runs: Run[];
   source_binding: SourceBinding | null;
+  stages: Stages;
 }
 
 export interface Approval {
@@ -108,6 +111,7 @@ export interface Approval {
   kind: string;
   operation_id: string | null;
   reason: string | null;
+  rejected_fields: string[] | null;
   relay_quote: string | null;
   relay_session: string | null;
   target_version: number;
@@ -168,6 +172,38 @@ export interface SourceBinding {
   url: string;
 }
 
+export interface Stages {
+  actual: StageActual[] | null;
+  expected: StageExpected[] | null;
+  figure: string | null;
+  issues: StageIssue[] | null;
+  issues_answer: string | null;
+  non_goals: string[] | null;
+}
+
+export interface StageActual {
+  after: string;
+  scene: string;
+}
+
+export interface StageExpected {
+  after: string;
+  before: string;
+  kind: string;
+  scene: string;
+}
+
+export interface StageIssue {
+  options: StageOption[];
+  question: string;
+  recommended: number;
+}
+
+export interface StageOption {
+  example: string | null;
+  label: string;
+}
+
 export interface LogResponse {
   activities: Activity[];
 }
@@ -210,9 +246,11 @@ export interface ListCardResponse {
 
 export interface ChallengeCard {
   card: Card;
+  context: string | null;
   created_at: string;
   description: string;
   done_criteria: string;
+  headline: string | null;
   id: string;
   priority: string | null;
   reporter: string;
@@ -242,6 +280,7 @@ export interface ShowCardResponse {
   plans: PlanDetail[];
   runs: Run[];
   source_binding: SourceBinding | null;
+  stages: Stages;
 }
 
 export interface NeedsHumanResponse {
@@ -288,9 +327,11 @@ export interface ApprovalSummary {
   done_criteria: string | null;
   kind: string;
   other_pending_operations: ApprovalOtherOperation[];
+  pairs: StagePair[];
   plan: ApprovalPlan | null;
   release_held: boolean;
   releases: ApprovalRelease[];
+  stages: Stages;
   title: string;
   version: number;
 }
@@ -299,6 +340,11 @@ export interface ApprovalOtherOperation {
   id: string;
   kind: string;
   summary: string;
+}
+
+export interface StagePair {
+  actual: StageActual | null;
+  expected: StageExpected | null;
 }
 
 export interface ApprovalPlan {
