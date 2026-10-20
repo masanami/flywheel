@@ -47,8 +47,11 @@ type transitionCtx struct {
 	before   map[string]any
 	after    map[string]any
 	priority *Priority // 既定は current.Priority。classify だけが上書きする
-	nowStr   string    // rec.at をミリ秒精度に丸めた文字列（task_plan.created_at・hold.raised_at に使う）
-	now      time.Time // nowStr を parseTimestamp した値（返却する Plan.CreatedAt に使う）
+	// stage は書き込む段階の欄（既定は current の値。patchStages が書き換える）。
+	// runTransition が課題の UPDATE と同じトランザクションで書き、戻り値の Challenge に写す。
+	stage  StageFields
+	nowStr string    // rec.at をミリ秒精度に丸めた文字列（task_plan.created_at・hold.raised_at に使う）
+	now    time.Time // nowStr を parseTimestamp した値（返却する Plan.CreatedAt に使う）
 	// runID は、この遷移の原因になった run の内部整数 ID（rec.runID と同じ値。
 	// nil なら run に由来しない＝#9・#10・#12 の既存の呼び出し元）。
 	// insertHold（#84 の J1 の uncertain）が hold.run_id へ書くために使う。
@@ -184,6 +187,7 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 			before:   map[string]any{},
 			after:    map[string]any{},
 			priority: current.Priority,
+			stage:    current.StageFields,
 			nowStr:   nowStr,
 			now:      now,
 			runID:    rec.runID,
@@ -201,9 +205,15 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 		}
 
 		newVersion := current.Version + 1
+		stageArgs, err := tc.stage.args()
+		if err != nil {
+			return err
+		}
+		args := append([]any{string(target), nullablePriority(tc.priority), newVersion, nowStr}, stageArgs...)
+		args = append(args, cid, current.Version)
 		res, err := tx.ExecContext(ctx,
-			`UPDATE challenge SET status = ?, priority = ?, version = ?, updated_at = ? WHERE id = ? AND version = ?`,
-			string(target), nullablePriority(tc.priority), newVersion, nowStr, cid, current.Version,
+			`UPDATE challenge SET status = ?, priority = ?, version = ?, updated_at = ?, `+stageUpdateSQL+` WHERE id = ? AND version = ?`,
+			args...,
 		)
 		if err != nil {
 			return err
@@ -235,6 +245,7 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 			Reporter:     current.Reporter,
 			CreatedAt:    current.CreatedAt,
 			UpdatedAt:    now,
+			StageFields:  tc.stage,
 		}
 		return nil
 	})

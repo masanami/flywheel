@@ -199,3 +199,51 @@ func operationStateForDecision(d ApprovalDecision) (OperationState, bool) {
 		return "", false
 	}
 }
+
+// RejectedField は課題の差し戻しで「ずれていた」と指す段階の欄
+// （`reject --field` の閉集合。approval.rejected_fields の要素）。
+type RejectedField string
+
+// RejectedField の4値。
+const (
+	RejectedFieldIssues   RejectedField = "issues"
+	RejectedFieldExpected RejectedField = "expected"
+	RejectedFieldNonGoals RejectedField = "non_goals"
+	RejectedFieldFigure   RejectedField = "figure"
+)
+
+// rejectedFieldValues は閉集合の順（記録する順もこの順）。
+var rejectedFieldValues = []RejectedField{
+	RejectedFieldIssues, RejectedFieldExpected, RejectedFieldNonGoals, RejectedFieldFigure,
+}
+
+// ParseRejectedField は s を差し戻しのずれた欄として解釈する。
+// 前後の空白を除いた完全一致のみ受理する。
+func ParseRejectedField(s string) (RejectedField, bool) {
+	trimmed := strings.TrimSpace(s)
+	for _, v := range rejectedFieldValues {
+		if string(v) == trimmed {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// NormalizeRejectedFields は fields を閉集合で検査し、重複を 1 つにして閉集合の順に
+// 並べて返す。閉集合の外の値があれば ok=false。空（nil を含む）は nil（NULL として書く）。
+func NormalizeRejectedFields(fields []string) (out []RejectedField, ok bool) {
+	seen := map[RejectedField]bool{}
+	for _, f := range fields {
+		v, valid := ParseRejectedField(f)
+		if !valid {
+			return nil, false
+		}
+		seen[v] = true
+	}
+	for _, v := range rejectedFieldValues {
+		if seen[v] {
+			out = append(out, v)
+		}
+	}
+	return out, true
+}
