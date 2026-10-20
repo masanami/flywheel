@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "vite";
@@ -43,3 +44,68 @@ it("本番のビルドに偽の API・モックの画面を含めない", async 
     rmSync(out, { recursive: true, force: true });
   }
 }, 60_000);
+
+// 同じ origin の相対パスか（スキームも // も持たない）。JS の本文中の URL 文字列は検べない。
+const sameOriginRelative = (u: string) =>
+  u !== "" && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(u) && !u.startsWith("//");
+
+it("ビルド成果物の参照は同じ origin の相対パスだけ・Mermaid は別チャンク（AC-391・AC-381）", async () => {
+  const out = mkdtempSync(join(tmpdir(), "flywheel-web-build-"));
+  try {
+    await build({
+      logLevel: "silent",
+      build: { outDir: out, emptyOutDir: true },
+    });
+    const html = readFileSync(join(out, "index.html"), "utf8");
+    const refs = [
+      ...[...html.matchAll(/<script\b[^>]*\bsrc="([^"]*)"/g)].map(
+        (m) => m[1] ?? "",
+      ),
+      ...[...html.matchAll(/<link\b[^>]*\bhref="([^"]*)"/g)].map(
+        (m) => m[1] ?? "",
+      ),
+    ];
+    expect(refs.length).toBeGreaterThan(0);
+    for (const r of refs) expect(sameOriginRelative(r), r).toBe(true);
+
+    const manifestPath = [".vite/manifest.json", "manifest.json"]
+      .map((p) => join(out, p))
+      .find((p) => existsSync(p));
+    expect(manifestPath).toBeDefined();
+    const manifest = JSON.parse(
+      readFileSync(manifestPath as string, "utf8"),
+    ) as Record<
+      string,
+      {
+        file: string;
+        imports?: string[];
+        dynamicImports?: string[];
+        isEntry?: boolean;
+      }
+    >;
+    for (const [key, e] of Object.entries(manifest)) {
+      expect(sameOriginRelative(e.file), e.file).toBe(true);
+      for (const i of [...(e.imports ?? []), ...(e.dynamicImports ?? [])]) {
+        expect(sameOriginRelative(i), `${key} -> ${i}`).toBe(true);
+        expect(manifest[i], `${key} -> ${i}`).toBeDefined();
+      }
+    }
+    // 初期の画面（入口とその静的な import の推移）に Mermaid を含めず、動的 import の先に分かれている。
+    const entry = Object.values(manifest).find((e) => e.isEntry);
+    expect(entry).toBeDefined();
+    const isMermaid = (k: string) => k.includes("node_modules/mermaid/");
+    const dynKeys = entry?.dynamicImports ?? [];
+    expect(dynKeys.some(isMermaid)).toBe(true);
+    const seen = new Set<string>();
+    const walk = (k: string) => {
+      if (seen.has(k)) return;
+      seen.add(k);
+      for (const i of manifest[k]?.imports ?? []) walk(i);
+    };
+    for (const [k, e] of Object.entries(manifest)) if (e.isEntry) walk(k);
+    for (const k of seen) expect(isMermaid(k), k).toBe(false);
+    expect(html).not.toMatch(/mermaid/i);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+}, 120_000);
