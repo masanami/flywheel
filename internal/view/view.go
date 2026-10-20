@@ -35,9 +35,11 @@ func strOrNil(s string) *string {
 
 // Challenge は課題の形。
 type Challenge struct {
+	Context      *string `json:"context"`
 	CreatedAt    string  `json:"created_at"`
 	Description  string  `json:"description"`
 	DoneCriteria string  `json:"done_criteria"`
+	Headline     *string `json:"headline"`
 	ID           string  `json:"id"`
 	Priority     *string `json:"priority"`
 	Reporter     string  `json:"reporter"`
@@ -53,9 +55,11 @@ type Challenge struct {
 func FromChallenge(c core.Challenge) Challenge {
 	label, _ := c.Status.Label()
 	out := Challenge{
+		Context:      c.Context,
 		CreatedAt:    FormatTimestamp(c.CreatedAt),
 		Description:  c.Description,
 		DoneCriteria: c.DoneCriteria,
+		Headline:     c.Headline,
 		ID:           c.ID,
 		Reporter:     c.Reporter,
 		Status:       string(c.Status),
@@ -119,33 +123,35 @@ func FromPlans(ps []core.Plan) []PlanDetail {
 
 // Approval は承認の形。
 type Approval struct {
-	Actor         string  `json:"actor"`
-	Channel       string  `json:"channel"`
-	DecidedAt     string  `json:"decided_at"`
-	Decision      string  `json:"decision"`
-	Kind          string  `json:"kind"`
-	OperationID   *string `json:"operation_id"`
-	Reason        *string `json:"reason"`
-	RelayQuote    *string `json:"relay_quote"`
-	RelaySession  *string `json:"relay_session"`
-	TargetVersion int     `json:"target_version"`
-	Verification  string  `json:"verification"`
+	Actor          string   `json:"actor"`
+	Channel        string   `json:"channel"`
+	DecidedAt      string   `json:"decided_at"`
+	Decision       string   `json:"decision"`
+	Kind           string   `json:"kind"`
+	OperationID    *string  `json:"operation_id"`
+	Reason         *string  `json:"reason"`
+	RejectedFields []string `json:"rejected_fields" ts:"nullable"`
+	RelayQuote     *string  `json:"relay_quote"`
+	RelaySession   *string  `json:"relay_session"`
+	TargetVersion  int      `json:"target_version"`
+	Verification   string   `json:"verification"`
 }
 
 // FromApproval は core.Approval を Approval へ変換する。
 func FromApproval(a core.Approval) Approval {
 	return Approval{
-		Actor:         a.Actor,
-		Channel:       a.Channel,
-		DecidedAt:     FormatTimestamp(a.DecidedAt),
-		Decision:      string(a.Decision),
-		Kind:          string(a.Kind),
-		OperationID:   a.OperationID,
-		Reason:        a.Reason,
-		RelayQuote:    a.RelayQuote,
-		RelaySession:  a.RelaySession,
-		TargetVersion: a.TargetVersion,
-		Verification:  a.Verification,
+		Actor:          a.Actor,
+		Channel:        a.Channel,
+		DecidedAt:      FormatTimestamp(a.DecidedAt),
+		Decision:       string(a.Decision),
+		Kind:           string(a.Kind),
+		OperationID:    a.OperationID,
+		Reason:         a.Reason,
+		RejectedFields: nilIfEmpty(a.RejectedFields),
+		RelayQuote:     a.RelayQuote,
+		RelaySession:   a.RelaySession,
+		TargetVersion:  a.TargetVersion,
+		Verification:   a.Verification,
 	}
 }
 
@@ -403,6 +409,7 @@ type ShowResponse struct {
 	Plans         []PlanDetail   `json:"plans"`
 	Runs          []Run          `json:"runs"`
 	SourceBinding *SourceBinding `json:"source_binding"`
+	Stages        Stages         `json:"stages"`
 }
 
 // FromChallengeDetail は core.ChallengeDetail を ShowResponse へ変換する。
@@ -415,6 +422,7 @@ func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 		Plans:         FromPlans(d.Plans),
 		Runs:          FromRuns(d.Runs),
 		SourceBinding: FromSourceBinding(d.SourceBinding),
+		Stages:        FromStages(d.StageFields, d.IssuesAnswer),
 	}
 }
 

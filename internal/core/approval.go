@@ -76,6 +76,12 @@ type ApprovalPreview struct {
 	Kind        ApprovalKind // ApprovalKindPlan または ApprovalKindCompletion
 	Version     int          // 表示時点の課題の版（Execute* の ExpectedVersion にそのまま渡す）
 
+	// StageFields・IssuesAnswer は、表示時点の課題の段階の欄と、論点の保留の回答（無ければ nil）。
+	StageFields
+	IssuesAnswer *string
+	// Pairs は予想と実物を位置で対にしたもの（Pairs の唯一の呼び出し。どちらも NULL なら空）。
+	Pairs []StagePair
+
 	// Kind == ApprovalKindPlan のときだけ有効（最新の計画の版と本文）。
 	PlanVersion int
 	PlanBody    string
@@ -155,7 +161,14 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 			Kind:         kind,
 			Version:      current.Version,
 			DoneCriteria: current.DoneCriteria,
+			StageFields:  current.StageFields,
+			Pairs:        Pairs(current.Expected, current.Actual),
 		}
+		answer, err := loadIssuesAnswer(ctx, tx, cid, current.IssuesHoldID)
+		if err != nil {
+			return err
+		}
+		preview.IssuesAnswer = answer
 
 		if kind == ApprovalKindPlan {
 			var version int

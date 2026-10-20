@@ -35,9 +35,11 @@ type ApprovalSummary struct {
 	DoneCriteria           *string                  `json:"done_criteria"`
 	Kind                   string                   `json:"kind"`
 	OtherPendingOperations []ApprovalOtherOperation `json:"other_pending_operations"`
+	Pairs                  []StagePair              `json:"pairs"`
 	Plan                   *ApprovalPlan            `json:"plan"`
 	ReleaseHeld            bool                     `json:"release_held"`
 	Releases               []ApprovalRelease        `json:"releases"`
+	Stages                 Stages                   `json:"stages"`
 	Title                  string                   `json:"title"`
 	Version                int                      `json:"version"`
 }
@@ -54,8 +56,10 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 		ChallengeID:            p.ChallengeID,
 		Kind:                   string(p.Kind),
 		OtherPendingOperations: make([]ApprovalOtherOperation, 0, len(p.OtherPendingOperations)),
+		Pairs:                  FromPairs(p.Pairs),
 		ReleaseHeld:            true,
 		Releases:               make([]ApprovalRelease, 0, len(heads)),
+		Stages:                 FromStages(p.StageFields, p.IssuesAnswer),
 		Title:                  p.Title,
 		Version:                p.Version,
 	}

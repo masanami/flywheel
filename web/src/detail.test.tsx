@@ -29,9 +29,11 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
       state: "in_progress",
     },
     challenge: {
+      context: null,
       created_at: "2026-01-01T00:00:00Z",
       description: "説明",
       done_criteria: "完了条件",
+      headline: null,
       id: "C-1",
       priority: null,
       reporter: "me",
@@ -47,6 +49,14 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
     plans: [],
     runs: [],
     source_binding: null,
+    stages: {
+      actual: null,
+      expected: null,
+      figure: null,
+      issues: null,
+      issues_answer: null,
+      non_goals: null,
+    },
   };
   return { ...base, ...over };
 }
@@ -124,6 +134,7 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
         kind: "plan",
         operation_id: null,
         reason: "差し戻しの理由",
+        rejected_fields: null,
         relay_quote: null,
         relay_session: null,
         target_version: 1,
@@ -287,6 +298,7 @@ it("AC-113: 承認と差し戻しのそれぞれの記録が詳細に出る", as
     kind: "plan",
     operation_id: null,
     reason,
+    rejected_fields: null,
     relay_quote: null,
     relay_session: null,
     target_version: 1,

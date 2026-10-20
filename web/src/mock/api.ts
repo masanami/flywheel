@@ -79,6 +79,14 @@ export function createMockApi(
         plans: m.plans,
         runs: m.runs,
         source_binding: null,
+        stages: {
+          actual: null,
+          expected: null,
+          figure: null,
+          issues: null,
+          issues_answer: null,
+          non_goals: null,
+        },
       };
     },
     async log(name, id): Promise<LogResponse> {
@@ -173,6 +181,7 @@ export function createMockApi(
           other_pending_operations: m.operations
             .filter((o) => o.state === "pending" && o.kind !== "release")
             .map((o) => ({ id: o.id, kind: o.kind, summary: o.summary })),
+          pairs: [],
           plan:
             kind === "plan" && plan
               ? { body: plan.body, version: plan.version }
@@ -187,6 +196,14 @@ export function createMockApi(
                   summary: o.summary,
                 }))
               : [],
+          stages: {
+            actual: null,
+            expected: null,
+            figure: null,
+            issues: null,
+            issues_answer: null,
+            non_goals: null,
+          },
           title: m.c.title,
           version: m.c.version,
         },
@@ -217,6 +234,14 @@ export function createMockApi(
         plans: m.plans,
         runs: m.runs,
         source_binding: null,
+        stages: {
+          actual: null,
+          expected: null,
+          figure: null,
+          issues: null,
+          issues_answer: null,
+          non_goals: null,
+        },
       };
     },
     async cycle(name) {

@@ -5,7 +5,7 @@ import "github.com/masanami/flywheel/internal/core"
 // このファイルは閲覧の API（docs/features/m4-ui-server.md §IF / API「閲覧の API」）が新しく
 // 定めた応答の型を持つ。CLI の --json と同じ形の応答は view.go にある。
 
-// Card は課題カードの面。Headline・Context は S4 まで常に null。SlotIDs は、スロットごとの直近の run がこの課題の run であるスロットの ID（API 専用。CLI の --json には出さない）。
+// Card は課題カードの面。Headline・Context は challenge の列と同じ値。SlotIDs は、スロットごとの直近の run がこの課題の run であるスロットの ID（API 専用。CLI の --json には出さない）。
 type Card struct {
 	Context          *string  `json:"context"`
 	Headline         *string  `json:"headline"`
@@ -31,9 +31,11 @@ func FromCard(c *core.Card) Card {
 // ChallengeCard は `GET …/challenges` の要素。Challenge の各キーに card を足した形。
 type ChallengeCard struct {
 	Card         Card    `json:"card"`
+	Context      *string `json:"context"`
 	CreatedAt    string  `json:"created_at"`
 	Description  string  `json:"description"`
 	DoneCriteria string  `json:"done_criteria"`
+	Headline     *string `json:"headline"`
 	ID           string  `json:"id"`
 	Priority     *string `json:"priority"`
 	Reporter     string  `json:"reporter"`
@@ -49,8 +51,8 @@ type ChallengeCard struct {
 func FromChallengeCard(c core.Challenge, card *core.Card) ChallengeCard {
 	v := FromChallenge(c)
 	return ChallengeCard{
-		Card: FromCard(card), CreatedAt: v.CreatedAt, Description: v.Description, DoneCriteria: v.DoneCriteria,
-		ID: v.ID, Priority: v.Priority, Reporter: v.Reporter, Status: v.Status, StatusLabel: v.StatusLabel,
+		Card: FromCard(card), Context: v.Context, CreatedAt: v.CreatedAt, Description: v.Description, DoneCriteria: v.DoneCriteria,
+		Headline: v.Headline, ID: v.ID, Priority: v.Priority, Reporter: v.Reporter, Status: v.Status, StatusLabel: v.StatusLabel,
 		Title: v.Title, UpdatedAt: v.UpdatedAt, Urgency: v.Urgency, Version: v.Version,
 	}
 }
@@ -70,6 +72,7 @@ type ShowCardResponse struct {
 	Plans         []PlanDetail   `json:"plans"`
 	Runs          []Run          `json:"runs"`
 	SourceBinding *SourceBinding `json:"source_binding"`
+	Stages        Stages         `json:"stages"`
 }
 
 // FromChallengeDetailCard は課題の全体像とそのカードを ShowCardResponse へ変換する。
@@ -77,7 +80,7 @@ func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card) ShowCardR
 	s := FromChallengeDetail(d)
 	return ShowCardResponse{
 		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, Holds: s.Holds,
-		Operations: s.Operations, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding,
+		Operations: s.Operations, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, Stages: s.Stages,
 	}
 }
 
