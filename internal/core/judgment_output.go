@@ -38,14 +38,15 @@ var J1VerdictValues = []J1Verdict{J1VerdictMine, J1VerdictNotMine, J1VerdictUnce
 // J2Verdict は J2（計画）の判定の閉集合。
 type J2Verdict string
 
-// J2Verdict の2値。
+// J2Verdict の3値。
 const (
 	J2VerdictPlan      J2Verdict = "plan"
 	J2VerdictUncertain J2Verdict = "uncertain"
+	J2VerdictIssues    J2Verdict = "issues"
 )
 
 // J2VerdictValues は J2Verdict の全値。
-var J2VerdictValues = []J2Verdict{J2VerdictPlan, J2VerdictUncertain}
+var J2VerdictValues = []J2Verdict{J2VerdictPlan, J2VerdictUncertain, J2VerdictIssues}
 
 // JudgmentSize は J1・J2 が出すサイズ案の閉集合（S|M|L。
 // .flywheel/agent.json の size_budgets_usd のキーと同じ3文字だが、後者は

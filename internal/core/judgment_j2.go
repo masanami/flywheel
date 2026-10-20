@@ -45,9 +45,16 @@ type j2RawOutput struct {
 	Question        *string  `json:"question"`
 }
 
+// j2RawIssuesOutput は verdict が issues のときだけ読む形。plan の項目は読まない
+// （型が合わなくても issues の検査に影響させない＝無視する）。
+type j2RawIssuesOutput struct {
+	Verdict string       `json:"verdict"`
+	Issues  []StageIssue `json:"issues"`
+}
+
 // j2ValidatedOutput は core の閉集合・必須の組・宣言との突き合わせを通った J2 の
 // 出力。plan のときは Repo〜RelatedRepos・Resolved*・Spec が、uncertain のときは
-// Question が有効である。
+// Question が、issues のときは Issues が有効である。
 type j2ValidatedOutput struct {
 	Verdict      J2Verdict
 	Summary      string
@@ -66,6 +73,8 @@ type j2ValidatedOutput struct {
 	CrossRepo         bool
 	RelatedRepos      []string
 	Question          *string
+	// Issues は issues のときの論点（検査済み。3〜5 件）。
+	Issues []StageIssue
 	// Spec は構造化した出力の JSON を空白を除いて詰めたもの（task_plan.spec。
 	// null の額も出力のまま残す＝「spec は構造化した出力と一致する」）。
 	Spec []byte
@@ -93,6 +102,30 @@ func j2OutputSchema() []byte {
 	}
 	sizes := []any{string(JudgmentSizeS), string(JudgmentSizeM), string(JudgmentSizeL), nil}
 	nullableString := map[string]any{"type": []string{"string", "null"}}
+	issuesSchema := map[string]any{
+		"type": "array",
+		"items": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"question": map[string]any{"type": "string"},
+				"options": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"label":   map[string]any{"type": "string"},
+							"example": nullableString,
+						},
+						"required":             []string{"label"},
+						"additionalProperties": false,
+					},
+				},
+				"recommended": map[string]any{"type": "integer"},
+			},
+			"required":             []string{"question", "options", "recommended"},
+			"additionalProperties": false,
+		},
+	}
 	nullableNumber := map[string]any{"type": []string{"number", "null"}}
 	stringArray := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 
@@ -111,6 +144,7 @@ func j2OutputSchema() []byte {
 			"cross_repo":        map[string]any{"type": []string{"boolean", "null"}},
 			"related_repos":     stringArray,
 			"question":          nullableString,
+			"issues":            issuesSchema,
 		},
 		"required":             []string{"verdict"},
 		"additionalProperties": false,
@@ -159,6 +193,25 @@ func (d *ConnectorsDeclaration) findConnectorRepo(name string) (*ConnectorRepo, 
 //     無い／額が 0 以下／実装枠（null はサイズの既定へ解決した額）が
 //     max_run_budget_usd を超える／関係するリポジトリが宣言に無い
 func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, bool) {
+	var head struct {
+		Verdict string `json:"verdict"`
+	}
+	if err := json.Unmarshal(data, &head); err != nil {
+		return nil, false
+	}
+	if J2Verdict(head.Verdict) == J2VerdictIssues {
+		// 論点は件数・選択肢・推奨・文字列を検査する。plan の項目は読まない。
+		var iss j2RawIssuesOutput
+		if err := json.Unmarshal(data, &iss); err != nil || len(iss.Issues) == 0 {
+			return nil, false
+		}
+		issues, err := NormalizeIssues(iss.Issues)
+		if err != nil || len(issues) == 0 {
+			return nil, false
+		}
+		return &j2ValidatedOutput{Verdict: J2VerdictIssues, Issues: issues}, true
+	}
+
 	var raw j2RawOutput
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, false
@@ -389,12 +442,20 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 
 	var holds []Hold
 	var sb *sourceBinding
+	var issuesAnswer *string
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		hs, err := loadHolds(ctx, tx, cid)
 		if err != nil {
 			return err
 		}
 		holds = hs
+		if len(ch.Issues) > 0 {
+			a, err := loadIssuesAnswer(ctx, tx, cid, ch.IssuesHoldID)
+			if err != nil {
+				return err
+			}
+			issuesAnswer = a
+		}
 		b, err := loadSourceBindingByChallengeID(ctx, tx, cid)
 		sb = b
 		return err
@@ -448,6 +509,9 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	if holdsText := formatHoldsSection(holds); holdsText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "保留の記録", Content: holdsText})
 	}
+	if len(ch.Issues) > 0 {
+		sections = append(sections, JudgmentDataSection{Label: "論点と回答", Content: formatIssuesSection(ch.Issues, issuesAnswer)})
+	}
 	if sourceText := formatSourceBindingSection(sb); sourceText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "取り込み元の対応", Content: sourceText})
 	}
@@ -460,6 +524,35 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	)
 	prepared.Sections = sections
 	return prepared, nil, nil
+}
+
+// formatIssuesSection は課題の論点（問い・選択肢・推奨）と、その保留の回答を整形する。
+func formatIssuesSection(issues []StageIssue, answer *string) string {
+	var b strings.Builder
+	writeIssuesText(&b, issues, "")
+	b.WriteString("\n回答: ")
+	if answer != nil {
+		b.WriteString(*answer)
+	} else {
+		b.WriteString("(未回答)")
+	}
+	return b.String()
+}
+
+// writeIssuesText は論点を Q<n>.・選択肢 <n>)・推奨の行へ整形して b へ書く
+// （保留の問いと J2 の入力の区画が共有する。sep は各論点の前に置く文字列）。
+func writeIssuesText(b *strings.Builder, issues []StageIssue, sep string) {
+	for i, is := range issues {
+		fmt.Fprintf(b, "%sQ%d. %s\n", sep, i+1, is.Question)
+		for j, o := range is.Options {
+			fmt.Fprintf(b, "  %d) %s", j+1, o.Label)
+			if o.Example != nil {
+				b.WriteString("（例: " + *o.Example + "）")
+			}
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(b, "  推奨: %d\n", is.Recommended)
+	}
 }
 
 func yesNo(b bool) string {
@@ -575,6 +668,50 @@ func (s *Store) applyJ2Uncertain(ctx context.Context, runIDDisplay, challengeIDD
 	return mapped, nil
 }
 
+// errJ2IssuesAlreadyRecorded は、論点の記録がすでにある課題へ issues が返ったことを
+// 表す内部の sentinel（論点の段は課題ごとに 1 回。写さず run を invalid_output にする）。
+var errJ2IssuesAlreadyRecorded = errors.New("core: challenge already has an issues record")
+
+// formatIssuesQuestion は論点の保留の問いの文を決定的に組み立てる
+// （固定の冒頭の文→論点ごとに Q<n>.・選択肢 <n>)・推奨。番号は 1 から）。
+func formatIssuesQuestion(issues []StageIssue) string {
+	var b strings.Builder
+	b.WriteString(IssuesQuestionPreamble + "\n")
+	writeIssuesText(&b, issues, "\n")
+	return b.String()
+}
+
+// applyJ2Issues は判定 issues の出力を課題へ写す（T11。論点と保留の参照を、保留・
+// 遷移・作業ログと同じトランザクションで書く）。写す直前に読み直した状態が分類済で
+// なければ写さない。論点の記録がすでにあれば記録済み（hasRecord）として何も書かない。
+func (s *Store) applyJ2Issues(ctx context.Context, runIDDisplay, challengeIDDisplay string, issues []StageIssue) (mapped, hasRecord bool, err error) {
+	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpHold, func(ctx context.Context, tc *transitionCtx) error {
+		if tc.current.Status != StatusClassified {
+			return errJ2MappingNotEligible
+		}
+		if tc.current.Issues != nil {
+			return errJ2IssuesAlreadyRecorded
+		}
+		holdID, err := insertHoldID(ctx, tc, formatIssuesQuestion(issues))
+		if err != nil {
+			return err
+		}
+		tc.patchStages(StagePatch{Issues: StageSet(issues), IssuesHoldID: StageSet(&holdID)})
+		mapped = true
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errJ2IssuesAlreadyRecorded) {
+			return false, true, nil
+		}
+		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errJ2MappingNotEligible) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	return mapped, false, nil
+}
+
 // j2Finalize は finalizeJ2Output が使う、起動の前に決まっていた事実。
 type j2Finalize struct {
 	Validation j2ValidationContext
@@ -583,7 +720,7 @@ type j2Finalize struct {
 }
 
 // finalizeJ2Output は run が succeeded の場合に、core の再検査（閉集合・必須の組・
-// 宣言との突き合わせ）→写像（plan/uncertain）→読んだ記録を行う。再検査に落ちたら
+// 宣言との突き合わせ）→写像（plan/uncertain/issues。issues は論点の記録がすでにあれば写さず invalid_output）→読んだ記録を行う。再検査に落ちたら
 // run の結果を invalid_output へ更新し、課題は変えない。outcome は判定の文字列
 // （invalid_output に落ちた場合は空）、status は写した後の課題の状態コード
 // （写さなかった場合は nil）、result は最終的な run の結果、note は人が読む補足
@@ -632,6 +769,22 @@ func (s *Store) finalizeJ2Output(ctx context.Context, runIDDisplay, challengeIDD
 			return string(J2VerdictUncertain), &st, RunResultSucceeded, "", nil
 		}
 		return string(J2VerdictUncertain), nil, RunResultSucceeded, "", nil
+	case J2VerdictIssues:
+		mapped, hasRecord, err := s.applyJ2Issues(ctx, runIDDisplay, challengeIDDisplay, validated.Issues)
+		if err != nil {
+			return "", nil, "", "", err
+		}
+		if hasRecord {
+			if err := s.invalidateRunOutput(ctx, runIDDisplay); err != nil {
+				return "", nil, "", "", err
+			}
+			return "", nil, RunResultInvalidOutput, "", nil
+		}
+		if mapped {
+			st := string(StatusAwaitingHuman)
+			return string(J2VerdictIssues), &st, RunResultSucceeded, "", nil
+		}
+		return string(J2VerdictIssues), nil, RunResultSucceeded, "", nil
 	default:
 		return "", nil, RunResultSucceeded, "", nil
 	}
