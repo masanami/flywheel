@@ -27,6 +27,9 @@ type j1RawOutput struct {
 	Size     *string `json:"size"`
 	Reason   string  `json:"reason"`
 	Question *string `json:"question"`
+	// Headline・Context は課題カードの「一言で」「位置づけ」（S4。M4H7・M4P35）。
+	Headline *string `json:"headline"`
+	Context  *string `json:"context"`
 }
 
 // j1ValidatedOutput は core の閉集合・必須の組の検査を通った J1 の出力
@@ -39,6 +42,10 @@ type j1ValidatedOutput struct {
 	Size     *JudgmentSize
 	Reason   string
 	Question *string
+	// Headline・Context は検査を通った値だけを持つ。mine では必ず非 nil。
+	// uncertain・not_mine では空白だけ・上限超えの値を nil（無いもの）にして持つ。
+	Headline *string
+	Context  *string
 }
 
 // j1OutputSchema は J1 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -61,6 +68,8 @@ func j1OutputSchema() []byte {
 			"size":     map[string]any{"type": []string{"string", "null"}, "enum": sizes},
 			"reason":   map[string]any{"type": "string"},
 			"question": map[string]any{"type": []string{"string", "null"}},
+			"headline": map[string]any{"type": []string{"string", "null"}},
+			"context":  map[string]any{"type": []string{"string", "null"}},
 		},
 		"required":             []string{"verdict", "reason"},
 		"additionalProperties": false,
@@ -116,7 +125,23 @@ func validateJ1Output(data []byte) (*j1ValidatedOutput, bool) {
 		return nil, false
 	}
 
-	return &j1ValidatedOutput{Verdict: verdict, Priority: priority, Size: size, Reason: raw.Reason, Question: raw.Question}, true
+	// 一言で・位置づけ（M4P35）: mine は両方とも検査を通る値が必須。それ以外は
+	// 検査を通る値だけを採り、通らない値は「無いもの」として判定を捨てない。
+	headline := checkedJ1Text(raw.Headline, CheckHeadline)
+	jctx := checkedJ1Text(raw.Context, CheckContext)
+	if verdict == J1VerdictMine && (headline == nil || jctx == nil) {
+		return nil, false
+	}
+
+	return &j1ValidatedOutput{Verdict: verdict, Priority: priority, Size: size, Reason: raw.Reason, Question: raw.Question, Headline: headline, Context: jctx}, true
+}
+
+// checkedJ1Text は s が非 nil で check を通るときだけ s を返す（通らなければ nil）。
+func checkedJ1Text(s *string, check func(string) error) *string {
+	if s == nil || check(*s) != nil {
+		return nil
+	}
+	return s
 }
 
 // --- J1 の対象の選び方 ---
@@ -366,11 +391,12 @@ var errJ1MappingNotEligible = errors.New("core: j1 mapping is no longer eligible
 // From: 未分類の1行しか持たないため、Lookup(current.Status, OpClassify) の
 // 成功自体が「読み直した状態が未分類である」ことを保証する（§アーキテクチャ
 // 決定③はこの Lookup の失敗〈ErrInvalidTransition〉で満たされる）。
-func (s *Store) applyJ1Mine(ctx context.Context, runIDDisplay, challengeIDDisplay string, priority Priority) (mapped bool, err error) {
+func (s *Store) applyJ1Mine(ctx context.Context, runIDDisplay, challengeIDDisplay string, priority Priority, headline, jctx *string) (mapped bool, err error) {
 	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpClassify, func(_ context.Context, tc *transitionCtx) error {
 		tc.before["priority"] = nullablePriority(tc.current.Priority)
 		tc.after["priority"] = nullablePriority(&priority)
 		tc.priority = &priority
+		patchJ1Text(tc, headline, jctx)
 		mapped = true
 		return nil
 	})
@@ -378,6 +404,111 @@ func (s *Store) applyJ1Mine(ctx context.Context, runIDDisplay, challengeIDDispla
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) {
 			return false, nil
 		}
+		return false, err
+	}
+	return mapped, nil
+}
+
+// patchJ1Text は J1 の出力の headline・context（nil は書かない）を段階の欄へ当て、
+// classify の作業ログの after に載せる（AC-276。値が現在と同じでも after に載せる）。
+func patchJ1Text(tc *transitionCtx, headline, jctx *string) {
+	var p StagePatch
+	if headline != nil {
+		p.Headline = StageSet(headline)
+	}
+	if jctx != nil {
+		p.Context = StageSet(jctx)
+	}
+	tc.patchStages(p)
+	if headline != nil {
+		tc.after["headline"] = *headline
+	}
+	if jctx != nil {
+		tc.after["context"] = *jctx
+	}
+}
+
+// applyJ1NotMine は判定 not_mine の出力のうち headline・context を、遷移を伴わない
+// 更新として課題へ書く（状態は変えず、版を 1 上げ、作業ログは action=classify・after に
+// headline・context。値が無い、または現在と同じなら何も書かない）。この書き込みで上がる
+// 版は、原因の run の challenge_version にも写す（j1NotMineIfCurrent が「その判定の
+// 時点から版が変わっていない」と見るため。別の書き込みで版が上がれば自動の対象に戻る）。
+// 写す直前に読み直した課題が未分類でなければ書かない（mapped=false）。
+func (s *Store) applyJ1NotMine(ctx context.Context, runIDDisplay, challengeIDDisplay string, headline, jctx *string) (mapped bool, err error) {
+	if headline == nil && jctx == nil {
+		return false, nil
+	}
+	runIDInt, ok := parseRunID(runIDDisplay)
+	if !ok {
+		return false, ErrValidation
+	}
+	cid, ok := parseChallengeID(challengeIDDisplay)
+	if !ok {
+		return false, ErrNotFound
+	}
+	actor, err := resolveActor()
+	if err != nil {
+		return false, err
+	}
+	err = s.mutateAsRun(ctx, actor, ChannelInvoker, VerificationNone, &runIDInt, func(tx *sql.Tx, rec *activityRecorder) error {
+		current, err := loadChallenge(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if current.Status != StatusUnclassified {
+			return nil
+		}
+		// run の起動時の版から課題が変わっていれば（走行中の edit・取り込み）、古い内容から
+		// 作った値を書かず、run の版も写さない（変更後の課題は自動の対象に戻る）。
+		var runVersion int64
+		if err := tx.QueryRowContext(ctx, `SELECT challenge_version FROM run WHERE id = ?`, runIDInt).Scan(&runVersion); err != nil {
+			return err
+		}
+		if runVersion != int64(current.Version) {
+			return nil
+		}
+		var p StagePatch
+		if headline != nil {
+			p.Headline = StageSet(headline)
+		}
+		if jctx != nil {
+			p.Context = StageSet(jctx)
+		}
+		before := map[string]any{}
+		after := map[string]any{}
+		next := current.applyPatch(p, before, after)
+		if len(after) == 0 {
+			return nil
+		}
+		stageArgs, err := next.args()
+		if err != nil {
+			return err
+		}
+		nowStr := formatTimestamp(rec.at)
+		newVersion := current.Version + 1
+		args := append([]any{newVersion, nowStr}, stageArgs...)
+		args = append(args, cid, current.Version)
+		res, err := tx.ExecContext(ctx,
+			`UPDATE challenge SET version = ?, updated_at = ?, `+stageUpdateSQL+` WHERE id = ? AND version = ?`, args...)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n != 1 {
+			return fmt.Errorf("core: j1 not_mine write %s: expected to update 1 row, updated %d", challengeIDDisplay, n)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE run SET challenge_version = ? WHERE id = ?`, newVersion, runIDInt); err != nil {
+			return err
+		}
+		after["version"] = newVersion
+		if err := rec.record("challenge", cid, string(OpClassify), before, after); err != nil {
+			return err
+		}
+		mapped = true
+		return nil
+	})
+	if err != nil {
 		return false, err
 	}
 	return mapped, nil
@@ -394,7 +525,7 @@ func (s *Store) applyJ1Mine(ctx context.Context, runIDDisplay, challengeIDDispla
 // 人間が別の操作でこの課題を分類済・着手中・検証中へ進めていても、
 // uncertain の出力がその課題を人間対応待ちへ進め、from_status の食い違う
 // 保留を作ってしまっていた）。
-func (s *Store) applyJ1Uncertain(ctx context.Context, runIDDisplay, challengeIDDisplay, question string) (mapped bool, err error) {
+func (s *Store) applyJ1Uncertain(ctx context.Context, runIDDisplay, challengeIDDisplay, question string, headline, jctx *string) (mapped bool, err error) {
 	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpHold, func(ctx context.Context, tc *transitionCtx) error {
 		if tc.current.Status != StatusUnclassified {
 			return errJ1MappingNotEligible
@@ -402,6 +533,7 @@ func (s *Store) applyJ1Uncertain(ctx context.Context, runIDDisplay, challengeIDD
 		if err := insertHold(ctx, tc, question); err != nil {
 			return err
 		}
+		patchJ1Text(tc, headline, jctx)
 		mapped = true
 		return nil
 	})
@@ -435,7 +567,7 @@ func (s *Store) finalizeJ1Output(ctx context.Context, runIDDisplay, challengeIDD
 
 	switch validated.Verdict {
 	case J1VerdictMine:
-		mapped, err := s.applyJ1Mine(ctx, runIDDisplay, challengeIDDisplay, *validated.Priority)
+		mapped, err := s.applyJ1Mine(ctx, runIDDisplay, challengeIDDisplay, *validated.Priority, validated.Headline, validated.Context)
 		if err != nil {
 			return "", nil, "", err
 		}
@@ -445,7 +577,7 @@ func (s *Store) finalizeJ1Output(ctx context.Context, runIDDisplay, challengeIDD
 		}
 		return string(J1VerdictMine), nil, RunResultSucceeded, nil
 	case J1VerdictUncertain:
-		mapped, err := s.applyJ1Uncertain(ctx, runIDDisplay, challengeIDDisplay, *validated.Question)
+		mapped, err := s.applyJ1Uncertain(ctx, runIDDisplay, challengeIDDisplay, *validated.Question, validated.Headline, validated.Context)
 		if err != nil {
 			return "", nil, "", err
 		}
@@ -455,6 +587,10 @@ func (s *Store) finalizeJ1Output(ctx context.Context, runIDDisplay, challengeIDD
 		}
 		return string(J1VerdictUncertain), nil, RunResultSucceeded, nil
 	case J1VerdictNotMine:
+		// 状態は変えないので status は nil のまま（headline・context の書き込みは版だけを上げる）。
+		if _, err := s.applyJ1NotMine(ctx, runIDDisplay, challengeIDDisplay, validated.Headline, validated.Context); err != nil {
+			return "", nil, "", err
+		}
 		return string(J1VerdictNotMine), nil, RunResultSucceeded, nil
 	default:
 		return "", nil, RunResultSucceeded, nil

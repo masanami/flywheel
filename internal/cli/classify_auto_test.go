@@ -15,7 +15,7 @@ import (
 const j1NotMineFixture = `{"is_error":false,"structured_output":{"verdict":"not_mine","reason":"CLI test fixture"}}`
 
 func j1MineFixture(priority string) string {
-	return `{"is_error":false,"structured_output":{"verdict":"mine","priority":"` + priority + `","reason":"CLI test fixture"}}`
+	return `{"is_error":false,"structured_output":{"verdict":"mine","priority":"` + priority + `","reason":"CLI test fixture","headline":"CLI の課題を分類する","context":"全体計画の一部で、分類のために要る。"}}`
 }
 
 // setupWorkspaceWithPosition は初期化済みのワークスペースへ position.md を置き、
