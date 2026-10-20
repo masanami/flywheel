@@ -17,6 +17,8 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   show <ID>
   list [--status <状態>]
   edit <ID> [--title <t>] [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>]
+            [--headline <h>] [--context <c>] [--issues <json>] [--expected <json>] [--actual <json>]
+            [--non-goals <json>] [--figure <mermaid>]   （上の 7 つは空文字を渡すとその欄を NULL にする）
   classify (<ID> --priority <P0|P1|P2> | --auto [<C-ID>])
   plan (<ID> (--file <path> | --stdin) | --auto [<C-ID>])
   submit <ID>
