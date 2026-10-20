@@ -143,6 +143,8 @@ func simpleThread(body string, comments ...string) UpstreamIssueThread {
 // out は plan の出力（hasSource なら flywheel/impl、なければ harness-repo/brief）。
 func j2OutputFor(hasSource bool, mut func(m map[string]any)) []byte {
 	return j2PlanOutput(func(m map[string]any) {
+		// 既定はサイズ S（M・L は論点の記録と予想が要る。個別のテストが mut で上げる）。
+		m["size"] = "S"
 		if !hasSource {
 			m["repo"] = "harness-repo"
 			m["operation"] = "brief"
@@ -160,6 +162,16 @@ func (f *j2Fixture) input(inv JudgmentInvoker, cycleID string, id *string) J2Aut
 func (f *j2Fixture) run(t *testing.T, inv JudgmentInvoker, id *string) (*J2AutoResult, error) {
 	t.Helper()
 	return f.s.PlanAutoJ2(context.Background(), f.input(inv, f.beginCycle(t, 300), id))
+}
+
+// recordIssues は課題に論点の記録を書く（サイズ M・L の plan の前提）。
+func (f *j2Fixture) recordIssues(t *testing.T, id string) {
+	t.Helper()
+	issues := `[` + strings.Repeat(`{"question":"q","options":[{"label":"a","example":null},{"label":"b","example":null}],"recommended":1},`, 2) +
+		`{"question":"q","options":[{"label":"a","example":null},{"label":"b","example":null}],"recommended":1}]`
+	if _, err := f.s.EditChallenge(context.Background(), ChannelCLI, id, EditInput{Issues: &issues}); err != nil {
+		t.Fatalf("EditChallenge(issues): %v", err)
+	}
 }
 
 func (f *j2Fixture) detail(t *testing.T, id string) *ChallengeDetail {
@@ -218,7 +230,7 @@ func TestPlanAutoJ2_Plan_RegistersPlanBodyAndSpec(t *testing.T) {
 	if len(d.Plans) != 1 || d.Plans[0].Version != 1 {
 		t.Fatalf("plans = %+v, want exactly version 1", d.Plans)
 	}
-	for _, want := range []string{"harness-repo", "brief", "サイズ: M", "DONE-MARKER", "実装枠: 41 USD", "レビュー対応枠: 21 USD"} {
+	for _, want := range []string{"harness-repo", "brief", "サイズ: S", "DONE-MARKER", "実装枠: 41 USD", "レビュー対応枠: 21 USD"} {
 		if !strings.Contains(d.Plans[0].Body, want) {
 			t.Errorf("plan body does not contain %q:\n%s", want, d.Plans[0].Body)
 		}
@@ -252,6 +264,7 @@ func TestPlanAutoJ2_NullBudgetsUseSizeDefaultsInThePlan(t *testing.T) {
 		t.Run(c.size, func(t *testing.T) {
 			f := newJ2Fixture(t)
 			ch := f.newClassified(t, "sized", "P1")
+			f.recordIssues(t, ch.ID)
 			inv := succeededInvoker(j2OutputFor(false, func(m map[string]any) { m["size"] = c.size }))
 			if _, err := f.run(t, inv, idPtr(ch.ID)); err != nil {
 				t.Fatalf("PlanAutoJ2: %v", err)

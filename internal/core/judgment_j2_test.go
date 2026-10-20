@@ -67,6 +67,11 @@ func j2PlanOutput(mut func(m map[string]any)) []byte {
 		"cross_repo":        false,
 		"related_repos":     []string{},
 		"question":          nil,
+		"expected": []any{map[string]any{
+			"kind": "cli", "scene": "SCENE-MARKER", "before": "BEFORE-MARKER", "after": "AFTER-MARKER",
+		}},
+		"non_goals": []string{"NONGOAL-MARKER"},
+		"figure":    "graph TD; A-->B",
 	}
 	if mut != nil {
 		mut(m)
@@ -85,7 +90,7 @@ func TestJ2OutputSchema_ContainsAllPropertiesAndClosedValues(t *testing.T) {
 		t.Fatalf("properties missing: %#v", decoded)
 	}
 	for _, key := range []string{"verdict", "summary", "steps", "repo", "operation", "size", "done_criteria",
-		"budget_impl_usd", "budget_review_usd", "cross_repo", "related_repos", "question", "issues"} {
+		"budget_impl_usd", "budget_review_usd", "cross_repo", "related_repos", "question", "issues", "expected", "non_goals", "figure"} {
 		if _, ok := props[key]; !ok {
 			t.Errorf("properties is missing %q", key)
 		}
