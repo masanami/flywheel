@@ -48,10 +48,10 @@ func j2PlanFixture(t *testing.T, mut func(m map[string]any)) (stdout string, out
 		"steps":             []string{"step one", "step two"},
 		"repo":              "direct-repo",
 		"operation":         "brief-op",
-		"size":              "M",
+		"size":              "S",
 		"done_criteria":     "DONE-CLI-MARKER",
-		"budget_impl_usd":   nil,
-		"budget_review_usd": nil,
+		"budget_impl_usd":   50, // サイズ S の既定（30）ではなく、委譲側のテストが前提にする額
+		"budget_review_usd": 30,
 		"cross_repo":        false,
 		"related_repos":     []string{},
 		"question":          nil,
@@ -254,7 +254,7 @@ func TestPlanAuto_MappedChallenge_RegistersPlanWithSpecAndFeedsUpstreamToJ2(t *t
 	}
 	plan := plans[0].(map[string]any)
 	body := plan["body"].(string)
-	for _, want := range []string{"flywheel-repo", "impl-op", "サイズ: M", "DONE-CLI-MARKER", "実装枠: 41.5 USD", "レビュー対応枠: 30 USD"} {
+	for _, want := range []string{"flywheel-repo", "impl-op", "サイズ: S", "DONE-CLI-MARKER", "実装枠: 41.5 USD", "レビュー対応枠: 30 USD"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("plan body does not contain %q:\n%s", want, body)
 		}

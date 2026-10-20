@@ -43,6 +43,10 @@ type j2RawOutput struct {
 	CrossRepo       *bool    `json:"cross_repo"`
 	RelatedRepos    []string `json:"related_repos"`
 	Question        *string  `json:"question"`
+	// Expected・NonGoals・Figure は段階の欄（無い・null は「書かない」）。
+	Expected []StageExpected `json:"expected"`
+	NonGoals []string        `json:"non_goals"`
+	Figure   *string         `json:"figure"`
 }
 
 // j2RawIssuesOutput は verdict が issues のときだけ読む形。plan の項目は読まない
@@ -75,6 +79,11 @@ type j2ValidatedOutput struct {
 	Question          *string
 	// Issues は issues のときの論点（検査済み。3〜5 件）。
 	Issues []StageIssue
+	// Expected・NonGoals・Figure は plan のときの段階の欄（検査済み。無い・0 個・null は
+	// nil。Expected が nil なら課題のいまの値を残す）。
+	Expected []StageExpected
+	NonGoals []string
+	Figure   *string
 	// Spec は構造化した出力の JSON を空白を除いて詰めたもの（task_plan.spec。
 	// null の額も出力のまま残す＝「spec は構造化した出力と一致する」）。
 	Spec []byte
@@ -126,6 +135,26 @@ func j2OutputSchema() []byte {
 			"additionalProperties": false,
 		},
 	}
+	expectedSchema := map[string]any{
+		"type":     []string{"array", "null"},
+		"maxItems": MaxExpected,
+		"items": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"kind":   map[string]any{"type": "string", "enum": []string{string(ExpectedKindUI), string(ExpectedKindCLI), string(ExpectedKindBehavior)}},
+				"scene":  map[string]any{"type": "string"},
+				"before": map[string]any{"type": "string"},
+				"after":  map[string]any{"type": "string"},
+			},
+			"required":             []string{"kind", "scene", "before", "after"},
+			"additionalProperties": false,
+		},
+	}
+	nonGoalsSchema := map[string]any{
+		"type":     []string{"array", "null"},
+		"maxItems": MaxNonGoals,
+		"items":    map[string]any{"type": "string"},
+	}
 	nullableNumber := map[string]any{"type": []string{"number", "null"}}
 	stringArray := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 
@@ -145,6 +174,9 @@ func j2OutputSchema() []byte {
 			"related_repos":     stringArray,
 			"question":          nullableString,
 			"issues":            issuesSchema,
+			"expected":          expectedSchema,
+			"non_goals":         nonGoalsSchema,
+			"figure":            nullableString,
 		},
 		"required":             []string{"verdict"},
 		"additionalProperties": false,
@@ -280,6 +312,21 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		}
 	}
 
+	expected, err := NormalizeExpected(raw.Expected)
+	if err != nil {
+		return nil, false
+	}
+	nonGoals, err := NormalizeNonGoals(raw.NonGoals)
+	if err != nil {
+		return nil, false
+	}
+	// figure は空文字・空白だけを不正とする（消すときは null）。
+	if raw.Figure != nil {
+		if err := CheckFigure(*raw.Figure); err != nil {
+			return nil, false
+		}
+	}
+
 	var spec bytes.Buffer
 	if err := json.Compact(&spec, data); err != nil {
 		return nil, false
@@ -297,6 +344,10 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		ResolvedImplUSD:   impl,
 		ResolvedReviewUSD: review,
 		RelatedRepos:      raw.RelatedRepos,
+		Expected:          expected,
+		NonGoals:          nonGoals,
+		Figure:            raw.Figure,
+		Question:          raw.Question,
 		Spec:              spec.Bytes(),
 	}
 	if raw.Summary != nil {
@@ -512,6 +563,9 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	if len(ch.Issues) > 0 {
 		sections = append(sections, JudgmentDataSection{Label: "論点と回答", Content: formatIssuesSection(ch.Issues, issuesAnswer)})
 	}
+	if stagesText := formatJ2StagesSection(ch); stagesText != "" {
+		sections = append(sections, JudgmentDataSection{Label: "いまの予想・やらないこと・図", Content: stagesText})
+	}
 	if sourceText := formatSourceBindingSection(sb); sourceText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "取り込み元の対応", Content: sourceText})
 	}
@@ -535,6 +589,27 @@ func formatIssuesSection(issues []StageIssue, answer *string) string {
 		b.WriteString(*answer)
 	} else {
 		b.WriteString("(未回答)")
+	}
+	return b.String()
+}
+
+// formatJ2StagesSection は課題のいまの予想・やらないこと・図を整形する（どれも無ければ空）。
+func formatJ2StagesSection(ch Challenge) string {
+	var b strings.Builder
+	if len(ch.Expected) > 0 {
+		b.WriteString("予想:\n")
+		for i, e := range ch.Expected {
+			fmt.Fprintf(&b, "  %d) 種別: %s｜場面: %s｜いま: %s｜完了後: %s\n", i+1, e.Kind, e.Scene, e.Before, e.After)
+		}
+	}
+	if len(ch.NonGoals) > 0 {
+		b.WriteString("やらないこと:\n")
+		for _, g := range ch.NonGoals {
+			b.WriteString("  - " + g + "\n")
+		}
+	}
+	if ch.Figure != nil {
+		b.WriteString("図（Mermaid）:\n" + *ch.Figure + "\n")
 	}
 	return b.String()
 }
@@ -619,30 +694,131 @@ func formatJ2BudgetDefaultsSection(agent *AgentDeclaration) string {
 // 同じく mapped=false（エラーではない）として扱う。
 var errJ2MappingNotEligible = errors.New("core: j2 mapping is no longer eligible (challenge is not classified anymore)")
 
+// j2PlanKind は plan の出力を課題のいまの状態に当てた結果の種類。
+type j2PlanKind int
+
+const (
+	// j2PlanNotEligible は課題が分類済でなくなっている（写さない）。
+	j2PlanNotEligible j2PlanKind = iota
+	// j2PlanNoIssues はサイズ M・L なのに論点の記録が無い（invalid_output）。
+	j2PlanNoIssues
+	// j2PlanExpectedEmpty はサイズ M・L なのに予想が空のまま（計画を登録せず保留）。
+	j2PlanExpectedEmpty
+	// j2PlanRegister は計画を登録する。
+	j2PlanRegister
+)
+
+// errJ2PlanStale は、写す直前に読み直した課題が事前の読み取りと違う判定になったことを表す。
+var errJ2PlanStale = errors.New("core: challenge changed while mapping J2 plan")
+
+// j2PlanMapping は applyJ2Plan の結果。
+type j2PlanMapping struct {
+	// Mapped は計画の登録か保留のどちらかを書いたとき true。
+	Mapped bool
+	// Kind が j2PlanNoIssues なら何も書いていない（呼び出し元が invalid_output にする）。
+	Kind j2PlanKind
+}
+
+// j2PlanDecide は検査済みの plan の出力を課題 ch の現在の値に当てて、写し方を決める。
+// 論点の記録の検査（M4P34）を先に行い、予想の規則（M4P38）はそれを通った出力にだけ当てる。
+func j2PlanDecide(ch *Challenge, v *j2ValidatedOutput) j2PlanKind {
+	if ch.Status != StatusClassified {
+		return j2PlanNotEligible
+	}
+	big := v.Size == JudgmentSizeM || v.Size == JudgmentSizeL
+	if big && ch.Issues == nil {
+		return j2PlanNoIssues
+	}
+	if big && len(v.Expected) == 0 && len(ch.Expected) == 0 {
+		return j2PlanExpectedEmpty
+	}
+	return j2PlanRegister
+}
+
+// j2ExpectedEmptyQuestion は予想を書けなかったときの保留の問い（固定の文＋出力の question）。
+func j2ExpectedEmptyQuestion(question *string) string {
+	if question != nil && strings.TrimSpace(*question) != "" {
+		return ExpectedEmptyHoldPreamble + " " + *question
+	}
+	return ExpectedEmptyHoldPreamble
+}
+
 // applyJ2Plan は判定 plan の出力を課題へ写す（M1 T3。PlanChallenge と同じ遷移を、
 // 経路 invoker・本人確認 none・原因の run の ID つきで実行し、計画の本文と spec を
-// 1 版として登録する）。T3 と T4 は同じ操作 plan なので、遷移表の照合だけでは
-// 「計画承認待ちの計画の改訂〈T4〉」を弾けない。J2 の対象は分類済の課題だけなので、
-// 写す直前に読み直した状態を分類済と照合する。
-func (s *Store) applyJ2Plan(ctx context.Context, runIDDisplay, challengeIDDisplay, body string, spec []byte) (mapped bool, err error) {
-	specText := string(spec)
-	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpPlan, func(ctx context.Context, tc *transitionCtx) error {
-		if tc.current.Status != StatusClassified {
-			return errJ2MappingNotEligible
+// 1 版として登録する。予想・やらないこと・図・実物も同じトランザクションで書く）。
+// T3 と T4 は同じ操作 plan なので、遷移表の照合だけでは「計画承認待ちの計画の改訂〈T4〉」を
+// 弾けない。J2 の対象は分類済の課題だけなので、写す直前に読み直した状態を照合する。
+// 予想が空のままのサイズ M・L は計画を登録せず保留（T11）にする。操作は事前の読み取りで
+// 選び、書き込みの中で読み直した判定がずれたら（間に edit が入った）書かずに選び直す。
+func (s *Store) applyJ2Plan(ctx context.Context, runIDDisplay, challengeIDDisplay, body string, v *j2ValidatedOutput) (j2PlanMapping, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		m, err := s.applyJ2PlanOnce(ctx, runIDDisplay, challengeIDDisplay, body, v)
+		if !errors.Is(err, errJ2PlanStale) {
+			return m, err
+		}
+	}
+	return j2PlanMapping{}, ErrConflict
+}
+
+func (s *Store) applyJ2PlanOnce(ctx context.Context, runIDDisplay, challengeIDDisplay, body string, v *j2ValidatedOutput) (j2PlanMapping, error) {
+	cid, ok := parseChallengeID(challengeIDDisplay)
+	if !ok {
+		return j2PlanMapping{}, ErrNotFound
+	}
+	var pre *Challenge
+	err := classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
+		ch, err := loadChallenge(ctx, tx, cid)
+		pre = ch
+		return err
+	}))
+	if err != nil {
+		return j2PlanMapping{}, err
+	}
+	kind := j2PlanDecide(pre, v)
+	switch kind {
+	case j2PlanNotEligible, j2PlanNoIssues:
+		return j2PlanMapping{Kind: kind}, nil
+	}
+
+	op := OpPlan
+	if kind == j2PlanExpectedEmpty {
+		op = OpHold
+	}
+	specText := string(v.Spec)
+	m := j2PlanMapping{Kind: kind}
+	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, op, func(ctx context.Context, tc *transitionCtx) error {
+		if j2PlanDecide(tc.current, v) != kind {
+			return errJ2PlanStale
+		}
+		if kind == j2PlanExpectedEmpty {
+			if err := insertHold(ctx, tc, j2ExpectedEmptyQuestion(v.Question)); err != nil {
+				return err
+			}
+			m.Mapped = true
+			return nil
 		}
 		if _, err := insertTaskPlanVersion(ctx, tc, body, &specText); err != nil {
 			return err
 		}
-		mapped = true
+		patch := StagePatch{
+			NonGoals: StageSet(v.NonGoals),
+			Figure:   StageSet(v.Figure),
+			Actual:   StageSet[[]StageActual](nil),
+		}
+		if len(v.Expected) > 0 {
+			patch.Expected = StageSet(v.Expected)
+		}
+		tc.patchStages(patch)
+		m.Mapped = true
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errJ2MappingNotEligible) {
-			return false, nil
+		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) {
+			return j2PlanMapping{Kind: j2PlanNotEligible}, nil
 		}
-		return false, err
+		return j2PlanMapping{}, err
 	}
-	return mapped, nil
+	return m, nil
 }
 
 // applyJ2Uncertain は判定 uncertain の出力を課題へ写す（M1 T11）。J2 の対象は
@@ -743,12 +919,22 @@ func (s *Store) finalizeJ2Output(ctx context.Context, runIDDisplay, challengeIDD
 
 	switch validated.Verdict {
 	case J2VerdictPlan:
-		mapped, err := s.applyJ2Plan(ctx, runIDDisplay, challengeIDDisplay, formatJ2PlanBody(validated), validated.Spec)
+		pm, err := s.applyJ2Plan(ctx, runIDDisplay, challengeIDDisplay, formatJ2PlanBody(validated), validated)
 		if err != nil {
 			return "", nil, "", "", err
 		}
-		if !mapped {
+		if pm.Kind == j2PlanNoIssues {
+			if err := s.invalidateRunOutput(ctx, runIDDisplay); err != nil {
+				return "", nil, "", "", err
+			}
+			return "", nil, RunResultInvalidOutput, "", nil
+		}
+		if !pm.Mapped {
 			return string(J2VerdictPlan), nil, RunResultSucceeded, "", nil
+		}
+		if pm.Kind == j2PlanExpectedEmpty {
+			st := string(StatusAwaitingHuman)
+			return string(J2VerdictPlan), &st, RunResultSucceeded, "", nil
 		}
 		if fin.Read != nil {
 			_, err := s.markReadWithValues(ctx, ChannelInvoker, challengeIDDisplay, markReadOptions{RunID: runIDDisplay, Values: fin.Read})
