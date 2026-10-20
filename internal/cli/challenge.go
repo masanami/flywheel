@@ -52,31 +52,36 @@ func runList(a Args) (any, error) {
 	return textOutput{json: view.ListResponse{Challenges: view.FromChallenges(challenges)}, text: challengeListText(challenges)}, nil
 }
 
-// runEdit は `flywheel edit <C-ID> […]` の実装。人間記入欄のフラグが1つも
+// runEdit は `flywheel edit <C-ID> […]` の実装。編集できる欄のフラグが1つも
 // 指定されていなければ usage_error（引数の誤り）で拒否する。core の検証
 // （閉集合・存在・terminal_state・差分の有無）はここに書かない。
 func runEdit(a Args) (any, error) {
-	title, hasTitle := a.Values["title"]
-	description, hasDescription := a.Values["description"]
-	doneCriteria, hasDoneCriteria := a.Values["done-criteria"]
-	urgency, hasUrgency := a.Values["urgency"]
-
-	if !hasTitle && !hasDescription && !hasDoneCriteria && !hasUrgency {
-		return nil, NewError(CodeUsageError, "edit には --title / --description / --done-criteria / --urgency のいずれか1つ以上を指定してください")
-	}
-
 	in := core.EditInput{}
-	if hasTitle {
-		in.Title = &title
+	targets := []struct {
+		flag string
+		dst  **string
+	}{
+		{"title", &in.Title},
+		{"description", &in.Description},
+		{"done-criteria", &in.DoneCriteria},
+		{"urgency", &in.Urgency},
+		{"headline", &in.Headline},
+		{"context", &in.Context},
+		{"issues", &in.Issues},
+		{"expected", &in.Expected},
+		{"actual", &in.Actual},
+		{"non-goals", &in.NonGoals},
+		{"figure", &in.Figure},
 	}
-	if hasDescription {
-		in.Description = &description
+	specified := false
+	for _, t := range targets {
+		if v, ok := a.Values[t.flag]; ok {
+			*t.dst = &v
+			specified = true
+		}
 	}
-	if hasDoneCriteria {
-		in.DoneCriteria = &doneCriteria
-	}
-	if hasUrgency {
-		in.Urgency = &urgency
+	if !specified {
+		return nil, NewError(CodeUsageError, "edit には --title / --description / --done-criteria / --urgency / --headline / --context / --issues / --expected / --actual / --non-goals / --figure のいずれか1つ以上を指定してください")
 	}
 
 	c, err := a.Store.EditChallenge(context.Background(), core.ChannelCLI, a.Positional[0], in)
