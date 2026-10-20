@@ -85,7 +85,7 @@ func TestJ2OutputSchema_ContainsAllPropertiesAndClosedValues(t *testing.T) {
 		t.Fatalf("properties missing: %#v", decoded)
 	}
 	for _, key := range []string{"verdict", "summary", "steps", "repo", "operation", "size", "done_criteria",
-		"budget_impl_usd", "budget_review_usd", "cross_repo", "related_repos", "question"} {
+		"budget_impl_usd", "budget_review_usd", "cross_repo", "related_repos", "question", "issues"} {
 		if _, ok := props[key]; !ok {
 			t.Errorf("properties is missing %q", key)
 		}

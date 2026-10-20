@@ -369,15 +369,26 @@ func attestationValid(att Attestation, id string) bool {
 // insertHold は hold テーブルへ 1 行追加する（T10・T11 が共有する）。
 // from_status は遷移前の状態（tc.current.Status）。answer 系は NULL のまま。
 func insertHold(ctx context.Context, tc *transitionCtx, question string) error {
-	if _, err := tc.tx.ExecContext(ctx,
+	_, err := insertHoldID(ctx, tc, question)
+	return err
+}
+
+// insertHoldID は insertHold と同じ行を追加し、その hold.id を返す。
+func insertHoldID(ctx context.Context, tc *transitionCtx, question string) (int64, error) {
+	res, err := tc.tx.ExecContext(ctx,
 		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id)
 		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)`,
 		tc.id, question, string(tc.current.Status), tc.nowStr, int64PtrColumn(tc.runID),
-	); err != nil {
-		return err
+	)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
 	}
 	tc.after["question"] = question
-	return nil
+	return id, nil
 }
 
 // ClassifyChallenge は課題に優先度を設定する（T2）。Priority が閉集合外なら
