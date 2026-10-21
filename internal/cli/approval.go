@@ -284,7 +284,7 @@ func approvalSummaryText(p *core.ApprovalPreview, decision core.ApprovalDecision
 		fmt.Fprintf(&b, "計画 v%d:\n%s", p.PlanVersion, indentLines(escapeControlKeepLines(p.PlanBody), "    "))
 		writePlanStageSummary(&b, p)
 	} else {
-		fmt.Fprintf(&b, "完了条件:    %s\n", p.DoneCriteria)
+		fmt.Fprintf(&b, "完了条件:    %s\n", escapeControl(p.DoneCriteria))
 		writeCompletionStageSummary(&b, p)
 	}
 	if p.Kind == core.ApprovalKindCompletion {
@@ -375,7 +375,11 @@ func operationApprovalSummaryText(p *core.OperationApprovalPreview, reason *stri
 	fmt.Fprintf(&b, "操作 ID:      %s\n", p.OperationID)
 	fmt.Fprintf(&b, "種類:         %s\n", string(p.Kind))
 	fmt.Fprintf(&b, "要約:         %s\n", escapeControl(p.Summary))
-	fmt.Fprintf(&b, "参照:         %s\n", textOrDash(nilableString(p.Ref)))
+	ref := "-"
+	if p.Ref != nil {
+		ref = escapeControl(*p.Ref)
+	}
+	fmt.Fprintf(&b, "参照:         %s\n", ref)
 	fmt.Fprintf(&b, "課題 ID:      %s\n", p.ChallengeID)
 	fmt.Fprintf(&b, "課題タイトル: %s\n", escapeControl(p.ChallengeTitle))
 	label, _ := p.ChallengeStatus.Label()
@@ -397,7 +401,7 @@ func answerSummaryText(p *core.AnswerPreview) string {
 	return b.String()
 }
 
-// escapeControl は外部・LLM が書きうる値（段階の欄・課題のタイトル・不可逆操作の要約）を、承認の要約へ 1 行で埋め込めるように
+// escapeControl は外部・LLM が書きうる値（段階の欄・課題のタイトル・完了条件・不可逆操作の要約と参照）を、承認の要約へ 1 行で埋め込めるように
 // する。改行・復帰・タブ・ESC などの制御文字と Unicode の行・段落の区切り
 // （U+2028・U+2029）、双方向制御文字・ゼロ幅文字を、見える形（\n・\r・\t・\x1b・\u2028 など）に置き換える。
 // 値の中の改行で、人間が承認の根拠にする端末の要約に偽の行や見出しを作らせない。

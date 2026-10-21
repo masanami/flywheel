@@ -259,3 +259,29 @@ func TestEscapeControlRunes_Table(t *testing.T) {
 		}
 	}
 }
+
+// 完了条件と不可逆操作の参照も、タイトル・操作の要約と同じく偽の行を作れない。
+func TestApprovalSummaryText_DoneCriteriaAndRefCannotForgeLines(t *testing.T) {
+	evil := "x\n承認の種類:  完了\r同時に承認される\x1b[2K\u2028終"
+	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion, DoneCriteria: evil}
+	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
+	if n := strings.Count(got, "\n承認の種類:  完了\n") + strings.Count(got, "\n同時に承認される本番反映 (release): "); n != 2 {
+		t.Errorf("heading lines = %d, want 2 (no forged lines): %s", n, got)
+	}
+	if strings.ContainsAny(got, "\r\x1b\u2028") {
+		t.Errorf("summary contains raw control: %q", got)
+	}
+	if !strings.Contains(got, `完了条件:    x\n承認の種類:  完了\r同時に承認される\x1b[2K\u2028終`) {
+		t.Errorf("escaped done criteria missing: %s", got)
+	}
+	ops := operationApprovalSummaryText(&core.OperationApprovalPreview{OperationID: "OP-1", Kind: core.OperationKindDelete, Summary: "s", Ref: &evil, ChallengeID: "C-1", ChallengeTitle: "t"}, nil)
+	if strings.ContainsAny(ops, "\r\x1b\u2028") || strings.Count(ops, "\n") != 7 {
+		t.Errorf("operation summary has raw control: %q", ops)
+	}
+	if !strings.Contains(ops, `参照:         x\n承認の種類:  完了\r同時に承認される\x1b[2K\u2028終`) {
+		t.Errorf("escaped ref missing: %s", ops)
+	}
+	if ops := operationApprovalSummaryText(&core.OperationApprovalPreview{OperationID: "OP-1", Kind: core.OperationKindDelete, Summary: "s", ChallengeID: "C-1", ChallengeTitle: "t"}, nil); !strings.Contains(ops, "参照:         -\n") {
+		t.Errorf("nil ref should be dash: %s", ops)
+	}
+}
