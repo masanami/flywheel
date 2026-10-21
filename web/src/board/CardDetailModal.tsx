@@ -170,7 +170,11 @@ export function CardDetailModal({
         data-testid="card-detail-content"
       >
         <div className="card-detail-modal-header">
-          <h2 id="card-detail-modal-title" className="card-detail-modal-title">
+          <h2
+            id="card-detail-modal-title"
+            className="card-detail-modal-title"
+            data-testid="detail-headline"
+          >
             {challenge.headline ?? challenge.title}
           </h2>
           <button type="button" className="modal-close-button" onClick={close}>
@@ -195,10 +199,6 @@ export function CardDetailModal({
           <dd>{challenge.priority ?? "-"}</dd>
           <dt>要対応</dt>
           <dd>{challenge.needsHuman ? "はい" : "いいえ"}</dd>
-          <dt>見出し</dt>
-          <dd data-testid="detail-headline">
-            {challenge.headline ?? challenge.title}
-          </dd>
         </dl>
 
         <section className="card-detail-ledger-join" data-testid="ledger-join">

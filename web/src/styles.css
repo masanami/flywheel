@@ -1472,8 +1472,15 @@ body {
   flex: 1;
   min-height: 0;
 }
+/* 端末のコマンドは長い。flex の子の最小幅（内容幅）で親を押し広げず、列の幅の中で横スクロールさせる（幅 360px）。 */
+.approval-guide-item {
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
+}
 .approval-control pre {
   margin: 0.25rem 0 0;
+  max-width: 100%;
   overflow-x: auto;
   font-size: 0.75rem;
 }

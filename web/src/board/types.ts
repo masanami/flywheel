@@ -40,7 +40,8 @@ export type Challenge = {
 // 実行中の課題（running 修飾を持つもの）。
 export type RunningChallenge = {
   challengeId: string;
-  title: string;
+  // 行に出す文。「一言で」（headline）が空ならタイトル。
+  summary: string;
   unresponsive: boolean;
 };
 

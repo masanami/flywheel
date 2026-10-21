@@ -21,7 +21,7 @@ function RunningRow({ run }: { run: RunningChallenge }) {
           {run.challengeId}
         </span>
         <span className="agent-column-running-run-ledger-title">
-          {run.title}
+          {run.summary}
         </span>
       </div>
       {run.unresponsive && (

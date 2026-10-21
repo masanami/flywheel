@@ -227,6 +227,8 @@ it("AC-197/198: 60 文字を超える見出しは先頭 60 文字と「…」、
   fireEvent.click(within(face("C-7")).getByRole("button"));
   const modal = await screen.findByTestId("card-detail-content");
   expect(within(modal).getByTestId("detail-headline")).toHaveTextContent(LONG);
+  // 「一言で」と同じ文を属性の表に 2 度出さない（見出しの行は無い）
+  expect(within(modal).queryByText("見出し")).toBeNull();
 });
 
 it("AC-202: 詳細に card.state と card.next_human_actions の文言（[] なら「なし（エージェントが進める）」）が出る", async () => {

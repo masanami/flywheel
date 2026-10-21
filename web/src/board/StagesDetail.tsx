@@ -49,6 +49,21 @@ export function IssuesAnswerView({ answer }: { answer: string }) {
   );
 }
 
+// 予想の例 1 つ。種類・場面・変更前・変更後を出す（仕様の表の各例と同じ。端末の要約も変更前を出す）。
+function ExpectedBody({ e }: { e: StageExpected }) {
+  return (
+    <>
+      予想（{e.kind}・{e.scene}）:
+      <div data-field="before">
+        変更前: <ClampedText text={e.before} />
+      </div>
+      <div data-field="after">
+        変更後: <ClampedText text={e.after} />
+      </div>
+    </>
+  );
+}
+
 // 予想（完了したら見えるもの）の一覧。計画の承認の要約で使う。
 export function ExpectedView({ expected }: { expected: StageExpected[] }) {
   return (
@@ -58,7 +73,7 @@ export function ExpectedView({ expected }: { expected: StageExpected[] }) {
         {expected.map((e, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: 固定の一覧
           <li key={i} data-field="expected">
-            予想（{e.scene}）: <ClampedText text={e.after} />
+            <ExpectedBody e={e} />
           </li>
         ))}
       </ol>
@@ -67,8 +82,18 @@ export function ExpectedView({ expected }: { expected: StageExpected[] }) {
 }
 
 // 予想と実物の対。core の Pairs の結果をそのまま 1 行ずつ出す（UI では位置で対を組まない）。
-// 片側が null の行には印を出す。
-export function PairsView({ pairs }: { pairs: StagePair[] }) {
+// 片側が null の行には印を出す。quietWhenNoActual のときは、実物がどの行にも無い間
+// （計画の承認の時点。実物は完了確認で入る）だけ実物の欄に印を出さない（欠けているのではなく、まだ無いだけ）。
+// 完了の承認の要約は指定せず、常に印を出す。
+export function PairsView({
+  pairs,
+  quietWhenNoActual = false,
+}: {
+  pairs: StagePair[];
+  quietWhenNoActual?: boolean;
+}) {
+  const showActualMark =
+    !quietWhenNoActual || pairs.some((p) => p.actual !== null);
   return (
     <section aria-label="予想と実物" data-stage="pairs">
       <h3>予想と実物</h3>
@@ -78,8 +103,7 @@ export function PairsView({ pairs }: { pairs: StagePair[] }) {
           <li key={i} data-pair={i}>
             {p.expected ? (
               <div data-field="expected">
-                予想（{p.expected.scene}）:{" "}
-                <ClampedText text={p.expected.after} />
+                <ExpectedBody e={p.expected} />
               </div>
             ) : (
               <div data-field="expected" data-mark="expected-missing">
@@ -90,11 +114,11 @@ export function PairsView({ pairs }: { pairs: StagePair[] }) {
               <div data-field="actual">
                 実物（{p.actual.scene}）: <ClampedText text={p.actual.after} />
               </div>
-            ) : (
+            ) : showActualMark ? (
               <div data-field="actual" data-mark="actual-missing">
                 {ACTUAL_MISSING_MARK}
               </div>
-            )}
+            ) : null}
           </li>
         ))}
       </ol>
@@ -141,7 +165,7 @@ export function StagesDetail({
     <section className="card-detail-stages" data-testid="stages-detail">
       {issues !== null && <IssuesView issues={issues} />}
       {issues_answer !== null && <IssuesAnswerView answer={issues_answer} />}
-      {pairs.length > 0 && <PairsView pairs={pairs} />}
+      {pairs.length > 0 && <PairsView pairs={pairs} quietWhenNoActual />}
       {non_goals !== null && <NonGoalsView nonGoals={non_goals} />}
     </section>
   );

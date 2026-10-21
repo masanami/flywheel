@@ -87,6 +87,9 @@ it("計画の承認の要約に、論点と回答・予想・やらないこと�
   expect(w.getByText("どちらにする？")).toBeInTheDocument();
   expect(w.getByText("案Bで決定")).toBeInTheDocument();
   expect(w.getByText("予想後")).toBeInTheDocument();
+  // 変更前と種類も出す（端末の要約と同じ）
+  expect(w.getByText("前")).toBeInTheDocument();
+  expect(w.getByText(/予想（ui・画面1）/)).toBeInTheDocument();
   expect(w.getByText("やらない1")).toBeInTheDocument();
   expect(w.queryByTestId("approval-pairs")).toBeNull();
 });

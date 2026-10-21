@@ -42,7 +42,10 @@ function bodies() {
       cc("C-2", "awaiting_plan_approval", {
         next_human_actions: ["approve_plan"],
       }),
-      cc("C-3", "in_progress", { modifiers: ["running", "unresponsive"] }),
+      cc("C-3", "in_progress", {
+        modifiers: ["running", "unresponsive"],
+        headline: "C-3の一言",
+      }),
       cc("C-7", "in_progress", { next_human_actions: ["answer_question"] }),
       cc("C-4", "done"),
       cc(
@@ -155,6 +158,9 @@ it("実行中の課題は「⚡ 実行中」に出て、更新なしは区別さ
   const row = within(alpha).getByTestId("running-run-C-3");
   expect(row).toHaveAttribute("data-stale", "true");
   expect(row).toHaveTextContent("更新なし");
+  // 行には「一言で」を出す（タイトルではない）。
+  expect(row).toHaveTextContent("C-3の一言");
+  expect(row).not.toHaveTextContent("題名C-3");
 });
 
 it("AC-120: running だけを持つ課題も、そのワークスペースの列で実行中の印が出る（更新なしではない）", async () => {
