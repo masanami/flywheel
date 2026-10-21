@@ -143,6 +143,7 @@ func parseArgs(rawArgs []string, cmd Command) (Args, *Error) {
 	}
 
 	values := map[string]string{}
+	multi := map[string][]string{}
 	bools := map[string]bool{}
 	var positional []string
 
@@ -175,6 +176,9 @@ func parseArgs(rawArgs []string, cmd Command) (Args, *Error) {
 					i++
 				}
 				values[name] = val
+				if def.Repeatable {
+					multi[name] = append(multi[name], val)
+				}
 			} else {
 				bools[name] = !hasInline || inlineValue != "false"
 			}
@@ -220,7 +224,7 @@ func parseArgs(rawArgs []string, cmd Command) (Args, *Error) {
 		}
 	}
 
-	return Args{Positional: positional, Values: values, Bools: bools}, nil
+	return Args{Positional: positional, Values: values, Multi: multi, Bools: bools}, nil
 }
 
 func failErr(stderr io.Writer, jsonMode bool, cliErr *Error) int {

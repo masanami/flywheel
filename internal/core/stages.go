@@ -37,6 +37,8 @@ const (
 const (
 	// PairActualMissingMark は予想の例に対応する実物が無い位置の印。
 	PairActualMissingMark = "実物なし"
+	// PairExpectedMissingMark は実物に対応する予想の例が無い位置（実物が予想より多い）の印。
+	PairExpectedMissingMark = "予想なし"
 	// IssuesQuestionPreamble は論点の保留の問いの冒頭の文。
 	IssuesQuestionPreamble = "論点に答えてください。答えは 1 回の回答にまとめてください"
 	// ExpectedEmptyHoldPreamble はサイズ M・L の計画で予想を書けなかったときの保留の問いの冒頭の文。
