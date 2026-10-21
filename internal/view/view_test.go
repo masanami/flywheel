@@ -183,3 +183,22 @@ func TestChallengeAndApprovalCarryS4Keys(t *testing.T) {
 		t.Errorf("approval = %s", got)
 	}
 }
+
+func TestShowCarriesPairsOutsideStages(t *testing.T) {
+	d := &core.ChallengeDetail{Challenge: core.Challenge{StageFields: core.StageFields{
+		Expected: []core.StageExpected{{Kind: core.ExpectedKindUI, Scene: "s1", Before: "b", After: "a"}},
+	}}}
+	for name, got := range map[string]string{
+		"show":      marshal(t, view.FromChallengeDetail(d)),
+		"show-card": marshal(t, view.FromChallengeDetailCard(d, &core.Card{})),
+	} {
+		if !strings.Contains(got, `"pairs":[{"actual":null,"expected":{"after":"a","before":"b","kind":"ui","scene":"s1"}}]`) {
+			t.Errorf("%s: pairs missing: %s", name, got)
+		}
+		var m map[string]map[string]json.RawMessage
+		_ = json.Unmarshal([]byte(got), &m)
+		if _, ok := m["stages"]["pairs"]; ok {
+			t.Errorf("%s: pairs must not be inside stages", name)
+		}
+	}
+}

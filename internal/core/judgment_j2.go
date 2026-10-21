@@ -934,7 +934,7 @@ func (s *Store) finalizeJ2Output(ctx context.Context, runIDDisplay, challengeIDD
 		}
 		if pm.Kind == j2PlanExpectedEmpty {
 			st := string(StatusAwaitingHuman)
-			return string(J2VerdictPlan), &st, RunResultSucceeded, "", nil
+			return string(J2VerdictUncertain), &st, RunResultSucceeded, "", nil
 		}
 		if fin.Read != nil {
 			_, err := s.markReadWithValues(ctx, ChannelInvoker, challengeIDDisplay, markReadOptions{RunID: runIDDisplay, Values: fin.Read})

@@ -97,6 +97,7 @@ export interface ShowResponse {
   challenge: Challenge;
   holds: Hold[];
   operations: Operation[];
+  pairs: StagePair[];
   plans: PlanDetail[];
   runs: Run[];
   source_binding: SourceBinding | null;
@@ -131,6 +132,23 @@ export interface Hold {
   relay_quote: string | null;
   relay_session: string | null;
   run_id: string | null;
+}
+
+export interface StagePair {
+  actual: StageActual | null;
+  expected: StageExpected | null;
+}
+
+export interface StageActual {
+  after: string;
+  scene: string;
+}
+
+export interface StageExpected {
+  after: string;
+  before: string;
+  kind: string;
+  scene: string;
 }
 
 export interface PlanDetail {
@@ -179,18 +197,6 @@ export interface Stages {
   issues: StageIssue[] | null;
   issues_answer: string | null;
   non_goals: string[] | null;
-}
-
-export interface StageActual {
-  after: string;
-  scene: string;
-}
-
-export interface StageExpected {
-  after: string;
-  before: string;
-  kind: string;
-  scene: string;
 }
 
 export interface StageIssue {
@@ -277,6 +283,7 @@ export interface ShowCardResponse {
   challenge: Challenge;
   holds: Hold[];
   operations: Operation[];
+  pairs: StagePair[];
   plans: PlanDetail[];
   runs: Run[];
   source_binding: SourceBinding | null;
@@ -340,11 +347,6 @@ export interface ApprovalOtherOperation {
   id: string;
   kind: string;
   summary: string;
-}
-
-export interface StagePair {
-  actual: StageActual | null;
-  expected: StageExpected | null;
 }
 
 export interface ApprovalPlan {

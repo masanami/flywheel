@@ -2,6 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import type { Stages } from "../api/types.gen.ts";
 import { StagesDetail } from "./StagesDetail.tsx";
+import { ACTUAL_MISSING_MARK, EXPECTED_MISSING_MARK } from "./stage-marks.ts";
 
 afterEach(cleanup);
 
@@ -15,7 +16,7 @@ const EMPTY: Stages = {
 };
 
 it("段階の欄がすべて null なら何も出さない（AC-380）", () => {
-  const { container } = render(<StagesDetail stages={EMPTY} />);
+  const { container } = render(<StagesDetail stages={EMPTY} pairs={[]} />);
   expect(container.innerHTML).toBe("");
 });
 
@@ -41,6 +42,17 @@ it("論点・決定・予想と実物・やらないことを出し、ボタン�
         actual: [{ scene: "画面1", after: "実物後" }],
         non_goals: ["やらない1"],
       }}
+      pairs={[
+        {
+          expected: {
+            kind: "k",
+            scene: "画面1",
+            before: "前",
+            after: "予想後",
+          },
+          actual: { scene: "画面1", after: "実物後" },
+        },
+      ]}
     />,
   );
   expect(screen.getByText("どちらにする？")).toBeTruthy();
@@ -70,29 +82,46 @@ it("外部由来の文字列を HTML として解釈しない（M4P10）", () =>
   const { container } = render(
     <StagesDetail
       stages={{ ...EMPTY, non_goals: ["<img src=x onerror=alert(1)>"] }}
+      pairs={[]}
     />,
   );
   expect(container.querySelector("img")).toBeNull();
   expect(container.textContent).toContain("<img");
 });
 
-it("予想と実物を同じ位置で対にし、個数がずれても落ちない", () => {
+it("予想と実物は pairs の結果をそのまま 1 行ずつ出し、片側だけの行に印を出す（AC-388・AC-389）", () => {
   const { container } = render(
     <StagesDetail
       stages={{
         ...EMPTY,
-        expected: [
-          { kind: "k", scene: "s1", before: "b", after: "予想1" },
-          { kind: "k", scene: "s2", before: "b", after: "予想2" },
-        ],
-        actual: [{ scene: "s1", after: "実物1" }],
+        // pairs と食い違う値を入れて、位置で対を組んでいないことを確かめる
+        expected: [{ kind: "k", scene: "x", before: "b", after: "無視される" }],
       }}
+      pairs={[
+        {
+          expected: { kind: "k", scene: "s1", before: "b", after: "予想1" },
+          actual: { scene: "s1", after: "実物1" },
+        },
+        {
+          expected: { kind: "k", scene: "s2", before: "b", after: "予想2" },
+          actual: null,
+        },
+        { expected: null, actual: { scene: "s3", after: "実物3" } },
+      ]}
     />,
   );
+  expect(container.textContent).not.toContain("無視される");
   const p0 = container.querySelector('[data-pair="0"]');
   const p1 = container.querySelector('[data-pair="1"]');
+  const p2 = container.querySelector('[data-pair="2"]');
   expect(p0?.textContent).toContain("予想1");
   expect(p0?.textContent).toContain("実物1");
+  expect(p0?.textContent).not.toContain(ACTUAL_MISSING_MARK);
+  expect(p0?.textContent).not.toContain(EXPECTED_MISSING_MARK);
   expect(p1?.textContent).toContain("予想2");
-  expect(p1?.textContent).not.toContain("実物");
+  expect(p1?.textContent).toContain(ACTUAL_MISSING_MARK);
+  expect(p2?.textContent).toContain("実物3");
+  expect(p2?.textContent).toContain(EXPECTED_MISSING_MARK);
+  expect(ACTUAL_MISSING_MARK).toBe("実物なし");
+  expect(EXPECTED_MISSING_MARK).toBe("予想なし");
 });

@@ -226,4 +226,16 @@ func TestServeReturnsBuiltUIIndex(t *testing.T) {
 	if resp.StatusCode != 200 || !bytes.Contains(mb, []byte(`"standalone"`)) {
 		t.Fatalf("manifest = %d %s", resp.StatusCode, mb)
 	}
+	// ビルドの manifest は本番に出さない（D3）。配信もしない。
+	for _, p := range []string{"/.vite/manifest.json", "/manifest.json"} {
+		resp, err := http.Get("http://127.0.0.1:" + strconv.Itoa(port) + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode == 200 && bytes.Contains(body, []byte(`"isEntry"`)) {
+			t.Fatalf("GET %s served a build manifest: %s", p, body)
+		}
+	}
 }

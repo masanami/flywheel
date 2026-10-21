@@ -8,10 +8,12 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
+import { type MermaidLike, setMermaidLoader } from "./board/loadMermaid.ts";
 import { screens } from "./screens.tsx";
 import { FakeEventSource, fixtures, installFakes } from "./testing/fakes.ts";
 
 afterEach(() => {
+  setMermaidLoader();
   vi.unstubAllGlobals();
   document.head.innerHTML = "";
 });
@@ -28,6 +30,35 @@ async function operate(check: (container: HTMLElement, id: string) => void) {
     check(container, s.id);
   }
 }
+
+// S4 の画面（図・段階の欄・承認の要約）を操作しても要求の集合が増えないことを確かめるための値。
+const S4_STAGES = {
+  actual: [{ scene: "画面1", after: "実物後" }],
+  expected: [
+    { kind: "ui", scene: "画面1", before: "前", after: "予想後" },
+    { kind: "cli", scene: "画面2", before: "前", after: "予想2" },
+  ],
+  figure: "graph TD; A-->B",
+  issues: [
+    {
+      question: "どちらにする？",
+      recommended: 1,
+      options: [
+        { label: "案A", example: null },
+        { label: "案B", example: "例B" },
+      ],
+    },
+  ],
+  issues_answer: "案Aで決定",
+  non_goals: ["やらない1"],
+};
+const S4_PAIRS = [
+  {
+    expected: S4_STAGES.expected[0],
+    actual: S4_STAGES.actual[0],
+  },
+  { expected: S4_STAGES.expected[1], actual: null },
+];
 
 // AC-221 の fleet に置く承認待ちの課題（帯 → 詳細のモーダル → 承認のボタンまで操作するため）。
 function awaitingApproval(): Record<string, unknown> {
@@ -77,15 +108,9 @@ function awaitingApproval(): Record<string, unknown> {
       operations: [],
       plans: [],
       runs: [],
+      pairs: S4_PAIRS,
       source_binding: null,
-      stages: {
-        actual: null,
-        expected: null,
-        figure: null,
-        issues: null,
-        issues_answer: null,
-        non_goals: null,
-      },
+      stages: S4_STAGES,
     },
     [`${base}/log?challenge=C-1`]: { activities: [] },
     [`${base}/challenges/C-1/approval`]: {
@@ -94,9 +119,11 @@ function awaitingApproval(): Record<string, unknown> {
         done_criteria: "完了条件",
         kind: "plan",
         other_pending_operations: [],
+        pairs: S4_PAIRS,
         plan: { body: "承認する計画", version: 1 },
         release_held: false,
         releases: [],
+        stages: S4_STAGES,
         title: "題名",
         version: 3,
       },
@@ -111,6 +138,11 @@ function awaitingApproval(): Record<string, unknown> {
 
 it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POST …/cycle だけ、EventSource は events の購読だけ", async () => {
   document.head.innerHTML = '<meta name="flywheel-csrf" content="tok">';
+  const mermaid: MermaidLike = {
+    initialize: vi.fn(),
+    render: vi.fn(async () => ({ svg: "<svg></svg>" })),
+  };
+  setMermaidLoader(vi.fn(async () => mermaid));
   const { requests } = installFakes({
     ...fixtures(),
     ...awaitingApproval(),
@@ -127,6 +159,10 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
   const c = await screen.findByTestId("card-C-1");
   fireEvent.click(within(c).getByRole("button"));
   const m = await screen.findByTestId("card-detail-content");
+  // S4 の画面（段階の欄・図・承認の要約）が出ている
+  await within(m).findByTestId("stages-detail");
+  await within(m).findByTestId("figure-svg");
+  await within(m).findByTestId("approval-stages");
   fireEvent.click(
     await within(m).findByRole("button", {
       name: "計画を承認する",

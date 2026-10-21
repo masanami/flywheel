@@ -263,7 +263,7 @@ export function DetailSections({ l }: { l: Loaded }) {
   const acts = [...activities].sort((a, b) => byTimeAsc(a.at, b.at));
   return (
     <>
-      <StagesDetail stages={show.stages} />
+      <StagesDetail stages={show.stages} pairs={show.pairs} />
       <FigureView figure={show.stages.figure} />
       <Section title="計画" count={plans.length}>
         {plans.map((p) => (
