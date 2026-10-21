@@ -95,7 +95,7 @@ export function toAgentBoard(
     )
     .map((c) => ({
       challengeId: c.id,
-      title: c.title,
+      summary: c.headline ?? c.title,
       unresponsive: c.modifiers.includes("unresponsive"),
     }));
   return {

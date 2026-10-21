@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import type { Stages } from "../api/types.gen.ts";
-import { StagesDetail } from "./StagesDetail.tsx";
+import { PairsView, StagesDetail } from "./StagesDetail.tsx";
 import { ACTUAL_MISSING_MARK, EXPECTED_MISSING_MARK } from "./stage-marks.ts";
 
 afterEach(cleanup);
@@ -124,4 +124,47 @@ it("予想と実物は pairs の結果をそのまま 1 行ずつ出し、片側
   expect(p2?.textContent).toContain(EXPECTED_MISSING_MARK);
   expect(ACTUAL_MISSING_MARK).toBe("実物なし");
   expect(EXPECTED_MISSING_MARK).toBe("予想なし");
+});
+
+it("実物がどの行にも無い間は「実物なし」の印を出さず、予想の種類・変更前・変更後を出す", () => {
+  const { container } = render(
+    <StagesDetail
+      stages={EMPTY}
+      pairs={[
+        {
+          expected: { kind: "ui", scene: "s1", before: "前1", after: "後1" },
+          actual: null,
+        },
+        {
+          expected: { kind: "cli", scene: "s2", before: "前2", after: "後2" },
+          actual: null,
+        },
+      ]}
+    />,
+  );
+  expect(container.textContent).not.toContain(ACTUAL_MISSING_MARK);
+  expect(container.querySelector('[data-mark="actual-missing"]')).toBeNull();
+  const p0 = container.querySelector('[data-pair="0"]');
+  expect(p0?.textContent).toContain("ui");
+  expect(p0?.textContent).toContain("s1");
+  expect(p0?.querySelector('[data-field="before"]')?.textContent).toContain(
+    "前1",
+  );
+  expect(p0?.querySelector('[data-field="after"]')?.textContent).toContain(
+    "後1",
+  );
+});
+
+it("完了の承認の要約では、実物が全行 null でも「実物なし」の印を出す", () => {
+  const { container } = render(
+    <PairsView
+      pairs={[
+        {
+          expected: { kind: "ui", scene: "s1", before: "前", after: "後" },
+          actual: null,
+        },
+      ]}
+    />,
+  );
+  expect(container.textContent).toContain(ACTUAL_MISSING_MARK);
 });
