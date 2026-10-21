@@ -277,7 +277,7 @@ func approvalSummaryText(p *core.ApprovalPreview, decision core.ApprovalDecision
 		kindLabel = "不明（" + string(p.Kind) + "）"
 	}
 	fmt.Fprintf(&b, "課題 ID:     %s\n", p.ChallengeID)
-	fmt.Fprintf(&b, "タイトル:    %s\n", p.Title)
+	fmt.Fprintf(&b, "タイトル:    %s\n", escapeControl(p.Title))
 	fmt.Fprintf(&b, "承認の種類:  %s\n", kindLabel)
 	if p.Kind == core.ApprovalKindPlan {
 		// 本文は複数行の文書として読ませるが、各行を字下げして要約の見出し行と見分けられるようにする。
@@ -362,7 +362,7 @@ func operationListSummary(ops []core.IrreversibleOperation) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "%s(%s) %s", op.ID, op.Kind, op.Summary)
+		fmt.Fprintf(&b, "%s(%s) %s", op.ID, op.Kind, escapeControl(op.Summary))
 	}
 	return b.String()
 }
@@ -374,10 +374,10 @@ func operationApprovalSummaryText(p *core.OperationApprovalPreview, reason *stri
 	var b strings.Builder
 	fmt.Fprintf(&b, "操作 ID:      %s\n", p.OperationID)
 	fmt.Fprintf(&b, "種類:         %s\n", string(p.Kind))
-	fmt.Fprintf(&b, "要約:         %s\n", p.Summary)
+	fmt.Fprintf(&b, "要約:         %s\n", escapeControl(p.Summary))
 	fmt.Fprintf(&b, "参照:         %s\n", textOrDash(nilableString(p.Ref)))
 	fmt.Fprintf(&b, "課題 ID:      %s\n", p.ChallengeID)
-	fmt.Fprintf(&b, "課題タイトル: %s\n", p.ChallengeTitle)
+	fmt.Fprintf(&b, "課題タイトル: %s\n", escapeControl(p.ChallengeTitle))
 	label, _ := p.ChallengeStatus.Label()
 	fmt.Fprintf(&b, "課題の状態:   %s (%s)\n", label, p.ChallengeStatus)
 	if reason != nil {
@@ -391,15 +391,15 @@ func operationApprovalSummaryText(p *core.OperationApprovalPreview, reason *stri
 func answerSummaryText(p *core.AnswerPreview) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "課題 ID:  %s\n", p.ChallengeID)
-	fmt.Fprintf(&b, "タイトル: %s\n", p.Title)
+	fmt.Fprintf(&b, "タイトル: %s\n", escapeControl(p.Title))
 	fmt.Fprintf(&b, "問い:     %s\n", escapeControlKeepLines(p.Question))
 	fmt.Fprintf(&b, "回答:     %s\n", p.Answer)
 	return b.String()
 }
 
-// escapeControl は LLM が書いた段階の欄の値を、承認の要約へ 1 行で埋め込めるように
+// escapeControl は外部・LLM が書きうる値（段階の欄・課題のタイトル・不可逆操作の要約）を、承認の要約へ 1 行で埋め込めるように
 // する。改行・復帰・タブ・ESC などの制御文字と Unicode の行・段落の区切り
-// （U+2028・U+2029）を、見える形（\n・\r・\t・\x1b・\u2028 など）に置き換える。
+// （U+2028・U+2029）、双方向制御文字・ゼロ幅文字を、見える形（\n・\r・\t・\x1b・\u2028 など）に置き換える。
 // 値の中の改行で、人間が承認の根拠にする端末の要約に偽の行や見出しを作らせない。
 func escapeControl(s string) string {
 	return escapeControlRunes(s, false)
@@ -426,11 +426,24 @@ func escapeControlRunes(s string, keepLines bool) string {
 			b.WriteString(`\t`)
 		case r < 0x20 || (r >= 0x7f && r <= 0x9f):
 			fmt.Fprintf(&b, `\x%02x`, r)
-		case r == 0x2028 || r == 0x2029:
+		case r == 0x2028 || r == 0x2029 || isBidiOrZeroWidth(r):
 			fmt.Fprintf(&b, `\u%04x`, r)
 		default:
 			b.WriteRune(r)
 		}
 	}
 	return b.String()
+}
+
+// isBidiOrZeroWidth は、表示の並びを入れ替える双方向制御文字（U+202A〜202E・U+2066〜2069、
+// U+200E・U+200F・U+061C）とゼロ幅文字（U+200B〜200D・U+2060・U+FEFF）かを返す。
+// 見えないまま承認の根拠の読みを変えさせないため、見える形にする。
+func isBidiOrZeroWidth(r rune) bool {
+	switch {
+	case r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
+		return true
+	case r >= 0x200b && r <= 0x200f, r == 0x061c, r == 0x2060, r == 0xfeff:
+		return true
+	}
+	return false
 }
