@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -159,15 +160,38 @@ func TestPlanAutoJ2_Plan_OmittedFieldsClearNonGoalsFigureAndKeepExpected(t *test
 	}
 }
 
+// AC-301・AC-302: 予想が NULL の課題で、サイズ S の plan は expected が [] でも null でも
+// 計画として登録され、課題の expected は NULL のまま（[] を書かない）。
 func TestPlanAutoJ2_Plan_SizeSAllowsEmptyExpectedAndNoIssues(t *testing.T) {
-	f := newJ2Fixture(t)
-	ch := f.newClassified(t, "small", "P1")
-	out := j2OutputFor(false, func(m map[string]any) { m["expected"] = nil })
-	if _, err := f.run(t, succeededInvoker(out), idPtr(ch.ID)); err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name     string
+		expected any
+	}{
+		{"empty array", []any{}},
+		{"null", nil},
 	}
-	if d := f.detail(t, ch.ID); d.Status != StatusAwaitingPlanApproval || d.Expected != nil {
-		t.Errorf("status=%s expected=%v", d.Status, d.Expected)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newJ2Fixture(t)
+			ch := f.newClassified(t, "small", "P1")
+			out := j2OutputFor(false, func(m map[string]any) { m["expected"] = tc.expected })
+			if _, err := f.run(t, succeededInvoker(out), idPtr(ch.ID)); err != nil {
+				t.Fatal(err)
+			}
+			if d := f.detail(t, ch.ID); d.Status != StatusAwaitingPlanApproval || d.Expected != nil {
+				t.Errorf("status=%s expected=%#v, want awaiting_plan_approval and nil", d.Status, d.Expected)
+			}
+			cid, _ := parseChallengeID(ch.ID)
+			var raw sql.NullString
+			if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+				return tx.QueryRow(`SELECT expected FROM challenge WHERE id = ?`, cid).Scan(&raw)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if raw.Valid {
+				t.Errorf("challenge.expected = %q, want NULL", raw.String)
+			}
+		})
 	}
 }
 
