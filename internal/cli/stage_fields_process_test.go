@@ -38,6 +38,19 @@ func TestPlanAuto_J2IssuesWritesStageIssuesViaChildProcess(t *testing.T) {
 	if len(issues) != 3 || issues[0].(map[string]any)["question"] != "QA" || issues[2].(map[string]any)["question"] != "QC" {
 		t.Errorf("stages.issues = %v", issues)
 	}
+	// 選択肢（ラベルと例）が子プロセスの経路で実物として書かれる。
+	opts, _ := issues[0].(map[string]any)["options"].([]any)
+	if len(opts) != 2 || opts[0].(map[string]any)["label"] != "甲-QA" || opts[0].(map[string]any)["example"] != nil ||
+		opts[1].(map[string]any)["label"] != "乙-QA" || opts[1].(map[string]any)["example"] != "例" {
+		t.Errorf("stages.issues[0].options = %v", opts)
+	}
+	if issues[0].(map[string]any)["recommended"] != float64(2) {
+		t.Errorf("recommended = %v", issues[0].(map[string]any)["recommended"])
+	}
+	// issues_hold_id が指す保留に回答が付くまで、回答は空（show に hold id は出ないので issues_answer で固定する）。
+	if show["stages"].(map[string]any)["issues_answer"] != nil {
+		t.Errorf("issues_answer = %v, want null", show["stages"].(map[string]any)["issues_answer"])
+	}
 	if len(show["plans"].([]any)) != 0 || len(show["holds"].([]any)) != 1 {
 		t.Errorf("plans/holds = %v / %v", show["plans"], show["holds"])
 	}
@@ -70,6 +83,15 @@ func TestPlanAuto_J2PlanWritesExpectedAndNonGoalsViaChildProcess(t *testing.T) {
 	if len(show["plans"].([]any)) != 1 {
 		t.Errorf("plans = %v", show["plans"])
 	}
+	// plan では論点も回答も実物も空のまま（issues_hold_id も立たない）。
+	for _, k := range []string{"issues", "issues_answer", "actual"} {
+		if st[k] != nil {
+			t.Errorf("stages.%s = %v, want null", k, st[k])
+		}
+	}
+	if len(show["holds"].([]any)) != 0 {
+		t.Errorf("holds = %v, want none", show["holds"])
+	}
 }
 
 // J5 の actual: 実物が課題の stages.actual に書かれる。
@@ -81,9 +103,22 @@ func TestVerifyAuto_J5WritesActualViaChildProcess(t *testing.T) {
 		`{"verdict":"met","reason":"R","feedback":null,"question":null,"actual":[{"scene":"ACT-SCENE-CLI","after":"ACT-AFTER-CLI"}]}}`
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{route}, "")
 
-	runJSON(t, ws, "verify", "--auto", id)
+	item := phaseOf(t, runJSON(t, ws, "verify", "--auto", id))["items"].([]any)[0].(map[string]any)
+	if item["outcome"] != "met" {
+		t.Errorf("verify item = %v", item)
+	}
 
-	st := runJSON(t, ws, "show", id)["stages"].(map[string]any)
+	show := runJSON(t, ws, "show", id)
+	if got := show["challenge"].(map[string]any)["status"]; got != "awaiting_completion_approval" {
+		t.Errorf("status = %v, want awaiting_completion_approval after met", got)
+	}
+	st := show["stages"].(map[string]any)
+	// 実物だけが書かれ、論点・予想は空のまま。
+	for _, k := range []string{"issues", "expected"} {
+		if st[k] != nil {
+			t.Errorf("stages.%s = %v, want null", k, st[k])
+		}
+	}
 	act, _ := st["actual"].([]any)
 	if len(act) != 1 || act[0].(map[string]any)["scene"] != "ACT-SCENE-CLI" || act[0].(map[string]any)["after"] != "ACT-AFTER-CLI" {
 		t.Errorf("stages.actual = %v", st["actual"])
