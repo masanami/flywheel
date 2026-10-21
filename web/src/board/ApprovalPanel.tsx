@@ -2,6 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.ts";
 import { ApiError } from "../api/proposed.ts";
 import type { ApprovalSummary } from "../api/types.gen.ts";
+import {
+  ExpectedView,
+  IssuesAnswerView,
+  IssuesView,
+  NonGoalsView,
+  PairsView,
+} from "./StagesDetail.tsx";
 
 // 承認のボタンを出すコード。課題の状態の文字列では絞らない。
 export const APPROVE_PLAN = "approve_plan";
@@ -157,6 +164,7 @@ function messageOf(e: unknown): string {
 // ① の要約。完了では、同時には承認されない不可逆操作・release の PR の head・保留のまま残ることを示す。
 function Summary({ summary }: { summary: ApprovalSummary }) {
   const completion = summary.kind === "completion";
+  const { issues, issues_answer, expected, non_goals } = summary.stages;
   return (
     <div className="approval-summary" data-testid="approval-summary">
       <p>
@@ -173,6 +181,21 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           <h4>承認する計画（v{summary.plan.version}）</h4>
           <pre style={{ whiteSpace: "pre-wrap" }}>{summary.plan.body}</pre>
         </>
+      )}
+      {!completion && (
+        <div data-testid="approval-stages">
+          {issues !== null && <IssuesView issues={issues} />}
+          {issues_answer !== null && (
+            <IssuesAnswerView answer={issues_answer} />
+          )}
+          {expected !== null && <ExpectedView expected={expected} />}
+          {non_goals !== null && <NonGoalsView nonGoals={non_goals} />}
+        </div>
+      )}
+      {completion && summary.pairs.length > 0 && (
+        <div data-testid="approval-pairs">
+          <PairsView pairs={summary.pairs} />
+        </div>
       )}
       {completion && (
         <>

@@ -879,14 +879,15 @@ func addM4StageShape(t *testing.T, doc *documentedJSON) {
 	if err != nil {
 		t.Fatalf("read m4 spec: %v", err)
 	}
-	var challengeLine, stagesLine, rejectedLine bool
+	var challengeLine, stagesLine, rejectedLine, pairsLine bool
 	for _, line := range strings.Split(string(data), "\n") {
 		challengeLine = challengeLine || strings.Contains(line, "に `headline`・`context`（string \\| null）を足す")
 		stagesLine = stagesLine || strings.Contains(line, "`show --json` の最上位に `stages` を足す")
+		pairsLine = pairsLine || strings.Contains(line, "`show --json` の最上位に `pairs` を足す")
 		rejectedLine = rejectedLine || strings.Contains(line, "承認の要素に `rejected_fields`")
 	}
-	if !challengeLine || !stagesLine || !rejectedLine {
-		t.Fatalf("m4 spec does not document the S4 keys of --json (challenge=%v stages=%v rejected_fields=%v)", challengeLine, stagesLine, rejectedLine)
+	if !challengeLine || !stagesLine || !pairsLine || !rejectedLine {
+		t.Fatalf("m4 spec does not document the S4 keys of --json (challenge=%v stages=%v pairs=%v rejected_fields=%v)", challengeLine, stagesLine, pairsLine, rejectedLine)
 	}
 	if len(doc.entity["challenge"]) == 0 || len(doc.entity["approval"]) == 0 || len(doc.topLevel["show"]) == 0 {
 		t.Fatal("documented shape of challenge/approval/show not found")
@@ -896,5 +897,6 @@ func addM4StageShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["approval"]["rejected_fields"] = true
 	for _, keys := range doc.topLevel["show"] {
 		keys["stages"] = true
+		keys["pairs"] = true
 	}
 }

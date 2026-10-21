@@ -45,6 +45,20 @@ it("本番のビルドに偽の API・モックの画面を含めない", async 
   }
 }, 60_000);
 
+it("本番のビルドは manifest を出さない（D3）", async () => {
+  const out = mkdtempSync(join(tmpdir(), "flywheel-web-build-"));
+  try {
+    await build({
+      logLevel: "silent",
+      build: { outDir: out, emptyOutDir: true },
+    });
+    expect(existsSync(join(out, ".vite", "manifest.json"))).toBe(false);
+    expect(existsSync(join(out, "manifest.json"))).toBe(false);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+}, 60_000);
+
 // 同じ origin の相対パスか（スキームも // も持たない）。JS の本文中の URL 文字列は検べない。
 const sameOriginRelative = (u: string) =>
   u !== "" && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(u) && !u.startsWith("//");
@@ -52,9 +66,10 @@ const sameOriginRelative = (u: string) =>
 it("ビルド成果物の参照は同じ origin の相対パスだけ・Mermaid は別チャンク（AC-391・AC-381）", async () => {
   const out = mkdtempSync(join(tmpdir(), "flywheel-web-build-"));
   try {
+    // manifest は本番のビルドでは出さない。この検査のためのビルドでだけ出す。
     await build({
       logLevel: "silent",
-      build: { outDir: out, emptyOutDir: true },
+      build: { outDir: out, emptyOutDir: true, manifest: true },
     });
     const html = readFileSync(join(out, "index.html"), "utf8");
     const refs = [

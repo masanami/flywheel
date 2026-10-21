@@ -13,6 +13,8 @@ import type {
   Operation,
   PlanDetail,
   Run,
+  StagePair,
+  Stages,
   StatusResponse,
   Workspace,
 } from "../api/types.gen.ts";
@@ -28,7 +30,27 @@ export interface Flags {
   slot?: { path: string; repo: string; slot_id: string; run_id: string };
 }
 
+// 段階の欄のサンプル（無ければ全部 null）。本物では core が持つ値を写す。
+export const NO_STAGES: Stages = {
+  actual: null,
+  expected: null,
+  figure: null,
+  issues: null,
+  issues_answer: null,
+  non_goals: null,
+};
+
+// 予想と実物を位置で対にする（本物の core.Pairs と同じ。偽の API だけで使う）。
+export function pairsOf(s: Stages): StagePair[] {
+  const n = Math.max(s.expected?.length ?? 0, s.actual?.length ?? 0);
+  return Array.from({ length: n }, (_, i) => ({
+    expected: s.expected?.[i] ?? null,
+    actual: s.actual?.[i] ?? null,
+  }));
+}
+
 export interface MockChallenge {
+  stages: Stages;
   c: Challenge;
   headline: string | null;
   context: string | null;
@@ -78,9 +100,11 @@ function mk(
     approvals,
     runs,
     flags,
+    stages,
     ...rest
   } = p;
   return {
+    stages: stages ?? NO_STAGES,
     c: {
       context: context ?? null,
       created_at: iso(600),
@@ -182,6 +206,34 @@ export function seed(): Record<string, MockWorkspace> {
       done_criteria: "同一キーの再送は 1 通だけ届く。",
       headline: "通知メールの二重送信を止める",
       context: "障害 INC-42 の再発防止。送信キューの設計が前提になる。",
+      stages: {
+        ...NO_STAGES,
+        issues: [
+          {
+            question: "再送の重複をどこで止めますか",
+            recommended: 1,
+            options: [
+              {
+                label: "送信側で冪等キーを持つ",
+                example: "同じキーなら 2 通目は捨てる",
+              },
+              { label: "受信側で重複を除く", example: null },
+            ],
+          },
+        ],
+        issues_answer: "送信側で冪等キーを持つ",
+        expected: [
+          {
+            kind: "behavior",
+            scene: "同じ通知を 2 回送る",
+            before: "2 通届く",
+            after: "1 通だけ届く",
+          },
+        ],
+        non_goals: ["受信側の重複除去は作らない"],
+        figure:
+          "graph TD\n  A[通知要求] --> B{キーあり?}\n  B -->|はい| C[1 通だけ送る]\n  B -->|いいえ| D[キーを付けて送る]",
+      },
       plans: [
         plan(
           1,
@@ -214,6 +266,34 @@ export function seed(): Record<string, MockWorkspace> {
       done_criteria: "請求書の金額と画面の金額が全件一致する。",
       headline: "料金表の丸めを請求書とそろえる",
       context: "月次請求の締め前に必要。経理の突合作業が減る。",
+      stages: {
+        ...NO_STAGES,
+        expected: [
+          {
+            kind: "ui",
+            scene: "料金表の画面",
+            before: "請求書と 1 円ずれる",
+            after: "請求書と同じ金額が出る",
+          },
+          {
+            kind: "cli",
+            scene: "突合コマンド",
+            before: "差分が出る",
+            after: "差分が 0 件",
+          },
+          {
+            kind: "behavior",
+            scene: "月次の締め処理",
+            before: "手で直す",
+            after: "そのまま通る",
+          },
+        ],
+        // 実物は 2 件だけ。3 件目は「実物なし」の行になる。
+        actual: [
+          { scene: "料金表の画面", after: "請求書と同じ金額が出た" },
+          { scene: "突合コマンド", after: "差分は 0 件だった" },
+        ],
+      },
       operations: [
         op("O-1", "C-7", "release", "pending", "v1.4.0 を本番へ出す"),
       ],

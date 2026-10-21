@@ -406,6 +406,7 @@ type ShowResponse struct {
 	Challenge     Challenge      `json:"challenge"`
 	Holds         []Hold         `json:"holds"`
 	Operations    []Operation    `json:"operations"`
+	Pairs         []StagePair    `json:"pairs"`
 	Plans         []PlanDetail   `json:"plans"`
 	Runs          []Run          `json:"runs"`
 	SourceBinding *SourceBinding `json:"source_binding"`
@@ -419,6 +420,7 @@ func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 		Challenge:     FromChallenge(d.Challenge),
 		Holds:         FromHolds(d.Holds),
 		Operations:    FromOperations(d.Operations),
+		Pairs:         FromPairs(core.Pairs(d.Expected, d.Actual)),
 		Plans:         FromPlans(d.Plans),
 		Runs:          FromRuns(d.Runs),
 		SourceBinding: FromSourceBinding(d.SourceBinding),

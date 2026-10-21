@@ -225,6 +225,9 @@ func TestPlanAutoJ2_Plan_SizeMLWithEmptyExpectedHoldsWithoutPlan(t *testing.T) {
 	if item.Result != RunResultSucceeded || item.Status == nil || *item.Status != string(StatusAwaitingHuman) {
 		t.Fatalf("item = %+v", item)
 	}
+	if item.Outcome != "uncertain" {
+		t.Errorf("outcome = %q, want uncertain", item.Outcome)
+	}
 	d := f.detail(t, ch.ID)
 	if d.Status != StatusAwaitingHuman || len(d.Plans) != 0 || d.Version != before.Version+1 {
 		t.Fatalf("status=%s plans=%d version=%d", d.Status, len(d.Plans), d.Version)

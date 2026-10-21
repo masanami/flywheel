@@ -48,6 +48,7 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
     operations: [],
     plans: [],
     runs: [],
+    pairs: [],
     source_binding: null,
     stages: {
       actual: null,

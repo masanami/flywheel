@@ -50,6 +50,7 @@ function detail(figure: string | null): ShowCardResponse {
     operations: [],
     plans: [],
     runs: [],
+    pairs: [],
     source_binding: null,
     stages: {
       actual: null,

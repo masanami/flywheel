@@ -131,6 +131,7 @@ function bodies() {
           result: null,
         },
       ],
+      pairs: [],
       source_binding: null,
       stages: {
         actual: null,

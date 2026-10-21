@@ -20,7 +20,6 @@ export default defineConfig({
       new URL("../internal/server/dist/ui", import.meta.url),
     ),
     emptyOutDir: true,
-    manifest: true,
   },
   test: {
     environment: "jsdom",

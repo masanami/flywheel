@@ -19,6 +19,7 @@ import {
   type MockWorkspace,
   STATUS_LABEL,
   cardOf,
+  pairsOf,
   statusOf,
   toCard,
 } from "./store.ts";
@@ -78,15 +79,9 @@ export function createMockApi(
         operations: m.operations,
         plans: m.plans,
         runs: m.runs,
+        pairs: pairsOf(m.stages),
         source_binding: null,
-        stages: {
-          actual: null,
-          expected: null,
-          figure: null,
-          issues: null,
-          issues_answer: null,
-          non_goals: null,
-        },
+        stages: m.stages,
       };
     },
     async log(name, id): Promise<LogResponse> {
@@ -181,7 +176,7 @@ export function createMockApi(
           other_pending_operations: m.operations
             .filter((o) => o.state === "pending" && o.kind !== "release")
             .map((o) => ({ id: o.id, kind: o.kind, summary: o.summary })),
-          pairs: [],
+          pairs: pairsOf(m.stages),
           plan:
             kind === "plan" && plan
               ? { body: plan.body, version: plan.version }
@@ -196,14 +191,7 @@ export function createMockApi(
                   summary: o.summary,
                 }))
               : [],
-          stages: {
-            actual: null,
-            expected: null,
-            figure: null,
-            issues: null,
-            issues_answer: null,
-            non_goals: null,
-          },
+          stages: m.stages,
           title: m.c.title,
           version: m.c.version,
         },
@@ -233,15 +221,9 @@ export function createMockApi(
         operations: m.operations,
         plans: m.plans,
         runs: m.runs,
+        pairs: pairsOf(m.stages),
         source_binding: null,
-        stages: {
-          actual: null,
-          expected: null,
-          figure: null,
-          issues: null,
-          issues_answer: null,
-          non_goals: null,
-        },
+        stages: m.stages,
       };
     },
     async cycle(name) {
