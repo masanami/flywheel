@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1009,26 +1010,32 @@ func TestVerifyAutoJ5_Actual_MetAndNotMetWriteItInTheSameTransaction(t *testing.
 	}
 }
 
+// AC-320〜AC-322: 予想が 2 個の課題で met の実物の個数がそろわなければ（AC が挙げる 1 個と、多すぎる 3 個）、
+// 完了確認待ちにせず人間対応待ちにし、actual は写す前の値のままにする。
 func TestVerifyAutoJ5_Actual_CountMismatchHoldsAndDoesNotWrite(t *testing.T) {
-	f := newJ5Fixture(t, "impl")
-	f.delegateToVerifying(t, "C-1")
-	f.setExpected(t, "C-1", 2)
-	f.setActual(t, "C-1", `[{"scene":"OLD","after":"OLD"}]`)
-	f.j5.result = j5OutWithActual("met", actualItems(3))
-	res, err := f.verify(t, nil)
-	if err != nil || len(res.Items) != 1 {
-		t.Fatal(res, err)
-	}
-	it := res.Items[0]
-	if it.Result != RunResultSucceeded || it.Status == nil || *it.Status != string(StatusAwaitingHuman) {
-		t.Errorf("item = %+v", it)
-	}
-	d := f.detail(t, "C-1")
-	if d.Status != StatusAwaitingHuman || len(d.Actual) != 1 || d.Actual[0].Scene != "OLD" {
-		t.Errorf("status = %s actual = %+v", d.Status, d.Actual)
-	}
-	if q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`); !strings.HasPrefix(q, ActualMismatchHoldPreamble) {
-		t.Errorf("question = %q", q)
+	for _, n := range []int{1, 3} {
+		t.Run(fmt.Sprintf("actual %d", n), func(t *testing.T) {
+			f := newJ5Fixture(t, "impl")
+			f.delegateToVerifying(t, "C-1")
+			f.setExpected(t, "C-1", 2)
+			f.setActual(t, "C-1", `[{"scene":"OLD","after":"OLD"}]`)
+			f.j5.result = j5OutWithActual("met", actualItems(n))
+			res, err := f.verify(t, nil)
+			if err != nil || len(res.Items) != 1 {
+				t.Fatal(res, err)
+			}
+			it := res.Items[0]
+			if it.Result != RunResultSucceeded || it.Status == nil || *it.Status != string(StatusAwaitingHuman) {
+				t.Errorf("item = %+v", it)
+			}
+			d := f.detail(t, "C-1")
+			if d.Status != StatusAwaitingHuman || len(d.Actual) != 1 || d.Actual[0].Scene != "OLD" {
+				t.Errorf("status = %s actual = %+v", d.Status, d.Actual)
+			}
+			if q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`); !strings.HasPrefix(q, ActualMismatchHoldPreamble) {
+				t.Errorf("question = %q", q)
+			}
+		})
 	}
 	// 実物なしの met も同じ（予想が非 NULL）。
 	f2 := newJ5Fixture(t, "impl")
@@ -1039,6 +1046,37 @@ func TestVerifyAutoJ5_Actual_CountMismatchHoldsAndDoesNotWrite(t *testing.T) {
 	}
 	if got := f2.detail(t, "C-1").Status; got != StatusAwaitingHuman {
 		t.Errorf("met without actual and with expected: status = %s", got)
+	}
+}
+
+// AC-324・AC-325: not_met・実物 1 個の出力は、予想の有無・個数にかかわらず着手中へ戻し、
+// actual を出力の値にする（個数の照合は met だけ）。
+func TestVerifyAutoJ5_Actual_NotMetWithOneActualReturnsToInProgressAndWritesIt(t *testing.T) {
+	for _, expected := range []int{0, 2} {
+		t.Run(fmt.Sprintf("expected %d", expected), func(t *testing.T) {
+			f := newJ5Fixture(t, "impl")
+			f.delegateToVerifying(t, "C-1")
+			if expected > 0 {
+				f.setExpected(t, "C-1", expected)
+			}
+			f.setActual(t, "C-1", `[{"scene":"OLD","after":"OLD"}]`)
+			f.j5.result = j5OutWithActual("not_met", actualItems(1))
+			res, err := f.verify(t, nil)
+			if err != nil || len(res.Items) != 1 {
+				t.Fatal(res, err)
+			}
+			if it := res.Items[0]; it.Outcome != "not_met" || it.Status == nil || *it.Status != string(StatusInProgress) {
+				t.Errorf("item = %+v", it)
+			}
+			d := f.detail(t, "C-1")
+			if d.Status != StatusInProgress {
+				t.Errorf("status = %s, want in_progress", d.Status)
+			}
+			want := []StageActual{{Scene: "S0", After: "A0"}}
+			if !reflect.DeepEqual(d.Actual, want) {
+				t.Errorf("actual = %+v, want %+v", d.Actual, want)
+			}
+		})
 	}
 }
 

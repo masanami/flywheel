@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -159,15 +160,38 @@ func TestPlanAutoJ2_Plan_OmittedFieldsClearNonGoalsFigureAndKeepExpected(t *test
 	}
 }
 
+// AC-301・AC-302: 予想が NULL の課題で、サイズ S の plan は expected が [] でも null でも
+// 計画として登録され、課題の expected は NULL のまま（[] を書かない）。
 func TestPlanAutoJ2_Plan_SizeSAllowsEmptyExpectedAndNoIssues(t *testing.T) {
-	f := newJ2Fixture(t)
-	ch := f.newClassified(t, "small", "P1")
-	out := j2OutputFor(false, func(m map[string]any) { m["expected"] = nil })
-	if _, err := f.run(t, succeededInvoker(out), idPtr(ch.ID)); err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name     string
+		expected any
+	}{
+		{"empty array", []any{}},
+		{"null", nil},
 	}
-	if d := f.detail(t, ch.ID); d.Status != StatusAwaitingPlanApproval || d.Expected != nil {
-		t.Errorf("status=%s expected=%v", d.Status, d.Expected)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newJ2Fixture(t)
+			ch := f.newClassified(t, "small", "P1")
+			out := j2OutputFor(false, func(m map[string]any) { m["expected"] = tc.expected })
+			if _, err := f.run(t, succeededInvoker(out), idPtr(ch.ID)); err != nil {
+				t.Fatal(err)
+			}
+			if d := f.detail(t, ch.ID); d.Status != StatusAwaitingPlanApproval || d.Expected != nil {
+				t.Errorf("status=%s expected=%#v, want awaiting_plan_approval and nil", d.Status, d.Expected)
+			}
+			cid, _ := parseChallengeID(ch.ID)
+			var raw sql.NullString
+			if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+				return tx.QueryRow(`SELECT expected FROM challenge WHERE id = ?`, cid).Scan(&raw)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if raw.Valid {
+				t.Errorf("challenge.expected = %q, want NULL", raw.String)
+			}
+		})
 	}
 }
 
@@ -207,38 +231,48 @@ func TestPlanAutoJ2_Plan_IssuesRecordedViaEditCountsEvenWithoutHoldID(t *testing
 	}
 }
 
+// AC-298: サイズ M・L × expected の []・null の 4 通りのどれも、計画を登録せず人間対応待ちになる。
 func TestPlanAutoJ2_Plan_SizeMLWithEmptyExpectedHoldsWithoutPlan(t *testing.T) {
-	f := newJ2Fixture(t)
-	ch := f.newClassified(t, "noexp", "P1")
-	f.recordIssues(t, ch.ID)
-	before := f.detail(t, ch.ID)
-	out := j2OutputFor(false, func(m map[string]any) {
-		m["size"] = "M"
-		m["expected"] = []any{}
-		m["question"] = "QUESTION-MARKER どう見えますか"
-	})
-	res, err := f.run(t, succeededInvoker(out), idPtr(ch.ID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	item := res.Items[0]
-	if item.Result != RunResultSucceeded || item.Status == nil || *item.Status != string(StatusAwaitingHuman) {
-		t.Fatalf("item = %+v", item)
-	}
-	if item.Outcome != "uncertain" {
-		t.Errorf("outcome = %q, want uncertain", item.Outcome)
-	}
-	d := f.detail(t, ch.ID)
-	if d.Status != StatusAwaitingHuman || len(d.Plans) != 0 || d.Version != before.Version+1 {
-		t.Fatalf("status=%s plans=%d version=%d", d.Status, len(d.Plans), d.Version)
-	}
-	last := d.Holds[len(d.Holds)-1]
-	if last.Question != ExpectedEmptyHoldPreamble+" QUESTION-MARKER どう見えますか" || last.FromStatus != StatusClassified {
-		t.Errorf("hold = %+v", last)
-	}
-	// 計画を登録しないので、非空の non_goals・figure も書かない。
-	if d.NonGoals != nil || d.Figure != nil || d.Expected != nil {
-		t.Errorf("stage fields written: %+v", d.StageFields)
+	for _, size := range []string{"M", "L"} {
+		for _, exp := range []struct {
+			name string
+			val  any
+		}{{"empty array", []any{}}, {"null", nil}} {
+			t.Run(size+"/"+exp.name, func(t *testing.T) {
+				f := newJ2Fixture(t)
+				ch := f.newClassified(t, "noexp", "P1")
+				f.recordIssues(t, ch.ID)
+				before := f.detail(t, ch.ID)
+				out := j2OutputFor(false, func(m map[string]any) {
+					m["size"] = size
+					m["expected"] = exp.val
+					m["question"] = "QUESTION-MARKER どう見えますか"
+				})
+				res, err := f.run(t, succeededInvoker(out), idPtr(ch.ID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				item := res.Items[0]
+				if item.Result != RunResultSucceeded || item.Status == nil || *item.Status != string(StatusAwaitingHuman) {
+					t.Fatalf("item = %+v", item)
+				}
+				if item.Outcome != "uncertain" {
+					t.Errorf("outcome = %q, want uncertain", item.Outcome)
+				}
+				d := f.detail(t, ch.ID)
+				if d.Status != StatusAwaitingHuman || len(d.Plans) != 0 || d.Version != before.Version+1 {
+					t.Fatalf("status=%s plans=%d version=%d", d.Status, len(d.Plans), d.Version)
+				}
+				last := d.Holds[len(d.Holds)-1]
+				if last.Question != ExpectedEmptyHoldPreamble+" QUESTION-MARKER どう見えますか" || last.FromStatus != StatusClassified {
+					t.Errorf("hold = %+v", last)
+				}
+				// 計画を登録しないので、非空の non_goals・figure も書かない。
+				if d.NonGoals != nil || d.Figure != nil || d.Expected != nil {
+					t.Errorf("stage fields written: %+v", d.StageFields)
+				}
+			})
+		}
 	}
 }
 

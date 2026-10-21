@@ -5,11 +5,17 @@ import (
 	"database/sql"
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 func j2IssuesOutput(mut func(m map[string]any)) []byte {
+	return j2IssuesOutputN(3, mut)
+}
+
+// j2IssuesOutputN は論点が n 個の issues の出力を作る（問いは q1〜qn）。
+func j2IssuesOutputN(n int, mut func(m map[string]any)) []byte {
 	mkIssue := func(q string) map[string]any {
 		return map[string]any{
 			"question": q,
@@ -20,9 +26,13 @@ func j2IssuesOutput(mut func(m map[string]any)) []byte {
 			"recommended": 2,
 		}
 	}
+	var issues []any
+	for i := 1; i <= n; i++ {
+		issues = append(issues, mkIssue("q"+strconv.Itoa(i)))
+	}
 	m := map[string]any{
 		"verdict": "issues",
-		"issues":  []any{mkIssue("q1"), mkIssue("q2"), mkIssue("q3")},
+		"issues":  issues,
 	}
 	if mut != nil {
 		mut(m)
@@ -139,47 +149,53 @@ func TestValidateJ2Output_Issues(t *testing.T) {
 	}
 }
 
+// AC-278: 論点 3・4・5 個のどれも、人間対応待ちになる。
 func TestPlanAutoJ2_Issues_HoldsWithQuestionIssuesAndHoldID(t *testing.T) {
-	f := newJ2Fixture(t)
-	ch := f.newClassified(t, "big", "P1")
-	before := f.detail(t, ch.ID)
-	res, err := f.run(t, succeededInvoker(j2IssuesOutput(nil)), idPtr(ch.ID))
-	if err != nil {
-		t.Fatalf("PlanAutoJ2: %v", err)
-	}
-	item := res.Items[0]
-	if item.Outcome != "issues" || item.Status == nil || *item.Status != string(StatusAwaitingHuman) || item.Result != RunResultSucceeded {
-		t.Fatalf("item = %+v", item)
-	}
-	d := f.detail(t, ch.ID)
-	if d.Status != StatusAwaitingHuman || d.Version != before.Version+1 || len(d.Plans) != 0 {
-		t.Fatalf("detail status=%s version=%d plans=%v", d.Status, d.Version, d.Plans)
-	}
-	if len(d.Holds) != 1 || d.Holds[0].FromStatus != StatusClassified || d.Holds[0].RunID == nil {
-		t.Fatalf("holds = %+v", d.Holds)
-	}
-	want := IssuesQuestionPreamble + "\n" +
-		"\nQ1. q1\n  1) 案A-q1（例: 例-q1）\n  2) 案B-q1\n  推奨: 2\n" +
-		"\nQ2. q2\n  1) 案A-q2（例: 例-q2）\n  2) 案B-q2\n  推奨: 2\n" +
-		"\nQ3. q3\n  1) 案A-q3（例: 例-q3）\n  2) 案B-q3\n  推奨: 2\n"
-	if d.Holds[0].Question != want {
-		t.Errorf("question = %q, want %q", d.Holds[0].Question, want)
-	}
-	if len(d.Issues) != 3 || d.Issues[0].Question != "q1" || d.IssuesHoldID == nil {
-		t.Fatalf("issues = %+v holdID = %v", d.Issues, d.IssuesHoldID)
-	}
-	var holdID int64
-	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
-		return tx.QueryRow(`SELECT id FROM hold WHERE challenge_id = ?`, mustChallengeInternalID(t, ch.ID)).Scan(&holdID)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if *d.IssuesHoldID != holdID {
-		t.Errorf("issues_hold_id = %d, want %d", *d.IssuesHoldID, holdID)
-	}
-	// J2 のサイズは課題へ書かない（plan が無く、段階の欄は論点だけ）。
-	if d.Expected != nil || d.NonGoals != nil || d.Figure != nil {
-		t.Errorf("unexpected stage fields: %+v", d.StageFields)
+	for _, n := range []int{3, 4, 5} {
+		t.Run(strconv.Itoa(n)+" issues", func(t *testing.T) {
+			f := newJ2Fixture(t)
+			ch := f.newClassified(t, "big", "P1")
+			before := f.detail(t, ch.ID)
+			res, err := f.run(t, succeededInvoker(j2IssuesOutputN(n, nil)), idPtr(ch.ID))
+			if err != nil {
+				t.Fatalf("PlanAutoJ2: %v", err)
+			}
+			item := res.Items[0]
+			if item.Outcome != "issues" || item.Status == nil || *item.Status != string(StatusAwaitingHuman) || item.Result != RunResultSucceeded {
+				t.Fatalf("item = %+v", item)
+			}
+			d := f.detail(t, ch.ID)
+			if d.Status != StatusAwaitingHuman || d.Version != before.Version+1 || len(d.Plans) != 0 {
+				t.Fatalf("detail status=%s version=%d plans=%v", d.Status, d.Version, d.Plans)
+			}
+			if len(d.Holds) != 1 || d.Holds[0].FromStatus != StatusClassified || d.Holds[0].RunID == nil {
+				t.Fatalf("holds = %+v", d.Holds)
+			}
+			want := IssuesQuestionPreamble + "\n"
+			for i := 1; i <= n; i++ {
+				q := "q" + strconv.Itoa(i)
+				want += "\nQ" + strconv.Itoa(i) + ". " + q + "\n  1) 案A-" + q + "（例: 例-" + q + "）\n  2) 案B-" + q + "\n  推奨: 2\n"
+			}
+			if d.Holds[0].Question != want {
+				t.Errorf("question = %q, want %q", d.Holds[0].Question, want)
+			}
+			if len(d.Issues) != n || d.Issues[0].Question != "q1" || d.IssuesHoldID == nil {
+				t.Fatalf("issues = %+v holdID = %v", d.Issues, d.IssuesHoldID)
+			}
+			var holdID int64
+			if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+				return tx.QueryRow(`SELECT id FROM hold WHERE challenge_id = ?`, mustChallengeInternalID(t, ch.ID)).Scan(&holdID)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if *d.IssuesHoldID != holdID {
+				t.Errorf("issues_hold_id = %d, want %d", *d.IssuesHoldID, holdID)
+			}
+			// J2 のサイズは課題へ書かない（plan が無く、段階の欄は論点だけ）。
+			if d.Expected != nil || d.NonGoals != nil || d.Figure != nil {
+				t.Errorf("unexpected stage fields: %+v", d.StageFields)
+			}
+		})
 	}
 }
 
