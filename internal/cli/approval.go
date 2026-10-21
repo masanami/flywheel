@@ -280,7 +280,8 @@ func approvalSummaryText(p *core.ApprovalPreview, decision core.ApprovalDecision
 	fmt.Fprintf(&b, "タイトル:    %s\n", p.Title)
 	fmt.Fprintf(&b, "承認の種類:  %s\n", kindLabel)
 	if p.Kind == core.ApprovalKindPlan {
-		fmt.Fprintf(&b, "計画 v%d:\n%s\n", p.PlanVersion, p.PlanBody)
+		// 本文は複数行の文書として読ませるが、各行を字下げして要約の見出し行と見分けられるようにする。
+		fmt.Fprintf(&b, "計画 v%d:\n%s", p.PlanVersion, indentLines(escapeControlKeepLines(p.PlanBody), "    "))
 		writePlanStageSummary(&b, p)
 	} else {
 		fmt.Fprintf(&b, "完了条件:    %s\n", p.DoneCriteria)
@@ -307,26 +308,26 @@ func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
 	if len(p.Issues) > 0 {
 		b.WriteString("論点:\n")
 		for i, is := range p.Issues {
-			fmt.Fprintf(b, "  Q%d. %s\n", i+1, is.Question)
+			fmt.Fprintf(b, "  Q%d. %s\n", i+1, escapeControl(is.Question))
 			for j, o := range is.Options {
-				fmt.Fprintf(b, "    %d) %s\n", j+1, o.Label)
+				fmt.Fprintf(b, "    %d) %s\n", j+1, escapeControl(o.Label))
 			}
 			fmt.Fprintf(b, "    推奨: %d\n", is.Recommended)
 		}
 		if p.IssuesAnswer != nil {
-			fmt.Fprintf(b, "  回答: %s\n", *p.IssuesAnswer)
+			fmt.Fprintf(b, "  回答: %s\n", escapeControl(*p.IssuesAnswer))
 		}
 	}
 	if len(p.Expected) > 0 {
 		b.WriteString("完了したら見えるもの（予想）:\n")
 		for i, e := range p.Expected {
-			fmt.Fprintf(b, "  %d. %s\n     変更前: %s\n     変更後: %s\n", i+1, e.Scene, e.Before, e.After)
+			fmt.Fprintf(b, "  %d. %s\n     変更前: %s\n     変更後: %s\n", i+1, escapeControl(e.Scene), escapeControl(e.Before), escapeControl(e.After))
 		}
 	}
 	if len(p.NonGoals) > 0 {
 		b.WriteString("やらないこと:\n")
 		for _, g := range p.NonGoals {
-			fmt.Fprintf(b, "  - %s\n", g)
+			fmt.Fprintf(b, "  - %s\n", escapeControl(g))
 		}
 	}
 }
@@ -341,10 +342,10 @@ func writeCompletionStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
 	for i, pr := range p.Pairs {
 		exp, act := core.PairExpectedMissingMark, core.PairActualMissingMark
 		if pr.Expected != nil {
-			exp = pr.Expected.After
+			exp = escapeControl(pr.Expected.After)
 		}
 		if pr.Actual != nil {
-			act = pr.Actual.After
+			act = escapeControl(pr.Actual.After)
 		}
 		fmt.Fprintf(b, "  %d. 予想: %s\n     実物: %s\n", i+1, exp, act)
 	}
@@ -391,7 +392,45 @@ func answerSummaryText(p *core.AnswerPreview) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "課題 ID:  %s\n", p.ChallengeID)
 	fmt.Fprintf(&b, "タイトル: %s\n", p.Title)
-	fmt.Fprintf(&b, "問い:     %s\n", p.Question)
+	fmt.Fprintf(&b, "問い:     %s\n", escapeControlKeepLines(p.Question))
 	fmt.Fprintf(&b, "回答:     %s\n", p.Answer)
+	return b.String()
+}
+
+// escapeControl は LLM が書いた段階の欄の値を、承認の要約へ 1 行で埋め込めるように
+// する。改行・復帰・タブ・ESC などの制御文字と Unicode の行・段落の区切り
+// （U+2028・U+2029）を、見える形（\n・\r・\t・\x1b・\u2028 など）に置き換える。
+// 値の中の改行で、人間が承認の根拠にする端末の要約に偽の行や見出しを作らせない。
+func escapeControl(s string) string {
+	return escapeControlRunes(s, false)
+}
+
+// escapeControlKeepLines は計画の本文（PlanBody）用。本文は複数行の文書として
+// 読ませるので、改行とタブは残し、それ以外の制御文字（端末の画面を書き換える
+// ESC など）だけを見える形にする（偽の見出し行は、呼び出し側の字下げで防ぐ）。
+func escapeControlKeepLines(s string) string {
+	return escapeControlRunes(s, true)
+}
+
+func escapeControlRunes(s string, keepLines bool) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case keepLines && (r == '\n' || r == '\t'):
+			b.WriteRune(r)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20 || (r >= 0x7f && r <= 0x9f):
+			fmt.Fprintf(&b, `\x%02x`, r)
+		case r == 0x2028 || r == 0x2029:
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
 	return b.String()
 }

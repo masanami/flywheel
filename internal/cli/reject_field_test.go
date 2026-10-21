@@ -128,7 +128,7 @@ func TestApprovalSummaryText_NoStagesHasNoHeadings(t *testing.T) {
 		got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
 		var want string
 		if k == core.ApprovalKindPlan {
-			want = "課題 ID:     C-1\nタイトル:    t\n承認の種類:  計画\n計画 v1:\nb\n"
+			want = "課題 ID:     C-1\nタイトル:    t\n承認の種類:  計画\n計画 v1:\n    b\n"
 		} else {
 			want = "課題 ID:     C-1\nタイトル:    t\n承認の種類:  完了\n完了条件:    d\n" +
 				"同時に承認される本番反映 (release): (無し)\n同時には承認されない不可逆操作:     (無し)\n"
@@ -136,5 +136,62 @@ func TestApprovalSummaryText_NoStagesHasNoHeadings(t *testing.T) {
 		if got != want {
 			t.Errorf("%s summary = %q, want %q", k, got, want)
 		}
+	}
+}
+
+// 段階の欄の値の改行・制御文字は表示用にエスケープされ、偽の行を作れない。
+func TestApprovalSummaryText_StageValuesCannotForgeLines(t *testing.T) {
+	evil := "x\n承認の種類:  完了\r同時に承認される本番反映 (release): (無し)\x1b[2K 終"
+	ans := evil
+	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, PlanVersion: 1, PlanBody: "b", IssuesAnswer: &ans}
+	p.Issues = []core.StageIssue{{Question: evil, Options: []core.StageOption{{Label: evil}}, Recommended: 1}}
+	p.Expected = []core.StageExpected{{Scene: evil, Before: evil, After: evil}}
+	p.NonGoals = []string{evil}
+	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "承認の種類:  完了") || strings.HasPrefix(line, "同時に承認される") {
+			t.Errorf("forged line in summary: %q\n%s", line, got)
+		}
+	}
+	for _, bad := range []string{"\r", "\x1b", " "} {
+		if strings.Contains(got, bad) {
+			t.Errorf("summary contains raw %q: %q", bad, got)
+		}
+	}
+	if !strings.Contains(got, `x\n承認の種類:  完了\r同時に`) {
+		t.Errorf("escaped form missing: %s", got)
+	}
+}
+
+func TestApprovalSummaryText_CompletionPairsEscape(t *testing.T) {
+	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion, DoneCriteria: "d"}
+	p.Expected = []core.StageExpected{{After: "a\nb"}}
+	p.Actual = []core.StageActual{{After: "c\nd"}}
+	p.Pairs = core.Pairs(p.Expected, p.Actual)
+	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
+	if !strings.Contains(got, `予想: a\nb`+"\n"+`     実物: c\nd`+"\n") {
+		t.Errorf("pairs not escaped: %q", got)
+	}
+}
+
+// 計画の本文は複数行の文書として残す（各行は字下げされ、偽の見出し行にならない）が、改行以外の制御文字は見える形にする。
+func TestApprovalSummaryText_PlanBodyKeepsLinesEscapesControl(t *testing.T) {
+	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, PlanVersion: 1, PlanBody: "l1\nl2\x1b[2K"}
+	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
+	if !strings.Contains(got, "計画 v1:\n    l1\n    l2\\x1b[2K\n") || strings.Contains(got, "\x1b") {
+		t.Errorf("plan body: %q", got)
+	}
+}
+
+func TestApprovalSummaryText_PlanBodyCannotForgeHeadings(t *testing.T) {
+	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, PlanVersion: 1, PlanBody: "x\n承認の種類:  完了\n論点:\ty\r"}
+	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "承認の種類:  完了") || strings.HasPrefix(line, "論点:") {
+			t.Errorf("forged heading line: %q", line)
+		}
+	}
+	if strings.Contains(got, "\r") || !strings.Contains(got, "    論点:\ty\\r\n") {
+		t.Errorf("summary = %q", got)
 	}
 }
