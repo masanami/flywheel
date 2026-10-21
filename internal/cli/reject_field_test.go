@@ -117,7 +117,7 @@ func TestApprovalSummaryText_CompletionPairs(t *testing.T) {
 	}
 	p.Expected, p.Actual = p.Expected[:1], []core.StageActual{{After: "x"}, {After: "余り"}}
 	p.Pairs = core.Pairs(p.Expected, p.Actual)
-	if got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil); !strings.Contains(got, "  2. 予想: "+expectedMissingMark+"\n     実物: 余り\n") {
+	if got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil); !strings.Contains(got, "  2. 予想: "+core.PairExpectedMissingMark+"\n     実物: 余り\n") {
 		t.Errorf("summary lacks 予想なし row: %s", got)
 	}
 }

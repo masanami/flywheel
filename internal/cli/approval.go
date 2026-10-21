@@ -331,9 +331,6 @@ func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
 	}
 }
 
-// expectedMissingMark は予想の例が無い位置（実物が予想より多い）の印。
-const expectedMissingMark = "予想なし"
-
 // writeCompletionStageSummary は完了の承認の要約へ、予想と実物の変更後の対を書く
 // （対の組み立ては core の Pairs。足りない位置は印を出す）。
 func writeCompletionStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
@@ -342,7 +339,7 @@ func writeCompletionStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
 	}
 	b.WriteString("予想と実物:\n")
 	for i, pr := range p.Pairs {
-		exp, act := expectedMissingMark, core.PairActualMissingMark
+		exp, act := core.PairExpectedMissingMark, core.PairActualMissingMark
 		if pr.Expected != nil {
 			exp = pr.Expected.After
 		}

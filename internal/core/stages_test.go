@@ -215,6 +215,9 @@ func TestPairs(t *testing.T) {
 	if PairActualMissingMark != "実物なし" {
 		t.Errorf("mark = %q", PairActualMissingMark)
 	}
+	if PairExpectedMissingMark != "予想なし" {
+		t.Errorf("expected mark = %q", PairExpectedMissingMark)
+	}
 }
 
 func TestNormalizeRejectedFields(t *testing.T) {
