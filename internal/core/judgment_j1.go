@@ -724,6 +724,17 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 		if !eligible {
 			continue
 		}
+		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ1, StatusUnclassified, in.AgentDecl)
+		if err != nil {
+			return nil, err
+		}
+		if skip {
+			continue
+		}
+		if held != nil {
+			result.NotStarted = append(result.NotStarted, *held)
+			continue
+		}
 		sections, err := s.buildJ1Sections(ctx, *ch, in.AgentDecl)
 		if err != nil {
 			return nil, err

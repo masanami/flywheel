@@ -617,6 +617,17 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		if ch.Status != StatusVerifying {
 			continue // 対象を選んだ後に状態が変わった
 		}
+		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ5, StatusVerifying, in.AgentDecl)
+		if err != nil {
+			return nil, err
+		}
+		if skip {
+			continue
+		}
+		if held != nil {
+			result.NotStarted = append(result.NotStarted, *held)
+			continue
+		}
 		item, notStarted, err := s.verifyOne(ctx, in, jc, *ch)
 		if err != nil {
 			// 1 件の課題の問題（承認済みの計画が無い等）で、他の課題の検証を止めない。

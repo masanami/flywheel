@@ -1097,6 +1097,17 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 		if !eligible {
 			continue
 		}
+		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ2, StatusClassified, in.AgentDecl)
+		if err != nil {
+			return nil, err
+		}
+		if skip {
+			continue
+		}
+		if held != nil {
+			result.NotStarted = append(result.NotStarted, *held)
+			continue
+		}
 		item, notStarted, err := s.planOneJ2(ctx, in, jc, *ch)
 		if err != nil {
 			if errors.Is(err, ErrRunInProgress) {
