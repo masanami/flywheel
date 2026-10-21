@@ -439,6 +439,7 @@ var runLevelUsageErrorCases = [][]string{
 	{"approve", "C-2", "--session", "s"},                        // --relayed なしの --session・--quote（M4P26）
 	{"approve", "C-2", "--relayed", "--quote", "q"},             // --relayed に --session が無い（空白だけも同じ）
 	{"approve", "C-2", "--relayed", "--session", "s"},           // --relayed に --quote が無い（空白だけも同じ）
+	{"reject", "OP-1", "--reason", "r", "--field", "issues"},    // 不可逆操作の ID への --field（M4P36）
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の

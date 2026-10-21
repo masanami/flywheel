@@ -146,9 +146,12 @@ func runReject(a Args) (any, error) {
 		return nil, err
 	}
 	if isOperationID(id) {
+		if len(a.Multi["field"]) > 0 {
+			return nil, NewError(CodeUsageError, "--field は課題の差し戻しにだけ指定できます")
+		}
 		return runRejectOperation(a, verifier, id, reason)
 	}
-	return runRejectChallenge(a, verifier, id, reason)
+	return runRejectChallenge(a, verifier, id, reason, a.Multi["field"])
 }
 
 // runRejectOperation は `flywheel reject <OP-ID> --reason <r>` の実装。
@@ -181,7 +184,11 @@ func runRejectOperation(a Args, verifier core.Verifier, id string, reason string
 }
 
 // runRejectChallenge は `flywheel reject <C-ID> --reason <r>` の実装（T6・T15）。
-func runRejectChallenge(a Args, verifier core.Verifier, id string, reason string) (any, error) {
+func runRejectChallenge(a Args, verifier core.Verifier, id string, reason string, fields []string) (any, error) {
+	// 閉集合の外の値は、本人確認の前に何も書かず拒む（正規化の規則は core が持つ）。
+	if _, ok := core.NormalizeRejectedFields(fields); !ok {
+		return nil, NewError(CodeValidationFailed, "--field は issues・expected・non_goals・figure のいずれかを指定してください")
+	}
 	preview, err := a.Store.PrepareRejection(context.Background(), id, reason)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -198,6 +205,7 @@ func runRejectChallenge(a Args, verifier core.Verifier, id string, reason string
 		ExpectedVersion: preview.Version,
 		Decision:        core.ApprovalDecisionRejected,
 		Reason:          &reason,
+		RejectedFields:  fields,
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -273,8 +281,10 @@ func approvalSummaryText(p *core.ApprovalPreview, decision core.ApprovalDecision
 	fmt.Fprintf(&b, "承認の種類:  %s\n", kindLabel)
 	if p.Kind == core.ApprovalKindPlan {
 		fmt.Fprintf(&b, "計画 v%d:\n%s\n", p.PlanVersion, p.PlanBody)
+		writePlanStageSummary(&b, p)
 	} else {
 		fmt.Fprintf(&b, "完了条件:    %s\n", p.DoneCriteria)
+		writeCompletionStageSummary(&b, p)
 	}
 	if p.Kind == core.ApprovalKindCompletion {
 		// D12: 完了の承認の要約は、同時に承認される release と、同時には
@@ -289,6 +299,58 @@ func approvalSummaryText(p *core.ApprovalPreview, decision core.ApprovalDecision
 		fmt.Fprintf(&b, "理由:        %s\n", *reason)
 	}
 	return b.String()
+}
+
+// writePlanStageSummary は計画の承認の要約へ、論点の各問いと回答・予想の各例・やらないことを
+// 書く。段階の欄が NULL の見出しは出さない（すべて NULL なら何も足さない）。
+func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
+	if len(p.Issues) > 0 {
+		b.WriteString("論点:\n")
+		for i, is := range p.Issues {
+			fmt.Fprintf(b, "  Q%d. %s\n", i+1, is.Question)
+			for j, o := range is.Options {
+				fmt.Fprintf(b, "    %d) %s\n", j+1, o.Label)
+			}
+			fmt.Fprintf(b, "    推奨: %d\n", is.Recommended)
+		}
+		if p.IssuesAnswer != nil {
+			fmt.Fprintf(b, "  回答: %s\n", *p.IssuesAnswer)
+		}
+	}
+	if len(p.Expected) > 0 {
+		b.WriteString("完了したら見えるもの（予想）:\n")
+		for i, e := range p.Expected {
+			fmt.Fprintf(b, "  %d. %s\n     変更前: %s\n     変更後: %s\n", i+1, e.Scene, e.Before, e.After)
+		}
+	}
+	if len(p.NonGoals) > 0 {
+		b.WriteString("やらないこと:\n")
+		for _, g := range p.NonGoals {
+			fmt.Fprintf(b, "  - %s\n", g)
+		}
+	}
+}
+
+// expectedMissingMark は予想の例が無い位置（実物が予想より多い）の印。
+const expectedMissingMark = "予想なし"
+
+// writeCompletionStageSummary は完了の承認の要約へ、予想と実物の変更後の対を書く
+// （対の組み立ては core の Pairs。足りない位置は印を出す）。
+func writeCompletionStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
+	if len(p.Pairs) == 0 {
+		return
+	}
+	b.WriteString("予想と実物:\n")
+	for i, pr := range p.Pairs {
+		exp, act := expectedMissingMark, core.PairActualMissingMark
+		if pr.Expected != nil {
+			exp = pr.Expected.After
+		}
+		if pr.Actual != nil {
+			act = pr.Actual.After
+		}
+		fmt.Fprintf(b, "  %d. 予想: %s\n     実物: %s\n", i+1, exp, act)
+	}
 }
 
 // operationListSummary は不可逆操作の一覧を、完了の承認の要約に埋め込む

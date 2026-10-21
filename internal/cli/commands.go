@@ -14,6 +14,9 @@ type flagDef struct {
 	Name     string
 	HasValue bool
 	Required bool
+	// Repeatable が true のフラグは複数回指定でき、指定された順に Args.Multi へ集める
+	// （HasValue と併せて使う。Values には最後の値も入る）。
+	Repeatable bool
 }
 
 // Command は 1 つの CLI コマンドの宣言的な定義。
@@ -44,8 +47,10 @@ type Command struct {
 type Args struct {
 	Positional []string
 	Values     map[string]string
-	Bools      map[string]bool
-	Stdin      io.Reader
+	// Multi は Repeatable なフラグの値を指定順に持つ。
+	Multi map[string][]string
+	Bools map[string]bool
+	Stdin io.Reader
 	// Stderr は標準エラー出力（serve の待ち受けの 1 行など、結果とは別に出す表示用）。
 	Stderr io.Writer
 	// Stdout は標準出力（cycle の周の開始の 1 行など、結果の出力より前に書く表示用）。
@@ -249,8 +254,11 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			Flags:         append([]flagDef{{Name: "reason", HasValue: true, Required: true}}, relayedFlags()...),
-			Run:           runReject,
+			Flags: append([]flagDef{
+				{Name: "reason", HasValue: true, Required: true},
+				{Name: "field", HasValue: true, Repeatable: true},
+			}, relayedFlags()...),
+			Run: runReject,
 		},
 		{
 			Path:          []string{"op", "add"},
