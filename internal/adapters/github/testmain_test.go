@@ -26,6 +26,7 @@ const (
 	envPidFile       = "FAKE_GH_PID_FILE"
 	envSleepSeconds  = "FAKE_GH_SLEEP_SECONDS"
 	envGrandchildPid = "FAKE_GH_GRANDCHILD_PID_FILE"
+	envMergeable     = "FAKE_GH_MERGEABLE"
 )
 
 func TestMain(m *testing.M) {
@@ -78,6 +79,11 @@ func runFakeGH(argv []string) int {
 		return fakeGHPullsTwoPages(argv)
 	case "checks_pending", "checks_complete", "checks_merged", "checks_runs_fail":
 		return fakeGHChecks(argv, os.Getenv(envScenario))
+	case "merge_ok":
+		return 0
+	case "merge_fail":
+		fmt.Fprintln(os.Stderr, "gh: Head branch was modified")
+		return 1
 	case "pulls_fail":
 		fmt.Fprintln(os.Stderr, "gh: connection refused")
 		return 1
@@ -481,7 +487,11 @@ func fakeGHChecks(argv []string, scenario string) int {
 		if scenario == "checks_merged" {
 			merged, state = `"2026-10-01T00:00:00Z"`, "closed"
 		}
-		fmt.Printf(`{"html_url":"https://github.com/o/r/pull/7","title":"t","state":%q,"merged_at":%s,"base":{"ref":"main"},"head":{"sha":"abc123"}}`, state, merged)
+		mergeable := "true"
+		if v := os.Getenv(envMergeable); v != "" {
+			mergeable = v
+		}
+		fmt.Printf(`{"html_url":"https://github.com/o/r/pull/7","title":"t","state":%q,"merged_at":%s,"base":{"ref":"main"},"head":{"sha":"abc123"},"mergeable":%s,"merge_commit_sha":"mc456"}`, state, merged, mergeable)
 		return 0
 	case strings.HasPrefix(endpoint, "repos/o/r/commits/abc123/check-runs"):
 		if scenario == "checks_runs_fail" {

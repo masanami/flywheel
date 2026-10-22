@@ -186,6 +186,9 @@ type ConnectorRepo struct {
 	DefaultBranch string
 	Connector     string
 	Slots         ConnectorRepoSlots
+	// MergeMethod は承認済みの release のマージの方式（squash | merge | rebase）。
+	// キーを省略したときは読み込みが squash を入れる。
+	MergeMethod string
 }
 
 // ConnectorsDeclaration は .flywheel/connectors.json の中身
@@ -249,6 +252,7 @@ var operationKeys = map[string]bool{
 var cliCommandsKeys = map[string]bool{"start": true, "status": true, "resume": true, "cancel": true}
 var connectorRepoKeys = map[string]bool{
 	"name": true, "remote": true, "default_branch": true, "connector": true, "slots": true,
+	"merge_method": true,
 }
 var connectorRepoSlotsKeys = map[string]bool{"provider": true, "paths": true, "base": true, "count": true}
 
@@ -606,6 +610,15 @@ func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 				return nil, fmt.Errorf("[%d].connector: %w", i, err)
 			}
 		}
+		r.MergeMethod = MergeMethodSquash
+		if v, ok := rr["merge_method"]; ok {
+			if isJSONNull(v) {
+				return nil, fmt.Errorf("[%d].merge_method: must not be null", i)
+			}
+			if err := json.Unmarshal(v, &r.MergeMethod); err != nil {
+				return nil, fmt.Errorf("[%d].merge_method: %w", i, err)
+			}
+		}
 		if v, ok := rr["slots"]; ok {
 			// self-review 指摘（round 2）: "slots": null は「省略」と区別され
 			// ず、Slots がゼロ値のまま静かに通ってしまう。
@@ -778,6 +791,11 @@ func validateConnectorRepo(r ConnectorRepo, repoNames map[string]bool, connector
 	}
 	if r.DefaultBranch == "" {
 		return fmt.Errorf("%w: repo %q has no default_branch", ErrConfigInvalid, r.Name)
+	}
+	switch r.MergeMethod {
+	case MergeMethodSquash, MergeMethodMerge, MergeMethodRebase:
+	default:
+		return fmt.Errorf("%w: repo %q has invalid merge_method %q (want squash, merge or rebase)", ErrConfigInvalid, r.Name, r.MergeMethod)
 	}
 	if r.Slots.Provider != "" && !slotsProviderValues[r.Slots.Provider] {
 		return fmt.Errorf("%w: repo %q has invalid slots.provider %q", ErrConfigInvalid, r.Name, r.Slots.Provider)

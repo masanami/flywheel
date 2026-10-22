@@ -28,7 +28,7 @@
 | `internal/cli` | コマンドの定義・JSON／テキスト出力・終了コードとエラーコードの写像・端末での本人確認 |
 | `internal/view` | CLI の `--json` と API が共有する JSON の形の型（`json` タグつきの構造体。フィールドはキーの辞書順）と、core の型からの変換。JSON の形を `map[string]any` で組み立てず、ここへ置く。import してよいのは `internal/core` だけ |
 | `internal/view/cmd/gentypes` | `internal/view` の型から `web/src/api/types.gen.ts` を書き出す生成専用の `main`（`go generate ./internal/view`）。`internal/view` と標準ライブラリだけを import し、テストは生成物との差の検査。本番のバイナリに含めない |
-| `internal/adapters/github` | `gh` の起動と応答の正規化（GitHub Issue・ブランチ・PR・PR のチェックの取得）。core の取得 IF（`internal/core/upstream.go`）だけに依存し、取り込みの規則・CI の完了の判定規則は持たない。ストアを import しない |
+| `internal/adapters/github` | `gh` の起動と応答の正規化（GitHub Issue・ブランチ・PR・PR のチェックと `mergeable`・`merge_commit_sha` の取得）と、PR のマージの依頼（`gh pr merge`。唯一の書き込み。呼ぶのは承認済みの `release` の実行の口だけで、`--admin`・`--auto`・`--delete-branch` は付けない）。core の IF（`internal/core/upstream.go`）だけに依存し、取り込みの規則・CI の完了の判定規則・マージの可否の判定は持たない。ストアを import しない |
 | `internal/adapters/git` | スロットの作業ツリーの検査と `git worktree add` の払い出し（`git` の起動）。core のスロットの IF（`internal/core/slot_git.go` の `SlotGit`）だけに依存し、割り当ての規則・origin の正規化は持たない。ストアを import しない。`GIT_DIR`・`GIT_WORK_TREE` を明示し、`fetch`・`clone` をしない |
 | `internal/server` | `flywheel serve` の HTTP サーバ（server・API・Host と Origin の検査・UI の配信）。`127.0.0.1` だけに bind する。core の公開 API だけを呼び（`internal/adapters/github` は下の import の向きの節の範囲だけ）、ストアのパッケージ・`internal/cli`・`internal/invoker` を import しない。自身の状態をストアの外に持たない（メモリ上の CSRF の値・challenge・セッションを除く） |
 | `web` | UI のソース（Vite・React・TypeScript・Vitest・Biome）。npm の依存はここだけに置き、ロックファイルで固定する。ビルド成果物は `internal/server/dist/ui`（git の追跡外）へ出て `go:embed` でバイナリへ入る。Node が無くても `go build` は通る（最小の `index.html` を返す） |
