@@ -96,8 +96,8 @@ func TestOpenWorkspace_UpgradesSchemaVersion4StoreToVersion5(t *testing.T) {
 	ctx := context.Background()
 
 	// AC-370: 版が 5 になる。
-	if got := schemaVersionForTest(t, s); got != 8 {
-		t.Fatalf("schema version = %d, want 8 (AC-370: 版 5 の表は保たれる)", got)
+	if got := schemaVersionForTest(t, s); got != 9 {
+		t.Fatalf("schema version = %d, want 9 (AC-370: 版 5 の表は保たれる)", got)
 	}
 	// #143: 既存の承認の行は plan_version が NULL のまま（推測で計画を割り当てない）。
 	var total, nonNull int
@@ -206,7 +206,7 @@ func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
 	if got := pragmaTableInfoColumnsForTest(t, s, "slot"); !stringSlicesEqual(got, wantSlot) {
 		t.Fatalf("slot columns = %v, want %v", got, wantSlot)
 	}
-	wantArtifact := []string{"id", "run_id", "kind", "ref", "state", "base", "verified_at"}
+	wantArtifact := []string{"id", "run_id", "kind", "ref", "state", "base", "verified_at", "verified_head_sha"}
 	if got := pragmaTableInfoColumnsForTest(t, s, "run_artifact"); !stringSlicesEqual(got, wantArtifact) {
 		t.Fatalf("run_artifact columns = %v, want %v", got, wantArtifact)
 	}
@@ -218,8 +218,8 @@ func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
 
 func TestSchemaV5_FreshStoreHasSlotTables(t *testing.T) {
 	s := newStoreForTest(t)
-	if got := schemaVersionForTest(t, s); got != 8 {
-		t.Fatalf("schema version = %d, want 8", got)
+	if got := schemaVersionForTest(t, s); got != 9 {
+		t.Fatalf("schema version = %d, want 9", got)
 	}
 	if !tableExistsForTest(t, s, "slot") || !tableExistsForTest(t, s, "run_artifact") {
 		t.Fatalf("slot and run_artifact tables must exist")

@@ -581,3 +581,138 @@ func SetRunSlot(t *testing.T, workspace string, runID, slotID int64) {
 		t.Fatalf("coretest: SetRunSlot(%d, %d): %v", runID, slotID, err)
 	}
 }
+
+// InsertReleaseOperation はテスト専用のフィクスチャとして、challengeID（内部整数 ID）の課題に
+// 種類 release の不可逆操作（参照 ref・状態 state）を 1 件挿入し、その内部整数 ID を返す。
+// 承認の記録は作らない（承認済みの release は InsertApprovedRelease）。
+func InsertReleaseOperation(t *testing.T, workspace string, challengeID int, ref, state string) int64 {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var id int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(
+			`INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at)
+			 VALUES (?, 'release', 'release', ?, ?, 1, ?)`,
+			challengeID, ref, state, "2026-10-22T00:00:00.000Z")
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertReleaseOperation: %v", err)
+	}
+	return id
+}
+
+// InsertReleaseApproval はテスト専用のフィクスチャとして、opID（内部整数 ID）の release に承認の
+// 記録（kind=release・decision=approved）を 1 件挿入する。headSHA が空なら head_sha は NULL
+// （マイグレーションの前に承認された release と同じ）。decidedAt は RFC3339・UTC・ミリ秒固定。
+func InsertReleaseApproval(t *testing.T, workspace string, opID int64, headSHA, decidedAt string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var head any
+	if headSHA != "" {
+		head = headSHA
+	}
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, decided_at, head_sha)
+			 VALUES ((SELECT challenge_id FROM operation WHERE id = ?), ?, 'release', 'approved', 1, 'tester', 'cli', 'tty_confirm', ?, ?)`,
+			opID, opID, decidedAt, head)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertReleaseApproval: %v", err)
+	}
+}
+
+// InsertApprovedRelease はテスト専用のフィクスチャとして、承認済み（state=approved）の release と
+// その承認の記録（head_sha つき）を作り、操作の内部整数 ID を返す。
+func InsertApprovedRelease(t *testing.T, workspace string, challengeID int, ref, headSHA, decidedAt string) int64 {
+	t.Helper()
+	id := InsertReleaseOperation(t, workspace, challengeID, ref, "approved")
+	InsertReleaseApproval(t, workspace, id, headSHA, decidedAt)
+	return id
+}
+
+// ExecutionAttempt は InsertOperationExecution が挿入する試行の行。EndedAt と Result がともに空なら終了していない
+// 試行（ended_at・result は NULL。片方だけの指定は不可）。空の文字列の項目は NULL になる。
+type ExecutionAttempt struct {
+	StartedAt    string
+	EndedAt      string
+	Result       string
+	ApprovedHead string
+	ObservedHead string
+	Detail       string
+	PID          int64
+	Host         string
+}
+
+// InsertOperationExecution はテスト専用のフィクスチャとして、opID（内部整数 ID）の release の
+// 実行の試行を 1 件挿入し、その内部整数 ID を返す。Host が空なら "testhost"、PID が 0 なら 1。
+func InsertOperationExecution(t *testing.T, workspace string, opID int64, a ExecutionAttempt) int64 {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	nullable := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	if (a.EndedAt == "") != (a.Result == "") {
+		t.Fatalf("coretest: InsertOperationExecution: EndedAt and Result must be both set or both empty")
+	}
+	if a.StartedAt == "" {
+		t.Fatalf("coretest: InsertOperationExecution: StartedAt is required")
+	}
+	host, pid := a.Host, a.PID
+	if host == "" {
+		host = "testhost"
+	}
+	if pid == 0 {
+		pid = 1
+	}
+	var id int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(
+			`INSERT INTO operation_execution (operation_id, started_at, ended_at, result, approved_head, observed_head, detail, pid, host)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			opID, a.StartedAt, nullable(a.EndedAt), nullable(a.Result), nullable(a.ApprovedHead),
+			nullable(a.ObservedHead), nullable(a.Detail), pid, host)
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertOperationExecution: %v", err)
+	}
+	return id
+}
+
+// SetRunArtifactVerifiedHead はテスト専用のフィクスチャとして、run の成果物のうち ref が一致する
+// 行の verified_head_sha（J5 の met の入力にした head）を設定する。該当する行が無ければ失敗する。
+func SetRunArtifactVerifiedHead(t *testing.T, workspace string, runID int64, ref, headSHA string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`UPDATE run_artifact SET verified_head_sha = ? WHERE run_id = ? AND ref = ?`, headSHA, runID, ref)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("no run_artifact with run_id=%d ref=%q", runID, ref)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("coretest: SetRunArtifactVerifiedHead: %v", err)
+	}
+}
