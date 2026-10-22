@@ -707,3 +707,40 @@ func TestLoadConnectorsDeclaration_Slots_Invalid(t *testing.T) {
 		})
 	}
 }
+
+// --- merge_method（AC-41） ---
+
+func loadRepoWithMergeMethod(t *testing.T, field string) (*ConnectorsDeclaration, error) {
+	t.Helper()
+	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
+		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
+	], "repos": [{"name": "r", "remote": "o/r", "default_branch": "main", "connector": "a"`+field+`}]}`)
+	return LoadConnectorsDeclaration(dir)
+}
+
+func TestLoadConnectorsDeclaration_MergeMethodDefaultsToSquash(t *testing.T) {
+	decl, err := loadRepoWithMergeMethod(t, "")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if got := decl.Repos[0].MergeMethod; got != MergeMethodSquash {
+		t.Errorf("MergeMethod = %q, want squash", got)
+	}
+}
+
+func TestLoadConnectorsDeclaration_MergeMethodClosedSet(t *testing.T) {
+	for _, m := range []string{"squash", "merge", "rebase"} {
+		decl, err := loadRepoWithMergeMethod(t, `, "merge_method": "`+m+`"`)
+		if err != nil {
+			t.Fatalf("%s: error = %v", m, err)
+		}
+		if got := decl.Repos[0].MergeMethod; got != m {
+			t.Errorf("MergeMethod = %q, want %q", got, m)
+		}
+	}
+	for _, bad := range []string{`"fast-forward"`, `""`, `"Squash"`, `null`, `1`, `true`} {
+		if _, err := loadRepoWithMergeMethod(t, `, "merge_method": `+bad); !errors.Is(err, ErrConfigInvalid) {
+			t.Errorf("merge_method %s: error = %v, want ErrConfigInvalid", bad, err)
+		}
+	}
+}

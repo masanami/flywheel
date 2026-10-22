@@ -65,3 +65,34 @@ func TestGetPullRequestChecks_FailureIsReturnedAsError(t *testing.T) {
 		t.Fatalf("err = %v, want a check runs failure", err)
 	}
 }
+
+func TestGetPullRequestChecks_MergeableAndMergeCommitSHA(t *testing.T) {
+	cases := []struct {
+		env  string
+		want *bool
+	}{
+		{"true", boolPtr(true)},
+		{"false", boolPtr(false)},
+		{"null", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			dir := newFakeGHDir(t)
+			t.Setenv(envScenario, "checks_complete")
+			t.Setenv(envMergeable, tc.env)
+			c := newTestClient(t, dir)
+			got, err := c.GetPullRequestChecks(context.Background(), "o/r", 7)
+			if err != nil {
+				t.Fatalf("GetPullRequestChecks: %v", err)
+			}
+			if (got.Mergeable == nil) != (tc.want == nil) || (tc.want != nil && *got.Mergeable != *tc.want) {
+				t.Errorf("Mergeable = %v, want %v", got.Mergeable, tc.want)
+			}
+			if got.MergeCommitSHA != "mc456" {
+				t.Errorf("MergeCommitSHA = %q, want mc456", got.MergeCommitSHA)
+			}
+		})
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }

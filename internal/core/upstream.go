@@ -176,7 +176,12 @@ type UpstreamPullRequestChecks struct {
 	State   string // "open" | "closed" | "merged"
 	Base    string
 	HeadSHA string
-	Checks  []UpstreamCheck
+	// Mergeable は REST の `mergeable`。nil は null（GitHub が計算中）、false はマージ不可、
+	// true はマージ可。`mergeable_state` は読まない。
+	Mergeable *bool
+	// MergeCommitSHA は REST の `merge_commit_sha`（マージ済みの PR のマージのコミット。無ければ空）。
+	MergeCommitSHA string
+	Checks         []UpstreamCheck
 }
 
 // UpstreamCheckSource は J5 の起動の前に core が呼ぶ、PR のチェックの取得 IF。実装は
@@ -185,4 +190,23 @@ type UpstreamCheckSource interface {
 	// GetPullRequestChecks は repo（"<owner>/<name>"）の number 番の PR の状態と、head の
 	// コミットのチェックの一覧を返す。
 	GetPullRequestChecks(ctx context.Context, repo string, number int) (UpstreamPullRequestChecks, error)
+}
+
+// MergeMethod は PR のマージの方式（connectors.json の repos[].merge_method の閉集合）。
+const (
+	MergeMethodSquash = "squash"
+	MergeMethodMerge  = "merge"
+	MergeMethodRebase = "rebase"
+)
+
+// UpstreamPullRequestMerger は承認済みの release の実行の口（core）だけが呼ぶ、PR のマージの依頼の
+// 書き込み IF。読み取りの IF とは分ける。実装は internal/adapters/github が
+// `gh pr merge <URL> --<方式> --match-head-commit <head>` だけで行う
+// （--admin・--auto・--delete-branch は付けない）。
+type UpstreamPullRequestMerger interface {
+	// MergePullRequest は prURL の PR のマージを method（MergeMethod*）で依頼する。
+	// matchHeadSHA は承認した head で、GitHub 側でも head の一致を比べさせる。
+	// 依頼が成功しても merged になったことは保証しない（呼び出し側が読み取りで確かめる）。
+	// 終了コードが 0 でないときは失敗を返す。
+	MergePullRequest(ctx context.Context, prURL, method, matchHeadSHA string) error
 }
