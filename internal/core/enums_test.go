@@ -92,10 +92,10 @@ func TestParseOperationKind_RejectsUnknownValue(t *testing.T) {
 	}
 }
 
-// --- OperationState（不可逆操作の状態。pending|approved|rejected） ---
+// --- OperationState（不可逆操作の状態。pending|approved|rejected|executed） ---
 
 func TestParseOperationState_AcceptsKnownValues(t *testing.T) {
-	for _, s := range []string{"pending", "approved", "rejected"} {
+	for _, s := range []string{"pending", "approved", "rejected", "executed"} {
 		if _, ok := ParseOperationState(s); !ok {
 			t.Errorf("ParseOperationState(%q) ok = false, want true", s)
 		}
@@ -103,7 +103,7 @@ func TestParseOperationState_AcceptsKnownValues(t *testing.T) {
 }
 
 func TestParseOperationState_RejectsUnknownValue(t *testing.T) {
-	for _, s := range []string{"executed", "", "PENDING", "approve"} {
+	for _, s := range []string{"done", "", "PENDING", "approve", "EXECUTED"} {
 		if _, ok := ParseOperationState(s); ok {
 			t.Errorf("ParseOperationState(%q) ok = true, want false", s)
 		}
@@ -184,5 +184,64 @@ func TestNotStartedReasonValues_AreTheTenAndACopy(t *testing.T) {
 	got[0] = "tampered"
 	if NotStartedReasonValues()[0] != NotStartedCycleBudget {
 		t.Error("NotStartedReasonValues returned the internal slice, not a copy")
+	}
+}
+
+// --- ExecutionResult（release の実行の試行の結果。16 値と分類） ---
+
+func TestExecutionResult_ClosedSetHas16ValuesWithClasses(t *testing.T) {
+	want := map[ExecutionResult]struct {
+		class  ExecutionClass
+		counts bool
+	}{
+		"merged": {ExecutionClassExecuted, false}, "already_merged": {ExecutionClassExecuted, false},
+		"waiting_checks": {ExecutionClassWait, false}, "upstream_failed": {ExecutionClassWait, false},
+		"merge_unconfirmed": {ExecutionClassWait, false},
+		"checks_failed":     {ExecutionClassWait, true}, "not_mergeable": {ExecutionClassWait, true}, "merge_failed": {ExecutionClassWait, true},
+		"head_changed": {ExecutionClassCancel, false}, "closed": {ExecutionClassCancel, false}, "base_changed": {ExecutionClassCancel, false},
+		"no_approved_head": {ExecutionClassCancel, false}, "unsupported": {ExecutionClassCancel, false},
+		"merged_unapproved": {ExecutionClassCancel, false}, "limit_reached": {ExecutionClassCancel, false},
+		"interrupted": {ExecutionClassInterrupted, false},
+	}
+	values := ExecutionResultValues()
+	if len(values) != 16 || len(want) != 16 {
+		t.Fatalf("len(ExecutionResultValues()) = %d, want 16", len(values))
+	}
+	seen := map[ExecutionResult]bool{}
+	for _, v := range values {
+		if seen[v] {
+			t.Errorf("duplicate result %q", v)
+		}
+		seen[v] = true
+		w, ok := want[v]
+		if !ok {
+			t.Errorf("unexpected result %q", v)
+			continue
+		}
+		if c, ok := v.Class(); !ok || c != w.class {
+			t.Errorf("%q class = %q (ok=%v), want %q", v, c, ok, w.class)
+		}
+		if v.Counts() != w.counts {
+			t.Errorf("%q Counts() = %v, want %v", v, v.Counts(), w.counts)
+		}
+		if got, ok := ParseExecutionResult(string(v)); !ok || got != v {
+			t.Errorf("ParseExecutionResult(%q) = %q, %v", v, got, ok)
+		}
+	}
+	for v := range want {
+		if !seen[v] {
+			t.Errorf("result %q missing from ExecutionResultValues()", v)
+		}
+	}
+	for _, s := range []string{"", "MERGED", "success"} {
+		if _, ok := ParseExecutionResult(s); ok {
+			t.Errorf("ParseExecutionResult(%q) ok = true, want false", s)
+		}
+	}
+	if _, ok := ExecutionResult("bogus").Class(); ok {
+		t.Error("Class() of unknown result ok = true")
+	}
+	if ActivityActionOpExecute != "op_execute" {
+		t.Errorf("ActivityActionOpExecute = %q", ActivityActionOpExecute)
 	}
 }

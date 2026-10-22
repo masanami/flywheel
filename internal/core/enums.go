@@ -159,20 +159,22 @@ func ParseApprovalDecision(s string) (ApprovalDecision, bool) {
 
 // OperationState は不可逆操作の状態（§データモデル `operation.state`）。
 // 登録直後は OperationStatePending で、単独の承認・差し戻し
-// （ExecuteOperationApproval）または完了の承認による一括承認（D12）でだけ
-// 変わる。他の閉集合（Status・OperationKind・ApprovalKind・ApprovalDecision）
+// （ExecuteOperationApproval）、完了の承認による一括承認（D12）、および release の
+// 実行（executed）・取り消し（approved から pending へ戻す）で変わる。他の閉集合（Status・OperationKind・ApprovalKind・ApprovalDecision）
 // と同じく、値の正本をここ 1 箇所に置く。
 type OperationState string
 
-// OperationState の3値。
+// OperationState の4値。executed は承認済みの release を core が実行した後の
+// 状態で、未承認にも承認済み（未実行）にも数えない。
 const (
 	OperationStatePending  OperationState = "pending"
 	OperationStateApproved OperationState = "approved"
 	OperationStateRejected OperationState = "rejected"
+	OperationStateExecuted OperationState = "executed"
 )
 
 var operationStateValues = []OperationState{
-	OperationStatePending, OperationStateApproved, OperationStateRejected,
+	OperationStatePending, OperationStateApproved, OperationStateRejected, OperationStateExecuted,
 }
 
 // ParseOperationState は s を不可逆操作の状態として解釈する。
@@ -246,4 +248,111 @@ func NormalizeRejectedFields(fields []string) (out []RejectedField, ok bool) {
 		}
 	}
 	return out, true
+}
+
+// ActivityActionOpExecute は作業ログ（entity=operation・entity=challenge）の action で、
+// release の実行の試行の結果が実行済みか取り消しのときに残す。待つ結果の試行は
+// 作業ログに載せず operation_execution にだけ残す。
+const ActivityActionOpExecute = "op_execute"
+
+// ExecutionResult は release の実行の試行の結果（operation_execution.result）の閉集合。
+type ExecutionResult string
+
+// ExecutionResult の16値。
+const (
+	ExecutionResultMerged           ExecutionResult = "merged"
+	ExecutionResultAlreadyMerged    ExecutionResult = "already_merged"
+	ExecutionResultWaitingChecks    ExecutionResult = "waiting_checks"
+	ExecutionResultUpstreamFailed   ExecutionResult = "upstream_failed"
+	ExecutionResultChecksFailed     ExecutionResult = "checks_failed"
+	ExecutionResultNotMergeable     ExecutionResult = "not_mergeable"
+	ExecutionResultMergeFailed      ExecutionResult = "merge_failed"
+	ExecutionResultMergeUnconfirmed ExecutionResult = "merge_unconfirmed"
+	ExecutionResultHeadChanged      ExecutionResult = "head_changed"
+	ExecutionResultClosed           ExecutionResult = "closed"
+	ExecutionResultBaseChanged      ExecutionResult = "base_changed"
+	ExecutionResultNoApprovedHead   ExecutionResult = "no_approved_head"
+	ExecutionResultUnsupported      ExecutionResult = "unsupported"
+	ExecutionResultMergedUnapproved ExecutionResult = "merged_unapproved"
+	ExecutionResultLimitReached     ExecutionResult = "limit_reached"
+	ExecutionResultInterrupted      ExecutionResult = "interrupted"
+)
+
+// ExecutionClass は試行の結果の分類。
+type ExecutionClass string
+
+// ExecutionClass の値。待つ結果は連続の回数に数えるか（ExecutionResult.Counts）で分かれる。
+const (
+	// ExecutionClassExecuted は実行済み（merged・already_merged）。
+	ExecutionClassExecuted ExecutionClass = "executed"
+	// ExecutionClassWait は待つ（承認を保ち、次の実行の口で試し直す）。
+	ExecutionClassWait ExecutionClass = "wait"
+	// ExecutionClassCancel は取り消す（承認を取り消し、release を未承認へ戻す）。
+	ExecutionClassCancel ExecutionClass = "cancel"
+	// ExecutionClassInterrupted は実行の口の都合（回収で閉じた試行）。
+	ExecutionClassInterrupted ExecutionClass = "interrupted"
+)
+
+// executionResultSpec は結果ごとの分類と、連続の回数に数えるか。
+var executionResultSpecs = []struct {
+	result ExecutionResult
+	class  ExecutionClass
+	counts bool
+}{
+	{ExecutionResultMerged, ExecutionClassExecuted, false},
+	{ExecutionResultAlreadyMerged, ExecutionClassExecuted, false},
+	{ExecutionResultWaitingChecks, ExecutionClassWait, false},
+	{ExecutionResultUpstreamFailed, ExecutionClassWait, false},
+	{ExecutionResultChecksFailed, ExecutionClassWait, true},
+	{ExecutionResultNotMergeable, ExecutionClassWait, true},
+	{ExecutionResultMergeFailed, ExecutionClassWait, true},
+	{ExecutionResultMergeUnconfirmed, ExecutionClassWait, false},
+	{ExecutionResultHeadChanged, ExecutionClassCancel, false},
+	{ExecutionResultClosed, ExecutionClassCancel, false},
+	{ExecutionResultBaseChanged, ExecutionClassCancel, false},
+	{ExecutionResultNoApprovedHead, ExecutionClassCancel, false},
+	{ExecutionResultUnsupported, ExecutionClassCancel, false},
+	{ExecutionResultMergedUnapproved, ExecutionClassCancel, false},
+	{ExecutionResultLimitReached, ExecutionClassCancel, false},
+	{ExecutionResultInterrupted, ExecutionClassInterrupted, false},
+}
+
+// ExecutionResultValues は閉集合の全値を表の順に返す。
+func ExecutionResultValues() []ExecutionResult {
+	out := make([]ExecutionResult, len(executionResultSpecs))
+	for i, sp := range executionResultSpecs {
+		out[i] = sp.result
+	}
+	return out
+}
+
+// ParseExecutionResult は s を試行の結果として解釈する（前後の空白を除いた完全一致）。
+func ParseExecutionResult(s string) (ExecutionResult, bool) {
+	trimmed := strings.TrimSpace(s)
+	for _, sp := range executionResultSpecs {
+		if string(sp.result) == trimmed {
+			return sp.result, true
+		}
+	}
+	return "", false
+}
+
+// Class は r の分類を返す。閉集合の外には ok=false。
+func (r ExecutionResult) Class() (ExecutionClass, bool) {
+	for _, sp := range executionResultSpecs {
+		if sp.result == r {
+			return sp.class, true
+		}
+	}
+	return "", false
+}
+
+// Counts は r が連続の回数に数えられる結果（checks_failed・not_mergeable・merge_failed）か。
+func (r ExecutionResult) Counts() bool {
+	for _, sp := range executionResultSpecs {
+		if sp.result == r {
+			return sp.counts
+		}
+	}
+	return false
 }

@@ -237,13 +237,15 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 }
 
 // releaseApproved は課題の、参照が prURL の release が承認済みかを返す。
+// 実行済み（executed）の release も承認済みとして数える（実行済みの PR を、承認なしの
+// 本番反映と誤検出しない）。
 func (s *Store) releaseApproved(ctx context.Context, challengeID int64, prURL string) (bool, error) {
 	var approved bool
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM operation WHERE challenge_id = ? AND kind = ? AND ref = ? AND state = ?`,
-			challengeID, string(OperationKindRelease), prURL, string(OperationStateApproved)).Scan(&n); err != nil {
+			`SELECT COUNT(*) FROM operation WHERE challenge_id = ? AND kind = ? AND ref = ? AND state IN (?, ?)`,
+			challengeID, string(OperationKindRelease), prURL, string(OperationStateApproved), string(OperationStateExecuted)).Scan(&n); err != nil {
 			return err
 		}
 		approved = n > 0
