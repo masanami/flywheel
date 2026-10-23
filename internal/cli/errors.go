@@ -149,7 +149,8 @@ func NewError(code ErrorCode, message string) *Error {
 
 // newReleaseNotApprovableError は承認の ① で release を承認の対象にできない upstream_unavailable を生成する。
 // upstream_unavailable は、`gh` が無い（M2。終了コード 2。表の値）と、この意味（M4.5。終了コード 1）の
-// 2 つを持つため、こちらは終了コードを 1 に上書きする。
+// 2 つを持つため、こちらは終了コードを 1 に上書きする
+// （仕様: docs/features/m4.5-learning-and-self-improvement.md §エラーコードの追加。M1・M2 の表の注記と対応）。
 func newReleaseNotApprovableError(message string) *Error {
 	e := NewError(CodeUpstreamUnavailable, message)
 	e.ExitCode = 1

@@ -168,7 +168,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `verification_rejected` | 1 | 許可していない経路と本人確認の方式の組み合わせ（core の API へ直接要求された場合）。M3H13 以降は、委譲の目印（`FLYWHEEL_DELEGATED_RUN`）のある環境からの `help` 以外のコマンドの実行も含む |
 | `config_not_found` | 2 | 取り込み元の宣言ファイル（`.flywheel/sources.json`）が無い（#54。docs/features/m2-github-issue-ingest.md §エラーコードの追加） |
 | `config_invalid` | 2 | 取り込み元の宣言が規則に反する（解釈できない JSON を含む。#54。同上） |
-| `upstream_unavailable` | 2 | 上流へ接続する手段（`gh`）が PATH に無い（#59。同上） |
+| `upstream_unavailable` | 2 | 上流へ接続する手段（`gh`）が PATH に無い（#59。同上）。終了コードは経路で決まる（表の値は `gh` が無い経路）: `gh` が無い経路は 2、承認の ① の経路は 1（docs/features/m4.5-learning-and-self-improvement.md §エラーコードの追加） |
 | `invoker_unavailable` | 2 | 判断の呼び出し・委譲を行う手段（`claude`）が PATH に無い（#84。docs/features/m3-invoker-delegation.md §IF / API「エラーコードの追加」） |
 | `locked` | 1 | 生きている別の `cycle` がサイクルの排他を保持している（#86。同上） |
 | `run_in_progress` | 1 | 指定した課題に終了していない run がある（#84。同上） |
