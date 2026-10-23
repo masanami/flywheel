@@ -97,6 +97,10 @@ type ApprovalPreview struct {
 	// VerifiedHeadSHAs は PendingReleases の release の ID ごとに、J5 が検証の入力にした
 	// 最新の head（latestVerifiedHead）。記録のない release は載せない（承認を止めない）。
 	VerifiedHeadSHAs map[string]string
+	// LastExecutionResults は PendingReleases の release の ID ごとに、直前の試行
+	// （operation_execution でその操作の id が最大の行）の結果。試行のない release は載せない。
+	// CLI が merged_unapproved の release を外す判定（M45H16）に使う。
+	LastExecutionResults map[string]ExecutionResult
 }
 
 // approvesPendingReleases は D12 の規則の正本: 「その操作が、対象の課題の
@@ -219,6 +223,18 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 							preview.VerifiedHeadSHAs = map[string]string{}
 						}
 						preview.VerifiedHeadSHAs[op.ID] = *head
+					}
+					if oid, ok := parseOperationID(op.ID); ok {
+						last, err := latestOperationExecution(ctx, tx, oid)
+						if err != nil {
+							return err
+						}
+						if last != nil {
+							if preview.LastExecutionResults == nil {
+								preview.LastExecutionResults = map[string]ExecutionResult{}
+							}
+							preview.LastExecutionResults[op.ID] = last.Result
+						}
 					}
 				} else {
 					preview.OtherPendingOperations = append(preview.OtherPendingOperations, op)
@@ -497,7 +513,8 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 //
 // 承認する release は req.ReleaseHeads の組だけで、req の組と外した release（req.ExcludedReleaseIDs）の
 // 和集合が未承認の release の全体と一致しなければ、何も書かず ErrConflict を返す（外した release は
-// pending のまま残る）。
+// pending のまま残る）。承認する組に、直前の試行の結果が merged_unapproved の release が入っていれば、
+// 何も書かず ReapprovalForbiddenError（verification_rejected）を返す。
 func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation, req ApprovalRequest) error {
 	rows, err := tc.tx.QueryContext(ctx,
 		`SELECT id, version, ref FROM operation WHERE challenge_id = ? AND kind = ? AND state = ? ORDER BY id ASC`,
@@ -565,6 +582,11 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 		head, approve := heads[p.id]
 		if !approve {
 			continue
+		}
+		// 直前の試行の結果が merged_unapproved の release は、CLI の判定に関わらず承認しない
+		// （M45H16。--relayed の経路でも同じ）。承認する組に入っていたら何も書かず終える。
+		if err := rejectReapproval(ctx, tc.tx, p.id); err != nil {
+			return err
 		}
 		verified, err := latestVerifiedHead(ctx, tc.tx, p.ref)
 		if err != nil {
