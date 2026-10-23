@@ -6,6 +6,8 @@ import "github.com/masanami/flywheel/internal/core"
 type Discrepancy struct {
 	ChallengeID string   `json:"challenge_id"`
 	Kinds       []string `json:"kinds"`
+	// OperationID は merged_unapproved の release の ID。上流の食い違いだけの要素では省く。
+	OperationID string `json:"operation_id,omitempty"`
 }
 
 // Triage は status.needs_human.triage の要素。
@@ -51,7 +53,7 @@ func DiscrepancyKinds(kinds []core.DiscrepancyKind) []string {
 func FromDiscrepancies(ds []core.Discrepancy) []Discrepancy {
 	out := make([]Discrepancy, 0, len(ds))
 	for _, d := range ds {
-		out = append(out, Discrepancy{ChallengeID: d.ChallengeID, Kinds: DiscrepancyKinds(d.Kinds)})
+		out = append(out, Discrepancy{ChallengeID: d.ChallengeID, Kinds: DiscrepancyKinds(d.Kinds), OperationID: d.OperationID})
 	}
 	return out
 }

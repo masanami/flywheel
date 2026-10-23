@@ -158,6 +158,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM4HoldRunIDShape(t, &doc)
 	addM4RelayEvidenceShape(t, &doc)
 	addM4StageShape(t, &doc)
+	addM45OperationShape(t, &doc)
 	return doc
 }
 
@@ -542,7 +543,7 @@ func assertDocumentedEntities(t *testing.T, doc documentedJSON, where string, v 
 				assertDocumentedEntities(t, doc, where+"."+k, x) // status の区分
 				continue
 			}
-			if got := keysOf(x); !reflect.DeepEqual(got, doc.entity[entity]) {
+			if got := withoutOptionalKeys(entity, keysOf(x)); !reflect.DeepEqual(got, doc.entity[entity]) {
 				t.Errorf("%s.%s keys = %v, documented %s shape = %v", where, k, sortedKeys(got), entity, sortedKeys(doc.entity[entity]))
 			}
 			// known な単一エンティティの内側も再帰する（今のところ source_binding
@@ -559,7 +560,7 @@ func assertDocumentedEntities(t *testing.T, doc documentedJSON, where string, v 
 					t.Errorf("%s.%s[%d] is not an object: %#v", where, k, i, e)
 					continue
 				}
-				if got := keysOf(em); !reflect.DeepEqual(got, doc.entity[entity]) {
+				if got := withoutOptionalKeys(entity, keysOf(em)); !reflect.DeepEqual(got, doc.entity[entity]) {
 					t.Errorf("%s.%s[%d] keys = %v, documented %s shape = %v", where, k, i, sortedKeys(got), entity, sortedKeys(doc.entity[entity]))
 				}
 				// ingest の source/repo/item のように、要素自身がさらに入れ子の
@@ -899,4 +900,53 @@ func addM4StageShape(t *testing.T, doc *documentedJSON) {
 		keys["stages"] = true
 		keys["pairs"] = true
 	}
+}
+
+// m45OperationKeys は M4.5 S1 が不可逆操作の要素（show の operations・status の
+// needs_human.operations・approved.operations）に足す 6 つのキー。
+var m45OperationKeys = []string{"approved_head", "executed_at", "merge_commit", "last_execution_result", "consecutive_failures", "waiting_since"}
+
+// addM45OperationShape は M4.5 S1 が不可逆操作の要素に足した 6 つのキーを doc へ合成する。
+// m4.5 の機能仕様が 6 つのキーをすべて書いていることを確かめた上で足す（第 2 の正本を持たず、
+// 文書の記述が消えたらここで落ちる）。
+func addM45OperationShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	for _, k := range m45OperationKeys {
+		if !strings.Contains(string(data), "| `"+k+"` |") {
+			t.Fatalf("m4.5 spec does not document the operation key %q", k)
+		}
+	}
+	if len(doc.entity["operation"]) == 0 {
+		t.Fatal("documented shape of operation not found")
+	}
+	if !strings.Contains(string(data), "`kind: merged_unapproved`（`operation_id`）") {
+		t.Fatal("m4.5 spec does not document discrepancy operation_id")
+	}
+	for _, k := range m45OperationKeys {
+		doc.entity["operation"][k] = true
+	}
+}
+
+// optionalEntityKeys は要素の形から省いてよいキー。discrepancy の operation_id は
+// merged_unapproved を含む要素だけが持つ（上流の食い違いだけの要素は持たない。M4.5 S1）。
+var optionalEntityKeys = map[string][]string{"discrepancy": {"operation_id"}}
+
+// withoutOptionalKeys は got から、entity で省いてよいキーを除いた写しを返す。
+func withoutOptionalKeys(entity string, got map[string]bool) map[string]bool {
+	opt := optionalEntityKeys[entity]
+	if len(opt) == 0 {
+		return got
+	}
+	out := map[string]bool{}
+	for k := range got {
+		out[k] = true
+	}
+	for _, k := range opt {
+		delete(out, k)
+	}
+	return out
 }

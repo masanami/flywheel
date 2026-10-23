@@ -71,7 +71,11 @@ func overviewText(ov *core.Overview) string {
 		for _, k := range d.Kinds {
 			kinds = append(kinds, string(k))
 		}
-		fmt.Fprintf(&b, "  %s\t食い違い\t%s\n", d.ChallengeID, strings.Join(kinds, ","))
+		fmt.Fprintf(&b, "  %s\t食い違い\t%s", d.ChallengeID, strings.Join(kinds, ","))
+		if d.OperationID != "" {
+			fmt.Fprintf(&b, "\t%s", d.OperationID)
+		}
+		b.WriteString("\n")
 	}
 
 	fmt.Fprintf(&b, "システムが次に進められるもの:\n")

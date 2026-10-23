@@ -39,6 +39,7 @@ export const DISCREPANCY_KINDS = [
   "out_of_policy",
   "upstream_commented",
   "upstream_updated",
+  "merged_unapproved",
 ] as const;
 export type DiscrepancyKind = (typeof DISCREPANCY_KINDS)[number];
 
@@ -78,6 +79,7 @@ export const DISCREPANCY_LABELS: Record<DiscrepancyKind, string> = {
   out_of_policy: "取り込みの方針の範囲外",
   upstream_commented: "上流に新しいコメント",
   upstream_updated: "上流が更新された",
+  merged_unapproved: "承認なしでマージされた",
 };
 
 // カードの面に出す区分の印（M4H23）。API の値から UI が導く（board/marks.ts）。

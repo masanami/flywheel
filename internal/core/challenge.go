@@ -113,6 +113,24 @@ type IrreversibleOperation struct {
 	State       OperationState
 	Version     int
 	CreatedAt   time.Time
+
+	// 以下は実行の表示用（docs/features/m4.5-learning-and-self-improvement.md S1
+	// 「show・status の不可逆操作の要素に足すキー」）。読み取りの経路
+	// （loadOperations・listOperationsInState）が埋める。それ以外の経路の戻り値では
+	// 既定値（nil・0）のままである。
+
+	// ApprovedHead は最新の承認の記録の head_sha。承認が無い・head が無ければ nil。
+	ApprovedHead *string
+	// ExecutedAt は実行済みにした日時。実行済みでなければ nil。
+	ExecutedAt *time.Time
+	// MergeCommit はマージのコミット SHA。無ければ nil。
+	MergeCommit *string
+	// LastExecutionResult は直前の試行（id が最大の行）の結果。試行が無い・終了していなければ nil。
+	LastExecutionResult *ExecutionResult
+	// ConsecutiveFailures は連続の回数（consecutiveFailures の導出）。
+	ConsecutiveFailures int
+	// WaitingSince は最新の承認の後の最初の試行の開始日時。承認済み（approved）の間だけ値を持つ。
+	WaitingSince *time.Time
 }
 
 // ChallengeDetail は show が返す課題の全体像（人間記入欄・状態に加え、計画の
@@ -409,7 +427,7 @@ func loadIssuesAnswer(ctx context.Context, tx *sql.Tx, challengeID int64, holdID
 // （Scan・created_at のパース・Ref の NULL 処理・IrreversibleOperation の組み立て）が
 // 2箇所にほぼ同じ内容で複製されており、operation にカラムが増えたとき片方だけ
 // 直し忘れるおそれがあった）。
-const operationSelectColumns = `SELECT id, challenge_id, kind, summary, ref, state, version, created_at FROM operation`
+const operationSelectColumns = `SELECT id, challenge_id, kind, summary, ref, state, version, created_at, executed_at, merge_commit FROM operation`
 
 // scanOperationRow は operationSelectColumns の1行を IrreversibleOperation へ変換する。
 func scanOperationRow(scanner rowScanner) (*IrreversibleOperation, error) {
@@ -420,8 +438,10 @@ func scanOperationRow(scanner rowScanner) (*IrreversibleOperation, error) {
 		state           string
 		version         int
 		createdAtStr    string
+		executedAtStr   sql.NullString
+		mergeCommit     sql.NullString
 	)
-	if err := scanner.Scan(&id, &challengeID, &kind, &summary, &ref, &state, &version, &createdAtStr); err != nil {
+	if err := scanner.Scan(&id, &challengeID, &kind, &summary, &ref, &state, &version, &createdAtStr, &executedAtStr, &mergeCommit); err != nil {
 		return nil, err
 	}
 	createdAt, err := parseTimestamp(createdAtStr)
@@ -440,6 +460,17 @@ func scanOperationRow(scanner rowScanner) (*IrreversibleOperation, error) {
 	if ref.Valid {
 		v := ref.String
 		op.Ref = &v
+	}
+	if executedAtStr.Valid {
+		t, err := parseTimestamp(executedAtStr.String)
+		if err != nil {
+			return nil, err
+		}
+		op.ExecutedAt = &t
+	}
+	if mergeCommit.Valid {
+		v := mergeCommit.String
+		op.MergeCommit = &v
 	}
 	return op, nil
 }
@@ -460,6 +491,9 @@ func loadOperations(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Irrev
 		ops = append(ops, *op)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := fillOperationExecutionInfo(ctx, tx, ops); err != nil {
 		return nil, err
 	}
 	return ops, nil

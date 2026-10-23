@@ -210,28 +210,54 @@ func FromHolds(hs []core.Hold) []Hold {
 
 // Operation は不可逆操作の形。
 type Operation struct {
-	ChallengeID string  `json:"challenge_id"`
-	CreatedAt   string  `json:"created_at"`
-	ID          string  `json:"id"`
-	Kind        string  `json:"kind"`
-	Ref         *string `json:"ref"`
-	State       string  `json:"state"`
-	Summary     string  `json:"summary"`
-	Version     int     `json:"version"`
+	ApprovedHead        *string `json:"approved_head"`
+	ChallengeID         string  `json:"challenge_id"`
+	ConsecutiveFailures int     `json:"consecutive_failures"`
+	CreatedAt           string  `json:"created_at"`
+	ExecutedAt          *string `json:"executed_at"`
+	ID                  string  `json:"id"`
+	Kind                string  `json:"kind"`
+	LastExecutionResult *string `json:"last_execution_result"`
+	MergeCommit         *string `json:"merge_commit"`
+	Ref                 *string `json:"ref"`
+	State               string  `json:"state"`
+	Summary             string  `json:"summary"`
+	Version             int     `json:"version"`
+	WaitingSince        *string `json:"waiting_since"`
 }
 
 // FromOperation は core.IrreversibleOperation を Operation へ変換する。
 func FromOperation(op core.IrreversibleOperation) Operation {
-	return Operation{
-		ChallengeID: op.ChallengeID,
-		CreatedAt:   FormatTimestamp(op.CreatedAt),
-		ID:          op.ID,
-		Kind:        string(op.Kind),
-		Ref:         op.Ref,
-		State:       string(op.State),
-		Summary:     op.Summary,
-		Version:     op.Version,
+	var last *string
+	if op.LastExecutionResult != nil {
+		v := string(*op.LastExecutionResult)
+		last = &v
 	}
+	return Operation{
+		ApprovedHead:        op.ApprovedHead,
+		ChallengeID:         op.ChallengeID,
+		ConsecutiveFailures: op.ConsecutiveFailures,
+		CreatedAt:           FormatTimestamp(op.CreatedAt),
+		ExecutedAt:          optionalTimestamp(op.ExecutedAt),
+		ID:                  op.ID,
+		Kind:                string(op.Kind),
+		LastExecutionResult: last,
+		MergeCommit:         op.MergeCommit,
+		Ref:                 op.Ref,
+		State:               string(op.State),
+		Summary:             op.Summary,
+		Version:             op.Version,
+		WaitingSince:        optionalTimestamp(op.WaitingSince),
+	}
+}
+
+// optionalTimestamp は t が nil なら nil、そうでなければ FormatTimestamp の文字列へのポインタを返す。
+func optionalTimestamp(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	v := FormatTimestamp(*t)
+	return &v
 }
 
 // FromOperations は不可逆操作の一覧を変換する。

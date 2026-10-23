@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -174,9 +175,23 @@ func TestRunStatus_Discrepancies_KindsMatchCoreClosedSetBothWays(t *testing.T) {
 	updatedID := createForCase(t, ws)
 	bindSourceForDiscrepancyCase(t, ws, updatedID, "o/r#4", "open", "in_policy")
 	coretest.SetSourceBindingObservation(t, ws, challengeIDToInternalID(t, updatedID), 0, "2026-09-25T08:00:00.000Z", 0, "2026-09-24T08:00:00.000Z")
+	// merged_unapproved（M4.5 S1）: 直前の試行が merged_unapproved の、取り消された release。
+	mergedID := createForCase(t, ws)
+	opID := coretest.InsertReleaseOperation(t, ws, challengeIDToInternalID(t, mergedID), "https://github.com/o/r/pull/9", "pending")
+	coretest.InsertOperationExecution(t, ws, opID, coretest.ExecutionAttempt{
+		StartedAt: "2026-10-22T00:00:00.000Z", EndedAt: "2026-10-22T00:00:01.000Z", Result: "merged_unapproved",
+	})
 
 	seen := map[string]bool{}
 	for _, e := range discrepancyEntries(t, runJSON(t, ws, "status")) {
+		_, hasOp := e["operation_id"]
+		if k, _ := e["kinds"].([]any); len(k) > 0 && k[0] == "merged_unapproved" {
+			if e["challenge_id"] != mergedID || e["operation_id"] != fmt.Sprintf("OP-%d", opID) {
+				t.Errorf("merged_unapproved element = %#v, want challenge_id=%s operation_id=OP-%d", e, mergedID, opID)
+			}
+		} else if hasOp {
+			t.Errorf("upstream-only element %#v must not have operation_id", e)
+		}
 		kinds, ok := e["kinds"].([]any)
 		if !ok {
 			t.Fatalf("kinds = %#v, want an array", e["kinds"])

@@ -202,3 +202,39 @@ func TestShowCarriesPairsOutsideStages(t *testing.T) {
 		}
 	}
 }
+
+func TestFromOperation_ExecutionKeys(t *testing.T) {
+	at := time.Date(2026, 10, 22, 1, 2, 3, 0, time.UTC)
+	head, commit := "a1b2c3", "deadbeef"
+	res := core.ExecutionResultNotMergeable
+	got := marshal(t, view.FromOperation(core.IrreversibleOperation{
+		ID: "OP-1", ChallengeID: "C-1", Kind: core.OperationKindRelease, State: core.OperationStateApproved,
+		CreatedAt: at, ApprovedHead: &head, ExecutedAt: &at, MergeCommit: &commit,
+		LastExecutionResult: &res, ConsecutiveFailures: 2, WaitingSince: &at,
+	}))
+	for _, want := range []string{
+		`"approved_head":"a1b2c3"`, `"executed_at":"2026-10-22T01:02:03.000Z"`, `"merge_commit":"deadbeef"`,
+		`"last_execution_result":"not_mergeable"`, `"consecutive_failures":2`, `"waiting_since":"2026-10-22T01:02:03.000Z"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%s does not contain %s", got, want)
+		}
+	}
+	zero := marshal(t, view.FromOperation(core.IrreversibleOperation{ID: "OP-1", CreatedAt: at}))
+	for _, want := range []string{`"approved_head":null`, `"executed_at":null`, `"merge_commit":null`, `"last_execution_result":null`, `"consecutive_failures":0`, `"waiting_since":null`} {
+		if !strings.Contains(zero, want) {
+			t.Errorf("%s does not contain %s", zero, want)
+		}
+	}
+}
+
+func TestFromDiscrepancies_OperationIDOmittedWhenEmpty(t *testing.T) {
+	got := marshal(t, view.FromDiscrepancies([]core.Discrepancy{
+		{ChallengeID: "C-1", Kinds: []core.DiscrepancyKind{core.DiscrepancyKindUpstreamClosed}},
+		{ChallengeID: "C-2", Kinds: []core.DiscrepancyKind{core.DiscrepancyKindMergedUnapproved}, OperationID: "OP-3"},
+	}))
+	want := `[{"challenge_id":"C-1","kinds":["upstream_closed"]},{"challenge_id":"C-2","kinds":["merged_unapproved"],"operation_id":"OP-3"}]`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
