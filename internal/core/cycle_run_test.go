@@ -740,6 +740,10 @@ func TestRunCycle_ReleasePhaseMergesAnApprovedReleaseInsideTheCycle(t *testing.T
 	conn.Repos[0].Remote = "o/r"
 	in.ConnDecl = conn
 	in.Checks, in.Merger = fake, fake
+	// マージの依頼の時点で、サイクルの排他ロックがこの周に保持されていること（AC-43）。
+	var holderAtMerge int64
+	var heldAtMerge bool
+	fake.onMerge = func() { holderAtMerge, heldAtMerge = coretest.CycleLockHolder(t, f.s.workspace) }
 
 	res := f.run(t, in)
 	rel := phaseOfResult(t, res, CyclePhaseRelease)
@@ -748,5 +752,22 @@ func TestRunCycle_ReleasePhaseMergesAnApprovedReleaseInsideTheCycle(t *testing.T
 	}
 	if len(fake.mergeArgs) != 1 {
 		t.Errorf("merge requests = %v, want 1", fake.mergeArgs)
+	}
+	if !heldAtMerge || formatCycleID(holderAtMerge) != res.Cycle.ID {
+		t.Errorf("lock holder at merge = %d (held=%v), want this cycle %s", holderAtMerge, heldAtMerge, res.Cycle.ID)
+	}
+	// AC-47・AC-48: cycle の段から実行した作業ログは、契機が cycle・経路が cli。
+	all, err := f.s.ListActivities(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs []Activity
+	for _, a := range all {
+		if a.Action == ActivityActionOpExecute {
+			logs = append(logs, a)
+		}
+	}
+	if len(logs) != 1 || logs[0].Channel != "cli" || relAfter(t, logs[0])["trigger"] != "cycle" {
+		t.Errorf("op_execute logs = %+v, want one with trigger cycle and channel cli", logs)
 	}
 }

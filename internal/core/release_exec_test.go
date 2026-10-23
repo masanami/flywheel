@@ -29,6 +29,8 @@ type fakeRelease struct {
 	merged    bool
 	getCalls  int
 	mergeArgs [][]string
+	// onMerge が非 nil なら、MergePullRequest の呼び出しの時点で（記録の前に）呼ぶ。
+	onMerge func()
 }
 
 func truePtr() *bool { v := true; return &v }
@@ -54,6 +56,9 @@ func (f *fakeRelease) MergePullRequest(_ context.Context, prURL, method, head st
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.mergeArgs = append(f.mergeArgs, []string{prURL, method, head})
+	if f.onMerge != nil {
+		f.onMerge()
+	}
 	if f.mergeErr != nil {
 		return f.mergeErr
 	}
@@ -550,6 +555,42 @@ func TestNotExecutable_NotReleaseOrNotApproved(t *testing.T) {
 	}
 	if n := len(f.attempts(t)); n != 0 {
 		t.Errorf("attempts = %d", n)
+	}
+}
+
+// AC-126: 承認済みでも release 以外（external_send・other）は実行せず、操作の state と version を変えない。
+func TestNotExecutable_ApprovedNonReleaseKindsAreLeftUntouched(t *testing.T) {
+	f := newRelFixture(t)
+	ids := map[string]int64{}
+	for _, kind := range []string{"external_send", "other"} {
+		writeForTest(t, f.s, func(tx *sql.Tx) error {
+			r, err := tx.Exec(`INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at) VALUES (?, ?, 's', 'x', 'approved', 2, ?)`, f.cid, kind, execBase)
+			if err != nil {
+				return err
+			}
+			ids[kind], err = r.LastInsertId()
+			return err
+		})
+	}
+	for _, kind := range []string{"external_send", "other"} {
+		res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(ids[kind])}, f.opts())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Items) != 0 || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedNotExecutable || res.NotStarted[0].Detail != "kind="+kind+" state=approved" {
+			t.Errorf("%s: res = %+v", kind, res)
+		}
+		var state string
+		var version int
+		readForTest(t, f.s, func(tx *sql.Tx) error {
+			return tx.QueryRow(`SELECT state, version FROM operation WHERE id = ?`, ids[kind]).Scan(&state, &version)
+		})
+		if state != "approved" || version != 2 {
+			t.Errorf("%s: state/version = %s/%d, want approved/2 (unchanged)", kind, state, version)
+		}
+	}
+	if f.fake.getCalls != 0 || len(f.fake.mergeArgs) != 0 {
+		t.Errorf("external calls: get %d merge %v", f.fake.getCalls, f.fake.mergeArgs)
 	}
 }
 

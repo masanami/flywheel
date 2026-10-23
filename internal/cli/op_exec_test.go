@@ -201,6 +201,9 @@ func TestOpExec_DelegatedEnvIsRejectedBeforeAnythingRuns(t *testing.T) {
 	if triggers, _ := coretest.CycleTriggers(t, ws); len(triggers) != 0 {
 		t.Errorf("cycle rows = %v, want none", triggers)
 	}
+	if n := coretest.CountOperationExecutions(t, ws); n != 0 {
+		t.Errorf("operation_execution rows = %d, want 0", n)
+	}
 }
 
 // AC-42: connectors.json が無ければ config_not_found、merge_method が閉集合の外なら外部を呼ばず config_invalid。
@@ -259,6 +262,20 @@ func TestOpExec_NotExecutableOperationsAreReportedWithDetail(t *testing.T) {
 	_, _, ns = execItems(t, doc)
 	if n := ns[0].(map[string]any); n["reason"] != "not_executable" || n["detail"] != "kind=delete state=pending" {
 		t.Errorf("not_started[0] = %v, want not_executable kind=delete state=pending", n)
+	}
+
+	// AC-60: 承認済みでも release 以外は実行しない。
+	coretest.SetOperationState(t, ws, int64(mustAtoi(t, strings.TrimPrefix(other, "OP-"))), "approved")
+	doc = runJSON(t, ws, "op", "exec", other)
+	_, items, ns = execItems(t, doc)
+	if len(items) != 0 || len(ns) != 1 {
+		t.Fatalf("items = %v, not_started = %v, want only one not_started", items, ns)
+	}
+	if n := ns[0].(map[string]any); n["reason"] != "not_executable" || n["detail"] != "kind=delete state=approved" {
+		t.Errorf("not_started[0] = %v, want not_executable kind=delete state=approved", n)
+	}
+	if n := coretest.CountOperationExecutions(t, ws); n != 0 {
+		t.Errorf("operation_execution rows = %d, want 0", n)
 	}
 	if len(gh.calls(t)) != 0 {
 		t.Errorf("gh was called for a non-executable operation: %v", gh.calls(t))
@@ -386,6 +403,28 @@ func TestCycle_ReleasePhaseIsFirstAndMergesInsideTheCycle(t *testing.T) {
 	}
 	if triggers, _ := coretest.CycleTriggers(t, ws); len(triggers) != 1 || triggers[0] != "manual" {
 		t.Errorf("cycle triggers = %v", triggers)
+	}
+}
+
+// AC-43・AC-146: 承認済みの release があっても、生きている保持者が排他を持っている間の cycle は locked で
+// 終わり、gh pr merge を呼ばず、試行の行も作らない（release の段は cycle のロックの中で動く）。
+func TestCycle_LiveHolder_ReleaseIsNotExecuted(t *testing.T) {
+	ws, _, _ := execWorkspace(t)
+	gh := newReleaseGH(t, execHead)
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	holder := coretest.InsertCycle(t, ws, "other-cycle", 300_000_000, nowStamp())
+	coretest.InsertLock(t, ws, holder, int64(os.Getpid()), currentHost(t), nowStamp(), nowStamp())
+
+	requireJSONErrorEnvelope(t, []string{"cycle", "--workspace", ws}, 1, CodeLocked)
+
+	if calls := gh.calls(t); len(calls) != 0 {
+		t.Errorf("gh was called while the exclusive lock was held: %v", calls)
+	}
+	if n := coretest.CountOperationExecutions(t, ws); n != 0 {
+		t.Errorf("operation_execution rows = %d, want 0", n)
+	}
+	if h, found := coretest.CycleLockHolder(t, ws); !found || h != holder {
+		t.Errorf("lock holder = %d (found=%v), want the original holder %d", h, found, holder)
 	}
 }
 
