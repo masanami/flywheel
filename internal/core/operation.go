@@ -463,6 +463,12 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 			DecidedAt:     now,
 		}
 		approvalOut.RelaySession, approvalOut.RelayQuote = att.relayPtrs()
+		// 応答の操作も show・status と同じ形の値にする（承認の記録は書き込み済み）。
+		one := []IrreversibleOperation{opOut}
+		if err := fillOperationExecutionInfo(ctx, tx, one); err != nil {
+			return err
+		}
+		opOut = one[0]
 		return nil
 	})
 	if err != nil {

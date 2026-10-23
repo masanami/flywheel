@@ -140,14 +140,20 @@ const op = (
   state: string,
   summary: string,
 ): Operation => ({
+  approved_head: null,
   challenge_id,
+  consecutive_failures: 0,
   created_at: iso(120),
+  executed_at: null,
   id,
   kind,
+  last_execution_result: null,
+  merge_commit: null,
   ref: null,
   state,
   summary,
   version: 1,
+  waiting_since: null,
 });
 
 const plan = (version: number, body: string): PlanDetail => ({

@@ -160,14 +160,20 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
     ],
     operations: [
       {
+        approved_head: null,
         challenge_id: "C-1",
+        consecutive_failures: 0,
         created_at: "t",
+        executed_at: null,
         id: "op-1",
         kind: "merge",
+        last_execution_result: null,
+        merge_commit: null,
         ref: null,
         state: "pending",
         summary: "不可逆の要約",
         version: 1,
+        waiting_since: null,
       },
     ],
     runs: [

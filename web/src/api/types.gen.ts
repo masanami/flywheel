@@ -34,14 +34,20 @@ export interface StatusApproved {
 }
 
 export interface Operation {
+  approved_head: string | null;
   challenge_id: string;
+  consecutive_failures: number;
   created_at: string;
+  executed_at: string | null;
   id: string;
   kind: string;
+  last_execution_result: string | null;
+  merge_commit: string | null;
   ref: string | null;
   state: string;
   summary: string;
   version: number;
+  waiting_since: string | null;
 }
 
 export interface StatusNeedsHuman {
@@ -63,6 +69,7 @@ export interface BudgetExhausted {
 export interface Discrepancy {
   challenge_id: string;
   kinds: string[];
+  operation_id?: string;
 }
 
 export interface Slot {
@@ -408,4 +415,5 @@ export const DISCREPANCY_KIND_CODES = [
   "out_of_policy",
   "upstream_commented",
   "upstream_updated",
+  "merged_unapproved",
 ] as const;

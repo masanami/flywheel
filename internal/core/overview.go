@@ -11,6 +11,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"sort"
 	"strings"
 )
 
@@ -78,6 +79,9 @@ const (
 	DiscrepancyKindOutOfPolicy       DiscrepancyKind = "out_of_policy"
 	DiscrepancyKindUpstreamCommented DiscrepancyKind = "upstream_commented"
 	DiscrepancyKindUpstreamUpdated   DiscrepancyKind = "upstream_updated"
+	// DiscrepancyKindMergedUnapproved は、直前の試行の結果が merged_unapproved の
+	// release がある（承認なしの本番反映。M3 の検出と同じ事象）。
+	DiscrepancyKindMergedUnapproved DiscrepancyKind = "merged_unapproved"
 )
 
 // discrepancyKindValues は DiscrepancyKind の閉集合（仕様の列挙の順）。
@@ -87,6 +91,7 @@ var discrepancyKindValues = []DiscrepancyKind{
 	DiscrepancyKindOutOfPolicy,
 	DiscrepancyKindUpstreamCommented,
 	DiscrepancyKindUpstreamUpdated,
+	DiscrepancyKindMergedUnapproved,
 }
 
 // DiscrepancyKindValues は DiscrepancyKind の閉集合の写しを返す（CLI のテストが
@@ -99,6 +104,9 @@ func DiscrepancyKindValues() []DiscrepancyKind {
 type Discrepancy struct {
 	ChallengeID string
 	Kinds       []DiscrepancyKind
+	// OperationID は merged_unapproved の release の ID（"OP-<n>"）。上流の食い違いだけの
+	// 要素では空。
+	OperationID string
 }
 
 // listChallengesInStatuses は statuses のいずれかに一致する課題を id 昇順で返す
@@ -148,7 +156,13 @@ func listOperationsInState(ctx context.Context, tx *sql.Tx, state OperationState
 		}
 		result = append(result, *op)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := fillOperationExecutionInfo(ctx, tx, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // unreadKinds は観測値と読んだ時点の値から未読の更新の種類を導く
@@ -226,7 +240,57 @@ func listDiscrepancies(ctx context.Context, tx *sql.Tx) ([]Discrepancy, error) {
 		}
 		result = append(result, Discrepancy{ChallengeID: formatChallengeID(id), Kinds: kinds})
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return addMergedUnapproved(ctx, tx, result)
+}
+
+// addMergedUnapproved は、直前の試行（operation_execution で id が最大の行）の結果が
+// merged_unapproved で、取り消されて pending に戻っている release を食い違いに足す。
+// 課題に上流の食い違いの要素があれば、その kinds の末尾に足して operation_id を持たせる。
+// 同じ課題に該当する release がほかにもあれば、その分は kinds が merged_unapproved だけの
+// 要素を足す。課題が完了していても出す（承認なしの反映は完了後も人が見る）。結果は課題 ID
+// の昇順、同じ課題の中では操作 ID の昇順。
+func addMergedUnapproved(ctx context.Context, tx *sql.Tx, result []Discrepancy) ([]Discrepancy, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT o.challenge_id, o.id FROM operation o
+		WHERE o.kind = ? AND o.state = ?
+		  AND (SELECT e.result FROM operation_execution e WHERE e.operation_id = o.id ORDER BY e.id DESC LIMIT 1) = ?
+		ORDER BY o.challenge_id ASC, o.id ASC`,
+		string(OperationKindRelease), string(OperationStatePending), string(ExecutionResultMergedUnapproved))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var cid, oid int64
+		if err := rows.Scan(&cid, &oid); err != nil {
+			return nil, err
+		}
+		cidStr, opStr := formatChallengeID(cid), formatOperationID(oid)
+		merged := false
+		for i := range result {
+			if result[i].ChallengeID == cidStr && result[i].OperationID == "" {
+				result[i].Kinds = append(result[i].Kinds, DiscrepancyKindMergedUnapproved)
+				result[i].OperationID = opStr
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			result = append(result, Discrepancy{ChallengeID: cidStr, Kinds: []DiscrepancyKind{DiscrepancyKindMergedUnapproved}, OperationID: opStr})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		a, _ := parseChallengeID(result[i].ChallengeID)
+		b, _ := parseChallengeID(result[j].ChallengeID)
+		return a < b
+	})
+	return result, nil
 }
 
 // GetOverview は `flywheel status` の本体。課題を「人間の操作を待っているもの」

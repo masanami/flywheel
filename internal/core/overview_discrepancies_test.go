@@ -180,7 +180,7 @@ func TestGetOverview_Discrepancies_OrderedByChallengeIDAscending(t *testing.T) {
 // は #72〔上流の更新の観測と既読〕が足す） ---
 
 func TestDiscrepancyKindValues_MatchSpecClosedSet(t *testing.T) {
-	want := []string{"upstream_closed", "upstream_missing", "out_of_policy", "upstream_commented", "upstream_updated"}
+	want := []string{"upstream_closed", "upstream_missing", "out_of_policy", "upstream_commented", "upstream_updated", "merged_unapproved"}
 	got := DiscrepancyKindValues()
 	if len(got) != len(want) {
 		t.Fatalf("DiscrepancyKindValues() = %v, want %v", got, want)
