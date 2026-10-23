@@ -367,7 +367,7 @@ func loadM45ErrorCodeTable(t *testing.T) []codeExit {
 
 // M4.5 の表は 2 行（upstream_unavailable・dependency_cycle〔S2〕）。upstream_unavailable は M2 の表では
 // 終了コード 2（`gh` が無い）、M4.5 の表では 1（承認の ① で release を承認の対象にできない）で、
-// 表（errorCodeTable）は M2 の 2 を持ち、approve の経路が newErrorWithExit で 1 を出す。
+// 表（errorCodeTable）は M2 の 2 を持ち、approve の経路が newReleaseNotApprovableError で 1 を出す。
 // dependency_cycle は S2 の実装で足す。
 func TestM45ErrorCodeTable_UpstreamUnavailableIsExit1OnTheApprovePath(t *testing.T) {
 	m45 := loadM45ErrorCodeTable(t)
@@ -385,6 +385,6 @@ func TestM45ErrorCodeTable_UpstreamUnavailableIsExit1OnTheApprovePath(t *testing
 	}
 	e := newReleaseNotApprovableError("m")
 	if e.Code != CodeUpstreamUnavailable || e.ExitCode != 1 {
-		t.Errorf("newErrorWithExit = %+v", e)
+		t.Errorf("newReleaseNotApprovableError = %+v", e)
 	}
 }

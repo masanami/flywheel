@@ -23,7 +23,8 @@ const releaseConnectorsFixture = `{
 func releasePRURL(n int) string { return fmt.Sprintf("https://github.com/o/r/pull/%d", n) }
 
 // releaseHead は PR #n の偽の gh が返す head（40 文字）。gen を変えると別の head になる。
-func releaseHead(n, gen int) string { return fmt.Sprintf("%040x", 0xabc000+n*16+gen) }
+// 先頭 12 文字（短縮形）が (n, gen) ごとに違い、完全形の残りにも他の head にも現れない形にする。
+func releaseHead(n, gen int) string { return fmt.Sprintf("%06x%06x%028x", 0xabc000+n, 0xdef000+gen, 1) }
 
 // declareReleaseRepo は repos[].remote に o/r を持つ connectors.json を置く。
 func declareReleaseRepo(t *testing.T, ws string) {

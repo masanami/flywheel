@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
-// このファイルは M4.5 S1 の「承認の時点の head」（AC-1〜AC-15・AC-21・AC-22・AC-26〜AC-32・AC-34〜AC-37・
+// このファイルは M4.5 S1 の「承認の時点の head」（AC-1〜AC-17・AC-21・AC-26〜AC-32・AC-34〜AC-37・
 // AC-104・AC-105）を、疑似端末の子プロセス・--relayed・偽の gh で検証する。core の公開 API を直接呼ぶ検証は
 // internal/core/approval_head_test.go にある。
 
@@ -93,7 +94,7 @@ func (f *completionFixture) approvedHead(t *testing.T, op string) (string, bool)
 	return coretest.ApprovalHeadSHA(t, f.ws, opNumber(op))
 }
 
-// --- 端末の要約（AC-1・AC-2・AC-7〜AC-9）と --relayed の出力（AC-3・AC-4・AC-10） ---
+// --- 端末の要約（AC-1・AC-2）と --relayed の出力（AC-3・AC-4・AC-11） ---
 
 func TestApproveHead_CompletionSummaryShowsFullAndShortHeadsBeforeTheConfirmation(t *testing.T) {
 	h1, h2 := releaseHead(1, 0), releaseHead(2, 0)
@@ -107,8 +108,9 @@ func TestApproveHead_CompletionSummaryShowsFullAndShortHeadsBeforeTheConfirmatio
 		if i := strings.Index(ptyOutput, h); i < 0 || i > prompt {
 			t.Errorf("full head %s must be shown before the confirmation prompt (pos %d, prompt %d)", h, i, prompt)
 		}
-		if !strings.Contains(ptyOutput, h[:12]) {
-			t.Errorf("short head %s missing", h[:12])
+		// 短縮形は完全形の先頭でもあるので、完全形とは別にもう 1 回現れることを確かめる。
+		if n := strings.Count(ptyOutput, h[:12]); n < 2 {
+			t.Errorf("short head %s must be shown besides the full head (count %d)", h[:12], n)
 		}
 	}
 	for i, op := range f.ops {
@@ -136,7 +138,7 @@ func TestApproveHead_RelayedCompletionRecordsHeadsAndPrintsReleases(t *testing.T
 	}
 }
 
-// --- 外す理由（AC-5・AC-6・AC-11〜AC-14） ---
+// --- 外す理由（AC-7〜AC-13） ---
 
 func TestApproveHead_CompletionLeavesUnapprovableReleasesPendingAndStillCompletes(t *testing.T) {
 	good := releaseHead(1, 0)
@@ -182,7 +184,7 @@ func TestApproveHead_SummaryNamesTheExcludedReasonsAndSaysTheyAreNotApproved(t *
 	assertOperationListing(t, ptyOutput, approvedReleasesPrefix, nil, f.ops)
 }
 
-// --- 単独の承認（AC-15・AC-21・AC-26・AC-27・AC-104） ---
+// --- 単独の承認（AC-5・AC-6・AC-14・AC-15） ---
 
 func TestApproveHead_OperationTerminalAndRelayedRecordTheFetchedHead(t *testing.T) {
 	h1, h2 := releaseHead(1, 0), releaseHead(2, 0)
@@ -191,7 +193,7 @@ func TestApproveHead_OperationTerminalAndRelayedRecordTheFetchedHead(t *testing.
 	if code != 0 {
 		t.Fatalf("exit=%d (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
 	}
-	if !strings.Contains(ptyOutput, h1) || !strings.Contains(ptyOutput, h1[:12]) {
+	if !strings.Contains(ptyOutput, h1) || strings.Count(ptyOutput, h1[:12]) < 2 {
 		t.Errorf("summary lacks the head: %q", ptyOutput)
 	}
 	if got, ok := f.approvedHead(t, f.ops[0]); !ok || got != h1 {
@@ -226,7 +228,7 @@ func TestApproveHead_OperationThatCannotBeApprovedEndsWithUpstreamUnavailableAnd
 	}
 }
 
-// --- 検証の head（AC-28〜AC-37・AC-105） ---
+// --- 検証の head（AC-26〜AC-32・AC-34〜AC-36） ---
 
 func TestApproveHead_VerifiedHeadMismatchExcludesAndMatchOrNoRecordApproves(t *testing.T) {
 	h1, h2, h3 := releaseHead(1, 0), releaseHead(2, 0), releaseHead(3, 0)
@@ -256,18 +258,42 @@ func TestApproveHead_RelayedJSONNamesVerifiedHeadMismatch(t *testing.T) {
 	}
 }
 
-// 最新の行（id が大きい）の値と比べる。最新の行が NULL なら、小さい方の値と比べる。
+// 最新の行（id が大きい）が NULL なら、NULL でない最新の行の値と比べる（AC-31）。NULL でない最新の行は
+// 取得した head と異なるので、正しい実装は verified_head_mismatch で外し、NULL の行を最新として扱う
+// （記録なしとみなす）実装は承認してしまう。
 func TestApproveHead_ComparesWithTheLatestNonNullVerifiedHead(t *testing.T) {
 	h := releaseHead(1, 0)
 	f := newCompletionFixture(t, map[int]string{1: h}, releasePRURL(1))
-	f.verified(t, releasePRURL(1), releaseHead(1, 1)) // 古い行: 異なる
-	f.verified(t, releasePRURL(1), h)                 // 新しい行: 一致
+	f.verified(t, releasePRURL(1), h)                 // 古い行: 一致
+	f.verified(t, releasePRURL(1), releaseHead(1, 1)) // NULL でない最新の行: 異なる
 	f.verified(t, releasePRURL(1), "")                // 最新の行は NULL → 無視
-	if ex := jsonList(t, f.relayed(t, f.id), "excluded_releases"); len(ex) != 0 {
-		t.Errorf("excluded_releases = %v, want none (the latest non-NULL row matches)", ex)
+	ex := jsonList(t, f.relayed(t, f.id), "excluded_releases")
+	if len(ex) != 1 || ex[0]["operation_id"] != f.ops[0] || ex[0]["reason"] != "verified_head_mismatch" {
+		t.Errorf("excluded_releases = %v, want %s with verified_head_mismatch (the latest non-NULL row differs)", ex, f.ops[0])
+	}
+	if f.state(t, f.ops[0]) != "pending" {
+		t.Errorf("must stay pending")
+	}
+}
+
+// 成果物の行の verified_head_sha がすべて NULL の PR は、承認の対象になり、要約が記録の無いことを示す（AC-35）。
+func TestApproveHead_AllNullVerifiedHeadsApprovesAndSaysThereIsNoRecord(t *testing.T) {
+	h := releaseHead(1, 0)
+	f := newCompletionFixture(t, map[int]string{1: h}, releasePRURL(1))
+	f.verified(t, releasePRURL(1), "")
+	f.verified(t, releasePRURL(1), "")
+	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"approve", "--workspace", f.ws, "--json", f.id}, f.id)
+	if code != 0 {
+		t.Fatalf("exit=%d (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
+	}
+	if !strings.Contains(ptyOutput, "検証の head の記録が無い") {
+		t.Errorf("summary must say there is no verified head record: %q", ptyOutput)
 	}
 	if f.state(t, f.ops[0]) != "approved" {
 		t.Errorf("must be approved")
+	}
+	if got, ok := f.approvedHead(t, f.ops[0]); !ok || got != h {
+		t.Errorf("head_sha = %q (found %v), want %s", got, ok, h)
 	}
 }
 
@@ -278,7 +304,25 @@ func TestApproveHead_OperationWithVerifiedHeadMismatchIsUpstreamUnavailable(t *t
 	if code != 1 || readErrorCode(t, stderr) != string(CodeUpstreamUnavailable) || !strings.Contains(stderr, "verified_head_mismatch") {
 		t.Errorf("terminal: exit=%d stderr=%s", code, stderr)
 	}
-	requireErrorCode(t, []string{"approve", f.ops[0], "--relayed", "--session", "s", "--quote", "q", "--workspace", f.ws}, 1, CodeUpstreamUnavailable)
+	assertRelayedOperationRejected(t, f, f.ops[0], 1, CodeUpstreamUnavailable, "verified_head_mismatch")
+}
+
+// assertRelayedOperationRejected は approve <OP-ID> --relayed --json が終了コード wantExit・エラーコード wantCode で
+// 終わり、エラーの出力が detail を含み（空なら問わない）、承認の記録を書かず、op が pending のままであることを確かめる。
+func assertRelayedOperationRejected(t *testing.T, f *completionFixture, op string, wantExit int, wantCode ErrorCode, detail string) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"approve", op, "--relayed", "--session", "s", "--quote", "q", "--workspace", f.ws, "--json"},
+		strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	if code != wantExit || readErrorCode(t, stderr.String()) != string(wantCode) || !strings.Contains(stderr.String(), detail) {
+		t.Errorf("relayed %s: exit=%d stderr=%s, want exit %d %s naming %s", op, code, stderr.String(), wantExit, wantCode, detail)
+	}
+	if _, ok := f.approvedHead(t, op); ok {
+		t.Errorf("relayed %s: no approval row may be written", op)
+	}
+	if f.state(t, op) != "pending" {
+		t.Errorf("%s must stay pending", op)
+	}
 }
 
 func TestApproveHead_OperationWithNoVerifiedRecordIsApprovedAndSaysSo(t *testing.T) {
@@ -289,7 +333,7 @@ func TestApproveHead_OperationWithNoVerifiedRecordIsApprovedAndSaysSo(t *testing
 	}
 }
 
-// --- ① と ② の間の変化（AC-23・AC-24）と ② が head を取り直さないこと（AC-30） ---
+// --- ① と ② の間の変化（AC-16・AC-17）と ② が head を取り直さないこと（AC-21） ---
 
 func startCompletionApproval(t *testing.T, f *completionFixture) (waitFinish func() (code int, stderr string), confirm func()) {
 	t.Helper()
@@ -318,7 +362,10 @@ func startCompletionApproval(t *testing.T, f *completionFixture) (waitFinish fun
 		}
 }
 
-func TestApproveHead_ReleaseAddedBetweenSummaryAndConfirmationIsConflict(t *testing.T) {
+// AC-16・AC-17 の CLI のテストは、② の版の照合（① の後に課題が変わった）で conflict になることを確かめる。
+// 承認する組と外した組の和集合の検査までは届かない。和集合の検査は core の
+// TestExecuteApproval_InvalidReleaseInputIsConflictAndWritesNothing が担う。
+func TestApproveHead_ReleaseAddedBetweenSummaryAndConfirmationIsConflictByTheVersionCheck(t *testing.T) {
 	f := newCompletionFixture(t, map[int]string{1: releaseHead(1, 0)}, releasePRURL(1))
 	wait, confirm := startCompletionApproval(t, f)
 	addRelease(t, f.ws, f.id, "late", releasePRURL(1))
@@ -332,7 +379,7 @@ func TestApproveHead_ReleaseAddedBetweenSummaryAndConfirmationIsConflict(t *test
 	}
 }
 
-func TestApproveHead_ExcludedReleaseRejectedBetweenSummaryAndConfirmationIsConflict(t *testing.T) {
+func TestApproveHead_ExcludedReleaseRejectedBetweenSummaryAndConfirmationIsConflictByTheVersionCheck(t *testing.T) {
 	f := newCompletionFixture(t, map[int]string{1: releaseHead(1, 0)}, releasePRURL(1), "https://example.com/not-a-pr")
 	wait, confirm := startCompletionApproval(t, f)
 	runConfirmedRejectOp(t, f.ws, f.ops[1])
@@ -379,7 +426,7 @@ func TestApproveHead_TheRecordedHeadIsTheOneFetchedAtTheSummary(t *testing.T) {
 	}
 }
 
-// --- merged_unapproved の承認し直し（AC-104 の一部） ---
+// --- merged_unapproved の承認し直し（AC-104・AC-105） ---
 
 func TestApproveHead_OperationRevokedAsMergedUnapprovedIsRejectedBeforeTheConfirmation(t *testing.T) {
 	f := newCompletionFixture(t, map[int]string{1: releaseHead(1, 0)}, releasePRURL(1))
@@ -393,9 +440,10 @@ func TestApproveHead_OperationRevokedAsMergedUnapprovedIsRejectedBeforeTheConfir
 	if strings.Contains(ptyOutput, confirmPrompt(f.ops[0])) {
 		t.Errorf("the confirmation must not be asked: %q", ptyOutput)
 	}
+	assertRelayedOperationRejected(t, f, f.ops[0], 1, CodeVerificationRejected, "")
 }
 
-// --- 完了した課題の pending の release は approve <OP-ID> で承認できる（AC-105）。UI の経路は release を承認しない（AC-22） ---
+// --- 完了した課題の pending の release は approve <OP-ID> で承認できる（AC-37）。--hold-release は release を承認しない ---
 
 func TestApproveHead_DoneChallengesPendingReleaseCanBeApprovedByOperationID(t *testing.T) {
 	f := newCompletionFixture(t, map[int]string{1: releaseHead(1, 0)}, releasePRURL(1))

@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+	"database/sql"
 	"testing"
 )
 
@@ -79,8 +81,13 @@ func TestVerifyAutoJ5_MetRecordsHeadOnlyOnTheReferencedDelegationRun(t *testing.
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.setPRHead("head-y")
+	// 別の run（別の課題の委譲）にも同じ PR の成果物の行を置く。この行は NULL のまま残る。
+	other := f.insertOtherRunWithPRArtifact(t, j5PRURL)
 	if _, err := f.verify(t, nil); err != nil {
 		t.Fatal(err)
+	}
+	if got := f.queryString(t, `SELECT COALESCE(verified_head_sha, 'NULL') FROM run_artifact WHERE id = ?`, other); got != "NULL" {
+		t.Errorf("the other run's row verified_head_sha = %q, want NULL", got)
 	}
 	if got := f.queryString(t, `SELECT COUNT(*) FROM run_artifact WHERE verified_head_sha IS NOT NULL`); got != "1" {
 		t.Errorf("rows with a verified head = %s, want 1", got)
@@ -88,4 +95,36 @@ func TestVerifyAutoJ5_MetRecordsHeadOnlyOnTheReferencedDelegationRun(t *testing.
 	if got := f.queryString(t, `SELECT COUNT(*) FROM run_artifact WHERE verified_head_sha = 'head-y' AND kind = 'pr' AND ref = ?`, j5PRURL); got != "1" {
 		t.Errorf("the referenced PR row was not updated: %s", got)
 	}
+}
+
+// insertOtherRunWithPRArtifact は別の課題の委譲の run を 1 つ足し、その run に ref の PR の成果物の行を置いて、行の ID を返す。
+func (f *j5Fixture) insertOtherRunWithPRArtifact(t *testing.T, ref string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	ch, err := f.s.CreateChallenge(ctx, ChannelCLI, CreateInput{Title: "other", Description: "d", DoneCriteria: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cid, _ := parseChallengeID(ch.ID)
+	now := f.s.currentTime()
+	var id int64
+	if err := f.s.db.Write(ctx, func(tx *sql.Tx) error {
+		run, err := insertRun(ctx, tx, cid, insertRunInput{Kind: runKindDelegate, ChallengeVersion: 1,
+			SessionID: "55555555-5555-4555-8555-555555555555", PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now,
+			MaxBudgetUSD: 1_000_000, BudgetBucket: budgetBucketImpl})
+		if err != nil {
+			return err
+		}
+		runID, _ := parseRunID(run.ID)
+		res, err := tx.Exec(`INSERT INTO run_artifact (run_id, kind, ref, state, base, verified_at) VALUES (?, 'pr', ?, 'open', 'develop', ?)`,
+			runID, ref, "2026-10-02T00:00:00.000Z")
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
