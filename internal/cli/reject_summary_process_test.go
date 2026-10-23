@@ -174,7 +174,8 @@ func TestReject_CompletionApprovalWithPendingRelease_MatchesApprovalWithD12Reass
 	approve, reject := approveAndRejectSummaries(t, func(t *testing.T, ws string) string {
 		created := runJSON(t, ws, "create", "--title", "distinctive-release-title", "--done-criteria", "distinctive done criteria")
 		id := created["challenge"].(map[string]any)["id"].(string)
-		releaseOpID := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "distinctive release op")["operation"].(map[string]any)["id"].(string)
+		prepareReleaseWorkspace(t, ws)
+		releaseOpID := addRelease(t, ws, id, "distinctive release op", releasePRURL(1))
 		deleteOpID := runJSON(t, ws, "op", "add", id, "--kind", "delete", "--summary", "distinctive delete op")["operation"].(map[string]any)["id"].(string)
 		// releaseOpID/deleteOpID は下の期待値に OP-1/OP-2 として埋め込んで
 		// いるため、想定と違えばここで早期に失敗させる（新しいワークスペース
@@ -192,12 +193,14 @@ func TestReject_CompletionApprovalWithPendingRelease_MatchesApprovalWithD12Reass
 	approveBody := strings.TrimRight(approve, "\n") + "\n"
 	rejectBody := strings.TrimRight(reject, "\n") + "\n"
 
-	const wantApprove = "課題 ID:     C-1\n" +
+	wantApprove := "課題 ID:     C-1\n" +
 		"タイトル:    distinctive-release-title\n" +
 		"承認の種類:  完了\n" +
 		"完了条件:    distinctive done criteria\n" +
 		"同時に承認される本番反映 (release): OP-1(release) distinctive release op\n" +
-		"同時には承認されない不可逆操作:     OP-2(delete) distinctive delete op\n"
+		"同時には承認されない不可逆操作:     OP-2(delete) distinctive delete op\n" +
+		"  OP-1 の head: " + releaseHead(1, 0)[:12] + "（" + releaseHead(1, 0) + "）" +
+		" ※検証の head の記録が無いため、比較していません\n"
 	if approveBody != wantApprove {
 		t.Errorf("approve summary = %q, want %q", approveBody, wantApprove)
 	}

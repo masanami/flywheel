@@ -311,6 +311,7 @@ func TestExecuteApproval_VersionMismatchIsConflictAndChangesNothing(t *testing.T
 	att := verifiedAttestationForTest(t, c.ID)
 	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("ExecuteApproval() error = %v, want ErrConflict", err)
@@ -353,6 +354,7 @@ func TestExecuteApproval_RevisedPlanInvalidatesPriorPreview(t *testing.T) {
 	att := verifiedAttestationForTest(t, c.ID)
 	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("ExecuteApproval() error = %v, want ErrConflict (stale plan version)", err)
@@ -374,6 +376,7 @@ func TestExecuteApproval_RecordsApprovalWithActorChannelVerificationTargetVersio
 	att := verifiedAttestationForTest(t, c.ID)
 	c2, approval, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att)
 	if err != nil {
 		t.Fatalf("ExecuteApproval() error = %v", err)
@@ -466,6 +469,7 @@ func TestExecuteApproval_ZeroValueAttestationIsRejectedWithoutChangingState(t *t
 
 	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, Attestation{})
 	if !errors.Is(err, ErrVerificationRejected) {
 		t.Fatalf("err = %v, want ErrVerificationRejected", err)
@@ -519,6 +523,7 @@ func TestExecuteApproval_NonEmptyActorButUnregisteredChannelIsRejected(t *testin
 	att := Attestation{actor: "alice", channel: Channel("mobile"), verification: VerificationTTYConfirm, target: c.ID}
 	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att)
 	if !errors.Is(err, ErrVerificationRejected) {
 		t.Fatalf("err = %v, want ErrVerificationRejected", err)
@@ -591,6 +596,7 @@ func TestExecuteApproval_ActivityInsertFailureRollsBackApproval(t *testing.T) {
 	}
 	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att)
 	if err == nil {
 		t.Fatal("ExecuteApproval() error = nil, want an error from the injected failure")
@@ -676,6 +682,7 @@ func TestExecuteApproval_CompletionApprovesAllPendingReleasesButNotOtherKinds(t 
 	att := verifiedAttestationForTest(t, c.ID)
 	c2, approval, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att)
 	if err != nil {
 		t.Fatalf("ExecuteApproval() error = %v", err)
@@ -742,6 +749,7 @@ func TestExecuteApproval_CompletionRecordsSeparateActivityEntriesForEachRelease(
 	att := verifiedAttestationForTest(t, c.ID)
 	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att); err != nil {
 		t.Fatalf("ExecuteApproval() error = %v", err)
 	}
@@ -959,7 +967,7 @@ func TestExecuteApproval_ConflictWhenAReleaseIsApprovedStandaloneAfterSummarySho
 	}
 	opAtt := verifiedAttestationForTest(t, releases[0].ID)
 	if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-		OperationID: releases[0].ID, ExpectedVersion: opPrev.Version, ExpectedChallengeVersion: opPrev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+		OperationID: releases[0].ID, ExpectedVersion: opPrev.Version, ExpectedChallengeVersion: opPrev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
 	}, opAtt); err != nil {
 		t.Fatalf("ExecuteOperationApproval() error = %v", err)
 	}
@@ -968,6 +976,7 @@ func TestExecuteApproval_ConflictWhenAReleaseIsApprovedStandaloneAfterSummarySho
 	att := verifiedAttestationForTest(t, c.ID)
 	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
@@ -1004,6 +1013,7 @@ func TestExecuteApproval_ConflictWhenOpAddHappensAfterSummaryShown(t *testing.T)
 	att := verifiedAttestationForTest(t, c.ID)
 	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)

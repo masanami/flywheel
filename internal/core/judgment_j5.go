@@ -427,11 +427,13 @@ func selectJ5AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 
 // applyJ5 は検査を通った出力を、M1 の verify（T8〜T10）へ経路 invoker・原因の run の ID つきで写す。
 // 写す直前に読み直した課題が検証中でなければ（遷移表に行が無い）写さず、mapped=false を返す。
-func (s *Store) applyJ5(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput) (mapped, mismatch bool, err error) {
+//
+// vh は met のときに成果物の行へ残す検証の head（J5 の起動の前に取得して入力にしたもの）。
+func (s *Store) applyJ5(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, vh *j5VerifiedHeads) (mapped, mismatch bool, err error) {
 	// 操作は事前の読み取りで選ぶ。書き込みトランザクションの中で読み直した予想と判定がずれたら
 	// （間に edit が入った）、書かずに選び直す。
 	for attempt := 0; attempt < 3; attempt++ {
-		mapped, mismatch, err = s.applyJ5Once(ctx, runIDDisplay, challengeIDDisplay, v)
+		mapped, mismatch, err = s.applyJ5Once(ctx, runIDDisplay, challengeIDDisplay, v, vh)
 		if !errors.Is(err, errJ5StaleExpected) {
 			return mapped, mismatch, err
 		}
@@ -441,11 +443,51 @@ func (s *Store) applyJ5(ctx context.Context, runIDDisplay, challengeIDDisplay st
 
 var errJ5StaleExpected = errors.New("core: expected changed while mapping J5")
 
+// j5VerifiedHeads は J5 の起動の前に取得して入力にした PR ごとの head と、J5 が参照した直前の
+// 委譲の run（内部整数 ID）。写す時点で取り直さない。
+type j5VerifiedHeads struct {
+	RunID int64
+	PRs   []UpstreamPullRequestChecks
+}
+
+// recordVerifiedHeads は vh.RunID の run の kind=pr の成果物の行のうち、(repo, 番号) が vh.PRs の
+// PR と一致する行の verified_head_sha に、その PR の head を書く。head が空の PR は書かない。
+func recordVerifiedHeads(ctx context.Context, tx *sql.Tx, vh *j5VerifiedHeads) error {
+	if vh == nil || len(vh.PRs) == 0 {
+		return nil
+	}
+	arts, err := listRunArtifacts(ctx, tx, vh.RunID)
+	if err != nil {
+		return err
+	}
+	for _, a := range arts {
+		if a.Kind != artifactKindPR {
+			continue
+		}
+		arepo, anum, ok := parsePullRequestURL(a.Ref)
+		if !ok {
+			continue
+		}
+		for _, pr := range vh.PRs {
+			repo, num, ok := parsePullRequestURL(pr.URL)
+			if !ok || pr.HeadSHA == "" || num != anum || !strings.EqualFold(repo, arepo) {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE run_artifact SET verified_head_sha = ? WHERE id = ?`, pr.HeadSHA, a.ID); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	return nil
+}
+
 func j5ActualMismatch(v *j5ValidatedOutput, expected []StageExpected) bool {
 	return v.Verdict == J5VerdictMet && len(expected) > 0 && len(expected) != len(v.Actual)
 }
 
-func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput) (mapped, mismatch bool, err error) {
+func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, vh *j5VerifiedHeads) (mapped, mismatch bool, err error) {
 	op, mismatch, err := s.j5Operation(ctx, challengeIDDisplay, v)
 	if err != nil {
 		return false, false, err
@@ -464,6 +506,10 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 		}
 		if v.Actual != nil && (v.Verdict == J5VerdictMet || v.Verdict == J5VerdictNotMet) {
 			tc.patchStages(StagePatch{Actual: StageSet(v.Actual)})
+		}
+		if v.Verdict == J5VerdictMet {
+			// T8 と同じトランザクションで、検証の入力にした head を成果物の行へ残す。
+			return recordVerifiedHeads(ctx, tc.tx, vh)
 		}
 		return nil
 	})
@@ -511,7 +557,7 @@ func (s *Store) j5Operation(ctx context.Context, challengeIDDisplay string, v *j
 
 // finalizeJ5Output は run が succeeded のときに、出力を検査し直して課題へ写す。検査に落ちたら
 // run の結果を invalid_output にし、課題は変えない。
-func (s *Store) finalizeJ5Output(ctx context.Context, runIDDisplay, challengeIDDisplay string, structured []byte) (outcome string, status *string, result RunResult, err error) {
+func (s *Store) finalizeJ5Output(ctx context.Context, runIDDisplay, challengeIDDisplay string, structured []byte, vh *j5VerifiedHeads) (outcome string, status *string, result RunResult, err error) {
 	v, ok := validateJ5Output(structured)
 	if !ok {
 		if err := s.invalidateRunOutput(ctx, runIDDisplay); err != nil {
@@ -519,7 +565,7 @@ func (s *Store) finalizeJ5Output(ctx context.Context, runIDDisplay, challengeIDD
 		}
 		return "", nil, RunResultInvalidOutput, nil
 	}
-	mapped, mismatch, err := s.applyJ5(ctx, runIDDisplay, challengeIDDisplay, v)
+	mapped, mismatch, err := s.applyJ5(ctx, runIDDisplay, challengeIDDisplay, v, vh)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -718,7 +764,13 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 	}
 	item := &JudgmentAutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
-		outcome, status, finalResult, err := s.finalizeJ5Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput)
+		var vh *j5VerifiedHeads
+		if vc.LastDelegate != nil {
+			if lastRunID, ok := parseRunID(vc.LastDelegate.ID); ok {
+				vh = &j5VerifiedHeads{RunID: lastRunID, PRs: prs}
+			}
+		}
+		outcome, status, finalResult, err := s.finalizeJ5Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, vh)
 		if err != nil {
 			return nil, nil, err
 		}

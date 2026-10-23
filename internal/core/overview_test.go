@@ -159,7 +159,7 @@ func TestGetOverview_ApprovedOperationGoesToApprovedOperations(t *testing.T) {
 	}
 	att := verifiedAttestationForTest(t, op.ID)
 	if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
 	}, att); err != nil {
 		t.Fatalf("ExecuteOperationApproval() error = %v", err)
 	}

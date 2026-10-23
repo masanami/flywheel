@@ -181,6 +181,9 @@ type OperationApprovalPreview struct {
 	// 本番反映の承認が成立しうる）。`op add`・不可逆操作の承認・差し戻しが
 	// 課題の版を 1 増やす設計（親 #4 §アーキテクチャ決定）とも整合する。
 	ChallengeVersion int
+	// VerifiedHeadSHA は、この操作（release）の参照が指す PR について J5 が検証の入力に
+	// した最新の head。nil は記録なし（承認を止めない）。release 以外では常に nil。
+	VerifiedHeadSHA *string
 }
 
 // operationRow は operation テーブルの1行分の内部表現（読み取り専用の走査に使う）。
@@ -212,7 +215,10 @@ func loadOperationRow(ctx context.Context, tx *sql.Tx, id int64) (*operationRow,
 // 共有する読み取り。不可逆操作が存在しなければ ErrNotFound。既に承認・差し戻し済み
 // （state != "pending"）なら ErrInvalidTransition（fail-closed。二重の承認・差し戻しを
 // 防ぐ）。
-func (s *Store) prepareOperationApproval(ctx context.Context, id string) (*OperationApprovalPreview, error) {
+//
+// forApproval が true（承認の①）のときは、直前の試行の結果が merged_unapproved の
+// release を ReapprovalForbiddenError で拒否する（差し戻しの①は通す）。
+func (s *Store) prepareOperationApproval(ctx context.Context, id string, forApproval bool) (*OperationApprovalPreview, error) {
 	oid, ok := parseOperationID(id)
 	if !ok {
 		return nil, ErrNotFound
@@ -226,6 +232,11 @@ func (s *Store) prepareOperationApproval(ctx context.Context, id string) (*Opera
 		}
 		if row.State != OperationStatePending {
 			return ErrInvalidTransition
+		}
+		if forApproval {
+			if err := rejectReapproval(ctx, tx, oid); err != nil {
+				return err
+			}
 		}
 		challenge, err := loadChallenge(ctx, tx, row.ChallengeID)
 		if err != nil {
@@ -246,6 +257,11 @@ func (s *Store) prepareOperationApproval(ctx context.Context, id string) (*Opera
 			v := row.Ref.String
 			preview.Ref = &v
 		}
+		if preview.Kind == OperationKindRelease {
+			if preview.VerifiedHeadSHA, err = latestVerifiedHead(ctx, tx, preview.Ref); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -254,9 +270,22 @@ func (s *Store) prepareOperationApproval(ctx context.Context, id string) (*Opera
 	return &preview, nil
 }
 
+// rejectReapproval は、opID の直前の試行（operation_execution で id が最大の行）の結果が
+// merged_unapproved なら ReapprovalForbiddenError を返す。
+func rejectReapproval(ctx context.Context, tx *sql.Tx, opID int64) error {
+	last, err := latestOperationExecution(ctx, tx, opID)
+	if err != nil {
+		return err
+	}
+	if last != nil && last.Result == ExecutionResultMergedUnapproved {
+		return &ReapprovalForbiddenError{OperationID: formatOperationID(opID)}
+	}
+	return nil
+}
+
 // PrepareOperationApproval は `approve <OP-ID>` の①（読み取り）。
 func (s *Store) PrepareOperationApproval(ctx context.Context, id string) (*OperationApprovalPreview, error) {
-	return s.prepareOperationApproval(ctx, id)
+	return s.prepareOperationApproval(ctx, id, true)
 }
 
 // PrepareOperationRejection は `reject <OP-ID> --reason <r>` の①（読み取り）。
@@ -266,7 +295,7 @@ func (s *Store) PrepareOperationRejection(ctx context.Context, id string, reason
 	if strings.TrimSpace(reason) == "" {
 		return nil, ErrValidation
 	}
-	return s.prepareOperationApproval(ctx, id)
+	return s.prepareOperationApproval(ctx, id, false)
 }
 
 // OperationApprovalRequest は ExecuteOperationApproval の入力（②＝書き込み）。
@@ -279,6 +308,9 @@ type OperationApprovalRequest struct {
 	ExpectedChallengeVersion int
 	Decision                 ApprovalDecision
 	Reason                   *string
+	// HeadSHA は承認の① で取った PR の head。release の承認では必須で、空なら ErrConflict。
+	// ② で取り直さず、承認の記録の head_sha にそのまま残す。差し戻しと release 以外では使わない。
+	HeadSHA string
 }
 
 // ExecuteOperationApproval は `approve <OP-ID>` / `reject <OP-ID> --reason` の
@@ -320,11 +352,37 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 		if err != nil {
 			return err
 		}
+		if row.State != OperationStatePending {
+			return ErrInvalidTransition
+		}
+		if req.Decision == ApprovalDecisionApproved {
+			if err := rejectReapproval(ctx, tx, oid); err != nil {
+				return err
+			}
+		}
 		if row.Version != req.ExpectedVersion {
 			return ErrConflict
 		}
-		if row.State != OperationStatePending {
-			return ErrInvalidTransition
+
+		// release の承認は、① で取った head を必須とし、J5 が検証した最新の head（記録があれば）と
+		// 一致しなければ承認しない。
+		headSHA := ""
+		if req.Decision == ApprovalDecisionApproved && OperationKind(row.Kind) == OperationKindRelease {
+			headSHA = strings.TrimSpace(req.HeadSHA)
+			if headSHA == "" {
+				return ErrConflict
+			}
+			var ref *string
+			if row.Ref.Valid {
+				ref = &row.Ref.String
+			}
+			verified, err := latestVerifiedHead(ctx, tx, ref)
+			if err != nil {
+				return err
+			}
+			if verified != nil && *verified != headSHA {
+				return ErrConflict
+			}
 		}
 
 		challenge, err := loadChallenge(ctx, tx, row.ChallengeID)
@@ -354,6 +412,7 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 			reason:      req.Reason,
 			att:         att,
 			nowStr:      nowStr,
+			headSHA:     headSHA,
 		})
 		if err != nil {
 			return err
@@ -454,6 +513,9 @@ type operationApprovalWrite struct {
 	reason      *string // 差し戻しのときだけ非 nil
 	att         Attestation
 	nowStr      string // 呼び出し元のトランザクションと共有する日時
+	// headSHA は承認の記録の head_sha に残す、承認の ① で取った PR の head。空なら NULL
+	// （release 以外の操作・差し戻し）。
+	headSHA string
 }
 
 // approveOperationInTx は不可逆操作 1 件について、呼び出し元のトランザクション内で
@@ -498,10 +560,11 @@ func approveOperationInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 	}
 	relaySession, relayQuote := w.att.relayColumns()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, head_sha)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.challengeID, w.opID, string(ApprovalKindRelease), string(w.decision), w.version,
 		w.att.Actor(), string(w.att.Channel()), string(w.att.Verification()), reasonVal, w.nowStr, relaySession, relayQuote,
+		nullableTextColumn(w.headSHA),
 	); err != nil {
 		return "", err
 	}

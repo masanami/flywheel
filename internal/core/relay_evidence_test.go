@@ -128,7 +128,7 @@ func TestExecuteApproval_RelayedRecordsEvidenceInApprovalAndActivity(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved},
+	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, ReleaseHeads: headsForAll(prev)},
 		relayedAttestation(t, c.ID, "sess-1", "「承認して」")); err != nil {
 		t.Fatalf("ExecuteApproval() error = %v", err)
 	}
@@ -162,7 +162,7 @@ func TestExecuteApproval_TTYConfirmLeavesRelayNullAndOutOfActivity(t *testing.T)
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
 	insertPlanRowForTest(t, s, c.ID, 1, "x")
 	prev, _ := s.PrepareApproval(context.Background(), c.ID)
-	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved},
+	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, ReleaseHeads: headsForAll(prev)},
 		verifiedAttestationForTest(t, c.ID)); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestExecuteOperationApproval_RelayedRecordsEvidence(t *testing.T) {
 	op := createPendingOperation(t, s, c.ID, "release")
 	prev, _ := s.PrepareOperationApproval(context.Background(), op.ID)
 	if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
 	}, relayedAttestation(t, op.ID, "so", "qo")); err != nil {
 		t.Fatalf("ExecuteOperationApproval() error = %v", err)
 	}
@@ -250,7 +250,7 @@ func TestExecuteApproval_RelayedCompletionApprovalRecordsEvidenceOnAutoApprovedR
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved},
+	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, ReleaseHeads: headsForAll(prev)},
 		relayedAttestation(t, c.ID, "sc", "qc")); err != nil {
 		t.Fatalf("ExecuteApproval() error = %v", err)
 	}
@@ -292,7 +292,7 @@ func TestExecute_RelayedAttestationWithoutEvidenceIsRejectedAndWritesNothing(t *
 	}
 	forged := Attestation{actor: "alice", channel: ChannelCLI, verification: VerificationRelayed, target: c.ID}
 	before := len(activitiesFor(t, s, c.ID))
-	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved}, forged); !errors.Is(err, ErrVerificationRejected) {
+	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, ReleaseHeads: headsForAll(prev)}, forged); !errors.Is(err, ErrVerificationRejected) {
 		t.Fatalf("err = %v, want ErrVerificationRejected", err)
 	}
 	if got := len(activitiesFor(t, s, c.ID)); got != before {
@@ -458,7 +458,7 @@ func TestExecuteOperationApproval_ReturnsRelayEvidence(t *testing.T) {
 				att = relayedAttestation(t, op.ID, tc.session, tc.quote)
 			}
 			_, ret, err := s.ExecuteOperationApproval(ctx, OperationApprovalRequest{
-				OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+				OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
 			}, att)
 			if err != nil {
 				t.Fatalf("ExecuteOperationApproval() error = %v", err)

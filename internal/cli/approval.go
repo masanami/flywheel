@@ -65,7 +65,18 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 		return nil, mapCoreErr(err)
 	}
 
-	summary := operationApprovalSummaryText(preview, nil)
+	// release の head は ① で取得し、要約に示して ② へ渡す（② で取り直さない）。承認の対象にできない
+	// release は、確認を求める前に upstream_unavailable で終わる。
+	rd, err := operationReleaseDecision(context.Background(), a, preview)
+	if err != nil {
+		return nil, err
+	}
+	headSHA := ""
+	if rd != nil {
+		headSHA = rd.Head
+	}
+
+	summary := operationApprovalSummaryText(preview, nil) + operationHeadLines(rd)
 	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -76,6 +87,7 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 		ExpectedVersion:          preview.Version,
 		ExpectedChallengeVersion: preview.ChallengeVersion,
 		Decision:                 core.ApprovalDecisionApproved,
+		HeadSHA:                  headSHA,
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -114,23 +126,39 @@ func runApproveChallenge(a Args, verifier core.Verifier, id string, holdRelease 
 		}
 	}
 
+	// 完了の承認（--hold-release なし）は、同時に承認する release の head を ① で取得し、承認の対象に
+	// できない release を外す。
+	var rds []releaseDecision
+	if preview.Kind == core.ApprovalKindCompletion && !holdRelease {
+		rds, err = completionReleaseDecisions(context.Background(), a, preview)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	summary := approvalSummaryText(preview, core.ApprovalDecisionApproved, holdRelease, nil)
+	if rds != nil {
+		summary = approvalSummaryTextWithReleases(preview, rds)
+	}
 	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
 
 	c, approval, err := a.Store.ExecuteApproval(context.Background(), core.ApprovalRequest{
-		ChallengeID:     id,
-		ExpectedVersion: preview.Version,
-		Decision:        core.ApprovalDecisionApproved,
-		HoldRelease:     holdRelease,
+		ChallengeID:        id,
+		ExpectedVersion:    preview.Version,
+		Decision:           core.ApprovalDecisionApproved,
+		HoldRelease:        holdRelease,
+		ReleaseHeads:       coreReleaseHeads(rds),
+		ExcludedReleaseIDs: excludedIDs(rds),
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
+	approvedViews, excludedViews := releaseViews(rds)
 	return textOutput{
-		json: view.ChallengeApprovalResponse{Approval: view.FromApproval(*approval), Challenge: view.FromChallenge(*c)},
+		json: view.ChallengeApprovalResponse{Approval: view.FromApproval(*approval), Challenge: view.FromChallenge(*c), Releases: approvedViews, ExcludedReleases: excludedViews},
 		text: challengeText(*c),
 	}, nil
 }
@@ -258,6 +286,16 @@ func runAnswer(a Args) (any, error) {
 // ない」へ振り分けるために core.ApprovalPreview.ReleaseEffect へ渡す（D12 の
 // 規則そのものは core が持ち、ここでは表示だけを行う）。
 func approvalSummaryText(p *core.ApprovalPreview, decision core.ApprovalDecision, holdRelease bool, reason *string) string {
+	return buildApprovalSummary(p, decision, holdRelease, reason, nil)
+}
+
+// approvalSummaryTextWithReleases は完了の承認（--hold-release なし）の要約。同時に承認される release を
+// ① の判定（rds）の承認の対象だけにし、外した release は同時には承認されない側に示す。head と理由を添える。
+func approvalSummaryTextWithReleases(p *core.ApprovalPreview, rds []releaseDecision) string {
+	return buildApprovalSummary(p, core.ApprovalDecisionApproved, false, nil, rds)
+}
+
+func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecision, holdRelease bool, reason *string, rds []releaseDecision) string {
 	var b strings.Builder
 	// 種類ラベル・本文の両方を switch で明示的に分岐する（self-review 指摘:
 	// 以前は if/else で「completion でなければ計画」としており、
@@ -293,8 +331,19 @@ func approvalSummaryText(p *core.ApprovalPreview, decision core.ApprovalDecision
 		// core が今回の操作（承認か差し戻しか・--hold-release か）から決める
 		// ため、要約は常に実際の結果と一致する（self-review 指摘）。
 		effect := p.ReleaseEffect(decision, holdRelease)
+		if rds != nil {
+			effect = core.ReleaseEffect{NotApproved: append([]core.IrreversibleOperation(nil), p.OtherPendingOperations...)}
+			for _, d := range rds {
+				if d.Reason == "" {
+					effect.Approved = append(effect.Approved, d.Op)
+				} else {
+					effect.NotApproved = append(effect.NotApproved, d.Op)
+				}
+			}
+		}
 		fmt.Fprintf(&b, "同時に承認される本番反映 (release): %s\n", operationListSummary(effect.Approved))
 		fmt.Fprintf(&b, "同時には承認されない不可逆操作:     %s\n", operationListSummary(effect.NotApproved))
+		writeReleaseHeadLines(&b, rds)
 	}
 	if reason != nil {
 		fmt.Fprintf(&b, "理由:        %s\n", *reason)

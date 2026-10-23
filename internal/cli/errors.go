@@ -132,6 +132,8 @@ func ExitCodeFor(code ErrorCode) int {
 type Error struct {
 	Code    ErrorCode
 	Message string
+	// ExitCode が 0 以外なら、表（errorCodeTable）の終了コードの代わりにこの値で終わる。
+	ExitCode int
 }
 
 func (e *Error) Error() string {
@@ -143,6 +145,15 @@ func (e *Error) Error() string {
 // internal/cli/codeusage_test.go が検出する）。
 func NewError(code ErrorCode, message string) *Error {
 	return &Error{Code: code, Message: message}
+}
+
+// newReleaseNotApprovableError は承認の ① で release を承認の対象にできない upstream_unavailable を生成する。
+// upstream_unavailable は、`gh` が無い（M2。終了コード 2。表の値）と、この意味（M4.5。終了コード 1）の
+// 2 つを持つため、こちらは終了コードを 1 に上書きする。
+func newReleaseNotApprovableError(message string) *Error {
+	e := NewError(CodeUpstreamUnavailable, message)
+	e.ExitCode = 1
+	return e
 }
 
 // mapCoreErr は internal/core が返す sentinel error（errors.go の設計メモの

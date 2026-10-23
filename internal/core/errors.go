@@ -1,6 +1,9 @@
 package core
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // core が返すストア関連の sentinel error。internal/cli はこれらを errors.Is で
 // 判定し、cli.ErrorCode（usage_error 等と同じ閉集合）へ写像する。
@@ -115,3 +118,17 @@ func (relayEvidenceMissingError) Error() string {
 }
 
 func (relayEvidenceMissingError) Unwrap() error { return ErrVerificationRejected }
+
+// ReapprovalForbiddenError は、直前の試行の結果が merged_unapproved（承認なしにマージされた
+// ため承認を取り消した）の release を承認し直そうとしたことを表す。errors.Is(err,
+// ErrVerificationRejected) が真で、呼び出し側の写像（verification_rejected）は変わらない。
+// 差し戻しは対象にならない。
+type ReapprovalForbiddenError struct {
+	OperationID string
+}
+
+func (e *ReapprovalForbiddenError) Error() string {
+	return fmt.Sprintf("core: release %s was merged without approval and its approval was revoked; re-approval is forbidden", e.OperationID)
+}
+
+func (e *ReapprovalForbiddenError) Unwrap() error { return ErrVerificationRejected }
