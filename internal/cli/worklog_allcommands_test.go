@@ -371,6 +371,22 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
+		// 承認済みの release の実行（M4.5 S1）。実行済みになったときだけ entity=operation・action=op_execute を残す
+		// （経路は cli）。
+		name: "op exec", command: "op exec",
+		setup: func(t *testing.T, ws string) []string {
+			prepareExecWorkspace(t, ws)
+			newReleaseGH(t, execHead)
+			return []string{"op", "exec"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"operation", "OP-1", "op_execute",
+				map[string]any{"state": "approved"},
+				map[string]any{"result": "merged", "state": "executed", "version": 3.0, "trigger": "op exec",
+					"approved_head": execHead, "observed_head": execHead, "merge_commit": execMerged}}}
+		},
+	},
+	{
 		name: "approve <OP-ID>", command: "approve",
 		setup: func(t *testing.T, ws string) []string {
 			prepareReleaseWorkspace(t, ws)

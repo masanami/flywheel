@@ -737,6 +737,9 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	wantSet["run"] = true
 	// #105: 同じ理由で、実装済みの `budget` を個別に足す。
 	wantSet["budget"] = true
+	// M4.5 S1（#310）: 同じ理由で、実装済みの `op exec` を個別に足す（m4.5 の表と照合する
+	// TestOpExecCommand_MatchesM45IFAPITable）。
+	wantSet["op exec"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")

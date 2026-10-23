@@ -118,6 +118,7 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 		{"approve", "C-1"},
 		{"reject", "C-1", "--reason", "r"},
 		{"op", "add", "C-1", "--kind", "release", "--summary", "s"},
+		{"op", "exec"},
 		{"status"},
 		{"log"},
 		{"ingest"},

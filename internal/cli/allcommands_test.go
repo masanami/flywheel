@@ -127,6 +127,13 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	"op add": {setup: func(t *testing.T, ws string) []string {
 		return []string{"op", "add", createForCase(t, ws), "--kind", "release", "--summary", "s"}
 	}},
+	"op exec": {setup: func(t *testing.T, ws string) []string {
+		// op exec --json の出力の形（release の段の items の要素）が文書と照合されるよう、マージされる
+		// release を 1 件置き、ID を明示して実行する（not_started の要素の形は cycle の観測が照合する）。
+		_, op := prepareExecWorkspace(t, ws)
+		newReleaseGH(t, execHead)
+		return []string{"op", "exec", op}
+	}},
 	"status": {setup: func(t *testing.T, ws string) []string {
 		createForCase(t, ws)
 		// needs_human.discrepancies の要素の形も文書と照合されるよう、食い違いの

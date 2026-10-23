@@ -764,3 +764,31 @@ func CountReleaseApprovals(t *testing.T, workspace string) int {
 	}
 	return n
 }
+
+// CycleTriggers は cycle 表の全行の trigger と lock 表の行数を返す（trigger は ID の昇順）。
+func CycleTriggers(t *testing.T, workspace string) (triggers []string, locks int) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT trigger FROM cycle ORDER BY id ASC`)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				return err
+			}
+			triggers = append(triggers, s)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return tx.QueryRow(`SELECT COUNT(*) FROM lock`).Scan(&locks)
+	}); err != nil {
+		t.Fatalf("coretest: CycleTriggers: %v", err)
+	}
+	return triggers, locks
+}

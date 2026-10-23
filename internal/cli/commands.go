@@ -273,6 +273,14 @@ func defaultCommands() []Command {
 			Run: runOpAdd,
 		},
 		{
+			// 承認済みで未実行の release の実行（docs/features/m4.5-learning-and-self-improvement.md
+			// §承認済みの release の実行）。承認を作らないので端末での確認を求めない。
+			Path:          []string{"op", "exec"},
+			RequiresStore: true,
+			MaxPositional: 1,
+			Run:           runOpExec,
+		},
+		{
 			Path:          []string{"status"},
 			RequiresStore: true,
 			Run:           runStatus,

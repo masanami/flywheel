@@ -78,10 +78,38 @@ type PhaseItem struct {
 	Status      *string `json:"status"`
 }
 
-// PhaseNotStarted は判断の段の not_started の要素。
+// PhaseNotStarted は判断の段の not_started の要素。detail は空文字のとき持たない。
 type PhaseNotStarted struct {
 	ChallengeID string `json:"challenge_id"`
+	Detail      string `json:"detail,omitempty"`
 	Reason      string `json:"reason"`
+}
+
+// ReleaseNotStarted は release の段と `op exec` の not_started の要素。operation_id を常に持つ。
+type ReleaseNotStarted struct {
+	ChallengeID string `json:"challenge_id"`
+	Detail      string `json:"detail,omitempty"`
+	OperationID string `json:"operation_id"`
+	Reason      string `json:"reason"`
+}
+
+// ReleaseItem は release の段と `op exec` の items の要素。head とマージのコミットは無ければ null。
+type ReleaseItem struct {
+	ApprovedHead        *string `json:"approved_head"`
+	ChallengeID         string  `json:"challenge_id"`
+	ConsecutiveFailures int     `json:"consecutive_failures"`
+	MergeCommit         *string `json:"merge_commit"`
+	ObservedHead        *string `json:"observed_head"`
+	OperationID         string  `json:"operation_id"`
+	Result              string  `json:"result"`
+}
+
+// ReleasePhase は release の段（cycle の phases の要素と `op exec` の phase が共有する）の形。
+type ReleasePhase struct {
+	Items      []ReleaseItem       `json:"items"`
+	NotStarted []ReleaseNotStarted `json:"not_started"`
+	Phase      string              `json:"phase"`
+	Skipped    bool                `json:"skipped"`
 }
 
 // SerialGroup は委譲の段の serial_groups の要素。
@@ -138,7 +166,7 @@ func phaseItems(items []core.JudgmentAutoItem) []PhaseItem {
 func phaseNotStarted(items []core.NotStarted) []PhaseNotStarted {
 	out := make([]PhaseNotStarted, 0, len(items))
 	for _, it := range items {
-		out = append(out, PhaseNotStarted{ChallengeID: it.ChallengeID, Reason: string(it.Reason)})
+		out = append(out, PhaseNotStarted{ChallengeID: it.ChallengeID, Detail: it.Detail, Reason: string(it.Reason)})
 	}
 	return out
 }
@@ -176,8 +204,32 @@ func FromDelegationPhase(skipped bool, res *core.JudgmentAutoResult) DelegationP
 	}
 }
 
+// FromReleasePhase は release の段の結果を変換する。
+func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []core.NotStarted) ReleasePhase {
+	outItems := make([]ReleaseItem, 0, len(items))
+	for _, it := range items {
+		outItems = append(outItems, ReleaseItem{
+			ApprovedHead:        strOrNil(it.ApprovedHead),
+			ChallengeID:         it.ChallengeID,
+			ConsecutiveFailures: it.ConsecutiveFailures,
+			MergeCommit:         strOrNil(it.MergeCommit),
+			ObservedHead:        strOrNil(it.ObservedHead),
+			OperationID:         it.OperationID,
+			Result:              string(it.Result),
+		})
+	}
+	outNS := make([]ReleaseNotStarted, 0, len(notStarted))
+	for _, it := range notStarted {
+		outNS = append(outNS, ReleaseNotStarted{ChallengeID: it.ChallengeID, Detail: it.Detail, OperationID: it.OperationID, Reason: string(it.Reason)})
+	}
+	return ReleasePhase{Items: outItems, NotStarted: outNS, Phase: string(core.CyclePhaseRelease), Skipped: skipped}
+}
+
 // FromCyclePhase は cycle の段 1 つを phases の要素へ変換する。
 func FromCyclePhase(p core.CyclePhaseResult) any {
+	if p.Phase == core.CyclePhaseRelease {
+		return FromReleasePhase(p.Skipped, p.ReleaseItems, p.NotStarted)
+	}
 	if p.Phase == core.CyclePhaseIngest {
 		out := IngestPhase{Phase: string(p.Phase), Skipped: p.Skipped}
 		if p.Ingest != nil {

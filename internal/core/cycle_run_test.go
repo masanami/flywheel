@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
 // このファイルは #86（親要件チケット #77・docs/features/m3-invoker-delegation.md
@@ -138,7 +140,7 @@ func (f *cycleFixture) classified(t *testing.T, title, priority string) *Challen
 func (f *cycleFixture) input(inv JudgmentInvoker) CycleRunInput {
 	return CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream,
-		Delegate: &fakeDelegator{}, Git: newFakeSlotGit(), Reconcile: newFakeBranchSource(), Checks: newFakeChecks(),
+		Delegate: &fakeDelegator{}, Git: newFakeSlotGit(), Reconcile: newFakeBranchSource(), Checks: newFakeChecks(), Merger: &fakeRelease{},
 	}
 }
 
@@ -204,7 +206,7 @@ func TestRunCycle_RunsIngestClassifyPlanInOrder(t *testing.T) {
 	}
 	res := f.run(t, in)
 
-	want := []CyclePhase{CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify}
+	want := []CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify}
 	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("phases = %v, want %v", got, want)
 	}
@@ -229,8 +231,8 @@ func TestRunCycle_NoIngestInput_IngestPhaseIsSkipped(t *testing.T) {
 	if !ing.Skipped || ing.Ingest != nil {
 		t.Errorf("ingest phase = %+v, want skipped with no result", ing)
 	}
-	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint([]CyclePhase{CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify}) {
-		t.Errorf("phases = %v, want all five phases listed even when ingest is skipped", got)
+	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint([]CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify}) {
+		t.Errorf("phases = %v, want all six phases listed even when ingest is skipped", got)
 	}
 }
 
@@ -713,4 +715,38 @@ func lockHeartbeatNoFatal(t *testing.T, s *Store) time.Time {
 		t.Errorf("lockHeartbeatNoFatal: %v", err)
 	}
 	return at
+}
+
+// release の段は最初の段で、接続ツールの宣言（ConnDecl）が無ければ skipped。
+func TestRunCycle_ReleasePhaseIsSkippedWithoutConnectors(t *testing.T) {
+	f := newCycleFixture(t)
+	in := f.input(mineThenPlanInvoker(t))
+	in.ConnDecl, in.Upstream, in.Delegate, in.Git, in.Reconcile, in.Checks, in.Merger = nil, nil, nil, nil, nil, nil, nil
+	res := f.run(t, in)
+	rel := phaseOfResult(t, res, CyclePhaseRelease)
+	if !rel.Skipped || len(rel.ReleaseItems) != 0 || len(rel.NotStarted) != 0 || phaseNames(res)[0] != CyclePhaseRelease {
+		t.Errorf("release phase without connectors = %+v (names %v), want first, skipped and empty", rel, phaseNames(res))
+	}
+}
+
+// ある周では、承認済みの release をその周の中で実行する（マージの依頼は 1 回。契機は cycle）。
+func TestRunCycle_ReleasePhaseMergesAnApprovedReleaseInsideTheCycle(t *testing.T) {
+	f := newCycleFixture(t)
+	c := createAndAdvance(t, f.s, StatusDone)
+	opID := coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c.ID)), relRef, relHead, execTS(0))
+	fake := &fakeRelease{pr: openPR(), afterPR: &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "mc1"}}
+	in := f.input(mineThenPlanInvoker(t))
+	conn := j2TestConnectors(t)
+	conn.Repos[0].Remote = "o/r"
+	in.ConnDecl = conn
+	in.Checks, in.Merger = fake, fake
+
+	res := f.run(t, in)
+	rel := phaseOfResult(t, res, CyclePhaseRelease)
+	if rel.Skipped || len(rel.ReleaseItems) != 1 || rel.ReleaseItems[0].OperationID != formatOperationID(opID) || rel.ReleaseItems[0].Result != ExecutionResultMerged {
+		t.Errorf("release phase = %+v", rel)
+	}
+	if len(fake.mergeArgs) != 1 {
+		t.Errorf("merge requests = %v, want 1", fake.mergeArgs)
+	}
 }

@@ -151,6 +151,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3ShowPlanSpecShape(t, &doc)
 	addM3ShowRunsShape(t, &doc)
 	addM3CycleShape(t, &doc)
+	addM45ReleaseShape(t, &doc)
 	addM3SlotClearShape(t, &doc)
 	addM3RunShape(t, &doc)
 	addM3BudgetShapes(t, &doc)
@@ -291,6 +292,72 @@ func addM3ShowRunsShape(t *testing.T, doc *documentedJSON) {
 	}
 }
 
+// addM45ReleaseShape は `op exec` の成功時の JSON の形と、release の段の要素の形を doc へ足す
+// （m4.5-learning-and-self-improvement.md §IF / API）。items の要素のキーは仕様の
+// `{"operation_id", …}` の行から読む。not_started の要素は challenge_id・reason・operation_id を
+// 常に持ち、detail は空文字のときだけ持たない（省略できる）。
+func addM45ReleaseShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	var itemKeys map[string]bool
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "`op exec` の `--json` の出力は") && strings.Contains(line, "`items` の要素は") {
+			_, after, _ := strings.Cut(line, "`items` の要素は")
+			itemKeys = map[string]bool{}
+			for _, m := range quotedRe.FindAllStringSubmatch(after, -1) {
+				itemKeys[m[1]] = true
+			}
+			break
+		}
+	}
+	if len(itemKeys) != 7 {
+		t.Fatalf("m4.5 spec's `op exec` line does not list the 7 item keys: %v", itemKeys)
+	}
+	doc.topLevel["op exec"] = []map[string]bool{{"phase": true}}
+	doc.entity["release_phase"] = map[string]bool{"phase": true, "skipped": true, "items": true, "not_started": true}
+	doc.entity["release_item"] = itemKeys
+	doc.entity["release_not_started"] = map[string]bool{"challenge_id": true, "reason": true, "operation_id": true}
+}
+
+// assertDocumentedReleasePhase は release の段（cycle の phases の要素と `op exec` の phase が共有する形）の
+// 1 要素 pm が文書の形と一致することを検査する。
+func assertDocumentedReleasePhase(t *testing.T, doc documentedJSON, where string, pm map[string]any) {
+	t.Helper()
+	if got := keysOf(pm); !reflect.DeepEqual(got, doc.entity["release_phase"]) {
+		t.Errorf("%s keys = %v, documented = %v", where, sortedKeys(got), sortedKeys(doc.entity["release_phase"]))
+	}
+	items, ok := pm["items"].([]any)
+	if !ok {
+		t.Errorf("%s.items = %#v, want an array (never null)", where, pm["items"])
+	}
+	for j, it := range items {
+		im, _ := it.(map[string]any)
+		if got := keysOf(im); !reflect.DeepEqual(got, doc.entity["release_item"]) {
+			t.Errorf("%s.items[%d] keys = %v, documented = %v", where, j, sortedKeys(got), sortedKeys(doc.entity["release_item"]))
+		}
+	}
+	ns, ok := pm["not_started"].([]any)
+	if !ok {
+		t.Errorf("%s.not_started = %#v, want an array (never null)", where, pm["not_started"])
+	}
+	for j, n := range ns {
+		nm, _ := n.(map[string]any)
+		got := keysOf(nm)
+		if d, has := nm["detail"]; has {
+			if s, _ := d.(string); s == "" {
+				t.Errorf("%s.not_started[%d] has an empty detail, want the key omitted", where, j)
+			}
+			delete(got, "detail")
+		}
+		if !reflect.DeepEqual(got, doc.entity["release_not_started"]) {
+			t.Errorf("%s.not_started[%d] keys = %v, documented = %v (+ optional detail)", where, j, sortedKeys(got), sortedKeys(doc.entity["release_not_started"]))
+		}
+	}
+}
+
 // addM3CycleShape は `cycle` の成功時の JSON の形を doc へ合成する（#86）。m3-invoker-
 // delegation.md §IF / API「`cycle` の JSON 出力」の見出しの下の最初の ```json の例を、文書から
 // 直接読む（第 2 の正本を持たない）。最上位の形は doc.topLevel["cycle"]、周の記録は
@@ -374,7 +441,7 @@ func addM3CycleShape(t *testing.T, doc *documentedJSON) {
 
 // documentedCyclePhaseNames は cycle の JSON の phase の閉集合（§IF / API「`phase` は
 // `ingest | classify | plan | run | verify` の閉集合」）。cycle は 5 つすべてを出す。
-var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true}
+var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true}
 
 // assertDocumentedCycle は cycle の成功時の出力 out の内側（周の記録・段・items・not_started・
 // ingest の result）が、文書の例と同じ形であることを検査する（最上位のキーは
@@ -405,6 +472,10 @@ func assertDocumentedCycle(t *testing.T, doc documentedJSON, out map[string]any)
 			t.Errorf("cycle.phases[%d].phase = %v, want a member of the documented closed set", i, pm["phase"])
 		}
 		where := fmt.Sprintf("cycle.phases[%d](%s)", i, name)
+		if name == "release" {
+			assertDocumentedReleasePhase(t, doc, where, pm)
+			continue
+		}
 		if name == "ingest" {
 			if got := keysOf(pm); !reflect.DeepEqual(got, doc.entity["cycle_phase_ingest"]) {
 				t.Errorf("%s keys = %v, documented = %v", where, sortedKeys(got), sortedKeys(doc.entity["cycle_phase_ingest"]))
@@ -471,7 +542,14 @@ func assertDocumentedPhase(t *testing.T, doc documentedJSON, where string, pm ma
 			t.Errorf("%s.not_started[%d] is not an object", where, j)
 			continue
 		}
-		if got := keysOf(nm); !reflect.DeepEqual(got, doc.entity["cycle_not_started"]) {
+		got := keysOf(nm)
+		if d, has := nm["detail"]; has { // detail は空文字のときだけ持たない（M4.5 §IF / API）
+			if s, _ := d.(string); s == "" {
+				t.Errorf("%s.not_started[%d] has an empty detail, want the key omitted", where, j)
+			}
+			delete(got, "detail")
+		}
+		if !reflect.DeepEqual(got, doc.entity["cycle_not_started"]) {
 			t.Errorf("%s.not_started[%d] keys = %v, documented = %v", where, j, sortedKeys(got), sortedKeys(doc.entity["cycle_not_started"]))
 		}
 	}
@@ -594,11 +672,18 @@ func assertDocumentedJSON(t *testing.T, doc documentedJSON, name string, out map
 		}
 		t.Errorf("%s: top-level keys = %v, documented shapes = %v", name, sortedKeys(got), want)
 	}
-	if name != "run" { // run の phase の items は ingest の item と名前が同じなので別に照合する。
+	if name != "run" && name != "op exec" { // run・op exec の phase の items は ingest の item と名前が同じなので別に照合する。
 		assertDocumentedEntities(t, doc, name, out)
 	}
 	if name == "cycle" {
 		assertDocumentedCycle(t, doc, out)
+	}
+	if name == "op exec" {
+		if pm, ok := out["phase"].(map[string]any); ok {
+			assertDocumentedReleasePhase(t, doc, "op exec", pm)
+		} else {
+			t.Errorf("op exec: `phase` is not an object: %#v", out["phase"])
+		}
 	}
 	if name == "run" {
 		if pm, ok := out["phase"].(map[string]any); ok {

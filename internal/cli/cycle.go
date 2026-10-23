@@ -113,12 +113,14 @@ func runCycle(a Args) (any, error) {
 	// 型つき nil を core へ渡さないよう、宣言が無いときは nil のインターフェース値のままにする。
 	var (
 		delegate  core.DelegationInvoker
+		merger    core.UpstreamPullRequestMerger
 		slotGit   core.SlotGit
 		reconcile core.UpstreamBranchSource
 		checks    core.UpstreamCheckSource
 	)
 	if hasConnectors {
 		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(), newCheckSource()
+		merger = newPullRequestMerger()
 	}
 
 	// 周の開始を標準出力へ知らせる（UI の server が起動の合図として読む）。--json では書かない。
@@ -142,6 +144,7 @@ func runCycle(a Args) (any, error) {
 		Git:       slotGit,
 		Reconcile: reconcile,
 		Checks:    checks,
+		Merger:    merger,
 		Predictor: launcher,
 		OnBegin:   onBegin,
 	})
@@ -160,6 +163,8 @@ func cycleResultText(res *core.CycleRunResult) string {
 		switch {
 		case p.Skipped:
 			fmt.Fprintf(&b, "  %s: スキップ\n", p.Phase)
+		case p.Phase == core.CyclePhaseRelease:
+			fmt.Fprintf(&b, "  %s: 処理 %d 件・未起動 %d 件\n", p.Phase, len(p.ReleaseItems), len(p.NotStarted))
 		case p.Phase == core.CyclePhaseIngest:
 			fmt.Fprintf(&b, "  %s: 取り込み元 %d 件\n", p.Phase, len(p.Ingest.Sources))
 		default:

@@ -100,6 +100,9 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	}
 	// 行の最初の span は `not_started[].reason` 自身、2 番目が S2 の全体の閉集合。
 	spec := pipeSet(spans[1][1])
+	// M4.5 S1 が足す理由（in_progress・not_executable）は m4.5 の仕様の行から読む。
+	spec = append(spec, m45AddedNotStartedReasons(t)...)
+	sort.Strings(spec)
 
 	var impl []string
 	for _, r := range core.NotStartedReasonValues() {
@@ -116,6 +119,8 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"serialized":    "TestPlan_RunningInSameGroup_Serialized_OtherGroupStarts (internal/core/delegate_plan_test.go)",
 		// 計画の版を持たない承認の行（作り直しが必要）は、core のテストが実際の対象の選択で観測する。
 		"plan_unavailable": "TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothingLaunched (internal/core/delegate_plan_approval_test.go)",
+		// release 以外・approved でない操作を指した op exec だけが出す（cycle の release の段は approved の release しか試さない）。
+		"not_executable": "TestNotExecutable_NotReleaseOrNotApproved (internal/core/release_exec_test.go)",
 	}
 	observed := map[string]bool{}
 	for r, ref := range coreObservedReasons {
@@ -186,6 +191,16 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		// 実装枠が起動の最小額（1 USD）に満たない計画。
 		newInProgressForRun(t, ws, func(m map[string]any) { m["budget_impl_usd"] = 0.5 })
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
+		observe(cycleDoc(t, ws))
+	})
+	t.Run("in_progress", func(t *testing.T) {
+		// 終わっていない生きた試行を持つ承認済みの release は、cycle の release の段が飛ばす。
+		ws, _, op := execWorkspace(t)
+		newReleaseGH(t, execHead)
+		coretest.InsertOperationExecution(t, ws, int64(mustAtoi(t, strings.TrimPrefix(op, "OP-"))), coretest.ExecutionAttempt{
+			StartedAt: nowStamp(), ApprovedHead: execHead, PID: int64(os.Getpid()), Host: currentHost(t),
+		})
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 		observe(cycleDoc(t, ws))
 	})
 	t.Run("waiting_external", func(t *testing.T) {
@@ -341,6 +356,61 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedSerialized"
 	case "plan_unavailable":
 		return "NotStartedPlanUnavailable"
+	case "not_executable":
+		return "NotStartedNotExecutable"
 	}
 	return "?"
+}
+
+// m45SpecLine は m4.5-learning-and-self-improvement.md の、contains を全て含む最初の行を返す。
+func m45SpecLine(t *testing.T, contains ...string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		ok := true
+		for _, c := range contains {
+			if !strings.Contains(line, c) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return line
+		}
+	}
+	t.Fatalf("m4.5 spec has no line containing %q", contains)
+	return ""
+}
+
+// m45AddedNotStartedReasons は m4.5 の仕様が S1 で足す not_started の理由（in_progress・not_executable）を返す。
+func m45AddedNotStartedReasons(t *testing.T) []string {
+	t.Helper()
+	line := m45SpecLine(t, "`not_started` の理由に、", "（S1）")
+	head, _, _ := strings.Cut(line, "を足す（S1）")
+	var out []string
+	for _, sp := range regexp.MustCompile("`([a-z_]+)`（").FindAllStringSubmatch(head, -1) {
+		out = append(out, sp[1])
+	}
+	if !equalStringSlices(sortedStrings(out), []string{"in_progress", "not_executable"}) {
+		t.Fatalf("m4.5 spec's added not_started reasons = %v, want in_progress and not_executable", out)
+	}
+	return out
+}
+
+// M4.5 S1: cycle の phase の閉集合は release を最初に持ち、cycle --json の phases の並びがそれに従う。
+func TestCycle_PhasesStartWithReleaseThenTheM3Phases(t *testing.T) {
+	m45SpecLine(t, "`cycle` は、取り込みの段より前に `release` の段を実行する")
+	ws := setupWorkspaceWithPosition(t)
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	var got []string
+	for _, p := range cycleDoc(t, ws)["phases"].([]any) {
+		got = append(got, p.(map[string]any)["phase"].(string))
+	}
+	want := []string{"release", "ingest", "classify", "plan", "run", "verify"}
+	if !equalStringSlices(got, want) {
+		t.Errorf("phases = %v, want %v", got, want)
+	}
 }

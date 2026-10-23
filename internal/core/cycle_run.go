@@ -7,7 +7,7 @@ package core
 // （`ingest`・`classify --auto`・`plan --auto`）と同じ core の処理
 // （Store.Ingest・ClassifyAutoJ1・PlanAutoJ2）をそのまま呼び、ここは段の順・
 // 排他ロックの取得と解放・heartbeat・枠超過の段をまたぐ伝播だけを持つ。
-// 段は 取り込み → 分類（J1）→ 計画（J2）→ 委譲（run）→ 検証（verify・J5）の順で、
+// 段は 実行（release）→ 取り込み → 分類（J1）→ 計画（J2）→ 委譲（run）→ 検証（verify・J5）の順で、
 // 委譲と検証の段は接続ツールの宣言（connectors.json）があるときだけ実行する。
 
 import (
@@ -20,6 +20,8 @@ type CyclePhase string
 
 // CyclePhase の値（実行する順）。
 const (
+	// CyclePhaseRelease は承認済みの release の実行の段（ExecuteReleases と同じ処理。最初の段）。
+	CyclePhaseRelease  CyclePhase = "release"
 	CyclePhaseIngest   CyclePhase = "ingest"
 	CyclePhaseClassify CyclePhase = "classify"
 	CyclePhasePlan     CyclePhase = "plan"
@@ -72,6 +74,8 @@ type CycleRunInput struct {
 	Reconcile UpstreamBranchSource
 	// Checks は J5 の起動の前の PR のチェックの取得（GET だけ）。ConnDecl が非 nil のとき必須。
 	Checks UpstreamCheckSource
+	// Merger は release の段のマージの依頼（唯一の書き込み）。ConnDecl が非 nil のとき必須。
+	Merger UpstreamPullRequestMerger
 	// Predictor は衝突の予測の口の起動（nil なら予測の口を呼べない。RunDelegation と同じ）。
 	Predictor ConflictPredictor
 	// OnBegin が非 nil なら、周の開始（BeginCycle の成功）の直後、段を始める前に周の ID で呼ぶ。
@@ -87,6 +91,8 @@ type CyclePhaseResult struct {
 	Ingest     *IngestResult
 	Items      []JudgmentAutoItem
 	NotStarted []NotStarted
+	// ReleaseItems は release の段の items（他の段は空）。release の段の not_started は NotStarted に入る。
+	ReleaseItems []ReleaseExecItem
 	// SerialGroups は委譲の段（run）の直列化グループ（他の段・skipped の段は空）。
 	SerialGroups []SerialGroup
 }
@@ -108,7 +114,7 @@ type CycleRunResult struct {
 //
 //  1. サイクルの排他を取って周を開始する（生きている保持者がいれば ErrLocked。
 //     何も起動・記録しない）。以後、段の実行中は 60 秒ごとにロックの heartbeat を更新する
-//  2. 取り込み（in.Ingest があれば）→ 分類（J1）→ 計画（J2）→ 委譲 → 検証（J5）の順に
+//  2. 承認済みの release の実行（in.ConnDecl があれば）→ 取り込み（in.Ingest があれば）→ 分類（J1）→ 計画（J2）→ 委譲 → 検証（J5）の順に
 //     段を実行する（計画・委譲・検証は in.ConnDecl があるときだけ）。検証の段は、委譲の段が
 //     起動した委譲の run がすべて終わってから始まる（RunDelegation は合流して返る）。各段は個別の操作と同じ core の処理を呼び、前の段で状態が進んだ
 //     課題は後の段の対象になる。枠超過は段をまたいで伝播する（同じ JudgmentCycle を渡す）
@@ -121,7 +127,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	if in.Trigger == "" || in.AgentDecl == nil || in.Invoker == nil {
 		return nil, ErrValidation
 	}
-	if in.ConnDecl != nil && (in.Upstream == nil || in.Delegate == nil || in.Git == nil || in.Reconcile == nil || in.Checks == nil) {
+	if in.ConnDecl != nil && (in.Upstream == nil || in.Delegate == nil || in.Git == nil || in.Reconcile == nil || in.Checks == nil || in.Merger == nil) {
 		return nil, ErrValidation
 	}
 	if in.Ingest != nil && (in.Ingest.Upstream == nil || in.Ingest.Channel == "") {
@@ -181,6 +187,24 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 // エラーになるまでの分は返さない（呼び出し元は runErr を返す）。
 func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle) ([]CyclePhaseResult, error) {
 	var phases []CyclePhaseResult
+
+	// 承認済みの release の実行（op exec と同じ core の処理。最初の段。接続ツールの宣言が無ければ skipped）。
+	release := CyclePhaseResult{Phase: CyclePhaseRelease, Skipped: in.ConnDecl == nil, ReleaseItems: []ReleaseExecItem{}}
+	if in.ConnDecl != nil {
+		res, err := s.ExecuteReleases(ctx, nil, ReleaseExecOptions{
+			Checks:     in.Checks,
+			Merger:     in.Merger,
+			Connectors: in.ConnDecl,
+			Agent:      in.AgentDecl,
+			Trigger:    ReleaseExecTriggerCycle,
+		})
+		if err != nil {
+			return nil, err
+		}
+		release.ReleaseItems = res.Items
+		release.NotStarted = res.NotStarted
+	}
+	phases = append(phases, release)
 
 	// 取り込み（M2 の ingest と同じ core の処理。経路は呼び出し元が渡す）。
 	ingest := CyclePhaseResult{Phase: CyclePhaseIngest, Skipped: in.Ingest == nil}
