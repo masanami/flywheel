@@ -113,8 +113,8 @@ func awaitingCompletionWithReleasesForCase(t *testing.T, ws string) string {
 	t.Helper()
 	id := createWithStatusForCase(t, ws, "verifying")
 	runJSON(t, ws, "verify", id, "--result", "met")
-	runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "s1")
-	runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "s2")
+	addPRRelease(t, ws, id, "s1")
+	addPRRelease(t, ws, id, "s2")
 	return id
 }
 
@@ -373,7 +373,8 @@ var worklogCases = []worklogCase{
 	{
 		name: "approve <OP-ID>", command: "approve",
 		setup: func(t *testing.T, ws string) []string {
-			op := runJSON(t, ws, "op", "add", createForCase(t, ws), "--kind", "release", "--summary", "s")
+			prepareReleaseWorkspace(t, ws)
+			op := runJSON(t, ws, "op", "add", createForCase(t, ws), "--kind", "release", "--summary", "s", "--ref", releasePRURL(1))
 			return []string{"approve", op["operation"].(map[string]any)["id"].(string)}
 		},
 		want: func(string) []wantActivity {

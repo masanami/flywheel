@@ -82,7 +82,8 @@ func TestScenario_CLIOnly_InitThroughApprove_ReachesDoneWithConsistentLogAndStat
 	}
 
 	// op add --kind release（不可逆操作の登録。本人確認は不要）。
-	opAdded := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "ship to prod")
+	prepareReleaseWorkspace(t, ws)
+	opAdded := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "ship to prod", "--ref", releasePRURL(1))
 	opID := opAdded["operation"].(map[string]any)["id"].(string)
 	if opAdded["operation"].(map[string]any)["state"] != "pending" {
 		t.Fatalf("op add.state = %v, want pending", opAdded["operation"].(map[string]any)["state"])

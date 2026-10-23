@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"net/url"
 	"strconv"
 	"strings"
@@ -33,6 +34,12 @@ func parseReleasePullRequestRef(ref string) (repo string, number int, ok bool) {
 	return segs[0] + "/" + segs[1], n, true
 }
 
+// ParseReleasePullRequestRef は release の ref が GitHub の PR の URL のときだけ repo（<owner>/<repo>）と
+// 番号を返す（末尾の /files 等の続きは無視）。外す理由の判定（not_a_pr_url）に CLI が使う。
+func ParseReleasePullRequestRef(ref string) (repo string, number int, ok bool) {
+	return parseReleasePullRequestRef(ref)
+}
+
 // ResolveReleaseHeads は releases（ApprovalPreview.PendingReleases）の ref が指す PR の
 // head を src から取り、releases と同じ順序・件数で返す。ストアに触れない（呼び出し側は
 // ストアの読み取りの借りを返してから呼ぶ）。取得できない release は HeadSHA が nil。
@@ -51,4 +58,35 @@ func ResolveReleaseHeads(ctx context.Context, releases []IrreversibleOperation, 
 		out = append(out, rh)
 	}
 	return out
+}
+
+// latestVerifiedHead は ref が指す PR について、J5 が検証の入力にした最新の head を返す。
+// 成果物の行のうち (repo, 番号) が ref と一致し verified_head_sha が NULL でない行で、
+// run_artifact.id が最大のものの値。ref が PR の URL でない・該当する行が無いときは nil
+// （検証の head の記録なし。照合せず承認できる）。
+func latestVerifiedHead(ctx context.Context, tx *sql.Tx, ref *string) (*string, error) {
+	if ref == nil {
+		return nil, nil
+	}
+	repo, number, ok := parseReleasePullRequestRef(*ref)
+	if !ok {
+		return nil, nil
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT ref, verified_head_sha FROM run_artifact WHERE verified_head_sha IS NOT NULL ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var aref, head string
+		if err := rows.Scan(&aref, &head); err != nil {
+			return nil, err
+		}
+		arepo, anum, ok := parsePullRequestURL(aref)
+		if ok && anum == number && strings.EqualFold(arepo, repo) {
+			return &head, nil
+		}
+	}
+	return nil, rows.Err()
 }

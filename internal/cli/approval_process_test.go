@@ -542,8 +542,8 @@ func setUpChallengeAwaitingCompletionWithOperationsForCLI(t *testing.T, ws strin
 	t.Helper()
 	created := runJSON(t, ws, "create", "--title", "t", "--done-criteria", "it works")
 	id = created["challenge"].(map[string]any)["id"].(string)
-	release1 = runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "ship A")["operation"].(map[string]any)["id"].(string)
-	release2 = runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "ship B")["operation"].(map[string]any)["id"].(string)
+	release1 = addPRRelease(t, ws, id, "ship A")
+	release2 = addPRRelease(t, ws, id, "ship B")
 	del = runJSON(t, ws, "op", "add", id, "--kind", "delete", "--summary", "remove old data")["operation"].(map[string]any)["id"].(string)
 	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, id), "awaiting_completion_approval")
 	return id, release1, release2, del
@@ -774,7 +774,8 @@ func TestApproveOperationID_Success(t *testing.T) {
 	const title = "deploy the billing job"
 	created := runJSON(t, ws, "create", "--title", title)
 	id := created["challenge"].(map[string]any)["id"].(string)
-	op := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "ship it", "--ref", "https://example.com/pr/9")
+	prepareReleaseWorkspace(t, ws)
+	op := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "ship it", "--ref", releasePRURL(9))
 	opID := op["operation"].(map[string]any)["id"].(string)
 
 	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"approve", "--workspace", ws, "--json", opID}, opID)
@@ -782,7 +783,7 @@ func TestApproveOperationID_Success(t *testing.T) {
 		t.Fatalf("exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
 	}
 	// AC: 操作の ID・種類・要約・参照と、課題の ID・タイトル・状態を表示する。
-	for _, want := range []string{confirmPrompt(opID), "release", "ship it", "https://example.com/pr/9", id, title} {
+	for _, want := range []string{confirmPrompt(opID), "release", "ship it", releasePRURL(9), id, title} {
 		if !strings.Contains(ptyOutput, want) {
 			t.Errorf("pty output = %q, want it to contain %q", ptyOutput, want)
 		}
@@ -874,7 +875,8 @@ func TestApproveOperationID_Success_AfterChallengeIsDone(t *testing.T) {
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
-	op := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "s")
+	prepareReleaseWorkspace(t, ws)
+	op := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "s", "--ref", releasePRURL(1))
 	opID := op["operation"].(map[string]any)["id"].(string)
 	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, id), "done")
 

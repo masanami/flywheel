@@ -354,3 +354,37 @@ func TestErrorCodeSet_IsM1M2PlusS1CodesInBothDirections(t *testing.T) {
 		}
 	}
 }
+
+// loadM45ErrorCodeTable は docs/features/m4.5-learning-and-self-improvement.md の「エラーコードの追加」の表を読む。
+func loadM45ErrorCodeTable(t *testing.T) []codeExit {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read spec: %v", err)
+	}
+	return parseErrorCodeTable(t, string(data))
+}
+
+// M4.5 の表は 2 行（upstream_unavailable・dependency_cycle〔S2〕）。upstream_unavailable は M2 の表では
+// 終了コード 2（`gh` が無い）、M4.5 の表では 1（承認の ① で release を承認の対象にできない）で、
+// 表（errorCodeTable）は M2 の 2 を持ち、approve の経路が newReleaseNotApprovableError で 1 を出す。
+// dependency_cycle は S2 の実装で足す。
+func TestM45ErrorCodeTable_UpstreamUnavailableIsExit1OnTheApprovePath(t *testing.T) {
+	m45 := loadM45ErrorCodeTable(t)
+	if len(m45) != 2 {
+		t.Fatalf("M4.5 adds 2 error codes, table has %d: %+v", len(m45), m45)
+	}
+	want := map[ErrorCode]int{"upstream_unavailable": 1, "dependency_cycle": 1}
+	for _, e := range m45 {
+		if w, ok := want[e.Code]; !ok || w != e.ExitCode {
+			t.Errorf("unexpected M4.5 row %+v", e)
+		}
+	}
+	if got := ExitCodeFor(CodeUpstreamUnavailable); got != 2 {
+		t.Errorf("table exit of upstream_unavailable = %d, want 2 (M2: gh is missing)", got)
+	}
+	e := newReleaseNotApprovableError("m")
+	if e.Code != CodeUpstreamUnavailable || e.ExitCode != 1 {
+		t.Errorf("newReleaseNotApprovableError = %+v", e)
+	}
+}

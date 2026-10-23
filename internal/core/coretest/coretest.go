@@ -725,3 +725,42 @@ func SetRunArtifactVerifiedHead(t *testing.T, workspace string, runID int64, ref
 		t.Fatalf("coretest: SetRunArtifactVerifiedHead: %v", err)
 	}
 }
+
+// ApprovalHeadSHA はテスト専用のフィクスチャとして、opID（内部整数 ID）の release の承認の記録
+// （kind=release・decision=approved）のうち最新の行の head_sha を返す。承認の記録が無ければ
+// found=false、head_sha が NULL なら found=true・head=""。
+func ApprovalHeadSHA(t *testing.T, workspace string, opID int64) (head string, found bool) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		var h sql.NullString
+		err := tx.QueryRow(
+			`SELECT head_sha FROM approval WHERE operation_id = ? AND kind = 'release' AND decision = 'approved' ORDER BY id DESC LIMIT 1`, opID).Scan(&h)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found, head = true, h.String
+		return nil
+	}); err != nil {
+		t.Fatalf("coretest: ApprovalHeadSHA: %v", err)
+	}
+	return head, found
+}
+
+// CountReleaseApprovals はテスト専用のフィクスチャとして、kind=release の承認の記録の件数を返す。
+func CountReleaseApprovals(t *testing.T, workspace string) int {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var n int
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM approval WHERE kind = 'release'`).Scan(&n)
+	}); err != nil {
+		t.Fatalf("coretest: CountReleaseApprovals: %v", err)
+	}
+	return n
+}

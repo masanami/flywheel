@@ -373,9 +373,26 @@ type ChallengeWithPlanResponse struct {
 }
 
 // ChallengeApprovalResponse は課題の approve・reject の `{"approval": …, "challenge": …}`。
+//
+// 完了の承認では、同時に承認した release（Releases）と外した release（ExcludedReleases）も持つ
+// （release が 1 件も無いときは両方とも出さない）。
 type ChallengeApprovalResponse struct {
-	Approval  Approval  `json:"approval"`
-	Challenge Challenge `json:"challenge"`
+	Approval         Approval          `json:"approval"`
+	Challenge        Challenge         `json:"challenge"`
+	ExcludedReleases []ExcludedRelease `json:"excluded_releases,omitempty"`
+	Releases         []ApprovedRelease `json:"releases,omitempty"`
+}
+
+// ApprovedRelease は完了の承認で同時に承認した release 1 件と、承認の記録に残した head（完全形）。
+type ApprovedRelease struct {
+	HeadSHA     string `json:"head_sha"`
+	OperationID string `json:"operation_id"`
+}
+
+// ExcludedRelease は完了の承認で同時には承認せず pending のまま残した release 1 件と、外した理由の名前。
+type ExcludedRelease struct {
+	OperationID string `json:"operation_id"`
+	Reason      string `json:"reason"`
 }
 
 // ChallengeHoldResponse は answer の `{"challenge": …, "hold": …}`。

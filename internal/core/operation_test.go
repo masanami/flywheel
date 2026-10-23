@@ -241,7 +241,7 @@ func TestPrepareOperationApproval_AlreadyDecidedIsInvalidTransition(t *testing.T
 	}
 	att := verifiedAttestationForTest(t, op.ID)
 	if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
 	}, att); err != nil {
 		t.Fatalf("ExecuteOperationApproval() error = %v", err)
 	}
@@ -289,7 +289,7 @@ func TestExecuteOperationApproval_ApprovedRecordsApprovalAndBumpsChallengeVersio
 	}
 	att := verifiedAttestationForTest(t, op.ID)
 	opOut, approval, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
 	}, att)
 	if err != nil {
 		t.Fatalf("ExecuteOperationApproval() error = %v", err)
@@ -330,7 +330,7 @@ func TestExecuteOperationApproval_ApprovedRecordsChallengeEntityActivityEntry(t 
 	}
 	att := verifiedAttestationForTest(t, op.ID)
 	if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
 	}, att); err != nil {
 		t.Fatalf("ExecuteOperationApproval() error = %v", err)
 	}
@@ -445,7 +445,7 @@ func TestExecuteOperationApproval_WorksAfterChallengeIsDone(t *testing.T) {
 	}
 	att := verifiedAttestationForTest(t, op.ID)
 	opOut, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
 	}, att)
 	if err != nil {
 		t.Fatalf("ExecuteOperationApproval() error = %v", err)
@@ -466,21 +466,27 @@ func TestExecuteOperationApproval_VersionMismatchIsConflict(t *testing.T) {
 		t.Fatalf("PrepareOperationApproval() error = %v", err)
 	}
 
-	// 別プロセスが先に承認する。
-	att1 := verifiedAttestationForTest(t, op.ID)
-	if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
-	}, att1); err != nil {
-		t.Fatalf("first ExecuteOperationApproval() error = %v", err)
-	}
-
-	// 古い版のまま再試行すると conflict。
-	att2 := verifiedAttestationForTest(t, op.ID)
+	// ① の後に操作の版が進んだ（pending のまま）場合、古い版のままの ② は conflict。
+	// 別プロセスが先に承認・差し戻した場合は pending でなくなるため invalid_transition
+	// （判定の順は 存在 → pending → merged_unapproved → 版）。
+	att := verifiedAttestationForTest(t, op.ID)
 	_, _, err = s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
-	}, att2)
+		OperationID: op.ID, ExpectedVersion: prev.Version + 1, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
+	}, att)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+
+	if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
+		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
+	}, verifiedAttestationForTest(t, op.ID)); err != nil {
+		t.Fatalf("first ExecuteOperationApproval() error = %v", err)
+	}
+	_, _, err = s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
+		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
+	}, verifiedAttestationForTest(t, op.ID))
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("err = %v, want ErrInvalidTransition for an already-decided operation", err)
 	}
 }
 
@@ -509,7 +515,7 @@ func TestExecuteOperationApproval_ChallengeChangedIsConflict(t *testing.T) {
 
 	att := verifiedAttestationForTest(t, op.ID)
 	_, _, err = s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved,
+		OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1",
 	}, att)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
@@ -584,7 +590,7 @@ func TestListActivities_ChallengeEntryVersionsAreConsecutiveAcrossOperationChang
 			t.Fatalf("Prepare(%s) error = %v", opID, err)
 		}
 		if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-			OperationID: opID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: decision, Reason: reason,
+			OperationID: opID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: decision, Reason: reason, HeadSHA: "head1",
 		}, verifiedAttestationForTest(t, opID)); err != nil {
 			t.Fatalf("ExecuteOperationApproval(%s) error = %v", opID, err)
 		}
@@ -680,7 +686,7 @@ func TestExecuteOperationApproval_ChallengeEntryFailureRollsBackEverything(t *te
 			}
 			s.insertActivity = failSecondChallengeEntry
 			if _, _, err := s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
-				OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: decision, Reason: reason,
+				OperationID: op.ID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: decision, Reason: reason, HeadSHA: "head1",
 			}, verifiedAttestationForTest(t, op.ID)); err == nil {
 				t.Fatal("ExecuteOperationApproval() error = nil, want an error from the injected failure")
 			}

@@ -46,6 +46,7 @@ func TestExecuteApproval_ConflictDoesNotAddActivityLogEntry(t *testing.T) {
 	att := verifiedAttestationForTest(t, c.ID)
 	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("ExecuteApproval() error = %v, want ErrConflict", err)
@@ -76,6 +77,7 @@ func TestExecuteApproval_VerificationRejectedDoesNotAddActivityLogEntry(t *testi
 	// fail-closed の経路を通る（§クリティカル設計決定 1）。
 	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, Attestation{})
 	if !errors.Is(err, ErrVerificationRejected) {
 		t.Fatalf("err = %v, want ErrVerificationRejected", err)
@@ -132,6 +134,7 @@ func TestExecuteApproval_RecordsDecidedAt(t *testing.T) {
 
 	_, approval, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att)
 	if err != nil {
 		t.Fatalf("ExecuteApproval() error = %v", err)
@@ -173,6 +176,7 @@ func TestExecuteApproval_CompletionReleaseApprovalActivityChannelIsCLI(t *testin
 	att := verifiedAttestationForTest(t, c.ID)
 	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: headsForAll(prev),
 	}, att); err != nil {
 		t.Fatalf("ExecuteApproval() error = %v", err)
 	}

@@ -236,6 +236,9 @@ func failErr(stderr io.Writer, jsonMode bool, cliErr *Error) int {
 	} else {
 		writeTextError(stderr, cliErr.Code, cliErr.Message)
 	}
+	if cliErr.ExitCode != 0 {
+		return cliErr.ExitCode
+	}
 	return ExitCodeFor(cliErr.Code)
 }
 

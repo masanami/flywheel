@@ -94,6 +94,9 @@ type ApprovalPreview struct {
 	// OtherPendingOperations は、この完了の承認では承認されない未承認の
 	// 不可逆操作（delete・external_send・other。§決定事項の記録 A1）。
 	OtherPendingOperations []IrreversibleOperation
+	// VerifiedHeadSHAs は PendingReleases の release の ID ごとに、J5 が検証の入力にした
+	// 最新の head（latestVerifiedHead）。記録のない release は載せない（承認を止めない）。
+	VerifiedHeadSHAs map[string]string
 }
 
 // approvesPendingReleases は D12 の規則の正本: 「その操作が、対象の課題の
@@ -207,6 +210,16 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 				}
 				if op.Kind == OperationKindRelease {
 					preview.PendingReleases = append(preview.PendingReleases, op)
+					head, err := latestVerifiedHead(ctx, tx, op.Ref)
+					if err != nil {
+						return err
+					}
+					if head != nil {
+						if preview.VerifiedHeadSHAs == nil {
+							preview.VerifiedHeadSHAs = map[string]string{}
+						}
+						preview.VerifiedHeadSHAs[op.ID] = *head
+					}
 				} else {
 					preview.OtherPendingOperations = append(preview.OtherPendingOperations, op)
 				}
@@ -319,6 +332,15 @@ type ApprovalRequest struct {
 	// RejectedFields は課題の差し戻しでずれた欄（RejectedField の閉集合の値。重複は 1 つにし、
 	// 閉集合の順に記録する）。差し戻し以外・閉集合の外の値は ErrValidation。
 	RejectedFields []string
+
+	// ReleaseHeads と ExcludedReleaseIDs は、完了の承認（HoldRelease==false）で同時に承認する
+	// release の ID と ① で取った head の組（Operation.ID と HeadSHA だけを使う）と、① が外した
+	// release の ID。2 つの和集合が ② の時点の未承認の release の全体と一致しない入力・head が空の組・
+	// 承認する組の head が最新の検証の head（記録があるとき）と異なる入力は、何も書かず ErrConflict。
+	// 外した release は pending のまま残る。head は ② で取り直さず、承認の記録の head_sha にそのまま残す。
+	// 完了の承認以外（計画・差し戻し・HoldRelease）では使わない。
+	ReleaseHeads       []ReleaseHead
+	ExcludedReleaseIDs []string
 }
 
 // ExecuteApproval は approve（T5・T13・T14）・reject（T6・T15）の②（書き込み）。
@@ -452,7 +474,7 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		// activity とは別に、release の数だけ積む）。T14（HoldRelease==true）・
 		// 計画の承認（kind==ApprovalKindPlan）・reject では行わない。
 		if approvesPendingReleases(kind, req.Decision, req.HoldRelease) {
-			if err := autoApproveReleases(ctx, tc, att); err != nil {
+			if err := autoApproveReleases(ctx, tc, att, req); err != nil {
 				return err
 			}
 		}
@@ -472,9 +494,13 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 // release ごとに: (1) operation.state を "approved" にし version を1増やす、
 // (2) approval 行を1件（operation_id・kind=release つき）記録する、
 // (3) 作業ログへ entity="operation" のエントリを1件記録する。
-func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation) error {
+//
+// 承認する release は req.ReleaseHeads の組だけで、req の組と外した release（req.ExcludedReleaseIDs）の
+// 和集合が未承認の release の全体と一致しなければ、何も書かず ErrConflict を返す（外した release は
+// pending のまま残る）。
+func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation, req ApprovalRequest) error {
 	rows, err := tc.tx.QueryContext(ctx,
-		`SELECT id, version FROM operation WHERE challenge_id = ? AND kind = ? AND state = ? ORDER BY id ASC`,
+		`SELECT id, version, ref FROM operation WHERE challenge_id = ? AND kind = ? AND state = ? ORDER BY id ASC`,
 		tc.id, string(OperationKindRelease), string(OperationStatePending),
 	)
 	if err != nil {
@@ -483,13 +509,19 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 	type pendingRelease struct {
 		id      int64
 		version int
+		ref     *string
 	}
 	var pending []pendingRelease
 	for rows.Next() {
 		var p pendingRelease
-		if err := rows.Scan(&p.id, &p.version); err != nil {
+		var ref sql.NullString
+		if err := rows.Scan(&p.id, &p.version, &ref); err != nil {
 			_ = rows.Close()
 			return err
+		}
+		if ref.Valid {
+			v := ref.String
+			p.ref = &v
 		}
 		pending = append(pending, p)
 	}
@@ -500,7 +532,54 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 		return err
 	}
 
+	// 入力の検査。承認する組（head つき）と外した release が互いに素で、和集合が未承認の
+	// release の全体と一致すること。
+	pendingIDs := make(map[int64]bool, len(pending))
 	for _, p := range pending {
+		pendingIDs[p.id] = true
+	}
+	seen := make(map[int64]bool, len(pending))
+	heads := make(map[int64]string, len(req.ReleaseHeads))
+	for _, rh := range req.ReleaseHeads {
+		oid, ok := parseOperationID(rh.Operation.ID)
+		if !ok || !pendingIDs[oid] || seen[oid] {
+			return ErrConflict
+		}
+		seen[oid] = true
+		if rh.HeadSHA == nil || strings.TrimSpace(*rh.HeadSHA) == "" {
+			return ErrConflict
+		}
+		heads[oid] = strings.TrimSpace(*rh.HeadSHA)
+	}
+	for _, id := range req.ExcludedReleaseIDs {
+		oid, ok := parseOperationID(id)
+		if !ok || !pendingIDs[oid] || seen[oid] {
+			return ErrConflict
+		}
+		seen[oid] = true
+	}
+	if len(seen) != len(pending) {
+		return ErrConflict
+	}
+	for _, p := range pending {
+		head, approve := heads[p.id]
+		if !approve {
+			continue
+		}
+		verified, err := latestVerifiedHead(ctx, tc.tx, p.ref)
+		if err != nil {
+			return err
+		}
+		if verified != nil && *verified != head {
+			return ErrConflict
+		}
+	}
+
+	for _, p := range pending {
+		head, approve := heads[p.id]
+		if !approve {
+			continue
+		}
 		// 書き込みの形（operation の更新・approval 行・作業ログのエントリ）は
 		// 単独の承認と同じ実装を共有する（operation.go の
 		// approveOperationInTx。self-review 指摘）。課題の版はこの経路では
@@ -512,6 +591,7 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 			decision:    ApprovalDecisionApproved,
 			att:         att,
 			nowStr:      tc.nowStr,
+			headSHA:     head,
 		}); err != nil {
 			return err
 		}

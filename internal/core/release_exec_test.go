@@ -415,7 +415,7 @@ func TestCancel_BumpsVersionsKeepsApprovalWritesTwoLogs(t *testing.T) {
 	// 取り消しの前に得た版を添えた承認の ② は conflict
 	_, _, err := f.s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
 		OperationID: formatOperationID(f.opID), ExpectedVersion: before.opVersion, ExpectedChallengeVersion: before.chVersion,
-		Decision: ApprovalDecisionApproved}, verifiedAttestationForTest(t, formatOperationID(f.opID)))
+		Decision: ApprovalDecisionApproved, HeadSHA: "head1"}, verifiedAttestationForTest(t, formatOperationID(f.opID)))
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("stale approval after cancel: err = %v, want ErrConflict", err)
 	}
@@ -426,7 +426,7 @@ func TestCancel_BumpsVersionsKeepsApprovalWritesTwoLogs(t *testing.T) {
 	}
 	if _, _, err := f.s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
 		OperationID: prev.OperationID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion,
-		Decision: ApprovalDecisionApproved}, verifiedAttestationForTest(t, prev.OperationID)); err != nil {
+		Decision: ApprovalDecisionApproved, HeadSHA: "head1"}, verifiedAttestationForTest(t, prev.OperationID)); err != nil {
 		t.Errorf("re-approval error = %v", err)
 	}
 }

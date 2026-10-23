@@ -48,7 +48,7 @@ func TestUIRefusedOperationApprovalWritesNothing(t *testing.T) { // AC-169
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := OperationApprovalRequest{OperationID: id, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved}
+	req := OperationApprovalRequest{OperationID: id, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion, Decision: ApprovalDecisionApproved, HeadSHA: "head1"}
 	before := coretest.DumpTables(t, dir, allStoreTables...)
 	if _, _, err := s.ExecuteOperationApproval(context.Background(), req, uiAttestationForTest(t, id)); !errors.Is(err, ErrVerificationRejected) {
 		t.Fatalf("err = %v, want ErrVerificationRejected", err)

@@ -172,8 +172,8 @@ func TestRelayed_SuccessForEveryCommand(t *testing.T) {
 	t.Run("approve and reject OP-ID", func(t *testing.T) {
 		ws := initializedWorkspace(t)
 		id := createForCase(t, ws)
-		op1 := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "a")["operation"].(map[string]any)["id"].(string)
-		op2 := runJSON(t, ws, "op", "add", id, "--kind", "release", "--summary", "b")["operation"].(map[string]any)["id"].(string)
+		op1 := addPRRelease(t, ws, id, "a")
+		op2 := addPRRelease(t, ws, id, "b")
 		runJSON(t, ws, append([]string{"approve", op1}, rel("sess-op1", "q-op1")...)...)
 		runJSON(t, ws, append([]string{"reject", op2, "--reason", "no"}, rel("sess-op2", "q-op2")...)...)
 		requireRelayedRecorded(t, ws, "sess-op1", "q-op1")
