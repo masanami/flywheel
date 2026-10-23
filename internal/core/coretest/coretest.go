@@ -629,11 +629,20 @@ func InsertReleaseApproval(t *testing.T, workspace string, opID int64, headSHA, 
 }
 
 // InsertApprovedRelease はテスト専用のフィクスチャとして、承認済み（state=approved）の release と
-// その承認の記録（head_sha つき）を作り、操作の内部整数 ID を返す。
+// その承認の記録（head_sha つき）を作り、操作の内部整数 ID を返す。版の組は実物の承認と同じ（操作の版 2・承認の target_version 1）。
 func InsertApprovedRelease(t *testing.T, workspace string, challengeID int, ref, headSHA, decidedAt string) int64 {
 	t.Helper()
 	id := InsertReleaseOperation(t, workspace, challengeID, ref, "approved")
 	InsertReleaseApproval(t, workspace, id, headSHA, decidedAt)
+	// 実物の承認と同じ版の組にする: 承認で操作の版が 1 上がり、承認の行の target_version は承認前の版（1）。
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE operation SET version = 2 WHERE id = ?`, id)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertApprovedRelease: %v", err)
+	}
 	return id
 }
 
