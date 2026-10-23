@@ -467,3 +467,42 @@ func TestApproveHead_HoldReleaseCreatesNoReleaseApproval(t *testing.T) {
 		t.Errorf("--hold-release must not print releases: %v", doc)
 	}
 }
+
+// --- 完了の承認での merged_unapproved の release（M45H16。AC-107a〜AC-107c） ---
+
+func (f *completionFixture) revokedAsMergedUnapproved(t *testing.T, op string) {
+	t.Helper()
+	coretest.InsertOperationExecution(t, f.ws, opNumber(op), coretest.ExecutionAttempt{
+		StartedAt: "2026-10-22T00:00:00.000Z", EndedAt: "2026-10-22T00:00:01.000Z", Result: "merged_unapproved",
+	})
+}
+
+func TestApproveHead_CompletionExcludesAReleaseRevokedAsMergedUnapprovedOnTheTerminal(t *testing.T) {
+	f := newCompletionFixture(t, map[int]string{1: releaseHead(1, 0), 2: releaseHead(2, 0)}, releasePRURL(1), releasePRURL(2))
+	f.revokedAsMergedUnapproved(t, f.ops[0])
+	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"approve", "--workspace", f.ws, "--json", f.id}, f.id)
+	if code != 0 {
+		t.Fatalf("exit=%d (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
+	}
+	if !strings.Contains(ptyOutput, "merged_unapproved") || !strings.Contains(ptyOutput, "承認し直せません") {
+		t.Errorf("summary must name merged_unapproved and its description: %q", ptyOutput)
+	}
+	if f.challengeStatus(t) != "done" || f.state(t, f.ops[0]) != "pending" || f.state(t, f.ops[1]) != "approved" {
+		t.Errorf("challenge %s, releases %s %s", f.challengeStatus(t), f.state(t, f.ops[0]), f.state(t, f.ops[1]))
+	}
+}
+
+func TestApproveHead_RelayedJSONNamesMergedUnapproved(t *testing.T) {
+	f := newCompletionFixture(t, map[int]string{1: releaseHead(1, 0)}, releasePRURL(1))
+	f.revokedAsMergedUnapproved(t, f.ops[0])
+	ex := jsonList(t, f.relayed(t, f.id), "excluded_releases")
+	if len(ex) != 1 || ex[0]["operation_id"] != f.ops[0] || ex[0]["reason"] != "merged_unapproved" {
+		t.Errorf("excluded_releases = %v", ex)
+	}
+	if f.challengeStatus(t) != "done" || f.state(t, f.ops[0]) != "pending" {
+		t.Errorf("challenge %s release %s", f.challengeStatus(t), f.state(t, f.ops[0]))
+	}
+	if n := coretest.CountReleaseApprovals(t, f.ws); n != 0 {
+		t.Errorf("release approval rows = %d, want 0", n)
+	}
+}

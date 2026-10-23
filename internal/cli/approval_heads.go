@@ -21,6 +21,7 @@ const (
 	reasonNotAPRURL            excludeReason = "not_a_pr_url"
 	reasonRepoNotDeclared      excludeReason = "repo_not_declared"
 	reasonVerifiedHeadMismatch excludeReason = "verified_head_mismatch"
+	reasonMergedUnapproved     excludeReason = "merged_unapproved"
 )
 
 // description は要約に示す、理由の説明の文。
@@ -34,6 +35,8 @@ func (r excludeReason) description() string {
 		return "参照の PR のリポジトリが connectors.json の repos[].remote にありません"
 	case reasonVerifiedHeadMismatch:
 		return "検証の後に push されたコミットがあります（取得した head が J5 の検証の head と異なります）"
+	case reasonMergedUnapproved:
+		return "承認していない head で既にマージされ、承認を取り消した release です（承認し直せません。差し戻しは reject <OP-ID>）"
 	}
 	return string(r)
 }
@@ -48,9 +51,10 @@ type releaseDecision struct {
 }
 
 // resolveReleaseDecisions は ops（release）それぞれについて、外す理由か承認する head を決める。
-// 判定の順は PR の URL か → リポジトリが宣言にあるか → head の取得 → 検証の head との比較。
+// 判定の順は 直前の試行の結果が merged_unapproved か → PR の URL か → リポジトリが宣言にあるか → head の取得 → 検証の head との比較。
 // verified は release の ID から最新の検証の head を返す（記録なしは ok=false）。
-func resolveReleaseDecisions(ctx context.Context, ws string, ops []core.IrreversibleOperation, verified func(id string) (string, bool)) ([]releaseDecision, error) {
+// mergedUnapproved は release の ID について、直前の試行の結果が merged_unapproved かを返す。
+func resolveReleaseDecisions(ctx context.Context, ws string, ops []core.IrreversibleOperation, verified func(id string) (string, bool), mergedUnapproved func(id string) bool) ([]releaseDecision, error) {
 	declared := map[string]bool{}
 	decl, err := core.LoadConnectorsDeclaration(ws)
 	switch {
@@ -69,6 +73,10 @@ func resolveReleaseDecisions(ctx context.Context, ws string, ops []core.Irrevers
 	var fetchIdx []int
 	for i, op := range ops {
 		out[i].Op = op
+		if mergedUnapproved(op.ID) {
+			out[i].Reason = reasonMergedUnapproved
+			continue
+		}
 		if op.Ref == nil {
 			out[i].Reason = reasonNotAPRURL
 			continue
@@ -175,6 +183,8 @@ func completionReleaseDecisions(ctx context.Context, a Args, p *core.ApprovalPre
 	return resolveReleaseDecisions(ctx, a.Store.Workspace(), p.PendingReleases, func(id string) (string, bool) {
 		v, ok := p.VerifiedHeadSHAs[id]
 		return v, ok
+	}, func(id string) bool {
+		return p.LastExecutionResults[id] == core.ExecutionResultMergedUnapproved
 	})
 }
 
@@ -190,6 +200,9 @@ func operationReleaseDecision(ctx context.Context, a Args, p *core.OperationAppr
 			return "", false
 		}
 		return *p.VerifiedHeadSHA, true
+	}, func(string) bool {
+		// 単独の承認の merged_unapproved は core が ① で拒否する（rejectReapproval）。
+		return false
 	})
 	if err != nil {
 		return nil, err

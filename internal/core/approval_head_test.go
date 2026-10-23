@@ -402,3 +402,66 @@ func TestOperationApproval_OnlyTheLatestAttemptDecides(t *testing.T) {
 		t.Fatalf("approve after a later attempt: %v", err)
 	}
 }
+
+// --- 完了の承認での merged_unapproved の release（M45H16。AC-107a〜AC-107c） ---
+
+// AC-107a: ① は release ごとに、直前の試行の結果を返す（試行のない release は載せない）。
+func TestApprovalPreview_LastExecutionResultsIsTheLatestAttemptOfEachRelease(t *testing.T) {
+	f := newHeadFixture(t)
+	f.revokeAsMergedUnapproved(t, f.relA)
+	prev, err := f.s.PrepareApproval(context.Background(), f.c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prev.LastExecutionResults[f.relA.ID]; got != ExecutionResultMergedUnapproved {
+		t.Errorf("relA last result = %q, want merged_unapproved", got)
+	}
+	if got, ok := prev.LastExecutionResults[f.relB.ID]; ok {
+		t.Errorf("relB (no attempt) last result = %q, want none", got)
+	}
+}
+
+// 直前の試行（id が最大の行）だけが結果になる。
+func TestApprovalPreview_LastExecutionResultsUsesOnlyTheLatestAttempt(t *testing.T) {
+	f := newHeadFixture(t)
+	oid, _ := parseOperationID(f.relA.ID)
+	for i, r := range []ExecutionResult{ExecutionResultMergedUnapproved, ExecutionResultHeadChanged} {
+		coretest.InsertOperationExecution(t, f.s.workspace, oid, coretest.ExecutionAttempt{
+			StartedAt: execTS(2 * i), EndedAt: execTS(2*i + 1), Result: string(r),
+		})
+	}
+	prev, err := f.s.PrepareApproval(context.Background(), f.c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prev.LastExecutionResults[f.relA.ID]; got != ExecutionResultHeadChanged {
+		t.Errorf("relA last result = %q, want head_changed", got)
+	}
+}
+
+// AC-107b: 承認する組に merged_unapproved の release が入っていたら、何も書かず verification_rejected。
+func TestExecuteApproval_RevokedAsMergedUnapprovedInTheApprovedSetIsRejectedAndWritesNothing(t *testing.T) {
+	f := newHeadFixture(t)
+	f.revokeAsMergedUnapproved(t, f.relA)
+	before := f.dump(t)
+	err := f.approve(t, []ReleaseHead{f.rh(f.relA, "h"), f.rh(f.relB, "h")}, nil)
+	assertReapprovalForbidden(t, err)
+	if f.dump(t) != before {
+		t.Error("the store changed on a rejected approval")
+	}
+}
+
+// AC-107c: 外した組に入っていれば受け付け、その release は pending のまま残る。
+func TestExecuteApproval_RevokedAsMergedUnapprovedInTheExcludedSetIsAccepted(t *testing.T) {
+	f := newHeadFixture(t)
+	f.revokeAsMergedUnapproved(t, f.relA)
+	if err := f.approve(t, []ReleaseHead{f.rh(f.relB, "h")}, []string{f.relA.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.state(t, f.relA); got != OperationStatePending {
+		t.Errorf("relA state = %s, want pending", got)
+	}
+	if got := f.state(t, f.relB); got != OperationStateApproved {
+		t.Errorf("relB state = %s, want approved", got)
+	}
+}
