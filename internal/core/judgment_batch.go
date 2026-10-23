@@ -59,6 +59,8 @@ func NotStartedReasonValues() []NotStartedReason {
 // NotStarted は周で起動しなかった課題 1 件（not_started の 1 要素）。
 type NotStarted struct {
 	ChallengeID string
+	// OperationID は release の実行の段・`op exec` の要素だけが持つ不可逆操作の ID（それ以外は空）。
+	OperationID string
 	Reason      NotStartedReason
 	// Detail は人が読む補足（例: 取得の失敗の原因）。JSON 出力の形
 	// （challenge_id・reason）には含めず、テキスト出力にだけ使う。空なら無し。
