@@ -47,6 +47,8 @@ var notStartedReasonValues = []NotStartedReason{
 	NotStartedSerialized,
 	NotStartedWaitingExternal,
 	NotStartedPlanUnavailable,
+	NotStartedInProgress,
+	NotStartedNotExecutable,
 }
 
 // NotStartedReasonValues は NotStartedReason の閉集合（§IF / API「cycle の JSON 出力」の
@@ -62,8 +64,8 @@ type NotStarted struct {
 	// OperationID は release の実行の段・`op exec` の要素だけが持つ不可逆操作の ID（それ以外は空）。
 	OperationID string
 	Reason      NotStartedReason
-	// Detail は人が読む補足（例: 取得の失敗の原因）。JSON 出力の形
-	// （challenge_id・reason）には含めず、テキスト出力にだけ使う。空なら無し。
+	// Detail は人が読む補足（例: 取得の失敗の原因）。テキスト出力に出し、JSON では空でないときだけ
+	// detail に出す。空なら無し。
 	Detail string
 }
 

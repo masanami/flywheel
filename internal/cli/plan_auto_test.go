@@ -380,8 +380,8 @@ func TestPlanAuto_UpstreamFetchFailure_NotStartedAndNothingChanges(t *testing.T)
 			t.Fatalf("%v: not_started = %v, want 1", args, notStarted)
 		}
 		ns := notStarted[0].(map[string]any)
-		if ns["challenge_id"] != id || ns["reason"] != "upstream_fetch_failed" || len(ns) != 2 {
-			t.Errorf("%v: not_started[0] = %v, want exactly {challenge_id, reason: upstream_fetch_failed}", args, ns)
+		if ns["challenge_id"] != id || ns["reason"] != "upstream_fetch_failed" || len(ns) != 3 || ns["detail"] == "" {
+			t.Errorf("%v: not_started[0] = %v, want {challenge_id, reason: upstream_fetch_failed, detail}", args, ns)
 		}
 		if items := phase["items"].([]any); len(items) != 0 {
 			t.Errorf("%v: items = %v, want []", args, items)

@@ -27,7 +27,7 @@ func cycleS2Invoker(verdict string, calls *[]JudgmentPoint) JudgmentInvoker {
 func (f *j5Fixture) cycleInput(inv JudgmentInvoker) CycleRunInput {
 	return CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream,
-		Delegate: f.deleg, Git: f.git, Reconcile: f.branches, Checks: f.checks,
+		Delegate: f.deleg, Git: f.git, Reconcile: f.branches, Checks: f.checks, Merger: &fakeRelease{},
 	}
 }
 
@@ -45,7 +45,7 @@ func TestRunCycle_DelegatesThenVerifiesInTheSameCycle(t *testing.T) {
 		t.Fatalf("RunCycle: %v", err)
 	}
 
-	if got := fmt.Sprint(phaseNames(res)); got != "[ingest classify plan run verify]" {
+	if got := fmt.Sprint(phaseNames(res)); got != "[release ingest classify plan run verify]" {
 		t.Fatalf("phases = %s", got)
 	}
 	run := phaseOfResult(t, res, CyclePhaseRun)

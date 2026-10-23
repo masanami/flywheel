@@ -764,3 +764,59 @@ func CountReleaseApprovals(t *testing.T, workspace string) int {
 	}
 	return n
 }
+
+// CycleTriggers は cycle 表の全行の trigger と lock 表の行数を返す（trigger は ID の昇順）。
+func CycleTriggers(t *testing.T, workspace string) (triggers []string, locks int) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT trigger FROM cycle ORDER BY id ASC`)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				return err
+			}
+			triggers = append(triggers, s)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return tx.QueryRow(`SELECT COUNT(*) FROM lock`).Scan(&locks)
+	}); err != nil {
+		t.Fatalf("coretest: CycleTriggers: %v", err)
+	}
+	return triggers, locks
+}
+
+// SetOperationState はテスト専用のフィクスチャとして、opID（内部整数 ID）の不可逆操作の state を
+// 書き換える（承認の記録は作らない。端末での承認を経ずに approved の操作を置くため）。
+func SetOperationState(t *testing.T, workspace string, opID int64, state string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE operation SET state = ? WHERE id = ?`, state, opID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: SetOperationState: %v", err)
+	}
+}
+
+// CountOperationExecutions は operation_execution 表（実行の試行）の行数を返す。
+func CountOperationExecutions(t *testing.T, workspace string) int {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var n int
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM operation_execution`).Scan(&n)
+	}); err != nil {
+		t.Fatalf("coretest: CountOperationExecutions: %v", err)
+	}
+	return n
+}

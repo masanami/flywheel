@@ -401,6 +401,37 @@ func TestCycleCommand_RequiredArgumentsMatchM3IFAPITable(t *testing.T) {
 	}
 }
 
+// TestOpExecCommand_MatchesM45IFAPITable は、`op exec` の名前と書式（位置引数は任意の 1 つ・
+// 必須のフラグなし）が m4.5 の §IF / API の表のとおりであることを確かめる。
+func TestOpExecCommand_MatchesM45IFAPITable(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	sigs, ok := parseIFAPISignatures(t, string(data))["op exec"]
+	if !ok || len(sigs) != 1 {
+		t.Fatalf("m4.5 spec's IF/API table has %d `op exec` rows, want 1", len(sigs))
+	}
+	want := sigs[0]
+
+	cmd, ok := registeredCommands()["op exec"]
+	if !ok {
+		t.Fatal("op exec is not registered in defaultCommands()")
+	}
+	if cmd.MinPositional != want.minPositional || cmd.MaxPositional != 1 {
+		t.Errorf("op exec: Min/MaxPositional = %d/%d, IF/API table says min %d and one optional <OP-ID>", cmd.MinPositional, cmd.MaxPositional, want.minPositional)
+	}
+	got := map[string]bool{}
+	for _, f := range cmd.Flags {
+		if f.Required {
+			got[f.Name] = true
+		}
+	}
+	if !reflect.DeepEqual(got, want.required) {
+		t.Errorf("op exec: required flags = %v, IF/API table says %v", got, want.required)
+	}
+}
+
 // TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats は、
 // ifAPISkipCommands で汎用比較から外した classify について、m1・m3 それぞれの
 // 書式が仕様書のとおりであること（m1 の行を書き換えていないこと）と、登録表の
@@ -737,6 +768,9 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	wantSet["run"] = true
 	// #105: 同じ理由で、実装済みの `budget` を個別に足す。
 	wantSet["budget"] = true
+	// M4.5 S1（#310）: 同じ理由で、実装済みの `op exec` を個別に足す（書式は
+	// TestOpExecCommand_MatchesM45IFAPITable が m4.5 の表と照合する）。
+	wantSet["op exec"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")
