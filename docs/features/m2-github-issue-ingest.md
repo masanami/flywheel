@@ -388,7 +388,7 @@ M1 のエラーコードの表（閉集合）に次を足す。
 |---|---|---|
 | `config_not_found` | 2 | 取り込み元の宣言ファイルが無い |
 | `config_invalid` | 2 | 取り込み元の宣言が規則に反する（解釈できない JSON を含む） |
-| `upstream_unavailable` | 2 | 上流へ接続する手段（`gh`）が無い |
+| `upstream_unavailable` | 2 | 上流へ接続する手段（`gh`）が無い（この経路の終了コードは 2。M4.5 の承認の ① の経路だけ 1） |
 
 `--source` に宣言に無い id を指定したときは M1 の `validation_failed`（終了コード 1）。`mark-read` は M1 の `not_found`・`validation_failed`・`terminal_state` を使い、エラーコードを足さない。
 
