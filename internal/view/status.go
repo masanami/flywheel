@@ -7,7 +7,9 @@ type Discrepancy struct {
 	ChallengeID string `json:"challenge_id"`
 	// ChallengeIDs は dependency_cycle の輪の課題の ID（昇順）。それ以外の要素では省く。
 	ChallengeIDs []string `json:"challenge_ids,omitempty"`
-	Kinds        []string `json:"kinds"`
+	// CycleOnly は種類が dependency_cycle だけの要素で true（帯の件数・絞り込みに数えない）。それ以外では省く。
+	CycleOnly bool     `json:"cycle_only,omitempty"`
+	Kinds     []string `json:"kinds"`
 	// OperationID は merged_unapproved の release の ID。上流の食い違いだけの要素では省く。
 	OperationID string `json:"operation_id,omitempty"`
 }
@@ -55,7 +57,7 @@ func DiscrepancyKinds(kinds []core.DiscrepancyKind) []string {
 func FromDiscrepancies(ds []core.Discrepancy) []Discrepancy {
 	out := make([]Discrepancy, 0, len(ds))
 	for _, d := range ds {
-		out = append(out, Discrepancy{ChallengeID: d.ChallengeID, Kinds: DiscrepancyKinds(d.Kinds), OperationID: d.OperationID, ChallengeIDs: d.ChallengeIDs})
+		out = append(out, Discrepancy{ChallengeID: d.ChallengeID, Kinds: DiscrepancyKinds(d.Kinds), OperationID: d.OperationID, ChallengeIDs: d.ChallengeIDs, CycleOnly: d.CycleOnly()})
 	}
 	return out
 }

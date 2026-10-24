@@ -78,7 +78,7 @@ it("AC-184: 帯は区分ごとの件数をワークスペースごとの行に�
     "承認待ち 3",
     "未回答の問い 1",
     "不可逆操作の承認 1",
-    "上流との食い違い 1",
+    "食い違い 1",
     "予算の使い切り 1",
     "トリアージ 1",
   ]);
@@ -215,7 +215,7 @@ it("M45H19: dependency_cycle だけの食い違いは帯の件数にも絞り込
   const nh = {
     ...base,
     discrepancies: [
-      { challenge_id: "C-1", kinds: ["dependency_cycle"] },
+      { challenge_id: "C-1", kinds: ["dependency_cycle"], cycle_only: true },
       { challenge_id: "C-2", kinds: ["upstream_closed", "dependency_cycle"] },
       { challenge_id: "C-3", kinds: ["merged_unapproved"] },
       { challenge_id: "C-4", kinds: ["dependency_cycle", "upstream_updated"] },
@@ -235,9 +235,33 @@ it("M45H19: 種類が空の食い違いは帯の件数にも絞り込みにも�
     slots: [],
     discrepancies: [
       { challenge_id: "C-1", kinds: [] },
-      { challenge_id: "C-2", kinds: ["dependency_cycle"] },
+      { challenge_id: "C-2", kinds: ["dependency_cycle"], cycle_only: true },
     ],
   } as unknown as StatusNeedsHuman;
   expect(countsOf(nh).discrepancies).toBe(1);
   expect([...challengeIdsOf(nh, "discrepancies", [])]).toEqual(["C-1"]);
+});
+
+it("同じ課題に merged_unapproved の要素が複数あっても、件数と絞り込みは課題の数でそろう", () => {
+  const nh = {
+    challenges: [],
+    operations: [],
+    budget_exhausted: [],
+    triage: [],
+    slots: [],
+    discrepancies: [
+      {
+        challenge_id: "C-1",
+        kinds: ["merged_unapproved"],
+        operation_id: "OP-1",
+      },
+      {
+        challenge_id: "C-1",
+        kinds: ["merged_unapproved"],
+        operation_id: "OP-2",
+      },
+    ],
+  } as unknown as StatusNeedsHuman;
+  expect(countsOf(nh).discrepancies).toBe(1);
+  expect(challengeIdsOf(nh, "discrepancies", []).size).toBe(1);
 });

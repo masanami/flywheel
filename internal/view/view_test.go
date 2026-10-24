@@ -244,7 +244,7 @@ func TestFromDiscrepancies_ChallengeIDsOmittedUnlessDependencyCycle(t *testing.T
 		{ChallengeID: "C-1", Kinds: []core.DiscrepancyKind{core.DiscrepancyKindDependencyCycle}, ChallengeIDs: []string{"C-1", "C-2"}},
 		{ChallengeID: "C-3", Kinds: []core.DiscrepancyKind{core.DiscrepancyKindUpstreamClosed}},
 	}))
-	want := `[{"challenge_id":"C-1","challenge_ids":["C-1","C-2"],"kinds":["dependency_cycle"]},{"challenge_id":"C-3","kinds":["upstream_closed"]}]`
+	want := `[{"challenge_id":"C-1","challenge_ids":["C-1","C-2"],"cycle_only":true,"kinds":["dependency_cycle"]},{"challenge_id":"C-3","kinds":["upstream_closed"]}]`
 	if got != want {
 		t.Errorf("got %s, want %s", got, want)
 	}

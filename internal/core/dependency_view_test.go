@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func insertBindingForTest(t *testing.T, s *Store, cid int64, upstream, policy string) {
@@ -115,6 +116,28 @@ func TestGetOverview_UnmetDependenciesAndCycleDiscrepancies(t *testing.T) {
 	for i, d := range cycles {
 		if d.ChallengeID != ring[i] || !reflect.DeepEqual(d.Kinds, []DiscrepancyKind{DiscrepancyKindDependencyCycle}) || !reflect.DeepEqual(d.ChallengeIDs, ring) {
 			t.Errorf("discrepancy[%d] = %+v, want %s with ring %v", i, d, ring[i], ring)
+		}
+		if !d.CycleOnly() {
+			t.Errorf("discrepancy[%d] = %+v, want CycleOnly() (実ストアの循環は GetOverview 経由でも循環だけ)", i, d)
+		}
+	}
+	// 実ストアの輪から導いたカードには、食い違いの印も review_discrepancy も付かない。
+	ch, err := s.GetChallenge(ctx, "C-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, err := s.DeriveCard(ctx, ch.Challenge, ov, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range card.Modifiers {
+		if m == CardModifierDiscrepancy {
+			t.Errorf("cycle-only card has discrepancy modifier: %+v", card.Modifiers)
+		}
+	}
+	for _, a := range card.NextHumanActions {
+		if a == CardActionReviewDiscrepancy {
+			t.Errorf("cycle-only card has review_discrepancy: %+v", card.NextHumanActions)
 		}
 	}
 }

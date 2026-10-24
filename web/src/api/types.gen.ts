@@ -94,6 +94,7 @@ export interface Challenge {
 export interface Discrepancy {
   challenge_id: string;
   challenge_ids?: string[];
+  cycle_only?: boolean;
   kinds: string[];
   operation_id?: string;
 }
