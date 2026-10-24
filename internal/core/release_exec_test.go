@@ -739,7 +739,7 @@ func TestWriteFailure_RollsBackEverything(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return cancelReleaseInTx(context.Background(), tx, rec, releaseOutcomeWrite{opID: f.opID, challengeID: f.cid, attemptID: att.ID, version: 2, result: ExecutionResultHeadChanged, trigger: "op exec", at: execTime(2)})
+		return f.s.cancelReleaseInTx(context.Background(), tx, rec, releaseOutcomeWrite{opID: f.opID, challengeID: f.cid, attemptID: att.ID, version: 2, result: ExecutionResultHeadChanged, trigger: "op exec", at: execTime(2)})
 	})
 	if err == nil {
 		t.Fatal("want error")
