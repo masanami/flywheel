@@ -32,6 +32,8 @@ type fakeRelease struct {
 	mergeArgs [][]string
 	// onMerge が非 nil なら、MergePullRequest の呼び出しの時点で（記録の前に）呼ぶ。
 	onMerge func()
+	// onGet が非 nil なら、GetPullRequestChecks の呼び出しの時点で呼ぶ。
+	onGet func()
 }
 
 func truePtr() *bool { v := true; return &v }
@@ -44,6 +46,9 @@ func (f *fakeRelease) GetPullRequestChecks(_ context.Context, _ string, _ int) (
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getCalls++
+	if f.onGet != nil {
+		f.onGet()
+	}
 	if f.getErr != nil {
 		return UpstreamPullRequestChecks{}, f.getErr
 	}
@@ -755,6 +760,8 @@ func countAction(as []Activity, action string) int {
 // 終わっていない試行の ID（固定の文字列ではない）である。
 func TestExecuteReleases_ChangedAfterAttemptStartedReportsTheAttemptID(t *testing.T) {
 	f := newRelFixture(t)
+	// マージの依頼が失敗した（依頼していない）場合は、従来どおり not_started になる（M45H18）。
+	f.fake.mergeErr = errors.New("merge refused")
 	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
 	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
 	if err != nil {
@@ -773,6 +780,41 @@ func TestExecuteReleases_ChangedAfterAttemptStartedReportsTheAttemptID(t *testin
 	}
 	if at[0].open() {
 		t.Errorf("attempt %+v is still open, want closed", at[0])
+	}
+}
+
+// M45H18: マージを依頼した後に試行の記録が衝突しても、release は merge_unconfirmed として出力に残る。
+func TestExecuteReleases_ConflictAfterMergeRequestIsMergeUnconfirmed(t *testing.T) {
+	f := newRelFixture(t)
+	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
+	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
+	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
+	if err != nil {
+		t.Fatalf("ExecuteReleases() error = %v", err)
+	}
+	if len(res.NotStarted) != 0 || len(res.Items) != 1 {
+		t.Fatalf("Items = %+v, NotStarted = %+v, want 1 item and no not_started", res.Items, res.NotStarted)
+	}
+	it := res.Items[0]
+	if it.Result != ExecutionResultMergeUnconfirmed || it.OperationID != formatOperationID(f.opID) || it.Detail == "" {
+		t.Errorf("item = %+v, want merge_unconfirmed with a detail", it)
+	}
+}
+
+// M45H18: マージの依頼の前（先頭の読み取りで merged_unapproved）の衝突は not_started のまま。
+func TestExecuteReleases_ConflictBeforeMergeRequestStaysNotStarted(t *testing.T) {
+	f := newRelFixture(t)
+	f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: "other", MergeCommitSHA: "m1"}
+	f.fake.onGet = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
+	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
+	if err != nil {
+		t.Fatalf("ExecuteReleases() error = %v", err)
+	}
+	if len(res.Items) != 0 || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedInProgress {
+		t.Fatalf("Items = %+v, NotStarted = %+v, want 1 in_progress not_started", res.Items, res.NotStarted)
+	}
+	if len(f.fake.mergeArgs) != 0 {
+		t.Errorf("merge must not be requested: %v", f.fake.mergeArgs)
 	}
 }
 

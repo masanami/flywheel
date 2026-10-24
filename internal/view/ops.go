@@ -98,6 +98,7 @@ type ReleaseItem struct {
 	ApprovedHead        *string `json:"approved_head"`
 	ChallengeID         string  `json:"challenge_id"`
 	ConsecutiveFailures int     `json:"consecutive_failures"`
+	Detail              string  `json:"detail,omitempty"`
 	MergeCommit         *string `json:"merge_commit"`
 	ObservedHead        *string `json:"observed_head"`
 	OperationID         string  `json:"operation_id"`
@@ -212,6 +213,7 @@ func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []c
 			ApprovedHead:        strOrNil(it.ApprovedHead),
 			ChallengeID:         it.ChallengeID,
 			ConsecutiveFailures: it.ConsecutiveFailures,
+			Detail:              it.Detail,
 			MergeCommit:         strOrNil(it.MergeCommit),
 			ObservedHead:        strOrNil(it.ObservedHead),
 			OperationID:         it.OperationID,

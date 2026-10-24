@@ -73,6 +73,8 @@ type ReleaseExecItem struct {
 	ObservedHead        string
 	MergeCommit         string
 	ConsecutiveFailures int
+	// Detail は結果が merge_unconfirmed で、マージの依頼の後に試行の記録を書けなかったときだけ入る。
+	Detail string
 }
 
 // PartialReleaseError は release の段が途中でエラーになったとき、それまでに実行済みの結果（マージ済みの
@@ -200,6 +202,8 @@ type releaseJudgment struct {
 	observedHead string
 	mergeCommit  string
 	detail       string
+	// mergeRequested はマージの依頼（gh pr merge）が成功した後の判定であること。
+	mergeRequested bool
 }
 
 func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExecOptions) (*ReleaseExecItem, *NotStarted, error) {
@@ -292,6 +296,27 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 			return closeOperationExecution(ctx, tx, attempt.ID, closeOperationExecutionInput{EndedAt: now(), Result: ExecutionResultInterrupted, Detail: err.Error()})
 		})
 		if errors.Is(err, ErrConflict) || errors.Is(err, errExecutionNotOpen) {
+			if j.mergeRequested {
+				// マージは依頼済みで、結果は未確認として扱う。release は approved のまま残り、
+				// 次の実行の口の先頭の読み取りで already_merged かを確かめる。
+				n := 0
+				_ = s.db.Read(ctx, func(tx *sql.Tx) error {
+					c, e := consecutiveFailures(ctx, tx, opID)
+					if e == nil {
+						n = c
+					}
+					return nil
+				})
+				return &ReleaseExecItem{
+					ConsecutiveFailures: n,
+					OperationID:         formatOperationID(opID),
+					ChallengeID:         formatChallengeID(row.ChallengeID),
+					Result:              ExecutionResultMergeUnconfirmed,
+					ApprovedHead:        approvedRow,
+					ObservedHead:        j.observedHead,
+					Detail:              "merge requested; recording the attempt failed: " + err.Error(),
+				}, nil, nil
+			}
 			// 実行の途中で別の呼び出しが同じ操作・試行を変えた。自分の試行の ID を詳細に入れて飛ばす。
 			return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
 				Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
@@ -432,13 +457,13 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 	after, err := opts.Checks.GetPullRequestChecks(ctx, repo, number)
 	if err != nil {
 		// 依頼は成功したが結果を読めない。マージされたかは次の試行の先頭の読み取りで確かめる。
-		return releaseJudgment{result: ExecutionResultMergeUnconfirmed, observedHead: observed, detail: err.Error()}
+		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergeUnconfirmed, observedHead: observed, detail: err.Error()}
 	}
 	if after.State != string(artifactStateMerged) {
-		return releaseJudgment{result: ExecutionResultMergeUnconfirmed, observedHead: after.HeadSHA}
+		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergeUnconfirmed, observedHead: after.HeadSHA}
 	}
 	if after.HeadSHA != approvedHead {
-		return releaseJudgment{result: ExecutionResultMergedUnapproved, observedHead: after.HeadSHA}
+		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergedUnapproved, observedHead: after.HeadSHA}
 	}
-	return releaseJudgment{result: ExecutionResultMerged, observedHead: after.HeadSHA, mergeCommit: after.MergeCommitSHA}
+	return releaseJudgment{mergeRequested: true, result: ExecutionResultMerged, observedHead: after.HeadSHA, mergeCommit: after.MergeCommitSHA}
 }
