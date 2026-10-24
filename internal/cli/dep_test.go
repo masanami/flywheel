@@ -7,8 +7,8 @@ import (
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
-// このファイルは M4.5 S2 の `dep add`・`dep rm` を、子プロセスとして起動した CLI で検査する
-// （受入基準 §S2: 依存の登録）。
+// このファイルは M4.5 S2 の `dep add`・`dep rm` を CLI の入口から検査する（受入基準 §S2: 依存の登録）。
+// 大半は同じプロセスで run(...) を呼び、端末なし・CLAUDECODE ありの実行だけを子プロセスで確かめる。
 
 func depWorkspace(t *testing.T, n int) (ws string, ids []string) {
 	t.Helper()

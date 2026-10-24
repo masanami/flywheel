@@ -114,6 +114,49 @@ func TestRemoveDependencies_DeletesRowsBumpsVersionOnceAndLogs(t *testing.T) {
 	}
 }
 
+// 作業ログの after.depends_on には、実際に足した・外した依存先だけが載る（既にある・もとから無い依存先は載らない）。
+func TestChangeDependencies_LogsOnlyChangedTargetsWhenMixed(t *testing.T) {
+	s := depFixture(t, 3)
+	ctx := context.Background()
+	if _, err := s.AddDependencies(ctx, ChannelCLI, "C-1", []string{"C-2"}); err != nil {
+		t.Fatal(err)
+	}
+	lastDependsOn := func(action string) []string {
+		t.Helper()
+		acts := depActivities(t, s, "C-1")
+		last := acts[len(acts)-1]
+		if last.Action != action {
+			t.Fatalf("last activity = %+v, want %s", last, action)
+		}
+		var after struct {
+			DependsOn []string `json:"depends_on"`
+		}
+		if err := json.Unmarshal(last.After, &after); err != nil {
+			t.Fatal(err)
+		}
+		return after.DependsOn
+	}
+
+	// C-2 は既にある。足されるのは C-3 だけ。
+	if _, err := s.AddDependencies(ctx, ChannelCLI, "C-1", []string{"C-2", "C-3"}); err != nil {
+		t.Fatalf("AddDependencies: %v", err)
+	}
+	if got := lastDependsOn("dep_add"); !reflect.DeepEqual(got, []string{"C-3"}) {
+		t.Errorf("dep_add after.depends_on = %v, want [C-3]", got)
+	}
+
+	// C-2 を外したあと C-2・C-3 を外す。もとから無い C-2 は載らず、外れるのは C-3 だけ。
+	if _, err := s.RemoveDependencies(ctx, ChannelCLI, "C-1", []string{"C-2"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RemoveDependencies(ctx, ChannelCLI, "C-1", []string{"C-2", "C-3"}); err != nil {
+		t.Fatalf("RemoveDependencies: %v", err)
+	}
+	if got := lastDependsOn("dep_rm"); !reflect.DeepEqual(got, []string{"C-3"}) {
+		t.Errorf("dep_rm after.depends_on = %v, want [C-3]", got)
+	}
+}
+
 func TestChangeDependencies_IdempotentWritesNothing(t *testing.T) {
 	s := depFixture(t, 2)
 	if _, err := s.AddDependencies(context.Background(), ChannelCLI, "C-1", []string{"C-2"}); err != nil {
@@ -332,5 +375,22 @@ func TestEvaluateDependencies_CyclicTargetIsUnmetEvenWhenDoneAndReleased(t *test
 				t.Errorf("C-%d -> C-%d met inside a cycle", id, d.DependsOn)
 			}
 		}
+	}
+}
+
+// 完了で release を持たない依存先と、release が rejected だけの依存先は満たされている
+// （未実行と数えるのは pending・approved だけ）。
+func TestEvaluateDependencies_MetWhenDoneWithoutReleaseOrOnlyRejectedRelease(t *testing.T) {
+	s := depFixture(t, 3)
+	if _, err := s.AddDependencies(context.Background(), ChannelCLI, "C-1", []string{"C-2", "C-3"}); err != nil {
+		t.Fatal(err)
+	}
+	setChallengeStatus(t, s, 2, StatusDone)
+	setChallengeStatus(t, s, 3, StatusDone)
+	setReleaseOp(t, s, 3, "rejected")
+	ev := evalDeps(t, s)
+	want := []dependencyStatus{{2, true}, {3, true}}
+	if !reflect.DeepEqual(ev.Dependencies[1], want) {
+		t.Errorf("deps = %+v, want %+v", ev.Dependencies[1], want)
 	}
 }

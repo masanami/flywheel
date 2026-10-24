@@ -51,7 +51,7 @@ func TestOpen_AppliesChallengeDependencyMigrationToAVersion9Store(t *testing.T) 
 		if err := tx.QueryRow(`SELECT title, status, version FROM challenge`).Scan(&title, &status, &version); err != nil {
 			return err
 		}
-		if title != "t" || version != 1 {
+		if title != "t" || status != "unclassified" || version != 1 {
 			t.Errorf("challenge changed: title=%q status=%q version=%d", title, status, version)
 		}
 		var state string
