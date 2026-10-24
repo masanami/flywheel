@@ -588,7 +588,7 @@ func (s *Store) createChallengeFromIssue(ctx context.Context, actor string, ch C
 			return errSourceBindingExternalKeyTaken
 		}
 
-		id, _, err := insertChallengeRow(ctx, tx, rec.at, issue.Title, issue.Body, "", urgency, issue.Reporter)
+		id, _, err := insertChallengeRow(ctx, tx, rec.at, issue.Title, issue.Body, "", urgency, issue.Reporter, ChallengeOriginIngest, nil)
 		if err != nil {
 			return err
 		}

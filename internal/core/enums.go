@@ -262,6 +262,13 @@ const (
 	ActivityActionDepRm  = "dep_rm"
 )
 
+// 作業ログ（entity=challenge）の action。J6（learn）が課題の発生を分類した・
+// フォローアップの課題を起票した（followup）ときに残す。
+const (
+	ActivityActionLearn    = "learn"
+	ActivityActionFollowup = "followup"
+)
+
 // ExecutionResult は release の実行の試行の結果（operation_execution.result）の閉集合。
 type ExecutionResult string
 
@@ -362,4 +369,27 @@ func (r ExecutionResult) Counts() bool {
 		}
 	}
 	return false
+}
+
+// ChallengeOrigin は課題の出どころ（challenge.origin。マイグレーション 0011）。
+type ChallengeOrigin string
+
+// ChallengeOrigin の3値。improvement は S4 が足す。
+const (
+	ChallengeOriginIngest   ChallengeOrigin = "ingest"
+	ChallengeOriginManual   ChallengeOrigin = "manual"
+	ChallengeOriginFollowup ChallengeOrigin = "followup"
+)
+
+var challengeOriginValues = []ChallengeOrigin{ChallengeOriginIngest, ChallengeOriginManual, ChallengeOriginFollowup}
+
+// ParseChallengeOrigin は s を課題の出どころとして解釈する。前後の空白を除いた完全一致のみ受理する。
+func ParseChallengeOrigin(s string) (ChallengeOrigin, bool) {
+	trimmed := strings.TrimSpace(s)
+	for _, v := range challengeOriginValues {
+		if string(v) == trimmed {
+			return v, true
+		}
+	}
+	return "", false
 }

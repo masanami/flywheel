@@ -834,3 +834,33 @@ func CountOperationExecutions(t *testing.T, workspace string) int {
 	}
 	return n
 }
+
+// FailOccurrenceInserts は、以後 occurrence への INSERT を必ず失敗させる（DB のトリガ）。
+// 発生を書く出来事の書き込みが、発生の挿入の失敗で巻き戻ることを検証するためのフィクスチャで、
+// 別プロセスで動く CLI のテストからも使える。ワークスペースには Init 済みのストアがあること。
+func FailOccurrenceInserts(t *testing.T, workspace string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TRIGGER coretest_fail_occurrence_insert BEFORE INSERT ON occurrence
+			BEGIN SELECT RAISE(ABORT, 'coretest: occurrence insert failed'); END`)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: FailOccurrenceInserts: %v", err)
+	}
+}
+
+// CountOccurrences は occurrence の行数を返す。
+func CountOccurrences(t *testing.T, workspace string) int {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var n int
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM occurrence`).Scan(&n)
+	}); err != nil {
+		t.Fatalf("coretest: CountOccurrences: %v", err)
+	}
+	return n
+}

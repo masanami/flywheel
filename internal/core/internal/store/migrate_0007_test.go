@@ -46,8 +46,8 @@ func TestOpen_AppliesRelayEvidenceMigrationToAVersion6Store(t *testing.T) {
 		t.Fatalf("Open(latest) error = %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if got := userVersion(t, db); got != 10 {
-		t.Fatalf("user_version = %d, want 10", got)
+	if got := userVersion(t, db); got != 11 {
+		t.Fatalf("user_version = %d, want 11", got)
 	}
 	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
 		var s, q sql.NullString
