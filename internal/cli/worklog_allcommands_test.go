@@ -157,6 +157,31 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
+		name: "dep add", command: "dep add",
+		setup: func(t *testing.T, ws string) []string {
+			id := createForCase(t, ws)
+			return []string{"dep", "add", id, createForCase(t, ws), createForCase(t, ws)}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"challenge", "C-1", "dep_add", nil,
+				map[string]any{"depends_on": []any{"C-2", "C-3"}, "version": 2.0}}}
+		},
+	},
+	{
+		name: "dep rm", command: "dep rm",
+		setup: func(t *testing.T, ws string) []string {
+			id := createForCase(t, ws)
+			dep := createForCase(t, ws)
+			runJSON(t, ws, "dep", "add", id, dep)
+			return []string{"dep", "rm", id, dep}
+		},
+		want: func(string) []wantActivity {
+			// dep add の作業ログ 1 件は setup が足したもの。この操作が足すのは dep_rm の 1 件だけ。
+			return []wantActivity{{"challenge", "C-1", "dep_rm", nil,
+				map[string]any{"depends_on": []any{"C-2"}, "version": 3.0}}}
+		},
+	},
+	{
 		name: "T2 classify", command: "classify", transition: tableRow("T2", core.StatusUnclassified),
 		setup: func(t *testing.T, ws string) []string {
 			return []string{"classify", createForCase(t, ws), "--priority", "P1"}

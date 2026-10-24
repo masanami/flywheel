@@ -478,6 +478,7 @@ func TestErrorCodeUsageInSourcesMatchesSpecInBothDirections(t *testing.T) {
 	}
 
 	spec := append(loadSpecErrorCodeTable(t), loadM4ErrorCodeTable(t)...)
+	spec = append(spec, loadM45S2ErrorCodeTable(t)...)
 	specCodes := map[ErrorCode]bool{}
 	for _, e := range spec {
 		specCodes[e.Code] = true

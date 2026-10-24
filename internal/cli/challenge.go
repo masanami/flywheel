@@ -91,6 +91,25 @@ func runEdit(a Args) (any, error) {
 	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
 }
 
+// runDepAdd は `flywheel dep add <C-ID> <依存先>...` の実装。検査（自己参照・存在・終端の状態・
+// 循環）と書き込みは core に任せる。成功時は edit と同じ形の課題を返す。
+func runDepAdd(a Args) (any, error) {
+	c, err := a.Store.AddDependencies(context.Background(), core.ChannelCLI, a.Positional[0], a.Positional[1:])
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
+}
+
+// runDepRm は `flywheel dep rm <C-ID> <依存先>...` の実装。
+func runDepRm(a Args) (any, error) {
+	c, err := a.Store.RemoveDependencies(context.Background(), core.ChannelCLI, a.Positional[0], a.Positional[1:])
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
+}
+
 // runLog は `flywheel log [<C-ID>]` の実装。
 func runLog(a Args) (any, error) {
 	var challengeID *string

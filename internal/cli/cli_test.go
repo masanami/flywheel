@@ -432,6 +432,32 @@ func TestOpExecCommand_MatchesM45IFAPITable(t *testing.T) {
 	}
 }
 
+// TestDepCommands_MatchM45IFAPITable は、`dep add`・`dep rm` の名前と書式（依存元 1 つと依存先 1 つ以上の
+// 位置引数・必須のフラグなし）が m4.5 の §IF / API の表のとおりであることを確かめる。
+func TestDepCommands_MatchM45IFAPITable(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	sigs := parseIFAPISignatures(t, string(data))
+	for _, name := range []string{"dep add", "dep rm"} {
+		rows, ok := sigs[name]
+		if !ok || len(rows) != 1 {
+			t.Fatalf("m4.5 spec's IF/API table has %d `%s` rows, want 1", len(rows), name)
+		}
+		cmd, ok := registeredCommands()[name]
+		if !ok {
+			t.Fatalf("%s is not registered in defaultCommands()", name)
+		}
+		if cmd.MinPositional != rows[0].minPositional || cmd.MaxPositional != UnlimitedPositional {
+			t.Errorf("%s: Min/MaxPositional = %d/%d, IF/API table says min %d and no upper limit", name, cmd.MinPositional, cmd.MaxPositional, rows[0].minPositional)
+		}
+		if len(rows[0].required) != 0 || len(cmd.Flags) != 0 {
+			t.Errorf("%s: flags = %v, IF/API table says required %v (want none)", name, cmd.Flags, rows[0].required)
+		}
+	}
+}
+
 // TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats は、
 // ifAPISkipCommands で汎用比較から外した classify について、m1・m3 それぞれの
 // 書式が仕様書のとおりであること（m1 の行を書き換えていないこと）と、登録表の
@@ -771,6 +797,10 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	// M4.5 S1（#310）: 同じ理由で、実装済みの `op exec` を個別に足す（書式は
 	// TestOpExecCommand_MatchesM45IFAPITable が m4.5 の表と照合する）。
 	wantSet["op exec"] = true
+	// M4.5 S2: 同じ理由で、実装済みの `dep add`・`dep rm` を個別に足す（書式は
+	// TestDepCommands_MatchM45IFAPITable が m4.5 の表と照合する）。
+	wantSet["dep add"] = true
+	wantSet["dep rm"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")

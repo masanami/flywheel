@@ -19,6 +19,9 @@ type flagDef struct {
 	Repeatable bool
 }
 
+// UnlimitedPositional は Command.MaxPositional に置くと、位置引数の個数に上限が無いことを表す。
+const UnlimitedPositional = -1
+
 // Command は 1 つの CLI コマンドの宣言的な定義。
 // Path はコマンド名のトークン列（`op add` のような複合コマンドは 2 要素）。
 // フラグ・位置引数の個数・OneOfGroups（ちょうど 1 つを要求するフラグの組）
@@ -27,6 +30,7 @@ type flagDef struct {
 type Command struct {
 	Path          []string
 	MinPositional int
+	// MaxPositional は位置引数の上限。UnlimitedPositional なら上限なし（`dep add` の依存先）。
 	MaxPositional int
 	Flags         []flagDef
 	OneOfGroups   [][]string
@@ -279,6 +283,22 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MaxPositional: 1,
 			Run:           runOpExec,
+		},
+		{
+			// 課題どうしの依存を足す・外す（docs/features/m4.5-learning-and-self-improvement.md
+			// §課題どうしの依存）。本人確認は求めない（edit と同じ扱い）。
+			Path:          []string{"dep", "add"},
+			RequiresStore: true,
+			MinPositional: 2,
+			MaxPositional: UnlimitedPositional,
+			Run:           runDepAdd,
+		},
+		{
+			Path:          []string{"dep", "rm"},
+			RequiresStore: true,
+			MinPositional: 2,
+			MaxPositional: UnlimitedPositional,
+			Run:           runDepRm,
 		},
 		{
 			Path:          []string{"status"},

@@ -37,6 +37,8 @@ func TestExitCodeFor_KnownCodes(t *testing.T) {
 		{CodeLocked, 1},
 		{CodeRunInProgress, 1},
 		{CodeBudgetExceeded, 1},
+		// M4.5 S2（M45P11）。
+		{CodeDependencyCycle, 1},
 	}
 	for _, c := range cases {
 		if got := ExitCodeFor(c.code); got != c.want {
@@ -185,6 +187,7 @@ func TestParseErrorCodeTable_Synthetic(t *testing.T) {
 
 func TestErrorCodeTableMatchesSpec(t *testing.T) {
 	spec := append(loadSpecErrorCodeTable(t), loadM4ErrorCodeTable(t)...)
+	spec = append(spec, loadM45S2ErrorCodeTable(t)...)
 
 	if len(spec) != len(errorCodeTable) {
 		t.Fatalf("spec table has %d rows, implementation has %d (spec=%+v impl=%+v)",
@@ -339,6 +342,12 @@ func TestErrorCodeSet_IsM1M2PlusS1CodesInBothDirections(t *testing.T) {
 		want[e.Code] = e.ExitCode
 	}
 
+	// M4.5 S2 の dependency_cycle（upstream_unavailable は M2 の行が正本で、終了コードの食い違いは
+	// TestM45ErrorCodeTable_UpstreamUnavailableIsExit1OnTheApprovePath が扱う）。
+	for _, e := range loadM45S2ErrorCodeTable(t) {
+		want[e.Code] = e.ExitCode
+	}
+
 	got := map[ErrorCode]int{}
 	for _, e := range errorCodeTable {
 		got[e.Code] = e.ExitCode
@@ -365,10 +374,25 @@ func loadM45ErrorCodeTable(t *testing.T) []codeExit {
 	return parseErrorCodeTable(t, string(data))
 }
 
+// loadM45S2ErrorCodeTable は M4.5 の「エラーコードの追加」の表のうち、S2 が足す行（dependency_cycle）を返す。
+func loadM45S2ErrorCodeTable(t *testing.T) []codeExit {
+	t.Helper()
+	var out []codeExit
+	for _, e := range loadM45ErrorCodeTable(t) {
+		if e.Code == "dependency_cycle" {
+			out = append(out, e)
+		}
+	}
+	if len(out) != 1 {
+		t.Fatalf("M4.5 table has %d dependency_cycle rows, want 1", len(out))
+	}
+	return out
+}
+
 // M4.5 の表は 2 行（upstream_unavailable・dependency_cycle〔S2〕）。upstream_unavailable は M2 の表では
 // 終了コード 2（`gh` が無い）、M4.5 の表では 1（承認の ① で release を承認の対象にできない）で、
 // 表（errorCodeTable）は M2 の 2 を持ち、approve の経路が newReleaseNotApprovableError で 1 を出す。
-// dependency_cycle は S2 の実装で足す。
+// dependency_cycle は S2 で足し、表（errorCodeTable）に終了コード 1 で持つ。
 func TestM45ErrorCodeTable_UpstreamUnavailableIsExit1OnTheApprovePath(t *testing.T) {
 	m45 := loadM45ErrorCodeTable(t)
 	if len(m45) != 2 {

@@ -79,6 +79,10 @@ const (
 	// （値は internal/server.CodeForbiddenOrigin と一致する）。
 	CodeListenFailed    ErrorCode = "listen_failed"
 	CodeForbiddenOrigin ErrorCode = "forbidden_origin"
+	// CodeDependencyCycle は M4.5 S2 で追加（足すと循環ができる依存。docs/features/
+	// m4.5-learning-and-self-improvement.md §IF / API「エラーコードの追加」）。
+	// core.ErrDependencyCycle を写す。
+	CodeDependencyCycle ErrorCode = "dependency_cycle"
 )
 
 // codeExit は 1 つのエラーコードと、それに対応する終了コード（0/1/2 のみ）の組。
@@ -115,6 +119,7 @@ var errorCodeTable = []codeExit{
 	{CodeSerialized, 1},
 	{CodeListenFailed, 2},
 	{CodeForbiddenOrigin, 1},
+	{CodeDependencyCycle, 1},
 }
 
 // ExitCodeFor は既知の ErrorCode に対応する終了コードを返す。
@@ -204,6 +209,10 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeSlotUnavailable, err.Error())
 	case errors.Is(err, core.ErrSerialized):
 		return NewError(CodeSerialized, err.Error())
+	case errors.Is(err, core.ErrDependencyCycle):
+		return NewError(CodeDependencyCycle, err.Error())
+	case errors.Is(err, core.ErrSelfDependency):
+		return NewError(CodeUsageError, err.Error())
 	default:
 		return NewError(CodeInternalError, err.Error())
 	}
