@@ -163,11 +163,12 @@ func shortHead(h string) string {
 // 外した release の理由（名前と説明の文）を書く。
 func writeReleaseHeadLines(b *strings.Builder, ds []releaseDecision) {
 	for _, d := range includedReleases(ds) {
-		fmt.Fprintf(b, "  %s の head: %s（%s）", d.Op.ID, shortHead(d.Head), d.Head)
+		// 完全形は他の文字の無い単独の行に置く（コピー・ダブルクリックで SHA だけを取れるように）。
+		fmt.Fprintf(b, "  %s の head（短縮形 %s。完全形は次の行）\n", d.Op.ID, shortHead(d.Head))
+		fmt.Fprintf(b, "%s\n", d.Head)
 		if d.NoVerifiedHead {
-			b.WriteString(" ※検証の head の記録が無いため、比較していません")
+			b.WriteString("  ※検証の head の記録が無いため、比較していません\n")
 		}
-		b.WriteString("\n")
 	}
 	for _, d := range excludedReleases(ds) {
 		fmt.Fprintf(b, "  %s は同時に承認されません（未承認のまま残ります）: %s（%s）\n", d.Op.ID, d.Reason, d.Reason.description())
@@ -220,7 +221,9 @@ func operationHeadLines(d *releaseDecision) string {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "head:         %s（%s）\n", shortHead(d.Head), d.Head)
+	// 完全形は他の文字の無い単独の行に置く。
+	fmt.Fprintf(&b, "head:         %s（短縮形。完全形は次の行）\n", shortHead(d.Head))
+	fmt.Fprintf(&b, "%s\n", d.Head)
 	if d.NoVerifiedHead {
 		b.WriteString("              ※検証の head の記録が無いため、比較していません\n")
 	}

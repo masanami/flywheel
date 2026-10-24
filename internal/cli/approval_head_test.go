@@ -112,6 +112,7 @@ func TestApproveHead_CompletionSummaryShowsFullAndShortHeadsBeforeTheConfirmatio
 		if n := strings.Count(ptyOutput, h[:12]); n < 2 {
 			t.Errorf("short head %s must be shown besides the full head (count %d)", h[:12], n)
 		}
+		assertFullHeadOnOwnLine(t, ptyOutput, h)
 	}
 	for i, op := range f.ops {
 		if got, ok := f.approvedHead(t, op); !ok || got != []string{h1, h2}[i] {
@@ -196,6 +197,7 @@ func TestApproveHead_OperationTerminalAndRelayedRecordTheFetchedHead(t *testing.
 	if !strings.Contains(ptyOutput, h1) || strings.Count(ptyOutput, h1[:12]) < 2 {
 		t.Errorf("summary lacks the head: %q", ptyOutput)
 	}
+	assertFullHeadOnOwnLine(t, ptyOutput, h1)
 	if got, ok := f.approvedHead(t, f.ops[0]); !ok || got != h1 {
 		t.Errorf("terminal head_sha = %q (found %v)", got, ok)
 	}
@@ -505,4 +507,20 @@ func TestApproveHead_RelayedJSONNamesMergedUnapproved(t *testing.T) {
 	if n := coretest.CountReleaseApprovals(t, f.ws); n != 0 {
 		t.Errorf("release approval rows = %d, want 0", n)
 	}
+}
+
+// assertFullHeadOnOwnLine は、完全形の SHA が前後に他の文字の無い単独の行で出ていて、直前の行が
+// その head の短縮形を持つ見出しであること（release との対応が並び順で決まること）を固定する。
+func assertFullHeadOnOwnLine(t *testing.T, out, head string) {
+	t.Helper()
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if strings.TrimRight(line, "\r") != head {
+			continue
+		}
+		if i > 0 && strings.Contains(lines[i-1], head[:12]) && strings.Contains(lines[i-1], "完全形は次の行") {
+			return
+		}
+	}
+	t.Errorf("full head %q is not on its own line right after its heading: %q", head, out)
 }
