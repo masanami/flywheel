@@ -123,7 +123,7 @@ func judgmentLimitQuestion(hit *judgmentLimitHit) string {
 // holdForJudgmentFailureLimit は、自動の段が判断点 j を起動する直前に呼ぶ。課題の連続失敗が上限に
 // 達していれば、判断を起動せず課題を人間対応待ち（T11）にして NotStarted（failure_limit）を返す。
 // 達していなければ (nil, nil)。want は j を起動してよい課題の状態で、読み直した状態が違えば何もしない。
-func (s *Store) holdForJudgmentFailureLimit(ctx context.Context, ch Challenge, j JudgmentPoint, want Status, decl *AgentDeclaration) (ns *NotStarted, skip bool, err error) {
+func (s *Store) holdForJudgmentFailureLimit(ctx context.Context, ch Challenge, j JudgmentPoint, want Status, decl *AgentDeclaration, cycleID string) (ns *NotStarted, skip bool, err error) {
 	cid, ok := parseChallengeID(ch.ID)
 	if !ok {
 		return nil, false, ErrNotFound
@@ -145,7 +145,7 @@ func (s *Store) holdForJudgmentFailureLimit(ctx context.Context, ch Challenge, j
 		if tc.current.Status != want || tc.current.Version != ch.Version {
 			return errReconcileNotEligible
 		}
-		return insertHold(ctx, tc, judgmentLimitQuestion(hit))
+		return s.insertHoldWithOccurrence(ctx, tc, judgmentLimitQuestion(hit), holdReasonFailureLimit, cycleID)
 	})
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
