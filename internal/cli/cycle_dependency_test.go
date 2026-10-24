@@ -97,6 +97,16 @@ func TestCycle_ReleaseExecutedInTheSameCycleUnblocksTheRunPhase(t *testing.T) {
 	gh := newReleaseGH(t, execHead)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("BRIEF-DEP"), delegateRoute("completed")}, "")
 
+	// release の段より前は、依存先の release が承認済みで未実行なので、依存元は止まっている（M45H12）。
+	before := phaseOf(t, runJSON(t, ws, "run"))
+	if ns, _ := before["not_started"].([]any); len(ns) != 1 ||
+		ns[0].(map[string]any)["reason"] != "dependency" || ns[0].(map[string]any)["detail"] != dep {
+		t.Fatalf("before the release phase: not_started = %v, want %s dependency %s", before["not_started"], id, dep)
+	}
+	if got := delegateRunsOf(t, ws); len(got) != 0 {
+		t.Fatalf("before the release phase: delegate runs = %v, want none", got)
+	}
+
 	doc := cycleDoc(t, ws)
 
 	rel := cyclePhase(t, doc, "release")
@@ -117,5 +127,40 @@ func TestCycle_ReleaseExecutedInTheSameCycleUnblocksTheRunPhase(t *testing.T) {
 	}
 	if got := delegateRunsOf(t, ws); len(got) != 1 {
 		t.Errorf("delegate runs = %v, want one", got)
+	}
+}
+
+// J2 が出した depends_on は、承認の後の委譲の判定で依存元を止める（一続きの確認）。
+func TestCycle_J2DependsOnStopsTheDelegationAfterPlanApproval(t *testing.T) {
+	ws := setupRunWorkspace(t)
+	id := createTitled(t, ws, "dependent")
+	classifyManually(t, ws, id, "P1")
+	dep := newUnmetDependencyTarget(t, ws)
+	stdout, _ := j2PlanFixture(t, func(m map[string]any) { m["depends_on"] = []string{dep} })
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{
+		{Match: fakeClaudeJ2Match, Tag: "J2", Stdout: stdout},
+		j3Route("BRIEF-DEP"), delegateRoute("completed"),
+	}, "")
+
+	// 1 周目: J2 が計画と依存を登録する。計画は未承認なので委譲の段は何も起動しない。
+	doc := cycleDoc(t, ws)
+	plan := cyclePhase(t, doc, "plan")
+	if items := phaseItems(t, plan); len(items) != 1 || items[0]["challenge_id"] != id || items[0]["status"] != "awaiting_plan_approval" {
+		t.Fatalf("plan items = %v, want %s planned", items, id)
+	}
+	deps, _ := runJSON(t, ws, "show", id)["challenge"].(map[string]any)["dependencies"].([]any)
+	if len(deps) != 1 || deps[0].(map[string]any)["challenge_id"] != dep {
+		t.Fatalf("dependencies after J2 = %v, want [%s]", deps, dep)
+	}
+
+	// 計画を承認し、次の周の委譲の段が依存で止まる。
+	runJSON(t, ws, "approve", id, "--relayed", "--session", "s", "--quote", "q")
+	doc = cycleDoc(t, ws)
+	ns := phaseNotStarted(t, cyclePhase(t, doc, "run"))
+	if len(ns) != 1 || ns[0]["challenge_id"] != id || ns[0]["reason"] != "dependency" || ns[0]["detail"] != dep {
+		t.Fatalf("run not_started = %v, want %s dependency %s", ns, id, dep)
+	}
+	if got := delegateRunsOf(t, ws); len(got) != 0 {
+		t.Errorf("delegate runs = %v, want none", got)
 	}
 }

@@ -134,6 +134,9 @@ func releasePhaseText(res *core.ReleaseExecResult) string {
 		if it.MergeCommit != "" {
 			b.WriteString("\t" + it.MergeCommit)
 		}
+		if it.Detail != "" {
+			b.WriteString("\t" + it.Detail)
+		}
 		b.WriteString("\n")
 	}
 	for _, ns := range res.NotStarted {

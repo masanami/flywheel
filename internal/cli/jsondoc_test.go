@@ -1117,7 +1117,7 @@ func addM45DependencyKeysShape(t *testing.T, doc *documentedJSON) {
 	}
 	doc.entity["show_challenge"] = show
 	doc.entity["actionable_challenge"] = actionable
-	if !strings.Contains(string(data), "`kind: dependency_cycle`・`challenge_ids`") {
+	if !strings.Contains(string(data), "`kinds` に `dependency_cycle`・`challenge_ids`") {
 		t.Fatal("m4.5 spec does not document discrepancy challenge_ids")
 	}
 }
