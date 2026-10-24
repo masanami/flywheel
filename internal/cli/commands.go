@@ -342,6 +342,14 @@ func defaultCommands() []Command {
 			Run:           runRuns,
 		},
 		{
+			// docs/features/m4.5-learning-and-self-improvement.md §効果の測定（S3）。読み取りだけで、
+			// 判断点も claude も起動しない。--compare は S4 で足す（S3 では未知のフラグ）。
+			Path:          []string{"metrics"},
+			RequiresStore: true,
+			Flags:         []flagDef{{Name: "since", HasValue: true}, {Name: "until", HasValue: true}},
+			Run:           runMetrics,
+		},
+		{
 			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（#86）。位置引数は
 			// 取らない。`--trigger` の省略は manual（runCycle）。
 			Path:          []string{"cycle"},

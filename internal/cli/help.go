@@ -37,6 +37,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   ingest [--source <id>]
   mark-read <C-ID>
   runs [<C-ID>] [--open]
+  metrics [--since <YYYY-MM-DD>] [--until <YYYY-MM-DD>]
   cycle [--trigger <t>]
   run [<C-ID>]
   slot clear <SL-ID>

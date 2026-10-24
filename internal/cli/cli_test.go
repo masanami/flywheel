@@ -801,6 +801,8 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	// TestDepCommands_MatchM45IFAPITable が m4.5 の表と照合する）。
 	wantSet["dep add"] = true
 	wantSet["dep rm"] = true
+	// M4.5 S3: 同じ理由で、実装済みの `metrics` を個別に足す（`--compare` は S4 で足すので、S3 では登録しない）。
+	wantSet["metrics"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")
