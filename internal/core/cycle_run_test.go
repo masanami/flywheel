@@ -800,3 +800,24 @@ func TestRunCycle_LaterPhaseErrorKeepsTheExecutedReleases(t *testing.T) {
 		t.Errorf("error = %#v, want PartialReleaseError with the merged release", err)
 	}
 }
+
+// release の段の発生は、その周の ID を持つ（AC-217）。
+func TestRunCycle_ReleasePhaseOccurrenceCarriesTheCycleID(t *testing.T) {
+	f := newCycleFixture(t)
+	c := createAndAdvance(t, f.s, StatusDone)
+	coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c.ID)), relRef, relHead, execTS(0))
+	changed := openPR()
+	changed.HeadSHA = "zzz"
+	fake := &fakeRelease{pr: changed}
+	in := f.input(mineThenPlanInvoker(t))
+	conn := j2TestConnectors(t)
+	conn.Repos[0].Remote = "o/r"
+	in.ConnDecl = conn
+	in.Checks, in.Merger = fake, fake
+
+	res := f.run(t, in)
+	ids := coretest.OccurrenceCycleIDs(t, f.s.workspace)
+	if len(ids) != 1 || formatCycleID(ids[0]) != res.Cycle.ID {
+		t.Fatalf("occurrence cycle ids = %v, want one for %s", ids, res.Cycle.ID)
+	}
+}
