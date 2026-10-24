@@ -360,3 +360,34 @@ func TestDeriveCard_SlotBindsOnlyToLatestRunChallenge(t *testing.T) {
 		}
 	}
 }
+
+// M45H19: 種類が dependency_cycle だけの食い違いは印にも review_discrepancy にも数えない。他の種類が混ざれば数える。
+func TestDeriveCard_CycleOnlyDiscrepancyNotCounted(t *testing.T) {
+	c := Challenge{ID: "C-1", Status: StatusInProgress}
+	cycle := DiscrepancyKindDependencyCycle
+	cases := []struct {
+		name  string
+		kinds []DiscrepancyKind
+		want  bool
+	}{
+		{"cycle only", []DiscrepancyKind{cycle}, false},
+		{"cycle mixed", []DiscrepancyKind{DiscrepancyKindUpstreamClosed, cycle}, true},
+		{"cycle first then other", []DiscrepancyKind{cycle, DiscrepancyKindUpstreamUpdated}, true},
+		{"empty kinds", nil, true},
+		{"merged_unapproved", []DiscrepancyKind{DiscrepancyKindMergedUnapproved}, true},
+	}
+	for _, tc := range cases {
+		st := &Overview{Discrepancies: []Discrepancy{{ChallengeID: "C-1", Kinds: tc.kinds}}}
+		card := deriveCard(c, st, nil, nil, time.Now(), defaultStaleAfter)
+		hasA, hasM := false, false
+		for _, a := range card.NextHumanActions {
+			hasA = hasA || a == CardActionReviewDiscrepancy
+		}
+		for _, m := range card.Modifiers {
+			hasM = hasM || m == CardModifierDiscrepancy
+		}
+		if hasA != tc.want || hasM != tc.want {
+			t.Errorf("%s: action=%v modifier=%v, want %v", tc.name, hasA, hasM, tc.want)
+		}
+	}
+}

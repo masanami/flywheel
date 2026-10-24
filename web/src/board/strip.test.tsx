@@ -8,7 +8,12 @@ import { createMockApi } from "../mock/api.ts";
 import { MockStore } from "../mock/store.ts";
 import { Board } from "./Board.tsx";
 import { toAgentBoard } from "./adapt.ts";
-import { countsOf, filterByKind, unboundSlots } from "./filter.ts";
+import {
+  challengeIdsOf,
+  countsOf,
+  filterByKind,
+  unboundSlots,
+} from "./filter.ts";
 
 let api: ApiClient;
 beforeEach(() => {
@@ -197,4 +202,26 @@ it("AC-201: 読み取れなかったワークスペースは帯に示す", async
   expect(within(strip).getByTestId("unreadable-workspaces")).toHaveTextContent(
     "gamma",
   );
+});
+
+it("M45H19: dependency_cycle だけの食い違いは帯の件数にも絞り込みにも数えない", () => {
+  const base = {
+    challenges: [],
+    operations: [],
+    budget_exhausted: [],
+    triage: [],
+    slots: [],
+  } as unknown as StatusNeedsHuman;
+  const nh = {
+    ...base,
+    discrepancies: [
+      { challenge_id: "C-1", kinds: ["dependency_cycle"] },
+      { challenge_id: "C-2", kinds: ["upstream_closed", "dependency_cycle"] },
+      { challenge_id: "C-3", kinds: ["merged_unapproved"] },
+      { challenge_id: "C-4", kinds: ["dependency_cycle", "upstream_updated"] },
+    ],
+  } as StatusNeedsHuman;
+  expect(countsOf(nh).discrepancies).toBe(3);
+  const ids = challengeIdsOf(nh, "discrepancies", []);
+  expect([...ids].sort()).toEqual(["C-2", "C-3", "C-4"]);
 });
