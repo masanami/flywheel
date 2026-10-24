@@ -97,10 +97,10 @@ type ApprovalPreview struct {
 	// VerifiedHeadSHAs は PendingReleases の release の ID ごとに、J5 が検証の入力にした
 	// 最新の head（latestVerifiedHead）。記録のない release は載せない（承認を止めない）。
 	VerifiedHeadSHAs map[string]string
-	// LastExecutionResults は PendingReleases の release の ID ごとに、直前の試行
-	// （operation_execution でその操作の id が最大の行）の結果。試行のない release は載せない。
-	// CLI が merged_unapproved の release を外す判定（M45H16）に使う。
-	LastExecutionResults map[string]ExecutionResult
+	// ReapprovalForbidden は PendingReleases の release の ID ごとに、承認し直せないか
+	// （直前の試行の結果が merged_unapproved か。rejectReapproval と同じ判定）。
+	// CLI が release を同時の承認から外す判定（M45H16）に使い、CLI は結果の比較をしない。
+	ReapprovalForbidden map[string]bool
 }
 
 // approvesPendingReleases は D12 の規則の正本: 「その操作が、対象の課題の
@@ -225,16 +225,14 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 						preview.VerifiedHeadSHAs[op.ID] = *head
 					}
 					if oid, ok := parseOperationID(op.ID); ok {
-						last, err := latestOperationExecution(ctx, tx, oid)
+						forbidden, err := reapprovalForbidden(ctx, tx, oid)
 						if err != nil {
 							return err
 						}
-						if last != nil {
-							if preview.LastExecutionResults == nil {
-								preview.LastExecutionResults = map[string]ExecutionResult{}
-							}
-							preview.LastExecutionResults[op.ID] = last.Result
+						if preview.ReapprovalForbidden == nil {
+							preview.ReapprovalForbidden = map[string]bool{}
 						}
+						preview.ReapprovalForbidden[op.ID] = forbidden
 					}
 				} else {
 					preview.OtherPendingOperations = append(preview.OtherPendingOperations, op)

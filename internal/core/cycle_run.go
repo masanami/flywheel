@@ -12,6 +12,7 @@ package core
 
 import (
 	"context"
+	"errors"
 )
 
 // CyclePhase は `cycle` の段の名前（§IF / API「cycle の JSON 出力」の phase の閉集合の
@@ -184,9 +185,17 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 }
 
 // runCyclePhases は取り込み・分類・計画・委譲・検証の順に段を実行する。どの段の結果も、途中で
-// エラーになるまでの分は返さない（呼び出し元は runErr を返す）。
-func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle) ([]CyclePhaseResult, error) {
+// エラーになるまでの分は返さない（呼び出し元は runErr を返す）。ただし release の段で実行済みの結果は PartialReleaseError で運ぶ。
+func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle) (_ []CyclePhaseResult, retErr error) {
 	var phases []CyclePhaseResult
+	// release の段で実行済みのものがあれば、後続の段のエラーでも失わないよう PartialReleaseError で運ぶ。
+	var executed []ReleaseExecItem
+	defer func() {
+		var pe *PartialReleaseError
+		if retErr != nil && len(executed) > 0 && !errors.As(retErr, &pe) {
+			retErr = &PartialReleaseError{Err: retErr, Items: executed}
+		}
+	}()
 
 	// 承認済みの release の実行（op exec と同じ core の処理。最初の段。接続ツールの宣言が無ければ skipped）。
 	release := CyclePhaseResult{Phase: CyclePhaseRelease, Skipped: in.ConnDecl == nil, ReleaseItems: []ReleaseExecItem{}}
@@ -199,11 +208,15 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			Trigger:    ReleaseExecTriggerCycle,
 		})
 		if err != nil {
+			if res != nil && len(res.Items) > 0 {
+				return nil, &PartialReleaseError{Err: err, Items: res.Items}
+			}
 			return nil, err
 		}
 		release.ReleaseItems = res.Items
 		release.NotStarted = res.NotStarted
 	}
+	executed = release.ReleaseItems
 	phases = append(phases, release)
 
 	// 取り込み（M2 の ingest と同じ core の処理。経路は呼び出し元が渡す）。

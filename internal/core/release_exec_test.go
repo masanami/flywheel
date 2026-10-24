@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -513,10 +514,16 @@ func TestReapprovalResetsConsecutiveFailures(t *testing.T) {
 	f.run(t)
 	f.fake.pr.HeadSHA = "zzz"
 	f.run(t) // head_changed → pending
-	writeForTest(t, f.s, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE operation SET state = 'approved' WHERE id = ?`, f.opID)
-		return err
-	})
+	// 実際の承認し直しの経路（取り消しの後の approve <OP-ID>）で approved に戻す。
+	prev, err := f.s.PrepareOperationApproval(context.Background(), formatOperationID(f.opID))
+	if err != nil {
+		t.Fatalf("PrepareOperationApproval() error = %v", err)
+	}
+	if _, _, err := f.s.ExecuteOperationApproval(context.Background(), OperationApprovalRequest{
+		OperationID: prev.OperationID, ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion,
+		Decision: ApprovalDecisionApproved, HeadSHA: relHead}, verifiedAttestationForTest(t, prev.OperationID)); err != nil {
+		t.Fatalf("re-approval error = %v", err)
+	}
 	f.fake.pr.HeadSHA = relHead
 	if item := f.run(t); item.ConsecutiveFailures != 1 {
 		t.Errorf("item = %+v, want counting from 0 again", item)
@@ -558,7 +565,7 @@ func TestNotExecutable_NotReleaseOrNotApproved(t *testing.T) {
 	}
 }
 
-// AC-126: 承認済みでも release 以外（external_send・other）は実行せず、操作の state と version を変えない。
+// AC-60: 承認済みでも release 以外（external_send・other）は実行せず、操作の state と version を変えない。
 func TestNotExecutable_ApprovedNonReleaseKindsAreLeftUntouched(t *testing.T) {
 	f := newRelFixture(t)
 	ids := map[string]int64{}
@@ -742,4 +749,65 @@ func countAction(as []Activity, action string) int {
 		}
 	}
 	return n
+}
+
+// AC-125: 試行を始めた後に別の呼び出しが操作を変えたとき、not_started の in_progress の detail は
+// 終わっていない試行の ID（固定の文字列ではない）である。
+func TestExecuteReleases_ChangedAfterAttemptStartedReportsTheAttemptID(t *testing.T) {
+	f := newRelFixture(t)
+	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
+	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
+	if err != nil {
+		t.Fatalf("ExecuteReleases() error = %v", err)
+	}
+	at := f.attempts(t)
+	if len(at) != 1 {
+		t.Fatalf("attempts = %+v, want 1", at)
+	}
+	if len(res.Items) != 0 || len(res.NotStarted) != 1 {
+		t.Fatalf("Items = %+v, NotStarted = %+v, want 1 not_started", res.Items, res.NotStarted)
+	}
+	ns := res.NotStarted[0]
+	if ns.Reason != NotStartedInProgress || ns.Detail != fmt.Sprintf("%d", at[0].ID) || ns.OperationID != formatOperationID(f.opID) {
+		t.Errorf("not_started = %+v, want in_progress with detail %d", ns, at[0].ID)
+	}
+	if at[0].open() {
+		t.Errorf("attempt %+v is still open, want closed", at[0])
+	}
+}
+
+// 2 件目でエラーになっても、1 件目の実行済みの結果は ExecuteReleases の戻り値に残る（op exec が出力に残す）。
+func TestExecuteReleases_ErrorOnALaterReleaseKeepsThePartialResult(t *testing.T) {
+	f := newRelFixture(t)
+	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
+	c2 := createAndAdvance(t, f.s, StatusDone)
+	coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c2.ID)), relRef, relHead, execTS(0))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	o := f.opts()
+	o.Checks = &cancelOnGet{fakeRelease: f.fake, at: 3, cancel: cancel}
+	res, err := f.s.ExecuteReleases(ctx, nil, o)
+	if err == nil {
+		t.Fatalf("ExecuteReleases() error = nil, want an error from the cancelled context (res %+v)", res)
+	}
+	if res == nil || len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMerged {
+		t.Errorf("partial result = %+v, want the first release merged", res)
+	}
+}
+
+// cancelOnGet は at 回目の GetPullRequestChecks の呼び出しで ctx を取り消す（2 件目の release の途中で
+// 書き込みを失敗させるため）。
+type cancelOnGet struct {
+	*fakeRelease
+	at     int
+	n      int
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnGet) GetPullRequestChecks(ctx context.Context, repo string, n int) (UpstreamPullRequestChecks, error) {
+	c.n++
+	if c.n == c.at {
+		c.cancel()
+	}
+	return c.fakeRelease.GetPullRequestChecks(ctx, repo, n)
 }

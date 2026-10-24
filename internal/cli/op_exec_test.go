@@ -116,7 +116,7 @@ func opExecEnvelope(t *testing.T, ws string, wantExit int, wantCode ErrorCode, a
 	requireJSONErrorEnvelope(t, append(append([]string{"op", "exec"}, args...), "--workspace", ws), wantExit, wantCode)
 }
 
-// AC-59 ほか: 承認した head と一致する open の PR は gh pr merge を 1 回呼んでマージされ、show にマージの
+// AC-38・AC-46・AC-123: 承認した head と一致する open の PR は gh pr merge を 1 回呼んでマージされ、show にマージの
 // コミットが出る。出力は {"phase": {…}} の形で、items は 7 つのキーを持つ。claude は起動しない。
 func TestOpExec_MergesApprovedReleaseAndShowsTheMergeCommit(t *testing.T) {
 	ws, cid, op := execWorkspace(t)
@@ -206,7 +206,7 @@ func TestOpExec_DelegatedEnvIsRejectedBeforeAnythingRuns(t *testing.T) {
 	}
 }
 
-// AC-42: connectors.json が無ければ config_not_found、merge_method が閉集合の外なら外部を呼ばず config_invalid。
+// AC-42・AC-63: connectors.json が無ければ config_not_found、merge_method が閉集合の外なら外部を呼ばず config_invalid。
 func TestOpExec_ConnectorsMissingOrMergeMethodInvalid(t *testing.T) {
 	t.Run("config_not_found", func(t *testing.T) {
 		ws := setupWorkspaceWithPosition(t)
@@ -406,7 +406,7 @@ func TestCycle_ReleasePhaseIsFirstAndMergesInsideTheCycle(t *testing.T) {
 	}
 }
 
-// AC-43・AC-146: 承認済みの release があっても、生きている保持者が排他を持っている間の cycle は locked で
+// M3 の AC-146（M4.5 の序数ではない）: 承認済みの release があっても、生きている保持者が排他を持っている間の cycle は locked で
 // 終わり、gh pr merge を呼ばず、試行の行も作らない（release の段は cycle のロックの中で動く）。
 func TestCycle_LiveHolder_ReleaseIsNotExecuted(t *testing.T) {
 	ws, _, _ := execWorkspace(t)

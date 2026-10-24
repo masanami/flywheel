@@ -184,7 +184,7 @@ func completionReleaseDecisions(ctx context.Context, a Args, p *core.ApprovalPre
 		v, ok := p.VerifiedHeadSHAs[id]
 		return v, ok
 	}, func(id string) bool {
-		return p.LastExecutionResults[id] == core.ExecutionResultMergedUnapproved
+		return p.ReapprovalForbidden[id]
 	})
 }
 

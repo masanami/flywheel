@@ -740,7 +740,7 @@ func TestRunCycle_ReleasePhaseMergesAnApprovedReleaseInsideTheCycle(t *testing.T
 	conn.Repos[0].Remote = "o/r"
 	in.ConnDecl = conn
 	in.Checks, in.Merger = fake, fake
-	// マージの依頼の時点で、サイクルの排他ロックがこの周に保持されていること（AC-43）。
+	// マージの依頼の時点で、サイクルの排他ロックがこの周に保持されていること（M3 の AC-146）。
 	var holderAtMerge int64
 	var heldAtMerge bool
 	fake.onMerge = func() { holderAtMerge, heldAtMerge = coretest.CycleLockHolder(t, f.s.workspace) }
@@ -769,5 +769,34 @@ func TestRunCycle_ReleasePhaseMergesAnApprovedReleaseInsideTheCycle(t *testing.T
 	}
 	if len(logs) != 1 || logs[0].Channel != "cli" || relAfter(t, logs[0])["trigger"] != "cycle" {
 		t.Errorf("op_execute logs = %+v, want one with trigger cycle and channel cli", logs)
+	}
+}
+
+// release の段でマージした後に後続の段（ここでは分類）が失敗しても、実行済みの結果は
+// PartialReleaseError で運ばれる。
+func TestRunCycle_LaterPhaseErrorKeepsTheExecutedReleases(t *testing.T) {
+	f := newCycleFixture(t)
+	c := createAndAdvance(t, f.s, StatusDone)
+	opID := coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c.ID)), relRef, relHead, execTS(0))
+	fake := &fakeRelease{pr: openPR(), afterPR: &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "mc1"}}
+	f.create(t, "unclassified") // 分類の段（J1）で判断の呼び出しが起きるようにする
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// 分類の段の判断の呼び出しで ctx を取り消し、release の段の後の段を失敗させる。
+	in := f.input(&cycleFakeInvoker{handle: func(cycleCall) JudgmentLaunchOutput {
+		cancel()
+		return succeeded(j1MineP(t, "P1"))
+	}})
+	conn := j2TestConnectors(t)
+	conn.Repos[0].Remote = "o/r"
+	in.ConnDecl = conn
+	in.Checks, in.Merger = fake, fake
+	_, err := f.s.RunCycle(ctx, in)
+	if err == nil {
+		t.Fatal("RunCycle() error = nil, want a failure in a later phase")
+	}
+	var pe *PartialReleaseError
+	if !errors.As(err, &pe) || len(pe.Items) != 1 || pe.Items[0].OperationID != formatOperationID(opID) || pe.Items[0].Result != ExecutionResultMerged {
+		t.Errorf("error = %#v, want PartialReleaseError with the merged release", err)
 	}
 }

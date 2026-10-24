@@ -273,14 +273,24 @@ func (s *Store) prepareOperationApproval(ctx context.Context, id string, forAppr
 // rejectReapproval は、opID の直前の試行（operation_execution で id が最大の行）の結果が
 // merged_unapproved なら ReapprovalForbiddenError を返す。
 func rejectReapproval(ctx context.Context, tx *sql.Tx, opID int64) error {
-	last, err := latestOperationExecution(ctx, tx, opID)
+	forbidden, err := reapprovalForbidden(ctx, tx, opID)
 	if err != nil {
 		return err
 	}
-	if last != nil && last.Result == ExecutionResultMergedUnapproved {
+	if forbidden {
 		return &ReapprovalForbiddenError{OperationID: formatOperationID(opID)}
 	}
 	return nil
+}
+
+// reapprovalForbidden は「承認し直せない」判定の正本: opID の直前の試行の結果が merged_unapproved か。
+// rejectReapproval と、承認の ① が release ごとに返す ApprovalPreview.ReapprovalForbidden が使う。
+func reapprovalForbidden(ctx context.Context, tx *sql.Tx, opID int64) (bool, error) {
+	last, err := latestOperationExecution(ctx, tx, opID)
+	if err != nil {
+		return false, err
+	}
+	return last != nil && last.Result == ExecutionResultMergedUnapproved, nil
 }
 
 // PrepareOperationApproval は `approve <OP-ID>` の①（読み取り）。

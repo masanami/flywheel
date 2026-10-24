@@ -405,24 +405,24 @@ func TestOperationApproval_OnlyTheLatestAttemptDecides(t *testing.T) {
 
 // --- 完了の承認での merged_unapproved の release（M45H16。AC-107a〜AC-107c） ---
 
-// AC-107a: ① は release ごとに、直前の試行の結果を返す（試行のない release は載せない）。
-func TestApprovalPreview_LastExecutionResultsIsTheLatestAttemptOfEachRelease(t *testing.T) {
+// AC-107c: ① は release ごとに、承認し直せないか（直前の試行の結果が merged_unapproved か）を返す。
+func TestApprovalPreview_ReapprovalForbiddenIsPerRelease(t *testing.T) {
 	f := newHeadFixture(t)
 	f.revokeAsMergedUnapproved(t, f.relA)
 	prev, err := f.s.PrepareApproval(context.Background(), f.c.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := prev.LastExecutionResults[f.relA.ID]; got != ExecutionResultMergedUnapproved {
-		t.Errorf("relA last result = %q, want merged_unapproved", got)
+	if !prev.ReapprovalForbidden[f.relA.ID] {
+		t.Errorf("relA ReapprovalForbidden = false, want true (merged_unapproved)")
 	}
-	if got, ok := prev.LastExecutionResults[f.relB.ID]; ok {
-		t.Errorf("relB (no attempt) last result = %q, want none", got)
+	if prev.ReapprovalForbidden[f.relB.ID] {
+		t.Errorf("relB (no attempt) ReapprovalForbidden = true, want false")
 	}
 }
 
 // 直前の試行（id が最大の行）だけが結果になる。
-func TestApprovalPreview_LastExecutionResultsUsesOnlyTheLatestAttempt(t *testing.T) {
+func TestApprovalPreview_ReapprovalForbiddenUsesOnlyTheLatestAttempt(t *testing.T) {
 	f := newHeadFixture(t)
 	oid, _ := parseOperationID(f.relA.ID)
 	for i, r := range []ExecutionResult{ExecutionResultMergedUnapproved, ExecutionResultHeadChanged} {
@@ -434,8 +434,8 @@ func TestApprovalPreview_LastExecutionResultsUsesOnlyTheLatestAttempt(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := prev.LastExecutionResults[f.relA.ID]; got != ExecutionResultHeadChanged {
-		t.Errorf("relA last result = %q, want head_changed", got)
+	if prev.ReapprovalForbidden[f.relA.ID] {
+		t.Errorf("relA ReapprovalForbidden = true, want false (latest attempt is head_changed)")
 	}
 }
 

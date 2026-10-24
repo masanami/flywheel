@@ -104,7 +104,7 @@ func TestReleaseApproved_CountsExecutedButNotPendingOrRejected(t *testing.T) {
 	}
 }
 
-// --- 試行の書き込み・閉じる・読む（AC-139・AC-140） ---
+// --- 試行の書き込み・閉じる・読む（AC-111） ---
 
 func TestOperationExecution_BeginCloseRoundTrip(t *testing.T) {
 	s, _, opID := releaseFixtureForTest(t)
