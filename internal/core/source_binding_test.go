@@ -314,8 +314,8 @@ func TestOpenWorkspace_UpgradesSchemaVersion1StoreToVersion2AndPreservesExisting
 	ctx := context.Background()
 
 	// 0004（#78）を足した後の最新版は 4（AC-99 の文言と同じ改訂。AC-165）。
-	if got := schemaVersionForTest(t, s); got != 10 {
-		t.Fatalf("schema version = %d, want 10 (AC-99)", got)
+	if got := schemaVersionForTest(t, s); got != 11 {
+		t.Fatalf("schema version = %d, want 11 (AC-99)", got)
 	}
 
 	// AC-100: 課題の件数と内容。

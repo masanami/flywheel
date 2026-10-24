@@ -37,6 +37,12 @@ type Store struct {
 	// 注入口を露出しない）。
 	insertActivity func(tx *sql.Tx, row activityRow) error
 
+	// insertOccurrence はテストが発生（occurrence）への書き込みを失敗させるための
+	// フック。nil なら defaultInsertOccurrence を使う。insertActivity と違い
+	// activityRecorder を通らない経路（launchDelegation の mutateSlots・RunJudgment の
+	// db.Write）の発生の挿入にも効く（挿入は insertOccurrenceRow 1 か所を通るため）。
+	insertOccurrence func(tx *sql.Tx, row occurrenceRow) error
+
 	// beforeCommit はテストが「1 つの書き込みトランザクションが BEGIN IMMEDIATE の
 	// 書き込みロックを保持したまま止まる」状況を作るためのフック。mutate が
 	// 渡された fn を成功させた直後・コミットする前に呼ぶ。nil なら何もしない

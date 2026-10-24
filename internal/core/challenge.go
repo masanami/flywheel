@@ -536,16 +536,26 @@ func nullablePriority(p *Priority) any {
 // 往復させ常にミリ秒精度に丸めたもの。以後 GetChallenge 等でストアから再読込した
 // 値と time.Time.Equal で一致させるため）を返す。CreateChallenge（起票者=actor）と
 // Ingest の課題作成（起票者=Issue の作成者の login。#56）が共有する。
-func insertChallengeRow(ctx context.Context, tx *sql.Tx, at time.Time, title, description, doneCriteria string, urgency *Urgency, reporter string) (id int64, now time.Time, err error) {
+//
+// origin は課題の出どころ（ChallengeOrigin*）で必須。followupOf は元の課題の ID
+// （"C-n"）で、フォローアップの課題だけが値を持つ（nil なら NULL）。
+func insertChallengeRow(ctx context.Context, tx *sql.Tx, at time.Time, title, description, doneCriteria string, urgency *Urgency, reporter string, origin ChallengeOrigin, followupOf *string) (id int64, now time.Time, err error) {
+	origin, ok := ParseChallengeOrigin(string(origin))
+	if !ok {
+		return 0, time.Time{}, fmt.Errorf("insert challenge: invalid origin %q", origin)
+	}
+	if (origin == ChallengeOriginFollowup) != (followupOf != nil) {
+		return 0, time.Time{}, fmt.Errorf("insert challenge: followup_of must be set exactly for origin followup")
+	}
 	nowStr := formatTimestamp(at)
 	now, err = parseTimestamp(nowStr)
 	if err != nil {
 		return 0, time.Time{}, err
 	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO challenge (title, description, done_criteria, urgency, status, version, reporter, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-		title, description, doneCriteria, nullableUrgency(urgency), string(StatusUnclassified), reporter, nowStr, nowStr,
+		`INSERT INTO challenge (title, description, done_criteria, urgency, status, version, reporter, created_at, updated_at, origin, followup_of)
+		 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+		title, description, doneCriteria, nullableUrgency(urgency), string(StatusUnclassified), reporter, nowStr, nowStr, string(origin), nullableString(followupOf),
 	)
 	if err != nil {
 		return 0, time.Time{}, err
@@ -591,7 +601,7 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 
 	var result *Challenge
 	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
-		id, now, err := insertChallengeRow(ctx, tx, rec.at, in.Title, in.Description, in.DoneCriteria, urgency, rec.actor)
+		id, now, err := insertChallengeRow(ctx, tx, rec.at, in.Title, in.Description, in.DoneCriteria, urgency, rec.actor, ChallengeOriginManual, nil)
 		if err != nil {
 			return err
 		}
@@ -972,4 +982,12 @@ func nullStr(v sql.NullString) *string {
 	}
 	s := v.String
 	return &s
+}
+
+// nullableString は s が nil なら SQL の NULL、そうでなければ値を返す。
+func nullableString(s *string) any {
+	if s == nil {
+		return nil
+	}
+	return *s
 }
