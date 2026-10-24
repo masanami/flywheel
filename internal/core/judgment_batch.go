@@ -49,6 +49,7 @@ var notStartedReasonValues = []NotStartedReason{
 	NotStartedPlanUnavailable,
 	NotStartedInProgress,
 	NotStartedNotExecutable,
+	NotStartedDependency,
 }
 
 // NotStartedReasonValues は NotStartedReason の閉集合（§IF / API「cycle の JSON 出力」の

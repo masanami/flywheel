@@ -254,6 +254,10 @@ func selectDelegationTargets(ctx context.Context, tx *sql.Tx) (out []int64, skip
 	if err != nil {
 		return nil, nil, err
 	}
+	deps, err := evaluateDependencies(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, ch := range challenges {
 		cid, ok := parseChallengeID(ch.ID)
 		if !ok {
@@ -286,6 +290,10 @@ func selectDelegationTargets(ctx context.Context, tx *sql.Tx) (out []int64, skip
 		case !p.HasSpec:
 			skipped = append(skipped, NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable,
 				Detail: "承認済みの計画に構造化した出力が無い（人が登録した計画は委譲できない）"})
+			continue
+		}
+		if ns := dependencyNotStarted(deps, ch.ID, cid); ns != nil {
+			skipped = append(skipped, *ns)
 			continue
 		}
 		out = append(out, cid)
@@ -861,4 +869,20 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		item.Status, item.Note = status, note
 	}
 	return item, nil, nil
+}
+
+// dependencyNotStarted は cid の依存先に満たされていないものがあれば、起動しない理由
+// （dependency。detail は満たされていない依存先の ID を昇順に "," で連ねた文字列）を返す。
+// 満たされていれば nil。
+func dependencyNotStarted(eval *dependencyEvaluation, challengeID string, cid int64) *NotStarted {
+	var unmet []string
+	for _, d := range eval.Dependencies[cid] {
+		if !d.Met {
+			unmet = append(unmet, formatChallengeID(d.DependsOn))
+		}
+	}
+	if len(unmet) == 0 {
+		return nil
+	}
+	return &NotStarted{ChallengeID: challengeID, Reason: NotStartedDependency, Detail: strings.Join(unmet, ",")}
 }
