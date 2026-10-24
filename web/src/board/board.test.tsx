@@ -12,6 +12,8 @@ const cc = (
   o: Record<string, unknown> = {},
 ) => ({
   created_at: "",
+  dependencies: [],
+  dependents: [],
   description: `説明${id}`,
   done_criteria: `完了条件${id}`,
   id,

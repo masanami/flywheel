@@ -370,3 +370,27 @@ it("T12: 詳細を開いても fetch は GET だけ、form 要素なし", async 
   expect(requests.every((r) => r.method === "GET")).toBe(true);
   expect(document.querySelector("form")).toBeNull();
 });
+
+it("M4.5 AC-196: 詳細に依存先ごとの ID と「満たされている」「待っている」が API の satisfied のまま出る", async () => {
+  const dep = (id: string, satisfied: boolean) => ({
+    challenge_id: id,
+    policy_state: null,
+    satisfied,
+    status: "in_progress",
+    upstream_state: null,
+  });
+  const d = show();
+  d.challenge.dependencies = [dep("C-2", true), dep("C-3", false)];
+  installFakes(bodies(d));
+  const content = await openDetail();
+  const sec = await within(content).findByTestId("dependencies");
+  expect(within(sec).getByText("C-2: 満たされている")).toBeTruthy();
+  expect(within(sec).getByText("C-3: 待っている")).toBeTruthy();
+});
+
+it("M4.5 AC-196: 依存先が無い課題では欄を出さない", async () => {
+  installFakes(bodies(show()));
+  const content = await openDetail();
+  await within(content).findByText("計画（0）");
+  expect(within(content).queryByTestId("dependencies")).toBeNull();
+});

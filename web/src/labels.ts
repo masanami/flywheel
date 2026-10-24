@@ -104,6 +104,10 @@ export const MARK_LABELS: Record<MarkKind, string> = {
   approved_operation: "承認済みの操作が未実行",
 };
 
+// 依存先の充足の表示。値は API の satisfied をそのまま写す（UI で導かない）。
+export const DEPENDENCY_SATISFIED_LABEL = "満たされている";
+export const DEPENDENCY_WAITING_LABEL = "待っている";
+
 export const NO_ACTION_LABEL = "なし（エージェントが進める）";
 export const NO_PRIORITY_LABEL = "優先度なし";
 

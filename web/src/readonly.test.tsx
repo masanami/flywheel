@@ -71,6 +71,8 @@ function awaitingApproval(): Record<string, unknown> {
   };
   const challenge = {
     created_at: "",
+    dependencies: [],
+    dependents: [],
     description: "説明",
     done_criteria: "完了条件",
     id: "C-1",
