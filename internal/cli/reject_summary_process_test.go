@@ -199,8 +199,9 @@ func TestReject_CompletionApprovalWithPendingRelease_MatchesApprovalWithD12Reass
 		"完了条件:    distinctive done criteria\n" +
 		"同時に承認される本番反映 (release): OP-1(release) distinctive release op\n" +
 		"同時には承認されない不可逆操作:     OP-2(delete) distinctive delete op\n" +
-		"  OP-1 の head: " + releaseHead(1, 0)[:12] + "（" + releaseHead(1, 0) + "）" +
-		" ※検証の head の記録が無いため、比較していません\n"
+		"  OP-1 の head（短縮形 " + releaseHead(1, 0)[:12] + "。完全形は次の行）\n" +
+		releaseHead(1, 0) + "\n" +
+		"  ※検証の head の記録が無いため、比較していません\n"
 	if approveBody != wantApprove {
 		t.Errorf("approve summary = %q, want %q", approveBody, wantApprove)
 	}
