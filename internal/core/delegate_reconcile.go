@@ -153,7 +153,7 @@ var errReconcileNotEligible = errors.New("core: the challenge is no longer in pr
 // 検出（成果物の確認より優先）→ 成果物の確認（結果が succeeded で結末が completed の
 // ときだけ）の順。写す直前に読み直した課題が着手中でなければ、写さない。
 func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, runIDDisplay string,
-	rec *reconciliation, result RunResult, report *DelegationReport) (status *string, note string, err error) {
+	rec *reconciliation, result RunResult, report *DelegationReport, cycleID string) (status *string, note string, err error) {
 	runIDInt, _ := parseRunID(runIDDisplay)
 
 	// release の登録。base が宣言の既定ブランチの PR（状態を問わない）ごとに、同じ PR の
@@ -197,16 +197,16 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 			fmt.Fprintf(&q, "- %s\n", pr.URL)
 		}
 		q.WriteString(rec.describe())
-		return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, q.String())
+		return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, q.String(), holdReasonUnapprovedMerge, cycleID)
 	}
 
 	// 子の問い・停止の報告（J4 は S3）。保留の原因の run はこの run になる。
 	if result == RunResultSucceeded && report != nil {
 		switch report.Outcome {
 		case DelegationOutcomeQuestions:
-			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatQuestionsHold(report))
+			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatQuestionsHold(report), holdReasonQuestions, cycleID)
 		case DelegationOutcomeBlocked:
-			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatBlockedHold(report))
+			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatBlockedHold(report), holdReasonBlocked, cycleID)
 		}
 	}
 
@@ -230,10 +230,10 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 		confirmed = true
 	}
 	if confirmed {
-		return s.mapReconciliation(ctx, dc, runIDDisplay, OpSubmit, "")
+		return s.mapReconciliation(ctx, dc, runIDDisplay, OpSubmit, "", holdReasonNone, cycleID)
 	}
 	question := "子は完了を報告したが成果物が見つからない（宣言の成果物の種類: " + dc.Operation.Artifacts + "）。\n" + rec.describe()
-	return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, question)
+	return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, question, holdReasonArtifactMissing, cycleID)
 }
 
 // releaseApproved は課題の、参照が prURL の release が承認済みかを返す。
@@ -256,13 +256,17 @@ func (s *Store) releaseApproved(ctx context.Context, challengeID int64, prURL st
 
 // mapReconciliation は課題が着手中のときだけ、経路 invoker・原因の run の ID つきで
 // submit（検証中）または hold（人間対応待ち。question が問い）を行う。
-func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, runIDDisplay string, op Operation, question string) (*string, string, error) {
+//
+// reason は保留の理由の種別で、発生（M45P5）の種類を決める。保留の行と同じトランザクションで
+// 発生を作る。holdReasonArtifactMissing（成果物が見つからない）は発生を作らない。
+// cycleID はこの写像が属する周（発生が持つ周の ID）。
+func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, runIDDisplay string, op Operation, question string, reason holdReason, cycleID string) (*string, string, error) {
 	_, err := s.transitionAsInvoker(ctx, runIDDisplay, dc.Challenge.ID, op, func(ctx context.Context, tc *transitionCtx) error {
 		if tc.current.Status != StatusInProgress {
 			return errReconcileNotEligible
 		}
 		if op == OpHold {
-			return insertHold(ctx, tc, question)
+			return s.insertHoldWithOccurrence(ctx, tc, question, reason, cycleID)
 		}
 		return nil
 	})

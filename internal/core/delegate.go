@@ -555,10 +555,10 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 	}
 
 	if dc.LimitHit != nil {
-		return s.holdForFailureLimit(ctx, dc)
+		return s.holdForFailureLimit(ctx, dc, in.CycleID)
 	}
 	if dc.ReworkHit != nil {
-		return s.holdForReworkLimit(ctx, dc)
+		return s.holdForReworkLimit(ctx, dc, in.CycleID)
 	}
 
 	// 実装枠の残りが起動の最小額に満たなければ、J3 の費用を払う前に起動しない。
@@ -815,12 +815,23 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 				return err
 			}
 		}
+		endedAt := s.currentTime()
 		if _, err := updateRunEnd(recordCtx, tx, runIDInt, updateRunEndInput{
-			EndedAt: s.currentTime(), Result: result, RateLimited: output.RateLimited,
+			EndedAt: endedAt, Result: result, RateLimited: output.RateLimited,
 			CostUSD: &costMicros, CostSource: costSource, ReportedTotalCostUSD: reportedPtr,
 			Output: string(output.StructuredOutput), Error: errSummary,
 		}); err != nil {
 			return err
+		}
+		// 数える失敗は delegation_failed、budget_exhausted は budget_exhausted の発生を、
+		// run の終了と同じトランザクションで作る（枠超過の run は数えない）。
+		if kind, ok := delegationEndOccurrenceKind(result, output.RateLimited); ok {
+			if err := s.insertOccurrenceRow(tx, occurrenceInput{
+				ChallengeID: cid, CycleID: cycleIDInt, CauseRunID: &runIDInt, Kind: kind,
+				Ref: OccurrenceRef{RunID: &runIDInt}, Outcome: OccurrenceOutcomeBad, At: endedAt,
+			}); err != nil {
+				return err
+			}
 		}
 		if recon != nil {
 			verifiedAt := s.currentTime()
@@ -862,7 +873,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		item.Outcome = string(report.Outcome)
 	}
 	if recon != nil {
-		status, note, err := s.applyReconciliation(recordCtx, dc, assignment.RunID, recon, result, report)
+		status, note, err := s.applyReconciliation(recordCtx, dc, assignment.RunID, recon, result, report, in.CycleID)
 		if err != nil {
 			return nil, nil, err
 		}
