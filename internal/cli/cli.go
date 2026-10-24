@@ -189,7 +189,7 @@ func parseArgs(rawArgs []string, cmd Command) (Args, *Error) {
 		i++
 	}
 
-	if len(positional) < cmd.MinPositional || len(positional) > cmd.MaxPositional {
+	if len(positional) < cmd.MinPositional || (cmd.MaxPositional != UnlimitedPositional && len(positional) > cmd.MaxPositional) {
 		return Args{}, NewError(CodeUsageError, fmt.Sprintf("引数の数が正しくありません（%d 個必要、%d 個指定）", cmd.MinPositional, len(positional)))
 	}
 

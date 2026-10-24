@@ -30,6 +30,8 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   budget <C-ID> --impl-usd <額> [--review-usd <額>] [--relayed --session <s> --quote <q>]
   op add <C-ID> --kind <release|delete|external_send|other> --summary <s> [--ref <r>]
   op exec [<OP-ID>]
+  dep add <C-ID> <依存先の C-ID>...
+  dep rm <C-ID> <依存先の C-ID>...
   status
   log [<ID>]
   ingest [--source <id>]
@@ -43,5 +45,5 @@ const usageText = `flywheel - flywheel の core を操作する CLI
 --relayed は、人間と会話しているエージェントが会話で受けた操作を記録する口（端末での確認は行わない。
 --session は会話の識別、--quote は発言の要旨で、どちらも必須）。
 
-詳細は docs/features/m1-core.md・docs/features/m3-invoker-delegation.md を参照。
+詳細は docs/features/m1-core.md・docs/features/m3-invoker-delegation.md・docs/features/m4.5-learning-and-self-improvement.md を参照。
 `

@@ -134,6 +134,16 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		newReleaseGH(t, execHead)
 		return []string{"op", "exec", op}
 	}},
+	"dep add": {setup: func(t *testing.T, ws string) []string {
+		id := createForCase(t, ws)
+		return []string{"dep", "add", id, createForCase(t, ws)}
+	}},
+	"dep rm": {setup: func(t *testing.T, ws string) []string {
+		id := createForCase(t, ws)
+		dep := createForCase(t, ws)
+		runJSON(t, ws, "dep", "add", id, dep)
+		return []string{"dep", "rm", id, dep}
+	}},
 	"status": {setup: func(t *testing.T, ws string) []string {
 		createForCase(t, ws)
 		// needs_human.discrepancies の要素の形も文書と照合されるよう、食い違いの
@@ -447,6 +457,7 @@ var runLevelUsageErrorCases = [][]string{
 	{"approve", "C-2", "--relayed", "--quote", "q"},             // --relayed に --session が無い（空白だけも同じ）
 	{"approve", "C-2", "--relayed", "--session", "s"},           // --relayed に --quote が無い（空白だけも同じ）
 	{"reject", "OP-1", "--reason", "r", "--field", "issues"},    // 不可逆操作の ID への --field（M4P36）
+	{"dep", "add", "C-1", "C-1"},                                // 自分自身を依存先にした（core が ErrSelfDependency を返し usage_error に写る。M4.5 S2）
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の

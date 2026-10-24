@@ -97,6 +97,14 @@ var (
 	// §宣言）・agent.json・connectors.json
 	// （docs/features/m3-invoker-delegation.md §宣言）が共有する。
 	ErrConfigInvalid = errors.New("core: declaration is invalid")
+
+	// ErrSelfDependency は課題を自分自身の依存先にしようとしたことを表す
+	// （CLI の usage_error。何も書かない）。
+	ErrSelfDependency = errors.New("core: a challenge cannot depend on itself")
+
+	// ErrDependencyCycle は足すと依存の循環ができることを表す（CLI の dependency_cycle。
+	// 何も書かず、循環を自動で解かない）。
+	ErrDependencyCycle = errors.New("core: the dependency would create a cycle")
 )
 
 // ErrGitUnavailable は、スロットの検査・払い出しのために git を起動できない

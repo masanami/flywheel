@@ -255,6 +255,13 @@ func NormalizeRejectedFields(fields []string) (out []RejectedField, ok bool) {
 // 作業ログに載せず operation_execution にだけ残す。
 const ActivityActionOpExecute = "op_execute"
 
+// 作業ログ（entity=challenge）の action。依存を足した・外したときに残し、after に
+// 足した・外した依存先の ID を持つ。
+const (
+	ActivityActionDepAdd = "dep_add"
+	ActivityActionDepRm  = "dep_rm"
+)
+
 // ExecutionResult は release の実行の試行の結果（operation_execution.result）の閉集合。
 type ExecutionResult string
 

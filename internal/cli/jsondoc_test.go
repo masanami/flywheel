@@ -152,6 +152,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3ShowRunsShape(t, &doc)
 	addM3CycleShape(t, &doc)
 	addM45ReleaseShape(t, &doc)
+	addM45DependencyShape(t, &doc)
 	addM3SlotClearShape(t, &doc)
 	addM3RunShape(t, &doc)
 	addM3BudgetShapes(t, &doc)
@@ -320,6 +321,34 @@ func addM45ReleaseShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["release_phase"] = map[string]bool{"phase": true, "skipped": true, "items": true, "not_started": true}
 	doc.entity["release_item"] = itemKeys
 	doc.entity["release_not_started"] = map[string]bool{"challenge_id": true, "reason": true, "operation_id": true}
+}
+
+// addM45DependencyShape は `dep add`・`dep rm` の成功時の JSON の形を doc へ足す。m4.5 の §IF / API の
+// 「`dep add`・`dep rm` の `--json` の成功の出力は `{"challenge": {…}}` とし」の行から最上位のキーを読む
+// （challenge の要素の形は M1 の edit と同じなので、doc.entity["challenge"] が照合する）。
+func addM45DependencyShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	var keys map[string]bool
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "`dep add`・`dep rm` の `--json` の成功の出力は") {
+			for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+				if strings.HasPrefix(m[1], "{") {
+					keys = topLevelKeys(m[1])
+					break
+				}
+			}
+			break
+		}
+	}
+	if len(keys) != 1 || !keys["challenge"] {
+		t.Fatalf("m4.5 spec's `dep add`・`dep rm` line does not document {\"challenge\": …}: %v", keys)
+	}
+	doc.topLevel["dep add"] = []map[string]bool{keys}
+	doc.topLevel["dep rm"] = []map[string]bool{keys}
 }
 
 // assertDocumentedReleasePhase は release の段（cycle の phases の要素と `op exec` の phase が共有する形）の

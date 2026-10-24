@@ -16,7 +16,7 @@ func TestIDCommands_NotFoundForMissingChallengeAndOperationID(t *testing.T) {
 	for _, name := range sortedCommandNames(registeredCommands()) {
 		cmd := registeredCommands()[name]
 		tc, ok := allCommandSuccessCases[name]
-		if !ok || cmd.MaxPositional < 1 {
+		if !ok || (cmd.MaxPositional < 1 && cmd.MaxPositional != UnlimitedPositional) {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
