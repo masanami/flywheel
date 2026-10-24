@@ -5,7 +5,12 @@ import type {
   RunReport,
   ShowCardResponse,
 } from "../api/types.gen.ts";
-import { STATE_LABELS, label } from "../labels.ts";
+import {
+  DEPENDENCY_SATISFIED_LABEL,
+  DEPENDENCY_WAITING_LABEL,
+  STATE_LABELS,
+  label,
+} from "../labels.ts";
 import { RefreshKeyContext } from "../nav.tsx";
 import { ApprovalGuide } from "./ApprovalGuide.tsx";
 import { ApprovalPanel, approvalKindOf } from "./ApprovalPanel.tsx";
@@ -265,6 +270,25 @@ export function DetailSections({ l }: { l: Loaded }) {
     <>
       <StagesDetail stages={show.stages} pairs={show.pairs} />
       <FigureView figure={show.stages.figure} />
+      {show.challenge.dependencies.length > 0 ? (
+        <section aria-label="依存先" data-testid="dependencies">
+          <h3>依存先（{show.challenge.dependencies.length}）</h3>
+          <ul>
+            {show.challenge.dependencies.map((d) => (
+              <li
+                key={d.challenge_id}
+                data-dependency={d.challenge_id}
+                data-satisfied={d.satisfied ? "true" : "false"}
+              >
+                {d.challenge_id}:{" "}
+                {d.satisfied
+                  ? DEPENDENCY_SATISFIED_LABEL
+                  : DEPENDENCY_WAITING_LABEL}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <Section title="計画" count={plans.length}>
         {plans.map((p) => (
           <article key={p.version} data-plan={p.version}>
