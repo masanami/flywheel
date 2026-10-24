@@ -71,6 +71,16 @@ type ReleaseExecItem struct {
 	ConsecutiveFailures int
 }
 
+// PartialReleaseError は release の段が途中でエラーになったとき、それまでに実行済みの結果（マージ済みの
+// release 等）を運ぶ。Unwrap で元のエラーを返すので errors.Is の判定は変わらない。
+type PartialReleaseError struct {
+	Err   error
+	Items []ReleaseExecItem
+}
+
+func (e *PartialReleaseError) Error() string { return e.Err.Error() }
+func (e *PartialReleaseError) Unwrap() error { return e.Err }
+
 // ReleaseExecResult は ExecuteReleases の結果。
 type ReleaseExecResult struct {
 	Items      []ReleaseExecItem
@@ -152,16 +162,19 @@ func (s *Store) ExecuteReleases(ctx context.Context, ids []string, opts ReleaseE
 		seen[id] = true
 		item, ns, err := s.executeRelease(ctx, id, opts)
 		if errors.Is(err, ErrConflict) || errors.Is(err, errExecutionNotOpen) {
-			// 実行の途中で別の呼び出しが同じ操作・試行を変えた。この release は飛ばして続ける
-			// （試行は別の呼び出しが閉じているか、回収される）。
-			cid := ""
+			// 試行を始める前に別の呼び出しが同じ操作・試行を変えた。この release は飛ばして続ける。
+			// detail には、その時点で開いている試行の ID を入れる（無ければ出さない）。
+			cid, detail := "", ""
 			_ = s.db.Read(ctx, func(tx *sql.Tx) error {
 				if r, e := loadOperationRow(ctx, tx, id); e == nil {
 					cid = formatChallengeID(r.ChallengeID)
 				}
+				if cur, e := latestOperationExecution(ctx, tx, id); e == nil && cur != nil && cur.open() {
+					detail = fmt.Sprintf("%d", cur.ID)
+				}
 				return nil
 			})
-			res.NotStarted = append(res.NotStarted, NotStarted{ChallengeID: cid, OperationID: formatOperationID(id), Reason: NotStartedInProgress, Detail: "changed concurrently"})
+			res.NotStarted = append(res.NotStarted, NotStarted{ChallengeID: cid, OperationID: formatOperationID(id), Reason: NotStartedInProgress, Detail: detail})
 			continue
 		}
 		if err != nil {
@@ -274,6 +287,11 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		_ = s.db.Write(ctx, func(tx *sql.Tx) error {
 			return closeOperationExecution(ctx, tx, attempt.ID, closeOperationExecutionInput{EndedAt: now(), Result: ExecutionResultInterrupted, Detail: err.Error()})
 		})
+		if errors.Is(err, ErrConflict) || errors.Is(err, errExecutionNotOpen) {
+			// 実行の途中で別の呼び出しが同じ操作・試行を変えた。自分の試行の ID を詳細に入れて飛ばす。
+			return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
+				Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
+		}
 		return nil, nil, err
 	}
 	return item, nil, nil

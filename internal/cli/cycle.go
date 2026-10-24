@@ -149,6 +149,10 @@ func runCycle(a Args) (any, error) {
 		OnBegin:   onBegin,
 	})
 	if err != nil {
+		var partial *core.PartialReleaseError
+		if errors.As(err, &partial) {
+			return nil, withExecutedReleases(mapCoreErr(err), partial.Items)
+		}
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{json: view.FromCycleRunResult(res), text: cycleResultText(res)}, nil

@@ -92,13 +92,35 @@ func runOpExec(a Args) (any, error) {
 		return nil, mapCoreErr(endErr)
 	}
 	if runErr != nil {
-		return nil, mapCoreErr(runErr)
+		var items []core.ReleaseExecItem
+		if res != nil {
+			items = res.Items
+		}
+		return nil, withExecutedReleases(mapCoreErr(runErr), items)
 	}
 
 	return textOutput{
 		json: view.PhaseResponse{Phase: view.FromReleasePhase(false, res.Items, res.NotStarted)},
 		text: releasePhaseText(res),
 	}, nil
+}
+
+// withExecutedReleases は、release の段が途中でエラーになったときに、それまでに実行済みの結果を
+// エラーの文言へ残す（マージ済みの release がエラーの陰に隠れないように）。
+func withExecutedReleases(e *Error, items []core.ReleaseExecItem) *Error {
+	if e == nil || len(items) == 0 {
+		return e
+	}
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		p := it.OperationID + " " + string(it.Result)
+		if it.MergeCommit != "" {
+			p += " " + it.MergeCommit
+		}
+		parts = append(parts, p)
+	}
+	e.Message += "（途中までの結果: " + strings.Join(parts, "、") + "）"
+	return e
 }
 
 // releasePhaseText は --json 無しの `op exec` の表示（形式の安定は保証しない）。

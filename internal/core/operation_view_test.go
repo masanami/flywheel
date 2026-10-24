@@ -9,7 +9,7 @@ import (
 )
 
 // このファイルは M4.5 S1 の「show・status の不可逆操作の要素に足す 6 つのキー」
-// （AC-118・AC-131〜AC-135）と、status の食い違い merged_unapproved（AC-103）の core 側を
+// （AC-118・AC-131〜AC-137）と、status の食い違い merged_unapproved（AC-103）の core 側を
 // 検証する。実ストアで、試行の行は coretest のフィクスチャで作る。
 
 func attempt(t *testing.T, s *Store, opID int64, startSec int, result ExecutionResult, head string) {
@@ -59,7 +59,7 @@ func showOpOf(t *testing.T, s *Store, cid, opID int64) IrreversibleOperation {
 	return IrreversibleOperation{}
 }
 
-// AC-133: 試行がまだ無い承認済みの release。
+// AC-134: 試行がまだ無い承認済みの release。
 func TestOperationView_ApprovedWithoutAttempts(t *testing.T) {
 	s, cid, opID := releaseFixtureForTest(t)
 	for name, op := range map[string]IrreversibleOperation{"status": approvedOpOf(t, s, opID), "show": showOpOf(t, s, cid, opID)} {
@@ -72,7 +72,7 @@ func TestOperationView_ApprovedWithoutAttempts(t *testing.T) {
 	}
 }
 
-// AC-132・AC-134・AC-135: 承認の行が無い release は approved_head が null。
+// AC-135: 承認の行が無い release は approved_head が null。
 func TestOperationView_NoApprovalRowHasNilApprovedHead(t *testing.T) {
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
@@ -141,7 +141,7 @@ func TestOperationView_WaitingSinceIsAfterLatestApprovalAndOnlyWhileApproved(t *
 	}
 }
 
-// AC-131: executed_at・merge_commit は show に出る。executed の操作は status の一覧に出ない。
+// AC-131・AC-136・AC-137: executed_at・merge_commit は show に出る。executed の操作は status の一覧に出ない。
 func TestOperationView_ExecutedShowsExecutedAtAndMergeCommit(t *testing.T) {
 	s, cid, opID := releaseFixtureForTest(t)
 	attempt(t, s, opID, 10, ExecutionResultMerged, "a1b2c3")
@@ -164,7 +164,7 @@ func TestOperationView_ExecutedShowsExecutedAtAndMergeCommit(t *testing.T) {
 	}
 }
 
-// AC-132: 取り消した release は needs_human.operations に出て、last_execution_result を持つ。
+// AC-76・AC-77: 取り消した release は needs_human.operations に出て、last_execution_result を持つ。
 func TestOperationView_CancelledPendingReleaseShowsLastResultInNeedsHuman(t *testing.T) {
 	s, _, opID := releaseFixtureForTest(t)
 	attempt(t, s, opID, 10, ExecutionResultHeadChanged, "a1b2c3")
