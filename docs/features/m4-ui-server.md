@@ -149,7 +149,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | 承認待ち | `needs_human.challenges` のうち計画承認待ち・完了確認待ちの課題 | その課題 |
 | 未回答の問い | `needs_human.challenges` のうち人間対応待ちの課題 | その課題 |
 | 不可逆操作の承認 | `needs_human.operations` の各操作 | 操作の `challenge_id` の課題 |
-| 上流との食い違い | `needs_human.discrepancies` の各要素 | `challenge_id` の課題 |
+| 上流との食い違い | `needs_human.discrepancies` の各要素（種類〔`kinds`〕が `dependency_cycle` だけの要素は除く。`m4.5-learning-and-self-improvement.md` の決定 M45H19） | `challenge_id` の課題 |
 | 予算の使い切り | `needs_human.budget_exhausted` の各要素 | `challenge_id` の課題 |
 | トリアージ | `needs_human.triage` の各要素 | `challenge_id` の課題 |
 | 片づけ待ちのスロット | `needs_human.slots` の各スロット | `card.next_human_actions` に `clear_slot` を持つ課題。どのカードの `card.slot_ids` にも載らないスロット（課題の run に結ばれないスロット）は、ボードの上に一覧で出す【M4H36】 |
@@ -468,7 +468,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 `{"state": <コード>, "modifiers": [<コード>…], "next_human_actions": [<コード>…], "slot_ids": ["SL-<n>"…], "headline": string|null, "context": string|null}`（`headline`・`context` は S3 まで常に `null`。S4 から課題の `headline`・`context` の列の値を返す）。`slot_ids` は、スロットごとの直近の run（`run.slot_id` が一致する run のうち最新）がこの課題の run であるスロットの ID を昇順に並べる（API 専用。CLI の `--json` には出さない。M4H36）。
 
 - `state` は課題の状態のコード（M1 の 8 値）そのもの。
-- `modifiers` は `running`（終了していない run がある）・`unresponsive`（終了していない run の heartbeat が 300 秒より古い。しきい値は M3 の中断の判定と同じ値を core から使い、導出の関数は現在時刻を引数で受け取る）・`waiting_ci`（`status.waiting_external` にある）・`budget_exhausted`（`status.needs_human.budget_exhausted` にある）・`discrepancy`（`status.needs_human.discrepancies` にある）の閉集合で、この順に重複なく並べる。
+- `modifiers` は `running`（終了していない run がある）・`unresponsive`（終了していない run の heartbeat が 300 秒より古い。しきい値は M3 の中断の判定と同じ値を core から使い、導出の関数は現在時刻を引数で受け取る）・`waiting_ci`（`status.waiting_external` にある）・`budget_exhausted`（`status.needs_human.budget_exhausted` にある）・`discrepancy`（`status.needs_human.discrepancies` にある（種類〔`kinds`〕が `dependency_cycle` だけの要素は除く。`m4.5-learning-and-self-improvement.md` の決定 M45H19）の閉集合で、この順に重複なく並べる。
 - `next_human_actions` は次の表の条件に当たるものを表の順に重複なく並べる。どれにも当たらなければ `[]`（UI は「なし（エージェントが進める）」と表示する。S2 からはカードの面でなく詳細に表示する）。
 
 | コード | 条件 |
@@ -479,7 +479,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | `triage` | `status.needs_human.triage` にある |
 | `increase_budget` | `status.needs_human.budget_exhausted` にある |
 | `approve_operation` | 未承認（`pending`）の不可逆操作がある（完了した課題を含む） |
-| `review_discrepancy` | `status.needs_human.discrepancies` にある |
+| `review_discrepancy` | `status.needs_human.discrepancies` にある（種類〔`kinds`〕が `dependency_cycle` だけの要素は除く。`m4.5-learning-and-self-improvement.md` の決定 M45H19） |
 | `clear_slot` | `card.slot_ids`（スロットごとの直近の run が課題の run であるスロット。`run.slot_id`〔M3 のマイグレーション `0005`〕で結ぶ）が `status.needs_human.slots` にある |
 
 #### エラーコードと HTTP の状態コード
@@ -717,7 +717,7 @@ S1 は 2026-10-12（flywheel#159）、S2 は 2026-10-18（flywheel#212）、S3 �
 - [ ] `status.needs_human.triage` にある課題の `card.next_human_actions` は `triage` を含む
 - [ ] `status.needs_human.budget_exhausted` にある課題の `card.next_human_actions` は `increase_budget` を含む
 - [ ] 未承認の不可逆操作を持つ完了した課題の `card.next_human_actions` は `["approve_operation"]` である
-- [ ] `status.needs_human.discrepancies` にある課題の `card.next_human_actions` は `review_discrepancy` を含む
+- [ ] `status.needs_human.discrepancies` にある課題の `card.next_human_actions` は `review_discrepancy` を含む。種類が `dependency_cycle` だけの要素でだけそこにある課題は含まない（M45H19）
 - [ ] `run.slot_id` で結ばれたスロットが `status.needs_human.slots` にあり、そのスロットの直近の run がこの課題の run である課題の `card.next_human_actions` は `clear_slot` を含み、`card.slot_ids` はそのスロットの ID を含む
 - [ ] 【AC-71a】同じスロットをあとの run で別の課題が使ったとき、過去にそのスロットを使っただけの課題の `card.next_human_actions` は `clear_slot` を含まず、`card.slot_ids` にそのスロットの ID を含まない（M4H36）
 - [ ] 分類済みで、保留・未承認の不可逆操作・食い違い・予算の使い切り・`triage` の記録の無い課題の `card.next_human_actions` は `[]` である
@@ -727,7 +727,7 @@ S1 は 2026-10-12（flywheel#159）、S2 は 2026-10-18（flywheel#212）、S3 �
 - [ ] 終了していない run の heartbeat が 300 秒ちょうど、または 300 秒より新しい課題の `card.modifiers` は `unresponsive` を含まない
 - [ ] `status.waiting_external` にある課題の `card.modifiers` は `waiting_ci` を含む
 - [ ] `status.needs_human.budget_exhausted` にある課題の `card.modifiers` は `budget_exhausted` を含む
-- [ ] `status.needs_human.discrepancies` にある課題の `card.modifiers` は `discrepancy` を含む
+- [ ] `status.needs_human.discrepancies` にある課題の `card.modifiers` は `discrepancy` を含む。種類が `dependency_cycle` だけの要素でだけそこにある課題は含まない（M45H19）
 - [ ] 複数の条件に当たる課題の `card.modifiers` は、§IF / API「カードの面」の列挙の順に重複なく並ぶ（API では同時に成り立つ 4 つで検証し、5 つすべての順は core の単体テスト `internal/core/card_test.go` で検証する）
   - 2026-10-12 に括弧書きを改めた（M4H25）。`waiting_ci`（終了していない run が無い検証中の課題）と `running`・`unresponsive` は同じ課題に重ならないため、API の実データでは 5 つすべてに当たる課題を作れない。
 - [ ] S1 では、すべての課題の `card.headline` と `card.context` は `null` である

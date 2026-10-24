@@ -32,6 +32,14 @@ const APPROVAL_STATES = [
 const QUESTION_STATE = "awaiting_human";
 const CLEAR_SLOT = "clear_slot";
 
+// 種類が dependency_cycle だけの食い違いは帯に数えない（循環は status で見える）。
+function realDiscrepancies(nh: StatusNeedsHuman) {
+  return nh.discrepancies.filter(
+    (d) =>
+      d.kinds.length === 0 || d.kinds.some((k) => k !== "dependency_cycle"),
+  );
+}
+
 function challengesIn(nh: StatusNeedsHuman, states: string[]): string[] {
   return nh.challenges
     .filter((c) => states.includes(c.status))
@@ -44,7 +52,7 @@ export function countsOf(nh: StatusNeedsHuman): HumanCounts {
     approvals: challengesIn(nh, APPROVAL_STATES).length,
     questions: challengesIn(nh, [QUESTION_STATE]).length,
     operations: nh.operations.length,
-    discrepancies: nh.discrepancies.length,
+    discrepancies: realDiscrepancies(nh).length,
     budget: nh.budget_exhausted.length,
     triage: nh.triage.length,
     slots: nh.slots.length,
@@ -65,7 +73,7 @@ export function challengeIdsOf(
     case "operations":
       return new Set(nh.operations.map((o) => o.challenge_id));
     case "discrepancies":
-      return new Set(nh.discrepancies.map((d) => d.challenge_id));
+      return new Set(realDiscrepancies(nh).map((d) => d.challenge_id));
     case "budget":
       return new Set(nh.budget_exhausted.map((b) => b.challenge_id));
     case "triage":

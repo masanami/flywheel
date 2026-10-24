@@ -165,7 +165,7 @@ func deriveCard(c Challenge, st *Overview, runs []*runRow, ownSlots []string, no
 		inBudget = inBudget || b.ChallengeID == c.ID
 	}
 	for _, d := range st.Discrepancies {
-		inDisc = inDisc || d.ChallengeID == c.ID
+		inDisc = inDisc || (d.ChallengeID == c.ID && !cycleOnlyDiscrepancy(d))
 	}
 	for _, w := range st.WaitingExternal {
 		waiting = waiting || w.ChallengeID == c.ID
@@ -204,4 +204,18 @@ func deriveCard(c Challenge, st *Overview, runs []*runRow, ownSlots []string, no
 	addM(inBudget, CardModifierBudgetExhausted)
 	addM(inDisc, CardModifierDiscrepancy)
 	return card
+}
+
+// cycleOnlyDiscrepancy は、種類が dependency_cycle だけの食い違いか返す。
+// 循環は status の discrepancies では見えるが、カードの印と review_discrepancy には数えない。
+func cycleOnlyDiscrepancy(d Discrepancy) bool {
+	if len(d.Kinds) == 0 {
+		return false
+	}
+	for _, k := range d.Kinds {
+		if k != DiscrepancyKindDependencyCycle {
+			return false
+		}
+	}
+	return true
 }
