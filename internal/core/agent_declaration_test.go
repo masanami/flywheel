@@ -97,7 +97,9 @@ func TestLoadAgentDeclaration_AllKeysExplicit_DefaultsUsedFalse(t *testing.T) {
 		"max_parallel_runs": 2,
 		"rework_limit": 3,
 		"failure_limit": 2,
-		"conflict_prediction_budget_usd": 1
+		"conflict_prediction_budget_usd": 1,
+		"memory_dir": "memory",
+		"memory_write_limit": {"files": 5, "bytes": 8192}
 	}`)
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
@@ -438,5 +440,71 @@ func TestLoadAgentDeclaration_ConflictPredictionBudget_WrongTypeIsInvalid(t *tes
 	dir := writeAgentJSON(t, `{"conflict_prediction_budget_usd": "1"}`)
 	if _, err := LoadAgentDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("error = %v, want ErrConfigInvalid", err)
+	}
+}
+
+// --- memory_dir・memory_write_limit（M4.5 S3。AC-271〜AC-273） ---
+
+func TestLoadAgentDeclaration_MemoryDefaults(t *testing.T) {
+	decl, err := LoadAgentDeclaration(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decl.MemoryDir != "memory" || decl.MemoryWriteLimit != (MemoryWriteLimit{Files: 5, Bytes: 8192}) {
+		t.Errorf("defaults = %q %+v", decl.MemoryDir, decl.MemoryWriteLimit)
+	}
+}
+
+func TestLoadAgentDeclaration_MemoryExplicit(t *testing.T) {
+	dir := writeAgentJSON(t, `{"memory_dir": "memory/harness", "memory_write_limit": {"files": 2}}`)
+	decl, err := LoadAgentDeclaration(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decl.MemoryDir != "memory/harness" {
+		t.Errorf("MemoryDir = %q", decl.MemoryDir)
+	}
+	if decl.MemoryWriteLimit != (MemoryWriteLimit{Files: 2, Bytes: 8192}) {
+		t.Errorf("limit = %+v", decl.MemoryWriteLimit)
+	}
+	if !decl.DefaultsUsed {
+		t.Error("DefaultsUsed = false, want true (bytes omitted)")
+	}
+}
+
+func TestLoadAgentDeclaration_MemoryInvalid(t *testing.T) {
+	cases := map[string]string{
+		"absolute":      `{"memory_dir": "/etc/memory"}`,
+		"escape":        `{"memory_dir": "../memory"}`,
+		"escape-nested": `{"memory_dir": "a/../../memory"}`,
+		"dotdot":        `{"memory_dir": ".."}`,
+		"empty":         `{"memory_dir": ""}`,
+		"null":          `{"memory_dir": null}`,
+		"not-string":    `{"memory_dir": 1}`,
+		"files-zero":    `{"memory_write_limit": {"files": 0}}`,
+		"files-neg":     `{"memory_write_limit": {"files": -1}}`,
+		"bytes-zero":    `{"memory_write_limit": {"bytes": 0}}`,
+		"bytes-float":   `{"memory_write_limit": {"bytes": 1.5}}`,
+		"bytes-string":  `{"memory_write_limit": {"bytes": "8192"}}`,
+		"limit-null":    `{"memory_write_limit": null}`,
+		"limit-unknown": `{"memory_write_limit": {"lines": 3}}`,
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadAgentDeclaration(writeAgentJSON(t, content))
+			if !errors.Is(err, ErrConfigInvalid) {
+				t.Errorf("err = %v, want ErrConfigInvalid", err)
+			}
+		})
+	}
+}
+
+func TestLoadAgentDeclaration_MemoryDirInsideWorkspaceDotDotAllowed(t *testing.T) {
+	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{"memory_dir": "a/../memory/x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decl.MemoryDir != "memory/x" {
+		t.Errorf("MemoryDir = %q", decl.MemoryDir)
 	}
 }
