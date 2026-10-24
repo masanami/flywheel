@@ -225,7 +225,7 @@ func (s *Store) reclaimStaleLockOrErrLocked(ctx context.Context, tx *sql.Tx, now
 		// 既に確認済みなので、run 自身の heartbeat の古さに関わらず、
 		// その pid・host の終了していない run を直接 interrupted で閉じる
 		// （ReapInterruptedRuns より狭い条件で確実に閉じる）。
-		if err := closeDeadHolderRuns(ctx, tx, holderID, lock.PID, lock.Host, now); err != nil {
+		if err := s.closeDeadHolderRuns(ctx, tx, holderID, lock.PID, lock.Host, now); err != nil {
 			return err
 		}
 		if err := closeCycleAsEnded(ctx, tx, holderID, now, cycleResultInterrupted); err != nil {
@@ -240,7 +240,7 @@ func (s *Store) reclaimStaleLockOrErrLocked(ctx context.Context, tx *sql.Tx, now
 // 死亡が確認済みのプロセス）を interrupted で閉じる（費用は渡した上限額、
 // 出所 unknown。§費用の記録「結果のJSONを得られなかった…ときは…
 // max-budget-usdの額を費用とし、出所をunknownにする」と同じ規則）。
-func closeDeadHolderRuns(ctx context.Context, tx *sql.Tx, cycleID, pid int64, host string, now time.Time) error {
+func (s *Store) closeDeadHolderRuns(ctx context.Context, tx *sql.Tx, cycleID, pid int64, host string, now time.Time) error {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id, max_budget_usd FROM run WHERE cycle_id = ? AND ended_at IS NULL AND pid = ? AND host = ?`,
 		cycleID, pid, host,
@@ -274,6 +274,9 @@ func closeDeadHolderRuns(ctx context.Context, tx *sql.Tx, cycleID, pid int64, ho
 		if _, err := updateRunEnd(ctx, tx, o.id, updateRunEndInput{
 			EndedAt: now, Result: runResultInterrupted, CostUSD: &cost, CostSource: costSourceUnknown,
 		}); err != nil {
+			return err
+		}
+		if err := s.insertRunFailureOccurrence(ctx, tx, o.id, RunResultInterrupted, false, now); err != nil {
 			return err
 		}
 	}
