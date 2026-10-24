@@ -47,6 +47,8 @@ type j2RawOutput struct {
 	Expected []StageExpected `json:"expected"`
 	NonGoals []string        `json:"non_goals"`
 	Figure   *string         `json:"figure"`
+	// DependsOn は省略可の依存先の課題 ID（M45P3）。ストアを読む検査は写像の中で行う。
+	DependsOn []string `json:"depends_on"`
 }
 
 // j2RawIssuesOutput は verdict が issues のときだけ読む形。plan の項目は読まない
@@ -54,6 +56,8 @@ type j2RawOutput struct {
 type j2RawIssuesOutput struct {
 	Verdict string       `json:"verdict"`
 	Issues  []StageIssue `json:"issues"`
+	// DependsOn は書かないが、型だけは検証する（スキーマの検証）。
+	DependsOn []string `json:"depends_on"`
 }
 
 // j2ValidatedOutput は core の閉集合・必須の組・宣言との突き合わせを通った J2 の
@@ -84,6 +88,9 @@ type j2ValidatedOutput struct {
 	Expected []StageExpected
 	NonGoals []string
 	Figure   *string
+	// DependsOn は plan のときの依存先の課題 ID（出力のまま。存在・自己参照・循環は
+	// 計画を登録する書き込みの中で検査する。無い・null・空は nil）。
+	DependsOn []string
 	// Spec は構造化した出力の JSON を空白を除いて詰めたもの（task_plan.spec。
 	// null の額も出力のまま残す＝「spec は構造化した出力と一致する」）。
 	Spec []byte
@@ -177,6 +184,7 @@ func j2OutputSchema() []byte {
 			"expected":          expectedSchema,
 			"non_goals":         nonGoalsSchema,
 			"figure":            nullableString,
+			"depends_on":        stringArray,
 		},
 		"required":             []string{"verdict"},
 		"additionalProperties": false,
@@ -254,6 +262,7 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		if raw.Question == nil || strings.TrimSpace(*raw.Question) == "" {
 			return nil, false
 		}
+		// depends_on は型の検証だけ（上の Unmarshal）。uncertain では依存を書かない。
 		return &j2ValidatedOutput{Verdict: J2VerdictUncertain, Question: raw.Question}, true
 	case J2VerdictPlan:
 	default:
@@ -347,6 +356,7 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		Expected:          expected,
 		NonGoals:          nonGoals,
 		Figure:            raw.Figure,
+		DependsOn:         raw.DependsOn,
 		Question:          raw.Question,
 		Spec:              spec.Bytes(),
 	}
@@ -702,6 +712,9 @@ const (
 	j2PlanNotEligible j2PlanKind = iota
 	// j2PlanNoIssues はサイズ M・L なのに論点の記録が無い（invalid_output）。
 	j2PlanNoIssues
+	// j2PlanInvalidDependsOn は depends_on に存在しない ID・自己参照・循環がある
+	// （計画も依存も書かず、呼び出し元が invalid_output にする）。
+	j2PlanInvalidDependsOn
 	// j2PlanExpectedEmpty はサイズ M・L なのに予想が空のまま（計画を登録せず保留）。
 	j2PlanExpectedEmpty
 	// j2PlanRegister は計画を登録する。
@@ -715,7 +728,7 @@ var errJ2PlanStale = errors.New("core: challenge changed while mapping J2 plan")
 type j2PlanMapping struct {
 	// Mapped は計画の登録か保留のどちらかを書いたとき true。
 	Mapped bool
-	// Kind が j2PlanNoIssues なら何も書いていない（呼び出し元が invalid_output にする）。
+	// Kind が j2PlanNoIssues・j2PlanInvalidDependsOn なら何も書いていない（呼び出し元が invalid_output にする）。
 	Kind j2PlanKind
 }
 
@@ -800,6 +813,9 @@ func (s *Store) applyJ2PlanOnce(ctx context.Context, runIDDisplay, challengeIDDi
 		if _, err := insertTaskPlanVersion(ctx, tc, body, &specText); err != nil {
 			return err
 		}
+		if err := addJ2Dependencies(ctx, tc, v.DependsOn); err != nil {
+			return err
+		}
 		patch := StagePatch{
 			NonGoals: StageSet(v.NonGoals),
 			Figure:   StageSet(v.Figure),
@@ -813,12 +829,56 @@ func (s *Store) applyJ2PlanOnce(ctx context.Context, runIDDisplay, challengeIDDi
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, errJ2InvalidDependsOn) {
+			return j2PlanMapping{Kind: j2PlanInvalidDependsOn}, nil
+		}
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) {
 			return j2PlanMapping{Kind: j2PlanNotEligible}, nil
 		}
 		return j2PlanMapping{}, err
 	}
 	return m, nil
+}
+
+// errJ2InvalidDependsOn は depends_on の検査に落ちたことを表す内部の sentinel
+// （書き込みのトランザクションを巻き戻し、run を invalid_output にする）。
+var errJ2InvalidDependsOn = errors.New("core: invalid depends_on in J2 output")
+
+// addJ2Dependencies は計画を登録する遷移のトランザクションの中で、depends_on を
+// AddDependencies と同じ規則（自己参照→存在→循環。循環は課題の状態によらずすべての辺）で
+// 検査し、通れば依存を足して作業ログに entity=challenge・action=dep_add を残す。
+// 課題の版は遷移の 1 回だけ上がる（ここでは上げない）。既にある依存は足さない。
+func addJ2Dependencies(ctx context.Context, tc *transitionCtx, dependsOn []string) error {
+	if len(dependsOn) == 0 {
+		return nil
+	}
+	_, targets, err := parseDependencyTargets(formatChallengeID(tc.id), dependsOn)
+	if err != nil {
+		return errJ2InvalidDependsOn
+	}
+	if err := dependencyTargetsExist(ctx, tc.tx, targets); err != nil {
+		return j2DependsOnErr(err)
+	}
+	changed, err := planDependencyChange(ctx, tc.tx, tc.id, targets, true)
+	if err != nil {
+		return j2DependsOnErr(err)
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	ids, err := writeDependencyEdges(ctx, tc.tx, tc.id, changed, true, tc.nowStr)
+	if err != nil {
+		return err
+	}
+	return tc.rec.record("challenge", tc.id, ActivityActionDepAdd, nil, map[string]any{"depends_on": ids, "version": tc.current.Version + 1})
+}
+
+// j2DependsOnErr は検査の拒否（存在しない・循環）を errJ2InvalidDependsOn に写し、それ以外はそのまま返す。
+func j2DependsOnErr(err error) error {
+	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrDependencyCycle) {
+		return errJ2InvalidDependsOn
+	}
+	return err
 }
 
 // applyJ2Uncertain は判定 uncertain の出力を課題へ写す（M1 T11）。J2 の対象は
@@ -923,7 +983,7 @@ func (s *Store) finalizeJ2Output(ctx context.Context, runIDDisplay, challengeIDD
 		if err != nil {
 			return "", nil, "", "", err
 		}
-		if pm.Kind == j2PlanNoIssues {
+		if pm.Kind == j2PlanNoIssues || pm.Kind == j2PlanInvalidDependsOn {
 			if err := s.invalidateRunOutput(ctx, runIDDisplay); err != nil {
 				return "", nil, "", "", err
 			}

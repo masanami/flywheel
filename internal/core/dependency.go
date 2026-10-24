@@ -72,38 +72,16 @@ func (s *Store) changeDependencies(ctx context.Context, ch Channel, id string, d
 		if err != nil {
 			return err
 		}
-		for _, t := range targets {
-			var one int
-			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM challenge WHERE id = ?`, t).Scan(&one); err != nil {
-				if err == sql.ErrNoRows {
-					return ErrNotFound
-				}
-				return err
-			}
+		if err := dependencyTargetsExist(ctx, tx, targets); err != nil {
+			return err
 		}
 		if IsTerminal(Table, StatusVocabulary, current.Status) {
 			return ErrTerminalState
 		}
 
-		existing, err := loadDependencyEdges(ctx, tx)
+		changed, err := planDependencyChange(ctx, tx, cid, targets, add)
 		if err != nil {
 			return err
-		}
-		var changed []int64
-		for _, t := range targets {
-			has := existing[cid][t]
-			if add != has {
-				changed = append(changed, t)
-			}
-		}
-		if add {
-			// 新しい辺 cid→t は、t から cid へ既存の辺で届くと輪になる。新しい辺はどれも cid から出るので、
-			// 輪が新しい辺を 2 つ通ることは無く、既存の辺だけで足りる。
-			for _, t := range changed {
-				if reachable(existing, t, cid) {
-					return ErrDependencyCycle
-				}
-			}
 		}
 		if len(changed) == 0 {
 			result = current
@@ -115,15 +93,9 @@ func (s *Store) changeDependencies(ctx context.Context, ch Channel, id string, d
 		if err != nil {
 			return err
 		}
-		for _, t := range changed {
-			if add {
-				_, err = tx.ExecContext(ctx, `INSERT INTO challenge_dependency (challenge_id, depends_on_id, created_at) VALUES (?, ?, ?)`, cid, t, nowStr)
-			} else {
-				_, err = tx.ExecContext(ctx, `DELETE FROM challenge_dependency WHERE challenge_id = ? AND depends_on_id = ?`, cid, t)
-			}
-			if err != nil {
-				return err
-			}
+		ids, err := writeDependencyEdges(ctx, tx, cid, changed, add, nowStr)
+		if err != nil {
+			return err
 		}
 		newVersion := current.Version + 1
 		res, err := tx.ExecContext(ctx,
@@ -139,10 +111,6 @@ func (s *Store) changeDependencies(ctx context.Context, ch Channel, id string, d
 		if affected != 1 {
 			return fmt.Errorf("core: change dependencies of %s: expected to update 1 row, updated %d", id, affected)
 		}
-		ids := make([]string, 0, len(changed))
-		for _, t := range changed {
-			ids = append(ids, formatChallengeID(t))
-		}
 		if err := rec.record("challenge", cid, action, nil, map[string]any{"depends_on": ids, "version": newVersion}); err != nil {
 			return err
 		}
@@ -156,6 +124,63 @@ func (s *Store) changeDependencies(ctx context.Context, ch Channel, id string, d
 		return nil, err
 	}
 	return result, nil
+}
+
+// dependencyTargetsExist は依存先がすべて存在するか（無ければ ErrNotFound）。
+func dependencyTargetsExist(ctx context.Context, tx *sql.Tx, targets []int64) error {
+	for _, t := range targets {
+		var one int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM challenge WHERE id = ?`, t).Scan(&one); err != nil {
+			if err == sql.ErrNoRows {
+				return ErrNotFound
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// planDependencyChange は変わる依存先（add なら無いもの、rm ならあるもの）を返す。add のときは
+// 循環（ErrDependencyCycle）を、課題の状態によらずすべての辺で検査する。
+func planDependencyChange(ctx context.Context, tx *sql.Tx, cid int64, targets []int64, add bool) ([]int64, error) {
+	existing, err := loadDependencyEdges(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	var changed []int64
+	for _, t := range targets {
+		if add != existing[cid][t] {
+			changed = append(changed, t)
+		}
+	}
+	if add {
+		// 新しい辺 cid→t は、t から cid へ既存の辺で届くと輪になる。新しい辺はどれも cid から出るので、
+		// 輪が新しい辺を 2 つ通ることは無く、既存の辺だけで足りる。
+		for _, t := range changed {
+			if reachable(existing, t, cid) {
+				return nil, ErrDependencyCycle
+			}
+		}
+	}
+	return changed, nil
+}
+
+// writeDependencyEdges は changed の辺を足す（add）か外し、作業ログに載せる依存先の ID を返す。
+func writeDependencyEdges(ctx context.Context, tx *sql.Tx, cid int64, changed []int64, add bool, nowStr string) ([]string, error) {
+	ids := make([]string, 0, len(changed))
+	for _, t := range changed {
+		var err error
+		if add {
+			_, err = tx.ExecContext(ctx, `INSERT INTO challenge_dependency (challenge_id, depends_on_id, created_at) VALUES (?, ?, ?)`, cid, t, nowStr)
+		} else {
+			_, err = tx.ExecContext(ctx, `DELETE FROM challenge_dependency WHERE challenge_id = ? AND depends_on_id = ?`, cid, t)
+		}
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, formatChallengeID(t))
+	}
+	return ids, nil
 }
 
 // loadDependencyEdges はストアのすべての依存の辺（依存元→依存先）を、課題の状態によらず読む。
