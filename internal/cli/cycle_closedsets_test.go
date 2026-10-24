@@ -100,7 +100,7 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	}
 	// 行の最初の span は `not_started[].reason` 自身、2 番目が S2 の全体の閉集合。
 	spec := pipeSet(spans[1][1])
-	// M4.5 S1 が足す理由（in_progress・not_executable）は m4.5 の仕様の行から読む。
+	// M4.5 が足す理由（S1: in_progress・not_executable、S2: dependency）は m4.5 の仕様の行から読む。
 	spec = append(spec, m45AddedNotStartedReasons(t)...)
 	sort.Strings(spec)
 
@@ -201,6 +201,14 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 			StartedAt: nowStamp(), ApprovedHead: execHead, PID: int64(os.Getpid()), Host: currentHost(t),
 		})
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+		observe(cycleDoc(t, ws))
+	})
+	t.Run("dependency", func(t *testing.T) {
+		// 依存先が未完了の着手中の課題は、cycle の run の段が起動しない。
+		ws := setupRunWorkspace(t)
+		id := newInProgressForRun(t, ws, nil)
+		runJSON(t, ws, "dep", "add", id, createForCase(t, ws))
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
 		observe(cycleDoc(t, ws))
 	})
 	t.Run("waiting_external", func(t *testing.T) {
@@ -358,6 +366,8 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedPlanUnavailable"
 	case "not_executable":
 		return "NotStartedNotExecutable"
+	case "dependency":
+		return "NotStartedDependency"
 	}
 	return "?"
 }
@@ -385,9 +395,14 @@ func m45SpecLine(t *testing.T, contains ...string) string {
 	return ""
 }
 
-// m45AddedNotStartedReasons は m4.5 の仕様が S1 で足す not_started の理由（in_progress・not_executable）を返す。
+// m45AddedNotStartedReasons は m4.5 の仕様が足す not_started の理由（S1: in_progress・not_executable、
+// S2: dependency）を返す。
 func m45AddedNotStartedReasons(t *testing.T) []string {
 	t.Helper()
+	s2 := m45SpecLine(t, "`dependency`（S2）を足す")
+	if !strings.Contains(s2, "`dependency`（S2）を足す") {
+		t.Fatalf("m4.5 spec does not add dependency in S2: %q", s2)
+	}
 	line := m45SpecLine(t, "`not_started` の理由に、", "（S1）")
 	head, _, _ := strings.Cut(line, "を足す（S1）")
 	var out []string
@@ -397,7 +412,7 @@ func m45AddedNotStartedReasons(t *testing.T) []string {
 	if !equalStringSlices(sortedStrings(out), []string{"in_progress", "not_executable"}) {
 		t.Fatalf("m4.5 spec's added not_started reasons = %v, want in_progress and not_executable", out)
 	}
-	return out
+	return append(out, "dependency")
 }
 
 // M4.5 S1: cycle の phase の閉集合は release を最初に持ち、cycle --json の phases の並びがそれに従う。

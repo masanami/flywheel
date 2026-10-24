@@ -36,6 +36,10 @@ const NotStartedInProgress NotStartedReason = "in_progress"
 // 飛ばしたことを表す（詳細は `kind=<種類> state=<状態>`）。
 const NotStartedNotExecutable NotStartedReason = "not_executable"
 
+// NotStartedDependency は、依存先に満たされていないものがあり委譲を起動しなかったことを表す
+// （S2。Detail は満たされていない依存先の ID を昇順に "," で連ねた文字列）。
+const NotStartedDependency NotStartedReason = "dependency"
+
 // releaseAttemptStaleAfter は、終了していない試行を、プロセスの有無によらず止まったとみなす経過時間。
 // ちょうどこの時間は止まったに含めない。
 const releaseAttemptStaleAfter = 15 * time.Minute

@@ -726,6 +726,22 @@ func (s *Store) executePlan(ctx context.Context, in DelegateInput, jc *JudgmentC
 // 委譲の run を持つ課題がいれば、委譲を起動せず ErrSerialized を返す。
 func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Challenge) (*DelegateResult, error) {
 	cid, _ := parseChallengeID(ch.ID)
+	// 依存の判定は --resume の可否（decideLaunch）より前に置く。満たされていなければ何も消費しない。
+	var depNS *NotStarted
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		eval, err := evaluateDependencies(ctx, tx)
+		if err != nil {
+			return err
+		}
+		depNS = dependencyNotStarted(eval, ch.ID, cid)
+		return nil
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return nil, err
+	}
+	if depNS != nil {
+		return &DelegateResult{NotStarted: []NotStarted{*depNS}}, nil
+	}
 	plan, err := s.planDelegation(ctx, in, []int64{cid})
 	if err != nil {
 		return nil, err

@@ -168,12 +168,12 @@ func TestRunResultValues_MatchWhatTheStoreAccepts(t *testing.T) {
 	}
 }
 
-// NotStartedReasonValues は 仕様の 12 値（M4.5 S1 の in_progress・not_executable を含む）で、写しを返す（呼び出し側が書き換えても本体は変わらない）。
-func TestNotStartedReasonValues_AreTheTwelveAndACopy(t *testing.T) {
+// NotStartedReasonValues は 仕様の 13 値（M4.5 の in_progress・not_executable・dependency を含む）で、写しを返す（呼び出し側が書き換えても本体は変わらない）。
+func TestNotStartedReasonValues_AreTheThirteenAndACopy(t *testing.T) {
 	got := NotStartedReasonValues()
 	want := []NotStartedReason{NotStartedCycleBudget, NotStartedRateLimited, NotStartedRunBudget, NotStartedSlotUnavailable,
 		NotStartedFailureLimit, NotStartedReworkLimit, NotStartedUpstreamFetchFailed, NotStartedSerialized, NotStartedWaitingExternal, NotStartedPlanUnavailable,
-		NotStartedInProgress, NotStartedNotExecutable}
+		NotStartedInProgress, NotStartedNotExecutable, NotStartedDependency}
 	if len(got) != len(want) {
 		t.Fatalf("NotStartedReasonValues() = %v, want %v", got, want)
 	}
