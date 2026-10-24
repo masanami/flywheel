@@ -39,6 +39,13 @@ const (
 	defaultReworkLimit        = 3
 	defaultFailureLimit       = 2
 
+	// defaultMemoryDir は memory_dir の既定（ワークスペースからの相対パス）。
+	defaultMemoryDir = "memory"
+	// defaultMemoryWriteFiles・defaultMemoryWriteBytes は memory_write_limit の
+	// 既定（1 回の J6 で書ける記憶の件数と、1 件の大きさ〔バイト〕）。
+	defaultMemoryWriteFiles = 5
+	defaultMemoryWriteBytes = 8192
+
 	// defaultConflictPredictionBudgetUSD は conflict_prediction_budget_usd の既定
 	// （衝突の予測 1 件あたりの上限額、USD）。
 	defaultConflictPredictionBudgetUSD = 1.0
@@ -76,6 +83,14 @@ type AgentTimeoutSec struct {
 	Delegate int
 }
 
+// MemoryWriteLimit は memory_write_limit（1 回の J6 で書ける記憶の上限）。
+type MemoryWriteLimit struct {
+	// Files は 1 回の出力で書ける記憶の件数の上限。
+	Files int
+	// Bytes は 1 件の大きさの上限（作成は書くファイル全体、追記は足す分）。
+	Bytes int
+}
+
 // AgentDeclaration は .flywheel/agent.json の中身（LoadAgentDeclaration の
 // 戻り値）。ファイルが無い場合もこの型の値（全既定値）を返す
 // （docs/features/m3-invoker-delegation.md「不在を『上限なし』に縮退させない」）。
@@ -94,6 +109,12 @@ type AgentDeclaration struct {
 	// ConflictPredictionBudgetUSD は conflict_prediction_budget_usd
 	// （衝突の予測 1 件あたりの上限額、USD）。
 	ConflictPredictionBudgetUSD float64
+
+	// MemoryDir は memory_dir（記憶の置き場。ワークスペースからの相対パスで、
+	// filepath.Clean 済み。絶対パスとワークスペースの外へ出る値は読み込みで
+	// config_invalid にする）。MemoryWriteLimit は memory_write_limit。
+	MemoryDir        string
+	MemoryWriteLimit MemoryWriteLimit
 
 	// DefaultsUsed は、agent.json 自体が無かった、または position_file を除く
 	// いずれかのキー（ネストした葉の値を含む）が省略され既定値を適用した
@@ -117,6 +138,8 @@ func defaultAgentDeclaration() *AgentDeclaration {
 		FailureLimit:      defaultFailureLimit,
 
 		ConflictPredictionBudgetUSD: defaultConflictPredictionBudgetUSD,
+		MemoryDir:                   defaultMemoryDir,
+		MemoryWriteLimit:            MemoryWriteLimit{Files: defaultMemoryWriteFiles, Bytes: defaultMemoryWriteBytes},
 		DefaultsUsed:                true,
 	}
 }
@@ -212,7 +235,10 @@ var agentTopLevelKeys = map[string]bool{
 	"size_budgets_usd": true, "max_run_budget_usd": true, "judgment_budget_usd": true,
 	"timeout_sec": true, "max_parallel_runs": true, "rework_limit": true, "failure_limit": true,
 	"conflict_prediction_budget_usd": true,
+	"memory_dir":                     true, "memory_write_limit": true,
 }
+
+var memoryWriteLimitKeys = map[string]bool{"files": true, "bytes": true}
 
 var sizeBudgetsSizeKeys = map[string]bool{"S": true, "M": true, "L": true}
 var sizeBudgetPairKeys = map[string]bool{"impl": true, "review": true}
@@ -368,8 +394,89 @@ func parseAgentDeclaration(data []byte) (*AgentDeclaration, error) {
 		usedDefault = true
 	}
 
+	if v, ok := raw["memory_dir"]; ok {
+		dir, err := parseMemoryDir(v)
+		if err != nil {
+			return nil, fmt.Errorf("memory_dir: %w", err)
+		}
+		decl.MemoryDir = dir
+	} else {
+		decl.MemoryDir = defaultMemoryDir
+		usedDefault = true
+	}
+
+	if v, ok := raw["memory_write_limit"]; ok {
+		lim, used, err := parseMemoryWriteLimit(v)
+		if err != nil {
+			return nil, fmt.Errorf("memory_write_limit: %w", err)
+		}
+		decl.MemoryWriteLimit = lim
+		if used {
+			usedDefault = true
+		}
+	} else {
+		decl.MemoryWriteLimit = MemoryWriteLimit{Files: defaultMemoryWriteFiles, Bytes: defaultMemoryWriteBytes}
+		usedDefault = true
+	}
+
 	decl.DefaultsUsed = usedDefault
 	return decl, nil
+}
+
+// parseMemoryDir は memory_dir を解釈する。空・null・文字列以外・絶対パス・
+// ワークスペースの外へ出る相対パス（字面で ".." に始まる）は拒否する。
+func parseMemoryDir(raw json.RawMessage) (string, error) {
+	if isJSONNull(raw) {
+		return "", fmt.Errorf("must not be null")
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(s) == "" {
+		return "", fmt.Errorf("must not be empty")
+	}
+	if filepath.IsAbs(s) || strings.HasPrefix(s, "/") {
+		return "", fmt.Errorf("must be a path relative to the workspace, got %q", s)
+	}
+	clean := filepath.Clean(s)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("must stay inside the workspace, got %q", s)
+	}
+	return clean, nil
+}
+
+// parseMemoryWriteLimit は memory_write_limit（files・bytes）を解釈する。
+// 省略した葉には既定値を入れ、used を立てる。正の整数でない値は拒否する。
+func parseMemoryWriteLimit(raw json.RawMessage) (MemoryWriteLimit, bool, error) {
+	if isJSONNull(raw) {
+		return MemoryWriteLimit{}, false, fmt.Errorf("must not be null")
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return MemoryWriteLimit{}, false, err
+	}
+	if err := rejectUnknownKeys(m, memoryWriteLimitKeys, "memory_write_limit"); err != nil {
+		return MemoryWriteLimit{}, false, err
+	}
+	result := MemoryWriteLimit{Files: defaultMemoryWriteFiles, Bytes: defaultMemoryWriteBytes}
+	used := false
+	for _, leaf := range []struct {
+		key    string
+		target *int
+	}{{"files", &result.Files}, {"bytes", &result.Bytes}} {
+		v, ok := m[leaf.key]
+		if !ok {
+			used = true
+			continue
+		}
+		i, err := decodeIntLiteral(v)
+		if err != nil {
+			return MemoryWriteLimit{}, false, fmt.Errorf("%s: %w", leaf.key, err)
+		}
+		*leaf.target = i
+	}
+	return result, used, nil
 }
 
 // decodeIntLiteral は raw を「整数のリテラル」として解釈する。小数点・指数表記
@@ -621,6 +728,12 @@ func (d *AgentDeclaration) validate() error {
 	}
 	if d.FailureLimit <= 0 {
 		return fmt.Errorf("%w: failure_limit must be a positive integer, got %d", ErrConfigInvalid, d.FailureLimit)
+	}
+	if d.MemoryWriteLimit.Files <= 0 {
+		return fmt.Errorf("%w: memory_write_limit.files must be a positive integer, got %d", ErrConfigInvalid, d.MemoryWriteLimit.Files)
+	}
+	if d.MemoryWriteLimit.Bytes <= 0 {
+		return fmt.Errorf("%w: memory_write_limit.bytes must be a positive integer, got %d", ErrConfigInvalid, d.MemoryWriteLimit.Bytes)
 	}
 
 	return nil

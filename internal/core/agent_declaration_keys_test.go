@@ -28,6 +28,8 @@ func TestAgentDeclarationKeys_ContainsAllTopLevelAndNestedKeys(t *testing.T) {
 		"J1", "J2", "J3", "J4", "J5",
 		// ネスト: timeout_sec（judgment/delegate）
 		"judgment", "delegate",
+		// M4.5 S3
+		"memory_dir", "memory_write_limit", "files", "bytes",
 	}
 
 	set := map[string]bool{}

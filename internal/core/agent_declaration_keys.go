@@ -6,7 +6,7 @@ import "sort"
 // （トップレベル＋ネストした葉のキー）をソート済みで返す。
 // agent_declaration.go の非公開マップ（agentTopLevelKeys・
 // sizeBudgetsSizeKeys・sizeBudgetPairKeys・judgmentBudgetKeys・
-// agentTimeoutSecKeys）から生成し、手で書き写さない
+// agentTimeoutSecKeys・memoryWriteLimitKeys）から生成し、手で書き写さない
 // （#82・docs/features/m3-invoker-delegation.md §指示文の歯止め
 // 「上の禁止の一覧は、コードの定義（…設定のキー…）から生成する
 // （一覧を手で写さない。語彙を足せば検査も追従する）」）。
@@ -28,6 +28,9 @@ func AgentDeclarationKeys() []string {
 		keys = append(keys, k)
 	}
 	for k := range agentTimeoutSecKeys {
+		keys = append(keys, k)
+	}
+	for k := range memoryWriteLimitKeys {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
