@@ -5,7 +5,8 @@ import "github.com/masanami/flywheel/internal/core"
 // このファイルは課題の依存（M4.5 S2）のキーを持つ専用の型を置く。共有の Challenge には足さない
 // （list・create・edit・遷移系の応答・needs_human の challenge の形を変えないため）。
 // gentypes は埋め込みの構造体に対応しないので、Challenge のフィールドを重複して持つ
-// （Challenge に足したら、ここの型とその変換にも足す。view_test.go が一致を検査する）。
+// （Challenge に足したら、ここの型とその変換にも足す。view_test.go がキーの集合の一致と、写した値が
+// FromChallenge の値と一致することを検査する）。
 
 // Dependency は show の challenge.dependencies の要素（依存先 1 つ）。
 // UpstreamState・PolicyState は依存先に取り込みの対応が無ければ null。

@@ -132,3 +132,27 @@ func TestGetOverview_NoCycleNoDiscrepancy(t *testing.T) {
 		t.Errorf("Discrepancies = %+v, want none", ov.Discrepancies)
 	}
 }
+
+// 輪に含まれる課題が上流の食い違いも持つとき、要素は 1 つだけで kinds に両方が入る（輪の課題ごとに要素を 1 つ）。
+// 食い違いは課題 ID の昇順（上流の食い違いの C-9 が、あとから足す輪の C-1・C-2 より後ろ）。
+func TestGetOverview_CycleMergesIntoExistingDiscrepancyAndOrdersByChallengeID(t *testing.T) {
+	s := depFixture(t, 9)
+	insertDepEdge(t, s, 1, 2)
+	insertDepEdge(t, s, 2, 1)
+	insertBindingForTest(t, s, 2, "closed", "in_policy")
+	insertBindingForTest(t, s, 9, "closed", "in_policy")
+
+	ov, err := s.GetOverview(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring := []string{"C-1", "C-2"}
+	want := []Discrepancy{
+		{ChallengeID: "C-1", Kinds: []DiscrepancyKind{DiscrepancyKindDependencyCycle}, ChallengeIDs: ring},
+		{ChallengeID: "C-2", Kinds: []DiscrepancyKind{DiscrepancyKindUpstreamClosed, DiscrepancyKindDependencyCycle}, ChallengeIDs: ring},
+		{ChallengeID: "C-9", Kinds: []DiscrepancyKind{DiscrepancyKindUpstreamClosed}},
+	}
+	if !reflect.DeepEqual(ov.Discrepancies, want) {
+		t.Errorf("Discrepancies = %+v, want %+v", ov.Discrepancies, want)
+	}
+}

@@ -303,3 +303,35 @@ func TestShowAndActionableChallengeCarryEveryChallengeKey(t *testing.T) {
 		}
 	}
 }
+
+// ShowChallenge・ActionableChallenge へ写した Challenge の各キーの値が、FromChallenge の値と一致することを確かめる
+// （キーの名前だけでなく、別のフィールドから写す・写し落とす誤りを捕まえるため、全項目に互いに異なる値を入れる）。
+func TestShowAndActionableChallengeCopyEveryChallengeValue(t *testing.T) {
+	str := func(v string) *string { return &v }
+	urgency, priority := core.UrgencyHigh, core.PriorityP1
+	c := core.Challenge{
+		ID: "C-7", Title: "title", Description: "description", DoneCriteria: "done", Urgency: &urgency, Priority: &priority,
+		Status: core.StatusDone, Version: 3, Reporter: "alice",
+		CreatedAt:   time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC),
+		StageFields: core.StageFields{Headline: str("headline"), Context: str("context")},
+	}
+	toMap := func(v any) map[string]any {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(marshal(t, v)), &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	base := toMap(view.FromChallenge(c))
+	for name, got := range map[string]map[string]any{
+		"ShowChallenge":       toMap(view.FromShowChallenge(&core.ChallengeDetail{Challenge: c})),
+		"ActionableChallenge": toMap(view.FromActionableChallenges([]core.Challenge{c}, nil)[0]),
+	} {
+		for k, want := range base {
+			if !reflect.DeepEqual(got[k], want) {
+				t.Errorf("%s.%s = %v, want %v", name, k, got[k], want)
+			}
+		}
+	}
+}
