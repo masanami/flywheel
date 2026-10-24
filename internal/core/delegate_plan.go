@@ -726,6 +726,11 @@ func (s *Store) executePlan(ctx context.Context, in DelegateInput, jc *JudgmentC
 // 委譲の run を持つ課題がいれば、委譲を起動せず ErrSerialized を返す。
 func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Challenge) (*DelegateResult, error) {
 	cid, _ := parseChallengeID(ch.ID)
+	// 状態（呼び出し元の RunDelegation が検査済み）と計画の検査は、ID を省いた経路（selectDelegationTargets）と
+	// 同じく、依存の判定より先に行う。通らない課題に `not_started dependency` を返して本来のエラーを隠さない。
+	if err := s.checkApprovedPlanForRun(ctx, cid); err != nil {
+		return nil, err
+	}
 	// 依存の判定は --resume の可否（decideLaunch）より前に置く。満たされていなければ何も消費しない。
 	var depNS *NotStarted
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
@@ -774,4 +779,32 @@ func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Ch
 	}
 	appendDelegateOutcome(result, item, ns)
 	return result, nil
+}
+
+// checkApprovedPlanForRun は、承認済みで構造化した出力を持つ計画があるかを検査する。無ければ
+// loadDelegationContext と同じエラー（計画が使えない詳細つき、または ErrValidation）を返す。
+func (s *Store) checkApprovedPlanForRun(ctx context.Context, cid int64) error {
+	var unavailable error
+	var ok bool
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		p, gap, detail, err := lookupApprovedPlan(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if gap != planGapNone && gap != planGapNoApproval {
+			unavailable = &planUnavailableError{Detail: detail}
+		}
+		ok = gap == planGapNone && p.HasSpec
+		return nil
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	if unavailable != nil {
+		return unavailable
+	}
+	return fmt.Errorf("%w: the challenge has no approved plan with a structured spec", ErrValidation)
 }

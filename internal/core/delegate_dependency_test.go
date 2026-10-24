@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 )
 
@@ -210,6 +211,38 @@ func TestDependency_CycleMembersAndTheirDependentsAreNotStarted(t *testing.T) {
 	}
 	assertDependencyNotStarted(t, res, x, formatChallengeID(y))
 	if len(g.deleg.launched()) != 0 {
+		t.Error("nothing may be launched")
+	}
+}
+
+// run <C-ID> は、依存の判定より先に状態と計画を検査する（ID を省いた経路と同じ順。M45H20）。
+func TestDependency_IDGivenRun_StateIsCheckedBeforeDependency(t *testing.T) {
+	f := newResumeFixture(t)
+	id := f.newInProgress(t, "t", "P1", planSpec(nil))
+	cid, _ := parseChallengeID(id)
+	setChallengeStatus(t, f.s, cid, StatusVerifying)
+	a := f.newDepTarget(t)
+	f.dependOn(t, id, a)
+	res, err := f.run(t, &id)
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("err = %v (res %+v), want ErrInvalidTransition rather than not_started dependency", err, res)
+	}
+	if len(f.deleg.launched()) != 0 {
+		t.Error("nothing may be launched")
+	}
+}
+
+func TestDependency_IDGivenRun_PlanIsCheckedBeforeDependency(t *testing.T) {
+	f := newResumeFixture(t)
+	// 構造化した出力の無い計画（人が登録した計画）。
+	id := f.newInProgress(t, "t", "P1", "")
+	a := f.newDepTarget(t)
+	f.dependOn(t, id, a)
+	res, err := f.run(t, &id)
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v (res %+v), want the plan check error rather than not_started dependency", err, res)
+	}
+	if len(f.deleg.launched()) != 0 {
 		t.Error("nothing may be launched")
 	}
 }
