@@ -52,6 +52,8 @@ var worklogReadOnlyCommands = map[string]bool{
 	// §クリティカル設計決定 1）。ReapInterruptedRuns による run の更新も
 	// activity には現れない。
 	"runs": true,
+	// metrics（M4.5 S3）はストアを読むだけで何も書かない。
+	"metrics": true,
 }
 
 // worklogNoActivityMutationCommands はストアを変えるが作業ログ（activity）には載せない
