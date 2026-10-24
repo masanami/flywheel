@@ -1,7 +1,11 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
-import { NO_ACTION_LABEL } from "../labels.ts";
+import {
+  DEPENDENCY_SATISFIED_LABEL,
+  DEPENDENCY_WAITING_LABEL,
+  NO_ACTION_LABEL,
+} from "../labels.ts";
 import { POLL_MS, RECONNECT_MS } from "../live/useLive.ts";
 import { FakeEventSource, fixtures, installFakes } from "../testing/fakes.ts";
 
@@ -219,6 +223,64 @@ it("AC-194〜196: カードの面は見出し・ID・優先度・区分の印だ
   }
   // 見出しが headline のカードは、タイトルでなく headline を出す
   expect(face("C-8").textContent).not.toContain("題名C-8");
+});
+
+it("M4.5 AC-196: 依存先（満たされている・待っている）を持つ課題でも、カードの面と帯に依存先の ID と充足の文言を出さない", async () => {
+  const f = bodies();
+  const dep = (id: string, satisfied: boolean) => ({
+    challenge_id: id,
+    policy_state: null,
+    satisfied,
+    status: "in_progress",
+    upstream_state: null,
+  });
+  const list = (
+    f["/api/v1/workspaces/alpha/challenges"] as {
+      challenges: ReturnType<typeof cc>[];
+    }
+  ).challenges;
+  for (const c of list)
+    if (c.id === "C-1" || c.id === "C-9")
+      Object.assign(c, {
+        dependencies: [dep("C-50", true), dep("C-51", false)],
+      });
+  f["/api/v1/needs-human"] = {
+    unreadable_workspaces: [],
+    workspaces: [
+      {
+        name: "alpha",
+        needs_human: {
+          budget_exhausted: [],
+          challenges: [
+            { id: "C-1", status: "awaiting_plan_approval" },
+            { id: "C-9", status: "awaiting_human" },
+          ],
+          discrepancies: [],
+          operations: [],
+          slots: [],
+          triage: [],
+        },
+      },
+    ],
+  };
+  installFakes(f);
+  render(<App />);
+  act(() => FakeEventSource.latest.open());
+  await screen.findByText("題名C-1");
+  const strip = screen.getByRole("region", { name: "人間待ちの帯" });
+  await vi.waitFor(() =>
+    expect(strip.querySelectorAll(".strip-chip").length).toBeGreaterThan(0),
+  );
+  for (const el of [face("C-1"), face("C-9"), strip]) {
+    const t = el.textContent ?? "";
+    for (const s of [
+      "C-50",
+      "C-51",
+      DEPENDENCY_SATISFIED_LABEL,
+      DEPENDENCY_WAITING_LABEL,
+    ])
+      expect(t).not.toContain(s);
+  }
 });
 
 it("AC-197/198: 60 文字を超える見出しは先頭 60 文字と「…」、ちょうどは全文。切り詰めた詳細に全文が出る", async () => {
