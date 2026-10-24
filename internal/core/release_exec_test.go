@@ -787,7 +787,7 @@ func TestExecuteReleases_ChangedAfterAttemptStartedReportsTheAttemptID(t *testin
 func TestExecuteReleases_ConflictAfterMergeRequestIsMergeUnconfirmed(t *testing.T) {
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
-	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
+	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "rejected") }
 	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
 	if err != nil {
 		t.Fatalf("ExecuteReleases() error = %v", err)
@@ -798,6 +798,88 @@ func TestExecuteReleases_ConflictAfterMergeRequestIsMergeUnconfirmed(t *testing.
 	it := res.Items[0]
 	if it.Result != ExecutionResultMergeUnconfirmed || it.OperationID != formatOperationID(f.opID) || it.Detail == "" {
 		t.Errorf("item = %+v, want merge_unconfirmed with a detail", it)
+	}
+}
+
+// #344: マージの依頼の後に release が pending へ取り消されていてマージ済みなら、merged_unapproved として
+// 記録し、status の食い違いに出し、承認し直しを拒む。
+func TestExecuteReleases_WithdrawnThenMerged_RecordsMergedUnapproved(t *testing.T) {
+	f := newRelFixture(t)
+	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
+	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
+	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
+	if err != nil {
+		t.Fatalf("ExecuteReleases() error = %v", err)
+	}
+	if len(res.NotStarted) != 0 || len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMergedUnapproved {
+		t.Fatalf("Items = %+v, NotStarted = %+v, want 1 merged_unapproved item", res.Items, res.NotStarted)
+	}
+	at := f.attempts(t)
+	if last := at[len(at)-1]; last.Result != ExecutionResultMergedUnapproved || last.open() {
+		t.Fatalf("last attempt = %+v, want closed merged_unapproved", last)
+	}
+	ov, err := f.s.GetOverview(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, d := range ov.Discrepancies {
+		if d.OperationID == formatOperationID(f.opID) {
+			for _, k := range d.Kinds {
+				found = found || k == DiscrepancyKindMergedUnapproved
+			}
+		}
+	}
+	if !found {
+		t.Errorf("discrepancies = %+v, want merged_unapproved for the release", ov.Discrepancies)
+	}
+	forbidden := false
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		var e error
+		forbidden, e = reapprovalForbidden(context.Background(), tx, f.opID)
+		return e
+	})
+	if !forbidden {
+		t.Error("reapproval must be forbidden")
+	}
+}
+
+// #344: 依頼の後の読み取りが失敗しても、取り消された後の読み取りでマージ済みと分かれば merged_unapproved。
+// 依頼した試行そのものを閉じ、試行は 1 行のまま。
+func TestExecuteReleases_WithdrawnThenMergedSeenOnSecondRead(t *testing.T) {
+	f := newRelFixture(t)
+	f.fake.onMerge = func() {
+		coretest.SetOperationState(t, f.s.workspace, f.opID, "pending")
+		f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
+	}
+	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
+	if err != nil {
+		t.Fatalf("ExecuteReleases() error = %v", err)
+	}
+	if len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMergedUnapproved {
+		t.Fatalf("Items = %+v, want merged_unapproved", res.Items)
+	}
+	at := f.attempts(t)
+	if len(at) != 1 || at[0].Result != ExecutionResultMergedUnapproved {
+		t.Errorf("attempts = %+v, want the single attempt closed as merged_unapproved", at)
+	}
+}
+
+// #344: 取り消された後で、マージ済みと確かめられないなら記録を足さず merge_unconfirmed のまま。
+func TestExecuteReleases_WithdrawnAndNotMerged_StaysMergeUnconfirmed(t *testing.T) {
+	f := newRelFixture(t)
+	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
+	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
+	if err != nil {
+		t.Fatalf("ExecuteReleases() error = %v", err)
+	}
+	if len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMergeUnconfirmed {
+		t.Fatalf("Items = %+v, want merge_unconfirmed", res.Items)
+	}
+	for _, a := range f.attempts(t) {
+		if a.Result == ExecutionResultMergedUnapproved {
+			t.Errorf("attempt %+v must not be merged_unapproved", a)
+		}
 	}
 }
 

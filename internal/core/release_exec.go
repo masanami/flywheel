@@ -290,14 +290,25 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 
 	item, err := s.finishReleaseAttempt(ctx, actor, opID, row, attempt, approvedRow, j, opts, now)
 	if err != nil {
+		conflict := errors.Is(err, ErrConflict) || errors.Is(err, errExecutionNotOpen)
+		// 記録が衝突した原因が、release が別の経路で pending へ取り消されたことで、PR がマージ済みなら、
+		// 依頼した試行そのものを merged_unapproved で閉じる（承認の取り消し後にマージされた事象）。
+		var recordErr error
+		if conflict && j.mergeRequested {
+			var it *ReleaseExecItem
+			it, recordErr = s.recordMergeAfterWithdrawal(ctx, actor, opID, row, attempt, approvedRow, j, opts, now, host, pid)
+			if it != nil {
+				return it, nil, nil
+			}
+		}
 		// 試行を終えられなかった。終了していない行が残ると次の口が 15 分待つことになるので、
 		// 可能なら interrupted で閉じる（失敗しても元のエラーを返す）。
 		_ = s.db.Write(ctx, func(tx *sql.Tx) error {
 			return closeOperationExecution(ctx, tx, attempt.ID, closeOperationExecutionInput{EndedAt: now(), Result: ExecutionResultInterrupted, Detail: err.Error()})
 		})
-		if errors.Is(err, ErrConflict) || errors.Is(err, errExecutionNotOpen) {
+		if conflict {
 			if j.mergeRequested {
-				// マージは依頼済みで、結果は未確認として扱う。release は approved のまま残り、
+				// マージは依頼済みで、結果は未確認として扱う。release が approved のまま残っていれば、
 				// 次の実行の口の先頭の読み取りで already_merged かを確かめる。
 				n := 0
 				_ = s.db.Read(ctx, func(tx *sql.Tx) error {
@@ -314,7 +325,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 					Result:              ExecutionResultMergeUnconfirmed,
 					ApprovedHead:        approvedRow,
 					ObservedHead:        j.observedHead,
-					Detail:              "merge requested; recording the attempt failed: " + err.Error(),
+					Detail:              mergeUnconfirmedDetail(err, recordErr),
 				}, nil, nil
 			}
 			// 実行の途中で別の呼び出しが同じ操作・試行を変えた。自分の試行の ID を詳細に入れて飛ばす。
@@ -466,4 +477,82 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergedUnapproved, observedHead: after.HeadSHA}
 	}
 	return releaseJudgment{mergeRequested: true, result: ExecutionResultMerged, observedHead: after.HeadSHA, mergeCommit: after.MergeCommitSHA}
+}
+
+func mergeUnconfirmedDetail(err, recordErr error) string {
+	d := "merge requested; recording the attempt failed: " + err.Error()
+	if recordErr != nil {
+		d += "; recording the merge after withdrawal failed: " + recordErr.Error()
+	}
+	return d
+}
+
+// recordMergeAfterWithdrawal は、マージを依頼した後に試行の記録が衝突した release が pending に
+// 取り消されていて、PR がマージ済みだったときに、依頼した試行を結果 merged_unapproved で閉じて返す
+// （別の呼び出しが先に閉じていれば新しい試行を足す。直前の試行がすでに merged_unapproved なら足さない）。
+// status の食い違い・承認し直しの禁止は、直前の試行のこの結果で働く。
+// 取り消されていない・マージ済みと確かめられないときは (nil, nil)、確かめた後に書けなかったときは
+// (nil, エラー) を返し、呼び出し側が merge_unconfirmed を返す。確かめるのは j の結果、なければ PR の読み取り 1 回。
+func (s *Store) recordMergeAfterWithdrawal(ctx context.Context, actor string, opID int64, row *operationRow, attempt *operationExecutionRow, approvedHead string, j releaseJudgment, opts ReleaseExecOptions, now func() time.Time, host string, pid int64) (*ReleaseExecItem, error) {
+	merged := j.result == ExecutionResultMerged || j.result == ExecutionResultMergedUnapproved
+	observed := j.observedHead
+	if !merged {
+		repo, number, ok := parseReleasePullRequestRef(row.Ref.String)
+		if !ok {
+			return nil, nil
+		}
+		pr, err := opts.Checks.GetPullRequestChecks(ctx, repo, number)
+		if err != nil || pr.State != string(artifactStateMerged) {
+			return nil, nil
+		}
+		observed = pr.HeadSHA
+	}
+	const detail = "merged after the approval was withdrawn (release is pending)"
+	var wrote bool
+	err := s.mutateAs(ctx, actor, ChannelCLI, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
+		rec.at = now()
+		cur, err := loadOperationRow(ctx, tx, opID)
+		if err != nil {
+			return err
+		}
+		if cur.State != OperationStatePending {
+			return nil
+		}
+		wrote = true
+		if last, err := latestOperationExecution(ctx, tx, opID); err != nil {
+			return err
+		} else if last != nil && !last.open() && last.ID != attempt.ID && last.Result == ExecutionResultMergedUnapproved {
+			return nil // 別の呼び出しが同じマージを記録済み。
+		}
+		in := closeOperationExecutionInput{EndedAt: rec.at, Result: ExecutionResultMergedUnapproved, ObservedHead: observed, Detail: detail}
+		err = closeOperationExecution(ctx, tx, attempt.ID, in)
+		if errors.Is(err, errExecutionNotOpen) {
+			a, berr := beginOperationExecution(ctx, tx, opID, beginOperationExecutionInput{StartedAt: rec.at, ApprovedHead: approvedHead, PID: pid, Host: host})
+			if berr != nil {
+				return berr
+			}
+			err = closeOperationExecution(ctx, tx, a.ID, in)
+		}
+		if err != nil {
+			return err
+		}
+		return rec.record("operation", opID, ActivityActionOpExecute,
+			map[string]any{"state": string(OperationStatePending)},
+			map[string]any{"result": string(ExecutionResultMergedUnapproved), "approved_head": nullableTextColumn(approvedHead),
+				"observed_head": nullableTextColumn(observed), "merge_commit": nullableTextColumn(j.mergeCommit),
+				"trigger": opts.Trigger, "detail": detail, "state": string(OperationStatePending)})
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !wrote {
+		return nil, nil
+	}
+	return &ReleaseExecItem{
+		OperationID:  formatOperationID(opID),
+		ChallengeID:  formatChallengeID(row.ChallengeID),
+		Result:       ExecutionResultMergedUnapproved,
+		ApprovedHead: approvedHead,
+		ObservedHead: observed,
+	}, nil
 }
