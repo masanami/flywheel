@@ -152,6 +152,10 @@ type ChallengeDetail struct {
 	Runs []Run
 	// IssuesAnswer は IssuesHoldID の保留の回答。論点が無い・未回答なら nil。
 	IssuesAnswer *string
+	// Dependencies は課題の依存先（依存先の ID の昇順。S2）、Dependents はこの課題に依存する課題の ID（昇順）。
+	// 無ければ空スライス（nil でない）。
+	Dependencies []DependencyView
+	Dependents   []string
 }
 
 // CreateInput は CreateChallenge の入力。
@@ -684,7 +688,17 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		detail.IssuesAnswer = answer
-		return nil
+
+		eval, err := evaluateDependencies(ctx, tx)
+		if err != nil {
+			return err
+		}
+		detail.Dependencies, err = dependencyViews(ctx, tx, eval, cid)
+		if err != nil {
+			return err
+		}
+		detail.Dependents, err = loadDependents(ctx, tx, cid)
+		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err

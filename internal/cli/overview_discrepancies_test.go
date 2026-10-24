@@ -182,6 +182,12 @@ func TestRunStatus_Discrepancies_KindsMatchCoreClosedSetBothWays(t *testing.T) {
 		StartedAt: "2026-10-22T00:00:00.000Z", EndedAt: "2026-10-22T00:00:01.000Z", Result: "merged_unapproved",
 	})
 
+	// dependency_cycle（M4.5 S2）: ストアに直接入れた 2 件の輪。
+	cycleA := createForCase(t, ws)
+	cycleB := createForCase(t, ws)
+	coretest.InsertDependency(t, ws, challengeIDToInternalID(t, cycleA), challengeIDToInternalID(t, cycleB))
+	coretest.InsertDependency(t, ws, challengeIDToInternalID(t, cycleB), challengeIDToInternalID(t, cycleA))
+
 	seen := map[string]bool{}
 	for _, e := range discrepancyEntries(t, runJSON(t, ws, "status")) {
 		_, hasOp := e["operation_id"]

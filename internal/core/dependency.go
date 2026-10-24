@@ -8,7 +8,7 @@ import (
 )
 
 // このファイルは課題どうしの依存（challenge_dependency。M4.5 S2・M45H12）の登録と評価を持つ。
-// 状態機械は変えず、「依存待ち」の状態も足さない。依存は委譲の起動の判定にだけ使う。
+// 状態機械は変えず、「依存待ち」の状態も足さない。依存は委譲の起動の判定と、show・status の表示（満たされているか・循環）にだけ使う。
 
 // AddDependencies は id の課題に依存先 dependsOn を足す。検査の順は 自己参照
 // （ErrSelfDependency）→ 存在（ErrNotFound。依存元・依存先のどちらも）→ 終端の状態
@@ -281,4 +281,121 @@ func evaluateDependencies(ctx context.Context, tx *sql.Tx) (*dependencyEvaluatio
 		eval.Dependencies[from] = list
 	}
 	return eval, nil
+}
+
+// DependencyView は課題の依存先 1 つの表示用の要約（show の dependencies・status の
+// unmet_dependencies の元）。UpstreamState・PolicyState は依存先に取り込みの対応が無ければ nil。
+type DependencyView struct {
+	ChallengeID   string
+	Status        Status
+	Satisfied     bool
+	UpstreamState *string
+	PolicyState   *string
+}
+
+// dependencyViews は from の依存先を、評価 eval に従って依存先の ID の昇順で返す。無ければ空スライス。
+func dependencyViews(ctx context.Context, tx *sql.Tx, eval *dependencyEvaluation, from int64) ([]DependencyView, error) {
+	out := make([]DependencyView, 0, len(eval.Dependencies[from]))
+	for _, d := range eval.Dependencies[from] {
+		var status string
+		var upstream, policy sql.NullString
+		err := tx.QueryRowContext(ctx, `
+			SELECT c.status, sb.upstream_state, sb.policy_state
+			FROM challenge c LEFT JOIN source_binding sb ON sb.challenge_id = c.id
+			WHERE c.id = ?`, d.DependsOn).Scan(&status, &upstream, &policy)
+		if err != nil {
+			return nil, err
+		}
+		v := DependencyView{ChallengeID: formatChallengeID(d.DependsOn), Status: Status(status), Satisfied: d.Met}
+		if upstream.Valid {
+			u := upstream.String
+			v.UpstreamState = &u
+		}
+		if policy.Valid {
+			p := policy.String
+			v.PolicyState = &p
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// loadDependents は depends_on_id が id の課題（この課題に依存する課題）の ID を昇順で返す。
+func loadDependents(ctx context.Context, tx *sql.Tx, id int64) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT challenge_id FROM challenge_dependency WHERE depends_on_id = ? ORDER BY challenge_id ASC`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []string{}
+	for rows.Next() {
+		var from int64
+		if err := rows.Scan(&from); err != nil {
+			return nil, err
+		}
+		out = append(out, formatChallengeID(from))
+	}
+	return out, rows.Err()
+}
+
+// dependencyCycleDiscrepancies は、ストアの循環に含まれる課題ごとに 1 つの食い違い
+// （kinds=dependency_cycle・ChallengeIDs=輪の課題の ID の昇順）を課題 ID の昇順で返す。
+// 輪は、その課題から届き、その課題へ戻れる課題の集合。
+func dependencyCycleDiscrepancies(ctx context.Context, tx *sql.Tx) ([]Discrepancy, error) {
+	edges, err := loadDependencyEdges(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	var nodes []int64
+	for from := range edges {
+		nodes = append(nodes, from)
+	}
+	for _, tos := range edges {
+		for to := range tos {
+			nodes = append(nodes, to)
+		}
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i] < nodes[j] })
+	var out []Discrepancy
+	seen := map[int64]bool{}
+	for _, n := range nodes {
+		if seen[n] {
+			continue
+		}
+		seen[n] = true
+		onCycle := false
+		for to := range edges[n] {
+			if reachable(edges, to, n) {
+				onCycle = true
+				break
+			}
+		}
+		if !onCycle {
+			continue
+		}
+		var ring []string
+		for _, m := range nodes {
+			if m == n || (reachable(edges, n, m) && reachable(edges, m, n)) {
+				ring = append(ring, formatChallengeID(m))
+			}
+		}
+		ring = uniqueSorted(ring)
+		out = append(out, Discrepancy{ChallengeID: formatChallengeID(n), Kinds: []DiscrepancyKind{DiscrepancyKindDependencyCycle}, ChallengeIDs: ring})
+	}
+	return out, nil
+}
+
+func uniqueSorted(ids []string) []string {
+	sort.Slice(ids, func(i, j int) bool {
+		a, _ := parseChallengeID(ids[i])
+		b, _ := parseChallengeID(ids[j])
+		return a < b
+	})
+	out := ids[:0]
+	for i, id := range ids {
+		if i == 0 || id != ids[i-1] {
+			out = append(out, id)
+		}
+	}
+	return out
 }

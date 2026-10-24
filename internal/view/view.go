@@ -446,7 +446,7 @@ type ListResponse struct {
 // ShowResponse は `show` の成功の形。
 type ShowResponse struct {
 	Approvals     []Approval     `json:"approvals"`
-	Challenge     Challenge      `json:"challenge"`
+	Challenge     ShowChallenge  `json:"challenge"`
 	Holds         []Hold         `json:"holds"`
 	Operations    []Operation    `json:"operations"`
 	Pairs         []StagePair    `json:"pairs"`
@@ -460,7 +460,7 @@ type ShowResponse struct {
 func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 	return ShowResponse{
 		Approvals:     FromApprovals(d.Approvals),
-		Challenge:     FromChallenge(d.Challenge),
+		Challenge:     FromShowChallenge(d),
 		Holds:         FromHolds(d.Holds),
 		Operations:    FromOperations(d.Operations),
 		Pairs:         FromPairs(core.Pairs(d.Expected, d.Actual)),

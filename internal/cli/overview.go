@@ -75,6 +75,9 @@ func overviewText(ov *core.Overview) string {
 		if d.OperationID != "" {
 			fmt.Fprintf(&b, "\t%s", d.OperationID)
 		}
+		if len(d.ChallengeIDs) > 0 {
+			fmt.Fprintf(&b, "\t%s", strings.Join(d.ChallengeIDs, ","))
+		}
 		b.WriteString("\n")
 	}
 
@@ -84,7 +87,15 @@ func overviewText(ov *core.Overview) string {
 	}
 	for _, c := range ov.ActionableChallenges {
 		label, _ := c.Status.Label()
-		fmt.Fprintf(&b, "  %s\t%s\t%s\n", c.ID, label, c.Title)
+		fmt.Fprintf(&b, "  %s\t%s\t%s", c.ID, label, c.Title)
+		if unmet := ov.UnmetDependencies[c.ID]; len(unmet) > 0 {
+			ids := make([]string, 0, len(unmet))
+			for _, u := range unmet {
+				ids = append(ids, u.ChallengeID)
+			}
+			fmt.Fprintf(&b, "\t満たされていない依存先: %s", strings.Join(ids, ","))
+		}
+		b.WriteString("\n")
 	}
 
 	fmt.Fprintf(&b, "外部を待っているもの:\n")

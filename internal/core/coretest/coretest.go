@@ -134,6 +134,20 @@ func SetChallengeStatus(t *testing.T, workspace string, id int, status string) {
 	}
 }
 
+// InsertDependency は challenge_dependency の行（from が to に依存する）を、循環の検査を通さず直接挿入する
+// （ストアにある循環の表示を検証するため。from・to は内部整数 ID）。
+func InsertDependency(t *testing.T, workspace string, from, to int) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO challenge_dependency (challenge_id, depends_on_id, created_at) VALUES (?, ?, '2026-10-24T00:00:00.000Z')`, from, to)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertDependency(%d, %d): %v", from, to, err)
+	}
+}
+
 // InsertRunInput はテスト専用のフィクスチャとして run を1件挿入するための
 // 値（#81。internal/cli の runs コマンドのテストが、まだ結線されていない
 // 判断の呼び出し〈#84・#85〉を経由せず、run の一覧の表示を検証するために

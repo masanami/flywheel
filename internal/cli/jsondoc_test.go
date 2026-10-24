@@ -161,6 +161,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM4RelayEvidenceShape(t, &doc)
 	addM4StageShape(t, &doc)
 	addM45OperationShape(t, &doc)
+	addM45DependencyKeysShape(t, &doc)
 	return doc
 }
 
@@ -618,6 +619,8 @@ var jsonEntityOf = map[string]string{
 	"operation": "operation", "operations": "operation",
 	"activities":     "activity",
 	"source_binding": "source_binding",
+	// show の challenge.dependencies・status の actionable.challenges[].unmet_dependencies の要素（M4.5 S2）。
+	"dependencies": "dependency", "unmet_dependencies": "unmet_dependency",
 	// discrepancies は status の needs_human 配下の食い違いの一覧
 	// （docs/features/m2-github-issue-ingest.md §食い違いの表示。#58 で追加）。
 	"discrepancies": "discrepancy",
@@ -643,6 +646,14 @@ func assertDocumentedEntities(t *testing.T, doc documentedJSON, where string, v 
 		if k == "challenges" && strings.HasSuffix(where, "waiting_external") {
 			// status.waiting_external.challenges の要素は課題の形ではない（S2）。
 			entity, known = "waiting_external_challenge", true
+		}
+		if k == "challenge" && where == "show" {
+			// show の challenge は共有の課題の形に dependencies・dependents を足した形（M4.5 S2）。
+			entity, known = "show_challenge", true
+		}
+		if k == "challenges" && strings.HasSuffix(where, "actionable") {
+			// status の actionable.challenges[] は共有の課題の形に unmet_dependencies を足した形（M4.5 S2）。
+			entity, known = "actionable_challenge", true
 		}
 		switch x := val.(type) {
 		case map[string]any:
@@ -1045,9 +1056,75 @@ func addM45OperationShape(t *testing.T, doc *documentedJSON) {
 	}
 }
 
+// m45DependencyRows は m4.5 の仕様の「S2 で足す JSON のキー」の表の、足すキーの行（置き場・キー・先頭の要素の形を読む）。
+var m45DependencyRows = []struct{ place, key, entity string }{
+	{"`show` の `challenge`", "dependencies", "dependency"},
+	{"`show` の `challenge`", "dependents", ""},
+	{"`status` の `actionable.challenges[]`", "unmet_dependencies", "unmet_dependency"},
+}
+
+var quotedKeyRe = regexp.MustCompile(`"([a-z_]+)"`)
+
+// addM45DependencyKeysShape は M4.5 S2 が足した JSON のキーを、仕様の表から読んで doc へ合成する。
+// show の challenge（show_challenge）・status の actionable.challenges[]（actionable_challenge）は
+// 共有の challenge の形に足したキーを持つ形、dependencies・unmet_dependencies の要素の形は表の値の欄から読む。
+// discrepancy の challenge_ids は dependency_cycle の要素だけが持つ（optionalEntityKeys）。
+func addM45DependencyKeysShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	base := doc.entity["challenge"]
+	if len(base) == 0 {
+		t.Fatal("documented shape of challenge not found")
+	}
+	show := map[string]bool{}
+	actionable := map[string]bool{}
+	for k := range base {
+		show[k] = true
+		actionable[k] = true
+	}
+	for _, row := range m45DependencyRows {
+		var line string
+		for _, l := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(l, "| "+row.place+" | `"+row.key+"` |") {
+				line = l
+			}
+		}
+		if line == "" {
+			t.Fatalf("m4.5 spec does not document %s %s", row.place, row.key)
+		}
+		if row.place == "`show` の `challenge`" {
+			show[row.key] = true
+		} else {
+			actionable[row.key] = true
+		}
+		if row.entity != "" {
+			cols := strings.Split(line, "|")
+			if len(cols) < 5 {
+				t.Fatalf("m4.5 spec row has no value column: %q", line)
+			}
+			keys := map[string]bool{}
+			for _, m := range quotedKeyRe.FindAllStringSubmatch(cols[3], -1) {
+				keys[m[1]] = true
+			}
+			if len(keys) == 0 {
+				t.Fatalf("m4.5 spec row has no element keys: %q", line)
+			}
+			doc.entity[row.entity] = keys
+		}
+	}
+	doc.entity["show_challenge"] = show
+	doc.entity["actionable_challenge"] = actionable
+	if !strings.Contains(string(data), "`kind: dependency_cycle`・`challenge_ids`") {
+		t.Fatal("m4.5 spec does not document discrepancy challenge_ids")
+	}
+}
+
 // optionalEntityKeys は要素の形から省いてよいキー。discrepancy の operation_id は
 // merged_unapproved を含む要素だけが持つ（上流の食い違いだけの要素は持たない。M4.5 S1）。
-var optionalEntityKeys = map[string][]string{"discrepancy": {"operation_id"}}
+var optionalEntityKeys = map[string][]string{"discrepancy": {"operation_id", "challenge_ids"}}
 
 // withoutOptionalKeys は got から、entity で省いてよいキーを除いた写しを返す。
 func withoutOptionalKeys(entity string, got map[string]bool) map[string]bool {

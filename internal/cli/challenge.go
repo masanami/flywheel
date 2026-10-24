@@ -162,6 +162,16 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	fmt.Fprintf(&b, "完了条件:      %s\n", c.DoneCriteria)
 	fmt.Fprintf(&b, "作成:          %s\n", FormatTimestamp(c.CreatedAt))
 	fmt.Fprintf(&b, "更新:          %s\n", FormatTimestamp(c.UpdatedAt))
+	deps := make([]string, 0, len(d.Dependencies))
+	for _, dep := range d.Dependencies {
+		state := "満たされていない"
+		if dep.Satisfied {
+			state = "満たされている"
+		}
+		deps = append(deps, dep.ChallengeID+"("+state+")")
+	}
+	fmt.Fprintf(&b, "依存先:        %s\n", textOrDash(joinOrNil(deps)))
+	fmt.Fprintf(&b, "依存元:        %s\n", textOrDash(joinOrNil(d.Dependents)))
 	fmt.Fprintf(&b, "計画:          %d 版\n", len(d.Plans))
 	// 計画は全版の本文まで出す（受入基準 17・35 の「show で読める」をテキスト
 	// 出力にも適用する【決定 2026-09-23（オーナー）】）。
@@ -237,6 +247,14 @@ func indentLines(s, prefix string) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// joinOrNil は items を `,` で連ねる。空なら nil（textOrDash が `-` にする）。
+func joinOrNil(items []string) any {
+	if len(items) == 0 {
+		return nil
+	}
+	return strings.Join(items, ",")
 }
 
 func textOrDash(v any) string {
