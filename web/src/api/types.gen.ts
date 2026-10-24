@@ -9,10 +9,10 @@ export interface StatusResponse {
 }
 
 export interface StatusActionable {
-  challenges: Challenge[];
+  challenges: ActionableChallenge[];
 }
 
-export interface Challenge {
+export interface ActionableChallenge {
   context: string | null;
   created_at: string;
   description: string;
@@ -24,9 +24,17 @@ export interface Challenge {
   status: string;
   status_label: string;
   title: string;
+  unmet_dependencies: UnmetDependency[];
   updated_at: string;
   urgency: string | null;
   version: number;
+}
+
+export interface UnmetDependency {
+  challenge_id: string;
+  policy_state: string | null;
+  status: string;
+  upstream_state: string | null;
 }
 
 export interface StatusApproved {
@@ -66,8 +74,26 @@ export interface BudgetExhausted {
   review_remaining_usd: number;
 }
 
+export interface Challenge {
+  context: string | null;
+  created_at: string;
+  description: string;
+  done_criteria: string;
+  headline: string | null;
+  id: string;
+  priority: string | null;
+  reporter: string;
+  status: string;
+  status_label: string;
+  title: string;
+  updated_at: string;
+  urgency: string | null;
+  version: number;
+}
+
 export interface Discrepancy {
   challenge_id: string;
+  challenge_ids?: string[];
   kinds: string[];
   operation_id?: string;
 }
@@ -101,7 +127,7 @@ export interface ListResponse {
 
 export interface ShowResponse {
   approvals: Approval[];
-  challenge: Challenge;
+  challenge: ShowChallenge;
   holds: Hold[];
   operations: Operation[];
   pairs: StagePair[];
@@ -124,6 +150,33 @@ export interface Approval {
   relay_session: string | null;
   target_version: number;
   verification: string;
+}
+
+export interface ShowChallenge {
+  context: string | null;
+  created_at: string;
+  dependencies: Dependency[];
+  dependents: string[];
+  description: string;
+  done_criteria: string;
+  headline: string | null;
+  id: string;
+  priority: string | null;
+  reporter: string;
+  status: string;
+  status_label: string;
+  title: string;
+  updated_at: string;
+  urgency: string | null;
+  version: number;
+}
+
+export interface Dependency {
+  challenge_id: string;
+  policy_state: string | null;
+  satisfied: boolean;
+  status: string;
+  upstream_state: string | null;
 }
 
 export interface Hold {
@@ -287,7 +340,7 @@ export interface Card {
 export interface ShowCardResponse {
   approvals: Approval[];
   card: Card;
-  challenge: Challenge;
+  challenge: ShowChallenge;
   holds: Hold[];
   operations: Operation[];
   pairs: StagePair[];
@@ -416,4 +469,5 @@ export const DISCREPANCY_KIND_CODES = [
   "upstream_commented",
   "upstream_updated",
   "merged_unapproved",
+  "dependency_cycle",
 ] as const;

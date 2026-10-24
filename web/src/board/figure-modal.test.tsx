@@ -33,6 +33,8 @@ function detail(figure: string | null): ShowCardResponse {
     challenge: {
       context: null,
       created_at: "2026-01-01T00:00:00Z",
+      dependencies: [],
+      dependents: [],
       description: "説明",
       done_criteria: "完了条件",
       headline: null,

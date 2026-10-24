@@ -238,3 +238,100 @@ func TestFromDiscrepancies_OperationIDOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("got %s, want %s", got, want)
 	}
 }
+
+func TestFromDiscrepancies_ChallengeIDsOmittedUnlessDependencyCycle(t *testing.T) {
+	got := marshal(t, view.FromDiscrepancies([]core.Discrepancy{
+		{ChallengeID: "C-1", Kinds: []core.DiscrepancyKind{core.DiscrepancyKindDependencyCycle}, ChallengeIDs: []string{"C-1", "C-2"}},
+		{ChallengeID: "C-3", Kinds: []core.DiscrepancyKind{core.DiscrepancyKindUpstreamClosed}},
+	}))
+	want := `[{"challenge_id":"C-1","challenge_ids":["C-1","C-2"],"kinds":["dependency_cycle"]},{"challenge_id":"C-3","kinds":["upstream_closed"]}]`
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestFromActionableChallenges_UnmetDependenciesIsAlwaysAnArray(t *testing.T) {
+	got := marshal(t, view.FromActionableChallenges([]core.Challenge{{ID: "C-1"}}, nil))
+	if !strings.Contains(got, `"unmet_dependencies":[]`) {
+		t.Errorf("got %s, want unmet_dependencies:[]", got)
+	}
+}
+
+func TestFromShowChallenge_DependenciesAndDependentsAreArraysAndNullStatesStayNull(t *testing.T) {
+	got := marshal(t, view.FromShowChallenge(&core.ChallengeDetail{
+		Challenge:    core.Challenge{ID: "C-1"},
+		Dependencies: []core.DependencyView{{ChallengeID: "C-2", Status: core.StatusDone, Satisfied: true}},
+	}))
+	for _, want := range []string{
+		`"dependencies":[{"challenge_id":"C-2","policy_state":null,"satisfied":true,"status":"done","upstream_state":null}]`,
+		`"dependents":[]`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%s does not contain %s", got, want)
+		}
+	}
+}
+
+// ShowChallenge・ActionableChallenge は Challenge のフィールドを重複して持つ（gentypes が埋め込みに対応しないため）。
+// Challenge に足したキーが落ちないことを、JSON タグの集合で確かめる。
+func TestShowAndActionableChallengeCarryEveryChallengeKey(t *testing.T) {
+	tags := func(v any) map[string]bool {
+		out := map[string]bool{}
+		rt := reflect.TypeOf(v)
+		for i := 0; i < rt.NumField(); i++ {
+			out[strings.Split(rt.Field(i).Tag.Get("json"), ",")[0]] = true
+		}
+		return out
+	}
+	base := tags(view.Challenge{})
+	for name, extra := range map[string]struct {
+		got   map[string]bool
+		added []string
+	}{
+		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"dependencies", "dependents"}},
+		"ActionableChallenge": {tags(view.ActionableChallenge{}), []string{"unmet_dependencies"}},
+	} {
+		want := map[string]bool{}
+		for k := range base {
+			want[k] = true
+		}
+		for _, k := range extra.added {
+			want[k] = true
+		}
+		if !reflect.DeepEqual(extra.got, want) {
+			t.Errorf("%s keys = %v, want Challenge keys plus %v", name, extra.got, extra.added)
+		}
+	}
+}
+
+// ShowChallenge・ActionableChallenge へ写した Challenge の各キーの値が、FromChallenge の値と一致することを確かめる
+// （キーの名前だけでなく、別のフィールドから写す・写し落とす誤りを捕まえるため、全項目に互いに異なる値を入れる）。
+func TestShowAndActionableChallengeCopyEveryChallengeValue(t *testing.T) {
+	str := func(v string) *string { return &v }
+	urgency, priority := core.UrgencyHigh, core.PriorityP1
+	c := core.Challenge{
+		ID: "C-7", Title: "title", Description: "description", DoneCriteria: "done", Urgency: &urgency, Priority: &priority,
+		Status: core.StatusDone, Version: 3, Reporter: "alice",
+		CreatedAt:   time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC),
+		StageFields: core.StageFields{Headline: str("headline"), Context: str("context")},
+	}
+	toMap := func(v any) map[string]any {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(marshal(t, v)), &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	base := toMap(view.FromChallenge(c))
+	for name, got := range map[string]map[string]any{
+		"ShowChallenge":       toMap(view.FromShowChallenge(&core.ChallengeDetail{Challenge: c})),
+		"ActionableChallenge": toMap(view.FromActionableChallenges([]core.Challenge{c}, nil)[0]),
+	} {
+		for k, want := range base {
+			if !reflect.DeepEqual(got[k], want) {
+				t.Errorf("%s.%s = %v, want %v", name, k, got[k], want)
+			}
+		}
+	}
+}

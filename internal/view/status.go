@@ -4,8 +4,10 @@ import "github.com/masanami/flywheel/internal/core"
 
 // Discrepancy は食い違いの形。
 type Discrepancy struct {
-	ChallengeID string   `json:"challenge_id"`
-	Kinds       []string `json:"kinds"`
+	ChallengeID string `json:"challenge_id"`
+	// ChallengeIDs は dependency_cycle の輪の課題の ID（昇順）。それ以外の要素では省く。
+	ChallengeIDs []string `json:"challenge_ids,omitempty"`
+	Kinds        []string `json:"kinds"`
 	// OperationID は merged_unapproved の release の ID。上流の食い違いだけの要素では省く。
 	OperationID string `json:"operation_id,omitempty"`
 }
@@ -53,7 +55,7 @@ func DiscrepancyKinds(kinds []core.DiscrepancyKind) []string {
 func FromDiscrepancies(ds []core.Discrepancy) []Discrepancy {
 	out := make([]Discrepancy, 0, len(ds))
 	for _, d := range ds {
-		out = append(out, Discrepancy{ChallengeID: d.ChallengeID, Kinds: DiscrepancyKinds(d.Kinds), OperationID: d.OperationID})
+		out = append(out, Discrepancy{ChallengeID: d.ChallengeID, Kinds: DiscrepancyKinds(d.Kinds), OperationID: d.OperationID, ChallengeIDs: d.ChallengeIDs})
 	}
 	return out
 }
@@ -70,7 +72,7 @@ type StatusNeedsHuman struct {
 
 // StatusActionable は status.actionable。
 type StatusActionable struct {
-	Challenges []Challenge `json:"challenges"`
+	Challenges []ActionableChallenge `json:"challenges"`
 }
 
 // StatusApproved は status.approved。
@@ -115,7 +117,7 @@ func FromOverview(ov *core.Overview) StatusResponse {
 		waiting = append(waiting, WaitingExternal{ChallengeID: it.ChallengeID, Checks: "pending", PRURL: it.PRURL})
 	}
 	return StatusResponse{
-		Actionable: StatusActionable{Challenges: FromChallenges(ov.ActionableChallenges)},
+		Actionable: StatusActionable{Challenges: FromActionableChallenges(ov.ActionableChallenges, ov.UnmetDependencies)},
 		Approved:   StatusApproved{Operations: FromOperations(ov.ApprovedOperations)},
 		NeedsHuman: StatusNeedsHuman{
 			BudgetExhausted: budget,

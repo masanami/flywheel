@@ -40,6 +40,7 @@ export const DISCREPANCY_KINDS = [
   "upstream_commented",
   "upstream_updated",
   "merged_unapproved",
+  "dependency_cycle",
 ] as const;
 export type DiscrepancyKind = (typeof DISCREPANCY_KINDS)[number];
 
@@ -80,6 +81,7 @@ export const DISCREPANCY_LABELS: Record<DiscrepancyKind, string> = {
   upstream_commented: "上流に新しいコメント",
   upstream_updated: "上流が更新された",
   merged_unapproved: "承認なしでマージされた",
+  dependency_cycle: "依存が循環している",
 };
 
 // カードの面に出す区分の印（M4H23）。API の値から UI が導く（board/marks.ts）。

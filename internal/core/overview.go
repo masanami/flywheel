@@ -64,6 +64,9 @@ type Overview struct {
 	// GetOverview は GitHub を呼ばないため空のまま返し、呼び出し元が ListWaitingExternal の結果を
 	// 入れる。
 	WaitingExternal []WaitingExternal
+	// UnmetDependencies は ActionableChallenges の課題 ID ごとの、満たされていない依存先（S2。依存先の ID の昇順）。
+	// 満たされていない依存先が無い課題はキーを持たない。
+	UnmetDependencies map[string][]DependencyView
 }
 
 // DiscrepancyKind は Discrepancy.Kinds の値（docs/features/
@@ -82,6 +85,8 @@ const (
 	// DiscrepancyKindMergedUnapproved は、直前の試行の結果が merged_unapproved の
 	// release がある（承認なしの本番反映。M3 の検出と同じ事象）。
 	DiscrepancyKindMergedUnapproved DiscrepancyKind = "merged_unapproved"
+	// DiscrepancyKindDependencyCycle は、ストアの依存の循環に含まれる課題（S2）。
+	DiscrepancyKindDependencyCycle DiscrepancyKind = "dependency_cycle"
 )
 
 // discrepancyKindValues は DiscrepancyKind の閉集合（仕様の列挙の順）。
@@ -92,6 +97,7 @@ var discrepancyKindValues = []DiscrepancyKind{
 	DiscrepancyKindUpstreamCommented,
 	DiscrepancyKindUpstreamUpdated,
 	DiscrepancyKindMergedUnapproved,
+	DiscrepancyKindDependencyCycle,
 }
 
 // DiscrepancyKindValues は DiscrepancyKind の閉集合の写しを返す（CLI のテストが
@@ -107,6 +113,8 @@ type Discrepancy struct {
 	// OperationID は merged_unapproved の release の ID（"OP-<n>"）。上流の食い違いだけの
 	// 要素では空。
 	OperationID string
+	// ChallengeIDs は dependency_cycle の輪の課題の ID（昇順）。それ以外の要素では空。
+	ChallengeIDs []string
 }
 
 // listChallengesInStatuses は statuses のいずれかに一致する課題を id 昇順で返す
@@ -243,7 +251,44 @@ func listDiscrepancies(ctx context.Context, tx *sql.Tx) ([]Discrepancy, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return addMergedUnapproved(ctx, tx, result)
+	result, err = addMergedUnapproved(ctx, tx, result)
+	if err != nil {
+		return nil, err
+	}
+	return addDependencyCycles(ctx, tx, result)
+}
+
+// addDependencyCycles は循環に含まれる課題を食い違いに足す。課題に既に要素があれば、その先頭の要素の
+// kinds の末尾に dependency_cycle を足して ChallengeIDs を持たせ、無ければ新しい要素を足す。
+// 課題が完了していても出す。結果は課題 ID の昇順。
+func addDependencyCycles(ctx context.Context, tx *sql.Tx, result []Discrepancy) ([]Discrepancy, error) {
+	cycles, err := dependencyCycleDiscrepancies(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if len(cycles) == 0 {
+		return result, nil
+	}
+	for _, c := range cycles {
+		merged := false
+		for i := range result {
+			if result[i].ChallengeID == c.ChallengeID {
+				result[i].Kinds = append(result[i].Kinds, DiscrepancyKindDependencyCycle)
+				result[i].ChallengeIDs = c.ChallengeIDs
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			result = append(result, c)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		a, _ := parseChallengeID(result[i].ChallengeID)
+		b, _ := parseChallengeID(result[j].ChallengeID)
+		return a < b
+	})
+	return result, nil
 }
 
 // addMergedUnapproved は、直前の試行（operation_execution で id が最大の行）の結果が
@@ -293,6 +338,34 @@ func addMergedUnapproved(ctx context.Context, tx *sql.Tx, result []Discrepancy) 
 	return result, nil
 }
 
+// listUnmetDependencies は課題ごとに、依存の評価（#325）で満たされていない依存先を返す。
+func listUnmetDependencies(ctx context.Context, tx *sql.Tx, challenges []Challenge) (map[string][]DependencyView, error) {
+	out := map[string][]DependencyView{}
+	if len(challenges) == 0 {
+		return out, nil
+	}
+	eval, err := evaluateDependencies(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range challenges {
+		cid, ok := parseChallengeID(c.ID)
+		if !ok {
+			continue
+		}
+		views, err := dependencyViews(ctx, tx, eval, cid)
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range views {
+			if !v.Satisfied {
+				out[c.ID] = append(out[c.ID], v)
+			}
+		}
+	}
+	return out, nil
+}
+
 // GetOverview は `flywheel status` の本体。課題を「人間の操作を待っているもの」
 // （計画承認待ち・完了確認待ち・人間対応待ち）と「システムが次に進められるもの」
 // （未分類・分類済・着手中・検証中）に、不可逆操作を「未承認（pending）」と
@@ -322,6 +395,12 @@ func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*O
 			return err
 		}
 		result.ActionableChallenges = actionable
+
+		unmet, err := listUnmetDependencies(ctx, tx, actionable)
+		if err != nil {
+			return err
+		}
+		result.UnmetDependencies = unmet
 
 		pendingOps, err := listOperationsInState(ctx, tx, OperationStatePending)
 		if err != nil {

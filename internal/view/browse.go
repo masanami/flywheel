@@ -66,7 +66,7 @@ type ListCardResponse struct {
 type ShowCardResponse struct {
 	Approvals     []Approval     `json:"approvals"`
 	Card          Card           `json:"card"`
-	Challenge     Challenge      `json:"challenge"`
+	Challenge     ShowChallenge  `json:"challenge"`
 	Holds         []Hold         `json:"holds"`
 	Operations    []Operation    `json:"operations"`
 	Pairs         []StagePair    `json:"pairs"`

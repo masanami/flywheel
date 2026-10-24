@@ -538,7 +538,9 @@ export function statusOf(w: MockWorkspace): StatusResponse {
   const ops = (state: string) =>
     items.flatMap((m) => m.operations.filter((o) => o.state === state));
   return {
-    actionable: { challenges: actionable.map((m) => m.c) },
+    actionable: {
+      challenges: actionable.map((m) => ({ ...m.c, unmet_dependencies: [] })),
+    },
     approved: { operations: ops("approved") },
     needs_human: {
       budget_exhausted: items.flatMap((m) =>

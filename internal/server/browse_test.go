@@ -857,3 +857,36 @@ func TestBrowseAPI_CardsDoNotHoldStoreLeaseWhileFetchingChecks(t *testing.T) {
 		})
 	}
 }
+
+// M4.5 S2: 詳細の API の challenge に dependencies・dependents が載り、CLI の show と等しい。
+func TestBrowseAPI_ShowChallengeCarriesDependencies(t *testing.T) {
+	ws := browseWorkspace(t)
+	coretest.InsertDependency(t, ws, 2, 1)
+	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
+
+	for _, tc := range []struct {
+		id         string
+		deps       int
+		dependents []any
+	}{{"C-2", 1, []any{}}, {"C-1", 0, []any{"C-2"}}} {
+		code, body := apiGet(t, port, "/api/v1/workspaces/w/challenges/"+tc.id)
+		if code != http.StatusOK {
+			t.Fatalf("show %s = %d %s", tc.id, code, body)
+		}
+		ch := decodeMap(t, body)["challenge"].(map[string]any)
+		deps, ok := ch["dependencies"].([]any)
+		if !ok || len(deps) != tc.deps {
+			t.Errorf("%s dependencies = %#v, want %d elements", tc.id, ch["dependencies"], tc.deps)
+		}
+		if !reflect.DeepEqual(ch["dependents"], tc.dependents) {
+			t.Errorf("%s dependents = %#v, want %#v", tc.id, ch["dependents"], tc.dependents)
+		}
+		if tc.deps == 1 {
+			d := deps[0].(map[string]any)
+			if d["challenge_id"] != "C-1" || d["satisfied"] != false || d["status"] != "awaiting_plan_approval" {
+				t.Errorf("dependency = %#v", d)
+			}
+			assertKeys(t, "dependency", d, "challenge_id", "policy_state", "satisfied", "status", "upstream_state")
+		}
+	}
+}
