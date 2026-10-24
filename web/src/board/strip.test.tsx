@@ -225,3 +225,19 @@ it("M45H19: dependency_cycle だけの食い違いは帯の件数にも絞り込
   const ids = challengeIdsOf(nh, "discrepancies", []);
   expect([...ids].sort()).toEqual(["C-2", "C-3", "C-4"]);
 });
+
+it("M45H19: 種類が空の食い違いは帯の件数にも絞り込みにも数える", () => {
+  const nh = {
+    challenges: [],
+    operations: [],
+    budget_exhausted: [],
+    triage: [],
+    slots: [],
+    discrepancies: [
+      { challenge_id: "C-1", kinds: [] },
+      { challenge_id: "C-2", kinds: ["dependency_cycle"] },
+    ],
+  } as unknown as StatusNeedsHuman;
+  expect(countsOf(nh).discrepancies).toBe(1);
+  expect([...challengeIdsOf(nh, "discrepancies", [])]).toEqual(["C-1"]);
+});

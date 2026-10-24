@@ -493,12 +493,17 @@ const HUMAN_STATES = [
 
 export function cardOf(m: MockChallenge): Card {
   const f = m.flags;
+  // 種類が dependency_cycle だけの食い違いは印と review_discrepancy に数えない（M45H19。core と同じ）。
+  const disc =
+    f.discrepancy !== undefined &&
+    (f.discrepancy.length === 0 ||
+      f.discrepancy.some((k) => k !== "dependency_cycle"));
   const modifiers: string[] = [];
   if (f.running) modifiers.push("running");
   if (f.unresponsive) modifiers.push("unresponsive");
   if (f.waitingCi) modifiers.push("waiting_ci");
   if (f.budget) modifiers.push("budget_exhausted");
-  if (f.discrepancy) modifiers.push("discrepancy");
+  if (disc) modifiers.push("discrepancy");
   const actions: string[] = [];
   const s = m.c.status;
   if (s === "awaiting_plan_approval") actions.push("approve_plan");
@@ -508,7 +513,7 @@ export function cardOf(m: MockChallenge): Card {
   if (f.budget) actions.push("increase_budget");
   if (m.operations.some((o) => o.state === "pending"))
     actions.push("approve_operation");
-  if (f.discrepancy) actions.push("review_discrepancy");
+  if (disc) actions.push("review_discrepancy");
   if (f.slot) actions.push("clear_slot");
   return {
     context: m.context,
