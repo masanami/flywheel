@@ -256,12 +256,14 @@ type runRow struct {
 	Decider    decider
 	DeciderRow *int64
 	Repo       string
+	// FlywheelVersion は run を作った flywheel の版（0011。"" が NULL）。
+	FlywheelVersion string
 }
 
 const runSelectColumns = `SELECT id, cycle_id, kind, judgment, challenge_id, challenge_version, plan_version,
 	session_id, session_id_mismatch, resumed_from_run_id, pid, host, heartbeat_at, started_at, ended_at,
 	result, rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source, reported_total_cost_usd,
-	output, error, slot_id, decider, decider_row, repo FROM run`
+	output, error, slot_id, decider, decider_row, repo, flywheel_version FROM run`
 
 // scanRunRow は 1 行分の run を Scan して runRow へ変換する。
 func scanRunRow(row interface{ Scan(dest ...any) error }) (*runRow, error) {
@@ -273,6 +275,7 @@ func scanRunRow(row interface{ Scan(dest ...any) error }) (*runRow, error) {
 		slotID, deciderRow                              sql.NullInt64
 		kind, judgment, sessionID, host, result         string
 		costSourceStr, deciderStr, repo                 string
+		flywheelVersion                                 string
 		budgetBucketStr, output, errStr                 sql.NullString
 		heartbeatAtStr, startedAtStr                    string
 		endedAtStr                                      sql.NullString
@@ -283,7 +286,7 @@ func scanRunRow(row interface{ Scan(dest ...any) error }) (*runRow, error) {
 		&id, &cycleID, &kind, &nullString{&judgment}, &challengeID, &challengeVersion, &planVersion,
 		&nullString{&sessionID}, &sessionIDMismatch, &resumedFromRunID, &pid, &host, &heartbeatAtStr, &startedAtStr, &endedAtStr,
 		&nullString{&result}, &rateLimited, &maxBudgetUSD, &budgetBucketStr, &costUSD, &nullString{&costSourceStr}, &reportedTotalCostUSD,
-		&output, &errStr, &slotID, &nullString{&deciderStr}, &deciderRow, &nullString{&repo},
+		&output, &errStr, &slotID, &nullString{&deciderStr}, &deciderRow, &nullString{&repo}, &nullString{&flywheelVersion},
 	); err != nil {
 		return nil, err
 	}
@@ -326,6 +329,7 @@ func scanRunRow(row interface{ Scan(dest ...any) error }) (*runRow, error) {
 		Error:             errStr.String,
 		Decider:           decider(deciderStr),
 		Repo:              repo,
+		FlywheelVersion:   flywheelVersion,
 	}
 	if challengeID.Valid {
 		r.ChallengeID = formatChallengeID(challengeID.Int64)
@@ -476,14 +480,14 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 		`INSERT INTO run (cycle_id, kind, judgment, challenge_id, challenge_version, plan_version,
 			session_id, session_id_mismatch, resumed_from_run_id, pid, host, heartbeat_at, started_at,
 			ended_at, result, rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source,
-			reported_total_cost_usd, output, error, slot_id, decider, decider_row, repo)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?)`,
+			reported_total_cost_usd, output, error, slot_id, decider, decider_row, repo, flywheel_version)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?)`,
 		int64PtrColumn(in.CycleID), string(in.Kind), nullableTextColumn(string(in.Judgment)), challengeIDCol,
 		challengeVersionCol, int64PtrColumn(in.PlanVersion), sessionIDCol, int64PtrColumn(in.ResumedFromRunID),
 		in.PID, in.Host, formatTimestamp(in.HeartbeatAt), formatTimestamp(in.StartedAt),
 		in.MaxBudgetUSD, string(in.BudgetBucket),
 		int64PtrColumn(in.SlotID), nullableTextColumn(string(in.Decider)), int64PtrColumn(in.DeciderRow),
-		nullableTextColumn(in.Repo),
+		nullableTextColumn(in.Repo), nullableTextColumn(flywheelVersion()),
 	)
 	if store.IsUniqueViolation(err) {
 		// 部分一意索引のどちらに当たったかは、スロットを指定していて、その
