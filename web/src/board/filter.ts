@@ -17,7 +17,7 @@ export const HUMAN_KIND_LABELS: Record<HumanKind, string> = {
   approvals: "承認待ち",
   questions: "未回答の問い",
   operations: "不可逆操作の承認",
-  discrepancies: "上流との食い違い",
+  discrepancies: "食い違い",
   budget: "予算の使い切り",
   triage: "トリアージ",
   slots: "片づけ待ちのスロット",
@@ -32,12 +32,14 @@ const APPROVAL_STATES = [
 const QUESTION_STATE = "awaiting_human";
 const CLEAR_SLOT = "clear_slot";
 
-// 種類が dependency_cycle だけの食い違いは帯に数えない（循環は status で見える）。
+// 循環だけの食い違い（cycle_only。core が判定する）は帯に数えない（循環は status で見える）。
 function realDiscrepancies(nh: StatusNeedsHuman) {
-  return nh.discrepancies.filter(
-    (d) =>
-      d.kinds.length === 0 || d.kinds.some((k) => k !== "dependency_cycle"),
-  );
+  return nh.discrepancies.filter((d) => d.cycle_only !== true);
+}
+
+// 食い違いのある課題の ID。同じ課題に要素が複数あっても 1 課題と数える（件数と絞り込みの単位）。
+function discrepancyChallengeIds(nh: StatusNeedsHuman): Set<string> {
+  return new Set(realDiscrepancies(nh).map((d) => d.challenge_id));
 }
 
 function challengesIn(nh: StatusNeedsHuman, states: string[]): string[] {
@@ -46,13 +48,13 @@ function challengesIn(nh: StatusNeedsHuman, states: string[]): string[] {
     .map((c) => c.id);
 }
 
-// 区分ごとの件数 = 区分に入る要素の数。
+// 区分ごとの件数。食い違いは課題の数、他は要素の数（絞り込みで出る課題の数と一致する）。
 export function countsOf(nh: StatusNeedsHuman): HumanCounts {
   return {
     approvals: challengesIn(nh, APPROVAL_STATES).length,
     questions: challengesIn(nh, [QUESTION_STATE]).length,
     operations: nh.operations.length,
-    discrepancies: realDiscrepancies(nh).length,
+    discrepancies: discrepancyChallengeIds(nh).size,
     budget: nh.budget_exhausted.length,
     triage: nh.triage.length,
     slots: nh.slots.length,
@@ -73,7 +75,7 @@ export function challengeIdsOf(
     case "operations":
       return new Set(nh.operations.map((o) => o.challenge_id));
     case "discrepancies":
-      return new Set(realDiscrepancies(nh).map((d) => d.challenge_id));
+      return discrepancyChallengeIds(nh);
     case "budget":
       return new Set(nh.budget_exhausted.map((b) => b.challenge_id));
     case "triage":

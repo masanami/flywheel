@@ -165,7 +165,7 @@ func deriveCard(c Challenge, st *Overview, runs []*runRow, ownSlots []string, no
 		inBudget = inBudget || b.ChallengeID == c.ID
 	}
 	for _, d := range st.Discrepancies {
-		inDisc = inDisc || (d.ChallengeID == c.ID && !cycleOnlyDiscrepancy(d))
+		inDisc = inDisc || (d.ChallengeID == c.ID && !d.CycleOnly())
 	}
 	for _, w := range st.WaitingExternal {
 		waiting = waiting || w.ChallengeID == c.ID
@@ -206,9 +206,10 @@ func deriveCard(c Challenge, st *Overview, runs []*runRow, ownSlots []string, no
 	return card
 }
 
-// cycleOnlyDiscrepancy は、種類が dependency_cycle だけの食い違いか返す。
-// 循環は status の discrepancies では見えるが、カードの印と review_discrepancy には数えない。
-func cycleOnlyDiscrepancy(d Discrepancy) bool {
+// CycleOnly は、種類が dependency_cycle だけの食い違いか返す。
+// 循環は status の discrepancies では見えるが、カードの印・review_discrepancy・帯の件数には数えない。
+// この判定の正本はここ 1 か所（view が JSON の cycle_only に出し、web はそれを使う）。
+func (d Discrepancy) CycleOnly() bool {
 	if len(d.Kinds) == 0 {
 		return false
 	}

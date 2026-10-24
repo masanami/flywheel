@@ -60,7 +60,7 @@ export const MODIFIER_LABELS: Record<CardModifier, string> = {
   unresponsive: "更新なし（実行中だが一定時間更新がない）",
   waiting_ci: "自動の確認待ち",
   budget_exhausted: "予算を使い切った",
-  discrepancy: "上流との食い違い",
+  discrepancy: "食い違い",
 };
 
 export const ACTION_LABELS: Record<CardAction, string> = {

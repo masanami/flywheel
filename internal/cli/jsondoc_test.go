@@ -1120,11 +1120,14 @@ func addM45DependencyKeysShape(t *testing.T, doc *documentedJSON) {
 	if !strings.Contains(string(data), "`kinds` に `dependency_cycle`・`challenge_ids`") {
 		t.Fatal("m4.5 spec does not document discrepancy challenge_ids")
 	}
+	if !strings.Contains(string(data), "| `status` の `needs_human.discrepancies[]` | `cycle_only` |") {
+		t.Fatal("m4.5 spec does not document discrepancy cycle_only")
+	}
 }
 
 // optionalEntityKeys は要素の形から省いてよいキー。discrepancy の operation_id は
 // merged_unapproved を含む要素だけが持つ（上流の食い違いだけの要素は持たない。M4.5 S1）。
-var optionalEntityKeys = map[string][]string{"discrepancy": {"operation_id", "challenge_ids"}}
+var optionalEntityKeys = map[string][]string{"discrepancy": {"operation_id", "challenge_ids", "cycle_only"}}
 
 // withoutOptionalKeys は got から、entity で省いてよいキーを除いた写しを返す。
 func withoutOptionalKeys(entity string, got map[string]bool) map[string]bool {

@@ -18,6 +18,7 @@ import type {
   StatusResponse,
   Workspace,
 } from "../api/types.gen.ts";
+import type { DiscrepancyKind } from "../labels.ts";
 import { seedGraphs } from "./graph.ts";
 
 export interface Flags {
@@ -25,7 +26,7 @@ export interface Flags {
   unresponsive?: boolean;
   waitingCi?: { checks: string; pr_url: string };
   budget?: BudgetExhausted;
-  discrepancy?: string[];
+  discrepancy?: DiscrepancyKind[];
   triage?: { reason: string; run_id: string };
   slot?: { path: string; repo: string; slot_id: string; run_id: string };
 }
@@ -491,13 +492,15 @@ const HUMAN_STATES = [
   "awaiting_human",
 ];
 
+// 区分の型（labels.ts の DiscrepancyKind）から引く。型の無い文字列で書かない。
+const CYCLE_KIND: DiscrepancyKind = "dependency_cycle";
+
 export function cardOf(m: MockChallenge): Card {
   const f = m.flags;
   // 種類が dependency_cycle だけの食い違いは印と review_discrepancy に数えない（M45H19。core と同じ）。
   const disc =
     f.discrepancy !== undefined &&
-    (f.discrepancy.length === 0 ||
-      f.discrepancy.some((k) => k !== "dependency_cycle"));
+    (f.discrepancy.length === 0 || f.discrepancy.some((k) => k !== CYCLE_KIND));
   const modifiers: string[] = [];
   if (f.running) modifiers.push("running");
   if (f.unresponsive) modifiers.push("unresponsive");
@@ -554,7 +557,16 @@ export function statusOf(w: MockWorkspace): StatusResponse {
       challenges: nhChallenges.map((m) => m.c),
       discrepancies: items.flatMap((m) =>
         m.flags.discrepancy
-          ? [{ challenge_id: m.c.id, kinds: m.flags.discrepancy }]
+          ? [
+              {
+                challenge_id: m.c.id,
+                kinds: m.flags.discrepancy,
+                ...(m.flags.discrepancy.length > 0 &&
+                m.flags.discrepancy.every((k) => k === CYCLE_KIND)
+                  ? { cycle_only: true }
+                  : {}),
+              },
+            ]
           : [],
       ),
       operations: ops("pending"),
