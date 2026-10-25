@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -223,4 +224,65 @@ func (s *Store) insertOccurrenceRow(tx *sql.Tx, in occurrenceInput) error {
 		insert = defaultInsertOccurrence
 	}
 	return insert(tx, row)
+}
+
+// holdReason は保留（hold の行）を作る理由の種別。発生の種類を決める。
+type holdReason string
+
+const (
+	holdReasonNone            holdReason = ""
+	holdReasonFailureLimit    holdReason = "failure_limit"
+	holdReasonReworkLimit     holdReason = "rework_limit"
+	holdReasonQuestions       holdReason = "questions"
+	holdReasonBlocked         holdReason = "blocked"
+	holdReasonUnapprovedMerge holdReason = "unapproved_merge"
+	// holdReasonArtifactMissing は成果物が見つからない保留。M45P5 の 12 の出来事に無いので発生を作らない。
+	holdReasonArtifactMissing holdReason = "artifact_missing"
+)
+
+// occurrenceKind は保留の理由に対応する発生の種類。発生を作らない理由は false。
+func (r holdReason) occurrenceKind() (OccurrenceKind, bool) {
+	switch r {
+	case holdReasonFailureLimit, holdReasonReworkLimit:
+		return OccurrenceKindFailureLimitHold, true
+	case holdReasonQuestions, holdReasonBlocked:
+		return OccurrenceKindDelegationStopped, true
+	case holdReasonUnapprovedMerge:
+		return OccurrenceKindUnapprovedMerge, true
+	}
+	return "", false
+}
+
+// delegationEndOccurrenceKind は委譲の run の終了結果に対応する発生の種類。
+// 数える失敗（枠超過の run を除く）は delegation_failed、budget_exhausted は budget_exhausted
+// （delegation_failed は作らない）。それ以外は発生を作らない。
+func delegationEndOccurrenceKind(result RunResult, rateLimited bool) (OccurrenceKind, bool) {
+	if result == RunResultBudgetExhausted {
+		return OccurrenceKindBudgetExhausted, true
+	}
+	if !rateLimited && isCountedFailure(result) {
+		return OccurrenceKindDelegationFailed, true
+	}
+	return "", false
+}
+
+// insertHoldWithOccurrence は保留の行を作り、理由に対応する発生があれば同じトランザクションで
+// 作る（参照は保留の行、原因の run は遷移の run、周は cycleID）。
+func (s *Store) insertHoldWithOccurrence(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string) error {
+	holdID, err := insertHoldID(ctx, tc, question)
+	if err != nil {
+		return err
+	}
+	kind, ok := reason.occurrenceKind()
+	if !ok {
+		return nil
+	}
+	var cyc *int64
+	if n, ok := parseCycleID(cycleID); ok {
+		cyc = &n
+	}
+	return s.insertOccurrenceRow(tc.tx, occurrenceInput{
+		ChallengeID: tc.id, CycleID: cyc, CauseRunID: tc.runID, Kind: kind,
+		Ref: OccurrenceRef{HoldID: &holdID}, Outcome: OccurrenceOutcomeBad, At: tc.now,
+	})
 }

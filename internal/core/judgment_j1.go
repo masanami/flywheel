@@ -724,7 +724,7 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 		if !eligible {
 			continue
 		}
-		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ1, StatusUnclassified, in.AgentDecl)
+		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ1, StatusUnclassified, in.AgentDecl, in.CycleID)
 		if err != nil {
 			return nil, err
 		}

@@ -663,7 +663,7 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		if ch.Status != StatusVerifying {
 			continue // 対象を選んだ後に状態が変わった
 		}
-		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ5, StatusVerifying, in.AgentDecl)
+		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ5, StatusVerifying, in.AgentDecl, in.CycleID)
 		if err != nil {
 			return nil, err
 		}

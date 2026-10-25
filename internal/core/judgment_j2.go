@@ -1157,7 +1157,7 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 		if !eligible {
 			continue
 		}
-		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ2, StatusClassified, in.AgentDecl)
+		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ2, StatusClassified, in.AgentDecl, in.CycleID)
 		if err != nil {
 			return nil, err
 		}
