@@ -69,7 +69,7 @@ func j1OutputSchema() []byte {
 			"reason":   map[string]any{"type": "string"},
 			"question": map[string]any{"type": []string{"string", "null"}},
 			"headline": map[string]any{"type": []string{"string", "null"}},
-			"context":  map[string]any{"type": []string{"string", "null"}},
+			"context":  map[string]any{"type": []string{"string", "null"}, "description": "位置づけ（この課題が全体の計画のどこにあり、なぜ要るか）"},
 		},
 		"required":             []string{"verdict", "reason"},
 		"additionalProperties": false,

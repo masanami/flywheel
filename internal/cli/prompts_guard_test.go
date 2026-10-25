@@ -68,7 +68,7 @@ func realForbiddenSources() invoker.ForbiddenSources {
 func allEmbeddedPromptContents(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6} {
 		body, err := invoker.Instructions(j)
 		if err != nil {
 			t.Fatalf("invoker.Instructions(%s): %v", j, err)
@@ -203,5 +203,17 @@ func TestForbiddenTerms_GeneratedFromCode_PicksUpNewStateVocabularyValue(t *test
 	}
 	if !found {
 		t.Errorf("ForbiddenTerms(...) does not contain the newly added state vocabulary value; the generation does not follow the code definition")
+	}
+}
+
+// TestForbiddenTerms_DetectsJ6ClosedValues は、J6 の出力の閉集合の値
+// （原因・層・mode・記憶の種類）が指示文に現れると検出されることを検証する。
+func TestForbiddenTerms_DetectsJ6ClosedValues(t *testing.T) {
+	terms := invoker.ForbiddenTerms(realForbiddenSources())
+	for _, v := range []string{"context", "permission", "performance", "connector_skill", "entry_skill", "knowledge", "create", "append", "tacit", "reference"} {
+		hits := invoker.FindForbiddenTerms("本文に "+v+" がある。", terms)
+		if !slices.Contains(hits, v) {
+			t.Errorf("FindForbiddenTerms did not detect J6 closed value %q (hits=%v)", v, hits)
+		}
 	}
 }

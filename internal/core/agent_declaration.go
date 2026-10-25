@@ -57,7 +57,7 @@ var defaultSizeBudgetsUSD = SizeBudgetsUSD{
 	L: SizeBudgetPair{Impl: 100, Review: 40},
 }
 
-var defaultJudgmentBudgetUSD = JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5}
+var defaultJudgmentBudgetUSD = JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5, J6: 2}
 
 // SizeBudgetPair はサイズ1段（S・M・L のいずれか）の実装・レビューの予算(USD)。
 type SizeBudgetPair struct {
@@ -72,9 +72,9 @@ type SizeBudgetsUSD struct {
 	L SizeBudgetPair
 }
 
-// JudgmentBudgetUSD は judgment_budget_usd（判断点 J1〜J5 ごとの上限額）。
+// JudgmentBudgetUSD は judgment_budget_usd（判断点 J1〜J6 ごとの上限額）。
 type JudgmentBudgetUSD struct {
-	J1, J2, J3, J4, J5 float64
+	J1, J2, J3, J4, J5, J6 float64
 }
 
 // AgentTimeoutSec は timeout_sec（判断の呼び出し・委譲の時間の上限、秒）。
@@ -175,11 +175,11 @@ func LoadAgentDeclaration(base string) (*AgentDeclaration, error) {
 	return decl, nil
 }
 
-// JudgmentBudgetFor は判断点 j（J1〜J5）の1回の呼び出しの上限額
+// JudgmentBudgetFor は判断点 j（J1〜J6）の1回の呼び出しの上限額
 // （judgment_budget_usd.<j>）を返す（#83・§予算ガード「判断の呼び出しの
 // --max-budget-usd は、judgment_budget_usd の値」）。呼び出し元
 // （#84〜#86の判断点の入口）は、この値を RunJudgmentInput.MaxBudgetUSD に
-// 渡す。j が J1〜J5 の外なら 0 を返す【仮定】（呼び出し元はJ1〜J5のいずれか
+// 渡す。j が J1〜J6 の外なら 0 を返す【仮定】（呼び出し元はJ1〜J6のいずれか
 // しか渡さない。core.JudgmentPoint.valid() で事前に検査されている前提）。
 func (d *AgentDeclaration) JudgmentBudgetFor(j JudgmentPoint) float64 {
 	switch j {
@@ -193,6 +193,8 @@ func (d *AgentDeclaration) JudgmentBudgetFor(j JudgmentPoint) float64 {
 		return d.JudgmentBudgetUSD.J4
 	case JudgmentJ5:
 		return d.JudgmentBudgetUSD.J5
+	case JudgmentJ6:
+		return d.JudgmentBudgetUSD.J6
 	default:
 		return 0
 	}
@@ -242,7 +244,7 @@ var memoryWriteLimitKeys = map[string]bool{"files": true, "bytes": true}
 
 var sizeBudgetsSizeKeys = map[string]bool{"S": true, "M": true, "L": true}
 var sizeBudgetPairKeys = map[string]bool{"impl": true, "review": true}
-var judgmentBudgetKeys = map[string]bool{"J1": true, "J2": true, "J3": true, "J4": true, "J5": true}
+var judgmentBudgetKeys = map[string]bool{"J1": true, "J2": true, "J3": true, "J4": true, "J5": true, "J6": true}
 var agentTimeoutSecKeys = map[string]bool{"judgment": true, "delegate": true}
 
 // parseAgentDeclaration は data を AgentDeclaration へ変換する。省略された
@@ -616,7 +618,7 @@ func parseJudgmentBudgets(raw json.RawMessage) (JudgmentBudgetUSD, bool, error) 
 		key    string
 		target *float64
 	}{
-		{"J1", &result.J1}, {"J2", &result.J2}, {"J3", &result.J3}, {"J4", &result.J4}, {"J5", &result.J5},
+		{"J1", &result.J1}, {"J2", &result.J2}, {"J3", &result.J3}, {"J4", &result.J4}, {"J5", &result.J5}, {"J6", &result.J6},
 	}
 	for _, f := range fields {
 		v, ok := m[f.key]
@@ -706,7 +708,7 @@ func (d *AgentDeclaration) validate() error {
 		val  float64
 	}{
 		{"J1", d.JudgmentBudgetUSD.J1}, {"J2", d.JudgmentBudgetUSD.J2}, {"J3", d.JudgmentBudgetUSD.J3},
-		{"J4", d.JudgmentBudgetUSD.J4}, {"J5", d.JudgmentBudgetUSD.J5},
+		{"J4", d.JudgmentBudgetUSD.J4}, {"J5", d.JudgmentBudgetUSD.J5}, {"J6", d.JudgmentBudgetUSD.J6},
 	}
 	for _, j := range judgments {
 		if j.val <= 0 {
