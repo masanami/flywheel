@@ -512,3 +512,15 @@ func phaseNames(phases []any) []string {
 	}
 	return out
 }
+
+// AC-217: op exec が作った周の ID を、取り消しの発生が持つ。
+func TestOpExec_CancelOccurrenceCarriesTheCycleID(t *testing.T) {
+	ws, _, _ := execWorkspace(t)
+	newReleaseGH(t, execHead2) // 承認の後に push されて head が変わっている
+
+	runJSON(t, ws, "op", "exec")
+
+	if ids := coretest.OccurrenceCycleIDs(t, ws); len(ids) != 1 || ids[0] == 0 {
+		t.Fatalf("occurrence cycle ids = %v, want one non-NULL", ids)
+	}
+}
