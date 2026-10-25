@@ -177,6 +177,12 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 			VALUES (?, 'completion_rejected', (SELECT MAX(id) FROM activity), 'bad', 'core', '2026-03-01T00:00:00.000Z')`, cid)
 		return []string{"metrics"}
 	}},
+	"learn": {setup: func(t *testing.T, ws string) []string {
+		// 対象の条件を満たさない課題を指す learn（not_started に not_learnable。J6 は起動されず作業ログも増えない）。
+		// 要素の形を照合する経路は learn_test.go の TestLearn_JSONIsOnePhaseObject。
+		putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
+		return []string{"learn", createForCase(t, ws)}
+	}},
 	"cycle": {setup: func(t *testing.T, ws string) []string {
 		// cycle --json の出力の形（phases の各段・items・not_started・ingest の result）が
 		// 文書と照合されるよう、取り込みで課題を 1 件作り、同じ周で分類・計画まで進める。

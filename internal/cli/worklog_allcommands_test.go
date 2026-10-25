@@ -68,6 +68,10 @@ var worklogNoActivityMutationCommands = map[string]bool{
 	// completed の写像（保留・検証中）は経路 invoker の作業ログを残すので、この表の検査
 	// （経路 cli 固定）の対象ではなく、core・cycle のテストが検証する。
 	"run": true,
+	// learn（M4.5 S3）は run・cycle 表を書く。J6 の写像が残す作業ログ（entity=challenge・action=learn。
+	// 経路 invoker）は経路 cli 固定のこの表の検査の対象ではなく、core のテスト（TestLearnJ6_*）と
+	// learn_test.go が検証する。この表の検査は、対象の課題が無い learn が何も足さないことを確かめる。
+	"learn": true,
 }
 
 // worklogIngestRepo は worklogCases の "ingest create" ケースが使う偽の

@@ -121,8 +121,6 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"plan_unavailable": "TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothingLaunched (internal/core/delegate_plan_approval_test.go)",
 		// release 以外・approved でない操作を指した op exec だけが出す（cycle の release の段は approved の release しか試さない）。
 		"not_executable": "TestNotExecutable_NotReleaseOrNotApproved (internal/core/release_exec_test.go)",
-		// learn の段と CLI は #363 で結線する。それまでは、ID を指定した LearnJ6 だけが出す理由を core のテストが観測する。
-		"not_learnable": "TestLearnJ6_ExplicitID_NotLearnable_NotStartedAndNoRun (internal/core/judgment_j6_test.go)",
 	}
 	observed := map[string]bool{}
 	for r, ref := range coreObservedReasons {
@@ -204,6 +202,17 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		})
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 		observe(cycleDoc(t, ws))
+	})
+	t.Run("not_learnable", func(t *testing.T) {
+		// ID を指定した learn の課題が対象の条件を満たさないときだけ出る（cycle の learn の段は対象外を黙って除く）。
+		ws := setupWorkspaceWithPosition(t)
+		id, _ := newLearnableForCase(t, ws, "in_progress", 1)
+		putRoutedFakeClaudeOnPATH(t, nil, "")
+		pm := runJSON(t, ws, "learn", id)["phase"].(map[string]any)
+		assertDocumentedPhase(t, loadDocumentedJSON(t), "learn", pm)
+		for _, n := range phaseNotStarted(t, pm) {
+			observed[n["reason"].(string)] = true
+		}
 	})
 	t.Run("dependency", func(t *testing.T) {
 		// 依存先が未完了の着手中の課題は、cycle の run の段が起動しない。
@@ -427,13 +436,14 @@ func m45AddedNotStartedReasons(t *testing.T) []string {
 // M4.5 S1: cycle の phase の閉集合は release を最初に持ち、cycle --json の phases の並びがそれに従う。
 func TestCycle_PhasesStartWithReleaseThenTheM3Phases(t *testing.T) {
 	m45SpecLine(t, "`cycle` は、取り込みの段より前に `release` の段を実行する")
+	m45SpecLine(t, "`cycle --json` の `phases` の最後の要素は `phase: \"learn\"` である")
 	ws := setupWorkspaceWithPosition(t)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 	var got []string
 	for _, p := range cycleDoc(t, ws)["phases"].([]any) {
 		got = append(got, p.(map[string]any)["phase"].(string))
 	}
-	want := []string{"release", "ingest", "classify", "plan", "run", "verify"}
+	want := []string{"release", "ingest", "classify", "plan", "run", "verify", "learn"}
 	if !equalStringSlices(got, want) {
 		t.Errorf("phases = %v, want %v", got, want)
 	}
