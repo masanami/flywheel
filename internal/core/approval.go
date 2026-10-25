@@ -446,11 +446,19 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		}
 
 		relaySession, relayQuote := att.relayColumns()
-		if _, err := tc.tx.ExecContext(ctx,
+		approvalRes, err := tc.tx.ExecContext(ctx,
 			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, rejected_fields)
 			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			tc.id, string(kind), string(req.Decision), tc.current.Version, planVersionVal, att.Actor(), string(att.Channel()), string(att.Verification()), reasonVal, tc.nowStr, relaySession, relayQuote, rejectedFieldsVal,
-		); err != nil {
+		)
+		if err != nil {
+			return err
+		}
+		approvalRowID, err := approvalRes.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if err := s.recordApprovalOccurrence(ctx, tc, kind, req.Decision, approvalRowID); err != nil {
 			return err
 		}
 
@@ -500,6 +508,66 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		return nil, nil, err
 	}
 	return c, &approvalOut, nil
+}
+
+// recordApprovalOccurrence は計画・完了の承認と差し戻しの発生を、承認の行と同じ
+// トランザクションの中で 1 行作る。種類は承認の種類（kind）と決定で決め、
+// rejected_fields の有無では決めない。参照はその承認の行（完了の承認は kind=completion の行。
+// release ごとの承認の行ではない）。周は作らない経路なので NULL。計画の承認は発生を作らない。
+func (s *Store) recordApprovalOccurrence(ctx context.Context, tc *transitionCtx, kind ApprovalKind, decision ApprovalDecision, approvalRowID int64) error {
+	var occKind OccurrenceKind
+	outcome := OccurrenceOutcomeBad
+	switch {
+	case kind == ApprovalKindPlan && decision == ApprovalDecisionRejected:
+		occKind = OccurrenceKindPlanRejected
+	case kind == ApprovalKindCompletion && decision == ApprovalDecisionRejected:
+		occKind = OccurrenceKindCompletionRejected
+	case kind == ApprovalKindCompletion && decision == ApprovalDecisionApproved:
+		occKind = OccurrenceKindCompletionApproved
+		good, err := completionApprovedIsGood(ctx, tc.tx, tc.id)
+		if err != nil {
+			return err
+		}
+		if good {
+			outcome = OccurrenceOutcomeGood
+		}
+	default:
+		return nil
+	}
+	return s.insertOccurrenceRow(tc.tx, occurrenceInput{
+		ChallengeID: tc.id,
+		Kind:        occKind,
+		Ref:         OccurrenceRef{ApprovalID: &approvalRowID},
+		Outcome:     outcome,
+		At:          tc.now,
+	})
+}
+
+// completionApprovedIsGood は M45H21 の規則。その課題の最新の計画の承認の行より後に
+// completion_rejected と verification_not_met の発生が無ければ true。差し戻しの行は
+// plan_version を持たないので、区切りは承認の行の id（completion_rejected）と日時
+// （verification_not_met。参照が承認の行とは限らない）で取る。計画の承認の行が無ければ全体を見る。
+func completionApprovedIsGood(ctx context.Context, tx *sql.Tx, challengeID int64) (bool, error) {
+	var planID sql.NullInt64
+	var planAt sql.NullString
+	err := tx.QueryRowContext(ctx,
+		`SELECT id, decided_at FROM approval WHERE challenge_id = ? AND kind = ? AND decision = ? ORDER BY id DESC LIMIT 1`,
+		challengeID, string(ApprovalKindPlan), string(ApprovalDecisionApproved)).Scan(&planID, &planAt)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM occurrence
+		  WHERE challenge_id = ?
+		    AND ((kind = ? AND approval_id > ?) OR (kind = ? AND created_at >= ?))`,
+		challengeID,
+		string(OccurrenceKindCompletionRejected), planID.Int64,
+		string(OccurrenceKindVerificationNotMet), planAt.String,
+	).Scan(&n); err != nil {
+		return false, err
+	}
+	return n == 0, nil
 }
 
 // autoApproveReleases は tc.id の課題が持つ未承認（state="pending"）の
