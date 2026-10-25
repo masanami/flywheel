@@ -807,6 +807,32 @@ func CycleTriggers(t *testing.T, workspace string) (triggers []string, locks int
 	return triggers, locks
 }
 
+// CycleIDsByTrigger は cycle 表のうち trigger が一致する行の内部整数 ID を昇順に返す。
+func CycleIDsByTrigger(t *testing.T, workspace, trigger string) []int64 {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var out []int64
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT id FROM cycle WHERE trigger = ? ORDER BY id ASC`, trigger)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var n int64
+			if err := rows.Scan(&n); err != nil {
+				return err
+			}
+			out = append(out, n)
+		}
+		return rows.Err()
+	}); err != nil {
+		t.Fatalf("coretest: CycleIDsByTrigger: %v", err)
+	}
+	return out
+}
+
 // SetOperationState はテスト専用のフィクスチャとして、opID（内部整数 ID）の不可逆操作の state を
 // 書き換える（承認の記録は作らない。端末での承認を経ずに approved の操作を置くため）。
 func SetOperationState(t *testing.T, workspace string, opID int64, state string) {

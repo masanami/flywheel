@@ -59,6 +59,21 @@ func latestHoldID(t *testing.T, s *Store) int64 {
 	return id
 }
 
+// wantLatestCycle は発生の cycle_id が、その出来事を起こした周（最後に作られた周）の ID と値で一致することを
+// 確かめる（AC-217。NULL でないことだけでなく、どの周かまで照合する）。
+func wantLatestCycle(t *testing.T, s *Store, o occRow) {
+	t.Helper()
+	var want int64
+	if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT MAX(id) FROM cycle`).Scan(&want)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !o.cycleID.Valid || o.cycleID.Int64 != want || want == 0 {
+		t.Errorf("cycle_id = %+v, want the latest cycle %d", o.cycleID, want)
+	}
+}
+
 func wantKinds(t *testing.T, rows []occRow, want ...string) {
 	t.Helper()
 	got := occKinds(rows)
@@ -90,6 +105,7 @@ func TestOccurrence_CountedFailureCreatesDelegationFailedWithRunRefCauseAndCycle
 			if !o.cycleID.Valid || o.outcome != "bad" || o.source != "core" || o.holdID.Valid {
 				t.Errorf("row = %+v", o)
 			}
+			wantLatestCycle(t, f.s, o)
 		})
 	}
 }
@@ -121,6 +137,7 @@ func TestOccurrence_BudgetExhaustedCreatesOnlyBudgetExhausted(t *testing.T) {
 	if !rows[0].runID.Valid || rows[0].runID.Int64 != n || !rows[0].causeRunID.Valid || rows[0].causeRunID.Int64 != n || !rows[0].cycleID.Valid {
 		t.Errorf("row = %+v", rows[0])
 	}
+	wantLatestCycle(t, f.s, rows[0])
 }
 
 func TestOccurrence_QuestionsAndBlockedCreateDelegationStoppedReferencingTheHold(t *testing.T) {
@@ -140,6 +157,7 @@ func TestOccurrence_QuestionsAndBlockedCreateDelegationStoppedReferencingTheHold
 			if !rows[0].holdID.Valid || rows[0].holdID.Int64 != latestHoldID(t, f.s) || !rows[0].cycleID.Valid || rows[0].outcome != "bad" {
 				t.Errorf("row = %+v", rows[0])
 			}
+			wantLatestCycle(t, f.s, rows[0])
 		})
 	}
 }
@@ -166,6 +184,7 @@ func TestOccurrence_UnapprovedMergeCreatesUnapprovedMergeReferencingTheHold(t *t
 	if !rows[0].holdID.Valid || rows[0].holdID.Int64 != latestHoldID(t, f.s) || !rows[0].cycleID.Valid {
 		t.Errorf("row = %+v", rows[0])
 	}
+	wantLatestCycle(t, f.s, rows[0])
 }
 
 func TestOccurrence_NotEligibleReconciliationCreatesNothing(t *testing.T) {
@@ -200,6 +219,7 @@ func TestOccurrence_DelegationFailureLimitHoldCreatesFailureLimitHold(t *testing
 	if !h.holdID.Valid || h.holdID.Int64 != latestHoldID(t, f.s) || !h.cycleID.Valid || h.outcome != "bad" {
 		t.Errorf("row = %+v", h)
 	}
+	wantLatestCycle(t, f.s, h)
 }
 
 func TestOccurrence_ReworkLimitHoldCreatesFailureLimitHold(t *testing.T) {

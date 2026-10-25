@@ -97,6 +97,35 @@ type j6Context struct {
 	Activities  []j6ActivityRow
 	ActivityCut int
 	Runs        []runRow
+	// Followups はこの課題を followup_of に持つ既存の課題（J6 が前に起票したもの）。ID の昇順。
+	Followups []j6Followup
+}
+
+// j6Followup はこの課題から起票済みのフォローアップ 1 件（題名と状態）。
+type j6Followup struct {
+	ID     int64
+	Title  string
+	Status Status
+}
+
+func loadJ6Followups(ctx context.Context, tx *sql.Tx, cid int64) ([]j6Followup, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, title, status FROM challenge WHERE followup_of = ? ORDER BY id ASC`, formatChallengeID(cid))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []j6Followup
+	for rows.Next() {
+		var f j6Followup
+		var st string
+		if err := rows.Scan(&f.ID, &f.Title, &st); err != nil {
+			return nil, err
+		}
+		f.Status = Status(st)
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 func nullStrValue(n sql.NullString) string {
@@ -286,7 +315,10 @@ func (s *Store) loadJ6Context(ctx context.Context, cid int64) (*j6Context, error
 		if jc.Activities, jc.ActivityCut, err = loadJ6Activities(ctx, tx, cid); err != nil {
 			return err
 		}
-		jc.Runs, err = loadJ6Runs(ctx, tx, cid)
+		if jc.Runs, err = loadJ6Runs(ctx, tx, cid); err != nil {
+			return err
+		}
+		jc.Followups, err = loadJ6Followups(ctx, tx, cid)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -298,6 +330,9 @@ func (s *Store) loadJ6Context(ctx context.Context, cid int64) (*j6Context, error
 // --- 入力の組み立て ---
 
 const j6MemoryIndexLabel = "記憶の索引のパス"
+
+// j6FollowupsLabel はこの課題から起票済みのフォローアップの区画のラベル。
+const j6FollowupsLabel = "起票済みのフォローアップ"
 
 func j6Cost(r runRow) string {
 	if r.CostUSD == nil {
@@ -395,6 +430,15 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 		b.WriteString("承認も保留も無い。")
 	}
 	sections = append(sections, JudgmentDataSection{Label: "承認と保留の記録", Content: strings.TrimRight(b.String(), "\n")})
+
+	b.Reset()
+	for _, f := range jc.Followups {
+		fmt.Fprintf(&b, "- ID: %s / 状態: %s / 題名: %s\n", formatChallengeID(f.ID), f.Status, f.Title)
+	}
+	if len(jc.Followups) == 0 {
+		b.WriteString("既存のフォローアップは無い。")
+	}
+	sections = append(sections, JudgmentDataSection{Label: j6FollowupsLabel, Content: strings.TrimRight(b.String(), "\n")})
 
 	b.Reset()
 	for _, o := range jc.Occurrences {
@@ -727,8 +771,8 @@ type J6AutoInput struct {
 //     ErrBudgetExceeded を返す。
 //   - in.ChallengeID が nil: 対象を ID の昇順に処理し、起動しなかった課題を NotStarted へ入れる。
 //
-// J6 の結果の失敗が同じ課題で failure_limit 回続いたら、その課題は対象から外して理由 failure_limit の
-// NotStarted に入れる。課題の状態は変えず、保留を作らない。
+// J6 の結果の失敗が同じ課題で failure_limit 回続いたら、ID を省略した選択ではその課題を対象から外して
+// 理由 failure_limit の NotStarted に入れる（ID を指定した個別の操作には当てない）。課題の状態は変えず、保留を作らない。
 func (s *Store) LearnJ6(ctx context.Context, in J6AutoInput) (*JudgmentAutoResult, error) {
 	if in.AgentDecl == nil || in.Invoker == nil || in.CycleID == "" {
 		return nil, ErrValidation
@@ -829,8 +873,13 @@ func (s *Store) learnOne(ctx context.Context, in J6AutoInput, jc *JudgmentCycle,
 	if active {
 		return nil, nil, ErrRunInProgress
 	}
-	if ns, err := s.j6FailureLimitHit(ctx, ch, cid, in.AgentDecl); err != nil || ns != nil {
-		return nil, ns, err
+	// 連続失敗の上限は自動の選択（cycle の learn の段・ID 省略の learn）だけに当てる。ID を指定した個別の
+	// 操作には当てない（M3 の「個別の操作には除外を適用しない」に揃える。完了の課題は版が変わらず、
+	// 上限に達すると二度と学習できなくなるため）。
+	if !individual {
+		if ns, err := s.j6FailureLimitHit(ctx, ch, cid, in.AgentDecl); err != nil || ns != nil {
+			return nil, ns, err
+		}
 	}
 
 	budget := in.AgentDecl.JudgmentBudgetFor(JudgmentJ6)

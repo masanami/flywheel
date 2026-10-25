@@ -520,7 +520,9 @@ func TestOpExec_CancelOccurrenceCarriesTheCycleID(t *testing.T) {
 
 	runJSON(t, ws, "op", "exec")
 
-	if ids := coretest.OccurrenceCycleIDs(t, ws); len(ids) != 1 || ids[0] == 0 {
-		t.Fatalf("occurrence cycle ids = %v, want one non-NULL", ids)
+	ids := coretest.OccurrenceCycleIDs(t, ws)
+	cycles := coretest.CycleIDsByTrigger(t, ws, "op exec")
+	if len(ids) != 1 || len(cycles) != 1 || ids[0] != cycles[0] {
+		t.Fatalf("occurrence cycle ids = %v, want the 'op exec' cycle %v", ids, cycles)
 	}
 }

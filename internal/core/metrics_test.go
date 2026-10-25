@@ -338,3 +338,38 @@ func TestMetricsDefinitions_CoverEveryMetricWithStrings(t *testing.T) {
 		}
 	}
 }
+
+// AC-298: 人の承認の件数の軸（種類・決定・経路・本人確認の方式）は、経路の違う行・release・budget の行を
+// 別々の組として数え、期間外の行は数えない（どれかの軸を落とすと件数の組が変わって検出できる）。
+func TestMetrics_ApprovalCountSeparatesKindDecisionChannelAndVerification(t *testing.T) {
+	s := newStoreForTest(t)
+	a := mChallenge(t, s, "a")
+	b := mChallenge(t, s, "b")
+	mApproval(t, s, a, "plan", "approved", "cli", "tty_confirm", local("2026-03-02", 8, 0), nil)
+	mApproval(t, s, b, "plan", "approved", "ui", "none", local("2026-03-02", 8, 1), nil)
+	mApproval(t, s, b, "plan", "approved", "ui", "none", local("2026-03-02", 8, 2), nil)
+	mApproval(t, s, a, "release", "approved", "cli", "relayed", local("2026-03-02", 9, 0), nil)
+	mApproval(t, s, a, "release", "approved", "cli", "tty_confirm", local("2026-03-02", 9, 1), nil)
+	mApproval(t, s, b, "budget", "approved", "ui", "none", local("2026-03-02", 10, 0), nil)
+	mApproval(t, s, b, "budget", "rejected", "ui", "none", local("2026-03-02", 10, 1), nil)
+	mApproval(t, s, b, "release", "approved", "ui", "none", local("2026-04-02", 10, 1), nil) // 期間外
+
+	m, err := s.Metrics(context.Background(), MetricsOptions{Since: day(t, "2026-03-02"), Until: day(t, "2026-03-02")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ApprovalCount.Total != 7 {
+		t.Fatalf("total = %d, want 7", m.ApprovalCount.Total)
+	}
+	want := []MetricsApprovalCount{
+		{"budget", "approved", "ui", "none", 1},
+		{"budget", "rejected", "ui", "none", 1},
+		{"plan", "approved", "cli", "tty_confirm", 1},
+		{"plan", "approved", "ui", "none", 2},
+		{"release", "approved", "cli", "relayed", 1},
+		{"release", "approved", "cli", "tty_confirm", 1},
+	}
+	if !reflect.DeepEqual(m.ApprovalCount.By, want) {
+		t.Errorf("by = %+v, want %+v", m.ApprovalCount.By, want)
+	}
+}

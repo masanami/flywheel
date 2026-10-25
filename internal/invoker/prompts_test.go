@@ -289,3 +289,44 @@ func repeatBytes(n int) []byte {
 	}
 	return b
 }
+
+// AC-275: J2・J3・J5 の指示文は、入力の節と同じラベル（core.MemoryIndexSectionLabel）で記憶の索引を指し、
+// 「関係する記憶を読んでよい」と述べる（入力の区画の中の指示は打ち消されるため、指示は指示文に置く）。
+// J1・J4 の指示文は索引を指さない。
+func TestInstructions_MemoryIndexIsReferencedByJ2J3J5Only(t *testing.T) {
+	label := "「" + core.MemoryIndexSectionLabel + "」"
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ5} {
+		got, err := Instructions(j)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, label) || !strings.Contains(got, "読んでよい") {
+			t.Errorf("Instructions(%s) lacks %s or 読んでよい", j, label)
+		}
+	}
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ4} {
+		got, err := Instructions(j)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(got, label) {
+			t.Errorf("Instructions(%s) must not refer to the memory index", j)
+		}
+	}
+}
+
+// AC-243a: j6.md は起票済みのフォローアップの区画を説明し、それと重複させない指示を持つ。
+// ラベルは internal/core/judgment_j6.go の j6FollowupsLabel と同じ文字列（core の非公開の定数のため写す）。
+func TestInstructions_J6ForbidsDuplicateFollowups(t *testing.T) {
+	label := "「起票済みのフォローアップ」"
+	got, err := Instructions(core.JudgmentJ6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "- "+label+":") {
+		t.Errorf("Instructions(J6) lacks the description of the section %s", label)
+	}
+	if !strings.Contains(got, label+"にある課題と同じ内容のものは重複させない") {
+		t.Errorf("Instructions(J6) lacks the instruction not to duplicate %s", label)
+	}
+}

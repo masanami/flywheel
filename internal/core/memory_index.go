@@ -116,6 +116,11 @@ func newMemoryIndexHeader(dir string) string {
 // memoryIndexSectionLabel は J2・J3・J5 の入力に足す、記憶の索引の節のラベル。
 const memoryIndexSectionLabel = "記憶の索引"
 
+// MemoryIndexSectionLabel は memoryIndexSectionLabel の公開名。判断点の指示文（invoker が埋め込む
+// prompts/j2.md・j3.md・j5.md）が、入力の節と同じラベルで索引を指していることを invoker のテストが
+// 検査するために公開する。
+const MemoryIndexSectionLabel = memoryIndexSectionLabel
+
 // memoryIndexSections は J2・J3・J5 の入力に足す記憶の索引の節（0 個か 1 個）を返す。
 // 置き場に INDEX.md があるときだけ、索引のパスと「関係する記憶を読んでよい」という
 // 指示の節を返し、無いときは nil（判断点はそのまま起動する）。判断点は読み取りの道具

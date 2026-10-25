@@ -463,3 +463,73 @@ func TestExecuteApproval_OccurrenceFailureAlsoRollsBackReleaseApprovals(t *testi
 		t.Errorf("approval rows = %d, want 0 (release approvals included)", n)
 	}
 }
+
+// AC-215: 発生の挿入より後の書き込み（作業ログ）を DB のトリガで失敗させると、差し戻しの承認の行・
+// 遷移とともに、すでに挿入した発生の行も残らない（同じトランザクション）。
+func TestExecuteApproval_LateWriteFailureLeavesNoOccurrence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status Status
+	}{
+		{"plan_rejected", StatusAwaitingPlanApproval},
+		{"completion_rejected", StatusAwaitingCompletionApproval},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStoreForTest(t)
+			fixedActor(t, "alice")
+			c := createAndAdvance(t, s, tc.status)
+			insertPlanRowForTest(t, s, c.ID, 1, "x")
+			prev, err := s.PrepareApproval(context.Background(), c.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// 発生の挿入の後に走る書き込み（作業ログ）を、本物の DB のトリガで失敗させる。
+			if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+				_, err := tx.Exec(`CREATE TRIGGER fail_late_activity BEFORE INSERT ON activity
+					WHEN NEW.action IN ('reject', 'approve') BEGIN SELECT RAISE(ABORT, 'late write failed'); END`)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			att := verifiedAttestationForTest(t, c.ID)
+			_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
+				ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionRejected, Reason: strPtr("no"),
+			}, att)
+			if err == nil || !strings.Contains(err.Error(), "late write failed") {
+				t.Fatalf("err = %v, want the late write failure", err)
+			}
+			if n := len(readApprovalOccs(t, s)); n != 0 {
+				t.Errorf("occurrences = %d, want 0", n)
+			}
+			if n := countApprovalRows(t, s); n != 0 {
+				t.Errorf("approval rows = %d, want 0", n)
+			}
+			after, gerr := s.GetChallenge(context.Background(), c.ID)
+			if gerr != nil || after.Version != prev.Version || after.Status != tc.status {
+				t.Errorf("challenge changed: %+v (err %v)", after, gerr)
+			}
+		})
+	}
+}
+
+// AC-215: 先に別の差し戻しが成立していて版が古い 2 回目の差し戻しは conflict で、発生は 1 行のまま増えない。
+func TestExecuteApproval_StaleRejectionConflictDoesNotAddOccurrence(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	insertPlanRowForTest(t, s, c.ID, 1, "x")
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := ApprovalRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionRejected, Reason: strPtr("no")}
+	if _, _, err := s.ExecuteApproval(context.Background(), req, verifiedAttestationForTest(t, c.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ExecuteApproval(context.Background(), req, verifiedAttestationForTest(t, c.ID)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("2nd err = %v, want ErrConflict", err)
+	}
+	if n := len(readApprovalOccs(t, s)); n != 1 {
+		t.Errorf("occurrences = %d, want 1", n)
+	}
+}
