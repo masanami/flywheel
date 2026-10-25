@@ -499,6 +499,9 @@ func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 	type env struct {
 		o1, o2, other, classified string
 		runOfOther                string
+		approvalOfOther           string
+		holdOfOther               string
+		activityOfOther           string
 	}
 	cases := []struct {
 		name string
@@ -534,6 +537,15 @@ func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 		}},
 		{"evidence of another challenge's run", func(e env) JudgmentLaunchOutput {
 			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, []any{j6Added("bad", "k", e.runOfOther, "context")}, nil, nil)
+		}},
+		{"evidence of another challenge's approval", func(e env) JudgmentLaunchOutput {
+			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, []any{j6Added("bad", "k", e.approvalOfOther, "context")}, []any{j6Mem("create", "tacit", "m")}, nil)
+		}},
+		{"evidence of another challenge's hold", func(e env) JudgmentLaunchOutput {
+			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, []any{j6Added("bad", "k", e.holdOfOther, "context")}, []any{j6Mem("create", "tacit", "m")}, nil)
+		}},
+		{"evidence of another challenge's work log", func(e env) JudgmentLaunchOutput {
+			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, []any{j6Added("bad", "k", e.activityOfOther, "context")}, []any{j6Mem("create", "tacit", "m")}, nil)
 		}},
 		{"memory create of an existing file", func(e env) JudgmentLaunchOutput {
 			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, nil, []any{j6Mem("create", "tacit", "fresh"), j6Mem("create", "tacit", "dup")}, nil)
@@ -578,6 +590,12 @@ func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 			e.runOfOther = "R-" + j6itoa(f.exec(t, `INSERT INTO run (challenge_id, kind, judgment, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket)
 				VALUES (?, 'judgment', 'J1', 1, 's', 1, 'h', ?, ?, ?, 'succeeded', 1000000, 'judgment')`,
 				mustCID(t, other), formatTimestamp(time.Now()), formatTimestamp(time.Now()), formatTimestamp(time.Now())))
+			e.approvalOfOther = "AP-" + j6itoa(f.exec(t, `INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at)
+				VALUES (?, 'plan', 'approved', 1, 'a', 'cli', 'none', ?)`, mustCID(t, other), formatTimestamp(time.Now())))
+			e.holdOfOther = "H-" + j6itoa(f.exec(t, `INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (?, 'q', 'done', ?)`,
+				mustCID(t, other), formatTimestamp(time.Now())))
+			e.activityOfOther = "L-" + j6itoa(f.exec(t, `INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action) VALUES (?, 'a', 'cli', 'none', 'challenge', ?, 'x')`,
+				formatTimestamp(time.Now()), mustCID(t, other)))
 			if err := os.MkdirAll(f.memRoot, 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -613,6 +631,35 @@ func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 			}
 			if !retried {
 				t.Error("the challenge was not a learn target again")
+			}
+		})
+	}
+}
+
+// フォローアップは 1〜3 件まで受理して learned にする（このチケットでは検査だけで起票しない）。
+func TestLearnJ6_Followups_OneAndThreeAreAccepted(t *testing.T) {
+	for _, n := range []int{1, 3} {
+		t.Run(j6itoa(int64(n)), func(t *testing.T) {
+			f := newJ6Fixture(t)
+			c := f.challenge(t, StatusDone)
+			o := f.occ(t, c, "plan_rejected", "bad", nil)
+			var fu []any
+			for i := 0; i < n; i++ {
+				fu = append(fu, map[string]any{"title": "t", "description": "d", "done_criteria": "c"})
+			}
+			f.inv.result = j6Out([]any{j6Cls(o, "context", "prompt")}, nil, nil, fu)
+			challengesBefore := f.count(t, `SELECT COUNT(*) FROM challenge`)
+
+			res := f.mustLearn(t, idp(c))
+
+			if len(res.Items) != 1 || res.Items[0].Result != RunResultSucceeded || res.Items[0].Outcome != "learned" {
+				t.Errorf("item = %+v, want learned", res.Items)
+			}
+			if f.unclassified(t) != 0 || f.learnActivities(t) != 1 {
+				t.Errorf("unclassified = %d, learn activities = %d", f.unclassified(t), f.learnActivities(t))
+			}
+			if got := f.count(t, `SELECT COUNT(*) FROM challenge`); got != challengesBefore {
+				t.Errorf("challenges %d → %d; followups must not be filed yet", challengesBefore, got)
 			}
 		})
 	}
@@ -707,6 +754,16 @@ func TestLearnJ6_AC270_FailuresRollBackFilesAndStore(t *testing.T) {
 		}
 	}
 
+	// assertWritten は「記憶を書いた後の失敗」であることを、失敗を注入するフックの中で固定する。
+	assertWritten := func(t *testing.T, f *j6Fixture) {
+		t.Helper()
+		for _, name := range []string{"tacit-a.md", "INDEX.md"} {
+			if _, err := os.Stat(filepath.Join(f.memRoot, name)); err != nil {
+				t.Errorf("precondition: %s is not written yet: %v", name, err)
+			}
+		}
+	}
+
 	t.Run("a file write fails midway", func(t *testing.T) {
 		f, c := setup(t)
 		boom := errors.New("injected memory failure")
@@ -744,6 +801,7 @@ func TestLearnJ6_AC270_FailuresRollBackFilesAndStore(t *testing.T) {
 		boom := errors.New("injected activity failure")
 		f.s.insertActivity = func(tx *sql.Tx, row activityRow) error {
 			if row.Action == ActivityActionLearn {
+				assertWritten(t, f)
 				return boom
 			}
 			return defaultInsertActivity(tx, row)
@@ -757,13 +815,115 @@ func TestLearnJ6_AC270_FailuresRollBackFilesAndStore(t *testing.T) {
 	t.Run("the occurrence write fails after the files were written", func(t *testing.T) {
 		f, c := setup(t)
 		boom := errors.New("injected occurrence failure")
-		f.s.insertOccurrence = func(*sql.Tx, occurrenceRow) error { return boom }
+		f.s.insertOccurrence = func(*sql.Tx, occurrenceRow) error {
+			assertWritten(t, f)
+			return boom
+		}
 		occBefore := f.occurrences(t)
 		if _, err := f.learn(t, idp(c)); !errors.Is(err, boom) {
 			t.Fatalf("err = %v", err)
 		}
 		assertRolledBack(t, f, occBefore)
 	})
+	t.Run("the classification update fails after the files were written", func(t *testing.T) {
+		f, c := setup(t)
+		boom := errors.New("injected classification failure")
+		j6ClassifyFault = func(*sql.Tx, int64) error {
+			assertWritten(t, f)
+			return boom
+		}
+		defer func() { j6ClassifyFault = nil }()
+		occBefore := f.occurrences(t)
+		if _, err := f.learn(t, idp(c)); !errors.Is(err, boom) {
+			t.Fatalf("err = %v", err)
+		}
+		assertRolledBack(t, f, occBefore)
+	})
+	t.Run("the classification update affects no row after the files were written", func(t *testing.T) {
+		f, c := setup(t)
+		// 同じトランザクションで先に分類しておくと、写像の UPDATE は RowsAffected = 0 になる。
+		j6ClassifyFault = func(tx *sql.Tx, id int64) error {
+			assertWritten(t, f)
+			_, err := tx.Exec(`UPDATE occurrence SET cause = 'context', layer = 'prompt' WHERE id = ?`, id)
+			return err
+		}
+		defer func() { j6ClassifyFault = nil }()
+		occBefore := f.occurrences(t)
+		if _, err := f.learn(t, idp(c)); err == nil || !strings.Contains(err.Error(), "was not classified") {
+			t.Fatalf("err = %v, want the not-classified error", err)
+		}
+		assertRolledBack(t, f, occBefore)
+	})
+	t.Run("the commit fails after the files were written", func(t *testing.T) {
+		f, c := setup(t)
+		// 外部キーの検査をコミットまで遅らせ、親の無い行を足すと COMMIT が FOREIGN KEY 違反で失敗する。
+		f.s.insertActivity = func(tx *sql.Tx, row activityRow) error {
+			if row.Action == ActivityActionLearn {
+				assertWritten(t, f)
+				if _, err := tx.Exec(`PRAGMA defer_foreign_keys = ON`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(`INSERT INTO occurrence (challenge_id, kind, activity_id, outcome, source, created_at)
+					VALUES (999999, 'plan_rejected', (SELECT MAX(id) FROM activity), 'bad', 'core', ?)`, formatTimestamp(time.Now())); err != nil {
+					return err
+				}
+			}
+			return defaultInsertActivity(tx, row)
+		}
+		occBefore := f.occurrences(t)
+		if _, err := f.learn(t, idp(c)); err == nil || !strings.Contains(err.Error(), "FOREIGN KEY") {
+			t.Fatalf("err = %v, want the commit to fail on the foreign key", err)
+		}
+		assertRolledBack(t, f, occBefore)
+	})
+}
+
+// 記憶のファイルを戻すのは書き込みのロックの下（トランザクションの中）。ロックが外れるのを待って
+// いた別の書き込みからは、戻した後のファイルだけが見える（並走する写像の索引の行や追記を消さない）。
+func TestLearnJ6_UndoRunsBeforeTheWriteLockIsReleased(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusDone)
+	o := f.occ(t, c, "plan_rejected", "bad", nil)
+	f.inv.result = j6Out([]any{j6Cls(o, "context", "prompt")}, nil, []any{j6Mem("create", "tacit", "a")}, nil)
+	other, err := OpenWorkspace(f.s.Workspace())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Close() })
+
+	path := filepath.Join(f.memRoot, "tacit-a.md")
+	boom := errors.New("injected activity failure")
+	done := make(chan error, 1)
+	var seen error
+	f.s.insertActivity = func(tx *sql.Tx, row activityRow) error {
+		if row.Action != ActivityActionLearn {
+			return defaultInsertActivity(tx, row)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("precondition: %s is not written yet: %v", path, err)
+		}
+		go func() {
+			// この写像がロックを保持している間は BEGIN IMMEDIATE で待たされる。
+			done <- other.db.Write(context.Background(), func(*sql.Tx) error {
+				_, seen = os.Stat(path)
+				return nil
+			})
+		}()
+		return boom
+	}
+	// ロックが外れた後は、待っていた別の書き込みが終わるまで写像の側を止める（並走の順序を固定する）。
+	j6AfterMappingTx = func() {
+		if err := <-done; err != nil {
+			t.Errorf("the other write: %v", err)
+		}
+	}
+	defer func() { j6AfterMappingTx = nil }()
+	if _, err := f.learn(t, idp(c)); !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	if !os.IsNotExist(seen) {
+		t.Errorf("the other writer saw the memory file before it was undone (stat err = %v)", seen)
+	}
 }
 
 // 発生を足す経路の失敗注入（クリティカル設計決定 4）: 出来事（作業ログ）が失敗すれば足す発生も残らず、

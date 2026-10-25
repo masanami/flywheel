@@ -417,6 +417,14 @@ var (
 	errJ6NotEligible = errors.New("core: challenge is no longer eligible for J6 mapping")
 )
 
+// j6ClassifyFault はテストが分類の UPDATE の直前に失敗を注入するフック（tx は写像のトランザクション）。
+// 本番では nil。
+var j6ClassifyFault func(tx *sql.Tx, occurrenceID int64) error
+
+// j6AfterMappingTx はテストが写像のトランザクションの終了直後（書き込みのロックが外れた後・
+// トランザクションの外での戻しの前）に呼ぶフック。本番では nil。
+var j6AfterMappingTx func()
+
 type j6Evidence struct {
 	ref   OccurrenceRef
 	runID *int64
@@ -472,7 +480,9 @@ func j6MemoryLog(written []memoryWritten) []map[string]any {
 // なっていて写さなかったこと。出力がストアの事実に合わなければ invalid=true（何も書かない）。
 //
 // トランザクションの中の順は、(1) ストアの事実との照合 (2) 記憶のファイルを書く (3) 分類の列・
-// 足す発生・作業ログ。(3) のどれかが失敗するか、コミットが失敗したら、書いたファイルを戻す。
+// 足す発生・作業ログ。(3) のどれかが失敗したら、書いたファイルをトランザクションの中（書き込みの
+// ロックの下）で戻す。ロックが外れた後に戻すと、並走する別の写像がその間に書いた索引の行や追記を
+// 消しうるため。トランザクションの外で戻すのはコミットが失敗したときだけ。
 func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *j6ValidatedOutput, snapshot []j6Occurrence, decl *AgentDeclaration) (mapped, invalid bool, note string, err error) {
 	runInt, ok := parseRunID(runIDDisplay)
 	if !ok {
@@ -483,7 +493,7 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 		return false, false, "", err
 	}
 	var undo func()
-	err = s.mutateAsRun(ctx, actor, ChannelInvoker, VerificationNone, &runInt, func(tx *sql.Tx, rec *activityRecorder) error {
+	err = s.mutateAsRun(ctx, actor, ChannelInvoker, VerificationNone, &runInt, func(tx *sql.Tx, rec *activityRecorder) (ferr error) {
 		ch, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -555,6 +565,12 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 			if undo, err = plan.apply(); err != nil {
 				return err
 			}
+			defer func() {
+				if ferr != nil {
+					undo()
+					undo = nil
+				}
+			}()
 			written = plan.written()
 		}
 
@@ -567,6 +583,11 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 		}
 		for _, c := range v.Classifications {
 			id, _ := parseOccurrenceID(c.OccurrenceID)
+			if j6ClassifyFault != nil {
+				if err := j6ClassifyFault(tx, id); err != nil {
+					return err
+				}
+			}
 			var handled any
 			if c.Cause == OccurrenceCauseNone {
 				handled = occurrenceHandledNotApplicable
@@ -599,8 +620,11 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 			"followups":  []string{},
 		})
 	})
+	if j6AfterMappingTx != nil {
+		j6AfterMappingTx()
+	}
 	if err != nil {
-		if undo != nil {
+		if undo != nil { // fn は成功したがコミットが失敗した
 			undo()
 		}
 		switch {
