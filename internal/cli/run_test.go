@@ -483,3 +483,19 @@ func TestRun_PredictionHook_GroupsFromSharedFiles_AndRecordsAPredictRun(t *testi
 		t.Errorf("delegate runs = %d, want both candidates launched one after the other", n)
 	}
 }
+
+// AC-217: run が作った周の ID を、委譲の失敗の発生が値で持つ。
+func TestRun_DelegationFailureOccurrenceCarriesTheCycleID(t *testing.T) {
+	ws := setupRunWorkspace(t)
+	newInProgressForRun(t, ws, nil)
+	failing := fakeClaudeRoute{Match: fakeClaudeDelegateMatch, Tag: "DELEGATE", Stdout: `{"session_id":"s","is_error":true,"result":"boom"}`}
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{failing, j3Route("b")}, filepath.Join(t.TempDir(), "order.log"))
+
+	runJSON(t, ws, "run")
+
+	ids := coretest.OccurrenceCycleIDs(t, ws)
+	cycles := coretest.CycleIDsByTrigger(t, ws, "run")
+	if len(ids) != 1 || len(cycles) != 1 || ids[0] != cycles[0] {
+		t.Fatalf("occurrence cycle ids = %v, want the 'run' cycle %v", ids, cycles)
+	}
+}

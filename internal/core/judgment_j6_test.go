@@ -164,6 +164,17 @@ func (f *j6Fixture) unclassified(t *testing.T) int {
 	return f.count(t, `SELECT COUNT(*) FROM occurrence WHERE cause IS NULL`)
 }
 
+func (f *j6Fixture) firstUnclassified(t *testing.T) string {
+	t.Helper()
+	var id int64
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT MIN(id) FROM occurrence WHERE cause IS NULL`).Scan(&id)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return formatOccurrenceID(id)
+}
+
 func (f *j6Fixture) occurrences(t *testing.T) int {
 	return f.count(t, `SELECT COUNT(*) FROM occurrence`)
 }
@@ -341,9 +352,13 @@ func TestLearnJ6_ClassificationsFillColumnsAndNoneIsHandled(t *testing.T) {
 	}
 	rid := testRunInt(t, runs[0].ID)
 	occ := readOccurrences(t, f.s)
-	want := []struct{ cause, handled string }{{"context", ""}, {"performance", ""}, {"none", occurrenceHandledNotApplicable}}
+	want := []struct{ cause, layer, handled string }{{"context", "prompt", ""}, {"performance", "knowledge", ""}, {"none", "none", occurrenceHandledNotApplicable}}
 	for i, w := range want {
 		o := occ[i]
+		// AC-231: 層・対象は出力の値がそのまま行に入る（固定値や既存の値のままではない）。
+		if o.layer.String != w.layer || o.target.String != "internal/invoker/prompts/j1.md" {
+			t.Errorf("occurrence %d layer/target = %q/%q, want %q/%q", i, o.layer.String, o.target.String, w.layer, "internal/invoker/prompts/j1.md")
+		}
 		if !o.cause.Valid || o.cause.String != w.cause || !o.layer.Valid || !o.target.Valid || !o.signal.Valid || o.signal.String != "SIGNAL-"+[]string{o1, o2, o3}[i] {
 			t.Errorf("occurrence %d = %+v", i, o)
 		}
@@ -963,12 +978,16 @@ func TestLearnJ6_FailureCreatesNoOccurrence_AndFailureLimitExcludesTheChallenge(
 				t.Errorf("J6's own failure created or changed occurrences: %d → %d", occBefore, f.occurrences(t))
 			}
 
-			// failure_limit（既定 2）回続いたので、対象から外れて not_started に failure_limit で示される。
-			for _, id := range []*string{nil, idp(c)} {
-				res = f.mustLearn(t, id)
-				if calls != 2 || len(res.Items) != 0 || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedFailureLimit || res.NotStarted[0].ChallengeID != c {
-					t.Fatalf("id=%v: calls=%d result=%+v", id, calls, res)
-				}
+			// failure_limit（既定 2）回続いたので、ID を省略した選択では対象から外れて not_started に failure_limit で示される。
+			res = f.mustLearn(t, nil)
+			if calls != 2 || len(res.Items) != 0 || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedFailureLimit || res.NotStarted[0].ChallengeID != c {
+				t.Fatalf("auto: calls=%d result=%+v", calls, res)
+			}
+			// ID を指定した個別の操作には上限を当てない（M3 に揃える）。起動して結果を返す。
+			f.inv.result = j6Out([]any{j6Cls(f.firstUnclassified(t), "context", "prompt")}, nil, nil, nil)
+			res = f.mustLearn(t, idp(c))
+			if calls != 3 || len(res.NotStarted) != 0 || len(res.Items) != 1 || res.Items[0].Result != RunResultSucceeded || f.unclassified(t) != 0 {
+				t.Fatalf("individual: calls=%d result=%+v", calls, res)
 			}
 			after := f.get(t, c)
 			if after.Status != before.Status || after.Version != before.Version || len(after.Holds) != len(before.Holds) {
@@ -1095,7 +1114,7 @@ func TestLearnJ6_Input_SectionsAndMemoryIndexPath(t *testing.T) {
 	for _, s := range in.Sections {
 		labels = append(labels, s.Label)
 	}
-	if got := strings.Join(labels, ","); got != "課題,承認済みの計画,作業ログ,実行の一覧と委譲の報告,承認と保留の記録,分類待ちの発生" {
+	if got := strings.Join(labels, ","); got != "課題,承認済みの計画,作業ログ,実行の一覧と委譲の報告,承認と保留の記録,起票済みのフォローアップ,分類待ちの発生" {
 		t.Errorf("sections = %s (no INDEX.md → no memory index section)", got)
 	}
 	if !strings.Contains(f.section(t, in, "承認済みの計画"), "本文:") {
@@ -1191,5 +1210,25 @@ func TestLearnJ6_MappingError_AutoContinuesAndCountsTheRunAsFailed(t *testing.T)
 	}
 	if runs := f.j6Runs(t); runs[0].Result != RunResultInvalidOutput {
 		t.Errorf("first run = %s", runs[0].Result)
+	}
+}
+
+func TestLearnJ6_Input_ExistingFollowupsSection(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusDone)
+	f.occ(t, c, "plan_rejected", "bad", nil)
+	other := f.challenge(t, StatusDone)
+	cid, _ := parseChallengeID(c)
+	ins := func(title, status string, of any) {
+		f.exec(t, `INSERT INTO challenge (title, description, done_criteria, status, version, reporter, created_at, updated_at, origin, followup_of)
+		 VALUES (?, '', '', ?, 1, 'alice', ?, ?, ?, ?)`, title, status, formatTimestamp(time.Now()), formatTimestamp(time.Now()),
+			map[bool]string{true: "followup", false: "manual"}[of != nil], of)
+	}
+	ins("FOLLOW-ONE", "unclassified", formatChallengeID(cid))
+	ins("FOLLOW-OTHER", "unclassified", other)
+	f.mustLearn(t, idp(c))
+	got := f.section(t, f.inputs[0], "起票済みのフォローアップ")
+	if !strings.Contains(got, "FOLLOW-ONE") || !strings.Contains(got, "unclassified") || strings.Contains(got, "FOLLOW-OTHER") {
+		t.Errorf("section = %q", got)
 	}
 }

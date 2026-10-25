@@ -225,3 +225,47 @@ func TestCycle_LearnPhaseIsLastAndClassifiesWithoutConnectors(t *testing.T) {
 	assertDocumentedCycle(t, loadDocumentedJSON(t), doc)
 	requireNoLearnTargets(t, ws)
 }
+
+// AC-285: 1 周目の learn の段で J6 が起票したフォローアップは、2 周目の classify の段（J1）の対象に入る。
+func TestCycle_FollowupFiledByLearnIsClassifiedInTheNextCycle(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	first, occ := newLearnableForCase(t, ws, "done", 1)
+	out, _ := json.Marshal(map[string]any{
+		"classifications": []any{map[string]any{"occurrence_id": occ, "cause": "context", "layer": "prompt", "target": "internal/invoker/prompts/j1.md", "signal": "s"}},
+		"added":           []any{}, "memory": []any{},
+		"followups": []any{map[string]any{"title": "FOLLOWUP-FROM-J6", "description": "d", "done_criteria": "c"}},
+	})
+	j6 := fakeClaudeRoute{Match: fakeClaudeJ6Match, Tag: "J6",
+		Stdout: `{"session_id":"s","is_error":false,"total_cost_usd":0.5,"structured_output":` + string(out) + `}`}
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j6}, "")
+
+	// 1 周目: 分類の段は新しい課題を持たず、learn の段がフォローアップを起票する。
+	doc1 := cycleDoc(t, ws)
+	if its := phaseItems(t, cyclePhase(t, doc1, "classify")); len(its) != 0 {
+		t.Errorf("1st cycle classify items = %v, want none", its)
+	}
+	items := phaseItems(t, cyclePhase(t, doc1, "learn"))
+	if len(items) != 1 || items[0]["challenge_id"] != first {
+		t.Fatalf("learn items = %v", items)
+	}
+	var followupID string
+	for _, c := range runJSON(t, ws, "list")["challenges"].([]any) {
+		m := c.(map[string]any)
+		if m["title"] == "FOLLOWUP-FROM-J6" {
+			followupID, _ = m["id"].(string)
+		}
+	}
+	if followupID == "" {
+		t.Fatal("the follow-up challenge was not filed")
+	}
+
+	// 2 周目: 起票したフォローアップが classify の items に入る。
+	doc2 := cycleDoc(t, ws)
+	var found bool
+	for _, it := range phaseItems(t, cyclePhase(t, doc2, "classify")) {
+		found = found || it["challenge_id"] == followupID
+	}
+	if !found {
+		t.Errorf("2nd cycle classify items = %v, want to include %s", cyclePhase(t, doc2, "classify")["items"], followupID)
+	}
+}

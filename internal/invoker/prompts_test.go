@@ -289,3 +289,28 @@ func repeatBytes(n int) []byte {
 	}
 	return b
 }
+
+// AC-275: J2・J3・J5 の指示文は、入力の節と同じラベル（core.MemoryIndexSectionLabel）で記憶の索引を指し、
+// 「関係する記憶を読んでよい」と述べる（入力の区画の中の指示は打ち消されるため、指示は指示文に置く）。
+// J1・J4 の指示文は索引を指さない。
+func TestInstructions_MemoryIndexIsReferencedByJ2J3J5Only(t *testing.T) {
+	label := "「" + core.MemoryIndexSectionLabel + "」"
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ5} {
+		got, err := Instructions(j)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, label) || !strings.Contains(got, "読んでよい") {
+			t.Errorf("Instructions(%s) lacks %s or 読んでよい", j, label)
+		}
+	}
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ4} {
+		got, err := Instructions(j)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(got, label) {
+			t.Errorf("Instructions(%s) must not refer to the memory index", j)
+		}
+	}
+}
