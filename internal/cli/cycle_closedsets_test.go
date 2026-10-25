@@ -100,7 +100,7 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	}
 	// 行の最初の span は `not_started[].reason` 自身、2 番目が S2 の全体の閉集合。
 	spec := pipeSet(spans[1][1])
-	// M4.5 が足す理由（S1: in_progress・not_executable、S2: dependency）は m4.5 の仕様の行から読む。
+	// M4.5 が足す理由（S1: in_progress・not_executable、S2: dependency、S3: not_learnable）は m4.5 の仕様の行から読む。
 	spec = append(spec, m45AddedNotStartedReasons(t)...)
 	sort.Strings(spec)
 
@@ -121,6 +121,8 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"plan_unavailable": "TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothingLaunched (internal/core/delegate_plan_approval_test.go)",
 		// release 以外・approved でない操作を指した op exec だけが出す（cycle の release の段は approved の release しか試さない）。
 		"not_executable": "TestNotExecutable_NotReleaseOrNotApproved (internal/core/release_exec_test.go)",
+		// learn の段と CLI は #363 で結線する。それまでは、ID を指定した LearnJ6 だけが出す理由を core のテストが観測する。
+		"not_learnable": "TestLearnJ6_ExplicitID_NotLearnable_NotStartedAndNoRun (internal/core/judgment_j6_test.go)",
 	}
 	observed := map[string]bool{}
 	for r, ref := range coreObservedReasons {
@@ -368,6 +370,8 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedNotExecutable"
 	case "dependency":
 		return "NotStartedDependency"
+	case "not_learnable":
+		return "NotStartedNotLearnable"
 	}
 	return "?"
 }
@@ -396,7 +400,7 @@ func m45SpecLine(t *testing.T, contains ...string) string {
 }
 
 // m45AddedNotStartedReasons は m4.5 の仕様が足す not_started の理由（S1: in_progress・not_executable、
-// S2: dependency）を返す。
+// S2: dependency、S3: not_learnable）を返す。
 func m45AddedNotStartedReasons(t *testing.T) []string {
 	t.Helper()
 	s2 := m45SpecLine(t, "`dependency`（S2）を足す")
@@ -412,7 +416,12 @@ func m45AddedNotStartedReasons(t *testing.T) []string {
 	if !equalStringSlices(sortedStrings(out), []string{"in_progress", "not_executable"}) {
 		t.Fatalf("m4.5 spec's added not_started reasons = %v, want in_progress and not_executable", out)
 	}
-	return append(out, "dependency")
+	// S3: ID を指定した learn の課題が対象の条件を満たさないときの理由。
+	s3 := m45SpecLine(t, "J6 を呼ばず `not_started` に理由 `not_learnable` で示す")
+	if !strings.Contains(s3, "`flywheel learn <C-ID>`") {
+		t.Fatalf("m4.5 spec does not add not_learnable for flywheel learn <C-ID>: %q", s3)
+	}
+	return append(out, "dependency", "not_learnable")
 }
 
 // M4.5 S1: cycle の phase の閉集合は release を最初に持ち、cycle --json の phases の並びがそれに従う。

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -178,16 +179,26 @@ type occurrenceRow struct {
 	Outcome     string
 	Source      string
 	CreatedAt   string
+	// 以下は J6 が足す発生（出どころ j6。insertJ6OccurrenceRow）だけが持つ。core の発生では nil。
+	J6Kind          *string
+	Cause           *string
+	Layer           *string
+	Target          *string
+	Signal          *string
+	ClassifiedRunID *int64
+	Handled         *string
 }
 
 func defaultInsertOccurrence(tx *sql.Tx, row occurrenceRow) error {
 	_, err := tx.Exec(
-		`INSERT INTO occurrence (challenge_id, cycle_id, cause_run_id, kind, approval_id, hold_id, run_id, execution_id, activity_id, outcome, source, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		row.ChallengeID, int64PtrColumn(row.CycleID), int64PtrColumn(row.CauseRunID), row.Kind,
+		`INSERT INTO occurrence (challenge_id, cycle_id, cause_run_id, kind, j6_kind, approval_id, hold_id, run_id, execution_id, activity_id,
+		   outcome, source, cause, layer, target, signal, classified_run_id, handled, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		row.ChallengeID, int64PtrColumn(row.CycleID), int64PtrColumn(row.CauseRunID), row.Kind, nullableString(row.J6Kind),
 		int64PtrColumn(row.Ref.ApprovalID), int64PtrColumn(row.Ref.HoldID), int64PtrColumn(row.Ref.RunID),
 		int64PtrColumn(row.Ref.ExecutionID), int64PtrColumn(row.Ref.ActivityID),
-		row.Outcome, row.Source, row.CreatedAt,
+		row.Outcome, row.Source, nullableString(row.Cause), nullableString(row.Layer), nullableString(row.Target),
+		nullableString(row.Signal), int64PtrColumn(row.ClassifiedRunID), nullableString(row.Handled), row.CreatedAt,
 	)
 	return err
 }
@@ -224,6 +235,81 @@ func (s *Store) insertOccurrenceRow(tx *sql.Tx, in occurrenceInput) error {
 		insert = defaultInsertOccurrence
 	}
 	return insert(tx, row)
+}
+
+// occurrenceHandledNotApplicable は発生の処理済みの印（handled）の値のうち、原因が none の
+// 発生に分類の時点で付ける「対象外」。J8 の入力としきい値の件数に入れない。
+const occurrenceHandledNotApplicable = "not_applicable"
+
+// j6OccurrenceInput は J6 が足す発生の入力。出どころは j6・種類は j6_observed に固定し、
+// 分類の列（原因・層・対象・兆候・分類した run）は作成の時点で埋める。
+type j6OccurrenceInput struct {
+	ChallengeID int64
+	CycleID     *int64
+	CauseRunID  *int64
+	// J6Kind は J6 の出力の kind（自由記述。行の j6_kind に写す）。
+	J6Kind  string
+	Ref     OccurrenceRef
+	Outcome OccurrenceOutcome
+	Cause   OccurrenceCause
+	Layer   OccurrenceLayer
+	Target  string
+	Signal  string
+	// ClassifiedRunID は分類した J6 の run の内部整数 ID。
+	ClassifiedRunID int64
+	At              time.Time
+}
+
+// insertJ6OccurrenceRow は J6 が足す発生を 1 行作る口。insertOccurrenceRow と同じく呼び出し側の
+// トランザクションの中で呼び、同じ挿入の関数（テストの失敗注入のフック insertOccurrence を含む）を通す。
+// 原因が none の発生は分類の時点で処理済み（対象外）にする。
+func (s *Store) insertJ6OccurrenceRow(tx *sql.Tx, in j6OccurrenceInput) error {
+	outcome, ok := ParseOccurrenceOutcome(string(in.Outcome))
+	if !ok {
+		return fmt.Errorf("insert j6 occurrence: invalid outcome %q", in.Outcome)
+	}
+	cause, ok := ParseOccurrenceCause(string(in.Cause))
+	if !ok {
+		return fmt.Errorf("insert j6 occurrence: invalid cause %q", in.Cause)
+	}
+	layer, ok := ParseOccurrenceLayer(string(in.Layer))
+	if !ok {
+		return fmt.Errorf("insert j6 occurrence: invalid layer %q", in.Layer)
+	}
+	if in.Ref.count() != 1 {
+		return fmt.Errorf("insert j6 occurrence: exactly one reference is required, got %d", in.Ref.count())
+	}
+	causeS, layerS, targetS, signalS, j6Kind := string(cause), string(layer), in.Target, in.Signal, in.J6Kind
+	row := occurrenceRow{
+		ChallengeID: in.ChallengeID, CycleID: in.CycleID, CauseRunID: in.CauseRunID,
+		Kind: string(OccurrenceKindJ6Observed), Ref: in.Ref, Outcome: string(outcome),
+		Source: string(OccurrenceSourceJ6), CreatedAt: formatTimestamp(in.At),
+		J6Kind: &j6Kind, Cause: &causeS, Layer: &layerS, Target: &targetS, Signal: &signalS,
+		ClassifiedRunID: &in.ClassifiedRunID,
+	}
+	if cause == OccurrenceCauseNone {
+		h := occurrenceHandledNotApplicable
+		row.Handled = &h
+	}
+	insert := s.insertOccurrence
+	if insert == nil {
+		insert = defaultInsertOccurrence
+	}
+	return insert(tx, row)
+}
+
+func formatOccurrenceID(id int64) string { return "O-" + strconv.FormatInt(id, 10) }
+
+func parseOccurrenceID(s string) (int64, bool) {
+	rest, ok := strings.CutPrefix(s, "O-")
+	if !ok || rest == "" || rest[0] == '0' || rest[0] == '+' || rest[0] == '-' {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(rest, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 // holdReason は保留（hold の行）を作る理由の種別。発生の種類を決める。
