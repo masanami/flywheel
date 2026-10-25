@@ -153,6 +153,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3CycleShape(t, &doc)
 	addM45ReleaseShape(t, &doc)
 	addM45DependencyShape(t, &doc)
+	addM45LearnShape(t, &doc)
 	addM45MetricsShape(t, &doc)
 	addM3SlotClearShape(t, &doc)
 	addM3RunShape(t, &doc)
@@ -362,6 +363,34 @@ func addM45DependencyShape(t *testing.T, doc *documentedJSON) {
 	doc.topLevel["dep rm"] = []map[string]bool{keys}
 }
 
+// addM45LearnShape は `learn` の成功時の JSON の最上位のキーを doc へ足す。仕様の §IF / API には行を
+// 足さず、受入基準（AC-229）の「`learn --json` は、`cycle` の `phases` の 1 要素と同じ形を
+// `{"phase": {…}}` で返す」の行から読む。phase の中身は cycle の phases の 1 要素と同じなので、
+// 判断の段の形（doc.entity["cycle_phase_judgment"]）が照合する。
+func addM45LearnShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	var keys map[string]bool
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "`learn --json` は、`cycle` の `phases` の 1 要素と同じ形を") {
+			for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+				if strings.HasPrefix(m[1], "{") {
+					keys = topLevelKeys(m[1])
+					break
+				}
+			}
+			break
+		}
+	}
+	if len(keys) != 1 || !keys["phase"] {
+		t.Fatalf("m4.5 spec's `learn --json` line does not document {\"phase\": …}: %v", keys)
+	}
+	doc.topLevel["learn"] = []map[string]bool{keys}
+}
+
 // assertDocumentedReleasePhase は release の段（cycle の phases の要素と `op exec` の phase が共有する形）の
 // 1 要素 pm が文書の形と一致することを検査する。
 func assertDocumentedReleasePhase(t *testing.T, doc documentedJSON, where string, pm map[string]any) {
@@ -480,8 +509,8 @@ func addM3CycleShape(t *testing.T, doc *documentedJSON) {
 }
 
 // documentedCyclePhaseNames は cycle の JSON の phase の閉集合（§IF / API「`phase` は
-// `ingest | classify | plan | run | verify` の閉集合」）。cycle は 5 つすべてを出す。
-var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true}
+// `ingest | classify | plan | run | verify` の閉集合」）。M4.5 で release（最初）と learn（最後）が加わり、cycle は 7 つすべてを出す。
+var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "learn": true}
 
 // assertDocumentedCycle は cycle の成功時の出力 out の内側（周の記録・段・items・not_started・
 // ingest の result）が、文書の例と同じ形であることを検査する（最上位のキーは
@@ -738,11 +767,11 @@ func assertDocumentedJSON(t *testing.T, doc documentedJSON, name string, out map
 			t.Errorf("op exec: `phase` is not an object: %#v", out["phase"])
 		}
 	}
-	if name == "run" {
+	if name == "run" || name == "learn" {
 		if pm, ok := out["phase"].(map[string]any); ok {
-			assertDocumentedPhase(t, doc, "run", pm)
+			assertDocumentedPhase(t, doc, name, pm)
 		} else {
-			t.Errorf("run: `phase` is not an object: %#v", out["phase"])
+			t.Errorf("%s: `phase` is not an object: %#v", name, out["phase"])
 		}
 	}
 }

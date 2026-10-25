@@ -7,7 +7,7 @@ package core
 // （`ingest`・`classify --auto`・`plan --auto`）と同じ core の処理
 // （Store.Ingest・ClassifyAutoJ1・PlanAutoJ2）をそのまま呼び、ここは段の順・
 // 排他ロックの取得と解放・heartbeat・枠超過の段をまたぐ伝播だけを持つ。
-// 段は 実行（release）→ 取り込み → 分類（J1）→ 計画（J2）→ 委譲（run）→ 検証（verify・J5）の順で、
+// 段は 実行（release）→ 取り込み → 分類（J1）→ 計画（J2）→ 委譲（run）→ 検証（verify・J5）→ 学習（learn・J6）の順で、
 // 委譲と検証の段は接続ツールの宣言（connectors.json）があるときだけ実行する。
 
 import (
@@ -30,6 +30,8 @@ const (
 	CyclePhaseRun CyclePhase = "run"
 	// CyclePhaseVerify は検証の段（VerifyAutoJ5 と同じ処理）。
 	CyclePhaseVerify CyclePhase = "verify"
+	// CyclePhaseLearn は学習の段（LearnJ6 と同じ処理。最後の段。接続ツールの宣言を使わないので skipped にならない）。
+	CyclePhaseLearn CyclePhase = "learn"
 )
 
 // CycleIngestInput は取り込みの段の入力。`.flywheel/sources.json` があるときだけ
@@ -115,7 +117,7 @@ type CycleRunResult struct {
 //
 //  1. サイクルの排他を取って周を開始する（生きている保持者がいれば ErrLocked。
 //     何も起動・記録しない）。以後、段の実行中は 60 秒ごとにロックの heartbeat を更新する
-//  2. 承認済みの release の実行（in.ConnDecl があれば）→ 取り込み（in.Ingest があれば）→ 分類（J1）→ 計画（J2）→ 委譲 → 検証（J5）の順に
+//  2. 承認済みの release の実行（in.ConnDecl があれば）→ 取り込み（in.Ingest があれば）→ 分類（J1）→ 計画（J2）→ 委譲 → 検証（J5）→ 学習（J6）の順に
 //     段を実行する（計画・委譲・検証は in.ConnDecl があるときだけ）。検証の段は、委譲の段が
 //     起動した委譲の run がすべて終わってから始まる（RunDelegation は合流して返る）。各段は個別の操作と同じ core の処理を呼び、前の段で状態が進んだ
 //     課題は後の段の対象になる。枠超過は段をまたいで伝播する（同じ JudgmentCycle を渡す）
@@ -304,6 +306,18 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 		verify.NotStarted = res.NotStarted
 	}
 	phases = append(phases, verify)
+
+	// 学習（learn と同じ処理。J6 は接続ツールの宣言を使わないので常に実行する）。
+	j6, err := s.LearnJ6(ctx, J6AutoInput{
+		AgentDecl: in.AgentDecl,
+		Invoker:   in.Invoker,
+		CycleID:   cycleID,
+		Cycle:     jc,
+	})
+	if err != nil {
+		return nil, err
+	}
+	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseLearn, Items: j6.Items, NotStarted: j6.NotStarted})
 
 	return phases, nil
 }

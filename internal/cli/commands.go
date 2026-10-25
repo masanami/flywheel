@@ -367,6 +367,15 @@ func defaultCommands() []Command {
 			Run:           runRun,
 		},
 		{
+			// docs/features/m4.5-learning-and-self-improvement.md §IF / API（S3）。
+			// `<C-ID>` は省略できる（未分類の発生を持つ完了・人間対応待ちの課題すべて）。
+			Path:          []string{"learn"},
+			RequiresStore: true,
+			MinPositional: 0,
+			MaxPositional: 1,
+			Run:           runLearn,
+		},
+		{
 			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2）。本人確認も
 			// 端末も要らない単発の操作（作業ログには載せない）。
 			Path:          []string{"slot", "clear"},
