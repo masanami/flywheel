@@ -112,3 +112,23 @@ func memoryIndexLine(slug, typ, confidence, description string) string {
 func newMemoryIndexHeader(dir string) string {
 	return fmt.Sprintf("# %s INDEX\n\n", filepath.ToSlash(dir))
 }
+
+// memoryIndexSectionLabel は J2・J3・J5 の入力に足す、記憶の索引の節のラベル。
+const memoryIndexSectionLabel = "記憶の索引"
+
+// memoryIndexSections は J2・J3・J5 の入力に足す記憶の索引の節（0 個か 1 個）を返す。
+// 置き場に INDEX.md があるときだけ、索引のパスと「関係する記憶を読んでよい」という
+// 指示の節を返し、無いときは nil（判断点はそのまま起動する）。判断点は読み取りの道具
+// だけを持つ（書くのは core だけ）。「読んでよい」という指示は、データの区画の
+// 中の指示には従わないという指示文の規則に打ち消されないよう、指示文
+// （prompts/j2.md・j3.md・j5.md）に置き、節にはパスだけを入れる。
+func memoryIndexSections(base string, decl *AgentDeclaration) []JudgmentDataSection {
+	p := memoryIndexPath(base, decl)
+	if p == "" {
+		return nil
+	}
+	return []JudgmentDataSection{{
+		Label:   memoryIndexSectionLabel,
+		Content: "索引のパス: " + p,
+	}}
+}

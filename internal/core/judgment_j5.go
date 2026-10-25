@@ -333,7 +333,7 @@ func formatPullRequestSection(prs []UpstreamPullRequestChecks) string {
 // prepareJ5 は J5 の入力（データの区画）を組み立てる。取り込み元の対応のある課題では、ここ
 // （J5 の起動の直前）で上流の本文・全コメント・参照先を取得する（読んだ記録は付けない）。
 // 取得に失敗したら NotStarted（upstream_fetch_failed）を返し、run を作らない。
-func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context, prs []UpstreamPullRequestChecks) ([]JudgmentDataSection, *NotStarted) {
+func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context, prs []UpstreamPullRequestChecks, memoryIndex []JudgmentDataSection) ([]JudgmentDataSection, *NotStarted) {
 	ch := vc.Challenge
 	urgency, priority := "", ""
 	if ch.Urgency != nil {
@@ -385,6 +385,7 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 		}
 		sections = append(sections, buildUpstreamInput(uc).Sections...)
 	}
+	sections = append(sections, memoryIndex...)
 	return sections, nil
 }
 
@@ -751,7 +752,7 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 		}
 		return nil, nil, err
 	}
-	sections, notStarted := prepareJ5(ctx, in.Upstream, vc, prs)
+	sections, notStarted := prepareJ5(ctx, in.Upstream, vc, prs, memoryIndexSections(s.workspace, in.AgentDecl))
 	if notStarted != nil {
 		return nil, notStarted, nil
 	}
