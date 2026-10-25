@@ -865,6 +865,20 @@ func CountOccurrences(t *testing.T, workspace string) int {
 	return n
 }
 
+// Exec は workspace のストアへ生の SQL を 1 回書く（metrics のように複数の表の行を組み合わせて
+// 読む機能のフィクスチャ用。本番の API が書く行と同じ列を、テストが指定する値で作る）。
+func Exec(t *testing.T, workspace, query string, args ...any) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, args...)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: Exec(%q): %v", query, err)
+	}
+}
+
 // OccurrenceCycleIDs は occurrence の cycle_id を ID の昇順に返す（NULL は 0）。
 func OccurrenceCycleIDs(t *testing.T, workspace string) []int64 {
 	t.Helper()

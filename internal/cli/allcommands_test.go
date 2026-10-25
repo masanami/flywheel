@@ -165,6 +165,18 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	"runs": {setup: func(t *testing.T, ws string) []string {
 		return []string{"runs", createForCase(t, ws)}
 	}},
+	"metrics": {setup: func(t *testing.T, ws string) []string {
+		// 完了の承認・差し戻し・発生を 1 件ずつ持たせ、入れ子（by・by_field など）の要素の形も照合する。
+		id := createForCase(t, ws)
+		cid := challengeIDToInternalID(t, id)
+		coretest.Exec(t, ws, `INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at, rejected_fields)
+			VALUES (?, 'completion', 'rejected', 1, 'a', 'cli', 'tty_confirm', '2026-03-01T00:00:00.000Z', '["issues"]')`, cid)
+		coretest.Exec(t, ws, `INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at)
+			VALUES (?, 'completion', 'approved', 1, 'a', 'cli', 'tty_confirm', '2026-03-02T00:00:00.000Z')`, cid)
+		coretest.Exec(t, ws, `INSERT INTO occurrence (challenge_id, kind, activity_id, outcome, source, created_at)
+			VALUES (?, 'completion_rejected', (SELECT MAX(id) FROM activity), 'bad', 'core', '2026-03-01T00:00:00.000Z')`, cid)
+		return []string{"metrics"}
+	}},
 	"cycle": {setup: func(t *testing.T, ws string) []string {
 		// cycle --json の出力の形（phases の各段・items・not_started・ingest の result）が
 		// 文書と照合されるよう、取り込みで課題を 1 件作り、同じ周で分類・計画まで進める。
@@ -457,6 +469,7 @@ var runLevelUsageErrorCases = [][]string{
 	{"approve", "C-2", "--relayed", "--quote", "q"},             // --relayed に --session が無い（空白だけも同じ）
 	{"approve", "C-2", "--relayed", "--session", "s"},           // --relayed に --quote が無い（空白だけも同じ）
 	{"reject", "OP-1", "--reason", "r", "--field", "issues"},    // 不可逆操作の ID への --field（M4P36）
+	{"metrics", "--since", "2026-3-1"},                          // --since・--until が YYYY-MM-DD の日付でない（M4.5 S3）
 	{"dep", "add", "C-1", "C-1"},                                // 自分自身を依存先にした（core が ErrSelfDependency を返し usage_error に写る。M4.5 S2）
 }
 

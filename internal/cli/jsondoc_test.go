@@ -153,6 +153,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3CycleShape(t, &doc)
 	addM45ReleaseShape(t, &doc)
 	addM45DependencyShape(t, &doc)
+	addM45MetricsShape(t, &doc)
 	addM3SlotClearShape(t, &doc)
 	addM3RunShape(t, &doc)
 	addM3BudgetShapes(t, &doc)
@@ -727,6 +728,9 @@ func assertDocumentedJSON(t *testing.T, doc documentedJSON, name string, out map
 	if name == "cycle" {
 		assertDocumentedCycle(t, doc, out)
 	}
+	if name == "metrics" {
+		assertDocumentedMetrics(t, doc, out)
+	}
 	if name == "op exec" {
 		if pm, ok := out["phase"].(map[string]any); ok {
 			assertDocumentedReleasePhase(t, doc, "op exec", pm)
@@ -1157,4 +1161,130 @@ func withoutOptionalKeys(entity string, got map[string]bool) map[string]bool {
 		delete(out, k)
 	}
 	return out
+}
+
+// metricsShapeRe は m4.5 の §IF / API の metrics の行の `name`（`{…}`） の組（rejection_rate など）。
+var metricsShapeRe = regexp.MustCompile("`([a-z_]+)`（`(\\{[^`]*\\})`）")
+
+// addM45MetricsShape は `metrics` の成功時の JSON の形を doc へ足す。m4.5 の §IF / API の
+// 「`metrics` の `--json` の成功の出力は」の行から、最上位のキー（definitions・metrics・occurrences・period・
+// target_challenges）と、metrics・occurrences の中のキーを読む。
+func addM45MetricsShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	var line string
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.Contains(l, "`metrics` の `--json` の成功の出力は") {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		t.Fatal("m4.5 spec has no `metrics` の `--json` の成功の出力 line")
+	}
+	var top map[string]bool
+	for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+		if strings.HasPrefix(m[1], "{") {
+			top = topLevelKeys(m[1])
+			break
+		}
+	}
+	wantTop := map[string]bool{"definitions": true, "metrics": true, "occurrences": true, "period": true, "target_challenges": true}
+	if !reflect.DeepEqual(top, wantTop) {
+		t.Fatalf("m4.5 spec's `metrics` line top-level keys = %v, want %v", sortedKeys(top), sortedKeys(wantTop))
+	}
+	doc.topLevel["metrics"] = []map[string]bool{top}
+
+	_, afterMetrics, _ := strings.Cut(line, "`metrics` は")
+	metricsPart, occPart, ok := strings.Cut(afterMetrics, "`occurrences` は")
+	if !ok {
+		t.Fatal("m4.5 spec's `metrics` line has no `occurrences` は part")
+	}
+	names := map[string]bool{}
+	for _, m := range metricsShapeRe.FindAllStringSubmatch(metricsPart, -1) {
+		names[m[1]] = true
+		keys := map[string]bool{}
+		if m[1] == "approval_count" {
+			// `{"total", "by": [{"kind", …}]}`: by の配列の中の引用は要素のキー。
+			head, by, _ := strings.Cut(m[2], `"by"`)
+			for _, q := range quotedRe.FindAllStringSubmatch(head, -1) {
+				keys[q[1]] = true
+			}
+			keys["by"] = true
+			row := map[string]bool{}
+			for _, q := range quotedRe.FindAllStringSubmatch(by, -1) {
+				row[q[1]] = true
+			}
+			doc.entity["metrics_approval_row"] = row
+		} else {
+			for _, q := range quotedRe.FindAllStringSubmatch(m[2], -1) {
+				keys[q[1]] = true
+			}
+		}
+		doc.entity["metrics_"+m[1]] = keys
+	}
+	doc.entity["metrics_metrics"] = names
+	for _, m := range backtickRe.FindAllStringSubmatch(occPart, -1) {
+		if strings.HasPrefix(m[1], "{") {
+			occ := map[string]bool{}
+			for _, q := range quotedRe.FindAllStringSubmatch(m[1], -1) {
+				occ[q[1]] = true
+			}
+			doc.entity["metrics_occurrences"] = occ
+			break
+		}
+	}
+	doc.entity["metrics_period"] = map[string]bool{"since": true, "until": true}
+	doc.entity["metrics_definition"] = map[string]bool{"numerator": true, "denominator": true, "period": true}
+	if len(names) != 4 || len(doc.entity["metrics_occurrences"]) != 5 || len(doc.entity["metrics_approval_row"]) != 5 {
+		t.Fatalf("m4.5 spec's `metrics` line is not parsed: metrics=%v occurrences=%v approval_row=%v",
+			sortedKeys(names), sortedKeys(doc.entity["metrics_occurrences"]), sortedKeys(doc.entity["metrics_approval_row"]))
+	}
+}
+
+// assertDocumentedMetrics は metrics の出力の入れ子のキーが文書の形と一致することを検査する。
+func assertDocumentedMetrics(t *testing.T, doc documentedJSON, out map[string]any) {
+	t.Helper()
+	obj := func(where string, v any) map[string]any {
+		m, ok := v.(map[string]any)
+		if !ok {
+			t.Fatalf("metrics: %s is not an object: %#v", where, v)
+		}
+		return m
+	}
+	check := func(where string, got map[string]any, entity string) {
+		if g := keysOf(got); !reflect.DeepEqual(g, doc.entity[entity]) {
+			t.Errorf("metrics: %s keys = %v, documented %s = %v", where, sortedKeys(g), entity, sortedKeys(doc.entity[entity]))
+		}
+	}
+	check("period", obj("period", out["period"]), "metrics_period")
+	ms := obj("metrics", out["metrics"])
+	check("metrics", ms, "metrics_metrics")
+	for name := range doc.entity["metrics_metrics"] {
+		check("metrics."+name, obj("metrics."+name, ms[name]), "metrics_"+name)
+	}
+	by, ok := obj("metrics.approval_count", ms["approval_count"])["by"].([]any)
+	if !ok {
+		t.Fatalf("metrics.approval_count.by is not an array (never null): %#v", ms["approval_count"])
+	}
+	for i, r := range by {
+		check(fmt.Sprintf("metrics.approval_count.by[%d]", i), obj("by row", r), "metrics_approval_row")
+	}
+	check("occurrences", obj("occurrences", out["occurrences"]), "metrics_occurrences")
+	defs := obj("definitions", out["definitions"])
+	if g := keysOf(defs); !reflect.DeepEqual(g, doc.entity["metrics_metrics"]) {
+		t.Errorf("metrics: definitions keys = %v, want the metric names %v", sortedKeys(g), sortedKeys(doc.entity["metrics_metrics"]))
+	}
+	for name, d := range defs {
+		dm := obj("definitions."+name, d)
+		check("definitions."+name, dm, "metrics_definition")
+		for k, v := range dm {
+			if _, isStr := v.(string); !isStr {
+				t.Errorf("metrics: definitions.%s.%s = %#v, want a string", name, k, v)
+			}
+		}
+	}
 }
