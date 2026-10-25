@@ -229,6 +229,15 @@ func addM3RunsShape(t *testing.T, doc *documentedJSON) {
 		if len(elem) == 0 {
 			t.Fatalf("m3 spec `runs` element shape has no keys: %q", shape)
 		}
+		// S3: runs の要素の flywheel_version（m4.5 の仕様の受入基準「`runs --json` の要素は `flywheel_version` を持つ」）。
+		m45, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+		if err != nil {
+			t.Fatalf("read m4.5 spec: %v", err)
+		}
+		if !strings.Contains(string(m45), "`runs --json` の要素は `flywheel_version` を持つ") {
+			t.Fatal("m4.5 spec does not document runs flywheel_version")
+		}
+		elem["flywheel_version"] = true
 		doc.entity["run"] = elem
 		return
 	}
@@ -1119,6 +1128,11 @@ func addM45DependencyKeysShape(t *testing.T, doc *documentedJSON) {
 			doc.entity[row.entity] = keys
 		}
 	}
+	// S3: show の challenge の followup_of（仕様の受入基準「`show <C-ID> --json` の `challenge` に `followup_of` として出る」）。
+	if !strings.Contains(string(data), "`show <C-ID> --json` の `challenge` に `followup_of` として出る") {
+		t.Fatal("m4.5 spec does not document show challenge followup_of")
+	}
+	show["followup_of"] = true
 	doc.entity["show_challenge"] = show
 	doc.entity["actionable_challenge"] = actionable
 	if !strings.Contains(string(data), "`kinds` に `dependency_cycle`・`challenge_ids`") {

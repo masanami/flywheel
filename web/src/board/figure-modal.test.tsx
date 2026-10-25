@@ -35,6 +35,7 @@ function detail(figure: string | null): ShowCardResponse {
       created_at: "2026-01-01T00:00:00Z",
       dependencies: [],
       dependents: [],
+      followup_of: null,
       description: "説明",
       done_criteria: "完了条件",
       headline: null,

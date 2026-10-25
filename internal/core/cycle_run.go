@@ -206,6 +206,7 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			Connectors: in.ConnDecl,
 			Agent:      in.AgentDecl,
 			Trigger:    ReleaseExecTriggerCycle,
+			CycleID:    cycleID,
 		})
 		if err != nil {
 			if res != nil && len(res.Items) > 0 {

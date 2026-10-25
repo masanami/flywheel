@@ -368,8 +368,18 @@ func (s *Store) invalidateRunOutput(ctx context.Context, runIDDisplay string) er
 		return ErrValidation
 	}
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE run SET result = ? WHERE id = ?`, string(runResultInvalidOutput), id)
-		return err
+		prev, err := loadRunByID(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE run SET result = ? WHERE id = ?`, string(runResultInvalidOutput), id); err != nil {
+			return err
+		}
+		if prev == nil || prev.Result == runResultInvalidOutput {
+			return nil
+		}
+		// 再検査で連続失敗に数える結果へ書き換えたので、書き換えと同じトランザクションで judgment_failed を作る。
+		return s.insertRunFailureOccurrence(ctx, tx, id, RunResultInvalidOutput, prev.RateLimited, s.currentTime())
 	})
 	return classifyReadWriteErr(err)
 }
@@ -724,7 +734,7 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 		if !eligible {
 			continue
 		}
-		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ1, StatusUnclassified, in.AgentDecl)
+		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ1, StatusUnclassified, in.AgentDecl, in.CycleID)
 		if err != nil {
 			return nil, err
 		}

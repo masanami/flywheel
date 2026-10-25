@@ -81,6 +81,7 @@ func runOpExec(a Args) (any, error) {
 		Connectors: conn,
 		Agent:      decl,
 		Trigger:    core.ReleaseExecTriggerOpExec,
+		CycleID:    cyc.ID,
 	})
 
 	endResult := core.CycleResultCompleted

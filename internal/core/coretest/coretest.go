@@ -878,3 +878,29 @@ func Exec(t *testing.T, workspace, query string, args ...any) {
 		t.Fatalf("coretest: Exec(%q): %v", query, err)
 	}
 }
+
+// OccurrenceCycleIDs は occurrence の cycle_id を ID の昇順に返す（NULL は 0）。
+func OccurrenceCycleIDs(t *testing.T, workspace string) []int64 {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var out []int64
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT COALESCE(cycle_id, 0) FROM occurrence ORDER BY id`)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var n int64
+			if err := rows.Scan(&n); err != nil {
+				return err
+			}
+			out = append(out, n)
+		}
+		return rows.Err()
+	}); err != nil {
+		t.Fatalf("coretest: OccurrenceCycleIDs: %v", err)
+	}
+	return out
+}

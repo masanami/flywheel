@@ -156,6 +156,8 @@ type ChallengeDetail struct {
 	// 無ければ空スライス（nil でない）。
 	Dependencies []DependencyView
 	Dependents   []string
+	// FollowupOf は改修課題の元の課題の ID（challenge.followup_of。S3。値を入れるのは別の経路）。無ければ nil。
+	FollowupOf *string
 }
 
 // CreateInput は CreateChallenge の入力。
@@ -708,7 +710,18 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		detail.Dependents, err = loadDependents(ctx, tx, cid)
-		return err
+		if err != nil {
+			return err
+		}
+		var followupOf sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT followup_of FROM challenge WHERE id = ?`, cid).Scan(&followupOf); err != nil {
+			return err
+		}
+		if followupOf.Valid {
+			v := followupOf.String
+			detail.FollowupOf = &v
+		}
+		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err

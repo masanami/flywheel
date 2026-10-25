@@ -55,6 +55,10 @@ type ReleaseExecOptions struct {
 	Connectors *ConnectorsDeclaration
 	// Agent は failure_limit の出どころ。nil なら既定値。
 	Agent *AgentDeclaration
+	// CycleID は発生に持たせる周の ID（"Y-<n>"）。空なら周を持たない（NULL）。形式不正は ErrValidation。
+	CycleID string
+	// cycleID は ExecuteReleases が CycleID を解釈した内部整数 ID。
+	cycleID *int64
 	// Trigger は作業ログの契機（ReleaseExecTrigger*）。空なら ReleaseExecTriggerOpExec。
 	Trigger string
 	// Now は現在時刻。nil ならストアの時計（テストから与えられる）。
@@ -131,6 +135,14 @@ func (s *Store) ExecuteReleases(ctx context.Context, ids []string, opts ReleaseE
 		return nil, ErrValidation
 	}
 
+	if opts.CycleID != "" {
+		n, ok := parseCycleID(opts.CycleID)
+		if !ok {
+			return nil, ErrValidation
+		}
+		opts.cycleID = &n
+	}
+
 	var opIDs []int64
 	if len(ids) == 0 {
 		listed, err := s.ListExecutableReleases(ctx)
@@ -147,8 +159,18 @@ func (s *Store) ExecuteReleases(ctx context.Context, ids []string, opts ReleaseE
 		opIDs = append(opIDs, n)
 	}
 	sort.Slice(opIDs, func(i, j int) bool { return opIDs[i] < opIDs[j] })
-	// 存在の確認は、何も実行する前に済ませる。
+	// 存在の確認は、何も実行する前に済ませる（周の ID も。無いと発生の挿入が外部キーで失敗し、
+	// マージの依頼の後に取り消しの記録だけが残らなくなる）。
 	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		if opts.cycleID != nil {
+			var n int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM cycle WHERE id = ?`, *opts.cycleID).Scan(&n); err != nil {
+				return err
+			}
+			if n == 0 {
+				return ErrValidation
+			}
+		}
 		for _, id := range opIDs {
 			if _, err := loadOperationRow(ctx, tx, id); err != nil {
 				return err
@@ -288,7 +310,8 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 
 	j := s.judgeRelease(ctx, row, approvedRow, opts)
 
-	item, err := s.finishReleaseAttempt(ctx, actor, opID, row, attempt, approvedRow, j, opts, now)
+	cycleID := opts.cycleID
+	item, err := s.finishReleaseAttempt(ctx, actor, opID, row, attempt, approvedRow, j, opts, cycleID, now)
 	if err != nil {
 		conflict := errors.Is(err, ErrConflict) || errors.Is(err, errExecutionNotOpen)
 		// 記録が衝突した原因が、release が別の経路で pending へ取り消されたことで、PR がマージ済みなら、
@@ -296,7 +319,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		var recordErr error
 		if conflict && j.mergeRequested {
 			var it *ReleaseExecItem
-			it, recordErr = s.recordMergeAfterWithdrawal(ctx, actor, opID, row, attempt, approvedRow, j, opts, now, host, pid)
+			it, recordErr = s.recordMergeAfterWithdrawal(ctx, actor, opID, row, attempt, approvedRow, j, opts, cycleID, now, host, pid)
 			if it != nil {
 				return it, nil, nil
 			}
@@ -493,7 +516,7 @@ func mergeUnconfirmedDetail(err, recordErr error) string {
 // status の食い違い・承認し直しの禁止は、直前の試行のこの結果で働く。
 // 取り消されていない・マージ済みと確かめられないときは (nil, nil)、確かめた後に書けなかったときは
 // (nil, エラー) を返し、呼び出し側が merge_unconfirmed を返す。確かめるのは j の結果、なければ PR の読み取り 1 回。
-func (s *Store) recordMergeAfterWithdrawal(ctx context.Context, actor string, opID int64, row *operationRow, attempt *operationExecutionRow, approvedHead string, j releaseJudgment, opts ReleaseExecOptions, now func() time.Time, host string, pid int64) (*ReleaseExecItem, error) {
+func (s *Store) recordMergeAfterWithdrawal(ctx context.Context, actor string, opID int64, row *operationRow, attempt *operationExecutionRow, approvedHead string, j releaseJudgment, opts ReleaseExecOptions, cycleID *int64, now func() time.Time, host string, pid int64) (*ReleaseExecItem, error) {
 	merged := j.result == ExecutionResultMerged || j.result == ExecutionResultMergedUnapproved
 	observed := j.observedHead
 	if !merged {
@@ -508,44 +531,21 @@ func (s *Store) recordMergeAfterWithdrawal(ctx context.Context, actor string, op
 		observed = pr.HeadSHA
 	}
 	const detail = "merged after the approval was withdrawn (release is pending)"
-	var wrote bool
+	var outcome mergedAfterWithdrawalOutcome
 	err := s.mutateAs(ctx, actor, ChannelCLI, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
 		rec.at = now()
-		cur, err := loadOperationRow(ctx, tx, opID)
-		if err != nil {
-			return err
-		}
-		if cur.State != OperationStatePending {
-			return nil
-		}
-		wrote = true
-		if last, err := latestOperationExecution(ctx, tx, opID); err != nil {
-			return err
-		} else if last != nil && !last.open() && last.ID != attempt.ID && last.Result == ExecutionResultMergedUnapproved {
-			return nil // 別の呼び出しが同じマージを記録済み。
-		}
-		in := closeOperationExecutionInput{EndedAt: rec.at, Result: ExecutionResultMergedUnapproved, ObservedHead: observed, Detail: detail}
-		err = closeOperationExecution(ctx, tx, attempt.ID, in)
-		if errors.Is(err, errExecutionNotOpen) {
-			a, berr := beginOperationExecution(ctx, tx, opID, beginOperationExecutionInput{StartedAt: rec.at, ApprovedHead: approvedHead, PID: pid, Host: host})
-			if berr != nil {
-				return berr
-			}
-			err = closeOperationExecution(ctx, tx, a.ID, in)
-		}
-		if err != nil {
-			return err
-		}
-		return rec.record("operation", opID, ActivityActionOpExecute,
-			map[string]any{"state": string(OperationStatePending)},
-			map[string]any{"result": string(ExecutionResultMergedUnapproved), "approved_head": nullableTextColumn(approvedHead),
-				"observed_head": nullableTextColumn(observed), "merge_commit": nullableTextColumn(j.mergeCommit),
-				"trigger": opts.Trigger, "detail": detail, "state": string(OperationStatePending)})
+		var err error
+		outcome, err = s.recordMergedAfterWithdrawalInTx(ctx, tx, rec, releaseOutcomeWrite{
+			opID: opID, challengeID: row.ChallengeID, attemptID: attempt.ID,
+			result: ExecutionResultMergedUnapproved, approvedHead: approvedHead, observedHead: observed,
+			mergeCommit: j.mergeCommit, detail: detail, trigger: opts.Trigger, at: rec.at, cycleID: cycleID,
+		}, pid, host)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	if !wrote {
+	if outcome == mergedAfterWithdrawalNotPending {
 		return nil, nil
 	}
 	return &ReleaseExecItem{

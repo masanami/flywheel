@@ -171,6 +171,7 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
   cycle_budget_usd: 20,
   cycle_id: "Y-1",
   ended_at: null,
+  flywheel_version: null,
   id,
   judgment: null,
   kind: "delegation",

@@ -499,13 +499,22 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 		mapped = true
 		if mismatch {
 			// 実物は課題へ書かない（前の値のまま）。
-			return insertHold(ctx, tc, ActualMismatchHoldPreamble+" "+v.Reason)
+			if err := insertHold(ctx, tc, ActualMismatchHoldPreamble+" "+v.Reason); err != nil {
+				return err
+			}
+			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationUncertain)
 		}
 		if v.Verdict == J5VerdictUncertain {
-			return insertHold(ctx, tc, *v.Question)
+			if err := insertHold(ctx, tc, *v.Question); err != nil {
+				return err
+			}
+			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationUncertain)
 		}
 		if v.Actual != nil && (v.Verdict == J5VerdictMet || v.Verdict == J5VerdictNotMet) {
 			tc.patchStages(StagePatch{Actual: StageSet(v.Actual)})
+		}
+		if v.Verdict == J5VerdictNotMet {
+			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationNotMet)
 		}
 		if v.Verdict == J5VerdictMet {
 			// T8 と同じトランザクションで、検証の入力にした head を成果物の行へ残す。
@@ -520,6 +529,15 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 		return false, false, err
 	}
 	return mapped, mismatch, nil
+}
+
+// insertJ5Occurrence は J5 の写像（遷移）と同じトランザクションで、J5 の run を参照と原因の run
+// とする発生を 1 行作る。周の ID は run の行から引く。
+func (s *Store) insertJ5Occurrence(ctx context.Context, tc *transitionCtx, kind OccurrenceKind) error {
+	if tc.runID == nil {
+		return fmt.Errorf("core: J5 occurrence: transition has no run")
+	}
+	return s.insertRunOccurrence(ctx, tc.tx, *tc.runID, kind, OccurrenceOutcomeBad, tc.now)
 }
 
 // j5Operation は出力を写す遷移の操作を選ぶ。met で課題の予想が空でなく、実物の個数が予想の個数と
@@ -663,7 +681,7 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		if ch.Status != StatusVerifying {
 			continue // 対象を選んだ後に状態が変わった
 		}
-		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ5, StatusVerifying, in.AgentDecl)
+		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ5, StatusVerifying, in.AgentDecl, in.CycleID)
 		if err != nil {
 			return nil, err
 		}

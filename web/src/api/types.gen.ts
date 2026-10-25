@@ -160,6 +160,7 @@ export interface ShowChallenge {
   dependents: string[];
   description: string;
   done_criteria: string;
+  followup_of: string | null;
   headline: string | null;
   id: string;
   priority: string | null;
@@ -226,6 +227,7 @@ export interface Run {
   cycle_budget_usd: number | null;
   cycle_id: string | null;
   ended_at: string | null;
+  flywheel_version: string | null;
   id: string;
   judgment: string | null;
   kind: string;
