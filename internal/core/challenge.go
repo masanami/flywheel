@@ -156,7 +156,7 @@ type ChallengeDetail struct {
 	// 無ければ空スライス（nil でない）。
 	Dependencies []DependencyView
 	Dependents   []string
-	// FollowupOf は改修課題の元の課題の ID（challenge.followup_of。S3。値を入れるのは別の経路）。無ければ nil。
+	// FollowupOf はJ6 のフォローアップで起票した課題の元の課題の ID（challenge.followup_of。S3。applyJ6 が設定）。無ければ nil。
 	FollowupOf *string
 }
 

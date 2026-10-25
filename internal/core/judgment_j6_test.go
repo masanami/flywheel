@@ -636,35 +636,6 @@ func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 	}
 }
 
-// フォローアップは 1〜3 件まで受理して learned にする（このチケットでは検査だけで起票しない）。
-func TestLearnJ6_Followups_OneAndThreeAreAccepted(t *testing.T) {
-	for _, n := range []int{1, 3} {
-		t.Run(j6itoa(int64(n)), func(t *testing.T) {
-			f := newJ6Fixture(t)
-			c := f.challenge(t, StatusDone)
-			o := f.occ(t, c, "plan_rejected", "bad", nil)
-			var fu []any
-			for i := 0; i < n; i++ {
-				fu = append(fu, map[string]any{"title": "t", "description": "d", "done_criteria": "c"})
-			}
-			f.inv.result = j6Out([]any{j6Cls(o, "context", "prompt")}, nil, nil, fu)
-			challengesBefore := f.count(t, `SELECT COUNT(*) FROM challenge`)
-
-			res := f.mustLearn(t, idp(c))
-
-			if len(res.Items) != 1 || res.Items[0].Result != RunResultSucceeded || res.Items[0].Outcome != "learned" {
-				t.Errorf("item = %+v, want learned", res.Items)
-			}
-			if f.unclassified(t) != 0 || f.learnActivities(t) != 1 {
-				t.Errorf("unclassified = %d, learn activities = %d", f.unclassified(t), f.learnActivities(t))
-			}
-			if got := f.count(t, `SELECT COUNT(*) FROM challenge`); got != challengesBefore {
-				t.Errorf("challenges %d → %d; followups must not be filed yet", challengesBefore, got)
-			}
-		})
-	}
-}
-
 // --- 記憶の書き込み ---
 
 func TestLearnJ6_MemoryWritten_CreateAndAppend_LoggedWithHashes_NoGit(t *testing.T) {
