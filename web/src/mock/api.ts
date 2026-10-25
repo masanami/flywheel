@@ -74,7 +74,12 @@ export function createMockApi(
       return {
         approvals: m.approvals,
         card: cardOf(m),
-        challenge: { ...m.c, dependencies: [], dependents: [] },
+        challenge: {
+          ...m.c,
+          dependencies: [],
+          dependents: [],
+          followup_of: null,
+        },
         holds: m.holds,
         operations: m.operations,
         plans: m.plans,
@@ -216,7 +221,12 @@ export function createMockApi(
       return {
         approvals: m.approvals,
         card: cardOf(m),
-        challenge: { ...m.c, dependencies: [], dependents: [] },
+        challenge: {
+          ...m.c,
+          dependencies: [],
+          dependents: [],
+          followup_of: null,
+        },
         holds: m.holds,
         operations: m.operations,
         plans: m.plans,

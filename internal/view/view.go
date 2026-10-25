@@ -308,39 +308,41 @@ func FromSourceBinding(b *core.SourceBinding) *SourceBinding {
 
 // Run は run の形。
 type Run struct {
-	ChallengeID    *string  `json:"challenge_id"`
-	CostSource     *string  `json:"cost_source"`
-	CostUSD        *float64 `json:"cost_usd"`
-	CycleBudgetUSD *float64 `json:"cycle_budget_usd"`
-	CycleID        *string  `json:"cycle_id"`
-	EndedAt        *string  `json:"ended_at"`
-	ID             string   `json:"id"`
-	Judgment       *string  `json:"judgment"`
-	Kind           string   `json:"kind"`
-	MaxBudgetUSD   float64  `json:"max_budget_usd"`
-	RateLimited    bool     `json:"rate_limited"`
-	Result         *string  `json:"result"`
-	SessionID      *string  `json:"session_id"`
-	StartedAt      string   `json:"started_at"`
+	ChallengeID     *string  `json:"challenge_id"`
+	CostSource      *string  `json:"cost_source"`
+	CostUSD         *float64 `json:"cost_usd"`
+	CycleBudgetUSD  *float64 `json:"cycle_budget_usd"`
+	CycleID         *string  `json:"cycle_id"`
+	EndedAt         *string  `json:"ended_at"`
+	FlywheelVersion *string  `json:"flywheel_version"`
+	ID              string   `json:"id"`
+	Judgment        *string  `json:"judgment"`
+	Kind            string   `json:"kind"`
+	MaxBudgetUSD    float64  `json:"max_budget_usd"`
+	RateLimited     bool     `json:"rate_limited"`
+	Result          *string  `json:"result"`
+	SessionID       *string  `json:"session_id"`
+	StartedAt       string   `json:"started_at"`
 }
 
 // FromRun は core.Run を Run へ変換する。
 func FromRun(r core.Run) Run {
 	return Run{
-		ChallengeID:    strOrNil(r.ChallengeID),
-		CostSource:     strOrNil(string(r.CostSource)),
-		CostUSD:        r.CostUSD,
-		CycleBudgetUSD: r.CycleBudgetUSD,
-		CycleID:        r.CycleID,
-		EndedAt:        ts(r.EndedAt),
-		ID:             r.ID,
-		Judgment:       strOrNil(string(r.Judgment)),
-		Kind:           string(r.Kind),
-		MaxBudgetUSD:   r.MaxBudgetUSD,
-		RateLimited:    r.RateLimited,
-		Result:         strOrNil(string(r.Result)),
-		SessionID:      strOrNil(r.SessionID),
-		StartedAt:      FormatTimestamp(r.StartedAt),
+		ChallengeID:     strOrNil(r.ChallengeID),
+		CostSource:      strOrNil(string(r.CostSource)),
+		CostUSD:         r.CostUSD,
+		CycleBudgetUSD:  r.CycleBudgetUSD,
+		CycleID:         r.CycleID,
+		EndedAt:         ts(r.EndedAt),
+		FlywheelVersion: r.FlywheelVersion,
+		ID:              r.ID,
+		Judgment:        strOrNil(string(r.Judgment)),
+		Kind:            string(r.Kind),
+		MaxBudgetUSD:    r.MaxBudgetUSD,
+		RateLimited:     r.RateLimited,
+		Result:          strOrNil(string(r.Result)),
+		SessionID:       strOrNil(r.SessionID),
+		StartedAt:       FormatTimestamp(r.StartedAt),
 	}
 }
 

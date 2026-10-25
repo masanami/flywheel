@@ -34,6 +34,7 @@ type ShowChallenge struct {
 	Dependents   []string     `json:"dependents"`
 	Description  string       `json:"description"`
 	DoneCriteria string       `json:"done_criteria"`
+	FollowupOf   *string      `json:"followup_of"`
 	Headline     *string      `json:"headline"`
 	ID           string       `json:"id"`
 	Priority     *string      `json:"priority"`
@@ -89,7 +90,7 @@ func FromShowChallenge(d *core.ChallengeDetail) ShowChallenge {
 	dependents := append([]string{}, d.Dependents...)
 	return ShowChallenge{
 		Context: c.Context, CreatedAt: c.CreatedAt, Dependencies: FromDependencies(d.Dependencies), Dependents: dependents,
-		Description: c.Description, DoneCriteria: c.DoneCriteria, Headline: c.Headline, ID: c.ID, Priority: c.Priority,
+		Description: c.Description, DoneCriteria: c.DoneCriteria, FollowupOf: d.FollowupOf, Headline: c.Headline, ID: c.ID, Priority: c.Priority,
 		Reporter: c.Reporter, Status: c.Status, StatusLabel: c.StatusLabel, Title: c.Title, UpdatedAt: c.UpdatedAt,
 		Urgency: c.Urgency, Version: c.Version,
 	}
