@@ -612,12 +612,27 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 				return err
 			}
 		}
-		// フォローアップはこのチケットでは検査だけで起票しない（起票は後続のチケット）。
+		// フォローアップは未分類の課題として同じトランザクションで起票する（保留は作らない）。
+		filed := []string{}
+		source := formatChallengeID(cid)
+		for _, f := range v.Followups {
+			fid, _, err := insertChallengeRow(ctx, tx, rec.at, f.Title, f.Description, f.DoneCriteria, nil, rec.actor, ChallengeOriginFollowup, &source)
+			if err != nil {
+				return err
+			}
+			after := createdChallengeAfter(f.Title, f.Description, f.DoneCriteria, nil, rec.actor)
+			after["origin"] = string(ChallengeOriginFollowup)
+			after["followup_of"] = source
+			if err := rec.record("challenge", fid, ActivityActionFollowup, nil, after); err != nil {
+				return err
+			}
+			filed = append(filed, formatChallengeID(fid))
+		}
 		return rec.record("challenge", cid, ActivityActionLearn, nil, map[string]any{
 			"classified": len(v.Classifications),
 			"added":      len(v.Added),
 			"memory":     j6MemoryLog(written),
-			"followups":  []string{},
+			"followups":  filed,
 		})
 	})
 	if j6AfterMappingTx != nil {
