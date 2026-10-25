@@ -179,6 +179,36 @@ type plannedMemoryWrite struct {
 // 元に戻して、その失敗を返す。now は追記の節の日付に使う。core は git を起動せず、
 // コミットもしない。
 func writeMemory(base string, decl *AgentDeclaration, items []memoryItem, now time.Time) ([]memoryWritten, error) {
+	plan, err := prepareMemoryWrite(base, decl, items, now)
+	if err != nil {
+		return nil, err
+	}
+	if plan == nil {
+		return nil, nil
+	}
+	if _, err := plan.apply(); err != nil {
+		return nil, err
+	}
+	return plan.written(), nil
+}
+
+// memoryWritePlan は検査を終えた書き込みの全体（何も書いていない）。J6 の写像は、検査
+// （prepareMemoryWrite）と書き込み（apply。元に戻す関数を返す）を分けて呼び、ストアの
+// トランザクションが失敗したときに書いたファイルを戻す。
+type memoryWritePlan struct {
+	root        memoryRoot
+	dir         string
+	plans       []plannedMemoryWrite
+	indexPath   string
+	indexOrig   []byte
+	indexExists bool
+	hasCreate   bool
+}
+
+// prepareMemoryWrite は writeMemory の検査の部分。items のすべてを検査して計画を返す
+// （何も書かず、置き場も作らない）。規則に反する出力は ErrMemoryWriteRejected。items が空なら
+// (nil, nil)。
+func prepareMemoryWrite(base string, decl *AgentDeclaration, items []memoryItem, now time.Time) (*memoryWritePlan, error) {
 	dir, limit := defaultMemoryDir, MemoryWriteLimit{Files: defaultMemoryWriteFiles, Bytes: defaultMemoryWriteBytes}
 	if decl != nil {
 		if decl.MemoryDir != "" {
@@ -203,16 +233,31 @@ func writeMemory(base string, decl *AgentDeclaration, items []memoryItem, now ti
 	if err != nil {
 		return nil, err
 	}
-	var indexPath string
-	var indexOrig []byte
-	indexExists := false
+	p := &memoryWritePlan{root: root, dir: dir, plans: plans, hasCreate: hasCreate}
 	if hasCreate {
-		indexPath, indexOrig, indexExists, err = planMemoryIndex(root)
+		p.indexPath, p.indexOrig, p.indexExists, err = planMemoryIndex(root)
 		if err != nil {
 			return nil, err
 		}
 	}
-	return applyMemoryWrites(root, dir, plans, indexPath, indexOrig, indexExists)
+	return p, nil
+}
+
+// written は書き込みの一覧（置き場からの相対パス・mode・書く本文の SHA-256）を返す。
+// 本文は計画の時点で決まっているので、書く前に作業ログの内容を組み立てられる。
+func (p *memoryWritePlan) written() []memoryWritten {
+	out := make([]memoryWritten, 0, len(p.plans))
+	for _, pl := range p.plans {
+		sum := sha256.Sum256([]byte(pl.content))
+		out = append(out, memoryWritten{Path: pl.rel, Mode: pl.item.Mode, SHA256: hex.EncodeToString(sum[:])})
+	}
+	return out
+}
+
+// apply は計画を書く。失敗したらそれまでに書いた分を元に戻してエラーを返す。成功したら、
+// 書いた分をすべて元に戻す関数を返す（呼び出し側が後続の失敗で呼ぶ）。
+func (p *memoryWritePlan) apply() (undo func(), err error) {
+	return applyMemoryWrites(p.root, p.dir, p.plans, p.indexPath, p.indexOrig, p.indexExists)
 }
 
 // planMemoryWrites はすべての要素を検査し、書き込みの計画を返す（何も書かない）。
@@ -351,13 +396,16 @@ func planMemoryIndex(root memoryRoot) (path string, orig []byte, exists bool, er
 }
 
 // applyMemoryWrites は plans を順に書く。失敗したら書いた分を元に戻す。
-func applyMemoryWrites(root memoryRoot, dir string, plans []plannedMemoryWrite, indexPath string, indexOrig []byte, indexExists bool) (_ []memoryWritten, err error) {
+func applyMemoryWrites(root memoryRoot, dir string, plans []plannedMemoryWrite, indexPath string, indexOrig []byte, indexExists bool) (_ func(), err error) {
 	var undo []func()
+	rollback := func() {
+		for i := len(undo) - 1; i >= 0; i-- {
+			undo[i]()
+		}
+	}
 	defer func() {
 		if err != nil {
-			for i := len(undo) - 1; i >= 0; i-- {
-				undo[i]()
-			}
+			rollback()
 		}
 	}()
 
@@ -372,7 +420,6 @@ func applyMemoryWrites(root memoryRoot, dir string, plans []plannedMemoryWrite, 
 		}
 	}
 
-	written := make([]memoryWritten, 0, len(plans))
 	var rows []string
 	for n, p := range plans {
 		if memoryWriteFault != nil {
@@ -411,8 +458,6 @@ func applyMemoryWrites(root memoryRoot, dir string, plans []plannedMemoryWrite, 
 				return nil, fmt.Errorf("write %s: %w", p.rel, errors.Join(werr, cerr))
 			}
 		}
-		sum := sha256.Sum256([]byte(p.content))
-		written = append(written, memoryWritten{Path: p.rel, Mode: p.item.Mode, SHA256: hex.EncodeToString(sum[:])})
 	}
 
 	if len(rows) > 0 {
@@ -457,7 +502,7 @@ func applyMemoryWrites(root memoryRoot, dir string, plans []plannedMemoryWrite, 
 			}
 		}
 	}
-	return written, nil
+	return rollback, nil
 }
 
 // mkdirAllTracked は os.MkdirAll と同じく dir を作り、新しく作ったディレクトリを
