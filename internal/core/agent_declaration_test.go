@@ -47,7 +47,7 @@ func TestLoadAgentDeclaration_FileNotFoundUsesAllDefaults(t *testing.T) {
 	if decl.SizeBudgetsUSD != wantSize {
 		t.Errorf("SizeBudgetsUSD = %+v, want %+v", decl.SizeBudgetsUSD, wantSize)
 	}
-	wantJudgment := JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5}
+	wantJudgment := JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5, J6: 2}
 	if decl.JudgmentBudgetUSD != wantJudgment {
 		t.Errorf("JudgmentBudgetUSD = %+v, want %+v", decl.JudgmentBudgetUSD, wantJudgment)
 	}
@@ -92,7 +92,7 @@ func TestLoadAgentDeclaration_AllKeysExplicit_DefaultsUsedFalse(t *testing.T) {
 		"cycle_budget_usd": 300,
 		"size_budgets_usd": {"S": {"impl": 30, "review": 25}, "M": {"impl": 50, "review": 30}, "L": {"impl": 100, "review": 40}},
 		"max_run_budget_usd": 200,
-		"judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5},
+		"judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5, "J6": 2},
 		"timeout_sec": {"judgment": 900, "delegate": 14400},
 		"max_parallel_runs": 2,
 		"rework_limit": 3,
@@ -159,7 +159,7 @@ func TestLoadAgentDeclaration_MaxRunBudgetUSDMustBePositive(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_JudgmentBudgetUSDMustBePositive(t *testing.T) {
-	keys := []string{"J1", "J2", "J3", "J4", "J5"}
+	keys := []string{"J1", "J2", "J3", "J4", "J5", "J6"}
 	for _, k := range keys {
 		for _, v := range []string{"0", "-1"} {
 			t.Run(k+"="+v, func(t *testing.T) {
@@ -267,7 +267,7 @@ func TestLoadAgentDeclaration_UnknownNestedKey(t *testing.T) {
 	cases := []string{
 		`{"size_budgets_usd": {"XL": {"impl": 1, "review": 1}}}`,
 		`{"size_budgets_usd": {"S": {"impl": 1, "review": 1, "extra": 1}}}`,
-		`{"judgment_budget_usd": {"J6": 1}}`,
+		`{"judgment_budget_usd": {"J7": 1}}`,
 		`{"timeout_sec": {"extra": 1}}`,
 	}
 	for _, doc := range cases {
@@ -404,7 +404,7 @@ func TestLoadAgentDeclaration_ConflictPredictionBudget_DefaultWhenOmitted(t *tes
 	// キーだけを省略した宣言でも既定値の使用が示される。
 	dir := writeAgentJSON(t, `{"version": 1, "position_file": "p.md", "cycle_budget_usd": 300,
 		"size_budgets_usd": {"S": {"impl": 30, "review": 25}, "M": {"impl": 50, "review": 30}, "L": {"impl": 100, "review": 40}},
-		"max_run_budget_usd": 200, "judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5},
+		"max_run_budget_usd": 200, "judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5, "J6": 2},
 		"timeout_sec": {"judgment": 900, "delegate": 14400}, "max_parallel_runs": 2, "rework_limit": 3, "failure_limit": 2}`)
 	d, err := LoadAgentDeclaration(dir)
 	if err != nil {

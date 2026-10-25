@@ -92,7 +92,7 @@ func (k runKind) valid() bool {
 	return false
 }
 
-// judgmentPoint は run.judgment（判断点 J1〜J5。委譲は "" = NULL）。
+// judgmentPoint は run.judgment（判断点 J1〜J6。委譲は "" = NULL）。
 type judgmentPoint string
 
 const (
@@ -101,13 +101,14 @@ const (
 	judgmentJ3 judgmentPoint = "J3"
 	judgmentJ4 judgmentPoint = "J4"
 	judgmentJ5 judgmentPoint = "J5"
+	judgmentJ6 judgmentPoint = "J6"
 )
 
-// valid は j が J1〜J5 のいずれかであるかを返す（"" には false。空許容は
+// valid は j が J1〜J6 のいずれかであるかを返す（"" には false。空許容は
 // 呼び出し側が kind に応じて判定する）。
 func (j judgmentPoint) valid() bool {
 	switch j {
-	case judgmentJ1, judgmentJ2, judgmentJ3, judgmentJ4, judgmentJ5:
+	case judgmentJ1, judgmentJ2, judgmentJ3, judgmentJ4, judgmentJ5, judgmentJ6:
 		return true
 	}
 	return false

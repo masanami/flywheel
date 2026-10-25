@@ -78,16 +78,17 @@ const (
 	CostSourceUnknown  CostSource = costSourceUnknown
 )
 
-// JudgmentPoint は判断点 J1〜J5 の閉集合。
+// JudgmentPoint は判断点 J1〜J6 の閉集合。
 type JudgmentPoint = judgmentPoint
 
-// JudgmentPoint の5値。
+// JudgmentPoint の6値。
 const (
 	JudgmentJ1 JudgmentPoint = judgmentJ1
 	JudgmentJ2 JudgmentPoint = judgmentJ2
 	JudgmentJ3 JudgmentPoint = judgmentJ3
 	JudgmentJ4 JudgmentPoint = judgmentJ4
 	JudgmentJ5 JudgmentPoint = judgmentJ5
+	JudgmentJ6 JudgmentPoint = judgmentJ6
 )
 
 // RunKind は run.kind（判断の呼び出しか委譲の起動か）の閉集合。
@@ -126,7 +127,7 @@ type JudgmentLaunchInput struct {
 	// 起動の引数の形（--session-id と --resume のどちらを使うか）を
 	// 決めてよい（実際の引数の形は【仮定】。args.goを参照）。
 	IsResume bool
-	// Judgment は判断点（J1〜J5）。invoker（#84 以降の Sections を使う経路）が
+	// Judgment は判断点（J1〜J6）。invoker（#84 以降の Sections を使う経路）が
 	// この値から埋め込みの指示文（Instructions）を選ぶために使う。
 	Judgment JudgmentPoint
 	// Workspace は判断の呼び出しの作業ディレクトリ。
@@ -229,7 +230,7 @@ func microsToUSD(micros int64) float64 {
 type RunJudgmentInput struct {
 	// ChallengeID は対象の課題（"C-<n>"）。
 	ChallengeID string
-	// Judgment は判断点（J1〜J5）。
+	// Judgment は判断点（J1〜J6）。
 	Judgment JudgmentPoint
 	// MaxBudgetUSD はこの run に渡す上限額（USD。0以下は ErrValidation）。
 	MaxBudgetUSD float64

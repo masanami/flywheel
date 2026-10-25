@@ -13,7 +13,7 @@ import (
 // 返すことを検証する（#82・§指示文の歯止め「判断点ごとの指示文は別ファイルと
 // し、バイナリに埋め込む」）。
 func TestInstructions_ReturnsEmbeddedContentForEachJudgmentPoint(t *testing.T) {
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6} {
 		got, err := Instructions(j)
 		if err != nil {
 			t.Fatalf("Instructions(%s): %v", j, err)
@@ -29,7 +29,7 @@ func TestInstructions_ReturnsEmbeddedContentForEachJudgmentPoint(t *testing.T) {
 // （1つのファイルへの読み違いを防ぐ回帰）。
 func TestInstructions_DifferentJudgmentPointsHaveDifferentContent(t *testing.T) {
 	seen := map[string]core.JudgmentPoint{}
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6} {
 		got, err := Instructions(j)
 		if err != nil {
 			t.Fatalf("Instructions(%s): %v", j, err)
@@ -45,9 +45,9 @@ func TestInstructions_DifferentJudgmentPointsHaveDifferentContent(t *testing.T) 
 // 渡すとエラーになることを検証する（fail-closed。将来 core 側に判断点が
 // 増えたときの空回り防止）。
 func TestInstructions_UnknownJudgmentPointReturnsError(t *testing.T) {
-	_, err := Instructions(core.JudgmentPoint("J6"))
+	_, err := Instructions(core.JudgmentPoint("J7"))
 	if err == nil {
-		t.Fatal("Instructions(\"J6\") err = nil, want an error")
+		t.Fatal("Instructions(\"J7\") err = nil, want an error")
 	}
 }
 
@@ -110,6 +110,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j3.md": 8192,
 		"j4.md": 4096,
 		"j5.md": 6144,
+		"j6.md": 6144,
 	}
 
 	mkFS := func(sizes map[string]int) fstest.MapFS {
@@ -159,6 +160,7 @@ func TestCheckPromptSizes_BriefTotal_ExactLimitPasses_OneByteOverFails(t *testin
 			"j3.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 			"j4.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 			"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+			"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
@@ -189,6 +191,7 @@ func TestCheckPromptSizes_MissingJudgmentFileFails(t *testing.T) {
 		"j3.md": &fstest.MapFile{Data: repeatBytes(1)},
 		"j4.md": &fstest.MapFile{Data: repeatBytes(1)},
 		// j5.md が無い
+		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
@@ -213,6 +216,7 @@ func TestCheckPromptSizes_MissingBriefFileFails(t *testing.T) {
 		"j3.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j4.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
@@ -235,7 +239,8 @@ func TestCheckPromptSizes_UnexpectedFileFails(t *testing.T) {
 		"j3.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j4.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
-		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)}, // 上限表に無い
+		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"j7.md":                            &fstest.MapFile{Data: repeatBytes(1)}, // 上限表に無い
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
@@ -247,7 +252,7 @@ func TestCheckPromptSizes_UnexpectedFileFails(t *testing.T) {
 		"resume/rework.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 	}
 	if err := CheckPromptSizes(fsys); err == nil {
-		t.Error("CheckPromptSizes(with unexpected j6.md) = nil, want an error")
+		t.Error("CheckPromptSizes(with unexpected j7.md) = nil, want an error")
 	}
 }
 
@@ -260,6 +265,7 @@ func TestCheckPromptSizes_UnexpectedFileInBriefDirFails(t *testing.T) {
 		"j3.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j4.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
