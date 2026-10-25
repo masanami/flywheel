@@ -500,8 +500,11 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 				return err
 			}
 		}
-		_, err := updateRunEnd(recordCtx, tx, runIDInt, updateInput)
-		return err
+		if _, err := updateRunEnd(recordCtx, tx, runIDInt, updateInput); err != nil {
+			return err
+		}
+		// 連続失敗に数える結果なら、run の終了と同じトランザクションで judgment_failed を作る。
+		return s.insertRunFailureOccurrence(recordCtx, tx, runIDInt, result, output.RateLimited, updateInput.EndedAt)
 	})
 	if err != nil {
 		return nil, classifyReadWriteErr(err)
@@ -688,13 +691,17 @@ func (s *Store) ReapInterruptedRuns(ctx context.Context) error {
 				continue // 冪等: 別の呼び出しが既に閉じていた
 			}
 			cost := c.maxBudgetUSD
+			endedAt := s.currentTime()
 			if _, err := updateRunEnd(ctx, tx, c.id, updateRunEndInput{
-				EndedAt:     s.currentTime(),
+				EndedAt:     endedAt,
 				Result:      RunResultInterrupted,
 				RateLimited: false,
 				CostUSD:     &cost,
 				CostSource:  CostSourceUnknown,
 			}); err != nil {
+				return err
+			}
+			if err := s.insertRunFailureOccurrence(ctx, tx, c.id, RunResultInterrupted, false, endedAt); err != nil {
 				return err
 			}
 			// 中断した委譲の子がまだ作業ツリーで動いているかもしれないので、スロットを
