@@ -457,6 +457,7 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 			dc.Repo.Name, dc.Connector.ID, dc.Connector.Form, dc.Operation.ID)},
 		JudgmentDataSection{Label: "意思決定者", Content: fmt.Sprintf("意思決定者: %s\n該当した行: %d", dc.Decider, dc.DeciderRow)},
 	)
+	sections = append(sections, memoryIndexSections(s.workspace, in.AgentDecl)...)
 	return sections, nil, nil
 }
 

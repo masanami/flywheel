@@ -586,6 +586,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		JudgmentDataSection{Label: "対象リポジトリと操作の宣言", Content: formatJ2DeclarationSection(in.ConnDecl, prepared.HasSource, in.AgentDecl)},
 		JudgmentDataSection{Label: "サイズごとの予算の既定", Content: formatJ2BudgetDefaultsSection(in.AgentDecl)},
 	)
+	sections = append(sections, memoryIndexSections(s.workspace, in.AgentDecl)...)
 	prepared.Sections = sections
 	return prepared, nil, nil
 }
