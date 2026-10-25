@@ -55,7 +55,7 @@ func j6Out(cls []any, added, memory, followups []any) JudgmentLaunchOutput {
 }
 
 func j6Cls(id, cause, layer string) map[string]any {
-	return map[string]any{"occurrence_id": id, "cause": cause, "layer": layer, "target": "internal/invoker/prompts/j1.md", "signal": "SIGNAL-" + id}
+	return map[string]any{"occurrence_id": id, "cause": cause, "layer": layer, "target": "TARGET-" + id, "signal": "SIGNAL-" + id}
 }
 
 func j6Added(outcome, kind, evidence, cause string) map[string]any {
@@ -356,8 +356,8 @@ func TestLearnJ6_ClassificationsFillColumnsAndNoneIsHandled(t *testing.T) {
 	for i, w := range want {
 		o := occ[i]
 		// AC-231: 層・対象は出力の値がそのまま行に入る（固定値や既存の値のままではない）。
-		if o.layer.String != w.layer || o.target.String != "internal/invoker/prompts/j1.md" {
-			t.Errorf("occurrence %d layer/target = %q/%q, want %q/%q", i, o.layer.String, o.target.String, w.layer, "internal/invoker/prompts/j1.md")
+		if o.layer.String != w.layer || o.target.String != "TARGET-"+[]string{o1, o2, o3}[i] {
+			t.Errorf("occurrence %d layer/target = %q/%q, want %q/%q", i, o.layer.String, o.target.String, w.layer, "TARGET-"+[]string{o1, o2, o3}[i])
 		}
 		if !o.cause.Valid || o.cause.String != w.cause || !o.layer.Valid || !o.target.Valid || !o.signal.Valid || o.signal.String != "SIGNAL-"+[]string{o1, o2, o3}[i] {
 			t.Errorf("occurrence %d = %+v", i, o)

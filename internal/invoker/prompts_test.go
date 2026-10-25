@@ -314,3 +314,19 @@ func TestInstructions_MemoryIndexIsReferencedByJ2J3J5Only(t *testing.T) {
 		}
 	}
 }
+
+// AC-243a: j6.md は起票済みのフォローアップの区画を説明し、それと重複させない指示を持つ。
+// ラベルは internal/core/judgment_j6.go の j6FollowupsLabel と同じ文字列（core の非公開の定数のため写す）。
+func TestInstructions_J6ForbidsDuplicateFollowups(t *testing.T) {
+	label := "「起票済みのフォローアップ」"
+	got, err := Instructions(core.JudgmentJ6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "- "+label+":") {
+		t.Errorf("Instructions(J6) lacks the description of the section %s", label)
+	}
+	if !strings.Contains(got, label+"にある課題と同じ内容のものは重複させない") {
+		t.Errorf("Instructions(J6) lacks the instruction not to duplicate %s", label)
+	}
+}
