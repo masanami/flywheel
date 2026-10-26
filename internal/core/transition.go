@@ -3,7 +3,7 @@ package core
 import "fmt"
 
 // NoStatus は「遷移元が無い」ことを表すセンチネル値（T1: create の遷移元）。
-// ParseStatus は空文字列を語彙として解釈しないため、状態語彙8値とは衝突しない。
+// ParseStatus は空文字列を語彙として解釈しないため、状態語彙9値とは衝突しない。
 const NoStatus Status = ""
 
 // Operation は状態機械への操作を識別するトークン。CLI のフラグ表記
@@ -27,6 +27,7 @@ const (
 	OpApprove            Operation = "approve"
 	OpApproveHoldRelease Operation = "approve_hold_release"
 	OpReject             Operation = "reject"
+	OpWithdraw           Operation = "withdraw"
 )
 
 // TransitionTarget は遷移先の表現。T1〜T11・T13〜T15 は固定の状態を持つが、
@@ -72,7 +73,7 @@ type Transition struct {
 	RequiresVerification bool
 }
 
-// Table は遷移表 T1〜T15 の正本。docs/features/m1-core.md §状態機械 の
+// Table は遷移表 T1〜T16 の正本。docs/features/m1-core.md §状態機械 の
 // 遷移表と1対1に対応する（T11 は遷移元4つに展開して4行として持つ）。
 // この表に無い（状態, 操作）の組はすべて不可（Lookup が ok=false を返す）。
 var Table = []Transition{
@@ -94,6 +95,15 @@ var Table = []Transition{
 	{ID: "T13", From: StatusAwaitingCompletionApproval, Op: OpApprove, Target: TransitionTarget{Fixed: StatusDone}, RequiresVerification: true},
 	{ID: "T14", From: StatusAwaitingCompletionApproval, Op: OpApproveHoldRelease, Target: TransitionTarget{Fixed: StatusDone}, RequiresVerification: true},
 	{ID: "T15", From: StatusAwaitingCompletionApproval, Op: OpReject, Target: TransitionTarget{Fixed: StatusInProgress}, RequiresVerification: true},
+	// T16: 取り下げ（docs/features/m4.5-learning-and-self-improvement.md S4。M45H13・M45H28）。
+	// 完了以外の 7 状態から取り下げへ。取り下げから出る行は持たない（終端）。
+	{ID: "T16", From: StatusUnclassified, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
+	{ID: "T16", From: StatusClassified, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
+	{ID: "T16", From: StatusAwaitingPlanApproval, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
+	{ID: "T16", From: StatusInProgress, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
+	{ID: "T16", From: StatusVerifying, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
+	{ID: "T16", From: StatusAwaitingCompletionApproval, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
+	{ID: "T16", From: StatusAwaitingHuman, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
 }
 
 // Lookup は (from, op) から遷移表の行を引く。表に無い組は ok=false を返す

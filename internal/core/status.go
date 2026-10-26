@@ -12,7 +12,8 @@ import "strings"
 // 生成は必ず StatusVocabulary の定数、または ParseStatus を経由する。
 type Status string
 
-// 状態語彙8値のコード定数。順序は docs/features/m1-core.md §状態機械 の表と一致する。
+// 状態語彙9値のコード定数。順序は docs/features/m1-core.md §状態機械 の表（と、末尾に足した
+// 取り下げ。docs/features/m4.5-learning-and-self-improvement.md S4）と一致する。
 const (
 	StatusUnclassified               Status = "unclassified"
 	StatusClassified                 Status = "classified"
@@ -22,6 +23,7 @@ const (
 	StatusAwaitingCompletionApproval Status = "awaiting_completion_approval"
 	StatusDone                       Status = "done"
 	StatusAwaitingHuman              Status = "awaiting_human"
+	StatusWithdrawn                  Status = "withdrawn"
 )
 
 // StatusVocabEntry は状態語彙の1行（コードと表示名の対）。
@@ -30,7 +32,7 @@ type StatusVocabEntry struct {
 	Label string
 }
 
-// StatusVocabulary は状態語彙8値の正本。docs/features/m1-core.md §状態機械 の表と
+// StatusVocabulary は状態語彙9値の正本。docs/features/m1-core.md §状態機械 の表と
 // 1対1に対応する（internal/core/status_test.go の
 // TestStatusVocabulary_MatchesSpecCodesAndLabels が照合する）。
 var StatusVocabulary = []StatusVocabEntry{
@@ -42,6 +44,7 @@ var StatusVocabulary = []StatusVocabEntry{
 	{Code: StatusAwaitingCompletionApproval, Label: "完了確認待ち"},
 	{Code: StatusDone, Label: "完了"},
 	{Code: StatusAwaitingHuman, Label: "人間対応待ち"},
+	{Code: StatusWithdrawn, Label: "取り下げ"},
 }
 
 // ParseStatus は s を状態として解釈する。前後の空白を除いた後、語彙のコードか

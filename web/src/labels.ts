@@ -9,6 +9,7 @@ export const CARD_STATES = [
   "awaiting_completion_approval",
   "done",
   "awaiting_human",
+  "withdrawn",
 ] as const;
 export type CardState = (typeof CARD_STATES)[number];
 
@@ -53,6 +54,7 @@ export const STATE_LABELS: Record<CardState, string> = {
   awaiting_completion_approval: "完了確認待ち",
   done: "完了",
   awaiting_human: "人間対応待ち",
+  withdrawn: "取り下げ",
 };
 
 export const MODIFIER_LABELS: Record<CardModifier, string> = {

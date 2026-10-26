@@ -103,7 +103,7 @@ func containsChallengeID(challenges []Challenge, id string) bool {
 }
 
 // TestOverviewBuckets_CoverStatusVocabularyExactlyOnce は、needsHumanStatuses・
-// actionableStatuses・StatusDone の3つを合わせると語彙8値をちょうど1回ずつ
+// actionableStatuses・終端の状態（StatusDone・StatusWithdrawn）を合わせると語彙9値をちょうど1回ずつ
 // 覆うことを検査する（将来 StatusVocabulary に値が増えたとき、区分の定義を
 // 更新し忘れて「どちらの区分にも現れない・両方に現れる」課題が黙って生じるのを防ぐ。
 // docs/features/m1-core.md §状態機械 の閉包テストと同じ発想）。
@@ -116,6 +116,7 @@ func TestOverviewBuckets_CoverStatusVocabularyExactlyOnce(t *testing.T) {
 		seen[st]++
 	}
 	seen[StatusDone]++
+	seen[StatusWithdrawn]++
 
 	if len(seen) != len(StatusVocabulary) {
 		t.Fatalf("covered %d distinct statuses, want %d (StatusVocabulary)", len(seen), len(StatusVocabulary))

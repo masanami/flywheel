@@ -173,9 +173,12 @@ func formatHoldsSection(holds []Hold) string {
 		b.WriteString("問い: ")
 		b.WriteString(h.Question)
 		b.WriteString("\n回答: ")
-		if h.Answer != nil {
+		switch {
+		case h.Answer != nil:
 			b.WriteString(*h.Answer)
-		} else {
+		case h.ClosedAt != nil:
+			b.WriteString("(回答なしで閉じた)")
+		default:
 			b.WriteString("(未回答)")
 		}
 	}

@@ -805,6 +805,8 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	wantSet["metrics"] = true
 	// M4.5 S3: 同じ理由で、実装済みの `learn` を個別に足す（書式は TestLearnCommand_MatchesM45IFAPITable が m4.5 の表と照合する）。
 	wantSet["learn"] = true
+	// M4.5 S4: 同じ理由で、実装済みの `withdraw` を個別に足す（書式は TestWithdrawCommand_MatchesM45IFAPITable が m4.5 の表と照合する）。
+	wantSet["withdraw"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")

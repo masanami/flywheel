@@ -74,6 +74,7 @@ type j6Hold struct {
 	ID       int64
 	Question string
 	Answer   *string
+	Closed   bool // 回答なしで閉じた（課題の取り下げ）
 	From     string
 	At       string
 }
@@ -198,7 +199,7 @@ func loadJ6Approvals(ctx context.Context, tx *sql.Tx, cid int64) ([]j6Approval, 
 
 func loadJ6Holds(ctx context.Context, tx *sql.Tx, cid int64) ([]j6Hold, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, question, answer, from_status, raised_at FROM hold WHERE challenge_id = ? ORDER BY id ASC`, cid)
+		`SELECT id, question, answer, from_status, raised_at, closed_at IS NOT NULL FROM hold WHERE challenge_id = ? ORDER BY id ASC`, cid)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +208,7 @@ func loadJ6Holds(ctx context.Context, tx *sql.Tx, cid int64) ([]j6Hold, error) {
 	for rows.Next() {
 		var h j6Hold
 		var ans sql.NullString
-		if err := rows.Scan(&h.ID, &h.Question, &ans, &h.From, &h.At); err != nil {
+		if err := rows.Scan(&h.ID, &h.Question, &ans, &h.From, &h.At, &h.Closed); err != nil {
 			return nil, err
 		}
 		if ans.Valid {
@@ -286,8 +287,11 @@ func loadJ6Runs(ctx context.Context, tx *sql.Tx, cid int64) ([]runRow, error) {
 	return out, nil
 }
 
-// learnableStatus は J6 の対象になる課題の状態（完了か人間対応待ち）。
-func learnableStatus(st Status) bool { return st == StatusDone || st == StatusAwaitingHuman }
+// learnableStatus は J6 の対象になる課題の状態（完了・取り下げ・人間対応待ち）。取り下げは結末が
+// 出ている点で完了と同じで、対象にしないと未分類の発生が metrics に残り続ける（M45P32）。
+func learnableStatus(st Status) bool {
+	return st == StatusDone || st == StatusWithdrawn || st == StatusAwaitingHuman
+}
 
 // loadJ6Context は課題 cid の J6 の入力の事実を 1 回の読み取りで読む。
 func (s *Store) loadJ6Context(ctx context.Context, cid int64) (*j6Context, error) {
@@ -419,9 +423,12 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 	}
 	for _, h := range jc.Holds {
 		fmt.Fprintf(&b, "- 保留 ID: %s-%d / %s / 問い: %s / 回答: ", j6EvidenceHold, h.ID, h.At, h.Question)
-		if h.Answer != nil {
+		switch {
+		case h.Answer != nil:
 			b.WriteString(*h.Answer)
-		} else {
+		case h.Closed:
+			b.WriteString("(回答なしで閉じた)")
+		default:
 			b.WriteString("(未回答)")
 		}
 		b.WriteString("\n")
@@ -727,13 +734,13 @@ func (s *Store) finalizeJ6Output(ctx context.Context, in J6AutoInput, runIDDispl
 // --- 対象の選び方と本体 ---
 
 // selectJ6AutoTargets は ID を省略した `learn` が対象にする課題の内部整数 ID を ID の昇順で返す。
-// 対象は、未分類の発生を持ち、状態が完了か人間対応待ちの課題。上流の状態による除外はしない
+// 対象は、未分類の発生を持ち、状態が完了・取り下げ・人間対応待ちの課題。上流の状態による除外はしない
 // （完了した課題は上流が closed のことが多い）。
 func selectJ6AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT c.id FROM challenge c
-		 WHERE c.status IN (?, ?) AND EXISTS (SELECT 1 FROM occurrence o WHERE o.challenge_id = c.id AND o.cause IS NULL)
-		 ORDER BY c.id ASC`, string(StatusDone), string(StatusAwaitingHuman))
+		 WHERE c.status IN (?, ?, ?) AND EXISTS (SELECT 1 FROM occurrence o WHERE o.challenge_id = c.id AND o.cause IS NULL)
+		 ORDER BY c.id ASC`, string(StatusDone), string(StatusWithdrawn), string(StatusAwaitingHuman))
 	if err != nil {
 		return nil, err
 	}

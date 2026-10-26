@@ -73,14 +73,14 @@ func TestParseStatus_RejectsEmpty(t *testing.T) {
 	}
 }
 
-// TestStatusVocabulary_Has8Entries は、語彙が完了条件どおり8値であることを検証する。
-func TestStatusVocabulary_Has8Entries(t *testing.T) {
-	if len(StatusVocabulary) != 8 {
-		t.Fatalf("len(StatusVocabulary) = %d, want 8", len(StatusVocabulary))
+// TestStatusVocabulary_Has9Entries は、語彙が完了条件どおり9値（M1 の 8 値＋取り下げ）であることを検証する。
+func TestStatusVocabulary_Has9Entries(t *testing.T) {
+	if len(StatusVocabulary) != 9 {
+		t.Fatalf("len(StatusVocabulary) = %d, want 9", len(StatusVocabulary))
 	}
 }
 
-// TestStatusVocabulary_MatchesSpecCodesAndLabels は、語彙の全8行が
+// TestStatusVocabulary_MatchesSpecCodesAndLabels は、語彙の全9行が
 // docs/features/m1-core.md §状態機械 の表（コード・表示名）と一致することを検証する。
 func TestStatusVocabulary_MatchesSpecCodesAndLabels(t *testing.T) {
 	want := []StatusVocabEntry{
@@ -92,6 +92,7 @@ func TestStatusVocabulary_MatchesSpecCodesAndLabels(t *testing.T) {
 		{Code: StatusAwaitingCompletionApproval, Label: "完了確認待ち"},
 		{Code: StatusDone, Label: "完了"},
 		{Code: StatusAwaitingHuman, Label: "人間対応待ち"},
+		{Code: StatusWithdrawn, Label: "取り下げ"},
 	}
 	if len(StatusVocabulary) != len(want) {
 		t.Fatalf("len(StatusVocabulary) = %d, want %d", len(StatusVocabulary), len(want))

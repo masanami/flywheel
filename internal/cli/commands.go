@@ -234,6 +234,16 @@ func defaultCommands() []Command {
 			Run:           runAnswer,
 		},
 		{
+			// 課題の取り下げ（docs/features/m4.5-learning-and-self-improvement.md S4。M45H28）。
+			// 本人確認つき（端末か --relayed）。UI には口を置かない。--reason の空は runWithdraw が usage_error にする。
+			Path:          []string{"withdraw"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: 1,
+			Flags:         append([]flagDef{{Name: "reason", HasValue: true, Required: true}}, relayedFlags()...),
+			Run:           runWithdraw,
+		},
+		{
 			Path:          []string{"approve"},
 			RequiresStore: true,
 			MinPositional: 1,

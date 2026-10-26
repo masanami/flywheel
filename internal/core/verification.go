@@ -105,6 +105,7 @@ const (
 	actionApproveCompletionHold attestedAction = "approve_completion_hold" // T14（HoldRelease=true）
 	actionReject                attestedAction = "reject"                  // T6・T15
 	actionAnswer                attestedAction = "answer"                  // T12
+	actionWithdraw              attestedAction = "withdraw"                // T16
 	actionBudget                attestedAction = "budget"
 	actionOperationApprove      attestedAction = "operation_approve"
 	actionOperationReject       attestedAction = "operation_reject"
@@ -124,6 +125,8 @@ func actionForTransition(tr Transition) (attestedAction, bool) {
 		return actionReject, true
 	case "T12":
 		return actionAnswer, true
+	case "T16":
+		return actionWithdraw, true
 	}
 	return "", false
 }

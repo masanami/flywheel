@@ -140,7 +140,7 @@ export function createMockApi(
         .flatMap((w) =>
           w.items.flatMap((m) =>
             m.holds
-              .filter((h) => h.answer === null)
+              .filter((h) => h.answer === null && h.closed_at === null)
               .map((h) => ({
                 challenge_id: m.c.id,
                 from_status: h.from_status,

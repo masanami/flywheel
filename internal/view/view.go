@@ -171,6 +171,7 @@ type Hold struct {
 	AnsweredBy           *string `json:"answered_by"`
 	AnsweredChannel      *string `json:"answered_channel"`
 	AnsweredVerification *string `json:"answered_verification"`
+	ClosedAt             *string `json:"closed_at"`
 	FromStatus           string  `json:"from_status"`
 	FromStatusLabel      string  `json:"from_status_label"`
 	Question             string  `json:"question"`
@@ -189,6 +190,7 @@ func FromHold(h core.Hold) Hold {
 		AnsweredBy:           h.AnsweredBy,
 		AnsweredChannel:      h.AnsweredChannel,
 		AnsweredVerification: h.AnsweredVerification,
+		ClosedAt:             ts(h.ClosedAt),
 		FromStatus:           string(h.FromStatus),
 		FromStatusLabel:      label,
 		Question:             h.Question,

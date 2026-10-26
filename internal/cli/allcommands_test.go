@@ -115,6 +115,9 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		runJSON(t, ws, "verify", id, "--result", "uncertain", "--question", "q")
 		return []string{"answer", id, "--answer", "a"}
 	}},
+	"withdraw": {needsTTY: true, setup: func(t *testing.T, ws string) []string {
+		return []string{"withdraw", createForCase(t, ws), "--reason", "r"}
+	}},
 	"approve": {needsTTY: true, setup: func(t *testing.T, ws string) []string {
 		return []string{"approve", createPlannedForCase(t, ws)}
 	}},
@@ -478,6 +481,7 @@ var runLevelUsageErrorCases = [][]string{
 	{"metrics", "--since", "2026-3-1"},                          // --since・--until が YYYY-MM-DD の日付でない（M4.5 S3）
 	{"metrics", "--compare", "C-1", "--since", "2026-03-01"},    // --compare と --since・--until の同時指定（M4.5 S4）
 	{"dep", "add", "C-1", "C-1"},                                // 自分自身を依存先にした（core が ErrSelfDependency を返し usage_error に写る。M4.5 S2）
+	{"withdraw", "C-1", "--reason", " "},                        // --reason が空白だけ（M4.5 S4。無いときは必須フラグの欠落）
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の

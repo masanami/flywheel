@@ -304,6 +304,8 @@ var transitionCommandCases = []transitionCommandCase{
 	{"approve", func(_ *testing.T, id string) []string { return []string{"approve", id} }},
 	{"reject", func(_ *testing.T, id string) []string { return []string{"reject", id, "--reason", "r"} }},
 	{"answer", func(_ *testing.T, id string) []string { return []string{"answer", id, "--answer", "a"} }},
+	// withdraw（M4.5 S4）: 完了・取り下げの課題は core.PrepareWithdraw（①）が端末を開く前に terminal_state を返す。
+	{"withdraw", func(_ *testing.T, id string) []string { return []string{"withdraw", id, "--reason", "r"} }},
 	// approve --hold-release（T14。#13）: 計画承認待ちの課題への --hold-release は
 	// core.PrepareApproval が端末を開く前に usage_error を返す（runApproveChallenge）ため、
 	// この枠組みでも検証できる。ただし、この枠組みは invalid_transition／
@@ -327,6 +329,7 @@ var operationByCommand = map[string]core.Operation{
 	"approve":            core.OpApprove,
 	"reject":             core.OpReject,
 	"answer":             core.OpAnswer,
+	"withdraw":           core.OpWithdraw,
 	"approveHoldRelease": core.OpApproveHoldRelease,
 }
 
@@ -439,13 +442,13 @@ func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T)
 			})
 		}
 	}
-	// 9 コマンド（#13 で approveHoldRelease を追加）× 8 状態 = 72 組のうち、
+	// 10 コマンド（#13 で approveHoldRelease、M4.5 S4 で withdraw を追加）× 9 状態 = 90 組のうち、
 	// 遷移表にある組（T2=1・T3/T4=2・T7=1・T8=1・T11=4・approve=2〈T5・T13〉・
-	// reject=2〈T6・T15〉・answer=1〈T12〉・approveHoldRelease=1〈T14〉の計 15）と、
+	// reject=2〈T6・T15〉・answer=1〈T12〉・approveHoldRelease=1〈T14〉・withdraw=7〈T16〉の計 22）と、
 	// この汎用枠組みでは検証できない1組（approveHoldRelease/計画承認待ち。
-	// usage_error であり、専用テストが担う）を除いた 56 組を回したことを固定する。
-	if tested != 56 {
-		t.Fatalf("tested %d undefined (command, status) combinations, want 56", tested)
+	// usage_error であり、専用テストが担う）を除いた 67 組を回したことを固定する。
+	if tested != 67 {
+		t.Fatalf("tested %d undefined (command, status) combinations, want 67", tested)
 	}
 }
 

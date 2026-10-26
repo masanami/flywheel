@@ -278,6 +278,57 @@ func runAnswer(a Args) (any, error) {
 	}, nil
 }
 
+// runWithdraw は `flywheel withdraw <C-ID> --reason <理由>` の実装（課題の取り下げ。M45H28）。
+// 形は runAnswer と同じ ① 要約 → core.Verify → ② 実行。遷移・不可逆操作の差し戻し・保留の
+// クローズ・作業ログの規則は core が持つ。
+func runWithdraw(a Args) (any, error) {
+	id := a.Positional[0]
+	reason := a.Values["reason"]
+	if strings.TrimSpace(reason) == "" {
+		return nil, NewError(CodeUsageError, "--reason には取り下げの理由を指定してください")
+	}
+
+	verifier, err := verifierFor(a)
+	if err != nil {
+		return nil, err
+	}
+	preview, err := a.Store.PrepareWithdraw(context.Background(), id, reason)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+
+	att, err := core.Verify(core.ChannelCLI, verifier, withdrawSummaryText(preview), id)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+
+	c, err := a.Store.ExecuteWithdraw(context.Background(), core.WithdrawRequest{
+		ChallengeID:     id,
+		ExpectedVersion: preview.Version,
+		Reason:          reason,
+	}, att)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
+}
+
+// withdrawSummaryText は withdraw が確認前に /dev/tty へ表示する要約（課題の ID・タイトル・現在の状態・理由と、
+// 同時に差し戻される不可逆操作・回答なしで閉じる保留）。
+func withdrawSummaryText(p *core.WithdrawPreview) string {
+	var b strings.Builder
+	statusLabel, _ := p.Status.Label()
+	fmt.Fprintf(&b, "課題 ID:  %s\n", p.ChallengeID)
+	fmt.Fprintf(&b, "タイトル: %s\n", escapeControl(p.Title))
+	fmt.Fprintf(&b, "操作:     取り下げ（現在の状態: %s。取り下げた課題は元に戻せない）\n", statusLabel)
+	fmt.Fprintf(&b, "理由:     %s\n", escapeControlKeepLines(p.Reason))
+	fmt.Fprintf(&b, "同時に差し戻される不可逆操作: %s\n", operationListSummary(p.RejectedOperations))
+	if p.ClosedHold != nil {
+		fmt.Fprintf(&b, "回答なしで閉じる保留: %s\n", escapeControlKeepLines(*p.ClosedHold))
+	}
+	return b.String()
+}
+
 // approvalSummaryText は approve・reject が確認前に /dev/tty へ表示する要約
 // （AC-39: 課題の ID・タイトル・承認の種類、計画の承認なら本文と版／
 // AC-41: reject は対応する承認と同じ要約＋入力された理由）。
