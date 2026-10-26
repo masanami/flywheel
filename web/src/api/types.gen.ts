@@ -193,6 +193,7 @@ export interface Hold {
   answered_by: string | null;
   answered_channel: string | null;
   answered_verification: string | null;
+  closed_at: string | null;
   from_status: string;
   from_status_label: string;
   question: string;
@@ -469,6 +470,7 @@ export const STATUS_CODES = [
   "awaiting_completion_approval",
   "done",
   "awaiting_human",
+  "withdrawn",
 ] as const;
 
 export const DISCREPANCY_KIND_CODES = [

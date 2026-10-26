@@ -174,10 +174,10 @@ func TestLookup_CreateNotAvailableFromExistingStatus(t *testing.T) {
 	}
 }
 
-// TestTable_RowCount は、Table の物理行数が18（T1〜T15、うちT11が4遷移元に展開）であることを検証する。
+// TestTable_RowCount は、Table の物理行数が25（T1〜T16、うちT11が4遷移元・T16が7遷移元に展開）であることを検証する。
 func TestTable_RowCount(t *testing.T) {
-	if len(Table) != 18 {
-		t.Fatalf("len(Table) = %d, want 18", len(Table))
+	if len(Table) != 25 {
+		t.Fatalf("len(Table) = %d, want 25", len(Table))
 	}
 }
 
@@ -256,10 +256,34 @@ func TestIsTerminal_Done(t *testing.T) {
 	}
 }
 
-// TestIsTerminal_NonTerminalStatuses は、完了以外の状態が終端でないことを検証する。
+// TestIsTerminal_Withdrawn は、取り下げが終端状態（出る遷移が無い）であることを検証する（AC-373）。
+func TestIsTerminal_Withdrawn(t *testing.T) {
+	if !IsTerminal(Table, StatusVocabulary, StatusWithdrawn) {
+		t.Errorf("IsTerminal(Table, vocab, withdrawn) = false, want true")
+	}
+}
+
+// TestTable_T16_WithdrawFromEveryStatusExceptTerminals は、取り下げの行が完了・取り下げ以外の7状態
+// すべてにあり、本人確認つきで、遷移先が取り下げであることを検証する（行数 18→25）。
+func TestTable_T16_WithdrawFromEveryStatusExceptTerminals(t *testing.T) {
+	for _, e := range StatusVocabulary {
+		tr, ok := Lookup(e.Code, OpWithdraw)
+		if e.Code == StatusDone || e.Code == StatusWithdrawn {
+			if ok {
+				t.Errorf("Lookup(%q, withdraw) ok = true, want false", e.Code)
+			}
+			continue
+		}
+		if !ok || tr.ID != "T16" || tr.Target.Fixed != StatusWithdrawn || !tr.RequiresVerification {
+			t.Errorf("Lookup(%q, withdraw) = %+v, ok=%v, want T16 -> withdrawn requiring verification", e.Code, tr, ok)
+		}
+	}
+}
+
+// TestIsTerminal_NonTerminalStatuses は、完了・取り下げ以外の状態が終端でないことを検証する。
 func TestIsTerminal_NonTerminalStatuses(t *testing.T) {
 	for _, e := range StatusVocabulary {
-		if e.Code == StatusDone {
+		if e.Code == StatusDone || e.Code == StatusWithdrawn {
 			continue
 		}
 		if IsTerminal(Table, StatusVocabulary, e.Code) {

@@ -99,7 +99,13 @@ type Hold struct {
 	AnsweredVerification *string
 	RelaySession         *string
 	RelayQuote           *string
+	// ClosedAt は保留を回答なしで閉じた日時（課題の取り下げ。M45H29）。閉じていなければ nil。
+	// Answer が nil でも ClosedAt が非 nil の保留は、開いている保留ではない。
+	ClosedAt *time.Time
 }
+
+// Open は保留がまだ開いている（回答も閉じる操作も無い）かを返す。
+func (h Hold) Open() bool { return h.Answer == nil && h.ClosedAt == nil }
 
 // IrreversibleOperation は不可逆操作の 1 件（§データモデル operation。core 内部の
 // Operation 型（状態機械の操作トークン。transition.go）と名前が衝突するため
@@ -360,7 +366,7 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT question, from_status, raised_at, answer, answered_at, answered_by, run_id,
-		        answered_channel, answered_verification, relay_session, relay_quote
+		        answered_channel, answered_verification, relay_session, relay_quote, closed_at
 		 FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -375,10 +381,10 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			answer, answeredAtStr, answeredBy sql.NullString
 			runID                             sql.NullInt64
 			ansChannel, ansVerif, relSess     sql.NullString
-			relQuote                          sql.NullString
+			relQuote, closedAtStr             sql.NullString
 			h                                 Hold
 		)
-		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote); err != nil {
+		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr); err != nil {
 			return nil, err
 		}
 		if runID.Valid {
@@ -410,6 +416,13 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 		h.AnsweredVerification = nullStr(ansVerif)
 		h.RelaySession = nullStr(relSess)
 		h.RelayQuote = nullStr(relQuote)
+		if closedAtStr.Valid {
+			t, err := parseTimestamp(closedAtStr.String)
+			if err != nil {
+				return nil, err
+			}
+			h.ClosedAt = &t
+		}
 		holds = append(holds, h)
 	}
 	if err := rows.Err(); err != nil {

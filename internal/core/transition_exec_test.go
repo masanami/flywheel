@@ -659,6 +659,16 @@ func dispatchOperation(t *testing.T, s *Store, id string, op Operation) dispatch
 			ChallengeID: id, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, HoldRelease: true,
 		}, att)
 		return resultOf(c, err)
+	case OpWithdraw:
+		prev, err := s.PrepareWithdraw(context.Background(), id, "because")
+		if err != nil {
+			return dispatchResult{err: err}
+		}
+		att := verifiedAttestationForTest(t, id)
+		c, err := s.ExecuteWithdraw(context.Background(), WithdrawRequest{
+			ChallengeID: id, ExpectedVersion: prev.Version, Reason: "because",
+		}, att)
+		return resultOf(c, err)
 	case OpAnswer:
 		answer := "ans"
 		prev, err := s.PrepareAnswer(context.Background(), id, answer)
@@ -755,7 +765,7 @@ func dispatchedOperations(t *testing.T) []Operation {
 	want := map[Operation]bool{
 		OpClassify: true, OpPlan: true, OpSubmit: true,
 		OpVerifyMet: true, OpVerifyNotMet: true, OpVerifyUncertain: true, OpHold: true,
-		OpApprove: true, OpReject: true, OpAnswer: true, OpApproveHoldRelease: true,
+		OpApprove: true, OpReject: true, OpAnswer: true, OpApproveHoldRelease: true, OpWithdraw: true,
 	}
 	if len(ops) != len(want) {
 		t.Fatalf("dispatchable operations derived from Table = %v, want exactly %v (a new operation token needs a dispatch entry)", ops, want)

@@ -140,6 +140,24 @@ func holdFromCase(from string) worklogCase {
 	}
 }
 
+// withdrawFromCase は T16（取り下げ）の遷移元ごとのケース。after は status・理由・last_occurrence_id（発生が
+// 無いので 0）・版を持つ（M45H28・M45P30）。
+func withdrawFromCase(from string) worklogCase {
+	return worklogCase{
+		name:       "T16 withdraw from " + from,
+		command:    "withdraw",
+		transition: tableRow("T16", core.Status(from)),
+		setup: func(t *testing.T, ws string) []string {
+			return []string{"withdraw", createWithStatusForCase(t, ws, from), "--reason", "r"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"challenge", "C-1", "withdraw",
+				map[string]any{"status": from},
+				map[string]any{"status": "withdrawn", "reason": "r", "last_occurrence_id": 0.0, "version": 2.0}}}
+		},
+	}
+}
+
 var worklogCases = []worklogCase{
 	{
 		name: "T1 create", command: "create", transition: tableRow("T1", core.NoStatus),
@@ -295,6 +313,13 @@ var worklogCases = []worklogCase{
 	holdFromCase("classified"),
 	holdFromCase("in_progress"),
 	holdFromCase("verifying"),
+	withdrawFromCase("unclassified"),
+	withdrawFromCase("classified"),
+	withdrawFromCase("awaiting_plan_approval"),
+	withdrawFromCase("in_progress"),
+	withdrawFromCase("verifying"),
+	withdrawFromCase("awaiting_completion_approval"),
+	withdrawFromCase("awaiting_human"),
 	{
 		name: "T12 answer", command: "answer", transition: tableRow("T12", core.StatusAwaitingHuman),
 		setup: func(t *testing.T, ws string) []string {

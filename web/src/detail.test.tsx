@@ -125,6 +125,35 @@ async function openDetail() {
   return await screen.findByTestId("card-detail-content");
 }
 
+it("取り下げで回答なしに閉じた保留は、開いている保留として出さない", async () => {
+  const d = show({
+    holds: [
+      {
+        answer: null,
+        answered_at: null,
+        answered_by: null,
+        answered_channel: null,
+        answered_verification: null,
+        closed_at: "2026-02-03T00:00:00Z",
+        relay_quote: null,
+        relay_session: null,
+        from_status: "in_progress",
+        from_status_label: "着手中",
+        question: "閉じた問い",
+        raised_at: "t0",
+        run_id: null,
+      },
+    ],
+  });
+  installFakes(bodies(d, {}));
+  const detail = await openDetail();
+  const hold = await within(detail).findByText(/閉じた問い/);
+  const li = hold.closest("li");
+  expect(li?.getAttribute("data-hold")).toBe("closed");
+  expect(li?.textContent).toContain("回答なしで閉じた");
+  expect(li?.textContent).not.toContain("未回答");
+});
+
 it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古い順、report の一覧", async () => {
   const d = show({
     plans: [
@@ -154,6 +183,7 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
         answered_by: "me",
         answered_channel: null,
         answered_verification: null,
+        closed_at: null,
         relay_quote: null,
         relay_session: null,
         from_status: "in_progress",
@@ -238,6 +268,7 @@ it("AC-119: 外部由来の文字列は文字として出し、script 要素と 
         answered_by: "me",
         answered_channel: null,
         answered_verification: null,
+        closed_at: null,
         relay_quote: null,
         relay_session: null,
         from_status: "in_progress",

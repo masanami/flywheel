@@ -27,6 +27,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   answer <ID> --answer <a> [--relayed --session <s> --quote <q>]
   approve <ID> [--hold-release] [--relayed --session <s> --quote <q>]
   reject <ID> --reason <r> [--field <issues|expected|non_goals|figure>]... [--relayed --session <s> --quote <q>]
+  withdraw <C-ID> --reason <r> [--relayed --session <s> --quote <q>]
   budget <C-ID> --impl-usd <額> [--review-usd <額>] [--relayed --session <s> --quote <q>]
   learn [<C-ID>]
   op add <C-ID> --kind <release|delete|external_send|other> --summary <s> [--ref <r>]

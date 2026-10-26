@@ -117,6 +117,7 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 		{"answer", "C-1", "--answer", "a"},
 		{"approve", "C-1"},
 		{"reject", "C-1", "--reason", "r"},
+		{"withdraw", "C-1", "--reason", "r"},
 		{"op", "add", "C-1", "--kind", "release", "--summary", "s"},
 		{"op", "exec"},
 		{"dep", "add", "C-1", "C-2"},

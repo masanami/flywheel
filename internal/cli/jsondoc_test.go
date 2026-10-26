@@ -153,6 +153,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3CycleShape(t, &doc)
 	addM45ReleaseShape(t, &doc)
 	addM45DependencyShape(t, &doc)
+	addM45WithdrawShape(t, &doc)
 	addM45LearnShape(t, &doc)
 	addM45MetricsShape(t, &doc)
 	addM45MetricsCompareShape(t, &doc)
@@ -362,6 +363,32 @@ func addM45DependencyShape(t *testing.T, doc *documentedJSON) {
 	}
 	doc.topLevel["dep add"] = []map[string]bool{keys}
 	doc.topLevel["dep rm"] = []map[string]bool{keys}
+}
+
+// addM45WithdrawShape は `withdraw` の成功時の JSON の形を doc へ足す。m4.5 の受入基準
+// 「`withdraw --json` の成功の出力は `{"challenge": {…}}`」の行から最上位のキーを読む。
+func addM45WithdrawShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	var keys map[string]bool
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "`withdraw --json` の成功の出力は") {
+			for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+				if strings.HasPrefix(m[1], "{") {
+					keys = topLevelKeys(m[1])
+					break
+				}
+			}
+			break
+		}
+	}
+	if len(keys) != 1 || !keys["challenge"] {
+		t.Fatalf("m4.5 spec's `withdraw --json` line does not document {\"challenge\": …}: %v", keys)
+	}
+	doc.topLevel["withdraw"] = []map[string]bool{keys}
 }
 
 // addM45LearnShape は `learn` の成功時の JSON の最上位のキーを doc へ足す。仕様の §IF / API には行を
@@ -1038,6 +1065,9 @@ func addM4RelayEvidenceShape(t *testing.T, doc *documentedJSON) {
 	}
 	doc.entity["hold"]["answered_channel"] = true
 	doc.entity["hold"]["answered_verification"] = true
+	// closed_at: 取り下げで回答なしに閉じた保留の日時（M4.5 S4。hold.closed_at は #385 の列。
+	// 仕様の JSON の表にはまだ書かれていない）。
+	doc.entity["hold"]["closed_at"] = true
 }
 
 // addM4StageShape は S4 が `--json` に足すキー（challenge の headline・context、show の最上位の

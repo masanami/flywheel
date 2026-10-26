@@ -322,16 +322,28 @@ export function DetailSections({ l }: { l: Loaded }) {
           {show.holds.map((h) => (
             <li
               key={h.raised_at}
-              data-hold={h.answer === null ? "open" : "answered"}
+              data-hold={
+                h.answer !== null
+                  ? "answered"
+                  : h.closed_at !== null
+                    ? "closed"
+                    : "open"
+              }
             >
               <div>
                 問い（{h.raised_at}）: <ClampedText text={h.question} />
               </div>
               <div>
                 回答:{" "}
-                {h.answer === null ? "未回答" : <ClampedText text={h.answer} />}
+                {h.answer !== null ? (
+                  <ClampedText text={h.answer} />
+                ) : h.closed_at !== null ? (
+                  `回答なしで閉じた（${h.closed_at}）`
+                ) : (
+                  "未回答"
+                )}
               </div>
-              {h.answer === null ? (
+              {h.answer === null && h.closed_at === null ? (
                 <>
                   <div>保留に入った日時: {h.raised_at}</div>
                   <div>

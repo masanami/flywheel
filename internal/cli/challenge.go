@@ -197,7 +197,11 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 		fmt.Fprintf(&b, "  %s から (%s)\n", fromLabel, FormatTimestamp(h.RaisedAt))
 		b.WriteString(indentLines("問い: "+h.Question, "    "))
 		if h.Answer == nil {
-			b.WriteString("    回答: (未回答)\n")
+			if !h.Open() {
+				fmt.Fprintf(&b, "    回答: (回答なしで閉じた %s)\n", FormatTimestamp(*h.ClosedAt))
+			} else {
+				b.WriteString("    回答: (未回答)\n")
+			}
 			continue
 		}
 		answeredBy, answeredAt := "-", "-"

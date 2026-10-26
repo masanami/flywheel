@@ -317,6 +317,7 @@ export function seed(): Record<string, MockWorkspace> {
           answered_by: null,
           answered_channel: null,
           answered_verification: null,
+          closed_at: null,
           relay_quote: null,
           relay_session: null,
           from_status: "in_progress",
