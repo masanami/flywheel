@@ -314,13 +314,107 @@ func TestJ8Input_DoesNotWriteAndIsDeterministic(t *testing.T) {
 	c := mChallenge(t, s, "c")
 	j8Occ(t, s, c, j8Row{})
 	j8InsertImprovement(t, s, "prompt", "T", "in_progress")
-	before := j8MaxID(t, s, "activity")
+	mRun(t, s, c, "delegate", nil, nil)
+	before := j8Snapshot(t, s)
 	a := prepareJ8(j8Load(t, s, 10))
 	b := prepareJ8(j8Load(t, s, 10))
 	if !reflect.DeepEqual(a, b) {
 		t.Error("input is not deterministic")
 	}
-	if j8MaxID(t, s, "activity") != before {
-		t.Error("loading wrote to the store")
+	if after := j8Snapshot(t, s); !reflect.DeepEqual(before, after) {
+		t.Errorf("loading wrote to the store:\nbefore %v\nafter  %v", before, after)
+	}
+}
+
+// j8Snapshot は activity・occurrence（handled を含む）・challenge・run の全行を文字列で返す。
+func j8Snapshot(t *testing.T, s *Store) map[string][]string {
+	t.Helper()
+	out := map[string][]string{}
+	if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		for _, table := range []string{"activity", "occurrence", "challenge", "run"} {
+			rows, err := tx.Query(`SELECT * FROM ` + table + ` ORDER BY id`)
+			if err != nil {
+				return err
+			}
+			cols, err := rows.Columns()
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			for rows.Next() {
+				vals := make([]any, len(cols))
+				ptrs := make([]any, len(cols))
+				for i := range vals {
+					ptrs[i] = &vals[i]
+				}
+				if err := rows.Scan(ptrs...); err != nil {
+					_ = rows.Close()
+					return err
+				}
+				out[table] = append(out[table], fmt.Sprintf("%v", vals))
+			}
+			if err := rows.Close(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(out["occurrence"]) == 0 || len(out["run"]) == 0 {
+		t.Fatalf("snapshot lacks rows: %v", out)
+	}
+	return out
+}
+
+func TestJ8Input_UnreadableWithdrawAfterIsAnError(t *testing.T) {
+	s := newStoreForTest(t)
+	c := mChallenge(t, s, "c")
+	j8Occ(t, s, c, j8Row{})
+	cid := j8InsertImprovement(t, s, "prompt", "T", "withdrawn")
+	mexec(t, s, `INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, after)
+		VALUES ('2026-03-02T00:00:00.000Z', 'a', 'cli', 'tty_confirm', 'challenge', ?, 'withdraw', '{broken')`, cid)
+	if jc, err := s.loadJ8Context(context.Background(), 1); err == nil {
+		t.Fatalf("broken withdraw after must be an error (not loosen the suppression): %+v", jc)
+	}
+}
+
+func TestJ8Input_DoneImprovementWithOpenReleaseShowsAppliedAtButNoComparison(t *testing.T) {
+	s := newStoreForTest(t)
+	executed := j8InsertImprovement(t, s, "prompt", "R", "done")
+	mRelease(t, s, executed, "executed", mAt(6))
+	mRelease(t, s, executed, "pending", nil)
+	approved := j8InsertImprovement(t, s, "prompt", "A", "done")
+	mApproval(t, s, approved, "completion", "approved", "cli", "tty_confirm", mAt(4), nil)
+	mRelease(t, s, approved, "approved", nil)
+	none := j8InsertImprovement(t, s, "prompt", "N", "done")
+	mRelease(t, s, none, "pending", nil)
+
+	jc := j8Load(t, s, 10)
+	byID := map[int64]j8Improvement{}
+	for _, im := range jc.Improvements {
+		byID[im.ID] = im
+	}
+	if im := byID[executed]; im.AppliedAt != mAt(6) || !im.OpenRelease || im.Compare != nil {
+		t.Errorf("executed release + pending = %+v, want applied %s without comparison", im, mAt(6))
+	}
+	if im := byID[approved]; im.AppliedAt != mAt(4) || !im.OpenRelease || im.Compare != nil {
+		t.Errorf("completion approval + approved release = %+v, want applied %s without comparison", im, mAt(4))
+	}
+	if im := byID[none]; im.AppliedAt != "" || im.Compare != nil {
+		t.Errorf("no application point = %+v", im)
+	}
+	text := j8Section(t, jc, j8ImprovementsLabel)
+	for _, want := range []string{
+		formatChallengeID(executed) + " / 層: prompt / 対象: R / 状態: done / 適用の時点: " + mAt(6) + "（未実行の release があるため前後の指標は比べない）",
+		formatChallengeID(approved) + " / 層: prompt / 対象: A / 状態: done / 適用の時点: " + mAt(4) + "（未実行の release があるため前後の指標は比べない）",
+		formatChallengeID(none) + " / 層: prompt / 対象: N / 状態: done / 適用の時点: なし",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("section lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "適用の前:") {
+		t.Errorf("open release must not carry before/after metrics:\n%s", text)
 	}
 }

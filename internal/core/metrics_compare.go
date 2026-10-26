@@ -59,27 +59,16 @@ func metricsCompare(ctx context.Context, tx *sql.Tx, cid int64) (*MetricsCompare
 	if c.Status != StatusDone {
 		return nil, fmt.Errorf("%w: %s は完了していない課題なので比べられない（状態 %s）", ErrValidation, c.ID, c.Status)
 	}
-	var open int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM operation WHERE challenge_id = ? AND kind = ? AND state IN (?, ?)`,
-		cid, string(OperationKindRelease), string(OperationStatePending), string(OperationStateApproved)).Scan(&open); err != nil {
+	open, err := metricsOpenReleases(ctx, tx, cid)
+	if err != nil {
 		return nil, err
 	}
 	if open > 0 {
 		return nil, fmt.Errorf("%w: %s は未実行（pending・approved）の release を持つので比べられない", ErrValidation, c.ID)
 	}
-	var applied sql.NullString
-	if err := tx.QueryRowContext(ctx,
-		`SELECT MAX(executed_at) FROM operation WHERE challenge_id = ? AND kind = ? AND state = ?`,
-		cid, string(OperationKindRelease), string(OperationStateExecuted)).Scan(&applied); err != nil {
+	applied, err := metricsAppliedAt(ctx, tx, cid)
+	if err != nil {
 		return nil, err
-	}
-	if !applied.Valid {
-		if err := tx.QueryRowContext(ctx,
-			`SELECT MAX(decided_at) FROM approval WHERE challenge_id = ? AND kind = ? AND decision = ?`,
-			cid, string(ApprovalKindCompletion), string(ApprovalDecisionApproved)).Scan(&applied); err != nil {
-			return nil, err
-		}
 	}
 	if !applied.Valid {
 		return nil, fmt.Errorf("%w: %s は適用の時点（release の実行・完了の承認）を持たない", ErrValidation, c.ID)
@@ -100,6 +89,33 @@ func metricsCompare(ctx context.Context, tx *sql.Tx, cid int64) (*MetricsCompare
 		return nil, err
 	}
 	return out, nil
+}
+
+// metricsOpenReleases は課題 cid の未実行（pending・approved）の release の件数を返す。
+func metricsOpenReleases(ctx context.Context, tx *sql.Tx, cid int64) (int, error) {
+	var open int
+	err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM operation WHERE challenge_id = ? AND kind = ? AND state IN (?, ?)`,
+		cid, string(OperationKindRelease), string(OperationStatePending), string(OperationStateApproved)).Scan(&open)
+	return open, err
+}
+
+// metricsAppliedAt は課題 cid の適用の時点を返す: 実行済みの release の最も遅い executed_at、無ければ完了の承認の
+// 最も遅い decided_at。どちらも無ければ Valid でない値。
+func metricsAppliedAt(ctx context.Context, tx *sql.Tx, cid int64) (sql.NullString, error) {
+	var applied sql.NullString
+	if err := tx.QueryRowContext(ctx,
+		`SELECT MAX(executed_at) FROM operation WHERE challenge_id = ? AND kind = ? AND state = ?`,
+		cid, string(OperationKindRelease), string(OperationStateExecuted)).Scan(&applied); err != nil {
+		return applied, err
+	}
+	if applied.Valid {
+		return applied, nil
+	}
+	err := tx.QueryRowContext(ctx,
+		`SELECT MAX(decided_at) FROM approval WHERE challenge_id = ? AND kind = ? AND decision = ?`,
+		cid, string(ApprovalKindCompletion), string(ApprovalDecisionApproved)).Scan(&applied)
+	return applied, err
 }
 
 // metricsCompareTargets は、完了の承認の日時（課題ごとの最も遅いもの）が applied と op（"<" か ">"）の関係にある課題

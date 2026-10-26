@@ -13,7 +13,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -51,13 +50,17 @@ type j8KeyGroup struct {
 	Details []j8Occurrence
 }
 
-// j8Improvement は過去の改修課題 1 件。Compare は完了して適用の時点を持つ課題だけが持つ。
+// j8Improvement は過去の改修課題 1 件。AppliedAt は完了して適用の時点を持つ課題だけが持つ（metrics --compare と
+// 同じ規則）。Compare はそのうち未実行の release を持たない課題だけが持つ。OpenRelease は完了して未実行の
+// release を持つ（前後の指標を比べない）こと。
 type j8Improvement struct {
-	ID      int64
-	Layer   string
-	Target  string
-	Status  Status
-	Compare *MetricsCompareResult
+	ID          int64
+	Layer       string
+	Target      string
+	Status      Status
+	AppliedAt   string
+	OpenRelease bool
+	Compare     *MetricsCompareResult
 }
 
 // j8Context は J8 の入力の事実。
@@ -155,10 +158,11 @@ func j8KeyOf(layer, target string) string {
 }
 
 // loadJ8WithdrawCuts は、取り下げた改修課題の改修の鍵ごとに、最後の（作業ログの id が最大の）取り下げの
-// after.last_occurrence_id を返す。値を持たない取り下げは 0。
+// after.last_occurrence_id を返す。値を持たない取り下げは 0。after が JSON として読めないときはエラーを返す
+// （抑えが外れる側に倒さず、J8 の入力を作らない）。
 func loadJ8WithdrawCuts(ctx context.Context, tx *sql.Tx) (map[string]int64, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT c.improvement_layer, c.improvement_target, a.after FROM activity a
+		`SELECT a.id, c.improvement_layer, c.improvement_target, a.after FROM activity a
 		 JOIN challenge c ON c.id = a.entity_id
 		 WHERE a.entity = 'challenge' AND a.action = ? AND c.origin = ?
 		   AND c.improvement_layer IS NOT NULL AND c.improvement_target IS NOT NULL
@@ -170,16 +174,19 @@ func loadJ8WithdrawCuts(ctx context.Context, tx *sql.Tx) (map[string]int64, erro
 	defer func() { _ = rows.Close() }()
 	cut := map[string]int64{}
 	for rows.Next() {
+		var id int64
 		var layer, target string
 		var after sql.NullString
-		if err := rows.Scan(&layer, &target, &after); err != nil {
+		if err := rows.Scan(&id, &layer, &target, &after); err != nil {
 			return nil, err
 		}
 		var v struct {
 			Last int64 `json:"last_occurrence_id"`
 		}
 		if after.Valid {
-			_ = json.Unmarshal([]byte(after.String), &v) // 読めない after は 0（発生が無い時点の取り下げと同じ）
+			if err := json.Unmarshal([]byte(after.String), &v); err != nil {
+				return nil, fmt.Errorf("core: decode activity.after (id %d): %w", id, err)
+			}
 		}
 		cut[j8KeyOf(layer, target)] = v.Last // 後の行が前を上書きする＝最後の取り下げ
 	}
@@ -238,7 +245,7 @@ func groupJ8Candidates(cands []j8Candidate) []j8KeyGroup {
 }
 
 // loadJ8Improvements は過去の改修課題（出どころ improvement）を新しい順に最大 10 件読む。完了した課題は、
-// 適用の時点を持てば metrics --compare と同じ前後の指標を添える（持たない課題は添えない）。
+// 適用の時点を持てばそれを添え、未実行の release を持たなければ metrics --compare と同じ前後の指標も添える。
 func loadJ8Improvements(ctx context.Context, tx *sql.Tx) ([]j8Improvement, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id, improvement_layer, improvement_target, status FROM challenge
@@ -270,12 +277,23 @@ func loadJ8Improvements(ctx context.Context, tx *sql.Tx) ([]j8Improvement, error
 		if out[i].Status != StatusDone {
 			continue
 		}
-		cmp, err := metricsCompare(ctx, tx, out[i].ID)
-		switch {
-		case err == nil:
-			out[i].Compare = cmp
-		case errors.Is(err, ErrValidation): // 適用の時点を持たない（未実行の release など）
-		default:
+		applied, err := metricsAppliedAt(ctx, tx, out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		if !applied.Valid {
+			continue
+		}
+		out[i].AppliedAt = applied.String
+		open, err := metricsOpenReleases(ctx, tx, out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		if open > 0 {
+			out[i].OpenRelease = true
+			continue
+		}
+		if out[i].Compare, err = metricsCompare(ctx, tx, out[i].ID); err != nil {
 			return nil, err
 		}
 	}
@@ -362,10 +380,13 @@ func prepareJ8(jc *j8Context) []JudgmentDataSection {
 	b.Reset()
 	for _, im := range jc.Improvements {
 		fmt.Fprintf(&b, "- ID: %s / 層: %s / 対象: %s / 状態: %s", formatChallengeID(im.ID), im.Layer, im.Target, im.Status)
-		if im.Compare != nil {
+		switch {
+		case im.Compare != nil:
 			fmt.Fprintf(&b, " / 適用の時点: %s\n  適用の前: %s\n  適用の後: %s", im.Compare.AppliedAt,
 				j8JSON(j8GroupMap(im.Compare.Before)), j8JSON(j8GroupMap(im.Compare.After)))
-		} else {
+		case im.OpenRelease:
+			fmt.Fprintf(&b, " / 適用の時点: %s（未実行の release があるため前後の指標は比べない）", im.AppliedAt)
+		default:
 			b.WriteString(" / 適用の時点: なし")
 		}
 		b.WriteString("\n")
