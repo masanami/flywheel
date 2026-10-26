@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
 import { FakeEventSource, fixtures, installFakes } from "../testing/fakes.ts";
+import { toChallenge } from "./adapt.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -50,6 +51,7 @@ function bodies() {
       }),
       cc("C-7", "in_progress", { next_human_actions: ["answer_question"] }),
       cc("C-4", "done"),
+      cc("C-8", "withdrawn"),
       cc(
         "C-5",
         "in_progress",
@@ -126,6 +128,20 @@ it("既定の画面はボード: ワークスペースがエージェントの�
   expect(within(alpha).queryByText("題名C-4")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "完了を表示" }));
   expect(within(alpha).getByText("題名C-4")).toBeInTheDocument();
+});
+
+it("取り下げた課題は完了と同じ扱い: 既定で隠れ、「完了を表示」で完了と同じ列に出て、表示名は「取り下げ」（AC-388）", async () => {
+  await mount();
+  const alpha = screen.getByRole("region", { name: "alpha の列" });
+  expect(within(alpha).queryByTestId("card-C-8")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "完了を表示" }));
+  const card = within(alpha).getByTestId("card-C-8");
+  expect(within(alpha).getByTestId("card-C-4")).toBeInTheDocument();
+  expect(
+    toChallenge(
+      cc("C-8", "withdrawn") as unknown as Parameters<typeof toChallenge>[0],
+    ).status,
+  ).toBe("取り下げ");
 });
 
 it("人間の操作待ちは「🔔 人間の操作待ち」の見出しの下に先頭で出て、差し戻しの端末のコマンドは詳細に出す", async () => {
