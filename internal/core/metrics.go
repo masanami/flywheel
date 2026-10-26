@@ -136,30 +136,35 @@ func (s *Store) Metrics(ctx context.Context, opt MetricsOptions) (*MetricsResult
 		res.Until = &v
 	}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		targets, err := metricsTargets(ctx, tx, lo, hi)
-		if err != nil {
-			return err
-		}
-		res.TargetChallenges = len(targets)
-		if res.RejectionRate, err = metricsRejection(ctx, tx, targets); err != nil {
-			return err
-		}
-		if res.ResumeCount, err = metricsResume(ctx, tx, targets); err != nil {
-			return err
-		}
-		if res.CostPerChallenge, err = metricsCost(ctx, tx, targets); err != nil {
-			return err
-		}
-		if res.ApprovalCount, err = metricsApprovals(ctx, tx, lo, hi); err != nil {
-			return err
-		}
-		res.Occurrences, err = metricsOccurrences(ctx, tx, lo, hi)
-		return err
+		return metricsFill(ctx, tx, lo, hi, res)
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
 	return res, nil
+}
+
+// metricsFill は期間 [lo, hi)（空は制限なし）の指標を res に数える（J8 の入力から同じ読み取りの中で呼ぶ）。
+func metricsFill(ctx context.Context, tx *sql.Tx, lo, hi string, res *MetricsResult) error {
+	targets, err := metricsTargets(ctx, tx, lo, hi)
+	if err != nil {
+		return err
+	}
+	res.TargetChallenges = len(targets)
+	if res.RejectionRate, err = metricsRejection(ctx, tx, targets); err != nil {
+		return err
+	}
+	if res.ResumeCount, err = metricsResume(ctx, tx, targets); err != nil {
+		return err
+	}
+	if res.CostPerChallenge, err = metricsCost(ctx, tx, targets); err != nil {
+		return err
+	}
+	if res.ApprovalCount, err = metricsApprovals(ctx, tx, lo, hi); err != nil {
+		return err
+	}
+	res.Occurrences, err = metricsOccurrences(ctx, tx, lo, hi)
+	return err
 }
 
 // metricsRange は列 col が [lo, hi) にある条件と引数を返す（空の端は条件を足さない）。
