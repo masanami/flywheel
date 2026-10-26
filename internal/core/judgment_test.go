@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
@@ -676,5 +677,150 @@ func TestReapInterruptedRuns_DefaultThresholdIs300Seconds(t *testing.T) {
 		if got.Result != tc.want {
 			t.Errorf("age %v: Result = %q, want %q", tc.age, got.Result, tc.want)
 		}
+	}
+}
+
+// --- J8: 課題を持たない判断 ---
+
+func TestRunJudgment_J8HasNoChallengeAndKeepsCost(t *testing.T) {
+	s := newStoreForTest(t)
+	inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{
+		Result: RunResultSucceeded, StructuredOutput: []byte(`{"proposals":[]}`), ReportedTotalCostUSD: float64Ptr(1.25),
+	}}
+	res, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ8, MaxBudgetUSD: 5, Stdin: []byte("x"), Invoker: inv})
+	if err != nil {
+		t.Fatalf("RunJudgment(J8): %v", err)
+	}
+	if res.ChallengeID != "" || res.Result != RunResultSucceeded || res.CostUSD != 1.25 {
+		t.Errorf("result = %+v", res)
+	}
+	runs, err := s.ListRuns(context.Background(), RunListOptions{})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("ListRuns = %v, %v", runs, err)
+	}
+	if runs[0].Judgment != JudgmentJ8 || runs[0].ChallengeID != "" || runs[0].SessionID == "" {
+		t.Errorf("run = %+v", runs[0])
+	}
+	// 費用は戻り値だけでなく run の表に書かれる（AC-332）。
+	runID, _ := parseRunID(res.RunID)
+	row, err := loadRunForTest(t, s, runID)
+	if err != nil {
+		t.Fatalf("loadRunForTest: %v", err)
+	}
+	if row.Kind != runKindJudgment || row.CostUSD == nil || *row.CostUSD != usdToMicros(1.25) {
+		t.Errorf("run row = %+v", row)
+	}
+}
+
+func TestRunJudgment_J8RunsMayOverlapBecauseNoChallenge(t *testing.T) {
+	s := newStoreForTest(t)
+	block := make(chan struct{})
+	invoked := make(chan struct{})
+	inv1 := &fakeJudgmentInvoker{block: block, invoked: invoked, result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
+	errc := make(chan error, 1)
+	go func() {
+		_, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ8, MaxBudgetUSD: 5, Stdin: []byte("x"), Invoker: inv1})
+		errc <- err
+	}()
+	// 1 回目が invoker を呼ぶ前にエラーで返っても固まらないよう、エラーとタイムアウトも待つ。
+	select {
+	case <-invoked:
+	case err := <-errc:
+		t.Fatalf("first J8 returned before invoking: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("first J8 did not invoke")
+	}
+	inv2 := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
+	if _, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ8, MaxBudgetUSD: 5, Stdin: []byte("x"), Invoker: inv2}); err != nil {
+		t.Errorf("second J8: %v", err)
+	}
+	close(block)
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Errorf("first J8: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("first J8 did not finish")
+	}
+}
+
+func TestRunJudgment_J8RejectsChallengeAndResume(t *testing.T) {
+	s := newStoreForTest(t)
+	id := createChallengeForJudgmentTest(t, s)
+	inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
+	if _, err := s.RunJudgment(context.Background(), RunJudgmentInput{ChallengeID: id, Judgment: JudgmentJ8, MaxBudgetUSD: 5, Invoker: inv}); !errors.Is(err, ErrValidation) {
+		t.Errorf("J8 with challenge: err = %v, want ErrValidation", err)
+	}
+	first, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ8, MaxBudgetUSD: 5, Invoker: inv})
+	if err != nil {
+		t.Fatalf("first J8: %v", err)
+	}
+	if _, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ8, MaxBudgetUSD: 5, ResumeFromRunID: &first.RunID, Invoker: inv}); !errors.Is(err, ErrValidation) {
+		t.Errorf("J8 with resume: err = %v, want ErrValidation", err)
+	}
+	pv := int64(1)
+	if _, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ8, MaxBudgetUSD: 5, PlanVersion: &pv, Invoker: inv}); !errors.Is(err, ErrValidation) {
+		t.Errorf("J8 with plan version: err = %v, want ErrValidation", err)
+	}
+}
+
+func TestRunJudgment_J1RequiresChallengeStill(t *testing.T) {
+	s := newStoreForTest(t)
+	inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
+	if _, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ1, MaxBudgetUSD: 1, Invoker: inv}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("J1 without challenge: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRunJudgment_J8FailureCreatesNoOccurrence(t *testing.T) {
+	s := newStoreForTest(t)
+	for _, res := range []RunResult{RunResultErrored, RunResultMalformed, RunResultTimedOut, RunResultInvalidOutput} {
+		inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: res}}
+		if _, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ8, MaxBudgetUSD: 5, Invoker: inv}); err != nil {
+			t.Fatalf("RunJudgment(J8, %s): %v", res, err)
+		}
+	}
+	var n int
+	if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM occurrence`).Scan(&n)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("occurrence rows = %d, want 0", n)
+	}
+}
+
+func TestReapInterruptedRuns_J8CreatesNoOccurrence(t *testing.T) {
+	s := newStoreForTest(t)
+	s.staleAfter = 100 * time.Millisecond
+	host, _ := os.Hostname()
+	base := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return base }
+	row, err := insertRunForTest(t, s, 0, insertRunInput{
+		Kind: runKindJudgment, Judgment: judgmentJ8, SessionID: "11111111-1111-1111-1111-111111111111",
+		PID: deadPID(t), Host: host, HeartbeatAt: base, StartedAt: base, MaxBudgetUSD: 5_000_000, BudgetBucket: budgetBucketJudgment,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.now = func() time.Time { return base.Add(time.Second) }
+	if err := s.ReapInterruptedRuns(context.Background()); err != nil {
+		t.Fatalf("ReapInterruptedRuns: %v", err)
+	}
+	id, _ := parseRunID(row.ID)
+	got, err := loadRunForTest(t, s, id)
+	if err != nil || got.Result != RunResultInterrupted {
+		t.Fatalf("run = %+v, err = %v", got, err)
+	}
+	var n int
+	if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM occurrence`).Scan(&n)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("occurrence rows = %d, want 0", n)
 	}
 }

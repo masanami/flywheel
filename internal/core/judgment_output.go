@@ -2,7 +2,7 @@ package core
 
 // このファイルは docs/features/m3-invoker-delegation.md §IF / API
 // 「判断点の出力（--json-schema に渡す形の要点）」・§J3「報告の問いの種類」が
-// 定める、判断点 J1〜J6 の出力と委譲の報告の閉集合の値を Go の定義として置く
+// 定める、判断点 J1〜J6・J8 の出力と委譲の報告の閉集合の値を Go の定義として置く
 // （#82・親要件 #77）。
 //
 // このファイルはあくまで閉集合の値の正本である。JSON スキーマ
@@ -135,7 +135,7 @@ var QuestionKindValues = []QuestionKind{
 	QuestionKindMinor,
 }
 
-// AllJudgmentOutputClosedValues は、判断点 J1〜J6 の出力と委譲の報告が持つ
+// AllJudgmentOutputClosedValues は、判断点 J1〜J6・J8 の出力と委譲の報告が持つ
 // 閉集合の値をすべて1つの一覧に合成して返す（重複を含みうる。例:
 // JudgmentSize の "S" と .flywheel/agent.json のキー "S" は別の関心事だが
 // 文字としては同じ）。
@@ -184,6 +184,12 @@ func AllJudgmentOutputClosedValues() []string {
 		vals = append(vals, string(v))
 	}
 	vals = append(vals, J6MemoryTypeValues...)
+	for _, v := range J8MetricValues {
+		vals = append(vals, string(v))
+	}
+	for _, v := range J8ActionValues {
+		vals = append(vals, string(v))
+	}
 	for _, v := range DelegationOutcomeValues {
 		vals = append(vals, string(v))
 	}

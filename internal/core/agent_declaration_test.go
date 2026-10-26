@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -47,7 +48,7 @@ func TestLoadAgentDeclaration_FileNotFoundUsesAllDefaults(t *testing.T) {
 	if decl.SizeBudgetsUSD != wantSize {
 		t.Errorf("SizeBudgetsUSD = %+v, want %+v", decl.SizeBudgetsUSD, wantSize)
 	}
-	wantJudgment := JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5, J6: 2}
+	wantJudgment := JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5, J6: 2, J8: 5}
 	if decl.JudgmentBudgetUSD != wantJudgment {
 		t.Errorf("JudgmentBudgetUSD = %+v, want %+v", decl.JudgmentBudgetUSD, wantJudgment)
 	}
@@ -63,6 +64,9 @@ func TestLoadAgentDeclaration_FileNotFoundUsesAllDefaults(t *testing.T) {
 	}
 	if decl.FailureLimit != 2 {
 		t.Errorf("FailureLimit = %v, want 2", decl.FailureLimit)
+	}
+	if decl.ImproveThreshold != 10 {
+		t.Errorf("ImproveThreshold = %v, want 10", decl.ImproveThreshold)
 	}
 }
 
@@ -84,29 +88,51 @@ func TestLoadAgentDeclaration_PositionFileOnly_DefaultsUsedTrue(t *testing.T) {
 	}
 }
 
+// allKeysAgentJSON はすべてのキーを明示した agent.json。
+const allKeysAgentJSON = `{
+	"version": 1,
+	"position_file": "positions/harness.md",
+	"cycle_budget_usd": 300,
+	"size_budgets_usd": {"S": {"impl": 30, "review": 25}, "M": {"impl": 50, "review": 30}, "L": {"impl": 100, "review": 40}},
+	"max_run_budget_usd": 200,
+	"judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5, "J6": 2, "J8": 5},
+	"timeout_sec": {"judgment": 900, "delegate": 14400},
+	"max_parallel_runs": 2,
+	"rework_limit": 3,
+	"failure_limit": 2,
+	"improve_threshold": 10,
+	"conflict_prediction_budget_usd": 1,
+	"memory_dir": "memory",
+	"memory_write_limit": {"files": 5, "bytes": 8192}
+}`
+
 // AC: すべてのキーを明示した agent.json は、DefaultsUsed が偽になる。
 func TestLoadAgentDeclaration_AllKeysExplicit_DefaultsUsedFalse(t *testing.T) {
-	dir := writeAgentJSON(t, `{
-		"version": 1,
-		"position_file": "positions/harness.md",
-		"cycle_budget_usd": 300,
-		"size_budgets_usd": {"S": {"impl": 30, "review": 25}, "M": {"impl": 50, "review": 30}, "L": {"impl": 100, "review": 40}},
-		"max_run_budget_usd": 200,
-		"judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5, "J6": 2},
-		"timeout_sec": {"judgment": 900, "delegate": 14400},
-		"max_parallel_runs": 2,
-		"rework_limit": 3,
-		"failure_limit": 2,
-		"conflict_prediction_budget_usd": 1,
-		"memory_dir": "memory",
-		"memory_write_limit": {"files": 5, "bytes": 8192}
-	}`)
+	dir := writeAgentJSON(t, allKeysAgentJSON)
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
 		t.Fatalf("LoadAgentDeclaration() error = %v, want nil", err)
 	}
 	if decl.DefaultsUsed {
 		t.Errorf("DefaultsUsed = true, want false")
+	}
+}
+
+// improve_threshold だけを省いた agent.json は、既定値を使い DefaultsUsed が真になる。
+func TestLoadAgentDeclaration_ImproveThresholdOmitted_DefaultsUsedTrue(t *testing.T) {
+	omitted := strings.Replace(allKeysAgentJSON, `"improve_threshold": 10,`, ``, 1)
+	if omitted == allKeysAgentJSON {
+		t.Fatal("fixture lacks improve_threshold")
+	}
+	decl, err := LoadAgentDeclaration(writeAgentJSON(t, omitted))
+	if err != nil {
+		t.Fatalf("LoadAgentDeclaration() error = %v, want nil", err)
+	}
+	if !decl.DefaultsUsed {
+		t.Errorf("DefaultsUsed = false, want true")
+	}
+	if decl.ImproveThreshold != defaultImproveThreshold {
+		t.Errorf("ImproveThreshold = %d, want %d", decl.ImproveThreshold, defaultImproveThreshold)
 	}
 }
 
@@ -506,5 +532,45 @@ func TestLoadAgentDeclaration_MemoryDirInsideWorkspaceDotDotAllowed(t *testing.T
 	}
 	if decl.MemoryDir != "memory/x" {
 		t.Errorf("MemoryDir = %q", decl.MemoryDir)
+	}
+}
+
+func TestLoadAgentDeclaration_ImproveThreshold(t *testing.T) {
+	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{"improve_threshold": 3}`))
+	if err != nil {
+		t.Fatalf("LoadAgentDeclaration: %v", err)
+	}
+	if decl.ImproveThreshold != 3 {
+		t.Errorf("ImproveThreshold = %d, want 3", decl.ImproveThreshold)
+	}
+	for _, v := range []string{"0", "-1", "1.5", `"10"`, "null"} {
+		t.Run(v, func(t *testing.T) {
+			_, err := LoadAgentDeclaration(writeAgentJSON(t, fmt.Sprintf(`{"improve_threshold": %s}`, v)))
+			if !errors.Is(err, ErrConfigInvalid) {
+				t.Fatalf("error = %v, want ErrConfigInvalid", err)
+			}
+		})
+	}
+}
+
+func TestLoadAgentDeclaration_J8Budget(t *testing.T) {
+	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{"judgment_budget_usd": {"J8": 7.5}}`))
+	if err != nil {
+		t.Fatalf("LoadAgentDeclaration: %v", err)
+	}
+	if got := decl.JudgmentBudgetFor(JudgmentJ8); got != 7.5 {
+		t.Errorf("JudgmentBudgetFor(J8) = %v, want 7.5", got)
+	}
+	if got := decl.JudgmentBudgetUSD.J6; got != 2 {
+		t.Errorf("J6 = %v, want default 2", got)
+	}
+	for _, v := range []string{"0", "-1"} {
+		_, err := LoadAgentDeclaration(writeAgentJSON(t, fmt.Sprintf(`{"judgment_budget_usd": {"J8": %s}}`, v)))
+		if !errors.Is(err, ErrConfigInvalid) {
+			t.Errorf("J8=%s: error = %v, want ErrConfigInvalid", v, err)
+		}
+	}
+	if _, err := LoadAgentDeclaration(writeAgentJSON(t, `{"judgment_budget_usd": {"J7": 1}}`)); !errors.Is(err, ErrConfigInvalid) {
+		t.Errorf("J7 key: error = %v, want ErrConfigInvalid", err)
 	}
 }
