@@ -724,6 +724,19 @@ func TestInsertRun_J8HasNoChallengeButOtherJudgmentsDo(t *testing.T) {
 	if _, err := insertRunForTest(t, s, 0, bad); !errors.Is(err, ErrValidation) {
 		t.Errorf("J8 with version: err = %v", err)
 	}
+	// セッションが空・計画の版あり・再開元ありの J8 も不正。
+	planVersion, resumedFrom := int64(1), int64(1) // 再開元は上で作った最初の run
+	for name, mutate := range map[string]func(*insertRunInput){
+		"no session":   func(in *insertRunInput) { in.SessionID = "" },
+		"plan version": func(in *insertRunInput) { in.PlanVersion = &planVersion },
+		"resumed from": func(in *insertRunInput) { in.ResumedFromRunID = &resumedFrom },
+	} {
+		bad := in
+		mutate(&bad)
+		if _, err := insertRunForTest(t, s, 0, bad); !errors.Is(err, ErrValidation) {
+			t.Errorf("J8 with %s: err = %v", name, err)
+		}
+	}
 	j1 := validInsertRunInput()
 	if _, err := insertRunForTest(t, s, 0, j1); !errors.Is(err, ErrValidation) {
 		t.Errorf("J1 without challenge: err = %v", err)

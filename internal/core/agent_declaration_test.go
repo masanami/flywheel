@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -87,30 +88,51 @@ func TestLoadAgentDeclaration_PositionFileOnly_DefaultsUsedTrue(t *testing.T) {
 	}
 }
 
+// allKeysAgentJSON はすべてのキーを明示した agent.json。
+const allKeysAgentJSON = `{
+	"version": 1,
+	"position_file": "positions/harness.md",
+	"cycle_budget_usd": 300,
+	"size_budgets_usd": {"S": {"impl": 30, "review": 25}, "M": {"impl": 50, "review": 30}, "L": {"impl": 100, "review": 40}},
+	"max_run_budget_usd": 200,
+	"judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5, "J6": 2, "J8": 5},
+	"timeout_sec": {"judgment": 900, "delegate": 14400},
+	"max_parallel_runs": 2,
+	"rework_limit": 3,
+	"failure_limit": 2,
+	"improve_threshold": 10,
+	"conflict_prediction_budget_usd": 1,
+	"memory_dir": "memory",
+	"memory_write_limit": {"files": 5, "bytes": 8192}
+}`
+
 // AC: すべてのキーを明示した agent.json は、DefaultsUsed が偽になる。
 func TestLoadAgentDeclaration_AllKeysExplicit_DefaultsUsedFalse(t *testing.T) {
-	dir := writeAgentJSON(t, `{
-		"version": 1,
-		"position_file": "positions/harness.md",
-		"cycle_budget_usd": 300,
-		"size_budgets_usd": {"S": {"impl": 30, "review": 25}, "M": {"impl": 50, "review": 30}, "L": {"impl": 100, "review": 40}},
-		"max_run_budget_usd": 200,
-		"judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5, "J6": 2, "J8": 5},
-		"timeout_sec": {"judgment": 900, "delegate": 14400},
-		"max_parallel_runs": 2,
-		"rework_limit": 3,
-		"failure_limit": 2,
-		"improve_threshold": 10,
-		"conflict_prediction_budget_usd": 1,
-		"memory_dir": "memory",
-		"memory_write_limit": {"files": 5, "bytes": 8192}
-	}`)
+	dir := writeAgentJSON(t, allKeysAgentJSON)
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
 		t.Fatalf("LoadAgentDeclaration() error = %v, want nil", err)
 	}
 	if decl.DefaultsUsed {
 		t.Errorf("DefaultsUsed = true, want false")
+	}
+}
+
+// improve_threshold だけを省いた agent.json は、既定値を使い DefaultsUsed が真になる。
+func TestLoadAgentDeclaration_ImproveThresholdOmitted_DefaultsUsedTrue(t *testing.T) {
+	omitted := strings.Replace(allKeysAgentJSON, `"improve_threshold": 10,`, ``, 1)
+	if omitted == allKeysAgentJSON {
+		t.Fatal("fixture lacks improve_threshold")
+	}
+	decl, err := LoadAgentDeclaration(writeAgentJSON(t, omitted))
+	if err != nil {
+		t.Fatalf("LoadAgentDeclaration() error = %v, want nil", err)
+	}
+	if !decl.DefaultsUsed {
+		t.Errorf("DefaultsUsed = false, want true")
+	}
+	if decl.ImproveThreshold != defaultImproveThreshold {
+		t.Errorf("ImproveThreshold = %d, want %d", decl.ImproveThreshold, defaultImproveThreshold)
 	}
 }
 

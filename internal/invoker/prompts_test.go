@@ -343,7 +343,13 @@ func TestInstructions_J8AsksForReductionAndMetricHoleCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"やめる・減らす", "穴"} {
+	// 見出し（### 3・### 4）にも出る語ではなく、本文の句で照合する。
+	for _, want := range []string{
+		"足す改修だけを考えない",
+		"やめる・減らす提案の候補として検討する",
+		"選んだ指標で効果を本当に測れるかを疑う",
+		"指標を選び直すか、その提案を出さない",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J8) lacks %q", want)
 		}

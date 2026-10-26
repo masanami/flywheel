@@ -69,6 +69,7 @@ func TestValidateJ8Output_Invalid(t *testing.T) {
 		"blank title":             replace(`"title":"t"`, `"title":" "`),
 		"blank done_criteria":     replace(`"done_criteria":"c"`, `"done_criteria":""`),
 		"empty target":            replace(`"target":"a"`, `"target":"  "`),
+		"blank expected":          replace(`"expected":"下がる"`, `"expected":" "`),
 		"empty occurrence_ids":    replace(`["O-1"]`, `[]`),
 		"blank occurrence id":     replace(`["O-1"]`, `[" "]`),
 		"same id in one proposal": j8Out(j8Prop("prompt", "a", "context", "O-1", "O-1")),
@@ -110,6 +111,28 @@ func TestJ8OutputSchema_HasNoWaitsAndClosedSets(t *testing.T) {
 	for _, v := range []string{`"none"`, `"performance"`} {
 		if strings.Contains(s, v) {
 			t.Errorf("schema has %s", v)
+		}
+	}
+}
+
+// 検査が空白だけを拒否する文字列の項目は、スキーマでも空を許さない（minLength: 1）。
+func TestJ8OutputSchema_NonEmptyStringsMatchValidation(t *testing.T) {
+	var schema struct {
+		Properties struct {
+			Proposals struct {
+				Items struct {
+					Properties map[string]map[string]any `json:"properties"`
+				} `json:"items"`
+			} `json:"proposals"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(j8OutputSchema(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	props := schema.Properties.Proposals.Items.Properties
+	for _, k := range []string{"target", "expected", "title", "done_criteria"} {
+		if got, ok := props[k]["minLength"].(float64); !ok || got != 1 {
+			t.Errorf("%s: minLength = %v, want 1", k, props[k]["minLength"])
 		}
 	}
 }

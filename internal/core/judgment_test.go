@@ -701,6 +701,15 @@ func TestRunJudgment_J8HasNoChallengeAndKeepsCost(t *testing.T) {
 	if runs[0].Judgment != JudgmentJ8 || runs[0].ChallengeID != "" || runs[0].SessionID == "" {
 		t.Errorf("run = %+v", runs[0])
 	}
+	// 費用は戻り値だけでなく run の表に書かれる（AC-332）。
+	runID, _ := parseRunID(res.RunID)
+	row, err := loadRunForTest(t, s, runID)
+	if err != nil {
+		t.Fatalf("loadRunForTest: %v", err)
+	}
+	if row.Kind != runKindJudgment || row.CostUSD == nil || *row.CostUSD != usdToMicros(1.25) {
+		t.Errorf("run row = %+v", row)
+	}
 }
 
 func TestRunJudgment_J8RunsMayOverlapBecauseNoChallenge(t *testing.T) {
@@ -708,18 +717,32 @@ func TestRunJudgment_J8RunsMayOverlapBecauseNoChallenge(t *testing.T) {
 	block := make(chan struct{})
 	invoked := make(chan struct{})
 	inv1 := &fakeJudgmentInvoker{block: block, invoked: invoked, result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
-	done := make(chan struct{})
+	errc := make(chan error, 1)
 	go func() {
-		defer close(done)
-		_, _ = s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ8, MaxBudgetUSD: 5, Stdin: []byte("x"), Invoker: inv1})
+		_, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ8, MaxBudgetUSD: 5, Stdin: []byte("x"), Invoker: inv1})
+		errc <- err
 	}()
-	<-invoked
+	// 1 回目が invoker を呼ぶ前にエラーで返っても固まらないよう、エラーとタイムアウトも待つ。
+	select {
+	case <-invoked:
+	case err := <-errc:
+		t.Fatalf("first J8 returned before invoking: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("first J8 did not invoke")
+	}
 	inv2 := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
 	if _, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ8, MaxBudgetUSD: 5, Stdin: []byte("x"), Invoker: inv2}); err != nil {
 		t.Errorf("second J8: %v", err)
 	}
 	close(block)
-	<-done
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Errorf("first J8: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("first J8 did not finish")
+	}
 }
 
 func TestRunJudgment_J8RejectsChallengeAndResume(t *testing.T) {

@@ -180,12 +180,12 @@ func LoadAgentDeclaration(base string) (*AgentDeclaration, error) {
 	return decl, nil
 }
 
-// JudgmentBudgetFor は判断点 j（J1〜J6）の1回の呼び出しの上限額
+// JudgmentBudgetFor は判断点 j（J1〜J6・J8）の1回の呼び出しの上限額
 // （judgment_budget_usd.<j>）を返す（#83・§予算ガード「判断の呼び出しの
 // --max-budget-usd は、judgment_budget_usd の値」）。呼び出し元
 // （#84〜#86の判断点の入口）は、この値を RunJudgmentInput.MaxBudgetUSD に
-// 渡す。j が J1〜J6 の外なら 0 を返す【仮定】（呼び出し元はJ1〜J6のいずれか
-// しか渡さない。core.JudgmentPoint.valid() で事前に検査されている前提）。
+// 渡す。j が J1〜J6・J8 の外なら 0 を返す【仮定】（呼び出し元はJ1〜J6・J8の
+// いずれかしか渡さない。core.JudgmentPoint.valid() で事前に検査されている前提）。
 func (d *AgentDeclaration) JudgmentBudgetFor(j JudgmentPoint) float64 {
 	switch j {
 	case JudgmentJ1:

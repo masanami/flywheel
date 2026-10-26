@@ -86,17 +86,18 @@ type j8RawOutput struct {
 // j8OutputSchema は J8 の `--json-schema` に渡すスキーマ。閉集合の値は各閉集合の定義から作る。
 func j8OutputSchema() []byte {
 	str := map[string]any{"type": "string"}
+	nonEmpty := map[string]any{"type": "string", "minLength": 1}
 	enum := func(vals []string) map[string]any { return map[string]any{"type": "string", "enum": vals} }
 	props := map[string]any{
 		"layer":          enum(j6StringEnum(J8LayerValues)),
-		"target":         map[string]any{"type": "string", "minLength": 1},
+		"target":         nonEmpty,
 		"cause":          enum(j6StringEnum(J8CauseValues)),
 		"occurrence_ids": map[string]any{"type": "array", "items": str, "minItems": 1, "uniqueItems": true},
 		"metric":         enum(j6StringEnum(J8MetricValues)),
-		"expected":       str,
+		"expected":       nonEmpty,
 		"action":         enum(j6StringEnum(J8ActionValues)),
-		"title":          str,
-		"done_criteria":  str,
+		"title":          nonEmpty,
+		"done_criteria":  nonEmpty,
 	}
 	required := []string{"layer", "target", "cause", "occurrence_ids", "metric", "expected", "action", "title", "done_criteria"}
 	schema := map[string]any{
@@ -112,8 +113,8 @@ func j8OutputSchema() []byte {
 }
 
 // validateJ8Output は J8 の出力を検査する。項目の欠落・閉集合の外の値・layer=none・cause が
-// performance か none・同じ発生の ID が 2 つの提案に現れる・同じ改修の鍵の提案が 2 つ・
-// 提案が 4 件以上のいずれかなら ok=false（出力全体を不正とする）。提案が 3 件までは可。
+// performance か none・対象・期待・題名・完了条件が空白だけ・同じ発生の ID が 2 つの提案に
+// 現れる・同じ改修の鍵の提案が 2 つ・提案が 4 件以上のいずれかなら ok=false（出力全体を不正とする）。提案が 3 件までは可。
 func validateJ8Output(data []byte) ([]J8Proposal, bool) {
 	var raw j8RawOutput
 	if err := json.Unmarshal(data, &raw); err != nil || raw.Proposals == nil {
@@ -147,7 +148,7 @@ func validateJ8Output(data []byte) ([]J8Proposal, bool) {
 			return nil, false
 		}
 		target := strings.TrimSpace(*p.Target)
-		if target == "" || strings.TrimSpace(*p.Title) == "" || strings.TrimSpace(*p.DoneCriteria) == "" || len(*p.OccurrenceIDs) == 0 {
+		if target == "" || strings.TrimSpace(*p.Expected) == "" || strings.TrimSpace(*p.Title) == "" || strings.TrimSpace(*p.DoneCriteria) == "" || len(*p.OccurrenceIDs) == 0 {
 			return nil, false
 		}
 		ids := make([]string, 0, len(*p.OccurrenceIDs))

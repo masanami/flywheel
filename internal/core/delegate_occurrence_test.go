@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 )
 
 // S3（#355）: 委譲の失敗・予算の使い切り・保留で発生を記録する（AC-203・205〜210）。
@@ -336,4 +337,36 @@ func TestOccurrence_InsertFailureRollsBackHolds(t *testing.T) {
 			t.Error("status changed")
 		}
 	})
+}
+
+// 課題を持たない run に発生を作らないのは衝突の予測と J8 だけ。それ以外の判断の run が課題を
+// 持たなければ（不変条件の違反）エラーにする。
+func TestInsertRunOccurrence_OnlyJ8AndPredictMayLackChallenge(t *testing.T) {
+	s := newStoreForTest(t)
+	in := validInsertRunInput()
+	in.Judgment, in.ChallengeVersion = judgmentJ8, 0
+	if _, err := insertRunForTest(t, s, 0, in); err != nil {
+		t.Fatalf("insertRun(J8): %v", err)
+	}
+	insertOcc := func() error {
+		return s.db.Write(context.Background(), func(tx *sql.Tx) error {
+			return s.insertRunOccurrence(context.Background(), tx, 1, OccurrenceKindJudgmentFailed, OccurrenceOutcomeBad, time.Now())
+		})
+	}
+	if err := insertOcc(); err != nil {
+		t.Fatalf("J8: err = %v, want nil", err)
+	}
+	if rows := readOccRows(t, s); len(rows) != 0 {
+		t.Fatalf("J8 made occurrences: %+v", rows)
+	}
+	// 同じ行を J1 に書き換える（insertRun の検査を経ずに不変条件の違反を作る）。
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE run SET judgment = 'J1' WHERE id = 1`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := insertOcc(); err == nil {
+		t.Error("J1 without challenge: err = nil, want error")
+	}
 }

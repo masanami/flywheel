@@ -8,7 +8,7 @@ import (
 // TestAgentDeclarationKeys_ContainsAllTopLevelAndNestedKeys は
 // AgentDeclarationKeys が .flywheel/agent.json のトップレベルのキーと、
 // ネストした葉のキー（size_budgets_usd の S/M/L・そのimpl/review、
-// judgment_budget_usd の J1〜J5、timeout_sec の judgment/delegate）を
+// judgment_budget_usd の J1〜J6・J8、timeout_sec の judgment/delegate）を
 // すべて含むソート済みの一覧を返すことを検証する
 // （§指示文の歯止め「一覧を手で写さない。語彙を足せば検査も追従する」の
 // 検証対象そのもの）。
@@ -20,12 +20,13 @@ func TestAgentDeclarationKeys_ContainsAllTopLevelAndNestedKeys(t *testing.T) {
 		"version", "position_file", "cycle_budget_usd",
 		"size_budgets_usd", "max_run_budget_usd", "judgment_budget_usd",
 		"timeout_sec", "max_parallel_runs", "rework_limit", "failure_limit", "conflict_prediction_budget_usd",
+		"improve_threshold",
 		// ネスト: size_budgets_usd の段（S/M/L）
 		"S", "M", "L",
 		// ネスト: size pair（impl/review）
 		"impl", "review",
-		// ネスト: judgment_budget_usd（J1〜J5）
-		"J1", "J2", "J3", "J4", "J5", "J6",
+		// ネスト: judgment_budget_usd（J1〜J6・J8）
+		"J1", "J2", "J3", "J4", "J5", "J6", "J8",
 		// ネスト: timeout_sec（judgment/delegate）
 		"judgment", "delegate",
 		// M4.5 S3
