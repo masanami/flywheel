@@ -27,7 +27,7 @@ func (s *Store) insertRunOccurrence(ctx context.Context, tx *sql.Tx, runID int64
 	if r == nil {
 		return fmt.Errorf("core: insert run occurrence: run %d not found", runID)
 	}
-	if r.Kind == runKindPredict {
+	if r.Kind == runKindPredict || r.ChallengeID == "" {
 		return nil
 	}
 	cid, ok := parseChallengeID(r.ChallengeID)
