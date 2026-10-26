@@ -78,10 +78,10 @@ const (
 	CostSourceUnknown  CostSource = costSourceUnknown
 )
 
-// JudgmentPoint は判断点 J1〜J6 の閉集合。
+// JudgmentPoint は判断点 J1〜J6・J8 の閉集合（J7 は無い）。
 type JudgmentPoint = judgmentPoint
 
-// JudgmentPoint の6値。
+// JudgmentPoint の7値。
 const (
 	JudgmentJ1 JudgmentPoint = judgmentJ1
 	JudgmentJ2 JudgmentPoint = judgmentJ2
@@ -89,6 +89,7 @@ const (
 	JudgmentJ4 JudgmentPoint = judgmentJ4
 	JudgmentJ5 JudgmentPoint = judgmentJ5
 	JudgmentJ6 JudgmentPoint = judgmentJ6
+	JudgmentJ8 JudgmentPoint = judgmentJ8
 )
 
 // RunKind は run.kind（判断の呼び出しか委譲の起動か）の閉集合。
@@ -127,7 +128,7 @@ type JudgmentLaunchInput struct {
 	// 起動の引数の形（--session-id と --resume のどちらを使うか）を
 	// 決めてよい（実際の引数の形は【仮定】。args.goを参照）。
 	IsResume bool
-	// Judgment は判断点（J1〜J6）。invoker（#84 以降の Sections を使う経路）が
+	// Judgment は判断点（J1〜J6・J8）。invoker（#84 以降の Sections を使う経路）が
 	// この値から埋め込みの指示文（Instructions）を選ぶために使う。
 	Judgment JudgmentPoint
 	// Workspace は判断の呼び出しの作業ディレクトリ。
@@ -228,9 +229,9 @@ func microsToUSD(micros int64) float64 {
 
 // RunJudgmentInput は Store.RunJudgment の入力。
 type RunJudgmentInput struct {
-	// ChallengeID は対象の課題（"C-<n>"）。
+	// ChallengeID は対象の課題（"C-<n>"）。J8 だけは課題を持たないので空にする。
 	ChallengeID string
-	// Judgment は判断点（J1〜J6）。
+	// Judgment は判断点（J1〜J6・J8）。
 	Judgment JudgmentPoint
 	// MaxBudgetUSD はこの run に渡す上限額（USD。0以下は ErrValidation）。
 	MaxBudgetUSD float64
@@ -295,9 +296,19 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 	if !in.Judgment.valid() {
 		return nil, ErrValidation
 	}
-	cid, ok := parseChallengeID(in.ChallengeID)
-	if !ok {
-		return nil, ErrNotFound
+	// J8 は課題を持たない判断（課題の ID を渡さない。再開もしない）。J1〜J6 は課題が必須。
+	noChallenge := in.Judgment == JudgmentJ8
+	var cid int64
+	if noChallenge {
+		if in.ChallengeID != "" || in.ResumeFromRunID != nil || in.PlanVersion != nil {
+			return nil, ErrValidation
+		}
+	} else {
+		var ok bool
+		cid, ok = parseChallengeID(in.ChallengeID)
+		if !ok {
+			return nil, ErrNotFound
+		}
 	}
 
 	// invoker が起動できるか（PATHにclaudeがあるか）を、何も記録・変更する前に
@@ -335,20 +346,26 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 	var runIDInt int64
 
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
-		ch, err := loadChallenge(ctx, tx, cid)
-		if err != nil {
-			return err
+		var challengeVersion int64
+		if !noChallenge {
+			ch, err := loadChallenge(ctx, tx, cid)
+			if err != nil {
+				return err
+			}
+			challengeVersion = int64(ch.Version)
 		}
 
 		if in.CycleID != nil {
 			// 終了していない run を持つ課題は、予算の評価より先に
 			// ErrRunInProgress にする（予算の不足と取り違えない）。
-			active, err := loadActiveRunByChallengeID(ctx, tx, cid)
-			if err != nil {
-				return err
-			}
-			if active != nil {
-				return errActiveRunExists
+			if !noChallenge {
+				active, err := loadActiveRunByChallengeID(ctx, tx, cid)
+				if err != nil {
+					return err
+				}
+				if active != nil {
+					return errActiveRunExists
+				}
 			}
 			cyid, ok := parseCycleID(*in.CycleID)
 			if !ok {
@@ -399,7 +416,7 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 			CycleID:          cycleIDInt,
 			Kind:             runKindJudgment,
 			Judgment:         in.Judgment,
-			ChallengeVersion: int64(ch.Version),
+			ChallengeVersion: challengeVersion,
 			PlanVersion:      in.PlanVersion,
 			SessionID:        sessionID,
 			ResumedFromRunID: resumeFromRunIDInt,
@@ -511,9 +528,13 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 		return nil, classifyReadWriteErr(err)
 	}
 
+	resultChallengeID := ""
+	if !noChallenge {
+		resultChallengeID = formatChallengeID(cid)
+	}
 	return &RunJudgmentResult{
 		RunID:             runIDDisplay,
-		ChallengeID:       formatChallengeID(cid),
+		ChallengeID:       resultChallengeID,
 		Result:            result,
 		RateLimited:       output.RateLimited,
 		CostUSD:           microsToUSD(costMicros),

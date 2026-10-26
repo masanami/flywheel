@@ -68,7 +68,7 @@ func realForbiddenSources() invoker.ForbiddenSources {
 func allEmbeddedPromptContents(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8} {
 		body, err := invoker.Instructions(j)
 		if err != nil {
 			t.Fatalf("invoker.Instructions(%s): %v", j, err)
@@ -214,6 +214,18 @@ func TestForbiddenTerms_DetectsJ6ClosedValues(t *testing.T) {
 		hits := invoker.FindForbiddenTerms("本文に "+v+" がある。", terms)
 		if !slices.Contains(hits, v) {
 			t.Errorf("FindForbiddenTerms did not detect J6 closed value %q (hits=%v)", v, hits)
+		}
+	}
+}
+
+// TestForbiddenTerms_DetectsJ8ClosedValues は、J8 の出力の閉集合の値（指標・種類）が
+// 指示文に現れると検出されることを検証する。
+func TestForbiddenTerms_DetectsJ8ClosedValues(t *testing.T) {
+	terms := invoker.ForbiddenTerms(realForbiddenSources())
+	for _, v := range []string{"rejection_rate", "resume_count", "cost_per_challenge", "approval_count", "add", "reduce", "improve_threshold", "J8"} {
+		hits := invoker.FindForbiddenTerms("本文に "+v+" がある。", terms)
+		if !slices.Contains(hits, v) {
+			t.Errorf("FindForbiddenTerms did not detect J8 closed value %q (hits=%v)", v, hits)
 		}
 	}
 }

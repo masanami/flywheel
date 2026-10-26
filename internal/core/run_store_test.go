@@ -703,3 +703,45 @@ func TestInsertLock_RejectsInvalidInput(t *testing.T) {
 		})
 	}
 }
+
+func TestInsertRun_J8HasNoChallengeButOtherJudgmentsDo(t *testing.T) {
+	s := newStoreForTest(t)
+	in := validInsertRunInput()
+	in.Judgment, in.ChallengeVersion = judgmentJ8, 0
+	r, err := insertRunForTest(t, s, 0, in)
+	if err != nil {
+		t.Fatalf("insertRun(J8): %v", err)
+	}
+	if r.ChallengeID != "" || r.Judgment != judgmentJ8 || r.SessionID == "" || r.Kind != runKindJudgment {
+		t.Errorf("run = %+v", r)
+	}
+	// 課題の ID を付けた J8・課題の版を付けた J8・課題なしの J1 は不正。
+	if _, err := insertRunForTest(t, s, 1, in); !errors.Is(err, ErrValidation) {
+		t.Errorf("J8 with challenge: err = %v", err)
+	}
+	bad := in
+	bad.ChallengeVersion = 1
+	if _, err := insertRunForTest(t, s, 0, bad); !errors.Is(err, ErrValidation) {
+		t.Errorf("J8 with version: err = %v", err)
+	}
+	// セッションが空・計画の版あり・再開元ありの J8 も不正。
+	planVersion, resumedFrom := int64(1), int64(1) // 再開元は上で作った最初の run
+	for name, mutate := range map[string]func(*insertRunInput){
+		"no session":   func(in *insertRunInput) { in.SessionID = "" },
+		"plan version": func(in *insertRunInput) { in.PlanVersion = &planVersion },
+		"resumed from": func(in *insertRunInput) { in.ResumedFromRunID = &resumedFrom },
+	} {
+		bad := in
+		mutate(&bad)
+		if _, err := insertRunForTest(t, s, 0, bad); !errors.Is(err, ErrValidation) {
+			t.Errorf("J8 with %s: err = %v", name, err)
+		}
+	}
+	j1 := validInsertRunInput()
+	if _, err := insertRunForTest(t, s, 0, j1); !errors.Is(err, ErrValidation) {
+		t.Errorf("J1 without challenge: err = %v", err)
+	}
+	if judgmentPoint("J7").valid() {
+		t.Error("J7 must not be valid")
+	}
+}

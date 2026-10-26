@@ -92,7 +92,7 @@ func (k runKind) valid() bool {
 	return false
 }
 
-// judgmentPoint は run.judgment（判断点 J1〜J6。委譲は "" = NULL）。
+// judgmentPoint は run.judgment（判断点 J1〜J6・J8。J7 は無い。委譲は "" = NULL）。
 type judgmentPoint string
 
 const (
@@ -102,13 +102,14 @@ const (
 	judgmentJ4 judgmentPoint = "J4"
 	judgmentJ5 judgmentPoint = "J5"
 	judgmentJ6 judgmentPoint = "J6"
+	judgmentJ8 judgmentPoint = "J8"
 )
 
-// valid は j が J1〜J6 のいずれかであるかを返す（"" には false。空許容は
+// valid は j が J1〜J6・J8 のいずれかであるかを返す（"" には false。空許容は
 // 呼び出し側が kind に応じて判定する）。
 func (j judgmentPoint) valid() bool {
 	switch j {
-	case judgmentJ1, judgmentJ2, judgmentJ3, judgmentJ4, judgmentJ5, judgmentJ6:
+	case judgmentJ1, judgmentJ2, judgmentJ3, judgmentJ4, judgmentJ5, judgmentJ6, judgmentJ8:
 		return true
 	}
 	return false
@@ -425,7 +426,12 @@ func (in insertRunInput) valid() bool {
 			return false
 		}
 	}
-	if in.Kind != runKindPredict && (in.ChallengeVersion <= 0 || in.SessionID == "") {
+	if in.Kind == runKindJudgment && in.Judgment == judgmentJ8 {
+		// J8 は課題を持たない判断（predict と同じく課題・計画・再開元を持たない）。セッションは持つ。
+		if in.ChallengeVersion != 0 || in.PlanVersion != nil || in.ResumedFromRunID != nil || in.SessionID == "" {
+			return false
+		}
+	} else if in.Kind != runKindPredict && (in.ChallengeVersion <= 0 || in.SessionID == "") {
 		return false
 	}
 	if in.Kind != runKindPredict && in.BudgetBucket == budgetBucketPredict {
@@ -460,7 +466,7 @@ func (in insertRunInput) valid() bool {
 //   - 課題に既に終了していない run があれば errActiveRunExists
 //     （部分一意索引 idx_run_active_challenge の違反を翻訳する。AC-168）
 //
-// predict の run は課題に結び付かないため challengeID は 0 を渡す（NULL で
+// predict と J8 の run は課題に結び付かないため challengeID は 0 を渡す（NULL で
 // 挿入する）。それ以外の run に 0 以下を渡すと ErrValidation。
 //
 // slot_id を指定し、そのスロットに終了していない run が既にあれば
@@ -469,12 +475,15 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 	if !in.valid() {
 		return nil, ErrValidation
 	}
-	if (in.Kind == runKindPredict) != (challengeID == 0) || challengeID < 0 {
+	noChallenge := in.Kind == runKindPredict || (in.Kind == runKindJudgment && in.Judgment == judgmentJ8)
+	if noChallenge != (challengeID == 0) || challengeID < 0 {
 		return nil, ErrValidation
 	}
 	var challengeIDCol, challengeVersionCol, sessionIDCol any
-	if in.Kind != runKindPredict {
+	if !noChallenge {
 		challengeIDCol, challengeVersionCol, sessionIDCol = challengeID, in.ChallengeVersion, in.SessionID
+	} else if in.Kind == runKindJudgment {
+		sessionIDCol = in.SessionID
 	}
 
 	res, err := tx.ExecContext(ctx,

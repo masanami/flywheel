@@ -13,7 +13,7 @@ import (
 // 返すことを検証する（#82・§指示文の歯止め「判断点ごとの指示文は別ファイルと
 // し、バイナリに埋め込む」）。
 func TestInstructions_ReturnsEmbeddedContentForEachJudgmentPoint(t *testing.T) {
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8} {
 		got, err := Instructions(j)
 		if err != nil {
 			t.Fatalf("Instructions(%s): %v", j, err)
@@ -29,7 +29,7 @@ func TestInstructions_ReturnsEmbeddedContentForEachJudgmentPoint(t *testing.T) {
 // （1つのファイルへの読み違いを防ぐ回帰）。
 func TestInstructions_DifferentJudgmentPointsHaveDifferentContent(t *testing.T) {
 	seen := map[string]core.JudgmentPoint{}
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8} {
 		got, err := Instructions(j)
 		if err != nil {
 			t.Fatalf("Instructions(%s): %v", j, err)
@@ -111,6 +111,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j4.md": 4096,
 		"j5.md": 6144,
 		"j6.md": 6144,
+		"j8.md": 6144,
 	}
 
 	mkFS := func(sizes map[string]int) fstest.MapFS {
@@ -161,6 +162,7 @@ func TestCheckPromptSizes_BriefTotal_ExactLimitPasses_OneByteOverFails(t *testin
 			"j4.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 			"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 			"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+			"j8.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
@@ -192,6 +194,7 @@ func TestCheckPromptSizes_MissingJudgmentFileFails(t *testing.T) {
 		"j4.md": &fstest.MapFile{Data: repeatBytes(1)},
 		// j5.md が無い
 		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"j8.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
@@ -217,6 +220,7 @@ func TestCheckPromptSizes_MissingBriefFileFails(t *testing.T) {
 		"j4.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"j8.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
@@ -240,6 +244,7 @@ func TestCheckPromptSizes_UnexpectedFileFails(t *testing.T) {
 		"j4.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"j8.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j7.md":                            &fstest.MapFile{Data: repeatBytes(1)}, // 上限表に無い
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
@@ -266,6 +271,7 @@ func TestCheckPromptSizes_UnexpectedFileInBriefDirFails(t *testing.T) {
 		"j4.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"j8.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/completion_report_style.md": &fstest.MapFile{Data: repeatBytes(1)},
@@ -328,5 +334,27 @@ func TestInstructions_J6ForbidsDuplicateFollowups(t *testing.T) {
 	}
 	if !strings.Contains(got, label+"にある課題と同じ内容のものは重複させない") {
 		t.Errorf("Instructions(J6) lacks the instruction not to duplicate %s", label)
+	}
+}
+
+// J8 の指示文は、やめる・減らす候補の検討と、指標の取り方の穴の点検を求める。
+func TestInstructions_J8AsksForReductionAndMetricHoleCheck(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 見出し（### 3・### 4）にも出る語ではなく、本文の句で照合する。
+	for _, want := range []string{
+		"足す改修だけを考えない",
+		"やめる・減らす提案の候補として検討する",
+		"選んだ指標で効果を本当に測れるかを疑う",
+		"指標を選び直すか、その提案を出さない",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J8) lacks %q", want)
+		}
+	}
+	if len(got) > 6144 {
+		t.Errorf("Instructions(J8) is %d bytes, over 6144", len(got))
 	}
 }
