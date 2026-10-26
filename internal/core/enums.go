@@ -269,6 +269,13 @@ const (
 	ActivityActionFollowup = "followup"
 )
 
+// 作業ログ（entity=challenge）の action。取り下げ（withdraw。#386 が書く）・
+// 改修課題の起票（improvement。#392 が書く）。ここでは定数だけを持つ。
+const (
+	ActivityActionWithdraw    = "withdraw"
+	ActivityActionImprovement = "improvement"
+)
+
 // ExecutionResult は release の実行の試行の結果（operation_execution.result）の閉集合。
 type ExecutionResult string
 
@@ -374,14 +381,15 @@ func (r ExecutionResult) Counts() bool {
 // ChallengeOrigin は課題の出どころ（challenge.origin。マイグレーション 0011）。
 type ChallengeOrigin string
 
-// ChallengeOrigin の3値。improvement は S4 が足す。
+// ChallengeOrigin の4値。improvement だけが改修の鍵（improvement_layer・improvement_target）を持つ。
 const (
-	ChallengeOriginIngest   ChallengeOrigin = "ingest"
-	ChallengeOriginManual   ChallengeOrigin = "manual"
-	ChallengeOriginFollowup ChallengeOrigin = "followup"
+	ChallengeOriginIngest      ChallengeOrigin = "ingest"
+	ChallengeOriginManual      ChallengeOrigin = "manual"
+	ChallengeOriginFollowup    ChallengeOrigin = "followup"
+	ChallengeOriginImprovement ChallengeOrigin = "improvement"
 )
 
-var challengeOriginValues = []ChallengeOrigin{ChallengeOriginIngest, ChallengeOriginManual, ChallengeOriginFollowup}
+var challengeOriginValues = []ChallengeOrigin{ChallengeOriginIngest, ChallengeOriginManual, ChallengeOriginFollowup, ChallengeOriginImprovement}
 
 // ParseChallengeOrigin は s を課題の出どころとして解釈する。前後の空白を除いた完全一致のみ受理する。
 func ParseChallengeOrigin(s string) (ChallengeOrigin, bool) {

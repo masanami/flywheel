@@ -34,6 +34,7 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
       dependencies: [],
       dependents: [],
       followup_of: null,
+      improvement: null,
       description: "説明",
       done_criteria: "完了条件",
       headline: null,

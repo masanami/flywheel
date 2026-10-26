@@ -163,6 +163,7 @@ export interface ShowChallenge {
   followup_of: string | null;
   headline: string | null;
   id: string;
+  improvement: ImprovementKey | null;
   priority: string | null;
   reporter: string;
   status: string;
@@ -179,6 +180,11 @@ export interface Dependency {
   satisfied: boolean;
   status: string;
   upstream_state: string | null;
+}
+
+export interface ImprovementKey {
+  layer: string;
+  target: string;
 }
 
 export interface Hold {

@@ -68,8 +68,11 @@ func TestOccurrenceClosedSets(t *testing.T) {
 	if _, ok := ParseOccurrenceLayer("code"); ok {
 		t.Error("layer code accepted")
 	}
-	if _, ok := ParseChallengeOrigin("improvement"); ok {
-		t.Error("origin improvement accepted before S4")
+	if _, ok := ParseChallengeOrigin("improvement"); !ok {
+		t.Error("origin improvement rejected (AC-408)")
+	}
+	if ActivityActionWithdraw != "withdraw" || ActivityActionImprovement != "improvement" {
+		t.Error("withdraw/improvement activity actions missing (AC-410)")
 	}
 	if ActivityActionLearn != "learn" || ActivityActionFollowup != "followup" {
 		t.Error("learn/followup activity actions missing (AC-311)")
@@ -315,7 +318,7 @@ func TestInsertChallengeRow_AcceptsFollowupOf(t *testing.T) {
 	var id int64
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
 		var err error
-		id, _, err = insertChallengeRow(context.Background(), tx, time.Now(), "t", "", "", nil, "r", ChallengeOriginFollowup, &of)
+		id, _, err = insertChallengeRow(context.Background(), tx, time.Now(), "t", "", "", nil, "r", ChallengeOriginFollowup, &of, nil)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -325,7 +328,7 @@ func TestInsertChallengeRow_AcceptsFollowupOf(t *testing.T) {
 		t.Errorf("origin = %q followup_of = %v", origin, followupOf)
 	}
 	err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		_, _, err := insertChallengeRow(context.Background(), tx, time.Now(), "t", "", "", nil, "r", "bogus", nil)
+		_, _, err := insertChallengeRow(context.Background(), tx, time.Now(), "t", "", "", nil, "r", "bogus", nil, nil)
 		return err
 	})
 	if err == nil {

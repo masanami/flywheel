@@ -660,7 +660,7 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 		filed := []string{}
 		source := formatChallengeID(cid)
 		for _, f := range v.Followups {
-			fid, _, err := insertChallengeRow(ctx, tx, rec.at, f.Title, f.Description, f.DoneCriteria, nil, rec.actor, ChallengeOriginFollowup, &source)
+			fid, _, err := insertChallengeRow(ctx, tx, rec.at, f.Title, f.Description, f.DoneCriteria, nil, rec.actor, ChallengeOriginFollowup, &source, nil)
 			if err != nil {
 				return err
 			}
