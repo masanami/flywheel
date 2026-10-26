@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // このファイルは課題の取り下げ（T16。docs/features/m4.5-learning-and-self-improvement.md S4。
@@ -33,10 +34,24 @@ type WithdrawRequest struct {
 	Reason          string
 }
 
+// withdrawConflictError は取り下げを止める前提（終わっていない委譲の run・release の実行の試行）に
+// 当たったこと。ErrConflict を包み CLI では conflict で終わるが（M45H29）、文言は取り下げを止めた理由を
+// そのまま示す（ErrConflict 自体の文言「要約の後に課題が変わった」とは読ませない）。
+type withdrawConflictError struct{ msg string }
+
+func (e *withdrawConflictError) Error() string { return e.msg }
+func (e *withdrawConflictError) Unwrap() error { return ErrConflict }
+
 // errWithdrawOpenDelegation は、着手中で終わっていない委譲の run がある課題を取り下げようとしたこと。
-// ErrConflict を包み、CLI では conflict で終わる（M45H29）。
 func errWithdrawOpenDelegation(challengeID string) error {
-	return fmt.Errorf("%w: challenge %s has an unfinished delegation run", ErrConflict, challengeID)
+	return &withdrawConflictError{msg: fmt.Sprintf(
+		"core: cannot withdraw challenge %s: it has an unfinished delegation run; wait for the run to end", challengeID)}
+}
+
+// errWithdrawReleaseInProgress は、課題の release に終わっていない（止まっていない）実行の試行があること。
+func errWithdrawReleaseInProgress(challengeID string) error {
+	return &withdrawConflictError{msg: fmt.Sprintf(
+		"core: cannot withdraw challenge %s: a release execution (op exec) is in progress; wait for it to end", challengeID)}
 }
 
 // hasOpenDelegationRun は課題 cid に終わっていない委譲の run があるかを返す。
@@ -48,39 +63,71 @@ func hasOpenDelegationRun(ctx context.Context, tx *sql.Tx, cid int64) (bool, err
 	return n > 0, err
 }
 
-// hasOpenReleaseAttempt は課題の不可逆操作に、終わっていない実行の試行（`op exec` がマージを依頼している最中）が
-// あるかを返す。取り下げで release を rejected にすると、依頼中のマージの結果を記録する経路が働かないため止める。
-func hasOpenReleaseAttempt(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) {
-	var n int
-	err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM operation_execution e JOIN operation o ON o.id = e.operation_id
-		 WHERE o.challenge_id = ? AND e.ended_at IS NULL`, cid).Scan(&n)
-	return n > 0, err
+// openReleaseAttempts は課題の不可逆操作の、終わっていない実行の試行を ID 昇順で返す。
+func openReleaseAttempts(ctx context.Context, tx *sql.Tx, cid int64) ([]*operationExecutionRow, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT e.id FROM operation_execution e JOIN operation o ON o.id = e.operation_id
+		 WHERE o.challenge_id = ? AND e.ended_at IS NULL ORDER BY e.id ASC`, cid)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	out := make([]*operationExecutionRow, 0, len(ids))
+	for _, id := range ids {
+		r, err := getOperationExecution(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }
 
 // checkWithdrawable は取り下げの前提（完了・取り下げでない、着手中なら終わっていない委譲の run が無い、
-// 終わっていない release の実行の試行が無い）を調べる。
-func checkWithdrawable(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge) error {
+// 止まっていない release の実行の試行が無い）を調べる。
+//
+// release の実行の試行は `op exec` と同じ判定（releaseAttemptStale）で止まったものを開いていないとみなし、
+// その試行を stale として返す（書き込み側が interrupted として閉じる）。止まっていない試行があれば conflict
+// （取り下げで release を rejected にすると、依頼中のマージの結果を記録する経路が働かないため）。
+func checkWithdrawable(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge, at time.Time) (stale []*operationExecutionRow, err error) {
 	if IsTerminal(Table, StatusVocabulary, current.Status) {
-		return ErrTerminalState
+		return nil, ErrTerminalState
 	}
 	if current.Status == StatusInProgress {
 		open, err := hasOpenDelegationRun(ctx, tx, cid)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if open {
-			return errWithdrawOpenDelegation(current.ID)
+			return nil, errWithdrawOpenDelegation(current.ID)
 		}
 	}
-	attempt, err := hasOpenReleaseAttempt(ctx, tx, cid)
+	attempts, err := openReleaseAttempts(ctx, tx, cid)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if attempt {
-		return fmt.Errorf("%w: challenge %s has a release execution in progress", ErrConflict, current.ID)
+	for _, a := range attempts {
+		if !releaseAttemptStale(a, at) {
+			return nil, errWithdrawReleaseInProgress(current.ID)
+		}
+		stale = append(stale, a)
 	}
-	return nil
+	return stale, nil
 }
 
 // PrepareWithdraw は withdraw の ①（読み取り）。理由が空なら ErrValidation、課題が無ければ ErrNotFound、
@@ -104,7 +151,7 @@ func (s *Store) PrepareWithdraw(ctx context.Context, id string, reason string) (
 		if err != nil {
 			return err
 		}
-		if err := checkWithdrawable(ctx, tx, cid, current); err != nil {
+		if _, err := checkWithdrawable(ctx, tx, cid, current, s.currentTime()); err != nil {
 			return err
 		}
 		ops, err := loadOperations(ctx, tx, cid)
@@ -160,8 +207,15 @@ func (s *Store) ExecuteWithdraw(ctx context.Context, req WithdrawRequest, att At
 	}
 
 	apply := func(ctx context.Context, tc *transitionCtx) error {
-		if err := checkWithdrawable(ctx, tc.tx, tc.id, tc.current); err != nil {
+		stale, err := checkWithdrawable(ctx, tc.tx, tc.id, tc.current, tc.now)
+		if err != nil {
 			return err
+		}
+		// 止まった試行は `op exec` の再実行と同じく interrupted として閉じる（executeRelease と同じ扱い）。
+		for _, a := range stale {
+			if err := closeOperationExecution(ctx, tc.tx, a.ID, closeOperationExecutionInput{EndedAt: tc.now, Result: ExecutionResultInterrupted}); err != nil {
+				return err
+			}
 		}
 		if err := rejectOperationsForWithdrawal(ctx, tc, req.Reason, att); err != nil {
 			return err

@@ -239,11 +239,15 @@ func TestWithdraw_ClosesOpenHoldWithoutAnswer(t *testing.T) {
 	if h["answer"] != nil || h["closed_at"] == nil {
 		t.Errorf("hold = %v, want answer null and closed_at set", h)
 	}
+	// show のテキストは閉じた保留を「未回答」と出さず、閉じた旨を出す（#385 の申し送り）。
+	if out := runText(t, ws, "show", id); !strings.Contains(out, "回答: (回答なしで閉じた ") || strings.Contains(out, "回答: (未回答)") {
+		t.Errorf("show text = %q, want the closed-hold marker instead of (未回答)", out)
+	}
 	// 閉じた保留が未回答の質問として数えられないことは core の
 	// TestWithdraw_ClosedHold_IsNotOpenInAnyReadPath（ListUnansweredHolds）が確かめる。
 }
 
-// AC-384 相当: list --status は withdrawn と 取り下げ のどちらでも取り下げた課題を返す。
+// AC-382 相当: list --status は withdrawn と 取り下げ のどちらでも取り下げた課題を返す。
 func TestWithdraw_ListStatusFindsWithdrawnByCodeAndLabel(t *testing.T) {
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)

@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // このファイルは課題の取り下げ（docs/features/m4.5-learning-and-self-improvement.md S4。T16）の core の
@@ -83,11 +85,17 @@ func TestExecuteWithdraw_UINoneAttestationIsRejected(t *testing.T) {
 	}
 }
 
+// last_occurrence_id は取り下げた時点の発生の id の全体の最大（課題を問わない。#391 の見送りの抑えの鍵）。
+// 別の課題の発生を後に作り、途中の id を欠番にして、件数・課題単位の最大と区別する。
 func TestExecuteWithdraw_LastOccurrenceIDIsTheMaxOccurrenceID(t *testing.T) {
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusClassified)
-	f.occ(t, c, "plan_rejected", "bad", nil)
-	f.occ(t, c, "plan_rejected", "bad", nil)
+	other := f.challenge(t, StatusClassified)
+	f.occ(t, c, "plan_rejected", "bad", nil)     // O-1
+	f.occ(t, c, "plan_rejected", "bad", nil)     // O-2（欠番にする）
+	f.occ(t, other, "plan_rejected", "bad", nil) // O-3
+	f.occ(t, other, "plan_rejected", "bad", nil) // O-4
+	f.exec(t, `DELETE FROM occurrence WHERE id = 2`)
 
 	if _, err := withdrawForTest(t, f.s, c, "r"); err != nil {
 		t.Fatal(err)
@@ -101,8 +109,45 @@ func TestExecuteWithdraw_LastOccurrenceIDIsTheMaxOccurrenceID(t *testing.T) {
 	if err := json.Unmarshal(last.After, &after); err != nil {
 		t.Fatal(err)
 	}
-	if last.Action != "withdraw" || after["last_occurrence_id"] != float64(2) {
-		t.Errorf("last activity = %s %s, want withdraw with last_occurrence_id 2", last.Action, last.After)
+	// 件数は 3・この課題の最大は 1・全体の最大は 4。
+	if last.Action != "withdraw" || after["last_occurrence_id"] != float64(4) {
+		t.Errorf("last activity = %s %s, want withdraw with last_occurrence_id 4", last.Action, last.After)
+	}
+}
+
+// AC-389: 取り下げは課題の出どころ（取り込み・人の手・フォローアップ・改修課題）を問わない。
+func TestWithdraw_AnyOrigin_Succeeds(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	base := createAndAdvance(t, s, StatusClassified)
+	for _, tc := range []struct {
+		origin      ChallengeOrigin
+		followupOf  *string
+		improvement *ImprovementKey
+	}{
+		{origin: ChallengeOriginIngest},
+		{origin: ChallengeOriginManual},
+		{origin: ChallengeOriginFollowup, followupOf: &base.ID},
+		{origin: ChallengeOriginImprovement, improvement: &ImprovementKey{Layer: "prompt", Target: "t"}},
+	} {
+		t.Run(string(tc.origin), func(t *testing.T) {
+			var cid int64
+			if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+				var err error
+				cid, _, err = insertChallengeRow(context.Background(), tx, time.Now(), "origin "+string(tc.origin), "", "", nil, "alice", tc.origin, tc.followupOf, tc.improvement)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			id := formatChallengeID(cid)
+			got, err := withdrawForTest(t, s, id, "r")
+			if err != nil {
+				t.Fatalf("withdraw %s: %v", tc.origin, err)
+			}
+			if got.Status != StatusWithdrawn {
+				t.Errorf("status = %s, want withdrawn", got.Status)
+			}
+		})
 	}
 }
 
@@ -148,28 +193,139 @@ func TestWithdraw_InProgressWithOnlyJudgmentOrClosedRuns_Succeeds(t *testing.T) 
 	}
 }
 
-// release の実行の試行が終わっていない課題は conflict で、何も書かない（`op exec` が依頼中のマージを取りこぼさない）。
-func TestWithdraw_OpenReleaseExecutionAttempt_IsConflictAndWritesNothing(t *testing.T) {
+// AC-376: ① の後・② の前に委譲の run が始まると、版の照合では検出できない（run の記録は課題の版を上げない）。
+// ② のトランザクションの中の再検査が conflict にし、何も書かない。
+func TestWithdraw_DelegationStartedAfterPrepare_IsConflictAndWritesNothing(t *testing.T) {
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
-	ch := createAndAdvance(t, s, StatusAwaitingCompletionApproval)
-	if _, err := s.CreateOperation(context.Background(), ChannelCLI, OperationInput{ChallengeID: ch.ID, Kind: "release", Summary: "s"}); err != nil {
+	ch := createAndAdvance(t, s, StatusInProgress)
+	prev, err := s.PrepareWithdraw(context.Background(), ch.ID, "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := insertActiveFakeRunForTest(t, s, ch.ID, judgmentJ1)
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE run SET kind = 'delegate', judgment = NULL WHERE id = ?`, runID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.ExecuteWithdraw(context.Background(), WithdrawRequest{ChallengeID: ch.ID, ExpectedVersion: prev.Version, Reason: "r"}, verifiedAttestationForTest(t, ch.ID))
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+	if strings.Contains(err.Error(), "approval summary") || !strings.Contains(err.Error(), "delegation run") {
+		t.Errorf("err message = %q, want the withdraw reason (unfinished delegation run)", err.Error())
+	}
+	if d, _ := s.GetChallenge(context.Background(), ch.ID); d.Status != StatusInProgress || d.Version != prev.Version {
+		t.Errorf("challenge changed: %s v%d", d.Status, d.Version)
+	}
+	if n := len(activitiesFor(t, s, ch.ID)); n != 1 {
+		t.Errorf("activities = %d, want 1", n)
+	}
+}
+
+// approvedReleaseWithAttempt は課題に approved の release を作り、終わっていない試行（pid・host・開始時刻）を 1 つ足す。
+func approvedReleaseWithAttempt(t *testing.T, s *Store, id string, pid int64, host string, started time.Time) {
+	t.Helper()
+	if _, err := s.CreateOperation(context.Background(), ChannelCLI, OperationInput{ChallengeID: id, Kind: "release", Summary: "s"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`UPDATE operation SET state = 'approved'`); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO operation_execution (operation_id, started_at, pid, host) VALUES (1, '2026-01-01T00:00:00.000Z', 1, 'h')`)
+		_, err := tx.Exec(`INSERT INTO operation_execution (operation_id, started_at, pid, host) VALUES (1, ?, ?, ?)`,
+			formatTimestamp(started), pid, host)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := withdrawForTest(t, s, ch.ID, "r"); !errors.Is(err, ErrConflict) {
+}
+
+// プロセスの生きている試行（`op exec` がマージを依頼している最中）は conflict で、何も書かない。
+func TestWithdraw_LiveReleaseExecutionAttempt_IsConflictAndWritesNothing(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	ch := createAndAdvance(t, s, StatusAwaitingCompletionApproval)
+	host, _ := os.Hostname()
+	approvedReleaseWithAttempt(t, s, ch.ID, int64(os.Getpid()), host, time.Now())
+
+	_, err := withdrawForTest(t, s, ch.ID, "r")
+	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+	if strings.Contains(err.Error(), "approval summary") || !strings.Contains(err.Error(), "release execution") {
+		t.Errorf("err message = %q, want the withdraw reason (release execution in progress)", err.Error())
 	}
 	if d, _ := s.GetChallenge(context.Background(), ch.ID); d.Status != StatusAwaitingCompletionApproval {
 		t.Errorf("status = %s, want unchanged", d.Status)
+	}
+	if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		r, err := getOperationExecution(context.Background(), tx, 1)
+		if err != nil {
+			return err
+		}
+		if !r.open() {
+			t.Error("the live attempt was closed")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// プロセスの死んだ（止まった）試行は開いていないとみなし、取り下げのトランザクションで interrupted として閉じる
+// （`op exec` の再実行＝本番へのマージ以外に閉じる経路を残す。M45H29）。
+func TestWithdraw_StaleReleaseExecutionAttempt_IsClosedAsInterruptedAndWithdraws(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	ch := createAndAdvance(t, s, StatusAwaitingCompletionApproval)
+	host, _ := os.Hostname()
+	approvedReleaseWithAttempt(t, s, ch.ID, deadPID(t), host, time.Now())
+
+	got, err := withdrawForTest(t, s, ch.ID, "r")
+	if err != nil {
+		t.Fatalf("err = %v, want success", err)
+	}
+	if got.Status != StatusWithdrawn {
+		t.Errorf("status = %s, want withdrawn", got.Status)
+	}
+	if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		r, err := getOperationExecution(context.Background(), tx, 1)
+		if err != nil {
+			return err
+		}
+		if r.open() || r.Result != ExecutionResultInterrupted {
+			t.Errorf("attempt = %+v, want closed as interrupted", r)
+		}
+		var state string
+		if err := tx.QueryRow(`SELECT state FROM operation WHERE id = 1`).Scan(&state); err != nil {
+			return err
+		}
+		if state != string(OperationStateRejected) {
+			t.Errorf("operation state = %s, want rejected", state)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// J6 の入力の「承認と保留の記録」は、閉じた保留を未回答と書かない（#385 の申し送り）。
+func TestWithdraw_J6Input_ClosedHoldIsNotUnanswered(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusWithdrawn)
+	cid, _ := parseChallengeID(c)
+	now := formatTimestamp(time.Now())
+	f.exec(t, `INSERT INTO hold (challenge_id, question, from_status, raised_at, closed_at) VALUES (?, 'CLOSED-Q', 'verifying', ?, ?)`, cid, now, now)
+	f.occ(t, c, "plan_rejected", "bad", nil)
+
+	f.mustLearn(t, nil)
+	got := f.section(t, f.inputs[0], "承認と保留の記録")
+	if !strings.Contains(got, "CLOSED-Q") || !strings.Contains(got, "(回答なしで閉じた)") || strings.Contains(got, "(未回答)") {
+		t.Errorf("approvals/holds section = %q, want the closed marker instead of (未回答)", got)
 	}
 }
 
