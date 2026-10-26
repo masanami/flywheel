@@ -14,8 +14,20 @@ import (
 // runMetrics は `flywheel metrics [--since <日付>] [--until <日付>] [--json]` の実装
 // （docs/features/m4.5-learning-and-self-improvement.md §効果の測定）。core.Store.Metrics を呼ぶだけで、
 // 集計の規則は core が持つ。判断点も `claude` も起動せず、ストアを書かない。
-// `--compare` は S4 で足すので、S3 では未知のフラグとして usage_error になる。
+// `--compare <C-ID>`（S4）は適用の時点の前後の組を比べ、`--since`・`--until` とは同時に指定できない。
 func runMetrics(a Args) (any, error) {
+	if id, ok := a.Values["compare"]; ok {
+		_, hasSince := a.Values["since"]
+		_, hasUntil := a.Values["until"]
+		if hasSince || hasUntil {
+			return nil, NewError(CodeUsageError, "--compare は --since・--until と同時に指定できません")
+		}
+		r, err := a.Store.MetricsCompare(context.Background(), id)
+		if err != nil {
+			return nil, mapCoreErr(err)
+		}
+		return textOutput{json: view.FromMetricsCompare(r), text: metricsCompareText(r)}, nil
+	}
 	var opt core.MetricsOptions
 	for _, f := range []struct {
 		name string
@@ -87,5 +99,25 @@ func metricsText(m *core.MetricsResult) string {
 	fmt.Fprintf(&b, "  原因 %s\n", metricsCounts(o.ByCause))
 	fmt.Fprintf(&b, "  層 %s\n", metricsCounts(o.ByLayer))
 	fmt.Fprintf(&b, "  未分類 %d 未処理 %d\n", o.Unclassified, o.Unprocessed)
+	return b.String()
+}
+
+// metricsCompareText は --json 無しの metrics --compare の表示（形式の安定は保証しない）。
+func metricsCompareText(r *core.MetricsCompareResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "比べる課題: %s 適用の時点: %s\n", r.ChallengeID, r.AppliedAt)
+	for _, g := range []struct {
+		name string
+		g    core.MetricsGroup
+	}{{"前", r.Before}, {"後", r.After}} {
+		fmt.Fprintf(&b, "[%s] 対象の課題: %d 件\n", g.name, g.g.TargetChallenges)
+		rr := g.g.RejectionRate
+		fmt.Fprintf(&b, "  差し戻し率: %s (%d/%d)\n", metricsFloat(rr.Value, "%.3f"), rr.Numerator, rr.Denominator)
+		fmt.Fprintf(&b, "  resume の回数: %d 課題あたり %s\n", g.g.ResumeCount.Total, metricsFloat(g.g.ResumeCount.PerChallenge, "%.3f"))
+		c := g.g.CostPerChallenge
+		fmt.Fprintf(&b, "  1 課題あたりの費用: 平均 %s USD 中央値 %s USD 費用不明の run %d 件\n",
+			metricsFloat(c.Mean, "%.4f"), metricsFloat(c.Median, "%.4f"), c.UnknownCostRuns)
+		fmt.Fprintf(&b, "  人の承認の件数: %d 件\n", g.g.ApprovalCount.Total)
+	}
 	return b.String()
 }

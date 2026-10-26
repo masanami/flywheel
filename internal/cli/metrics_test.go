@@ -99,7 +99,7 @@ func TestMetrics_ZeroTargetsHaveNullValues(t *testing.T) {
 	}
 }
 
-func TestMetrics_InvalidDatesAndCompareAreUsageErrors(t *testing.T) {
+func TestMetrics_InvalidDatesAreUsageErrors(t *testing.T) {
 	ws := metricsWorkspace(t)
 	for _, args := range [][]string{
 		{"metrics", "--since", "2026-3-1"},
@@ -107,7 +107,6 @@ func TestMetrics_InvalidDatesAndCompareAreUsageErrors(t *testing.T) {
 		{"metrics", "--until", "2026-02-30"},
 		{"metrics", "--until", "yesterday"},
 		{"metrics", "--since", ""},
-		{"metrics", "--compare", "C-1"}, // S4 で足す
 		{"metrics", "extra"},
 	} {
 		requireErrorCode(t, append(append([]string{}, args...), "--workspace", ws), 2, CodeUsageError)

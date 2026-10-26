@@ -476,6 +476,7 @@ var runLevelUsageErrorCases = [][]string{
 	{"approve", "C-2", "--relayed", "--session", "s"},           // --relayed に --quote が無い（空白だけも同じ）
 	{"reject", "OP-1", "--reason", "r", "--field", "issues"},    // 不可逆操作の ID への --field（M4P36）
 	{"metrics", "--since", "2026-3-1"},                          // --since・--until が YYYY-MM-DD の日付でない（M4.5 S3）
+	{"metrics", "--compare", "C-1", "--since", "2026-03-01"},    // --compare と --since・--until の同時指定（M4.5 S4）
 	{"dep", "add", "C-1", "C-1"},                                // 自分自身を依存先にした（core が ErrSelfDependency を返し usage_error に写る。M4.5 S2）
 }
 
