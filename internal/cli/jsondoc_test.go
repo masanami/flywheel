@@ -155,6 +155,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM45DependencyShape(t, &doc)
 	addM45LearnShape(t, &doc)
 	addM45MetricsShape(t, &doc)
+	addM45MetricsCompareShape(t, &doc)
 	addM3SlotClearShape(t, &doc)
 	addM3RunShape(t, &doc)
 	addM3BudgetShapes(t, &doc)
@@ -1316,4 +1317,57 @@ func assertDocumentedMetrics(t *testing.T, doc documentedJSON, out map[string]an
 			}
 		}
 	}
+}
+
+var compareGroupRe = regexp.MustCompile("`before`・`after` は `metrics --json` の `([a-z_]+)` と `([a-z_]+)` と同じ形")
+
+// addM45MetricsCompareShape は `metrics --compare` の成功時の JSON の形を doc へ足す。m4.5 の受入基準 AC-398 の行
+// （「`metrics --compare --json` の成功の出力は」）から、最上位の `compare` のキーと、`before`・`after` の組のキーを読む。
+// 組のキーは `metrics --json` の最上位にあるキーの名前で書かれているので、addM45MetricsShape が読んだ形と突き合わせる。
+func addM45MetricsCompareShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
+	if err != nil {
+		t.Fatalf("read m4.5 spec: %v", err)
+	}
+	var line string
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.Contains(l, "`metrics --compare --json` の成功の出力は") {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		t.Fatal("m4.5 spec has no `metrics --compare --json` の成功の出力 line")
+	}
+	var shape string
+	for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+		if strings.HasPrefix(m[1], "{") {
+			shape = m[1]
+			break
+		}
+	}
+	top := topLevelKeys(shape)
+	if !reflect.DeepEqual(top, map[string]bool{"compare": true}) {
+		t.Fatalf("m4.5 spec's `metrics --compare` line top-level keys = %v, want [compare]", sortedKeys(top))
+	}
+	inner := map[string]bool{}
+	for _, q := range quotedRe.FindAllStringSubmatch(shape, -1) {
+		if q[1] != "compare" {
+			inner[q[1]] = true
+		}
+	}
+	doc.entity["metrics_compare_top"] = top
+	doc.entity["metrics_compare"] = inner
+	g := compareGroupRe.FindStringSubmatch(line)
+	if g == nil {
+		t.Fatal("m4.5 spec's `metrics --compare` line has no `before`・`after` の形の記述")
+	}
+	group := map[string]bool{g[1]: true, g[2]: true}
+	for k := range group {
+		if !doc.topLevel["metrics"][0][k] {
+			t.Fatalf("m4.5 spec: %q is not a top-level key of `metrics --json`", k)
+		}
+	}
+	doc.entity["metrics_compare_group"] = group
 }

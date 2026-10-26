@@ -343,10 +343,11 @@ func defaultCommands() []Command {
 		},
 		{
 			// docs/features/m4.5-learning-and-self-improvement.md §効果の測定（S3）。読み取りだけで、
-			// 判断点も claude も起動しない。--compare は S4 で足す（S3 では未知のフラグ）。
+			// 判断点も claude も起動しない。
+			// --compare <C-ID>（S4）は --since・--until と同時に指定できない（run の中の usage_error）。
 			Path:          []string{"metrics"},
 			RequiresStore: true,
-			Flags:         []flagDef{{Name: "since", HasValue: true}, {Name: "until", HasValue: true}},
+			Flags:         []flagDef{{Name: "since", HasValue: true}, {Name: "until", HasValue: true}, {Name: "compare", HasValue: true}},
 			Run:           runMetrics,
 		},
 		{

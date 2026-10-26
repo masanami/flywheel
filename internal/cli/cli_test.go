@@ -801,7 +801,7 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	// TestDepCommands_MatchM45IFAPITable が m4.5 の表と照合する）。
 	wantSet["dep add"] = true
 	wantSet["dep rm"] = true
-	// M4.5 S3: 同じ理由で、実装済みの `metrics` を個別に足す（`--compare` は S4 で足すので、S3 では登録しない）。
+	// M4.5 S3: 同じ理由で、実装済みの `metrics` を個別に足す（`--compare` は S4 で足した）。
 	wantSet["metrics"] = true
 	// M4.5 S3: 同じ理由で、実装済みの `learn` を個別に足す（書式は TestLearnCommand_MatchesM45IFAPITable が m4.5 の表と照合する）。
 	wantSet["learn"] = true

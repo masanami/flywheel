@@ -86,21 +86,9 @@ func FromMetrics(m *core.MetricsResult) MetricsResponse {
 	for name, d := range core.MetricsDefinitions() {
 		defs[name] = MetricsDefinition{Denominator: d.Denominator, Numerator: d.Numerator, Period: d.Period}
 	}
-	by := make([]MetricsApprovalCountRow, 0, len(m.ApprovalCount.By))
-	for _, r := range m.ApprovalCount.By {
-		by = append(by, MetricsApprovalCountRow{Channel: r.Channel, Count: r.Count, Decision: r.Decision, Kind: r.Kind, Verification: r.Verification})
-	}
 	return MetricsResponse{
 		Definitions: defs,
-		Metrics: MetricsValues{
-			ApprovalCount:    MetricsApprovalCount{By: by, Total: m.ApprovalCount.Total},
-			CostPerChallenge: MetricsCostPerChallenge{Mean: m.CostPerChallenge.Mean, Median: m.CostPerChallenge.Median, UnknownCostRuns: m.CostPerChallenge.UnknownCostRuns},
-			RejectionRate: MetricsRejectionRate{
-				ByField: m.RejectionRate.ByField, Denominator: m.RejectionRate.Denominator,
-				Numerator: m.RejectionRate.Numerator, Value: m.RejectionRate.Value,
-			},
-			ResumeCount: MetricsResumeCount{PerChallenge: m.ResumeCount.PerChallenge, Total: m.ResumeCount.Total},
-		},
+		Metrics:     metricsValues(m.RejectionRate, m.ResumeCount, m.CostPerChallenge, m.ApprovalCount),
 		Occurrences: MetricsOccurrences{
 			ByCause: m.Occurrences.ByCause, ByKind: m.Occurrences.ByKind, ByLayer: m.Occurrences.ByLayer,
 			Unclassified: m.Occurrences.Unclassified, Unprocessed: m.Occurrences.Unprocessed,
@@ -108,4 +96,51 @@ func FromMetrics(m *core.MetricsResult) MetricsResponse {
 		Period:           MetricsPeriod{Since: m.Since, Until: m.Until},
 		TargetChallenges: m.TargetChallenges,
 	}
+}
+
+// MetricsCompareResponse は `metrics --compare --json` の最上位（仕様の AC-398。M45P31）。
+type MetricsCompareResponse struct {
+	Compare MetricsCompare `json:"compare"`
+}
+
+// MetricsCompare は課題 1 件の適用の時点の前後の比較。
+type MetricsCompare struct {
+	After       MetricsGroup `json:"after"`
+	AppliedAt   string       `json:"applied_at"`
+	Before      MetricsGroup `json:"before"`
+	ChallengeID string       `json:"challenge_id"`
+}
+
+// MetricsGroup は比べる組 1 つ分。`metrics --json` の `metrics` と `target_challenges` と同じ形。
+type MetricsGroup struct {
+	Metrics          MetricsValues `json:"metrics"`
+	TargetChallenges int           `json:"target_challenges"`
+}
+
+func metricsValues(rr core.MetricsRejectionRate, rc core.MetricsResumeCount, cp core.MetricsCostPerChallenge, ac core.MetricsApprovals) MetricsValues {
+	by := make([]MetricsApprovalCountRow, 0, len(ac.By))
+	for _, r := range ac.By {
+		by = append(by, MetricsApprovalCountRow{Channel: r.Channel, Count: r.Count, Decision: r.Decision, Kind: r.Kind, Verification: r.Verification})
+	}
+	return MetricsValues{
+		ApprovalCount:    MetricsApprovalCount{By: by, Total: ac.Total},
+		CostPerChallenge: MetricsCostPerChallenge{Mean: cp.Mean, Median: cp.Median, UnknownCostRuns: cp.UnknownCostRuns},
+		RejectionRate:    MetricsRejectionRate{ByField: rr.ByField, Denominator: rr.Denominator, Numerator: rr.Numerator, Value: rr.Value},
+		ResumeCount:      MetricsResumeCount{PerChallenge: rc.PerChallenge, Total: rc.Total},
+	}
+}
+
+func fromMetricsGroup(g core.MetricsGroup) MetricsGroup {
+	return MetricsGroup{
+		Metrics:          metricsValues(g.RejectionRate, g.ResumeCount, g.CostPerChallenge, g.ApprovalCount),
+		TargetChallenges: g.TargetChallenges,
+	}
+}
+
+// FromMetricsCompare は core の比較の結果を --json の形へ写す。
+func FromMetricsCompare(r *core.MetricsCompareResult) MetricsCompareResponse {
+	return MetricsCompareResponse{Compare: MetricsCompare{
+		After: fromMetricsGroup(r.After), AppliedAt: r.AppliedAt,
+		Before: fromMetricsGroup(r.Before), ChallengeID: r.ChallengeID,
+	}}
 }
