@@ -288,7 +288,7 @@ func TestShowAndActionableChallengeCarryEveryChallengeKey(t *testing.T) {
 		got   map[string]bool
 		added []string
 	}{
-		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"dependencies", "dependents", "followup_of"}},
+		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"dependencies", "dependents", "followup_of", "improvement"}},
 		"ActionableChallenge": {tags(view.ActionableChallenge{}), []string{"unmet_dependencies"}},
 	} {
 		want := map[string]bool{}
@@ -351,6 +351,16 @@ func TestFromShowChallenge_FollowupOf(t *testing.T) {
 	src := "C-1"
 	got := marshal(t, view.FromShowChallenge(&core.ChallengeDetail{Challenge: core.Challenge{ID: "C-2"}, FollowupOf: &src}))
 	if !strings.Contains(got, `"followup_of":"C-1"`) {
+		t.Errorf("got %s", got)
+	}
+}
+
+func TestFromShowChallenge_Improvement(t *testing.T) {
+	if got := marshal(t, view.FromShowChallenge(&core.ChallengeDetail{Challenge: core.Challenge{ID: "C-2"}})); !strings.Contains(got, `"improvement":null`) {
+		t.Errorf("got %s", got)
+	}
+	got := marshal(t, view.FromShowChallenge(&core.ChallengeDetail{Challenge: core.Challenge{ID: "C-2"}, Improvement: &core.ImprovementKey{Layer: "prompt", Target: "j1.md"}}))
+	if !strings.Contains(got, `"improvement":{"layer":"prompt","target":"j1.md"}`) {
 		t.Errorf("got %s", got)
 	}
 }

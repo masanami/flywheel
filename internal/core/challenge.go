@@ -158,6 +158,14 @@ type ChallengeDetail struct {
 	Dependents   []string
 	// FollowupOf はJ6 のフォローアップで起票した課題の元の課題の ID（challenge.followup_of。S3。applyJ6 が設定）。無ければ nil。
 	FollowupOf *string
+	// Improvement は改修課題（origin=improvement）の改修の鍵。改修課題でなければ nil。
+	Improvement *ImprovementKey
+}
+
+// ImprovementKey は改修課題の鍵（challenge.improvement_layer・improvement_target。マイグレーション 0012）。
+type ImprovementKey struct {
+	Layer  string
+	Target string
 }
 
 // CreateInput は CreateChallenge の入力。
@@ -541,7 +549,7 @@ func nullablePriority(p *Priority) any {
 //
 // origin は課題の出どころ（ChallengeOrigin*）で必須。followupOf は元の課題の ID
 // （"C-n"）で、フォローアップの課題だけが値を持つ（nil なら NULL）。
-func insertChallengeRow(ctx context.Context, tx *sql.Tx, at time.Time, title, description, doneCriteria string, urgency *Urgency, reporter string, origin ChallengeOrigin, followupOf *string) (id int64, now time.Time, err error) {
+func insertChallengeRow(ctx context.Context, tx *sql.Tx, at time.Time, title, description, doneCriteria string, urgency *Urgency, reporter string, origin ChallengeOrigin, followupOf *string, improvement *ImprovementKey) (id int64, now time.Time, err error) {
 	origin, ok := ParseChallengeOrigin(string(origin))
 	if !ok {
 		return 0, time.Time{}, fmt.Errorf("insert challenge: invalid origin %q", origin)
@@ -549,15 +557,25 @@ func insertChallengeRow(ctx context.Context, tx *sql.Tx, at time.Time, title, de
 	if (origin == ChallengeOriginFollowup) != (followupOf != nil) {
 		return 0, time.Time{}, fmt.Errorf("insert challenge: followup_of must be set exactly for origin followup")
 	}
+	if (origin == ChallengeOriginImprovement) != (improvement != nil) {
+		return 0, time.Time{}, fmt.Errorf("insert challenge: improvement key must be set exactly for origin improvement: %w", ErrValidation)
+	}
+	if improvement != nil && (strings.TrimSpace(improvement.Layer) == "" || strings.TrimSpace(improvement.Target) == "") {
+		return 0, time.Time{}, fmt.Errorf("insert challenge: improvement layer and target must not be empty: %w", ErrValidation)
+	}
+	var impLayer, impTarget any
+	if improvement != nil {
+		impLayer, impTarget = improvement.Layer, improvement.Target
+	}
 	nowStr := formatTimestamp(at)
 	now, err = parseTimestamp(nowStr)
 	if err != nil {
 		return 0, time.Time{}, err
 	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO challenge (title, description, done_criteria, urgency, status, version, reporter, created_at, updated_at, origin, followup_of)
-		 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
-		title, description, doneCriteria, nullableUrgency(urgency), string(StatusUnclassified), reporter, nowStr, nowStr, string(origin), nullableString(followupOf),
+		`INSERT INTO challenge (title, description, done_criteria, urgency, status, version, reporter, created_at, updated_at, origin, followup_of, improvement_layer, improvement_target)
+		 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+		title, description, doneCriteria, nullableUrgency(urgency), string(StatusUnclassified), reporter, nowStr, nowStr, string(origin), nullableString(followupOf), impLayer, impTarget,
 	)
 	if err != nil {
 		return 0, time.Time{}, err
@@ -603,7 +621,7 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 
 	var result *Challenge
 	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
-		id, now, err := insertChallengeRow(ctx, tx, rec.at, in.Title, in.Description, in.DoneCriteria, urgency, rec.actor, ChallengeOriginManual, nil)
+		id, now, err := insertChallengeRow(ctx, tx, rec.at, in.Title, in.Description, in.DoneCriteria, urgency, rec.actor, ChallengeOriginManual, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -713,9 +731,12 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 		if err != nil {
 			return err
 		}
-		var followupOf sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT followup_of FROM challenge WHERE id = ?`, cid).Scan(&followupOf); err != nil {
+		var followupOf, impLayer, impTarget sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT followup_of, improvement_layer, improvement_target FROM challenge WHERE id = ?`, cid).Scan(&followupOf, &impLayer, &impTarget); err != nil {
 			return err
+		}
+		if impLayer.Valid && impTarget.Valid {
+			detail.Improvement = &ImprovementKey{Layer: impLayer.String, Target: impTarget.String}
 		}
 		if followupOf.Valid {
 			v := followupOf.String

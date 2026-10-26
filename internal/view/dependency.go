@@ -28,23 +28,30 @@ type UnmetDependency struct {
 
 // ShowChallenge は show（UI の詳細の API を含む）の challenge。Challenge の各キーに dependencies・dependents を足した形。
 type ShowChallenge struct {
-	Context      *string      `json:"context"`
-	CreatedAt    string       `json:"created_at"`
-	Dependencies []Dependency `json:"dependencies"`
-	Dependents   []string     `json:"dependents"`
-	Description  string       `json:"description"`
-	DoneCriteria string       `json:"done_criteria"`
-	FollowupOf   *string      `json:"followup_of"`
-	Headline     *string      `json:"headline"`
-	ID           string       `json:"id"`
-	Priority     *string      `json:"priority"`
-	Reporter     string       `json:"reporter"`
-	Status       string       `json:"status"`
-	StatusLabel  string       `json:"status_label"`
-	Title        string       `json:"title"`
-	UpdatedAt    string       `json:"updated_at"`
-	Urgency      *string      `json:"urgency"`
-	Version      int          `json:"version"`
+	Context      *string         `json:"context"`
+	CreatedAt    string          `json:"created_at"`
+	Dependencies []Dependency    `json:"dependencies"`
+	Dependents   []string        `json:"dependents"`
+	Description  string          `json:"description"`
+	DoneCriteria string          `json:"done_criteria"`
+	FollowupOf   *string         `json:"followup_of"`
+	Headline     *string         `json:"headline"`
+	ID           string          `json:"id"`
+	Improvement  *ImprovementKey `json:"improvement"`
+	Priority     *string         `json:"priority"`
+	Reporter     string          `json:"reporter"`
+	Status       string          `json:"status"`
+	StatusLabel  string          `json:"status_label"`
+	Title        string          `json:"title"`
+	UpdatedAt    string          `json:"updated_at"`
+	Urgency      *string         `json:"urgency"`
+	Version      int             `json:"version"`
+}
+
+// ImprovementKey は show の challenge.improvement（改修課題の鍵。改修課題以外では null）。
+type ImprovementKey struct {
+	Layer  string `json:"layer"`
+	Target string `json:"target"`
 }
 
 // ActionableChallenge は status の actionable.challenges[] の要素。Challenge の各キーに unmet_dependencies を足した形。
@@ -88,9 +95,13 @@ func FromUnmetDependencies(ds []core.DependencyView) []UnmetDependency {
 func FromShowChallenge(d *core.ChallengeDetail) ShowChallenge {
 	c := FromChallenge(d.Challenge)
 	dependents := append([]string{}, d.Dependents...)
+	var imp *ImprovementKey
+	if d.Improvement != nil {
+		imp = &ImprovementKey{Layer: d.Improvement.Layer, Target: d.Improvement.Target}
+	}
 	return ShowChallenge{
 		Context: c.Context, CreatedAt: c.CreatedAt, Dependencies: FromDependencies(d.Dependencies), Dependents: dependents,
-		Description: c.Description, DoneCriteria: c.DoneCriteria, FollowupOf: d.FollowupOf, Headline: c.Headline, ID: c.ID, Priority: c.Priority,
+		Description: c.Description, DoneCriteria: c.DoneCriteria, FollowupOf: d.FollowupOf, Headline: c.Headline, ID: c.ID, Improvement: imp, Priority: c.Priority,
 		Reporter: c.Reporter, Status: c.Status, StatusLabel: c.StatusLabel, Title: c.Title, UpdatedAt: c.UpdatedAt,
 		Urgency: c.Urgency, Version: c.Version,
 	}

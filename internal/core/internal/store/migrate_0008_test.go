@@ -42,8 +42,8 @@ func TestOpen_AppliesCardStagesMigrationToAVersion7Store(t *testing.T) {
 		t.Fatalf("Open(latest) error = %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if got := userVersion(t, db); got != 11 {
-		t.Fatalf("user_version = %d, want 11", got)
+	if got := userVersion(t, db); got != 12 {
+		t.Fatalf("user_version = %d, want 12", got)
 	}
 	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
 		var headline, context, issues, expected, actual, nonGoals, figure sql.NullString

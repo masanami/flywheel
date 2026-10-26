@@ -35,7 +35,7 @@ import (
 func loadUnansweredHold(ctx context.Context, tx *sql.Tx, cid int64) (holdID int64, question string, fromStatus Status, raisedAt time.Time, err error) {
 	var fs, raisedAtStr string
 	if err = tx.QueryRowContext(ctx,
-		`SELECT id, question, from_status, raised_at FROM hold WHERE challenge_id = ? AND answer IS NULL ORDER BY id DESC LIMIT 1`, cid,
+		`SELECT id, question, from_status, raised_at FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL ORDER BY id DESC LIMIT 1`, cid,
 	).Scan(&holdID, &question, &fs, &raisedAtStr); err != nil {
 		return 0, "", "", time.Time{}, err
 	}
@@ -736,7 +736,7 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	apply := func(ctx context.Context, tc *transitionCtx) error {
 		relaySession, relayQuote := att.relayColumns()
 		res, err := tc.tx.ExecContext(ctx,
-			`UPDATE hold SET answer = ?, answered_at = ?, answered_by = ?, answered_channel = ?, answered_verification = ?, relay_session = ?, relay_quote = ? WHERE id = ? AND answer IS NULL`,
+			`UPDATE hold SET answer = ?, answered_at = ?, answered_by = ?, answered_channel = ?, answered_verification = ?, relay_session = ?, relay_quote = ? WHERE id = ? AND answer IS NULL AND closed_at IS NULL`,
 			req.Answer, tc.nowStr, att.Actor(), string(att.Channel()), string(att.Verification()), relaySession, relayQuote, holdID,
 		)
 		if err != nil {

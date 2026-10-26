@@ -93,7 +93,7 @@ func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, erro
 		rows, err := tx.QueryContext(ctx,
 			`SELECT h.challenge_id, c.title, h.question, h.raised_at, h.from_status, h.run_id
 			 FROM hold h JOIN challenge c ON c.id = h.challenge_id
-			 WHERE h.answer IS NULL
+			 WHERE h.answer IS NULL AND h.closed_at IS NULL
 			 ORDER BY h.raised_at, h.challenge_id, h.id`)
 		if err != nil {
 			return err

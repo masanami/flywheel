@@ -1162,6 +1162,11 @@ func addM45DependencyKeysShape(t *testing.T, doc *documentedJSON) {
 		t.Fatal("m4.5 spec does not document show challenge followup_of")
 	}
 	show["followup_of"] = true
+	// S4: show の challenge の improvement（仕様の受入基準）。
+	if !strings.Contains(string(data), "`show <C-ID> --json` の `challenge` は `improvement`") {
+		t.Fatal("m4.5 spec does not document show challenge improvement")
+	}
+	show["improvement"] = true
 	doc.entity["show_challenge"] = show
 	doc.entity["actionable_challenge"] = actionable
 	if !strings.Contains(string(data), "`kinds` に `dependency_cycle`・`challenge_ids`") {
