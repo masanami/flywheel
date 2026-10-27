@@ -156,3 +156,52 @@ func (s *Store) holdForJudgmentFailureLimit(ctx context.Context, ch Challenge, j
 	return &NotStarted{ChallengeID: ch.ID, Reason: NotStartedFailureLimit,
 		Detail: fmt.Sprintf("%s: %d consecutive failures (limit %d)", hit.Judgment, hit.Count, hit.Limit)}, false, nil
 }
+
+// loadJ8LimitHit は課題を持たない J8 の run を新しい方から数え、連続失敗の数が limit に達していれば検出を返す。
+// 枠超過の run は数えず連続も切らない。成功（または終了していない run）で連続は切れる。J8 は課題を持たないので
+// 課題の版・保留では区切らない（回答する保留が無い）。
+func loadJ8LimitHit(ctx context.Context, tx *sql.Tx, limit int) (*judgmentLimitHit, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM run WHERE kind = 'judgment' AND judgment = ? AND challenge_id IS NULL ORDER BY id DESC`, string(JudgmentJ8))
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	_ = rows.Close()
+
+	count := 0
+	var last *runRow
+	for _, id := range ids {
+		r, err := loadRunByID(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		if r == nil || r.RateLimited {
+			continue
+		}
+		if !isCountedFailure(r.Result) {
+			break
+		}
+		count++
+		if last == nil {
+			rr := *r
+			last = &rr
+		}
+	}
+	if last == nil || count < limit {
+		return nil, nil
+	}
+	return &judgmentLimitHit{Judgment: JudgmentJ8, Count: count, Limit: limit, Last: *last}, nil
+}

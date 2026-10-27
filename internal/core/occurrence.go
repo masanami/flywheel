@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -371,4 +372,50 @@ func (s *Store) insertHoldWithOccurrence(ctx context.Context, tc *transitionCtx,
 		ChallengeID: tc.id, CycleID: cyc, CauseRunID: tc.runID, Kind: kind,
 		Ref: OccurrenceRef{HoldID: &holdID}, Outcome: OccurrenceOutcomeBad, At: tc.now,
 	})
+}
+
+// occurrenceHandledWait は、原因が performance の未処理の発生に J8 の写像が付ける処理の印「待つ」。
+// 処理の印に使う値は、not_applicable・wait・改修課題の ID（C-<n>）だけ。
+const occurrenceHandledWait = "wait"
+
+// errOccurrenceNotPending は、処理の印を付ける直前に読み直した発生が、もう未処理でない（条件に合わない）
+// ことを表す。
+var errOccurrenceNotPending = errors.New("core: occurrence is no longer pending")
+
+// markOccurrenceHandled は発生 id に処理の印 handled を付ける。付けられるのは、未処理（handled が無い）で
+// 追加の条件 cond（SQL の条件。無ければ空）を満たす発生だけで、満たさなければ errOccurrenceNotPending を
+// 返す（印を上書きしない）。
+func markOccurrenceHandled(ctx context.Context, tx *sql.Tx, id int64, handled, cond string, args ...any) error {
+	q := `UPDATE occurrence SET handled = ? WHERE id = ? AND handled IS NULL`
+	if cond != "" {
+		q += " AND " + cond
+	}
+	res, err := tx.ExecContext(ctx, q, append([]any{handled, id}, args...)...)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return errOccurrenceNotPending
+	}
+	return nil
+}
+
+// loadPendingPerformanceOccurrenceIDs は原因が performance の未処理の発生の ID を昇順で返す
+// （J8 の写像が「待つ」を付ける対象）。
+func loadPendingPerformanceOccurrenceIDs(ctx context.Context, tx *sql.Tx) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM occurrence WHERE handled IS NULL AND cause = ? ORDER BY id ASC`, string(OccurrenceCausePerformance))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }

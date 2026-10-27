@@ -43,6 +43,11 @@ type Store struct {
 	// db.Write）の発生の挿入にも効く（挿入は insertOccurrenceRow 1 か所を通るため）。
 	insertOccurrence func(tx *sql.Tx, row occurrenceRow) error
 
+	// insertChallenge はテストが改修課題（J8 の写像）の課題の挿入を失敗させるためのフック。
+	// nil なら何もしない。非 nil なら insertChallengeRow の直前に呼び、エラーを返せば挿入しない。
+	// insertActivity と同じ流儀で、本番 API には注入口を露出しない。
+	insertChallenge func(tx *sql.Tx, key ImprovementKey) error
+
 	// beforeCommit はテストが「1 つの書き込みトランザクションが BEGIN IMMEDIATE の
 	// 書き込みロックを保持したまま止まる」状況を作るためのフック。mutate が
 	// 渡された fn を成功させた直後・コミットする前に呼ぶ。nil なら何もしない
