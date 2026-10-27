@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { CardState } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { RefreshKeyContext } from "../nav.tsx";
 import { AgentColumn } from "./AgentColumn.tsx";
@@ -9,8 +10,8 @@ import { toAgentBoard } from "./adapt.ts";
 import { type HumanKind, filterByKind } from "./filter.ts";
 import type { AgentBoard, Challenge } from "./types.ts";
 
-// 完了は既定で隠す。表示の絞り込みだけで、データには影響しない。
-const COMPLETED_STATE = "done";
+// 完了と取り下げ（どちらも終端）は既定で隠す。表示の絞り込みだけで、データには影響しない。
+const COMPLETED_STATES: readonly CardState[] = ["done", "withdrawn"];
 
 function visibleChallenges(
   challenges: Challenge[],
@@ -19,7 +20,9 @@ function visibleChallenges(
 ): Challenge[] {
   let result = challenges;
   if (!showCompleted) {
-    result = result.filter((c) => c.state !== COMPLETED_STATE);
+    result = result.filter(
+      (c) => !(COMPLETED_STATES as readonly string[]).includes(c.state),
+    );
   }
   if (filter === "needsHuman") {
     result = result.filter((c) => c.needsHuman);

@@ -169,3 +169,29 @@ func TestDocumentedShape_DependencyElementsAreCheckedAgainstSpec(t *testing.T) {
 		t.Fatalf("fixture must have unmet dependencies and a cycle (unmet=%d)", n)
 	}
 }
+
+// AC-385: 取り下げた依存先は満たされず、unmet_dependencies[].status は withdrawn。
+func TestStatus_UnmetDependencies_WithdrawnDependency(t *testing.T) {
+	ws := initializedWorkspace(t)
+	a, b := createForCase(t, ws), createForCase(t, ws)
+	runJSON(t, ws, "dep", "add", a, b)
+	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, b), "withdrawn")
+
+	doc := runJSON(t, ws, "status")
+	for _, v := range anySlice(t, doc["actionable"].(map[string]any)["challenges"], "actionable.challenges") {
+		m := v.(map[string]any)
+		if m["id"] != a {
+			continue
+		}
+		unmet := anySlice(t, m["unmet_dependencies"], "unmet_dependencies")
+		if len(unmet) != 1 {
+			t.Fatalf("unmet_dependencies = %#v, want [%s]", unmet, b)
+		}
+		u := unmet[0].(map[string]any)
+		if u["challenge_id"] != b || u["status"] != "withdrawn" {
+			t.Errorf("unmet[0] = %#v, want challenge_id %s with status withdrawn", u, b)
+		}
+		return
+	}
+	t.Fatalf("%s is not in actionable.challenges", a)
+}

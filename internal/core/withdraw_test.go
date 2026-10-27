@@ -482,3 +482,112 @@ func TestWithdraw_ClosedHold_IsNotOpenInAnyReadPath(t *testing.T) {
 		t.Errorf("formatHoldsSection = %q, want the closed marker instead of (未回答)", got)
 	}
 }
+
+// 取り下げた課題は、分類・計画・委譲・検証の段の対象にならない（AC-383）。
+func TestWithdraw_IsNotATargetOfClassifyPlanDelegateVerifyStages(t *testing.T) {
+	ctx := context.Background()
+	f := newResumeFixture(t)
+	mk := func(status Status) (string, int64) {
+		ch, err := f.s.CreateChallenge(ctx, ChannelCLI, CreateInput{Title: "stage " + string(status)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cid, _ := parseChallengeID(ch.ID)
+		setChallengeStatus(t, f.s, cid, status)
+		return ch.ID, cid
+	}
+	inProgress := f.newInProgress(t, "t", "P1", planSpec(nil))
+	inProgressCID, _ := parseChallengeID(inProgress)
+	type stage struct {
+		name   string
+		status Status
+		cid    int64
+		sel    func(context.Context, *sql.Tx) ([]int64, error)
+	}
+	_, j1 := mk(StatusUnclassified)
+	_, j2 := mk(StatusClassified)
+	_, j5 := mk(StatusVerifying)
+	stages := []stage{
+		{"classify", StatusUnclassified, j1, selectJ1AutoTargets},
+		{"plan", StatusClassified, j2, selectJ2AutoTargets},
+		{"verify", StatusVerifying, j5, selectJ5AutoTargets},
+		{"delegate", StatusInProgress, inProgressCID, func(ctx context.Context, tx *sql.Tx) ([]int64, error) {
+			ids, _, err := selectDelegationTargets(ctx, tx)
+			return ids, err
+		}},
+	}
+	targets := func(s stage) []int64 {
+		var got []int64
+		if err := f.s.db.Read(ctx, func(tx *sql.Tx) error {
+			var err error
+			got, err = s.sel(ctx, tx)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	contains := func(ids []int64, id int64) bool {
+		for _, v := range ids {
+			if v == id {
+				return true
+			}
+		}
+		return false
+	}
+	for _, s := range stages {
+		if !contains(targets(s), s.cid) {
+			t.Fatalf("%s: control failed: a %s challenge is not a target", s.name, s.status)
+		}
+		setChallengeStatus(t, f.s, s.cid, StatusWithdrawn)
+		if got := targets(s); contains(got, s.cid) {
+			t.Errorf("%s: withdrawn challenge %d is a target: %v", s.name, s.cid, got)
+		}
+	}
+}
+
+// 取り下げた課題を ID で指定した learn も対象の条件を満たす（AC-386）。
+func TestWithdraw_J6ExplicitTarget_IsLearnable(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusWithdrawn)
+	o := f.occ(t, c, "plan_rejected", "bad", nil)
+	f.inv.result = j6Out([]any{j6Cls(o, "context", "prompt")}, nil, nil, nil)
+
+	res := f.mustLearn(t, &c)
+	if len(res.Items) != 1 || res.Items[0].ChallengeID != c || res.Items[0].Result != RunResultSucceeded {
+		t.Fatalf("items = %+v, want one succeeded item for %s", res.Items, c)
+	}
+	if len(res.NotStarted) != 0 {
+		t.Errorf("not_started = %+v, want none", res.NotStarted)
+	}
+	if f.unclassified(t) != 0 {
+		t.Error("the occurrence was not classified")
+	}
+}
+
+// 取り下げた課題は metrics の対象（期間に完了の承認を受けた課題）に入らない（AC-387）。
+// 取り下げは完了の承認の前の状態からだけ起こる（終端の done からは出られない）ので、取り下げた課題は
+// 完了の承認を受けていない。対象の条件は承認だけで決まるため、この構造が崩れないことをここで固定する
+// （取り下げ側に承認済みの完了が付く状態は作れない。計画の承認と完了の却下だけを持たせる）。
+func TestWithdraw_IsNotAMetricsTarget(t *testing.T) {
+	s := newStoreForTest(t)
+	done := mChallenge(t, s, "done")
+	withdrawn := mChallenge(t, s, "withdrawn")
+	mexec(t, s, `UPDATE challenge SET status = 'withdrawn' WHERE id = ?`, withdrawn)
+	at := "2026-01-02T00:00:00.000Z"
+	mApproval(t, s, done, "completion", "approved", "cli", "verified", at, nil)
+	mApproval(t, s, withdrawn, "plan", "approved", "cli", "verified", at, nil)
+	mApproval(t, s, withdrawn, "completion", "rejected", "cli", "verified", at, "[]")
+
+	var got []int64
+	if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		var err error
+		got, err = metricsTargets(context.Background(), tx, "", "")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != done {
+		t.Errorf("metricsTargets = %v, want only [%d]", got, done)
+	}
+}
