@@ -202,6 +202,33 @@ func TestImproveJ8_FailureLimit_AutoOnly_AC331(t *testing.T) {
 	}
 }
 
+// 枠超過の run は失敗の連続に数えず、連続も切らない（失敗 → 枠超過 → 失敗の並び）。
+func TestImproveJ8_FailureLimit_RateLimitedIsSkipped_AC331(t *testing.T) {
+	f := newJ8Fixture(t)
+	f.occ(t, 10, j8Row{})
+	f.inv.result = JudgmentLaunchOutput{Result: RunResultErrored}
+	for i := 0; i < f.agent.FailureLimit-1; i++ {
+		if res := f.auto(t); !res.Called || res.Result != RunResultErrored {
+			t.Fatalf("run %d: %+v", i, res)
+		}
+	}
+	f.inv.result = JudgmentLaunchOutput{Result: RunResultErrored, RateLimited: true}
+	if res := f.auto(t); !res.Called {
+		t.Fatalf("rate limited run: %+v", res)
+	}
+	// 枠超過を数えないので、まだ上限に達していない。
+	f.inv.result = JudgmentLaunchOutput{Result: RunResultErrored}
+	if res := f.auto(t); !res.Called || len(res.NotStarted) != 0 {
+		t.Fatalf("after the rate limited run: %+v", res)
+	}
+	// 枠超過で連続が切れていないので、枠超過の前後の失敗を合わせて上限に達する。
+	calls := f.calls
+	res := f.auto(t)
+	if res.Called || f.calls != calls || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedFailureLimit {
+		t.Fatalf("after the limit: res = %+v calls = %d", res, f.calls)
+	}
+}
+
 func TestImproveJ8_InvalidOutputCountsTowardFailureLimit(t *testing.T) {
 	f := newJ8Fixture(t)
 	f.occ(t, 10, j8Row{})
