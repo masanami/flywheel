@@ -429,6 +429,24 @@ func TestImproveJ8_OriginInspectFailureIsNotedAndRoutesToIssue(t *testing.T) {
 	}
 }
 
+// 手動の improve で写像が硬いエラーになったときも、origin の検査の失敗の注記をエラーに残す。
+func TestImproveJ8_ManualMappingErrorKeepsTheOriginNote(t *testing.T) {
+	f := newJ8Fixture(t)
+	ids := f.occ(t, 2, j8Row{layer: "knowledge", target: "K"})
+	f.out([]any{j8Proposal("knowledge", "K", formatOccurrenceID(ids[0]))})
+	boomMap := errors.New("map boom")
+	f.s.insertChallenge = func(*sql.Tx, ImprovementKey) error { return boomMap }
+	git := newFakeSlotGit()
+	git.errs = map[string]error{f.s.Workspace(): errors.New("inspect boom")}
+	_, err := f.s.ImproveJ8(context.Background(), ImproveJ8Input{
+		Manual: true, ConnDecl: &ConnectorsDeclaration{Repos: []ConnectorRepo{{Name: "r", Remote: "o/r"}}}, SlotGit: git,
+		AgentDecl: f.agent, Invoker: f.inv,
+	})
+	if err == nil || !errors.Is(err, boomMap) || !strings.Contains(err.Error(), "origin unreadable") || !strings.Contains(err.Error(), "inspect boom") {
+		t.Fatalf("err = %v, want the mapping error with the origin note", err)
+	}
+}
+
 func TestImproveJ8_AtomicWhenWritesFail_AC351(t *testing.T) {
 	boom := errors.New("injected failure")
 	for name, inject := range map[string]func(s *Store){

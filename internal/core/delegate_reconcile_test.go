@@ -596,3 +596,19 @@ func TestReconcile_WithdrawnBeforeMappingIsNotedAndNotMapped(t *testing.T) {
 		t.Errorf("status = %q, want withdrawn (unchanged)", got)
 	}
 }
+
+// 取り下げ以外の理由（例: 人間対応待ちへ移された）で写さなかったときは、取り下げの注記を出さない。
+func TestReconcile_NotWithdrawnSkipHasNoWithdrawalNote(t *testing.T) {
+	f := newReconFixture(t, "impl")
+	f.deleg.onInvoke = func(DelegateLaunchInput) { f.setStatus(t, "C-1", "awaiting_human") }
+	res, err := f.run(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 1 || strings.Contains(res.Items[0].Note, "withdrawn") {
+		t.Fatalf("result = %+v, want no note about a withdrawal", res)
+	}
+	if got := f.queryString(t, `SELECT status FROM challenge WHERE id = 1`); got != "awaiting_human" {
+		t.Errorf("status = %q, want awaiting_human (unchanged)", got)
+	}
+}

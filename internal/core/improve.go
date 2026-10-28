@@ -156,7 +156,11 @@ func (s *Store) ImproveJ8(ctx context.Context, in ImproveJ8Input) (*ImproveJ8Res
 		// failure_limit で止める）。手動はエラーを返し、自動は結果に注記する。
 		invErr := s.invalidateRunOutput(ctx, run.RunID)
 		if in.Manual {
-			return nil, errors.Join(err, invErr)
+			var noteErr error
+			if originNote != "" {
+				noteErr = errors.New(originNote)
+			}
+			return nil, errors.Join(err, invErr, noteErr)
 		}
 		res.Result, res.Note = RunResultInvalidOutput, "mapping failed: "+err.Error()
 		if invErr != nil {
