@@ -377,10 +377,10 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 	for _, a := range jc.Activities {
 		fmt.Fprintf(&b, "- ID: %s-%d / %s / %s / %s", j6EvidenceActivity, a.ID, a.At, a.Entity, a.Action)
 		if a.Before != "" {
-			fmt.Fprintf(&b, " / before: %s", a.Before)
+			fmt.Fprintf(&b, " / before: %s", oneLine(a.Before))
 		}
 		if a.After != "" {
-			fmt.Fprintf(&b, " / after: %s", a.After)
+			fmt.Fprintf(&b, " / after: %s", oneLine(a.After))
 		}
 		b.WriteString("\n")
 	}
@@ -398,7 +398,7 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 		fmt.Fprintf(&b, " / 結果: %s / 費用: %s", r.Result, j6Cost(r))
 		if r.Kind == runKindDelegate {
 			if strings.TrimSpace(r.Output) != "" {
-				fmt.Fprintf(&b, "\n  報告: %s", truncateUTF8(r.Output, maxJ6ReportBytes))
+				fmt.Fprintf(&b, "\n  報告: %s", oneLine(truncateUTF8(r.Output, maxJ6ReportBytes)))
 			} else {
 				b.WriteString("\n  報告: なし")
 			}
@@ -414,18 +414,18 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 	for _, a := range jc.Approvals {
 		fmt.Fprintf(&b, "- 承認 ID: %s-%d / 種類: %s / 判断: %s / %s", j6EvidenceApproval, a.ID, a.Kind, a.Decision, a.At)
 		if a.Reason != "" {
-			fmt.Fprintf(&b, " / 理由: %s", a.Reason)
+			fmt.Fprintf(&b, " / 理由: %s", oneLine(a.Reason))
 		}
 		if a.Fields != "" {
-			fmt.Fprintf(&b, " / ずれた欄: %s", a.Fields)
+			fmt.Fprintf(&b, " / ずれた欄: %s", oneLine(a.Fields))
 		}
 		b.WriteString("\n")
 	}
 	for _, h := range jc.Holds {
-		fmt.Fprintf(&b, "- 保留 ID: %s-%d / %s / 問い: %s / 回答: ", j6EvidenceHold, h.ID, h.At, h.Question)
+		fmt.Fprintf(&b, "- 保留 ID: %s-%d / %s / 問い: %s / 回答: ", j6EvidenceHold, h.ID, h.At, oneLine(h.Question))
 		switch {
 		case h.Answer != nil:
-			b.WriteString(*h.Answer)
+			b.WriteString(oneLine(*h.Answer))
 		case h.Closed:
 			b.WriteString("(回答なしで閉じた)")
 		default:
@@ -440,7 +440,7 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 
 	b.Reset()
 	for _, f := range jc.Followups {
-		fmt.Fprintf(&b, "- ID: %s / 状態: %s / 題名: %s\n", formatChallengeID(f.ID), f.Status, f.Title)
+		fmt.Fprintf(&b, "- ID: %s / 状態: %s / 題名: %s\n", formatChallengeID(f.ID), f.Status, oneLine(f.Title))
 	}
 	if len(jc.Followups) == 0 {
 		b.WriteString("既存のフォローアップは無い。")
@@ -926,11 +926,14 @@ func (s *Store) learnOne(ctx context.Context, in J6AutoInput, jc *JudgmentCycle,
 		if err != nil {
 			// 写像が硬いエラーで終わった run は、succeeded のままにせず失敗に数える（毎周の呼び直しを
 			// failure_limit で止める）。ID を指定した操作はエラーを返し、自動の選択は他の課題を続ける。
-			_ = s.invalidateRunOutput(ctx, res.RunID)
+			invErr := s.invalidateRunOutput(ctx, res.RunID)
 			if individual {
-				return nil, nil, err
+				return nil, nil, errors.Join(err, invErr)
 			}
 			item.Result, item.Note = RunResultInvalidOutput, "mapping failed: "+err.Error()
+			if invErr != nil {
+				item.Note += "; invalidate failed: " + invErr.Error()
+			}
 			return item, nil, nil
 		}
 		item.Outcome, item.Note, item.Result = outcome, note, finalResult

@@ -10,6 +10,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -148,15 +149,22 @@ func (s *Store) ImproveJ8(ctx context.Context, in ImproveJ8Input) (*ImproveJ8Res
 	if !ok {
 		return invalid()
 	}
-	m, bad, err := s.applyJ8(ctx, run.RunID, props, jc.DetailOccurrenceIDs(), waitIDs, in.ConnDecl, s.j8OriginURL(ctx, in, props))
+	originURL, originNote := s.j8OriginURL(ctx, in, props)
+	m, bad, err := s.applyJ8(ctx, run.RunID, props, jc.DetailOccurrenceIDs(), waitIDs, in.ConnDecl, originURL)
 	if err != nil {
 		// 写像が硬いエラーで終わった run は、succeeded のままにせず失敗に数える（毎周の呼び直しを
 		// failure_limit で止める）。手動はエラーを返し、自動は結果に注記する。
-		_ = s.invalidateRunOutput(ctx, run.RunID)
+		invErr := s.invalidateRunOutput(ctx, run.RunID)
 		if in.Manual {
-			return nil, err
+			return nil, errors.Join(err, invErr)
 		}
 		res.Result, res.Note = RunResultInvalidOutput, "mapping failed: "+err.Error()
+		if invErr != nil {
+			res.Note += "; invalidate failed: " + invErr.Error()
+		}
+		if originNote != "" {
+			res.Note += "; " + originNote
+		}
 		return res, nil
 	}
 	if bad {
@@ -164,24 +172,31 @@ func (s *Store) ImproveJ8(ctx context.Context, in ImproveJ8Input) (*ImproveJ8Res
 	}
 	res.Filed, res.Linked, res.Waited = m.Filed, m.Linked, m.Waited
 	res.Note = fmt.Sprintf("filed %d, linked %d, waited %d", len(m.Filed), len(m.Linked), len(m.Waited))
+	if originNote != "" {
+		res.Note += "; " + originNote
+	}
 	return res, nil
 }
 
 // j8OriginURL は knowledge の層の提案があり、SlotGit が渡されているときだけ、ワークスペースの origin の
-// URL を読む。読めなければ空（経路は Issue になる）。
-func (s *Store) j8OriginURL(ctx context.Context, in ImproveJ8Input, props []J8Proposal) string {
+// URL を読む。読めなければ URL は空（経路は Issue になる）で、検査が失敗したときはその理由を note で返す
+// （結果の注記に残す）。
+func (s *Store) j8OriginURL(ctx context.Context, in ImproveJ8Input, props []J8Proposal) (url, note string) {
 	if in.SlotGit == nil || in.ConnDecl == nil {
-		return ""
+		return "", ""
 	}
 	for _, p := range props {
 		if p.Layer != OccurrenceLayerKnowledge {
 			continue
 		}
 		st, err := in.SlotGit.Inspect(ctx, SlotTree{Path: s.workspace})
-		if err != nil || !st.Exists {
-			return ""
+		if err != nil {
+			return "", "origin unreadable: " + err.Error()
 		}
-		return st.OriginURL
+		if !st.Exists {
+			return "", ""
+		}
+		return st.OriginURL, ""
 	}
-	return ""
+	return "", ""
 }

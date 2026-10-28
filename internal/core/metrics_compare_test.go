@@ -82,6 +82,22 @@ func TestMetricsCompare_GroupsAreNearestTenExcludingTheTargetAndTheBoundary(t *t
 	}
 }
 
+func TestMetricsCompare_AfterGroupIsTheOldestTenAfterTheBoundary(t *testing.T) {
+	s := newStoreForTest(t)
+	target := mDone(t, s, "t", 1)
+	for d := 2; d <= 13; d++ { // 12 件が後
+		mRun(t, s, mDone(t, s, "a", d), "delegate", nil, int64(d)*1_000_000)
+	}
+	r := compare(t, s, target)
+	if r.After.TargetChallenges != 10 {
+		t.Fatalf("after targets = %d, want 10", r.After.TargetChallenges)
+	}
+	// 後の組は境界に近い古い方から 10 件: day 2〜11（新しい day 12・13 は入らない）。
+	if m := r.After.CostPerChallenge.Mean; m == nil || *m != 6.5 {
+		t.Errorf("after cost mean = %v, want 6.5 (days 2..11)", m)
+	}
+}
+
 func TestMetricsCompare_GroupMetricsUseTheGroupsChallengesOnly(t *testing.T) {
 	s := newStoreForTest(t)
 	b1 := mDone(t, s, "b1", 1)

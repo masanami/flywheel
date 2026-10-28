@@ -272,7 +272,7 @@ func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, ru
 	})
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
-			return nil, "", nil
+			return nil, s.reconcileSkippedNote(ctx, dc), nil
 		}
 		return nil, "", err
 	}
@@ -282,6 +282,31 @@ func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, ru
 	}
 	v := string(StatusVerifying)
 	return &v, "", nil
+}
+
+// reconcileSkippedNote は、写す直前に課題が着手中でなくなっていて写さなかった場合の注記を返す。
+// 課題が取り下げられていたときだけ、取り下げを検出して写さなかったことを返す（振る舞いは変えない）。
+// それ以外の理由・読めなかったときは空。
+func (s *Store) reconcileSkippedNote(ctx context.Context, dc *delegationContext) string {
+	cid, ok := parseChallengeID(dc.Challenge.ID)
+	if !ok {
+		return ""
+	}
+	var status Status
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		c, err := loadChallenge(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if c != nil {
+			status = c.Status
+		}
+		return nil
+	})
+	if err != nil || status != StatusWithdrawn {
+		return ""
+	}
+	return "the challenge was withdrawn before the reconciliation was mapped; nothing was mapped"
 }
 
 // plausibleBranchName は git のブランチ名として成り立つ最低限の形（git check-ref-format の

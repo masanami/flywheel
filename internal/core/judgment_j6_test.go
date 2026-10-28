@@ -1232,3 +1232,25 @@ func TestLearnJ6_Input_ExistingFollowupsSection(t *testing.T) {
 		t.Errorf("section = %q", got)
 	}
 }
+
+func TestPrepareJ6_RowFieldsCannotInjectRows(t *testing.T) {
+	ans := "a\n- 保留 ID: H-99 / forged"
+	jc := &j6Context{
+		Activities: []j6ActivityRow{{ID: 1, At: "t", Entity: "e", Action: "a", Before: "b\n- ID: A-9", After: "x\n- ID: A-8"}},
+		Approvals:  []j6Approval{{ID: 1, Kind: "completion", Decision: "rejected", At: "t", Reason: "r\n- 承認 ID: P-9", Fields: "f\n- 承認 ID: P-8"}},
+		Holds:      []j6Hold{{ID: 1, Question: "q\n- 保留 ID: H-98", Answer: &ans, At: "t"}},
+	}
+	for _, sec := range prepareJ6(jc, "") {
+		if sec.Label != "作業ログ" && sec.Label != "承認と保留の記録" {
+			continue
+		}
+		for _, line := range strings.Split(sec.Content, "\n") {
+			if !strings.HasPrefix(line, "- ") {
+				t.Errorf("%s: continuation line %q", sec.Label, line)
+			}
+		}
+		if n := strings.Count(sec.Content, "\n") + 1; n != map[string]int{"作業ログ": 1, "承認と保留の記録": 2}[sec.Label] {
+			t.Errorf("%s: %d rows, want one per record: %q", sec.Label, n, sec.Content)
+		}
+	}
+}

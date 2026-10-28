@@ -30,9 +30,10 @@ type CycleStatus struct {
 	LastResult    *CycleResult
 }
 
-// notIndividualOpFilter は個別の操作（run・classify --auto・plan --auto・verify --auto）の周を
-// 除く条件。トリガーの値は internal/cli の各コマンドの Trigger に固定されている。
-const notIndividualOpFilter = `trigger NOT IN ('run', 'classify --auto', 'plan --auto', 'verify --auto')`
+// notIndividualOpFilter は個別の操作（run・classify --auto・plan --auto・verify --auto・improve・learn・op exec）の周を
+// 除く条件。トリガーの値は internal/cli の各コマンドの Trigger に固定されている。手動の improve・learn・
+// op exec も個別の操作として除く。
+const notIndividualOpFilter = `trigger NOT IN ('run', 'classify --auto', 'plan --auto', 'verify --auto', 'improve', 'learn', '` + ReleaseExecTriggerOpExec + `')`
 
 // ReadCycleStatus はサイクルの排他ロックと周の記録を読んで状態を導く。読むだけで、
 // 古いロックの回収・周の終了はしない（回収は次の cycle の BeginCycle が行う）。

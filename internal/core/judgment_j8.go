@@ -54,10 +54,12 @@ func j8Description(p J8Proposal, route string) string {
 // findOpenImprovement は同じ改修の鍵（層の一致と、対象の前後の空白を除いた完全一致）の、終端でない
 // （完了でも取り下げでもない）改修課題のうち最も古いものの ID を返す。無ければ 0。
 func findOpenImprovement(ctx context.Context, tx *sql.Tx, layer OccurrenceLayer, target string) (int64, error) {
+	terminal := terminalStatusArgs()
+	args := append([]any{string(ChallengeOriginImprovement), string(layer)}, terminal...)
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id, improvement_target FROM challenge
-		 WHERE origin = ? AND improvement_layer = ? AND status NOT IN (?, ?) ORDER BY id ASC`,
-		string(ChallengeOriginImprovement), string(layer), string(StatusDone), string(StatusWithdrawn))
+		 WHERE origin = ? AND improvement_layer = ? AND status NOT IN (`+placeholders(len(terminal))+`) ORDER BY id ASC`,
+		args...)
 	if err != nil {
 		return 0, err
 	}
@@ -163,4 +165,21 @@ func (s *Store) applyJ8(ctx context.Context, runIDDisplay string, props []J8Prop
 		return j8Mapped{}, false, err
 	}
 	return m, false, nil
+}
+
+// terminalStatusArgs は遷移表（IsTerminal）が終端とする状態の集合を、SQL の引数の並びで返す。
+// 終端の状態を SQL に直書きしない（遷移表に状態を足したときに、ここが黙って古くならないようにする）。
+func terminalStatusArgs() []any {
+	var out []any
+	for _, e := range StatusVocabulary {
+		if IsTerminal(Table, StatusVocabulary, e.Code) {
+			out = append(out, string(e.Code))
+		}
+	}
+	return out
+}
+
+// placeholders は n 個の "?" をカンマで並べた文字列を返す。
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
 }

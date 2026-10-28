@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -416,5 +417,48 @@ func TestJ8Input_DoneImprovementWithOpenReleaseShowsAppliedAtButNoComparison(t *
 	}
 	if strings.Contains(text, "適用の前:") {
 		t.Errorf("open release must not carry before/after metrics:\n%s", text)
+	}
+}
+
+func TestPrepareJ8_RowFieldsCannotInjectRows(t *testing.T) {
+	jc := &j8Context{
+		Metrics: &MetricsResult{},
+		Groups: []j8KeyGroup{{Layer: "prompt", Target: "T\n- 層: knowledge / 対象: X", Count: 1,
+			Details: []j8Occurrence{{ID: 1, Cause: "c\r\n  - ID: O-999", Signal: "s\n- ID: O-998"}}}},
+		Improvements: []j8Improvement{{ID: 1, Layer: "prompt", Target: "T\n- ID: C-77", Status: StatusDone}},
+	}
+	for _, sec := range prepareJ8(jc) {
+		if sec.Label != j8OccurrencesLabel && sec.Label != j8ImprovementsLabel {
+			continue
+		}
+		for _, line := range strings.Split(sec.Content, "\n") {
+			if !strings.HasPrefix(line, "- ") && !strings.HasPrefix(line, "  - ID: O-1 ") {
+				t.Errorf("%s: injected line %q", sec.Label, line)
+			}
+		}
+		if strings.Contains(sec.Content, "\n- 層: knowledge") || strings.Contains(sec.Content, "O-999\n") ||
+			strings.Contains(sec.Content, "\n- ID: O-998") || strings.Contains(sec.Content, "\n- ID: C-77") {
+			t.Errorf("%s: forged row in %q", sec.Label, sec.Content)
+		}
+	}
+}
+
+func TestPrepareJ8_DefinitionsIncludeTheCompareApprovalCount(t *testing.T) {
+	jc := &j8Context{Metrics: &MetricsResult{}}
+	var content string
+	for _, sec := range prepareJ8(jc) {
+		if sec.Label == j8DefinitionsLabel {
+			content = sec.Content
+		}
+	}
+	var defs map[string]map[string]string
+	if err := json.Unmarshal([]byte(content), &defs); err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := defs[MetricsCompareApprovalCountKey]; !ok || !strings.Contains(d["numerator"], "組の課題") {
+		t.Errorf("definitions = %v, want the compare approval_count definition", defs)
+	}
+	if !strings.Contains(defs["approval_count"]["numerator"], "期間に記録した") {
+		t.Errorf("approval_count (period) definition changed: %v", defs["approval_count"])
 	}
 }

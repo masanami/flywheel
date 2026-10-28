@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -412,6 +413,22 @@ func TestImproveJ8_RoutesFromDeclaration(t *testing.T) {
 	}
 }
 
+func TestImproveJ8_OriginInspectFailureIsNotedAndRoutesToIssue(t *testing.T) {
+	f := newJ8Fixture(t)
+	ids := f.occ(t, 2, j8Row{layer: "knowledge", target: "K"})
+	f.out([]any{j8Proposal("knowledge", "K", formatOccurrenceID(ids[0]))})
+	decl := &ConnectorsDeclaration{Repos: []ConnectorRepo{{Name: "r", Remote: "o/r"}}}
+	git := newFakeSlotGit()
+	git.errs = map[string]error{f.s.Workspace(): errors.New("inspect boom")}
+	res := f.run(t, ImproveJ8Input{Manual: true, ConnDecl: decl, SlotGit: git})
+	if len(res.Filed) != 1 || !strings.Contains(f.challengeField(t, res.Filed[0], "description"), "成果物の経路: Issue") {
+		t.Fatalf("res = %+v", res)
+	}
+	if !strings.Contains(res.Note, "origin unreadable") || !strings.Contains(res.Note, "inspect boom") {
+		t.Errorf("note = %q, want the inspect error", res.Note)
+	}
+}
+
 func TestImproveJ8_AtomicWhenWritesFail_AC351(t *testing.T) {
 	boom := errors.New("injected failure")
 	for name, inject := range map[string]func(s *Store){
@@ -466,6 +483,44 @@ func TestImproveJ8_AutoMappingErrorIsCountedAsInvalidOutput(t *testing.T) {
 	if f.count(t, `SELECT COUNT(*) FROM run WHERE judgment = 'J8' AND result = 'invalid_output'`) != 1 {
 		t.Error("the run was not rewritten to invalid_output in the store")
 	}
+}
+
+func TestImproveJ8_InvalidateFailureIsReportedWithTheMappingError(t *testing.T) {
+	boomMap := errors.New("map boom")
+	// 写像が失敗した時点で ctx を取り消し、続く invalidateRunOutput の書き込みも失敗させる。
+	run := func(t *testing.T, in ImproveJ8Input) (*ImproveJ8Result, error) {
+		f := newJ8Fixture(t)
+		f.occ(t, 10, j8Row{})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		f.s.insertChallenge = func(*sql.Tx, ImprovementKey) error { cancel(); return boomMap }
+		ids := f.s.mustOccIDs(t)
+		f.out([]any{j8Proposal("prompt", "T", formatOccurrenceID(ids[len(ids)-1]))})
+		if !in.Manual {
+			c, err := f.s.BeginCycle(context.Background(), BeginCycleInput{Trigger: "run", BudgetUSD: 100})
+			if err != nil {
+				t.Fatal(err)
+			}
+			in.CycleID = c.ID
+		}
+		in.AgentDecl, in.Invoker = f.agent, f.inv
+		return f.s.ImproveJ8(ctx, in)
+	}
+	t.Run("auto", func(t *testing.T) {
+		res, err := run(t, ImproveJ8Input{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(res.Note, "mapping failed") || !strings.Contains(res.Note, "invalidate failed") {
+			t.Fatalf("note = %q", res.Note)
+		}
+	})
+	t.Run("manual", func(t *testing.T) {
+		_, err := run(t, ImproveJ8Input{Manual: true})
+		if err == nil || !strings.Contains(err.Error(), "context canceled") || !errors.Is(err, boomMap) {
+			t.Fatalf("err = %v, want the invalidate failure (context canceled) joined", err)
+		}
+	})
 }
 
 func (s *Store) mustOccIDs(t *testing.T) []int64 {
@@ -561,5 +616,16 @@ func TestImproveJ8_RunFailureWritesNothing(t *testing.T) {
 	before := f.handledAll(t)
 	if res := f.manual(t); res.Result != RunResultErrored || f.handledAll(t) != before {
 		t.Errorf("res = %+v handled = %s", res, f.handledAll(t))
+	}
+}
+
+func TestTerminalStatusArgs_AreDerivedFromTheTransitionTable(t *testing.T) {
+	got := map[any]bool{}
+	for _, a := range terminalStatusArgs() {
+		got[a] = true
+	}
+	want := map[any]bool{string(StatusDone): true, string(StatusWithdrawn): true}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("terminal statuses = %v, want %v", got, want)
 	}
 }

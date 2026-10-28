@@ -162,43 +162,37 @@ func (s *Store) holdForJudgmentFailureLimit(ctx context.Context, ch Challenge, j
 // 課題の版・保留では区切らない（回答する保留が無い）。
 func loadJ8LimitHit(ctx context.Context, tx *sql.Tx, limit int) (*judgmentLimitHit, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id FROM run WHERE kind = 'judgment' AND judgment = ? AND challenge_id IS NULL ORDER BY id DESC`, string(JudgmentJ8))
+		`SELECT id, result, rate_limited FROM run
+		 WHERE kind = 'judgment' AND judgment = ? AND challenge_id IS NULL ORDER BY id DESC`, string(JudgmentJ8))
 	if err != nil {
 		return nil, err
 	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, err
-	}
-	_ = rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	count := 0
 	var last *runRow
-	for _, id := range ids {
-		r, err := loadRunByID(ctx, tx, id)
-		if err != nil {
+	for rows.Next() {
+		var (
+			id          int64
+			result      sql.NullString
+			rateLimited bool
+		)
+		if err := rows.Scan(&id, &result, &rateLimited); err != nil {
 			return nil, err
 		}
-		if r == nil || r.RateLimited {
+		if rateLimited {
 			continue
 		}
-		if !isCountedFailure(r.Result) {
+		if !isCountedFailure(RunResult(result.String)) {
 			break
 		}
 		count++
 		if last == nil {
-			rr := *r
-			last = &rr
+			last = &runRow{ID: formatRunID(id), Result: runResult(result.String)}
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	if last == nil || count < limit {
 		return nil, nil
