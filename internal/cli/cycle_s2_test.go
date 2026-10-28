@@ -64,7 +64,7 @@ func TestCycle_AllFivePhases_DelegatesAndVerifiesInTheSameCycleWithOnlyGETs(t *t
 	for _, p := range doc["phases"].([]any) {
 		names = append(names, p.(map[string]any)["phase"].(string))
 	}
-	if !reflect.DeepEqual(names, []string{"release", "ingest", "classify", "plan", "run", "verify", "learn"}) {
+	if !reflect.DeepEqual(names, []string{"release", "ingest", "classify", "plan", "run", "verify", "learn", "improve"}) {
 		t.Fatalf("phases = %v", names)
 	}
 	got := collapseConsecutive(orderLogTags(readOrderLog(t, orderLog)))

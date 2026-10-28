@@ -169,6 +169,13 @@ func cycleResultText(res *core.CycleRunResult) string {
 			fmt.Fprintf(&b, "  %s: スキップ\n", p.Phase)
 		case p.Phase == core.CyclePhaseRelease:
 			fmt.Fprintf(&b, "  %s: 処理 %d 件・未起動 %d 件\n", p.Phase, len(p.ReleaseItems), len(p.NotStarted))
+		case p.Phase == core.CyclePhaseImprove:
+			var created, linked int
+			for _, it := range p.ImproveItems {
+				created += len(it.Created)
+				linked += len(it.Linked)
+			}
+			fmt.Fprintf(&b, "  %s: J8 の起動 %d 件・起票 %d 件・紐づけ %d 件・未起動 %d 件\n", p.Phase, len(p.ImproveItems), created, linked, len(p.NotStarted))
 		case p.Phase == core.CyclePhaseIngest:
 			fmt.Fprintf(&b, "  %s: 取り込み元 %d 件\n", p.Phase, len(p.Ingest.Sources))
 		default:

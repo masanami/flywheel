@@ -387,6 +387,15 @@ func defaultCommands() []Command {
 			Run:           runLearn,
 		},
 		{
+			// docs/features/m4.5-learning-and-self-improvement.md §IF / API（S4）。位置引数も必須のフラグも無い。
+			// 承認を作らないので端末は求めない。
+			Path:          []string{"improve"},
+			RequiresStore: true,
+			MinPositional: 0,
+			MaxPositional: 0,
+			Run:           runImprove,
+		},
+		{
 			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2）。本人確認も
 			// 端末も要らない単発の操作（作業ログには載せない）。
 			Path:          []string{"slot", "clear"},

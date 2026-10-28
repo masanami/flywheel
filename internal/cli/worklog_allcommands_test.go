@@ -72,6 +72,10 @@ var worklogNoActivityMutationCommands = map[string]bool{
 	// 経路 invoker）は経路 cli 固定のこの表の検査の対象ではなく、core のテスト（TestLearnJ6_*）と
 	// learn_test.go が検証する。この表の検査は、対象の課題が無い learn が何も足さないことを確かめる。
 	"learn": true,
+	// improve（M4.5 S4）も run・cycle 表を書く。J8 の写像が残す作業ログ（entity=challenge・action=improvement。
+	// 経路 invoker）は経路 cli 固定のこの表の検査の対象ではなく、core のテストと improve_test.go が検証する。
+	// この表の検査は、起動の件数が 0 の improve が何も足さないことを確かめる。
+	"improve": true,
 }
 
 // worklogIngestRepo は worklogCases の "ingest create" ケースが使う偽の

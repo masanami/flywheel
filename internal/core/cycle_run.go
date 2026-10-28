@@ -30,8 +30,10 @@ const (
 	CyclePhaseRun CyclePhase = "run"
 	// CyclePhaseVerify は検証の段（VerifyAutoJ5 と同じ処理）。
 	CyclePhaseVerify CyclePhase = "verify"
-	// CyclePhaseLearn は学習の段（LearnJ6 と同じ処理。最後の段。接続ツールの宣言を使わないので skipped にならない）。
+	// CyclePhaseLearn は学習の段（LearnJ6 と同じ処理。improve の直前の段。接続ツールの宣言を使わないので skipped にならない）。
 	CyclePhaseLearn CyclePhase = "learn"
+	// CyclePhaseImprove は改修提案の段（ImproveJ8 と同じ処理。8 段目で最後の段。接続ツールの宣言を使わないので skipped にならない）。
+	CyclePhaseImprove CyclePhase = "improve"
 )
 
 // CycleIngestInput は取り込みの段の入力。`.flywheel/sources.json` があるときだけ
@@ -98,6 +100,32 @@ type CyclePhaseResult struct {
 	ReleaseItems []ReleaseExecItem
 	// SerialGroups は委譲の段（run）の直列化グループ（他の段・skipped の段は空）。
 	SerialGroups []SerialGroup
+	// ImproveItems は improve の段の items（J8 を呼んだ run ごとに 1 件。他の段は空）。
+	// improve の段の not_started は NotStarted に入る（課題の ID を持たない）。
+	ImproveItems []ImproveItem
+}
+
+// ImproveItem は improve の段と `flywheel improve` の items の要素（J8 の run 1 回分）。
+type ImproveItem struct {
+	// Created は起票した改修課題の ID、Linked は重複の抑えで紐づけた既存の改修課題の ID。
+	Created []string
+	Linked  []string
+	Result  RunResult
+	RunID   string
+}
+
+// ImproveItems は ImproveJ8 の結果を段の items へ写す（J8 を呼ばなかったなら空）。
+func (r *ImproveJ8Result) ImproveItems() []ImproveItem {
+	items := []ImproveItem{}
+	if r.Called {
+		items = append(items, ImproveItem{
+			Created: append([]string{}, r.Filed...),
+			Linked:  append([]string{}, r.Linked...),
+			Result:  r.Result,
+			RunID:   r.RunID,
+		})
+	}
+	return items
 }
 
 // CycleRunResult は Store.RunCycle の出力（`cycle --json` の元になる値）。
@@ -117,7 +145,7 @@ type CycleRunResult struct {
 //
 //  1. サイクルの排他を取って周を開始する（生きている保持者がいれば ErrLocked。
 //     何も起動・記録しない）。以後、段の実行中は 60 秒ごとにロックの heartbeat を更新する
-//  2. 承認済みの release の実行（in.ConnDecl があれば）→ 取り込み（in.Ingest があれば）→ 分類（J1）→ 計画（J2）→ 委譲 → 検証（J5）→ 学習（J6）の順に
+//  2. 承認済みの release の実行（in.ConnDecl があれば）→ 取り込み（in.Ingest があれば）→ 分類（J1）→ 計画（J2）→ 委譲 → 検証（J5）→ 学習（J6）→ 改修提案（J8）の順に
 //     段を実行する（計画・委譲・検証は in.ConnDecl があるときだけ）。検証の段は、委譲の段が
 //     起動した委譲の run がすべて終わってから始まる（RunDelegation は合流して返る）。各段は個別の操作と同じ core の処理を呼び、前の段で状態が進んだ
 //     課題は後の段の対象になる。枠超過は段をまたいで伝播する（同じ JudgmentCycle を渡す）
@@ -318,6 +346,21 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 		return nil, err
 	}
 	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseLearn, Items: j6.Items, NotStarted: j6.NotStarted})
+
+	// 改修提案（improve と同じ処理。J8 は接続ツールの宣言が無くても呼ぶ。起動の件数がしきい値に
+	// 達したときだけ呼び、J8 の連続失敗が上限に達していれば呼ばない）。
+	j8, err := s.ImproveJ8(ctx, ImproveJ8Input{
+		AgentDecl: in.AgentDecl,
+		ConnDecl:  in.ConnDecl,
+		Invoker:   in.Invoker,
+		SlotGit:   in.Git,
+		CycleID:   cycleID,
+		Cycle:     jc,
+	})
+	if err != nil {
+		return nil, err
+	}
+	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseImprove, ImproveItems: j8.ImproveItems(), NotStarted: j8.NotStarted})
 
 	return phases, nil
 }
