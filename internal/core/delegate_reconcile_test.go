@@ -579,3 +579,36 @@ func TestReconcile_ResumeOnTheChallengesOwnBranchStillReconciles(t *testing.T) {
 		t.Errorf("gh calls = %q, want a pull request lookup for feat/x", calls)
 	}
 }
+
+// 委譲の run の終了と照合の写像の間に課題が取り下げられたら、写さず（状態は取り下げのまま）、
+// 取り下げを検出したことを結果の注記に残す。
+func TestReconcile_WithdrawnBeforeMappingIsNotedAndNotMapped(t *testing.T) {
+	f := newReconFixture(t, "impl")
+	f.deleg.onInvoke = func(DelegateLaunchInput) { f.setStatus(t, "C-1", "withdrawn") }
+	res, err := f.run(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 1 || !strings.Contains(res.Items[0].Note, "withdrawn") {
+		t.Fatalf("result = %+v, want a note about the withdrawal", res)
+	}
+	if got := f.queryString(t, `SELECT status FROM challenge WHERE id = 1`); got != "withdrawn" {
+		t.Errorf("status = %q, want withdrawn (unchanged)", got)
+	}
+}
+
+// 取り下げ以外の理由（例: 人間対応待ちへ移された）で写さなかったときは、取り下げの注記を出さない。
+func TestReconcile_NotWithdrawnSkipHasNoWithdrawalNote(t *testing.T) {
+	f := newReconFixture(t, "impl")
+	f.deleg.onInvoke = func(DelegateLaunchInput) { f.setStatus(t, "C-1", "awaiting_human") }
+	res, err := f.run(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 1 || strings.Contains(res.Items[0].Note, "withdrawn") {
+		t.Fatalf("result = %+v, want no note about a withdrawal", res)
+	}
+	if got := f.queryString(t, `SELECT status FROM challenge WHERE id = 1`); got != "awaiting_human" {
+		t.Errorf("status = %q, want awaiting_human (unchanged)", got)
+	}
+}

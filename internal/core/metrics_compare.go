@@ -91,6 +91,19 @@ func metricsCompare(ctx context.Context, tx *sql.Tx, cid int64) (*MetricsCompare
 	return out, nil
 }
 
+// MetricsCompareApprovalCountKey は --compare の approval_count の定義を J8 の入力の定義の区画に載せるときの名前。
+const MetricsCompareApprovalCountKey = "approval_count_compare"
+
+// MetricsCompareApprovalCountDefinition は --compare の前後の組の approval_count の定義。metrics の
+// approval_count（MetricsDefinitions）は期間の全行を数えるが、--compare は組の課題の承認だけを数える。
+func MetricsCompareApprovalCountDefinition() MetricsDefinition {
+	return MetricsDefinition{
+		Numerator:   "組の課題（前の組・後の組それぞれの target_challenges に数えた課題）の承認と差し戻しの行の数（種類・決定・経路・本人確認の方式ごと）。組の外の課題の承認は数えない",
+		Denominator: "なし（組の課題の全行を数える）",
+		Period:      fmt.Sprintf("期間ではなく、適用の時点の前後それぞれ最大 %d 件の完了した課題の組。承認の日時は問わない", MetricsCompareGroupSize),
+	}
+}
+
 // metricsOpenReleases は課題 cid の未実行（pending・approved）の release の件数を返す。
 func metricsOpenReleases(ctx context.Context, tx *sql.Tx, cid int64) (int, error) {
 	var open int

@@ -351,10 +351,10 @@ func j8JSON(v any) string {
 func prepareJ8(jc *j8Context) []JudgmentDataSection {
 	var b strings.Builder
 	for _, g := range jc.Groups {
-		fmt.Fprintf(&b, "- 層: %s / 対象: %s / 件数: %d\n", g.Layer, g.Target, g.Count)
+		fmt.Fprintf(&b, "- 層: %s / 対象: %s / 件数: %d\n", g.Layer, oneLine(g.Target), g.Count)
 		for _, o := range g.Details {
 			fmt.Fprintf(&b, "  - ID: %s / 種類: %s / 原因: %s / 兆候: %s / 課題: %s / 作成: %s\n",
-				formatOccurrenceID(o.ID), o.Kind, o.Cause, o.Signal, formatChallengeID(o.ChallengeID), o.At)
+				formatOccurrenceID(o.ID), o.Kind, oneLine(o.Cause), oneLine(o.Signal), formatChallengeID(o.ChallengeID), o.At)
 		}
 	}
 	if len(jc.Groups) == 0 {
@@ -375,11 +375,13 @@ func prepareJ8(jc *j8Context) []JudgmentDataSection {
 	for name, d := range MetricsDefinitions() {
 		defs[name] = map[string]any{"numerator": d.Numerator, "denominator": d.Denominator, "period": d.Period}
 	}
+	cd := MetricsCompareApprovalCountDefinition()
+	defs[MetricsCompareApprovalCountKey] = map[string]any{"numerator": cd.Numerator, "denominator": cd.Denominator, "period": cd.Period}
 	sections = append(sections, JudgmentDataSection{Label: j8DefinitionsLabel, Content: j8JSON(defs)})
 
 	b.Reset()
 	for _, im := range jc.Improvements {
-		fmt.Fprintf(&b, "- ID: %s / 層: %s / 対象: %s / 状態: %s", formatChallengeID(im.ID), im.Layer, im.Target, im.Status)
+		fmt.Fprintf(&b, "- ID: %s / 層: %s / 対象: %s / 状態: %s", formatChallengeID(im.ID), im.Layer, oneLine(im.Target), im.Status)
 		switch {
 		case im.Compare != nil:
 			fmt.Fprintf(&b, " / 適用の時点: %s\n  適用の前: %s\n  適用の後: %s", im.Compare.AppliedAt,

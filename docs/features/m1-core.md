@@ -227,7 +227,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 |---|---|
 | `plans` | `{"version", "body", "created_at"}` |
 | `approvals` | `{"kind", "decision", "operation_id", "target_version", "actor", "channel", "verification", "reason", "decided_at"}`（`operation_id`・`reason` は `null` 可） |
-| `holds` | `{"question", "from_status", "from_status_label", "raised_at", "answer", "answered_at", "answered_by"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`） |
+| `holds` | `{"question", "from_status", "from_status_label", "raised_at", "answer", "answered_at", "answered_by", "closed_at"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`。`closed_at` は保留を回答なしで閉じた時刻〔課題の取り下げ。M4.5〕で、閉じていなければ `null`） |
 | `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
 | `source_binding` | `{"source_id", "external_key", "url", "fingerprint", "upstream_state", "policy_state", "comments_count", "upstream_updated_at", "read_comments_count", "read_upstream_updated_at", "created_at", "updated_at"}`（対応の無い課題では `source_binding` 自体が `null`。`comments_count`・`upstream_updated_at`・`read_comments_count`・`read_upstream_updated_at` は #72（上流の更新の観測と既読）が追加。`upstream_updated_at`・`read_upstream_updated_at` は未設定なら `null`） |
 

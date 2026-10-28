@@ -106,7 +106,7 @@ func TestReadCycleStatus_NoLockOpenCycleIsIdle(t *testing.T) {
 }
 
 func TestReadCycleStatus_IndividualOpCyclesExcluded(t *testing.T) {
-	triggers := []string{"run", "classify --auto", "plan --auto", "verify --auto"}
+	triggers := []string{"run", "classify --auto", "plan --auto", "verify --auto", "improve", "learn", "op exec"}
 	s := newStoreForTest(t)
 	for i, tr := range triggers {
 		st := statusBase.Add(time.Duration(i) * time.Minute)
@@ -223,10 +223,10 @@ func TestReadCycleStatus_NoLockOpenCycleIsIdleForEachTrigger(t *testing.T) {
 	}
 }
 
-// AC-180: cycle の周より ID の大きい個別の操作の周（4 つの trigger のそれぞれ。終了したものと
+// AC-180: cycle の周より ID の大きい個別の操作の周（7 つの trigger のそれぞれ。終了したものと
 // 終了していないもの）は、last_started_at・last_ended_at・last_result に影響しない。
 func TestReadCycleStatus_NewerIndividualOpCyclesNeverAffectLast(t *testing.T) {
-	for _, tr := range []string{"run", "classify --auto", "plan --auto", "verify --auto"} {
+	for _, tr := range []string{"run", "classify --auto", "plan --auto", "verify --auto", "improve", "learn", "op exec"} {
 		t.Run(tr+"/cycle は終了済み", func(t *testing.T) {
 			s := newStoreForTest(t)
 			cycleStart := statusBase
