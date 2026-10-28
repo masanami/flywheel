@@ -186,6 +186,11 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
 		return []string{"learn", createForCase(t, ws)}
 	}},
+	"improve": {setup: func(t *testing.T, _ string) []string {
+		// 起動の件数が 0 の improve（J8 を呼ばず、items は空）。要素の形を照合する経路は improve_test.go。
+		putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
+		return []string{"improve"}
+	}},
 	"cycle": {setup: func(t *testing.T, ws string) []string {
 		// cycle --json の出力の形（phases の各段・items・not_started・ingest の result）が
 		// 文書と照合されるよう、取り込みで課題を 1 件作り、同じ周で分類・計画まで進める。

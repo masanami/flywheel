@@ -28,8 +28,8 @@ func TestRunCycle_LearnPhaseRunsLastWithoutConnectors(t *testing.T) {
 		t.Fatalf("RunCycle: %v", err)
 	}
 	names := phaseNames(res)
-	if names[len(names)-1] != CyclePhaseLearn || fmt.Sprint(names) != "[release ingest classify plan run verify learn]" {
-		t.Fatalf("phases = %v, want learn last", names)
+	if names[len(names)-2] != CyclePhaseLearn || fmt.Sprint(names) != "[release ingest classify plan run verify learn improve]" {
+		t.Fatalf("phases = %v, want learn right before improve", names)
 	}
 	learn := phaseOfResult(t, res, CyclePhaseLearn)
 	if learn.Skipped || len(learn.Items) != 1 || learn.Items[0].ChallengeID != c || learn.Items[0].Outcome != "learned" {

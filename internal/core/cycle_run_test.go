@@ -206,7 +206,7 @@ func TestRunCycle_RunsIngestClassifyPlanInOrder(t *testing.T) {
 	}
 	res := f.run(t, in)
 
-	want := []CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseLearn}
+	want := []CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseLearn, CyclePhaseImprove}
 	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("phases = %v, want %v", got, want)
 	}
@@ -231,8 +231,8 @@ func TestRunCycle_NoIngestInput_IngestPhaseIsSkipped(t *testing.T) {
 	if !ing.Skipped || ing.Ingest != nil {
 		t.Errorf("ingest phase = %+v, want skipped with no result", ing)
 	}
-	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint([]CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseLearn}) {
-		t.Errorf("phases = %v, want all seven phases listed even when ingest is skipped", got)
+	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint([]CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseLearn, CyclePhaseImprove}) {
+		t.Errorf("phases = %v, want all eight phases listed even when ingest is skipped", got)
 	}
 }
 

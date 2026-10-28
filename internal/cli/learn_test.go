@@ -202,7 +202,7 @@ func TestLearn_NoTargets_EmptyPhase_AndClaudeNotOnPATH_InvokerUnavailable(t *tes
 
 // AC-222: cycle の phases の最後は learn で、verify の後に実行される。learn の段は connectors.json が無くても
 // skipped にならず、完了の課題の発生を分類する。
-func TestCycle_LearnPhaseIsLastAndClassifiesWithoutConnectors(t *testing.T) {
+func TestCycle_LearnPhaseIsBeforeImproveAndClassifiesWithoutConnectors(t *testing.T) {
 	m45SpecLine(t, "`cycle --json` の `phases` の最後の要素は `phase: \"learn\"` である")
 	ws := setupWorkspaceWithPosition(t)
 	id, occ := newLearnableForCase(t, ws, "done", 1)
@@ -210,11 +210,14 @@ func TestCycle_LearnPhaseIsLastAndClassifiesWithoutConnectors(t *testing.T) {
 
 	doc := cycleDoc(t, ws)
 	phases := doc["phases"].([]any)
-	last := phases[len(phases)-1].(map[string]any)
-	if last["phase"] != "learn" || last["skipped"] != false {
-		t.Fatalf("last phase = %v, want learn (not skipped)", last)
+	if tail := phases[len(phases)-1].(map[string]any); tail["phase"] != "improve" {
+		t.Fatalf("last phase = %v, want improve (S4 puts improve after learn)", tail)
 	}
-	prev := phases[len(phases)-2].(map[string]any)
+	last := phases[len(phases)-2].(map[string]any)
+	if last["phase"] != "learn" || last["skipped"] != false {
+		t.Fatalf("phase before improve = %v, want learn (not skipped)", last)
+	}
+	prev := phases[len(phases)-3].(map[string]any)
 	if prev["phase"] != "verify" {
 		t.Errorf("the phase before learn = %v, want verify", prev["phase"])
 	}

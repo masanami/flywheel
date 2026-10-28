@@ -129,6 +129,7 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 		{"runs", "C-1"},
 		{"metrics"},
 		{"learn"},
+		{"improve"},
 		{"cycle"},
 		{"run"},
 		{"slot", "clear", "SL-1"},

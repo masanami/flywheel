@@ -155,6 +155,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM45DependencyShape(t, &doc)
 	addM45WithdrawShape(t, &doc)
 	addM45LearnShape(t, &doc)
+	addM45ImproveShape(t, &doc)
 	addM45MetricsShape(t, &doc)
 	addM45MetricsCompareShape(t, &doc)
 	addM3SlotClearShape(t, &doc)
@@ -419,6 +420,39 @@ func addM45LearnShape(t *testing.T, doc *documentedJSON) {
 	doc.topLevel["learn"] = []map[string]bool{keys}
 }
 
+// addM45ImproveShape は `improve` の成功時の JSON の最上位のキーと、improve の段の items の要素のキーを
+// doc へ足す。仕様の §IF / API には行を足さず、受入基準（AC-326）の「`improve --json` は、`cycle` の
+// `phases` の 1 要素と同じ形を `{"phase": {…}}`（`phase: "improve"`）で返す。`items` の要素は J8 の run ごとに
+// `{"created", "linked", "result", "run_id"}`」の行から読む。段のそれ以外の形（items・not_started・phase・skipped）は
+// 判断の段の形（doc.entity["cycle_phase_judgment"]）が照合する。
+func addM45ImproveShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	line := m45SpecLine(t, "`improve --json` は、`cycle` の `phases` の 1 要素と同じ形を")
+	var top map[string]bool
+	var itemKeys map[string]bool
+	for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+		switch {
+		case strings.HasPrefix(m[1], `{"phase"`):
+			top = topLevelKeys(m[1])
+		case strings.HasPrefix(m[1], `{"created"`):
+			itemKeys = map[string]bool{}
+			for _, k := range regexp.MustCompile(`"([a-z_]+)"`).FindAllStringSubmatch(m[1], -1) {
+				itemKeys[k[1]] = true
+			}
+		}
+	}
+	if len(top) != 1 || !top["phase"] {
+		t.Fatalf("m4.5 spec's `improve --json` line does not document {\"phase\": …}: %v", top)
+	}
+	if len(itemKeys) != 4 {
+		t.Fatalf("m4.5 spec's `improve --json` line does not list the 4 item keys: %v", itemKeys)
+	}
+	doc.topLevel["improve"] = []map[string]bool{top}
+	doc.entity["improve_item"] = itemKeys
+	// failure_limit の not_started の要素は challenge_id を持たない（AC の「この not_started の要素は challenge_id を持たない」）。
+	m45SpecLine(t, "`failure_limit`", "この `not_started` の要素は `challenge_id` を持たない")
+}
+
 // assertDocumentedReleasePhase は release の段（cycle の phases の要素と `op exec` の phase が共有する形）の
 // 1 要素 pm が文書の形と一致することを検査する。
 func assertDocumentedReleasePhase(t *testing.T, doc documentedJSON, where string, pm map[string]any) {
@@ -538,7 +572,7 @@ func addM3CycleShape(t *testing.T, doc *documentedJSON) {
 
 // documentedCyclePhaseNames は cycle の JSON の phase の閉集合（§IF / API「`phase` は
 // `ingest | classify | plan | run | verify` の閉集合」）。M4.5 で release（最初）と learn（最後）が加わり、cycle は 7 つすべてを出す。
-var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "learn": true}
+var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "learn": true, "improve": true}
 
 // assertDocumentedCycle は cycle の成功時の出力 out の内側（周の記録・段・items・not_started・
 // ingest の result）が、文書の例と同じ形であることを検査する（最上位のキーは
@@ -621,6 +655,18 @@ func assertDocumentedPhase(t *testing.T, doc documentedJSON, where string, pm ma
 	if got := keysOf(pm); !reflect.DeepEqual(got, doc.entity["cycle_phase_judgment"]) {
 		t.Errorf("%s keys = %v, documented = %v", where, sortedKeys(got), sortedKeys(doc.entity["cycle_phase_judgment"]))
 	}
+	// improve の段の items は J8 の run ごとの要素（AC-326）、not_started は challenge_id を持たない（failure_limit）。
+	isImprove := pm["phase"] == "improve"
+	wantItem, wantNS := doc.entity["cycle_item"], doc.entity["cycle_not_started"]
+	if isImprove {
+		wantItem = doc.entity["improve_item"]
+		wantNS = map[string]bool{}
+		for k := range doc.entity["cycle_not_started"] {
+			if k != "challenge_id" {
+				wantNS[k] = true
+			}
+		}
+	}
 	items, _ := pm["items"].([]any)
 	for j, it := range items {
 		im, ok := it.(map[string]any)
@@ -628,8 +674,8 @@ func assertDocumentedPhase(t *testing.T, doc documentedJSON, where string, pm ma
 			t.Errorf("%s.items[%d] is not an object", where, j)
 			continue
 		}
-		if got := keysOf(im); !reflect.DeepEqual(got, doc.entity["cycle_item"]) {
-			t.Errorf("%s.items[%d] keys = %v, documented = %v", where, j, sortedKeys(got), sortedKeys(doc.entity["cycle_item"]))
+		if got := keysOf(im); !reflect.DeepEqual(got, wantItem) {
+			t.Errorf("%s.items[%d] keys = %v, documented = %v", where, j, sortedKeys(got), sortedKeys(wantItem))
 		}
 	}
 	ns, _ := pm["not_started"].([]any)
@@ -646,8 +692,8 @@ func assertDocumentedPhase(t *testing.T, doc documentedJSON, where string, pm ma
 			}
 			delete(got, "detail")
 		}
-		if !reflect.DeepEqual(got, doc.entity["cycle_not_started"]) {
-			t.Errorf("%s.not_started[%d] keys = %v, documented = %v", where, j, sortedKeys(got), sortedKeys(doc.entity["cycle_not_started"]))
+		if !reflect.DeepEqual(got, wantNS) {
+			t.Errorf("%s.not_started[%d] keys = %v, documented = %v", where, j, sortedKeys(got), sortedKeys(wantNS))
 		}
 	}
 	if _, ok := pm["items"].([]any); !ok {
@@ -779,7 +825,7 @@ func assertDocumentedJSON(t *testing.T, doc documentedJSON, name string, out map
 		}
 		t.Errorf("%s: top-level keys = %v, documented shapes = %v", name, sortedKeys(got), want)
 	}
-	if name != "run" && name != "op exec" { // run・op exec の phase の items は ingest の item と名前が同じなので別に照合する。
+	if name != "run" && name != "op exec" && name != "improve" { // run・op exec・improve の phase の items は ingest の item と名前が同じなので別に照合する。
 		assertDocumentedEntities(t, doc, name, out)
 	}
 	if name == "cycle" {
@@ -795,7 +841,7 @@ func assertDocumentedJSON(t *testing.T, doc documentedJSON, name string, out map
 			t.Errorf("op exec: `phase` is not an object: %#v", out["phase"])
 		}
 	}
-	if name == "run" || name == "learn" {
+	if name == "run" || name == "learn" || name == "improve" {
 		if pm, ok := out["phase"].(map[string]any); ok {
 			assertDocumentedPhase(t, doc, name, pm)
 		} else {

@@ -79,8 +79,9 @@ type PhaseItem struct {
 }
 
 // PhaseNotStarted は判断の段の not_started の要素。detail は空文字のとき持たない。
+// challenge_id は improve の段の failure_limit だけが持たない（それ以外の段は常に課題を持つ）。
 type PhaseNotStarted struct {
-	ChallengeID string `json:"challenge_id"`
+	ChallengeID string `json:"challenge_id,omitempty"`
 	Detail      string `json:"detail,omitempty"`
 	Reason      string `json:"reason"`
 }
@@ -136,6 +137,22 @@ type DelegationPhase struct {
 	Phase        string            `json:"phase"`
 	SerialGroups []SerialGroup     `json:"serial_groups"`
 	Skipped      bool              `json:"skipped"`
+}
+
+// ImproveItem は improve の段と `improve` の items の要素。
+type ImproveItem struct {
+	Created []string `json:"created"`
+	Linked  []string `json:"linked"`
+	Result  string   `json:"result"`
+	RunID   string   `json:"run_id"`
+}
+
+// ImprovePhase は improve の段の形（cycle の phases の要素と `improve` の phase が共有する）。
+type ImprovePhase struct {
+	Items      []ImproveItem     `json:"items"`
+	NotStarted []PhaseNotStarted `json:"not_started"`
+	Phase      string            `json:"phase"`
+	Skipped    bool              `json:"skipped"`
 }
 
 // IngestPhase は取り込みの段の形。skipped なら result は null。
@@ -205,6 +222,20 @@ func FromDelegationPhase(skipped bool, res *core.JudgmentAutoResult) DelegationP
 	}
 }
 
+// FromImprovePhase は improve の段の結果を変換する。
+func FromImprovePhase(items []core.ImproveItem, notStarted []core.NotStarted) ImprovePhase {
+	out := make([]ImproveItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, ImproveItem{
+			Created: append([]string{}, it.Created...),
+			Linked:  append([]string{}, it.Linked...),
+			Result:  string(it.Result),
+			RunID:   it.RunID,
+		})
+	}
+	return ImprovePhase{Items: out, NotStarted: phaseNotStarted(notStarted), Phase: string(core.CyclePhaseImprove), Skipped: false}
+}
+
 // FromReleasePhase は release の段の結果を変換する。
 func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []core.NotStarted) ReleasePhase {
 	outItems := make([]ReleaseItem, 0, len(items))
@@ -231,6 +262,9 @@ func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []c
 func FromCyclePhase(p core.CyclePhaseResult) any {
 	if p.Phase == core.CyclePhaseRelease {
 		return FromReleasePhase(p.Skipped, p.ReleaseItems, p.NotStarted)
+	}
+	if p.Phase == core.CyclePhaseImprove {
+		return FromImprovePhase(p.ImproveItems, p.NotStarted)
 	}
 	if p.Phase == core.CyclePhaseIngest {
 		out := IngestPhase{Phase: string(p.Phase), Skipped: p.Skipped}

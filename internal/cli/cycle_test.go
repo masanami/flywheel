@@ -186,8 +186,8 @@ func TestCycle_WithSources_RunsIngestClassifyPlanInOrder(t *testing.T) {
 	for _, p := range doc["phases"].([]any) {
 		names = append(names, p.(map[string]any)["phase"].(string))
 	}
-	if !reflect.DeepEqual(names, []string{"release", "ingest", "classify", "plan", "run", "verify", "learn"}) {
-		t.Errorf("phases = %v, want [release ingest classify plan run verify learn]", names)
+	if !reflect.DeepEqual(names, []string{"release", "ingest", "classify", "plan", "run", "verify", "learn", "improve"}) {
+		t.Errorf("phases = %v, want [release ingest classify plan run verify learn improve]", names)
 	}
 	got := collapseConsecutive(orderLogTags(readOrderLog(t, order)))
 	want := []string{"gh", "claude J1", "gh", "claude J2"}
