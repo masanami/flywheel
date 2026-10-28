@@ -299,3 +299,57 @@ func TestImprove_FailureLimit_StopsOnlyTheCyclePhase(t *testing.T) {
 		t.Errorf("manual improve phase = %v, want a J8 call without the failure limit", pm)
 	}
 }
+
+// J8 が改修課題を起票した周の `cycle`（--json なし）は、improve の段の起票・紐づけの件数を表示する
+// （cycleResultText の improve の case を消すと既定の「処理 0 件」の表示になり、このテストが落ちる）。
+func TestCycle_Text_ShowsImproveFiledCount(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	writeImproveThreshold(t, ws, 1)
+	occ := addJ8Occurrences(t, ws, 1)
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j8Route("T", occ...)}, "")
+
+	got := runText(t, ws, "cycle")
+	if want := "  improve: J8 の起動 1 件・起票 1 件・紐づけ 0 件・未起動 0 件\n"; !strings.Contains(got, want) {
+		t.Errorf("cycle text = %q, want to contain %q", got, want)
+	}
+}
+
+// 手動の `improve`（--json なし）は、J8 を呼ばなかった理由（not_started の reason）を表示する。
+// 周の上限で起動できない cycle_budget を実ストア・偽の claude で確かめる。
+func TestImprove_Text_ShowsCycleBudgetReason(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	// J8 の 1 回の上限（既定）より周の上限を小さくして、必ず cycle_budget で起動しない。
+	writeAgentJSONForTest(t, ws, `{"position_file": "position.md", "cycle_budget_usd": 0.1}`)
+	addJ8Occurrences(t, ws, 1)
+	argvLog, _ := putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
+
+	got := runText(t, ws, "improve")
+	if !strings.Contains(got, "呼びませんでした") || !strings.Contains(got, "理由: cycle_budget") {
+		t.Errorf("improve text = %q, want the cycle_budget reason", got)
+	}
+	if _, err := os.Stat(argvLog); err == nil {
+		t.Error("claude was invoked although the cycle budget is exceeded")
+	}
+}
+
+// improveText は J8 を呼ばなかった理由ごとに、その reason と（あれば）detail を表示する。
+// 手動の improve は failure_limit・rate_limited に至らないため、表示の関数を直接確かめる。
+func TestImproveText_ShowsEachNotStartedReason(t *testing.T) {
+	for _, tc := range []struct {
+		ns   core.NotStarted
+		want string
+	}{
+		{core.NotStarted{Reason: core.NotStartedFailureLimit, Detail: "J8: 2 consecutive failures (limit 2)"},
+			"理由: failure_limit（J8: 2 consecutive failures (limit 2)）"},
+		{core.NotStarted{Reason: core.NotStartedRateLimited}, "理由: rate_limited）"},
+		{core.NotStarted{Reason: core.NotStartedCycleBudget}, "理由: cycle_budget）"},
+	} {
+		got := improveText(&core.ImproveJ8Result{Triggering: 3, NotStarted: []core.NotStarted{tc.ns}})
+		if !strings.Contains(got, "起動の件数 3") || !strings.Contains(got, tc.want) {
+			t.Errorf("%s: improveText = %q, want to contain %q", tc.ns.Reason, got, tc.want)
+		}
+	}
+	if got := improveText(&core.ImproveJ8Result{}); strings.Contains(got, "理由") {
+		t.Errorf("improveText without not_started = %q, want no reason", got)
+	}
+}

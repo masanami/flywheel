@@ -90,7 +90,18 @@ func runImprove(a Args) (any, error) {
 // improveText は --json 無しの `improve` の表示（形式の安定は保証しない）。
 func improveText(res *core.ImproveJ8Result) string {
 	if !res.Called {
-		return fmt.Sprintf("改修の提案は呼びませんでした（起動の件数 %d）\n", res.Triggering)
+		if len(res.NotStarted) == 0 {
+			return fmt.Sprintf("改修の提案は呼びませんでした（起動の件数 %d）\n", res.Triggering)
+		}
+		reasons := make([]string, 0, len(res.NotStarted))
+		for _, ns := range res.NotStarted {
+			r := string(ns.Reason)
+			if ns.Detail != "" {
+				r += "（" + ns.Detail + "）"
+			}
+			reasons = append(reasons, r)
+		}
+		return fmt.Sprintf("改修の提案は呼びませんでした（起動の件数 %d・理由: %s）\n", res.Triggering, strings.Join(reasons, ", "))
 	}
 	s := fmt.Sprintf("%s\t%s", res.RunID, res.Result)
 	if len(res.Filed) > 0 {
