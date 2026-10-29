@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/masanami/flywheel/internal/core/internal/store"
 )
@@ -192,7 +193,13 @@ func exportRows(ctx context.Context, tx *sql.Tx, table string, cols []exportColu
 		row := make(map[string]any, len(names))
 		for i, n := range names {
 			switch v := vals[i].(type) {
-			case nil, int64, float64, string:
+			case nil, int64, float64:
+				row[n] = v
+			case string:
+				// encoding/json は UTF-8 として不正なバイト列を黙って U+FFFD に置き換え、往復が一致しなくなる。
+				if !utf8.ValidString(v) {
+					return nil, fmt.Errorf("column %s holds TEXT that is not valid UTF-8, which the export format cannot keep", n)
+				}
 				row[n] = v
 			case []byte:
 				return nil, fmt.Errorf("column %s holds a BLOB, which the export format does not define", n)
@@ -261,8 +268,8 @@ type parsedExport struct {
 }
 
 func parseExport(data []byte) (*parsedExport, error) {
+	// 数の扱い（UseNumber）は値ごとの decodeUseNumber で決める。ここは RawMessage へ分けるだけ。
 	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
 	var raw map[string]json.RawMessage
 	if err := dec.Decode(&raw); err != nil {
 		return nil, importInvalid("not a JSON object: %v", err)
@@ -434,9 +441,17 @@ func importTx(ctx context.Context, tx *sql.Tx, p *parsedExport) error {
 		return err
 	}
 	for _, n := range seqNames {
-		var maxID sql.NullInt64
-		if err := tx.QueryRowContext(ctx, "SELECT MAX(rowid) FROM "+quoteIdent(n)).Scan(&maxID); err != nil {
+		// 最大の ID の検査は rowid が ID である表（INTEGER PRIMARY KEY を持つ表）に限る。TEXT・複合の
+		// 主キーの表では rowid は ID ではない。
+		isRowidAlias, err := hasIntegerPrimaryKey(tx, n)
+		if err != nil {
 			return err
+		}
+		var maxID sql.NullInt64
+		if isRowidAlias {
+			if err := tx.QueryRowContext(ctx, "SELECT MAX(rowid) FROM "+quoteIdent(n)).Scan(&maxID); err != nil {
+				return err
+			}
 		}
 		if maxID.Valid && seqValues[n] < maxID.Int64 {
 			return importInvalid("sequences[%q] = %d is smaller than the largest ID %d in the table", n, seqValues[n], maxID.Int64)
@@ -487,7 +502,7 @@ func insertRows(ctx context.Context, tx *sql.Tx, table string, rows []map[string
 		}
 		if _, err := stmt.ExecContext(ctx, args...); err != nil {
 			// NOT NULL・CHECK・主キー・UNIQUE の違反は書き出しの内容の誤り。
-			if isConstraintErr(err) {
+			if store.IsInvalidData(err) {
 				return importInvalid("tables[%q][%d]: %v", table, i, err)
 			}
 			return err
@@ -496,7 +511,26 @@ func insertRows(ctx context.Context, tx *sql.Tx, table string, rows []map[string
 	return nil
 }
 
-func isConstraintErr(err error) bool { return store.IsInvalidData(err) }
+// hasIntegerPrimaryKey は table の主キーが INTEGER と宣言された 1 列だけか（rowid の別名か）を返す。
+func hasIntegerPrimaryKey(tx *sql.Tx, table string) (bool, error) {
+	rows, err := tx.Query(`SELECT type FROM pragma_table_info(?) WHERE pk > 0`, table)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	var types []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return false, err
+		}
+		types = append(types, t)
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return len(types) == 1 && strings.EqualFold(types[0], "INTEGER"), nil
+}
 
 func checkForeignKeys(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, "PRAGMA foreign_key_check")

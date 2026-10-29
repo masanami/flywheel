@@ -380,6 +380,74 @@ func TestImport_IntoStoreWithRows_IsRejected(t *testing.T) {
 	assertImportRejected(t, dst, dir, exported)
 }
 
+// AC-14: 主キーがぶつからない形（空のストアの書き出しを、slot だけに行を持つストアへ）でも、
+// 行数の検査で何も変えず validation_failed。
+func TestImport_EmptyExportIntoStoreWithRows_IsRejected(t *testing.T) {
+	empty, _ := newWorkspaceStore(t)
+	exported := mustExport(t, empty)
+	dst, dir := newWorkspaceStore(t)
+	coretest.InsertSlot(t, dir, "o/r", "local", "/tmp/s", "free", "")
+	assertImportRejected(t, dst, dir, exported)
+}
+
+// AC-10: import は sequences の値を採番の状態にする（最大の ID より大きい値でも保つ）。sqlite_sequence に
+// 同じ名前の行が重複しない。
+func TestImport_KeepsSequencesAboveTheLargestID(t *testing.T) {
+	src, srcDir := filledStore(t)
+	coretest.Exec(t, srcDir, "UPDATE sqlite_sequence SET seq = 10 WHERE name = 'challenge'")
+	coretest.Exec(t, srcDir, "UPDATE sqlite_sequence SET seq = 10 WHERE name = 'run'")
+	exported := mustExport(t, src)
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), exported); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if again := mustExport(t, dst); !bytes.Equal(exported, again) {
+		t.Errorf("export after import differs:\n%s\n---\n%s", exported, again)
+	}
+	var dups int
+	if err := dst.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM (SELECT name FROM sqlite_sequence GROUP BY name HAVING COUNT(*) > 1)`).Scan(&dups)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if dups != 0 {
+		t.Errorf("sqlite_sequence has %d duplicated names", dups)
+	}
+	for _, s := range []*Store{src, dst} {
+		c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "next"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.ID != "C-11" {
+			t.Errorf("next challenge ID = %s, want C-11", c.ID)
+		}
+	}
+}
+
+// rowid が ID でない表（TEXT の主キーの lock）では、sequences の値を最大の ID と比べない。
+func TestImport_SequenceOfTableWithoutIntegerKeyIsNotComparedWithRowid(t *testing.T) {
+	src, _ := filledStore(t)
+	doc := replaceJSON(t, mustExport(t, src), func(d map[string]any) {
+		if len(d["tables"].(map[string]any)["lock"].([]any)) == 0 {
+			t.Fatal("fixture lacks a lock row")
+		}
+		d["sequences"].(map[string]any)["lock"] = json.Number("0")
+	})
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), doc); err != nil {
+		t.Errorf("Import: %v, want success", err)
+	}
+}
+
+// UTF-8 として不正な TEXT は書き出さず store_error（encoding/json の置き換えで往復が崩れるため）。
+func TestExport_InvalidUTF8TextIsStoreError(t *testing.T) {
+	s, dir := filledStore(t)
+	coretest.Exec(t, dir, "UPDATE challenge SET title = CAST(x'ff' AS TEXT) WHERE id = 1")
+	if _, _, err := s.Export(context.Background()); !errors.Is(err, ErrStoreError) {
+		t.Errorf("Export = %v, want ErrStoreError", err)
+	}
+}
+
 // AC-15: スキーマの版が違う書き出しは、何も変えず validation_failed。
 func TestImport_DifferentSchemaVersion_IsRejected(t *testing.T) {
 	src, _ := filledStore(t)
@@ -416,10 +484,10 @@ func TestImport_MalformedDocuments_AreRejected(t *testing.T) {
 		"sequence not an integer":   func(d map[string]any) { d["sequences"].(map[string]any)["challenge"] = json.Number("2.5") },
 		"sequence is a string":      func(d map[string]any) { d["sequences"].(map[string]any)["challenge"] = "9" },
 		"sequence below max id":     func(d map[string]any) { d["sequences"].(map[string]any)["challenge"] = json.Number("1") },
-		"negative sequence":         func(d map[string]any) { d["sequences"].(map[string]any)["slot"] = json.Number("-1") },
 		"unknown table":             func(d map[string]any) { d["tables"].(map[string]any)["ghost"] = []any{} },
-		"missing table":             func(d map[string]any) { delete(d["tables"].(map[string]any), "slot") },
-		"unknown top-level key":     func(d map[string]any) { d["extra"] = json.Number("1") },
+		// lock はどの外部キーからも参照されないので、欠けの検査より先に外部キーの違反で落ちない。
+		"missing table":         func(d map[string]any) { delete(d["tables"].(map[string]any), "lock") },
+		"unknown top-level key": func(d map[string]any) { d["extra"] = json.Number("1") },
 		"missing column": func(d map[string]any) {
 			delete(d["tables"].(map[string]any)["slot"].([]any)[0].(map[string]any), "path")
 		},
@@ -447,6 +515,15 @@ func TestImport_MalformedDocuments_AreRejected(t *testing.T) {
 			assertImportRejected(t, dst, dir, replaceJSON(t, exported, cases[name]))
 		})
 	}
+	// 行の無い表の負の値（最大の ID の検査に先に当たらない形）。
+	t.Run("negative sequence", func(t *testing.T) {
+		empty, _ := newWorkspaceStore(t)
+		doc := replaceJSON(t, mustExport(t, empty), func(d map[string]any) {
+			d["sequences"].(map[string]any)["challenge"] = json.Number("-1")
+		})
+		dst, dir := newWorkspaceStore(t)
+		assertImportRejected(t, dst, dir, doc)
+	})
 	t.Run("not json", func(t *testing.T) {
 		dst, dir := newWorkspaceStore(t)
 		assertImportRejected(t, dst, dir, []byte("not json"))

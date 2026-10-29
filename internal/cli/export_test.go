@@ -91,6 +91,32 @@ func TestImport_IntoStoreWithRowsIsValidationFailed(t *testing.T) {
 	}
 }
 
+// 主キーがぶつからない形（空のストアの書き出しを、行のあるストアへ）でも validation_failed。
+func TestImport_EmptyExportIntoStoreWithRowsIsValidationFailed(t *testing.T) {
+	empty := t.TempDir()
+	if _, err := core.Init(empty); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "export.json")
+	runJSON(t, empty, "export", "--out", path)
+	dst := t.TempDir()
+	if _, err := core.Init(dst); err != nil {
+		t.Fatal(err)
+	}
+	coretest.InsertSlot(t, dst, "o/r", "local", "/tmp/s", "free", "")
+	tables := []string{"challenge", "activity", "slot", "sqlite_sequence"}
+	before := coretest.DumpTables(t, dst, tables...)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"import", "--in", path, "--workspace", dst, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	if code == 0 || !strings.Contains(stderr.String(), `"validation_failed"`) {
+		t.Errorf("exit=%d stderr=%s, want validation_failed", code, stderr.String())
+	}
+	if after := coretest.DumpTables(t, dst, tables...); after != before {
+		t.Error("a rejected import changed the store")
+	}
+}
+
 // export の書き込みに失敗したとき（out の場所にディレクトリ）は store_error で、ストアを変えない。
 func TestExport_WriteFailureIsStoreError(t *testing.T) {
 	ws := t.TempDir()
