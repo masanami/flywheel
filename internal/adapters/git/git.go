@@ -2,6 +2,9 @@
 // 実装する adapter である（親要件チケット #98 §実行スロット・§プロバイダ worktree。
 // M3H8・M3P45・M3P47）。
 //
+// ワークスペースの Git（作業ツリーの判定・除外・差の有無・パス指定のコミット。push なし）は
+// core の WorkspaceGit（internal/core/workspace_git.go）の実装（workspace.go）が担う。
+//
 // 規則（何を満たせば割り当てるか・origin の正規化と比較）は core が持ち、ここは
 // 入出力だけを担う。ストアを import せず、core の IF（SlotGit とその型）だけに
 // 依存する（internal/adapters/github と同じ形）。
