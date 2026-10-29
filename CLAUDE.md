@@ -22,7 +22,7 @@
 | パッケージ | 責務 |
 |---|---|
 | `cmd/flywheel` | バイナリの入口。引数を解釈して `internal/cli` を呼ぶだけ |
-| `internal/core` | 状態機械・承認・作業ログ・課題と不可逆操作の操作・run/cycle/lock の記録と予算評価。**公開 API はここだけ** |
+| `internal/core` | 状態機械・承認・作業ログ・課題と不可逆操作の操作・run/cycle/lock の記録と予算評価・ストアの全状態の書き出しと再構築（`Export`/`Import`）。**公開 API はここだけ** |
 | `internal/core/internal/store` | SQLite の接続・PRAGMA・スキーマ・マイグレーション |
 | `internal/core/coretest` | core のテスト支援専用（実ストアのフィクスチャ生成等）。`*_test.go` からだけ import し、本番バイナリの依存に含めない（`internal/cli/depcheck_test.go` が検査） |
 | `internal/cli` | コマンドの定義・JSON／テキスト出力・終了コードとエラーコードの写像・端末での本人確認 |

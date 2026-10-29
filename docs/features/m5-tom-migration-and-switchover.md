@@ -264,6 +264,8 @@ claude-harness 5.0 の論点（親の推論・要検証）: claude-harness の `
 | `import --in <path>` | 新しいコマンド | S1 |
 | `cycle` の段 `backup` | 段の閉集合に足す | S1 |
 
+`export --json` の成功の出力は `{"export": {"path", "schema_version"}}`、`import --json` の成功の出力は `{"import": {"path", "schema_version"}}` とする（`path` は書き出した・読み込んだファイルの絶対パス、`schema_version` は書き出しのスキーマの版）【仮定: キー名】。
+
 #### 書き出しの形【仮定】
 
 SQLite の値は、INTEGER を JSON の整数、REAL を数、TEXT を文字列、NULL を `null` へ写す（いまのスキーマに BLOB の列は無い。足すときにこの写像を決め直す）。最上位のキーは `schema_version`（整数）・`sequences`（`sqlite_sequence` の表の名前から値への対応）・`tables`（表の名前から行の配列への対応）の 3 つ。行は列の名前をキーにしたオブジェクトで、表ごとに主キーの昇順（主キーの列の宣言順での辞書的な昇順）に並べ（INTEGER の列は数の順、TEXT の列はバイト列の順。いまのスキーマの表はすべて主キーを持つ）、すべてのオブジェクトのキーを辞書順にする。`import` は `sequences` のキーを `tables` にある表の名前に限り、行が無い表のキーも受け付けて `sqlite_sequence` へ書く。値が整数でないか、その表の行の最大の ID より小さいときは読み込まない。書き出しは周の途中の状態（終わっていない `cycle` の行・`lock` の行）もそのまま含み、復旧の後の最初の `cycle` は既存の古い排他の回収（pid・host・heartbeat の判定）に任せる【仮定】。run のディレクトリは書き出しに含まれないので、復旧の後の run の出力の保存先のパスは存在しないファイルを指しうる。

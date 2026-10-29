@@ -68,7 +68,7 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 		view.IngestSource{}, view.IngestResponse{}, view.PhaseItem{}, view.PhaseNotStarted{}, view.ReleaseNotStarted{}, view.ReleaseItem{}, view.ReleasePhase{}, view.SerialGroup{},
 		view.JudgmentPhase{}, view.DelegationPhase{}, view.IngestPhase{}, view.PhaseResponse{}, view.Cycle{},
 		view.CycleResponse{}, view.CycleStarted{}, view.CycleStatus{}, view.SlotCleared{}, view.SlotResponse{}, view.InitResponse{},
-		view.MarkReadResponse{}, view.BudgetResponse{},
+		view.MarkReadResponse{}, view.BudgetResponse{}, view.ExportBody{}, view.ExportResponse{}, view.ImportBody{}, view.ImportResponse{},
 		view.ApprovalPlan{}, view.ApprovalRelease{}, view.ApprovalOtherOperation{}, view.ApprovalSummary{}, view.ApprovalSummaryResponse{},
 	}
 	for _, v := range types {

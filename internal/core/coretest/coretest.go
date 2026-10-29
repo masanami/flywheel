@@ -930,3 +930,78 @@ func OccurrenceCycleIDs(t *testing.T, workspace string) []int64 {
 	}
 	return out
 }
+
+// FillAllTables はテスト専用のフィクスチャとして、init 済みのワークスペースのストアの、名前が
+// sqlite_ で始まらないすべての表に 1 行以上を挿入する（書き出しと再構築の往復の検査用。M5 S1）。
+// 外部キーの循環（challenge.issues_hold_id→hold、hold.challenge_id→challenge）と自己参照
+// （run.resumed_from_run_id→run）も 1 行ずつ含む。挿入の後に表の一覧を sqlite_master から読み直し、
+// 行の無い表が残っていれば失敗する（マイグレーションが表を足したときの更新漏れを検出する）。
+func FillAllTables(t *testing.T, workspace string) {
+	t.Helper()
+	const at = "2026-10-29T00:00:00.000Z"
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		stmts := []struct {
+			q    string
+			args []any
+		}{
+			{`INSERT INTO challenge (title, status, reporter, created_at, updated_at) VALUES ('c1', 'in_progress', 'tester', ?, ?)`, []any{at, at}},
+			{`INSERT INTO challenge (title, status, reporter, created_at, updated_at) VALUES ('c2 "quoted" <&>', 'unclassified', 'tester', ?, ?)`, []any{at, at}},
+			{`INSERT INTO challenge_dependency (challenge_id, depends_on_id, created_at) VALUES (2, 1, ?)`, []any{at}},
+			{`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (1, 1, 'plan', ?, '{"size":"M"}')`, []any{at}},
+			{`INSERT INTO source_binding (challenge_id, source_id, external_key, url, fingerprint, upstream_state, policy_state, created_at, updated_at)
+			  VALUES (1, 'src', 'o/r#1', 'https://example.test/1', 'fp', 'open', 'in_policy', ?, ?)`, []any{at, at}},
+			{`INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (1, 'q', 'verifying', ?)`, []any{at}},
+			{`UPDATE challenge SET issues_hold_id = 1 WHERE id = 1`, nil},
+			{`INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at) VALUES (1, 'release', 'release', 'o/r#2', 'approved', 2, ?)`, []any{at}},
+			{`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, decided_at)
+			  VALUES (1, 1, 'release', 'approved', 1, 'tester', 'cli', 'tty_confirm', ?)`, []any{at}},
+			{`INSERT INTO operation_execution (operation_id, started_at, pid, host) VALUES (1, ?, 1, 'testhost')`, []any{at}},
+			{`INSERT INTO cycle (trigger, started_at, budget_usd, spent_usd) VALUES ('manual', ?, 100000000, 1234567)`, []any{at}},
+			{`INSERT INTO lock (name, holder, pid, host, acquired_at, heartbeat_at) VALUES ('cycle', 1, 1, 'testhost', ?, ?)`, []any{at, at}},
+			{`INSERT INTO slot (repo, provider, path, state, run_id, attention_reason) VALUES ('o/r', 'local', '/tmp/slot', 'free', NULL, NULL)`, nil},
+			{`INSERT INTO run (cycle_id, kind, challenge_id, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket, cost_usd, slot_id)
+			  VALUES (1, 'delegation', 1, 1, 's1', 1, 'testhost', ?, ?, ?, 'succeeded', 50000000, 'impl', 9007199254740993, 1)`, []any{at, at, at}},
+			{`INSERT INTO run (cycle_id, kind, challenge_id, challenge_version, session_id, resumed_from_run_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket)
+			  VALUES (1, 'delegation', 2, 1, 's1', 1, 1, 'testhost', ?, ?, ?, 'succeeded', 50000000, 'impl')`, []any{at, at, at}},
+			{`INSERT INTO run_artifact (run_id, kind, ref, state, base, verified_at) VALUES (1, 'pr', 'o/r#3', 'open', 'main', ?)`, []any{at}},
+			{`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after, run_id)
+			  VALUES (?, 'tester', 'cli', 'none', 'challenge', 1, 'create', NULL, '{"title":"c1"}', 1)`, []any{at}},
+			{`INSERT INTO occurrence (challenge_id, activity_id, kind, outcome, source, created_at) VALUES (1, 1, 'completion_rejected', 'bad', 'core', ?)`, []any{at}},
+		}
+		for _, s := range stmts {
+			if _, err := tx.Exec(s.q, s.args...); err != nil {
+				return fmt.Errorf("%s: %w", s.q, err)
+			}
+		}
+		rows, err := tx.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\_%' ESCAPE '\' ORDER BY name`)
+		if err != nil {
+			return err
+		}
+		var names []string
+		for rows.Next() {
+			var n string
+			if err := rows.Scan(&n); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			names = append(names, n)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, n := range names {
+			var c int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM "` + n + `"`).Scan(&c); err != nil {
+				return err
+			}
+			if c == 0 {
+				return fmt.Errorf("table %s has no rows after FillAllTables; add a row for it", n)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("coretest: FillAllTables: %v", err)
+	}
+}

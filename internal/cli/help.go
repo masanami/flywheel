@@ -44,6 +44,8 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   cycle [--trigger <t>]
   run [<C-ID>]
   slot clear <SL-ID>
+  export --out <path>
+  import --in <path>
   serve [--port <n>] [--fleet <path>]
 
 --relayed は、人間と会話しているエージェントが会話で受けた操作を記録する口（端末での確認は行わない。
