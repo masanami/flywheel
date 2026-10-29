@@ -33,6 +33,14 @@ func backupGit(t *testing.T, dir string, args ...string) string {
 // backupWorkspace は Git の作業ツリーにした、position を持つワークスペースを返す。
 func backupWorkspace(t *testing.T) string {
 	t.Helper()
+	// adapter が起動する git も identity を必要とする（CI には無い）ので、プロセスの環境に置く。
+	for k, v := range map[string]string{
+		"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+		"GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+		"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+	} {
+		t.Setenv(k, v)
+	}
 	ws := setupWorkspaceWithPosition(t)
 	backupGit(t, ws, "init", "-q")
 	backupGit(t, ws, "add", "-A")
