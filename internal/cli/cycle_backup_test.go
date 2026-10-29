@@ -176,3 +176,79 @@ func TestBackup_UnchangedAgainstRealGit(t *testing.T) {
 		t.Errorf("second backup = %+v, want unchanged", res)
 	}
 }
+
+// AC-25: 書き出しに差が無く memory_dir だけに差があるとき、記憶だけをコミットする（実物の git）。
+func TestBackup_CommitsOnlyTheMemoryDirAgainstRealGit(t *testing.T) {
+	ws := backupWorkspace(t)
+	backupPhaseOf(t, ws)
+	st, err := core.OpenWorkspace(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	// cycle が backup の後に足した作業ログの行を含めて書き出しを確定させる。
+	st.BackupWorkspace(context.Background(), gitadapter.NewWorkspace(), &core.AgentDeclaration{}, "Y-8")
+	st.BackupWorkspace(context.Background(), gitadapter.NewWorkspace(), &core.AgentDeclaration{}, "Y-9")
+	if err := os.MkdirAll(filepath.Join(ws, "mem"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "mem", "a.md"), []byte("m"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := st.BackupWorkspace(context.Background(), gitadapter.NewWorkspace(), &core.AgentDeclaration{MemoryDir: "mem", MemoryDirDeclared: true}, "Y-10")
+	if res.Outcome != core.BackupCommitted || res.Commit == "" {
+		t.Fatalf("result = %+v, want committed", res)
+	}
+	if files := backupGit(t, ws, "show", "--name-only", "--format=", "HEAD"); files != "mem/a.md" {
+		t.Errorf("committed files = %q, want only mem/a.md", files)
+	}
+}
+
+// 記憶だけのコミットを cycle を通して確かめる。書き出しは周ごとに作業ログの行が増えて必ず変わるため、
+// 書き出しを .gitignore で除外して記憶だけに差がある周を作る（outcome は ignored で commit を持つ）。
+func TestCycle_Backup_CommitsOnlyTheMemoryDirWhenTheExportIsIgnored(t *testing.T) {
+	ws := backupWorkspace(t)
+	if err := os.WriteFile(filepath.Join(ws, ".gitignore"), []byte(".flywheel/export.json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backupGit(t, ws, "add", ".gitignore")
+	backupGit(t, ws, "commit", "-q", "-m", "ignore export")
+	writeAgentJSONForTest(t, ws, `{"position_file": "position.md", "memory_dir": "mem"}`)
+	backupGit(t, ws, "add", "-A")
+	backupGit(t, ws, "commit", "-q", "-m", "agent")
+	if err := os.MkdirAll(filepath.Join(ws, "mem"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "mem", "a.md"), []byte("m"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := backupPhaseOf(t, ws)
+
+	head := backupGit(t, ws, "rev-parse", "HEAD")
+	if res["outcome"] != "ignored" || res["commit"] != head || res["detail"] == nil {
+		t.Fatalf("result = %v, want ignored with commit HEAD %s and a detail", res, head)
+	}
+	if files := backupGit(t, ws, "show", "--name-only", "--format=", "HEAD"); files != "mem/a.md" {
+		t.Errorf("committed files = %q, want only mem/a.md", files)
+	}
+}
+
+// AC-37: .flywheel/export.json の場所にディレクトリがあると書き出しに失敗し、backup は failed で
+// detail を持つ。cycle の終了コードは 0 のまま。
+func TestCycle_Backup_ExportPathIsADirectoryIsFailed(t *testing.T) {
+	ws := backupWorkspace(t)
+	if err := os.MkdirAll(filepath.Join(ws, ".flywheel", "export.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	head := backupGit(t, ws, "rev-parse", "HEAD")
+
+	res := backupPhaseOf(t, ws) // cycleDoc は終了コード 0 でなければ失敗する
+
+	if d, _ := res["detail"].(string); res["outcome"] != "failed" || d == "" || res["commit"] != nil {
+		t.Errorf("result = %v, want failed with a non-empty detail and no commit", res)
+	}
+	if got := backupGit(t, ws, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD moved to %s", got)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,16 +15,19 @@ import (
 // internal/adapters/git のテストと internal/cli のテストが持つ。
 
 type fakeWorkspaceGit struct {
-	notTree    bool
-	ignored    bool
-	changed    bool
-	treeErr    error
-	commitErr  error
-	sha        string
-	calls      []string
-	changePath []string
-	commitMsg  string
-	commitPath []string
+	notTree bool
+	ignored bool
+	changed bool
+	// changedPaths が nil でなければ、HasChanges はワークスペースからの相対パスのどれかが true のときだけ差ありを返す。
+	changedPaths map[string]bool
+	onCommit     func()
+	treeErr      error
+	commitErr    error
+	sha          string
+	calls        []string
+	changePath   []string
+	commitMsg    string
+	commitPath   []string
 }
 
 func (g *fakeWorkspaceGit) IsWorkTree(context.Context, string) (bool, error) {
@@ -34,13 +38,24 @@ func (g *fakeWorkspaceGit) IsIgnored(context.Context, string, string) (bool, err
 	g.calls = append(g.calls, "IsIgnored")
 	return g.ignored, nil
 }
-func (g *fakeWorkspaceGit) HasChanges(_ context.Context, _ string, paths []string) (bool, error) {
+func (g *fakeWorkspaceGit) HasChanges(_ context.Context, ws string, paths []string) (bool, error) {
 	g.calls = append(g.calls, "HasChanges")
 	g.changePath = paths
-	return g.changed, nil
+	if g.changedPaths == nil {
+		return g.changed, nil
+	}
+	for _, p := range paths {
+		if r, err := filepath.Rel(ws, p); err == nil && g.changedPaths[filepath.ToSlash(r)] {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 func (g *fakeWorkspaceGit) CommitPaths(_ context.Context, _, msg string, paths []string) (string, error) {
 	g.calls = append(g.calls, "CommitPaths")
+	if g.onCommit != nil {
+		g.onCommit()
+	}
 	g.commitMsg, g.commitPath = msg, paths
 	if g.commitErr != nil {
 		return "", g.commitErr
@@ -245,7 +260,23 @@ func TestRunCycle_BackupPhaseIsLastAndRecordsAnActivityRow(t *testing.T) {
 	}
 }
 
-func TestRunCycle_BackupRunsAfterAPhaseErrorAndWithACancelledContext(t *testing.T) {
+// assertCommittedBackupRow は周の backup の作業ログが 1 行で、after が committed・abc123・detail のキーを持つことを確かめる。
+func assertCommittedBackupRow(t *testing.T, s *Store, cycleID string) {
+	t.Helper()
+	rows := backupActivities(t, s)
+	if len(rows) != 1 || rows[0].EntityID != cycleID {
+		t.Fatalf("cycle activities = %+v, want one backup row for %s", rows, cycleID)
+	}
+	var after map[string]any
+	if err := json.Unmarshal(rows[0].After, &after); err != nil {
+		t.Fatal(err)
+	}
+	if _, hasDetail := after["detail"]; !hasDetail || after["outcome"] != "committed" || after["commit"] != "abc123" {
+		t.Errorf("after = %v, want outcome committed, commit abc123 and a detail key", after)
+	}
+}
+
+func TestRunCycle_BackupRunsWithACancelledContext(t *testing.T) {
 	f := newCycleFixture(t)
 	f.create(t, "t-1")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -264,13 +295,68 @@ func TestRunCycle_BackupRunsAfterAPhaseErrorAndWithACancelledContext(t *testing.
 	if _, err := os.Stat(filepath.Join(f.s.Workspace(), ".flywheel", "export.json")); err != nil {
 		t.Errorf("export file after an errored cycle: %v", err)
 	}
-	rows := backupActivities(t, f.s)
-	if len(rows) != 1 || rows[0].EntityID != "Y-1" {
-		t.Errorf("cycle activities = %+v, want one backup row for Y-1", rows)
-	}
+	assertCommittedBackupRow(t, f.s, "Y-1")
 	if g.commitMsg != "chore(flywheel): backup Y-1" {
 		t.Errorf("commit message = %q", g.commitMsg)
 	}
+}
+
+// AC-20: ctx を取り消さず、段だけがエラーになった周でも backup を実行する。
+func TestRunCycle_BackupRunsAfterAPhaseError(t *testing.T) {
+	f := newCycleFixture(t)
+	f.create(t, "t-1")
+	// J1 の起動中に actor を解決できなくし、分類の結果の書き込み（ストア）をエラーにする。
+	// backup のコミットの時点で戻す（backup の作業ログを書けるようにする）。
+	inv := &cycleFakeInvoker{handle: func(cycleCall) JudgmentLaunchOutput {
+		withActorSource(t, actorSourceFuncs{
+			userCurrent: func() (*user.User, error) { return nil, errors.New("no user") },
+			getenv:      fakeGetenv(map[string]string{}),
+		})
+		return succeeded(j1MineP(t, "P1"))
+	}}
+	g := &fakeWorkspaceGit{changed: true, onCommit: func() { fixedActor(t, "alice") }}
+	in := f.input(inv)
+	in.ConnDecl = nil
+	in.WorkspaceGit = g
+
+	if _, err := f.s.RunCycle(context.Background(), in); !errors.Is(err, ErrActorUnavailable) {
+		t.Fatalf("RunCycle err = %v, want the phase error (ErrActorUnavailable)", err)
+	}
+	assertCommittedBackupRow(t, f.s, "Y-1")
+	if g.commitMsg != "chore(flywheel): backup Y-1" {
+		t.Errorf("commit message = %q", g.commitMsg)
+	}
+}
+
+// AC-21: 周の上限で起動を打ち切った周でも backup を実行する。
+func TestRunCycle_BackupRunsInACycleCutByTheCycleBudget(t *testing.T) {
+	f := newCycleFixture(t)
+	f.create(t, "t-1")
+	f.agent.CycleBudgetUSD = 0.000001
+	g := &fakeWorkspaceGit{changed: true}
+	in := f.input(mineThenPlanInvoker(t))
+	in.WorkspaceGit = g
+	res := f.run(t, in)
+
+	cut := false
+	for _, p := range res.Phases {
+		for _, ns := range p.NotStarted {
+			if ns.Reason == NotStartedCycleBudget {
+				cut = true
+			}
+		}
+	}
+	if !cut {
+		t.Fatalf("phases = %+v, want a not_started cycle_budget", res.Phases)
+	}
+	last := res.Phases[len(res.Phases)-1]
+	if last.Phase != CyclePhaseBackup || last.Backup == nil || last.Backup.Outcome != BackupCommitted {
+		t.Fatalf("last phase = %+v, want a committed backup", last)
+	}
+	if g.commitMsg == "" {
+		t.Error("CommitPaths was not called")
+	}
+	assertCommittedBackupRow(t, f.s, res.Cycle.ID)
 }
 
 func TestRunCycle_BackupIsNotRunWhenTheLockIsHeld(t *testing.T) {
@@ -314,5 +400,75 @@ func TestRunCycle_WorkspaceGitIsRequired(t *testing.T) {
 	in.WorkspaceGit = nil
 	if _, err := f.s.RunCycle(context.Background(), in); !errors.Is(err, ErrValidation) {
 		t.Errorf("err = %v, want ErrValidation", err)
+	}
+}
+
+// AC-25: memory_dir だけに差があるときも、記憶をコミットする（差の検査に memory_dir を含める）。
+func TestBackup_CommitsWhenOnlyTheMemoryDirChanged(t *testing.T) {
+	g := &fakeWorkspaceGit{changedPaths: map[string]bool{"mem": true}}
+	s, res := backupOnce(t, g, true)
+	if res.Outcome != BackupCommitted || res.Commit != "abc123" {
+		t.Fatalf("result = %+v, want committed", res)
+	}
+	if got := relPaths(t, s.Workspace(), g.changePath); len(got) != 2 || got[1] != "mem" {
+		t.Errorf("HasChanges paths = %v, want export and mem", got)
+	}
+}
+
+// AC-33: 書き出しが除外され memory_dir に差が無いときは ignored で、コミットしない。
+func TestBackup_IgnoredExportWithDeclaredMemoryDirWithoutChangeMakesNoCommit(t *testing.T) {
+	g := &fakeWorkspaceGit{ignored: true}
+	_, res := backupOnce(t, g, true)
+	if res.Outcome != BackupIgnored || res.Commit != "" || res.Detail == "" {
+		t.Errorf("result = %+v, want ignored without commit and with detail", res)
+	}
+	for _, c := range g.calls {
+		if c == "CommitPaths" {
+			t.Error("CommitPaths was called")
+		}
+	}
+}
+
+// memory_dir が .flywheel を含む場所（"."）を指すときは記憶を外し、そのことを detail に出す。
+func TestBackup_MemoryDirContainingFlywheelIsExcludedWithDetail(t *testing.T) {
+	g := &fakeWorkspaceGit{changed: true}
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	agent := defaultAgentDeclaration()
+	agent.MemoryDir, agent.MemoryDirDeclared = ".", true
+	res := s.BackupWorkspace(context.Background(), g, agent, "Y-1")
+	if res.Outcome != BackupCommitted || res.Detail == "" {
+		t.Errorf("result = %+v, want committed with a detail about the exclusion", res)
+	}
+	if got := relPaths(t, s.Workspace(), g.commitPath); len(got) != 1 || got[0] != ".flywheel/export.json" {
+		t.Errorf("commit paths = %v, want only .flywheel/export.json", got)
+	}
+}
+
+// backup の作業ログの記録に失敗したら RunCycle はエラーを返すが、周は completed で閉じ、排他を解放する。
+func TestRunCycle_BackupRecordFailureIsReturnedAndTheCycleStillCloses(t *testing.T) {
+	f := newCycleFixture(t)
+	g := &fakeWorkspaceGit{changed: true}
+	// backup のコミットの後で actor を解決できなくし、作業ログの書き込み（mutate）を失敗させる。
+	g.onCommit = func() {
+		withActorSource(t, actorSourceFuncs{
+			userCurrent: func() (*user.User, error) { return nil, errors.New("no user") },
+			getenv:      fakeGetenv(map[string]string{}),
+		})
+	}
+	in := f.input(mineThenPlanInvoker(t))
+	in.WorkspaceGit = g
+	if _, err := f.s.RunCycle(context.Background(), in); !errors.Is(err, ErrActorUnavailable) {
+		t.Fatalf("err = %v, want ErrActorUnavailable", err)
+	}
+	if len(backupActivities(t, f.s)) != 0 {
+		t.Error("a backup row was recorded")
+	}
+	st, err := f.s.ReadCycleStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.LockHeld || st.LastResult == nil || *st.LastResult != CycleResultCompleted {
+		t.Errorf("status = %+v (last result %v), want the lock released and the cycle completed", st, st.LastResult)
 	}
 }

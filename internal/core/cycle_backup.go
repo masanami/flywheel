@@ -28,7 +28,8 @@ const (
 const backupExportRel = ".flywheel/export.json"
 
 // BackupResult は backup の段の結果。Commit が空ならコミットを作っていない。
-// Detail は failed と ignored で理由を持ち（failed では空にしない）、ほかは空。
+// Detail は failed と ignored で理由を持ち（failed では空にしない）、memory_dir を対象から外したときは
+// その旨を持つ。ほかは空。
 type BackupResult struct {
 	Outcome BackupOutcome
 	Commit  string
@@ -65,20 +66,25 @@ func (s *Store) BackupWorkspace(ctx context.Context, git WorkspaceGit, agent *Ag
 		paths = append(paths, exportAbs)
 	}
 	// memory_dir がワークスペース自身・.flywheel を含む場所を指すときは対象にしない
-	// （ワークスペース全体〈オーナーの未コミットの変更を含む〉を巻き込まないため）。
+	// （ワークスペース全体〈オーナーの未コミットの変更を含む〉を巻き込まないため）。外したことは detail に出す。
+	var notes []string
 	if agent != nil && agent.MemoryDirDeclared && agent.MemoryDir != "" {
 		mem := filepath.Join(ws, agent.MemoryDir)
 		rel, err := filepath.Rel(mem, filepath.Join(ws, ".flywheel"))
 		insideMem := err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-		if !insideMem {
+		if insideMem {
+			notes = append(notes, "memory_dir is excluded because it contains .flywheel: "+agent.MemoryDir)
+		} else {
 			paths = append(paths, mem)
 		}
 	}
 
 	skipped := BackupResult{Outcome: BackupUnchanged}
 	if ignored {
-		skipped = BackupResult{Outcome: BackupIgnored, Detail: "export path is ignored by git: " + backupExportRel}
+		skipped = BackupResult{Outcome: BackupIgnored}
+		notes = append([]string{"export path is ignored by git: " + backupExportRel}, notes...)
 	}
+	skipped.Detail = strings.Join(notes, "; ")
 	if len(paths) == 0 {
 		return skipped
 	}
@@ -97,7 +103,7 @@ func (s *Store) BackupWorkspace(ctx context.Context, git WorkspaceGit, agent *Ag
 		skipped.Commit = sha
 		return skipped
 	}
-	return BackupResult{Outcome: BackupCommitted, Commit: sha}
+	return BackupResult{Outcome: BackupCommitted, Commit: sha, Detail: skipped.Detail}
 }
 
 func backupFailed(detail string) BackupResult {
