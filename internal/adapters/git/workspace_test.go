@@ -1,0 +1,222 @@
+package git
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// このファイルは Workspace（core.WorkspaceGit の実装）を実物の git で検証する。
+
+func newRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	write(t, filepath.Join(dir, "README.md"), "hi\n")
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "-q", "-m", "init")
+	return dir
+}
+
+func write(t *testing.T, p, s string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkspace_CommitPathsOnlyGivenPathsAndKeepsOtherState(t *testing.T) {
+	dir := newRepo(t)
+	t.Setenv("GIT_AUTHOR_NAME", "t")
+	t.Setenv("GIT_AUTHOR_EMAIL", "t@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "t")
+	t.Setenv("GIT_COMMITTER_EMAIL", "t@example.com")
+	// ほかのファイル: ステージ済み・未ステージの変更・追跡外
+	write(t, filepath.Join(dir, "staged.txt"), "s\n")
+	gitIn(t, dir, "add", "staged.txt")
+	write(t, filepath.Join(dir, "README.md"), "changed\n")
+	write(t, filepath.Join(dir, "untracked.txt"), "u\n")
+	// コミット対象
+	exp := filepath.Join(dir, ".flywheel", "export.json")
+	mem := filepath.Join(dir, "memory")
+	write(t, exp, "{}\n")
+	write(t, filepath.Join(mem, "a.md"), "a\n")
+	before := gitIn(t, dir, "status", "--porcelain")
+
+	w := NewWorkspace()
+	ctx := context.Background()
+	has, err := w.HasChanges(ctx, dir, []string{exp, mem})
+	if err != nil || !has {
+		t.Fatalf("HasChanges = %v, %v; want true", has, err)
+	}
+	sha, err := w.CommitPaths(ctx, dir, "chore(flywheel): backup X", []string{exp, mem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head := gitIn(t, dir, "rev-parse", "HEAD"); sha != head {
+		t.Errorf("sha = %q, HEAD = %q", sha, head)
+	}
+	files := gitIn(t, dir, "show", "--name-only", "--pretty=format:", "HEAD")
+	if got := strings.Fields(files); len(got) != 2 || got[0] != ".flywheel/export.json" || got[1] != "memory/a.md" {
+		t.Errorf("committed files = %v", got)
+	}
+	if msg := gitIn(t, dir, "log", "-1", "--format=%s"); msg != "chore(flywheel): backup X" {
+		t.Errorf("subject = %q", msg)
+	}
+	after := gitIn(t, dir, "status", "--porcelain")
+	wantAfter := []string{}
+	for _, l := range strings.Split(before, "\n") {
+		if !strings.Contains(l, ".flywheel") && !strings.Contains(l, "memory") {
+			wantAfter = append(wantAfter, l)
+		}
+	}
+	if after != strings.Join(wantAfter, "\n") {
+		t.Errorf("status after = %q, want %q", after, strings.Join(wantAfter, "\n"))
+	}
+	if has, err := w.HasChanges(ctx, dir, []string{exp, mem}); err != nil || has {
+		t.Errorf("HasChanges after commit = %v, %v; want false", has, err)
+	}
+}
+
+func TestWorkspace_DoesNotPushToBareRemote(t *testing.T) {
+	dir := newRepo(t)
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	gitIn(t, filepath.Dir(bare), "init", "-q", "--bare", bare)
+	gitIn(t, dir, "remote", "add", "origin", bare)
+	gitIn(t, dir, "push", "-q", "origin", "main")
+	refs := func() string { return gitIn(t, bare, "for-each-ref") }
+	b := refs()
+	t.Setenv("GIT_AUTHOR_NAME", "t")
+	t.Setenv("GIT_AUTHOR_EMAIL", "t@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "t")
+	t.Setenv("GIT_COMMITTER_EMAIL", "t@example.com")
+	p := filepath.Join(dir, "export.json")
+	write(t, p, "{}")
+	if _, err := NewWorkspace().CommitPaths(context.Background(), dir, "m", []string{p}); err != nil {
+		t.Fatal(err)
+	}
+	if refs() != b {
+		t.Errorf("bare refs changed")
+	}
+}
+
+func TestWorkspace_IsWorkTreeIsIgnored(t *testing.T) {
+	dir := newRepo(t)
+	w := NewWorkspace()
+	ctx := context.Background()
+	if ok, err := w.IsWorkTree(ctx, dir); err != nil || !ok {
+		t.Errorf("IsWorkTree(repo) = %v, %v", ok, err)
+	}
+	plain := t.TempDir()
+	if ok, err := w.IsWorkTree(ctx, plain); err != nil || ok {
+		t.Errorf("IsWorkTree(plain) = %v, %v", ok, err)
+	}
+	write(t, filepath.Join(dir, ".gitignore"), ".flywheel/\n")
+	ign := filepath.Join(dir, ".flywheel", "export.json")
+	write(t, ign, "{}")
+	if ok, err := w.IsIgnored(ctx, dir, ign); err != nil || !ok {
+		t.Errorf("IsIgnored(ignored) = %v, %v", ok, err)
+	}
+	if ok, err := w.IsIgnored(ctx, dir, filepath.Join(dir, "memory", "x.md")); err != nil || ok {
+		t.Errorf("IsIgnored(normal) = %v, %v", ok, err)
+	}
+}
+
+func TestWorkspace_HasChangesFalseWhenClean(t *testing.T) {
+	dir := newRepo(t)
+	if has, err := NewWorkspace().HasChanges(context.Background(), dir, []string{filepath.Join(dir, "README.md"), filepath.Join(dir, "missing")}); err != nil || has {
+		t.Errorf("= %v, %v; want false", has, err)
+	}
+}
+
+func TestWorkspace_FailingPreCommitHookReturnsReason(t *testing.T) {
+	dir := newRepo(t)
+	t.Setenv("GIT_AUTHOR_NAME", "t")
+	t.Setenv("GIT_AUTHOR_EMAIL", "t@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "t")
+	t.Setenv("GIT_COMMITTER_EMAIL", "t@example.com")
+	gitIn(t, dir, "config", "core.hooksPath", filepath.Join(dir, ".git", "hooks"))
+	hook := filepath.Join(dir, ".git", "hooks", "pre-commit")
+	write(t, hook, "#!/bin/sh\necho hook-says-no >&2\nexit 1\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "export.json")
+	write(t, p, "{}")
+	head := gitIn(t, dir, "rev-parse", "HEAD")
+	_, err := NewWorkspace().CommitPaths(context.Background(), dir, "m", []string{p})
+	if err == nil || !strings.Contains(err.Error(), "hook-says-no") {
+		t.Fatalf("err = %v; want an error carrying the hook's reason", err)
+	}
+	if gitIn(t, dir, "rev-parse", "HEAD") != head {
+		t.Errorf("HEAD moved despite the failing hook")
+	}
+}
+
+// 仮定: ワークスペースが親のディレクトリのリポジトリの中にあるとき、見つかった
+// リポジトリへ渡したパスだけをコミットする。
+func TestWorkspace_WorkspaceInsideParentRepo(t *testing.T) {
+	parent := newRepo(t)
+	t.Setenv("GIT_AUTHOR_NAME", "t")
+	t.Setenv("GIT_AUTHOR_EMAIL", "t@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "t")
+	t.Setenv("GIT_COMMITTER_EMAIL", "t@example.com")
+	ws := filepath.Join(parent, "sub", "ws")
+	exp := filepath.Join(ws, ".flywheel", "export.json")
+	write(t, exp, "{}")
+	write(t, filepath.Join(parent, "sub", "other.txt"), "o")
+	w := NewWorkspace()
+	ctx := context.Background()
+	if ok, err := w.IsWorkTree(ctx, ws); err != nil || !ok {
+		t.Fatalf("IsWorkTree = %v, %v", ok, err)
+	}
+	if _, err := w.CommitPaths(ctx, ws, "m", []string{exp}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitIn(t, parent, "show", "--name-only", "--pretty=format:", "HEAD")); got != "sub/ws/.flywheel/export.json" {
+		t.Errorf("committed = %q", got)
+	}
+	if st := gitIn(t, parent, "status", "--porcelain"); !strings.Contains(st, "other.txt") {
+		t.Errorf("other.txt should stay untracked: %q", st)
+	}
+}
+
+func TestWorkspace_InheritedGitEnvIsIgnored(t *testing.T) {
+	other := newRepo(t)
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+	if ok, err := NewWorkspace().IsWorkTree(context.Background(), t.TempDir()); err != nil || ok {
+		t.Errorf("IsWorkTree = %v, %v; want false (env must not leak)", ok, err)
+	}
+}
+
+func TestWorkspace_CommitPathsSkipsMissingUntrackedPathAndIsLiteral(t *testing.T) {
+	dir := newRepo(t)
+	t.Setenv("GIT_AUTHOR_NAME", "t")
+	t.Setenv("GIT_AUTHOR_EMAIL", "t@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "t")
+	t.Setenv("GIT_COMMITTER_EMAIL", "t@example.com")
+	exp := filepath.Join(dir, "m[1]")
+	write(t, exp, "x")
+	emptyDir := filepath.Join(dir, "emptymem")
+	if err := os.MkdirAll(emptyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "m1"), "y") // glob なら m[1] に一致してしまう
+	w := NewWorkspace()
+	if _, err := w.CommitPaths(context.Background(), dir, "m", []string{exp, filepath.Join(dir, "nomemory"), emptyDir}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitIn(t, dir, "show", "--name-only", "--pretty=format:", "HEAD")); got != "m[1]" {
+		t.Errorf("committed = %q", got)
+	}
+	// ワークツリーのルートそのものは受け付けない
+	if _, err := w.CommitPaths(context.Background(), dir, "m", []string{dir}); err == nil {
+		t.Errorf("root path must be rejected")
+	}
+}
