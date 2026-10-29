@@ -210,14 +210,17 @@ func TestCycle_LearnPhaseIsBeforeImproveAndClassifiesWithoutConnectors(t *testin
 
 	doc := cycleDoc(t, ws)
 	phases := doc["phases"].([]any)
-	if tail := phases[len(phases)-1].(map[string]any); tail["phase"] != "improve" {
-		t.Fatalf("last phase = %v, want improve (S4 puts improve after learn)", tail)
+	if tail := phases[len(phases)-1].(map[string]any); tail["phase"] != "backup" {
+		t.Fatalf("last phase = %v, want backup (M5 S1 puts backup after improve)", tail)
 	}
-	last := phases[len(phases)-2].(map[string]any)
+	if imp := phases[len(phases)-2].(map[string]any); imp["phase"] != "improve" {
+		t.Fatalf("phase before backup = %v, want improve (S4 puts improve after learn)", imp)
+	}
+	last := phases[len(phases)-3].(map[string]any)
 	if last["phase"] != "learn" || last["skipped"] != false {
 		t.Fatalf("phase before improve = %v, want learn (not skipped)", last)
 	}
-	prev := phases[len(phases)-3].(map[string]any)
+	prev := phases[len(phases)-4].(map[string]any)
 	if prev["phase"] != "verify" {
 		t.Errorf("the phase before learn = %v, want verify", prev["phase"])
 	}

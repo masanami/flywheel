@@ -276,6 +276,9 @@ const (
 	ActivityActionImprovement = "improvement"
 )
 
+// ActivityActionBackup は作業ログ（entity=cycle）の action。`cycle` の最後の段 backup の結果を残す。
+const ActivityActionBackup = "backup"
+
 // ExecutionResult は release の実行の試行の結果（operation_execution.result）の閉集合。
 type ExecutionResult string
 

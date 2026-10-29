@@ -7,7 +7,7 @@ package core
 // （`ingest`・`classify --auto`・`plan --auto`）と同じ core の処理
 // （Store.Ingest・ClassifyAutoJ1・PlanAutoJ2）をそのまま呼び、ここは段の順・
 // 排他ロックの取得と解放・heartbeat・枠超過の段をまたぐ伝播だけを持つ。
-// 段は 実行（release）→ 取り込み → 分類（J1）→ 計画（J2）→ 委譲（run）→ 検証（verify・J5）→ 学習（learn・J6）の順で、
+// 段は 実行（release）→ 取り込み → 分類（J1）→ 計画（J2）→ 委譲（run）→ 検証（verify・J5）→ 学習（learn・J6）→ 改修提案（improve・J8）→ backup の順で、
 // 委譲と検証の段は接続ツールの宣言（connectors.json）があるときだけ実行する。
 
 import (
@@ -34,6 +34,8 @@ const (
 	CyclePhaseLearn CyclePhase = "learn"
 	// CyclePhaseImprove は改修提案の段（ImproveJ8 と同じ処理。8 段目で最後の段。接続ツールの宣言を使わないので skipped にならない）。
 	CyclePhaseImprove CyclePhase = "improve"
+	// CyclePhaseBackup は書き出しと記憶のコミットの段（BackupWorkspace。9 段目で最後の段。skipped にならない）。
+	CyclePhaseBackup CyclePhase = "backup"
 )
 
 // CycleIngestInput は取り込みの段の入力。`.flywheel/sources.json` があるときだけ
@@ -83,6 +85,8 @@ type CycleRunInput struct {
 	Merger UpstreamPullRequestMerger
 	// Predictor は衝突の予測の口の起動（nil なら予測の口を呼べない。RunDelegation と同じ）。
 	Predictor ConflictPredictor
+	// WorkspaceGit は backup の段が使うワークスペースの Git の口（必須。nil は ErrValidation）。
+	WorkspaceGit WorkspaceGit
 	// OnBegin が非 nil なら、周の開始（BeginCycle の成功）の直後、段を始める前に周の ID で呼ぶ。
 	OnBegin func(cycleID string)
 }
@@ -103,6 +107,8 @@ type CyclePhaseResult struct {
 	// ImproveItems は improve の段の items（J8 を呼んだ run ごとに 1 件。他の段は空）。
 	// improve の段の not_started は NotStarted に入る（課題の ID を持たない）。
 	ImproveItems []ImproveItem
+	// Backup は backup の段の結果（他の段は nil）。
+	Backup *BackupResult
 }
 
 // ImproveItem は improve の段と `flywheel improve` の items の要素（J8 の run 1 回分）。
@@ -149,13 +155,14 @@ type CycleRunResult struct {
 //     段を実行する（計画・委譲・検証は in.ConnDecl があるときだけ）。検証の段は、委譲の段が
 //     起動した委譲の run がすべて終わってから始まる（RunDelegation は合流して返る）。各段は個別の操作と同じ core の処理を呼び、前の段で状態が進んだ
 //     課題は後の段の対象になる。枠超過は段をまたいで伝播する（同じ JudgmentCycle を渡す）
-//  3. 周を終えて排他を解放する（段の途中でエラーになった周も解放する。周は aborted）
+//  3. backup の段（書き出しと記憶のコミット。ほかの段のエラー・打ち切り・ctx の取り消しがあっても実行する。
+//     failed は周の成否を変えない）の後、周を終えて排他を解放する（段の途中でエラーになった周も解放する。周は aborted）
 //
 // 周の中の run の失敗（errored 等）は結果の items に示し、エラーにしない（§一括の操作
 // 「周の中の run が失敗しても、cycle は終了コード 0 で終わり」）。返すエラーは、排他が
 // 取れない（ErrLocked）・宣言や入力の不備・ストアの失敗など、周を続けられないものだけ。
 func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult, error) {
-	if in.Trigger == "" || in.AgentDecl == nil || in.Invoker == nil {
+	if in.Trigger == "" || in.AgentDecl == nil || in.Invoker == nil || in.WorkspaceGit == nil {
 		return nil, ErrValidation
 	}
 	if in.ConnDecl != nil && (in.Upstream == nil || in.Delegate == nil || in.Git == nil || in.Reconcile == nil || in.Checks == nil || in.Merger == nil) {
@@ -187,19 +194,24 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	phases, runErr := s.runCyclePhases(ctx, in, cyc.ID, jc)
 
 	// 周は段の途中で失敗しても、ctx が取り消されていても、必ず終えて排他を解放する
-	// （開始した周と排他を残さない）。
-	stopHeartbeat()
+	// （開始した周と排他を残さない）。backup も同じで、ほかの段の成否にかかわらず周を閉じる前に実行する。
+	// ctx が取り消されていても実行する【仮定】。backup の failed は周の成否・終了コードを変えない。
 	endCtx := context.WithoutCancel(ctx)
+	backup := s.BackupWorkspace(endCtx, in.WorkspaceGit, in.AgentDecl, cyc.ID)
+	recordErr := s.recordBackup(endCtx, cyc.ID, backup)
+	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseBackup, Backup: &backup})
+	stopHeartbeat()
 	endResult := CycleResultCompleted
 	if runErr != nil {
 		endResult = CycleResultAborted
 	}
 	ended, endErr := s.EndCycle(endCtx, cyc.ID, endResult)
-	if runErr != nil {
-		return nil, runErr
-	}
-	if endErr != nil {
-		return nil, endErr
+	if err := errors.Join(runErr, endErr, recordErr); err != nil {
+		if runErr != nil {
+			// PartialReleaseError など runErr の型を保つ。
+			return nil, runErr
+		}
+		return nil, err
 	}
 
 	defaults := []string{}

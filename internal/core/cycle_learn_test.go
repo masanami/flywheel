@@ -12,7 +12,7 @@ import (
 // （AC-222。docs/features/m4.5-learning-and-self-improvement.md）。J6 の写像そのものは judgment_j6_test.go が持つ。
 
 func (f *j6Fixture) cycleInput() CycleRunInput {
-	return CycleRunInput{Trigger: "manual", AgentDecl: f.agent, Invoker: f.inv}
+	return CycleRunInput{Trigger: "manual", AgentDecl: f.agent, Invoker: f.inv, WorkspaceGit: &fakeWorkspaceGit{}}
 }
 
 // learn の段は最後に実行され、接続ツールの宣言（ConnDecl）が無くても skipped にならず、未分類の発生を持つ
@@ -28,8 +28,8 @@ func TestRunCycle_LearnPhaseRunsLastWithoutConnectors(t *testing.T) {
 		t.Fatalf("RunCycle: %v", err)
 	}
 	names := phaseNames(res)
-	if names[len(names)-2] != CyclePhaseLearn || fmt.Sprint(names) != "[release ingest classify plan run verify learn improve]" {
-		t.Fatalf("phases = %v, want learn right before improve", names)
+	if names[len(names)-3] != CyclePhaseLearn || fmt.Sprint(names) != "[release ingest classify plan run verify learn improve backup]" {
+		t.Fatalf("phases = %v, want learn right before improve and backup last", names)
 	}
 	learn := phaseOfResult(t, res, CyclePhaseLearn)
 	if learn.Skipped || len(learn.Items) != 1 || learn.Items[0].ChallengeID != c || learn.Items[0].Outcome != "learned" {

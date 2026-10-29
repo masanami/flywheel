@@ -543,6 +543,8 @@ var worklogCases = []worklogCase{
 		// 記録される（TestCycle_RecordsNoApprovalRejectionOrAnswerActivity が検証する）が、
 		// この表の検査は経路 cli 固定のため、J1 が not_mine を返して遷移を起こさない設定で
 		// ingest_create だけを記録させる。承認・差し戻し・回答は cycle からは記録されない。
+		// 周の最後の段 backup は entity=cycle・action=backup を残す（テスト用のワークスペースは
+		// Git の作業ツリーでないので outcome は not_git。M5 S1）。
 		name: "cycle ingest create", command: "cycle",
 		setup: func(t *testing.T, ws string) []string {
 			writePositionFileForTest(t, ws, "pos")
@@ -571,7 +573,8 @@ var worklogCases = []worklogCase{
 					"status":        "unclassified",
 					"reporter":      "reporter",
 					"external_key":  worklogIngestRepo + "#1",
-				}}}
+				}},
+				{"cycle", "Y-1", "backup", nil, map[string]any{"outcome": "not_git", "commit": nil, "detail": nil}}}
 		},
 	},
 }

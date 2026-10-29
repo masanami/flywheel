@@ -146,7 +146,9 @@ func runCycle(a Args) (any, error) {
 		Checks:    checks,
 		Merger:    merger,
 		Predictor: launcher,
-		OnBegin:   onBegin,
+		// backup の段の口。connectors.json の有無にかかわらず組み立てる。
+		WorkspaceGit: git.NewWorkspace(),
+		OnBegin:      onBegin,
 	})
 	if err != nil {
 		var partial *core.PartialReleaseError
@@ -169,6 +171,15 @@ func cycleResultText(res *core.CycleRunResult) string {
 			fmt.Fprintf(&b, "  %s: スキップ\n", p.Phase)
 		case p.Phase == core.CyclePhaseRelease:
 			fmt.Fprintf(&b, "  %s: 処理 %d 件・未起動 %d 件\n", p.Phase, len(p.ReleaseItems), len(p.NotStarted))
+		case p.Phase == core.CyclePhaseBackup && p.Backup != nil:
+			fmt.Fprintf(&b, "  %s: %s", p.Phase, p.Backup.Outcome)
+			if p.Backup.Commit != "" {
+				fmt.Fprintf(&b, "（コミット %s）", p.Backup.Commit)
+			}
+			if p.Backup.Detail != "" {
+				fmt.Fprintf(&b, "（%s）", p.Backup.Detail)
+			}
+			b.WriteString("\n")
 		case p.Phase == core.CyclePhaseImprove:
 			var created, linked int
 			for _, it := range p.ImproveItems {

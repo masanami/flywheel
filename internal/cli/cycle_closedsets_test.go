@@ -436,15 +436,16 @@ func m45AddedNotStartedReasons(t *testing.T) []string {
 // M4.5 S1: cycle の phase の閉集合は release を最初に持ち、cycle --json の phases の並びがそれに従う。
 func TestCycle_PhasesStartWithReleaseThenTheM3Phases(t *testing.T) {
 	m45SpecLine(t, "`cycle` は、取り込みの段より前に `release` の段を実行する")
-	// S4 の節の最初の項目（AC-319）。S3 の AC-222（最後の要素は learn）は中身を変えず、段の並びは improve が最後になる。
-	m45SpecLine(t, "`cycle --json` の `phases` の最終要素は `phase: \"improve\"` になる")
+	// M5 S1 の `backup` の節の最初の項目。M4.5 AC-319（最終要素は improve）の中身は変えず、
+	// 段の並びは backup が最後になる（M45P29 と同じ流儀）。
+	m5SpecLine(t, "`cycle --json` の `phases` の最後の要素は `phase: \"backup\"` である")
 	ws := setupWorkspaceWithPosition(t)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 	var got []string
 	for _, p := range cycleDoc(t, ws)["phases"].([]any) {
 		got = append(got, p.(map[string]any)["phase"].(string))
 	}
-	want := []string{"release", "ingest", "classify", "plan", "run", "verify", "learn", "improve"}
+	want := []string{"release", "ingest", "classify", "plan", "run", "verify", "learn", "improve", "backup"}
 	if !equalStringSlices(got, want) {
 		t.Errorf("phases = %v, want %v", got, want)
 	}
