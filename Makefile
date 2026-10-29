@@ -72,10 +72,10 @@ lint:
 	fi
 	golangci-lint run
 
-## test: go test -race ./... が終了コード 0 で終わることを確認する。
+## test: go test -race ./... が終了コード 0 で終わることを確認する（internal/core は CI で 10 分に近いため -timeout 20m を明示する）。
 test:
 	@echo "==> go test -race ./..."
-	go test -race ./...
+	go test -race -timeout 20m ./...
 
 ## build: CGO_ENABLED=0 go build ./cmd/flywheel。成果物は build/ 配下（.gitignore 済み）へ出す。
 build:

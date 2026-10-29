@@ -61,7 +61,7 @@ CI も同じ make check を実行する（ubuntu-latest だけ。macOS の Actio
 2. 静的検査  go vet ./...                            終了コード 0
 3. lint      golangci-lint run                       終了コード 0（設定は .golangci.yml。
              インストール済みの版が Makefile の GOLANGCI_LINT_VERSION と一致しなければ失敗）
-4. テスト    go test -race ./...                     終了コード 0
+4. テスト    go test -race -timeout 20m ./...        終了コード 0
 5. ビルド    CGO_ENABLED=0 go build ./cmd/flywheel   終了コード 0（成果物は build/flywheel）
 ```
 
