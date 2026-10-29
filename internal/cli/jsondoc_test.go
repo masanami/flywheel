@@ -156,6 +156,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM45WithdrawShape(t, &doc)
 	addM45LearnShape(t, &doc)
 	addM45ImproveShape(t, &doc)
+	addM5ExportImportShapes(t, &doc)
 	addM45MetricsShape(t, &doc)
 	addM45MetricsCompareShape(t, &doc)
 	addM3SlotClearShape(t, &doc)
@@ -451,6 +452,60 @@ func addM45ImproveShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["improve_item"] = itemKeys
 	// failure_limit の not_started の要素は challenge_id を持たない（AC の「この not_started の要素は challenge_id を持たない」）。
 	m45SpecLine(t, "`failure_limit`", "この `not_started` の要素は `challenge_id` を持たない")
+}
+
+// addM5ExportImportShapes は `export`・`import` の成功時の JSON の最上位のキーと、その値のオブジェクトのキーを
+// doc へ足す。m5-tom-migration-and-switchover.md §IF / API「CLI に足すもの」の
+// 「`export --json` の成功の出力は `{"export": {…}}`、`import --json` の成功の出力は `{"import": {…}}`」の行から読む。
+func addM5ExportImportShapes(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	line := m5SpecLine(t, "`export --json` の成功の出力は")
+	for _, name := range []string{"export", "import"} {
+		var shape string
+		for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+			if strings.HasPrefix(m[1], `{"`+name+`"`) {
+				shape = m[1]
+			}
+		}
+		if shape == "" {
+			t.Fatalf("m5 spec's line does not document {%q: …}: %q", name, line)
+		}
+		top := topLevelKeys(shape)
+		if len(top) != 1 || !top[name] {
+			t.Fatalf("m5 spec documents top-level keys %v for %s, want exactly [%s]", top, name, name)
+		}
+		inner := map[string]bool{}
+		for _, k := range regexp.MustCompile(`"([a-z_]+)"`).FindAllStringSubmatch(shape, -1) {
+			if k[1] != name {
+				inner[k[1]] = true
+			}
+		}
+		doc.topLevel[name] = []map[string]bool{top}
+		doc.entity[name+"_body"] = inner
+	}
+}
+
+// m5SpecLine は m5-tom-migration-and-switchover.md の、contains を全て含む最初の行を返す。
+func m5SpecLine(t *testing.T, contains ...string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m5-tom-migration-and-switchover.md"))
+	if err != nil {
+		t.Fatalf("read m5 spec: %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		ok := true
+		for _, c := range contains {
+			if !strings.Contains(line, c) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return line
+		}
+	}
+	t.Fatalf("m5 spec has no line containing %q", contains)
+	return ""
 }
 
 // assertDocumentedReleasePhase は release の段（cycle の phases の要素と `op exec` の phase が共有する形）の
@@ -833,6 +888,15 @@ func assertDocumentedJSON(t *testing.T, doc documentedJSON, name string, out map
 	}
 	if name == "metrics" {
 		assertDocumentedMetrics(t, doc, out)
+	}
+	if name == "export" || name == "import" {
+		body, ok := out[name].(map[string]any)
+		if !ok {
+			t.Fatalf("%s: `%s` is not an object: %#v", name, name, out[name])
+		}
+		if got := keysOf(body); !reflect.DeepEqual(got, doc.entity[name+"_body"]) {
+			t.Errorf("%s.%s keys = %v, documented %v", name, name, sortedKeys(got), sortedKeys(doc.entity[name+"_body"]))
+		}
 	}
 	if name == "op exec" {
 		if pm, ok := out["phase"].(map[string]any); ok {

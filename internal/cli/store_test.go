@@ -134,6 +134,8 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 		{"run"},
 		{"slot", "clear", "SL-1"},
 		{"budget", "C-1", "--impl-usd", "80"},
+		{"export", "--out", "x.json"},
+		{"import", "--in", "x.json"},
 	}
 
 	assertCasesCoverExactlyDefaultCommandsAndRequireStoreExceptInit(t, cases)

@@ -54,6 +54,8 @@ var worklogReadOnlyCommands = map[string]bool{
 	"runs": true,
 	// metrics（M4.5 S3）はストアを読むだけで何も書かない。
 	"metrics": true,
+	// export（M5 S1）はストアを読んでファイルへ書くだけで、ストアを書かない。
+	"export": true,
 }
 
 // worklogNoActivityMutationCommands はストアを変えるが作業ログ（activity）には載せない
@@ -76,6 +78,9 @@ var worklogNoActivityMutationCommands = map[string]bool{
 	// 経路 invoker）は経路 cli 固定のこの表の検査の対象ではなく、core のテストと improve_test.go が検証する。
 	// この表の検査は、起動の件数が 0 の improve が何も足さないことを確かめる。
 	"improve": true,
+	// import（M5 S1）は全表の行と採番の状態を書くが、作業ログに自分の行を足さない（足すと往復の後の
+	// 書き出しが元と一致しない＝AC-9）。
+	"import": true,
 }
 
 // worklogIngestRepo は worklogCases の "ingest create" ケースが使う偽の

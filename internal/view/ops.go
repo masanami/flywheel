@@ -396,3 +396,35 @@ func FromCycleStatus(s *core.CycleStatus) CycleStatus {
 	}
 	return out
 }
+
+// ExportBody は `export` の成功の形の中身（書き出したファイルの絶対パスとスキーマの版）。
+type ExportBody struct {
+	Path          string `json:"path"`
+	SchemaVersion int    `json:"schema_version"`
+}
+
+// ExportResponse は `export` の成功の形。
+type ExportResponse struct {
+	Export ExportBody `json:"export"`
+}
+
+// FromExportResult は core.ExportResult を ExportResponse へ変換する。
+func FromExportResult(r *core.ExportResult) ExportResponse {
+	return ExportResponse{Export: ExportBody{Path: r.Path, SchemaVersion: r.SchemaVersion}}
+}
+
+// ImportBody は `import` の成功の形の中身（読み込んだファイルの絶対パスとスキーマの版）。
+type ImportBody struct {
+	Path          string `json:"path"`
+	SchemaVersion int    `json:"schema_version"`
+}
+
+// ImportResponse は `import` の成功の形。
+type ImportResponse struct {
+	Import ImportBody `json:"import"`
+}
+
+// FromImportResult は core.ImportResult を ImportResponse へ変換する。
+func FromImportResult(r *core.ImportResult) ImportResponse {
+	return ImportResponse{Import: ImportBody{Path: r.Path, SchemaVersion: r.SchemaVersion}}
+}

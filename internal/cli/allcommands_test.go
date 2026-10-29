@@ -191,6 +191,22 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
 		return []string{"improve"}
 	}},
+	"export": {setup: func(t *testing.T, ws string) []string {
+		createForCase(t, ws)
+		return []string{"export", "--out", filepath.Join(t.TempDir(), "export.json")}
+	}},
+	"import": {setup: func(t *testing.T, _ string) []string {
+		// 課題を 1 件持つ別のストアの書き出しを、行の無い ws へ読み込む（作業ログの行を持たない課題にして、
+		// import が作業ログを足さないことを worklog の検査が確かめられるようにする）。
+		other := t.TempDir()
+		if _, err := core.Init(other); err != nil {
+			t.Fatalf("core.Init: %v", err)
+		}
+		coretest.InsertChallenge(t, other, "t")
+		path := filepath.Join(t.TempDir(), "export.json")
+		runJSON(t, other, "export", "--out", path)
+		return []string{"import", "--in", path}
+	}},
 	"cycle": {setup: func(t *testing.T, ws string) []string {
 		// cycle --json の出力の形（phases の各段・items・not_started・ingest の result）が
 		// 文書と照合されるよう、取り込みで課題を 1 件作り、同じ周で分類・計画まで進める。

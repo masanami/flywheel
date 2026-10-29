@@ -396,6 +396,20 @@ func defaultCommands() []Command {
 			Run:           runImprove,
 		},
 		{
+			// docs/features/m5-tom-migration-and-switchover.md §書き出し（S1）。ストアを読むだけ。
+			Path:          []string{"export"},
+			RequiresStore: true,
+			Flags:         []flagDef{{Name: "out", HasValue: true, Required: true}},
+			Run:           runExport,
+		},
+		{
+			// 同 §再構築（S1）。行の無いストアへ書き出しを読み込む（作業ログには載せない）。
+			Path:          []string{"import"},
+			RequiresStore: true,
+			Flags:         []flagDef{{Name: "in", HasValue: true, Required: true}},
+			Run:           runImport,
+		},
+		{
 			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2）。本人確認も
 			// 端末も要らない単発の操作（作業ログには載せない）。
 			Path:          []string{"slot", "clear"},

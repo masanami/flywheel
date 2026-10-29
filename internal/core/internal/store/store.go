@@ -311,3 +311,17 @@ func IsUniqueViolation(err error) bool {
 	var sqliteErr *sqlite.Error
 	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteConstraintUniqueExtendedResultCode
 }
+
+// IsInvalidData は err が、文に渡した値が表の定義に合わないことを表す SQLite のエラー
+// （制約の違反〔NOT NULL・CHECK・主キー・UNIQUE・外部キー〕または型の不一致〔INTEGER PRIMARY KEY に整数でない値〕）かを返す。
+func IsInvalidData(err error) bool {
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	switch sqliteErr.Code() & 0xff {
+	case 19, 20: // SQLITE_CONSTRAINT, SQLITE_MISMATCH
+		return true
+	}
+	return false
+}

@@ -809,6 +809,10 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	wantSet["improve"] = true
 	// M4.5 S4: 同じ理由で、実装済みの `withdraw` を個別に足す（書式は TestWithdrawCommand_MatchesM45IFAPITable が m4.5 の表と照合する）。
 	wantSet["withdraw"] = true
+	// M5 S1: 同じ理由で、実装済みの `export`・`import` を個別に足す（書式は
+	// TestExportImportCommands_MatchM5IFAPITable が m5 の表と照合する）。
+	wantSet["export"] = true
+	wantSet["import"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")
