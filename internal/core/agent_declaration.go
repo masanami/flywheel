@@ -119,6 +119,9 @@ type AgentDeclaration struct {
 	// config_invalid にする）。MemoryWriteLimit は memory_write_limit。
 	MemoryDir        string
 	MemoryWriteLimit MemoryWriteLimit
+	// MemoryDirDeclared は agent.json が memory_dir を宣言していたか（省略して既定の
+	// `memory` を使ったときは false）。backup の段は、宣言したときだけ memory_dir をコミットする。
+	MemoryDirDeclared bool
 
 	// DefaultsUsed は、agent.json 自体が無かった、または position_file を除く
 	// いずれかのキー（ネストした葉の値を含む）が省略され既定値を適用した
@@ -420,6 +423,7 @@ func parseAgentDeclaration(data []byte) (*AgentDeclaration, error) {
 			return nil, fmt.Errorf("memory_dir: %w", err)
 		}
 		decl.MemoryDir = dir
+		decl.MemoryDirDeclared = true
 	} else {
 		decl.MemoryDir = defaultMemoryDir
 		usedDefault = true

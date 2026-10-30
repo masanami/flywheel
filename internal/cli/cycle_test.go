@@ -186,8 +186,8 @@ func TestCycle_WithSources_RunsIngestClassifyPlanInOrder(t *testing.T) {
 	for _, p := range doc["phases"].([]any) {
 		names = append(names, p.(map[string]any)["phase"].(string))
 	}
-	if !reflect.DeepEqual(names, []string{"release", "ingest", "classify", "plan", "run", "verify", "learn", "improve"}) {
-		t.Errorf("phases = %v, want [release ingest classify plan run verify learn improve]", names)
+	if !reflect.DeepEqual(names, []string{"release", "ingest", "classify", "plan", "run", "verify", "learn", "improve", "backup"}) {
+		t.Errorf("phases = %v, want [release ingest classify plan run verify learn improve backup]", names)
 	}
 	got := collapseConsecutive(orderLogTags(readOrderLog(t, order)))
 	want := []string{"gh", "claude J1", "gh", "claude J2"}
@@ -347,6 +347,10 @@ func TestCycle_RecordsNoApprovalRejectionOrAnswerActivity(t *testing.T) {
 		case "classify", "plan":
 			if a["channel"] != "invoker" || a["verification"] != "none" {
 				t.Errorf("activity %v: want channel=invoker verification=none", a)
+			}
+		case "backup":
+			if a["entity"] != "cycle" || a["channel"] != "cli" {
+				t.Errorf("activity %v: want entity=cycle channel=cli", a)
 			}
 		default:
 			t.Errorf("unexpected activity action %v recorded by cycle", a["action"])
@@ -510,6 +514,10 @@ func TestCycle_InvalidDeclarations_ConfigInvalidAndNothingInvoked(t *testing.T) 
 			}
 			if string(storeBytes(t, ws)) != string(before) {
 				t.Error("config_invalid must not change the store")
+			}
+			// backup の段も実行しない（宣言の検査で始まらなかった周）。
+			if _, err := os.Stat(filepath.Join(ws, ".flywheel", "export.json")); err == nil {
+				t.Error("config_invalid wrote .flywheel/export.json (backup must not run)")
 			}
 		})
 	}

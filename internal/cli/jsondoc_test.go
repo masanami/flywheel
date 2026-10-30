@@ -626,8 +626,8 @@ func addM3CycleShape(t *testing.T, doc *documentedJSON) {
 }
 
 // documentedCyclePhaseNames は cycle の JSON の phase の閉集合（§IF / API「`phase` は
-// `ingest | classify | plan | run | verify` の閉集合」）。M4.5 で release（最初）・learn・improve（最後）が加わり、cycle は 8 つすべてを出す。
-var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "learn": true, "improve": true}
+// `ingest | classify | plan | run | verify` の閉集合」）。M4.5 で release（最初）・learn・improve、M5 S1 で backup（最後）が加わり、cycle は 9 つすべてを出す。
+var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "learn": true, "improve": true, "backup": true}
 
 // assertDocumentedCycle は cycle の成功時の出力 out の内側（周の記録・段・items・not_started・
 // ingest の result）が、文書の例と同じ形であることを検査する（最上位のキーは
@@ -662,6 +662,10 @@ func assertDocumentedCycle(t *testing.T, doc documentedJSON, out map[string]any)
 			assertDocumentedReleasePhase(t, doc, where, pm)
 			continue
 		}
+		if name == "backup" {
+			assertDocumentedBackupPhase(t, where, pm)
+			continue
+		}
 		if name == "ingest" {
 			if got := keysOf(pm); !reflect.DeepEqual(got, doc.entity["cycle_phase_ingest"]) {
 				t.Errorf("%s keys = %v, documented = %v", where, sortedKeys(got), sortedKeys(doc.entity["cycle_phase_ingest"]))
@@ -676,6 +680,32 @@ func assertDocumentedCycle(t *testing.T, doc documentedJSON, out map[string]any)
 			continue
 		}
 		assertDocumentedPhase(t, doc, where, pm)
+	}
+}
+
+// assertDocumentedBackupPhase は backup の段の 1 要素 pm が、m5 の仕様（§IF / API「`backup` の段の JSON」）の
+// 形 `{"phase", "skipped", "result": {"outcome", "commit", "detail"}}` と一致することを検査する。
+func assertDocumentedBackupPhase(t *testing.T, where string, pm map[string]any) {
+	t.Helper()
+	line := m5SpecLine(t, "`cycle --json` の `phases` の最後の要素は", `"phase": "backup"`)
+	for _, k := range []string{"phase", "skipped", "result", "outcome", "commit", "detail"} {
+		if !strings.Contains(line, `"`+k+`"`) {
+			t.Fatalf("m5 spec's backup line does not document %q: %q", k, line)
+		}
+	}
+	if got := sortedKeys(keysOf(pm)); !reflect.DeepEqual(got, []string{"phase", "result", "skipped"}) {
+		t.Errorf("%s keys = %v, documented = [phase result skipped]", where, got)
+	}
+	if pm["skipped"] != false {
+		t.Errorf("%s.skipped = %v, want false", where, pm["skipped"])
+	}
+	res, ok := pm["result"].(map[string]any)
+	if !ok {
+		t.Errorf("%s.result is not an object: %#v", where, pm["result"])
+		return
+	}
+	if got := sortedKeys(keysOf(res)); !reflect.DeepEqual(got, []string{"commit", "detail", "outcome"}) {
+		t.Errorf("%s.result keys = %v, documented = [commit detail outcome]", where, got)
 	}
 }
 

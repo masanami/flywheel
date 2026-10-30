@@ -28,6 +28,7 @@ func (f *j5Fixture) cycleInput(inv JudgmentInvoker) CycleRunInput {
 	return CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream,
 		Delegate: f.deleg, Git: f.git, Reconcile: f.branches, Checks: f.checks, Merger: &fakeRelease{},
+		WorkspaceGit: &fakeWorkspaceGit{},
 	}
 }
 
@@ -45,7 +46,7 @@ func TestRunCycle_DelegatesThenVerifiesInTheSameCycle(t *testing.T) {
 		t.Fatalf("RunCycle: %v", err)
 	}
 
-	if got := fmt.Sprint(phaseNames(res)); got != "[release ingest classify plan run verify learn improve]" {
+	if got := fmt.Sprint(phaseNames(res)); got != "[release ingest classify plan run verify learn improve backup]" {
 		t.Fatalf("phases = %s", got)
 	}
 	run := phaseOfResult(t, res, CyclePhaseRun)

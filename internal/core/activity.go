@@ -88,6 +88,8 @@ func formatEntityID(entity string, id int64) string {
 		return formatChallengeID(id)
 	case "operation":
 		return formatOperationID(id)
+	case "cycle":
+		return formatCycleID(id)
 	default:
 		return fmt.Sprintf("%d", id)
 	}

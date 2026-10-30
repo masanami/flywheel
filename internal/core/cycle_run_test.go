@@ -141,6 +141,7 @@ func (f *cycleFixture) input(inv JudgmentInvoker) CycleRunInput {
 	return CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream,
 		Delegate: &fakeDelegator{}, Git: newFakeSlotGit(), Reconcile: newFakeBranchSource(), Checks: newFakeChecks(), Merger: &fakeRelease{},
+		WorkspaceGit: &fakeWorkspaceGit{},
 	}
 }
 
@@ -206,7 +207,7 @@ func TestRunCycle_RunsIngestClassifyPlanInOrder(t *testing.T) {
 	}
 	res := f.run(t, in)
 
-	want := []CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseLearn, CyclePhaseImprove}
+	want := []CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseLearn, CyclePhaseImprove, CyclePhaseBackup}
 	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("phases = %v, want %v", got, want)
 	}
@@ -231,8 +232,8 @@ func TestRunCycle_NoIngestInput_IngestPhaseIsSkipped(t *testing.T) {
 	if !ing.Skipped || ing.Ingest != nil {
 		t.Errorf("ingest phase = %+v, want skipped with no result", ing)
 	}
-	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint([]CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseLearn, CyclePhaseImprove}) {
-		t.Errorf("phases = %v, want all eight phases listed even when ingest is skipped", got)
+	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint([]CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseLearn, CyclePhaseImprove, CyclePhaseBackup}) {
+		t.Errorf("phases = %v, want all nine phases listed even when ingest is skipped", got)
 	}
 }
 

@@ -155,6 +155,29 @@ type ImprovePhase struct {
 	Skipped    bool              `json:"skipped"`
 }
 
+// BackupResult は backup の段の result（outcome は committed|unchanged|not_git|ignored|failed）。
+type BackupResult struct {
+	Commit  *string `json:"commit"`
+	Detail  *string `json:"detail"`
+	Outcome string  `json:"outcome"`
+}
+
+// BackupPhase は backup の段の形（cycle の phases の最後の要素）。
+type BackupPhase struct {
+	Phase   string       `json:"phase"`
+	Result  BackupResult `json:"result"`
+	Skipped bool         `json:"skipped"`
+}
+
+// FromBackupPhase は backup の段の結果を変換する。
+func FromBackupPhase(r core.BackupResult) BackupPhase {
+	return BackupPhase{
+		Phase:   string(core.CyclePhaseBackup),
+		Result:  BackupResult{Commit: strOrNil(r.Commit), Detail: strOrNil(r.Detail), Outcome: string(r.Outcome)},
+		Skipped: false,
+	}
+}
+
 // IngestPhase は取り込みの段の形。skipped なら result は null。
 type IngestPhase struct {
 	Phase   string          `json:"phase"`
@@ -262,6 +285,9 @@ func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []c
 func FromCyclePhase(p core.CyclePhaseResult) any {
 	if p.Phase == core.CyclePhaseRelease {
 		return FromReleasePhase(p.Skipped, p.ReleaseItems, p.NotStarted)
+	}
+	if p.Phase == core.CyclePhaseBackup && p.Backup != nil {
+		return FromBackupPhase(*p.Backup)
 	}
 	if p.Phase == core.CyclePhaseImprove {
 		return FromImprovePhase(p.ImproveItems, p.NotStarted)

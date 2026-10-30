@@ -189,11 +189,12 @@ func TestCycle_ImprovePhaseIsLast_CallsJ8OnlyAtThreshold(t *testing.T) {
 
 	doc := cycleDoc(t, ws)
 	phases := doc["phases"].([]any)
-	last := phases[len(phases)-1].(map[string]any)
+	// M5 S1 で最後の段は backup になり、improve はその直前になる。
+	last := phases[len(phases)-2].(map[string]any)
 	if last["phase"] != "improve" || last["skipped"] != false || len(phaseItems(t, last)) != 0 {
-		t.Fatalf("last phase = %v, want improve (not skipped) with no items below the threshold", last)
+		t.Fatalf("improve phase = %v, want improve (not skipped) with no items below the threshold", last)
 	}
-	if prev := phases[len(phases)-2].(map[string]any); prev["phase"] != "learn" {
+	if prev := phases[len(phases)-3].(map[string]any); prev["phase"] != "learn" {
 		t.Errorf("the phase before improve = %v, want learn", prev["phase"])
 	}
 	if _, err := os.Stat(argvLog); err == nil {
@@ -206,7 +207,7 @@ func TestCycle_ImprovePhaseIsLast_CallsJ8OnlyAtThreshold(t *testing.T) {
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j8Route("T", occ...)}, "")
 	doc = cycleDoc(t, ws)
 	phases = doc["phases"].([]any)
-	last = phases[len(phases)-1].(map[string]any)
+	last = phases[len(phases)-2].(map[string]any)
 	items := phaseItems(t, last)
 	if last["phase"] != "improve" || len(items) != 1 || items[0]["result"] != "succeeded" {
 		t.Fatalf("last phase = %v, want one succeeded J8 run at the threshold", last)
