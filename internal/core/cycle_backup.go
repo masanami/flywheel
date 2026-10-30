@@ -3,9 +3,12 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // このファイルは `cycle` の最後の段 backup（docs/features/m5-tom-migration-and-switchover.md
@@ -24,6 +27,10 @@ const (
 	BackupFailed    BackupOutcome = "failed"
 )
 
+// backupTimeout は backup の段全体（書き出し・git の起動）の期限。期限切れは failed（detail に timeout）。
+// フックや署名で git が止まっても周を閉じるための上限で、テストが差し替える。
+var backupTimeout = 120 * time.Second
+
 // backupExportRel は書き出しの置き場（ワークスペースからの相対パス）。
 const backupExportRel = ".flywheel/export.json"
 
@@ -40,25 +47,27 @@ type BackupResult struct {
 // 書き出しと（宣言されていれば）memory_dir だけをコミットする。ストアを書かない（読むだけ）。
 // 失敗はエラーにせず outcome=failed の結果で返す（cycle の終了コードとほかの段を変えない）。
 func (s *Store) BackupWorkspace(ctx context.Context, git WorkspaceGit, agent *AgentDeclaration, cycleID string) BackupResult {
+	ctx, cancel := context.WithTimeout(ctx, backupTimeout)
+	defer cancel()
 	ws := s.Workspace()
 	exportAbs := filepath.Join(ws, filepath.FromSlash(backupExportRel))
 	if err := os.MkdirAll(filepath.Dir(exportAbs), 0o755); err != nil {
-		return backupFailed("export: " + err.Error())
+		return backupFailedCtx(ctx, "export: ", err)
 	}
 	if _, err := s.ExportToFile(ctx, exportAbs); err != nil {
-		return backupFailed("export: " + err.Error())
+		return backupFailedCtx(ctx, "export: ", err)
 	}
 
 	isTree, err := git.IsWorkTree(ctx, ws)
 	if err != nil {
-		return backupFailed("git: " + err.Error())
+		return backupFailedCtx(ctx, "git: ", err)
 	}
 	if !isTree {
 		return BackupResult{Outcome: BackupNotGit}
 	}
 	ignored, err := git.IsIgnored(ctx, ws, exportAbs)
 	if err != nil {
-		return backupFailed("git: " + err.Error())
+		return backupFailedCtx(ctx, "git: ", err)
 	}
 
 	var paths []string
@@ -90,20 +99,37 @@ func (s *Store) BackupWorkspace(ctx context.Context, git WorkspaceGit, agent *Ag
 	}
 	changed, err := git.HasChanges(ctx, ws, paths)
 	if err != nil {
-		return backupFailed("git: " + err.Error())
+		return backupFailedCtx(ctx, "git: ", err)
 	}
 	if !changed {
 		return skipped
 	}
+	// detached HEAD・rebase の途中・merge の途中ではコミットしない（コミットがどのブランチにも載らない・
+	// 途中の状態を壊すため）。差が無ければ検査しない（unchanged のまま）。
+	reason, err := git.InterruptedState(ctx, ws)
+	if err != nil {
+		return backupFailedCtx(ctx, "git: ", err)
+	}
+	if reason != "" {
+		return backupFailed("not committed: " + reason)
+	}
 	sha, err := git.CommitPaths(ctx, ws, "chore(flywheel): backup "+cycleID, paths)
 	if err != nil {
-		return backupFailed("git commit: " + err.Error())
+		return backupFailedCtx(ctx, "git commit: ", err)
 	}
 	if ignored {
 		skipped.Commit = sha
 		return skipped
 	}
 	return BackupResult{Outcome: BackupCommitted, Commit: sha, Detail: skipped.Detail}
+}
+
+// backupFailedCtx は err を failed にする。ctx の期限が切れていれば、detail の先頭を timeout にする。
+func backupFailedCtx(ctx context.Context, prefix string, err error) BackupResult {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return backupFailed(fmt.Sprintf("timeout: backup exceeded %s: %s%s", backupTimeout, prefix, err))
+	}
+	return backupFailed(prefix + err.Error())
 }
 
 func backupFailed(detail string) BackupResult {

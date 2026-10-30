@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -218,5 +219,91 @@ func TestWorkspace_CommitPathsSkipsMissingUntrackedPathAndIsLiteral(t *testing.T
 	// ワークツリーのルートそのものは受け付けない
 	if _, err := w.CommitPaths(context.Background(), dir, "m", []string{dir}); err == nil {
 		t.Errorf("root path must be rejected")
+	}
+}
+
+func gitIdentity(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_AUTHOR_NAME", "t")
+	t.Setenv("GIT_AUTHOR_EMAIL", "t@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "t")
+	t.Setenv("GIT_COMMITTER_EMAIL", "t@example.com")
+}
+
+func TestWorkspace_InterruptedState(t *testing.T) {
+	gitIdentity(t)
+	ctx := context.Background()
+
+	t.Run("normal", func(t *testing.T) {
+		dir := newRepo(t)
+		if got, err := NewWorkspace().InterruptedState(ctx, dir); err != nil || got != "" {
+			t.Errorf("InterruptedState = %q, %v; want empty", got, err)
+		}
+	})
+	t.Run("detached", func(t *testing.T) {
+		dir := newRepo(t)
+		gitIn(t, dir, "checkout", "-q", "--detach")
+		if got, err := NewWorkspace().InterruptedState(ctx, dir); err != nil || got != "detached HEAD" {
+			t.Errorf("InterruptedState = %q, %v; want detached HEAD", got, err)
+		}
+	})
+	t.Run("merge", func(t *testing.T) {
+		dir := conflictingBranches(t)
+		cmd := exec.Command("git", "merge", "other")
+		cmd.Dir = dir
+		_ = cmd.Run() // 衝突で止める
+		if got, err := NewWorkspace().InterruptedState(ctx, dir); err != nil || got != "merge in progress" {
+			t.Errorf("InterruptedState = %q, %v; want merge in progress", got, err)
+		}
+	})
+	t.Run("rebase", func(t *testing.T) {
+		dir := conflictingBranches(t)
+		cmd := exec.Command("git", "rebase", "other")
+		cmd.Dir = dir
+		_ = cmd.Run() // 衝突で止める
+		// rebase の途中は HEAD が detached になるが、理由は rebase を優先する。
+		got, err := NewWorkspace().InterruptedState(ctx, dir)
+		if err != nil || got != "rebase in progress" {
+			t.Errorf("InterruptedState = %q, %v; want rebase in progress", got, err)
+		}
+	})
+}
+
+// conflictingBranches は main と other が README.md を別々に変えたリポジトリ（main を checkout 済み）。
+func conflictingBranches(t *testing.T) string {
+	t.Helper()
+	dir := newRepo(t)
+	gitIn(t, dir, "checkout", "-q", "-b", "other")
+	write(t, filepath.Join(dir, "README.md"), "other\n")
+	gitIn(t, dir, "commit", "-q", "-am", "other")
+	gitIn(t, dir, "checkout", "-q", "main")
+	write(t, filepath.Join(dir, "README.md"), "main\n")
+	gitIn(t, dir, "commit", "-q", "-am", "main")
+	return dir
+}
+
+// IsWorkTree が突き止めた作業ツリーは続く呼び出しが使い回し、作業ツリーでない dir は覚えない。
+func TestWorkspace_DiscoveryIsRememberedByIsWorkTree(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+	w := NewWorkspace()
+	if ok, err := w.IsWorkTree(ctx, dir); err != nil || !ok {
+		t.Fatalf("IsWorkTree = %v, %v", ok, err)
+	}
+	w.mu.Lock()
+	_, cached := w.repos[dir]
+	w.mu.Unlock()
+	if !cached {
+		t.Fatal("IsWorkTree did not remember the discovered work tree")
+	}
+	plain := t.TempDir()
+	if ok, err := w.IsWorkTree(ctx, plain); err != nil || ok {
+		t.Fatalf("IsWorkTree(plain) = %v, %v", ok, err)
+	}
+	w.mu.Lock()
+	_, cached = w.repos[plain]
+	w.mu.Unlock()
+	if cached {
+		t.Error("a non-work-tree must not be cached")
 	}
 }

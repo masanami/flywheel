@@ -81,13 +81,35 @@ func gitEnv(gitDir, workTree string) []string {
 // run は GIT_DIR・GIT_WORK_TREE を明示して git を実行し、標準出力を返す。
 // PATH は呼び出しごとに引く。
 func run(ctx context.Context, gitDir, workTree string, args ...string) (string, error) {
+	cmd, err := newCmd(ctx, gitDir, workTree, args...)
+	if err != nil {
+		return "", err
+	}
+	return execute(cmd, args)
+}
+
+// waitDelay は、ctx の取り消し（期限切れ）で git を止めた後、git の子プロセス（フック・署名の
+// プログラム等）が出力の管を握り続けていても待つ最長の時間。
+const waitDelay = 5 * time.Second
+
+// newCmd は GIT_DIR・GIT_WORK_TREE を明示した git のコマンドを組み立てる。PATH は呼び出しごとに引く。
+func newCmd(ctx context.Context, gitDir, workTree string, args ...string) (*exec.Cmd, error) {
 	exe, err := exec.LookPath("git")
 	if err != nil {
-		return "", ErrGitNotFound
+		return nil, ErrGitNotFound
 	}
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Dir = workTree
 	cmd.Env = gitEnv(gitDir, workTree)
+	// 期限切れでは、まず SIGTERM で止める（git が index.lock を自分で消せるように）。止まらなければ
+	// waitDelay の後に強制終了される。
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = waitDelay
+	return cmd, nil
+}
+
+// execute は cmd を実行し、標準出力を返す。失敗は runError にする。
+func execute(cmd *exec.Cmd, args []string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

@@ -18,7 +18,15 @@ import "context"
 type WorkspaceGit interface {
 	// IsWorkTree は dir が Git の作業ツリーの中かを返す。作業ツリーでないと
 	// git が答えたときは (false, nil)。git が実行できない・ほかの理由で失敗したときは error。
+	//
+	// 実装は、ここで突き止めた作業ツリーを同じ dir への続く呼び出しで使い回してよい。呼ぶ側は、
+	// 1 回の backup の最初にこれを呼ぶ。
 	IsWorkTree(ctx context.Context, dir string) (bool, error)
+
+	// InterruptedState は、コミットしてはいけない途中の状態（HEAD がブランチを指さない
+	// detached HEAD・rebase の途中・merge の途中）なら、その理由（`detached HEAD`・
+	// `rebase in progress`・`merge in progress`）を返す。通常の状態なら空文字列。
+	InterruptedState(ctx context.Context, dir string) (reason string, err error)
 
 	// IsIgnored は path が Git の除外の対象（`git check-ignore` が一致する）かを返す。
 	IsIgnored(ctx context.Context, dir, path string) (bool, error)

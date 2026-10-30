@@ -133,6 +133,8 @@ func TestRun_InitReturnsStoreBusyWhileAnotherProcessHoldsTheWriteLock(t *testing
 // busy_timeout の対象になるのは既に WAL 化されたストアに対してだけ、という
 // 上のコメントの挙動メモに従う）。
 func TestRun_CreateReturnsStoreBusyWhileAnotherProcessHoldsTheWriteLock(t *testing.T) {
+	// 専用の一時ワークスペースと子プロセスだけを使い、環境変数・PATH を触らない（待ち時間 5 秒を直列にしない）。
+	t.Parallel()
 	dir := t.TempDir()
 	var initStdout, initStderr bytes.Buffer
 	if code := Run([]string{"init", "--workspace", dir, "--json"}, strings.NewReader(""), &initStdout, &initStderr); code != 0 {
