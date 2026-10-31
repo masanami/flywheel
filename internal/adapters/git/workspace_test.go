@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // このファイルは Workspace（core.WorkspaceGit の実装）を実物の git で検証する。
@@ -247,26 +248,112 @@ func TestWorkspace_InterruptedState(t *testing.T) {
 			t.Errorf("InterruptedState = %q, %v; want detached HEAD", got, err)
 		}
 	})
-	t.Run("merge", func(t *testing.T) {
-		dir := conflictingBranches(t)
-		cmd := exec.Command("git", "merge", "other")
-		cmd.Dir = dir
-		_ = cmd.Run() // 衝突で止める
-		if got, err := NewWorkspace().InterruptedState(ctx, dir); err != nil || got != "merge in progress" {
-			t.Errorf("InterruptedState = %q, %v; want merge in progress", got, err)
-		}
-	})
-	t.Run("rebase", func(t *testing.T) {
-		dir := conflictingBranches(t)
-		cmd := exec.Command("git", "rebase", "other")
-		cmd.Dir = dir
-		_ = cmd.Run() // 衝突で止める
+	// want の理由は、衝突で止めた操作ごとの途中の状態。
+	for _, c := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"merge", []string{"merge", "other"}, "merge in progress"},
 		// rebase の途中は HEAD が detached になるが、理由は rebase を優先する。
-		got, err := NewWorkspace().InterruptedState(ctx, dir)
-		if err != nil || got != "rebase in progress" {
-			t.Errorf("InterruptedState = %q, %v; want rebase in progress", got, err)
+		{"rebase", []string{"rebase", "other"}, "rebase in progress"},
+		{"rebase-apply", []string{"rebase", "--apply", "other"}, "rebase in progress"},
+		{"cherry-pick", []string{"cherry-pick", "other"}, "cherry-pick in progress"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := conflictingBranches(t)
+			gitStop(t, dir, c.args...)
+			if got, err := NewWorkspace().InterruptedState(ctx, dir); err != nil || got != c.want {
+				t.Errorf("InterruptedState = %q, %v; want %s", got, err, c.want)
+			}
+		})
+	}
+	t.Run("revert", func(t *testing.T) {
+		dir := newRepo(t)
+		write(t, filepath.Join(dir, "README.md"), "a\n")
+		gitIn(t, dir, "commit", "-q", "-am", "a")
+		write(t, filepath.Join(dir, "README.md"), "b\n")
+		gitIn(t, dir, "commit", "-q", "-am", "b")
+		gitStop(t, dir, "revert", "--no-edit", "HEAD~1")
+		if got, err := NewWorkspace().InterruptedState(ctx, dir); err != nil || got != "revert in progress" {
+			t.Errorf("InterruptedState = %q, %v; want revert in progress", got, err)
 		}
 	})
+}
+
+// gitStop は dir で git を実行し、衝突で止まる（非 0 で終わる）ことを確かめる。
+func gitStop(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(realGit(t), args...)
+	cmd.Dir = dir
+	cmd.Env = append(cleanEnv(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com", "GIT_EDITOR=true")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("git %s did not stop on a conflict:\n%s", strings.Join(args, " "), out)
+	}
+}
+
+// installHook は dir のリポジトリにフック name を置く。
+func installHook(t *testing.T, dir, name, script string) {
+	t.Helper()
+	gitIn(t, dir, "config", "core.hooksPath", filepath.Join(dir, ".git", "hooks"))
+	hook := filepath.Join(dir, ".git", "hooks", name)
+	write(t, hook, script)
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func shortWaitDelay(t *testing.T) {
+	t.Helper()
+	old := waitDelay
+	waitDelay = 300 * time.Millisecond
+	t.Cleanup(func() { waitDelay = old })
+}
+
+// 期限切れでは git を SIGTERM で止め（git が index.lock を消せる）、フックが出力の管を握っていても
+// waitDelay の後に戻る。
+func TestWorkspace_CommitPathsStopsAtTheDeadlineWithoutLeavingLocks(t *testing.T) {
+	gitIdentity(t)
+	shortWaitDelay(t)
+	dir := newRepo(t)
+	installHook(t, dir, "pre-commit", "#!/bin/sh\nsleep 60\n")
+	p := filepath.Join(dir, "export.json")
+	write(t, p, "{}")
+	w := NewWorkspace()
+	if ok, err := w.IsWorkTree(context.Background(), dir); err != nil || !ok {
+		t.Fatalf("IsWorkTree = %v, %v", ok, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := w.CommitPaths(ctx, dir, "m", []string{p})
+	if err == nil {
+		t.Fatal("CommitPaths succeeded despite the deadline")
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("CommitPaths returned after %s, want within a few seconds", d)
+	}
+	locks, _ := filepath.Glob(filepath.Join(dir, ".git", "*.lock"))
+	if len(locks) != 0 {
+		t.Errorf("lock files left: %v", locks)
+	}
+}
+
+// git が 0 で終わった後にフックの子孫が出力の管を握り続けても（exec.ErrWaitDelay）、成功として扱う。
+func TestWorkspace_CommitPathsSucceedsWhenAHookChildHoldsThePipes(t *testing.T) {
+	gitIdentity(t)
+	shortWaitDelay(t)
+	dir := newRepo(t)
+	installHook(t, dir, "post-commit", "#!/bin/sh\nsleep 30 &\n")
+	p := filepath.Join(dir, "export.json")
+	write(t, p, "{}")
+	sha, err := NewWorkspace().CommitPaths(context.Background(), dir, "m", []string{p})
+	if err != nil {
+		t.Fatalf("CommitPaths: %v", err)
+	}
+	if head := gitIn(t, dir, "rev-parse", "HEAD"); sha != head {
+		t.Errorf("sha = %q, HEAD = %q", sha, head)
+	}
 }
 
 // conflictingBranches は main と other が README.md を別々に変えたリポジトリ（main を checkout 済み）。

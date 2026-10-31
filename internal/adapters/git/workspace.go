@@ -173,6 +173,8 @@ func (w *Workspace) InterruptedState(ctx context.Context, dir string) (string, e
 		{"rebase-merge", "rebase in progress"},
 		{"rebase-apply", "rebase in progress"},
 		{"MERGE_HEAD", "merge in progress"},
+		{"CHERRY_PICK_HEAD", "cherry-pick in progress"},
+		{"REVERT_HEAD", "revert in progress"},
 	} {
 		out, err := r.run(ctx, "rev-parse", "--git-path", m.path)
 		if err != nil {

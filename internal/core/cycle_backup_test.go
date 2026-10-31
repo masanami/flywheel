@@ -344,7 +344,8 @@ func TestRunCycle_BackupRunsAfterAPhaseError(t *testing.T) {
 
 // AC-21: 周の上限で起動を打ち切った周でも backup を実行する。
 func TestRunCycle_BackupRunsInACycleCutByTheCycleBudget(t *testing.T) {
-	// 委譲の対象（着手中の課題）がある周で、周の上限を J1・J2 の 1 回分は通すが J3 と実装枠には足りない額にする。
+	// 委譲の対象（着手中の課題）がある周で、周の上限を J3 と実装枠には足りない額にする（フィクスチャに J1・J2 の
+	// 対象は無く、判断の呼び出しは起きない。上限の額は J1・J2 の枠の和に 1 を足したもの）。
 	// 委譲の段（run）が not_started: cycle_budget を出し、それでも backup は実行される。
 	f := newJ5Fixture(t, "impl")
 	f.agent.CycleBudgetUSD = f.agent.JudgmentBudgetUSD.J1 + f.agent.JudgmentBudgetUSD.J2 + 1
@@ -514,11 +515,25 @@ func TestRunCycle_BackupTimesOutAsFailedAndTheCycleStillCloses(t *testing.T) {
 	if res.Cycle.Result != CycleResultCompleted {
 		t.Errorf("cycle result = %s", res.Cycle.Result)
 	}
+	st, err := f.s.ReadCycleStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.LockHeld {
+		t.Errorf("status = %+v, want the lock released", st)
+	}
 }
 
-// detached HEAD・rebase の途中・merge の途中ではコミットせず failed（detail に理由）にする。
+// 期限の既定値は 120 秒（M5 仕様の決定）。
+func TestBackupTimeoutDefaultIs120Seconds(t *testing.T) {
+	if backupTimeout != 120*time.Second {
+		t.Errorf("backupTimeout = %s, want 120s", backupTimeout)
+	}
+}
+
+// detached HEAD・rebase・merge・cherry-pick・revert の途中ではコミットせず failed（detail に理由）にする。
 func TestBackupWorkspace_InterruptedStateIsFailedWithoutCommit(t *testing.T) {
-	for _, reason := range []string{"detached HEAD", "rebase in progress", "merge in progress"} {
+	for _, reason := range []string{"detached HEAD", "rebase in progress", "merge in progress", "cherry-pick in progress", "revert in progress"} {
 		t.Run(reason, func(t *testing.T) {
 			s := newStoreForTest(t)
 			g := &fakeWorkspaceGit{changed: true, interrupted: reason}

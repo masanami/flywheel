@@ -24,8 +24,9 @@ type WorkspaceGit interface {
 	IsWorkTree(ctx context.Context, dir string) (bool, error)
 
 	// InterruptedState は、コミットしてはいけない途中の状態（HEAD がブランチを指さない
-	// detached HEAD・rebase の途中・merge の途中）なら、その理由（`detached HEAD`・
-	// `rebase in progress`・`merge in progress`）を返す。通常の状態なら空文字列。
+	// detached HEAD・rebase の途中・merge の途中・cherry-pick の途中・revert の途中）なら、
+	// その理由（`detached HEAD`・`rebase in progress`・`merge in progress`・
+	// `cherry-pick in progress`・`revert in progress`）を返す。通常の状態なら空文字列。
 	InterruptedState(ctx context.Context, dir string) (reason string, err error)
 
 	// IsIgnored は path が Git の除外の対象（`git check-ignore` が一致する）かを返す。

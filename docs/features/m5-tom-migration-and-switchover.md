@@ -65,9 +65,9 @@ M5 は、旧 claude-flywheel の run-cycle で周を回しているエージェ�
 - [ ] コミットの要約は `chore(flywheel): backup <周の ID>` とする【仮定】
 - [ ] 書き出しのパスが Git の除外の対象（`git check-ignore` が一致する）なら、書き出しをコミットせず、`outcome` を `ignored` にする。このときも `memory_dir` に差があれば `memory_dir` だけをコミットし、`commit` にその SHA を入れる（記憶のコミットは M45P7 から引き継いだ別の目的のため）【仮定】
 - [ ] `backup` の段は push しない
-- [ ] `backup` の段全体（書き出しと git の起動）には 120 秒の期限を付ける。期限切れは `failed` にし、`detail` の先頭を `timeout` にする（フックや署名で git が止まっても、周が閉じて排他が解放されるようにするため）【決定 2026-10-30 オーナー】
-- [ ] コミットの前に、HEAD がブランチを指していない（detached HEAD）・rebase の途中・merge の途中のいずれかを検査し、該当すればコミットせず `failed` にして `detail` に理由（`detached HEAD`・`rebase in progress`・`merge in progress`）を書く。差が無いときは検査せず `unchanged` のまま。`outcome` の閉集合に値は足さない【決定 2026-10-30 オーナー】
-- [ ] `memory_dir` の宣言が `.flywheel` を含む場所（`.` など）を指すときは、記憶をコミットの対象から外し、外したことを `detail` に出す（ワークスペース全体を巻き込まないための安全策）【決定 2026-10-30 オーナー】。ワークスペースの外を指す `memory_dir`（絶対パス・字面で `..` に始まる相対パス）の宣言は、宣言の検査（`LoadAgentDeclaration`）で `config_invalid` にし、周を始めない【決定 2026-10-30 オーナー】
+- [ ] `backup` の段全体（書き出しと git の起動）には 120 秒の期限を付ける。期限切れは `failed` にし、`detail` の先頭を `timeout` にする（フックや署名で git が止まっても、周が閉じて排他が解放されるようにするため）【決定 2026-10-30 オーナー】。期限切れで止めるのは git 本体だけで、フック等の子孫のプロセスは止めない（孤児で残りうる）【仮定】
+- [ ] コミットの前に、HEAD がブランチを指していない（detached HEAD）・rebase の途中・merge の途中・cherry-pick の途中・revert の途中のいずれかを検査し、該当すればコミットせず `failed` にして `detail` に理由（`detached HEAD`・`rebase in progress`・`merge in progress`・`cherry-pick in progress`・`revert in progress`）を書く。差が無いときは検査せず `unchanged` のまま。`outcome` の閉集合に値は足さない【決定 2026-10-30 オーナー】
+- [ ] `memory_dir` の宣言が `.flywheel` を含む場所（`.` など）を指すときは、記憶をコミットの対象から外し、外したことを `detail` に出す（ワークスペース全体を巻き込まないための安全策）【決定 2026-10-30 オーナー】。ワークスペースの外を指す `memory_dir`（絶対パス・Clean した結果が `..` に始まる相対パス）の宣言は、宣言の検査（`LoadAgentDeclaration`）で `config_invalid` にし、周を始めない【決定 2026-10-30 オーナー】
 - [ ] `memory_dir` を宣言していないワークスペースでは、記憶（J6 が既定の `memory/` に書く分）はコミットされない。記憶もコミットしたいワークスペースは `memory_dir` を宣言する【決定 2026-10-30 オーナー】
 - [ ] 作業ログへの記録だけが失敗したときは、周を `completed` で閉じ、`cycle --json` の `phases` に段の結果を出す。記録に失敗したことは `detail` に足す（警告。`cycle` はエラーを返さない）【仮定】
 - [ ] 段の結果の `outcome` は `committed`（コミットした）・`unchanged`（差が無い）・`not_git`（Git の作業ツリーでない）・`ignored`（書き出しのパスが除外の対象）・`failed`（書き出しかコミットに失敗した）の閉集合とする【仮定: 名前】
@@ -377,10 +377,10 @@ M5 の完了の目安（設計書 §17）のうち、「Tom が新しい flywhee
 - [ ] コミットに失敗したとき（ワークスペースに失敗する pre-commit フックを置く）、`outcome` が `failed` で、`detail` が空でない文字列である
 - [ ] 書き出しの書き込みに失敗したとき（`.flywheel/export.json` の場所にディレクトリを置く）、`outcome` が `failed` で、`detail` が空でない文字列である
 - [ ] ほかの段が成功する周で `backup` の段だけが `failed` のとき、`cycle` の終了コードは 0 である
-- [ ] 【AC-37a】`backup` の段の git が期限（120 秒）を過ぎても終わらないとき、`outcome` が `failed` で `detail` が `timeout` を含み、周は `completed` で閉じて排他を解放する（core のテストは期限を短くして確かめる）
-- [ ] 【AC-37b】detached HEAD・rebase の途中・merge の途中のワークスペースで、書き出しに差があっても、コミットを作らず、`outcome` が `failed` で `detail` が理由を含む
-- [ ] 【AC-37c】作業ログの記録だけが失敗しても、`cycle` はエラーを返さず、`phases` の最後の要素が `backup` の結果を持ち、`detail` に記録の失敗がある
-- [ ] 【AC-37d】ワークスペースの外を指す `memory_dir`（絶対パス・`../x`・`a/../../x`）の宣言は `config_invalid` で、周を始めない
+- [ ] 【AC-38a】`backup` の段の git が期限（120 秒）を過ぎても終わらないとき、`outcome` が `failed` で `detail` が `timeout` を含み、周は `completed` で閉じて排他を解放する（core のテストは期限を短くして確かめる）
+- [ ] 【AC-38b】detached HEAD・rebase の途中・merge の途中・cherry-pick の途中・revert の途中のワークスペースで、書き出しに差があっても、コミットを作らず、`outcome` が `failed` で `detail` が理由を含む
+- [ ] 【AC-38c】作業ログの記録だけが失敗しても、`cycle` はエラーを返さず、`phases` の最後の要素が `backup` の結果を持ち、`detail` に記録の失敗がある
+- [ ] 【AC-38d】ワークスペースの外を指す `memory_dir`（絶対パス・`../x`・`a/../../x`）の宣言は `config_invalid` で、周を始めない
 
 ### ストアと構造
 
