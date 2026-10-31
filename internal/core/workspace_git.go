@@ -18,9 +18,6 @@ import "context"
 type WorkspaceGit interface {
 	// IsWorkTree は dir が Git の作業ツリーの中かを返す。作業ツリーでないと
 	// git が答えたときは (false, nil)。git が実行できない・ほかの理由で失敗したときは error。
-	//
-	// 実装は、ここで突き止めた作業ツリーを同じ dir への続く呼び出しで使い回してよい。呼ぶ側は、
-	// 1 回の backup の最初にこれを呼ぶ。
 	IsWorkTree(ctx context.Context, dir string) (bool, error)
 
 	// InterruptedState は、コミットしてはいけない途中の状態（HEAD がブランチを指さない
@@ -38,7 +35,8 @@ type WorkspaceGit interface {
 
 	// CommitPaths は paths だけを message でコミットし、作ったコミットの SHA を返す
 	// （`git add -- <パス>` の後に `git commit --only -m <message> -- <パス>`）。ほかの
-	// ファイルのステージの状態・未コミットの変更は変えない。コミットできるものが無い（実在しない・
+	// ファイルのステージの状態・未コミットの変更は変えない。失敗（期限切れ・フックの拒否）しても
+	// 対象のファイルは index に残らない。コミットできるものが無い（実在しない・
 	// 空のディレクトリ・除外されたファイルだけ）パスは対象から外す（すべて外れたら error）。パスはリテラルで、作業ツリーのルート自体は
 	// 受け付けない。フックの失敗などは、
 	// 空でない理由を持つ error で返す。
