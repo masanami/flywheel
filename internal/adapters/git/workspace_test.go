@@ -394,3 +394,48 @@ func TestWorkspace_DiscoveryIsRememberedByIsWorkTree(t *testing.T) {
 		t.Error("a non-work-tree must not be cached")
 	}
 }
+
+// commit が失敗（フックの拒否）しても、対象のファイルは本物の index に残らない。
+func TestWorkspace_FailedCommitLeavesTheRealIndexUntouched(t *testing.T) {
+	gitIdentity(t)
+	dir := newRepo(t)
+	installHook(t, dir, "pre-commit", "#!/bin/sh\nexit 1\n")
+	write(t, filepath.Join(dir, "staged.txt"), "s\n")
+	gitIn(t, dir, "add", "staged.txt")
+	p := filepath.Join(dir, ".flywheel", "export.json")
+	write(t, p, "{}")
+	before := gitIn(t, dir, "status", "--porcelain")
+	if _, err := NewWorkspace().CommitPaths(context.Background(), dir, "m", []string{p}); err == nil {
+		t.Fatal("CommitPaths succeeded despite the failing hook")
+	}
+	if after := gitIn(t, dir, "status", "--porcelain"); after != before {
+		t.Errorf("status changed by the failed commit:\nbefore %q\nafter  %q", before, after)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".git", "flywheel-index-*")); len(left) != 0 {
+		t.Errorf("temporary index left: %v", left)
+	}
+}
+
+// まだコミットが無いブランチ（unborn）でも、途中の状態の検査は通常の状態を返し、最初のコミットを作れる。
+func TestWorkspace_UnbornBranch(t *testing.T) {
+	gitIdentity(t)
+	dir := t.TempDir()
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	w := NewWorkspace()
+	ctx := context.Background()
+	if got, err := w.InterruptedState(ctx, dir); err != nil || got != "" {
+		t.Fatalf("InterruptedState = %q, %v; want empty", got, err)
+	}
+	p := filepath.Join(dir, "export.json")
+	write(t, p, "{}")
+	sha, err := w.CommitPaths(ctx, dir, "m", []string{p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head := gitIn(t, dir, "rev-parse", "HEAD"); sha != head {
+		t.Errorf("sha = %q, HEAD = %q", sha, head)
+	}
+	if st := gitIn(t, dir, "status", "--porcelain"); st != "" {
+		t.Errorf("status after = %q", st)
+	}
+}
