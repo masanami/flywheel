@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // backup の段（M5 S1・M5P3）を、実ストアと偽の WorkspaceGit で検証する。git の実物は
@@ -28,6 +29,15 @@ type fakeWorkspaceGit struct {
 	changePath   []string
 	commitMsg    string
 	commitPath   []string
+	// interrupted が空でなければ、InterruptedState はその理由を返す。
+	interrupted string
+	// blockCommit が真なら、CommitPaths は ctx が終わるまで止まり、ctx のエラーを返す。
+	blockCommit bool
+}
+
+func (g *fakeWorkspaceGit) InterruptedState(context.Context, string) (string, error) {
+	g.calls = append(g.calls, "InterruptedState")
+	return g.interrupted, nil
 }
 
 func (g *fakeWorkspaceGit) IsWorkTree(context.Context, string) (bool, error) {
@@ -51,8 +61,12 @@ func (g *fakeWorkspaceGit) HasChanges(_ context.Context, ws string, paths []stri
 	}
 	return false, nil
 }
-func (g *fakeWorkspaceGit) CommitPaths(_ context.Context, _, msg string, paths []string) (string, error) {
+func (g *fakeWorkspaceGit) CommitPaths(ctx context.Context, _, msg string, paths []string) (string, error) {
 	g.calls = append(g.calls, "CommitPaths")
+	if g.blockCommit {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
 	if g.onCommit != nil {
 		g.onCommit()
 	}
@@ -330,24 +344,26 @@ func TestRunCycle_BackupRunsAfterAPhaseError(t *testing.T) {
 
 // AC-21: 周の上限で起動を打ち切った周でも backup を実行する。
 func TestRunCycle_BackupRunsInACycleCutByTheCycleBudget(t *testing.T) {
-	f := newCycleFixture(t)
-	f.create(t, "t-1")
-	f.agent.CycleBudgetUSD = 0.000001
+	// 委譲の対象（着手中の課題）がある周で、周の上限を J3 と実装枠には足りない額にする（フィクスチャに J1・J2 の
+	// 対象は無く、判断の呼び出しは起きない。上限の額は J1・J2 の枠の和に 1 を足したもの）。
+	// 委譲の段（run）が not_started: cycle_budget を出し、それでも backup は実行される。
+	f := newJ5Fixture(t, "impl")
+	f.agent.CycleBudgetUSD = f.agent.JudgmentBudgetUSD.J1 + f.agent.JudgmentBudgetUSD.J2 + 1
+	var calls []JudgmentPoint
 	g := &fakeWorkspaceGit{changed: true}
-	in := f.input(mineThenPlanInvoker(t))
+	in := f.cycleInput(cycleS2Invoker("met", &calls))
 	in.WorkspaceGit = g
-	res := f.run(t, in)
-
-	cut := false
-	for _, p := range res.Phases {
-		for _, ns := range p.NotStarted {
-			if ns.Reason == NotStartedCycleBudget {
-				cut = true
-			}
-		}
+	res, err := f.s.RunCycle(context.Background(), in)
+	if err != nil {
+		t.Fatalf("RunCycle: %v", err)
 	}
-	if !cut {
-		t.Fatalf("phases = %+v, want a not_started cycle_budget", res.Phases)
+
+	run := phaseOfResult(t, res, CyclePhaseRun)
+	if len(run.NotStarted) != 1 || run.NotStarted[0].Reason != NotStartedCycleBudget {
+		t.Fatalf("run phase = %+v, want one not_started cycle_budget", run)
+	}
+	if len(calls) != 0 {
+		t.Errorf("judgment calls = %v, want none (J3 must not be paid)", calls)
 	}
 	last := res.Phases[len(res.Phases)-1]
 	if last.Phase != CyclePhaseBackup || last.Backup == nil || last.Backup.Outcome != BackupCommitted {
@@ -445,8 +461,9 @@ func TestBackup_MemoryDirContainingFlywheelIsExcludedWithDetail(t *testing.T) {
 	}
 }
 
-// backup の作業ログの記録に失敗したら RunCycle はエラーを返すが、周は completed で閉じ、排他を解放する。
-func TestRunCycle_BackupRecordFailureIsReturnedAndTheCycleStillCloses(t *testing.T) {
+// backup の作業ログの記録だけに失敗しても RunCycle はエラーを返さず、phases に backup の結果を
+// 残す（detail に記録の失敗を足す）。周は completed で閉じ、排他を解放する。
+func TestRunCycle_BackupRecordFailureIsAWarningInDetailAndTheCycleStillCloses(t *testing.T) {
 	f := newCycleFixture(t)
 	g := &fakeWorkspaceGit{changed: true}
 	// backup のコミットの後で actor を解決できなくし、作業ログの書き込み（mutate）を失敗させる。
@@ -458,8 +475,16 @@ func TestRunCycle_BackupRecordFailureIsReturnedAndTheCycleStillCloses(t *testing
 	}
 	in := f.input(mineThenPlanInvoker(t))
 	in.WorkspaceGit = g
-	if _, err := f.s.RunCycle(context.Background(), in); !errors.Is(err, ErrActorUnavailable) {
-		t.Fatalf("err = %v, want ErrActorUnavailable", err)
+	res, err := f.s.RunCycle(context.Background(), in)
+	if err != nil {
+		t.Fatalf("RunCycle: %v", err)
+	}
+	last := res.Phases[len(res.Phases)-1]
+	if last.Phase != CyclePhaseBackup || last.Backup == nil || last.Backup.Outcome != BackupCommitted {
+		t.Fatalf("last phase = %+v, want the committed backup result", last)
+	}
+	if !strings.Contains(last.Backup.Detail, "activity log") {
+		t.Errorf("detail = %q, want the record failure", last.Backup.Detail)
 	}
 	if len(backupActivities(t, f.s)) != 0 {
 		t.Error("a backup row was recorded")
@@ -470,5 +495,65 @@ func TestRunCycle_BackupRecordFailureIsReturnedAndTheCycleStillCloses(t *testing
 	}
 	if st.LockHeld || st.LastResult == nil || *st.LastResult != CycleResultCompleted {
 		t.Errorf("status = %+v (last result %v), want the lock released and the cycle completed", st, st.LastResult)
+	}
+}
+
+// git が止まったら期限（backupTimeout）で failed（detail に timeout）にし、周は閉じる。
+func TestRunCycle_BackupTimesOutAsFailedAndTheCycleStillCloses(t *testing.T) {
+	old := backupTimeout
+	backupTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { backupTimeout = old })
+	f := newCycleFixture(t)
+	g := &fakeWorkspaceGit{changed: true, blockCommit: true}
+	in := f.input(mineThenPlanInvoker(t))
+	in.WorkspaceGit = g
+	res := f.run(t, in)
+	b := res.Phases[len(res.Phases)-1].Backup
+	if b == nil || b.Outcome != BackupFailed || !strings.Contains(b.Detail, "timeout") {
+		t.Fatalf("backup = %+v, want failed with timeout", b)
+	}
+	if res.Cycle.Result != CycleResultCompleted {
+		t.Errorf("cycle result = %s", res.Cycle.Result)
+	}
+	st, err := f.s.ReadCycleStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.LockHeld {
+		t.Errorf("status = %+v, want the lock released", st)
+	}
+}
+
+// 期限の既定値は 120 秒（M5 仕様の決定）。
+func TestBackupTimeoutDefaultIs120Seconds(t *testing.T) {
+	if backupTimeout != 120*time.Second {
+		t.Errorf("backupTimeout = %s, want 120s", backupTimeout)
+	}
+}
+
+// detached HEAD・rebase・merge・cherry-pick・revert の途中ではコミットせず failed（detail に理由）にする。
+func TestBackupWorkspace_InterruptedStateIsFailedWithoutCommit(t *testing.T) {
+	for _, reason := range []string{"detached HEAD", "rebase in progress", "merge in progress", "cherry-pick in progress", "revert in progress"} {
+		t.Run(reason, func(t *testing.T) {
+			s := newStoreForTest(t)
+			g := &fakeWorkspaceGit{changed: true, interrupted: reason}
+			res := s.BackupWorkspace(context.Background(), g, defaultAgentDeclaration(), "Y-1")
+			if res.Outcome != BackupFailed || !strings.Contains(res.Detail, reason) || res.Commit != "" {
+				t.Fatalf("result = %+v, want failed with %q", res, reason)
+			}
+			if g.commitMsg != "" {
+				t.Error("CommitPaths was called")
+			}
+		})
+	}
+}
+
+// 差が無ければ途中の状態でも unchanged のまま（検査しない）。
+func TestBackupWorkspace_InterruptedStateIsNotCheckedWithoutChanges(t *testing.T) {
+	s := newStoreForTest(t)
+	g := &fakeWorkspaceGit{changed: false, interrupted: "detached HEAD"}
+	res := s.BackupWorkspace(context.Background(), g, defaultAgentDeclaration(), "Y-1")
+	if res.Outcome != BackupUnchanged {
+		t.Fatalf("result = %+v, want unchanged", res)
 	}
 }

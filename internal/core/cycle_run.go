@@ -198,7 +198,14 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	// ctx が取り消されていても実行する【仮定】。backup の failed は周の成否・終了コードを変えない。
 	endCtx := context.WithoutCancel(ctx)
 	backup := s.BackupWorkspace(endCtx, in.WorkspaceGit, in.AgentDecl, cyc.ID)
-	recordErr := s.recordBackup(endCtx, cyc.ID, backup)
+	// 作業ログの記録だけが失敗しても周は止めない（phases を失わない）。detail に残して警告にする。
+	if recordErr := s.recordBackup(endCtx, cyc.ID, backup); recordErr != nil {
+		note := "backup was not recorded in the activity log: " + recordErr.Error()
+		if backup.Detail != "" {
+			note = backup.Detail + "; " + note
+		}
+		backup.Detail = note
+	}
 	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseBackup, Backup: &backup})
 	stopHeartbeat()
 	endResult := CycleResultCompleted
@@ -206,7 +213,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 		endResult = CycleResultAborted
 	}
 	ended, endErr := s.EndCycle(endCtx, cyc.ID, endResult)
-	if err := errors.Join(runErr, endErr, recordErr); err != nil {
+	if err := errors.Join(runErr, endErr); err != nil {
 		if runErr != nil {
 			// PartialReleaseError など runErr の型を保つ。
 			return nil, runErr
