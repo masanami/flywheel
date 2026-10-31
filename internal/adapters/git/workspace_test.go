@@ -439,3 +439,47 @@ func TestWorkspace_UnbornBranch(t *testing.T) {
 		t.Errorf("status after = %q", st)
 	}
 }
+
+// git commit が成功した後に ctx が切れても、後始末（HEAD の取得・index の同期）は別の期限で
+// 続き、失敗（期限切れ）にならずに SHA を返す。post-commit フックの子が出力の管を握っている間
+// （git 自身は 0 で終了済み）に、フックが作った印のファイルを見て ctx を取り消す。
+func TestWorkspace_CommitPathsKeepsTheCommitWhenCtxEndsAfterIt(t *testing.T) {
+	gitIdentity(t)
+	dir := newRepo(t)
+	marker := filepath.Join(t.TempDir(), "committed")
+	installHook(t, dir, "post-commit", "#!/bin/sh\n(sleep 0.5; touch '"+marker+"'; sleep 2) &\n")
+	p := filepath.Join(dir, "export.json")
+	write(t, p, "{}")
+	w := NewWorkspace()
+	if ok, err := w.IsWorkTree(context.Background(), dir); err != nil || !ok {
+		t.Fatalf("IsWorkTree = %v, %v", ok, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for {
+			if _, err := os.Stat(marker); err == nil {
+				cancel()
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}()
+	sha, err := w.CommitPaths(ctx, dir, "m", []string{p})
+	if ctx.Err() == nil {
+		t.Fatal("ctx was not cancelled during the commit; the test did not exercise the case")
+	}
+	if err != nil {
+		t.Fatalf("CommitPaths: %v; want the commit kept despite ctx ending after it", err)
+	}
+	if head := gitIn(t, dir, "rev-parse", "HEAD"); sha != head {
+		t.Errorf("sha = %q, HEAD = %q", sha, head)
+	}
+	if st := gitIn(t, dir, "status", "--porcelain", "--", "export.json"); st != "" {
+		t.Errorf("real index does not match the new HEAD for the committed path: %q", st)
+	}
+}
