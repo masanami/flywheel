@@ -18,6 +18,10 @@ func startBinary(t *testing.T, bin, dir string, port int) (int, *exec.Cmd) {
 	t.Helper()
 	cmd := exec.Command(bin, "serve", "--port", strconv.Itoa(port))
 	cmd.Dir = dir
+	// os.UserConfigDir() を一時ディレクトリへ向け、開発機の既定の場所の fleet.json を読まない
+	// （Linux は XDG_CONFIG_HOME、macOS は HOME）。
+	cfg := t.TempDir()
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+cfg, "HOME="+cfg)
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		t.Fatal(err)
