@@ -34,6 +34,10 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	// 委譲の子（flywheel 自身のリポジトリで make check を回す子）の環境に目印があると、テストが
+	// 起動する実バイナリが os.Environ() を引き継いで拒否される。最初に外す（internal/cli の
+	// TestMain と同じ前例）。目印の拒否そのものは internal/cli と cmd/flywheel のテストが検査する。
+	_ = os.Unsetenv(core.DelegatedRunEnvVar)
 	code := m.Run()
 	if cliBinary != "" {
 		_ = os.RemoveAll(filepath.Dir(cliBinary))
