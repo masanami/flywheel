@@ -138,6 +138,32 @@ func TestBuildDelegationStdin_InvocationOnlyWhenGiven_AndClosesRuleIsRequested(t
 	}
 }
 
+// #441: CI で測れない完了条件の実測は、子自身が PR の head で流して貼り、
+// 下に使ったサブエージェントの申告で代えない規律が、すべてのブリーフに載る。
+func TestBuildDelegationStdin_RequiresSelfMeasuringGatesCINeverRuns(t *testing.T) {
+	for _, d := range []struct {
+		decider string
+		row     int
+	}{{"human", 1}, {"parent", 3}, {"child", 4}} {
+		out, err := BuildDelegationStdin(DelegationBrief{Decider: d.decider, DeciderRow: d.row, Brief: "b"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(out)
+		for _, phrase := range []string{
+			"CI で測れない実測",
+			"PR の head",
+			"コマンド・終了コード・出力の要約",
+			"`quality_gate`",
+			"サブエージェントの申告で代えない",
+		} {
+			if !strings.Contains(text, phrase) {
+				t.Errorf("%s: the delegation stdin lacks %q", d.decider, phrase)
+			}
+		}
+	}
+}
+
 func TestBuildDelegationStdin_SourceIssueSectionAndRegionDelimiterGuard(t *testing.T) {
 	out, err := BuildDelegationStdin(DelegationBrief{Decider: "child", DeciderRow: 4, Brief: "b", SourceIssueNumber: 7, SourceIssueURL: "https://github.com/o/r/issues/7"})
 	if err != nil || !strings.Contains(string(out), "番号: 7") {
