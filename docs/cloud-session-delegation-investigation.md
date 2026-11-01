@@ -84,6 +84,7 @@
 
 - 今回は push も PR もできなかった（#3。実物で確証）。観測: セッションの中のクローンにリモートが無く `git push -u origin probe/382-cloud-push-auto` は `fatal: 'origin' does not appear to be a git repository`。`gh pr create` は `HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API`。`gh api repos/masanami/flywheel/pulls` は `HTTP 403: GitHub access to this repository is not enabled for this session. Use add_repo to request access.`。`gh auth status` は `GH_TOKEN` を無効と表示した。
 - push と PR を確かめるには、Claude GitHub App をこのリポジトリへ承認するか `/web-setup`（手元の `gh` のトークンを Anthropic へ送る）が要る。どちらも資格情報の扱いを変える操作で、この課題の範囲（新しいトークンを発行しない・資格情報を増やさない）の外のため行っていない。**未確証**（条件付き）。資料では、接続すれば push・REST での PR の作成はでき、push できるブランチは proxy では絞られない。
+- **いまは確かめない【決定 2026-11-02 オーナー】**: GitHub の接続（App・`/web-setup`）は行わず、push と PR の作成はクラウドの実装の予定が立つまで前提条件として残す。
 - 検証用の PR は作られていない（close するものは無い）。GitHub 以外のリポジトリは資料だけ（bundle で送れるが push できない）。
 
 **(d) MCP の接続と資格情報**
@@ -105,7 +106,7 @@
 |---|---|---|---|
 | (a) 起動・状態・構造化した結果・再開 | 条件付き | 実物で確証 | 作成は対話の起動だけ（`-p` 不可・信頼の確認あり）。ID は事前に決められない。結果は events を読み、構造化は指示文頼み。続きの文は `-p --cloud <ID>` で送れて文脈が残る。無人では `--permission-mode auto` が要る |
 | (b) 予算の打ち切り・消費の額 | できない | 実物で確証 | `--max-budget-usd` は受け付けられるが効かない。費用の欄はどこにも無い。課金はプランの利用上限（資料だけ） |
-| (c) push・PR | 未確証 | 実物では不可を観測・可は資料だけ | このリポジトリへの GitHub の接続が無効で、bundle で clone され push も REST も 403。接続（App か `/web-setup`）をすればできると資料にある。GitHub 以外は push できない（資料だけ） |
+| (c) push・PR | 未確証 | 実物では不可を観測・可は資料だけ | このリポジトリへの GitHub の接続が無効で、bundle で clone され push も REST も 403。いまは確かめず、クラウドの実装の予定が立つまで前提条件として残す【決定 2026-11-02 オーナー】。接続（App か `/web-setup`）をすればできると資料にある。GitHub 以外は push できない（資料だけ） |
 | (d) MCP と資格情報 | 条件付き | `.mcp.json` は実物で確証・資格情報は資料だけ | `.mcp.json` の MCP は使える。資格情報は環境の変数か network secrets で、単位は環境 |
 | (e) `CLAUDE.md`・`.claude/settings.json` | できる | 実物で確証 | `CLAUDE.md`・`env`・拒否の規則が効く |
 
