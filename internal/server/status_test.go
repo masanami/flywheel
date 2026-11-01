@@ -274,9 +274,8 @@ func budgetExhaustedCount(t *testing.T, body string) int {
 	return len(doc.NeedsHuman.BudgetExhausted)
 }
 
-// AC-38a: agent.json が読めないときも CLI と同じ（budget_exhausted の判定の対象外になるだけ）。
-// フィクスチャは、宣言を読めるときだけ budget_exhausted に載る課題を含む（宣言を常に無視する
-// 実装では、読める側の比較で落ちる）。
+// AC-38a: agent.json が読めないときも CLI と同じ（config_invalid。宣言の検査は core.CheckDeclarations）。
+// 読めるときは本文が CLI と JSON として等しく、宣言を読めるときだけ budget_exhausted に載る課題を含む。
 func TestStatusAPI_UnreadableAgentJSONEqualsCLI(t *testing.T) {
 	ws := budgetWorkspace(t)
 	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
@@ -292,13 +291,9 @@ func TestStatusAPI_UnreadableAgentJSONEqualsCLI(t *testing.T) {
 
 	writeAgentJSON(t, ws, `{broken`)
 	code, body = statusRequest(t, port, "w")
-	if code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", code, body)
+	if code != http.StatusInternalServerError || errCode(t, body) != "config_invalid" {
+		t.Fatalf("status = %d, body = %s, want 500 config_invalid", code, body)
 	}
-	if n := budgetExhaustedCount(t, body); n != 0 {
-		t.Errorf("with an unreadable agent.json: budget_exhausted = %d, want 0: %s", n, body)
-	}
-	sameJSON(t, body, cliStatusJSON(t, ws))
 }
 
 // AC-44a: 遅い gh の取得の間、ストアの読み取りの借りを持たない（状態更新の Lock が待たされない）。
@@ -642,7 +637,10 @@ func TestAPICodeForCoreErr_OnlyTableCodes(t *testing.T) {
 			t.Errorf("%v: status = %d, want 500", e, rec.Code)
 		}
 	}
-	for _, e := range []error{core.ErrTTYRequired, core.ErrConfigNotFound, core.ErrConfigInvalid, core.ErrRunInProgress, core.ErrBudgetExceeded, core.ErrSlotUnavailable, core.ErrSerialized} {
+	if got := apiCodeForCoreErr(core.ErrConfigInvalid); got != CodeConfigInvalid {
+		t.Errorf("ErrConfigInvalid: %q, want config_invalid", got)
+	}
+	for _, e := range []error{core.ErrTTYRequired, core.ErrConfigNotFound, core.ErrRunInProgress, core.ErrBudgetExceeded, core.ErrSlotUnavailable, core.ErrSerialized} {
 		if got := apiCodeForCoreErr(e); got != CodeInternalError {
 			t.Errorf("%v: %q, want internal_error", e, got)
 		}

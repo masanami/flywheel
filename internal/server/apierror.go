@@ -103,7 +103,7 @@ func apiCodeForCoreErr(err error) string {
 	case CodeNotFound, CodeStoreNotFound, CodeValidationFailed, CodeUsageError,
 		CodeInvalidTransition, CodeTerminalState, CodeConflict, CodeLocked,
 		CodeVerificationRejected, CodeConfirmationMismatch,
-		CodeStoreTooNew, CodeStoreBusy, CodeStoreError, CodeInternalError:
+		CodeStoreTooNew, CodeStoreBusy, CodeStoreError, CodeConfigInvalid, CodeInternalError:
 		return code
 	default:
 		return CodeInternalError

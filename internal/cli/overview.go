@@ -18,11 +18,11 @@ import (
 // runStatus は `flywheel status` の実装。読み取り専用（core.GetOverview は状態・
 // 作業ログを変えない）。
 func runStatus(a Args) (any, error) {
-	// サイズの既定を引く宣言。読めなくても status は読み取り専用の表示として動かす
-	// （その場合、枠の額を明記しない計画の課題は budget_exhausted の判定の対象外になる）。
-	decl, derr := core.LoadAgentDeclaration(a.Store.Workspace())
-	if derr != nil {
-		decl = nil
+	// 宣言は cycle と同じ読み込み・検査（core.CheckDeclarations）で確かめる。不備なら
+	// config_invalid。agent.json はサイズの既定としても使う。
+	decl, err := core.CheckDeclarations(a.Store.Workspace())
+	if err != nil {
+		return nil, mapCoreErr(err)
 	}
 	ctx := context.Background()
 	ov, err := a.Store.GetOverviewFor(ctx, decl)

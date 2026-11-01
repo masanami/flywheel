@@ -139,6 +139,10 @@ func statusOverview(ctx context.Context, fleet *Fleet, name string, checks *chec
 	}
 	ov, cands, err := func() (*core.Overview, []core.WaitingExternalCandidate, error) {
 		defer release()
+		// status は CLI と同じ宣言の検査をし、不備なら config_invalid で終わる。
+		if _, err := core.CheckDeclarations(st.Workspace()); err != nil {
+			return nil, nil, err
+		}
 		ov, err := baseOverview(ctx, st)
 		if err != nil {
 			return nil, nil, err
