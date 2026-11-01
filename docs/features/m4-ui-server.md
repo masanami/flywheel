@@ -491,9 +491,10 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | `invalid_transition`・`terminal_state`・`conflict`・`locked` | 409 |
 | `verification_rejected`・`confirmation_mismatch` | 403 |
 | `store_too_new`・`store_busy`・`store_error` | 503 |
+| `config_invalid` | 500 |
 | `internal_error` とその他 | 500 |
 
-API の失敗の `code` は上の表に列挙した値（と `forbidden_origin`）だけである。CLI にあって表に無いコード（`tty_required`・`config_not_found`・`config_invalid`・`run_in_progress`・`budget_exceeded`・`slot_unavailable`・`serialized`）に当たる core のエラーは、API では `internal_error`（500）で返す【決定 2026-10-11 オーナー・AC-51】。
+API の失敗の `code` は上の表に列挙した値（と `forbidden_origin`）だけである。CLI にあって表に無いコード（`tty_required`・`config_not_found`・`run_in_progress`・`budget_exceeded`・`slot_unavailable`・`serialized`）に当たる core のエラーは、API では `internal_error`（500）で返す【決定 2026-10-11 オーナー・AC-51】。`config_invalid` は `GET …/status` の宣言の検査の失敗で返すため表に入れる【決定 2026-10-31 オーナー・Issue #427】。
 
 Host・Origin・CSRF の検査で拒否した要求は、core を呼ばずに 403 と `{"error":{"code":"forbidden_origin","message"}}` を返す【仮定: コード名】。
 
@@ -677,7 +678,7 @@ S1 は 2026-10-12（flywheel#159）、S2 は 2026-10-18（flywheel#212）、S3 �
 > 「CLI と JSON として等しい」の項目は、heartbeat が古い終了していない run の無いストアで比べる（`runs`・`show` は run の一覧を読むときに中断した run を回収するが、server は回収しないため。`status` は回収しない）。
 
 - [ ] `GET /api/v1/workspaces/{name}/status` の本文は、同じストアでの `flywheel status --json` の標準出力と JSON として等しい（検証中で PR を持つ課題を含むストアで、M3 と同じ偽の `gh` を PATH に置いて比べる）
-- [ ] 【AC-38a】`agent.json` の宣言の有無で `needs_human.budget_exhausted` が変わる課題を含むストアで、`agent.json` が読めるときも読めないときも、`GET …/status` の本文は `flywheel status --json` と JSON として等しく、読めるときだけその課題が `budget_exhausted` に載る
+- [ ] 【AC-38a】`agent.json` の宣言の有無で `needs_human.budget_exhausted` が変わる課題を含むストアで、`agent.json` が読めるときは、`GET …/status` の本文は `flywheel status --json` と JSON として等しく、その課題が `budget_exhausted` に載る。`agent.json` が不備なら、`flywheel status` と同じく `config_invalid` で終わる（`GET …/status` は 500・`config_invalid`。宣言ファイルが無いときは今どおり動く）
 - [ ] 検証中で PR を持つ課題を含むストアで、PATH から `gh` だけを除いた環境（`flywheel` は絶対パスで起動する）では、`GET /api/v1/workspaces/{name}/status` は 200 を返し、本文は同じ環境の `flywheel status --json` の標準出力（その課題を `waiting_external` に含まない）と JSON として等しい
 - [ ] 検証中で PR を持つ課題を含むストアで、60 秒の間に同じワークスペースの `GET …/status` を 2 回呼んでも、その PR の `gh` の起動は 1 回である（偽の `gh` の起動の記録で確かめる）
 - [ ] 検証中で PR を持つ課題をそれぞれ含む 2 つのワークスペースの `GET …/status` を交互に 2 回ずつ呼ぶと、`gh` の起動はワークスペースごとに 1 回ずつである
