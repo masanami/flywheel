@@ -358,3 +358,30 @@ func TestInstructions_J8AsksForReductionAndMetricHoleCheck(t *testing.T) {
 		t.Errorf("Instructions(J8) is %d bytes, over 6144", len(got))
 	}
 }
+
+// #444: j2.md の達成条件の項は、達成の確認がこの課題の記録だけで判定できる条件にすることと、
+// 他の課題の将来の実行に依存する確認をテストでの固定かフォローアップの課題へ回すことを求める。
+func TestInstructions_J2CriteriaJudgeableFromOwnRecord(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var line string
+	for _, l := range strings.Split(got, "\n") {
+		if strings.Contains(l, "- 達成条件:") {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		t.Fatal("Instructions(J2) lacks the item of 達成条件")
+	}
+	for _, want := range []string{
+		"達成の確認がこの課題の記録だけで判定できる条件にする",
+		"他の課題の将来の実行に依存する確認は、テストでの固定に代えるか、フォローアップの課題に分ける",
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the item of 達成条件 in Instructions(J2) lacks %q", want)
+		}
+	}
+}
