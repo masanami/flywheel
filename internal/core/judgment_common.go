@@ -9,6 +9,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -129,37 +130,86 @@ func challengeAutoExclusion(ctx context.Context, tx *sql.Tx, challengeID int64) 
 
 // closedByOwnRelease は、challengeID の課題の取り込み元が「その課題自身の本番反映（委譲の PR の
 // マージ）で閉じた」とストアの記録だけで見なせるかを返す（#440。GitHub への問い合わせはしない）。
-// 条件は、その課題の release の不可逆操作のうち、実行済み（state=executed。実行の結果が
-// merged・already_merged のときだけこの状態になる）で、参照（ref）が PR の URL として読め、
-// マージのコミット（merge_commit）が記録されているものが 1 つ以上あること。
+// 条件は次の 2 つ。
+//
+//  1. その課題の release の不可逆操作のうち、実行済み（state=executed。実行の結果が merged・
+//     already_merged のときだけこの状態になる）で、参照（ref）が PR の URL として読め、マージの
+//     コミット（merge_commit）と実行の日時（executed_at）が記録されているものが 1 つ以上ある。
+//  2. そのうち最も新しい実行より後に、取り込みが取り込み元の reopen（upstream_state_change で
+//     upstream_state が open になった作業ログ）を記録していない。本番反映の後に reopen された
+//     取り込み元が再び閉じたのは、本番反映によるものではないため（外部の理由で閉じたものと同じに扱う）。
 //
 // flywheel を通さず GitHub で直接マージされた課題（release が未実行）は、委譲の run の成果物の
 // PR と一致しても真にしない（外部の理由で閉じたものと同じに扱う）。
 func closedByOwnRelease(ctx context.Context, tx *sql.Tx, challengeID int64) (bool, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT ref, merge_commit FROM operation WHERE challenge_id = ? AND kind = ? AND state = ? ORDER BY id`,
+		`SELECT ref, merge_commit, executed_at FROM operation WHERE challenge_id = ? AND kind = ? AND state = ? ORDER BY id`,
 		challengeID, string(OperationKindRelease), string(OperationStateExecuted))
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = rows.Close() }()
-	found := false
+	latest := ""
 	for rows.Next() {
-		var ref, mergeCommit sql.NullString
-		if err := rows.Scan(&ref, &mergeCommit); err != nil {
+		var ref, mergeCommit, executedAt sql.NullString
+		if err := rows.Scan(&ref, &mergeCommit, &executedAt); err != nil {
+			_ = rows.Close()
 			return false, err
 		}
-		if !ref.Valid || !mergeCommit.Valid || strings.TrimSpace(mergeCommit.String) == "" {
+		if !ref.Valid || !mergeCommit.Valid || strings.TrimSpace(mergeCommit.String) == "" || !executedAt.Valid {
 			continue
 		}
-		if _, _, ok := parseReleasePullRequestRef(ref.String); ok {
-			found = true
+		if _, _, ok := parseReleasePullRequestRef(ref.String); !ok {
+			continue
+		}
+		if executedAt.String > latest {
+			latest = executedAt.String
 		}
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
 		return false, err
 	}
-	return found, nil
+	_ = rows.Close()
+	if latest == "" {
+		return false, nil
+	}
+	reopened, err := upstreamReopenedAfter(ctx, tx, challengeID, latest)
+	if err != nil {
+		return false, err
+	}
+	return !reopened, nil
+}
+
+// upstreamReopenedAfter は、challengeID の課題に、日時 at（formatTimestamp の形）より後の取り込み元の
+// reopen（action=upstream_state_change で after の upstream_state が open）の作業ログがあるかを返す。
+// 日時の形は固定の桁なので文字列の比較で前後を決める。
+func upstreamReopenedAfter(ctx context.Context, tx *sql.Tx, challengeID int64, at string) (bool, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT after FROM activity WHERE entity = 'challenge' AND entity_id = ? AND action = 'upstream_state_change' AND at > ?`,
+		challengeID, at)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var after sql.NullString
+		if err := rows.Scan(&after); err != nil {
+			return false, err
+		}
+		if !after.Valid {
+			continue
+		}
+		var v struct {
+			UpstreamState string `json:"upstream_state"`
+		}
+		if err := json.Unmarshal([]byte(after.String), &v); err != nil {
+			return false, err
+		}
+		if v.UpstreamState == string(upstreamStateOpen) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // latestJudgmentRun は latestSucceededJudgmentOutput が返す、直近で成功した

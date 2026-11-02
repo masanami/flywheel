@@ -48,6 +48,20 @@ func insertReleaseForTest(t *testing.T, s *Store, id, ref string, state Operatio
 	return op
 }
 
+// insertUpstreamStateChangeForTest は取り込みが記録する upstream_state_change の作業ログを、日時 at で 1 件置く。
+func insertUpstreamStateChangeForTest(t *testing.T, s *Store, id, at string, to upstreamState) {
+	t.Helper()
+	cid := mustChallengeInternalID(t, id)
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after)
+			VALUES (?, 'alice', 'cli', 'none', 'challenge', ?, 'upstream_state_change', '{"upstream_state":"closed"}', ?)`,
+			at, cid, fmt.Sprintf(`{"upstream_state":%q,"version":99}`, string(to)))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // newClosedVerifyingFixture は C-1 を委譲して検証中にし、取り込み元 o/r#42 の対応を付ける（上流は open）。
 func newClosedVerifyingFixture(t *testing.T) *j5Fixture {
 	t.Helper()
@@ -139,7 +153,7 @@ func TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind(t *testing.
 		release  func(t *testing.T, s *Store)
 		want     NotStartedReason
 	}{
-		{name: "closed without any release (closed outside / merged directly on GitHub)", upstream: upstreamStateClosed, policy: policyStateInPolicy, want: NotStartedUpstreamClosed},
+		{name: "closed without any release (closed outside, or the PR merged on GitHub without an executed release)", upstream: upstreamStateClosed, policy: policyStateInPolicy, want: NotStartedUpstreamClosed},
 		{name: "closed with the release approved but not executed", upstream: upstreamStateClosed, policy: policyStateInPolicy,
 			release: func(t *testing.T, s *Store) { insertReleaseForTest(t, s, "C-1", relRef, OperationStateApproved, "") }, want: NotStartedUpstreamClosed},
 		{name: "closed with an executed release that has no merge commit", upstream: upstreamStateClosed, policy: policyStateInPolicy,
@@ -147,6 +161,13 @@ func TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind(t *testing.
 		{name: "closed with an executed release whose ref is not a PR", upstream: upstreamStateClosed, policy: policyStateInPolicy,
 			release: func(t *testing.T, s *Store) {
 				insertReleaseForTest(t, s, "C-1", "https://github.com/o/r/issues/1", OperationStateExecuted, "mc1")
+			}, want: NotStartedUpstreamClosed},
+		{name: "closed with an executed release whose merge commit is blank", upstream: upstreamStateClosed, policy: policyStateInPolicy,
+			release: func(t *testing.T, s *Store) { insertReleaseForTest(t, s, "C-1", relRef, OperationStateExecuted, "  ") }, want: NotStartedUpstreamClosed},
+		{name: "closed again after a reopen observed after the executed release", upstream: upstreamStateClosed, policy: policyStateInPolicy,
+			release: func(t *testing.T, s *Store) {
+				insertReleaseForTest(t, s, "C-1", relRef, OperationStateExecuted, "mc1")
+				insertUpstreamStateChangeForTest(t, s, "C-1", "2999-01-01T00:00:00.000Z", upstreamStateOpen)
 			}, want: NotStartedUpstreamClosed},
 		{name: "missing even with an executed release", upstream: upstreamStateMissing, policy: policyStateInPolicy,
 			release: func(t *testing.T, s *Store) { insertReleaseForTest(t, s, "C-1", relRef, OperationStateExecuted, "mc1") }, want: NotStartedUpstreamMissing},
@@ -180,7 +201,6 @@ func TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind(t *testing.
 }
 
 // 分類・計画・委譲の段でも、食い違いで外した課題を not_started に理由つきで出す（対象には入れない）。
-// 本番反映の記録の無い課題は、委譲の run の成果物の PR と同じ PR が直接マージされていても外す。
 func TestAutoExclusion_OtherStagesReportTheExcludedChallenges(t *testing.T) {
 	f := newDelegateFixture(t)
 	ctx := context.Background()
@@ -291,4 +311,49 @@ func TestRunCycle_Y10_ReleaseClosesTheSourceAndVerifyStillRunsInTheSameCycle(t *
 	if got := f.detail(t, "C-1").Status; got != StatusAwaitingCompletionApproval {
 		t.Errorf("status = %s, want awaiting completion approval", got)
 	}
+}
+
+// 述語の境界: 本番反映の前に記録された reopen は妨げない。release が複数あるときは、条件を満たすものが
+// 1 つあれば足りる（条件を満たさない release が先にあっても）。
+func TestClosedByOwnRelease_ReopenBeforeTheReleaseAndSeveralReleases(t *testing.T) {
+	check := func(t *testing.T, f *j5Fixture, want bool) {
+		t.Helper()
+		var got bool
+		if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+			var err error
+			got, err = closedByOwnRelease(context.Background(), tx, 1)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("closedByOwnRelease = %v, want %v", got, want)
+		}
+	}
+	t.Run("reopen recorded before the release", func(t *testing.T) {
+		f := newClosedVerifyingFixture(t)
+		insertUpstreamStateChangeForTest(t, f.s, "C-1", "2000-01-01T00:00:00.000Z", upstreamStateOpen)
+		insertReleaseForTest(t, f.s, "C-1", relRef, OperationStateExecuted, "mc1")
+		check(t, f, true)
+	})
+	t.Run("a close (not a reopen) recorded after the release", func(t *testing.T) {
+		f := newClosedVerifyingFixture(t)
+		insertReleaseForTest(t, f.s, "C-1", relRef, OperationStateExecuted, "mc1")
+		insertUpstreamStateChangeForTest(t, f.s, "C-1", "2999-01-01T00:00:00.000Z", upstreamStateClosed)
+		check(t, f, true)
+	})
+	t.Run("an unqualified release first, then a qualified one", func(t *testing.T) {
+		f := newClosedVerifyingFixture(t)
+		insertReleaseForTest(t, f.s, "C-1", relRef, OperationStateExecuted, "")
+		insertReleaseForTest(t, f.s, "C-1", "https://github.com/o/r/issues/9", OperationStateExecuted, "mc0")
+		insertReleaseForTest(t, f.s, "C-1", "https://github.com/o/r/pull/2", OperationStateExecuted, "mc2")
+		check(t, f, true)
+	})
+	t.Run("only unqualified releases", func(t *testing.T) {
+		f := newClosedVerifyingFixture(t)
+		insertReleaseForTest(t, f.s, "C-1", relRef, OperationStateExecuted, "")
+		insertReleaseForTest(t, f.s, "C-1", relRef, OperationStatePending, "")
+		insertReleaseForTest(t, f.s, "C-1", relRef, OperationStateRejected, "")
+		check(t, f, false)
+	})
 }
