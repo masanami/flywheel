@@ -98,7 +98,7 @@ func TestLearnJ6_Followups_FiledAsUnclassified_AC280_281_283_284(t *testing.T) {
 			var targets []int64
 			if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
 				var err error
-				targets, err = selectJ1AutoTargets(context.Background(), tx)
+				targets, _, err = selectJ1AutoTargets(context.Background(), tx)
 				return err
 			}); err != nil {
 				t.Fatal(err)

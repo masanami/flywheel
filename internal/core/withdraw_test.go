@@ -508,9 +508,9 @@ func TestWithdraw_IsNotATargetOfClassifyPlanDelegateVerifyStages(t *testing.T) {
 	_, j2 := mk(StatusClassified)
 	_, j5 := mk(StatusVerifying)
 	stages := []stage{
-		{"classify", StatusUnclassified, j1, selectJ1AutoTargets},
-		{"plan", StatusClassified, j2, selectJ2AutoTargets},
-		{"verify", StatusVerifying, j5, selectJ5AutoTargets},
+		{"classify", StatusUnclassified, j1, dropExcluded(selectJ1AutoTargets)},
+		{"plan", StatusClassified, j2, dropExcluded(selectJ2AutoTargets)},
+		{"verify", StatusVerifying, j5, dropExcluded(selectJ5AutoTargets)},
 		{"delegate", StatusInProgress, inProgressCID, func(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 			ids, _, err := selectDelegationTargets(ctx, tx)
 			return ids, err
@@ -589,5 +589,13 @@ func TestWithdraw_IsNotAMetricsTarget(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != done {
 		t.Errorf("metricsTargets = %v, want only [%d]", got, done)
+	}
+}
+
+// dropExcluded は対象選び（selectJ1AutoTargets 等）から、食い違いで外した課題の理由を捨てた形を作る。
+func dropExcluded(sel func(context.Context, *sql.Tx) ([]int64, []NotStarted, error)) func(context.Context, *sql.Tx) ([]int64, error) {
+	return func(ctx context.Context, tx *sql.Tx) ([]int64, error) {
+		ids, _, err := sel(ctx, tx)
+		return ids, err
 	}
 }

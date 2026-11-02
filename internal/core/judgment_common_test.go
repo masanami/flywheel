@@ -43,7 +43,7 @@ func listJ1AutoTargetsForTest(t *testing.T, s *Store) []int64 {
 	t.Helper()
 	var ids []int64
 	err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
-		got, err := selectJ1AutoTargets(context.Background(), tx)
+		got, _, err := selectJ1AutoTargets(context.Background(), tx)
 		ids = got
 		return err
 	})

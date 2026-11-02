@@ -392,14 +392,14 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 // --- J5 の対象の選び方 ---
 
 // selectJ5AutoTargets は ID を省略した `verify --auto` が対象にする課題の内部整数 ID を、
-// 優先度→ID の昇順で返す。対象は状態が検証中で、終了していない run を持たず、上流の状態が
-// closed・missing・ポリシーの状態が out_of_policy でない課題。
-func selectJ5AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
+// 優先度→ID の昇順で返す。対象は状態が検証中で、終了していない run を持たず、取り込み元の
+// 食い違いで外れない（challengeAutoExclusion。上流が closed でも自身の本番反映で閉じた課題は
+// 外さない。#440）課題。食い違いで外した課題は excluded に理由つきで返す（not_started に出す）。
+func selectJ5AutoTargets(ctx context.Context, tx *sql.Tx) (out []int64, excluded []NotStarted, err error) {
 	challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusVerifying)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []int64
 	for _, ch := range challenges {
 		cid, ok := parseChallengeID(ch.ID)
 		if !ok {
@@ -407,21 +407,22 @@ func selectJ5AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 		}
 		active, err := challengeHasActiveRun(ctx, tx, cid)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if active {
 			continue
 		}
-		excluded, err := challengeAutoExcludedByPolicy(ctx, tx, cid)
+		ex, err := challengeAutoExclusion(ctx, tx, cid)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if excluded {
+		if ex != nil {
+			excluded = append(excluded, *ex)
 			continue
 		}
 		out = append(out, cid)
 	}
-	return out, nil
+	return out, excluded, nil
 }
 
 // --- J5 の出力の写像 ---
@@ -663,8 +664,9 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 
 	var targetIDs []int64
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		ids, err := selectJ5AutoTargets(ctx, tx)
+		ids, ex, err := selectJ5AutoTargets(ctx, tx)
 		targetIDs = ids
+		result.NotStarted = append(result.NotStarted, ex...)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {

@@ -246,7 +246,8 @@ func loadApprovedPlan(ctx context.Context, tx *sql.Tx, challengeID int64) (appro
 
 // selectDelegationTargets は ID を省略した `run` の対象の課題の内部整数 ID を、優先度→ID の
 // 昇順で返す。対象は着手中で、構造化した出力を持つ承認済みの計画があり、終了していない run を
-// 持たず、上流の状態が closed・missing・ポリシーの状態が out_of_policy でない課題。
+// 持たず、取り込み元の食い違いで外れない（challengeAutoExclusion。外した課題は skipped に理由つきで
+// 返す。#440）課題。
 // 計画の承認が済んでいるのに計画を引けない（承認に計画の版が無い・版の計画が無い・構造化した
 // 出力が無い）課題は、黙って除外せず skipped に理由つきで返す。
 func selectDelegationTargets(ctx context.Context, tx *sql.Tx) (out []int64, skipped []NotStarted, err error) {
@@ -270,11 +271,12 @@ func selectDelegationTargets(ctx context.Context, tx *sql.Tx) (out []int64, skip
 		if active {
 			continue
 		}
-		excluded, err := challengeAutoExcludedByPolicy(ctx, tx, cid)
+		ex, err := challengeAutoExclusion(ctx, tx, cid)
 		if err != nil {
 			return nil, nil, err
 		}
-		if excluded {
+		if ex != nil {
+			skipped = append(skipped, *ex)
 			continue
 		}
 		p, gap, detail, err := lookupApprovedPlan(ctx, tx, cid)

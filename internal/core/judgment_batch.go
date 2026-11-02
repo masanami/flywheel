@@ -35,6 +35,16 @@ const NotStartedSlotUnavailable NotStartedReason = "slot_unavailable"
 // `cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
 const NotStartedPlanUnavailable NotStartedReason = "plan_unavailable"
 
+// NotStartedUpstreamClosed・NotStartedUpstreamMissing・NotStartedOutOfPolicy は、周の中で自動で選ぶ
+// 対象から、取り込み元の食い違い（上流の状態が closed・missing、ポリシーの状態が out_of_policy）で
+// 外したことを表す（#440。値は食い違いの種類〈DiscrepancyKind〉と同じ語）。Detail は取り込み元の URL。
+// 上流が closed でも、その課題自身の本番反映で閉じた課題は外さない（challengeAutoExclusion）。
+const (
+	NotStartedUpstreamClosed  NotStartedReason = "upstream_closed"
+	NotStartedUpstreamMissing NotStartedReason = "upstream_missing"
+	NotStartedOutOfPolicy     NotStartedReason = "out_of_policy"
+)
+
 // notStartedReasonValues は NotStartedReason の閉集合（仕様の列挙の順）。
 var notStartedReasonValues = []NotStartedReason{
 	NotStartedCycleBudget,
@@ -51,6 +61,9 @@ var notStartedReasonValues = []NotStartedReason{
 	NotStartedNotExecutable,
 	NotStartedDependency,
 	NotStartedNotLearnable,
+	NotStartedUpstreamClosed,
+	NotStartedUpstreamMissing,
+	NotStartedOutOfPolicy,
 }
 
 // NotStartedReasonValues は NotStartedReason の閉集合（§IF / API「cycle の JSON 出力」の
