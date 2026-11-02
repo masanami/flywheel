@@ -824,6 +824,7 @@ func TestPlanAutoJ2_AutoTargets_ExcludeClosedMissingOutOfPolicyAndActiveRun(t *t
 		"out_of_policy": {upstreamStateOpen, policyStateOutOfPolicy},
 	}
 	var excludedIDs []string
+	wantNotStarted := map[string]NotStarted{}
 	i := 100
 	for name, e := range excluded {
 		ch := f.newClassified(t, "excluded-"+name, "P0")
@@ -834,6 +835,11 @@ func TestPlanAutoJ2_AutoTargets_ExcludeClosedMissingOutOfPolicyAndActiveRun(t *t
 		}
 		i++
 		excludedIDs = append(excludedIDs, ch.ID)
+		// #440: 食い違いで外した課題は not_started に種類ごとの理由（detail は取り込み元の URL）で出る。
+		wantNotStarted[ch.ID] = NotStarted{ChallengeID: ch.ID, Reason: NotStartedReason("upstream_" + name), Detail: in.URL}
+		if name == "out_of_policy" {
+			wantNotStarted[ch.ID] = NotStarted{ChallengeID: ch.ID, Reason: NotStartedOutOfPolicy, Detail: in.URL}
+		}
 	}
 	busy := f.newClassified(t, "busy", "P0")
 	insertOpenRunForTest(t, f.s, busy.ID, JudgmentJ2)
@@ -844,6 +850,14 @@ func TestPlanAutoJ2_AutoTargets_ExcludeClosedMissingOutOfPolicyAndActiveRun(t *t
 	}
 	if len(res.Items) != 1 || res.Items[0].ChallengeID != target.ID {
 		t.Errorf("items = %+v, want only %s", res.Items, target.ID)
+	}
+	if len(res.NotStarted) != len(wantNotStarted) {
+		t.Errorf("not_started = %+v, want %d entries for the excluded challenges", res.NotStarted, len(wantNotStarted))
+	}
+	for _, ns := range res.NotStarted {
+		if want, ok := wantNotStarted[ns.ChallengeID]; !ok || ns != want {
+			t.Errorf("not_started entry = %+v, want %+v", ns, want)
+		}
 	}
 	for _, id := range append(excludedIDs, busy.ID) {
 		if st := f.detail(t, id).Status; st != StatusClassified {

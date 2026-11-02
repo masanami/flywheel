@@ -121,6 +121,10 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"plan_unavailable": "TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothingLaunched (internal/core/delegate_plan_approval_test.go)",
 		// release 以外・approved でない操作を指した op exec だけが出す（cycle の release の段は approved の release しか試さない）。
 		"not_executable": "TestNotExecutable_NotReleaseOrNotApproved (internal/core/release_exec_test.go)",
+		// #440: 取り込み元の食い違いで周の対象から外した課題（検証の段で種類ごとに観測する）。
+		"upstream_closed":  "TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind (internal/core/auto_exclusion_test.go)",
+		"upstream_missing": "TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind (internal/core/auto_exclusion_test.go)",
+		"out_of_policy":    "TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind (internal/core/auto_exclusion_test.go)",
 	}
 	observed := map[string]bool{}
 	for r, ref := range coreObservedReasons {
@@ -381,6 +385,12 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedDependency"
 	case "not_learnable":
 		return "NotStartedNotLearnable"
+	case "upstream_closed":
+		return "NotStartedUpstreamClosed"
+	case "upstream_missing":
+		return "NotStartedUpstreamMissing"
+	case "out_of_policy":
+		return "NotStartedOutOfPolicy"
 	}
 	return "?"
 }
@@ -409,7 +419,8 @@ func m45SpecLine(t *testing.T, contains ...string) string {
 }
 
 // m45AddedNotStartedReasons は m4.5 の仕様が足す not_started の理由（S1: in_progress・not_executable、
-// S2: dependency、S3: not_learnable）を返す。
+// S2: dependency、S3: not_learnable）と、M5 の仕様が #440 で足す理由（upstream_closed・upstream_missing・
+// out_of_policy）を返す。
 func m45AddedNotStartedReasons(t *testing.T) []string {
 	t.Helper()
 	s2 := m45SpecLine(t, "`dependency`（S2）を足す")
@@ -430,7 +441,17 @@ func m45AddedNotStartedReasons(t *testing.T) []string {
 	if !strings.Contains(s3, "`flywheel learn <C-ID>`") {
 		t.Fatalf("m4.5 spec does not add not_learnable for flywheel learn <C-ID>: %q", s3)
 	}
-	return append(out, "dependency", "not_learnable")
+	out = append(out, "dependency", "not_learnable")
+	// #440: 取り込み元の食い違いで周の対象から外した理由（M5 の仕様の「前段の仕様との関係」）。
+	l440 := m5SpecLine(t, "`not_started` の理由の閉集合に", "#440")
+	var added []string
+	for _, sp := range regexp.MustCompile("`([a-z_]+)`（#440）").FindAllStringSubmatch(l440, -1) {
+		added = append(added, sp[1])
+	}
+	if !equalStringSlices(sortedStrings(added), []string{"out_of_policy", "upstream_closed", "upstream_missing"}) {
+		t.Fatalf("m5 spec's #440 not_started reasons = %v, want out_of_policy, upstream_closed and upstream_missing", added)
+	}
+	return append(out, added...)
 }
 
 // M4.5 S1: cycle の phase の閉集合は release を最初に持ち、cycle --json の phases の並びがそれに従う。

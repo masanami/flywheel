@@ -183,13 +183,13 @@ func j1NotMineIfCurrent(ctx context.Context, tx *sql.Tx, challengeID int64, vers
 
 // selectJ1AutoTargets は ID を省略した `classify --auto`・`cycle` の分類の段が
 // 対象にする課題の内部整数 ID を、優先度→ID の昇順で返す（§判断点の共通の
-// 規則）。
-func selectJ1AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
+// 規則）。取り込み元の食い違いで外した課題は excluded に理由つきで返す（not_started に
+// 出す。#440）。
+func selectJ1AutoTargets(ctx context.Context, tx *sql.Tx) (out []int64, excluded []NotStarted, err error) {
 	challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusUnclassified)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []int64
 	for _, ch := range challenges {
 		cid, ok := parseChallengeID(ch.ID)
 		if !ok {
@@ -197,28 +197,29 @@ func selectJ1AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 		}
 		active, err := challengeHasActiveRun(ctx, tx, cid)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if active {
 			continue
 		}
-		excluded, err := challengeAutoExcludedByPolicy(ctx, tx, cid)
+		ex, err := challengeAutoExclusion(ctx, tx, cid)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if excluded {
+		if ex != nil {
+			excluded = append(excluded, *ex)
 			continue
 		}
 		notMine, err := j1NotMineIfCurrent(ctx, tx, cid, ch.Version)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if notMine != nil {
 			continue
 		}
 		out = append(out, cid)
 	}
-	return out, nil
+	return out, excluded, nil
 }
 
 // j1StillEligibleForAuto は、ID を省略した対象選び（selectJ1AutoTargets）が
@@ -229,15 +230,17 @@ func selectJ1AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 // code-reviewer 指摘・round1 PLAUSIBLE）。終了していない run の有無は
 // RunJudgment の①トランザクションが最終防衛として検査するためここでは
 // 見ない（二重化しない）。
-func (s *Store) j1StillEligibleForAuto(ctx context.Context, cid int64, version int) (bool, error) {
-	var eligible bool
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		excluded, err := challengeAutoExcludedByPolicy(ctx, tx, cid)
+//
+// 取り込み元の食い違いで外れたときは、その理由（not_started の 1 要素）を excluded に返す
+// （not_mine で外れたときは excluded は nil で eligible だけが偽）。
+func (s *Store) j1StillEligibleForAuto(ctx context.Context, cid int64, version int) (eligible bool, excluded *NotStarted, err error) {
+	err = s.db.Read(ctx, func(tx *sql.Tx) error {
+		ex, err := challengeAutoExclusion(ctx, tx, cid)
 		if err != nil {
 			return err
 		}
-		if excluded {
-			eligible = false
+		if ex != nil {
+			excluded = ex
 			return nil
 		}
 		notMine, err := j1NotMineIfCurrent(ctx, tx, cid, version)
@@ -248,9 +251,9 @@ func (s *Store) j1StillEligibleForAuto(ctx context.Context, cid int64, version i
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
-		return false, err
+		return false, nil, err
 	}
-	return eligible, nil
+	return eligible, excluded, nil
 }
 
 // TriageItem は `status` の `needs_human.triage` の 1 件（§IF / API
@@ -699,8 +702,9 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 
 	var targetIDs []int64
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		ids, err := selectJ1AutoTargets(ctx, tx)
+		ids, ex, err := selectJ1AutoTargets(ctx, tx)
 		targetIDs = ids
+		result.NotStarted = append(result.NotStarted, ex...)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -727,9 +731,13 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 		// サイクルの排他ロックを取らない＝§サイクルの排他「個別の操作は
 		// サイクルのロックを取らない」）。除外条件（上流の状態・ポリシーの
 		// 状態・not_mine）を起動の直前にもう一度確かめる。
-		eligible, err := s.j1StillEligibleForAuto(ctx, cid, ch.Version)
+		eligible, excluded, err := s.j1StillEligibleForAuto(ctx, cid, ch.Version)
 		if err != nil {
 			return nil, err
+		}
+		if excluded != nil {
+			result.NotStarted = append(result.NotStarted, *excluded)
+			continue
 		}
 		if !eligible {
 			continue

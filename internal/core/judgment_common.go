@@ -9,6 +9,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -83,27 +84,132 @@ func challengeHasActiveRun(ctx context.Context, tx *sql.Tx, challengeID int64) (
 	return row != nil, nil
 }
 
-// challengeAutoExcludedByPolicy は challengeID が §判断点の共通の規則「周の
-// 中で自動で選ぶ対象からは、上流の状態が closed・missing の課題と、ポリシーの
-// 状態が out_of_policy の課題を除く」に当たるかを判定する（ID を指定した
-// 個別の操作では呼ばない＝この除外を適用しない。§判断点の共通の規則「課題の
-// ID を指定した個別の操作は、上の除外を適用しない」）。対応（source_binding）
-// が無い課題（`create` で作った課題）は除外しない。
-func challengeAutoExcludedByPolicy(ctx context.Context, tx *sql.Tx, challengeID int64) (bool, error) {
+// challengeAutoExclusion は challengeID が §判断点の共通の規則「周の中で自動で選ぶ対象からは、
+// 上流の状態が closed・missing の課題と、ポリシーの状態が out_of_policy の課題を除く」に当たるかを
+// 判定し、当たれば除外の理由（not_started の 1 要素）を返す。当たらなければ nil（ID を指定した
+// 個別の操作では呼ばない＝この除外を適用しない。§判断点の共通の規則「課題の ID を指定した個別の
+// 操作は、上の除外を適用しない」）。対応（source_binding）が無い課題（`create` で作った課題）は
+// 除外しない。
+//
+// 上流の状態が closed でも、その課題自身の本番反映の操作で取り込み元が閉じた（closedByOwnRelease
+// が真）なら、上流の状態では除外しない（#440。委譲の PR は `Closes #<取り込み元>` を書くので、
+// 完了の検証より前に本番反映を実行すると取り込み元が閉じる。ここで外すと課題が検証中のまま止まる）。
+// ポリシーの状態による除外はそのまま当てる。
+//
+// 理由は食い違いの種類ごとに分ける（upstream_closed・upstream_missing・out_of_policy）。複数に
+// 当たるときは上流の状態を先に見る（食い違いの表示〈discrepancyKinds〉の並びと同じ）。Detail は
+// 取り込み元の URL。
+func challengeAutoExclusion(ctx context.Context, tx *sql.Tx, challengeID int64) (*NotStarted, error) {
 	sb, err := loadSourceBindingByChallengeID(ctx, tx, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	if sb == nil {
+		return nil, nil
+	}
+	ns := func(r NotStartedReason) *NotStarted {
+		return &NotStarted{ChallengeID: formatChallengeID(challengeID), Reason: r, Detail: sb.URL}
+	}
+	switch sb.UpstreamState {
+	case upstreamStateClosed:
+		own, err := closedByOwnRelease(ctx, tx, challengeID)
+		if err != nil {
+			return nil, err
+		}
+		if !own {
+			return ns(NotStartedUpstreamClosed), nil
+		}
+	case upstreamStateMissing:
+		return ns(NotStartedUpstreamMissing), nil
+	}
+	if sb.PolicyState == policyStateOutOfPolicy {
+		return ns(NotStartedOutOfPolicy), nil
+	}
+	return nil, nil
+}
+
+// closedByOwnRelease は、challengeID の課題の取り込み元が「その課題自身の本番反映（委譲の PR の
+// マージ）で閉じた」とストアの記録だけで見なせるかを返す（#440。GitHub への問い合わせはしない）。
+// 条件は次の 2 つ。
+//
+//  1. その課題の release の不可逆操作のうち、実行済み（state=executed。実行の結果が merged・
+//     already_merged のときだけこの状態になる）で、参照（ref）が PR の URL として読め、マージの
+//     コミット（merge_commit）と実行の日時（executed_at）が記録されているものが 1 つ以上ある。
+//  2. そのうち最も新しい実行より後に、取り込みが取り込み元の reopen（upstream_state_change で
+//     upstream_state が open になった作業ログ）を記録していない。本番反映の後に reopen された
+//     取り込み元が再び閉じたのは、本番反映によるものではないため（外部の理由で閉じたものと同じに扱う）。
+//
+// flywheel を通さず GitHub で直接マージされた課題（release が未実行）は、委譲の run の成果物の
+// PR と一致しても真にしない（外部の理由で閉じたものと同じに扱う）。
+func closedByOwnRelease(ctx context.Context, tx *sql.Tx, challengeID int64) (bool, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT ref, merge_commit, executed_at FROM operation WHERE challenge_id = ? AND kind = ? AND state = ? ORDER BY id`,
+		challengeID, string(OperationKindRelease), string(OperationStateExecuted))
 	if err != nil {
 		return false, err
 	}
-	if sb == nil {
+	latest := ""
+	for rows.Next() {
+		var ref, mergeCommit, executedAt sql.NullString
+		if err := rows.Scan(&ref, &mergeCommit, &executedAt); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		if !ref.Valid || !mergeCommit.Valid || strings.TrimSpace(mergeCommit.String) == "" || !executedAt.Valid {
+			continue
+		}
+		if _, _, ok := parseReleasePullRequestRef(ref.String); !ok {
+			continue
+		}
+		if executedAt.String > latest {
+			latest = executedAt.String
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return false, err
+	}
+	_ = rows.Close()
+	if latest == "" {
 		return false, nil
 	}
-	if sb.UpstreamState == upstreamStateClosed || sb.UpstreamState == upstreamStateMissing {
-		return true, nil
+	reopened, err := upstreamReopenedAfter(ctx, tx, challengeID, latest)
+	if err != nil {
+		return false, err
 	}
-	if sb.PolicyState == policyStateOutOfPolicy {
-		return true, nil
+	return !reopened, nil
+}
+
+// upstreamReopenedAfter は、challengeID の課題に、日時 at（formatTimestamp の形）より後の取り込み元の
+// reopen（action=upstream_state_change で after の upstream_state が open）の作業ログがあるかを返す。
+// 日時の形は固定の桁なので文字列の比較で前後を決める。
+func upstreamReopenedAfter(ctx context.Context, tx *sql.Tx, challengeID int64, at string) (bool, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT after FROM activity WHERE entity = 'challenge' AND entity_id = ? AND action = 'upstream_state_change' AND at > ?`,
+		challengeID, at)
+	if err != nil {
+		return false, err
 	}
-	return false, nil
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var after sql.NullString
+		if err := rows.Scan(&after); err != nil {
+			return false, err
+		}
+		if !after.Valid {
+			continue
+		}
+		var v struct {
+			UpstreamState string `json:"upstream_state"`
+		}
+		if err := json.Unmarshal([]byte(after.String), &v); err != nil {
+			return false, err
+		}
+		if v.UpstreamState == string(upstreamStateOpen) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // latestJudgmentRun は latestSucceededJudgmentOutput が返す、直近で成功した

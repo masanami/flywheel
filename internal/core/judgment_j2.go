@@ -415,14 +415,14 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 
 // selectJ2AutoTargets は ID を省略した `plan --auto`・`cycle` の計画の段が対象に
 // する課題の内部整数 ID を、優先度→ID の昇順で返す（§判断点の共通の規則）。
-// 対象は分類済で、終了していない run を持たず、上流の状態が closed・missing・
-// ポリシーの状態が out_of_policy でない課題。
-func selectJ2AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
+// 対象は分類済で、終了していない run を持たず、取り込み元の食い違いで外れない
+// （challengeAutoExclusion）課題。食い違いで外した課題は excluded に理由つきで返す
+// （not_started に出す。#440）。
+func selectJ2AutoTargets(ctx context.Context, tx *sql.Tx) (out []int64, excluded []NotStarted, err error) {
 	challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusClassified)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []int64
 	for _, ch := range challenges {
 		cid, ok := parseChallengeID(ch.ID)
 		if !ok {
@@ -430,21 +430,22 @@ func selectJ2AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 		}
 		active, err := challengeHasActiveRun(ctx, tx, cid)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if active {
 			continue
 		}
-		excluded, err := challengeAutoExcludedByPolicy(ctx, tx, cid)
+		ex, err := challengeAutoExclusion(ctx, tx, cid)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if excluded {
+		if ex != nil {
+			excluded = append(excluded, *ex)
 			continue
 		}
 		out = append(out, cid)
 	}
-	return out, nil
+	return out, excluded, nil
 }
 
 // j2StillEligibleForAuto は、対象選び（selectJ2AutoTargets）から実際に起動する
@@ -452,17 +453,18 @@ func selectJ2AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 // 確かめる（`plan --auto` はサイクルの排他ロックを取らないため、並行する
 // 取り込みの進行と時間差が生じうる。J1 の j1StillEligibleForAuto と同じ理由）。
 // 終了していない run の有無は RunJudgment の①が最終防衛として検査する。
-func (s *Store) j2StillEligibleForAuto(ctx context.Context, cid int64) (bool, error) {
-	var excluded bool
+// 外れたときは、その理由（not_started の 1 要素）を返す。nil なら起動してよい。
+func (s *Store) j2StillEligibleForAuto(ctx context.Context, cid int64) (*NotStarted, error) {
+	var excluded *NotStarted
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		ex, err := challengeAutoExcludedByPolicy(ctx, tx, cid)
+		ex, err := challengeAutoExclusion(ctx, tx, cid)
 		excluded = ex
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
-		return false, err
+		return nil, err
 	}
-	return !excluded, nil
+	return excluded, nil
 }
 
 // --- J2 の入力の組み立て ---
@@ -1130,8 +1132,9 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 
 	var targetIDs []int64
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		ids, err := selectJ2AutoTargets(ctx, tx)
+		ids, ex, err := selectJ2AutoTargets(ctx, tx)
 		targetIDs = ids
+		result.NotStarted = append(result.NotStarted, ex...)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -1151,11 +1154,12 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 			// 同じ周の中で並行して状態が変わった（例: 人間が先に計画を登録した）。
 			continue
 		}
-		eligible, err := s.j2StillEligibleForAuto(ctx, cid)
+		excluded, err := s.j2StillEligibleForAuto(ctx, cid)
 		if err != nil {
 			return nil, err
 		}
-		if !eligible {
+		if excluded != nil {
+			result.NotStarted = append(result.NotStarted, *excluded)
 			continue
 		}
 		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ2, StatusClassified, in.AgentDecl, in.CycleID)
