@@ -6,8 +6,9 @@ package core
 //
 //	① 課題・承認済みの計画・作業ログ・run の一覧と委譲の報告・承認と保留・未分類の発生を読む
 //	② J6 を起動する（課題 1 件につき 1 回。その課題の未分類の発生をまとめて分類する）
-//	③ 出力を検査する。発生の ID・分類の抜けと重複・evidence・記憶の規則・フォローアップの件数の
-//	   どれかに反すれば、出力全体を invalid_output にして何も書かない
+//	③ 出力を検査する。発生の ID・分類の抜けと重複・記憶の規則・フォローアップの件数の
+//	   どれかに反すれば、出力全体を invalid_output にして何も書かない。足す発生の根拠（evidence）が
+//	   解決できないときだけは、その項目だけを捨てて残りを写す
 //	④ 1 つのトランザクションの中で、記憶のファイルを書き（元に戻す関数を持つ）、分類の列を埋め、
 //	   足す発生を作り、作業ログ（entity=challenge・action=learn）を 1 行残す。どこかが失敗すれば
 //	   書いたファイルを戻し、ストアの変更もすべて巻き戻る
@@ -39,7 +40,11 @@ const (
 	j6EvidenceActivity = "L"
 )
 
-var j6EvidenceRe = regexp.MustCompile(`^(R|AP|H|L)-([1-9][0-9]*)$`)
+// j6EvidencePattern は根拠の ID の形。core の検査（j6EvidenceRe）と出力の schema の pattern が
+// 同じ文字列を使う（食い違わせないための 1 か所）。
+const j6EvidencePattern = `^(R|AP|H|L)-([1-9][0-9]*)$`
+
+var j6EvidenceRe = regexp.MustCompile(j6EvidencePattern)
 
 // maxJ6ActivityRows は J6 の入力に載せる作業ログの行数の上限（新しい方から）。
 const maxJ6ActivityRows = 200
@@ -462,7 +467,7 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 // --- 出力の検査と写像 ---
 
 var (
-	// errJ6Invalid は出力がストアの事実（発生の ID・evidence）に合わないことを表す。
+	// errJ6Invalid は出力がストアの事実（発生の ID・記憶の書き込みの規則）に合わないことを表す。足す発生の evidence は項目単位で捨てるので含まない。
 	errJ6Invalid = errors.New("core: J6 output does not match the store")
 	// errJ6NotEligible は写す直前に読み直した課題が対象でなくなっていたことを表す。
 	errJ6NotEligible = errors.New("core: challenge is no longer eligible for J6 mapping")
@@ -544,6 +549,7 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 		return false, false, "", err
 	}
 	var undo func()
+	var droppedAdded int
 	err = s.mutateAsRun(ctx, actor, ChannelInvoker, VerificationNone, &runInt, func(tx *sql.Tx, rec *activityRecorder) (ferr error) {
 		ch, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
@@ -590,17 +596,21 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 		if len(want) != 0 {
 			return errJ6Invalid
 		}
+		// 根拠を解決できない「足す発生」は、その項目だけ捨てる（分類・記憶・フォローアップは写す）。
 		evidences := make([]j6Evidence, 0, len(v.Added))
+		keptAdded := make([]J6Added, 0, len(v.Added))
 		for _, a := range v.Added {
 			ev, ok, err := resolveJ6Evidence(ctx, tx, cid, a.Evidence)
 			if err != nil {
 				return err
 			}
 			if !ok {
-				return errJ6Invalid
+				continue
 			}
 			evidences = append(evidences, ev)
+			keptAdded = append(keptAdded, a)
 		}
+		droppedAdded = len(v.Added) - len(keptAdded)
 
 		// (2) 記憶のファイル。検査から書き込みまでを書き込みのロックの下で行う（索引の読み取りと
 		// 取り消しの基準が、別の写像の書き込みと食い違わないように）。
@@ -654,7 +664,7 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 				return fmt.Errorf("core: J6: occurrence %d was not classified", id)
 			}
 		}
-		for i, a := range v.Added {
+		for i, a := range keptAdded {
 			if err := s.insertJ6OccurrenceRow(tx, j6OccurrenceInput{
 				ChallengeID: cid, CycleID: cycleID, CauseRunID: evidences[i].runID,
 				J6Kind: a.Kind, Ref: evidences[i].ref, Outcome: a.Outcome, Cause: a.Cause, Layer: a.Layer,
@@ -681,9 +691,11 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 		}
 		return rec.record("challenge", cid, ActivityActionLearn, nil, map[string]any{
 			"classified": len(v.Classifications),
-			"added":      len(v.Added),
-			"memory":     j6MemoryLog(written),
-			"followups":  filed,
+			"added":      len(keptAdded),
+			// 根拠を解決できず捨てた「足す発生」の件数（モデルの根拠の書き方の揺れを後から測るため）。
+			"dropped_added": droppedAdded,
+			"memory":        j6MemoryLog(written),
+			"followups":     filed,
 		})
 	})
 	if j6AfterMappingTx != nil {
@@ -701,7 +713,10 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 		}
 		return false, false, "", err
 	}
-	note = fmt.Sprintf("classified %d, added %d, memory %d", len(v.Classifications), len(v.Added), len(v.Memory))
+	note = fmt.Sprintf("classified %d, added %d, memory %d", len(v.Classifications), len(v.Added)-droppedAdded, len(v.Memory))
+	if droppedAdded > 0 {
+		note += fmt.Sprintf(", dropped %d added (evidence not resolvable)", droppedAdded)
+	}
 	return true, false, note, nil
 }
 
