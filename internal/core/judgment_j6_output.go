@@ -143,10 +143,10 @@ func j6OutputSchema() []byte {
 	outcomes := enum([]string{string(OccurrenceOutcomeGood), string(OccurrenceOutcomeBad)})
 	schema := obj(map[string]any{
 		"classifications": map[string]any{"type": "array", "items": obj(map[string]any{
-			"occurrence_id": str, "cause": causes, "layer": layers, "target": str, "signal": str,
+			"occurrence_id": map[string]any{"type": "string", "pattern": `^O-[1-9][0-9]*$`}, "cause": causes, "layer": layers, "target": str, "signal": str,
 		}, []string{"occurrence_id", "cause", "layer", "target", "signal"})},
 		"added": map[string]any{"type": "array", "items": obj(map[string]any{
-			"outcome": outcomes, "kind": str, "evidence": str, "cause": causes, "layer": layers, "target": str, "signal": str,
+			"outcome": outcomes, "kind": str, "evidence": map[string]any{"type": "string", "pattern": j6EvidencePattern}, "cause": causes, "layer": layers, "target": str, "signal": str,
 		}, []string{"outcome", "kind", "evidence", "cause", "layer", "target", "signal"})},
 		"memory": map[string]any{"type": "array", "items": obj(map[string]any{
 			"mode":        enum(j6StringEnum(J6ModeValues)),
@@ -160,7 +160,7 @@ func j6OutputSchema() []byte {
 			"signal":      str,
 			"body":        str,
 		}, []string{"mode", "type", "slug", "body"})},
-		"followups": map[string]any{"type": "array", "items": obj(map[string]any{
+		"followups": map[string]any{"type": "array", "maxItems": maxJ6Followups, "items": obj(map[string]any{
 			"title": str, "description": str, "done_criteria": str,
 		}, []string{"title", "description", "done_criteria"})},
 	}, []string{"classifications", "added", "memory", "followups"})

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -513,10 +514,6 @@ func j6itoa(n int64) string {
 func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 	type env struct {
 		o1, o2, other, classified string
-		runOfOther                string
-		approvalOfOther           string
-		holdOfOther               string
-		activityOfOther           string
 	}
 	cases := []struct {
 		name string
@@ -543,24 +540,6 @@ func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 		}},
 		{"layer outside the closed set", func(e env) JudgmentLaunchOutput {
 			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "weird")}, nil, nil, nil)
-		}},
-		{"evidence not an id", func(e env) JudgmentLaunchOutput {
-			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, []any{j6Added("bad", "k", "somewhere", "context")}, []any{j6Mem("create", "tacit", "ok")}, nil)
-		}},
-		{"evidence of an unknown run", func(e env) JudgmentLaunchOutput {
-			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, []any{j6Added("bad", "k", "R-9999", "context")}, nil, nil)
-		}},
-		{"evidence of another challenge's run", func(e env) JudgmentLaunchOutput {
-			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, []any{j6Added("bad", "k", e.runOfOther, "context")}, nil, nil)
-		}},
-		{"evidence of another challenge's approval", func(e env) JudgmentLaunchOutput {
-			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, []any{j6Added("bad", "k", e.approvalOfOther, "context")}, []any{j6Mem("create", "tacit", "m")}, nil)
-		}},
-		{"evidence of another challenge's hold", func(e env) JudgmentLaunchOutput {
-			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, []any{j6Added("bad", "k", e.holdOfOther, "context")}, []any{j6Mem("create", "tacit", "m")}, nil)
-		}},
-		{"evidence of another challenge's work log", func(e env) JudgmentLaunchOutput {
-			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, []any{j6Added("bad", "k", e.activityOfOther, "context")}, []any{j6Mem("create", "tacit", "m")}, nil)
 		}},
 		{"memory create of an existing file", func(e env) JudgmentLaunchOutput {
 			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, nil, []any{j6Mem("create", "tacit", "fresh"), j6Mem("create", "tacit", "dup")}, nil)
@@ -602,15 +581,6 @@ func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 			e.o2 = f.occ(t, c, "completion_rejected", "bad", nil)
 			e.other = f.occ(t, other, "plan_rejected", "bad", nil)
 			e.classified = f.occ(t, c, "plan_rejected", "bad", "context")
-			e.runOfOther = "R-" + j6itoa(f.exec(t, `INSERT INTO run (challenge_id, kind, judgment, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket)
-				VALUES (?, 'judgment', 'J1', 1, 's', 1, 'h', ?, ?, ?, 'succeeded', 1000000, 'judgment')`,
-				mustCID(t, other), formatTimestamp(time.Now()), formatTimestamp(time.Now()), formatTimestamp(time.Now())))
-			e.approvalOfOther = "AP-" + j6itoa(f.exec(t, `INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at)
-				VALUES (?, 'plan', 'approved', 1, 'a', 'cli', 'none', ?)`, mustCID(t, other), formatTimestamp(time.Now())))
-			e.holdOfOther = "H-" + j6itoa(f.exec(t, `INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (?, 'q', 'done', ?)`,
-				mustCID(t, other), formatTimestamp(time.Now())))
-			e.activityOfOther = "L-" + j6itoa(f.exec(t, `INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action) VALUES (?, 'a', 'cli', 'none', 'challenge', ?, 'x')`,
-				formatTimestamp(time.Now()), mustCID(t, other)))
 			if err := os.MkdirAll(f.memRoot, 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -648,6 +618,104 @@ func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 				t.Error("the challenge was not a learn target again")
 			}
 		})
+	}
+}
+
+// 足す発生の根拠が解決できない項目（形が違う・存在しない・他の課題の ID）は、その項目だけ捨てる。
+// 分類・記憶・解決できた項目・フォローアップは写る。
+func TestLearnJ6_UnresolvableEvidence_DropsOnlyThatAddedItem(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusDone)
+	other := f.challenge(t, StatusDone)
+	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
+	otherRun := "R-" + j6itoa(f.exec(t, `INSERT INTO run (challenge_id, kind, judgment, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket)
+		VALUES (?, 'judgment', 'J1', 1, 's', 1, 'h', ?, ?, ?, 'succeeded', 1000000, 'judgment')`,
+		mustCID(t, other), formatTimestamp(time.Now()), formatTimestamp(time.Now()), formatTimestamp(time.Now())))
+	okRun := "R-" + j6itoa(f.exec(t, `INSERT INTO run (challenge_id, kind, judgment, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket)
+		VALUES (?, 'judgment', 'J1', 1, 's', 1, 'h', ?, ?, ?, 'succeeded', 1000000, 'judgment')`,
+		mustCID(t, c), formatTimestamp(time.Now()), formatTimestamp(time.Now()), formatTimestamp(time.Now())))
+	otherAP := "AP-" + j6itoa(f.exec(t, `INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at)
+		VALUES (?, 'plan', 'approved', 1, 'a', 'cli', 'none', ?)`, mustCID(t, other), formatTimestamp(time.Now())))
+	otherHD := "H-" + j6itoa(f.exec(t, `INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (?, 'q', 'done', ?)`,
+		mustCID(t, other), formatTimestamp(time.Now())))
+	otherAct := "L-" + j6itoa(f.exec(t, `INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action) VALUES (?, 'a', 'cli', 'none', 'challenge', ?, 'x')`,
+		formatTimestamp(time.Now()), mustCID(t, other)))
+	f.inv.result = j6Out([]any{j6Cls(o1, "context", "prompt")}, []any{
+		j6Added("bad", "foreign-ap", otherAP, "context"),
+		j6Added("bad", "foreign-hold", otherHD, "context"),
+		j6Added("bad", "foreign-act", otherAct, "context"),
+		j6Added("bad", "prose", "R-1 の run の説明（日本語の文）", "context"),
+		j6Added("bad", "unknown", "R-9999", "context"),
+		j6Added("bad", "foreign", otherRun, "context"),
+		j6Added("good", "kept", okRun, "none"),
+	}, []any{j6Mem("create", "tacit", "kept-mem")}, []any{map[string]any{"title": "t", "description": "d", "done_criteria": "c"}})
+	res := f.mustLearn(t, idp(c))
+
+	if len(res.Items) != 1 || res.Items[0].Result == RunResultInvalidOutput || res.Items[0].Outcome == "" {
+		t.Fatalf("item = %+v, want mapped", res.Items)
+	}
+	if got := f.count(t, `SELECT COUNT(*) FROM occurrence WHERE source = 'j6'`); got != 1 {
+		t.Errorf("j6 occurrences = %d, want only the resolvable one", got)
+	}
+	if f.unclassified(t) != 0 {
+		t.Error("the classification was not written")
+	}
+	var jk, oc string
+	var runRef sql.NullInt64
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT j6_kind, outcome, run_id FROM occurrence WHERE source = 'j6'`).Scan(&jk, &oc, &runRef)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if jk != "kept" || oc != "good" || !runRef.Valid || "R-"+j6itoa(runRef.Int64) != okRun {
+		t.Errorf("stored row = %s %s %v, want kept good %s", jk, oc, runRef, okRun)
+	}
+	if !strings.Contains(res.Items[0].Note, "added 1") || !strings.Contains(res.Items[0].Note, "dropped 6 added") {
+		t.Errorf("note = %q", res.Items[0].Note)
+	}
+	if _, err := os.Stat(filepath.Join(f.memRoot, "tacit-kept-mem.md")); err != nil {
+		t.Errorf("memory not written: %v", err)
+	}
+	if got := f.count(t, `SELECT COUNT(*) FROM challenge WHERE origin = 'followup'`); got != 1 {
+		t.Errorf("followups = %d, want 1", got)
+	}
+	var raw string
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT after FROM activity WHERE action = 'learn'`).Scan(&raw)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(raw, `"added":1`) || !strings.Contains(raw, `"dropped_added":6`) {
+		t.Errorf("learn after = %s", raw)
+	}
+}
+
+// schema の根拠の pattern は core の検査と同じ文字列で、ID の形だけを通す。
+func TestJ6OutputSchema_EvidencePatternMatchesCoreCheck(t *testing.T) {
+	var sch map[string]any
+	if err := json.Unmarshal(j6OutputSchema(), &sch); err != nil {
+		t.Fatal(err)
+	}
+	items := sch["properties"].(map[string]any)["added"].(map[string]any)["items"].(map[string]any)
+	ev := items["properties"].(map[string]any)["evidence"].(map[string]any)
+	if ev["pattern"] != j6EvidencePattern {
+		t.Errorf("evidence = %+v", ev)
+	}
+	cls := sch["properties"].(map[string]any)["classifications"].(map[string]any)["items"].(map[string]any)
+	oidRe := regexp.MustCompile(cls["properties"].(map[string]any)["occurrence_id"].(map[string]any)["pattern"].(string))
+	for _, s := range []string{"O-1", "O-12", "O-0", "O-01", "O--1", "O-+1", "o-1", "R-1", "", "O-1x"} {
+		if _, ok := parseOccurrenceID(s); ok != oidRe.MatchString(s) {
+			t.Errorf("occurrence_id pattern and parseOccurrenceID disagree on %q", s)
+		}
+	}
+	if fu := sch["properties"].(map[string]any)["followups"].(map[string]any); fu["maxItems"] != float64(maxJ6Followups) {
+		t.Errorf("followups maxItems = %v", fu["maxItems"])
+	}
+	re := regexp.MustCompile(ev["pattern"].(string))
+	for s, want := range map[string]bool{"R-1": true, "AP-12": true, "H-3": true, "L-40": true, "R-0": false, "R-1 と説明": false, "O-1": false, "": false} {
+		if re.MatchString(s) != want {
+			t.Errorf("pattern(%q) = %v", s, !want)
+		}
 	}
 }
 
