@@ -6,6 +6,7 @@
   --board-bg: #f7f7f8;
   --board-fg: #1c1c1f;
   --board-muted-fg: #6b6b70;
+  --board-link: #1a56db;
   --board-border: #dcdce0;
   --board-column-bg: #ffffff;
   --board-card-bg: #ffffff;
@@ -59,6 +60,7 @@
     --board-bg: #17181c;
     --board-fg: #e7e7ea;
     --board-muted-fg: #9a9aa2;
+    --board-link: #8ab4f8;
     --board-border: #303138;
     --board-column-bg: #1e1f24;
     --board-card-bg: #24252b;
@@ -1544,4 +1546,21 @@ body {
 }
 .cycle-notice[data-kind="failed"] {
   color: var(--board-error-fg);
+}
+
+/* 長い文字列の「全文を開く／折りたたむ」: ボタンの見た目ではなく、下線を引いた文字のリンクにする */
+.clamped-text-toggle {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--board-link);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.clamped-text-toggle:focus-visible {
+  outline: 2px solid var(--board-link);
+  outline-offset: 2px;
 }

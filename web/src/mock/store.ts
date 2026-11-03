@@ -80,6 +80,7 @@ export const STATUS_LABEL: Record<string, string> = {
   awaiting_completion_approval: "完了確認待ち",
   done: "完了",
   awaiting_human: "人間対応待ち",
+  withdrawn: "取り下げ",
 };
 
 const T0 = Date.parse("2026-10-12T09:00:00Z");
@@ -342,6 +343,8 @@ export function seed(): Record<string, MockWorkspace> {
       description: LONG,
       done_criteria: LONG,
       context: LONG,
+      // 切り詰めた長い文章に「全文を開く」が出ることを実ブラウザで確かめるための、長い「やらないこと」
+      stages: { ...NO_STAGES, non_goals: [LONG] },
       flags: { discrepancy: ["upstream_updated", "upstream_commented"] },
     }),
     mk("C-11", "決済画面の改修", "verifying", {
@@ -406,6 +409,17 @@ export function seed(): Record<string, MockWorkspace> {
     mk("C-20", "返金 API の上限の確認", "in_progress", {
       priority: "P1",
       headline: "決済チームに返金 API の上限を問い合わせている",
+    }),
+    // 取り下げた課題。動いている課題（C-18）の前提なので、既定でも灰色で出る（graph.ts）
+    mk("C-21", "旧テーブルの参照元の洗い出し", "withdrawn", {
+      priority: "P2",
+      headline: "別の調査で済んだので取り下げた",
+    }),
+    // 何ともつながらない完了の課題。既定では隠れ、「終わった課題もすべて表示」で出る
+    mk("C-22", "ログ出力の整理", "done", {
+      priority: "P3",
+      version: 4,
+      headline: "不要なログ出力を削った",
     }),
   ];
   const beta: MockChallenge[] = [
@@ -521,7 +535,7 @@ export function cardOf(m: MockChallenge): Card {
   };
 }
 
-// `GET …/graph` の偽の応答。区分・running・stale は課題のカードの導出と同じ規則（人間 > 完了 > システム。
+// `GET …/graph` の偽の応答。区分・running・stale は課題のカードの導出と同じ規則（人間 > 完了 > 取り下げ > システム。
 // 外部待ちは core から出ない）。登録の日時は 2026-10-10T00:00:00Z からの経過分。
 export function graphOf(w: MockWorkspace): GraphResponse {
   const byId = new Map(w.items.map((m) => [m.c.id, m]));
@@ -535,7 +549,9 @@ export function graphOf(w: MockWorkspace): GraphResponse {
           ? "human"
           : m.c.status === "done"
             ? "done"
-            : "system";
+            : m.c.status === "withdrawn"
+              ? "withdrawn"
+              : "system";
       return {
         category,
         context: m.context,

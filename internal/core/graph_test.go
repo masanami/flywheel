@@ -82,6 +82,33 @@ func TestChallengeGraph_NodesAreInNumericIDOrderWithTheirFields(t *testing.T) {
 	}
 }
 
+// 取り下げた課題は、システムが進めている課題ではなく取り下げの区分になる。人間の操作待ちが残っていれば人間が先。
+func TestChallengeGraph_WithdrawnIsItsOwnCategory(t *testing.T) {
+	s, _ := graphStore(t, StatusWithdrawn, StatusWithdrawn, StatusDone)
+	// C-2 は取り下げ済みだが、承認待ちの本番反映（人間の操作待ち）を持つ。
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at)
+			VALUES (2, 'release', 's', 'o/r#2', 'pending', 1, '2026-11-01T00:00:00.000Z')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	g := mustGraph(t, s)
+	want := map[string]GraphCategory{"C-1": GraphCategoryWithdrawn, "C-2": GraphCategoryHuman, "C-3": GraphCategoryDone}
+	for id, c := range want {
+		if got := nodeByID(t, g, id).Category; got != c {
+			t.Errorf("%s category = %q, want %q", id, got, c)
+		}
+	}
+}
+
+func TestGraphCategoryValues_IsTheFiveCategoriesInOrder(t *testing.T) {
+	want := []GraphCategory{GraphCategoryHuman, GraphCategoryExternal, GraphCategoryDone, GraphCategoryWithdrawn, GraphCategorySystem}
+	if got := GraphCategoryValues(); !reflect.DeepEqual(got, want) {
+		t.Errorf("GraphCategoryValues = %v, want %v", got, want)
+	}
+}
+
 // 区分は 人間 > 外部 > 完了 > システム の順で、カードの next_human_actions と状態から決まる。
 func TestChallengeGraph_CategoryFollowsTheCardDerivation(t *testing.T) {
 	s, cs := graphStore(t, StatusClassified, StatusAwaitingPlanApproval, StatusDone, StatusDone, StatusInProgress)

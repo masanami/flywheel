@@ -12,7 +12,7 @@ import (
 // core の記録（課題・依存・親子・run・作業ログ・カードの導出）だけから決定的に作る公開 API
 // （ChallengeGraph）を持つ。LLM も上流（GitHub）も呼ばず、ストアへ書かない。
 
-// GraphCategory はノードの区分（「誰が動くべきか」。閉集合。導く順は 人間 → 外部 → 完了 → システム）。
+// GraphCategory はノードの区分（「誰が動くべきか」。閉集合。導く順は 人間 → 外部 → 完了 → 取り下げ → システム）。
 type GraphCategory string
 
 // GraphCategory の値。
@@ -24,13 +24,15 @@ const (
 	GraphCategoryExternal GraphCategory = "external"
 	// GraphCategoryDone は状態が完了。
 	GraphCategoryDone GraphCategory = "done"
+	// GraphCategoryWithdrawn は状態が取り下げ（完了と同じく終わった課題で、進める主体がいない）。
+	GraphCategoryWithdrawn GraphCategory = "withdrawn"
 	// GraphCategorySystem は上のいずれでもない（システムが進めている。CI の待ちを含む）。
 	GraphCategorySystem GraphCategory = "system"
 )
 
 // GraphCategoryValues は GraphCategory の閉集合の写しを返す。
 func GraphCategoryValues() []GraphCategory {
-	return []GraphCategory{GraphCategoryHuman, GraphCategoryExternal, GraphCategoryDone, GraphCategorySystem}
+	return []GraphCategory{GraphCategoryHuman, GraphCategoryExternal, GraphCategoryDone, GraphCategoryWithdrawn, GraphCategorySystem}
 }
 
 // GraphEdgeKind は依存の種類（閉集合）。
@@ -153,6 +155,8 @@ func graphCategory(c Challenge, card *Card) GraphCategory {
 		return GraphCategoryHuman
 	case c.Status == StatusDone:
 		return GraphCategoryDone
+	case c.Status == StatusWithdrawn:
+		return GraphCategoryWithdrawn
 	default:
 		return GraphCategorySystem
 	}

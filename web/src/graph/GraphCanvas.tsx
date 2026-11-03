@@ -12,6 +12,8 @@ import {
   type Layout,
   type LayoutBox,
   type LayoutEdge,
+  OTHERS_ID,
+  OTHERS_LABEL,
   STALE_LONG,
   categoryLabel,
   chipLines,
@@ -192,12 +194,12 @@ function HeadlineCallout({
   );
 }
 
-export function insideText(n: Inside): string {
+export function insideText(n: Inside, label = "畳んだ子"): string {
   const parts = [
     n.active > 0 ? `実施中 ${n.active}` : "",
     n.human > 0 ? `人間の操作待ち ${n.human}` : "",
   ].filter(Boolean);
-  return `畳んだ子 ${n.total} 件${parts.length > 0 ? `（${parts.join("・")}）` : ""}`;
+  return `${label} ${n.total} 件${parts.length > 0 ? `（${parts.join("・")}）` : ""}`;
 }
 
 export function accessibleName(
@@ -259,9 +261,18 @@ function Toggle({
 }
 
 // 畳んだ親の箱の 3 行目に置く、中の件数の札。実施中と人間の操作待ちだけを色つきで出す。
-function InsideBadges({ n, y }: { n: Inside; y: number }) {
+function InsideBadges({
+  n,
+  y,
+  all = `子${n.total}`,
+}: {
+  n: Inside;
+  y: number;
+  // 件数の札の文字（既定は畳んだ親の子の数）
+  all?: string;
+}) {
   const badges: { key: string; cat: Category; text: string }[] = [
-    { key: "all", cat: "other", text: `子${n.total}` },
+    { key: "all", cat: "other", text: all },
   ];
   if (n.active > 0)
     badges.push({
@@ -413,6 +424,16 @@ function NodeLines({
         >
           ▶ 実施中
         </text>
+      ) : i.category === "withdrawn" ? (
+        // 取り下げは完了と同じ灰色なので、札で区別する（取り消し線は使わない）
+        <text
+          x={box.w - (inside ? TOGGLE + 10 : 8)}
+          y={18}
+          textAnchor="end"
+          className="graph-node-withdrawn-tag"
+        >
+          取り下げ
+        </text>
       ) : null}
       <text x={11} y={35} className="graph-node-title">
         {lines.map((line, k) => (
@@ -430,6 +451,114 @@ function NodeLines({
         </text>
       ) : null}
     </>
+  );
+}
+
+// 「ほかの課題」は課題ではない疑似の大枠なので、押しても詳細のモーダルは開かず、開閉だけをする。
+function OthersBox({ box, p }: { box: LayoutBox; p: CanvasProps }) {
+  const n = p.inside(OTHERS_ID);
+  if (!n) return null;
+  const act = () => p.onToggle(OTHERS_ID);
+  const name = `${OTHERS_LABEL}を開く（${n.total} 件）`;
+  return (
+    <g transform={`translate(${box.x} ${box.y})`}>
+      <g
+        // biome-ignore lint/a11y/useSemanticElements: SVG の中に button 要素は置けない
+        role="button"
+        tabIndex={0}
+        aria-label={name}
+        aria-expanded={false}
+        className="graph-node graph-others"
+        data-category="other"
+        data-others="closed"
+        data-dim={p.dimmed(OTHERS_ID) || undefined}
+        data-active-inside={n.active > 0 || undefined}
+        data-human-inside={n.human > 0 || undefined}
+        data-collapsed
+        onClick={act}
+        onKeyDown={onActivate(act)}
+      >
+        <title>{name}</title>
+        <rect
+          className="graph-node-stack"
+          x={4}
+          y={4}
+          width={box.w}
+          height={box.h}
+          rx={6}
+        />
+        <rect className="graph-node-box" width={box.w} height={box.h} rx={6} />
+        <rect className="graph-node-stripe" width={5} height={box.h} rx={2} />
+        <text x={11} y={18} className="graph-node-id">
+          {OTHERS_LABEL}
+        </text>
+        <text
+          x={box.w - 10}
+          y={18}
+          textAnchor="end"
+          className="graph-others-glyph"
+        >
+          +
+        </text>
+        <InsideBadges n={n} y={30} all={`${n.total}件`} />
+      </g>
+    </g>
+  );
+}
+
+function OthersFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
+  const { dims } = p;
+  const n = p.inside(OTHERS_ID);
+  const act = () => p.onToggle(OTHERS_ID);
+  const name = `${OTHERS_LABEL}を畳む（${n?.total ?? 0} 件）`;
+  return (
+    <g
+      transform={`translate(${box.x} ${box.y})`}
+      className="graph-group graph-others-frame"
+      data-category="other"
+      data-others="open"
+      data-depth={box.depth}
+      data-dim={p.dimmed(OTHERS_ID) || undefined}
+    >
+      <rect className="graph-group-box" width={box.w} height={box.h} rx={8} />
+      <g
+        // biome-ignore lint/a11y/useSemanticElements: SVG の中に button 要素は置けない
+        role="button"
+        tabIndex={0}
+        aria-label={name}
+        aria-expanded
+        className="graph-group-head"
+        data-category="other"
+        onClick={act}
+        onKeyDown={onActivate(act)}
+      >
+        <title>{name}</title>
+        <rect
+          className="graph-group-head-box"
+          width={box.w}
+          height={box.headH}
+          rx={8}
+        />
+        <rect
+          className="graph-node-stripe"
+          width={5}
+          height={box.headH}
+          rx={2}
+        />
+        <text x={11} y={dims.headH / 2 + 4.5} className="graph-group-title">
+          <tspan className="graph-node-id">{OTHERS_LABEL}</tspan>
+          {` ${n?.total ?? 0}件`}
+        </text>
+        <text
+          x={box.w - TOGGLE / 2 - 5}
+          y={dims.headH / 2 + 5}
+          textAnchor="middle"
+          className="graph-others-glyph"
+        >
+          −
+        </text>
+      </g>
+    </g>
   );
 }
 
@@ -499,6 +628,17 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
           {` ${clip(c.title, chars)}`}
           {selfActive ? " ▶ 実施中" : ""}
         </text>
+        {i.category === "withdrawn" ? (
+          // 開いた親でも、取り下げは完了と同じ灰色のまま札で区別する
+          <text
+            x={box.w - TOGGLE - 14}
+            y={dims.headH / 2 + 4.5}
+            textAnchor="end"
+            className="graph-node-withdrawn-tag"
+          >
+            取り下げ
+          </text>
+        ) : null}
         {hl.map((line, k) => (
           <text
             // biome-ignore lint/suspicious/noArrayIndexKey: 幅で切った行の並びで、行の位置そのものが鍵
@@ -701,9 +841,13 @@ export function GraphCanvas(p: CanvasProps) {
           />
         </marker>
       </defs>
-      {layout.groups.map((g) => (
-        <GroupFrame key={g.id} box={g} p={p} />
-      ))}
+      {layout.groups.map((g) =>
+        g.id === OTHERS_ID ? (
+          <OthersFrame key={g.id} box={g} p={p} />
+        ) : (
+          <GroupFrame key={g.id} box={g} p={p} />
+        ),
+      )}
       {layout.edges.map((e) => {
         const key = edgeKey(e);
         const picked = p.selectedEdge === key;
@@ -761,9 +905,13 @@ export function GraphCanvas(p: CanvasProps) {
           関係の無い課題
         </text>
       ) : null}
-      {layout.nodes.map((n) => (
-        <NodeBox key={n.id} box={n} p={p} />
-      ))}
+      {layout.nodes.map((n) =>
+        n.id === OTHERS_ID ? (
+          <OthersBox key={n.id} box={n} p={p} />
+        ) : (
+          <NodeBox key={n.id} box={n} p={p} />
+        ),
+      )}
       {placeLabels(
         layout.edges.filter(p.edgeLabeled),
         dims.edgeChars,

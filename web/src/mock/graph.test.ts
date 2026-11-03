@@ -36,6 +36,9 @@ it("偽の API の graph: ID の数の昇順・区分と実施中と更新なし
   expect(node("C-3")?.category).toBe("human");
   expect(node("C-12")?.category).toBe("done");
   expect(node("C-1")?.category).toBe("system");
+  // 取り下げは完了とは別の区分
+  expect(node("C-21")?.category).toBe("withdrawn");
+  expect(node("C-22")?.category).toBe("done");
   expect(node("C-5")).toMatchObject({ running: true, stale: false });
   expect(node("C-6")).toMatchObject({ running: true, stale: true });
   expect(node("C-12")?.parent_id).toBe("C-14");

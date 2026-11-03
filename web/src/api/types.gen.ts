@@ -512,6 +512,7 @@ export const GRAPH_CATEGORY_CODES = [
   "human",
   "external",
   "done",
+  "withdrawn",
   "system",
 ] as const;
 

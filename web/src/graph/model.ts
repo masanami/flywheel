@@ -3,7 +3,7 @@
 
 import type { GraphEdge, GraphNode, GraphResponse } from "../api/types.gen.ts";
 
-// ノードの色の区分。API の区分（human・external・done・system）に、システムが進めていて run が動いている
+// ノードの色の区分。API の区分（human・external・done・withdrawn・system）に、システムが進めていて run が動いている
 // 課題の running を足したもの。other は畳んだ親の件数の札の色にだけ使う。
 export type Category =
   | "human"
@@ -11,6 +11,7 @@ export type Category =
   | "running"
   | "system"
   | "done"
+  | "withdrawn"
   | "other";
 
 // 区分の名前。凡例は区分の名前と色だけにし、実装の語（フィールド名など）を人に見せない。
@@ -20,6 +21,8 @@ export const CATEGORIES: { key: Category; label: string }[] = [
   { key: "running", label: "システムが実行中" },
   { key: "system", label: "システムが次に進めるもの" },
   { key: "done", label: "完了" },
+  // 取り下げは完了と同じ灰色で描き、名前で区別する
+  { key: "withdrawn", label: "取り下げ" },
 ];
 
 export const categoryLabel = (c: Category): string =>
@@ -32,12 +35,13 @@ export const STALE_LONG = "⚠ 更新なし（要確認）";
 export const STALE_HINT =
   "実行中だが、しきい値を超えて記録がありません。止まったとは限らず、長い委譲でも出ます";
 
-// 色の区分。人間の操作待ち・外部待ち・完了は API の区分のまま、システムの課題は run が動いていれば running。
+// 色の区分。人間の操作待ち・外部待ち・完了・取り下げは API の区分のまま、システムの課題は run が動いていれば running。
 export function categoryOf(n: GraphNode): Category {
   switch (n.category) {
     case "human":
     case "external":
     case "done":
+    case "withdrawn":
       return n.category;
     default:
       return n.running ? "running" : "system";
@@ -210,6 +214,60 @@ export function visibleBoxOf(
   return box;
 }
 
+// --- 終わった課題（完了・取り下げ）の既定の隠し方と、「ほかの課題」のまとめ方 ---
+
+export const isFinished = (c: { category: string }): boolean =>
+  c.category === "done" || c.category === "withdrawn";
+
+// 「ほかの課題」の大枠は課題ではない疑似の大枠。開閉の集合（expanded）と配置では、この名前で親と同じに扱う。
+export const OTHERS_ID = "others";
+export const OTHERS_LABEL = "ほかの課題";
+
+// グラフと一覧に出す課題の ID（入力の並びのまま）。既定では終わった課題を出さないが、動いている課題の前提
+// （その課題へ向かう依存の先行）と、動いている課題の親（祖先を含む）になっている終わった課題だけは残す。
+// 残した終わった前提が親の中にあるときも、入れ子を保つために祖先を残す。showAll なら全部を出す。
+export function visibleIds(
+  nodes: GraphNode[],
+  relations: ChallengeRelation[],
+  showAll: boolean,
+): string[] {
+  if (showAll) return nodes.map((n) => n.id);
+  const all = new Set(nodes.map((n) => n.id));
+  const rels = validRelations(all, relations);
+  const live = new Set(nodes.filter((n) => !isFinished(n)).map((n) => n.id));
+  const keep = new Set(live);
+  for (const r of rels)
+    if (r.kind === "depends_on" && live.has(r.to)) keep.add(r.from);
+  const pm = parentMap(all, rels);
+  for (const id of [...keep]) for (const a of ancestorsOf(id, pm)) keep.add(a);
+  return nodes.filter((n) => keep.has(n.id)).map((n) => n.id);
+}
+
+// 「ほかの課題」に入る課題（ID の数の昇順）: 親を持たず、子も持たず、依存の辺（前提・衝突のどちらの向きも）を
+// 1 本も持たない、動いている課題。ids は表示中の課題で、隠れた課題につながる関係は数えない。
+export function othersOf(
+  ids: string[],
+  relations: ChallengeRelation[],
+  isActive: (id: string) => boolean,
+): string[] {
+  const set = new Set(ids);
+  const rels = validRelations(set, relations);
+  const pm = parentMap(set, rels);
+  const hasChild = new Set(pm.values());
+  const linked = new Set<string>();
+  for (const r of rels)
+    if (r.kind === "depends_on") {
+      linked.add(r.from);
+      linked.add(r.to);
+    }
+  return ids
+    .filter(
+      (id) =>
+        isActive(id) && !pm.has(id) && !hasChild.has(id) && !linked.has(id),
+    )
+    .sort(compareIds);
+}
+
 // --- 配置（大枠ごとに、上から下へ層を重ねる。先行が上、後続が下） ---
 
 export interface Dims {
@@ -296,6 +354,8 @@ export function layoutGraph(
   d: Dims,
   expanded: Set<string> = new Set(),
   headOf: (id: string) => number = () => d.headH,
+  // 一番外で孤立した課題のうち「ほかの課題」の大枠へまとめる課題。大枠の開閉は expanded の OTHERS_ID
+  isOther: (id: string) => boolean = () => false,
 ): Layout {
   const order = [...ids].sort(compareIds);
   const rels = validRelations(new Set(order), relations);
@@ -349,11 +409,13 @@ export function layoutGraph(
       linked.add(b);
       for (const a of ps) linked.add(a);
     }
-    const isolated =
+    const isolatedAll =
       container === null
         ? members.filter((m) => !linked.has(m) && !kids.has(m))
         : [];
-    const graphIds = members.filter((m) => !isolated.includes(m));
+    const others = isolatedAll.filter(isOther);
+    const isolated = isolatedAll.filter((m) => !isOther(m));
+    const graphIds = members.filter((m) => !isolatedAll.includes(m));
 
     // 最長経路で層を決める（Kahn の方法）。
     const indeg = new Map(graphIds.map((id) => [id, preds.get(id)?.size ?? 0]));
@@ -418,8 +480,27 @@ export function layoutGraph(
       wrap(row).map((ids) => ({ ids, layer: l })),
     );
     const isoRows = wrap(isolated);
+    // 「ほかの課題」: 開いていれば大枠（中に課題を並べる）、畳んでいれば 1 つの箱
+    let otherBox: {
+      w: number;
+      h: number;
+      inner: Arranged | null;
+    } | null = null;
+    if (others.length > 0) {
+      const inner = expanded.has(OTHERS_ID)
+        ? arrange(others, OTHERS_ID, limit - 2 * d.inset)
+        : null;
+      otherBox = inner
+        ? {
+            w: Math.max(d.nodeW, inner.w + 2 * d.inset),
+            h: headOf(OTHERS_ID) + inner.h + d.inset,
+            inner,
+          }
+        : { w: d.nodeW, h: d.nodeH, inner: null };
+    }
     const w = Math.max(
       d.nodeW,
+      otherBox?.w ?? 0,
       ...rows.map((r) => rowW(r.ids)),
       ...isoRows.map(rowW),
     );
@@ -439,9 +520,22 @@ export function layoutGraph(
       if (i > 0) y += d.gapY;
       put(r.ids, r.layer);
     });
+    if (otherBox) {
+      if (rows.length > 0) y += d.gapY;
+      items.push({
+        id: OTHERS_ID,
+        x: (w - otherBox.w) / 2,
+        y,
+        w: otherBox.w,
+        h: otherBox.h,
+        layer: -1,
+        inner: otherBox.inner,
+      });
+      y += otherBox.h;
+    }
     let labelY: number | null = null;
     if (isoRows.length > 0) {
-      if (rows.length > 0) y += d.gapY;
+      if (rows.length > 0 || otherBox) y += d.gapY;
       labelY = y;
       y += d.labelH;
       isoRows.forEach((r, i) => {

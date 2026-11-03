@@ -51,6 +51,7 @@ export function seedGraphs(): { alpha: GraphSeed; beta: GraphSeed } {
         "C-16": "C-15",
         "C-19": "C-15",
         "C-17": "C-16",
+        "C-21": "C-14",
       },
       deps: [
         dep("C-12", "C-6", "prerequisite", "plan", 0),
@@ -64,6 +65,7 @@ export function seedGraphs(): { alpha: GraphSeed; beta: GraphSeed } {
         dep("C-5", "C-19", "prerequisite", "manual", 8),
         dep("C-11", "C-19", "conflict", "plan", 9),
         dep("C-19", "C-2", "prerequisite", "unknown", 10),
+        dep("C-21", "C-18", "prerequisite", "manual", 11),
       ],
     },
     beta: {

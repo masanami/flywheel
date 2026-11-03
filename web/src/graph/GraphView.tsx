@@ -19,6 +19,7 @@ import {
   BASIS_LABELS,
   CATEGORIES,
   type Category,
+  OTHERS_ID,
   STALE_HINT,
   STALE_LABEL,
   ancestorsOf,
@@ -28,11 +29,14 @@ import {
   compareIds,
   descendantsOf,
   downstreamOf,
+  isFinished,
   layoutGraph,
+  othersOf,
   parentMap,
   relationsOf,
   upstreamOf,
   validRelations,
+  visibleIds,
 } from "./model.ts";
 import "./graph.css";
 
@@ -102,11 +106,13 @@ function useGraph(ws: string | null, refreshKey: unknown) {
 }
 
 // 開いたときに開いておく親: 実施中か人間の操作待ちの子孫（孫を含む）を持つ親。
+// 「ほかの課題」の大枠は、中に人間の操作待ちの課題があるときだけ開く。
 export function defaultOpen(
   infos: Map<string, NodeInfo>,
   kids: Map<string, string[]>,
+  others: string[] = [],
 ): string[] {
-  return [...kids.keys()]
+  const open = [...kids.keys()]
     .filter((p) =>
       descendantsOf(p, kids).some((d) => {
         const i = infos.get(d);
@@ -114,6 +120,9 @@ export function defaultOpen(
       }),
     )
     .sort(compareIds);
+  return others.some((id) => infos.get(id)?.category === "human")
+    ? [...open, OTHERS_ID]
+    : open;
 }
 
 // 選んだワークスペース 1 つ分のグラフ。ワークスペースを切り替えると作り直す（key）ので、絞り込みは持ち越さない。
@@ -142,7 +151,8 @@ export function GraphView({
   const trigger = useRef<Element | null>(null);
   const [contextOpen, setContextOpen] = useState<Set<string>>(new Set());
   const [catFilter, setCatFilter] = useState<Category | null>(null);
-  const [hideDone, setHideDone] = useState(false);
+  // 終わった課題（完了・取り下げ）は既定で隠し、これを入れると全部を出す（サーバには持たない）
+  const [showAll, setShowAll] = useState(false);
   const graph = useGraph(ws, live.lastUpdated);
   const wsData = ws ? live.data[ws] : undefined;
 
@@ -165,10 +175,32 @@ export function GraphView({
     return { map: m, rels, pm, kids: childrenMap(pm) };
   }, [graph]);
 
-  const initialOpen = useMemo(
-    () => defaultOpen(infos.map, infos.kids),
-    [infos],
-  );
+  // 表示する課題（既定では終わった課題を隠す）と、そのうち「ほかの課題」にまとめる課題
+  const view = useMemo(() => {
+    const ids = visibleIds(graph?.data?.nodes ?? [], infos.rels, showAll);
+    const isActive = (id: string) => {
+      const i = infos.map.get(id);
+      return !!i && !isFinished(i);
+    };
+    return { ids, others: othersOf(ids, infos.rels, isActive) };
+  }, [graph, infos, showAll]);
+  const shownIds = view.ids;
+  const othersIds = view.others;
+
+  // 最初に読めたときの既定は、既定の表示（終わった課題を隠した状態）で決める
+  const initialOpen = useMemo(() => {
+    const nodes = graph?.data?.nodes ?? [];
+    const ids = visibleIds(nodes, infos.rels, false);
+    const isActive = (id: string) => {
+      const i = infos.map.get(id);
+      return !!i && !isFinished(i);
+    };
+    return defaultOpen(
+      infos.map,
+      infos.kids,
+      othersOf(ids, infos.rels, isActive),
+    );
+  }, [graph, infos]);
   // 最初に読めたとき、既定の開き方を覚える（以後の取り直しで開閉が勝手に変わらないように）
   useEffect(() => {
     if (graph?.data && openParents === undefined) onOpenParents(initialOpen);
@@ -200,22 +232,10 @@ export function GraphView({
       return next;
     });
 
-  // 完了を隠しても、まだ終わっていない子を持つ親（大枠）は残す。
-  const shownIds = [...infos.map.values()]
-    .filter(
-      (i) =>
-        !(
-          hideDone &&
-          i.category === "done" &&
-          descendantsOf(i.node.id, infos.kids).every(
-            (d) => infos.map.get(d)?.category === "done",
-          )
-        ),
-    )
-    .map((i) => i.node.id);
   // 開いた大枠の見出しは一言でと位置づけの分だけ伸びる。行数は大枠の幅で決まり、幅は見出しの高さに左右されないので、
   // 一度配置して大枠の幅を得てから、見出しの高さを決めて配置し直す。
   const nodeOf = (id: string) => infos.map.get(id)?.node;
+  const isOther = (id: string) => othersIds.includes(id);
   const headOf = (width: (id: string) => number) => (id: string) =>
     groupHeadHeight(
       nodeOf(id)?.headline ?? null,
@@ -230,6 +250,7 @@ export function GraphView({
     dims,
     expanded,
     headOf(() => dims.maxW),
+    isOther,
   );
   const widths = new Map(first.groups.map((g) => [g.id, g.w]));
   const layout = layoutGraph(
@@ -238,6 +259,7 @@ export function GraphView({
     dims,
     expanded,
     headOf((id) => widths.get(id) ?? dims.maxW),
+    isOther,
   );
   const pm = layout.parents;
   const kids = childrenMap(pm);
@@ -251,9 +273,12 @@ export function GraphView({
   const ancestors = new Set(sel ? ancestorsOf(sel, pm) : []);
   const inner = new Set(sel ? descendantsOf(sel, kids) : []);
 
+  // 区分の件数は、いま出している課題の数（隠した終わった課題は数えない）
   const counts = new Map<Category, number>();
-  for (const i of infos.map.values())
-    counts.set(i.category, (counts.get(i.category) ?? 0) + 1);
+  for (const id of shownIds) {
+    const c = infos.map.get(id)?.category;
+    if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
   const running = [...infos.map.values()].filter((i) => i.active);
 
   // 線を選んだときは、線の両端の箱（とその中の課題）だけを濃く残す
@@ -280,7 +305,8 @@ export function GraphView({
     return !(catFilter && i.category !== catFilter);
   };
   // 箱が表す課題: 自分と、大枠（開いていても畳んでいても）の中の課題すべて。
-  const membersOf = (id: string) => [id, ...descendantsOf(id, kids)];
+  const membersOf = (id: string) =>
+    id === OTHERS_ID ? othersIds : [id, ...descendantsOf(id, kids)];
   const dimmed = (id: string) =>
     !membersOf(id).some((m) => matches(m) && relevant(m));
   const edgeLit = (from: string, to: string) =>
@@ -295,6 +321,15 @@ export function GraphView({
     return undefined;
   };
   const inside = (id: string): Inside | null => {
+    // 「ほかの課題」は開いていても件数を返す（大枠の見出しの件数に使う）
+    if (id === OTHERS_ID) {
+      const ds = othersIds.map((d) => infos.map.get(d));
+      return {
+        total: ds.length,
+        active: ds.filter((d) => d?.active).length,
+        human: ds.filter((d) => d?.category === "human").length,
+      };
+    }
     if (!kids.has(id) || expanded.has(id)) return null;
     const ds = descendantsOf(id, kids).map((d) => infos.map.get(d));
     return {
@@ -322,26 +357,24 @@ export function GraphView({
   } else if (shownIds.length === 0) {
     body = <p>表示する課題がありません。</p>;
   } else if (narrow) {
-    const shown = new Set(shownIds);
-    const shownKids = new Map(
-      [...infos.kids].map(([p, cs]) => [p, cs.filter((c) => shown.has(c))]),
-    );
+    const innerOf = (id: string) => {
+      const ds = descendantsOf(id, kids).map((d) => infos.map.get(d));
+      return {
+        total: ds.length,
+        active: ds.filter((d) => d?.active).length,
+        human: ds.filter((d) => d?.category === "human").length,
+      };
+    };
     body = (
       <NarrowList
         ids={shownIds}
         infos={infos.map}
-        kids={shownKids}
-        roots={shownIds.filter((id) => !infos.pm.has(id))}
-        relations={infos.rels}
+        kids={kids}
+        roots={shownIds.filter((id) => !pm.has(id) && !isOther(id))}
+        others={othersIds}
+        relations={shownRels}
         expanded={expanded}
-        inside={(id) => {
-          const ds = descendantsOf(id, shownKids).map((d) => infos.map.get(d));
-          return {
-            total: ds.length,
-            active: ds.filter((d) => d?.active).length,
-            human: ds.filter((d) => d?.category === "human").length,
-          };
-        }}
+        inside={innerOf}
         onToggle={toggle}
         onOpen={openDetail}
       />
@@ -386,9 +419,13 @@ export function GraphView({
     );
   }
 
-  const parents = [...infos.kids.keys()];
-  // いま効いている絞り込みの数（区分・完了を隠す）。畳んでいても数で分かるようにする
-  const filtering = (catFilter ? 1 : 0) + (hideDone ? 1 : 0);
+  // 開閉できる大枠（親と「ほかの課題」）
+  const parents = [
+    ...kids.keys(),
+    ...(othersIds.length > 0 ? [OTHERS_ID] : []),
+  ];
+  // いま効いている絞り込みの数（区分）。畳んでいても数で分かるようにする
+  const filtering = catFilter ? 1 : 0;
   return (
     <>
       <div className="graph-toolbar">
@@ -465,7 +502,12 @@ export function GraphView({
                 onClick={() => {
                   // 畳んだ大枠の中にあっても、閉じたあと見えるように祖先を開いてから詳細を開く
                   setOpen(
-                    (s) => new Set([...s, ...ancestorsOf(i.node.id, infos.pm)]),
+                    (s) =>
+                      new Set([
+                        ...s,
+                        ...ancestorsOf(i.node.id, pm),
+                        ...(isOther(i.node.id) ? [OTHERS_ID] : []),
+                      ]),
                   );
                   openDetail(i.node.id);
                 }}
@@ -501,11 +543,11 @@ export function GraphView({
           <label className="graph-switch">
             <input
               type="checkbox"
-              checked={hideDone}
-              onChange={(e) => setHideDone(e.target.checked)}
+              checked={showAll}
+              onChange={(e) => setShowAll(e.target.checked)}
             />
             <span className="graph-switch-track" aria-hidden="true" />
-            完了を隠す
+            終わった課題もすべて表示
           </label>
           {filtering > 0 ? (
             <button
@@ -513,7 +555,6 @@ export function GraphView({
               className="graph-clear"
               onClick={() => {
                 setCatFilter(null);
-                setHideDone(false);
               }}
             >
               絞り込みを解除

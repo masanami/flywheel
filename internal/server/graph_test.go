@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
 // docs/features/ui-relation-graph.md §関係グラフの API を、実ストア・実際の HTTP の要求で検証する。
@@ -38,7 +39,6 @@ func graphWorkspace(t *testing.T, now time.Time) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 	if _, err := st.AddDependencies(ctx, core.ChannelCLI, "C-4", []string{"C-5"}); err != nil {
 		t.Fatal(err)
@@ -49,6 +49,12 @@ func graphWorkspace(t *testing.T, now time.Time) string {
 	if err := st.SetParent(ctx, core.ChannelCLI, "C-6", "C-1"); err != nil {
 		t.Fatal(err)
 	}
+	// C-7 は取り下げた課題（category は withdrawn になる）。
+	if _, err := st.CreateChallenge(ctx, core.ChannelCLI, core.CreateInput{Title: "c7", DoneCriteria: "d"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	coretest.SetChallengeStatus(t, ws, 7, "withdrawn")
 	return ws
 }
 
@@ -102,6 +108,8 @@ func TestGraphAPI_NodesFollowTheBoardCardsAndEdgesAndParentsAreReturned(t *testi
 			wantCategory = "human"
 		case c["status"] == "done":
 			wantCategory = "done"
+		case c["status"] == "withdrawn":
+			wantCategory = "withdrawn"
 		}
 		if node["category"] != wantCategory {
 			t.Errorf("%v category = %v, want %v", node["id"], node["category"], wantCategory)
@@ -116,6 +124,9 @@ func TestGraphAPI_NodesFollowTheBoardCardsAndEdgesAndParentsAreReturned(t *testi
 	}
 	if byID["C-2"]["category"] != "human" || byID["C-6"]["stale"] != true || byID["C-5"]["running"] != true || byID["C-5"]["stale"] != false {
 		t.Errorf("fixture expectations broken: C-2=%v C-5=%v C-6=%v", byID["C-2"], byID["C-5"], byID["C-6"])
+	}
+	if byID["C-7"]["category"] != "withdrawn" {
+		t.Errorf("C-7 category = %v, want withdrawn", byID["C-7"]["category"])
 	}
 	if byID["C-5"]["parent_id"] != "C-1" || byID["C-1"]["parent_id"] != nil {
 		t.Errorf("parent ids: C-5=%v C-1=%v", byID["C-5"]["parent_id"], byID["C-1"]["parent_id"])

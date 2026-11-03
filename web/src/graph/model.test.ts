@@ -3,16 +3,20 @@ import type { GraphEdge, GraphNode, GraphResponse } from "../api/types.gen.ts";
 import {
   type ChallengeRelation,
   type Dims,
+  OTHERS_ID,
   basisOf,
+  categoryLabel,
   categoryOf,
   chipLines,
   chipText,
   downstreamOf,
   layoutGraph,
+  othersOf,
   parentMap,
   reasonText,
   relationsOf,
   upstreamOf,
+  visibleIds,
 } from "./model.ts";
 
 const D: Dims = {
@@ -63,6 +67,8 @@ it("区分: API の区分をそのまま使い、システムの課題だけ run
   expect(categoryOf(node("C-1", { category: "external" }))).toBe("external");
   expect(categoryOf(node("C-1", { category: "done" }))).toBe("done");
   expect(categoryOf(node("C-1", { category: "system" }))).toBe("system");
+  expect(categoryOf(node("C-1", { category: "withdrawn" }))).toBe("withdrawn");
+  expect(categoryLabel("withdrawn")).toBe("取り下げ");
   expect(categoryOf(node("C-1", { running: true }))).toBe("running");
   // 人間の操作待ちは run が動いていても人間の色（光の輪は別に出す）
   expect(categoryOf(node("C-1", { category: "human", running: true }))).toBe(
@@ -190,4 +196,171 @@ it("入れ子: 幅の上限を超える段は折り返す", () => {
   expect(l.width).toBeLessThanOrEqual(220 + 2 * D.pad);
   const ys = new Set(l.nodes.filter((n) => n.layer === 1).map((n) => n.y));
   expect(ys.size).toBe(2);
+});
+
+// --- 終わった課題（完了・取り下げ）の既定の隠し方 ---
+
+const done = (id: string, over: Partial<GraphNode> = {}) =>
+  node(id, { category: "done", ...over });
+const withdrawn = (id: string, over: Partial<GraphNode> = {}) =>
+  node(id, { category: "withdrawn", ...over });
+const shown = (nodes: GraphNode[], rels: ChallengeRelation[], all = false) =>
+  visibleIds(nodes, rels, all).sort();
+
+it("終わった課題の隠し方: 動いている課題はすべて残り、つながりの無い終わった課題は隠れる", () => {
+  const nodes = [
+    node("C-1"),
+    node("C-2", { category: "human" }),
+    done("C-3"),
+    withdrawn("C-4"),
+  ];
+  expect(shown(nodes, [])).toEqual(["C-1", "C-2"]);
+});
+
+it("終わった課題の隠し方: 動いている課題の前提（依存の先行）になっている終わった課題は残る", () => {
+  const nodes = [done("C-1"), withdrawn("C-2"), node("C-3")];
+  const rels = [dep("C-1", "C-3"), dep("C-2", "C-3")];
+  expect(shown(nodes, rels)).toEqual(["C-1", "C-2", "C-3"]);
+});
+
+it("終わった課題の隠し方: 前提の種類は問わず、衝突のための依存の先行も残る", () => {
+  const nodes = [done("C-1"), node("C-2")];
+  const rels: ChallengeRelation[] = [
+    { ...dep("C-1", "C-2"), edge: edge("C-1", "C-2", { kind: "conflict" }) },
+  ];
+  expect(shown(nodes, rels)).toEqual(["C-1", "C-2"]);
+});
+
+it("終わった課題の隠し方: 動いている課題の後続にしかならない終わった課題は隠れる", () => {
+  const nodes = [node("C-1"), done("C-2")];
+  expect(shown(nodes, [dep("C-1", "C-2")])).toEqual(["C-1"]);
+});
+
+it("終わった課題の隠し方: 終わった課題どうしの前提は残さない（動いている課題へつながらない）", () => {
+  const nodes = [done("C-1"), done("C-2"), node("C-3")];
+  // C-1 → C-2 は終わった同士。C-2 は C-3 の前提ではない
+  expect(shown(nodes, [dep("C-1", "C-2")])).toEqual(["C-3"]);
+});
+
+it("終わった課題の隠し方: 動いている子を持つ終わった親は、祖先の連鎖ごと残る", () => {
+  const nodes = [
+    done("C-1"),
+    done("C-2", { parent_id: "C-1" }),
+    node("C-3", { parent_id: "C-2" }),
+    done("C-4"),
+    done("C-5", { parent_id: "C-4" }),
+  ];
+  const rels = relationsOf({ nodes, edges: [] });
+  // C-3（動いている）の親 C-2 と祖父 C-1 は残り、動いている子の無い C-4・C-5 は隠れる
+  expect(shown(nodes, rels)).toEqual(["C-1", "C-2", "C-3"]);
+});
+
+it("終わった課題の隠し方: 残る終わった前提が親の中にあるときは、その親も入れ子を保つために残る", () => {
+  const nodes = [
+    done("C-1"),
+    done("C-2", { parent_id: "C-1" }),
+    node("C-3"),
+    done("C-4", { parent_id: "C-1" }),
+  ];
+  const rels = relationsOf({ nodes, edges: [edge("C-2", "C-3")] });
+  expect(shown(nodes, rels)).toEqual(["C-1", "C-2", "C-3"]);
+});
+
+it("終わった課題の隠し方: 動いている親の終わった子は、前提になっていなければ隠れる", () => {
+  const nodes = [node("C-1"), done("C-2", { parent_id: "C-1" })];
+  expect(shown(nodes, relationsOf({ nodes, edges: [] }))).toEqual(["C-1"]);
+});
+
+it("終わった課題の隠し方: 全部を見る切り替えを入れると、終わった課題も含めてすべて出る", () => {
+  const nodes = [node("C-1"), done("C-2"), withdrawn("C-3")];
+  expect(shown(nodes, [], true)).toEqual(["C-1", "C-2", "C-3"]);
+});
+
+// --- 「ほかの課題」の大枠 ---
+
+const active = (id: string) => id.length > 0;
+it("ほかの課題: 親も子も依存も持たない動いている課題だけが入る", () => {
+  const ids = ["C-1", "C-2", "C-3", "C-4", "C-5", "C-6", "C-7", "C-8"];
+  const rels = [
+    par("C-1", "C-2"), // C-1 は親、C-2 は子
+    dep("C-3", "C-4"), // 前提と後続
+    dep("C-5", "C-4"),
+  ];
+  // C-6・C-7・C-8 は何ともつながらない。C-7 は終わっている
+  expect(othersOf(ids, rels, (id) => id !== "C-7")).toEqual(["C-6", "C-8"]);
+  expect(othersOf(ids, rels, active)).toEqual(["C-6", "C-7", "C-8"]);
+});
+
+it("ほかの課題: 隠れた課題につながる辺は数えない（表示中の課題だけで決める）", () => {
+  // C-2 は隠れた課題（ids に無い C-9）の前提だが、表示中の辺は持たない
+  expect(othersOf(["C-1", "C-2"], [dep("C-2", "C-9")], active)).toEqual([
+    "C-1",
+    "C-2",
+  ]);
+});
+
+it("ほかの課題: 衝突の依存も、どちらの向きでも数える", () => {
+  const rels: ChallengeRelation[] = [
+    { ...dep("C-1", "C-2"), edge: edge("C-1", "C-2", { kind: "conflict" }) },
+  ];
+  expect(othersOf(["C-1", "C-2", "C-3"], rels, active)).toEqual(["C-3"]);
+});
+
+it("ほかの課題: 該当が無ければ空で、大枠は出ない", () => {
+  expect(othersOf(["C-1", "C-2"], [dep("C-1", "C-2")], active)).toEqual([]);
+});
+
+it("配置: ほかの課題は畳むと 1 つの箱、開くと大枠になり、中に動いている課題を置く", () => {
+  const ids = ["C-1", "C-2", "C-3", "C-4"];
+  const rels = [dep("C-1", "C-2")];
+  const isOther = (id: string) => id === "C-3" || id === "C-4";
+  const closed = layoutGraph(ids, rels, D, new Set(), () => D.headH, isOther);
+  expect(closed.groups).toHaveLength(0);
+  expect(closed.nodes.map((n) => n.id).sort()).toEqual([
+    "C-1",
+    "C-2",
+    OTHERS_ID,
+  ]);
+  expect(closed.isolated).toEqual([]);
+  const open = layoutGraph(
+    ids,
+    rels,
+    D,
+    new Set([OTHERS_ID]),
+    () => D.headH,
+    isOther,
+  );
+  expect(open.groups.map((g) => g.id)).toEqual([OTHERS_ID]);
+  expect(open.nodes.map((n) => n.id).sort()).toEqual([
+    "C-1",
+    "C-2",
+    "C-3",
+    "C-4",
+  ]);
+  const g = open.groups[0];
+  for (const id of ["C-3", "C-4"]) {
+    const n = open.nodes.find((b) => b.id === id);
+    expect(
+      g &&
+        n &&
+        n.x >= g.x &&
+        n.x + n.w <= g.x + g.w &&
+        n.y >= g.y + g.headH &&
+        n.y + n.h <= g.y + g.h,
+    ).toBe(true);
+    expect(n?.depth).toBe(1);
+  }
+});
+
+it("配置: ほかの課題に当たらない孤立した課題（終わった課題）は、従来の関係の無い課題の段に残る", () => {
+  const l = layoutGraph(
+    ["C-1", "C-2"],
+    [],
+    D,
+    new Set(),
+    () => D.headH,
+    (id) => id === "C-1",
+  );
+  expect(l.isolated).toEqual(["C-2"]);
+  expect(l.nodes.map((n) => n.id).sort()).toEqual(["C-2", OTHERS_ID]);
 });

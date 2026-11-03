@@ -89,7 +89,8 @@
   background: var(--board-card-bg);
   overflow-wrap: anywhere;
 }
-.graph-list-item[data-category="done"] {
+.graph-list-item[data-category="done"],
+.graph-list-item[data-category="withdrawn"] {
   color: var(--board-muted-fg);
 }
 .graph-list-item[data-unresponsive] {
@@ -168,7 +169,8 @@
 [data-category="system"] {
   --c: var(--graph-system);
 }
-[data-category="done"] {
+[data-category="done"],
+[data-category="withdrawn"] {
   --c: var(--graph-done);
 }
 [data-category="other"] {
@@ -239,11 +241,27 @@
   fill: var(--c);
 }
 /* 完了は取り消し線を使わず、灰色の枠と淡い文字（グレーアウト）だけで示す */
-.graph-node[data-category="done"] .graph-node-box {
+.graph-node[data-category="done"] .graph-node-box,
+.graph-node[data-category="withdrawn"] .graph-node-box {
   fill: color-mix(in srgb, var(--c) 8%, var(--board-card-bg));
 }
-.graph-node[data-category="done"] text {
+.graph-node[data-category="done"] text,
+.graph-node[data-category="withdrawn"] text {
   fill: var(--board-muted-fg);
+}
+/* 取り下げは完了と同じ灰色のまま、右上の札で区別する（取り消し線は使わない） */
+.graph-node-withdrawn-tag {
+  font-size: 11px;
+  font-weight: 700;
+}
+/* 「ほかの課題」: 課題ではない疑似の大枠。右上の + / − は開閉の目印 */
+.graph-others-glyph {
+  fill: var(--board-fg) !important;
+  font-size: 15px;
+  font-weight: 700;
+}
+.graph-list-others-title {
+  font-size: 0.95rem;
 }
 /* 更新なし（unresponsive）: 旧 board の更新の止まった実行中の行と同じく、箱そのものを赤みにする。
  * 実施中の光の輪は残し、実行中でかつ更新なしであることを両方示す。 */

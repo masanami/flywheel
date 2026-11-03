@@ -9,6 +9,8 @@ import {
 } from "./GraphCanvas.tsx";
 import {
   type ChallengeRelation,
+  OTHERS_ID,
+  OTHERS_LABEL,
   categoryLabel,
   compareIds,
   neighborsOf,
@@ -20,8 +22,10 @@ export interface NarrowListProps {
   infos: Map<string, NodeInfo>;
   // 親ごとの子（絞り込み後の課題だけ）
   kids: Map<string, string[]>;
-  // 親を持たない課題（一番外）の ID
+  // 親を持たない課題（一番外）の ID（「ほかの課題」にまとめる課題は含めない）
   roots: string[];
+  // 「ほかの課題」にまとめる課題の ID（親・子・依存を持たない動いている課題）
+  others: string[];
   relations: ChallengeRelation[];
   expanded: Set<string>;
   inside: (id: string) => Inside | null;
@@ -94,12 +98,57 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
   );
 }
 
+// 「ほかの課題」の見出し。課題ではない疑似の大枠で、押すと開閉するだけ（詳細のモーダルは開かない）。
+function OthersGroup({ p }: { p: NarrowListProps }) {
+  const open = p.expanded.has(OTHERS_ID);
+  const ds = p.others.map((id) => p.infos.get(id));
+  const folded = {
+    total: ds.length,
+    active: ds.filter((d) => d?.active).length,
+    human: ds.filter((d) => d?.category === "human").length,
+  };
+  return (
+    <li className="graph-list-item graph-list-others" data-category="other">
+      <div className="graph-list-row">
+        <button
+          type="button"
+          className="graph-list-toggle"
+          aria-expanded={open}
+          aria-label={
+            open
+              ? `${OTHERS_LABEL}を畳む（${folded.total} 件）`
+              : `${OTHERS_LABEL}を開く（${folded.total} 件）`
+          }
+          onClick={() => p.onToggle(OTHERS_ID)}
+        >
+          {open ? "−" : "+"}
+        </button>
+        <b className="graph-list-others-title">
+          {OTHERS_LABEL} {folded.total}件
+        </b>
+      </div>
+      {open ? (
+        <ul className="graph-list-children">
+          {[...p.others].sort(compareIds).map((c) => (
+            <Row key={c} id={c} p={p} />
+          ))}
+        </ul>
+      ) : (
+        <div className="graph-list-meta">
+          <span>{insideText(folded, "畳んだ課題")}</span>
+        </div>
+      )}
+    </li>
+  );
+}
+
 export function NarrowList(p: NarrowListProps) {
   return (
     <ul aria-label="課題の一覧（親ごと）" className="graph-list">
       {[...p.roots].sort(compareIds).map((id) => (
         <Row key={id} id={id} p={p} />
       ))}
+      {p.others.length > 0 ? <OthersGroup p={p} /> : null}
     </ul>
   );
 }
