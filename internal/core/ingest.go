@@ -176,6 +176,7 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 	}
 
 	result := &IngestResult{Sources: make([]SourceIngestResult, 0, len(in.Sources))}
+	observed := observedParents{}
 
 	for _, src := range in.Sources {
 		sr := SourceIngestResult{ID: src.ID, Repos: make([]RepoIngestResult, 0, len(src.Repos))}
@@ -204,6 +205,7 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
+				observed.observe(issue)
 				_, isBound := bound[issue.ExternalKey]
 				item, excluded, err := s.ingestOneIssue(ctx, actor, ch, src, selfAssignees, resolved, isBound, issue)
 				switch {
@@ -235,6 +237,10 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 			sr.Repos = append(sr.Repos, rr)
 		}
 		result.Sources = append(result.Sources, sr)
+	}
+	// 上流の sub-issue の関係を課題の親子へ写す。全リポジトリの課題の対応が出そろった後で行う。
+	if err := s.syncIngestParents(ctx, actor, ch, observed); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

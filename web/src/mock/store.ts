@@ -1,7 +1,6 @@
 // ブラウザ内の偽のストア。開発時の mock モードだけが読み込む（本番のビルドには入らない）。
 // 返す形は types.gen.ts と仕様の API の節に従う。状態の導出は本物では core がやるが、ここでは同じ表を写す。
 
-import type { ChallengeGraphResponse } from "../api/proposed.ts";
 import type {
   Approval,
   BudgetExhausted,
@@ -9,6 +8,7 @@ import type {
   Challenge,
   ChallengeCard,
   CycleStatus,
+  GraphResponse,
   Hold,
   Operation,
   PlanDetail,
@@ -19,7 +19,7 @@ import type {
   Workspace,
 } from "../api/types.gen.ts";
 import type { DiscrepancyKind } from "../labels.ts";
-import { seedGraphs } from "./graph.ts";
+import { type GraphSeed, seedGraphs } from "./graph.ts";
 
 export interface Flags {
   running?: boolean;
@@ -67,9 +67,8 @@ export interface MockWorkspace {
   meta: Workspace;
   items: MockChallenge[];
   cycle: CycleStatus;
-  graph: ChallengeGraphResponse;
-  // 見た目の設定の案（proposed.ts の AgentProfile）。絵文字か画像の URL、無ければ null
-  icon: string | null;
+  // 関係グラフの偽の関係（親子・依存）。応答は graphOf が課題の導出と合わせて作る
+  graph: GraphSeed;
 }
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -184,11 +183,6 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
 });
 
 const LONG = `${"この値はカードに全文を出すと幅 320px の列で何行にも伸びる。".repeat(8)}\n2 行目: 外部の Issue 本文をそのまま取り込んだ想定の長い説明。`;
-
-// 画像の URL を持つアイコンの例（外へ取りに行かないよう、data URL の SVG にする）
-const BETA_ICON = `data:image/svg+xml,${encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="8" fill="#2f6fde"/><path d="M8 28 L16 14 L22 24 L26 18 L32 28 Z" fill="#fff"/></svg>',
-)}`;
 
 export function seed(): Record<string, MockWorkspace> {
   const graphs = seedGraphs();
@@ -452,7 +446,6 @@ export function seed(): Record<string, MockWorkspace> {
         last_result: "completed",
       },
       graph: graphs.alpha,
-      icon: "🚀",
     },
     beta: {
       meta: ok("beta"),
@@ -464,7 +457,6 @@ export function seed(): Record<string, MockWorkspace> {
         last_result: "completed",
       },
       graph: graphs.beta,
-      icon: BETA_ICON,
     },
     gamma: {
       meta: {
@@ -480,8 +472,7 @@ export function seed(): Record<string, MockWorkspace> {
         last_ended_at: null,
         last_result: null,
       },
-      graph: { relations: [], repos: [], waiting_party: [] },
-      icon: null,
+      graph: { parents: {}, deps: [] },
     },
   };
 }
@@ -528,6 +519,47 @@ export function cardOf(m: MockChallenge): Card {
     slot_ids: f.slot ? [f.slot.slot_id] : [],
     state: s,
   };
+}
+
+// `GET …/graph` の偽の応答。区分・running・stale は課題のカードの導出と同じ規則（人間 > 完了 > システム。
+// 外部待ちは core から出ない）。登録の日時は 2026-10-10T00:00:00Z からの経過分。
+export function graphOf(w: MockWorkspace): GraphResponse {
+  const byId = new Map(w.items.map((m) => [m.c.id, m]));
+  const idNum = (id: string) => Number(id.replace(/^\D+/, ""));
+  const nodes = [...w.items]
+    .sort((a, b) => idNum(a.c.id) - idNum(b.c.id))
+    .map((m) => {
+      const card = cardOf(m);
+      const category =
+        card.next_human_actions.length > 0
+          ? "human"
+          : m.c.status === "done"
+            ? "done"
+            : "system";
+      return {
+        category,
+        context: m.context,
+        headline: m.headline,
+        id: m.c.id,
+        parent_id: w.graph.parents[m.c.id] ?? null,
+        running: !!(m.flags.running || m.flags.unresponsive),
+        stale: !!m.flags.unresponsive,
+        title: m.c.title,
+      };
+    });
+  const edges = [...w.graph.deps]
+    .sort((a, b) => idNum(a.from) - idNum(b.from) || idNum(a.to) - idNum(b.to))
+    .map((d) => ({
+      from: d.from,
+      kind: d.kind,
+      registered_at: new Date(
+        Date.parse("2026-10-10T00:00:00Z") + d.minutes * 60_000,
+      ).toISOString(),
+      registered_via: d.via,
+      satisfied: byId.get(d.from)?.c.status === "done",
+      to: d.to,
+    }));
+  return { edges, nodes };
 }
 
 export const toCard = (m: MockChallenge): ChallengeCard => ({

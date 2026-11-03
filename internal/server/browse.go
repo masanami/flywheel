@@ -137,6 +137,19 @@ func challengesHandler(fleet *Fleet, checks *checkCache, now func() time.Time) h
 	}
 }
 
+// graphHandler は GET /api/v1/workspaces/{name}/graph（課題の関係グラフ）。core の記録だけから作り、
+// 上流（GitHub）にも LLM にも問い合わせない。
+func graphHandler(fleet *Fleet, now func() time.Time) http.HandlerFunc {
+	return withStore(fleet, func(w http.ResponseWriter, r *http.Request, st *core.Store) {
+		g, err := st.ChallengeGraph(r.Context(), now())
+		if err != nil {
+			writeCoreError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, view.FromChallengeGraph(g))
+	})
+}
+
 func challengeHandler(fleet *Fleet, checks *checkCache, now func() time.Time) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !getOnly(w, r) {

@@ -1,22 +1,20 @@
-// 関係グラフの案（flywheel#176）の SVG の描画。親課題は大枠（開いたとき）か重ねた箱（畳んだとき）で示し、
+// 課題の関係グラフ（flywheel#176）の SVG の描画。親課題は大枠（開いたとき）か重ねた箱（畳んだとき）で示し、
 // 依存だけを線で結ぶ。どの課題を選んでいるか・薄くするかは画面（GraphScreen）が決めて渡す。
 // 2026-10-14 オーナー: ノードは ID と題名だけでは読めない。開いた大枠の見出しには「位置づけ」、依存の線には理由を持たせる。
 // 2026-10-17 オーナー: ノードには題名を出し、カーソルを重ねたとき（キーボードで移ったとき）に「一言で」を吹き出しで出す。
 // 課題を押すとボードと同じ詳細のモーダルを開く。先行・後続の強調も重ねたとき・移ったときに出す。
 
 import type { KeyboardEvent } from "react";
-import type { PartyWait } from "../../api/proposed.ts";
-import type { ChallengeCard } from "../../api/types.gen.ts";
+import type { GraphNode } from "../api/types.gen.ts";
 import {
-  AUTO_CHECK_TEXT,
-  CATEGORIES,
   type Category,
   type Dims,
   type Layout,
   type LayoutBox,
   type LayoutEdge,
-  STALE_LABEL,
   STALE_LONG,
+  categoryLabel,
+  chipLines,
   clip,
   clipLines,
   reasonText,
@@ -24,14 +22,11 @@ import {
 } from "./model.ts";
 
 export interface NodeInfo {
-  card: ChallengeCard;
+  node: GraphNode;
   category: Category;
-  repos: string[];
-  marks: string[];
-  // run が動いている（実施中）・自動の確認待ち（waiting_ci）・自動では解けない待ちの相手
+  // 課題の run が動いている（実施中）。記録が途絶えていれば stale も立つ
   active: boolean;
-  autoCheck: boolean;
-  party: PartyWait | null;
+  stale: boolean;
 }
 
 // 畳んだ親の中に入っている課題の数（子・孫…を含む）。
@@ -45,7 +40,6 @@ export interface Inside {
 // edgeChars は依存の理由の札の文字数。calloutW・calloutLines は一言での吹き出しの最小の幅と行数の上限。
 export type Dimensions = Dims & {
   titleLines: number;
-  metaChars: number;
   ctxCharW: number;
   ctxLineH: number;
   edgeChars: number;
@@ -59,7 +53,6 @@ export interface CanvasProps {
   ws: string;
   layout: Layout;
   dims: Dimensions;
-  narrow: boolean;
   infos: Map<string, NodeInfo>;
   inside: (id: string) => Inside | null;
   // カーソルを重ねた・キーボードで移った課題（先行・後続の強調の起点。一言での吹き出しもこの課題に出す）
@@ -141,8 +134,6 @@ export function edgeName(e: LayoutEdge): string {
 
 // 重ねた・移った課題の一言での吹き出し。箱の下（入らなければ上）に置き、画面の幅に収める。
 // 一言では切らずに折り返し、行数の上限を超えたときだけ「…」で切る。押す操作は下へ通す。
-// 自動では解けない外部待ちの相手と理由・自動の確認を待っていることもここに出す（以前は右のパネルに出していた。
-// 詳細のモーダルは試作の案の印を知らず、自動の確認待ちも利用分野の語で出すため）。
 function HeadlineCallout({
   id,
   p,
@@ -151,29 +142,18 @@ function HeadlineCallout({
   p: CanvasProps;
 }) {
   const info = p.infos.get(id);
-  const c = info?.card;
+  const headline = info?.node.headline;
   // 開いた大枠の一言では見出しの欄に出すので、吹き出しは課題のノード（畳んだ親を含む）だけに出す
   const box = p.layout.nodes.find((b) => b.id === id);
-  if (!c || !box) return null;
-  const { dims, layout, narrow } = p;
-  const font = narrow ? 12 : 13;
+  if (!headline || !box) return null;
+  const { dims, layout } = p;
+  const font = 13;
   const w = Math.min(layout.width - 4, Math.max(box.w, dims.calloutW));
   const lineH = font + 5;
-  const sections = [
-    c.card.headline ? { label: "一言で", text: c.card.headline } : null,
-    info.party
-      ? {
-          label: "外部待ち",
-          text: `${info.party.party}（${info.party.reason}）`,
-        }
-      : null,
-    info.autoCheck ? { label: "自動の確認", text: AUTO_CHECK_TEXT } : null,
-  ]
-    .filter((x) => x !== null)
-    .map((x) => ({
-      ...x,
-      lines: clipLines(x.text, w - 20, font, dims.calloutLines),
-    }));
+  const sections = [{ label: "一言で", text: headline }].map((x) => ({
+    ...x,
+    lines: clipLines(x.text, w - 20, font, dims.calloutLines),
+  }));
   if (sections.length === 0) return null;
   // 区分ごとに、見出しの行（16px）と文の行を積む
   let top = 0;
@@ -212,10 +192,7 @@ function HeadlineCallout({
   );
 }
 
-const categoryLabel = (c: Category) =>
-  CATEGORIES.find((k) => k.key === c)?.label ?? c;
-
-function insideText(n: Inside): string {
+export function insideText(n: Inside): string {
   const parts = [
     n.active > 0 ? `実施中 ${n.active}` : "",
     n.human > 0 ? `人間の操作待ち ${n.human}` : "",
@@ -227,13 +204,12 @@ export function accessibleName(
   i: NodeInfo,
   extra: string | null = null,
 ): string {
-  const c = i.card;
   const notes = [
     categoryLabel(i.category),
-    ...i.marks,
+    ...(i.stale ? [STALE_LONG] : []),
     ...(extra ? [extra] : []),
   ];
-  return `${c.id} ${c.title}（${notes.join("・")}）`;
+  return `${i.node.id} ${i.node.title}（${notes.join("・")}）`;
 }
 
 const onActivate = (fn: () => void) => (ev: KeyboardEvent) => {
@@ -283,15 +259,7 @@ function Toggle({
 }
 
 // 畳んだ親の箱の 3 行目に置く、中の件数の札。実施中と人間の操作待ちだけを色つきで出す。
-function InsideBadges({
-  n,
-  narrow,
-  y,
-}: {
-  n: Inside;
-  narrow: boolean;
-  y: number;
-}) {
+function InsideBadges({ n, y }: { n: Inside; y: number }) {
   const badges: { key: string; cat: Category; text: string }[] = [
     { key: "all", cat: "other", text: `子${n.total}` },
   ];
@@ -299,13 +267,13 @@ function InsideBadges({
     badges.push({
       key: "active",
       cat: "running",
-      text: narrow ? `▶${n.active}` : `▶実施中${n.active}`,
+      text: `▶実施中${n.active}`,
     });
   if (n.human > 0)
     badges.push({
       key: "human",
       cat: "human",
-      text: narrow ? `!${n.human}` : `!人間待ち${n.human}`,
+      text: `!人間待ち${n.human}`,
     });
   // 10px の文字の幅の目安（全角 10px・半角 6px）。SVG の text は幅を測らずに置く
   const textW = (t: string) =>
@@ -325,8 +293,8 @@ function InsideBadges({
             data-badge={b.key}
             transform={`translate(${at} ${y})`}
           >
-            <rect width={w} height={narrow ? 13 : 14} rx={7} />
-            <text x={5} y={narrow ? 10 : 10.5}>
+            <rect width={w} height={14} rx={7} />
+            <text x={5} y={10.5}>
               {b.text}
             </text>
           </g>
@@ -345,11 +313,10 @@ function NodeBox({
 }) {
   const i = p.infos.get(box.id);
   if (!i) return null;
-  const c = i.card;
   const inside = p.inside(box.id);
   const selfActive = i.active;
   const active = selfActive || (inside?.active ?? 0) > 0;
-  const stale = c.card.modifiers.includes("unresponsive");
+  const stale = i.stale;
   const select = () => p.onOpen(box.id);
   return (
     <g transform={`translate(${box.x} ${box.y})`}>
@@ -414,7 +381,7 @@ function NodeBox({
   );
 }
 
-// ノードの 3 段（ID と優先度・題名・印かリポジトリ）。
+// ノードの 3 段（ID・題名・更新なしの札か畳んだ親の中の件数）。
 function NodeLines({
   box,
   p,
@@ -426,42 +393,28 @@ function NodeLines({
   i: NodeInfo;
   inside: Inside | null;
 }) {
-  const { dims, narrow } = p;
-  const c = i.card;
-  const selfActive = i.active;
-  const stale = c.card.modifiers.includes("unresponsive");
+  const { dims } = p;
+  const n = i.node;
   // 更新なしは 3 行目を札に使う（旧 board の「⚠ 更新なし（要確認）」と同じく、赤の太字で出す）
-  const marks = i.marks.filter((m) => m !== STALE_LABEL);
-  // 題名の行が増えた分だけ、3 段目（印・リポジトリ・中の件数の札）を下げる
+  // 題名の行が増えた分だけ、3 段目（札・中の件数の札）を下げる
   const shift = (dims.titleLines - 1) * 16;
-  const lines = clipLines(
-    c.title,
-    box.w - 18,
-    narrow ? 12 : 13,
-    dims.titleLines,
-  );
-  const third = narrow
-    ? (marks[0] ?? "")
-    : [...marks, i.repos.map((r) => r.split("/").pop()).join("・")]
-        .filter(Boolean)
-        .join(" / ");
+  const lines = clipLines(n.title, box.w - 18, 13, dims.titleLines);
   return (
     <>
-      <text x={11} y={narrow ? 16 : 18} className="graph-node-id">
-        {c.id}
-        {c.priority ? ` ${c.priority}` : ""}
+      <text x={11} y={18} className="graph-node-id">
+        {n.id}
       </text>
-      {selfActive ? (
+      {i.active ? (
         <text
           x={box.w - (inside ? TOGGLE + 10 : 8)}
-          y={narrow ? 16 : 18}
+          y={18}
           textAnchor="end"
           className="graph-node-active-tag"
         >
-          {narrow ? "▶" : "▶ 実施中"}
+          ▶ 実施中
         </text>
       ) : null}
-      <text x={11} y={narrow ? 31 : 35} className="graph-node-title">
+      <text x={11} y={35} className="graph-node-title">
         {lines.map((line, k) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: 幅で切った行の並びで、行の位置そのものが鍵
           <tspan key={k} x={11} dy={k === 0 ? 0 : 16}>
@@ -470,22 +423,10 @@ function NodeLines({
         ))}
       </text>
       {inside ? (
-        <InsideBadges
-          n={inside}
-          narrow={narrow}
-          y={(narrow ? 36 : 41) + shift}
-        />
-      ) : stale ? (
-        <text
-          x={11}
-          y={(narrow ? 45 : 51) + shift}
-          className="graph-node-stale"
-        >
-          {narrow ? STALE_LABEL : STALE_LONG}
-        </text>
-      ) : third ? (
-        <text x={11} y={(narrow ? 45 : 51) + shift} className="graph-node-meta">
-          {clip(third, dims.metaChars)}
+        <InsideBadges n={inside} y={41 + shift} />
+      ) : i.stale ? (
+        <text x={11} y={51 + shift} className="graph-node-stale">
+          {STALE_LONG}
         </text>
       ) : null}
     </>
@@ -498,14 +439,14 @@ function NodeLines({
 function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
   const i = p.infos.get(box.id);
   if (!i) return null;
-  const { dims, narrow } = p;
-  const c = i.card;
+  const { dims } = p;
+  const c = i.node;
   const selfActive = i.active;
   const select = () => p.onOpen(box.id);
-  const chars = Math.max(4, Math.floor((box.w - 90) / (narrow ? 12 : 13)));
+  const chars = Math.max(4, Math.floor((box.w - 90) / 13));
   const { headline: hl, context: lines } = headLines(
-    c.card.headline,
-    c.card.context,
+    c.headline,
+    c.context,
     box.w,
     dims,
   );
@@ -652,16 +593,21 @@ function MoreButton({
 
 interface PlacedLabel {
   e: LayoutEdge;
-  text: string;
+  lines: string[];
   x: number;
   y: number;
   w: number;
 }
 
-const LABEL_H = 18;
+const LABEL_LINE_H = 15;
 
-// 理由の札を線の中ほどに置く。同じ後続へ合流する線は中ほどが近く札が重なるので、重なる札は下へずらす。
-export function placeLabels(edges: LayoutEdge[], chars: number): PlacedLabel[] {
+// 理由の札（種類と、登録の経路・日時・満たされているかの 2 行）を線の中ほどに置く。同じ後続へ合流する線は中ほどが近く
+// 札が重なるので、重なる札は下へずらす。札は画面の幅からはみ出さない。
+export function placeLabels(
+  edges: LayoutEdge[],
+  chars: number,
+  maxW: number,
+): PlacedLabel[] {
   const placed: PlacedLabel[] = [];
   const sorted = [...edges].sort(
     (a, b) => a.mid.y - b.mid.y || a.mid.x - b.mid.x,
@@ -670,21 +616,31 @@ export function placeLabels(edges: LayoutEdge[], chars: number): PlacedLabel[] {
     const first = e.relations[0];
     if (!first) continue;
     const more = e.relations.length - 1;
-    const text = `${clip(reasonText(first), chars)}${more > 0 ? ` ほか${more}件` : ""}`;
-    const w = labelW(text) + 12;
-    const x = e.mid.x - w / 2;
-    let y = e.mid.y - LABEL_H / 2;
+    const lines = chipLines(first)
+      .filter((l) => l !== "")
+      .map(
+        (l, i, all) =>
+          clip(l, chars) +
+          (i === all.length - 1 && more > 0 ? ` ほか${more}件` : ""),
+      );
+    const w = Math.max(...lines.map(labelW)) + 12;
+    const h = lines.length * LABEL_LINE_H + 6;
+    const x = Math.max(0, Math.min(e.mid.x - w / 2, maxW - w));
+    let y = e.mid.y - h / 2;
     const hits = (q: PlacedLabel) =>
-      x < q.x + q.w && q.x < x + w && y < q.y + LABEL_H && q.y < y + LABEL_H;
-    while (placed.some(hits)) y += LABEL_H + 2;
-    placed.push({ e, text, x, y, w });
+      x < q.x + q.w &&
+      q.x < x + w &&
+      y < q.y + q.lines.length * LABEL_LINE_H + 6 &&
+      q.y < y + h;
+    while (placed.some(hits)) y += h + 2;
+    placed.push({ e, lines, x, y, w });
   }
   return placed;
 }
 
 // 依存の線の理由の札。押せない（線の当たり判定の上に重ねるが、押す操作は下へ通す）。
 function EdgeLabel({ l }: { l: PlacedLabel }) {
-  const { e, text, x, y, w } = l;
+  const { e, lines, x, y, w } = l;
   return (
     <g
       className="graph-edge-label"
@@ -693,16 +649,21 @@ function EdgeLabel({ l }: { l: PlacedLabel }) {
       data-basis={e.basis}
       transform={`translate(${x} ${y})`}
     >
-      <rect width={w} height={LABEL_H} rx={LABEL_H / 2} />
-      <text x={6} y={12.5}>
-        {text}
+      <rect width={w} height={lines.length * LABEL_LINE_H + 6} rx={9} />
+      <text x={6} y={13}>
+        {lines.map((line, k) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 札の行の並びで、行の位置そのものが鍵
+          <tspan key={k} x={6} dy={k === 0 ? 0 : LABEL_LINE_H}>
+            {line}
+          </tspan>
+        ))}
       </text>
     </g>
   );
 }
 
 export function GraphCanvas(p: CanvasProps) {
-  const { layout, dims, narrow, ws } = p;
+  const { layout, dims, ws } = p;
   return (
     <svg
       // biome-ignore lint/a11y/useSemanticElements: 課題のノード（ボタン）を束ねる SVG で、fieldset に置き換えられない
@@ -710,7 +671,7 @@ export function GraphCanvas(p: CanvasProps) {
       aria-label={`${ws} の課題の関係グラフ`}
       viewBox={`0 0 ${layout.width} ${layout.height}`}
       width={layout.width}
-      className={narrow ? "graph-svg is-narrow" : "graph-svg"}
+      className="graph-svg"
     >
       <defs>
         <marker
@@ -803,11 +764,13 @@ export function GraphCanvas(p: CanvasProps) {
       {layout.nodes.map((n) => (
         <NodeBox key={n.id} box={n} p={p} />
       ))}
-      {placeLabels(layout.edges.filter(p.edgeLabeled), dims.edgeChars).map(
-        (l) => (
-          <EdgeLabel key={edgeKey(l.e)} l={l} />
-        ),
-      )}
+      {placeLabels(
+        layout.edges.filter(p.edgeLabeled),
+        dims.edgeChars,
+        layout.width,
+      ).map((l) => (
+        <EdgeLabel key={edgeKey(l.e)} l={l} />
+      ))}
       {p.focused ? <HeadlineCallout id={p.focused} p={p} /> : null}
     </svg>
   );

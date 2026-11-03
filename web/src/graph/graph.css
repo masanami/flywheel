@@ -1,0 +1,754 @@
+/* 課題の関係グラフ（flywheel#176）。区分の色は承認待ちの暖色・外部待ちの紫など、ボードの状態の色と同じ系統に寄せる。
+ * 変数は :root に置く（詳細のモーダルに差し込む「待っている理由」も同じ色を使うため）。 */
+:root {
+  --graph-human: #e07b39;
+  --graph-external: #8a63d2;
+  --graph-running: #1b998b;
+  --graph-system: #4a90d9;
+  --graph-done: #9aa0a6;
+  --graph-other: #c4c4c9;
+  --graph-edge: #9a9aa2;
+  --graph-edge-lit: #1c1c1f;
+  --graph-frame: #b9b9c0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --graph-edge: #6b6b70;
+    --graph-edge-lit: #e7e7ea;
+    --graph-other: #5a5a60;
+    --graph-frame: #55555b;
+  }
+}
+/* ボードの 1 画面の中のグラフの表示。スクロールはこの中で行う（画面全体は動かさない） */
+.graph-screen {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 0.5rem 0.75rem;
+}
+.board-screen > .graph-topbar-board {
+  padding: 0.5rem 0.75rem 0;
+}
+.graph-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+  margin-bottom: 0.6rem;
+}
+.graph-ws-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  font-size: 0.85rem;
+}
+.graph-ws-picker select {
+  min-width: 0;
+  max-width: 100%;
+}
+/* 右側はターミナル／対話の欄のために空けておく（欄は作らない）。狭い画面では場所を取らない */
+.graph-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--graph-dock-w, 0px);
+  gap: 0.75rem;
+}
+.graph-shell-main {
+  min-width: 0;
+}
+.graph-dock-space {
+  min-width: 0;
+}
+@media (min-width: 481px) {
+  .graph-shell {
+    --graph-dock-w: min(420px, 32vw);
+  }
+}
+
+/* 幅 480px 以下の親ごとに畳んだ一覧 */
+.graph-list,
+.graph-list-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.graph-list-children {
+  margin-top: 0.3rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--graph-frame);
+}
+.graph-list-item {
+  min-width: 0;
+  margin: 0 0 0.45rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--board-border);
+  border-left: 5px solid var(--c);
+  border-radius: 6px;
+  background: var(--board-card-bg);
+  overflow-wrap: anywhere;
+}
+.graph-list-item[data-category="done"] {
+  color: var(--board-muted-fg);
+}
+.graph-list-item[data-unresponsive] {
+  background: color-mix(
+    in srgb,
+    var(--running-section-stale-fg) 10%,
+    var(--board-card-bg)
+  );
+}
+.graph-list-item[data-active] {
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--graph-running) 55%, transparent);
+}
+.graph-list-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.graph-list-toggle {
+  flex: none;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--board-border);
+  border-radius: 4px;
+  background: var(--board-chip-bg);
+  color: inherit;
+  cursor: pointer;
+}
+.graph-list-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.graph-list-open:focus-visible,
+.graph-list-toggle:focus-visible {
+  outline: 2px solid var(--graph-edge-lit);
+  outline-offset: 2px;
+}
+.graph-list-meta,
+.graph-list-rel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.6rem;
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  min-width: 0;
+}
+.graph-list-cat {
+  font-weight: 600;
+  color: var(--c);
+}
+.graph-list-stale {
+  color: var(--running-section-stale-fg);
+  font-weight: 700;
+}
+.graph-list-rel {
+  color: var(--board-muted-fg);
+}
+[data-category="human"] {
+  --c: var(--graph-human);
+}
+[data-category="external"] {
+  --c: var(--graph-external);
+}
+[data-category="running"] {
+  --c: var(--graph-running);
+}
+[data-category="system"] {
+  --c: var(--graph-system);
+}
+[data-category="done"] {
+  --c: var(--graph-done);
+}
+[data-category="other"] {
+  --c: var(--graph-other);
+}
+
+.graph-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.graph-swatch {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  border-radius: 3px;
+  background: var(--c);
+  margin-right: 0.25rem;
+  vertical-align: baseline;
+}
+
+.graph-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+.graph-canvas {
+  min-width: 0;
+}
+.graph-svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+.graph-section-label {
+  fill: var(--board-muted-fg);
+  font-size: 12px;
+}
+
+.graph-edge {
+  fill: none;
+  stroke: var(--graph-edge);
+  stroke-width: 1.5;
+}
+.graph-edge[data-lit] {
+  stroke: var(--graph-edge-lit);
+  stroke-width: 2.2;
+}
+.graph-edge[data-dim] {
+  opacity: 0.2;
+}
+.graph-arrow {
+  fill: var(--graph-edge);
+}
+
+.graph-node {
+  cursor: pointer;
+  outline: none;
+}
+.graph-node-box {
+  fill: color-mix(in srgb, var(--c) 14%, var(--board-card-bg));
+  stroke: var(--c);
+  stroke-width: 1.5;
+}
+.graph-node-stripe {
+  fill: var(--c);
+}
+/* 完了は取り消し線を使わず、灰色の枠と淡い文字（グレーアウト）だけで示す */
+.graph-node[data-category="done"] .graph-node-box {
+  fill: color-mix(in srgb, var(--c) 8%, var(--board-card-bg));
+}
+.graph-node[data-category="done"] text {
+  fill: var(--board-muted-fg);
+}
+/* 更新なし（unresponsive）: 旧 board の更新の止まった実行中の行と同じく、箱そのものを赤みにする。
+ * 実施中の光の輪は残し、実行中でかつ更新なしであることを両方示す。 */
+.graph-node[data-unresponsive] .graph-node-box {
+  fill: var(--running-section-stale-bg);
+  stroke: var(--running-section-stale-border);
+  stroke-width: 2;
+}
+.graph-node[data-unresponsive] .graph-node-stripe {
+  fill: var(--running-section-stale-border);
+}
+.graph-node-stale {
+  fill: var(--running-section-stale-fg) !important;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.graph-legend-stale {
+  color: var(--running-section-stale-fg);
+  font-weight: 600;
+}
+.graph-node[data-relation="selected"] .graph-node-box,
+.graph-node:focus-visible .graph-node-box {
+  stroke: var(--board-fg);
+  stroke-width: 3;
+}
+.graph-node[data-relation="downstream"] .graph-node-box {
+  stroke-width: 2.5;
+}
+.graph-node[data-dim] {
+  opacity: 0.25;
+}
+.graph-node text {
+  fill: var(--board-fg);
+}
+.graph-node-id {
+  font-size: 12px;
+  font-weight: 600;
+}
+.graph-node-title {
+  font-size: 13px;
+}
+.graph-node-meta {
+  font-size: 10.5px;
+  fill: var(--board-muted-fg) !important;
+}
+.graph-muted {
+  color: var(--board-muted-fg);
+}
+
+/* 決定 1: グラフと列のボードの切り替え（既定はグラフ） */
+.graph-view-switch {
+  display: inline-flex;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.graph-view-switch button {
+  border: 1px solid var(--board-border);
+  background: var(--board-chip-bg);
+  color: inherit;
+  padding: 0.25rem 0.9rem;
+  cursor: pointer;
+}
+.graph-view-switch button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.graph-view-switch button:last-child {
+  border-radius: 0 6px 6px 0;
+  border-left: 0;
+}
+.graph-view-switch button[aria-pressed="true"] {
+  background: var(--board-fg);
+  color: var(--board-card-bg);
+  font-weight: 600;
+}
+.graph-board-view {
+  min-height: 60vh;
+}
+
+/* 決定 3: いま実施している課題を強調する（一覧の行・ノードの光の輪・「実施中」の札） */
+.graph-active-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85em;
+}
+.graph-active-label {
+  color: var(--graph-running);
+  font-weight: 700;
+}
+.graph-active-chip {
+  border: 1.5px solid var(--graph-running);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--graph-running) 12%, transparent);
+  color: inherit;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+.graph-active-chip[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--graph-running) 30%, transparent);
+}
+.graph-node-halo {
+  fill: none;
+  stroke: var(--graph-running);
+  stroke-width: 3;
+  animation: graph-pulse 1.6s ease-in-out infinite;
+}
+@keyframes graph-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-node-halo {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+.graph-node[data-active] .graph-node-box {
+  stroke-width: 2.5;
+}
+.graph-node-active-tag {
+  fill: var(--graph-running) !important;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 決定 4・追加の指示: 親課題の大枠（開いた親）と、重ねた箱（畳んだ親） */
+.graph-group-box {
+  fill: color-mix(in srgb, var(--c) 5%, transparent);
+  stroke: var(--graph-frame);
+  stroke-width: 1.5;
+}
+.graph-group[data-depth="1"] .graph-group-box,
+.graph-group[data-depth="2"] .graph-group-box {
+  stroke-dasharray: 6 3;
+}
+.graph-group[data-dim] {
+  opacity: 0.35;
+}
+.graph-group-head {
+  cursor: pointer;
+  outline: none;
+}
+.graph-group-head-box {
+  fill: color-mix(in srgb, var(--c) 18%, var(--board-card-bg));
+  stroke: var(--graph-frame);
+  stroke-width: 1.5;
+}
+.graph-group-head[aria-pressed="true"] .graph-group-head-box,
+.graph-group-head:focus-visible .graph-group-head-box {
+  stroke: var(--board-fg);
+  stroke-width: 3;
+}
+.graph-group-head[data-active] .graph-group-head-box {
+  stroke: var(--graph-running);
+  stroke-width: 2.5;
+}
+.graph-group-title {
+  fill: var(--board-fg);
+  font-size: 13px;
+}
+.graph-node-stack {
+  fill: var(--board-card-bg);
+  stroke: var(--c);
+  stroke-width: 1.2;
+}
+.graph-badge rect {
+  fill: color-mix(in srgb, var(--c) 22%, var(--board-card-bg));
+  stroke: var(--c);
+  stroke-width: 1;
+}
+.graph-badge text {
+  font-size: 10px;
+  font-weight: 600;
+}
+.graph-badge[data-badge="all"] rect {
+  fill: transparent;
+  stroke: var(--graph-frame);
+}
+.graph-toggle-btn {
+  cursor: pointer;
+  outline: none;
+}
+.graph-toggle-btn rect {
+  fill: var(--board-card-bg);
+  stroke: var(--graph-frame);
+  stroke-width: 1.2;
+}
+.graph-toggle-btn:focus-visible rect,
+.graph-toggle-btn:hover rect {
+  stroke: var(--board-fg);
+  stroke-width: 2;
+}
+.graph-toggle-btn text {
+  fill: var(--board-fg);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* 凡例と絞り込み: 区分は色の丸＋語＋件数の小さなチップ。選んだ区分は区分の色で塗り、ほかは淡くする。
+ * 説明の文は「? 凡例」の吹き出しへ移した */
+.graph-titlebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.graph-agent-title {
+  margin: 0;
+  font-size: 1.05em;
+}
+.graph-titlebar-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+.graph-tool-btn {
+  border: 1px solid var(--board-border);
+  border-radius: 6px;
+  background: var(--board-chip-bg);
+  color: inherit;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.8em;
+  cursor: pointer;
+  list-style: none;
+}
+summary.graph-tool-btn::-webkit-details-marker {
+  display: none;
+}
+.graph-help {
+  position: relative;
+}
+.graph-help-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 5;
+  width: min(26rem, calc(100vw - 2rem));
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.82em;
+  line-height: 1.5;
+  background: var(--board-card-bg);
+  border: 1px solid var(--board-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.14);
+}
+.graph-help-body .graph-swatch {
+  border-radius: 50%;
+}
+.graph-filters > summary {
+  cursor: pointer;
+  font-size: 0.82em;
+  color: var(--board-muted-fg);
+  margin-bottom: 0.3rem;
+}
+.graph-filter-count {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0 0.4rem;
+  border-radius: 9px;
+  background: var(--board-fg);
+  color: var(--board-card-bg);
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.graph-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 1rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--board-border);
+  border-radius: 8px;
+  background: var(--board-column-bg);
+}
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82em;
+}
+.graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--board-card-bg);
+  color: inherit;
+  padding: 0.12rem 0.55rem 0.12rem 0.45rem;
+  cursor: pointer;
+  transition: opacity 0.12s, background 0.12s;
+}
+.graph-legend-item .graph-swatch {
+  width: 0.6rem;
+  height: 0.6rem;
+  margin: 0;
+  border-radius: 50%;
+}
+.graph-legend-item:hover {
+  border-color: var(--c);
+}
+.graph-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--board-muted-fg);
+}
+.graph-legend-item[aria-pressed="true"] {
+  background: var(--c);
+  border-color: var(--c);
+  color: #fff;
+}
+.graph-legend-item[aria-pressed="true"] .graph-swatch {
+  background: #fff;
+}
+.graph-legend-item[aria-pressed="true"] .graph-count {
+  color: #fff;
+}
+.graph-filterbar[data-filtering] .graph-legend-item[aria-pressed="false"] {
+  opacity: 0.55;
+}
+.graph-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82em;
+  cursor: pointer;
+}
+.graph-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.graph-switch-track {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--board-border);
+  transition: background 0.12s;
+}
+.graph-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.12s;
+}
+.graph-switch input:checked + .graph-switch-track {
+  background: var(--graph-running);
+}
+.graph-switch input:checked + .graph-switch-track::after {
+  left: 14px;
+}
+.graph-switch input:focus-visible + .graph-switch-track {
+  outline: 2px solid var(--board-fg);
+  outline-offset: 2px;
+}
+.graph-clear {
+  border: 0;
+  background: transparent;
+  color: var(--graph-system);
+  font-size: 0.82em;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* 3 巡目（2026-10-14 オーナー: ノードが ID と題名だけでは読めない）: 一言で・位置づけ・依存の理由 */
+/* 依存の線の種類: 衝突のための順番は破線と中抜きの矢じり */
+.graph-edge[data-basis="conflict"] {
+  stroke-dasharray: 5 4;
+}
+.graph-arrow-open {
+  fill: var(--board-card-bg);
+  stroke: var(--graph-edge);
+  stroke-width: 1.4;
+}
+.graph-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  pointer-events: stroke;
+  cursor: pointer;
+  outline: none;
+}
+.graph-edge-hit:focus-visible {
+  stroke: color-mix(in srgb, var(--graph-edge-lit) 18%, transparent);
+}
+.graph-edge-wrap:hover .graph-edge {
+  stroke: var(--graph-edge-lit);
+  opacity: 1;
+}
+.graph-edge-label {
+  pointer-events: none;
+}
+.graph-edge-label rect {
+  fill: var(--board-card-bg);
+  stroke: var(--graph-edge-lit);
+  stroke-width: 1;
+}
+.graph-edge-label[data-basis="conflict"] rect {
+  stroke-dasharray: 3 2;
+}
+.graph-edge-label text {
+  fill: var(--board-fg);
+  font-size: 10.5px;
+}
+
+/* 開いた大枠の位置づけと、続きを広げるボタン */
+.graph-group-context {
+  fill: var(--board-muted-fg);
+  font-size: 11px;
+}
+/* 大枠の見出しの欄の一言で。位置づけより濃く出す */
+.graph-group-headline {
+  fill: var(--board-fg);
+  font-size: 11px;
+}
+/* 「続き」はボタンの見た目にせず、リンクのような文字だけにする（2026-10-17 オーナー） */
+.graph-more-btn {
+  cursor: pointer;
+  outline: none;
+}
+.graph-more-hit {
+  fill: transparent;
+}
+.graph-more-btn text {
+  fill: var(--graph-system);
+  font-size: 11px;
+  text-decoration: underline;
+}
+.graph-more-btn:hover text {
+  fill: var(--board-fg);
+}
+.graph-more-btn:focus-visible .graph-more-hit {
+  stroke: var(--board-fg);
+  stroke-width: 1.5;
+}
+
+/* 一言での吹き出し（選んだ課題・カーソルを重ねた課題） */
+.graph-callout {
+  pointer-events: none;
+}
+.graph-callout rect {
+  fill: var(--board-card-bg);
+  stroke: var(--board-fg);
+  stroke-width: 1;
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.18));
+}
+.graph-callout-label {
+  fill: var(--board-muted-fg);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.graph-callout-text {
+  fill: var(--board-fg);
+  font-size: 13px;
+}
+
+/* 詳細のモーダルに差し込む「待っている理由（直前の先行）」（2026-10-17 オーナー） */
+.graph-waiting h3 {
+  margin: 0.8rem 0 0.3rem;
+  font-size: 1em;
+}
+.graph-waiting ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.graph-waiting li {
+  margin: 0.35rem 0;
+  padding-left: 0.5rem;
+  border-left: 3px solid var(--graph-edge-lit);
+}
+.graph-waiting li[data-basis="conflict"] {
+  border-left-style: dashed;
+}
+.graph-waiting-reason {
+  margin-top: 0.1rem;
+}
+.graph-waiting-kind {
+  margin-right: 0.4rem;
+  font-size: 0.85em;
+  color: var(--board-muted-fg);
+}

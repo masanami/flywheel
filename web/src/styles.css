@@ -1440,8 +1440,9 @@ body {
 /* 移植に伴う追加（board には無い）: 画面の切り替えと接続状態の細い帯、承認方法の案内 */
 .view-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.25rem 0.75rem;
   padding: 0.25rem 0.75rem;
   border-bottom: 1px solid var(--board-border, #ccc);
   font-size: 0.85rem;

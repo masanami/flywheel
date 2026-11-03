@@ -1,14 +1,10 @@
-// 関係グラフの案（flywheel#176）の導出と配置。画面から切り離した純粋な関数だけを置く。
-// 区分は仕様 m4-ui-server.md「状況の表示とライブ更新」のカードの区分の印と同じ値から導く（API に区分を足さない）。
+// 課題の関係グラフ（flywheel#176）の導出と配置。画面から切り離した純粋な関数だけを置く。
+// 区分・running・stale・親子・依存は `GET …/graph`（core が記録だけから決定的に導く）の値をそのまま使う。
 
-import type {
-  ChallengeRelation,
-  DependencyBasis,
-  RelationKind,
-} from "../../api/proposed.ts";
-import type { ChallengeCard, StatusResponse } from "../../api/types.gen.ts";
+import type { GraphEdge, GraphNode, GraphResponse } from "../api/types.gen.ts";
 
-// ノードの色の区分。1 つの課題は 1 つの区分だけに入り、上から順に先に当たったものを採る。
+// ノードの色の区分。API の区分（human・external・done・system）に、システムが進めていて run が動いている
+// 課題の running を足したもの。other は畳んだ親の件数の札の色にだけ使う。
 export type Category =
   | "human"
   | "external"
@@ -17,55 +13,58 @@ export type Category =
   | "done"
   | "other";
 
-// 区分の名前。2026-10-17 オーナー: 凡例は区分の名前と色だけにし、実装の語（フィールド名など）の注記を人に見せない。
-// 判定の根拠は categoryOf の注記に置く。
+// 区分の名前。凡例は区分の名前と色だけにし、実装の語（フィールド名など）を人に見せない。
 export const CATEGORIES: { key: Category; label: string }[] = [
-  // card.next_human_actions が空でない
   { key: "human", label: "人間の操作待ち" },
-  // 自動では解けない待ち（他チームへの相談・外部のレビュー・ベンダーの回答など。案の印 waiting_party）
   { key: "external", label: "外部待ち" },
-  // run が動いているか、自動の確認（waiting_ci）の結果を待っていて、結果が出ればシステムが先へ進める
   { key: "running", label: "システムが実行中" },
-  // 次の周でシステムが進められる（status.actionable）
   { key: "system", label: "システムが次に進めるもの" },
   { key: "done", label: "完了" },
-  // 上のいずれにも当たらない
-  { key: "other", label: "その他" },
 ];
 
-// 実行中で、しきい値を超えて記録が無い run（unresponsive）の見せ方。旧 board（claude-flywheel-board の
-// Issue #154）と同じく、死活の断定に読める「応答なし」を避け、事実だけを言う「更新なし」とする。
+export const categoryLabel = (c: Category): string =>
+  CATEGORIES.find((k) => k.key === c)?.label ?? c;
+
+// 実行中で、しきい値を超えて記録が無い run（stale）の見せ方。死活の断定に読める「応答なし」を避け、
+// 事実だけを言う「更新なし」とする。
 export const STALE_LABEL = "⚠ 更新なし";
 export const STALE_LONG = "⚠ 更新なし（要確認）";
 export const STALE_HINT =
   "実行中だが、しきい値を超えて記録がありません。止まったとは限らず、長い委譲でも出ます";
 
-// 自動の確認待ち（いまのカードの印は waiting_ci）。人に見せる面では利用分野に固有の語（CI・PR など）を使わず、
-// 「システムが実行中」の区分の色だけで示す（2026-10-14 オーナー: flywheel は汎用の道具）。
-export const AUTO_CHECK_TEXT =
-  "検証中（自動の確認を待っている。結果が出ればシステムが先へ進める）";
-
-// いま run が動いている（実施中）。自動の確認待ちは実行中の区分に入るが、run は動いていないので実施中ではない。
-export const isActive = (c: ChallengeCard) =>
-  c.card.modifiers.includes("running") ||
-  c.card.modifiers.includes("unresponsive");
-
-// partyWait は自動では解けない待ち（案の印 waiting_party）があるか。
-export function categoryOf(
-  c: ChallengeCard,
-  actionable: Set<string>,
-  partyWait = false,
-): Category {
-  if (c.card.next_human_actions.length > 0) return "human";
-  if (partyWait) return "external";
-  if (isActive(c) || c.card.modifiers.includes("waiting_ci")) return "running";
-  if (c.card.state === "done") return "done";
-  if (actionable.has(c.id)) return "system";
-  return "other";
+// 色の区分。人間の操作待ち・外部待ち・完了は API の区分のまま、システムの課題は run が動いていれば running。
+export function categoryOf(n: GraphNode): Category {
+  switch (n.category) {
+    case "human":
+    case "external":
+    case "done":
+      return n.category;
+    default:
+      return n.running ? "running" : "system";
+  }
 }
 
-export function actionableIds(status: StatusResponse | undefined): Set<string> {
-  return new Set((status?.actionable.challenges ?? []).map((c) => c.id));
+export type DependencyBasis = "prerequisite" | "conflict";
+export type RelationKind = "depends_on" | "parent_of";
+
+// 課題どうしの関係 1 本。depends_on は from が先行・to が後続（edge に登録の記録を持つ）、
+// parent_of は from が親・to が子。
+export interface ChallengeRelation {
+  from: string;
+  kind: RelationKind;
+  to: string;
+  edge?: GraphEdge;
+}
+
+// API の応答を関係の並びにする。親は node.parent_id から、依存は edges から。
+export function relationsOf(g: GraphResponse): ChallengeRelation[] {
+  const rels: ChallengeRelation[] = [];
+  for (const n of g.nodes)
+    if (n.parent_id !== null)
+      rels.push({ from: n.parent_id, kind: "parent_of", to: n.id });
+  for (const e of g.edges)
+    rels.push({ from: e.from, kind: "depends_on", to: e.to, edge: e });
+  return rels;
 }
 
 // 課題の ID（C-12 など）を数の順に並べる。数が無ければ文字列の順。
@@ -547,10 +546,14 @@ export function clip(s: string, n: number): string {
   return chars.length <= n ? s : `${chars.slice(0, n - 1).join("")}…`;
 }
 
-// 線が表す依存の種類。1 つでも先行の成果を使う依存（種類の無い依存を含む）があれば、終わらないと始められない線として描く。
+// 依存 1 つの種類。API の kind が conflict のときだけ衝突、それ以外は先行の成果を使う。
+export const basisOfRelation = (r: ChallengeRelation): DependencyBasis =>
+  r.edge?.kind === "conflict" ? "conflict" : "prerequisite";
+
+// 線が表す依存の種類。1 つでも先行の成果を使う依存があれば、終わらないと始められない線として描く。
 // すべてが衝突のための順番なら、衝突の線として描く。
 export function basisOf(rels: ChallengeRelation[]): DependencyBasis {
-  return rels.length > 0 && rels.every((r) => r.basis === "conflict")
+  return rels.length > 0 && rels.every((r) => basisOfRelation(r) === "conflict")
     ? "conflict"
     : "prerequisite";
 }
@@ -560,10 +563,55 @@ export const BASIS_LABELS: Record<DependencyBasis, string> = {
   conflict: "同時に走らせると衝突する",
 };
 
-// 依存 1 つを人が読む一文にする。理由が無ければ種類だけを言う。
-export function reasonText(r: ChallengeRelation): string {
-  return r.reason ?? BASIS_LABELS[r.basis ?? "prerequisite"];
+const VIA_LABELS: Record<string, string> = {
+  plan: "計画の判断で登録",
+  manual: "端末のコマンドで登録",
+  unknown: "登録の経路は不明",
+};
+const VIA_SHORT: Record<string, string> = {
+  plan: "計画の判断",
+  manual: "端末のコマンド",
+  unknown: "経路不明",
+};
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+// 登録の日時を「月/日 時:分」にする。読めない値はそのまま返す。
+export function shortAt(at: string): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return at;
+  return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+
+// 依存 1 つの登録の経路と日時・満たされているか（種類は含めない）。理由の文は core の記録から UI が組み立てる。
+export function reasonDetail(r: ChallengeRelation): string {
+  const e = r.edge;
+  if (!e) return "";
+  return `${VIA_LABELS[e.registered_via] ?? VIA_LABELS.unknown}（${shortAt(e.registered_at)}）。${e.satisfied ? "満たされている" : "まだ満たされていない"}`;
+}
+
+// 依存 1 つを人が読む一文にする（種類・登録の経路と日時・満たされているか）。
+export function reasonText(r: ChallengeRelation): string {
+  const detail = reasonDetail(r);
+  const kind = BASIS_LABELS[basisOfRelation(r)];
+  return detail === "" ? kind : `${kind}。${detail}`;
+}
+
+// 線の札に出す 2 行（1 行目: 種類、2 行目: 登録の経路・日時・満たされているか）。
+export function chipLines(r: ChallengeRelation): [string, string] {
+  const e = r.edge;
+  const kind = BASIS_LABELS[basisOfRelation(r)];
+  if (!e) return [kind, ""];
+  return [
+    kind,
+    `${VIA_SHORT[e.registered_via] ?? VIA_SHORT.unknown}・${shortAt(e.registered_at)}・${e.satisfied ? "満たされている" : "満たされていない"}`,
+  ];
+}
+
+// 線の札の文字（読み上げ・テスト用に 1 行へつないだもの）。
+export const chipText = (r: ChallengeRelation): string =>
+  chipLines(r)
+    .filter((l) => l !== "")
+    .join("・");
 
 // 幅 maxPx に収まるように行へ分ける（SVG の text は折り返さないため）。1 文字の幅は目安で、全角を full、
 // 半角をその 0.55 倍と見る（幅を測らずに置く）。

@@ -84,7 +84,7 @@ async function setup(figure: string | null) {
   };
   const loader = vi.fn(async () => mermaid);
   setMermaidLoader(loader);
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   const card = await screen.findByTestId("card-C-1");
   return { card, loader };

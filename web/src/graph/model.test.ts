@@ -1,0 +1,193 @@
+import { expect, it } from "vitest";
+import type { GraphEdge, GraphNode, GraphResponse } from "../api/types.gen.ts";
+import {
+  type ChallengeRelation,
+  type Dims,
+  basisOf,
+  categoryOf,
+  chipLines,
+  chipText,
+  downstreamOf,
+  layoutGraph,
+  parentMap,
+  reasonText,
+  relationsOf,
+  upstreamOf,
+} from "./model.ts";
+
+const D: Dims = {
+  nodeW: 100,
+  nodeH: 40,
+  gapX: 10,
+  gapY: 20,
+  pad: 5,
+  labelH: 20,
+  headH: 20,
+  inset: 5,
+  maxW: 1000,
+};
+const dep = (from: string, to: string): ChallengeRelation => ({
+  from,
+  kind: "depends_on",
+  to,
+});
+const par = (from: string, to: string): ChallengeRelation => ({
+  from,
+  kind: "parent_of",
+  to,
+});
+
+const node = (id: string, over: Partial<GraphNode> = {}): GraphNode => ({
+  category: "system",
+  context: null,
+  headline: null,
+  id,
+  parent_id: null,
+  running: false,
+  stale: false,
+  title: `題名${id}`,
+  ...over,
+});
+const edge = (from: string, to: string, over: Partial<GraphEdge> = {}) => ({
+  from,
+  kind: "prerequisite",
+  registered_at: "2026-11-01T00:00:00.000Z",
+  registered_via: "plan",
+  satisfied: false,
+  to,
+  ...over,
+});
+
+it("区分: API の区分をそのまま使い、システムの課題だけ run が動いていれば実行中の色になる", () => {
+  expect(categoryOf(node("C-1", { category: "human" }))).toBe("human");
+  expect(categoryOf(node("C-1", { category: "external" }))).toBe("external");
+  expect(categoryOf(node("C-1", { category: "done" }))).toBe("done");
+  expect(categoryOf(node("C-1", { category: "system" }))).toBe("system");
+  expect(categoryOf(node("C-1", { running: true }))).toBe("running");
+  // 人間の操作待ちは run が動いていても人間の色（光の輪は別に出す）
+  expect(categoryOf(node("C-1", { category: "human", running: true }))).toBe(
+    "human",
+  );
+});
+
+it("関係: parent_id は親子の関係に、辺は依存の関係（先行が from）になる", () => {
+  const g: GraphResponse = {
+    nodes: [node("C-1"), node("C-2", { parent_id: "C-1" })],
+    edges: [edge("C-2", "C-3")],
+  };
+  const rels = relationsOf(g);
+  expect(rels.map((r) => [r.kind, r.from, r.to])).toEqual([
+    ["parent_of", "C-1", "C-2"],
+    ["depends_on", "C-2", "C-3"],
+  ]);
+  expect(rels[1]?.edge?.registered_via).toBe("plan");
+});
+
+it("線の種類: 衝突だけの線は破線、先行の成果を使う依存を含めば実線", () => {
+  const e = (kind: string): ChallengeRelation => ({
+    ...dep("C-1", "C-2"),
+    edge: edge("C-1", "C-2", { kind }),
+  });
+  expect(basisOf([e("conflict")])).toBe("conflict");
+  expect(basisOf([e("conflict"), e("prerequisite")])).toBe("prerequisite");
+  expect(basisOf([e("prerequisite")])).toBe("prerequisite");
+});
+
+it("理由の文: 種類・登録の経路と日時・満たされているかを core の記録から組み立てる", () => {
+  const r = (over: Partial<GraphEdge>): ChallengeRelation => ({
+    ...dep("C-1", "C-2"),
+    edge: edge("C-1", "C-2", over),
+  });
+  const plan = reasonText(r({ registered_via: "plan", satisfied: true }));
+  expect(plan).toContain("終わらないと始められない");
+  expect(plan).toContain("計画の判断で登録");
+  expect(plan).toContain("満たされている");
+  expect(reasonText(r({ registered_via: "manual" }))).toContain(
+    "端末のコマンドで登録",
+  );
+  expect(reasonText(r({ registered_via: "unknown" }))).toContain("経路は不明");
+  expect(reasonText(r({ kind: "conflict" }))).toContain("衝突する");
+  expect(reasonText(r({}))).toContain("まだ満たされていない");
+  const chip = chipText(r({ registered_via: "manual", satisfied: false }));
+  expect(chip).toContain("終わらないと始められない");
+  expect(chip).toContain("端末のコマンド");
+  expect(chip).toMatch(/\d\d\/\d\d \d\d:\d\d/);
+  expect(chipLines(r({ satisfied: true }))[1]).toMatch(/満たされている$/);
+  // 読めない日時はそのまま出す
+  expect(chipText(r({ registered_at: "とある日" }))).toContain("とある日");
+});
+
+it("配置: 先行・親を上の層に置き、関係の無い課題は下にまとめる", () => {
+  const l = layoutGraph(
+    ["C-1", "C-2", "C-3", "C-4", "C-9"],
+    [
+      dep("C-1", "C-2"),
+      dep("C-1", "C-3"),
+      dep("C-2", "C-4"),
+      dep("C-3", "C-4"),
+    ],
+    D,
+  );
+  const layer = Object.fromEntries(l.nodes.map((n) => [n.id, n.layer]));
+  expect(layer).toEqual({ "C-1": 0, "C-2": 1, "C-3": 1, "C-4": 2, "C-9": -1 });
+  expect(l.isolated).toEqual(["C-9"]);
+  expect(l.hasCycle).toBe(false);
+  expect(l.edges).toHaveLength(4);
+});
+
+it("配置: 循環を見つけたら印を立て、全部の課題を置く", () => {
+  const l = layoutGraph(
+    ["C-1", "C-2", "C-3"],
+    [dep("C-1", "C-2"), dep("C-2", "C-3"), dep("C-3", "C-2")],
+    D,
+  );
+  expect(l.hasCycle).toBe(true);
+  expect(l.nodes.map((n) => n.id).sort()).toEqual(["C-1", "C-2", "C-3"]);
+});
+
+it("たどり: 先行・後続は依存だけを連鎖してたどり、親子はたどらない", () => {
+  const rels = [
+    dep("C-4", "C-1"),
+    dep("C-4", "C-10"),
+    dep("C-1", "C-9"),
+    dep("C-10", "C-9"),
+    par("C-2", "C-4"),
+  ];
+  expect(downstreamOf("C-4", rels)).toEqual(["C-1", "C-9", "C-10"]);
+  expect(upstreamOf("C-9", rels)).toEqual(["C-1", "C-4", "C-10"]);
+  expect(upstreamOf("C-4", rels)).toEqual([]);
+});
+
+it("入れ子: 開いた親は大枠になり子を中に置き、畳んだ親は 1 つの箱で、畳んだ親の中の依存は親の箱へつなぎ替わる", () => {
+  const ids = ["C-1", "C-2", "C-3", "C-4"];
+  const rels = [par("C-1", "C-2"), par("C-1", "C-3"), dep("C-2", "C-4")];
+  const closed = layoutGraph(ids, rels, D, new Set());
+  expect(closed.groups).toHaveLength(0);
+  expect(closed.nodes.map((n) => n.id).sort()).toEqual(["C-1", "C-4"]);
+  expect(closed.edges.map((e) => [e.from, e.to])).toEqual([["C-1", "C-4"]]);
+  const open = layoutGraph(ids, rels, D, new Set(["C-1"]));
+  expect(open.groups.map((g) => g.id)).toEqual(["C-1"]);
+  expect(open.nodes.map((n) => n.id).sort()).toEqual(["C-2", "C-3", "C-4"]);
+  expect(open.edges.map((e) => [e.from, e.to])).toEqual([["C-2", "C-4"]]);
+  const g = open.groups[0];
+  const c2 = open.nodes.find((n) => n.id === "C-2");
+  expect(g && c2 && c2.x >= g.x && c2.x + c2.w <= g.x + g.w).toBe(true);
+});
+
+it("入れ子: 親子が循環する関係は捨てる", () => {
+  const pm = parentMap(new Set(["C-1", "C-2"]), [
+    par("C-1", "C-2"),
+    par("C-2", "C-1"),
+  ]);
+  // 子の ID の小さい関係を先に採り、輪になる 2 つ目は捨てる
+  expect([...pm.entries()]).toEqual([["C-1", "C-2"]]);
+});
+
+it("入れ子: 幅の上限を超える段は折り返す", () => {
+  const ids = ["C-1", "C-2", "C-3", "C-4", "C-5"];
+  const rels = ids.slice(1).map((c) => dep("C-1", c));
+  const l = layoutGraph(ids, rels, { ...D, maxW: 220 }, new Set());
+  expect(l.width).toBeLessThanOrEqual(220 + 2 * D.pad);
+  const ys = new Set(l.nodes.filter((n) => n.layer === 1).map((n) => n.y));
+  expect(ys.size).toBe(2);
+});

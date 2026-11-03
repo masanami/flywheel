@@ -7,6 +7,6 @@ afterEach(() => vi.unstubAllGlobals());
 
 it("renders the heading", () => {
   installFakes();
-  render(<App />);
+  render(<App initialView="board" />);
   expect(screen.getByRole("heading", { name: "flywheel" })).toBeInTheDocument();
 });

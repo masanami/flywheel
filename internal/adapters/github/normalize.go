@@ -3,6 +3,7 @@ package github
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
@@ -25,6 +26,8 @@ type issuePayload struct {
 	// 観測のための追加の API 呼び出しは要らない（QH9）。
 	Comments  int    `json:"comments"`
 	UpdatedAt string `json:"updated_at"`
+	// ParentIssueURL は sub-issue の親の Issue の API の URL（親が無ければ null）。
+	ParentIssueURL *string `json:"parent_issue_url"`
 }
 
 type issueUser struct {
@@ -114,7 +117,33 @@ func normalizeIssue(raw json.RawMessage) (core.UpstreamIssue, error) {
 		URL:         payload.HTMLURL,
 		Comments:    payload.Comments,
 		UpdatedAt:   payload.UpdatedAt,
+
+		ParentExternalKey: parentExternalKey(payload.ParentIssueURL),
 	}, nil
+}
+
+// parentExternalKey は parent_issue_url（例:
+// "https://api.github.com/repos/masanami/flywheel/issues/324"）から親の外部キー
+// "<owner>/<name>#<番号>" を取り出す。無い・読めない形のときは ""（親なし）。
+// 親子は表示だけに使うので、読めない形でも Issue 本体の取り込みは失敗させない。
+func parentExternalKey(u *string) string {
+	if u == nil {
+		return ""
+	}
+	idx := strings.Index(*u, reposMarker)
+	if idx == -1 {
+		return ""
+	}
+	rest := strings.TrimSuffix((*u)[idx+len(reposMarker):], "/")
+	parts := strings.Split(rest, "/")
+	if len(parts) != 4 || parts[2] != "issues" || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	n, err := strconv.Atoi(parts[3])
+	if err != nil || n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s/%s#%d", parts[0], parts[1], n)
 }
 
 // commentPayload は gh api の Issue コメント 1 件分の応答のうち、正規化に
