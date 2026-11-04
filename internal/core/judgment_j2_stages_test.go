@@ -195,22 +195,26 @@ func TestPlanAutoJ2_Plan_SizeSAllowsEmptyExpectedAndNoIssues(t *testing.T) {
 	}
 }
 
-func TestPlanAutoJ2_Plan_SizeMLWithoutIssuesRecordIsInvalidOutput(t *testing.T) {
+// 論点の記録も論点不要の引用も無いサイズ M・L の plan は登録されない（#450: 1 回目は捨てて 1 回だけ問い直し、
+// 問い直しでも同じなら保留に置く。詳しくは judgment_j2_noissues_test.go）。
+func TestPlanAutoJ2_Plan_SizeMLWithoutIssuesRecordIsNeverRegistered(t *testing.T) {
 	for _, size := range []string{"M", "L"} {
 		f := newJ2Fixture(t)
 		ch := f.newClassified(t, "nolog", "P1")
-		before := f.detail(t, ch.ID)
 		out := j2OutputFor(false, func(m map[string]any) { m["size"] = size })
-		res, err := f.run(t, succeededInvoker(out), idPtr(ch.ID))
+		inv := succeededInvoker(out)
+		calls := 0
+		inv.onInvoke = func(JudgmentLaunchInput) { calls++ }
+		res, err := f.run(t, inv, idPtr(ch.ID))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if res.Items[0].Result != RunResultInvalidOutput {
-			t.Errorf("%s: result = %v, want invalid_output", size, res.Items[0].Result)
+		if calls != 2 || len(res.Items) != 2 || res.Items[0].Result != RunResultInvalidOutput {
+			t.Errorf("%s: calls=%d items=%+v, want the first invalid_output and one re-ask", size, calls, res.Items)
 		}
 		after := f.detail(t, ch.ID)
-		if after.Status != StatusClassified || after.Version != before.Version || len(after.Plans) != 0 || after.Expected != nil || len(after.Holds) != 0 {
-			t.Errorf("%s: challenge changed: %+v", size, after.Challenge)
+		if after.Status != StatusAwaitingHuman || len(after.Plans) != 0 || after.Expected != nil || after.Issues != nil || len(after.Holds) != 1 {
+			t.Errorf("%s: challenge = %+v plans=%d holds=%d", size, after.Challenge, len(after.Plans), len(after.Holds))
 		}
 	}
 }

@@ -43,6 +43,9 @@ const (
 	IssuesQuestionPreamble = "論点に答えてください。答えは 1 回の回答にまとめてください"
 	// ExpectedEmptyHoldPreamble はサイズ M・L の計画で予想を書けなかったときの保留の問いの冒頭の文。
 	ExpectedEmptyHoldPreamble = "完了したら見えるもの（予想）を書けませんでした。"
+	// NoIssuesHoldPreamble はサイズ M・L の計画で論点の記録も論点を不要とする根拠の引用も無い出力が
+	// 問い直しを挟んで 2 回続いたときの保留の問いの冒頭の文。
+	NoIssuesHoldPreamble = "サイズ中以上の計画に要る論点の記録（または論点を不要とする根拠の引用）が無い出力が 2 回続いたため、計画を登録せず保留にしました。"
 	// ActualMismatchHoldPreamble は実物を予想の例ごとに確かめられなかったときの保留の問いの冒頭の文。
 	ActualMismatchHoldPreamble = "完了したら見えるもの（予想）の例ごとに実物を確かめられませんでした。"
 )
