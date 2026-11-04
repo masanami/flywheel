@@ -385,3 +385,48 @@ func TestInstructions_J2CriteriaJudgeableFromOwnRecord(t *testing.T) {
 		}
 	}
 }
+
+// #450: j2.md は、中以上で論点の記録が無いとき計画ではなく論点を選ぶ確認の段（判断の前）と、
+// 論点不要を返す条件（決まっていることごとの引用）、問い直しの区画、出力の型の説明の行を持つ。
+func TestInstructions_J2AsksForQuotesBeforeSkippingIssues(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirm := strings.Index(got, "## 判断の前の確認")
+	judge := strings.Index(got, "## 判断\n")
+	if confirm < 0 || judge < 0 || confirm > judge {
+		t.Fatalf("the confirmation step must come before the judgment section: %d %d", confirm, judge)
+	}
+	step := got[confirm:judge]
+	for _, want := range []string{
+		"区画「論点と回答」が無く、見込みのサイズが中以上なら、1 は選ばず 3 を選ぶ",
+		"決まったことすべてを区画の文で引用できるときだけ、1 に論点不要（no_issues_needed）と引用を付けてよい",
+		"引用できない決定が 1 つでもあれば 3 を選ぶ",
+	} {
+		if !strings.Contains(step, want) {
+			t.Errorf("the confirmation step lacks %q", want)
+		}
+	}
+	// 1 の項目に論点不要の意味、読むものに問い直しの区画、出力の型の説明の行にサイズと記録の関係。
+	var item, shape string
+	for _, l := range strings.Split(got, "\n") {
+		switch {
+		case strings.Contains(l, "- 論点不要（no_issues_needed）:"):
+			item = l
+		case strings.Contains(l, "出力の形式（どの項目にどんな値を入れるか）"):
+			shape = l
+		}
+	}
+	for _, want := range []string{"確認の条件を満たすときだけ", "中身・引用元の種別", "引用の文"} {
+		if !strings.Contains(item, want) {
+			t.Errorf("the item of no_issues_needed lacks %q", want)
+		}
+	}
+	if !strings.Contains(shape, "計画のサイズが中・大なら、論点の記録（区画「論点と回答」）か論点不要の引用が要る") {
+		t.Errorf("the line about the output shape lacks the size rule: %q", shape)
+	}
+	if !strings.Contains(got, "- 「問い直し」:") {
+		t.Error("the reading list lacks the re-ask section")
+	}
+}
