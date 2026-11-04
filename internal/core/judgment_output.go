@@ -88,6 +88,22 @@ const (
 // J5VerdictValues は J5Verdict の全値。
 var J5VerdictValues = []J5Verdict{J5VerdictMet, J5VerdictNotMet, J5VerdictUncertain}
 
+// J5ConditionStatus は J5 の出力の条件ごとの判定（`deferred_conditions[].status`）の区分の閉集合（#451）。
+// 達成条件のうち、課題の本番反映より前には満たしようのない条件に付ける。区分の付いた条件は判定
+// （verdict）から除かれ、core はこの区分だけを見て振り分ける（条件の文字列で見分けない）。
+type J5ConditionStatus string
+
+// J5ConditionStatus の2値。
+const (
+	// J5ConditionAfterRelease は、承認の後の本番反映そのもので満たされる見込みの条件。
+	J5ConditionAfterRelease J5ConditionStatus = "after_release"
+	// J5ConditionAfterHumanAction は、人の操作の後でしか満たせない条件。
+	J5ConditionAfterHumanAction J5ConditionStatus = "after_human_action"
+)
+
+// J5ConditionStatusValues は J5ConditionStatus の全値。
+var J5ConditionStatusValues = []J5ConditionStatus{J5ConditionAfterRelease, J5ConditionAfterHumanAction}
+
 // DelegationOutcome は委譲の報告の結末（outcome）の閉集合。
 type DelegationOutcome string
 
@@ -172,6 +188,9 @@ func AllJudgmentOutputClosedValues() []string {
 		vals = append(vals, string(v))
 	}
 	for _, v := range J5VerdictValues {
+		vals = append(vals, string(v))
+	}
+	for _, v := range J5ConditionStatusValues {
 		vals = append(vals, string(v))
 	}
 	for _, v := range OccurrenceCauseValues {

@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // NotStartedWaitingExternal は、直前の委譲の成果物の PR のチェックが完了していないため J5 を
@@ -34,12 +35,36 @@ const NotStartedWaitingExternal NotStartedReason = "waiting_external"
 // --- J5 の出力スキーマ・検査 ---
 
 type j5RawOutput struct {
-	Verdict  string         `json:"verdict"`
-	Reason   *string        `json:"reason"`
-	Feedback *string        `json:"feedback"`
-	Question *string        `json:"question"`
-	Actual   *[]StageActual `json:"actual"`
+	Verdict            string                    `json:"verdict"`
+	Reason             *string                   `json:"reason"`
+	Feedback           *string                   `json:"feedback"`
+	Question           *string                   `json:"question"`
+	Actual             *[]StageActual            `json:"actual"`
+	DeferredConditions *[]j5RawDeferredCondition `json:"deferred_conditions"`
 }
+
+// j5RawDeferredCondition は J5 の出力の条件ごとの判定のうち、区分（J5ConditionStatus）を付けた
+// 条件 1 件（#451）。
+type j5RawDeferredCondition struct {
+	Condition string `json:"condition"`
+	Status    string `json:"status"`
+}
+
+// J5DeferredCondition は検査を通った、区分を付けた条件 1 件。
+type J5DeferredCondition struct {
+	Condition string
+	Status    J5ConditionStatus
+}
+
+// MaxJ5DeferredConditions は J5 の出力の deferred_conditions の個数の上限。
+const MaxJ5DeferredConditions = 20
+
+// maxJ5DeferredConditionRunes は区分を付けた条件 1 件の文字数の上限。
+const maxJ5DeferredConditionRunes = 2000
+
+// J5HumanActionHoldPreamble は、達成条件の残りが人の操作の後でしか満たせない条件を含むときに
+// 置く保留の問いの前置き（#451）。続けて該当の条件を 1 行ずつ並べる。
+const J5HumanActionHoldPreamble = "達成条件のうち、人の操作の後でしか満たせない条件が残っています（ほかの条件は満たしています）。次の操作を終えたら回答してください。回答すると達成の確認をやり直します。"
 
 // j5ValidatedOutput は検査を通った J5 の出力。
 type j5ValidatedOutput struct {
@@ -49,6 +74,37 @@ type j5ValidatedOutput struct {
 	Question *string
 	// Actual は検査済みの実物（無い・0 個は nil）。
 	Actual []StageActual
+	// Deferred は区分を付けた条件（無い・0 個は nil）。判定（Verdict）はこれを除いた残りの条件で
+	// 決まっている。区分の無い旧い出力では nil で、今までどおりに扱う。
+	Deferred []J5DeferredCondition
+}
+
+// conditionsWith は Deferred のうち区分が st の条件の文字列を、出力の順に返す。
+func (v *j5ValidatedOutput) conditionsWith(st J5ConditionStatus) []string {
+	var out []string
+	for _, d := range v.Deferred {
+		if d.Status == st {
+			out = append(out, d.Condition)
+		}
+	}
+	return out
+}
+
+// awaitsHumanAction は、区分の無い条件がすべて満たされ（met）、残りに人の操作の後でしか満たせない
+// 条件が 1 つでもあるか（#451）。このときは完了確認待ちへ進めず、着手中にも戻さず、人間待ちの
+// 保留へ置く。区分の無い未達・不確かが混じるとき（not_met・uncertain）は今までどおりに扱う。
+func (v *j5ValidatedOutput) awaitsHumanAction() bool {
+	return v.Verdict == J5VerdictMet && len(v.conditionsWith(J5ConditionAfterHumanAction)) > 0
+}
+
+// humanActionHoldQuestion は awaitsHumanAction のときの保留の問い。
+func (v *j5ValidatedOutput) humanActionHoldQuestion() string {
+	var b strings.Builder
+	b.WriteString(J5HumanActionHoldPreamble)
+	for _, c := range v.conditionsWith(J5ConditionAfterHumanAction) {
+		b.WriteString("\n- " + c)
+	}
+	return b.String()
 }
 
 // j5OutputSchema は J5 の `--json-schema` に渡すスキーマ（§IF / API「判断点の出力」の J5 の行）。
@@ -57,6 +113,10 @@ func j5OutputSchema() []byte {
 	verdicts := make([]string, 0, len(J5VerdictValues))
 	for _, v := range J5VerdictValues {
 		verdicts = append(verdicts, string(v))
+	}
+	statuses := make([]string, 0, len(J5ConditionStatusValues))
+	for _, v := range J5ConditionStatusValues {
+		statuses = append(statuses, string(v))
 	}
 	schema := map[string]any{
 		"type": "object",
@@ -75,6 +135,19 @@ func j5OutputSchema() []byte {
 						"after": map[string]any{"type": "string"},
 					},
 					"required":             []string{"scene", "after"},
+					"additionalProperties": false,
+				},
+			},
+			"deferred_conditions": map[string]any{
+				"type":     []string{"array", "null"},
+				"maxItems": MaxJ5DeferredConditions,
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"condition": map[string]any{"type": "string"},
+						"status":    map[string]any{"type": "string", "enum": statuses},
+					},
+					"required":             []string{"condition", "status"},
 					"additionalProperties": false,
 				},
 			},
@@ -117,7 +190,37 @@ func validateJ5Output(data []byte) (*j5ValidatedOutput, bool) {
 		}
 		actual = n
 	}
-	return &j5ValidatedOutput{Verdict: verdict, Reason: *raw.Reason, Feedback: raw.Feedback, Question: raw.Question, Actual: actual}, true
+	deferred, ok := validateJ5DeferredConditions(raw.DeferredConditions)
+	if !ok {
+		return nil, false
+	}
+	return &j5ValidatedOutput{Verdict: verdict, Reason: *raw.Reason, Feedback: raw.Feedback, Question: raw.Question, Actual: actual, Deferred: deferred}, true
+}
+
+// validateJ5DeferredConditions は deferred_conditions を検査する。無い・null・0 個は nil。
+// 個数の上限超え・閉集合の外の区分・空白だけか長すぎる条件は ok=false。条件の前後の空白は除く。
+func validateJ5DeferredConditions(raw *[]j5RawDeferredCondition) ([]J5DeferredCondition, bool) {
+	if raw == nil || len(*raw) == 0 {
+		return nil, true
+	}
+	if len(*raw) > MaxJ5DeferredConditions {
+		return nil, false
+	}
+	out := make([]J5DeferredCondition, 0, len(*raw))
+	for _, d := range *raw {
+		st := J5ConditionStatus(d.Status)
+		switch st {
+		case J5ConditionAfterRelease, J5ConditionAfterHumanAction:
+		default:
+			return nil, false
+		}
+		c := strings.TrimSpace(d.Condition)
+		if c == "" || utf8.RuneCountInString(c) > maxJ5DeferredConditionRunes {
+			return nil, false
+		}
+		out = append(out, J5DeferredCondition{Condition: c, Status: st})
+	}
+	return out, true
 }
 
 // --- CI の判定規則 ---
@@ -518,7 +621,16 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 		if v.Verdict == J5VerdictNotMet {
 			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationNotMet)
 		}
+		if v.awaitsHumanAction() {
+			// 残りが人の操作の後でしか満たせない条件を含む（#451）: 着手中に戻さず（子を再起動しない）、
+			// 該当の条件を理由に書いた保留へ置く（T10）。回答すると検証中へ戻る（T12）。
+			return insertHold(ctx, tc, v.humanActionHoldQuestion())
+		}
 		if v.Verdict == J5VerdictMet {
+			// 本番反映で満たされる見込みの条件は、完了の承認の要約に出すため作業ログ（T8）へ残す。
+			if conds := v.conditionsWith(J5ConditionAfterRelease); len(conds) > 0 {
+				tc.after[activityKeyConditionsAfterRelease] = conds
+			}
 			// T8 と同じトランザクションで、検証の入力にした head を成果物の行へ残す。
 			return recordVerifiedHeads(ctx, tc.tx, vh)
 		}
@@ -548,6 +660,9 @@ func (s *Store) j5Operation(ctx context.Context, challengeIDDisplay string, v *j
 	switch v.Verdict {
 	case J5VerdictMet:
 		op = OpVerifyMet
+		if v.awaitsHumanAction() {
+			op = OpVerifyUncertain
+		}
 	case J5VerdictNotMet:
 		return OpVerifyNotMet, false, nil
 	default:
@@ -602,6 +717,10 @@ func (s *Store) finalizeJ5Output(ctx context.Context, runIDDisplay, challengeIDD
 		st = string(StatusAwaitingHuman)
 	}
 	outcome = string(v.Verdict)
+	if v.awaitsHumanAction() {
+		// met だが人の操作の後でしか満たせない条件が残る: 保留（成功）。
+		outcome, st = string(J5VerdictUncertain), string(StatusAwaitingHuman)
+	}
 	if mismatch {
 		// met だが実物を予想の例ごとに確かめられなかった: uncertain の保留と同じ扱い（成功）。
 		outcome, st = string(J5VerdictUncertain), string(StatusAwaitingHuman)

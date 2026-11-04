@@ -385,3 +385,52 @@ func TestInstructions_J2CriteriaJudgeableFromOwnRecord(t *testing.T) {
 		}
 	}
 }
+
+// #451: j2.md は、達成条件をこの課題の本番反映の一歩手前までにすること・人の操作を達成条件に入れないこと・
+// 本番反映の後に人が行う作業を手順の末尾に『本番反映の後に人が行うこと』として書くことを求める。
+func TestInstructions_J2CriteriaStopBeforeTheReleaseAndHumanActionsGoToTheSteps(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := func(prefix string) string {
+		for _, l := range strings.Split(got, "\n") {
+			if strings.Contains(l, prefix) {
+				return l
+			}
+		}
+		t.Fatalf("Instructions(J2) lacks the item %q", prefix)
+		return ""
+	}
+	criteria := item("- 達成条件:")
+	for _, want := range []string{
+		"達成条件は、この課題の本番反映の一歩手前まで（例: 成果物が揃い、自動の検査が通る）にする",
+		"人の操作は達成条件に入れない",
+	} {
+		if !strings.Contains(criteria, want) {
+			t.Errorf("the item of 達成条件 in Instructions(J2) lacks %q", want)
+		}
+	}
+	if steps := item("- 手順:"); !strings.Contains(steps, "本番反映の後に人が行う作業があれば、手順の末尾に『本番反映の後に人が行うこと』として書く") {
+		t.Errorf("the item of 手順 in Instructions(J2) lacks where to write the human work after the release: %q", steps)
+	}
+}
+
+// #451: j5.md は、本番反映より前には満たせない条件に付ける 2 つの区分と、その使い方を書く。
+func TestInstructions_J5DescribesTheTwoConditionCategories(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## 本番反映より前には満たせない条件",
+		"- 本番反映で満たされる見込み:",
+		"- 人の操作の後でしか満たせない:",
+		"判断の 3 つは、区分を付けた条件を除いた残りの条件で選ぶ",
+		"区分は、いま確かめられる条件には付けない",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J5) lacks %q", want)
+		}
+	}
+}

@@ -163,6 +163,22 @@ func TestApprovalSummaryText_CompletionIncludesDoneCriteria(t *testing.T) {
 	}
 }
 
+// #451: 検証が「本番反映で満たされる見込み」と区分した条件は、完了の承認の要約に並ぶ。無ければ見出しも出ない。
+func TestApprovalSummaryText_CompletionListsTheConditionsSatisfiedByTheRelease(t *testing.T) {
+	p := &core.ApprovalPreview{
+		ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion,
+		DoneCriteria: "it works", ConditionsAfterRelease: []string{"A が取り込まれている", "B"},
+	}
+	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
+	if !strings.Contains(got, "承認で本番反映されると満たされる条件:\n  - A が取り込まれている\n  - B\n") {
+		t.Errorf("summary = %q, want the conditions satisfied by the release", got)
+	}
+	p.ConditionsAfterRelease = nil
+	if got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil); strings.Contains(got, "承認で本番反映されると満たされる条件") {
+		t.Errorf("summary = %q, must not show the heading without conditions", got)
+	}
+}
+
 func TestApprovalSummaryText_RejectIncludesReason(t *testing.T) {
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, PlanVersion: 1, PlanBody: "x"}
 	reason := "not ready"

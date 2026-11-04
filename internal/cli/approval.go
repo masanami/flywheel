@@ -374,6 +374,7 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 		writePlanStageSummary(&b, p)
 	} else {
 		fmt.Fprintf(&b, "完了条件:    %s\n", escapeControl(p.DoneCriteria))
+		writeConditionsAfterRelease(&b, p.ConditionsAfterRelease)
 		writeCompletionStageSummary(&b, p)
 	}
 	if p.Kind == core.ApprovalKindCompletion {
@@ -400,6 +401,18 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 		fmt.Fprintf(&b, "理由:        %s\n", *reason)
 	}
 	return b.String()
+}
+
+// writeConditionsAfterRelease は完了の承認の要約へ、検証が「本番反映で満たされる見込み」と区分した
+// 達成条件を書く（#451）。無ければ何も書かない。
+func writeConditionsAfterRelease(b *strings.Builder, conds []string) {
+	if len(conds) == 0 {
+		return
+	}
+	b.WriteString("承認で本番反映されると満たされる条件:\n")
+	for _, c := range conds {
+		fmt.Fprintf(b, "  - %s\n", escapeControl(c))
+	}
 }
 
 // writePlanStageSummary は計画の承認の要約へ、論点の各問いと回答・予想の各例・やらないことを
