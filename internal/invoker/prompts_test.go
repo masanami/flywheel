@@ -1,6 +1,7 @@
 package invoker
 
 import (
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -94,6 +95,28 @@ func TestCheckPromptSizes_RealEmbedIsWithinLimits(t *testing.T) {
 	}
 }
 
+// j2HeadroomBytes は J2 の指示文に残しておく余り（バイト）。新しい規則を足す
+// 課題（例: #460）が上限に当たって止まらないよう、実物の j2.md が上限より
+// この値以上小さいことを固定する（#462）。
+const j2HeadroomBytes = 300
+
+// TestJ2Prompt_HasHeadroomBelowLimit は、埋め込みの j2.md のバイト数が J2 の
+// 上限より j2HeadroomBytes 以上小さいことを検証する（#462）。
+func TestJ2Prompt_HasHeadroomBelowLimit(t *testing.T) {
+	fsys, err := promptsSubFS()
+	if err != nil {
+		t.Fatalf("promptsSubFS(): %v", err)
+	}
+	info, err := fs.Stat(fsys, "j2.md")
+	if err != nil {
+		t.Fatalf("fs.Stat(j2.md): %v", err)
+	}
+	limit := judgmentPromptLimit["j2.md"]
+	if headroom := int64(limit) - info.Size(); headroom < j2HeadroomBytes {
+		t.Errorf("j2.md is %d bytes, limit %d bytes: headroom %d bytes, want >= %d", info.Size(), limit, headroom, j2HeadroomBytes)
+	}
+}
+
 // TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails は AC「上限を1バイト
 // 超えるフィクスチャで失敗することも検証する」を、J1〜J5 の5ファイルすべての
 // 上限で固定する（三角測量: ちょうど上限は通り、+1バイトで落ちることの両方を
@@ -101,12 +124,12 @@ func TestCheckPromptSizes_RealEmbedIsWithinLimits(t *testing.T) {
 //
 // self-review 指摘（round1, code-reviewer CONFIRMED）: 当初は J1（4096バイト）
 // の境界だけを検証しており、judgmentPromptLimit の J2〜J5 の値
-// （8192・8192・4096・6144）を緩めても検出するテストが無かった。5ファイル
+// （当時 8192・8192・4096・6144。J2 は #462 で 12288）を緩めても検出するテストが無かった。5ファイル
 // 分をテーブル駆動で回す形に直した。
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
 		"j1.md": 4096,
-		"j2.md": 8192,
+		"j2.md": 12288,
 		"j3.md": 8192,
 		"j4.md": 4096,
 		"j5.md": 6144,
