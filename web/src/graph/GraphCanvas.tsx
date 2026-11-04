@@ -7,6 +7,7 @@
 import type { KeyboardEvent } from "react";
 import type { GraphNode } from "../api/types.gen.ts";
 import {
+  CHIP_H,
   type Category,
   type Dims,
   type Layout,
@@ -19,7 +20,9 @@ import {
   chipLines,
   clip,
   clipLines,
+  fitChips,
   humanActionLabels,
+  humanChips,
   reasonText,
   wrapByWidth,
 } from "./model.ts";
@@ -125,6 +128,8 @@ const labelW = (t: string) =>
 
 // 依存の線の名前と、重ねたときの吹き出し。課題のノードの名前（「C-12 …」）と前方一致しないよう「依存」で始める。
 export function edgeName(e: LayoutEdge): string {
+  // 「ほかの課題」の大枠は、実装上の名前（others）でなく画面の名前で言う
+  const name = (id: string) => (id === OTHERS_ID ? OTHERS_LABEL : id);
   const why = e.relations
     .map((r) =>
       e.relations.length > 1 || r.from !== e.from || r.to !== e.to
@@ -132,7 +137,7 @@ export function edgeName(e: LayoutEdge): string {
         : reasonText(r),
     )
     .join("／");
-  return `依存 ${e.from} → ${e.to}（${why}）`;
+  return `依存 ${name(e.from)} → ${name(e.to)}（${why}）`;
 }
 
 // 重ねた・移った課題の一言での吹き出し。箱の下（入らなければ上）に置き、画面の幅に収める。
@@ -216,17 +221,47 @@ export function accessibleName(
   return `${i.node.id} ${i.node.title}（${notes.join("・")}）`;
 }
 
-// 人間の操作待ちの札の文字（11px の太字。全角 11px の目安）を、room（px）に収まる文字数で切り詰める。
-// 3 文字も入らなければ出さない（全部の語は読み上げの名前にある）。
-const TAG_CHAR_W = 11;
 const ID_CHAR_W = 7;
-function humanTagText(n: GraphNode, room: number): string {
-  const text = humanActionLabels(n).join("・");
-  const chars = Math.min(
-    Array.from(text).length,
-    Math.floor(room / TAG_CHAR_W),
+
+// 人間の操作待ちのチップ（記号と帯の区分の語）。ノードの右上の角に右寄せで並べる。
+// right はチップの行の右端、room はチップに使える幅。入らない分は切り詰める（全部の語は読み上げの名前にある）。
+function HumanChips({
+  node,
+  right,
+  room,
+  y,
+}: {
+  node: GraphNode;
+  right: number;
+  room: number;
+  y: number;
+}) {
+  const { items, width } = fitChips(humanChips(node), room);
+  if (items.length === 0) return null;
+  return (
+    <g
+      className="graph-human-chips"
+      data-category="human"
+      transform={`translate(${right - width} ${y})`}
+    >
+      {items.map((c) => (
+        <g
+          key={c.chip.kind}
+          className="graph-human-chip"
+          data-kind={c.chip.kind}
+          transform={`translate(${c.x} 0)`}
+        >
+          <rect width={c.w} height={CHIP_H} rx={CHIP_H / 2} />
+          <text x={5} y={10.5}>
+            <tspan className="graph-human-chip-glyph">{c.chip.glyph}</tspan>
+            <tspan className="graph-human-chip-label" dx={3}>
+              {c.label}
+            </tspan>
+          </text>
+        </g>
+      ))}
+    </g>
   );
-  return chars >= 3 ? clip(text, chars) : "";
 }
 
 const onActivate = (fn: () => void) => (ev: KeyboardEvent) => {
@@ -425,36 +460,25 @@ function NodeLines({
   // 題名の行が増えた分だけ、3 段目（札・中の件数の札）を下げる
   const shift = (dims.titleLines - 1) * 16;
   const lines = clipLines(n.title, box.w - 18, 13, dims.titleLines);
-  const tag = humanTagText(
-    n,
-    box.w -
-      8 -
-      (inside ? TOGGLE + 2 : 0) -
-      (i.active ? 54 : 0) -
-      (11 + Array.from(n.id).length * ID_CHAR_W + 6),
-  );
+  // 3 行目の左と、右上の札の置き場: ID の右に実施中、ノードの右上の角に人間の操作待ちのチップ（取り下げの札と同じ角。
+  // 取り下げは人間の操作待ちと重ならない）。畳んだ親の開閉ボタンの左へ寄せる。
+  const idEnd = 11 + Array.from(n.id).length * ID_CHAR_W + 6;
+  const activeEnd = idEnd + (i.active ? 54 : 0);
+  const cornerRight = box.w - 6 - (inside ? TOGGLE + 2 : 0);
   return (
     <>
       <text x={11} y={18} className="graph-node-id">
         {n.id}
       </text>
-      {tag !== "" ? (
-        // 人間の操作待ちの札（何をするか）。ID のすぐ右に置き、右上の「▶ 実施中」・畳んだ親の開閉ボタンとは重ならない
-        <text
-          x={11 + Array.from(n.id).length * ID_CHAR_W + 6}
-          y={18}
-          className="graph-node-human-tag"
-        >
-          {tag}
-        </text>
-      ) : null}
+      <HumanChips
+        node={n}
+        right={cornerRight}
+        room={cornerRight - activeEnd}
+        y={4}
+      />
       {i.active ? (
-        <text
-          x={box.w - (inside ? TOGGLE + 10 : 8)}
-          y={18}
-          textAnchor="end"
-          className="graph-node-active-tag"
-        >
+        // 実施中は ID の右（右上の角は人間の操作待ちのチップの置き場）
+        <text x={idEnd} y={18} className="graph-node-active-tag">
           ▶ 実施中
         </text>
       ) : i.category === "withdrawn" ? (
@@ -605,9 +629,10 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
   const c = i.node;
   const selfActive = i.active;
   const select = () => p.onOpen(box.id);
-  // 人間の操作待ちの札は、題名が最低 4 文字残る範囲で右上（開閉ボタンの左）に置く。残りが題名の文字数
-  const tag = humanTagText(
-    c,
+  // 人間の操作待ちのチップは、題名が最低 4 文字残る範囲で右上（開閉ボタンの左）に置く。残りが題名の文字数
+  const chipRight = box.w - TOGGLE - 10;
+  const chips = fitChips(
+    humanChips(c),
     box.w -
       TOGGLE -
       14 -
@@ -617,10 +642,7 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
       8 -
       (selfActive ? 66 : 0),
   );
-  const chars = Math.max(
-    4,
-    Math.floor((box.w - 90 - Array.from(tag).length * TAG_CHAR_W) / 13),
-  );
+  const chars = Math.max(4, Math.floor((box.w - 90 - chips.width) / 13));
   const { headline: hl, context: lines } = headLines(
     c.headline,
     c.context,
@@ -676,16 +698,12 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
           {` ${clip(c.title, chars)}`}
           {selfActive ? " ▶ 実施中" : ""}
         </text>
-        {tag !== "" ? (
-          <text
-            x={box.w - TOGGLE - 14}
-            y={dims.headH / 2 + 4.5}
-            textAnchor="end"
-            className="graph-node-human-tag"
-          >
-            {tag}
-          </text>
-        ) : null}
+        <HumanChips
+          node={c}
+          right={chipRight}
+          room={chips.width}
+          y={(dims.headH - TOGGLE) / 2}
+        />
         {i.category === "withdrawn" ? (
           // 開いた親でも、取り下げは完了と同じ灰色のまま札で区別する
           <text

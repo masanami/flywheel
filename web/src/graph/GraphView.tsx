@@ -29,7 +29,6 @@ import {
   compareIds,
   descendantsOf,
   downstreamOf,
-  isTodo,
   layoutGraph,
   othersOf,
   parentMap,
@@ -106,7 +105,7 @@ function useGraph(ws: string | null, refreshKey: unknown) {
 }
 
 // 開いたときに開いておく親: 実施中か人間の操作待ちの子孫（孫を含む）を持つ親。
-// 「ほかの課題」の大枠は常に畳んで始める。
+// 「ほかの課題」の大枠は常に畳んで始める（中に何があっても開かない）。
 export function defaultOpen(
   infos: Map<string, NodeInfo>,
   kids: Map<string, string[]>,
@@ -172,14 +171,11 @@ export function GraphView({
   }, [graph]);
 
   // 表示する課題（既定では終わった課題を隠す）と、そのうち「ほかの課題」にまとめる課題
+  // （注目でない動いている課題。判定は model.ts の focusOf・othersOf）
   const view = useMemo(() => {
-    const ids = visibleIds(graph?.data?.nodes ?? [], infos.rels, showAll);
-    // 大枠に入れるのは、次の周以降で着手される TODO（分類待ち・計画待ち）だけ
-    const isOtherCandidate = (id: string) => {
-      const i = infos.map.get(id);
-      return !!i && isTodo(i.node);
-    };
-    return { ids, others: othersOf(ids, infos.rels, isOtherCandidate) };
+    const nodes = graph?.data?.nodes ?? [];
+    const ids = visibleIds(nodes, infos.rels, showAll);
+    return { ids, others: othersOf(ids, infos.rels, nodes) };
   }, [graph, infos, showAll]);
   const shownIds = view.ids;
   const othersIds = view.others;
@@ -269,14 +265,12 @@ export function GraphView({
   }
   const running = [...infos.map.values()].filter((i) => i.active);
 
+  // 箱が表す課題: 自分と、大枠（開いていても畳んでいても）の中の課題すべて。
+  const membersOf = (id: string) =>
+    id === OTHERS_ID ? othersIds : [id, ...descendantsOf(id, kids)];
   // 線を選んだときは、線の両端の箱（とその中の課題）だけを濃く残す
   const edgeEnds = new Set(
-    selEdge
-      ? [selEdge.from, selEdge.to].flatMap((b) => [
-          b,
-          ...descendantsOf(b, kids),
-        ])
-      : [],
+    selEdge ? [selEdge.from, selEdge.to].flatMap(membersOf) : [],
   );
   const relevant = (id: string) =>
     selEdge
@@ -292,9 +286,6 @@ export function GraphView({
     if (!i) return false;
     return !(catFilter && i.category !== catFilter);
   };
-  // 箱が表す課題: 自分と、大枠（開いていても畳んでいても）の中の課題すべて。
-  const membersOf = (id: string) =>
-    id === OTHERS_ID ? othersIds : [id, ...descendantsOf(id, kids)];
   const dimmed = (id: string) =>
     !membersOf(id).some((m) => matches(m) && relevant(m));
   const edgeLit = (from: string, to: string) =>

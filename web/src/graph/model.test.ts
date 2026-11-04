@@ -6,6 +6,7 @@ import { HUMAN_KIND_OF_ACTION } from "../board/filter.ts";
 import {
   type ChallengeRelation,
   type Dims,
+  HUMAN_KIND_GLYPHS,
   OTHERS_ID,
   basisOf,
   categoryLabel,
@@ -13,8 +14,10 @@ import {
   chipLines,
   chipText,
   downstreamOf,
+  fitChips,
+  focusOf,
   humanActionLabels,
-  isTodo,
+  humanChips,
   layoutGraph,
   othersOf,
   parentMap,
@@ -53,6 +56,7 @@ const node = (id: string, over: Partial<GraphNode> = {}): GraphNode => ({
   id,
   next_human_actions: [],
   parent_id: null,
+  priority: null,
   running: false,
   stale: false,
   state: "in_progress",
@@ -283,66 +287,214 @@ it("終わった課題の隠し方: 全部を見る切り替えを入れると�
   expect(shown(nodes, [], true)).toEqual(["C-1", "C-2", "C-3"]);
 });
 
-// --- 「ほかの課題」の大枠 ---
+// --- 注目の課題と「ほかの課題」の大枠 ---
 
-// 「ほかの課題」に入るのは、次の周以降で着手される TODO（分類待ち・計画待ち）で、線を持たない課題だけ
-const todo = (id: string) => id.length > 0;
-it("ほかの課題: 親も子も依存も持たない TODO の課題だけが入る", () => {
-  const ids = ["C-1", "C-2", "C-3", "C-4", "C-5", "C-6", "C-7", "C-8"];
-  const rels = [
-    par("C-1", "C-2"), // C-1 は親、C-2 は子
-    dep("C-3", "C-4"), // 前提と後続
-    dep("C-5", "C-4"),
+// 注目の判定の入力: 表示中の課題 ids の関係と、課題の行（nodes）
+const focus = (nodes: GraphNode[], rels: ChallengeRelation[] = []) =>
+  focusOf(
+    nodes.map((n) => n.id),
+    rels,
+    nodes,
+  );
+const reasons = (nodes: GraphNode[], rels: ChallengeRelation[] = []) =>
+  Object.fromEntries(focus(nodes, rels));
+const todoNode = (id: string, over: Partial<GraphNode> = {}) =>
+  node(id, { state: "classified", ...over });
+
+it("注目 ①: 人間の操作待ち（next_human_actions が空でない）は、線が無くても状態が何でも前に出る", () => {
+  const nodes = [
+    todoNode("C-1", { category: "human", next_human_actions: ["triage"] }),
+    node("C-2", {
+      state: "awaiting_plan_approval",
+      category: "human",
+      next_human_actions: ["approve_plan", "answer_question"],
+    }),
+    // 人間の操作待ちが無ければ、分類待ち・計画待ちの P1 は前に出ない
+    todoNode("C-3", { priority: "P1" }),
   ];
-  // C-6・C-7・C-8 は何ともつながらない。C-7 は TODO ではない（着手中など）
-  expect(othersOf(ids, rels, (id) => id !== "C-7")).toEqual(["C-6", "C-8"]);
-  expect(othersOf(ids, rels, todo)).toEqual(["C-6", "C-7", "C-8"]);
+  expect(reasons(nodes)).toEqual({ "C-1": "human", "C-2": "human" });
 });
 
-it("ほかの課題: 隠れた課題につながる辺は数えない（表示中の課題だけで決める）", () => {
-  // C-2 は隠れた課題（ids に無い C-9）の前提だが、表示中の辺は持たない
-  expect(othersOf(["C-1", "C-2"], [dep("C-2", "C-9")], todo)).toEqual([
-    "C-1",
-    "C-2",
-  ]);
+it("注目 ②: 着手中・検証中・実行中（run が動いている）は前に出る", () => {
+  const nodes = [
+    node("C-1", { state: "in_progress" }),
+    node("C-2", { state: "verifying" }),
+    // 状態が計画待ちでも、run が動いていれば前に出る
+    todoNode("C-3", { running: true }),
+    // 完了確認待ちでも、人間の操作待ちが無く run も動いていなければ前に出ない
+    node("C-4", { state: "awaiting_completion_approval" }),
+  ];
+  expect(reasons(nodes)).toEqual({
+    "C-1": "working",
+    "C-2": "working",
+    "C-3": "working",
+  });
 });
 
-it("ほかの課題: 衝突の依存も、どちらの向きでも数える", () => {
+it("注目 ③: 分類待ち・計画待ちは P0 だけ前に出る。P1・P2・優先度なしは前に出ない", () => {
+  const nodes = [
+    node("C-1", { state: "unclassified", priority: "P0" }),
+    todoNode("C-2", { priority: "P0" }),
+    todoNode("C-3", { priority: "P1" }),
+    todoNode("C-4", { priority: "P2" }),
+    node("C-5", { state: "unclassified" }),
+    // P0 でも、分類待ち・計画待ちでなければ③ではない（着手前の TODO ではない）
+    node("C-6", { state: "awaiting_completion_approval", priority: "P0" }),
+  ];
+  expect(reasons(nodes)).toEqual({ "C-1": "urgent", "C-2": "urgent" });
+});
+
+it("注目: 複数に当たるときは①②③の順で最初に当たったものを返す", () => {
+  const nodes = [
+    node("C-1", {
+      state: "in_progress",
+      running: true,
+      category: "human",
+      next_human_actions: ["approve_operation"],
+    }),
+    todoNode("C-2", { priority: "P0", running: true }),
+  ];
+  expect(reasons(nodes)).toEqual({ "C-1": "human", "C-2": "working" });
+});
+
+it("注目 ④: 注目の課題の依存の相手（前提・後続・衝突）は、直接の相手だけ前に出る", () => {
+  const nodes = [
+    node("C-1", { state: "in_progress" }),
+    todoNode("C-2"), // C-1 の前提
+    todoNode("C-3"), // C-1 の後続
+    todoNode("C-4"), // C-1 と衝突
+    todoNode("C-5"), // C-2 の前提（C-1 から見て 2 つ先）
+    todoNode("C-6"), // 何ともつながらない
+  ];
   const rels: ChallengeRelation[] = [
-    { ...dep("C-1", "C-2"), edge: edge("C-1", "C-2", { kind: "conflict" }) },
+    dep("C-2", "C-1"),
+    dep("C-1", "C-3"),
+    { ...dep("C-4", "C-1"), edge: edge("C-4", "C-1", { kind: "conflict" }) },
+    dep("C-5", "C-2"),
   ];
-  expect(othersOf(["C-1", "C-2", "C-3"], rels, todo)).toEqual(["C-3"]);
+  expect(reasons(nodes, rels)).toEqual({
+    "C-1": "working",
+    "C-2": "partner",
+    "C-3": "partner",
+    "C-4": "partner",
+  });
 });
 
-it("ほかの課題: 該当が無ければ空で、大枠は出ない", () => {
-  expect(othersOf(["C-1", "C-2"], [dep("C-1", "C-2")], todo)).toEqual([]);
+it("注目 ④: 注目の課題の親は祖先まで前に出る。注目の課題の依存の相手の親も同じ", () => {
+  const nodes = [
+    todoNode("C-1"), // 祖父
+    todoNode("C-2", { parent_id: "C-1" }), // 親
+    node("C-3", { state: "in_progress", parent_id: "C-2" }), // 注目
+    todoNode("C-4", { parent_id: "C-2" }), // 注目の兄弟（注目ではない）
+    todoNode("C-5", { parent_id: "C-6" }), // C-3 の後続（依存の相手）
+    todoNode("C-6"), // C-5 の親
+    todoNode("C-7"), // 何ともつながらない
+  ];
+  const rels = [
+    par("C-1", "C-2"),
+    par("C-2", "C-3"),
+    par("C-2", "C-4"),
+    par("C-6", "C-5"),
+    dep("C-3", "C-5"),
+  ];
+  expect(reasons(nodes, rels)).toEqual({
+    "C-1": "ancestor",
+    "C-2": "ancestor",
+    "C-3": "working",
+    "C-5": "partner",
+    "C-6": "ancestor",
+  });
 });
 
-it("TODO の判定: 分類待ち・計画待ちで人間の操作待ちでないものだけ。着手中・検証中・人間の操作待ち・終わった課題は入らない", () => {
-  const yes = (state: string) =>
-    isTodo(node("C-1", { state, category: "system" }));
-  expect(yes("unclassified")).toBe(true);
-  expect(yes("classified")).toBe(true);
-  for (const s of [
-    "awaiting_plan_approval",
-    "in_progress",
-    "verifying",
-    "awaiting_completion_approval",
-    "awaiting_human",
-    "done",
-    "withdrawn",
-  ])
-    expect(yes(s), s).toBe(false);
-  // 分類待ち・計画待ちでも、人間の操作待ち（本番反映の承認など）を持てば TODO ではない
+it("注目: 終わった課題（完了・取り下げ）は注目に入らない。隠れた課題につながる関係は数えない", () => {
+  const nodes = [
+    node("C-1", { state: "in_progress" }),
+    node("C-2", { state: "done", category: "done" }),
+    node("C-3", { state: "withdrawn", category: "withdrawn", priority: "P0" }),
+    todoNode("C-4"),
+  ];
+  // C-2 は C-1 の前提、C-3 は C-1 の親。C-4 は表示していない C-9 の注目の課題の前提
+  const rels = [dep("C-2", "C-1"), par("C-3", "C-1"), dep("C-4", "C-9")];
+  expect(reasons(nodes, rels)).toEqual({ "C-1": "working" });
+  // ids に無い課題は、nodes に載っていても判定の対象にしない
   expect(
-    isTodo(
-      node("C-1", {
-        state: "classified",
-        category: "human",
-        next_human_actions: ["approve_operation"],
-      }),
+    Object.fromEntries(
+      focusOf(["C-1"], rels, [...nodes, node("C-9", { running: true })]),
     ),
-  ).toBe(false);
+  ).toEqual({ "C-1": "working" });
+});
+
+it("ほかの課題: 注目でない動いている課題がすべて入り、ID の数の昇順で返る", () => {
+  const nodes = [
+    todoNode("C-10"),
+    node("C-2", { state: "in_progress" }),
+    todoNode("C-3", { priority: "P1" }),
+    todoNode("C-4", { priority: "P0" }),
+    todoNode("C-5", { category: "human", next_human_actions: ["triage"] }),
+    node("C-6", { state: "awaiting_completion_approval" }),
+  ];
+  const ids = nodes.map((n) => n.id);
+  expect(othersOf(ids, [], nodes)).toEqual(["C-3", "C-6", "C-10"]);
+});
+
+it("ほかの課題: 注目の親の子で注目でないものは大枠へ移り、④で注目に入る子は残る", () => {
+  const nodes = [
+    node("C-1", { state: "in_progress" }), // 注目の親
+    node("C-2", { state: "in_progress", parent_id: "C-1" }),
+    todoNode("C-3", { parent_id: "C-1" }), // 注目の子ではない子 → 大枠
+    todoNode("C-4", { parent_id: "C-1" }), // 注目の C-2 の後続 → ④で残る
+  ];
+  const rels = [
+    par("C-1", "C-2"),
+    par("C-1", "C-3"),
+    par("C-1", "C-4"),
+    dep("C-2", "C-4"),
+  ];
+  expect(
+    othersOf(
+      nodes.map((n) => n.id),
+      rels,
+      nodes,
+    ),
+  ).toEqual(["C-3"]);
+});
+
+it("ほかの課題: 大枠の仲間どうしの親子・依存は大枠の中に残り、仲間かどうかは相手の課題で決まる", () => {
+  const nodes = [todoNode("C-1"), todoNode("C-2", { parent_id: "C-1" })];
+  const rels = [par("C-1", "C-2")];
+  expect(
+    othersOf(
+      nodes.map((n) => n.id),
+      rels,
+      nodes,
+    ),
+  ).toEqual(["C-1", "C-2"]);
+});
+
+it("ほかの課題: 残した終わった課題は、関係する相手がすべて大枠の中なら大枠の中、そうでなければ前に置く", () => {
+  const nodes = [
+    node("C-1", { state: "done", category: "done" }), // 大枠の C-4 の前提だけ → 大枠
+    node("C-2", { state: "done", category: "done" }), // 大枠の C-4 と注目の C-5 の前提 → 前
+    node("C-3", { state: "withdrawn", category: "withdrawn" }), // 関係なし（全部を見る） → 前
+    todoNode("C-4"),
+    node("C-5", { state: "in_progress" }),
+    node("C-6", { state: "done", category: "done" }), // C-7（終わった）の親、C-7 は大枠の C-4 の前提 → 連鎖は前
+    node("C-7", { state: "done", category: "done", parent_id: "C-6" }),
+  ];
+  const rels = [
+    dep("C-1", "C-4"),
+    dep("C-2", "C-4"),
+    dep("C-2", "C-5"),
+    dep("C-7", "C-4"),
+    par("C-6", "C-7"),
+  ];
+  expect(
+    othersOf(
+      nodes.map((n) => n.id),
+      rels,
+      nodes,
+    ),
+  ).toEqual(["C-1", "C-4"]);
 });
 
 it("人間の操作待ちの札: 帯の区分の語を、next_human_actions の並びで、同じ語は 1 つにして返す", () => {
@@ -365,6 +517,70 @@ it("人間の操作待ちの札: 帯の区分の語を、next_human_actions の�
   expect(labels(["unknown_action", "increase_budget"])).toEqual([
     "予算の使い切り",
   ]);
+});
+
+it("人間の操作待ちのチップ: 帯の区分ごとの記号と語を、next_human_actions の並びで、同じ区分は 1 つにして返す", () => {
+  const chips = (acts: string[], category = "human") =>
+    humanChips(node("C-1", { category, next_human_actions: acts }));
+  expect(chips(["approve_plan", "approve_completion", "triage"])).toEqual([
+    { kind: "approvals", glyph: "✓", label: "承認待ち" },
+    { kind: "triage", glyph: "↕", label: "トリアージ" },
+  ]);
+  expect(chips([], "system")).toEqual([]);
+  // 語は帯の語のまま（チップの語と labels は同じ並び）
+  expect(chips(["clear_slot", "answer_question"]).map((c) => c.label)).toEqual([
+    "片づけ待ちのスロット",
+    "未回答の問い",
+  ]);
+});
+
+it("人間の操作待ちのチップの並べ方: 右寄せの 1 行に並べ、入らない分は最後の 1 つを「…」で切り詰め、それも入らなければ出さない", () => {
+  const chips = humanChips(
+    node("C-1", {
+      category: "human",
+      next_human_actions: ["approve_plan", "triage", "clear_slot"],
+    }),
+  );
+  const wide = fitChips(chips, 400);
+  expect(wide.items.map((c) => c.label)).toEqual([
+    "承認待ち",
+    "トリアージ",
+    "片づけ待ちのスロット",
+  ]);
+  // 左から詰めて並べ、全体の幅が 1 行の幅になる
+  const xs = wide.items.map((c) => c.x);
+  expect(xs[0]).toBe(0);
+  expect(xs).toEqual([...xs].sort((a, b) => a - b));
+  const last = wide.items[2];
+  expect(last && last.x + last.w).toBe(wide.width);
+  expect(wide.width).toBeLessThanOrEqual(400);
+  // 狭いと、入る分だけ。最後に入れる 1 つは語を「…」で切る
+  const narrow = fitChips(chips, 130);
+  expect(narrow.width).toBeLessThanOrEqual(130);
+  expect(narrow.items.length).toBeLessThan(3);
+  expect(narrow.items[0]?.label).toBe("承認待ち");
+  const tail = narrow.items[narrow.items.length - 1];
+  expect(tail?.label.endsWith("…") || tail?.label === "承認待ち").toBe(true);
+  // 1 つも入らなければ空
+  expect(fitChips(chips, 20)).toEqual({ items: [], width: 0 });
+});
+
+it("人間の操作待ちのチップ: 記号の表が帯の全区分を覆い、記号は区分ごとに異なる", () => {
+  expect(Object.keys(HUMAN_KIND_GLYPHS).sort()).toEqual(
+    [...HUMAN_KINDS].sort(),
+  );
+  expect(HUMAN_KIND_GLYPHS).toEqual({
+    approvals: "✓",
+    questions: "?",
+    operations: "!",
+    discrepancies: "≠",
+    budget: "$",
+    triage: "↕",
+    slots: "⌫",
+  });
+  expect(new Set(Object.values(HUMAN_KIND_GLYPHS)).size).toBe(
+    HUMAN_KINDS.length,
+  );
 });
 
 it("人間の操作待ちの札: 行動の値ごとの帯の区分の対応が、閉集合の全値を覆う", () => {
@@ -438,4 +654,111 @@ it("配置: ほかの課題に当たらない孤立した課題（終わった�
   );
   expect(l.isolated).toEqual(["C-2"]);
   expect(l.nodes.map((n) => n.id).sort()).toEqual(["C-2", OTHERS_ID]);
+});
+
+// --- 配置: 注目でない課題の大枠 ---
+
+it("配置: 大枠の仲間どうしの依存は、大枠を開いたときだけ中の線として残り、畳むと 1 つの箱に隠れる", () => {
+  const ids = ["C-1", "C-2", "C-3"];
+  const rels = [dep("C-2", "C-3")];
+  const isOther = (id: string) => id !== "C-1";
+  const closed = layoutGraph(ids, rels, D, new Set(), () => D.headH, isOther);
+  expect(closed.edges).toEqual([]);
+  expect(closed.nodes.map((n) => n.id).sort()).toEqual(["C-1", OTHERS_ID]);
+  const open = layoutGraph(
+    ids,
+    rels,
+    D,
+    new Set([OTHERS_ID]),
+    () => D.headH,
+    isOther,
+  );
+  expect(open.edges.map((e) => `${e.from}>${e.to}`)).toEqual(["C-2>C-3"]);
+  // 大枠の中で先行が上、後続が下
+  const y = (id: string) => open.nodes.find((n) => n.id === id)?.y ?? -1;
+  expect(y("C-2")).toBeLessThan(y("C-3"));
+});
+
+it("配置: 大枠の外の課題との依存は、大枠を畳むと大枠の箱へ、開くと中の課題へつながる", () => {
+  const ids = ["C-1", "C-2", "C-3"];
+  const rels = [dep("C-1", "C-2")];
+  const isOther = (id: string) => id !== "C-1";
+  const keys = (l: ReturnType<typeof layoutGraph>) =>
+    l.edges.map((e) => `${e.from}>${e.to}`);
+  const closed = layoutGraph(ids, rels, D, new Set(), () => D.headH, isOther);
+  expect(keys(closed)).toEqual([`C-1>${OTHERS_ID}`]);
+  // 大枠との間にだけ線を持つ課題は、関係の無い課題の段に落ちない
+  expect(closed.isolated).toEqual([]);
+  const open = layoutGraph(
+    ids,
+    rels,
+    D,
+    new Set([OTHERS_ID]),
+    () => D.headH,
+    isOther,
+  );
+  expect(keys(open)).toEqual(["C-1>C-2"]);
+  expect(open.isolated).toEqual([]);
+});
+
+it("配置: 注目の親の子で大枠に入るものは、親の入れ子から外れて大枠の中へ置く", () => {
+  const ids = ["C-1", "C-2", "C-3"];
+  const rels = [par("C-1", "C-2"), par("C-1", "C-3")];
+  const isOther = (id: string) => id === "C-3";
+  const l = layoutGraph(
+    ids,
+    rels,
+    D,
+    new Set(["C-1", OTHERS_ID]),
+    () => D.headH,
+    isOther,
+  );
+  expect(l.parents.get("C-2")).toBe("C-1");
+  expect(l.parents.has("C-3")).toBe(false);
+  expect(l.groups.map((g) => g.id).sort()).toEqual(["C-1", OTHERS_ID]);
+  const c3 = l.nodes.find((n) => n.id === "C-3");
+  const others = l.groups.find((g) => g.id === OTHERS_ID);
+  const c1 = l.groups.find((g) => g.id === "C-1");
+  expect(c3?.depth).toBe(1);
+  expect(
+    others &&
+      c3 &&
+      c3.x >= others.x &&
+      c3.x + c3.w <= others.x + others.w &&
+      c3.y >= others.y + others.headH,
+  ).toBe(true);
+  // C-3 は親の大枠の中に入っていない
+  expect(
+    c1 &&
+      c3 &&
+      c3.y >= c1.y &&
+      c3.y + c3.h <= c1.y + c1.h &&
+      c3.x >= c1.x &&
+      c3.x + c3.w <= c1.x + c1.w,
+  ).toBe(false);
+});
+
+it("配置: 大枠の中の親子は入れ子のまま、畳んだ親は大枠の中で 1 つの箱になる", () => {
+  const ids = ["C-1", "C-2", "C-3"];
+  const rels = [par("C-2", "C-3")];
+  const isOther = (id: string) => id !== "C-1";
+  const l = layoutGraph(
+    ids,
+    rels,
+    D,
+    new Set([OTHERS_ID]),
+    () => D.headH,
+    isOther,
+  );
+  expect(l.nodes.map((n) => n.id).sort()).toEqual(["C-1", "C-2"]);
+  expect(l.nodes.find((n) => n.id === "C-2")?.depth).toBe(1);
+  const nested = layoutGraph(
+    ids,
+    rels,
+    D,
+    new Set([OTHERS_ID, "C-2"]),
+    () => D.headH,
+    isOther,
+  );
+  expect(nested.nodes.find((n) => n.id === "C-3")?.depth).toBe(2);
 });

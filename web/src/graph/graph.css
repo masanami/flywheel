@@ -150,8 +150,42 @@
   font-weight: 600;
   color: var(--c);
 }
+/* 人間の操作待ちのチップ（記号と帯の区分の語）。行の右上に右寄せで並べる */
 .graph-list-human {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 0.15rem;
+  max-width: 60%;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+}
+.graph-list-human .graph-human-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 0.4rem;
+  border: 1px solid var(--graph-human);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--graph-human) 24%, var(--board-card-bg));
+  color: var(--board-fg);
+  font-size: 0.68rem;
   font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.graph-list-human .graph-human-chip-glyph {
+  flex: none;
+}
+.graph-list-human .graph-human-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .graph-list-stale {
   color: var(--running-section-stale-fg);
@@ -257,9 +291,17 @@
   font-size: 11px;
   font-weight: 700;
 }
-/* 人間の操作待ちの札（何をするか）。色は区分のまま、文字は本文の色の太字で、ID の右に置く */
-.graph-node-human-tag {
-  font-size: 11px;
+/* 人間の操作待ちのチップ（記号と帯の区分の語）。題名より一段小さい文字の小さな角丸で、区分の色を薄く敷き、
+ * ノードの右上の角に右寄せで置く。薄い背景は --board-card-bg に混ぜるので、ライト・ダークのどちらでも読める */
+.graph-human-chip rect {
+  fill: color-mix(in srgb, var(--graph-human) 24%, var(--board-card-bg));
+  stroke: var(--graph-human);
+  stroke-width: 1;
+}
+.graph-node .graph-human-chip text,
+.graph-human-chip text {
+  fill: var(--board-fg) !important;
+  font-size: 10px;
   font-weight: 700;
 }
 /* 「ほかの課題」: 課題ではない疑似の大枠。右上の + / − は開閉の目印 */

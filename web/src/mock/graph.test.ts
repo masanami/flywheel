@@ -52,9 +52,22 @@ it("偽の API の graph: ID の数の昇順・区分と実施中と更新なし
     state: "awaiting_completion_approval",
     next_human_actions: ["approve_completion", "approve_operation"],
   });
+  // 優先度は課題の優先度そのまま（カード／一覧と同じ値）。C-25 は線が無くても前に出る P0 の分類待ち
+  expect(node("C-3")?.priority).toBe("P0");
+  expect(node("C-24")?.priority).toBe("P2");
+  expect(node("C-25")).toMatchObject({
+    state: "unclassified",
+    priority: "P0",
+    next_human_actions: [],
+  });
   expect(node("C-5")).toMatchObject({ running: true, stale: false });
   expect(node("C-6")).toMatchObject({ running: true, stale: true });
   expect(node("C-12")?.parent_id).toBe("C-14");
+  // 人間の操作待ちの親 C-3（開いた大枠の見出しにチップが出る）の子
+  expect(node("C-26")).toMatchObject({
+    parent_id: "C-3",
+    state: "in_progress",
+  });
   expect(node("C-14")?.parent_id).toBeNull();
   expect(new Set(g.edges.map((e) => e.kind))).toEqual(
     new Set(["prerequisite", "conflict"]),

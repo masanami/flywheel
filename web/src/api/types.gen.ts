@@ -463,6 +463,7 @@ export interface GraphNode {
   id: string;
   next_human_actions: string[];
   parent_id: string | null;
+  priority: string | null;
   running: boolean;
   stale: boolean;
   state: string;

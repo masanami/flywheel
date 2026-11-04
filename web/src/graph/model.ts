@@ -53,10 +53,28 @@ export function categoryOf(n: GraphNode): Category {
   }
 }
 
-// 人間の操作待ちのノードに付ける札の語（何をするか）。ボードの上の人間待ちの帯の区分の語を使い、
-// next_human_actions の並びで、同じ語になるもの（計画と完了の承認など）は 1 つにまとめる。
+// 人間の操作待ちのチップの記号。帯の区分（HumanKind）ごとに 1 つで、語の前に添える。
+// 語（HUMAN_KIND_LABELS）を変えずに、題名と見分けられる印にする。
+export const HUMAN_KIND_GLYPHS: Record<HumanKind, string> = {
+  approvals: "✓",
+  questions: "?",
+  operations: "!",
+  discrepancies: "≠",
+  budget: "$",
+  triage: "↕",
+  slots: "⌫",
+};
+
+export interface HumanChip {
+  kind: HumanKind;
+  glyph: string;
+  label: string;
+}
+
+// 人間の操作待ちのノードに付けるチップ（何をするか）。ボードの上の人間待ちの帯の区分の語を使い、
+// next_human_actions の並びで、同じ区分になるもの（計画と完了の承認など）は 1 つにまとめる。
 // 人間の操作待ちでなければ空。知らない行動の値は飛ばす。
-export function humanActionLabels(n: GraphNode): string[] {
+export function humanChips(n: GraphNode): HumanChip[] {
   if (n.category !== "human") return [];
   const kinds = new Set<HumanKind>();
   for (const a of n.next_human_actions) {
@@ -65,8 +83,64 @@ export function humanActionLabels(n: GraphNode): string[] {
     ];
     if (k) kinds.add(k);
   }
-  return [...kinds].map((k) => HUMAN_KIND_LABELS[k]);
+  return [...kinds].map((kind) => ({
+    kind,
+    glyph: HUMAN_KIND_GLYPHS[kind],
+    label: HUMAN_KIND_LABELS[kind],
+  }));
 }
+
+// チップ（10px の太字）の寸法。SVG の text は幅を測らずに置くので、全角 10px・半角 6px の目安で並べる。
+export const CHIP_H = 14;
+const CHIP_PAD = 5;
+const CHIP_GAP = 3;
+const chipW = (t: string) =>
+  Array.from(t).reduce((s, ch) => s + (ch.charCodeAt(0) > 0xff ? 10 : 6), 0);
+
+export interface PlacedChip {
+  chip: HumanChip;
+  // 画面に出す語。収まらないときは「…」で切る（全部の語は読み上げの名前にある）
+  label: string;
+  // チップの行の左端からの位置と、チップの幅
+  x: number;
+  w: number;
+}
+
+// チップを幅 room（px）の 1 行に左から詰めて並べる。入らない分は、最後に入れる 1 つの語を「…」で切り（3 文字以上残るとき）、
+// それも入らなければ出さない。
+export function fitChips(
+  chips: HumanChip[],
+  room: number,
+): { items: PlacedChip[]; width: number } {
+  const items: PlacedChip[] = [];
+  let used = 0;
+  for (const chip of chips) {
+    const at = used === 0 ? 0 : used + CHIP_GAP;
+    const base = 2 * CHIP_PAD + chipW(chip.glyph) + CHIP_GAP;
+    const full = base + chipW(chip.label);
+    if (at + full <= room) {
+      items.push({ chip, label: chip.label, x: at, w: full });
+      used = at + full;
+      continue;
+    }
+    const chars = Math.min(
+      Array.from(chip.label).length,
+      Math.floor((room - at - base) / 10),
+    );
+    if (chars >= 3) {
+      const label = clip(chip.label, chars);
+      const w = base + chipW(label);
+      items.push({ chip, label, x: at, w });
+      used = at + w;
+    }
+    break;
+  }
+  return { items, width: used };
+}
+
+// チップの語だけ（読み上げの名前に使う。記号は読み上げない）。
+export const humanActionLabels = (n: GraphNode): string[] =>
+  humanChips(n).map((c) => c.label);
 
 export type DependencyBasis = "prerequisite" | "conflict";
 export type RelationKind = "depends_on" | "parent_of";
@@ -263,36 +337,112 @@ export function visibleIds(
   return nodes.filter((n) => keep.has(n.id)).map((n) => n.id);
 }
 
-// 次の周以降で着手される TODO: 状態が分類待ち（unclassified）か計画待ち（classified）で、人間の操作待ちでない課題。
-// 人間の操作待ち・着手中・検証中・完了確認待ち・終わった課題は入らない。
-// 人間の操作待ちは category が human（core では next_human_actions が空でないことと同値）で判定する。
-export const isTodo = (n: GraphNode): boolean =>
-  (n.state === "unclassified" || n.state === "classified") &&
-  n.category !== "human";
+// --- 注目の課題と「ほかの課題」 ---
 
-// 「ほかの課題」に入る課題（ID の数の昇順）: 親を持たず、子も持たず、依存の辺（前提・衝突のどちらの向きも）を
-// 1 本も持たない、TODO の課題（isTodo。eligible で渡す）。ids は表示中の課題で、隠れた課題につながる関係は数えない。
+// ③で前に出す優先度。どの優先度から前に出すかは、Tom#2 の見直しの後に決める仮定（いまは P0 だけ）。
+export const FOCUS_PRIORITIES: readonly string[] = ["P0"];
+
+// 注目に入った理由。human・working・urgent は課題そのものが当たったもの（①②③）、
+// partner・ancestor は注目の課題との関係で入ったもの（④）。
+export type FocusReason =
+  | "human"
+  | "working"
+  | "urgent"
+  | "partner"
+  | "ancestor";
+
+// 課題そのものが注目に当たるか（①②③の順で最初に当たったもの）。終わった課題（完了・取り下げ）は当たらない。
+export function seedReason(n: GraphNode): FocusReason | null {
+  if (isFinished(n)) return null;
+  // ① 人間の操作待ち
+  if (n.next_human_actions.length > 0) return "human";
+  // ② 着手中・検証中・実行中
+  if (n.state === "in_progress" || n.state === "verifying" || n.running)
+    return "working";
+  // ③ 分類待ち・計画待ちのうち、前に出す優先度
+  if (
+    (n.state === "unclassified" || n.state === "classified") &&
+    n.priority !== null &&
+    FOCUS_PRIORITIES.includes(n.priority)
+  )
+    return "urgent";
+  return null;
+}
+
+// 前に出す課題（注目）と、その理由。ids は表示中の課題で、隠れた課題につながる関係は数えない。
+// ①②③の課題（seedReason）に、④として、その課題の依存の相手（前提・後続・衝突。直接の相手だけで推移しない）と、
+// その親（入れ子を保つため祖先まで。注目の課題の依存の相手の祖先も含める）を足す。動いている課題だけが入る。
+export function focusOf(
+  ids: string[],
+  relations: ChallengeRelation[],
+  nodes: GraphNode[],
+): Map<string, FocusReason> {
+  const set = new Set(ids);
+  const rels = validRelations(set, relations);
+  const live = new Map<string, GraphNode>();
+  for (const n of nodes) if (set.has(n.id) && !isFinished(n)) live.set(n.id, n);
+  const out = new Map<string, FocusReason>();
+  for (const n of live.values()) {
+    const why = seedReason(n);
+    if (why) out.set(n.id, why);
+  }
+  const seeds = new Set(out.keys());
+  for (const r of rels) {
+    if (r.kind !== "depends_on") continue;
+    if (seeds.has(r.from) && live.has(r.to) && !out.has(r.to))
+      out.set(r.to, "partner");
+    if (seeds.has(r.to) && live.has(r.from) && !out.has(r.from))
+      out.set(r.from, "partner");
+  }
+  const pm = parentMap(set, rels);
+  for (const id of [...out.keys()])
+    for (const a of ancestorsOf(id, pm))
+      if (live.has(a) && !out.has(a)) out.set(a, "ancestor");
+  return out;
+}
+
+// 「ほかの課題」の大枠に入れる課題（ID の数の昇順）: 動いている課題のうち注目（focusOf）でないもの。
+// 残した終わった課題（完了・取り下げ）は、関係する相手（親子・依存のどちらの向きも）がすべて大枠の中にあり、
+// そのうち 1 つ以上が動いている課題なら大枠の中に置く。そうでなければ前に置く（大枠に入れない）。
 export function othersOf(
   ids: string[],
   relations: ChallengeRelation[],
-  eligible: (id: string) => boolean,
+  nodes: GraphNode[],
 ): string[] {
   const set = new Set(ids);
   const rels = validRelations(set, relations);
-  const pm = parentMap(set, rels);
-  const hasChild = new Set(pm.values());
-  const linked = new Set<string>();
-  for (const r of rels)
-    if (r.kind === "depends_on") {
-      linked.add(r.from);
-      linked.add(r.to);
+  const focus = focusOf(ids, relations, nodes);
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const others = new Set(
+    ids.filter((id) => {
+      const n = byId.get(id);
+      return n !== undefined && !isFinished(n) && !focus.has(id);
+    }),
+  );
+  const partners = (id: string): string[] =>
+    rels.flatMap((r) => (r.from === id ? [r.to] : r.to === id ? [r.from] : []));
+  // 終わった課題の候補から、前に置くものを外していく（相手が大枠の外にあるか、動いている相手が大枠にいないもの）
+  const finished = new Set(
+    ids.filter((id) => {
+      const n = byId.get(id);
+      return n !== undefined && isFinished(n);
+    }),
+  );
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const id of [...finished]) {
+      const ps = partners(id);
+      const ok =
+        ps.length > 0 &&
+        ps.every((p) => others.has(p) || finished.has(p)) &&
+        ps.some((p) => others.has(p));
+      if (!ok) {
+        finished.delete(id);
+        changed = true;
+      }
     }
-  return ids
-    .filter(
-      (id) =>
-        eligible(id) && !pm.has(id) && !hasChild.has(id) && !linked.has(id),
-    )
-    .sort(compareIds);
+  }
+  return [...others, ...finished].sort(compareIds);
 }
 
 // --- 配置（大枠ごとに、上から下へ層を重ねる。先行が上、後続が下） ---
@@ -381,22 +531,32 @@ export function layoutGraph(
   d: Dims,
   expanded: Set<string> = new Set(),
   headOf: (id: string) => number = () => d.headH,
-  // 一番外で孤立した課題のうち「ほかの課題」の大枠へまとめる課題。大枠の開閉は expanded の OTHERS_ID
+  // 「ほかの課題」の大枠へまとめる課題（大枠の中でも、仲間どうしの親子の入れ子と依存の線は保つ）。
+  // 大枠の開閉は expanded の OTHERS_ID。大枠の外の親の子は、親の入れ子から外して大枠へ移す。
   isOther: (id: string) => boolean = () => false,
 ): Layout {
   const order = [...ids].sort(compareIds);
-  const rels = validRelations(new Set(order), relations);
+  const otherSet = new Set(order.filter(isOther));
+  const rels = validRelations(new Set(order), relations).filter(
+    // 大枠の内と外をまたぐ親子は入れ子にしない（依存の線はまたいでも描く）
+    (r) =>
+      r.kind !== "parent_of" || otherSet.has(r.from) === otherSet.has(r.to),
+  );
   const pm = parentMap(new Set(order), rels);
   const kids = childrenMap(pm);
   const deps = rels.filter((r) => r.kind === "depends_on");
   let hasCycle = false;
 
   // 大枠 container（null は一番外）の直接の中身のうち、課題 id を含むもの。
+  // 「ほかの課題」の大枠の直接の中身は、親を持たない大枠の仲間。
+  const containerOf = (x: string): string | null =>
+    pm.get(x) ?? (otherSet.has(x) ? OTHERS_ID : null);
   const memberIn = (id: string, container: string | null): string | null => {
     for (const x of [id, ...ancestorsOf(id, pm)])
-      if ((pm.get(x) ?? null) === container) return x;
+      if (containerOf(x) === container) return x;
     return null;
   };
+  const otherRoots = order.filter((id) => otherSet.has(id) && !pm.has(id));
 
   const arrange = (
     members: string[],
@@ -436,12 +596,20 @@ export function layoutGraph(
       linked.add(b);
       for (const a of ps) linked.add(a);
     }
+    // 「ほかの課題」の大枠との間だけに依存を持つ課題も、関係の無い課題ではない（線を持つ）
+    if (container === null)
+      for (const r of deps) {
+        const a = memberIn(r.from, null);
+        const b = memberIn(r.to, null);
+        if (a && !b && otherSet.has(r.to)) linked.add(a);
+        if (b && !a && otherSet.has(r.from)) linked.add(b);
+      }
     const isolatedAll =
       container === null
         ? members.filter((m) => !linked.has(m) && !kids.has(m))
         : [];
-    const others = isolatedAll.filter(isOther);
-    const isolated = isolatedAll.filter((m) => !isOther(m));
+    const others = container === null ? otherRoots : [];
+    const isolated = isolatedAll;
     const graphIds = members.filter((m) => !isolatedAll.includes(m));
 
     // 最長経路で層を決める（Kahn の方法）。
@@ -574,7 +742,7 @@ export function layoutGraph(
   };
 
   const root = arrange(
-    order.filter((id) => !pm.has(id)),
+    order.filter((id) => !pm.has(id) && !otherSet.has(id)),
     null,
     d.maxW,
   );
@@ -608,11 +776,16 @@ export function layoutGraph(
   groups.sort((a, b) => a.depth - b.depth);
 
   const at = new Map([...groups, ...nodes].map((b) => [b.id, b]));
+  // 線の端の箱。畳んだ「ほかの課題」の中の課題は大枠の箱、畳んだ親の中の課題は一番外の畳んだ親の箱
+  const boxOf = (id: string) =>
+    otherSet.has(id) && !expanded.has(OTHERS_ID)
+      ? OTHERS_ID
+      : visibleBoxOf(id, pm, expanded);
   const seen = new Map<string, LayoutEdge>();
   const edges: LayoutEdge[] = [];
   for (const r of deps) {
-    const a = visibleBoxOf(r.from, pm, expanded);
-    const b = visibleBoxOf(r.to, pm, expanded);
+    const a = boxOf(r.from);
+    const b = boxOf(r.to);
     // 同じ箱の中・自分の大枠との依存は線にしない（入れ子の位置で読める）
     if (
       a === b ||

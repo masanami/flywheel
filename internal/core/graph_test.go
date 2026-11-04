@@ -160,6 +160,27 @@ func TestChallengeGraph_NodeCarriesTheCardStateAndNextHumanActions(t *testing.T)
 	}
 }
 
+func graphPriority(p Priority) *Priority { return &p }
+
+// 優先度は課題の優先度（カード／一覧と同じ値）。付いていなければ nil。
+func TestChallengeGraph_NodeCarriesThePriority(t *testing.T) {
+	s, _ := graphStore(t, StatusClassified, StatusClassified, StatusClassified)
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE challenge SET priority = CASE id WHEN 1 THEN 'P0' WHEN 2 THEN 'P2' END WHERE id IN (1, 2)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	g := mustGraph(t, s)
+	want := map[string]*Priority{"C-1": graphPriority(PriorityP0), "C-2": graphPriority(PriorityP2), "C-3": nil}
+	for id, w := range want {
+		got := nodeByID(t, g, id).Priority
+		if (got == nil) != (w == nil) || (got != nil && *got != *w) {
+			t.Errorf("%s priority = %v, want %v", id, got, w)
+		}
+	}
+}
+
 func TestChallengeGraph_RunningAndStaleFollowTheHeartbeat(t *testing.T) {
 	s, cs := graphStore(t, StatusInProgress, StatusInProgress, StatusInProgress)
 	cardInsertRun(t, s, cs[0], graphNow.Add(-10*time.Second), nil) // 動いている

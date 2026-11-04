@@ -27,6 +27,24 @@ const horizontalOverflow = (page: Page) =>
     return found.slice(0, 5);
   });
 
+// 色（rgb(...) か color(srgb r g b)）を 0〜1 の RGB にする
+const parseColor = (c: string): [number, number, number] => {
+  const nums = (c.match(/-?[\d.]+/g) ?? []).map(Number);
+  const [r = 0, g = 0, b = 0] = nums;
+  return c.startsWith("color(") ? [r, g, b] : [r / 255, g / 255, b / 255];
+};
+const luminance = ([r, g, b]: [number, number, number]) => {
+  const f = (v: number) =>
+    v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+};
+const contrast = (a: string, b: string) => {
+  const [hi, lo] = [luminance(parseColor(a)), luminance(parseColor(b))].sort(
+    (x, y) => y - x,
+  );
+  return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05);
+};
+
 test.describe("広い画面（1280px）", () => {
   test.use({ viewport: { width: 1280, height: 900 } });
 
@@ -114,51 +132,177 @@ test.describe("広い画面（1280px）", () => {
     await expect(graph.getByRole("button", { name: /^C-22 / })).toHaveCount(0);
   });
 
-  test("ほかの課題: 親も子も依存も持たない分類待ち・計画待ちの課題だけを大枠にまとめ、既定で畳み、押しても詳細は開かず、開閉できる", async ({
+  test("ほかの課題: 注目でない動いている課題を大枠にまとめ、既定で畳み、押しても詳細は開かず、開閉できる。優先度 P0 の分類待ちや人間の操作待ちは線が無くても前に出る", async ({
     page,
   }) => {
     await page.goto("/");
     const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
-    // 人間の操作待ち（C-3・C-7）と実施中（C-20）が線無しでいても、大枠は畳んだまま。中身（C-23・C-24）は見えない
+    // 大枠は C-1（注目の親 C-2 の子）・C-23（P3 の分類待ち）・C-24（P2 の計画待ち）。畳んだまま、中身は見えない
     const closed = graph.getByRole("button", {
-      name: /^ほかの課題を開く（2 件）/,
+      name: /^ほかの課題を開く（3 件）/,
     });
     await expect(closed).toBeVisible();
-    await expect(graph.getByRole("button", { name: /^C-23 / })).toHaveCount(0);
-    await expect(graph.getByRole("button", { name: /^C-24 / })).toHaveCount(0);
-    // 線の無い人間の操作待ち・着手中は、大枠に入らずそのまま並ぶ
-    for (const id of ["C-3", "C-7", "C-20"])
+    for (const id of ["C-1", "C-23", "C-24"])
       await expect(
-        graph.getByRole("button", { name: new RegExp(`^${id} `) }),
+        graph.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
+      ).toHaveCount(0);
+    // 線の無い人間の操作待ち（C-3・C-7）・実行中（C-20）・P0 の分類待ち（C-25）は、大枠に入らずそのまま並ぶ
+    for (const id of ["C-3", "C-7", "C-20", "C-25"])
+      await expect(
+        graph.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
+      ).toBeVisible();
+    // 注目の後続になっている計画待ち（C-18・C-19）も前に出る
+    for (const id of ["C-18", "C-19"])
+      await expect(
+        graph.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
       ).toBeVisible();
     await closed.click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(graph.getByRole("button", { name: /^C-23 / })).toBeVisible();
-    await expect(graph.getByRole("button", { name: /^C-24 / })).toBeVisible();
+    for (const id of ["C-1", "C-23", "C-24"])
+      await expect(
+        graph.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
+      ).toBeVisible();
+    // C-1 は親 C-2 の大枠の中でなく、「ほかの課題」の大枠の中にいる
+    const inside = async (outer: string, id: string) => {
+      const o = await graph.locator(outer).boundingBox();
+      const n = await graph
+        .getByRole("button", { name: new RegExp(`^${id} (?!を)`) })
+        .locator(".graph-node-box")
+        .boundingBox();
+      return (
+        !!o &&
+        !!n &&
+        n.x >= o.x &&
+        n.y >= o.y &&
+        n.x + n.width <= o.x + o.width &&
+        n.y + n.height <= o.y + o.height
+      );
+    };
+    expect(await inside(".graph-others-frame .graph-group-box", "C-1")).toBe(
+      true,
+    );
+    expect(
+      await inside(
+        '.graph-group:has(.graph-group-head[aria-label^="C-2 "]) .graph-group-box',
+        "C-1",
+      ),
+    ).toBe(false);
     await graph.getByRole("button", { name: /^ほかの課題を畳む/ }).click();
     await expect(graph.getByRole("button", { name: /^C-23 / })).toHaveCount(0);
   });
 
-  test("人間の操作待ちのノードに「何をするか」の札が帯の語で出る（承認と不可逆操作は並び、実装の語は出ない）", async ({
+  test("人間の操作待ちのチップ: 区分の記号と帯の語が、題名と見分けられる小さな角丸で、ノードの右上の角に出る。ライト・ダークで読める。実装の語は出ない", async ({
     page,
   }) => {
     await page.goto("/");
     const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
-    const tag = (id: string) =>
-      graph
-        .getByRole("button", { name: new RegExp(`^${id} `) })
-        .locator(".graph-node-human-tag");
-    await expect(tag("C-3")).toHaveText("承認待ち");
-    await expect(tag("C-7")).toHaveText("承認待ち・不可逆操作の承認");
+    const node = (id: string) =>
+      graph.getByRole("button", { name: new RegExp(`^${id} (?!を)`) });
+    const chips = (id: string) => node(id).locator(".graph-human-chip");
+    await expect(chips("C-3")).toHaveCount(1);
+    await expect(chips("C-3").locator(".graph-human-chip-glyph")).toHaveText(
+      "✓",
+    );
+    await expect(chips("C-3").locator(".graph-human-chip-label")).toHaveText(
+      "承認待ち",
+    );
+    // 承認と不可逆操作は並ぶ（入らない語は切り詰める。全部の語は読み上げの名前にある）
+    await expect(chips("C-7")).toHaveCount(2);
+    await expect(chips("C-7").nth(0)).toHaveAttribute("data-kind", "approvals");
+    await expect(chips("C-7").nth(1)).toHaveAttribute(
+      "data-kind",
+      "operations",
+    );
+    await expect(
+      chips("C-7").nth(1).locator(".graph-human-chip-glyph"),
+    ).toHaveText("!");
+    await expect(node("C-7")).toHaveAccessibleName(
+      /人間の操作待ち・承認待ち・不可逆操作の承認/,
+    );
     // 開いた大枠 C-14 の中の C-8（問いに答える）
-    await expect(tag("C-8")).toHaveText("未回答の問い");
-    // 人間の操作待ちでないノードには札が無い
-    await expect(tag("C-20")).toHaveCount(0);
-    await expect(tag("C-5")).toHaveCount(0);
+    await expect(chips("C-8").locator(".graph-human-chip-glyph")).toHaveText(
+      "?",
+    );
+    await expect(chips("C-8").locator(".graph-human-chip-label")).toHaveText(
+      "未回答の問い",
+    );
+    // 人間の操作待ちでないノードにはチップが無い
+    await expect(chips("C-20")).toHaveCount(0);
+    await expect(chips("C-5")).toHaveCount(0);
+
+    // ノードの右上の角: 箱の上の端に近く、右の端は箱の右から 6px。題名より上の行にある
+    const boxOf = await node("C-7").locator(".graph-node-box").boundingBox();
+    const last = await chips("C-7").last().boundingBox();
+    const title = await node("C-7").locator(".graph-node-title").boundingBox();
+    if (!boxOf || !last || !title) throw new Error("位置が取れない");
+    expect(last.y - boxOf.y).toBeLessThanOrEqual(8);
+    expect(
+      boxOf.x + boxOf.width - (last.x + last.width),
+    ).toBeGreaterThanOrEqual(4);
+    expect(boxOf.x + boxOf.width - (last.x + last.width)).toBeLessThanOrEqual(
+      8,
+    );
+    expect(last.y + last.height).toBeLessThanOrEqual(title.y + 2);
+
+    // 文字は題名より一段小さい
+    const fontSize = (sel: string) =>
+      node("C-7")
+        .locator(sel)
+        .first()
+        .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+    expect(await fontSize(".graph-human-chip text")).toBeLessThan(
+      await fontSize(".graph-node-title"),
+    );
+
+    // 区分の色が薄く敷かれ、ライト・ダークのどちらでも文字が読める
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const [fill, text] = await chips("C-3").evaluate((el) => [
+        getComputedStyle(el.querySelector("rect") as Element).fill,
+        getComputedStyle(el.querySelector("text") as Element).fill,
+      ]);
+      expect(fill).not.toBe("none");
+      expect(
+        contrast(fill as string, text as string),
+        scheme,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+    await page.emulateMedia({ colorScheme: "light" });
     const html = await page.content();
     expect(html).not.toMatch(
       /approve_plan|approve_completion|answer_question|approve_operation|next_human_actions/,
     );
+  });
+
+  test("人間の操作待ちのチップ: 開いた大枠の見出しでも右上に出て、開閉ボタンとぶつからない", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
+    // C-3（人間の操作待ち）は着手中の子 C-26 を持つ親。畳んだ箱のチップは開閉ボタンの左にある
+    const folded = graph.getByRole("button", { name: /^C-3 (?!を)/ });
+    const foldedChip = await folded.locator(".graph-human-chip").boundingBox();
+    const foldedToggle = await graph
+      .getByRole("button", { name: /^C-3 を開く/ })
+      .boundingBox();
+    if (!foldedChip || !foldedToggle) throw new Error("位置が取れない");
+    expect(foldedChip.x + foldedChip.width).toBeLessThanOrEqual(foldedToggle.x);
+    // 開くと、見出しの右上に同じチップが出て、右上の開閉ボタンの左に収まる
+    await graph.getByRole("button", { name: /^C-3 を開く/ }).click();
+    const headBox = graph.locator('.graph-group-head[aria-label^="C-3 "]');
+    await expect(headBox.locator(".graph-human-chip")).toHaveCount(1);
+    await expect(headBox.locator(".graph-human-chip-glyph")).toHaveText("✓");
+    await expect(headBox.locator(".graph-human-chip-label")).toHaveText(
+      "承認待ち",
+    );
+    const chip = await headBox.locator(".graph-human-chip").boundingBox();
+    const toggle = await graph
+      .getByRole("button", { name: "C-3 を畳む" })
+      .boundingBox();
+    const frame = await headBox.locator(".graph-group-head-box").boundingBox();
+    if (!chip || !toggle || !frame) throw new Error("位置が取れない");
+    expect(chip.x + chip.width).toBeLessThanOrEqual(toggle.x);
+    expect(chip.y - frame.y).toBeLessThanOrEqual(8);
   });
 
   test("詳細の長い文章にだけ「全文を開く」が出る（短い・3 行に収まる文章には出ない）", async ({
@@ -167,7 +311,7 @@ test.describe("広い画面（1280px）", () => {
     await page.goto("/");
     const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
     // C-3: 短い論点・複数行でも 3 行に収まる文章だけ
-    await graph.getByRole("button", { name: /^C-3 / }).click();
+    await graph.getByRole("button", { name: /^C-3 (?!を)/ }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await expect(
@@ -245,7 +389,7 @@ test.describe("狭い画面（360px）", () => {
     expect(await horizontalOverflow(page)).toEqual([]);
   });
 
-  test("終わった課題は既定で隠れ、ほかの課題は分類待ち・計画待ちだけで既定で畳んでいる。人間の操作待ちの行には札が出る", async ({
+  test("終わった課題は既定で隠れ、ほかの課題は注目でない課題だけで既定で畳んでいる。人間の操作待ちの行の右上にはチップが出る", async ({
     page,
   }) => {
     await page.goto("/");
@@ -253,22 +397,61 @@ test.describe("狭い画面（360px）", () => {
     await expect(list).toBeVisible();
     await expect(list.getByRole("button", { name: /^C-22 / })).toHaveCount(0);
     await expect(list.getByRole("button", { name: /^C-21 / })).toBeVisible();
-    // 大枠は畳んでいる（人間の操作待ち C-3・C-7 が線無しでいても開かない）
+    // 大枠は畳んでいる（人間の操作待ち C-3・C-7 や P0 の C-25 が線無しでいても開かない）。入るのは C-1・C-23・C-24
     const others = list.getByRole("button", {
-      name: /^ほかの課題を開く（2 件）/,
+      name: /^ほかの課題を開く（3 件）/,
     });
     await expect(others).toBeVisible();
-    await expect(list.getByRole("button", { name: /^C-23 / })).toHaveCount(0);
-    // 線の無い実施中・人間の操作待ちは大枠の外に並ぶ
-    await expect(list.getByRole("button", { name: /^C-20 / })).toBeVisible();
-    const c7 = list.locator(
-      'li.graph-list-item:has(> .graph-list-row > button.graph-list-open[aria-label^="C-7 "])',
+    for (const id of ["C-1", "C-23", "C-24"])
+      await expect(
+        list.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
+      ).toHaveCount(0);
+    // 線の無い実行中・人間の操作待ち・P0 の分類待ちは大枠の外に並ぶ
+    for (const id of ["C-20", "C-25"])
+      await expect(
+        list.getByRole("button", { name: new RegExp(`^${id} `) }),
+      ).toBeVisible();
+    const row = (id: string) =>
+      list.locator(
+        `li.graph-list-item:has(> .graph-list-row > button.graph-list-open[aria-label^="${id} "])`,
+      );
+    const c7 = row("C-7");
+    const chips = c7.locator(".graph-list-row .graph-human-chip");
+    await expect(chips).toHaveCount(2);
+    await expect(chips.nth(0).locator(".graph-human-chip-glyph")).toHaveText(
+      "✓",
     );
-    await expect(c7.locator(".graph-list-human")).toHaveText(
-      "承認待ち・不可逆操作の承認",
+    await expect(chips.nth(0).locator(".graph-human-chip-label")).toHaveText(
+      "承認待ち",
     );
+    await expect(chips.nth(1).locator(".graph-human-chip-glyph")).toHaveText(
+      "!",
+    );
+    await expect(chips.nth(1).locator(".graph-human-chip-label")).toHaveText(
+      "不可逆操作の承認",
+    );
+    // 行の右上: 行の右端に近く、行の上の端に近い。文字は題名より小さい
+    const rowBox = await c7.locator("> .graph-list-row").boundingBox();
+    const last = await chips.last().boundingBox();
+    if (!rowBox || !last) throw new Error("位置が取れない");
+    expect(rowBox.x + rowBox.width - (last.x + last.width)).toBeLessThanOrEqual(
+      12,
+    );
+    expect(last.y - rowBox.y).toBeLessThanOrEqual(8);
+    const fontSize = (sel: string) =>
+      c7
+        .locator(sel)
+        .first()
+        .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+    expect(await fontSize(".graph-human-chip")).toBeLessThan(
+      await fontSize(".graph-list-open"),
+    );
+    expect(await horizontalOverflow(page)).toEqual([]);
     await others.click();
-    await expect(list.getByRole("button", { name: /^C-23 / })).toBeVisible();
+    for (const id of ["C-1", "C-23", "C-24"])
+      await expect(
+        list.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
+      ).toBeVisible();
     await page.locator("label.graph-switch").click();
     await expect(list.getByRole("button", { name: /^C-22 / })).toBeVisible();
     expect(await horizontalOverflow(page)).toEqual([]);

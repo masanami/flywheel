@@ -421,7 +421,8 @@ export function seed(): Record<string, MockWorkspace> {
       version: 4,
       headline: "不要なログ出力を削った",
     }),
-    // 何ともつながらない、次の周以降で着手される TODO（分類待ち・計画待ち）。「ほかの課題」の大枠にまとまる（既定で畳む）
+    // 何ともつながらない TODO（分類待ち・計画待ち）のうち、優先度が P1 以下のものは「ほかの課題」の大枠にまとまる（既定で畳む）。
+    // 優先度が P0 の C-25 は、線が無くても大枠に入らず前に出る
     mk("C-23", "エラーページの文言の見直し", "unclassified", {
       priority: "P3",
       urgency: "低",
@@ -430,6 +431,16 @@ export function seed(): Record<string, MockWorkspace> {
     mk("C-24", "CSV 出力の文字コードの指定", "classified", {
       priority: "P2",
       headline: "出力時に文字コードを選べるようにする",
+    }),
+    // 人間の操作待ちの親 C-3 の子（着手中）。C-3 を開くと、大枠の見出しの右上にもチップが出る（親を開くまで中は見えない）
+    mk("C-26", "再送の重複テストの追加", "in_progress", {
+      priority: "P2",
+      headline: "冪等キーの再送が 1 通だけ届くことを確かめるテストを足す",
+    }),
+    mk("C-25", "決済 API の障害の一次対応", "unclassified", {
+      priority: "P0",
+      urgency: "高",
+      description: "決済 API が断続的に 500 を返している。",
     }),
   ];
   const beta: MockChallenge[] = [
@@ -569,6 +580,7 @@ export function graphOf(w: MockWorkspace): GraphResponse {
         id: m.c.id,
         next_human_actions: card.next_human_actions,
         parent_id: w.graph.parents[m.c.id] ?? null,
+        priority: m.c.priority,
         running: !!(m.flags.running || m.flags.unresponsive),
         stale: !!m.flags.unresponsive,
         state: card.state,

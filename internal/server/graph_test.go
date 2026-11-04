@@ -53,6 +53,10 @@ func graphWorkspace(t *testing.T, now time.Time) string {
 	if _, err := st.CreateChallenge(ctx, core.ChannelCLI, core.CreateInput{Title: "c7", DoneCriteria: "d"}); err != nil {
 		t.Fatal(err)
 	}
+	// C-7 にだけ優先度を付ける（他は付いていない＝ null）。
+	if _, err := st.ClassifyChallenge(ctx, core.ChannelCLI, "C-7", core.ClassifyInput{Priority: "P0"}); err != nil {
+		t.Fatal(err)
+	}
 	_ = st.Close()
 	coretest.SetChallengeStatus(t, ws, 7, "withdrawn")
 	return ws
@@ -87,7 +91,7 @@ func TestGraphAPI_NodesFollowTheBoardCardsAndEdgesAndParentsAreReturned(t *testi
 	}
 	for i, n := range nodes {
 		node := n.(map[string]any)
-		assertKeys(t, "node", node, "id", "title", "headline", "context", "category", "running", "stale", "parent_id", "state", "next_human_actions")
+		assertKeys(t, "node", node, "id", "title", "headline", "context", "category", "running", "stale", "parent_id", "state", "next_human_actions", "priority")
 		c := board[i].(map[string]any)
 		card := c["card"].(map[string]any)
 		if node["id"] != c["id"] || node["title"] != c["title"] {
@@ -115,6 +119,10 @@ func TestGraphAPI_NodesFollowTheBoardCardsAndEdgesAndParentsAreReturned(t *testi
 		if node["state"] != card["state"] || !reflect.DeepEqual(strs(node["next_human_actions"]), strs(card["next_human_actions"])) {
 			t.Errorf("%v state/next_human_actions = %v/%v, card = %v/%v", node["id"], node["state"], node["next_human_actions"], card["state"], card["next_human_actions"])
 		}
+		// 優先度は一覧の値そのまま（付いていなければ null）
+		if node["priority"] != c["priority"] {
+			t.Errorf("%v priority = %v, board = %v", node["id"], node["priority"], c["priority"])
+		}
 		if node["category"] != wantCategory {
 			t.Errorf("%v category = %v, want %v", node["id"], node["category"], wantCategory)
 		}
@@ -128,6 +136,9 @@ func TestGraphAPI_NodesFollowTheBoardCardsAndEdgesAndParentsAreReturned(t *testi
 	}
 	if byID["C-2"]["category"] != "human" || byID["C-6"]["stale"] != true || byID["C-5"]["running"] != true || byID["C-5"]["stale"] != false {
 		t.Errorf("fixture expectations broken: C-2=%v C-5=%v C-6=%v", byID["C-2"], byID["C-5"], byID["C-6"])
+	}
+	if byID["C-7"]["priority"] != "P0" || byID["C-1"]["priority"] != nil {
+		t.Errorf("priority: C-7=%v C-1=%v, want P0 / null", byID["C-7"]["priority"], byID["C-1"]["priority"])
 	}
 	if byID["C-7"]["category"] != "withdrawn" {
 		t.Errorf("C-7 category = %v, want withdrawn", byID["C-7"]["category"])

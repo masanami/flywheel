@@ -13,7 +13,7 @@ import {
   OTHERS_LABEL,
   categoryLabel,
   compareIds,
-  humanActionLabels,
+  humanChips,
   neighborsOf,
 } from "./model.ts";
 
@@ -25,7 +25,7 @@ export interface NarrowListProps {
   kids: Map<string, string[]>;
   // 親を持たない課題（一番外）の ID（「ほかの課題」にまとめる課題は含めない）
   roots: string[];
-  // 「ほかの課題」にまとめる課題の ID（親・子・依存を持たない分類待ち・計画待ちの課題）
+  // 「ほかの課題」にまとめる課題の ID（注目でない動いている課題。判定は model.ts の othersOf）
   others: string[];
   relations: ChallengeRelation[];
   expanded: Set<string>;
@@ -44,7 +44,7 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
   const open = isParent && p.expanded.has(id);
   const near = neighborsOf(id, p.relations);
   const folded = isParent && !open ? p.inside(id) : null;
-  const human = humanActionLabels(info.node);
+  const chips = humanChips(info.node);
   return (
     <li
       className="graph-list-item"
@@ -76,13 +76,26 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
           <span className="graph-swatch" aria-hidden="true" />
           <b>{id}</b> {info.node.title}
         </button>
+        {chips.length > 0 ? (
+          // 人間の操作待ちのチップ（記号と語）。行の右上に右寄せで並べ、入らない語は切り詰める
+          <span className="graph-list-human" data-category="human">
+            {chips.map((c) => (
+              <span
+                key={c.kind}
+                className="graph-human-chip"
+                data-kind={c.kind}
+              >
+                <span className="graph-human-chip-glyph" aria-hidden="true">
+                  {c.glyph}
+                </span>
+                <span className="graph-human-chip-label">{c.label}</span>
+              </span>
+            ))}
+          </span>
+        ) : null}
       </div>
       <div className="graph-list-meta">
         <span className="graph-list-cat">{categoryLabel(info.category)}</span>
-        {human.length > 0 ? (
-          // 人間の操作待ちの札（何をするか）
-          <span className="graph-list-human">{human.join("・")}</span>
-        ) : null}
         {info.active ? <span>▶ 実施中</span> : null}
         {info.stale ? (
           <span className="graph-list-stale">⚠ 更新なし（要確認）</span>
@@ -107,6 +120,8 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
 // 「ほかの課題」の見出し。課題ではない疑似の大枠で、押すと開閉するだけ（詳細のモーダルは開かない）。
 function OthersGroup({ p }: { p: NarrowListProps }) {
   const open = p.expanded.has(OTHERS_ID);
+  // 大枠の直下に並べるのは親を持たない仲間だけ（子は親の下に入れ子で出る）
+  const childIds = new Set([...p.kids.values()].flat());
   const ds = p.others.map((id) => p.infos.get(id));
   const folded = {
     total: ds.length,
@@ -135,9 +150,12 @@ function OthersGroup({ p }: { p: NarrowListProps }) {
       </div>
       {open ? (
         <ul className="graph-list-children">
-          {[...p.others].sort(compareIds).map((c) => (
-            <Row key={c} id={c} p={p} />
-          ))}
+          {[...p.others]
+            .filter((c) => !childIds.has(c))
+            .sort(compareIds)
+            .map((c) => (
+              <Row key={c} id={c} p={p} />
+            ))}
         </ul>
       ) : (
         <div className="graph-list-meta">
