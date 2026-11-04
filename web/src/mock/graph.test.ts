@@ -39,6 +39,19 @@ it("偽の API の graph: ID の数の昇順・区分と実施中と更新なし
   // 取り下げは完了とは別の区分
   expect(node("C-21")?.category).toBe("withdrawn");
   expect(node("C-22")?.category).toBe("done");
+  // 状態と人間の操作待ちの中身はカードの導出と同じ（線の無い TODO と、複数の操作待ちを持つ課題が見える）
+  expect(node("C-23")).toMatchObject({
+    state: "unclassified",
+    next_human_actions: [],
+  });
+  expect(node("C-24")).toMatchObject({
+    state: "classified",
+    next_human_actions: [],
+  });
+  expect(node("C-7")).toMatchObject({
+    state: "awaiting_completion_approval",
+    next_human_actions: ["approve_completion", "approve_operation"],
+  });
   expect(node("C-5")).toMatchObject({ running: true, stale: false });
   expect(node("C-6")).toMatchObject({ running: true, stale: true });
   expect(node("C-12")?.parent_id).toBe("C-14");

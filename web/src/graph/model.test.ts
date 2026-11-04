@@ -1,5 +1,8 @@
 import { expect, it } from "vitest";
 import type { GraphEdge, GraphNode, GraphResponse } from "../api/types.gen.ts";
+import { CARD_ACTION_CODES } from "../api/types.gen.ts";
+import { HUMAN_KINDS, HUMAN_KIND_LABELS } from "../board/filter.ts";
+import { HUMAN_KIND_OF_ACTION } from "../board/filter.ts";
 import {
   type ChallengeRelation,
   type Dims,
@@ -10,6 +13,8 @@ import {
   chipLines,
   chipText,
   downstreamOf,
+  humanActionLabels,
+  isTodo,
   layoutGraph,
   othersOf,
   parentMap,
@@ -46,9 +51,11 @@ const node = (id: string, over: Partial<GraphNode> = {}): GraphNode => ({
   context: null,
   headline: null,
   id,
+  next_human_actions: [],
   parent_id: null,
   running: false,
   stale: false,
+  state: "in_progress",
   title: `題名${id}`,
   ...over,
 });
@@ -278,22 +285,23 @@ it("終わった課題の隠し方: 全部を見る切り替えを入れると�
 
 // --- 「ほかの課題」の大枠 ---
 
-const active = (id: string) => id.length > 0;
-it("ほかの課題: 親も子も依存も持たない動いている課題だけが入る", () => {
+// 「ほかの課題」に入るのは、次の周以降で着手される TODO（分類待ち・計画待ち）で、線を持たない課題だけ
+const todo = (id: string) => id.length > 0;
+it("ほかの課題: 親も子も依存も持たない TODO の課題だけが入る", () => {
   const ids = ["C-1", "C-2", "C-3", "C-4", "C-5", "C-6", "C-7", "C-8"];
   const rels = [
     par("C-1", "C-2"), // C-1 は親、C-2 は子
     dep("C-3", "C-4"), // 前提と後続
     dep("C-5", "C-4"),
   ];
-  // C-6・C-7・C-8 は何ともつながらない。C-7 は終わっている
+  // C-6・C-7・C-8 は何ともつながらない。C-7 は TODO ではない（着手中など）
   expect(othersOf(ids, rels, (id) => id !== "C-7")).toEqual(["C-6", "C-8"]);
-  expect(othersOf(ids, rels, active)).toEqual(["C-6", "C-7", "C-8"]);
+  expect(othersOf(ids, rels, todo)).toEqual(["C-6", "C-7", "C-8"]);
 });
 
 it("ほかの課題: 隠れた課題につながる辺は数えない（表示中の課題だけで決める）", () => {
   // C-2 は隠れた課題（ids に無い C-9）の前提だが、表示中の辺は持たない
-  expect(othersOf(["C-1", "C-2"], [dep("C-2", "C-9")], active)).toEqual([
+  expect(othersOf(["C-1", "C-2"], [dep("C-2", "C-9")], todo)).toEqual([
     "C-1",
     "C-2",
   ]);
@@ -303,11 +311,78 @@ it("ほかの課題: 衝突の依存も、どちらの向きでも数える", ()
   const rels: ChallengeRelation[] = [
     { ...dep("C-1", "C-2"), edge: edge("C-1", "C-2", { kind: "conflict" }) },
   ];
-  expect(othersOf(["C-1", "C-2", "C-3"], rels, active)).toEqual(["C-3"]);
+  expect(othersOf(["C-1", "C-2", "C-3"], rels, todo)).toEqual(["C-3"]);
 });
 
 it("ほかの課題: 該当が無ければ空で、大枠は出ない", () => {
-  expect(othersOf(["C-1", "C-2"], [dep("C-1", "C-2")], active)).toEqual([]);
+  expect(othersOf(["C-1", "C-2"], [dep("C-1", "C-2")], todo)).toEqual([]);
+});
+
+it("TODO の判定: 分類待ち・計画待ちで人間の操作待ちでないものだけ。着手中・検証中・人間の操作待ち・終わった課題は入らない", () => {
+  const yes = (state: string) =>
+    isTodo(node("C-1", { state, category: "system" }));
+  expect(yes("unclassified")).toBe(true);
+  expect(yes("classified")).toBe(true);
+  for (const s of [
+    "awaiting_plan_approval",
+    "in_progress",
+    "verifying",
+    "awaiting_completion_approval",
+    "awaiting_human",
+    "done",
+    "withdrawn",
+  ])
+    expect(yes(s), s).toBe(false);
+  // 分類待ち・計画待ちでも、人間の操作待ち（本番反映の承認など）を持てば TODO ではない
+  expect(
+    isTodo(
+      node("C-1", {
+        state: "classified",
+        category: "human",
+        next_human_actions: ["approve_operation"],
+      }),
+    ),
+  ).toBe(false);
+});
+
+it("人間の操作待ちの札: 帯の区分の語を、next_human_actions の並びで、同じ語は 1 つにして返す", () => {
+  const labels = (acts: string[], category = "human") =>
+    humanActionLabels(node("C-1", { category, next_human_actions: acts }));
+  expect(labels(["approve_completion", "approve_operation"])).toEqual([
+    HUMAN_KIND_LABELS.approvals,
+    HUMAN_KIND_LABELS.operations,
+  ]);
+  // 承認 2 つ（計画・完了）は 1 つの語にまとまる
+  expect(labels(["approve_plan", "approve_completion"])).toEqual(["承認待ち"]);
+  // 並びは next_human_actions のとおり（帯の並びに直さない）
+  expect(labels(["clear_slot", "answer_question", "triage"])).toEqual([
+    "片づけ待ちのスロット",
+    "未回答の問い",
+    "トリアージ",
+  ]);
+  // 人間の操作待ちでなければ札は無い。知らない行動の値は飛ばす
+  expect(labels([], "system")).toEqual([]);
+  expect(labels(["unknown_action", "increase_budget"])).toEqual([
+    "予算の使い切り",
+  ]);
+});
+
+it("人間の操作待ちの札: 行動の値ごとの帯の区分の対応が、閉集合の全値を覆う", () => {
+  expect(Object.keys(HUMAN_KIND_OF_ACTION).sort()).toEqual(
+    [...CARD_ACTION_CODES].sort(),
+  );
+  for (const k of Object.values(HUMAN_KIND_OF_ACTION))
+    expect(HUMAN_KINDS).toContain(k);
+  expect(HUMAN_KIND_OF_ACTION).toMatchObject({
+    approve_plan: "approvals",
+    approve_completion: "approvals",
+    answer_question: "questions",
+    triage: "triage",
+    increase_budget: "budget",
+    approve_operation: "operations",
+    review_discrepancy: "discrepancies",
+    clear_slot: "slots",
+  });
 });
 
 it("配置: ほかの課題は畳むと 1 つの箱、開くと大枠になり、中に動いている課題を置く", () => {

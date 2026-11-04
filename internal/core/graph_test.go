@@ -130,6 +130,36 @@ func TestChallengeGraph_CategoryFollowsTheCardDerivation(t *testing.T) {
 	}
 }
 
+// 状態と人間の操作待ち（何をするか）は、カードの導出（state・next_human_actions）をそのまま持つ。
+// 人間の操作待ちが無い課題は空の並び（nil ではない）。
+func TestChallengeGraph_NodeCarriesTheCardStateAndNextHumanActions(t *testing.T) {
+	s, _ := graphStore(t, StatusClassified, StatusAwaitingPlanApproval, StatusInProgress, StatusDone)
+	// C-4 は完了だが、承認待ちの本番反映（approve_operation）を持つ。
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at)
+			VALUES (4, 'release', 's', 'o/r#2', 'pending', 1, '2026-11-01T00:00:00.000Z')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	g := mustGraph(t, s)
+	want := map[string]struct {
+		state   Status
+		actions []CardAction
+	}{
+		"C-1": {StatusClassified, []CardAction{}},
+		"C-2": {StatusAwaitingPlanApproval, []CardAction{CardActionApprovePlan}},
+		"C-3": {StatusInProgress, []CardAction{}},
+		"C-4": {StatusDone, []CardAction{CardActionApproveOperation}},
+	}
+	for id, w := range want {
+		n := nodeByID(t, g, id)
+		if n.State != w.state || n.NextHumanActions == nil || !reflect.DeepEqual(n.NextHumanActions, w.actions) {
+			t.Errorf("%s state/actions = %q/%#v, want %q/%#v", id, n.State, n.NextHumanActions, w.state, w.actions)
+		}
+	}
+}
+
 func TestChallengeGraph_RunningAndStaleFollowTheHeartbeat(t *testing.T) {
 	s, cs := graphStore(t, StatusInProgress, StatusInProgress, StatusInProgress)
 	cardInsertRun(t, s, cs[0], graphNow.Add(-10*time.Second), nil) // 動いている

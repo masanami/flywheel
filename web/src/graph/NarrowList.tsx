@@ -13,6 +13,7 @@ import {
   OTHERS_LABEL,
   categoryLabel,
   compareIds,
+  humanActionLabels,
   neighborsOf,
 } from "./model.ts";
 
@@ -24,7 +25,7 @@ export interface NarrowListProps {
   kids: Map<string, string[]>;
   // 親を持たない課題（一番外）の ID（「ほかの課題」にまとめる課題は含めない）
   roots: string[];
-  // 「ほかの課題」にまとめる課題の ID（親・子・依存を持たない動いている課題）
+  // 「ほかの課題」にまとめる課題の ID（親・子・依存を持たない分類待ち・計画待ちの課題）
   others: string[];
   relations: ChallengeRelation[];
   expanded: Set<string>;
@@ -43,6 +44,7 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
   const open = isParent && p.expanded.has(id);
   const near = neighborsOf(id, p.relations);
   const folded = isParent && !open ? p.inside(id) : null;
+  const human = humanActionLabels(info.node);
   return (
     <li
       className="graph-list-item"
@@ -77,6 +79,10 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
       </div>
       <div className="graph-list-meta">
         <span className="graph-list-cat">{categoryLabel(info.category)}</span>
+        {human.length > 0 ? (
+          // 人間の操作待ちの札（何をするか）
+          <span className="graph-list-human">{human.join("・")}</span>
+        ) : null}
         {info.active ? <span>▶ 実施中</span> : null}
         {info.stale ? (
           <span className="graph-list-stale">⚠ 更新なし（要確認）</span>

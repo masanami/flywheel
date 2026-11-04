@@ -421,6 +421,16 @@ export function seed(): Record<string, MockWorkspace> {
       version: 4,
       headline: "不要なログ出力を削った",
     }),
+    // 何ともつながらない、次の周以降で着手される TODO（分類待ち・計画待ち）。「ほかの課題」の大枠にまとまる（既定で畳む）
+    mk("C-23", "エラーページの文言の見直し", "unclassified", {
+      priority: "P3",
+      urgency: "低",
+      description: "404 と 500 のページの文言がそっけない。",
+    }),
+    mk("C-24", "CSV 出力の文字コードの指定", "classified", {
+      priority: "P2",
+      headline: "出力時に文字コードを選べるようにする",
+    }),
   ];
   const beta: MockChallenge[] = [
     mk("C-1", "レポートの CSV 出力", "classified", {
@@ -557,9 +567,11 @@ export function graphOf(w: MockWorkspace): GraphResponse {
         context: m.context,
         headline: m.headline,
         id: m.c.id,
+        next_human_actions: card.next_human_actions,
         parent_id: w.graph.parents[m.c.id] ?? null,
         running: !!(m.flags.running || m.flags.unresponsive),
         stale: !!m.flags.unresponsive,
+        state: card.state,
         title: m.c.title,
       };
     });

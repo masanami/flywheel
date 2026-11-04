@@ -24,12 +24,26 @@ const node = (id: string, over: Partial<GraphNode> = {}): GraphNode => ({
   context: null,
   headline: null,
   id,
+  next_human_actions: [],
   parent_id: null,
   running: false,
   stale: false,
+  state: "in_progress",
   title: `題名${id}`,
   ...over,
 });
+// 人間の操作待ちの課題（状態と next_human_actions は、API ではカードの導出と同じ値）
+const human = (
+  id: string,
+  actions: string[],
+  over: Partial<GraphNode> = {},
+): GraphNode =>
+  node(id, {
+    category: "human",
+    next_human_actions: actions,
+    state: "awaiting_plan_approval",
+    ...over,
+  });
 const edge = (from: string, to: string, over: Partial<GraphEdge> = {}) => ({
   from,
   kind: "prerequisite",
@@ -42,26 +56,34 @@ const edge = (from: string, to: string, over: Partial<GraphEdge> = {}) => ({
 
 // alpha の課題 C-1〜C-20 のうち一部を使う関係。C-14 は実施中（更新なし）の子を持つので開き、
 // C-2 は人間の操作待ちの子を持つので開き、C-15 は子が静かなので畳む。C-7 > C-8 > C-9 は孫が人間の操作待ち。
-// C-3（実施中）と C-19（静か）は何ともつながらない動いている課題なので「ほかの課題」にまとまる（人間の操作待ちが
-// 無いので畳む）。C-16 は取り下げで C-10 の前提なので既定でも出る。C-13（完了）・C-17（取り下げ）は何ともつながらず、
+// C-19（分類待ち）と C-20（計画待ち）は何ともつながらない TODO なので「ほかの課題」にまとまる（既定で畳む）。
+// C-3（実施中）と C-21（人間の操作待ち）は何ともつながらなくても TODO ではないので、大枠の外の「関係の無い課題」の段に並ぶ。
+// C-16 は取り下げで C-10 の前提なので既定でも出る。C-13（完了）・C-17（取り下げ）は何ともつながらず、
 // C-18（完了）は動いている C-10 の後続にしかならないので、既定では隠れる。
 const GRAPH: GraphResponse = {
   nodes: [
     node("C-1", { parent_id: "C-2" }),
     node("C-2", { headline: "検索のページング", context: "位置づけの文" }),
-    node("C-4", { parent_id: "C-2", category: "human" }),
+    human("C-4", ["approve_plan"], { parent_id: "C-2" }),
     node("C-5", { parent_id: "C-15" }),
     node("C-6", { parent_id: "C-14", running: true, stale: true }),
     node("C-7"),
     node("C-8", { parent_id: "C-7" }),
-    node("C-9", { parent_id: "C-8", category: "human" }),
+    human("C-9", ["answer_question"], {
+      parent_id: "C-8",
+      state: "awaiting_human",
+    }),
     node("C-10"),
     node("C-11", { parent_id: "C-15" }),
     node("C-12", { parent_id: "C-14", category: "done" }),
     node("C-14", { headline: "旧基盤を外す" }),
     node("C-15"),
     node("C-3", { running: true }),
-    node("C-19"),
+    node("C-19", { state: "classified" }),
+    node("C-20", { state: "unclassified" }),
+    human("C-21", ["approve_completion", "approve_operation"], {
+      state: "awaiting_completion_approval",
+    }),
     node("C-16", { category: "withdrawn" }),
     node("C-13", { category: "done" }),
     node("C-17", { category: "withdrawn" }),
@@ -245,10 +267,10 @@ it("色: 人間の操作待ちは区分の色で区別でき、システムの�
     .getAllByRole("button")
     .map((b) => b.textContent?.replace(/\s+/g, " ").trim());
   expect(items).toEqual([
-    "人間の操作待ち 2",
+    "人間の操作待ち 3",
     "外部待ち 0",
     "システムが実行中 2",
-    "システムが次に進めるもの 10",
+    "システムが次に進めるもの 11",
     "完了 1",
     "取り下げ 1",
   ]);
@@ -335,66 +357,98 @@ it("取り下げた親が動いている子のために開いた大枠になっ�
   );
 });
 
-it("ほかの課題: 親も子も依存も持たない動いている課題を 1 つの大枠にまとめ、人間の操作待ちが無ければ畳んで件数を示す。押しても詳細は開かない", async () => {
+it("ほかの課題: 親も子も依存も持たない分類待ち・計画待ちの課題だけを 1 つの大枠にまとめ、既定で畳んで件数を示す。押しても詳細は開かない", async () => {
   await mount();
   const group = await graphGroup();
-  // C-3（実施中）・C-19 だけが入る。畳んでいるので中は見えない
+  // C-19（計画待ち）・C-20（分類待ち）だけが入る。畳んでいるので中は見えない
   const closed = within(group).getByRole("button", {
     name: "ほかの課題を開く（2 件）",
   });
   expect(closed.textContent).toContain("ほかの課題");
   expect(closed.textContent).toContain("2件");
-  expect(closed.textContent).toContain("▶実施中1");
+  expect(closed.textContent).not.toContain("実施中");
   expect(closed.textContent).not.toContain("人間待ち");
-  expect(hasBox(group, "C-3")).toBe(false);
   expect(hasBox(group, "C-19")).toBe(false);
+  expect(hasBox(group, "C-20")).toBe(false);
+  // 線の無い実施中（C-3）と人間の操作待ち（C-21）は大枠に入らず、そのまま並ぶ
+  expect(hasBox(group, "C-3")).toBe(true);
+  expect(hasBox(group, "C-21")).toBe(true);
   // 押すと開き、中に課題が並ぶ。詳細のモーダルは開かない
   fireEvent.click(closed);
   expect(screen.queryByTestId("card-detail-content")).toBeNull();
-  expect(hasBox(group, "C-3")).toBe(true);
   expect(hasBox(group, "C-19")).toBe(true);
+  expect(hasBox(group, "C-20")).toBe(true);
   const open = within(group).getByRole("button", {
     name: "ほかの課題を畳む（2 件）",
   });
   expect(open).toHaveAttribute("aria-expanded", "true");
   fireEvent.click(open);
   expect(screen.queryByTestId("card-detail-content")).toBeNull();
-  expect(hasBox(group, "C-3")).toBe(false);
+  expect(hasBox(group, "C-19")).toBe(false);
   // 「親をすべて開く」でも開く
   fireEvent.click(screen.getByRole("button", { name: "親をすべて開く" }));
-  expect(hasBox(group, "C-3")).toBe(true);
+  expect(hasBox(group, "C-19")).toBe(true);
 });
 
-it("ほかの課題: 中に人間の操作待ちの課題があれば既定で開き、動いている課題が無ければ大枠を出さない", async () => {
+// 線の無い課題を状態ごとに 1 つずつ並べる。大枠に入るのは分類待ち（C-1）・計画待ち（C-2）だけ
+const LINKLESS: GraphNode[] = [
+  node("C-1", { state: "unclassified" }),
+  node("C-2", { state: "classified" }),
+  human("C-3", ["approve_plan"]),
+  node("C-4", { state: "in_progress" }),
+  node("C-5", { state: "verifying" }),
+  human("C-6", ["approve_completion"], {
+    state: "awaiting_completion_approval",
+  }),
+  human("C-7", ["approve_operation"], { state: "classified" }),
+  node("C-8", { state: "done", category: "done" }),
+];
+
+it("ほかの課題: 人間の操作待ち・着手中・検証中・完了確認待ちは線が無くても大枠に入らず、人間の操作待ちが線無しでいても大枠は開かない", async () => {
+  graphFor = async () => ({ nodes: LINKLESS, edges: [] });
+  await mount();
+  const group = await graphGroup();
+  // 大枠は C-1・C-2 の 2 件だけ。人間の操作待ちが外にいても畳んだまま
+  expect(
+    within(group).getByRole("button", { name: "ほかの課題を開く（2 件）" }),
+  ).toBeInTheDocument();
+  expect(hasBox(group, "C-1")).toBe(false);
+  expect(hasBox(group, "C-2")).toBe(false);
+  // 分類待ち・計画待ちでも人間の操作待ち（C-7）なら大枠に入らない。ほかは従来どおり段に並ぶ
+  for (const id of ["C-3", "C-4", "C-5", "C-6", "C-7"])
+    expect(hasBox(group, id), id).toBe(true);
+  // 終わった課題（C-8）は隠れ、切り替えを入れても大枠には入らない
+  expect(hasBox(group, "C-8")).toBe(false);
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "終わった課題もすべて表示" }),
+  );
+  expect(hasBox(group, "C-8")).toBe(true);
+  expect(
+    within(group).getByRole("button", { name: "ほかの課題を開く（2 件）" }),
+  ).toBeInTheDocument();
+});
+
+it("ほかの課題: 該当が無ければ大枠を出さない", async () => {
   graphFor = async () => ({
-    nodes: [
-      node("C-1"),
-      node("C-2", { category: "human" }),
-      node("C-3", { category: "done" }),
-    ],
+    nodes: [node("C-1"), human("C-2", ["approve_plan"])],
     edges: [],
   });
   await mount();
   const group = await graphGroup();
   expect(
-    within(group).getByRole("button", { name: "ほかの課題を畳む（2 件）" }),
-  ).toBeInTheDocument();
+    within(group).queryByRole("button", { name: /ほかの課題/ }),
+  ).toBeNull();
   expect(hasBox(group, "C-1")).toBe(true);
   expect(hasBox(group, "C-2")).toBe(true);
-  // 完了の C-3 は隠れ、切り替えを入れても大枠には入らない
-  expect(hasBox(group, "C-3")).toBe(false);
-  fireEvent.click(
-    screen.getByRole("checkbox", { name: "終わった課題もすべて表示" }),
-  );
-  expect(hasBox(group, "C-3")).toBe(true);
-  expect(
-    within(group).getByRole("button", { name: "ほかの課題を畳む（2 件）" }),
-  ).toBeInTheDocument();
 });
 
 it("ほかの課題: 該当が 0 件なら大枠を出さない（依存を持つ課題・親子の課題は入らない）", async () => {
   graphFor = async () => ({
-    nodes: [node("C-1"), node("C-2"), node("C-3", { parent_id: "C-1" })],
+    nodes: [
+      node("C-1", { state: "classified" }),
+      node("C-2", { state: "classified" }),
+      node("C-3", { state: "classified", parent_id: "C-1" }),
+    ],
     edges: [edge("C-2", "C-3")],
   });
   await mount();
@@ -405,6 +459,105 @@ it("ほかの課題: 該当が 0 件なら大枠を出さない（依存を持�
   expect(
     screen.queryByRole("button", { name: "親をすべて畳む" }),
   ).not.toBeNull();
+});
+
+// 札に出してはいけない実装の語（next_human_actions の値）
+const ACTION_WORDS =
+  /approve_plan|approve_completion|answer_question|increase_budget|approve_operation|review_discrepancy|clear_slot|next_human_actions/;
+const TAG = ".graph-node-human-tag";
+
+it("人間の操作待ちの札: 人間の操作待ちのノードに「何をするか」を帯の区分の語で出し、承認 2 つは 1 つにまとめる。色は区分のまま、実装の語は出さない", async () => {
+  graphFor = async () => ({
+    nodes: [
+      human("C-1", ["approve_plan"]),
+      human("C-2", ["approve_completion", "approve_operation"], {
+        state: "awaiting_completion_approval",
+      }),
+      human("C-3", ["approve_plan", "approve_completion"]),
+      human(
+        "C-4",
+        [
+          "answer_question",
+          "triage",
+          "increase_budget",
+          "review_discrepancy",
+          "clear_slot",
+        ],
+        { state: "awaiting_human" },
+      ),
+      node("C-5"),
+      human("C-6", ["approve_plan"], { running: true }),
+    ],
+    edges: [],
+  });
+  await mount();
+  const group = await graphGroup();
+  const tag = (id: string) => box(group, id).querySelector(TAG);
+  expect(tag("C-1")?.textContent).toBe("承認待ち");
+  // 並びは next_human_actions のとおり
+  expect(tag("C-2")?.textContent).toBe("承認待ち・不可逆操作の承認");
+  // 計画と完了の承認は同じ語なので 1 つ
+  expect(tag("C-3")?.textContent).toBe("承認待ち");
+  // ノードの幅に収まらない分は切り詰める。全部の語は読み上げの名前に出る
+  expect(tag("C-4")?.textContent?.startsWith("未回答の問い・")).toBe(true);
+  expect(tag("C-4")?.textContent?.endsWith("…")).toBe(true);
+  expect(box(group, "C-4")).toHaveAccessibleName(
+    "C-4 題名C-4（人間の操作待ち・未回答の問い・トリアージ・予算の使い切り・食い違い・片づけ待ちのスロット）",
+  );
+  // 人間の操作待ちでなければ札は無い。色は区分のまま
+  expect(tag("C-5")).toBeNull();
+  expect(
+    box(group, "C-1").closest("[data-category]")?.getAttribute("data-category"),
+  ).toBe("human");
+  // 実施中の人間の操作待ちは、札と「▶ 実施中」が両方読める
+  expect(tag("C-6")?.textContent).toBe("承認待ち");
+  expect(within(box(group, "C-6")).getByText("▶ 実施中")).toBeInTheDocument();
+  // 実装の語は画面に出ない
+  expect(document.body.innerHTML).not.toMatch(ACTION_WORDS);
+});
+
+it("人間の操作待ちの札: 開いた大枠の見出しにも、畳んだ箱と同じ語で出る", async () => {
+  graphFor = async () => ({
+    nodes: [
+      human("C-1", ["approve_completion", "approve_operation"], {
+        state: "awaiting_completion_approval",
+      }),
+      node("C-2", { parent_id: "C-1", running: true }),
+      node("C-3", { parent_id: "C-1" }),
+    ],
+    edges: [],
+  });
+  await mount();
+  const group = await graphGroup();
+  const head = group.querySelector(".graph-group-head");
+  expect(head?.querySelector(TAG)?.textContent).toBe(
+    "承認待ち・不可逆操作の承認",
+  );
+  // 畳むと、箱に同じ札が出る（開閉ボタンの分だけ狭いので、収まらない分は切り詰める）
+  fireEvent.click(within(group).getByRole("button", { name: "C-1 を畳む" }));
+  const folded = box(group, "C-1").querySelector(TAG)?.textContent;
+  expect(folded?.startsWith("承認待ち・不可逆")).toBe(true);
+  expect(folded?.endsWith("…")).toBe(true);
+});
+
+it("人間の操作待ちの札: 幅 480px 以下の一覧の行にも同じ語で出る", async () => {
+  narrowScreen(true);
+  await mount();
+  const list = await screen.findByRole("list", {
+    name: "課題の一覧（親ごと）",
+  });
+  const row = (id: string) =>
+    within(list)
+      .getByRole("button", { name: new RegExp(`^${id} (?!を)`) })
+      .closest("li") as HTMLElement;
+  expect(row("C-21").querySelector(".graph-list-human")?.textContent).toBe(
+    "承認待ち・不可逆操作の承認",
+  );
+  expect(row("C-4").querySelector(".graph-list-human")?.textContent).toBe(
+    "承認待ち",
+  );
+  expect(row("C-10").querySelector(".graph-list-human")).toBeNull();
+  expect(document.body.innerHTML).not.toMatch(ACTION_WORDS);
 });
 
 it("更新なしの課題は「⚠ 更新なし（要確認）」と出し、実施中の課題には光の輪が付く", async () => {
@@ -479,7 +632,6 @@ it("一言では、課題に重ねたとき（キーボードで移ったとき�
   // 開いた大枠（C-2。実施中も人間待ちも子に無いので既定は畳み）を開く
   fireEvent.click(within(group).getByRole("button", { name: /^C-2 を開く/ }));
   expect(group.querySelector(".graph-callout")).toBeNull();
-  openOthers(group);
   const c3 = box(group, "C-3");
   fireEvent.focus(c3);
   expect(group.querySelector('[data-callout="C-3"]')?.textContent).toContain(
@@ -641,18 +793,22 @@ it("幅 480px 以下の一覧でも、終わった課題は既定で隠し、ほ
         .closest("li") as HTMLElement
     ).textContent,
   ).not.toContain("C-18");
-  // ほかの課題は畳んだ見出し（件数と実施中の件数）。人間の操作待ちが無いので畳む
+  // ほかの課題は畳んだ見出し（件数）。分類待ち・計画待ちで線の無い課題だけが入る
   const head = within(list).getByRole("button", {
     name: "ほかの課題を開く（2 件）",
   });
   const li = head.closest("li") as HTMLElement;
   expect(li.textContent).toContain("ほかの課題 2件");
-  expect(li.textContent).toContain("実施中 1");
-  expect(has("C-3")).toBe(false);
+  expect(li.textContent).not.toContain("実施中");
+  expect(has("C-19")).toBe(false);
+  expect(has("C-20")).toBe(false);
+  // 線の無い実施中・人間の操作待ちは大枠に入らず、そのまま並ぶ
+  expect(has("C-3")).toBe(true);
+  expect(has("C-21")).toBe(true);
   fireEvent.click(head);
   expect(screen.queryByTestId("card-detail-content")).toBeNull();
-  expect(has("C-3")).toBe(true);
   expect(has("C-19")).toBe(true);
+  expect(has("C-20")).toBe(true);
   // 全部を見る切り替えで終わった課題も並ぶ。ほかの課題には入らない
   fireEvent.click(
     screen.getByRole("checkbox", { name: "終わった課題もすべて表示" }),
@@ -663,22 +819,24 @@ it("幅 480px 以下の一覧でも、終わった課題は既定で隠し、ほ
   ).toBeInTheDocument();
 });
 
-it("幅 480px 以下の一覧でも、ほかの課題に人間の操作待ちの課題があれば既定で開く", async () => {
+it("幅 480px 以下の一覧でも、ほかの課題は分類待ち・計画待ちの線の無い課題だけで、人間の操作待ちが線無しでいても畳んだまま", async () => {
   narrowScreen(true);
-  graphFor = async () => ({
-    nodes: [node("C-1", { category: "human" }), node("C-2")],
-    edges: [],
-  });
+  graphFor = async () => ({ nodes: LINKLESS, edges: [] });
   await mount();
   const list = await screen.findByRole("list", {
     name: "課題の一覧（親ごと）",
   });
+  const has = (id: string) =>
+    within(list).queryByRole("button", {
+      name: new RegExp(`^${id} (?!を)`),
+    }) !== null;
   expect(
-    within(list).getByRole("button", { name: "ほかの課題を畳む（2 件）" }),
+    within(list).getByRole("button", { name: "ほかの課題を開く（2 件）" }),
   ).toBeInTheDocument();
-  expect(
-    within(list).getByRole("button", { name: /^C-1 / }),
-  ).toBeInTheDocument();
+  expect(has("C-1")).toBe(false);
+  expect(has("C-2")).toBe(false);
+  for (const id of ["C-3", "C-4", "C-5", "C-6", "C-7"])
+    expect(has(id), id).toBe(true);
 });
 
 it("狭い画面の一覧は、ボードへ切り替えるとボードを出し、グラフへ戻すと一覧に戻る", async () => {

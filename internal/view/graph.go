@@ -5,16 +5,18 @@ import "github.com/masanami/flywheel/internal/core"
 // このファイルは課題の関係グラフ（docs/features/ui-relation-graph.md §関係グラフの API。
 // `GET /api/v1/workspaces/{name}/graph`）の応答の型を持つ。
 
-// GraphNode は graph の nodes[] の要素（課題 1 件）。category・running・stale はボードのカードの導出と同じ規則。
+// GraphNode は graph の nodes[] の要素（課題 1 件）。category・running・stale・state・next_human_actions はボードのカードの導出と同じ規則。
 type GraphNode struct {
-	Category string  `json:"category"`
-	Context  *string `json:"context"`
-	Headline *string `json:"headline"`
-	ID       string  `json:"id"`
-	ParentID *string `json:"parent_id"`
-	Running  bool    `json:"running"`
-	Stale    bool    `json:"stale"`
-	Title    string  `json:"title"`
+	Category         string   `json:"category"`
+	Context          *string  `json:"context"`
+	Headline         *string  `json:"headline"`
+	ID               string   `json:"id"`
+	NextHumanActions []string `json:"next_human_actions"`
+	ParentID         *string  `json:"parent_id"`
+	Running          bool     `json:"running"`
+	Stale            bool     `json:"stale"`
+	State            string   `json:"state"`
+	Title            string   `json:"title"`
 }
 
 // GraphEdge は graph の edges[] の要素（依存 1 本）。from が先行（依存先）、to が後続（依存元）。
@@ -37,9 +39,14 @@ type GraphResponse struct {
 func FromChallengeGraph(g *core.ChallengeGraph) GraphResponse {
 	out := GraphResponse{Edges: make([]GraphEdge, 0, len(g.Edges)), Nodes: make([]GraphNode, 0, len(g.Nodes))}
 	for _, n := range g.Nodes {
+		acts := make([]string, 0, len(n.NextHumanActions))
+		for _, a := range n.NextHumanActions {
+			acts = append(acts, string(a))
+		}
 		out.Nodes = append(out.Nodes, GraphNode{
 			Category: string(n.Category), Context: n.Context, Headline: n.Headline, ID: n.ID,
-			ParentID: n.ParentID, Running: n.Running, Stale: n.Stale, Title: n.Title,
+			NextHumanActions: acts, ParentID: n.ParentID, Running: n.Running, Stale: n.Stale,
+			State: string(n.State), Title: n.Title,
 		})
 	}
 	for _, e := range g.Edges {

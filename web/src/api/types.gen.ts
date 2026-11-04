@@ -461,9 +461,11 @@ export interface GraphNode {
   context: string | null;
   headline: string | null;
   id: string;
+  next_human_actions: string[];
   parent_id: string | null;
   running: boolean;
   stale: boolean;
+  state: string;
   title: string;
 }
 

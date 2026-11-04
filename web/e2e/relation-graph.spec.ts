@@ -114,26 +114,51 @@ test.describe("広い画面（1280px）", () => {
     await expect(graph.getByRole("button", { name: /^C-22 / })).toHaveCount(0);
   });
 
-  test("ほかの課題: 親も子も依存も持たない動いている課題を大枠にまとめ、押しても詳細は開かず、畳める", async ({
+  test("ほかの課題: 親も子も依存も持たない分類待ち・計画待ちの課題だけを大枠にまとめ、既定で畳み、押しても詳細は開かず、開閉できる", async ({
     page,
   }) => {
     await page.goto("/");
     const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
-    // 中に人間の操作待ち（C-3・C-7）があるので既定で開いている
-    const fold = graph.getByRole("button", { name: /^ほかの課題を畳む/ });
-    await expect(fold).toBeVisible();
+    // 人間の操作待ち（C-3・C-7）と実施中（C-20）が線無しでいても、大枠は畳んだまま。中身（C-23・C-24）は見えない
+    const closed = graph.getByRole("button", {
+      name: /^ほかの課題を開く（2 件）/,
+    });
+    await expect(closed).toBeVisible();
+    await expect(graph.getByRole("button", { name: /^C-23 / })).toHaveCount(0);
+    await expect(graph.getByRole("button", { name: /^C-24 / })).toHaveCount(0);
+    // 線の無い人間の操作待ち・着手中は、大枠に入らずそのまま並ぶ
     for (const id of ["C-3", "C-7", "C-20"])
       await expect(
         graph.getByRole("button", { name: new RegExp(`^${id} `) }),
       ).toBeVisible();
-    await fold.click();
+    await closed.click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(graph.getByRole("button", { name: /^C-20 / })).toHaveCount(0);
-    const closed = graph.getByRole("button", {
-      name: /^ほかの課題を開く（3 件）/,
-    });
-    await expect(closed).toBeVisible();
-    await expect(closed).toContainText("人間待ち");
+    await expect(graph.getByRole("button", { name: /^C-23 / })).toBeVisible();
+    await expect(graph.getByRole("button", { name: /^C-24 / })).toBeVisible();
+    await graph.getByRole("button", { name: /^ほかの課題を畳む/ }).click();
+    await expect(graph.getByRole("button", { name: /^C-23 / })).toHaveCount(0);
+  });
+
+  test("人間の操作待ちのノードに「何をするか」の札が帯の語で出る（承認と不可逆操作は並び、実装の語は出ない）", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
+    const tag = (id: string) =>
+      graph
+        .getByRole("button", { name: new RegExp(`^${id} `) })
+        .locator(".graph-node-human-tag");
+    await expect(tag("C-3")).toHaveText("承認待ち");
+    await expect(tag("C-7")).toHaveText("承認待ち・不可逆操作の承認");
+    // 開いた大枠 C-14 の中の C-8（問いに答える）
+    await expect(tag("C-8")).toHaveText("未回答の問い");
+    // 人間の操作待ちでないノードには札が無い
+    await expect(tag("C-20")).toHaveCount(0);
+    await expect(tag("C-5")).toHaveCount(0);
+    const html = await page.content();
+    expect(html).not.toMatch(
+      /approve_plan|approve_completion|answer_question|approve_operation|next_human_actions/,
+    );
   });
 
   test("詳細の長い文章にだけ「全文を開く」が出る（短い・3 行に収まる文章には出ない）", async ({
@@ -161,6 +186,20 @@ test.describe("広い画面（1280px）", () => {
     const long = page.getByRole("dialog");
     const open = long.getByRole("button", { name: "全文を開く" }).first();
     await expect(open).toBeVisible();
+    // 文字色はリンクの色ではなく、控えめなグレー（--board-muted-fg）。ライトでもダークでも
+    const sameAsMuted = () =>
+      open.evaluate((el) => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--board-muted-fg)";
+        document.body.append(probe);
+        const muted = getComputedStyle(probe).color;
+        probe.remove();
+        return getComputedStyle(el).color === muted;
+      });
+    expect(await sameAsMuted()).toBe(true);
+    await page.emulateMedia({ colorScheme: "dark" });
+    expect(await sameAsMuted()).toBe(true);
+    await page.emulateMedia({ colorScheme: "light" });
     await open.click();
     await expect(
       long.getByRole("button", { name: "折りたたむ" }).first(),
@@ -206,7 +245,7 @@ test.describe("狭い画面（360px）", () => {
     expect(await horizontalOverflow(page)).toEqual([]);
   });
 
-  test("終わった課題は既定で隠れ、ほかの課題は人間待ちがあるので開いている", async ({
+  test("終わった課題は既定で隠れ、ほかの課題は分類待ち・計画待ちだけで既定で畳んでいる。人間の操作待ちの行には札が出る", async ({
     page,
   }) => {
     await page.goto("/");
@@ -214,10 +253,22 @@ test.describe("狭い画面（360px）", () => {
     await expect(list).toBeVisible();
     await expect(list.getByRole("button", { name: /^C-22 / })).toHaveCount(0);
     await expect(list.getByRole("button", { name: /^C-21 / })).toBeVisible();
-    await expect(
-      list.getByRole("button", { name: /^ほかの課題を畳む（3 件）/ }),
-    ).toBeVisible();
+    // 大枠は畳んでいる（人間の操作待ち C-3・C-7 が線無しでいても開かない）
+    const others = list.getByRole("button", {
+      name: /^ほかの課題を開く（2 件）/,
+    });
+    await expect(others).toBeVisible();
+    await expect(list.getByRole("button", { name: /^C-23 / })).toHaveCount(0);
+    // 線の無い実施中・人間の操作待ちは大枠の外に並ぶ
     await expect(list.getByRole("button", { name: /^C-20 / })).toBeVisible();
+    const c7 = list.locator(
+      'li.graph-list-item:has(> .graph-list-row > button.graph-list-open[aria-label^="C-7 "])',
+    );
+    await expect(c7.locator(".graph-list-human")).toHaveText(
+      "承認待ち・不可逆操作の承認",
+    );
+    await others.click();
+    await expect(list.getByRole("button", { name: /^C-23 / })).toBeVisible();
     await page.locator("label.graph-switch").click();
     await expect(list.getByRole("button", { name: /^C-22 / })).toBeVisible();
     expect(await horizontalOverflow(page)).toEqual([]);

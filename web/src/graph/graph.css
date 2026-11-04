@@ -150,6 +150,9 @@
   font-weight: 600;
   color: var(--c);
 }
+.graph-list-human {
+  font-weight: 700;
+}
 .graph-list-stale {
   color: var(--running-section-stale-fg);
   font-weight: 700;
@@ -251,6 +254,11 @@
 }
 /* 取り下げは完了と同じ灰色のまま、右上の札で区別する（取り消し線は使わない） */
 .graph-node-withdrawn-tag {
+  font-size: 11px;
+  font-weight: 700;
+}
+/* 人間の操作待ちの札（何をするか）。色は区分のまま、文字は本文の色の太字で、ID の右に置く */
+.graph-node-human-tag {
   font-size: 11px;
   font-weight: 700;
 }

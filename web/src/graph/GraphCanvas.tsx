@@ -19,6 +19,7 @@ import {
   chipLines,
   clip,
   clipLines,
+  humanActionLabels,
   reasonText,
   wrapByWidth,
 } from "./model.ts";
@@ -208,10 +209,24 @@ export function accessibleName(
 ): string {
   const notes = [
     categoryLabel(i.category),
+    ...humanActionLabels(i.node),
     ...(i.stale ? [STALE_LONG] : []),
     ...(extra ? [extra] : []),
   ];
   return `${i.node.id} ${i.node.title}（${notes.join("・")}）`;
+}
+
+// 人間の操作待ちの札の文字（11px の太字。全角 11px の目安）を、room（px）に収まる文字数で切り詰める。
+// 3 文字も入らなければ出さない（全部の語は読み上げの名前にある）。
+const TAG_CHAR_W = 11;
+const ID_CHAR_W = 7;
+function humanTagText(n: GraphNode, room: number): string {
+  const text = humanActionLabels(n).join("・");
+  const chars = Math.min(
+    Array.from(text).length,
+    Math.floor(room / TAG_CHAR_W),
+  );
+  return chars >= 3 ? clip(text, chars) : "";
 }
 
 const onActivate = (fn: () => void) => (ev: KeyboardEvent) => {
@@ -410,11 +425,29 @@ function NodeLines({
   // 題名の行が増えた分だけ、3 段目（札・中の件数の札）を下げる
   const shift = (dims.titleLines - 1) * 16;
   const lines = clipLines(n.title, box.w - 18, 13, dims.titleLines);
+  const tag = humanTagText(
+    n,
+    box.w -
+      8 -
+      (inside ? TOGGLE + 2 : 0) -
+      (i.active ? 54 : 0) -
+      (11 + Array.from(n.id).length * ID_CHAR_W + 6),
+  );
   return (
     <>
       <text x={11} y={18} className="graph-node-id">
         {n.id}
       </text>
+      {tag !== "" ? (
+        // 人間の操作待ちの札（何をするか）。ID のすぐ右に置き、右上の「▶ 実施中」・畳んだ親の開閉ボタンとは重ならない
+        <text
+          x={11 + Array.from(n.id).length * ID_CHAR_W + 6}
+          y={18}
+          className="graph-node-human-tag"
+        >
+          {tag}
+        </text>
+      ) : null}
       {i.active ? (
         <text
           x={box.w - (inside ? TOGGLE + 10 : 8)}
@@ -572,7 +605,22 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
   const c = i.node;
   const selfActive = i.active;
   const select = () => p.onOpen(box.id);
-  const chars = Math.max(4, Math.floor((box.w - 90) / 13));
+  // 人間の操作待ちの札は、題名が最低 4 文字残る範囲で右上（開閉ボタンの左）に置く。残りが題名の文字数
+  const tag = humanTagText(
+    c,
+    box.w -
+      TOGGLE -
+      14 -
+      11 -
+      Array.from(c.id).length * ID_CHAR_W -
+      52 -
+      8 -
+      (selfActive ? 66 : 0),
+  );
+  const chars = Math.max(
+    4,
+    Math.floor((box.w - 90 - Array.from(tag).length * TAG_CHAR_W) / 13),
+  );
   const { headline: hl, context: lines } = headLines(
     c.headline,
     c.context,
@@ -628,6 +676,16 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
           {` ${clip(c.title, chars)}`}
           {selfActive ? " ▶ 実施中" : ""}
         </text>
+        {tag !== "" ? (
+          <text
+            x={box.w - TOGGLE - 14}
+            y={dims.headH / 2 + 4.5}
+            textAnchor="end"
+            className="graph-node-human-tag"
+          >
+            {tag}
+          </text>
+        ) : null}
         {i.category === "withdrawn" ? (
           // 開いた親でも、取り下げは完了と同じ灰色のまま札で区別する
           <text

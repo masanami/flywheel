@@ -2,6 +2,11 @@
 // 区分・running・stale・親子・依存は `GET …/graph`（core が記録だけから決定的に導く）の値をそのまま使う。
 
 import type { GraphEdge, GraphNode, GraphResponse } from "../api/types.gen.ts";
+import {
+  HUMAN_KIND_LABELS,
+  HUMAN_KIND_OF_ACTION,
+  type HumanKind,
+} from "../board/filter.ts";
 
 // ノードの色の区分。API の区分（human・external・done・withdrawn・system）に、システムが進めていて run が動いている
 // 課題の running を足したもの。other は畳んだ親の件数の札の色にだけ使う。
@@ -46,6 +51,21 @@ export function categoryOf(n: GraphNode): Category {
     default:
       return n.running ? "running" : "system";
   }
+}
+
+// 人間の操作待ちのノードに付ける札の語（何をするか）。ボードの上の人間待ちの帯の区分の語を使い、
+// next_human_actions の並びで、同じ語になるもの（計画と完了の承認など）は 1 つにまとめる。
+// 人間の操作待ちでなければ空。知らない行動の値は飛ばす。
+export function humanActionLabels(n: GraphNode): string[] {
+  if (n.category !== "human") return [];
+  const kinds = new Set<HumanKind>();
+  for (const a of n.next_human_actions) {
+    const k = (HUMAN_KIND_OF_ACTION as Record<string, HumanKind | undefined>)[
+      a
+    ];
+    if (k) kinds.add(k);
+  }
+  return [...kinds].map((k) => HUMAN_KIND_LABELS[k]);
 }
 
 export type DependencyBasis = "prerequisite" | "conflict";
@@ -243,12 +263,19 @@ export function visibleIds(
   return nodes.filter((n) => keep.has(n.id)).map((n) => n.id);
 }
 
+// 次の周以降で着手される TODO: 状態が分類待ち（unclassified）か計画待ち（classified）で、人間の操作待ちでない課題。
+// 人間の操作待ち・着手中・検証中・完了確認待ち・終わった課題は入らない。
+// 人間の操作待ちは category が human（core では next_human_actions が空でないことと同値）で判定する。
+export const isTodo = (n: GraphNode): boolean =>
+  (n.state === "unclassified" || n.state === "classified") &&
+  n.category !== "human";
+
 // 「ほかの課題」に入る課題（ID の数の昇順）: 親を持たず、子も持たず、依存の辺（前提・衝突のどちらの向きも）を
-// 1 本も持たない、動いている課題。ids は表示中の課題で、隠れた課題につながる関係は数えない。
+// 1 本も持たない、TODO の課題（isTodo。eligible で渡す）。ids は表示中の課題で、隠れた課題につながる関係は数えない。
 export function othersOf(
   ids: string[],
   relations: ChallengeRelation[],
-  isActive: (id: string) => boolean,
+  eligible: (id: string) => boolean,
 ): string[] {
   const set = new Set(ids);
   const rels = validRelations(set, relations);
@@ -263,7 +290,7 @@ export function othersOf(
   return ids
     .filter(
       (id) =>
-        isActive(id) && !pm.has(id) && !hasChild.has(id) && !linked.has(id),
+        eligible(id) && !pm.has(id) && !hasChild.has(id) && !linked.has(id),
     )
     .sort(compareIds);
 }

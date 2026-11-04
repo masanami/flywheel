@@ -1548,14 +1548,15 @@ body {
   color: var(--board-error-fg);
 }
 
-/* 長い文字列の「全文を開く／折りたたむ」: ボタンの見た目ではなく、下線を引いた文字のリンクにする */
+/* 長い文字列の「全文を開く／折りたたむ」: ボタンの見た目ではなく、下線を引いた文字のリンクにする。
+ * 本文より目立たせないよう、控えめなグレー（ライト・ダークで値が切り替わる）にする */
 .clamped-text-toggle {
   display: block;
   margin: 0;
   padding: 0;
   border: 0;
   background: none;
-  color: var(--board-link);
+  color: var(--board-muted-fg);
   font: inherit;
   text-decoration: underline;
   cursor: pointer;

@@ -77,6 +77,10 @@ type GraphNode struct {
 	Headline *string
 	Context  *string
 	Category GraphCategory
+	// State は課題の状態（カードの state）。
+	State Status
+	// NextHumanActions は人間の操作待ちの中身（カードの next_human_actions と同じ値・並び。無ければ空で nil ではない）。
+	NextHumanActions []CardAction
 	// Running は課題の run が動いている（カードの印 running か unresponsive）。
 	Running bool
 	// Stale は動いている run の記録が途絶えている（カードの印 unresponsive）。
@@ -136,7 +140,10 @@ func (s *Store) ChallengeGraph(ctx context.Context, now time.Time) (*ChallengeGr
 }
 
 func graphNode(c Challenge, card *Card) GraphNode {
-	n := GraphNode{ID: c.ID, Title: c.Title, Headline: c.Headline, Context: c.Context, Category: graphCategory(c, card)}
+	n := GraphNode{
+		ID: c.ID, Title: c.Title, Headline: c.Headline, Context: c.Context, Category: graphCategory(c, card),
+		State: card.State, NextHumanActions: append([]CardAction{}, card.NextHumanActions...),
+	}
 	for _, m := range card.Modifiers {
 		switch m {
 		case CardModifierRunning:

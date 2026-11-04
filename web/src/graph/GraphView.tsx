@@ -29,7 +29,7 @@ import {
   compareIds,
   descendantsOf,
   downstreamOf,
-  isFinished,
+  isTodo,
   layoutGraph,
   othersOf,
   parentMap,
@@ -106,13 +106,12 @@ function useGraph(ws: string | null, refreshKey: unknown) {
 }
 
 // 開いたときに開いておく親: 実施中か人間の操作待ちの子孫（孫を含む）を持つ親。
-// 「ほかの課題」の大枠は、中に人間の操作待ちの課題があるときだけ開く。
+// 「ほかの課題」の大枠は常に畳んで始める。
 export function defaultOpen(
   infos: Map<string, NodeInfo>,
   kids: Map<string, string[]>,
-  others: string[] = [],
 ): string[] {
-  const open = [...kids.keys()]
+  return [...kids.keys()]
     .filter((p) =>
       descendantsOf(p, kids).some((d) => {
         const i = infos.get(d);
@@ -120,9 +119,6 @@ export function defaultOpen(
       }),
     )
     .sort(compareIds);
-  return others.some((id) => infos.get(id)?.category === "human")
-    ? [...open, OTHERS_ID]
-    : open;
 }
 
 // 選んだワークスペース 1 つ分のグラフ。ワークスペースを切り替えると作り直す（key）ので、絞り込みは持ち越さない。
@@ -178,29 +174,21 @@ export function GraphView({
   // 表示する課題（既定では終わった課題を隠す）と、そのうち「ほかの課題」にまとめる課題
   const view = useMemo(() => {
     const ids = visibleIds(graph?.data?.nodes ?? [], infos.rels, showAll);
-    const isActive = (id: string) => {
+    // 大枠に入れるのは、次の周以降で着手される TODO（分類待ち・計画待ち）だけ
+    const isOtherCandidate = (id: string) => {
       const i = infos.map.get(id);
-      return !!i && !isFinished(i);
+      return !!i && isTodo(i.node);
     };
-    return { ids, others: othersOf(ids, infos.rels, isActive) };
+    return { ids, others: othersOf(ids, infos.rels, isOtherCandidate) };
   }, [graph, infos, showAll]);
   const shownIds = view.ids;
   const othersIds = view.others;
 
-  // 最初に読めたときの既定は、既定の表示（終わった課題を隠した状態）で決める
-  const initialOpen = useMemo(() => {
-    const nodes = graph?.data?.nodes ?? [];
-    const ids = visibleIds(nodes, infos.rels, false);
-    const isActive = (id: string) => {
-      const i = infos.map.get(id);
-      return !!i && !isFinished(i);
-    };
-    return defaultOpen(
-      infos.map,
-      infos.kids,
-      othersOf(ids, infos.rels, isActive),
-    );
-  }, [graph, infos]);
+  // 最初に読めたときの既定の開き方（「ほかの課題」の大枠は含めない）
+  const initialOpen = useMemo(
+    () => defaultOpen(infos.map, infos.kids),
+    [infos],
+  );
   // 最初に読めたとき、既定の開き方を覚える（以後の取り直しで開閉が勝手に変わらないように）
   useEffect(() => {
     if (graph?.data && openParents === undefined) onOpenParents(initialOpen);

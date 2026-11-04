@@ -87,7 +87,7 @@ func TestGraphAPI_NodesFollowTheBoardCardsAndEdgesAndParentsAreReturned(t *testi
 	}
 	for i, n := range nodes {
 		node := n.(map[string]any)
-		assertKeys(t, "node", node, "id", "title", "headline", "context", "category", "running", "stale", "parent_id")
+		assertKeys(t, "node", node, "id", "title", "headline", "context", "category", "running", "stale", "parent_id", "state", "next_human_actions")
 		c := board[i].(map[string]any)
 		card := c["card"].(map[string]any)
 		if node["id"] != c["id"] || node["title"] != c["title"] {
@@ -110,6 +110,10 @@ func TestGraphAPI_NodesFollowTheBoardCardsAndEdgesAndParentsAreReturned(t *testi
 			wantCategory = "done"
 		case c["status"] == "withdrawn":
 			wantCategory = "withdrawn"
+		}
+		// 状態と人間の操作待ちの中身は、同じ応答のカードの値そのまま（並びも同じ）
+		if node["state"] != card["state"] || !reflect.DeepEqual(strs(node["next_human_actions"]), strs(card["next_human_actions"])) {
+			t.Errorf("%v state/next_human_actions = %v/%v, card = %v/%v", node["id"], node["state"], node["next_human_actions"], card["state"], card["next_human_actions"])
 		}
 		if node["category"] != wantCategory {
 			t.Errorf("%v category = %v, want %v", node["id"], node["category"], wantCategory)

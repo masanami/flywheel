@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ClampedText } from "./ClampedText.tsx";
@@ -109,4 +111,13 @@ it("ResizeObserver が無い環境でも動く", () => {
   expect(
     screen.getByRole("button", { name: "全文を開く" }),
   ).toBeInTheDocument();
+});
+
+// 色の値そのものは見ない。本文より控えめなグレーのトークン（ライト・ダークで値が切り替わる）で指定していることだけ確かめる。
+it("「全文を開く／折りたたむ」の文字色は、リンクの色ではなく控えめなグレーのトークンで指定する（下線は残す）", () => {
+  const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+  const rule = /\.clamped-text-toggle\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  expect(rule).toMatch(/color:\s*var\(--board-muted-fg\)/);
+  expect(rule).not.toMatch(/color:\s*var\(--board-link\)/);
+  expect(rule).toMatch(/text-decoration:\s*underline/);
 });
