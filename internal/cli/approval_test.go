@@ -163,18 +163,40 @@ func TestApprovalSummaryText_CompletionIncludesDoneCriteria(t *testing.T) {
 	}
 }
 
-// #451: 検証が「本番反映で満たされる見込み」と区分した条件は、完了の承認の要約に並ぶ。無ければ見出しも出ない。
+// #451: 検証が「本番反映で満たされる見込み」と区分した条件は、完了の承認の要約に並ぶ。この操作で本番反映が
+// 承認されるときだけ「満たされる」と書き、承認されない（--hold-release・差し戻し・release が無い）ときは
+// 満たされないまま残ることを示す。条件が無ければ見出しも出ない。
 func TestApprovalSummaryText_CompletionListsTheConditionsSatisfiedByTheRelease(t *testing.T) {
+	const releasing = "承認で本番反映されると満たされる条件:\n  - A が取り込まれている\n  - B\n"
+	const notReleasing = "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:\n  - A が取り込まれている\n  - B\n"
 	p := &core.ApprovalPreview{
 		ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion,
 		DoneCriteria: "it works", ConditionsAfterRelease: []string{"A が取り込まれている", "B"},
+		PendingReleases: []core.IrreversibleOperation{{ID: "OP-1", Kind: core.OperationKindRelease, Summary: "s"}},
 	}
-	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
-	if !strings.Contains(got, "承認で本番反映されると満たされる条件:\n  - A が取り込まれている\n  - B\n") {
-		t.Errorf("summary = %q, want the conditions satisfied by the release", got)
+	reason := "r"
+	for _, tc := range []struct {
+		name        string
+		decision    core.ApprovalDecision
+		holdRelease bool
+		reason      *string
+		want        string
+	}{
+		{"approve releases", core.ApprovalDecisionApproved, false, nil, releasing},
+		{"hold-release", core.ApprovalDecisionApproved, true, nil, notReleasing},
+		{"reject", core.ApprovalDecisionRejected, false, &reason, notReleasing},
+	} {
+		if got := approvalSummaryText(p, tc.decision, tc.holdRelease, tc.reason); !strings.Contains(got, tc.want) {
+			t.Errorf("%s: summary = %q, want %q", tc.name, got, tc.want)
+		}
 	}
-	p.ConditionsAfterRelease = nil
-	if got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil); strings.Contains(got, "承認で本番反映されると満たされる条件") {
+	noRelease := *p
+	noRelease.PendingReleases = nil
+	if got := approvalSummaryText(&noRelease, core.ApprovalDecisionApproved, false, nil); !strings.Contains(got, notReleasing) {
+		t.Errorf("no release: summary = %q, want %q", got, notReleasing)
+	}
+	noRelease.ConditionsAfterRelease = nil
+	if got := approvalSummaryText(&noRelease, core.ApprovalDecisionApproved, false, nil); strings.Contains(got, "本番反映で満たされる") || strings.Contains(got, "本番反映されると満たされる") {
 		t.Errorf("summary = %q, must not show the heading without conditions", got)
 	}
 }

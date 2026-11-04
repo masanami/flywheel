@@ -428,6 +428,7 @@ func TestInstructions_J5DescribesTheTwoConditionCategories(t *testing.T) {
 		"- 人の操作の後でしか満たせない:",
 		"判断の 3 つは、区分を付けた条件を除いた残りの条件で選ぶ",
 		"区分は、いま確かめられる条件には付けない",
+		"保留の記録で人がその条件に答えている（済ませた・本番反映の後に行う等）ときは、回答に従い、同じ区分を付け直さない",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J5) lacks %q", want)

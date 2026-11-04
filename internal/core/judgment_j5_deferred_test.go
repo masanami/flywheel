@@ -5,6 +5,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -160,7 +161,7 @@ func TestVerifyAutoJ5_AfterHumanActionLeft_HoldsWithTheConditionsAndDoesNotRelau
 	if err != nil || len(res.Items) != 1 {
 		t.Fatal(res, err)
 	}
-	if it := res.Items[0]; it.Result != RunResultSucceeded || it.Status == nil || *it.Status != string(StatusAwaitingHuman) {
+	if it := res.Items[0]; it.Result != RunResultSucceeded || it.Outcome != "uncertain" || it.Status == nil || *it.Status != string(StatusAwaitingHuman) {
 		t.Errorf("item = %+v", it)
 	}
 	if got := f.detail(t, "C-1").Status; got != StatusAwaitingHuman {
@@ -180,6 +181,9 @@ func TestVerifyAutoJ5_AfterHumanActionLeft_HoldsWithTheConditionsAndDoesNotRelau
 	if action, channel, _ := f.lastActivity(t, "C-1"); action != "verify_uncertain" || channel != "invoker" {
 		t.Errorf("activity = %s/%s", action, channel)
 	}
+	if got := f.queryString(t, `SELECT COUNT(*) FROM occurrence WHERE challenge_id = 1 AND kind LIKE 'verification%'`); got != "0" {
+		t.Errorf("verification occurrences = %s, want none (waiting for a human action is not a failure)", got)
+	}
 	// 次の周: 委譲の対象（ID を省略）に入らず、子は起動されない。
 	if _, err := f.run(t, nil); err != nil {
 		t.Fatal(err)
@@ -198,6 +202,82 @@ func TestVerifyAutoJ5_AfterHumanActionLeft_HoldsWithTheConditionsAndDoesNotRelau
 	}
 	if got := f.detail(t, "C-1").Status; got != StatusVerifying {
 		t.Errorf("status after the answer = %s, want verifying", got)
+	}
+	// 検証し直して残りが満たされれば、完了確認待ちへ進む。
+	f.j5.result = j5Out("met", nil, nil)
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusAwaitingCompletionApproval {
+		t.Errorf("status after the re-verification = %s, want awaiting_completion_approval", got)
+	}
+}
+
+// 人の操作の後でしか満たせない条件と、予想と実物の個数の食い違いが重なると、食い違いの保留に条件も書き、
+// 実物は課題へ書かない。
+func TestVerifyAutoJ5_AfterHumanActionWithActualMismatch_OneHoldListsBoth(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.setExpected(t, "C-1", 2)
+	b, _ := json.Marshal(map[string]any{
+		"verdict": "met", "reason": "R", "feedback": nil, "question": nil,
+		"actual":              []map[string]string{{"scene": "s", "after": "a"}},
+		"deferred_conditions": []map[string]string{{"condition": condAfterHuman, "status": "after_human_action"}},
+	})
+	f.j5.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: b, ReportedTotalCostUSD: float64Ptr(0.5)}
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusAwaitingHuman {
+		t.Fatalf("status = %s", got)
+	}
+	if got := f.holdCount(t); got != "1" {
+		t.Errorf("holds = %s, want 1", got)
+	}
+	q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`)
+	if !strings.HasPrefix(q, ActualMismatchHoldPreamble) || !strings.Contains(q, "- "+condAfterHuman) {
+		t.Errorf("hold question = %q, want the mismatch and the human-action condition", q)
+	}
+	if got := f.detail(t, "C-1").Actual; len(got) != 0 {
+		t.Errorf("actual = %+v, want unchanged (empty)", got)
+	}
+}
+
+// 人の操作の保留（T10）では、他の T10 と同じく実物を課題へ書かない。
+func TestVerifyAutoJ5_AfterHumanAction_DoesNotWriteTheActual(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	b, _ := json.Marshal(map[string]any{
+		"verdict": "met", "reason": "R", "feedback": nil, "question": nil,
+		"actual":              []map[string]string{{"scene": "s", "after": "a"}},
+		"deferred_conditions": []map[string]string{{"condition": condAfterHuman, "status": "after_human_action"}},
+	})
+	f.j5.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: b, ReportedTotalCostUSD: float64Ptr(0.5)}
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.detail(t, "C-1").Actual; len(got) != 0 {
+		t.Errorf("actual = %+v, want unchanged (empty)", got)
+	}
+}
+
+// 作業ログの値が読めなくても、表示だけの値なので承認の①を止めない。
+func TestPrepareApproval_UnreadableConditionsAfterReleaseAreIgnored(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, after := range []string{`[]`, `{"conditions_after_release":"x"}`, `not json`} {
+		if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+			_, err := tx.Exec(`UPDATE activity SET after = ? WHERE id = (SELECT MAX(id) FROM activity WHERE action = 'verify_met')`, after)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if p := f.approvalPreview(t, "C-1"); p.ConditionsAfterRelease != nil {
+			t.Errorf("after=%s: ConditionsAfterRelease = %v", after, p.ConditionsAfterRelease)
+		}
 	}
 }
 

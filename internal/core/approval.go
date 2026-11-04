@@ -261,7 +261,8 @@ const activityKeyConditionsAfterRelease = "conditions_after_release"
 
 // loadConditionsAfterRelease は課題の最新の T8（verify_met）の作業ログから、本番反映で満たされる
 // 見込みの達成条件を返す。完了確認待ちへ入る遷移は T8 だけなので、最新の T8 がいまの完了確認待ちを
-// 作った検証である。キーが無い（区分の無い出力・人が進めた検証）なら nil。
+// 作った検証である。キーが無い（区分の無い出力・人が進めた検証）なら nil。表示のためだけの値なので、
+// 読めない値（取り込んだ・手で直した行など）は無いものとして扱い、承認・差し戻しを止めない。
 func loadConditionsAfterRelease(ctx context.Context, tx *sql.Tx, cid int64) ([]string, error) {
 	var after sql.NullString
 	err := tx.QueryRowContext(ctx,
@@ -277,16 +278,16 @@ func loadConditionsAfterRelease(ctx context.Context, tx *sql.Tx, cid int64) ([]s
 		return nil, nil
 	}
 	var m map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(after.String), &m); err != nil {
-		return nil, fmt.Errorf("core: activity after of challenge %d: %w", cid, err)
+	if json.Unmarshal([]byte(after.String), &m) != nil {
+		return nil, nil
 	}
 	raw, ok := m[activityKeyConditionsAfterRelease]
 	if !ok {
 		return nil, nil
 	}
 	var conds []string
-	if err := json.Unmarshal(raw, &conds); err != nil {
-		return nil, fmt.Errorf("core: %s of challenge %d: %w", activityKeyConditionsAfterRelease, cid, err)
+	if json.Unmarshal(raw, &conds) != nil {
+		return nil, nil
 	}
 	if len(conds) == 0 {
 		return nil, nil

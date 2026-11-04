@@ -604,7 +604,12 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 		mapped = true
 		if mismatch {
 			// 実物は課題へ書かない（前の値のまま）。
-			if err := insertHold(ctx, tc, ActualMismatchHoldPreamble+" "+v.Reason); err != nil {
+			q := ActualMismatchHoldPreamble + " " + v.Reason
+			if v.awaitsHumanAction() {
+				// 人の操作の後でしか満たせない条件も同じ保留で伝え、回答の往復を 1 回で済ませる（#451）。
+				q += "\n" + v.humanActionHoldQuestion()
+			}
+			if err := insertHold(ctx, tc, q); err != nil {
 				return err
 			}
 			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationUncertain)
@@ -615,16 +620,17 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 			}
 			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationUncertain)
 		}
+		if v.awaitsHumanAction() {
+			// 残りが人の操作の後でしか満たせない条件を含む（#451）: 着手中に戻さず（子を再起動しない）、
+			// 該当の条件を理由に書いた保留へ置く（T10）。回答すると検証中へ戻る（T12）。他の T10 と同じく
+			// 実物は課題へ書かず、失敗ではないので発生も作らない。
+			return insertHold(ctx, tc, v.humanActionHoldQuestion())
+		}
 		if v.Actual != nil && (v.Verdict == J5VerdictMet || v.Verdict == J5VerdictNotMet) {
 			tc.patchStages(StagePatch{Actual: StageSet(v.Actual)})
 		}
 		if v.Verdict == J5VerdictNotMet {
 			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationNotMet)
-		}
-		if v.awaitsHumanAction() {
-			// 残りが人の操作の後でしか満たせない条件を含む（#451）: 着手中に戻さず（子を再起動しない）、
-			// 該当の条件を理由に書いた保留へ置く（T10）。回答すると検証中へ戻る（T12）。
-			return insertHold(ctx, tc, v.humanActionHoldQuestion())
 		}
 		if v.Verdict == J5VerdictMet {
 			// 本番反映で満たされる見込みの条件は、完了の承認の要約に出すため作業ログ（T8）へ残す。
