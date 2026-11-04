@@ -1,4 +1,8 @@
-import type { Slot, StatusNeedsHuman } from "../api/types.gen.ts";
+import type {
+  CARD_ACTION_CODES,
+  Slot,
+  StatusNeedsHuman,
+} from "../api/types.gen.ts";
 import type { Challenge } from "./types.ts";
 
 // 帯の区分。表示の順もこの並び。
@@ -21,6 +25,20 @@ export const HUMAN_KIND_LABELS: Record<HumanKind, string> = {
   budget: "予算の使い切り",
   triage: "トリアージ",
   slots: "片づけ待ちのスロット",
+};
+
+export type CardActionCode = (typeof CARD_ACTION_CODES)[number];
+
+// カードの next_human_actions の値が、上の帯のどの区分の語で言われるか。型で閉集合の全値を覆わせる。
+export const HUMAN_KIND_OF_ACTION: Record<CardActionCode, HumanKind> = {
+  approve_plan: "approvals",
+  approve_completion: "approvals",
+  answer_question: "questions",
+  triage: "triage",
+  increase_budget: "budget",
+  approve_operation: "operations",
+  review_discrepancy: "discrepancies",
+  clear_slot: "slots",
 };
 
 export type HumanCounts = Record<HumanKind, number>;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.ts";
-import { ApiError } from "../api/proposed.ts";
+import { ApiError } from "../api/error.ts";
 import type { CycleStatus } from "../api/types.gen.ts";
 
 const LOCKED_NOTE = "サイクルが既に動いているため、1 周を起動しませんでした。";

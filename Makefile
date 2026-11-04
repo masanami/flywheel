@@ -9,7 +9,7 @@ BINARY := $(BUILD_DIR)/flywheel
 NPM := npm
 WEB_DIR := web
 
-.PHONY: check ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
+.PHONY: check e2e ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
 
 ## check はすべての品質ゲートを順に実行する。1 つでも失敗すれば非 0 で終わる。
 ## UI の lint・テスト・ビルドを先に実行し、その成果物を埋め込んだ状態で go test・go build を行う。
@@ -28,6 +28,12 @@ $(WEB_DIR)/node_modules/.install-stamp: $(WEB_DIR)/package-lock.json
 	@echo "==> npm ci (web)"
 	cd $(WEB_DIR) && $(NPM) ci
 	@touch $(WEB_DIR)/node_modules/.install-stamp
+
+## e2e: UI のブラウザの E2E（Playwright。偽の API の mock モードで画面を操作する）。make check には入れない。
+## 初回は cd web && npx playwright install chromium が要る（落とせない環境では PLAYWRIGHT_CHANNEL=chrome で手元の Chrome を使う）。
+e2e: ui-install
+	@echo "==> npm run e2e (web)"
+	cd $(WEB_DIR) && $(NPM) run e2e
 
 ## ui-lint: UI の lint（Biome）。
 ui-lint: ui-install

@@ -16,6 +16,7 @@ function jsFiles(dir: string): string[] {
 }
 
 // 本番のビルド（flywheel serve に埋め込む）に、偽の API と UX 案の画面が入らないこと。
+// 関係グラフの画面の文言（「関係の無い課題」「親をすべて開く」など）は本番の画面になったので、検査の対象にしない。
 it("本番のビルドに偽の API・モックの画面を含めない", async () => {
   const out = mkdtempSync(join(tmpdir(), "flywheel-web-build-"));
   try {
@@ -33,9 +34,9 @@ it("本番のビルドに偽の API・モックの画面を含めない", async 
       "通知メールの二重送信を止める",
       "優先度方針: 厳格",
       "関係グラフ（案）",
-      "関係の無い課題",
-      "親をすべて開く",
       "旧基盤の撤去",
+      "古いバッチの撤去",
+      "検索 API にページングを足す",
       "mock-org/",
     ]) {
       expect(code, marker).not.toContain(marker);

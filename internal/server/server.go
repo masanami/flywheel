@@ -127,6 +127,7 @@ func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done 
 	})
 	mux.HandleFunc("/api/v1/workspaces/{name}/status", statusHandler(fleet, checks))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges", challengesHandler(fleet, checks, cfg.now))
+	mux.HandleFunc("/api/v1/workspaces/{name}/graph", graphHandler(fleet, cfg.now))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}", challengeHandler(fleet, checks, cfg.now))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/approval", approvalSummaryHandler(fleet, newGitHubSource))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/approve", approveHandler(fleet, checks, cfg.now))

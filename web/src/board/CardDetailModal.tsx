@@ -86,7 +86,7 @@ type CardDetailModalProps = {
   agentName: string;
   workspacePath: string;
   onClose: () => void;
-  // 開発時の mock の案の画面（関係グラフ）だけが渡す差し込み口。「課題」の節の後ろに描く。
+  // 関係グラフの画面だけが渡す差し込み口（待っている理由）。「課題」の節の後ろに描く。
   // ボードは渡さないので、省略時は何も描かない（ボードの表示は変わらない）。
   supplement?: React.ReactNode;
 };

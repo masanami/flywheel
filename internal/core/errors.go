@@ -105,6 +105,12 @@ var (
 	// ErrDependencyCycle は足すと依存の循環ができることを表す（CLI の dependency_cycle。
 	// 何も書かず、循環を自動で解かない）。
 	ErrDependencyCycle = errors.New("core: the dependency would create a cycle")
+
+	// ErrSelfParent は課題を自分自身の親にしようとしたことを表す（何も書かない）。
+	ErrSelfParent = errors.New("core: a challenge cannot be its own parent")
+
+	// ErrParentCycle は親子の登録で輪ができることを表す（何も書かず、輪を自動で解かない）。
+	ErrParentCycle = errors.New("core: the parent would create a cycle")
 )
 
 // ErrGitUnavailable は、スロットの検査・払い出しのために git を起動できない

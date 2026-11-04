@@ -10,14 +10,14 @@ import (
 
 // FillAllTables は、すべての表に行を持つストアを作る。表の一覧は sqlite_master から読む側（FillAllTables
 // 自身）が持ち、行の無い表が残ればフィクスチャ自身が落ちる（マイグレーションが表を足したときの更新漏れの検出）。
-// ここでは別の経路（DumpTables）で、15 個の表のすべてに行があることを確かめる。
+// ここでは別の経路（DumpTables）で、16 個の表のすべてに行があることを確かめる。
 func TestFillAllTables_EveryTableHasRows(t *testing.T) {
 	ws := t.TempDir()
 	if _, err := core.Init(ws); err != nil {
 		t.Fatalf("core.Init: %v", err)
 	}
 	coretest.FillAllTables(t, ws)
-	tables := []string{"activity", "approval", "challenge", "challenge_dependency", "cycle", "hold", "lock",
+	tables := []string{"activity", "approval", "challenge", "challenge_dependency", "challenge_parent", "cycle", "hold", "lock",
 		"occurrence", "operation", "operation_execution", "run", "run_artifact", "slot", "source_binding", "task_plan"}
 	rowsOf := map[string]int{}
 	current := ""

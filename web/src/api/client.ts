@@ -1,8 +1,9 @@
-import { ApiError, type ProposedApi } from "./proposed.ts";
+import { ApiError } from "./error.ts";
 import type {
   ApprovalSummaryResponse,
   CycleStarted,
   CycleStatus,
+  GraphResponse,
   ListCardResponse,
   LogResponse,
   NeedsHumanResponse,
@@ -94,7 +95,12 @@ export interface CycleApi {
   startCycle(name: string): Promise<CycleStarted>;
 }
 
-export type ApiClient = ReadApi & ApprovalApi & CycleApi & ProposedApi;
+// 課題の関係グラフ（core の記録だけから決定的に導く。上流には問い合わせない）。
+export interface GraphApi {
+  challengeGraph(name: string): Promise<GraphResponse>;
+}
+
+export type ApiClient = ReadApi & ApprovalApi & CycleApi & GraphApi;
 
 const readApi: ReadApi = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
@@ -129,22 +135,15 @@ const cycleApi: CycleApi = {
   startCycle: (name) => post<CycleStarted>(`${ws(name)}/cycle`),
 };
 
-// 案の口（proposed.ts）は server にまだ無い。本物の呼び出しは何も送らずに失敗させる。
-const notBuilt = (): Promise<never> =>
-  Promise.reject(
-    new ApiError(
-      "internal_error",
-      "この API はまだありません（開発時の mock モードで確かめてください）",
-      501,
-    ),
-  );
+const graphApi: GraphApi = {
+  challengeGraph: (name) => get<GraphResponse>(`${ws(name)}/graph`),
+};
 
 const realApi: ApiClient = {
   ...readApi,
   ...approvalApi,
   ...cycleApi,
-  challengeGraph: notBuilt,
-  agentProfiles: notBuilt,
+  ...graphApi,
 };
 
 // 呼び出し口は差し替えられる。開発時の mock モードだけが setApi でブラウザ内の偽の API を入れる。
@@ -171,7 +170,6 @@ export const api: ApiClient = {
   approve: (n, id, v) => impl.approve(n, id, v),
   startCycle: (n) => impl.startCycle(n),
   challengeGraph: (n) => impl.challengeGraph(n),
-  agentProfiles: () => impl.agentProfiles(),
 };
 
 export const eventsPath = "/api/v1/events";

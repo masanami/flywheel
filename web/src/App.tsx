@@ -3,16 +3,19 @@ import { CardDetailModal } from "./board/CardDetailModal.tsx";
 import { toAgentBoard } from "./board/adapt.ts";
 import { useLive } from "./live/useLive.ts";
 import {
+  InitialViewContext,
   OpenDetailContext,
   RefreshKeyContext,
+  type RelationView,
   ScreenNavContext,
 } from "./nav.tsx";
 import { screens } from "./screens.tsx";
 
-export function App() {
+// initialView は、ボードの画面の最初の表示（既定はグラフ）。
+export function App({ initialView = "graph" }: { initialView?: RelationView }) {
   const live = useLive();
   const [current, setCurrent] = useState(screens[0]?.id);
-  // 開発時の mock の案の画面が課題の詳細を開く口。ボードのカードは自分でモーダルを開く。
+  // 画面が課題の詳細を開く口（mock モードで足した画面が使う）。ボードのカードは自分でモーダルを開く。
   const [detail, setDetail] = useState<{ ws: string; id: string } | null>(null);
   const screen = screens.find((s) => s.id === current) ?? screens[0];
 
@@ -62,11 +65,15 @@ export function App() {
           screen?.id === "board" ? "view-body view-body-board" : "view-body"
         }
       >
-        <ScreenNavContext.Provider value={setCurrent}>
-          <OpenDetailContext.Provider value={(ws, id) => setDetail({ ws, id })}>
-            {screen?.render(live)}
-          </OpenDetailContext.Provider>
-        </ScreenNavContext.Provider>
+        <InitialViewContext.Provider value={initialView}>
+          <ScreenNavContext.Provider value={setCurrent}>
+            <OpenDetailContext.Provider
+              value={(ws, id) => setDetail({ ws, id })}
+            >
+              {screen?.render(live)}
+            </OpenDetailContext.Provider>
+          </ScreenNavContext.Provider>
+        </InitialViewContext.Provider>
       </div>
       {detail && detailWs && detailChallenge ? (
         <RefreshKeyContext.Provider value={live.lastUpdated}>

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ApiClient } from "../api/client.ts";
-import { ApiError } from "../api/proposed.ts";
+import { ApiError } from "../api/error.ts";
 import { createMockApi } from "./api.ts";
 import { MockStore } from "./store.ts";
 

@@ -222,3 +222,55 @@ func TestNormalizeComment_MalformedJSON_Fails(t *testing.T) {
 		t.Fatal("want error for malformed JSON")
 	}
 }
+
+// 課題の関係グラフ（docs/features/ui-relation-graph.md §取り込み）: sub-issue の親は REST の
+// `parent_issue_url` から親の外部キー "<owner>/<name>#<番号>" を取り出す。親が無ければ ""。
+func TestNormalizeIssue_ParentIssueURLBecomesParentExternalKey(t *testing.T) {
+	tests := []struct {
+		name   string
+		parent string
+		want   string
+	}{
+		{"親あり", `"parent_issue_url": "https://api.github.com/repos/masanami/flywheel/issues/324"`, "masanami/flywheel#324"},
+		{"別リポジトリの親", `"parent_issue_url": "https://api.github.com/repos/Other-Org/Other.Repo/issues/7"`, "Other-Org/Other.Repo#7"},
+		{"null は親なし", `"parent_issue_url": null`, ""},
+		{"キーなしは親なし", `"x": 1`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := []byte(`{
+				"number": 325, "title": "t", "body": "b", "user": {"login": "u"},
+				"assignees": [], "labels": [], "state": "open",
+				"html_url": "https://github.com/masanami/flywheel/issues/325",
+				"repository_url": "https://api.github.com/repos/masanami/flywheel",
+				` + tt.parent + `
+			}`)
+			issue, err := normalizeIssue(raw)
+			if err != nil {
+				t.Fatalf("normalizeIssue: %v", err)
+			}
+			if issue.ParentExternalKey != tt.want {
+				t.Errorf("ParentExternalKey = %q, want %q", issue.ParentExternalKey, tt.want)
+			}
+		})
+	}
+}
+
+// 読めない形の parent_issue_url は取り込みを失敗させず、親なしとして扱う
+// （親子は表示だけに使う。Issue 本体の取り込みを止めない）。
+func TestNormalizeIssue_UnparsableParentIssueURLMeansNoParent(t *testing.T) {
+	raw := []byte(`{
+		"number": 1, "title": "t", "body": "b", "user": {"login": "u"},
+		"assignees": [], "labels": [], "state": "open",
+		"html_url": "https://github.com/masanami/flywheel/issues/1",
+		"repository_url": "https://api.github.com/repos/masanami/flywheel",
+		"parent_issue_url": "https://example.com/not-an-issue-url"
+	}`)
+	issue, err := normalizeIssue(raw)
+	if err != nil {
+		t.Fatalf("normalizeIssue: %v", err)
+	}
+	if issue.ParentExternalKey != "" {
+		t.Errorf("ParentExternalKey = %q, want empty", issue.ParentExternalKey)
+	}
+}

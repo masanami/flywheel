@@ -442,6 +442,34 @@ export interface CycleStarted {
   started: boolean;
 }
 
+export interface GraphResponse {
+  edges: GraphEdge[];
+  nodes: GraphNode[];
+}
+
+export interface GraphEdge {
+  from: string;
+  kind: string;
+  registered_at: string;
+  registered_via: string;
+  satisfied: boolean;
+  to: string;
+}
+
+export interface GraphNode {
+  category: string;
+  context: string | null;
+  headline: string | null;
+  id: string;
+  next_human_actions: string[];
+  parent_id: string | null;
+  priority: string | null;
+  running: boolean;
+  stale: boolean;
+  state: string;
+  title: string;
+}
+
 export const CARD_ACTION_CODES = [
   "approve_plan",
   "approve_completion",
@@ -481,4 +509,23 @@ export const DISCREPANCY_KIND_CODES = [
   "upstream_updated",
   "merged_unapproved",
   "dependency_cycle",
+] as const;
+
+export const GRAPH_CATEGORY_CODES = [
+  "human",
+  "external",
+  "done",
+  "withdrawn",
+  "system",
+] as const;
+
+export const GRAPH_EDGE_KIND_CODES = [
+  "prerequisite",
+  "conflict",
+] as const;
+
+export const GRAPH_REGISTERED_VIA_CODES = [
+  "plan",
+  "manual",
+  "unknown",
 ] as const;

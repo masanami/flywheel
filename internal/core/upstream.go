@@ -80,6 +80,11 @@ type UpstreamIssue struct {
 	// UpdatedAt は観測値の更新日時（REST の `updated_at` の文字列をそのまま
 	// 持つ。加工・パースしない＝§クリティカル設計決定 1）。
 	UpdatedAt string
+	// ParentExternalKey は sub-issue の親の Issue の外部キー（REST の
+	// `parent_issue_url` から作る "<owner>/<name>#<番号>"）。親が無ければ ""。
+	// 取り込みが課題の親子（challenge_parent）へ写すためだけに使い、
+	// fingerprint の入力には含めない。
+	ParentExternalKey string
 }
 
 // UpstreamIssueSource は取り込みの規則（core。#56）が呼ぶ、上流（GitHub）取得の
