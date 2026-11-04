@@ -357,53 +357,85 @@ it("注目: 複数に当たるときは①②③の順で最初に当たった�
   expect(reasons(nodes)).toEqual({ "C-1": "human", "C-2": "working" });
 });
 
-it("注目 ④: 注目の課題の依存の相手（前提・後続・衝突）は、直接の相手だけ前に出る", () => {
+it("注目 ④: 起点の依存の相手（前提・後続・衝突）は、段数に関係なく推移的に前に出る", () => {
   const nodes = [
-    node("C-1", { state: "in_progress" }),
+    node("C-1", { state: "in_progress" }), // 起点
     todoNode("C-2"), // C-1 の前提
     todoNode("C-3"), // C-1 の後続
     todoNode("C-4"), // C-1 と衝突
-    todoNode("C-5"), // C-2 の前提（C-1 から見て 2 つ先）
-    todoNode("C-6"), // 何ともつながらない
+    todoNode("C-5"), // C-2 の前提（C-1 から見て 2 段先）
+    todoNode("C-6"), // C-5 の前提（3 段先）
+    todoNode("C-7"), // 何ともつながらない
   ];
   const rels: ChallengeRelation[] = [
     dep("C-2", "C-1"),
     dep("C-1", "C-3"),
     { ...dep("C-4", "C-1"), edge: edge("C-4", "C-1", { kind: "conflict" }) },
     dep("C-5", "C-2"),
+    dep("C-6", "C-5"),
   ];
   expect(reasons(nodes, rels)).toEqual({
     "C-1": "working",
-    "C-2": "partner",
-    "C-3": "partner",
-    "C-4": "partner",
+    "C-2": "linked",
+    "C-3": "linked",
+    "C-4": "linked",
+    "C-5": "linked",
+    "C-6": "linked",
   });
 });
 
-it("注目 ④: 注目の課題の親は祖先まで前に出る。注目の課題の依存の相手の親も同じ", () => {
+it("注目 ④: 親子の線も両方向にたどる。起点の祖先・子・孫・兄弟と、その先の依存の相手まで前に出る", () => {
   const nodes = [
     todoNode("C-1"), // 祖父
     todoNode("C-2", { parent_id: "C-1" }), // 親
-    node("C-3", { state: "in_progress", parent_id: "C-2" }), // 注目
-    todoNode("C-4", { parent_id: "C-2" }), // 注目の兄弟（注目ではない）
-    todoNode("C-5", { parent_id: "C-6" }), // C-3 の後続（依存の相手）
-    todoNode("C-6"), // C-5 の親
-    todoNode("C-7"), // 何ともつながらない
+    node("C-3", { state: "in_progress", parent_id: "C-2" }), // 起点
+    todoNode("C-4", { parent_id: "C-2" }), // 起点の兄弟
+    todoNode("C-5", { parent_id: "C-3" }), // 起点の子
+    todoNode("C-6", { parent_id: "C-5" }), // 起点の孫
+    todoNode("C-7"), // 孫 C-6 の後続
+    todoNode("C-8"), // 何ともつながらない
   ];
   const rels = [
     par("C-1", "C-2"),
     par("C-2", "C-3"),
     par("C-2", "C-4"),
-    par("C-6", "C-5"),
-    dep("C-3", "C-5"),
+    par("C-3", "C-5"),
+    par("C-5", "C-6"),
+    dep("C-6", "C-7"),
   ];
   expect(reasons(nodes, rels)).toEqual({
-    "C-1": "ancestor",
-    "C-2": "ancestor",
+    "C-1": "linked",
+    "C-2": "linked",
     "C-3": "working",
-    "C-5": "partner",
-    "C-6": "ancestor",
+    "C-4": "linked",
+    "C-5": "linked",
+    "C-6": "linked",
+    "C-7": "linked",
   });
+});
+
+it("注目 ④: 注目している親の子・孫は、自分が起点に当たらなくても前に出る", () => {
+  const nodes = [
+    node("C-1", { category: "human", next_human_actions: ["approve_plan"] }), // 起点の親
+    todoNode("C-2", { parent_id: "C-1" }), // 子
+    todoNode("C-3", { parent_id: "C-2" }), // 孫
+  ];
+  const rels = [par("C-1", "C-2"), par("C-2", "C-3")];
+  expect(reasons(nodes, rels)).toEqual({
+    "C-1": "human",
+    "C-2": "linked",
+    "C-3": "linked",
+  });
+});
+
+it("注目 ④: 表示している終わった課題を通る線もつながりに数える。終わった課題そのものは注目に入らない", () => {
+  const nodes = [
+    node("C-1", { state: "in_progress" }),
+    node("C-2", { state: "done", category: "done" }), // C-1 と C-3 の前提
+    todoNode("C-3"),
+  ];
+  const rels = [dep("C-2", "C-1"), dep("C-2", "C-3")];
+  expect(reasons(nodes, rels)).toEqual({ "C-1": "working", "C-3": "linked" });
 });
 
 it("注目: 終わった課題（完了・取り下げ）は注目に入らない。隠れた課題につながる関係は数えない", () => {
@@ -424,7 +456,7 @@ it("注目: 終わった課題（完了・取り下げ）は注目に入らな�
   ).toEqual({ "C-1": "working" });
 });
 
-it("ほかの課題: 注目でない動いている課題がすべて入り、ID の数の昇順で返る", () => {
+it("ほかの課題: どの線でも注目の課題とつながらない、注目でない動いている課題がすべて入り、ID の数の昇順で返る", () => {
   const nodes = [
     todoNode("C-10"),
     node("C-2", { state: "in_progress" }),
@@ -437,18 +469,20 @@ it("ほかの課題: 注目でない動いている課題がすべて入り、ID
   expect(othersOf(ids, [], nodes)).toEqual(["C-3", "C-6", "C-10"]);
 });
 
-it("ほかの課題: 注目の親の子で注目でないものは大枠へ移り、④で注目に入る子は残る", () => {
+it("ほかの課題: 注目の親の子・孫は大枠へ移らない。起点を含まないつながりのまとまりは、まとまりごと大枠に入る", () => {
   const nodes = [
-    node("C-1", { state: "in_progress" }), // 注目の親
-    node("C-2", { state: "in_progress", parent_id: "C-1" }),
-    todoNode("C-3", { parent_id: "C-1" }), // 注目の子ではない子 → 大枠
-    todoNode("C-4", { parent_id: "C-1" }), // 注目の C-2 の後続 → ④で残る
+    node("C-1", { state: "in_progress" }), // 起点の親
+    todoNode("C-2", { parent_id: "C-1" }), // 子 → 前
+    todoNode("C-3", { parent_id: "C-2" }), // 孫 → 前
+    todoNode("C-4"), // 起点を含まないまとまり（親）
+    todoNode("C-5", { parent_id: "C-4" }), // その子
+    todoNode("C-6"), // C-5 の後続
   ];
   const rels = [
     par("C-1", "C-2"),
-    par("C-1", "C-3"),
-    par("C-1", "C-4"),
-    dep("C-2", "C-4"),
+    par("C-2", "C-3"),
+    par("C-4", "C-5"),
+    dep("C-5", "C-6"),
   ];
   expect(
     othersOf(
@@ -456,34 +490,21 @@ it("ほかの課題: 注目の親の子で注目でないものは大枠へ移�
       rels,
       nodes,
     ),
-  ).toEqual(["C-3"]);
+  ).toEqual(["C-4", "C-5", "C-6"]);
 });
 
-it("ほかの課題: 大枠の仲間どうしの親子・依存は大枠の中に残り、仲間かどうかは相手の課題で決まる", () => {
-  const nodes = [todoNode("C-1"), todoNode("C-2", { parent_id: "C-1" })];
-  const rels = [par("C-1", "C-2")];
-  expect(
-    othersOf(
-      nodes.map((n) => n.id),
-      rels,
-      nodes,
-    ),
-  ).toEqual(["C-1", "C-2"]);
-});
-
-it("ほかの課題: 残した終わった課題は、関係する相手がすべて大枠の中なら大枠の中、そうでなければ前に置く", () => {
+it("ほかの課題: 残した終わった課題は、属するまとまりが大枠なら大枠の中、注目のまとまりなら前に置く", () => {
   const nodes = [
     node("C-1", { state: "done", category: "done" }), // 大枠の C-4 の前提だけ → 大枠
-    node("C-2", { state: "done", category: "done" }), // 大枠の C-4 と注目の C-5 の前提 → 前
+    node("C-2", { state: "done", category: "done" }), // 注目の C-5 の前提 → 前
     node("C-3", { state: "withdrawn", category: "withdrawn" }), // 関係なし（全部を見る） → 前
     todoNode("C-4"),
     node("C-5", { state: "in_progress" }),
-    node("C-6", { state: "done", category: "done" }), // C-7（終わった）の親、C-7 は大枠の C-4 の前提 → 連鎖は前
+    node("C-6", { state: "done", category: "done" }), // C-7（終わった）の親、C-7 は大枠の C-4 の前提 → 大枠
     node("C-7", { state: "done", category: "done", parent_id: "C-6" }),
   ];
   const rels = [
     dep("C-1", "C-4"),
-    dep("C-2", "C-4"),
     dep("C-2", "C-5"),
     dep("C-7", "C-4"),
     par("C-6", "C-7"),
@@ -494,7 +515,7 @@ it("ほかの課題: 残した終わった課題は、関係する相手がす�
       rels,
       nodes,
     ),
-  ).toEqual(["C-1", "C-4"]);
+  ).toEqual(["C-1", "C-4", "C-6", "C-7"]);
 });
 
 it("人間の操作待ちの札: 帯の区分の語を、next_human_actions の並びで、同じ語は 1 つにして返す", () => {

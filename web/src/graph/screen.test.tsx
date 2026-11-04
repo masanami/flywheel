@@ -460,55 +460,63 @@ it("ほかの課題: 該当が無ければ大枠を出さない（注目の課�
   ).not.toBeNull();
 });
 
-it("ほかの課題: 注目の親の子で注目でないものは大枠へ移り、親の入れ子には残らない", async () => {
-  graphFor = async () => ({
-    nodes: [
-      node("C-1"),
-      node("C-2", { parent_id: "C-1", running: true }),
-      node("C-3", { parent_id: "C-1", state: "classified" }),
-    ],
-    edges: [],
-  });
-  await mount();
-  const group = await graphGroup();
-  // 親 C-1 は実施中の子 C-2 を持つので開いており、C-3 は親の中でなく大枠の中にいる
-  expect(
-    within(group).getByRole("button", { name: "C-1 を畳む" }),
-  ).toBeInTheDocument();
-  expect(hasBox(group, "C-2")).toBe(true);
-  expect(hasBox(group, "C-3")).toBe(false);
-  fireEvent.click(
-    within(group).getByRole("button", { name: "ほかの課題を開く（1 件）" }),
-  );
-  expect(hasBox(group, "C-3")).toBe(true);
-  // 親を畳むと、親の中の件数は注目の子だけ（C-3 は数えない）
-  fireEvent.click(within(group).getByRole("button", { name: "C-1 を畳む" }));
-  expect(box(group, "C-1").textContent).toContain("子 1 件");
-});
+// 推移的な注目の確かめに使う課題: 着手中の C-1 から 2 段先の C-3 まで依存でつながり、
+// 実施中の子 C-5 を持つ親 C-4 の下に、注目に当たらない子 C-6 と孫 C-7 がいる。C-8→C-9 は起点を含まないまとまり
+const CHAINED: GraphNode[] = [
+  node("C-1", { state: "in_progress" }),
+  node("C-2", { state: "classified", priority: "P2" }),
+  node("C-3", { state: "classified", priority: "P3" }),
+  node("C-4", { state: "classified", priority: "P2" }),
+  node("C-5", { parent_id: "C-4", running: true }),
+  node("C-6", { parent_id: "C-4", state: "classified", priority: "P2" }),
+  node("C-7", { parent_id: "C-6", state: "unclassified" }),
+  node("C-8", { state: "classified", priority: "P2" }),
+  node("C-9", { state: "unclassified" }),
+];
+const CHAINED_EDGES = [
+  edge("C-1", "C-2"),
+  edge("C-2", "C-3"),
+  edge("C-8", "C-9"),
+];
 
-it("ほかの課題: 大枠の外の課題との依存は、大枠を畳むと大枠の箱へ、開くと中の課題へつながる", async () => {
-  graphFor = async () => ({
-    nodes: [
-      node("C-1"),
-      node("C-2", { state: "classified", priority: "P2" }),
-      node("C-3", { state: "classified", priority: "P2" }),
-    ],
-    // C-1（着手中）の後続 C-2 は④で前に出る。C-2 の後続 C-3 は注目の相手の相手なので大枠に残る
-    edges: [edge("C-1", "C-2"), edge("C-2", "C-3")],
-  });
+it("注目は推移的: 2 段以上先の依存の相手は前に出て、線もそのまま描く。起点を含まないまとまりだけが大枠に入る", async () => {
+  graphFor = async () => ({ nodes: CHAINED, edges: CHAINED_EDGES });
   await mount();
   const group = await graphGroup();
+  // C-3 は C-1 から 2 段先（C-1 → C-2 → C-3）
+  for (const id of ["C-1", "C-2", "C-3"])
+    expect(hasBox(group, id), id).toBe(true);
   const names = () =>
     [...group.querySelectorAll(".graph-edge-hit")].map((e) =>
       e.getAttribute("aria-label"),
     );
-  expect(names().some((n) => n?.startsWith("依存 C-2 → ほかの課題"))).toBe(
-    true,
-  );
-  // 実装上の名前は画面の名前に出ない
-  expect(names().join("")).not.toMatch(/others/);
-  openOthers(group);
   expect(names().some((n) => n?.startsWith("依存 C-2 → C-3"))).toBe(true);
+  // 大枠は C-8・C-9 のまとまりだけで、既定で畳む
+  expect(
+    within(group).getByRole("button", { name: "ほかの課題を開く（2 件）" }),
+  ).toBeInTheDocument();
+  expect(hasBox(group, "C-8")).toBe(false);
+  expect(hasBox(group, "C-9")).toBe(false);
+  openOthers(group);
+  expect(names().some((n) => n?.startsWith("依存 C-8 → C-9"))).toBe(true);
+});
+
+it("注目は推移的: 注目している親の子・孫は、自分が起点に当たらなくても親の入れ子のまま前に出る", async () => {
+  graphFor = async () => ({ nodes: CHAINED, edges: CHAINED_EDGES });
+  await mount();
+  const group = await graphGroup();
+  // 親 C-4 は実施中の子 C-5 を持つので開いている。子 C-6 も親の中にいる（大枠へ移らない）
+  expect(
+    within(group).getByRole("button", { name: "C-4 を畳む" }),
+  ).toBeInTheDocument();
+  expect(hasBox(group, "C-5")).toBe(true);
+  // 孫 C-7 は、子 C-6 の大枠の中（C-6 は既定で畳む）。開くと見える
+  fireEvent.click(within(group).getByRole("button", { name: /^C-6 を開く/ }));
+  expect(hasBox(group, "C-7")).toBe(true);
+  // 大枠には C-6・C-7 は入らない（2 件のまま）
+  expect(
+    within(group).getByRole("button", { name: "ほかの課題を開く（2 件）" }),
+  ).toBeInTheDocument();
 });
 
 it("ほかの課題: 大枠の中の仲間どうしの親子と依存は残る", async () => {
@@ -1002,6 +1010,33 @@ it("幅 480px 以下の一覧でも、ほかの課題は注目でない課題だ
   expect(has("C-2")).toBe(false);
   for (const id of ["C-3", "C-4", "C-5", "C-6", "C-7", "C-8"])
     expect(has(id), id).toBe(true);
+});
+
+it("幅 480px 以下の一覧でも注目は推移的: 2 段先の依存の相手と、注目の親の子・孫は前に出て、起点を含まないまとまりだけが畳んだ大枠に入る", async () => {
+  narrowScreen(true);
+  graphFor = async () => ({ nodes: CHAINED, edges: CHAINED_EDGES });
+  await mount();
+  const list = await screen.findByRole("list", {
+    name: "課題の一覧（親ごと）",
+  });
+  const has = (id: string) =>
+    within(list).queryByRole("button", {
+      name: new RegExp(`^${id} (?!を)`),
+    }) !== null;
+  const head = within(list).getByRole("button", {
+    name: "ほかの課題を開く（2 件）",
+  });
+  for (const id of ["C-1", "C-2", "C-3", "C-4", "C-5", "C-6"])
+    expect(has(id), id).toBe(true);
+  // 孫 C-7 は子 C-6 の下（C-6 を開くと見える）。大枠の中ではない
+  if (!has("C-7"))
+    fireEvent.click(within(list).getByRole("button", { name: /^C-6 を開く/ }));
+  expect(has("C-7")).toBe(true);
+  expect(has("C-8")).toBe(false);
+  expect(has("C-9")).toBe(false);
+  fireEvent.click(head);
+  expect(has("C-8")).toBe(true);
+  expect(has("C-9")).toBe(true);
 });
 
 it("幅 480px 以下の一覧でも、ほかの課題の中の親子は入れ子のまま（子を大枠の直下に重ねて出さない）", async () => {

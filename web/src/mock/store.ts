@@ -421,8 +421,8 @@ export function seed(): Record<string, MockWorkspace> {
       version: 4,
       headline: "不要なログ出力を削った",
     }),
-    // 何ともつながらない TODO（分類待ち・計画待ち）のうち、優先度が P1 以下のものは「ほかの課題」の大枠にまとまる（既定で畳む）。
-    // 優先度が P0 の C-25 は、線が無くても大枠に入らず前に出る
+    // 注目の課題とどの線でもつながらない TODO（分類待ち・計画待ち）のうち、優先度が P1 以下のものは「ほかの課題」の大枠に
+    // まとまる（既定で畳む）。C-23 → C-24 の依存のまとまりごと入る。優先度が P0 の C-25 は、線が無くても大枠に入らず前に出る
     mk("C-23", "エラーページの文言の見直し", "unclassified", {
       priority: "P3",
       urgency: "低",
@@ -436,6 +436,11 @@ export function seed(): Record<string, MockWorkspace> {
     mk("C-26", "再送の重複テストの追加", "in_progress", {
       priority: "P2",
       headline: "冪等キーの再送が 1 通だけ届くことを確かめるテストを足す",
+    }),
+    // C-1 の子（C-2 から見て孫）。C-2 は実施中の C-5 から依存で 2 段先（C-5 → C-19 → C-2）。
+    // 注目は推移的なので、注目に当たらない子 C-1・孫 C-27 も前に出る
+    mk("C-27", "ログイン画面の文言の翻訳", "unclassified", {
+      headline: "英語の文言も同じ言い回しにそろえる",
     }),
     mk("C-25", "決済 API の障害の一次対応", "unclassified", {
       priority: "P0",

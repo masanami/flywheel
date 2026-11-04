@@ -342,16 +342,11 @@ export function visibleIds(
 // ③で前に出す優先度。どの優先度から前に出すかは、Tom#2 の見直しの後に決める仮定（いまは P0 だけ）。
 export const FOCUS_PRIORITIES: readonly string[] = ["P0"];
 
-// 注目に入った理由。human・working・urgent は課題そのものが当たったもの（①②③）、
-// partner・ancestor は注目の課題との関係で入ったもの（④）。
-export type FocusReason =
-  | "human"
-  | "working"
-  | "urgent"
-  | "partner"
-  | "ancestor";
+// 注目に入った理由。human・working・urgent は課題そのものが起点に当たったもの（①②③）、
+// linked は起点とつながりのまとまりが同じもの（④）。
+export type FocusReason = "human" | "working" | "urgent" | "linked";
 
-// 課題そのものが注目に当たるか（①②③の順で最初に当たったもの）。終わった課題（完了・取り下げ）は当たらない。
+// 課題そのものが注目の起点に当たるか（①②③の順で最初に当たったもの）。終わった課題（完了・取り下げ）は当たらない。
 export function seedReason(n: GraphNode): FocusReason | null {
   if (isFinished(n)) return null;
   // ① 人間の操作待ち
@@ -369,80 +364,94 @@ export function seedReason(n: GraphNode): FocusReason | null {
   return null;
 }
 
+// 表示中の課題を、依存の線（前提・後続・衝突）と親子の線（親と子の両方向）でつながるまとまりに分ける。
+// 表示している終わった課題を通る線もつながりに数える（画面に描く線と同じ）。隠れた課題につながる関係は数えない。
+// 返すのは課題の ID → まとまりの代表の ID。
+function componentsOf(
+  ids: string[],
+  relations: ChallengeRelation[],
+): Map<string, string> {
+  const set = new Set(ids);
+  const rels = validRelations(set, relations);
+  const adj = new Map<string, string[]>(ids.map((id) => [id, []]));
+  const link = (a: string, b: string) => {
+    adj.get(a)?.push(b);
+    adj.get(b)?.push(a);
+  };
+  for (const r of rels) link(r.from, r.to);
+  const pm = parentMap(set, rels);
+  for (const [child, parent] of pm) link(child, parent);
+  const comp = new Map<string, string>();
+  for (const id of [...ids].sort(compareIds)) {
+    if (comp.has(id)) continue;
+    const stack = [id];
+    comp.set(id, id);
+    while (stack.length > 0) {
+      const cur = stack.pop() as string;
+      for (const nb of adj.get(cur) ?? [])
+        if (!comp.has(nb)) {
+          comp.set(nb, id);
+          stack.push(nb);
+        }
+    }
+  }
+  return comp;
+}
+
 // 前に出す課題（注目）と、その理由。ids は表示中の課題で、隠れた課題につながる関係は数えない。
-// ①②③の課題（seedReason）に、④として、その課題の依存の相手（前提・後続・衝突。直接の相手だけで推移しない）と、
-// その親（入れ子を保つため祖先まで。注目の課題の依存の相手の祖先も含める）を足す。動いている課題だけが入る。
+// ①②③の起点（seedReason）と、④として、起点と依存の線・親子の線で（段数に関係なく）つながる動いている課題。
+// つながりのまとまりごと前に出す。終わった課題は注目に入らない（まとまりの中で前に残る。othersOf）。
 export function focusOf(
   ids: string[],
   relations: ChallengeRelation[],
   nodes: GraphNode[],
 ): Map<string, FocusReason> {
   const set = new Set(ids);
-  const rels = validRelations(set, relations);
+  const comp = componentsOf(ids, relations);
   const live = new Map<string, GraphNode>();
   for (const n of nodes) if (set.has(n.id) && !isFinished(n)) live.set(n.id, n);
   const out = new Map<string, FocusReason>();
+  const hot = new Set<string>();
   for (const n of live.values()) {
     const why = seedReason(n);
-    if (why) out.set(n.id, why);
+    if (why) {
+      out.set(n.id, why);
+      hot.add(comp.get(n.id) as string);
+    }
   }
-  const seeds = new Set(out.keys());
-  for (const r of rels) {
-    if (r.kind !== "depends_on") continue;
-    if (seeds.has(r.from) && live.has(r.to) && !out.has(r.to))
-      out.set(r.to, "partner");
-    if (seeds.has(r.to) && live.has(r.from) && !out.has(r.from))
-      out.set(r.from, "partner");
-  }
-  const pm = parentMap(set, rels);
-  for (const id of [...out.keys()])
-    for (const a of ancestorsOf(id, pm))
-      if (live.has(a) && !out.has(a)) out.set(a, "ancestor");
+  for (const id of live.keys())
+    if (!out.has(id) && hot.has(comp.get(id) as string)) out.set(id, "linked");
   return out;
 }
 
-// 「ほかの課題」の大枠に入れる課題（ID の数の昇順）: 動いている課題のうち注目（focusOf）でないもの。
-// 残した終わった課題（完了・取り下げ）は、関係する相手（親子・依存のどちらの向きも）がすべて大枠の中にあり、
-// そのうち 1 つ以上が動いている課題なら大枠の中に置く。そうでなければ前に置く（大枠に入れない）。
+// 「ほかの課題」の大枠に入れる課題（ID の数の昇順）: どの線でも注目の課題とつながらない、注目でない課題。
+// つながりのまとまりのうち、起点を含まず、動いている課題を 1 つ以上含むものを、まとまりごと入れる
+// （残した終わった課題も、属するまとまりが大枠なら大枠の中。注目のまとまりなら前）。
+// 終わった課題だけのまとまり（全部を見る切り替えのとき）は大枠に入れない。
 export function othersOf(
   ids: string[],
   relations: ChallengeRelation[],
   nodes: GraphNode[],
 ): string[] {
   const set = new Set(ids);
-  const rels = validRelations(set, relations);
+  const comp = componentsOf(ids, relations);
   const focus = focusOf(ids, relations, nodes);
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const others = new Set(
-    ids.filter((id) => {
-      const n = byId.get(id);
-      return n !== undefined && !isFinished(n) && !focus.has(id);
-    }),
-  );
-  const partners = (id: string): string[] =>
-    rels.flatMap((r) => (r.from === id ? [r.to] : r.to === id ? [r.from] : []));
-  // 終わった課題の候補から、前に置くものを外していく（相手が大枠の外にあるか、動いている相手が大枠にいないもの）
-  const finished = new Set(
-    ids.filter((id) => {
-      const n = byId.get(id);
-      return n !== undefined && isFinished(n);
-    }),
-  );
-  for (let changed = true; changed; ) {
-    changed = false;
-    for (const id of [...finished]) {
-      const ps = partners(id);
-      const ok =
-        ps.length > 0 &&
-        ps.every((p) => others.has(p) || finished.has(p)) &&
-        ps.some((p) => others.has(p));
-      if (!ok) {
-        finished.delete(id);
-        changed = true;
-      }
-    }
+  const hot = new Set<string>();
+  const hasLive = new Set<string>();
+  for (const id of ids) {
+    const n = byId.get(id);
+    if (!n || !set.has(id)) continue;
+    const c = comp.get(id) as string;
+    if (focus.has(id)) hot.add(c);
+    if (!isFinished(n)) hasLive.add(c);
   }
-  return [...others, ...finished].sort(compareIds);
+  return ids
+    .filter((id) => {
+      const c = comp.get(id) as string;
+      return byId.has(id) && hasLive.has(c) && !hot.has(c);
+    })
+    .sort(compareIds);
 }
 
 // --- 配置（大枠ごとに、上から下へ層を重ねる。先行が上、後続が下） ---

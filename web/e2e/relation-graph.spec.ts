@@ -132,43 +132,35 @@ test.describe("広い画面（1280px）", () => {
     await expect(graph.getByRole("button", { name: /^C-22 / })).toHaveCount(0);
   });
 
-  test("ほかの課題: 注目でない動いている課題を大枠にまとめ、既定で畳み、押しても詳細は開かず、開閉できる。優先度 P0 の分類待ちや人間の操作待ちは線が無くても前に出る", async ({
+  test("ほかの課題: 注目の課題とどの線でもつながらない課題のまとまりだけを大枠にまとめ、既定で畳み、押しても詳細は開かず、開閉できる。注目は推移的に前に出る", async ({
     page,
   }) => {
     await page.goto("/");
     const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
-    // 大枠は C-1（注目の親 C-2 の子）・C-23（P3 の分類待ち）・C-24（P2 の計画待ち）。畳んだまま、中身は見えない
+    const nodeBtn = (id: string) =>
+      graph.getByRole("button", { name: new RegExp(`^${id} (?!を)`) });
+    // 大枠は C-23 → C-24 のまとまり（P3 の分類待ちと P2 の計画待ち）だけ。畳んだまま、中身は見えない
     const closed = graph.getByRole("button", {
-      name: /^ほかの課題を開く（3 件）/,
+      name: /^ほかの課題を開く（2 件）/,
     });
     await expect(closed).toBeVisible();
-    for (const id of ["C-1", "C-23", "C-24"])
-      await expect(
-        graph.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
-      ).toHaveCount(0);
+    for (const id of ["C-23", "C-24"]) await expect(nodeBtn(id)).toHaveCount(0);
     // 線の無い人間の操作待ち（C-3・C-7）・実行中（C-20）・P0 の分類待ち（C-25）は、大枠に入らずそのまま並ぶ
     for (const id of ["C-3", "C-7", "C-20", "C-25"])
-      await expect(
-        graph.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
-      ).toBeVisible();
-    // 注目の後続になっている計画待ち（C-18・C-19）も前に出る
-    for (const id of ["C-18", "C-19"])
-      await expect(
-        graph.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
-      ).toBeVisible();
-    await closed.click();
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-    for (const id of ["C-1", "C-23", "C-24"])
-      await expect(
-        graph.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
-      ).toBeVisible();
-    // C-1 は親 C-2 の大枠の中でなく、「ほかの課題」の大枠の中にいる
+      await expect(nodeBtn(id)).toBeVisible();
+    // 2 段以上先の依存の相手: 実施中の C-5 → C-19 → C-2。C-2 は 2 段先で前に出る（大枠の見出し）
+    await expect(nodeBtn("C-19")).toBeVisible();
+    await expect(
+      graph.locator('.graph-group-head[aria-label^="C-2 "]'),
+    ).toBeVisible();
+    // 注目している親 C-2 の子 C-1 と孫 C-27 は、注目に当たらなくても親の入れ子のまま前に出る
+    const c1Open = graph.getByRole("button", { name: /^C-1 を開く/ });
+    await expect(c1Open).toBeVisible();
+    await c1Open.click();
+    await expect(nodeBtn("C-27")).toBeVisible();
     const inside = async (outer: string, id: string) => {
-      const o = await graph.locator(outer).boundingBox();
-      const n = await graph
-        .getByRole("button", { name: new RegExp(`^${id} (?!を)`) })
-        .locator(".graph-node-box")
-        .boundingBox();
+      const o = await graph.locator(outer).first().boundingBox();
+      const n = await nodeBtn(id).locator(".graph-node-box").boundingBox();
       return (
         !!o &&
         !!n &&
@@ -178,15 +170,22 @@ test.describe("広い画面（1280px）", () => {
         n.y + n.height <= o.y + o.height
       );
     };
-    expect(await inside(".graph-others-frame .graph-group-box", "C-1")).toBe(
-      true,
-    );
     expect(
       await inside(
-        '.graph-group:has(.graph-group-head[aria-label^="C-2 "]) .graph-group-box',
-        "C-1",
+        '.graph-group:has(> .graph-group-head[aria-label^="C-2 "]) > .graph-group-box',
+        "C-27",
       ),
-    ).toBe(false);
+    ).toBe(true);
+    // 大枠を開くと、まとまりの中の線（C-23 → C-24）ごと見える。押しても詳細は開かない
+    await closed.click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    for (const id of ["C-23", "C-24"]) await expect(nodeBtn(id)).toBeVisible();
+    expect(await inside(".graph-others-frame .graph-group-box", "C-24")).toBe(
+      true,
+    );
+    await expect(
+      graph.locator('.graph-edge-hit[aria-label^="依存 C-23 → C-24"]'),
+    ).toHaveCount(1);
     await graph.getByRole("button", { name: /^ほかの課題を畳む/ }).click();
     await expect(graph.getByRole("button", { name: /^C-23 / })).toHaveCount(0);
   });
@@ -397,12 +396,12 @@ test.describe("狭い画面（360px）", () => {
     await expect(list).toBeVisible();
     await expect(list.getByRole("button", { name: /^C-22 / })).toHaveCount(0);
     await expect(list.getByRole("button", { name: /^C-21 / })).toBeVisible();
-    // 大枠は畳んでいる（人間の操作待ち C-3・C-7 や P0 の C-25 が線無しでいても開かない）。入るのは C-1・C-23・C-24
+    // 大枠は畳んでいる（人間の操作待ち C-3・C-7 や P0 の C-25 が線無しでいても開かない）。入るのは C-23・C-24 のまとまり
     const others = list.getByRole("button", {
-      name: /^ほかの課題を開く（3 件）/,
+      name: /^ほかの課題を開く（2 件）/,
     });
     await expect(others).toBeVisible();
-    for (const id of ["C-1", "C-23", "C-24"])
+    for (const id of ["C-23", "C-24"])
       await expect(
         list.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
       ).toHaveCount(0);
@@ -410,6 +409,21 @@ test.describe("狭い画面（360px）", () => {
     for (const id of ["C-20", "C-25"])
       await expect(
         list.getByRole("button", { name: new RegExp(`^${id} `) }),
+      ).toBeVisible();
+    // 注目は推移的: 2 段先の C-2 と、その子 C-1・孫 C-27 も前に出る（大枠の外）
+    for (const id of ["C-2", "C-1"])
+      await expect(
+        list.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
+      ).toBeVisible();
+    const c1Toggle = list.getByRole("button", { name: /^C-1 を開く/ });
+    if ((await c1Toggle.count()) > 0) await c1Toggle.click();
+    await expect(
+      list.getByRole("button", { name: /^C-27 (?!を)/ }),
+    ).toBeVisible();
+    await others.click();
+    for (const id of ["C-23", "C-24"])
+      await expect(
+        list.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
       ).toBeVisible();
     const row = (id: string) =>
       list.locator(
@@ -447,11 +461,6 @@ test.describe("狭い画面（360px）", () => {
       await fontSize(".graph-list-open"),
     );
     expect(await horizontalOverflow(page)).toEqual([]);
-    await others.click();
-    for (const id of ["C-1", "C-23", "C-24"])
-      await expect(
-        list.getByRole("button", { name: new RegExp(`^${id} (?!を)`) }),
-      ).toBeVisible();
     await page.locator("label.graph-switch").click();
     await expect(list.getByRole("button", { name: /^C-22 / })).toBeVisible();
     expect(await horizontalOverflow(page)).toEqual([]);
