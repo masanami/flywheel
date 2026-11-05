@@ -444,14 +444,16 @@ test.describe("狭い画面（360px）", () => {
     await expect(chips.nth(1).locator(".graph-human-chip-label")).toHaveText(
       "不可逆操作の承認",
     );
-    // 行の右上: 行の右端に近く、行の上の端に近い。文字は題名より小さい
+    // 行の右上: 行の右端に近く、行の上の端に近い。入らないチップは語を切らずに次の行へ折り返す（flywheel#464）ので、
+    // 上の端は最初のチップで見る。文字は題名より小さい
     const rowBox = await c7.locator("> .graph-list-row").boundingBox();
+    const first = await chips.first().boundingBox();
     const last = await chips.last().boundingBox();
-    if (!rowBox || !last) throw new Error("位置が取れない");
+    if (!rowBox || !first || !last) throw new Error("位置が取れない");
     expect(rowBox.x + rowBox.width - (last.x + last.width)).toBeLessThanOrEqual(
       12,
     );
-    expect(last.y - rowBox.y).toBeLessThanOrEqual(8);
+    expect(first.y - rowBox.y).toBeLessThanOrEqual(8);
     const fontSize = (sel: string) =>
       c7
         .locator(sel)

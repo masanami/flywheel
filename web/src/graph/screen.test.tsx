@@ -558,7 +558,7 @@ const chipsOf = (el: Element, sel = CHIP) =>
     label: c.querySelector(".graph-human-chip-label")?.textContent,
   }));
 
-it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を出し、承認 2 つは 1 つにまとめる。入らない語は切り詰め、実装の語は出さない", async () => {
+it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を出し、承認 2 つは 1 つにまとめる。入らない語は切り詰めるか「+n」にまとめ、実装の語は出さない", async () => {
   graphFor = async () => ({
     nodes: [
       human("C-1", ["approve_plan"]),
@@ -597,6 +597,12 @@ it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を�
   expect(c2[0]?.label).toBe("承認待ち");
   expect(c2[1]?.label?.startsWith("不可逆")).toBe(true);
   expect(c2[1]?.label?.endsWith("…")).toBe(true);
+  // 切り詰めたチップは、全部の語を title に残す
+  expect(
+    box(group, "C-2").querySelector(
+      '.graph-human-chip[data-kind="operations"] > title',
+    )?.textContent,
+  ).toBe("! 不可逆操作の承認");
   // 計画と完了の承認は同じ区分なので 1 つ
   expect(chips("C-3").map((c) => c.kind)).toEqual(["approvals"]);
   const c4 = chips("C-4");
@@ -605,8 +611,18 @@ it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を�
     glyph: "?",
     label: "未回答の問い",
   });
-  // 入る分だけ（残りの語は読み上げの名前にある）
-  expect(c4.map((c) => c.kind)).toEqual(["questions", "triage"]);
+  // 入る分だけ並べ、残りは「+n」の 1 つにまとめる。まとめた語は「+n」の title に残る（全部の語は読み上げの名前にもある）
+  expect(c4.map((c) => c.kind)).toEqual(["questions", "more"]);
+  const more = box(group, "C-4").querySelector(
+    '.graph-human-chip[data-kind="more"]',
+  );
+  expect(more?.querySelector("text")?.textContent).toBe("+4");
+  expect(more?.getAttribute("data-hidden")).toBe(
+    "triage budget discrepancies slots",
+  );
+  expect(more?.querySelector("title")?.textContent).toBe(
+    "↕ トリアージ・$ 予算の使い切り・≠ 食い違い・⌫ 片づけ待ちのスロット",
+  );
   expect(box(group, "C-4")).toHaveAccessibleName(
     "C-4 題名C-4（人間の操作待ち・未回答の問い・トリアージ・予算の使い切り・食い違い・片づけ待ちのスロット）",
   );

@@ -19,6 +19,7 @@ import {
   humanActionLabels,
   humanChips,
   layoutGraph,
+  minChipRoom,
   othersOf,
   parentMap,
   reasonText,
@@ -555,7 +556,7 @@ it("人間の操作待ちのチップ: 帯の区分ごとの記号と語を、ne
   ]);
 });
 
-it("人間の操作待ちのチップの並べ方: 右寄せの 1 行に並べ、入らない分は最後の 1 つを「…」で切り詰め、それも入らなければ出さない", () => {
+it("人間の操作待ちのチップの並べ方: 右寄せの 1 行に並べ、入らないチップは「…」で切り詰めるか「+n」にまとめる", () => {
   const chips = humanChips(
     node("C-1", {
       category: "human",
@@ -568,6 +569,7 @@ it("人間の操作待ちのチップの並べ方: 右寄せの 1 行に並べ�
     "トリアージ",
     "片づけ待ちのスロット",
   ]);
+  expect(wide.more).toBeNull();
   // 左から詰めて並べ、全体の幅が 1 行の幅になる
   const xs = wide.items.map((c) => c.x);
   expect(xs[0]).toBe(0);
@@ -575,15 +577,40 @@ it("人間の操作待ちのチップの並べ方: 右寄せの 1 行に並べ�
   const last = wide.items[2];
   expect(last && last.x + last.w).toBe(wide.width);
   expect(wide.width).toBeLessThanOrEqual(400);
-  // 狭いと、入る分だけ。最後に入れる 1 つは語を「…」で切る
-  const narrow = fitChips(chips, 130);
-  expect(narrow.width).toBeLessThanOrEqual(130);
-  expect(narrow.items.length).toBeLessThan(3);
-  expect(narrow.items[0]?.label).toBe("承認待ち");
-  const tail = narrow.items[narrow.items.length - 1];
-  expect(tail?.label.endsWith("…") || tail?.label === "承認待ち").toBe(true);
-  // 1 つも入らなければ空
-  expect(fitChips(chips, 20)).toEqual({ items: [], width: 0 });
+
+  // 2 つ目以降が入らなければ、入る分だけ並べ、残りを「+n」にまとめる（まとめた区分は hidden に残る）
+  const narrow = fitChips(chips, 110);
+  expect(narrow.width).toBeLessThanOrEqual(110);
+  expect(narrow.items.map((c) => c.label)).toEqual(["承認待ち"]);
+  expect(narrow.more?.label).toBe("+2");
+  expect(narrow.more?.hidden.map((c) => c.kind)).toEqual(["triage", "slots"]);
+  expect(narrow.more && narrow.more.x + narrow.more.w).toBe(narrow.width);
+
+  // 「…」で切れば入るなら切って置き、残りを「+n」にまとめる
+  const mid = fitChips(chips, 150);
+  expect(mid.width).toBeLessThanOrEqual(150);
+  expect(mid.items.map((c) => c.label)).toEqual(["承認待ち", "トリ…"]);
+  expect(mid.items[1]?.chip.label).toBe("トリアージ");
+  expect(mid.more?.label).toBe("+1");
+  expect(mid.more?.hidden.map((c) => c.kind)).toEqual(["slots"]);
+
+  // 入らないのが最後の 1 つだけなら、その語を「…」で切って置く（+n にしない）
+  const two = chips.slice(0, 2);
+  const full = fitChips(two, 400).width;
+  const cut = fitChips(two, full - 12);
+  expect(cut.more).toBeNull();
+  expect(cut.items).toHaveLength(2);
+  expect(cut.items[1]?.label.endsWith("…")).toBe(true);
+  expect(cut.items[1]?.chip.label).toBe("トリアージ");
+  expect(cut.width).toBeLessThanOrEqual(full - 12);
+
+  // 1 つも入らなくても、全部をまとめた「+n」は置く（何かを待っていることは必ず見せる）。その幅が minChipRoom
+  const none = fitChips(chips, 5);
+  expect(none.items).toEqual([]);
+  expect(none.more?.label).toBe("+3");
+  expect(none.width).toBe(minChipRoom(chips));
+  expect(minChipRoom([])).toBe(0);
+  expect(fitChips([], 100)).toEqual({ items: [], more: null, width: 0 });
 });
 
 it("人間の操作待ちのチップ: 記号の表が帯の全区分を覆い、記号は区分ごとに異なる", () => {
