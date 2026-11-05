@@ -1,0 +1,203 @@
+{
+  "base": "http://127.0.0.1:5288/?mock=large&latency=0",
+  "ws": "large",
+  "compare": "large-flat",
+  "runs": 7,
+  "env": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+    "node": "v24.18.0",
+    "platform": "darwin arm64"
+  },
+  "measures": {
+    "large": {
+      "render": {
+        "first_render_from_navigation": {
+          "runs": 7,
+          "median_ms": 133.2,
+          "min_ms": 124.4,
+          "max_ms": 135.3,
+          "boxes": 41
+        },
+        "toggle_show_finished": {
+          "runs": 7,
+          "median_ms": 17.4,
+          "min_ms": 16.4,
+          "max_ms": 19.8
+        },
+        "toggle_hide_finished": {
+          "runs": 7,
+          "median_ms": 17.5,
+          "min_ms": 15.3,
+          "max_ms": 19.1
+        },
+        "open_all_parents": {
+          "runs": 7,
+          "median_ms": 19.2,
+          "min_ms": 17.4,
+          "max_ms": 20.9
+        },
+        "close_all_parents": {
+          "runs": 7,
+          "median_ms": 17.5,
+          "min_ms": 16.3,
+          "max_ms": 18.3
+        },
+        "hover_node": {
+          "runs": 7,
+          "median_ms": 15.8,
+          "min_ms": 14.5,
+          "max_ms": 16.1
+        }
+      },
+      "compute": {
+        "focusOf_default": {
+          "runs": 20,
+          "median_ms": 0.041,
+          "min_ms": 0.032,
+          "max_ms": 0.064
+        },
+        "othersOf_default": {
+          "runs": 20,
+          "median_ms": 0.072,
+          "min_ms": 0.068,
+          "max_ms": 0.076
+        },
+        "layout_x2_closed_default": {
+          "runs": 20,
+          "median_ms": 0.106,
+          "min_ms": 0.098,
+          "max_ms": 0.146
+        },
+        "layout_x2_all_open_default": {
+          "runs": 20,
+          "median_ms": 0.286,
+          "min_ms": 0.27,
+          "max_ms": 0.344
+        },
+        "shown_default": 72,
+        "others_default": 0,
+        "focusOf_all": {
+          "runs": 20,
+          "median_ms": 0.044,
+          "min_ms": 0.04,
+          "max_ms": 0.046
+        },
+        "othersOf_all": {
+          "runs": 20,
+          "median_ms": 0.088,
+          "min_ms": 0.086,
+          "max_ms": 0.09
+        },
+        "layout_x2_closed_all": {
+          "runs": 20,
+          "median_ms": 0.13,
+          "min_ms": 0.126,
+          "max_ms": 0.136
+        },
+        "layout_x2_all_open_all": {
+          "runs": 20,
+          "median_ms": 0.374,
+          "min_ms": 0.372,
+          "max_ms": 0.384
+        },
+        "shown_all": 100,
+        "others_all": 0
+      }
+    },
+    "large-flat": {
+      "render": {
+        "first_render_from_navigation": {
+          "runs": 7,
+          "median_ms": 151.2,
+          "min_ms": 146,
+          "max_ms": 161.7,
+          "boxes": 14
+        },
+        "toggle_show_finished": {
+          "runs": 7,
+          "median_ms": 17.6,
+          "min_ms": 15.2,
+          "max_ms": 18.5
+        },
+        "toggle_hide_finished": {
+          "runs": 7,
+          "median_ms": 16,
+          "min_ms": 15.8,
+          "max_ms": 17.5
+        },
+        "open_all_parents": {
+          "runs": 7,
+          "median_ms": 19.1,
+          "min_ms": 16.3,
+          "max_ms": 19.7
+        },
+        "close_all_parents": {
+          "runs": 7,
+          "median_ms": 16.1,
+          "min_ms": 14.6,
+          "max_ms": 18
+        },
+        "hover_node": {
+          "runs": 7,
+          "median_ms": 13.7,
+          "min_ms": 12.9,
+          "max_ms": 16.3
+        }
+      },
+      "compute": {
+        "focusOf_default": {
+          "runs": 20,
+          "median_ms": 0.017,
+          "min_ms": 0.014,
+          "max_ms": 0.034
+        },
+        "othersOf_default": {
+          "runs": 20,
+          "median_ms": 0.036,
+          "min_ms": 0.032,
+          "max_ms": 0.046
+        },
+        "layout_x2_closed_default": {
+          "runs": 20,
+          "median_ms": 0.034,
+          "min_ms": 0.032,
+          "max_ms": 0.046
+        },
+        "layout_x2_all_open_default": {
+          "runs": 20,
+          "median_ms": 0.154,
+          "min_ms": 0.096,
+          "max_ms": 0.188
+        },
+        "shown_default": 70,
+        "others_default": 57,
+        "focusOf_all": {
+          "runs": 20,
+          "median_ms": 0.017,
+          "min_ms": 0.014,
+          "max_ms": 0.02
+        },
+        "othersOf_all": {
+          "runs": 20,
+          "median_ms": 0.042,
+          "min_ms": 0.038,
+          "max_ms": 0.044
+        },
+        "layout_x2_closed_all": {
+          "runs": 20,
+          "median_ms": 0.05,
+          "min_ms": 0.048,
+          "max_ms": 0.052
+        },
+        "layout_x2_all_open_all": {
+          "runs": 20,
+          "median_ms": 0.12,
+          "min_ms": 0.118,
+          "max_ms": 0.188
+        },
+        "shown_all": 100,
+        "others_all": 57
+      }
+    }
+  }
+}
