@@ -31,7 +31,10 @@ type ApprovalOtherOperation struct {
 // ApprovalSummary は承認の①の要約。Plan は計画承認待ちのときだけ、DoneCriteria は完了確認待ちの
 // ときだけ非 null。ReleaseHeld は常に true（UI の承認は本番反映の保留つきの完了の承認だけ）。
 type ApprovalSummary struct {
-	ChallengeID            string                   `json:"challenge_id"`
+	ChallengeID string `json:"challenge_id"`
+	// DirectCompletion は、この完了確認待ちが親が直接行った完了の記録によるときだけ非 null（成果物の参照を
+	// 完了条件と並べて見せる。完了の検証は通っていない）。
+	DirectCompletion       *DirectCompletion        `json:"direct_completion"`
 	DoneCriteria           *string                  `json:"done_criteria"`
 	Kind                   string                   `json:"kind"`
 	OtherPendingOperations []ApprovalOtherOperation `json:"other_pending_operations"`
@@ -69,6 +72,10 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 	case core.ApprovalKindCompletion:
 		dc := p.DoneCriteria
 		s.DoneCriteria = &dc
+		if p.DirectCompletion != nil {
+			d := FromDirectCompletion(*p.DirectCompletion)
+			s.DirectCompletion = &d
+		}
 	}
 	for _, h := range heads {
 		s.Releases = append(s.Releases, ApprovalRelease{HeadSHA: h.HeadSHA, ID: h.Operation.ID, Ref: h.Operation.Ref, Summary: h.Operation.Summary})

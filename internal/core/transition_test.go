@@ -174,10 +174,10 @@ func TestLookup_CreateNotAvailableFromExistingStatus(t *testing.T) {
 	}
 }
 
-// TestTable_RowCount は、Table の物理行数が25（T1〜T16、うちT11が4遷移元・T16が7遷移元に展開）であることを検証する。
+// TestTable_RowCount は、Table の物理行数が26（T1〜T17、うちT11が4遷移元・T16が7遷移元に展開）であることを検証する。
 func TestTable_RowCount(t *testing.T) {
-	if len(Table) != 25 {
-		t.Fatalf("len(Table) = %d, want 25", len(Table))
+	if len(Table) != 26 {
+		t.Fatalf("len(Table) = %d, want 26", len(Table))
 	}
 }
 

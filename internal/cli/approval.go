@@ -374,6 +374,7 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 		writePlanStageSummary(&b, p)
 	} else {
 		fmt.Fprintf(&b, "完了条件:    %s\n", escapeControl(p.DoneCriteria))
+		writeDirectCompletionSummary(&b, p)
 		writeCompletionStageSummary(&b, p)
 	}
 	if p.Kind == core.ApprovalKindCompletion {
@@ -400,6 +401,22 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 		fmt.Fprintf(&b, "理由:        %s\n", *reason)
 	}
 	return b.String()
+}
+
+// writeDirectCompletionSummary は完了の承認の要約へ、親が直接行った完了の記録の成果物の参照と説明を、完了条件の
+// 次に書く（完了の検証〈J5〉を通っていないので、承認の根拠はこれらと完了条件）。記録が無ければ何も足さない。
+func writeDirectCompletionSummary(b *strings.Builder, p *core.ApprovalPreview) {
+	dc := p.DirectCompletion
+	if dc == nil {
+		return
+	}
+	b.WriteString("親が直接行った（完了の検証は通っていません）。成果物:\n")
+	for _, ref := range dc.Artifacts {
+		fmt.Fprintf(b, "  - %s\n", escapeControl(ref))
+	}
+	if dc.Note != nil {
+		fmt.Fprintf(b, "  説明: %s\n", escapeControl(*dc.Note))
+	}
 }
 
 // writePlanStageSummary は計画の承認の要約へ、論点の各問いと回答・予想の各例・やらないことを

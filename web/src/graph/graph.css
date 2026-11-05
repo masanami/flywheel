@@ -3,6 +3,7 @@
 :root {
   --graph-human: #e07b39;
   --graph-external: #8a63d2;
+  --graph-parent: #c2377f;
   --graph-running: #1b998b;
   --graph-system: #4a90d9;
   --graph-done: #9aa0a6;
@@ -199,6 +200,9 @@
 }
 [data-category="external"] {
   --c: var(--graph-external);
+}
+[data-category="parent_agent"] {
+  --c: var(--graph-parent);
 }
 [data-category="running"] {
   --c: var(--graph-running);

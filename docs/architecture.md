@@ -188,7 +188,8 @@ DDL ではなく、何を持つかの合意のための素描である。
 | `challenge_link` | challenge_id, kind（repo / issue / pr）, ref | 現行の関連リポジトリ・関連 Issue・関連 PR |
 | `task_plan` | challenge_id, version, summary, steps | FR-13 の承認対象。改訂履歴を持てる |
 | `approval` | id, challenge_id, kind（plan / completion / irreversible_op）, decision, actor, channel（ui / cli）, verification（tty_confirm / none / relayed）, decided_at, relay_session, relay_quote | D5。`actor` と `channel` が作業ログを兼ねる。`relay_session`・`relay_quote` は対話で受けた承認（`verification=relayed`）の会話の手がかり（会話の識別とオーナーの発言の要旨）で、それ以外は空。当初の案の `note` に当たる（M4 の S3 で足す。[M4 の機能仕様](features/m4-ui-server.md) M4H21） |
-| `hold` | challenge_id, question, raised_at, resolved_at, answer, session_ref | 現行の「人間対応待ち」。問いと回答を構造として持つ。M4 の S3 で、回答の経路と方式（`answered_channel`・`answered_verification`）と、対話で受けた回答の会話の手がかり（`relay_session`・`relay_quote`）を足す（[M4 の機能仕様](features/m4-ui-server.md) M4H21） |
+| `hold` | challenge_id, question, raised_at, resolved_at, answer, session_ref, kind | 現行の「人間対応待ち」。問いと回答を構造として持つ。M4 の S3 で、回答の経路と方式（`answered_channel`・`answered_verification`）と、対話で受けた回答の会話の手がかり（`relay_session`・`relay_quote`）を足す（[M4 の機能仕様](features/m4-ui-server.md) M4H21）。`kind` は保留の種類（`human`＝人の対応を待つ〔既定〕・`parent_direct`＝対話のセッションの親が直接行う課題の保留。#452＝[M1 の機能仕様](features/m1-core.md) §親が直接行った作業の完了） |
+| `direct_completion`・`direct_completion_artifact` | challenge_id, hold_id, note, created_at ／ direct_completion_id, position, ref | 親が直接行った作業の完了の記録（T17）と、その成果物の参照（run を介さない。1 件以上）。1 行あることが課題の「親が直接行った」印で、完了の後も残る（#452） |
 | `source_binding` | challenge_id, source_id, external_key, fingerprint, last_synced_at, upstream_state | 取り込み元との対応。上流の close を保持できる（claude-flywheel#140） |
 | `cycle` | id, started_at, ended_at, result, budget_usd, spent_usd | 現行の `cycle_start` / `cycle_end` |
 | `run` | id, cycle_id（NULL 可）, kind（delegate / adhoc / judgment）, challenge_id, repo, slot_id, session_ref, started_at, ended_at, result, cost_usd | 現行の `delegate_*` / `adhoc_*` に、判断点の呼び出しを加えたもの。**終了していない `run` が「実行中」** |
@@ -224,6 +225,8 @@ stateDiagram-v2
 ```
 
 > 人間対応待ちへ入れる状態と戻り先は、M1 で拡張した（未分類・分類済・着手中・検証中から入り、回答で入る直前の状態へ戻る。2026-09-21 オーナー決定 H4＝[M1 の機能仕様](features/m1-core.md)）。上の図は着手中からの経路だけを描いている。
+>
+> 人間対応待ちには種類がある（`human`＝人の対応を待つ・`parent_direct`＝対話のセッションの親が直接行う。#452）。種類が `parent_direct` の保留からは、回答（T12）・取り下げ（T16）に加え、親が直接行った作業を成果物の参照つきで記録する T17（`complete-direct`）で、完了の検証を通さずに完了確認待ちへ進める（完了の承認は従来どおりオーナー。[M1 の機能仕様](features/m1-core.md) §親が直接行った作業の完了）。状態は人間対応待ちのままで、`status`・関係グラフは種類を見て「親のエージェントが動く番」の区分に分ける。
 
 遷移ごとに「誰が起こせるか」を core が持つ。**人間だけが起こせる遷移を、自走中の Claude が起こせない**ことが承認ゲートの実体になる（§9）。
 

@@ -114,7 +114,10 @@ export function defaultOpen(
     .filter((p) =>
       descendantsOf(p, kids).some((d) => {
         const i = infos.get(d);
-        return i && (i.active || i.category === "human");
+        return (
+          i &&
+          (i.active || i.category === "human" || i.category === "parent_agent")
+        );
       }),
     )
     .sort(compareIds);

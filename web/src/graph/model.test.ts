@@ -80,6 +80,14 @@ it("区分: API の区分をそのまま使い、システムの課題だけ run
   expect(categoryOf(node("C-1", { category: "system" }))).toBe("system");
   expect(categoryOf(node("C-1", { category: "withdrawn" }))).toBe("withdrawn");
   expect(categoryLabel("withdrawn")).toBe("取り下げ");
+  expect(categoryOf(node("C-1", { category: "parent_agent" }))).toBe(
+    "parent_agent",
+  );
+  expect(categoryLabel("parent_agent")).toBe("親のエージェントが動く番");
+  // 親のエージェントが動く番は run が動いていても、その区分の色
+  expect(
+    categoryOf(node("C-1", { category: "parent_agent", running: true })),
+  ).toBe("parent_agent");
   expect(categoryOf(node("C-1", { running: true }))).toBe("running");
   // 人間の操作待ちは run が動いていても人間の色（光の輪は別に出す）
   expect(categoryOf(node("C-1", { category: "human", running: true }))).toBe(
@@ -782,4 +790,17 @@ it("配置: 大枠の中の親子は入れ子のまま、畳んだ親は大枠�
     isOther,
   );
   expect(nested.nodes.find((n) => n.id === "C-3")?.depth).toBe(2);
+});
+
+it("注目: 親のエージェントが動く番の課題は起点になり、線が無くても「ほかの課題」に隠れない", () => {
+  const nodes = [
+    node("C-1", {
+      category: "parent_agent",
+      state: "awaiting_human",
+    }),
+    node("C-2", { state: "classified", priority: "P2" }),
+  ];
+  const ids = ["C-1", "C-2"];
+  expect(focusOf(ids, [], nodes).get("C-1")).toBe("working");
+  expect(othersOf(ids, [], nodes)).toEqual(["C-2"]);
 });

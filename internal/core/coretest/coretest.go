@@ -955,6 +955,9 @@ func FillAllTables(t *testing.T, workspace string) {
 			  VALUES (1, 'src', 'o/r#1', 'https://example.test/1', 'fp', 'open', 'in_policy', ?, ?)`, []any{at, at}},
 			{`INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (1, 'q', 'verifying', ?)`, []any{at}},
 			{`UPDATE challenge SET issues_hold_id = 1 WHERE id = 1`, nil},
+			{`INSERT INTO hold (challenge_id, question, from_status, raised_at, closed_at, kind) VALUES (2, '親が直接行う', 'unclassified', ?, ?, 'parent_direct')`, []any{at, at}},
+			{`INSERT INTO direct_completion (challenge_id, hold_id, note, created_at) VALUES (2, 2, '直接行った', ?)`, []any{at}},
+			{`INSERT INTO direct_completion_artifact (direct_completion_id, position, ref) VALUES (1, 1, 'https://example.test/result')`, nil},
 			{`INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at) VALUES (1, 'release', 'release', 'o/r#2', 'approved', 2, ?)`, []any{at}},
 			{`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, decided_at)
 			  VALUES (1, 1, 'release', 'approved', 1, 'tester', 'cli', 'tty_confirm', ?)`, []any{at}},

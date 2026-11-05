@@ -48,6 +48,7 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
       urgency: null,
       version: 1,
     },
+    direct_completions: [],
     holds: [],
     operations: [],
     plans: [],
@@ -139,6 +140,7 @@ it("取り下げで回答なしに閉じた保留は、開いている保留と�
         relay_session: null,
         from_status: "in_progress",
         from_status_label: "着手中",
+        kind: "human",
         question: "閉じた問い",
         raised_at: "t0",
         run_id: null,
@@ -188,6 +190,7 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
         relay_session: null,
         from_status: "in_progress",
         from_status_label: "着手中",
+        kind: "human",
         question: "保留の問い",
         raised_at: "t0",
         run_id: null,
@@ -273,6 +276,7 @@ it("AC-119: 外部由来の文字列は文字として出し、script 要素と 
         relay_session: null,
         from_status: "in_progress",
         from_status_label: "",
+        kind: "human",
         question: XSS,
         raised_at: "t0",
         run_id: null,
@@ -427,4 +431,79 @@ it("M4.5 AC-196: 依存先が無い課題では欄を出さない", async () => 
   const content = await openDetail();
   await within(content).findByText("計画（0）");
   expect(within(content).queryByTestId("dependencies")).toBeNull();
+});
+
+it("親が直接行う保留が開いているとき、「未回答」ではなく、オーナーが答える問いではないことを示す", async () => {
+  const d = show({
+    holds: [
+      {
+        answer: null,
+        answered_at: null,
+        answered_by: null,
+        answered_channel: null,
+        answered_verification: null,
+        closed_at: null,
+        relay_quote: null,
+        relay_session: null,
+        from_status: "classified",
+        from_status_label: "分類済",
+        kind: "parent_direct",
+        question: "親が直接行う",
+        raised_at: "t0",
+        run_id: null,
+      },
+    ],
+  });
+  installFakes(bodies(d, {}));
+  const detail = await openDetail();
+  const li = (await within(detail).findByText(/親が直接行う$/)).closest("li");
+  expect(li?.getAttribute("data-hold")).toBe("open");
+  expect(li?.textContent).toContain("オーナーが答える問いではありません");
+  expect(li?.textContent).not.toContain("未回答");
+});
+
+it("親が直接行った記録: 成果物の参照を完了条件の近くにリンクで出し、http(s) 以外はリンクにしない。無い課題には節を出さない", async () => {
+  const d = show({
+    direct_completions: [
+      {
+        artifacts: [
+          "https://github.com/o/r/issues/337#issuecomment-1",
+          "o/r#12",
+          "javascript:alert(1)",
+        ],
+        created_at: "2026-11-05T01:02:03.004Z",
+        note: "手で確かめた",
+      },
+    ],
+  });
+  installFakes(bodies(d, {}));
+  const detail = await openDetail();
+  await within(detail).findByText("親が直接行った成果物");
+  const section = within(detail).getByLabelText("親が直接行った記録");
+  // モーダル（dialog）は jsdom では開いた扱いにならず role の問い合わせから外れるので、要素で引く
+  const links = Array.from(section.querySelectorAll("a"));
+  expect(links).toHaveLength(1);
+  const link = links[0] as HTMLAnchorElement;
+  expect(link.textContent).toBe(
+    "https://github.com/o/r/issues/337#issuecomment-1",
+  );
+  expect(link).toHaveAttribute(
+    "href",
+    "https://github.com/o/r/issues/337#issuecomment-1",
+  );
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  expect(within(section).getByText("o/r#12")).toBeInTheDocument();
+  expect(within(section).getByText("javascript:alert(1)")).toBeInTheDocument();
+  expect(section.textContent).toContain("手で確かめた");
+  // 完了条件は同じ詳細の上にある
+  expect(
+    within(detail).getByTestId("ledger-completion-criteria").textContent,
+  ).toBe("完了条件");
+});
+
+it("親が直接行った記録の無い課題の詳細には、その節を出さない", async () => {
+  installFakes(bodies(show(), {}));
+  const detail = await openDetail();
+  await within(detail).findByText(/保留の問いと回答/);
+  expect(within(detail).queryByLabelText("親が直接行った記録")).toBeNull();
 });

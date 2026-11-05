@@ -125,15 +125,36 @@ func runVerify(a Args) (any, error) {
 	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
 }
 
-// runHold は `flywheel hold <ID> [--question <q>]` の実装（T11）。--question の
+// runHold は `flywheel hold <ID> [--question <q>] [--kind <human|parent_direct>]` の実装（T11）。--question の
 // 省略は空の問いとして core へ渡し、core が validation_failed にする
-// （usage_error にはしない＝仕様）。
+// （usage_error にはしない＝仕様）。--kind の省略は人の対応を待つ保留（human）。閉集合外の値も core が
+// validation_failed にする。
 func runHold(a Args) (any, error) {
 	c, err := a.Store.HoldChallenge(context.Background(), core.ChannelCLI, a.Positional[0], core.HoldInput{
 		Question: a.Values["question"],
+		Kind:     a.Values["kind"],
 	})
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
+}
+
+// runCompleteDirect は `flywheel complete-direct <ID> --artifact <ref>... [--note <s>]` の実装（T17。課題 #452）。
+// 親が直接行った作業を成果物の参照つきで記録し、完了確認待ちへ進める。完了の検証（J5）は起動しない。
+// 完了の承認は従来どおり approve で行う。本人確認は求めない（submit・hold と同じ、エージェントの記録）。
+// --artifact の省略は引数の誤り（usage_error）で、空の参照・使えない保留の種類・状態の規則は core が検査する。
+func runCompleteDirect(a Args) (any, error) {
+	in := core.CompleteDirectInput{Artifacts: a.Multi["artifact"]}
+	if note, ok := a.Values["note"]; ok {
+		in.Note = &note
+	}
+	c, dc, err := a.Store.CompleteDirect(context.Background(), core.ChannelCLI, a.Positional[0], in)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	return textOutput{
+		json: view.ChallengeDirectCompletionResponse{Challenge: view.FromChallenge(*c), DirectCompletion: view.FromDirectCompletion(*dc)},
+		text: challengeText(*c),
+	}, nil
 }

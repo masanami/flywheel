@@ -28,6 +28,8 @@ const (
 	OpApproveHoldRelease Operation = "approve_hold_release"
 	OpReject             Operation = "reject"
 	OpWithdraw           Operation = "withdraw"
+	// OpCompleteDirect は、親が直接行った作業を完了として記録する操作（T17）。
+	OpCompleteDirect Operation = "complete_direct"
 )
 
 // TransitionTarget は遷移先の表現。T1〜T11・T13〜T15 は固定の状態を持つが、
@@ -63,7 +65,7 @@ func (tt TransitionTarget) Resolve(table []Transition, preceding Status) (Status
 	return "", fmt.Errorf("core: %q is not a valid preceding-hold status", preceding)
 }
 
-// Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T15）を指す。
+// Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T17）を指す。
 // T11 は遷移元が4つあるため、物理的には ID="T11" の行が4つ存在する。
 type Transition struct {
 	ID                   string
@@ -73,7 +75,7 @@ type Transition struct {
 	RequiresVerification bool
 }
 
-// Table は遷移表 T1〜T16 の正本。docs/features/m1-core.md §状態機械 の
+// Table は遷移表 T1〜T17 の正本。docs/features/m1-core.md §状態機械 の
 // 遷移表と1対1に対応する（T11 は遷移元4つに展開して4行として持つ）。
 // この表に無い（状態, 操作）の組はすべて不可（Lookup が ok=false を返す）。
 var Table = []Transition{
@@ -104,6 +106,11 @@ var Table = []Transition{
 	{ID: "T16", From: StatusVerifying, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
 	{ID: "T16", From: StatusAwaitingCompletionApproval, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
 	{ID: "T16", From: StatusAwaitingHuman, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
+	// T17: 親が直接行った作業の完了の記録（docs/features/m1-core.md §状態機械。課題 #452）。人間対応待ちから
+	// 完了確認待ちへ進む。遷移表の行は状態だけで決まるため、「開いている保留の種類が親が直接行う」ことと
+	// 「成果物の参照が 1 件以上」は CompleteDirect が検査する（T12 の戻り先の検査と同じ位置づけ）。
+	// 完了の承認は T13・T14 のとおり本人確認つきで、この行は本人確認を要さない（submit・hold と同じ、エージェントの記録）。
+	{ID: "T17", From: StatusAwaitingHuman, Op: OpCompleteDirect, Target: TransitionTarget{Fixed: StatusAwaitingCompletionApproval}},
 }
 
 // Lookup は (from, op) から遷移表の行を引く。表に無い組は ok=false を返す

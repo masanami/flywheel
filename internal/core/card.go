@@ -157,6 +157,10 @@ func deriveCard(c Challenge, st *Overview, runs []*runRow, ownSlots []string, no
 		}
 	}
 
+	inParentAgent := false
+	for _, p := range st.ParentAgentChallenges {
+		inParentAgent = inParentAgent || p.ID == c.ID
+	}
 	inTriage, inBudget, inDisc, waiting := false, false, false, false
 	for _, t := range st.NeedsHumanTriage {
 		inTriage = inTriage || t.ChallengeID == c.ID
@@ -186,7 +190,8 @@ func deriveCard(c Challenge, st *Overview, runs []*runRow, ownSlots []string, no
 	}
 	addA(c.Status == StatusAwaitingPlanApproval, CardActionApprovePlan)
 	addA(c.Status == StatusAwaitingCompletionApproval, CardActionApproveCompletion)
-	addA(c.Status == StatusAwaitingHuman, CardActionAnswerQuestion)
+	// 親が直接行う保留はオーナーが答える問いではないので、問いに答える操作を出さない。
+	addA(c.Status == StatusAwaitingHuman && !inParentAgent, CardActionAnswerQuestion)
 	addA(inTriage, CardActionTriage)
 	addA(inBudget, CardActionIncreaseBudget)
 	addA(pendingOp, CardActionApproveOperation)

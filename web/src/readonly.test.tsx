@@ -106,6 +106,7 @@ function awaitingApproval(): Record<string, unknown> {
       approvals: [],
       card,
       challenge,
+      direct_completions: [],
       holds: [],
       operations: [],
       plans: [],

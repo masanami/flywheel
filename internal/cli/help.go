@@ -23,7 +23,8 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   plan (<ID> (--file <path> | --stdin) | --auto [<C-ID>])
   submit <ID>
   verify (<ID> --result <met|not_met|uncertain> [--question <q>] | --auto [<C-ID>])
-  hold <ID> [--question <q>]
+  hold <ID> [--question <q>] [--kind <human|parent_direct>]   （parent_direct＝対話のセッションの親が直接行う課題の保留）
+  complete-direct <ID> --artifact <参照>... [--note <s>]   （親が直接行った作業を成果物の参照つきで記録し、完了確認待ちへ進める）
   answer <ID> --answer <a> [--relayed --session <s> --quote <q>]
   approve <ID> [--hold-release] [--relayed --session <s> --quote <q>]
   reject <ID> --reason <r> [--field <issues|expected|non_goals|figure>]... [--relayed --session <s> --quote <q>]

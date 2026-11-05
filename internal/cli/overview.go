@@ -98,6 +98,16 @@ func overviewText(ov *core.Overview) string {
 		b.WriteString("\n")
 	}
 
+	// 親のエージェントが動く番（課題 #452）。人間の操作を待っているものとは分けて示す。
+	fmt.Fprintf(&b, "親のエージェントが動く番:\n")
+	if len(ov.ParentAgentChallenges) == 0 {
+		fmt.Fprintf(&b, "  (なし)\n")
+	}
+	for _, c := range ov.ParentAgentChallenges {
+		label, _ := c.Status.Label()
+		fmt.Fprintf(&b, "  %s\t%s\t%s\n", c.ID, label, c.Title)
+	}
+
 	fmt.Fprintf(&b, "外部を待っているもの:\n")
 	if len(ov.WaitingExternal) == 0 {
 		fmt.Fprintf(&b, "  (なし)\n")

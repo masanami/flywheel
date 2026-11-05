@@ -24,6 +24,7 @@ function summary(over: Partial<ApprovalSummary>): {
   return {
     approval: {
       challenge_id: "C-1",
+      direct_completion: null,
       done_criteria: "完了条件",
       kind: "plan",
       other_pending_operations: [],
@@ -148,4 +149,50 @@ it("完了の承認の要約は stages の予想を位置で対にしない（pa
   );
   expect(el.querySelectorAll("[data-pair]")).toHaveLength(0);
   expect(el.textContent).not.toContain("実物だけ");
+});
+
+it("親が直接行った完了の承認の要約: 完了条件の次に成果物の参照をリンクで示し、完了の検証を通っていないことを添える", async () => {
+  const el = await show(
+    summary({
+      kind: "completion",
+      plan: null,
+      done_criteria: "結果が Issue に書かれている",
+      direct_completion: {
+        artifacts: [
+          "https://github.com/o/r/issues/337#issuecomment-1",
+          "o/r#12",
+          "javascript:alert(1)",
+        ],
+        created_at: "2026-11-05T01:02:03.004Z",
+        note: "案 B を動かして確かめた",
+      },
+    }),
+  );
+  const block = within(el).getByTestId("direct-completion");
+  const link = within(block).getByRole("link", {
+    name: "https://github.com/o/r/issues/337#issuecomment-1",
+  });
+  expect(link).toHaveAttribute(
+    "href",
+    "https://github.com/o/r/issues/337#issuecomment-1",
+  );
+  expect(link).toHaveAttribute("target", "_blank");
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  // URL でない参照と javascript: はリンクにしない
+  expect(within(block).getAllByRole("link")).toHaveLength(1);
+  expect(within(block).getByText("o/r#12")).toBeInTheDocument();
+  expect(within(block).getByText("javascript:alert(1)")).toBeInTheDocument();
+  expect(block.textContent).toContain("案 B を動かして確かめた");
+  expect(block.textContent).toContain("完了の検証");
+  // 完了条件の後ろに並ぶ
+  const criteria = within(el).getByText("結果が Issue に書かれている");
+  expect(
+    criteria.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(within(el).getByRole("heading", { name: "完了条件" })).toBeTruthy();
+});
+
+it("通常の完了の承認の要約には、親が直接行った成果物の欄を出さない", async () => {
+  const el = await show(summary({ kind: "completion", plan: null }));
+  expect(within(el).queryByTestId("direct-completion")).toBeNull();
 });

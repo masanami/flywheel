@@ -8,6 +8,7 @@ import type {
   Challenge,
   ChallengeCard,
   CycleStatus,
+  DirectCompletion,
   GraphResponse,
   Hold,
   Operation,
@@ -56,6 +57,8 @@ export interface MockChallenge {
   headline: string | null;
   context: string | null;
   holds: Hold[];
+  // 親が直接行った完了の記録（無ければ空）
+  directCompletions: DirectCompletion[];
   operations: Operation[];
   plans: PlanDetail[];
   approvals: Approval[];
@@ -96,6 +99,7 @@ function mk(
     headline,
     context,
     holds,
+    directCompletions,
     operations,
     plans,
     approvals,
@@ -126,6 +130,7 @@ function mk(
     headline: headline ?? null,
     context: context ?? null,
     holds: holds ?? [],
+    directCompletions: directCompletions ?? [],
     operations: operations ?? [],
     plans: plans ?? [],
     approvals: approvals ?? [],
@@ -317,6 +322,7 @@ export function seed(): Record<string, MockWorkspace> {
           relay_session: null,
           from_status: "in_progress",
           from_status_label: "着手中",
+          kind: "human",
           question:
             "旧テーブルの deleted_at が NULL の行を移行対象に含めてよいですか？ 含めると 3 万件増えます。",
           raised_at: iso(90),
@@ -528,6 +534,13 @@ const HUMAN_STATES = [
 // 区分の型（labels.ts の DiscrepancyKind）から引く。型の無い文字列で書かない。
 const CYCLE_KIND: DiscrepancyKind = "dependency_cycle";
 
+// 人間対応待ちで、いま開いている保留の種類が親が直接行う（core の listParentAgentChallenges と同じ規則）。
+export function isParentAgent(m: MockChallenge): boolean {
+  if (m.c.status !== "awaiting_human") return false;
+  const open = m.holds.filter((h) => h.answer === null && h.closed_at === null);
+  return open[open.length - 1]?.kind === "parent_direct";
+}
+
 export function cardOf(m: MockChallenge): Card {
   const f = m.flags;
   // 種類が dependency_cycle だけの食い違いは印と review_discrepancy に数えない（M45H19。core と同じ）。
@@ -544,7 +557,8 @@ export function cardOf(m: MockChallenge): Card {
   const s = m.c.status;
   if (s === "awaiting_plan_approval") actions.push("approve_plan");
   if (s === "awaiting_completion_approval") actions.push("approve_completion");
-  if (s === "awaiting_human") actions.push("answer_question");
+  if (s === "awaiting_human" && !isParentAgent(m))
+    actions.push("answer_question");
   if (f.triage) actions.push("triage");
   if (f.budget) actions.push("increase_budget");
   if (m.operations.some((o) => o.state === "pending"))
@@ -573,11 +587,13 @@ export function graphOf(w: MockWorkspace): GraphResponse {
       const category =
         card.next_human_actions.length > 0
           ? "human"
-          : m.c.status === "done"
-            ? "done"
-            : m.c.status === "withdrawn"
-              ? "withdrawn"
-              : "system";
+          : isParentAgent(m)
+            ? "parent_agent"
+            : m.c.status === "done"
+              ? "done"
+              : m.c.status === "withdrawn"
+                ? "withdrawn"
+                : "system";
       return {
         category,
         context: m.context,
@@ -614,8 +630,13 @@ export const toCard = (m: MockChallenge): ChallengeCard => ({
 
 export function statusOf(w: MockWorkspace): StatusResponse {
   const items = w.items;
-  const nhChallenges = items.filter((m) => HUMAN_STATES.includes(m.c.status));
-  const humanIds = new Set(nhChallenges.map((m) => m.c.id));
+  const parentAgent = items.filter(isParentAgent);
+  const nhChallenges = items.filter(
+    (m) => HUMAN_STATES.includes(m.c.status) && !isParentAgent(m),
+  );
+  const humanIds = new Set(
+    [...nhChallenges, ...parentAgent].map((m) => m.c.id),
+  );
   const actionable = items.filter(
     (m) =>
       m.c.status !== "done" &&
@@ -656,6 +677,7 @@ export function statusOf(w: MockWorkspace): StatusResponse {
         m.flags.triage ? [{ challenge_id: m.c.id, ...m.flags.triage }] : [],
       ),
     },
+    parent_agent: { challenges: parentAgent.map((m) => m.c) },
     waiting_external: {
       challenges: items.flatMap((m) =>
         m.flags.waitingCi

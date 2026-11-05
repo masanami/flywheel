@@ -659,6 +659,9 @@ func dispatchOperation(t *testing.T, s *Store, id string, op Operation) dispatch
 			ChallengeID: id, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, HoldRelease: true,
 		}, att)
 		return resultOf(c, err)
+	case OpCompleteDirect:
+		c, _, err := s.CompleteDirect(context.Background(), ChannelCLI, id, CompleteDirectInput{Artifacts: []string{"https://example.com/artifact"}})
+		return resultOf(c, err)
 	case OpWithdraw:
 		prev, err := s.PrepareWithdraw(context.Background(), id, "because")
 		if err != nil {
@@ -765,7 +768,7 @@ func dispatchedOperations(t *testing.T) []Operation {
 	want := map[Operation]bool{
 		OpClassify: true, OpPlan: true, OpSubmit: true,
 		OpVerifyMet: true, OpVerifyNotMet: true, OpVerifyUncertain: true, OpHold: true,
-		OpApprove: true, OpReject: true, OpAnswer: true, OpApproveHoldRelease: true, OpWithdraw: true,
+		OpApprove: true, OpReject: true, OpAnswer: true, OpApproveHoldRelease: true, OpWithdraw: true, OpCompleteDirect: true,
 	}
 	if len(ops) != len(want) {
 		t.Fatalf("dispatchable operations derived from Table = %v, want exactly %v (a new operation token needs a dispatch entry)", ops, want)
@@ -811,6 +814,12 @@ func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) 
 			preceding = StatusUnclassified
 			cid, _ := parseChallengeID(c.ID)
 			insertUnansweredHold(t, s, cid, preceding, "why?")
+		}
+		// T17（complete_direct）は、開いている保留の種類が親が直接行うことを実行時に読む。
+		if tr.Op == OpCompleteDirect {
+			cid, _ := parseChallengeID(c.ID)
+			insertUnansweredHold(t, s, cid, StatusClassified, "親が直接行う")
+			setHoldKindForTest(t, s, cid, HoldKindParentDirect)
 		}
 
 		// T5・T6（計画承認待ちからの approve・reject）は PrepareApproval/
@@ -1236,4 +1245,15 @@ func s2GetDetail(t *testing.T, ws, id string) (*ChallengeDetail, error) {
 	}
 	defer func() { _ = s.Close() }()
 	return s.GetChallenge(context.Background(), id)
+}
+
+// setHoldKindForTest は challengeID（内部整数 ID）の保留の種類を kind にする（insertUnansweredHold は既定の種類で作る）。
+func setHoldKindForTest(t *testing.T, s *Store, challengeID int64, kind HoldKind) {
+	t.Helper()
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE hold SET kind = ? WHERE challenge_id = ?`, string(kind), challengeID)
+		return err
+	}); err != nil {
+		t.Fatalf("setHoldKindForTest: %v", err)
+	}
 }

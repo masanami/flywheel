@@ -64,23 +64,24 @@ type ListCardResponse struct {
 
 // ShowCardResponse は `GET …/challenges/{id}` の本文。ShowResponse の最上位に card を足した形。
 type ShowCardResponse struct {
-	Approvals     []Approval     `json:"approvals"`
-	Card          Card           `json:"card"`
-	Challenge     ShowChallenge  `json:"challenge"`
-	Holds         []Hold         `json:"holds"`
-	Operations    []Operation    `json:"operations"`
-	Pairs         []StagePair    `json:"pairs"`
-	Plans         []PlanDetail   `json:"plans"`
-	Runs          []Run          `json:"runs"`
-	SourceBinding *SourceBinding `json:"source_binding"`
-	Stages        Stages         `json:"stages"`
+	Approvals         []Approval         `json:"approvals"`
+	Card              Card               `json:"card"`
+	Challenge         ShowChallenge      `json:"challenge"`
+	DirectCompletions []DirectCompletion `json:"direct_completions"`
+	Holds             []Hold             `json:"holds"`
+	Operations        []Operation        `json:"operations"`
+	Pairs             []StagePair        `json:"pairs"`
+	Plans             []PlanDetail       `json:"plans"`
+	Runs              []Run              `json:"runs"`
+	SourceBinding     *SourceBinding     `json:"source_binding"`
+	Stages            Stages             `json:"stages"`
 }
 
 // FromChallengeDetailCard は課題の全体像とそのカードを ShowCardResponse へ変換する。
 func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card) ShowCardResponse {
 	s := FromChallengeDetail(d)
 	return ShowCardResponse{
-		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, Holds: s.Holds,
+		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, DirectCompletions: s.DirectCompletions, Holds: s.Holds,
 		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, Stages: s.Stages,
 	}
 }
