@@ -447,6 +447,65 @@ export function seed(): Record<string, MockWorkspace> {
       urgency: "高",
       description: "決済 API が断続的に 500 を返している。",
     }),
+    // 人間の操作待ちのチップが多い課題（flywheel#464）。実施中のまま、トリアージ・予算・操作の承認・食い違いの
+    // 4 つを待つ。広い幅のノード・一覧の行で、チップが題名や「▶ 実施中」と重ならないかを見る
+    mk("C-28", "請求データの夜間集計を新しい基盤へ載せ替える", "in_progress", {
+      priority: "P1",
+      headline: "夜間集計を新基盤で回し、旧基盤の負荷を下げる",
+      flags: {
+        running: true,
+        triage: {
+          reason: "run が 2 回続けて同じ集計の検査で落ちた。",
+          run_id: "R-11",
+        },
+        budget: {
+          challenge_id: "C-28",
+          impl_remaining_usd: 0,
+          plan_version: 1,
+          review_remaining_usd: 2,
+        },
+        discrepancy: ["upstream_updated"],
+      },
+      runs: [run("R-11", "C-28", { started_at: iso(20) })],
+      operations: [
+        op("O-1", "C-28", "release", "pending", "集計の切り替えを本番へ反映"),
+      ],
+    }),
+    // チップが多い親（flywheel#464）。完了の承認・トリアージ・予算・操作の承認・食い違いの 5 つを待ちながら自身も実施中で、
+    // 実施中の子 C-30 を持つので既定で開く。開いた大枠の見出しで、チップが題名や「▶ 実施中」と重ならないかを見る
+    mk(
+      "C-29",
+      "問い合わせ窓口の一本化と旧フォームの撤去",
+      "awaiting_completion_approval",
+      {
+        priority: "P1",
+        headline: "窓口を 1 つにまとめ、古いフォームを消す",
+        flags: {
+          running: true,
+          triage: {
+            reason: "子の run が旧フォームの削除で止まった。",
+            run_id: "R-12",
+          },
+          budget: {
+            challenge_id: "C-29",
+            impl_remaining_usd: 0,
+            plan_version: 2,
+            review_remaining_usd: 1,
+          },
+          discrepancy: ["upstream_commented"],
+        },
+        runs: [run("R-12", "C-29", { started_at: iso(25) })],
+        operations: [
+          op("O-1", "C-29", "release", "pending", "旧フォームを本番から外す"),
+        ],
+      },
+    ),
+    mk("C-30", "旧フォームの送信先の付け替え", "in_progress", {
+      priority: "P2",
+      headline: "旧フォームの送信を新しい窓口へ流す",
+      flags: { running: true },
+      runs: [run("R-13", "C-30", { started_at: iso(10) })],
+    }),
   ];
   const beta: MockChallenge[] = [
     mk("C-1", "レポートの CSV 出力", "classified", {
