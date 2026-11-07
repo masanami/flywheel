@@ -91,6 +91,9 @@ type ApprovalPreview struct {
 	// DirectCompletion は、この完了確認待ちが親が直接行った完了の記録（T17）によるときだけ非 nil。
 	// 成果物の参照を完了条件と並べて見せる（完了の検証〈J5〉は通っていない）。
 	DirectCompletion *DirectCompletion
+	// ConditionsAfterRelease は、完了確認待ちへ進めた検証（T8）が「本番反映で満たされる見込み」と
+	// 区分した達成条件（#451）。承認で本番反映されると満たされる条件として要約に出す。無ければ nil。
+	ConditionsAfterRelease []string
 	// PendingReleases は、この完了の承認と同時に承認される未承認の release
 	// （D12）。PendingOperations の kind==release の部分集合。
 	PendingReleases []IrreversibleOperation
@@ -210,6 +213,11 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 				return err
 			}
 			preview.DirectCompletion = dc
+			conds, err := loadConditionsAfterRelease(ctx, tx, cid)
+			if err != nil {
+				return err
+			}
+			preview.ConditionsAfterRelease = conds
 			// 完了の承認の要約は、同時に承認される release と、同時には承認
 			// されない不可逆操作の一覧を含む（D12・A1）。
 			ops, err := loadOperations(ctx, tx, cid)
@@ -253,6 +261,46 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 		return nil, err
 	}
 	return &preview, nil
+}
+
+// activityKeyConditionsAfterRelease は、T8（verify_met）の作業ログの after に残す「本番反映で
+// 満たされる見込み」の達成条件の配列のキー（#451）。
+const activityKeyConditionsAfterRelease = "conditions_after_release"
+
+// loadConditionsAfterRelease は課題の最新の T8（verify_met）の作業ログから、本番反映で満たされる
+// 見込みの達成条件を返す。完了確認待ちへ入る遷移は T8 だけなので、最新の T8 がいまの完了確認待ちを
+// 作った検証である。キーが無い（区分の無い出力・人が進めた検証）なら nil。表示のためだけの値なので、
+// 読めない値（取り込んだ・手で直した行など）は無いものとして扱い、承認・差し戻しを止めない。
+func loadConditionsAfterRelease(ctx context.Context, tx *sql.Tx, cid int64) ([]string, error) {
+	var after sql.NullString
+	err := tx.QueryRowContext(ctx,
+		`SELECT after FROM activity WHERE entity = 'challenge' AND entity_id = ? AND action = ? ORDER BY id DESC LIMIT 1`,
+		cid, string(OpVerifyMet)).Scan(&after)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !after.Valid {
+		return nil, nil
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal([]byte(after.String), &m) != nil {
+		return nil, nil
+	}
+	raw, ok := m[activityKeyConditionsAfterRelease]
+	if !ok {
+		return nil, nil
+	}
+	var conds []string
+	if json.Unmarshal(raw, &conds) != nil {
+		return nil, nil
+	}
+	if len(conds) == 0 {
+		return nil, nil
+	}
+	return conds, nil
 }
 
 // PrepareApproval は approve の①（読み取り）。

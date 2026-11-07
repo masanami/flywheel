@@ -393,6 +393,7 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 				}
 			}
 		}
+		writeConditionsAfterRelease(&b, p.ConditionsAfterRelease, len(effect.Approved) > 0)
 		fmt.Fprintf(&b, "同時に承認される本番反映 (release): %s\n", operationListSummary(effect.Approved))
 		fmt.Fprintf(&b, "同時には承認されない不可逆操作:     %s\n", operationListSummary(effect.NotApproved))
 		writeReleaseHeadLines(&b, rds)
@@ -416,6 +417,24 @@ func writeDirectCompletionSummary(b *strings.Builder, p *core.ApprovalPreview) {
 	}
 	if dc.Note != nil {
 		fmt.Fprintf(b, "  説明: %s\n", escapeControl(*dc.Note))
+	}
+}
+
+// writeConditionsAfterRelease は完了の承認の要約へ、検証が「本番反映で満たされる見込み」と区分した
+// 達成条件を書く（#451）。無ければ何も書かない。この操作で本番反映が 1 つも承認されない
+// （--hold-release・差し戻し・head の照合で外れた・release が無い）ときは、満たされないまま残ることを
+// 見出しで示す。
+func writeConditionsAfterRelease(b *strings.Builder, conds []string, releasing bool) {
+	if len(conds) == 0 {
+		return
+	}
+	if releasing {
+		b.WriteString("承認で本番反映されると満たされる条件:\n")
+	} else {
+		b.WriteString("本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:\n")
+	}
+	for _, c := range conds {
+		fmt.Fprintf(b, "  - %s\n", escapeControl(c))
 	}
 }
 
