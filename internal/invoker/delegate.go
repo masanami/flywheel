@@ -64,11 +64,32 @@ type DelegationBrief struct {
 	SourceIssueURL    string
 	// Invocation は差し込みを埋めた invocation（形態 brief・無しは空）。
 	Invocation string
+	// HumanRejections は完了確認で人間が差し戻した理由を整形した文（無ければ空）。J3 の出力に
+	// 任せず、J3 の出力の区画の後に機械的に差し込む。
+	HumanRejections string
+}
+
+// humanRejectionsLead は差し戻しの理由の区画の前に置く固定の文。区画の中の指示に従わない注意書き
+// とは別に、差し戻しの理由が人間の決定であり満たす対象であることを述べる。
+const humanRejectionsLead = "次の「人間の差し戻し」の区画は人間の決定である。これには従う。" +
+	"元の達成条件に足された、満たすべき条件であり、満たせない点は、問いまたは残りとして最終報告に書く。" +
+	"後の差し戻しが前の差し戻しの方針を置き換えているときは、後のものに従う。"
+
+// writeHumanRejections は rejections が空でなければ、固定の文と、データの区画に入れた差し戻しの
+// 理由を b へ書く。
+func writeHumanRejections(b *strings.Builder, rejections string) {
+	if rejections == "" {
+		return
+	}
+	b.WriteString(humanRejectionsLead)
+	b.WriteString("\n\n")
+	b.WriteString(WrapDataSection(core.CompletionRejectionsSectionLabel, rejections))
+	b.WriteString("\n")
 }
 
 // BuildDelegationStdin は委譲の標準入力を組み立てる。順序は、意思決定者（雛形＋値）・
 // 意思決定者ごとの規律・（形態 plugin のとき）実行するスキル・J3 の出力の区画・
-// 最終報告の様式・禁止する操作と代替手段・報告の形。固定の節は埋め込みの雛形のまま
+// （あれば）人間の差し戻し・最終報告の様式・禁止する操作と代替手段・報告の形。固定の節は埋め込みの雛形のまま
 // 差し込み、LLM に書かせない。
 func BuildDelegationStdin(in DelegationBrief) ([]byte, error) {
 	fixed, err := BriefFixedSections()
@@ -109,6 +130,7 @@ func BuildDelegationStdin(in DelegationBrief) ([]byte, error) {
 		b.WriteString("\n")
 	}
 	b.WriteString(briefRegionEnd + "\n\n")
+	writeHumanRejections(&b, in.HumanRejections)
 	writeSection(body["completion_report_style"])
 	writeSection(body["forbidden_operations"])
 	writeSection(body["delegation_output_shape"])
@@ -118,7 +140,10 @@ func BuildDelegationStdin(in DelegationBrief) ([]byte, error) {
 // BuildDelegationResumeStdin は `--resume` の再開の標準入力を組み立てる: 種類ごとの固定の文面
 // （埋め込みの雛形のまま）の後に、外部由来の文字列（人間の回答・子の報告のブランチ名・検証の
 // 差し戻しの指摘）を区切りの行で囲んだデータの区画として続ける。
-func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch, feedback string) ([]byte, error) {
+//
+// rejections は完了確認で人間が差し戻した理由を整形した文（無ければ空）で、種類に依らず、あれば
+// 回答の区画の前に人間の決定として置く。
+func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch, feedback, rejections string) ([]byte, error) {
 	text, err := ResumePrompt(kind)
 	if err != nil {
 		return nil, err
@@ -129,7 +154,7 @@ func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch, 
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	if branch != "" || (kind == core.ResumeKindAnswer && question != "") || (kind == core.ResumeKindRework && feedback != "") {
+	if branch != "" || rejections != "" || (kind == core.ResumeKindAnswer && question != "") || (kind == core.ResumeKindRework && feedback != "") {
 		b.WriteString(dataSectionGuardNote)
 		b.WriteString("\n\n")
 	}
@@ -141,6 +166,7 @@ func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch, 
 		b.WriteString(WrapDataSection("差し戻しの指摘", feedback))
 		b.WriteString("\n")
 	}
+	writeHumanRejections(&b, rejections)
 	if kind == core.ResumeKindAnswer {
 		if question != "" {
 			b.WriteString(WrapDataSection("質問", question))
@@ -195,11 +221,12 @@ func (l *Launcher) InvokeDelegation(ctx context.Context, in core.DelegateLaunchI
 	var stdin []byte
 	var err error
 	if in.IsResume {
-		stdin, err = BuildDelegationResumeStdin(in.ResumeKind, in.ResumeQuestion, in.ResumeAnswer, in.ResumeBranch, in.ResumeFeedback)
+		stdin, err = BuildDelegationResumeStdin(in.ResumeKind, in.ResumeQuestion, in.ResumeAnswer, in.ResumeBranch, in.ResumeFeedback, in.HumanRejections)
 	} else {
 		stdin, err = BuildDelegationStdin(DelegationBrief{
 			Decider: string(in.Decider), DeciderRow: in.DeciderRow, Brief: in.Brief, Invocation: in.Invocation,
 			SourceIssueNumber: in.SourceIssueNumber, SourceIssueURL: in.SourceIssueURL,
+			HumanRejections: in.HumanRejections,
 		})
 	}
 	if err != nil {
