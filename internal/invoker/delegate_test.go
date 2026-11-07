@@ -313,7 +313,7 @@ func TestBuildDelegateArgs_ResumeUsesResumeFlagInsteadOfSessionID(t *testing.T) 
 }
 
 func TestBuildDelegationResumeStdin_AnswerCarriesFixedTextAnswerAndBranch(t *testing.T) {
-	got, err := BuildDelegationResumeStdin(core.ResumeKindAnswer, "Q-TEXT", "ANSWER-TEXT", "feat/x", "")
+	got, err := BuildDelegationResumeStdin(core.ResumeKindAnswer, "Q-TEXT", "ANSWER-TEXT", "feat/x", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestBuildDelegationResumeStdin_AnswerCarriesFixedTextAnswerAndBranch(t *tes
 }
 
 func TestBuildDelegationResumeStdin_InterruptedHasNoAnswerSection(t *testing.T) {
-	got, err := BuildDelegationResumeStdin(core.ResumeKindInterrupted, "", "", "", "")
+	got, err := BuildDelegationResumeStdin(core.ResumeKindInterrupted, "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestBuildDelegationResumeStdin_InterruptedHasNoAnswerSection(t *testing.T) 
 	if fixed == answerFixed {
 		t.Error("the two resume texts must differ")
 	}
-	if _, err := BuildDelegationResumeStdin(core.ResumeKind("x"), "", "", "", ""); err == nil {
+	if _, err := BuildDelegationResumeStdin(core.ResumeKind("x"), "", "", "", "", ""); err == nil {
 		t.Error("unknown kind must be an error")
 	}
 }
@@ -353,7 +353,7 @@ func TestBuildDelegationResumeStdin_InterruptedHasNoAnswerSection(t *testing.T) 
 // 上限到達の後の再開（M3P44）: 固定の文面が、上限到達で中断した事実と続行を求めることを書き、
 // 回答の区画は持たない。ブランチがあれば「続けるブランチ」の区画で渡す。
 func TestBuildDelegationResumeStdin_BudgetStatesTheCapStopAndAsksToContinue(t *testing.T) {
-	got, err := BuildDelegationResumeStdin(core.ResumeKindBudget, "", "", "feat/x", "")
+	got, err := BuildDelegationResumeStdin(core.ResumeKindBudget, "", "", "feat/x", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestLauncher_InvokeDelegation_ResumeSendsResumeFlagAndTheFixedTextOnStdin(t
 
 // 差し戻しの後の再開: 固定の文面の後に、J5 の差し戻しの指摘とブランチを区画で渡す。回答の区画は持たない。
 func TestBuildDelegationResumeStdin_ReworkCarriesFixedTextAndFeedback(t *testing.T) {
-	got, err := BuildDelegationResumeStdin(core.ResumeKindRework, "", "", "feat/x", "FEEDBACK-TEXT")
+	got, err := BuildDelegationResumeStdin(core.ResumeKindRework, "", "", "feat/x", "FEEDBACK-TEXT", "")
 	if err != nil {
 		t.Fatal(err)
 	}
