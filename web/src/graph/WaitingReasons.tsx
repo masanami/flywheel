@@ -1,10 +1,16 @@
-// 詳細のモーダルに差し込む「待っている理由（直前の先行）」。その課題が直接待っている先行課題と、
-// 依存の種類・登録の経路と日時・満たされているかを並べる。モーダルは board と同じ部品なので、
-// 関係グラフから開いたときだけ差し込み口（CardDetailModal の supplement）で渡す。ボードから開いたときは出さない。
+// 関係グラフから開いた詳細のモーダルに差し込む「待っている理由」。その課題が直接待っている先行課題（前提）と、
+// 衝突のため後回しにした相手を、別の行で並べる。表示の部品は、ボードから開いた詳細と共通
+// （board/WaitingReasonsSection）。ボードは API の waiting を、ここはグラフの辺を出どころにする。
 
+import {
+  PREREQUISITE_LABEL,
+  WAITING_TITLE,
+  WaitingReasonsSection,
+  type WaitingRow,
+  conflictKindLabel,
+} from "../board/WaitingReasonsSection.tsx";
 import type { NodeInfo } from "./GraphCanvas.tsx";
 import {
-  BASIS_LABELS,
   type ChallengeRelation,
   basisOfRelation,
   categoryLabel,
@@ -12,7 +18,9 @@ import {
   reasonDetail,
 } from "./model.ts";
 
-// 課題 id が直接待っている依存（先行 → id）を、先行の ID の順に並べる。
+export { WAITING_TITLE };
+
+// 課題 id が直接待っている前提（先行 → id）を、先行の ID の順に並べる。衝突は前提ではないので含めない。
 export function waitingOn(
   id: string,
   relations: ChallengeRelation[],
@@ -22,7 +30,48 @@ export function waitingOn(
     .sort((a, b) => compareIds(a.from, b.from));
 }
 
-export const WAITING_TITLE = "待っている理由（直前の先行）";
+// 課題 id が衝突のため後回しにした相手（向きのある衝突で、id が後回しの側）を、相手の ID の順に並べる。
+// 先に委譲した側・向きの無い組には、待っている側が無いので含めない。
+export function yieldingTo(
+  id: string,
+  relations: ChallengeRelation[],
+): ChallengeRelation[] {
+  return relations
+    .filter(
+      (r) =>
+        r.kind === "conflicts_with" &&
+        r.from === id &&
+        r.edge?.directed !== false,
+    )
+    .sort((a, b) => compareIds(a.to, b.to));
+}
+
+export function waitingRowsOfGraph(
+  id: string,
+  relations: ChallengeRelation[],
+  infos: Map<string, NodeInfo>,
+): WaitingRow[] {
+  const row = (other: string, r: ChallengeRelation): WaitingRow => {
+    const i = infos.get(other);
+    const basis = basisOfRelation(r);
+    return {
+      key: `${basis}:${other}`,
+      id: other,
+      title: i?.node.title ?? "",
+      marks: `${i?.category === "done" ? "（完了）" : ""}${i?.active ? "（実施中）" : ""}`,
+      basis,
+      kindLabel:
+        basis === "conflict" ? conflictKindLabel(other) : PREREQUISITE_LABEL,
+      detail: reasonDetail(r),
+      category: i?.category,
+      swatchTitle: i ? categoryLabel(i.category) : "",
+    };
+  };
+  return [
+    ...waitingOn(id, relations).map((r) => row(r.from, r)),
+    ...yieldingTo(id, relations).map((r) => row(r.to, r)),
+  ];
+}
 
 export function WaitingReasons({
   id,
@@ -33,43 +82,7 @@ export function WaitingReasons({
   relations: ChallengeRelation[];
   infos: Map<string, NodeInfo>;
 }) {
-  const rels = waitingOn(id, relations);
-  // 待っている先行が無ければ節ごと出さない
-  if (rels.length === 0) return null;
   return (
-    <section aria-label={WAITING_TITLE} className="graph-waiting">
-      <h3>{WAITING_TITLE}</h3>
-      <ul>
-        {rels.map((r) => {
-          const i = infos.get(r.from);
-          const basis = basisOfRelation(r);
-          return (
-            <li
-              key={r.from}
-              data-from={r.from}
-              data-category={i?.category}
-              data-basis={basis}
-            >
-              <div className="graph-waiting-head">
-                <span
-                  className="graph-swatch"
-                  title={i ? categoryLabel(i.category) : ""}
-                  aria-hidden="true"
-                />
-                <b>{r.from}</b> {i?.node.title ?? ""}
-                {i?.category === "done" ? "（完了）" : ""}
-                {i?.active ? "（実施中）" : ""}
-              </div>
-              <div className="graph-waiting-reason">
-                <span className="graph-waiting-kind">
-                  {BASIS_LABELS[basis]}
-                </span>
-                <span>{reasonDetail(r)}</span>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
+    <WaitingReasonsSection rows={waitingRowsOfGraph(id, relations, infos)} />
   );
 }

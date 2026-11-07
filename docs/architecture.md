@@ -184,6 +184,7 @@ DDL ではなく、何を持つかの合意のための素描である。
 |---|---|---|
 | `challenge` | id, title, description, done_criteria, urgency, status, priority, position, size, budget_limit, reporter, reported_at | 現行台帳の 1 エントリに相当。人間記入欄と分類欄の区別は「誰が書けるか」の権限として core が持つ |
 | `challenge_dependency` | challenge_id, depends_on_id | 現行の `依存` フィールド。M4.5 の S2 で作る（旧台帳の `依存` を M5 で移す受け皿。課題どうしの関係のグラフ〔flywheel#176〕のデータにもなる）。依存先が完了し、その `release` に未承認・承認済みで未実行のものが無いときに満たし、委譲の起動だけを止める（2026-10-22 オーナー＝[M4.5 の機能仕様](features/m4.5-learning-and-self-improvement.md) M45H12） |
+| `challenge_conflict` | challenge_id, conflicts_with_id, directed, cycle_id, run_id, created_at | 衝突の予測（`harness predict-conflicts`）の結果として、同時に委譲しない組を持つ。向きありは「後回しにした課題 → 先に委譲した課題」、向きなし（`directed = 0`）はまだどちらも委譲していない組。前提の依存（`challenge_dependency`）とは別の表で、依存の評価・委譲の起動の判定は読まない。関係グラフの衝突の辺（`kind=conflict`）と、ボードの詳細の「衝突のため後回し」のために使う（2026-11-05 オーナー＝[関係グラフの仕様](features/ui-relation-graph.md) §衝突） |
 | 課題カードの段階の欄（D20） | challenge_id, headline, context, issues（論点）, expected（完了したら見えるもの・予想）, actual（同・実物）, non_goals（やらないこと）, figure（図・任意） | M4 の S4 で作る。`challenge` の列（論点・予想・実物・やらないことは JSON の配列、図は Mermaid のテキスト。論点の回答は保留の記録を正本とし、`issues_hold_id` で参照する）とし、版ごとの履歴は持たず書き換えの前後を作業ログに残す。差し戻しの記録（`approval`）に「ずれた欄」（`rejected_fields`）を足す（[M4 の機能仕様](features/m4-ui-server.md) §クリティカル設計決定 5。2026-10-19 親 M4P33） |
 | `challenge_link` | challenge_id, kind（repo / issue / pr）, ref | 現行の関連リポジトリ・関連 Issue・関連 PR |
 | `task_plan` | challenge_id, version, summary, steps | FR-13 の承認対象。改訂履歴を持てる |

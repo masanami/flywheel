@@ -93,9 +93,7 @@ test.describe("広い画面（1280px）", () => {
     await c6.click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await expect(
-      dialog.getByText("待っている理由（直前の先行）"),
-    ).toBeVisible();
+    await expect(dialog.getByText("待っている理由")).toBeVisible();
     await expect(
       dialog.getByText("C-12", { exact: false }).first(),
     ).toBeVisible();
@@ -353,15 +351,53 @@ test.describe("広い画面（1280px）", () => {
     ).toBeVisible();
   });
 
-  test("ボードから開いた詳細には待っている理由が出ない", async ({ page }) => {
+  test("ボードから開いた詳細にも待っている理由が出る。前提の行と「衝突のため後回し」の行が別になる", async ({
+    page,
+  }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "ボード", exact: true }).click();
-    await page.getByTestId("card-C-6").first().getByRole("button").click();
+    // C-19 は前提（C-5・C-17）と衝突（実施中の C-6 に譲って後回し）の両方で待っている
+    await page.getByTestId("card-C-19").first().getByRole("button").click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("待っている理由（直前の先行）")).toHaveCount(
-      0,
+    const section = dialog.getByRole("region", { name: "待っている理由" });
+    await expect(section.locator("li")).toHaveCount(3);
+    await expect(section.locator('li[data-basis="prerequisite"]')).toHaveCount(
+      2,
     );
+    await expect(section.locator('li[data-basis="conflict"]')).toContainText(
+      "衝突のため後回し: C-6",
+    );
+    await page.keyboard.press("Escape");
+    // 待っている理由が無い課題（C-6）には節を出さない
+    await page.getByTestId("card-C-6").first().getByRole("button").click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.getByText("待っている理由")).toHaveCount(0);
+  });
+
+  test("衝突の線: 向きのある組は中抜きの矢じり、向きの無い組（C-20 と C-26）は矢じりなしの破線で描かれる", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
+    await expect(graph).toBeVisible();
+    const directed = graph.locator(
+      'path.graph-edge[data-basis="conflict"][data-directed="true"]',
+    );
+    await expect(directed.first()).toHaveAttribute(
+      "marker-end",
+      "url(#graph-arrow-conflict)",
+    );
+    const free = graph.locator(
+      'path.graph-edge[data-basis="conflict"][data-directed="false"]',
+    );
+    await expect(free).toHaveCount(1);
+    await expect(free).not.toHaveAttribute("marker-end", /.+/);
+    // 破線で描かれる（計算後の stroke-dasharray が none でない）
+    const dash = await free.evaluate(
+      (el) => getComputedStyle(el).strokeDasharray,
+    );
+    expect(dash).not.toBe("none");
   });
 });
 
