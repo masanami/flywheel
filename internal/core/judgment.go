@@ -131,8 +131,10 @@ type JudgmentLaunchInput struct {
 	// Judgment は判断点（J1〜J6・J8）。invoker（#84 以降の Sections を使う経路）が
 	// この値から埋め込みの指示文（Instructions）を選ぶために使う。
 	Judgment JudgmentPoint
-	// Workspace は判断の呼び出しの作業ディレクトリ。
+	// Workspace はワークスペースのディレクトリ。WorkDir が空なら判断の呼び出しの作業ディレクトリ。
 	Workspace string
+	// WorkDir が空でなければ、判断の呼び出しの作業ディレクトリ（J5 の PR の head の一時の worktree）。
+	WorkDir string
 	// RunDir は標準出力・標準エラー・渡した入力の保存先
 	// （.flywheel/runs/<run の ID>/ の絶対パス）。
 	RunDir string
@@ -262,6 +264,8 @@ type RunJudgmentInput struct {
 	// PlanVersion が非 nil なら、run の plan_version に記録する（J5 が、同じ計画の版の差し戻しの
 	// 回数を数えるために使う。他の判断点は nil のまま）。
 	PlanVersion *int64
+	// WorkDir が空でなければ、ワークスペースの代わりにこのディレクトリで起動する（J5 だけが使う）。
+	WorkDir string
 }
 
 // RunJudgmentResult は Store.RunJudgment の出力。
@@ -451,6 +455,7 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 		IsResume:     isResume,
 		Judgment:     in.Judgment,
 		Workspace:    s.workspace,
+		WorkDir:      in.WorkDir,
 		RunDir:       runDirPath(s.workspace, runIDDisplay),
 		OutputSchema: in.OutputSchema,
 		MaxBudgetUSD: in.MaxBudgetUSD,

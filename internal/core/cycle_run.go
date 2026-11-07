@@ -81,6 +81,10 @@ type CycleRunInput struct {
 	Reconcile UpstreamBranchSource
 	// Checks は J5 の起動の前の PR のチェックの取得（GET だけ）。ConnDecl が非 nil のとき必須。
 	Checks UpstreamCheckSource
+	// Diffs は J5 の起動の前の PR の差分の取得（GET だけ）。ConnDecl が非 nil のとき必須。
+	Diffs UpstreamDiffSource
+	// HeadGit は J5 が PR の head を読む一時の worktree の口。ConnDecl が非 nil のとき必須。
+	HeadGit HeadWorktreeGit
 	// Merger は release の段のマージの依頼（唯一の書き込み）。ConnDecl が非 nil のとき必須。
 	Merger UpstreamPullRequestMerger
 	// Predictor は衝突の予測の口の起動（nil なら予測の口を呼べない。RunDelegation と同じ）。
@@ -165,7 +169,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	if in.Trigger == "" || in.AgentDecl == nil || in.Invoker == nil || in.WorkspaceGit == nil {
 		return nil, ErrValidation
 	}
-	if in.ConnDecl != nil && (in.Upstream == nil || in.Delegate == nil || in.Git == nil || in.Reconcile == nil || in.Checks == nil || in.Merger == nil) {
+	if in.ConnDecl != nil && (in.Upstream == nil || in.Delegate == nil || in.Git == nil || in.Reconcile == nil || in.Checks == nil || in.Diffs == nil || in.HeadGit == nil || in.Merger == nil) {
 		return nil, ErrValidation
 	}
 	if in.Ingest != nil && (in.Ingest.Upstream == nil || in.Ingest.Channel == "") {
@@ -339,12 +343,15 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 	verify := CyclePhaseResult{Phase: CyclePhaseVerify, Skipped: in.ConnDecl == nil}
 	if in.ConnDecl != nil {
 		res, err := s.VerifyAutoJ5(ctx, J5AutoInput{
-			AgentDecl: in.AgentDecl,
-			Invoker:   in.Invoker,
-			Upstream:  in.Upstream,
-			Checks:    in.Checks,
-			CycleID:   cycleID,
-			Cycle:     jc,
+			AgentDecl:  in.AgentDecl,
+			Invoker:    in.Invoker,
+			Upstream:   in.Upstream,
+			Checks:     in.Checks,
+			Diffs:      in.Diffs,
+			HeadGit:    in.HeadGit,
+			Connectors: in.ConnDecl,
+			CycleID:    cycleID,
+			Cycle:      jc,
 		})
 		if err != nil {
 			return nil, err

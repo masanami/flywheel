@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -451,5 +452,55 @@ func TestLauncher_InvokeJudgment_ArtifactSaveFailureDoesNotOverrideSucceededResu
 	}
 	if out.ErrorSummary == "" {
 		t.Error("ErrorSummary is empty, want a note about the save failure")
+	}
+}
+
+// J5 の PR の head の一時の worktree（WorkDir）で起動し、ワークスペースの記憶を読めて、PR が持ち込む
+// 設定を読まない引数を渡す。WorkDir が空の判断点は今までどおりワークスペースで起動する（#465）。
+func TestInvokeJudgment_WorkDir(t *testing.T) {
+	cases := map[string]struct {
+		workDir  func(ws string) string
+		wantArgs bool
+	}{
+		"given":  {func(ws string) string { return filepath.Join(ws, "head") }, true},
+		"absent": {func(string) string { return "" }, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			setFakeClaudePath(t, newFakeClaudeDir(t))
+			ws := newWorkspace(t)
+			in := baseLaunchInput(t, ws)
+			in.WorkDir = tc.workDir(ws)
+			want := ws
+			if in.WorkDir != "" {
+				want = in.WorkDir
+				if err := os.MkdirAll(want, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dir := t.TempDir()
+			cwdLog, argvLog := filepath.Join(dir, "cwd"), filepath.Join(dir, "argv")
+			t.Setenv(envFixture, writeFixture(t, fakeClaudeFixture{Stdout: `{"session_id":"11111111-1111-1111-1111-111111111111","total_cost_usd":0.1,"is_error":false,"structured_output":{}}`, CwdLogPath: cwdLog, ArgvLogPath: argvLog}))
+			if _, err := NewLauncher().InvokeJudgment(context.Background(), in); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(cwdLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotReal, _ := filepath.EvalSymlinks(strings.TrimSpace(string(got)))
+			wantReal, _ := filepath.EvalSymlinks(want)
+			if gotReal != wantReal {
+				t.Errorf("cwd = %s, want %s", gotReal, wantReal)
+			}
+			argv, err := os.ReadFile(argvLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hasFlags := strings.Contains(string(argv), `"--add-dir","`+ws+`"`) && strings.Contains(string(argv), `"--setting-sources","user"`)
+			if hasFlags != tc.wantArgs {
+				t.Errorf("argv = %s, want the flags: %v", argv, tc.wantArgs)
+			}
+		})
 	}
 }

@@ -16,6 +16,10 @@ import (
 //     "--disallowedTools Bash Edit Write NotebookEdit WebFetch WebSearch Task"・
 //     "--permission-mode default"
 //
+// in.WorkDir が空でない（J5 が PR の head の一時の worktree で起動する）ときは、記憶の索引を読める
+// よう "--add-dir <ワークスペース>" を足し、PR が持ち込む設定（フック・許可の規則）を読まないよう
+// "--setting-sources user" を足す。
+//
 // 外部由来の文字列（課題の本文等）は一切引数に現れない（標準入力で渡す。
 // stdin.go）。core が決めた唯一の in.SessionID を使う（新規セッションでも
 // --resume の再開でも、core が「どのセッションIDを使うか」を一意に決め、
@@ -37,7 +41,7 @@ func buildArgs(in core.JudgmentLaunchInput) []string {
 	if in.IsResume {
 		sessionFlag = "--resume"
 	}
-	return []string{
+	args := []string{
 		"-p",
 		sessionFlag, in.SessionID,
 		"--output-format", "json",
@@ -47,6 +51,10 @@ func buildArgs(in core.JudgmentLaunchInput) []string {
 		"--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task",
 		"--permission-mode", "default",
 	}
+	if in.WorkDir != "" {
+		args = append(args, "--add-dir", in.Workspace, "--setting-sources", "user")
+	}
+	return args
 }
 
 // formatUSDArg は金額を --max-budget-usd に渡す最小表記の10進文字列にする

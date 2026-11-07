@@ -9,7 +9,8 @@ package core
 //	② 成果物に PR があれば、その PR のチェックを取得する（GET だけ）。完了していないものが
 //	   1 つでもあれば J5 を起動せず、課題の状態と版を変えずに waiting_external として返す。
 //	   PR が無ければ CI を調べず、入力に PR が無いことを書く
-//	③ 上流の最新の状態を取得して J5 を起動する
+//	③ 上流の最新の状態と、②で得た head の差分を取得し、その head を取り出した一時の worktree を
+//	   作業ディレクトリにして J5 を起動する（judgment_j5_head.go。worktree は終わったら消す）
 //	④ 出力を検査し（不正なら run を invalid_output にして課題は変えない）、判定を M1 の
 //	   verify（T8〜T10）へ経路 invoker・原因の run の ID つきで写す
 //
@@ -436,7 +437,7 @@ func formatPullRequestSection(prs []UpstreamPullRequestChecks) string {
 // prepareJ5 は J5 の入力（データの区画）を組み立てる。取り込み元の対応のある課題では、ここ
 // （J5 の起動の直前）で上流の本文・全コメント・参照先を取得する（読んだ記録は付けない）。
 // 取得に失敗したら NotStarted（upstream_fetch_failed）を返し、run を作らない。
-func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context, prs []UpstreamPullRequestChecks, memoryIndex []JudgmentDataSection) ([]JudgmentDataSection, *NotStarted) {
+func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context, prs []UpstreamPullRequestChecks, headSections, memoryIndex []JudgmentDataSection) ([]JudgmentDataSection, *NotStarted) {
 	ch := vc.Challenge
 	urgency, priority := "", ""
 	if ch.Urgency != nil {
@@ -470,6 +471,7 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 		JudgmentDataSection{Label: "照合の結果", Content: formatReconciliationSection(vc)},
 		JudgmentDataSection{Label: "PR の状態とチェックの結果", Content: formatPullRequestSection(prs)},
 	)
+	sections = append(sections, headSections...)
 	if t := formatHoldsSection(vc.Holds); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "保留の記録", Content: t})
 	}
@@ -546,6 +548,9 @@ func (s *Store) applyJ5(ctx context.Context, runIDDisplay, challengeIDDisplay st
 	return false, false, ErrConflict
 }
 
+// activityKeyVerifiedHeads は J5 の判定の作業ログの after に残す、検証した PR と head の一覧のキー。
+const activityKeyVerifiedHeads = "verified_heads"
+
 var errJ5StaleExpected = errors.New("core: expected changed while mapping J5")
 
 // j5VerifiedHeads は J5 の起動の前に取得して入力にした PR ごとの head と、J5 が参照した直前の
@@ -553,6 +558,20 @@ var errJ5StaleExpected = errors.New("core: expected changed while mapping J5")
 type j5VerifiedHeads struct {
 	RunID int64
 	PRs   []UpstreamPullRequestChecks
+}
+
+// logEntries は作業ログの after に残す、検証した PR と head の一覧を返す。head の無い PR は載せない。
+func (vh *j5VerifiedHeads) logEntries() []map[string]string {
+	if vh == nil {
+		return nil
+	}
+	var out []map[string]string
+	for _, pr := range vh.PRs {
+		if pr.HeadSHA != "" {
+			out = append(out, map[string]string{"pr": pr.URL, "head": pr.HeadSHA})
+		}
+	}
+	return out
 }
 
 // recordVerifiedHeads は vh.RunID の run の kind=pr の成果物の行のうち、(repo, 番号) が vh.PRs の
@@ -602,6 +621,10 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 			return errJ5StaleExpected
 		}
 		mapped = true
+		// どの判定でも、検証した head を作業ログに残す（成果物の行へ残すのは met だけ）。
+		if heads := vh.logEntries(); len(heads) > 0 {
+			tc.after[activityKeyVerifiedHeads] = heads
+		}
 		if mismatch {
 			// 実物は課題へ書かない（前の値のまま）。
 			q := ActualMismatchHoldPreamble + " " + v.Reason
@@ -748,6 +771,13 @@ type J5AutoInput struct {
 	Upstream UpstreamThreadSource
 	// Checks は J5 の起動の前の PR のチェックの取得（PR の無い課題では呼ばれない）。
 	Checks UpstreamCheckSource
+	// Diffs は J5 の起動の前の PR の差分の取得（PR の無い課題では呼ばれない）。
+	Diffs UpstreamDiffSource
+	// HeadGit は PR の head を取り出す一時の worktree の口。
+	HeadGit HeadWorktreeGit
+	// Connectors は PR のリポジトリの元のクローンを引く宣言。nil なら PR の head を取り出さない
+	// （差分だけを渡す）。
+	Connectors *ConnectorsDeclaration
 	// CycleID はこの操作が属する周。空は ErrValidation。
 	CycleID string
 	// Cycle が非 nil なら枠超過の状態をこの JudgmentCycle と共有する。
@@ -763,7 +793,7 @@ type J5AutoInput struct {
 //     失敗は、課題を変えずに結果の NotStarted へ入れる。
 //   - in.ChallengeID が nil: 対象を順に処理し、起動しなかった課題を NotStarted へ入れる。
 func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAutoResult, error) {
-	if in.AgentDecl == nil || in.Invoker == nil || in.Upstream == nil || in.Checks == nil || in.CycleID == "" {
+	if in.AgentDecl == nil || in.Invoker == nil || in.Upstream == nil || in.Checks == nil || in.Diffs == nil || in.HeadGit == nil || in.CycleID == "" {
 		return nil, ErrValidation
 	}
 	if in.Cycle != nil && in.Cycle.cycleID != in.CycleID {
@@ -879,7 +909,13 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 		}
 		return nil, nil, err
 	}
-	sections, notStarted := prepareJ5(ctx, in.Upstream, vc, prs, memoryIndexSections(s.workspace, in.AgentDecl))
+	head, notStarted := s.prepareJ5Head(ctx, in, ch.ID, prs)
+	if notStarted != nil {
+		return nil, notStarted, nil
+	}
+	ctx, finishHead := head.guard(ctx)
+	defer finishHead()
+	sections, notStarted := prepareJ5(ctx, in.Upstream, vc, prs, head.Sections, memoryIndexSections(s.workspace, in.AgentDecl))
 	if notStarted != nil {
 		return nil, notStarted, nil
 	}
@@ -894,6 +930,7 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 		OutputSchema: j5OutputSchema(),
 		Invoker:      in.Invoker,
 		PlanVersion:  &planVersion,
+		WorkDir:      head.WorkDir,
 	}
 	var res *RunJudgmentResult
 	if jc != nil {

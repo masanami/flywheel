@@ -176,10 +176,12 @@ type UpstreamCheck struct {
 
 // UpstreamPullRequestChecks は PR 1 件の現在の状態と、head のコミットのチェック一覧。
 type UpstreamPullRequestChecks struct {
-	URL     string
-	Title   string
-	State   string // "open" | "closed" | "merged"
-	Base    string
+	URL   string
+	Title string
+	State string // "open" | "closed" | "merged"
+	Base  string
+	// BaseSHA は REST の `base.sha`（PR の比較の起点。base のブランチが進んでも消えても指せる）。
+	BaseSHA string
 	HeadSHA string
 	// Mergeable は REST の `mergeable`。nil は null（GitHub が計算中）、false はマージ不可、
 	// true はマージ可。`mergeable_state` は読まない。
