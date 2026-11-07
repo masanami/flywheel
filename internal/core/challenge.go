@@ -85,6 +85,8 @@ type Approval struct {
 
 // Hold は保留の 1 件（§データモデル hold）。#9 は書き込まない（読み取りだけ実装する）。
 type Hold struct {
+	// Kind は保留の種類（0014。既存の行は human）。
+	Kind       HoldKind
 	Question   string
 	FromStatus Status
 	RaisedAt   time.Time
@@ -143,10 +145,12 @@ type IrreversibleOperation struct {
 // 全版・承認と差し戻しの記録・保留の記録・不可逆操作・GitHub Issue との対応）。
 type ChallengeDetail struct {
 	Challenge
-	Plans      []Plan
-	Approvals  []Approval
-	Holds      []Hold
-	Operations []IrreversibleOperation
+	Plans     []Plan
+	Approvals []Approval
+	Holds     []Hold
+	// DirectCompletions は親が直接行った完了の記録（古い順。無ければ空のスライス）。1 件以上あることが「親が直接行った」印。
+	DirectCompletions []DirectCompletion
+	Operations        []IrreversibleOperation
 	// SourceBinding は課題と上流の GitHub Issue の対応（#56。
 	// docs/features/m2-github-issue-ingest.md §IF / API「`show` の拡張」）。
 	// 対応が無ければ nil（`create` で作った課題・スキーマ版 1 から上げたストアの
@@ -366,7 +370,7 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT question, from_status, raised_at, answer, answered_at, answered_by, run_id,
-		        answered_channel, answered_verification, relay_session, relay_quote, closed_at
+		        answered_channel, answered_verification, relay_session, relay_quote, closed_at, kind
 		 FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -382,11 +386,13 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			runID                             sql.NullInt64
 			ansChannel, ansVerif, relSess     sql.NullString
 			relQuote, closedAtStr             sql.NullString
+			kind                              string
 			h                                 Hold
 		)
-		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr); err != nil {
+		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind); err != nil {
 			return nil, err
 		}
+		h.Kind = HoldKind(kind)
 		if runID.Valid {
 			v := formatRunID(runID.Int64)
 			h.RunID = &v
@@ -713,6 +719,11 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		detail.Holds = holds
+
+		detail.DirectCompletions, err = loadDirectCompletions(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
 
 		operations, err := loadOperations(ctx, tx, cid)
 		if err != nil {

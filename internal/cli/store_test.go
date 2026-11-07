@@ -114,6 +114,7 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 		{"submit", "C-1"},
 		{"verify", "C-1", "--result", "met"},
 		{"hold", "C-1", "--question", "q"},
+		{"complete-direct", "C-1", "--artifact", "https://example.com/1"},
 		{"answer", "C-1", "--answer", "a"},
 		{"approve", "C-1"},
 		{"reject", "C-1", "--reason", "r"},

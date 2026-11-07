@@ -298,6 +298,10 @@ var transitionCommandCases = []transitionCommandCase{
 	{"submit", func(_ *testing.T, id string) []string { return []string{"submit", id} }},
 	{"verify", func(_ *testing.T, id string) []string { return []string{"verify", id, "--result", "met"} }},
 	{"hold", func(_ *testing.T, id string) []string { return []string{"hold", id, "--question", "why?"} }},
+	// complete-direct（T17。#452）: 人間対応待ち以外の状態では invalid_transition／terminal_state（人間対応待ちは遷移表にある組）。
+	{"completeDirect", func(_ *testing.T, id string) []string {
+		return []string{"complete-direct", id, "--artifact", "https://example.com/1"}
+	}},
 	// approve・reject・answer（#12）: 対象外の状態では、core.Prepare*（①
 	// 読み取り）が端末を開く前に invalid_transition／terminal_state を返す
 	// ため、この in-process の枠組み（stdin は空のまま）でも検証できる。
@@ -326,6 +330,7 @@ var operationByCommand = map[string]core.Operation{
 	"submit":             core.OpSubmit,
 	"verify":             core.OpVerifyMet,
 	"hold":               core.OpHold,
+	"completeDirect":     core.OpCompleteDirect,
 	"approve":            core.OpApprove,
 	"reject":             core.OpReject,
 	"answer":             core.OpAnswer,
@@ -442,13 +447,14 @@ func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T)
 			})
 		}
 	}
-	// 10 コマンド（#13 で approveHoldRelease、M4.5 S4 で withdraw を追加）× 9 状態 = 90 組のうち、
+	// 11 コマンド（#13 で approveHoldRelease、M4.5 S4 で withdraw、#452 で completeDirect を追加）× 9 状態 = 99 組のうち、
 	// 遷移表にある組（T2=1・T3/T4=2・T7=1・T8=1・T11=4・approve=2〈T5・T13〉・
-	// reject=2〈T6・T15〉・answer=1〈T12〉・approveHoldRelease=1〈T14〉・withdraw=7〈T16〉の計 22）と、
+	// reject=2〈T6・T15〉・answer=1〈T12〉・approveHoldRelease=1〈T14〉・withdraw=7〈T16〉・
+	// completeDirect=1〈T17〉の計 23）と、
 	// この汎用枠組みでは検証できない1組（approveHoldRelease/計画承認待ち。
-	// usage_error であり、専用テストが担う）を除いた 67 組を回したことを固定する。
-	if tested != 67 {
-		t.Fatalf("tested %d undefined (command, status) combinations, want 67", tested)
+	// usage_error であり、専用テストが担う）を除いた 75 組を回したことを固定する。
+	if tested != 75 {
+		t.Fatalf("tested %d undefined (command, status) combinations, want 75", tested)
 	}
 }
 

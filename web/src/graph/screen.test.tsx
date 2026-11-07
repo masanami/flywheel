@@ -271,6 +271,7 @@ it("色: 人間の操作待ちは区分の色で区別でき、システムの�
   expect(items).toEqual([
     "人間の操作待ち 3",
     "外部待ち 0",
+    "親のエージェントが動く番 0",
     "システムが実行中 2",
     "システムが次に進めるもの 11",
     "完了 1",
@@ -1096,4 +1097,51 @@ it("ボードと同じく、最後に読み込めた時刻が変わるたびに�
   expect(
     await screen.findByRole("button", { name: /^C-1 更新後/ }),
   ).toBeInTheDocument();
+});
+
+it("親のエージェントが動く番: 人間の操作待ちとも他の区分とも違う色の区分で、凡例に名前と件数が出る。ほかの課題に隠れない", async () => {
+  graphFor = async () => ({
+    nodes: [
+      node("C-1", { category: "parent_agent", state: "awaiting_human" }),
+      human("C-2", ["answer_question"], { state: "awaiting_human" }),
+      node("C-3", { category: "withdrawn" }),
+      node("C-4", { state: "classified", priority: "P2" }),
+      node("C-5", { category: "done" }),
+      node("C-6", { state: "classified", priority: "P2" }),
+    ],
+    edges: [],
+  });
+  await mount();
+  const group = await graphGroup();
+  const cat = (id: string) =>
+    box(group, id).closest("[data-category]")?.getAttribute("data-category");
+  expect(cat("C-1")).toBe("parent_agent");
+  expect(cat("C-2")).toBe("human");
+  expect(box(group, "C-1")).toHaveAccessibleName(
+    "C-1 題名C-1（親のエージェントが動く番）",
+  );
+  const legend = screen.getByRole("list", { name: "区分の凡例" });
+  const item = within(legend).getByRole("button", {
+    name: /^親のエージェントが動く番/,
+  });
+  expect(item).toHaveAttribute("data-category", "parent_agent");
+  expect(item.textContent?.replace(/\s+/g, " ").trim()).toBe(
+    "親のエージェントが動く番 1",
+  );
+  // 注目の起点なので「ほかの課題」の大枠に入らない（入るのは線の無い P2 の C-4・C-6）
+  expect(
+    within(group).getByRole("button", { name: "ほかの課題を開く（2 件）" }),
+  ).toBeInTheDocument();
+  // 色は他の区分と別の変数
+  const css = readFileSync("src/graph/graph.css", "utf8");
+  expect(css).toMatch(
+    /\[data-category="parent_agent"\]\s*\{\s*--c: var\(--graph-parent\)/,
+  );
+  expect(css).toMatch(/--graph-parent:\s*#[0-9a-f]{6}/i);
+  const colors = [
+    ...css.matchAll(
+      /--graph-(human|external|parent|running|system|done):\s*(#[0-9a-f]{6})/gi,
+    ),
+  ].map((m) => m[2]?.toLowerCase());
+  expect(new Set(colors).size).toBe(colors.length);
 });

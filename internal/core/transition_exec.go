@@ -35,6 +35,8 @@ type VerifyInput struct {
 // HoldInput は HoldChallenge の入力。
 type HoldInput struct {
 	Question string
+	// Kind は保留の種類（HoldKind の値）。空は人の対応を待つ保留（human）。閉集合外は ErrValidation。
+	Kind string
 }
 
 // transitionCtx は transition ヘルパーが操作固有の書き込み（apply）へ渡す
@@ -375,10 +377,16 @@ func insertHold(ctx context.Context, tc *transitionCtx, question string) error {
 
 // insertHoldID は insertHold と同じ行を追加し、その hold.id を返す。
 func insertHoldID(ctx context.Context, tc *transitionCtx, question string) (int64, error) {
+	return insertHoldKind(ctx, tc, question, HoldKindHuman)
+}
+
+// insertHoldKind は insertHoldID の、保留の種類を指定する版。human 以外のときだけ作業ログの after に種類を載せる
+// （既存の保留の作業ログの形は変えない）。
+func insertHoldKind(ctx context.Context, tc *transitionCtx, question string, kind HoldKind) (int64, error) {
 	res, err := tc.tx.ExecContext(ctx,
-		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id)
-		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)`,
-		tc.id, question, string(tc.current.Status), tc.nowStr, int64PtrColumn(tc.runID),
+		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind)
+		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`,
+		tc.id, question, string(tc.current.Status), tc.nowStr, int64PtrColumn(tc.runID), string(kind),
 	)
 	if err != nil {
 		return 0, err
@@ -388,6 +396,9 @@ func insertHoldID(ctx context.Context, tc *transitionCtx, question string) (int6
 		return 0, err
 	}
 	tc.after["question"] = question
+	if kind != HoldKindHuman {
+		tc.after["hold_kind"] = string(kind)
+	}
 	return id, nil
 }
 
@@ -513,13 +524,23 @@ func (s *Store) VerifyChallenge(ctx context.Context, ch Channel, id string, in V
 }
 
 // HoldChallenge は課題を人間対応待ちへ進める（T11）。Question が
-// strings.TrimSpace で空なら ErrValidation。
+// strings.TrimSpace で空なら ErrValidation。Kind が空でも HoldKind の値でもなければ ErrValidation
+// （空は人の対応を待つ保留）。
 func (s *Store) HoldChallenge(ctx context.Context, ch Channel, id string, in HoldInput) (*Challenge, error) {
 	if strings.TrimSpace(in.Question) == "" {
 		return nil, ErrValidation
 	}
+	kind := HoldKindHuman
+	if in.Kind != "" {
+		k, ok := ParseHoldKind(in.Kind)
+		if !ok {
+			return nil, ErrValidation
+		}
+		kind = k
+	}
 	return s.transition(ctx, ch, id, OpHold, func(ctx context.Context, tc *transitionCtx) error {
-		return insertHold(ctx, tc, in.Question)
+		_, err := insertHoldKind(ctx, tc, in.Question, kind)
+		return err
 	})
 }
 

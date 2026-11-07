@@ -195,6 +195,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	for _, h := range d.Holds {
 		fromLabel, _ := h.FromStatus.Label()
 		fmt.Fprintf(&b, "  %s から (%s)\n", fromLabel, FormatTimestamp(h.RaisedAt))
+		if h.Kind == core.HoldKindParentDirect {
+			b.WriteString("    種類: 親が直接行う\n")
+		}
 		b.WriteString(indentLines("問い: "+h.Question, "    "))
 		if h.Answer == nil {
 			if !h.Open() {
@@ -213,6 +216,18 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 		}
 		b.WriteString(indentLines("回答: "+*h.Answer, "    "))
 		fmt.Fprintf(&b, "    回答者: %s (%s)\n", answeredBy, answeredAt)
+	}
+	if len(d.DirectCompletions) > 0 {
+		fmt.Fprintf(&b, "親が直接行った記録: %d 件\n", len(d.DirectCompletions))
+		for _, dc := range d.DirectCompletions {
+			fmt.Fprintf(&b, "  (%s)\n", FormatTimestamp(dc.CreatedAt))
+			for _, ref := range dc.Artifacts {
+				fmt.Fprintf(&b, "    成果物: %s\n", escapeControl(ref))
+			}
+			if dc.Note != nil {
+				b.WriteString(indentLines("説明: "+escapeControl(*dc.Note), "    "))
+			}
+		}
 	}
 	fmt.Fprintf(&b, "不可逆操作:    %d 件\n", len(d.Operations))
 	for _, op := range d.Operations {

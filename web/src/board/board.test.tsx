@@ -68,6 +68,7 @@ function bodies() {
     approvals: [],
     card: cc("C-2", "awaiting_plan_approval").card,
     challenge: cc("C-2", "awaiting_plan_approval"),
+    direct_completions: [],
     holds: [],
     operations: [],
     plans: [{ body: "計画の本文", created_at: "", spec: null, version: 1 }],

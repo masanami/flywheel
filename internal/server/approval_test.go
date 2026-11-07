@@ -110,7 +110,7 @@ func TestApprovalSummaryForPlan(t *testing.T) {
 		got[k] = string(v)
 	}
 	want := map[string]string{
-		"challenge_id": `"C-1"`, "title": `"title"`, "kind": `"plan"`, "done_criteria": `null`,
+		"challenge_id": `"C-1"`, "title": `"title"`, "kind": `"plan"`, "done_criteria": `null`, "direct_completion": `null`,
 		"plan": `{"body":"PLAN","version":1}`, "releases": `[]`, "other_pending_operations": `[]`, "release_held": `true`,
 		"pairs": `[]`, "stages": `{"actual":null,"expected":null,"figure":null,"issues":null,"issues_answer":null,"non_goals":null}`,
 	}

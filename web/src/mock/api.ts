@@ -82,6 +82,7 @@ export function createMockApi(
           followup_of: null,
           improvement: null,
         },
+        direct_completions: m.directCompletions,
         holds: m.holds,
         operations: m.operations,
         plans: m.plans,
@@ -141,7 +142,13 @@ export function createMockApi(
         .flatMap((w) =>
           w.items.flatMap((m) =>
             m.holds
-              .filter((h) => h.answer === null && h.closed_at === null)
+              // 種類が親が直接行うの保留は、オーナーが答える問いではない
+              .filter(
+                (h) =>
+                  h.answer === null &&
+                  h.closed_at === null &&
+                  h.kind !== "parent_direct",
+              )
               .map((h) => ({
                 challenge_id: m.c.id,
                 from_status: h.from_status,
@@ -178,6 +185,10 @@ export function createMockApi(
       return {
         approval: {
           challenge_id: id,
+          direct_completion:
+            kind === "completion"
+              ? (m.directCompletions[m.directCompletions.length - 1] ?? null)
+              : null,
           done_criteria: m.c.done_criteria === "" ? null : m.c.done_criteria,
           kind,
           other_pending_operations: m.operations
@@ -230,6 +241,7 @@ export function createMockApi(
           followup_of: null,
           improvement: null,
         },
+        direct_completions: m.directCompletions,
         holds: m.holds,
         operations: m.operations,
         plans: m.plans,

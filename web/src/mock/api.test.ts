@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { ApiClient } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
 import { createMockApi } from "./api.ts";
-import { MockStore } from "./store.ts";
+import { MockStore, graphOf } from "./store.ts";
 
 let api: ApiClient;
 beforeEach(() => {
@@ -60,5 +60,71 @@ describe("承認（偽の ① ②）", () => {
     ).toBe("conflict");
     const r = await api.approve("alpha", "C-7", s.approval.version);
     expect(r.challenge.status).toBe("done");
+  });
+});
+
+describe("親が直接行う保留（#452）", () => {
+  // 既存の課題 C-8（人間対応待ち）の開いている保留を、種類が親が直接行うにする
+  function makeParentDirect(store: MockStore) {
+    const w = store.workspaces.alpha;
+    const m = w?.items.find((i) => i.c.id === "C-8");
+    if (!w || !m) throw new Error("fixture");
+    for (const h of m.holds) h.kind = "parent_direct";
+    return { w, m };
+  }
+
+  it("status は parent_agent に出して needs_human から外し、カードは問いに答える操作を出さず、グラフの区分は parent_agent", async () => {
+    const store = new MockStore();
+    const { w } = makeParentDirect(store);
+    const a = createMockApi(store, { latencyMs: 0 });
+    const status = await a.status("alpha");
+    expect(status.parent_agent.challenges.map((c) => c.id)).toEqual(["C-8"]);
+    expect(status.parent_agent.challenges[0]?.status).toBe("awaiting_human");
+    expect(status.needs_human.challenges.map((c) => c.id)).not.toContain("C-8");
+    const card = (await a.challenges("alpha")).challenges.find(
+      (c) => c.id === "C-8",
+    );
+    expect(card?.card.state).toBe("awaiting_human");
+    expect(card?.card.next_human_actions).toEqual([]);
+    const node = graphOf(w).nodes.find((n) => n.id === "C-8");
+    expect(node?.category).toBe("parent_agent");
+    // 終わった課題・関係を持たない課題は従来どおり
+    const cats = new Map(graphOf(w).nodes.map((n) => [n.id, n.category]));
+    expect(cats.get("C-12")).toBe("done");
+    expect(cats.get("C-21")).toBe("withdrawn");
+    // オーナーが答える問いにも出ない
+    expect((await a.questions()).questions.map((x) => x.challenge_id)).toEqual(
+      [],
+    );
+  });
+
+  it("種類が人の対応を待つ保留の課題は、従来どおり needs_human と問いに出る", async () => {
+    const status = await api.status("alpha");
+    expect(status.parent_agent.challenges).toEqual([]);
+    expect(status.needs_human.challenges.map((c) => c.id)).toContain("C-8");
+  });
+
+  it("承認の ① は、直接行った記録の成果物の参照を完了条件と並べて返す", async () => {
+    const store = new MockStore();
+    const m = store.workspaces.alpha?.items.find((i) => i.c.id === "C-7");
+    if (!m) throw new Error("fixture");
+    m.directCompletions.push({
+      artifacts: ["https://example.com/result"],
+      created_at: "2026-10-12T09:00:00Z",
+      note: null,
+    });
+    const a = createMockApi(store, { latencyMs: 0 });
+    const s = await a.approvalSummary("alpha", "C-7");
+    expect(s.approval.direct_completion?.artifacts).toEqual([
+      "https://example.com/result",
+    ]);
+    expect(s.approval.done_criteria).not.toBeNull();
+    expect((await a.challenge("alpha", "C-7")).direct_completions).toHaveLength(
+      1,
+    );
+    // 記録の無い課題は null / 空
+    expect(
+      (await api.approvalSummary("alpha", "C-7")).approval.direct_completion,
+    ).toBeNull();
   });
 });

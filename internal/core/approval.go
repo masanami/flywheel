@@ -88,6 +88,9 @@ type ApprovalPreview struct {
 
 	// Kind == ApprovalKindCompletion のときだけ有効。
 	DoneCriteria string
+	// DirectCompletion は、この完了確認待ちが親が直接行った完了の記録（T17）によるときだけ非 nil。
+	// 成果物の参照を完了条件と並べて見せる（完了の検証〈J5〉は通っていない）。
+	DirectCompletion *DirectCompletion
 	// ConditionsAfterRelease は、完了確認待ちへ進めた検証（T8）が「本番反映で満たされる見込み」と
 	// 区分した達成条件（#451）。承認で本番反映されると満たされる条件として要約に出す。無ければ nil。
 	ConditionsAfterRelease []string
@@ -205,6 +208,11 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 		}
 
 		if kind == ApprovalKindCompletion {
+			dc, err := loadCurrentDirectCompletion(ctx, tx, cid)
+			if err != nil {
+				return err
+			}
+			preview.DirectCompletion = dc
 			conds, err := loadConditionsAfterRelease(ctx, tx, cid)
 			if err != nil {
 				return err
@@ -770,10 +778,11 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		}
 		holdID = id
 		var runID sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT run_id FROM hold WHERE id = ?`, id).Scan(&runID); err != nil {
+		var kind string
+		if err := tx.QueryRowContext(ctx, `SELECT run_id, kind FROM hold WHERE id = ?`, id).Scan(&runID, &kind); err != nil {
 			return "", err
 		}
-		holdOut = Hold{Question: question, FromStatus: fromStatus, RaisedAt: raisedAt}
+		holdOut = Hold{Kind: HoldKind(kind), Question: question, FromStatus: fromStatus, RaisedAt: raisedAt}
 		if runID.Valid {
 			v := formatRunID(runID.Int64)
 			holdOut.RunID = &v

@@ -345,6 +345,20 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
+		// T17（#452）: 親が直接行う保留（分類済から）にある課題の完了の記録。保留は setup が立てる。
+		name: "T17 complete-direct", command: "complete-direct", transition: tableRow("T17", core.StatusAwaitingHuman),
+		setup: func(t *testing.T, ws string) []string {
+			id := createWithStatusForCase(t, ws, "classified")
+			runJSON(t, ws, "hold", id, "--question", "q", "--kind", "parent_direct")
+			return []string{"complete-direct", id, "--artifact", "https://example.com/1", "--artifact", "o/r#2", "--note", "n"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"challenge", "C-1", "complete_direct",
+				map[string]any{"status": "awaiting_human"},
+				map[string]any{"artifacts": []any{"https://example.com/1", "o/r#2"}, "note": "n", "status": "awaiting_completion_approval", "version": 3.0}}}
+		},
+	},
+	{
 		name: "T13 approve (completion, D12 with release)", command: "approve", transition: tableRow("T13", core.StatusAwaitingCompletionApproval),
 		setup: func(t *testing.T, ws string) []string {
 			id := awaitingCompletionWithReleasesForCase(t, ws)

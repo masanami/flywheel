@@ -174,11 +174,13 @@ type Hold struct {
 	ClosedAt             *string `json:"closed_at"`
 	FromStatus           string  `json:"from_status"`
 	FromStatusLabel      string  `json:"from_status_label"`
-	Question             string  `json:"question"`
-	RaisedAt             string  `json:"raised_at"`
-	RelayQuote           *string `json:"relay_quote"`
-	RelaySession         *string `json:"relay_session"`
-	RunID                *string `json:"run_id"`
+	// Kind は保留の種類（human＝人の対応を待つ・parent_direct＝親が直接行う）。
+	Kind         string  `json:"kind"`
+	Question     string  `json:"question"`
+	RaisedAt     string  `json:"raised_at"`
+	RelayQuote   *string `json:"relay_quote"`
+	RelaySession *string `json:"relay_session"`
+	RunID        *string `json:"run_id"`
 }
 
 // FromHold は core.Hold を Hold へ変換する。
@@ -193,6 +195,7 @@ func FromHold(h core.Hold) Hold {
 		ClosedAt:             ts(h.ClosedAt),
 		FromStatus:           string(h.FromStatus),
 		FromStatusLabel:      label,
+		Kind:                 string(h.Kind),
 		Question:             h.Question,
 		RaisedAt:             FormatTimestamp(h.RaisedAt),
 		RelayQuote:           h.RelayQuote,
@@ -206,6 +209,29 @@ func FromHolds(hs []core.Hold) []Hold {
 	out := make([]Hold, 0, len(hs))
 	for _, h := range hs {
 		out = append(out, FromHold(h))
+	}
+	return out
+}
+
+// DirectCompletion は親が直接行った完了の記録の形（成果物の参照は run を介さない）。
+type DirectCompletion struct {
+	// Artifacts は成果物の参照（URL・PR・Issue コメントなど）。1 件以上。
+	Artifacts []string `json:"artifacts"`
+	CreatedAt string   `json:"created_at"`
+	// Note は短い説明。無ければ null。
+	Note *string `json:"note"`
+}
+
+// FromDirectCompletion は core.DirectCompletion を DirectCompletion へ変換する。
+func FromDirectCompletion(d core.DirectCompletion) DirectCompletion {
+	return DirectCompletion{Artifacts: append([]string{}, d.Artifacts...), CreatedAt: FormatTimestamp(d.CreatedAt), Note: d.Note}
+}
+
+// FromDirectCompletions は親が直接行った完了の記録の一覧を変換する（空でも `[]`）。
+func FromDirectCompletions(ds []core.DirectCompletion) []DirectCompletion {
+	out := make([]DirectCompletion, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, FromDirectCompletion(d))
 	}
 	return out
 }
@@ -431,6 +457,12 @@ type ChallengeHoldResponse struct {
 	Hold      Hold      `json:"hold"`
 }
 
+// ChallengeDirectCompletionResponse は complete-direct の `{"challenge": …, "direct_completion": …}`。
+type ChallengeDirectCompletionResponse struct {
+	Challenge        Challenge        `json:"challenge"`
+	DirectCompletion DirectCompletion `json:"direct_completion"`
+}
+
 // OperationResponse は op add の `{"operation": …}`。
 type OperationResponse struct {
 	Operation Operation `json:"operation"`
@@ -449,29 +481,32 @@ type ListResponse struct {
 
 // ShowResponse は `show` の成功の形。
 type ShowResponse struct {
-	Approvals     []Approval     `json:"approvals"`
-	Challenge     ShowChallenge  `json:"challenge"`
-	Holds         []Hold         `json:"holds"`
-	Operations    []Operation    `json:"operations"`
-	Pairs         []StagePair    `json:"pairs"`
-	Plans         []PlanDetail   `json:"plans"`
-	Runs          []Run          `json:"runs"`
-	SourceBinding *SourceBinding `json:"source_binding"`
-	Stages        Stages         `json:"stages"`
+	Approvals []Approval    `json:"approvals"`
+	Challenge ShowChallenge `json:"challenge"`
+	// DirectCompletions は親が直接行った完了の記録（古い順。無ければ []）。1 件以上あることが「親が直接行った」印。
+	DirectCompletions []DirectCompletion `json:"direct_completions"`
+	Holds             []Hold             `json:"holds"`
+	Operations        []Operation        `json:"operations"`
+	Pairs             []StagePair        `json:"pairs"`
+	Plans             []PlanDetail       `json:"plans"`
+	Runs              []Run              `json:"runs"`
+	SourceBinding     *SourceBinding     `json:"source_binding"`
+	Stages            Stages             `json:"stages"`
 }
 
 // FromChallengeDetail は core.ChallengeDetail を ShowResponse へ変換する。
 func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 	return ShowResponse{
-		Approvals:     FromApprovals(d.Approvals),
-		Challenge:     FromShowChallenge(d),
-		Holds:         FromHolds(d.Holds),
-		Operations:    FromOperations(d.Operations),
-		Pairs:         FromPairs(core.Pairs(d.Expected, d.Actual)),
-		Plans:         FromPlans(d.Plans),
-		Runs:          FromRuns(d.Runs),
-		SourceBinding: FromSourceBinding(d.SourceBinding),
-		Stages:        FromStages(d.StageFields, d.IssuesAnswer),
+		Approvals:         FromApprovals(d.Approvals),
+		Challenge:         FromShowChallenge(d),
+		DirectCompletions: FromDirectCompletions(d.DirectCompletions),
+		Holds:             FromHolds(d.Holds),
+		Operations:        FromOperations(d.Operations),
+		Pairs:             FromPairs(core.Pairs(d.Expected, d.Actual)),
+		Plans:             FromPlans(d.Plans),
+		Runs:              FromRuns(d.Runs),
+		SourceBinding:     FromSourceBinding(d.SourceBinding),
+		Stages:            FromStages(d.StageFields, d.IssuesAnswer),
 	}
 }
 

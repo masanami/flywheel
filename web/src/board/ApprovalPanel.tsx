@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
 import type { ApprovalSummary } from "../api/types.gen.ts";
+import { DirectCompletionView } from "./DirectCompletionView.tsx";
 import {
   ExpectedView,
   IssuesAnswerView,
@@ -175,6 +176,9 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           <h4>完了条件</h4>
           <p className="card-detail-multiline">{summary.done_criteria}</p>
         </>
+      )}
+      {completion && summary.direct_completion && (
+        <DirectCompletionView completion={summary.direct_completion} showNote />
       )}
       {summary.plan && (
         <>

@@ -8,11 +8,12 @@ import {
   type HumanKind,
 } from "../board/filter.ts";
 
-// ノードの色の区分。API の区分（human・external・done・withdrawn・system）に、システムが進めていて run が動いている
+// ノードの色の区分。API の区分（human・external・parent_agent・done・withdrawn・system）に、システムが進めていて run が動いている
 // 課題の running を足したもの。other は畳んだ親の件数の札の色にだけ使う。
 export type Category =
   | "human"
   | "external"
+  | "parent_agent"
   | "running"
   | "system"
   | "done"
@@ -23,6 +24,7 @@ export type Category =
 export const CATEGORIES: { key: Category; label: string }[] = [
   { key: "human", label: "人間の操作待ち" },
   { key: "external", label: "外部待ち" },
+  { key: "parent_agent", label: "親のエージェントが動く番" },
   { key: "running", label: "システムが実行中" },
   { key: "system", label: "システムが次に進めるもの" },
   { key: "done", label: "完了" },
@@ -40,11 +42,12 @@ export const STALE_LONG = "⚠ 更新なし（要確認）";
 export const STALE_HINT =
   "実行中だが、しきい値を超えて記録がありません。止まったとは限らず、長い委譲でも出ます";
 
-// 色の区分。人間の操作待ち・外部待ち・完了・取り下げは API の区分のまま、システムの課題は run が動いていれば running。
+// 色の区分。人間の操作待ち・外部待ち・親のエージェントが動く番・完了・取り下げは API の区分のまま、システムの課題は run が動いていれば running。
 export function categoryOf(n: GraphNode): Category {
   switch (n.category) {
     case "human":
     case "external":
+    case "parent_agent":
     case "done":
     case "withdrawn":
       return n.category;
@@ -351,8 +354,13 @@ export function seedReason(n: GraphNode): FocusReason | null {
   if (isFinished(n)) return null;
   // ① 人間の操作待ち
   if (n.next_human_actions.length > 0) return "human";
-  // ② 着手中・検証中・実行中
-  if (n.state === "in_progress" || n.state === "verifying" || n.running)
+  // ② 着手中・検証中・実行中・親のエージェントが動く番（親が直接行っている課題を「ほかの課題」に隠さない）
+  if (
+    n.state === "in_progress" ||
+    n.state === "verifying" ||
+    n.running ||
+    n.category === "parent_agent"
+  )
     return "working";
   // ③ 分類待ち・計画待ちのうち、前に出す優先度
   if (

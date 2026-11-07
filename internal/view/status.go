@@ -72,6 +72,12 @@ type StatusNeedsHuman struct {
 	Triage          []Triage          `json:"triage"`
 }
 
+// StatusParentAgent は status.parent_agent（親のエージェントが動く番）。状態は人間対応待ちのままで、
+// いま開いている保留の種類が親が直接行う課題。
+type StatusParentAgent struct {
+	Challenges []Challenge `json:"challenges"`
+}
+
 // StatusActionable は status.actionable。
 type StatusActionable struct {
 	Challenges []ActionableChallenge `json:"challenges"`
@@ -92,6 +98,7 @@ type StatusResponse struct {
 	Actionable      StatusActionable      `json:"actionable"`
 	Approved        StatusApproved        `json:"approved"`
 	NeedsHuman      StatusNeedsHuman      `json:"needs_human"`
+	ParentAgent     StatusParentAgent     `json:"parent_agent"`
 	WaitingExternal StatusWaitingExternal `json:"waiting_external"`
 }
 
@@ -129,6 +136,7 @@ func FromOverview(ov *core.Overview) StatusResponse {
 			Slots:           slots,
 			Triage:          triage,
 		},
+		ParentAgent:     StatusParentAgent{Challenges: FromChallenges(ov.ParentAgentChallenges)},
 		WaitingExternal: StatusWaitingExternal{Challenges: waiting},
 	}
 }

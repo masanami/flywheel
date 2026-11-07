@@ -5,6 +5,7 @@ export interface StatusResponse {
   actionable: StatusActionable;
   approved: StatusApproved;
   needs_human: StatusNeedsHuman;
+  parent_agent: StatusParentAgent;
   waiting_external: StatusWaitingExternal;
 }
 
@@ -112,6 +113,10 @@ export interface Triage {
   run_id: string;
 }
 
+export interface StatusParentAgent {
+  challenges: Challenge[];
+}
+
 export interface StatusWaitingExternal {
   challenges: WaitingExternal[];
 }
@@ -129,6 +134,7 @@ export interface ListResponse {
 export interface ShowResponse {
   approvals: Approval[];
   challenge: ShowChallenge;
+  direct_completions: DirectCompletion[];
   holds: Hold[];
   operations: Operation[];
   pairs: StagePair[];
@@ -187,6 +193,12 @@ export interface ImprovementKey {
   target: string;
 }
 
+export interface DirectCompletion {
+  artifacts: string[];
+  created_at: string;
+  note: string | null;
+}
+
 export interface Hold {
   answer: string | null;
   answered_at: string | null;
@@ -196,6 +208,7 @@ export interface Hold {
   closed_at: string | null;
   from_status: string;
   from_status_label: string;
+  kind: string;
   question: string;
   raised_at: string;
   relay_quote: string | null;
@@ -351,6 +364,7 @@ export interface ShowCardResponse {
   approvals: Approval[];
   card: Card;
   challenge: ShowChallenge;
+  direct_completions: DirectCompletion[];
   holds: Hold[];
   operations: Operation[];
   pairs: StagePair[];
@@ -401,6 +415,7 @@ export interface ApprovalSummaryResponse {
 
 export interface ApprovalSummary {
   challenge_id: string;
+  direct_completion: DirectCompletion | null;
   done_criteria: string | null;
   kind: string;
   other_pending_operations: ApprovalOtherOperation[];
@@ -514,6 +529,7 @@ export const DISCREPANCY_KIND_CODES = [
 export const GRAPH_CATEGORY_CODES = [
   "human",
   "external",
+  "parent_agent",
   "done",
   "withdrawn",
   "system",
