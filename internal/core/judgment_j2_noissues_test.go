@@ -21,6 +21,8 @@ type scriptedJ2Invoker struct {
 	outputs [][]byte
 	cost    *float64
 	calls   []JudgmentLaunchInput
+	// onCall が非 nil なら、i 回目（0 始まり）の起動の中で呼ぶ（起動と写像の間に起きる並行の変化を作る）。
+	onCall func(i int)
 }
 
 func (f *scriptedJ2Invoker) Available(context.Context) error { return nil }
@@ -28,6 +30,9 @@ func (f *scriptedJ2Invoker) Available(context.Context) error { return nil }
 func (f *scriptedJ2Invoker) InvokeJudgment(_ context.Context, in JudgmentLaunchInput) (JudgmentLaunchOutput, error) {
 	i := len(f.calls)
 	f.calls = append(f.calls, in)
+	if f.onCall != nil {
+		f.onCall(i)
+	}
 	if i >= len(f.outputs) {
 		i = len(f.outputs) - 1
 	}
@@ -521,15 +526,19 @@ func TestPlanAutoJ2_NoIssues_OtherMappingsDoNotAskAgain(t *testing.T) {
 	})
 }
 
-// (f) 問い直しを起動できない周（周の上限）では、1 回目の invalid_output だけが残り、
-// それが周をまたいで既存の上限（既定 2 回）に達すると、次の周は判断を起動せず保留（failure_limit）に置く。
+// (f) 問い直しを起動できない周（周の上限）では、1 回目の invalid_output だけが残り、次の周で通常の
+// 自動の対象として再試行される。連続失敗が既存の上限（既定 2 回）に達した周では、問い直しも 1 回目と
+// 同じ連続失敗の上限の検査を通るので（#469）、問い直しを起動せず保留（failure_limit）に置く。
 func TestPlanAutoJ2_NoIssues_ReaskNotStartableKeepsFirstInvalidAndHitsTheFailureLimit(t *testing.T) {
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "limit", "P1")
 	cost := 3.0
 	inv := &scriptedJ2Invoker{outputs: [][]byte{j2BigNoIssues("only")}, cost: &cost}
 	limit := f.agent.FailureLimit
-	for i := 0; i < limit; i++ {
+	if limit < 2 {
+		t.Fatalf("fixture failure limit = %d, this test needs 2 or more", limit)
+	}
+	for i := 0; i < limit-1; i++ {
 		// 周の上限 6・J2 の上限 5・1 回目の費用 3 → 問い直し（3+5 > 6）は起動できない。
 		res, err := f.s.PlanAutoJ2(context.Background(), f.input(inv, f.beginCycle(t, 6), nil))
 		if err != nil {
@@ -545,19 +554,34 @@ func TestPlanAutoJ2_NoIssues_ReaskNotStartableKeepsFirstInvalidAndHitsTheFailure
 			t.Fatalf("cycle %d: status = %s, want classified", i, st)
 		}
 	}
-	if len(inv.calls) != limit {
-		t.Fatalf("calls = %d, want %d (the re-ask never started)", len(inv.calls), limit)
+	if len(inv.calls) != limit-1 {
+		t.Fatalf("calls = %d, want %d (the re-ask never started)", len(inv.calls), limit-1)
 	}
-	res, err := f.s.PlanAutoJ2(context.Background(), f.input(inv, f.beginCycle(t, 6), nil))
+	// 上限に達する周: 1 回目の前の検査は通り（連続失敗 limit-1 回）、1 回目の invalid_output で limit 回に
+	// 達する。周の上限は十分あるが、問い直しは起動しない（#469: 起動すると上限を超える）。
+	res, err := f.s.PlanAutoJ2(context.Background(), f.input(inv, f.beginCycle(t, 300), nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inv.calls) != limit || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedFailureLimit {
-		t.Fatalf("calls=%d not started=%+v, want held by failure_limit without invoking", len(inv.calls), res.NotStarted)
+	if len(inv.calls) != limit {
+		t.Fatalf("calls = %d, want %d (the re-ask must not start past the failure limit)", len(inv.calls), limit)
+	}
+	if len(res.Items) != 1 || res.Items[0].Result != RunResultInvalidOutput {
+		t.Fatalf("items = %+v, want the first invalid_output only", res.Items)
+	}
+	if len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedFailureLimit || res.NotStarted[0].ChallengeID != ch.ID {
+		t.Fatalf("not started = %+v, want failure_limit", res.NotStarted)
 	}
 	d := f.detail(t, ch.ID)
-	if d.Status != StatusAwaitingHuman || !strings.Contains(d.Holds[len(d.Holds)-1].Question, "J2") {
-		t.Errorf("status=%s holds=%+v", d.Status, d.Holds)
+	if d.Status != StatusAwaitingHuman || len(d.Holds) != 1 || !strings.Contains(d.Holds[0].Question, "J2") {
+		t.Errorf("status=%s holds=%+v, want a failure_limit hold", d.Status, d.Holds)
+	}
+	// 保留に置いた後の周では、判断を起動しない。
+	if _, err := f.s.PlanAutoJ2(context.Background(), f.input(inv, f.beginCycle(t, 300), nil)); err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.calls) != limit {
+		t.Errorf("calls = %d after the hold, want %d", len(inv.calls), limit)
 	}
 }
 
@@ -573,6 +597,95 @@ func TestPlanAutoJ2_NoIssues_ByIDReaskNotStartableReturnsTheFirstResult(t *testi
 	}
 	if len(res.Items) != 1 || res.Items[0].Result != RunResultInvalidOutput || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedCycleBudget {
 		t.Errorf("result = %+v", res)
+	}
+}
+
+// (#469) ID を指定した個別の操作は、1 回目も連続失敗の上限の検査を通らない（§判断点の共通の規則）。
+// 問い直しも同じで、上限に達していても起動する。
+func TestPlanAutoJ2_NoIssues_ByIDReaskDoesNotApplyTheFailureLimit(t *testing.T) {
+	f := newJ2Fixture(t)
+	ch := f.newClassified(t, "byid-limit", "P1")
+	if f.agent.FailureLimit != 2 {
+		t.Fatalf("fixture failure limit = %d, this test assumes 2 (1 auto run + the by-id first run reach it)", f.agent.FailureLimit)
+	}
+	inv := &scriptedJ2Invoker{outputs: [][]byte{j2BigNoIssues("first"), j2BigNoIssues("first"), validIssuesOutput()}}
+	if _, err := f.s.PlanAutoJ2(context.Background(), f.input(inv, f.beginCycle(t, 6), nil)); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.s.PlanAutoJ2(context.Background(), f.input(inv, f.beginCycle(t, 300), idPtr(ch.ID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.calls) != 3 || len(res.Items) != 2 || res.Items[1].Outcome != string(J2VerdictIssues) {
+		t.Fatalf("calls=%d result=%+v, want the re-ask to run by id", len(inv.calls), res)
+	}
+}
+
+// (#469) ID を省略した自動の対象では、問い直しの直前にも取り込み元の状態を読み直す（1 回目の前の
+// j2StillEligibleForAuto と同じ検査）。1 回目の起動の間に取り込み元が見つからなくなったら問い直さない。
+func TestPlanAutoJ2_NoIssues_AutoReaskRechecksEligibility(t *testing.T) {
+	f := newJ2Fixture(t)
+	ch := f.newClassified(t, "reask-elig", "P1")
+	f.bind(t, ch, 7, simpleThread("UP-BODY"))
+	inv := &scriptedJ2Invoker{outputs: [][]byte{j2OutputFor(true, func(m map[string]any) {
+		m["size"] = "M"
+		m["summary"] = "first"
+	}), validIssuesOutput()}}
+	inv.onCall = func(i int) {
+		if i == 0 {
+			setBindingStateForTest(t, f.s, ch.ID, upstreamStateMissing, policyStateInPolicy)
+		}
+	}
+	res, err := f.s.PlanAutoJ2(context.Background(), f.input(inv, f.beginCycle(t, 300), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.calls) != 1 {
+		t.Fatalf("calls = %d, want 1 (the re-ask must not start for an excluded challenge)", len(inv.calls))
+	}
+	if len(res.Items) != 1 || res.Items[0].Result != RunResultInvalidOutput {
+		t.Fatalf("items = %+v", res.Items)
+	}
+	if len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedUpstreamMissing {
+		t.Fatalf("not started = %+v, want upstream_missing", res.NotStarted)
+	}
+}
+
+// (#469) 問い直しは別の run で、費用は run ごとに 1 回だけ周の消費額に入る（1 回目の費用を
+// 問い直しの run に重ねて数えない）。
+func TestPlanAutoJ2_NoIssues_ReaskCostIsCountedOncePerRun(t *testing.T) {
+	f := newJ2Fixture(t)
+	ch := f.newClassified(t, "reask-cost", "P1")
+	first, second := 1.25, 2.5
+	inv := &scriptedJ2Invoker{outputs: [][]byte{j2BigNoIssues("first"), validIssuesOutput()}}
+	inv.onCall = func(i int) {
+		if i == 0 {
+			inv.cost = &first
+		} else {
+			inv.cost = &second
+		}
+	}
+	cycleID := f.beginCycle(t, 300)
+	res, err := f.s.PlanAutoJ2(context.Background(), f.input(inv, cycleID, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.calls) != 2 || len(res.Items) != 2 {
+		t.Fatalf("calls=%d items=%+v, want the re-ask to run", len(inv.calls), res.Items)
+	}
+	runs, err := f.s.ListRuns(context.Background(), RunListOptions{ChallengeID: &ch.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("runs = %d, want 2", len(runs))
+	}
+	ended, err := f.s.EndCycle(context.Background(), cycleID, CycleResultCompleted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ended.SpentUSD != first+second {
+		t.Errorf("cycle spent = %v, want %v (each run once)", ended.SpentUSD, first+second)
 	}
 }
 

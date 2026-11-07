@@ -149,3 +149,30 @@ it("完了の承認の要約は stages の予想を位置で対にしない（pa
   expect(el.querySelectorAll("[data-pair]")).toHaveLength(0);
   expect(el.textContent).not.toContain("実物だけ");
 });
+
+// 承認の画面は計画の本文（core の formatJ2PlanBody が組み立てる）を加工せずに示す。下の本文はその形を写した
+// 手書きの値で、節の有無を決めるのは core（judgment_j2_noissues_test.go が固定）。ここでは画面が節と引用の文を
+// 落とさず示すこと・画面の側で節を足さないことを固定する（#469）。
+const PLAN_HEAD =
+  "# 計画\n\n## 対象\n\n- リポジトリ: flywheel\n- 操作: impl\n- サイズ: M\n- 複数リポジトリにまたがる: いいえ\n\n## 予算\n\n- 実装枠: 30 USD\n- レビュー対応枠: 25 USD\n\n## 完了条件\n\n完了条件の文\n";
+const NO_ISSUES_SECTION =
+  "\n## 論点を不要とした根拠\n\n1. DECISION-ONE 方式は A に決まっている\n   - 引用元: 上流のコメント\n   - 引用:\n     > QUOTE-ONE A 方式で進める\n";
+
+it("計画に論点を不要とした根拠の引用があれば、その節と引用の文を示す（#469）", async () => {
+  const el = await show(
+    summary({ plan: { body: PLAN_HEAD + NO_ISSUES_SECTION, version: 2 } }),
+  );
+  const plan = within(el).getByText(/## 論点を不要とした根拠/);
+  expect(plan.tagName).toBe("PRE");
+  expect(plan.textContent).toContain("## 論点を不要とした根拠");
+  expect(plan.textContent).toContain("DECISION-ONE 方式は A に決まっている");
+  expect(plan.textContent).toContain("引用元: 上流のコメント");
+  expect(plan.textContent).toContain("> QUOTE-ONE A 方式で進める");
+});
+
+it("計画に論点を不要とした根拠の引用が無ければ、その節を出さない（#469）", async () => {
+  const el = await show(summary({ plan: { body: PLAN_HEAD, version: 2 } }));
+  expect(within(el).getByText(/## 完了条件/).tagName).toBe("PRE");
+  expect(el.textContent).not.toContain("論点を不要とした根拠");
+  expect(el.textContent).not.toContain("QUOTE-ONE");
+});
