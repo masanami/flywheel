@@ -1,6 +1,6 @@
 import { createContext } from "react";
 
-// 課題の詳細を開く口。開発時の mock の案の画面が使う。
+// 課題の詳細を開く口。
 export const OpenDetailContext = createContext<
   ((workspace: string, id: string) => void) | null
 >(null);
@@ -12,3 +12,7 @@ export const RefreshKeyContext = createContext<unknown>(null);
 export const ScreenNavContext = createContext<((id: string) => void) | null>(
   null,
 );
+
+// ボードの 1 画面の中の表示（グラフ／ボード）。既定はグラフ。
+export type RelationView = "graph" | "board";
+export const InitialViewContext = createContext<RelationView>("graph");

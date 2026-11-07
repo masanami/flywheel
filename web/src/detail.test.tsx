@@ -118,7 +118,7 @@ function bodies(
 }
 
 async function openDetail() {
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   const card = await screen.findByTestId("card-C-1");
   fireEvent.click(within(card).getByRole("button"));

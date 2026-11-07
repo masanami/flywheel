@@ -262,6 +262,13 @@ const (
 	ActivityActionDepRm  = "dep_rm"
 )
 
+// 作業ログ（entity=challenge）の action。親子（challenge_parent）を付けた（付け替えを含む。
+// before に前の親）・外したときに残す。課題の版は上げない。
+const (
+	ActivityActionParentSet   = "parent_set"
+	ActivityActionParentClear = "parent_clear"
+)
+
 // 作業ログ（entity=challenge）の action。J6（learn）が課題の発生を分類した・
 // フォローアップの課題を起票した（followup）ときに残す。
 const (

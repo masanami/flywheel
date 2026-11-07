@@ -20,7 +20,7 @@ afterEach(() => {
 
 // 本番の画面の一覧はボードだけ。ボードを操作したときの要求と DOM を検査する（詳細のモーダルは detail.test.tsx の T12 が検査する）。
 async function operate(check: (container: HTMLElement, id: string) => void) {
-  const { container } = render(<App />);
+  const { container } = render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   await waitFor(() =>
     expect(screen.getAllByText(/alpha/).length).toBeGreaterThan(0),

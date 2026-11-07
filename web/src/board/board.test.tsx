@@ -111,13 +111,13 @@ function bodies() {
 
 async function mount() {
   const { requests } = installFakes(bodies());
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   await screen.findByText("題名C-1");
   return { requests };
 }
 
-it("既定の画面はボード: ワークスペースがエージェントの列として並び、課題がカードで出る", async () => {
+it("ボードの表示: ワークスペースがエージェントの列として並び、課題がカードで出る", async () => {
   await mount();
   const alpha = screen.getByRole("region", { name: "alpha の列" });
   expect(screen.getByRole("region", { name: "beta の列" })).toBeInTheDocument();
@@ -247,7 +247,7 @@ it("ok でないワークスペースの列には、状態とエラーが出る"
     ],
   };
   installFakes(f);
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   const alpha = await screen.findByRole("region", { name: "alpha の列" });
   expect(alpha).toHaveTextContent("store_error");
@@ -267,7 +267,7 @@ it("ok でなくなったワークスペースの列は、前に読めた課題�
     ],
   };
   installFakes(f);
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   const alpha = await screen.findByRole("region", { name: "alpha の列" });
   expect(within(alpha).queryByText("題名C-1")).toBeNull();

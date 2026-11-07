@@ -1,7 +1,6 @@
 // ブラウザ内の偽のストア。開発時の mock モードだけが読み込む（本番のビルドには入らない）。
 // 返す形は types.gen.ts と仕様の API の節に従う。状態の導出は本物では core がやるが、ここでは同じ表を写す。
 
-import type { ChallengeGraphResponse } from "../api/proposed.ts";
 import type {
   Approval,
   BudgetExhausted,
@@ -9,6 +8,7 @@ import type {
   Challenge,
   ChallengeCard,
   CycleStatus,
+  GraphResponse,
   Hold,
   Operation,
   PlanDetail,
@@ -19,7 +19,7 @@ import type {
   Workspace,
 } from "../api/types.gen.ts";
 import type { DiscrepancyKind } from "../labels.ts";
-import { seedGraphs } from "./graph.ts";
+import { type GraphSeed, seedGraphs } from "./graph.ts";
 
 export interface Flags {
   running?: boolean;
@@ -67,9 +67,8 @@ export interface MockWorkspace {
   meta: Workspace;
   items: MockChallenge[];
   cycle: CycleStatus;
-  graph: ChallengeGraphResponse;
-  // 見た目の設定の案（proposed.ts の AgentProfile）。絵文字か画像の URL、無ければ null
-  icon: string | null;
+  // 関係グラフの偽の関係（親子・依存）。応答は graphOf が課題の導出と合わせて作る
+  graph: GraphSeed;
 }
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -81,6 +80,7 @@ export const STATUS_LABEL: Record<string, string> = {
   awaiting_completion_approval: "完了確認待ち",
   done: "完了",
   awaiting_human: "人間対応待ち",
+  withdrawn: "取り下げ",
 };
 
 const T0 = Date.parse("2026-10-12T09:00:00Z");
@@ -184,11 +184,6 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
 });
 
 const LONG = `${"この値はカードに全文を出すと幅 320px の列で何行にも伸びる。".repeat(8)}\n2 行目: 外部の Issue 本文をそのまま取り込んだ想定の長い説明。`;
-
-// 画像の URL を持つアイコンの例（外へ取りに行かないよう、data URL の SVG にする）
-const BETA_ICON = `data:image/svg+xml,${encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="8" fill="#2f6fde"/><path d="M8 28 L16 14 L22 24 L26 18 L32 28 Z" fill="#fff"/></svg>',
-)}`;
 
 export function seed(): Record<string, MockWorkspace> {
   const graphs = seedGraphs();
@@ -348,6 +343,8 @@ export function seed(): Record<string, MockWorkspace> {
       description: LONG,
       done_criteria: LONG,
       context: LONG,
+      // 切り詰めた長い文章に「全文を開く」が出ることを実ブラウザで確かめるための、長い「やらないこと」
+      stages: { ...NO_STAGES, non_goals: [LONG] },
       flags: { discrepancy: ["upstream_updated", "upstream_commented"] },
     }),
     mk("C-11", "決済画面の改修", "verifying", {
@@ -413,6 +410,43 @@ export function seed(): Record<string, MockWorkspace> {
       priority: "P1",
       headline: "決済チームに返金 API の上限を問い合わせている",
     }),
+    // 取り下げた課題。動いている課題（C-18）の前提なので、既定でも灰色で出る（graph.ts）
+    mk("C-21", "旧テーブルの参照元の洗い出し", "withdrawn", {
+      priority: "P2",
+      headline: "別の調査で済んだので取り下げた",
+    }),
+    // 何ともつながらない完了の課題。既定では隠れ、「終わった課題もすべて表示」で出る
+    mk("C-22", "ログ出力の整理", "done", {
+      priority: "P3",
+      version: 4,
+      headline: "不要なログ出力を削った",
+    }),
+    // 注目の課題とどの線でもつながらない TODO（分類待ち・計画待ち）のうち、優先度が P1 以下のものは「ほかの課題」の大枠に
+    // まとまる（既定で畳む）。C-23 → C-24 の依存のまとまりごと入る。優先度が P0 の C-25 は、線が無くても大枠に入らず前に出る
+    mk("C-23", "エラーページの文言の見直し", "unclassified", {
+      priority: "P3",
+      urgency: "低",
+      description: "404 と 500 のページの文言がそっけない。",
+    }),
+    mk("C-24", "CSV 出力の文字コードの指定", "classified", {
+      priority: "P2",
+      headline: "出力時に文字コードを選べるようにする",
+    }),
+    // 人間の操作待ちの親 C-3 の子（着手中）。C-3 を開くと、大枠の見出しの右上にもチップが出る（親を開くまで中は見えない）
+    mk("C-26", "再送の重複テストの追加", "in_progress", {
+      priority: "P2",
+      headline: "冪等キーの再送が 1 通だけ届くことを確かめるテストを足す",
+    }),
+    // C-1 の子（C-2 から見て孫）。C-2 は実施中の C-5 から依存で 2 段先（C-5 → C-19 → C-2）。
+    // 注目は推移的なので、注目に当たらない子 C-1・孫 C-27 も前に出る
+    mk("C-27", "ログイン画面の文言の翻訳", "unclassified", {
+      headline: "英語の文言も同じ言い回しにそろえる",
+    }),
+    mk("C-25", "決済 API の障害の一次対応", "unclassified", {
+      priority: "P0",
+      urgency: "高",
+      description: "決済 API が断続的に 500 を返している。",
+    }),
   ];
   const beta: MockChallenge[] = [
     mk("C-1", "レポートの CSV 出力", "classified", {
@@ -452,7 +486,6 @@ export function seed(): Record<string, MockWorkspace> {
         last_result: "completed",
       },
       graph: graphs.alpha,
-      icon: "🚀",
     },
     beta: {
       meta: ok("beta"),
@@ -464,7 +497,6 @@ export function seed(): Record<string, MockWorkspace> {
         last_result: "completed",
       },
       graph: graphs.beta,
-      icon: BETA_ICON,
     },
     gamma: {
       meta: {
@@ -480,8 +512,7 @@ export function seed(): Record<string, MockWorkspace> {
         last_ended_at: null,
         last_result: null,
       },
-      graph: { relations: [], repos: [], waiting_party: [] },
-      icon: null,
+      graph: { parents: {}, deps: [] },
     },
   };
 }
@@ -528,6 +559,52 @@ export function cardOf(m: MockChallenge): Card {
     slot_ids: f.slot ? [f.slot.slot_id] : [],
     state: s,
   };
+}
+
+// `GET …/graph` の偽の応答。区分・running・stale は課題のカードの導出と同じ規則（人間 > 完了 > 取り下げ > システム。
+// 外部待ちは core から出ない）。登録の日時は 2026-10-10T00:00:00Z からの経過分。
+export function graphOf(w: MockWorkspace): GraphResponse {
+  const byId = new Map(w.items.map((m) => [m.c.id, m]));
+  const idNum = (id: string) => Number(id.replace(/^\D+/, ""));
+  const nodes = [...w.items]
+    .sort((a, b) => idNum(a.c.id) - idNum(b.c.id))
+    .map((m) => {
+      const card = cardOf(m);
+      const category =
+        card.next_human_actions.length > 0
+          ? "human"
+          : m.c.status === "done"
+            ? "done"
+            : m.c.status === "withdrawn"
+              ? "withdrawn"
+              : "system";
+      return {
+        category,
+        context: m.context,
+        headline: m.headline,
+        id: m.c.id,
+        next_human_actions: card.next_human_actions,
+        parent_id: w.graph.parents[m.c.id] ?? null,
+        priority: m.c.priority,
+        running: !!(m.flags.running || m.flags.unresponsive),
+        stale: !!m.flags.unresponsive,
+        state: card.state,
+        title: m.c.title,
+      };
+    });
+  const edges = [...w.graph.deps]
+    .sort((a, b) => idNum(a.from) - idNum(b.from) || idNum(a.to) - idNum(b.to))
+    .map((d) => ({
+      from: d.from,
+      kind: d.kind,
+      registered_at: new Date(
+        Date.parse("2026-10-10T00:00:00Z") + d.minutes * 60_000,
+      ).toISOString(),
+      registered_via: d.via,
+      satisfied: byId.get(d.from)?.c.status === "done",
+      to: d.to,
+    }));
+  return { edges, nodes };
 }
 
 export const toCard = (m: MockChallenge): ChallengeCard => ({

@@ -13,3 +13,6 @@ coverage.out
 # UI のビルド成果物（go:embed が読む）。.gitkeep だけ追跡し、成果物は追跡しない
 /internal/server/dist/*
 !/internal/server/dist/.gitkeep
+# UI のブラウザの E2E の成果物（Playwright）
+/web/test-results/
+/web/playwright-report/

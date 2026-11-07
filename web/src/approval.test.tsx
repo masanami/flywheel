@@ -139,7 +139,7 @@ function setup(
 }
 
 async function open() {
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   const c = await screen.findByTestId("card-C-1");
   fireEvent.click(within(c).getByRole("button"));

@@ -48,6 +48,51 @@ const (
 // J2VerdictValues は J2Verdict の全値。
 var J2VerdictValues = []J2Verdict{J2VerdictPlan, J2VerdictUncertain, J2VerdictIssues}
 
+// J2SourceKind は J2 の「論点は不要」の決定が引用した元の種別（J2 が読む区画に対応する閉集合）。
+type J2SourceKind string
+
+// J2SourceKind の値。
+const (
+	J2SourceKindChallenge       J2SourceKind = "challenge"
+	J2SourceKindUpstreamIssue   J2SourceKind = "upstream_issue"
+	J2SourceKindUpstreamComment J2SourceKind = "upstream_comment"
+	J2SourceKindReferencedIssue J2SourceKind = "referenced_issue"
+	J2SourceKindHoldRecord      J2SourceKind = "hold_record"
+)
+
+// J2SourceKindValues は J2SourceKind の全値。
+var J2SourceKindValues = []J2SourceKind{
+	J2SourceKindChallenge, J2SourceKindUpstreamIssue, J2SourceKindUpstreamComment,
+	J2SourceKindReferencedIssue, J2SourceKindHoldRecord,
+}
+
+// valid は k が閉集合の値か（前後の空白も許さない）。
+func (k J2SourceKind) valid() bool {
+	for _, v := range J2SourceKindValues {
+		if k == v {
+			return true
+		}
+	}
+	return false
+}
+
+// sectionLabel は k が指す J2 の入力の区画の名前（計画の本文で人が読む引用元の名前になる）。
+func (k J2SourceKind) sectionLabel() string {
+	switch k {
+	case J2SourceKindChallenge:
+		return labelChallenge
+	case J2SourceKindUpstreamIssue:
+		return labelUpstreamIssue
+	case J2SourceKindUpstreamComment:
+		return labelUpstreamComments
+	case J2SourceKindReferencedIssue:
+		return labelUpstreamRefs
+	case J2SourceKindHoldRecord:
+		return labelHoldRecord
+	}
+	return ""
+}
+
 // JudgmentSize は J1・J2 が出すサイズ案の閉集合（S|M|L。
 // .flywheel/agent.json の size_budgets_usd のキーと同じ3文字だが、後者は
 // 設定のキー、前者は判断点の出力値であり関心事が異なる）。
@@ -182,6 +227,9 @@ func AllJudgmentOutputClosedValues() []string {
 		vals = append(vals, string(v))
 	}
 	for _, v := range JudgmentSizeValues {
+		vals = append(vals, string(v))
+	}
+	for _, v := range J2SourceKindValues {
 		vals = append(vals, string(v))
 	}
 	for _, v := range J4DecisionValues {

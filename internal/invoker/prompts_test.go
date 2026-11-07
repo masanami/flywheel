@@ -1,6 +1,7 @@
 package invoker
 
 import (
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -94,6 +95,28 @@ func TestCheckPromptSizes_RealEmbedIsWithinLimits(t *testing.T) {
 	}
 }
 
+// j2HeadroomBytes は J2 の指示文に残しておく余り（バイト）。新しい規則を足す
+// 課題（例: #460）が上限に当たって止まらないよう、実物の j2.md が上限より
+// この値以上小さいことを固定する（#462）。
+const j2HeadroomBytes = 300
+
+// TestJ2Prompt_HasHeadroomBelowLimit は、埋め込みの j2.md のバイト数が J2 の
+// 上限より j2HeadroomBytes 以上小さいことを検証する（#462）。
+func TestJ2Prompt_HasHeadroomBelowLimit(t *testing.T) {
+	fsys, err := promptsSubFS()
+	if err != nil {
+		t.Fatalf("promptsSubFS(): %v", err)
+	}
+	info, err := fs.Stat(fsys, "j2.md")
+	if err != nil {
+		t.Fatalf("fs.Stat(j2.md): %v", err)
+	}
+	limit := judgmentPromptLimit["j2.md"]
+	if headroom := int64(limit) - info.Size(); headroom < j2HeadroomBytes {
+		t.Errorf("j2.md is %d bytes, limit %d bytes: headroom %d bytes, want >= %d", info.Size(), limit, headroom, j2HeadroomBytes)
+	}
+}
+
 // TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails は AC「上限を1バイト
 // 超えるフィクスチャで失敗することも検証する」を、J1〜J5 の5ファイルすべての
 // 上限で固定する（三角測量: ちょうど上限は通り、+1バイトで落ちることの両方を
@@ -101,12 +124,12 @@ func TestCheckPromptSizes_RealEmbedIsWithinLimits(t *testing.T) {
 //
 // self-review 指摘（round1, code-reviewer CONFIRMED）: 当初は J1（4096バイト）
 // の境界だけを検証しており、judgmentPromptLimit の J2〜J5 の値
-// （8192・8192・4096・6144）を緩めても検出するテストが無かった。5ファイル
+// （当時 8192・8192・4096・6144。J2 は #462 で 12288）を緩めても検出するテストが無かった。5ファイル
 // 分をテーブル駆動で回す形に直した。
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
 		"j1.md": 4096,
-		"j2.md": 8192,
+		"j2.md": 12288,
 		"j3.md": 8192,
 		"j4.md": 4096,
 		"j5.md": 6144,
@@ -433,5 +456,50 @@ func TestInstructions_J5DescribesTheTwoConditionCategories(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J5) lacks %q", want)
 		}
+	}
+}
+
+// #450: j2.md は、中以上で論点の記録が無いとき計画ではなく論点を選ぶ確認の段（判断の前）と、
+// 論点不要を返す条件（決まっていることごとの引用）、問い直しの区画、出力の型の説明の行を持つ。
+func TestInstructions_J2AsksForQuotesBeforeSkippingIssues(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirm := strings.Index(got, "## 判断の前の確認")
+	judge := strings.Index(got, "## 判断\n")
+	if confirm < 0 || judge < 0 || confirm > judge {
+		t.Fatalf("the confirmation step must come before the judgment section: %d %d", confirm, judge)
+	}
+	step := got[confirm:judge]
+	for _, want := range []string{
+		"区画「論点と回答」が無く、見込みのサイズが中以上なら、1 は選ばず 3 を選ぶ",
+		"決まったことすべてを区画の文で引用できるときだけ、1 に論点不要（no_issues_needed）と引用を付けてよい",
+		"引用できない決定が 1 つでもあれば 3 を選ぶ",
+	} {
+		if !strings.Contains(step, want) {
+			t.Errorf("the confirmation step lacks %q", want)
+		}
+	}
+	// 1 の項目に論点不要の意味、読むものに問い直しの区画、出力の型の説明の行にサイズと記録の関係。
+	var item, shape string
+	for _, l := range strings.Split(got, "\n") {
+		switch {
+		case strings.Contains(l, "- 論点不要（no_issues_needed）:"):
+			item = l
+		case strings.Contains(l, "出力の形式（どの項目にどんな値を入れるか）"):
+			shape = l
+		}
+	}
+	for _, want := range []string{"確認の条件を満たすときだけ", "中身・引用元の種別", "引用の文"} {
+		if !strings.Contains(item, want) {
+			t.Errorf("the item of no_issues_needed lacks %q", want)
+		}
+	}
+	if !strings.Contains(shape, "計画のサイズが中・大なら、論点の記録（区画「論点と回答」）か論点不要の引用が要る") {
+		t.Errorf("the line about the output shape lacks the size rule: %q", shape)
+	}
+	if !strings.Contains(got, "- 「問い直し」:") {
+		t.Error("the reading list lacks the re-ask section")
 	}
 }

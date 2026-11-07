@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.ts";
-import { ApiError } from "../api/proposed.ts";
+import { ApiError } from "../api/error.ts";
 import type { ApprovalSummary } from "../api/types.gen.ts";
 import {
   ExpectedView,

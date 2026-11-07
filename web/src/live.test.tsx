@@ -15,7 +15,7 @@ afterEach(() => {
 
 async function mounted() {
   const { requests } = installFakes();
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   await waitFor(() => expect(screen.getByText(/alpha/)).toBeInTheDocument());
   return requests;
@@ -137,7 +137,7 @@ it("fleet の集約の取得に失敗しても、一覧と各ワークスペー�
     Object.entries(fixtures()).filter(([k]) => k !== "/api/v1/needs-human"),
   );
   installFakes(b);
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   await waitFor(() => expect(screen.getByText(/alpha/)).toBeInTheDocument());
   await waitFor(() =>
@@ -150,7 +150,7 @@ it("GET …/cycle だけが失敗しても、その列の課題の表示は残�
   b["/api/v1/workspaces/alpha/cycle"] = () =>
     new Response("{}", { status: 500 });
   installFakes(b);
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   const beta = await screen.findByRole("region", { name: "beta の列" });
   await waitFor(() =>
@@ -170,7 +170,7 @@ it("読めないワークスペースの列には見出しを出さない", asyn
     ],
   };
   installFakes(b);
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   const gamma = await screen.findByRole("region", { name: "gamma の列" });
   await waitFor(() =>
@@ -246,7 +246,7 @@ it("AC-206c: 取り直した cycle が running→stale なら見出しが「更�
     );
   };
   installFakes(b);
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   const alpha = await screen.findByRole("region", { name: "alpha の列" });
   await waitFor(() =>
@@ -302,7 +302,7 @@ it("AC-206c: 取り直した challenges の card.modifiers に unresponsive が�
     );
   };
   installFakes(b);
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   const alpha = await screen.findByRole("region", { name: "alpha の列" });
   await waitFor(() => expect(alpha).toHaveTextContent("題名C-1"));

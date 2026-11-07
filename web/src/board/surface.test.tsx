@@ -157,7 +157,7 @@ function bodies() {
 
 async function mount() {
   const { requests } = installFakes(bodies());
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   await screen.findByText("題名C-1");
   return { requests };
@@ -266,7 +266,7 @@ it("M4.5 AC-196: 依存先（満たされている・待っている）を持つ
     ],
   };
   installFakes(f);
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   await screen.findByText("題名C-1");
   const strip = screen.getByRole("region", { name: "人間待ちの帯" });
@@ -359,7 +359,7 @@ it("AC-206: UI は全画面を操作しても（全カードの詳細・全区�
       ],
     };
     const { requests } = installFakes(f);
-    render(<App />);
+    render(<App initialView="board" />);
     act(() => FakeEventSource.latest.open());
     await screen.findByText("題名C-1");
     Object.defineProperty(document, "visibilityState", {
@@ -449,7 +449,7 @@ it("集約から除かれたワークスペースは、読み取れなかった�
     workspaces: [],
   };
   installFakes(f);
-  render(<App />);
+  render(<App initialView="board" />);
   act(() => FakeEventSource.latest.open());
   const note = await screen.findByTestId("unreadable-workspaces");
   expect(note).toHaveTextContent("gamma");

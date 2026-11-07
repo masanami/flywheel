@@ -2,7 +2,7 @@
 // 失敗は本物と同じエラーコード（ApiError）で返し、画面の失敗表示を確かめられるようにする。
 
 import type { ApiClient } from "../api/client.ts";
-import { ApiError } from "../api/proposed.ts";
+import { ApiError } from "../api/error.ts";
 import type {
   ApprovalSummaryResponse,
   CycleStarted,
@@ -19,6 +19,7 @@ import {
   type MockWorkspace,
   STATUS_LABEL,
   cardOf,
+  graphOf,
   pairsOf,
   statusOf,
   toCard,
@@ -244,16 +245,7 @@ export function createMockApi(
     },
     async challengeGraph(name) {
       await wait();
-      return wsOf(name).graph;
-    },
-    async agentProfiles() {
-      await wait();
-      return {
-        agents: Object.values(store.workspaces).map((w) => ({
-          name: w.meta.name,
-          icon: w.icon,
-        })),
-      };
+      return graphOf(wsOf(name));
     },
   };
   return api;
