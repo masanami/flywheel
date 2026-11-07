@@ -950,6 +950,7 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`INSERT INTO challenge (title, status, reporter, created_at, updated_at) VALUES ('c2 "quoted" <&>', 'unclassified', 'tester', ?, ?)`, []any{at, at}},
 			{`INSERT INTO challenge_dependency (challenge_id, depends_on_id, created_at) VALUES (2, 1, ?)`, []any{at}},
 			{`INSERT INTO challenge_parent (challenge_id, parent_id, created_at) VALUES (2, 1, ?)`, []any{at}},
+			{`INSERT INTO challenge_conflict (challenge_id, conflicts_with_id, directed, created_at) VALUES (2, 1, 1, ?)`, []any{at}},
 			{`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (1, 1, 'plan', ?, '{"size":"M"}')`, []any{at}},
 			{`INSERT INTO source_binding (challenge_id, source_id, external_key, url, fingerprint, upstream_state, policy_state, created_at, updated_at)
 			  VALUES (1, 'src', 'o/r#1', 'https://example.test/1', 'fp', 'open', 'in_policy', ?, ?)`, []any{at, at}},

@@ -143,10 +143,12 @@ export const humanActionLabels = (n: GraphNode): string[] =>
   humanChips(n).map((c) => c.label);
 
 export type DependencyBasis = "prerequisite" | "conflict";
-export type RelationKind = "depends_on" | "parent_of";
+export type RelationKind = "depends_on" | "parent_of" | "conflicts_with";
 
 // 課題どうしの関係 1 本。depends_on は from が先行・to が後続（edge に登録の記録を持つ）、
-// parent_of は from が親・to が子。
+// parent_of は from が親・to が子。conflicts_with は衝突の予測の結果で、前提とは向きが逆: from が後回しにした課題・
+// to が先に委譲した課題（edge.directed が false の組は向きが無く、from は ID の小さい側）。衝突は先行・後続に数えない
+// （どちらも相手を待たない前提ではなく、順に走らせるための記録）。
 export interface ChallengeRelation {
   from: string;
   kind: RelationKind;
@@ -161,7 +163,12 @@ export function relationsOf(g: GraphResponse): ChallengeRelation[] {
     if (n.parent_id !== null)
       rels.push({ from: n.parent_id, kind: "parent_of", to: n.id });
   for (const e of g.edges)
-    rels.push({ from: e.from, kind: "depends_on", to: e.to, edge: e });
+    rels.push({
+      from: e.from,
+      kind: e.kind === "conflict" ? "conflicts_with" : "depends_on",
+      to: e.to,
+      edge: e,
+    });
   return rels;
 }
 
@@ -235,6 +242,28 @@ export function neighborsOf(id: string, relations: ChallengeRelation[]) {
     parents: pick("parent_of", "from"),
     children: pick("parent_of", "to"),
   };
+}
+
+export type ConflictNoteKind = "yields" | "preferred" | "undirected";
+export interface ConflictNote {
+  kind: ConflictNoteKind;
+  id: string;
+}
+
+// 課題 id の衝突の相手を、id から見た役割で返す（相手の ID の順）。yields＝id が相手に譲って後回しにした、
+// preferred＝相手が id に譲った（id が先に委譲された）、undirected＝向きがまだ決まっていない。
+export function conflictNotesOf(
+  id: string,
+  relations: ChallengeRelation[],
+): ConflictNote[] {
+  const out: ConflictNote[] = [];
+  for (const r of relations) {
+    if (r.kind !== "conflicts_with" || (r.from !== id && r.to !== id)) continue;
+    const other = r.from === id ? r.to : r.from;
+    if (r.edge?.directed === false) out.push({ kind: "undirected", id: other });
+    else out.push({ kind: r.from === id ? "yields" : "preferred", id: other });
+  }
+  return out.sort((a, b) => compareIds(a.id, b.id));
 }
 
 // --- 親子の入れ子（親課題の大枠の中に子課題を置く。親子は線で結ばない） ---
@@ -496,6 +525,8 @@ export interface LayoutEdge {
   // この線が表す依存（畳んだ親へつなぎ替えると複数になる）。理由と種類はここから引く
   relations: ChallengeRelation[];
   basis: DependencyBasis;
+  // 線に向きがあるか（矢じりを付けるか）。前提は常に true。向きの無い衝突だけ false
+  directed: boolean;
 }
 
 export interface Layout {
@@ -532,6 +563,57 @@ interface Arranged {
   labelY: number | null;
 }
 
+// 線の幾何。前提は先行（上）の下端から後続（下）の上端へ。制御点が両端から対称なので、t = 0.5 の点は両端の中点。
+interface Geometry {
+  path: string;
+  mid: { x: number; y: number };
+}
+
+function prerequisiteGeometry(ba: LayoutBox, bb: LayoutBox, d: Dims): Geometry {
+  const x1 = ba.x + ba.w / 2;
+  const y1 = ba.y + ba.h;
+  const x2 = bb.x + bb.w / 2;
+  const y2 = bb.y;
+  const bend = Math.max(d.gapY / 2, Math.abs(y2 - y1) / 2);
+  return {
+    path: `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`,
+    mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+  };
+}
+
+// 衝突の線は後回しの箱 ba から先に委譲の箱 bb へ引く（矢じりは bb 側。前提と向きが逆）。層を決めないので、
+// bb が上・下・同じ段のどこにあってもよい: 上下に離れていれば向かい合う上端と下端、同じ段なら向かい合う側面をつなぐ。
+function conflictGeometry(ba: LayoutBox, bb: LayoutBox, d: Dims): Geometry {
+  const aCx = ba.x + ba.w / 2;
+  const bCx = bb.x + bb.w / 2;
+  if (ba.y + ba.h <= bb.y) {
+    const [x1, y1, x2, y2] = [aCx, ba.y + ba.h, bCx, bb.y];
+    const bend = Math.max(d.gapY / 2, Math.abs(y2 - y1) / 2);
+    return {
+      path: `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`,
+      mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+    };
+  }
+  if (bb.y + bb.h <= ba.y) {
+    const [x1, y1, x2, y2] = [aCx, ba.y, bCx, bb.y + bb.h];
+    const bend = Math.max(d.gapY / 2, Math.abs(y2 - y1) / 2);
+    return {
+      path: `M ${x1} ${y1} C ${x1} ${y1 - bend}, ${x2} ${y2 + bend}, ${x2} ${y2}`,
+      mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+    };
+  }
+  const right = aCx <= bCx;
+  const x1 = right ? ba.x + ba.w : ba.x;
+  const x2 = right ? bb.x : bb.x + bb.w;
+  const y1 = ba.y + ba.h / 2;
+  const y2 = bb.y + bb.h / 2;
+  const bend = Math.max(d.gapX / 2, Math.abs(x2 - x1) / 2) * (right ? 1 : -1);
+  return {
+    path: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
+    mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+  };
+}
+
 // expanded は開いている親の集合。ここに無い親は畳んで 1 つの箱にする。
 // headOf は開いた親ごとの見出しの高さ（無ければ d.headH）。大枠の幅は見出しの高さに左右されない。
 export function layoutGraph(
@@ -554,6 +636,9 @@ export function layoutGraph(
   const pm = parentMap(new Set(order), rels);
   const kids = childrenMap(pm);
   const deps = rels.filter((r) => r.kind === "depends_on");
+  // 衝突は層を決めない（前提の線と合わせても循環にならない）。線を持つ課題として数え、線だけを描く
+  const conflicts = rels.filter((r) => r.kind === "conflicts_with");
+  const links = [...deps, ...conflicts];
   let hasCycle = false;
 
   // 大枠 container（null は一番外）の直接の中身のうち、課題 id を含むもの。
@@ -605,9 +690,17 @@ export function layoutGraph(
       linked.add(b);
       for (const a of ps) linked.add(a);
     }
+    for (const r of conflicts) {
+      const a = memberIn(r.from, container);
+      const b = memberIn(r.to, container);
+      if (a && b && a !== b) {
+        linked.add(a);
+        linked.add(b);
+      }
+    }
     // 「ほかの課題」の大枠との間だけに依存を持つ課題も、関係の無い課題ではない（線を持つ）
     if (container === null)
-      for (const r of deps) {
+      for (const r of links) {
         const a = memberIn(r.from, null);
         const b = memberIn(r.to, null);
         if (a && !b && otherSet.has(r.to)) linked.add(a);
@@ -792,7 +885,7 @@ export function layoutGraph(
       : visibleBoxOf(id, pm, expanded);
   const seen = new Map<string, LayoutEdge>();
   const edges: LayoutEdge[] = [];
-  for (const r of deps) {
+  for (const r of links) {
     const a = boxOf(r.from);
     const b = boxOf(r.to);
     // 同じ箱の中・自分の大枠との依存は線にしない（入れ子の位置で読める）
@@ -802,29 +895,31 @@ export function layoutGraph(
       ancestorsOf(b, pm).includes(a)
     )
       continue;
-    const key = `${a}:${b}`;
+    const conflict = r.kind === "conflicts_with";
+    const directed = !conflict || r.edge?.directed !== false;
+    // 前提の線と衝突の線は、同じ箱の組でも別の線にする
+    const key = `${conflict ? "conflict:" : ""}${a}:${b}`;
     const merged = seen.get(key);
     if (merged) {
       merged.relations.push(r);
       merged.basis = basisOf(merged.relations);
+      merged.directed = merged.directed && directed;
       continue;
     }
     const ba = at.get(a);
     const bb = at.get(b);
     if (!ba || !bb) continue;
-    const x1 = ba.x + ba.w / 2;
-    const y1 = ba.y + ba.h;
-    const x2 = bb.x + bb.w / 2;
-    const y2 = bb.y;
-    const bend = Math.max(d.gapY / 2, Math.abs(y2 - y1) / 2);
+    const geo = conflict
+      ? conflictGeometry(ba, bb, d)
+      : prerequisiteGeometry(ba, bb, d);
     const edge: LayoutEdge = {
       from: a,
       to: b,
-      path: `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`,
-      // 制御点が両端から対称なので、t = 0.5 の点は両端の中点
-      mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+      path: geo.path,
+      mid: geo.mid,
       relations: [r],
       basis: basisOf([r]),
+      directed,
     };
     seen.set(key, edge);
     edges.push(edge);
@@ -851,7 +946,9 @@ export function clip(s: string, n: number): string {
 
 // 依存 1 つの種類。API の kind が conflict のときだけ衝突、それ以外は先行の成果を使う。
 export const basisOfRelation = (r: ChallengeRelation): DependencyBasis =>
-  r.edge?.kind === "conflict" ? "conflict" : "prerequisite";
+  r.kind === "conflicts_with" || r.edge?.kind === "conflict"
+    ? "conflict"
+    : "prerequisite";
 
 // 線が表す依存の種類。1 つでも先行の成果を使う依存があれば、終わらないと始められない線として描く。
 // すべてが衝突のための順番なら、衝突の線として描く。
@@ -889,6 +986,13 @@ export function shortAt(at: string): string {
 export function reasonDetail(r: ChallengeRelation): string {
   const e = r.edge;
   if (!e) return "";
+  // 衝突は予測の結果から core が記録する。満たされているかは持たない（片方が終われば線ごと消える）
+  if (r.kind === "conflicts_with")
+    return `衝突の予測で記録（${shortAt(e.registered_at)}）。${
+      e.directed
+        ? `${r.from} を後回しにして ${r.to} を先に委譲`
+        : "どちらを先にするかはまだ決まっていない"
+    }`;
   return `${VIA_LABELS[e.registered_via] ?? VIA_LABELS.unknown}（${shortAt(e.registered_at)}）。${e.satisfied ? "満たされている" : "まだ満たされていない"}`;
 }
 
@@ -904,6 +1008,13 @@ export function chipLines(r: ChallengeRelation): [string, string] {
   const e = r.edge;
   const kind = BASIS_LABELS[basisOfRelation(r)];
   if (!e) return [kind, ""];
+  if (r.kind === "conflicts_with")
+    return [
+      kind,
+      `${
+        e.directed ? `${r.from} は ${r.to} の後に回す` : "向きは未定"
+      }・予測・${shortAt(e.registered_at)}`,
+    ];
   return [
     kind,
     `${VIA_SHORT[e.registered_via] ?? VIA_SHORT.unknown}・${shortAt(e.registered_at)}・${e.satisfied ? "満たされている" : "満たされていない"}`,

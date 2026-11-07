@@ -27,6 +27,7 @@ import {
   childrenMap,
   clip,
   compareIds,
+  conflictNotesOf,
   descendantsOf,
   downstreamOf,
   layoutGraph,
@@ -254,6 +255,10 @@ export function GraphView({
   const selEdge = edgeOf(selectedEdge);
   const up = new Set(sel ? upstreamOf(sel, shownRels) : []);
   const down = new Set(sel ? downstreamOf(sel, shownRels) : []);
+  // 選んだ課題と衝突する課題（後回し・先に委譲・向きの無い組のすべて）。衝突の線もいっしょに濃くする
+  const peers = new Set(
+    sel ? conflictNotesOf(sel, shownRels).map((n) => n.id) : [],
+  );
   const ancestors = new Set(sel ? ancestorsOf(sel, pm) : []);
   const inner = new Set(sel ? descendantsOf(sel, kids) : []);
 
@@ -279,6 +284,7 @@ export function GraphView({
         id === sel ||
         up.has(id) ||
         down.has(id) ||
+        peers.has(id) ||
         ancestors.has(id) ||
         inner.has(id);
   const matches = (id: string) => {
@@ -297,6 +303,7 @@ export function GraphView({
     if (down.has(id)) return "downstream";
     if (up.has(id)) return "upstream";
     if (ancestors.has(id) || inner.has(id)) return "family";
+    if (peers.has(id)) return "conflict";
     return undefined;
   };
   const inside = (id: string): Inside | null => {

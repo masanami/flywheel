@@ -53,7 +53,9 @@ export type Dimensions = Dims & {
   calloutLines: number;
 };
 
-export const edgeKey = (e: { from: string; to: string }) => `${e.from}:${e.to}`;
+// 前提の線と衝突の線は、同じ箱の組でも別の線なので、鍵も分ける
+export const edgeKey = (e: { from: string; to: string; basis?: string }) =>
+  `${e.basis === "conflict" ? "conflict:" : ""}${e.from}:${e.to}`;
 
 export interface CanvasProps {
   ws: string;
@@ -137,7 +139,9 @@ export function edgeName(e: LayoutEdge): string {
         : reasonText(r),
     )
     .join("／");
-  return `依存 ${name(e.from)} → ${name(e.to)}（${why}）`;
+  // 向きの無い衝突は矢印でなく線で結ぶ（どちらが先かまだ決まっていない）
+  const arrow = e.directed ? "→" : "—";
+  return `依存 ${name(e.from)} ${arrow} ${name(e.to)}（${why}）`;
 }
 
 // 重ねた・移った課題の一言での吹き出し。箱の下（入らなければ上）に置き、画面の幅に収める。
@@ -940,6 +944,7 @@ export function GraphCanvas(p: CanvasProps) {
               data-from={e.from}
               data-to={e.to}
               data-basis={e.basis}
+              data-directed={e.directed}
               data-lit={lit || undefined}
               data-dim={
                 (focus && !lit) ||
@@ -948,7 +953,11 @@ export function GraphCanvas(p: CanvasProps) {
                 undefined
               }
               markerEnd={
-                conflict ? "url(#graph-arrow-conflict)" : "url(#graph-arrow)"
+                !e.directed
+                  ? undefined
+                  : conflict
+                    ? "url(#graph-arrow-conflict)"
+                    : "url(#graph-arrow)"
               }
             />
             {/* 細い線は押しにくいので、太い透明な線を重ねて当たり判定にする */}

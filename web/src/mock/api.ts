@@ -23,6 +23,7 @@ import {
   pairsOf,
   statusOf,
   toCard,
+  waitingOf,
 } from "./store.ts";
 
 export interface MockOptions {
@@ -89,6 +90,7 @@ export function createMockApi(
         pairs: pairsOf(m.stages),
         source_binding: null,
         stages: m.stages,
+        waiting: waitingOf(wsOf(name), id),
       };
     },
     async log(name, id): Promise<LogResponse> {
@@ -237,6 +239,7 @@ export function createMockApi(
         pairs: pairsOf(m.stages),
         source_binding: null,
         stages: m.stages,
+        waiting: waitingOf(wsOf(name), id),
       };
     },
     async cycle(name) {
