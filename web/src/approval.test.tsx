@@ -72,6 +72,8 @@ function summary(over: Partial<ApprovalSummary> = {}): {
   return {
     approval: {
       challenge_id: "C-1",
+      conditions_after_release: [],
+      conditions_after_release_heading: "",
       direct_completion: null,
       done_criteria: "完了条件の本文",
       kind: "completion",

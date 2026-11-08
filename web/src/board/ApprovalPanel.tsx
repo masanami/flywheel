@@ -196,6 +196,16 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           {non_goals !== null && <NonGoalsView nonGoals={non_goals} />}
         </div>
       )}
+      {completion && summary.conditions_after_release.length > 0 && (
+        <div data-testid="approval-conditions-after-release">
+          <h4>{summary.conditions_after_release_heading}</h4>
+          <ul>
+            {summary.conditions_after_release.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {completion && summary.pairs.length > 0 && (
         <div data-testid="approval-pairs">
           <PairsView pairs={summary.pairs} />
