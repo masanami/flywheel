@@ -60,6 +60,8 @@ export interface MockChallenge {
   holds: Hold[];
   // 親が直接行った完了の記録（無ければ空）
   directCompletions: DirectCompletion[];
+  // 完了確認待ちの検証が「本番反映で満たされる見込み」と区分した条件（無ければ空）
+  conditionsAfterRelease: string[];
   operations: Operation[];
   plans: PlanDetail[];
   approvals: Approval[];
@@ -101,6 +103,7 @@ function mk(
     context,
     holds,
     directCompletions,
+    conditionsAfterRelease,
     operations,
     plans,
     approvals,
@@ -132,6 +135,7 @@ function mk(
     context: context ?? null,
     holds: holds ?? [],
     directCompletions: directCompletions ?? [],
+    conditionsAfterRelease: conditionsAfterRelease ?? [],
     operations: operations ?? [],
     plans: plans ?? [],
     approvals: approvals ?? [],
@@ -273,6 +277,7 @@ export function seed(): Record<string, MockWorkspace> {
       version: 4,
       description: "端数の丸めが請求書とずれる。",
       done_criteria: "請求書の金額と画面の金額が全件一致する。",
+      conditionsAfterRelease: ["本番の料金表の画面で、請求書と同じ金額が出る"],
       headline: "料金表の丸めを請求書とそろえる",
       context: "月次請求の締め前に必要。経理の突合作業が減る。",
       stages: {

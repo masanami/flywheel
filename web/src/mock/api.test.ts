@@ -55,6 +55,12 @@ describe("承認（偽の ① ②）", () => {
     const s = await api.approvalSummary("alpha", "C-7");
     expect(s.approval.kind).toBe("completion");
     expect(s.approval.release_held).toBe(true);
+    expect(s.approval.conditions_after_release).toEqual([
+      "本番の料金表の画面で、請求書と同じ金額が出る",
+    ]);
+    expect(s.approval.conditions_after_release_heading).toContain(
+      "満たされないまま残る",
+    );
     expect(
       await codeOf(api.approve("alpha", "C-7", s.approval.version - 1)),
     ).toBe("conflict");

@@ -25,6 +25,10 @@ import {
   toCard,
 } from "./store.ts";
 
+// 偽のサーバが返す見出し（本物は internal/view の ConditionsAfterReleaseHeading。UI の承認は本番反映を承認しない側）
+const CONDITIONS_AFTER_RELEASE_HEADING =
+  "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:";
+
 export interface MockOptions {
   latencyMs?: number;
 }
@@ -185,6 +189,9 @@ export function createMockApi(
       return {
         approval: {
           challenge_id: id,
+          conditions_after_release:
+            kind === "completion" ? m.conditionsAfterRelease : [],
+          conditions_after_release_heading: CONDITIONS_AFTER_RELEASE_HEADING,
           direct_completion:
             kind === "completion"
               ? (m.directCompletions[m.directCompletions.length - 1] ?? null)
