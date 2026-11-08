@@ -90,20 +90,32 @@ func normalizePull(p rawPull) (core.UpstreamPullRequest, error) {
 }
 
 // GetPullRequest は core.UpstreamBranchSource の実装。repo の number 番の PR を 1 件取得する
-// （`gh api repos/<repo>/pulls/<number>` の GET だけ）。
+// （`gh api -i repos/<repo>/pulls/<number>` の GET だけ）。HTTP 404 だけを「見つからない」
+// （core.ErrUpstreamPullRequestNotFound）とし、それ以外の失敗（状態行の無い失敗・404 以外の
+// 状態）はそれを包まないエラーで返す（BranchExists と同じ流儀。#487）。
 func (c *Client) GetPullRequest(ctx context.Context, repo string, number int) (core.UpstreamPullRequest, error) {
-	res := c.run(ctx, "api", fmt.Sprintf("repos/%s/pulls/%d", repo, number))
+	res := c.run(ctx, "api", "-i", fmt.Sprintf("repos/%s/pulls/%d", repo, number))
 	if res.timedOut {
 		return core.UpstreamPullRequest{}, fmt.Errorf("adapters/github: get pull request %s#%d timed out after %s: %w", repo, number, c.timeout, context.DeadlineExceeded)
 	}
 	if res.ctxErr != nil {
 		return core.UpstreamPullRequest{}, fmt.Errorf("adapters/github: get pull request %s#%d: %w", repo, number, res.ctxErr)
 	}
-	if res.err != nil {
-		return core.UpstreamPullRequest{}, fmt.Errorf("adapters/github: get pull request %s#%d: %w (%s)", repo, number, res.err, strings.TrimSpace(string(res.stderr)))
+	status, body, parseErr := splitHTTPResponse(res.stdout)
+	if parseErr != nil {
+		if res.err != nil {
+			return core.UpstreamPullRequest{}, fmt.Errorf("adapters/github: get pull request %s#%d: %w (%s)", repo, number, res.err, strings.TrimSpace(string(res.stderr)))
+		}
+		return core.UpstreamPullRequest{}, fmt.Errorf("adapters/github: get pull request %s#%d: %w", repo, number, parseErr)
+	}
+	switch {
+	case status == 404:
+		return core.UpstreamPullRequest{}, fmt.Errorf("adapters/github: get pull request %s#%d: http %d: %w", repo, number, status, core.ErrUpstreamPullRequestNotFound)
+	case status < 200 || status >= 300:
+		return core.UpstreamPullRequest{}, fmt.Errorf("adapters/github: get pull request %s#%d: unexpected http status %d", repo, number, status)
 	}
 	var raw rawPull
-	if err := json.Unmarshal(res.stdout, &raw); err != nil {
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return core.UpstreamPullRequest{}, fmt.Errorf("adapters/github: decode pull request %s#%d: %w", repo, number, err)
 	}
 	pr, err := normalizePull(raw)

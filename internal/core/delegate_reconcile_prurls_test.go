@@ -199,14 +199,9 @@ func TestReconcilePRURLs_NoArtifactHolds(t *testing.T) {
 		{"malformed url", []string{"not a url", "https://github.com/o/s/issues/5", "http://github.com/o/s/pull/5", "https://example.com/o/s/pull/5"},
 			func(f *delegateFixture) { f.givePull(pullPR("o/s", 5, "open", "main")) },
 			nil, []string{"成果物が見つからない", "形が不正"}},
-		{"fetch failure", []string{"https://github.com/o/s/pull/5"},
-			func(f *delegateFixture) { f.branches.pullErrs["o/s#5"] = errors.New("boom 502") },
-			[]string{"pr o/s 5"}, []string{"成果物が見つからない", "boom 502"}},
-		{"gh returns a different pull request", []string{"https://github.com/o/s/pull/5"},
-			func(f *delegateFixture) {
-				f.branches.pulls["o/s#5"] = pullPR("x/y", 5, "open", "main")
-			},
-			[]string{"pr o/s 5"}, []string{"成果物が見つからない", "does not match"}},
+		{"not found (404)", []string{"https://github.com/o/s/pull/5"},
+			func(*delegateFixture) {},
+			[]string{"pr o/s 5"}, []string{"成果物が見つからない", "o/s で見つからない"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

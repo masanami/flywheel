@@ -76,20 +76,19 @@ func runFakeGH(argv []string) int {
 ]`)
 		return 0
 	case "pull_one_open":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"open one","state":"open","merged_at":null,"base":{"ref":"main"}}`)
-		return 0
+		return fakeGHStatusLineOK("HTTP/2.0 200 OK", `{"html_url":"https://github.com/o/r/pull/7","title":"open one","state":"open","merged_at":null,"base":{"ref":"main"}}`)
 	case "pull_one_closed":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"closed one","state":"closed","merged_at":null,"base":{"ref":"develop"}}`)
-		return 0
+		return fakeGHStatusLineOK("HTTP/2.0 200 OK", `{"html_url":"https://github.com/o/r/pull/7","title":"closed one","state":"closed","merged_at":null,"base":{"ref":"develop"}}`)
 	case "pull_one_merged":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"merged one","state":"closed","merged_at":"2026-10-01T00:00:00Z","base":{"ref":"main"}}`)
-		return 0
+		return fakeGHStatusLineOK("HTTP/2.0 200 OK", `{"html_url":"https://github.com/o/r/pull/7","title":"merged one","state":"closed","merged_at":"2026-10-01T00:00:00Z","base":{"ref":"main"}}`)
 	case "pull_one_unknown_state":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"x","state":"draft","merged_at":null,"base":{"ref":"main"}}`)
-		return 0
+		return fakeGHStatusLineOK("HTTP/2.0 200 OK", `{"html_url":"https://github.com/o/r/pull/7","title":"x","state":"draft","merged_at":null,"base":{"ref":"main"}}`)
 	case "pull_one_no_base":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"x","state":"open","merged_at":null,"base":{}}`)
-		return 0
+		return fakeGHStatusLineOK("HTTP/2.0 200 OK", `{"html_url":"https://github.com/o/r/pull/7","title":"x","state":"open","merged_at":null,"base":{}}`)
+	case "pull_one_missing":
+		return fakeGHStatusLine("HTTP/2.0 404 Not Found", notFoundBody())
+	case "pull_one_http502":
+		return fakeGHStatusLine("HTTP/2.0 502 Bad Gateway", `{"message":"Server Error"}`)
 	case "pulls_two_pages":
 		return fakeGHPullsTwoPages(argv)
 	case "checks_pending", "checks_complete", "checks_merged", "checks_runs_fail":
@@ -272,6 +271,12 @@ func fakeGHSleepWithGrandchild() int {
 func fakeGHStatusLine(statusLine, body string) int {
 	fmt.Printf("%s\r\nContent-Type: application/json; charset=utf-8\r\n\r\n%s", statusLine, body)
 	return 1
+}
+
+// fakeGHStatusLineOK は gh api -i の 2xx の応答（状態行・ヘッダ・本文。終了コード 0）を返す。
+func fakeGHStatusLineOK(statusLine, body string) int {
+	fmt.Printf("%s\r\nContent-Type: application/json; charset=utf-8\r\n\r\n%s", statusLine, body)
+	return 0
 }
 
 func fakeGHGetDecoy500() int {
