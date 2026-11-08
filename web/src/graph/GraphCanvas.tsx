@@ -107,7 +107,14 @@ export function headLines(
   };
 }
 
-// 開いた大枠の見出しの高さ。一言では常に全行、位置づけは畳んだら 1 行・広げたら全行の分だけ伸ばす。
+// 開いた大枠の見出しの欄（背景の矩形）の下に空ける帯の高さ（flywheel#482）。子の箱は見出しの高さのすぐ下に置く
+// （model.ts の layoutGraph）ので、見出しの高さにこの帯を含め、欄の背景は帯を除いた高さで描く。
+// - 説明の文の最後の行の下の端と子の箱の上の端が、帯の分だけ離れる（帯が無いと 6px しか離れず、実施中の子の縁取りとは 2px で当たって見えた）。
+// - 依存の線は見出しの下を通るので、子の箱へ入る線の矢じり（長さ 7px）は、この帯の中で見える。
+export const HEAD_GAP = 8;
+
+// 開いた大枠の見出しの高さ（下の帯 HEAD_GAP を含む）。一言では常に全行、位置づけは畳んだら 1 行・広げたら全行の分だけ伸ばす。
+// 子の箱の置き場所（layoutGraph の headOf）と見出しの欄の高さ（GroupFrame。この値から帯を引く）は、どちらもこの値から決める。
 export function groupHeadHeight(
   headline: string | null,
   context: string | null,
@@ -119,7 +126,8 @@ export function groupHeadHeight(
   const rows =
     l.headline.length +
     (open ? l.context.length : Math.min(1, l.context.length));
-  return rows === 0 ? dims.headH : dims.headH + dims.ctxLineH * rows + 4;
+  const text = rows === 0 ? 0 : dims.ctxLineH * rows + 4;
+  return dims.headH + text + HEAD_GAP;
 }
 
 // 10.5px の文字の幅の目安（全角 10.5px・半角 6px）。SVG の text は幅を測らずに置く
@@ -622,9 +630,28 @@ function OthersFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
 // 開いた親の大枠。見出し（親課題そのもの）を押すと親を選び、右上のボタンで畳む。
 // 見出しは題名と、その下の欄に一言で・位置づけの順に出す（2026-10-17 オーナー: 大枠の一言では吹き出しでなくこの欄）。
 // 一言では常に全文を出し、位置づけは 1 行に収まらなければ畳んで始め、「続き」で広げる。
-function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
+// layer は描く層。"box" は大枠の枠（依存の線より下）、"head" は見出し（題名・一言で・位置づけ・「続き」・開閉ボタン。
+// 依存の線より上に描き、線が見出しの下を通るようにする。flywheel#482）。
+function GroupFrame({
+  box,
+  p,
+  layer,
+}: { box: LayoutBox; p: CanvasProps; layer: "box" | "head" }) {
   const i = p.infos.get(box.id);
   if (!i) return null;
+  const attrs = {
+    transform: `translate(${box.x} ${box.y})`,
+    "data-group": box.id,
+    "data-category": i.category,
+    "data-depth": box.depth,
+    "data-dim": p.dimmed(box.id) || undefined,
+  };
+  if (layer === "box")
+    return (
+      <g {...attrs} className="graph-group">
+        <rect className="graph-group-box" width={box.w} height={box.h} rx={8} />
+      </g>
+    );
   const { dims } = p;
   const c = i.node;
   const selfActive = i.active;
@@ -655,14 +682,7 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
   // 位置づけは一言での行の下から始める
   const ctxTop = dims.headH + dims.ctxLineH * hl.length;
   return (
-    <g
-      transform={`translate(${box.x} ${box.y})`}
-      className="graph-group"
-      data-category={i.category}
-      data-depth={box.depth}
-      data-dim={p.dimmed(box.id) || undefined}
-    >
-      <rect className="graph-group-box" width={box.w} height={box.h} rx={8} />
+    <g {...attrs} className="graph-group graph-group-top">
       <g
         // biome-ignore lint/a11y/useSemanticElements: SVG の中に button 要素は置けない
         role="button"
@@ -684,13 +704,13 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
         <rect
           className="graph-group-head-box"
           width={box.w}
-          height={box.headH}
+          height={box.headH - HEAD_GAP}
           rx={8}
         />
         <rect
           className="graph-node-stripe"
           width={5}
-          height={box.headH}
+          height={box.headH - HEAD_GAP}
           rx={2}
         />
         <text x={11} y={dims.headH / 2 + 4.5} className="graph-group-title">
@@ -917,11 +937,13 @@ export function GraphCanvas(p: CanvasProps) {
           />
         </marker>
       </defs>
+      {/* 大枠の枠は依存の線より下、開いた親の見出しは線より上に描く（線が見出しの文字の上を通らない。flywheel#482）。
+          どちらも外側から内側の順。「ほかの課題」の大枠は見出しごと線より下のまま */}
       {layout.groups.map((g) =>
         g.id === OTHERS_ID ? (
           <OthersFrame key={g.id} box={g} p={p} />
         ) : (
-          <GroupFrame key={g.id} box={g} p={p} />
+          <GroupFrame key={g.id} box={g} p={p} layer="box" />
         ),
       )}
       {layout.edges.map((e) => {
@@ -972,6 +994,13 @@ export function GraphCanvas(p: CanvasProps) {
           </g>
         );
       })}
+      <g className="graph-group-heads">
+        {layout.groups
+          .filter((g) => g.id !== OTHERS_ID)
+          .map((g) => (
+            <GroupFrame key={g.id} box={g} p={p} layer="head" />
+          ))}
+      </g>
       {layout.isolatedLabelY !== null ? (
         <text
           x={dims.pad}

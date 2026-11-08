@@ -45,6 +45,229 @@ const contrast = (a: string, b: string) => {
   return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05);
 };
 
+// flywheel#482: 説明の文（一言で・位置づけ）が長い親の大枠を 1440px の幅で開いたときの見出し。
+// 偽のデータの C-28 は、一言でが 2 行・位置づけが 3 行以上に折り返し、畳むと末尾に「続き」が出る親。子は C-29 と
+// 実施中の C-30（縁取りが箱の外へ 4px 出る）で、大枠の外の C-31 から子 C-29 へ依存の線が見出しを縦切って向かう。
+test.describe("広い画面（1440px）: 説明の文が長い親の見出し", () => {
+  test.use({ viewport: { width: 1440, height: 1000 } });
+
+  const LINES =
+    ".graph-group-head .graph-group-headline, .graph-group-head .graph-group-context";
+  // 説明の文の行の矩形を上下にこの値だけ広げても、子の箱（実施中の縁取りを含む）と交わらないことを見る
+  const MARGIN = 4;
+
+  // 開いた大枠の見出しの説明の文の各行と、箱（課題の箱・実施中の縁取り・ほかの大枠の枠と見出し）の矩形の交わりを
+  // boundingBox と同じ画面の座標で集める。行を中に収める大枠（自分と祖先の大枠）の枠と、自分の見出しの欄は除く。
+  const overlaps = (page: Page) =>
+    page.evaluate(
+      ({ sel, margin }) => {
+        const found: string[] = [];
+        const boxes = Array.from(
+          document.querySelectorAll(
+            ".graph-node-box, .graph-node-halo, .graph-group-box, .graph-group-head-box",
+          ),
+        );
+        for (const line of Array.from(document.querySelectorAll(sel))) {
+          const l = line.getBoundingClientRect();
+          const top = l.top - margin;
+          const bottom = l.bottom + margin;
+          const own = line.closest(".graph-group-head");
+          for (const b of boxes) {
+            if (own?.contains(b)) continue;
+            const r = b.getBoundingClientRect();
+            const contains =
+              r.left <= l.left &&
+              r.right >= l.right &&
+              r.top <= l.top &&
+              r.bottom >= l.bottom;
+            if (contains) continue;
+            if (
+              l.left < r.right &&
+              r.left < l.right &&
+              top < r.bottom &&
+              r.top < bottom
+            ) {
+              const who =
+                b.closest("[aria-label]")?.getAttribute("aria-label") ?? "";
+              found.push(
+                `${line.textContent?.slice(0, 12)} × ${b.getAttribute("class")} ${who.slice(0, 8)} (${l.bottom.toFixed(1)} / ${r.top.toFixed(1)})`,
+              );
+            }
+          }
+        }
+        return found;
+      },
+      { sel: LINES, margin: MARGIN },
+    );
+
+  // C-31 → C-29 の線の上の点のうち、C-28 の見出しの説明の文の行の矩形に入る点で、最前面にある要素を調べる。
+  // 線が文字の上に描かれていれば、その点の最前面は線（.graph-edge-wrap の中）になる。
+  const edgeOverText = (page: Page) =>
+    page.evaluate(() => {
+      const path = document.querySelector(
+        '.graph-edge[data-from="C-31"][data-to="C-29"]',
+      ) as SVGPathElement | null;
+      const head = document.querySelector(
+        '.graph-group-head[aria-label^="C-28 "]',
+      );
+      if (!path || !head) return { checked: 0, onTop: ["線か見出しが無い"] };
+      const ctm = path.getScreenCTM();
+      if (!ctm) return { checked: 0, onTop: ["座標が取れない"] };
+      const lines = Array.from(
+        head.querySelectorAll(".graph-group-headline, .graph-group-context"),
+      ).map((t) => t.getBoundingClientRect());
+      const len = path.getTotalLength();
+      let checked = 0;
+      const onTop: string[] = [];
+      for (let s = 0; s <= len; s += 1) {
+        const pt = path.getPointAtLength(s);
+        const x = ctm.a * pt.x + ctm.c * pt.y + ctm.e;
+        const y = ctm.b * pt.x + ctm.d * pt.y + ctm.f;
+        if (
+          !lines.some(
+            (r) => x > r.left && x < r.right && y > r.top && y < r.bottom,
+          )
+        )
+          continue;
+        checked++;
+        const el = document.elementFromPoint(x, y);
+        if (!el || el.closest(".graph-edge-wrap") || !head.contains(el))
+          onTop.push(
+            `${x.toFixed(0)},${y.toFixed(0)}: ${el?.getAttribute("class")}`,
+          );
+      }
+      return { checked, onTop: onTop.slice(0, 5) };
+    });
+
+  const openGraph = async (page: Page) => {
+    await page.goto("/");
+    const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
+    const head = graph.locator('.graph-group-head[aria-label^="C-28 "]');
+    await expect(head).toBeVisible();
+    await head.scrollIntoViewIfNeeded();
+    return { graph, head };
+  };
+
+  test("説明の文の各行は、子の箱（実施中の縁取りを含む）と交わらず、間を空ける。位置づけを畳んだときも広げたときも", async ({
+    page,
+  }) => {
+    const { graph, head } = await openGraph(page);
+    // 前提: 一言でが 2 行以上・位置づけが複数行に折り返し、畳んだ 1 行目の末尾に「続き」が出る
+    expect(
+      await head.locator(".graph-group-headline").count(),
+    ).toBeGreaterThanOrEqual(2);
+    await expect(head.locator(".graph-group-context")).toHaveCount(1);
+    const more = graph.getByRole("button", {
+      name: "位置づけの続きを読む（C-28）",
+    });
+    await expect(more).toBeVisible();
+    expect(await overlaps(page)).toEqual([]);
+
+    await more.click();
+    await expect(
+      graph.getByRole("button", { name: "位置づけを畳む（C-28）" }),
+    ).toBeVisible();
+    expect(
+      await head.locator(".graph-group-context").count(),
+    ).toBeGreaterThanOrEqual(3);
+    expect(await overlaps(page)).toEqual([]);
+    // 最後の行の下の端と、すぐ下の子の箱（C-29）の上の端の間に余白がある
+    const last = await head
+      .locator(".graph-group-context")
+      .last()
+      .boundingBox();
+    const child = await graph
+      .getByRole("button", { name: /^C-29 / })
+      .locator(".graph-node-box")
+      .boundingBox();
+    if (!last || !child) throw new Error("位置が取れない");
+    expect(child.y - (last.y + last.height)).toBeGreaterThanOrEqual(8);
+  });
+
+  test("開いた親の見出しは依存の線より上に描かれ、線は見出しの文字の上を通らない。線の当たり判定と札・見出しの操作は保つ", async ({
+    page,
+  }) => {
+    const { graph, head } = await openGraph(page);
+    // 描く順: 見出しの層は、すべての依存の線より後にある
+    const order = await page.evaluate(() => {
+      const edges = Array.from(document.querySelectorAll(".graph-edge-wrap"));
+      const heads = Array.from(document.querySelectorAll(".graph-group-head"));
+      return {
+        edges: edges.length,
+        heads: heads.length,
+        before: heads.filter((h) =>
+          edges.some(
+            (e) =>
+              (h.compareDocumentPosition(e) &
+                Node.DOCUMENT_POSITION_FOLLOWING) !==
+              0,
+          ),
+        ).length,
+      };
+    });
+    expect(order.edges).toBeGreaterThan(0);
+    expect(order.heads).toBeGreaterThan(0);
+    expect(order.before).toBe(0);
+    // 線が見出しの文字の上を縦切る点で、最前面は見出し（線でない）。畳んだときも広げたときも
+    const folded = await edgeOverText(page);
+    expect(folded.checked).toBeGreaterThan(0);
+    expect(folded.onTop).toEqual([]);
+    await graph
+      .getByRole("button", { name: "位置づけの続きを読む（C-28）" })
+      .click();
+    const opened = await edgeOverText(page);
+    expect(opened.checked).toBeGreaterThan(0);
+    expect(opened.onTop).toEqual([]);
+    // 線の先端（子 C-29 の箱の上の端の手前 4px）は見出しに隠れず、最前面が線のまま（矢じりが見える）
+    const tip = await page.evaluate(() => {
+      const path = document.querySelector(
+        '.graph-edge[data-from="C-31"][data-to="C-29"]',
+      ) as SVGPathElement | null;
+      const ctm = path?.getScreenCTM();
+      if (!path || !ctm) return "線が無い";
+      const pt = path.getPointAtLength(path.getTotalLength() - 4);
+      const x = ctm.a * pt.x + ctm.c * pt.y + ctm.e;
+      const y = ctm.b * pt.x + ctm.d * pt.y + ctm.f;
+      return (
+        document.elementFromPoint(x, y)?.getAttribute("class") ?? "何も無い"
+      );
+    });
+    expect(tip).toBe("graph-edge-hit");
+
+    // 線は見出しの外では押せ、選ぶと理由の札が出る
+    const edge = graph.getByRole("button", { name: /^依存.*C-31.*C-29/ });
+    await expect(edge).toHaveCount(1);
+    await edge.focus();
+    await page.keyboard.press("Enter");
+    await expect(edge).toHaveAttribute("aria-pressed", "true");
+    await expect(graph.locator(".graph-edge-label")).not.toHaveCount(0);
+    // 見出しはキーボードで押せて、詳細が開く
+    await head.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog")).toBeVisible();
+  });
+
+  for (const scheme of ["light", "dark"] as const) {
+    test(`見出しの欄の背景は線を隠せる不透明な塗り（${scheme}）`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      const { head } = await openGraph(page);
+      const fill = await head
+        .locator(".graph-group-head-box")
+        .evaluate((el) => getComputedStyle(el).fill);
+      const alpha = /\/\s*([\d.]+%?)\s*\)$|rgba\([^)]*,\s*([\d.]+)\)$/.exec(
+        fill,
+      );
+      expect(alpha, fill).toBeNull();
+      const opacity = await head
+        .locator(".graph-group-head-box")
+        .evaluate((el) => getComputedStyle(el).fillOpacity);
+      expect(opacity).toBe("1");
+    });
+  }
+});
+
 test.describe("広い画面（1280px）", () => {
   test.use({ viewport: { width: 1280, height: 900 } });
 
@@ -171,10 +394,7 @@ test.describe("広い画面（1280px）", () => {
       );
     };
     expect(
-      await inside(
-        '.graph-group:has(> .graph-group-head[aria-label^="C-2 "]) > .graph-group-box',
-        "C-27",
-      ),
+      await inside('.graph-group[data-group="C-2"] > .graph-group-box', "C-27"),
     ).toBe(true);
     // 大枠を開くと、まとまりの中の線（C-23 → C-24）ごと見える。押しても詳細は開かない
     await closed.click();

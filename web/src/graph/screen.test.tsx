@@ -821,6 +821,67 @@ it("一言では、課題に重ねたとき（キーボードで移ったとき�
   expect(group.querySelector(".graph-callout")).toBeNull();
 });
 
+it("開いた大枠: 見出しの欄の下に帯を空けて子の箱を置き、大枠の枠は依存の線より下・見出しは線より上に描く（flywheel#482）", async () => {
+  graphFor = async () => ({
+    nodes: [
+      node("C-1", { parent_id: "C-2", running: true }),
+      node("C-2", {
+        headline: "親の一言で".repeat(12),
+        context: "親の位置づけ".repeat(20),
+      }),
+      node("C-3", { running: true }),
+    ],
+    edges: [edge("C-3", "C-1")],
+  });
+  await mount();
+  const group = await graphGroup();
+  const xy = (el: Element | null) =>
+    (
+      /translate\(([-\d.]+) ([-\d.]+)\)/.exec(
+        el?.getAttribute("transform") ?? "",
+      ) ?? []
+    )
+      .slice(1)
+      .map(Number);
+  const check = () => {
+    const frame = group.querySelector(
+      '.graph-group[data-group="C-2"]',
+    ) as Element;
+    const top = group.querySelector(
+      '.graph-group-top[data-group="C-2"]',
+    ) as Element;
+    const headBox = top.querySelector(".graph-group-head-box");
+    const lines = top.querySelectorAll(
+      ".graph-group-headline, .graph-group-context",
+    );
+    const [, gy = Number.NaN] = xy(frame);
+    const [, cy = Number.NaN] = xy(box(group, "C-1").parentElement);
+    const headH = Number(headBox?.getAttribute("height"));
+    const lastY = Number([...(lines ?? [])].at(-1)?.getAttribute("y"));
+    // 子の箱の上の端は、見出しの欄の下の端から帯の分（8px）だけ下。最後の行の文字の下の端（y + 4）からも離れる
+    expect(cy - gy).toBe(headH + 8);
+    expect(cy - gy - (lastY + 4)).toBeGreaterThanOrEqual(8);
+    // 描く順: 大枠の枠 → 依存の線 → 見出し
+    const wrap = group.querySelector(".graph-edge-wrap") as Element;
+    expect(
+      frame.compareDocumentPosition(wrap) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      top.compareDocumentPosition(wrap) & Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+  };
+  check();
+  fireEvent.click(
+    within(group).getByRole("button", { name: "位置づけの続きを読む（C-2）" }),
+  );
+  expect(
+    group.querySelectorAll(
+      '.graph-group-top[data-group="C-2"] .graph-group-context',
+    ).length,
+  ).toBeGreaterThan(1);
+  check();
+});
+
 it("課題を押すと、ボードと同じ詳細のモーダルが開き、待っている理由の節を出す。閉じるとフォーカスが戻る", async () => {
   await mount();
   const group = await graphGroup();
