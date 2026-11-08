@@ -20,11 +20,9 @@ import (
 	"fmt"
 	"hash/crc32"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -45,20 +43,6 @@ const j5HeadsDirName = ".j5-heads"
 // j5HeadRemoveTimeout は一時の worktree を消す git に置く時間の上限。消すのは呼び出し元の ctx が
 // 取り消された後でも行う。
 const j5HeadRemoveTimeout = time.Minute
-
-// ErrUpstreamDiffUnavailable は、上流がその差分を返さない（大きすぎる・コミットが見つからない）ことを
-// 表す。やり直しても変わらないので、J5 を止めずに注記する。
-var ErrUpstreamDiffUnavailable = errors.New("the upstream does not return the diff")
-
-// UpstreamDiffSource は J5 の起動の前に core が呼ぶ、差分の取得 IF。実装は
-// internal/adapters/github が `gh api` の GET だけで行う。
-type UpstreamDiffSource interface {
-	// GetCompareDiff は repo（"<owner>/<name>"）の baseSHA と headSHA の共通の祖先から headSHA までの
-	// 差分（unified diff）を返す。PR の番号でもブランチでもなくコミットを指すので、取得の間に PR へ
-	// push されても、マージ済みでも、base のブランチが消えていても、固定した版の差分になる。
-	// 上流が返さないときは errors.Is(err, ErrUpstreamDiffUnavailable) が true のエラーを返す。
-	GetCompareDiff(ctx context.Context, repo, baseSHA, headSHA string) (string, error)
-}
 
 // HeadWorktreeGit は J5 の一時の worktree を作って消す口。実装は internal/adapters/git。clone は元の
 // クローンの絶対パス。どれも `git fetch`・`git clone` を実行しない。
@@ -94,51 +78,6 @@ func removeJ5Head(ctx context.Context, git HeadWorktreeGit, clone, path string) 
 func (h *j5Head) remove(ctx context.Context) {
 	if h.WorkDir != "" {
 		removeJ5Head(ctx, h.git, h.clone, h.WorkDir)
-	}
-}
-
-// raiseJ5Signal は、受け取った終了のシグナルを自分へ送り直す（テストが差し替える）。
-var raiseJ5Signal = func(sig os.Signal) {
-	if s, ok := sig.(syscall.Signal); ok {
-		_ = syscall.Kill(os.Getpid(), s)
-	}
-}
-
-// guard は一時の worktree を、中断（SIGINT・SIGTERM）でも消せるようにする。シグナルを受けたら返す
-// ctx を取り消し（claude が止まって run が記録される）、返す関数で worktree を消してから同じ
-// シグナルを送り直す（プロセスの終わり方は変えない）。返す関数は必ず呼ぶ。
-func (h *j5Head) guard(ctx context.Context) (context.Context, func()) {
-	if h.WorkDir == "" {
-		return ctx, func() {}
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
-	done, stopped := make(chan struct{}), make(chan struct{})
-	var got os.Signal
-	go func() {
-		defer close(stopped)
-		select {
-		case got = <-sigs:
-			cancel()
-		case <-done:
-		}
-	}()
-	return ctx, func() {
-		h.remove(ctx)
-		close(done)
-		<-stopped
-		cancel()
-		signal.Stop(sigs)
-		if got == nil {
-			select {
-			case got = <-sigs:
-			default:
-			}
-		}
-		if got != nil {
-			raiseJ5Signal(got)
-		}
 	}
 }
 
@@ -182,6 +121,10 @@ func fetchPullRequestDiffs(ctx context.Context, src UpstreamDiffSource, targets 
 		if !ok {
 			return "", nil, fmt.Errorf("core: malformed pull request url %q", pr.URL)
 		}
+		if pr.BaseSHA == "" {
+			notes = append(notes, fmt.Sprintf("%s の比較の起点（base のコミット）が分からないので、差分はこの入力に無い。", pr.URL))
+			continue
+		}
 		diff, err := src.GetCompareDiff(ctx, repo, pr.BaseSHA, pr.HeadSHA)
 		if errors.Is(err, ErrUpstreamDiffUnavailable) {
 			notes = append(notes, fmt.Sprintf("%s の差分は上流が返さなかった（大きすぎる等）ので、この入力に無い。", pr.URL))
@@ -189,6 +132,9 @@ func fetchPullRequestDiffs(ctx context.Context, src UpstreamDiffSource, targets 
 		}
 		if err != nil {
 			return "", nil, fmt.Errorf("core: fetch the diff of %s: %w", pr.URL, err)
+		}
+		if strings.TrimSpace(diff) == "" {
+			diff = "（差分なし: base と head の間に変更が無い）"
 		}
 		blocks = append(blocks, fmt.Sprintf("PR: %s\nhead のコミット: %s\n\n%s", pr.URL, pr.HeadSHA, diff))
 	}
@@ -247,7 +193,7 @@ func (s *Store) addJ5HeadWorktree(ctx context.Context, git HeadWorktreeGit, clon
 	if err := ensureWorktreesIgnored(s.workspace); err != nil {
 		return "", err
 	}
-	dir := filepath.Join(s.workspace, flywheelDirName, "worktrees", j5HeadsDirName, repoName)
+	dir := filepath.Join(s.workspace, worktreeSlotsDir, j5HeadsDirName, repoName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("core: create %s: %w", dir, err)
 	}
@@ -266,7 +212,7 @@ func (s *Store) addJ5HeadWorktree(ctx context.Context, git HeadWorktreeGit, clon
 // prepareJ5Head は prs の head（J5 の入力にしたチェックの取得で得た値。ここで取り直さない）の
 // 差分の区画と一時の worktree を用意する。PR が無ければ何もしない。差分の取得・worktree の作成に
 // 失敗したら NotStarted（upstream_fetch_failed）を返し、run を作らない。呼び出し元は、NotStarted で
-// なければ必ず guard を呼ぶ。
+// なければ必ず remove を呼ぶ。
 func (s *Store) prepareJ5Head(ctx context.Context, in J5AutoInput, challengeID string, prs []UpstreamPullRequestChecks) (*j5Head, *NotStarted) {
 	head := &j5Head{git: in.HeadGit}
 	targets := readablePullRequests(prs)

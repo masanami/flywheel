@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -34,7 +33,8 @@ const defaultCycleTrigger = "manual"
 // 生きている別の cycle があれば core が locked を返す。周の中の run の失敗は結果に示すだけで、
 // 終了コードは 0 のまま。
 func runCycle(a Args) (any, error) {
-	ctx := context.Background()
+	ctx, stop := interruptContext()
+	defer stop()
 	ws := a.Store.Workspace()
 
 	// --trigger の指定の有無を区別する（`--trigger ""` を省略の manual に化けさせない。

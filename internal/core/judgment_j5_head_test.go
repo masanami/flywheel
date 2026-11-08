@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -200,6 +199,9 @@ func TestVerifyAutoJ5_ReadsThePullRequestHead_Met(t *testing.T) {
 	if gotHead != f.sha {
 		t.Errorf("worktree HEAD = %s, want the fixed head %s", gotHead, f.sha)
 	}
+	if in := f.j5Inputs[0]; len(in.AddDirs) != 1 || in.AddDirs[0] != f.s.Workspace() || in.SettingSources != "user" {
+		t.Errorf("AddDirs = %v, SettingSources = %q", in.AddDirs, in.SettingSources)
+	}
 	if !strings.HasPrefix(f.workDir, filepath.Join(f.s.Workspace(), ".flywheel", "worktrees", j5HeadsDirName)+string(filepath.Separator)) {
 		t.Errorf("WorkDir = %s", f.workDir)
 	}
@@ -290,30 +292,6 @@ func TestVerifyAutoJ5_RemovesTheWorktreeOnFailureAndCancel(t *testing.T) {
 		}
 		f.assertWorktreeGone(t)
 	})
-	t.Run("SIGTERM", func(t *testing.T) {
-		raised := make(chan os.Signal, 1)
-		orig := raiseJ5Signal
-		raiseJ5Signal = func(sig os.Signal) { raised <- sig }
-		defer func() { raiseJ5Signal = orig }()
-		f := newPRHeadFixture(t, headOnlySentence)
-		inner := f.j5.onInvoke
-		f.j5.onInvoke = func(in JudgmentLaunchInput) {
-			inner(in)
-			if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-				t.Error(err)
-			}
-		}
-		_, _ = f.verifyHead(context.Background(), t)
-		f.assertWorktreeGone(t)
-		select {
-		case sig := <-raised:
-			if sig != syscall.SIGTERM {
-				t.Errorf("raised %v", sig)
-			}
-		default:
-			t.Error("the signal was not raised again")
-		}
-	})
 	t.Run("canceled", func(t *testing.T) {
 		f := newPRHeadFixture(t, headOnlySentence)
 		ctx, cancel := context.WithCancel(context.Background())
@@ -321,10 +299,14 @@ func TestVerifyAutoJ5_RemovesTheWorktreeOnFailureAndCancel(t *testing.T) {
 		inner := f.j5.onInvoke
 		f.j5.onInvoke = func(in JudgmentLaunchInput) {
 			inner(in)
+			f.j5.result = JudgmentLaunchOutput{Result: RunResultErrored, ErrorSummary: "signal: killed"}
 			cancel()
 		}
 		_, _ = f.verifyHead(ctx, t)
 		f.assertWorktreeGone(t)
+		if runs := f.j5Runs(t); len(runs) != 1 || runs[0].Result != RunResultInterrupted {
+			t.Errorf("runs = %+v, want one interrupted run", runs)
+		}
 	})
 }
 
@@ -455,11 +437,12 @@ func TestVerifyAutoJ5_LargeDiffs(t *testing.T) {
 func TestPrepareJ5Head_ManyPullRequests(t *testing.T) {
 	f := newPRHeadFixture(t, headOnlySentence)
 	pr := func(n int, state, sha string) UpstreamPullRequestChecks {
-		return UpstreamPullRequestChecks{URL: fmt.Sprintf("https://github.com/o/r/pull/%d", n), State: state, Base: "main", HeadSHA: sha}
+		return UpstreamPullRequestChecks{URL: fmt.Sprintf("https://github.com/o/r/pull/%d", n), State: state, Base: "main", BaseSHA: "b", HeadSHA: sha}
 	}
+	noBase := func(p UpstreamPullRequestChecks) UpstreamPullRequestChecks { p.BaseSHA = ""; return p }
 	main := gitOut(t, f.clone, "rev-parse", "main")
 	in := J5AutoInput{Diffs: f.diffs, HeadGit: f.git, Connectors: worktreeConnectors()}
-	head, ns := f.s.prepareJ5Head(context.Background(), in, "C-1", []UpstreamPullRequestChecks{pr(1, "closed", "dead"), pr(2, "merged", main), pr(3, "open", f.sha)})
+	head, ns := f.s.prepareJ5Head(context.Background(), in, "C-1", []UpstreamPullRequestChecks{pr(1, "closed", "dead"), noBase(pr(2, "merged", main)), pr(3, "open", f.sha), pr(4, "open", f.sha)})
 	if ns != nil {
 		t.Fatalf("not started: %+v", ns)
 	}
@@ -471,7 +454,7 @@ func TestPrepareJ5Head_ManyPullRequests(t *testing.T) {
 		t.Errorf("diff calls = %v", f.diffs.calls)
 	}
 	note := head.Sections[len(head.Sections)-1].Content
-	if !strings.Contains(note, "pull/2 の head は取り出していない") {
+	if !strings.Contains(note, "pull/2 の head は取り出していない") || !strings.Contains(note, "比較の起点") {
 		t.Errorf("note = %q", note)
 	}
 }
@@ -484,10 +467,36 @@ func TestVerifyAutoJ5_NoReadablePullRequest_RunsInTheWorkspace(t *testing.T) {
 	if _, err := f.verify(t, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.j5Inputs[0].WorkDir; got != "" {
-		t.Errorf("WorkDir = %q", got)
+	if in := f.j5Inputs[0]; in.WorkDir != "" || in.AddDirs != nil || in.SettingSources != "" {
+		t.Errorf("WorkDir = %q, AddDirs = %v, SettingSources = %q", in.WorkDir, in.AddDirs, in.SettingSources)
 	}
 	if got := f.stdin(t); strings.Contains(got, labelPullRequestDiff) || strings.Contains(got, labelPullRequestHeadNotice) {
 		t.Errorf("stdin has pull request sections:\n%s", got)
+	}
+}
+
+// 中断で止めた委譲の run は interrupted になり、起動していない（launch_failed）run はそのまま残る。
+func TestRunDelegation_CanceledRunIsInterrupted(t *testing.T) {
+	cases := map[string]struct {
+		out  JudgmentLaunchOutput
+		want RunResult
+	}{
+		"killed":        {JudgmentLaunchOutput{Result: RunResultErrored, ErrorSummary: "signal: killed"}, RunResultInterrupted},
+		"never started": {JudgmentLaunchOutput{Result: RunResultLaunchFailed, ErrorSummary: "no claude"}, RunResultLaunchFailed},
+		"cost reported": {JudgmentLaunchOutput{Result: RunResultErrored, ReportedTotalCostUSD: float64Ptr(0.2)}, RunResultErrored},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newDelegateFixture(t)
+			id := f.newInProgress(t, "t", "P1", planSpec(nil))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			f.deleg.result = tc.out
+			f.deleg.onInvoke = func(DelegateLaunchInput) { cancel() }
+			_, _ = f.s.RunDelegation(ctx, f.input(f.cycle(t, 300), &id))
+			if runs := f.delegateRuns(t); len(runs) != 1 || runs[0].Result != tc.want {
+				t.Fatalf("runs = %+v, want one %s run", runs, tc.want)
+			}
+		})
 	}
 }

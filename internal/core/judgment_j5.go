@@ -560,16 +560,15 @@ type j5VerifiedHeads struct {
 	PRs   []UpstreamPullRequestChecks
 }
 
-// logEntries は作業ログの after に残す、検証した PR と head の一覧を返す。head の無い PR は載せない。
+// logEntries は作業ログの after に残す、検証した PR と head の一覧を返す。J5 が中身を読む対象
+// （readablePullRequests。open かマージ済みで head を持つ PR）だけを載せる。
 func (vh *j5VerifiedHeads) logEntries() []map[string]string {
 	if vh == nil {
 		return nil
 	}
 	var out []map[string]string
-	for _, pr := range vh.PRs {
-		if pr.HeadSHA != "" {
-			out = append(out, map[string]string{"pr": pr.URL, "head": pr.HeadSHA})
-		}
+	for _, pr := range readablePullRequests(vh.PRs) {
+		out = append(out, map[string]string{"pr": pr.URL, "head": pr.HeadSHA})
 	}
 	return out
 }
@@ -913,8 +912,7 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 	if notStarted != nil {
 		return nil, notStarted, nil
 	}
-	ctx, finishHead := head.guard(ctx)
-	defer finishHead()
+	defer head.remove(ctx)
 	sections, notStarted := prepareJ5(ctx, in.Upstream, vc, prs, head.Sections, memoryIndexSections(s.workspace, in.AgentDecl))
 	if notStarted != nil {
 		return nil, notStarted, nil

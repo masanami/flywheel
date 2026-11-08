@@ -771,6 +771,9 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	if !result.valid() {
 		result = RunResultErrored
 	}
+	if interruptedByCancel(ctx, result, output.ReportedTotalCostUSD) {
+		result = RunResultInterrupted
+	}
 	var report *DelegationReport
 	if result == RunResultSucceeded {
 		r, ok := validateDelegationReport(output.StructuredOutput, in.ConnDecl.HumanQuestionKinds)

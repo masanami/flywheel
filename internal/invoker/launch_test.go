@@ -471,6 +471,9 @@ func TestInvokeJudgment_WorkDir(t *testing.T) {
 			ws := newWorkspace(t)
 			in := baseLaunchInput(t, ws)
 			in.WorkDir = tc.workDir(ws)
+			if in.WorkDir != "" {
+				in.AddDirs, in.SettingSources = []string{ws}, "user"
+			}
 			want := ws
 			if in.WorkDir != "" {
 				want = in.WorkDir

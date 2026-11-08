@@ -135,6 +135,10 @@ type JudgmentLaunchInput struct {
 	Workspace string
 	// WorkDir が空でなければ、判断の呼び出しの作業ディレクトリ（J5 の PR の head の一時の worktree）。
 	WorkDir string
+	// AddDirs は作業ディレクトリのほかに読み取りの道具で読めるディレクトリ（--add-dir）。
+	AddDirs []string
+	// SettingSources が空でなければ、読む設定の出所を限る（--setting-sources）。
+	SettingSources string
 	// RunDir は標準出力・標準エラー・渡した入力の保存先
 	// （.flywheel/runs/<run の ID>/ の絶対パス）。
 	RunDir string
@@ -464,6 +468,12 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 		Sections:     in.Sections,
 	}
 
+	if in.WorkDir != "" {
+		// 作業ディレクトリが PR の中身（検証される側が書いたもの）のときは、記憶の索引を読めるよう
+		// ワークスペースを足し、作業ディレクトリが持ち込む設定（フック・許可の規則）を読まない。
+		launchIn.AddDirs = []string{s.workspace}
+		launchIn.SettingSources = "user"
+	}
 	output, invokeErr := s.invokeWithHeartbeat(ctx, runIDInt, launchIn, in.Invoker)
 
 	result := output.Result
@@ -478,6 +488,9 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 	}
 	if !result.valid() {
 		result = RunResultErrored
+	}
+	if interruptedByCancel(ctx, result, output.ReportedTotalCostUSD) {
+		result = RunResultInterrupted
 	}
 
 	sessionIDReturned := output.SessionIDReturned
@@ -605,6 +618,17 @@ func (s *Store) invokeFnWithHeartbeat(ctx context.Context, runIDInt int64, invok
 			})
 		}
 	}
+}
+
+// interruptedByCancel は、中断（SIGINT・SIGTERM で ctx が取り消された）で止めた run を interrupted と
+// して記録するか（起動したプロセスが死んで回収されたときと同じ結果にし、失敗の結果に化けさせない）。
+// 書き換えるのは結果の JSON を得られなかった結果（errored・malformed で費用の報告が無い）だけで、
+// launch_failed（起動していない）・budget_exhausted・費用を報告した結果はそのまま残す。
+func interruptedByCancel(ctx context.Context, result RunResult, reportedUSD *float64) bool {
+	if ctx.Err() == nil || reportedUSD != nil {
+		return false
+	}
+	return result == RunResultErrored || result == RunResultMalformed
 }
 
 // computeRunCost は§費用の記録の規則を実装する:

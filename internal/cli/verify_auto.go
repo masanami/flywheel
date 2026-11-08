@@ -22,7 +22,8 @@ import (
 // 後の段（claude の起動・gh の取得）は行わない。`--auto` と `--result met` などの同時指定は
 // 引数の検査（OneOfGroups）が usage_error にする。
 func runVerifyAuto(a Args) (any, error) {
-	ctx := context.Background()
+	ctx, stop := interruptContext()
+	defer stop()
 	ws := a.Store.Workspace()
 
 	decl, err := core.LoadAgentDeclaration(ws)
@@ -75,7 +76,7 @@ func runVerifyAuto(a Args) (any, error) {
 		endResult = core.CycleResultAborted
 	}
 	// 周は起動できたかどうかに関わらず必ず終える（plan --auto と同じ）。
-	if _, endErr := a.Store.EndCycle(ctx, cyc.ID, endResult); endErr != nil && runErr == nil {
+	if _, endErr := a.Store.EndCycle(context.WithoutCancel(ctx), cyc.ID, endResult); endErr != nil && runErr == nil {
 		return nil, mapCoreErr(endErr)
 	}
 	if runErr != nil {
@@ -88,10 +89,7 @@ func runVerifyAuto(a Args) (any, error) {
 	}, nil
 }
 
-// newCheckSource は J5 の起動の前の PR のチェックの取得（`gh api` の GET だけ）を組み立てる。
-// `gh` が PATH に無いときは、どの取得も失敗する実装を返す（PR の無い課題は取得を呼ばないので
-// `gh` が無くても検証できる。PR のある課題は、取得の失敗として起動されず、not_started に
-// upstream_fetch_failed で出る）。
+// newDiffSource は J5 の起動の前の PR の差分の取得を組み立てる（取得できないときは newCheckSource と同じ）。
 func newDiffSource() core.UpstreamDiffSource {
 	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
 	if err != nil {
@@ -100,6 +98,10 @@ func newDiffSource() core.UpstreamDiffSource {
 	return client
 }
 
+// newCheckSource は J5 の起動の前の PR のチェックの取得（`gh api` の GET だけ）を組み立てる。
+// `gh` が PATH に無いときは、どの取得も失敗する実装を返す（PR の無い課題は取得を呼ばないので
+// `gh` が無くても検証できる。PR のある課題は、取得の失敗として起動されず、not_started に
+// upstream_fetch_failed で出る）。
 func newCheckSource() core.UpstreamCheckSource {
 	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
 	if err != nil {
