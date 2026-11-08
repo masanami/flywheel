@@ -526,6 +526,97 @@ it("ほかの課題: 残した終わった課題は、属するまとまりが�
   ).toEqual(["C-1", "C-4", "C-6", "C-7"]);
 });
 
+it("注目 ④: 依存の循環・親子と依存が混ざった循環でも止まり、起点を含むまとまりは全員が前、含まないまとまりはまとまりごと大枠に入る", () => {
+  const nodes = [
+    node("C-1", { state: "in_progress" }), // 起点。C-1 → C-2 → C-3 → C-1 の循環
+    todoNode("C-2"),
+    todoNode("C-3"),
+    todoNode("C-4"), // 起点を含まない循環: C-4 → C-5 → C-4、C-5 は C-4 の子でもある
+    todoNode("C-5", { parent_id: "C-4" }),
+    todoNode("C-6"), // 孤立した課題（起点ではない）
+  ];
+  const rels = [
+    dep("C-1", "C-2"),
+    dep("C-2", "C-3"),
+    dep("C-3", "C-1"),
+    dep("C-4", "C-5"),
+    dep("C-5", "C-4"),
+    par("C-4", "C-5"),
+  ];
+  const ids = nodes.map((n) => n.id);
+  expect(reasons(nodes, rels)).toEqual({
+    "C-1": "working",
+    "C-2": "linked",
+    "C-3": "linked",
+  });
+  expect(othersOf(ids, rels, nodes)).toEqual(["C-4", "C-5", "C-6"]);
+});
+
+it("ほかの課題: 大枠の外と中のあいだには、畳んでも開いても依存の線も親子の入れ子も残らない", () => {
+  const nodes = [
+    node("C-1", { state: "in_progress" }), // 起点
+    done("C-2", { state: "done" }), // 起点と C-3 をつなぐ終わった課題
+    todoNode("C-3"),
+    todoNode("C-4", { parent_id: "C-3" }), // 注目の親の子
+    todoNode("C-5", { parent_id: "C-4" }), // 注目の孫
+    todoNode("C-6"), // 起点を含まないまとまり
+    todoNode("C-7", { parent_id: "C-6" }),
+    done("C-8", { state: "done" }), // 大枠のまとまりの終わった前提
+    todoNode("C-9"), // C-9 → C-10 → C-9 の循環（起点なし）
+    todoNode("C-10"),
+    todoNode("C-11"), // 孤立
+  ];
+  const rels = [
+    dep("C-1", "C-2"),
+    dep("C-2", "C-3"),
+    par("C-3", "C-4"),
+    par("C-4", "C-5"),
+    dep("C-5", "C-1"),
+    par("C-6", "C-7"),
+    dep("C-8", "C-7"),
+    dep("C-9", "C-10"),
+    dep("C-10", "C-9"),
+  ];
+  const ids = nodes.map((n) => n.id);
+  const others = new Set(othersOf(ids, rels, nodes));
+  expect([...others].sort()).toEqual(
+    ["C-10", "C-11", "C-6", "C-7", "C-8", "C-9"].sort(),
+  );
+  const isOther = (id: string) => others.has(id);
+  const crosses = (r: ChallengeRelation) => isOther(r.from) !== isOther(r.to);
+  // 親子の入れ子: 大枠の内と外をまたぐ親子は無い
+  for (const [child, parent] of parentMap(new Set(ids), rels))
+    expect([child, parent, isOther(child) === isOther(parent)]).toEqual([
+      child,
+      parent,
+      true,
+    ]);
+  for (const expanded of [new Set<string>(), new Set([OTHERS_ID])]) {
+    const l = layoutGraph(ids, rels, D, expanded, () => D.headH, isOther);
+    // 畳んでも開いても、大枠の箱を端に持つ線も、内と外をまたぐ依存を表す線も無い
+    expect(
+      l.edges.filter((e) => e.from === OTHERS_ID || e.to === OTHERS_ID),
+    ).toEqual([]);
+    expect(l.edges.flatMap((e) => e.relations).filter(crosses)).toEqual([]);
+    // 検査が空振りしないこと: 前に出た側の依存の線は、畳んでも開いても残る
+    expect(l.edges.map((e) => `${e.from}>${e.to}`)).toEqual(
+      expect.arrayContaining(["C-1>C-2", "C-3>C-1"]),
+    );
+  }
+  // 検査が空振りしないこと: 開いた大枠の中では仲間どうしの依存の線が残る
+  const open = layoutGraph(
+    ids,
+    rels,
+    D,
+    new Set([OTHERS_ID]),
+    () => D.headH,
+    isOther,
+  );
+  expect(open.edges.map((e) => `${e.from}>${e.to}`)).toEqual(
+    expect.arrayContaining(["C-8>C-6", "C-9>C-10", "C-10>C-9"]),
+  );
+});
+
 it("人間の操作待ちの札: 帯の区分の語を、next_human_actions の並びで、同じ語は 1 つにして返す", () => {
   const labels = (acts: string[], category = "human") =>
     humanActionLabels(node("C-1", { category, next_human_actions: acts }));
