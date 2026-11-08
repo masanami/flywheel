@@ -131,3 +131,51 @@ func TestListPullRequestsByHead_PaginatesAndFails(t *testing.T) {
 		t.Fatal("want an error when gh fails")
 	}
 }
+
+func TestGetPullRequest_NormalizesTheThreeStates(t *testing.T) {
+	cases := []struct {
+		scenario string
+		want     core.UpstreamPullRequest
+	}{
+		{"pull_one_open", core.UpstreamPullRequest{URL: "https://github.com/o/r/pull/7", Title: "open one", State: "open", Base: "main"}},
+		{"pull_one_closed", core.UpstreamPullRequest{URL: "https://github.com/o/r/pull/7", Title: "closed one", State: "closed", Base: "develop"}},
+		{"pull_one_merged", core.UpstreamPullRequest{URL: "https://github.com/o/r/pull/7", Title: "merged one", State: "merged", Base: "main"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.scenario, func(t *testing.T) {
+			dir := newFakeGHDir(t)
+			logPath := newFakeGHLogPath(t)
+			t.Setenv(envScenario, tc.scenario)
+			t.Setenv(envLogFile, logPath)
+			c := newTestClient(t, dir)
+			got, err := c.GetPullRequest(context.Background(), "o/r", 7)
+			if err != nil {
+				t.Fatalf("GetPullRequest: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+			calls := readInvocationLog(t, logPath)
+			assertAllGET(t, calls)
+			if len(calls) != 1 {
+				t.Fatalf("gh calls = %v, want exactly one", calls)
+			}
+			if ep, _ := lastEndpointAndDashI(calls[0]); ep != "repos/o/r/pulls/7" {
+				t.Fatalf("endpoint = %q", ep)
+			}
+		})
+	}
+}
+
+func TestGetPullRequest_Failures(t *testing.T) {
+	for _, scenario := range []string{"pulls_fail", "pull_one_unknown_state", "pull_one_no_base"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir := newFakeGHDir(t)
+			t.Setenv(envScenario, scenario)
+			c := newTestClient(t, dir)
+			if _, err := c.GetPullRequest(context.Background(), "o/r", 7); err == nil {
+				t.Fatal("want an error")
+			}
+		})
+	}
+}
