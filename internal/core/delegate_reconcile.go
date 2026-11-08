@@ -482,9 +482,14 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 // recordReconcileFetchFailure は、成果物の種類が pr の完了の照合で、成果物が見つからず取得の失敗が
 // あったときの扱い（#487）。課題が着手中なら連続回数を 1 増やし、調べたブランチを残す（次の周の
 // やり直しで同じブランチを調べるため）。回数が上限に達していなければ課題の状態を変えずに注記だけを
-// 返し、達していれば人間対応待ちにする（問いに取得の失敗・連続の回数・最後のエラーを書く）。
+// 返し、達していれば人間対応待ちにする。回数は runIDDisplay の run の照合の連続の失敗で、前の失敗が
+// 別の run の照合なら 1 から数える（問いに取得の失敗・連続の回数・最後のエラーを書く）。
 func (s *Store) recordReconcileFetchFailure(ctx context.Context, dc *delegationContext, runIDDisplay string, rec *reconciliation, cycleID string) (*string, string, error) {
 	cid, ok := parseChallengeID(dc.Challenge.ID)
+	if !ok {
+		return nil, "", ErrNotFound
+	}
+	runIDInt, ok := parseRunID(runIDDisplay)
 	if !ok {
 		return nil, "", ErrNotFound
 	}
@@ -503,9 +508,11 @@ func (s *Store) recordReconcileFetchFailure(ctx context.Context, dc *delegationC
 		if rec.Branch != "" {
 			branch = rec.Branch
 		}
+		// 連続の回数は同じ run の照合の失敗だけを数える（別の run の照合の失敗は 1 から数える）。
 		return tx.QueryRowContext(ctx,
-			`UPDATE challenge SET reconcile_fetch_failures = reconcile_fetch_failures + 1, reconcile_fetch_branch = ? WHERE id = ? RETURNING reconcile_fetch_failures`,
-			branch, cid).Scan(&count)
+			`UPDATE challenge SET reconcile_fetch_failures = CASE WHEN reconcile_fetch_run_id = ? THEN reconcile_fetch_failures + 1 ELSE 1 END,
+				reconcile_fetch_run_id = ?, reconcile_fetch_branch = ? WHERE id = ? RETURNING reconcile_fetch_failures`,
+			runIDInt, runIDInt, branch, cid).Scan(&count)
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, "", err
@@ -581,10 +588,11 @@ func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, ru
 	return &v, "", nil
 }
 
-// resetReconcileFetchFailures は課題の照合の取得の失敗の連続回数を 0 に、調べたブランチを NULL に戻す。
+// resetReconcileFetchFailures は課題の照合の取得の失敗の連続回数を 0 に、失敗した照合の run と調べたブランチを NULL に戻す。
 func resetReconcileFetchFailures(ctx context.Context, tx *sql.Tx, challengeID int64) error {
 	_, err := tx.ExecContext(ctx,
-		`UPDATE challenge SET reconcile_fetch_failures = 0, reconcile_fetch_branch = NULL WHERE id = ? AND (reconcile_fetch_failures <> 0 OR reconcile_fetch_branch IS NOT NULL)`, challengeID)
+		`UPDATE challenge SET reconcile_fetch_failures = 0, reconcile_fetch_run_id = NULL, reconcile_fetch_branch = NULL
+			WHERE id = ? AND (reconcile_fetch_failures <> 0 OR reconcile_fetch_run_id IS NOT NULL OR reconcile_fetch_branch IS NOT NULL)`, challengeID)
 	return err
 }
 

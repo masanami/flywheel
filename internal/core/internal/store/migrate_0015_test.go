@@ -8,7 +8,7 @@ import (
 )
 
 // スキーマ版 14 のストアを開くと 0015 が当たり、既存の課題の行は照合の取得の失敗の連続回数が 0・
-// 調べたブランチが NULL で埋まり、他の列は変わらない。版は 15 になる。
+// 失敗した照合の run・調べたブランチが NULL で埋まり、他の列は変わらない。版は 15 になる。
 func TestOpen_AppliesReconcileFetchFailuresMigrationToAVersion14Store(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "flywheel.db")
 	var upTo14 []Migration
@@ -41,11 +41,12 @@ func TestOpen_AppliesReconcileFetchFailuresMigrationToAVersion14Store(t *testing
 		var title string
 		var n int
 		var branch sql.NullString
-		if err := tx.QueryRow(`SELECT title, reconcile_fetch_failures, reconcile_fetch_branch FROM challenge WHERE id = 1`).Scan(&title, &n, &branch); err != nil {
+		var runID sql.NullInt64
+		if err := tx.QueryRow(`SELECT title, reconcile_fetch_failures, reconcile_fetch_run_id, reconcile_fetch_branch FROM challenge WHERE id = 1`).Scan(&title, &n, &runID, &branch); err != nil {
 			return err
 		}
-		if title != "a" || n != 0 || branch.Valid {
-			t.Errorf("challenge after migration: title=%q failures=%d branch=%v, want a/0/NULL", title, n, branch)
+		if title != "a" || n != 0 || runID.Valid || branch.Valid {
+			t.Errorf("challenge after migration: title=%q failures=%d run=%v branch=%v, want a/0/NULL/NULL", title, n, runID, branch)
 		}
 		return nil
 	}); err != nil {

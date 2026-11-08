@@ -7,8 +7,9 @@ package core
 // 持つ。そのまま委譲の対象に選ぶと新しい子を起動してしまうため、`run`（ID を省いた経路と ID を
 // 指定した経路の両方）は、委譲の前にやり直しの対象を見分け、子を起動せず照合だけを行う:
 //
-//   - 対象: 照合の取得の失敗の連続回数が 1 以上で、最後の委譲の run が succeeded で終わっていて、
-//     その run より後に保留が無い着手中の課題
+//   - 対象: 照合の取得の失敗の連続回数が 1 以上で、失敗した照合の run（reconcile_fetch_run_id）が
+//     最後の委譲の run で、succeeded で終わっていて、その run より後に保留も J5 の run も無い着手中の
+//     課題（人が提出して J5 が差し戻した・回答で再開した課題は、通常の起動の判定に任せる）
 //   - 調べる先: 最後の委譲の run の報告（ブランチ・pr_urls）と、前の照合で調べたブランチ
 //     （challenge.reconcile_fetch_branch。報告にブランチが無くスロットのブランチを調べた場合）
 //   - 記録: 見つかった成果物は、その run の成果物として足す（同じ種類・参照の行が既にあれば足さない）
@@ -31,9 +32,10 @@ type pendingReconcileRetry struct {
 // loadPendingReconcileRetry は課題 cid が照合のやり直しの対象なら、その内容を返す（対象でなければ nil）。
 func loadPendingReconcileRetry(ctx context.Context, tx *sql.Tx, cid int64) (*pendingReconcileRetry, error) {
 	var n int
+	var runID sql.NullInt64
 	var branch sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT reconcile_fetch_failures, reconcile_fetch_branch FROM challenge WHERE id = ?`, cid).Scan(&n, &branch)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && n == 0) {
+	err := tx.QueryRowContext(ctx, `SELECT reconcile_fetch_failures, reconcile_fetch_run_id, reconcile_fetch_branch FROM challenge WHERE id = ?`, cid).Scan(&n, &runID, &branch)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && (n == 0 || !runID.Valid)) {
 		return nil, nil
 	}
 	if err != nil {
@@ -47,8 +49,13 @@ func loadPendingReconcileRetry(ctx context.Context, tx *sql.Tx, cid int64) (*pen
 		return nil, nil
 	}
 	last := h.Runs[len(h.Runs)-1]
-	if last.EndedAt == nil || last.Result != RunResultSucceeded {
+	if runIntID(last) != runID.Int64 || last.EndedAt == nil || last.Result != RunResultSucceeded {
 		return nil, nil
+	}
+	for _, v := range h.Verifications {
+		if runIntID(v) > runID.Int64 {
+			return nil, nil
+		}
 	}
 	for _, hd := range h.Holds {
 		if holdIsAfterRun(hd, last) {
@@ -93,10 +100,16 @@ func (s *Store) retryReconciliation(ctx context.Context, in DelegateInput, ch Ch
 	}
 	report, reason := checkDelegationReport([]byte(p.Run.Output), in.ConnDecl.HumanQuestionKinds)
 	if reason != "" || report == nil {
-		// 前の照合のときに検査を通った報告が、宣言の変更で通らなくなった。やり直しの前提が崩れたので
-		// 写さず、そのまま返す（回数は残し、課題は着手中のまま。人が状態を見て扱う）。
-		return &JudgmentAutoItem{ChallengeID: ch.ID, RunID: p.Run.ID, Result: RunResultSucceeded,
-			Note: "the reconciliation was not retried: the report of " + p.Run.ID + " no longer passes the check: " + reason}, nil, nil
+		// 前の照合のときに検査を通った報告が、宣言の変更で通らなくなった。照合をやり直せないので、
+		// 着手中のまま残さず人間対応待ちにする（回数は戻さない）。
+		q := "照合の取得の失敗の後、照合をやり直せない: 委譲の run " + p.Run.ID + " の報告が現在の宣言の検査を通らない（" + reason + "）。\n" +
+			"子は完了を報告したが、成果物の有無を確かめられていない（宣言の成果物の種類: " + dc.Operation.Artifacts + "）。"
+		status, note, err := s.mapReconciliation(ctx, dc, p.Run.ID, OpHold, q, holdReasonArtifactMissing, in.CycleID, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &JudgmentAutoItem{ChallengeID: ch.ID, RunID: p.Run.ID, Result: RunResultSucceeded, Status: status,
+			Note: "the reconciliation could not be retried: the report of " + p.Run.ID + " no longer passes the check" + map[bool]string{true: "; " + note, false: ""}[note != ""]}, nil, nil
 	}
 
 	rec := &reconciliation{}
