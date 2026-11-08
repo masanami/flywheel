@@ -1,12 +1,13 @@
 import { expect, it } from "vitest";
-import { MockStore, graphOf } from "./store.ts";
+import { MockStore, graphOf, seedLarge } from "./store.ts";
 
 // 依存の後続は、先行が完了するまで着手できない。偽のデータがこの順序と矛盾しないことを固定する。
 const WAITING = ["classified", "awaiting_plan_approval"];
 
 it("偽の関係: 先行が完了していない依存の後続は、分類済か計画承認待ちに留まる", () => {
   let checked = 0;
-  for (const [name, w] of Object.entries(new MockStore().workspaces)) {
+  const all = { ...new MockStore().workspaces, ...seedLarge() };
+  for (const [name, w] of Object.entries(all)) {
     const status = new Map(w.items.map((m) => [m.c.id, m.c.status]));
     for (const d of w.graph.deps) {
       const from = status.get(d.from);

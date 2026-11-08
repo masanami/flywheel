@@ -21,6 +21,7 @@ import type {
 } from "../api/types.gen.ts";
 import type { DiscrepancyKind } from "../labels.ts";
 import { type GraphSeed, seedGraphs } from "./graph.ts";
+import { type LargeSpec, largeWorkspace } from "./large.ts";
 
 export interface Flags {
   running?: boolean;
@@ -688,10 +689,38 @@ export function statusOf(w: MockWorkspace): StatusResponse {
   };
 }
 
+// 大きなまとまりの偽のデータ（flywheel#470。`?mock=large` のときだけ）。large は課題 100 件がほぼ 1 つにつながる形、
+// large-flat は同じ 100 件から線をすべて抜いた形（描画の速さの比べ先）。
+export function seedLarge(): Record<string, MockWorkspace> {
+  const build = (s: LargeSpec): MockChallenge =>
+    mk(s.id, s.title, s.status, {
+      priority: s.priority,
+      flags: { running: s.running, unresponsive: s.unresponsive },
+      operations: s.operation
+        ? [op(`O-${s.id.slice(2)}`, s.id, "release", "pending", "本番へ反映")]
+        : [],
+    });
+  const base = {
+    cycle: {
+      state: "running",
+      last_started_at: iso(12),
+      last_ended_at: iso(90),
+      last_result: "completed",
+    },
+  };
+  return {
+    large: largeWorkspace("large", true, build, base),
+    "large-flat": largeWorkspace("large-flat", false, build, base),
+  };
+}
+
 // --- ストア本体 ---
 
 export class MockStore {
-  workspaces: Record<string, MockWorkspace> = seed();
+  workspaces: Record<string, MockWorkspace>;
+  constructor(workspaces: Record<string, MockWorkspace> = seed()) {
+    this.workspaces = workspaces;
+  }
   private listeners = new Set<(ws: string) => void>();
 
   subscribe(fn: (ws: string) => void): () => void {
