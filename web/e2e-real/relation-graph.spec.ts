@@ -59,7 +59,7 @@ test("① 取り下げの課題は取り下げの区分で、札「取り下げ�
   await expect(withdrawn).toBeVisible();
   expect(await categoryOf(withdrawn)).toBe("withdrawn");
   await expect(withdrawn.locator(".graph-node-withdrawn-tag")).toHaveText(
-    "取り下げ（わざと壊した期待値）",
+    "取り下げ",
   );
   // 題名（「C-3 の別の前提」）に無い区分の語が、読み上げの名前に入る
   await expect(withdrawn).toHaveAccessibleName(
