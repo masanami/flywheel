@@ -60,6 +60,10 @@ export interface MockChallenge {
   holds: Hold[];
   // 親が直接行った完了の記録（無ければ空）
   directCompletions: DirectCompletion[];
+  // いまの完了確認待ちが、直接行った完了（T17）で入ったものか。本物の challenge.completion_direct と同じ意味で、
+  // 承認の ① が direct_completion を返すのはこれが真のときだけ（記録があっても、検証の met で入り直したときは返さない）。
+  // 完了確認待ちを出る遷移で偽に戻る。
+  completionDirect: boolean;
   operations: Operation[];
   plans: PlanDetail[];
   approvals: Approval[];
@@ -101,6 +105,7 @@ function mk(
     context,
     holds,
     directCompletions,
+    completionDirect,
     operations,
     plans,
     approvals,
@@ -132,6 +137,7 @@ function mk(
     context: context ?? null,
     holds: holds ?? [],
     directCompletions: directCompletions ?? [],
+    completionDirect: completionDirect ?? false,
     operations: operations ?? [],
     plans: plans ?? [],
     approvals: approvals ?? [],

@@ -104,7 +104,7 @@ describe("親が直接行う保留（#452）", () => {
     expect(status.needs_human.challenges.map((c) => c.id)).toContain("C-8");
   });
 
-  it("承認の ① は、直接行った記録の成果物の参照を完了条件と並べて返す", async () => {
+  it("承認の ① は、直近が直接行った完了（T17）で完了確認待ちに入った課題にだけ、成果物の参照を完了条件と並べて返す", async () => {
     const store = new MockStore();
     const m = store.workspaces.alpha?.items.find((i) => i.c.id === "C-7");
     if (!m) throw new Error("fixture");
@@ -113,6 +113,7 @@ describe("親が直接行う保留（#452）", () => {
       created_at: "2026-10-12T09:00:00Z",
       note: null,
     });
+    m.completionDirect = true;
     const a = createMockApi(store, { latencyMs: 0 });
     const s = await a.approvalSummary("alpha", "C-7");
     expect(s.approval.direct_completion?.artifacts).toEqual([
@@ -126,5 +127,41 @@ describe("親が直接行う保留（#452）", () => {
     expect(
       (await api.approvalSummary("alpha", "C-7")).approval.direct_completion,
     ).toBeNull();
+  });
+
+  it("記録があっても、直近が直接行った完了でなければ（検証の met で入り直した）承認の ① に出さない", async () => {
+    const store = new MockStore();
+    const m = store.workspaces.alpha?.items.find((i) => i.c.id === "C-7");
+    if (!m) throw new Error("fixture");
+    m.directCompletions.push({
+      artifacts: ["https://example.com/old"],
+      created_at: "2026-10-12T09:00:00Z",
+      note: null,
+    });
+    m.completionDirect = false;
+    const a = createMockApi(store, { latencyMs: 0 });
+    expect(
+      (await a.approvalSummary("alpha", "C-7")).approval.direct_completion,
+    ).toBeNull();
+    // 詳細には記録が残る
+    expect((await a.challenge("alpha", "C-7")).direct_completions).toHaveLength(
+      1,
+    );
+  });
+
+  it("完了確認待ちを承認で出ると、直接行った完了の印は消える", async () => {
+    const store = new MockStore();
+    const m = store.workspaces.alpha?.items.find((i) => i.c.id === "C-7");
+    if (!m) throw new Error("fixture");
+    m.directCompletions.push({
+      artifacts: ["https://example.com/result"],
+      created_at: "2026-10-12T09:00:00Z",
+      note: null,
+    });
+    m.completionDirect = true;
+    const a = createMockApi(store, { latencyMs: 0 });
+    await a.approve("alpha", "C-7", m.c.version);
+    expect(m.c.status).toBe("done");
+    expect(m.completionDirect).toBe(false);
   });
 });
