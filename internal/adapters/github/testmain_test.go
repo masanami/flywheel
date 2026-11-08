@@ -113,6 +113,8 @@ func runFakeGH(argv []string) int {
 	case "get_redirected_other_repo":
 		// 改名・移管のリダイレクトを gh が辿った後の応答（要求と別の repo）。
 		return fakeGHStatusLine("HTTP/2.0 200 OK", strings.Replace(closedIssueBody(), "repos/masanami/flywheel", "repos/someone/elsewhere", 1))
+	case "get_pull_request":
+		return fakeGHStatusLine("HTTP/2.0 200 OK", pullRequestElement(7))
 	case "get_wrong_number":
 		return fakeGHStatusLine("HTTP/2.0 200 OK", closedIssueBody())
 	case "list_other_repo":
