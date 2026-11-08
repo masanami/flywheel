@@ -109,9 +109,10 @@ export function headLines(
 
 // 開いた大枠の見出しの欄（背景の矩形）の下に空ける帯の高さ（flywheel#482）。子の箱は見出しの高さのすぐ下に置く
 // （model.ts の layoutGraph）ので、見出しの高さにこの帯を含め、欄の背景は帯を除いた高さで描く。
-// - 説明の文の最後の行の下の端と子の箱の上の端が、帯の分だけ離れる（帯が無いと 6px しか離れず、実施中の子の縁取りとは 2px で当たって見えた）。
-// - 依存の線は見出しの下を通るので、子の箱へ入る線の矢じり（長さ 7px）は、この帯の中で見える。
-export const HEAD_GAP = 8;
+// - 説明の文の最後の行の下の端と子の箱の上の端が、帯の分より離れる（帯が無いと 6px しか離れず、実施中の子の縁取りとは 2px で当たって見えた）。
+// - 依存の線は見出しの下を通るので、子の箱へ入る線の矢じりは、この帯の中で見える。矢じりは線の太さに比例し（markerWidth 7・
+//   refX 9 で、線の端から太さの 6.3 倍だけ戻る）、強調した線（2.2px）で約 13.9px。欄の縁取り（最大 3px）の半分を引いても収まる値にする。
+export const HEAD_GAP = 16;
 
 // 開いた大枠の見出しの高さ（下の帯 HEAD_GAP を含む）。一言では常に全行、位置づけは畳んだら 1 行・広げたら全行の分だけ伸ばす。
 // 子の箱の置き場所（layoutGraph の headOf）と見出しの欄の高さ（GroupFrame。この値から帯を引く）は、どちらもこの値から決める。
@@ -682,103 +683,121 @@ function GroupFrame({
   // 位置づけは一言での行の下から始める
   const ctxTop = dims.headH + dims.ctxLineH * hl.length;
   return (
-    <g {...attrs} className="graph-group graph-group-top">
-      <g
-        // biome-ignore lint/a11y/useSemanticElements: SVG の中に button 要素は置けない
-        role="button"
-        tabIndex={0}
-        aria-label={accessibleName(i, "開いた親")}
-        aria-haspopup="dialog"
-        className="graph-group-head"
-        data-category={i.category}
-        data-relation={p.relationOf(box.id)}
-        data-active={selfActive || undefined}
-        onClick={select}
-        onKeyDown={onActivate(select)}
-        onMouseEnter={() => p.onHoverNode(box.id)}
-        onMouseLeave={() => p.onHoverNode(null)}
-        onFocus={() => p.onHoverNode(box.id)}
-        onBlur={() => p.onHoverNode(null)}
-      >
-        <title>{accessibleName(i, "開いた親")}</title>
-        <rect
-          className="graph-group-head-box"
-          width={box.w}
-          height={box.headH - HEAD_GAP}
-          rx={8}
-        />
-        <rect
-          className="graph-node-stripe"
-          width={5}
-          height={box.headH - HEAD_GAP}
-          rx={2}
-        />
-        <text x={11} y={dims.headH / 2 + 4.5} className="graph-group-title">
-          <tspan className="graph-node-id">{c.id}</tspan>
-          {` ${clip(c.title, chars)}`}
-          {selfActive ? " ▶ 実施中" : ""}
-        </text>
-        <HumanChips
-          node={c}
-          right={chipRight}
-          room={chips.width}
-          y={(dims.headH - TOGGLE) / 2}
-        />
-        {i.category === "withdrawn" ? (
-          // 開いた親でも、取り下げは完了と同じ灰色のまま札で区別する
-          <text
-            x={box.w - TOGGLE - 14}
-            y={dims.headH / 2 + 4.5}
-            textAnchor="end"
-            className="graph-node-withdrawn-tag"
-          >
-            取り下げ
-          </text>
-        ) : null}
-        {hl.map((line, k) => (
-          <text
-            // biome-ignore lint/suspicious/noArrayIndexKey: 幅で切った行の並びで、行の位置そのものが鍵
-            key={k}
-            x={11}
-            y={dims.headH + dims.ctxLineH * (k + 1) - 4}
-            className="graph-group-headline"
-          >
-            {line}
-          </text>
-        ))}
-        {shown.map((line, k) => (
-          <text
-            // biome-ignore lint/suspicious/noArrayIndexKey: 文字数で切った行の並びで、行の位置そのものが鍵
-            key={k}
-            x={11}
-            y={ctxTop + dims.ctxLineH * (k + 1) - 4}
-            className="graph-group-context"
-          >
-            {/* 畳んだときは 1 行目の最後の 1 文字を「…」に替え、続きがあることを示す */}
-            {!ctxOpen && foldable
-              ? clip(`${line}…`, Array.from(line).length)
-              : line}
-          </text>
-        ))}
-      </g>
-      {foldable ? (
-        <MoreButton
-          id={box.id}
-          open={ctxOpen}
-          x={box.w - MORE_W - 6}
-          y={ctxTop}
-          h={dims.ctxLineH}
-          onToggle={p.onToggleContext}
-        />
-      ) : null}
-      <Toggle
-        id={box.id}
-        open
-        count={0}
-        x={box.w - TOGGLE - 5}
-        y={(dims.headH - TOGGLE) / 2}
-        onToggle={p.onToggle}
+    <g
+      transform={attrs.transform}
+      data-group={box.id}
+      className="graph-group-top"
+    >
+      {/* 薄めた（data-dim）見出しでも下の線が透けないよう、不透明な下地を薄めない層に敷く */}
+      <rect
+        className="graph-group-head-backing"
+        width={box.w}
+        height={box.headH - HEAD_GAP}
+        rx={8}
       />
+      <g
+        className="graph-group"
+        data-category={attrs["data-category"]}
+        data-depth={attrs["data-depth"]}
+        data-dim={attrs["data-dim"]}
+      >
+        <g
+          // biome-ignore lint/a11y/useSemanticElements: SVG の中に button 要素は置けない
+          role="button"
+          tabIndex={0}
+          aria-label={accessibleName(i, "開いた親")}
+          aria-haspopup="dialog"
+          className="graph-group-head"
+          data-category={i.category}
+          data-relation={p.relationOf(box.id)}
+          data-active={selfActive || undefined}
+          onClick={select}
+          onKeyDown={onActivate(select)}
+          onMouseEnter={() => p.onHoverNode(box.id)}
+          onMouseLeave={() => p.onHoverNode(null)}
+          onFocus={() => p.onHoverNode(box.id)}
+          onBlur={() => p.onHoverNode(null)}
+        >
+          <title>{accessibleName(i, "開いた親")}</title>
+          <rect
+            className="graph-group-head-box"
+            width={box.w}
+            height={box.headH - HEAD_GAP}
+            rx={8}
+          />
+          <rect
+            className="graph-node-stripe"
+            width={5}
+            height={box.headH - HEAD_GAP}
+            rx={2}
+          />
+          <text x={11} y={dims.headH / 2 + 4.5} className="graph-group-title">
+            <tspan className="graph-node-id">{c.id}</tspan>
+            {` ${clip(c.title, chars)}`}
+            {selfActive ? " ▶ 実施中" : ""}
+          </text>
+          <HumanChips
+            node={c}
+            right={chipRight}
+            room={chips.width}
+            y={(dims.headH - TOGGLE) / 2}
+          />
+          {i.category === "withdrawn" ? (
+            // 開いた親でも、取り下げは完了と同じ灰色のまま札で区別する
+            <text
+              x={box.w - TOGGLE - 14}
+              y={dims.headH / 2 + 4.5}
+              textAnchor="end"
+              className="graph-node-withdrawn-tag"
+            >
+              取り下げ
+            </text>
+          ) : null}
+          {hl.map((line, k) => (
+            <text
+              // biome-ignore lint/suspicious/noArrayIndexKey: 幅で切った行の並びで、行の位置そのものが鍵
+              key={k}
+              x={11}
+              y={dims.headH + dims.ctxLineH * (k + 1) - 4}
+              className="graph-group-headline"
+            >
+              {line}
+            </text>
+          ))}
+          {shown.map((line, k) => (
+            <text
+              // biome-ignore lint/suspicious/noArrayIndexKey: 文字数で切った行の並びで、行の位置そのものが鍵
+              key={k}
+              x={11}
+              y={ctxTop + dims.ctxLineH * (k + 1) - 4}
+              className="graph-group-context"
+            >
+              {/* 畳んだときは 1 行目の最後の 1 文字を「…」に替え、続きがあることを示す */}
+              {!ctxOpen && foldable
+                ? clip(`${line}…`, Array.from(line).length)
+                : line}
+            </text>
+          ))}
+        </g>
+        {foldable ? (
+          <MoreButton
+            id={box.id}
+            open={ctxOpen}
+            x={box.w - MORE_W - 6}
+            y={ctxTop}
+            h={dims.ctxLineH}
+            onToggle={p.onToggleContext}
+          />
+        ) : null}
+        <Toggle
+          id={box.id}
+          open
+          count={0}
+          x={box.w - TOGGLE - 5}
+          y={(dims.headH - TOGGLE) / 2}
+          onToggle={p.onToggle}
+        />
+      </g>
     </g>
   );
 }

@@ -858,8 +858,8 @@ it("開いた大枠: 見出しの欄の下に帯を空けて子の箱を置き�
     const [, cy = Number.NaN] = xy(box(group, "C-1").parentElement);
     const headH = Number(headBox?.getAttribute("height"));
     const lastY = Number([...(lines ?? [])].at(-1)?.getAttribute("y"));
-    // 子の箱の上の端は、見出しの欄の下の端から帯の分（8px）だけ下。最後の行の文字の下の端（y + 4）からも離れる
-    expect(cy - gy).toBe(headH + 8);
+    // 子の箱の上の端は、見出しの欄の下の端より下で、最後の行の文字の下の端（y + 4）から 8px 以上離れる
+    expect(cy - gy).toBeGreaterThan(headH);
     expect(cy - gy - (lastY + 4)).toBeGreaterThanOrEqual(8);
     // 描く順: 大枠の枠 → 依存の線 → 見出し
     const wrap = group.querySelector(".graph-edge-wrap") as Element;

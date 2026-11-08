@@ -131,7 +131,12 @@ test.describe("広い画面（1440px）: 説明の文が長い親の見出し", 
           continue;
         checked++;
         const el = document.elementFromPoint(x, y);
-        if (!el || el.closest(".graph-edge-wrap") || !head.contains(el))
+        // 見出しの層（題名・説明の文・「続き」・開閉ボタン）のどれかが最前面なら、線は見出しの下を通っている
+        if (
+          !el ||
+          el.closest(".graph-edge-wrap") ||
+          !el.closest('.graph-group-top[data-group="C-28"]')
+        )
           onTop.push(
             `${x.toFixed(0)},${y.toFixed(0)}: ${el?.getAttribute("class")}`,
           );
@@ -218,21 +223,23 @@ test.describe("広い画面（1440px）: 説明の文が長い親の見出し", 
     const opened = await edgeOverText(page);
     expect(opened.checked).toBeGreaterThan(0);
     expect(opened.onTop).toEqual([]);
-    // 線の先端（子 C-29 の箱の上の端の手前 4px）は見出しに隠れず、最前面が線のまま（矢じりが見える）
+    // 線の先端から矢じりの根元まで（子 C-29 の箱の上の端の手前 4px と 12px）は見出しに隠れず、最前面が線のまま
     const tip = await page.evaluate(() => {
       const path = document.querySelector(
         '.graph-edge[data-from="C-31"][data-to="C-29"]',
       ) as SVGPathElement | null;
       const ctm = path?.getScreenCTM();
-      if (!path || !ctm) return "線が無い";
-      const pt = path.getPointAtLength(path.getTotalLength() - 4);
-      const x = ctm.a * pt.x + ctm.c * pt.y + ctm.e;
-      const y = ctm.b * pt.x + ctm.d * pt.y + ctm.f;
-      return (
-        document.elementFromPoint(x, y)?.getAttribute("class") ?? "何も無い"
-      );
+      if (!path || !ctm) return ["線が無い"];
+      return [4, 12].map((back) => {
+        const pt = path.getPointAtLength(path.getTotalLength() - back);
+        const x = ctm.a * pt.x + ctm.c * pt.y + ctm.e;
+        const y = ctm.b * pt.x + ctm.d * pt.y + ctm.f;
+        return (
+          document.elementFromPoint(x, y)?.getAttribute("class") ?? "何も無い"
+        );
+      });
     });
-    expect(tip).toBe("graph-edge-hit");
+    expect(tip).toEqual(["graph-edge-hit", "graph-edge-hit"]);
 
     // 線は見出しの外では押せ、選ぶと理由の札が出る
     const edge = graph.getByRole("button", { name: /^依存.*C-31.*C-29/ });
