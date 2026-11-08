@@ -503,3 +503,39 @@ func TestInstructions_J2AsksForQuotesBeforeSkippingIssues(t *testing.T) {
 		t.Error("the reading list lacks the re-ask section")
 	}
 }
+
+// #472: j2.md は、計画を出す前の点検として、作業のセッションの中で進められる手順にすること
+// （周を回すことが要る段は親の段に分ける・実物を起動する段に権限と後片付けを書く）、
+// 着手の門を課題の間の依存で表し外部の Issue の開閉を門にしないこと、
+// パスを実物で確かめ渡す文が渡す先の禁止語を含まないかを確かめることを、例とともに求める。
+func TestInstructions_J2ChecksThePlanBeforeOutput(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(got, "## 計画の点検\n")
+	if start < 0 {
+		t.Fatal("Instructions(J2) lacks the section 計画の点検")
+	}
+	section := got[start+len("## 計画の点検\n"):]
+	if end := strings.Index(section, "\n## "); end >= 0 {
+		section = section[:end]
+	}
+	for _, want := range []string{
+		"周を回すことが要る段は、親が行う段として手順に分ける",
+		"与える権限と、確かめた後の停止・削除の後片付けを書く",
+		"着手の門や順序は、課題の間の依存で表す",
+		"外部の Issue の開閉などの状態を、着手や続行の門にしない",
+		"『子の課題に分けて依存でつなぐ』と答えたときは、課題の依存として扱う",
+		"読み取りの道具で実物を確かめてから書き、確かめられなければ『未確認』と添える",
+		"渡す先の指示文が禁じる語を含まないかを確かめ",
+	} {
+		if !strings.Contains(section, want) {
+			t.Errorf("the section 計画の点検 in Instructions(J2) lacks %q", want)
+		}
+	}
+	// 各点に要旨の例を 1 行ずつ添える。
+	if n := strings.Count(section, "例:"); n < 3 {
+		t.Errorf("the section 計画の点検 in Instructions(J2) has %d examples, want >= 3", n)
+	}
+}
