@@ -81,6 +81,9 @@ type DelegateLaunchInput struct {
 	// ResumeProblem は ResumeKind が interrupted で、再開元の run が子の報告の不備
 	// （invalid_output）で終わったときの、不備の理由（無ければ空）。
 	ResumeProblem string
+	// PriorArtifact は前の委譲が残した PR（前の PR が無い課題では nil）。新しいセッションにも
+	// すべての再開にも渡す。
+	PriorArtifact *PriorArtifact
 }
 
 // DelegationInvoker は core が定義する、委譲の起動 1 回の実行の IF
@@ -106,7 +109,7 @@ type DelegateInput struct {
 	Upstream UpstreamThreadSource
 	// Git はスロットの作業ツリーの検査と払い出しの口。
 	Git SlotGit
-	// Reconcile は委譲の後の照合が呼ぶ、リモートのブランチと head ブランチの PR の取得
+	// Reconcile は委譲の後の照合と、委譲の前の前の成果物の PR の状態の確認が呼ぶ、リモートのブランチと head ブランチの PR の取得
 	// （GET だけ）。
 	Reconcile UpstreamBranchSource
 	// Predictor は衝突の予測の口の起動（nil なら予測の口を呼べず、予測が要るリポジトリの
@@ -161,6 +164,10 @@ type delegationContext struct {
 	ReworkHit *reworkLimitHit
 	// ResumeBranchPushed は Resume のブランチがリモートにあるか（再開のスロットの選び方に使う）。
 	ResumeBranchPushed bool
+	// PriorPR は前の委譲が残した PR の候補（無ければ nil。状態は委譲の前に確かめる）。
+	// Prior はその状態を確かめた結果で、子の入力と J3 の入力に渡す。
+	PriorPR *priorPR
+	Prior   *PriorArtifact
 }
 
 // estimateMicros は周の上限の評価額（実装枠の残り ＋ レビュー対応枠の残り）。`--max-budget-usd` と
@@ -408,6 +415,16 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 			return nil, err
 		}
 	}
+	if len(history.Runs) > 0 {
+		err := s.db.Read(ctx, func(tx *sql.Tx) error {
+			p, err := loadPriorPR(ctx, tx, history.Runs, in.ConnDecl.HumanQuestionKinds, dc.Repo)
+			dc.PriorPR = p
+			return err
+		})
+		if err = classifyReadWriteErr(err); err != nil {
+			return nil, err
+		}
+	}
 	if connector.Form == ConnectorFormPlugin {
 		inv, err := fillInvocation(dc.Operation.Invocation, ch.ID, dc.Binding)
 		if err != nil {
@@ -462,6 +479,9 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 			dc.Repo.Name, dc.Connector.ID, dc.Connector.Form, dc.Operation.ID)},
 		JudgmentDataSection{Label: "意思決定者", Content: fmt.Sprintf("意思決定者: %s\n該当した行: %d", dc.Decider, dc.DeciderRow)},
 	)
+	if t := formatPriorArtifactSection(dc.Prior); t != "" {
+		sections = append(sections, JudgmentDataSection{Label: "前の成果物", Content: t})
+	}
 	sections = append(sections, memoryIndexSections(s.workspace, in.AgentDecl)...)
 	return sections, nil, nil
 }
@@ -604,6 +624,10 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 		}
 		return nil, nil, err
 	}
+	// 前の委譲が残した PR の状態を、トランザクションの外で 1 回だけ確かめる（J3 の前。再開でも同じ）。
+	if dc.PriorPR != nil {
+		dc.Prior = resolvePriorArtifact(ctx, in.Reconcile, *dc.PriorPR, dc.Repo.DefaultBranch)
+	}
 	if dc.Resume != nil {
 		return s.launchDelegation(ctx, in, jc, dc, "", adm)
 	}
@@ -744,6 +768,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		DeciderRow:     dc.DeciderRow,
 		Brief:          brief,
 		Invocation:     dc.Invocation,
+		PriorArtifact:  dc.Prior,
 	}
 	if dc.Binding != nil {
 		if _, n, ok := parseExternalKey(dc.Binding.ExternalKey); ok {

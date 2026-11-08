@@ -89,6 +89,9 @@ func allEmbeddedPromptContents(t *testing.T) map[string]string {
 		}
 		out["resume:"+string(k)] = body
 	}
+	for name, body := range invoker.PriorArtifactTexts() {
+		out["prior:"+name] = body
+	}
 	return out
 }
 

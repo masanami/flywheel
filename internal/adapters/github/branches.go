@@ -71,6 +71,10 @@ type rawPull struct {
 	Base     struct {
 		Ref string `json:"ref"`
 	} `json:"base"`
+	Head struct {
+		Ref string `json:"ref"`
+		SHA string `json:"sha"`
+	} `json:"head"`
 }
 
 // normalizePull は REST の PR 1 件を core の語彙へ写す。merged_at を持つ PR は merged にし、
@@ -86,7 +90,7 @@ func normalizePull(p rawPull) (core.UpstreamPullRequest, error) {
 	if state != "open" && state != "closed" && state != "merged" {
 		return core.UpstreamPullRequest{}, fmt.Errorf("unknown state %q", p.State)
 	}
-	return core.UpstreamPullRequest{URL: p.HTMLURL, Title: p.Title, State: state, Base: p.Base.Ref}, nil
+	return core.UpstreamPullRequest{URL: p.HTMLURL, Title: p.Title, State: state, Base: p.Base.Ref, HeadRef: p.Head.Ref, HeadSHA: p.Head.SHA}, nil
 }
 
 // GetPullRequest は core.UpstreamBranchSource の実装。repo の number 番の PR を 1 件取得する

@@ -64,6 +64,8 @@ type DelegationBrief struct {
 	SourceIssueURL    string
 	// Invocation は差し込みを埋めた invocation（形態 brief・無しは空）。
 	Invocation string
+	// Prior は前の委譲が残した PR（無ければ nil）。J3 の出力に依らず、その区画の後へ必ず差し込む。
+	Prior *core.PriorArtifact
 }
 
 // BuildDelegationStdin は委譲の標準入力を組み立てる。順序は、意思決定者（雛形＋値）・
@@ -109,6 +111,14 @@ func BuildDelegationStdin(in DelegationBrief) ([]byte, error) {
 		b.WriteString("\n")
 	}
 	b.WriteString(briefRegionEnd + "\n\n")
+	if fixedText, data := priorArtifactParts(in.Prior); fixedText != "" {
+		writeSection(fixedText)
+		if data != "" {
+			writeSection(dataSectionGuardNote)
+			b.WriteString(data)
+			b.WriteString("\n")
+		}
+	}
 	writeSection(body["completion_report_style"])
 	writeSection(body["forbidden_operations"])
 	writeSection(body["delegation_output_shape"])
@@ -119,7 +129,9 @@ func BuildDelegationStdin(in DelegationBrief) ([]byte, error) {
 // （埋め込みの雛形のまま）の後に、外部由来の文字列（人間の回答・子の報告のブランチ名・検証の
 // 差し戻しの指摘・前の報告の不備の理由）を区切りの行で囲んだデータの区画として続ける。
 // problem は kind が interrupted のときだけ使う（前の起動が、報告の不備で終わったときの理由）。
-func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch, feedback, problem string) ([]byte, error) {
+// prior が非 nil なら、固定の文面の直後に前の成果物（前の PR の続け方の固定の文と、値のデータの区画）を
+// 付ける（すべての kind で同じ）。
+func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch, feedback, problem string, prior *core.PriorArtifact) ([]byte, error) {
 	text, err := ResumePrompt(kind)
 	if err != nil {
 		return nil, err
@@ -130,10 +142,19 @@ func BuildDelegationResumeStdin(kind core.ResumeKind, question, answer, branch, 
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
+	priorText, priorData := priorArtifactParts(prior)
+	if priorText != "" {
+		b.WriteString(priorText)
+		b.WriteString("\n\n")
+	}
 	withProblem := kind == core.ResumeKindInterrupted && problem != ""
-	if branch != "" || withProblem || (kind == core.ResumeKindAnswer && question != "") || (kind == core.ResumeKindRework && feedback != "") {
+	if priorData != "" || branch != "" || withProblem || (kind == core.ResumeKindAnswer && question != "") || (kind == core.ResumeKindRework && feedback != "") {
 		b.WriteString(dataSectionGuardNote)
 		b.WriteString("\n\n")
+	}
+	if priorData != "" {
+		b.WriteString(priorData)
+		b.WriteString("\n")
 	}
 	if branch != "" {
 		b.WriteString(WrapDataSection("続けるブランチ", branch))
@@ -201,11 +222,11 @@ func (l *Launcher) InvokeDelegation(ctx context.Context, in core.DelegateLaunchI
 	var stdin []byte
 	var err error
 	if in.IsResume {
-		stdin, err = BuildDelegationResumeStdin(in.ResumeKind, in.ResumeQuestion, in.ResumeAnswer, in.ResumeBranch, in.ResumeFeedback, in.ResumeProblem)
+		stdin, err = BuildDelegationResumeStdin(in.ResumeKind, in.ResumeQuestion, in.ResumeAnswer, in.ResumeBranch, in.ResumeFeedback, in.ResumeProblem, in.PriorArtifact)
 	} else {
 		stdin, err = BuildDelegationStdin(DelegationBrief{
 			Decider: string(in.Decider), DeciderRow: in.DeciderRow, Brief: in.Brief, Invocation: in.Invocation,
-			SourceIssueNumber: in.SourceIssueNumber, SourceIssueURL: in.SourceIssueURL,
+			SourceIssueNumber: in.SourceIssueNumber, SourceIssueURL: in.SourceIssueURL, Prior: in.PriorArtifact,
 		})
 	}
 	if err != nil {
