@@ -144,9 +144,12 @@ type UpstreamPullRequest struct {
 	State string
 	// Base は PR の base のブランチ名。
 	Base string
+	// HeadRef・HeadSHA は PR の head のブランチ名とコミット（取れなければ空。空でも失敗にしない）。
+	HeadRef string
+	HeadSHA string
 }
 
-// UpstreamBranchSource は委譲の後の照合（core）が呼ぶ、リモートのブランチと
+// UpstreamBranchSource は委譲の後の照合と、委譲の前の前の成果物の PR の状態の確認（core）が呼ぶ、リモートのブランチと
 // head ブランチの PR の取得 IF。実装は internal/adapters/github が `gh api` の
 // GET だけで行う。照合は子の報告に依らず、この IF が返した値だけを記録する。
 type UpstreamBranchSource interface {

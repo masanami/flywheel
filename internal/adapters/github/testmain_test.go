@@ -76,7 +76,7 @@ func runFakeGH(argv []string) int {
 ]`)
 		return 0
 	case "pull_one_open":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"open one","state":"open","merged_at":null,"base":{"ref":"main"}}`)
+		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"open one","state":"open","merged_at":null,"base":{"ref":"main"},"head":{"ref":"feat/x","sha":"0123abcd"}}`)
 		return 0
 	case "pull_one_closed":
 		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"closed one","state":"closed","merged_at":null,"base":{"ref":"develop"}}`)

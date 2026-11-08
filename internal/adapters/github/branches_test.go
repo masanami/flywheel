@@ -137,7 +137,7 @@ func TestGetPullRequest_NormalizesTheThreeStates(t *testing.T) {
 		scenario string
 		want     core.UpstreamPullRequest
 	}{
-		{"pull_one_open", core.UpstreamPullRequest{URL: "https://github.com/o/r/pull/7", Title: "open one", State: "open", Base: "main"}},
+		{"pull_one_open", core.UpstreamPullRequest{URL: "https://github.com/o/r/pull/7", Title: "open one", State: "open", Base: "main", HeadRef: "feat/x", HeadSHA: "0123abcd"}},
 		{"pull_one_closed", core.UpstreamPullRequest{URL: "https://github.com/o/r/pull/7", Title: "closed one", State: "closed", Base: "develop"}},
 		{"pull_one_merged", core.UpstreamPullRequest{URL: "https://github.com/o/r/pull/7", Title: "merged one", State: "merged", Base: "main"}},
 	}
