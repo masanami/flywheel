@@ -428,11 +428,7 @@ func writeConditionsAfterRelease(b *strings.Builder, conds []string, releasing b
 	if len(conds) == 0 {
 		return
 	}
-	if releasing {
-		b.WriteString("承認で本番反映されると満たされる条件:\n")
-	} else {
-		b.WriteString("本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:\n")
-	}
+	b.WriteString(view.ConditionsAfterReleaseHeading(releasing) + "\n")
 	for _, c := range conds {
 		fmt.Fprintf(b, "  - %s\n", escapeControl(c))
 	}

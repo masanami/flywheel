@@ -213,6 +213,8 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeDependencyCycle, err.Error())
 	case errors.Is(err, core.ErrSelfDependency):
 		return NewError(CodeUsageError, err.Error())
+	case errors.Is(err, core.ErrUpstreamFetchFailed):
+		return NewError(CodeUpstreamUnavailable, err.Error())
 	default:
 		return NewError(CodeInternalError, err.Error())
 	}

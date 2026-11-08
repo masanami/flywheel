@@ -112,6 +112,7 @@ func TestApprovalSummaryForPlan(t *testing.T) {
 	want := map[string]string{
 		"challenge_id": `"C-1"`, "title": `"title"`, "kind": `"plan"`, "done_criteria": `null`, "direct_completion": `null`,
 		"plan": `{"body":"PLAN","version":1}`, "releases": `[]`, "other_pending_operations": `[]`, "release_held": `true`,
+		"conditions_after_release": `[]`, "conditions_after_release_heading": `"本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"`,
 		"pairs": `[]`, "stages": `{"actual":null,"expected":null,"figure":null,"issues":null,"issues_answer":null,"non_goals":null}`,
 	}
 	for k, w := range want {

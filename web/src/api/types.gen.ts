@@ -415,6 +415,8 @@ export interface ApprovalSummaryResponse {
 
 export interface ApprovalSummary {
   challenge_id: string;
+  conditions_after_release: string[];
+  conditions_after_release_heading: string;
   direct_completion: DirectCompletion | null;
   done_criteria: string | null;
   kind: string;

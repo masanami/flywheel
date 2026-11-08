@@ -36,6 +36,8 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   op exec [<OP-ID>]
   dep add <C-ID> <依存先の C-ID>...
   dep rm <C-ID> <依存先の C-ID>...
+  bind <C-ID> <owner/repo#番号>   （取り込み元の Issue の無い課題を、open の GitHub Issue に紐づける。宣言の取り込み元のリポジトリだけ）
+  unbind <C-ID>   （紐づけを外す）
   status
   log [<ID>]
   ingest [--source <id>]
