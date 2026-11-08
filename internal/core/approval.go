@@ -517,6 +517,12 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		if err := s.recordApprovalOccurrence(ctx, tc, kind, req.Decision, approvalRowID); err != nil {
 			return err
 		}
+		// 本番反映のやり直し（#485）で置き換えられた前の完了の承認に、この承認を結ぶ。
+		if kind == ApprovalKindCompletion && req.Decision == ApprovalDecisionApproved {
+			if err := linkSupersededApprovals(ctx, tc.tx, tc.id, approvalRowID); err != nil {
+				return err
+			}
+		}
 
 		tc.after["approval_kind"] = string(kind)
 		tc.after["decision"] = string(req.Decision)
@@ -530,6 +536,7 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		}
 
 		approvalOut = Approval{
+			ID:            formatApprovalID(approvalRowID),
 			Kind:          kind,
 			Decision:      req.Decision,
 			OperationID:   nil,
@@ -679,6 +686,7 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 	}
 	seen := make(map[int64]bool, len(pending))
 	heads := make(map[int64]string, len(req.ReleaseHeads))
+	mergeIns := make(map[int64]string, len(req.ReleaseHeads))
 	for _, rh := range req.ReleaseHeads {
 		oid, ok := parseOperationID(rh.Operation.ID)
 		if !ok || !pendingIDs[oid] || seen[oid] {
@@ -689,6 +697,9 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 			return ErrConflict
 		}
 		heads[oid] = strings.TrimSpace(*rh.HeadSHA)
+		if rh.MergeInVerifiedHead != nil {
+			mergeIns[oid] = strings.TrimSpace(*rh.MergeInVerifiedHead)
+		}
 	}
 	for _, id := range req.ExcludedReleaseIDs {
 		oid, ok := parseOperationID(id)
@@ -700,6 +711,7 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 	if len(seen) != len(pending) {
 		return ErrConflict
 	}
+	recordMergeIn := make(map[int64]string, len(pending))
 	for _, p := range pending {
 		head, approve := heads[p.id]
 		if !approve {
@@ -714,8 +726,12 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 		if err != nil {
 			return err
 		}
-		if verified != nil && *verified != head {
+		ok, record := releaseHeadAcceptable(verified, head, mergeIns[p.id])
+		if !ok {
 			return ErrConflict
+		}
+		if record {
+			recordMergeIn[p.id] = *verified
 		}
 	}
 
@@ -728,7 +744,7 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 		// 単独の承認と同じ実装を共有する（operation.go の
 		// approveOperationInTx。self-review 指摘）。課題の版はこの経路では
 		// 増やさない（完了の遷移そのものが 1 回だけ +1 する）。
-		if _, err := approveOperationInTx(ctx, tc.tx, tc.rec, operationApprovalWrite{
+		if _, _, err := approveOperationInTx(ctx, tc.tx, tc.rec, operationApprovalWrite{
 			opID:        p.id,
 			challengeID: tc.id,
 			version:     p.version,
@@ -736,6 +752,7 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 			att:         att,
 			nowStr:      tc.nowStr,
 			headSHA:     head,
+			mergeInHead: recordMergeIn[p.id],
 		}); err != nil {
 			return err
 		}

@@ -161,6 +161,8 @@ type delegationContext struct {
 	ReworkHit *reworkLimitHit
 	// ResumeBranchPushed は Resume のブランチがリモートにあるか（再開のスロットの選び方に使う）。
 	ResumeBranchPushed bool
+	// Reopen は、課題が本番反映のやり直しで完了から戻されたあと、まだ委譲していないときの戻した記録（#485）。
+	Reopen *reopenNote
 }
 
 // estimateMicros は周の上限の評価額（実装枠の残り ＋ レビュー対応枠の残り）。`--max-budget-usd` と
@@ -353,6 +355,9 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		if dc.Holds, err = loadHolds(ctx, tx, cid); err != nil {
 			return err
 		}
+		if dc.Reopen, err = loadReopenNote(ctx, tx, cid); err != nil {
+			return err
+		}
 		if dc.Binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
 			return err
 		}
@@ -440,6 +445,9 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 	}
 	if t := formatHoldsSection(dc.Holds); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "保留の記録", Content: t})
+	}
+	if dc.Reopen != nil {
+		sections = append(sections, JudgmentDataSection{Label: labelReopenReason, Content: formatReopenSection(dc.Reopen, dc.Repo.DefaultBranch)})
 	}
 	if t := formatSourceBindingSection(dc.Binding); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "取り込み元の対応", Content: t})
