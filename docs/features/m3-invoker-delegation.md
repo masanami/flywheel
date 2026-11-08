@@ -637,8 +637,18 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 | J2 | `{"verdict": "plan\|uncertain", "summary": string, "steps": [string], "repo": string, "operation": string, "size": "S\|M\|L", "done_criteria": string, "budget_impl_usd": number\|null, "budget_review_usd": number\|null, "cross_repo": bool, "related_repos": [string], "question": string\|null}`（`uncertain` のときは `question` 以外を `null` または空にしてよい） |
 | J3 | `{"brief": string}` |
 | J4 | `{"decisions": [{"question_index": int, "decision": "answer\|escalate", "answer": string\|null}]}` |
-| J5 | `{"verdict": "met\|not_met\|uncertain", "reason": string, "feedback": string\|null, "question": string\|null}` |
+| J5 | `{"verdict": "met\|not_met\|uncertain", "reason": string, "feedback": string\|null, "question": string\|null, "deferred_conditions": [{"condition": string, "status": "after_release\|after_human_action"}]\|null}`（`deferred_conditions` は任意。規則は表の下の「J5 の `deferred_conditions`」。M4 S4 で `actual` を足す＝m4-ui-server.md §IF / API「判断点の出力に足すもの（S4）」） |
 | 委譲の報告 | `{"outcome": "completed\|questions\|blocked", "summary": string, "branch": string\|null, "pr_urls": [string], "commits": [string], "quality_gate": string\|null, "assumptions": [string], "unverified": [string], "questions": [{"kind": string, "text": string, "options": [string], "recommendation": string\|null}]}`（`kind` の閉集合は §J3 のとおり、宣言から run ごとに生成する） |
+
+J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/judgment_j5.go` の `j5OutputSchema`・`validateJ5DeferredConditions`・`applyJ5Once`・`j5Operation`・`finalizeJ5Output`、区分の閉集合は `internal/core/judgment_output.go` の `J5ConditionStatusValues`）:
+
+- **任意の項目**。省略・`null`・空の配列は「区分を付けた条件が無い」として扱い、従来どおりに写す。要素は `{"condition": string, "status": "after_release" | "after_human_action"}` で、両方を要し、ほかのキーを持たない。要素は 20 個まで、`condition` は前後の空白を除いて空でなく 2,000 文字以内。外れれば `invalid_output`。
+- `status` の意味: `after_release`＝承認の後の本番反映そのもので満たされる見込みの条件。`after_human_action`＝人の操作の後でしか満たせない条件。
+- `verdict` は、`deferred_conditions` に挙げた条件を除いた残りの条件で決める。core は条件の文面を解釈せず、`verdict` と `status` の区分だけを見て次のとおり振り分ける。
+  - `verdict` が `met` で、`after_human_action` が 1 つも無い（`after_release` だけ、または区分が無い）: 従来の `met` と同じく T8 で完了確認待ちへ進める。`after_release` の条件は T8 の作業ログの `after` に `conditions_after_release`（文字列の配列）として残す。
+  - `verdict` が `met` で、`after_human_action` が 1 つでもある: 完了確認待ちへ進めず、着手中にも戻さない（子を再起動しない）。T10 で人間対応待ちにし、保留の問いは固定の前置き（`J5HumanActionHoldPreamble`）に続けて `after_human_action` の条件を 1 行ずつ並べたものにする。実物は課題に書かず、発生も作らない（失敗ではない）。run の判定の記録は `uncertain` になる。回答（T12）で検証中へ戻り、J5 をやり直す。実物の個数が予想と合わない保留（M4H44）と重なれば、1 つの保留の問いに両方を書く。
+  - `verdict` が `not_met`・`uncertain`: `deferred_conditions` は振り分けに使わず、従来どおり `not_met` は T9 で着手中、`uncertain` は T10 で人間対応待ちにする。
+- 承認の要約への表示: 完了の承認（`approve`・`reject` の `<C-ID>`）の確認の要約に、最新の T8 の作業ログの `conditions_after_release` を出す（`internal/cli/approval.go` の `writeConditionsAfterRelease`）。その操作で本番反映（`release`）が 1 つ以上承認されるときは見出し「承認で本番反映されると満たされる条件:」、承認されないとき（`--hold-release`・差し戻し・`release` が無い等）は「満たされないまま残る」ことを示す見出しで出す。現状は CLI の要約だけで、API（`internal/view`）・UI には出さない。
 
 #### CLI
 
