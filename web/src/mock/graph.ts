@@ -54,6 +54,7 @@ export function seedGraphs(): { alpha: GraphSeed; beta: GraphSeed } {
         "C-21": "C-14",
         "C-26": "C-3",
         "C-27": "C-1",
+        "C-30": "C-29",
       },
       deps: [
         dep("C-12", "C-6", "prerequisite", "plan", 0),

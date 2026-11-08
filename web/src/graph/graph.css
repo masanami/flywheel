@@ -151,23 +151,24 @@
   font-weight: 600;
   color: var(--c);
 }
-/* 人間の操作待ちのチップ（記号と帯の区分の語）。行の右上に右寄せで並べる */
+/* 人間の操作待ちのチップ（記号と帯の区分の語）。行の右上に右寄せで並べる。
+ * 置き場の幅は行の 60% までに抑えて題名の幅を残し、入らないチップは語を切らずに次の行へ折り返す（flywheel#464） */
 .graph-list-human {
   display: flex;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.15rem;
   max-width: 60%;
   min-width: 0;
   margin-left: auto;
-  overflow: hidden;
 }
 .graph-list-human .graph-human-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
   flex: 0 1 auto;
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   padding: 0 0.4rem;

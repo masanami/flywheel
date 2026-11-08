@@ -77,13 +77,15 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
           <b>{id}</b> {info.node.title}
         </button>
         {chips.length > 0 ? (
-          // 人間の操作待ちのチップ（記号と語）。行の右上に右寄せで並べ、入らない語は切り詰める
+          // 人間の操作待ちのチップ（記号と語）。行の右上に右寄せで並べ、入らないチップは次の行へ折り返す。
+          // それでも語が入らないほど狭いときに切り詰めても、語は title（ホバーで出る）に残る
           <span className="graph-list-human" data-category="human">
             {chips.map((c) => (
               <span
                 key={c.kind}
                 className="graph-human-chip"
                 data-kind={c.kind}
+                title={c.label}
               >
                 <span className="graph-human-chip-glyph" aria-hidden="true">
                   {c.glyph}
