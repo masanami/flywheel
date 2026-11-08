@@ -1,4 +1,4 @@
--- 0015_reconcile_fetch_failures: スキーマ版 15。
+-- 0016_reconcile_fetch_failures: スキーマ版 16。
 -- 課題 #487（完了の照合で、GitHub からの取得の失敗と「見つからない」を分ける）。
 --
 -- challenge に、完了の照合（成果物の種類 pr）の取得の失敗の連続回数（reconcile_fetch_failures）と、

@@ -30,6 +30,9 @@ const (
 	OpWithdraw           Operation = "withdraw"
 	// OpCompleteDirect は、親が直接行った作業を完了として記録する操作（T17）。
 	OpCompleteDirect Operation = "complete_direct"
+	// OpReopenForRelease は、完了の課題を着手中へ戻す操作（T18）。本番反映でマージできなくなった場合に限る
+	// 専用の書き込み（ReopenChallengeForRelease）だけが使う。CLI の操作には対応しない。
+	OpReopenForRelease Operation = "reopen_for_release"
 )
 
 // TransitionTarget は遷移先の表現。T1〜T11・T13〜T15 は固定の状態を持つが、
@@ -65,7 +68,7 @@ func (tt TransitionTarget) Resolve(table []Transition, preceding Status) (Status
 	return "", fmt.Errorf("core: %q is not a valid preceding-hold status", preceding)
 }
 
-// Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T17）を指す。
+// Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T18）を指す。
 // T11 は遷移元が4つあるため、物理的には ID="T11" の行が4つ存在する。
 type Transition struct {
 	ID                   string
@@ -73,9 +76,12 @@ type Transition struct {
 	Op                   Operation
 	Target               TransitionTarget
 	RequiresVerification bool
+	// Restricted が true の行は、専用の core の書き込みだけが使う（T18）。Lookup・OutgoingFrom・IsTerminal には現れず、
+	// LookupRestricted だけが引く。通常の操作から見た状態の終端（完了）は変わらない。
+	Restricted bool
 }
 
-// Table は遷移表 T1〜T17 の正本。docs/features/m1-core.md §状態機械 の
+// Table は遷移表 T1〜T18 の正本。docs/features/m1-core.md §状態機械 の
 // 遷移表と1対1に対応する（T11 は遷移元4つに展開して4行として持つ）。
 // この表に無い（状態, 操作）の組はすべて不可（Lookup が ok=false を返す）。
 var Table = []Transition{
@@ -111,26 +117,40 @@ var Table = []Transition{
 	// 「成果物の参照が 1 件以上」は CompleteDirect が検査する（T12 の戻り先の検査と同じ位置づけ）。
 	// 完了の承認は T13・T14 のとおり本人確認つきで、この行は本人確認を要さない（submit・hold と同じ、エージェントの記録）。
 	{ID: "T17", From: StatusAwaitingHuman, Op: OpCompleteDirect, Target: TransitionTarget{Fixed: StatusAwaitingCompletionApproval}},
+	// T18: 本番反映でマージできなくなった完了の課題を着手中へ戻す（#485）。本番反映のやり直し（ReopenChallengeForRelease）
+	// だけが使う制限つきの行で、通常の操作の対象にならない。本人確認は要さない（エージェントの記録。戻す理由は
+	// 本番反映の結果か、検証の後の中身の変更で、人の承認はやり直しの完了の承認で受ける）。
+	{ID: "T18", From: StatusDone, Op: OpReopenForRelease, Target: TransitionTarget{Fixed: StatusInProgress}, Restricted: true},
 }
 
 // Lookup は (from, op) から遷移表の行を引く。表に無い組は ok=false を返す
 // （表に無い遷移はすべて拒否する＝docs/features/m1-core.md §状態機械）。
 func Lookup(from Status, op Operation) (Transition, bool) {
 	for _, tr := range Table {
-		if tr.From == from && tr.Op == op {
+		if tr.From == from && tr.Op == op && !tr.Restricted {
 			return tr, true
 		}
 	}
 	return Transition{}, false
 }
 
-// OutgoingFrom は table の中で from を遷移元に持つ行をすべて返す。
+// LookupRestricted は (from, op) から制限つきの行（T18）を引く。通常の行は返さない。
+func LookupRestricted(from Status, op Operation) (Transition, bool) {
+	for _, tr := range Table {
+		if tr.From == from && tr.Op == op && tr.Restricted {
+			return tr, true
+		}
+	}
+	return Transition{}, false
+}
+
+// OutgoingFrom は table の中で from を遷移元に持つ行（制限つきの行を除く）をすべて返す。
 // AC-27（完了から出る遷移が無いこと）の検査や、将来の invalid_transition /
 // terminal_state の判定（後続チケット）に使う。
 func OutgoingFrom(table []Transition, from Status) []Transition {
 	var out []Transition
 	for _, tr := range table {
-		if tr.From == from {
+		if tr.From == from && !tr.Restricted {
 			out = append(out, tr)
 		}
 	}

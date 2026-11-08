@@ -71,9 +71,12 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 	if err != nil {
 		return nil, err
 	}
-	headSHA := ""
+	headSHA, mergeInHead := "", ""
 	if rd != nil {
 		headSHA = rd.Head
+		if rd.MergeIn != nil {
+			mergeInHead = rd.MergeIn.VerifiedHead
+		}
 	}
 
 	summary := operationApprovalSummaryText(preview, nil) + operationHeadLines(rd)
@@ -88,14 +91,17 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 		ExpectedChallengeVersion: preview.ChallengeVersion,
 		Decision:                 core.ApprovalDecisionApproved,
 		HeadSHA:                  headSHA,
+		MergeInVerifiedHead:      mergeInHead,
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{
-		json: view.OperationApprovalResponse{Approval: view.FromApproval(*approval), Operation: view.FromOperation(*op)},
-		text: op.ID + "\n",
-	}, nil
+	resp := view.OperationApprovalResponse{Approval: view.FromApproval(*approval), Operation: view.FromOperation(*op)}
+	if rd != nil && rd.MergeIn != nil {
+		hc := view.FromReleaseHeadAssessment(rd.MergeIn)
+		resp.MergeIn = &hc
+	}
+	return textOutput{json: resp, text: op.ID + "\n"}, nil
 }
 
 // runApproveChallenge は `flywheel approve <C-ID> [--hold-release]` の実装

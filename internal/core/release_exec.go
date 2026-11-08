@@ -51,6 +51,9 @@ type ReleaseExecOptions struct {
 	Checks UpstreamCheckSource
 	// Merger はマージの依頼（唯一の書き込み）。
 	Merger UpstreamPullRequestMerger
+	// Compare は、完了の課題の承認待ちの release の PR に検証の後の変更が入ったかを判定するための比較の取得
+	// （GET だけ）。nil なら、その判定をしない（承認待ちの release の片付けのうち、マージ済みを閉じる処理は動く）。
+	Compare UpstreamCompareSource
 	// Connectors は PR のリポジトリ・既定ブランチ・マージの方式を引く宣言。
 	Connectors *ConnectorsDeclaration
 	// Agent は failure_limit の出どころ。nil なら既定値。
@@ -79,6 +82,33 @@ type ReleaseExecItem struct {
 	ConsecutiveFailures int
 	// Detail は結果が merge_unconfirmed で、マージの依頼の後に試行の記録を書けなかったときだけ入る。
 	Detail string
+	// Reopened は、結果が not_mergeable で課題が完了だったため、課題を着手中へ戻して release を置き換えたこと
+	// （#485）。NewOperationID は作った新しい release、ReopenReason は戻した理由。
+	Reopened       bool
+	NewOperationID string
+	ReopenReason   ReopenReason
+}
+
+// ReleaseTidyAction は承認待ちの release の片付けで行ったこと。
+type ReleaseTidyAction string
+
+const (
+	// ReleaseTidyClosed は、PR がマージ済みの承認待ちの release を closed にしたこと。
+	ReleaseTidyClosed ReleaseTidyAction = "closed"
+	// ReleaseTidyReopened は、検証の後に中身が変わった PR の release を置き換え、完了の課題を着手中へ戻したこと。
+	ReleaseTidyReopened ReleaseTidyAction = "reopened"
+)
+
+// ReleaseTidyItem は承認待ちの release の片付け 1 件の結果。
+type ReleaseTidyItem struct {
+	OperationID string
+	ChallengeID string
+	Action      ReleaseTidyAction
+	// ClosedReason は Action が closed のときの閉じた理由。
+	ClosedReason ClosedReason
+	// ReopenReason・NewOperationID は Action が reopened のときの戻した理由と新しい release。
+	ReopenReason   ReopenReason
+	NewOperationID string
 }
 
 // PartialReleaseError は release の段が途中でエラーになったとき、それまでに実行済みの結果（マージ済みの
@@ -95,6 +125,8 @@ func (e *PartialReleaseError) Unwrap() error { return e.Err }
 type ReleaseExecResult struct {
 	Items      []ReleaseExecItem
 	NotStarted []NotStarted
+	// Tidied は承認待ちの release の片付け（ids を指定しない呼び出しだけ）の結果。
+	Tidied []ReleaseTidyItem
 }
 
 // ListExecutableReleases は状態が approved の release の ID を、ID の昇順に返す。
@@ -143,6 +175,8 @@ func (s *Store) ExecuteReleases(ctx context.Context, ids []string, opts ReleaseE
 		opts.cycleID = &n
 	}
 
+	// ids を指定しない呼び出し（周の release の段・`op exec` の ID なし）だけ、承認待ちの release の片付けも行う。
+	sweepPending := len(ids) == 0
 	var opIDs []int64
 	if len(ids) == 0 {
 		listed, err := s.ListExecutableReleases(ctx)
@@ -181,7 +215,15 @@ func (s *Store) ExecuteReleases(ctx context.Context, ids []string, opts ReleaseE
 		return nil, classifyReadWriteErr(err)
 	}
 
-	res := &ReleaseExecResult{Items: []ReleaseExecItem{}, NotStarted: []NotStarted{}}
+	res := &ReleaseExecResult{Items: []ReleaseExecItem{}, NotStarted: []NotStarted{}, Tidied: []ReleaseTidyItem{}}
+	// 承認待ちの release の片付けは、実行より先に行う（実行で取り消した・置き換えた release を同じ呼び出しで読み直さない）。
+	if sweepPending {
+		tidied, err := s.tidyPendingReleases(ctx, opts)
+		res.Tidied = append(res.Tidied, tidied...)
+		if err != nil {
+			return res, err
+		}
+	}
 	seen := map[int64]bool{}
 	for _, id := range opIDs {
 		if seen[id] {

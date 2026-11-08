@@ -110,7 +110,21 @@ func newCheckSource() core.UpstreamCheckSource {
 	return client
 }
 
+// newCompareSource は release の head の変化の判定（検証の後に入ったコミットの取得）を組み立てる
+// （取得できないときは newCheckSource と同じ）。
+func newCompareSource() core.UpstreamCompareSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
+	if err != nil {
+		return unavailableCheckSource{err: err}
+	}
+	return client
+}
+
 type unavailableCheckSource struct{ err error }
+
+func (u unavailableCheckSource) CompareCommits(context.Context, string, string, string) (core.UpstreamComparison, error) {
+	return core.UpstreamComparison{}, fmt.Errorf("上流を取得できません: %w", u.err)
+}
 
 func (u unavailableCheckSource) GetPullRequestChecks(context.Context, string, int) (core.UpstreamPullRequestChecks, error) {
 	return core.UpstreamPullRequestChecks{}, fmt.Errorf("上流を取得できません: %w", u.err)

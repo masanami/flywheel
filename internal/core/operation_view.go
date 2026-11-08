@@ -43,6 +43,19 @@ func fillOperationExecutionInfo(ctx context.Context, tx *sql.Tx, ops []Irreversi
 				return err
 			}
 		}
+		if ops[i].State == OperationStatePending && ops[i].Kind == OperationKindRelease {
+			if ops[i].VerifiedHeadSHA, err = latestVerifiedHead(ctx, tx, ops[i].Ref); err != nil {
+				return err
+			}
+		}
+		var by sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM operation WHERE supersedes_operation_id = ? ORDER BY id DESC LIMIT 1`, opID).Scan(&by); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if by.Valid {
+			v := formatOperationID(by.Int64)
+			ops[i].SupersededByOperationID = &v
+		}
 	}
 	return nil
 }

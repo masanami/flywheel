@@ -161,7 +161,8 @@ func TestRelease_MergedUnapprovedCreatesOnlyUnapprovedMerge(t *testing.T) {
 
 // AC-214: 待つ結果・実行済み・interrupted では発生を作らない。
 func TestRelease_NoOccurrenceForWaitingExecutedInterrupted(t *testing.T) {
-	f := newRelFixture(t)
+	// 完了の課題の not_mergeable は課題を戻す（#485）ので、待つ結果としては完了でない課題で確かめる。
+	f := newRelFixtureAt(t, StatusInProgress)
 	f.limit = 100
 	want := func(r ExecutionResult) {
 		t.Helper()

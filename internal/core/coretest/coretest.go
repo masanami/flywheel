@@ -962,6 +962,15 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, decided_at)
 			  VALUES (1, 1, 'release', 'approved', 1, 'tester', 'cli', 'tty_confirm', ?)`, []any{at}},
 			{`INSERT INTO operation_execution (operation_id, started_at, pid, host) VALUES (1, ?, 1, 'testhost')`, []any{at}},
+			{`UPDATE approval SET head_sha = 'abc123', merge_in_verified_head = 'def456' WHERE id = 1`, nil},
+			{`INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at, closed_reason, closed_at) VALUES (1, 'release', 'old release', 'o/r#2', 'closed', 3, ?, 'superseded', ?)`, []any{at, at}},
+			{`INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at, supersedes_operation_id) VALUES (1, 'release', 'new release', 'o/r#2', 'pending', 1, ?, 2)`, []any{at}},
+			{`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, decided_at, superseded_at, superseded_reason)
+			  VALUES (1, NULL, 'completion', 'approved', 1, 'tester', 'cli', 'tty_confirm', ?, ?, 'not_mergeable')`, []any{at, at}},
+			{`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, decided_at)
+			  VALUES (1, NULL, 'completion', 'approved', 5, 'tester', 'cli', 'tty_confirm', ?)`, []any{at}},
+			{`UPDATE approval SET superseded_by_approval_id = 3 WHERE id = 2`, nil},
+			{`INSERT INTO challenge_reopen (challenge_id, reason, operation_id, new_operation_id, superseded_approval_id, created_at) VALUES (1, 'not_mergeable', 2, 3, 2, ?)`, []any{at}},
 			{`INSERT INTO cycle (trigger, started_at, budget_usd, spent_usd) VALUES ('manual', ?, 100000000, 1234567)`, []any{at}},
 			{`INSERT INTO lock (name, holder, pid, host, acquired_at, heartbeat_at) VALUES ('cycle', 1, 1, 'testhost', ?, ?)`, []any{at, at}},
 			{`INSERT INTO slot (repo, provider, path, state, run_id, attention_reason) VALUES ('o/r', 'local', '/tmp/slot', 'free', NULL, NULL)`, nil},

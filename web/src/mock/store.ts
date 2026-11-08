@@ -153,6 +153,8 @@ const op = (
 ): Operation => ({
   approved_head: null,
   challenge_id,
+  closed_at: null,
+  closed_reason: null,
   consecutive_failures: 0,
   created_at: iso(120),
   executed_at: null,
@@ -163,6 +165,8 @@ const op = (
   ref: null,
   state,
   summary,
+  superseded_by: null,
+  supersedes: null,
   version: 1,
   waiting_since: null,
 });
