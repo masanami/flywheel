@@ -175,8 +175,8 @@ test("⑥ 優先度 P0 の分類待ち・計画待ちは、線が無くても大
   const field = (dialog: Locator, name: string) =>
     dialog.locator(`.card-detail-fields dt:text-is("${name}") + dd`).first();
   for (const [id, status] of [
-    ["C-7", "classified"],
-    ["C-8", "unclassified"],
+    ["C-7", "分類済"],
+    ["C-8", "未分類"],
   ] as const) {
     await expect(node(graph, id)).toBeVisible();
     await node(graph, id).click();
