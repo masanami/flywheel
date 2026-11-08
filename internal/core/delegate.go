@@ -78,6 +78,9 @@ type DelegateLaunchInput struct {
 	ResumeFeedback string
 	// ResumeBranch は再開のブリーフに書く、報告のブランチ名（無ければ空）。
 	ResumeBranch string
+	// ResumeProblem は ResumeKind が interrupted で、再開元の run が子の報告の不備
+	// （invalid_output）で終わったときの、不備の理由（無ければ空）。
+	ResumeProblem string
 }
 
 // DelegationInvoker は core が定義する、委譲の起動 1 回の実行の IF
@@ -754,6 +757,10 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		launch.ResumeQuestion = dc.Resume.Question
 		launch.ResumeFeedback = dc.Resume.Feedback
 		launch.ResumeBranch = dc.Resume.Branch
+		if dc.Resume.Kind == ResumeKindInterrupted && dc.Resume.Target.Result == RunResultInvalidOutput &&
+			strings.HasPrefix(dc.Resume.Target.Error, invalidReportErrorPrefix) {
+			launch.ResumeProblem = strings.TrimPrefix(dc.Resume.Target.Error, invalidReportErrorPrefix)
+		}
 	}
 	output, invokeErr := s.invokeFnWithHeartbeat(ctx, runIDInt, func(ctx context.Context) (JudgmentLaunchOutput, error) {
 		return in.Delegate.InvokeDelegation(ctx, launch)
@@ -773,9 +780,12 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	}
 	var report *DelegationReport
 	if result == RunResultSucceeded {
-		r, ok := validateDelegationReport(output.StructuredOutput, in.ConnDecl.HumanQuestionKinds)
-		if !ok {
+		r, reason := checkDelegationReport(output.StructuredOutput, in.ConnDecl.HumanQuestionKinds)
+		if reason != "" {
 			result = RunResultInvalidOutput
+			if errSummary == "" {
+				errSummary = invalidReportErrorPrefix + reason
+			}
 		}
 		report = r
 	}
@@ -784,11 +794,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	recordCtx := context.WithoutCancel(ctx)
 	var recon *reconciliation
 	if result != RunResultLaunchFailed {
-		var reportBranch *string
-		if report != nil {
-			reportBranch = report.Branch
-		}
-		recon = s.gatherReconciliation(recordCtx, in, dc, assignment.Path, assignment.BaseBranch, reportBranch)
+		recon = s.gatherReconciliation(recordCtx, in, dc, assignment.Path, assignment.BaseBranch, result, report)
 	}
 	mismatch := output.SessionIDReturned != "" && output.SessionIDReturned != sessionID
 	costMicros, costSource := computeRunCost(result, output.ReportedTotalCostUSD, dc.Resume != nil, prevReportedMicros, dc.ImplBudgetMicros)

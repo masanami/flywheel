@@ -75,6 +75,21 @@ func runFakeGH(argv []string) int {
 {"html_url":"https://github.com/o/r/pull/3","title":"merged one","state":"closed","merged_at":"2026-10-01T00:00:00Z","base":{"ref":"main"}}
 ]`)
 		return 0
+	case "pull_one_open":
+		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"open one","state":"open","merged_at":null,"base":{"ref":"main"}}`)
+		return 0
+	case "pull_one_closed":
+		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"closed one","state":"closed","merged_at":null,"base":{"ref":"develop"}}`)
+		return 0
+	case "pull_one_merged":
+		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"merged one","state":"closed","merged_at":"2026-10-01T00:00:00Z","base":{"ref":"main"}}`)
+		return 0
+	case "pull_one_unknown_state":
+		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"x","state":"draft","merged_at":null,"base":{"ref":"main"}}`)
+		return 0
+	case "pull_one_no_base":
+		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"x","state":"open","merged_at":null,"base":{}}`)
+		return 0
 	case "pulls_two_pages":
 		return fakeGHPullsTwoPages(argv)
 	case "checks_pending", "checks_complete", "checks_merged", "checks_runs_fail":

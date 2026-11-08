@@ -157,6 +157,10 @@ type UpstreamBranchSource interface {
 	// ListPullRequestsByHead は repo の、branch を head とする PR を open・closed・
 	// merged のすべてについて返す。
 	ListPullRequestsByHead(ctx context.Context, repo, branch string) ([]UpstreamPullRequest, error)
+
+	// GetPullRequest は repo の number 番の PR を 1 件返す（open・closed・merged のいずれでも）。
+	// 見つからない・取得できない場合はエラー。
+	GetPullRequest(ctx context.Context, repo string, number int) (UpstreamPullRequest, error)
 }
 
 // UpstreamCheckStatusLegacy は旧式のコミットステータスを表す UpstreamCheck.Status の値。
