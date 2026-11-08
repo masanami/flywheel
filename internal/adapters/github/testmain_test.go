@@ -79,6 +79,21 @@ func runFakeGH(argv []string) int {
 		return fakeGHPullsTwoPages(argv)
 	case "checks_pending", "checks_complete", "checks_merged", "checks_runs_fail":
 		return fakeGHChecks(argv, os.Getenv(envScenario))
+	case "compare_ok":
+		fmt.Print("diff --git a/x b/x\n")
+		return 0
+	case "compare_too_large":
+		fmt.Fprintln(os.Stderr, "gh: Sorry, this diff is taking too long to generate. (HTTP 406)")
+		return 1
+	case "compare_too_slow":
+		fmt.Fprintln(os.Stderr, "gh: The diff is taking too long to generate. (HTTP 422)")
+		return 1
+	case "compare_not_found":
+		fmt.Fprintln(os.Stderr, "gh: Not Found (HTTP 404)")
+		return 1
+	case "compare_fail":
+		fmt.Fprintln(os.Stderr, "gh: Server Error (HTTP 500)")
+		return 1
 	case "merge_ok":
 		return 0
 	case "merge_fail":
@@ -491,7 +506,7 @@ func fakeGHChecks(argv []string, scenario string) int {
 		if v := os.Getenv(envMergeable); v != "" {
 			mergeable = v
 		}
-		fmt.Printf(`{"html_url":"https://github.com/o/r/pull/7","title":"t","state":%q,"merged_at":%s,"base":{"ref":"main"},"head":{"sha":"abc123"},"mergeable":%s,"merge_commit_sha":"mc456"}`, state, merged, mergeable)
+		fmt.Printf(`{"html_url":"https://github.com/o/r/pull/7","title":"t","state":%q,"merged_at":%s,"base":{"ref":"main","sha":"base456"},"head":{"sha":"abc123"},"mergeable":%s,"merge_commit_sha":"mc456"}`, state, merged, mergeable)
 		return 0
 	case strings.HasPrefix(endpoint, "repos/o/r/commits/abc123/check-runs"):
 		if scenario == "checks_runs_fail" {

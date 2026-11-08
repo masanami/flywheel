@@ -35,16 +35,24 @@ func listCommitStatusesURL(repo, sha string, page int) string {
 // ghGet は gh api の GET を 1 回行い、応答の本文を返す。失敗は what を添えたエラーにする。
 func (c *Client) ghGet(ctx context.Context, what, endpoint string) ([]byte, error) {
 	res := c.run(ctx, "api", endpoint)
-	if res.timedOut {
-		return nil, fmt.Errorf("adapters/github: %s timed out after %s: %w", what, c.timeout, context.DeadlineExceeded)
-	}
-	if res.ctxErr != nil {
-		return nil, fmt.Errorf("adapters/github: %s: %w", what, res.ctxErr)
-	}
-	if res.err != nil {
-		return nil, fmt.Errorf("adapters/github: %s: %w (%s)", what, res.err, strings.TrimSpace(string(res.stderr)))
+	if err := c.resultErr(what, res); err != nil {
+		return nil, err
 	}
 	return res.stdout, nil
+}
+
+// resultErr は gh の起動の結果の失敗を、what を添えたエラーにする（成功なら nil）。
+func (c *Client) resultErr(what string, res runResult) error {
+	if res.timedOut {
+		return fmt.Errorf("adapters/github: %s timed out after %s: %w", what, c.timeout, context.DeadlineExceeded)
+	}
+	if res.ctxErr != nil {
+		return fmt.Errorf("adapters/github: %s: %w", what, res.ctxErr)
+	}
+	if res.err != nil {
+		return fmt.Errorf("adapters/github: %s: %w (%s)", what, res.err, strings.TrimSpace(string(res.stderr)))
+	}
+	return nil
 }
 
 type rawPullHead struct {
@@ -54,6 +62,7 @@ type rawPullHead struct {
 	MergedAt *string `json:"merged_at"`
 	Base     struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"base"`
 	Head struct {
 		SHA string `json:"sha"`
@@ -100,7 +109,7 @@ func (c *Client) GetPullRequestChecks(ctx context.Context, repo string, number i
 	if state != "open" && state != "closed" && state != "merged" {
 		return core.UpstreamPullRequestChecks{}, fmt.Errorf("adapters/github: %s: unknown state %q", what, pr.State)
 	}
-	out := core.UpstreamPullRequestChecks{URL: pr.HTMLURL, Title: pr.Title, State: state, Base: pr.Base.Ref, HeadSHA: pr.Head.SHA,
+	out := core.UpstreamPullRequestChecks{URL: pr.HTMLURL, Title: pr.Title, State: state, Base: pr.Base.Ref, BaseSHA: pr.Base.SHA, HeadSHA: pr.Head.SHA,
 		Mergeable: pr.Mergeable, MergeCommitSHA: pr.MergeCommitSHA}
 
 	for page := 1; ; page++ {

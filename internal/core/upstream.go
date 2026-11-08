@@ -176,10 +176,12 @@ type UpstreamCheck struct {
 
 // UpstreamPullRequestChecks は PR 1 件の現在の状態と、head のコミットのチェック一覧。
 type UpstreamPullRequestChecks struct {
-	URL     string
-	Title   string
-	State   string // "open" | "closed" | "merged"
-	Base    string
+	URL   string
+	Title string
+	State string // "open" | "closed" | "merged"
+	Base  string
+	// BaseSHA は REST の `base.sha`（PR の比較の起点。base のブランチが進んでも消えても指せる）。
+	BaseSHA string
 	HeadSHA string
 	// Mergeable は REST の `mergeable`。nil は null（GitHub が計算中）、false はマージ不可、
 	// true はマージ可。`mergeable_state` は読まない。
@@ -214,4 +216,18 @@ type UpstreamPullRequestMerger interface {
 	// 依頼が成功しても merged になったことは保証しない（呼び出し側が読み取りで確かめる）。
 	// 終了コードが 0 でないときは失敗を返す。
 	MergePullRequest(ctx context.Context, prURL, method, matchHeadSHA string) error
+}
+
+// ErrUpstreamDiffUnavailable は、上流がその差分を返さない（大きすぎる・コミットが見つからない）ことを
+// 表す。やり直しても変わらないので、J5 を止めずに注記する。
+var ErrUpstreamDiffUnavailable = errors.New("the upstream does not return the diff")
+
+// UpstreamDiffSource は J5 の起動の前に core が呼ぶ、差分の取得 IF。実装は
+// internal/adapters/github が `gh api` の GET だけで行う。
+type UpstreamDiffSource interface {
+	// GetCompareDiff は repo（"<owner>/<name>"）の baseSHA と headSHA の共通の祖先から headSHA までの
+	// 差分（unified diff）を返す。PR の番号でもブランチでもなくコミットを指すので、取得の間に PR へ
+	// push されても、マージ済みでも、base のブランチが消えていても、固定した版の差分になる。
+	// 上流が返さないときは errors.Is(err, ErrUpstreamDiffUnavailable) が true のエラーを返す。
+	GetCompareDiff(ctx context.Context, repo, baseSHA, headSHA string) (string, error)
 }

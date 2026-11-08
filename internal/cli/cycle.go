@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -34,7 +33,8 @@ const defaultCycleTrigger = "manual"
 // 生きている別の cycle があれば core が locked を返す。周の中の run の失敗は結果に示すだけで、
 // 終了コードは 0 のまま。
 func runCycle(a Args) (any, error) {
-	ctx := context.Background()
+	ctx, stop := interruptContext()
+	defer stop()
 	ws := a.Store.Workspace()
 
 	// --trigger の指定の有無を区別する（`--trigger ""` を省略の manual に化けさせない。
@@ -117,10 +117,12 @@ func runCycle(a Args) (any, error) {
 		slotGit   core.SlotGit
 		reconcile core.UpstreamBranchSource
 		checks    core.UpstreamCheckSource
+		diffs     core.UpstreamDiffSource
+		headGit   core.HeadWorktreeGit
 	)
 	if hasConnectors {
 		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(), newCheckSource()
-		merger = newPullRequestMerger()
+		merger, diffs, headGit = newPullRequestMerger(), newDiffSource(), git.New()
 	}
 
 	// 周の開始を標準出力へ知らせる（UI の server が起動の合図として読む）。--json では書かない。
@@ -144,6 +146,8 @@ func runCycle(a Args) (any, error) {
 		Git:       slotGit,
 		Reconcile: reconcile,
 		Checks:    checks,
+		Diffs:     diffs,
+		HeadGit:   headGit,
 		Merger:    merger,
 		Predictor: launcher,
 		// backup の段の口。connectors.json の有無にかかわらず組み立てる。
