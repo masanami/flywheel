@@ -78,6 +78,7 @@ func runOpExec(a Args) (any, error) {
 	res, runErr := a.Store.ExecuteReleases(ctx, ids, core.ReleaseExecOptions{
 		Checks:     newCheckSource(),
 		Merger:     newPullRequestMerger(),
+		Compare:    newCompareSource(),
 		Connectors: conn,
 		Agent:      decl,
 		Trigger:    core.ReleaseExecTriggerOpExec,
@@ -101,7 +102,7 @@ func runOpExec(a Args) (any, error) {
 	}
 
 	return textOutput{
-		json: view.PhaseResponse{Phase: view.FromReleasePhase(false, res.Items, res.NotStarted)},
+		json: view.PhaseResponse{Phase: view.FromReleasePhase(false, res.Items, res.NotStarted, res.Tidied)},
 		text: releasePhaseText(res),
 	}, nil
 }
@@ -126,14 +127,25 @@ func withExecutedReleases(e *Error, items []core.ReleaseExecItem) *Error {
 
 // releasePhaseText は --json 無しの `op exec` の表示（形式の安定は保証しない）。
 func releasePhaseText(res *core.ReleaseExecResult) string {
-	if len(res.Items) == 0 && len(res.NotStarted) == 0 {
+	if len(res.Items) == 0 && len(res.NotStarted) == 0 && len(res.Tidied) == 0 {
 		return "実行の対象はありませんでした\n"
 	}
 	var b strings.Builder
+	for _, t := range res.Tidied {
+		switch t.Action {
+		case core.ReleaseTidyReopened:
+			fmt.Fprintf(&b, "%s\t%s\t(立て直し)\t課題を完了から着手中へ戻し、%s に置き換えた（%s）\n", t.OperationID, t.ChallengeID, t.NewOperationID, t.ReopenReason)
+		default:
+			fmt.Fprintf(&b, "%s\t%s\t(閉じた)\t%s\n", t.OperationID, t.ChallengeID, t.ClosedReason)
+		}
+	}
 	for _, it := range res.Items {
 		fmt.Fprintf(&b, "%s\t%s\t%s", it.OperationID, it.ChallengeID, it.Result)
 		if it.MergeCommit != "" {
 			b.WriteString("\t" + it.MergeCommit)
+		}
+		if it.Reopened {
+			fmt.Fprintf(&b, "\t課題を完了から着手中へ戻し、%s に置き換えた（%s）", it.NewOperationID, it.ReopenReason)
 		}
 		if it.Detail != "" {
 			b.WriteString("\t" + it.Detail)

@@ -374,6 +374,9 @@ func TestTransitionCommands_CasesMatchTableOperationsAndRegisteredCommands(t *te
 
 	wantOps := map[core.Operation]bool{}
 	for _, tr := range core.Table {
+		if tr.Restricted {
+			continue // T18 は専用の core の書き込みだけが使い、CLI のコマンドに対応しない。
+		}
 		switch tr.Op {
 		case core.OpCreate:
 			continue

@@ -101,9 +101,25 @@ type ReleaseItem struct {
 	ConsecutiveFailures int     `json:"consecutive_failures"`
 	Detail              string  `json:"detail,omitempty"`
 	MergeCommit         *string `json:"merge_commit"`
-	ObservedHead        *string `json:"observed_head"`
-	OperationID         string  `json:"operation_id"`
-	Result              string  `json:"result"`
+	// NewOperationID・ReopenReason は、結果が not_mergeable で課題が完了だったため、課題を着手中へ戻して release を
+	// 置き換えたときだけ出す（新しい release の ID と、戻した理由 not_mergeable | limit_reached）。
+	NewOperationID *string `json:"new_operation_id,omitempty"`
+	ObservedHead   *string `json:"observed_head"`
+	OperationID    string  `json:"operation_id"`
+	ReopenReason   *string `json:"reopen_reason,omitempty"`
+	Result         string  `json:"result"`
+}
+
+// ReleaseTidied は release の段の、承認待ちの release の片付け 1 件。action は closed（PR がマージ済みで closed にした。
+// closed_reason は merged_outside | merged_unapproved）か reopened（検証の後に中身が変わった PR の release を置き換え、
+// 完了の課題を着手中へ戻した。reopen_reason は content_changed、new_operation_id は新しい release）。
+type ReleaseTidied struct {
+	Action         string  `json:"action"`
+	ChallengeID    string  `json:"challenge_id"`
+	ClosedReason   *string `json:"closed_reason,omitempty"`
+	NewOperationID *string `json:"new_operation_id,omitempty"`
+	OperationID    string  `json:"operation_id"`
+	ReopenReason   *string `json:"reopen_reason,omitempty"`
 }
 
 // ReleasePhase は release の段（cycle の phases の要素と `op exec` の phase が共有する）の形。
@@ -112,6 +128,7 @@ type ReleasePhase struct {
 	NotStarted []ReleaseNotStarted `json:"not_started"`
 	Phase      string              `json:"phase"`
 	Skipped    bool                `json:"skipped"`
+	Tidied     []ReleaseTidied     `json:"tidied"`
 }
 
 // SerialGroup は委譲の段の serial_groups の要素。
@@ -260,10 +277,10 @@ func FromImprovePhase(items []core.ImproveItem, notStarted []core.NotStarted) Im
 }
 
 // FromReleasePhase は release の段の結果を変換する。
-func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []core.NotStarted) ReleasePhase {
+func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []core.NotStarted, tidied []core.ReleaseTidyItem) ReleasePhase {
 	outItems := make([]ReleaseItem, 0, len(items))
 	for _, it := range items {
-		outItems = append(outItems, ReleaseItem{
+		ri := ReleaseItem{
 			ApprovedHead:        strOrNil(it.ApprovedHead),
 			ChallengeID:         it.ChallengeID,
 			ConsecutiveFailures: it.ConsecutiveFailures,
@@ -272,19 +289,35 @@ func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []c
 			ObservedHead:        strOrNil(it.ObservedHead),
 			OperationID:         it.OperationID,
 			Result:              string(it.Result),
+		}
+		if it.Reopened {
+			ri.NewOperationID = strOrNil(it.NewOperationID)
+			ri.ReopenReason = strOrNil(string(it.ReopenReason))
+		}
+		outItems = append(outItems, ri)
+	}
+	outTidied := make([]ReleaseTidied, 0, len(tidied))
+	for _, t := range tidied {
+		outTidied = append(outTidied, ReleaseTidied{
+			Action:         string(t.Action),
+			ChallengeID:    t.ChallengeID,
+			ClosedReason:   strOrNil(string(t.ClosedReason)),
+			NewOperationID: strOrNil(t.NewOperationID),
+			OperationID:    t.OperationID,
+			ReopenReason:   strOrNil(string(t.ReopenReason)),
 		})
 	}
 	outNS := make([]ReleaseNotStarted, 0, len(notStarted))
 	for _, it := range notStarted {
 		outNS = append(outNS, ReleaseNotStarted{ChallengeID: it.ChallengeID, Detail: it.Detail, OperationID: it.OperationID, Reason: string(it.Reason)})
 	}
-	return ReleasePhase{Items: outItems, NotStarted: outNS, Phase: string(core.CyclePhaseRelease), Skipped: skipped}
+	return ReleasePhase{Items: outItems, NotStarted: outNS, Phase: string(core.CyclePhaseRelease), Skipped: skipped, Tidied: outTidied}
 }
 
 // FromCyclePhase は cycle の段 1 つを phases の要素へ変換する。
 func FromCyclePhase(p core.CyclePhaseResult) any {
 	if p.Phase == core.CyclePhaseRelease {
-		return FromReleasePhase(p.Skipped, p.ReleaseItems, p.NotStarted)
+		return FromReleasePhase(p.Skipped, p.ReleaseItems, p.NotStarted, p.ReleaseTidied)
 	}
 	if p.Phase == core.CyclePhaseBackup && p.Backup != nil {
 		return FromBackupPhase(*p.Backup)

@@ -673,6 +673,9 @@ func TestWorklog_CasesCoverEveryTransitionTableRow(t *testing.T) {
 		}
 	}
 	for _, row := range core.Table {
+		if row.Restricted {
+			continue // T18 は専用の core の書き込み（本番反映の段・承認の ①）だけが使い、CLI のコマンドに対応しない。core のテストが作業ログを検証する。
+		}
 		if !covered[row] {
 			t.Errorf("transition %s (from %q, op %q) has no case in worklogCases", row.ID, row.From, row.Op)
 		}

@@ -119,10 +119,12 @@ func runCycle(a Args) (any, error) {
 		checks    core.UpstreamCheckSource
 		diffs     core.UpstreamDiffSource
 		headGit   core.HeadWorktreeGit
+		compare   core.UpstreamCompareSource
 	)
 	if hasConnectors {
 		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(), newCheckSource()
 		merger, diffs, headGit = newPullRequestMerger(), newDiffSource(), git.New()
+		compare = newCompareSource()
 	}
 
 	// 周の開始を標準出力へ知らせる（UI の server が起動の合図として読む）。--json では書かない。
@@ -149,6 +151,7 @@ func runCycle(a Args) (any, error) {
 		Diffs:     diffs,
 		HeadGit:   headGit,
 		Merger:    merger,
+		Compare:   compare,
 		Predictor: launcher,
 		// backup の段の口。connectors.json の有無にかかわらず組み立てる。
 		WorkspaceGit: git.NewWorkspace(),
@@ -174,7 +177,7 @@ func cycleResultText(res *core.CycleRunResult) string {
 		case p.Skipped:
 			fmt.Fprintf(&b, "  %s: スキップ\n", p.Phase)
 		case p.Phase == core.CyclePhaseRelease:
-			fmt.Fprintf(&b, "  %s: 処理 %d 件・未起動 %d 件\n", p.Phase, len(p.ReleaseItems), len(p.NotStarted))
+			fmt.Fprintf(&b, "  %s: 処理 %d 件・片付け %d 件・未起動 %d 件\n", p.Phase, len(p.ReleaseItems), len(p.ReleaseTidied), len(p.NotStarted))
 		case p.Phase == core.CyclePhaseBackup && p.Backup != nil:
 			fmt.Fprintf(&b, "  %s: %s", p.Phase, p.Backup.Outcome)
 			if p.Backup.Commit != "" {
