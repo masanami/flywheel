@@ -58,7 +58,7 @@ test("① 取り下げの課題は取り下げの区分で、札「取り下げ�
   await expect(withdrawn).toBeVisible();
   expect(await categoryOf(withdrawn)).toBe("withdrawn");
   await expect(withdrawn.locator(".graph-node-withdrawn-tag")).toHaveText(
-    "取り下げ",
+    "取り下げ（わざと壊した期待値）",
   );
   await expect(withdrawn).toHaveAccessibleName(/取り下げ/);
 });
