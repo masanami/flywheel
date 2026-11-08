@@ -153,6 +153,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3CycleShape(t, &doc)
 	addM45ReleaseShape(t, &doc)
 	addM45DependencyShape(t, &doc)
+	addM2BindShape(t, &doc)
 	addM45WithdrawShape(t, &doc)
 	addM45LearnShape(t, &doc)
 	addM45ImproveShape(t, &doc)
@@ -365,6 +366,34 @@ func addM45DependencyShape(t *testing.T, doc *documentedJSON) {
 	}
 	doc.topLevel["dep add"] = []map[string]bool{keys}
 	doc.topLevel["dep rm"] = []map[string]bool{keys}
+}
+
+// addM2BindShape は `bind`・`unbind` の成功時の JSON の形を doc へ足す。m2 の §IF / API の
+// 「`bind`・`unbind` の `--json` の成功の出力は `{"challenge": {…}}` とし」の行から最上位のキーを読む
+// （challenge の要素の形は M1 の edit と同じなので、doc.entity["challenge"] が照合する）。
+func addM2BindShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m2-github-issue-ingest.md"))
+	if err != nil {
+		t.Fatalf("read m2 spec: %v", err)
+	}
+	var keys map[string]bool
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "`bind`・`unbind` の `--json` の成功の出力は") {
+			for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+				if strings.HasPrefix(m[1], "{") {
+					keys = topLevelKeys(m[1])
+					break
+				}
+			}
+			break
+		}
+	}
+	if len(keys) != 1 || !keys["challenge"] {
+		t.Fatalf("m2 spec's `bind`・`unbind` line does not document {\"challenge\": …}: %v", keys)
+	}
+	doc.topLevel["bind"] = []map[string]bool{keys}
+	doc.topLevel["unbind"] = []map[string]bool{keys}
 }
 
 // addM45WithdrawShape は `withdraw` の成功時の JSON の形を doc へ足す。m4.5 の受入基準

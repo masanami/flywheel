@@ -101,3 +101,16 @@ func TestClientMethods_CallerCancel_IsNotReportedAsTimeout(t *testing.T) {
 		t.Fatalf("CurrentLogin: want context.Canceled, got %v", err)
 	}
 }
+
+// issues の API は Pull Request も返す。GetIssue は一覧と同じく Issue ではないものとして
+// 「見つからない」にする（bind が PR を Issue として紐づけない）。
+func TestGetIssue_PullRequest_IsNotFound(t *testing.T) {
+	dir := newFakeGHDir(t)
+	t.Setenv(envScenario, "get_pull_request")
+
+	c := newTestClient(t, dir)
+	_, err := c.GetIssue(context.Background(), "masanami/flywheel", 7)
+	if !errors.Is(err, core.ErrUpstreamIssueNotFound) {
+		t.Fatalf("a pull request must be reported as not found: %v", err)
+	}
+}
