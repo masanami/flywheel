@@ -38,6 +38,8 @@ const RelationGraphSeedEnvVar = "FLYWHEEL_E2E_SEED_WORKSPACE"
 //	C-15 完了。C-16 の親（灰色で残る）
 //	C-16 人間の操作待ち（不可逆操作の承認）。C-15 の子
 //	C-17 取り下げ。線なし（既定で隠れる）
+//	C-18 完了。C-12（完了）の前提。動いている課題の前提でも親でもないので既定で隠れ、C-18 → C-12 の線も描かれない
+//	C-19 完了。C-11 の前提（灰色で残り、ほかの課題の大枠の中に置かれる）
 func TestRelationGraphSeed(t *testing.T) {
 	dir := os.Getenv(RelationGraphSeedEnvVar)
 	if dir == "" {
@@ -70,7 +72,8 @@ func TestRelationGraphSeed(t *testing.T) {
 	titles := []string{
 		"人間待ちの起点", "依存で 1 段先", "依存で 2 段先", "着手中の起点", "親子で 1 段先", "親子で 2 段先",
 		"P0 の計画待ち", "P0 の分類待ち", "線の無い計画待ち", "ほかのまとまりの先行", "ほかのまとまりの後続",
-		"完了した前提", "完了した孤立", "取り下げた前提", "完了した親", "完了した親の子で人間待ち", "取り下げた孤立",
+		"完了した前提", "完了した孤立", "C-3 の別の前提", "完了した親", "完了した親の子で人間待ち", "取り下げた孤立",
+		"完了した前提の前提", "ほかのまとまりの完了した前提",
 	}
 	for _, title := range titles {
 		_, err := st.CreateChallenge(ctx, core.ChannelCLI, core.CreateInput{Title: title, DoneCriteria: "d"})
@@ -85,12 +88,10 @@ func TestRelationGraphSeed(t *testing.T) {
 		must(err)
 	}
 	// 依存（後続 → 先行）
-	for to, from := range map[string]string{"C-1": "C-12", "C-2": "C-1", "C-11": "C-10"} {
-		_, err := st.AddDependencies(ctx, core.ChannelCLI, to, []string{from})
+	for to, from := range map[string][]string{"C-1": {"C-12"}, "C-2": {"C-1"}, "C-3": {"C-2", "C-14"}, "C-11": {"C-10", "C-19"}, "C-12": {"C-18"}} {
+		_, err := st.AddDependencies(ctx, core.ChannelCLI, to, from)
 		must(err)
 	}
-	_, err = st.AddDependencies(ctx, core.ChannelCLI, "C-3", []string{"C-2", "C-14"})
-	must(err)
 	// 親子（子 → 親）
 	for child, parent := range map[string]string{"C-5": "C-4", "C-6": "C-5", "C-16": "C-15"} {
 		must(st.SetParent(ctx, core.ChannelCLI, child, parent))
@@ -103,7 +104,7 @@ func TestRelationGraphSeed(t *testing.T) {
 	must(st.Close())
 
 	// 公開 API では作れない状態（完了・取り下げ・着手中・優先度つきの分類待ち）だけを直接書く。
-	for id, status := range map[int]string{4: "in_progress", 8: "unclassified", 12: "done", 13: "done", 14: "withdrawn", 15: "done", 17: "withdrawn"} {
+	for id, status := range map[int]string{4: "in_progress", 8: "unclassified", 12: "done", 13: "done", 14: "withdrawn", 15: "done", 17: "withdrawn", 18: "done", 19: "done"} {
 		coretest.SetChallengeStatus(t, dir, id, status)
 	}
 
@@ -155,7 +156,7 @@ func assertRelationGraphSeed(t *testing.T, dir string) {
 	wantCategory := map[string][]string{
 		"human":     {"C-1", "C-16"},
 		"system":    {"C-2", "C-3", "C-4", "C-5", "C-6", "C-7", "C-8", "C-9", "C-10", "C-11"},
-		"done":      {"C-12", "C-13", "C-15"},
+		"done":      {"C-12", "C-13", "C-15", "C-18", "C-19"},
 		"withdrawn": {"C-14", "C-17"},
 	}
 	if !reflect.DeepEqual(byCategory, wantCategory) {
@@ -166,7 +167,7 @@ func assertRelationGraphSeed(t *testing.T, dir string) {
 		"classified":     {"C-2", "C-3", "C-5", "C-7", "C-9", "C-10", "C-11"},
 		"in_progress":    {"C-4"},
 		"unclassified":   {"C-6", "C-8", "C-16"},
-		"done":           {"C-12", "C-13", "C-15"},
+		"done":           {"C-12", "C-13", "C-15", "C-18", "C-19"},
 		"withdrawn":      {"C-14", "C-17"},
 	}
 	if !reflect.DeepEqual(byState, wantState) {
@@ -188,7 +189,7 @@ func assertRelationGraphSeed(t *testing.T, dir string) {
 			t.Errorf("edge %s→%s kind = %s", e.From, e.To, e.Kind)
 		}
 	}
-	if want := [][2]string{{"C-1", "C-2"}, {"C-2", "C-3"}, {"C-10", "C-11"}, {"C-12", "C-1"}, {"C-14", "C-3"}}; !reflect.DeepEqual(edges, want) {
+	if want := [][2]string{{"C-1", "C-2"}, {"C-2", "C-3"}, {"C-10", "C-11"}, {"C-12", "C-1"}, {"C-14", "C-3"}, {"C-18", "C-12"}, {"C-19", "C-11"}}; !reflect.DeepEqual(edges, want) {
 		t.Errorf("edges = %v, want %v", edges, want)
 	}
 }

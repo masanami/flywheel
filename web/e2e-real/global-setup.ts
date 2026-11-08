@@ -20,23 +20,59 @@ const SEED_ENV = "FLYWHEEL_E2E_SEED_WORKSPACE";
 function waitForListening(serve: ChildProcess): Promise<string> {
   return new Promise((ok, fail) => {
     let err = "";
+    const done = (f: () => void) => {
+      clearTimeout(timer);
+      serve.stderr?.off("data", onData);
+      serve.off("exit", onExit);
+      serve.off("error", onError);
+      f();
+    };
     const timer = setTimeout(
-      () => fail(new Error(`serve が 30 秒で待ち受けを始めない:\n${err}`)),
+      () =>
+        done(() =>
+          fail(new Error(`serve が 30 秒で待ち受けを始めない:\n${err}`)),
+        ),
       30_000,
     );
-    serve.stderr?.on("data", (chunk: Buffer) => {
+    // 行の終わりまで読んでから番地を取る（途中で切れた番地を拾わない）
+    const onData = (chunk: Buffer) => {
       err += chunk.toString();
-      const m = err.match(/listening on (\S+)/);
+      const m = err.match(/listening on (\S+)\r?\n/);
       if (m?.[1]) {
-        clearTimeout(timer);
-        ok(m[1]);
+        const addr = m[1];
+        done(() => ok(addr));
       }
-    });
-    serve.on("exit", (code) => {
-      clearTimeout(timer);
-      fail(new Error(`serve が終了した（終了コード ${code}）:\n${err}`));
-    });
+    };
+    const onExit = (code: number | null, signal: string | null) =>
+      done(() =>
+        fail(
+          new Error(
+            `serve が終了した（終了コード ${code}・シグナル ${signal}）:\n${err}`,
+          ),
+        ),
+      );
+    const onError = (e: Error) =>
+      done(() => fail(new Error(`serve を起動できない: ${e.message}\n${err}`)));
+    serve.stderr?.on("data", onData);
+    serve.on("exit", onExit);
+    serve.on("error", onError);
   });
+}
+
+// serve を止める。既に終わっていれば何もしない。止まらなければ 10 秒で SIGKILL を送る
+async function stopServe(serve: ChildProcess): Promise<void> {
+  // 起動できなかった（pid が無い）・既に終わっているときは、exit を待たない
+  if (
+    serve.pid === undefined ||
+    serve.exitCode !== null ||
+    serve.signalCode !== null
+  )
+    return;
+  const exited = new Promise<void>((ok) => serve.once("exit", () => ok()));
+  serve.kill("SIGTERM");
+  const timer = setTimeout(() => serve.kill("SIGKILL"), 10_000);
+  await exited;
+  clearTimeout(timer);
 }
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
@@ -52,42 +88,39 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const workspace = join(root, "seed");
   for (const d of [home, xdg, cwd]) mkdirSync(d, { recursive: true });
 
-  execFileSync(
-    "go",
-    ["test", "-count=1", "-run", "^TestRelationGraphSeed$", "./internal/core/"],
-    {
-      cwd: repoRoot,
-      env: { ...process.env, [SEED_ENV]: workspace },
-      stdio: "inherit",
-    },
-  );
-
-  const serve = spawn(
-    binary,
-    ["serve", "--port", "0", "--workspace", workspace],
-    {
+  let serve: ChildProcess | undefined;
+  try {
+    execFileSync(
+      "go",
+      [
+        "test",
+        "-count=1",
+        "-run",
+        "^TestRelationGraphSeed$",
+        "./internal/core/",
+      ],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, [SEED_ENV]: workspace },
+        stdio: "inherit",
+      },
+    );
+    serve = spawn(binary, ["serve", "--port", "0", "--workspace", workspace], {
       cwd,
       env: { ...process.env, HOME: home, XDG_CONFIG_HOME: xdg },
       stdio: ["ignore", "inherit", "pipe"],
-    },
-  );
-  let addr: string;
-  try {
-    addr = await waitForListening(serve);
+    });
+    const addr = await waitForListening(serve);
+    serve.stderr?.on("data", (chunk: Buffer) => process.stderr.write(chunk));
+    process.env[BASE_URL_ENV] = `http://${addr}`;
   } catch (e) {
-    serve.kill("SIGTERM");
+    if (serve) await stopServe(serve);
     rmSync(root, { recursive: true, force: true });
     throw e;
   }
-  serve.stderr?.on("data", (chunk: Buffer) => process.stderr.write(chunk));
-  process.env[BASE_URL_ENV] = `http://${addr}`;
-
+  const started = serve;
   return async () => {
-    if (serve.exitCode === null) {
-      const exited = new Promise((ok) => serve.once("exit", ok));
-      serve.kill("SIGTERM");
-      await exited;
-    }
+    await stopServe(started);
     rmSync(root, { recursive: true, force: true });
   };
 }
