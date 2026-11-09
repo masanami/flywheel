@@ -191,6 +191,9 @@ type ChallengeDetail struct {
 	// 無ければ空スライス（nil でない）。
 	Dependencies []DependencyView
 	Dependents   []string
+	// Waiting は課題が待っている理由（まだ終わっていない前提の課題と、衝突のため後回しにした相手）。
+	// ボードの詳細（API）だけが読む。
+	Waiting WaitingReasons
 	// FollowupOf はJ6 のフォローアップで起票した課題の元の課題の ID（challenge.followup_of。S3。applyJ6 が設定）。無ければ nil。
 	FollowupOf *string
 	// Improvement は改修課題（origin=improvement）の改修の鍵。改修課題でなければ nil。
@@ -819,6 +822,10 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		detail.Dependents, err = loadDependents(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		detail.Waiting, err = loadWaitingReasons(ctx, tx, cid, c.Status, eval)
 		if err != nil {
 			return err
 		}

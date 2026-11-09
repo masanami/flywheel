@@ -112,6 +112,7 @@ func TestBrowseAPI_EqualsCLI(t *testing.T) {
 	}
 	m = decodeMap(t, body)
 	delete(m, "card")
+	delete(m, "waiting") // API 専用（CLI の show には無い）
 	b, _ = json.Marshal(m)
 	sameJSON(t, string(b), cliJSON(t, ws, "show", "C-1"))
 

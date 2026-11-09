@@ -1,0 +1,164 @@
+{
+  "graph": {
+    "edges": [
+      {
+        "directed": false,
+        "from": "C-2",
+        "kind": "conflict",
+        "registered_at": "2026-11-05T01:02:03.000Z",
+        "registered_via": "prediction",
+        "satisfied": false,
+        "to": "C-3"
+      },
+      {
+        "directed": true,
+        "from": "C-4",
+        "kind": "conflict",
+        "registered_at": "2026-11-05T01:02:03.000Z",
+        "registered_via": "prediction",
+        "satisfied": false,
+        "to": "C-6"
+      },
+      {
+        "directed": true,
+        "from": "C-5",
+        "kind": "prerequisite",
+        "registered_at": "2026-11-02T00:00:00.000Z",
+        "registered_via": "manual",
+        "satisfied": false,
+        "to": "C-4"
+      }
+    ],
+    "nodes": [
+      {
+        "category": "system",
+        "context": null,
+        "headline": null,
+        "id": "C-1",
+        "next_human_actions": [],
+        "parent_id": null,
+        "priority": null,
+        "running": false,
+        "stale": false,
+        "state": "verifying",
+        "title": "t"
+      },
+      {
+        "category": "human",
+        "context": null,
+        "headline": null,
+        "id": "C-2",
+        "next_human_actions": [
+          "triage",
+          "approve_operation",
+          "review_discrepancy"
+        ],
+        "parent_id": null,
+        "priority": null,
+        "running": false,
+        "stale": false,
+        "state": "unclassified",
+        "title": "c2"
+      },
+      {
+        "category": "human",
+        "context": null,
+        "headline": null,
+        "id": "C-3",
+        "next_human_actions": [
+          "increase_budget",
+          "review_discrepancy",
+          "clear_slot"
+        ],
+        "parent_id": null,
+        "priority": null,
+        "running": true,
+        "stale": true,
+        "state": "in_progress",
+        "title": "c3"
+      },
+      {
+        "category": "system",
+        "context": null,
+        "headline": null,
+        "id": "C-4",
+        "next_human_actions": [],
+        "parent_id": null,
+        "priority": null,
+        "running": true,
+        "stale": false,
+        "state": "in_progress",
+        "title": "c4"
+      },
+      {
+        "category": "system",
+        "context": null,
+        "headline": null,
+        "id": "C-5",
+        "next_human_actions": [],
+        "parent_id": "C-1",
+        "priority": null,
+        "running": true,
+        "stale": false,
+        "state": "in_progress",
+        "title": "c5"
+      },
+      {
+        "category": "system",
+        "context": null,
+        "headline": null,
+        "id": "C-6",
+        "next_human_actions": [],
+        "parent_id": "C-1",
+        "priority": null,
+        "running": true,
+        "stale": true,
+        "state": "in_progress",
+        "title": "c6"
+      },
+      {
+        "category": "withdrawn",
+        "context": null,
+        "headline": null,
+        "id": "C-7",
+        "next_human_actions": [],
+        "parent_id": null,
+        "priority": "P0",
+        "running": false,
+        "stale": false,
+        "state": "withdrawn",
+        "title": "c7"
+      }
+    ]
+  },
+  "waiting": {
+    "C-2": {
+      "conflicts": [],
+      "prerequisites": []
+    },
+    "C-3": {
+      "conflicts": [],
+      "prerequisites": []
+    },
+    "C-4": {
+      "conflicts": [
+        {
+          "challenge_id": "C-6",
+          "status": "in_progress",
+          "title": "c6"
+        }
+      ],
+      "prerequisites": [
+        {
+          "challenge_id": "C-5",
+          "status": "in_progress",
+          "title": "c5"
+        }
+      ]
+    },
+    "C-6": {
+      "conflicts": [],
+      "prerequisites": []
+    }
+  }
+}

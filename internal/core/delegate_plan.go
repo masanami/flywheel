@@ -308,7 +308,8 @@ func (s *Store) predictRepo(ctx context.Context, in DelegateInput, repo Connecto
 		sort.SliceStable(reasons, func(i, j int) bool { return reasonIndex(reasons[i]) < reasonIndex(reasons[j]) })
 		return repoPrediction{FailClosed: reasons, HeadSHA: res.Output.HeadSHA}, nil
 	}
-	return repoPrediction{Output: res.Output, HeadSHA: res.Output.HeadSHA}, nil
+	runID, _ := parseRunID(res.RunID)
+	return repoPrediction{Output: res.Output, HeadSHA: res.Output.HeadSHA, RunID: runID}, nil
 }
 
 func reasonIndex(r SerialGroupReason) int {
@@ -372,6 +373,10 @@ func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []
 		if err != nil {
 			return nil, err
 		}
+		// 予測が得られたときだけ、衝突の記録（challenge_conflict）を最新の結果で置き換える。
+		// 直列化の判断は記録を読まない（記録は表示のため）。
+		// 記録の失敗は委譲を止めない（衝突は着手の門にしない。記録は表示のため）。
+		_ = s.recordConflicts(ctx, in.CycleID, pred.RunID, running[repo.Name], cands, pred.Output)
 		plan.groups = append(plan.groups, buildRepoGroups(repo.Name, running[repo.Name], cands, pred)...)
 	}
 	return plan, nil

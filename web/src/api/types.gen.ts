@@ -414,6 +414,18 @@ export interface ShowCardResponse {
   runs: Run[];
   source_binding: SourceBinding | null;
   stages: Stages;
+  waiting: Waiting;
+}
+
+export interface Waiting {
+  conflicts: WaitingChallenge[];
+  prerequisites: WaitingChallenge[];
+}
+
+export interface WaitingChallenge {
+  challenge_id: string;
+  status: string;
+  title: string;
 }
 
 export interface NeedsHumanResponse {
@@ -507,6 +519,7 @@ export interface GraphResponse {
 }
 
 export interface GraphEdge {
+  directed: boolean;
   from: string;
   kind: string;
   registered_at: string;
@@ -588,4 +601,5 @@ export const GRAPH_REGISTERED_VIA_CODES = [
   "plan",
   "manual",
   "unknown",
+  "prediction",
 ] as const;

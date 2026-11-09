@@ -23,6 +23,7 @@ import {
   pairsOf,
   statusOf,
   toCard,
+  waitingOf,
 } from "./store.ts";
 
 // 偽のサーバが返す見出し（本物は internal/view の ConditionsAfterReleaseHeading。UI の承認は本番反映を承認しない側）
@@ -94,6 +95,7 @@ export function createMockApi(
         pairs: pairsOf(m.stages),
         source_binding: null,
         stages: m.stages,
+        waiting: waitingOf(wsOf(name), id),
       };
     },
     async log(name, id): Promise<LogResponse> {
@@ -259,6 +261,7 @@ export function createMockApi(
         pairs: pairsOf(m.stages),
         source_binding: null,
         stages: m.stages,
+        waiting: waitingOf(wsOf(name), id),
       };
     },
     async cycle(name) {

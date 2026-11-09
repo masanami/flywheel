@@ -13,6 +13,7 @@ import {
   categoryOf,
   chipLines,
   chipText,
+  conflictNotesOf,
   downstreamOf,
   fitChips,
   focusOf,
@@ -20,6 +21,7 @@ import {
   humanChips,
   layoutGraph,
   minChipRoom,
+  neighborsOf,
   othersOf,
   parentMap,
   reasonText,
@@ -65,6 +67,7 @@ const node = (id: string, over: Partial<GraphNode> = {}): GraphNode => ({
   ...over,
 });
 const edge = (from: string, to: string, over: Partial<GraphEdge> = {}) => ({
+  directed: true,
   from,
   kind: "prerequisite",
   registered_at: "2026-11-01T00:00:00.000Z",
@@ -817,6 +820,207 @@ it("配置: 大枠の中の親子は入れ子のまま、畳んだ親は大枠�
     isOther,
   );
   expect(nested.nodes.find((n) => n.id === "C-3")?.depth).toBe(2);
+});
+
+// --- 衝突の辺（kind=conflict）。from＝後回しにした課題、to＝先に委譲した課題で、前提の辺と向きが逆になる ---
+
+// 衝突の辺（API の from が後回し・to が先に委譲）。
+const conflictEdge = (
+  from: string,
+  to: string,
+  over: Partial<GraphEdge> = {},
+) =>
+  edge(from, to, {
+    kind: "conflict",
+    registered_via: "prediction",
+    ...over,
+  });
+
+it("衝突の辺: 前提の依存とは別の種類の関係になり、from が後回し・to が先に委譲のまま持つ", () => {
+  const g: GraphResponse = {
+    nodes: [node("C-408"), node("C-409")],
+    edges: [conflictEdge("C-409", "C-408"), edge("C-408", "C-410")],
+  };
+  const rels = relationsOf(g);
+  expect(rels.map((r) => [r.kind, r.from, r.to])).toEqual([
+    ["conflicts_with", "C-409", "C-408"],
+    ["depends_on", "C-408", "C-410"],
+  ]);
+  expect(basisOf([rels[0] as ChallengeRelation])).toBe("conflict");
+  expect(basisOf([rels[1] as ChallengeRelation])).toBe("prerequisite");
+});
+
+it("衝突の辺: 先行・後続・上流・下流・前提として残す終わった課題に数えない", () => {
+  const g: GraphResponse = {
+    nodes: [
+      node("C-1", { category: "done", state: "done" }),
+      node("C-2"),
+      node("C-3"),
+    ],
+    edges: [conflictEdge("C-2", "C-1"), conflictEdge("C-2", "C-3")],
+  };
+  const rels = relationsOf(g);
+  for (const id of ["C-1", "C-2", "C-3"]) {
+    const near = neighborsOf(id, rels);
+    expect([near.predecessors, near.successors]).toEqual([[], []]);
+    expect(upstreamOf(id, rels)).toEqual([]);
+    expect(downstreamOf(id, rels)).toEqual([]);
+  }
+  // 終わった C-1 は、動いている C-2 の「衝突の相手」であっても前提ではないので、既定では隠れる
+  expect(visibleIds(g.nodes, rels, false)).toEqual(["C-2", "C-3"]);
+});
+
+it("衝突の辺: 後回しにした側・先に委譲した側・向きの無い組を、課題ごとに別の言い方で返す", () => {
+  const g: GraphResponse = {
+    nodes: [node("C-1"), node("C-2"), node("C-3"), node("C-4")],
+    edges: [
+      conflictEdge("C-2", "C-1"),
+      conflictEdge("C-3", "C-1"),
+      conflictEdge("C-2", "C-4", { directed: false }),
+    ],
+  };
+  const rels = relationsOf(g);
+  expect(conflictNotesOf("C-2", rels)).toEqual([
+    { kind: "yields", id: "C-1" },
+    { kind: "undirected", id: "C-4" },
+  ]);
+  expect(conflictNotesOf("C-1", rels)).toEqual([
+    { kind: "preferred", id: "C-2" },
+    { kind: "preferred", id: "C-3" },
+  ]);
+  expect(conflictNotesOf("C-4", rels)).toEqual([
+    { kind: "undirected", id: "C-2" },
+  ]);
+});
+
+it("衝突の辺: 配置の層を決めず、両端の課題を関係の無い課題にせず、向きの有無を線に持つ", () => {
+  const l = layoutGraph(
+    ["C-1", "C-2", "C-3", "C-4", "C-9"],
+    [
+      {
+        from: "C-2",
+        kind: "conflicts_with",
+        to: "C-1",
+        edge: conflictEdge("C-2", "C-1"),
+      },
+      {
+        from: "C-3",
+        kind: "conflicts_with",
+        to: "C-4",
+        edge: conflictEdge("C-3", "C-4", { directed: false }),
+      },
+    ],
+    D,
+  );
+  // 衝突は層を決めない（全員が同じ層）。ただし線を持つので関係の無い課題の段には入らない
+  expect(l.isolated).toEqual(["C-9"]);
+  const layer = Object.fromEntries(l.nodes.map((n) => [n.id, n.layer]));
+  expect(layer).toEqual({ "C-1": 0, "C-2": 0, "C-3": 0, "C-4": 0, "C-9": -1 });
+  expect(l.hasCycle).toBe(false);
+  expect(l.edges.map((e) => [e.from, e.to, e.basis, e.directed])).toEqual([
+    ["C-2", "C-1", "conflict", true],
+    ["C-3", "C-4", "conflict", false],
+  ]);
+});
+
+it("衝突の辺: 前提の線と合わせて循環に見えても配置は壊れず、矢印は後回しの箱から先に委譲の箱へ向かう", () => {
+  // C-2 は C-1 を前提に持ち（C-1 が上）、同時に C-1 に譲る衝突（C-2 → C-1）を持つ
+  const l = layoutGraph(
+    ["C-1", "C-2"],
+    [
+      dep("C-1", "C-2"),
+      {
+        from: "C-2",
+        kind: "conflicts_with",
+        to: "C-1",
+        edge: conflictEdge("C-2", "C-1"),
+      },
+    ],
+    D,
+  );
+  expect(l.hasCycle).toBe(false);
+  const layer = Object.fromEntries(l.nodes.map((n) => [n.id, n.layer]));
+  expect(layer).toEqual({ "C-1": 0, "C-2": 1 });
+  const conflict = l.edges.find((e) => e.basis === "conflict");
+  const prereq = l.edges.find((e) => e.basis === "prerequisite");
+  expect([conflict?.from, conflict?.to]).toEqual(["C-2", "C-1"]);
+  expect([prereq?.from, prereq?.to]).toEqual(["C-1", "C-2"]);
+  // 下の C-2 の上端から、上の C-1 の下端へ（上向きの線）。path は M x1 y1 C … x2 y2
+  const c1 = l.nodes.find((n) => n.id === "C-1");
+  const c2 = l.nodes.find((n) => n.id === "C-2");
+  const nums = (conflict?.path.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+  expect([nums[1], nums[nums.length - 1]]).toEqual([
+    c2?.y,
+    (c1?.y ?? 0) + (c1?.h ?? 0),
+  ]);
+});
+
+it("衝突の辺: 同じ層に並ぶ二つの箱の線は、向かい合う側面をつなぐ", () => {
+  const l = layoutGraph(
+    ["C-1", "C-2"],
+    [
+      {
+        from: "C-2",
+        kind: "conflicts_with",
+        to: "C-1",
+        edge: conflictEdge("C-2", "C-1"),
+      },
+    ],
+    D,
+  );
+  const e = l.edges[0];
+  const a = l.nodes.find((n) => n.id === "C-2");
+  const b = l.nodes.find((n) => n.id === "C-1");
+  const nums = (e?.path.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+  const [x1, y1] = [nums[0], nums[1]];
+  const [x2, y2] = [nums[nums.length - 2], nums[nums.length - 1]];
+  // 左右に並ぶので、y は箱の高さの中央、x は向かい合う側面
+  expect(y1).toBe((a?.y ?? 0) + (a?.h ?? 0) / 2);
+  expect(y2).toBe((b?.y ?? 0) + (b?.h ?? 0) / 2);
+  const aRight = (a?.x ?? 0) < (b?.x ?? 0);
+  expect(x1).toBe(aRight ? (a?.x ?? 0) + (a?.w ?? 0) : a?.x);
+  expect(x2).toBe(aRight ? b?.x : (b?.x ?? 0) + (b?.w ?? 0));
+});
+
+it("衝突の辺: 注目の範囲は衝突の線でもつながる（起点と衝突する課題は注目のまとまり）", () => {
+  const nodes = [
+    node("C-1", {
+      category: "human",
+      next_human_actions: ["approve_plan"],
+      state: "awaiting_plan_approval",
+    }),
+    node("C-2", { state: "classified" }),
+    node("C-3", { state: "classified" }),
+  ];
+  const g: GraphResponse = { nodes, edges: [conflictEdge("C-2", "C-1")] };
+  const rels = relationsOf(g);
+  const f = focusOf(["C-1", "C-2", "C-3"], rels, nodes);
+  expect([...f.keys()].sort()).toEqual(["C-1", "C-2"]);
+  expect(othersOf(["C-1", "C-2", "C-3"], rels, nodes)).toEqual(["C-3"]);
+});
+
+it("衝突の理由の文: 後回しにした相手と予測の記録を言い、満たされているかは言わない。向きの無い組は向きが未定", () => {
+  const directed = relationsOf({
+    nodes: [],
+    edges: [
+      conflictEdge("C-409", "C-408", {
+        registered_at: "2026-11-05T01:02:03.000Z",
+      }),
+    ],
+  })[0] as ChallengeRelation;
+  const text = reasonText(directed);
+  expect(text).toContain("同時に走らせると衝突する");
+  expect(text).toContain("衝突の予測で記録");
+  expect(text).toContain("C-409 を後回しにして C-408 を先に委譲");
+  expect(text).not.toContain("満たされ");
+  expect(chipLines(directed)[1]).toContain("C-409 は C-408 の後に回す");
+  const free = relationsOf({
+    nodes: [],
+    edges: [conflictEdge("C-1", "C-2", { directed: false })],
+  })[0] as ChallengeRelation;
+  expect(reasonText(free)).toContain("どちらを先にするかはまだ決まっていない");
+  expect(chipLines(free)[1]).toContain("向きは未定");
+  expect(chipText(free)).not.toContain("満たされ");
 });
 
 it("注目: 親のエージェントが動く番の課題は起点になり、線が無くても「ほかの課題」に隠れない", () => {

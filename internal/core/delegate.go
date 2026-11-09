@@ -749,6 +749,10 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		if !ok {
 			return 0, fmt.Errorf("core: malformed run id %q", row.ID)
 		}
+		// 委譲を起動した課題との向きの無い衝突の組に、「相手 → この課題」の向きを付ける（run の記録と同じ書き込み）。
+		if err := orientConflictsTx(ctx, tx, cid); err != nil {
+			return 0, err
+		}
 		return n, nil
 	}
 	assignment, err := s.acquireDelegationSlot(ctx, in, dc, bind)
