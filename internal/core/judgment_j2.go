@@ -51,14 +51,15 @@ type j2RawOutput struct {
 	DependsOn []string `json:"depends_on"`
 	// NoIssuesNeeded は plan のときの省略可の「論点は不要」の決定（#450）。中身の検査は
 	// normalizeNoIssuesNeeded が行う（空・欠けは出力全体を不正にせず、論点なしと同じに扱う）。
-	NoIssuesNeeded []J2NoIssuesDecision `json:"no_issues_needed"`
+	NoIssuesNeeded []j2NoIssuesEntry `json:"no_issues_needed"`
 }
 
-// J2NoIssuesDecision は J2 が「論点は不要」とするときの、決まっていること 1 つ。
+// j2NoIssuesEntry は J2 が「論点は不要」とするときの、決まっていること 1 つ。出力の読み取りと
+// 計画の本文の組み立てにだけ使う core の内部の型（#469 で公開をやめた。core の外では使わない）。
 // 中身（Content）・引用元の種別（SourceKind。J2SourceKindValues の値）・引用の文（Quote）の
 // すべてが空白除去後に非空のときだけ有効。core は引用が本文に実在するかを照合しない
 // （取り違えは、計画の本文に並べた引用を見た人が差し戻しで直す）。
-type J2NoIssuesDecision struct {
+type j2NoIssuesEntry struct {
 	Content    string       `json:"content"`
 	SourceKind J2SourceKind `json:"source_kind"`
 	Quote      string       `json:"quote"`
@@ -66,11 +67,11 @@ type J2NoIssuesDecision struct {
 
 // normalizeNoIssuesNeeded は決定の列を検査する。1 件以上あり、どれも有効なときだけ（空白を
 // 除いた）列を返し、空・欠け・閉集合の外が 1 件でもあれば nil（論点の記録として数えない）。
-func normalizeNoIssuesNeeded(in []J2NoIssuesDecision) []J2NoIssuesDecision {
+func normalizeNoIssuesNeeded(in []j2NoIssuesEntry) []j2NoIssuesEntry {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]J2NoIssuesDecision, 0, len(in))
+	out := make([]j2NoIssuesEntry, 0, len(in))
 	for _, d := range in {
 		d.Content = strings.TrimSpace(d.Content)
 		d.Quote = strings.TrimSpace(d.Quote)
@@ -124,7 +125,7 @@ type j2ValidatedOutput struct {
 	DependsOn []string
 	// NoIssuesNeeded は plan のときの有効な「論点は不要」の決定（検査済み。無い・無効は nil）。
 	// サイズ M・L の計画では、課題に論点の記録が無くてもこれがあれば計画を登録する。
-	NoIssuesNeeded []J2NoIssuesDecision
+	NoIssuesNeeded []j2NoIssuesEntry
 	// Spec は構造化した出力の JSON を空白を除いて詰めたもの（task_plan.spec。
 	// null の額も出力のまま残す＝「spec は構造化した出力と一致する」）。
 	Spec []byte
@@ -1298,31 +1299,15 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 		jc = NewJudgmentCycle(in.CycleID)
 	}
 	for _, cid := range targetIDs {
-		ch, err := s.loadChallengeForAuto(ctx, formatChallengeID(cid))
+		ch, ns, err := s.j2AutoPreLaunch(ctx, in, cid)
 		if err != nil {
 			return nil, err
 		}
-		if ch.Status != StatusClassified {
-			// 同じ周の中で並行して状態が変わった（例: 人間が先に計画を登録した）。
+		if ns != nil {
+			result.NotStarted = append(result.NotStarted, *ns)
 			continue
 		}
-		excluded, err := s.j2StillEligibleForAuto(ctx, cid)
-		if err != nil {
-			return nil, err
-		}
-		if excluded != nil {
-			result.NotStarted = append(result.NotStarted, *excluded)
-			continue
-		}
-		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ2, StatusClassified, in.AgentDecl, in.CycleID)
-		if err != nil {
-			return nil, err
-		}
-		if skip {
-			continue
-		}
-		if held != nil {
-			result.NotStarted = append(result.NotStarted, *held)
+		if ch == nil {
 			continue
 		}
 		items, notStarted, err := s.planOneJ2(ctx, in, jc, *ch)
@@ -1340,15 +1325,43 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 	return result, nil
 }
 
+// j2AutoPreLaunch は ID を省略した自動の対象で J2 を起動する直前の検査（PlanAutoJ2 の 1 回目の前と、
+// planOneJ2 の問い直しの前が共有する。#469）。課題を読み直し、分類済でなければ (nil, nil, nil)
+// （並行して状態が変わった。例: 人間が先に計画を登録した＝起動しない）。取り込み元の状態で外れれば
+// その理由、連続失敗の上限に達していれば課題を保留に置いて failure_limit を NotStarted に返す。
+// 保留に置く前に課題が対象でなくなっていれば (nil, nil, nil)。起動してよければ読み直した課題を返す。
+func (s *Store) j2AutoPreLaunch(ctx context.Context, in J2AutoInput, cid int64) (*Challenge, *NotStarted, error) {
+	ch, err := s.loadChallengeForAuto(ctx, formatChallengeID(cid))
+	if err != nil {
+		return nil, nil, err
+	}
+	if ch.Status != StatusClassified {
+		return nil, nil, nil
+	}
+	excluded, err := s.j2StillEligibleForAuto(ctx, cid)
+	if err != nil || excluded != nil {
+		return nil, excluded, err
+	}
+	held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ2, StatusClassified, in.AgentDecl, in.CycleID)
+	if err != nil || held != nil || skip {
+		return nil, held, err
+	}
+	return ch, nil, nil
+}
+
 // planOneJ2 は課題 1 件の J2 を実行する。jc が非 nil なら周の枠超過・周の上限の
 // 扱いを JudgmentCycle に任せ（NotStarted を返す）、nil（ID を指定した個別の操作）
 // なら周の上限で起動できないとき ErrBudgetExceeded を返す。
 //
 // 1 回目の写像が j2PlanNoIssues（論点の記録の無い中以上の計画）なら、同じ周の中で 1 回だけ
 // 問い直す（上流は取得し直さず、区画に問い直しの区画を足して同じ経路で起動する。run は別の
-// run として費用・連続失敗の数え方の対象になる）。問い直しでも同じなら保留に置く。問い直しを
-// 起動できなかった（周の上限・枠超過）ときは、1 回目の結果（invalid_output）を返し、
-// 起動できなかった理由を notStarted に載せる（個別の操作でもエラーにしない）。
+// run として費用・連続失敗の数え方の対象になる）。問い直しでも同じなら保留に置く。ID を省略した
+// 自動の対象（jc が非 nil）では、問い直しの直前にも 1 回目の前と同じ資格の検査と連続失敗の上限の
+// 検査を、課題を読み直して行う（#469。j2AutoPreLaunch。外れたら問い直さず、上限なら failure_limit の
+// 保留に置く）。問い直しを起動できなかった（資格・連続失敗の上限・周の上限・枠超過）ときは、1 回目の
+// 結果（invalid_output）を返し、起動できなかった理由を notStarted に載せる（個別の操作でもエラーに
+// しない）。課題が並行して分類済でなくなっていた・終了していない run があったときは、理由を載せずに
+// 1 回目の結果だけを返す（1 回目の前に同じことが起きたときに静かにスキップするのと同じ）。
 // 返り値の items は run ごとに 1 件（問い直したときは 2 件）。
 func (s *Store) planOneJ2(ctx context.Context, in J2AutoInput, jc *JudgmentCycle, ch Challenge) ([]J2AutoItem, *NotStarted, error) {
 	if jc != nil && jc.RateLimited() {
@@ -1379,6 +1392,24 @@ func (s *Store) planOneJ2(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	items := []J2AutoItem{*item}
 	if discarded == nil {
 		return items, nil, nil
+	}
+
+	if jc != nil {
+		// ID を省略した自動の対象では、問い直しも 1 回目の起動の前（PlanAutoJ2）と同じ検査
+		// （j2AutoPreLaunch）を、課題を読み直して通る（#469）。1 回目の invalid_output で連続失敗の
+		// 上限に達しうるため、そのまま起動すると上限を超える。個別の操作（jc が nil）は 1 回目と
+		// 同じく検査しない。入力の区画は 1 回目のもの（prepared）を使う（上流は取得し直さない）。
+		cid, _ := parseChallengeID(ch.ID)
+		cur, ns, err := s.j2AutoPreLaunch(ctx, in, cid)
+		if err != nil {
+			return nil, nil, err
+		}
+		if ns != nil {
+			return items, ns, nil
+		}
+		if cur == nil {
+			return items, nil, nil
+		}
 	}
 
 	sections := append(append([]JudgmentDataSection(nil), prepared.Sections...),
