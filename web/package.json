@@ -14,7 +14,8 @@
     "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
     "dev:mock": "vite --mode mock",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:real": "playwright test -c playwright.real.config.ts"
   },
   "dependencies": {
     "mermaid": "^12.2.0",

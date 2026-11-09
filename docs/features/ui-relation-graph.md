@@ -156,6 +156,20 @@
 - [ ] 衝突の線は、向きのある組が中抜きの矢じり（後回し → 先に委譲）、向きの無い組が矢じりなしの破線で描かれ、前提の線と合わせて循環に見えても配置が壊れない（`web/src/graph/model.test.ts` の純粋関数・Vitest のコンポーネントのテスト・ブラウザの E2E）
 - [ ] 実データの形での画面の確かめ: ストアに入れた衝突の行から API を経由した値を `web/src/testing/conflict-api.golden.json` と照合し（`internal/server`）、同じファイルを関係グラフとボードの詳細に通す（`web/src/graph/real-shape.test.tsx`）
 
+## 本物の serve の E2E（flywheel#463）
+
+偽の API（`vite --mode mock`）の上の E2E（`web/e2e/`・`web/playwright.config.ts`・`make e2e`）だけでは、実データでしか出ない誤り（取り下げの課題の区分など）を見落とす。関係グラフについてだけ、本物の `flywheel serve` と種のストアに向けた E2E を別に置く【決定 オーナー（#463 の計画への回答。種の作り方・CI・確かめる範囲・偽の API の E2E を残すこと・環境の切り離し）】。
+
+- **置き場**: 設定は `web/playwright.real.config.ts`、試験は `web/e2e-real/relation-graph.spec.ts`、準備の段は `web/e2e-real/global-setup.ts`。偽の API の設定（`testDir: e2e`）はこの置き場を拾わない
+- **流し方**: `make e2e-real`（`ui-build` と `build` の後に `npm run e2e:real`）。`make check` にも `make e2e` にも入れない。初回は `cd web && npx playwright install chromium` が要る
+- **種**: 準備の段が毎回、一時ディレクトリにワークスペース（`seed`）を作り、Go のテスト `TestRelationGraphSeed`（`internal/core/relation_graph_seed_test.go`）を環境変数 `FLYWHEEL_E2E_SEED_WORKSPACE` に置き場を渡して呼び、種のストアを作る。種は core の公開 API で作り、公開 API で作れない状態（完了・取り下げ・着手中・優先度つきの分類待ち）だけを `internal/core/coretest` で書く。固定のストアのファイルも本番のストアの写しも置かない。同じテストは `make check` でも置き場を `t.TempDir()` にして流れ、種の中身（区分・状態ごとの件数・線・親子）を検査する
+  - 種の中身: 人間の操作待ち（未回答の問い・不可逆操作の承認）、着手中、P0 の計画待ち・分類待ち、関係を持たない課題、起点を含まないまとまり（「ほかの課題」）、完了（前提・親になっているものと、どこにもつながらないもの。「ほかの課題」のまとまりの前提になっているもの。終わった課題の前提でしかないもの〔既定で隠れ、その線も描かれない〕）、取り下げ（前提になっているものと、どこにもつながらないもの）。推移的な注目のために、人間待ちの起点から依存で 2 段先の課題と、着手中の起点から親子で 2 段先の課題（どちらも自身は起点に当たらない）を入れる
+- **環境の切り離し**: 準備の段は一時ディレクトリに HOME・XDG_CONFIG_HOME・作業ディレクトリを作り、ビルド済みの `build/flywheel` を `serve --port 0 --workspace <一時のワークスペース>` で起動する（開発機の `fleet.json` を読まない。#430）。標準エラーの `listening on <addr>` から番地を読み、そこが配信する UI に Playwright を向ける（Vite の proxy の 4318 番は使わない）。一時の HOME・XDG_CONFIG_HOME は serve にだけ渡し、Go のキャッシュと Playwright のブラウザの置き場は元のまま。終了時に serve を止め、一時ディレクトリを消す
+- **確かめること**: ① 取り下げの区分と札 ② 終わった課題の既定の非表示と、前提・親の灰色の残し方、「終わった課題もすべて表示」 ③ 「ほかの課題」の大枠の中身 ④ 依存の線と親子の入れ子 ⑤ 人間の操作待ちの札 ⑥ P0 の分類待ち・計画待ちが前に出ること ⑦ 推移的な注目（2 段以上先の課題が大枠に入らず前に出る）。幅 480px 以下の一覧・見た目の細部（位置・色・コントラスト）は偽の API の E2E の分担のまま
+- **偽の API の E2E との分担**: 偽の API の E2E は画面の挙動の細部（位置・色・狭い画面・開閉）を、作りやすい偽のデータで広く確かめる。本物の serve の E2E は、core の導出から API・配信した UI までをつないだときの区分と注目の判定を、関係グラフに絞って確かめる。偽の API の E2E は残す
+- **CI**: `.github/workflows/ci.yml` のジョブ `e2e-real`（ubuntu-latest・`timeout-minutes: 20`）が、依存の導入（`make ui-install`）→ `npx playwright install --with-deps chromium` → `make e2e-real` の順に流す。既存のジョブ `check` は変えない
+- **委譲の子の環境では流せない**: 委譲の子の環境（目印 `FLYWHEEL_DELEGATED_RUN` がある）では、flywheel のコマンドは help 以外拒否される（`internal/cli/cli.go`）ので、準備の段が起動する serve が拒否されて試験は失敗する（想定どおり）。準備の段は目印を外さない。子は本物の serve の試験を手元で流さず、PR の CI のジョブ `e2e-real` の成功で確かめる
+
 ## 決定事項の記録
 
 | ID | 決めた人・日 | 論点 | 結論 |
