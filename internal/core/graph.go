@@ -12,7 +12,7 @@ import (
 // core の記録（課題・依存・親子・run・作業ログ・カードの導出）だけから決定的に作る公開 API
 // （ChallengeGraph）を持つ。LLM も上流（GitHub）も呼ばず、ストアへ書かない。
 
-// GraphCategory はノードの区分（「誰が動くべきか」。閉集合。導く順は 人間 → 外部 → 完了 → 取り下げ → システム）。
+// GraphCategory はノードの区分（「誰が動くべきか」。閉集合。導く順は 人間 → 外部 → 親のエージェント → 完了 → 取り下げ → システム）。
 type GraphCategory string
 
 // GraphCategory の値。
@@ -22,6 +22,9 @@ const (
 	// GraphCategoryExternal は外部待ち（自動では解けない、相手と理由を持つ待ち）。
 	// いまの core にはこれを表す記録が無いので、いまは出ない。
 	GraphCategoryExternal GraphCategory = "external"
+	// GraphCategoryParentAgent は親のエージェントが動く番（状態は人間対応待ちのまま、いま開いている保留の種類が
+	// 親が直接行うで、人間の操作待ちが無い課題）。人間の操作待ちが先に当たる。
+	GraphCategoryParentAgent GraphCategory = "parent_agent"
 	// GraphCategoryDone は状態が完了。
 	GraphCategoryDone GraphCategory = "done"
 	// GraphCategoryWithdrawn は状態が取り下げ（完了と同じく終わった課題で、進める主体がいない）。
@@ -32,7 +35,7 @@ const (
 
 // GraphCategoryValues は GraphCategory の閉集合の写しを返す。
 func GraphCategoryValues() []GraphCategory {
-	return []GraphCategory{GraphCategoryHuman, GraphCategoryExternal, GraphCategoryDone, GraphCategoryWithdrawn, GraphCategorySystem}
+	return []GraphCategory{GraphCategoryHuman, GraphCategoryExternal, GraphCategoryParentAgent, GraphCategoryDone, GraphCategoryWithdrawn, GraphCategorySystem}
 }
 
 // GraphEdgeKind は依存の種類（閉集合）。
@@ -131,12 +134,16 @@ func (s *Store) ChallengeGraph(ctx context.Context, now time.Time) (*ChallengeGr
 		return nil, err
 	}
 	g := &ChallengeGraph{Nodes: make([]GraphNode, 0, len(cs)), Edges: []GraphEdge{}}
+	inParentAgent := map[string]bool{}
+	for _, c := range ov.ParentAgentChallenges {
+		inParentAgent[c.ID] = true
+	}
 	for _, c := range cs {
 		runs, err := s.LoadCardRuns(ctx, c)
 		if err != nil {
 			return nil, err
 		}
-		g.Nodes = append(g.Nodes, graphNode(c, runs.Derive(c, ov, now)))
+		g.Nodes = append(g.Nodes, graphNode(c, runs.Derive(c, ov, now), inParentAgent[c.ID]))
 	}
 	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		return fillGraphRelations(ctx, tx, g)
@@ -146,9 +153,9 @@ func (s *Store) ChallengeGraph(ctx context.Context, now time.Time) (*ChallengeGr
 	return g, nil
 }
 
-func graphNode(c Challenge, card *Card) GraphNode {
+func graphNode(c Challenge, card *Card, parentAgent bool) GraphNode {
 	n := GraphNode{
-		ID: c.ID, Title: c.Title, Headline: c.Headline, Context: c.Context, Category: graphCategory(c, card), Priority: c.Priority,
+		ID: c.ID, Title: c.Title, Headline: c.Headline, Context: c.Context, Category: graphCategory(c, card, parentAgent), Priority: c.Priority,
 		State: card.State, NextHumanActions: append([]CardAction{}, card.NextHumanActions...),
 	}
 	for _, m := range card.Modifiers {
@@ -163,10 +170,12 @@ func graphNode(c Challenge, card *Card) GraphNode {
 	return n
 }
 
-func graphCategory(c Challenge, card *Card) GraphCategory {
+func graphCategory(c Challenge, card *Card, parentAgent bool) GraphCategory {
 	switch {
 	case len(card.NextHumanActions) > 0:
 		return GraphCategoryHuman
+	case parentAgent:
+		return GraphCategoryParentAgent
 	case c.Status == StatusDone:
 		return GraphCategoryDone
 	case c.Status == StatusWithdrawn:

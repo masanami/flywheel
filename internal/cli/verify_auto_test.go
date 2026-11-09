@@ -27,7 +27,8 @@ func j5Route(verdict string, feedback, question any) fakeClaudeRoute {
 // check-runs の応答。コミットステータスは空。
 func ghChecksRoutes(prState, checkRunsBody string) []fakeGHRoute {
 	return []fakeGHRoute{
-		{match: "repos/o/r/pulls/1", stdout: `{"html_url":"https://github.com/o/r/pull/1","title":"PR-CLI","state":"` + prState + `","merged_at":null,"base":{"ref":"develop"},"head":{"sha":"abc123"}}`},
+		{match: "repos/o/r/pulls/1", stdout: `{"html_url":"https://github.com/o/r/pull/1","title":"PR-CLI","state":"` + prState + `","merged_at":null,"base":{"ref":"develop","sha":"base456"},"head":{"sha":"abc123"}}`},
+		{match: "repos/o/r/compare/base456...abc123", stdout: "diff --git a/x b/x"},
 		{match: "repos/o/r/commits/abc123/check-runs?page=1&per_page=100", stdout: checkRunsBody},
 		{match: "repos/o/r/commits/abc123/status?page=1&per_page=100", stdout: `{"state":"success","total_count":0,"statuses":[]}`},
 	}

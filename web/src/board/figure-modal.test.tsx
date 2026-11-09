@@ -50,6 +50,7 @@ function detail(figure: string | null): ShowCardResponse {
       urgency: null,
       version: 1,
     },
+    direct_completions: [],
     holds: [],
     operations: [],
     plans: [],

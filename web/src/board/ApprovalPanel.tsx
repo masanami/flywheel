@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
 import type { ApprovalSummary } from "../api/types.gen.ts";
+import { DirectCompletionView } from "./DirectCompletionView.tsx";
 import {
   ExpectedView,
   IssuesAnswerView,
@@ -176,6 +177,9 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           <p className="card-detail-multiline">{summary.done_criteria}</p>
         </>
       )}
+      {completion && summary.direct_completion && (
+        <DirectCompletionView completion={summary.direct_completion} showNote />
+      )}
       {summary.plan && (
         <>
           <h4>承認する計画（v{summary.plan.version}）</h4>
@@ -190,6 +194,16 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           )}
           {expected !== null && <ExpectedView expected={expected} />}
           {non_goals !== null && <NonGoalsView nonGoals={non_goals} />}
+        </div>
+      )}
+      {completion && summary.conditions_after_release.length > 0 && (
+        <div data-testid="approval-conditions-after-release">
+          <h4>{summary.conditions_after_release_heading}</h4>
+          <ul>
+            {summary.conditions_after_release.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
         </div>
       )}
       {completion && summary.pairs.length > 0 && (

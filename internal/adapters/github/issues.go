@@ -120,6 +120,15 @@ func (c *Client) GetIssue(ctx context.Context, repo string, number int) (core.Up
 		return core.UpstreamIssue{}, err
 	}
 
+	isPR, err := isPullRequestElement(body)
+	if err != nil {
+		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: %w", repo, number, err)
+	}
+	if isPR {
+		// issues の API は Pull Request も返す。core は Pull Request を意識しないので、一覧と同じく Issue ではないものとして扱う（bind が PR を紐づけない）。
+		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: response is a pull request: %w", repo, number, core.ErrUpstreamIssueNotFound)
+	}
+
 	issue, err := normalizeIssue(body)
 	if err != nil {
 		return core.UpstreamIssue{}, fmt.Errorf("adapters/github: get issue %s#%d: %w", repo, number, err)

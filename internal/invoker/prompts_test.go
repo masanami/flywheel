@@ -117,6 +117,27 @@ func TestJ2Prompt_HasHeadroomBelowLimit(t *testing.T) {
 	}
 }
 
+// j5HeadroomBytes は J5 の指示文に残しておく余り（バイト）。J5 に規則を足す課題が上限に当たって
+// 止まらないよう、実物の j5.md が上限よりこの値以上小さいことを固定する（#466。J2 の #462 と同じやり方）。
+const j5HeadroomBytes = 300
+
+// TestJ5Prompt_HasHeadroomBelowLimit は、埋め込みの j5.md のバイト数が J5 の上限より
+// j5HeadroomBytes 以上小さいことを検証する（#466）。
+func TestJ5Prompt_HasHeadroomBelowLimit(t *testing.T) {
+	fsys, err := promptsSubFS()
+	if err != nil {
+		t.Fatalf("promptsSubFS(): %v", err)
+	}
+	info, err := fs.Stat(fsys, "j5.md")
+	if err != nil {
+		t.Fatalf("fs.Stat(j5.md): %v", err)
+	}
+	limit := judgmentPromptLimit["j5.md"]
+	if headroom := int64(limit) - info.Size(); headroom < j5HeadroomBytes {
+		t.Errorf("j5.md is %d bytes, limit %d bytes: headroom %d bytes, want >= %d", info.Size(), limit, headroom, j5HeadroomBytes)
+	}
+}
+
 // TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails は AC「上限を1バイト
 // 超えるフィクスチャで失敗することも検証する」を、J1〜J5 の5ファイルすべての
 // 上限で固定する（三角測量: ちょうど上限は通り、+1バイトで落ちることの両方を
@@ -124,7 +145,7 @@ func TestJ2Prompt_HasHeadroomBelowLimit(t *testing.T) {
 //
 // self-review 指摘（round1, code-reviewer CONFIRMED）: 当初は J1（4096バイト）
 // の境界だけを検証しており、judgmentPromptLimit の J2〜J5 の値
-// （当時 8192・8192・4096・6144。J2 は #462 で 12288）を緩めても検出するテストが無かった。5ファイル
+// （当時 8192・8192・4096・6144。J2 は #462 で 12288、J5 は #466 で 8192）を緩めても検出するテストが無かった。5ファイル
 // 分をテーブル駆動で回す形に直した。
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
@@ -132,7 +153,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j2.md": 12288,
 		"j3.md": 8192,
 		"j4.md": 4096,
-		"j5.md": 6144,
+		"j5.md": 8192,
 		"j6.md": 6144,
 		"j8.md": 6144,
 	}
@@ -405,6 +426,81 @@ func TestInstructions_J2CriteriaJudgeableFromOwnRecord(t *testing.T) {
 	} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the item of 達成条件 in Instructions(J2) lacks %q", want)
+		}
+	}
+}
+
+// #451: j2.md は、達成条件をこの課題の本番反映の一歩手前までにすること・人の操作を達成条件に入れないこと・
+// 本番反映の後に人が行う作業を手順の末尾に『本番反映の後に人が行うこと』として書くことを求める。
+func TestInstructions_J2CriteriaStopBeforeTheReleaseAndHumanActionsGoToTheSteps(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := func(prefix string) string {
+		for _, l := range strings.Split(got, "\n") {
+			if strings.Contains(l, prefix) {
+				return l
+			}
+		}
+		t.Fatalf("Instructions(J2) lacks the item %q", prefix)
+		return ""
+	}
+	criteria := item("- 達成条件:")
+	for _, want := range []string{
+		"達成条件は、この課題の本番反映の一歩手前まで（例: 成果物が揃い、自動の検査が通る）にする",
+		"人の操作は達成条件に入れない",
+	} {
+		if !strings.Contains(criteria, want) {
+			t.Errorf("the item of 達成条件 in Instructions(J2) lacks %q", want)
+		}
+	}
+	if steps := item("- 手順:"); !strings.Contains(steps, "本番反映の後に人が行う作業があれば、手順の末尾に『本番反映の後に人が行うこと』として書く") {
+		t.Errorf("the item of 手順 in Instructions(J2) lacks where to write the human work after the release: %q", steps)
+	}
+}
+
+// #451: j5.md は、本番反映より前には満たせない条件に付ける 2 つの区分と、その使い方を書く。
+func TestInstructions_J5DescribesTheTwoConditionCategories(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## 本番反映より前には満たせない条件",
+		"- 本番反映で満たされる見込み:",
+		"- 人の操作の後でしか満たせない:",
+		"判断の 3 つは、区分を付けた条件を除いた残りの条件で選ぶ",
+		"区分は、いま確かめられる条件には付けない",
+		"保留の記録で人がその条件に答えている（済ませた・本番反映の後に行う等）ときは、回答に従い、同じ区分を付け直さない",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J5) lacks %q", want)
+		}
+	}
+}
+
+// #466: j5.md は、「本番反映が無いので条件を満たせない」保留への人の回答ごとの扱い（マージ済み・PR が無い・
+// 条件が不要）を書く。
+func TestInstructions_J5DescribesTheAnswersToTheNoReleaseHold(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(got, "### 「本番反映が無いので条件を満たせない」保留への回答")
+	end := strings.Index(got, "## 守ること")
+	if start < 0 || end < start {
+		t.Fatalf("Instructions(J5) lacks the subsection about the answers to the no-release hold: %d %d", start, end)
+	}
+	sub := got[start:end]
+	for _, want := range []string{
+		"- マージ済み: 既定ブランチ（main）で取り込まれたことを確かめてから、その条件は満たしているとして判定する",
+		"- PR が無い: その条件は満たしていない。満たしていないを選び、差し戻しの指摘に、本番反映する PR を子に作らせることを書く",
+		"- 条件が不要: その条件を達成条件から除いて判定する",
+		"同じ区分を付け直さない",
+	} {
+		if !strings.Contains(sub, want) {
+			t.Errorf("the subsection lacks %q", want)
 		}
 	}
 }

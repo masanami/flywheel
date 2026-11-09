@@ -92,6 +92,7 @@ function bodies() {
       approvals: [],
       card: c.card,
       challenge: c,
+      direct_completions: [],
       holds:
         id === "C-9"
           ? [

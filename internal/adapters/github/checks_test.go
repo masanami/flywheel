@@ -19,7 +19,7 @@ func TestGetPullRequestChecks_NormalizesCheckRunsAndLegacyStatuses(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetPullRequestChecks: %v", err)
 	}
-	if got.URL != "https://github.com/o/r/pull/7" || got.State != "open" || got.Base != "main" || got.HeadSHA != "abc123" {
+	if got.URL != "https://github.com/o/r/pull/7" || got.State != "open" || got.Base != "main" || got.BaseSHA != "base456" || got.HeadSHA != "abc123" {
 		t.Fatalf("pull request = %+v", got)
 	}
 	want := []core.UpstreamCheck{

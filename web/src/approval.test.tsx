@@ -72,6 +72,9 @@ function summary(over: Partial<ApprovalSummary> = {}): {
   return {
     approval: {
       challenge_id: "C-1",
+      conditions_after_release: [],
+      conditions_after_release_heading: "",
+      direct_completion: null,
       done_criteria: "完了条件の本文",
       kind: "completion",
       other_pending_operations: [
@@ -119,6 +122,7 @@ function setup(
     approvals: [],
     card: c,
     challenge: challenge(state),
+    direct_completions: [],
     holds: [],
     operations: [],
     plans: [],
@@ -298,6 +302,7 @@ function fixturesFor(): Record<string, unknown> {
     approvals: [],
     card: c,
     challenge: challenge("awaiting_plan_approval"),
+    direct_completions: [],
     holds: [],
     operations: [],
     plans: [],

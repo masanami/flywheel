@@ -28,6 +28,11 @@ const (
 	OpApproveHoldRelease Operation = "approve_hold_release"
 	OpReject             Operation = "reject"
 	OpWithdraw           Operation = "withdraw"
+	// OpCompleteDirect は、親が直接行った作業を完了として記録する操作（T17）。
+	OpCompleteDirect Operation = "complete_direct"
+	// OpReopenForRelease は、完了の課題を着手中へ戻す操作（T18）。本番反映でマージできなくなった場合に限る
+	// 専用の書き込み（ReopenChallengeForRelease）だけが使う。CLI の操作には対応しない。
+	OpReopenForRelease Operation = "reopen_for_release"
 )
 
 // TransitionTarget は遷移先の表現。T1〜T11・T13〜T15 は固定の状態を持つが、
@@ -39,6 +44,12 @@ type TransitionTarget struct {
 	ReturnToPrecedingHoldStatus bool
 	// Fixed は ReturnToPrecedingHoldStatus が false のときの固定遷移先。
 	Fixed Status
+	// IfCompletionDirect は、課題の completion_direct（いまの完了確認待ちが親が直接行った完了〔T17〕で入ったもの
+	// であること）が真のときの遷移先。ゼロ値（NoStatus）なら無い（Fixed だけ）。T15（差し戻し）だけが持ち、
+	// 親が直接した完了の差し戻しを着手中ではなく「親が直接やる」保留（人間対応待ち）へ戻す（#481）。
+	// 値は遷移のたびに runTransition が書き（T17 で真・ほかで偽）、Resolve は読まない（既存の呼び出し元が見る遷移先は
+	// Fixed のまま）。真偽を渡して引くのは ResolveForCompletionDirect。
+	IfCompletionDirect Status
 }
 
 // Resolve は遷移先を確定する。固定遷移先の行では preceding を無視して Fixed を返す。
@@ -63,7 +74,16 @@ func (tt TransitionTarget) Resolve(table []Transition, preceding Status) (Status
 	return "", fmt.Errorf("core: %q is not a valid preceding-hold status", preceding)
 }
 
-// Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T15）を指す。
+// ResolveForCompletionDirect は Resolve に、課題の completion_direct（IfCompletionDirect の注記を参照）を
+// 加えた版。completionDirect が真で IfCompletionDirect を持つ行なら IfCompletionDirect、それ以外は Resolve と同じ。
+func (tt TransitionTarget) ResolveForCompletionDirect(table []Transition, preceding Status, completionDirect bool) (Status, error) {
+	if completionDirect && tt.IfCompletionDirect != NoStatus {
+		return tt.IfCompletionDirect, nil
+	}
+	return tt.Resolve(table, preceding)
+}
+
+// Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T18）を指す。
 // T11 は遷移元が4つあるため、物理的には ID="T11" の行が4つ存在する。
 type Transition struct {
 	ID                   string
@@ -71,9 +91,12 @@ type Transition struct {
 	Op                   Operation
 	Target               TransitionTarget
 	RequiresVerification bool
+	// Restricted が true の行は、専用の core の書き込みだけが使う（T18）。Lookup・OutgoingFrom・IsTerminal には現れず、
+	// LookupRestricted だけが引く。通常の操作から見た状態の終端（完了）は変わらない。
+	Restricted bool
 }
 
-// Table は遷移表 T1〜T16 の正本。docs/features/m1-core.md §状態機械 の
+// Table は遷移表 T1〜T18 の正本。docs/features/m1-core.md §状態機械 の
 // 遷移表と1対1に対応する（T11 は遷移元4つに展開して4行として持つ）。
 // この表に無い（状態, 操作）の組はすべて不可（Lookup が ok=false を返す）。
 var Table = []Transition{
@@ -94,7 +117,11 @@ var Table = []Transition{
 	{ID: "T12", From: StatusAwaitingHuman, Op: OpAnswer, Target: TransitionTarget{ReturnToPrecedingHoldStatus: true}, RequiresVerification: true},
 	{ID: "T13", From: StatusAwaitingCompletionApproval, Op: OpApprove, Target: TransitionTarget{Fixed: StatusDone}, RequiresVerification: true},
 	{ID: "T14", From: StatusAwaitingCompletionApproval, Op: OpApproveHoldRelease, Target: TransitionTarget{Fixed: StatusDone}, RequiresVerification: true},
-	{ID: "T15", From: StatusAwaitingCompletionApproval, Op: OpReject, Target: TransitionTarget{Fixed: StatusInProgress}, RequiresVerification: true},
+	// T15: 完了の差し戻し。着手中へ戻す。ただし、いまの完了確認待ちが親が直接行った完了（T17）で入ったもの
+	// （challenge.completion_direct が真）なら、着手中ではなく人間対応待ちへ戻し、同じトランザクションで種類が
+	// 親が直接行うの保留を新しく立てる（ExecuteApproval。#481）。戻り先が 2 つあるが遷移表の行は 1 つで、
+	// 後者は IfCompletionDirect で表す。
+	{ID: "T15", From: StatusAwaitingCompletionApproval, Op: OpReject, Target: TransitionTarget{Fixed: StatusInProgress, IfCompletionDirect: StatusAwaitingHuman}, RequiresVerification: true},
 	// T16: 取り下げ（docs/features/m4.5-learning-and-self-improvement.md S4。M45H13・M45H28）。
 	// 完了以外の 7 状態から取り下げへ。取り下げから出る行は持たない（終端）。
 	{ID: "T16", From: StatusUnclassified, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
@@ -104,26 +131,45 @@ var Table = []Transition{
 	{ID: "T16", From: StatusVerifying, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
 	{ID: "T16", From: StatusAwaitingCompletionApproval, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
 	{ID: "T16", From: StatusAwaitingHuman, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},
+	// T17: 親が直接行った作業の完了の記録（docs/features/m1-core.md §状態機械。課題 #452）。人間対応待ちから
+	// 完了確認待ちへ進む。遷移表の行は状態だけで決まるため、「開いている保留の種類が親が直接行う」ことと
+	// 「成果物の参照が 1 件以上」は CompleteDirect が検査する（T12 の戻り先の検査と同じ位置づけ）。
+	// 完了の承認は T13・T14 のとおり本人確認つきで、この行は本人確認を要さない（submit・hold と同じ、エージェントの記録）。
+	{ID: "T17", From: StatusAwaitingHuman, Op: OpCompleteDirect, Target: TransitionTarget{Fixed: StatusAwaitingCompletionApproval}},
+	// T18: 本番反映でマージできなくなった完了の課題を着手中へ戻す（#485）。本番反映のやり直し（ReopenChallengeForRelease）
+	// だけが使う制限つきの行で、通常の操作の対象にならない。本人確認は要さない（エージェントの記録。戻す理由は
+	// 本番反映の結果か、検証の後の中身の変更で、人の承認はやり直しの完了の承認で受ける）。
+	{ID: "T18", From: StatusDone, Op: OpReopenForRelease, Target: TransitionTarget{Fixed: StatusInProgress}, Restricted: true},
 }
 
 // Lookup は (from, op) から遷移表の行を引く。表に無い組は ok=false を返す
 // （表に無い遷移はすべて拒否する＝docs/features/m1-core.md §状態機械）。
 func Lookup(from Status, op Operation) (Transition, bool) {
 	for _, tr := range Table {
-		if tr.From == from && tr.Op == op {
+		if tr.From == from && tr.Op == op && !tr.Restricted {
 			return tr, true
 		}
 	}
 	return Transition{}, false
 }
 
-// OutgoingFrom は table の中で from を遷移元に持つ行をすべて返す。
+// LookupRestricted は (from, op) から制限つきの行（T18）を引く。通常の行は返さない。
+func LookupRestricted(from Status, op Operation) (Transition, bool) {
+	for _, tr := range Table {
+		if tr.From == from && tr.Op == op && tr.Restricted {
+			return tr, true
+		}
+	}
+	return Transition{}, false
+}
+
+// OutgoingFrom は table の中で from を遷移元に持つ行（制限つきの行を除く）をすべて返す。
 // AC-27（完了から出る遷移が無いこと）の検査や、将来の invalid_transition /
 // terminal_state の判定（後続チケット）に使う。
 func OutgoingFrom(table []Transition, from Status) []Transition {
 	var out []Transition
 	for _, tr := range table {
-		if tr.From == from {
+		if tr.From == from && !tr.Restricted {
 			out = append(out, tr)
 		}
 	}

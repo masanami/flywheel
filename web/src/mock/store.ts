@@ -8,6 +8,7 @@ import type {
   Challenge,
   ChallengeCard,
   CycleStatus,
+  DirectCompletion,
   GraphResponse,
   Hold,
   Operation,
@@ -22,6 +23,7 @@ import type {
 } from "../api/types.gen.ts";
 import type { DiscrepancyKind } from "../labels.ts";
 import { type GraphSeed, seedGraphs } from "./graph.ts";
+import { type LargeSpec, largeWorkspace } from "./large.ts";
 
 export interface Flags {
   running?: boolean;
@@ -58,6 +60,14 @@ export interface MockChallenge {
   headline: string | null;
   context: string | null;
   holds: Hold[];
+  // 親が直接行った完了の記録（無ければ空）
+  directCompletions: DirectCompletion[];
+  // 完了確認待ちの検証が「本番反映で満たされる見込み」と区分した条件（無ければ空）
+  conditionsAfterRelease: string[];
+  // いまの完了確認待ちが、直接行った完了（T17）で入ったものか。本物の challenge.completion_direct と同じ意味で、
+  // 承認の ① が direct_completion を返すのはこれが真のときだけ（記録があっても、検証の met で入り直したときは返さない）。
+  // 完了確認待ちを出る遷移で偽に戻る。
+  completionDirect: boolean;
   operations: Operation[];
   plans: PlanDetail[];
   approvals: Approval[];
@@ -98,6 +108,9 @@ function mk(
     headline,
     context,
     holds,
+    directCompletions,
+    conditionsAfterRelease,
+    completionDirect,
     operations,
     plans,
     approvals,
@@ -128,6 +141,9 @@ function mk(
     headline: headline ?? null,
     context: context ?? null,
     holds: holds ?? [],
+    directCompletions: directCompletions ?? [],
+    conditionsAfterRelease: conditionsAfterRelease ?? [],
+    completionDirect: completionDirect ?? false,
     operations: operations ?? [],
     plans: plans ?? [],
     approvals: approvals ?? [],
@@ -145,6 +161,8 @@ const op = (
 ): Operation => ({
   approved_head: null,
   challenge_id,
+  closed_at: null,
+  closed_reason: null,
   consecutive_failures: 0,
   created_at: iso(120),
   executed_at: null,
@@ -155,6 +173,8 @@ const op = (
   ref: null,
   state,
   summary,
+  superseded_by: null,
+  supersedes: null,
   version: 1,
   waiting_since: null,
 });
@@ -269,6 +289,7 @@ export function seed(): Record<string, MockWorkspace> {
       version: 4,
       description: "端数の丸めが請求書とずれる。",
       done_criteria: "請求書の金額と画面の金額が全件一致する。",
+      conditionsAfterRelease: ["本番の料金表の画面で、請求書と同じ金額が出る"],
       headline: "料金表の丸めを請求書とそろえる",
       context: "月次請求の締め前に必要。経理の突合作業が減る。",
       stages: {
@@ -319,6 +340,7 @@ export function seed(): Record<string, MockWorkspace> {
           relay_session: null,
           from_status: "in_progress",
           from_status_label: "着手中",
+          kind: "human",
           question:
             "旧テーブルの deleted_at が NULL の行を移行対象に含めてよいですか？ 含めると 3 万件増えます。",
           raised_at: iso(90),
@@ -449,6 +471,65 @@ export function seed(): Record<string, MockWorkspace> {
       urgency: "高",
       description: "決済 API が断続的に 500 を返している。",
     }),
+    // 人間の操作待ちのチップが多い課題（flywheel#464）。実施中のまま、トリアージ・予算・操作の承認・食い違いの
+    // 4 つを待つ。広い幅のノード・一覧の行で、チップが題名や「▶ 実施中」と重ならないかを見る
+    mk("C-28", "請求データの夜間集計を新しい基盤へ載せ替える", "in_progress", {
+      priority: "P1",
+      headline: "夜間集計を新基盤で回し、旧基盤の負荷を下げる",
+      flags: {
+        running: true,
+        triage: {
+          reason: "run が 2 回続けて同じ集計の検査で落ちた。",
+          run_id: "R-11",
+        },
+        budget: {
+          challenge_id: "C-28",
+          impl_remaining_usd: 0,
+          plan_version: 1,
+          review_remaining_usd: 2,
+        },
+        discrepancy: ["upstream_updated"],
+      },
+      runs: [run("R-11", "C-28", { started_at: iso(20) })],
+      operations: [
+        op("O-1", "C-28", "release", "pending", "集計の切り替えを本番へ反映"),
+      ],
+    }),
+    // チップが多い親（flywheel#464）。完了の承認・トリアージ・予算・操作の承認・食い違いの 5 つを待ちながら自身も実施中で、
+    // 実施中の子 C-30 を持つので既定で開く。開いた大枠の見出しで、チップが題名や「▶ 実施中」と重ならないかを見る
+    mk(
+      "C-29",
+      "問い合わせ窓口の一本化と旧フォームの撤去",
+      "awaiting_completion_approval",
+      {
+        priority: "P1",
+        headline: "窓口を 1 つにまとめ、古いフォームを消す",
+        flags: {
+          running: true,
+          triage: {
+            reason: "子の run が旧フォームの削除で止まった。",
+            run_id: "R-12",
+          },
+          budget: {
+            challenge_id: "C-29",
+            impl_remaining_usd: 0,
+            plan_version: 2,
+            review_remaining_usd: 1,
+          },
+          discrepancy: ["upstream_commented"],
+        },
+        runs: [run("R-12", "C-29", { started_at: iso(25) })],
+        operations: [
+          op("O-1", "C-29", "release", "pending", "旧フォームを本番から外す"),
+        ],
+      },
+    ),
+    mk("C-30", "旧フォームの送信先の付け替え", "in_progress", {
+      priority: "P2",
+      headline: "旧フォームの送信を新しい窓口へ流す",
+      flags: { running: true },
+      runs: [run("R-13", "C-30", { started_at: iso(10) })],
+    }),
   ];
   const beta: MockChallenge[] = [
     mk("C-1", "レポートの CSV 出力", "classified", {
@@ -530,6 +611,13 @@ const HUMAN_STATES = [
 // 区分の型（labels.ts の DiscrepancyKind）から引く。型の無い文字列で書かない。
 const CYCLE_KIND: DiscrepancyKind = "dependency_cycle";
 
+// 人間対応待ちで、いま開いている保留の種類が親が直接行う（core の listParentAgentChallenges と同じ規則）。
+export function isParentAgent(m: MockChallenge): boolean {
+  if (m.c.status !== "awaiting_human") return false;
+  const open = m.holds.filter((h) => h.answer === null && h.closed_at === null);
+  return open[open.length - 1]?.kind === "parent_direct";
+}
+
 export function cardOf(m: MockChallenge): Card {
   const f = m.flags;
   // 種類が dependency_cycle だけの食い違いは印と review_discrepancy に数えない（M45H19。core と同じ）。
@@ -546,7 +634,8 @@ export function cardOf(m: MockChallenge): Card {
   const s = m.c.status;
   if (s === "awaiting_plan_approval") actions.push("approve_plan");
   if (s === "awaiting_completion_approval") actions.push("approve_completion");
-  if (s === "awaiting_human") actions.push("answer_question");
+  if (s === "awaiting_human" && !isParentAgent(m))
+    actions.push("answer_question");
   if (f.triage) actions.push("triage");
   if (f.budget) actions.push("increase_budget");
   if (m.operations.some((o) => o.state === "pending"))
@@ -575,11 +664,13 @@ export function graphOf(w: MockWorkspace): GraphResponse {
       const category =
         card.next_human_actions.length > 0
           ? "human"
-          : m.c.status === "done"
-            ? "done"
-            : m.c.status === "withdrawn"
-              ? "withdrawn"
-              : "system";
+          : isParentAgent(m)
+            ? "parent_agent"
+            : m.c.status === "done"
+              ? "done"
+              : m.c.status === "withdrawn"
+                ? "withdrawn"
+                : "system";
       return {
         category,
         context: m.context,
@@ -673,8 +764,13 @@ export const toCard = (m: MockChallenge): ChallengeCard => ({
 
 export function statusOf(w: MockWorkspace): StatusResponse {
   const items = w.items;
-  const nhChallenges = items.filter((m) => HUMAN_STATES.includes(m.c.status));
-  const humanIds = new Set(nhChallenges.map((m) => m.c.id));
+  const parentAgent = items.filter(isParentAgent);
+  const nhChallenges = items.filter(
+    (m) => HUMAN_STATES.includes(m.c.status) && !isParentAgent(m),
+  );
+  const humanIds = new Set(
+    [...nhChallenges, ...parentAgent].map((m) => m.c.id),
+  );
   const actionable = items.filter(
     (m) =>
       m.c.status !== "done" &&
@@ -715,6 +811,7 @@ export function statusOf(w: MockWorkspace): StatusResponse {
         m.flags.triage ? [{ challenge_id: m.c.id, ...m.flags.triage }] : [],
       ),
     },
+    parent_agent: { challenges: parentAgent.map((m) => m.c) },
     waiting_external: {
       challenges: items.flatMap((m) =>
         m.flags.waitingCi
@@ -725,10 +822,38 @@ export function statusOf(w: MockWorkspace): StatusResponse {
   };
 }
 
+// 大きなまとまりの偽のデータ（flywheel#470。`?mock=large` のときだけ）。large は課題 100 件がほぼ 1 つにつながる形、
+// large-flat は同じ 100 件から線をすべて抜いた形（描画の速さの比べ先）。
+export function seedLarge(): Record<string, MockWorkspace> {
+  const build = (s: LargeSpec): MockChallenge =>
+    mk(s.id, s.title, s.status, {
+      priority: s.priority,
+      flags: { running: s.running, unresponsive: s.unresponsive },
+      operations: s.operation
+        ? [op(`O-${s.id.slice(2)}`, s.id, "release", "pending", "本番へ反映")]
+        : [],
+    });
+  const base = {
+    cycle: {
+      state: "running",
+      last_started_at: iso(12),
+      last_ended_at: iso(90),
+      last_result: "completed",
+    },
+  };
+  return {
+    large: largeWorkspace("large", true, build, base),
+    "large-flat": largeWorkspace("large-flat", false, build, base),
+  };
+}
+
 // --- ストア本体 ---
 
 export class MockStore {
-  workspaces: Record<string, MockWorkspace> = seed();
+  workspaces: Record<string, MockWorkspace>;
+  constructor(workspaces: Record<string, MockWorkspace> = seed()) {
+    this.workspaces = workspaces;
+  }
   private listeners = new Set<(ws: string) => void>();
 
   subscribe(fn: (ws: string) => void): () => void {

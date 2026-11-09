@@ -8,11 +8,12 @@ import {
   type HumanKind,
 } from "../board/filter.ts";
 
-// ノードの色の区分。API の区分（human・external・done・withdrawn・system）に、システムが進めていて run が動いている
+// ノードの色の区分。API の区分（human・external・parent_agent・done・withdrawn・system）に、システムが進めていて run が動いている
 // 課題の running を足したもの。other は畳んだ親の件数の札の色にだけ使う。
 export type Category =
   | "human"
   | "external"
+  | "parent_agent"
   | "running"
   | "system"
   | "done"
@@ -23,6 +24,7 @@ export type Category =
 export const CATEGORIES: { key: Category; label: string }[] = [
   { key: "human", label: "人間の操作待ち" },
   { key: "external", label: "外部待ち" },
+  { key: "parent_agent", label: "親のエージェントが動く番" },
   { key: "running", label: "システムが実行中" },
   { key: "system", label: "システムが次に進めるもの" },
   { key: "done", label: "完了" },
@@ -40,11 +42,12 @@ export const STALE_LONG = "⚠ 更新なし（要確認）";
 export const STALE_HINT =
   "実行中だが、しきい値を超えて記録がありません。止まったとは限らず、長い委譲でも出ます";
 
-// 色の区分。人間の操作待ち・外部待ち・完了・取り下げは API の区分のまま、システムの課題は run が動いていれば running。
+// 色の区分。人間の操作待ち・外部待ち・親のエージェントが動く番・完了・取り下げは API の区分のまま、システムの課題は run が動いていれば running。
 export function categoryOf(n: GraphNode): Category {
   switch (n.category) {
     case "human":
     case "external":
+    case "parent_agent":
     case "done":
     case "withdrawn":
       return n.category;
@@ -99,43 +102,72 @@ const chipW = (t: string) =>
 
 export interface PlacedChip {
   chip: HumanChip;
-  // 画面に出す語。収まらないときは「…」で切る（全部の語は読み上げの名前にある）
+  // 画面に出す語。入らないときは「…」で切ることがある（そのときは chip.label を title に出す）
   label: string;
   // チップの行の左端からの位置と、チップの幅
   x: number;
   w: number;
 }
 
-// チップを幅 room（px）の 1 行に左から詰めて並べる。入らない分は、最後に入れる 1 つの語を「…」で切り（3 文字以上残るとき）、
-// それも入らなければ出さない。
+// 入らないチップをまとめた「+n」のチップ。hidden はまとめた区分（語は title に出し、意味を失わない）。
+export interface MoreChip {
+  label: string;
+  hidden: HumanChip[];
+  x: number;
+  w: number;
+}
+
+const moreLabel = (n: number) => `+${n}`;
+const moreW = (n: number) => 2 * CHIP_PAD + chipW(moreLabel(n));
+
+// チップを置くのに要る最小の幅（全部を「+n」の 1 つにまとめたときの幅）。チップが無ければ 0。
+// 置き場の側は、題名などを詰めてでもこの幅を空ける（何かを待っていることは必ず見せる）。
+export const minChipRoom = (chips: HumanChip[]): number =>
+  chips.length > 0 ? moreW(chips.length) : 0;
+
+// チップを幅 room（px）の 1 行に左から詰めて並べる。入らないチップは、語を「…」で切れば入るなら（3 文字以上残るとき）
+// 切って置き、残りを「+n」のチップ 1 つにまとめて最後に置く（まとめたチップの語は MoreChip.hidden に、切ったチップの
+// 語は chip.label に残る）。room が minChipRoom より狭くても「+n」は置く。
 export function fitChips(
   chips: HumanChip[],
   room: number,
-): { items: PlacedChip[]; width: number } {
+): { items: PlacedChip[]; more: MoreChip | null; width: number } {
   const items: PlacedChip[] = [];
   let used = 0;
-  for (const chip of chips) {
-    const at = used === 0 ? 0 : used + CHIP_GAP;
+  const gapAfter = () => (used === 0 ? 0 : used + CHIP_GAP);
+  for (const [i, chip] of chips.entries()) {
+    const at = gapAfter();
     const base = 2 * CHIP_PAD + chipW(chip.glyph) + CHIP_GAP;
-    const full = base + chipW(chip.label);
-    if (at + full <= room) {
-      items.push({ chip, label: chip.label, x: at, w: full });
-      used = at + full;
+    const w = base + chipW(chip.label);
+    const rest = chips.length - i - 1;
+    // 後に残るチップがあれば、それをまとめる「+n」の幅も空けておく
+    const reserve = rest > 0 ? CHIP_GAP + moreW(rest) : 0;
+    if (at + w + reserve <= room) {
+      items.push({ chip, label: chip.label, x: at, w });
+      used = at + w;
       continue;
     }
     const chars = Math.min(
-      Array.from(chip.label).length,
-      Math.floor((room - at - base) / 10),
+      Array.from(chip.label).length - 1,
+      Math.floor((room - at - base - reserve) / 10),
     );
     if (chars >= 3) {
       const label = clip(chip.label, chars);
-      const w = base + chipW(label);
-      items.push({ chip, label, x: at, w });
-      used = at + w;
+      const cw = base + chipW(label);
+      items.push({ chip, label, x: at, w: cw });
+      used = at + cw;
     }
     break;
   }
-  return { items, width: used };
+  if (items.length === chips.length) return { items, more: null, width: used };
+  const hidden = chips.slice(items.length);
+  const x = gapAfter();
+  const w = moreW(hidden.length);
+  return {
+    items,
+    more: { label: moreLabel(hidden.length), hidden, x, w },
+    width: x + w,
+  };
 }
 
 // チップの語だけ（読み上げの名前に使う。記号は読み上げない）。
@@ -380,8 +412,13 @@ export function seedReason(n: GraphNode): FocusReason | null {
   if (isFinished(n)) return null;
   // ① 人間の操作待ち
   if (n.next_human_actions.length > 0) return "human";
-  // ② 着手中・検証中・実行中
-  if (n.state === "in_progress" || n.state === "verifying" || n.running)
+  // ② 着手中・検証中・実行中・親のエージェントが動く番（親が直接行っている課題を「ほかの課題」に隠さない）
+  if (
+    n.state === "in_progress" ||
+    n.state === "verifying" ||
+    n.running ||
+    n.category === "parent_agent"
+  )
     return "working";
   // ③ 分類待ち・計画待ちのうち、前に出す優先度
   if (

@@ -78,6 +78,9 @@ type DelegateLaunchInput struct {
 	ResumeFeedback string
 	// ResumeBranch は再開のブリーフに書く、報告のブランチ名（無ければ空）。
 	ResumeBranch string
+	// ResumeProblem は ResumeKind が interrupted で、再開元の run が子の報告の不備
+	// （invalid_output）で終わったときの、不備の理由（無ければ空）。
+	ResumeProblem string
 }
 
 // DelegationInvoker は core が定義する、委譲の起動 1 回の実行の IF
@@ -158,6 +161,8 @@ type delegationContext struct {
 	ReworkHit *reworkLimitHit
 	// ResumeBranchPushed は Resume のブランチがリモートにあるか（再開のスロットの選び方に使う）。
 	ResumeBranchPushed bool
+	// Reopen は、課題が本番反映のやり直しで完了から戻されたあと、まだ委譲していないときの戻した記録（#485）。
+	Reopen *reopenNote
 }
 
 // estimateMicros は周の上限の評価額（実装枠の残り ＋ レビュー対応枠の残り）。`--max-budget-usd` と
@@ -350,6 +355,9 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		if dc.Holds, err = loadHolds(ctx, tx, cid); err != nil {
 			return err
 		}
+		if dc.Reopen, err = loadReopenNote(ctx, tx, cid); err != nil {
+			return err
+		}
 		if dc.Binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
 			return err
 		}
@@ -438,6 +446,9 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 	if t := formatHoldsSection(dc.Holds); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "保留の記録", Content: t})
 	}
+	if dc.Reopen != nil {
+		sections = append(sections, JudgmentDataSection{Label: labelReopenReason, Content: formatReopenSection(dc.Reopen, dc.Repo.DefaultBranch)})
+	}
 	if t := formatSourceBindingSection(dc.Binding); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "取り込み元の対応", Content: t})
 	}
@@ -502,6 +513,20 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 		if active {
 			return nil, ErrRunInProgress
 		}
+		// 完了の照合が取得の失敗で終わった課題は、子を起動せず照合だけをやり直す（#487）。
+		retries, _, err := s.splitReconcileRetries(ctx, []int64{cid})
+		if err != nil {
+			return nil, err
+		}
+		if len(retries) == 1 {
+			item, ns, err := s.retryReconciliation(ctx, in, *ch, retries[0])
+			if err != nil {
+				return nil, err
+			}
+			res := &DelegateResult{}
+			appendDelegateOutcome(res, item, ns)
+			return res, nil
+		}
 		return s.runSingleDelegation(ctx, in, *ch)
 	}
 
@@ -514,6 +539,24 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
+	}
+	// 完了の照合が取得の失敗で終わった課題は、委譲の対象から外し、子を起動せず照合だけをやり直す
+	// （#487。優先度→ID の順）。
+	retries, targetIDs, err := s.splitReconcileRetries(ctx, targetIDs)
+	if err != nil {
+		return nil, err
+	}
+	retried := &DelegateResult{}
+	for _, p := range retries {
+		ch, err := s.loadChallengeForAuto(ctx, formatChallengeID(p.ChallengeID))
+		if err != nil {
+			return nil, err
+		}
+		item, ns, err := s.retryReconciliation(ctx, in, *ch, p)
+		if err != nil {
+			return nil, err
+		}
+		appendDelegateOutcome(retried, item, ns)
 	}
 	jc := in.Cycle
 	if jc == nil {
@@ -532,7 +575,8 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if err != nil {
 		return nil, err
 	}
-	res.NotStarted = append(append(skipped, plan.notStarted...), res.NotStarted...)
+	res.NotStarted = append(append(append(skipped, retried.NotStarted...), plan.notStarted...), res.NotStarted...)
+	res.Items = append(retried.Items, res.Items...)
 	return res, nil
 }
 
@@ -758,6 +802,10 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		launch.ResumeQuestion = dc.Resume.Question
 		launch.ResumeFeedback = dc.Resume.Feedback
 		launch.ResumeBranch = dc.Resume.Branch
+		if dc.Resume.Kind == ResumeKindInterrupted && dc.Resume.Target.Result == RunResultInvalidOutput &&
+			strings.HasPrefix(dc.Resume.Target.Error, invalidReportErrorPrefix) {
+			launch.ResumeProblem = strings.TrimPrefix(dc.Resume.Target.Error, invalidReportErrorPrefix)
+		}
 	}
 	output, invokeErr := s.invokeFnWithHeartbeat(ctx, runIDInt, func(ctx context.Context) (JudgmentLaunchOutput, error) {
 		return in.Delegate.InvokeDelegation(ctx, launch)
@@ -775,11 +823,17 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	if !result.valid() {
 		result = RunResultErrored
 	}
+	if interruptedByCancel(ctx, result, output.ReportedTotalCostUSD) {
+		result = RunResultInterrupted
+	}
 	var report *DelegationReport
 	if result == RunResultSucceeded {
-		r, ok := validateDelegationReport(output.StructuredOutput, in.ConnDecl.HumanQuestionKinds)
-		if !ok {
+		r, reason := checkDelegationReport(output.StructuredOutput, in.ConnDecl.HumanQuestionKinds)
+		if reason != "" {
 			result = RunResultInvalidOutput
+			if errSummary == "" {
+				errSummary = invalidReportErrorPrefix + reason
+			}
 		}
 		report = r
 	}
@@ -788,11 +842,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	recordCtx := context.WithoutCancel(ctx)
 	var recon *reconciliation
 	if result != RunResultLaunchFailed {
-		var reportBranch *string
-		if report != nil {
-			reportBranch = report.Branch
-		}
-		recon = s.gatherReconciliation(recordCtx, in, dc, assignment.Path, assignment.BaseBranch, reportBranch)
+		recon = s.gatherReconciliation(recordCtx, in, dc, assignment.Path, assignment.BaseBranch, result, report)
 	}
 	mismatch := output.SessionIDReturned != "" && output.SessionIDReturned != sessionID
 	costMicros, costSource := computeRunCost(result, output.ReportedTotalCostUSD, dc.Resume != nil, prevReportedMicros, dc.ImplBudgetMicros)

@@ -22,7 +22,7 @@ func marshal(t *testing.T, v any) string {
 
 func TestEmptyListsAreArraysAndNullsStayNull(t *testing.T) {
 	got := marshal(t, view.FromOverview(&core.Overview{}))
-	want := `{"actionable":{"challenges":[]},"approved":{"operations":[]},"needs_human":{"budget_exhausted":[],"challenges":[],"discrepancies":[],"operations":[],"slots":[],"triage":[]},"waiting_external":{"challenges":[]}}`
+	want := `{"actionable":{"challenges":[]},"approved":{"operations":[]},"needs_human":{"budget_exhausted":[],"challenges":[],"discrepancies":[],"operations":[],"slots":[],"triage":[]},"parent_agent":{"challenges":[]},"waiting_external":{"challenges":[]}}`
 	if got != want {
 		t.Errorf("status:\n got %s\nwant %s", got, want)
 	}
@@ -69,7 +69,7 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 		view.JudgmentPhase{}, view.DelegationPhase{}, view.IngestPhase{}, view.PhaseResponse{}, view.Cycle{},
 		view.CycleResponse{}, view.CycleStarted{}, view.CycleStatus{}, view.SlotCleared{}, view.SlotResponse{}, view.InitResponse{},
 		view.MarkReadResponse{}, view.BudgetResponse{}, view.ExportBody{}, view.ExportResponse{}, view.ImportBody{}, view.ImportResponse{},
-		view.ApprovalPlan{}, view.ApprovalRelease{}, view.ApprovalOtherOperation{}, view.ApprovalSummary{}, view.ApprovalSummaryResponse{},
+		view.ApprovalPlan{}, view.ApprovalRelease{}, view.ApprovalOtherOperation{}, view.ApprovalSummary{}, view.ApprovalSummaryResponse{}, view.DirectCompletion{}, view.ChallengeDirectCompletionResponse{}, view.StatusParentAgent{}, view.ShowCardResponse{},
 		view.GraphNode{}, view.GraphEdge{}, view.GraphResponse{},
 	}
 	for _, v := range types {
@@ -99,16 +99,50 @@ func TestFromApprovalPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"approval":{"challenge_id":"C-1","done_criteria":"d","kind":"completion","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"stages":` + emptyStages + `,"title":"t","version":4}}`
+	want := `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(false) + `","direct_completion":null,"done_criteria":"d","kind":"completion","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"stages":` + emptyStages + `,"title":"t","version":4}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
 
 	plan := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, Version: 2, PlanVersion: 3, PlanBody: "B"}
 	b, _ = json.Marshal(view.FromApprovalPreview(plan, nil))
-	want = `{"approval":{"challenge_id":"C-1","done_criteria":null,"kind":"plan","other_pending_operations":[],"pairs":[],"plan":{"body":"B","version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
+	want = `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(false) + `","direct_completion":null,"done_criteria":null,"kind":"plan","other_pending_operations":[],"pairs":[],"plan":{"body":"B","version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
+	}
+}
+
+// #466: 承認の要約（API）は、完了確認待ちの検証が「本番反映で満たされる見込み」と区分した条件を、CLI と
+// 同じ文言の見出し（UI の承認は常に本番反映の保留つきなので、満たされないまま残る側）つきで構造化して載せる。
+// 条件が無ければ空配列（null にしない）。
+func TestApprovalSummaryCarriesConditionsAfterRelease(t *testing.T) {
+	p := &core.ApprovalPreview{
+		ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion, Version: 4, DoneCriteria: "d",
+		ConditionsAfterRelease: []string{"本番で画面に出る", "通知が届く"},
+	}
+	got := marshal(t, view.FromApprovalPreview(p, nil))
+	for _, sub := range []string{
+		`"conditions_after_release":["本番で画面に出る","通知が届く"]`,
+		`"conditions_after_release_heading":"本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"`,
+	} {
+		if !strings.Contains(got, sub) {
+			t.Errorf("approval summary lacks %s:\n%s", sub, got)
+		}
+	}
+
+	none := marshal(t, view.FromApprovalPreview(&core.ApprovalPreview{ChallengeID: "C-1", Kind: core.ApprovalKindCompletion}, nil))
+	if !strings.Contains(none, `"conditions_after_release":[]`) {
+		t.Errorf("no conditions must be an empty array: %s", none)
+	}
+}
+
+// CLI（承認の要約）と API が同じ見出しを引く 1 か所。文言は CLI の出力どおり（変えない）。
+func TestConditionsAfterReleaseHeadingWording(t *testing.T) {
+	if got, want := view.ConditionsAfterReleaseHeading(true), "承認で本番反映されると満たされる条件:"; got != want {
+		t.Errorf("releasing heading = %q, want %q", got, want)
+	}
+	if got, want := view.ConditionsAfterReleaseHeading(false), "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"; got != want {
+		t.Errorf("held heading = %q, want %q", got, want)
 	}
 }
 
@@ -363,5 +397,49 @@ func TestFromShowChallenge_Improvement(t *testing.T) {
 	got := marshal(t, view.FromShowChallenge(&core.ChallengeDetail{Challenge: core.Challenge{ID: "C-2"}, Improvement: &core.ImprovementKey{Layer: "prompt", Target: "j1.md"}}))
 	if !strings.Contains(got, `"improvement":{"layer":"prompt","target":"j1.md"}`) {
 		t.Errorf("got %s", got)
+	}
+}
+
+// 親が直接行った完了の記録（#452）は、承認の要約に成果物の参照を完了条件と並べて載せ、詳細・show に出る。
+func TestDirectCompletionIsCarriedByApprovalSummaryShowAndHold(t *testing.T) {
+	note := "親が確かめた"
+	at := time.Date(2026, 11, 5, 1, 2, 3, 4_000_000, time.UTC)
+	dc := core.DirectCompletion{Artifacts: []string{"https://example.com/result", "o/r#12"}, Note: &note, CreatedAt: at}
+
+	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion, Version: 4, DoneCriteria: "d", DirectCompletion: &dc}
+	got := marshal(t, view.FromApprovalPreview(p, nil))
+	for _, sub := range []string{
+		`"direct_completion":{"artifacts":["https://example.com/result","o/r#12"],"created_at":"2026-11-05T01:02:03.004Z","note":"親が確かめた"}`,
+		`"done_criteria":"d"`,
+	} {
+		if !strings.Contains(got, sub) {
+			t.Errorf("approval summary lacks %s:\n%s", sub, got)
+		}
+	}
+
+	d := &core.ChallengeDetail{DirectCompletions: []core.DirectCompletion{dc}, Holds: []core.Hold{{Kind: core.HoldKindParentDirect, Question: "q", FromStatus: core.StatusClassified, RaisedAt: at}}}
+	show := marshal(t, view.FromChallengeDetail(d))
+	for _, sub := range []string{`"direct_completions":[{"artifacts":["https://example.com/result","o/r#12"]`, `"kind":"parent_direct"`} {
+		if !strings.Contains(show, sub) {
+			t.Errorf("show lacks %s:\n%s", sub, show)
+		}
+	}
+	if empty := marshal(t, view.FromChallengeDetail(&core.ChallengeDetail{})); !strings.Contains(empty, `"direct_completions":[]`) {
+		t.Errorf("an ordinary challenge's show must have an empty direct_completions array: %s", empty)
+	}
+	card := marshal(t, view.FromChallengeDetailCard(d, &core.Card{}))
+	if !strings.Contains(card, `"direct_completions":[{`) {
+		t.Errorf("show card lacks direct_completions: %s", card)
+	}
+}
+
+func TestStatusParentAgentSectionHoldsParentAgentChallenges(t *testing.T) {
+	ov := &core.Overview{ParentAgentChallenges: []core.Challenge{{ID: "C-7", Title: "親が直接行う", Status: core.StatusAwaitingHuman}}}
+	got := marshal(t, view.FromOverview(ov))
+	if !strings.Contains(got, `"parent_agent":{"challenges":[{`) || !strings.Contains(got, `"id":"C-7"`) || !strings.Contains(got, `"status":"awaiting_human"`) {
+		t.Errorf("status = %s", got)
+	}
+	if strings.Contains(marshal(t, view.FromNeedsHuman(ov)), "C-7") {
+		t.Error("the parent-agent challenge appears in needs_human")
 	}
 }

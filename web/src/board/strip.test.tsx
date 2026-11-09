@@ -52,17 +52,17 @@ const alpha = (live: LiveState): StatusNeedsHuman => {
 it("AC-184: 帯は区分ごとの件数をワークスペースごとの行に出し、0 件の区分は出さない", async () => {
   const live = await liveState();
   expect(countsOf(alpha(live))).toMatchObject({
-    approvals: 3,
+    approvals: 4,
     questions: 1,
-    operations: 1,
-    discrepancies: 1,
-    budget: 1,
-    triage: 1,
+    operations: 3,
+    discrepancies: 3,
+    budget: 3,
+    triage: 3,
   });
   render(<Board live={live} />);
   const strip = screen.getByRole("region", { name: "人間待ちの帯" });
-  // 全体の合計は、ワークスペースごとの件数の和（alpha 6 区分の計 8 + beta の 承認待ち 2・不可逆操作 2）
-  expect(within(strip).getByText("🔔 人間待ち 12 件")).toBeInTheDocument();
+  // 全体の合計は、ワークスペースごとの件数の和（alpha 6 区分の計 17 + beta の 承認待ち 2・不可逆操作 2）
+  expect(within(strip).getByText("🔔 人間待ち 21 件")).toBeInTheDocument();
   const rows = within(strip).getAllByRole("listitem");
   const rowOf = (name: string) => {
     const row = rows.find((r) => r.querySelector("b")?.textContent === name);
@@ -75,12 +75,12 @@ it("AC-184: 帯は区分ごとの件数をワークスペースごとの行に�
     );
   // 行はワークスペースごとにあり、それぞれ自分の件数だけを持つ。0 件の区分の押し子は無い。
   expect(chipsOf("alpha")).toEqual([
-    "承認待ち 3",
+    "承認待ち 4",
     "未回答の問い 1",
-    "不可逆操作の承認 1",
-    "食い違い 1",
-    "予算の使い切り 1",
-    "トリアージ 1",
+    "不可逆操作の承認 3",
+    "食い違い 3",
+    "予算の使い切り 3",
+    "トリアージ 3",
   ]);
   expect(chipsOf("beta")).toEqual(["承認待ち 2", "不可逆操作の承認 2"]);
   // 状態が読み取れないワークスペース（gamma）と、人間待ちの無いワークスペースの行は出ない
@@ -93,12 +93,12 @@ it("AC-184: 帯は区分ごとの件数をワークスペースごとの行に�
 
 // 期待する課題の集合は、モックの固定の状態から手で書いた値（本番の challengeIdsOf では導かない）。
 const EXPECTED_IDS: Record<string, { alpha: string[]; beta: string[] }> = {
-  approvals: { alpha: ["C-3", "C-4", "C-7"], beta: ["C-2", "C-3"] },
+  approvals: { alpha: ["C-29", "C-3", "C-4", "C-7"], beta: ["C-2", "C-3"] },
   questions: { alpha: ["C-8"], beta: [] },
-  operations: { alpha: ["C-7"], beta: ["C-3"] },
-  discrepancies: { alpha: ["C-10"], beta: [] },
-  budget: { alpha: ["C-9"], beta: [] },
-  triage: { alpha: ["C-13"], beta: [] },
+  operations: { alpha: ["C-28", "C-29", "C-7"], beta: ["C-3"] },
+  discrepancies: { alpha: ["C-10", "C-28", "C-29"], beta: [] },
+  budget: { alpha: ["C-28", "C-29", "C-9"], beta: [] },
+  triage: { alpha: ["C-13", "C-28", "C-29"], beta: [] },
 };
 
 it("AC-185・AC-186: 6 区分それぞれを選ぶとその区分に当たるカードだけに絞られ、もう一度選ぶと外れる", async () => {

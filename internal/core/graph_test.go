@@ -102,8 +102,8 @@ func TestChallengeGraph_WithdrawnIsItsOwnCategory(t *testing.T) {
 	}
 }
 
-func TestGraphCategoryValues_IsTheFiveCategoriesInOrder(t *testing.T) {
-	want := []GraphCategory{GraphCategoryHuman, GraphCategoryExternal, GraphCategoryDone, GraphCategoryWithdrawn, GraphCategorySystem}
+func TestGraphCategoryValues_IsTheSixCategoriesInOrder(t *testing.T) {
+	want := []GraphCategory{GraphCategoryHuman, GraphCategoryExternal, GraphCategoryParentAgent, GraphCategoryDone, GraphCategoryWithdrawn, GraphCategorySystem}
 	if got := GraphCategoryValues(); !reflect.DeepEqual(got, want) {
 		t.Errorf("GraphCategoryValues = %v, want %v", got, want)
 	}

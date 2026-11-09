@@ -16,6 +16,9 @@ import (
 //     "--disallowedTools Bash Edit Write NotebookEdit WebFetch WebSearch Task"・
 //     "--permission-mode default"
 //
+// core が in.AddDirs・in.SettingSources を決めたときは、そのまま "--add-dir <ディレクトリ>..."・
+// "--setting-sources <出所>" に写す（どの判断点で何を足すかは core の規則）。
+//
 // 外部由来の文字列（課題の本文等）は一切引数に現れない（標準入力で渡す。
 // stdin.go）。core が決めた唯一の in.SessionID を使う（新規セッションでも
 // --resume の再開でも、core が「どのセッションIDを使うか」を一意に決め、
@@ -37,7 +40,7 @@ func buildArgs(in core.JudgmentLaunchInput) []string {
 	if in.IsResume {
 		sessionFlag = "--resume"
 	}
-	return []string{
+	args := []string{
 		"-p",
 		sessionFlag, in.SessionID,
 		"--output-format", "json",
@@ -47,6 +50,13 @@ func buildArgs(in core.JudgmentLaunchInput) []string {
 		"--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task",
 		"--permission-mode", "default",
 	}
+	if len(in.AddDirs) > 0 {
+		args = append(append(args, "--add-dir"), in.AddDirs...)
+	}
+	if in.SettingSources != "" {
+		args = append(args, "--setting-sources", in.SettingSources)
+	}
+	return args
 }
 
 // formatUSDArg は金額を --max-budget-usd に渡す最小表記の10進文字列にする

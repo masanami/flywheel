@@ -39,6 +39,10 @@ func UnknownStatusesReferencedByTable(table []Transition, vocab []StatusVocabEnt
 		if !tr.Target.ReturnToPrecedingHoldStatus {
 			report(tr.Target.Fixed, false)
 		}
+		// 条件つきの遷移先（IfCompletionDirect）も語彙に無ければ違反。無い（NoStatus）のは正当。
+		if tr.Target.IfCompletionDirect != NoStatus {
+			report(tr.Target.IfCompletionDirect, false)
+		}
 	}
 	return out
 }
@@ -70,6 +74,10 @@ func UnreachableFromCreate(table []Transition, vocab []StatusVocabEntry) []Statu
 				continue
 			}
 			reached[tr.Target.Fixed] = true
+			// 条件つきの遷移先（IfCompletionDirect）も、From が到達済みなら辿れる。
+			if tr.Target.IfCompletionDirect != NoStatus {
+				reached[tr.Target.IfCompletionDirect] = true
+			}
 		}
 		if len(reached) == before {
 			break

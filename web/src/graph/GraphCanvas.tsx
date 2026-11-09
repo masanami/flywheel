@@ -23,6 +23,7 @@ import {
   fitChips,
   humanActionLabels,
   humanChips,
+  minChipRoom,
   reasonText,
   wrapByWidth,
 } from "./model.ts";
@@ -226,22 +227,30 @@ export function accessibleName(
 }
 
 const ID_CHAR_W = 7;
+// 開いた大枠の見出し（13px）の 1 文字の幅の目安（全角）と、「 ▶ 実施中」の幅の目安（実測で約 57px）
+const HEAD_CHAR_W = 13;
+const HEAD_ACTIVE_W = 60;
 
 // 人間の操作待ちのチップ（記号と帯の区分の語）。ノードの右上の角に右寄せで並べる。
-// right はチップの行の右端、room はチップに使える幅。入らない分は切り詰める（全部の語は読み上げの名前にある）。
+// right はチップの行の右端、room はチップに使える幅。入らない分は「+n」のチップにまとめ、まとめた語は
+// そのチップの title（ホバーで出る）に残す（全部の語は読み上げの名前にもある）。
+// fitted を渡すと、置き場の側で並べた結果をそのまま描く（置き場が題名の幅を決めるのに使った結果と食い違わせない）。
 function HumanChips({
   node,
   right,
   room,
+  fitted,
   y,
 }: {
   node: GraphNode;
   right: number;
-  room: number;
+  room?: number;
+  fitted?: ReturnType<typeof fitChips>;
   y: number;
 }) {
-  const { items, width } = fitChips(humanChips(node), room);
-  if (items.length === 0) return null;
+  const { items, more, width } =
+    fitted ?? fitChips(humanChips(node), room ?? 0);
+  if (items.length === 0 && !more) return null;
   return (
     <g
       className="graph-human-chips"
@@ -255,6 +264,9 @@ function HumanChips({
           data-kind={c.chip.kind}
           transform={`translate(${c.x} 0)`}
         >
+          {c.label !== c.chip.label ? (
+            <title>{`${c.chip.glyph} ${c.chip.label}`}</title>
+          ) : null}
           <rect width={c.w} height={CHIP_H} rx={CHIP_H / 2} />
           <text x={5} y={10.5}>
             <tspan className="graph-human-chip-glyph">{c.chip.glyph}</tspan>
@@ -264,6 +276,22 @@ function HumanChips({
           </text>
         </g>
       ))}
+      {more ? (
+        <g
+          className="graph-human-chip graph-human-chip-more"
+          data-kind="more"
+          data-hidden={more.hidden.map((c) => c.kind).join(" ")}
+          transform={`translate(${more.x} 0)`}
+        >
+          <title>
+            {more.hidden.map((c) => `${c.glyph} ${c.label}`).join("・")}
+          </title>
+          <rect width={more.w} height={CHIP_H} rx={CHIP_H / 2} />
+          <text x={5} y={10.5}>
+            {more.label}
+          </text>
+        </g>
+      ) : null}
     </g>
   );
 }
@@ -467,7 +495,8 @@ function NodeLines({
   // 3 行目の左と、右上の札の置き場: ID の右に実施中、ノードの右上の角に人間の操作待ちのチップ（取り下げの札と同じ角。
   // 取り下げは人間の操作待ちと重ならない）。畳んだ親の開閉ボタンの左へ寄せる。
   const idEnd = 11 + Array.from(n.id).length * ID_CHAR_W + 6;
-  const activeEnd = idEnd + (i.active ? 54 : 0);
+  // 「▶ 実施中」（11px の太字）は実測で約 45px。チップとの間を少し空けて 48px と見積もる
+  const activeEnd = idEnd + (i.active ? 48 : 0);
   const cornerRight = box.w - 6 - (inside ? TOGGLE + 2 : 0);
   return (
     <>
@@ -633,20 +662,29 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
   const c = i.node;
   const selfActive = i.active;
   const select = () => p.onOpen(box.id);
-  // 人間の操作待ちのチップは、題名が最低 4 文字残る範囲で右上（開閉ボタンの左）に置く。残りが題名の文字数
+  // 人間の操作待ちのチップは、題名が最低 4 文字・「▶ 実施中」が残る範囲で右上（開閉ボタンの左）に置く。
+  // 入らないチップは「+n」にまとめ、「+n」の幅は題名を詰めてでも空ける。残りの幅が題名の文字数
   const chipRight = box.w - TOGGLE - 10;
+  const human = humanChips(c);
+  const textLeft = 11 + Array.from(c.id).length * ID_CHAR_W + 4;
+  const activeW = selfActive ? HEAD_ACTIVE_W : 0;
   const chips = fitChips(
-    humanChips(c),
-    box.w -
-      TOGGLE -
-      14 -
-      11 -
-      Array.from(c.id).length * ID_CHAR_W -
-      52 -
-      8 -
-      (selfActive ? 66 : 0),
+    human,
+    Math.max(
+      minChipRoom(human),
+      chipRight - textLeft - 4 * HEAD_CHAR_W - activeW - 8,
+    ),
   );
-  const chars = Math.max(4, Math.floor((box.w - 90 - chips.width) / 13));
+  // 取り下げの札（右寄せで約 44px）は人間の操作待ちと重ならない（区分が別）ので、チップの代わりにその幅を空ける
+  const chipLeft =
+    chipRight -
+    chips.width -
+    (chips.width > 0 ? 8 : 0) -
+    (i.category === "withdrawn" ? 52 : 0);
+  const chars = Math.max(
+    1,
+    Math.floor((chipLeft - textLeft - activeW) / HEAD_CHAR_W),
+  );
   const { headline: hl, context: lines } = headLines(
     c.headline,
     c.context,
@@ -699,13 +737,15 @@ function GroupFrame({ box, p }: { box: LayoutBox; p: CanvasProps }) {
         />
         <text x={11} y={dims.headH / 2 + 4.5} className="graph-group-title">
           <tspan className="graph-node-id">{c.id}</tspan>
-          {` ${clip(c.title, chars)}`}
-          {selfActive ? " ▶ 実施中" : ""}
+          <tspan className="graph-group-title-text">{` ${clip(c.title, chars)}`}</tspan>
+          {selfActive ? (
+            <tspan className="graph-group-active-tag"> ▶ 実施中</tspan>
+          ) : null}
         </text>
         <HumanChips
           node={c}
           right={chipRight}
-          room={chips.width}
+          fitted={chips}
           y={(dims.headH - TOGGLE) / 2}
         />
         {i.category === "withdrawn" ? (

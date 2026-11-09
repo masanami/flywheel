@@ -273,6 +273,7 @@ it("色: 人間の操作待ちは区分の色で区別でき、システムの�
   expect(items).toEqual([
     "人間の操作待ち 3",
     "外部待ち 0",
+    "親のエージェントが動く番 0",
     "システムが実行中 2",
     "システムが次に進めるもの 11",
     "完了 1",
@@ -560,7 +561,7 @@ const chipsOf = (el: Element, sel = CHIP) =>
     label: c.querySelector(".graph-human-chip-label")?.textContent,
   }));
 
-it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を出し、承認 2 つは 1 つにまとめる。入らない語は切り詰め、実装の語は出さない", async () => {
+it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を出し、承認 2 つは 1 つにまとめる。入らない語は切り詰めるか「+n」にまとめ、実装の語は出さない", async () => {
   graphFor = async () => ({
     nodes: [
       human("C-1", ["approve_plan"]),
@@ -599,6 +600,12 @@ it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を�
   expect(c2[0]?.label).toBe("承認待ち");
   expect(c2[1]?.label?.startsWith("不可逆")).toBe(true);
   expect(c2[1]?.label?.endsWith("…")).toBe(true);
+  // 切り詰めたチップは、全部の語を title に残す
+  expect(
+    box(group, "C-2").querySelector(
+      '.graph-human-chip[data-kind="operations"] > title',
+    )?.textContent,
+  ).toBe("! 不可逆操作の承認");
   // 計画と完了の承認は同じ区分なので 1 つ
   expect(chips("C-3").map((c) => c.kind)).toEqual(["approvals"]);
   const c4 = chips("C-4");
@@ -607,8 +614,18 @@ it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を�
     glyph: "?",
     label: "未回答の問い",
   });
-  // 入る分だけ（残りの語は読み上げの名前にある）
-  expect(c4.map((c) => c.kind)).toEqual(["questions", "triage"]);
+  // 入る分だけ並べ、残りは「+n」の 1 つにまとめる。まとめた語は「+n」の title に残る（全部の語は読み上げの名前にもある）
+  expect(c4.map((c) => c.kind)).toEqual(["questions", "more"]);
+  const more = box(group, "C-4").querySelector(
+    '.graph-human-chip[data-kind="more"]',
+  );
+  expect(more?.querySelector("text")?.textContent).toBe("+4");
+  expect(more?.getAttribute("data-hidden")).toBe(
+    "triage budget discrepancies slots",
+  );
+  expect(more?.querySelector("title")?.textContent).toBe(
+    "↕ トリアージ・$ 予算の使い切り・≠ 食い違い・⌫ 片づけ待ちのスロット",
+  );
   expect(box(group, "C-4")).toHaveAccessibleName(
     "C-4 題名C-4（人間の操作待ち・未回答の問い・トリアージ・予算の使い切り・食い違い・片づけ待ちのスロット）",
   );
@@ -1251,4 +1268,51 @@ it("ボードと同じく、最後に読み込めた時刻が変わるたびに�
   expect(
     await screen.findByRole("button", { name: /^C-1 更新後/ }),
   ).toBeInTheDocument();
+});
+
+it("親のエージェントが動く番: 人間の操作待ちとも他の区分とも違う色の区分で、凡例に名前と件数が出る。ほかの課題に隠れない", async () => {
+  graphFor = async () => ({
+    nodes: [
+      node("C-1", { category: "parent_agent", state: "awaiting_human" }),
+      human("C-2", ["answer_question"], { state: "awaiting_human" }),
+      node("C-3", { category: "withdrawn" }),
+      node("C-4", { state: "classified", priority: "P2" }),
+      node("C-5", { category: "done" }),
+      node("C-6", { state: "classified", priority: "P2" }),
+    ],
+    edges: [],
+  });
+  await mount();
+  const group = await graphGroup();
+  const cat = (id: string) =>
+    box(group, id).closest("[data-category]")?.getAttribute("data-category");
+  expect(cat("C-1")).toBe("parent_agent");
+  expect(cat("C-2")).toBe("human");
+  expect(box(group, "C-1")).toHaveAccessibleName(
+    "C-1 題名C-1（親のエージェントが動く番）",
+  );
+  const legend = screen.getByRole("list", { name: "区分の凡例" });
+  const item = within(legend).getByRole("button", {
+    name: /^親のエージェントが動く番/,
+  });
+  expect(item).toHaveAttribute("data-category", "parent_agent");
+  expect(item.textContent?.replace(/\s+/g, " ").trim()).toBe(
+    "親のエージェントが動く番 1",
+  );
+  // 注目の起点なので「ほかの課題」の大枠に入らない（入るのは線の無い P2 の C-4・C-6）
+  expect(
+    within(group).getByRole("button", { name: "ほかの課題を開く（2 件）" }),
+  ).toBeInTheDocument();
+  // 色は他の区分と別の変数
+  const css = readFileSync("src/graph/graph.css", "utf8");
+  expect(css).toMatch(
+    /\[data-category="parent_agent"\]\s*\{\s*--c: var\(--graph-parent\)/,
+  );
+  expect(css).toMatch(/--graph-parent:\s*#[0-9a-f]{6}/i);
+  const colors = [
+    ...css.matchAll(
+      /--graph-(human|external|parent|running|system|done):\s*(#[0-9a-f]{6})/gi,
+    ),
+  ].map((m) => m[2]?.toLowerCase());
+  expect(new Set(colors).size).toBe(colors.length);
 });

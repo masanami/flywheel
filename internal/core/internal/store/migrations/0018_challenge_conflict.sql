@@ -1,4 +1,4 @@
--- 0014_challenge_conflict: スキーマ版 14。
+-- 0018_challenge_conflict: スキーマ版 18。
 -- docs/features/ui-relation-graph.md §衝突（core）。
 --
 -- 衝突の予測（predict-conflicts）の結果として、同時に委譲しない（順に走らせる）と決めた課題の組を持つ。

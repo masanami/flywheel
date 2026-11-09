@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -15,12 +16,20 @@ type fakeBranchSource struct {
 	mu       sync.Mutex
 	branches map[string]bool
 	prs      map[string][]UpstreamPullRequest
+	// pulls は GetPullRequest の結果。キーは "<repo>#<番号>"。無いキーは見つからない（404。
+	// ErrUpstreamPullRequestNotFound）。pullErrs のキーは取得の失敗。
+	pulls    map[string]UpstreamPullRequest
+	pullErrs map[string]error
 	err      error
-	calls    []string // "exists repo branch" | "prs repo branch"
+	// existsErr・prsErr はブランチの取得・head の PR の一覧の取得だけを失敗させる（err より後に見る）。
+	existsErr error
+	prsErr    error
+	calls     []string // "exists repo branch" | "prs repo branch" | "pr repo number"
 }
 
 func newFakeBranchSource() *fakeBranchSource {
-	return &fakeBranchSource{branches: map[string]bool{}, prs: map[string][]UpstreamPullRequest{}}
+	return &fakeBranchSource{branches: map[string]bool{}, prs: map[string][]UpstreamPullRequest{},
+		pulls: map[string]UpstreamPullRequest{}, pullErrs: map[string]error{}}
 }
 
 func (f *fakeBranchSource) BranchExists(_ context.Context, repo, branch string) (bool, error) {
@@ -29,6 +38,9 @@ func (f *fakeBranchSource) BranchExists(_ context.Context, repo, branch string) 
 	f.calls = append(f.calls, "exists "+repo+" "+branch)
 	if f.err != nil {
 		return false, f.err
+	}
+	if f.existsErr != nil {
+		return false, f.existsErr
 	}
 	return f.branches[branch], nil
 }
@@ -40,7 +52,50 @@ func (f *fakeBranchSource) ListPullRequestsByHead(_ context.Context, repo, branc
 	if f.err != nil {
 		return nil, f.err
 	}
+	if f.prsErr != nil {
+		return nil, f.prsErr
+	}
 	return append([]UpstreamPullRequest(nil), f.prs[branch]...), nil
+}
+
+func (f *fakeBranchSource) GetPullRequest(_ context.Context, repo string, number int) (UpstreamPullRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := fmt.Sprintf("%s#%d", repo, number)
+	f.calls = append(f.calls, fmt.Sprintf("pr %s %d", repo, number))
+	if f.err != nil {
+		return UpstreamPullRequest{}, f.err
+	}
+	if err := f.pullErrs[key]; err != nil {
+		return UpstreamPullRequest{}, err
+	}
+	pr, ok := f.pulls[key]
+	if !ok {
+		return UpstreamPullRequest{}, fmt.Errorf("fake gh: pull request %s: http 404: %w", key, ErrUpstreamPullRequestNotFound)
+	}
+	return pr, nil
+}
+
+// branchCallLog はブランチと head の PR の取得の呼び出しだけを返す（PR 1 件の取得を除く）。
+func (f *fakeBranchSource) branchCallLog() []string {
+	var out []string
+	for _, c := range f.callLog() {
+		if !strings.HasPrefix(c, "pr ") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// pullCallLog は PR 1 件の取得の呼び出しだけを返す。
+func (f *fakeBranchSource) pullCallLog() []string {
+	var out []string
+	for _, c := range f.callLog() {
+		if strings.HasPrefix(c, "pr ") {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (f *fakeBranchSource) callLog() []string {
@@ -141,7 +196,7 @@ func TestReconcile_RunsForEveryResultExceptLaunchFailed(t *testing.T) {
 			if _, err := f.run(t, nil); err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.Join(f.branches.callLog(), "|"); got != "exists o/r feat/slot|prs o/r feat/slot" {
+			if got := strings.Join(f.branches.branchCallLog(), "|"); got != "exists o/r feat/slot|prs o/r feat/slot" {
 				t.Errorf("gh calls = %q", got)
 			}
 		})
@@ -177,7 +232,7 @@ func TestReconcile_BranchSelection(t *testing.T) {
 	if _, err := f.run(t, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(f.branches.callLog(), "|"); got != "exists o/r feat/x|prs o/r feat/x" {
+	if got := strings.Join(f.branches.branchCallLog(), "|"); got != "exists o/r feat/x|prs o/r feat/x" {
 		t.Errorf("with a reported branch: calls = %q", got)
 	}
 
@@ -187,7 +242,7 @@ func TestReconcile_BranchSelection(t *testing.T) {
 	if _, err := f2.run(t, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(f2.branches.callLog(), "|"); got != "exists o/r feat/slot|prs o/r feat/slot" {
+	if got := strings.Join(f2.branches.branchCallLog(), "|"); got != "exists o/r feat/slot|prs o/r feat/slot" {
 		t.Errorf("with a null branch: calls = %q", got)
 	}
 
@@ -197,7 +252,7 @@ func TestReconcile_BranchSelection(t *testing.T) {
 	if _, err := f3.run(t, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := f3.branches.callLog(); len(got) != 0 {
+	if got := f3.branches.branchCallLog(); len(got) != 0 {
 		t.Errorf("calls = %v, want none", got)
 	}
 }
@@ -366,19 +421,6 @@ func TestReconcile_ArtifactCheckOnlyForSucceededCompleted(t *testing.T) {
 	}
 }
 
-// 取得の失敗は成果物を確かめられなかったものとして保留し、問いに失敗を書く。
-func TestReconcile_UpstreamFailureHoldsWithTheError(t *testing.T) {
-	f := newReconFixture(t, "impl")
-	f.branches.err = errFakeGH
-	if _, err := f.run(t, nil); err != nil {
-		t.Fatal(err)
-	}
-	d := f.detail(t, "C-1")
-	if d.Status != StatusAwaitingHuman || !strings.Contains(d.Holds[0].Question, "fake gh down") {
-		t.Fatalf("status=%s holds=%+v", d.Status, d.Holds)
-	}
-}
-
 // AC-236〜238: release の登録（既定ブランチの base だけ・重複なし）。
 func TestReconcile_ReleaseRegistration(t *testing.T) {
 	t.Run("default base registers once per PR URL", func(t *testing.T) {
@@ -474,20 +516,41 @@ func TestReconcile_UnapprovedProductionReleaseDetection(t *testing.T) {
 	})
 }
 
-// 子が報告したブランチ名が git のブランチ名として不正なら、gh を呼ばない。
-func TestReconcile_InvalidReportedBranchNameIsNotLookedUp(t *testing.T) {
-	for _, b := range []string{"x/../..", "-rf", "a b", "a//b", "feat/.hidden", "x.lock", "a~b"} {
+// 子が報告したブランチ名が git のブランチ名として不正なら、報告は検査で退けられ
+// （run の結果は invalid_output）、gh を呼ばない。
+func TestReconcile_InvalidReportedBranchNameIsRejectedAndNotLookedUp(t *testing.T) {
+	for _, b := range []string{"x/../..", "-rf", "a b", "a//b", "feat/.hidden", "x.lock", "a~b", c404Branch} {
 		f := newReconFixture(t, "impl-branch")
 		f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) { m["branch"] = b })
-		if _, err := f.run(t, nil); err != nil {
+		res, err := f.run(t, nil)
+		if err != nil {
 			t.Fatal(err)
+		}
+		if res.Items[0].Result != RunResultInvalidOutput {
+			t.Errorf("branch %q: result = %s, want invalid_output", b, res.Items[0].Result)
 		}
 		if got := f.branches.callLog(); len(got) != 0 {
 			t.Errorf("branch %q: gh was called: %v", b, got)
 		}
-		if f.status(t) != StatusAwaitingHuman {
-			t.Errorf("branch %q: status = %s", b, f.status(t))
+		if f.status(t) != StatusInProgress {
+			t.Errorf("branch %q: status = %s, want in_progress", b, f.status(t))
 		}
+	}
+}
+
+// 防御: core の再検査を通らない経路（スロット由来など）で不正なブランチ名が来ても、
+// gatherReconciliation は gh を呼ばない。
+func TestReconcile_GatherDoesNotLookUpAnImplausibleBranch(t *testing.T) {
+	f := newReconFixture(t, "impl-branch")
+	dc := &delegationContext{Repo: f.conn.Repos[0], Operation: ConnectorOperation{Artifacts: "branch"}}
+	bad := "a b"
+	rep := &DelegationReport{Outcome: DelegationOutcomeCompleted, Branch: &bad}
+	rec := f.s.gatherReconciliation(context.Background(), f.input("Y-1", nil), dc, f.s.Workspace()+"/slot1", "main", RunResultSucceeded, rep)
+	if got := f.branches.callLog(); len(got) != 0 {
+		t.Errorf("gh was called: %v", got)
+	}
+	if rec.Branch != "" || len(rec.Errors) != 1 || !strings.Contains(rec.Errors[0], "not a valid git branch name") {
+		t.Errorf("rec = %+v", rec)
 	}
 }
 
@@ -517,7 +580,7 @@ func TestReconcile_LeftoverSlotBranchIsNotThisDelegationsArtifact(t *testing.T) 
 	if _, err := f.run(t, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.branches.callLog(); len(got) != 0 {
+	if got := f.branches.branchCallLog(); len(got) != 0 {
 		t.Errorf("gh calls = %v, want none (no branch to look up)", got)
 	}
 	if a := f.artifacts(t); len(a) != 0 {
@@ -541,7 +604,7 @@ func TestReconcile_ChangedSlotBranchFallsBack(t *testing.T) {
 	if _, err := f.run(t, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(f.branches.callLog(), "|"); got != "exists o/r feat/new|prs o/r feat/new" {
+	if got := strings.Join(f.branches.branchCallLog(), "|"); got != "exists o/r feat/new|prs o/r feat/new" {
 		t.Errorf("gh calls = %q", got)
 	}
 }

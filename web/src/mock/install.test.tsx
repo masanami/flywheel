@@ -20,3 +20,15 @@ it("mock モード: 偽の API で関係グラフとボードを開ける", asyn
     await screen.findByRole("region", { name: "人間待ちの帯" }),
   ).toBeInTheDocument();
 });
+
+// `?mock=large` では、大きなまとまりの偽のデータ（課題 100 件。flywheel#470）に差し替わる。
+it("mock モード: ?mock=large で大きなまとまりのワークスペースを開ける", async () => {
+  installMock("?mock=large&latency=0");
+  render(<App />);
+  expect(
+    await screen.findByRole("group", { name: "large の課題の関係グラフ" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("option", { name: "large-flat" }),
+  ).toBeInTheDocument();
+});
