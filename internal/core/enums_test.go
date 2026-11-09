@@ -92,10 +92,10 @@ func TestParseOperationKind_RejectsUnknownValue(t *testing.T) {
 	}
 }
 
-// --- OperationState（不可逆操作の状態。pending|approved|rejected|executed） ---
+// --- OperationState（不可逆操作の状態。pending|approved|rejected|executed|closed） ---
 
 func TestParseOperationState_AcceptsKnownValues(t *testing.T) {
-	for _, s := range []string{"pending", "approved", "rejected", "executed"} {
+	for _, s := range []string{"pending", "approved", "rejected", "executed", "closed"} {
 		if _, ok := ParseOperationState(s); !ok {
 			t.Errorf("ParseOperationState(%q) ok = false, want true", s)
 		}
@@ -106,6 +106,34 @@ func TestParseOperationState_RejectsUnknownValue(t *testing.T) {
 	for _, s := range []string{"done", "", "PENDING", "approve", "EXECUTED"} {
 		if _, ok := ParseOperationState(s); ok {
 			t.Errorf("ParseOperationState(%q) ok = true, want false", s)
+		}
+	}
+}
+
+// --- ClosedReason（閉じた理由。superseded|merged_outside|merged_unapproved）・ReopenReason（戻した理由） ---
+
+func TestParseClosedReason_ClosedSet(t *testing.T) {
+	for _, s := range []string{"superseded", "merged_outside", "merged_unapproved"} {
+		if _, ok := ParseClosedReason(s); !ok {
+			t.Errorf("ParseClosedReason(%q) ok = false, want true", s)
+		}
+	}
+	for _, s := range []string{"", "merged", "SUPERSEDED", "executed"} {
+		if _, ok := ParseClosedReason(s); ok {
+			t.Errorf("ParseClosedReason(%q) ok = true, want false", s)
+		}
+	}
+}
+
+func TestParseReopenReason_ClosedSet(t *testing.T) {
+	for _, s := range []string{"not_mergeable", "limit_reached", "content_changed"} {
+		if _, ok := ParseReopenReason(s); !ok {
+			t.Errorf("ParseReopenReason(%q) ok = false, want true", s)
+		}
+	}
+	for _, s := range []string{"", "merge_failed", "checks_failed", "CONTENT_CHANGED"} {
+		if _, ok := ParseReopenReason(s); ok {
+			t.Errorf("ParseReopenReason(%q) ok = true, want false", s)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -160,22 +161,41 @@ func TestGetPullRequest_NormalizesTheThreeStates(t *testing.T) {
 			if len(calls) != 1 {
 				t.Fatalf("gh calls = %v, want exactly one", calls)
 			}
-			if ep, _ := lastEndpointAndDashI(calls[0]); ep != "repos/o/r/pulls/7" {
-				t.Fatalf("endpoint = %q", ep)
+			if ep, dashI := lastEndpointAndDashI(calls[0]); ep != "repos/o/r/pulls/7" || !dashI {
+				t.Fatalf("endpoint = %q, -i = %v; want repos/o/r/pulls/7 with -i", ep, dashI)
 			}
 		})
 	}
 }
 
+// 取得の失敗は ErrUpstreamPullRequestNotFound を包まない（完了の照合が「見つからない」と分けるため。#487）。
 func TestGetPullRequest_Failures(t *testing.T) {
-	for _, scenario := range []string{"pulls_fail", "pull_one_unknown_state", "pull_one_no_base"} {
+	for _, scenario := range []string{"pulls_fail", "pull_one_unknown_state", "pull_one_no_base", "pull_one_http502", "get_500_decoy_text"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := newFakeGHDir(t)
 			t.Setenv(envScenario, scenario)
 			c := newTestClient(t, dir)
-			if _, err := c.GetPullRequest(context.Background(), "o/r", 7); err == nil {
+			_, err := c.GetPullRequest(context.Background(), "o/r", 7)
+			if err == nil {
 				t.Fatal("want an error")
+			}
+			if errors.Is(err, core.ErrUpstreamPullRequestNotFound) {
+				t.Fatalf("err = %v, must not be ErrUpstreamPullRequestNotFound", err)
 			}
 		})
 	}
+}
+
+// HTTP 404 だけが ErrUpstreamPullRequestNotFound（見つからないと確定）になる（#487）。
+func TestGetPullRequest_404IsNotFound(t *testing.T) {
+	dir := newFakeGHDir(t)
+	logPath := newFakeGHLogPath(t)
+	t.Setenv(envScenario, "pull_one_missing")
+	t.Setenv(envLogFile, logPath)
+	c := newTestClient(t, dir)
+	_, err := c.GetPullRequest(context.Background(), "o/r", 7)
+	if !errors.Is(err, core.ErrUpstreamPullRequestNotFound) {
+		t.Fatalf("err = %v, want ErrUpstreamPullRequestNotFound", err)
+	}
+	assertAllGET(t, readInvocationLog(t, logPath))
 }

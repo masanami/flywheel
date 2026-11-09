@@ -16,11 +16,15 @@ type fakeBranchSource struct {
 	mu       sync.Mutex
 	branches map[string]bool
 	prs      map[string][]UpstreamPullRequest
-	// pulls は GetPullRequest の結果。キーは "<repo>#<番号>"。無いキーは取得の失敗（見つからない）。
+	// pulls は GetPullRequest の結果。キーは "<repo>#<番号>"。無いキーは見つからない（404。
+	// ErrUpstreamPullRequestNotFound）。pullErrs のキーは取得の失敗。
 	pulls    map[string]UpstreamPullRequest
 	pullErrs map[string]error
 	err      error
-	calls    []string // "exists repo branch" | "prs repo branch" | "pr repo number"
+	// existsErr・prsErr はブランチの取得・head の PR の一覧の取得だけを失敗させる（err より後に見る）。
+	existsErr error
+	prsErr    error
+	calls     []string // "exists repo branch" | "prs repo branch" | "pr repo number"
 }
 
 func newFakeBranchSource() *fakeBranchSource {
@@ -35,6 +39,9 @@ func (f *fakeBranchSource) BranchExists(_ context.Context, repo, branch string) 
 	if f.err != nil {
 		return false, f.err
 	}
+	if f.existsErr != nil {
+		return false, f.existsErr
+	}
 	return f.branches[branch], nil
 }
 
@@ -44,6 +51,9 @@ func (f *fakeBranchSource) ListPullRequestsByHead(_ context.Context, repo, branc
 	f.calls = append(f.calls, "prs "+repo+" "+branch)
 	if f.err != nil {
 		return nil, f.err
+	}
+	if f.prsErr != nil {
+		return nil, f.prsErr
 	}
 	return append([]UpstreamPullRequest(nil), f.prs[branch]...), nil
 }
@@ -61,7 +71,7 @@ func (f *fakeBranchSource) GetPullRequest(_ context.Context, repo string, number
 	}
 	pr, ok := f.pulls[key]
 	if !ok {
-		return UpstreamPullRequest{}, fmt.Errorf("fake gh: pull request %s not found", key)
+		return UpstreamPullRequest{}, fmt.Errorf("fake gh: pull request %s: http 404: %w", key, ErrUpstreamPullRequestNotFound)
 	}
 	return pr, nil
 }
@@ -408,19 +418,6 @@ func TestReconcile_ArtifactCheckOnlyForSucceededCompleted(t *testing.T) {
 	}
 	if got := f2.status(t); got != StatusInProgress {
 		t.Errorf("status = %s", got)
-	}
-}
-
-// 取得の失敗は成果物を確かめられなかったものとして保留し、問いに失敗を書く。
-func TestReconcile_UpstreamFailureHoldsWithTheError(t *testing.T) {
-	f := newReconFixture(t, "impl")
-	f.branches.err = errFakeGH
-	if _, err := f.run(t, nil); err != nil {
-		t.Fatal(err)
-	}
-	d := f.detail(t, "C-1")
-	if d.Status != StatusAwaitingHuman || !strings.Contains(d.Holds[0].Question, "fake gh down") {
-		t.Fatalf("status=%s holds=%+v", d.Status, d.Holds)
 	}
 }
 

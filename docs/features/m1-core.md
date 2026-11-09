@@ -84,6 +84,9 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | T14 | 完了確認待ち | `approve --hold-release` | 完了（本番反映は未承認のまま） | 要 |
 | T15 | 完了確認待ち | `reject --reason` | 着手中。ただし、その完了確認待ちが T17 で入ったもの（`challenge.completion_direct` が真）なら人間対応待ち（「親が直接やる」保留を新しく立てて戻す）【決定 2026-11 オーナー（#481 の Q1〜Q4）】 | 要 |
 | T17 | 人間対応待ち（開いている保留の種類が `parent_direct`） | `complete-direct --artifact`（親が直接行った作業を成果物の参照つきで記録する） | 完了確認待ち | —【決定 2026-11-05 オーナー（#452 の Q1=1）。T16 は取り下げ（M4.5）】 |
+| T18 | 完了 | （CLI のコマンドは無い。本番反映でマージできなくなった release を立て直す core の書き込みだけが起こす） | 着手中 | —【決定 2026-11-07 オーナー（#485 の Q3）。M4.5 §本番反映の立て直し】 |
+
+T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`・`IsTerminal`）には現れない。完了は T18 を除いて、引き続きどの通常の操作からも出られない終端である。T18 を起こせるのは M4.5 の「本番反映の立て直し」の書き込み（`ReopenChallengeForRelease`）だけで、戻す理由は「本番反映の段で PR が既定ブランチへマージできなくなった」「連続の上限に達した」「検証の後に既定ブランチの取り込み以外の変更が入った」の 3 つに限る。完了した課題をほかの理由で戻す口は作らない。
 
 - [ ] 遷移表に無い操作は拒否し、状態と作業ログを変えない
 - [ ] `verify --result` の値は `met | not_met | uncertain` の閉集合（設計書 §8.2 の写像）。それ以外は拒否する（fail-closed）
@@ -108,7 +111,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 - 承認後は普段の完了で、`metrics` の完了の件数に数え、J6 の入力にも渡す。`direct_completion` の行が 1 件以上あることが「親が直接行った」印で、完了の後も残る。J6 には run の代わりに、この印と成果物の参照・説明を区画「親が直接行った記録」として渡す【決定 Q5=1】
 - 状態は人間対応待ちのまま、新しい状態は作らない。`status` は種類が `parent_direct` の保留にある課題を `needs_human` から外し、別の区分 `parent_agent`（「親のエージェントが動く番」）に出す。課題カードは `answer_question` を出さず、関係グラフの `category` は `parent_agent`（人間の操作待ちが別にあれば `human` が先）。オーナーが答える問いではないので、未回答の問いの一覧にも出さない【決定 Q6=1】
 - **差し戻し（T15）の戻り先は、完了確認待ちへ入った道で分かれる**【決定 #481 のオーナーの決定 Q1〜Q4（2026-11）】。親が直接した完了（T17 で入ったもの）の差し戻しは、着手中ではなく**「親が直接やる」保留（人間対応待ち・開いている保留の種類が `parent_direct`）へ戻す**（着手中へ戻すと、承認済みの計画を持つ課題が周の委譲の対象になってしまうため）。通常の完了（T8 で入ったもの）の差し戻しは従来どおり着手中へ戻し、保留は立てない。保留を立てられる元の状態は絞らない（`hold --kind parent_direct` は T11 の 4 状態から立てられる）
-  - 課題の記録 `challenge.completion_direct`（0 か 1）が「いまの完了確認待ちが T17 で入ったものか」を持つ。**T17 で 1、ほかのすべての遷移で 0**（T8 で入るときも 0。完了確認待ちを出る T13・T14・T15・T16 で 0 に戻る）。遷移のたびに core が書き、`edit` など遷移でない書き込みは値を変えない。承認の要約が直接行った記録を見せるかの判定（`direct_completion` が非 null か）も、以前の作業ログからの判定をやめ、この値で行う。マイグレーション 0015（スキーマ版 15）で足し、既存の行は「状態が完了確認待ちで、作業ログの最後の `complete_direct` と `verify_met` のうち最後が `complete_direct`」の課題だけを 1 で埋める（従来の判定と結果が変わらない）。書き出しと再構築で保たれる
+  - 課題の記録 `challenge.completion_direct`（0 か 1）が「いまの完了確認待ちが T17 で入ったものか」を持つ。**T17 で 1、ほかのすべての遷移で 0**（T8 で入るときも 0。完了確認待ちを出る T13・T14・T15・T16 で 0 に戻る）。遷移のたびに core が書き、`edit` など遷移でない書き込みは値を変えない。承認の要約が直接行った記録を見せるかの判定（`direct_completion` が非 null か）も、以前の作業ログからの判定をやめ、この値で行う。マイグレーション 0017（スキーマ版 17）で足し、既存の行は「状態が完了確認待ちで、作業ログの最後の `complete_direct` と `verify_met` のうち最後が `complete_direct`」の課題だけを 1 で埋める（従来の判定と結果が変わらない）。書き出しと再構築で保たれる
   - 戻した保留は新しい行で、`kind=parent_direct`・**問い（`question`）は差し戻しの理由（`reject --reason` の文）そのまま**（`status`・`show` の `holds` で読める）・`from_status` は**その完了の記録（最新の `direct_completion`）が閉じた保留の `from_status`**（回答すると保留の前の状態へ戻れる。元の保留と同じ状態に戻る）。差し戻しの承認の記録（`approval`）・`rejected_fields`・本人確認の扱いは従来どおり。作業ログの `reject` の `after` は、保留へ戻したときだけ `hold_kind`（`parent_direct`）と `question`（差し戻しの理由。保留を作る `hold` の作業ログと同じキー）を含む
   - 戻した後は、親が作業をやり直して再び `complete-direct`（T17）で完了確認待ちへ進める（承認の要約には新しい記録が出る）。回答（T12）で保留の前の状態へ戻せば、通常の経路（着手中なら検証 T8）を通れる。周の委譲・自動の計画（J2）の対象の選び方は変えず、人間対応待ちは対象外のまま
 - 作業ログの `action` は `complete_direct`（`entity=challenge`）。`after` は `status`・`version` に加えて `artifacts`（成果物の参照の配列）・`note`（あれば）を含む。保留を作る `hold` の `after` は、種類が `human` 以外のときだけ `hold_kind` を含む
@@ -117,7 +120,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 - [ ] `complete-direct` は成果物の参照（1 件以上必須）と説明（任意）を記録して完了確認待ちへ進め、完了の検証を起動しない（run が 1 件も作られない）
 - [ ] 保留の中の課題と、T17 で完了確認待ちへ進んだ課題は、自動の計画（J2）・委譲・完了の検証（J5）の対象にならない
 - [ ] 親が直接した完了（T17 で入った完了確認待ち）の差し戻し（T15）は、元の保留を立てた状態によらず、課題を人間対応待ちへ戻し、種類が `parent_direct` の保留を新しく立てる（`status` の `parent_agent` 区分に出て、周の委譲・自動の計画の対象にならない）。保留の問いは差し戻しの理由で、`from_status` は元の保留の `from_status`。通常の完了（T8 で入った完了確認待ち）の差し戻しは従来どおり着手中へ戻り、保留は立たない【決定 #481 のオーナーの決定 Q1〜Q4】
-- [ ] `challenge.completion_direct` は T17 で 1、ほかのすべての遷移で 0 になり、完了確認待ちを出る遷移（T13・T14・T15・T16）で消える。T17 の後に差し戻され、回答で戻って T8 で完了確認待ちへ入ったとき、承認の要約に古い直接行った記録を出さない。マイグレーション 0015 で、既存の行は作業ログの最後が `complete_direct` の完了確認待ちの課題だけ 1 で埋まる【決定 #481 のオーナーの決定 Q3】
+- [ ] `challenge.completion_direct` は T17 で 1、ほかのすべての遷移で 0 になり、完了確認待ちを出る遷移（T13・T14・T15・T16）で消える。T17 の後に差し戻され、回答で戻って T8 で完了確認待ちへ入ったとき、承認の要約に古い直接行った記録を出さない。マイグレーション 0017 で、既存の行は作業ログの最後が `complete_direct` の完了確認待ちの課題だけ 1 で埋まる【決定 #481 のオーナーの決定 Q3】
 - [ ] 承認後は普段の完了として完了の件数に数え、J6 の入力に直接行った印と成果物の参照を渡し、記録に「親が直接行った」印が残る
 - [ ] マイグレーションで `hold.kind` が足され、既存の行は `human` で埋まり、問い・回答・回答の記録は変わらない。新しい表を含め、書き出しと再構築で保たれる
 - [ ] `status` と関係グラフが、種類が `parent_direct` の保留にある課題を「親のエージェントが動く番」の区分で出し、状態は人間対応待ちのまま
@@ -253,7 +256,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | 一覧 | 要素の形 |
 |---|---|
 | `plans` | `{"version", "body", "created_at"}` |
-| `approvals` | `{"kind", "decision", "operation_id", "target_version", "actor", "channel", "verification", "reason", "decided_at"}`（`operation_id`・`reason` は `null` 可） |
+| `approvals` | `{"id", "kind", "decision", "operation_id", "target_version", "actor", "channel", "verification", "reason", "decided_at", "merge_in_verified_head", "superseded_at", "superseded_reason", "superseded_by"}`（`operation_id`・`reason` は `null` 可。`id` は承認の行の ID `"AP-<n>"`。`merge_in_verified_head` は release を「検証の head から既定ブランチを取り込んだだけ」と判定して承認したときの検証の head、`superseded_at`・`superseded_reason`・`superseded_by` は完了の承認が本番反映のやり直しで置き換えられた日時・理由・置き換えた次の完了の承認の ID。有効な承認と、これらに当てはまらない承認は `null`。M4.5 §本番反映の立て直し・#485） |
 | `holds` | `{"question", "from_status", "from_status_label", "kind", "raised_at", "answer", "answered_at", "answered_by", "closed_at"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`。`closed_at` は保留を回答なしで閉じた時刻〔課題の取り下げ〔M4.5〕と、親が直接行った作業の完了の記録〔T17。#452〕〕で、閉じていなければ `null`。`kind` は保留の種類 `human`\|`parent_direct`） |
 | `direct_completions` | `{"artifacts", "note", "created_at"}`（親が直接行った完了の記録。古い順で、無ければ `[]`。`artifacts` は成果物の参照の文字列の配列〔1 件以上〕、`note` は短い説明で無ければ `null`。1 件以上あることが「親が直接行った」印。#452） |
 | `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
@@ -289,7 +292,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | `verification` | string | 本人確認の方式（本人確認の無い操作は `none`） |
 | `entity` | string | `challenge`\|`operation`\|`cycle`（`operation` は #13 で追加。不可逆操作の登録・単独の承認・差し戻し・D12 の一括承認のエントリ。`cycle` は M5 S1 で追加。`cycle` の `backup` の段の結果のエントリで、`action` は `backup` だけ） |
 | `entity_id` | string | `entity` が `challenge` なら `"C-<n>"`、`operation` なら `"OP-<n>"`、`cycle` なら `"Y-<n>"` |
-| `action` | string | `create`\|`edit`\|`classify`\|`plan`\|`submit`\|`verify_met`\|`verify_not_met`\|`verify_uncertain`\|`hold`\|`complete_direct`\|`approve`\|`approve_hold_release`\|`reject`\|`answer`\|`op_add`\|`op_approve`\|`op_reject`\|`backup`（`backup` は M5 S1 で追加し、`entity=cycle` のときだけ使う。`op_add`・`approve_hold_release` は #13 で追加。`op_approve`・`op_reject` は #39 で追加。`op_add` は `entity=operation`（不可逆操作自身の登録）と `entity=challenge`（`op add` が課題の版を1つ上げたことの記録。#39）の両方で使う。`op_approve`・`op_reject` は `entity=challenge` のときだけ（`<OP-ID>` への approve／reject が課題の版を1つ上げたことの記録。#39。同じ `entity=challenge` の `approve`／`reject`〔課題そのものの承認・差し戻し。`approval_kind` を持つ〕と紛れないための別語彙）。`action` の意味と `after` の形は `entity` との組で決まり、同じ `entity` の中で 1 つの `action` に 2 つの意味を持たせない（#39）。`approve_hold_release` は `entity=challenge` のときだけ〔`approve <C-ID> --hold-release`＝T14〕。`approve`・`reject` は `entity=challenge`・`entity=operation` の両方で使う） |
+| `action` | string | `create`\|`edit`\|`classify`\|`plan`\|`submit`\|`verify_met`\|`verify_not_met`\|`verify_uncertain`\|`hold`\|`complete_direct`\|`approve`\|`approve_hold_release`\|`reject`\|`answer`\|`op_add`\|`op_approve`\|`op_reject`\|`op_close`\|`reopen_for_release`\|`backup`（`backup` は M5 S1 で追加し、`entity=cycle` のときだけ使う。`op_add`・`approve_hold_release` は #13 で追加。`op_approve`・`op_reject` は #39 で追加。`op_add` は `entity=operation`（不可逆操作自身の登録）と `entity=challenge`（`op add` が課題の版を1つ上げたことの記録。#39）の両方で使う。`op_approve`・`op_reject` は `entity=challenge` のときだけ（`<OP-ID>` への approve／reject が課題の版を1つ上げたことの記録。#39。同じ `entity=challenge` の `approve`／`reject`〔課題そのものの承認・差し戻し。`approval_kind` を持つ〕と紛れないための別語彙）。`action` の意味と `after` の形は `entity` との組で決まり、同じ `entity` の中で 1 つの `action` に 2 つの意味を持たせない（#39）。`approve_hold_release` は `entity=challenge` のときだけ〔`approve <C-ID> --hold-release`＝T14〕。`approve`・`reject` は `entity=challenge`・`entity=operation` の両方で使う。`op_close`・`reopen_for_release` は #485 で追加した。`op_close` は `entity=operation`〔不可逆操作を `closed` にした記録。`after` は `state`・`version`・`closed_reason`〕と `entity=challenge`〔承認待ちの release を閉じて課題の版を 1 つ上げた記録〕で使う。`reopen_for_release` は `entity=challenge` のときだけ〔T18。`after` は `status`・`version`・`reason`・`operation_id`・`new_operation_id`〕） |
 | `before` | object \| null | 変わった項目だけの JSON オブジェクト。`create`、`entity=operation` の `op_add`、`entity=challenge` の `op_add`・`op_approve`・`op_reject`（#39）、`entity=cycle` は常に `null`。**`before` には `version` を載せない**（H7 の「変わった項目」に版も含まれるが、変更前の版は `after` の `version` − 1 として求まるため。#39）。課題から一意に引ける単一の値（課題の列、現在の計画の版、現在の保留への回答）が未設定から値を得た場合（`classify` の `priority`、`edit` の `urgency`、`plan` の初回〔T3〕の `plan_version`、`answer` の `answer`）は、その項目のキーを `null` で載せる（#39。`priority`・`urgency` は元からこの形、`plan_version`・`answer` は #39 でそろえた）。一方、履歴として新しく積まれる行の内容（保留の `question`、承認の `approval_kind`・`decision`・`target_version`・`reason`、不可逆操作の登録内容）はこの規則の対象外（キー自体を持たない） |
 | `after` | object \| null | 変わった項目だけの JSON オブジェクト。`create`・`op_add`（`entity=operation`）・`entity=cycle` 以外は常に `version` を含む（`entity=cycle` の `after` は `version` を持たず、`outcome`・`commit`・`detail` を持つ）（`entity=operation` の `version` は不可逆操作自身の版）。状態が変わる遷移では `status`（T4 のように状態が変わらない遷移では含まない）、`classify` は `priority`、`plan` は `plan_version`、保留に入る操作（`verify_uncertain`・`hold`）は `question` を含む、`entity=challenge` の `approve`・`approve_hold_release`・`reject` は `approval_kind`・`decision`・`target_version`（`reject` はさらに `reason`）を含む、`answer` は `answer` を含む、`entity=operation` の `op_add` は `operation_id`・`kind`・`summary`・`ref`・`state` を含む、`entity=operation` の `approve`・`reject` は `state`（`reject` はさらに `reason`）を含む、`entity=challenge` の `op_add`・`op_approve`・`op_reject`（#39）は `version` と、原因になった不可逆操作への参照 `operation_id` を含む |
 
@@ -506,9 +509,9 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 |---|---|---|
 | `challenge` | id, title, description, done_criteria, urgency, priority, status, version, reporter, created_at, updated_at | 足す: `version`・`created_at`・`updated_at`。`position`・`size`・`budget_limit` は M3 で足す（H1） |
 | `task_plan` | challenge_id, version, body, created_at | `summary`・`steps` の構造化はしない（本文 1 つ。J2 の出力形式が決まる M3 で見直す） |
-| `approval` | id, challenge_id, operation_id（NULL 可）, kind（plan / completion / release）, decision（approved / rejected）, target_version, plan_version（計画の承認だけ。承認した計画の版。NULL 可。#143 の 0006）, actor, channel, verification, reason, decided_at | 足す: `operation_id`・`target_version`・`verification`。改称: `note` → `reason`。`kind` の `irreversible_op` を `release` と読み替え、削除などの不可逆操作もこの種類で扱う（H2・H5） |
+| `approval` | id, challenge_id, operation_id（NULL 可）, kind（plan / completion / release）, decision（approved / rejected）, target_version, plan_version（計画の承認だけ。承認した計画の版。NULL 可。#143 の 0006）, actor, channel, verification, reason, decided_at（M4.5 が head_sha、#485 が merge_in_verified_head・superseded_at・superseded_reason・superseded_by_approval_id を足した） | 足す: `operation_id`・`target_version`・`verification`。改称: `note` → `reason`。`kind` の `irreversible_op` を `release` と読み替え、削除などの不可逆操作もこの種類で扱う（H2・H5） |
 | `hold` | id, challenge_id, question, from_status, raised_at, answer, answered_at, answered_by | 足す: `id`・`from_status`（H4）・`answered_by`。改称: `resolved_at` → `answered_at`。`session_ref` は M3 で足す |
-| `operation` | id, challenge_id, kind（release / delete / external_send / other）, summary, ref, state（pending / approved / rejected）, version, created_at | **新設**（H2）。実行の記録（executed など）は S2 |
+| `operation` | id, challenge_id, kind（release / delete / external_send / other）, summary, ref, state（pending / approved / rejected。M4.5 が executed、#485 が closed を足した）, version, created_at | **新設**（H2）。実行の記録（executed など）は S2。#485 が closed_reason・closed_at・supersedes_operation_id を足した |
 | `activity` | id, at, actor, channel, verification, entity, entity_id, action, before, after | 足す: `verification`。`before`・`after` は変わった項目だけの JSON（H7） |
 
 M1 で作らないもの: `challenge_dependency`・`challenge_link`（S2）、`source_binding`（M2）、`cycle`・`run`・`slot`・`lock`（M3）。
@@ -589,7 +592,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] （状態, 操作）の組のうち遷移表に無いものはすべて、終了コード 1・`invalid_transition`（完了の課題に対しては `terminal_state`）で終わり、課題の状態と作業ログが変わらない（全組を列挙して検証する）。ただし、引数の検証で遷移表の検査より先に `usage_error` になる組（計画承認待ちの課題への `approve --hold-release` など）は対象から除き、`usage_error` を定める受入基準に従う
 - [ ] 遷移表が参照する状態はすべて語彙にある（テストで検査する）
 - [ ] 語彙の状態はすべて T1 から遷移表をたどって到達できる（テストで検査する）
-- [ ] 遷移表に `完了` から出る遷移は無い（テストで検査する）
+- [ ] 遷移表に `完了` から出る遷移は無い（テストで検査する）。ただし T18（制限つきの行。本番反映の立て直しの書き込みだけが使う）は除く。通常の操作から見た完了は終端のままで、`terminal_state` の判定は変わらない【#485 で T18 を追加】
 - [ ] `classify --priority` に `P0 | P1 | P2` 以外を指定すると、終了コード 1・`validation_failed` で終わり、状態が変わらない
 - [ ] `verify --result` に `met | not_met | uncertain` 以外を指定すると、終了コード 1・`validation_failed` で終わり、状態が変わらない
 - [ ] `verify --result met`（または `not_met`）に `--question` を添えると、終了コード 2・`usage_error` で終わり、状態が変わらない

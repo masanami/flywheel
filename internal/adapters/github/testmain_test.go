@@ -76,26 +76,45 @@ func runFakeGH(argv []string) int {
 ]`)
 		return 0
 	case "pull_one_open":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"open one","state":"open","merged_at":null,"base":{"ref":"main"}}`)
-		return 0
+		return fakeGHStatusLineOK("HTTP/2.0 200 OK", `{"html_url":"https://github.com/o/r/pull/7","title":"open one","state":"open","merged_at":null,"base":{"ref":"main"}}`)
 	case "pull_one_closed":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"closed one","state":"closed","merged_at":null,"base":{"ref":"develop"}}`)
-		return 0
+		return fakeGHStatusLineOK("HTTP/2.0 200 OK", `{"html_url":"https://github.com/o/r/pull/7","title":"closed one","state":"closed","merged_at":null,"base":{"ref":"develop"}}`)
 	case "pull_one_merged":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"merged one","state":"closed","merged_at":"2026-10-01T00:00:00Z","base":{"ref":"main"}}`)
-		return 0
+		return fakeGHStatusLineOK("HTTP/2.0 200 OK", `{"html_url":"https://github.com/o/r/pull/7","title":"merged one","state":"closed","merged_at":"2026-10-01T00:00:00Z","base":{"ref":"main"}}`)
 	case "pull_one_unknown_state":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"x","state":"draft","merged_at":null,"base":{"ref":"main"}}`)
-		return 0
+		return fakeGHStatusLineOK("HTTP/2.0 200 OK", `{"html_url":"https://github.com/o/r/pull/7","title":"x","state":"draft","merged_at":null,"base":{"ref":"main"}}`)
 	case "pull_one_no_base":
-		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","title":"x","state":"open","merged_at":null,"base":{}}`)
-		return 0
+		return fakeGHStatusLineOK("HTTP/2.0 200 OK", `{"html_url":"https://github.com/o/r/pull/7","title":"x","state":"open","merged_at":null,"base":{}}`)
+	case "pull_one_missing":
+		return fakeGHStatusLine("HTTP/2.0 404 Not Found", notFoundBody())
+	case "pull_one_http502":
+		return fakeGHStatusLine("HTTP/2.0 502 Bad Gateway", `{"message":"Server Error"}`)
 	case "pulls_two_pages":
 		return fakeGHPullsTwoPages(argv)
 	case "checks_pending", "checks_complete", "checks_merged", "checks_runs_fail":
 		return fakeGHChecks(argv, os.Getenv(envScenario))
 	case "compare_ok":
 		fmt.Print("diff --git a/x b/x\n")
+		return 0
+	case "compare_commits_ok":
+		fmt.Print(`{"status":"ahead","ahead_by":2,"total_commits":2,
+"commits":[
+{"sha":"m1","parents":[{"sha":"m0"}],"commit":{"message":"main change\n\nbody"}},
+{"sha":"h1","parents":[{"sha":"v"},{"sha":"m1"}],"commit":{"message":"Merge branch 'main'"}}],
+"files":[{"filename":"a.go","status":"modified","patch":"@@ -1 +1 @@\n-a\n+b"},{"filename":"big.bin","status":"added"}]}`)
+		return 0
+	case "compare_commits_truncated":
+		fmt.Print(`{"status":"ahead","total_commits":300,"commits":[{"sha":"m1","parents":[],"commit":{"message":"x"}}],"files":[]}`)
+		return 0
+	case "compare_commits_full_files":
+		files := make([]string, 0, 100)
+		for i := 0; i < 100; i++ {
+			files = append(files, fmt.Sprintf(`{"filename":"f%d","patch":"p"}`, i))
+		}
+		fmt.Printf(`{"status":"diverged","total_commits":1,"commits":[{"sha":"c","parents":[{"sha":"p"}],"commit":{"message":"x"}}],"files":[%s]}`, strings.Join(files, ","))
+		return 0
+	case "compare_commits_bad_json":
+		fmt.Print(`not json`)
 		return 0
 	case "compare_too_large":
 		fmt.Fprintln(os.Stderr, "gh: Sorry, this diff is taking too long to generate. (HTTP 406)")
@@ -272,6 +291,12 @@ func fakeGHSleepWithGrandchild() int {
 func fakeGHStatusLine(statusLine, body string) int {
 	fmt.Printf("%s\r\nContent-Type: application/json; charset=utf-8\r\n\r\n%s", statusLine, body)
 	return 1
+}
+
+// fakeGHStatusLineOK は gh api -i の 2xx の応答（状態行・ヘッダ・本文。終了コード 0）を返す。
+func fakeGHStatusLineOK(statusLine, body string) int {
+	fmt.Printf("%s\r\nContent-Type: application/json; charset=utf-8\r\n\r\n%s", statusLine, body)
+	return 0
 }
 
 func fakeGHGetDecoy500() int {

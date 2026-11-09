@@ -161,6 +161,8 @@ type delegationContext struct {
 	ReworkHit *reworkLimitHit
 	// ResumeBranchPushed は Resume のブランチがリモートにあるか（再開のスロットの選び方に使う）。
 	ResumeBranchPushed bool
+	// Reopen は、課題が本番反映のやり直しで完了から戻されたあと、まだ委譲していないときの戻した記録（#485）。
+	Reopen *reopenNote
 }
 
 // estimateMicros は周の上限の評価額（実装枠の残り ＋ レビュー対応枠の残り）。`--max-budget-usd` と
@@ -353,6 +355,9 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		if dc.Holds, err = loadHolds(ctx, tx, cid); err != nil {
 			return err
 		}
+		if dc.Reopen, err = loadReopenNote(ctx, tx, cid); err != nil {
+			return err
+		}
 		if dc.Binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
 			return err
 		}
@@ -441,6 +446,9 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 	if t := formatHoldsSection(dc.Holds); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "保留の記録", Content: t})
 	}
+	if dc.Reopen != nil {
+		sections = append(sections, JudgmentDataSection{Label: labelReopenReason, Content: formatReopenSection(dc.Reopen, dc.Repo.DefaultBranch)})
+	}
 	if t := formatSourceBindingSection(dc.Binding); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "取り込み元の対応", Content: t})
 	}
@@ -505,6 +513,20 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 		if active {
 			return nil, ErrRunInProgress
 		}
+		// 完了の照合が取得の失敗で終わった課題は、子を起動せず照合だけをやり直す（#487）。
+		retries, _, err := s.splitReconcileRetries(ctx, []int64{cid})
+		if err != nil {
+			return nil, err
+		}
+		if len(retries) == 1 {
+			item, ns, err := s.retryReconciliation(ctx, in, *ch, retries[0])
+			if err != nil {
+				return nil, err
+			}
+			res := &DelegateResult{}
+			appendDelegateOutcome(res, item, ns)
+			return res, nil
+		}
 		return s.runSingleDelegation(ctx, in, *ch)
 	}
 
@@ -517,6 +539,24 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
+	}
+	// 完了の照合が取得の失敗で終わった課題は、委譲の対象から外し、子を起動せず照合だけをやり直す
+	// （#487。優先度→ID の順）。
+	retries, targetIDs, err := s.splitReconcileRetries(ctx, targetIDs)
+	if err != nil {
+		return nil, err
+	}
+	retried := &DelegateResult{}
+	for _, p := range retries {
+		ch, err := s.loadChallengeForAuto(ctx, formatChallengeID(p.ChallengeID))
+		if err != nil {
+			return nil, err
+		}
+		item, ns, err := s.retryReconciliation(ctx, in, *ch, p)
+		if err != nil {
+			return nil, err
+		}
+		appendDelegateOutcome(retried, item, ns)
 	}
 	jc := in.Cycle
 	if jc == nil {
@@ -535,7 +575,8 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if err != nil {
 		return nil, err
 	}
-	res.NotStarted = append(append(skipped, plan.notStarted...), res.NotStarted...)
+	res.NotStarted = append(append(append(skipped, retried.NotStarted...), plan.notStarted...), res.NotStarted...)
+	res.Items = append(retried.Items, res.Items...)
 	return res, nil
 }
 
