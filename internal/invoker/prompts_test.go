@@ -550,6 +550,42 @@ func TestInstructions_J2AsksForQuotesBeforeSkippingIssues(t *testing.T) {
 	}
 }
 
+// #500: 人や子に問い・選択肢・理由・推奨・差し戻しの指摘を出す判断点の指示文は、
+// 入力の区画が英語でも日本語で書くことを明記する（文を消すとこのテストが失敗する）。
+//
+// 足す前の指示文ごとの判定（2026-11-09 に既定ブランチの ec3f1ce で確認）:
+//
+//	指示文 | 人へ出す文                       | 言語を指定する文 | 英語の部分
+//	j1.md  | 理由・headline・位置づけ         | 無し             | 項目名の headline と例の識別子（AC-12 等）
+//	j2.md  | 問い・論点・理由                 | 無し             | 出力のキー名の括弧書き（expected・non_goals 等）
+//	j3.md  | 無し（委譲先への brief。問いを出さない） | 無し     | 無し
+//	j4.md  | 雛形のみ（本文は後続のチケット） | 無し             | 無し
+//	j5.md  | 理由・差し戻しの指摘・問い       | 無し             | 「実物（actual）」・`{scene, after}`・main
+//	j6.md  | 学び・記憶・フォローアップ       | 無し             | 出力のキー名の括弧書き（classifications 等）
+//	j8.md  | 改修の提案と理由                 | 無し             | 無し
+//
+// 出力の型（internal/core の各 jN の出力のスキーマ）はキー名・閉集合の値が英語で、
+// description は J1 の context（日本語）以外に無い。言語を指定する文はどこにも無かった。
+// 共通の規律を置く仕組み（判断点の指示文の共通の部品）は無いので、j3・j4 以外の各指示文に足した。
+//
+// 英語の問いになった原因の候補（未確認）: J5 の入力には PR の差分の区画が最大 200,000 バイト
+// （maxPullRequestDiffBytes）入り、コードの識別子・英語のコメントが大半を占めうる。出力の型の
+// キー名も英語で、指示文に言語の指定が無かったため、PR の中身を読めずにオーナーへ差分と本文の
+// 確認を頼む場面（C-439 の H-91・C-451 の H-122 に共通）で、日本語の文脈が薄いまま英語に
+// 引きずられた見込み。実際の入力（その時の差分の区画の中身）は確かめていない。
+func TestInstructions_RequireJapaneseForHumanFacingText(t *testing.T) {
+	const want = "人や子に出す問い・選択肢・理由・推奨・差し戻しの指摘の文は日本語で書く。データの区画（差分・課題・コメント）が英語でも同じ。コードの識別子・パス・コマンド・引用は原文のままでよい。"
+	for _, jp := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8} {
+		got, err := Instructions(jp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(%v) lacks the rule to write human-facing text in Japanese", jp)
+		}
+	}
+}
+
 // #511: j2.md の手順の項は、委譲の子が使えない操作（この仕組みのコマンド・サーバの起動）を
 // 計画の子の手順や論点の選択肢に入れず、親かオーナーの段か PR の CI へ分けることを求める。
 // 規則の行は特定のリポジトリの名前を含まない（汎用の道具として一般の言い方で書く）。
