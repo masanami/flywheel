@@ -62,6 +62,10 @@ export interface MockChallenge {
   directCompletions: DirectCompletion[];
   // 完了確認待ちの検証が「本番反映で満たされる見込み」と区分した条件（無ければ空）
   conditionsAfterRelease: string[];
+  // いまの完了確認待ちが、直接行った完了（T17）で入ったものか。本物の challenge.completion_direct と同じ意味で、
+  // 承認の ① が direct_completion を返すのはこれが真のときだけ（記録があっても、検証の met で入り直したときは返さない）。
+  // 完了確認待ちを出る遷移で偽に戻る。
+  completionDirect: boolean;
   operations: Operation[];
   plans: PlanDetail[];
   approvals: Approval[];
@@ -104,6 +108,7 @@ function mk(
     holds,
     directCompletions,
     conditionsAfterRelease,
+    completionDirect,
     operations,
     plans,
     approvals,
@@ -136,6 +141,7 @@ function mk(
     holds: holds ?? [],
     directCompletions: directCompletions ?? [],
     conditionsAfterRelease: conditionsAfterRelease ?? [],
+    completionDirect: completionDirect ?? false,
     operations: operations ?? [],
     plans: plans ?? [],
     approvals: approvals ?? [],

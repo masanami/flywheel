@@ -192,8 +192,9 @@ export function createMockApi(
           conditions_after_release:
             kind === "completion" ? m.conditionsAfterRelease : [],
           conditions_after_release_heading: CONDITIONS_AFTER_RELEASE_HEADING,
+          // 本物と同じく、いまの完了確認待ちが直接行った完了（T17）で入ったときだけ返す
           direct_completion:
-            kind === "completion"
+            kind === "completion" && m.completionDirect
               ? (m.directCompletions[m.directCompletions.length - 1] ?? null)
               : null,
           done_criteria: m.c.done_criteria === "" ? null : m.c.done_criteria,
@@ -236,6 +237,8 @@ export function createMockApi(
       if (!completion && m.c.status !== "awaiting_plan_approval")
         throw new ApiError("invalid_transition", "承認待ちではない", 409);
       m.c.status = completion ? "done" : "in_progress";
+      // 完了確認待ちを出る遷移で、直接行った完了の印は消える（本物の challenge.completion_direct と同じ）
+      m.completionDirect = false;
       m.c.status_label = STATUS_LABEL[m.c.status] ?? m.c.status;
       m.c.version += 1;
       return {

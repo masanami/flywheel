@@ -44,6 +44,12 @@ type TransitionTarget struct {
 	ReturnToPrecedingHoldStatus bool
 	// Fixed は ReturnToPrecedingHoldStatus が false のときの固定遷移先。
 	Fixed Status
+	// IfCompletionDirect は、課題の completion_direct（いまの完了確認待ちが親が直接行った完了〔T17〕で入ったもの
+	// であること）が真のときの遷移先。ゼロ値（NoStatus）なら無い（Fixed だけ）。T15（差し戻し）だけが持ち、
+	// 親が直接した完了の差し戻しを着手中ではなく「親が直接やる」保留（人間対応待ち）へ戻す（#481）。
+	// 値は遷移のたびに runTransition が書き（T17 で真・ほかで偽）、Resolve は読まない（既存の呼び出し元が見る遷移先は
+	// Fixed のまま）。真偽を渡して引くのは ResolveForCompletionDirect。
+	IfCompletionDirect Status
 }
 
 // Resolve は遷移先を確定する。固定遷移先の行では preceding を無視して Fixed を返す。
@@ -66,6 +72,15 @@ func (tt TransitionTarget) Resolve(table []Transition, preceding Status) (Status
 		}
 	}
 	return "", fmt.Errorf("core: %q is not a valid preceding-hold status", preceding)
+}
+
+// ResolveForCompletionDirect は Resolve に、課題の completion_direct（IfCompletionDirect の注記を参照）を
+// 加えた版。completionDirect が真で IfCompletionDirect を持つ行なら IfCompletionDirect、それ以外は Resolve と同じ。
+func (tt TransitionTarget) ResolveForCompletionDirect(table []Transition, preceding Status, completionDirect bool) (Status, error) {
+	if completionDirect && tt.IfCompletionDirect != NoStatus {
+		return tt.IfCompletionDirect, nil
+	}
+	return tt.Resolve(table, preceding)
 }
 
 // Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T18）を指す。
@@ -102,7 +117,11 @@ var Table = []Transition{
 	{ID: "T12", From: StatusAwaitingHuman, Op: OpAnswer, Target: TransitionTarget{ReturnToPrecedingHoldStatus: true}, RequiresVerification: true},
 	{ID: "T13", From: StatusAwaitingCompletionApproval, Op: OpApprove, Target: TransitionTarget{Fixed: StatusDone}, RequiresVerification: true},
 	{ID: "T14", From: StatusAwaitingCompletionApproval, Op: OpApproveHoldRelease, Target: TransitionTarget{Fixed: StatusDone}, RequiresVerification: true},
-	{ID: "T15", From: StatusAwaitingCompletionApproval, Op: OpReject, Target: TransitionTarget{Fixed: StatusInProgress}, RequiresVerification: true},
+	// T15: 完了の差し戻し。着手中へ戻す。ただし、いまの完了確認待ちが親が直接行った完了（T17）で入ったもの
+	// （challenge.completion_direct が真）なら、着手中ではなく人間対応待ちへ戻し、同じトランザクションで種類が
+	// 親が直接行うの保留を新しく立てる（ExecuteApproval。#481）。戻り先が 2 つあるが遷移表の行は 1 つで、
+	// 後者は IfCompletionDirect で表す。
+	{ID: "T15", From: StatusAwaitingCompletionApproval, Op: OpReject, Target: TransitionTarget{Fixed: StatusInProgress, IfCompletionDirect: StatusAwaitingHuman}, RequiresVerification: true},
 	// T16: 取り下げ（docs/features/m4.5-learning-and-self-improvement.md S4。M45H13・M45H28）。
 	// 完了以外の 7 状態から取り下げへ。取り下げから出る行は持たない（終端）。
 	{ID: "T16", From: StatusUnclassified, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},

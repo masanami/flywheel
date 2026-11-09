@@ -552,6 +552,14 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		}
 		approvalOut.RelaySession, approvalOut.RelayQuote = att.relayPtrs()
 
+		// 親が直接した完了の差し戻し（T15 の戻り先が人間対応待ち）は、「親が直接やる」保留を立てて戻す。
+		// 問いの文は差し戻しの理由（#481）。
+		if req.Decision == ApprovalDecisionRejected && tc.target == StatusAwaitingHuman {
+			if err := raiseParentDirectHoldOnReject(ctx, tc, *req.Reason); err != nil {
+				return err
+			}
+		}
+
 		// D12: 完了の承認（HoldRelease==false）は、同じトランザクションで
 		// その課題の未承認の release をすべて自動承認する。完了の承認と
 		// release ごとの承認は、それぞれ別の approval 行・別の作業ログの
