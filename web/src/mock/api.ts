@@ -23,7 +23,12 @@ import {
   pairsOf,
   statusOf,
   toCard,
+  waitingOf,
 } from "./store.ts";
+
+// 偽のサーバが返す見出し（本物は internal/view の ConditionsAfterReleaseHeading。UI の承認は本番反映を承認しない側）
+const CONDITIONS_AFTER_RELEASE_HEADING =
+  "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:";
 
 export interface MockOptions {
   latencyMs?: number;
@@ -82,6 +87,7 @@ export function createMockApi(
           followup_of: null,
           improvement: null,
         },
+        direct_completions: m.directCompletions,
         holds: m.holds,
         operations: m.operations,
         plans: m.plans,
@@ -89,6 +95,7 @@ export function createMockApi(
         pairs: pairsOf(m.stages),
         source_binding: null,
         stages: m.stages,
+        waiting: waitingOf(wsOf(name), id),
       };
     },
     async log(name, id): Promise<LogResponse> {
@@ -141,7 +148,13 @@ export function createMockApi(
         .flatMap((w) =>
           w.items.flatMap((m) =>
             m.holds
-              .filter((h) => h.answer === null && h.closed_at === null)
+              // 種類が親が直接行うの保留は、オーナーが答える問いではない
+              .filter(
+                (h) =>
+                  h.answer === null &&
+                  h.closed_at === null &&
+                  h.kind !== "parent_direct",
+              )
               .map((h) => ({
                 challenge_id: m.c.id,
                 from_status: h.from_status,
@@ -178,6 +191,14 @@ export function createMockApi(
       return {
         approval: {
           challenge_id: id,
+          conditions_after_release:
+            kind === "completion" ? m.conditionsAfterRelease : [],
+          conditions_after_release_heading: CONDITIONS_AFTER_RELEASE_HEADING,
+          // 本物と同じく、いまの完了確認待ちが直接行った完了（T17）で入ったときだけ返す
+          direct_completion:
+            kind === "completion" && m.completionDirect
+              ? (m.directCompletions[m.directCompletions.length - 1] ?? null)
+              : null,
           done_criteria: m.c.done_criteria === "" ? null : m.c.done_criteria,
           kind,
           other_pending_operations: m.operations
@@ -218,6 +239,8 @@ export function createMockApi(
       if (!completion && m.c.status !== "awaiting_plan_approval")
         throw new ApiError("invalid_transition", "承認待ちではない", 409);
       m.c.status = completion ? "done" : "in_progress";
+      // 完了確認待ちを出る遷移で、直接行った完了の印は消える（本物の challenge.completion_direct と同じ）
+      m.completionDirect = false;
       m.c.status_label = STATUS_LABEL[m.c.status] ?? m.c.status;
       m.c.version += 1;
       return {
@@ -230,6 +253,7 @@ export function createMockApi(
           followup_of: null,
           improvement: null,
         },
+        direct_completions: m.directCompletions,
         holds: m.holds,
         operations: m.operations,
         plans: m.plans,
@@ -237,6 +261,7 @@ export function createMockApi(
         pairs: pairsOf(m.stages),
         source_binding: null,
         stages: m.stages,
+        waiting: waitingOf(wsOf(name), id),
       };
     },
     async cycle(name) {

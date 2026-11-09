@@ -152,7 +152,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | 帯の区分 | 要素 | 絞り込みで残るカード |
 |---|---|---|
 | 承認待ち | `needs_human.challenges` のうち計画承認待ち・完了確認待ちの課題 | その課題 |
-| 未回答の問い | `needs_human.challenges` のうち人間対応待ちの課題 | その課題 |
+| 未回答の問い | `needs_human.challenges` のうち人間対応待ちの課題（種類が `parent_direct` の保留の課題は `needs_human` に入らず、`status.parent_agent` に出る。#452） | その課題 |
 | 不可逆操作の承認 | `needs_human.operations` の各操作 | 操作の `challenge_id` の課題 |
 | 食い違い | `needs_human.discrepancies` の各要素（種類〔`kinds`〕が `dependency_cycle` だけの要素は除く。`m4.5-learning-and-self-improvement.md` の決定 M45H19） | `challenge_id` の課題 |
 | 予算の使い切り | `needs_human.budget_exhausted` の各要素 | `challenge_id` の課題 |
@@ -415,7 +415,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | J2 | 判定に `issues` を足す。`issues`（論点の配列）・`expected`（予想の配列）・`non_goals`（文字列の配列）・`figure`（string \| null） | `issues` の判定は論点 3〜5 個を要し、`plan` の項目（`summary`・`steps`・`repo`・`operation`・`size`・`done_criteria`・予算の額・`cross_repo`・`related_repos`・`expected`・`non_goals`・`figure`）は検査せず無視する。`plan` の判定は従来の必須の組に加え、サイズが `M`・`L` なら予想 1 個以上を要する（空なら M4H39 の保留）。`issues` の判定のとき `expected` 以下は無視する。`plan` は省略可の `no_issues_needed`（null か `[{"content": string, "source_kind": "challenge" \| "upstream_issue" \| "upstream_comment" \| "referenced_issue" \| "hold_record", "quote": string}]`）を持てる（M4H48。要素が 1 件以上あり、すべての項目が空白を除いて非空で `source_kind` が閉集合の値のときだけ論点の記録として数える）。サイズが `M`・`L` で論点の記録も有効な `no_issues_needed` も無い `plan` は、1 回目は `invalid_output`、問い直しでも同じなら保留（M4H47） |
 | J5 | `actual`（実物の配列） | 判定が `met` で課題の予想が空でなければ、予想と同じ個数を要する（合わなければ保留＝【決定 2026-10-19 オーナー M4H44】） |
 
-- 指示文の上限（`internal/invoker/prompts.go` の `judgmentPromptLimit`。J1 4,096・J2 8,192・J5 6,144 バイト）は変えない。足す規則は上限に収める（2026-10-19 の時点で J1 1,796・J2 5,001・J5 3,796 バイト【実コード確証 high】。足した後に収まるかは【要確認】。2026-11-04 の #450 で確認の段・問い直しの区画・論点不要の項目を足した後の J2 は 8,186 バイト【実コード確証 high】で、上限に収めるため既存の文の重複を削った）。規則の正本は core の検査で、指示文には要点だけを書く。それでも収まらなければ、上限を変えずに仕様への指摘として PR の説明に書く（実装チケットの完了条件に `CheckPromptSizes` が通ることを含める）。
+- 指示文の上限（`internal/invoker/prompts.go` の `judgmentPromptLimit`。J1 4,096・J2 12,288〔#462 で 8,192 から引き上げ〕・J5 6,144 バイト）は変えない。足す規則は上限に収める（2026-10-19 の時点で J1 1,796・J2 5,001・J5 3,796 バイト【実コード確証 high】。足した後に収まるかは【要確認】。2026-11-04 の #450 で確認の段・問い直しの区画・論点不要の項目を足した後の J2 は 8,186 バイト〔当時の上限 8,192。#462 で 12 KiB へ引き上げ〕【実コード確証 high】で、上限に収めるため既存の文の重複を削った）。規則の正本は core の検査で、指示文には要点だけを書く。それでも収まらなければ、上限を変えずに仕様への指摘として PR の説明に書く（実装チケットの完了条件に `CheckPromptSizes` が通ることを含める）。
 
 #### 段階の欄の形（S4）【決定 2026-10-19 オーナー M4H43・親 M4P33】
 
@@ -443,7 +443,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | メソッドとパス | 内容 |
 |---|---|
 | `GET /`（UI の HTML を返す経路のすべて） | CSRF の値を cookie `flywheel_csrf_<ポート>`（`SameSite=Strict`・`HttpOnly`・`Path=/`）で渡し、同じ値を `<meta name="flywheel-csrf" content="…">` で HTML に埋める。値は server の起動ごとに `crypto/rand` の 32 バイトを base64url にしたもの。cookie の名前にポートを入れるのは、同じホストの別の `serve` と値が上書きし合わないため |
-| `GET /api/v1/workspaces/{name}/challenges/{id}/approval` | ① 承認の要約と版。`{"approval": {"challenge_id", "title", "kind": "plan" \| "completion", "version", "plan": {"version", "body"} \| null, "done_criteria": string \| null, "releases": [{"id", "summary", "ref", "head_sha": string \| null}], "other_pending_operations": [{"id", "kind", "summary"}], "release_held": bool}}`。M1 の承認の要約（`ApprovalPreview`）の中身に、`release` ごとの PR の head と、UI の承認では `release` が保留のまま残ること（`release_held` は常に `true`）を足す。型は `internal/view` に置き、`types.gen.ts` の生成の対象にする。承認待ちでない課題は `invalid_transition` |
+| `GET /api/v1/workspaces/{name}/challenges/{id}/approval` | ① 承認の要約と版。`{"approval": {"challenge_id", "title", "kind": "plan" \| "completion", "version", "plan": {"version", "body"} \| null, "done_criteria": string \| null, "direct_completion": {"artifacts": [string], "note": string \| null, "created_at"} \| null, "releases": [{"id", "summary", "ref", "head_sha": string \| null}], "other_pending_operations": [{"id", "kind", "summary"}], "release_held": bool}}`。M1 の承認の要約（`ApprovalPreview`）の中身に、`release` ごとの PR の head と、UI の承認では `release` が保留のまま残ること（`release_held` は常に `true`）を足す。`direct_completion` は、完了確認待ちが親が直接行った完了の記録（M1 の T17。#452）によるときだけ非 null で、成果物の参照を `done_criteria` と並べて見せる（画面では http(s) の URL だけをリンクにする）。型は `internal/view` に置き、`types.gen.ts` の生成の対象にする。承認待ちでない課題は `invalid_transition` |
 | `POST /api/v1/workspaces/{name}/challenges/{id}/approve` | ② 本文 `{"version": <①の版>}`（`version` が無い・整数でない・未知のキーがあれば `validation_failed`）。計画承認待ちなら計画の承認、完了確認待ちなら本番反映を保留した完了の承認を行い、`flywheel show --json` と同じ形に `card` を足して返す |
 | `POST /api/v1/workspaces/{name}/cycle` | 1 周の起動。`flywheel cycle --trigger ui` を別のプロセスで起動し、子が周を記録した合図を最大 3 秒待って `{"started": true}` を返す（3 秒のうちに合図も終了も無いときも同じ）。サイクルの排他に当たれば `locked`。合図の前に子が終了したら `internal_error`（`message` に子の終了コードと標準エラーの末尾）【決定 2026-10-17 オーナー M4H33。詳細は §アーキテクチャ決定】 |
 | `GET /api/v1/workspaces/{name}/cycle` | サイクルの状態 `{"state": "idle" \| "running" \| "stale", "last_started_at", "last_ended_at", "last_result"}`。`state` はサイクルのロック（`lock` の行。`holder` が周）だけで決め、ロックの `heartbeat_at` が 300 秒以内なら `running`、300 秒より古ければ `stale`（M3 の中断の判定と同じしきい値）、ロックが無ければ `idle`。終了していない周（`cycle.ended_at` が NULL）の有無は `state` に数えない。`last_started_at` は、個別の操作の周を除いた周のうち ID が最大のものの開始時刻、`last_ended_at`・`last_result` は、個別の操作の周を除いた終了した周のうち ID が最大のものの値で、無ければ `null`。個別の操作の周は、`cycle.trigger` が CLI の渡す閉集合（`run`・`classify --auto`・`plan --auto`・`verify --auto`・`improve`・`learn`・`op exec`）のどれかである周とし、スキーマは変えない。時刻の形は `runs --json` にそろえる【決定 2026-10-17 オーナー M4H32。trigger で区別することは親 M4P30】 |
@@ -1037,7 +1037,7 @@ S1 は 2026-10-12（flywheel#159）、S2 は 2026-10-18（flywheel#212）、S3 �
 - [ ] `no_issues_needed` が空の配列・要素の `quote` が空または空白だけ・`source_kind` が空または閉集合の外・`content` が空・1 件でも無効な要素を含む、のどれでも、出力全体は不正にならず、論点の記録が無いのと同じ（問い直しへ進む）。`source_kind` の閉集合は J2 の出力スキーマの `enum` と等しく、判断点の出力の閉集合の値（指示文の禁止語の生成元）に含まれる
 - [ ] サイズ `S` の `plan` は、`no_issues_needed` の有無・有効かどうかによらず問い直さず、判断の呼び出し 1 回で登録される
 - [ ] 問い直しを周の上限（`cycle_budget`）で起動できない周が 2 回続くと（1 回目の run が `invalid_output` のまま残る）、3 回目の周は J2 を起動せず `failure_limit` の保留になる。個別の操作で問い直しを起動できなくても、エラーにせず 1 回目の結果と `not_started`（`cycle_budget`）を返す
-- [ ] J2 の指示文は、判断の前の確認（論点の記録が無く中以上なら論点を選ぶ・論点不要は決まっていることすべての引用を要する）・区画「問い直し」・論点不要の項目・出力の型の説明の行（サイズが中・大なら論点の記録か論点不要の引用が要る）を持ち、8,192 バイトと禁止語の検査を通る【決定 2026-11-04 オーナー Q4】
+- [ ] J2 の指示文は、判断の前の確認（論点の記録が無く中以上なら論点を選ぶ・論点不要は決まっていることすべての引用を要する）・区画「問い直し」・論点不要の項目・出力の型の説明の行（サイズが中・大なら論点の記録か論点不要の引用が要る）を持ち、12,288 バイト〔#462 で 8,192 から引き上げ〕と禁止語の検査を通る【決定 2026-11-04 オーナー Q4】
 - [ ] 論点の記録の無い課題で、サイズ `S` の判定 `plan` の J2 の出力は計画として登録される
 - [ ] 論点の記録の無い課題で、サイズ `M` の判定 `plan` で `expected` が `null` の J2 の出力は、予想が空の保留にならず、1 回目の run は `invalid_output` になる（論点の記録の検査が先）
 - [ ] `flywheel edit <C-ID> --issues <JSON>` で論点を書いた課題（`issues_hold_id` は NULL）で、サイズ `M` の判定 `plan` の J2 の出力は計画として登録される
@@ -1319,7 +1319,7 @@ S4 の起草で確定事項から答えを引けなかった問い（起草時�
 - M1 の `approval`・`hold` のスキーマを広げる（S3。マイグレーション `0007`）: 会話の手がかりの列（§データモデル）。
 - M1 PD7（CLI の本人確認の要らない変更は `conflict` を返さない）: 2026-10-09 の版は UI の編集・優先度の変更に `conflict` を足した（M4P8）が、2026-10-12 に UI の編集・優先度の変更を外したので、当てはめる操作が無くなった。UI の承認の版の照合は M1 の 2 段階の API の規則のまま。
 - M3 の J1 の出力スキーマを広げる（S4）: `headline`・`context` を足す（M4H7）。J1 の指示文の上限（M3P4 の 4 KiB）は変えない前提である。
-- M3 の J2・J5 の出力スキーマを広げる（S4）: J2 の判定に `issues` を足し、`issues`・`expected`・`non_goals`・`figure` を足す。サイズ `M`・`L` の `plan` に論点の記録と予想を求める規則は、M3 の J2 の検査（必須の組）を広げる。J5 に `actual` を足す。J2（8 KiB）・J5（6 KiB）の指示文の上限は変えない（§IF / API「判断点の出力に足すもの（S4）」）。
+- M3 の J2・J5 の出力スキーマを広げる（S4）: J2 の判定に `issues` を足し、`issues`・`expected`・`non_goals`・`figure` を足す。サイズ `M`・`L` の `plan` に論点の記録と予想を求める規則は、M3 の J2 の検査（必須の組）を広げる。J5 に `actual` を足す。J2（12 KiB〔#462 で 8 KiB から引き上げ〕）・J5（6 KiB）の指示文の上限は変えない（§IF / API「判断点の出力に足すもの（S4）」）。
 - M1 の `edit`（人間記入欄の変更）の対象を広げる（S4）: J1・J2・J5 が書く欄（「一言で」「位置づけ」・段階の欄）も `edit` で人が直せる。M1 の「人間記入欄と分類欄を誰が書けるかで分ける」区別のうち、これらの欄は判断点と人の両方が書く欄になる。
 - M1 の `reject` を広げる（S4）: 課題の差し戻しに任意の `--field` を足し、`approval` に `rejected_fields` の列を足す（マイグレーション `0008`）。
 - M1 の承認の要約（`ApprovalPreview` と端末の要約の文）を広げる（S4）: 論点と回答・予想・やらないこと（計画）、予想と実物の対（完了）。
@@ -1334,7 +1334,7 @@ S4 の起草で確定事項から答えを引けなかった問い（起草時�
 
 - 親のブリーフは claude-flywheel#194 を「closed」としていたが、2026-10-08 に確かめた時点では open だった。board 側の表示（board PR #186）はマージ済み（board の `origin/main`＝`282a4a9` が #186 のコミット）。本仕様の結論は変わらない。
 - 委譲のブリーフ（2026-10-12）の §3 は flywheel#207 の決定の写しで、Issue の本文・決定のコメントと照合して食い違いは無かった。
-- 委譲のブリーフ（2026-10-19）は「J1・J2・J5 の指示文の上限（M3P4 の 4 KiB）」としていたが、`internal/invoker/prompts.go` の `judgmentPromptLimit` は J1 4,096・J2 8,192・J5 6,144 バイトで、4 KiB は J1 だけである【実コード確証 high】。本仕様は実コードの値に合わせた。
+- 委譲のブリーフ（2026-10-19）は「J1・J2・J5 の指示文の上限（M3P4 の 4 KiB）」としていたが、`internal/invoker/prompts.go` の `judgmentPromptLimit` は J1 4,096・J2 8,192〔当時。#462 で 12 KiB へ引き上げ〕・J5 6,144 バイトで、4 KiB は J1 だけである【実コード確証 high】。本仕様は実コードの値に合わせた。
 - 設計書 §差し戻しはずれた欄を記録する（D20）は「完了の差し戻しでは」と書いているが、M4P32 は差し戻しの種類を限っていない。本仕様は計画の差し戻しにも `--field` を使える形にした（2026-10-19 親 M4P36）。
 - 設計書 D20 と M4H17 は論点の段を「J2（計画）の前」に置くが、サイズは課題の列に無く（M3H7）、J1 のサイズの案は課題に書かれない（`internal/core/judgment_j1.go` の `mine` の写像は優先度だけを書く【実コード確証 high】）。本仕様は、J2 の 1 回目の呼び出しが計画を書く前に論点を返す形で書いた【決定 2026-10-19 オーナー M4H45】。決定 6 の「差し込みは引き継がない」の理由（使っていない）は Issue のコメントにだけあり、本仕様は Issue に合わせた。
 
@@ -1347,6 +1347,6 @@ S4 の起草で確定事項から答えを引けなかった問い（起草時�
 - 委譲の子セッションが、宣言の `--permission-mode` のもとで `curl` により `127.0.0.1` の server へ `POST` を送れること（M4H27 の前提。実際の子で試していない）。
 - 判断点の呼び出し（J1〜J5）と委譲の子のほかに、`flywheel` を実行できる LLM のセッションが新しい構成に無いこと（§クリティカル設計決定 1 の「自走中の自己承認を塞ぐ」の前提）。invoker の起動の引数（`internal/invoker/args.go`・`internal/invoker/delegate.go`）と M3H13 の目印は確かめた【実コード確証 high】が、オーナーが別に自走の LLM を起動する運用（旧 Tom の run-cycle に当たるもの）を新しい構成で続けるかは確かめていない。
 - `hold` の回答の記録に経路と本人確認の方式の列が無い（`0001_initial.sql` の `hold` は `answered_by` だけ）【実コード確証 high】。作業ログ（`activity`）には経路と方式が残る。
-- S4 の規則を足した J1・J2・J5 の指示文が、それぞれの上限（4,096・8,192・6,144 バイト）に収まること（起草時に指示文を書いていない）。
+- S4 の規則を足した J1・J2・J5 の指示文が、それぞれの上限（4,096・12,288〔#462 で 8,192 から引き上げ〕・6,144 バイト）に収まること（起草時に指示文を書いていない）。
 - Mermaid の描画のライブラリを `web/` の Vite のビルドで別のチャンクに分け、Vitest（jsdom）で読み込みの関数を差し替えて検証できること（ライブラリの版と jsdom での描画は試していない）。
 - 判断点（J5）が読み取り専用の道具だけで、予想の例ごとに変更後の姿（CLI の出力・振る舞い）を確かめて書けること（UI の画面は文で書く＝M4H43）。

@@ -68,6 +68,7 @@ function bodies() {
     approvals: [],
     card: cc("C-2", "awaiting_plan_approval").card,
     challenge: cc("C-2", "awaiting_plan_approval"),
+    direct_completions: [],
     holds: [],
     operations: [],
     plans: [{ body: "計画の本文", created_at: "", spec: null, version: 1 }],
@@ -82,6 +83,7 @@ function bodies() {
       issues_answer: null,
       non_goals: ["やらないこと1"],
     },
+    waiting: { conflicts: [], prerequisites: [] },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-2"] = { activities: [] };
   f["/api/v1/workspaces/alpha/challenges/C-2/approval"] = {

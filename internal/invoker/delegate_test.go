@@ -313,7 +313,7 @@ func TestBuildDelegateArgs_ResumeUsesResumeFlagInsteadOfSessionID(t *testing.T) 
 }
 
 func TestBuildDelegationResumeStdin_AnswerCarriesFixedTextAnswerAndBranch(t *testing.T) {
-	got, err := BuildDelegationResumeStdin(core.ResumeKindAnswer, "Q-TEXT", "ANSWER-TEXT", "feat/x", "", "")
+	got, err := BuildDelegationResumeStdin(core.ResumeKindAnswer, "Q-TEXT", "ANSWER-TEXT", "feat/x", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,8 +332,35 @@ func TestBuildDelegationResumeStdin_AnswerCarriesFixedTextAnswerAndBranch(t *tes
 	}
 }
 
+// invalid_output の後の再開: 報告が検査を通らなかった理由を「前の報告の不備」の区画で渡す。
+// 他の種類・理由が空なら区画を持たない。
+func TestBuildDelegationResumeStdin_InterruptedCarriesTheRejectedReportReason(t *testing.T) {
+	got, err := BuildDelegationResumeStdin(core.ResumeKindInterrupted, "", "", "feat/x", "", "the branch field is not a git branch name", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(got)
+	for _, want := range []string{WrapDataSection("前の報告の不備", "the branch field is not a git branch name"), WrapDataSection("続けるブランチ", "feat/x"), dataSectionGuardNote} {
+		if !strings.Contains(s, want) {
+			t.Errorf("stdin lacks %q:\n%s", want, s)
+		}
+	}
+	fixed, _ := ResumePrompt(core.ResumeKindInterrupted)
+	if !strings.Contains(fixed, "前の報告の不備") {
+		t.Errorf("the fixed text must tell the child to read the 前の報告の不備 section:\n%s", fixed)
+	}
+	none, _ := BuildDelegationResumeStdin(core.ResumeKindInterrupted, "", "", "", "", "", "")
+	if strings.Contains(string(none), "BEGIN DATA") {
+		t.Errorf("no section without a reason:\n%s", none)
+	}
+	other, _ := BuildDelegationResumeStdin(core.ResumeKindRework, "", "", "", "F", "ignored", "")
+	if strings.Contains(string(other), "ignored") {
+		t.Errorf("only an interrupted resume carries the reason:\n%s", other)
+	}
+}
+
 func TestBuildDelegationResumeStdin_InterruptedHasNoAnswerSection(t *testing.T) {
-	got, err := BuildDelegationResumeStdin(core.ResumeKindInterrupted, "", "", "", "", "")
+	got, err := BuildDelegationResumeStdin(core.ResumeKindInterrupted, "", "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +372,7 @@ func TestBuildDelegationResumeStdin_InterruptedHasNoAnswerSection(t *testing.T) 
 	if fixed == answerFixed {
 		t.Error("the two resume texts must differ")
 	}
-	if _, err := BuildDelegationResumeStdin(core.ResumeKind("x"), "", "", "", "", ""); err == nil {
+	if _, err := BuildDelegationResumeStdin(core.ResumeKind("x"), "", "", "", "", "", ""); err == nil {
 		t.Error("unknown kind must be an error")
 	}
 }
@@ -353,7 +380,7 @@ func TestBuildDelegationResumeStdin_InterruptedHasNoAnswerSection(t *testing.T) 
 // 上限到達の後の再開（M3P44）: 固定の文面が、上限到達で中断した事実と続行を求めることを書き、
 // 回答の区画は持たない。ブランチがあれば「続けるブランチ」の区画で渡す。
 func TestBuildDelegationResumeStdin_BudgetStatesTheCapStopAndAsksToContinue(t *testing.T) {
-	got, err := BuildDelegationResumeStdin(core.ResumeKindBudget, "", "", "feat/x", "", "")
+	got, err := BuildDelegationResumeStdin(core.ResumeKindBudget, "", "", "feat/x", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +435,7 @@ func TestLauncher_InvokeDelegation_ResumeSendsResumeFlagAndTheFixedTextOnStdin(t
 
 // 差し戻しの後の再開: 固定の文面の後に、J5 の差し戻しの指摘とブランチを区画で渡す。回答の区画は持たない。
 func TestBuildDelegationResumeStdin_ReworkCarriesFixedTextAndFeedback(t *testing.T) {
-	got, err := BuildDelegationResumeStdin(core.ResumeKindRework, "", "", "feat/x", "FEEDBACK-TEXT", "")
+	got, err := BuildDelegationResumeStdin(core.ResumeKindRework, "", "", "feat/x", "FEEDBACK-TEXT", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

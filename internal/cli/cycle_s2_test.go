@@ -49,7 +49,8 @@ func TestCycle_AllFivePhases_DelegatesAndVerifiesInTheSameCycleWithOnlyGETs(t *t
 		{match: "repos/o/direct/branches/feat/child", stdout: "HTTP/2.0 200 OK\r\n\r\n{\"name\":\"feat/child\"}"},
 		{match: "repos/o/direct/pulls?head=o%3Afeat%2Fchild&page=1&per_page=100&state=all", stdout: `[{"html_url":"https://github.com/o/direct/pull/9","title":"t","state":"open","merged_at":null,"base":{"ref":"develop"}}]`},
 		// 検証の段の PR のチェック（完了済み）。
-		{match: "repos/o/direct/pulls/9", stdout: `{"html_url":"https://github.com/o/direct/pull/9","title":"t","state":"open","merged_at":null,"base":{"ref":"develop"},"head":{"sha":"abc123"}}`},
+		{match: "repos/o/direct/pulls/9", stdout: `{"html_url":"https://github.com/o/direct/pull/9","title":"t","state":"open","merged_at":null,"base":{"ref":"develop","sha":"base456"},"head":{"sha":"abc123"}}`},
+		{match: "repos/o/direct/compare/base456...abc123", stdout: "diff --git a/x b/x"},
 		{match: "repos/o/direct/commits/abc123/check-runs?page=1&per_page=100", stdout: checkRunsComplete},
 		{match: "repos/o/direct/commits/abc123/status?page=1&per_page=100", stdout: `{"state":"success","total_count":0,"statuses":[]}`},
 	}, orderLog)

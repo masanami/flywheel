@@ -16,8 +16,10 @@ import { ApprovalGuide } from "./ApprovalGuide.tsx";
 import { ApprovalPanel, approvalKindOf } from "./ApprovalPanel.tsx";
 import { CardFields } from "./CardFields.tsx";
 import { ClampedText } from "./ClampedText.tsx";
+import { DirectCompletionView } from "./DirectCompletionView.tsx";
 import { FigureView } from "./FigureView.tsx";
 import { StagesDetail } from "./StagesDetail.tsx";
+import { ShowWaitingReasons } from "./WaitingReasonsSection.tsx";
 import type { Challenge } from "./types.ts";
 
 export interface Loaded {
@@ -63,11 +65,15 @@ function Section({
   title,
   count,
   children,
+  hideWhenEmpty = false,
 }: {
   title: string;
   count: number;
   children: React.ReactNode;
+  // 該当が 0 件のときは節ごと出さない（普通の課題には出さない節）
+  hideWhenEmpty?: boolean;
 }) {
+  if (hideWhenEmpty && count === 0) return null;
   return (
     <section aria-label={title}>
       <h3>
@@ -78,6 +84,10 @@ function Section({
   );
 }
 
+// 種類が親が直接行うの保留が開いているときの表示（オーナーが答える問いではない）。
+const PARENT_DIRECT_HOLD_NOTE =
+  "親のエージェントが直接行う保留（オーナーが答える問いではありません）";
+
 // 保留の原因の run が無い（run_id が null）ときの表示。
 const CAUSE_RUN_NONE = "なし（原因の run は記録されていない）";
 
@@ -86,8 +96,8 @@ type CardDetailModalProps = {
   agentName: string;
   workspacePath: string;
   onClose: () => void;
-  // 関係グラフの画面だけが渡す差し込み口（待っている理由）。「課題」の節の後ろに描く。
-  // ボードは渡さないので、省略時は何も描かない（ボードの表示は変わらない）。
+  // 関係グラフの画面が渡す差し込み口（待っている理由。グラフの辺から作る）。「課題」の節の後ろに描く。
+  // 省略時（ボード）は、詳細の API の waiting から同じ部品で同じ位置に描く。
   supplement?: React.ReactNode;
 };
 
@@ -226,7 +236,10 @@ export function CardDetailModal({
           </dl>
         </section>
 
-        {supplement}
+        {supplement ??
+          (loadState.status === "success" ? (
+            <ShowWaitingReasons waiting={loadState.loaded.show.waiting} />
+          ) : null)}
 
         {loadState.status === "loading" && (
           <div className="card-detail-log-loading">読み込み中...</div>
@@ -268,6 +281,15 @@ export function DetailSections({ l }: { l: Loaded }) {
   const acts = [...activities].sort((a, b) => byTimeAsc(a.at, b.at));
   return (
     <>
+      <Section
+        title="親が直接行った記録"
+        count={show.direct_completions.length}
+        hideWhenEmpty
+      >
+        {show.direct_completions.map((d) => (
+          <DirectCompletionView key={d.created_at} completion={d} />
+        ))}
+      </Section>
       <StagesDetail stages={show.stages} pairs={show.pairs} />
       <FigureView figure={show.stages.figure} />
       {show.challenge.dependencies.length > 0 ? (
@@ -339,6 +361,8 @@ export function DetailSections({ l }: { l: Loaded }) {
                   <ClampedText text={h.answer} />
                 ) : h.closed_at !== null ? (
                   `回答なしで閉じた（${h.closed_at}）`
+                ) : h.kind === "parent_direct" ? (
+                  PARENT_DIRECT_HOLD_NOTE
                 ) : (
                   "未回答"
                 )}

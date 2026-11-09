@@ -135,7 +135,7 @@ func TestLookup_T8ToT10AreDistinctRows(t *testing.T) {
 func TestLookup_AllPairsNotInTableAreRejected(t *testing.T) {
 	valid := map[[2]string]bool{}
 	for _, tr := range Table {
-		if tr.From == NoStatus {
+		if tr.From == NoStatus || tr.Restricted {
 			continue
 		}
 		valid[[2]string{string(tr.From), string(tr.Op)}] = true
@@ -174,10 +174,10 @@ func TestLookup_CreateNotAvailableFromExistingStatus(t *testing.T) {
 	}
 }
 
-// TestTable_RowCount は、Table の物理行数が25（T1〜T16、うちT11が4遷移元・T16が7遷移元に展開）であることを検証する。
+// TestTable_RowCount は、Table の物理行数が27（T1〜T18、うちT11が4遷移元・T16が7遷移元に展開）であることを検証する。
 func TestTable_RowCount(t *testing.T) {
-	if len(Table) != 25 {
-		t.Fatalf("len(Table) = %d, want 25", len(Table))
+	if len(Table) != 27 {
+		t.Fatalf("len(Table) = %d, want 27", len(Table))
 	}
 }
 

@@ -9,7 +9,8 @@
 // 取得・作成・更新）で、識別子はすべて非公開にしている。#56 は読み書きの
 // API と内部の型（sourceBinding・upstreamState・policyState）を非公開のまま
 // 残し、show のための読み取り専用の公開の形 SourceBinding だけを足した（書き
-// 込みは core の取り込み〔Ingest〕だけが行う）。作成・更新は tx を受け取る関数として置き、作業ログを書かない:
+// 込みは core の取り込み〔Ingest〕と、紐づける・外す操作〔BindChallenge・UnbindChallenge〕だけが行う）。
+// 作成・更新・削除は tx を受け取る関数として置き、作業ログを書かない:
 // 対応の変化は QP6 に従って、呼び出し側（#56〜#58）が mutate の同じトランザク
 // ションの中で課題の作成・更新・作業ログ・版の +1 と合わせて扱う（QH1 は
 // source_binding を作業ログ・版の対象外にする案 D を退けている）。
@@ -385,4 +386,22 @@ func nullableTextColumn(s string) any {
 		return nil
 	}
 	return s
+}
+
+// deleteSourceBinding は challengeID の課題の対応を削除する（unbind）。対応が無ければ
+// ErrNotBound。作業ログ・課題の版は書かない（呼び出し側が同じトランザクションの中で扱う。
+// ファイル冒頭の注記）。
+func deleteSourceBinding(ctx context.Context, tx *sql.Tx, challengeID int64) error {
+	res, err := tx.ExecContext(ctx, `DELETE FROM source_binding WHERE challenge_id = ?`, challengeID)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotBound
+	}
+	return nil
 }

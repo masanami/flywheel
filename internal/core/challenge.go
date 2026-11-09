@@ -63,6 +63,8 @@ type Plan struct {
 // Approval は承認・差し戻しの 1 件（§データモデル approval）。#9 は書き込まない
 // （読み取りだけ実装する）。
 type Approval struct {
+	// ID は承認の行の ID（"AP-<n>"）。読み取りの経路（loadApprovals）が埋める。
+	ID            string
 	Kind          ApprovalKind
 	Decision      ApprovalDecision
 	OperationID   *string // "OP-<n>"（nil 可）
@@ -81,10 +83,21 @@ type Approval struct {
 	RelayQuote   *string
 	// RejectedFields は課題の差し戻しでずれた欄（閉集合の順）。指定の無い差し戻しと承認は nil。
 	RejectedFields []string
+	// MergeInVerifiedHead は release を、検証の head から「既定ブランチを取り込んだだけ」と判定して承認したときの
+	// 検証の head（承認の ① で CLI が判定し、② の core が検査した）。それ以外の承認は nil。
+	MergeInVerifiedHead *string
+	// SupersededAt・SupersededReason は、完了の承認が本番反映のやり直しで置き換えられた日時と理由
+	// （ReopenReason の値）。有効な承認は nil。SupersededBy は置き換えた次の完了の承認の ID（"AP-<n>"）で、
+	// 次の完了の承認が成立するまで nil。
+	SupersededAt     *time.Time
+	SupersededReason *string
+	SupersededBy     *string
 }
 
 // Hold は保留の 1 件（§データモデル hold）。#9 は書き込まない（読み取りだけ実装する）。
 type Hold struct {
+	// Kind は保留の種類（0014。既存の行は human）。
+	Kind       HoldKind
 	Question   string
 	FromStatus Status
 	RaisedAt   time.Time
@@ -137,16 +150,32 @@ type IrreversibleOperation struct {
 	ConsecutiveFailures int
 	// WaitingSince は最新の承認の後の最初の試行の開始日時。承認済み（approved）の間だけ値を持つ。
 	WaitingSince *time.Time
+
+	// 以下は本番反映のやり直し・片付け（#485）の表示用。
+
+	// ClosedReason・ClosedAt は state が closed の操作の、閉じた理由と日時。closed でなければ nil。
+	ClosedReason *ClosedReason
+	ClosedAt     *time.Time
+	// SupersedesOperationID はこの操作が置き換える古い操作の ID（"OP-<n>"）。無ければ nil。
+	SupersedesOperationID *string
+	// SupersededByOperationID はこの操作を置き換えた新しい操作の ID（"OP-<n>"）。読み取りの経路
+	// （loadOperations・listOperationsInState）が埋める。無ければ nil。
+	SupersededByOperationID *string
+	// VerifiedHeadSHA は承認待ち（pending）の release の参照が指す PR について、J5 が検証の入力にした最新の head
+	// （latestVerifiedHead）。承認待ちでない・記録なしは nil。CLI の show が PR の今の head との違いを調べるのに使う。
+	VerifiedHeadSHA *string
 }
 
 // ChallengeDetail は show が返す課題の全体像（人間記入欄・状態に加え、計画の
 // 全版・承認と差し戻しの記録・保留の記録・不可逆操作・GitHub Issue との対応）。
 type ChallengeDetail struct {
 	Challenge
-	Plans      []Plan
-	Approvals  []Approval
-	Holds      []Hold
-	Operations []IrreversibleOperation
+	Plans     []Plan
+	Approvals []Approval
+	Holds     []Hold
+	// DirectCompletions は親が直接行った完了の記録（古い順。無ければ空のスライス）。1 件以上あることが「親が直接行った」印。
+	DirectCompletions []DirectCompletion
+	Operations        []IrreversibleOperation
 	// SourceBinding は課題と上流の GitHub Issue の対応（#56。
 	// docs/features/m2-github-issue-ingest.md §IF / API「`show` の拡張」）。
 	// 対応が無ければ nil（`create` で作った課題・スキーマ版 1 から上げたストアの
@@ -162,6 +191,9 @@ type ChallengeDetail struct {
 	// 無ければ空スライス（nil でない）。
 	Dependencies []DependencyView
 	Dependents   []string
+	// Waiting は課題が待っている理由（まだ終わっていない前提の課題と、衝突のため後回しにした相手）。
+	// ボードの詳細（API）だけが読む。
+	Waiting WaitingReasons
 	// FollowupOf はJ6 のフォローアップで起票した課題の元の課題の ID（challenge.followup_of。S3。applyJ6 が設定）。無ければ nil。
 	FollowupOf *string
 	// Improvement は改修課題（origin=improvement）の改修の鍵。改修課題でなければ nil。
@@ -304,9 +336,13 @@ func loadPlans(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Plan, erro
 	return plans, nil
 }
 
+// formatApprovalID は承認の行の内部整数 ID を表示形（"AP-<n>"）にする。
+func formatApprovalID(id int64) string { return fmt.Sprintf("AP-%d", id) }
+
 func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approval, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, rejected_fields
+		`SELECT id, operation_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, rejected_fields,
+		        merge_in_verified_head, superseded_at, superseded_reason, superseded_by_approval_id
 		 FROM approval WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -316,6 +352,7 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 	approvals := make([]Approval, 0)
 	for rows.Next() {
 		var (
+			id             int64
 			opID           sql.NullInt64
 			planVersion    sql.NullInt64
 			kind, decision string
@@ -323,12 +360,18 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 			relaySession   sql.NullString
 			relayQuote     sql.NullString
 			rejectedFields sql.NullString
+			mergeInHead    sql.NullString
+			supersededAt   sql.NullString
+			supersededWhy  sql.NullString
+			supersededBy   sql.NullInt64
 			decidedAtStr   string
 			a              Approval
 		)
-		if err := rows.Scan(&opID, &kind, &decision, &a.TargetVersion, &planVersion, &a.Actor, &a.Channel, &a.Verification, &reason, &decidedAtStr, &relaySession, &relayQuote, &rejectedFields); err != nil {
+		if err := rows.Scan(&id, &opID, &kind, &decision, &a.TargetVersion, &planVersion, &a.Actor, &a.Channel, &a.Verification, &reason, &decidedAtStr, &relaySession, &relayQuote, &rejectedFields,
+			&mergeInHead, &supersededAt, &supersededWhy, &supersededBy); err != nil {
 			return nil, err
 		}
+		a.ID = formatApprovalID(id)
 		a.Kind = ApprovalKind(kind)
 		a.Decision = ApprovalDecision(decision)
 		if opID.Valid {
@@ -345,6 +388,19 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 		}
 		a.RelaySession = nullStr(relaySession)
 		a.RelayQuote = nullStr(relayQuote)
+		a.MergeInVerifiedHead = nullStr(mergeInHead)
+		a.SupersededReason = nullStr(supersededWhy)
+		if supersededAt.Valid {
+			t, err := parseTimestamp(supersededAt.String)
+			if err != nil {
+				return nil, err
+			}
+			a.SupersededAt = &t
+		}
+		if supersededBy.Valid {
+			v := formatApprovalID(supersededBy.Int64)
+			a.SupersededBy = &v
+		}
 		if rejectedFields.Valid {
 			if err := json.Unmarshal([]byte(rejectedFields.String), &a.RejectedFields); err != nil {
 				return nil, fmt.Errorf("core: decode approval.rejected_fields: %w", err)
@@ -366,7 +422,7 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT question, from_status, raised_at, answer, answered_at, answered_by, run_id,
-		        answered_channel, answered_verification, relay_session, relay_quote, closed_at
+		        answered_channel, answered_verification, relay_session, relay_quote, closed_at, kind
 		 FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -382,11 +438,13 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			runID                             sql.NullInt64
 			ansChannel, ansVerif, relSess     sql.NullString
 			relQuote, closedAtStr             sql.NullString
+			kind                              string
 			h                                 Hold
 		)
-		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr); err != nil {
+		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind); err != nil {
 			return nil, err
 		}
+		h.Kind = HoldKind(kind)
 		if runID.Valid {
 			v := formatRunID(runID.Int64)
 			h.RunID = &v
@@ -454,7 +512,7 @@ func loadIssuesAnswer(ctx context.Context, tx *sql.Tx, challengeID int64, holdID
 // （Scan・created_at のパース・Ref の NULL 処理・IrreversibleOperation の組み立て）が
 // 2箇所にほぼ同じ内容で複製されており、operation にカラムが増えたとき片方だけ
 // 直し忘れるおそれがあった）。
-const operationSelectColumns = `SELECT id, challenge_id, kind, summary, ref, state, version, created_at, executed_at, merge_commit FROM operation`
+const operationSelectColumns = `SELECT id, challenge_id, kind, summary, ref, state, version, created_at, executed_at, merge_commit, closed_reason, closed_at, supersedes_operation_id FROM operation`
 
 // scanOperationRow は operationSelectColumns の1行を IrreversibleOperation へ変換する。
 func scanOperationRow(scanner rowScanner) (*IrreversibleOperation, error) {
@@ -467,8 +525,11 @@ func scanOperationRow(scanner rowScanner) (*IrreversibleOperation, error) {
 		createdAtStr    string
 		executedAtStr   sql.NullString
 		mergeCommit     sql.NullString
+		closedReason    sql.NullString
+		closedAtStr     sql.NullString
+		supersedes      sql.NullInt64
 	)
-	if err := scanner.Scan(&id, &challengeID, &kind, &summary, &ref, &state, &version, &createdAtStr, &executedAtStr, &mergeCommit); err != nil {
+	if err := scanner.Scan(&id, &challengeID, &kind, &summary, &ref, &state, &version, &createdAtStr, &executedAtStr, &mergeCommit, &closedReason, &closedAtStr, &supersedes); err != nil {
 		return nil, err
 	}
 	createdAt, err := parseTimestamp(createdAtStr)
@@ -498,6 +559,21 @@ func scanOperationRow(scanner rowScanner) (*IrreversibleOperation, error) {
 	if mergeCommit.Valid {
 		v := mergeCommit.String
 		op.MergeCommit = &v
+	}
+	if closedReason.Valid {
+		v := ClosedReason(closedReason.String)
+		op.ClosedReason = &v
+	}
+	if closedAtStr.Valid {
+		t, err := parseTimestamp(closedAtStr.String)
+		if err != nil {
+			return nil, err
+		}
+		op.ClosedAt = &t
+	}
+	if supersedes.Valid {
+		v := formatOperationID(supersedes.Int64)
+		op.SupersedesOperationID = &v
 	}
 	return op, nil
 }
@@ -714,6 +790,11 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 		}
 		detail.Holds = holds
 
+		detail.DirectCompletions, err = loadDirectCompletions(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+
 		operations, err := loadOperations(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -741,6 +822,10 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		detail.Dependents, err = loadDependents(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		detail.Waiting, err = loadWaitingReasons(ctx, tx, cid, c.Status, eval)
 		if err != nil {
 			return err
 		}

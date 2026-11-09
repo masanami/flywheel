@@ -92,6 +92,7 @@ function bodies() {
       approvals: [],
       card: c.card,
       challenge: c,
+      direct_completions: [],
       holds:
         id === "C-9"
           ? [
@@ -149,6 +150,7 @@ function bodies() {
         issues_answer: null,
         non_goals: null,
       },
+      waiting: { conflicts: [], prerequisites: [] },
     };
     f[`/api/v1/workspaces/alpha/log?challenge=${id}`] = { activities: [] };
   }

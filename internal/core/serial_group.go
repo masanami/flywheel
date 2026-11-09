@@ -107,6 +107,8 @@ type repoPrediction struct {
 	Output     *ConflictPredictionOutput
 	// HeadSHA は予測の口を呼んで得た head_sha（得られなければ空）。
 	HeadSHA string
+	// RunID は予測の口を呼んだ run の内部整数 ID（Output が非 nil のときだけ。衝突の記録に使う）。
+	RunID int64
 }
 
 func sortCandidates(cs []planCandidate) {
@@ -160,42 +162,9 @@ func buildRepoGroups(repo string, running []planRunning, cands []planCandidate, 
 			parent[c.Issue] = c.Issue
 		}
 	}
-	type edge struct {
-		a, b    int
-		reasons []SerialGroupReason
-		first   int // dependency.first（0 は無し）
-	}
-	var edges []edge
-	for _, p := range pred.Output.Pairs {
-		a, b := p.Issues[0], p.Issues[1]
-		if _, ok := parent[a]; !ok {
-			continue
-		}
-		if _, ok := parent[b]; !ok {
-			continue
-		}
-		var reasons []SerialGroupReason
-		first := 0
-		switch p.Status {
-		case predictPairUnknown:
-			reasons = append(reasons, SerialReasonUnknownPair)
-		default:
-			for _, f := range p.SharedFiles {
-				if !f.MergeFriendly && !f.Ignored {
-					reasons = append(reasons, SerialReasonSharedFiles)
-					break
-				}
-			}
-			if p.DependencyFirst != nil {
-				reasons = append(reasons, SerialReasonDependency)
-				first = *p.DependencyFirst
-			}
-		}
-		if len(reasons) == 0 {
-			continue
-		}
-		union(a, b)
-		edges = append(edges, edge{a: a, b: b, reasons: reasons, first: first})
+	edges := predictedEdges(pred.Output.Pairs, func(n int) bool { _, ok := parent[n]; return ok })
+	for _, e := range edges {
+		union(e.a, e.b)
 	}
 
 	byRoot := map[int]*plannedGroup{}
@@ -255,6 +224,49 @@ func buildRepoGroups(repo string, running []planRunning, cands []planCandidate, 
 		out = append(out, *g)
 	}
 	return out
+}
+
+// predictedEdge は予測の組のうち、同時に委譲しない（順に走らせる）理由を持つもの。first は
+// dependency.first（0 は無し）。
+type predictedEdge struct {
+	a, b    int
+	reasons []SerialGroupReason
+	first   int
+}
+
+// predictedEdges は予測の出力の組から、直列化の理由（shared_files・dependency・unknown_pair）を持つ組を
+// 返す。known が false を返す Issue（候補にも実行中にも無い）を含む組は飛ばす。直列化グループの作り方
+// （buildRepoGroups）と衝突の記録（recordConflicts）が同じ組を使う。
+func predictedEdges(pairs []PredictedPair, known func(issue int) bool) []predictedEdge {
+	var edges []predictedEdge
+	for _, p := range pairs {
+		a, b := p.Issues[0], p.Issues[1]
+		if !known(a) || !known(b) {
+			continue
+		}
+		var reasons []SerialGroupReason
+		first := 0
+		switch p.Status {
+		case predictPairUnknown:
+			reasons = append(reasons, SerialReasonUnknownPair)
+		default:
+			for _, f := range p.SharedFiles {
+				if !f.MergeFriendly && !f.Ignored {
+					reasons = append(reasons, SerialReasonSharedFiles)
+					break
+				}
+			}
+			if p.DependencyFirst != nil {
+				reasons = append(reasons, SerialReasonDependency)
+				first = *p.DependencyFirst
+			}
+		}
+		if len(reasons) == 0 {
+			continue
+		}
+		edges = append(edges, predictedEdge{a: a, b: b, reasons: reasons, first: first})
+	}
+	return edges
 }
 
 // orderByDependency は cands（優先度・ID の昇順）を、辺 [先, 後] を守って並べ直す。辺で順が

@@ -221,9 +221,24 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			// --question の省略も validation_failed（usage_error ではない）。
-			Flags: []flagDef{{Name: "question", HasValue: true}},
+			// --question の省略も validation_failed（usage_error ではない）。--kind の省略は人の対応を待つ保留
+			// （human）で、閉集合外の値は validation_failed。
+			Flags: []flagDef{{Name: "question", HasValue: true}, {Name: "kind", HasValue: true}},
 			Run:   runHold,
+		},
+		{
+			// 親が直接行った作業を完了として記録する（課題 #452。T17）。種類が親が直接行う（parent_direct）の
+			// 保留にある課題だけに使える。--artifact（成果物の参照）は 1 件以上必須で複数回指定できる。
+			// 本人確認は求めない（承認は approve で行う）。
+			Path:          []string{"complete-direct"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: 1,
+			Flags: []flagDef{
+				{Name: "artifact", HasValue: true, Required: true, Repeatable: true},
+				{Name: "note", HasValue: true},
+			},
+			Run: runCompleteDirect,
 		},
 		{
 			Path:          []string{"answer"},
@@ -309,6 +324,22 @@ func defaultCommands() []Command {
 			MinPositional: 2,
 			MaxPositional: UnlimitedPositional,
 			Run:           runDepRm,
+		},
+		{
+			// 取り込み元の Issue の無い課題を、あとから GitHub Issue に紐づける・外す（docs/features/
+			// m2-github-issue-ingest.md §課題と Issue の紐づけ）。承認も本人確認も要らない（edit と同じ扱い）。
+			Path:          []string{"bind"},
+			RequiresStore: true,
+			MinPositional: 2,
+			MaxPositional: 2,
+			Run:           runBind,
+		},
+		{
+			Path:          []string{"unbind"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: 1,
+			Run:           runUnbind,
 		},
 		{
 			Path:          []string{"status"},

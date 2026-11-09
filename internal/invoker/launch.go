@@ -61,7 +61,11 @@ func (l *Launcher) InvokeJudgment(ctx context.Context, in core.JudgmentLaunchInp
 	}
 
 	args := buildArgs(in)
-	return finishClaudeRun(ctx, claudePath, in.Workspace, in.Workspace, in.RunDir, args, stdin, timeout, withoutDelegatedMarker(os.Environ())), nil
+	workDir := in.WorkDir
+	if workDir == "" {
+		workDir = in.Workspace
+	}
+	return finishClaudeRun(ctx, claudePath, workDir, in.Workspace, in.RunDir, args, stdin, timeout, withoutDelegatedMarker(os.Environ())), nil
 }
 
 // finishClaudeRun は claude を args・stdin で起動して待ち、応答を

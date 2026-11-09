@@ -321,6 +321,10 @@ type OperationApprovalRequest struct {
 	// HeadSHA は承認の① で取った PR の head。release の承認では必須で、空なら ErrConflict。
 	// ② で取り直さず、承認の記録の head_sha にそのまま残す。差し戻しと release 以外では使わない。
 	HeadSHA string
+	// MergeInVerifiedHead は、① が HeadSHA を「この検証の head から既定ブランチを取り込んだだけ（CI は通っている）」と
+	// 判定したときの検証の head（#485）。最新の検証の head と一致するときだけ、HeadSHA が検証の head と異なっていても
+	// 承認し、承認の記録に残す。空は取り込みの判定を伴わない承認。release の承認以外では使わない。
+	MergeInVerifiedHead string
 }
 
 // ExecuteOperationApproval は `approve <OP-ID>` / `reject <OP-ID> --reason` の
@@ -376,7 +380,7 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 
 		// release の承認は、① で取った head を必須とし、J5 が検証した最新の head（記録があれば）と
 		// 一致しなければ承認しない。
-		headSHA := ""
+		headSHA, mergeInHead := "", ""
 		if req.Decision == ApprovalDecisionApproved && OperationKind(row.Kind) == OperationKindRelease {
 			headSHA = strings.TrimSpace(req.HeadSHA)
 			if headSHA == "" {
@@ -390,8 +394,12 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 			if err != nil {
 				return err
 			}
-			if verified != nil && *verified != headSHA {
+			ok, record := releaseHeadAcceptable(verified, headSHA, strings.TrimSpace(req.MergeInVerifiedHead))
+			if !ok {
 				return ErrConflict
+			}
+			if record {
+				mergeInHead = *verified
 			}
 		}
 
@@ -414,7 +422,7 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 			return err
 		}
 
-		newState, err := approveOperationInTx(ctx, tx, rec, operationApprovalWrite{
+		newState, approvalRowID, err := approveOperationInTx(ctx, tx, rec, operationApprovalWrite{
 			opID:        oid,
 			challengeID: row.ChallengeID,
 			version:     row.Version,
@@ -423,6 +431,7 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 			att:         att,
 			nowStr:      nowStr,
 			headSHA:     headSHA,
+			mergeInHead: mergeInHead,
 		})
 		if err != nil {
 			return err
@@ -462,6 +471,7 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 
 		opIDStr := formatOperationID(oid)
 		approvalOut = Approval{
+			ID:            formatApprovalID(approvalRowID),
 			Kind:          ApprovalKindRelease,
 			Decision:      req.Decision,
 			OperationID:   &opIDStr,
@@ -473,6 +483,10 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 			DecidedAt:     now,
 		}
 		approvalOut.RelaySession, approvalOut.RelayQuote = att.relayPtrs()
+		if mergeInHead != "" {
+			v := mergeInHead
+			approvalOut.MergeInVerifiedHead = &v
+		}
 		// 応答の操作も show・status と同じ形の値にする（承認の記録は書き込み済み）。
 		one := []IrreversibleOperation{opOut}
 		if err := fillOperationExecutionInfo(ctx, tx, one); err != nil {
@@ -532,6 +546,9 @@ type operationApprovalWrite struct {
 	// headSHA は承認の記録の head_sha に残す、承認の ① で取った PR の head。空なら NULL
 	// （release 以外の操作・差し戻し）。
 	headSHA string
+	// mergeInHead は、取り込みだけと判定して承認したときの検証の head（承認の記録の merge_in_verified_head）。
+	// 空なら NULL。
+	mergeInHead string
 }
 
 // approveOperationInTx は不可逆操作 1 件について、呼び出し元のトランザクション内で
@@ -545,10 +562,10 @@ type operationApprovalWrite struct {
 // 片方だけを直すと経路によって記録の形がずれる状態だった）。課題の版の増分は
 // 呼び出し元が行う（単独の経路は 1 件ごとに bumpChallengeVersionForOperation で
 // +1 と課題のエントリの記録を対で行い、D12 は遷移が 1 回だけ +1 して記録する）。
-func approveOperationInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, w operationApprovalWrite) (OperationState, error) {
+func approveOperationInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, w operationApprovalWrite) (OperationState, int64, error) {
 	newState, ok := operationStateForDecision(w.decision)
 	if !ok {
-		return "", ErrValidation
+		return "", 0, ErrValidation
 	}
 	newVersion := w.version + 1
 
@@ -557,38 +574,46 @@ func approveOperationInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		string(newState), newVersion, w.opID, w.version,
 	)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	oaffected, err := ores.RowsAffected()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if oaffected != 1 {
-		return "", fmt.Errorf("core: %s operation %s: expected to update 1 row, updated %d", w.decision, formatOperationID(w.opID), oaffected)
+		return "", 0, fmt.Errorf("core: %s operation %s: expected to update 1 row, updated %d", w.decision, formatOperationID(w.opID), oaffected)
 	}
 
 	var reasonVal any
 	if w.decision == ApprovalDecisionRejected {
 		if w.reason == nil {
-			return "", ErrValidation
+			return "", 0, ErrValidation
 		}
 		reasonVal = *w.reason
 	}
 	relaySession, relayQuote := w.att.relayColumns()
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, head_sha)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	ares, err := tx.ExecContext(ctx,
+		`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, head_sha, merge_in_verified_head)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.challengeID, w.opID, string(ApprovalKindRelease), string(w.decision), w.version,
 		w.att.Actor(), string(w.att.Channel()), string(w.att.Verification()), reasonVal, w.nowStr, relaySession, relayQuote,
-		nullableTextColumn(w.headSHA),
-	); err != nil {
-		return "", err
+		nullableTextColumn(w.headSHA), nullableTextColumn(w.mergeInHead),
+	)
+	if err != nil {
+		return "", 0, err
+	}
+	approvalID, err := ares.LastInsertId()
+	if err != nil {
+		return "", 0, err
 	}
 
 	before := map[string]any{"state": string(OperationStatePending)}
 	after := map[string]any{"state": string(newState), "version": newVersion}
 	if w.decision == ApprovalDecisionRejected {
 		after["reason"] = *w.reason
+	}
+	if w.mergeInHead != "" {
+		after["merge_in_verified_head"] = w.mergeInHead
 	}
 	w.att.addRelayTo(after)
 	// action は decision の値（approved/rejected）ではなく、challenge
@@ -600,7 +625,7 @@ func approveOperationInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		action = string(OpApprove)
 	}
 	if err := rec.record("operation", w.opID, action, before, after); err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return newState, nil
+	return newState, approvalID, nil
 }

@@ -64,24 +64,49 @@ type ListCardResponse struct {
 
 // ShowCardResponse は `GET …/challenges/{id}` の本文。ShowResponse の最上位に card を足した形。
 type ShowCardResponse struct {
-	Approvals     []Approval     `json:"approvals"`
-	Card          Card           `json:"card"`
-	Challenge     ShowChallenge  `json:"challenge"`
-	Holds         []Hold         `json:"holds"`
-	Operations    []Operation    `json:"operations"`
-	Pairs         []StagePair    `json:"pairs"`
-	Plans         []PlanDetail   `json:"plans"`
-	Runs          []Run          `json:"runs"`
-	SourceBinding *SourceBinding `json:"source_binding"`
-	Stages        Stages         `json:"stages"`
+	Approvals         []Approval         `json:"approvals"`
+	Card              Card               `json:"card"`
+	Challenge         ShowChallenge      `json:"challenge"`
+	DirectCompletions []DirectCompletion `json:"direct_completions"`
+	Holds             []Hold             `json:"holds"`
+	Operations        []Operation        `json:"operations"`
+	Pairs             []StagePair        `json:"pairs"`
+	Plans             []PlanDetail       `json:"plans"`
+	Runs              []Run              `json:"runs"`
+	SourceBinding     *SourceBinding     `json:"source_binding"`
+	Stages            Stages             `json:"stages"`
+	Waiting           Waiting            `json:"waiting"`
+}
+
+// WaitingChallenge は待っている相手の課題 1 件（status は課題の状態の値）。
+type WaitingChallenge struct {
+	ChallengeID string `json:"challenge_id"`
+	Status      string `json:"status"`
+	Title       string `json:"title"`
+}
+
+// Waiting は課題が待っている理由（API 専用。CLI の --json には出さない）。prerequisites はまだ終わっていない前提の課題、
+// conflicts は衝突のため後回しにした相手（先に委譲した課題）。どちらも ID の数の昇順で、無ければ `[]`。
+type Waiting struct {
+	Conflicts     []WaitingChallenge `json:"conflicts"`
+	Prerequisites []WaitingChallenge `json:"prerequisites"`
+}
+
+func fromWaitingChallenges(ws []core.WaitingChallenge) []WaitingChallenge {
+	out := make([]WaitingChallenge, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, WaitingChallenge{ChallengeID: w.ChallengeID, Status: string(w.Status), Title: w.Title})
+	}
+	return out
 }
 
 // FromChallengeDetailCard は課題の全体像とそのカードを ShowCardResponse へ変換する。
 func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card) ShowCardResponse {
 	s := FromChallengeDetail(d)
 	return ShowCardResponse{
-		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, Holds: s.Holds,
+		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, DirectCompletions: s.DirectCompletions, Holds: s.Holds,
 		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, Stages: s.Stages,
+		Waiting: Waiting{Conflicts: fromWaitingChallenges(d.Waiting.Conflicts), Prerequisites: fromWaitingChallenges(d.Waiting.Prerequisites)},
 	}
 }
 

@@ -86,15 +86,15 @@ type UnansweredHold struct {
 }
 
 // ListUnansweredHolds は未回答の保留を raised_at の古い順（同時刻は課題の ID の
-// 昇順）で返す。回答済みの保留は含めない。
+// 昇順）で返す。回答済みの保留・閉じた保留・種類が親が直接行うの保留（オーナーが答える問いではない）は含めない。
 func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, error) {
 	out := []UnansweredHold{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx,
 			`SELECT h.challenge_id, c.title, h.question, h.raised_at, h.from_status, h.run_id
 			 FROM hold h JOIN challenge c ON c.id = h.challenge_id
-			 WHERE h.answer IS NULL AND h.closed_at IS NULL
-			 ORDER BY h.raised_at, h.challenge_id, h.id`)
+			 WHERE h.answer IS NULL AND h.closed_at IS NULL AND h.kind = ?
+			 ORDER BY h.raised_at, h.challenge_id, h.id`, string(HoldKindHuman))
 		if err != nil {
 			return err
 		}

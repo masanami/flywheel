@@ -71,9 +71,12 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 	if err != nil {
 		return nil, err
 	}
-	headSHA := ""
+	headSHA, mergeInHead := "", ""
 	if rd != nil {
 		headSHA = rd.Head
+		if rd.MergeIn != nil {
+			mergeInHead = rd.MergeIn.VerifiedHead
+		}
 	}
 
 	summary := operationApprovalSummaryText(preview, nil) + operationHeadLines(rd)
@@ -88,14 +91,17 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 		ExpectedChallengeVersion: preview.ChallengeVersion,
 		Decision:                 core.ApprovalDecisionApproved,
 		HeadSHA:                  headSHA,
+		MergeInVerifiedHead:      mergeInHead,
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{
-		json: view.OperationApprovalResponse{Approval: view.FromApproval(*approval), Operation: view.FromOperation(*op)},
-		text: op.ID + "\n",
-	}, nil
+	resp := view.OperationApprovalResponse{Approval: view.FromApproval(*approval), Operation: view.FromOperation(*op)}
+	if rd != nil && rd.MergeIn != nil {
+		hc := view.FromReleaseHeadAssessment(rd.MergeIn)
+		resp.MergeIn = &hc
+	}
+	return textOutput{json: resp, text: op.ID + "\n"}, nil
 }
 
 // runApproveChallenge は `flywheel approve <C-ID> [--hold-release]` の実装
@@ -374,6 +380,7 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 		writePlanStageSummary(&b, p)
 	} else {
 		fmt.Fprintf(&b, "完了条件:    %s\n", escapeControl(p.DoneCriteria))
+		writeDirectCompletionSummary(&b, p)
 		writeCompletionStageSummary(&b, p)
 	}
 	if p.Kind == core.ApprovalKindCompletion {
@@ -392,6 +399,7 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 				}
 			}
 		}
+		writeConditionsAfterRelease(&b, p.ConditionsAfterRelease, len(effect.Approved) > 0)
 		fmt.Fprintf(&b, "同時に承認される本番反映 (release): %s\n", operationListSummary(effect.Approved))
 		fmt.Fprintf(&b, "同時には承認されない不可逆操作:     %s\n", operationListSummary(effect.NotApproved))
 		writeReleaseHeadLines(&b, rds)
@@ -400,6 +408,36 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 		fmt.Fprintf(&b, "理由:        %s\n", *reason)
 	}
 	return b.String()
+}
+
+// writeDirectCompletionSummary は完了の承認の要約へ、親が直接行った完了の記録の成果物の参照と説明を、完了条件の
+// 次に書く（完了の検証〈J5〉を通っていないので、承認の根拠はこれらと完了条件）。記録が無ければ何も足さない。
+func writeDirectCompletionSummary(b *strings.Builder, p *core.ApprovalPreview) {
+	dc := p.DirectCompletion
+	if dc == nil {
+		return
+	}
+	b.WriteString("親が直接行った（完了の検証は通っていません）。成果物:\n")
+	for _, ref := range dc.Artifacts {
+		fmt.Fprintf(b, "  - %s\n", escapeControl(ref))
+	}
+	if dc.Note != nil {
+		fmt.Fprintf(b, "  説明: %s\n", escapeControl(*dc.Note))
+	}
+}
+
+// writeConditionsAfterRelease は完了の承認の要約へ、検証が「本番反映で満たされる見込み」と区分した
+// 達成条件を書く（#451）。無ければ何も書かない。この操作で本番反映が 1 つも承認されない
+// （--hold-release・差し戻し・head の照合で外れた・release が無い）ときは、満たされないまま残ることを
+// 見出しで示す。
+func writeConditionsAfterRelease(b *strings.Builder, conds []string, releasing bool) {
+	if len(conds) == 0 {
+		return
+	}
+	b.WriteString(view.ConditionsAfterReleaseHeading(releasing) + "\n")
+	for _, c := range conds {
+		fmt.Fprintf(b, "  - %s\n", escapeControl(c))
+	}
 }
 
 // writePlanStageSummary は計画の承認の要約へ、論点の各問いと回答・予想の各例・やらないことを

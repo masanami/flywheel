@@ -140,7 +140,7 @@ func (f *cycleFixture) classified(t *testing.T, title, priority string) *Challen
 func (f *cycleFixture) input(inv JudgmentInvoker) CycleRunInput {
 	return CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream,
-		Delegate: &fakeDelegator{}, Git: newFakeSlotGit(), Reconcile: newFakeBranchSource(), Checks: newFakeChecks(), Merger: &fakeRelease{},
+		Delegate: &fakeDelegator{}, Git: newFakeSlotGit(), Reconcile: newFakeBranchSource(), Checks: newFakeChecks(), Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{}, Merger: &fakeRelease{},
 		WorkspaceGit: &fakeWorkspaceGit{},
 	}
 }

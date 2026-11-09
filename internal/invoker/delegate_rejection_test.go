@@ -61,7 +61,7 @@ func TestBuildDelegationResumeStdin_EveryKindCarriesTheRejectionsAsAHumanDecisio
 	want := rejectionsLeadWant + "\n\n" + WrapDataSection("人間の差し戻し", rejectionsText)
 	for _, kind := range []core.ResumeKind{core.ResumeKindAnswer, core.ResumeKindInterrupted, core.ResumeKindBudget, core.ResumeKindRework} {
 		t.Run(string(kind), func(t *testing.T) {
-			out, err := BuildDelegationResumeStdin(kind, "Q", "ANS", "feat/x", "FEEDBACK-TEXT", rejectionsText)
+			out, err := BuildDelegationResumeStdin(kind, "Q", "ANS", "feat/x", "FEEDBACK-TEXT", "", rejectionsText)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -86,7 +86,7 @@ func TestBuildDelegationResumeStdin_EveryKindCarriesTheRejectionsAsAHumanDecisio
 
 func TestBuildDelegationResumeStdin_WithoutRejectionsHasNoRejectionSection(t *testing.T) {
 	for _, kind := range []core.ResumeKind{core.ResumeKindAnswer, core.ResumeKindInterrupted, core.ResumeKindBudget, core.ResumeKindRework} {
-		out, err := BuildDelegationResumeStdin(kind, "Q", "ANS", "feat/x", "FEEDBACK-TEXT", "")
+		out, err := BuildDelegationResumeStdin(kind, "Q", "ANS", "feat/x", "FEEDBACK-TEXT", "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +98,7 @@ func TestBuildDelegationResumeStdin_WithoutRejectionsHasNoRejectionSection(t *te
 
 // 回答の区画と併せて渡すとき、差し戻しの理由は回答より前に置く（回答が最新の決定）。
 func TestBuildDelegationResumeStdin_RejectionsPrecedeTheAnswer(t *testing.T) {
-	out, err := BuildDelegationResumeStdin(core.ResumeKindAnswer, "Q", "ANS", "feat/x", "", rejectionsText)
+	out, err := BuildDelegationResumeStdin(core.ResumeKindAnswer, "Q", "ANS", "feat/x", "", "", rejectionsText)
 	if err != nil {
 		t.Fatal(err)
 	}
