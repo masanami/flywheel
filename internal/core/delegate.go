@@ -513,6 +513,20 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 		if active {
 			return nil, ErrRunInProgress
 		}
+		// 完了の照合が取得の失敗で終わった課題は、子を起動せず照合だけをやり直す（#487）。
+		retries, _, err := s.splitReconcileRetries(ctx, []int64{cid})
+		if err != nil {
+			return nil, err
+		}
+		if len(retries) == 1 {
+			item, ns, err := s.retryReconciliation(ctx, in, *ch, retries[0])
+			if err != nil {
+				return nil, err
+			}
+			res := &DelegateResult{}
+			appendDelegateOutcome(res, item, ns)
+			return res, nil
+		}
 		return s.runSingleDelegation(ctx, in, *ch)
 	}
 
@@ -525,6 +539,24 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
+	}
+	// 完了の照合が取得の失敗で終わった課題は、委譲の対象から外し、子を起動せず照合だけをやり直す
+	// （#487。優先度→ID の順）。
+	retries, targetIDs, err := s.splitReconcileRetries(ctx, targetIDs)
+	if err != nil {
+		return nil, err
+	}
+	retried := &DelegateResult{}
+	for _, p := range retries {
+		ch, err := s.loadChallengeForAuto(ctx, formatChallengeID(p.ChallengeID))
+		if err != nil {
+			return nil, err
+		}
+		item, ns, err := s.retryReconciliation(ctx, in, *ch, p)
+		if err != nil {
+			return nil, err
+		}
+		appendDelegateOutcome(retried, item, ns)
 	}
 	jc := in.Cycle
 	if jc == nil {
@@ -543,7 +575,8 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if err != nil {
 		return nil, err
 	}
-	res.NotStarted = append(append(skipped, plan.notStarted...), res.NotStarted...)
+	res.NotStarted = append(append(append(skipped, retried.NotStarted...), plan.notStarted...), res.NotStarted...)
+	res.Items = append(retried.Items, res.Items...)
 	return res, nil
 }
 

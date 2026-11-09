@@ -21,6 +21,11 @@ import (
 // 失敗」を区別するための契約である。
 var ErrUpstreamIssueNotFound = errors.New("core: upstream issue not found (404 or 410)")
 
+// ErrUpstreamPullRequestNotFound は PR 1 件の取得（UpstreamBranchSource.GetPullRequest）で
+// HTTP 404 が返ったことを表す。adapter は HTTP の状態行で判定し、エラーの文言・stderr の
+// 部分一致では判定しない。core は errors.Is で「見つからないと確定」と「取得の失敗」を分ける（#487）。
+var ErrUpstreamPullRequestNotFound = errors.New("core: upstream pull request not found (404)")
+
 // ErrUpstreamIssueTransferred は 1 件の取得が、改名・移管の転送（GitHub が
 // 返す 301）を辿った結果、要求と別のリポジトリの Issue を返したことを表す
 // （#69。docs/features/m2-github-issue-ingest.md §上流の close の検出）。
@@ -159,7 +164,9 @@ type UpstreamBranchSource interface {
 	ListPullRequestsByHead(ctx context.Context, repo, branch string) ([]UpstreamPullRequest, error)
 
 	// GetPullRequest は repo の number 番の PR を 1 件返す（open・closed・merged のいずれでも）。
-	// 見つからない・取得できない場合はエラー。
+	// HTTP 404（PR もリポジトリも見えない）は ErrUpstreamPullRequestNotFound を包んだエラー、
+	// それ以外の取得の失敗はそれを包まないエラーで返す（完了の照合が「見つからない」と
+	// 「取得の失敗」を分けるため。#487）。
 	GetPullRequest(ctx context.Context, repo string, number int) (UpstreamPullRequest, error)
 }
 

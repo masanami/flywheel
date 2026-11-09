@@ -56,8 +56,8 @@ func TestOpen_AppliesReleaseExecutionMigrationToAVersion8Store(t *testing.T) {
 		t.Fatalf("Open(latest) error = %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if got := userVersion(t, db); got != 15 {
-		t.Fatalf("user_version = %d, want 15", got)
+	if got := userVersion(t, db); got != 16 {
+		t.Fatalf("user_version = %d, want 16", got)
 	}
 	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
 		var state, ref string
