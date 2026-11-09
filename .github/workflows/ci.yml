@@ -64,3 +64,34 @@ jobs:
           name: e2e-test-results
           path: web/test-results
           if-no-files-found: ignore
+
+  # 関係グラフのブラウザの E2E を、本物の flywheel serve と種のストアに向けて流す（flywheel#463）。
+  # make check には入れない。偽の API の E2E（make e2e）とは別の設定・別の置き場（web/e2e-real/）。
+  e2e-real:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install UI dependencies
+        run: make ui-install
+
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: make e2e-real
+        run: make e2e-real

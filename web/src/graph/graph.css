@@ -467,6 +467,10 @@
   cursor: pointer;
   outline: none;
 }
+/* 開いた大枠の見出しの下地（線より上の層。薄めた見出しでも線が透けない。flywheel#482） */
+.graph-group-head-backing {
+  fill: var(--board-bg);
+}
 .graph-group-head-box {
   fill: color-mix(in srgb, var(--c) 18%, var(--board-card-bg));
   stroke: var(--graph-frame);

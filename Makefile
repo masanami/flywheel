@@ -9,7 +9,7 @@ BINARY := $(BUILD_DIR)/flywheel
 NPM := npm
 WEB_DIR := web
 
-.PHONY: check e2e ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
+.PHONY: check e2e e2e-real ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
 
 ## check はすべての品質ゲートを順に実行する。1 つでも失敗すれば非 0 で終わる。
 ## UI の lint・テスト・ビルドを先に実行し、その成果物を埋め込んだ状態で go test・go build を行う。
@@ -30,10 +30,19 @@ $(WEB_DIR)/node_modules/.install-stamp: $(WEB_DIR)/package-lock.json
 	@touch $(WEB_DIR)/node_modules/.install-stamp
 
 ## e2e: UI のブラウザの E2E（Playwright。偽の API の mock モードで画面を操作する）。make check には入れない。
+## 本物の serve に向けた試験（web/e2e-real/）は流さない（make e2e-real）。
 ## 初回は cd web && npx playwright install chromium が要る（落とせない環境では PLAYWRIGHT_CHANNEL=chrome で手元の Chrome を使う）。
 e2e: ui-install
 	@echo "==> npm run e2e (web)"
 	cd $(WEB_DIR) && $(NPM) run e2e
+
+## e2e-real: 関係グラフのブラウザの E2E を、本物の flywheel serve に向けて流す（Playwright。web/e2e-real/）。
+## make check と make e2e には入れない。ui-build と build の後に、準備の段（web/e2e-real/global-setup.ts）が
+## 一時ディレクトリへ種のストア（Go の TestRelationGraphSeed）を作り、build/flywheel を serve --port 0 で起動する。
+## 委譲の子の環境（FLYWHEEL_DELEGATED_RUN がある）では serve が拒否されて失敗する（CI のジョブ e2e-real で流す）。
+e2e-real: ui-build build
+	@echo "==> npm run e2e:real (web)"
+	cd $(WEB_DIR) && $(NPM) run e2e:real
 
 ## ui-lint: UI の lint（Biome）。
 ui-lint: ui-install

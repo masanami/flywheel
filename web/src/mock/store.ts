@@ -530,6 +530,29 @@ export function seed(): Record<string, MockWorkspace> {
       flags: { running: true },
       runs: [run("R-13", "C-30", { started_at: iso(10) })],
     }),
+    // 一言でと位置づけが長い親（flywheel#482）。一言では見出しの幅で 2 行に、位置づけは 3 行以上に折り返し、畳むと
+    // 末尾に「続き」が出る。別の課題 C-34 から子 C-32 へ依存の線が向かい、線が見出しの上を縦切る形を作る
+    mk("C-31", "配布形式 v5 への切り替え", "in_progress", {
+      priority: "P1",
+      headline:
+        "配布の形式を v5 に切り替え、旧形式（v4）の読み込みと書き出しを段階的に外して、利用者の手元の移行の手順を 1 本にまとめる",
+      context:
+        "全体計画「配布の簡素化」の 3 段目。v4 の形式は読み込みの経路が 2 つあり、障害の調査のたびに両方を見る手間がかかっている。v5 に切り替えると経路が 1 つになり、後の「署名の必須化」と「差分配布」がこの形式に乗る。いまは新形式の書き出しを先に入れ、旧形式の読み込みは証明書の更新（C-34）が済んでから外す。移行の手順書は切り替えの最後に 1 本にまとめる。",
+    }),
+    mk("C-32", "旧形式の読み込みを外す", "classified", {
+      priority: "P1",
+      headline: "v4 の読み込みの経路を消し、v5 だけを読む",
+    }),
+    mk("C-33", "新形式の書き出しを足す", "in_progress", {
+      priority: "P1",
+      headline: "v5 の形式で成果物を書き出す",
+      flags: { running: true },
+      runs: [run("R-14", "C-33", { started_at: iso(25) })],
+    }),
+    mk("C-34", "配布サーバの証明書の更新", "in_progress", {
+      priority: "P1",
+      headline: "期限の近い証明書を新しい鍵で取り直す",
+    }),
   ];
   const beta: MockChallenge[] = [
     mk("C-1", "レポートの CSV 出力", "classified", {
