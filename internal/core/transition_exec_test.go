@@ -759,7 +759,7 @@ func dispatchedOperations(t *testing.T) []Operation {
 	seen := map[Operation]bool{}
 	var ops []Operation
 	for _, tr := range Table {
-		if tr.From == NoStatus || seen[tr.Op] {
+		if tr.From == NoStatus || tr.Restricted || seen[tr.Op] {
 			continue
 		}
 		seen[tr.Op] = true
@@ -796,8 +796,8 @@ func allStatuses() []Status {
 func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) {
 	tested := 0
 	for _, tr := range Table {
-		if tr.From == NoStatus {
-			continue // T1: create は #9 の対象
+		if tr.From == NoStatus || tr.Restricted {
+			continue // T1: create は #9 の対象。T18 は専用の書き込みだけが使う制限つきの行（T18 の専用テストが検証する）
 		}
 
 		s := newStoreForTest(t)

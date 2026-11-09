@@ -45,6 +45,8 @@ export interface StatusApproved {
 export interface Operation {
   approved_head: string | null;
   challenge_id: string;
+  closed_at: string | null;
+  closed_reason: string | null;
   consecutive_failures: number;
   created_at: string;
   executed_at: string | null;
@@ -55,6 +57,8 @@ export interface Operation {
   ref: string | null;
   state: string;
   summary: string;
+  superseded_by: string | null;
+  supersedes: string | null;
   version: number;
   waiting_since: string | null;
 }
@@ -139,6 +143,7 @@ export interface ShowResponse {
   operations: Operation[];
   pairs: StagePair[];
   plans: PlanDetail[];
+  release_head_changes?: ReleaseHeadChange[];
   runs: Run[];
   source_binding: SourceBinding | null;
   stages: Stages;
@@ -149,12 +154,17 @@ export interface Approval {
   channel: string;
   decided_at: string;
   decision: string;
+  id: string;
   kind: string;
+  merge_in_verified_head: string | null;
   operation_id: string | null;
   reason: string | null;
   rejected_fields: string[] | null;
   relay_quote: string | null;
   relay_session: string | null;
+  superseded_at: string | null;
+  superseded_by: string | null;
+  superseded_reason: string | null;
   target_version: number;
   verification: string;
 }
@@ -238,6 +248,38 @@ export interface PlanDetail {
   created_at: string;
   spec: unknown;
   version: number;
+}
+
+export interface ReleaseHeadChange {
+  head_change: HeadChange;
+  operation_id: string;
+}
+
+export interface HeadChange {
+  checks_passed: boolean;
+  commits: HeadChangeCommit[];
+  conflict_fixes: ConflictFix[];
+  detail: string;
+  head: string;
+  kind: string;
+  verified_head: string;
+}
+
+export interface HeadChangeCommit {
+  role: string;
+  sha: string;
+  subject: string;
+}
+
+export interface ConflictFix {
+  files: ConflictFixFile[];
+  merge_commit: string;
+}
+
+export interface ConflictFixFile {
+  filename: string;
+  patch: string | null;
+  patch_unavailable: boolean;
 }
 
 export interface Run {
@@ -372,6 +414,18 @@ export interface ShowCardResponse {
   runs: Run[];
   source_binding: SourceBinding | null;
   stages: Stages;
+  waiting: Waiting;
+}
+
+export interface Waiting {
+  conflicts: WaitingChallenge[];
+  prerequisites: WaitingChallenge[];
+}
+
+export interface WaitingChallenge {
+  challenge_id: string;
+  status: string;
+  title: string;
 }
 
 export interface NeedsHumanResponse {
@@ -415,6 +469,8 @@ export interface ApprovalSummaryResponse {
 
 export interface ApprovalSummary {
   challenge_id: string;
+  conditions_after_release: string[];
+  conditions_after_release_heading: string;
   direct_completion: DirectCompletion | null;
   done_criteria: string | null;
   kind: string;
@@ -463,6 +519,7 @@ export interface GraphResponse {
 }
 
 export interface GraphEdge {
+  directed: boolean;
   from: string;
   kind: string;
   registered_at: string;
@@ -544,4 +601,5 @@ export const GRAPH_REGISTERED_VIA_CODES = [
   "plan",
   "manual",
   "unknown",
+  "prediction",
 ] as const;

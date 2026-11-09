@@ -8,6 +8,11 @@ package core
 // ブランチは、報告にあればそのブランチ、無ければスロットの作業ツリーの現在のブランチ。
 // 照合は launch_failed を除くすべての結果の後に行い、取得元の課題へは何も書き戻さない。
 //
+// 成果物の種類が pr で結末が completed の報告は、ブランチの有無に関わらず pr_urls の PR も
+// 1 件ずつ調べる（マージ後にブランチが消えても、成果物の PR が委譲先と別のリポジトリに
+// あっても見つけるため）。pr_urls は調べる先を示す子の申告にすぎず、記録するのは gh が返した
+// PR の値だけ。調べるのは宣言（connectors.json の repos[]）にあるリポジトリの PR に限る。
+//
 // 流れ（launchDelegation から呼ぶ）:
 //
 //	① gatherReconciliation: スロットの作業ツリーの検査と gh の GET（トランザクションの外）
@@ -15,6 +20,14 @@ package core
 //	   トランザクションで行う（launchDelegation 側）
 //	③ applyReconciliation: release の登録 → 承認なしの本番反映の検出 → 結末 questions・
 //	   blocked の保留 → 成果物の確認と検証中・人間対応待ちへの写像
+//
+// 取得の結果は「見つかった」「見つからないと確定（404・空の一覧）」「取得の失敗（それ以外の
+// エラーすべて）」の 3 つに分ける（#487・決定 2026-11-08 オーナー）。成果物の種類が pr の
+// 完了の照合で、成果物が見つからず取得の失敗が 1 つでもあれば「見つからない」と判定せず、
+// 課題の状態を変えずに課題ごとの連続回数（challenge.reconcile_fetch_failures）を 1 増やし、
+// 次の周で照合だけをやり直す（retryPendingReconciliation。子を起動しない）。連続
+// reconcileFetchFailureLimit 回で人間対応待ちにする。「成果物あり」か「見つからない」の判定が
+// 出たら回数を 0 に戻す。
 
 import (
 	"context"
@@ -36,16 +49,66 @@ type reconciliation struct {
 	UnchangedBranch string
 	// BranchExists はリモートにそのブランチがあるか（調べられなかったときは false）。
 	BranchExists bool
-	PRs          []UpstreamPullRequest
+	// PRs は委譲先のリポジトリの PR（ブランチを head とするものと、pr_urls で見つかったもの。
+	// URL の重複なし）。
+	PRs []UpstreamPullRequest
+	// Reported は報告の pr_urls の 1 件ごとの調べた結果（重複を除いた順）。
+	Reported []reportedPR
 	// Errors は取得できなかったものの説明（gh の失敗・スロットの検査の失敗）。
 	Errors []string
+	// FetchFailures は GitHub からの取得の失敗（見つからないと確定できなかったもの。接続の失敗・
+	// タイムアウト・5xx・認証切れ・レート制限などを区別しない）の説明。空でなければ、成果物が
+	// 見つからなくても「見つからない」と判定しない（#487）。
+	FetchFailures []string
+	// BranchLookupFailed・PRLookupFailed は、ブランチ・そのブランチを head とする PR の取得に
+	// 失敗したか（結果の説明で「見つからない」と書かないため）。
+	BranchLookupFailed bool
+	PRLookupFailed     bool
 	// AttentionReason が空でなければ、スロットを needs_attention にする理由。
 	AttentionReason string
 }
 
+// reconcileFetchFailureLimit は、完了の照合（成果物の種類 pr）の取得の失敗が続いたときに、
+// 人間対応待ちにする連続回数（3 周ぶん。決定 2026-11-08 オーナー #487）。
+const reconcileFetchFailureLimit = 3
+
+// maxReportedPRLookups は、報告の pr_urls から 1 回の照合で gh に問い合わせる PR の件数の上限
+// （重複を除いた件数。超えた分は調べない）。
+const maxReportedPRLookups = 20
+
+// reportedPR は報告の pr_urls の 1 件を調べた結果。
+type reportedPR struct {
+	// Ref は子が書いた文字列。結果の説明にだけ使い、記録しない。
+	Ref string
+	// Repo は宣言のリポジトリ（調べなかったときは零値）。Other は委譲先と別のリポジトリか。
+	Repo  ConnectorRepo
+	Other bool
+	// PR は gh が返した PR（取得できたときだけ）。
+	PR *UpstreamPullRequest
+	// Skipped は調べなかった理由（人に見せる文）、Err は取得のエラー。NotFound は、そのエラーが
+	// 見つからないと確定したもの（404）か（偽なら取得の失敗）。
+	Skipped  string
+	Err      string
+	NotFound bool
+}
+
 // gatherReconciliation はスロットの作業ツリーを検査し、ブランチと PR を取得する。
-// reportBranch は報告のブランチ（無ければ nil）。
-func (s *Store) gatherReconciliation(ctx context.Context, in DelegateInput, dc *delegationContext, slotPath, baseBranch string, reportBranch *string) *reconciliation {
+// result・report は委譲の run の結果と検査を通った報告（報告が無ければ nil）。
+func (s *Store) gatherReconciliation(ctx context.Context, in DelegateInput, dc *delegationContext, slotPath, baseBranch string, result RunResult, report *DelegationReport) *reconciliation {
+	var reportBranch *string
+	if report != nil {
+		reportBranch = report.Branch
+	}
+	rec := s.gatherBranchReconciliation(ctx, in, dc, slotPath, baseBranch, reportBranch)
+	if result == RunResultSucceeded && report != nil && report.Outcome == DelegationOutcomeCompleted && dc.Operation.Artifacts == "pr" {
+		s.gatherReportedPRs(ctx, in, dc, rec, report.PRURLs)
+	}
+	return rec
+}
+
+// gatherBranchReconciliation はスロットの作業ツリーを検査し、ブランチと、それを head とする
+// PR を取得する。reportBranch は報告のブランチ（無ければ nil）。
+func (s *Store) gatherBranchReconciliation(ctx context.Context, in DelegateInput, dc *delegationContext, slotPath, baseBranch string, reportBranch *string) *reconciliation {
 	rec := &reconciliation{}
 	tree := SlotTree{Path: slotPath}
 	if dc.Repo.Slots.Provider == string(slotProviderWorktree) {
@@ -88,18 +151,135 @@ func (s *Store) gatherReconciliation(ctx context.Context, in DelegateInput, dc *
 		rec.Branch, rec.BranchFrom = "", ""
 		return rec
 	}
-	remote := dc.Repo.Remote
+	lookupBranch(ctx, in, dc.Repo.Remote, rec)
+	return rec
+}
+
+// lookupBranch は rec.Branch のリモートのブランチと、それを head とする PR を取得して rec に置く。
+// ブランチの 404（false）と PR の空の一覧は見つからないと確定、エラーは取得の失敗。
+func lookupBranch(ctx context.Context, in DelegateInput, remote string, rec *reconciliation) {
 	exists, err := in.Reconcile.BranchExists(ctx, remote, rec.Branch)
 	if err != nil {
-		rec.Errors = append(rec.Errors, "looking up the remote branch failed: "+oneLine(err.Error()))
+		msg := "looking up the remote branch failed: " + oneLine(err.Error())
+		rec.Errors = append(rec.Errors, msg)
+		rec.FetchFailures = append(rec.FetchFailures, msg)
+		rec.BranchLookupFailed = true
 	}
-	rec.BranchExists = exists
+	rec.BranchExists = err == nil && exists
 	prs, err := in.Reconcile.ListPullRequestsByHead(ctx, remote, rec.Branch)
 	if err != nil {
-		rec.Errors = append(rec.Errors, "looking up the pull requests failed: "+oneLine(err.Error()))
+		msg := "looking up the pull requests failed: " + oneLine(err.Error())
+		rec.Errors = append(rec.Errors, msg)
+		rec.FetchFailures = append(rec.FetchFailures, msg)
+		rec.PRLookupFailed = true
+		prs = nil
 	}
-	rec.PRs = prs
-	return rec
+	rec.PRs = append(rec.PRs, prs...)
+}
+
+// gatherReportedPRs は報告の pr_urls を 1 件ずつ調べて rec に足す。URL は
+// parseReleasePullRequestRef で repo と番号に分け、repo を宣言の repos[] の remote と大文字小文字を
+// 無視して突き合わせる。宣言にない・形が不正なものは gh を呼ばずに理由を残す。宣言にあるものは
+// その repo で PR を引き、委譲先の PR は rec.PRs（ブランチで見つけた PR と URL の重複なし）へ、
+// 別のリポジトリの PR は rec.Reported へ置く。
+func (s *Store) gatherReportedPRs(ctx context.Context, in DelegateInput, dc *delegationContext, rec *reconciliation, urls []string) {
+	seen := map[string]bool{}
+	lookups := 0
+	for _, raw := range urls {
+		if len(rec.Reported) >= 2*maxReportedPRLookups {
+			break // 結果の説明が際限なく長くならないよう、記録する件数にも上限を置く
+		}
+		ref := strings.TrimSpace(raw)
+		item := reportedPR{Ref: ref}
+		repoName, number, ok := parseReleasePullRequestRef(ref)
+		if !ok {
+			item.Skipped = "URL の形が不正（GitHub の PR の URL ではない）"
+			rec.Reported = append(rec.Reported, item)
+			continue
+		}
+		key := fmt.Sprintf("%s#%d", strings.ToLower(repoName), number)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		var decl *ConnectorRepo
+		if in.ConnDecl != nil {
+			for i := range in.ConnDecl.Repos {
+				if strings.EqualFold(in.ConnDecl.Repos[i].Remote, repoName) {
+					decl = &in.ConnDecl.Repos[i]
+					break
+				}
+			}
+		}
+		if decl == nil {
+			item.Skipped = "リポジトリが宣言（connectors.json）にない"
+			rec.Reported = append(rec.Reported, item)
+			continue
+		}
+		item.Repo, item.Other = *decl, !strings.EqualFold(decl.Remote, dc.Repo.Remote)
+		if lookups >= maxReportedPRLookups {
+			item.Skipped = fmt.Sprintf("調べる件数の上限（%d 件）を超えた", maxReportedPRLookups)
+			rec.Reported = append(rec.Reported, item)
+			continue
+		}
+		lookups++
+		pr, err := in.Reconcile.GetPullRequest(ctx, decl.Remote, number)
+		if err == nil {
+			// gh が返した PR が、求めた PR（宣言のリポジトリの同じ番号）でなければ記録しない。
+			if gotRepo, gotNumber, ok := parseReleasePullRequestRef(pr.URL); !ok || gotNumber != number || !strings.EqualFold(gotRepo, decl.Remote) {
+				err = fmt.Errorf("the pull request gh returned does not match the one requested (%s#%d): %s", decl.Remote, number, oneLine(pr.URL))
+			}
+		}
+		if err != nil {
+			item.Err = oneLine(err.Error())
+			if errors.Is(err, ErrUpstreamPullRequestNotFound) {
+				item.NotFound = true // 404: 見つからないと確定
+			} else {
+				rec.FetchFailures = append(rec.FetchFailures, fmt.Sprintf("looking up the pull request %s#%d failed: %s", decl.Remote, number, item.Err))
+			}
+			rec.Reported = append(rec.Reported, item)
+			continue
+		}
+		item.PR = &pr
+		rec.Reported = append(rec.Reported, item)
+		if !item.Other {
+			dup := false
+			for _, have := range rec.PRs {
+				if strings.EqualFold(have.URL, pr.URL) {
+					dup = true
+				}
+			}
+			if !dup {
+				rec.PRs = append(rec.PRs, pr)
+			}
+		}
+	}
+}
+
+// otherRepoPRs は報告の pr_urls で見つかった、委譲先と別のリポジトリの PR（gh が返した値）。
+func (r *reconciliation) otherRepoPRs() []reportedPR {
+	var out []reportedPR
+	for _, rp := range r.Reported {
+		if rp.Other && rp.PR != nil {
+			out = append(out, rp)
+		}
+	}
+	return out
+}
+
+// otherRepoMergeNote は、委譲先と別のリポジトリの既定ブランチへマージ済みの PR があるときの
+// 注記（保留にはしない）。無ければ空。
+func (r *reconciliation) otherRepoMergeNote() string {
+	var urls []string
+	for _, rp := range r.otherRepoPRs() {
+		if rp.PR.State == string(artifactStateMerged) && rp.PR.Base == rp.Repo.DefaultBranch {
+			urls = append(urls, fmt.Sprintf("%s (%s, base %s)", rp.PR.URL, rp.Repo.Remote, rp.PR.Base))
+		}
+	}
+	if len(urls) == 0 {
+		return ""
+	}
+	return "pull requests of another repository were already merged into its default branch (not held): " + strings.Join(urls, ", ")
 }
 
 // artifactInputs は run の成果物として記録する行（照合で確かめられたものだけ）。
@@ -108,10 +288,21 @@ func (r *reconciliation) artifactInputs(verifiedAt *time.Time) []insertRunArtifa
 	if r.BranchExists {
 		out = append(out, insertRunArtifactInput{Kind: artifactKindBranch, Ref: r.Branch, VerifiedAt: verifiedAt})
 	}
-	for _, pr := range r.PRs {
+	recorded := map[string]bool{}
+	add := func(pr UpstreamPullRequest) {
+		if recorded[strings.ToLower(pr.URL)] {
+			return
+		}
+		recorded[strings.ToLower(pr.URL)] = true
 		out = append(out, insertRunArtifactInput{
 			Kind: artifactKindPR, Ref: pr.URL, State: artifactState(pr.State), Base: pr.Base, VerifiedAt: verifiedAt,
 		})
+	}
+	for _, pr := range r.PRs {
+		add(pr)
+	}
+	for _, rp := range r.otherRepoPRs() {
+		add(*rp.PR)
 	}
 	return out
 }
@@ -133,12 +324,39 @@ func (r *reconciliation) describe() string {
 		}
 	}
 	if r.Branch != "" {
-		fmt.Fprintf(&b, "- リモートのブランチ: %s\n", map[bool]string{true: "ある", false: "見つからない"}[r.BranchExists])
-		if len(r.PRs) == 0 {
+		switch {
+		case r.BranchLookupFailed:
+			b.WriteString("- リモートのブランチ: 取得の失敗（有無を確かめられない）\n")
+		default:
+			fmt.Fprintf(&b, "- リモートのブランチ: %s\n", map[bool]string{true: "ある", false: "見つからない"}[r.BranchExists])
+		}
+		switch {
+		case len(r.PRs) > 0:
+		case r.PRLookupFailed:
+			b.WriteString("- このブランチを head とする PR: 取得の失敗（有無を確かめられない）\n")
+		default:
 			b.WriteString("- このブランチを head とする PR: 見つからない\n")
 		}
 		for _, pr := range r.PRs {
 			fmt.Fprintf(&b, "- PR: %s（状態: %s、base: %s）\n", pr.URL, pr.State, pr.Base)
+		}
+	}
+	for _, rp := range r.Reported {
+		ref := oneLine(rp.Ref)
+		if len([]rune(ref)) > 200 {
+			ref = string([]rune(ref)[:200]) + "…"
+		}
+		switch {
+		case rp.PR != nil && rp.Other:
+			fmt.Fprintf(&b, "- 報告の PR（委譲先と別のリポジトリ %s）: %s（状態: %s、base: %s）\n", rp.Repo.Remote, rp.PR.URL, rp.PR.State, rp.PR.Base)
+		case rp.PR != nil:
+			fmt.Fprintf(&b, "- 報告の PR（委譲先のリポジトリ %s）: %s（状態: %s、base: %s）\n", rp.Repo.Remote, rp.PR.URL, rp.PR.State, rp.PR.Base)
+		case rp.Skipped != "":
+			fmt.Fprintf(&b, "- 報告の PR: %s（調べなかった: %s）\n", ref, rp.Skipped)
+		case rp.NotFound:
+			fmt.Fprintf(&b, "- 報告の PR: %s（%s で見つからない: %s）\n", ref, rp.Repo.Remote, rp.Err)
+		default:
+			fmt.Fprintf(&b, "- 報告の PR: %s（%s の取得の失敗: %s）\n", ref, rp.Repo.Remote, rp.Err)
 		}
 	}
 	for _, e := range r.Errors {
@@ -156,12 +374,22 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 	rec *reconciliation, result RunResult, report *DelegationReport, cycleID string) (status *string, note string, err error) {
 	runIDInt, _ := parseRunID(runIDDisplay)
 
-	// release の登録。base が宣言の既定ブランチの PR（状態を問わない）ごとに、同じ PR の
-	// URL の release が無ければ登録する。
+	// release の登録。委譲先のリポジトリの PR は、base が宣言の既定ブランチの PR（状態を問わない）
+	// ごとに、同じ PR の URL の release が無ければ登録する。委譲先と別のリポジトリの PR は、
+	// open で base がそのリポジトリの宣言の既定ブランチのものだけを登録する（マージ済みの PR は
+	// 登録しない。マージの承認の口に載せられるのは、まだマージされていない PR だけ）。
+	var releasePRs []UpstreamPullRequest
 	for _, pr := range rec.PRs {
-		if pr.Base != dc.Repo.DefaultBranch {
-			continue
+		if pr.Base == dc.Repo.DefaultBranch {
+			releasePRs = append(releasePRs, pr)
 		}
+	}
+	for _, rp := range rec.otherRepoPRs() {
+		if rp.PR.State == string(artifactStateOpen) && rp.PR.Base == rp.Repo.DefaultBranch {
+			releasePRs = append(releasePRs, *rp.PR)
+		}
+	}
+	for _, pr := range releasePRs {
 		ref := pr.URL
 		summary := pr.Title
 		if strings.TrimSpace(summary) == "" {
@@ -175,7 +403,8 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 		}
 	}
 
-	// 承認なしの本番反映の検出（M3P15）。
+	// 承認なしの本番反映の検出（M3P15）。委譲先のリポジトリだけが対象（委譲先と別のリポジトリへ
+	// マージ済みの PR は保留にせず、結果の注記で見えるようにする）。
 	cid, _ := parseChallengeID(dc.Challenge.ID)
 	var unapproved []UpstreamPullRequest
 	for _, pr := range rec.PRs {
@@ -197,16 +426,16 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 			fmt.Fprintf(&q, "- %s\n", pr.URL)
 		}
 		q.WriteString(rec.describe())
-		return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, q.String(), holdReasonUnapprovedMerge, cycleID)
+		return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, q.String(), holdReasonUnapprovedMerge, cycleID, false)
 	}
 
 	// 子の問い・停止の報告（J4 は S3）。保留の原因の run はこの run になる。
 	if result == RunResultSucceeded && report != nil {
 		switch report.Outcome {
 		case DelegationOutcomeQuestions:
-			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatQuestionsHold(report), holdReasonQuestions, cycleID)
+			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatQuestionsHold(report), holdReasonQuestions, cycleID, false)
 		case DelegationOutcomeBlocked:
-			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatBlockedHold(report), holdReasonBlocked, cycleID)
+			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatBlockedHold(report), holdReasonBlocked, cycleID, false)
 		}
 	}
 
@@ -222,6 +451,11 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 				confirmed = true
 			}
 		}
+		for _, rp := range rec.otherRepoPRs() {
+			if rp.PR.State == string(artifactStateOpen) || rp.PR.State == string(artifactStateMerged) {
+				confirmed = true
+			}
+		}
 	case "branch":
 		// 既定ブランチ自体は子が作った成果物ではない（作業ツリーが既定ブランチのままなら、
 		// リモートにあっても確かめられたことにしない）。
@@ -229,11 +463,74 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 	default: // "none"、および宣言の無い操作: 照合で確かめる成果物が無い（中身は J5 が判定する）
 		confirmed = true
 	}
+	// 「成果物あり」と「見つからない」の判定は、取得の失敗の連続回数を 0 に戻す（#487）。
 	if confirmed {
-		return s.mapReconciliation(ctx, dc, runIDDisplay, OpSubmit, "", holdReasonNone, cycleID)
+		status, note, err = s.mapReconciliation(ctx, dc, runIDDisplay, OpSubmit, "", holdReasonNone, cycleID, true)
+		if err == nil && status != nil && note == "" {
+			note = rec.otherRepoMergeNote()
+		}
+		return status, note, err
+	}
+	if dc.Operation.Artifacts == "pr" && len(rec.FetchFailures) > 0 {
+		// 見つからず、取得の失敗が 1 つでもある: 「見つからない」と判定しない（#487）。
+		return s.recordReconcileFetchFailure(ctx, dc, runIDDisplay, rec, cycleID)
 	}
 	question := "子は完了を報告したが成果物が見つからない（宣言の成果物の種類: " + dc.Operation.Artifacts + "）。\n" + rec.describe()
-	return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, question, holdReasonArtifactMissing, cycleID)
+	return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, question, holdReasonArtifactMissing, cycleID, true)
+}
+
+// recordReconcileFetchFailure は、成果物の種類が pr の完了の照合で、成果物が見つからず取得の失敗が
+// あったときの扱い（#487）。課題が着手中なら連続回数を 1 増やし、調べたブランチを残す（次の周の
+// やり直しで同じブランチを調べるため）。回数が上限に達していなければ課題の状態を変えずに注記だけを
+// 返し、達していれば人間対応待ちにする。回数は runIDDisplay の run の照合の連続の失敗で、前の失敗が
+// 別の run の照合なら 1 から数える（問いに取得の失敗・連続の回数・最後のエラーを書く）。
+func (s *Store) recordReconcileFetchFailure(ctx context.Context, dc *delegationContext, runIDDisplay string, rec *reconciliation, cycleID string) (*string, string, error) {
+	cid, ok := parseChallengeID(dc.Challenge.ID)
+	if !ok {
+		return nil, "", ErrNotFound
+	}
+	runIDInt, ok := parseRunID(runIDDisplay)
+	if !ok {
+		return nil, "", ErrNotFound
+	}
+	var count int
+	eligible := false
+	err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		c, err := loadChallenge(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if c == nil || c.Status != StatusInProgress {
+			return nil
+		}
+		eligible = true
+		var branch any
+		if rec.Branch != "" {
+			branch = rec.Branch
+		}
+		// 連続の回数は同じ run の照合の失敗だけを数える（別の run の照合の失敗は 1 から数える）。
+		return tx.QueryRowContext(ctx,
+			`UPDATE challenge SET reconcile_fetch_failures = CASE WHEN reconcile_fetch_run_id = ? THEN reconcile_fetch_failures + 1 ELSE 1 END,
+				reconcile_fetch_run_id = ?, reconcile_fetch_branch = ? WHERE id = ? RETURNING reconcile_fetch_failures`,
+			runIDInt, runIDInt, branch, cid).Scan(&count)
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return nil, "", err
+	}
+	if !eligible {
+		return nil, s.reconcileSkippedNote(ctx, dc), nil
+	}
+	last := rec.FetchFailures[len(rec.FetchFailures)-1]
+	if count >= reconcileFetchFailureLimit {
+		var q strings.Builder
+		fmt.Fprintf(&q, "子は完了を報告したが、照合で GitHub からの取得の失敗が続き、成果物の有無を確かめられない（宣言の成果物の種類: %s）。\n", dc.Operation.Artifacts)
+		fmt.Fprintf(&q, "取得の失敗の連続の回数: %d 回（上限 %d 回）\n", count, reconcileFetchFailureLimit)
+		fmt.Fprintf(&q, "最後のエラーのメッセージ: %s\n", last)
+		q.WriteString(rec.describe())
+		return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, q.String(), holdReasonArtifactMissing, cycleID, false)
+	}
+	return nil, fmt.Sprintf("looking up the artifacts failed (%d of %d consecutive fetch failures); the challenge is unchanged and the reconciliation will be retried in the next cycle: %s",
+		count, reconcileFetchFailureLimit, last), nil
 }
 
 // releaseApproved は課題の、参照が prURL の release が承認済みかを返す。
@@ -260,10 +557,17 @@ func (s *Store) releaseApproved(ctx context.Context, challengeID int64, prURL st
 // reason は保留の理由の種別で、発生（M45P5）の種類を決める。保留の行と同じトランザクションで
 // 発生を作る。holdReasonArtifactMissing（成果物が見つからない）は発生を作らない。
 // cycleID はこの写像が属する周（発生が持つ周の ID）。
-func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, runIDDisplay string, op Operation, question string, reason holdReason, cycleID string) (*string, string, error) {
+// resetFetchFailures が真なら、同じトランザクションで照合の取得の失敗の連続回数を 0 に戻す
+// （「成果物あり」「見つからない」の判定のとき。#487）。
+func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, runIDDisplay string, op Operation, question string, reason holdReason, cycleID string, resetFetchFailures bool) (*string, string, error) {
 	_, err := s.transitionAsInvoker(ctx, runIDDisplay, dc.Challenge.ID, op, func(ctx context.Context, tc *transitionCtx) error {
 		if tc.current.Status != StatusInProgress {
 			return errReconcileNotEligible
+		}
+		if resetFetchFailures {
+			if err := resetReconcileFetchFailures(ctx, tc.tx, tc.id); err != nil {
+				return err
+			}
 		}
 		if op == OpHold {
 			return s.insertHoldWithOccurrence(ctx, tc, question, reason, cycleID)
@@ -282,6 +586,14 @@ func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, ru
 	}
 	v := string(StatusVerifying)
 	return &v, "", nil
+}
+
+// resetReconcileFetchFailures は課題の照合の取得の失敗の連続回数を 0 に、失敗した照合の run と調べたブランチを NULL に戻す。
+func resetReconcileFetchFailures(ctx context.Context, tx *sql.Tx, challengeID int64) error {
+	_, err := tx.ExecContext(ctx,
+		`UPDATE challenge SET reconcile_fetch_failures = 0, reconcile_fetch_run_id = NULL, reconcile_fetch_branch = NULL
+			WHERE id = ? AND (reconcile_fetch_failures <> 0 OR reconcile_fetch_run_id IS NOT NULL OR reconcile_fetch_branch IS NOT NULL)`, challengeID)
+	return err
 }
 
 // reconcileSkippedNote は、写す直前に課題が着手中でなくなっていて写さなかった場合の注記を返す。

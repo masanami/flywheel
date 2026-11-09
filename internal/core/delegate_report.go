@@ -56,6 +56,14 @@ func allowedQuestionKinds(declared []HumanQuestionKind) []string {
 	return out
 }
 
+// invalidReportErrorPrefix は、子の報告が検査を通らず invalid_output になった run の error の
+// 先頭（理由の前）。再開で子へ渡すときは外す。
+const invalidReportErrorPrefix = "invalid report: "
+
+// branchFieldPattern は報告の branch 欄の pattern（JSON Schema は ECMA-262 の正規表現）。
+// 空白・制御文字・`~^:?*[\` を含まない（空文字は core が「ブランチなし」と読む）。
+const branchFieldPattern = `^[^\s\x00-\x1f\x7f~^:?*\[\\]*$`
+
 // delegationReportSchema は委譲の `--json-schema` に渡すスキーマを返す。閉集合の値は
 // DelegationOutcomeValues と宣言から機械的に組み立てる（手で書き写さない）。
 func delegationReportSchema(declared []HumanQuestionKind) []byte {
@@ -65,6 +73,9 @@ func delegationReportSchema(declared []HumanQuestionKind) []byte {
 	}
 	stringArray := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 	nullableString := map[string]any{"type": []string{"string", "null"}}
+	// branch はブランチ名だけを書く欄。空白・制御文字・git のブランチ名に使えない文字を
+	// 含む値（注記つきの値）をスキーマの段階で拒む。core の再検査（plausibleBranchName）が正。
+	branchField := map[string]any{"type": []string{"string", "null"}, "pattern": branchFieldPattern}
 	question := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -81,7 +92,7 @@ func delegationReportSchema(declared []HumanQuestionKind) []byte {
 		"properties": map[string]any{
 			"outcome":      map[string]any{"type": "string", "enum": outcomes},
 			"summary":      map[string]any{"type": "string"},
-			"branch":       nullableString,
+			"branch":       branchField,
 			"pr_urls":      stringArray,
 			"commits":      stringArray,
 			"quality_gate": nullableString,
@@ -135,17 +146,25 @@ func decodeNullableString(raw json.RawMessage) (*string, bool) {
 
 // validateDelegationReport は data（run の StructuredOutput）を検査する
 // （§結果の判別「core が閉集合と必須の組…を検査し直す」）。結末が閉集合の外・必須の
-// キーの欠落・未知のキー・型の違い・問いの種類が閉集合の外のいずれかで ok=false
-// （run の結果は invalid_output になる）。
+// キーの欠落・未知のキー・型の違い・問いの種類が閉集合の外・ブランチの欄がブランチ名で
+// ないもののいずれかで ok=false（run の結果は invalid_output になる）。
 func validateDelegationReport(data []byte, declared []HumanQuestionKind) (*DelegationReport, bool) {
+	r, reason := checkDelegationReport(data, declared)
+	return r, reason == ""
+}
+
+// checkDelegationReport は validateDelegationReport と同じ検査をして、不備があれば報告のどこが
+// 不備かを短い 1 行（reason）で返す。不備が無ければ reason は空。reason は子へ再開で渡すので、
+// 子の報告の値そのものは含めない。
+func checkDelegationReport(data []byte, declared []HumanQuestionKind) (*DelegationReport, string) {
 	m, ok := parseStrictObject(data, delegationReportKeys)
 	if !ok {
-		return nil, false
+		return nil, "the report is not one JSON object with exactly the required keys"
 	}
 	var r DelegationReport
 	var outcome string
 	if json.Unmarshal(m["outcome"], &outcome) != nil {
-		return nil, false
+		return nil, "the outcome field is not a string"
 	}
 	r.Outcome = DelegationOutcome(outcome)
 	known := false
@@ -155,30 +174,41 @@ func validateDelegationReport(data []byte, declared []HumanQuestionKind) (*Deleg
 		}
 	}
 	if !known {
-		return nil, false
+		return nil, "the outcome field is not one of the allowed values"
 	}
 	if json.Unmarshal(m["summary"], &r.Summary) != nil || strings.TrimSpace(string(m["summary"])) == "null" {
-		return nil, false
+		return nil, "the summary field is not a string"
 	}
 	var ok1, ok2, ok3, ok4, ok5 bool
 	r.Branch, ok1 = decodeNullableString(m["branch"])
 	r.QualityGate, ok2 = decodeNullableString(m["quality_gate"])
 	r.PRURLs, ok3 = decodeStringArray(m["pr_urls"])
 	r.Commits, ok4 = decodeStringArray(m["commits"])
-	if !ok1 || !ok2 || !ok3 || !ok4 {
-		return nil, false
+	switch {
+	case !ok1:
+		return nil, "the branch field is neither a string nor null"
+	case !ok2:
+		return nil, "the quality_gate field is neither a string nor null"
+	case !ok3:
+		return nil, "the pr_urls field is not an array of strings"
+	case !ok4:
+		return nil, "the commits field is not an array of strings"
 	}
-	r.Assumptions, ok5 = decodeStringArray(m["assumptions"])
-	if !ok5 {
-		return nil, false
+	if r.Branch != nil {
+		if b := strings.TrimSpace(*r.Branch); b != "" && !plausibleBranchName(b) {
+			return nil, "the branch field is not a git branch name; write only the branch name there and put any note (repository, state) in the summary or assumptions"
+		}
+	}
+	if r.Assumptions, ok5 = decodeStringArray(m["assumptions"]); !ok5 {
+		return nil, "the assumptions field is not an array of strings"
 	}
 	if r.Unverified, ok5 = decodeStringArray(m["unverified"]); !ok5 {
-		return nil, false
+		return nil, "the unverified field is not an array of strings"
 	}
 
 	var rawQuestions []json.RawMessage
 	if strings.TrimSpace(string(m["questions"])) == "null" || json.Unmarshal(m["questions"], &rawQuestions) != nil {
-		return nil, false
+		return nil, "the questions field is not an array"
 	}
 	kinds := map[string]bool{}
 	for _, k := range allowedQuestionKinds(declared) {
@@ -187,27 +217,27 @@ func validateDelegationReport(data []byte, declared []HumanQuestionKind) (*Deleg
 	for _, rq := range rawQuestions {
 		qm, ok := parseStrictObject(rq, delegationQuestionKeys)
 		if !ok {
-			return nil, false
+			return nil, "a question is not an object with exactly the required keys"
 		}
 		var q DelegationQuestion
 		if json.Unmarshal(qm["kind"], &q.Kind) != nil || !kinds[q.Kind] {
-			return nil, false
+			return nil, "a question's kind is not one of the allowed values"
 		}
 		if json.Unmarshal(qm["text"], &q.Text) != nil || strings.TrimSpace(string(qm["text"])) == "null" {
-			return nil, false
+			return nil, "a question's text is not a string"
 		}
 		if q.Options, ok = decodeStringArray(qm["options"]); !ok {
-			return nil, false
+			return nil, "a question's options is not an array of strings"
 		}
 		if q.Recommendation, ok = decodeNullableString(qm["recommendation"]); !ok {
-			return nil, false
+			return nil, "a question's recommendation is neither a string nor null"
 		}
 		r.Questions = append(r.Questions, q)
 	}
 	if r.Outcome == DelegationOutcomeQuestions && len(r.Questions) == 0 {
-		return nil, false
+		return nil, "the outcome is questions but the questions field is empty"
 	}
-	return &r, true
+	return &r, ""
 }
 
 // j3OutputSchema は J3 の `--json-schema` に渡すスキーマ（brief の文字列だけ）。

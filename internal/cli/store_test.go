@@ -123,6 +123,8 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 		{"op", "exec"},
 		{"dep", "add", "C-1", "C-2"},
 		{"dep", "rm", "C-1", "C-2"},
+		{"bind", "C-1", "owner/repo#1"},
+		{"unbind", "C-1"},
 		{"status"},
 		{"log"},
 		{"ingest"},

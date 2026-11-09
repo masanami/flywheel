@@ -118,16 +118,25 @@ func (f *j5Fixture) approvalPreview(t *testing.T, id string) *ApprovalPreview {
 	return p
 }
 
+// addOperation は課題 C-1 に不可逆操作を未承認で登録する（本番反映が待っている状態を作る）。
+func (f *j5Fixture) addOperation(t *testing.T, kind string) {
+	t.Helper()
+	if _, err := f.s.CreateOperation(context.Background(), ChannelCLI, OperationInput{ChallengeID: "C-1", Kind: kind, Summary: "OP-" + kind}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f *j5Fixture) holdCount(t *testing.T) string {
 	t.Helper()
 	return f.queryString(t, `SELECT COUNT(*) FROM hold WHERE challenge_id = 1`)
 }
 
-// (b) 区分の無い未達・不確かが無く、残りが「本番反映で満たされる見込み」だけなら、完了確認待ちへ進み、
-// 承認の要約にその条件が出る。
-func TestVerifyAutoJ5_OnlyAfterReleaseLeft_AwaitsCompletionApprovalAndTheSummaryListsThem(t *testing.T) {
+// (b) 区分の無い未達・不確かが無く、残りが「本番反映で満たされる見込み」だけで、待っている本番反映
+// （未承認の release）があれば、完了確認待ちへ進み、承認の要約にその条件が出る（#466 の (d)）。
+func TestVerifyAutoJ5_OnlyAfterReleaseLeftWithAPendingRelease_AwaitsCompletionApprovalAndTheSummaryListsThem(t *testing.T) {
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
+	f.addOperation(t, "release")
 	f.j5.result = j5OutDeferred("met", nil, nil,
 		[2]string{condAfterRelease, "after_release"}, [2]string{"2 つめの条件", "after_release"})
 	res, err := f.verify(t, nil)
@@ -154,6 +163,7 @@ func TestVerifyAutoJ5_OnlyAfterReleaseLeft_AwaitsCompletionApprovalAndTheSummary
 func TestVerifyAutoJ5_AfterHumanActionLeft_HoldsWithTheConditionsAndDoesNotRelaunchTheChild(t *testing.T) {
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
+	f.addOperation(t, "release") // 待っている本番反映があれば、本番反映が無い旨は保留に足さない
 	launches := len(f.deleg.launched())
 	f.j5.result = j5OutDeferred("met", nil, nil,
 		[2]string{condAfterRelease, "after_release"}, [2]string{condAfterHuman, "after_human_action"})
@@ -355,6 +365,7 @@ func TestVerifyAutoJ5_CategoriesMixedWithPlainVerdicts(t *testing.T) {
 	t.Run("after_release with a later plain met keeps only the latest conditions", func(t *testing.T) {
 		f := newJ5Fixture(t, "impl")
 		f.delegateToVerifying(t, "C-1")
+		f.addOperation(t, "release")
 		f.j5.result = j5OutDeferred("met", nil, nil, [2]string{condAfterRelease, "after_release"})
 		if _, err := f.verify(t, nil); err != nil {
 			t.Fatal(err)
@@ -369,4 +380,178 @@ func TestVerifyAutoJ5_CategoriesMixedWithPlainVerdicts(t *testing.T) {
 			t.Errorf("ConditionsAfterRelease = %v, want nil (from the latest verification)", p.ConditionsAfterRelease)
 		}
 	})
+}
+
+// --- #466: 待っている本番反映が無いのに、残りが「本番反映で満たされる見込み」だけのとき ---
+
+// (c) 残りが after_release だけで待っている本番反映（未承認の release）が無いと、条件は満たされないまま
+// 完了確認待ちへ進んでしまう。進めず、「本番反映が無いので条件を満たせない」と条件を問いに書いた人間待ちの
+// 保留へ置く。着手中へ戻さず（子を再起動しない）、失敗ではないので発生も作らず、実物は課題へ書かない。
+func TestVerifyAutoJ5_OnlyAfterReleaseLeftWithNoPendingRelease_HoldsAndDoesNotRelaunchTheChild(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	launches := len(f.deleg.launched())
+	b, _ := json.Marshal(map[string]any{
+		"verdict": "met", "reason": "R", "feedback": nil, "question": nil,
+		"actual": []map[string]string{{"scene": "s", "after": "a"}},
+		"deferred_conditions": []map[string]string{
+			{"condition": condAfterRelease, "status": "after_release"},
+			{"condition": "2 つめの条件", "status": "after_release"},
+		},
+	})
+	f.j5.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: b, ReportedTotalCostUSD: float64Ptr(0.5)}
+	res, err := f.verify(t, nil)
+	if err != nil || len(res.Items) != 1 {
+		t.Fatal(res, err)
+	}
+	if it := res.Items[0]; it.Result != RunResultSucceeded || it.Outcome != "uncertain" || it.Status == nil || *it.Status != string(StatusAwaitingHuman) {
+		t.Errorf("item = %+v", it)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusAwaitingHuman {
+		t.Fatalf("status = %s, want awaiting_human (not awaiting_completion_approval, not in_progress)", got)
+	}
+	q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`)
+	if !strings.HasPrefix(q, J5NoReleaseHoldPreamble) || !strings.Contains(q, "本番反映が無いので条件を満たせない") ||
+		!strings.Contains(q, "- "+condAfterRelease) || !strings.Contains(q, "- 2 つめの条件") {
+		t.Errorf("hold question = %q, want the no-release preamble and the conditions", q)
+	}
+	if got := f.queryString(t, `SELECT from_status FROM hold WHERE challenge_id = 1`); got != "verifying" {
+		t.Errorf("hold from_status = %q", got)
+	}
+	if action, channel, _ := f.lastActivity(t, "C-1"); action != "verify_uncertain" || channel != "invoker" {
+		t.Errorf("activity = %s/%s", action, channel)
+	}
+	if got := f.queryString(t, `SELECT COUNT(*) FROM occurrence WHERE challenge_id = 1 AND kind LIKE 'verification%'`); got != "0" {
+		t.Errorf("verification occurrences = %s, want none (waiting for an answer is not a failure)", got)
+	}
+	if got := f.detail(t, "C-1").Actual; len(got) != 0 {
+		t.Errorf("actual = %+v, want unchanged (empty)", got)
+	}
+	if _, err := f.run(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.deleg.launched()); got != launches {
+		t.Errorf("delegations launched = %d, want %d (the child must not be relaunched)", got, launches)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusAwaitingHuman {
+		t.Errorf("status after the next cycle = %s", got)
+	}
+}
+
+// 待っている本番反映と数えるのは、その課題の未承認（pending）の release だけ。release 以外の未承認の操作や、
+// 承認済みの release は数えない。
+func TestVerifyAutoJ5_OnlyAfterReleaseLeft_OnlyAPendingReleaseCounts(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		setup   func(t *testing.T, f *j5Fixture)
+		wantEnd Status
+	}{
+		{"a pending delete is not a release", func(t *testing.T, f *j5Fixture) { f.addOperation(t, "delete") }, StatusAwaitingHuman},
+		{"an approved release is not waiting", func(t *testing.T, f *j5Fixture) {
+			f.addOperation(t, "release")
+			f.setReleaseState(t, 1, "approved")
+		}, StatusAwaitingHuman},
+		{"a pending release of another challenge is not this one's", func(t *testing.T, f *j5Fixture) {
+			other, err := f.s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "other"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.s.CreateOperation(context.Background(), ChannelCLI, OperationInput{ChallengeID: other.ID, Kind: "release", Summary: "other release"}); err != nil {
+				t.Fatal(err)
+			}
+		}, StatusAwaitingHuman},
+		{"a pending release of this challenge", func(t *testing.T, f *j5Fixture) { f.addOperation(t, "release") }, StatusAwaitingCompletionApproval},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newJ5Fixture(t, "impl")
+			f.delegateToVerifying(t, "C-1")
+			tc.setup(t, f)
+			f.j5.result = j5OutDeferred("met", nil, nil, [2]string{condAfterRelease, "after_release"})
+			if _, err := f.verify(t, nil); err != nil {
+				t.Fatal(err)
+			}
+			if got := f.detail(t, "C-1").Status; got != tc.wantEnd {
+				t.Errorf("status = %s, want %s", got, tc.wantEnd)
+			}
+		})
+	}
+}
+
+// (e) 本番反映が無い保留へ回答すると、課題は検証中へ戻り（T12）、J5 が回答に従って判定し直す。
+func TestVerifyAutoJ5_NoPendingReleaseHold_AnswerReturnsToVerifyingAndTheNextJudgmentDecides(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.j5.result = j5OutDeferred("met", nil, nil, [2]string{condAfterRelease, "after_release"})
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusAwaitingHuman {
+		t.Fatalf("status = %s", got)
+	}
+	att := f.budgetAttestation(t, "C-1")
+	req := AnswerRequest{ChallengeID: "C-1", ExpectedVersion: f.version(t, "C-1"), Answer: "条件が不要"}
+	if _, _, err := f.s.ExecuteAnswer(context.Background(), req, att); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusVerifying {
+		t.Fatalf("status after the answer = %s, want verifying", got)
+	}
+	// 回答を踏まえた判定（その条件を除いて met）で、完了確認待ちへ進む。
+	f.j5.result = j5Out("met", nil, nil)
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusAwaitingCompletionApproval {
+		t.Errorf("status after the re-verification = %s, want awaiting_completion_approval", got)
+	}
+}
+
+// 人の操作の後でしか満たせない条件と after_release が混在し、待っている本番反映も無いとき、保留は 1 つで
+// 両方を伝える（人の操作の後に回答しても、すぐ次の保留になる往復を避ける）。待っている本番反映があれば
+// 人の操作の保留のまま（after_release の条件は書かない）。
+func TestVerifyAutoJ5_AfterHumanActionAndAfterReleaseWithNoPendingRelease_OneHoldListsBoth(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.j5.result = j5OutDeferred("met", nil, nil,
+		[2]string{condAfterRelease, "after_release"}, [2]string{condAfterHuman, "after_human_action"})
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusAwaitingHuman {
+		t.Fatalf("status = %s", got)
+	}
+	if got := f.holdCount(t); got != "1" {
+		t.Errorf("holds = %s, want 1", got)
+	}
+	q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`)
+	if !strings.HasPrefix(q, J5HumanActionHoldPreamble) || !strings.Contains(q, "- "+condAfterHuman) ||
+		!strings.Contains(q, J5NoReleaseHoldPreamble) || !strings.Contains(q, "- "+condAfterRelease) {
+		t.Errorf("hold question = %q, want both the human-action and the no-release parts", q)
+	}
+}
+
+// 予想と実物の個数の食い違いの保留にも、本番反映が無い旨と条件を書き、回答の往復を 1 回にする。
+func TestVerifyAutoJ5_NoPendingReleaseWithActualMismatch_OneHoldListsBoth(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.setExpected(t, "C-1", 2)
+	b, _ := json.Marshal(map[string]any{
+		"verdict": "met", "reason": "R", "feedback": nil, "question": nil,
+		"actual":              []map[string]string{{"scene": "s", "after": "a"}},
+		"deferred_conditions": []map[string]string{{"condition": condAfterRelease, "status": "after_release"}},
+	})
+	f.j5.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: b, ReportedTotalCostUSD: float64Ptr(0.5)}
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.holdCount(t); got != "1" {
+		t.Errorf("holds = %s, want 1", got)
+	}
+	q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`)
+	if !strings.HasPrefix(q, ActualMismatchHoldPreamble) || !strings.Contains(q, J5NoReleaseHoldPreamble) || !strings.Contains(q, "- "+condAfterRelease) {
+		t.Errorf("hold question = %q, want the mismatch and the no-release parts", q)
+	}
+	if got := f.detail(t, "C-1").Actual; len(got) != 0 {
+		t.Errorf("actual = %+v, want unchanged (empty)", got)
+	}
 }

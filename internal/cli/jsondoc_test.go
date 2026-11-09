@@ -153,6 +153,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3CycleShape(t, &doc)
 	addM45ReleaseShape(t, &doc)
 	addM45DependencyShape(t, &doc)
+	addM2BindShape(t, &doc)
 	addM45WithdrawShape(t, &doc)
 	addM45LearnShape(t, &doc)
 	addM45ImproveShape(t, &doc)
@@ -334,7 +335,7 @@ func addM45ReleaseShape(t *testing.T, doc *documentedJSON) {
 		t.Fatalf("m4.5 spec's `op exec` line does not list the 7 item keys: %v", itemKeys)
 	}
 	doc.topLevel["op exec"] = []map[string]bool{{"phase": true}}
-	doc.entity["release_phase"] = map[string]bool{"phase": true, "skipped": true, "items": true, "not_started": true}
+	doc.entity["release_phase"] = map[string]bool{"phase": true, "skipped": true, "items": true, "not_started": true, "tidied": true}
 	doc.entity["release_item"] = itemKeys
 	doc.entity["release_not_started"] = map[string]bool{"challenge_id": true, "reason": true, "operation_id": true}
 }
@@ -365,6 +366,34 @@ func addM45DependencyShape(t *testing.T, doc *documentedJSON) {
 	}
 	doc.topLevel["dep add"] = []map[string]bool{keys}
 	doc.topLevel["dep rm"] = []map[string]bool{keys}
+}
+
+// addM2BindShape は `bind`・`unbind` の成功時の JSON の形を doc へ足す。m2 の §IF / API の
+// 「`bind`・`unbind` の `--json` の成功の出力は `{"challenge": {…}}` とし」の行から最上位のキーを読む
+// （challenge の要素の形は M1 の edit と同じなので、doc.entity["challenge"] が照合する）。
+func addM2BindShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m2-github-issue-ingest.md"))
+	if err != nil {
+		t.Fatalf("read m2 spec: %v", err)
+	}
+	var keys map[string]bool
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "`bind`・`unbind` の `--json` の成功の出力は") {
+			for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
+				if strings.HasPrefix(m[1], "{") {
+					keys = topLevelKeys(m[1])
+					break
+				}
+			}
+			break
+		}
+	}
+	if len(keys) != 1 || !keys["challenge"] {
+		t.Fatalf("m2 spec's `bind`・`unbind` line does not document {\"challenge\": …}: %v", keys)
+	}
+	doc.topLevel["bind"] = []map[string]bool{keys}
+	doc.topLevel["unbind"] = []map[string]bool{keys}
 }
 
 // addM45WithdrawShape は `withdraw` の成功時の JSON の形を doc へ足す。m4.5 の受入基準
@@ -521,8 +550,45 @@ func assertDocumentedReleasePhase(t *testing.T, doc documentedJSON, where string
 	}
 	for j, it := range items {
 		im, _ := it.(map[string]any)
-		if got := keysOf(im); !reflect.DeepEqual(got, doc.entity["release_item"]) {
-			t.Errorf("%s.items[%d] keys = %v, documented = %v", where, j, sortedKeys(got), sortedKeys(doc.entity["release_item"]))
+		got := keysOf(im)
+		// 省略できるキー（mutually: 課題を戻したときの new_operation_id・reopen_reason は一緒に出る）。
+		_, hasNew := got["new_operation_id"]
+		_, hasReason := got["reopen_reason"]
+		if hasNew != hasReason {
+			t.Errorf("%s.items[%d] has new_operation_id=%v reopen_reason=%v, want both or neither", where, j, hasNew, hasReason)
+		}
+		delete(got, "new_operation_id")
+		delete(got, "reopen_reason")
+		delete(got, "detail")
+		if !reflect.DeepEqual(got, doc.entity["release_item"]) {
+			t.Errorf("%s.items[%d] keys = %v, documented = %v (+ optional detail, new_operation_id, reopen_reason)", where, j, sortedKeys(got), sortedKeys(doc.entity["release_item"]))
+		}
+	}
+	tidied, ok := pm["tidied"].([]any)
+	if !ok {
+		t.Errorf("%s.tidied = %#v, want an array (never null)", where, pm["tidied"])
+	}
+	for j, td := range tidied {
+		tm, _ := td.(map[string]any)
+		got := keysOf(tm)
+		for _, optional := range []string{"closed_reason", "new_operation_id", "reopen_reason"} {
+			delete(got, optional)
+		}
+		if want := map[string]bool{"action": true, "challenge_id": true, "operation_id": true}; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s.tidied[%d] keys = %v, documented = %v (+ optional closed_reason, new_operation_id, reopen_reason)", where, j, sortedKeys(got), sortedKeys(want))
+		}
+		action, _ := tm["action"].(string)
+		switch action {
+		case "closed":
+			if _, has := tm["closed_reason"]; !has {
+				t.Errorf("%s.tidied[%d] is closed without closed_reason", where, j)
+			}
+		case "reopened":
+			if _, has := tm["reopen_reason"]; !has {
+				t.Errorf("%s.tidied[%d] is reopened without reopen_reason", where, j)
+			}
+		default:
+			t.Errorf("%s.tidied[%d].action = %q, want closed or reopened", where, j, action)
 		}
 	}
 	ns, ok := pm["not_started"].([]any)
@@ -1242,10 +1308,10 @@ func addM4StageShape(t *testing.T, doc *documentedJSON) {
 
 // m45OperationKeys は M4.5 S1 が不可逆操作の要素（show の operations・status の
 // needs_human.operations・approved.operations）に足す 6 つのキー。
-var m45OperationKeys = []string{"approved_head", "executed_at", "merge_commit", "last_execution_result", "consecutive_failures", "waiting_since"}
+var m45OperationKeys = []string{"approved_head", "executed_at", "merge_commit", "last_execution_result", "consecutive_failures", "waiting_since", "closed_reason", "closed_at", "supersedes", "superseded_by"}
 
-// addM45OperationShape は M4.5 S1 が不可逆操作の要素に足した 6 つのキーを doc へ合成する。
-// m4.5 の機能仕様が 6 つのキーをすべて書いていることを確かめた上で足す（第 2 の正本を持たず、
+// addM45OperationShape は M4.5 S1 と #485 が不可逆操作の要素に足したキーを doc へ合成する。
+// m4.5 の機能仕様がそれらのキーをすべて書いていることを確かめた上で足す（第 2 の正本を持たず、
 // 文書の記述が消えたらここで落ちる）。
 func addM45OperationShape(t *testing.T, doc *documentedJSON) {
 	t.Helper()

@@ -215,6 +215,47 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
+		// 取り込み元の Issue の無い課題を Issue に紐づける（docs/features/m2-github-issue-ingest.md
+		// §課題と Issue の紐づけ）。before に紐づける前の見出しと説明、after に external_key 等と版。
+		name: "bind", command: "bind",
+		setup: func(t *testing.T, ws string) []string {
+			prepareBindCase(t, ws)
+			return []string{"bind", createForCase(t, ws), "example-owner/example-repo#1"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"challenge", "C-1", "bind",
+				map[string]any{"title": "t", "description": ""},
+				map[string]any{
+					"external_key": "example-owner/example-repo#1",
+					"source_id":    "harness-repo-issues",
+					"url":          "https://github.com/example-owner/example-repo/issues/1",
+					"version":      2.0,
+				}}}
+		},
+	},
+	{
+		name: "unbind", command: "unbind",
+		setup: func(t *testing.T, ws string) []string {
+			prepareBindCase(t, ws)
+			id := createForCase(t, ws)
+			runJSON(t, ws, "bind", id, "example-owner/example-repo#1")
+			return []string{"unbind", id}
+		},
+		want: func(string) []wantActivity {
+			// bind の作業ログ 1 件は setup が足したもの。この操作が足すのは unbind の 1 件だけ。
+			return []wantActivity{{"challenge", "C-1", "unbind",
+				map[string]any{
+					"external_key":   "example-owner/example-repo#1",
+					"source_id":      "harness-repo-issues",
+					"url":            "https://github.com/example-owner/example-repo/issues/1",
+					"fingerprint":    "2:bound",
+					"upstream_state": "open",
+					"policy_state":   "in_policy",
+				},
+				map[string]any{"version": 3.0}}}
+		},
+	},
+	{
 		name: "T2 classify", command: "classify", transition: tableRow("T2", core.StatusUnclassified),
 		setup: func(t *testing.T, ws string) []string {
 			return []string{"classify", createForCase(t, ws), "--priority", "P1"}
@@ -632,6 +673,9 @@ func TestWorklog_CasesCoverEveryTransitionTableRow(t *testing.T) {
 		}
 	}
 	for _, row := range core.Table {
+		if row.Restricted {
+			continue // T18 は専用の core の書き込み（本番反映の段・承認の ①）だけが使い、CLI のコマンドに対応しない。core のテストが作業ログを検証する。
+		}
 		if !covered[row] {
 			t.Errorf("transition %s (from %q, op %q) has no case in worklogCases", row.ID, row.From, row.Op)
 		}
