@@ -50,7 +50,7 @@ func (f *fakeChecks) callLog() []string {
 const j5PRURL = "https://github.com/o/r/pull/1"
 
 func prChecks(state string, checks ...UpstreamCheck) UpstreamPullRequestChecks {
-	return UpstreamPullRequestChecks{URL: j5PRURL, Title: "PR title 1", State: state, Base: "develop", HeadSHA: "abc123", Checks: checks}
+	return UpstreamPullRequestChecks{URL: j5PRURL, Title: "PR title 1", State: state, Base: "develop", BaseSHA: "base-sha", HeadSHA: "abc123", Checks: checks}
 }
 
 var (
@@ -94,7 +94,7 @@ func (f *j5Fixture) delegateToVerifying(t *testing.T, id string) {
 }
 
 func (f *j5Fixture) input(cycleID string, id *string) J5AutoInput {
-	return J5AutoInput{ChallengeID: id, AgentDecl: f.agent, Invoker: f.j5, Upstream: f.upstream, Checks: f.checks, CycleID: cycleID}
+	return J5AutoInput{ChallengeID: id, AgentDecl: f.agent, Invoker: f.j5, Upstream: f.upstream, Checks: f.checks, Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{}, CycleID: cycleID}
 }
 
 func (f *j5Fixture) verify(t *testing.T, id *string) (*JudgmentAutoResult, error) {

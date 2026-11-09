@@ -134,3 +134,7 @@ func (u unavailableBranchSource) BranchExists(context.Context, string, string) (
 func (u unavailableBranchSource) ListPullRequestsByHead(context.Context, string, string) ([]core.UpstreamPullRequest, error) {
 	return nil, fmt.Errorf("上流を取得できません: %w", u.err)
 }
+
+func (u unavailableBranchSource) GetPullRequest(context.Context, string, int) (core.UpstreamPullRequest, error) {
+	return core.UpstreamPullRequest{}, fmt.Errorf("上流を取得できません: %w", u.err)
+}

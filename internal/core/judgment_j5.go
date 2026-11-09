@@ -9,7 +9,8 @@ package core
 //	② 成果物に PR があれば、その PR のチェックを取得する（GET だけ）。完了していないものが
 //	   1 つでもあれば J5 を起動せず、課題の状態と版を変えずに waiting_external として返す。
 //	   PR が無ければ CI を調べず、入力に PR が無いことを書く
-//	③ 上流の最新の状態を取得して J5 を起動する
+//	③ 上流の最新の状態と、②で得た head の差分を取得し、その head を取り出した一時の worktree を
+//	   作業ディレクトリにして J5 を起動する（judgment_j5_head.go。worktree は終わったら消す）
 //	④ 出力を検査し（不正なら run を invalid_output にして課題は変えない）、判定を M1 の
 //	   verify（T8〜T10）へ経路 invoker・原因の run の ID つきで写す
 //
@@ -25,6 +26,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // NotStartedWaitingExternal は、直前の委譲の成果物の PR のチェックが完了していないため J5 を
@@ -34,12 +36,41 @@ const NotStartedWaitingExternal NotStartedReason = "waiting_external"
 // --- J5 の出力スキーマ・検査 ---
 
 type j5RawOutput struct {
-	Verdict  string         `json:"verdict"`
-	Reason   *string        `json:"reason"`
-	Feedback *string        `json:"feedback"`
-	Question *string        `json:"question"`
-	Actual   *[]StageActual `json:"actual"`
+	Verdict            string                    `json:"verdict"`
+	Reason             *string                   `json:"reason"`
+	Feedback           *string                   `json:"feedback"`
+	Question           *string                   `json:"question"`
+	Actual             *[]StageActual            `json:"actual"`
+	DeferredConditions *[]j5RawDeferredCondition `json:"deferred_conditions"`
 }
+
+// j5RawDeferredCondition は J5 の出力の条件ごとの判定のうち、区分（J5ConditionStatus）を付けた
+// 条件 1 件（#451）。
+type j5RawDeferredCondition struct {
+	Condition string `json:"condition"`
+	Status    string `json:"status"`
+}
+
+// J5DeferredCondition は検査を通った、区分を付けた条件 1 件。
+type J5DeferredCondition struct {
+	Condition string
+	Status    J5ConditionStatus
+}
+
+// MaxJ5DeferredConditions は J5 の出力の deferred_conditions の個数の上限。
+const MaxJ5DeferredConditions = 20
+
+// maxJ5DeferredConditionRunes は区分を付けた条件 1 件の文字数の上限。
+const maxJ5DeferredConditionRunes = 2000
+
+// J5HumanActionHoldPreamble は、達成条件の残りが人の操作の後でしか満たせない条件を含むときに
+// 置く保留の問いの前置き（#451）。続けて該当の条件を 1 行ずつ並べる。
+const J5HumanActionHoldPreamble = "達成条件のうち、人の操作の後でしか満たせない条件が残っています（ほかの条件は満たしています）。次の操作を終えたら回答してください。回答すると達成の確認をやり直します。"
+
+// J5NoReleaseHoldPreamble は、達成条件の残りに「本番反映で満たされる見込み」の条件があるのに、その課題に
+// 待っている本番反映（未承認の release）が無いときに置く保留の問いの前置き（#466）。続けて該当の条件を
+// 1 行ずつ並べる。完了確認待ちへ進めても、承認で本番反映されるものが無く条件は満たされないまま残る。
+const J5NoReleaseHoldPreamble = "本番反映が無いので条件を満たせない状態です。達成条件のうち、本番反映で満たされる見込みの条件が残っていますが、この課題には待っている本番反映（未承認の release）がありません（ほかの条件は満たしています）。次のどれかを回答してください: 「マージ済み」（PR は既定ブランチへ取り込み済み）・「PR が無い」（本番反映する PR がまだ無い）・「条件が不要」（その条件は要らない）。回答すると達成の確認をやり直します。"
 
 // j5ValidatedOutput は検査を通った J5 の出力。
 type j5ValidatedOutput struct {
@@ -49,6 +80,72 @@ type j5ValidatedOutput struct {
 	Question *string
 	// Actual は検査済みの実物（無い・0 個は nil）。
 	Actual []StageActual
+	// Deferred は区分を付けた条件（無い・0 個は nil）。判定（Verdict）はこれを除いた残りの条件で
+	// 決まっている。区分の無い旧い出力では nil で、今までどおりに扱う。
+	Deferred []J5DeferredCondition
+}
+
+// conditionsWith は Deferred のうち区分が st の条件の文字列を、出力の順に返す。
+func (v *j5ValidatedOutput) conditionsWith(st J5ConditionStatus) []string {
+	var out []string
+	for _, d := range v.Deferred {
+		if d.Status == st {
+			out = append(out, d.Condition)
+		}
+	}
+	return out
+}
+
+// awaitsHumanAction は、区分の無い条件がすべて満たされ（met）、残りに人の操作の後でしか満たせない
+// 条件が 1 つでもあるか（#451）。このときは完了確認待ちへ進めず、着手中にも戻さず、人間待ちの
+// 保留へ置く。区分の無い未達・不確かが混じるとき（not_met・uncertain）は今までどおりに扱う。
+func (v *j5ValidatedOutput) awaitsHumanAction() bool {
+	return v.Verdict == J5VerdictMet && len(v.conditionsWith(J5ConditionAfterHumanAction)) > 0
+}
+
+// humanActionHoldQuestion は awaitsHumanAction のときの保留の問い。
+func (v *j5ValidatedOutput) humanActionHoldQuestion() string {
+	return holdQuestion(J5HumanActionHoldPreamble, v.conditionsWith(J5ConditionAfterHumanAction))
+}
+
+// checksPendingRelease は、写すときに課題の待っている本番反映（未承認の release）の有無を確かめる必要が
+// あるか（#466）。区分の無い条件がすべて満たされ（met）、残りに本番反映で満たされる見込みの条件があるとき。
+func (v *j5ValidatedOutput) checksPendingRelease() bool {
+	return v.Verdict == J5VerdictMet && len(v.conditionsWith(J5ConditionAfterRelease)) > 0
+}
+
+// holdsForNoRelease は、本番反映で満たされる見込みの条件が残るのに待っている本番反映が無く、完了確認待ちへ
+// 進めても満たされないまま残るか。noRelease は課題に待っている本番反映が無いこと。
+func (v *j5ValidatedOutput) holdsForNoRelease(noRelease bool) bool {
+	return noRelease && v.checksPendingRelease()
+}
+
+// heldByDeferred は、区分を付けた条件のために完了確認待ちへ進めず保留へ置くか。
+func (v *j5ValidatedOutput) heldByDeferred(noRelease bool) bool {
+	return v.awaitsHumanAction() || v.holdsForNoRelease(noRelease)
+}
+
+// deferredHoldQuestion は heldByDeferred のときの保留の問い。人の操作の後でしか満たせない条件と、
+// 本番反映が無くて満たせない条件が両方あれば、1 つの問いに続けて書く（回答の往復を 1 回にする）。
+func (v *j5ValidatedOutput) deferredHoldQuestion(noRelease bool) string {
+	var parts []string
+	if v.awaitsHumanAction() {
+		parts = append(parts, v.humanActionHoldQuestion())
+	}
+	if v.holdsForNoRelease(noRelease) {
+		parts = append(parts, holdQuestion(J5NoReleaseHoldPreamble, v.conditionsWith(J5ConditionAfterRelease)))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// holdQuestion は前置きに、条件を 1 行ずつ並べた問い。
+func holdQuestion(preamble string, conds []string) string {
+	var b strings.Builder
+	b.WriteString(preamble)
+	for _, c := range conds {
+		b.WriteString("\n- " + c)
+	}
+	return b.String()
 }
 
 // j5OutputSchema は J5 の `--json-schema` に渡すスキーマ（§IF / API「判断点の出力」の J5 の行）。
@@ -57,6 +154,10 @@ func j5OutputSchema() []byte {
 	verdicts := make([]string, 0, len(J5VerdictValues))
 	for _, v := range J5VerdictValues {
 		verdicts = append(verdicts, string(v))
+	}
+	statuses := make([]string, 0, len(J5ConditionStatusValues))
+	for _, v := range J5ConditionStatusValues {
+		statuses = append(statuses, string(v))
 	}
 	schema := map[string]any{
 		"type": "object",
@@ -75,6 +176,19 @@ func j5OutputSchema() []byte {
 						"after": map[string]any{"type": "string"},
 					},
 					"required":             []string{"scene", "after"},
+					"additionalProperties": false,
+				},
+			},
+			"deferred_conditions": map[string]any{
+				"type":     []string{"array", "null"},
+				"maxItems": MaxJ5DeferredConditions,
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"condition": map[string]any{"type": "string"},
+						"status":    map[string]any{"type": "string", "enum": statuses},
+					},
+					"required":             []string{"condition", "status"},
 					"additionalProperties": false,
 				},
 			},
@@ -117,7 +231,37 @@ func validateJ5Output(data []byte) (*j5ValidatedOutput, bool) {
 		}
 		actual = n
 	}
-	return &j5ValidatedOutput{Verdict: verdict, Reason: *raw.Reason, Feedback: raw.Feedback, Question: raw.Question, Actual: actual}, true
+	deferred, ok := validateJ5DeferredConditions(raw.DeferredConditions)
+	if !ok {
+		return nil, false
+	}
+	return &j5ValidatedOutput{Verdict: verdict, Reason: *raw.Reason, Feedback: raw.Feedback, Question: raw.Question, Actual: actual, Deferred: deferred}, true
+}
+
+// validateJ5DeferredConditions は deferred_conditions を検査する。無い・null・0 個は nil。
+// 個数の上限超え・閉集合の外の区分・空白だけか長すぎる条件は ok=false。条件の前後の空白は除く。
+func validateJ5DeferredConditions(raw *[]j5RawDeferredCondition) ([]J5DeferredCondition, bool) {
+	if raw == nil || len(*raw) == 0 {
+		return nil, true
+	}
+	if len(*raw) > MaxJ5DeferredConditions {
+		return nil, false
+	}
+	out := make([]J5DeferredCondition, 0, len(*raw))
+	for _, d := range *raw {
+		st := J5ConditionStatus(d.Status)
+		switch st {
+		case J5ConditionAfterRelease, J5ConditionAfterHumanAction:
+		default:
+			return nil, false
+		}
+		c := strings.TrimSpace(d.Condition)
+		if c == "" || utf8.RuneCountInString(c) > maxJ5DeferredConditionRunes {
+			return nil, false
+		}
+		out = append(out, J5DeferredCondition{Condition: c, Status: st})
+	}
+	return out, true
 }
 
 // --- CI の判定規則 ---
@@ -333,7 +477,7 @@ func formatPullRequestSection(prs []UpstreamPullRequestChecks) string {
 // prepareJ5 は J5 の入力（データの区画）を組み立てる。取り込み元の対応のある課題では、ここ
 // （J5 の起動の直前）で上流の本文・全コメント・参照先を取得する（読んだ記録は付けない）。
 // 取得に失敗したら NotStarted（upstream_fetch_failed）を返し、run を作らない。
-func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context, prs []UpstreamPullRequestChecks, memoryIndex []JudgmentDataSection) ([]JudgmentDataSection, *NotStarted) {
+func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context, prs []UpstreamPullRequestChecks, headSections, memoryIndex []JudgmentDataSection) ([]JudgmentDataSection, *NotStarted) {
 	ch := vc.Challenge
 	urgency, priority := "", ""
 	if ch.Urgency != nil {
@@ -367,6 +511,7 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 		JudgmentDataSection{Label: "照合の結果", Content: formatReconciliationSection(vc)},
 		JudgmentDataSection{Label: "PR の状態とチェックの結果", Content: formatPullRequestSection(prs)},
 	)
+	sections = append(sections, headSections...)
 	if t := formatHoldsSection(vc.Holds); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "保留の記録", Content: t})
 	}
@@ -429,19 +574,24 @@ func selectJ5AutoTargets(ctx context.Context, tx *sql.Tx) (out []int64, excluded
 
 // applyJ5 は検査を通った出力を、M1 の verify（T8〜T10）へ経路 invoker・原因の run の ID つきで写す。
 // 写す直前に読み直した課題が検証中でなければ（遷移表に行が無い）写さず、mapped=false を返す。
+// held は met なのに完了確認待ちへ進めず保留（T10）へ置いたか（予想と実物の食い違い・人の操作の後でしか
+// 満たせない条件・本番反映が無くて満たせない条件）。
 //
 // vh は met のときに成果物の行へ残す検証の head（J5 の起動の前に取得して入力にしたもの）。
-func (s *Store) applyJ5(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, vh *j5VerifiedHeads) (mapped, mismatch bool, err error) {
+func (s *Store) applyJ5(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, vh *j5VerifiedHeads) (mapped, held bool, err error) {
 	// 操作は事前の読み取りで選ぶ。書き込みトランザクションの中で読み直した予想と判定がずれたら
 	// （間に edit が入った）、書かずに選び直す。
 	for attempt := 0; attempt < 3; attempt++ {
-		mapped, mismatch, err = s.applyJ5Once(ctx, runIDDisplay, challengeIDDisplay, v, vh)
+		mapped, held, err = s.applyJ5Once(ctx, runIDDisplay, challengeIDDisplay, v, vh)
 		if !errors.Is(err, errJ5StaleExpected) {
-			return mapped, mismatch, err
+			return mapped, held, err
 		}
 	}
 	return false, false, ErrConflict
 }
+
+// activityKeyVerifiedHeads は J5 の判定の作業ログの after に残す、検証した PR と head の一覧のキー。
+const activityKeyVerifiedHeads = "verified_heads"
 
 var errJ5StaleExpected = errors.New("core: expected changed while mapping J5")
 
@@ -450,6 +600,19 @@ var errJ5StaleExpected = errors.New("core: expected changed while mapping J5")
 type j5VerifiedHeads struct {
 	RunID int64
 	PRs   []UpstreamPullRequestChecks
+}
+
+// logEntries は作業ログの after に残す、検証した PR と head の一覧を返す。J5 が中身を読む対象
+// （readablePullRequests。open かマージ済みで head を持つ PR）だけを載せる。
+func (vh *j5VerifiedHeads) logEntries() []map[string]string {
+	if vh == nil {
+		return nil
+	}
+	var out []map[string]string
+	for _, pr := range readablePullRequests(vh.PRs) {
+		out = append(out, map[string]string{"pr": pr.URL, "head": pr.HeadSHA})
+	}
+	return out
 }
 
 // recordVerifiedHeads は vh.RunID の run の kind=pr の成果物の行のうち、(repo, 番号) が vh.PRs の
@@ -489,19 +652,39 @@ func j5ActualMismatch(v *j5ValidatedOutput, expected []StageExpected) bool {
 	return v.Verdict == J5VerdictMet && len(expected) > 0 && len(expected) != len(v.Actual)
 }
 
-func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, vh *j5VerifiedHeads) (mapped, mismatch bool, err error) {
-	op, mismatch, err := s.j5Operation(ctx, challengeIDDisplay, v)
+func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, vh *j5VerifiedHeads) (mapped, held bool, err error) {
+	rt, err := s.j5Operation(ctx, challengeIDDisplay, v)
 	if err != nil {
 		return false, false, err
 	}
+	op, mismatch, noRelease := rt.op, rt.mismatch, rt.noRelease
 	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, op, func(ctx context.Context, tc *transitionCtx) error {
 		if j5ActualMismatch(v, tc.current.Expected) != mismatch {
 			return errJ5StaleExpected
 		}
+		if v.checksPendingRelease() {
+			now, err := noPendingRelease(ctx, tc.tx, tc.id)
+			if err != nil {
+				return err
+			}
+			if now != noRelease {
+				return errJ5StaleExpected
+			}
+		}
 		mapped = true
+		// どの判定でも、検証した head を作業ログに残す（成果物の行へ残すのは met だけ）。
+		if heads := vh.logEntries(); len(heads) > 0 {
+			tc.after[activityKeyVerifiedHeads] = heads
+		}
 		if mismatch {
 			// 実物は課題へ書かない（前の値のまま）。
-			if err := insertHold(ctx, tc, ActualMismatchHoldPreamble+" "+v.Reason); err != nil {
+			q := ActualMismatchHoldPreamble + " " + v.Reason
+			if v.heldByDeferred(noRelease) {
+				// 人の操作の後でしか満たせない条件・本番反映が無くて満たせない条件も同じ保留で伝え、
+				// 回答の往復を 1 回で済ませる（#451・#466）。
+				q += "\n" + v.deferredHoldQuestion(noRelease)
+			}
+			if err := insertHold(ctx, tc, q); err != nil {
 				return err
 			}
 			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationUncertain)
@@ -512,6 +695,13 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 			}
 			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationUncertain)
 		}
+		if v.heldByDeferred(noRelease) {
+			// 残りが人の操作の後でしか満たせない条件を含む（#451）、または本番反映で満たされる見込みの条件だけが
+			// 残るのに待っている本番反映が無い（#466）: 完了確認待ちへ進めず、着手中にも戻さず（子を再起動しない）、
+			// 該当の条件を理由に書いた保留へ置く（T10）。回答すると検証中へ戻る（T12）。他の T10 と同じく
+			// 実物は課題へ書かず、失敗ではないので発生も作らない。
+			return insertHold(ctx, tc, v.deferredHoldQuestion(noRelease))
+		}
 		if v.Actual != nil && (v.Verdict == J5VerdictMet || v.Verdict == J5VerdictNotMet) {
 			tc.patchStages(StagePatch{Actual: StageSet(v.Actual)})
 		}
@@ -519,6 +709,10 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationNotMet)
 		}
 		if v.Verdict == J5VerdictMet {
+			// 本番反映で満たされる見込みの条件は、完了の承認の要約に出すため作業ログ（T8）へ残す。
+			if conds := v.conditionsWith(J5ConditionAfterRelease); len(conds) > 0 {
+				tc.after[activityKeyConditionsAfterRelease] = conds
+			}
 			// T8 と同じトランザクションで、検証の入力にした head を成果物の行へ残す。
 			return recordVerifiedHeads(ctx, tc.tx, vh)
 		}
@@ -530,7 +724,7 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 		}
 		return false, false, err
 	}
-	return mapped, mismatch, nil
+	return mapped, mismatch || v.heldByDeferred(noRelease), nil
 }
 
 // insertJ5Occurrence は J5 の写像（遷移）と同じトランザクションで、J5 の run を参照と原因の run
@@ -542,20 +736,47 @@ func (s *Store) insertJ5Occurrence(ctx context.Context, tc *transitionCtx, kind 
 	return s.insertRunOccurrence(ctx, tc.tx, *tc.runID, kind, OccurrenceOutcomeBad, tc.now)
 }
 
+// j5Route は出力を写す遷移の操作と、それを選んだ根拠（写す直前に読み直して照合する）。
+type j5Route struct {
+	op Operation
+	// mismatch は met で課題の予想が空でなく、実物の個数が予想の個数と違うこと。
+	mismatch bool
+	// noRelease は、本番反映で満たされる見込みの条件が残る met のとき（checksPendingRelease）に限り、
+	// 課題に待っている本番反映（未承認の release）が無いこと。それ以外は false。
+	noRelease bool
+}
+
+// noPendingRelease は課題 cid に待っている本番反映（state=pending の kind=release の不可逆操作）が
+// 1 件も無いか。
+func noPendingRelease(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) {
+	ops, err := loadOperations(ctx, tx, cid)
+	if err != nil {
+		return false, err
+	}
+	for _, op := range ops {
+		if op.State == OperationStatePending && op.Kind == OperationKindRelease {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // j5Operation は出力を写す遷移の操作を選ぶ。met で課題の予想が空でなく、実物の個数が予想の個数と
-// 違うときは、完了の確認へ進めず保留（T10）にする（mismatch=true）。予想は写す直前に読み直す。
-func (s *Store) j5Operation(ctx context.Context, challengeIDDisplay string, v *j5ValidatedOutput) (op Operation, mismatch bool, err error) {
+// 違うときは、完了の確認へ進めず保留（T10）にする（mismatch=true）。met で本番反映で満たされる見込みの
+// 条件が残り、待っている本番反映が無いときも保留にする（noRelease=true。#466）。予想と待っている本番反映は
+// 写す直前に読み直す。
+func (s *Store) j5Operation(ctx context.Context, challengeIDDisplay string, v *j5ValidatedOutput) (rt j5Route, err error) {
 	switch v.Verdict {
 	case J5VerdictMet:
-		op = OpVerifyMet
+		rt.op = OpVerifyMet
 	case J5VerdictNotMet:
-		return OpVerifyNotMet, false, nil
+		return j5Route{op: OpVerifyNotMet}, nil
 	default:
-		return OpVerifyUncertain, false, nil
+		return j5Route{op: OpVerifyUncertain}, nil
 	}
 	cid, ok := parseChallengeID(challengeIDDisplay)
 	if !ok {
-		return op, false, ErrNotFound
+		return rt, ErrNotFound
 	}
 	var expected []StageExpected
 	err = classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
@@ -564,15 +785,19 @@ func (s *Store) j5Operation(ctx context.Context, challengeIDDisplay string, v *j
 			return err
 		}
 		expected = ch.Expected
-		return nil
+		if v.checksPendingRelease() {
+			rt.noRelease, err = noPendingRelease(ctx, tx, cid)
+		}
+		return err
 	}))
 	if err != nil {
-		return op, false, err
+		return rt, err
 	}
-	if j5ActualMismatch(v, expected) {
-		return OpVerifyUncertain, true, nil
+	rt.mismatch = j5ActualMismatch(v, expected)
+	if rt.mismatch || v.heldByDeferred(rt.noRelease) {
+		rt.op = OpVerifyUncertain
 	}
-	return op, false, nil
+	return rt, nil
 }
 
 // finalizeJ5Output は run が succeeded のときに、出力を検査し直して課題へ写す。検査に落ちたら
@@ -585,7 +810,7 @@ func (s *Store) finalizeJ5Output(ctx context.Context, runIDDisplay, challengeIDD
 		}
 		return "", nil, RunResultInvalidOutput, nil
 	}
-	mapped, mismatch, err := s.applyJ5(ctx, runIDDisplay, challengeIDDisplay, v, vh)
+	mapped, held, err := s.applyJ5(ctx, runIDDisplay, challengeIDDisplay, v, vh)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -602,8 +827,9 @@ func (s *Store) finalizeJ5Output(ctx context.Context, runIDDisplay, challengeIDD
 		st = string(StatusAwaitingHuman)
 	}
 	outcome = string(v.Verdict)
-	if mismatch {
-		// met だが実物を予想の例ごとに確かめられなかった: uncertain の保留と同じ扱い（成功）。
+	if held {
+		// met だが完了確認待ちへ進めず保留に置いた（実物を予想の例ごとに確かめられなかった・人の操作の後で
+		// しか満たせない条件が残る・本番反映が無くて満たせない条件が残る）: uncertain の保留と同じ扱い（成功）。
 		outcome, st = string(J5VerdictUncertain), string(StatusAwaitingHuman)
 	}
 	return outcome, &st, RunResultSucceeded, nil
@@ -623,6 +849,13 @@ type J5AutoInput struct {
 	Upstream UpstreamThreadSource
 	// Checks は J5 の起動の前の PR のチェックの取得（PR の無い課題では呼ばれない）。
 	Checks UpstreamCheckSource
+	// Diffs は J5 の起動の前の PR の差分の取得（PR の無い課題では呼ばれない）。
+	Diffs UpstreamDiffSource
+	// HeadGit は PR の head を取り出す一時の worktree の口。
+	HeadGit HeadWorktreeGit
+	// Connectors は PR のリポジトリの元のクローンを引く宣言。nil なら PR の head を取り出さない
+	// （差分だけを渡す）。
+	Connectors *ConnectorsDeclaration
 	// CycleID はこの操作が属する周。空は ErrValidation。
 	CycleID string
 	// Cycle が非 nil なら枠超過の状態をこの JudgmentCycle と共有する。
@@ -638,7 +871,7 @@ type J5AutoInput struct {
 //     失敗は、課題を変えずに結果の NotStarted へ入れる。
 //   - in.ChallengeID が nil: 対象を順に処理し、起動しなかった課題を NotStarted へ入れる。
 func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAutoResult, error) {
-	if in.AgentDecl == nil || in.Invoker == nil || in.Upstream == nil || in.Checks == nil || in.CycleID == "" {
+	if in.AgentDecl == nil || in.Invoker == nil || in.Upstream == nil || in.Checks == nil || in.Diffs == nil || in.HeadGit == nil || in.CycleID == "" {
 		return nil, ErrValidation
 	}
 	if in.Cycle != nil && in.Cycle.cycleID != in.CycleID {
@@ -754,7 +987,12 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 		}
 		return nil, nil, err
 	}
-	sections, notStarted := prepareJ5(ctx, in.Upstream, vc, prs, memoryIndexSections(s.workspace, in.AgentDecl))
+	head, notStarted := s.prepareJ5Head(ctx, in, ch.ID, prs)
+	if notStarted != nil {
+		return nil, notStarted, nil
+	}
+	defer head.remove(ctx)
+	sections, notStarted := prepareJ5(ctx, in.Upstream, vc, prs, head.Sections, memoryIndexSections(s.workspace, in.AgentDecl))
 	if notStarted != nil {
 		return nil, notStarted, nil
 	}
@@ -769,6 +1007,7 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 		OutputSchema: j5OutputSchema(),
 		Invoker:      in.Invoker,
 		PlanVersion:  &planVersion,
+		WorkDir:      head.WorkDir,
 	}
 	var res *RunJudgmentResult
 	if jc != nil {

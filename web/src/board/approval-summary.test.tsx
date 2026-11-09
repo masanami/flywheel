@@ -16,6 +16,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// サーバが返す見出し（CLI の「--hold-release」と同じ文言。UI は本番反映を承認しない）
+const HELD_HEADING =
+  "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:";
+
 const APPROVAL = "/api/v1/workspaces/alpha/challenges/C-1/approval";
 
 function summary(over: Partial<ApprovalSummary>): {
@@ -24,6 +28,9 @@ function summary(over: Partial<ApprovalSummary>): {
   return {
     approval: {
       challenge_id: "C-1",
+      conditions_after_release: [],
+      conditions_after_release_heading: HELD_HEADING,
+      direct_completion: null,
       done_criteria: "完了条件",
       kind: "plan",
       other_pending_operations: [],
@@ -175,4 +182,74 @@ it("計画に論点を不要とした根拠の引用が無ければ、その節�
   expect(within(el).getByText(/## 完了条件/).tagName).toBe("PRE");
   expect(el.textContent).not.toContain("論点を不要とした根拠");
   expect(el.textContent).not.toContain("QUOTE-ONE");
+});
+
+it("親が直接行った完了の承認の要約: 完了条件の次に成果物の参照をリンクで示し、完了の検証を通っていないことを添える", async () => {
+  const el = await show(
+    summary({
+      kind: "completion",
+      plan: null,
+      done_criteria: "結果が Issue に書かれている",
+      direct_completion: {
+        artifacts: [
+          "https://github.com/o/r/issues/337#issuecomment-1",
+          "o/r#12",
+          "javascript:alert(1)",
+        ],
+        created_at: "2026-11-05T01:02:03.004Z",
+        note: "案 B を動かして確かめた",
+      },
+    }),
+  );
+  const block = within(el).getByTestId("direct-completion");
+  const link = within(block).getByRole("link", {
+    name: "https://github.com/o/r/issues/337#issuecomment-1",
+  });
+  expect(link).toHaveAttribute(
+    "href",
+    "https://github.com/o/r/issues/337#issuecomment-1",
+  );
+  expect(link).toHaveAttribute("target", "_blank");
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  // URL でない参照と javascript: はリンクにしない
+  expect(within(block).getAllByRole("link")).toHaveLength(1);
+  expect(within(block).getByText("o/r#12")).toBeInTheDocument();
+  expect(within(block).getByText("javascript:alert(1)")).toBeInTheDocument();
+  expect(block.textContent).toContain("案 B を動かして確かめた");
+  expect(block.textContent).toContain("完了の検証");
+  // 完了条件の後ろに並ぶ
+  const criteria = within(el).getByText("結果が Issue に書かれている");
+  expect(
+    criteria.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(within(el).getByRole("heading", { name: "完了条件" })).toBeTruthy();
+});
+
+it("通常の完了の承認の要約には、親が直接行った成果物の欄を出さない", async () => {
+  const el = await show(summary({ kind: "completion", plan: null }));
+  expect(within(el).queryByTestId("direct-completion")).toBeNull();
+});
+
+it("完了の承認の要約に、本番反映で満たされる見込みの条件を CLI と同じ見出しの一覧で示す（#466）", async () => {
+  const el = await show(
+    summary({
+      kind: "completion",
+      plan: null,
+      conditions_after_release: ["本番で画面に出る", "通知が届く"],
+    }),
+  );
+  const box = within(el).getByTestId("approval-conditions-after-release");
+  expect(within(box).getByText(HELD_HEADING)).toBeTruthy();
+  const items = within(box)
+    .getAllByRole("listitem")
+    .map((li) => li.textContent);
+  expect(items).toEqual(["本番で画面に出る", "通知が届く"]);
+});
+
+it("本番反映で満たされる見込みの条件が無ければ、見出しごと出さない（#466）", async () => {
+  const el = await show(summary({ kind: "completion", plan: null }));
+  expect(
+    within(el).queryByTestId("approval-conditions-after-release"),
+  ).toBeNull();
+  expect(within(el).queryByText(HELD_HEADING)).toBeNull();
 });

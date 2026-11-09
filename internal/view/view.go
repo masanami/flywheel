@@ -123,35 +123,49 @@ func FromPlans(ps []core.Plan) []PlanDetail {
 
 // Approval は承認の形。
 type Approval struct {
-	Actor          string   `json:"actor"`
-	Channel        string   `json:"channel"`
-	DecidedAt      string   `json:"decided_at"`
-	Decision       string   `json:"decision"`
-	Kind           string   `json:"kind"`
-	OperationID    *string  `json:"operation_id"`
-	Reason         *string  `json:"reason"`
-	RejectedFields []string `json:"rejected_fields" ts:"nullable"`
-	RelayQuote     *string  `json:"relay_quote"`
-	RelaySession   *string  `json:"relay_session"`
-	TargetVersion  int      `json:"target_version"`
-	Verification   string   `json:"verification"`
+	Actor     string `json:"actor"`
+	Channel   string `json:"channel"`
+	DecidedAt string `json:"decided_at"`
+	Decision  string `json:"decision"`
+	// ID は承認の行の ID（"AP-<n>"）。
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// MergeInVerifiedHead は release を「検証の head から既定ブランチを取り込んだだけ」と判定して承認したときの検証の head。
+	MergeInVerifiedHead *string  `json:"merge_in_verified_head"`
+	OperationID         *string  `json:"operation_id"`
+	Reason              *string  `json:"reason"`
+	RejectedFields      []string `json:"rejected_fields" ts:"nullable"`
+	RelayQuote          *string  `json:"relay_quote"`
+	RelaySession        *string  `json:"relay_session"`
+	// SupersededAt・SupersededReason・SupersededBy は、完了の承認が本番反映のやり直しで置き換えられた日時・理由
+	// （not_mergeable・limit_reached・content_changed）・置き換えた次の完了の承認の ID。有効な承認は null。
+	SupersededAt     *string `json:"superseded_at"`
+	SupersededBy     *string `json:"superseded_by"`
+	SupersededReason *string `json:"superseded_reason"`
+	TargetVersion    int     `json:"target_version"`
+	Verification     string  `json:"verification"`
 }
 
 // FromApproval は core.Approval を Approval へ変換する。
 func FromApproval(a core.Approval) Approval {
 	return Approval{
-		Actor:          a.Actor,
-		Channel:        a.Channel,
-		DecidedAt:      FormatTimestamp(a.DecidedAt),
-		Decision:       string(a.Decision),
-		Kind:           string(a.Kind),
-		OperationID:    a.OperationID,
-		Reason:         a.Reason,
-		RejectedFields: nilIfEmpty(a.RejectedFields),
-		RelayQuote:     a.RelayQuote,
-		RelaySession:   a.RelaySession,
-		TargetVersion:  a.TargetVersion,
-		Verification:   a.Verification,
+		Actor:               a.Actor,
+		Channel:             a.Channel,
+		DecidedAt:           FormatTimestamp(a.DecidedAt),
+		Decision:            string(a.Decision),
+		ID:                  a.ID,
+		Kind:                string(a.Kind),
+		MergeInVerifiedHead: a.MergeInVerifiedHead,
+		OperationID:         a.OperationID,
+		Reason:              a.Reason,
+		RejectedFields:      nilIfEmpty(a.RejectedFields),
+		RelayQuote:          a.RelayQuote,
+		RelaySession:        a.RelaySession,
+		SupersededAt:        optionalTimestamp(a.SupersededAt),
+		SupersededBy:        a.SupersededBy,
+		SupersededReason:    a.SupersededReason,
+		TargetVersion:       a.TargetVersion,
+		Verification:        a.Verification,
 	}
 }
 
@@ -174,11 +188,13 @@ type Hold struct {
 	ClosedAt             *string `json:"closed_at"`
 	FromStatus           string  `json:"from_status"`
 	FromStatusLabel      string  `json:"from_status_label"`
-	Question             string  `json:"question"`
-	RaisedAt             string  `json:"raised_at"`
-	RelayQuote           *string `json:"relay_quote"`
-	RelaySession         *string `json:"relay_session"`
-	RunID                *string `json:"run_id"`
+	// Kind は保留の種類（human＝人の対応を待つ・parent_direct＝親が直接行う）。
+	Kind         string  `json:"kind"`
+	Question     string  `json:"question"`
+	RaisedAt     string  `json:"raised_at"`
+	RelayQuote   *string `json:"relay_quote"`
+	RelaySession *string `json:"relay_session"`
+	RunID        *string `json:"run_id"`
 }
 
 // FromHold は core.Hold を Hold へ変換する。
@@ -193,6 +209,7 @@ func FromHold(h core.Hold) Hold {
 		ClosedAt:             ts(h.ClosedAt),
 		FromStatus:           string(h.FromStatus),
 		FromStatusLabel:      label,
+		Kind:                 string(h.Kind),
 		Question:             h.Question,
 		RaisedAt:             FormatTimestamp(h.RaisedAt),
 		RelayQuote:           h.RelayQuote,
@@ -210,10 +227,36 @@ func FromHolds(hs []core.Hold) []Hold {
 	return out
 }
 
+// DirectCompletion は親が直接行った完了の記録の形（成果物の参照は run を介さない）。
+type DirectCompletion struct {
+	// Artifacts は成果物の参照（URL・PR・Issue コメントなど）。1 件以上。
+	Artifacts []string `json:"artifacts"`
+	CreatedAt string   `json:"created_at"`
+	// Note は短い説明。無ければ null。
+	Note *string `json:"note"`
+}
+
+// FromDirectCompletion は core.DirectCompletion を DirectCompletion へ変換する。
+func FromDirectCompletion(d core.DirectCompletion) DirectCompletion {
+	return DirectCompletion{Artifacts: append([]string{}, d.Artifacts...), CreatedAt: FormatTimestamp(d.CreatedAt), Note: d.Note}
+}
+
+// FromDirectCompletions は親が直接行った完了の記録の一覧を変換する（空でも `[]`）。
+func FromDirectCompletions(ds []core.DirectCompletion) []DirectCompletion {
+	out := make([]DirectCompletion, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, FromDirectCompletion(d))
+	}
+	return out
+}
+
 // Operation は不可逆操作の形。
 type Operation struct {
-	ApprovedHead        *string `json:"approved_head"`
-	ChallengeID         string  `json:"challenge_id"`
+	ApprovedHead *string `json:"approved_head"`
+	ChallengeID  string  `json:"challenge_id"`
+	// ClosedAt・ClosedReason は state が closed の操作の、閉じた日時と理由（superseded・merged_outside・merged_unapproved）。
+	ClosedAt            *string `json:"closed_at"`
+	ClosedReason        *string `json:"closed_reason"`
 	ConsecutiveFailures int     `json:"consecutive_failures"`
 	CreatedAt           string  `json:"created_at"`
 	ExecutedAt          *string `json:"executed_at"`
@@ -224,8 +267,11 @@ type Operation struct {
 	Ref                 *string `json:"ref"`
 	State               string  `json:"state"`
 	Summary             string  `json:"summary"`
-	Version             int     `json:"version"`
-	WaitingSince        *string `json:"waiting_since"`
+	// SupersededBy はこの操作を置き換えた新しい操作の ID、Supersedes はこの操作が置き換えた古い操作の ID（本番反映のやり直し）。
+	SupersededBy *string `json:"superseded_by"`
+	Supersedes   *string `json:"supersedes"`
+	Version      int     `json:"version"`
+	WaitingSince *string `json:"waiting_since"`
 }
 
 // FromOperation は core.IrreversibleOperation を Operation へ変換する。
@@ -235,9 +281,16 @@ func FromOperation(op core.IrreversibleOperation) Operation {
 		v := string(*op.LastExecutionResult)
 		last = &v
 	}
+	var closedReason *string
+	if op.ClosedReason != nil {
+		v := string(*op.ClosedReason)
+		closedReason = &v
+	}
 	return Operation{
 		ApprovedHead:        op.ApprovedHead,
 		ChallengeID:         op.ChallengeID,
+		ClosedAt:            optionalTimestamp(op.ClosedAt),
+		ClosedReason:        closedReason,
 		ConsecutiveFailures: op.ConsecutiveFailures,
 		CreatedAt:           FormatTimestamp(op.CreatedAt),
 		ExecutedAt:          optionalTimestamp(op.ExecutedAt),
@@ -248,6 +301,8 @@ func FromOperation(op core.IrreversibleOperation) Operation {
 		Ref:                 op.Ref,
 		State:               string(op.State),
 		Summary:             op.Summary,
+		SupersededBy:        op.SupersededByOperationID,
+		Supersedes:          op.SupersedesOperationID,
 		Version:             op.Version,
 		WaitingSince:        optionalTimestamp(op.WaitingSince),
 	}
@@ -415,12 +470,17 @@ type ChallengeApprovalResponse struct {
 
 // ApprovedRelease は完了の承認で同時に承認した release 1 件と、承認の記録に残した head（完全形）。
 type ApprovedRelease struct {
-	HeadSHA     string `json:"head_sha"`
-	OperationID string `json:"operation_id"`
+	HeadSHA string `json:"head_sha"`
+	// MergeIn は、検証の head から「既定ブランチを取り込んだだけ（CI は通っている）」と判定して承認した release の評価
+	// （検証の head・今の head・後から入ったコミット・直した差分）。検証の head と一致した承認は出さない。
+	MergeIn     *HeadChange `json:"merge_in,omitempty"`
+	OperationID string      `json:"operation_id"`
 }
 
 // ExcludedRelease は完了の承認で同時には承認せず pending のまま残した release 1 件と、外した理由の名前。
 type ExcludedRelease struct {
+	// Detail は外した理由の根拠（検証の後に入った取り込み以外のコミット・判定できなかった理由・CI が通っていないこと）。無ければ出さない。
+	Detail      string `json:"detail,omitempty"`
 	OperationID string `json:"operation_id"`
 	Reason      string `json:"reason"`
 }
@@ -431,6 +491,12 @@ type ChallengeHoldResponse struct {
 	Hold      Hold      `json:"hold"`
 }
 
+// ChallengeDirectCompletionResponse は complete-direct の `{"challenge": …, "direct_completion": …}`。
+type ChallengeDirectCompletionResponse struct {
+	Challenge        Challenge        `json:"challenge"`
+	DirectCompletion DirectCompletion `json:"direct_completion"`
+}
+
 // OperationResponse は op add の `{"operation": …}`。
 type OperationResponse struct {
 	Operation Operation `json:"operation"`
@@ -438,8 +504,10 @@ type OperationResponse struct {
 
 // OperationApprovalResponse は操作の approve・reject の `{"approval": …, "operation": …}`。
 type OperationApprovalResponse struct {
-	Approval  Approval  `json:"approval"`
-	Operation Operation `json:"operation"`
+	Approval Approval `json:"approval"`
+	// MergeIn は release を「検証の head から既定ブランチを取り込んだだけ（CI は通っている）」と判定して承認したときの評価。
+	MergeIn   *HeadChange `json:"merge_in,omitempty"`
+	Operation Operation   `json:"operation"`
 }
 
 // ListResponse は `list` の `{"challenges": […]}`。
@@ -449,29 +517,35 @@ type ListResponse struct {
 
 // ShowResponse は `show` の成功の形。
 type ShowResponse struct {
-	Approvals     []Approval     `json:"approvals"`
-	Challenge     ShowChallenge  `json:"challenge"`
-	Holds         []Hold         `json:"holds"`
-	Operations    []Operation    `json:"operations"`
-	Pairs         []StagePair    `json:"pairs"`
-	Plans         []PlanDetail   `json:"plans"`
-	Runs          []Run          `json:"runs"`
-	SourceBinding *SourceBinding `json:"source_binding"`
-	Stages        Stages         `json:"stages"`
+	Approvals []Approval    `json:"approvals"`
+	Challenge ShowChallenge `json:"challenge"`
+	// DirectCompletions は親が直接行った完了の記録（古い順。無ければ []）。1 件以上あることが「親が直接行った」印。
+	DirectCompletions []DirectCompletion `json:"direct_completions"`
+	Holds             []Hold             `json:"holds"`
+	Operations        []Operation        `json:"operations"`
+	Pairs             []StagePair        `json:"pairs"`
+	Plans             []PlanDetail       `json:"plans"`
+	// ReleaseHeadChanges は承認待ちの release のうち、PR の head が J5 の検証の head から動いたものの評価
+	// （CLI の show だけが足す。GitHub を読めなかった release・head が動いていない release は載せない。無ければ出さない）。
+	ReleaseHeadChanges []ReleaseHeadChange `json:"release_head_changes,omitempty"`
+	Runs               []Run               `json:"runs"`
+	SourceBinding      *SourceBinding      `json:"source_binding"`
+	Stages             Stages              `json:"stages"`
 }
 
 // FromChallengeDetail は core.ChallengeDetail を ShowResponse へ変換する。
 func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 	return ShowResponse{
-		Approvals:     FromApprovals(d.Approvals),
-		Challenge:     FromShowChallenge(d),
-		Holds:         FromHolds(d.Holds),
-		Operations:    FromOperations(d.Operations),
-		Pairs:         FromPairs(core.Pairs(d.Expected, d.Actual)),
-		Plans:         FromPlans(d.Plans),
-		Runs:          FromRuns(d.Runs),
-		SourceBinding: FromSourceBinding(d.SourceBinding),
-		Stages:        FromStages(d.StageFields, d.IssuesAnswer),
+		Approvals:         FromApprovals(d.Approvals),
+		Challenge:         FromShowChallenge(d),
+		DirectCompletions: FromDirectCompletions(d.DirectCompletions),
+		Holds:             FromHolds(d.Holds),
+		Operations:        FromOperations(d.Operations),
+		Pairs:             FromPairs(core.Pairs(d.Expected, d.Actual)),
+		Plans:             FromPlans(d.Plans),
+		Runs:              FromRuns(d.Runs),
+		SourceBinding:     FromSourceBinding(d.SourceBinding),
+		Stages:            FromStages(d.StageFields, d.IssuesAnswer),
 	}
 }
 

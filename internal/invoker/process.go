@@ -31,12 +31,12 @@ type runResult struct {
 // 集め、timeout を超えたらプロセスグループごと SIGKILL してタイムアウト
 // 扱いにする（internal/adapters/github/run.go と同じ方式。プロセスグループに
 // することで孫プロセスも道連れに終了させる）。
-func runClaude(ctx context.Context, claudePath, workspace string, args []string, stdin []byte, timeout time.Duration, env []string) runResult {
+func runClaude(ctx context.Context, claudePath, workDir string, args []string, stdin []byte, timeout time.Duration, env []string) runResult {
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(cctx, claudePath, args...)
-	cmd.Dir = workspace
+	cmd.Dir = workDir
 	// env が nil なら親の環境をそのまま引き継ぐ（os/exec の既定）。委譲の起動だけが目印つきの環境を渡す。
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(stdin)

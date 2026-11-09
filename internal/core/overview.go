@@ -35,8 +35,12 @@ var actionableStatuses = []Status{
 // Overview は GetOverview の結果（`flywheel status` の3区分）。
 type Overview struct {
 	// NeedsHumanChallenges は計画承認待ち・完了確認待ち・人間対応待ちの課題
-	// （id 昇順）。
+	// （id 昇順）。人間対応待ちのうち、いま開いている保留の種類が親が直接行うの課題は
+	// ParentAgentChallenges へ分けて、ここには含めない。
 	NeedsHumanChallenges []Challenge
+	// ParentAgentChallenges は「親のエージェントが動く番」の課題（id 昇順）。状態は人間対応待ちのままで、
+	// いま開いている保留の種類が親が直接行う課題だけ（課題 #452。新しい状態は作らない）。
+	ParentAgentChallenges []Challenge
 	// NeedsHumanOperations は未承認（pending）の不可逆操作（id 昇順）。
 	NeedsHumanOperations []IrreversibleOperation
 	// ActionableChallenges は未分類・分類済・着手中・検証中の課題（id 昇順）。
@@ -388,7 +392,21 @@ func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*O
 		if err != nil {
 			return err
 		}
-		result.NeedsHumanChallenges = humanChallenges
+		parentAgent, err := listParentAgentChallenges(ctx, tx)
+		if err != nil {
+			return err
+		}
+		result.ParentAgentChallenges = parentAgent
+		inParentAgent := map[string]bool{}
+		for _, c := range parentAgent {
+			inParentAgent[c.ID] = true
+		}
+		result.NeedsHumanChallenges = make([]Challenge, 0, len(humanChallenges))
+		for _, c := range humanChallenges {
+			if !inParentAgent[c.ID] {
+				result.NeedsHumanChallenges = append(result.NeedsHumanChallenges, c)
+			}
+		}
 
 		actionable, err := listChallengesInStatuses(ctx, tx, actionableStatuses)
 		if err != nil {

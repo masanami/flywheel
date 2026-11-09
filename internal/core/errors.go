@@ -146,3 +146,33 @@ func (e *ReapprovalForbiddenError) Error() string {
 }
 
 func (e *ReapprovalForbiddenError) Unwrap() error { return ErrVerificationRejected }
+
+// bindRejectedError は bind・unbind が条件を満たさずに拒んだことを表す型。errors.Is(err,
+// ErrValidation) が真で（CLI は validation_failed へ写す）、拒んだ理由ごとに別の sentinel
+// （ErrAlreadyBound など）で区別できる。理由の詳細（課題の ID・Issue の表記）は
+// fmt.Errorf("%w: …", ErrAlreadyBound, …) で後ろへ足す。
+type bindRejectedError struct{ msg string }
+
+func (e *bindRejectedError) Error() string { return "core: " + e.msg }
+
+func (e *bindRejectedError) Unwrap() error { return ErrValidation }
+
+// bind・unbind が拒む理由（docs/features/m2-github-issue-ingest.md §課題と Issue の紐づけ）。
+// どれも何も書かずに終わる。
+var (
+	// ErrAlreadyBound は bind の対象の課題に、既に上流の Issue との対応があることを表す。
+	ErrAlreadyBound error = &bindRejectedError{"the challenge is already bound to an upstream issue"}
+	// ErrIssueBoundElsewhere は bind の対象の Issue が、ほかの課題に対応していることを表す。
+	ErrIssueBoundElsewhere error = &bindRejectedError{"the upstream issue is already bound to another challenge"}
+	// ErrRepoNotDeclared は bind の対象の Issue のリポジトリが、宣言（sources.json）のどの
+	// 取り込み元にも含まれないことを表す。
+	ErrRepoNotDeclared error = &bindRejectedError{"the issue's repository is not in any declared source"}
+	// ErrIssueNotOpen は bind の対象の Issue が open でないことを表す。
+	ErrIssueNotOpen error = &bindRejectedError{"the upstream issue is not open"}
+	// ErrNotBound は unbind の対象の課題に、上流の Issue との対応が無いことを表す。
+	ErrNotBound error = &bindRejectedError{"the challenge is not bound to an upstream issue"}
+)
+
+// ErrUpstreamFetchFailed は bind が上流から Issue を取得できなかった（404・移管以外の失敗）
+// ことを表す。CLI は upstream_unavailable へ写す。
+var ErrUpstreamFetchFailed = errors.New("core: could not fetch the upstream issue")

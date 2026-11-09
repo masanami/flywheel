@@ -167,6 +167,24 @@ M3 の J2 は、core の同じ公開 API で読んだ記録を付ける（§M3 �
 - [ ] 定期実行の仕組み（スケジューラ）は持たない。定期実行は cron などの外部から `flywheel ingest` を呼ぶ
 - [ ] `flywheel mark-read <C-ID> [--json]` は、ネットワークへ接続しない（`ingest` 以外のコマンドと同じ）
 
+### 課題と Issue の紐づけ（`bind`・`unbind`）【決定 2026-11-08 オーナー（flywheel#473）】
+
+取り込み元の Issue の無い課題（`flywheel create` や J6・J8 が作った課題）を、あとから GitHub Issue に紐づける `flywheel bind <C-ID> <owner/repo#番号>` と、外す `flywheel unbind <C-ID>` を足す。紐づけた課題は、取り込みで作った課題と同じく `ingest` が更新し、J2 が取り込み元の Issue を必要とする操作（`{issue_number}` を持つ操作）を選べる。
+
+- [ ] `bind` は次の 4 条件をすべて確かめ、1 つでも満たさなければ、理由の分かるエラーで拒み、何も記録しない: ① 課題に対応（`source_binding`）が無い ② Issue のリポジトリが宣言（`.flywheel/sources.json`）のいずれかの取り込み元の `repos` に含まれる（大文字小文字を区別しない。宣言の重複検査・close の確かめと同じ扱い） ③ Issue が `open`（上流から取得して確かめる） ④ その `external_key` がほかの課題に対応していない
+- [ ] 4 条件を通れば、対応の作成・作業ログ・課題の版の +1 を 1 つの書き込みトランザクションで記録する。作業ログの `before` に紐づける前の見出し（`title`）と説明（`description`）を残す。課題の見出し・説明はこの時点で置き換えない（次の取り込みに任せる）
+- [ ] 課題の状態（終端かどうか）と `origin` は制約しない・変えない（4 条件だけで判断する）
+- [ ] `bind` の上流の取得は書き込みトランザクションの外で行い、トランザクションの中で①④を読み直す（取り込みの 3 段階〔読む・取得・読み直して書く〕と同じ）。①と②は上流へ接続する前にも確かめ、満たさなければ接続しない
+- [ ] `external_key` には、上流の応答の正規の表記（大文字小文字）を使う。④もその表記で判定する
+- [ ] `unbind` は、対応のある課題だけを対象にする（無ければ拒む）。対応の削除・作業ログ・課題の版の +1 を 1 つの書き込みトランザクションで記録する。課題の見出し・説明・親子・依存は変えず、上流へは接続しない
+- [ ] どちらも承認を要さず、`--relayed` も端末での本人確認も持たない（`dep add`・`edit` と同じ扱い。本人確認の方式は `none`）
+- [ ] `unbind` の後の `ingest` は、その Issue を「対応の無い Issue」として扱う。宣言のポリシーに合えば新しい課題として作る（元の課題とは別。元の課題は変わらない）
+- [ ] 範囲外: Issue の起票・閉じた Issue の許可・承認の口・即時の見出し置換・GitHub 以外の取り込み元・他リポジトリ
+
+`bind` が記録する対応は、取り込みで課題を作ったときと同じ値で作る【仮定】。`source_id` は Issue のリポジトリを含む宣言の取り込み元の `id`（複数あれば宣言の順で最初）、`url` は Issue の URL、`upstream_state` は `open`、観測値は取得した Issue の値、読んだ時点のコメント数は 0・読んだ時点の更新日時は観測値と同じ、`policy_state` は `in_policy`（次の取り込みが `self_assignees` を解決できた回に再判定される）。
+
+`fingerprint` は、どの本文の fingerprint とも一致しない版 2 の値 `2:bound` を記録する【仮定】。`bind` は見出しを置き換えないので、このままだと次の取り込みで本文の fingerprint が記録と一致して `unchanged` となり、見出し・説明・緊急度が上流の値に置き換わらない（本文が課題の説明と同じだと見出しだけが食い違ったまま残る）。`2:bound` は版の接頭辞が `2:` なので `fingerprint_unknown_version` にはならず、次の取り込みは必ず `updated` になって、見出し・説明・緊急度と fingerprint が上流の値になる。
+
 ## 非機能要件
 
 - **LLM**: M2 は LLM を呼ばない（設計書 §17）。
@@ -324,6 +342,8 @@ M3 の J2 は、core の同じ公開 API で読んだ記録を付ける（§M3 �
 |---|---|---|
 | `flywheel ingest [--source <id>]` | 取り込み（作成・更新・上流の状態・ポリシーの状態・観測値の反映） | — |
 | `flywheel mark-read <C-ID>` | 上流を読んだ記録を付ける（読んだ時点の値を現在の観測値で上書きする。上流は取り直さない）【決定 2026-09-26 オーナー QH13】 | —（`none`） |
+| `flywheel bind <C-ID> <owner/repo#番号>` | 取り込み元の Issue の無い課題を、`open` の GitHub Issue に紐づける（§課題と Issue の紐づけ）【決定 2026-11-08 オーナー（flywheel#473）】 | —（`none`） |
+| `flywheel unbind <C-ID>` | 紐づけを外す。上流へは接続しない | —（`none`） |
 
 共通フラグ（`--workspace`・`--json`）は M1 と同じ。`--dry-run` は S2。
 
@@ -363,6 +383,7 @@ M1 §成功時の JSON 出力の規約に従う（包みなし・snake_case・�
 - `status`: `needs_human` に `discrepancies`（配列）を足す。要素は `{"challenge_id", "kinds"}`。`kinds` は `upstream_closed | upstream_missing | out_of_policy | upstream_commented | upstream_updated` の部分集合（空でない。配列の中の順はこの列挙の順【仮定】）。`upstream_commented`・`upstream_updated` は 2026-09-26 にオーナー QH10 で足した。`challenge_id` の昇順。
 - `show`: 最上位に `source_binding` を足す。対応があれば `{"source_id", "external_key", "url", "fingerprint", "upstream_state", "policy_state", "comments_count", "upstream_updated_at", "read_comments_count", "read_upstream_updated_at", "created_at", "updated_at"}`、無ければ `null`。`upstream_updated_at`・`read_upstream_updated_at` は未設定なら `null`（§クリティカル設計決定 1）。
 - `mark-read` の `--json`: `{"challenge_id", "changed", "source_binding"}`。`changed` は読んだ時点の値を変えたか（読んだ時点の値が観測値とすべて同じなら `false`。2026-09-27 オーナー決定）、`source_binding` は操作後の `show` と同じ形【仮定】。
+- `bind`・`unbind` の `--json` の成功の出力は `{"challenge": {…}}` とし、M1 の `edit` と同じ形にする（`challenge` の要素は M1 の課題の形。`version` は紐づけ・外した後の版）【仮定】。
 - M1 の `internal/cli/jsondoc_test.go`（全コマンドの成功出力の形の照合）に、`ingest`・`mark-read` と上の拡張を足す。
 
 #### 作業ログ【決定 2026-09-24 親 QP6】
@@ -375,6 +396,8 @@ M1 §成功時の JSON 出力の規約に従う（包みなし・snake_case・�
 | `policy_state_change` | ポリシーの状態が変わった | `policy_state`。`after` は `version` を含む |
 | `upstream_observation_change` | 観測値が変わった（fingerprint が一致していても）【決定 2026-09-26 オーナー QH12】 | 変わった `comments_count`・`upstream_updated_at`（未設定から値を得たら `before` に `null`。`0003` の前に作られた対応が初めて観測値を得たときは `read_upstream_updated_at` も含む＝§クリティカル設計決定 1。この場合 `upstream_read` は記録しない）。`after` は `version` を含む |
 | `upstream_read` | `mark-read` で読んだ時点の値を変えた【決定 2026-09-26 オーナー QH12・QH13】 | 変わった `read_comments_count`・`read_upstream_updated_at`。`after` は `version` を含む。経路 `cli`・本人確認の方式 `none` |
+| `bind` | `bind` で課題を Issue に紐づけた【決定 2026-11-08 オーナー（flywheel#473）】 | `before` は紐づける前の `title`・`description`。`after` は `external_key`・`source_id`・`url`・`version`。経路 `cli`・本人確認の方式 `none` |
+| `unbind` | `unbind` で紐づけを外した | `before` は外した対応の `external_key`・`source_id`・`url`・`fingerprint`・`upstream_state`・`policy_state`。`after` は `version`。経路 `cli`・本人確認の方式 `none` |
 
 - `before` に `version` を載せない・未設定から値を得た課題の列は `null` で載せる、は M1 の H14・H16 に従う。
 - `ingest_create` の `after` には観測値を載せない（作成時の観測値は `show` で読める）【仮定】。`0003` の前に作られた対応が初めて観測値を得て、読んだ時点の更新日時も同時に埋まる場合（§クリティカル設計決定 1）は、`upstream_observation_change` の `before`・`after` に `read_upstream_updated_at` も含める【仮定】。
@@ -388,9 +411,11 @@ M1 のエラーコードの表（閉集合）に次を足す。
 |---|---|---|
 | `config_not_found` | 2 | 取り込み元の宣言ファイルが無い |
 | `config_invalid` | 2 | 取り込み元の宣言が規則に反する（解釈できない JSON を含む） |
-| `upstream_unavailable` | 2 | 上流へ接続する手段（`gh`）が無い（この経路の終了コードは 2。M4.5 の承認の ① の経路だけ 1） |
+| `upstream_unavailable` | 2 | 上流へ接続する手段（`gh`）が無い（この経路の終了コードは 2。M4.5 の承認の ① の経路だけ 1）。`bind` が上流から Issue を取得できなかった場合（404・410・移管を除く）も同じコード・終了コード 2 |
 
 `--source` に宣言に無い id を指定したときは M1 の `validation_failed`（終了コード 1）。`mark-read` は M1 の `not_found`・`validation_failed`・`terminal_state` を使い、エラーコードを足さない。
+
+`bind`・`unbind` もエラーコードを足さない【仮定】。拒む理由（課題に既に対応がある・Issue がほかの課題に対応している・リポジトリが宣言に無い・Issue が `open` でない・Issue が見つからない〔404・410〕・移管された・`unbind` の対象に対応が無い・`<owner/repo#番号>` の形が不正）は `validation_failed`（終了コード 1）で、メッセージで区別できる。課題の ID の形が不正・課題が無いときは `not_found`。Issue の取得が 404・410・移管以外で失敗したときは `upstream_unavailable`（終了コード 2。`gh` が無い場合と同じコードで、上流へ接続できなかったことを表す）。`gh` が無い・宣言が無い・壊れているときは `ingest` と同じ（`upstream_unavailable`・`config_not_found`・`config_invalid`。いずれもストアを変えない）。
 
 ### データモデル
 
@@ -670,6 +695,26 @@ M2 では決めず、M3 の設計への入力として記録する（flywheel#65
 - [ ] adapter の `GetIssue` は、応答が要求と別のリポジトリのとき、404・410（`ErrUpstreamIssueNotFound`）とは `errors.Is` で区別できる別の値（`ErrUpstreamIssueTransferred`）を返す
 - [ ] 応答が要求と同じリポジトリで番号だけ違うときは、`GetIssue` は `ErrUpstreamIssueTransferred`・`ErrUpstreamIssueNotFound` のどちらも返さない（移管でも見つからないのでもない、それ以外の失敗のまま）
 
+### 課題と Issue の紐づけ（2026-11-08 追加。既存の序数を保つため末尾に置く）
+
+- [ ] `bind` は、対応の無い課題と、宣言の取り込み元のリポジトリの `open` な Issue について、対応・作業ログ・課題の版の +1 を記録する。作業ログ（`action=bind`）の `before` に紐づける前の `title`・`description` を、`after` に `external_key`・`version` を含み、課題の見出し・説明は変わらない
+- [ ] `bind` は、課題に既に対応がある／Issue がほかの課題に対応している／Issue のリポジトリが宣言のどの取り込み元にも無い／Issue が `open` でない、のそれぞれで拒み、対応・作業ログ・課題の版のいずれも変えない。4 つの拒否はメッセージで区別でき、いずれも `validation_failed` である
+- [ ] `bind` は、Issue が見つからない（404・410）・移管された場合も `validation_failed` で、取得がそれ以外で失敗した場合は `upstream_unavailable` で拒み、何も記録しない
+- [ ] `bind` のリポジトリの照合は大文字小文字を区別せず、`external_key` は上流の応答の表記で記録する。別の表記で書いても、すでにほかの課題に対応している Issue は拒まれる
+- [ ] 取得の後に、同じ Issue がほかの課題に対応した場合・同じ課題に別の対応ができた場合も、書き込みトランザクションの中の読み直しで拒み、何も記録しない
+- [ ] 課題に対応がある場合・リポジトリが宣言に無い場合は、上流へ接続しない
+- [ ] `bind` は、Pull Request の番号を Issue として紐づけない（上流の取得が「見つからない」を返し、`validation_failed` で拒む）
+- [ ] `bind` した課題への次の `ingest` は、新しい課題を作らず `updated` となり、課題の見出し・説明・緊急度が上流の値になり、対応の `fingerprint` が上流の本文の fingerprint になる。その次の `ingest` は `unchanged` である（課題が終端の状態なら、次の `ingest` は `skipped_done` で、対応は `2:bound` のまま残る）
+- [ ] `bind` した課題では、J2 の入力の「この課題では選べない」の注記が付かず、取り込み元の差し込みを持つ操作を選んだ計画が登録される。`bind` の前は同じ出力が検査で落ちる
+- [ ] `bind` は、終端の状態の課題にも、`origin` が `manual` の課題にも使え、状態・`origin` を変えない
+- [ ] `unbind` は、対応の削除・作業ログ（`action=unbind`。`before` に外した対応の `external_key` 等、`after` に `version`）・課題の版の +1 を記録し、見出し・説明・状態は変わらない
+- [ ] `unbind` は、対応の無い課題を `validation_failed` で、無い課題・形の不正な ID を `not_found` で拒み、何も記録しない
+- [ ] `unbind` の後の `ingest` は、その Issue がポリシーに合えば新しい課題を作り（`created`）、元の課題は変わらない。外した Issue は、別の課題に `bind` できる
+- [ ] `unbind` は課題の親子（`challenge_parent`）に触れず、その後の `ingest`（親子の同期を含む）は失敗しない。`export`・`import` は `bind`・`unbind` の後のストアを往復できる
+- [ ] `bind`・`unbind` は承認を作らず、`--relayed` を受け付けない（`usage_error`）。作業ログの本人確認の方式は `none`、経路は `cli`
+- [ ] `bind`・`unbind` の `--json` の成功の出力は `{"challenge": {…}}` である（`internal/cli/jsondoc_test.go` の形の照合に足す）
+- [ ] 偽の `gh` を使った CLI のテストで、`bind`・`unbind` の成功と、拒否のエラーコード（`validation_failed`・`not_found`・`usage_error`・`upstream_unavailable`・`config_not_found`・`config_invalid`）を検証する
+
 ## 決定事項の記録
 
 > 2026-09-24 に 18 件すべてが案 A で決まった。`QH` は人間（オーナー）が決めた論点、`QP` は親が決めた論点。M1 の番号（H1〜H17・PD1〜PD7・A1〜A2）とは別の系列である。
@@ -716,6 +761,14 @@ QH8〜QH11 は #65 の「オーナーに決めてほしいこと」Q1〜Q4、QH1
 | QP9 | 親・2026-09-24 | 完了した課題に対応する Issue の扱い | A: 何も変えない（人間記入欄・上流の状態とも）／B: 上流の状態だけは更新する | **A**。M1 は完了した課題を変えない（`terminal_state`）。完了した課題の上流の状態は食い違いの判定に使わない |
 | QP10 | 親・2026-09-24 | パッケージの構成 | A: `internal/adapters/github` を新設し、規則は core に置く／B: `internal/core` の中に GitHub の取得を置く | **A**。設計書 §15 の構成（`internal/adapters/`）と §13 の「adapter は core の語彙だけに依存させる」に沿う。パッケージ名は `github`（設計書 §15 の例示 `github-issue` を、宣言の `type` の値と区別するために短くした）。`CLAUDE.md` のパッケージの表は実装チケットで更新する |
 | QP11 | 親・2026-09-24 | 異なる緊急度へ写るラベルを複数持つ Issue の緊急度 | A: 未設定にする／B: 高い方を採る | **A**。決められないときに推測で埋めない（現行の「推測で埋めない」） |
+
+### 2026-11-08 の追加（flywheel#473 の `bind`・`unbind`）
+
+| # | 決めた人・日付 | 論点 | 採った案（理由） |
+|---|---|---|---|
+| QH16 | オーナー・2026-11-08 | 取り込み元の Issue の無い課題を、あとから Issue に紐づける・外す | `bind`・`unbind` を足す。条件は ① 課題に対応が無い ② Issue のリポジトリが宣言にある ③ Issue が `open` ④ その Issue がほかの課題に対応していない。承認も本人確認も要らない（`dep add`・`edit` と同じ）。課題の見出し・説明は `bind` の時点では置き換えず、次の取り込みに任せる。範囲外は Issue の起票・閉じた Issue の許可・承認の口・即時の見出し置換・GitHub 以外・他リポジトリ（理由: J6・J8・`create` が作った課題は取り込み元の Issue を持たず、J2 が `{issue_number}` を持つ操作を選べない。紐づけられれば既存の取り込み・計画の経路がそのまま使える） |
+| QH17 | 呼び出し元・2026-11-08 | `bind` が記録する `fingerprint` | `2:bound`（どの本文の fingerprint とも一致しない版 2 の値）。実装の仮定（§課題と Issue の紐づけ）。取り込み済みの課題と同じく「次の取り込みで上流の値に置き換える」を確実にする。案: 取得した本文の fingerprint を記録する→次の取り込みは `unchanged` になり、本文が課題の説明と同じだと見出しが置き換わらず、`bind` の目的〔取り込んだ課題と同じ状態にする〕と食い違う |
+| QH18 | 呼び出し元・2026-11-08 | `unbind` の後の取り込み | ふるまいを変えない: その Issue は対応の無い Issue として扱われ、宣言のポリシーに合えば新しい課題になる（元の課題とは別）。元の課題を再び取り込み対象にする経路は持たない（`bind` し直せる） |
 
 ### 起草者の仮定（軽微・可逆）
 

@@ -102,8 +102,8 @@ func TestChallengeGraph_WithdrawnIsItsOwnCategory(t *testing.T) {
 	}
 }
 
-func TestGraphCategoryValues_IsTheFiveCategoriesInOrder(t *testing.T) {
-	want := []GraphCategory{GraphCategoryHuman, GraphCategoryExternal, GraphCategoryDone, GraphCategoryWithdrawn, GraphCategorySystem}
+func TestGraphCategoryValues_IsTheSixCategoriesInOrder(t *testing.T) {
+	want := []GraphCategory{GraphCategoryHuman, GraphCategoryExternal, GraphCategoryParentAgent, GraphCategoryDone, GraphCategoryWithdrawn, GraphCategorySystem}
 	if got := GraphCategoryValues(); !reflect.DeepEqual(got, want) {
 		t.Errorf("GraphCategoryValues = %v, want %v", got, want)
 	}
@@ -335,4 +335,96 @@ func dumpTablesForGraph(t *testing.T, s *Store) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func insertConflictForTest(t *testing.T, s *Store, challenge, with int64, directed bool) {
+	t.Helper()
+	d := 0
+	if directed {
+		d = 1
+	}
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO challenge_conflict (challenge_id, conflicts_with_id, directed, created_at) VALUES (?, ?, ?, '2026-11-05T01:02:03.000Z')`,
+			challenge, with, d)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 衝突は kind=conflict の辺で返す。向きのある組は from＝後回しにした課題・to＝先に委譲した課題（後回し → 先に委譲）で
+// directed=true、向きの無い組は directed=false（from は ID の小さい側）。satisfied は常に false、
+// registered_via は prediction、registered_at は challenge_conflict.created_at。前提の辺は directed=true。
+func TestChallengeGraph_ConflictEdgesCarryDirectionAndPredictionRegistration(t *testing.T) {
+	s, _ := graphStore(t, StatusInProgress, StatusClassified, StatusClassified, StatusClassified)
+	insertDepEdge(t, s, 4, 1)
+	insertConflictForTest(t, s, 2, 1, true)  // C-2 を後回しにして C-1 を先に委譲した
+	insertConflictForTest(t, s, 3, 4, false) // どちらもまだ委譲していない
+	g := mustGraph(t, s)
+
+	type key struct {
+		from, to string
+		kind     GraphEdgeKind
+	}
+	var got []GraphEdge
+	var order []key
+	for _, e := range g.Edges {
+		got = append(got, e)
+		order = append(order, key{e.From, e.To, e.Kind})
+	}
+	want := []key{
+		{"C-1", "C-4", GraphEdgePrerequisite},
+		{"C-2", "C-1", GraphEdgeConflict},
+		{"C-3", "C-4", GraphEdgeConflict},
+	}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("edges = %+v, want order %v", g.Edges, want)
+	}
+	if !got[0].Directed {
+		t.Errorf("prerequisite edge = %+v, want directed", got[0])
+	}
+	directed := got[1]
+	if !directed.Directed || directed.Satisfied || directed.RegisteredVia != GraphRegisteredViaPrediction || directed.RegisteredAt != "2026-11-05T01:02:03.000Z" {
+		t.Errorf("directed conflict edge = %+v", directed)
+	}
+	undirected := got[2]
+	if undirected.Directed || undirected.Satisfied || undirected.RegisteredVia != GraphRegisteredViaPrediction {
+		t.Errorf("undirected conflict edge = %+v", undirected)
+	}
+}
+
+// 片方が完了・取り下げになった衝突は返さない（行は残る）。
+func TestChallengeGraph_ConflictEdgesWithAFinishedChallengeAreNotReturned(t *testing.T) {
+	s, _ := graphStore(t, StatusDone, StatusClassified, StatusWithdrawn, StatusClassified, StatusClassified)
+	insertConflictForTest(t, s, 2, 1, true)  // 先に委譲した側が完了
+	insertConflictForTest(t, s, 3, 4, true)  // 後回しにした側が取り下げ
+	insertConflictForTest(t, s, 2, 5, false) // 両方とも終わっていない
+	g := mustGraph(t, s)
+	if len(g.Edges) != 1 || g.Edges[0].From != "C-2" || g.Edges[0].To != "C-5" || g.Edges[0].Directed {
+		t.Fatalf("edges = %+v, want only the unfinished pair C-2/C-5", g.Edges)
+	}
+	if n := len(conflictRowsForTest(t, s)); n != 3 {
+		t.Errorf("conflict rows = %d, want all 3 kept", n)
+	}
+}
+
+// 衝突の行は前提の依存の辺（satisfied・登録の経路）に影響しない。
+func TestChallengeGraph_ConflictRowsDoNotChangePrerequisiteEdges(t *testing.T) {
+	s, _ := graphStore(t, StatusInProgress, StatusClassified)
+	insertDepEdge(t, s, 2, 1)
+	before := mustGraph(t, s)
+	insertConflictForTest(t, s, 2, 1, true)
+	after := mustGraph(t, s)
+	if len(before.Edges) != 1 || len(after.Edges) != 2 {
+		t.Fatalf("edges before %+v, after %+v", before.Edges, after.Edges)
+	}
+	var prereq []GraphEdge
+	for _, e := range after.Edges {
+		if e.Kind == GraphEdgePrerequisite {
+			prereq = append(prereq, e)
+		}
+	}
+	if !reflect.DeepEqual(prereq, before.Edges) {
+		t.Errorf("prerequisite edges changed: before %+v, after %+v", before.Edges, prereq)
+	}
 }

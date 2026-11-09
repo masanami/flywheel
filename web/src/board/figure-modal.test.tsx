@@ -50,6 +50,7 @@ function detail(figure: string | null): ShowCardResponse {
       urgency: null,
       version: 1,
     },
+    direct_completions: [],
     holds: [],
     operations: [],
     plans: [],
@@ -64,6 +65,7 @@ function detail(figure: string | null): ShowCardResponse {
       issues_answer: null,
       non_goals: null,
     },
+    waiting: { conflicts: [], prerequisites: [] },
   };
 }
 

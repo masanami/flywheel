@@ -110,6 +110,11 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	"hold": {setup: func(t *testing.T, ws string) []string {
 		return []string{"hold", createWithStatusForCase(t, ws, "verifying"), "--question", "q"}
 	}},
+	"complete-direct": {setup: func(t *testing.T, ws string) []string {
+		id := createWithStatusForCase(t, ws, "classified")
+		runJSON(t, ws, "hold", id, "--question", "q", "--kind", "parent_direct")
+		return []string{"complete-direct", id, "--artifact", "https://example.com/1", "--note", "n"}
+	}},
 	"answer": {needsTTY: true, setup: func(t *testing.T, ws string) []string {
 		id := createWithStatusForCase(t, ws, "verifying")
 		runJSON(t, ws, "verify", id, "--result", "uncertain", "--question", "q")
@@ -146,6 +151,16 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		dep := createForCase(t, ws)
 		runJSON(t, ws, "dep", "add", id, dep)
 		return []string{"dep", "rm", id, dep}
+	}},
+	"bind": {setup: func(t *testing.T, ws string) []string {
+		prepareBindCase(t, ws)
+		return []string{"bind", createForCase(t, ws), "example-owner/example-repo#1"}
+	}},
+	"unbind": {setup: func(t *testing.T, ws string) []string {
+		prepareBindCase(t, ws)
+		id := createForCase(t, ws)
+		runJSON(t, ws, "bind", id, "example-owner/example-repo#1")
+		return []string{"unbind", id}
 	}},
 	"status": {setup: func(t *testing.T, ws string) []string {
 		createForCase(t, ws)

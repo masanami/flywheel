@@ -48,6 +48,7 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
       urgency: null,
       version: 1,
     },
+    direct_completions: [],
     holds: [],
     operations: [],
     plans: [],
@@ -62,6 +63,7 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
       issues_answer: null,
       non_goals: null,
     },
+    waiting: { conflicts: [], prerequisites: [] },
   };
   return { ...base, ...over };
 }
@@ -139,6 +141,7 @@ it("取り下げで回答なしに閉じた保留は、開いている保留と�
         relay_session: null,
         from_status: "in_progress",
         from_status_label: "着手中",
+        kind: "human",
         question: "閉じた問い",
         raised_at: "t0",
         run_id: null,
@@ -166,12 +169,17 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
         channel: "tty",
         decided_at: "2026-01-02T00:00:00Z",
         decision: "rejected",
+        id: "AP-1",
         kind: "plan",
+        merge_in_verified_head: null,
         operation_id: null,
         reason: "差し戻しの理由",
         rejected_fields: null,
         relay_quote: null,
         relay_session: null,
+        superseded_at: null,
+        superseded_by: null,
+        superseded_reason: null,
         target_version: 1,
         verification: "tty",
       },
@@ -188,6 +196,7 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
         relay_session: null,
         from_status: "in_progress",
         from_status_label: "着手中",
+        kind: "human",
         question: "保留の問い",
         raised_at: "t0",
         run_id: null,
@@ -197,6 +206,8 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
       {
         approved_head: null,
         challenge_id: "C-1",
+        closed_at: null,
+        closed_reason: null,
         consecutive_failures: 0,
         created_at: "t",
         executed_at: null,
@@ -207,6 +218,8 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
         ref: null,
         state: "pending",
         summary: "不可逆の要約",
+        superseded_by: null,
+        supersedes: null,
         version: 1,
         waiting_since: null,
       },
@@ -273,6 +286,7 @@ it("AC-119: 外部由来の文字列は文字として出し、script 要素と 
         relay_session: null,
         from_status: "in_progress",
         from_status_label: "",
+        kind: "human",
         question: XSS,
         raised_at: "t0",
         run_id: null,
@@ -338,12 +352,17 @@ it("AC-113: 承認と差し戻しのそれぞれの記録が詳細に出る", as
     channel: "tty",
     decided_at: at,
     decision,
+    id: "AP-1",
     kind: "plan",
+    merge_in_verified_head: null,
     operation_id: null,
     reason,
     rejected_fields: null,
     relay_quote: null,
     relay_session: null,
+    superseded_at: null,
+    superseded_by: null,
+    superseded_reason: null,
     target_version: 1,
     verification: "tty",
   });
@@ -427,4 +446,170 @@ it("M4.5 AC-196: 依存先が無い課題では欄を出さない", async () => 
   const content = await openDetail();
   await within(content).findByText("計画（0）");
   expect(within(content).queryByTestId("dependencies")).toBeNull();
+});
+
+// --- 待っている理由（ボードから開いた詳細。API の waiting） ---
+
+const waitingOf = (
+  prerequisites: { id: string; status: string }[],
+  conflicts: { id: string; status: string }[],
+) => {
+  const w = (x: { id: string; status: string }) => ({
+    challenge_id: x.id,
+    status: x.status,
+    title: `題名${x.id}`,
+  });
+  return { conflicts: conflicts.map(w), prerequisites: prerequisites.map(w) };
+};
+
+it("待っている理由: まだ終わっていない前提の課題と、衝突のため後回しにした相手が、別の行で出る", async () => {
+  installFakes(
+    bodies(
+      show({
+        waiting: waitingOf(
+          [
+            { id: "C-5", status: "in_progress" },
+            { id: "C-7", status: "classified" },
+          ],
+          [{ id: "C-408", status: "in_progress" }],
+        ),
+      }),
+    ),
+  );
+  const content = await openDetail();
+  const sec = await within(content).findByRole("region", {
+    name: "待っている理由",
+    hidden: true,
+  });
+  const rows = [...sec.querySelectorAll("li")];
+  expect(rows.map((li) => [li.dataset.basis, li.dataset.from])).toEqual([
+    ["prerequisite", "C-5"],
+    ["prerequisite", "C-7"],
+    ["conflict", "C-408"],
+  ]);
+  // 前提の行: 題名と相手の状態・種類
+  expect(rows[0]?.textContent).toContain("題名C-5");
+  expect(rows[0]?.textContent).toContain("（着手中）");
+  expect(rows[0]?.textContent).toContain("終わらないと始められない");
+  // 衝突の行は別の行で「衝突のため後回し: C-xx」。前提の行には混ざらない
+  expect(rows[2]?.textContent).toContain("衝突のため後回し: C-408");
+  expect(rows[2]?.textContent).toContain("題名C-408");
+  expect(rows[0]?.textContent).not.toContain("衝突のため後回し");
+  // 「課題」の節の後ろ（計画などの節の前）に出る
+  const join = within(content).getByTestId("ledger-join");
+  expect(
+    join.compareDocumentPosition(sec) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+it("待っている理由: 衝突だけのときは衝突の行だけ、前提だけのときは前提の行だけ。どちらも無ければ節ごと出さない", async () => {
+  installFakes(
+    bodies(
+      show({ waiting: waitingOf([], [{ id: "C-408", status: "verifying" }]) }),
+    ),
+  );
+  let content = await openDetail();
+  let sec = await within(content).findByRole("region", {
+    name: "待っている理由",
+    hidden: true,
+  });
+  expect([...sec.querySelectorAll("li")].map((li) => li.dataset.basis)).toEqual(
+    ["conflict"],
+  );
+  cleanup();
+
+  installFakes(
+    bodies(
+      show({ waiting: waitingOf([{ id: "C-5", status: "classified" }], []) }),
+    ),
+  );
+  content = await openDetail();
+  sec = await within(content).findByRole("region", {
+    name: "待っている理由",
+    hidden: true,
+  });
+  expect([...sec.querySelectorAll("li")].map((li) => li.dataset.basis)).toEqual(
+    ["prerequisite"],
+  );
+  cleanup();
+
+  installFakes(bodies(show()));
+  content = await openDetail();
+  await within(content).findByText("計画（0）");
+  expect(within(content).queryByText("待っている理由")).toBeNull();
+});
+
+it("親が直接行う保留が開いているとき、「未回答」ではなく、オーナーが答える問いではないことを示す", async () => {
+  const d = show({
+    holds: [
+      {
+        answer: null,
+        answered_at: null,
+        answered_by: null,
+        answered_channel: null,
+        answered_verification: null,
+        closed_at: null,
+        relay_quote: null,
+        relay_session: null,
+        from_status: "classified",
+        from_status_label: "分類済",
+        kind: "parent_direct",
+        question: "親が直接行う",
+        raised_at: "t0",
+        run_id: null,
+      },
+    ],
+  });
+  installFakes(bodies(d, {}));
+  const detail = await openDetail();
+  const li = (await within(detail).findByText(/親が直接行う$/)).closest("li");
+  expect(li?.getAttribute("data-hold")).toBe("open");
+  expect(li?.textContent).toContain("オーナーが答える問いではありません");
+  expect(li?.textContent).not.toContain("未回答");
+});
+
+it("親が直接行った記録: 成果物の参照を完了条件の近くにリンクで出し、http(s) 以外はリンクにしない。無い課題には節を出さない", async () => {
+  const d = show({
+    direct_completions: [
+      {
+        artifacts: [
+          "https://github.com/o/r/issues/337#issuecomment-1",
+          "o/r#12",
+          "javascript:alert(1)",
+        ],
+        created_at: "2026-11-05T01:02:03.004Z",
+        note: "手で確かめた",
+      },
+    ],
+  });
+  installFakes(bodies(d, {}));
+  const detail = await openDetail();
+  await within(detail).findByText("親が直接行った成果物");
+  const section = within(detail).getByLabelText("親が直接行った記録");
+  // モーダル（dialog）は jsdom では開いた扱いにならず role の問い合わせから外れるので、要素で引く
+  const links = Array.from(section.querySelectorAll("a"));
+  expect(links).toHaveLength(1);
+  const link = links[0] as HTMLAnchorElement;
+  expect(link.textContent).toBe(
+    "https://github.com/o/r/issues/337#issuecomment-1",
+  );
+  expect(link).toHaveAttribute(
+    "href",
+    "https://github.com/o/r/issues/337#issuecomment-1",
+  );
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  expect(within(section).getByText("o/r#12")).toBeInTheDocument();
+  expect(within(section).getByText("javascript:alert(1)")).toBeInTheDocument();
+  expect(section.textContent).toContain("手で確かめた");
+  // 完了条件は同じ詳細の上にある
+  expect(
+    within(detail).getByTestId("ledger-completion-criteria").textContent,
+  ).toBe("完了条件");
+});
+
+it("親が直接行った記録の無い課題の詳細には、その節を出さない", async () => {
+  installFakes(bodies(show(), {}));
+  const detail = await openDetail();
+  await within(detail).findByText(/保留の問いと回答/);
+  expect(within(detail).queryByLabelText("親が直接行った記録")).toBeNull();
 });

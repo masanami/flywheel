@@ -76,6 +76,7 @@ type j6Approval struct {
 }
 
 type j6Hold struct {
+	Kind     HoldKind // 保留の種類（親が直接行う保留は問いに答える相手が人ではない）
 	ID       int64
 	Question string
 	Answer   *string
@@ -100,9 +101,11 @@ type j6Context struct {
 	Occurrences []j6Occurrence
 	Approvals   []j6Approval
 	Holds       []j6Hold
-	Activities  []j6ActivityRow
-	ActivityCut int
-	Runs        []runRow
+	// DirectCompletions は親が直接行った完了の記録（run の代わりに、直接行った印と成果物の参照を J6 に渡す）。
+	DirectCompletions []DirectCompletion
+	Activities        []j6ActivityRow
+	ActivityCut       int
+	Runs              []runRow
 	// Followups はこの課題を followup_of に持つ既存の課題（J6 が前に起票したもの）。ID の昇順。
 	Followups []j6Followup
 }
@@ -204,7 +207,7 @@ func loadJ6Approvals(ctx context.Context, tx *sql.Tx, cid int64) ([]j6Approval, 
 
 func loadJ6Holds(ctx context.Context, tx *sql.Tx, cid int64) ([]j6Hold, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, question, answer, from_status, raised_at, closed_at IS NOT NULL FROM hold WHERE challenge_id = ? ORDER BY id ASC`, cid)
+		`SELECT id, question, answer, from_status, raised_at, closed_at IS NOT NULL, kind FROM hold WHERE challenge_id = ? ORDER BY id ASC`, cid)
 	if err != nil {
 		return nil, err
 	}
@@ -213,9 +216,11 @@ func loadJ6Holds(ctx context.Context, tx *sql.Tx, cid int64) ([]j6Hold, error) {
 	for rows.Next() {
 		var h j6Hold
 		var ans sql.NullString
-		if err := rows.Scan(&h.ID, &h.Question, &ans, &h.From, &h.At, &h.Closed); err != nil {
+		var kind string
+		if err := rows.Scan(&h.ID, &h.Question, &ans, &h.From, &h.At, &h.Closed, &kind); err != nil {
 			return nil, err
 		}
+		h.Kind = HoldKind(kind)
 		if ans.Valid {
 			v := ans.String
 			h.Answer = &v
@@ -321,6 +326,9 @@ func (s *Store) loadJ6Context(ctx context.Context, cid int64) (*j6Context, error
 		if jc.Holds, err = loadJ6Holds(ctx, tx, cid); err != nil {
 			return err
 		}
+		if jc.DirectCompletions, err = loadDirectCompletions(ctx, tx, cid); err != nil {
+			return err
+		}
 		if jc.Activities, jc.ActivityCut, err = loadJ6Activities(ctx, tx, cid); err != nil {
 			return err
 		}
@@ -339,6 +347,9 @@ func (s *Store) loadJ6Context(ctx context.Context, cid int64) (*j6Context, error
 // --- 入力の組み立て ---
 
 const j6MemoryIndexLabel = "記憶の索引のパス"
+
+// j6DirectCompletionLabel は親が直接行った完了の記録の区画のラベル（記録がある課題にだけ載せる）。
+const j6DirectCompletionLabel = "親が直接行った記録"
 
 // j6FollowupsLabel はこの課題から起票済みのフォローアップの区画のラベル。
 const j6FollowupsLabel = "起票済みのフォローアップ"
@@ -415,6 +426,23 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 	}
 	sections = append(sections, JudgmentDataSection{Label: "実行の一覧と委譲の報告", Content: strings.TrimRight(b.String(), "\n")})
 
+	if len(jc.DirectCompletions) > 0 {
+		// この課題は対話のセッションの親が直接行った（委譲の run は無く、完了の検証も通っていない）。
+		// run の代わりに、直接行った印と成果物の参照を渡す。
+		b.Reset()
+		b.WriteString("この課題は対話のセッションの親が直接行った（委譲の run も完了の検証も無い）。成果物の参照:\n")
+		for i, d := range jc.DirectCompletions {
+			fmt.Fprintf(&b, "- 記録 %d / %s\n", i+1, formatTimestamp(d.CreatedAt))
+			for _, a := range d.Artifacts {
+				fmt.Fprintf(&b, "  - 参照: %s\n", oneLine(a))
+			}
+			if d.Note != nil {
+				fmt.Fprintf(&b, "  - 説明: %s\n", oneLine(*d.Note))
+			}
+		}
+		sections = append(sections, JudgmentDataSection{Label: j6DirectCompletionLabel, Content: strings.TrimRight(b.String(), "\n")})
+	}
+
 	b.Reset()
 	for _, a := range jc.Approvals {
 		fmt.Fprintf(&b, "- 承認 ID: %s-%d / 種類: %s / 判断: %s / %s", j6EvidenceApproval, a.ID, a.Kind, a.Decision, a.At)
@@ -427,7 +455,11 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 		b.WriteString("\n")
 	}
 	for _, h := range jc.Holds {
-		fmt.Fprintf(&b, "- 保留 ID: %s-%d / %s / 問い: %s / 回答: ", j6EvidenceHold, h.ID, h.At, oneLine(h.Question))
+		fmt.Fprintf(&b, "- 保留 ID: %s-%d / %s", j6EvidenceHold, h.ID, h.At)
+		if h.Kind == HoldKindParentDirect {
+			b.WriteString(" / 種類: 親が直接行う（オーナーが答える問いではない）")
+		}
+		fmt.Fprintf(&b, " / 問い: %s / 回答: ", oneLine(h.Question))
 		switch {
 		case h.Answer != nil:
 			b.WriteString(oneLine(*h.Answer))
