@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -34,7 +33,8 @@ const defaultCycleTrigger = "manual"
 // 生きている別の cycle があれば core が locked を返す。周の中の run の失敗は結果に示すだけで、
 // 終了コードは 0 のまま。
 func runCycle(a Args) (any, error) {
-	ctx := context.Background()
+	ctx, stop := interruptContext()
+	defer stop()
 	ws := a.Store.Workspace()
 
 	// --trigger の指定の有無を区別する（`--trigger ""` を省略の manual に化けさせない。
@@ -117,10 +117,14 @@ func runCycle(a Args) (any, error) {
 		slotGit   core.SlotGit
 		reconcile core.UpstreamBranchSource
 		checks    core.UpstreamCheckSource
+		diffs     core.UpstreamDiffSource
+		headGit   core.HeadWorktreeGit
+		compare   core.UpstreamCompareSource
 	)
 	if hasConnectors {
 		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(), newCheckSource()
-		merger = newPullRequestMerger()
+		merger, diffs, headGit = newPullRequestMerger(), newDiffSource(), git.New()
+		compare = newCompareSource()
 	}
 
 	// 周の開始を標準出力へ知らせる（UI の server が起動の合図として読む）。--json では書かない。
@@ -144,7 +148,10 @@ func runCycle(a Args) (any, error) {
 		Git:       slotGit,
 		Reconcile: reconcile,
 		Checks:    checks,
+		Diffs:     diffs,
+		HeadGit:   headGit,
 		Merger:    merger,
+		Compare:   compare,
 		Predictor: launcher,
 		// backup の段の口。connectors.json の有無にかかわらず組み立てる。
 		WorkspaceGit: git.NewWorkspace(),
@@ -170,7 +177,7 @@ func cycleResultText(res *core.CycleRunResult) string {
 		case p.Skipped:
 			fmt.Fprintf(&b, "  %s: スキップ\n", p.Phase)
 		case p.Phase == core.CyclePhaseRelease:
-			fmt.Fprintf(&b, "  %s: 処理 %d 件・未起動 %d 件\n", p.Phase, len(p.ReleaseItems), len(p.NotStarted))
+			fmt.Fprintf(&b, "  %s: 処理 %d 件・片付け %d 件・未起動 %d 件\n", p.Phase, len(p.ReleaseItems), len(p.ReleaseTidied), len(p.NotStarted))
 		case p.Phase == core.CyclePhaseBackup && p.Backup != nil:
 			fmt.Fprintf(&b, "  %s: %s", p.Phase, p.Backup.Outcome)
 			if p.Backup.Commit != "" {

@@ -72,6 +72,8 @@ function summary(over: Partial<ApprovalSummary> = {}): {
   return {
     approval: {
       challenge_id: "C-1",
+      conditions_after_release: [],
+      conditions_after_release_heading: "",
       direct_completion: null,
       done_criteria: "完了条件の本文",
       kind: "completion",
@@ -135,6 +137,7 @@ function setup(
       issues_answer: null,
       non_goals: null,
     },
+    waiting: { conflicts: [], prerequisites: [] },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-1"] = { activities: [] };
   return installFakes({ ...f, ...extra });
@@ -314,6 +317,7 @@ function fixturesFor(): Record<string, unknown> {
       issues_answer: null,
       non_goals: null,
     },
+    waiting: { conflicts: [], prerequisites: [] },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-1"] = { activities: [] };
   return f;

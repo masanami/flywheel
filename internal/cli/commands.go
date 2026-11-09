@@ -326,6 +326,22 @@ func defaultCommands() []Command {
 			Run:           runDepRm,
 		},
 		{
+			// 取り込み元の Issue の無い課題を、あとから GitHub Issue に紐づける・外す（docs/features/
+			// m2-github-issue-ingest.md §課題と Issue の紐づけ）。承認も本人確認も要らない（edit と同じ扱い）。
+			Path:          []string{"bind"},
+			RequiresStore: true,
+			MinPositional: 2,
+			MaxPositional: 2,
+			Run:           runBind,
+		},
+		{
+			Path:          []string{"unbind"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: 1,
+			Run:           runUnbind,
+		},
+		{
 			Path:          []string{"status"},
 			RequiresStore: true,
 			Run:           runStatus,

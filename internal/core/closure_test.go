@@ -193,3 +193,36 @@ func TestOutgoingFrom_Done_DetectsInjectedOutgoingTransition(t *testing.T) {
 		t.Fatalf("OutgoingFrom(corrupted, done) = %v, want 1 violation", got)
 	}
 }
+
+// --- 条件つきの遷移先（IfCompletionDirect。#481）も閉包の検査の対象 ---
+
+// 条件つきの遷移先が語彙に無い状態を指す破損データを検出できる（無い＝NoStatus は正当なので報告しない）。
+func TestUnknownStatusesReferencedByTable_DetectsUnknownIfCompletionDirect(t *testing.T) {
+	corrupted := append([]Transition{}, Table...)
+	corrupted = append(corrupted, Transition{
+		ID: "T-broken", From: StatusUnclassified, Op: OpAnswer,
+		Target: TransitionTarget{Fixed: StatusClassified, IfCompletionDirect: Status("no_such_status")},
+	})
+	got := UnknownStatusesReferencedByTable(corrupted, StatusVocabulary)
+	if len(got) != 1 || got[0] != Status("no_such_status") {
+		t.Fatalf("UnknownStatusesReferencedByTable(corrupted conditional target) = %v, want [no_such_status]", got)
+	}
+}
+
+// 条件つきの遷移先だけが到達の経路になる状態も、到達できるものとして数える（From が到達済みのとき）。
+func TestUnreachableFromCreate_FollowsIfCompletionDirect(t *testing.T) {
+	vocab := []StatusVocabEntry{{Code: StatusUnclassified}, {Code: StatusClassified}, {Code: StatusInProgress}}
+	table := []Transition{
+		{ID: "T1", From: NoStatus, Op: OpCreate, Target: TransitionTarget{Fixed: StatusUnclassified}},
+		{ID: "Tx", From: StatusUnclassified, Op: OpClassify, Target: TransitionTarget{Fixed: StatusClassified, IfCompletionDirect: StatusInProgress}},
+	}
+	if got := UnreachableFromCreate(table, vocab); len(got) != 0 {
+		t.Errorf("UnreachableFromCreate = %v, want none (in_progress is reached through IfCompletionDirect)", got)
+	}
+	// 遷移元が到達できないなら、条件つきの遷移先も到達できない。
+	table[1].From = StatusClassified
+	got := UnreachableFromCreate(table, vocab)
+	if len(got) != 2 {
+		t.Errorf("UnreachableFromCreate = %v, want [classified in_progress]", got)
+	}
+}

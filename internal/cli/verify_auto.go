@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/masanami/flywheel/internal/adapters/git"
 	"github.com/masanami/flywheel/internal/adapters/github"
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/invoker"
@@ -16,16 +17,23 @@ import (
 // 組み立て・周の開始と終了だけを行い、対象の選び方・CI の待ち・入力・出力の写像は
 // core.Store.VerifyAutoJ5 に委ねる（P2「CLI は core の公開 API だけを呼ぶ」）。
 //
-// 読み込み順（run と同じ形）: agent.json の読み込み・検証 → claude の有無 → 周の開始
+// 読み込み順（run と同じ形）: agent.json・connectors.json の読み込み・検証 → claude の有無 → 周の開始
 // （BeginCycle trigger "verify --auto"）→ VerifyAutoJ5 → EndCycle。どの段で失敗しても、それより
 // 後の段（claude の起動・gh の取得）は行わない。`--auto` と `--result met` などの同時指定は
 // 引数の検査（OneOfGroups）が usage_error にする。
 func runVerifyAuto(a Args) (any, error) {
-	ctx := context.Background()
+	ctx, stop := interruptContext()
+	defer stop()
 	ws := a.Store.Workspace()
 
 	decl, err := core.LoadAgentDeclaration(ws)
 	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+
+	// connectors.json が無ければ PR の head を取り出さない（J5 は差分だけを読む）。
+	conn, err := core.LoadConnectorsDeclaration(ws)
+	if err != nil && !errors.Is(err, core.ErrConfigNotFound) {
 		return nil, mapCoreErr(err)
 	}
 
@@ -57,6 +65,9 @@ func runVerifyAuto(a Args) (any, error) {
 		Invoker:     launcher,
 		Upstream:    newUpstreamThreadSource(),
 		Checks:      newCheckSource(),
+		Diffs:       newDiffSource(),
+		HeadGit:     git.New(),
+		Connectors:  conn,
 		CycleID:     cyc.ID,
 	})
 
@@ -65,7 +76,7 @@ func runVerifyAuto(a Args) (any, error) {
 		endResult = core.CycleResultAborted
 	}
 	// 周は起動できたかどうかに関わらず必ず終える（plan --auto と同じ）。
-	if _, endErr := a.Store.EndCycle(ctx, cyc.ID, endResult); endErr != nil && runErr == nil {
+	if _, endErr := a.Store.EndCycle(context.WithoutCancel(ctx), cyc.ID, endResult); endErr != nil && runErr == nil {
 		return nil, mapCoreErr(endErr)
 	}
 	if runErr != nil {
@@ -76,6 +87,15 @@ func runVerifyAuto(a Args) (any, error) {
 		json: view.PhaseResponse{Phase: view.FromJudgmentPhase("verify", false, res)},
 		text: judgmentPhaseText("検証の対象はありませんでした\n", res),
 	}, nil
+}
+
+// newDiffSource は J5 の起動の前の PR の差分の取得を組み立てる（取得できないときは newCheckSource と同じ）。
+func newDiffSource() core.UpstreamDiffSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
+	if err != nil {
+		return unavailableCheckSource{err: err}
+	}
+	return client
 }
 
 // newCheckSource は J5 の起動の前の PR のチェックの取得（`gh api` の GET だけ）を組み立てる。
@@ -90,8 +110,26 @@ func newCheckSource() core.UpstreamCheckSource {
 	return client
 }
 
+// newCompareSource は release の head の変化の判定（検証の後に入ったコミットの取得）を組み立てる
+// （取得できないときは newCheckSource と同じ）。
+func newCompareSource() core.UpstreamCompareSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
+	if err != nil {
+		return unavailableCheckSource{err: err}
+	}
+	return client
+}
+
 type unavailableCheckSource struct{ err error }
+
+func (u unavailableCheckSource) CompareCommits(context.Context, string, string, string) (core.UpstreamComparison, error) {
+	return core.UpstreamComparison{}, fmt.Errorf("上流を取得できません: %w", u.err)
+}
 
 func (u unavailableCheckSource) GetPullRequestChecks(context.Context, string, int) (core.UpstreamPullRequestChecks, error) {
 	return core.UpstreamPullRequestChecks{}, fmt.Errorf("上流を取得できません: %w", u.err)
+}
+
+func (u unavailableCheckSource) GetCompareDiff(context.Context, string, string, string) (string, error) {
+	return "", fmt.Errorf("上流を取得できません: %w", u.err)
 }

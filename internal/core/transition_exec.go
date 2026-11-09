@@ -51,7 +51,10 @@ type transitionCtx struct {
 	priority *Priority // 既定は current.Priority。classify だけが上書きする
 	// stage は書き込む段階の欄（既定は current の値。patchStages が書き換える）。
 	// runTransition が課題の UPDATE と同じトランザクションで書き、戻り値の Challenge に写す。
-	stage  StageFields
+	stage StageFields
+	// target は、この遷移で確定した遷移先の状態（tr.Target の解決の結果）。apply が戻り先で書き込みを分ける
+	// （T15 が人間対応待ちへ戻るときだけ保留を立てる）のに使う。
+	target Status
 	nowStr string    // rec.at をミリ秒精度に丸めた文字列（task_plan.created_at・hold.raised_at に使う）
 	now    time.Time // nowStr を parseTimestamp した値（返却する Plan.CreatedAt に使う）
 	// runID は、この遷移の原因になった run の内部整数 ID（rec.runID と同じ値。
@@ -171,7 +174,15 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 				return err
 			}
 		}
-		target, err := tr.Target.Resolve(Table, preceding)
+		// 遷移先が課題の completion_direct で分かれる行（T15）だけ、値をこのトランザクションの中で読む。
+		completionDirect := false
+		if tr.Target.IfCompletionDirect != NoStatus {
+			completionDirect, err = loadCompletionDirect(ctx, tx, cid)
+			if err != nil {
+				return err
+			}
+		}
+		target, err := tr.Target.ResolveForCompletionDirect(Table, preceding, completionDirect)
 		if err != nil {
 			return err
 		}
@@ -190,6 +201,7 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 			after:    map[string]any{},
 			priority: current.Priority,
 			stage:    current.StageFields,
+			target:   target,
 			nowStr:   nowStr,
 			now:      now,
 			runID:    rec.runID,
@@ -211,10 +223,12 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 		if err != nil {
 			return err
 		}
-		args := append([]any{string(target), nullablePriority(tc.priority), newVersion, nowStr}, stageArgs...)
+		// completion_direct は遷移のたびにここで一元的に書く（T17 で真、ほかのすべての遷移で偽。
+		// 完了確認待ちを出る遷移で消え、T8 で入るときも偽になる）。
+		args := append([]any{string(target), nullablePriority(tc.priority), newVersion, nowStr, completionDirectColumn(p.op)}, stageArgs...)
 		args = append(args, cid, current.Version)
 		res, err := tx.ExecContext(ctx,
-			`UPDATE challenge SET status = ?, priority = ?, version = ?, updated_at = ?, `+stageUpdateSQL+` WHERE id = ? AND version = ?`,
+			`UPDATE challenge SET status = ?, priority = ?, version = ?, updated_at = ?, completion_direct = ?, `+stageUpdateSQL+` WHERE id = ? AND version = ?`,
 			args...,
 		)
 		if err != nil {
@@ -255,6 +269,24 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 		return nil, err
 	}
 	return result, nil
+}
+
+// completionDirectColumn は、操作 op の遷移の後の challenge.completion_direct の値。
+// 親が直接行った完了の記録（T17）だけが 1、ほかの操作はすべて 0。
+func completionDirectColumn(op Operation) int {
+	if op == OpCompleteDirect {
+		return 1
+	}
+	return 0
+}
+
+// loadCompletionDirect は challenge.completion_direct（いまの完了確認待ちが T17 で入ったものか）を読む。
+func loadCompletionDirect(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) {
+	var v int
+	if err := tx.QueryRowContext(ctx, `SELECT completion_direct FROM challenge WHERE id = ?`, cid).Scan(&v); err != nil {
+		return false, err
+	}
+	return v == 1, nil
 }
 
 // transition は 5 操作（classify・plan・submit・verify・hold）が共有する
@@ -383,10 +415,16 @@ func insertHoldID(ctx context.Context, tc *transitionCtx, question string) (int6
 // insertHoldKind は insertHoldID の、保留の種類を指定する版。human 以外のときだけ作業ログの after に種類を載せる
 // （既存の保留の作業ログの形は変えない）。
 func insertHoldKind(ctx context.Context, tc *transitionCtx, question string, kind HoldKind) (int64, error) {
+	return insertHoldKindFrom(ctx, tc, question, kind, tc.current.Status)
+}
+
+// insertHoldKindFrom は insertHoldKind の、保留に入る直前の状態（hold.from_status。回答で戻る先）を指定する版。
+// 遷移前の状態と戻り先が違う T15（親が直接した完了の差し戻し）が使う。
+func insertHoldKindFrom(ctx context.Context, tc *transitionCtx, question string, kind HoldKind, from Status) (int64, error) {
 	res, err := tc.tx.ExecContext(ctx,
 		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind)
 		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`,
-		tc.id, question, string(tc.current.Status), tc.nowStr, int64PtrColumn(tc.runID), string(kind),
+		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind),
 	)
 	if err != nil {
 		return 0, err

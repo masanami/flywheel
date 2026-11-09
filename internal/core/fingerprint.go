@@ -60,3 +60,10 @@ func Fingerprint(body string) string {
 	sum := sha256.Sum256([]byte(normalized))
 	return fmt.Sprintf("%d:%s", FingerprintVersion, hex.EncodeToString(sum[:])[:12])
 }
+
+// boundFingerprint は bind（取り込み元の Issue の無い課題を、あとから Issue に紐づける操作）が
+// 対応に記録する fingerprint の印。版は FingerprintVersion と同じ（hasKnownFingerprintVersion が
+// 真になる）が、値は "<12桁の小文字 hex>" ではないので、どの Fingerprint の出力とも一致しない。
+// これにより次の取り込みは必ず本文が変わった側（updated）に進み、課題の見出し・説明・緊急度を
+// 上流の値へ置き換えて fingerprint も本物にする。bind 自身は課題の見出し・説明を置き換えない。
+var boundFingerprint = fmt.Sprintf("%d:bound", FingerprintVersion)

@@ -638,7 +638,7 @@ func (s *Store) slotStateOf(ctx context.Context, slotID string) (slotState, erro
 // （原因の run は最後の失敗の run）。課題が着手中でなくなっていれば何もしない。
 func (s *Store) holdForFailureLimit(ctx context.Context, dc *delegationContext, cycleID string) (*JudgmentAutoItem, *NotStarted, error) {
 	hit := dc.LimitHit
-	status, _, err := s.mapReconciliation(ctx, dc, hit.Last.ID, OpHold, failureLimitQuestion(hit), holdReasonFailureLimit, cycleID)
+	status, _, err := s.mapReconciliation(ctx, dc, hit.Last.ID, OpHold, failureLimitQuestion(hit), holdReasonFailureLimit, cycleID, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -653,7 +653,7 @@ func (s *Store) holdForFailureLimit(ctx context.Context, dc *delegationContext, 
 // （原因の run は最後の J5 の run）。課題が着手中でなくなっていれば何もしない。
 func (s *Store) holdForReworkLimit(ctx context.Context, dc *delegationContext, cycleID string) (*JudgmentAutoItem, *NotStarted, error) {
 	hit := dc.ReworkHit
-	status, _, err := s.mapReconciliation(ctx, dc, hit.Last.ID, OpHold, reworkLimitQuestion(hit), holdReasonReworkLimit, cycleID)
+	status, _, err := s.mapReconciliation(ctx, dc, hit.Last.ID, OpHold, reworkLimitQuestion(hit), holdReasonReworkLimit, cycleID, false)
 	if err != nil {
 		return nil, nil, err
 	}

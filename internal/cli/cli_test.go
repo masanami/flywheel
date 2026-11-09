@@ -458,6 +458,32 @@ func TestDepCommands_MatchM45IFAPITable(t *testing.T) {
 	}
 }
 
+// TestBindUnbindCommands_MatchM2IFAPITable は、`bind`・`unbind` の名前と書式（`bind` は課題と Issue の 2 つ、
+// `unbind` は課題の 1 つの位置引数・必須のフラグなし）が m2 の §IF / API の表のとおりであることを確かめる。
+func TestBindUnbindCommands_MatchM2IFAPITable(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m2-github-issue-ingest.md"))
+	if err != nil {
+		t.Fatalf("read m2 spec: %v", err)
+	}
+	sigs := parseIFAPISignatures(t, string(data))
+	for name, positional := range map[string]int{"bind": 2, "unbind": 1} {
+		rows, ok := sigs[name]
+		if !ok || len(rows) != 1 {
+			t.Fatalf("m2 spec's IF/API table has %d `%s` rows, want 1", len(rows), name)
+		}
+		cmd, ok := registeredCommands()[name]
+		if !ok {
+			t.Fatalf("%s is not registered in defaultCommands()", name)
+		}
+		if rows[0].minPositional != positional || cmd.MinPositional != positional || cmd.MaxPositional != positional {
+			t.Errorf("%s: Min/MaxPositional = %d/%d, IF/API table says min %d, want exactly %d", name, cmd.MinPositional, cmd.MaxPositional, rows[0].minPositional, positional)
+		}
+		if len(rows[0].required) != 0 || len(cmd.Flags) != 0 {
+			t.Errorf("%s: flags = %v, IF/API table says required %v (want none)", name, cmd.Flags, rows[0].required)
+		}
+	}
+}
+
 // TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats は、
 // ifAPISkipCommands で汎用比較から外した classify について、m1・m3 それぞれの
 // 書式が仕様書のとおりであること（m1 の行を書き換えていないこと）と、登録表の
@@ -801,6 +827,10 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	// TestDepCommands_MatchM45IFAPITable が m4.5 の表と照合する）。
 	wantSet["dep add"] = true
 	wantSet["dep rm"] = true
+	// 課題と Issue の紐づけ: 同じ理由で、実装済みの `bind`・`unbind` を個別に足す（書式は
+	// TestBindUnbindCommands_MatchM2IFAPITable が m2 の表と照合する）。
+	wantSet["bind"] = true
+	wantSet["unbind"] = true
 	// M4.5 S3: 同じ理由で、実装済みの `metrics` を個別に足す（`--compare` は S4 で足した）。
 	wantSet["metrics"] = true
 	// M4.5 S3: 同じ理由で、実装済みの `learn` を個別に足す（書式は TestLearnCommand_MatchesM45IFAPITable が m4.5 の表と照合する）。

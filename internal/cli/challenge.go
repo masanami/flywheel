@@ -29,14 +29,54 @@ func runCreate(a Args) (any, error) {
 
 // runShow は `flywheel show <C-ID>` の実装。
 func runShow(a Args) (any, error) {
-	detail, err := a.Store.GetChallenge(context.Background(), a.Positional[0])
+	ctx := context.Background()
+	detail, err := a.Store.GetChallenge(ctx, a.Positional[0])
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{
-		json: view.FromChallengeDetail(detail),
-		text: challengeDetailText(detail),
-	}, nil
+	changes := releaseHeadChanges(ctx, detail)
+	resp := view.FromChallengeDetail(detail)
+	for _, c := range changes {
+		resp.ReleaseHeadChanges = append(resp.ReleaseHeadChanges, view.ReleaseHeadChange{OperationID: c.opID, HeadChange: view.FromReleaseHeadAssessment(c.assessment)})
+	}
+	text := challengeDetailText(detail)
+	if len(changes) > 0 {
+		var b strings.Builder
+		b.WriteString(text)
+		b.WriteString("検証の後に head が動いた承認待ちの release:\n")
+		for _, c := range changes {
+			fmt.Fprintf(&b, "  %s\n", c.opID)
+			writeHeadChangeLines(&b, "    ", c.assessment)
+		}
+		text = b.String()
+	}
+	return textOutput{json: resp, text: text}, nil
+}
+
+// headChangeOf は承認待ちの release 1 件の、検証の後に head が動いたことの評価。
+type headChangeOf struct {
+	opID       string
+	assessment *core.ReleaseHeadAssessment
+}
+
+// releaseHeadChanges は課題の承認待ちの release のうち、PR の head が J5 の検証の head から動いたものを評価する
+// （#485）。GitHub を読めない release・head が動いていない release は載せない（show を止めない）。
+func releaseHeadChanges(ctx context.Context, d *core.ChallengeDetail) []headChangeOf {
+	var out []headChangeOf
+	for _, op := range d.Operations {
+		if op.Kind != core.OperationKindRelease || op.State != core.OperationStatePending || op.Ref == nil || op.VerifiedHeadSHA == nil {
+			continue
+		}
+		if _, _, ok := core.ParseReleasePullRequestRef(*op.Ref); !ok {
+			continue
+		}
+		a, err := core.AssessReleaseHead(ctx, newCheckSource(), newCompareSource(), *op.Ref, *op.VerifiedHeadSHA)
+		if err != nil || a.Change.Kind == "" {
+			continue
+		}
+		out = append(out, headChangeOf{opID: op.ID, assessment: a})
+	}
+	return out
 }
 
 // runList は `flywheel list [--status <状態>]` の実装。
@@ -181,9 +221,18 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	}
 	fmt.Fprintf(&b, "承認・差し戻し: %d 件\n", len(d.Approvals))
 	for _, a := range d.Approvals {
-		fmt.Fprintf(&b, "  %s %s by %s (%s)", a.Kind, a.Decision, a.Actor, FormatTimestamp(a.DecidedAt))
+		fmt.Fprintf(&b, "  %s %s %s by %s (%s)", a.ID, a.Kind, a.Decision, a.Actor, FormatTimestamp(a.DecidedAt))
 		if a.OperationID != nil {
 			fmt.Fprintf(&b, " %s", *a.OperationID)
+		}
+		switch {
+		case a.SupersededAt != nil && a.SupersededBy != nil:
+			fmt.Fprintf(&b, " [置き換えられた %s: %s → %s]", FormatTimestamp(*a.SupersededAt), textOrDash(nilableString(a.SupersededReason)), *a.SupersededBy)
+		case a.SupersededAt != nil:
+			fmt.Fprintf(&b, " [置き換えられた %s: %s]", FormatTimestamp(*a.SupersededAt), textOrDash(nilableString(a.SupersededReason)))
+		}
+		if a.MergeInVerifiedHead != nil {
+			fmt.Fprintf(&b, " [検証の head %s から取り込みだけと判定して承認]", shortHead(*a.MergeInVerifiedHead))
 		}
 		b.WriteString("\n")
 		if a.Reason != nil {
@@ -231,7 +280,17 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	}
 	fmt.Fprintf(&b, "不可逆操作:    %d 件\n", len(d.Operations))
 	for _, op := range d.Operations {
-		fmt.Fprintf(&b, "  %s %s %s [%s]\n", op.ID, op.Kind, op.Summary, op.State)
+		fmt.Fprintf(&b, "  %s %s %s [%s]", op.ID, op.Kind, op.Summary, op.State)
+		if op.ClosedReason != nil {
+			fmt.Fprintf(&b, " (閉じた理由: %s)", *op.ClosedReason)
+		}
+		if op.SupersededByOperationID != nil {
+			fmt.Fprintf(&b, " → %s に置き換え", *op.SupersededByOperationID)
+		}
+		if op.SupersedesOperationID != nil {
+			fmt.Fprintf(&b, " ← %s を置き換え", *op.SupersedesOperationID)
+		}
+		b.WriteString("\n")
 	}
 	// GitHub Issue との対応（#56）も JSON と同じ項目を出す（m2 仕様 §食い違いの
 	// 表示「show は、対応のある課題について対応の記録…を出力する」）。

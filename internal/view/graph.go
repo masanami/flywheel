@@ -20,8 +20,10 @@ type GraphNode struct {
 	Title            string   `json:"title"`
 }
 
-// GraphEdge は graph の edges[] の要素（依存 1 本）。from が先行（依存先）、to が後続（依存元）。
+// GraphEdge は graph の edges[] の要素（依存 1 本）。前提（kind=prerequisite）は from が先行（依存先）、to が後続（依存元）。
+// 衝突（kind=conflict）は from が後回しにした課題、to が先に委譲した課題（directed=false の組は向きが無く、from は ID の小さい側）。
 type GraphEdge struct {
+	Directed      bool   `json:"directed"`
 	From          string `json:"from"`
 	Kind          string `json:"kind"`
 	RegisteredAt  string `json:"registered_at"`
@@ -58,7 +60,7 @@ func FromChallengeGraph(g *core.ChallengeGraph) GraphResponse {
 	for _, e := range g.Edges {
 		out.Edges = append(out.Edges, GraphEdge{
 			From: e.From, Kind: string(e.Kind), RegisteredAt: e.RegisteredAt, RegisteredVia: string(e.RegisteredVia),
-			Satisfied: e.Satisfied, To: e.To,
+			Satisfied: e.Satisfied, To: e.To, Directed: e.Directed,
 		})
 	}
 	return out

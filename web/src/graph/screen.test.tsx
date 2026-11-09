@@ -47,6 +47,7 @@ const human = (
     ...over,
   });
 const edge = (from: string, to: string, over: Partial<GraphEdge> = {}) => ({
+  directed: true,
   from,
   kind: "prerequisite",
   registered_at: "2026-11-01T00:00:00.000Z",
@@ -93,7 +94,8 @@ const GRAPH: GraphResponse = {
   ],
   edges: [
     edge("C-12", "C-6", { satisfied: true }),
-    edge("C-5", "C-4", { kind: "conflict", registered_via: "manual" }),
+    // C-4 は、実施中の C-5 に譲って後回しにした（衝突の辺は from＝後回し・to＝先に委譲）
+    edge("C-4", "C-5", { kind: "conflict", registered_via: "prediction" }),
     edge("C-12", "C-10", { registered_via: "unknown", satisfied: true }),
     edge("C-16", "C-10"),
     edge("C-10", "C-18"),
@@ -559,7 +561,7 @@ const chipsOf = (el: Element, sel = CHIP) =>
     label: c.querySelector(".graph-human-chip-label")?.textContent,
   }));
 
-it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を出し、承認 2 つは 1 つにまとめる。入らない語は切り詰め、実装の語は出さない", async () => {
+it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を出し、承認 2 つは 1 つにまとめる。入らない語は切り詰めるか「+n」にまとめ、実装の語は出さない", async () => {
   graphFor = async () => ({
     nodes: [
       human("C-1", ["approve_plan"]),
@@ -598,6 +600,12 @@ it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を�
   expect(c2[0]?.label).toBe("承認待ち");
   expect(c2[1]?.label?.startsWith("不可逆")).toBe(true);
   expect(c2[1]?.label?.endsWith("…")).toBe(true);
+  // 切り詰めたチップは、全部の語を title に残す
+  expect(
+    box(group, "C-2").querySelector(
+      '.graph-human-chip[data-kind="operations"] > title',
+    )?.textContent,
+  ).toBe("! 不可逆操作の承認");
   // 計画と完了の承認は同じ区分なので 1 つ
   expect(chips("C-3").map((c) => c.kind)).toEqual(["approvals"]);
   const c4 = chips("C-4");
@@ -606,8 +614,18 @@ it("人間の操作待ちのチップ: 区分の記号と帯の区分の語を�
     glyph: "?",
     label: "未回答の問い",
   });
-  // 入る分だけ（残りの語は読み上げの名前にある）
-  expect(c4.map((c) => c.kind)).toEqual(["questions", "triage"]);
+  // 入る分だけ並べ、残りは「+n」の 1 つにまとめる。まとめた語は「+n」の title に残る（全部の語は読み上げの名前にもある）
+  expect(c4.map((c) => c.kind)).toEqual(["questions", "more"]);
+  const more = box(group, "C-4").querySelector(
+    '.graph-human-chip[data-kind="more"]',
+  );
+  expect(more?.querySelector("text")?.textContent).toBe("+4");
+  expect(more?.getAttribute("data-hidden")).toBe(
+    "triage budget discrepancies slots",
+  );
+  expect(more?.querySelector("title")?.textContent).toBe(
+    "↕ トリアージ・$ 予算の使い切り・≠ 食い違い・⌫ 片づけ待ちのスロット",
+  );
   expect(box(group, "C-4")).toHaveAccessibleName(
     "C-4 題名C-4（人間の操作待ち・未回答の問い・トリアージ・予算の使い切り・食い違い・片づけ待ちのスロット）",
   );
@@ -766,23 +784,25 @@ it("線: 先行の成果を使う依存は実線の矢じり、衝突は破線�
   expect(group.querySelector(".graph-edge-label")).toBeNull();
   // C-5 は畳んだ C-15 の中にあるので、線は C-15 の箱から出る。C-15 を開くと C-5 から出る
   expect(
-    within(group).getByRole("button", { name: /^依存 C-15 → C-4/ }),
+    within(group).getByRole("button", { name: /^依存 C-4 → C-15/ }),
   ).toBeInTheDocument();
   fireEvent.click(within(group).getByRole("button", { name: /^C-15 を開く/ }));
-  const hit = within(group).getByRole("button", { name: /^依存 C-5 → C-4/ });
+  const hit = within(group).getByRole("button", { name: /^依存 C-4 → C-5/ });
   expect(hit).toHaveAccessibleName(/同時に走らせると衝突する/);
-  expect(hit).toHaveAccessibleName(/端末のコマンドで登録/);
-  expect(hit).toHaveAccessibleName(/まだ満たされていない/);
+  expect(hit).toHaveAccessibleName(/衝突の予測で記録/);
+  expect(hit).toHaveAccessibleName(/C-4 を後回しにして C-5 を先に委譲/);
+  // 衝突は満たされているかを持たない
+  expect(hit.getAttribute("aria-label")).not.toContain("満たされ");
   fireEvent.click(hit);
   const label = group.querySelector(".graph-edge-label");
   expect(label?.getAttribute("data-basis")).toBe("conflict");
-  // 札: 1 行目は種類、2 行目は登録の経路・日時・満たされているか
+  // 札: 1 行目は種類、2 行目は後回しの向き・予測・日時
   const rows = [...(label?.querySelectorAll("tspan") ?? [])].map(
     (t) => t.textContent,
   );
   expect(rows[0]).toBe("同時に走らせると衝突する");
   expect(rows[1]).toMatch(
-    /^端末のコマンド・\d\d\/\d\d \d\d:\d\d・満たされていない$/,
+    /^C-4 は C-5 の後に回す・予測・\d\d\/\d\d \d\d:\d\d$/,
   );
   // もう一度押すと外す
   fireEvent.click(hit);
@@ -861,7 +881,33 @@ it("待っている先行が無い課題の詳細には、待っている理由�
   expect(within(content).queryByText(WAITING_TITLE)).toBeNull();
 });
 
-it("ボードから開いた詳細には、待っている理由の節を出さない（ボードの挙動は変えない）", async () => {
+it("ボードから開いた詳細にも、待っている理由の節を出す。前提の行と「衝突のため後回し」の行が別になる", async () => {
+  await mount();
+  await graphGroup();
+  fireEvent.click(screen.getByRole("button", { name: "ボード" }));
+  // C-19 は、前提（C-5・C-17。どちらも終わっていない）と衝突（実施中の C-6 に譲って後回し）の両方で待っている
+  const card = await screen.findByTestId("card-C-19");
+  fireEvent.click(within(card).getByRole("button"));
+  const content = await screen.findByTestId("card-detail-content");
+  const waiting = await within(content).findByRole("region", {
+    name: WAITING_TITLE,
+    hidden: true,
+  });
+  const rows = [...waiting.querySelectorAll("li")].map((li) => [
+    li.dataset.basis,
+    li.dataset.from,
+  ]);
+  expect(rows).toEqual([
+    ["prerequisite", "C-5"],
+    ["prerequisite", "C-17"],
+    ["conflict", "C-6"],
+  ]);
+  expect(waiting.textContent).toContain("衝突のため後回し: C-6");
+  // 先に委譲した C-6 には、後回しの行が付かない
+  fireEvent.keyDown(content, { key: "Escape" });
+});
+
+it("ボードから開いた詳細で、待っている理由が無い課題には節を出さない", async () => {
   await mount();
   await graphGroup();
   fireEvent.click(screen.getByRole("button", { name: "ボード" }));
@@ -869,7 +915,130 @@ it("ボードから開いた詳細には、待っている理由の節を出さ�
   fireEvent.click(within(card).getByRole("button"));
   const content = await screen.findByTestId("card-detail-content");
   expect(within(content).getByText("古いバッチの撤去")).toBeInTheDocument();
+  await within(content).findByText(/^計画（/);
   expect(within(content).queryByText(WAITING_TITLE)).toBeNull();
+});
+
+// --- 衝突の辺（kind=conflict）。from＝後回しにした課題、to＝先に委譲した課題 ---
+
+it("グラフから開いた詳細: 衝突のため後回しにした課題には前提と別の行で相手が出る。先に委譲された側・向きの無い組には出ない", async () => {
+  graphFor = async () => ({
+    nodes: [
+      node("C-1", { running: true }),
+      node("C-2"),
+      node("C-3", { state: "classified" }),
+      node("C-4"),
+    ],
+    edges: [
+      edge("C-1", "C-3"), // C-3 は C-1 を前提にも待つ
+      edge("C-3", "C-1", { kind: "conflict", registered_via: "prediction" }), // C-3 は C-1 に譲った
+      edge("C-2", "C-4", {
+        kind: "conflict",
+        directed: false,
+        registered_via: "prediction",
+      }),
+    ],
+  });
+  await mount();
+  const group = await graphGroup();
+  const rowsOf = async (id: string) => {
+    fireEvent.click(box(group, id));
+    const content = await screen.findByTestId("card-detail-content");
+    const sec = within(content).queryByRole("region", {
+      name: WAITING_TITLE,
+      hidden: true,
+    });
+    const rows = sec
+      ? [...sec.querySelectorAll("li")].map((li) => [
+          li.dataset.basis,
+          li.dataset.from,
+          li.textContent ?? "",
+        ])
+      : [];
+    const dialog = content.closest("dialog") as HTMLDialogElement;
+    act(() => {
+      dialog.dispatchEvent(new Event("close"));
+    });
+    await waitFor(() =>
+      expect(screen.queryByTestId("card-detail-content")).toBeNull(),
+    );
+    return rows;
+  };
+  const c3 = await rowsOf("C-3");
+  expect(c3.map((r) => [r[0], r[1]])).toEqual([
+    ["prerequisite", "C-1"],
+    ["conflict", "C-1"],
+  ]);
+  expect(c3[1]?.[2]).toContain("衝突のため後回し: C-1");
+  expect(c3[1]?.[2]).toContain("C-3 を後回しにして C-1 を先に委譲");
+  expect(c3[0]?.[2]).not.toContain("衝突のため後回し");
+  expect(await rowsOf("C-1")).toEqual([]);
+  expect(await rowsOf("C-2")).toEqual([]);
+  expect(await rowsOf("C-4")).toEqual([]);
+});
+
+it("衝突の線: 向きのある組は後回し → 先に委譲の向きの中抜きの矢じり、向きの無い組は矢じりなしの破線。前提と合わせて循環に見えても描く", async () => {
+  graphFor = async () => ({
+    nodes: [
+      node("C-1", { running: true }),
+      node("C-2"),
+      node("C-3"),
+      node("C-4"),
+    ],
+    edges: [
+      edge("C-1", "C-2"), // 前提: C-2 は C-1 を待つ
+      edge("C-2", "C-1", { kind: "conflict", registered_via: "prediction" }), // 衝突: C-2 は C-1 に譲った（前提と逆向き）
+      edge("C-3", "C-4", {
+        kind: "conflict",
+        directed: false,
+        registered_via: "prediction",
+      }),
+    ],
+  });
+  await mount();
+  const group = await graphGroup();
+  const edges = [...group.querySelectorAll<SVGPathElement>("path.graph-edge")];
+  const by = (basis: string, directed: string) =>
+    edges.filter(
+      (e) => e.dataset.basis === basis && e.dataset.directed === directed,
+    );
+  expect(by("prerequisite", "true")).toHaveLength(1);
+  const directedConflict = by("conflict", "true");
+  expect(directedConflict).toHaveLength(1);
+  expect(directedConflict[0]?.dataset.from).toBe("C-2");
+  expect(directedConflict[0]?.dataset.to).toBe("C-1");
+  expect(directedConflict[0]?.getAttribute("marker-end")).toBe(
+    "url(#graph-arrow-conflict)",
+  );
+  const free = by("conflict", "false");
+  expect(free).toHaveLength(1);
+  expect(free[0]?.hasAttribute("marker-end")).toBe(false);
+  // 向きの無い線の名前は矢印でなく線（どちらが先かまだ決まっていない）
+  expect(
+    within(group).getByRole("button", { name: /^依存 C-3 — C-4/ }),
+  ).toBeInTheDocument();
+  expect(
+    within(group).getByRole("button", { name: /^依存 C-2 → C-1/ }),
+  ).toBeInTheDocument();
+  // 四つの課題がすべて描かれ、衝突だけの課題も「関係の無い課題」にならない
+  for (const id of ["C-1", "C-2", "C-3", "C-4"])
+    expect(hasBox(group, id)).toBe(true);
+  expect(group.textContent).not.toContain("関係の無い課題");
+});
+
+it("衝突の線: 課題に重ねると、衝突の相手と線も濃く残る", async () => {
+  graphFor = async () => ({
+    nodes: [node("C-1", { running: true }), node("C-2"), node("C-3")],
+    edges: [
+      edge("C-2", "C-1", { kind: "conflict", registered_via: "prediction" }),
+    ],
+  });
+  await mount();
+  const group = await graphGroup();
+  fireEvent.mouseEnter(box(group, "C-1"));
+  const line = group.querySelector<SVGPathElement>("path.graph-edge");
+  expect(line?.dataset.lit).toBe("true");
+  expect(line?.dataset.dim).toBeUndefined();
 });
 
 it("読み込み中・失敗・課題が無いときの表示", async () => {
@@ -928,7 +1097,9 @@ it("幅 480px 以下ではグラフの代わりに親ごとに畳んだ一覧を
   expect(c12.textContent).toContain("先行: なし");
   expect(c12.textContent).toContain("後続: C-6、C-10");
   expect(item("C-4").textContent).toContain("人間の操作待ち");
-  expect(item("C-4").textContent).toContain("先行: C-5");
+  // 衝突は先行・後続には数えず、別の言い方で出す
+  expect(item("C-4").textContent).toContain("先行: なし");
+  expect(item("C-4").textContent).toContain("衝突のため後回し: C-5");
   // 開閉は広い画面と同じ規則（実施中・人間待ちの子孫を持つ親は開いている）
   expect(
     within(list).getByRole("button", { name: "C-14 を畳む" }),

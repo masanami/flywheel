@@ -91,11 +91,15 @@ type relFixture struct {
 	limit int
 }
 
-func newRelFixture(t *testing.T) *relFixture {
+func newRelFixture(t *testing.T) *relFixture { return newRelFixtureAt(t, StatusDone) }
+
+// newRelFixtureAt は課題が status にある newRelFixture。本番反映でマージできなくなった release は、課題が完了のときだけ
+// 課題を着手中へ戻す（#485）ので、その連続の回数・上限の扱いを確かめるテストは完了でない状態で作る。
+func newRelFixtureAt(t *testing.T, status Status) *relFixture {
 	t.Helper()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
-	c := createAndAdvance(t, s, StatusDone)
+	c := createAndAdvance(t, s, status)
 	cid := mustParseChallengeID(t, c.ID)
 	opID := coretest.InsertApprovedRelease(t, s.workspace, int(cid), relRef, relHead, execTS(0))
 	return &relFixture{s: s, cid: cid, opID: opID, fake: &fakeRelease{pr: openPR()}, now: execTime(100), limit: 3}
@@ -251,7 +255,8 @@ func TestExecuteReleases_MergedWithOtherHeadAfterRequest_MergedUnapproved(t *tes
 	if item.Result != ExecutionResultMergedUnapproved || item.ObservedHead != "zzz" {
 		t.Fatalf("item = %+v", item)
 	}
-	if st := f.state(t); st.opState != "pending" {
+	// 承認していない head でマージ済みになった release は、承認し直せないので pending へ戻さず closed にする（#485）。
+	if st := f.state(t); st.opState != "closed" {
 		t.Errorf("state = %s", st.opState)
 	}
 }
@@ -295,7 +300,7 @@ func TestJudgmentOrder(t *testing.T) {
 		{"closed", func(f *relFixture) { f.fake.pr.State = "closed" }, ExecutionResultClosed, "pending", 0},
 		{"merged other head beats closed/head", func(f *relFixture) {
 			f.fake.pr = UpstreamPullRequestChecks{State: "merged", Base: "x", HeadSHA: "zzz", Checks: failedCheck}
-		}, ExecutionResultMergedUnapproved, "pending", 0},
+		}, ExecutionResultMergedUnapproved, "closed", 0},
 		{"closed beats head_changed", func(f *relFixture) { f.fake.pr.State = "closed"; f.fake.pr.HeadSHA = "zzz" }, ExecutionResultClosed, "pending", 0},
 		{"base_changed", func(f *relFixture) { f.fake.pr.Base = "dev" }, ExecutionResultBaseChanged, "pending", 0},
 		{"base_changed beats head_changed", func(f *relFixture) { f.fake.pr.Base = "dev"; f.fake.pr.HeadSHA = "z" }, ExecutionResultBaseChanged, "pending", 0},
@@ -305,7 +310,8 @@ func TestJudgmentOrder(t *testing.T) {
 		}, ExecutionResultChecksFailed, "approved", 0},
 		{"waiting_checks", func(f *relFixture) { f.fake.pr.Checks = pendingCheck }, ExecutionResultWaitingChecks, "approved", 0},
 		{"mergeable null", func(f *relFixture) { f.fake.pr.Mergeable = nil }, ExecutionResultWaitingChecks, "approved", 0},
-		{"mergeable false", func(f *relFixture) { v := false; f.fake.pr.Mergeable = &v }, ExecutionResultNotMergeable, "approved", 0},
+		// 完了の課題の not_mergeable は、課題を着手中へ戻して release を置き換える（古い release は closed。#485）。
+		{"mergeable false", func(f *relFixture) { v := false; f.fake.pr.Mergeable = &v }, ExecutionResultNotMergeable, "closed", 0},
 		{"read failure", func(f *relFixture) { f.fake.getErr = errors.New("gh down") }, ExecutionResultUpstreamFailed, "approved", 0},
 		{"no checks passes", func(f *relFixture) { f.fake.pr.Checks = nil }, ExecutionResultMergeUnconfirmed, "approved", 1},
 	}
