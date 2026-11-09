@@ -81,8 +81,15 @@ type CycleRunInput struct {
 	Reconcile UpstreamBranchSource
 	// Checks は J5 の起動の前の PR のチェックの取得（GET だけ）。ConnDecl が非 nil のとき必須。
 	Checks UpstreamCheckSource
+	// Diffs は J5 の起動の前の PR の差分の取得（GET だけ）。ConnDecl が非 nil のとき必須。
+	Diffs UpstreamDiffSource
+	// HeadGit は J5 が PR の head を読む一時の worktree の口。ConnDecl が非 nil のとき必須。
+	HeadGit HeadWorktreeGit
 	// Merger は release の段のマージの依頼（唯一の書き込み）。ConnDecl が非 nil のとき必須。
 	Merger UpstreamPullRequestMerger
+	// Compare は release の段が、完了の課題の承認待ちの release の PR に検証の後の変更が入ったかを判定する比較の取得
+	// （GET だけ）。nil なら、その判定をしない。
+	Compare UpstreamCompareSource
 	// Predictor は衝突の予測の口の起動（nil なら予測の口を呼べない。RunDelegation と同じ）。
 	Predictor ConflictPredictor
 	// WorkspaceGit は backup の段が使うワークスペースの Git の口（必須。nil は ErrValidation）。
@@ -102,6 +109,8 @@ type CyclePhaseResult struct {
 	NotStarted []NotStarted
 	// ReleaseItems は release の段の items（他の段は空）。release の段の not_started は NotStarted に入る。
 	ReleaseItems []ReleaseExecItem
+	// ReleaseTidied は release の段の、承認待ちの release の片付け（マージ済みを閉じた・立て直しのため課題を戻した）の結果。
+	ReleaseTidied []ReleaseTidyItem
 	// SerialGroups は委譲の段（run）の直列化グループ（他の段・skipped の段は空）。
 	SerialGroups []SerialGroup
 	// ImproveItems は improve の段の items（J8 を呼んだ run ごとに 1 件。他の段は空）。
@@ -165,7 +174,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	if in.Trigger == "" || in.AgentDecl == nil || in.Invoker == nil || in.WorkspaceGit == nil {
 		return nil, ErrValidation
 	}
-	if in.ConnDecl != nil && (in.Upstream == nil || in.Delegate == nil || in.Git == nil || in.Reconcile == nil || in.Checks == nil || in.Merger == nil) {
+	if in.ConnDecl != nil && (in.Upstream == nil || in.Delegate == nil || in.Git == nil || in.Reconcile == nil || in.Checks == nil || in.Diffs == nil || in.HeadGit == nil || in.Merger == nil) {
 		return nil, ErrValidation
 	}
 	if in.Ingest != nil && (in.Ingest.Upstream == nil || in.Ingest.Channel == "") {
@@ -252,6 +261,7 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 		res, err := s.ExecuteReleases(ctx, nil, ReleaseExecOptions{
 			Checks:     in.Checks,
 			Merger:     in.Merger,
+			Compare:    in.Compare,
 			Connectors: in.ConnDecl,
 			Agent:      in.AgentDecl,
 			Trigger:    ReleaseExecTriggerCycle,
@@ -264,6 +274,7 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			return nil, err
 		}
 		release.ReleaseItems = res.Items
+		release.ReleaseTidied = res.Tidied
 		release.NotStarted = res.NotStarted
 	}
 	executed = release.ReleaseItems
@@ -339,12 +350,15 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 	verify := CyclePhaseResult{Phase: CyclePhaseVerify, Skipped: in.ConnDecl == nil}
 	if in.ConnDecl != nil {
 		res, err := s.VerifyAutoJ5(ctx, J5AutoInput{
-			AgentDecl: in.AgentDecl,
-			Invoker:   in.Invoker,
-			Upstream:  in.Upstream,
-			Checks:    in.Checks,
-			CycleID:   cycleID,
-			Cycle:     jc,
+			AgentDecl:  in.AgentDecl,
+			Invoker:    in.Invoker,
+			Upstream:   in.Upstream,
+			Checks:     in.Checks,
+			Diffs:      in.Diffs,
+			HeadGit:    in.HeadGit,
+			Connectors: in.ConnDecl,
+			CycleID:    cycleID,
+			Cycle:      jc,
 		})
 		if err != nil {
 			return nil, err

@@ -17,10 +17,13 @@ import type {
   StagePair,
   Stages,
   StatusResponse,
+  Waiting,
+  WaitingChallenge,
   Workspace,
 } from "../api/types.gen.ts";
 import type { DiscrepancyKind } from "../labels.ts";
 import { type GraphSeed, seedGraphs } from "./graph.ts";
+import { type LargeSpec, largeWorkspace } from "./large.ts";
 
 export interface Flags {
   running?: boolean;
@@ -59,6 +62,12 @@ export interface MockChallenge {
   holds: Hold[];
   // 親が直接行った完了の記録（無ければ空）
   directCompletions: DirectCompletion[];
+  // 完了確認待ちの検証が「本番反映で満たされる見込み」と区分した条件（無ければ空）
+  conditionsAfterRelease: string[];
+  // いまの完了確認待ちが、直接行った完了（T17）で入ったものか。本物の challenge.completion_direct と同じ意味で、
+  // 承認の ① が direct_completion を返すのはこれが真のときだけ（記録があっても、検証の met で入り直したときは返さない）。
+  // 完了確認待ちを出る遷移で偽に戻る。
+  completionDirect: boolean;
   operations: Operation[];
   plans: PlanDetail[];
   approvals: Approval[];
@@ -100,6 +109,8 @@ function mk(
     context,
     holds,
     directCompletions,
+    conditionsAfterRelease,
+    completionDirect,
     operations,
     plans,
     approvals,
@@ -131,6 +142,8 @@ function mk(
     context: context ?? null,
     holds: holds ?? [],
     directCompletions: directCompletions ?? [],
+    conditionsAfterRelease: conditionsAfterRelease ?? [],
+    completionDirect: completionDirect ?? false,
     operations: operations ?? [],
     plans: plans ?? [],
     approvals: approvals ?? [],
@@ -148,6 +161,8 @@ const op = (
 ): Operation => ({
   approved_head: null,
   challenge_id,
+  closed_at: null,
+  closed_reason: null,
   consecutive_failures: 0,
   created_at: iso(120),
   executed_at: null,
@@ -158,6 +173,8 @@ const op = (
   ref: null,
   state,
   summary,
+  superseded_by: null,
+  supersedes: null,
   version: 1,
   waiting_since: null,
 });
@@ -272,6 +289,7 @@ export function seed(): Record<string, MockWorkspace> {
       version: 4,
       description: "端数の丸めが請求書とずれる。",
       done_criteria: "請求書の金額と画面の金額が全件一致する。",
+      conditionsAfterRelease: ["本番の料金表の画面で、請求書と同じ金額が出る"],
       headline: "料金表の丸めを請求書とそろえる",
       context: "月次請求の締め前に必要。経理の突合作業が減る。",
       stages: {
@@ -453,26 +471,85 @@ export function seed(): Record<string, MockWorkspace> {
       urgency: "高",
       description: "決済 API が断続的に 500 を返している。",
     }),
+    // 人間の操作待ちのチップが多い課題（flywheel#464）。実施中のまま、トリアージ・予算・操作の承認・食い違いの
+    // 4 つを待つ。広い幅のノード・一覧の行で、チップが題名や「▶ 実施中」と重ならないかを見る
+    mk("C-28", "請求データの夜間集計を新しい基盤へ載せ替える", "in_progress", {
+      priority: "P1",
+      headline: "夜間集計を新基盤で回し、旧基盤の負荷を下げる",
+      flags: {
+        running: true,
+        triage: {
+          reason: "run が 2 回続けて同じ集計の検査で落ちた。",
+          run_id: "R-11",
+        },
+        budget: {
+          challenge_id: "C-28",
+          impl_remaining_usd: 0,
+          plan_version: 1,
+          review_remaining_usd: 2,
+        },
+        discrepancy: ["upstream_updated"],
+      },
+      runs: [run("R-11", "C-28", { started_at: iso(20) })],
+      operations: [
+        op("O-1", "C-28", "release", "pending", "集計の切り替えを本番へ反映"),
+      ],
+    }),
+    // チップが多い親（flywheel#464）。完了の承認・トリアージ・予算・操作の承認・食い違いの 5 つを待ちながら自身も実施中で、
+    // 実施中の子 C-30 を持つので既定で開く。開いた大枠の見出しで、チップが題名や「▶ 実施中」と重ならないかを見る
+    mk(
+      "C-29",
+      "問い合わせ窓口の一本化と旧フォームの撤去",
+      "awaiting_completion_approval",
+      {
+        priority: "P1",
+        headline: "窓口を 1 つにまとめ、古いフォームを消す",
+        flags: {
+          running: true,
+          triage: {
+            reason: "子の run が旧フォームの削除で止まった。",
+            run_id: "R-12",
+          },
+          budget: {
+            challenge_id: "C-29",
+            impl_remaining_usd: 0,
+            plan_version: 2,
+            review_remaining_usd: 1,
+          },
+          discrepancy: ["upstream_commented"],
+        },
+        runs: [run("R-12", "C-29", { started_at: iso(25) })],
+        operations: [
+          op("O-1", "C-29", "release", "pending", "旧フォームを本番から外す"),
+        ],
+      },
+    ),
+    mk("C-30", "旧フォームの送信先の付け替え", "in_progress", {
+      priority: "P2",
+      headline: "旧フォームの送信を新しい窓口へ流す",
+      flags: { running: true },
+      runs: [run("R-13", "C-30", { started_at: iso(10) })],
+    }),
     // 一言でと位置づけが長い親（flywheel#482）。一言では見出しの幅で 2 行に、位置づけは 3 行以上に折り返し、畳むと
-    // 末尾に「続き」が出る。別の課題 C-31 から子 C-29 へ依存の線が向かい、線が見出しの上を縦切る形を作る
-    mk("C-28", "配布形式 v5 への切り替え", "in_progress", {
+    // 末尾に「続き」が出る。別の課題 C-34 から子 C-32 へ依存の線が向かい、線が見出しの上を縦切る形を作る
+    mk("C-31", "配布形式 v5 への切り替え", "in_progress", {
       priority: "P1",
       headline:
         "配布の形式を v5 に切り替え、旧形式（v4）の読み込みと書き出しを段階的に外して、利用者の手元の移行の手順を 1 本にまとめる",
       context:
-        "全体計画「配布の簡素化」の 3 段目。v4 の形式は読み込みの経路が 2 つあり、障害の調査のたびに両方を見る手間がかかっている。v5 に切り替えると経路が 1 つになり、後の「署名の必須化」と「差分配布」がこの形式に乗る。いまは新形式の書き出しを先に入れ、旧形式の読み込みは証明書の更新（C-31）が済んでから外す。移行の手順書は切り替えの最後に 1 本にまとめる。",
+        "全体計画「配布の簡素化」の 3 段目。v4 の形式は読み込みの経路が 2 つあり、障害の調査のたびに両方を見る手間がかかっている。v5 に切り替えると経路が 1 つになり、後の「署名の必須化」と「差分配布」がこの形式に乗る。いまは新形式の書き出しを先に入れ、旧形式の読み込みは証明書の更新（C-34）が済んでから外す。移行の手順書は切り替えの最後に 1 本にまとめる。",
     }),
-    mk("C-29", "旧形式の読み込みを外す", "classified", {
+    mk("C-32", "旧形式の読み込みを外す", "classified", {
       priority: "P1",
       headline: "v4 の読み込みの経路を消し、v5 だけを読む",
     }),
-    mk("C-30", "新形式の書き出しを足す", "in_progress", {
+    mk("C-33", "新形式の書き出しを足す", "in_progress", {
       priority: "P1",
       headline: "v5 の形式で成果物を書き出す",
       flags: { running: true },
-      runs: [run("R-11", "C-30", { started_at: iso(25) })],
+      runs: [run("R-14", "C-33", { started_at: iso(25) })],
     }),
-    mk("C-31", "配布サーバの証明書の更新", "in_progress", {
+    mk("C-34", "配布サーバの証明書の更新", "in_progress", {
       priority: "P1",
       headline: "期限の近い証明書を新しい鍵で取り直す",
     }),
@@ -631,19 +708,76 @@ export function graphOf(w: MockWorkspace): GraphResponse {
         title: m.c.title,
       };
     });
-  const edges = [...w.graph.deps]
-    .sort((a, b) => idNum(a.from) - idNum(b.from) || idNum(a.to) - idNum(b.to))
+  // 衝突は、片方が完了・取り下げになったら API が返さない（行は残る）。前提は先行が完了していれば満たされている
+  const finished = (id: string) => {
+    const st = byId.get(id)?.c.status;
+    return st === "done" || st === "withdrawn";
+  };
+  const edges = w.graph.deps
+    .filter(
+      (d) => d.kind !== "conflict" || !(finished(d.from) || finished(d.to)),
+    )
+    .sort(
+      (a, b) =>
+        idNum(a.from) - idNum(b.from) ||
+        idNum(a.to) - idNum(b.to) ||
+        Number(a.kind === "conflict") - Number(b.kind === "conflict"),
+    )
     .map((d) => ({
+      directed: d.directed ?? true,
       from: d.from,
       kind: d.kind,
       registered_at: new Date(
         Date.parse("2026-10-10T00:00:00Z") + d.minutes * 60_000,
       ).toISOString(),
       registered_via: d.via,
-      satisfied: byId.get(d.from)?.c.status === "done",
+      satisfied:
+        d.kind === "prerequisite" && byId.get(d.from)?.c.status === "done",
       to: d.to,
     }));
   return { edges, nodes };
+}
+
+// 課題 id が待っている理由（`GET …/challenges/{id}` の waiting）。まだ終わっていない前提の課題と、
+// 衝突のため後回しにした相手（向きのある衝突で from が id、相手も終わっていないもの）。id 自身が終わっていれば空。
+export function waitingOf(w: MockWorkspace, id: string): Waiting {
+  const byId = new Map(w.items.map((m) => [m.c.id, m]));
+  const idNum = (x: string) => Number(x.replace(/^\D+/, ""));
+  const ended = (x: string) => {
+    const st = byId.get(x)?.c.status;
+    return st === "done" || st === "withdrawn";
+  };
+  const pick = (other: string): WaitingChallenge => ({
+    challenge_id: other,
+    status: byId.get(other)?.c.status ?? "",
+    title: byId.get(other)?.c.title ?? "",
+  });
+  if (ended(id)) return { conflicts: [], prerequisites: [] };
+  const sorted = (xs: string[]) => [...xs].sort((a, b) => idNum(a) - idNum(b));
+  const deps = w.graph.deps;
+  return {
+    conflicts: sorted(
+      deps
+        .filter(
+          (d) =>
+            d.kind === "conflict" &&
+            d.directed !== false &&
+            d.from === id &&
+            !ended(d.to),
+        )
+        .map((d) => d.to),
+    ).map(pick),
+    prerequisites: sorted(
+      deps
+        .filter(
+          (d) =>
+            d.kind === "prerequisite" &&
+            d.to === id &&
+            byId.get(d.from)?.c.status !== "done",
+        )
+        .map((d) => d.from),
+    ).map(pick),
+  };
 }
 
 export const toCard = (m: MockChallenge): ChallengeCard => ({
@@ -711,10 +845,38 @@ export function statusOf(w: MockWorkspace): StatusResponse {
   };
 }
 
+// 大きなまとまりの偽のデータ（flywheel#470。`?mock=large` のときだけ）。large は課題 100 件がほぼ 1 つにつながる形、
+// large-flat は同じ 100 件から線をすべて抜いた形（描画の速さの比べ先）。
+export function seedLarge(): Record<string, MockWorkspace> {
+  const build = (s: LargeSpec): MockChallenge =>
+    mk(s.id, s.title, s.status, {
+      priority: s.priority,
+      flags: { running: s.running, unresponsive: s.unresponsive },
+      operations: s.operation
+        ? [op(`O-${s.id.slice(2)}`, s.id, "release", "pending", "本番へ反映")]
+        : [],
+    });
+  const base = {
+    cycle: {
+      state: "running",
+      last_started_at: iso(12),
+      last_ended_at: iso(90),
+      last_result: "completed",
+    },
+  };
+  return {
+    large: largeWorkspace("large", true, build, base),
+    "large-flat": largeWorkspace("large-flat", false, build, base),
+  };
+}
+
 // --- ストア本体 ---
 
 export class MockStore {
-  workspaces: Record<string, MockWorkspace> = seed();
+  workspaces: Record<string, MockWorkspace>;
+  constructor(workspaces: Record<string, MockWorkspace> = seed()) {
+    this.workspaces = workspaces;
+  }
   private listeners = new Set<(ws: string) => void>();
 
   subscribe(fn: (ws: string) => void): () => void {

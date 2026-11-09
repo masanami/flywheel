@@ -14,6 +14,27 @@ import (
 type ReleaseHead struct {
 	Operation IrreversibleOperation
 	HeadSHA   *string
+	// MergeInVerifiedHead は、承認の ① が、HeadSHA を「この検証の head から既定ブランチを取り込んだだけ（CI は通っている）」と
+	// 判定したときの検証の head（承認の入力にだけ使う。#485）。② の core は、これが最新の検証の head と一致するときだけ、
+	// HeadSHA が検証の head と異なっていても承認し、承認の記録に残す。nil は取り込みの判定を伴わない承認。
+	MergeInVerifiedHead *string
+}
+
+// releaseHeadAcceptable は、承認する head が最新の検証の head（verified。nil は記録なし）に照らして承認できるかを返す。
+// 記録なし（取り込みの主張がないとき）・一致は承認できる。異なるときは、mergeIn（①が取り込みだけと判定した検証の head）が verified と一致する
+// ときだけ承認できる。recordMergeIn は承認の記録に取り込みの検証の head を残す（head が異なり、主張が通ったとき）。
+func releaseHeadAcceptable(verified *string, head, mergeIn string) (ok, recordMergeIn bool) {
+	if verified == nil {
+		// 検証の head の記録がないのに取り込みの検証の head を名指す入力は、呼び出し側の誤りとして承認しない。
+		return mergeIn == "", false
+	}
+	if *verified == head {
+		return true, false
+	}
+	if mergeIn != "" && mergeIn == *verified {
+		return true, true
+	}
+	return false, false
 }
 
 // parseReleasePullRequestRef は ref が https://github.com/<owner>/<repo>/pull/<番号> の形

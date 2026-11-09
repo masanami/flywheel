@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -369,16 +370,20 @@ func TestApproval_OrdinaryCompletionHasNoDirectCompletion(t *testing.T) {
 	}
 }
 
-// 差し戻されて別の道で再び完了確認待ちに来たとき、前の直接行った記録を承認の根拠として見せない。
+// 差し戻されて別の道（検証の met＝T8）で再び完了確認待ちに来たとき、前の直接行った記録を承認の根拠として見せない。
+// 親が直接した完了の差し戻しは「親が直接やる」保留へ戻る（#481）ので、回答で保留の前の状態へ戻してから進める。
 func TestApproval_StaleDirectCompletionIsNotShownAfterRejectionAndReentry(t *testing.T) {
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
-	c := holdAsParentDirect(t, s, StatusClassified)
+	c := holdAsParentDirect(t, s, StatusInProgress)
 	if _, _, err := s.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/1")); err != nil {
 		t.Fatal(err)
 	}
-	if res := dispatchOperation(t, s, c.ID, OpReject); res.err != nil || res.status != StatusInProgress {
-		t.Fatalf("reject = %+v, want in_progress", res)
+	if res := dispatchOperation(t, s, c.ID, OpReject); res.err != nil || res.status != StatusAwaitingHuman {
+		t.Fatalf("reject = %+v, want awaiting_human", res)
+	}
+	if res := dispatchOperation(t, s, c.ID, OpAnswer); res.err != nil || res.status != StatusInProgress {
+		t.Fatalf("answer = %+v, want in_progress", res)
 	}
 	if _, err := s.SubmitChallenge(context.Background(), ChannelCLI, c.ID); err != nil {
 		t.Fatal(err)
@@ -392,6 +397,9 @@ func TestApproval_StaleDirectCompletionIsNotShownAfterRejectionAndReentry(t *tes
 	}
 	if p.DirectCompletion != nil {
 		t.Errorf("DirectCompletion = %+v after re-entry through verify, want nil", p.DirectCompletion)
+	}
+	if completionDirectForTest(t, s, c.ID) {
+		t.Error("completion_direct = true after entering through T8, want false")
 	}
 	// 記録そのものは残る（詳細には出る）。
 	d, _ := s.GetChallenge(context.Background(), c.ID)
@@ -657,4 +665,362 @@ func mustChallenge(t *testing.T, s *Store, id string) Challenge {
 		t.Fatalf("GetChallenge(%s): %v", id, err)
 	}
 	return d.Challenge
+}
+
+// --- 親が直接した完了の差し戻し（T15 の 2 つの戻り先。#481） ---
+
+// completionDirectForTest は challenge.completion_direct（いまの完了確認待ちが T17 から来たか）を読む。
+func completionDirectForTest(t *testing.T, s *Store, id string) bool {
+	t.Helper()
+	cid, ok := parseChallengeID(id)
+	if !ok {
+		t.Fatalf("bad id %q", id)
+	}
+	var v int
+	if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRowContext(context.Background(), `SELECT completion_direct FROM challenge WHERE id = ?`, cid).Scan(&v)
+	}); err != nil {
+		t.Fatalf("read completion_direct: %v", err)
+	}
+	if v != 0 && v != 1 {
+		t.Fatalf("completion_direct = %d, want 0 or 1", v)
+	}
+	return v == 1
+}
+
+// rejectAfterForTest は課題の最後の reject の作業ログの after を返す（無ければ nil）。
+func rejectAfterForTest(t *testing.T, s *Store, id string) map[string]any {
+	t.Helper()
+	var out map[string]any
+	for _, a := range activitiesFor(t, s, id) {
+		if a.Action != string(OpReject) {
+			continue
+		}
+		out = map[string]any{}
+		if err := json.Unmarshal(a.After, &out); err != nil {
+			t.Fatalf("reject activity after is not JSON: %v", err)
+		}
+	}
+	return out
+}
+
+// rejectWithReasonForTest は完了確認待ちの課題を理由つきで差し戻す（本人確認つきの 2 段階をまとめたもの）。
+func rejectWithReasonForTest(t *testing.T, s *Store, id, reason string) *Challenge {
+	t.Helper()
+	prev, err := s.PrepareRejection(context.Background(), id, reason)
+	if err != nil {
+		t.Fatalf("PrepareRejection: %v", err)
+	}
+	c, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: id, ExpectedVersion: prev.Version, Decision: ApprovalDecisionRejected, Reason: &reason,
+	}, verifiedAttestationForTest(t, id))
+	if err != nil {
+		t.Fatalf("ExecuteApproval(reject): %v", err)
+	}
+	return c
+}
+
+func TestTable_T15_HasADirectCompletionTargetOfAwaitingHuman(t *testing.T) {
+	tr, ok := Lookup(StatusAwaitingCompletionApproval, OpReject)
+	if !ok || tr.ID != "T15" || !tr.RequiresVerification {
+		t.Fatalf("Lookup(awaiting_completion_approval, reject) = %+v, ok=%v", tr, ok)
+	}
+	plain, err := tr.Target.ResolveForCompletionDirect(Table, NoStatus, false)
+	if err != nil || plain != StatusInProgress {
+		t.Errorf("ResolveForCompletionDirect(false) = %q, %v, want in_progress", plain, err)
+	}
+	direct, err := tr.Target.ResolveForCompletionDirect(Table, NoStatus, true)
+	if err != nil || direct != StatusAwaitingHuman {
+		t.Errorf("ResolveForCompletionDirect(true) = %q, %v, want awaiting_human", direct, err)
+	}
+	// 通常の Resolve は従来どおり（既存の呼び出し元が見る遷移先は変わらない）。
+	if got, err := tr.Target.Resolve(Table, NoStatus); err != nil || got != StatusInProgress {
+		t.Errorf("Resolve = %q, %v, want in_progress", got, err)
+	}
+	// ほかの行は、真偽に関わらず従来の遷移先。
+	for _, row := range Table {
+		if row.ID == "T15" {
+			continue
+		}
+		if row.Target.IfCompletionDirect != NoStatus {
+			t.Errorf("%s has IfCompletionDirect = %q, want only T15", row.ID, row.Target.IfCompletionDirect)
+		}
+	}
+}
+
+// ① 親が直接した完了の差し戻しは、着手中ではなく「親が直接やる」保留（人間対応待ち）へ戻る。保留を立てた元の状態に
+// よらず同じで（②）、戻した保留の from_status は元の保留の from_status、問いの文は差し戻しの理由（③）。
+func TestReject_OfADirectCompletionReturnsToAParentDirectHold(t *testing.T) {
+	for _, from := range []Status{StatusUnclassified, StatusClassified, StatusInProgress, StatusVerifying} {
+		t.Run(string(from), func(t *testing.T) {
+			s := newStoreForTest(t)
+			fixedActor(t, "alice")
+			c := holdAsParentDirect(t, s, from)
+			if _, _, err := s.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/1")); err != nil {
+				t.Fatal(err)
+			}
+			reason := "成果物が完了条件を満たしていない。\n3 点目を直してやり直す"
+
+			got := rejectWithReasonForTest(t, s, c.ID, reason)
+			if got.Status != StatusAwaitingHuman {
+				t.Fatalf("status after reject = %q, want awaiting_human", got.Status)
+			}
+			d, err := s.GetChallenge(context.Background(), c.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.Status != StatusAwaitingHuman || d.Version != got.Version {
+				t.Errorf("stored challenge = %s v%d, returned v%d", d.Status, d.Version, got.Version)
+			}
+			if len(d.Holds) != 2 {
+				t.Fatalf("holds = %d, want 2 (the closed original and the new one)", len(d.Holds))
+			}
+			if d.Holds[0].Open() || d.Holds[0].Answer != nil {
+				t.Errorf("original hold = %+v, want still closed without an answer", d.Holds[0])
+			}
+			h := d.Holds[1]
+			if !h.Open() || h.Kind != HoldKindParentDirect || h.Question != reason || h.FromStatus != from || h.Answer != nil {
+				t.Errorf("new hold = open %v kind %q question %q from %q, want open parent_direct %q from %q", h.Open(), h.Kind, h.Question, h.FromStatus, reason, from)
+			}
+
+			// 親のエージェントが動く番（status の parent_agent 区分）で、周の自動の対象には選ばれない。
+			ov, err := s.GetOverview(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ov.ParentAgentChallenges) != 1 || ov.ParentAgentChallenges[0].ID != c.ID {
+				t.Errorf("ParentAgentChallenges = %v, want [%s]", ov.ParentAgentChallenges, c.ID)
+			}
+			cid, _ := parseChallengeID(c.ID)
+			j1, j2, deleg, j5 := autoTargetsForTest(t, s)
+			for name, ids := range map[string][]int64{"J1": j1, "J2": j2, "delegation": deleg, "J5": j5} {
+				for _, id := range ids {
+					if id == cid {
+						t.Errorf("%s targets include the rejected direct completion %d", name, cid)
+					}
+				}
+			}
+			if completionDirectForTest(t, s, c.ID) {
+				t.Error("completion_direct = true after leaving awaiting_completion_approval, want false")
+			}
+
+			// 作業ログの reject の after は、戻り先の保留の種類を持つ。
+			after := rejectAfterForTest(t, s, c.ID)
+			if after == nil || after["hold_kind"] != string(HoldKindParentDirect) || after["status"] != string(StatusAwaitingHuman) || after["reason"] != reason {
+				t.Errorf("reject activity after = %v, want status awaiting_human, hold_kind parent_direct and the reason", after)
+			}
+		})
+	}
+}
+
+// ④ 差し戻した保留から、親が再び complete-direct で完了確認待ちへ進められ、承認の要約には新しい記録が出る。
+// もう一度差し戻しても、同じ元の状態の保留へ戻る。
+func TestReject_DirectCompletionCanBeCompletedAgainAndRejectedAgain(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := holdAsParentDirect(t, s, StatusClassified)
+	if _, _, err := s.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/first")); err != nil {
+		t.Fatal(err)
+	}
+	rejectWithReasonForTest(t, s, c.ID, "やり直し")
+
+	got, dc, err := s.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/second"))
+	if err != nil {
+		t.Fatalf("CompleteDirect() after reject error = %v", err)
+	}
+	if got.Status != StatusAwaitingCompletionApproval || len(dc.Artifacts) != 1 || dc.Artifacts[0] != "https://example.com/second" {
+		t.Fatalf("second completion = %s %+v", got.Status, dc)
+	}
+	p, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.DirectCompletion == nil || len(p.DirectCompletion.Artifacts) != 1 || p.DirectCompletion.Artifacts[0] != "https://example.com/second" {
+		t.Errorf("preview direct completion = %+v, want the second record", p.DirectCompletion)
+	}
+	d, _ := s.GetChallenge(context.Background(), c.ID)
+	if len(d.DirectCompletions) != 2 || len(d.Holds) != 2 || d.Holds[1].Open() {
+		t.Errorf("direct completions = %d, holds = %+v, want 2 completions and the second hold closed", len(d.DirectCompletions), d.Holds)
+	}
+
+	// 2 回目の完了を差し戻しても、元の状態（分類済）を保った保留へ戻る。
+	rejectWithReasonForTest(t, s, c.ID, "もう一度")
+	d, _ = s.GetChallenge(context.Background(), c.ID)
+	if d.Status != StatusAwaitingHuman || len(d.Holds) != 3 || !d.Holds[2].Open() || d.Holds[2].FromStatus != StatusClassified || d.Holds[2].Question != "もう一度" {
+		t.Errorf("after the second reject: %s holds=%+v", d.Status, d.Holds)
+	}
+	// 回答すれば、保留の前の状態（分類済）へ戻る。
+	if res := dispatchOperation(t, s, c.ID, OpAnswer); res.err != nil || res.status != StatusClassified {
+		t.Errorf("answer = %+v, want back to classified", res)
+	}
+}
+
+// ⑤ 通常の完了（T8 由来）の差し戻しは従来どおり着手中へ戻り、保留は立たない。
+func TestReject_OfAnOrdinaryCompletionStillReturnsToInProgressWithoutAHold(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusVerifying)
+	if _, err := s.VerifyChallenge(context.Background(), ChannelCLI, c.ID, VerifyInput{Result: "met"}); err != nil {
+		t.Fatal(err)
+	}
+	if completionDirectForTest(t, s, c.ID) {
+		t.Fatal("completion_direct = true after T8, want false")
+	}
+	got := rejectWithReasonForTest(t, s, c.ID, "足りない")
+	if got.Status != StatusInProgress {
+		t.Fatalf("status after reject = %q, want in_progress", got.Status)
+	}
+	d, _ := s.GetChallenge(context.Background(), c.ID)
+	if len(d.Holds) != 0 {
+		t.Errorf("holds = %+v, want none", d.Holds)
+	}
+	after := rejectAfterForTest(t, s, c.ID)
+	if after == nil {
+		t.Fatal("no reject activity entry")
+	}
+	if _, ok := after["hold_kind"]; ok {
+		t.Errorf("reject activity after has hold_kind: %v", after)
+	}
+}
+
+// 別の課題が direct 由来でも、通常の課題の差し戻しには影響しない（値は課題ごと）。
+func TestReject_DirectFlagIsPerChallenge(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	direct := holdAsParentDirect(t, s, StatusClassified)
+	if _, _, err := s.CompleteDirect(context.Background(), ChannelCLI, direct.ID, completeDirectInput("https://example.com/1")); err != nil {
+		t.Fatal(err)
+	}
+	plain := createAndAdvance(t, s, StatusAwaitingCompletionApproval)
+	if res := dispatchOperation(t, s, plain.ID, OpReject); res.err != nil || res.status != StatusInProgress {
+		t.Fatalf("plain reject = %+v, want in_progress", res)
+	}
+	if !completionDirectForTest(t, s, direct.ID) {
+		t.Error("the direct challenge lost its flag")
+	}
+}
+
+// ⑥ 値は T17 で真、ほかのすべての遷移で偽。完了確認待ちを出るとき（T13・T14・T15・T16）に消える。
+func TestCompletionDirect_IsTrueOnlyAfterT17AndClearedWhenLeaving(t *testing.T) {
+	enter := func(t *testing.T, s *Store) *Challenge {
+		t.Helper()
+		c := holdAsParentDirect(t, s, StatusClassified)
+		if completionDirectForTest(t, s, c.ID) {
+			t.Fatal("completion_direct = true while only held")
+		}
+		if _, _, err := s.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/1")); err != nil {
+			t.Fatal(err)
+		}
+		if !completionDirectForTest(t, s, c.ID) {
+			t.Fatal("completion_direct = false after T17, want true")
+		}
+		return c
+	}
+	for name, leave := range map[string]func(t *testing.T, s *Store, id string){
+		"T13 approve":              func(t *testing.T, s *Store, id string) { dispatchOperation(t, s, id, OpApprove) },
+		"T14 approve hold-release": func(t *testing.T, s *Store, id string) { dispatchOperation(t, s, id, OpApproveHoldRelease) },
+		"T15 reject":               func(t *testing.T, s *Store, id string) { dispatchOperation(t, s, id, OpReject) },
+		"T16 withdraw":             func(t *testing.T, s *Store, id string) { dispatchOperation(t, s, id, OpWithdraw) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newStoreForTest(t)
+			fixedActor(t, "alice")
+			c := enter(t, s)
+			leave(t, s, c.ID)
+			d, _ := s.GetChallenge(context.Background(), c.ID)
+			if d.Status == StatusAwaitingCompletionApproval {
+				t.Fatalf("still in awaiting_completion_approval")
+			}
+			if completionDirectForTest(t, s, c.ID) {
+				t.Errorf("completion_direct = true after leaving through %s (now %s), want false", name, d.Status)
+			}
+		})
+	}
+
+	t.Run("T8 sets false", func(t *testing.T) {
+		s := newStoreForTest(t)
+		fixedActor(t, "alice")
+		c := createAndAdvance(t, s, StatusVerifying)
+		if _, err := s.VerifyChallenge(context.Background(), ChannelCLI, c.ID, VerifyInput{Result: "met"}); err != nil {
+			t.Fatal(err)
+		}
+		if completionDirectForTest(t, s, c.ID) {
+			t.Error("completion_direct = true after T8, want false")
+		}
+	})
+
+	// 値は遷移の外の書き込み（edit）で変わらない。
+	t.Run("edit keeps the value", func(t *testing.T) {
+		s := newStoreForTest(t)
+		fixedActor(t, "alice")
+		c := enter(t, s)
+		title := "題名を直した"
+		if _, err := s.EditChallenge(context.Background(), ChannelCLI, c.ID, EditInput{Title: &title}); err != nil {
+			t.Fatal(err)
+		}
+		if !completionDirectForTest(t, s, c.ID) {
+			t.Error("edit cleared completion_direct")
+		}
+		p, err := s.PrepareApproval(context.Background(), c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.DirectCompletion == nil {
+			t.Error("preview lost the direct completion after an edit")
+		}
+	})
+}
+
+// 承認の要約が「いまの完了確認待ちが T17 から来たか」を見るのは、作業ログではなく課題の記録（#481）。
+// 作業ログの行が無くても（取り込んだ・手で直したストア）、値が真なら記録を見せる。
+func TestApproval_DirectCompletionFollowsTheRecordNotTheActivityLog(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := holdAsParentDirect(t, s, StatusClassified)
+	if _, _, err := s.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/1")); err != nil {
+		t.Fatal(err)
+	}
+	cid, _ := parseChallengeID(c.ID)
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`DELETE FROM activity WHERE entity = 'challenge' AND entity_id = ? AND action = 'complete_direct'`, cid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.DirectCompletion == nil {
+		t.Error("DirectCompletion = nil, want the record (the flag is true)")
+	}
+}
+
+// ストアの書き出し・再構築（M5 S1）で値が往復する。
+func TestExportImport_CarriesTheCompletionDirectFlag(t *testing.T) {
+	src, _ := newWorkspaceStore(t)
+	fixedActor(t, "alice")
+	c := holdAsParentDirect(t, src, StatusClassified)
+	if _, _, err := src.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/1")); err != nil {
+		t.Fatal(err)
+	}
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if !completionDirectForTest(t, dst, c.ID) {
+		t.Error("completion_direct = false after the round trip, want true")
+	}
+	p, err := dst.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.DirectCompletion == nil {
+		t.Error("preview has no direct completion after the round trip")
+	}
+	// 差し戻しも、再構築したストアで同じ戻り先になる。
+	got := rejectWithReasonForTest(t, dst, c.ID, "やり直し")
+	if got.Status != StatusAwaitingHuman {
+		t.Errorf("status after reject in the imported store = %q, want awaiting_human", got.Status)
+	}
 }

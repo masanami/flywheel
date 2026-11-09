@@ -150,6 +150,7 @@ function bodies() {
         issues_answer: null,
         non_goals: null,
       },
+      waiting: { conflicts: [], prerequisites: [] },
     };
     f[`/api/v1/workspaces/alpha/log?challenge=${id}`] = { activities: [] };
   }

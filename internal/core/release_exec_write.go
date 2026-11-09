@@ -106,7 +106,8 @@ func executeReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, 
 		w.after(map[string]any{"state": string(OperationStateExecuted), "version": w.version + 1}))
 }
 
-// cancelReleaseInTx は取り消しの書き込み: 試行を閉じ、approved から pending へ戻し、不可逆操作と課題の版を
+// cancelReleaseInTx は取り消しの書き込み: 試行を閉じ、approved から pending へ戻し（結果が merged_unapproved の
+// ときは closed にして理由 merged_unapproved を残す）、不可逆操作と課題の版を
 // それぞれ 1 上げ、entity=operation と entity=challenge の op_execute を同じトランザクションで残す。
 // 承認の行（approval）は消さない。課題の状態は変えない。
 // 結果が merged_unapproved なら unapproved_merge、それ以外（取り消しの結果）は release_withdrawn の
@@ -117,16 +118,30 @@ func (s *Store) cancelReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activity
 		EndedAt: w.at, Result: w.result, ObservedHead: w.observedHead, Detail: w.detail}); err != nil {
 		return err
 	}
-	if err := updateOperationForExecution(ctx, tx, w, OperationStatePending, nil, nil); err != nil {
+	// 承認していない head でマージ済みになった release は、承認し直せないので pending へ戻さず closed にする
+	// （理由 merged_unapproved。承認なしの本番反映の発生は下で残す）。それ以外の取り消しは pending へ戻す。
+	newState, afterExtra := OperationStatePending, map[string]any{}
+	if w.result == ExecutionResultMergedUnapproved {
+		newState = OperationStateClosed
+		afterExtra["closed_reason"] = string(ClosedReasonMergedUnapproved)
+	}
+	if err := updateOperationForExecution(ctx, tx, w, newState, nil, nil); err != nil {
 		return err
+	}
+	if newState == OperationStateClosed {
+		if _, err := tx.ExecContext(ctx, `UPDATE operation SET closed_reason = ?, closed_at = ? WHERE id = ?`,
+			string(ClosedReasonMergedUnapproved), nowStr, w.opID); err != nil {
+			return err
+		}
 	}
 	newChallengeVersion, err := bumpChallengeVersionQuietly(ctx, tx, w.challengeID, nowStr)
 	if err != nil {
 		return err
 	}
 	before := map[string]any{"state": string(OperationStateApproved)}
-	if err := rec.record("operation", w.opID, ActivityActionOpExecute, before,
-		w.after(map[string]any{"state": string(OperationStatePending), "version": w.version + 1})); err != nil {
+	afterExtra["state"] = string(newState)
+	afterExtra["version"] = w.version + 1
+	if err := rec.record("operation", w.opID, ActivityActionOpExecute, before, w.after(afterExtra)); err != nil {
 		return err
 	}
 	if err := rec.record("challenge", w.challengeID, ActivityActionOpExecute, nil, map[string]any{
@@ -228,6 +243,39 @@ func (s *Store) recordMergedAfterWithdrawalInTx(ctx context.Context, tx *sql.Tx,
 	return mergedAfterWithdrawalRecorded, nil
 }
 
+// reopenAfterNotMergeable は、完了の課題の release が not_mergeable になった試行を閉じ、課題を着手中へ戻して
+// release を置き換える（reopenForReleaseInTx）。取り消しと同じく release_withdrawn の発生を試行を参照にして残す。
+func (s *Store) reopenAfterNotMergeable(ctx context.Context, tx *sql.Tx, rec *activityRecorder, w releaseOutcomeWrite, reason ReopenReason, item *ReleaseExecItem) error {
+	if err := closeOperationExecution(ctx, tx, w.attemptID, closeOperationExecutionInput{
+		EndedAt: w.at, Result: w.result, ObservedHead: w.observedHead, Detail: w.detail}); err != nil {
+		return err
+	}
+	res, err := reopenForReleaseInTx(ctx, tx, rec, w.opID, reason, map[string]any{
+		"attempt_result": string(w.result), "approved_head": nullableTextColumn(w.approvedHead),
+		"observed_head": nullableTextColumn(w.observedHead), "trigger": w.trigger,
+	})
+	if err != nil {
+		return err
+	}
+	if !res.Reopened {
+		return fmt.Errorf("core: reopen for release %s: the challenge is done and the release is approved but nothing was reopened", formatOperationID(w.opID))
+	}
+	if err := s.insertReleaseOccurrence(tx, w, OccurrenceKindReleaseWithdrawn); err != nil {
+		return err
+	}
+	item.Result = w.result
+	item.ObservedHead = w.observedHead
+	item.Reopened = true
+	item.NewOperationID = res.NewOperationID
+	item.ReopenReason = reason
+	n, err := consecutiveFailures(ctx, tx, w.opID)
+	if err != nil {
+		return err
+	}
+	item.ConsecutiveFailures = n
+	return nil
+}
+
 // finishReleaseAttempt は判定 j の結果で試行を閉じる。待つ結果は試行の行だけを書き（作業ログなし）、
 // 数える結果で連続の回数が failure_limit に達したときは limit_reached として取り消す。
 func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int64, row *operationRow, attempt *operationExecutionRow, approvedHead string, j releaseJudgment, opts ReleaseExecOptions, cycleID *int64, now func() time.Time) (*ReleaseExecItem, error) {
@@ -255,6 +303,25 @@ func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int
 		}
 		if cur.Version != row.Version || cur.State != OperationStateApproved {
 			return ErrConflict
+		}
+		// マージできない（not_mergeable）release の課題が完了なら、試行を not_mergeable で閉じ、課題を着手中へ戻して
+		// release を置き換える（連続の回数・上限より先に判定する。#485）。
+		if j.result == ExecutionResultNotMergeable {
+			chal, err := loadChallenge(ctx, tx, row.ChallengeID)
+			if err != nil {
+				return err
+			}
+			if chal.Status == StatusDone {
+				prior, err := consecutiveFailures(ctx, tx, opID)
+				if err != nil {
+					return err
+				}
+				reason := ReopenReasonNotMergeable
+				if prior+1 >= limit {
+					reason = ReopenReasonLimitReached
+				}
+				return s.reopenAfterNotMergeable(ctx, tx, rec, w, reason, item)
+			}
 		}
 		if j.result.Counts() {
 			prior, err := consecutiveFailures(ctx, tx, opID)

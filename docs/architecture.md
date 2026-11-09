@@ -184,12 +184,14 @@ DDL ではなく、何を持つかの合意のための素描である。
 |---|---|---|
 | `challenge` | id, title, description, done_criteria, urgency, status, priority, position, size, budget_limit, reporter, reported_at | 現行台帳の 1 エントリに相当。人間記入欄と分類欄の区別は「誰が書けるか」の権限として core が持つ |
 | `challenge_dependency` | challenge_id, depends_on_id | 現行の `依存` フィールド。M4.5 の S2 で作る（旧台帳の `依存` を M5 で移す受け皿。課題どうしの関係のグラフ〔flywheel#176〕のデータにもなる）。依存先が完了し、その `release` に未承認・承認済みで未実行のものが無いときに満たし、委譲の起動だけを止める（2026-10-22 オーナー＝[M4.5 の機能仕様](features/m4.5-learning-and-self-improvement.md) M45H12） |
+| `challenge_conflict` | challenge_id, conflicts_with_id, directed, cycle_id, run_id, created_at | 衝突の予測（`harness predict-conflicts`）の結果として、同時に委譲しない組を持つ。向きありは「後回しにした課題 → 先に委譲した課題」、向きなし（`directed = 0`）はまだどちらも委譲していない組。前提の依存（`challenge_dependency`）とは別の表で、依存の評価・委譲の起動の判定は読まない。関係グラフの衝突の辺（`kind=conflict`）と、ボードの詳細の「衝突のため後回し」のために使う（2026-11-05 オーナー＝[関係グラフの仕様](features/ui-relation-graph.md) §衝突） |
 | 課題カードの段階の欄（D20） | challenge_id, headline, context, issues（論点）, expected（完了したら見えるもの・予想）, actual（同・実物）, non_goals（やらないこと）, figure（図・任意） | M4 の S4 で作る。`challenge` の列（論点・予想・実物・やらないことは JSON の配列、図は Mermaid のテキスト。論点の回答は保留の記録を正本とし、`issues_hold_id` で参照する）とし、版ごとの履歴は持たず書き換えの前後を作業ログに残す。差し戻しの記録（`approval`）に「ずれた欄」（`rejected_fields`）を足す（[M4 の機能仕様](features/m4-ui-server.md) §クリティカル設計決定 5。2026-10-19 親 M4P33） |
 | `challenge_link` | challenge_id, kind（repo / issue / pr）, ref | 現行の関連リポジトリ・関連 Issue・関連 PR |
 | `task_plan` | challenge_id, version, summary, steps | FR-13 の承認対象。改訂履歴を持てる |
 | `approval` | id, challenge_id, kind（plan / completion / irreversible_op）, decision, actor, channel（ui / cli）, verification（tty_confirm / none / relayed）, decided_at, relay_session, relay_quote | D5。`actor` と `channel` が作業ログを兼ねる。`relay_session`・`relay_quote` は対話で受けた承認（`verification=relayed`）の会話の手がかり（会話の識別とオーナーの発言の要旨）で、それ以外は空。当初の案の `note` に当たる（M4 の S3 で足す。[M4 の機能仕様](features/m4-ui-server.md) M4H21） |
 | `hold` | challenge_id, question, raised_at, resolved_at, answer, session_ref, kind | 現行の「人間対応待ち」。問いと回答を構造として持つ。M4 の S3 で、回答の経路と方式（`answered_channel`・`answered_verification`）と、対話で受けた回答の会話の手がかり（`relay_session`・`relay_quote`）を足す（[M4 の機能仕様](features/m4-ui-server.md) M4H21）。`kind` は保留の種類（`human`＝人の対応を待つ〔既定〕・`parent_direct`＝対話のセッションの親が直接行う課題の保留。#452＝[M1 の機能仕様](features/m1-core.md) §親が直接行った作業の完了） |
 | `direct_completion`・`direct_completion_artifact` | challenge_id, hold_id, note, created_at ／ direct_completion_id, position, ref | 親が直接行った作業の完了の記録（T17）と、その成果物の参照（run を介さない。1 件以上）。1 行あることが課題の「親が直接行った」印で、完了の後も残る（#452） |
+| `challenge_reopen` | challenge_id, reason, operation_id, new_operation_id, superseded_approval_id, created_at | 完了の承認まで済んだ課題を、本番反映でマージできなくなったときに限って完了から着手中へ戻した記録（T18。#485）。古い `release` は `closed`（`superseded`）にし、新しい `release` と結び、前の完了の承認は「置き換えられた」として残して次の完了の承認と結ぶ（[M4.5 の機能仕様](features/m4.5-learning-and-self-improvement.md) §検証の後に head が動いた release と本番反映の立て直し） |
 | `source_binding` | challenge_id, source_id, external_key, fingerprint, last_synced_at, upstream_state | 取り込み元との対応。上流の close を保持できる（claude-flywheel#140） |
 | `cycle` | id, started_at, ended_at, result, budget_usd, spent_usd | 現行の `cycle_start` / `cycle_end` |
 | `run` | id, cycle_id（NULL 可）, kind（delegate / adhoc / judgment）, challenge_id, repo, slot_id, session_ref, started_at, ended_at, result, cost_usd | 現行の `delegate_*` / `adhoc_*` に、判断点の呼び出しを加えたもの。**終了していない `run` が「実行中」** |
@@ -224,9 +226,11 @@ stateDiagram-v2
     s7 --> [*]
 ```
 
-> 人間対応待ちへ入れる状態と戻り先は、M1 で拡張した（未分類・分類済・着手中・検証中から入り、回答で入る直前の状態へ戻る。2026-09-21 オーナー決定 H4＝[M1 の機能仕様](features/m1-core.md)）。上の図は着手中からの経路だけを描いている。
+> 人間対応待ちへ入れる状態と戻り先は、M1 で拡張した（未分類・分類済・着手中・検証中から入り、回答で入る直前の状態へ戻る〔T15 が親が直接した完了の差し戻しで立てた保留は、その完了が閉じた保留の直前の状態へ戻る。#481〕。2026-09-21 オーナー決定 H4＝[M1 の機能仕様](features/m1-core.md)）。上の図は着手中からの経路だけを描いている。
 >
-> 人間対応待ちには種類がある（`human`＝人の対応を待つ・`parent_direct`＝対話のセッションの親が直接行う。#452）。種類が `parent_direct` の保留からは、回答（T12）・取り下げ（T16）に加え、親が直接行った作業を成果物の参照つきで記録する T17（`complete-direct`）で、完了の検証を通さずに完了確認待ちへ進める（完了の承認は従来どおりオーナー。[M1 の機能仕様](features/m1-core.md) §親が直接行った作業の完了）。状態は人間対応待ちのままで、`status`・関係グラフは種類を見て「親のエージェントが動く番」の区分に分ける。
+> 人間対応待ちには種類がある（`human`＝人の対応を待つ・`parent_direct`＝対話のセッションの親が直接行う。#452）。種類が `parent_direct` の保留からは、回答（T12）・取り下げ（T16）に加え、親が直接行った作業を成果物の参照つきで記録する T17（`complete-direct`）で、完了の検証を通さずに完了確認待ちへ進める（完了の承認は従来どおりオーナー。[M1 の機能仕様](features/m1-core.md) §親が直接行った作業の完了）。状態は人間対応待ちのままで、`status`・関係グラフは種類を見て「親のエージェントが動く番」の区分に分ける。親が直接した完了の差し戻し（T15）は、着手中ではなく「親が直接やる」保留（種類 `parent_direct`・問いは差し戻しの理由）へ戻す。完了確認待ちが T17 で入ったものかは、課題の記録 `challenge.completion_direct`（T17 で 1・ほかの遷移で 0）で分ける（#481。スキーマ版 17）。
+>
+> 完了は通常の操作から出られない終端のままだが、承認まで済んだ `release` が本番反映でマージできなくなったときに限り、専用の書き込み（`ReopenChallengeForRelease`）だけが完了から着手中へ戻す（遷移表の制限つきの行 T18。CLI のコマンドは無い。#485）。戻した課題は委譲と完了の検証をやり直し、新しい完了の承認で新しい `release` を承認する。
 
 遷移ごとに「誰が起こせるか」を core が持つ。**人間だけが起こせる遷移を、自走中の Claude が起こせない**ことが承認ゲートの実体になる（§9）。
 

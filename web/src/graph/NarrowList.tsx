@@ -13,6 +13,7 @@ import {
   OTHERS_LABEL,
   categoryLabel,
   compareIds,
+  conflictNotesOf,
   humanChips,
   neighborsOf,
 } from "./model.ts";
@@ -36,6 +37,13 @@ export interface NarrowListProps {
 
 const idsText = (ids: string[]) => (ids.length > 0 ? ids.join("、") : "なし");
 
+// 衝突の相手を、この課題から見た役割で文字にする。向きの無い組は「衝突の可能性」（どちらを先にするかが未定）。
+const CONFLICT_LABELS = {
+  yields: "衝突のため後回し",
+  preferred: "衝突で先に委譲",
+  undirected: "衝突の可能性（順序は未定）",
+} as const;
+
 function Row({ id, p }: { id: string; p: NarrowListProps }) {
   const info = p.infos.get(id);
   if (!info) return null;
@@ -45,6 +53,7 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
   const near = neighborsOf(id, p.relations);
   const folded = isParent && !open ? p.inside(id) : null;
   const chips = humanChips(info.node);
+  const conflicts = conflictNotesOf(id, p.relations);
   return (
     <li
       className="graph-list-item"
@@ -77,13 +86,15 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
           <b>{id}</b> {info.node.title}
         </button>
         {chips.length > 0 ? (
-          // 人間の操作待ちのチップ（記号と語）。行の右上に右寄せで並べ、入らない語は切り詰める
+          // 人間の操作待ちのチップ（記号と語）。行の右上に右寄せで並べ、入らないチップは次の行へ折り返す。
+          // それでも語が入らないほど狭いときに切り詰めても、語は title（ホバーで出る）に残る
           <span className="graph-list-human" data-category="human">
             {chips.map((c) => (
               <span
                 key={c.kind}
                 className="graph-human-chip"
                 data-kind={c.kind}
+                title={c.label}
               >
                 <span className="graph-human-chip-glyph" aria-hidden="true">
                   {c.glyph}
@@ -105,6 +116,11 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
       <div className="graph-list-rel">
         <span>先行: {idsText(near.predecessors)}</span>
         <span>後続: {idsText(near.successors)}</span>
+        {conflicts.map((c) => (
+          <span key={`${c.kind}:${c.id}`} data-conflict={c.kind}>
+            {CONFLICT_LABELS[c.kind]}: {c.id}
+          </span>
+        ))}
       </div>
       {open ? (
         <ul className="graph-list-children">

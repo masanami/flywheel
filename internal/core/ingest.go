@@ -321,8 +321,9 @@ func (s *Store) reconcileBoundIssue(ctx context.Context, actor string, ch Channe
 			return err
 		}
 		if sb == nil {
-			// M2 は対応を削除する操作を持たないので、①の後に対応が消えることは
-			// 無い想定。防御的にこの Issue だけを失敗させる。
+			// ①の後に対応が消えうるのは、並行した unbind（UnbindChallenge）が
+			// 先に外した場合だけ。この Issue だけを失敗させ（次の取り込みで、対応の
+			// 無い Issue としてポリシーに合えば新しい課題になる）、他は続ける。
 			return fmt.Errorf("core: ingest: no source_binding for external_key %q", issue.ExternalKey)
 		}
 		cid, ok := parseChallengeID(sb.ChallengeID)

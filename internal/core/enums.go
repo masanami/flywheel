@@ -164,17 +164,72 @@ func ParseApprovalDecision(s string) (ApprovalDecision, bool) {
 // と同じく、値の正本をここ 1 箇所に置く。
 type OperationState string
 
-// OperationState の4値。executed は承認済みの release を core が実行した後の
-// 状態で、未承認にも承認済み（未実行）にも数えない。
+// OperationState の5値。executed は承認済みの release を core が実行した後の
+// 状態で、未承認にも承認済み（未実行）にも数えない。closed は、本番反映のやり直しで取り下げた・PR が flywheel の
+// 外でマージされた release の状態で、承認も差し戻しもできない（閉じた理由は ClosedReason）。
 const (
 	OperationStatePending  OperationState = "pending"
 	OperationStateApproved OperationState = "approved"
 	OperationStateRejected OperationState = "rejected"
 	OperationStateExecuted OperationState = "executed"
+	OperationStateClosed   OperationState = "closed"
 )
 
 var operationStateValues = []OperationState{
-	OperationStatePending, OperationStateApproved, OperationStateRejected, OperationStateExecuted,
+	OperationStatePending, OperationStateApproved, OperationStateRejected, OperationStateExecuted, OperationStateClosed,
+}
+
+// ClosedReason は state が closed の不可逆操作の閉じた理由（§データモデル `operation.closed_reason`）。
+type ClosedReason string
+
+// ClosedReason の3値。
+const (
+	// ClosedReasonSuperseded は、本番反映のやり直しで新しい release に置き換えた（取り下げた）。
+	ClosedReasonSuperseded ClosedReason = "superseded"
+	// ClosedReasonMergedOutside は、承認待ちの release の PR が flywheel の外でマージされた。
+	ClosedReasonMergedOutside ClosedReason = "merged_outside"
+	// ClosedReasonMergedUnapproved は、承認していない head で PR がマージされた（直前の試行の結果が merged_unapproved）。
+	// 承認なしの本番反映の発生（unapproved_merge）は残す。
+	ClosedReasonMergedUnapproved ClosedReason = "merged_unapproved"
+)
+
+var closedReasonValues = []ClosedReason{ClosedReasonSuperseded, ClosedReasonMergedOutside, ClosedReasonMergedUnapproved}
+
+// ParseClosedReason は s を閉じた理由として解釈する（前後の空白を除いた完全一致）。
+func ParseClosedReason(s string) (ClosedReason, bool) {
+	trimmed := strings.TrimSpace(s)
+	for _, v := range closedReasonValues {
+		if string(v) == trimmed {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// ReopenReason は、完了の課題を着手中へ戻した理由（challenge_reopen.reason・approval.superseded_reason）。
+type ReopenReason string
+
+// ReopenReason の3値。本番反映でマージできなくなった場合に限る。
+const (
+	// ReopenReasonNotMergeable は、本番反映の段で PR が既定ブランチへマージできなくなった（not_mergeable）。
+	ReopenReasonNotMergeable ReopenReason = "not_mergeable"
+	// ReopenReasonLimitReached は、連続の上限に達して取り消した結果の元が not_mergeable だった。
+	ReopenReasonLimitReached ReopenReason = "limit_reached"
+	// ReopenReasonContentChanged は、検証の後に取り込み以外の変更が PR に入った。
+	ReopenReasonContentChanged ReopenReason = "content_changed"
+)
+
+var reopenReasonValues = []ReopenReason{ReopenReasonNotMergeable, ReopenReasonLimitReached, ReopenReasonContentChanged}
+
+// ParseReopenReason は s を戻した理由として解釈する（前後の空白を除いた完全一致）。
+func ParseReopenReason(s string) (ReopenReason, bool) {
+	trimmed := strings.TrimSpace(s)
+	for _, v := range reopenReasonValues {
+		if string(v) == trimmed {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // ParseOperationState は s を不可逆操作の状態として解釈する。
@@ -254,6 +309,10 @@ func NormalizeRejectedFields(fields []string) (out []RejectedField, ok bool) {
 // release の実行の試行の結果が実行済みか取り消しのときに残す。待つ結果の試行は
 // 作業ログに載せず operation_execution にだけ残す。
 const ActivityActionOpExecute = "op_execute"
+
+// ActivityActionOpClose は作業ログ（entity=operation）の action で、不可逆操作を closed にした記録
+// （本番反映のやり直しで取り下げた・PR がマージ済みで片付けた。#485）。
+const ActivityActionOpClose = "op_close"
 
 // 作業ログ（entity=challenge）の action。依存を足した・外したときに残し、after に
 // 足した・外した依存先の ID を持つ。

@@ -16,6 +16,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// サーバが返す見出し（CLI の「--hold-release」と同じ文言。UI は本番反映を承認しない）
+const HELD_HEADING =
+  "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:";
+
 const APPROVAL = "/api/v1/workspaces/alpha/challenges/C-1/approval";
 
 function summary(over: Partial<ApprovalSummary>): {
@@ -24,6 +28,8 @@ function summary(over: Partial<ApprovalSummary>): {
   return {
     approval: {
       challenge_id: "C-1",
+      conditions_after_release: [],
+      conditions_after_release_heading: HELD_HEADING,
       direct_completion: null,
       done_criteria: "完了条件",
       kind: "plan",
@@ -195,4 +201,28 @@ it("親が直接行った完了の承認の要約: 完了条件の次に成果�
 it("通常の完了の承認の要約には、親が直接行った成果物の欄を出さない", async () => {
   const el = await show(summary({ kind: "completion", plan: null }));
   expect(within(el).queryByTestId("direct-completion")).toBeNull();
+});
+
+it("完了の承認の要約に、本番反映で満たされる見込みの条件を CLI と同じ見出しの一覧で示す（#466）", async () => {
+  const el = await show(
+    summary({
+      kind: "completion",
+      plan: null,
+      conditions_after_release: ["本番で画面に出る", "通知が届く"],
+    }),
+  );
+  const box = within(el).getByTestId("approval-conditions-after-release");
+  expect(within(box).getByText(HELD_HEADING)).toBeTruthy();
+  const items = within(box)
+    .getAllByRole("listitem")
+    .map((li) => li.textContent);
+  expect(items).toEqual(["本番で画面に出る", "通知が届く"]);
+});
+
+it("本番反映で満たされる見込みの条件が無ければ、見出しごと出さない（#466）", async () => {
+  const el = await show(summary({ kind: "completion", plan: null }));
+  expect(
+    within(el).queryByTestId("approval-conditions-after-release"),
+  ).toBeNull();
+  expect(within(el).queryByText(HELD_HEADING)).toBeNull();
 });

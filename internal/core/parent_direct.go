@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -194,28 +195,46 @@ func loadDirectCompletions(ctx context.Context, tx *sql.Tx, cid int64) ([]Direct
 }
 
 // loadCurrentDirectCompletion は、課題がいま完了確認待ちにいる理由が直接行った完了の記録（T17）であるときだけ
-// その記録（最新の 1 件）を返す。完了確認待ちへ入る道は T8（検証の met）と T17 だけなので、作業ログの
-// 課題の行のうち、その 2 つの最後が complete_direct かで決める（差し戻されて別の道で戻ってきたときに、
-// 前の記録を承認の根拠として見せない）。
+// その記録（最新の 1 件）を返す。判定は課題の記録 challenge.completion_direct（T17 で真、ほかのすべての遷移で偽。
+// 完了確認待ちを出るときに消える。遷移のたびに runTransition が書く）で行い、作業ログは読まない。
+// 差し戻されて別の道（T8）で戻ってきたときに、前の記録を承認の根拠として見せないための値でもある。
 func loadCurrentDirectCompletion(ctx context.Context, tx *sql.Tx, cid int64) (*DirectCompletion, error) {
-	var last string
-	err := tx.QueryRowContext(ctx,
-		`SELECT action FROM activity WHERE entity = 'challenge' AND entity_id = ? AND action IN (?, ?) ORDER BY id DESC LIMIT 1`,
-		cid, string(OpCompleteDirect), string(OpVerifyMet)).Scan(&last)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
+	direct, err := loadCompletionDirect(ctx, tx, cid)
+	if err != nil || !direct {
 		return nil, err
-	}
-	if last != string(OpCompleteDirect) {
-		return nil, nil
 	}
 	dcs, err := loadDirectCompletions(ctx, tx, cid)
 	if err != nil || len(dcs) == 0 {
 		return nil, err
 	}
 	return &dcs[len(dcs)-1], nil
+}
+
+// raiseParentDirectHoldOnReject は T15 が親が直接した完了を差し戻して人間対応待ちへ戻るときに、種類が
+// 親が直接行うの保留を同じトランザクションで立てる（#481）。問いの文は差し戻しの理由そのまま、from_status は
+// その完了の記録（最新の direct_completion）が閉じた保留の from_status（回答で保留の前の状態へ戻れる）。
+// 記録が無い・from_status が保留に入り得る状態でないのは状態の不整合なので、何も書かずエラーにする。
+func raiseParentDirectHoldOnReject(ctx context.Context, tc *transitionCtx, reason string) error {
+	var from string
+	err := tc.tx.QueryRowContext(ctx,
+		`SELECT h.from_status FROM direct_completion d JOIN hold h ON h.id = d.hold_id WHERE d.challenge_id = ? ORDER BY d.id DESC LIMIT 1`,
+		tc.id).Scan(&from)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("core: challenge %s is flagged as completed directly but has no direct completion", tc.current.ID)
+	}
+	if err != nil {
+		return err
+	}
+	fromStatus := Status(from)
+	valid := false
+	for _, st := range HoldEntrySources(Table) {
+		valid = valid || st == fromStatus
+	}
+	if !valid {
+		return fmt.Errorf("core: challenge %s: the direct completion's hold has from_status %q, which cannot be a hold's preceding status", tc.current.ID, from)
+	}
+	_, err = insertHoldKindFrom(ctx, tc, reason, HoldKindParentDirect, fromStatus)
+	return err
 }
 
 // listParentAgentChallenges は、人間対応待ちで、いま開いている保留の種類が親が直接行うの課題を id 昇順で返す

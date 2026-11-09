@@ -46,8 +46,8 @@ const contrast = (a: string, b: string) => {
 };
 
 // flywheel#482: 説明の文（一言で・位置づけ）が長い親の大枠を 1440px の幅で開いたときの見出し。
-// 偽のデータの C-28 は、一言でが 2 行・位置づけが 3 行以上に折り返し、畳むと末尾に「続き」が出る親。子は C-29 と
-// 実施中の C-30（縁取りが箱の外へ 4px 出る）で、大枠の外の C-31 から子 C-29 へ依存の線が見出しを縦切って向かう。
+// 偽のデータの C-31 は、一言でが 2 行・位置づけが 3 行以上に折り返し、畳むと末尾に「続き」が出る親。子は C-32 と
+// 実施中の C-33（縁取りが箱の外へ 4px 出る）で、大枠の外の C-34 から子 C-32 へ依存の線が見出しを縦切って向かう。
 test.describe("広い画面（1440px）: 説明の文が長い親の見出し", () => {
   test.use({ viewport: { width: 1440, height: 1000 } });
 
@@ -100,15 +100,15 @@ test.describe("広い画面（1440px）: 説明の文が長い親の見出し", 
       { sel: LINES, margin: MARGIN },
     );
 
-  // C-31 → C-29 の線の上の点のうち、C-28 の見出しの説明の文の行の矩形に入る点で、最前面にある要素を調べる。
+  // C-34 → C-32 の線の上の点のうち、C-31 の見出しの説明の文の行の矩形に入る点で、最前面にある要素を調べる。
   // 線が文字の上に描かれていれば、その点の最前面は線（.graph-edge-wrap の中）になる。
   const edgeOverText = (page: Page) =>
     page.evaluate(() => {
       const path = document.querySelector(
-        '.graph-edge[data-from="C-31"][data-to="C-29"]',
+        '.graph-edge[data-from="C-34"][data-to="C-32"]',
       ) as SVGPathElement | null;
       const head = document.querySelector(
-        '.graph-group-head[aria-label^="C-28 "]',
+        '.graph-group-head[aria-label^="C-31 "]',
       );
       if (!path || !head) return { checked: 0, onTop: ["線か見出しが無い"] };
       const ctm = path.getScreenCTM();
@@ -135,7 +135,7 @@ test.describe("広い画面（1440px）: 説明の文が長い親の見出し", 
         if (
           !el ||
           el.closest(".graph-edge-wrap") ||
-          !el.closest('.graph-group-top[data-group="C-28"]')
+          !el.closest('.graph-group-top[data-group="C-31"]')
         )
           onTop.push(
             `${x.toFixed(0)},${y.toFixed(0)}: ${el?.getAttribute("class")}`,
@@ -147,7 +147,7 @@ test.describe("広い画面（1440px）: 説明の文が長い親の見出し", 
   const openGraph = async (page: Page) => {
     await page.goto("/");
     const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
-    const head = graph.locator('.graph-group-head[aria-label^="C-28 "]');
+    const head = graph.locator('.graph-group-head[aria-label^="C-31 "]');
     await expect(head).toBeVisible();
     await head.scrollIntoViewIfNeeded();
     return { graph, head };
@@ -163,26 +163,26 @@ test.describe("広い画面（1440px）: 説明の文が長い親の見出し", 
     ).toBeGreaterThanOrEqual(2);
     await expect(head.locator(".graph-group-context")).toHaveCount(1);
     const more = graph.getByRole("button", {
-      name: "位置づけの続きを読む（C-28）",
+      name: "位置づけの続きを読む（C-31）",
     });
     await expect(more).toBeVisible();
     expect(await overlaps(page)).toEqual([]);
 
     await more.click();
     await expect(
-      graph.getByRole("button", { name: "位置づけを畳む（C-28）" }),
+      graph.getByRole("button", { name: "位置づけを畳む（C-31）" }),
     ).toBeVisible();
     expect(
       await head.locator(".graph-group-context").count(),
     ).toBeGreaterThanOrEqual(3);
     expect(await overlaps(page)).toEqual([]);
-    // 最後の行の下の端と、すぐ下の子の箱（C-29）の上の端の間に余白がある
+    // 最後の行の下の端と、すぐ下の子の箱（C-32）の上の端の間に余白がある
     const last = await head
       .locator(".graph-group-context")
       .last()
       .boundingBox();
     const child = await graph
-      .getByRole("button", { name: /^C-29 / })
+      .getByRole("button", { name: /^C-32 / })
       .locator(".graph-node-box")
       .boundingBox();
     if (!last || !child) throw new Error("位置が取れない");
@@ -218,15 +218,15 @@ test.describe("広い画面（1440px）: 説明の文が長い親の見出し", 
     expect(folded.checked).toBeGreaterThan(0);
     expect(folded.onTop).toEqual([]);
     await graph
-      .getByRole("button", { name: "位置づけの続きを読む（C-28）" })
+      .getByRole("button", { name: "位置づけの続きを読む（C-31）" })
       .click();
     const opened = await edgeOverText(page);
     expect(opened.checked).toBeGreaterThan(0);
     expect(opened.onTop).toEqual([]);
-    // 線の先端から矢じりの根元まで（子 C-29 の箱の上の端の手前 4px と 12px）は見出しに隠れず、最前面が線のまま
+    // 線の先端から矢じりの根元まで（子 C-32 の箱の上の端の手前 4px と 12px）は見出しに隠れず、最前面が線のまま
     const tip = await page.evaluate(() => {
       const path = document.querySelector(
-        '.graph-edge[data-from="C-31"][data-to="C-29"]',
+        '.graph-edge[data-from="C-34"][data-to="C-32"]',
       ) as SVGPathElement | null;
       const ctm = path?.getScreenCTM();
       if (!path || !ctm) return ["線が無い"];
@@ -242,7 +242,7 @@ test.describe("広い画面（1440px）: 説明の文が長い親の見出し", 
     expect(tip).toEqual(["graph-edge-hit", "graph-edge-hit"]);
 
     // 線は見出しの外では押せ、選ぶと理由の札が出る
-    const edge = graph.getByRole("button", { name: /^依存.*C-31.*C-29/ });
+    const edge = graph.getByRole("button", { name: /^依存.*C-34.*C-32/ });
     await expect(edge).toHaveCount(1);
     await edge.focus();
     await page.keyboard.press("Enter");
@@ -323,9 +323,7 @@ test.describe("広い画面（1280px）", () => {
     await c6.click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await expect(
-      dialog.getByText("待っている理由（直前の先行）"),
-    ).toBeVisible();
+    await expect(dialog.getByText("待っている理由")).toBeVisible();
     await expect(
       dialog.getByText("C-12", { exact: false }).first(),
     ).toBeVisible();
@@ -580,15 +578,53 @@ test.describe("広い画面（1280px）", () => {
     ).toBeVisible();
   });
 
-  test("ボードから開いた詳細には待っている理由が出ない", async ({ page }) => {
+  test("ボードから開いた詳細にも待っている理由が出る。前提の行と「衝突のため後回し」の行が別になる", async ({
+    page,
+  }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "ボード", exact: true }).click();
-    await page.getByTestId("card-C-6").first().getByRole("button").click();
+    // C-19 は前提（C-5・C-17）と衝突（実施中の C-6 に譲って後回し）の両方で待っている
+    await page.getByTestId("card-C-19").first().getByRole("button").click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("待っている理由（直前の先行）")).toHaveCount(
-      0,
+    const section = dialog.getByRole("region", { name: "待っている理由" });
+    await expect(section.locator("li")).toHaveCount(3);
+    await expect(section.locator('li[data-basis="prerequisite"]')).toHaveCount(
+      2,
     );
+    await expect(section.locator('li[data-basis="conflict"]')).toContainText(
+      "衝突のため後回し: C-6",
+    );
+    await page.keyboard.press("Escape");
+    // 待っている理由が無い課題（C-6）には節を出さない
+    await page.getByTestId("card-C-6").first().getByRole("button").click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.getByText("待っている理由")).toHaveCount(0);
+  });
+
+  test("衝突の線: 向きのある組は中抜きの矢じり、向きの無い組（C-20 と C-26）は矢じりなしの破線で描かれる", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
+    await expect(graph).toBeVisible();
+    const directed = graph.locator(
+      'path.graph-edge[data-basis="conflict"][data-directed="true"]',
+    );
+    await expect(directed.first()).toHaveAttribute(
+      "marker-end",
+      "url(#graph-arrow-conflict)",
+    );
+    const free = graph.locator(
+      'path.graph-edge[data-basis="conflict"][data-directed="false"]',
+    );
+    await expect(free).toHaveCount(1);
+    await expect(free).not.toHaveAttribute("marker-end", /.+/);
+    // 破線で描かれる（計算後の stroke-dasharray が none でない）
+    const dash = await free.evaluate(
+      (el) => getComputedStyle(el).strokeDasharray,
+    );
+    expect(dash).not.toBe("none");
   });
 });
 
@@ -671,14 +707,16 @@ test.describe("狭い画面（360px）", () => {
     await expect(chips.nth(1).locator(".graph-human-chip-label")).toHaveText(
       "不可逆操作の承認",
     );
-    // 行の右上: 行の右端に近く、行の上の端に近い。文字は題名より小さい
+    // 行の右上: 行の右端に近く、行の上の端に近い。入らないチップは語を切らずに次の行へ折り返す（flywheel#464）ので、
+    // 上の端は最初のチップで見る。文字は題名より小さい
     const rowBox = await c7.locator("> .graph-list-row").boundingBox();
+    const first = await chips.first().boundingBox();
     const last = await chips.last().boundingBox();
-    if (!rowBox || !last) throw new Error("位置が取れない");
+    if (!rowBox || !first || !last) throw new Error("位置が取れない");
     expect(rowBox.x + rowBox.width - (last.x + last.width)).toBeLessThanOrEqual(
       12,
     );
-    expect(last.y - rowBox.y).toBeLessThanOrEqual(8);
+    expect(first.y - rowBox.y).toBeLessThanOrEqual(8);
     const fontSize = (sel: string) =>
       c7
         .locator(sel)

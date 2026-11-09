@@ -114,6 +114,7 @@ function awaitingApproval(): Record<string, unknown> {
       pairs: S4_PAIRS,
       source_binding: null,
       stages: S4_STAGES,
+      waiting: { conflicts: [], prerequisites: [] },
     },
     [`${base}/log?challenge=C-1`]: { activities: [] },
     [`${base}/challenges/C-1/approval`]: {

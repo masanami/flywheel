@@ -152,6 +152,16 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		runJSON(t, ws, "dep", "add", id, dep)
 		return []string{"dep", "rm", id, dep}
 	}},
+	"bind": {setup: func(t *testing.T, ws string) []string {
+		prepareBindCase(t, ws)
+		return []string{"bind", createForCase(t, ws), "example-owner/example-repo#1"}
+	}},
+	"unbind": {setup: func(t *testing.T, ws string) []string {
+		prepareBindCase(t, ws)
+		id := createForCase(t, ws)
+		runJSON(t, ws, "bind", id, "example-owner/example-repo#1")
+		return []string{"unbind", id}
+	}},
 	"status": {setup: func(t *testing.T, ws string) []string {
 		createForCase(t, ws)
 		// needs_human.discrepancies の要素の形も文書と照合されるよう、食い違いの

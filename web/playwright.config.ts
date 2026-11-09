@@ -7,6 +7,8 @@ const PORT = 5199;
 export default defineConfig({
   testDir: "e2e",
   fullyParallel: true,
+  // CI で test.only が残っていたら失敗にする（1 件だけ流して通ったことにしない）
+  forbidOnly: !!process.env.CI,
   reporter: [["list"]],
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
