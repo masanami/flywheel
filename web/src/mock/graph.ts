@@ -71,6 +71,8 @@ export function seedGraphs(): { alpha: GraphSeed; beta: GraphSeed } {
         "C-26": "C-3",
         "C-27": "C-1",
         "C-30": "C-29",
+        "C-32": "C-31",
+        "C-33": "C-31",
       },
       deps: [
         dep("C-12", "C-6", "prerequisite", "plan", 0),
@@ -92,6 +94,8 @@ export function seedGraphs(): { alpha: GraphSeed; beta: GraphSeed } {
         conflict("C-19", "C-6", 16),
         conflict("C-8", "C-12", 17),
         conflict("C-20", "C-21", 18),
+        // 大枠の外の C-34 から、説明の文が長い親 C-31 の子 C-32 へ（線が親の見出しを縦切る。flywheel#482）
+        dep("C-34", "C-32", "prerequisite", "plan", 19),
       ],
     },
     beta: {

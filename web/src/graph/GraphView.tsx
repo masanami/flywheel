@@ -224,14 +224,17 @@ export function GraphView({
   // 一度配置して大枠の幅を得てから、見出しの高さを決めて配置し直す。
   const nodeOf = (id: string) => infos.map.get(id)?.node;
   const isOther = (id: string) => othersIds.includes(id);
+  // 「ほかの課題」の大枠の見出しは説明の文を持たず、高さは変えない（flywheel#482 の帯も付けない）
   const headOf = (width: (id: string) => number) => (id: string) =>
-    groupHeadHeight(
-      nodeOf(id)?.headline ?? null,
-      nodeOf(id)?.context ?? null,
-      width(id),
-      dims,
-      contextOpen.has(id),
-    );
+    id === OTHERS_ID
+      ? dims.headH
+      : groupHeadHeight(
+          nodeOf(id)?.headline ?? null,
+          nodeOf(id)?.context ?? null,
+          width(id),
+          dims,
+          contextOpen.has(id),
+        );
   const first = layoutGraph(
     shownIds,
     infos.rels,
