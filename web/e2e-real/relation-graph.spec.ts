@@ -45,11 +45,7 @@ const inside = async (outer: Locator, inner: Locator) => {
   );
 };
 const groupBox = (graph: Locator, id: string) =>
-  graph
-    .locator(
-      `.graph-group:has(> .graph-group-head[aria-label^="${id} "]) > .graph-group-box`,
-    )
-    .first();
+  graph.locator(`.graph-group[data-group="${id}"] > .graph-group-box`).first();
 
 test("① 取り下げの課題は取り下げの区分で、札「取り下げ」つきで出る", async ({
   page,
