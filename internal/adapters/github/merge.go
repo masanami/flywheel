@@ -9,7 +9,8 @@ import (
 )
 
 // 承認済みの release の実行の口だけが呼ぶ、PR のマージの依頼（core.UpstreamPullRequestMerger）。
-// このパッケージで唯一の書き込み。渡す引数は PR の URL・方式のフラグ・--match-head-commit だけで、
+// このパッケージの書き込みは、このマージの依頼と、PR が BEHIND のときの base の取り込みの依頼（UpdatePullRequestBranch）だけ。
+// マージの依頼に渡す引数は PR の URL・方式のフラグ・--match-head-commit だけで、
 // --admin・--auto・--delete-branch は付けない（ブランチの削除は GitHub のリポジトリ設定に任せる）。
 
 var mergeFlags = map[string]string{
@@ -43,3 +44,17 @@ func (c *Client) MergePullRequest(ctx context.Context, prURL, method, matchHeadS
 }
 
 var _ core.UpstreamPullRequestMerger = (*Client)(nil)
+
+// UpdatePullRequestBranch は core.UpstreamPullRequestBranchUpdater の実装。PR のブランチへ base の最新を取り込む
+// 依頼（PUT pulls/<番号>/update-branch）を 1 回起動する。expected_head_sha で、取り込みの前の head の一致を
+// GitHub 側でも比べさせる。repo・head が空のときは gh を起動せずエラーにする。
+func (c *Client) UpdatePullRequestBranch(ctx context.Context, repo string, number int, expectedHeadSHA string) error {
+	if repo == "" || number <= 0 || expectedHeadSHA == "" {
+		return fmt.Errorf("adapters/github: update pull request branch: repo, number and head SHA are required")
+	}
+	what := fmt.Sprintf("update pull request branch %s#%d", repo, number)
+	res := c.run(ctx, "api", "-X", "PUT", fmt.Sprintf("repos/%s/pulls/%d/update-branch", repo, number), "-f", "expected_head_sha="+expectedHeadSHA)
+	return c.resultErr(what, res)
+}
+
+var _ core.UpstreamPullRequestBranchUpdater = (*Client)(nil)

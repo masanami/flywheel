@@ -44,14 +44,20 @@ const NotStartedDependency NotStartedReason = "dependency"
 // ちょうどこの時間は止まったに含めない。
 const releaseAttemptStaleAfter = 15 * time.Minute
 
+// 本番の呼び出し（`op exec`・周の release の段）が ReleaseExecOptions.MergeableRetries・MergeableInterval に渡す値。
+const (
+	ReleaseMergeableRetries  = 2
+	ReleaseMergeableInterval = 3 * time.Second
+)
+
 // ReleaseExecOptions は ExecuteReleases の入力。Checks・Merger・Connectors は必須
 // （どれかが nil なら ErrValidation）。
 type ReleaseExecOptions struct {
 	// Checks は PR の状態・チェックの読み取り（GET だけ）。
 	Checks UpstreamCheckSource
-	// Merger はマージの依頼（唯一の書き込み）。
+	// Merger はマージの依頼の書き込み。UpstreamPullRequestBranchUpdater も実装していれば、BEHIND の取り込みの依頼にも使う。
 	Merger UpstreamPullRequestMerger
-	// Compare は、完了の課題の承認待ちの release の PR に検証の後の変更が入ったかを判定するための比較の取得
+	// Compare は、PR の head が承認の head から動いたとき、動いた中身が既定ブランチの取り込みだけかを判定するための比較の取得
 	// （GET だけ）。nil なら、その判定をしない（承認待ちの release の片付けのうち、マージ済みを閉じる処理は動く）。
 	Compare UpstreamCompareSource
 	// Connectors は PR のリポジトリ・既定ブランチ・マージの方式を引く宣言。
@@ -69,6 +75,11 @@ type ReleaseExecOptions struct {
 	// PID・Host は試行に記録する値。0・空ならこのプロセスの値。
 	PID  int64
 	Host string
+	// MergeableRetries・MergeableInterval は、mergeable が null（GitHub が計算中）のとき、待ちとして返す前に
+	// 読み直す回数と間隔。既定ブランチが進んだ直後（同じ呼び出しで先の PR をマージした後）に 1 周に 1 本ずつ
+	// しか進まなくなるのを和らげる。0 なら読み直さない。
+	MergeableRetries  int
+	MergeableInterval time.Duration
 }
 
 // ReleaseExecItem は実行を試みた release 1 件の結果。
@@ -452,8 +463,47 @@ func classifyCheck(c UpstreamCheck) checkOutcome {
 	return checkFail
 }
 
-// judgeRelease は判定の順 1〜11 を評価し、最初に当たった条件の結果を返す。
+// movedByMergeInOnly は、head の動きが既定ブランチの取り込みだけで、取り込みに紛れた変更（衝突の解消の差分）が
+// 無いかを返す。差分を人が見ない道なので、直したファイルがある取り込みは含めない（GitHub の update-branch は
+// 衝突があれば失敗するので、取り込みの依頼の結果はこれに当たる）。
+func movedByMergeInOnly(ctx context.Context, src UpstreamCompareSource, repo, prBase, approvedHead, head string) bool {
+	ch := ClassifyHeadChange(ctx, src, repo, prBase, approvedHead, head)
+	if ch.Kind != HeadChangeMergeInOnly {
+		return false
+	}
+	for _, f := range ch.ConflictFixes {
+		if len(f.Files) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// mergeableNullDetail は、mergeable が null で待つときの detail。
+const mergeableNullDetail = "mergeable is null"
+
+// judgeRelease は judgeReleaseOnce を、mergeable が null で待つ結果のとき、設定の回数まで読み直して返す。
 func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions) releaseJudgment {
+	for n := 0; ; n++ {
+		j := s.judgeReleaseOnce(ctx, row, approvedHead, opts)
+		if j.result != ExecutionResultWaitingChecks || j.detail != mergeableNullDetail || n >= opts.MergeableRetries {
+			return j
+		}
+		select {
+		case <-ctx.Done():
+			return j
+		case <-time.After(opts.MergeableInterval):
+		}
+	}
+}
+
+// judgeReleaseOnce は判定の順 1〜11 を評価し、最初に当たった条件の結果を返す。
+//
+// 7 で head が承認の head から動いていても、動いた中身が既定ブランチの取り込みだけ（ClassifyHeadChange）なら
+// 外さず、8〜10 で取り込んだ後の head のすべてのチェック（必須でないものを含む。1 件以上）が成功していることを
+// 確かめてから、その head をマージする（承認し直さない）。10 の後で PR が BEHIND（衝突なし）なら、マージを試さず
+// 既定ブランチを取り込む依頼（UpstreamPullRequestBranchUpdater）をして待つ。CI の結果は次の試行が読む。
+func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions) releaseJudgment {
 	// 1
 	if approvedHead == "" {
 		return releaseJudgment{result: ExecutionResultNoApprovedHead}
@@ -481,7 +531,8 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 	observed := pr.HeadSHA
 	// 4
 	if pr.State == string(artifactStateMerged) {
-		if pr.HeadSHA == approvedHead {
+		// 取り込みだけで動いた head（flywheel が取り込んでマージを依頼し、結果を読めなかった場合）も、承認した中身のマージ。
+		if pr.HeadSHA == approvedHead || movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) {
 			return releaseJudgment{result: ExecutionResultAlreadyMerged, observedHead: observed, mergeCommit: pr.MergeCommitSHA}
 		}
 		return releaseJudgment{result: ExecutionResultMergedUnapproved, observedHead: observed}
@@ -495,8 +546,11 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 		return releaseJudgment{result: ExecutionResultBaseChanged, observedHead: observed, detail: pr.Base}
 	}
 	// 7
-	if pr.HeadSHA != approvedHead {
-		return releaseJudgment{result: ExecutionResultHeadChanged, observedHead: observed}
+	moved := pr.HeadSHA != approvedHead
+	if moved {
+		if !movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) {
+			return releaseJudgment{result: ExecutionResultHeadChanged, observedHead: observed}
+		}
 	}
 	// 8・9
 	failed, pending := false, false
@@ -514,12 +568,24 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 	if pending {
 		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed}
 	}
+	// 取り込んだ後の head は、チェックが 1 件も付いていない間は何も見ていないので待つ。
+	if moved && !ChecksAllPassed(pr.Checks) {
+		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "no checks on the updated head yet"}
+	}
 	// 10
 	if pr.Mergeable == nil {
-		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "mergeable is null"}
+		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: mergeableNullDetail}
 	}
 	if !*pr.Mergeable {
 		return releaseJudgment{result: ExecutionResultNotMergeable, observedHead: observed}
+	}
+	if pr.MergeableState == UpstreamMergeStateBehind {
+		if u, ok := opts.Merger.(UpstreamPullRequestBranchUpdater); ok {
+			if err := u.UpdatePullRequestBranch(ctx, repo, number, pr.HeadSHA); err != nil {
+				return releaseJudgment{result: ExecutionResultMergeFailed, observedHead: observed, detail: "update branch: " + err.Error()}
+			}
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "branch updated: the pull request was behind " + decl.DefaultBranch}
+		}
 	}
 	// 11
 	method := decl.MergeMethod
@@ -527,7 +593,7 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 		method = MergeMethodSquash
 	}
 	prURL := fmt.Sprintf("https://github.com/%s/pull/%d", repo, number)
-	if err := opts.Merger.MergePullRequest(ctx, prURL, method, approvedHead); err != nil {
+	if err := opts.Merger.MergePullRequest(ctx, prURL, method, pr.HeadSHA); err != nil {
 		return releaseJudgment{result: ExecutionResultMergeFailed, observedHead: observed, detail: err.Error()}
 	}
 	after, err := opts.Checks.GetPullRequestChecks(ctx, repo, number)
@@ -538,7 +604,7 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 	if after.State != string(artifactStateMerged) {
 		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergeUnconfirmed, observedHead: after.HeadSHA}
 	}
-	if after.HeadSHA != approvedHead {
+	if after.HeadSHA != pr.HeadSHA {
 		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergedUnapproved, observedHead: after.HeadSHA}
 	}
 	return releaseJudgment{mergeRequested: true, result: ExecutionResultMerged, observedHead: after.HeadSHA, mergeCommit: after.MergeCommitSHA}

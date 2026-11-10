@@ -20,13 +20,14 @@ import (
 )
 
 const (
-	envFakeGHMode    = "FLYWHEEL_FAKE_GH"
-	envScenario      = "FAKE_GH_SCENARIO"
-	envLogFile       = "FAKE_GH_LOG"
-	envPidFile       = "FAKE_GH_PID_FILE"
-	envSleepSeconds  = "FAKE_GH_SLEEP_SECONDS"
-	envGrandchildPid = "FAKE_GH_GRANDCHILD_PID_FILE"
-	envMergeable     = "FAKE_GH_MERGEABLE"
+	envFakeGHMode     = "FLYWHEEL_FAKE_GH"
+	envScenario       = "FAKE_GH_SCENARIO"
+	envLogFile        = "FAKE_GH_LOG"
+	envPidFile        = "FAKE_GH_PID_FILE"
+	envSleepSeconds   = "FAKE_GH_SLEEP_SECONDS"
+	envGrandchildPid  = "FAKE_GH_GRANDCHILD_PID_FILE"
+	envMergeable      = "FAKE_GH_MERGEABLE"
+	envMergeableState = "FAKE_GH_MERGEABLE_STATE"
 )
 
 func TestMain(m *testing.M) {
@@ -128,8 +129,11 @@ func runFakeGH(argv []string) int {
 	case "compare_fail":
 		fmt.Fprintln(os.Stderr, "gh: Server Error (HTTP 500)")
 		return 1
-	case "merge_ok":
+	case "merge_ok", "update_branch_ok":
 		return 0
+	case "update_branch_fail":
+		fmt.Fprintln(os.Stderr, "gh: merge conflict between base and head (HTTP 422)")
+		return 1
 	case "merge_fail":
 		fmt.Fprintln(os.Stderr, "gh: Head branch was modified")
 		return 1
@@ -548,7 +552,7 @@ func fakeGHChecks(argv []string, scenario string) int {
 		if v := os.Getenv(envMergeable); v != "" {
 			mergeable = v
 		}
-		fmt.Printf(`{"html_url":"https://github.com/o/r/pull/7","title":"t","state":%q,"merged_at":%s,"base":{"ref":"main","sha":"base456"},"head":{"sha":"abc123"},"mergeable":%s,"merge_commit_sha":"mc456"}`, state, merged, mergeable)
+		fmt.Printf(`{"html_url":"https://github.com/o/r/pull/7","title":"t","state":%q,"merged_at":%s,"base":{"ref":"main","sha":"base456"},"head":{"sha":"abc123"},"mergeable":%s,"mergeable_state":%q,"merge_commit_sha":"mc456"}`, state, merged, mergeable, os.Getenv(envMergeableState))
 		return 0
 	case strings.HasPrefix(endpoint, "repos/o/r/commits/abc123/check-runs"):
 		if scenario == "checks_runs_fail" {

@@ -73,3 +73,42 @@ func TestMergePullRequest_InvalidInputDoesNotCallGH(t *testing.T) {
 		t.Errorf("gh was called for invalid input")
 	}
 }
+
+func TestUpdatePullRequestBranch_ArgsArePutUpdateBranchWithExpectedHead(t *testing.T) {
+	dir := newFakeGHDir(t)
+	logPath := newFakeGHLogPath(t)
+	t.Setenv(envScenario, "update_branch_ok")
+	t.Setenv(envLogFile, logPath)
+	c := newTestClient(t, dir)
+	if err := c.UpdatePullRequestBranch(context.Background(), "o/r", 7, "abc123"); err != nil {
+		t.Fatalf("UpdatePullRequestBranch: %v", err)
+	}
+	calls := readInvocationLog(t, logPath)
+	want := []string{"api", "-X", "PUT", "repos/o/r/pulls/7/update-branch", "-f", "expected_head_sha=abc123"}
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0], want) {
+		t.Fatalf("gh calls = %v, want [%v]", calls, want)
+	}
+}
+
+func TestUpdatePullRequestBranch_FailureAndInvalidInput(t *testing.T) {
+	dir := newFakeGHDir(t)
+	logPath := newFakeGHLogPath(t)
+	t.Setenv(envScenario, "update_branch_fail")
+	t.Setenv(envLogFile, logPath)
+	c := newTestClient(t, dir)
+	if err := c.UpdatePullRequestBranch(context.Background(), "o/r", 7, "abc123"); err == nil || !strings.Contains(err.Error(), "HTTP 422") {
+		t.Fatalf("err = %v, want a failure carrying stderr", err)
+	}
+	for _, tc := range []struct {
+		repo string
+		n    int
+		head string
+	}{{"", 7, "a"}, {"o/r", 0, "a"}, {"o/r", 7, ""}} {
+		if err := c.UpdatePullRequestBranch(context.Background(), tc.repo, tc.n, tc.head); err == nil {
+			t.Errorf("%+v: want error", tc)
+		}
+	}
+	if n := len(readInvocationLog(t, logPath)); n != 1 {
+		t.Errorf("gh calls = %d, want 1 (invalid input must not call gh)", n)
+	}
+}

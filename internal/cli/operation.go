@@ -83,6 +83,9 @@ func runOpExec(a Args) (any, error) {
 		Agent:      decl,
 		Trigger:    core.ReleaseExecTriggerOpExec,
 		CycleID:    cyc.ID,
+
+		MergeableRetries:  core.ReleaseMergeableRetries,
+		MergeableInterval: core.ReleaseMergeableInterval,
 	})
 
 	endResult := core.CycleResultCompleted

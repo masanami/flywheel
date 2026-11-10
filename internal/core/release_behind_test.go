@@ -1,0 +1,220 @@
+package core
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
+
+// behindFake は fakeRelease に、base の取り込みの依頼（UpstreamPullRequestBranchUpdater）を足した偽の実装。
+type behindFake struct {
+	*fakeRelease
+	updateErr error
+	updates   []string
+	// onUpdate が非 nil なら、取り込みの依頼の時点で呼ぶ（head を進める等）。
+	onUpdate func()
+}
+
+func (b *behindFake) UpdatePullRequestBranch(_ context.Context, _ string, _ int, head string) error {
+	b.updates = append(b.updates, head)
+	if b.updateErr != nil {
+		return b.updateErr
+	}
+	if b.onUpdate != nil {
+		b.onUpdate()
+	}
+	return nil
+}
+
+func behindFixture(t *testing.T) (*relFixture, *behindFake) {
+	t.Helper()
+	f := newRelFixture(t)
+	f.fake.pr.MergeableState = UpstreamMergeStateBehind
+	f.fake.pr.Checks = []UpstreamCheck{{Name: "check", Status: "completed", Conclusion: "success"}}
+	return f, &behindFake{fakeRelease: f.fake}
+}
+
+func (f *relFixture) runWith(t *testing.T, o ReleaseExecOptions) *ReleaseExecItem {
+	t.Helper()
+	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, o)
+	if err != nil {
+		t.Fatalf("ExecuteReleases() error = %v", err)
+	}
+	if len(res.Items) != 1 {
+		t.Fatalf("Items = %+v, NotStarted = %+v, want 1 item", res.Items, res.NotStarted)
+	}
+	f.now = f.now.Add(time.Second)
+	return &res.Items[0]
+}
+
+// 完了条件 (1): BEHIND の PR は、マージを試して merge_failed を重ねず、base の取り込みへ進み、待つ（数えない）。
+// 上限（3）を超える回数を試しても limit_reached で取り消されず、承認が保たれる。
+func TestRelease_BehindUpdatesBranchInsteadOfRepeatingMergeFailed(t *testing.T) {
+	f, bf := behindFixture(t)
+	f.fake.mergeErr = errors.New("Pull request is not up to date with the base branch")
+	o := f.opts()
+	o.Merger = bf
+	for i := 0; i < f.limit+2; i++ {
+		item := f.runWith(t, o)
+		if item.Result != ExecutionResultWaitingChecks {
+			t.Fatalf("run %d: result = %s, want waiting_checks", i, item.Result)
+		}
+		if item.ConsecutiveFailures != 0 {
+			t.Fatalf("run %d: consecutive failures = %d, want 0", i, item.ConsecutiveFailures)
+		}
+	}
+	if len(f.fake.mergeArgs) != 0 {
+		t.Errorf("merge calls = %v, want none while BEHIND", f.fake.mergeArgs)
+	}
+	if len(bf.updates) != f.limit+2 || bf.updates[0] != relHead {
+		t.Errorf("updates = %v, want one per run with the head %s", bf.updates, relHead)
+	}
+	if st := f.state(t); st.opState != "approved" {
+		t.Errorf("state = %s, want approved", st.opState)
+	}
+}
+
+func TestRelease_BehindUpdateFailureCounts(t *testing.T) {
+	f, bf := behindFixture(t)
+	bf.updateErr = errors.New("HTTP 422")
+	o := f.opts()
+	o.Merger = bf
+	item := f.runWith(t, o)
+	if item.Result != ExecutionResultMergeFailed || item.ConsecutiveFailures != 1 {
+		t.Fatalf("result = %s (failures %d), want merge_failed counted", item.Result, item.ConsecutiveFailures)
+	}
+}
+
+// 取り込みを依頼できない merger（更新の IF を持たない）では、従来どおりマージを試す。
+func TestRelease_BehindWithoutUpdaterTriesMerge(t *testing.T) {
+	f, _ := behindFixture(t)
+	f.fake.mergeErr = errors.New("not up to date")
+	item := f.run(t)
+	if item.Result != ExecutionResultMergeFailed || len(f.fake.mergeArgs) != 1 {
+		t.Fatalf("result = %s, merges = %d, want merge_failed after one merge attempt", item.Result, len(f.fake.mergeArgs))
+	}
+}
+
+// BEHIND でも、チェックが失敗していれば取り込まない（checks_failed が先）。
+func TestRelease_BehindWithFailedChecksDoesNotUpdate(t *testing.T) {
+	f, bf := behindFixture(t)
+	f.fake.pr.Checks = []UpstreamCheck{{Name: "e2e-real", Status: "completed", Conclusion: "failure"}}
+	o := f.opts()
+	o.Merger = bf
+	if item := f.runWith(t, o); item.Result != ExecutionResultChecksFailed || len(bf.updates) != 0 {
+		t.Fatalf("result = %s, updates = %v", item.Result, bf.updates)
+	}
+}
+
+// 取り込み後の head（既定ブランチの取り込みだけ）は、すべてのチェックが成功していれば承認し直さずにマージする。
+func movedHeadFixture(t *testing.T) (*relFixture, *fakeCompare) {
+	t.Helper()
+	f := newRelFixture(t)
+	f.fake.pr.HeadSHA = "n1"
+	f.fake.pr.Checks = []UpstreamCheck{
+		{Name: "check", Status: "completed", Conclusion: "success"},
+		{Name: "e2e-real", Status: "completed", Conclusion: "success"},
+	}
+	cmp := newFakeCompare()
+	cmp.set(relHead, "n1", ahead(commit("m1", "main change", "m0"), commit("n1", "Merge branch 'main'", relHead, "m1")))
+	cmp.set("main", "n1", ahead(commit(relHead, "fix", "p0"), commit("n1", "Merge branch 'main'", relHead, "m1")))
+	cmp.set("m1", "n1", ahead(commit(relHead, "fix", "p0")))
+	return f, cmp
+}
+
+func TestRelease_MovedHeadByMergeInMergesWithoutReapproval(t *testing.T) {
+	f, cmp := movedHeadFixture(t)
+	f.fake.afterPR = &UpstreamPullRequestChecks{State: "merged", Base: "main", HeadSHA: "n1", MergeCommitSHA: "mc"}
+	o := f.opts()
+	o.Compare = cmp
+	item := f.runWith(t, o)
+	if item.Result != ExecutionResultMerged {
+		t.Fatalf("result = %s, want merged", item.Result)
+	}
+	if len(f.fake.mergeArgs) != 1 || f.fake.mergeArgs[0][2] != "n1" {
+		t.Errorf("merge args = %v, want the merge pinned to the updated head n1", f.fake.mergeArgs)
+	}
+}
+
+// 必須でないチェック（e2e-real）が失敗していれば、必須のチェックが成功でもマージしない。
+func TestRelease_MovedHeadWithFailedNonRequiredCheckDoesNotMerge(t *testing.T) {
+	f, cmp := movedHeadFixture(t)
+	f.fake.pr.Checks[1].Conclusion = "failure"
+	o := f.opts()
+	o.Compare = cmp
+	if item := f.runWith(t, o); item.Result != ExecutionResultChecksFailed || len(f.fake.mergeArgs) != 0 {
+		t.Fatalf("result = %s, merges = %v, want checks_failed without merging", item.Result, f.fake.mergeArgs)
+	}
+}
+
+// 取り込んだ直後でチェックがまだ付いていない head は、何も見ていないので待つ。
+func TestRelease_MovedHeadWithoutChecksWaits(t *testing.T) {
+	f, cmp := movedHeadFixture(t)
+	f.fake.pr.Checks = nil
+	o := f.opts()
+	o.Compare = cmp
+	if item := f.runWith(t, o); item.Result != ExecutionResultWaitingChecks || len(f.fake.mergeArgs) != 0 {
+		t.Fatalf("result = %s, merges = %v, want waiting_checks", item.Result, f.fake.mergeArgs)
+	}
+}
+
+// 取り込み以外の変更が入った head、比較の手段が無い場合は従来どおり head_changed。
+func TestRelease_MovedHeadNotMergeInOnlyIsHeadChanged(t *testing.T) {
+	f, cmp := movedHeadFixture(t)
+	cmp.set("main", "n1", ahead(commit(relHead, "fix", "p0"), commit("m1x", "feat", relHead), commit("n1", "Merge branch 'main'", relHead, "m1")))
+	cmp.set(relHead, "n1", ahead(commit("m1x", "feat", relHead), commit("n1", "Merge branch 'main'", "m1x", "m1")))
+	o := f.opts()
+	o.Compare = cmp
+	if item := f.runWith(t, o); item.Result != ExecutionResultHeadChanged {
+		t.Fatalf("result = %s, want head_changed", item.Result)
+	}
+	f2, _ := movedHeadFixture(t)
+	if item := f2.run(t); item.Result != ExecutionResultHeadChanged {
+		t.Fatalf("without compare source: result = %s, want head_changed", item.Result)
+	}
+}
+
+// 1 本マージした直後に mergeable が null でも、設定の回数まで読み直して次へ進む。
+func TestRelease_MergeableNullIsRereadBeforeWaiting(t *testing.T) {
+	f := newRelFixture(t)
+	null := UpstreamPullRequestChecks{URL: relRef, State: "open", Base: "main", HeadSHA: relHead}
+	f.fake.prSeq = []UpstreamPullRequestChecks{null, null, openPR(), {URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "mc"}}
+	o := f.opts()
+	o.MergeableRetries, o.MergeableInterval = 3, time.Nanosecond
+	if item := f.runWith(t, o); item.Result != ExecutionResultMerged {
+		t.Fatalf("result = %s, want merged after rereading mergeable", item.Result)
+	}
+
+	g := newRelFixture(t)
+	g.fake.pr.Mergeable = nil
+	o = g.opts()
+	o.MergeableRetries, o.MergeableInterval = 2, time.Nanosecond
+	if item := g.runWith(t, o); item.Result != ExecutionResultWaitingChecks || g.fake.getCalls != 3 {
+		t.Fatalf("result = %s, reads = %d, want waiting_checks after bounded rereads", item.Result, g.fake.getCalls)
+	}
+}
+
+// 取り込み後の head でマージを依頼して結果を読めなかった（merge_unconfirmed）後の試行は、承認なしのマージとは扱わず
+// already_merged にする。
+func TestRelease_MergedOnMovedHeadIsAlreadyMerged(t *testing.T) {
+	f, cmp := movedHeadFixture(t)
+	f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: "n1", MergeCommitSHA: "mc"}
+	o := f.opts()
+	o.Compare = cmp
+	if item := f.runWith(t, o); item.Result != ExecutionResultAlreadyMerged {
+		t.Fatalf("result = %s, want already_merged", item.Result)
+	}
+}
+
+// 直したファイルがある取り込み（人が差分を見ていない）は、承認し直しが要る。
+func TestRelease_MovedHeadWithConflictFixesIsHeadChanged(t *testing.T) {
+	f, cmp := movedHeadFixture(t)
+	cmp.set(relHead, "n1", withFiles(cmp.results[[2]string{relHead, "n1"}], UpstreamFile{Filename: "a.go", Patch: "@@ a"}))
+	cmp.set("m1", "n1", withFiles(ahead(commit(relHead, "fix", "p0")), UpstreamFile{Filename: "a.go", Patch: "@@ a2"}))
+	o := f.opts()
+	o.Compare = cmp
+	if item := f.runWith(t, o); item.Result != ExecutionResultHeadChanged || len(f.fake.mergeArgs) != 0 {
+		t.Fatalf("result = %s, merges = %v, want head_changed", item.Result, f.fake.mergeArgs)
+	}
+}
