@@ -249,7 +249,16 @@ func j2OutputSchema() []byte {
 	return b
 }
 
-// invocationNeedsSource は操作の invocation が取り込み元の差し込みを持つかを返す
+// operationNeedsSource は操作が取り込み元の差し込みを持つかを返す（形態 cli は start の引数、
+// それ以外は invocation）。
+func operationNeedsSource(c *Connector, op *ConnectorOperation) bool {
+	if c.Form == ConnectorFormCLI {
+		return c.Commands.startNeedsSource()
+	}
+	return invocationNeedsSource(op.Invocation)
+}
+
+// invocationNeedsSource は invocation が取り込み元の差し込みを持つかを返す
 // （{challenge_id} は取り込み元の差し込みではない）。
 func invocationNeedsSource(invocation string) bool {
 	for _, ph := range []string{"{issue_number}", "{issue_url}", "{external_key}"} {
@@ -282,7 +291,7 @@ func (d *ConnectorsDeclaration) findConnectorRepo(name string) (*ConnectorRepo, 
 //   - JSON として解釈できない・判定が plan|uncertain の外
 //   - uncertain で問いが無い・空
 //   - plan で: 対象リポジトリが宣言に無い／そのリポジトリの接続ツールに操作が無い／
-//     形態 cli の操作／取り込み元の対応の無い課題で取り込み元の差し込みを持つ操作／
+//     取り込み元の対応の無い課題で取り込み元の差し込みを持つ操作／
 //     サイズが S・M・L の外または無い／達成条件が空／複数リポジトリにまたがるかが
 //     無い／額が 0 以下／実装枠（null はサイズの既定へ解決した額）が
 //     max_run_budget_usd を超える／関係するリポジトリが宣言に無い
@@ -339,10 +348,10 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 			break
 		}
 	}
-	if op == nil || connector.Form == ConnectorFormCLI {
+	if op == nil {
 		return nil, false
 	}
-	if !vc.HasSource && invocationNeedsSource(op.Invocation) {
+	if !vc.HasSource && operationNeedsSource(connector, op) {
 		return nil, false
 	}
 
@@ -727,8 +736,7 @@ func yesNo(b bool) string {
 
 // formatJ2DeclarationSection は J2 が選べる対象リポジトリと操作の一覧
 // （§J2「宣言の対象リポジトリと操作の一覧（id・形態・対話前提か・成果物の種類）」）。
-// J2 が選んでも不正になる操作には注記を付ける（形態 cli は現在の委譲に使えない・
-// 取り込み元の対応の無い課題では取り込み元の差し込みを持つ操作は選べない）。
+// J2 が選んでも不正になる操作には注記を付ける（取り込み元の対応の無い課題では取り込み元の差し込みを持つ操作は選べない）。
 func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, agent *AgentDeclaration) string {
 	var b strings.Builder
 	if hasSource {
@@ -745,16 +753,14 @@ func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, age
 		}
 		b.WriteString("  接続ツール: " + connector.ID + "（形態: " + string(connector.Form) + "）\n")
 		b.WriteString("  操作:\n")
-		for _, op := range connector.Operations {
+		for i, op := range connector.Operations {
 			artifacts := op.Artifacts
 			if artifacts == "" {
 				artifacts = "指定なし"
 			}
 			line := "    - id: " + op.ID + "｜対話前提: " + yesNo(op.Interactive) + "｜成果物: " + artifacts
 			switch {
-			case connector.Form == ConnectorFormCLI:
-				line += "｜注記: この形態の操作は現在の委譲に使えないため選べない"
-			case !hasSource && invocationNeedsSource(op.Invocation):
+			case !hasSource && operationNeedsSource(connector, &connector.Operations[i]):
 				line += "｜注記: 取り込み元の Issue の情報を必要とするため、この課題では選べない"
 			}
 			b.WriteString(line + "\n")

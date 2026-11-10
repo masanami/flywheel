@@ -24,7 +24,7 @@ const j2TestConnectorsJSON = `{
       {"id": "brief", "interactive": false, "child_may_decide": true, "artifacts": "pr"}
     ]},
     {"id": "clitool", "form": "cli", "permission_mode": "default", "contract_version": 1,
-     "commands": {"start": ["c", "start"], "status": ["c", "status"], "resume": ["c", "resume"], "cancel": ["c", "cancel"]},
+     "commands": {"start": ["c", "start", "{issue_number}"], "status": ["c", "status"], "resume": ["c", "resume"], "cancel": ["c", "cancel"]},
      "operations": [{"id": "cli-op", "interactive": false, "artifacts": "none"}]}
   ],
   "repos": [
@@ -128,7 +128,7 @@ func TestValidateJ2Output_InvalidOutputs(t *testing.T) {
 		{"repo empty", true, j2PlanOutput(func(m map[string]any) { m["repo"] = "" })},
 		{"operation not in the repo's connector (AC-106)", true, j2PlanOutput(func(m map[string]any) { m["operation"] = "brief" })},
 		{"operation missing", true, j2PlanOutput(func(m map[string]any) { m["operation"] = nil })},
-		{"operation of a cli connector (AC-107)", true, j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })},
+		{"cli connector operation whose start needs the source, without source (AC-108)", false, j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })},
 		{"{issue_number} operation without source (AC-108)", false, j2PlanOutput(func(m map[string]any) { m["operation"] = "impl" })},
 		{"{issue_url} operation without source (AC-108)", false, j2PlanOutput(func(m map[string]any) { m["operation"] = "by-url" })},
 		{"{external_key} operation without source (AC-108)", false, j2PlanOutput(func(m map[string]any) { m["operation"] = "by-key" })},
@@ -154,6 +154,15 @@ func TestValidateJ2Output_InvalidOutputs(t *testing.T) {
 				t.Errorf("want ok=false; output=%s", c.out)
 			}
 		})
+	}
+}
+
+// 形態 cli の操作は、取り込み元があれば plan として受け付ける（案 B の委譲）。
+func TestValidateJ2Output_CLIConnectorOperationIsAccepted(t *testing.T) {
+	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
+	v, ok := validateJ2Output(out, j2TestContext(t, true))
+	if !ok || v.Operation != "cli-op" {
+		t.Fatalf("ok=%v v=%+v, want the cli operation accepted", ok, v)
 	}
 }
 

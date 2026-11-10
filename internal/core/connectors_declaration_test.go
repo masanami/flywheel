@@ -475,13 +475,9 @@ func TestLoadConnectorsDeclaration_CLIConnectorEmptyCommandArrayIsInvalid(t *tes
 	}
 }
 
-// self-review round 2 指摘: commands の各引数に invocation と同じ差し込みの
-// 閉集合（{issue_number} 等）を適用すると、start が返す run_id を
-// status・resume・cancel に渡す宣言（例: "{run_id}"）を拒否してしまう。
-// 仕様は commands の引数に対する差し込みの閉集合を invocation とは別に
-// 定めていないため、S1 では commands の引数の内容を制限しない（構造的な
-// 検証・非空だけを課す）仮定を置く。
-func TestLoadConnectorsDeclaration_CLIConnectorCommandArgsAreNotRestrictedToInvocationPlaceholders(t *testing.T) {
+// commands の各引数に書ける差し込みはコマンドごとの閉集合（cliCommandPlaceholders）。
+// start が返す run_id は status・resume・cancel の引数へ `{run_id}` で渡せる。
+func TestLoadConnectorsDeclaration_CLIConnectorCommandsMayUseRunIDInStatusResumeAndCancel(t *testing.T) {
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "cli", "permission_mode": "auto", "contract_version": 1,
 		 "commands": {"start": ["start"], "status": ["status", "{run_id}"], "resume": ["resume", "{run_id}"], "cancel": ["cancel", "{run_id}"]}}

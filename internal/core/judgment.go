@@ -192,6 +192,9 @@ type JudgmentLaunchOutput struct {
 	StructuredOutput []byte
 	// ErrorSummary は run.error に記録する要約（無ければ空文字列）。
 	ErrorSummary string
+	// ContractOutput は形態 cli の委譲で、接続ツールが標準出力へ出した契約の JSON（生のまま。
+	// 検査と写像は core が行う）。cli 以外では nil。
+	ContractOutput []byte
 }
 
 // JudgmentInvoker は core が定義する、判断の呼び出し1回の実行の IF

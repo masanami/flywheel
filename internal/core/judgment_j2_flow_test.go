@@ -477,7 +477,7 @@ func TestPlanAutoJ2_InvalidOutput_LeavesChallengeClassified(t *testing.T) {
 		{"cross_repo missing", false, func(m map[string]any) { delete(m, "cross_repo") }},
 		{"repo not declared (AC-105)", false, func(m map[string]any) { m["repo"] = "ghost" }},
 		{"operation not in the connector (AC-106)", false, func(m map[string]any) { m["operation"] = "impl" }},
-		{"cli connector operation (AC-107)", false, func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" }},
+		{"cli connector operation whose start needs the source (AC-108)", false, func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" }},
 		{"{issue_number} operation without source (AC-108)", false, func(m map[string]any) { m["repo"] = "flywheel"; m["operation"] = "impl" }},
 	}
 	for _, c := range cases {

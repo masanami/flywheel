@@ -889,17 +889,10 @@ func validateOperation(c Connector, op ConnectorOperation, opIDs map[string]bool
 	return nil
 }
 
-// validateCLICommands は c.Commands（start・status・resume・cancel の4つ）を
-// 検査する。各コマンドはキーとして「無い」（nil）ことを拒否するだけでなく、
-// self-review 指摘（コマンドの引数が0個では何も起動できない）を踏まえ、
-// 空配列も拒否する。round 2 の self-review 指摘: 当初は各引数を
-// operations[].invocation と同じ差し込みの閉集合で検査していたが、start が
-// 返す run_id を status・resume・cancel に渡す宣言（例: "{run_id}"）を
-// 拒否してしまい、仕様（§クリティカル設計決定3）はこの4コマンドの引数に
-// 使える差し込みの閉集合を invocation のものと同一と定めていないため、
-// 過剰な制約だった。よって引数の中身は検証しない（S1 は commands・
-// contract_version の存在を検証する範囲。閉集合の確定は cli 形態の委譲を
-// 実装する S4 に委ねる仮定を置く）。
+// validateCLICommands は c.Commands（start・status・resume・cancel の4つ）を検査する。
+// 各コマンドは「無い」（nil）も空配列も拒否する。引数に書ける差し込みは、コマンドごとの閉集合
+// （cliCommandPlaceholders）に限る。閉集合の外の差し込みは、起動時に値が入らないまま接続ツールへ
+// 渡るため、読み込み時に拒否する。
 func validateCLICommands(c Connector) error {
 	if c.Commands == nil {
 		return fmt.Errorf("%w: connector %q (form cli) has no commands", ErrConfigInvalid, c.ID)
@@ -918,18 +911,14 @@ func validateCLICommands(c Connector) error {
 		if len(g.args) == 0 {
 			return fmt.Errorf("%w: connector %q (form cli) commands.%s must not be empty", ErrConfigInvalid, c.ID, g.name)
 		}
-		// self-review 指摘（round 2）: 当初 operations[].invocation と同じ
-		// 差し込みの閉集合（{issue_number} 等）を commands の各引数にも
-		// 適用していたが、仕様はこの4つのコマンドの引数に対する差し込みの
-		// 閉集合を別途定めていない（§クリティカル設計決定3は「差し込みは
-		// 閉集合」と述べるのみで、その閉集合の内容は invocation のものと同一
-		// と決めていない）。start が返す run_id を status・resume・cancel に
-		// 渡す手段（例: "{run_id}"）を invocation の閉集合が持たないため、
-		// invocation の閉集合をそのまま流用すると正当な宣言を拒否しうる。
-		// S1 は commands・contract_version の存在検証だけを行う範囲
-		// （cli 形態の委譲の実行は S4）なので、ここでは構造的な検証
-		// （空でないこと）だけに留め、閉集合の確定は S4 の設計判断に委ねる
-		// 仮定を置く（返却の「仕様への指摘」に明記）。
+		allowed := cliCommandPlaceholders[g.name]
+		for i, a := range g.args {
+			for _, m := range invocationPlaceholderPattern.FindAllString(a, -1) {
+				if !allowed[m] {
+					return fmt.Errorf("%w: connector %q (form cli) commands.%s[%d] has a disallowed placeholder %q", ErrConfigInvalid, c.ID, g.name, i, m)
+				}
+			}
+		}
 	}
 	if c.ContractVersion == nil {
 		return fmt.Errorf("%w: connector %q (form cli) has no contract_version", ErrConfigInvalid, c.ID)

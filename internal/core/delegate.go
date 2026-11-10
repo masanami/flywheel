@@ -82,6 +82,15 @@ type DelegateLaunchInput struct {
 	// 無ければ空。新しいセッションの起動（J3 のブリーフの外）にも再開にも、種類に依らず渡す。
 	// J3 の出力に任せず、invoker が標準入力へ機械的に差し込む。
 	HumanRejections string
+	// Form が cli のとき、委譲は claude ではなく接続ツールの契約のコマンドで起動する。CLIStart は
+	// 差し込みを埋めた start の引数（新しい起動）、CLIResume は `{run_id}`・`{input}` を埋めた resume の
+	// 引数（再開。SessionID が接続ツールの実行 ID）。CLIStatus・CLICancel は実行 ID が分かっている
+	// ときの status・cancel の引数（新しい起動では nil）。
+	Form      ConnectorForm
+	CLIStart  []string
+	CLIResume []string
+	CLIStatus []string
+	CLICancel []string
 	// ResumeProblem は ResumeKind が interrupted で、再開元の run が子の報告の不備
 	// （invalid_output）で終わったときの、不備の理由（無ければ空）。
 	ResumeProblem string
@@ -159,6 +168,8 @@ type delegationContext struct {
 	Decider            Decider
 	DeciderRow         int
 	Invocation         string
+	// CLIStart は形態 cli の start の引数（差し込み済み）。
+	CLIStart []string
 	// Resume が非 nil なら `--resume` で起動する（J3 は呼ばない）。LimitHit が非 nil なら
 	// 連続失敗の上限に達しており、委譲を起動しない。
 	Resume   *resumePlan
@@ -412,6 +423,10 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	// 費用が取れない失敗の後の再開に限り、失敗前の実装枠の残りを上限に 1 回だけ起動を許す。
 	// 人間が flywheel budget で枠を置き直して 1 USD 以上が残っているときは、その額に従う。
 	dc.ImplBudgetMicros = history.effectiveImplBudget(dc.Plan.Version, decision, dc.ImplBudgetMicros)
+	if dc.Resume != nil && connector.Form == ConnectorFormCLI && strings.HasPrefix(dc.Resume.Target.SessionID, cliPendingSessionPrefix) {
+		// 実行 ID を受け取る前に途切れた run（flywheel の停止による回収など）は再開の宛先が無い。新しい起動にする。
+		dc.Resume, dc.LimitHit, dc.ReworkHit = nil, nil, nil
+	}
 	if dc.Resume != nil {
 		err := s.db.Read(ctx, func(tx *sql.Tx) error {
 			b, err := loadRunBranch(ctx, tx, dc.Resume.Target, in.ConnDecl.HumanQuestionKinds, dc.Repo.DefaultBranch)
@@ -428,6 +443,13 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 			return nil, err
 		}
 		dc.Invocation = inv
+	}
+	if connector.Form == ConnectorFormCLI {
+		start, err := fillCLIStart(connector.Commands.Start, ch.ID, dc.Binding)
+		if err != nil {
+			return nil, err
+		}
+		dc.CLIStart = start
 	}
 	return dc, nil
 }
@@ -647,8 +669,11 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 	// J3 と実装枠の両方が周の上限に入らないなら、J3 の費用を払う前に起動しない
 	// （最終の評価は、スロットの割り当てと同じトランザクションの中で行う）。
 	// `--resume` の再開は J3 を呼ばない（子は前の文脈を持つ）。
+	// 形態 cli は J3 を呼ばない（接続ツールの開始のコマンドは課題の差し込みだけを受け取り、
+	// ブリーフを渡す先が無い）。
 	j3Budget := in.AgentDecl.JudgmentBudgetFor(JudgmentJ3)
-	if dc.Resume != nil {
+	cliForm := dc.Connector.Form == ConnectorFormCLI
+	if dc.Resume != nil || cliForm {
 		j3Budget = 0
 	}
 	if err := s.checkCycleBudget(ctx, in.CycleID, j3Budget+microsToUSD(dc.estimateMicros())); err != nil {
@@ -657,7 +682,7 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 		}
 		return nil, nil, err
 	}
-	if dc.Resume != nil {
+	if dc.Resume != nil || cliForm {
 		return s.launchDelegation(ctx, in, jc, dc, "", adm)
 	}
 	sections, notStarted, err := s.prepareJ3(ctx, in, dc)
@@ -724,6 +749,10 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 			return nil, nil, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err)
 		}
 		sessionID = sid
+		if dc.Connector.Form == ConnectorFormCLI {
+			// 接続ツールの実行 ID は start が戻るまで分からない。それまでの目印（再開の宛先にしない）。
+			sessionID = cliPendingSessionPrefix + sid
+		}
 	}
 	host, _ := os.Hostname()
 	pid := int64(os.Getpid())
@@ -809,6 +838,21 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 			launch.SourceIssueNumber, launch.SourceIssueURL = n, dc.Binding.URL
 		}
 	}
+	if dc.Connector.Form == ConnectorFormCLI {
+		launch.Form = ConnectorFormCLI
+		cmds := dc.Connector.Commands
+		if dc.Resume == nil {
+			launch.CLIStart = dc.CLIStart
+		} else {
+			input := dc.Resume.Answer
+			if dc.Resume.Kind == ResumeKindRework {
+				input = dc.Resume.Feedback
+			}
+			launch.CLIResume = fillCLIRunArgs(cmds.Resume, sessionID, input)
+			launch.CLIStatus = fillCLIRunArgs(cmds.Status, sessionID, "")
+			launch.CLICancel = fillCLIRunArgs(cmds.Cancel, sessionID, "")
+		}
+	}
 	if dc.Resume != nil {
 		launch.IsResume = true
 		launch.ResumeKind = dc.Resume.Kind
@@ -839,6 +883,24 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	}
 	if interruptedByCancel(ctx, result, output.ReportedTotalCostUSD) {
 		result = RunResultInterrupted
+	}
+	// 形態 cli: 接続ツールの契約の出力を、既存の委譲の結果と報告（run の出力）へ写す。実行 ID は
+	// 新しい起動では接続ツールが採番した値を、再開では返った値の食い違いの検出に使う。費用は契約の
+	// cost_usd（接続ツールが孫の Claude を含めて申告した額）。
+	externalRunID := ""
+	cliStart := launch.Form == ConnectorFormCLI && !launch.IsResume
+	if launch.Form == ConnectorFormCLI && result == RunResultSucceeded {
+		cm := mapContractOutput(output.ContractOutput, launch.IsResume)
+		result = cm.Result
+		if errSummary == "" {
+			errSummary = cm.Error
+		}
+		output.StructuredOutput, output.ReportedTotalCostUSD = cm.Report, cm.CostUSD
+		if launch.IsResume {
+			output.SessionIDReturned = cm.RunID
+		} else {
+			externalRunID = cm.RunID
+		}
 	}
 	var report *DelegationReport
 	if result == RunResultSucceeded {
@@ -883,6 +945,13 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		if mismatch {
 			if _, err := tx.ExecContext(recordCtx,
 				`UPDATE run SET session_id = ?, session_id_mismatch = 1 WHERE id = ?`, output.SessionIDReturned, runIDInt); err != nil {
+				return err
+			}
+		}
+		if cliStart {
+			// 新しい起動で接続ツールが採番した実行 ID を、再開・中止の宛先として保存する。受け取れなかった
+			// ときは空にする（目印を宛先として再開しない）。
+			if _, err := tx.ExecContext(recordCtx, `UPDATE run SET session_id = ? WHERE id = ?`, externalRunID, runIDInt); err != nil {
 				return err
 			}
 		}
