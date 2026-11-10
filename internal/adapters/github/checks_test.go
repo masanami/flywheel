@@ -96,3 +96,17 @@ func TestGetPullRequestChecks_MergeableAndMergeCommitSHA(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestGetPullRequestChecks_MergeableState(t *testing.T) {
+	dir := newFakeGHDir(t)
+	t.Setenv(envScenario, "checks_complete")
+	t.Setenv(envMergeableState, "behind")
+	c := newTestClient(t, dir)
+	got, err := c.GetPullRequestChecks(context.Background(), "o/r", 7)
+	if err != nil {
+		t.Fatalf("GetPullRequestChecks: %v", err)
+	}
+	if got.MergeableState != core.UpstreamMergeStateBehind {
+		t.Errorf("MergeableState = %q, want %q", got.MergeableState, core.UpstreamMergeStateBehind)
+	}
+}

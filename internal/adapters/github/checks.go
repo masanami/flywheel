@@ -69,6 +69,7 @@ type rawPullHead struct {
 	} `json:"head"`
 	Mergeable      *bool  `json:"mergeable"`
 	MergeCommitSHA string `json:"merge_commit_sha"`
+	MergeableState string `json:"mergeable_state"`
 }
 
 type rawCheckRuns struct {
@@ -110,7 +111,7 @@ func (c *Client) GetPullRequestChecks(ctx context.Context, repo string, number i
 		return core.UpstreamPullRequestChecks{}, fmt.Errorf("adapters/github: %s: unknown state %q", what, pr.State)
 	}
 	out := core.UpstreamPullRequestChecks{URL: pr.HTMLURL, Title: pr.Title, State: state, Base: pr.Base.Ref, BaseSHA: pr.Base.SHA, HeadSHA: pr.Head.SHA,
-		Mergeable: pr.Mergeable, MergeCommitSHA: pr.MergeCommitSHA}
+		Mergeable: pr.Mergeable, MergeCommitSHA: pr.MergeCommitSHA, MergeableState: strings.ToLower(pr.MergeableState)}
 
 	for page := 1; ; page++ {
 		what := fmt.Sprintf("list check runs %s@%s page %d", repo, pr.Head.SHA, page)

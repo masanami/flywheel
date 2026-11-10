@@ -195,12 +195,19 @@ type UpstreamPullRequestChecks struct {
 	BaseSHA string
 	HeadSHA string
 	// Mergeable は REST の `mergeable`。nil は null（GitHub が計算中）、false はマージ不可、
-	// true はマージ可。`mergeable_state` は読まない。
+	// true はマージ可。`mergeable_state` は MergeableState に入れ、core が読むのは `behind` だけ。
 	Mergeable *bool
 	// MergeCommitSHA は REST の `merge_commit_sha`（マージ済みの PR のマージのコミット。無ければ空）。
 	MergeCommitSHA string
+	// MergeableState は REST の `mergeable_state`（小文字。`behind`＝main に遅れているだけ、`dirty`＝衝突 等）。
+	// 取得できなければ空。BEHIND かどうかの判定は core が持つ（UpstreamMergeStateBehind）。
+	MergeableState string
 	Checks         []UpstreamCheck
 }
+
+// UpstreamMergeStateBehind は、PR の head が base のブランチに遅れているだけ（衝突は無い）ことを表す
+// UpstreamPullRequestChecks.MergeableState の値。
+const UpstreamMergeStateBehind = "behind"
 
 // UpstreamCheckSource は J5 の起動の前に core が呼ぶ、PR のチェックの取得 IF。実装は
 // internal/adapters/github が `gh api` の GET だけで行い、取得と正規化だけを担う。
@@ -223,10 +230,21 @@ const (
 // （--admin・--auto・--delete-branch は付けない）。
 type UpstreamPullRequestMerger interface {
 	// MergePullRequest は prURL の PR のマージを method（MergeMethod*）で依頼する。
-	// matchHeadSHA は承認した head で、GitHub 側でも head の一致を比べさせる。
+	// matchHeadSHA はマージする head（承認した head、または取り込みだけで動いた後の head）で、GitHub 側でも head の一致を比べさせる。
 	// 依頼が成功しても merged になったことは保証しない（呼び出し側が読み取りで確かめる）。
 	// 終了コードが 0 でないときは失敗を返す。
 	MergePullRequest(ctx context.Context, prURL, method, matchHeadSHA string) error
+}
+
+// UpstreamPullRequestBranchUpdater は、PR の head のブランチへ base の最新を取り込む依頼（GitHub の
+// update-branch）の書き込み IF。承認済みの release の実行の口（core）だけが、PR が BEHIND のときに呼ぶ。
+// マージの依頼（UpstreamPullRequestMerger）を実装する値が併せて実装していれば使われ、実装していなければ
+// BEHIND でも従来どおりマージを試す。
+type UpstreamPullRequestBranchUpdater interface {
+	// UpdatePullRequestBranch は repo の number 番の PR のブランチへ base を取り込む。expectedHeadSHA は
+	// 取り込みの前の head で、GitHub 側でも一致を比べさせる。依頼が受け付けられたら nil
+	// （取り込みの完了は保証しない。読み取りで確かめる）。
+	UpdatePullRequestBranch(ctx context.Context, repo string, number int, expectedHeadSHA string) error
 }
 
 // ErrUpstreamDiffUnavailable は、上流がその差分を返さない（大きすぎる・コミットが見つからない）ことを

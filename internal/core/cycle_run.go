@@ -85,7 +85,7 @@ type CycleRunInput struct {
 	Diffs UpstreamDiffSource
 	// HeadGit は J5 が PR の head を読む一時の worktree の口。ConnDecl が非 nil のとき必須。
 	HeadGit HeadWorktreeGit
-	// Merger は release の段のマージの依頼（唯一の書き込み）。ConnDecl が非 nil のとき必須。
+	// Merger は release の段のマージの依頼の書き込み（取り込みの依頼も実装していれば BEHIND に使う）。ConnDecl が非 nil のとき必須。
 	Merger UpstreamPullRequestMerger
 	// Compare は release の段が、完了の課題の承認待ちの release の PR に検証の後の変更が入ったかを判定する比較の取得
 	// （GET だけ）。nil なら、その判定をしない。
@@ -266,6 +266,9 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			Agent:      in.AgentDecl,
 			Trigger:    ReleaseExecTriggerCycle,
 			CycleID:    cycleID,
+
+			MergeableRetries:  ReleaseMergeableRetries,
+			MergeableInterval: ReleaseMergeableInterval,
 		})
 		if err != nil {
 			if res != nil && len(res.Items) > 0 {
