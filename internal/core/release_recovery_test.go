@@ -196,6 +196,45 @@ func TestRelease_SweepClosesAPendingReleaseWhoseHasBeenMerged(t *testing.T) {
 	}
 }
 
+// 承認待ちの release の PR がマージされずに閉じられていれば、周の release の段が closed（pr_closed）にする。
+func TestRelease_SweepClosesAPendingReleaseWhosePRWasClosedUnmerged(t *testing.T) {
+	f := newRelFixture(t)
+	f.setOpState(t, OperationStatePending)
+	f.fake.pr = UpstreamPullRequestChecks{State: "closed", Base: "main", HeadSHA: relHead}
+	_, v0 := f.challengeStatus(t)
+
+	res := f.runAll(t, nil)
+	if len(res.Items) != 0 || len(res.Tidied) != 1 {
+		t.Fatalf("result = %+v, want one tidied item and no execution", res)
+	}
+	got := res.Tidied[0]
+	if got.Action != ReleaseTidyClosed || got.ClosedReason != ClosedReasonPRClosed || got.OperationID != formatOperationID(f.opID) {
+		t.Errorf("tidied = %+v", got)
+	}
+	snap := snapshotReopen(t, f.s, f.cid)
+	if snap.ops[0].state != string(OperationStateClosed) || snap.ops[0].closed.String != string(ClosedReasonPRClosed) || !snap.ops[0].closedAt.Valid {
+		t.Errorf("operation = %+v", snap.ops[0])
+	}
+	if snap.chVersion != v0+1 {
+		t.Errorf("challenge version = %d, want %d", snap.chVersion, v0+1)
+	}
+	if at := f.attempts(t); len(at) != 0 {
+		t.Errorf("attempts = %+v, want none", at)
+	}
+	if occ := f.occurrences(t); len(occ) != 0 {
+		t.Errorf("occurrences = %+v, want none", occ)
+	}
+	// 閉じた release は終端。PR が開き直されても戻さない。
+	f.fake.pr = UpstreamPullRequestChecks{State: "open", Base: "main", HeadSHA: relHead}
+	if res := f.runAll(t, nil); len(res.Tidied) != 0 {
+		t.Errorf("tidied after reopen = %+v, want none", res.Tidied)
+	}
+	after := snapshotReopen(t, f.s, f.cid)
+	if after.ops[0].state != string(OperationStateClosed) || after.ops[0].closed.String != string(ClosedReasonPRClosed) || after.chVersion != snap.chVersion {
+		t.Errorf("after reopen: operation = %+v version = %d, want still closed/pr_closed at %d", after.ops[0], after.chVersion, snap.chVersion)
+	}
+}
+
 // 直前の試行の結果が merged_unapproved の承認待ちの release は、その理由を保って閉じる。
 func TestRelease_SweepKeepsMergedUnapprovedAsTheClosedReason(t *testing.T) {
 	f := newRelFixture(t)
@@ -221,7 +260,6 @@ func TestRelease_SweepLeavesOpenAndUnreadablePendingReleasesAlone(t *testing.T) 
 		mod  func(f *relFixture)
 	}{
 		{"open PR", func(*relFixture) {}},
-		{"closed PR", func(f *relFixture) { f.fake.pr.State = "closed" }},
 		{"read failure", func(f *relFixture) { f.fake.getErr = errors.New("gh down") }},
 	}
 	for _, tc := range cases {

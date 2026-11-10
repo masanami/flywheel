@@ -110,10 +110,10 @@ func TestParseOperationState_RejectsUnknownValue(t *testing.T) {
 	}
 }
 
-// --- ClosedReason（閉じた理由。superseded|merged_outside|merged_unapproved）・ReopenReason（戻した理由） ---
+// --- ClosedReason（閉じた理由。superseded|merged_outside|merged_unapproved|pr_closed）・ReopenReason（戻した理由） ---
 
 func TestParseClosedReason_ClosedSet(t *testing.T) {
-	for _, s := range []string{"superseded", "merged_outside", "merged_unapproved"} {
+	for _, s := range []string{"superseded", "merged_outside", "merged_unapproved", "pr_closed"} {
 		if _, ok := ParseClosedReason(s); !ok {
 			t.Errorf("ParseClosedReason(%q) ok = false, want true", s)
 		}

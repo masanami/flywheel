@@ -182,7 +182,7 @@ var operationStateValues = []OperationState{
 // ClosedReason は state が closed の不可逆操作の閉じた理由（§データモデル `operation.closed_reason`）。
 type ClosedReason string
 
-// ClosedReason の3値。
+// ClosedReason の4値。
 const (
 	// ClosedReasonSuperseded は、本番反映のやり直しで新しい release に置き換えた（取り下げた）。
 	ClosedReasonSuperseded ClosedReason = "superseded"
@@ -191,9 +191,11 @@ const (
 	// ClosedReasonMergedUnapproved は、承認していない head で PR がマージされた（直前の試行の結果が merged_unapproved）。
 	// 承認なしの本番反映の発生（unapproved_merge）は残す。
 	ClosedReasonMergedUnapproved ClosedReason = "merged_unapproved"
+	// ClosedReasonPRClosed は、承認待ちの release の PR がマージされずに閉じられた。
+	ClosedReasonPRClosed ClosedReason = "pr_closed"
 )
 
-var closedReasonValues = []ClosedReason{ClosedReasonSuperseded, ClosedReasonMergedOutside, ClosedReasonMergedUnapproved}
+var closedReasonValues = []ClosedReason{ClosedReasonSuperseded, ClosedReasonMergedOutside, ClosedReasonMergedUnapproved, ClosedReasonPRClosed}
 
 // ParseClosedReason は s を閉じた理由として解釈する（前後の空白を除いた完全一致）。
 func ParseClosedReason(s string) (ClosedReason, bool) {
