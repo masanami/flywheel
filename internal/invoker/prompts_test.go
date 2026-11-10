@@ -621,3 +621,28 @@ func TestInstructions_RequireJapaneseForHumanFacingText(t *testing.T) {
 		}
 	}
 }
+
+// #511: j2.md の手順の項は、委譲の子が使えない操作（この仕組みのコマンド・サーバの起動）を
+// 計画の子の手順や論点の選択肢に入れず、親かオーナーの段か PR の CI へ分けることを求める。
+// 規則の行は特定のリポジトリの名前を含まない（汎用の道具として一般の言い方で書く）。
+func TestInstructions_J2StepsExcludeOperationsDelegatedChildCannotUse(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"この仕組みのコマンド（CLI・サーバの起動を含む）を help 以外使えない",
+		"計画の子の手順にも論点の選択肢にも入れない",
+		"親かオーナーの段",
+		"PR の CI で確かめる",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J2) lacks %q", want)
+		}
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "この仕組みのコマンド") && strings.Contains(strings.ToLower(line), "flywheel") {
+			t.Errorf("the rule line names a specific repository: %q", line)
+		}
+	}
+}
