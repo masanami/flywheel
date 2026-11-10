@@ -338,9 +338,11 @@ func fetchPullRequestChecks(ctx context.Context, src UpstreamCheckSource, artifa
 
 // j5Context は 1 件の検証の前に読む、課題と承認済みの計画と直前の委譲の事実。
 type j5Context struct {
-	Challenge    Challenge
-	Plan         approvedPlan
-	Holds        []Hold
+	Challenge Challenge
+	Plan      approvedPlan
+	Holds     []Hold
+	// Rejections は完了確認での差し戻しの理由（古い順。無ければ空）。
+	Rejections   []CompletionRejection
 	Binding      *sourceBinding
 	LastDelegate *runRow
 	Artifacts    []runArtifactRow
@@ -368,6 +370,9 @@ func (s *Store) loadJ5Context(ctx context.Context, ch Challenge) (*j5Context, er
 			return nil
 		}
 		if vc.Holds, err = loadHolds(ctx, tx, cid); err != nil {
+			return err
+		}
+		if vc.Rejections, err = loadCompletionRejections(ctx, tx, cid); err != nil {
 			return err
 		}
 		if vc.Binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
@@ -494,8 +499,11 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 		{Label: "課題", Content: fmt.Sprintf("タイトル: %s\n\n説明:\n%s\n\n緊急度: %s\n優先度: %s\n起票者: %s",
 			ch.Title, ch.Description, urgency, priority, ch.Reporter)},
 		{Label: "達成条件", Content: criteria + "\n\n（出所: " + origin + "）"},
-		{Label: "承認済みの計画の本文", Content: vc.Plan.Body},
 	}
+	if t := formatCompletionRejectionsSection(vc.Rejections); t != "" {
+		sections = append(sections, JudgmentDataSection{Label: CompletionRejectionsSectionLabel, Content: t})
+	}
+	sections = append(sections, JudgmentDataSection{Label: "承認済みの計画の本文", Content: vc.Plan.Body})
 	if vc.Plan.HasSpec {
 		sections = append(sections, JudgmentDataSection{Label: "承認済みの計画の構造化した出力", Content: vc.Plan.Spec})
 	}

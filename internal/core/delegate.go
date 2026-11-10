@@ -78,6 +78,10 @@ type DelegateLaunchInput struct {
 	ResumeFeedback string
 	// ResumeBranch は再開のブリーフに書く、報告のブランチ名（無ければ空）。
 	ResumeBranch string
+	// HumanRejections は完了確認で人間が差し戻した理由を整形した文（日付つき・古い順）。差し戻しが
+	// 無ければ空。新しいセッションの起動（J3 のブリーフの外）にも再開にも、種類に依らず渡す。
+	// J3 の出力に任せず、invoker が標準入力へ機械的に差し込む。
+	HumanRejections string
 	// ResumeProblem は ResumeKind が interrupted で、再開元の run が子の報告の不備
 	// （invalid_output）で終わったときの、不備の理由（無ければ空）。
 	ResumeProblem string
@@ -141,11 +145,13 @@ type delegationContext struct {
 	Challenge Challenge
 	Plan      approvedPlan
 	Holds     []Hold
-	Binding   *sourceBinding
-	Validated *j2ValidatedOutput
-	Repo      ConnectorRepo
-	Connector Connector
-	Operation ConnectorOperation
+	// Rejections は完了確認での差し戻しの理由（古い順。無ければ空）。
+	Rejections []CompletionRejection
+	Binding    *sourceBinding
+	Validated  *j2ValidatedOutput
+	Repo       ConnectorRepo
+	Connector  Connector
+	Operation  ConnectorOperation
 	// ImplBudgetMicros は実装の委譲に渡す上限額・予約額（その計画の版の実装枠の残り）。
 	// ReviewBudgetMicros はレビュー対応枠の残りで、評価額（実装枠の残りと足した額）にだけ使う。
 	ImplBudgetMicros   int64
@@ -355,6 +361,9 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		if dc.Holds, err = loadHolds(ctx, tx, cid); err != nil {
 			return err
 		}
+		if dc.Rejections, err = loadCompletionRejections(ctx, tx, cid); err != nil {
+			return err
+		}
 		if dc.Reopen, err = loadReopenNote(ctx, tx, cid); err != nil {
 			return err
 		}
@@ -442,6 +451,9 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 			ch.Title, ch.Description, ch.DoneCriteria, urgency, priority, ch.Reporter)},
 		{Label: "承認済みの計画の本文", Content: dc.Plan.Body},
 		{Label: "承認済みの計画の構造化した出力", Content: dc.Plan.Spec},
+	}
+	if t := formatCompletionRejectionsSection(dc.Rejections); t != "" {
+		sections = append(sections, JudgmentDataSection{Label: CompletionRejectionsSectionLabel, Content: t})
 	}
 	if t := formatHoldsSection(dc.Holds); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "保留の記録", Content: t})
@@ -789,6 +801,8 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		DeciderRow:     dc.DeciderRow,
 		Brief:          brief,
 		Invocation:     dc.Invocation,
+
+		HumanRejections: formatCompletionRejectionsSection(dc.Rejections),
 	}
 	if dc.Binding != nil {
 		if _, n, ok := parseExternalKey(dc.Binding.ExternalKey); ok {
