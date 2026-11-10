@@ -110,8 +110,8 @@ type ReleaseItem struct {
 	Result         string  `json:"result"`
 }
 
-// ReleaseTidied は release の段の、承認待ちの release の片付け 1 件。action は closed（PR がマージ済みで closed にした。
-// closed_reason は merged_outside | merged_unapproved）か reopened（検証の後に中身が変わった PR の release を置き換え、
+// ReleaseTidied は release の段の、承認待ちの release の片付け 1 件。action は closed（PR がマージ済み、またはマージされずに閉じられていて closed にした。
+// closed_reason は merged_outside | merged_unapproved | pr_closed）か reopened（検証の後に中身が変わった PR の release を置き換え、
 // 完了の課題を着手中へ戻した。reopen_reason は content_changed、new_operation_id は新しい release）。
 type ReleaseTidied struct {
 	Action         string  `json:"action"`

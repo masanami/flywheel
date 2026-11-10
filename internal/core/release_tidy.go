@@ -5,6 +5,11 @@ package core
 //
 //   - PR がマージ済みなら closed にする。理由は、直前の試行の結果が merged_unapproved なら merged_unapproved、
 //     それ以外は merged_outside（flywheel の外でマージされた）。
+//   - PR がマージされずに閉じられているときも closed にする（理由は pr_closed）。閉じた release は終端で、
+//     PR が開き直されても承認待ちへ戻さない。開き直した PR の本番反映が要るときは、課題が完了でない間だけ、
+//     人が `op add --kind release` で同じ ref の release を登録し直す（CreateOperation は重複を判定しない）。
+//     委譲の照合（createOperation の skipDuplicate）は閉じた release を同じ ref の重複として数えて作らず、
+//     課題が完了なら op add も ErrTerminalState で断られ、戻す道は無い（#539）。
 //   - 課題が完了で、PR の head が J5 の検証の head と異なり、動いた中身を検証し直す必要があると確かに言えるとき
 //     （取り込み以外のコミットが入った・履歴が書き換わった）は、課題を着手中へ戻して release を置き換える。
 //     取り込みだけの変更・判定できない変更は何もしない（承認の ① が取り込みだけを承認する）。
@@ -77,6 +82,14 @@ func (s *Store) tidyPendingReleases(ctx context.Context, opts ReleaseExecOptions
 			if item != nil {
 				out = append(out, *item)
 			}
+		case string(artifactStateClosed):
+			item, err := s.closePendingRelease(ctx, actor, p, opts, now, false)
+			if err != nil {
+				return out, err
+			}
+			if item != nil {
+				out = append(out, *item)
+			}
 		case string(artifactStateOpen):
 			item, err := s.reopenIfVerifiedContentChanged(ctx, p, repo, pr, opts)
 			if err != nil {
@@ -93,6 +106,12 @@ func (s *Store) tidyPendingReleases(ctx context.Context, opts ReleaseExecOptions
 // closeMergedPendingRelease は、PR がマージ済みの承認待ちの release を closed にする（課題の版も 1 上げる）。
 // 読んだ後で別の呼び出しが状態を変えていれば何もしない（nil）。
 func (s *Store) closeMergedPendingRelease(ctx context.Context, actor string, p pendingReleaseRef, opts ReleaseExecOptions, now func() time.Time) (*ReleaseTidyItem, error) {
+	return s.closePendingRelease(ctx, actor, p, opts, now, true)
+}
+
+// closePendingRelease は承認待ちの release を closed にする。merged が false なら、PR がマージされずに閉じられた
+// （理由は pr_closed）。true なら理由は merged_outside か merged_unapproved。
+func (s *Store) closePendingRelease(ctx context.Context, actor string, p pendingReleaseRef, opts ReleaseExecOptions, now func() time.Time, merged bool) (*ReleaseTidyItem, error) {
 	var item *ReleaseTidyItem
 	err := s.mutateAs(ctx, actor, ChannelCLI, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
 		rec.at = now()
@@ -103,11 +122,14 @@ func (s *Store) closeMergedPendingRelease(ctx context.Context, actor string, p p
 		if row.State != OperationStatePending {
 			return nil
 		}
-		reason := ClosedReasonMergedOutside
-		if forbidden, err := reapprovalForbidden(ctx, tx, p.opID); err != nil {
-			return err
-		} else if forbidden {
-			reason = ClosedReasonMergedUnapproved
+		reason := ClosedReasonPRClosed
+		if merged {
+			reason = ClosedReasonMergedOutside
+			if forbidden, err := reapprovalForbidden(ctx, tx, p.opID); err != nil {
+				return err
+			} else if forbidden {
+				reason = ClosedReasonMergedUnapproved
+			}
 		}
 		chal, err := loadChallenge(ctx, tx, row.ChallengeID)
 		if err != nil {
@@ -123,7 +145,7 @@ func (s *Store) closeMergedPendingRelease(ctx context.Context, actor string, p p
 		if n, err := res.RowsAffected(); err != nil {
 			return err
 		} else if n != 1 {
-			return fmt.Errorf("core: close merged release %s: expected to update 1 row, updated %d", formatOperationID(p.opID), n)
+			return fmt.Errorf("core: close pending release %s: expected to update 1 row, updated %d", formatOperationID(p.opID), n)
 		}
 		if err := rec.record("operation", p.opID, ActivityActionOpClose,
 			map[string]any{"state": string(OperationStatePending)},

@@ -196,6 +196,92 @@ func TestRelease_SweepClosesAPendingReleaseWhoseHasBeenMerged(t *testing.T) {
 	}
 }
 
+// 承認待ちの release の PR がマージされずに閉じられていれば、周の release の段が closed（pr_closed）にする。
+func TestRelease_SweepClosesAPendingReleaseWhosePRWasClosedUnmerged(t *testing.T) {
+	f := newRelFixture(t)
+	f.setOpState(t, OperationStatePending)
+	f.fake.pr = UpstreamPullRequestChecks{State: "closed", Base: "main", HeadSHA: relHead}
+	_, v0 := f.challengeStatus(t)
+
+	res := f.runAll(t, nil)
+	if len(res.Items) != 0 || len(res.Tidied) != 1 {
+		t.Fatalf("result = %+v, want one tidied item and no execution", res)
+	}
+	got := res.Tidied[0]
+	if got.Action != ReleaseTidyClosed || got.ClosedReason != ClosedReasonPRClosed || got.OperationID != formatOperationID(f.opID) {
+		t.Errorf("tidied = %+v", got)
+	}
+	snap := snapshotReopen(t, f.s, f.cid)
+	if snap.ops[0].state != string(OperationStateClosed) || snap.ops[0].closed.String != string(ClosedReasonPRClosed) || !snap.ops[0].closedAt.Valid {
+		t.Errorf("operation = %+v", snap.ops[0])
+	}
+	if snap.chVersion != v0+1 {
+		t.Errorf("challenge version = %d, want %d", snap.chVersion, v0+1)
+	}
+	if at := f.attempts(t); len(at) != 0 {
+		t.Errorf("attempts = %+v, want none", at)
+	}
+	if occ := f.occurrences(t); len(occ) != 0 {
+		t.Errorf("occurrences = %+v, want none", occ)
+	}
+	// 閉じた release は終端。PR が開き直されても戻さない。
+	f.fake.pr = UpstreamPullRequestChecks{State: "open", Base: "main", HeadSHA: relHead}
+	if res := f.runAll(t, nil); len(res.Tidied) != 0 {
+		t.Errorf("tidied after reopen = %+v, want none", res.Tidied)
+	}
+	after := snapshotReopen(t, f.s, f.cid)
+	if after.ops[0].state != string(OperationStateClosed) || after.ops[0].closed.String != string(ClosedReasonPRClosed) || after.chVersion != snap.chVersion {
+		t.Errorf("after reopen: operation = %+v version = %d, want still closed/pr_closed at %d", after.ops[0], after.chVersion, snap.chVersion)
+	}
+}
+
+// pr_closed で閉じた後に PR が開き直されて本番反映が要るとき、戻す道を固定する（#539）。
+// 課題が完了でなければ、人の登録（CreateOperation。`op add --kind release`）は同じ参照でも通る。
+// 委譲の照合の登録（createOperation の skipDuplicate）は、閉じた release を同じ参照の重複として数えて作らない。
+func TestRelease_PRClosedReleaseIsRestoredOnlyByAHumanRegistrationWhileNotDone(t *testing.T) {
+	ctx := context.Background()
+	f := newRelFixtureAt(t, StatusInProgress)
+	f.setOpState(t, OperationStatePending)
+	f.fake.pr = UpstreamPullRequestChecks{State: "closed", Base: "main", HeadSHA: relHead}
+	if res := f.runAll(t, nil); len(res.Tidied) != 1 || res.Tidied[0].ClosedReason != ClosedReasonPRClosed {
+		t.Fatalf("tidied = %+v, want one pr_closed", res.Tidied)
+	}
+	ref := relRef
+	in := OperationInput{ChallengeID: formatChallengeID(f.cid), Kind: string(OperationKindRelease), Summary: "PR", Ref: &ref}
+
+	// 委譲の照合の道は通らない（閉じた release が重複として数えられる）。
+	if _, err := f.s.createOperation(ctx, ChannelInvoker, nil, true, in); !errors.Is(err, errOperationDuplicate) {
+		t.Fatalf("createOperation(skipDuplicate) error = %v, want errOperationDuplicate", err)
+	}
+	// 人の登録の道は通る。
+	op, err := f.s.CreateOperation(ctx, ChannelCLI, in)
+	if err != nil {
+		t.Fatalf("CreateOperation() error = %v", err)
+	}
+	if op.State != OperationStatePending || op.Ref == nil || *op.Ref != relRef || op.ID == formatOperationID(f.opID) {
+		t.Errorf("operation = %+v, want a new pending release for the same ref", op)
+	}
+}
+
+// 課題が完了なら、pr_closed で閉じた release を人の登録で戻す道も、委譲の照合の道も断られる（ErrTerminalState。#539）。
+func TestRelease_PRClosedReleaseCannotBeRegisteredAgainWhenTheChallengeIsDone(t *testing.T) {
+	ctx := context.Background()
+	f := newRelFixture(t)
+	f.setOpState(t, OperationStatePending)
+	f.fake.pr = UpstreamPullRequestChecks{State: "closed", Base: "main", HeadSHA: relHead}
+	if res := f.runAll(t, nil); len(res.Tidied) != 1 || res.Tidied[0].ClosedReason != ClosedReasonPRClosed {
+		t.Fatalf("tidied = %+v, want one pr_closed", res.Tidied)
+	}
+	ref := relRef
+	in := OperationInput{ChallengeID: formatChallengeID(f.cid), Kind: string(OperationKindRelease), Summary: "PR", Ref: &ref}
+	if _, err := f.s.CreateOperation(ctx, ChannelCLI, in); !errors.Is(err, ErrTerminalState) {
+		t.Fatalf("CreateOperation() error = %v, want ErrTerminalState", err)
+	}
+	if _, err := f.s.createOperation(ctx, ChannelInvoker, nil, true, in); !errors.Is(err, ErrTerminalState) {
+		t.Fatalf("createOperation(skipDuplicate) error = %v, want ErrTerminalState", err)
+	}
+}
+
 // 直前の試行の結果が merged_unapproved の承認待ちの release は、その理由を保って閉じる。
 func TestRelease_SweepKeepsMergedUnapprovedAsTheClosedReason(t *testing.T) {
 	f := newRelFixture(t)
@@ -221,7 +307,6 @@ func TestRelease_SweepLeavesOpenAndUnreadablePendingReleasesAlone(t *testing.T) 
 		mod  func(f *relFixture)
 	}{
 		{"open PR", func(*relFixture) {}},
-		{"closed PR", func(f *relFixture) { f.fake.pr.State = "closed" }},
 		{"read failure", func(f *relFixture) { f.fake.getErr = errors.New("gh down") }},
 	}
 	for _, tc := range cases {
