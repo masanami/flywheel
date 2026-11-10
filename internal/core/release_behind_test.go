@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
 // behindFake は fakeRelease に、base の取り込みの依頼（UpstreamPullRequestBranchUpdater）を足した偽の実装。
@@ -216,5 +218,115 @@ func TestRelease_MovedHeadWithConflictFixesIsHeadChanged(t *testing.T) {
 	o.Compare = cmp
 	if item := f.runWith(t, o); item.Result != ExecutionResultHeadChanged || len(f.fake.mergeArgs) != 0 {
 		t.Fatalf("result = %s, merges = %v, want head_changed", item.Result, f.fake.mergeArgs)
+	}
+}
+
+// (c) 取り込みの依頼で衝突が出た（読み直した PR が mergeable=false）なら、merge_failed ではなく既存の衝突の
+// 立て直し（not_mergeable。完了の課題は着手中へ戻す）へ回る。
+func TestRelease_BehindUpdateConflictGoesToNotMergeableRecovery(t *testing.T) {
+	f, bf := behindFixture(t)
+	bf.updateErr = errors.New("HTTP 422: merge conflict between base and head")
+	no := false
+	conflicted := f.fake.pr
+	conflicted.Mergeable = &no
+	conflicted.MergeableState = "dirty"
+	f.fake.prSeq = []UpstreamPullRequestChecks{f.fake.pr, conflicted}
+	o := f.opts()
+	o.Merger = bf
+	item := f.runWith(t, o)
+	if item.Result != ExecutionResultNotMergeable || !item.Reopened || item.ReopenReason != ReopenReasonNotMergeable {
+		t.Fatalf("item = %+v, want not_mergeable routed to the conflict recovery", item)
+	}
+	if len(bf.updates) != 1 || len(f.fake.mergeArgs) != 0 {
+		t.Errorf("updates = %v, merges = %v, want one update and no merge", bf.updates, f.fake.mergeArgs)
+	}
+}
+
+// multiPRFake は PR の番号ごとに状態を持つ偽の upstream。どれか 1 本をマージすると、残りの開いた PR を BEHIND にする
+// （既定ブランチが進んだ状態）。
+type multiPRFake struct {
+	prs     map[int]*UpstreamPullRequestChecks
+	merges  []int
+	updates []int
+}
+
+func prNumberFromURL(t *testing.T, u string) int {
+	t.Helper()
+	_, n, ok := parseReleasePullRequestRef(u)
+	if !ok {
+		t.Fatalf("bad PR url %q", u)
+	}
+	return n
+}
+
+func (m *multiPRFake) GetPullRequestChecks(_ context.Context, _ string, n int) (UpstreamPullRequestChecks, error) {
+	return *m.prs[n], nil
+}
+
+func (m *multiPRFake) MergePullRequest(_ context.Context, prURL, _, _ string) error {
+	_, n, _ := parseReleasePullRequestRef(prURL)
+	m.merges = append(m.merges, n)
+	m.prs[n].State = "merged"
+	m.prs[n].MergeCommitSHA = "mc"
+	for k, p := range m.prs {
+		if k != n && p.State == "open" {
+			p.MergeableState = UpstreamMergeStateBehind
+		}
+	}
+	return nil
+}
+
+func (m *multiPRFake) UpdatePullRequestBranch(_ context.Context, _ string, n int, _ string) error {
+	m.updates = append(m.updates, n)
+	return nil
+}
+
+// (d) 同じ周に承認済みの PR が 2 本あり、1 本をマージすると残りが BEHIND になる。残りは取り込みだけ済ませて
+// 数えない待ち（waiting_checks）へ戻り、同じ周ではマージを試さない（CI を待たない）。
+func TestRelease_MultiplePRsBehindAfterFirstMergeOnlyUpdateAndWait(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	refs := []string{"https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"}
+	m := &multiPRFake{prs: map[int]*UpstreamPullRequestChecks{}}
+	for i, ref := range refs {
+		c := createAndAdvance(t, s, StatusDone)
+		head := "h" + string(rune('1'+i))
+		coretest.InsertApprovedRelease(t, s.workspace, int(mustParseChallengeID(t, c.ID)), ref, head, execTS(0))
+		m.prs[prNumberFromURL(t, ref)] = &UpstreamPullRequestChecks{
+			URL: ref, State: "open", Base: "main", HeadSHA: head, Mergeable: truePtr(),
+			Checks: []UpstreamCheck{{Name: "check", Status: "completed", Conclusion: "success"}},
+		}
+	}
+	now := execTime(100)
+	res, err := s.ExecuteReleases(context.Background(), nil, ReleaseExecOptions{
+		Checks: m, Merger: m, Connectors: relConnectors(""),
+		Agent: &AgentDeclaration{FailureLimit: 3}, Trigger: ReleaseExecTriggerOpExec,
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("ExecuteReleases() error = %v", err)
+	}
+	if len(res.Items) != 2 {
+		t.Fatalf("items = %+v, want 2", res.Items)
+	}
+	var merged, waiting int
+	for _, it := range res.Items {
+		switch it.Result {
+		case ExecutionResultMerged:
+			merged++
+		case ExecutionResultWaitingChecks:
+			waiting++
+			if it.ConsecutiveFailures != 0 {
+				t.Errorf("waiting item counted: %+v", it)
+			}
+		default:
+			t.Errorf("unexpected item %+v", it)
+		}
+	}
+	if merged != 1 || waiting != 1 {
+		t.Fatalf("merged = %d, waiting = %d, want 1 and 1 (items %+v)", merged, waiting, res.Items)
+	}
+	if len(m.merges) != 1 || len(m.updates) != 1 || m.merges[0] == m.updates[0] {
+		t.Errorf("merges = %v, updates = %v, want one merge and one update of the other PR", m.merges, m.updates)
 	}
 }

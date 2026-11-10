@@ -582,6 +582,10 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 	if pr.MergeableState == UpstreamMergeStateBehind {
 		if u, ok := opts.Merger.(UpstreamPullRequestBranchUpdater); ok {
 			if err := u.UpdatePullRequestBranch(ctx, repo, number, pr.HeadSHA); err != nil {
+				// 取り込みで衝突が出た（読み直した PR が mergeable=false）なら、衝突の立て直し（not_mergeable）へ回す。
+				if again, gerr := opts.Checks.GetPullRequestChecks(ctx, repo, number); gerr == nil && again.Mergeable != nil && !*again.Mergeable {
+					return releaseJudgment{result: ExecutionResultNotMergeable, observedHead: observed, detail: "update branch: " + err.Error()}
+				}
 				return releaseJudgment{result: ExecutionResultMergeFailed, observedHead: observed, detail: "update branch: " + err.Error()}
 			}
 			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "branch updated: the pull request was behind " + decl.DefaultBranch}
