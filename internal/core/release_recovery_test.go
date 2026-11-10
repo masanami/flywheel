@@ -235,6 +235,53 @@ func TestRelease_SweepClosesAPendingReleaseWhosePRWasClosedUnmerged(t *testing.T
 	}
 }
 
+// pr_closed で閉じた後に PR が開き直されて本番反映が要るとき、戻す道を固定する（#539）。
+// 課題が完了でなければ、人の登録（CreateOperation。`op add --kind release`）は同じ参照でも通る。
+// 委譲の照合の登録（createOperation の skipDuplicate）は、閉じた release を同じ参照の重複として数えて作らない。
+func TestRelease_PRClosedReleaseIsRestoredOnlyByAHumanRegistrationWhileNotDone(t *testing.T) {
+	ctx := context.Background()
+	f := newRelFixtureAt(t, StatusInProgress)
+	f.setOpState(t, OperationStatePending)
+	f.fake.pr = UpstreamPullRequestChecks{State: "closed", Base: "main", HeadSHA: relHead}
+	if res := f.runAll(t, nil); len(res.Tidied) != 1 || res.Tidied[0].ClosedReason != ClosedReasonPRClosed {
+		t.Fatalf("tidied = %+v, want one pr_closed", res.Tidied)
+	}
+	ref := relRef
+	in := OperationInput{ChallengeID: formatChallengeID(f.cid), Kind: string(OperationKindRelease), Summary: "PR", Ref: &ref}
+
+	// 委譲の照合の道は通らない（閉じた release が重複として数えられる）。
+	if _, err := f.s.createOperation(ctx, ChannelInvoker, nil, true, in); !errors.Is(err, errOperationDuplicate) {
+		t.Fatalf("createOperation(skipDuplicate) error = %v, want errOperationDuplicate", err)
+	}
+	// 人の登録の道は通る。
+	op, err := f.s.CreateOperation(ctx, ChannelCLI, in)
+	if err != nil {
+		t.Fatalf("CreateOperation() error = %v", err)
+	}
+	if op.State != OperationStatePending || op.Ref == nil || *op.Ref != relRef || op.ID == formatOperationID(f.opID) {
+		t.Errorf("operation = %+v, want a new pending release for the same ref", op)
+	}
+}
+
+// 課題が完了なら、pr_closed で閉じた release を人の登録で戻す道も、委譲の照合の道も断られる（ErrTerminalState。#539）。
+func TestRelease_PRClosedReleaseCannotBeRegisteredAgainWhenTheChallengeIsDone(t *testing.T) {
+	ctx := context.Background()
+	f := newRelFixture(t)
+	f.setOpState(t, OperationStatePending)
+	f.fake.pr = UpstreamPullRequestChecks{State: "closed", Base: "main", HeadSHA: relHead}
+	if res := f.runAll(t, nil); len(res.Tidied) != 1 || res.Tidied[0].ClosedReason != ClosedReasonPRClosed {
+		t.Fatalf("tidied = %+v, want one pr_closed", res.Tidied)
+	}
+	ref := relRef
+	in := OperationInput{ChallengeID: formatChallengeID(f.cid), Kind: string(OperationKindRelease), Summary: "PR", Ref: &ref}
+	if _, err := f.s.CreateOperation(ctx, ChannelCLI, in); !errors.Is(err, ErrTerminalState) {
+		t.Fatalf("CreateOperation() error = %v, want ErrTerminalState", err)
+	}
+	if _, err := f.s.createOperation(ctx, ChannelInvoker, nil, true, in); !errors.Is(err, ErrTerminalState) {
+		t.Fatalf("createOperation(skipDuplicate) error = %v, want ErrTerminalState", err)
+	}
+}
+
 // 直前の試行の結果が merged_unapproved の承認待ちの release は、その理由を保って閉じる。
 func TestRelease_SweepKeepsMergedUnapprovedAsTheClosedReason(t *testing.T) {
 	f := newRelFixture(t)
