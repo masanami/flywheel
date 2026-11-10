@@ -646,3 +646,36 @@ func TestInstructions_J2StepsExcludeOperationsDelegatedChildCannotUse(t *testing
 		}
 	}
 }
+
+// #538: j2.md は、達成条件を書く前の「計画の前提の確認」として、(1) 上流の達成条件を写す前に
+// 関係する PR がマージ済みか・Issue が開いているかを確かめ、マージ済みなら成果物の形を選び直すこと、
+// (2) 子の課題に分けるという回答のときは取りまとめの Issue 自身を委譲しないこと、
+// (3) 「CI で通る」と書く前にその検査が CI にあるかを確かめることを求める（文を消すとこのテストが失敗する）。
+func TestInstructions_J2VerifiesPlanPremisesBeforeCriteria(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(got, "- 計画の前提の確認（達成条件を書く前に行う）:\n")
+	if start < 0 {
+		t.Fatal("Instructions(J2) lacks the item 計画の前提の確認")
+	}
+	item := got[start:]
+	if end := strings.Index(item, "\n   - 予算の額:"); end >= 0 {
+		item = item[:end]
+	}
+	for _, c := range []struct {
+		name string
+		keys []string
+	}{
+		{"(1) upstream PR merged / Issue open", []string{"上流の達成条件を写す前に", "PR がマージ済みか", "Issue が開いているか", "マージ済みなら成果物の形", "選び直す"}},
+		{"(2) do not delegate the umbrella Issue", []string{"子の課題に分けるという回答のとき", "取りまとめの Issue 自身を委譲しない"}},
+		{"(3) confirm the check exists in CI", []string{"「CI で通る」と書く前に", "その検査が CI にあるか確かめる"}},
+	} {
+		for _, want := range c.keys {
+			if !strings.Contains(item, want) {
+				t.Errorf("the item 計画の前提の確認 in Instructions(J2) lacks %q for %s", want, c.name)
+			}
+		}
+	}
+}
