@@ -782,7 +782,8 @@ func (s *Store) finalizeJ6Output(ctx context.Context, in J6AutoInput, runIDDispl
 
 // selectJ6AutoTargets は ID を省略した `learn` が対象にする課題の内部整数 ID を ID の昇順で返す。
 // 対象は、未分類の発生を持ち、状態が完了・取り下げ・人間対応待ちの課題。上流の状態による除外はしない
-// （完了した課題は上流が closed のことが多い）。
+// （完了した課題は上流が closed のことが多い）。終了していない run（周をまたいで続く契約の run を含む。
+// challengeHasActiveRun）を持つ課題は、J1・J2・J5 の自動の対象選びと同じく選ばない。
 func selectJ6AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT c.id FROM challenge c
@@ -800,7 +801,21 @@ func selectJ6AutoTargets(ctx context.Context, tx *sql.Tx) ([]int64, error) {
 		}
 		out = append(out, id)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	_ = rows.Close() // 読み終えてから同じトランザクションで run を引く
+	selected := out[:0]
+	for _, id := range out {
+		active, err := challengeHasActiveRun(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		if !active {
+			selected = append(selected, id)
+		}
+	}
+	return selected, nil
 }
 
 // J6AutoInput は Store.LearnJ6 の入力。

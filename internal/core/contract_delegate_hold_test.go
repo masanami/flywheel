@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // このファイルは `form: cli` の契約の run の扱い（専用の kind・失敗と中止の保留への写し・start の最中の回収・
@@ -339,5 +340,58 @@ func TestHoldUnrecordedContractStops_FailedWithoutHold(t *testing.T) {
 	d := f.detail(t, f.cid)
 	if d.Status != StatusAwaitingHuman || len(d.Holds) != 1 || !strings.Contains(d.Holds[0].Question, "要約XYZ") {
 		t.Fatalf("status=%s holds=%+v", d.Status, d.Holds)
+	}
+}
+
+// 終わっていない契約の run を持つ課題は、J6（学び）の自動の対象選びからも外れ、ID を省略した学びでも
+// 判断が起動しない。契約の run が終われば対象に戻り、学びが走る。
+func TestContractRun_ExcludesTheChallengeFromJ6AutoTargets(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusAwaitingHuman)
+	f.occ(t, c, "plan_rejected", "bad", nil)
+	cid, _ := parseChallengeID(c)
+	selected := func() bool {
+		var ids []int64
+		if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
+			ids, err = selectJ6AutoTargets(context.Background(), tx)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range ids {
+			if v == cid {
+				return true
+			}
+		}
+		return false
+	}
+	if !selected() {
+		t.Fatal("the control challenge is not selected without a contract run")
+	}
+
+	now := formatTimestamp(time.Now())
+	rid := f.exec(t, `INSERT INTO run (challenge_id, kind, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket)
+		VALUES (?, 'contract', 1, 's', 1, 'h', ?, ?, ?, 'succeeded', 1000000, 'impl')`, cid, now, now, now)
+	f.exec(t, `INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, max_budget_usd, started_at, observed_at)
+		VALUES (?, 'tool', 'ext-j6', ?, 'running', 's', 1000000, 'x', 'x')`, cid, rid)
+	if selected() {
+		t.Fatal("challenge with an open contract run is still selected for J6")
+	}
+	if _, err := f.s.LearnJ6(context.Background(), f.input(f.cycle(t, 300), nil)); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.inputs) != 0 {
+		t.Fatalf("J6 invoked %d times while the contract run is open, want 0", len(f.inputs))
+	}
+
+	f.exec(t, `UPDATE contract_run SET state = 'succeeded', ended_at = 'x' WHERE challenge_id = ?`, cid)
+	if !selected() {
+		t.Fatal("challenge is not selected for J6 again after the contract run ended")
+	}
+	if _, err := f.s.LearnJ6(context.Background(), f.input(f.cycle(t, 300), nil)); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.inputs) != 1 {
+		t.Fatalf("J6 invoked %d times after the contract run ended, want 1", len(f.inputs))
 	}
 }
