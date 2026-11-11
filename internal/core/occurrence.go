@@ -325,6 +325,9 @@ const (
 	holdReasonUnapprovedMerge holdReason = "unapproved_merge"
 	// holdReasonArtifactMissing は成果物が見つからない保留。M45P5 の 12 の出来事に無いので発生を作らない。
 	holdReasonArtifactMissing holdReason = "artifact_missing"
+	// holdReasonContractStopped は契約の run が failed・cancelled で終わった、または start の最中に
+	// flywheel の run が回収された保留。発生は作らない。
+	holdReasonContractStopped holdReason = "contract_stopped"
 )
 
 // occurrenceKind は保留の理由に対応する発生の種類。発生を作らない理由は false。

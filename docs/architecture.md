@@ -194,7 +194,7 @@ DDL ではなく、何を持つかの合意のための素描である。
 | `challenge_reopen` | challenge_id, reason, operation_id, new_operation_id, superseded_approval_id, created_at | 完了の承認まで済んだ課題を、本番反映でマージできなくなったときに限って完了から着手中へ戻した記録（T18。#485）。古い `release` は `closed`（`superseded`）にし、新しい `release` と結び、前の完了の承認は「置き換えられた」として残して次の完了の承認と結ぶ（[M4.5 の機能仕様](features/m4.5-learning-and-self-improvement.md) §検証の後に head が動いた release と本番反映の立て直し） |
 | `source_binding` | challenge_id, source_id, external_key, fingerprint, last_synced_at, upstream_state | 取り込み元との対応。上流の close を保持できる（claude-flywheel#140） |
 | `cycle` | id, started_at, ended_at, result, budget_usd, spent_usd | 現行の `cycle_start` / `cycle_end` |
-| `run` | id, cycle_id（NULL 可）, kind（delegate / adhoc / judgment）, challenge_id, repo, slot_id, session_ref, started_at, ended_at, result, cost_usd | 現行の `delegate_*` / `adhoc_*` に、判断点の呼び出しを加えたもの。**終了していない `run` が「実行中」** |
+| `run` | id, cycle_id（NULL 可）, kind（delegate / adhoc / judgment / contract。contract は `form: cli` の契約のコマンドの実行）, challenge_id, repo, slot_id, session_ref, started_at, ended_at, result, cost_usd | 現行の `delegate_*` / `adhoc_*` に、判断点の呼び出しを加えたもの。**終了していない `run` が「実行中」** |
 | `slot` | id, repo, provider（clone / worktree / container）, path, state | 実行環境の払い出し（claude-flywheel#154・§11） |
 | `activity` | id, at, actor, channel, entity, entity_id, action, before, after | 作業ログ（D4）。全ての状態変更を core が自動で記録する |
 | `lock` | name, holder, acquired_at, heartbeat_at | サイクルの並走排他 |

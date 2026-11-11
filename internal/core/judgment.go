@@ -92,13 +92,14 @@ const (
 	JudgmentJ8 JudgmentPoint = judgmentJ8
 )
 
-// RunKind は run.kind（判断の呼び出しか委譲の起動か）の閉集合。
+// RunKind は run.kind（判断の呼び出し・委譲の起動・契約のコマンドの実行）の公開する閉集合（衝突の予測の predict は含まない）。
 type RunKind = runKind
 
-// RunKind の2値。
+// RunKind の公開する値。
 const (
 	RunKindJudgment RunKind = runKindJudgment
 	RunKindDelegate RunKind = runKindDelegate
+	RunKindContract RunKind = runKindContract
 )
 
 // ErrRunInProgress は課題に既に終了していない run があることを表す

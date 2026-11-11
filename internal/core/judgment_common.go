@@ -87,6 +87,17 @@ func challengeHasActiveRun(ctx context.Context, tx *sql.Tx, challengeID int64) (
 	// 周をまたいで続く契約の run（form: cli）も、課題の実行中として数える。
 	var n int
 	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, challengeID).Scan(&n)
+	if err != nil || n > 0 {
+		return n > 0, err
+	}
+	// 契約の start の最中に回収され、まだ保留に写していない課題（外部の run が残っているかもしれない）も、実行中として数える。
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run r JOIN challenge c ON c.id = r.challenge_id
+		WHERE r.challenge_id = ? AND `+reclaimedContractStartWhere, challengeID).Scan(&n); err != nil || n > 0 {
+		return n > 0, err
+	}
+	// 契約の run が failed・cancelled で終わったのに保留を作れていない課題も同じ。
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
+		WHERE k.challenge_id = ? AND `+unheldContractStopWhere, challengeID).Scan(&n)
 	return n > 0, err
 }
 
