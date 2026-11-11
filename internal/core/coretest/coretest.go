@@ -980,6 +980,7 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`INSERT INTO run (cycle_id, kind, challenge_id, challenge_version, session_id, resumed_from_run_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket)
 			  VALUES (1, 'delegation', 2, 1, 's1', 1, 1, 'testhost', ?, ?, ?, 'succeeded', 50000000, 'impl')`, []any{at, at, at}},
 			{`INSERT INTO run_artifact (run_id, kind, ref, state, base, verified_at) VALUES (1, 'pr', 'o/r#3', 'open', 'main', ?)`, []any{at}},
+			{`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, cost_usd, max_budget_usd, started_at, observed_at) VALUES (1, 'tool', 'ext-1', 1, 'running', 's', 1500000, 5000000, ?, ?)`, []any{at, at}},
 			{`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after, run_id)
 			  VALUES (?, 'tester', 'cli', 'none', 'challenge', 1, 'create', NULL, '{"title":"c1"}', 1)`, []any{at}},
 			{`INSERT INTO occurrence (challenge_id, activity_id, kind, outcome, source, created_at) VALUES (1, 1, 'completion_rejected', 'bad', 'core', ?)`, []any{at}},

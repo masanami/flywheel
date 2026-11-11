@@ -17,7 +17,7 @@ func TestFillAllTables_EveryTableHasRows(t *testing.T) {
 		t.Fatalf("core.Init: %v", err)
 	}
 	coretest.FillAllTables(t, ws)
-	tables := []string{"activity", "approval", "challenge", "challenge_dependency", "challenge_parent", "cycle", "hold", "lock",
+	tables := []string{"activity", "approval", "challenge", "challenge_dependency", "challenge_parent", "contract_run", "cycle", "hold", "lock",
 		"occurrence", "operation", "operation_execution", "run", "run_artifact", "slot", "source_binding", "task_plan"}
 	rowsOf := map[string]int{}
 	current := ""

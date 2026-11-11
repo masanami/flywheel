@@ -81,7 +81,13 @@ func challengeHasActiveRun(ctx context.Context, tx *sql.Tx, challengeID int64) (
 	if err != nil {
 		return false, err
 	}
-	return row != nil, nil
+	if row != nil {
+		return true, nil
+	}
+	// 周をまたいで続く契約の run（form: cli）も、課題の実行中として数える。
+	var n int
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, challengeID).Scan(&n)
+	return n > 0, err
 }
 
 // challengeAutoExclusion は challengeID が §判断点の共通の規則「周の中で自動で選ぶ対象からは、

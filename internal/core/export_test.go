@@ -20,7 +20,7 @@ import (
 
 // docs/features/m5-tom-migration-and-switchover.md S1（AC-1〜AC-16）。実ストアで書き出しと再構築を検証する。
 
-var allTablesForExportTest = []string{"activity", "approval", "challenge", "challenge_conflict", "challenge_dependency", "challenge_parent", "challenge_reopen", "cycle", "direct_completion", "direct_completion_artifact", "hold", "lock",
+var allTablesForExportTest = []string{"activity", "approval", "challenge", "challenge_conflict", "challenge_dependency", "challenge_parent", "challenge_reopen", "contract_run", "cycle", "direct_completion", "direct_completion_artifact", "hold", "lock",
 	"occurrence", "operation", "operation_execution", "run", "run_artifact", "slot", "source_binding", "task_plan"}
 
 func newWorkspaceStore(t *testing.T) (*Store, string) {
