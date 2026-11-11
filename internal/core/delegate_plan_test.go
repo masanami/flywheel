@@ -152,7 +152,8 @@ func newPlanFixture(t *testing.T) *planFixture {
 				break
 			}
 		}
-		time.Sleep(40 * time.Millisecond)
+		// 別の枠の委譲と重なる時間。負荷の高い環境（CI）でも重なりを取り逃がさないよう、十分に長くとる。
+		time.Sleep(300 * time.Millisecond)
 	}
 	return f
 }
