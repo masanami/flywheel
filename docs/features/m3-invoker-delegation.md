@@ -496,6 +496,17 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
   - D: 終了コードで状態を表す（harness §5.2 の案を契約にする）— JSON を読めない失敗と `failed` の状態の区別が終了コードの割り当てに依存する。
 - **影響範囲**: 宣言の検証（`internal/core`）・`internal/invoker`（`cli` 形態の起動は S4）・claude-harness の runtime（契約に合わせる側。harness 側の変更は本仕様の範囲外）。
 
+#### 委譲の流れ（`form: cli`。前半だけ）【決定 2026-11-10 オーナー。Issue #532】
+
+`form: cli` の接続ツールを使う委譲の流れ（architecture.md §10 の汎用の契約）。**この節の実装は前半だけ**で、再開・中止・判断待ちの保留への写し・予算の上限での中止は後半の Issue が受け持つ。J2 が `form: cli` の操作を選べない扱い（上の `cli` 形態の宣言・J2 の受入基準）はこの前半では変えない。前半は、起動と記録の部品（core の `StartContractDelegation`・`PollContractRuns`、invoker の `Launcher.Start`・`Launcher.Status`）までで、J2 の選択や周からの呼び出しへの接続は含めない。
+
+- **周をまたぐ待ち方（Q1）**: `commands.start`（すぐ実行 ID を返す口）を呼び、返った実行 ID を `contract_run`（課題・接続ツール・実行 ID・state・要約・求められた操作・費用の累計・上限額）に保存して、その周の委譲を終える。run の終わりまで待たない。返った state が `running` でも失敗にしない。次の周以降に `commands.status` を、終わっていない `contract_run` について読んで進める。終わっていない契約の run は課題ごとに高々 1 つで、その課題は「実行中」として数える（委譲の対象のほか、判断点 J1・J2・J5・J6 の自動の対象選択からも外れる）。
+- **起動の形**: 引数の配列は宣言の `commands` から取り、シェルを介さない。差し込みは `operations[].invocation` と同じ 4 つ（`{issue_number}`・`{issue_url}`・`{external_key}`・`{challenge_id}`）と、`status` の `{run_id}`（start が返した実行 ID）。コマンド 1 回ごとに flywheel の run を 1 つ記録する（出力は `.flywheel/runs/<run の ID>/` に保存）。終了コードは「JSON を出力できたか」だけを表し、0 でなければ `errored`、JSON が読めない・フィールドの型が合わなければ `malformed`、型は合っていて契約の版・`run_id`・`state`・`requested_action`・`artifacts`・`cost_usd` の値が閉集合・範囲の外なら `invalid_output`。いずれも契約の状態は更新しない（start なら契約の run を作らない）。
+- **状態の振り分け**: `state` を汎用の 5 値で振り分け、接続ツール内部の手順・判断値は読まない。`running` は記録して次の周で読む。`waiting` は `state` と求められた操作（`requested_action`）を記録して次の周で読むだけで、保留・子の問いへは写さない。`succeeded` は `artifacts` の `pr`・`branch`・`commit` をその読みの run の成果物（`run_artifact`）へ 1 回だけ取り込み、契約の run を終える（終わった契約の run は読まない）。`failed`・`cancelled` は記録して契約の run を終える（成果物は取り込まない。課題の状態への写しは後半）。
+- **待ちの種類ごとの写し方（Q2。写しは後半）**: 人の承認（`decider` が `human` の `approve`・`answer`）→ オーナーの保留、親が答えられるもの（`parent`）→ 子の問いを振り分ける判断点（J4）、見守るだけ（`observe`）→ 保留にせず次の周で読み直す。前半はどれも状態を記録して次の周へ回すだけにする。
+- **費用（Q3）**: 契約の `cost_usd` は孫を含む累計で、予算の判定の費用に入れる。**差分を足す**: 読むたびの run の費用には「今回の累計 − `contract_run` に記録済みの累計」だけを記録し（`cost_source` は `delta`、`reported_total_cost_usd` は累計）、`contract_run` の累計は最大値で置き換える。同じ累計を何度読んでも 0 が足されるだけで二重に数えず、累計が減って見えても減らさない。`cost_usd` が `null` の読みは増分なし（0）。課題の実装枠・周の費用は run の費用の合計で数えるので、予算の判定（枠の残り・周の上限）にそのまま入る。上限を超えたときの `contract cancel` での中止は後半。
+- **前半と後半の範囲**: 前半＝開始・状態の確認・成功時の成果物（PR）と費用の取り込み。後半＝再開（`commands.resume`）・中止（`commands.cancel`）・判断待ちの保留への写し・予算の上限での中止・`failed` の課題への写し・J2 と周からの呼び出しへの接続。前提は、接続ツールの `commands.start` が run を切り離して始め、すぐ実行 ID を返すこと。
+
 ### 4. 予算ガードと費用の数え方【決定 2026-09-28 オーナー M3H3／親 M3P7・M3P8】
 
 - **採用案**:

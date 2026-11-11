@@ -48,8 +48,8 @@ func TestOpen_AppliesLearningMigrationToAVersion10Store(t *testing.T) {
 		t.Fatalf("Open(latest) error = %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if got := userVersion(t, db); got != 18 {
-		t.Fatalf("user_version = %d, want 18", got)
+	if got := userVersion(t, db); got != 19 {
+		t.Fatalf("user_version = %d, want 19", got)
 	}
 	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
 		rows, err := tx.Query(`SELECT id, title, status, version, reporter, origin, followup_of FROM challenge ORDER BY id`)

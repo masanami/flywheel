@@ -68,8 +68,8 @@ func TestOpen_BackfillsCompletionDirectFromTheActivityLog(t *testing.T) {
 		t.Fatalf("Open(latest) error = %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if got := userVersion(t, db); got != 18 {
-		t.Fatalf("user_version = %d, want 18", got)
+	if got := userVersion(t, db); got != 19 {
+		t.Fatalf("user_version = %d, want 19", got)
 	}
 	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
 		for i, s := range seeds {
