@@ -647,7 +647,7 @@ func TestInstructions_J2StepsExcludeOperationsDelegatedChildCannotUse(t *testing
 	}
 }
 
-// #538: j2.md は、達成条件を書く前の「計画の前提の確認」として、(1) 上流の達成条件を写す前に
+// #538（#542 で「計画の点検」へ統合）: j2.md は、達成条件を書く前の確認として、(1) 上流の達成条件を写す前に
 // 関係する PR がマージ済みか・Issue が開いているかを確かめ、マージ済みなら成果物の形を選び直すこと、
 // (2) 子の課題に分けるという回答のときは取りまとめの Issue 自身を委譲しないこと、
 // (3) 「CI で通る」と書く前にその検査が CI にあるかを確かめることを求める（文を消すとこのテストが失敗する）。
@@ -656,14 +656,12 @@ func TestInstructions_J2VerifiesPlanPremisesBeforeCriteria(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := strings.Index(got, "- 計画の前提の確認（達成条件を書く前に行う）:\n")
-	if start < 0 {
-		t.Fatal("Instructions(J2) lacks the item 計画の前提の確認")
+	start := strings.Index(got, "## 計画の点検\n")
+	end := strings.Index(got, "## 守ること")
+	if start < 0 || end < start {
+		t.Fatalf("Instructions(J2) lacks the section 計画の点検 before 守ること: %d %d", start, end)
 	}
-	item := got[start:]
-	if end := strings.Index(item, "\n   - 予算の額:"); end >= 0 {
-		item = item[:end]
-	}
+	item := got[start:end]
 	for _, c := range []struct {
 		name string
 		keys []string
@@ -674,8 +672,45 @@ func TestInstructions_J2VerifiesPlanPremisesBeforeCriteria(t *testing.T) {
 	} {
 		for _, want := range c.keys {
 			if !strings.Contains(item, want) {
-				t.Errorf("the item 計画の前提の確認 in Instructions(J2) lacks %q for %s", want, c.name)
+				t.Errorf("the section 計画の点検 in Instructions(J2) lacks %q for %s", want, c.name)
 			}
+		}
+	}
+}
+
+// #542: j2.md は、(規則 1) 子の課題に分けると決まった取りまとめの課題には委譲の計画を出さず、人への問いを 1 つ返し、
+// 選択肢に「親が子の Issue を起票して取り込み、依存でつなぐ」と「親が直接行う種類の保留にする」を入れること、
+// (規則 2) 論点の回答で選ばれた選択肢の中身を計画の手順と達成条件に全部写し、写せなければ問いにすること、
+// (b) 手元での実行に書き換えたときは結果を PR の説明に残させることを求める。規則の行は特定の名前を含まない。
+func TestInstructions_J2AggregateIssueQuestionAndChosenOptionCoverage(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(got, "## 計画の点検\n")
+	end := strings.Index(got, "## 守ること")
+	if start < 0 || end < start {
+		t.Fatalf("Instructions(J2) lacks the section 計画の点検 before 守ること: %d %d", start, end)
+	}
+	section := got[start:end]
+	for _, want := range []string{
+		"達成条件を書く前と出力の前に次を確かめ",
+		"委譲の計画（1）を出さず、人への問い（2）を 1 つ返す",
+		"保留の記録にこの問いの回答があるときは、その回答に従い問い直さない",
+		"「親が子の Issue を起票して取り込み、依存でつなぐ」",
+		"「取りまとめの課題は、親が直接行う種類の保留にする」",
+		"どちらかを推奨にする",
+		"ラベルだけでなく、その選択肢が何を確かめる／何を作るためのものかを、計画の手順と達成条件に全部写す",
+		"写せない部分があれば計画に入れず、2 で問う",
+		"手元での実行に書き換え、実行したコマンドと成否の要旨を PR の説明に残させる",
+	} {
+		if !strings.Contains(section, want) {
+			t.Errorf("the section 計画の点検 in Instructions(J2) lacks %q", want)
+		}
+	}
+	for _, l := range strings.Split(section, "\n") {
+		if low := strings.ToLower(l); strings.Contains(low, "flywheel") || strings.Contains(low, "claude-harness") {
+			t.Errorf("the rule line names a specific repository: %q", l)
 		}
 	}
 }
