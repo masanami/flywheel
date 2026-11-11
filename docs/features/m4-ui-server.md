@@ -145,7 +145,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 - [ ] ボードは当面、ワークスペース（エージェント）ごとの列と段階の並びを保つ。列の見出しには、そのワークスペースのサイクルの状態（実行中・停止中・更新なし）と最後の周の終わった時刻・結果を示す [S2]【決定 2026-10-12 オーナー M4H23・M4H24。2026-10-17 オーナー M4H34 で「応答なし」を「更新なし」に改めた】
 - [ ] ボードの上に人間待ちの帯を置く。帯は fleet 全体の `needs-human` の区分（承認待ち・未回答の問い・不可逆操作の承認・食い違い・予算の使い切り・トリアージ・片づけ待ちのスロット）ごとの件数を、ワークスペースごとに示す。件数が 0 の区分は出さない [S2]【決定 2026-10-12 オーナー M4H23。PR #206 の `NeedsHumanStrip` の試作】
 - [ ] 帯の区分を選ぶと、ボードはその区分に当たるカードだけに絞り込まれる。もう一度選ぶか解除の操作で絞り込みを外せる [S2]【決定 2026-10-12 オーナー M4H23】
-- [ ] カードには区分の印を付ける。印は、人間の操作待ち（`card.next_human_actions` が空でない）・外部待ち（`card.modifiers` に `waiting_ci`）・システムが次に進めるもの（`status.actionable` にある）・実行中（`running`）・更新なし（`unresponsive`）・承認済みの不可逆操作が未実行（`status.approved.operations` にある）とし、UI が既存の API の値から導く [S2]【決定 2026-10-12 オーナー M4H23。区分を API に足さないことは起草者の仮定。2026-10-17 オーナー M4H34 で `unresponsive` の印の語を「応答なし」から「更新なし」に改めた】
+- [ ] カードには区分の印を付ける。印は、人間の操作待ち（`card.next_human_actions` が空でない）・外部待ち（`card.modifiers` に `waiting_ci`）・システムが次に進めるもの（`status.actionable` にある）・実行中（`running`）・更新なし（`unresponsive`）・承認済みの不可逆操作が未実行（`status.approved.operations` にある）とし、UI が既存の API の値から導く [S2]【決定 2026-10-12 オーナー M4H23。区分を API に足さないことは起草者の仮定。2026-10-17 オーナー M4H34 で `unresponsive` の印の語を「応答なし」から「更新なし」に改めた】（【方針の更新 #523】ボードのカードの「CI 待ち」の印は外す方針。委譲先が CI を待つ間は委譲が「実行中」に見える。コードの変更は #547 の後に別の PR で行い、それまでは今の印が残る。この行の期待値は書き換えない。M3P48 を参照）
 - [ ] UI は画面を表示している間、60 秒ごとに、表示している各ワークスペースの `GET …/cycle` と `GET …/challenges` を取り直す。画面が裏に回っている間（`document.visibilityState` が `hidden`）は取り直さない。周のプロセスが落ちるとストアへの書き込みも `workspace_changed` も止まるので、時間の経過だけで変わる表示（列の見出しの `stale`＝「更新なし」と、カードの `unresponsive` の印）は通知では変わらない。取り直しの契機に時間を足し、再読み込みの操作なしにこれらの表示を変える。`GET …/challenges` を取り直すのは、ボードのカードの `card.modifiers`（`unresponsive` を含む）がこの応答の各要素の `card` から来るからである。server は変えない。周を起動する定期実行（M4H11）とは別で、この取り直しは `GET` だけを発行する [S2]【決定 2026-10-18 オーナー M4H37。`unresponsive` の元を `GET …/challenges` としたことは起草者の仮定】
 - [ ] 帯の区分と `needs-human` の値の対応は次の表のとおりとする。件数は区分に入る要素の数とする。ただし食い違いの区分だけは、同じ課題に要素が複数あっても 1 件と数え、課題の数とする（絞り込みで残るカードの数と一致させる） [S2]【仮定。食い違いの区分を課題の数で数えることは決定 2026-10-24 オーナー（flywheel#318 の計画の承認）】
 
@@ -473,7 +473,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 `{"state": <コード>, "modifiers": [<コード>…], "next_human_actions": [<コード>…], "slot_ids": ["SL-<n>"…], "headline": string|null, "context": string|null}`（`headline`・`context` は S3 まで常に `null`。S4 から課題の `headline`・`context` の列の値を返す）。`slot_ids` は、スロットごとの直近の run（`run.slot_id` が一致する run のうち最新）がこの課題の run であるスロットの ID を昇順に並べる（API 専用。CLI の `--json` には出さない。M4H36）。
 
 - `state` は課題の状態のコード（M1 の 8 値）そのもの。
-- `modifiers` は `running`（終了していない run がある）・`unresponsive`（終了していない run の heartbeat が 300 秒より古い。しきい値は M3 の中断の判定と同じ値を core から使い、導出の関数は現在時刻を引数で受け取る）・`waiting_ci`（`status.waiting_external` にある）・`budget_exhausted`（`status.needs_human.budget_exhausted` にある）・`discrepancy`（`status.needs_human.discrepancies` にある（種類〔`kinds`〕が `dependency_cycle` だけの要素は除く。`m4.5-learning-and-self-improvement.md` の決定 M45H19）の閉集合で、この順に重複なく並べる。
+- `modifiers` は `running`（終了していない run がある）・`unresponsive`（終了していない run の heartbeat が 300 秒より古い。しきい値は M3 の中断の判定と同じ値を core から使い、導出の関数は現在時刻を引数で受け取る）・`waiting_ci`（`status.waiting_external` にある）・`budget_exhausted`（`status.needs_human.budget_exhausted` にある）・`discrepancy`（`status.needs_human.discrepancies` にある（種類〔`kinds`〕が `dependency_cycle` だけの要素は除く。`m4.5-learning-and-self-improvement.md` の決定 M45H19）の閉集合で、この順に重複なく並べる。（【方針の更新 #523】ボードのカードの「CI 待ち」の印は外す方針。委譲先が CI を待つ間は委譲が「実行中」に見える。コードの変更は #547 の後に別の PR で行い、それまでは今の印が残る。この行の期待値は書き換えない。M3P48 を参照）
 - `next_human_actions` は次の表の条件に当たるものを表の順に重複なく並べる。どれにも当たらなければ `[]`（UI は「なし（エージェントが進める）」と表示する。S2 からはカードの面でなく詳細に表示する）。
 
 | コード | 条件 |
@@ -731,7 +731,7 @@ S1 は 2026-10-12（flywheel#159）、S2 は 2026-10-18（flywheel#212）、S3 �
 - [ ] 終了していない run を持つ課題の `card.modifiers` は `running` を含む
 - [ ] 終了していない run の heartbeat が 300 秒より古い課題の `card.modifiers` は `unresponsive` を含む
 - [ ] 終了していない run の heartbeat が 300 秒ちょうど、または 300 秒より新しい課題の `card.modifiers` は `unresponsive` を含まない
-- [ ] `status.waiting_external` にある課題の `card.modifiers` は `waiting_ci` を含む
+- [ ] `status.waiting_external` にある課題の `card.modifiers` は `waiting_ci` を含む（【方針の更新 #523】ボードのカードの「CI 待ち」の印は外す方針。委譲先が CI を待つ間は委譲が「実行中」に見える。コードの変更は #547 の後に別の PR で行い、それまでは今の印が残る。この行の期待値は書き換えない。M3P48 を参照）
 - [ ] `status.needs_human.budget_exhausted` にある課題の `card.modifiers` は `budget_exhausted` を含む
 - [ ] `status.needs_human.discrepancies` にある課題の `card.modifiers` は `discrepancy` を含む。種類が `dependency_cycle` だけの要素でだけそこにある課題は含まない（M45H19）
 - [ ] 複数の条件に当たる課題の `card.modifiers` は、§IF / API「カードの面」の列挙の順に重複なく並ぶ（API では同時に成り立つ 4 つで検証し、5 つすべての順は core の単体テスト `internal/core/card_test.go` で検証する）
