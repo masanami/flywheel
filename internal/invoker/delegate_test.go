@@ -164,6 +164,32 @@ func TestBuildDelegationStdin_RequiresSelfMeasuringGatesCINeverRuns(t *testing.T
 	}
 }
 
+// #523: 指示文だけの委譲（direct の brief）では、PR を作った後に CI の決着まで待ち、
+// 失敗なら直してから報告する段が、すべてのブリーフに載る。
+func TestBuildDelegationStdin_RequiresChildToWaitForCIAfterPR(t *testing.T) {
+	for _, d := range []struct {
+		decider string
+		row     int
+	}{{"human", 1}, {"parent", 3}, {"child", 4}} {
+		out, err := BuildDelegationStdin(DelegationBrief{Decider: d.decider, DeciderRow: d.row, Brief: "b"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(out)
+		for _, phrase := range []string{
+			"プルリクエストを作った後は、CI が決着するまで待ち、失敗したら直してから報告する",
+			"CI が未決着ならその事実を含めて実際の状態を報告して終了する",
+		} {
+			if !strings.Contains(text, phrase) {
+				t.Errorf("%s: the delegation stdin lacks %q", d.decider, phrase)
+			}
+		}
+		if strings.Contains(text, "CI・外部のレビュー・人間の承認のように") {
+			t.Errorf("%s: the old rule (do not wait for CI) must be gone", d.decider)
+		}
+	}
+}
+
 func TestBuildDelegationStdin_SourceIssueSectionAndRegionDelimiterGuard(t *testing.T) {
 	out, err := BuildDelegationStdin(DelegationBrief{Decider: "child", DeciderRow: 4, Brief: "b", SourceIssueNumber: 7, SourceIssueURL: "https://github.com/o/r/issues/7"})
 	if err != nil || !strings.Contains(string(out), "番号: 7") {
