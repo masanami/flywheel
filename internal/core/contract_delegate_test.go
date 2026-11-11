@@ -310,6 +310,28 @@ func TestPollContractRuns_ReadFailureKeepsTheStateAndRecordsTheResult(t *testing
 	}
 }
 
+// 状態の確認でも、contract_version が合わない応答は取り込まずに失敗（invalid_output）にする。
+func TestPollContractRuns_WrongContractVersionIsInvalidOutputAndImportsNothing(t *testing.T) {
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, func(st *ContractStatus) {
+		st.ContractVersion = 2
+		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: "https://github.com/o/r/pull/9"}}
+	})}
+	reps := f.poll(t)
+	if len(reps) != 1 || reps[0].Result != RunResultInvalidOutput {
+		t.Fatalf("report = %+v, want result invalid_output", reps)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM run_artifact`); n != 0 {
+		t.Fatalf("artifacts = %d, want 0（版が合わない応答の PR は取り込まない）", n)
+	}
+	if state, summary, _, ended := f.contractRow(t); state != "running" || summary != "s-running" || ended {
+		t.Fatalf("contract_run changed by a wrong-version read: state=%s summary=%s ended=%v", state, summary, ended)
+	}
+}
+
 // 費用: 契約の cost_usd は孫を含む累計。状態を何度読んでも二重に数えない（差分だけを run に記録し、累計で置き換える）。
 func TestContractCost_CumulativeIsNotDoubleCountedAcrossReads(t *testing.T) {
 	f := newContractFixture(t)
