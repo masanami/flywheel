@@ -114,6 +114,26 @@ func TestValidateJ2Output_ValidPlanIsAccepted(t *testing.T) {
 	}
 }
 
+// S4: cli 形態の接続ツールの操作は選べる（計画として登録できる）。差し込みの閉集合の外の値、または取り込み元の無い課題での
+// 取り込み元の差し込みを要する invocation は不正な出力になる。
+func TestValidateJ2Output_CLIOperation(t *testing.T) {
+	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
+	if v, ok := validateJ2Output(out, j2TestContext(t, false)); !ok || v.Operation != "cli-op" {
+		t.Fatalf("cli operation: ok=%v validated=%+v, want accepted", ok, v)
+	}
+	for name, inv := range map[string]string{"outside the closed set": "run {unknown}", "source value without source": "run {issue_number}"} {
+		vc := j2TestContext(t, false)
+		for i := range vc.Conn.Connectors {
+			if vc.Conn.Connectors[i].Form == ConnectorFormCLI {
+				vc.Conn.Connectors[i].Operations[0].Invocation = inv
+			}
+		}
+		if _, ok := validateJ2Output(out, vc); ok {
+			t.Errorf("%s: want invalid_output", name)
+		}
+	}
+}
+
 func TestValidateJ2Output_InvalidOutputs(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -128,7 +148,6 @@ func TestValidateJ2Output_InvalidOutputs(t *testing.T) {
 		{"repo empty", true, j2PlanOutput(func(m map[string]any) { m["repo"] = "" })},
 		{"operation not in the repo's connector (AC-106)", true, j2PlanOutput(func(m map[string]any) { m["operation"] = "brief" })},
 		{"operation missing", true, j2PlanOutput(func(m map[string]any) { m["operation"] = nil })},
-		{"operation of a cli connector (AC-107)", true, j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })},
 		{"{issue_number} operation without source (AC-108)", false, j2PlanOutput(func(m map[string]any) { m["operation"] = "impl" })},
 		{"{issue_url} operation without source (AC-108)", false, j2PlanOutput(func(m map[string]any) { m["operation"] = "by-url" })},
 		{"{external_key} operation without source (AC-108)", false, j2PlanOutput(func(m map[string]any) { m["operation"] = "by-key" })},
@@ -355,5 +374,22 @@ func TestFormatJ2PlanBody_OmitsEmptySummaryAndSteps(t *testing.T) {
 	}
 	if strings.TrimSpace(body) == "" {
 		t.Errorf("body must not be empty")
+	}
+}
+
+// cli 形態は、実際に起動に使う commands.start が取り込み元の差し込みを要するとき、取り込み元の無い課題の計画を不正な出力にする
+// （取り込み元がある課題では計画として通る）。
+func TestValidateJ2Output_CLIStartCommandNeedingSourceIsInvalidWithoutSource(t *testing.T) {
+	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
+	for _, hasSource := range []bool{false, true} {
+		vc := j2TestContext(t, hasSource)
+		for i := range vc.Conn.Connectors {
+			if vc.Conn.Connectors[i].Form == ConnectorFormCLI {
+				vc.Conn.Connectors[i].Commands.Start = []string{"tool", "start", "--issue", "{issue_number}"}
+			}
+		}
+		if _, ok := validateJ2Output(out, vc); ok != hasSource {
+			t.Errorf("hasSource=%v: accepted=%v, want %v", hasSource, ok, hasSource)
+		}
 	}
 }

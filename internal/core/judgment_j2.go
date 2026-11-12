@@ -251,6 +251,19 @@ func j2OutputSchema() []byte {
 
 // invocationNeedsSource は操作の invocation が取り込み元の差し込みを持つかを返す
 // （{challenge_id} は取り込み元の差し込みではない）。
+// cliStartNeedsSource は cli 形態の接続ツールの commands.start が取り込み元の差し込みを要するか。
+func cliStartNeedsSource(c *Connector) bool {
+	if c == nil || c.Form != ConnectorFormCLI || c.Commands == nil {
+		return false
+	}
+	for _, a := range c.Commands.Start {
+		if invocationNeedsSource(a) {
+			return true
+		}
+	}
+	return false
+}
+
 func invocationNeedsSource(invocation string) bool {
 	for _, ph := range []string{"{issue_number}", "{issue_url}", "{external_key}"} {
 		if strings.Contains(invocation, ph) {
@@ -339,10 +352,18 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 			break
 		}
 	}
-	if op == nil || connector.Form == ConnectorFormCLI {
+	if op == nil {
+		return nil, false
+	}
+	// cli 形態の操作は、invocation が差し込みの閉集合の中の値だけを要するときだけ選べる。
+	if connector.Form == ConnectorFormCLI && validateInvocationPlaceholders(op.Invocation) != nil {
 		return nil, false
 	}
 	if !vc.HasSource && invocationNeedsSource(op.Invocation) {
+		return nil, false
+	}
+	// cli 形態は、実際に起動に使う commands.start の引数も同じく、取り込み元の無い課題では取り込み元の差し込みを要してはならない。
+	if !vc.HasSource && cliStartNeedsSource(connector) {
 		return nil, false
 	}
 
@@ -727,8 +748,8 @@ func yesNo(b bool) string {
 
 // formatJ2DeclarationSection は J2 が選べる対象リポジトリと操作の一覧
 // （§J2「宣言の対象リポジトリと操作の一覧（id・形態・対話前提か・成果物の種類）」）。
-// J2 が選んでも不正になる操作には注記を付ける（形態 cli は現在の委譲に使えない・
-// 取り込み元の対応の無い課題では取り込み元の差し込みを持つ操作は選べない）。
+// J2 が選んでも不正になる操作には注記を付ける（取り込み元の対応の無い課題では、
+// 取り込み元の差し込みを持つ操作、および commands.start がそれを要する cli 形態の操作は選べない）。
 func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, agent *AgentDeclaration) string {
 	var b strings.Builder
 	if hasSource {
@@ -752,9 +773,7 @@ func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, age
 			}
 			line := "    - id: " + op.ID + "｜対話前提: " + yesNo(op.Interactive) + "｜成果物: " + artifacts
 			switch {
-			case connector.Form == ConnectorFormCLI:
-				line += "｜注記: この形態の操作は現在の委譲に使えないため選べない"
-			case !hasSource && invocationNeedsSource(op.Invocation):
+			case !hasSource && (invocationNeedsSource(op.Invocation) || cliStartNeedsSource(connector)):
 				line += "｜注記: 取り込み元の Issue の情報を必要とするため、この課題では選べない"
 			}
 			b.WriteString(line + "\n")

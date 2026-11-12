@@ -486,9 +486,7 @@ func (sch *delegationScheduler) capacity(ctx context.Context, repo ConnectorRepo
 		}
 		// 同時委譲数には、終わっていない契約の run（form: cli）を持つ課題も数える（start の最中で契約の run が
 		// まだ無い課題を含む）。契約の run はスロットを使わないので、リポジトリごとの数え（dbRepo）には入れない。
-		if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM run WHERE kind = 'delegate' AND result IS NULL)
-			+ (SELECT COUNT(*) FROM (SELECT challenge_id FROM contract_run WHERE ended_at IS NULL
-				UNION SELECT challenge_id FROM run WHERE kind = 'contract' AND result IS NULL))`).Scan(&c.dbTotal); err != nil {
+		if c.dbTotal, err = activeDelegationCount(ctx, tx); err != nil {
 			return err
 		}
 		return tx.QueryRowContext(ctx,
@@ -496,6 +494,15 @@ func (sch *delegationScheduler) capacity(ctx context.Context, repo ConnectorRepo
 			 WHERE r.kind = 'delegate' AND r.result IS NULL AND sl.repo = ?`, repo.Name).Scan(&c.dbRepo)
 	})
 	return c, classifyReadWriteErr(err)
+}
+
+// activeDelegationCount は終わっていない委譲の run と、終わっていない契約の run（form: cli）を持つ課題の数。
+func activeDelegationCount(ctx context.Context, tx *sql.Tx) (int, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM run WHERE kind = 'delegate' AND result IS NULL)
+		+ (SELECT COUNT(*) FROM (SELECT challenge_id FROM contract_run WHERE ended_at IS NULL
+			UNION SELECT challenge_id FROM run WHERE kind = 'contract' AND result IS NULL))`).Scan(&n)
+	return n, err
 }
 
 func (sch *delegationScheduler) fitsLocked(c slotCapacity, repo string) bool {
@@ -617,6 +624,32 @@ func (r *delegateRun) admit(ctx context.Context, jc *JudgmentCycle) (*admission,
 		ctx = r.waitCtx
 	}
 	return r.sch.admit(ctx, r.w, jc != nil)
+}
+
+// admitContract は form: cli の契約の run の起動の許可を得る。スロットは使わないので、全体の同時委譲数
+// （max_parallel_runs）だけを見る。空いていなければ待たずに ErrSlotUnavailable。
+func (r *delegateRun) admitContract(ctx context.Context) (*admission, error) {
+	if r == nil || r.sch == nil {
+		return nil, nil
+	}
+	sch := r.sch
+	sch.mu.Lock()
+	defer sch.mu.Unlock()
+	var total int
+	err := sch.s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		total, err = activeDelegationCount(ctx, tx)
+		return err
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return nil, err
+	}
+	if total+sch.pre >= sch.maxParallel {
+		return nil, ErrSlotUnavailable
+	}
+	sch.pre++
+	sch.preRepo[""]++
+	sch.own++
+	return &admission{sch: sch, repo: ""}, nil
 }
 
 type delegateOutcome struct {

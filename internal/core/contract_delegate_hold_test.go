@@ -105,9 +105,9 @@ func TestPollContractRuns_FailedAndCancelledHoldTheChallengeWithTheSummary(t *te
 	}
 }
 
-// succeeded・running・waiting は保留にしない。
+// running・求められた操作の無い waiting は保留にしない。
 func TestPollContractRuns_OtherStatesDoNotHold(t *testing.T) {
-	for _, st := range []ContractState{ContractStateRunning, ContractStateWaiting, ContractStateSucceeded} {
+	for _, st := range []ContractState{ContractStateRunning, ContractStateWaiting} {
 		f := newContractFixture(t)
 		if _, err := f.start(t); err != nil {
 			t.Fatal(err)
@@ -273,6 +273,14 @@ func TestPollContractRuns_ConcurrentReadsDoNotDoubleCountCost(t *testing.T) {
 type statusOnlyClient struct{ out ContractLaunchOutput }
 
 func (c *statusOnlyClient) Start(context.Context, ContractLaunchInput) (ContractLaunchOutput, error) {
+	return c.out, nil
+}
+
+func (c *statusOnlyClient) Resume(context.Context, ContractLaunchInput) (ContractLaunchOutput, error) {
+	return c.out, nil
+}
+
+func (c *statusOnlyClient) Cancel(context.Context, ContractLaunchInput) (ContractLaunchOutput, error) {
 	return c.out, nil
 }
 

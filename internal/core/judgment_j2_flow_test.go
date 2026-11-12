@@ -467,6 +467,22 @@ func TestPlanAutoJ2_OverCapDropsOldestCommentsAndStatesIt(t *testing.T) {
 
 // --- 不正な出力（AC-104〜108） ---
 
+// S4: cli 形態の操作を選んだ出力は、invalid_output にならず計画として登録される。
+func TestPlanAutoJ2_CLIOperationIsRegisteredAsAPlan(t *testing.T) {
+	f := newJ2Fixture(t)
+	ch := f.newClassified(t, "cli", "P1")
+	res, err := f.run(t, succeededInvoker(j2OutputFor(false, func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })), idPtr(ch.ID))
+	if err != nil {
+		t.Fatalf("PlanAutoJ2: %v", err)
+	}
+	if len(res.Items) != 1 || res.Items[0].Result != RunResultSucceeded || res.Items[0].Outcome != "plan" {
+		t.Fatalf("item = %+v, want a registered plan", res.Items)
+	}
+	if got := f.detail(t, ch.ID); got.Status != StatusAwaitingPlanApproval || len(got.Plans) != 1 {
+		t.Fatalf("challenge = %+v, want awaiting_plan_approval with 1 plan", got.Challenge)
+	}
+}
+
 func TestPlanAutoJ2_InvalidOutput_LeavesChallengeClassified(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -477,7 +493,6 @@ func TestPlanAutoJ2_InvalidOutput_LeavesChallengeClassified(t *testing.T) {
 		{"cross_repo missing", false, func(m map[string]any) { delete(m, "cross_repo") }},
 		{"repo not declared (AC-105)", false, func(m map[string]any) { m["repo"] = "ghost" }},
 		{"operation not in the connector (AC-106)", false, func(m map[string]any) { m["operation"] = "impl" }},
-		{"cli connector operation (AC-107)", false, func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" }},
 		{"{issue_number} operation without source (AC-108)", false, func(m map[string]any) { m["repo"] = "flywheel"; m["operation"] = "impl" }},
 	}
 	for _, c := range cases {
