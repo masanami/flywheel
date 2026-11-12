@@ -124,7 +124,8 @@ func sourceIssueNumber(sb *sourceBinding, remote string) int {
 }
 
 // loadRunningDelegations は、その周より前から終了していない委譲の run を持つ課題を、リポジトリごとに
-// 読む（スロットのリポジトリ。スロットが無ければ承認済みの計画のリポジトリ）。
+// 読む（スロットのリポジトリ。スロットが無ければ承認済みの計画のリポジトリ）。その周より前に始めた
+// 終わっていない契約の run（form: cli。周をまたいで続く）を持つ課題も、動いている委譲として含める。
 func (s *Store) loadRunningDelegations(ctx context.Context, in DelegateInput) (map[string][]planRunning, error) {
 	cycleInt, _ := parseCycleID(in.CycleID)
 	type raw struct {
@@ -137,7 +138,10 @@ func (s *Store) loadRunningDelegations(ctx context.Context, in DelegateInput) (m
 		rows, err := tx.QueryContext(ctx,
 			`SELECT r.challenge_id, COALESCE(sl.repo, '') FROM run r LEFT JOIN slot sl ON sl.id = r.slot_id
 			 WHERE r.kind = 'delegate' AND r.result IS NULL AND (r.cycle_id IS NULL OR r.cycle_id <> ?)
-			 ORDER BY r.challenge_id ASC`, cycleInt)
+			 UNION ALL
+			 SELECT k.challenge_id, '' FROM contract_run k JOIN run r ON r.id = k.start_run_id
+			 WHERE k.ended_at IS NULL AND (r.cycle_id IS NULL OR r.cycle_id <> ?)
+			 ORDER BY 1 ASC`, cycleInt, cycleInt)
 		if err != nil {
 			return err
 		}
@@ -480,7 +484,11 @@ func (sch *delegationScheduler) capacity(ctx context.Context, repo ConnectorRepo
 		if declared > len(cands) {
 			c.usable += declared - len(cands)
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run WHERE kind = 'delegate' AND result IS NULL`).Scan(&c.dbTotal); err != nil {
+		// 同時委譲数には、終わっていない契約の run（form: cli）を持つ課題も数える（start の最中で契約の run が
+		// まだ無い課題を含む）。契約の run はスロットを使わないので、リポジトリごとの数え（dbRepo）には入れない。
+		if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM run WHERE kind = 'delegate' AND result IS NULL)
+			+ (SELECT COUNT(*) FROM (SELECT challenge_id FROM contract_run WHERE ended_at IS NULL
+				UNION SELECT challenge_id FROM run WHERE kind = 'contract' AND result IS NULL))`).Scan(&c.dbTotal); err != nil {
 			return err
 		}
 		return tx.QueryRowContext(ctx,
