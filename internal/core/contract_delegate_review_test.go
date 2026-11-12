@@ -441,3 +441,97 @@ func TestPollContractRuns_UnfillableResumeKeepsTheAnswerLink(t *testing.T) {
 		t.Fatalf("answer link cleared without a resume (%d linked)", n)
 	}
 }
+
+// 差し戻しの後の 2 回目の契約の run は、1 回目に使った分を引いた残りの合計を上限額に記録し、
+// 2 回目の外部の run の累計（cost_usd）はその上限額とだけ比べる（1 回目の費用を足して比べない）。
+func TestRunDelegation_CLISecondContractAfterSendBackDoesNotCountTheFirstCostTwice(t *testing.T) {
+	f := newContractFixture(t)
+	ctx := context.Background()
+	in := f.input(f.cycle(t, 300), idPtr(f.cid))
+	in.Contract = f.client
+	ch := f.detail(t, f.cid).Challenge
+	dc, err := f.s.loadDelegationContext(ctx, in, ch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := dc.ImplBudgetMicros + dc.ReviewBudgetMicros
+	if dc.ImplBudgetMicros <= 0 || dc.ReviewBudgetMicros <= 0 {
+		t.Fatalf("impl=%d review=%d, want both frames positive", dc.ImplBudgetMicros, dc.ReviewBudgetMicros)
+	}
+	maxBudgets := func() []int64 {
+		var out []int64
+		readForTest(t, f.s, func(tx *sql.Tx) error {
+			rows, err := tx.Query(`SELECT max_budget_usd FROM contract_run ORDER BY id`)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = rows.Close() }()
+			for rows.Next() {
+				var v int64
+				if err := rows.Scan(&v); err != nil {
+					return err
+				}
+				out = append(out, v)
+			}
+			return rows.Err()
+		})
+		return out
+	}
+
+	// 1 回目: 実装の枠の半分を使って succeeded で終わり、検証中へ進む。
+	if _, err := f.s.RunDelegation(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	firstMicros := dc.ImplBudgetMicros / 2
+	first := microsToUSD(firstMicros)
+	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, &first, func(st *ContractStatus) {
+		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: "https://github.com/o/r/pull/9"}}
+	})}
+	f.poll(t)
+	if got := f.status(t, f.cid); got != StatusVerifying {
+		t.Fatalf("status = %s, want verifying after the first contract run", got)
+	}
+
+	// 差し戻し: 課題を着手中へ戻し、2 回目の契約の run を始める。
+	cid, _ := parseChallengeID(f.cid)
+	if _, err := f.exec(`UPDATE challenge SET status = 'in_progress', version = version + 1 WHERE id = ?`, cid); err != nil {
+		t.Fatal(err)
+	}
+	ext2 := func(st *ContractStatus) { st.RunID = "ext-2" }
+	f.client.startOut = contractOut(ContractStateRunning, nil, ext2)
+	in2 := f.input(f.cycle(t, 300), idPtr(f.cid))
+	in2.Contract = f.client
+	if _, err := f.s.RunDelegation(ctx, in2); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.client.starts) != 2 {
+		t.Fatalf("starts = %d, want 2 (the second contract run after the send-back)", len(f.client.starts))
+	}
+	secondMax := original - firstMicros
+	if got := maxBudgets(); len(got) != 2 || got[0] != original || got[1] != secondMax {
+		t.Fatalf("max_budget_usd = %v, want [%d %d]（2 回目は使った分を引いた残りの合計）", got, original, secondMax)
+	}
+
+	// 2 回目の累計がその上限額ちょうど: 1 回目の費用と足すと 2 回目の上限額を上回るが、中止しない。
+	atMax := microsToUSD(secondMax)
+	if firstMicros+secondMax <= secondMax {
+		t.Fatal("test setup: first + second must exceed the second run's budget")
+	}
+	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateRunning, &atMax, ext2)}
+	f.poll(t)
+	if len(f.client.cancels) != 0 {
+		t.Fatalf("cancels = %v, want none（2 回目の費用は 2 回目の上限額とだけ比べる）", f.client.cancels)
+	}
+	if got := f.status(t, f.cid); got != StatusInProgress {
+		t.Fatalf("status = %s, want in_progress", got)
+	}
+
+	// 2 回目の上限額を上回ったら中止する（比べる相手が 2 回目の上限額であること）。
+	over := microsToUSD(secondMax) + 0.01
+	f.client.cancelOut = contractOut(ContractStateCancelled, &over, ext2)
+	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateRunning, &over, ext2)}
+	f.poll(t)
+	if len(f.client.cancels) != 1 || !reflect.DeepEqual(f.client.cancels[0], []string{"tool", "cancel", "ext-2"}) {
+		t.Fatalf("cancels = %v, want one cancel for ext-2 over the second run's budget", f.client.cancels)
+	}
+}
