@@ -350,7 +350,7 @@ const ActivityActionBackup = "backup"
 // ExecutionResult は release の実行の試行の結果（operation_execution.result）の閉集合。
 type ExecutionResult string
 
-// ExecutionResult の16値。
+// ExecutionResult の18値。
 const (
 	ExecutionResultMerged           ExecutionResult = "merged"
 	ExecutionResultAlreadyMerged    ExecutionResult = "already_merged"
@@ -368,6 +368,11 @@ const (
 	ExecutionResultMergedUnapproved ExecutionResult = "merged_unapproved"
 	ExecutionResultLimitReached     ExecutionResult = "limit_reached"
 	ExecutionResultInterrupted      ExecutionResult = "interrupted"
+	// ExecutionResultMergeRequested は、反映（マージ）を接続先へ依頼し、接続先の結果待ちであること（数えない待ち）。
+	ExecutionResultMergeRequested ExecutionResult = "merge_requested"
+	// ExecutionResultMergeTimeout は、依頼から ReleaseMergeRequestTimeout を超えても反映・失敗・断りのどれにもならず、
+	// そのときの状態を写して取り消した（保留に戻した）こと。
+	ExecutionResultMergeTimeout ExecutionResult = "merge_timeout"
 )
 
 // ExecutionClass は試行の結果の分類。
@@ -407,6 +412,8 @@ var executionResultSpecs = []struct {
 	{ExecutionResultMergedUnapproved, ExecutionClassCancel, false},
 	{ExecutionResultLimitReached, ExecutionClassCancel, false},
 	{ExecutionResultInterrupted, ExecutionClassInterrupted, false},
+	{ExecutionResultMergeRequested, ExecutionClassWait, false},
+	{ExecutionResultMergeTimeout, ExecutionClassCancel, false},
 }
 
 // ExecutionResultValues は閉集合の全値を表の順に返す。

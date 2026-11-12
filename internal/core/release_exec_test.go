@@ -234,10 +234,10 @@ func TestExecuteReleases_MergeMethodFlagFollowsDeclaration(t *testing.T) {
 	}
 }
 
-func TestExecuteReleases_MergeNotReflected_Unconfirmed_NotCounted(t *testing.T) {
+func TestExecuteReleases_MergeNotReflected_Requested_NotCounted(t *testing.T) {
 	f := newRelFixture(t)
 	item := f.run(t) // 依頼の後の読み取りも open のまま
-	if item.Result != ExecutionResultMergeUnconfirmed || item.ConsecutiveFailures != 0 {
+	if item.Result != ExecutionResultMergeRequested || item.ConsecutiveFailures != 0 {
 		t.Fatalf("item = %+v", item)
 	}
 	if st := f.state(t); st.opState != "approved" {
@@ -313,7 +313,7 @@ func TestJudgmentOrder(t *testing.T) {
 		// 完了の課題の not_mergeable は、課題を着手中へ戻して release を置き換える（古い release は closed。#485）。
 		{"mergeable false", func(f *relFixture) { v := false; f.fake.pr.Mergeable = &v }, ExecutionResultNotMergeable, "closed", 0},
 		{"read failure", func(f *relFixture) { f.fake.getErr = errors.New("gh down") }, ExecutionResultUpstreamFailed, "approved", 0},
-		{"no checks passes", func(f *relFixture) { f.fake.pr.Checks = nil }, ExecutionResultMergeUnconfirmed, "approved", 1},
+		{"no checks passes", func(f *relFixture) { f.fake.pr.Checks = nil }, ExecutionResultMergeRequested, "approved", 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

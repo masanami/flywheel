@@ -50,6 +50,12 @@ const (
 	ReleaseMergeableInterval = 3 * time.Second
 )
 
+// ReleaseMergeRequestTimeout は、反映の依頼（merge_requested）から、反映・失敗・断りのどれにもならずに待てる時間。
+// 超えた試行は merge_timeout で取り消す（理由に、そのときのチェックの結果と mergeable_state を写す）。
+// 値の根拠は、接続先のチェックの実測が 15〜25 分で、取り込みの後の再実行を 1 回挟んでも収まる余裕を取ったこと。
+// ちょうどこの時間は超えたに含めない。
+const ReleaseMergeRequestTimeout = 90 * time.Minute
+
 // ReleaseExecOptions は ExecuteReleases の入力。Checks・Merger・Connectors は必須
 // （どれかが nil なら ErrValidation）。
 type ReleaseExecOptions struct {
@@ -310,6 +316,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		attempt     *operationExecutionRow
 		notStarted  *NotStarted
 		approvedRow string
+		reservedAt  time.Time
 	)
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
 		r, err := loadOperationRow(ctx, tx, opID)
@@ -341,6 +348,9 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 			return err
 		}
 		approvedRow = head
+		if reservedAt, err = latestMergeRequestedAt(ctx, tx, opID); err != nil {
+			return err
+		}
 		attempt, err = beginOperationExecution(ctx, tx, opID, beginOperationExecutionInput{StartedAt: at, ApprovedHead: head, PID: pid, Host: host})
 		if errors.Is(err, errActiveExecutionExists) {
 			// 別のプロセスが先に試行を始めた。
@@ -361,7 +371,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		return nil, notStarted, nil
 	}
 
-	j := s.judgeRelease(ctx, row, approvedRow, opts)
+	j := s.judgeRelease(ctx, row, approvedRow, opts, reservedAt, now)
 
 	cycleID := opts.cycleID
 	item, err := s.finishReleaseAttempt(ctx, actor, opID, row, attempt, approvedRow, j, opts, cycleID, now)
@@ -483,9 +493,9 @@ func movedByMergeInOnly(ctx context.Context, src UpstreamCompareSource, repo, pr
 const mergeableNullDetail = "mergeable is null"
 
 // judgeRelease は judgeReleaseOnce を、mergeable が null で待つ結果のとき、設定の回数まで読み直して返す。
-func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions) releaseJudgment {
+func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions, reservedAt time.Time, now func() time.Time) releaseJudgment {
 	for n := 0; ; n++ {
-		j := s.judgeReleaseOnce(ctx, row, approvedHead, opts)
+		j := s.judgeReleaseOnce(ctx, row, approvedHead, opts, reservedAt, now())
 		if j.result != ExecutionResultWaitingChecks || j.detail != mergeableNullDetail || n >= opts.MergeableRetries {
 			return j
 		}
@@ -500,10 +510,12 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 // judgeReleaseOnce は判定の順 1〜11 を評価し、最初に当たった条件の結果を返す。
 //
 // 7 で head が承認の head から動いていても、動いた中身が既定ブランチの取り込みだけ（ClassifyHeadChange）なら
-// 外さず、8〜10 で取り込んだ後の head のすべてのチェック（必須でないものを含む。1 件以上）が成功していることを
-// 確かめてから、その head をマージする（承認し直さない）。10 の後で PR が BEHIND（衝突なし）なら、マージを試さず
-// 既定ブランチを取り込む依頼（UpstreamPullRequestBranchUpdater）をして待つ。CI の結果は次の試行が読む。
-func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions) releaseJudgment {
+// 外さず、取り込んだ後の head を対象に続ける（承認し直さない）。失敗したチェックは checks_failed、未完了は待つ。
+// 反映の依頼が受け付けられている間は、依頼し直さず待ち、依頼から ReleaseMergeRequestTimeout を超えたら
+// merge_timeout で取り消す（mergeable=false は期限より先に not_mergeable）。PR が BEHIND（衝突なし）なら、
+// 依頼の有無によらず既定ブランチを取り込む依頼（UpstreamPullRequestBranchUpdater）をして待つ。
+// 依頼が無ければ（取り込みで外れた場合を含む）、いまの head で依頼する（11）。接続先のチェックの結果は次の試行が読む。
+func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions, reservedAt, now time.Time) releaseJudgment {
 	// 1
 	if approvedHead == "" {
 		return releaseJudgment{result: ExecutionResultNoApprovedHead}
@@ -565,12 +577,18 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 	if failed {
 		return releaseJudgment{result: ExecutionResultChecksFailed, observedHead: observed}
 	}
-	if pending {
-		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed}
+	// 依頼の後の待ちには期限がある。反映・失敗・断りのどれにもならないまま超えたら、そのときの状態を写して取り消す。
+	if pr.MergeRequested && !reservedAt.IsZero() && now.Sub(reservedAt) > ReleaseMergeRequestTimeout {
+		// 衝突は期限より先に扱う（#485 の立て直しへ回す）。
+		if pr.Mergeable != nil && !*pr.Mergeable {
+			return releaseJudgment{result: ExecutionResultNotMergeable, observedHead: observed}
+		}
+		return releaseJudgment{result: ExecutionResultMergeTimeout, observedHead: observed, detail: mergeTimeoutDetail(pr, reservedAt, now)}
 	}
-	// 取り込んだ後の head は、チェックが 1 件も付いていない間は何も見ていないので待つ。
-	if moved && !ChecksAllPassed(pr.Checks) {
-		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "no checks on the updated head yet"}
+	// 依頼の後に既定ブランチが進んで PR が遅れたときは、チェックの完了を待たず取り込む（遅れたままでは反映されない）。
+	behindWhileRequested := pr.MergeRequested && pr.MergeableState == UpstreamMergeStateBehind && pr.Mergeable != nil && *pr.Mergeable
+	if pending && !behindWhileRequested {
+		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed}
 	}
 	// 10
 	if pr.Mergeable == nil {
@@ -588,8 +606,13 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 				}
 				return releaseJudgment{result: ExecutionResultMergeFailed, observedHead: observed, detail: "update branch: " + err.Error()}
 			}
+			// 取り込んだ後の head は次の試行が読み直し、依頼が残っていなければ新しい head で依頼し直す。
 			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "branch updated: the pull request was behind " + decl.DefaultBranch}
 		}
+	}
+	// 依頼が受け付けられたまま反映を待っている（チェックがまだ付いていない間、成功してから反映までの間を含む）。
+	if pr.MergeRequested {
+		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "merge requested: waiting for the upstream"}
 	}
 	// 11
 	method := decl.MergeMethod
@@ -606,12 +629,57 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergeUnconfirmed, observedHead: observed, detail: err.Error()}
 	}
 	if after.State != string(artifactStateMerged) {
-		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergeUnconfirmed, observedHead: after.HeadSHA}
+		// 依頼は受け付けられ、反映は接続先の条件が整ってから。結果は次の試行（次の周）が読む。
+		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergeRequested, observedHead: after.HeadSHA, detail: "head " + pr.HeadSHA}
 	}
 	if after.HeadSHA != pr.HeadSHA {
 		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergedUnapproved, observedHead: after.HeadSHA}
 	}
 	return releaseJudgment{mergeRequested: true, result: ExecutionResultMerged, observedHead: after.HeadSHA, mergeCommit: after.MergeCommitSHA}
+}
+
+// mergeTimeoutDetail は merge_timeout の detail。そのときのチェックの結果と mergeable_state を写す。
+func mergeTimeoutDetail(pr UpstreamPullRequestChecks, reservedAt, now time.Time) string {
+	pass, fail, pend := 0, 0, 0
+	for _, c := range pr.Checks {
+		switch classifyCheck(c) {
+		case checkPass:
+			pass++
+		case checkFail:
+			fail++
+		default:
+			pend++
+		}
+	}
+	state := pr.MergeableState
+	if state == "" {
+		state = "unknown"
+	}
+	return fmt.Sprintf("no merge, failure or refusal within %s of the request (requested %s, now %s): checks success=%d failure=%d pending=%d, mergeable_state=%s",
+		ReleaseMergeRequestTimeout, formatTimestamp(reservedAt), formatTimestamp(now), pass, fail, pend, state)
+}
+
+// latestMergeRequestedAt は opID の release の、反映の依頼（merge_requested）の最新の時刻（依頼の試行の終了の時刻）を返す。
+// 依頼の試行が見つからないが、依頼が接続先に残っている場合に備え、最後の実行済み・取り消しの後の最初の試行の開始の時刻を
+// 代わりに返す（依頼の後の読み取りに失敗した試行・取り消しの後の承認し直しを含む）。試行が 1 件も無ければゼロ値。
+// 依頼より後に実行済み・取り消しの試行があれば、その依頼は終わっているので依頼の時刻としては返さない。
+func latestMergeRequestedAt(ctx context.Context, tx *sql.Tx, opID int64) (time.Time, error) {
+	rows, err := listOperationExecutions(ctx, tx, opID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var earliest time.Time
+	for i := len(rows) - 1; i >= 0; i-- {
+		r := rows[i]
+		if r.Result == ExecutionResultMergeRequested {
+			return r.EndedAt, nil
+		}
+		if c, ok := r.Result.Class(); ok && (c == ExecutionClassCancel || c == ExecutionClassExecuted) {
+			break
+		}
+		earliest = r.StartedAt
+	}
+	return earliest, nil
 }
 
 func mergeUnconfirmedDetail(err, recordErr error) string {

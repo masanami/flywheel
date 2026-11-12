@@ -193,7 +193,7 @@ func TestRelease_NoOccurrenceForWaitingExecutedInterrupted(t *testing.T) {
 
 	f.fake.pr = openPR()
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "open", Base: "main", HeadSHA: relHead}
-	if item := f.run(t); item.Result != ExecutionResultMergeUnconfirmed {
+	if item := f.run(t); item.Result != ExecutionResultMergeRequested {
 		t.Fatalf("item = %+v", item)
 	}
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}

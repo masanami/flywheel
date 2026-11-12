@@ -1,7 +1,12 @@
 name: CI
 
+# CI はマージ前に 1 回だけ走らせる。PR の push では走らせず、flywheel が GitHub の自動マージを予約したとき
+# （auto_merge_enabled）と、予約の後の push・main の取り込み（synchronize。予約が付いている PR だけ。下の if）、
+# main への push で走る。main の保護の必須チェック（check。main に追いついていること＝strict を含む）が通ると、
+# GitHub が予約した PR をマージする。
 on:
   pull_request:
+    types: [auto_merge_enabled, synchronize]
   push:
     branches: [main]
 
@@ -14,12 +19,14 @@ concurrency:
 
 jobs:
   check:
+    # 自動マージが予約されていない PR の push では走らせない（予約があると pull_request の auto_merge が null でない）。
+    if: github.event_name == 'push' || github.event.pull_request.auto_merge != null
     strategy:
       fail-fast: false
       matrix:
-        # CI は Linux だけで回す。private リポジトリの Actions は macOS の分数を
-        # 10 倍で数え、他の private リポジトリと共有の Free プランの月 2,000 分を
-        # 圧迫するため（2026-10-06 オーナー決定）。macOS はローカルの make check で確かめる。
+        # CI は Linux だけで回す。マージの前に 1 回だけ走り、flywheel が次の周でその結果を読むので、
+        # 待ち時間を短く保つため（macOS の runner は起動が遅く、分数も 10 倍で数えられる）。
+        # macOS はローカルの make check で確かめる。
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
@@ -68,6 +75,7 @@ jobs:
   # 関係グラフのブラウザの E2E を、本物の flywheel serve と種のストアに向けて流す（flywheel#463）。
   # make check には入れない。偽の API の E2E（make e2e）とは別の設定・別の置き場（web/e2e-real/）。
   e2e-real:
+    if: github.event_name == 'push' || github.event.pull_request.auto_merge != null
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

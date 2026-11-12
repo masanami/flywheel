@@ -151,13 +151,15 @@ func TestRelease_MovedHeadWithFailedNonRequiredCheckDoesNotMerge(t *testing.T) {
 }
 
 // 取り込んだ直後でチェックがまだ付いていない head は、何も見ていないので待つ。
-func TestRelease_MovedHeadWithoutChecksWaits(t *testing.T) {
+// 依頼がまだ無い間は、CI が走っていないのでチェックが 0 件でも待たず、取り込み後の head で依頼する（依頼が CI を走らせる）。
+func TestRelease_MovedHeadWithoutChecksRequestsMergeOnTheNewHead(t *testing.T) {
 	f, cmp := movedHeadFixture(t)
 	f.fake.pr.Checks = nil
 	o := f.opts()
 	o.Compare = cmp
-	if item := f.runWith(t, o); item.Result != ExecutionResultWaitingChecks || len(f.fake.mergeArgs) != 0 {
-		t.Fatalf("result = %s, merges = %v, want waiting_checks", item.Result, f.fake.mergeArgs)
+	item := f.runWith(t, o)
+	if item.Result != ExecutionResultMergeRequested || len(f.fake.mergeArgs) != 1 || f.fake.mergeArgs[0][2] != f.fake.pr.HeadSHA {
+		t.Fatalf("result = %s, merges = %v, want merge_requested on head %s", item.Result, f.fake.mergeArgs, f.fake.pr.HeadSHA)
 	}
 }
 

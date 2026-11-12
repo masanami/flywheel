@@ -20,3 +20,15 @@
 ```sh
 make check
 ```
+
+ブラウザの試験（Playwright。偽の API の上で画面を操作する）は `make e2e`。手元の必須のゲート（claude-harness の品質ゲートの宣言 `.claude-harness/quality-gate.json`）は `make gate`（`make check` の後に `make e2e`）。
+初回は Playwright のブラウザを用意する。
+
+```sh
+cd web && npx playwright install chromium          # Linux で依存が足りないときは --with-deps
+PLAYWRIGHT_CHANNEL=chrome make e2e                 # 落とせない環境では、手元の Google Chrome を使う
+```
+
+ブラウザが無いまま `make e2e` を流すと、上の手順を示して失敗する。
+
+CI はマージの前に 1 回だけ走る。PR の push では走らず、flywheel が GitHub の自動マージを予約したとき（予約の後の push・main の取り込みを含む）と main への push で走る。GitHub の自動マージを使うには、リポジトリの設定で自動マージ（Allow auto-merge）を有効にしておく。

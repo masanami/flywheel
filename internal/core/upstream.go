@@ -202,6 +202,8 @@ type UpstreamPullRequestChecks struct {
 	// MergeableState は REST の `mergeable_state`（小文字。`behind`＝main に遅れているだけ、`dirty`＝衝突 等）。
 	// 取得できなければ空。BEHIND かどうかの判定は core が持つ（UpstreamMergeStateBehind）。
 	MergeableState string
+	// MergeRequested は、反映（マージ）の依頼が接続先で受け付けられ、まだ反映も取り消しもされていないこと。
+	MergeRequested bool
 	Checks         []UpstreamCheck
 }
 
@@ -224,14 +226,13 @@ const (
 	MergeMethodRebase = "rebase"
 )
 
-// UpstreamPullRequestMerger は承認済みの release の実行の口（core）だけが呼ぶ、PR のマージの依頼の
-// 書き込み IF。読み取りの IF とは分ける。実装は internal/adapters/github が
-// `gh pr merge <URL> --<方式> --match-head-commit <head>` だけで行う
-// （--admin・--auto・--delete-branch は付けない）。
+// UpstreamPullRequestMerger は承認済みの release の実行の口（core）だけが呼ぶ、PR の反映（マージ）の依頼の
+// 書き込み IF。読み取りの IF とは分ける。依頼は予約で、反映は接続先が、接続先の条件が整ったときに行う。
+// 実装は internal/adapters/github が行う（接続先の操作の詳細はそちらに置く）。
 type UpstreamPullRequestMerger interface {
 	// MergePullRequest は prURL の PR のマージを method（MergeMethod*）で依頼する。
-	// matchHeadSHA はマージする head（承認した head、または取り込みだけで動いた後の head）で、GitHub 側でも head の一致を比べさせる。
-	// 依頼が成功しても merged になったことは保証しない（呼び出し側が読み取りで確かめる）。
+	// matchHeadSHA は依頼する head（承認した head、または取り込みだけで動いた後の head）で、GitHub 側でも依頼の時点の head の一致を比べさせる。
+	// 依頼が成功しても merged になったことは保証しない（呼び出し側が次の読み取りで確かめる）。
 	// 終了コードが 0 でないときは失敗を返す。
 	MergePullRequest(ctx context.Context, prURL, method, matchHeadSHA string) error
 }

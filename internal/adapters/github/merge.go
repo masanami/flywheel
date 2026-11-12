@@ -8,10 +8,11 @@ import (
 	"github.com/masanami/flywheel/internal/core"
 )
 
-// 承認済みの release の実行の口だけが呼ぶ、PR のマージの依頼（core.UpstreamPullRequestMerger）。
+// 承認済みの release の実行の口だけが呼ぶ、PR のマージの依頼（core.UpstreamPullRequestMerger）。依頼は GitHub の自動マージの
+// 予約（--auto）で、マージは必須のチェック（CI）が通ったときに GitHub が行う。
 // このパッケージの書き込みは、このマージの依頼と、PR が BEHIND のときの base の取り込みの依頼（UpdatePullRequestBranch）だけ。
-// マージの依頼に渡す引数は PR の URL・方式のフラグ・--match-head-commit だけで、
-// --admin・--auto・--delete-branch は付けない（ブランチの削除は GitHub のリポジトリ設定に任せる）。
+// マージの依頼に渡す引数は PR の URL・--auto・方式のフラグ・--match-head-commit だけで、
+// --admin・--delete-branch は付けない（ブランチの削除は GitHub のリポジトリ設定に任せる）。
 
 var mergeFlags = map[string]string{
 	core.MergeMethodSquash: "--squash",
@@ -19,7 +20,9 @@ var mergeFlags = map[string]string{
 	core.MergeMethodRebase: "--rebase",
 }
 
-// MergePullRequest は `gh pr merge <prURL> --<方式> --match-head-commit <matchHeadSHA>` を 1 回起動する。
+// MergePullRequest は `gh pr merge <prURL> --auto --<方式> --match-head-commit <matchHeadSHA>` を 1 回起動する。
+// --match-head-commit は予約の時点の head の一致を GitHub に比べさせる。予約の後に別の head が来てマージされたことは
+// 防げないので、core が読み取りで検出する（承認した head と違うマージは merged_unapproved）。
 // 方式が閉集合の外、URL・head が空のときは gh を起動せずエラーにする。終了コードが 0 でなければ失敗を返す。
 func (c *Client) MergePullRequest(ctx context.Context, prURL, method, matchHeadSHA string) error {
 	flag, ok := mergeFlags[method]
@@ -30,7 +33,7 @@ func (c *Client) MergePullRequest(ctx context.Context, prURL, method, matchHeadS
 		return fmt.Errorf("adapters/github: merge pull request: pull request URL and head SHA are required")
 	}
 	what := fmt.Sprintf("merge pull request %s", prURL)
-	res := c.run(ctx, "pr", "merge", prURL, flag, "--match-head-commit", matchHeadSHA)
+	res := c.run(ctx, "pr", "merge", prURL, "--auto", flag, "--match-head-commit", matchHeadSHA)
 	if res.timedOut {
 		return fmt.Errorf("adapters/github: %s timed out after %s: %w", what, c.timeout, context.DeadlineExceeded)
 	}
