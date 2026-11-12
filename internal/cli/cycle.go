@@ -120,11 +120,13 @@ func runCycle(a Args) (any, error) {
 		diffs     core.UpstreamDiffSource
 		headGit   core.HeadWorktreeGit
 		compare   core.UpstreamCompareSource
+		contract  core.ContractClient
 	)
 	if hasConnectors {
 		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(), newCheckSource()
 		merger, diffs, headGit = newPullRequestMerger(), newDiffSource(), git.New()
 		compare = newCompareSource()
+		contract = launcher
 	}
 
 	// 周の開始を標準出力へ知らせる（UI の server が起動の合図として読む）。--json では書かない。
@@ -145,6 +147,7 @@ func runCycle(a Args) (any, error) {
 		Invoker:   launcher,
 		Upstream:  threads,
 		Delegate:  delegate,
+		Contract:  contract,
 		Git:       slotGit,
 		Reconcile: reconcile,
 		Checks:    checks,

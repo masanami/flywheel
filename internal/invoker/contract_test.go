@@ -41,6 +41,7 @@ func TestContractCommand_ArgvHasNoShellAndStdoutIsNormalized(t *testing.T) {
 	in, work := contractInput(t, fakeClaudeFixture{Stdout: sampleContractStatus, ArgvLogPath: argvLog, CwdLogPath: cwdLog})
 	for name, call := range map[string]func(context.Context, core.ContractLaunchInput) (core.ContractLaunchOutput, error){
 		"start": NewLauncher().Start, "status": NewLauncher().Status,
+		"resume": NewLauncher().Resume, "cancel": NewLauncher().Cancel,
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, err := call(context.Background(), in)
@@ -135,5 +136,18 @@ func TestContractCommand_DoesNotPassTheDelegatedMarker(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(envLog); !strings.HasPrefix(string(got), "present=false") {
 		t.Fatalf("env = %q, want the marker absent", got)
+	}
+}
+
+// resume・cancel の標準出力も同じ形に正規化され、requested_action の options は文字列の配列になる（文字列以外は JSON のまま）。
+func TestContractCommand_RequestedActionOptionsAreNormalized(t *testing.T) {
+	in, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"contract_version": 1, "run_id": "r-1", "state": "waiting", "summary": "s",
+	  "requested_action": {"kind": "answer", "decider": "parent", "text": "t", "options": ["A", {"id": "b"}]}, "artifacts": [], "cost_usd": null}`})
+	out, err := NewLauncher().Resume(context.Background(), in)
+	if err != nil || out.Status == nil || out.Status.RequestedAction == nil {
+		t.Fatalf("out = %+v err = %v", out, err)
+	}
+	if want := []string{"A", `{"id": "b"}`}; !reflect.DeepEqual(out.Status.RequestedAction.Options, want) {
+		t.Fatalf("options = %q, want %q", out.Status.RequestedAction.Options, want)
 	}
 }

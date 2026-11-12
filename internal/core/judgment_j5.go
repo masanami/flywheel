@@ -380,7 +380,7 @@ func (s *Store) loadJ5Context(ctx context.Context, ch Challenge) (*j5Context, er
 		}
 		var lastID int64
 		qerr := tx.QueryRowContext(ctx,
-			`SELECT id FROM run WHERE challenge_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`, cid, string(runKindDelegate)).Scan(&lastID)
+			`SELECT id FROM run WHERE challenge_id = ? AND kind IN (?, ?) ORDER BY id DESC LIMIT 1`, cid, string(runKindDelegate), string(runKindContract)).Scan(&lastID)
 		if errors.Is(qerr, sql.ErrNoRows) {
 			return nil
 		}

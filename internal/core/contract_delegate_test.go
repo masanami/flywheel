@@ -33,6 +33,11 @@ const contractConnectorsJSON = `{
 type fakeContractClient struct {
 	starts   [][]string
 	statuses [][]string
+	resumes  [][]string
+	cancels  [][]string
+	// resumeOut・cancelOut は resume・cancel が返す値。
+	resumeOut ContractLaunchOutput
+	cancelOut ContractLaunchOutput
 	// startOut・queue は呼び出しのたびに返す値（queue が空なら last を返す）。
 	startOut ContractLaunchOutput
 	queue    []ContractLaunchOutput
@@ -51,6 +56,16 @@ func (f *fakeContractClient) Status(_ context.Context, in ContractLaunchInput) (
 		f.queue = f.queue[1:]
 	}
 	return f.last, nil
+}
+
+func (f *fakeContractClient) Resume(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
+	f.resumes = append(f.resumes, in.Command)
+	return f.resumeOut, nil
+}
+
+func (f *fakeContractClient) Cancel(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
+	f.cancels = append(f.cancels, in.Command)
+	return f.cancelOut, nil
 }
 
 func contractOut(state ContractState, cost *float64, mut func(st *ContractStatus)) ContractLaunchOutput {
@@ -211,14 +226,14 @@ func TestPollContractRuns_RunningAndWaitingAreRecordedAndCarriedToTheNextCycle(t
 	f.client.queue = []ContractLaunchOutput{
 		contractOut(ContractStateRunning, nil, nil),
 		contractOut(ContractStateWaiting, nil, func(st *ContractStatus) {
-			st.RequestedAction = &ContractRequestedAction{Kind: "approve", Decider: "human", Text: "承認して"}
+			st.RequestedAction = &ContractRequestedAction{Kind: "observe", Decider: "any", Text: "見守る"}
 		}),
 	}
 	if reps := f.poll(t); len(reps) != 1 || reps[0].State != ContractStateRunning {
 		t.Fatalf("poll 1 = %+v, want running", reps)
 	}
 	reps := f.poll(t)
-	if len(reps) != 1 || reps[0].State != ContractStateWaiting || reps[0].RequestedAction == nil || reps[0].RequestedAction.Text != "承認して" {
+	if len(reps) != 1 || reps[0].State != ContractStateWaiting || reps[0].RequestedAction == nil || reps[0].RequestedAction.Text != "見守る" {
 		t.Fatalf("poll 2 = %+v, want waiting with requested action", reps)
 	}
 	if want := []string{"tool", "status", "ext-1"}; !reflect.DeepEqual(f.client.statuses[0], want) {
@@ -229,7 +244,7 @@ func TestPollContractRuns_RunningAndWaitingAreRecordedAndCarriedToTheNextCycle(t
 		t.Fatalf("state=%s ended=%v, want waiting and not ended（次の周でも読む）", state, ended)
 	}
 	if n := f.count(t, `SELECT COUNT(*) FROM hold`); n != 0 {
-		t.Fatalf("holds = %d, want 0（保留への写しは後半）", n)
+		t.Fatalf("holds = %d, want 0（observe は保留にせず次の周で読み直す）", n)
 	}
 	if reps := f.poll(t); len(reps) != 1 {
 		t.Fatalf("poll 3 = %+v, want the waiting run to be read again", reps)

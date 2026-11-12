@@ -295,7 +295,7 @@ func loadReopenNote(ctx context.Context, tx *sql.Tx, challengeID int64) (*reopen
 		return nil, err
 	}
 	var lastRun sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind = 'delegate'`, challengeID).Scan(&lastRun); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind IN ('delegate', 'contract')`, challengeID).Scan(&lastRun); err != nil {
 		return nil, err
 	}
 	if lastRun.Valid && lastRun.String >= createdAt {

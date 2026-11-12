@@ -92,6 +92,8 @@ type CycleRunInput struct {
 	Compare UpstreamCompareSource
 	// Predictor は衝突の予測の口の起動（nil なら予測の口を呼べない。RunDelegation と同じ）。
 	Predictor ConflictPredictor
+	// Contract は form: cli の接続ツールの契約のコマンドの起動（DelegateInput.Contract と同じ）。
+	Contract ContractClient
 	// WorkspaceGit は backup の段が使うワークスペースの Git の口（必須。nil は ErrValidation）。
 	WorkspaceGit WorkspaceGit
 	// OnBegin が非 nil なら、周の開始（BeginCycle の成功）の直後、段を始める前に周の ID で呼ぶ。
@@ -333,6 +335,7 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			ConnDecl:  in.ConnDecl,
 			Judgment:  in.Invoker,
 			Delegate:  in.Delegate,
+			Contract:  in.Contract,
 			Upstream:  in.Upstream,
 			Git:       in.Git,
 			Reconcile: in.Reconcile,

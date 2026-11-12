@@ -106,6 +106,9 @@ type DelegateInput struct {
 	// Judgment は J3 の起動、Delegate は委譲の起動の実行者。
 	Judgment JudgmentInvoker
 	Delegate DelegationInvoker
+	// Contract は form: cli の接続ツールの契約のコマンドの起動。cli 形態の操作の計画の委譲と、終わっていない契約の run の
+	// 状態の確認（周の先頭）に使う。nil なら契約の run は読まず、cli 形態の操作の計画は ErrValidation になる。
+	Contract ContractClient
 	// Upstream は J3 の起動の直前の上流の取得（取り込み元の対応の無い課題では呼ばれない）。
 	Upstream UpstreamThreadSource
 	// Git はスロットの作業ツリーの検査と払い出しの口。
@@ -504,6 +507,15 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if in.Cycle != nil && in.Cycle.cycleID != in.CycleID {
 		return nil, ErrValidation
 	}
+	// 終わっていない契約の run（form: cli）の状態を読んで進める。1 件の読みの失敗は run に記録されるので、
+	// ストアの失敗だけを返し、委譲は続ける。
+	if in.Contract != nil {
+		if _, err := s.PollContractRuns(ctx, ContractPollInput{
+			ChallengeID: in.ChallengeID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl, Client: in.Contract, CycleID: in.CycleID,
+		}); errors.Is(err, ErrStoreError) {
+			return nil, err
+		}
+	}
 	if in.ChallengeID != nil {
 		ch, err := s.loadChallengeForAuto(ctx, *in.ChallengeID)
 		if err != nil {
@@ -627,6 +639,11 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 				Detail: budgetShortfallDetail(bucketRemaining{Impl: dc.ImplBudgetMicros, Review: dc.ReviewBudgetMicros})}, nil
 		}
 		return nil, nil, ErrBudgetExceeded
+	}
+
+	// form: cli の接続ツールの操作は、claude の子も J3 も起動せず、契約の start を呼んで実行 ID を記録し、その周の委譲を終える。
+	if dc.Connector.Form == ConnectorFormCLI {
+		return s.delegateViaContract(ctx, in, jc, dc)
 	}
 
 	// 同時の起動の上限と使えるスロットの枠。空くまで同じ周の中で待つ（J3 の費用を払う前）。

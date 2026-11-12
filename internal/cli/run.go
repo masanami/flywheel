@@ -60,6 +60,7 @@ func runRun(a Args) (any, error) {
 		ConnDecl:    conn,
 		Judgment:    launcher,
 		Delegate:    launcher,
+		Contract:    launcher,
 		Upstream:    newUpstreamThreadSource(),
 		Git:         git.New(),
 		Reconcile:   newBranchSource(),

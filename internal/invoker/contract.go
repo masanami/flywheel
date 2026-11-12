@@ -52,11 +52,21 @@ func decodeContractStatus(stdout []byte) (*core.ContractStatus, bool) {
 			Kind    string `json:"kind"`
 			Decider string `json:"decider"`
 			Text    string `json:"text"`
+			// options は求められた操作が示す選択肢（任意）。文字列でない要素は JSON のまま文字列にする。
+			Options []json.RawMessage `json:"options"`
 		}
 		if err := json.Unmarshal(raw.RequestedAction, &ra); err != nil {
 			return nil, false
 		}
 		st.RequestedAction = &core.ContractRequestedAction{Kind: ra.Kind, Decider: ra.Decider, Text: ra.Text}
+		for _, o := range ra.Options {
+			var str string
+			if json.Unmarshal(o, &str) == nil {
+				st.RequestedAction.Options = append(st.RequestedAction.Options, str)
+			} else {
+				st.RequestedAction.Options = append(st.RequestedAction.Options, string(o))
+			}
+		}
 	}
 	for _, a := range raw.Artifacts {
 		st.Artifacts = append(st.Artifacts, core.ContractArtifact{Kind: a.Kind, Ref: a.Ref})
@@ -78,6 +88,16 @@ func (l *Launcher) Start(ctx context.Context, in core.ContractLaunchInput) (core
 
 // Status は core.ContractClient の実装（契約の status）。
 func (l *Launcher) Status(ctx context.Context, in core.ContractLaunchInput) (core.ContractLaunchOutput, error) {
+	return l.runContractCommand(ctx, in)
+}
+
+// Resume は core.ContractClient の実装（契約の resume。判断待ちへの答えを返す。start と同じくすぐ戻る）。
+func (l *Launcher) Resume(ctx context.Context, in core.ContractLaunchInput) (core.ContractLaunchOutput, error) {
+	return l.runContractCommand(ctx, in)
+}
+
+// Cancel は core.ContractClient の実装（契約の cancel）。
+func (l *Launcher) Cancel(ctx context.Context, in core.ContractLaunchInput) (core.ContractLaunchOutput, error) {
 	return l.runContractCommand(ctx, in)
 }
 

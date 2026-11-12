@@ -339,7 +339,11 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 			break
 		}
 	}
-	if op == nil || connector.Form == ConnectorFormCLI {
+	if op == nil {
+		return nil, false
+	}
+	// cli 形態の操作は、invocation が差し込みの閉集合の中の値だけを要するときだけ選べる。
+	if connector.Form == ConnectorFormCLI && validateInvocationPlaceholders(op.Invocation) != nil {
 		return nil, false
 	}
 	if !vc.HasSource && invocationNeedsSource(op.Invocation) {
@@ -752,8 +756,6 @@ func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, age
 			}
 			line := "    - id: " + op.ID + "｜対話前提: " + yesNo(op.Interactive) + "｜成果物: " + artifacts
 			switch {
-			case connector.Form == ConnectorFormCLI:
-				line += "｜注記: この形態の操作は現在の委譲に使えないため選べない"
 			case !hasSource && invocationNeedsSource(op.Invocation):
 				line += "｜注記: 取り込み元の Issue の情報を必要とするため、この課題では選べない"
 			}

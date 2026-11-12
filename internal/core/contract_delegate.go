@@ -53,6 +53,8 @@ type ContractRequestedAction struct {
 	Kind    string // answer | approve | observe
 	Decider string // human | parent | any
 	Text    string
+	// Options は求められた操作が示す選択肢（無ければ空）。
+	Options []string
 }
 
 // ContractArtifact は契約の artifacts の 1 要素。Kind は pr | branch | commit | other。
@@ -98,6 +100,9 @@ type ContractLaunchOutput struct {
 type ContractClient interface {
 	Start(ctx context.Context, in ContractLaunchInput) (ContractLaunchOutput, error)
 	Status(ctx context.Context, in ContractLaunchInput) (ContractLaunchOutput, error)
+	// Resume は判断待ちへの答えを返して続ける（標準出力は start・status と同じ形）。Cancel は run を中止する。
+	Resume(ctx context.Context, in ContractLaunchInput) (ContractLaunchOutput, error)
+	Cancel(ctx context.Context, in ContractLaunchInput) (ContractLaunchOutput, error)
 }
 
 // contractVersion は扱う契約の版（宣言の contract_version と同じ。1 だけ）。
@@ -223,15 +228,17 @@ func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, erro
 
 // fillContractArgs は契約のコマンドの引数の差し込みを埋める。閉集合は invocation と同じ 4 つ
 // （{issue_number}・{issue_url}・{external_key}・{challenge_id}）と、status・resume・cancel の {run_id}
-// （start が返した契約の実行 ID）。引数の要素の数は変えない。
-func fillContractArgs(args []string, challengeID string, sb *sourceBinding, externalRunID string) ([]string, error) {
+// （start が返した契約の実行 ID）、resume の {answer}（保留への答え）。引数の要素の数は変えない。
+func fillContractArgs(args []string, challengeID string, sb *sourceBinding, externalRunID, answer string) ([]string, error) {
 	out := make([]string, len(args))
 	for i, a := range args {
 		v, err := fillInvocation(a, challengeID, sb)
 		if err != nil {
 			return nil, err
 		}
-		out[i] = strings.ReplaceAll(v, "{run_id}", externalRunID)
+		v = strings.ReplaceAll(v, "{run_id}", externalRunID)
+		// 答えは最後に差し込む（答えの中の波括弧を、他の差し込みとして読まない）。
+		out[i] = strings.ReplaceAll(v, "{answer}", answer)
 	}
 	return out, nil
 }
@@ -304,7 +311,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
-	command, err := fillContractArgs(connector.Commands.Start, in.ChallengeID, binding, "")
+	command, err := fillContractArgs(connector.Commands.Start, in.ChallengeID, binding, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +331,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	call := func(ctx context.Context, li ContractLaunchInput) (ContractLaunchOutput, error) {
 		return in.Client.Start(ctx, li)
 	}
-	return s.finishContractCall(ctx, contractCall{
+	rep, err := s.finishContractCall(ctx, contractCall{
 		ChallengeID: in.ChallengeID, ChallengeIDInt: cid, RunIDInt: runIDInt, Connector: connector.ID,
 		Launch: ContractLaunchInput{
 			Workspace: s.workspace, WorkDir: s.contractWorkDir(in.WorkDir), RunDir: runDirPath(s.workspace, formatRunID(runIDInt)),
@@ -332,6 +339,13 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 		},
 		Invoke: call, MaxMicros: maxMicros,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.afterContractRead(ctx, rep); err != nil {
+		return nil, err
+	}
+	return rep, nil
 }
 
 // beginContractRun は契約のコマンド 1 回ぶんの run を記録する。start のときは周の上限を評価し、課題に
@@ -401,6 +415,8 @@ type contractCall struct {
 	Invoke         func(context.Context, ContractLaunchInput) (ContractLaunchOutput, error)
 	MaxMicros      int64
 	Existing       *contractRunRow
+	// StopNote は、中止の理由（予算の超過）。契約が cancelled・failed を返して保留にするときの問いの先頭に付く。
+	StopNote string
 }
 
 // finishContractCall はコマンドを起動し、結果を run と contract_run へ 1 つのトランザクションで記録する。
@@ -567,7 +583,11 @@ func contractHoldQuestion(c contractCall, recorded, observed *ContractStatus, re
 	if recorded == nil {
 		return ""
 	}
-	return contractStopQuestion(recorded.State, recorded.RunID, recorded.Summary)
+	q := contractStopQuestion(recorded.State, recorded.RunID, recorded.Summary)
+	if q != "" && c.StopNote != "" {
+		q = c.StopNote + "\n" + q
+	}
+	return q
 }
 
 // contractStopQuestion は契約が failed・cancelled を返したときの問い（それ以外の state は空）。
@@ -770,34 +790,7 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 			firstErr = firstErrOr(firstErr, err)
 			continue
 		}
-		challengeID := formatChallengeID(row.ChallengeID)
-		command, err := fillContractArgs(connector.Commands.Status, challengeID, bindings[row.ChallengeID], row.ExternalRunID)
-		if err != nil {
-			firstErr = firstErrOr(firstErr, err)
-			continue
-		}
-		sessionID, err := newLowercaseUUIDv4()
-		if err != nil {
-			firstErr = firstErrOr(firstErr, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err))
-			continue
-		}
-
-		runIDInt, err := s.beginContractRun(ctx, row.ChallengeID, cycleIDInt, planVersions[row.ChallengeID], sessionID, row.MaxBudget, false)
-		if err != nil {
-			firstErr = firstErrOr(firstErr, err)
-			continue
-		}
-		rep, err := s.finishContractCall(ctx, contractCall{
-			ChallengeID: challengeID, ChallengeIDInt: row.ChallengeID, RunIDInt: runIDInt, Connector: row.ConnectorID,
-			Launch: ContractLaunchInput{
-				Workspace: s.workspace, WorkDir: s.contractWorkDir(in.WorkDir), RunDir: runDirPath(s.workspace, formatRunID(runIDInt)),
-				Command: command, TimeoutSec: in.AgentDecl.TimeoutSec.Delegate,
-			},
-			Invoke: func(ctx context.Context, li ContractLaunchInput) (ContractLaunchOutput, error) {
-				return in.Client.Status(ctx, li)
-			},
-			MaxMicros: row.MaxBudget, Existing: row,
-		})
+		rep, err := s.pollOne(ctx, in, row, connector, bindings[row.ChallengeID], planVersions[row.ChallengeID], cycleIDInt)
 		if err != nil {
 			firstErr = firstErrOr(firstErr, err)
 			continue
