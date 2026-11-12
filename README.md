@@ -32,3 +32,4 @@ PLAYWRIGHT_CHANNEL=chrome make e2e                 # 落とせない環境では
 ブラウザが無いまま `make e2e` を流すと、上の手順を示して失敗する。
 
 CI（GitHub Actions）は PR の push では走らない。main へのマージの後と、手動の起動（`workflow_dispatch`）だけで走る。main の保護の必須チェックは置かない。
+claude-harness の ticket の流れが CI を待たないよう、`.claude-harness/ci.json` で `after-merge` を宣言している（`{"trigger": "after-merge"}`）。

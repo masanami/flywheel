@@ -56,6 +56,7 @@
 ```
 手元で必ず通す入口は make gate（make check の後に make e2e。claude-harness の宣言 .claude-harness/quality-gate.json が呼ぶ）。make check は UI の lint（Biome）・テスト（Vitest）・ビルドを先に実行し、続けて次の 5 つを順に実行し、1 つでも失敗すれば非 0 で終わる。
 CI も make check と make e2e を実行する（ubuntu-latest だけ。macOS はローカルの make check で確かめる）。CI は PR の push では走らず、main への push（マージの後）と手動の起動（`workflow_dispatch`）だけで走る。main の保護の必須チェックは置かない。
+claude-harness の ticket の流れが CI を待たないよう、.claude-harness/ci.json で after-merge を宣言している（{"trigger": "after-merge"}）。
 
 1. 整形      gofmt -l .                              出力が空
 2. 静的検査  go vet ./...                            終了コード 0
