@@ -188,6 +188,9 @@ type ContractRunReport struct {
 	RequestedAction *ContractRequestedAction
 	// PRs は state が succeeded になったときに run の成果物へ取り込んだ PR の参照。
 	PRs []string
+	// Held は、この呼び出しで課題を保留（人間対応待ち）にしたとき真。契約の run が failed・cancelled で
+	// 終わった、または start の最中に flywheel の run が回収されたときで、自動では委譲し直さない。
+	Held bool
 	// CostDeltaUSD は今回この run に記録した費用（累計の増分。何度読んでも同じ累計なら 0）。CostTotalUSD は累計。
 	CostDeltaUSD float64
 	CostTotalUSD float64
@@ -349,11 +352,12 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 			if cur.Status != StatusInProgress {
 				return errDelegationNotEligible
 			}
-			var n int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, cid).Scan(&n); err != nil {
+			// 終わっていない契約の run のほか、保留に写し切れていない回収・失敗・中止も実行中として数える。
+			active, err := challengeHasActiveRun(ctx, tx, cid)
+			if err != nil {
 				return err
 			}
-			if n > 0 {
+			if active {
 				return errActiveRunExists
 			}
 			if cycleID != nil {
@@ -363,7 +367,7 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 			}
 		}
 		row, err := insertRun(ctx, tx, cid, insertRunInput{
-			CycleID: cycleID, Kind: runKindDelegate, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
+			CycleID: cycleID, Kind: runKindContract, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
 			SessionID: sessionID, PID: int64(os.Getpid()), Host: host, HeartbeatAt: now, StartedAt: now,
 			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl,
 		})
@@ -471,6 +475,7 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 
 	// コマンドを起動した以上、記録は ctx の取り消しに関わらず行う。
 	recordCtx := context.WithoutCancel(ctx)
+	var reclaimed bool
 	err := s.db.Write(recordCtx, func(tx *sql.Tx) error {
 		cur, err := loadRunByID(recordCtx, tx, c.RunIDInt)
 		if err != nil {
@@ -478,6 +483,7 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 		}
 		if cur == nil || cur.EndedAt != nil {
 			// 起動の最中に回収された run は上書きしない。
+			reclaimed = true
 			return nil
 		}
 		if c.Existing != nil {
@@ -525,7 +531,115 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 	if status == nil && c.Existing != nil {
 		report.State, report.Summary = c.Existing.State, c.Existing.Summary
 	}
+	if question := contractHoldQuestion(c, status, out.Status, reclaimed, result, errSummary); question != "" {
+		held, herr := s.holdForContract(ctx, c, question)
+		if herr != nil {
+			return nil, herr
+		}
+		report.Held = held
+	}
 	return report, nil
+}
+
+// contractHoldQuestion は、この呼び出しの結果が課題を保留にすべきものなら、オーナーへの問いを返す（無ければ空）。
+//   - start の最中に flywheel の run が回収された（reclaimed）: 契約の run は記録されず、追われていない
+//     外部の run が残っているかもしれない。
+//   - start が回収以外で失敗した（時間切れ・不正な出力・起動の失敗・その他のエラー）: 契約の run は記録されないが、
+//     コマンドが外部の run を切り離して始めた後に失敗したかもしれない。回収と同じく保留にし、失敗の種類を問いに書く
+//     （自動では委譲し直さない）。
+//   - 契約が failed・cancelled を返した（recorded は記録に使った状態。別のプロセスが先に終えていれば nil）。
+//     存在しない run の状態を読んでも failed が返ることがあり、状態の置き場の設定違いと本当の失敗を
+//     見分けられないため、自動で失敗にはしない。
+func contractHoldQuestion(c contractCall, recorded, observed *ContractStatus, reclaimed bool, result RunResult, errSummary string) string {
+	ext := ""
+	if observed != nil {
+		ext = observed.RunID
+	}
+	if reclaimed {
+		if c.Existing != nil {
+			return "" // 状態の確認の最中の回収は、契約の run がそのまま残るので次の周で読み直す
+		}
+		return contractReclaimedQuestion(ext, c.Connector)
+	}
+	if c.Existing == nil && result != RunResultSucceeded {
+		return contractStartFailedQuestion(result, errSummary, ext, c.Connector)
+	}
+	if recorded == nil {
+		return ""
+	}
+	return contractStopQuestion(recorded.State, recorded.RunID, recorded.Summary)
+}
+
+// contractStopQuestion は契約が failed・cancelled を返したときの問い（それ以外の state は空）。
+func contractStopQuestion(state ContractState, runID, summary string) string {
+	switch state {
+	case ContractStateFailed:
+		return fmt.Sprintf("接続ツールの run（%s）が failed を返した。接続ツールの要約: %s\n"+
+			"存在しない run の状態を読んでも failed が返ることがあり、状態の置き場の設定の違いと本当の失敗を見分けられないため、"+
+			"自動では失敗にも再委譲にもしない。要約と設定を確かめて回答する。", runID, summary)
+	case ContractStateCancelled:
+		return fmt.Sprintf("接続ツールの run（%s）が中止された（cancelled）。接続ツールの要約: %s\n"+
+			"自動では委譲し直さない。必要なら回答して再開する。", runID, summary)
+	}
+	return ""
+}
+
+// contractReclaimedQuestion は start の最中の回収の問い。externalRunID・connector は分かっていれば渡す（空なら書かない）。
+func contractReclaimedQuestion(externalRunID, connector string) string {
+	q := "接続ツールの run を始めている最中に、flywheel の run が回収された（プロセスの停止など）。" +
+		"接続ツールの側で run が始まっていて、flywheel が追っていない run が残っているかもしれない。"
+	if externalRunID != "" {
+		q += fmt.Sprintf("接続ツールが返した実行 ID: %s。", externalRunID)
+	} else {
+		q += "実行 ID は受け取れていない。"
+	}
+	if connector != "" {
+		q += fmt.Sprintf("接続先: %s。", connector)
+	}
+	return q + "接続ツール側の run が残っていないかを確かめ、残っていれば止めてから回答する。自動では委譲し直さない。"
+}
+
+// contractStartFailedQuestion は start が回収以外で失敗したときの問い。result は失敗の種類（run の結果）、
+// errSummary はその詳細。externalRunID・connector は分かっていれば渡す（空なら書かない）。
+func contractStartFailedQuestion(result RunResult, errSummary, externalRunID, connector string) string {
+	q := fmt.Sprintf("接続ツールの run を始めるコマンドが失敗した（失敗の種類: %s", result)
+	if errSummary != "" {
+		q += "。詳細: " + errSummary
+	}
+	q += "）。コマンドが接続ツールの側で run を始めた後に失敗した場合、flywheel が追っていない run が残っているかもしれない。"
+	if externalRunID != "" {
+		q += fmt.Sprintf("接続ツールが返した実行 ID: %s。", externalRunID)
+	} else {
+		q += "実行 ID は受け取れていない。"
+	}
+	if connector != "" {
+		q += fmt.Sprintf("接続先: %s。", connector)
+	}
+	return q + "接続ツール側の run が残っていないかを確かめ、残っていれば止めてから回答する。自動では委譲し直さない。"
+}
+
+// holdForContract は課題が着手中なら、契約の run の結果に基づいて課題を保留にする。課題が着手中でなくなって
+// いれば何もしない（held は偽）。契約の run の記録とは別のトランザクションで行う。
+func (s *Store) holdForContract(ctx context.Context, c contractCall, question string) (bool, error) {
+	return s.holdReclaimedContractStart(ctx, formatRunID(c.RunIDInt), c.ChallengeID, question)
+}
+
+// holdReclaimedContractStart は runID を原因の run として、課題が着手中なら保留にする（着手中でなければ偽）。
+func (s *Store) holdReclaimedContractStart(ctx context.Context, runID, challengeID, question string) (bool, error) {
+	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), runID, challengeID, OpHold,
+		func(ctx context.Context, tc *transitionCtx) error {
+			if tc.current.Status != StatusInProgress {
+				return errReconcileNotEligible
+			}
+			return s.insertHoldWithOccurrence(ctx, tc, question, holdReasonContractStopped, "")
+		})
+	if err != nil {
+		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // recordContractStatus は読めた状態を contract_run へ反映する（start なら行を作る）。state が succeeded のときは
@@ -599,6 +713,11 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 		}
 		only = &n
 	}
+	// 保留にし損ねた課題の掃引が失敗しても、その失敗を記録して状態の読みを続ける（1 件の失敗で読み全体を止めない）。
+	var firstErr error
+	if _, err := s.HoldUnrecordedContractStops(ctx); err != nil {
+		firstErr = err
+	}
 	var rows []*contractRunRow
 	bindings := map[int64]*sourceBinding{}
 	planVersions := map[int64]*int64{}
@@ -645,7 +764,6 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 		cycleIDInt = &n
 	}
 	var reports []ContractRunReport
-	var firstErr error
 	for _, row := range rows {
 		connector, err := findCLIConnector(in.ConnDecl, row.ConnectorID)
 		if err != nil {
@@ -687,6 +805,95 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 		reports = append(reports, *rep)
 	}
 	return reports, firstErr
+}
+
+// reclaimedContractStartWhere は、回収された（interrupted）か回収以外で失敗した契約の start の run で、まだ保留に
+// 写していないものを選ぶ条件（run を r、課題を c と別名にした副問い合わせの本体）。start の run は、契約の run（contract_run）を
+// 作る前に回収されると contract_run を持たない。status の run との区別は「その課題の、先に始まった契約の run が
+// その run の開始時点で終わっていなかった」ことで行う。課題が着手中でなくなっていれば（保留・取り下げ・完了）選ばない。
+const reclaimedContractStartWhere = `r.kind = 'contract' AND r.result IS NOT NULL AND r.result <> 'succeeded' AND c.status = 'in_progress'
+	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.start_run_id = r.id)
+	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND k.start_run_id < r.id
+		AND (k.ended_at IS NULL OR k.ended_at >= r.started_at))
+	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.run_id = r.id)`
+
+// unheldContractStopWhere は、契約の run（k）が failed・cancelled で終わったのに、その後に保留を作れていない
+// （記録と保留が別のトランザクションなので、間でプロセスが止まると起こる）課題を選ぶ条件。
+const unheldContractStopWhere = `k.state IN ('failed', 'cancelled') AND c.status = 'in_progress'
+	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at)`
+
+// HoldUnrecordedContractStops は、保留にし損ねた課題を保留にする。次の 2 つ（どちらも課題が着手中のときだけ）。
+//   - 契約の start の最中に flywheel の run が回収された（呼んだプロセスが止まって別のプロセスが回収した場合など）のに、
+//     まだ保留にしていない。外部の run が残っているかもしれないことを問いに書く。
+//   - 契約の run が failed・cancelled で終わったのに、保留を作れていない。
+//
+// 回収は run を interrupted で閉じるだけなので、PollContractRuns の先頭と、周から呼ぶ側が呼ぶ。
+// 保留にした課題の数を返す。
+func (s *Store) HoldUnrecordedContractStops(ctx context.Context) (int, error) {
+	type target struct {
+		runID, challengeID int64
+		question           string
+	}
+	var targets []target
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT r.id, r.challenge_id, r.result, COALESCE(r.error, '') FROM run r JOIN challenge c ON c.id = r.challenge_id
+			WHERE `+reclaimedContractStartWhere+` ORDER BY r.id`)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var t target
+			var result, errSummary string
+			if err := rows.Scan(&t.runID, &t.challengeID, &result, &errSummary); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			if RunResult(result) == RunResultInterrupted {
+				t.question = contractReclaimedQuestion("", "")
+			} else {
+				t.question = contractStartFailedQuestion(RunResult(result), errSummary, "", "")
+			}
+			targets = append(targets, t)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		_ = rows.Close()
+		rows, err = tx.QueryContext(ctx, `SELECT k.start_run_id, k.challenge_id, k.state, k.external_run_id, k.summary
+			FROM contract_run k JOIN challenge c ON c.id = k.challenge_id WHERE `+unheldContractStopWhere+` ORDER BY k.id`)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var t target
+			var state, ext, summary string
+			if err := rows.Scan(&t.runID, &t.challengeID, &state, &ext, &summary); err != nil {
+				return err
+			}
+			t.question = contractStopQuestion(ContractState(state), ext, summary)
+			targets = append(targets, t)
+		}
+		return rows.Err()
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return 0, err
+	}
+	// 1 件の保留が失敗しても残りを保留にする（最初の失敗を返す）。
+	held := 0
+	var firstErr error
+	for _, t := range targets {
+		ok, err := s.holdReclaimedContractStart(ctx, formatRunID(t.runID), formatChallengeID(t.challengeID), t.question)
+		if err != nil {
+			firstErr = firstErrOr(firstErr, err)
+			continue
+		}
+		if ok {
+			held++
+		}
+	}
+	return held, firstErr
 }
 
 func firstErrOr(cur, next error) error {

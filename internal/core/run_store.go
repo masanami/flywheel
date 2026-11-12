@@ -79,6 +79,10 @@ type runKind string
 const (
 	runKindJudgment runKind = "judgment"
 	runKindDelegate runKind = "delegate"
+	// runKindContract は form: cli の接続ツールの契約のコマンド（start・status）1 回の実行。委譲の run と
+	// 同じく課題・セッションに結び付くが、委譲の履歴の規則（連続失敗の数え・--resume の対象選び・
+	// delegation_failed の発生）には入れない。セッション ID は run の一意のために採る偽の値。
+	runKindContract runKind = "contract"
 	// runKindPredict は衝突の予測（flywheel の predict）の実行。課題・計画・
 	// セッションに結び付かず、repo を必須とする（0005）。
 	runKindPredict runKind = "predict"
@@ -86,7 +90,7 @@ const (
 
 func (k runKind) valid() bool {
 	switch k {
-	case runKindJudgment, runKindDelegate, runKindPredict:
+	case runKindJudgment, runKindDelegate, runKindContract, runKindPredict:
 		return true
 	}
 	return false
@@ -415,7 +419,7 @@ func (in insertRunInput) valid() bool {
 		if !in.Judgment.valid() {
 			return false
 		}
-	case runKindDelegate:
+	case runKindDelegate, runKindContract:
 		if in.Judgment != "" {
 			return false
 		}

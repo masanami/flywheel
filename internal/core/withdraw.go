@@ -58,8 +58,13 @@ func errWithdrawReleaseInProgress(challengeID string) error {
 func hasOpenDelegationRun(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) {
 	var n int
 	err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM run WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL`,
-		cid, string(RunKindDelegate)).Scan(&n)
+		`SELECT COUNT(*) FROM run WHERE challenge_id = ? AND kind IN (?, ?) AND ended_at IS NULL`,
+		cid, string(RunKindDelegate), string(RunKindContract)).Scan(&n)
+	if err != nil || n > 0 {
+		return n > 0, err
+	}
+	// 周をまたいで続く契約の run（外部の run が動いている）も、取り下げを止める。
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, cid).Scan(&n)
 	return n > 0, err
 }
 
