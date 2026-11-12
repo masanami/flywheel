@@ -395,3 +395,37 @@ func TestContractRun_ExcludesTheChallengeFromJ6AutoTargets(t *testing.T) {
 		t.Fatalf("J6 invoked %d times after the contract run ended, want 1", len(f.inputs))
 	}
 }
+
+// 終わっていない契約の run（外部の run が動いている）がある課題は、取り下げられない。
+func TestContractRun_BlocksWithdrawalWhileOpen(t *testing.T) {
+	f := newContractFixture(t)
+	f.client.startOut = contractOut(ContractStateRunning, nil, nil)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.PrepareWithdraw(context.Background(), f.cid, "不要"); err == nil {
+		t.Fatal("PrepareWithdraw succeeded, want a conflict while the contract run is open")
+	}
+}
+
+// 回収された start を保留に写す前は、課題に start を重ねて呼べない（外部の run を二重に作らない）。
+func TestStartContractDelegation_RefusedWhileReclaimedStartIsNotYetHeld(t *testing.T) {
+	f := newContractFixture(t)
+	sid, _ := newLowercaseUUIDv4()
+	runID, err := f.s.beginContractRun(context.Background(), 1, nil, nil, sid, usdToMicros(5), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := updateRunEnd(context.Background(), tx, runID, updateRunEndInput{EndedAt: f.s.currentTime(), Result: RunResultInterrupted})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.start(t); err == nil {
+		t.Fatal("start succeeded, want a refusal while the reclaimed start is not yet held")
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM contract_run`); n != 0 {
+		t.Fatalf("contract_run rows = %d, want 0", n)
+	}
+}

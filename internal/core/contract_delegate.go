@@ -334,6 +334,10 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	})
 }
 
+// statusRunMaxBudgetMicros は状態の確認（status）の run の評価額（run の記録が正の値を要求する最小）。契約の費用は
+// 累計の差分として読むたびに記録するので、status の run が回収されても契約の予算の全額を課さない（二重に数えない）。
+const statusRunMaxBudgetMicros int64 = 1
+
 // beginContractRun は契約のコマンド 1 回ぶんの run を記録する。start のときは周の上限を評価し、課題に
 // 終わっていない契約の run・run があれば ErrRunInProgress にする。
 func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool) (int64, error) {
@@ -352,11 +356,12 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 			if cur.Status != StatusInProgress {
 				return errDelegationNotEligible
 			}
-			var n int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, cid).Scan(&n); err != nil {
+			// 終わっていない契約の run のほか、保留に写し切れていない回収・失敗・中止も実行中として数える。
+			active, err := challengeHasActiveRun(ctx, tx, cid)
+			if err != nil {
 				return err
 			}
-			if n > 0 {
+			if active {
 				return errActiveRunExists
 			}
 			if cycleID != nil {
@@ -755,7 +760,7 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 			continue
 		}
 
-		runIDInt, err := s.beginContractRun(ctx, row.ChallengeID, cycleIDInt, planVersions[row.ChallengeID], sessionID, row.MaxBudget, false)
+		runIDInt, err := s.beginContractRun(ctx, row.ChallengeID, cycleIDInt, planVersions[row.ChallengeID], sessionID, statusRunMaxBudgetMicros, false)
 		if err != nil {
 			firstErr = firstErrOr(firstErr, err)
 			continue
