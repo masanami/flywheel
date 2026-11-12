@@ -10,9 +10,10 @@ on:
 permissions:
   contents: read
 
+# main への push では前の run を取り消さない（マージごとの main の結果を残す）。手動の起動は後の起動が前を取り消す。
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   check:
