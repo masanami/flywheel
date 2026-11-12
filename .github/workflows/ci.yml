@@ -1,25 +1,26 @@
 name: CI
 
+# CI は PR の push では走らせない。main への push（マージの後）と、手動の起動（workflow_dispatch）だけで走る。
+# main の保護の必須チェックは置かない。
 on:
-  pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# main への push では前の run を取り消さない（マージごとの main の結果を残す）。手動の起動は後の起動が前を取り消す。
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   check:
     strategy:
       fail-fast: false
       matrix:
-        # CI は Linux だけで回す。private リポジトリの Actions は macOS の分数を
-        # 10 倍で数え、他の private リポジトリと共有の Free プランの月 2,000 分を
-        # 圧迫するため（2026-10-06 オーナー決定）。macOS はローカルの make check で確かめる。
+        # CI は Linux だけで回す。macOS の runner は起動が遅いため。macOS はローカルの make gate で確かめる（手元は Mac）。
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:

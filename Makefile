@@ -9,7 +9,7 @@ BINARY := $(BUILD_DIR)/flywheel
 NPM := npm
 WEB_DIR := web
 
-.PHONY: check e2e e2e-real ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
+.PHONY: check gate e2e e2e-real ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
 
 ## check はすべての品質ゲートを順に実行する。1 つでも失敗すれば非 0 で終わる。
 ## UI の lint・テスト・ビルドを先に実行し、その成果物を埋め込んだ状態で go test・go build を行う。
@@ -32,9 +32,18 @@ $(WEB_DIR)/node_modules/.install-stamp: $(WEB_DIR)/package-lock.json
 ## e2e: UI のブラウザの E2E（Playwright。偽の API の mock モードで画面を操作する）。make check には入れない。
 ## 本物の serve に向けた試験（web/e2e-real/）は流さない（make e2e-real）。
 ## 初回は cd web && npx playwright install chromium が要る（落とせない環境では PLAYWRIGHT_CHANNEL=chrome で手元の Chrome を使う）。
+## ブラウザが無いときは、何をすればよいかを出して落とす（web/scripts/check-browser.mjs）。
 e2e: ui-install
+	@echo "==> check browser (web)"
+	cd $(WEB_DIR) && node scripts/check-browser.mjs
 	@echo "==> npm run e2e (web)"
 	cd $(WEB_DIR) && $(NPM) run e2e
+
+## gate: 手元の必須のゲート（claude-harness の品質ゲートの宣言 .claude-harness/quality-gate.json が呼ぶ）。
+## make check に続けて make e2e を流す。CI は同じ 2 つを別の手順で流す。
+gate:
+	$(MAKE) check
+	$(MAKE) e2e
 
 ## e2e-real: 関係グラフのブラウザの E2E を、本物の flywheel serve に向けて流す（Playwright。web/e2e-real/）。
 ## make check と make e2e には入れない。ui-build と build の後に、準備の段（web/e2e-real/global-setup.ts）が

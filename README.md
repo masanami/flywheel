@@ -20,3 +20,15 @@
 ```sh
 make check
 ```
+
+ブラウザの試験（Playwright。偽の API の上で画面を操作する）は `make e2e`。手元の必須のゲート（claude-harness の品質ゲートの宣言 `.claude-harness/quality-gate.json`）は `make gate`（`make check` の後に `make e2e`）。
+初回は Playwright のブラウザを用意する。
+
+```sh
+cd web && npx playwright install chromium          # Linux で依存が足りないときは --with-deps
+PLAYWRIGHT_CHANNEL=chrome make e2e                 # 落とせない環境では、手元の Google Chrome を使う
+```
+
+ブラウザが無いまま `make e2e` を流すと、上の手順を示して失敗する。
+
+CI（GitHub Actions）は PR の push では走らない。main へのマージの後と、手動の起動（`workflow_dispatch`）だけで走る。main の保護の必須チェックは置かない。

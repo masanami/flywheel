@@ -54,8 +54,8 @@
 ## 品質方針
 
 ```
-入口は make check の 1 つ。UI の lint（Biome）・テスト（Vitest）・ビルドを先に実行し、続けて次の 5 つを順に実行し、1 つでも失敗すれば非 0 で終わる。
-CI も同じ make check を実行する（ubuntu-latest だけ。macOS の Actions の分数は 10 倍で数えられるため、macOS はローカルの make check で確かめる）。
+手元で必ず通す入口は make gate（make check の後に make e2e。claude-harness の宣言 .claude-harness/quality-gate.json が呼ぶ）。make check は UI の lint（Biome）・テスト（Vitest）・ビルドを先に実行し、続けて次の 5 つを順に実行し、1 つでも失敗すれば非 0 で終わる。
+CI も make check と make e2e を実行する（ubuntu-latest だけ。macOS はローカルの make check で確かめる）。CI は PR の push では走らず、main への push（マージの後）と手動の起動（`workflow_dispatch`）だけで走る。main の保護の必須チェックは置かない。
 
 1. 整形      gofmt -l .                              出力が空
 2. 静的検査  go vet ./...                            終了コード 0
@@ -68,7 +68,9 @@ CI も同じ make check を実行する（ubuntu-latest だけ。macOS の Actio
 ## よく使うコマンド
 
 ```bash
-make check                          # 品質ゲートをすべて実行（PR 前に必ず通す）
+make check                          # 下の 5 つのゲート（ブラウザの試験は含まない）
+make e2e                            # ブラウザの試験（Playwright）。初回は cd web && npx playwright install chromium（落とせなければ PLAYWRIGHT_CHANNEL=chrome）。無いと手順を示して失敗する
+make gate                           # 手元の必須のゲート。PR 前に必ず通す（.claude-harness/quality-gate.json が呼ぶ。make check の後に make e2e）
 make test                           # ゲートを個別に実行（fmt-check / vet / lint / test / build）
 make print-golangci-lint-version    # 固定している golangci-lint の版を表示
 go test -race ./internal/core/...   # パッケージを絞ってテスト
