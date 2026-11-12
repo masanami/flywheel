@@ -139,18 +139,43 @@ func TestRelease_BehindWhileRequestedUpdatesBranchWithoutWaitingForChecks(t *tes
 	}
 }
 
-// 取り込みで依頼が外れたときは、次の周が新しい head で依頼し直す。
+// 依頼の後に遅れて取り込み、取り込みで head が動いて依頼が外れたときは、次の周が新しい head で依頼し直す。
+// 経過: ①承認した head で依頼 → ②依頼中に遅れたので取り込み（依頼し直さない） → ③head が動き依頼が外れた PR を読み、
+// チェックが 0 件でも待たず新しい head で依頼する。
 func TestRelease_RequestRenewedOnTheNewHeadAfterUpdate(t *testing.T) {
 	f, cmp := movedHeadFixture(t)
+	f.fake.pr = openPR()
+	if item := f.run(t); item.Result != ExecutionResultMergeRequested {
+		t.Fatalf("first run = %+v, want merge_requested", item)
+	}
+
+	f.fake.pr = requestedPR()
+	f.fake.pr.MergeableState = UpstreamMergeStateBehind
+	f.fake.pr.Checks = []UpstreamCheck{{Name: "check", Status: "in_progress"}}
+	bf := &behindFake{fakeRelease: f.fake}
+	o := f.opts()
+	o.Merger = bf
+	if item := f.runWith(t, o); item.Result != ExecutionResultWaitingChecks {
+		t.Fatalf("behind run = %+v, want waiting_checks", item)
+	}
+	if len(bf.updates) != 1 || len(f.fake.mergeArgs) != 1 {
+		t.Fatalf("updates = %v, merges = %v, want one update and no new request", bf.updates, f.fake.mergeArgs)
+	}
+
+	f.fake.pr = openPR()
+	f.fake.pr.HeadSHA = "n1"
 	f.fake.pr.Checks = nil
 	f.fake.pr.MergeRequested = false
-	o := f.opts()
+	o = f.opts()
 	o.Compare = cmp
 	if item := f.runWith(t, o); item.Result != ExecutionResultMergeRequested {
-		t.Fatalf("item = %+v, want merge_requested", item)
+		t.Fatalf("after update = %+v, want merge_requested", item)
 	}
-	if got := f.fake.mergeArgs[0][2]; got != f.fake.pr.HeadSHA || got == relHead {
-		t.Errorf("requested head = %s, want the moved head %s (not the approved %s)", got, f.fake.pr.HeadSHA, relHead)
+	if len(f.fake.mergeArgs) != 2 {
+		t.Fatalf("merge calls = %v, want the first request and one renewed request", f.fake.mergeArgs)
+	}
+	if got := f.fake.mergeArgs[1][2]; got != "n1" {
+		t.Errorf("renewed request head = %s, want the updated head n1 (not the approved %s)", got, relHead)
 	}
 }
 
