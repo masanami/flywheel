@@ -34,7 +34,7 @@ func contractWaitDestination(ra *ContractRequestedAction) contractWaitDest {
 }
 
 // contractWaitingQuestion は保留の問い。求められた操作の文と、選択肢があれば選択肢として並べる。
-func contractWaitingQuestion(runID, summary string, ra *ContractRequestedAction) string {
+func contractWaitingQuestion(runID, summary string, ra *ContractRequestedAction, carriesAnswer bool) string {
 	what := "回答"
 	if ra.Kind == "approve" {
 		what = "承認"
@@ -50,14 +50,49 @@ func contractWaitingQuestion(runID, summary string, ra *ContractRequestedAction)
 			fmt.Fprintf(&b, "  %d. %s\n", i+1, o)
 		}
 	}
-	b.WriteString("回答すると、その文を接続ツールへ返して続ける。")
+	if carriesAnswer {
+		b.WriteString("回答すると、その文を接続ツールへ返して続ける。")
+	} else {
+		b.WriteString("宣言の resume は答えの差し込みを含まないので、回答の文は接続ツールへ渡らない。回答すると、再開の指示だけを接続ツールへ送る。")
+	}
 	return b.String()
+}
+
+// resumeCarriesAnswer は宣言の resume が、保留への答えを接続ツールへ渡す差し込みを含むか。
+func resumeCarriesAnswer(c *Connector) bool {
+	if c == nil || c.Commands == nil {
+		return false
+	}
+	for _, a := range c.Commands.Resume {
+		if strings.Contains(a, "{answer}") {
+			return true
+		}
+	}
+	return false
+}
+
+// contractResumeFailedQuestion は resume（答えの返し）が失敗したときの問い。
+func contractResumeFailedQuestion(externalRunID string, result RunResult, detail string) string {
+	q := fmt.Sprintf("接続ツールの run（%s）へ保留への答えを返す resume が失敗した（失敗の種類: %s", externalRunID, result)
+	if detail != "" {
+		q += "。詳細: " + detail
+	}
+	return q + "）。答えが接続ツールへ届いたかは分からない。自動では答えを返し直さない。" +
+		"接続ツールの run の状態を確かめ、必要なら接続ツールの側で答えを返してから回答する。"
+}
+
+// sameRequestedAction は、契約の run が最後に読んだ求められた操作と ra が同じか。
+func sameRequestedAction(row *contractRunRow, ra *ContractRequestedAction) bool {
+	if ra == nil {
+		return row.RequestedKind == ""
+	}
+	return row.RequestedKind == ra.Kind && row.RequestedDecider == ra.Decider && row.RequestedText == ra.Text
 }
 
 // afterContractRead は読めた状態に応じた課題への写しを行う: waiting は求められた操作に従って保留へ写し、
 // succeeded は課題を着手中から検証中へ進める。読みが成功していない（Result が succeeded でない）・既に保留にした
 // ときは何もしない。
-func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport) error {
+func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, connector *Connector) error {
 	if rep.Result != RunResultSucceeded || rep.Held {
 		return nil
 	}
@@ -66,8 +101,7 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport) e
 		if contractWaitDestination(rep.RequestedAction) != contractWaitOwnerHold {
 			return nil
 		}
-		held, err := s.holdReclaimedContractStart(ctx, rep.RunID, rep.ChallengeID,
-			contractWaitingQuestion(rep.ExternalRunID, rep.Summary, rep.RequestedAction))
+		held, err := s.holdContractWait(ctx, rep, contractWaitingQuestion(rep.ExternalRunID, rep.Summary, rep.RequestedAction, resumeCarriesAnswer(connector)))
 		rep.Held = held
 		return err
 	case ContractStateSucceeded:
@@ -85,10 +119,39 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport) e
 	return nil
 }
 
+// holdContractWait は課題が着手中なら、契約の waiting を写した保留を作り、その保留の ID を契約の run に結び付ける
+// （保留への答えを resume で返すとき、この保留の答えだけを返すため）。着手中でなければ何もしない（偽）。
+func (s *Store) holdContractWait(ctx context.Context, rep *ContractRunReport, question string) (bool, error) {
+	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpHold,
+		func(ctx context.Context, tc *transitionCtx) error {
+			if tc.current.Status != StatusInProgress {
+				return errReconcileNotEligible
+			}
+			holdID, err := s.insertHoldWithOccurrenceID(ctx, tc, question, holdReasonContractStopped, "")
+			if err != nil {
+				return err
+			}
+			_, err = tc.tx.ExecContext(ctx, `UPDATE contract_run SET wait_hold_id = ? WHERE challenge_id = ? AND external_run_id = ?`,
+				holdID, tc.id, rep.ExternalRunID)
+			return err
+		})
+	if err != nil {
+		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // pollOne は終わっていない契約の run 1 件を進める。保留への答えが返っていれば resume で返し、無ければ status で読む。
 // 読んだ後に状態の写しと予算の確認を行う。
 func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64) (*ContractRunReport, error) {
 	challengeID := formatChallengeID(row.ChallengeID)
+	// 答えを返すと決める（結び付きを外す）前に、resume の引数を埋められることを確かめる（埋められないまま答えを失わない）。
+	if _, err := fillContractArgs(connector.Commands.Resume, challengeID, binding, row.ExternalRunID, ""); err != nil {
+		return nil, err
+	}
 	answer, resume, err := s.loadContractAnswer(ctx, row)
 	if err != nil {
 		return nil, err
@@ -105,8 +168,22 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	if err != nil {
 		return nil, err
 	}
-	if err := s.afterContractRead(ctx, rep); err != nil {
-		return nil, err
+	skipRead := false
+	if resume {
+		if rep.Result != RunResultSucceeded {
+			// 答えを返したか分からない。自動ではやり直さず、保留にする（答えは返し済みとして記録してある）。
+			held, err := s.holdReclaimedContractStart(ctx, rep.RunID, rep.ChallengeID, contractResumeFailedQuestion(row.ExternalRunID, rep.Result, rep.Error))
+			rep.Held = held
+			return rep, err
+		}
+		// resume はすぐ戻り、その時点の状態を返す。答えを返した直後に同じ求められた操作の waiting が返っても、
+		// 同じ問いの保留を立て直さない（次の周の状態の読みで、まだ waiting なら改めて問う）。
+		skipRead = rep.State == ContractStateWaiting && sameRequestedAction(row, rep.RequestedAction)
+	}
+	if !skipRead {
+		if err := s.afterContractRead(ctx, rep, connector); err != nil {
+			return nil, err
+		}
 	}
 	if rep.Result == RunResultSucceeded && !rep.State.Terminal() && !rep.Held {
 		if err := s.cancelOverBudget(ctx, in, row, connector, binding, planVersion, cycleID, rep); err != nil {
@@ -145,21 +222,28 @@ func (s *Store) runExistingContractCommand(ctx context.Context, client ContractC
 	})
 }
 
-// loadContractAnswer は、契約の run が waiting のまま、読んだ後に出された保留へオーナーが答え、課題が着手中へ
-// 戻っているとき、その答えを返す（無ければ resume=false）。resume の後に state が waiting でなくなる（または新しい保留が
-// 出る）ので、同じ答えを二重に返さない。
+// loadContractAnswer は、契約の run が waiting のまま、その waiting を写した保留（wait_hold_id）へオーナーが答え、
+// 課題が着手中へ戻っているとき、その答えを返す（無ければ resume=false）。答えを返すと決めた時点で、同じトランザクションで
+// 保留との結び付きを外す（resume が失敗しても同じ答えを二重に返さない）。別の理由で立った保留・古い保留の答えは返さない。
 func (s *Store) loadContractAnswer(ctx context.Context, row *contractRunRow) (answer string, resume bool, err error) {
-	err = s.db.Read(ctx, func(tx *sql.Tx) error {
+	err = s.db.Write(ctx, func(tx *sql.Tx) error {
+		var holdID int64
 		var a sql.NullString
 		qerr := tx.QueryRowContext(ctx,
-			`SELECT h.answer FROM hold h JOIN challenge c ON c.id = h.challenge_id JOIN contract_run k ON k.challenge_id = h.challenge_id
-			 WHERE k.id = ? AND k.state = 'waiting' AND c.status = 'in_progress' AND h.answered_at IS NOT NULL AND h.answered_at >= k.observed_at
-			 ORDER BY h.id DESC LIMIT 1`, row.ID).Scan(&a)
+			`SELECT h.id, h.answer FROM contract_run k JOIN hold h ON h.id = k.wait_hold_id JOIN challenge c ON c.id = k.challenge_id
+			 WHERE k.id = ? AND k.state = 'waiting' AND c.status = 'in_progress' AND h.answered_at IS NOT NULL`, row.ID).Scan(&holdID, &a)
 		if errors.Is(qerr, sql.ErrNoRows) {
 			return nil
 		}
 		if qerr != nil {
 			return qerr
+		}
+		res, qerr := tx.ExecContext(ctx, `UPDATE contract_run SET wait_hold_id = NULL WHERE id = ? AND wait_hold_id = ?`, row.ID, holdID)
+		if qerr != nil {
+			return qerr
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return nil
 		}
 		answer, resume = a.String, true
 		return nil
@@ -201,7 +285,8 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 	}
 	if crep.Result == RunResultSucceeded && crep.State.Terminal() {
 		rep.State = crep.State
-		return nil
+		// 中止の依頼の応答が succeeded（成果物つき）なら、読んだときと同じく検証中へ進める。
+		return s.afterContractRead(ctx, crep, connector)
 	}
 	detail := "中止のコマンドが失敗した"
 	if crep.Result != RunResultSucceeded {
@@ -217,17 +302,21 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 
 // delegateViaContract は form: cli の接続ツールの操作の計画を、契約の start で委譲する。run の上限額は、課題の実装の枠と
 // レビュー対応の枠の残りの合計（契約の費用の累計と比べる額）。
-func (s *Store) delegateViaContract(ctx context.Context, in DelegateInput, jc *JudgmentCycle, dc *delegationContext) (*JudgmentAutoItem, *NotStarted, error) {
+func (s *Store) delegateViaContract(ctx context.Context, in DelegateInput, jc *JudgmentCycle, dc *delegationContext, adm *admission) (*JudgmentAutoItem, *NotStarted, error) {
 	if in.Contract == nil {
 		return nil, nil, ErrValidation
 	}
 	rep, err := s.StartContractDelegation(ctx, ContractStartInput{
 		ChallengeID: dc.Challenge.ID, ConnectorID: dc.Connector.ID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl,
-		Client: in.Contract, CycleID: in.CycleID, MaxBudgetUSD: microsToUSD(dc.ImplBudgetMicros + dc.ReviewBudgetMicros),
+		Client: in.Contract, CycleID: in.CycleID, MaxBudgetUSD: microsToUSD(dc.ImplBudgetMicros + dc.ReviewBudgetMicros), OnRunInserted: adm.markInserted,
 	})
 	if err != nil {
 		if jc != nil && errors.Is(err, ErrBudgetExceeded) {
 			return nil, &NotStarted{ChallengeID: dc.Challenge.ID, Reason: NotStartedCycleBudget}, nil
+		}
+		// 宣言の commands.start の差し込みを埋められない等（ErrValidation）は、黙って飛ばさず理由つきで見えるようにする。
+		if jc != nil && errors.Is(err, ErrValidation) {
+			return nil, &NotStarted{ChallengeID: dc.Challenge.ID, Reason: NotStartedPlanUnavailable, Detail: err.Error()}, nil
 		}
 		return nil, nil, err
 	}

@@ -166,6 +166,8 @@ type ContractStartInput struct {
 	MaxBudgetUSD float64
 	// WorkDir は契約のコマンドの作業ディレクトリ（空ならワークスペース）。
 	WorkDir string
+	// OnRunInserted は start の run をストアに記録した直後に呼ぶ（nil なら呼ばない。同時委譲数の数えの二重計上を避けるため）。
+	OnRunInserted func()
 }
 
 // ContractPollInput は Store.PollContractRuns の入力。
@@ -189,11 +191,11 @@ type ContractRunReport struct {
 	Result  RunResult
 	State   ContractState
 	Summary string
-	// RequestedAction は state が waiting のときの求められた操作（無ければ nil）。保留へは写さない。
+	// RequestedAction は state が waiting のときの求められた操作（無ければ nil）。求めに応じて保留へ写す（Held を参照）。
 	RequestedAction *ContractRequestedAction
 	// PRs は state が succeeded になったときに run の成果物へ取り込んだ PR の参照。
 	PRs []string
-	// Held は、この呼び出しで課題を保留（人間対応待ち）にしたとき真。契約の run が failed・cancelled で
+	// Held は、この呼び出しで課題を保留（人間対応待ち）にしたとき真。waiting の写し・resume の失敗・予算の中止の失敗・契約の run が failed・cancelled で
 	// 終わった、または start の最中に flywheel の run が回収されたときで、自動では委譲し直さない。
 	Held bool
 	// CostDeltaUSD は今回この run に記録した費用（累計の増分。何度読んでも同じ累計なら 0）。CostTotalUSD は累計。
@@ -212,14 +214,18 @@ type contractRunRow struct {
 	Summary       string
 	CostMicros    int64
 	MaxBudget     int64
+	// RequestedKind・RequestedDecider・RequestedText は最後に読んだ求められた操作（無ければ空）。
+	RequestedKind, RequestedDecider, RequestedText string
 }
 
-const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd FROM contract_run`
+const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
+	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, '') FROM contract_run`
 
 func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, error) {
 	var r contractRunRow
 	var state string
-	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget); err != nil {
+	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget,
+		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText); err != nil {
 		return nil, err
 	}
 	r.State = ContractState(state)
@@ -328,6 +334,9 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if err != nil {
 		return nil, err
 	}
+	if in.OnRunInserted != nil {
+		in.OnRunInserted()
+	}
 	call := func(ctx context.Context, li ContractLaunchInput) (ContractLaunchOutput, error) {
 		return in.Client.Start(ctx, li)
 	}
@@ -342,7 +351,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if err != nil {
 		return nil, err
 	}
-	if err := s.afterContractRead(ctx, rep); err != nil {
+	if err := s.afterContractRead(ctx, rep, connector); err != nil {
 		return nil, err
 	}
 	return rep, nil
@@ -687,8 +696,9 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	} else {
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE contract_run SET state = ?, summary = ?, requested_kind = ?, requested_decider = ?, requested_text = ?,
-				cost_usd = ?, observed_at = ?, ended_at = ? WHERE id = ?`,
-			string(st.State), st.Summary, rk, rd, rt, totalMicros, now, endedAt, c.Existing.ID); err != nil {
+				cost_usd = ?, observed_at = ?, ended_at = ?,
+				wait_hold_id = CASE WHEN ? = 'waiting' AND requested_kind IS ? AND requested_decider IS ? AND requested_text IS ? THEN wait_hold_id ELSE NULL END WHERE id = ?`,
+			string(st.State), st.Summary, rk, rd, rt, totalMicros, now, endedAt, string(st.State), rk, rd, rt, c.Existing.ID); err != nil {
 			return err
 		}
 	}
@@ -786,13 +796,17 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	var reports []ContractRunReport
 	for _, row := range rows {
 		connector, err := findCLIConnector(in.ConnDecl, row.ConnectorID)
-		if err != nil {
-			firstErr = firstErrOr(firstErr, err)
-			continue
+		var rep *ContractRunReport
+		if err == nil {
+			rep, err = s.pollOne(ctx, in, row, connector, bindings[row.ChallengeID], planVersions[row.ChallengeID], cycleIDInt)
 		}
-		rep, err := s.pollOne(ctx, in, row, connector, bindings[row.ChallengeID], planVersions[row.ChallengeID], cycleIDInt)
 		if err != nil {
 			firstErr = firstErrOr(firstErr, err)
+			if !errors.Is(err, ErrStoreError) {
+				// 読めなかった（宣言の接続ツールが無い・差し込みを埋められない等）ことを、報告として見えるようにする。
+				reports = append(reports, ContractRunReport{ChallengeID: formatChallengeID(row.ChallengeID), ExternalRunID: row.ExternalRunID,
+					Result: RunResultErrored, State: row.State, Summary: row.Summary, Error: err.Error()})
+			}
 			continue
 		}
 		reports = append(reports, *rep)

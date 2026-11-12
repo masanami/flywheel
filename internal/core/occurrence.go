@@ -359,19 +359,25 @@ func delegationEndOccurrenceKind(result RunResult, rateLimited bool) (Occurrence
 // insertHoldWithOccurrence は保留の行を作り、理由に対応する発生があれば同じトランザクションで
 // 作る（参照は保留の行、原因の run は遷移の run、周は cycleID）。
 func (s *Store) insertHoldWithOccurrence(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string) error {
+	_, err := s.insertHoldWithOccurrenceID(ctx, tc, question, reason, cycleID)
+	return err
+}
+
+// insertHoldWithOccurrenceID は insertHoldWithOccurrence の、作った保留の ID を返す版。
+func (s *Store) insertHoldWithOccurrenceID(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string) (int64, error) {
 	holdID, err := insertHoldID(ctx, tc, question)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	kind, ok := reason.occurrenceKind()
 	if !ok {
-		return nil
+		return holdID, nil
 	}
 	var cyc *int64
 	if n, ok := parseCycleID(cycleID); ok {
 		cyc = &n
 	}
-	return s.insertOccurrenceRow(tc.tx, occurrenceInput{
+	return holdID, s.insertOccurrenceRow(tc.tx, occurrenceInput{
 		ChallengeID: tc.id, CycleID: cyc, CauseRunID: tc.runID, Kind: kind,
 		Ref: OccurrenceRef{HoldID: &holdID}, Outcome: OccurrenceOutcomeBad, At: tc.now,
 	})

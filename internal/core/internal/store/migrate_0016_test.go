@@ -34,8 +34,8 @@ func TestOpen_AppliesReconcileFetchFailuresMigrationToAVersion15Store(t *testing
 		t.Fatalf("Open(latest) error = %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if got := userVersion(t, db); got != 19 {
-		t.Fatalf("user_version = %d, want 19", got)
+	if got := userVersion(t, db); got != 20 {
+		t.Fatalf("user_version = %d, want 20", got)
 	}
 	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
 		var title string

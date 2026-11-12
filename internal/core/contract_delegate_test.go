@@ -19,7 +19,7 @@ const contractConnectorsJSON = `{
      "commands": {
        "start": ["tool", "start", "--challenge", "{challenge_id}"],
        "status": ["tool", "status", "{run_id}"],
-       "resume": ["tool", "resume", "{run_id}"],
+       "resume": ["tool", "resume", "{run_id}", "--answer", "{answer}"],
        "cancel": ["tool", "cancel", "{run_id}"]
      },
      "contract_version": 1,
@@ -84,8 +84,13 @@ type contractFixture struct {
 
 func newContractFixture(t *testing.T) *contractFixture {
 	t.Helper()
+	return newContractFixtureWith(t, contractConnectorsJSON)
+}
+
+func newContractFixtureWith(t *testing.T, connectorsJSON string) *contractFixture {
+	t.Helper()
 	f := newDelegateFixture(t)
-	conn, err := parseConnectorsDeclaration([]byte(contractConnectorsJSON))
+	conn, err := parseConnectorsDeclaration([]byte(connectorsJSON))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

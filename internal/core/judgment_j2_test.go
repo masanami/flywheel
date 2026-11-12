@@ -376,3 +376,20 @@ func TestFormatJ2PlanBody_OmitsEmptySummaryAndSteps(t *testing.T) {
 		t.Errorf("body must not be empty")
 	}
 }
+
+// cli 形態は、実際に起動に使う commands.start が取り込み元の差し込みを要するとき、取り込み元の無い課題の計画を不正な出力にする
+// （取り込み元がある課題では計画として通る）。
+func TestValidateJ2Output_CLIStartCommandNeedingSourceIsInvalidWithoutSource(t *testing.T) {
+	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
+	for _, hasSource := range []bool{false, true} {
+		vc := j2TestContext(t, hasSource)
+		for i := range vc.Conn.Connectors {
+			if vc.Conn.Connectors[i].Form == ConnectorFormCLI {
+				vc.Conn.Connectors[i].Commands.Start = []string{"tool", "start", "--issue", "{issue_number}"}
+			}
+		}
+		if _, ok := validateJ2Output(out, vc); ok != hasSource {
+			t.Errorf("hasSource=%v: accepted=%v, want %v", hasSource, ok, hasSource)
+		}
+	}
+}

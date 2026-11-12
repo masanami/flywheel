@@ -90,8 +90,8 @@ func TestPollContractRuns_AnswerIsReturnedByResumeOnce(t *testing.T) {
 	if len(reps) != 1 || reps[0].State != ContractStateRunning {
 		t.Fatalf("report = %+v, want running after resume（resume はすぐ戻る）", reps)
 	}
-	if len(f.client.resumes) != 1 || !reflect.DeepEqual(f.client.resumes[0], []string{"tool", "resume", "ext-1"}) {
-		t.Fatalf("resumes = %v, want one resume for ext-1", f.client.resumes)
+	if len(f.client.resumes) != 1 || !reflect.DeepEqual(f.client.resumes[0], []string{"tool", "resume", "ext-1", "--answer", "ANSWER-MARKER"}) {
+		t.Fatalf("resumes = %v, want one resume for ext-1 carrying the answer", f.client.resumes)
 	}
 	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateRunning, nil, nil)}
 	f.poll(t)

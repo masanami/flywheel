@@ -507,15 +507,33 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if in.Cycle != nil && in.Cycle.cycleID != in.CycleID {
 		return nil, ErrValidation
 	}
-	// 終わっていない契約の run（form: cli）の状態を読んで進める。1 件の読みの失敗は run に記録されるので、
-	// ストアの失敗だけを返し、委譲は続ける。
+	// 終わっていない契約の run（form: cli）の状態を読んで進める。1 件の読みの失敗は run に記録され、委譲は続ける。
+	// ストアの失敗は返す。それ以外の失敗は、周を止めずに、その課題の not_started（in_progress）として結果に見えるようにする。
+	var pollNotStarted []NotStarted
 	if in.Contract != nil {
-		if _, err := s.PollContractRuns(ctx, ContractPollInput{
+		reports, err := s.PollContractRuns(ctx, ContractPollInput{
 			ChallengeID: in.ChallengeID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl, Client: in.Contract, CycleID: in.CycleID,
-		}); errors.Is(err, ErrStoreError) {
+		})
+		if errors.Is(err, ErrStoreError) {
 			return nil, err
 		}
+		for _, r := range reports {
+			if r.Result != RunResultSucceeded && !r.Held {
+				pollNotStarted = append(pollNotStarted, NotStarted{ChallengeID: r.ChallengeID, Reason: NotStartedInProgress,
+					Detail: fmt.Sprintf("接続ツールの run の状態を読めなかった（失敗の種類: %s。詳細: %s）", r.Result, r.Error)})
+			}
+		}
 	}
+	res, err := s.runDelegationAfterPoll(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	res.NotStarted = append(pollNotStarted, res.NotStarted...)
+	return res, nil
+}
+
+// runDelegationAfterPoll は RunDelegation の、契約の run の状態の読みより後の本体。
+func (s *Store) runDelegationAfterPoll(ctx context.Context, in DelegateInput) (*DelegateResult, error) {
 	if in.ChallengeID != nil {
 		ch, err := s.loadChallengeForAuto(ctx, *in.ChallengeID)
 		if err != nil {
@@ -643,7 +661,16 @@ func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentC
 
 	// form: cli の接続ツールの操作は、claude の子も J3 も起動せず、契約の start を呼んで実行 ID を記録し、その周の委譲を終える。
 	if dc.Connector.Form == ConnectorFormCLI {
-		return s.delegateViaContract(ctx, in, jc, dc)
+		// 契約の run もスロットは使わないが、同時委譲数（max_parallel_runs）には数える。
+		adm, err := run.admitContract(ctx)
+		if err != nil {
+			if jc != nil && errors.Is(err, ErrSlotUnavailable) {
+				return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedSlotUnavailable}, nil
+			}
+			return nil, nil, err
+		}
+		defer adm.finish()
+		return s.delegateViaContract(ctx, in, jc, dc, adm)
 	}
 
 	// 同時の起動の上限と使えるスロットの枠。空くまで同じ周の中で待つ（J3 の費用を払う前）。
