@@ -31,4 +31,4 @@ PLAYWRIGHT_CHANNEL=chrome make e2e                 # 落とせない環境では
 
 ブラウザが無いまま `make e2e` を流すと、上の手順を示して失敗する。
 
-CI はマージの前に 1 回だけ走る。PR の push では走らず、flywheel が GitHub の自動マージを予約したとき（予約の後の push・main の取り込みを含む）と main への push で走る。GitHub の自動マージを使うには、リポジトリの設定で自動マージ（Allow auto-merge）を有効にしておく。
+CI（GitHub Actions）は PR の push では走らない。main へのマージの後と、手動の起動（`workflow_dispatch`）だけで走る。main の保護の必須チェックは置かない。

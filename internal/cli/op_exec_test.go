@@ -151,8 +151,8 @@ func TestOpExec_MergesApprovedReleaseAndShowsTheMergeCommit(t *testing.T) {
 	if len(merges) != 1 || !strings.Contains(merges[0], "--squash") || !strings.HasSuffix(merges[0], "--match-head-commit "+execHead) {
 		t.Errorf("gh pr merge calls = %v, want one squash call with --match-head-commit %s", merges, execHead)
 	}
-	if strings.Contains(strings.Join(merges, "\n"), "--admin") || !strings.Contains(merges[0], "--auto") {
-		t.Errorf("gh pr merge must carry --auto and not --admin: %v", merges)
+	if strings.Contains(strings.Join(merges, "\n"), "--admin") || strings.Contains(strings.Join(merges, "\n"), "--auto") {
+		t.Errorf("gh pr merge must not carry --admin/--auto: %v", merges)
 	}
 
 	shown := runJSON(t, ws, "show", cid)["operations"].([]any)[0].(map[string]any)

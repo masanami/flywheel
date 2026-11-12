@@ -28,7 +28,7 @@
 | `internal/cli` | コマンドの定義・JSON／テキスト出力・終了コードとエラーコードの写像・端末での本人確認 |
 | `internal/view` | CLI の `--json` と API が共有する JSON の形の型（`json` タグつきの構造体。フィールドはキーの辞書順）と、core の型からの変換。JSON の形を `map[string]any` で組み立てず、ここへ置く。import してよいのは `internal/core` だけ |
 | `internal/view/cmd/gentypes` | `internal/view` の型から `web/src/api/types.gen.ts` を書き出す生成専用の `main`（`go generate ./internal/view`）。`internal/view` と標準ライブラリだけを import し、テストは生成物との差の検査。本番のバイナリに含めない |
-| `internal/adapters/github` | `gh` の起動と応答の正規化（GitHub Issue・ブランチ・PR・PR のチェックと `mergeable`・`merge_commit_sha`・固定したコミットの差分・2 つのコミットの比較〔compare〕の取得）と、PR のマージの依頼（`gh pr merge --auto`〔自動マージの予約〕。`--admin`・`--delete-branch` は付けない）と、PR が BEHIND のときの base の取り込みの依頼（`gh api -X PUT …/update-branch`）。書き込みはこの 2 つだけで、呼ぶのは承認済みの `release` の実行の口だけ。BEHIND かの判定は core が持つ。core の IF（`internal/core/upstream.go`）だけに依存し、取り込みの規則・CI の完了の判定規則・マージの可否の判定・「既定ブランチの取り込みだけか」の判定は持たない。ストアを import しない |
+| `internal/adapters/github` | `gh` の起動と応答の正規化（GitHub Issue・ブランチ・PR・PR のチェックと `mergeable`・`merge_commit_sha`・固定したコミットの差分・2 つのコミットの比較〔compare〕の取得）と、PR のマージの依頼（`gh pr merge`。`--admin`・`--auto`・`--delete-branch` は付けない）と、PR が BEHIND のときの base の取り込みの依頼（`gh api -X PUT …/update-branch`）。書き込みはこの 2 つだけで、呼ぶのは承認済みの `release` の実行の口だけ。BEHIND かの判定は core が持つ。core の IF（`internal/core/upstream.go`）だけに依存し、取り込みの規則・CI の完了の判定規則・マージの可否の判定・「既定ブランチの取り込みだけか」の判定は持たない。ストアを import しない |
 | `internal/adapters/git` | スロットの作業ツリーの検査と `git worktree add` の払い出し（`git` の起動）。core のスロットの IF（`internal/core/slot_git.go` の `SlotGit`）だけに依存し、割り当ての規則・origin の正規化は持たない。J5 が PR の head を読む一時の worktree の作成と削除も担う（core の IF は `internal/core/judgment_j5_head.go` の `HeadWorktreeGit`）。ワークスペースの Git の検査（作業ツリーか・除外か・差の有無・detached HEAD や rebase・merge の途中でないか）と、パス指定のコミット（`git add -- <パス>` の後に `git commit --only -- <パス>`。push なし・`add -A` なし）も担い、core の IF（`internal/core/workspace_git.go` の `WorkspaceGit`）だけに依存する。ストアを import しない。`GIT_DIR`・`GIT_WORK_TREE` を明示し、`fetch`・`clone` をしない |
 | `internal/server` | `flywheel serve` の HTTP サーバ（server・API・Host と Origin の検査・UI の配信）。`127.0.0.1` だけに bind する。core の公開 API だけを呼び（`internal/adapters/github` は下の import の向きの節の範囲だけ）、ストアのパッケージ・`internal/cli`・`internal/invoker` を import しない。自身の状態をストアの外に持たない（メモリ上の CSRF の値・challenge・セッションを除く） |
 | `web` | UI のソース（Vite・React・TypeScript・Vitest・Biome）。npm の依存はここだけに置き、ロックファイルで固定する。ビルド成果物は `internal/server/dist/ui`（git の追跡外）へ出て `go:embed` でバイナリへ入る。Node が無くても `go build` は通る（最小の `index.html` を返す） |
@@ -54,8 +54,8 @@
 ## 品質方針
 
 ```
-入口は make check の 1 つ（claude-harness の宣言は make gate＝make check の後に make e2e）。UI の lint（Biome）・テスト（Vitest）・ビルドを先に実行し、続けて次の 5 つを順に実行し、1 つでも失敗すれば非 0 で終わる。
-CI も同じ make check を実行する（ubuntu-latest だけ。macOS はローカルの make check で確かめる）。CI は PR の push では走らず、自動マージの予約と main への push で走る。
+手元で必ず通す入口は make gate（make check の後に make e2e。claude-harness の宣言 .claude-harness/quality-gate.json が呼ぶ）。make check は UI の lint（Biome）・テスト（Vitest）・ビルドを先に実行し、続けて次の 5 つを順に実行し、1 つでも失敗すれば非 0 で終わる。
+CI も make check と make e2e を実行する（ubuntu-latest だけ。macOS はローカルの make check で確かめる）。CI は PR の push では走らず、main への push（マージの後）と手動の起動（`workflow_dispatch`）だけで走る。main の保護の必須チェックは置かない。
 
 1. 整形      gofmt -l .                              出力が空
 2. 静的検査  go vet ./...                            終了コード 0
@@ -68,9 +68,9 @@ CI も同じ make check を実行する（ubuntu-latest だけ。macOS はロー
 ## よく使うコマンド
 
 ```bash
-make check                          # 品質ゲートをすべて実行（PR 前に必ず通す）
+make check                          # 下の 5 つのゲート（ブラウザの試験は含まない）
 make e2e                            # ブラウザの試験（Playwright）。初回は cd web && npx playwright install chromium（落とせなければ PLAYWRIGHT_CHANNEL=chrome）。無いと手順を示して失敗する
-make gate                           # 手元の必須のゲート（.claude-harness/quality-gate.json が呼ぶ。make check の後に make e2e）
+make gate                           # 手元の必須のゲート。PR 前に必ず通す（.claude-harness/quality-gate.json が呼ぶ。make check の後に make e2e）
 make test                           # ゲートを個別に実行（fmt-check / vet / lint / test / build）
 make print-golangci-lint-version    # 固定している golangci-lint の版を表示
 go test -race ./internal/core/...   # パッケージを絞ってテスト

@@ -218,9 +218,9 @@ func TestNotStartedReasonValues_AreTheSeventeenAndACopy(t *testing.T) {
 	}
 }
 
-// --- ExecutionResult（release の実行の試行の結果。18 値と分類） ---
+// --- ExecutionResult（release の実行の試行の結果。16 値と分類） ---
 
-func TestExecutionResult_ClosedSetHas18ValuesWithClasses(t *testing.T) {
+func TestExecutionResult_ClosedSetHas16ValuesWithClasses(t *testing.T) {
 	want := map[ExecutionResult]struct {
 		class  ExecutionClass
 		counts bool
@@ -232,12 +232,11 @@ func TestExecutionResult_ClosedSetHas18ValuesWithClasses(t *testing.T) {
 		"head_changed": {ExecutionClassCancel, false}, "closed": {ExecutionClassCancel, false}, "base_changed": {ExecutionClassCancel, false},
 		"no_approved_head": {ExecutionClassCancel, false}, "unsupported": {ExecutionClassCancel, false},
 		"merged_unapproved": {ExecutionClassCancel, false}, "limit_reached": {ExecutionClassCancel, false},
-		"interrupted":     {ExecutionClassInterrupted, false},
-		"merge_requested": {ExecutionClassWait, false}, "merge_timeout": {ExecutionClassCancel, false},
+		"interrupted": {ExecutionClassInterrupted, false},
 	}
 	values := ExecutionResultValues()
-	if len(values) != 18 || len(want) != 18 {
-		t.Fatalf("len(ExecutionResultValues()) = %d, want 18", len(values))
+	if len(values) != 16 || len(want) != 16 {
+		t.Fatalf("len(ExecutionResultValues()) = %d, want 16", len(values))
 	}
 	seen := map[ExecutionResult]bool{}
 	for _, v := range values {

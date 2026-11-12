@@ -70,8 +70,6 @@ type rawPullHead struct {
 	Mergeable      *bool  `json:"mergeable"`
 	MergeCommitSHA string `json:"merge_commit_sha"`
 	MergeableState string `json:"mergeable_state"`
-	// AutoMerge は反映の依頼（自動マージの予約）が受け付けられていれば null でない。
-	AutoMerge json.RawMessage `json:"auto_merge"`
 }
 
 type rawCheckRuns struct {
@@ -113,8 +111,7 @@ func (c *Client) GetPullRequestChecks(ctx context.Context, repo string, number i
 		return core.UpstreamPullRequestChecks{}, fmt.Errorf("adapters/github: %s: unknown state %q", what, pr.State)
 	}
 	out := core.UpstreamPullRequestChecks{URL: pr.HTMLURL, Title: pr.Title, State: state, Base: pr.Base.Ref, BaseSHA: pr.Base.SHA, HeadSHA: pr.Head.SHA,
-		Mergeable: pr.Mergeable, MergeCommitSHA: pr.MergeCommitSHA, MergeableState: strings.ToLower(pr.MergeableState),
-		MergeRequested: len(pr.AutoMerge) > 0 && string(pr.AutoMerge) != "null"}
+		Mergeable: pr.Mergeable, MergeCommitSHA: pr.MergeCommitSHA, MergeableState: strings.ToLower(pr.MergeableState)}
 
 	for page := 1; ; page++ {
 		what := fmt.Sprintf("list check runs %s@%s page %d", repo, pr.Head.SHA, page)

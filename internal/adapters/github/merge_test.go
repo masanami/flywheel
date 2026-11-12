@@ -13,7 +13,7 @@ import (
 const testPRURL = "https://github.com/o/r/pull/7"
 
 // AC-39・AC-40: 引数は URL・方式のフラグ・--match-head-commit <head> だけ。3 方式を列挙して検証する。
-func TestMergePullRequest_ArgsAreOnlyURLAutoMethodFlagAndMatchHead(t *testing.T) {
+func TestMergePullRequest_ArgsAreOnlyURLMethodFlagAndMatchHead(t *testing.T) {
 	cases := map[string]string{
 		core.MergeMethodSquash: "--squash",
 		core.MergeMethodMerge:  "--merge",
@@ -30,12 +30,12 @@ func TestMergePullRequest_ArgsAreOnlyURLAutoMethodFlagAndMatchHead(t *testing.T)
 				t.Fatalf("MergePullRequest: %v", err)
 			}
 			calls := readInvocationLog(t, logPath)
-			want := []string{"pr", "merge", testPRURL, "--auto", flag, "--match-head-commit", "abc123"}
+			want := []string{"pr", "merge", testPRURL, flag, "--match-head-commit", "abc123"}
 			if len(calls) != 1 || !reflect.DeepEqual(calls[0], want) {
 				t.Fatalf("gh calls = %v, want [%v]", calls, want)
 			}
 			for _, a := range calls[0] {
-				if a == "--admin" || a == "--delete-branch" {
+				if a == "--admin" || a == "--auto" || a == "--delete-branch" {
 					t.Errorf("forbidden flag %q", a)
 				}
 			}

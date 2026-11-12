@@ -110,28 +110,3 @@ func TestGetPullRequestChecks_MergeableState(t *testing.T) {
 		t.Errorf("MergeableState = %q, want %q", got.MergeableState, core.UpstreamMergeStateBehind)
 	}
 }
-
-// 反映の依頼（自動マージの予約）の有無を、REST の auto_merge が null かどうかで正規化する。
-func TestGetPullRequestChecks_MergeRequestedFollowsAutoMerge(t *testing.T) {
-	for name, tc := range map[string]struct {
-		autoMerge string
-		want      bool
-	}{
-		"not requested": {"", false},
-		"requested":     {`{"enabled_by":{"login":"u"},"merge_method":"squash"}`, true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			dir := newFakeGHDir(t)
-			t.Setenv(envScenario, "checks_complete")
-			t.Setenv(envAutoMerge, tc.autoMerge)
-			c := newTestClient(t, dir)
-			got, err := c.GetPullRequestChecks(context.Background(), "o/r", 7)
-			if err != nil {
-				t.Fatalf("GetPullRequestChecks: %v", err)
-			}
-			if got.MergeRequested != tc.want {
-				t.Errorf("MergeRequested = %v, want %v", got.MergeRequested, tc.want)
-			}
-		})
-	}
-}

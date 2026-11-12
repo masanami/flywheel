@@ -28,7 +28,6 @@ const (
 	envGrandchildPid  = "FAKE_GH_GRANDCHILD_PID_FILE"
 	envMergeable      = "FAKE_GH_MERGEABLE"
 	envMergeableState = "FAKE_GH_MERGEABLE_STATE"
-	envAutoMerge      = "FAKE_GH_AUTO_MERGE"
 )
 
 func TestMain(m *testing.M) {
@@ -553,11 +552,7 @@ func fakeGHChecks(argv []string, scenario string) int {
 		if v := os.Getenv(envMergeable); v != "" {
 			mergeable = v
 		}
-		autoMerge := "null"
-		if v := os.Getenv(envAutoMerge); v != "" {
-			autoMerge = v
-		}
-		fmt.Printf(`{"html_url":"https://github.com/o/r/pull/7","title":"t","state":%q,"merged_at":%s,"base":{"ref":"main","sha":"base456"},"head":{"sha":"abc123"},"mergeable":%s,"mergeable_state":%q,"merge_commit_sha":"mc456","auto_merge":%s}`, state, merged, mergeable, os.Getenv(envMergeableState), autoMerge)
+		fmt.Printf(`{"html_url":"https://github.com/o/r/pull/7","title":"t","state":%q,"merged_at":%s,"base":{"ref":"main","sha":"base456"},"head":{"sha":"abc123"},"mergeable":%s,"mergeable_state":%q,"merge_commit_sha":"mc456"}`, state, merged, mergeable, os.Getenv(envMergeableState))
 		return 0
 	case strings.HasPrefix(endpoint, "repos/o/r/commits/abc123/check-runs"):
 		if scenario == "checks_runs_fail" {
