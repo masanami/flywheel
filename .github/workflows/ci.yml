@@ -20,8 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # CI は Linux だけで回す。macOS の runner は起動が遅く、実行の分数も Linux の 10 倍で数えられるため。
-        # macOS はローカルの make check で確かめる。
+        # CI は Linux だけで回す。macOS の runner は起動が遅いため。macOS はローカルの make gate で確かめる（手元は Mac）。
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
