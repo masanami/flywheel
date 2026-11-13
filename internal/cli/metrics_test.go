@@ -114,6 +114,7 @@ func TestMetrics_InvalidDatesAreUsageErrors(t *testing.T) {
 }
 
 func TestMetrics_JSONHasDefinitionsForEveryMetricAndIsDeterministic(t *testing.T) {
+	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
 	ws := metricsWorkspace(t)
 	args := []string{"metrics", "--since", "2026-03-01", "--workspace", ws, "--json"}
 	code1, out1, _ := runPiped(t, args)

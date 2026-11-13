@@ -74,6 +74,7 @@ func TestMetricsCompare_ErrorsLeaveNothingOnStdout(t *testing.T) {
 }
 
 func TestMetricsCompare_DeterministicReadOnlyAndPlainMetricsUnchanged(t *testing.T) {
+	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
 	ws := compareWorkspace(t)
 	dbPath := filepath.Join(ws, ".flywheel", "flywheel.db")
 	before, err := os.ReadFile(dbPath)

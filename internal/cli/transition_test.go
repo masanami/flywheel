@@ -403,6 +403,7 @@ func TestTransitionCommands_CasesMatchTableOperationsAndRegisteredCommands(t *te
 }
 
 func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T) {
+	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
 	tested := 0
 	for _, tc := range transitionCommandCases {
 		op, ok := operationByCommand[tc.name]

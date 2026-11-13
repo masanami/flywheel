@@ -477,6 +477,7 @@ func TestImport_ForeignKeyViolation_IsRejectedAndLeavesNoRows(t *testing.T) {
 // 書き出しの形の誤りは何も書かず validation_failed（sequences のキーが tables に無い・値が整数でない・
 // 最大の ID より小さい・列の過不足・未知のキー・JSON でない）。
 func TestImport_MalformedDocuments_AreRejected(t *testing.T) {
+	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
 	src, _ := filledStore(t)
 	exported := mustExport(t, src)
 	cases := map[string]func(d map[string]any){

@@ -141,6 +141,7 @@ func TestServeFleet_NoDeclarationBundlesOneWorkspaceFromCwd(t *testing.T) {
 }
 
 func TestServeFleet_WorkspaceFlagNameDerivation(t *testing.T) {
+	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
 	cases := map[string]string{
 		"My_Agent.1": "my-agent-1",
 		"_a":         "a",
