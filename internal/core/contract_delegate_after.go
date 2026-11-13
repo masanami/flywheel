@@ -71,6 +71,15 @@ func resumeCarriesAnswer(c *Connector) bool {
 	return false
 }
 
+// contractStatusMalformedQuestion は状態の確認（status）の出力が契約の型に合わなかった（malformed）ときの問い。
+func contractStatusMalformedQuestion(externalRunID, connector, errSummary string) string {
+	q := fmt.Sprintf("接続ツールの run（%s。接続先: %s）の状態の確認の出力が契約の形に合わなかった（失敗の種類: %s", externalRunID, connector, RunResultMalformed)
+	if errSummary != "" {
+		q += "。詳細: " + errSummary
+	}
+	return q + "）。契約の状態は更新していない。接続ツールの出力（requested_action.options は文字列の配列など）を確かめて直してから回答する。回答すると次の周で状態を読み直す。"
+}
+
 // contractResumeFailedQuestion は resume（答えの返し）が失敗したときの問い。
 func contractResumeFailedQuestion(externalRunID string, result RunResult, detail string) string {
 	q := fmt.Sprintf("接続ツールの run（%s）へ保留への答えを返す resume が失敗した（失敗の種類: %s", externalRunID, result)
@@ -180,6 +189,12 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		// resume はすぐ戻り、その時点の状態を返す。答えを返した直後に同じ求められた操作の waiting が返っても、
 		// 同じ問いの保留を立て直さない（次の周の状態の読みで、まだ waiting なら改めて問う）。
 		skipRead = rep.State == ContractStateWaiting && sameRequestedAction(row, rep.RequestedAction)
+	} else if rep.Result == RunResultMalformed && !rep.Held {
+		// 状態の確認の出力の型が合わない（例: requested_action.options に文字列でない要素がある）。契約の状態は更新しておらず、
+		// 読み直しても同じ出力が返りうるので、自動では読み直し続けず保留にする。
+		held, err := s.holdReclaimedContractStart(ctx, rep.RunID, rep.ChallengeID, contractStatusMalformedQuestion(row.ExternalRunID, connector.ID, rep.Error))
+		rep.Held = held
+		return rep, err
 	}
 	if !skipRead {
 		if err := s.afterContractRead(ctx, rep, connector); err != nil {
