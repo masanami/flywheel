@@ -27,7 +27,7 @@ func TestIngest_GHCallTimesOut_RepoFailsButCommandFinishes(t *testing.T) {
 	writeSourcesDeclaration(t, ws, singleSourceForTimingDeclaration)
 
 	dir, _ := writeSleepyFakeGH(t, "30", "") // 実際には短い ingestGHTimeout で先に打ち切られる
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	addToolDir(t, dir)
 
 	original := ingestGHTimeout
 	ingestGHTimeout = 100 * time.Millisecond
@@ -69,7 +69,7 @@ func TestIngest_DoesNotHoldStoreWriteLockWhileGHIsInFlight(t *testing.T) {
 
 	startedFile := filepath.Join(t.TempDir(), "gh-started")
 	dir, _ := writeSleepyFakeGH(t, "3", startedFile)
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	addToolDir(t, dir)
 
 	ingestDone := make(chan int, 1)
 	var ingestStdout, ingestStderr bytes.Buffer

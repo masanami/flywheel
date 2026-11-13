@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -64,6 +65,8 @@ func addRelease(t *testing.T, ws, challengeID, summary, ref string) string {
 }
 
 var (
+	// releaseHelperMu は preparedReleaseWorkspaces・nextReleasePR を守る（t.Parallel のテストから呼ばれる）。
+	releaseHelperMu           sync.Mutex
 	preparedReleaseWorkspaces = map[string]bool{}
 	nextReleasePR             = 0
 )
@@ -73,15 +76,21 @@ var (
 func addPRRelease(t *testing.T, ws, challengeID, summary string) string {
 	t.Helper()
 	prepareReleaseWorkspace(t, ws)
+	releaseHelperMu.Lock()
 	nextReleasePR = nextReleasePR%300 + 1
-	return addRelease(t, ws, challengeID, summary, releasePRURL(nextReleasePR))
+	n := nextReleasePR
+	releaseHelperMu.Unlock()
+	return addRelease(t, ws, challengeID, summary, releasePRURL(n))
 }
 
 // prepareReleaseWorkspace は ws に宣言と偽の gh を（最初の 1 回だけ）用意する。
 func prepareReleaseWorkspace(t *testing.T, ws string) {
 	t.Helper()
-	if !preparedReleaseWorkspaces[ws] {
-		preparedReleaseWorkspaces[ws] = true
+	releaseHelperMu.Lock()
+	first := !preparedReleaseWorkspaces[ws]
+	preparedReleaseWorkspaces[ws] = true
+	releaseHelperMu.Unlock()
+	if first {
 		declareReleaseRepo(t, ws)
 		heads := map[int]string{}
 		for n := 1; n <= 300; n++ {

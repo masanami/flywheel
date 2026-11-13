@@ -89,7 +89,7 @@ func (s *Store) markReadWithValues(ctx context.Context, ch Channel, id string, o
 	if opt.Values != nil && opt.Values.CommentsCount < 0 {
 		return nil, ErrValidation
 	}
-	actor, err := resolveActor()
+	actor, err := s.resolveActor()
 	if err != nil {
 		return nil, err
 	}
