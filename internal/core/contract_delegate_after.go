@@ -115,17 +115,78 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 		return err
 	case ContractStateSucceeded:
 		_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpSubmit,
-			func(_ context.Context, tc *transitionCtx) error {
+			func(ctx context.Context, tc *transitionCtx) error {
 				if tc.current.Status != StatusInProgress {
 					return errReconcileNotEligible
 				}
-				return nil
+				// 読んだ後で答えが付いて着手中へ戻っていたときは、ここで進めるので印は不要。
+				_, err := tc.tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 0 WHERE challenge_id = ? AND external_run_id = ?`, tc.id, rep.ExternalRunID)
+				return err
 			})
 		if err != nil && !errors.Is(err, ErrInvalidTransition) && !errors.Is(err, ErrTerminalState) && !errors.Is(err, errReconcileNotEligible) {
 			return err
 		}
+		// 課題が保留の間に読んだ成功の印（held_success）は、読んだ記録と同じトランザクションで付けてある（recordContractStatus）。
 	}
 	return nil
+}
+
+// SubmitHeldContractSuccesses は、課題が保留の間に契約の run が succeeded まで進み（held_success）、オーナーが答えて課題が
+// 着手中へ戻ったものを、start も resume も呼ばずに検証中へ進める。成果物は succeeded を読んだときに取り込み済み。
+// 答えは保留に残り、完了の検証（J5）の材料に入る。オーナーが答える前（課題がまだ保留）は何も変えない。
+// 検証中へ進めた課題の数を返す。only が非 nil ならその課題だけを対象にする。
+func (s *Store) SubmitHeldContractSuccesses(ctx context.Context, only *int64) (int, error) {
+	type target struct {
+		id          int64
+		startRunID  int64
+		externalRun string
+	}
+	var targets []target
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		q := `SELECT k.challenge_id, k.start_run_id, k.external_run_id FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
+			WHERE k.held_success = 1 AND c.status = 'in_progress'`
+		args := []any{}
+		if only != nil {
+			q += ` AND k.challenge_id = ?`
+			args = append(args, *only)
+		}
+		rows, err := tx.QueryContext(ctx, q+` ORDER BY k.id`, args...)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var t target
+			if err := rows.Scan(&t.id, &t.startRunID, &t.externalRun); err != nil {
+				return err
+			}
+			targets = append(targets, t)
+		}
+		return rows.Err()
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return 0, err
+	}
+	n := 0
+	var firstErr error
+	for _, t := range targets {
+		_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), formatRunID(t.startRunID), formatChallengeID(t.id), OpSubmit,
+			func(ctx context.Context, tc *transitionCtx) error {
+				if tc.current.Status != StatusInProgress {
+					return errReconcileNotEligible
+				}
+				_, err := tc.tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 0 WHERE challenge_id = ? AND external_run_id = ?`, tc.id, t.externalRun)
+				return err
+			})
+		switch {
+		case err == nil:
+			n++
+		case errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible):
+		default:
+			firstErr = firstErrOr(firstErr, err)
+		}
+	}
+	return n, firstErr
 }
 
 // holdContractWait は課題が着手中なら、契約の waiting を写した保留を作り、その保留の ID を契約の run に結び付ける

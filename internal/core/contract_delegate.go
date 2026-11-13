@@ -733,6 +733,11 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	if st.State != ContractStateSucceeded {
 		return nil
 	}
+	// 課題が保留（awaiting_human）の間に succeeded を読んだ印。答えの後の周で、start も resume も呼ばずに検証中へ進める。
+	if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 1 WHERE challenge_id = ? AND external_run_id = ?
+		AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND status = 'awaiting_human')`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
+		return err
+	}
 	verifiedAt := s.currentTime()
 	for _, a := range st.Artifacts {
 		var kind artifactKind
@@ -775,6 +780,10 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	var firstErr error
 	if _, err := s.HoldUnrecordedContractStops(ctx); err != nil {
 		firstErr = err
+	}
+	// 保留の間に成功していた課題（オーナーが答えて着手中へ戻ったもの）を、start も resume も呼ばずに検証中へ進める。
+	if _, err := s.SubmitHeldContractSuccesses(ctx, only); err != nil {
+		firstErr = firstErrOr(firstErr, err)
 	}
 	var rows []*contractRunRow
 	bindings := map[int64]*sourceBinding{}
