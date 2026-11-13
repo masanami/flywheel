@@ -233,6 +233,66 @@ func TestVerifyAuto_CompletedChecks_J5RunsWithTheChecksAndMapsMet(t *testing.T) 
 	}
 }
 
+// withPRBodyField は ghChecksRoutes の PR の取得の応答（pulls/1）へ "body" のフィールドを足す。
+// bodyJSON は JSON の値（文字列なら引用符つき）。チェックの取得は body を読まないので、
+// 説明文の取得だけに効く。
+func withPRBodyField(routes []fakeGHRoute, bodyJSON string) []fakeGHRoute {
+	out := append([]fakeGHRoute(nil), routes...)
+	out[0].stdout = strings.Replace(out[0].stdout, `{"html_url"`, `{"body":`+bodyJSON+`,"html_url"`, 1)
+	return out
+}
+
+// 偽の gh の PR の本文が、adapter の取得（GetArtifactDescription）→ core の区画 → J5 の標準入力まで 1 本で届く。
+func TestVerifyAuto_PRBody_ReachesJ5StdinAsArtifactDescription(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	id := newVerifyingForCase(t, ws, true)
+	withFakeGHRoutesOnPATH(t, withPRBodyField(ghChecksRoutes("open", checkRunsComplete), `"PR-BODY-MARKER-CLI"`))
+	stdinLog := t.TempDir() + "/j5-stdin.log"
+	route := j5Route("met", nil, nil)
+	route.StdinLogPath = stdinLog
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{route}, "")
+
+	doc := runJSON(t, ws, "verify", "--auto", id)
+	if item := phaseOf(t, doc)["items"].([]any)[0].(map[string]any); item["outcome"] != "met" {
+		t.Errorf("item = %v", item)
+	}
+	in, err := os.ReadFile(stdinLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"PR-BODY-MARKER-CLI", "成果物の説明文", "head abc123 の時点で取得"} {
+		if !bytes.Contains(in, []byte(want)) {
+			t.Errorf("J5 stdin lacks %q:\n%s", want, in)
+		}
+	}
+}
+
+// PR の本文の取得に失敗しても J5 は止まらず（偽の claude が起動される）、区画に失敗が書かれる。
+// 本文の型を壊し（数値）、本文を読まないチェックの取得は通したまま、説明文の取得だけを失敗させる。
+func TestVerifyAuto_PRBodyFetchFails_J5StillRunsAndStdinSaysSo(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	id := newVerifyingForCase(t, ws, true)
+	withFakeGHRoutesOnPATH(t, withPRBodyField(ghChecksRoutes("open", checkRunsComplete), `12345`))
+	stdinLog := t.TempDir() + "/j5-stdin.log"
+	route := j5Route("met", nil, nil)
+	route.StdinLogPath = stdinLog
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{route}, "")
+
+	doc := runJSON(t, ws, "verify", "--auto", id)
+	if item := phaseOf(t, doc)["items"].([]any)[0].(map[string]any); item["result"] != "succeeded" || item["outcome"] != "met" {
+		t.Errorf("item = %v", item)
+	}
+	in, err := os.ReadFile(stdinLog)
+	if err != nil {
+		t.Fatalf("J5 was not started: %v", err)
+	}
+	for _, want := range []string{"成果物の説明文", "説明文の取得に失敗した", "test-CLI"} {
+		if !bytes.Contains(in, []byte(want)) {
+			t.Errorf("J5 stdin lacks %q:\n%s", want, in)
+		}
+	}
+}
+
 func TestVerifyAuto_NoPR_NeverCallsGHAndStdinSaysSo(t *testing.T) {
 	ws := setupWorkspaceWithPosition(t)
 	id := newVerifyingForCase(t, ws, false)

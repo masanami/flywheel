@@ -145,7 +145,7 @@ func TestJ5Prompt_HasHeadroomBelowLimit(t *testing.T) {
 //
 // self-review 指摘（round1, code-reviewer CONFIRMED）: 当初は J1（4096バイト）
 // の境界だけを検証しており、judgmentPromptLimit の J2〜J5 の値
-// （当時 8192・8192・4096・6144。J2 は #462 で 12288、J5 は #466 で 8192）を緩めても検出するテストが無かった。5ファイル
+// （当時 8192・8192・4096・6144。J2 は #462 で 12288、J5 は #466 で 8192、#565 で 9216）を緩めても検出するテストが無かった。5ファイル
 // 分をテーブル駆動で回す形に直した。
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
@@ -153,7 +153,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j2.md": 12288,
 		"j3.md": 8192,
 		"j4.md": 4096,
-		"j5.md": 8192,
+		"j5.md": 9216,
 		"j6.md": 6144,
 		"j8.md": 6144,
 	}
