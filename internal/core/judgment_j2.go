@@ -249,21 +249,24 @@ func j2OutputSchema() []byte {
 	return b
 }
 
-// invocationNeedsSource は操作の invocation が取り込み元の差し込みを持つかを返す
-// （{challenge_id} は取り込み元の差し込みではない）。
-// cliStartNeedsSource は cli 形態の接続ツールの commands.start が取り込み元の差し込みを要するか。
-func cliStartNeedsSource(c *Connector) bool {
+// cliCommandsNeedSource は cli 形態の接続ツールの commands（start・status・resume・cancel）のどれかが、
+// 取り込み元の差し込みを要するか。4 つとも実際の起動に使うので、取り込み元の無い課題ではどれも要してはならない。
+func cliCommandsNeedSource(c *Connector) bool {
 	if c == nil || c.Form != ConnectorFormCLI || c.Commands == nil {
 		return false
 	}
-	for _, a := range c.Commands.Start {
-		if invocationNeedsSource(a) {
-			return true
+	for _, args := range [][]string{c.Commands.Start, c.Commands.Status, c.Commands.Resume, c.Commands.Cancel} {
+		for _, a := range args {
+			if invocationNeedsSource(a) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
+// invocationNeedsSource は操作の invocation が取り込み元の差し込みを持つかを返す
+// （{challenge_id} は取り込み元の差し込みではない）。
 func invocationNeedsSource(invocation string) bool {
 	for _, ph := range []string{"{issue_number}", "{issue_url}", "{external_key}"} {
 		if strings.Contains(invocation, ph) {
@@ -362,8 +365,8 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 	if !vc.HasSource && invocationNeedsSource(op.Invocation) {
 		return nil, false
 	}
-	// cli 形態は、実際に起動に使う commands.start の引数も同じく、取り込み元の無い課題では取り込み元の差し込みを要してはならない。
-	if !vc.HasSource && cliStartNeedsSource(connector) {
+	// cli 形態は、実際に起動に使う commands（start・status・resume・cancel）の引数も同じく、取り込み元の無い課題では取り込み元の差し込みを要してはならない。
+	if !vc.HasSource && cliCommandsNeedSource(connector) {
 		return nil, false
 	}
 
@@ -773,7 +776,7 @@ func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, age
 			}
 			line := "    - id: " + op.ID + "｜対話前提: " + yesNo(op.Interactive) + "｜成果物: " + artifacts
 			switch {
-			case !hasSource && (invocationNeedsSource(op.Invocation) || cliStartNeedsSource(connector)):
+			case !hasSource && (invocationNeedsSource(op.Invocation) || cliCommandsNeedSource(connector)):
 				line += "｜注記: 取り込み元の Issue の情報を必要とするため、この課題では選べない"
 			}
 			b.WriteString(line + "\n")

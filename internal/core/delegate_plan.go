@@ -394,6 +394,8 @@ type schedWaiter struct {
 	rank   int
 	seq    int64
 	queued bool
+	// contract は form: cli の接続ツールの課題（スロットを使わず、全体の同時委譲数だけで許可される）。
+	contract bool
 }
 
 // delegationScheduler は 1 回の RunDelegation の中の起動を、全リポジトリの合計
@@ -402,6 +404,7 @@ type schedWaiter struct {
 type delegationScheduler struct {
 	s           *Store
 	maxParallel int
+	conn        *ConnectorsDeclaration
 
 	mu      sync.Mutex
 	pre     int // 許可したが run がまだストアに無い起動
@@ -412,12 +415,18 @@ type delegationScheduler struct {
 
 func newDelegationScheduler(s *Store, in DelegateInput) *delegationScheduler {
 	return &delegationScheduler{
-		s: s, maxParallel: in.AgentDecl.MaxParallelRuns, preRepo: map[string]int{},
+		s: s, maxParallel: in.AgentDecl.MaxParallelRuns, conn: in.ConnDecl, preRepo: map[string]int{},
 	}
 }
 
 func (sch *delegationScheduler) newWaiter(repo ConnectorRepo, c planCandidate) *schedWaiter {
-	return &schedWaiter{repo: repo, rank: c.Rank, seq: c.Seq}
+	w := &schedWaiter{repo: repo, rank: c.Rank, seq: c.Seq}
+	if sch.conn != nil {
+		if _, conn := sch.conn.findConnectorRepo(repo.Name); conn != nil && conn.Form == ConnectorFormCLI {
+			w.contract = true
+		}
+	}
+	return w
 }
 
 // enqueue は w を待ちの列へ入れる（優先度・ID の昇順）。
@@ -509,6 +518,35 @@ func (sch *delegationScheduler) fitsLocked(c slotCapacity, repo string) bool {
 	return c.usable > 0 && c.dbTotal+sch.pre < sch.maxParallel && c.dbRepo+sch.preRepo[repo] < c.usable
 }
 
+// earlierFitCountLocked は、待ちの列で w より前の課題のうち、今すぐ許可できるものの数（その課題が先に枠を取る）。
+// w が列に無ければ（nil を含む）前の課題は無いものとする。契約の課題の許可には全体の同時委譲数 total（呼び出し側が読んだ値）だけを使う。
+func (sch *delegationScheduler) earlierFitCountLocked(ctx context.Context, w *schedWaiter, total int) (int, error) {
+	if w == nil || !w.queued {
+		return 0, nil
+	}
+	n := 0
+	for _, e := range sch.waiters {
+		if e == w {
+			break
+		}
+		if e.contract {
+			// 契約の run はスロットを使わないので、全体の同時委譲数だけで許可される。
+			if total+sch.pre < sch.maxParallel {
+				n++
+			}
+			continue
+		}
+		ec, err := sch.capacity(ctx, e.repo)
+		if err != nil {
+			return 0, err
+		}
+		if sch.fitsLocked(ec, e.repo.Name) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // admission は許可した起動 1 件。nil に対するメソッドは何もしない。
 type admission struct {
 	sch      *delegationScheduler
@@ -567,22 +605,12 @@ func (sch *delegationScheduler) admit(ctx context.Context, w *schedWaiter, wait 
 		}
 		fits := sch.fitsLocked(c, w.repo.Name)
 		if fits {
-			blocked := false
-			for _, e := range sch.waiters {
-				if e == w {
-					break
-				}
-				ec, err := sch.capacity(ctx, e.repo)
-				if err != nil {
-					sch.mu.Unlock()
-					return nil, err
-				}
-				if sch.fitsLocked(ec, e.repo.Name) {
-					blocked = true
-					break
-				}
+			n, err := sch.earlierFitCountLocked(ctx, w, c.dbTotal)
+			if err != nil {
+				sch.mu.Unlock()
+				return nil, err
 			}
-			if !blocked {
+			if n == 0 {
 				sch.pre++
 				sch.preRepo[w.repo.Name]++
 				sch.own++
@@ -644,6 +672,15 @@ func (r *delegateRun) admitContract(ctx context.Context) (*admission, error) {
 		return nil, err
 	}
 	if total+sch.pre >= sch.maxParallel {
+		return nil, ErrSlotUnavailable
+	}
+	// 待ちの列で前にいる課題が今すぐ許可できる分の枠は、その課題に譲る（優先度・ID の昇順）。譲ってもなお枠が残るなら許可する
+	// （契約は待たないので、枠に余裕があるのに譲るだけで拒否しない）。
+	n, err := sch.earlierFitCountLocked(ctx, r.w, total)
+	if err != nil {
+		return nil, err
+	}
+	if total+sch.pre+n >= sch.maxParallel {
 		return nil, ErrSlotUnavailable
 	}
 	sch.pre++

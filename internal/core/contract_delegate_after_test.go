@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -277,5 +278,43 @@ func TestRunDelegation_PollsUnfinishedContractRuns(t *testing.T) {
 	}
 	if len(f.client.statuses) != 1 {
 		t.Fatalf("statuses = %d, want 1（周が PollContractRuns を呼ぶ）", len(f.client.statuses))
+	}
+}
+
+// resume だけが取り込み元の差し込みを要する宣言でも、答えが無い確認（status）では resume の引数を確かめず、状態が読まれて
+// 終わりを検知できる。答えがあるときだけ resume の引数を確かめ、埋められなければ答えを失わずにエラーにする。
+func TestPollContractRuns_ResumeNeedingSourceIsOnlyCheckedWhenAnswering(t *testing.T) {
+	json := strings.Replace(contractConnectorsJSON, `"resume": ["tool", "resume", "{run_id}", "--answer", "{answer}"]`,
+		`"resume": ["tool", "resume", "{run_id}", "--issue", "{issue_number}", "--answer", "{answer}"]`, 1)
+	f := newContractFixtureWith(t, json)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, nil)}
+	reps := f.poll(t)
+	if len(reps) != 1 || reps[0].State != ContractStateSucceeded || len(f.client.statuses) != 1 {
+		t.Fatalf("report = %+v statuses = %v, want the state read and succeeded detected", reps, f.client.statuses)
+	}
+}
+
+func TestPollContractRuns_AnswerWithUnfillableResumeKeepsTheAnswer(t *testing.T) {
+	json := strings.Replace(contractConnectorsJSON, `"resume": ["tool", "resume", "{run_id}", "--answer", "{answer}"]`,
+		`"resume": ["tool", "resume", "{run_id}", "--issue", "{issue_number}", "--answer", "{answer}"]`, 1)
+	f := newContractFixtureWith(t, json)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{waitingOut(&ContractRequestedAction{Kind: "approve", Decider: "human", Text: "承認して"}, nil)}
+	f.poll(t)
+	f.answerLatestHold(t, f.cid, "A")
+	_, err := f.s.PollContractRuns(context.Background(), ContractPollInput{AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client, CycleID: f.cycle(t, 300)})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation when resume cannot be filled while answering", err)
+	}
+	if len(f.client.resumes) != 0 {
+		t.Fatalf("resumes = %v, want none", f.client.resumes)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM contract_run WHERE wait_hold_id IS NOT NULL`); n != 1 {
+		t.Fatalf("wait_hold_id cleared although resume was not sent (rows with the link = %d, want 1)", n)
 	}
 }

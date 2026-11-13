@@ -393,3 +393,31 @@ func TestValidateJ2Output_CLIStartCommandNeedingSourceIsInvalidWithoutSource(t *
 		}
 	}
 }
+
+// status・resume・cancel も実際の起動に使うので、どれが取り込み元の差し込みを要しても、取り込み元の無い課題の計画は不正な出力になる。
+func TestValidateJ2Output_CLINonStartCommandNeedingSourceIsInvalidWithoutSource(t *testing.T) {
+	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
+	for _, cmd := range []string{"status", "resume", "cancel"} {
+		for _, hasSource := range []bool{false, true} {
+			vc := j2TestContext(t, hasSource)
+			for i := range vc.Conn.Connectors {
+				if vc.Conn.Connectors[i].Form != ConnectorFormCLI {
+					continue
+				}
+				c := vc.Conn.Connectors[i].Commands
+				args := []string{"tool", cmd, "--issue", "{issue_number}"}
+				switch cmd {
+				case "status":
+					c.Status = args
+				case "resume":
+					c.Resume = args
+				case "cancel":
+					c.Cancel = args
+				}
+			}
+			if _, ok := validateJ2Output(out, vc); ok != hasSource {
+				t.Errorf("%s hasSource=%v: accepted=%v, want %v", cmd, hasSource, ok, hasSource)
+			}
+		}
+	}
+}
