@@ -69,7 +69,7 @@ func writeFakeGHRoutesOrdered(t *testing.T, routes []fakeGHRoute, orderLogPath s
 	b.WriteString(";;\n")
 	b.WriteString("esac\n")
 
-	if err := writeExecutable(filepath.Join(dir, "gh"), []byte(b.String())); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(b.String()), 0o755); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
 	return dir, func() []string { return readFakeGHCallLog(t, logPath) }
@@ -136,7 +136,7 @@ func withFakeGHRoutesOnPATH(t *testing.T, routes []fakeGHRoute) func() []string 
 func withFakeGHRoutesOrderedOnPATH(t *testing.T, routes []fakeGHRoute, orderLogPath string) func() []string {
 	t.Helper()
 	dir, calls := writeFakeGHRoutesOrdered(t, routes, orderLogPath)
-	addToolDir(t, dir)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return calls
 }
 
@@ -263,7 +263,7 @@ func writeSleepyFakeGH(t *testing.T, sleepArg, startedFile string) (dir string, 
 	b.WriteString("echo '[]'\n")
 	b.WriteString("exit 0\n")
 
-	if err := writeExecutable(filepath.Join(dir, "gh"), []byte(b.String())); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(b.String()), 0o755); err != nil {
 		t.Fatalf("write sleepy fake gh: %v", err)
 	}
 	return dir, func() []string { return readFakeGHCallLog(t, logPath) }

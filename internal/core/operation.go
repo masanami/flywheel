@@ -84,7 +84,7 @@ func (s *Store) createOperation(ctx context.Context, ch Channel, runID *int64, s
 		return nil, ErrNotFound
 	}
 
-	actor, err := s.resolveActor()
+	actor, err := resolveActor()
 	if err != nil {
 		return nil, err
 	}

@@ -54,7 +54,7 @@ func (s *Store) tidyPendingReleases(ctx context.Context, opts ReleaseExecOptions
 	if len(pending) == 0 {
 		return nil, nil
 	}
-	actor, err := s.resolveActor()
+	actor, err := resolveActor()
 	if err != nil {
 		return nil, err
 	}

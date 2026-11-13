@@ -80,7 +80,7 @@ func (r *activityRecorder) record(entity string, entityID int64, action string, 
 // verification をそのまま使う必要があるため、その差し替え口として
 // mutateAs を切り出す（mutate はその薄いラッパー）。
 func (s *Store) mutate(ctx context.Context, ch Channel, fn func(tx *sql.Tx, rec *activityRecorder) error) error {
-	actor, err := s.resolveActor()
+	actor, err := resolveActor()
 	if err != nil {
 		return err
 	}

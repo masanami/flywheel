@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"os/exec"
 
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/view"
@@ -64,20 +63,6 @@ type Args struct {
 	// ワークスペースのストア。Run は Close してはならない（呼び出し元の run が
 	// 責任を持つ）。
 	Store *core.Store
-	// LookPath は gh・claude の実行ファイルの探し方。nil なら exec.LookPath（PATH 上を探す）。
-	// テストが、プロセス全体の PATH を書き換えずに偽の gh・claude の場所をテストごとに渡すために使う。
-	LookPath func(file string) (string, error)
-}
-
-// lookPathFunc は実行ファイルの探し方（exec.LookPath と同じ形）。
-type lookPathFunc = func(file string) (string, error)
-
-// lookPath は a の実行ファイルの探し方（既定は exec.LookPath）。
-func (a Args) lookPath() lookPathFunc {
-	if a.LookPath != nil {
-		return a.LookPath
-	}
-	return exec.LookPath
 }
 
 // commonFlags はすべてのコマンドに共通のフラグ。

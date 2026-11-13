@@ -37,7 +37,7 @@ func runVerifyAuto(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	launcher := invoker.NewLauncherWithLookPath(a.LookPath)
+	launcher := invoker.NewLauncher()
 	if err := launcher.Available(ctx); err != nil {
 		if errors.Is(err, invoker.ErrClaudeNotFound) {
 			return nil, NewError(CodeInvokerUnavailable, err.Error())
@@ -63,10 +63,10 @@ func runVerifyAuto(a Args) (any, error) {
 		ChallengeID:  challengeID,
 		AgentDecl:    decl,
 		Invoker:      launcher,
-		Upstream:     newUpstreamThreadSource(a.lookPath()),
-		Checks:       newCheckSource(a.lookPath()),
-		Diffs:        newDiffSource(a.lookPath()),
-		Descriptions: newDescriptionSource(a.lookPath()),
+		Upstream:     newUpstreamThreadSource(),
+		Checks:       newCheckSource(),
+		Diffs:        newDiffSource(),
+		Descriptions: newDescriptionSource(),
 		HeadGit:      git.New(),
 		Connectors:   conn,
 		CycleID:      cyc.ID,
@@ -91,8 +91,8 @@ func runVerifyAuto(a Args) (any, error) {
 }
 
 // newDiffSource は J5 の起動の前の PR の差分の取得を組み立てる（取得できないときは newCheckSource と同じ）。
-func newDiffSource(lp lookPathFunc) core.UpstreamDiffSource {
-	client, err := github.New(github.Options{Timeout: ingestGHTimeout, LookPath: lp})
+func newDiffSource() core.UpstreamDiffSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
 	if err != nil {
 		return unavailableCheckSource{err: err}
 	}
@@ -101,8 +101,8 @@ func newDiffSource(lp lookPathFunc) core.UpstreamDiffSource {
 
 // newDescriptionSource は J5 の起動の前の成果物の説明文（PR の本文）の取得を組み立てる（取得できないときは各取得が失敗し、
 // J5 は止まらず説明文の区画に失敗が書かれる）。
-func newDescriptionSource(lp lookPathFunc) core.UpstreamDescriptionSource {
-	client, err := github.New(github.Options{Timeout: ingestGHTimeout, LookPath: lp})
+func newDescriptionSource() core.UpstreamDescriptionSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
 	if err != nil {
 		return unavailableCheckSource{err: err}
 	}
@@ -113,8 +113,8 @@ func newDescriptionSource(lp lookPathFunc) core.UpstreamDescriptionSource {
 // `gh` が PATH に無いときは、どの取得も失敗する実装を返す（PR の無い課題は取得を呼ばないので
 // `gh` が無くても検証できる。PR のある課題は、取得の失敗として起動されず、not_started に
 // upstream_fetch_failed で出る）。
-func newCheckSource(lp lookPathFunc) core.UpstreamCheckSource {
-	client, err := github.New(github.Options{Timeout: ingestGHTimeout, LookPath: lp})
+func newCheckSource() core.UpstreamCheckSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
 	if err != nil {
 		return unavailableCheckSource{err: err}
 	}
@@ -123,8 +123,8 @@ func newCheckSource(lp lookPathFunc) core.UpstreamCheckSource {
 
 // newCompareSource は release の head の変化の判定（検証の後に入ったコミットの取得）を組み立てる
 // （取得できないときは newCheckSource と同じ）。
-func newCompareSource(lp lookPathFunc) core.UpstreamCompareSource {
-	client, err := github.New(github.Options{Timeout: ingestGHTimeout, LookPath: lp})
+func newCompareSource() core.UpstreamCompareSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
 	if err != nil {
 		return unavailableCheckSource{err: err}
 	}

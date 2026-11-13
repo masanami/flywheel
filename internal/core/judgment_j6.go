@@ -580,7 +580,7 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 	if !ok {
 		return false, "", "", ErrValidation
 	}
-	actor, err := s.resolveActor()
+	actor, err := resolveActor()
 	if err != nil {
 		return false, "", "", err
 	}

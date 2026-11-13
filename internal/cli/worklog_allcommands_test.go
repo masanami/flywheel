@@ -697,7 +697,7 @@ func runCommandForWorklog(t *testing.T, command string, args []string, ws string
 		return
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runWithLookPath(full, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 0 {
+	if code := run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 {
 		t.Fatalf("args=%v exit=%d, want 0 (stderr=%s)", args, code, stderr.String())
 	}
 }
@@ -741,7 +741,6 @@ func TestWorklog_EveryMutatingOperationRecordsAllFields(t *testing.T) {
 	actor := resolveExpectedActor(t)
 	for _, c := range worklogCases {
 		t.Run(c.name, func(t *testing.T) {
-			parallelTools(t) // 偽の gh・claude の場所は t ごとに渡す（t.Setenv しない）。共有の状態は無い（flywheel#578）
 			// 期待値は core の定数ではなく仕様の文字列で書く（定数の値が変わっても
 			// 気付けるように）。
 			wantVerification := "none"

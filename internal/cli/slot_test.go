@@ -98,7 +98,7 @@ func installTripwireGH(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	addToolDir(t, dir)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return marker
 }
 
@@ -381,7 +381,7 @@ func TestSlotAssignment_GitCallsCarryEnvAndNeverFetchOrClone_RealGit(t *testing.
 	if err := os.WriteFile(filepath.Join(wrapDir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	addToolDir(t, wrapDir)
+	t.Setenv("PATH", wrapDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	s := openSlotStore(t, ws)
 	repo := core.ConnectorRepo{Name: "r", Remote: "owner/name", DefaultBranch: "main",

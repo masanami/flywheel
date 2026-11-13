@@ -86,7 +86,7 @@ func (s *Store) applyJ8(ctx context.Context, runIDDisplay string, props []J8Prop
 	if !ok {
 		return m, false, ErrValidation
 	}
-	actor, err := s.resolveActor()
+	actor, err := resolveActor()
 	if err != nil {
 		return m, false, err
 	}

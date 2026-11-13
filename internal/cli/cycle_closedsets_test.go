@@ -335,7 +335,7 @@ func TestRunResults_AreTheDocumentedClosedSetInBothDirections(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/nonexistent/interpreter\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		addToolDir(t, dir)
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		cycleDoc(t, ws)
 		results := runResultsOf(t, ws)
 		if len(results) != 1 || results[0] != "launch_failed" {

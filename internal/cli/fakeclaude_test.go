@@ -64,7 +64,7 @@ func writeFakeClaude(t *testing.T, opts fakeClaudeOpts, argvLogPath, stdinLogPat
 	add("\n" + delim + "\n")
 	add(fmt.Sprintf("exit %d\n", opts.ExitCode))
 
-	if err := writeExecutable(filepath.Join(dir, "claude"), b); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "claude"), b, 0o755); err != nil {
 		t.Fatalf("write fake claude: %v", err)
 	}
 	return dir
@@ -77,7 +77,7 @@ func putFakeClaudeOnPATH(t *testing.T, opts fakeClaudeOpts) (argvLogPath, stdinL
 	argvLogPath = filepath.Join(dir, "argv.log")
 	stdinLogPath = filepath.Join(dir, "stdin.log")
 	claudeDir := writeFakeClaude(t, opts, argvLogPath, stdinLogPath)
-	addToolDir(t, claudeDir)
+	t.Setenv("PATH", claudeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return argvLogPath, stdinLogPath
 }
 

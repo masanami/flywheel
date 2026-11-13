@@ -85,7 +85,7 @@ func runCycle(a Args) (any, error) {
 	var ingest *core.CycleIngestInput
 	var ghClient *github.Client
 	if hasSources {
-		client, err := newIngestClient(a.lookPath())
+		client, err := newIngestClient()
 		if err != nil {
 			return nil, err
 		}
@@ -97,11 +97,11 @@ func runCycle(a Args) (any, error) {
 		if ghClient != nil {
 			threads = ghClient
 		} else {
-			threads = newUpstreamThreadSource(a.lookPath())
+			threads = newUpstreamThreadSource()
 		}
 	}
 
-	launcher := invoker.NewLauncherWithLookPath(a.LookPath)
+	launcher := invoker.NewLauncher()
 	if err := launcher.Available(ctx); err != nil {
 		if errors.Is(err, invoker.ErrClaudeNotFound) {
 			return nil, NewError(CodeInvokerUnavailable, err.Error())
@@ -124,9 +124,9 @@ func runCycle(a Args) (any, error) {
 		contract  core.ContractClient
 	)
 	if hasConnectors {
-		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(a.lookPath()), newCheckSource(a.lookPath())
-		merger, diffs, headGit = newPullRequestMerger(a.lookPath()), newDiffSource(a.lookPath()), git.New()
-		compare, bodies = newCompareSource(a.lookPath()), newDescriptionSource(a.lookPath())
+		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(), newCheckSource()
+		merger, diffs, headGit = newPullRequestMerger(), newDiffSource(), git.New()
+		compare, bodies = newCompareSource(), newDescriptionSource()
 		contract = launcher
 	}
 
