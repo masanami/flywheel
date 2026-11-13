@@ -128,8 +128,9 @@ func awaitingCompletionWithReleasesForCase(t *testing.T, ws string) string {
 	t.Helper()
 	id := createWithStatusForCase(t, ws, "verifying")
 	runJSON(t, ws, "verify", id, "--result", "met")
-	addPRRelease(t, ws, id, "s1")
-	addPRRelease(t, ws, id, "s2")
+	rel := prepareReleaseWorkspace(t, ws)
+	rel.addPRRelease(t, id, "s1")
+	rel.addPRRelease(t, id, "s2")
 	return id
 }
 

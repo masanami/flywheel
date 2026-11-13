@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"sync"
 	"testing"
 )
 
@@ -64,38 +63,30 @@ func addRelease(t *testing.T, ws, challengeID, summary, ref string) string {
 	return runJSON(t, ws, args...)["operation"].(map[string]any)["id"].(string)
 }
 
-var (
-	// releaseHelperMu は preparedReleaseWorkspaces・nextReleasePR を守る（t.Parallel のテストから呼ばれる）。
-	releaseHelperMu           sync.Mutex
-	preparedReleaseWorkspaces = map[string]bool{}
-	nextReleasePR             = 0
-)
-
-// addPRRelease は課題に、宣言のリポジトリ（o/r）の PR を参照に持つ release を足し、その ID を返す。
-// ワークスペースごとに最初の 1 回だけ、宣言と偽の gh（PR #1〜#300 の head を返す）を用意する。
-func addPRRelease(t *testing.T, ws, challengeID, summary string) string {
-	t.Helper()
-	prepareReleaseWorkspace(t, ws)
-	releaseHelperMu.Lock()
-	nextReleasePR = nextReleasePR%300 + 1
-	n := nextReleasePR
-	releaseHelperMu.Unlock()
-	return addRelease(t, ws, challengeID, summary, releasePRURL(n))
+// releaseWorkspace は、宣言と偽の gh（PR #1〜#300 の head を返す）を用意したワークスペースと、
+// そのワークスペースで次に参照する PR の番号を持つ。値はテストごと（ワークスペースごと）で、
+// パッケージ変数に置かないので t.Parallel のテストの間で共有しない。
+type releaseWorkspace struct {
+	ws     string
+	lastPR int
 }
 
-// prepareReleaseWorkspace は ws に宣言と偽の gh を（最初の 1 回だけ）用意する。
-func prepareReleaseWorkspace(t *testing.T, ws string) {
+// prepareReleaseWorkspace は ws に宣言と偽の gh を用意し、PR を参照に持つ release を足すための値を返す。
+func prepareReleaseWorkspace(t *testing.T, ws string) *releaseWorkspace {
 	t.Helper()
-	releaseHelperMu.Lock()
-	first := !preparedReleaseWorkspaces[ws]
-	preparedReleaseWorkspaces[ws] = true
-	releaseHelperMu.Unlock()
-	if first {
-		declareReleaseRepo(t, ws)
-		heads := map[int]string{}
-		for n := 1; n <= 300; n++ {
-			heads[n] = releaseHead(n, 0)
-		}
-		fakeGHReleaseHeads(t, heads)
+	declareReleaseRepo(t, ws)
+	heads := map[int]string{}
+	for n := 1; n <= 300; n++ {
+		heads[n] = releaseHead(n, 0)
 	}
+	fakeGHReleaseHeads(t, heads)
+	return &releaseWorkspace{ws: ws}
+}
+
+// addPRRelease は課題に、宣言のリポジトリ（o/r）の PR を参照に持つ release を足し、その ID を返す。
+// PR の番号はこのワークスペースの中で 1, 2, 3, …（300 の次は 1）の順に進む。
+func (r *releaseWorkspace) addPRRelease(t *testing.T, challengeID, summary string) string {
+	t.Helper()
+	r.lastPR = r.lastPR%300 + 1
+	return addRelease(t, r.ws, challengeID, summary, releasePRURL(r.lastPR))
 }
