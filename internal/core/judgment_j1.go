@@ -370,7 +370,7 @@ func (s *Store) invalidateRunOutput(ctx context.Context, runIDDisplay string) er
 }
 
 // invalidateRunOutputWithReason は invalidateRunOutput に加え、reason が空でなければ run の error に
-// 検査のどれに落ちたかを残す。
+// 検査のどれに落ちたかを残す（run に既にある error は上書きしない）。
 func (s *Store) invalidateRunOutputWithReason(ctx context.Context, runIDDisplay, reason string) error {
 	id, ok := parseRunID(runIDDisplay)
 	if !ok {
@@ -385,7 +385,7 @@ func (s *Store) invalidateRunOutputWithReason(ctx context.Context, runIDDisplay,
 			return err
 		}
 		if reason != "" {
-			if _, err := tx.ExecContext(ctx, `UPDATE run SET error = ? WHERE id = ?`, reason, id); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE run SET error = ? WHERE id = ? AND (error IS NULL OR error = '')`, reason, id); err != nil {
 				return err
 			}
 		}
