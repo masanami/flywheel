@@ -145,7 +145,7 @@ func TestJ5Prompt_HasHeadroomBelowLimit(t *testing.T) {
 //
 // self-review 指摘（round1, code-reviewer CONFIRMED）: 当初は J1（4096バイト）
 // の境界だけを検証しており、judgmentPromptLimit の J2〜J5 の値
-// （当時 8192・8192・4096・6144。J2 は #462 で 12288、J5 は #466 で 8192、#565 で 9216）を緩めても検出するテストが無かった。5ファイル
+// （当時 8192・8192・4096・6144。J2 は #462 で 12288、J5 は #466 で 8192、#565 で 9216、#563 で 9728）を緩めても検出するテストが無かった。5ファイル
 // 分をテーブル駆動で回す形に直した。
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
@@ -153,7 +153,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j2.md": 12288,
 		"j3.md": 8192,
 		"j4.md": 4096,
-		"j5.md": 9216,
+		"j5.md": 9728,
 		"j6.md": 6144,
 		"j8.md": 6144,
 	}
@@ -711,6 +711,29 @@ func TestInstructions_J2AggregateIssueQuestionAndChosenOptionCoverage(t *testing
 	for _, l := range strings.Split(section, "\n") {
 		if low := strings.ToLower(l); strings.Contains(low, "flywheel") || strings.Contains(low, "claude-harness") {
 			t.Errorf("the rule line names a specific repository: %q", l)
+		}
+	}
+}
+
+// #563: j5.md は、委譲の報告がレビュー（自己レビュー・独立レビュー）の未実施・不明を申告しているときの扱い
+// （満たしているを選ばず判断できないを選ぶ・理由の文言・ほかの未検証へ広げない・満たしていないになるときはそちらを優先）を書く。
+func TestInstructions_J5DescribesTheUnreviewedReportRule(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"子の作業の中で行うべき自己レビュー・独立レビューの未実施・不明の申告があるときは、満たしているを選ばず、判断できないを選ぶ",
+		"レビュー未実施・不明の申告あり。親の独立レビューを推奨",
+		"次はこの扱いにしない:",
+		"ほかの未検証の申告",
+		"人による PR のレビューやマージの承認の待ち",
+		"直した後の再レビューは無い",
+		"保留の記録に、レビューの実施を確かめた人の回答（例: 親がレビューして問題なし）があるときも、この扱いをせず回答に従う",
+		"満たしていないになるときはそちらを選び、差し戻しの指摘にレビューの実施を含める",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J5) lacks %q", want)
 		}
 	}
 }

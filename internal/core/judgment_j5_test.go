@@ -1125,3 +1125,65 @@ func TestVerifyAutoJ5_Actual_InputCarriesTheExpected(t *testing.T) {
 		t.Error("J5 input lacks the expected section")
 	}
 }
+
+// #563: 委譲の報告の未検証の欄にレビュー未実施・不明の申告があれば、その文が J5 に渡る入力にそのまま載る
+// （J5 の指示文の規則が読む材料。判定そのものは claude が行うので、ここでは入力を固定する）。
+func TestVerifyAutoJ5_InputCarriesTheUnreviewedDeclarationOfTheReport(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.deleg.result = JudgmentLaunchOutput{Result: RunResultSucceeded, ReportedTotalCostUSD: float64Ptr(2.5), StructuredOutput: reportJSON(func(m map[string]any) {
+		m["unverified"] = []string{"自己レビューが走り切ったか不明", "独立レビュー未実施"}
+	})}
+	f.delegateToVerifying(t, "C-1")
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	in := f.stdin(t)
+	for _, want := range []string{"自己レビューが走り切ったか不明", "独立レビュー未実施"} {
+		if !strings.Contains(in, want) {
+			t.Errorf("J5 input lacks the declaration %q:\n%s", want, in)
+		}
+	}
+}
+
+// 保留の記録に、レビューの実施を確かめた人の回答があるとき、J5 の入力の
+// 「保留の記録」の節にその回答が載り、委譲の報告の申告も並んで載る
+// （j5.md の回答の例外を J5 が適用できる材料が揃う。【決定 2026-11-13 オーナー #563】）。
+func TestVerifyAutoJ5_InputCarriesTheReviewAnswerAlongsideTheUnreviewedDeclaration(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.deleg.result = JudgmentLaunchOutput{Result: RunResultSucceeded, ReportedTotalCostUSD: float64Ptr(2.5), StructuredOutput: reportJSON(func(m map[string]any) {
+		m["unverified"] = []string{"独立レビュー未実施"}
+	})}
+	f.delegateToVerifying(t, "C-1")
+	const (
+		question = "委譲の報告に独立レビュー未実施の申告があります。レビューは実施されましたか"
+		answer   = "親がレビューして問題なし"
+	)
+	cid, _ := parseChallengeID("C-1")
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by)
+			VALUES (?, ?, 'in_progress', '2026-09-25T00:00:00.000Z', ?, '2026-09-25T00:01:00.000Z', 'alice')`, cid, question, answer)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	var holds, report string
+	for _, s := range f.j5Inputs[len(f.j5Inputs)-1].Sections {
+		switch s.Label {
+		case "保留の記録":
+			holds = s.Content
+		case "直前の委譲の報告":
+			report = s.Content
+		}
+	}
+	for _, want := range []string{question, answer} {
+		if !strings.Contains(holds, want) {
+			t.Errorf("the hold section lacks %q:\n%s", want, holds)
+		}
+	}
+	if report == "" {
+		t.Errorf("J5 input lacks the declaration of the report:\n%s", f.stdin(t))
+	}
+}
