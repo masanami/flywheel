@@ -1125,3 +1125,22 @@ func TestVerifyAutoJ5_Actual_InputCarriesTheExpected(t *testing.T) {
 		t.Error("J5 input lacks the expected section")
 	}
 }
+
+// #563: 委譲の報告の未検証の欄にレビュー未実施・不明の申告があれば、その文が J5 に渡る入力にそのまま載る
+// （J5 の指示文の規則が読む材料。判定そのものは claude が行うので、ここでは入力を固定する）。
+func TestVerifyAutoJ5_InputCarriesTheUnreviewedDeclarationOfTheReport(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.deleg.result = JudgmentLaunchOutput{Result: RunResultSucceeded, ReportedTotalCostUSD: float64Ptr(2.5), StructuredOutput: reportJSON(func(m map[string]any) {
+		m["unverified"] = []string{"自己レビューが走り切ったか不明", "独立レビュー未実施"}
+	})}
+	f.delegateToVerifying(t, "C-1")
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	in := f.stdin(t)
+	for _, want := range []string{"自己レビューが走り切ったか不明", "独立レビュー未実施"} {
+		if !strings.Contains(in, want) {
+			t.Errorf("J5 input lacks the declaration %q:\n%s", want, in)
+		}
+	}
+}
