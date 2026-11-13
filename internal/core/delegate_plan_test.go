@@ -104,15 +104,39 @@ type planFixture struct {
 	holdMu      sync.Mutex
 	holdBlock   chan struct{}
 	holdStarted chan struct{}
+	// overlapWant は、重なりを期待するテストが置く同時の委譲の数（0 なら期待しない）。overlapReached は
+	// 終了していない委譲の run がその数に達したときに閉じる（待ち合わせ。固定の時間の Sleep ではない）。
+	overlapWant    int
+	overlapReached chan struct{}
+	overlapOnce    sync.Once
+}
+
+// holdGrace は、重なりが起きないこと（上限を守ること）を見るために、起動した委譲の run を終了させずに置く
+// 時間の上限。待ち合わせの成立（overlapReached）が先なら、そこから grace だけ置く。テストの成否は
+// この時間の長さに依存しない（上限を破る実装が重なりを起こす猶予を与えるだけ）。
+const holdGrace = 30 * time.Millisecond
+
+// holdOverlap は、起動した委譲の run（n は終了していない委譲の run の数）を、他の枠の委譲と重なれるよう
+// 終了させずに置く。重なりを期待するテスト（overlapWant>0）は、その数に達するまで待ち合わせる
+// （上限は安全弁の 10 秒。負荷の高い環境でも重なりを取り逃がさない）。
+func (f *planFixture) holdOverlap(n int64) {
+	if f.overlapWant > 0 {
+		if n >= int64(f.overlapWant) {
+			f.overlapOnce.Do(func() { close(f.overlapReached) })
+		}
+		select {
+		case <-f.overlapReached:
+		case <-time.After(10 * time.Second):
+			return
+		}
+	}
+	<-time.After(holdGrace)
 }
 
 func newPlanFixture(t *testing.T) *planFixture {
 	t.Helper()
-	old := delegationWaitInterval
-	delegationWaitInterval = 5 * time.Millisecond
-	t.Cleanup(func() { delegationWaitInterval = old })
-
-	f := &planFixture{delegateFixture: newDelegateFixture(t), events: &eventLog{}, nextIssue: 100}
+	f := &planFixture{delegateFixture: newDelegateFixture(t), events: &eventLog{}, nextIssue: 100, overlapReached: make(chan struct{})}
+	f.s.delegationWait = 5 * time.Millisecond
 	conn, err := parseConnectorsDeclaration([]byte(planConnectorsJSON))
 	if err != nil {
 		t.Fatalf("parseConnectorsDeclaration: %v", err)
@@ -152,8 +176,7 @@ func newPlanFixture(t *testing.T) *planFixture {
 				break
 			}
 		}
-		// 別の枠の委譲と重なる時間。負荷の高い環境（CI）でも重なりを取り逃がさないよう、十分に長くとる。
-		time.Sleep(300 * time.Millisecond)
+		f.holdOverlap(n)
 	}
 	return f
 }
@@ -310,6 +333,7 @@ func (f *planFixture) holdRunning(t *testing.T, id string) (release func()) {
 // --- 予測の口に渡す Issue の順と呼ぶ条件（AC-297〜300） ---
 
 func TestPlan_IssueOrder_RunningFirstThenCandidatesByPriorityThenID(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	running := f.candidate(t, "multi", "P1", 5)
 	f.candidate(t, "multi", "P2", 20)
@@ -329,6 +353,7 @@ func TestPlan_IssueOrder_RunningFirstThenCandidatesByPriorityThenID(t *testing.T
 }
 
 func TestPlan_NotCalledForOneIssueOrZeroPredictableCandidates(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	assertNotCalled := func(t *testing.T, f *planFixture) {
 		t.Helper()
 		if n := len(f.pred.called()); n != 0 {
@@ -381,6 +406,7 @@ func TestPlan_NotCalledForOneIssueOrZeroPredictableCandidates(t *testing.T) {
 }
 
 func TestPlan_CalledOnceForTwoAndForTwentyIssues(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	for _, n := range []int{2, 20} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
 			f := newPlanFixture(t)
@@ -397,6 +423,7 @@ func TestPlan_CalledOnceForTwoAndForTwentyIssues(t *testing.T) {
 }
 
 func TestPlan_TwentyOneIssues_NotCalled_OneGroup_NotPredictable(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	for i := 0; i < 21; i++ {
 		f.candidate(t, "multi", "P1", 1000+i)
@@ -416,6 +443,7 @@ func TestPlan_TwentyOneIssues_NotCalled_OneGroup_NotPredictable(t *testing.T) {
 }
 
 func TestPlan_CandidateWithoutSource_OneGroup_NotPredictable(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "multi", "P1", 7)
 	f.candidate(t, "multi", "P1", 8)
@@ -433,6 +461,7 @@ func TestPlan_CandidateWithoutSource_OneGroup_NotPredictable(t *testing.T) {
 // --- グループの作り方と fail-closed（AC-301〜311） ---
 
 func TestPlan_SharedFilesChain_OneGroup_OthersApart(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -455,6 +484,7 @@ func TestPlan_SharedFilesChain_OneGroup_OthersApart(t *testing.T) {
 }
 
 func TestPlan_FailClosedReasons(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	cases := []struct {
 		name   string
 		mut    func(o *ConflictPredictionOutput)
@@ -480,6 +510,7 @@ func TestPlan_FailClosedReasons(t *testing.T) {
 }
 
 func TestPlan_WholeCallFailures_OneGroup_PredictionFailed(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	good := func(in PredictLaunchInput) *ConflictPredictionOutput { return predictionFor(in, nil).Prediction }
 	cases := map[string]func(in PredictLaunchInput) PredictLaunchOutput{
 		"launch failed": func(PredictLaunchInput) PredictLaunchOutput {
@@ -527,6 +558,7 @@ func TestPlan_WholeCallFailures_OneGroup_PredictionFailed(t *testing.T) {
 }
 
 func TestPlan_CompleteFalseWithoutError_IsNotAWholeFailure(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "multi", "P1", 11)
 	f.candidate(t, "multi", "P1", 12)
@@ -540,6 +572,7 @@ func TestPlan_CompleteFalseWithoutError_IsNotAWholeFailure(t *testing.T) {
 }
 
 func TestPlan_NoPredictionDeclared_OneGroup(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "plain", "P1", 11)
 	f.candidate(t, "plain", "P1", 12)
@@ -553,6 +586,7 @@ func TestPlan_NoPredictionDeclared_OneGroup(t *testing.T) {
 }
 
 func TestPlan_DependencyOnly_OneGroup_AndOrder(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	hi := f.candidate(t, "multi", "P0", 11) // 優先度は高いが、依存で後
 	lo := f.candidate(t, "multi", "P2", 12)
@@ -575,6 +609,7 @@ func TestPlan_DependencyOnly_OneGroup_AndOrder(t *testing.T) {
 }
 
 func TestPlan_UnknownPair_OneGroup_PriorityOrder(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "multi", "P2", 11)
 	f.candidate(t, "multi", "P0", 12)
@@ -591,6 +626,7 @@ func TestPlan_UnknownPair_OneGroup_PriorityOrder(t *testing.T) {
 }
 
 func TestPlan_RunningWithoutIssue_FailClosed_AllCandidatesSerialized(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	running := f.candidate(t, "multi", "P1", 0)
 	a := f.candidate(t, "multi", "P1", 11)
@@ -618,6 +654,7 @@ func TestPlan_RunningWithoutIssue_FailClosed_AllCandidatesSerialized(t *testing.
 }
 
 func TestPlan_RunningInSameGroup_Serialized_OtherGroupStarts(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	running := f.candidate(t, "multi", "P1", 5)
 	same := f.candidate(t, "multi", "P1", 11)
@@ -642,6 +679,7 @@ func TestPlan_RunningInSameGroup_Serialized_OtherGroupStarts(t *testing.T) {
 }
 
 func TestPlan_ExplicitID_SerializedWhenGroupedWithRunning(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	running := f.candidate(t, "multi", "P1", 5)
 	same := f.candidate(t, "multi", "P1", 11)
@@ -675,6 +713,7 @@ func TestPlan_ExplicitID_SerializedWhenGroupedWithRunning(t *testing.T) {
 // --- グループの中の順・並列と枠待ち（AC-312〜328） ---
 
 func TestPlan_GroupRunsSequentially_AndContinuesAfterFailure(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P0", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -705,6 +744,7 @@ func TestPlan_GroupRunsSequentially_AndContinuesAfterFailure(t *testing.T) {
 }
 
 func TestPlan_RateLimitedStopsTheNextCandidateOfTheGroup(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "multi", "P0", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -719,7 +759,9 @@ func TestPlan_RateLimitedStopsTheNextCandidateOfTheGroup(t *testing.T) {
 }
 
 func TestPlan_TwoGroupsRunConcurrently(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
+	f.overlapWant = 2 // 2 つの委譲が重なるまで待ち合わせる
 	f.candidate(t, "multi", "P1", 11)
 	f.candidate(t, "multi", "P1", 12)
 	f.mustRunPlan(t)
@@ -729,6 +771,7 @@ func TestPlan_TwoGroupsRunConcurrently(t *testing.T) {
 }
 
 func TestPlan_MaxParallelRunsOne_SecondGroupWaitsForTheFirst(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.agent.MaxParallelRuns = 1
 	f.candidate(t, "multi", "P1", 11)
@@ -747,7 +790,9 @@ func TestPlan_MaxParallelRunsOne_SecondGroupWaitsForTheFirst(t *testing.T) {
 }
 
 func TestPlan_GlobalLimitAcrossRepos(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
+	f.overlapWant = 2 // 2 つの委譲が重なるまで待ち合わせる
 	f.candidate(t, "multi", "P1", 11)
 	f.candidate(t, "multi", "P1", 12)
 	f.candidate(t, "other", "P1", 21)
@@ -761,6 +806,7 @@ func TestPlan_GlobalLimitAcrossRepos(t *testing.T) {
 }
 
 func TestPlan_UsableSlotsLimitTheRepo(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.ensure(t, "multi")
 	f.setSlotState(t, "m2", slotStateNeedsAttention)
@@ -777,6 +823,7 @@ func TestPlan_UsableSlotsLimitTheRepo(t *testing.T) {
 }
 
 func TestPlan_NoUsableSlot_NotStartedSlotUnavailable_WithoutWaiting(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.ensure(t, "solo")
 	f.setSlotState(t, "s1", slotStateNeedsAttention)
@@ -788,7 +835,9 @@ func TestPlan_NoUsableSlot_NotStartedSlotUnavailable_WithoutWaiting(t *testing.T
 }
 
 func TestPlan_UnprovisionedWorktreeSlotsCount(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
+	f.overlapWant = 2 // 2 つの委譲が重なるまで待ち合わせる
 	f.candidate(t, "wt", "P1", 11)
 	f.candidate(t, "wt", "P1", 12)
 	res := f.mustRunPlan(t)
@@ -801,6 +850,7 @@ func TestPlan_UnprovisionedWorktreeSlotsCount(t *testing.T) {
 }
 
 func TestPlan_WaitingGroupsStartInHeadPriorityOrder(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.agent.MaxParallelRuns = 1
 	f.candidate(t, "multi", "P2", 11)
@@ -813,6 +863,7 @@ func TestPlan_WaitingGroupsStartInHeadPriorityOrder(t *testing.T) {
 }
 
 func TestPlan_CycleBudgetAndRunBudget_AfterWaiting(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.agent.MaxParallelRuns = 1
 	f.candidate(t, "multi", "P1", 11)
@@ -831,6 +882,7 @@ func TestPlan_CycleBudgetAndRunBudget_AfterWaiting(t *testing.T) {
 // --- 予測の口の呼び出しの順と予算・記録（AC-334・335・347〜351） ---
 
 func TestPlan_PredictionIsCalledBeforeAnyDelegation(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "multi", "P1", 11)
 	f.candidate(t, "other", "P1", 21)
@@ -851,6 +903,7 @@ func TestPlan_PredictionIsCalledBeforeAnyDelegation(t *testing.T) {
 }
 
 func TestPlan_PredictionBudgetArgument(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	cases := []struct {
 		perIssue float64
 		issues   int
@@ -881,6 +934,7 @@ func TestPlan_PredictionBudgetArgument(t *testing.T) {
 }
 
 func TestPlan_WorkDir_WorktreeUsesTheBaseClone(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "wt", "P1", 11)
 	f.candidate(t, "wt", "P1", 12)
@@ -892,6 +946,7 @@ func TestPlan_WorkDir_WorktreeUsesTheBaseClone(t *testing.T) {
 }
 
 func TestPlan_Clone_NoIdleWorkingClone_FailsLikeAWholeFailure(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.ensure(t, "multi")
 	for _, p := range []string{"m1", "m2", "m3"} {
@@ -909,6 +964,7 @@ func TestPlan_Clone_NoIdleWorkingClone_FailsLikeAWholeFailure(t *testing.T) {
 }
 
 func TestPlan_CycleBudgetBlocksThePrediction_DelegationsStillRunOneByOne(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.agent.ConflictPredictionBudgetUSD = 50 // 2 件 × 50 = 100 > 周の上限 90
 	a := f.candidate(t, "multi", "P1", 11)
@@ -933,6 +989,7 @@ func TestPlan_CycleBudgetBlocksThePrediction_DelegationsStillRunOneByOne(t *test
 }
 
 func TestPlan_PredictRunIsRecordedWithCostReported(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "multi", "P1", 11)
 	f.candidate(t, "multi", "P1", 12)
@@ -968,6 +1025,7 @@ func TestPlan_PredictRunIsRecordedWithCostReported(t *testing.T) {
 }
 
 func TestPlan_PredictCostIsTheLimitWhenNotTrustworthy(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	cases := map[string]func(o *ConflictPredictionOutput){
 		"cost missing":    func(o *ConflictPredictionOutput) { o.CostUSD = nil },
 		"cost negative":   func(o *ConflictPredictionOutput) { o.CostUSD = float64Ptr(-1) },
@@ -1014,6 +1072,7 @@ func TestPlan_PredictCostIsTheLimitWhenNotTrustworthy(t *testing.T) {
 }
 
 func TestPlan_NilPredictor_FailsClosed(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "multi", "P1", 11)
 	f.candidate(t, "multi", "P1", 12)
@@ -1030,6 +1089,7 @@ func TestPlan_NilPredictor_FailsClosed(t *testing.T) {
 
 // 枠超過を記録した周には、衝突の予測の口を呼ばない（【決定 A 2026-10-05 オーナー】）。
 func TestPlan_RateLimitedCycle_DoesNotCallThePredictor(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "multi", "P1", 11)
 	f.candidate(t, "multi", "P1", 12)
@@ -1048,6 +1108,7 @@ func TestPlan_RateLimitedCycle_DoesNotCallThePredictor(t *testing.T) {
 
 // 取り込み元の Issue が対象リポジトリの Issue でなければ、番号は別の Issue を指すので予測できない。
 func TestPlan_SourceIssueOfAnotherRepoIsNotPredictable(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.candidate(t, "multi", "P1", 11)
 	id := f.candidate(t, "multi", "P1", 12)
@@ -1069,6 +1130,7 @@ func TestPlan_SourceIssueOfAnotherRepoIsNotPredictable(t *testing.T) {
 
 // 実装枠の残りが起動の最小額に満たない候補は run_budget で起動しない（J3 の費用を払う前）。
 func TestPlan_RunBudget_NotStarted(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.agent.MaxParallelRuns = 1
 	f.candidate(t, "multi", "P1", 11)
@@ -1088,6 +1150,7 @@ func TestPlan_RunBudget_NotStarted(t *testing.T) {
 // 使えるスロットが 1 本のリポジトリ（worktree。予測は元のクローンで呼べる）で、衝突しない（別グループの）2 課題を別々の呼び出しで起動すると、後の呼び出しは
 // serialized ではなく slot_unavailable で終わる（AC-1120 の前提: 同じグループに入らない）。
 func TestPlan_ExplicitID_SingleSlot_SeparateGroups_SlotUnavailable(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.ensure(t, "wt")
 	slots, _ := f.s.ListSlots(context.Background())

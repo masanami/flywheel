@@ -18,7 +18,7 @@ func runJSON(t *testing.T, ws string, args ...string) map[string]any {
 	t.Helper()
 	full := append(append([]string{}, args...), "--workspace", ws, "--json")
 	var stdout, stderr bytes.Buffer
-	code := run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath(full, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("args=%v exit=%d, want 0 (stderr=%s)", args, code, stderr.String())
 	}
@@ -269,7 +269,7 @@ func runText(t *testing.T, ws string, args ...string) string {
 	t.Helper()
 	full := append(append([]string{}, args...), "--workspace", ws)
 	var stdout, stderr bytes.Buffer
-	code := run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath(full, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("args=%v exit=%d, want 0 (stderr=%s)", args, code, stderr.String())
 	}

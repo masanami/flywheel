@@ -386,6 +386,7 @@ func TestAllCommands_JSONSuccessWritesSingleDocumentToStdout(t *testing.T) {
 			continue // TestAllCommands_SuccessCasesCoverRegistrationTable が落とす
 		}
 		t.Run(name, func(t *testing.T) {
+			parallelTools(t, tc.needsTTY) // 偽の gh・claude の場所は t ごとに渡す（t.Setenv しない）。pty を使うケースは並列にしない（flywheel#578）
 			ws := t.TempDir()
 			if !tc.uninitialized {
 				copyInitTemplate(t, ws)
@@ -398,7 +399,7 @@ func TestAllCommands_JSONSuccessWritesSingleDocumentToStdout(t *testing.T) {
 				code, _, stdout, stderr = runConfirmedChild(t, args, id)
 			} else {
 				var out, errOut bytes.Buffer
-				code = run(args, strings.NewReader(""), &out, &errOut, defaultCommands())
+				code = runWithLookPath(args, strings.NewReader(""), &out, &errOut, defaultCommands(), lookPathFor(t))
 				stdout, stderr = out.String(), errOut.String()
 			}
 			if code != 0 {

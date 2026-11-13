@@ -29,15 +29,31 @@ const defaultInvokeTimeout = 900
 
 // Launcher は core.JudgmentInvoker の実装。claude の絶対パスをコードに
 // 埋め込まず、呼び出しのたびに exec.LookPath で解決する（D13）。
-type Launcher struct{}
+type Launcher struct {
+	// lookPath は実行ファイルの探し方。nil なら exec.LookPath（PATH 上を探す）。
+	lookPath func(file string) (string, error)
+}
 
 // NewLauncher は Launcher を返す。
 func NewLauncher() *Launcher { return &Launcher{} }
 
+// NewLauncherWithLookPath は実行ファイルの探し方を差し替えた Launcher を返す
+// （テストごとに偽の claude の場所を渡せるようにする。nil なら NewLauncher と同じ）。
+func NewLauncherWithLookPath(lookPath func(file string) (string, error)) *Launcher {
+	return &Launcher{lookPath: lookPath}
+}
+
+func (l *Launcher) look(file string) (string, error) {
+	if l != nil && l.lookPath != nil {
+		return l.lookPath(file)
+	}
+	return exec.LookPath(file)
+}
+
 // Available は PATH 上に claude があるかを確かめる。無ければ
 // errors.Is(err, ErrClaudeNotFound) が true になるエラーを返す。
 func (l *Launcher) Available(_ context.Context) error {
-	if _, err := exec.LookPath("claude"); err != nil {
+	if _, err := l.look("claude"); err != nil {
 		return fmt.Errorf("%w: %s", ErrClaudeNotFound, err.Error())
 	}
 	return nil

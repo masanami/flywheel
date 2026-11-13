@@ -303,7 +303,7 @@ func (s *Store) transition(ctx context.Context, ch Channel, id string, op Operat
 	if _, ok := parseChallengeID(id); !ok {
 		return nil, ErrNotFound
 	}
-	actor, err := resolveActor()
+	actor, err := s.resolveActor()
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +345,7 @@ func (s *Store) transitionAsInvoker(ctx context.Context, runIDDisplay, id string
 	if _, ok := parseChallengeID(id); !ok {
 		return nil, ErrNotFound
 	}
-	actor, err := resolveActor()
+	actor, err := s.resolveActor()
 	if err != nil {
 		return nil, err
 	}

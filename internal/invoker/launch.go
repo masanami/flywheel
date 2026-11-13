@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -20,7 +19,7 @@ import (
 // 異常終了・不正な出力は、error ではなく core.JudgmentLaunchOutput.Result で
 // 表す（§結果の判別）。
 func (l *Launcher) InvokeJudgment(ctx context.Context, in core.JudgmentLaunchInput) (core.JudgmentLaunchOutput, error) {
-	claudePath, lookErr := exec.LookPath("claude")
+	claudePath, lookErr := l.look("claude")
 	if lookErr != nil {
 		// Available() の事前チェックの後でも、TOCTOU で claude が消えることは
 		// ありうる。この場合は起動失敗として run の結果に示す（呼び出し元の

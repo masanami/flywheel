@@ -51,7 +51,7 @@ func (s *Store) ReopenChallengeForRelease(ctx context.Context, ch Channel, in Re
 	if !ok {
 		return nil, ErrNotFound
 	}
-	actor, err := resolveActor()
+	actor, err := s.resolveActor()
 	if err != nil {
 		return nil, err
 	}

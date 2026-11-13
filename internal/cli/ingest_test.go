@@ -46,7 +46,7 @@ func writeFakeGH(t *testing.T) (dir string, calls func() []string) {
 func withFakeGHOnPATH(t *testing.T) func() []string {
 	t.Helper()
 	dir, calls := writeFakeGH(t)
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	addToolDir(t, dir)
 	return calls
 }
 

@@ -31,7 +31,7 @@ func runStatus(a Args) (any, error) {
 	}
 	// CI の完了を待っている課題は GitHub の現在の状態（GET だけ）から導く。検証中で PR を持つ課題が
 	// 無ければ gh は呼ばれない。
-	if ov.WaitingExternal, err = a.Store.ListWaitingExternal(ctx, newCheckSource()); err != nil {
+	if ov.WaitingExternal, err = a.Store.ListWaitingExternal(ctx, newCheckSource(a.lookPath())); err != nil {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{

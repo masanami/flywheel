@@ -24,6 +24,12 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // テストからテスト専用コマンドを注入できるようにする
 // （成功経路 AC-72 の検証は、この関数へ直接テスト用のコマンド表を渡して行う）。
 func run(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands []Command) int {
+	return runWithLookPath(rawArgs, stdin, stdout, stderr, commands, nil)
+}
+
+// runWithLookPath は run に gh・claude の実行ファイルの探し方を渡せる形（nil なら exec.LookPath＝PATH 上）。
+// テストが、プロセス全体の PATH を書き換えずに、テストごとの偽の gh・claude を使うために使う。
+func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands []Command, lookPath lookPathFunc) int {
 	jsonMode := scanJSONFlag(rawArgs)
 
 	if len(rawArgs) > 0 && isHelpInvocation(rawArgs[0]) {
@@ -55,6 +61,7 @@ func run(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands [
 	parsed.Stdin = stdin
 	parsed.Stderr = stderr
 	parsed.Stdout = stdout
+	parsed.LookPath = lookPath
 
 	// 解析が成功した後は解析結果を正とする（事前走査はフラグの値としての
 	// "--json" も拾うため、解析に失敗したときの出力形式の判定にだけ使う）。

@@ -52,10 +52,10 @@ case "$*" in
 *) echo "fake gh: no route for: $*" >&2; exit 1;;
 esac
 `, shellSingleQuote(dir), execMerged)
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+	if err := writeExecutable(filepath.Join(dir, "gh"), []byte(script)); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	addToolDir(t, dir)
 	return g
 }
 

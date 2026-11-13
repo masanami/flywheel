@@ -413,7 +413,7 @@ func TestApproveHead_TheRecordedHeadIsTheOneFetchedAtTheSummary(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	addToolDir(t, dir)
 
 	wait, confirm := startCompletionApproval(t, f)
 	if err := os.WriteFile(resp, []byte(body(releaseHead(1, 5))), 0o644); err != nil {
