@@ -716,7 +716,7 @@ func TestInstructions_J2AggregateIssueQuestionAndChosenOptionCoverage(t *testing
 }
 
 // #563: j5.md は、委譲の報告がレビュー（自己レビュー・独立レビュー）の未実施・不明を申告しているときの扱い
-// （満たしているを選ばず判断できないを選ぶ・理由の文言・ほかの未検証へ広げない）を書く。
+// （満たしているを選ばず判断できないを選ぶ・理由の文言・ほかの未検証へ広げない・満たしていないになるときはそちらを優先）を書く。
 func TestInstructions_J5DescribesTheUnreviewedReportRule(t *testing.T) {
 	got, err := Instructions(core.JudgmentJ5)
 	if err != nil {
@@ -726,6 +726,7 @@ func TestInstructions_J5DescribesTheUnreviewedReportRule(t *testing.T) {
 		"自己レビュー・独立レビューの未実施・不明の申告があるときは、満たしているを選ばず、判断できないを選ぶ",
 		"レビュー未実施・不明の申告あり。親の独立レビューを推奨",
 		"ほかの未検証の申告にはこの扱いを広げない",
+		"満たしていないになるときはそちらを選ぶ",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J5) lacks %q", want)
