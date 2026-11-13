@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"time"
 
@@ -123,7 +122,7 @@ func (l *Launcher) Predict(ctx context.Context, in core.PredictLaunchInput) (cor
 	if len(in.Command) == 0 {
 		return core.PredictLaunchOutput{Result: core.RunResultLaunchFailed, ErrorSummary: "invoker: empty conflict prediction command"}, nil
 	}
-	path, lookErr := exec.LookPath(in.Command[0])
+	path, lookErr := l.look(in.Command[0])
 	if lookErr != nil {
 		return core.PredictLaunchOutput{Result: core.RunResultLaunchFailed, ErrorSummary: lookErr.Error()}, nil
 	}

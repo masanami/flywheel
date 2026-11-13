@@ -76,9 +76,9 @@ func runOpExec(a Args) (any, error) {
 	}
 
 	res, runErr := a.Store.ExecuteReleases(ctx, ids, core.ReleaseExecOptions{
-		Checks:     newCheckSource(),
-		Merger:     newPullRequestMerger(),
-		Compare:    newCompareSource(),
+		Checks:     newCheckSource(a.lookPath()),
+		Merger:     newPullRequestMerger(a.lookPath()),
+		Compare:    newCompareSource(a.lookPath()),
 		Connectors: conn,
 		Agent:      decl,
 		Trigger:    core.ReleaseExecTriggerOpExec,
@@ -167,8 +167,8 @@ func releasePhaseText(res *core.ReleaseExecResult) string {
 
 // newPullRequestMerger はマージの依頼（gh pr merge）を組み立てる。gh が PATH に無いときは、
 // 依頼が失敗する実装を返す（依頼まで到達するのは、読み取りが成功した後だけ）。
-func newPullRequestMerger() core.UpstreamPullRequestMerger {
-	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
+func newPullRequestMerger(lp lookPathFunc) core.UpstreamPullRequestMerger {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout, LookPath: lp})
 	if err != nil {
 		return unavailableMerger{err: err}
 	}
