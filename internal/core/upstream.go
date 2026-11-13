@@ -217,6 +217,12 @@ type UpstreamCheckSource interface {
 	GetPullRequestChecks(ctx context.Context, repo string, number int) (UpstreamPullRequestChecks, error)
 }
 
+// UpstreamCommitChecksSource は、コミット 1 つのチェックの一覧の取得 IF（UpstreamCheckSource を実装する値が
+// 併せて実装していれば使われる）。release の実行が、承認した head にチェックが付いていたかを読むために呼ぶ。
+type UpstreamCommitChecksSource interface {
+	GetCommitChecks(ctx context.Context, repo, sha string) ([]UpstreamCheck, error)
+}
+
 // MergeMethod は PR のマージの方式（connectors.json の repos[].merge_method の閉集合）。
 const (
 	MergeMethodSquash = "squash"

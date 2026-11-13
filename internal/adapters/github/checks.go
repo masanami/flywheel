@@ -113,25 +113,40 @@ func (c *Client) GetPullRequestChecks(ctx context.Context, repo string, number i
 	out := core.UpstreamPullRequestChecks{URL: pr.HTMLURL, Title: pr.Title, State: state, Base: pr.Base.Ref, BaseSHA: pr.Base.SHA, HeadSHA: pr.Head.SHA,
 		Mergeable: pr.Mergeable, MergeCommitSHA: pr.MergeCommitSHA, MergeableState: strings.ToLower(pr.MergeableState)}
 
+	checks, err := c.listCommitChecks(ctx, repo, pr.Head.SHA)
+	if err != nil {
+		return core.UpstreamPullRequestChecks{}, err
+	}
+	out.Checks = checks
+	return out, nil
+}
+
+// GetCommitChecks は core.UpstreamCommitChecksSource の実装。sha のコミットの check run と旧式のコミットステータスを全ページ集める。
+func (c *Client) GetCommitChecks(ctx context.Context, repo, sha string) ([]core.UpstreamCheck, error) {
+	return c.listCommitChecks(ctx, repo, sha)
+}
+
+func (c *Client) listCommitChecks(ctx context.Context, repo, sha string) ([]core.UpstreamCheck, error) {
+	var checks []core.UpstreamCheck
 	for page := 1; ; page++ {
-		what := fmt.Sprintf("list check runs %s@%s page %d", repo, pr.Head.SHA, page)
-		b, err := c.ghGet(ctx, what, listCheckRunsURL(repo, pr.Head.SHA, page))
+		what := fmt.Sprintf("list check runs %s@%s page %d", repo, sha, page)
+		b, err := c.ghGet(ctx, what, listCheckRunsURL(repo, sha, page))
 		if err != nil {
-			return core.UpstreamPullRequestChecks{}, err
+			return nil, err
 		}
 		var raw rawCheckRuns
 		if err := json.Unmarshal(b, &raw); err != nil {
-			return core.UpstreamPullRequestChecks{}, fmt.Errorf("adapters/github: decode %s: %w", what, err)
+			return nil, fmt.Errorf("adapters/github: decode %s: %w", what, err)
 		}
 		for _, r := range raw.CheckRuns {
 			if r.Status == "" {
-				return core.UpstreamPullRequestChecks{}, fmt.Errorf("adapters/github: %s: a check run lacks status", what)
+				return nil, fmt.Errorf("adapters/github: %s: a check run lacks status", what)
 			}
 			chk := core.UpstreamCheck{Name: r.Name, Status: r.Status}
 			if r.Conclusion != nil {
 				chk.Conclusion = *r.Conclusion
 			}
-			out.Checks = append(out.Checks, chk)
+			checks = append(checks, chk)
 		}
 		if len(raw.CheckRuns) < perPage {
 			break
@@ -139,25 +154,27 @@ func (c *Client) GetPullRequestChecks(ctx context.Context, repo string, number i
 	}
 
 	for page := 1; ; page++ {
-		what := fmt.Sprintf("list commit statuses %s@%s page %d", repo, pr.Head.SHA, page)
-		b, err := c.ghGet(ctx, what, listCommitStatusesURL(repo, pr.Head.SHA, page))
+		what := fmt.Sprintf("list commit statuses %s@%s page %d", repo, sha, page)
+		b, err := c.ghGet(ctx, what, listCommitStatusesURL(repo, sha, page))
 		if err != nil {
-			return core.UpstreamPullRequestChecks{}, err
+			return nil, err
 		}
 		var raw rawCombinedStatus
 		if err := json.Unmarshal(b, &raw); err != nil {
-			return core.UpstreamPullRequestChecks{}, fmt.Errorf("adapters/github: decode %s: %w", what, err)
+			return nil, fmt.Errorf("adapters/github: decode %s: %w", what, err)
 		}
 		for _, s := range raw.Statuses {
 			// 完了したかの判定は core が持つ。生の state をそのまま渡す。
-			out.Checks = append(out.Checks, core.UpstreamCheck{Name: s.Context, Status: core.UpstreamCheckStatusLegacy, Conclusion: s.State})
+			checks = append(checks, core.UpstreamCheck{Name: s.Context, Status: core.UpstreamCheckStatusLegacy, Conclusion: s.State})
 		}
 		if len(raw.Statuses) < perPage {
 			break
 		}
 	}
-	return out, nil
+	return checks, nil
 }
+
+var _ core.UpstreamCommitChecksSource = (*Client)(nil)
 
 // Client が core.UpstreamCheckSource を実装していることのコンパイル時の検査。
 var _ core.UpstreamCheckSource = (*Client)(nil)
