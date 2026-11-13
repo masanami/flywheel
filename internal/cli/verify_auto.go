@@ -60,15 +60,16 @@ func runVerifyAuto(a Args) (any, error) {
 	}
 
 	res, runErr := a.Store.VerifyAutoJ5(ctx, core.J5AutoInput{
-		ChallengeID: challengeID,
-		AgentDecl:   decl,
-		Invoker:     launcher,
-		Upstream:    newUpstreamThreadSource(),
-		Checks:      newCheckSource(),
-		Diffs:       newDiffSource(),
-		HeadGit:     git.New(),
-		Connectors:  conn,
-		CycleID:     cyc.ID,
+		ChallengeID:  challengeID,
+		AgentDecl:    decl,
+		Invoker:      launcher,
+		Upstream:     newUpstreamThreadSource(),
+		Checks:       newCheckSource(),
+		Diffs:        newDiffSource(),
+		Descriptions: newDescriptionSource(),
+		HeadGit:      git.New(),
+		Connectors:   conn,
+		CycleID:      cyc.ID,
 	})
 
 	endResult := core.CycleResultCompleted
@@ -91,6 +92,16 @@ func runVerifyAuto(a Args) (any, error) {
 
 // newDiffSource は J5 の起動の前の PR の差分の取得を組み立てる（取得できないときは newCheckSource と同じ）。
 func newDiffSource() core.UpstreamDiffSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
+	if err != nil {
+		return unavailableCheckSource{err: err}
+	}
+	return client
+}
+
+// newDescriptionSource は J5 の起動の前の成果物の説明文（PR の本文）の取得を組み立てる（取得できないときは各取得が失敗し、
+// J5 は止まらず説明文の区画に失敗が書かれる）。
+func newDescriptionSource() core.UpstreamDescriptionSource {
 	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
 	if err != nil {
 		return unavailableCheckSource{err: err}
@@ -128,6 +139,10 @@ func (u unavailableCheckSource) CompareCommits(context.Context, string, string, 
 
 func (u unavailableCheckSource) GetPullRequestChecks(context.Context, string, int) (core.UpstreamPullRequestChecks, error) {
 	return core.UpstreamPullRequestChecks{}, fmt.Errorf("上流を取得できません: %w", u.err)
+}
+
+func (u unavailableCheckSource) GetArtifactDescription(context.Context, string, int) (core.UpstreamArtifactDescription, error) {
+	return core.UpstreamArtifactDescription{}, fmt.Errorf("上流を取得できません: %w", u.err)
 }
 
 func (u unavailableCheckSource) GetCompareDiff(context.Context, string, string, string) (string, error) {

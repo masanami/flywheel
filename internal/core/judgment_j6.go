@@ -505,6 +505,10 @@ var (
 	errJ6NotEligible = errors.New("core: challenge is no longer eligible for J6 mapping")
 )
 
+func j6Invalid(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", errJ6Invalid, fmt.Sprintf(format, args...))
+}
+
 // j6ClassifyFault はテストが分類の UPDATE の直前に失敗を注入するフック（tx は写像のトランザクション）。
 // 本番では nil。
 var j6ClassifyFault func(tx *sql.Tx, occurrenceID int64) error
@@ -571,17 +575,18 @@ func j6MemoryLog(written []memoryWritten) []map[string]any {
 // 足す発生・作業ログ。(3) のどれかが失敗したら、書いたファイルをトランザクションの中（書き込みの
 // ロックの下）で戻す。ロックが外れた後に戻すと、並走する別の写像がその間に書いた索引の行や追記を
 // 消しうるため。トランザクションの外で戻すのはコミットが失敗したときだけ。
-func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *j6ValidatedOutput, snapshot []j6Occurrence, decl *AgentDeclaration) (mapped, invalid bool, note string, err error) {
+func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *j6ValidatedOutput, snapshot []j6Occurrence, decl *AgentDeclaration) (mapped bool, invalid, note string, err error) {
 	runInt, ok := parseRunID(runIDDisplay)
 	if !ok {
-		return false, false, "", ErrValidation
+		return false, "", "", ErrValidation
 	}
 	actor, err := resolveActor()
 	if err != nil {
-		return false, false, "", err
+		return false, "", "", err
 	}
 	var undo func()
 	var droppedAdded int
+	droppedMemory := []string{}
 	err = s.mutateAsRun(ctx, actor, ChannelInvoker, VerificationNone, &runInt, func(tx *sql.Tx, rec *activityRecorder) (ferr error) {
 		ch, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
@@ -616,17 +621,17 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 			want[o.ID] = true
 		}
 		if len(v.Classifications) != len(snapshot) {
-			return errJ6Invalid
+			return j6Invalid("classifications has %d items, want %d (one per unclassified occurrence)", len(v.Classifications), len(snapshot))
 		}
 		for _, c := range v.Classifications {
 			id, ok := parseOccurrenceID(c.OccurrenceID)
 			if !ok || !want[id] {
-				return errJ6Invalid
+				return j6Invalid("classifications: occurrence_id %q is not one of the unclassified occurrences given", c.OccurrenceID)
 			}
 			delete(want, id) // 重複は validateJ6Output が落としているが、念のため 2 回目を許さない
 		}
 		if len(want) != 0 {
-			return errJ6Invalid
+			return j6Invalid("classifications: %d unclassified occurrence(s) were not classified", len(want))
 		}
 		// 根拠を解決できない「足す発生」は、その項目だけ捨てる（分類・記憶・フォローアップは写す）。
 		evidences := make([]j6Evidence, 0, len(v.Added))
@@ -649,7 +654,7 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 		plan, perr := prepareMemoryWrite(s.workspace, decl, v.Memory, rec.at)
 		if perr != nil {
 			if errors.Is(perr, ErrMemoryWriteRejected) {
-				return errJ6Invalid
+				return j6Invalid("memory: %s", strings.TrimPrefix(perr.Error(), ErrMemoryWriteRejected.Error()+": "))
 			}
 			return perr
 		}
@@ -665,6 +670,7 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 				}
 			}()
 			written = plan.written()
+			droppedMemory = plan.dropped
 		}
 
 		// (3) ストアへの写像。
@@ -727,7 +733,9 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 			// 根拠を解決できず捨てた「足す発生」の件数（モデルの根拠の書き方の揺れを後から測るため）。
 			"dropped_added": droppedAdded,
 			"memory":        j6MemoryLog(written),
-			"followups":     filed,
+			// 追記の slug がファイルに届かず捨てた項目（分類・追加の発生・フォローアップは写している）。
+			"dropped_memory": droppedMemory,
+			"followups":      filed,
 		})
 	})
 	if j6AfterMappingTx != nil {
@@ -739,38 +747,44 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 		}
 		switch {
 		case errors.Is(err, errJ6Invalid):
-			return false, true, "", nil
+			return false, strings.TrimPrefix(err.Error(), errJ6Invalid.Error()+": "), "", nil
 		case errors.Is(err, errJ6NotEligible):
-			return false, false, "", nil
+			return false, "", "", nil
 		}
-		return false, false, "", err
+		return false, "", "", err
 	}
-	note = fmt.Sprintf("classified %d, added %d, memory %d", len(v.Classifications), len(v.Added)-droppedAdded, len(v.Memory))
+	note = fmt.Sprintf("classified %d, added %d, memory %d", len(v.Classifications), len(v.Added)-droppedAdded, len(v.Memory)-len(droppedMemory))
+	if len(droppedMemory) > 0 {
+		note += fmt.Sprintf(", dropped %d memory append (file not found: %s)", len(droppedMemory), strings.Join(droppedMemory, ", "))
+	}
 	if droppedAdded > 0 {
 		note += fmt.Sprintf(", dropped %d added (evidence not resolvable)", droppedAdded)
 	}
-	return true, false, note, nil
+	return true, "", note, nil
 }
 
 // finalizeJ6Output は run が succeeded のときに、出力を検査して写す。検査に落ちたら run の結果を
 // invalid_output にして何も書かない。
 func (s *Store) finalizeJ6Output(ctx context.Context, in J6AutoInput, runIDDisplay string, cid int64, snapshot []j6Occurrence, structured []byte) (outcome, note string, result RunResult, err error) {
-	invalid := func() (string, string, RunResult, error) {
-		if err := s.invalidateRunOutput(ctx, runIDDisplay); err != nil {
+	invalid := func(reason string) (string, string, RunResult, error) {
+		if err := s.invalidateRunOutputWithReason(ctx, runIDDisplay, reason); err != nil {
 			return "", "", "", err
 		}
 		return "", "", RunResultInvalidOutput, nil
 	}
-	v, ok := validateJ6Output(structured)
-	if !ok || len(v.Followups) > maxJ6Followups {
-		return invalid()
+	v, reason := validateJ6Output(structured)
+	if reason != "" {
+		return invalid("invalid J6 output: " + reason)
+	}
+	if len(v.Followups) > maxJ6Followups {
+		return invalid(fmt.Sprintf("invalid J6 output: followups has %d items, over the limit %d", len(v.Followups), maxJ6Followups))
 	}
 	mapped, bad, note, err := s.applyJ6(ctx, runIDDisplay, cid, v, snapshot, in.AgentDecl)
 	if err != nil {
 		return "", "", "", err
 	}
-	if bad {
-		return invalid()
+	if bad != "" {
+		return invalid("invalid J6 output: " + bad)
 	}
 	if !mapped {
 		return "", "", RunResultSucceeded, nil

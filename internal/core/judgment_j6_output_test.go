@@ -22,9 +22,9 @@ const j6ValidOutput = `{
 }`
 
 func TestValidateJ6Output_Valid(t *testing.T) {
-	got, ok := validateJ6Output([]byte(j6ValidOutput))
-	if !ok {
-		t.Fatal("valid output rejected")
+	got, reason := validateJ6Output([]byte(j6ValidOutput))
+	if reason != "" {
+		t.Fatalf("valid output rejected: %s", reason)
 	}
 	if len(got.Classifications) != 2 || got.Classifications[0].Cause != OccurrenceCauseContext || got.Classifications[0].Layer != OccurrenceLayerPrompt {
 		t.Errorf("classifications = %+v", got.Classifications)
@@ -41,8 +41,27 @@ func TestValidateJ6Output_Valid(t *testing.T) {
 }
 
 func TestValidateJ6Output_EmptyArraysAreValid(t *testing.T) {
-	if _, ok := validateJ6Output([]byte(`{"classifications":[],"added":[],"memory":[],"followups":[]}`)); !ok {
+	if _, reason := validateJ6Output([]byte(`{"classifications":[],"added":[],"memory":[],"followups":[]}`)); reason != "" {
 		t.Error("empty arrays rejected")
+	}
+}
+
+// 経験の記憶の追記は outcome・target・signal を要らない（作成だけが必須）。
+func TestValidateJ6Output_ExperienceAppendNeedsNoExtras(t *testing.T) {
+	in := `{"classifications":[],"added":[],"memory":[{"mode":"append","type":"experience","slug":"s","body":"b"}],"followups":[]}`
+	got, reason := validateJ6Output([]byte(in))
+	if reason != "" {
+		t.Fatalf("experience append rejected: %s", reason)
+	}
+	if len(got.Memory) != 1 || got.Memory[0].Mode != MemoryModeAppend {
+		t.Errorf("memory = %+v", got.Memory)
+	}
+}
+
+func TestValidateJ6Output_ReasonNamesTheFailedCheck(t *testing.T) {
+	in := `{"classifications":[],"added":[],"memory":[{"mode":"create","type":"experience","slug":"s","body":"b"}],"followups":[]}`
+	if _, reason := validateJ6Output([]byte(in)); !strings.Contains(reason, "memory[0]") || !strings.Contains(reason, "outcome") {
+		t.Errorf("reason = %q", reason)
 	}
 }
 
@@ -56,7 +75,7 @@ func TestValidateJ6Output_Invalid(t *testing.T) {
 	goodAdded := `{"outcome":"bad","kind":"k","evidence":"e","cause":"context","layer":"prompt","target":"t","signal":"s"}`
 	goodMem := `{"mode":"create","type":"tacit","slug":"s","body":"b"}`
 	// 土台そのものが受理されること（以降のケースは 1 か所だけ壊す）。
-	if _, ok := validateJ6Output([]byte(wrap(cls("O-1", "context", "prompt"), goodAdded, goodMem, `{"title":"t","description":"d","done_criteria":"c"}`))); !ok {
+	if _, reason := validateJ6Output([]byte(wrap(cls("O-1", "context", "prompt"), goodAdded, goodMem, `{"title":"t","description":"d","done_criteria":"c"}`))); reason != "" {
 		t.Fatal("base fixture must be accepted")
 	}
 	cases := map[string]string{
@@ -71,7 +90,7 @@ func TestValidateJ6Output_Invalid(t *testing.T) {
 		"memory missing mode":       wrap("", "", `{"type":"tacit","slug":"s","body":"b"}`, ""),
 		"memory missing type":       wrap("", "", `{"mode":"create","slug":"s","body":"b"}`, ""),
 		"memory missing slug":       wrap("", "", `{"mode":"create","type":"tacit","body":"b"}`, ""),
-		"experience append lacking": wrap("", "", `{"mode":"append","type":"experience","slug":"s","body":"b"}`, ""),
+		"experience create lacking": wrap("", "", `{"mode":"create","type":"experience","slug":"s","description":"d","confidence":"high","body":"b"}`, ""),
 		"followup missing desc":     wrap("", "", "", `{"title":"t","done_criteria":"c"}`),
 		"followup missing done":     wrap("", "", "", `{"title":"t","description":"d"}`),
 		"not json":                  `nope`,
@@ -95,7 +114,7 @@ func TestValidateJ6Output_Invalid(t *testing.T) {
 	}
 	for name, in := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, ok := validateJ6Output([]byte(in)); ok {
+			if _, reason := validateJ6Output([]byte(in)); reason == "" {
 				t.Errorf("accepted: %s", in)
 			}
 		})

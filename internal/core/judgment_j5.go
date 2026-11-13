@@ -859,6 +859,8 @@ type J5AutoInput struct {
 	Checks UpstreamCheckSource
 	// Diffs は J5 の起動の前の PR の差分の取得（PR の無い課題では呼ばれない）。
 	Diffs UpstreamDiffSource
+	// Descriptions は J5 の起動の前の成果物の説明文の取得（読み取りだけ。nil なら説明文の区画を入れない）。
+	Descriptions UpstreamDescriptionSource
 	// HeadGit は PR の head を取り出す一時の worktree の口。
 	HeadGit HeadWorktreeGit
 	// Connectors は PR のリポジトリの元のクローンを引く宣言。nil なら PR の head を取り出さない

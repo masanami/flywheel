@@ -161,6 +161,68 @@ func TestRelease_MovedHeadWithoutChecksWaits(t *testing.T) {
 	}
 }
 
+// commitChecksFake は fakeRelease に、コミットごとのチェックの取得（UpstreamCommitChecksSource）を足した偽の実装。
+type commitChecksFake struct {
+	*fakeRelease
+	checks []UpstreamCheck
+	err    error
+	shas   []string
+}
+
+func (c *commitChecksFake) GetCommitChecks(_ context.Context, _, sha string) ([]UpstreamCheck, error) {
+	c.shas = append(c.shas, sha)
+	return c.checks, c.err
+}
+
+// 承認した head もチェックが 0 件だった（CI が走らないリポジトリ）なら、取り込み後の head も 0 件のままマージへ進む。
+func TestRelease_MovedHeadWithoutChecksMergesWhenApprovedHeadHadNone(t *testing.T) {
+	f, cmp := movedHeadFixture(t)
+	f.fake.pr.Checks = nil
+	f.fake.afterPR = &UpstreamPullRequestChecks{State: "merged", Base: "main", HeadSHA: "n1", MergeCommitSHA: "mc"}
+	o := f.opts()
+	o.Compare = cmp
+	cc := &commitChecksFake{fakeRelease: f.fake}
+	o.Checks = cc
+	if len(cc.shas) != 0 {
+		t.Fatalf("unexpected read before run: %v", cc.shas)
+	}
+	if item := f.runWith(t, o); len(cc.shas) == 0 || cc.shas[0] != relHead || item.Result != ExecutionResultMerged || len(f.fake.mergeArgs) != 1 || f.fake.mergeArgs[0][2] != "n1" {
+		t.Fatalf("result = %s, merges = %v, want merged on n1", item.Result, f.fake.mergeArgs)
+	}
+}
+
+// 承認した head にチェックがあったのに取り込み後が 0 件なら待つ。承認した head のチェックを読めないときも待つ。
+func TestRelease_MovedHeadWithoutChecksWaitsWhenApprovedHeadHadChecks(t *testing.T) {
+	for name, cc := range map[string]*commitChecksFake{
+		"had checks": {checks: []UpstreamCheck{{Name: "check", Status: "completed", Conclusion: "success"}}},
+		"read error": {err: errors.New("boom")},
+	} {
+		f, cmp := movedHeadFixture(t)
+		f.fake.pr.Checks = nil
+		cc.fakeRelease = f.fake
+		o := f.opts()
+		o.Compare = cmp
+		o.Checks = cc
+		if item := f.runWith(t, o); item.Result != ExecutionResultWaitingChecks || len(f.fake.mergeArgs) != 0 {
+			t.Fatalf("%s: result = %s, merges = %v, want waiting_checks", name, item.Result, f.fake.mergeArgs)
+		}
+	}
+}
+
+// 取り込み以外で head が動いたなら、承認した head にチェックが無くても head_changed。
+func TestRelease_NotMergeInOnlyIsHeadChangedEvenWithoutApprovedChecks(t *testing.T) {
+	f, cmp := movedHeadFixture(t)
+	f.fake.pr.Checks = nil
+	cmp.set("main", "n1", ahead(commit(relHead, "fix", "p0"), commit("m1x", "feat", relHead), commit("n1", "Merge branch 'main'", relHead, "m1")))
+	cmp.set(relHead, "n1", ahead(commit("m1x", "feat", relHead), commit("n1", "Merge branch 'main'", "m1x", "m1")))
+	o := f.opts()
+	o.Compare = cmp
+	o.Checks = &commitChecksFake{fakeRelease: f.fake}
+	if item := f.runWith(t, o); item.Result != ExecutionResultHeadChanged {
+		t.Fatalf("result = %s, want head_changed", item.Result)
+	}
+}
+
 // 取り込み以外の変更が入った head、比較の手段が無い場合は従来どおり head_changed。
 func TestRelease_MovedHeadNotMergeInOnlyIsHeadChanged(t *testing.T) {
 	f, cmp := movedHeadFixture(t)
