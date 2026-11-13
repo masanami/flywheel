@@ -442,7 +442,11 @@ func TestLearnJ6_Added_RecordedAsJ6ObservedClassified_AndCountedInMetrics(t *tes
 		t.Fatal(err)
 	}
 
-	j6run := testRunInt(t, f.j6Runs(t)[0].ID)
+	j6runs := f.j6Runs(t)
+	if len(j6runs) != 1 {
+		t.Fatalf("j6 runs = %d, want 1", len(j6runs))
+	}
+	j6run := testRunInt(t, j6runs[0].ID)
 	var rows []struct {
 		kind, source, j6Kind, outcome, cause, handled           sql.NullString
 		runRef, apRef, hdRef, actRef, causeRun, classified, cyc sql.NullInt64
@@ -1454,7 +1458,7 @@ func TestLearnJ6_AppendSlugWithTypePrefix(t *testing.T) {
 	if !strings.Contains(rawLog, `"dropped_memory":["tacit-tacit-ghost.md"]`) {
 		t.Errorf("learn after = %s", rawLog)
 	}
-	if !strings.Contains(f.readMem(t, "tacit-real.md"), "BODY-real") && !strings.Contains(f.readMem(t, "tacit-real.md"), "BODY-tacit-real") {
+	if !strings.Contains(f.readMem(t, "tacit-real.md"), "BODY-tacit-real") {
 		t.Error("prefixed slug was not resolved to the existing file")
 	}
 	if !strings.Contains(f.readMem(t, "experience-experience-dbl.md"), "BODY-experience-dbl") {
@@ -1484,5 +1488,43 @@ func TestLearnJ6_InvalidOutput_KeepsReasonInRunError(t *testing.T) {
 	runs := f.j6Runs(t)
 	if len(runs) != 1 || runs[0].Result != RunResultInvalidOutput || !strings.Contains(runs[0].Error, "classifications has 1 items, want 2") {
 		t.Errorf("runs = %+v", runs)
+	}
+}
+
+// スラッグの検査の理由は、接頭辞（memory:）が 1 回だけ付く。
+func TestLearnJ6_InvalidSlugReasonHasSinglePrefix(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusDone)
+	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
+	f.inv.result = j6Out([]any{j6Cls(o1, "none", "none")}, nil, []any{j6Mem("create", "tacit", "a/b")}, nil)
+	f.mustLearn(t, idp(c))
+	runs := f.j6Runs(t)
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want 1", len(runs))
+	}
+	want := "invalid J6 output: memory: memory[0]: slug"
+	if !strings.HasPrefix(runs[0].Error, want) || strings.Contains(runs[0].Error, "core:") || strings.Count(runs[0].Error, "memory:") != 1 {
+		t.Errorf("run error = %q, want prefix %q once and no core: prefix", runs[0].Error, want)
+	}
+}
+
+// 理由つきで invalid_output にしても、run に既にある error は上書きしない。
+func TestInvalidateRunOutputWithReason_KeepsExistingError(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusDone)
+	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
+	f.inv.result = j6Out([]any{j6Cls(o1, "none", "none")}, nil, []any{j6Mem("create", "tacit", "a/b")}, nil)
+	f.mustLearn(t, idp(c))
+	runs := f.j6Runs(t)
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want 1", len(runs))
+	}
+	runID := runs[0].ID
+	f.exec(t, `UPDATE run SET error = 'original failure' WHERE id = ?`, testRunInt(t, runID))
+	if err := f.s.invalidateRunOutputWithReason(context.Background(), runID, "new reason"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.j6Runs(t)[0].Error; got != "original failure" {
+		t.Errorf("run error = %q, want the existing error kept", got)
 	}
 }

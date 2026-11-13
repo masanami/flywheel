@@ -572,3 +572,66 @@ func TestWriteMemory_SymlinkInsideWorkspaceButOutsideMemoryDirRejected(t *testin
 		t.Error("other.md changed")
 	}
 }
+
+// 同じ出力の中の create の後に、接頭辞つきの slug で追記すると、作るファイルへ向け直される（捨てられない）。
+func TestWriteMemory_PrefixedAppendRedirectsToFileCreatedInSameOutput(t *testing.T) {
+	ws, root, decl := memWS(t)
+	app := memoryItem{Mode: "append", Type: "tacit", Slug: "tacit-alpha", Body: "next"}
+	plan, err := prepareMemoryWrite(ws, decl, []memoryItem{tacit("alpha"), app}, memNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.dropped) != 0 {
+		t.Fatalf("dropped = %v, want none", plan.dropped)
+	}
+	if _, err := plan.apply(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(readFile(t, filepath.Join(root, "tacit-alpha.md")), "本文です\n\n## 2026-10-24\n\nnext\n") {
+		t.Error("prefixed append was not redirected to the file created in the same output")
+	}
+}
+
+// create より前に書かれた追記（接頭辞つきの slug を含む）も、同じ出力で作るファイルへ向く。
+func TestWriteMemory_AppendBeforeCreateInSameOutputTargetsCreatedFile(t *testing.T) {
+	for _, slug := range []string{"alpha", "tacit-alpha"} {
+		ws, root, decl := memWS(t)
+		app := memoryItem{Mode: "append", Type: "tacit", Slug: slug, Body: "next"}
+		plan, err := prepareMemoryWrite(ws, decl, []memoryItem{app, tacit("alpha")}, memNow)
+		if err != nil {
+			t.Fatalf("slug %q: %v", slug, err)
+		}
+		if len(plan.dropped) != 0 {
+			t.Fatalf("slug %q: dropped = %v", slug, plan.dropped)
+		}
+		if _, err := plan.apply(); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(readFile(t, filepath.Join(root, "tacit-alpha.md")), "本文です\n\n## 2026-10-24\n\nnext\n") {
+			t.Errorf("slug %q: append was not applied to the file created in the same output", slug)
+		}
+	}
+}
+
+// Lstat の失敗が「無い」以外（権限エラー）のときは、無いものとして項目を捨てず拒否する。
+func TestWriteMemory_PrefixedAppendLstatErrorIsNotTreatedAsMissing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission errors cannot be produced as root")
+	}
+	ws, root, decl := memWS(t)
+	if err := os.WriteFile(filepath.Join(root, "tacit-real.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app := memoryItem{Mode: "append", Type: "tacit", Slug: "tacit-real", Body: "next"}
+	if err := os.Chmod(root, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(root, 0o755) }()
+	plan, err := prepareMemoryWrite(ws, decl, []memoryItem{app}, memNow)
+	if err == nil {
+		t.Fatalf("err = nil, plan = %+v; want a rejection (the item must not be dropped)", plan)
+	}
+	if !errors.Is(err, ErrMemoryWriteRejected) || !strings.Contains(err.Error(), "cannot be inspected") {
+		t.Errorf("err = %v, want a rejection saying the append target cannot be inspected", err)
+	}
+}

@@ -87,16 +87,16 @@ func validMemoryType(t string) bool {
 
 // validateMemorySlug は slug が置き場の直下の 1 つのファイル名の一部になることを
 // 確かめる（絶対パス・".."・"/"・空白や制御文字を含むものを拒否する）。
-func validateMemorySlug(slug string) error {
+func validateMemorySlug(i int, slug string) error {
 	if slug == "" {
-		return memoryReject("slug is empty")
+		return memoryReject("memory[%d]: slug is empty", i)
 	}
 	if filepath.IsAbs(slug) || strings.Contains(slug, "..") || !memorySlugRe.MatchString(slug) {
-		return memoryReject("slug %q must not be an absolute path or contain '..', '/' or whitespace", slug)
+		return memoryReject("memory[%d]: slug %q must not be an absolute path or contain '..', '/' or whitespace", i, slug)
 	}
 	for _, r := range slug {
 		if unicode.IsControl(r) {
-			return memoryReject("slug %q contains a control character", slug)
+			return memoryReject("memory[%d]: slug %q contains a control character", i, slug)
 		}
 	}
 	return nil
@@ -174,7 +174,8 @@ type plannedMemoryWrite struct {
 
 // writeMemory は J6 の出力の memory の要素 items を、decl の置き場（base の下の
 // memory_dir）へ書く。すべての要素を検査してから書き、規則に反する出力は
-// ErrMemoryWriteRejected で何も書かずに拒否する。書き込みの途中で失敗したら、
+// ErrMemoryWriteRejected で何も書かずに拒否する（ただし、届くファイルが無い接頭辞つき slug の
+// 追記はその項目だけ捨て、残りを書く）。書き込みの途中で失敗したら、
 // それより前に書いたファイル（作成は削除・追記は元の長さへ戻す・索引も同様）を
 // 元に戻して、その失敗を返す。now は追記の節の日付に使う。core は git を起動せず、
 // コミットもしない。
@@ -268,17 +269,37 @@ func (p *memoryWritePlan) apply() (undo func(), err error) {
 // 返す dropped は、接頭辞つきの slug で届くファイルが無く捨てた追記の項目のファイル名。
 func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimit, date string) (plans []plannedMemoryWrite, hasCreate bool, dropped []string, err error) {
 	plans = make([]plannedMemoryWrite, 0, len(items))
-	created := map[string]bool{} // この出力で作るファイル
+	created := map[string]bool{}    // この出力で作るファイル
+	willCreate := map[string]bool{} // この出力で作るファイル（追記の slug の読み替え用）
+	for _, it := range items {
+		if it.Mode == MemoryModeCreate && validMemoryType(it.Type) {
+			willCreate[it.Type+"-"+it.Slug+".md"] = true
+		}
+	}
 	touched := map[string]bool{} // この出力で既に書く対象にしたファイル（改行の判定用）
+	// create を先に、追記を後に処理する（各グループの中は元の順）。追記が create より前に書かれていても、
+	// 後ろで作るファイルへ追記でき、接頭辞つきの slug も向け直せる。i はエラーの文言のために元の添字を使う。
+	order := make([]int, 0, len(items))
 	for i, it := range items {
+		if it.Mode == MemoryModeCreate {
+			order = append(order, i)
+		}
+	}
+	for i, it := range items {
+		if it.Mode != MemoryModeCreate {
+			order = append(order, i)
+		}
+	}
+	for _, i := range order {
+		it := items[i]
 		if it.Mode != MemoryModeCreate && it.Mode != MemoryModeAppend {
 			return nil, false, nil, memoryReject("memory[%d]: mode %q must be create or append", i, it.Mode)
 		}
 		if !validMemoryType(it.Type) {
 			return nil, false, nil, memoryReject("memory[%d]: type %q must be map, tacit, experience or reference", i, it.Type)
 		}
-		if err := validateMemorySlug(it.Slug); err != nil {
-			return nil, false, nil, fmt.Errorf("memory[%d]: %w", i, err)
+		if err := validateMemorySlug(i, it.Slug); err != nil {
+			return nil, false, nil, err
 		}
 		if strings.TrimSpace(it.Body) == "" {
 			return nil, false, nil, memoryReject("memory[%d]: body is empty", i)
@@ -287,7 +308,10 @@ func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimi
 			// 追記の slug が種類の接頭辞つき（索引の [name] ではなくファイル名）で、そのままでは
 			// ファイルに届かないときは、接頭辞を外して届くなら読み替え、届かなければその項目だけ捨てる。
 			// 接頭辞が名前の一部のファイル（experience-experience-….md）は、そのままで届くので変えない。
-			alt, ok := resolveAppendSlug(root, it, created)
+			alt, ok, rerr := resolveAppendSlug(root, it, willCreate)
+			if rerr != nil {
+				return nil, false, nil, memoryReject("memory[%d]: append target cannot be inspected: %v", i, rerr)
+			}
 			if !ok {
 				dropped = append(dropped, it.Type+"-"+it.Slug+".md")
 				continue
@@ -313,10 +337,10 @@ func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimi
 			if created[rel] {
 				return nil, false, nil, memoryReject("memory[%d]: %s is created twice", i, rel)
 			}
-			if _, err := os.Lstat(path); err == nil {
-				return nil, false, nil, memoryReject("memory[%d]: %s already exists", i, rel)
-			} else if !os.IsNotExist(err) {
+			if exists, err := memoryFileExists(path); err != nil {
 				return nil, false, nil, memoryReject("memory[%d]: %s cannot be inspected: %v", i, rel, err)
+			} else if exists {
+				return nil, false, nil, memoryReject("memory[%d]: %s already exists", i, rel)
 			}
 			p.content = memoryFileContent(it, root.domain)
 			p.indexRow = memoryIndexLine(it.Slug, it.Type, it.Confidence, it.Description)
@@ -327,7 +351,7 @@ func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimi
 			hasCreate = true
 		case MemoryModeAppend:
 			needNL := false
-			if !created[rel] { // この出力で作るファイルの本文は改行で終わる
+			if !created[rel] { // この出力で先に作るファイルの本文は改行で終わる
 
 				resolved, err := filepath.EvalSymlinks(path)
 				if err != nil {
@@ -364,28 +388,42 @@ func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimi
 
 // resolveAppendSlug は追記の項目が指すファイルの slug を返す。ok=false は、接頭辞つきの slug で届く
 // ファイルが無く、接頭辞を外しても届かないこと（その項目を捨てる）。接頭辞が無い slug・そのままで
-// 届く slug・この出力で作るファイルへの追記は変えず、無いファイルへの追記の拒否は後段の検査が行う。
-func resolveAppendSlug(root memoryRoot, it memoryItem, created map[string]bool) (slug string, ok bool) {
+// 届く slug・この出力で作るファイル（後ろの要素で作るものを含む）への追記は変えず、無いファイルへの
+// 追記の拒否は後段の検査が行う。Lstat が「無い」以外で失敗したら、無いものとして捨てず err を返す。
+func resolveAppendSlug(root memoryRoot, it memoryItem, willCreate map[string]bool) (slug string, ok bool, err error) {
 	prefix := it.Type + "-"
 	rel := prefix + it.Slug + ".md"
-	if !strings.HasPrefix(it.Slug, prefix) || created[rel] {
-		return it.Slug, true
+	if !strings.HasPrefix(it.Slug, prefix) || willCreate[rel] {
+		return it.Slug, true, nil
 	}
-	if _, err := os.Lstat(filepath.Join(root.abs, rel)); err == nil {
-		return it.Slug, true
+	if exists, err := memoryFileExists(filepath.Join(root.abs, rel)); err != nil {
+		return "", false, err
+	} else if exists {
+		return it.Slug, true, nil
 	}
 	alt := strings.TrimPrefix(it.Slug, prefix)
 	if alt == "" {
-		return "", false
+		return "", false, nil
 	}
 	altRel := prefix + alt + ".md"
-	if created[altRel] {
-		return alt, true
+	if willCreate[altRel] {
+		return alt, true, nil
 	}
-	if _, err := os.Lstat(filepath.Join(root.abs, altRel)); err == nil {
-		return alt, true
+	exists, err := memoryFileExists(filepath.Join(root.abs, altRel))
+	if err != nil {
+		return "", false, err
 	}
-	return "", false
+	return alt, exists, nil
+}
+
+// memoryFileExists は path が在るかを返す。「無い」以外の Lstat の失敗（権限エラー等）は err。
+func memoryFileExists(path string) (bool, error) {
+	if _, err := os.Lstat(path); err == nil {
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	return false, nil
 }
 
 func lacksTrailingNewline(path string) (bool, error) {
