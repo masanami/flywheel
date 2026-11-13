@@ -83,6 +83,8 @@ type CycleRunInput struct {
 	Checks UpstreamCheckSource
 	// Diffs は J5 の起動の前の PR の差分の取得（GET だけ）。ConnDecl が非 nil のとき必須。
 	Diffs UpstreamDiffSource
+	// Bodies は J5 の起動の前の PR の本文の取得（GET だけ。nil なら本文の区画を入れない）。
+	Bodies UpstreamBodySource
 	// HeadGit は J5 が PR の head を読む一時の worktree の口。ConnDecl が非 nil のとき必須。
 	HeadGit HeadWorktreeGit
 	// Merger は release の段のマージの依頼の書き込み（取り込みの依頼も実装していれば BEHIND に使う）。ConnDecl が非 nil のとき必須。
@@ -361,6 +363,7 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			Upstream:   in.Upstream,
 			Checks:     in.Checks,
 			Diffs:      in.Diffs,
+			Bodies:     in.Bodies,
 			HeadGit:    in.HeadGit,
 			Connectors: in.ConnDecl,
 			CycleID:    cycleID,

@@ -66,6 +66,7 @@ func runVerifyAuto(a Args) (any, error) {
 		Upstream:    newUpstreamThreadSource(),
 		Checks:      newCheckSource(),
 		Diffs:       newDiffSource(),
+		Bodies:      newBodySource(),
 		HeadGit:     git.New(),
 		Connectors:  conn,
 		CycleID:     cyc.ID,
@@ -91,6 +92,16 @@ func runVerifyAuto(a Args) (any, error) {
 
 // newDiffSource は J5 の起動の前の PR の差分の取得を組み立てる（取得できないときは newCheckSource と同じ）。
 func newDiffSource() core.UpstreamDiffSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
+	if err != nil {
+		return unavailableCheckSource{err: err}
+	}
+	return client
+}
+
+// newBodySource は J5 の起動の前の PR の本文の取得を組み立てる（取得できないときは各取得が失敗し、
+// J5 は止まらず本文の区画に失敗が書かれる）。
+func newBodySource() core.UpstreamBodySource {
 	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
 	if err != nil {
 		return unavailableCheckSource{err: err}
@@ -128,6 +139,10 @@ func (u unavailableCheckSource) CompareCommits(context.Context, string, string, 
 
 func (u unavailableCheckSource) GetPullRequestChecks(context.Context, string, int) (core.UpstreamPullRequestChecks, error) {
 	return core.UpstreamPullRequestChecks{}, fmt.Errorf("上流を取得できません: %w", u.err)
+}
+
+func (u unavailableCheckSource) GetPullRequestBody(context.Context, string, int) (core.UpstreamPullRequestBody, error) {
+	return core.UpstreamPullRequestBody{}, fmt.Errorf("上流を取得できません: %w", u.err)
 }
 
 func (u unavailableCheckSource) GetCompareDiff(context.Context, string, string, string) (string, error) {

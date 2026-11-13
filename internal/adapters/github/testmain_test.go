@@ -94,6 +94,12 @@ func runFakeGH(argv []string) int {
 		return fakeGHPullsTwoPages(argv)
 	case "checks_pending", "checks_complete", "checks_merged", "checks_runs_fail":
 		return fakeGHChecks(argv, os.Getenv(envScenario))
+	case "pull_body_ok":
+		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","body":"本文です","head":{"sha":"abc123"}}`)
+		return 0
+	case "pull_body_null":
+		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","body":null,"head":{"sha":"abc123"}}`)
+		return 0
 	case "compare_ok":
 		fmt.Print("diff --git a/x b/x\n")
 		return 0

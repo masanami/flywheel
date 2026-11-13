@@ -118,6 +118,7 @@ func runCycle(a Args) (any, error) {
 		reconcile core.UpstreamBranchSource
 		checks    core.UpstreamCheckSource
 		diffs     core.UpstreamDiffSource
+		bodies    core.UpstreamBodySource
 		headGit   core.HeadWorktreeGit
 		compare   core.UpstreamCompareSource
 		contract  core.ContractClient
@@ -125,7 +126,7 @@ func runCycle(a Args) (any, error) {
 	if hasConnectors {
 		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(), newCheckSource()
 		merger, diffs, headGit = newPullRequestMerger(), newDiffSource(), git.New()
-		compare = newCompareSource()
+		compare, bodies = newCompareSource(), newBodySource()
 		contract = launcher
 	}
 
@@ -152,6 +153,7 @@ func runCycle(a Args) (any, error) {
 		Reconcile: reconcile,
 		Checks:    checks,
 		Diffs:     diffs,
+		Bodies:    bodies,
 		HeadGit:   headGit,
 		Merger:    merger,
 		Compare:   compare,
