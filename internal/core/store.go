@@ -41,6 +41,11 @@ type Store struct {
 	// delegationWaitInterval（既定）を使う。同じ理由で、パッケージ変数を書き換えない。
 	delegationWait time.Duration
 
+	// delegationWaited は委譲の候補が枠待ちに入る（再評価の間隔だけ待つ）直前に呼ぶテスト用の欄。
+	// nil なら何もしない（本番の挙動は変わらない）。テストの偽の委譲が、固定の時間ではなく
+	// 「別の候補が枠待ちに入ったこと」で待ち合わせるために使う。
+	delegationWaited func()
+
 	// insertActivity はテストが作業ログへの書き込みを失敗させるためのフック。
 	// nil なら defaultInsertActivity を使う（#9 §A-3 の失敗注入。本番 API には
 	// 注入口を露出しない）。

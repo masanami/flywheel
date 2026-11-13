@@ -633,6 +633,9 @@ func (sch *delegationScheduler) admit(ctx context.Context, w *schedWaiter, wait 
 		if !wait || (!fits && own == 0) {
 			return nil, ErrSlotUnavailable
 		}
+		if hook := sch.s.delegationWaited; hook != nil {
+			hook()
+		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

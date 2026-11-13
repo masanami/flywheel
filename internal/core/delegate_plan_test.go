@@ -109,34 +109,72 @@ type planFixture struct {
 	overlapWant    int
 	overlapReached chan struct{}
 	overlapOnce    sync.Once
+	// overlapWaited は、重なりが成り立った時点で取った waitedSignal（重なった委譲がそろって同じ知らせで終わる）。
+	overlapWaited <-chan struct{}
+	// holdForWaiter は、上限を守ること（重ならないこと）を見るテストが置く数。起動の順で最初の
+	// holdForWaiter 件の偽の委譲は、その委譲の起動の後に別の候補が枠待ちに入るまで終わらない。
+	// 上限を破る実装は、その間に次の委譲を起動して maxUnfinished が上限を超える。
+	holdForWaiter int
+	started       atomic.Int64
+	// waitedMu・waited: 候補が枠待ちに入るたびに、Store の delegationWaited が waited を閉じて作り直す
+	// （待っている偽の委譲のすべてへ知らせる）。
+	waitedMu sync.Mutex
+	waited   chan struct{}
 }
 
-// holdGrace は、重なりが起きないこと（上限を守ること）を見るために、起動した委譲の run を終了させずに置く
-// 時間の上限。待ち合わせの成立（overlapReached）が先なら、そこから grace だけ置く。テストの成否は
-// この時間の長さに依存しない（上限を破る実装が重なりを起こす猶予を与えるだけ）。
-const holdGrace = 30 * time.Millisecond
+// notifyWaited は、候補が枠待ちに入ったことを、それまでに waited を受け取った偽の委譲のすべてへ知らせる。
+func (f *planFixture) notifyWaited() {
+	f.waitedMu.Lock()
+	defer f.waitedMu.Unlock()
+	close(f.waited)
+	f.waited = make(chan struct{})
+}
 
-// holdOverlap は、起動した委譲の run（n は終了していない委譲の run の数）を、他の枠の委譲と重なれるよう
-// 終了させずに置く。重なりを期待するテスト（overlapWant>0）は、その数に達するまで待ち合わせる
-// （上限は安全弁の 10 秒。負荷の高い環境でも重なりを取り逃がさない）。
+// waitedSignal は、この時点より後に候補が枠待ちに入ると閉じるチャネルを返す。
+func (f *planFixture) waitedSignal() <-chan struct{} {
+	f.waitedMu.Lock()
+	defer f.waitedMu.Unlock()
+	return f.waited
+}
+
+// holdOverlap は、起動した委譲の run（n は終了していない委譲の run の数）を、待ち合わせが成り立つまで
+// 終了させずに置く。固定の時間は待たない（10 秒は待ち合わせが成り立たないときの安全弁で、成功の経路では通らない）。
+//   - 重なりを期待するテスト（overlapWant>0）は、終了していない委譲の run がその数に達するまで待つ。
+//   - 上限を見るテスト（holdForWaiter>0）は、起動の順で最初の holdForWaiter 件が、その起動の後（重なりを
+//     期待するテストでは、重なりが成り立った後）に別の候補が枠待ちに入るまで待つ（待つ候補は、上限が埋まっている間は再評価のたびに枠待ちに入り直すので、取りこぼさない）。
+//     それより後の件は、待つ候補が残っていないので待たずに終わる。
 func (f *planFixture) holdOverlap(n int64) {
+	waited := f.waitedSignal()
+	order := f.started.Add(1)
 	if f.overlapWant > 0 {
 		if n >= int64(f.overlapWant) {
-			f.overlapOnce.Do(func() { close(f.overlapReached) })
+			f.overlapOnce.Do(func() {
+				f.overlapWaited = f.waitedSignal()
+				close(f.overlapReached)
+			})
 		}
 		select {
 		case <-f.overlapReached:
 		case <-time.After(10 * time.Second):
 			return
 		}
+		// 重なった委譲は、そろって終了していない間に枠待ちに入った知らせで終わる（先に終わった 1 件が
+		// 枠を空けて、後の件の待ち合わせの相手を消さないため）。
+		waited = f.overlapWaited
 	}
-	<-time.After(holdGrace)
+	if order <= int64(f.holdForWaiter) {
+		select {
+		case <-waited:
+		case <-time.After(10 * time.Second):
+		}
+	}
 }
 
 func newPlanFixture(t *testing.T) *planFixture {
 	t.Helper()
-	f := &planFixture{delegateFixture: newDelegateFixture(t), events: &eventLog{}, nextIssue: 100, overlapReached: make(chan struct{})}
+	f := &planFixture{delegateFixture: newDelegateFixture(t), events: &eventLog{}, nextIssue: 100, overlapReached: make(chan struct{}), waited: make(chan struct{})}
 	f.s.delegationWait = 5 * time.Millisecond
+	f.s.delegationWaited = f.notifyWaited
 	conn, err := parseConnectorsDeclaration([]byte(planConnectorsJSON))
 	if err != nil {
 		t.Fatalf("parseConnectorsDeclaration: %v", err)
@@ -774,6 +812,7 @@ func TestPlan_MaxParallelRunsOne_SecondGroupWaitsForTheFirst(t *testing.T) {
 	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.agent.MaxParallelRuns = 1
+	f.holdForWaiter = 1 // 1 件目は、2 件目が枠待ちに入るまで終わらない
 	f.candidate(t, "multi", "P1", 11)
 	f.candidate(t, "multi", "P1", 12)
 	res := f.mustRunPlan(t)
@@ -792,7 +831,8 @@ func TestPlan_MaxParallelRunsOne_SecondGroupWaitsForTheFirst(t *testing.T) {
 func TestPlan_GlobalLimitAcrossRepos(t *testing.T) {
 	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
-	f.overlapWant = 2 // 2 つの委譲が重なるまで待ち合わせる
+	f.overlapWant = 2   // 2 つの委譲が重なるまで待ち合わせる
+	f.holdForWaiter = 2 // 重なった 2 件は、3 件目が枠待ちに入るまで終わらない
 	f.candidate(t, "multi", "P1", 11)
 	f.candidate(t, "multi", "P1", 12)
 	f.candidate(t, "other", "P1", 21)
@@ -808,6 +848,7 @@ func TestPlan_GlobalLimitAcrossRepos(t *testing.T) {
 func TestPlan_UsableSlotsLimitTheRepo(t *testing.T) {
 	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
+	f.holdForWaiter = 1 // 1 件目は、2 件目が枠待ちに入るまで終わらない
 	f.ensure(t, "multi")
 	f.setSlotState(t, "m2", slotStateNeedsAttention)
 	f.setSlotState(t, "m3", slotStateNeedsAttention)
@@ -853,6 +894,7 @@ func TestPlan_WaitingGroupsStartInHeadPriorityOrder(t *testing.T) {
 	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.agent.MaxParallelRuns = 1
+	f.holdForWaiter = 2 // 先の 2 件は、後の候補が枠待ちに入るまで終わらない
 	f.candidate(t, "multi", "P2", 11)
 	f.candidate(t, "other", "P0", 21)
 	f.candidate(t, "multi", "P1", 12)
@@ -866,6 +908,7 @@ func TestPlan_CycleBudgetAndRunBudget_AfterWaiting(t *testing.T) {
 	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
 	f.agent.MaxParallelRuns = 1
+	f.holdForWaiter = 1 // 1 件目は、2 件目が枠待ちに入るまで終わらない
 	f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
 	// 最初の起動（J3 の 3 ＋ 実装枠 50 ＋ レビュー対応枠 30）だけが入る周の上限。2 件目は、1 件目の費用
