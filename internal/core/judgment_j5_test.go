@@ -1171,10 +1171,10 @@ func TestVerifyAutoJ5_InputCarriesTheReviewAnswerAlongsideTheUnreviewedDeclarati
 	}
 	var holds, report string
 	for _, s := range f.j5Inputs[len(f.j5Inputs)-1].Sections {
-		switch {
-		case s.Label == "保留の記録":
+		switch s.Label {
+		case "保留の記録":
 			holds = s.Content
-		case strings.Contains(s.Content, "独立レビュー未実施"):
+		case "直前の委譲の報告":
 			report = s.Content
 		}
 	}
