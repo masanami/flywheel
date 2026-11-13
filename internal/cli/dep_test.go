@@ -84,6 +84,7 @@ func TestDep_RejectionsMapToTheDocumentedCodesAndWriteNothing(t *testing.T) {
 
 // 受入基準: 端末なし（標準入力をパイプ）・CLAUDECODE ありの子プロセスでも実行できる（本人確認を求めない）。
 func TestDep_RunsUnderClaudeCodeWithPipedStdin(t *testing.T) {
+	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
 	ws, ids := depWorkspace(t, 2)
 	for _, args := range [][]string{
 		{"dep", "add", ids[0], ids[1], "--workspace", ws, "--json"},

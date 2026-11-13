@@ -132,6 +132,7 @@ func requireSummaryContains(t *testing.T, summary string, wants ...string) {
 }
 
 func TestReject_PlanApproval_ShowsTheApprovalSummaryPlusReason(t *testing.T) {
+	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
 	const reason = "distinctive plan rejection reason"
 	approve, reject := approveAndRejectSummaries(t, func(t *testing.T, ws string) string {
 		created := runJSON(t, ws, "create", "--title", "distinctive-plan-title")
@@ -146,6 +147,7 @@ func TestReject_PlanApproval_ShowsTheApprovalSummaryPlusReason(t *testing.T) {
 }
 
 func TestReject_CompletionApproval_ShowsTheApprovalSummaryPlusReason(t *testing.T) {
+	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
 	const reason = "distinctive completion rejection reason"
 	approve, reject := approveAndRejectSummaries(t, func(t *testing.T, ws string) string {
 		created := runJSON(t, ws, "create", "--title", "distinctive-completion-title", "--done-criteria", "distinctive done criteria")

@@ -62,6 +62,7 @@ func createFullChallenge(t *testing.T, ws string) (id, opID string) {
 // TestRunShow_FullChallenge は疑似端末の子プロセスを伴う準備が重いため、1 つの
 // 課題を JSON とテキストの両方の検査で共有する。
 func TestRunShow_FullChallenge(t *testing.T) {
+	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
 	ws := initializedWorkspace(t)
 	id, opID := createFullChallenge(t, ws)
 

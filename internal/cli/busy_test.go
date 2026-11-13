@@ -58,6 +58,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	code := m.Run()
+	removeInitTemplate()
 	cleanupHarness()
 	cleanupClaude()
 	cleanup()
@@ -133,6 +134,7 @@ func TestRun_InitReturnsStoreBusyWhileAnotherProcessHoldsTheWriteLock(t *testing
 // busy_timeout の対象になるのは既に WAL 化されたストアに対してだけ、という
 // 上のコメントの挙動メモに従う）。
 func TestRun_CreateReturnsStoreBusyWhileAnotherProcessHoldsTheWriteLock(t *testing.T) {
+	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
 	dir := t.TempDir()
 	var initStdout, initStderr bytes.Buffer
 	if code := Run([]string{"init", "--workspace", dir, "--json"}, strings.NewReader(""), &initStdout, &initStderr); code != 0 {
