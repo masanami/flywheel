@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -404,7 +405,7 @@ func TestPlanAuto_UpstreamFetchFailure_NotStartedAndNothingChanges(t *testing.T)
 // gh を要さない）。
 func TestNewUpstreamThreadSource_WithoutGH_FailsOnUseOnly(t *testing.T) {
 	emptyPATH(t)
-	src := newUpstreamThreadSource()
+	src := newUpstreamThreadSource(exec.LookPath)
 	if _, err := src.GetIssueThread(context.Background(), "o/r", 1); err == nil {
 		t.Error("GetIssueThread succeeded although gh is not on PATH")
 	}

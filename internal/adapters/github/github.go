@@ -34,6 +34,9 @@ type Options struct {
 	// Timeout は gh の 1 回の呼び出しに置く時間の上限。ゼロ値なら
 	// defaultTimeout を使う。
 	Timeout time.Duration
+	// LookPath は gh の実行ファイルの探し方（テストごとに偽の gh の場所を渡せるようにする）。
+	// nil なら exec.LookPath（PATH 上の gh）。
+	LookPath func(file string) (string, error)
 }
 
 // Client は core.UpstreamIssueSource の実装。gh の絶対パスを保持し、以後の
@@ -46,7 +49,11 @@ type Client struct {
 // New は PATH 上の gh を探し、見つかれば Client を返す。見つからなければ
 // errors.Is(err, ErrGHNotFound) が true になるエラーを返す。
 func New(opts Options) (*Client, error) {
-	path, err := exec.LookPath("gh")
+	lookPath := opts.LookPath
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	path, err := lookPath("gh")
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrGHNotFound, err.Error())
 	}

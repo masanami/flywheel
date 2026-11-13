@@ -33,7 +33,7 @@ const (
 	maxPredictionIssues = 20
 )
 
-// delegationWaitInterval は枠待ちの再評価の間隔（テストが短くする）。
+// delegationWaitInterval は枠待ちの再評価の間隔の既定値。
 var delegationWaitInterval = slotWaitInterval
 
 // delegationPlan は委譲の段の実行計画。
@@ -413,6 +413,14 @@ type delegationScheduler struct {
 	waiters []*schedWaiter
 }
 
+// waitInterval は枠待ちの再評価の間隔（Store に差し替えが無ければ delegationWaitInterval）。
+func (sch *delegationScheduler) waitInterval() time.Duration {
+	if sch.s.delegationWait > 0 {
+		return sch.s.delegationWait
+	}
+	return delegationWaitInterval
+}
+
 func newDelegationScheduler(s *Store, in DelegateInput) *delegationScheduler {
 	return &delegationScheduler{
 		s: s, maxParallel: in.AgentDecl.MaxParallelRuns, conn: in.ConnDecl, preRepo: map[string]int{},
@@ -625,10 +633,13 @@ func (sch *delegationScheduler) admit(ctx context.Context, w *schedWaiter, wait 
 		if !wait || (!fits && own == 0) {
 			return nil, ErrSlotUnavailable
 		}
+		if hook := sch.s.delegationWaited; hook != nil {
+			hook()
+		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(delegationWaitInterval):
+		case <-time.After(sch.waitInterval()):
 		}
 	}
 }

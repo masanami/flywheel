@@ -470,7 +470,7 @@ func (s *Store) applyJ1NotMine(ctx context.Context, runIDDisplay, challengeIDDis
 	if !ok {
 		return false, ErrNotFound
 	}
-	actor, err := resolveActor()
+	actor, err := s.resolveActor()
 	if err != nil {
 		return false, err
 	}

@@ -89,7 +89,7 @@ func TestRunStatus_ChallengesAreClassifiedIntoNeedsHumanAndActionableBuckets(t *
 func TestRunStatus_PendingOperationAppearsInNeedsHumanOperations(t *testing.T) {
 	ws := initializedWorkspace(t)
 	id := runJSON(t, ws, "create", "--title", "t")["challenge"].(map[string]any)["id"].(string)
-	opID := addPRRelease(t, ws, id, "ship it")
+	opID := prepareReleaseWorkspace(t, ws).addPRRelease(t, id, "ship it")
 
 	doc := runJSON(t, ws, "status")
 	ops := statusIDs(t, doc, "needs_human.operations")
@@ -105,7 +105,7 @@ func TestRunStatus_PendingOperationAppearsInNeedsHumanOperations(t *testing.T) {
 func TestRunStatus_ApprovedOperationAppearsInApprovedOperationsList(t *testing.T) {
 	ws := initializedWorkspace(t)
 	id := runJSON(t, ws, "create", "--title", "t")["challenge"].(map[string]any)["id"].(string)
-	opID := addPRRelease(t, ws, id, "ship it")
+	opID := prepareReleaseWorkspace(t, ws).addPRRelease(t, id, "ship it")
 
 	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"approve", "--workspace", ws, "--json", opID}, opID)
 	if code != 0 {
@@ -156,7 +156,7 @@ func TestRunStatus_TextOutputHasThreeLabeledSectionsWithItemsInTheCorrectSection
 	runJSON(t, ws, "create", "--title", "actionable title")
 
 	approvedID := runJSON(t, ws, "create", "--title", "t3")["challenge"].(map[string]any)["id"].(string)
-	opID := addPRRelease(t, ws, approvedID, "approved summary")
+	opID := prepareReleaseWorkspace(t, ws).addPRRelease(t, approvedID, "approved summary")
 	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"approve", "--workspace", ws, "--json", opID}, opID)
 	if code != 0 {
 		t.Fatalf("approve exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)

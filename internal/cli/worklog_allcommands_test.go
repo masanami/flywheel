@@ -128,8 +128,9 @@ func awaitingCompletionWithReleasesForCase(t *testing.T, ws string) string {
 	t.Helper()
 	id := createWithStatusForCase(t, ws, "verifying")
 	runJSON(t, ws, "verify", id, "--result", "met")
-	addPRRelease(t, ws, id, "s1")
-	addPRRelease(t, ws, id, "s2")
+	rel := prepareReleaseWorkspace(t, ws)
+	rel.addPRRelease(t, id, "s1")
+	rel.addPRRelease(t, id, "s2")
 	return id
 }
 
@@ -697,7 +698,7 @@ func runCommandForWorklog(t *testing.T, command string, args []string, ws string
 		return
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 {
+	if code := runWithLookPath(full, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 0 {
 		t.Fatalf("args=%v exit=%d, want 0 (stderr=%s)", args, code, stderr.String())
 	}
 }
@@ -741,6 +742,7 @@ func TestWorklog_EveryMutatingOperationRecordsAllFields(t *testing.T) {
 	actor := resolveExpectedActor(t)
 	for _, c := range worklogCases {
 		t.Run(c.name, func(t *testing.T) {
+			parallelTools(t, allCommandSuccessCases[c.command].needsTTY) // 偽の gh・claude の場所は t ごとに渡す（t.Setenv しない）。pty を使うケースは並列にしない（flywheel#578）
 			// 期待値は core の定数ではなく仕様の文字列で書く（定数の値が変わっても
 			// 気付けるように）。
 			wantVerification := "none"

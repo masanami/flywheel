@@ -482,6 +482,9 @@ func drainSnapshot(d *ptyDrain) string {
 func runConfirmedChild(t *testing.T, args []string, confirmInput string) (code int, ptyOutput, stdout, stderr string) {
 	t.Helper()
 	cmd, stdoutBuf, stderrBuf := newChildCmd(args)
+	if env := childPathEnv(t); env != "" {
+		cmd.Env = append(cmd.Env, env)
+	}
 	master, err := pty.StartWithAttrs(cmd, nil, &syscall.SysProcAttr{Setsid: true, Setctty: true})
 	if err != nil {
 		t.Fatalf("pty.StartWithAttrs: %v", err)
@@ -542,8 +545,9 @@ func setUpChallengeAwaitingCompletionWithOperationsForCLI(t *testing.T, ws strin
 	t.Helper()
 	created := runJSON(t, ws, "create", "--title", "t", "--done-criteria", "it works")
 	id = created["challenge"].(map[string]any)["id"].(string)
-	release1 = addPRRelease(t, ws, id, "ship A")
-	release2 = addPRRelease(t, ws, id, "ship B")
+	rel := prepareReleaseWorkspace(t, ws)
+	release1 = rel.addPRRelease(t, id, "ship A")
+	release2 = rel.addPRRelease(t, id, "ship B")
 	del = runJSON(t, ws, "op", "add", id, "--kind", "delete", "--summary", "remove old data")["operation"].(map[string]any)["id"].(string)
 	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, id), "awaiting_completion_approval")
 	return id, release1, release2, del
