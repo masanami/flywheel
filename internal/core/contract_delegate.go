@@ -16,6 +16,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -249,6 +250,27 @@ func fillContractArgs(args []string, challengeID string, sb *sourceBinding, exte
 	return out, nil
 }
 
+// checkPlannedContractOperation は承認済みの計画 plan（構造化した出力つき）が選んだ操作を宣言の connector から引き、
+// J2 と同じ checkOperationLaunchable で検査する。計画が無い・構造化した出力が無い・操作が
+// connector の宣言に無いときも ErrValidation（起動しない）。
+func checkPlannedContractOperation(plan approvedPlan, connector *Connector, hasSource bool) error {
+	if !plan.HasSpec {
+		return fmt.Errorf("%w: the challenge has no approved plan with a structured spec", ErrValidation)
+	}
+	var spec struct {
+		Operation string `json:"operation"`
+	}
+	if err := json.Unmarshal([]byte(plan.Spec), &spec); err != nil {
+		return fmt.Errorf("%w: the approved plan spec is malformed: %s", ErrValidation, err.Error())
+	}
+	for i := range connector.Operations {
+		if connector.Operations[i].ID == spec.Operation {
+			return checkOperationLaunchable(connector, &connector.Operations[i], hasSource)
+		}
+	}
+	return fmt.Errorf("%w: operation %q is not declared for connector %q", ErrValidation, spec.Operation, connector.ID)
+}
+
 func findCLIConnector(d *ConnectorsDeclaration, id string) (*Connector, error) {
 	if d == nil {
 		return nil, fmt.Errorf("%w: connectors declaration is required", ErrValidation)
@@ -290,6 +312,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	}
 	var binding *sourceBinding
 	var planVersion *int64
+	var plan approvedPlan
 	err = s.db.Read(ctx, func(tx *sql.Tx) error {
 		ch, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
@@ -311,10 +334,15 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 		if found {
 			v := int64(p.Version)
 			planVersion = &v
+			plan = p
 		}
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
+		return nil, err
+	}
+	// 起動の前に、J2 と同じ関数で承認済みの計画の操作を検査する（J2 の後に宣言が変わっても、検査していない引数で起動しない）。
+	if err := checkPlannedContractOperation(plan, connector, binding != nil); err != nil {
 		return nil, err
 	}
 	command, err := fillContractArgs(connector.Commands.Start, in.ChallengeID, binding, "", "")

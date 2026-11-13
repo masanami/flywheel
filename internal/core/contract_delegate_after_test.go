@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -277,5 +278,112 @@ func TestRunDelegation_PollsUnfinishedContractRuns(t *testing.T) {
 	}
 	if len(f.client.statuses) != 1 {
 		t.Fatalf("statuses = %d, want 1（周が PollContractRuns を呼ぶ）", len(f.client.statuses))
+	}
+}
+
+// resume だけが取り込み元の差し込みを要する宣言に変わっても、答えが無い確認（status）では resume の引数を確かめず、状態が読まれて
+// 終わりを検知できる。答えがあるときだけ resume の引数を確かめ、埋められなければ答えを失わずにエラーにする。
+func TestPollContractRuns_ResumeNeedingSourceIsOnlyCheckedWhenAnswering(t *testing.T) {
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	// 契約の run が進行中に、宣言の resume が取り込み元の差し込みを要する形に変わった（取り込み元の無い課題では、そうした宣言の計画は J2・起動の検査で選べない）。
+	for i := range f.conn.Connectors {
+		f.conn.Connectors[i].Commands.Resume = []string{"tool", "resume", "{run_id}", "--issue", "{issue_number}", "--answer", "{answer}"}
+	}
+	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, nil)}
+	reps := f.poll(t)
+	if len(reps) != 1 || reps[0].State != ContractStateSucceeded || len(f.client.statuses) != 1 {
+		t.Fatalf("report = %+v statuses = %v, want the state read and succeeded detected", reps, f.client.statuses)
+	}
+}
+
+func TestPollContractRuns_AnswerWithUnfillableResumeKeepsTheAnswer(t *testing.T) {
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	// 契約の run が進行中に、宣言の resume が取り込み元の差し込みを要する形に変わった（取り込み元の無い課題では、そうした宣言の計画は J2・起動の検査で選べない）。
+	for i := range f.conn.Connectors {
+		f.conn.Connectors[i].Commands.Resume = []string{"tool", "resume", "{run_id}", "--issue", "{issue_number}", "--answer", "{answer}"}
+	}
+	f.client.queue = []ContractLaunchOutput{waitingOut(&ContractRequestedAction{Kind: "approve", Decider: "human", Text: "承認して"}, nil)}
+	f.poll(t)
+	f.answerLatestHold(t, f.cid, "A")
+	_, err := f.s.PollContractRuns(context.Background(), ContractPollInput{AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client, CycleID: f.cycle(t, 300)})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation when resume cannot be filled while answering", err)
+	}
+	if len(f.client.resumes) != 0 {
+		t.Fatalf("resumes = %v, want none", f.client.resumes)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM contract_run WHERE wait_hold_id IS NOT NULL`); n != 1 {
+		t.Fatalf("wait_hold_id cleared although resume was not sent (rows with the link = %d, want 1)", n)
+	}
+}
+
+// J2 で検査した後に宣言の commands（start・status）が閉集合の外の差し込みや取り込み元の差し込みを要する形に変わると、
+// 委譲は start を呼ばず not_started（plan_unavailable）になる。StartContractDelegation も起動の前に J2 と同じ検査を通し、
+// start を呼ばずに ErrValidation を返す。
+func TestRunDelegation_DeclarationChangedAfterJ2DoesNotStartTheContract(t *testing.T) {
+	for _, tc := range []struct{ name, cmd string }{
+		{"start-outside-closed-set", "start"}, {"start-needs-source", "start"},
+		{"status-outside-closed-set", "status"}, {"status-needs-source", "status"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newContractFixture(t)
+			ph := "{bogus}"
+			if strings.HasSuffix(tc.name, "needs-source") {
+				ph = "{issue_number}"
+			}
+			args := []string{"tool", tc.cmd, "--x", ph}
+			for i := range f.conn.Connectors {
+				if tc.cmd == "start" {
+					f.conn.Connectors[i].Commands.Start = args
+				} else {
+					f.conn.Connectors[i].Commands.Status = args
+				}
+			}
+			in := f.input(f.cycle(t, 300), nil)
+			in.Contract = f.client
+			res, err := f.s.RunDelegation(context.Background(), in)
+			if err != nil {
+				t.Fatalf("RunDelegation: %v", err)
+			}
+			if len(f.client.starts) != 0 || len(res.Items) != 0 || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedPlanUnavailable {
+				t.Fatalf("starts = %v items = %+v not started = %+v, want no start and plan_unavailable", f.client.starts, res.Items, res.NotStarted)
+			}
+			if _, err := f.start(t); !errors.Is(err, ErrValidation) || len(f.client.starts) != 0 {
+				t.Fatalf("StartContractDelegation err = %v starts = %v, want ErrValidation without start", err, f.client.starts)
+			}
+		})
+	}
+}
+
+// 状態の確認の出力の型が合わない（malformed。例: requested_action.options に文字列でない要素がある）ときは、契約の状態を
+// 更新せず、課題を保留にする。問いに選択肢を文字列にして並べない。
+func TestPollContractRuns_MalformedStatusHoldsWithoutUpdatingTheContract(t *testing.T) {
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{{Result: RunResultMalformed, ErrorSummary: "stdout is not a single JSON object of the expected shape", RawOutput: []byte(`{"requested_action":{"options":["A",1]}}`)}}
+	reps := f.poll(t)
+	if len(reps) != 1 || reps[0].Result != RunResultMalformed || !reps[0].Held {
+		t.Fatalf("report = %+v, want malformed and held", reps)
+	}
+	if state, summary, _, ended := f.contractRow(t); state != "running" || summary != "s-running" || ended {
+		t.Fatalf("contract_run changed by a malformed read: %s %s %v", state, summary, ended)
+	}
+	var q string
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error { return tx.QueryRow(`SELECT question FROM hold`).Scan(&q) }); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(q, string(RunResultMalformed)) || strings.Contains(q, "選択肢:") {
+		t.Fatalf("question = %q, want the malformed kind and no options listed", q)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM challenge WHERE status = 'in_progress'`); n != 0 {
+		t.Fatalf("in_progress challenges = %d, want 0（保留で人間対応待ち）", n)
 	}
 }

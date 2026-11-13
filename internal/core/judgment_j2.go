@@ -249,21 +249,77 @@ func j2OutputSchema() []byte {
 	return b
 }
 
-// invocationNeedsSource は操作の invocation が取り込み元の差し込みを持つかを返す
-// （{challenge_id} は取り込み元の差し込みではない）。
-// cliStartNeedsSource は cli 形態の接続ツールの commands.start が取り込み元の差し込みを要するか。
-func cliStartNeedsSource(c *Connector) bool {
+// checkOperationLaunchable は接続ツール connector の操作 op を、取り込み元の有無が hasSource の課題で起動できるかを
+// 検査する（できなければ ErrValidation）。J2 の出力の検査と、form: cli の委譲の起動（StartContractDelegation）が
+// この同じ関数を通る（J2 で検査した後に宣言が変わっても、検査していない引数で起動しない）。
+//   - cli 形態: op.Invocation と commands（start・status・resume・cancel）の引数が、それぞれの差し込みの閉集合の中の値だけを要する
+//   - 取り込み元の無い課題: op.Invocation も cli の commands も、取り込み元の差し込みを要しない
+func checkOperationLaunchable(connector *Connector, op *ConnectorOperation, hasSource bool) error {
+	if connector == nil || op == nil {
+		return fmt.Errorf("%w: unknown connector or operation", ErrValidation)
+	}
+	if connector.Form == ConnectorFormCLI {
+		if err := validateInvocationPlaceholders(op.Invocation); err != nil {
+			return fmt.Errorf("%w: operation %q: %s", ErrValidation, op.ID, err.Error())
+		}
+		if err := validateCLICommandPlaceholders(connector); err != nil {
+			return err
+		}
+	}
+	if !hasSource && invocationNeedsSource(op.Invocation) {
+		return fmt.Errorf("%w: operation %q needs the source issue but the challenge has none", ErrValidation, op.ID)
+	}
+	if !hasSource && cliCommandsNeedSource(connector) {
+		return fmt.Errorf("%w: connector %q commands need the source issue but the challenge has none", ErrValidation, connector.ID)
+	}
+	return nil
+}
+
+// validateCLICommandPlaceholders は cli 形態の commands の引数が、コマンドごとの差し込みの閉集合の中の値だけを要するか検査する。
+// 閉集合は fillContractArgs が埋めるもの: start は invocation と同じ 4 つ、status・cancel はそれに {run_id}、resume はさらに {answer}。
+func validateCLICommandPlaceholders(c *Connector) error {
+	if c.Commands == nil {
+		return fmt.Errorf("%w: connector %q (form cli) has no commands", ErrValidation, c.ID)
+	}
+	withRunID := map[string]bool{"{run_id}": true}
+	withAnswer := map[string]bool{"{run_id}": true, "{answer}": true}
+	for _, g := range []struct {
+		name  string
+		args  []string
+		extra map[string]bool
+	}{
+		{"start", c.Commands.Start, nil}, {"status", c.Commands.Status, withRunID},
+		{"resume", c.Commands.Resume, withAnswer}, {"cancel", c.Commands.Cancel, withRunID},
+	} {
+		for _, a := range g.args {
+			for _, m := range invocationPlaceholderPattern.FindAllString(a, -1) {
+				if !allowedInvocationPlaceholders[m] && !g.extra[m] {
+					return fmt.Errorf("%w: connector %q commands.%s has a disallowed placeholder %q", ErrValidation, c.ID, g.name, m)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// cliCommandsNeedSource は cli 形態の接続ツールの commands（start・status・resume・cancel）のどれかが、
+// 取り込み元の差し込みを要するか。4 つとも実際の起動に使うので、取り込み元の無い課題ではどれも要してはならない。
+func cliCommandsNeedSource(c *Connector) bool {
 	if c == nil || c.Form != ConnectorFormCLI || c.Commands == nil {
 		return false
 	}
-	for _, a := range c.Commands.Start {
-		if invocationNeedsSource(a) {
-			return true
+	for _, args := range [][]string{c.Commands.Start, c.Commands.Status, c.Commands.Resume, c.Commands.Cancel} {
+		for _, a := range args {
+			if invocationNeedsSource(a) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
+// invocationNeedsSource は操作の invocation が取り込み元の差し込みを持つかを返す
+// （{challenge_id} は取り込み元の差し込みではない）。
 func invocationNeedsSource(invocation string) bool {
 	for _, ph := range []string{"{issue_number}", "{issue_url}", "{external_key}"} {
 		if strings.Contains(invocation, ph) {
@@ -355,15 +411,8 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 	if op == nil {
 		return nil, false
 	}
-	// cli 形態の操作は、invocation が差し込みの閉集合の中の値だけを要するときだけ選べる。
-	if connector.Form == ConnectorFormCLI && validateInvocationPlaceholders(op.Invocation) != nil {
-		return nil, false
-	}
-	if !vc.HasSource && invocationNeedsSource(op.Invocation) {
-		return nil, false
-	}
-	// cli 形態は、実際に起動に使う commands.start の引数も同じく、取り込み元の無い課題では取り込み元の差し込みを要してはならない。
-	if !vc.HasSource && cliStartNeedsSource(connector) {
+	// 起動できる操作だけを選べる。委譲の起動（StartContractDelegation）も同じ関数で検査する。
+	if checkOperationLaunchable(connector, op, vc.HasSource) != nil {
 		return nil, false
 	}
 
@@ -773,7 +822,7 @@ func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, age
 			}
 			line := "    - id: " + op.ID + "｜対話前提: " + yesNo(op.Interactive) + "｜成果物: " + artifacts
 			switch {
-			case !hasSource && (invocationNeedsSource(op.Invocation) || cliStartNeedsSource(connector)):
+			case !hasSource && (invocationNeedsSource(op.Invocation) || cliCommandsNeedSource(connector)):
 				line += "｜注記: 取り込み元の Issue の情報を必要とするため、この課題では選べない"
 			}
 			b.WriteString(line + "\n")

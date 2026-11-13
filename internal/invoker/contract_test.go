@@ -139,15 +139,29 @@ func TestContractCommand_DoesNotPassTheDelegatedMarker(t *testing.T) {
 	}
 }
 
-// resume・cancel の標準出力も同じ形に正規化され、requested_action の options は文字列の配列になる（文字列以外は JSON のまま）。
+// resume・cancel の標準出力も同じ形に正規化され、requested_action の options は文字列の配列として読む。
 func TestContractCommand_RequestedActionOptionsAreNormalized(t *testing.T) {
 	in, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"contract_version": 1, "run_id": "r-1", "state": "waiting", "summary": "s",
-	  "requested_action": {"kind": "answer", "decider": "parent", "text": "t", "options": ["A", {"id": "b"}]}, "artifacts": [], "cost_usd": null}`})
+	  "requested_action": {"kind": "answer", "decider": "parent", "text": "t", "options": ["A", "B"]}, "artifacts": [], "cost_usd": null}`})
 	out, err := NewLauncher().Resume(context.Background(), in)
 	if err != nil || out.Status == nil || out.Status.RequestedAction == nil {
 		t.Fatalf("out = %+v err = %v", out, err)
 	}
-	if want := []string{"A", `{"id": "b"}`}; !reflect.DeepEqual(out.Status.RequestedAction.Options, want) {
+	if want := []string{"A", "B"}; !reflect.DeepEqual(out.Status.RequestedAction.Options, want) {
 		t.Fatalf("options = %q, want %q", out.Status.RequestedAction.Options, want)
+	}
+}
+
+// requested_action.options に文字列でない要素（数値・オブジェクト）が 1 つでもあれば、契約の出力の誤り（malformed）にし、状態を返さない。
+func TestContractCommand_NonStringOptionsAreMalformed(t *testing.T) {
+	for name, opts := range map[string]string{"number": `["A", 1]`, "object": `["A", {"id": "b"}]`} {
+		t.Run(name, func(t *testing.T) {
+			in, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"contract_version": 1, "run_id": "r-1", "state": "waiting", "summary": "s",
+			  "requested_action": {"kind": "answer", "decider": "human", "text": "t", "options": ` + opts + `}, "artifacts": [], "cost_usd": null}`})
+			out, err := NewLauncher().Status(context.Background(), in)
+			if err != nil || out.Result != core.RunResultMalformed || out.Status != nil {
+				t.Fatalf("out = %+v err = %v, want malformed without a status", out, err)
+			}
+		})
 	}
 }

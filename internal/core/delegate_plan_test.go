@@ -1101,3 +1101,45 @@ func TestPlan_ExplicitID_SingleSlot_SeparateGroups_SlotUnavailable(t *testing.T)
 		t.Fatalf("err = %v, want ErrSlotUnavailable", err)
 	}
 }
+
+// 契約の run（form: cli）の許可は、待ちの列の優先度・ID の昇順を守る: 前にいる claude の課題が今すぐ許可できる分の枠は先に譲り、
+// 譲ってもなお枠が残るなら許可する（契約は待たないので、余裕があるのに譲るだけで拒否しない）。
+func TestAdmitContract_YieldsOnlyTheSlotsEarlierWaitersTake(t *testing.T) {
+	f := newDelegateFixture(t)
+	conn := &ConnectorsDeclaration{
+		Connectors: []Connector{{ID: "pc", Form: ConnectorFormPlugin}, {ID: "cl", Form: ConnectorFormCLI}},
+		Repos: []ConnectorRepo{
+			{Name: "multi", Connector: "pc", Slots: ConnectorRepoSlots{Provider: "clone", Paths: []string{"m1", "m2"}}},
+			{Name: "clirepo", Connector: "cl"},
+		},
+	}
+	claudeRepo, cliRepo := conn.Repos[0], conn.Repos[1]
+	cases := []struct {
+		name         string
+		max          int
+		claudeRank   int
+		wantAdmitted bool
+	}{
+		{"last slot, earlier claude waiter", 1, 1, false},
+		{"spare slot after the earlier claude waiter", 2, 1, true},
+		{"contract waiter is first", 1, 3, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sch := newDelegationScheduler(f.s, DelegateInput{AgentDecl: &AgentDeclaration{MaxParallelRuns: tc.max}, ConnDecl: conn})
+			claudeW := sch.newWaiter(claudeRepo, planCandidate{Rank: tc.claudeRank, Seq: 1})
+			cliW := sch.newWaiter(cliRepo, planCandidate{Rank: 2, Seq: 2})
+			sch.enqueue(claudeW)
+			sch.enqueue(cliW)
+			adm, err := (&delegateRun{sch: sch, w: cliW}).admitContract(context.Background())
+			if tc.wantAdmitted {
+				if err != nil {
+					t.Fatalf("err = %v, want admitted", err)
+				}
+				adm.finish()
+			} else if !errors.Is(err, ErrSlotUnavailable) {
+				t.Fatalf("err = %v, want ErrSlotUnavailable", err)
+			}
+		})
+	}
+}

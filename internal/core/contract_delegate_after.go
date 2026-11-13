@@ -71,6 +71,15 @@ func resumeCarriesAnswer(c *Connector) bool {
 	return false
 }
 
+// contractStatusMalformedQuestion は状態の確認（status）の出力が契約の型に合わなかった（malformed）ときの問い。
+func contractStatusMalformedQuestion(externalRunID, connector, errSummary string) string {
+	q := fmt.Sprintf("接続ツールの run（%s。接続先: %s）の状態の確認の出力が契約の形に合わなかった（失敗の種類: %s", externalRunID, connector, RunResultMalformed)
+	if errSummary != "" {
+		q += "。詳細: " + errSummary
+	}
+	return q + "）。契約の状態は更新していない。接続ツールの出力（requested_action.options は文字列の配列など）を確かめて直してから回答する。回答すると次の周で状態を読み直す。"
+}
+
 // contractResumeFailedQuestion は resume（答えの返し）が失敗したときの問い。
 func contractResumeFailedQuestion(externalRunID string, result RunResult, detail string) string {
 	q := fmt.Sprintf("接続ツールの run（%s）へ保留への答えを返す resume が失敗した（失敗の種類: %s", externalRunID, result)
@@ -148,11 +157,12 @@ func (s *Store) holdContractWait(ctx context.Context, rep *ContractRunReport, qu
 // 読んだ後に状態の写しと予算の確認を行う。
 func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64) (*ContractRunReport, error) {
 	challengeID := formatChallengeID(row.ChallengeID)
-	// 答えを返すと決める（結び付きを外す）前に、resume の引数を埋められることを確かめる（埋められないまま答えを失わない）。
-	if _, err := fillContractArgs(connector.Commands.Resume, challengeID, binding, row.ExternalRunID, ""); err != nil {
-		return nil, err
-	}
-	answer, resume, err := s.loadContractAnswer(ctx, row)
+	answer, resume, err := s.loadContractAnswer(ctx, row, func(answer string) error {
+		// 答えを返すと決める（結び付きを外す）前に、resume の引数を埋められることを確かめる（埋められないまま答えを失わない）。
+		// 答えが無い状態の確認（status）では resume の引数を確かめない（取り込み元を要するのが resume だけの宣言でも状態を読める）。
+		_, err := fillContractArgs(connector.Commands.Resume, challengeID, binding, row.ExternalRunID, answer)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +189,12 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		// resume はすぐ戻り、その時点の状態を返す。答えを返した直後に同じ求められた操作の waiting が返っても、
 		// 同じ問いの保留を立て直さない（次の周の状態の読みで、まだ waiting なら改めて問う）。
 		skipRead = rep.State == ContractStateWaiting && sameRequestedAction(row, rep.RequestedAction)
+	} else if rep.Result == RunResultMalformed && !rep.Held {
+		// 状態の確認の出力の型が合わない（例: requested_action.options に文字列でない要素がある）。契約の状態は更新しておらず、
+		// 読み直しても同じ出力が返りうるので、自動では読み直し続けず保留にする。
+		held, err := s.holdReclaimedContractStart(ctx, rep.RunID, rep.ChallengeID, contractStatusMalformedQuestion(row.ExternalRunID, connector.ID, rep.Error))
+		rep.Held = held
+		return rep, err
 	}
 	if !skipRead {
 		if err := s.afterContractRead(ctx, rep, connector); err != nil {
@@ -223,35 +239,48 @@ func (s *Store) runExistingContractCommand(ctx context.Context, client ContractC
 }
 
 // loadContractAnswer は、契約の run が waiting のまま、その waiting を写した保留（wait_hold_id）へオーナーが答え、
-// 課題が着手中へ戻っているとき、その答えを返す（無ければ resume=false）。答えを返すと決めた時点で、同じトランザクションで
-// 保留との結び付きを外す（resume が失敗しても同じ答えを二重に返さない）。別の理由で立った保留・古い保留の答えは返さない。
-func (s *Store) loadContractAnswer(ctx context.Context, row *contractRunRow) (answer string, resume bool, err error) {
-	err = s.db.Write(ctx, func(tx *sql.Tx) error {
-		var holdID int64
-		var a sql.NullString
+// 課題が着手中へ戻っているとき、その答えを返す（無ければ resume=false）。答えが無い確認は読み取りだけで済ませ、
+// 書き込みのロックを取らない。答えがあれば、check（resume の引数を埋められるかの確認。失敗したら答えを失わないよう何も変えずに
+// エラーを返す）を通した後、保留との結び付きを外す（resume が失敗しても同じ答えを二重に返さない）。別の理由で立った保留・
+// 古い保留の答えは返さない。
+func (s *Store) loadContractAnswer(ctx context.Context, row *contractRunRow, check func(answer string) error) (answer string, resume bool, err error) {
+	var holdID int64
+	var a sql.NullString
+	found := false
+	err = s.db.Read(ctx, func(tx *sql.Tx) error {
 		qerr := tx.QueryRowContext(ctx,
 			`SELECT h.id, h.answer FROM contract_run k JOIN hold h ON h.id = k.wait_hold_id JOIN challenge c ON c.id = k.challenge_id
 			 WHERE k.id = ? AND k.state = 'waiting' AND c.status = 'in_progress' AND h.answered_at IS NOT NULL`, row.ID).Scan(&holdID, &a)
 		if errors.Is(qerr, sql.ErrNoRows) {
 			return nil
 		}
+		found = qerr == nil
+		return qerr
+	})
+	if err = classifyReadWriteErr(err); err != nil || !found {
+		return "", false, err
+	}
+	if check != nil {
+		if err := check(a.String); err != nil {
+			return "", false, err
+		}
+	}
+	err = s.db.Write(ctx, func(tx *sql.Tx) error {
+		// 読んだ後に別の周が先に結び付きを外した・課題が着手中でなくなったときは 0 件になり、答えは返さない。
+		res, qerr := tx.ExecContext(ctx, `UPDATE contract_run SET wait_hold_id = NULL WHERE id = ? AND wait_hold_id = ? AND state = 'waiting'
+			 AND EXISTS (SELECT 1 FROM challenge WHERE id = challenge_id AND status = 'in_progress')`, row.ID, holdID)
 		if qerr != nil {
 			return qerr
 		}
-		res, qerr := tx.ExecContext(ctx, `UPDATE contract_run SET wait_hold_id = NULL WHERE id = ? AND wait_hold_id = ?`, row.ID, holdID)
-		if qerr != nil {
-			return qerr
+		if n, _ := res.RowsAffected(); n == 1 {
+			answer, resume = a.String, true
 		}
-		if n, _ := res.RowsAffected(); n != 1 {
-			return nil
-		}
-		answer, resume = a.String, true
 		return nil
 	})
 	return answer, resume, classifyReadWriteErr(err)
 }
 
-// cancelOverBudget は契約の累計の費用が、課題の実装の枠とレビュー対応の枠の合計（run の上限額）を上回ったとき
+// cancelOverBudget は契約の累計の費用が、課題の実装の枠とレビュー対応の枠の残りの合計（run の上限額）を上回ったとき
 // （同額では中止しない）、宣言の cancel で中止して課題を保留にする。中止が失敗した（コマンドの失敗・中止されない状態）
 // ときも保留にし、費用が増え続けうることを問いに書く。自動ではやり直さない（課題が着手中のときだけ中止する）。
 func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, rep *ContractRunReport) error {
@@ -271,7 +300,7 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 	if err != nil {
 		return err
 	}
-	note := fmt.Sprintf("接続ツールの run（%s）の費用の累計（%s USD）が、課題の実装の枠とレビュー対応の枠の合計（%s USD）を上回ったため、中止を依頼した。",
+	note := fmt.Sprintf("接続ツールの run（%s）の費用の累計（%s USD）が、課題の実装の枠とレビュー対応の枠の残りの合計（%s USD）を上回ったため、中止を依頼した。",
 		row.ExternalRunID, formatUSDAmount(rep.CostTotalUSD), formatUSDAmount(microsToUSD(row.MaxBudget)))
 	latest := *row
 	latest.State, latest.Summary, latest.CostMicros = rep.State, rep.Summary, usdToMicros(rep.CostTotalUSD)
