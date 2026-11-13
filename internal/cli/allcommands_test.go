@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
@@ -214,9 +213,7 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		// 課題を 1 件持つ別のストアの書き出しを、行の無い ws へ読み込む（作業ログの行を持たない課題にして、
 		// import が作業ログを足さないことを worklog の検査が確かめられるようにする）。
 		other := t.TempDir()
-		if _, err := core.Init(other); err != nil {
-			t.Fatalf("core.Init: %v", err)
-		}
+		copyInitTemplate(t, other)
 		coretest.InsertChallenge(t, other, "t")
 		path := filepath.Join(t.TempDir(), "export.json")
 		runJSON(t, other, "export", "--out", path)
@@ -391,9 +388,7 @@ func TestAllCommands_JSONSuccessWritesSingleDocumentToStdout(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ws := t.TempDir()
 			if !tc.uninitialized {
-				if _, err := core.Init(ws); err != nil {
-					t.Fatalf("core.Init: %v", err)
-				}
+				copyInitTemplate(t, ws)
 			}
 			args := append(tc.setup(t, ws), "--workspace", ws, "--json")
 			var code int

@@ -816,9 +816,7 @@ func TestWorklog_ReadOnlyCommandsAddNoActivityAndLeaveStoreUnchanged(t *testing.
 		t.Run(name, func(t *testing.T) {
 			ws := t.TempDir()
 			if !tc.uninitialized {
-				if _, err := core.Init(ws); err != nil {
-					t.Fatalf("core.Init: %v", err)
-				}
+				copyInitTemplate(t, ws)
 			}
 			args := tc.setup(t, ws)
 			var before []map[string]any
@@ -858,9 +856,7 @@ func TestWorklog_NoActivityMutationCommandsAddNoActivity(t *testing.T) {
 		tc := allCommandSuccessCases[name]
 		t.Run(name, func(t *testing.T) {
 			ws := t.TempDir()
-			if _, err := core.Init(ws); err != nil {
-				t.Fatalf("core.Init: %v", err)
-			}
+			copyInitTemplate(t, ws)
 			args := tc.setup(t, ws)
 			before := allActivities(t, ws)
 			runCommandForWorklog(t, name, args, ws)

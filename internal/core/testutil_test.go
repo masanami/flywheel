@@ -14,9 +14,7 @@ import (
 func newStoreForTest(t *testing.T) *Store {
 	t.Helper()
 	dir := t.TempDir()
-	if _, err := Init(dir); err != nil {
-		t.Fatalf("Init() setup error = %v", err)
-	}
+	copyInitTemplate(t, dir)
 	s, err := OpenWorkspace(dir)
 	if err != nil {
 		t.Fatalf("OpenWorkspace() setup error = %v", err)

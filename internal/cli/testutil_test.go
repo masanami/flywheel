@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/masanami/flywheel/internal/core"
 )
 
 // repoRoot はテスト実行時のカレントディレクトリから go.mod を上方へ探し、
@@ -35,8 +33,6 @@ func repoRoot(t *testing.T) string {
 func initializedWorkspace(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if _, err := core.Init(dir); err != nil {
-		t.Fatalf("core.Init(%q) setup error = %v", dir, err)
-	}
+	copyInitTemplate(t, dir)
 	return dir
 }
