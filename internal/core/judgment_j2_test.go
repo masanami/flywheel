@@ -421,3 +421,47 @@ func TestValidateJ2Output_CLINonStartCommandNeedingSourceIsInvalidWithoutSource(
 		}
 	}
 }
+
+// 達成条件 (1): 取り込み元のある課題で、status・resume・cancel の差し込みが各コマンドの閉集合の外なら
+// J2 の出力を受け付けず（invalid_output）、閉集合の中なら受け付ける。
+func TestValidateJ2Output_CLINonStartCommandPlaceholdersOutsideClosedSetAreInvalid(t *testing.T) {
+	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
+	for _, tc := range []struct {
+		cmd    string
+		args   []string
+		accept bool
+	}{
+		{"status", []string{"tool", "status", "{bogus}"}, false},
+		{"resume", []string{"tool", "resume", "{bogus}"}, false},
+		{"cancel", []string{"tool", "cancel", "{bogus}"}, false},
+		{"cancel", []string{"tool", "cancel", "{run_id}", "{answer}"}, false},
+		{"status", []string{"tool", "status", "{run_id}", "{answer}"}, false},
+		{"status", []string{"tool", "status", "{run_id}"}, true},
+		{"cancel", []string{"tool", "cancel", "{run_id}"}, true},
+		{"resume", []string{"tool", "resume", "{run_id}", "{answer}"}, true},
+	} {
+		vc := j2TestContext(t, true)
+		found := false
+		for i := range vc.Conn.Connectors {
+			if vc.Conn.Connectors[i].Form != ConnectorFormCLI {
+				continue
+			}
+			found = true
+			c := vc.Conn.Connectors[i].Commands
+			switch tc.cmd {
+			case "status":
+				c.Status = tc.args
+			case "resume":
+				c.Resume = tc.args
+			case "cancel":
+				c.Cancel = tc.args
+			}
+		}
+		if !found {
+			t.Fatal("fixture has no form: cli connector")
+		}
+		if _, ok := validateJ2Output(out, vc); ok != tc.accept {
+			t.Errorf("%s %v: accepted=%v, want %v", tc.cmd, tc.args, ok, tc.accept)
+		}
+	}
+}
