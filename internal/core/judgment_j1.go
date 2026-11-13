@@ -366,6 +366,12 @@ func (s *Store) buildJ1Sections(ctx context.Context, ch Challenge, decl *AgentDe
 // run を記録する」の run と同じ行を更新するだけで、課題の状態・版は変えない
 // 〈決定済みの設計〉）。
 func (s *Store) invalidateRunOutput(ctx context.Context, runIDDisplay string) error {
+	return s.invalidateRunOutputWithReason(ctx, runIDDisplay, "")
+}
+
+// invalidateRunOutputWithReason は invalidateRunOutput に加え、reason が空でなければ run の error に
+// 検査のどれに落ちたかを残す。
+func (s *Store) invalidateRunOutputWithReason(ctx context.Context, runIDDisplay, reason string) error {
 	id, ok := parseRunID(runIDDisplay)
 	if !ok {
 		return ErrValidation
@@ -377,6 +383,11 @@ func (s *Store) invalidateRunOutput(ctx context.Context, runIDDisplay string) er
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE run SET result = ? WHERE id = ?`, string(runResultInvalidOutput), id); err != nil {
 			return err
+		}
+		if reason != "" {
+			if _, err := tx.ExecContext(ctx, `UPDATE run SET error = ? WHERE id = ?`, reason, id); err != nil {
+				return err
+			}
 		}
 		if prev == nil || prev.Result == runResultInvalidOutput {
 			return nil

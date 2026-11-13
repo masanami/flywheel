@@ -203,6 +203,7 @@ type memoryWritePlan struct {
 	indexOrig   []byte
 	indexExists bool
 	hasCreate   bool
+	dropped     []string // 捨てた追記の項目のファイル名
 }
 
 // prepareMemoryWrite は writeMemory の検査の部分。items のすべてを検査して計画を返す
@@ -229,11 +230,11 @@ func prepareMemoryWrite(base string, decl *AgentDeclaration, items []memoryItem,
 	if err != nil {
 		return nil, err
 	}
-	plans, hasCreate, err := planMemoryWrites(root, items, limit, now.Format("2006-01-02"))
+	plans, hasCreate, dropped, err := planMemoryWrites(root, items, limit, now.Format("2006-01-02"))
 	if err != nil {
 		return nil, err
 	}
-	p := &memoryWritePlan{root: root, dir: dir, plans: plans, hasCreate: hasCreate}
+	p := &memoryWritePlan{root: root, dir: dir, plans: plans, hasCreate: hasCreate, dropped: dropped}
 	if hasCreate {
 		p.indexPath, p.indexOrig, p.indexExists, err = planMemoryIndex(root)
 		if err != nil {
@@ -257,27 +258,41 @@ func (p *memoryWritePlan) written() []memoryWritten {
 // apply は計画を書く。失敗したらそれまでに書いた分を元に戻してエラーを返す。成功したら、
 // 書いた分をすべて元に戻す関数を返す（呼び出し側が後続の失敗で呼ぶ）。
 func (p *memoryWritePlan) apply() (undo func(), err error) {
+	if len(p.plans) == 0 { // 追記がすべて捨てられたときは、置き場も作らない
+		return func() {}, nil
+	}
 	return applyMemoryWrites(p.root, p.dir, p.plans, p.indexPath, p.indexOrig, p.indexExists)
 }
 
 // planMemoryWrites はすべての要素を検査し、書き込みの計画を返す（何も書かない）。
-func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimit, date string) ([]plannedMemoryWrite, bool, error) {
-	plans := make([]plannedMemoryWrite, 0, len(items))
+// 返す dropped は、接頭辞つきの slug で届くファイルが無く捨てた追記の項目のファイル名。
+func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimit, date string) (plans []plannedMemoryWrite, hasCreate bool, dropped []string, err error) {
+	plans = make([]plannedMemoryWrite, 0, len(items))
 	created := map[string]bool{} // この出力で作るファイル
 	touched := map[string]bool{} // この出力で既に書く対象にしたファイル（改行の判定用）
-	hasCreate := false
 	for i, it := range items {
 		if it.Mode != MemoryModeCreate && it.Mode != MemoryModeAppend {
-			return nil, false, memoryReject("memory[%d]: mode %q must be create or append", i, it.Mode)
+			return nil, false, nil, memoryReject("memory[%d]: mode %q must be create or append", i, it.Mode)
 		}
 		if !validMemoryType(it.Type) {
-			return nil, false, memoryReject("memory[%d]: type %q must be map, tacit, experience or reference", i, it.Type)
+			return nil, false, nil, memoryReject("memory[%d]: type %q must be map, tacit, experience or reference", i, it.Type)
 		}
 		if err := validateMemorySlug(it.Slug); err != nil {
-			return nil, false, fmt.Errorf("memory[%d]: %w", i, err)
+			return nil, false, nil, fmt.Errorf("memory[%d]: %w", i, err)
 		}
 		if strings.TrimSpace(it.Body) == "" {
-			return nil, false, memoryReject("memory[%d]: body is empty", i)
+			return nil, false, nil, memoryReject("memory[%d]: body is empty", i)
+		}
+		if it.Mode == MemoryModeAppend {
+			// 追記の slug が種類の接頭辞つき（索引の [name] ではなくファイル名）で、そのままでは
+			// ファイルに届かないときは、接頭辞を外して届くなら読み替え、届かなければその項目だけ捨てる。
+			// 接頭辞が名前の一部のファイル（experience-experience-….md）は、そのままで届くので変えない。
+			alt, ok := resolveAppendSlug(root, it, created)
+			if !ok {
+				dropped = append(dropped, it.Type+"-"+it.Slug+".md")
+				continue
+			}
+			it.Slug = alt
 		}
 		rel := it.Type + "-" + it.Slug + ".md"
 		path := filepath.Join(root.abs, rel)
@@ -286,27 +301,27 @@ func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimi
 		switch it.Mode {
 		case MemoryModeCreate:
 			if strings.TrimSpace(it.Description) == "" || strings.ContainsAny(it.Description, "\r\n") {
-				return nil, false, memoryReject("memory[%d]: description must be a non-empty single line", i)
+				return nil, false, nil, memoryReject("memory[%d]: description must be a non-empty single line", i)
 			}
 			if strings.TrimSpace(it.Confidence) == "" || strings.ContainsAny(it.Confidence, " \t\r\n") {
-				return nil, false, memoryReject("memory[%d]: confidence must be a non-empty single word", i)
+				return nil, false, nil, memoryReject("memory[%d]: confidence must be a non-empty single word", i)
 			}
 			if it.Type == MemoryTypeExperience &&
 				(strings.TrimSpace(it.Outcome) == "" || strings.TrimSpace(it.Target) == "" || strings.TrimSpace(it.Signal) == "") {
-				return nil, false, memoryReject("memory[%d]: experience requires outcome, target and signal", i)
+				return nil, false, nil, memoryReject("memory[%d]: experience requires outcome, target and signal", i)
 			}
 			if created[rel] {
-				return nil, false, memoryReject("memory[%d]: %s is created twice", i, rel)
+				return nil, false, nil, memoryReject("memory[%d]: %s is created twice", i, rel)
 			}
 			if _, err := os.Lstat(path); err == nil {
-				return nil, false, memoryReject("memory[%d]: %s already exists", i, rel)
+				return nil, false, nil, memoryReject("memory[%d]: %s already exists", i, rel)
 			} else if !os.IsNotExist(err) {
-				return nil, false, memoryReject("memory[%d]: %s cannot be inspected: %v", i, rel, err)
+				return nil, false, nil, memoryReject("memory[%d]: %s cannot be inspected: %v", i, rel, err)
 			}
 			p.content = memoryFileContent(it, root.domain)
 			p.indexRow = memoryIndexLine(it.Slug, it.Type, it.Confidence, it.Description)
 			if len(p.content) > limit.Bytes {
-				return nil, false, memoryReject("memory[%d]: %s is %d bytes, over memory_write_limit.bytes (%d)", i, rel, len(p.content), limit.Bytes)
+				return nil, false, nil, memoryReject("memory[%d]: %s is %d bytes, over memory_write_limit.bytes (%d)", i, rel, len(p.content), limit.Bytes)
 			}
 			created[rel], touched[rel] = true, true
 			hasCreate = true
@@ -317,34 +332,60 @@ func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimi
 				resolved, err := filepath.EvalSymlinks(path)
 				if err != nil {
 					if os.IsNotExist(err) {
-						return nil, false, memoryReject("memory[%d]: %s does not exist", i, rel)
+						return nil, false, nil, memoryReject("memory[%d]: %s does not exist", i, rel)
 					}
-					return nil, false, memoryReject("memory[%d]: %s cannot be resolved: %v", i, rel, err)
+					return nil, false, nil, memoryReject("memory[%d]: %s cannot be resolved: %v", i, rel, err)
 				}
 				if !root.exists || !pathInside(root.real, resolved) {
-					return nil, false, memoryReject("memory[%d]: %s resolves outside the memory directory", i, rel)
+					return nil, false, nil, memoryReject("memory[%d]: %s resolves outside the memory directory", i, rel)
 				}
 				fi, err := os.Stat(resolved)
 				if err != nil || !fi.Mode().IsRegular() {
-					return nil, false, memoryReject("memory[%d]: %s is not a regular file", i, rel)
+					return nil, false, nil, memoryReject("memory[%d]: %s is not a regular file", i, rel)
 				}
 				p.path = resolved
 				if !touched[rel] {
 					needNL, err = lacksTrailingNewline(resolved)
 					if err != nil {
-						return nil, false, fmt.Errorf("inspect %s: %w", rel, err)
+						return nil, false, nil, fmt.Errorf("inspect %s: %w", rel, err)
 					}
 				}
 			}
 			p.content = memoryAppendSection(it, date, needNL)
 			if len(p.content) > limit.Bytes {
-				return nil, false, memoryReject("memory[%d]: append to %s is %d bytes, over memory_write_limit.bytes (%d)", i, rel, len(p.content), limit.Bytes)
+				return nil, false, nil, memoryReject("memory[%d]: append to %s is %d bytes, over memory_write_limit.bytes (%d)", i, rel, len(p.content), limit.Bytes)
 			}
 			touched[rel] = true
 		}
 		plans = append(plans, p)
 	}
-	return plans, hasCreate, nil
+	return plans, hasCreate, dropped, nil
+}
+
+// resolveAppendSlug は追記の項目が指すファイルの slug を返す。ok=false は、接頭辞つきの slug で届く
+// ファイルが無く、接頭辞を外しても届かないこと（その項目を捨てる）。接頭辞が無い slug・そのままで
+// 届く slug・この出力で作るファイルへの追記は変えず、無いファイルへの追記の拒否は後段の検査が行う。
+func resolveAppendSlug(root memoryRoot, it memoryItem, created map[string]bool) (slug string, ok bool) {
+	prefix := it.Type + "-"
+	rel := prefix + it.Slug + ".md"
+	if !strings.HasPrefix(it.Slug, prefix) || created[rel] {
+		return it.Slug, true
+	}
+	if _, err := os.Lstat(filepath.Join(root.abs, rel)); err == nil {
+		return it.Slug, true
+	}
+	alt := strings.TrimPrefix(it.Slug, prefix)
+	if alt == "" {
+		return "", false
+	}
+	altRel := prefix + alt + ".md"
+	if created[altRel] {
+		return alt, true
+	}
+	if _, err := os.Lstat(filepath.Join(root.abs, altRel)); err == nil {
+		return alt, true
+	}
+	return "", false
 }
 
 func lacksTrailingNewline(path string) (bool, error) {
