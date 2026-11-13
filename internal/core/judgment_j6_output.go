@@ -11,6 +11,7 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -178,71 +179,72 @@ func j6Str(p *string) string {
 }
 
 // validateJ6Output は J6 の出力を検査する。閉集合の外の値・必須項目の欠け・
-// 同じ occurrence_id が classifications に 2 回現れる出力は ok=false（出力全体を不正とする）。
-func validateJ6Output(data []byte) (*j6ValidatedOutput, bool) {
+// 同じ occurrence_id が classifications に 2 回現れる出力は、落ちた検査を表す理由（空でない文字列）を返す
+// （出力全体を不正とする）。理由が空なら検査を通った。経験の記憶の outcome・target・signal は作成のときだけ必須で、追記は要らない。
+func validateJ6Output(data []byte) (*j6ValidatedOutput, string) {
 	var raw j6RawOutput
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, false
+		return nil, "output is not valid JSON: " + err.Error()
 	}
 	if raw.Classifications == nil || raw.Added == nil || raw.Memory == nil || raw.Followups == nil {
-		return nil, false
+		return nil, "classifications, added, memory and followups are all required"
 	}
 	out := &j6ValidatedOutput{}
 	seen := map[string]bool{}
-	for _, c := range *raw.Classifications {
+	for ci, c := range *raw.Classifications {
 		if j6Blank(c.OccurrenceID) || c.Target == nil || j6Blank(c.Signal) {
-			return nil, false
+			return nil, fmt.Sprintf("classifications[%d]: occurrence_id, target and signal are required", ci)
 		}
 		cause, ok := j6ParseCause(c.Cause)
 		if !ok {
-			return nil, false
+			return nil, fmt.Sprintf("classifications[%d]: cause is not in the closed set", ci)
 		}
 		layer, ok := j6ParseLayer(c.Layer)
 		if !ok {
-			return nil, false
+			return nil, fmt.Sprintf("classifications[%d]: layer is not in the closed set", ci)
 		}
 		id := strings.TrimSpace(*c.OccurrenceID)
 		if seen[id] {
-			return nil, false
+			return nil, fmt.Sprintf("classifications[%d]: occurrence_id %q appears twice", ci, id)
 		}
 		seen[id] = true
 		out.Classifications = append(out.Classifications, J6Classification{
 			OccurrenceID: id, Cause: cause, Layer: layer, Target: *c.Target, Signal: *c.Signal,
 		})
 	}
-	for _, a := range *raw.Added {
+	for ai, a := range *raw.Added {
 		if a.Outcome == nil || j6Blank(a.Kind) || j6Blank(a.Evidence) || a.Target == nil || j6Blank(a.Signal) {
-			return nil, false
+			return nil, fmt.Sprintf("added[%d]: outcome, kind, evidence, target and signal are required", ai)
 		}
 		outcome, ok := ParseOccurrenceOutcome(*a.Outcome)
 		if !ok {
-			return nil, false
+			return nil, fmt.Sprintf("added[%d]: outcome is not in the closed set", ai)
 		}
 		cause, ok := j6ParseCause(a.Cause)
 		if !ok {
-			return nil, false
+			return nil, fmt.Sprintf("added[%d]: cause is not in the closed set", ai)
 		}
 		layer, ok := j6ParseLayer(a.Layer)
 		if !ok {
-			return nil, false
+			return nil, fmt.Sprintf("added[%d]: layer is not in the closed set", ai)
 		}
 		out.Added = append(out.Added, J6Added{
 			Outcome: outcome, Kind: *a.Kind, Evidence: strings.TrimSpace(*a.Evidence),
 			Cause: cause, Layer: layer, Target: *a.Target, Signal: *a.Signal,
 		})
 	}
-	for _, m := range *raw.Memory {
+	for mi, m := range *raw.Memory {
 		if m.Mode == nil || m.Type == nil || m.Slug == nil || m.Body == nil {
-			return nil, false
+			return nil, fmt.Sprintf("memory[%d]: mode, type, slug and body are required", mi)
 		}
 		if !slices.Contains(J6ModeValues, J6Mode(*m.Mode)) {
-			return nil, false
+			return nil, fmt.Sprintf("memory[%d]: mode is not in the closed set", mi)
 		}
 		if !slices.Contains(J6MemoryTypeValues, *m.Type) {
-			return nil, false
+			return nil, fmt.Sprintf("memory[%d]: type is not in the closed set", mi)
 		}
-		if *m.Type == MemoryTypeExperience && (j6Blank(m.Outcome) || j6Blank(m.Target) || j6Blank(m.Signal)) {
-			return nil, false
+		if *m.Type == MemoryTypeExperience && *m.Mode == string(J6ModeCreate) && (j6Blank(m.Outcome) || j6Blank(m.Target) || j6Blank(m.Signal)) {
+			return nil, fmt.Sprintf("memory[%d]: experience create requires outcome, target and signal", mi)
 		}
 		item := memoryItem{
 			Mode: *m.Mode, Type: *m.Type, Slug: *m.Slug, Description: j6Str(m.Description),
@@ -254,13 +256,13 @@ func validateJ6Output(data []byte) (*j6ValidatedOutput, bool) {
 		}
 		out.Memory = append(out.Memory, item)
 	}
-	for _, f := range *raw.Followups {
+	for fi, f := range *raw.Followups {
 		if j6Blank(f.Title) || f.Description == nil || f.DoneCriteria == nil {
-			return nil, false
+			return nil, fmt.Sprintf("followups[%d]: title, description and done_criteria are required", fi)
 		}
 		out.Followups = append(out.Followups, J6Followup{Title: *f.Title, Description: *f.Description, DoneCriteria: *f.DoneCriteria})
 	}
-	return out, true
+	return out, ""
 }
 
 func j6ParseCause(p *string) (OccurrenceCause, bool) {

@@ -1370,3 +1370,119 @@ func TestLearnJ6_InvalidateFailureIsReportedWithTheMappingError(t *testing.T) {
 		}
 	})
 }
+
+// --- 追記の検査・slug の接頭辞・理由の保持（実ストア） ---
+
+func (f *j6Fixture) writeMem(t *testing.T, name string) {
+	t.Helper()
+	if err := os.MkdirAll(f.memRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.memRoot, name), []byte("---\nname: x\n---\n\n既存\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *j6Fixture) readMem(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(f.memRoot, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// 経験の記憶の追記は outcome・target・signal が無くても写る。作成は 3 つが無ければ invalid_output。
+func TestLearnJ6_ExperienceAppendNeedsNoExtras_CreateStillDoes(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusDone)
+	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
+	f.writeMem(t, "experience-old.md")
+	f.inv.result = j6Out([]any{j6Cls(o1, "none", "none")}, nil, []any{j6Mem("append", "experience", "old")}, nil)
+	res := f.mustLearn(t, idp(c))
+	if len(res.Items) != 1 || res.Items[0].Outcome != "learned" {
+		t.Fatalf("item = %+v, want learned", res.Items)
+	}
+	if !strings.Contains(f.readMem(t, "experience-old.md"), "BODY-old") {
+		t.Error("append not written")
+	}
+
+	g := newJ6Fixture(t)
+	c2 := g.challenge(t, StatusDone)
+	o2 := g.occ(t, c2, "plan_rejected", "bad", nil)
+	g.inv.result = j6Out([]any{j6Cls(o2, "none", "none")}, nil, []any{j6Mem("create", "experience", "fresh")}, nil)
+	res = g.mustLearn(t, idp(c2))
+	if len(res.Items) != 1 || res.Items[0].Result != RunResultInvalidOutput {
+		t.Fatalf("item = %+v, want invalid_output", res.Items)
+	}
+	runs := g.j6Runs(t)
+	if len(runs) != 1 || !strings.Contains(runs[0].Error, "memory[0]") || !strings.Contains(runs[0].Error, "outcome") {
+		t.Errorf("run error = %q, want the failed check", runs[0].Error)
+	}
+	if g.unclassified(t) != 1 || len(g.memFiles(t)) != 0 {
+		t.Error("invalid output wrote something")
+	}
+}
+
+// 追記の slug が接頭辞つきでファイルに届くなら読み替える。届かなければその項目だけ捨て、残りは写す。
+// 接頭辞が名前の一部のファイル（experience-experience-….md）は、そのまま届く。
+func TestLearnJ6_AppendSlugWithTypePrefix(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusDone)
+	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
+	f.writeMem(t, "tacit-real.md")
+	f.writeMem(t, "experience-experience-dbl.md")
+	f.inv.result = j6Out([]any{j6Cls(o1, "none", "none")}, nil, []any{
+		j6Mem("append", "tacit", "tacit-real"),          // 外すと届く → 読み替え
+		j6Mem("append", "tacit", "tacit-ghost"),         // 外しても届かない → その項目だけ捨てる
+		j6Mem("append", "experience", "experience-dbl"), // 二重の接頭辞のファイル → そのまま
+		j6Mem("create", "reference", "kept"),            // 残りは写す
+	}, []any{map[string]any{"title": "t", "description": "d", "done_criteria": "c"}})
+	res := f.mustLearn(t, idp(c))
+	if len(res.Items) != 1 || res.Items[0].Outcome != "learned" {
+		t.Fatalf("item = %+v, want learned", res.Items)
+	}
+	if !strings.Contains(res.Items[0].Note, "dropped 1 memory append") || !strings.Contains(res.Items[0].Note, "tacit-tacit-ghost.md") {
+		t.Errorf("note = %q", res.Items[0].Note)
+	}
+	var rawLog string
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT after FROM activity WHERE action = 'learn'`).Scan(&rawLog)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rawLog, `"dropped_memory":["tacit-tacit-ghost.md"]`) {
+		t.Errorf("learn after = %s", rawLog)
+	}
+	if !strings.Contains(f.readMem(t, "tacit-real.md"), "BODY-real") && !strings.Contains(f.readMem(t, "tacit-real.md"), "BODY-tacit-real") {
+		t.Error("prefixed slug was not resolved to the existing file")
+	}
+	if !strings.Contains(f.readMem(t, "experience-experience-dbl.md"), "BODY-experience-dbl") {
+		t.Error("doubled-prefix file was not appended")
+	}
+	for _, name := range f.memFiles(t) {
+		if strings.Contains(name, "ghost") {
+			t.Errorf("ghost file created: %s", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(f.memRoot, "reference-kept.md")); err != nil {
+		t.Errorf("create not carried over: %v", err)
+	}
+	if f.unclassified(t) != 0 || f.count(t, `SELECT COUNT(*) FROM challenge WHERE origin = 'followup'`) != 1 {
+		t.Error("classification or followup not carried over")
+	}
+}
+
+// 検査の理由は、スキーマ違反でもストアの事実への不一致でも run の error に残る。
+func TestLearnJ6_InvalidOutput_KeepsReasonInRunError(t *testing.T) {
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusDone)
+	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
+	f.occ(t, c, "completion_rejected", "bad", nil)
+	f.inv.result = j6Out([]any{j6Cls(o1, "none", "none")}, nil, nil, nil)
+	f.mustLearn(t, idp(c))
+	runs := f.j6Runs(t)
+	if len(runs) != 1 || runs[0].Result != RunResultInvalidOutput || !strings.Contains(runs[0].Error, "classifications has 1 items, want 2") {
+		t.Errorf("runs = %+v", runs)
+	}
+}
