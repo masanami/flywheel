@@ -94,10 +94,10 @@ func putRoutedFakeClaudeOnPATH(t *testing.T, routes []fakeClaudeRoute, orderLogP
 	}
 	b.WriteString("*)\nprintf 'fake claude: no route for: %s\\n' \"$ARGS\" >&2\nexit 1\n;;\nesac\n")
 
-	if err := writeExecutable(filepath.Join(dir, "claude"), []byte(b.String())); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(b.String()), 0o755); err != nil {
 		t.Fatalf("write routed fake claude: %v", err)
 	}
-	addToolDir(t, dir)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // readOrderLog は偽の gh・偽の claude が追記した順序ログを行ごとに返す（呼ばれた順）。

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/masanami/flywheel/internal/core"
@@ -101,7 +102,7 @@ func (l *Launcher) runContractCommand(ctx context.Context, in core.ContractLaunc
 	if len(in.Command) == 0 {
 		return core.ContractLaunchOutput{Result: core.RunResultLaunchFailed, ErrorSummary: "invoker: empty contract command"}, nil
 	}
-	path, lookErr := l.look(in.Command[0])
+	path, lookErr := exec.LookPath(in.Command[0])
 	if lookErr != nil {
 		return core.ContractLaunchOutput{Result: core.RunResultLaunchFailed, ErrorSummary: lookErr.Error()}, nil
 	}

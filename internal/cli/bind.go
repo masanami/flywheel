@@ -20,7 +20,7 @@ func runBind(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	client, err := newIngestClient(a.lookPath())
+	client, err := newIngestClient()
 	if err != nil {
 		return nil, err
 	}

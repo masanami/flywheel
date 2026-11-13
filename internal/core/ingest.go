@@ -162,7 +162,7 @@ func ingestItemFromBinding(sb *sourceBinding, outcome IngestOutcome) IngestItemR
 func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*IngestResult, error) {
 	// 作業ログの actor（OS のログインユーザー名）は M1 の mutate と同じ規則で
 	// 解決する。解決できない環境では上流へ接続せずに終える。
-	actor, err := s.resolveActor()
+	actor, err := resolveActor()
 	if err != nil {
 		return nil, err
 	}

@@ -32,7 +32,7 @@ func runRun(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	launcher := invoker.NewLauncherWithLookPath(a.LookPath)
+	launcher := invoker.NewLauncher()
 	if err := launcher.Available(ctx); err != nil {
 		if errors.Is(err, invoker.ErrClaudeNotFound) {
 			return nil, NewError(CodeInvokerUnavailable, err.Error())
@@ -61,9 +61,9 @@ func runRun(a Args) (any, error) {
 		Judgment:    launcher,
 		Delegate:    launcher,
 		Contract:    launcher,
-		Upstream:    newUpstreamThreadSource(a.lookPath()),
+		Upstream:    newUpstreamThreadSource(),
 		Git:         git.New(),
-		Reconcile:   newBranchSource(a.lookPath()),
+		Reconcile:   newBranchSource(),
 		Predictor:   launcher,
 		CycleID:     cyc.ID,
 	})

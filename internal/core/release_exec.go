@@ -300,7 +300,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 	}
 
 	// 外部への書き込み（マージの依頼）より前に、作業ログの actor を解決しておく。
-	actor, err := s.resolveActor()
+	actor, err := resolveActor()
 	if err != nil {
 		return nil, nil, err
 	}

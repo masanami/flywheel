@@ -113,7 +113,7 @@ type delegateFixture struct {
 func newDelegateFixture(t *testing.T) *delegateFixture {
 	t.Helper()
 	s := newStoreForTest(t)
-	fixedStoreActor(s, "alice")
+	fixedActor(t, "alice")
 	conn, err := parseConnectorsDeclaration([]byte(delegateConnectorsJSON))
 	if err != nil {
 		t.Fatalf("parseConnectorsDeclaration: %v", err)

@@ -55,7 +55,7 @@ esac
 	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
-	addToolDir(t, dir)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return g
 }
 

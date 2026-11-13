@@ -186,7 +186,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	}
 	// 作業ログの actor（OS のログインユーザー名）を解決できない環境は、周を始める前に
 	// 拒否する（周の行だけが aborted で残る失敗にしない）。
-	if _, err := s.resolveActor(); err != nil {
+	if _, err := resolveActor(); err != nil {
 		return nil, err
 	}
 

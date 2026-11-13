@@ -32,15 +32,6 @@ type Store struct {
 	// （*Store は同一パッケージから生成されるため、公開セッターは持たない）。
 	now func() time.Time
 
-	// actor は actor 解決の入力元のテスト用の差し替え。nil ならパッケージ変数 actorSource
-	// （本番の既定）を使う。パッケージ変数を書き換えずにテストごとに actor を固定でき、
-	// t.Parallel にできる。本番 API には注入口を露出しない。
-	actor *actorSourceFuncs
-
-	// delegationWait は委譲の枠待ちの再評価の間隔のテスト用の差し替え。0 なら
-	// delegationWaitInterval（既定）を使う。同じ理由で、パッケージ変数を書き換えない。
-	delegationWait time.Duration
-
 	// insertActivity はテストが作業ログへの書き込みを失敗させるためのフック。
 	// nil なら defaultInsertActivity を使う（#9 §A-3 の失敗注入。本番 API には
 	// 注入口を露出しない）。

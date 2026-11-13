@@ -482,9 +482,6 @@ func drainSnapshot(d *ptyDrain) string {
 func runConfirmedChild(t *testing.T, args []string, confirmInput string) (code int, ptyOutput, stdout, stderr string) {
 	t.Helper()
 	cmd, stdoutBuf, stderrBuf := newChildCmd(args)
-	if env := childPathEnv(t); env != "" {
-		cmd.Env = append(cmd.Env, env)
-	}
 	master, err := pty.StartWithAttrs(cmd, nil, &syscall.SysProcAttr{Setsid: true, Setctty: true})
 	if err != nil {
 		t.Fatalf("pty.StartWithAttrs: %v", err)

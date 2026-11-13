@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -209,7 +210,7 @@ func buildDelegateArgs(in core.DelegateLaunchInput) []string {
 // 戻り値の error は invoker 自身の予期しない失敗だけに使う（claude の起動失敗・時間切れ・
 // 異常終了は Result で表す）。
 func (l *Launcher) InvokeDelegation(ctx context.Context, in core.DelegateLaunchInput) (core.JudgmentLaunchOutput, error) {
-	claudePath, lookErr := l.look("claude")
+	claudePath, lookErr := exec.LookPath("claude")
 	if lookErr != nil {
 		return core.JudgmentLaunchOutput{Result: core.RunResultLaunchFailed, ErrorSummary: lookErr.Error()}, nil
 	}

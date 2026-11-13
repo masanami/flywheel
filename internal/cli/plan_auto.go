@@ -38,7 +38,7 @@ func runPlanAuto(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	launcher := invoker.NewLauncherWithLookPath(a.LookPath)
+	launcher := invoker.NewLauncher()
 	if err := launcher.Available(ctx); err != nil {
 		if errors.Is(err, invoker.ErrClaudeNotFound) {
 			return nil, NewError(CodeInvokerUnavailable, err.Error())
@@ -65,7 +65,7 @@ func runPlanAuto(a Args) (any, error) {
 		AgentDecl:   decl,
 		ConnDecl:    conn,
 		Invoker:     launcher,
-		Upstream:    newUpstreamThreadSource(a.lookPath()),
+		Upstream:    newUpstreamThreadSource(),
 		CycleID:     cyc.ID,
 	})
 
@@ -94,8 +94,8 @@ func runPlanAuto(a Args) (any, error) {
 // not_started に upstream_fetch_failed で出る（計画する時点の上流を読めないまま
 // 計画しない）。gh の 1 回の呼び出しの時間の上限は ingest と同じ
 // （ingestGHTimeout。テストだけが書き換える）。
-func newUpstreamThreadSource(lp lookPathFunc) core.UpstreamThreadSource {
-	client, err := github.New(github.Options{Timeout: ingestGHTimeout, LookPath: lp})
+func newUpstreamThreadSource() core.UpstreamThreadSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
 	if err != nil {
 		return unavailableThreadSource{err: err}
 	}
@@ -117,8 +117,8 @@ func (u unavailableThreadSource) GetReferencedIssue(context.Context, string, int
 // newBranchSource は委譲の後の照合が使う、リモートのブランチと PR の取得（`gh api` の
 // GET だけ）を組み立てる。`gh` が PATH に無いときは、どの取得も失敗する実装を返す
 // （照合は取得の失敗を結果に書き、成果物を確かめられなかったものとして扱う）。
-func newBranchSource(lp lookPathFunc) core.UpstreamBranchSource {
-	client, err := github.New(github.Options{Timeout: ingestGHTimeout, LookPath: lp})
+func newBranchSource() core.UpstreamBranchSource {
+	client, err := github.New(github.Options{Timeout: ingestGHTimeout})
 	if err != nil {
 		return unavailableBranchSource{err: err}
 	}

@@ -34,7 +34,7 @@ func runShow(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	changes := releaseHeadChanges(ctx, a.lookPath(), detail)
+	changes := releaseHeadChanges(ctx, detail)
 	resp := view.FromChallengeDetail(detail)
 	for _, c := range changes {
 		resp.ReleaseHeadChanges = append(resp.ReleaseHeadChanges, view.ReleaseHeadChange{OperationID: c.opID, HeadChange: view.FromReleaseHeadAssessment(c.assessment)})
@@ -61,7 +61,7 @@ type headChangeOf struct {
 
 // releaseHeadChanges は課題の承認待ちの release のうち、PR の head が J5 の検証の head から動いたものを評価する
 // （#485）。GitHub を読めない release・head が動いていない release は載せない（show を止めない）。
-func releaseHeadChanges(ctx context.Context, lp lookPathFunc, d *core.ChallengeDetail) []headChangeOf {
+func releaseHeadChanges(ctx context.Context, d *core.ChallengeDetail) []headChangeOf {
 	var out []headChangeOf
 	for _, op := range d.Operations {
 		if op.Kind != core.OperationKindRelease || op.State != core.OperationStatePending || op.Ref == nil || op.VerifiedHeadSHA == nil {
@@ -70,7 +70,7 @@ func releaseHeadChanges(ctx context.Context, lp lookPathFunc, d *core.ChallengeD
 		if _, _, ok := core.ParseReleasePullRequestRef(*op.Ref); !ok {
 			continue
 		}
-		a, err := core.AssessReleaseHead(ctx, newCheckSource(lp), newCompareSource(lp), *op.Ref, *op.VerifiedHeadSHA)
+		a, err := core.AssessReleaseHead(ctx, newCheckSource(), newCompareSource(), *op.Ref, *op.VerifiedHeadSHA)
 		if err != nil || a.Change.Kind == "" {
 			continue
 		}

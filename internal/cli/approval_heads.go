@@ -61,7 +61,7 @@ type releaseDecision struct {
 // 判定の順は 直前の試行の結果が merged_unapproved か → PR の URL か → リポジトリが宣言にあるか → head の取得 → 検証の head との比較。
 // verified は release の ID から最新の検証の head を返す（記録なしは ok=false）。
 // mergedUnapproved は release の ID について、直前の試行の結果が merged_unapproved かを返す。
-func resolveReleaseDecisions(ctx context.Context, lp lookPathFunc, ws string, ops []core.IrreversibleOperation, verified func(id string) (string, bool), mergedUnapproved func(id string) bool) ([]releaseDecision, error) {
+func resolveReleaseDecisions(ctx context.Context, ws string, ops []core.IrreversibleOperation, verified func(id string) (string, bool), mergedUnapproved func(id string) bool) ([]releaseDecision, error) {
 	declared := map[string]bool{}
 	decl, err := core.LoadConnectorsDeclaration(ws)
 	switch {
@@ -100,7 +100,7 @@ func resolveReleaseDecisions(ctx context.Context, lp lookPathFunc, ws string, op
 		}
 	}
 	if len(fetchOps) > 0 {
-		heads := core.ResolveReleaseHeads(ctx, fetchOps, newCheckSource(lp))
+		heads := core.ResolveReleaseHeads(ctx, fetchOps, newCheckSource())
 		for j, h := range heads {
 			i := fetchIdx[j]
 			if h.HeadSHA == nil {
@@ -114,7 +114,7 @@ func resolveReleaseDecisions(ctx context.Context, lp lookPathFunc, ws string, op
 				continue
 			}
 			if v != out[i].Head {
-				assessVerifiedHeadMismatch(ctx, lp, &out[i], v)
+				assessVerifiedHeadMismatch(ctx, &out[i], v)
 			}
 		}
 	}
@@ -124,8 +124,8 @@ func resolveReleaseDecisions(ctx context.Context, lp lookPathFunc, ws string, op
 // assessVerifiedHeadMismatch は、取得した head が検証の head（verified）と異なる release を評価する。
 // 既定ブランチの取り込みだけで今の head の CI が通っていれば、評価した head を承認の対象にする（MergeIn）。
 // そうでなければ（取り込み以外の変更・判定できない・CI が通っていない・取得に失敗）外す。
-func assessVerifiedHeadMismatch(ctx context.Context, lp lookPathFunc, d *releaseDecision, verified string) {
-	a, err := core.AssessReleaseHead(ctx, newCheckSource(lp), newCompareSource(lp), *d.Op.Ref, verified)
+func assessVerifiedHeadMismatch(ctx context.Context, d *releaseDecision, verified string) {
+	a, err := core.AssessReleaseHead(ctx, newCheckSource(), newCompareSource(), *d.Op.Ref, verified)
 	switch {
 	case err != nil:
 		d.Reason = reasonVerifiedHeadMismatch
@@ -234,7 +234,7 @@ func completionReleaseDecisions(ctx context.Context, a Args, p *core.ApprovalPre
 	if len(p.PendingReleases) == 0 {
 		return nil, nil
 	}
-	return resolveReleaseDecisions(ctx, a.lookPath(), a.Store.Workspace(), p.PendingReleases, func(id string) (string, bool) {
+	return resolveReleaseDecisions(ctx, a.Store.Workspace(), p.PendingReleases, func(id string) (string, bool) {
 		v, ok := p.VerifiedHeadSHAs[id]
 		return v, ok
 	}, func(id string) bool {
@@ -249,7 +249,7 @@ func operationReleaseDecision(ctx context.Context, a Args, p *core.OperationAppr
 		return nil, nil
 	}
 	op := core.IrreversibleOperation{ID: p.OperationID, Kind: p.Kind, Summary: p.Summary, Ref: p.Ref}
-	ds, err := resolveReleaseDecisions(ctx, a.lookPath(), a.Store.Workspace(), []core.IrreversibleOperation{op}, func(string) (string, bool) {
+	ds, err := resolveReleaseDecisions(ctx, a.Store.Workspace(), []core.IrreversibleOperation{op}, func(string) (string, bool) {
 		if p.VerifiedHeadSHA == nil {
 			return "", false
 		}

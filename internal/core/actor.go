@@ -14,8 +14,8 @@ type actorSourceFuncs struct {
 	getenv      func(string) string
 }
 
-// actorSource は本番の既定実装。パッケージ変数を差し替えるテストは t.Parallel にしない
-// （t.Parallel にするテストは Store.actor で Store ごとに差し替える）。
+// actorSource は本番の既定実装。internal/core のテストだけが t.Cleanup で
+// 復元しつつ差し替える（該当テストは t.Parallel にしない）。
 var actorSource = actorSourceFuncs{
 	userCurrent: user.Current,
 	getenv:      os.Getenv,
@@ -26,26 +26,13 @@ var actorSource = actorSourceFuncs{
 // LOGNAME。どれも得られなければ ErrActorUnavailable を返し、呼び出し側
 // （mutate）は一切の変更を行わない。
 func resolveActor() (string, error) {
-	return resolveActorFrom(actorSource)
-}
-
-// resolveActor は s の入力元（テストが Store ごとに持たせたもの。無ければ既定）で actor を解決する。
-// パッケージ変数 actorSource を書き換えずに、テストごとに actor を固定できる。
-func (s *Store) resolveActor() (string, error) {
-	if s.actor != nil {
-		return resolveActorFrom(*s.actor)
-	}
-	return resolveActor()
-}
-
-func resolveActorFrom(src actorSourceFuncs) (string, error) {
-	if u, err := src.userCurrent(); err == nil && u != nil && u.Username != "" {
+	if u, err := actorSource.userCurrent(); err == nil && u != nil && u.Username != "" {
 		return u.Username, nil
 	}
-	if v := src.getenv("USER"); v != "" {
+	if v := actorSource.getenv("USER"); v != "" {
 		return v, nil
 	}
-	if v := src.getenv("LOGNAME"); v != "" {
+	if v := actorSource.getenv("LOGNAME"); v != "" {
 		return v, nil
 	}
 	return "", ErrActorUnavailable

@@ -20,15 +20,6 @@ func fixedActor(t *testing.T, name string) {
 	})
 }
 
-// fixedStoreActor は s の resolveActor が常に name を返すようにする。fixedActor と違い、
-// パッケージ変数 actorSource を書き換えないので、t.Parallel のテストで使える。
-func fixedStoreActor(s *Store, name string) {
-	s.actor = &actorSourceFuncs{
-		userCurrent: func() (*user.User, error) { return &user.User{Username: name}, nil },
-		getenv:      fakeGetenv(map[string]string{}),
-	}
-}
-
 func strPtr(s string) *string { return &s }
 
 func TestCreateChallenge_SetsUnclassifiedStatusVersionAndID(t *testing.T) {

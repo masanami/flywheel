@@ -30,7 +30,7 @@ func runClassifyAuto(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	launcher := invoker.NewLauncherWithLookPath(a.LookPath)
+	launcher := invoker.NewLauncher()
 	if err := launcher.Available(ctx); err != nil {
 		// design-reviewer 指摘（round1 CONFIRMED）: CLAUDE.md の import の向きの
 		// 規約「cli が invoker を import してよいのは…起動不能のエラー
