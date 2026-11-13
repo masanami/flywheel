@@ -96,10 +96,10 @@ lint:
 	fi
 	golangci-lint run
 
-## test: go test -race ./... が終了コード 0 で終わることを確認する。-timeout 30m は internal/core・internal/cli が遅く 20m に近づいたための余裕で、テストの用意を速くした後（flywheel#567）の実測で足りるなら 20m へ戻せる。
+## test: go test -race ./... が終了コード 0 で終わることを確認する。-timeout 20m はパッケージごとにかかる。テストの用意を速くした後（flywheel#567）の main の CI（Linux）の実測では、最も遅いパッケージでも約 4.2 分（internal/core 187〜252 秒、internal/cli 180〜222 秒）なので、20m で足りる。
 test:
 	@echo "==> go test -race ./..."
-	go test -race -timeout 30m ./...
+	go test -race -timeout 20m ./...
 
 ## build: CGO_ENABLED=0 go build ./cmd/flywheel。成果物は build/ 配下（.gitignore 済み）へ出す。
 build:
