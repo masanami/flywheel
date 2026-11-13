@@ -484,8 +484,9 @@ const mergeableNullDetail = "mergeable is null"
 
 // judgeRelease は judgeReleaseOnce を、mergeable が null で待つ結果のとき、設定の回数まで読み直して返す。
 func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions) releaseJudgment {
+	approved := &approvedHeadChecks{}
 	for n := 0; ; n++ {
-		j := s.judgeReleaseOnce(ctx, row, approvedHead, opts)
+		j := s.judgeReleaseOnce(ctx, row, approvedHead, opts, approved)
 		if j.result != ExecutionResultWaitingChecks || j.detail != mergeableNullDetail || n >= opts.MergeableRetries {
 			return j
 		}
@@ -497,15 +498,31 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 	}
 }
 
-// approvedHeadHadNoChecks は、承認した head にチェックが 1 件も付いていなかったと確かめられたときだけ true を返す。
-// 取得の手段が無い・取得に失敗した場合は false（確かめられないので待つ側に倒す）。
-func approvedHeadHadNoChecks(ctx context.Context, src UpstreamCheckSource, repo, approvedHead string) bool {
+// approvedHeadChecks は、承認した head のチェックの取得結果を 1 回の判定（mergeable の読み直しを含む）の中で使い回す入れ物。
+type approvedHeadChecks struct {
+	done bool
+	none bool
+	err  error
+}
+
+// noChecks は、承認した head にチェックが 1 件も付いていなかったと確かめられたときだけ none=true を返す。
+// 取得の手段が無い場合は none=false・err=nil、取得に失敗した場合は none=false・err（確かめられないので待つ側に倒す）。
+func (a *approvedHeadChecks) noChecks(ctx context.Context, src UpstreamCheckSource, repo, approvedHead string) (bool, error) {
+	if a.done {
+		return a.none, a.err
+	}
+	a.done = true
 	cs, ok := src.(UpstreamCommitChecksSource)
 	if !ok {
-		return false
+		return false, nil
 	}
 	checks, err := cs.GetCommitChecks(ctx, repo, approvedHead)
-	return err == nil && len(checks) == 0
+	if err != nil {
+		a.err = err
+		return false, err
+	}
+	a.none = len(checks) == 0
+	return a.none, nil
 }
 
 // judgeReleaseOnce は判定の順 1〜11 を評価し、最初に当たった条件の結果を返す。
@@ -514,7 +531,7 @@ func approvedHeadHadNoChecks(ctx context.Context, src UpstreamCheckSource, repo,
 // 外さず、8〜10 で取り込んだ後の head のすべてのチェック（必須でないものを含む。1 件以上）が成功していることを
 // 確かめてから、その head をマージする（承認し直さない）。ただし承認した head にもチェックが 0 件だったと確かめられたときは、0 件のままでも進む。10 の後で PR が BEHIND（衝突なし）なら、マージを試さず
 // 既定ブランチを取り込む依頼（UpstreamPullRequestBranchUpdater）をして待つ。CI の結果は次の試行が読む。
-func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions) releaseJudgment {
+func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions, approved *approvedHeadChecks) releaseJudgment {
 	// 1
 	if approvedHead == "" {
 		return releaseJudgment{result: ExecutionResultNoApprovedHead}
@@ -581,8 +598,16 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 	}
 	// 取り込んだ後の head は、チェックが 1 件も付いていない間は何も見ていないので待つ。
 	// 承認した head にもチェックが 0 件だった（読めない場合は 0 件と見なさない）なら、何も見ていないのは承認の時点から同じなので待たない。
-	if moved && !ChecksAllPassed(pr.Checks) && (len(pr.Checks) != 0 || !approvedHeadHadNoChecks(ctx, opts.Checks, repo, approvedHead)) {
-		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "no checks on the updated head yet"}
+	noChecksMerge := false
+	if moved && len(pr.Checks) == 0 {
+		none, err := approved.noChecks(ctx, opts.Checks, repo, approvedHead)
+		switch {
+		case err != nil:
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "cannot read the checks of the approved head: " + err.Error()}
+		case !none:
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "no checks on the updated head yet"}
+		}
+		noChecksMerge = true
 	}
 	// 10
 	if pr.Mergeable == nil {
@@ -623,7 +648,11 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 	if after.HeadSHA != pr.HeadSHA {
 		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergedUnapproved, observedHead: after.HeadSHA}
 	}
-	return releaseJudgment{mergeRequested: true, result: ExecutionResultMerged, observedHead: after.HeadSHA, mergeCommit: after.MergeCommitSHA}
+	detail := ""
+	if noChecksMerge {
+		detail = "merged with no checks on the updated head (the approved head had none either)"
+	}
+	return releaseJudgment{mergeRequested: true, result: ExecutionResultMerged, observedHead: after.HeadSHA, mergeCommit: after.MergeCommitSHA, detail: detail}
 }
 
 func mergeUnconfirmedDetail(err, recordErr error) string {

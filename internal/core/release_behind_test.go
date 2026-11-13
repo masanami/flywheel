@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,11 +184,12 @@ func TestRelease_MovedHeadWithoutChecksMergesWhenApprovedHeadHadNone(t *testing.
 	o.Compare = cmp
 	cc := &commitChecksFake{fakeRelease: f.fake}
 	o.Checks = cc
-	if len(cc.shas) != 0 {
-		t.Fatalf("unexpected read before run: %v", cc.shas)
-	}
 	if item := f.runWith(t, o); len(cc.shas) == 0 || cc.shas[0] != relHead || item.Result != ExecutionResultMerged || len(f.fake.mergeArgs) != 1 || f.fake.mergeArgs[0][2] != "n1" {
 		t.Fatalf("result = %s, merges = %v, want merged on n1", item.Result, f.fake.mergeArgs)
+	}
+	at := f.attempts(t)
+	if got := at[len(at)-1].Detail; got != "merged with no checks on the updated head (the approved head had none either)" {
+		t.Errorf("merged attempt detail = %q, want it to say the merge had no checks", got)
 	}
 }
 
@@ -205,6 +207,14 @@ func TestRelease_MovedHeadWithoutChecksWaitsWhenApprovedHeadHadChecks(t *testing
 		o.Checks = cc
 		if item := f.runWith(t, o); item.Result != ExecutionResultWaitingChecks || len(f.fake.mergeArgs) != 0 {
 			t.Fatalf("%s: result = %s, merges = %v, want waiting_checks", name, item.Result, f.fake.mergeArgs)
+		}
+		got := f.attempts(t)
+		detail := got[len(got)-1].Detail
+		if name == "read error" && (!strings.Contains(detail, "cannot read the checks of the approved head") || !strings.Contains(detail, "boom")) {
+			t.Errorf("%s: detail = %q, want a read-failure detail", name, detail)
+		}
+		if name == "had checks" && detail != "no checks on the updated head yet" {
+			t.Errorf("%s: detail = %q", name, detail)
 		}
 	}
 }
@@ -390,5 +400,20 @@ func TestRelease_MultiplePRsBehindAfterFirstMergeOnlyUpdateAndWait(t *testing.T)
 	}
 	if len(m.merges) != 1 || len(m.updates) != 1 || m.merges[0] == m.updates[0] {
 		t.Errorf("merges = %v, updates = %v, want one merge and one update of the other PR", m.merges, m.updates)
+	}
+}
+
+// mergeable が null の読み直しの間、承認した head のチェックは 1 回しか取らない。
+func TestRelease_ApprovedHeadChecksReadOnceAcrossMergeableRetries(t *testing.T) {
+	f, cmp := movedHeadFixture(t)
+	f.fake.pr.Checks = nil
+	f.fake.pr.Mergeable = nil
+	o := f.opts()
+	o.Compare = cmp
+	o.MergeableRetries, o.MergeableInterval = 3, time.Nanosecond
+	cc := &commitChecksFake{fakeRelease: f.fake}
+	o.Checks = cc
+	if item := f.runWith(t, o); item.Result != ExecutionResultWaitingChecks || len(cc.shas) != 1 || f.fake.getCalls != 4 {
+		t.Fatalf("result = %s, reads = %v, pr reads = %d, want waiting_checks, one approved-head read, 4 PR reads", item.Result, cc.shas, f.fake.getCalls)
 	}
 }
