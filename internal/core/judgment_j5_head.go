@@ -263,8 +263,8 @@ func (s *Store) prepareJ5Head(ctx context.Context, in J5AutoInput, challengeID s
 	if diffs != "" {
 		head.Sections = append(head.Sections, JudgmentDataSection{Label: labelPullRequestDiff, Content: diffs})
 	}
-	if in.Bodies != nil {
-		head.Sections = append(head.Sections, JudgmentDataSection{Label: labelPullRequestBody, Content: fetchPullRequestBodies(ctx, in.Bodies, targets)})
+	if in.Descriptions != nil {
+		head.Sections = append(head.Sections, JudgmentDataSection{Label: labelArtifactDescription, Content: fetchArtifactDescriptions(ctx, in.Descriptions, targets)})
 	}
 	head.Sections = append(head.Sections, JudgmentDataSection{Label: labelPullRequestHeadNotice, Content: strings.Join(append(checkout, notes...), "\n")})
 	return head, nil

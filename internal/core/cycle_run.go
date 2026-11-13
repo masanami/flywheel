@@ -83,8 +83,8 @@ type CycleRunInput struct {
 	Checks UpstreamCheckSource
 	// Diffs は J5 の起動の前の PR の差分の取得（GET だけ）。ConnDecl が非 nil のとき必須。
 	Diffs UpstreamDiffSource
-	// Bodies は J5 の起動の前の PR の本文の取得（GET だけ。nil なら本文の区画を入れない）。
-	Bodies UpstreamBodySource
+	// Descriptions は J5 の起動の前の成果物の説明文の取得（読み取りだけ。nil なら説明文の区画を入れない）。
+	Descriptions UpstreamDescriptionSource
 	// HeadGit は J5 が PR の head を読む一時の worktree の口。ConnDecl が非 nil のとき必須。
 	HeadGit HeadWorktreeGit
 	// Merger は release の段のマージの依頼の書き込み（取り込みの依頼も実装していれば BEHIND に使う）。ConnDecl が非 nil のとき必須。
@@ -358,16 +358,16 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 	verify := CyclePhaseResult{Phase: CyclePhaseVerify, Skipped: in.ConnDecl == nil}
 	if in.ConnDecl != nil {
 		res, err := s.VerifyAutoJ5(ctx, J5AutoInput{
-			AgentDecl:  in.AgentDecl,
-			Invoker:    in.Invoker,
-			Upstream:   in.Upstream,
-			Checks:     in.Checks,
-			Diffs:      in.Diffs,
-			Bodies:     in.Bodies,
-			HeadGit:    in.HeadGit,
-			Connectors: in.ConnDecl,
-			CycleID:    cycleID,
-			Cycle:      jc,
+			AgentDecl:    in.AgentDecl,
+			Invoker:      in.Invoker,
+			Upstream:     in.Upstream,
+			Checks:       in.Checks,
+			Diffs:        in.Diffs,
+			Descriptions: in.Descriptions,
+			HeadGit:      in.HeadGit,
+			Connectors:   in.ConnDecl,
+			CycleID:      cycleID,
+			Cycle:        jc,
 		})
 		if err != nil {
 			return nil, err

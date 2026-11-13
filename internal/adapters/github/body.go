@@ -15,24 +15,24 @@ type rawPullBody struct {
 	} `json:"head"`
 }
 
-// GetPullRequestBody は core.UpstreamBodySource の実装。PR の取得（`gh api` の GET 1 回）の応答から、
+// GetArtifactDescription は core.UpstreamDescriptionSource の実装（成果物の説明文＝PR の本文）。PR の取得（`gh api` の GET 1 回）の応答から、
 // 本文とそのときの head の SHA をまとめて読む。読み取りだけで、書き込みはしない。
-func (c *Client) GetPullRequestBody(ctx context.Context, repo string, number int) (core.UpstreamPullRequestBody, error) {
+func (c *Client) GetArtifactDescription(ctx context.Context, repo string, number int) (core.UpstreamArtifactDescription, error) {
 	what := fmt.Sprintf("get pull request body %s#%d", repo, number)
 	body, err := c.ghGet(ctx, what, getPullURL(repo, number))
 	if err != nil {
-		return core.UpstreamPullRequestBody{}, err
+		return core.UpstreamArtifactDescription{}, err
 	}
 	var pr rawPullBody
 	if err := json.Unmarshal(body, &pr); err != nil {
-		return core.UpstreamPullRequestBody{}, fmt.Errorf("adapters/github: decode %s: %w", what, err)
+		return core.UpstreamArtifactDescription{}, fmt.Errorf("adapters/github: decode %s: %w", what, err)
 	}
 	if pr.Head.SHA == "" {
-		return core.UpstreamPullRequestBody{}, fmt.Errorf("adapters/github: %s: the pull request lacks head.sha", what)
+		return core.UpstreamArtifactDescription{}, fmt.Errorf("adapters/github: %s: the pull request lacks head.sha", what)
 	}
-	out := core.UpstreamPullRequestBody{HeadSHA: pr.Head.SHA}
+	out := core.UpstreamArtifactDescription{HeadSHA: pr.Head.SHA}
 	if pr.Body != nil {
-		out.Body = *pr.Body
+		out.Text = *pr.Body
 	}
 	return out, nil
 }

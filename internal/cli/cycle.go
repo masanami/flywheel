@@ -118,7 +118,7 @@ func runCycle(a Args) (any, error) {
 		reconcile core.UpstreamBranchSource
 		checks    core.UpstreamCheckSource
 		diffs     core.UpstreamDiffSource
-		bodies    core.UpstreamBodySource
+		bodies    core.UpstreamDescriptionSource
 		headGit   core.HeadWorktreeGit
 		compare   core.UpstreamCompareSource
 		contract  core.ContractClient
@@ -126,7 +126,7 @@ func runCycle(a Args) (any, error) {
 	if hasConnectors {
 		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(), newCheckSource()
 		merger, diffs, headGit = newPullRequestMerger(), newDiffSource(), git.New()
-		compare, bodies = newCompareSource(), newBodySource()
+		compare, bodies = newCompareSource(), newDescriptionSource()
 		contract = launcher
 	}
 
@@ -141,23 +141,23 @@ func runCycle(a Args) (any, error) {
 	}
 
 	res, err := a.Store.RunCycle(ctx, core.CycleRunInput{
-		Trigger:   trigger,
-		AgentDecl: agent,
-		Ingest:    ingest,
-		ConnDecl:  conn,
-		Invoker:   launcher,
-		Upstream:  threads,
-		Delegate:  delegate,
-		Contract:  contract,
-		Git:       slotGit,
-		Reconcile: reconcile,
-		Checks:    checks,
-		Diffs:     diffs,
-		Bodies:    bodies,
-		HeadGit:   headGit,
-		Merger:    merger,
-		Compare:   compare,
-		Predictor: launcher,
+		Trigger:      trigger,
+		AgentDecl:    agent,
+		Ingest:       ingest,
+		ConnDecl:     conn,
+		Invoker:      launcher,
+		Upstream:     threads,
+		Delegate:     delegate,
+		Contract:     contract,
+		Git:          slotGit,
+		Reconcile:    reconcile,
+		Checks:       checks,
+		Diffs:        diffs,
+		Descriptions: bodies,
+		HeadGit:      headGit,
+		Merger:       merger,
+		Compare:      compare,
+		Predictor:    launcher,
 		// backup の段の口。connectors.json の有無にかかわらず組み立てる。
 		WorkspaceGit: git.NewWorkspace(),
 		OnBegin:      onBegin,
