@@ -67,6 +67,9 @@ type Args struct {
 	// LookPath は gh・claude の実行ファイルの探し方。nil なら exec.LookPath（PATH 上を探す）。
 	// テストが、プロセス全体の PATH を書き換えずに偽の gh・claude の場所をテストごとに渡すために使う。
 	LookPath func(file string) (string, error)
+	// ReadVersion は動いているバイナリの版の読み取り。nil なら core.ReadVersion（Issue #593）。
+	// テストが、パッケージ変数を差し替えずに、ビルド情報の有り・無しをテストごとに渡すために使う。
+	ReadVersion func() (core.VersionInfo, error)
 }
 
 // lookPathFunc は実行ファイルの探し方（exec.LookPath と同じ形）。
@@ -78,6 +81,14 @@ func (a Args) lookPath() lookPathFunc {
 		return a.LookPath
 	}
 	return exec.LookPath
+}
+
+// readVersion は a のバイナリの版の読み取り（既定は core.ReadVersion）。
+func (a Args) readVersion() (core.VersionInfo, error) {
+	if a.ReadVersion != nil {
+		return a.ReadVersion()
+	}
+	return core.ReadVersion()
 }
 
 // commonFlags はすべてのコマンドに共通のフラグ。
@@ -109,10 +120,10 @@ func initText(res *core.InitResult) string {
 }
 
 // defaultCommands は docs/features/m1-core.md §IF / API の全コマンドを登録する。
-// この表に無いコマンド（例: version）は足さない。init 以外はすべて
+// この表に無いコマンドは足さない。init・version 以外はすべて
 // RequiresStore: true（完了条件「init と読み取りを含むすべてのコマンドを
 // store_too_new で拒否する」の対象。init 自身は自分でワークスペースを作る
-// ため false）。
+// ため false。version はバイナリの版を読むだけで、版の食い違うストアでも動く）。
 func defaultCommands() []Command {
 	return []Command{
 		{
@@ -355,6 +366,12 @@ func defaultCommands() []Command {
 			MinPositional: 1,
 			MaxPositional: 1,
 			Run:           runUnbind,
+		},
+		{
+			// 動いているバイナリのコミットとストアのスキーマの版。ストアを開かない（版の食い違うストア＝
+			// store_too_new でも、ワークスペースの外でも、バイナリの版を読めるようにするため）。
+			Path: []string{"version"},
+			Run:  runVersion,
 		},
 		{
 			Path:          []string{"status"},
