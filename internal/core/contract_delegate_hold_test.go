@@ -743,3 +743,34 @@ func TestPollContractRuns_ValidatesTheIDBeforeTheSweep(t *testing.T) {
 		t.Fatalf("status = %s, want in_progress（不正な ID では掃引しない）", got)
 	}
 }
+
+// 直前の契約の run の終わりと同じ時刻（ミリ秒）に start が失敗した場合も、status の run と取り違えず保留にする。
+// 失敗した（成功以外の）run は契約の run を終わらせられないので、終わりと同時刻の run は start の run である。
+func TestHoldUnrecordedContractStops_FailedStartAtSameInstantAsPreviousRunEnd(t *testing.T) {
+	f := newContractFixture(t)
+	const tie = "2026-01-01T00:00:00.000Z"
+	prev := f.exec2(t, `INSERT INTO run (challenge_id, kind, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket)
+		VALUES (?, 'contract', 1, 's0', 1, 'h', ?, ?, ?, 'succeeded', 1000000, 'impl')`, 1, "2025-12-31T23:59:59.000Z", "2025-12-31T23:59:59.000Z", tie)
+	f.exec2(t, `INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, max_budget_usd, started_at, observed_at, ended_at)
+		VALUES (?, 'tool', 'ext-prev', ?, 'succeeded', 's', 1000000, ?, ?, ?)`, 1, prev, "2025-12-31T23:59:59.000Z", tie, tie)
+	// 直前の契約の run は成功で終わっていて（保留の掃引の対象外）、課題は着手中のまま再 start した場合を想定する。
+	f.exec2(t, `INSERT INTO run (challenge_id, kind, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, error, max_budget_usd, budget_bucket)
+		VALUES (?, 'contract', 1, 's1', 1, 'h', ?, ?, ?, 'timed_out', 'timed out', 1000000, 'impl')`, 1, tie, tie, tie)
+	n, err := f.s.HoldUnrecordedContractStops(context.Background())
+	if err != nil || n != 1 {
+		t.Fatalf("held = %d, err = %v, want 1", n, err)
+	}
+	if d := f.detail(t, f.cid); d.Status != StatusAwaitingHuman {
+		t.Fatalf("status = %s, want awaiting_human", d.Status)
+	}
+}
+
+func (f *contractFixture) exec2(t *testing.T, q string, args ...any) int64 {
+	t.Helper()
+	res, err := f.exec(q, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := res.LastInsertId()
+	return id
+}
