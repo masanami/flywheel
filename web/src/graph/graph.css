@@ -471,6 +471,12 @@
 .graph-group-head-backing {
   fill: var(--board-bg);
 }
+/* 見出しの欄の下の帯。見えないが、押すと親を選べる（線の下の層） */
+.graph-group-head-gap {
+  fill: transparent;
+  pointer-events: all;
+  cursor: pointer;
+}
 .graph-group-head-box {
   fill: color-mix(in srgb, var(--c) 18%, var(--board-card-bg));
   stroke: var(--graph-frame);
