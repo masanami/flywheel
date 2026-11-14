@@ -300,6 +300,10 @@ func formatHoldsSection(holds []Hold) string {
 		}
 		b.WriteString("問い: ")
 		b.WriteString(h.Question)
+		if h.Kind == HoldKindParentDirect {
+			// 人へ尋ねた問いではなく、親が直接行う理由（J2 が立てたものを含む）。
+			b.WriteString(" （種類: 親が直接行う。オーナーが答える問いではない）")
+		}
 		b.WriteString("\n回答: ")
 		switch {
 		case h.Answer != nil:
