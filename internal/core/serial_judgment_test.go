@@ -428,3 +428,119 @@ func TestJ9_ConfigDeclarations(t *testing.T) {
 		}
 	}
 }
+
+// 判断点を呼ばない側の組: 予測の宣言があるリポジトリで、両方が触る対象が無く（先後の依存も無く）、
+// 互いに前提にし合ってもいない組は、J9 を呼ばずに従来どおり並列にする。
+func TestJ9_Declared_PairWithoutSharedFiles_IsNotJudged_AndParallel(t *testing.T) {
+	t.Parallel()
+	cases := map[string]PredictedPair{
+		"no stated":      pairOf(11, 12),
+		"one-way stated": {Issues: [2]int{11, 12}, Status: predictPairPredicted, DependencyStated: []PredictedDependEdge{{11, 12}}},
+	}
+	for name, pair := range cases {
+		pair := pair
+		t.Run(name, func(t *testing.T) {
+			f, inv := serialJudgmentFixture(t, "multi")
+			a := f.candidate(t, "multi", "P1", 11)
+			b := f.candidate(t, "multi", "P1", 12)
+			f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput { return predictionFor(in, nil, pair) }
+			res := f.runPlanWith(t, inv)
+			if n := len(inv.called()); n != 0 {
+				t.Fatalf("J9 calls = %d, want 0 for a pair without shared files", n)
+			}
+			if want := [][]string{{a}, {b}}; !reflect.DeepEqual(groupsOf(res), want) {
+				t.Errorf("groups = %v, want %v", groupsOf(res), want)
+			}
+			for _, g := range res.SerialGroups {
+				if len(g.Judgments) != 0 {
+					t.Errorf("judgments = %+v, want none", g.Judgments)
+				}
+			}
+			if runs := f.j9Runs(t); len(runs) != 0 {
+				t.Errorf("J9 runs = %+v, want none", runs)
+			}
+		})
+	}
+}
+
+// 両方が触る対象が merge_friendly・ignored の印のものだけの組は、J9 を呼ばずに従来どおり並列にする。
+func TestJ9_Declared_OnlyMergeFriendlyOrIgnoredFiles_IsNotJudged_AndParallel(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "multi")
+	a := f.candidate(t, "multi", "P1", 11)
+	b := f.candidate(t, "multi", "P1", 12)
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil, pairOf(11, 12,
+			PredictedSharedFile{Path: "CHANGELOG.md", MergeFriendly: true},
+			PredictedSharedFile{Path: "go.sum", Ignored: true}))
+	}
+	res := f.runPlanWith(t, inv)
+	if n := len(inv.called()); n != 0 {
+		t.Fatalf("J9 calls = %d, want 0 for merge-friendly / ignored files only", n)
+	}
+	if want := [][]string{{a}, {b}}; !reflect.DeepEqual(groupsOf(res), want) {
+		t.Errorf("groups = %v, want %v", groupsOf(res), want)
+	}
+	for _, g := range res.SerialGroups {
+		if len(g.Judgments) != 0 {
+			t.Errorf("judgments = %+v, want none", g.Judgments)
+		}
+	}
+}
+
+// 予測の宣言があるリポジトリで、同時に起動できる数を超えた候補を含む組は判断せず、数の内の組だけを判断する。
+func TestJ9_Declared_OnlyCandidatesUpToTheConcurrencyLimitAreJudged(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "multi")
+	f.agent.MaxParallelRuns = 2 // multi は 3 スロット。全体の上限 2 で、3 件目の候補は判断しない
+	a := f.candidate(t, "multi", "P1", 11)
+	b := f.candidate(t, "multi", "P1", 12)
+	c := f.candidate(t, "multi", "P1", 13)
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil, pairOf(11, 12, shared("a.go")), pairOf(11, 13, shared("a.go")), pairOf(12, 13, shared("a.go")))
+	}
+	res := f.runPlanWith(t, inv)
+	calls := inv.called()
+	if len(calls) != 1 {
+		t.Fatalf("J9 calls = %d, want 1 (only the pair within the limit)", len(calls))
+	}
+	var joined string
+	for _, s := range calls[0].Sections {
+		joined += s.Content + "\n"
+	}
+	if !strings.Contains(joined, a) || !strings.Contains(joined, b) || strings.Contains(joined, c) {
+		t.Errorf("J9 judged a pair other than (%s, %s): %s", a, b, joined)
+	}
+	if want := [][]string{{a, b, c}}; !reflect.DeepEqual(groupsOf(res), want) {
+		t.Errorf("groups = %v, want %v (candidates over the limit are serial)", groupsOf(res), want)
+	}
+}
+
+// 予測の宣言があるリポジトリで、動いている課題を含む組は判断せず、候補どうしの組だけを判断する。
+func TestJ9_Declared_RunningDelegation_IsNotJudged(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "multi")
+	run := f.candidate(t, "multi", "P1", 11)
+	release := f.holdRunning(t, run)
+	defer release()
+	a := f.candidate(t, "multi", "P1", 12)
+	b := f.candidate(t, "multi", "P1", 13)
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil, pairOf(11, 12, shared("a.go")), pairOf(11, 13, shared("a.go")), pairOf(12, 13, shared("b.go")))
+	}
+	res := f.runPlanWith(t, inv)
+	calls := inv.called()
+	if len(calls) != 1 {
+		t.Fatalf("J9 calls = %d, want 1 (only the pair of the two candidates)", len(calls))
+	}
+	var joined string
+	for _, s := range calls[0].Sections {
+		joined += s.Content + "\n"
+	}
+	if !strings.Contains(joined, a) || !strings.Contains(joined, b) || strings.Contains(joined, run) {
+		t.Errorf("J9 judged a pair with the running challenge: %s", joined)
+	}
+	if want := [][]string{{run, a, b}}; !reflect.DeepEqual(groupsOf(res), want) {
+		t.Errorf("groups = %v, want %v", groupsOf(res), want)
+	}
+}
