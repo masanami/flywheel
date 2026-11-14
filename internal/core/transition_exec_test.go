@@ -511,12 +511,33 @@ func TestHoldChallenge_EmptyQuestionIsValidationErrorAndChangesNothing(t *testin
 func TestHoldChallenge_WrongStateIsInvalidTransition(t *testing.T) {
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
-	// 計画承認待ちは T11 の遷移元に含まれない。
+	// 完了確認待ちは T11 の遷移元に含まれない（親が直接行う保留でも入れない）。
+	c := createAndAdvance(t, s, StatusAwaitingCompletionApproval)
+
+	for _, kind := range []string{"", string(HoldKindParentDirect)} {
+		_, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "why?", Kind: kind})
+		if !errors.Is(err, ErrInvalidTransition) {
+			t.Fatalf("kind %q: err = %v, want ErrInvalidTransition", kind, err)
+		}
+	}
+}
+
+// 計画承認待ちから入れるのは親が直接行う保留だけ。人の対応を待つ保留は拒否し、何も変えない。
+func TestHoldChallenge_PlanApprovalAcceptsOnlyParentDirect(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
 
 	_, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "why?"})
 	if !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("err = %v, want ErrInvalidTransition", err)
+		t.Fatalf("human hold: err = %v, want ErrInvalidTransition", err)
+	}
+	got, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "親が直接", Kind: string(HoldKindParentDirect)})
+	if err != nil {
+		t.Fatalf("parent_direct hold: %v", err)
+	}
+	if got.Status != StatusAwaitingHuman || got.Version != 2 {
+		t.Fatalf("got status=%q version=%d", got.Status, got.Version)
 	}
 }
 
@@ -626,7 +647,11 @@ func dispatchOperation(t *testing.T, s *Store, id string, op Operation) dispatch
 		c, err := s.VerifyChallenge(context.Background(), ChannelCLI, id, VerifyInput{Result: "uncertain", Question: &q})
 		return resultOf(c, err)
 	case OpHold:
-		c, err := s.HoldChallenge(context.Background(), ChannelCLI, id, HoldInput{Question: "why?"})
+		in := HoldInput{Question: "why?"}
+		if cur, gerr := s.GetChallenge(context.Background(), id); gerr == nil && cur.Status == StatusAwaitingPlanApproval {
+			in.Kind = string(HoldKindParentDirect) // 計画承認待ちから入れるのは親が直接行う保留だけ
+		}
+		c, err := s.HoldChallenge(context.Background(), ChannelCLI, id, in)
 		return resultOf(c, err)
 	case OpApprove:
 		prev, err := s.PrepareApproval(context.Background(), id)

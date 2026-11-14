@@ -170,4 +170,21 @@ describe("親が直接行う保留（#452）", () => {
     expect(m.c.status).toBe("done");
     expect(m.completionDirect).toBe(false);
   });
+  it("承認済みで未実行の release があるときの ① の見出しは「満たされないまま残る」ではない", async () => {
+    const store = new MockStore();
+    const item = store.workspaces.alpha?.items.find((i) => i.c.id === "C-7");
+    for (const o of item?.operations ?? []) {
+      if (o.kind === "release") o.state = "approved";
+    }
+    const s = await createMockApi(store, { latencyMs: 0 }).approvalSummary(
+      "alpha",
+      "C-7",
+    );
+    expect(s.approval.conditions_after_release_heading).toBe(
+      "承認済みの本番反映が走れば満たされる条件:",
+    );
+    expect(s.approval.conditions_after_release_heading).not.toContain(
+      "満たされないまま残る",
+    );
+  });
 });

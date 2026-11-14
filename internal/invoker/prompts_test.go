@@ -513,6 +513,7 @@ func TestInstructions_J5DescribesTheAnswersToTheNoReleaseHold(t *testing.T) {
 
 // #450: j2.md は、中以上で論点の記録が無いとき計画ではなく論点を選ぶ確認の段（判断の前）と、
 // 論点不要を返す条件（決まっていることごとの引用）、問い直しの区画、出力の型の説明の行を持つ。
+// サイズと論点の記録の関係の規則は確認の段の 1 か所だけに置く（#536 で出力の型の説明の行から寄せた）。
 func TestInstructions_J2AsksForQuotesBeforeSkippingIssues(t *testing.T) {
 	got, err := Instructions(core.JudgmentJ2)
 	if err != nil {
@@ -548,8 +549,10 @@ func TestInstructions_J2AsksForQuotesBeforeSkippingIssues(t *testing.T) {
 			t.Errorf("the item of no_issues_needed lacks %q", want)
 		}
 	}
-	if !strings.Contains(shape, "計画のサイズが中・大なら、論点の記録（区画「論点と回答」）か論点不要の引用が要る") {
-		t.Errorf("the line about the output shape lacks the size rule: %q", shape)
+	// サイズと論点の記録の関係の規則は「判断の前の確認」の 1 か所に寄せた（#536。上の step の検査が固定する）。
+	// 出力の型の説明の行に同じ規則を重ねて書かない。
+	if shape == "" || strings.Contains(shape, "論点の記録") {
+		t.Errorf("the line about the output shape must exist and must not repeat the size rule: %q", shape)
 	}
 	if !strings.Contains(got, "- 「問い直し」:") {
 		t.Error("the reading list lacks the re-ask section")
@@ -771,5 +774,24 @@ func TestInstructions_J9HasTheCriteriaAndAvoidsEngineAndDevelopmentTerms(t *test
 	}
 	if len(got) > 4096 {
 		t.Errorf("Instructions(J9) is %d bytes, over 4096", len(got))
+	}
+}
+
+// TestJ2Prompt_MentionsParentDirectVerdict は、J2 の指示文が parent_direct の判定の意味（委譲の計画が立たず
+// 親が直接行うのが適切なときに、サイズに関わらず判断の前の確認より先に返し、理由と親の達成条件を書く）を
+// 持つことを固定する（#536）。
+func TestJ2Prompt_MentionsParentDirectVerdict(t *testing.T) {
+	fsys, err := promptsSubFS()
+	if err != nil {
+		t.Fatalf("promptsSubFS(): %v", err)
+	}
+	b, err := fs.ReadFile(fsys, "j2.md")
+	if err != nil {
+		t.Fatalf("fs.ReadFile(j2.md): %v", err)
+	}
+	for _, want := range []string{"委譲の計画が立たず、親が直接行うのが適切", "親が何を満たせば終わりか", "4 を選んでよい", "サイズに関わらず"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("j2.md does not contain %q", want)
+		}
 	}
 }

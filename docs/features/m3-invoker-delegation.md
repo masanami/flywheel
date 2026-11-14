@@ -158,15 +158,16 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 取り込み元の対応のある課題では、本文と全コメントに現れる Issue への参照（同じリポジトリの `#<番号>`・`<owner>/<name>#<番号>`・`https://github.com/<owner>/<name>/issues/<番号>`）を出現順に最大 5 件まで取得し、その本文を入力に含める（参照先のコメントと、参照先がさらに参照する Issue は取得しない）【決定 2026-09-28 親 M3P14】
 - [ ] 上流の取得に失敗したら、J2 を起動せず、その課題の結果に失敗として示す（計画する時点の上流を読めないまま計画しない）
 - [ ] 上流の入力の合計が 200,000 バイトを超えるときは、参照先の Issue の本文を後ろから落として収める。課題自身の本文とコメントだけで超えるときは、古いコメントから落とし、落としたことを入力に明記する【決定 2026-09-28 親 M3P14】
-- [ ] J2 の出力は、判定（`plan | uncertain`）・要約・手順・対象リポジトリ・操作の id・サイズ（`S | M | L`）・完了条件・実装枠の額・レビュー対応枠の額・複数リポジトリにまたがるか・関係するリポジトリ・問いである（形は §IF / API）
+- [ ] J2 の出力は、判定（`plan | uncertain | issues | parent_direct`）・要約・手順・対象リポジトリ・操作の id・サイズ（`S | M | L`）・完了条件・実装枠の額・レビュー対応枠の額・複数リポジトリにまたがるか・関係するリポジトリ・問いである（形は §IF / API）
 - [ ] 判定が `plan` の出力は、宣言にある対象リポジトリと、そのリポジトリの接続ツールの操作の id を必須とする（宣言に無ければ `invalid_output`）
 - [ ] 判定が `plan` の出力で選んだ操作の `invocation` が取り込み元の差し込み（`{issue_number}`・`{issue_url}`・`{external_key}`）を持つとき、取り込み元の対応の無い課題では `invalid_output` にする
 - [ ] 実装枠・レビュー対応枠の額が出力に無ければ（`null`）、サイズとサイズごとの予算の既定から決める【決定 2026-09-28 親 M3P22】（既定 S: 実装 30・レビュー対応 25、M: 50・30、L: 100・40。USD。現行と同じ）
 - [ ] 実装枠の額が `.flywheel/agent.json` の 1 回の委譲の上限額の最大値を超える出力は `invalid_output` にする
 - [ ] 判定が `plan` なら、出力を計画の本文（Markdown）へ決定的に整形し、構造化した出力とともに計画として登録する（M1 T3）。整形した本文は、対象リポジトリ・操作・サイズ・完了条件・実装枠・レビュー対応枠の額を必ず含む（人間は計画の承認で、この額と操作を承認する＝設計書 §9・M1 の計画の承認の要約）
 - [ ] 判定が `uncertain` なら、出力の問いで課題を人間対応待ちにする（M1 T11）
+- [ ] 判定が `parent_direct`（委譲の計画が立たず、親が直接行うのが適切）なら、課題に種類 `parent_direct` の保留を立てる（`hold --kind parent_direct` と同じ記録。M1 T11）。出力は理由（`question`）と、親が何を満たせば終わりかの達成条件（`done_criteria`）の両方を必須とし、どちらかが空・欠けなら `invalid_output`（課題は変えない）。達成条件は課題の達成条件（`done_criteria`）を置き換えず、元の達成条件の後ろへ見出し `## 親が直接行うときの達成条件` を付けて書き足す（元の達成条件は残し、J2 が計画し直すときに両方を読めるようにする。元が空なら見出しと親の達成条件だけにする。同じ見出しと同じ本文がすでに末尾にあれば二重に書き足さない。作業ログの `hold` の `before`・`after` に書き足す前と後の全文が載る）【決定 2026-11-14 オーナー #616 のレビュー】。写せるのは分類済の課題だけ（写す直前に読み直した状態が違えば写さない）。サイズや論点の記録の有無に関わらず返してよく、「論点が無く中以上なら論点を返す」規則より先に判定する。見え方は手で立てた `parent_direct` の保留と同じ（`status` の `parent_agent` に出て、`needs_human`・未回答の問いの一覧〔`/api/v1/needs-human`〕には出ない。新しい表示は作らない）。保留を既存の操作（`answer`。CLI・UI）で解くと、保留に入る前の状態＝分類済（計画待ち）へ戻り、次の周で J2 が計画し直す（新しい操作は作らない）。どの課題を親が直接行うかの基準は flywheel 本体の指示文・仕様に書かず、ワークスペースの基準（ポジションのファイル）に置く。指示文には「委譲の計画が立たず、親が直接行うのが適切なら `parent_direct` を返す」旨だけを書く【決定 2026-11-14 オーナー #536 の Q1〜Q5】
 - [ ] J2 の run が成功し計画を登録したとき、上流のコメントを落とさずにすべて入力へ含めていれば、core は上流を読んだ記録を付ける。読んだ時点の値には、J2 の直前の取得で得たコメント数と更新日時を使う（ストアの観測値ではない）【決定 2026-09-28 親 M3P14。M2 QH14】
-- [ ] 上流のコメントを 1 件でも落とした J2、失敗した J2、`uncertain` の J2 は、読んだ記録を付けない
+- [ ] 上流のコメントを 1 件でも落とした J2、失敗した J2、計画を登録しなかった J2（`uncertain`・`issues`・`parent_direct`）は、読んだ記録を付けない
 - [ ] J2 が付けた読んだ記録の作業ログ（`upstream_read`）は、経路 `invoker` と原因の run の ID を持ち、人間の `mark-read`（経路 `cli`）と区別できる（M2 §M3 への申し送り）
 - [ ] 保留への回答に「範囲が変わる」印（M1 §範囲が変わる回答）が付いた課題の J2 の入力には、区画「計画の作り直し」（印の付いた最後の回答の問いと文・最新の計画の本文・前の計画の版までに使った枠ごとの費用〔積み上げの対象の額〕と、新しい計画の予算はこの額を含む上限として書く旨）が入る。J2 は回答に従って計画を作り直し、成功すれば計画承認待ちへ進む（自動の承認はしない）。印の無い課題の入力にこの区画は入らない
 
@@ -718,7 +719,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 | 判断点 | 出力 |
 |---|---|
 | J1 | `{"verdict": "mine\|not_mine\|uncertain", "priority": "P0\|P1\|P2"\|null, "size": "S\|M\|L"\|null, "reason": string, "question": string\|null}` |
-| J2 | `{"verdict": "plan\|uncertain", "summary": string, "steps": [string], "repo": string, "operation": string, "size": "S\|M\|L", "done_criteria": string, "budget_impl_usd": number\|null, "budget_review_usd": number\|null, "cross_repo": bool, "related_repos": [string], "question": string\|null}`（`uncertain` のときは `question` 以外を `null` または空にしてよい） |
+| J2 | `{"verdict": "plan\|uncertain\|issues\|parent_direct", "summary": string, "steps": [string], "repo": string, "operation": string, "size": "S\|M\|L", "done_criteria": string, "budget_impl_usd": number\|null, "budget_review_usd": number\|null, "cross_repo": bool, "related_repos": [string], "question": string\|null}`（`uncertain` のときは `question` 以外を `null` または空にしてよい。`parent_direct` のときは `question`〔理由〕と `done_criteria`〔親の達成条件〕が必須で、ほかは `null` または空にしてよい） |
 | J3 | `{"brief": string}` |
 | J4 | `{"decisions": [{"question_index": int, "decision": "answer\|escalate", "answer": string\|null}]}` |
 | J5 | `{"verdict": "met\|not_met\|uncertain", "reason": string, "feedback": string\|null, "question": string\|null, "deferred_conditions": [{"condition": string, "status": "after_release\|after_human_action"}]\|null}`（`deferred_conditions` は任意。規則は表の下の「J5 の `deferred_conditions`」。M4 S4 で `actual` を足す＝m4-ui-server.md §IF / API「判断点の出力に足すもの（S4）」） |
@@ -730,11 +731,11 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 - **任意の項目**。省略・`null`・空の配列は「区分を付けた条件が無い」として扱い、従来どおりに写す。要素は `{"condition": string, "status": "after_release" | "after_human_action"}` で、両方を要し、ほかのキーを持たない。要素は 20 個まで、`condition` は前後の空白を除いて空でなく 2,000 文字以内。外れれば `invalid_output`。
 - `status` の意味: `after_release`＝承認の後の本番反映そのもので満たされる見込みの条件。`after_human_action`＝人の操作の後でしか満たせない条件。
 - `verdict` は、`deferred_conditions` に挙げた条件を除いた残りの条件で決める。core は条件の文面を解釈せず、`verdict` と `status` の区分だけを見て次のとおり振り分ける。
-  - `verdict` が `met` で、`after_human_action` が 1 つも無く、かつ `after_release` が無い、または課題に待っている本番反映（未承認の `release`）がある: 従来の `met` と同じく T8 で完了確認待ちへ進める。`after_release` の条件は T8 の作業ログの `after` に `conditions_after_release`（文字列の配列）として残す。
+  - `verdict` が `met` で、`after_human_action` が 1 つも無く、かつ `after_release` が無い、または課題に待っている本番反映（未承認か、承認済みで未実行の `release`）がある: 従来の `met` と同じく T8 で完了確認待ちへ進める。`after_release` の条件は T8 の作業ログの `after` に `conditions_after_release`（文字列の配列）として残す。
   - `verdict` が `met` で、`after_human_action` が 1 つでもある: 完了確認待ちへ進めず、着手中にも戻さない（子を再起動しない）。T10 で人間対応待ちにし、保留の問いは固定の前置き（`J5HumanActionHoldPreamble`）に続けて `after_human_action` の条件を 1 行ずつ並べたものにする。実物は課題に書かず、発生も作らない（失敗ではない）。run の判定の記録は `uncertain` になる。回答（T12）で検証中へ戻り、J5 をやり直す。実物の個数が予想と合わない保留（M4H44）と重なれば、1 つの保留の問いに両方を書く。
-  - `verdict` が `met` で、`after_release` の条件が残り、課題に待っている本番反映（未承認の `release`）が無い（#496・#466）: 完了確認待ちへ進めず、T10 で人間対応待ちにする。保留の問いは固定の前置き（`J5NoReleaseHoldPreamble`）に続けて `after_release` の条件を 1 行ずつ並べたもので、回答の選択肢は「マージ済み」「PR が無い」「条件が不要」。回答（T12）で検証中へ戻り、J5 をやり直す。`after_human_action` の保留と重なるときは、1 つの問いに両方を書く（`deferredHoldQuestion`）。run の判定の記録は `uncertain` と同じ扱い。正本は `judgment_j5.go` の `checksPendingRelease`・`holdsForNoRelease`・`heldByDeferred`。
+  - `verdict` が `met` で、`after_release` の条件が残り、課題に待っている本番反映（未承認か、承認済みで未実行の `release`）が無い（#496・#466）: 完了確認待ちへ進めず、T10 で人間対応待ちにする。保留の問いは固定の前置き（`J5NoReleaseHoldPreamble`）に続けて `after_release` の条件を 1 行ずつ並べたもので、回答の選択肢は「マージ済み」「PR が無い」「条件が不要」。回答（T12）で検証中へ戻り、J5 をやり直す。`after_human_action` の保留と重なるときは、1 つの問いに両方を書く（`deferredHoldQuestion`）。run の判定の記録は `uncertain` と同じ扱い。正本は `judgment_j5.go` の `checksPendingRelease`・`holdsForNoRelease`・`heldByDeferred`。
   - `verdict` が `not_met`・`uncertain`: `deferred_conditions` は振り分けに使わず、従来どおり `not_met` は T9 で着手中、`uncertain` は T10 で人間対応待ちにする。
-- 承認の要約への表示: 完了の承認（`approve`・`reject` の `<C-ID>`）の確認の要約に、最新の T8 の作業ログの `conditions_after_release` を出す（`internal/cli/approval.go` の `writeConditionsAfterRelease`）。その操作で本番反映（`release`）が 1 つ以上承認されるときは見出し「承認で本番反映されると満たされる条件:」、承認されないとき（`--hold-release`・差し戻し・`release` が無い等）は「満たされないまま残る」ことを示す見出しで出す。出し先は 3 つ: CLI（`writeConditionsAfterRelease`）、API（`internal/view/approval.go` の `ApprovalSummary.ConditionsAfterRelease`・`ConditionsAfterReleaseHeading`。JSON のキーは `conditions_after_release`・`conditions_after_release_heading`）、UI（承認カード）。見出しの文言の正本は `view.ConditionsAfterReleaseHeading(releasing bool)` 1 か所で、CLI と API が同じものを使う。UI の承認は本番反映を承認しない側（`ReleaseHeld`）なので、「満たされないまま残る」側の見出しになる。
+- 承認の要約への表示: 完了の承認（`approve`・`reject` の `<C-ID>`）の確認の要約に、最新の T8 の作業ログの `conditions_after_release` を出す（`internal/cli/approval.go` の `writeConditionsAfterRelease`）。その操作で本番反映（`release`）が 1 つ以上承認されるときは見出し「承認で本番反映されると満たされる条件:」、承認されないが、課題に承認済みで未実行の `release` があるとき（`core.ApprovalPreview.HasApprovedRelease`。`noWaitingRelease` と同じ「待っている本番反映」の見方）は見出し「承認済みの本番反映が走れば満たされる条件:」、承認されず待っている本番反映も無いとき（`--hold-release`・差し戻し・`release` が無い等）は「満たされないまま残る」ことを示す見出しで出す。出し先は 3 つ: CLI（`writeConditionsAfterRelease`）、API（`internal/view/approval.go` の `ApprovalSummary.ConditionsAfterRelease`・`ConditionsAfterReleaseHeading`。JSON のキーは `conditions_after_release`・`conditions_after_release_heading`）、UI（承認カード）。見出しの文言の正本は `view.ConditionsAfterReleaseHeading(view.ConditionsOutlook)` 1 か所（場合分けは `view.OutlookFor(releasing, approvedRelease)`）で、CLI と API が同じものを使う。UI の偽のサーバ（`web/src/mock/api.ts`）は同じ文言の写しを持つ（同期の検査は無い）。UI の承認は本番反映を承認しない側（`ReleaseHeld`）なので、承認済みで未実行の `release` が無ければ「満たされないまま残る」側、あれば「承認済みの本番反映が走れば満たされる」側の見出しになる。
 
 #### CLI
 

@@ -42,6 +42,7 @@ func TestLookup_AllRows(t *testing.T) {
 		{id: "T9", from: StatusVerifying, op: OpVerifyNotMet, wantTo: StatusInProgress, wantVfy: false},
 		{id: "T10", from: StatusVerifying, op: OpVerifyUncertain, wantTo: StatusAwaitingHuman, wantVfy: false},
 		{id: "T11-unclassified", from: StatusUnclassified, op: OpHold, wantTo: StatusAwaitingHuman, wantVfy: false},
+		{id: "T11-awaiting_plan_approval", from: StatusAwaitingPlanApproval, op: OpHold, wantTo: StatusAwaitingHuman, wantVfy: false},
 		{id: "T11-classified", from: StatusClassified, op: OpHold, wantTo: StatusAwaitingHuman, wantVfy: false},
 		{id: "T11-in_progress", from: StatusInProgress, op: OpHold, wantTo: StatusAwaitingHuman, wantVfy: false},
 		{id: "T11-verifying", from: StatusVerifying, op: OpHold, wantTo: StatusAwaitingHuman, wantVfy: false},
@@ -174,10 +175,10 @@ func TestLookup_CreateNotAvailableFromExistingStatus(t *testing.T) {
 	}
 }
 
-// TestTable_RowCount は、Table の物理行数が27（T1〜T18、うちT11が4遷移元・T16が7遷移元に展開）であることを検証する。
+// TestTable_RowCount は、Table の物理行数が28（T1〜T18、うちT11が5遷移元・T16が7遷移元に展開）であることを検証する。
 func TestTable_RowCount(t *testing.T) {
-	if len(Table) != 27 {
-		t.Fatalf("len(Table) = %d, want 27", len(Table))
+	if len(Table) != 28 {
+		t.Fatalf("len(Table) = %d, want 28", len(Table))
 	}
 }
 
@@ -213,14 +214,15 @@ func TestTransitionTargetResolve_PrecedingHold_RejectsInvalidPreceding(t *testin
 }
 
 // TestHoldEntrySources は、人間対応待ちへ遷移できる状態の集合
-// （T10・T11 の遷移元の和集合）が、未分類・分類済・着手中・検証中であることを検証する。
+// （T10・T11 の遷移元の和集合）が、未分類・分類済・計画承認待ち・着手中・検証中であることを検証する。
 func TestHoldEntrySources(t *testing.T) {
 	got := HoldEntrySources(Table)
 	want := map[Status]bool{
-		StatusUnclassified: true,
-		StatusClassified:   true,
-		StatusInProgress:   true,
-		StatusVerifying:    true,
+		StatusUnclassified:         true,
+		StatusClassified:           true,
+		StatusAwaitingPlanApproval: true,
+		StatusInProgress:           true,
+		StatusVerifying:            true,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("HoldEntrySources = %v, want %v", got, want)

@@ -6,12 +6,40 @@ import "github.com/masanami/flywheel/internal/core"
 // CLI の approve の要約・--json の形は変えない（core.ApprovalPreview の中身に、release ごとの PR の
 // head と release_held を足した形）。
 
+// ConditionsOutlook は、完了の承認の要約で「本番反映で満たされる見込みの条件」が満たされる見通し。
+type ConditionsOutlook int
+
+const (
+	// OutlookNotReleasing は、この操作で本番反映が承認されず、待っている本番反映も無い（満たされないまま残る）。
+	OutlookNotReleasing ConditionsOutlook = iota
+	// OutlookReleasing は、この操作で本番反映（release）が 1 つ以上承認される。
+	OutlookReleasing
+	// OutlookApprovedRelease は、この操作では承認されないが、承認済みで未実行の release が課題にある
+	// （それが走れば満たされる）。
+	OutlookApprovedRelease
+)
+
+// OutlookFor は、この操作で承認される release があるか（releasing）と、課題に承認済みで未実行の
+// release があるか（approvedRelease）から見通しを決める。CLI と API が同じ規則を引く 1 か所。
+func OutlookFor(releasing, approvedRelease bool) ConditionsOutlook {
+	switch {
+	case releasing:
+		return OutlookReleasing
+	case approvedRelease:
+		return OutlookApprovedRelease
+	}
+	return OutlookNotReleasing
+}
+
 // ConditionsAfterReleaseHeading は、完了の承認の要約に並べる「本番反映で満たされる見込みの条件」の見出し。
-// CLI の approve の要約と API（ApprovalSummary.ConditionsAfterReleaseHeading）が同じ文言を引く 1 か所。
-// releasing はその操作で本番反映（release）が 1 つでも承認されるか。
-func ConditionsAfterReleaseHeading(releasing bool) string {
-	if releasing {
+// CLI の approve の要約と API（ApprovalSummary.ConditionsAfterReleaseHeading）と UI の偽のサーバが
+// 同じ文言を引く 1 か所。
+func ConditionsAfterReleaseHeading(o ConditionsOutlook) string {
+	switch o {
+	case OutlookReleasing:
 		return "承認で本番反映されると満たされる条件:"
+	case OutlookApprovedRelease:
+		return "承認済みの本番反映が走れば満たされる条件:"
 	}
 	return "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"
 }
@@ -43,7 +71,8 @@ type ApprovalOtherOperation struct {
 //
 // ConditionsAfterRelease は、完了確認待ちへ進めた検証が「本番反映で満たされる見込み」と区分した条件
 // （無い・完了確認待ち以外は空配列）。ConditionsAfterReleaseHeading はその見出しで、UI の承認は本番反映を
-// 承認しない（ReleaseHeld）ので、CLI の --hold-release と同じ「満たされないまま残る」側の文言。
+// 承認しない（ReleaseHeld）ので、承認済みで未実行の release が無ければ CLI の --hold-release と同じ
+// 「満たされないまま残る」側、あれば「承認済みの本番反映が走れば満たされる」側の文言。
 type ApprovalSummary struct {
 	ChallengeID                   string   `json:"challenge_id"`
 	ConditionsAfterRelease        []string `json:"conditions_after_release"`
@@ -83,8 +112,9 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 		Title:                  p.Title,
 		Version:                p.Version,
 	}
-	// ReleaseHeld は常に true なので、本番反映が承認されない側の見出し。
-	s.ConditionsAfterReleaseHeading = ConditionsAfterReleaseHeading(!s.ReleaseHeld)
+	// ReleaseHeld は常に true なので、この操作では本番反映が承認されない。承認済みで未実行の release が
+	// あるときだけ、それが走れば満たされる側の見出し。
+	s.ConditionsAfterReleaseHeading = ConditionsAfterReleaseHeading(OutlookFor(false, p.HasApprovedRelease))
 	switch p.Kind {
 	case core.ApprovalKindPlan:
 		s.Plan = &ApprovalPlan{Body: p.PlanBody, Version: p.PlanVersion}

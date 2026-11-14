@@ -49,7 +49,7 @@ type SlotAssignment struct {
 	Repo   string
 	Path   string
 	RunID  string
-	// BaseBranch は割り当て前の検査で読んだ、スロットの作業ツリーの現在のブランチ
+	// BaseBranch は割り当て前の検査（と worktree の先頭の切り替え）の後の、スロットの作業ツリーの現在のブランチ
 	// （detached HEAD なら ""）。委譲の後の照合が、報告にブランチが無いときに
 	// 「子が今回作ったブランチか」を判定する基準になる（メモリ上の値）。
 	BaseBranch string
@@ -238,7 +238,11 @@ func (s *Store) ListSlots(ctx context.Context) ([]Slot, error) {
 // git を起動できない（ErrGitUnavailable）・ctx の取り消しのように、スロットの
 // 作業ツリーに原因が無い失敗は理由にせず err で返す（スロットを needs_attention
 // にしない）。
-func (s *Store) prepareSlot(ctx context.Context, git SlotGit, repo ConnectorRepo, slot slotRow) (string, string, error) {
+//
+// worktree のスロットは、検査を通った後に作業ツリーの先頭を揃える（switchSlotTree）:
+// 前の課題のブランチに残っていれば base（既定ブランチ）へ detach し、want（既存の PR の
+// ブランチの追従）があればそのブランチへ切り替える。切り替えた後のブランチを返す。
+func (s *Store) prepareSlot(ctx context.Context, git SlotGit, repo ConnectorRepo, slot slotRow, choice slotChoice) (string, string, error) {
 	tree := SlotTree{Path: slot.Path}
 	if slot.Provider == slotProviderWorktree {
 		base := filepath.Join(s.workspace, repo.Slots.Base)
@@ -268,7 +272,127 @@ func (s *Store) prepareSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 	case !remoteMatches(st.OriginURL, repo.Remote):
 		return fmt.Sprintf("origin (%q) is not the declared remote %s", st.OriginURL, repo.Remote), "", nil
 	}
-	return "", st.Branch, nil
+	if slot.Provider != slotProviderWorktree {
+		return "", st.Branch, nil
+	}
+	if choice.KeepTree {
+		return "", st.Branch, nil
+	}
+	return s.switchSlotTree(ctx, git, repo, slot, tree, st, choice.Branch)
+}
+
+// errSlotBranchHeld は、want のブランチを他のスロットが checkout していて外せない
+// （idle だが未コミットの変更がある等。待っても解けない）ことを表す。このスロットは
+// この割り当てでは使わず、needs_attention にもしない。
+var errSlotBranchHeld = errors.New("core: the branch is checked out in another slot that cannot release it")
+
+// errSlotBranchBusy は、want のブランチを使用中（busy）の他のスロットが checkout していることを
+// 表す。その委譲が終われば外せるので、委譲の割り当ては待って取り直す（waitForBranchHolder）。
+// 待たない呼び出し元には ErrSlotUnavailable として見える。
+var errSlotBranchBusy = fmt.Errorf("%w: the branch is checked out in a busy slot", ErrSlotUnavailable)
+
+// switchSlotTree は worktree のスロットの作業ツリーの先頭を、これから始める委譲に合わせる。
+//   - want が無い: 別の課題のブランチに残っていれば base へ detach する（detached なら何もしない）
+//   - want がある: 現在のブランチが want なら何もしない。そうでなければ、want を checkout
+//     している他のスロットの作業ツリー（idle・変更なしのものだけ）を base へ外してから、
+//     このスロットで want を checkout する（同じブランチを 2 つの作業ツリーで checkout できない）
+func (s *Store) switchSlotTree(ctx context.Context, git SlotGit, repo ConnectorRepo, slot slotRow, tree SlotTree, st SlotTreeState, want string) (string, string, error) {
+	ref := "refs/heads/" + repo.DefaultBranch
+	if want == "" || !plausibleBranchName(want) {
+		want = ""
+	}
+	if (want == "" && st.Branch == "") || (want != "" && st.Branch == want) {
+		return "", st.Branch, nil
+	}
+	if want != "" {
+		var rows []slotRow
+		if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+			var err error
+			rows, err = loadSlotRows(ctx, tx)
+			return err
+		}); err != nil {
+			return "", "", classifyReadWriteErr(err)
+		}
+		for _, o := range slotCandidates(rows, repo, s.workspace) {
+			if o.ID == slot.ID {
+				continue
+			}
+			ot := SlotTree{Path: o.Path, BaseClone: tree.BaseClone}
+			ost, err := git.Inspect(ctx, ot)
+			if err != nil {
+				if isEnvironmentFailure(ctx, err) {
+					return "", "", err
+				}
+				continue
+			}
+			if !ost.Exists || !ost.PointerOK || ost.Branch != want {
+				continue
+			}
+			if o.State == slotStateBusy {
+				return "", "", errSlotBranchBusy
+			}
+			if o.State != slotStateIdle || ost.Dirty {
+				return "", "", errSlotBranchHeld
+			}
+			// 外す直前に、そのスロットの状態をストアから読み直す。上の一覧を読んだ後に他の
+			// プロセスが割り当てて子を起動していれば、その作業ツリーの先頭を動かさない。
+			cur, err := s.reloadSlotState(ctx, o.ID)
+			if err != nil {
+				return "", "", err
+			}
+			if cur == slotStateBusy {
+				return "", "", errSlotBranchBusy
+			}
+			if cur != slotStateIdle {
+				return "", "", errSlotBranchHeld
+			}
+			if err := git.SwitchTree(ctx, ot, SlotSwitch{Ref: ref}); err != nil {
+				if isEnvironmentFailure(ctx, err) {
+					return "", "", err
+				}
+				return "", "", errSlotBranchHeld
+			}
+		}
+	}
+	if err := git.SwitchTree(ctx, tree, SlotSwitch{Branch: want, Ref: ref}); err != nil {
+		if isEnvironmentFailure(ctx, err) {
+			return "", "", err
+		}
+		if errors.Is(err, ErrBranchCheckedOutElsewhere) {
+			// 走査の外（ベースのクローン・宣言の数を超えたスロット等）の作業ツリーが want を
+			// 持つ。このスロットの欠陥ではないので needs_attention にせず、この割り当てでは使わない。
+			return "", "", errSlotBranchHeld
+		}
+		return "switching the working tree failed: " + oneLine(err.Error()), "", nil
+	}
+	after, err := git.Inspect(ctx, tree)
+	if err != nil {
+		if isEnvironmentFailure(ctx, err) {
+			return "", "", err
+		}
+		return "inspecting the working tree failed: " + oneLine(err.Error()), "", nil
+	}
+	return "", after.Branch, nil
+}
+
+// reloadSlotState は id（表示形）のスロットの現在の状態をストアから読む（無ければ ""）。
+func (s *Store) reloadSlotState(ctx context.Context, slotID string) (slotState, error) {
+	var st slotState
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		id, _ := parseSlotID(slotID)
+		cur, err := loadSlotByID(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if cur != nil {
+			st = cur.State
+		}
+		return nil
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return "", err
+	}
+	return st, nil
 }
 
 func isEnvironmentFailure(ctx context.Context, err error) bool {
@@ -295,6 +419,11 @@ func (s *Store) AcquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 type slotChoice struct {
 	Only   string
 	Prefer string
+	// Branch は worktree のスロットで、起動前に checkout しておく既存のブランチ
+	// （既存の PR の追従。空なら base へ揃える）。
+	Branch string
+	// KeepTree は作業ツリーの先頭を動かさない（ブランチが分からない再開が、元の状態を引き継ぐ）。
+	KeepTree bool
 }
 
 func (s *Store) acquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo, bind SlotBinder, choice slotChoice) (*SlotAssignment, error) {
@@ -315,25 +444,56 @@ func (s *Store) acquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 		}
 		tried[next.ID] = true
 
-		reason, baseBranch, err := s.prepareSlot(ctx, git, repo, *next)
+		a, retry, err := s.tryAcquireSlot(ctx, git, repo, *next, bind, choice)
 		if err != nil {
 			return nil, err
 		}
-		if reason != "" {
-			if err := s.markSlotNeedsAttention(ctx, *next, reason); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		a, err := s.assignSlot(ctx, *next, bind)
-		if err != nil {
-			return nil, err
-		}
-		if a != nil {
-			a.BaseBranch = baseBranch
+		if !retry {
 			return a, nil
 		}
 	}
+}
+
+// tryAcquireSlot は slot の 1 回の試行（検査・作業ツリーの切り替え → busy にする）を、同じ
+// プロセスの他の割り当てと直列に行う（slotMu）。retry=true は次の候補を試す。
+// 待ち（waitForBranchHolder・waitForOriginalSlot の sleep）はこの外で行うので、ロックを持ったまま待たない。
+func (s *Store) tryAcquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo, slot slotRow, bind SlotBinder, choice slotChoice) (*SlotAssignment, bool, error) {
+	s.slotMu.Lock()
+	defer s.slotMu.Unlock()
+	// 一覧を読んだ後に同じプロセスの他の割り当てが取っていれば、作業ツリーに触れずに次へ。
+	cur, err := s.reloadSlotState(ctx, slot.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if cur != slotStateIdle {
+		return nil, true, nil
+	}
+	reason, baseBranch, err := s.prepareSlot(ctx, git, repo, slot, choice)
+	if errors.Is(err, errSlotBranchBusy) {
+		// どのスロットでもそのブランチは checkout できないので、他を試さずに返す。
+		return nil, false, errSlotBranchBusy
+	}
+	if errors.Is(err, errSlotBranchHeld) {
+		return nil, true, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if reason != "" {
+		if err := s.markSlotNeedsAttention(ctx, slot, reason); err != nil {
+			return nil, false, err
+		}
+		return nil, true, nil
+	}
+	a, err := s.assignSlot(ctx, slot, bind)
+	if err != nil {
+		return nil, false, err
+	}
+	if a == nil {
+		return nil, true, nil
+	}
+	a.BaseBranch = baseBranch
+	return a, false, nil
 }
 
 func (s *Store) nextIdleSlot(ctx context.Context, repo ConnectorRepo, tried map[string]bool, choice slotChoice) (*slotRow, error) {

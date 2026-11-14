@@ -97,6 +97,10 @@ type ApprovalPreview struct {
 	// PendingReleases は、この完了の承認と同時に承認される未承認の release
 	// （D12）。PendingOperations の kind==release の部分集合。
 	PendingReleases []IrreversibleOperation
+	// HasApprovedRelease は、課題に承認済みで未実行の release（state=approved）があるか。あれば、この
+	// 操作で本番反映が承認されなくても、その release が走れば ConditionsAfterRelease は満たされうる
+	// （判定は isApprovedUnexecutedRelease で、noWaitingRelease と共有する）。
+	HasApprovedRelease bool
 	// OtherPendingOperations は、この完了の承認では承認されない未承認の
 	// 不可逆操作（delete・external_send・other。§決定事項の記録 A1）。
 	OtherPendingOperations []IrreversibleOperation
@@ -225,6 +229,9 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 				return err
 			}
 			for _, op := range ops {
+				if isApprovedUnexecutedRelease(op) {
+					preview.HasApprovedRelease = true
+				}
 				if op.State != OperationStatePending {
 					continue
 				}
