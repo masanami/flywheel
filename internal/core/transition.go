@@ -109,7 +109,7 @@ func (tt TransitionTarget) ResolveForReplan(table []Transition, preceding Status
 }
 
 // Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T18）を指す。
-// T11 は遷移元が4つあるため、物理的には ID="T11" の行が4つ存在する。
+// T11 は遷移元が5つあるため、物理的には ID="T11" の行が5つ存在する。
 type Transition struct {
 	ID                   string
 	From                 Status
@@ -122,7 +122,7 @@ type Transition struct {
 }
 
 // Table は遷移表 T1〜T18 の正本。docs/features/m1-core.md §状態機械 の
-// 遷移表と1対1に対応する（T11 は遷移元4つに展開して4行として持つ）。
+// 遷移表と1対1に対応する（T11 は遷移元5つに展開して5行として持つ）。
 // この表に無い（状態, 操作）の組はすべて不可（Lookup が ok=false を返す）。
 var Table = []Transition{
 	{ID: "T1", From: NoStatus, Op: OpCreate, Target: TransitionTarget{Fixed: StatusUnclassified}},
@@ -137,6 +137,9 @@ var Table = []Transition{
 	{ID: "T10", From: StatusVerifying, Op: OpVerifyUncertain, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
 	{ID: "T11", From: StatusUnclassified, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
 	{ID: "T11", From: StatusClassified, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
+	// 計画承認待ちから入れるのは種類が親が直接行う保留だけ（insertHoldKind が検査する。承認待ちの計画は残り、
+	// 回答で計画承認待ちへ戻る。完了確認待ちからは入れない）。
+	{ID: "T11", From: StatusAwaitingPlanApproval, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
 	{ID: "T11", From: StatusInProgress, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
 	{ID: "T11", From: StatusVerifying, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
 	{ID: "T12", From: StatusAwaitingHuman, Op: OpAnswer, Target: TransitionTarget{ReturnToPrecedingHoldStatus: true, IfReplan: StatusClassified}, RequiresVerification: true},
