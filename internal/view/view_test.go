@@ -443,3 +443,25 @@ func TestStatusParentAgentSectionHoldsParentAgentChallenges(t *testing.T) {
 		t.Error("the parent-agent challenge appears in needs_human")
 	}
 }
+
+// 完了の承認の要約は、core の要約に計画の版・本文が残っていても計画を出さず（計画は計画の承認のときだけ）、
+// 親が直接行った完了の記録を direct_completion に出す（#519。承認画面の API の plan・direct_completion）。
+func TestFromApprovalPreview_CompletionWithDirectCompletionHasNoPlan(t *testing.T) {
+	p := &core.ApprovalPreview{
+		ChallengeID: "C-1",
+		Kind:        core.ApprovalKindCompletion,
+		PlanVersion: 1,
+		PlanBody:    "plan body",
+		DirectCompletion: &core.DirectCompletion{
+			Artifacts: []string{"https://example.com/1"},
+			CreatedAt: time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	got := view.FromApprovalPreview(p, nil).Approval
+	if got.Plan != nil {
+		t.Errorf("Plan = %+v, want nil for a completion approval", got.Plan)
+	}
+	if got.DirectCompletion == nil || !reflect.DeepEqual(got.DirectCompletion.Artifacts, []string{"https://example.com/1"}) {
+		t.Errorf("DirectCompletion = %+v, want the recorded artifact", got.DirectCompletion)
+	}
+}
