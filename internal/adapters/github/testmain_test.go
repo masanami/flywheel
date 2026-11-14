@@ -94,6 +94,8 @@ func runFakeGH(argv []string) int {
 		return fakeGHPullsTwoPages(argv)
 	case "checks_pending", "checks_complete", "checks_merged", "checks_runs_fail":
 		return fakeGHChecks(argv, os.Getenv(envScenario))
+	case "commit_checks_none", "commit_checks_some", "commit_checks_runs_fail", "commit_checks_status_fail":
+		return fakeGHCommitChecks(argv, os.Getenv(envScenario))
 	case "pull_body_ok":
 		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","body":"本文です","head":{"sha":"abc123"}}`)
 		return 0
@@ -573,6 +575,38 @@ func fakeGHChecks(argv []string, scenario string) int {
 		return 0
 	case strings.HasPrefix(endpoint, "repos/o/r/commits/abc123/status"):
 		fmt.Print(`{"state":"pending","total_count":2,"statuses":[{"context":"legacy-a","state":"success"},{"context":"legacy-b","state":"pending"}]}`)
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "fake gh: unexpected endpoint %q\n", endpoint)
+	return 1
+}
+
+// fakeGHCommitChecks は固定したコミット（SHA は fixedSHA だけ受け付ける）のチェックの取得の偽の応答。
+func fakeGHCommitChecks(argv []string, scenario string) int {
+	endpoint, _ := lastEndpointAndDashI(argv)
+	switch {
+	case strings.HasPrefix(endpoint, "repos/o/r/commits/"+fixedSHA+"/check-runs?"):
+		switch scenario {
+		case "commit_checks_runs_fail":
+			fmt.Fprintln(os.Stderr, "gh: boom")
+			return 1
+		case "commit_checks_some", "commit_checks_status_fail":
+			// status_fail でも check run を 1 件返し、取得の失敗時に部分的な一覧を返さないことを試験で確かめられるようにする。
+			fmt.Print(`{"total_count":1,"check_runs":[{"name":"build","status":"completed","conclusion":"success"}]}`)
+		default:
+			fmt.Print(`{"total_count":0,"check_runs":[]}`)
+		}
+		return 0
+	case strings.HasPrefix(endpoint, "repos/o/r/commits/"+fixedSHA+"/status?"):
+		switch scenario {
+		case "commit_checks_status_fail":
+			fmt.Fprintln(os.Stderr, "gh: boom")
+			return 1
+		case "commit_checks_some":
+			fmt.Print(`{"state":"pending","total_count":1,"statuses":[{"context":"legacy-a","state":"pending"}]}`)
+		default:
+			fmt.Print(`{"state":"pending","total_count":0,"statuses":[]}`)
+		}
 		return 0
 	}
 	fmt.Fprintf(os.Stderr, "fake gh: unexpected endpoint %q\n", endpoint)
