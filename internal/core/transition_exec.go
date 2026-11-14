@@ -99,6 +99,8 @@ type runTransitionParams struct {
 	// 呼び出し）だけが true にする。本人確認つきの遷移かどうかの不変条件は
 	// verification の値（方式 none の (ui, none) も本人確認つき）ではなくこれで判定する。
 	attested bool
+	// replan は回答に「範囲が変わる」印が付いたこと（T12 だけ）。真のとき、遷移先は IfReplan の分類済になる。
+	replan bool
 }
 
 // runTransition は transition（#10: 本人確認の無い5操作）・verifiedTransition
@@ -182,9 +184,20 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 				return err
 			}
 		}
-		target, err := tr.Target.ResolveForCompletionDirect(Table, preceding, completionDirect)
-		if err != nil {
-			return err
+		var target Status
+		if p.replan {
+			target, err = tr.Target.ResolveForReplan(Table, preceding)
+			if err != nil {
+				if tr.Target.IfReplan != NoStatus && ReplanAllowedFrom(preceding) {
+					return err
+				}
+				return fmt.Errorf("%w: %w", ErrValidation, err)
+			}
+		} else {
+			target, err = tr.Target.ResolveForCompletionDirect(Table, preceding, completionDirect)
+			if err != nil {
+				return err
+			}
 		}
 
 		nowStr := formatTimestamp(rec.at)
@@ -368,6 +381,11 @@ func (s *Store) transitionAsInvoker(ctx context.Context, runIDDisplay, id string
 // 必ず渡すため、対象の版が Prepare* の時点から変わっていれば ErrConflict に
 // なる。
 func (s *Store) verifiedTransition(ctx context.Context, att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+	return s.verifiedTransitionReplan(ctx, att, id, expectedVersion, op, preceding, resolvePreceding, false, apply)
+}
+
+// verifiedTransitionReplan は verifiedTransition に、回答の「範囲が変わる」印（replan）を足した版。
+func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, replan bool, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
 	if !attestationValid(att, id) {
 		return nil, ErrVerificationRejected
 	}
@@ -382,6 +400,7 @@ func (s *Store) verifiedTransition(ctx context.Context, att Attestation, id stri
 		preceding:        preceding,
 		resolvePreceding: resolvePreceding,
 		attested:         true,
+		replan:           replan,
 	}, apply)
 }
 

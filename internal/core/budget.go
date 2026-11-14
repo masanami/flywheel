@@ -79,14 +79,17 @@ func applyBudgetOverride(implUSD, reviewUSD float64, o *planBudgetOverride) plan
 }
 
 // loadBucketSpend は challengeID の計画の版 planVersion の枠ごとの費用の合計と、実装枠の
-// 打ち切りの有無を読む。終了していない run の費用（NULL）は 0 として数える（その上限額は
+// 打ち切りの有無を読む。範囲が変わる回答（hold.replan）で計画を作り直した課題だけは、前の計画の版の run の
+// 費用も合計に積み上げる（使った費用を新しい計画の予算から引く。M1 §範囲が変わる回答）。終了していない run の費用（NULL）は 0 として数える（その上限額は
 // 周の予約額が持つ）。
 func loadBucketSpend(ctx context.Context, tx *sql.Tx, challengeID, planVersion int64) (bucketSpend, error) {
 	var sp bucketSpend
 	rows, err := tx.QueryContext(ctx,
 		`SELECT budget_bucket, COALESCE(SUM(cost_usd), 0) FROM run
-		 WHERE challenge_id = ? AND plan_version = ? AND budget_bucket IN (?, ?) GROUP BY budget_bucket`,
-		challengeID, planVersion, string(budgetBucketImpl), string(budgetBucketReview))
+		 WHERE challenge_id = ? AND budget_bucket IN (?, ?)
+		   AND (plan_version = ? OR (plan_version < ? AND EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = run.challenge_id AND h.replan = 1 AND h.answer IS NOT NULL)))
+		 GROUP BY budget_bucket`,
+		challengeID, string(budgetBucketImpl), string(budgetBucketReview), planVersion, planVersion)
 	if err != nil {
 		return sp, err
 	}

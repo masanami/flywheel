@@ -260,7 +260,7 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			Flags:         append([]flagDef{{Name: "answer", HasValue: true, Required: true}}, relayedFlags()...),
+			Flags:         append([]flagDef{{Name: "answer", HasValue: true, Required: true}, {Name: "replan", HasValue: false}}, relayedFlags()...),
 			Run:           runAnswer,
 		},
 		{

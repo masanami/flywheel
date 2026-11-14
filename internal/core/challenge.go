@@ -115,6 +115,9 @@ type Hold struct {
 	// ClosedAt は保留を回答なしで閉じた日時（課題の取り下げ。M45H29）。閉じていなければ nil。
 	// Answer が nil でも ClosedAt が非 nil の保留は、開いている保留ではない。
 	ClosedAt *time.Time
+	// Replan は回答に付いた「範囲が変わる」印（T12）。真なら、その回答は委譲を再開せず、課題を計画の
+	// 作り直し（分類済）へ戻した。回答の無い保留・印の無い回答は偽。
+	Replan bool
 }
 
 // Open は保留がまだ開いている（回答も閉じる操作も無い）かを返す。
@@ -422,7 +425,7 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT question, from_status, raised_at, answer, answered_at, answered_by, run_id,
-		        answered_channel, answered_verification, relay_session, relay_quote, closed_at, kind
+		        answered_channel, answered_verification, relay_session, relay_quote, closed_at, kind, replan
 		 FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -439,11 +442,13 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			ansChannel, ansVerif, relSess     sql.NullString
 			relQuote, closedAtStr             sql.NullString
 			kind                              string
+			replan                            int
 			h                                 Hold
 		)
-		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind); err != nil {
+		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind, &replan); err != nil {
 			return nil, err
 		}
+		h.Replan = replan == 1
 		h.Kind = HoldKind(kind)
 		if runID.Valid {
 			v := formatRunID(runID.Int64)
