@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -163,5 +164,104 @@ func TestAcquireSlot_KeepTreeDoesNotSwitch(t *testing.T) {
 	}
 	if len(g.switched) != 0 || a.BaseBranch != "fix/own" {
 		t.Errorf("switched = %+v BaseBranch = %q", g.switched, a.BaseBranch)
+	}
+}
+
+// 再開でない新しい委譲（計画の版が変わった後）でも、前の委譲が SL-2 でブランチ B を報告し、
+// SL-2 が B を checkout したまま idle なら、新しい委譲は B のまま起動される（#526）。
+func TestAcquireDelegationSlot_NewDelegationFollowsPreviousRunBranch(t *testing.T) {
+	s := newStoreForTest(t)
+	ctx := context.Background()
+	g := newFakeSlotGit()
+	repo := worktreeRepoForTest(2)
+	p1 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-1")
+	p2 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-2")
+	switchStateAt(g, p1, "", false)
+	switchStateAt(g, p2, "fix/issue-457-pr", false)
+
+	sl2 := "SL-2"
+	prev := []runRow{
+		{ID: "R-1", Result: RunResultSucceeded, Output: string(reportJSON(func(m map[string]any) { m["branch"] = "fix/issue-457-pr" })), SlotID: &sl2},
+		{ID: "R-2", Result: RunResultLaunchFailed},
+	}
+	var follow *followBranch
+	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		var err error
+		follow, err = loadFollowBranch(ctx, tx, prev, nil, repo.DefaultBranch)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if follow == nil || *follow != (followBranch{Branch: "fix/issue-457-pr", SlotID: "SL-2"}) {
+		t.Fatalf("follow = %+v", follow)
+	}
+	dc := &delegationContext{Repo: repo, Follow: follow}
+	a, err := s.acquireDelegationSlot(ctx, DelegateInput{Git: g}, dc, bindRunForTest(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.SlotID != "SL-2" || a.BaseBranch != "fix/issue-457-pr" || len(g.switched) != 0 {
+		t.Errorf("assignment = %+v switched = %+v, want SL-2 on fix/issue-457-pr without switching", a, g.switched)
+	}
+}
+
+// 前の run のスロットが分からず別のスロットに割り当てるときも、B を checkout している
+// idle・変更なしのスロットから B を外して、割り当てたスロットで checkout する。
+func TestAcquireDelegationSlot_NewDelegationReleasesBranchFromOtherIdleSlot(t *testing.T) {
+	s := newStoreForTest(t)
+	ctx := context.Background()
+	g := newFakeSlotGit()
+	repo := worktreeRepoForTest(2)
+	p1 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-1")
+	p2 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-2")
+	switchStateAt(g, p1, "test/issue-9-other", false)
+	switchStateAt(g, p2, "fix/issue-457-pr", false)
+
+	// 前の run のスロットの記録が無い（SlotID が空）: 候補の先頭の SL-1 で B を checkout する。
+	dc := &delegationContext{Repo: repo, Follow: &followBranch{Branch: "fix/issue-457-pr"}}
+	a, err := s.acquireDelegationSlot(ctx, DelegateInput{Git: g}, dc, bindRunForTest(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SlotSwitchCall{
+		{Path: p2, Req: SlotSwitch{Ref: "refs/heads/main"}},
+		{Path: p1, Req: SlotSwitch{Branch: "fix/issue-457-pr", Ref: "refs/heads/main"}},
+	}
+	if a.SlotID != "SL-1" || a.BaseBranch != "fix/issue-457-pr" || len(g.switched) != 2 || g.switched[0] != want[0] || g.switched[1] != want[1] {
+		t.Errorf("assignment = %+v switched = %+v, want %+v", a, g.switched, want)
+	}
+}
+
+// 前の run が無い・ブランチが既定ブランチ・報告が読めないときは追従しない（base へ揃える）。
+func TestLoadFollowBranch_NoneWhenNoUsableBranch(t *testing.T) {
+	s := newStoreForTest(t)
+	ctx := context.Background()
+	for name, runs := range map[string][]runRow{
+		"no runs":        nil,
+		"default branch": {{ID: "R-1", Result: RunResultSucceeded, Output: string(reportJSON(func(m map[string]any) { m["branch"] = "main" }))}},
+		"unreadable":     {{ID: "R-1", Result: RunResultSucceeded, Output: "not json"}},
+		"failed run":     {{ID: "R-1", Result: RunResultLaunchFailed}},
+	} {
+		var follow *followBranch
+		if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+			var err error
+			follow, err = loadFollowBranch(ctx, tx, runs, nil, "main")
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if follow != nil {
+			t.Errorf("%s: follow = %+v, want nil", name, follow)
+		}
+	}
+	// 追従しない新しい委譲は、前の課題のブランチに残るスロットを base へ揃える。
+	g := newFakeSlotGit()
+	p1 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-1")
+	switchStateAt(g, p1, "test/issue-1-other", false)
+	if _, err := s.acquireDelegationSlot(ctx, DelegateInput{Git: g}, &delegationContext{Repo: worktreeRepoForTest(1)}, bindRunForTest(ctx)); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.switched) != 1 || g.switched[0] != (SlotSwitchCall{Path: p1, Req: SlotSwitch{Ref: "refs/heads/main"}}) {
+		t.Errorf("switched = %+v, want one detach to base", g.switched)
 	}
 }
