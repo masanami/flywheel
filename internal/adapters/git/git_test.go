@@ -587,8 +587,12 @@ func TestSwitchTree_DetachToBaseCheckoutBranchAndNeverForces(t *testing.T) {
 	if err := g.SwitchTree(ctx, t1, core.SlotSwitch{Branch: "pr", Ref: "refs/heads/main"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.SwitchTree(ctx, t2, core.SlotSwitch{Branch: "pr", Ref: "refs/heads/main"}); err == nil {
-		t.Error("checking out a branch held by another worktree succeeded")
+	if err := g.SwitchTree(ctx, t2, core.SlotSwitch{Branch: "pr", Ref: "refs/heads/main"}); !errors.Is(err, core.ErrBranchCheckedOutElsewhere) {
+		t.Errorf("checking out a branch held by another worktree: err = %v, want ErrBranchCheckedOutElsewhere", err)
+	}
+	// 元のクローン（走査の外の作業ツリー）が持つブランチも同じ失敗として返す。
+	if err := g.SwitchTree(ctx, t2, core.SlotSwitch{Branch: "main", Ref: "refs/heads/main"}); !errors.Is(err, core.ErrBranchCheckedOutElsewhere) {
+		t.Errorf("checking out the base clone's branch: err = %v, want ErrBranchCheckedOutElsewhere", err)
 	}
 	if got := branchOf(t2); got != "" {
 		t.Errorf("SL-2 branch = %q, want unchanged (detached)", got)

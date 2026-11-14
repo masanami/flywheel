@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -403,4 +405,172 @@ func slotByIDNoT(s *Store, id string) string {
 		}
 	}
 	return "missing"
+}
+
+// 前の委譲のブランチの PR がマージ済み・閉じ済みとストアの記録で分かるときは追従しない
+// （base へ揃える）。成果物の PR の状態か、その PR を参照する実行済みの本番反映で判断する（#526 F4）。
+func TestLoadFollowBranch_NoneWhenPreviousPRIsMergedOrClosed(t *testing.T) {
+	const prURL = "https://github.com/o/r/pull/7"
+	for _, tc := range []struct {
+		name      string
+		state     artifactState
+		executed  bool
+		wantNoFol bool
+	}{
+		{"open PR is followed", artifactStateOpen, false, false},
+		{"merged PR", artifactStateMerged, false, true},
+		{"closed PR", artifactStateClosed, false, true},
+		{"release executed", artifactStateOpen, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStoreForTest(t)
+			ctx := context.Background()
+			cid := mustCreateChallengeInternalID(t, s, "c")
+			var runID int64
+			if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+				now := time.Now()
+				r, err := insertRun(ctx, tx, 0, insertRunInput{
+					Kind: runKindPredict, PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now,
+					MaxBudgetUSD: 1, BudgetBucket: budgetBucketPredict, Repo: "r",
+				})
+				if err != nil {
+					return err
+				}
+				runID, _ = parseRunID(r.ID)
+				if _, err := insertRunArtifact(ctx, tx, runID, insertRunArtifactInput{Kind: artifactKindPR, Ref: prURL, State: tc.state, Base: "main"}); err != nil {
+					return err
+				}
+				if tc.executed {
+					_, err := tx.Exec(`INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at, executed_at, merge_commit)
+						VALUES (?, 'release', 's', ?, 'executed', 1, ?, ?, 'abc')`, cid, prURL, formatTimestamp(now), formatTimestamp(now))
+					return err
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			runs := []runRow{{ID: formatRunID(runID), Result: RunResultSucceeded, Output: string(reportJSON(func(m map[string]any) { m["branch"] = "fix/issue-7" }))}}
+			var follow *followBranch
+			if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+				var err error
+				follow, err = loadFollowBranch(ctx, tx, runs, nil, "main")
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantNoFol && follow != nil {
+				t.Errorf("follow = %+v, want nil", follow)
+			}
+			if !tc.wantNoFol && (follow == nil || follow.Branch != "fix/issue-7") {
+				t.Errorf("follow = %+v, want fix/issue-7", follow)
+			}
+		})
+	}
+}
+
+// 走査の外（ベースのクローン・宣言の数を超えたスロット）の作業ツリーが追従するブランチを持ち、
+// checkout が「他の作業ツリーが持つ」で失敗するときは、そのスロットを使わず needs_attention にも
+// しない（idle のスロットが次々と needs_attention にならない。#526 F3）。
+func TestAcquireSlot_BranchHeldOutsideTheSlotsDoesNotMarkNeedsAttention(t *testing.T) {
+	s := newStoreForTest(t)
+	ctx := context.Background()
+	g := newFakeSlotGit()
+	repo := worktreeRepoForTest(2)
+	held := fmt.Errorf("%w: git checkout: fatal: 'fix/b' is already used by worktree at '/base'", ErrBranchCheckedOutElsewhere)
+	g.switchErr = map[string]error{}
+	for _, id := range []string{"SL-1", "SL-2"} {
+		p := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", id)
+		switchStateAt(g, p, "", false)
+		g.switchErr[p] = held
+	}
+	if _, err := s.acquireSlot(ctx, g, repo, bindRunForTest(ctx), slotChoice{Branch: "fix/b"}); !errors.Is(err, ErrSlotUnavailable) {
+		t.Fatalf("error = %v, want ErrSlotUnavailable", err)
+	}
+	for _, id := range []string{"SL-1", "SL-2"} {
+		if sl := slotByID(t, s, id); sl.State != "idle" {
+			t.Errorf("%s = %+v, want idle", id, sl)
+		}
+	}
+}
+
+// 同じプロセスの並行の割り当て（直列グループごとの goroutine）が、同じスロットを切り替え合わない:
+// (a) 各委譲は望むブランチのスロットで起動され、(b) 割り当て済みのスロットの先頭は他の割り当てで
+// 動かない（#526 F1）。
+func TestAcquireSlot_ConcurrentAssignmentsDoNotSwitchEachOthersSlot(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		s := newStoreForTest(t)
+		ctx := context.Background()
+		g := newFakeSlotGit()
+		repo := worktreeRepoForTest(2)
+		for _, id := range []string{"SL-1", "SL-2"} {
+			switchStateAt(g, filepath.Join(s.Workspace(), worktreeSlotsDir, "r", id), "", false)
+		}
+		wants := []string{"fix/a", "fix/b"}
+		got := make([]*SlotAssignment, len(wants))
+		errs := make([]error, len(wants))
+		var wg sync.WaitGroup
+		for j, w := range wants {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				got[j], errs[j] = s.acquireSlot(ctx, g, repo, bindRunForTest(ctx), slotChoice{Branch: w})
+			}()
+		}
+		wg.Wait()
+		for j, w := range wants {
+			if errs[j] != nil {
+				t.Fatalf("iteration %d: %s: %v", i, w, errs[j])
+			}
+			st, _ := g.Inspect(ctx, SlotTree{Path: got[j].Path})
+			if got[j].BaseBranch != w || st.Branch != w {
+				t.Fatalf("iteration %d: %s assigned %+v, tree on %q", i, w, got[j], st.Branch)
+			}
+		}
+		if got[0].SlotID == got[1].SlotID {
+			t.Fatalf("iteration %d: both assigned %s", i, got[0].SlotID)
+		}
+	}
+}
+
+// 同じブランチを追従する並行の割り当てでは、片方だけがそのブランチで起動し、もう片方は
+// 割り当て済みのスロットからブランチを外さない（使用中なので ErrSlotUnavailable）。
+func TestAcquireSlot_ConcurrentSameBranchDoesNotMoveTheAssignedSlot(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		s := newStoreForTest(t)
+		ctx := context.Background()
+		g := newFakeSlotGit()
+		repo := worktreeRepoForTest(2)
+		for _, id := range []string{"SL-1", "SL-2"} {
+			switchStateAt(g, filepath.Join(s.Workspace(), worktreeSlotsDir, "r", id), "", false)
+		}
+		got := make([]*SlotAssignment, 2)
+		errs := make([]error, 2)
+		var wg sync.WaitGroup
+		for j := range got {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				got[j], errs[j] = s.acquireSlot(ctx, g, repo, bindRunForTest(ctx), slotChoice{Branch: "fix/a"})
+			}()
+		}
+		wg.Wait()
+		var winner *SlotAssignment
+		for j := range got {
+			switch {
+			case errs[j] == nil:
+				if winner != nil {
+					t.Fatalf("iteration %d: both assigned (%+v, %+v)", i, winner, got[j])
+				}
+				winner = got[j]
+			case !errors.Is(errs[j], ErrSlotUnavailable):
+				t.Fatalf("iteration %d: error = %v, want ErrSlotUnavailable", i, errs[j])
+			}
+		}
+		if winner == nil {
+			t.Fatalf("iteration %d: neither assigned: %v", i, errs)
+		}
+		if st, _ := g.Inspect(ctx, SlotTree{Path: winner.Path}); st.Branch != "fix/a" || winner.BaseBranch != "fix/a" {
+			t.Fatalf("iteration %d: winner %+v tree on %q, want fix/a", i, winner, st.Branch)
+		}
+	}
 }

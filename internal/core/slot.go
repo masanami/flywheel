@@ -334,6 +334,18 @@ func (s *Store) switchSlotTree(ctx context.Context, git SlotGit, repo ConnectorR
 			if o.State != slotStateIdle || ost.Dirty {
 				return "", "", errSlotBranchHeld
 			}
+			// 外す直前に、そのスロットの状態をストアから読み直す。上の一覧を読んだ後に他の
+			// プロセスが割り当てて子を起動していれば、その作業ツリーの先頭を動かさない。
+			cur, err := s.reloadSlotState(ctx, o.ID)
+			if err != nil {
+				return "", "", err
+			}
+			if cur == slotStateBusy {
+				return "", "", errSlotBranchBusy
+			}
+			if cur != slotStateIdle {
+				return "", "", errSlotBranchHeld
+			}
 			if err := git.SwitchTree(ctx, ot, SlotSwitch{Ref: ref}); err != nil {
 				if isEnvironmentFailure(ctx, err) {
 					return "", "", err
@@ -346,6 +358,11 @@ func (s *Store) switchSlotTree(ctx context.Context, git SlotGit, repo ConnectorR
 		if isEnvironmentFailure(ctx, err) {
 			return "", "", err
 		}
+		if errors.Is(err, ErrBranchCheckedOutElsewhere) {
+			// 走査の外（ベースのクローン・宣言の数を超えたスロット等）の作業ツリーが want を
+			// 持つ。このスロットの欠陥ではないので needs_attention にせず、この割り当てでは使わない。
+			return "", "", errSlotBranchHeld
+		}
 		return "switching the working tree failed: " + oneLine(err.Error()), "", nil
 	}
 	after, err := git.Inspect(ctx, tree)
@@ -356,6 +373,26 @@ func (s *Store) switchSlotTree(ctx context.Context, git SlotGit, repo ConnectorR
 		return "inspecting the working tree failed: " + oneLine(err.Error()), "", nil
 	}
 	return "", after.Branch, nil
+}
+
+// reloadSlotState は id（表示形）のスロットの現在の状態をストアから読む（無ければ ""）。
+func (s *Store) reloadSlotState(ctx context.Context, slotID string) (slotState, error) {
+	var st slotState
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		id, _ := parseSlotID(slotID)
+		cur, err := loadSlotByID(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if cur != nil {
+			st = cur.State
+		}
+		return nil
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return "", err
+	}
+	return st, nil
 }
 
 func isEnvironmentFailure(ctx context.Context, err error) bool {
@@ -407,32 +444,56 @@ func (s *Store) acquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 		}
 		tried[next.ID] = true
 
-		reason, baseBranch, err := s.prepareSlot(ctx, git, repo, *next, choice)
-		if errors.Is(err, errSlotBranchBusy) {
-			// どのスロットでもそのブランチは checkout できないので、他を試さずに返す。
-			return nil, errSlotBranchBusy
-		}
-		if errors.Is(err, errSlotBranchHeld) {
-			continue
-		}
+		a, retry, err := s.tryAcquireSlot(ctx, git, repo, *next, bind, choice)
 		if err != nil {
 			return nil, err
 		}
-		if reason != "" {
-			if err := s.markSlotNeedsAttention(ctx, *next, reason); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		a, err := s.assignSlot(ctx, *next, bind)
-		if err != nil {
-			return nil, err
-		}
-		if a != nil {
-			a.BaseBranch = baseBranch
+		if !retry {
 			return a, nil
 		}
 	}
+}
+
+// tryAcquireSlot は slot の 1 回の試行（検査・作業ツリーの切り替え → busy にする）を、同じ
+// プロセスの他の割り当てと直列に行う（slotMu）。retry=true は次の候補を試す。
+// 待ち（waitForBranchHolder・waitForOriginalSlot の sleep）はこの外で行うので、ロックを持ったまま待たない。
+func (s *Store) tryAcquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo, slot slotRow, bind SlotBinder, choice slotChoice) (*SlotAssignment, bool, error) {
+	s.slotMu.Lock()
+	defer s.slotMu.Unlock()
+	// 一覧を読んだ後に同じプロセスの他の割り当てが取っていれば、作業ツリーに触れずに次へ。
+	cur, err := s.reloadSlotState(ctx, slot.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if cur != slotStateIdle {
+		return nil, true, nil
+	}
+	reason, baseBranch, err := s.prepareSlot(ctx, git, repo, slot, choice)
+	if errors.Is(err, errSlotBranchBusy) {
+		// どのスロットでもそのブランチは checkout できないので、他を試さずに返す。
+		return nil, false, errSlotBranchBusy
+	}
+	if errors.Is(err, errSlotBranchHeld) {
+		return nil, true, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if reason != "" {
+		if err := s.markSlotNeedsAttention(ctx, slot, reason); err != nil {
+			return nil, false, err
+		}
+		return nil, true, nil
+	}
+	a, err := s.assignSlot(ctx, slot, bind)
+	if err != nil {
+		return nil, false, err
+	}
+	if a == nil {
+		return nil, true, nil
+	}
+	a.BaseBranch = baseBranch
+	return a, false, nil
 }
 
 func (s *Store) nextIdleSlot(ctx context.Context, repo ConnectorRepo, tried map[string]bool, choice slotChoice) (*slotRow, error) {

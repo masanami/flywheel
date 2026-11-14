@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/masanami/flywheel/internal/core/internal/store"
@@ -26,6 +27,11 @@ type Store struct {
 	// file は OpenWorkspace が開いたときのストアのファイル（IsCurrent が差し替えを
 	// 検出する）。nil なら IsCurrent は常に true。
 	file os.FileInfo
+
+	// slotMu は同じプロセスの中のスロットの割り当てを直列にする（acquireSlot の 1 回の試行の
+	// 「検査・作業ツリーの切り替え〔prepareSlot〕→ busy にする〔assignSlot〕」を囲む）。
+	// 並行の委譲（直列グループごとの goroutine）が同じスロットを切り替え合わないため（#526）。
+	slotMu sync.Mutex
 
 	// now はテストが時刻を差し替えるためのフック。nil なら time.Now を使う
 	// （#9 §A-6）。internal/core のテストだけがこのフィールドへ直接代入する

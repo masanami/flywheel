@@ -528,6 +528,16 @@ func loadFollowBranch(ctx context.Context, tx *sql.Tx, runs []runRow, declared [
 		if b == "" {
 			continue
 		}
+		// そのブランチの PR がマージ済み・閉じ済みとストアの記録で分かれば追従しない（base へ
+		// 揃える）。マージの後に課題が戻されたとき、古いブランチで新しい委譲を起動しないため。
+		// 記録に無い（GitHub で直接マージ・閉じた）場合は分からず、追従する（gh は呼ばない）。
+		done, err := followedPRFinished(ctx, tx, runIntID(runs[i]))
+		if err != nil {
+			return nil, err
+		}
+		if done {
+			return nil, nil
+		}
 		f := &followBranch{Branch: b}
 		if runs[i].SlotID != nil {
 			f.SlotID = *runs[i].SlotID
@@ -535,6 +545,51 @@ func loadFollowBranch(ctx context.Context, tx *sql.Tx, runs []runRow, declared [
 		return f, nil
 	}
 	return nil, nil
+}
+
+// followedPRFinished は runID の run の成果物の PR が、ストアの記録の上でマージ済み・閉じ済みかを
+// 返す。成果物の PR の状態（照合の時点の merged・closed）か、その PR を参照する実行済みの本番反映
+// （release の不可逆操作）のどちらかがあれば真。
+func followedPRFinished(ctx context.Context, tx *sql.Tx, runID int64) (bool, error) {
+	arts, err := listRunArtifacts(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	type prKey struct {
+		repo string
+		n    int
+	}
+	prs := map[prKey]bool{}
+	for _, a := range arts {
+		if a.Kind != artifactKindPR {
+			continue
+		}
+		if a.State == artifactStateMerged || a.State == artifactStateClosed {
+			return true, nil
+		}
+		if repo, n, ok := parseReleasePullRequestRef(a.Ref); ok {
+			prs[prKey{strings.ToLower(repo), n}] = true
+		}
+	}
+	if len(prs) == 0 {
+		return false, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT ref FROM operation WHERE kind = ? AND state = ?`,
+		string(OperationKindRelease), string(OperationStateExecuted))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var ref sql.NullString
+		if err := rows.Scan(&ref); err != nil {
+			return false, err
+		}
+		if repo, n, ok := parseReleasePullRequestRef(ref.String); ok && prs[prKey{strings.ToLower(repo), n}] {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // formatQuestionsHold は結末 questions の報告の問いを、保留の問いにする整形した文にする。

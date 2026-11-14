@@ -131,6 +131,17 @@ func exitedOKButPipesHeld(cmd *exec.Cmd, err error) bool {
 	return errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success()
 }
 
+// checkedOutElsewhere は、checkout の失敗が「そのブランチを他の作業ツリーが checkout している」
+// ことによるかを返す（git の版で文言が違う: "is already checked out at"〔古い版〕と
+// "is already used by worktree at"〔2.42 以降〕）。
+func checkedOutElsewhere(err error) bool {
+	var re *runError
+	if !errors.As(err, &re) {
+		return false
+	}
+	return strings.Contains(re.msg, "is already checked out at") || strings.Contains(re.msg, "is already used by worktree at")
+}
+
 type runError struct {
 	args []string
 	msg  string
@@ -321,6 +332,9 @@ func (*Git) SwitchTree(ctx context.Context, tree core.SlotTree, req core.SlotSwi
 		ref := "refs/heads/" + req.Branch
 		if _, err := run(ctx, gitDir, tree.Path, "show-ref", "--verify", "--quiet", ref); err == nil {
 			_, err := run(ctx, gitDir, tree.Path, "checkout", "-q", req.Branch, "--")
+			if err != nil && checkedOutElsewhere(err) {
+				return fmt.Errorf("%w: %w", core.ErrBranchCheckedOutElsewhere, err)
+			}
 			return err
 		} else if exitCode(err) != 1 {
 			return err

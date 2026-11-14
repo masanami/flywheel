@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"strings"
 )
 
@@ -68,6 +69,11 @@ type SlotGit interface {
 	// `git fetch` は実行しない。失敗は error。
 	SwitchTree(ctx context.Context, tree SlotTree, req SlotSwitch) error
 }
+
+// ErrBranchCheckedOutElsewhere は、SwitchTree が checkout しようとしたブランチを、同じ元の
+// クローンの他の作業ツリーが checkout しているため切り替えられなかったことを表す（SlotGit の
+// 実装がこれを包んで返す）。core はこの失敗をスロットの欠陥として扱わない。
+var ErrBranchCheckedOutElsewhere = errors.New("core: the branch is checked out in another working tree")
 
 // SlotSwitch は SlotGit.SwitchTree の入力。Ref は "refs/heads/<既定ブランチ>"。
 type SlotSwitch struct {
