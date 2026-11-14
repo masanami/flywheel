@@ -540,7 +540,7 @@ func (s *Store) applyJ1NotMine(ctx context.Context, runIDDisplay, challengeIDDis
 
 // applyJ1Uncertain は判定 uncertain の出力を課題へ写す（M1 T11。
 // HoldChallenge と同じ遷移を transitionAsInvoker 経由で実行する）。T11 の
-// 遷移表は未分類・分類済・着手中・検証中の4行を持つため、
+// 遷移表は未分類・分類済・計画承認待ち・着手中・検証中の5行を持つため、
 // Lookup(current.Status, OpHold) の成功だけでは「読み直した状態が未分類で
 // なくなっていれば写さない」を保証できない（J1 の対象は常に未分類の課題
 // だけであり、他の3状態からの人間対応待ちへの遷移は M1 の hold・verify が

@@ -1024,3 +1024,67 @@ func TestExportImport_CarriesTheCompletionDirectFlag(t *testing.T) {
 		t.Errorf("status after reject in the imported store = %q, want awaiting_human", got.Status)
 	}
 }
+
+// 計画承認待ちの課題で、親が直接行う保留を立て、完了として記録し、差し戻されたら親が直接行う保留へ戻る
+// （#519）。承認を待っている計画は一連の流れを通して残る。
+func TestPlanApproval_ParentDirectHoldCompleteDirectAndRejectKeepThePlan(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	cid, _ := parseChallengeID(c.ID)
+	insertPlanRow(t, s, cid, 1, "plan body")
+	planRows := func() int {
+		d, err := s.GetChallenge(context.Background(), c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(d.Plans)
+	}
+
+	if _, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "親が直接行う", Kind: string(HoldKindParentDirect)}); err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	got, dc, err := s.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/1"))
+	if err != nil {
+		t.Fatalf("CompleteDirect: %v", err)
+	}
+	if got.Status != StatusAwaitingCompletionApproval || len(dc.Artifacts) != 1 {
+		t.Fatalf("status=%q artifacts=%v", got.Status, dc.Artifacts)
+	}
+
+	// 差し戻すと、子に任され直さず親が直接行う保留へ戻る。
+	rej := rejectWithReasonForTest(t, s, c.ID, "やり直す")
+	if rej.Status != StatusAwaitingHuman {
+		t.Fatalf("status after reject = %q, want awaiting_human", rej.Status)
+	}
+	d, _ := s.GetChallenge(context.Background(), c.ID)
+	open := d.Holds[len(d.Holds)-1]
+	if !open.Open() || open.Kind != HoldKindParentDirect || open.FromStatus != StatusAwaitingPlanApproval {
+		t.Fatalf("open hold = %+v, want an open parent_direct hold from awaiting_plan_approval", open)
+	}
+	if planRows() != 1 {
+		t.Errorf("plan rows = %d, want 1 (the pending plan must be kept)", planRows())
+	}
+}
+
+// 計画承認待ちから立てた保留を回答で解くと、計画承認待ちへ戻り、承認待ちの計画は残る。
+func TestPlanApproval_AnswerReturnsToPlanApprovalAndKeepsThePlan(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	cid, _ := parseChallengeID(c.ID)
+	insertPlanRow(t, s, cid, 1, "plan body")
+	if _, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "親が直接行う", Kind: string(HoldKindParentDirect)}); err != nil {
+		t.Fatal(err)
+	}
+	if res := dispatchOperation(t, s, c.ID, OpAnswer); res.err != nil {
+		t.Fatalf("answer: %v", res.err)
+	}
+	d, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Status != StatusAwaitingPlanApproval || len(d.Plans) != 1 {
+		t.Fatalf("status=%q plans=%d, want awaiting_plan_approval with 1 plan", d.Status, len(d.Plans))
+	}
+}

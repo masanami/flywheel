@@ -136,17 +136,24 @@ func awaitingCompletionWithReleasesForCase(t *testing.T, ws string) string {
 }
 
 func holdFromCase(from string) worklogCase {
+	// 計画承認待ちから入れるのは親が直接行う保留だけ。
+	extra := []string{}
+	after := map[string]any{"question": "q", "status": "awaiting_human", "version": 2.0}
+	if from == "awaiting_plan_approval" {
+		extra = []string{"--kind", "parent_direct"}
+		after["hold_kind"] = "parent_direct"
+	}
 	return worklogCase{
 		name:       "T11 hold from " + from,
 		command:    "hold",
 		transition: tableRow("T11", core.Status(from)),
 		setup: func(t *testing.T, ws string) []string {
-			return []string{"hold", createWithStatusForCase(t, ws, from), "--question", "q"}
+			return append([]string{"hold", createWithStatusForCase(t, ws, from), "--question", "q"}, extra...)
 		},
 		want: func(string) []wantActivity {
 			return []wantActivity{{"challenge", "C-1", "hold",
 				map[string]any{"status": from},
-				map[string]any{"question": "q", "status": "awaiting_human", "version": 2.0}}}
+				after}}
 		},
 	}
 }
@@ -363,6 +370,7 @@ var worklogCases = []worklogCase{
 	},
 	holdFromCase("unclassified"),
 	holdFromCase("classified"),
+	holdFromCase("awaiting_plan_approval"),
 	holdFromCase("in_progress"),
 	holdFromCase("verifying"),
 	withdrawFromCase("unclassified"),
