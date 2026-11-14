@@ -70,7 +70,7 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 		view.CycleResponse{}, view.CycleStarted{}, view.CycleStatus{}, view.SlotCleared{}, view.SlotResponse{}, view.InitResponse{},
 		view.MarkReadResponse{}, view.BudgetResponse{}, view.ExportBody{}, view.ExportResponse{}, view.ImportBody{}, view.ImportResponse{},
 		view.ApprovalPlan{}, view.ApprovalRelease{}, view.ApprovalOtherOperation{}, view.ApprovalSummary{}, view.ApprovalSummaryResponse{}, view.DirectCompletion{}, view.ChallengeDirectCompletionResponse{}, view.StatusParentAgent{}, view.ShowCardResponse{},
-		view.GraphNode{}, view.GraphEdge{}, view.GraphResponse{},
+		view.GraphNode{}, view.GraphEdge{}, view.GraphResponse{}, view.VersionResponse{},
 	}
 	for _, v := range types {
 		rt := reflect.TypeOf(v)

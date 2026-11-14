@@ -109,10 +109,10 @@ func initText(res *core.InitResult) string {
 }
 
 // defaultCommands は docs/features/m1-core.md §IF / API の全コマンドを登録する。
-// この表に無いコマンド（例: version）は足さない。init 以外はすべて
+// この表に無いコマンドは足さない。init・version 以外はすべて
 // RequiresStore: true（完了条件「init と読み取りを含むすべてのコマンドを
 // store_too_new で拒否する」の対象。init 自身は自分でワークスペースを作る
-// ため false）。
+// ため false。version はバイナリの版を読むだけで、版の食い違うストアでも動く）。
 func defaultCommands() []Command {
 	return []Command{
 		{
@@ -355,6 +355,12 @@ func defaultCommands() []Command {
 			MinPositional: 1,
 			MaxPositional: 1,
 			Run:           runUnbind,
+		},
+		{
+			// 動いているバイナリのコミットとストアのスキーマの版。ストアを開かない（版の食い違うストア＝
+			// store_too_new でも、ワークスペースの外でも、バイナリの版を読めるようにするため）。
+			Path: []string{"version"},
+			Run:  runVersion,
 		},
 		{
 			Path:          []string{"status"},

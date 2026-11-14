@@ -45,6 +45,11 @@ func runStatus(a Args) (any, error) {
 // もの」の中に出す（docs/features/m2-github-issue-ingest.md §食い違いの表示）。
 func overviewText(ov *core.Overview) string {
 	var b strings.Builder
+	commit := core.UnknownBuildValue
+	if v, err := core.ReadVersion(); err == nil {
+		commit = commitText(v)
+	}
+	fmt.Fprintf(&b, "バイナリのコミット: %s\n", commit)
 	fmt.Fprintf(&b, "人間の操作を待っているもの:\n")
 	if len(ov.NeedsHumanChallenges) == 0 && len(ov.NeedsHumanOperations) == 0 && len(ov.Discrepancies) == 0 && len(ov.NeedsHumanTriage) == 0 && len(ov.NeedsHumanSlots) == 0 && len(ov.NeedsHumanBudgetExhausted) == 0 {
 		fmt.Fprintf(&b, "  (なし)\n")

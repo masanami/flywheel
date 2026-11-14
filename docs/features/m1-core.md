@@ -333,6 +333,17 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 完了（`done`）の課題と差し戻し済み（`state=rejected`）の不可逆操作はどの一覧にも含めない。各一覧は `id` 昇順（`discrepancies` は `challenge_id` の昇順）。
 
+##### `version`（#593 で追加）
+
+ビルド情報が無いとき（`runtime/debug.ReadBuildInfo` が失敗する・vcs の設定が無い）の `commit`・`time` は文字列 `"unknown"`（`modified` は `false`）。
+
+| フィールド | 型 | 内容 |
+|---|---|---|
+| `commit` | string | ビルドのコミット。無ければ `"unknown"` |
+| `time` | string | コミットの時刻。無ければ `"unknown"` |
+| `modified` | boolean | 未コミットの変更つきのビルドか |
+| `schema_version` | number | ストアのスキーマの版 |
+
 ##### `ingest`（#54 で追加。取得・作成・更新の結線は #59）
 
 `{"sources": [...]}`。docs/features/m2-github-issue-ingest.md §IF / API「`ingest` の JSON 出力」の形。
@@ -494,7 +505,8 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel reject <C-ID> --reason <r>` | T6・T15 | 要 |
 | `flywheel op add <C-ID> --kind <release\|delete\|external_send\|other> --summary <s> [--ref <r>]` | 不可逆操作の登録 | — |
 | `flywheel approve <OP-ID>` / `flywheel reject <OP-ID> --reason <r>` | 不可逆操作の単独の承認・差し戻し | 要 |
-| `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作 | — |
+| `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す | — |
+| `flywheel version` | 動いているバイナリのビルドのコミット（`vcs.revision`・`vcs.time`・`vcs.modified`）と、そのバイナリが扱うストアのスキーマの版。読み取りだけで、ストアを開かず（`store_too_new` でも動く）、ネットワークにも Git にも触れない。未コミットの変更つきのビルドは commit の表示に `+dirty` を付ける | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |
 | `flywheel ingest [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・冪等な作成と更新・上流の close の検出（#59） | — |
 | `flywheel mark-read <C-ID>` | 上流を読んだ記録を付ける（読んだ時点の値を現在の観測値で上書きする。上流は取り直さない。docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読） | — |
