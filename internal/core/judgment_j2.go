@@ -113,6 +113,9 @@ type j2ValidatedOutput struct {
 	CrossRepo         bool
 	RelatedRepos      []string
 	Question          *string
+	// ParentDirectCriteria は parent_direct のときの、親が満たすべき達成条件（検査済み。空白を除いた値）。
+	// 理由は Question に入る。
+	ParentDirectCriteria string
 	// Issues は issues のときの論点（検査済み。3〜5 件）。
 	Issues []StageIssue
 	// Expected・NonGoals・Figure は plan のときの段階の欄（検査済み。無い・0 個・null は
@@ -348,7 +351,7 @@ func (d *ConnectorsDeclaration) findConnectorRepo(name string) (*ConnectorRepo, 
 // validateJ2Output は data（run の StructuredOutput）を検査する
 // （§結果の判別「core が閉集合と必須の組…を検査し直す」・§J2）。次のいずれかで
 // ok=false（run の結果は invalid_output になる）:
-//   - JSON として解釈できない・判定が plan|uncertain の外
+//   - JSON として解釈できない・判定が plan|uncertain|issues|parent_direct の外
 //   - uncertain で問いが無い・空
 //   - plan で: 対象リポジトリが宣言に無い／そのリポジトリの接続ツールに操作が無い／
 //     形態 cli の操作／取り込み元の対応の無い課題で取り込み元の差し込みを持つ操作／
@@ -387,6 +390,18 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		}
 		// depends_on は型の検証だけ（上の Unmarshal）。uncertain では依存を書かない。
 		return &j2ValidatedOutput{Verdict: J2VerdictUncertain, Question: raw.Question}, true
+	case J2VerdictParentDirect:
+		// 理由（question）と親の達成条件（done_criteria）の両方が必須。どちらかが空・欠けなら不正。
+		if raw.Question == nil || strings.TrimSpace(*raw.Question) == "" ||
+			raw.DoneCriteria == nil || strings.TrimSpace(*raw.DoneCriteria) == "" {
+			return nil, false
+		}
+		reason := strings.TrimSpace(*raw.Question)
+		return &j2ValidatedOutput{
+			Verdict:              J2VerdictParentDirect,
+			Question:             &reason,
+			ParentDirectCriteria: strings.TrimSpace(*raw.DoneCriteria),
+		}, true
 	case J2VerdictPlan:
 	default:
 		return nil, false
@@ -1129,6 +1144,37 @@ func (s *Store) applyJ2Uncertain(ctx context.Context, runIDDisplay, challengeIDD
 	return mapped, nil
 }
 
+// applyJ2ParentDirect は判定 parent_direct の出力を課題へ写す（T11）。種類が親が直接行う
+// （parent_direct）の保留を、問いを理由として立て、課題の達成条件を親の達成条件で置き換える
+// （保留・達成条件・遷移・作業ログを同じトランザクションで書く）。写す直前に読み直した状態が
+// 分類済でなければ写さない。保留を解くと保留の前の状態（分類済）へ戻り、次の周で J2 が計画し直す。
+func (s *Store) applyJ2ParentDirect(ctx context.Context, runIDDisplay, challengeIDDisplay, reason, doneCriteria string) (mapped bool, err error) {
+	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpHold, func(ctx context.Context, tc *transitionCtx) error {
+		if tc.current.Status != StatusClassified {
+			return errJ2MappingNotEligible
+		}
+		if _, err := insertHoldKind(ctx, tc, reason, HoldKindParentDirect); err != nil {
+			return err
+		}
+		if doneCriteria != tc.current.DoneCriteria {
+			if _, err := tc.tx.ExecContext(ctx, `UPDATE challenge SET done_criteria = ? WHERE id = ?`, doneCriteria, tc.id); err != nil {
+				return err
+			}
+			tc.before["done_criteria"] = tc.current.DoneCriteria
+			tc.after["done_criteria"] = doneCriteria
+		}
+		mapped = true
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errJ2MappingNotEligible) {
+			return false, nil
+		}
+		return false, err
+	}
+	return mapped, nil
+}
+
 // errJ2IssuesAlreadyRecorded は、論点の記録がすでにある課題へ issues が返ったことを
 // 表す内部の sentinel（論点の段は課題ごとに 1 回。写さず run を invalid_output にする）。
 var errJ2IssuesAlreadyRecorded = errors.New("core: challenge already has an issues record")
@@ -1196,7 +1242,7 @@ type j2Finalized struct {
 }
 
 // finalizeJ2Output は run が succeeded の場合に、core の再検査（閉集合・必須の組・
-// 宣言との突き合わせ）→写像（plan/uncertain/issues。issues は論点の記録がすでにあれば写さず invalid_output）→読んだ記録を行う。再検査に落ちたら
+// 宣言との突き合わせ）→写像（plan/uncertain/issues/parent_direct。issues は論点の記録がすでにあれば写さず invalid_output）→読んだ記録を行う。再検査に落ちたら
 // run の結果を invalid_output へ更新し、課題は変えない。
 //
 // 論点の記録の無い中以上の plan（j2PlanNoIssues）は、1 回目の起動では run を invalid_output に
@@ -1263,6 +1309,15 @@ func (s *Store) finalizeJ2Output(ctx context.Context, runIDDisplay, challengeIDD
 			return succeeded(J2VerdictUncertain, StatusAwaitingHuman), nil
 		}
 		return j2Finalized{Outcome: string(J2VerdictUncertain), Result: RunResultSucceeded}, nil
+	case J2VerdictParentDirect:
+		mapped, err := s.applyJ2ParentDirect(ctx, runIDDisplay, challengeIDDisplay, *validated.Question, validated.ParentDirectCriteria)
+		if err != nil {
+			return j2Finalized{}, err
+		}
+		if mapped {
+			return succeeded(J2VerdictParentDirect, StatusAwaitingHuman), nil
+		}
+		return j2Finalized{Outcome: string(J2VerdictParentDirect), Result: RunResultSucceeded}, nil
 	case J2VerdictIssues:
 		mapped, hasRecord, err := s.applyJ2Issues(ctx, runIDDisplay, challengeIDDisplay, validated.Issues)
 		if err != nil {
@@ -1305,7 +1360,7 @@ type J2AutoInput struct {
 
 // J2AutoItem は `plan --auto` が処理した課題 1 件の結果（judgment_batch.go の
 // JudgmentAutoItem。`classify --auto` の J1AutoItem と同じ形）。J2 の Outcome は
-// plan/uncertain。
+// plan/uncertain/issues/parent_direct。
 type J2AutoItem = JudgmentAutoItem
 
 // J2AutoResult は Store.PlanAutoJ2 の出力（JudgmentAutoResult）。

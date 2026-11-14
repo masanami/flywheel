@@ -61,12 +61,13 @@ var judgmentPromptFile = map[core.JudgmentPoint]string{
 }
 
 // judgmentPromptLimit は判断点ごとの指示文の分量の上限（バイト。UTF-8）
-// （J1: 4KiB・J2: 12KiB・J3: 8KiB・J4: 4KiB・J5: 9.5KiB・J6: 6KiB・J8: 6KiB。
+// （J1: 4KiB・J2: 12.5KiB・J3: 8KiB・J4: 4KiB・J5: 9.5KiB・J6: 6KiB・J8: 6KiB。
+// J2 は #462 で 12KiB、#536 で 12.5KiB へ引き上げた（parent_direct の判定の規則を足した。重複する文を詰めても収まらなかった分）。
 // J5 は #466 で 8KiB、#565 で 9KiB、#563 で 9.5KiB へ引き上げた。
 // 仕様は docs/features/m3-invoker-delegation.md §指示文の歯止め）。
 var judgmentPromptLimit = map[string]int{
 	"j1.md": 4096,
-	"j2.md": 12288,
+	"j2.md": 12800,
 	"j3.md": 8192,
 	"j4.md": 4096,
 	"j5.md": 9728,

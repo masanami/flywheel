@@ -145,12 +145,12 @@ func TestJ5Prompt_HasHeadroomBelowLimit(t *testing.T) {
 //
 // self-review 指摘（round1, code-reviewer CONFIRMED）: 当初は J1（4096バイト）
 // の境界だけを検証しており、judgmentPromptLimit の J2〜J5 の値
-// （当時 8192・8192・4096・6144。J2 は #462 で 12288、J5 は #466 で 8192、#565 で 9216、#563 で 9728）を緩めても検出するテストが無かった。5ファイル
+// （当時 8192・8192・4096・6144。J2 は #462 で 12288、#536 で 12800（parent_direct の規則を足した。重複する文を詰めても収まらなかった）、J5 は #466 で 8192、#565 で 9216、#563 で 9728）を緩めても検出するテストが無かった。5ファイル
 // 分をテーブル駆動で回す形に直した。
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
 		"j1.md": 4096,
-		"j2.md": 12288,
+		"j2.md": 12800,
 		"j3.md": 8192,
 		"j4.md": 4096,
 		"j5.md": 9728,
@@ -734,6 +734,24 @@ func TestInstructions_J5DescribesTheUnreviewedReportRule(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J5) lacks %q", want)
+		}
+	}
+}
+
+// TestJ2Prompt_MentionsParentDirectVerdict は、J2 の指示文が parent_direct の判定の意味（委譲の計画が立たず
+// 親が直接行うのが適切なときに返し、理由と親の達成条件を書く）を持つことを固定する（#536）。
+func TestJ2Prompt_MentionsParentDirectVerdict(t *testing.T) {
+	fsys, err := promptsSubFS()
+	if err != nil {
+		t.Fatalf("promptsSubFS(): %v", err)
+	}
+	b, err := fs.ReadFile(fsys, "j2.md")
+	if err != nil {
+		t.Fatalf("fs.ReadFile(j2.md): %v", err)
+	}
+	for _, want := range []string{"委譲の計画が立たず、親が直接行うのが適切", "親が何を満たせば終わりか", "4 を選んでよい"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("j2.md does not contain %q", want)
 		}
 	}
 }
