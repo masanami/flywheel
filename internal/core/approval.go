@@ -773,6 +773,9 @@ type AnswerRequest struct {
 	ChallengeID     string
 	ExpectedVersion int
 	Answer          string
+	// Replan は回答に付ける「範囲が変わる」印。真なら、委譲を再開せず、課題を計画の作り直し（分類済）へ戻す。
+	// 保留の直前の状態が着手中・検証中でなければ ErrValidation（何も書かない）。
+	Replan bool
 }
 
 // ExecuteAnswer は answer（T12）の②（書き込み）。「保留に入る直前の状態」は
@@ -802,6 +805,17 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return "", err
 		}
 		holdID = id
+		if req.Replan {
+			// 契約の run（form: cli）が終わっていない・保留の間の成功が未処理のときは、前の計画の run が
+			// 回答で再開されたり検証中へ進んだりして、作り直した計画が使われない。印は成立させない。
+			var open int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND (ended_at IS NULL OR held_success = 1)`, cid).Scan(&open); err != nil {
+				return "", err
+			}
+			if open > 0 {
+				return "", fmt.Errorf("%w: replan is not allowed while a contract run is open", ErrValidation)
+			}
+		}
 		var runID sql.NullInt64
 		var kind string
 		if err := tx.QueryRowContext(ctx, `SELECT run_id, kind FROM hold WHERE id = ?`, id).Scan(&runID, &kind); err != nil {
@@ -818,8 +832,8 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	apply := func(ctx context.Context, tc *transitionCtx) error {
 		relaySession, relayQuote := att.relayColumns()
 		res, err := tc.tx.ExecContext(ctx,
-			`UPDATE hold SET answer = ?, answered_at = ?, answered_by = ?, answered_channel = ?, answered_verification = ?, relay_session = ?, relay_quote = ? WHERE id = ? AND answer IS NULL AND closed_at IS NULL`,
-			req.Answer, tc.nowStr, att.Actor(), string(att.Channel()), string(att.Verification()), relaySession, relayQuote, holdID,
+			`UPDATE hold SET answer = ?, answered_at = ?, answered_by = ?, answered_channel = ?, answered_verification = ?, relay_session = ?, relay_quote = ?, replan = ? WHERE id = ? AND answer IS NULL AND closed_at IS NULL`,
+			req.Answer, tc.nowStr, att.Actor(), string(att.Channel()), string(att.Verification()), relaySession, relayQuote, boolToInt(req.Replan), holdID,
 		)
 		if err != nil {
 			return err
@@ -837,6 +851,9 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		// priority・edit の urgency とそろえる）。
 		tc.before["answer"] = nil
 		tc.after["answer"] = req.Answer
+		if req.Replan {
+			tc.after["replan"] = true
+		}
 		att.addRelayTo(tc.after)
 
 		answer := req.Answer
@@ -848,10 +865,11 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		ch, ver := string(att.Channel()), string(att.Verification())
 		holdOut.AnsweredChannel, holdOut.AnsweredVerification = &ch, &ver
 		holdOut.RelaySession, holdOut.RelayQuote = att.relayPtrs()
+		holdOut.Replan = req.Replan
 		return nil
 	}
 
-	c, err := s.verifiedTransition(ctx, att, req.ChallengeID, req.ExpectedVersion, OpAnswer, NoStatus, resolvePreceding, apply)
+	c, err := s.verifiedTransitionReplan(ctx, att, req.ChallengeID, req.ExpectedVersion, OpAnswer, NoStatus, resolvePreceding, req.Replan, apply)
 	if err != nil {
 		return nil, nil, err
 	}

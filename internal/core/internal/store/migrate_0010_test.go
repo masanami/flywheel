@@ -42,8 +42,8 @@ func TestOpen_AppliesChallengeDependencyMigrationToAVersion9Store(t *testing.T) 
 		t.Fatalf("Open(latest) error = %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if got := userVersion(t, db); got != 21 {
-		t.Fatalf("user_version = %d, want 21", got)
+	if got := userVersion(t, db); got != 22 {
+		t.Fatalf("user_version = %d, want 22", got)
 	}
 	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
 		var title, status string
