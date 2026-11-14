@@ -539,3 +539,62 @@ func TestInspect_ReportsCurrentBranch(t *testing.T) {
 		t.Fatalf("detached worktree state = %+v, err=%v; want empty Branch", st, err)
 	}
 }
+
+// 前の課題のブランチに残った作業ツリーを base へ detach し、既存のブランチは checkout する。
+// 別の作業ツリーが checkout 中のブランチは切り替えに失敗し、未コミットの変更は消さない。
+func TestSwitchTree_DetachToBaseCheckoutBranchAndNeverForces(t *testing.T) {
+	base := newClone(t, "https://github.com/o/r.git")
+	gitIn(t, base, "branch", "other")
+	gitIn(t, base, "branch", "pr")
+	p1 := filepath.Join(t.TempDir(), "SL-1")
+	p2 := filepath.Join(t.TempDir(), "SL-2")
+	g, ctx := New(), context.Background()
+	for _, p := range []string{p1, p2} {
+		if _, err := g.EnsureWorktree(ctx, req(base, p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t1, t2 := core.SlotTree{Path: p1, BaseClone: base}, core.SlotTree{Path: p2, BaseClone: base}
+	branchOf := func(tr core.SlotTree) string {
+		st, err := g.Inspect(ctx, tr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.Branch
+	}
+
+	if err := g.SwitchTree(ctx, t1, core.SlotSwitch{Branch: "other", Ref: "refs/heads/main"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := branchOf(t1); got != "other" {
+		t.Fatalf("branch = %q, want other", got)
+	}
+	// base へ detach（前の課題のブランチから外す）。
+	if err := g.SwitchTree(ctx, t1, core.SlotSwitch{Ref: "refs/heads/main"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := branchOf(t1); got != "" {
+		t.Errorf("branch = %q, want detached", got)
+	}
+	// ローカルに無いブランチは base へ detach する。
+	if err := g.SwitchTree(ctx, t1, core.SlotSwitch{Branch: "missing", Ref: "refs/heads/main"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := branchOf(t1); got != "" {
+		t.Errorf("branch = %q, want detached", got)
+	}
+	// 他の作業ツリーが checkout 中のブランチは切り替えられない。
+	if err := g.SwitchTree(ctx, t1, core.SlotSwitch{Branch: "pr", Ref: "refs/heads/main"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.SwitchTree(ctx, t2, core.SlotSwitch{Branch: "pr", Ref: "refs/heads/main"}); err == nil {
+		t.Error("checking out a branch held by another worktree succeeded")
+	}
+	if got := branchOf(t2); got != "" {
+		t.Errorf("SL-2 branch = %q, want unchanged (detached)", got)
+	}
+	// 先頭がダッシュのブランチ名は拒否する。
+	if err := g.SwitchTree(ctx, t2, core.SlotSwitch{Branch: "--orphan", Ref: "refs/heads/main"}); err == nil {
+		t.Error("an option-like branch name was accepted")
+	}
+}

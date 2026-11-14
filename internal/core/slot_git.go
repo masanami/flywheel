@@ -61,6 +61,18 @@ type SlotGit interface {
 	// に対する払い出しは、複数のプロセスの間でも直列に実行される。払い出し済みなら
 	// 何も実行せず created=false を返す。失敗は error。
 	EnsureWorktree(ctx context.Context, req WorktreeRequest) (created bool, err error)
+
+	// SwitchTree は tree（未コミットの変更が無いと core が確かめた作業ツリー）の
+	// 先頭を切り替える。req.Branch が空でなく、そのローカルブランチがあれば checkout
+	// する。無ければ（または空なら）req.Ref へ detach する。強制しない（変更を消さない）。
+	// `git fetch` は実行しない。失敗は error。
+	SwitchTree(ctx context.Context, tree SlotTree, req SlotSwitch) error
+}
+
+// SlotSwitch は SlotGit.SwitchTree の入力。Ref は "refs/heads/<既定ブランチ>"。
+type SlotSwitch struct {
+	Branch string
+	Ref    string
 }
 
 // normalizeRemoteURL は origin の URL（https・scp 形式・ssh。`.git` の有無を

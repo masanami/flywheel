@@ -508,6 +508,35 @@ func loadRunBranch(ctx context.Context, tx *sql.Tx, r runRow, declared []HumanQu
 	return "", nil
 }
 
+// followBranch は、再開でない新しい委譲が追従する前の委譲のブランチと、その run のスロット
+// （表示形。記録が無ければ ""）。
+type followBranch struct {
+	Branch string
+	SlotID string
+}
+
+// loadFollowBranch は同じ課題の委譲の run を新しい順に見て、既定ブランチ以外のブランチ
+// （loadRunBranch と同じ規則で読めるもの）を報告した最も新しい run のブランチとスロットを返す。
+// 無ければ nil（新しい委譲は base へ揃えて始める）。計画の版が変わった後の新しい委譲が既存の
+// PR を追従するとき、そのブランチを別のスロットが checkout したままでも外して起動するために使う（#526）。
+func loadFollowBranch(ctx context.Context, tx *sql.Tx, runs []runRow, declared []HumanQuestionKind, defaultBranch string) (*followBranch, error) {
+	for i := len(runs) - 1; i >= 0; i-- {
+		b, err := loadRunBranch(ctx, tx, runs[i], declared, defaultBranch)
+		if err != nil {
+			return nil, err
+		}
+		if b == "" {
+			continue
+		}
+		f := &followBranch{Branch: b}
+		if runs[i].SlotID != nil {
+			f.SlotID = *runs[i].SlotID
+		}
+		return f, nil
+	}
+	return nil, nil
+}
+
 // formatQuestionsHold は結末 questions の報告の問いを、保留の問いにする整形した文にする。
 func formatQuestionsHold(rep *DelegationReport) string {
 	var b strings.Builder
@@ -552,7 +581,8 @@ var slotWaitInterval = 200 * time.Millisecond
 // maxIdleRetries は、取れなかった後の状態が idle だった場合に、待たずに連続して取り直す回数の上限。
 const maxIdleRetries = 3
 
-// acquireDelegationSlot は委譲のスロットを割り当てる。新しいセッションの起動は通常の割り当て。
+// acquireDelegationSlot は委譲のスロットを割り当てる。新しいセッションの起動は通常の割り当て
+// （worktree で前の委譲がブランチを報告していれば、そのブランチを checkout し、前の run のスロットを先に試す）。
 // `--resume` の再開は、元のスロット（再開元の run が使ったもの）を次のように使う
 // （M3P16・M3P30・M3P38）:
 //
@@ -562,15 +592,23 @@ const maxIdleRetries = 3
 //   - 中断の後の再開（仕様に定めが無い）: 作業ツリーの状態を引き継ぐため、clone でも元のスロットだけ
 //   - clone でブランチが未 push: 元のスロットだけ。idle でなければ待たずに ErrSlotUnavailable
 func (s *Store) acquireDelegationSlot(ctx context.Context, in DelegateInput, dc *delegationContext, bind SlotBinder) (*SlotAssignment, error) {
-	if dc.Resume == nil || dc.Resume.Target.SlotID == nil {
-		return s.AcquireSlot(ctx, in.Git, dc.Repo, bind)
+	if dc.Resume == nil {
+		// 再開でない新しい委譲: 前の委譲がブランチを報告していれば、そのブランチのまま起動する
+		// （worktree のスロットのとき。前の run のスロットを先に試す。#526）。
+		if dc.Follow != nil && dc.Repo.Slots.Provider == string(slotProviderWorktree) {
+			return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{Prefer: dc.Follow.SlotID, Branch: dc.Follow.Branch})
+		}
+		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{})
+	}
+	if dc.Resume.Target.SlotID == nil {
+		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{})
 	}
 	original := *dc.Resume.Target.SlotID
 	worktree := dc.Repo.Slots.Provider == string(slotProviderWorktree)
 	if !worktree && dc.ResumeBranchPushed && (dc.Resume.Kind == ResumeKindAnswer || dc.Resume.Kind == ResumeKindRework) {
 		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{Prefer: original})
 	}
-	choice := slotChoice{Only: original}
+	choice := slotChoice{Only: original, Branch: dc.Resume.Branch, KeepTree: dc.Resume.Branch == ""}
 	if !worktree {
 		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice)
 	}

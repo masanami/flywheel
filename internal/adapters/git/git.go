@@ -14,7 +14,7 @@
 //     （作業ツリーの .git は書き換え可能なポインタのファイルのため。worktree は
 //     元のクローンが持つ管理ディレクトリを自分で突き止めて GIT_DIR にする）。
 //   - git fetch・git clone を実行しない。作業ツリーの変更を消さない（reset・
-//     clean・checkout -- をしない。例外は Workspace.CommitPaths がコミットの後に本物の
+//     clean・checkout -- をしない〔SwitchTree のブランチの切り替えは強制せず、変更を消さない〕。例外は Workspace.CommitPaths がコミットの後に本物の
 //     index の対象パスを HEAD に合わせる `reset -q -- <パス>` だけで、作業ツリーには触れない）。
 //     ネットワークを使わない。
 //   - `git worktree add` は、同じ元のクローンについてプロセスをまたいで直列に
@@ -302,4 +302,30 @@ func lockDir(ctx context.Context, dir string) (func(), error) {
 		case <-time.After(lockPollInterval):
 		}
 	}
+}
+
+// SwitchTree は core.SlotGit の実装。強制せず（`-f`・reset を使わず）、ネットワークも使わない。
+func (*Git) SwitchTree(ctx context.Context, tree core.SlotTree, req core.SlotSwitch) error {
+	gitDir := filepath.Join(tree.Path, ".git")
+	if tree.BaseClone != "" {
+		admin, problem := verifyWorktreePointer(tree.BaseClone, tree.Path)
+		if problem != "" {
+			return errors.New(problem)
+		}
+		gitDir = admin
+	}
+	if req.Branch != "" {
+		if strings.HasPrefix(req.Branch, "-") {
+			return fmt.Errorf("invalid branch name %q", req.Branch)
+		}
+		ref := "refs/heads/" + req.Branch
+		if _, err := run(ctx, gitDir, tree.Path, "show-ref", "--verify", "--quiet", ref); err == nil {
+			_, err := run(ctx, gitDir, tree.Path, "checkout", "-q", req.Branch, "--")
+			return err
+		} else if exitCode(err) != 1 {
+			return err
+		}
+	}
+	_, err := run(ctx, gitDir, tree.Path, "checkout", "-q", "--detach", req.Ref, "--")
+	return err
 }
