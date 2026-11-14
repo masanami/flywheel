@@ -4,6 +4,7 @@
 export interface StatusResponse {
   actionable: StatusActionable;
   approved: StatusApproved;
+  binary_commit: string;
   needs_human: StatusNeedsHuman;
   parent_agent: StatusParentAgent;
   waiting_external: StatusWaitingExternal;

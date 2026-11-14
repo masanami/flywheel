@@ -68,6 +68,9 @@ type Overview struct {
 	// GetOverview は GitHub を呼ばないため空のまま返し、呼び出し元が ListWaitingExternal の結果を
 	// 入れる。
 	WaitingExternal []WaitingExternal
+	// BinaryCommit は動いているバイナリのコミットの表示（VersionInfo.CommitLabel。Issue #593）。GetOverview は
+	// 空のまま返し、呼び出し元（status の CLI・API）が埋める。空なら表示は UnknownBuildValue。
+	BinaryCommit string
 	// UnmetDependencies は ActionableChallenges の課題 ID ごとの、満たされていない依存先（S2。依存先の ID の昇順）。
 	// 満たされていない依存先が無い課題はキーを持たない。
 	UnmetDependencies map[string][]DependencyView

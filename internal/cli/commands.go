@@ -67,6 +67,9 @@ type Args struct {
 	// LookPath は gh・claude の実行ファイルの探し方。nil なら exec.LookPath（PATH 上を探す）。
 	// テストが、プロセス全体の PATH を書き換えずに偽の gh・claude の場所をテストごとに渡すために使う。
 	LookPath func(file string) (string, error)
+	// ReadVersion は動いているバイナリの版の読み取り。nil なら core.ReadVersion（Issue #593）。
+	// テストが、パッケージ変数を差し替えずに、ビルド情報の有り・無しをテストごとに渡すために使う。
+	ReadVersion func() (core.VersionInfo, error)
 }
 
 // lookPathFunc は実行ファイルの探し方（exec.LookPath と同じ形）。
@@ -78,6 +81,14 @@ func (a Args) lookPath() lookPathFunc {
 		return a.LookPath
 	}
 	return exec.LookPath
+}
+
+// readVersion は a のバイナリの版の読み取り（既定は core.ReadVersion）。
+func (a Args) readVersion() (core.VersionInfo, error) {
+	if a.ReadVersion != nil {
+		return a.ReadVersion()
+	}
+	return core.ReadVersion()
 }
 
 // commonFlags はすべてのコマンドに共通のフラグ。

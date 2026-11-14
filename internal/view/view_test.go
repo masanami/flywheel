@@ -22,7 +22,7 @@ func marshal(t *testing.T, v any) string {
 
 func TestEmptyListsAreArraysAndNullsStayNull(t *testing.T) {
 	got := marshal(t, view.FromOverview(&core.Overview{}))
-	want := `{"actionable":{"challenges":[]},"approved":{"operations":[]},"needs_human":{"budget_exhausted":[],"challenges":[],"discrepancies":[],"operations":[],"slots":[],"triage":[]},"parent_agent":{"challenges":[]},"waiting_external":{"challenges":[]}}`
+	want := `{"actionable":{"challenges":[]},"approved":{"operations":[]},"binary_commit":"unknown","needs_human":{"budget_exhausted":[],"challenges":[],"discrepancies":[],"operations":[],"slots":[],"triage":[]},"parent_agent":{"challenges":[]},"waiting_external":{"challenges":[]}}`
 	if got != want {
 		t.Errorf("status:\n got %s\nwant %s", got, want)
 	}

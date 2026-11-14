@@ -2,6 +2,9 @@ package core
 
 import "runtime/debug"
 
+// このファイルは `flywheel version`（Issue #593）の、動いているバイナリの版（埋め込まれたビルド情報と
+// ストアのスキーマの版）の読み取りを持つ。
+
 // UnknownBuildValue は、ビルド情報（vcs の設定）が無いときの commit・time の表示値。
 const UnknownBuildValue = "unknown"
 
@@ -49,4 +52,13 @@ func versionFromBuildInfo(info *debug.BuildInfo, ok bool) (VersionInfo, error) {
 	}
 	v.SchemaVersion = schema
 	return v, nil
+}
+
+// CommitLabel はコミットの表示（version のテキスト・status のバイナリのコミット）。未コミットの変更つきの
+// ビルドは、run の flywheel_version と同じく末尾に +dirty を付ける。
+func (v VersionInfo) CommitLabel() string {
+	if v.Modified {
+		return v.Commit + "+dirty"
+	}
+	return v.Commit
 }

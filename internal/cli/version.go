@@ -7,24 +7,29 @@ import (
 	"github.com/masanami/flywheel/internal/view"
 )
 
+// このファイルは `flywheel version`（Issue #593）の実コマンドを持つ。版の読み取りは core.ReadVersion、
+// JSON の形は internal/view が持ち、ここでは整形するだけ。
+
 // runVersion は `flywheel version` の実装。ストアを開かず、ネットワークにも触れない。
-func runVersion(_ Args) (any, error) {
-	v, err := core.ReadVersion()
+func runVersion(a Args) (any, error) {
+	v, err := a.readVersion()
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{json: view.FromVersion(v), text: versionText(v)}, nil
 }
 
+// versionText は --json 無しの version の表示。コミット（未コミットの変更つきは +dirty）・ビルドの時刻・
+// 未コミットの変更の有無・ストアのスキーマの版を 1 行ずつ出す。
 func versionText(v core.VersionInfo) string {
-	return fmt.Sprintf("commit: %s\ntime: %s\nschema_version: %d\n", commitText(v), v.Time, v.SchemaVersion)
+	return fmt.Sprintf("commit: %s\ntime: %s\nmodified: %t\nschema_version: %d\n", v.CommitLabel(), v.Time, v.Modified, v.SchemaVersion)
 }
 
-// commitText はコミットの表示。未コミットの変更つきのビルドは、run の flywheel_version と同じく
-// 末尾に +dirty を付ける。
-func commitText(v core.VersionInfo) string {
-	if v.Modified {
-		return v.Commit + "+dirty"
+// binaryCommit は status に出す、動いているバイナリのコミットの表示。読み取りに失敗したら UnknownBuildValue。
+func binaryCommit(a Args) string {
+	v, err := a.readVersion()
+	if err != nil {
+		return core.UnknownBuildValue
 	}
-	return v.Commit
+	return v.CommitLabel()
 }

@@ -34,6 +34,7 @@ func runStatus(a Args) (any, error) {
 	if ov.WaitingExternal, err = a.Store.ListWaitingExternal(ctx, newCheckSource(a.lookPath())); err != nil {
 		return nil, mapCoreErr(err)
 	}
+	ov.BinaryCommit = binaryCommit(a)
 	return textOutput{
 		json: view.FromOverview(ov),
 		text: overviewText(ov),
@@ -45,9 +46,9 @@ func runStatus(a Args) (any, error) {
 // もの」の中に出す（docs/features/m2-github-issue-ingest.md §食い違いの表示）。
 func overviewText(ov *core.Overview) string {
 	var b strings.Builder
-	commit := core.UnknownBuildValue
-	if v, err := core.ReadVersion(); err == nil {
-		commit = commitText(v)
+	commit := ov.BinaryCommit
+	if commit == "" {
+		commit = core.UnknownBuildValue
 	}
 	fmt.Fprintf(&b, "バイナリのコミット: %s\n", commit)
 	fmt.Fprintf(&b, "人間の操作を待っているもの:\n")

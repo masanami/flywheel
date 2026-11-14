@@ -316,7 +316,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 ##### `status`（#14 で追加。`discrepancies` は #58 で追加）
 
-`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}, "waiting_external": {"challenges": [...]}, "parent_agent": {"challenges": [...]}}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約。`waiting_external` は M3 が、`parent_agent` は #452 が足した）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
+`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}, "waiting_external": {"challenges": [...]}, "parent_agent": {"challenges": [...]}, "binary_commit": "..."}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約。`waiting_external` は M3 が、`parent_agent` は #452 が、区分ではない `binary_commit`〔動いているバイナリのコミット〕は #593 が足した）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
 
 | フィールド | 型 | 内容 |
 |---|---|---|
@@ -343,6 +343,10 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 | `time` | string | コミットの時刻。無ければ `"unknown"` |
 | `modified` | boolean | 未コミットの変更つきのビルドか |
 | `schema_version` | number | ストアのスキーマの版 |
+
+テキスト表示は `commit:`（未コミットの変更つきは `+dirty` を付ける）・`time:`・`modified:`（`true` / `false`）・`schema_version:` の 4 行。
+
+`status --json` の最上位にも `binary_commit`（string。動いているバイナリのコミットで、テキスト表示の先頭の行と同じ値＝未コミットの変更つきは `+dirty` 付き。ビルド情報が無ければ `"unknown"`）を置く（#593。API の `GET …/status` も同じ形）。
 
 ##### `ingest`（#54 で追加。取得・作成・更新の結線は #59）
 
@@ -505,7 +509,7 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel reject <C-ID> --reason <r>` | T6・T15 | 要 |
 | `flywheel op add <C-ID> --kind <release\|delete\|external_send\|other> --summary <s> [--ref <r>]` | 不可逆操作の登録 | — |
 | `flywheel approve <OP-ID>` / `flywheel reject <OP-ID> --reason <r>` | 不可逆操作の単独の承認・差し戻し | 要 |
-| `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す | — |
+| `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す（`--json` では `binary_commit`） | — |
 | `flywheel version` | 動いているバイナリのビルドのコミット（`vcs.revision`・`vcs.time`・`vcs.modified`）と、そのバイナリが扱うストアのスキーマの版。読み取りだけで、ストアを開かず（`store_too_new` でも動く）、ネットワークにも Git にも触れない。未コミットの変更つきのビルドは commit の表示に `+dirty` を付ける | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |
 | `flywheel ingest [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・冪等な作成と更新・上流の close の検出（#59） | — |
