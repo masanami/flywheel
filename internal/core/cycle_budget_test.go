@@ -33,8 +33,8 @@ func TestAgentDeclaration_JudgmentBudgetFor_ReturnsPerPointConfiguredValue(t *te
 // 渡すことは想定しないが、fail-closed で判別不能な額を返さない）。
 func TestAgentDeclaration_JudgmentBudgetFor_ReturnsZeroForUnknownPoint(t *testing.T) {
 	decl := defaultAgentDeclaration()
-	if got := decl.JudgmentBudgetFor(JudgmentPoint("J9")); got != 0 {
-		t.Errorf("JudgmentBudgetFor(J9) = %v, want 0", got)
+	if got := decl.JudgmentBudgetFor(JudgmentPoint("J7")); got != 0 {
+		t.Errorf("JudgmentBudgetFor(J7) = %v, want 0", got)
 	}
 }
 

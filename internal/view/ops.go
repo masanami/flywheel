@@ -131,12 +131,20 @@ type ReleasePhase struct {
 	Tidied     []ReleaseTidied     `json:"tidied"`
 }
 
+// SerialJudgment は serial_groups[].judgments の要素（判断点が判断した組の記録）。
+type SerialJudgment struct {
+	Challenges []string `json:"challenges"`
+	Outcome    string   `json:"outcome"`
+	Reason     string   `json:"reason"`
+}
+
 // SerialGroup は委譲の段の serial_groups の要素。
 type SerialGroup struct {
-	Challenges        []string `json:"challenges"`
-	PredictionHeadSHA *string  `json:"prediction_head_sha"`
-	Reasons           []string `json:"reasons"`
-	Repo              string   `json:"repo"`
+	Challenges        []string         `json:"challenges"`
+	Judgments         []SerialJudgment `json:"judgments"`
+	PredictionHeadSHA *string          `json:"prediction_head_sha"`
+	Reasons           []string         `json:"reasons"`
+	Repo              string           `json:"repo"`
 }
 
 // JudgmentPhase は分類・計画・検証の段の形（cycle の phases の要素と `--auto` の phase が共有する）。
@@ -236,8 +244,13 @@ func serialGroups(groups []core.SerialGroup) []SerialGroup {
 		for _, r := range g.Reasons {
 			reasons = append(reasons, string(r))
 		}
+		judgments := make([]SerialJudgment, 0, len(g.Judgments))
+		for _, j := range g.Judgments {
+			judgments = append(judgments, SerialJudgment{Challenges: []string{j.Challenges[0], j.Challenges[1]}, Outcome: string(j.Outcome), Reason: j.Reason})
+		}
 		out = append(out, SerialGroup{
 			Challenges:        append([]string{}, g.Challenges...),
+			Judgments:         judgments,
 			PredictionHeadSHA: g.PredictionHeadSHA,
 			Reasons:           reasons,
 			Repo:              g.Repo,

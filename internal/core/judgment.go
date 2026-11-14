@@ -78,10 +78,10 @@ const (
 	CostSourceUnknown  CostSource = costSourceUnknown
 )
 
-// JudgmentPoint は判断点 J1〜J6・J8 の閉集合（J7 は無い）。
+// JudgmentPoint は判断点 J1〜J6・J8・J9 の閉集合（J7 は無い）。
 type JudgmentPoint = judgmentPoint
 
-// JudgmentPoint の7値。
+// JudgmentPoint の8値。
 const (
 	JudgmentJ1 JudgmentPoint = judgmentJ1
 	JudgmentJ2 JudgmentPoint = judgmentJ2
@@ -90,6 +90,7 @@ const (
 	JudgmentJ5 JudgmentPoint = judgmentJ5
 	JudgmentJ6 JudgmentPoint = judgmentJ6
 	JudgmentJ8 JudgmentPoint = judgmentJ8
+	JudgmentJ9 JudgmentPoint = judgmentJ9
 )
 
 // RunKind は run.kind（判断の呼び出し・委譲の起動・契約のコマンドの実行）の公開する閉集合（衝突の予測の predict は含まない）。
@@ -305,8 +306,8 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 	if !in.Judgment.valid() {
 		return nil, ErrValidation
 	}
-	// J8 は課題を持たない判断（課題の ID を渡さない。再開もしない）。J1〜J6 は課題が必須。
-	noChallenge := in.Judgment == JudgmentJ8
+	// J8・J9 は課題を持たない判断（課題の ID を渡さない。再開もしない）。J1〜J6 は課題が必須。
+	noChallenge := in.Judgment.hasNoChallenge()
 	var cid int64
 	if noChallenge {
 		if in.ChallengeID != "" || in.ResumeFromRunID != nil || in.PlanVersion != nil {

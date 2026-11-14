@@ -189,6 +189,9 @@ type ConnectorRepo struct {
 	// MergeMethod は承認済みの release のマージの方式（squash | merge | rebase）。
 	// キーを省略したときは読み込みが squash を入れる。
 	MergeMethod string
+	// SerialJudgment は repos[].serial_judgment。true なら、同じリポジトリの 2 つの課題を同時に進めてよいかを
+	// 判断点（J9）が判断して、弱ければ並列にする。省略は false（両方が触るファイルがあれば直列、のまま）。
+	SerialJudgment bool
 }
 
 // ConnectorsDeclaration は .flywheel/connectors.json の中身
@@ -252,7 +255,7 @@ var operationKeys = map[string]bool{
 var cliCommandsKeys = map[string]bool{"start": true, "status": true, "resume": true, "cancel": true}
 var connectorRepoKeys = map[string]bool{
 	"name": true, "remote": true, "default_branch": true, "connector": true, "slots": true,
-	"merge_method": true,
+	"merge_method": true, "serial_judgment": true,
 }
 var connectorRepoSlotsKeys = map[string]bool{"provider": true, "paths": true, "base": true, "count": true}
 
@@ -617,6 +620,14 @@ func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 			}
 			if err := json.Unmarshal(v, &r.MergeMethod); err != nil {
 				return nil, fmt.Errorf("[%d].merge_method: %w", i, err)
+			}
+		}
+		if v, ok := rr["serial_judgment"]; ok {
+			if isJSONNull(v) {
+				return nil, fmt.Errorf("[%d].serial_judgment: must not be null", i)
+			}
+			if err := json.Unmarshal(v, &r.SerialJudgment); err != nil {
+				return nil, fmt.Errorf("[%d].serial_judgment: %w", i, err)
 			}
 		}
 		if v, ok := rr["slots"]; ok {

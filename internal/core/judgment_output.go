@@ -251,6 +251,9 @@ func AllJudgmentOutputClosedValues() []string {
 		vals = append(vals, string(v))
 	}
 	vals = append(vals, J6MemoryTypeValues...)
+	for _, v := range J9VerdictValues {
+		vals = append(vals, string(v))
+	}
 	for _, v := range J8MetricValues {
 		vals = append(vals, string(v))
 	}

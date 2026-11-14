@@ -316,6 +316,23 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] `cycle --json` の委譲の段は、直列化グループを `serial_groups` に示す（形・理由の閉集合・規則と理由の対応は §IF / API）[S2]
 - [ ] 衝突の予測の結果（予測の口を呼んで出力を得たとき）は、同時に委譲しない組（直列化グループを作る組。理由が `shared_files`・`dependency`・`unknown_pair` のいずれか）として、`challenge_conflict` に記録する。前提の依存（`challenge_dependency`）とは別の表で、依存の評価・委譲の対象の選び方・起動の判定・直列化グループの決定は記録を読まない（衝突は着手の門にしない）。記録の規則は [関係グラフの仕様 §衝突](ui-relation-graph.md)【決定 2026-11-05 オーナー（flywheel#474）。記録する組・失敗時の扱い・置き換えの範囲は仮定】[S2]
 
+#### 同時に進めてよいかの判断（判断点 J9）【決定 2026-11-08 オーナー #493】【決定 2026-11-14 オーナー（Issue #493。Q1〜Q5）】
+
+予測の結果が「両方が触るファイルがある」でも、問題にならなければ（同じ対象の別の節に独立に足すだけなら）並列で進めてよい【決定 2026-11-08 オーナー #493】。強弱は claude-harness の予測ではなく flywheel の判断点が決める。判断点 J9（J7 は無い）が、2 つの課題の承認済みの計画と予測の結果を読み、**強い・弱い・判断できない**と理由を返す【決定 2026-11-08 オーナー #493】。使うかどうかは `connectors.json` の `repos[]` の要素ごとの `serial_judgment`（真偽。既定は偽）で宣言し、偽のリポジトリは従来どおり（両方が触るファイルがあれば直列。予測の宣言が無ければ全部直列）に動く。
+
+- [ ] 判断点 J9 は、判断した組の 2 つの課題の承認済みの計画（本文）と、組の予測の結果（両方が触る対象・`dependency.first`・`dependency.stated`。予測が無ければその旨）を入力の区画として受け取り、区画に書かれた内容だけで判断して、`{"verdict": "strong|weak|uncertain", "reason": string}` を返す。予測は「あれば判断の材料に足す」扱いで、判断の根拠は 2 つの計画の中身である【決定 2026-11-08 オーナー #493】。J9 の run は課題に属さない（`challenge_id` は NULL。J8 と同じ）[S2]
+- [ ] 強い・判断できない（`uncertain`）は直列。弱い（`weak`）は並列。J9 の呼び出しの失敗・出力の不正（`invalid_output`）・費用の上限での打ち切りや呼ばない判断は直列（安全側）にする [S2]
+- [ ] `dependency.first` が `null` でない組（先後の依存）は、判断の結果に関わらず同じ直列化グループに入り、先の方から起動する（今までどおり。この組は J9 に判断させない）[S2]
+- [ ] 互いに相手を前提に挙げた組（`dependency.stated` が両方向で `dependency.first` が `null`）は、判断の結果に関わらず直列にする。理由 `merge_candidate`（1 つの課題にまとめる候補）を `serial_groups[].reasons` に載せ、周の報告にだけ示す。問い（保留）は出さず周を止めない。課題を自動で 1 つにまとめない（Q3）【決定 2026-11-08 オーナー #493】[S2]
+- [ ] J9 に判断させるのは、`serial_judgment` が真のリポジトリの、(a) 両方が触るファイル（`merge_friendly`・`ignored` の印だけのものを除く）がある候補どうしの組、(b) 互いに前提にし合う候補どうしの組、(c) 衝突の予測の宣言が無いリポジトリの候補どうしの組、だけ。動いている課題を含む組と、(c) で動いている課題があるリポジトリは判断せず、従来どおり直列にする [S2]
+- [ ] 予測の宣言が無いリポジトリ（(c)）では、2 つの計画だけで強弱と両方が触る対象を判断し、弱ければ並列にする。判断する組は、この周で同時に起動しうる候補（`max_parallel_runs` とそのリポジトリの使えるスロットの小さい方）の先頭の候補どうしの組だけで、1 組ずつ判断する。上限を超えた候補を含む組は直列にする（Q5）。予測の宣言があるリポジトリの (a)(b) も、同じ上限までの候補の組だけを判断する [S2]
+- [ ] 費用の上限は 1 組あたりと 1 周あたりの両方に持つ。1 組あたりは `judgment_budget_usd.J9`（既定 0.5 USD。`--max-budget-usd` に渡す）、1 周あたりは `serial_judgment_cycle_budget_usd`（既定 3 USD）で、その周の J9 の費用（終了した run は費用、終了していない run は渡した上限額）に次の 1 組の上限額を足すと周の上限を超えるときは、残りの組を判断せずに直列にする。周全体の予算の評価（`cycle_budget`・枠超過）で呼べなかった組も直列にする（Q1）[S2]
+- [ ] `serial_groups[].reasons` に、直列になった理由として次の値が載る。`merge_candidate`（互いに前提にし合う組）・`serial_judgment_strong`（強いと判断した）・`serial_judgment_undetermined`（判断できない）・`serial_judgment_failed`（呼び出しの失敗・出力の不正）・`serial_judgment_budget`（費用の上限・周の上限・枠超過で判断しなかった）。`serial_groups[].judgments` に、そのグループの課題を含む組の判断の記録（`challenges`・`outcome`＝`strong | weak | uncertain | failed | budget`・`reason`）が載り、判断点の理由が読める。判断させなければ `[]` [S2]
+- [ ] 指示文は特定の実行エンジンの語を書かず、開発固有の語に頼らず「成果物・対象」の言葉で書く【決定 2026-11-08 オーナー #493】。強弱の目安を書く: 強い＝同じ規則・状態の遷移・データの形・公開の口を 2 つの計画が別々に決め直す／片方の決めごとがもう片方の前提を崩す／対象が重ならなくても決めごとが食い違う。弱い＝同じ対象の別の節・別の関数に独立に足すだけで、互いの決めごとに触れない。判断できない＝直列 [S2]
+- [ ] J9 の指示文 `internal/invoker/prompts/j9.md` は、`CheckPromptSizes` の分量の上限の表に行を持ち、上限は 4,096 バイトで、超えるとテストが落ちる [S2]
+- [ ] claude-harness の予測の出力の形（`harness.conflict-prediction/v1`）は変えない。flywheel が `pairs[].dependency.stated[]`（`issue`・`depends_on`）を読むようにするだけ [S2]
+- [ ] 本番の宣言（Tom の `.flywheel/connectors.json`）で `serial_judgment` を有効にするのは、本番反映の後に人が行う（この機能の範囲外）。
+
 #### その他
 
 スロットの払い出し主体: 操作の宣言で、スロットを flywheel が払い出すか（`flywheel`）、接続ツールに任せるか（`connector`）を選べるようにするか（`slot_owner: connector` の要否）は、S3 の分解のときに `bundle` と合わせて決める。S2 では足さない（S2 のスロットは常に flywheel が払い出す）【決定 2026-10-01 親 M3P37】。claude-harness の `harness run ticket` は呼び出し元が渡した作業ツリーを `provided` として受けて消さないため、claude-harness には不要になる見込み（flywheel#73 の 2026-09-29 のコメント）【決定 2026-10-01 オーナー M3H8】。決まったら、検証できる要件としてここに書く。
@@ -623,16 +640,18 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
   "cycle_budget_usd": 300,
   "size_budgets_usd": {"S": {"impl": 30, "review": 25}, "M": {"impl": 50, "review": 30}, "L": {"impl": 100, "review": 40}},
   "max_run_budget_usd": 200,
-  "judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5},
+  "judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5, "J9": 0.5},
   "timeout_sec": {"judgment": 900, "delegate": 14400},
   "max_parallel_runs": 2,
   "rework_limit": 3,
   "failure_limit": 2,
-  "conflict_prediction_budget_usd": 1
+  "conflict_prediction_budget_usd": 1,
+  "serial_judgment_cycle_budget_usd": 3
 }
 ```
 
 - `conflict_prediction_budget_usd` は S2 で足す（【決定 2026-10-01 親 M3P29】。金額なので 0 以下は `config_invalid`）。
+- `judgment_budget_usd.J9`（1 組の判断の上限額。既定 0.5）と `serial_judgment_cycle_budget_usd`（1 周の J9 の費用の上限。既定 3）は §同時に進めてよいかの判断（J9）で足す（【決定 2026-11-14 オーナー Q1】。金額なので 0 以下は `config_invalid`）。
 - すべてのキーは省略でき、省略したキーは上の値を既定とする。`position_file` だけは既定を持たない（省略したら J1・J2 を起動しない＝`config_invalid`）。
 
 #### `.flywheel/connectors.json`【決定 2026-09-28 オーナー M3H2／親 M3P1】
@@ -674,8 +693,9 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - `form: brief` の操作は `invocation` を持たない。`form: plugin` の操作は `invocation` を必須とする。
 - `form: cli` の接続ツールは `commands`（`start`・`status`・`resume`・`cancel` の引数の配列）と `contract_version`（`1` だけ）を必須とする（§クリティカル設計決定 3）。
 - S3 で操作に `bundle`（`{"max_parallel": <N>}`。束ねて受け取れる場合だけ）を足す。`slot_owner`（`flywheel | connector`）は S2 では足さず、足すかは S3 の分解のときに `bundle` と合わせて決める【決定 2026-10-01 オーナー M3H8／親 M3P37】。操作の `parallel_safe` は足さない（§クリティカル設計決定 7）【決定 2026-10-01 親 M3P27】。
+- `repos[]` の要素は `serial_judgment`（真偽。省略は偽）を持てる。真のリポジトリでは、2 つの課題を同時に進めてよいかを判断点 J9 が判断する（§同時に進めてよいかの判断。【決定 2026-11-14 オーナー Q2】）。真偽以外・`null` は `config_invalid`。
 - `slots` は `provider` で形が分かれる（S2）。`clone` は `paths`（既存の作業用クローンの列挙。数がスロットの数）を、`worktree` は `base`（元のクローンのパス）と `count`（正の整数。スロットの数）を必須とする。どちらもワークスペースからの相対パスで、未知のキー・閉集合の外の `provider` は `config_invalid`。
-- S2 で接続ツールに `conflict_prediction`（`{"command": [<引数の配列>], "schema": "harness.conflict-prediction/v1"}`）を足す。flywheel は `command` の後ろに `--max-budget-usd <額>` と Issue 番号を別々の要素として足し、元のクローン（`worktree`）、または状態が `idle` の作業用クローンのうち `paths` の順で最初のもの（`clone`。`idle` のものが無ければ予測の口を呼ばず、呼び出し全体の失敗と同じ扱いにする）を作業ディレクトリにして、シェルを介さずに起動する。`command[0]` は PATH で解決する。時間の上限は `timeout_sec.judgment` とする【仮定】。予測は作業ディレクトリのチェックアウトの手元の HEAD に対するもので、flywheel は fetch しないため古いことがある（出力の `head_sha` を周の結果に残す）【仮定】。`schema` は閉集合（今は `harness.conflict-prediction/v1` だけ）【決定 2026-10-01 オーナー M3H9】。読むのは汎用のフィールド（`issues[].issue`・`issues[].status`・`pairs[].issues`・`pairs[].status`・`pairs[].shared_files[]`〔`path`・`merge_friendly`・`ignored`〕・`pairs[].dependency.first`〔先に入れるべき側の Issue 番号。片方向のときだけ値を持つ〕・`complete`・`error`・`head_sha`・`cost_usd`・`unknown_cost_count`）だけで、`issues[].status` は `predicted | failed | budget_exhausted`、`pairs[].status` は `predicted | unknown` の閉集合として読み（閉集合の外の値は呼び出し全体の失敗とする）、接続ツール内部の手順・判断値は持ち込まない（§クリティカル設計決定 7）。
+- S2 で接続ツールに `conflict_prediction`（`{"command": [<引数の配列>], "schema": "harness.conflict-prediction/v1"}`）を足す。flywheel は `command` の後ろに `--max-budget-usd <額>` と Issue 番号を別々の要素として足し、元のクローン（`worktree`）、または状態が `idle` の作業用クローンのうち `paths` の順で最初のもの（`clone`。`idle` のものが無ければ予測の口を呼ばず、呼び出し全体の失敗と同じ扱いにする）を作業ディレクトリにして、シェルを介さずに起動する。`command[0]` は PATH で解決する。時間の上限は `timeout_sec.judgment` とする【仮定】。予測は作業ディレクトリのチェックアウトの手元の HEAD に対するもので、flywheel は fetch しないため古いことがある（出力の `head_sha` を周の結果に残す）【仮定】。`schema` は閉集合（今は `harness.conflict-prediction/v1` だけ）【決定 2026-10-01 オーナー M3H9】。読むのは汎用のフィールド（`issues[].issue`・`issues[].status`・`pairs[].issues`・`pairs[].status`・`pairs[].shared_files[]`〔`path`・`merge_friendly`・`ignored`〕・`pairs[].dependency.first`〔先に入れるべき側の Issue 番号。片方向のときだけ値を持つ〕・`pairs[].dependency.stated[]`〔`issue`・`depends_on`。どちらの予測が相手を前提に挙げたか〕・`complete`・`error`・`head_sha`・`cost_usd`・`unknown_cost_count`）だけで、`issues[].status` は `predicted | failed | budget_exhausted`、`pairs[].status` は `predicted | unknown` の閉集合として読み（閉集合の外の値は呼び出し全体の失敗とする）、接続ツール内部の手順・判断値は持ち込まない（§クリティカル設計決定 7）。
 
 #### 現行の宣言からの写し方（`positions/<domain>.md` §5 → `connectors.json`）
 
@@ -698,6 +718,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 | J3 | `{"brief": string}` |
 | J4 | `{"decisions": [{"question_index": int, "decision": "answer\|escalate", "answer": string\|null}]}` |
 | J5 | `{"verdict": "met\|not_met\|uncertain", "reason": string, "feedback": string\|null, "question": string\|null, "deferred_conditions": [{"condition": string, "status": "after_release\|after_human_action"}]\|null}`（`deferred_conditions` は任意。規則は表の下の「J5 の `deferred_conditions`」。M4 S4 で `actual` を足す＝m4-ui-server.md §IF / API「判断点の出力に足すもの（S4）」） |
+| J9 | `{"verdict": "strong\|weak\|uncertain", "reason": string}`（2 つの課題を同時に進めてよいかの判断。強い・判断できない→直列、弱い→並列。§同時に進めてよいかの判断） |
 | 委譲の報告 | `{"outcome": "completed\|questions\|blocked", "summary": string, "branch": string\|null（ブランチ名だけ。git のブランチ名として成り立たない値は `invalid_output`。正は core の再検査 `plausibleBranchName`、スキーマの `branchFieldPattern` は子への手がかり）, "pr_urls": [string], "commits": [string], "quality_gate": string\|null, "assumptions": [string], "unverified": [string], "questions": [{"kind": string, "text": string, "options": [string], "recommendation": string\|null}]}`（`kind` の閉集合は §J3 のとおり、宣言から run ごとに生成する） |
 
 J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/judgment_j5.go` の `j5OutputSchema`・`validateJ5DeferredConditions`・`applyJ5Once`・`j5Operation`・`finalizeJ5Output`、区分の閉集合は `internal/core/judgment_output.go` の `J5ConditionStatusValues`）:
@@ -745,7 +766,7 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 - `phase` は `ingest | classify | plan | run | verify` の閉集合（S1 は前の 3 つ）。`ingest` の `result` は M2 の `ingest --json` と同じ形（`.flywheel/sources.json` が無ければ `skipped: true`・`result: null`）。`plan`・`run`・`verify` の段は `.flywheel/connectors.json` が無ければ `skipped: true`・`items: []`・`not_started: []`。どの段も `skipped` を持つ。
 - `items[].outcome` は判断点の判定（J1・J2・J5）か委譲の結末。`items[].status` は写した後の課題の状態（写さなかったら `null`）。
 - `not_started[].reason` は `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | waiting_external | plan_unavailable` の閉集合（S1 は `cycle_budget | rate_limited | upstream_fetch_failed`。`serialized` は S2 で、【決定 2026-10-01 親 M3P31】。`waiting_external` は S2 で、【決定 2026-10-01 親 M3P42】）。 `plan_unavailable` は、計画の承認が済んでいるのに承認済みの計画を引けない課題（承認に計画の版が無い〔課題の作り直しが必要。再承認の遷移もマイグレーションによる版の補完も持たない〕・版の計画が無い・構造化した出力が無い）と、承認済みの計画が今の宣言と合わない課題（構造化した出力が宣言と合わない・verdict が `plan` でない・リポジトリや接続ツールが宣言に無い）を `run` が黙って除外しないための値で、理由は `Detail`（テキスト出力）に付く【決定 2026-10-06 #143 オーナー・承認に計画の版を記録する（`approval.plan_version`・マイグレーション 0006）】。
-- `run` の段（S2）は `serial_groups: [{"repo", "challenges": [<C-ID>…], "reasons": [<理由>…], "prediction_head_sha": string|null}]` を持つ。`challenges` は、実行中の課題を先頭に、続けて委譲の候補を起動の順に並べる。`reasons` は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | running_run` の閉集合で、この定義順に重複なく並べる【仮定: キー名と理由の名前】。1 件だけのグループも載せる。`reasons` は、そのグループが成立した規則に対応する理由の和集合であり、予測の結果だけで 1 件になったグループ（実行中の課題を含まず、fail-closed の規則にも当たらないもの。予測の口を呼ばなかった候補も含む）だけが `[]` になる。委譲の段が `skipped: true` なら `serial_groups` は `[]`。`prediction_head_sha` は予測の口を呼んで `head_sha` を得たときだけ `null` でない。規則と理由の対応: 共有ファイルを持つ組→`shared_files`／`dependency.first` のある組→`dependency`／`unknown` の組→`unknown_pair`／取り込み元の対応が無い候補・Issue 番号を渡せない実行中の課題・20 件を超えて口を呼ばなかった→`not_predictable`／口の呼び出し全体の失敗・`idle` の作業用クローンが無く口を呼べなかった・`issues[].status` が `failed`→`prediction_failed`／`issues[].status` が `budget_exhausted`・周の上限で口を呼べなかった→`prediction_budget`／口の宣言が無い→`no_prediction_declared`／実行中の課題を含む→`running_run`。
+- `run` の段（S2）は `serial_groups: [{"repo", "challenges": [<C-ID>…], "reasons": [<理由>…], "judgments": [<組の判断の記録>…], "prediction_head_sha": string|null}]` を持つ。`challenges` は、実行中の課題を先頭に、続けて委譲の候補を起動の順に並べる。`reasons` は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | merge_candidate | serial_judgment_strong | serial_judgment_undetermined | serial_judgment_failed | serial_judgment_budget | running_run` の閉集合で、この定義順に重複なく並べる【仮定: キー名と理由の名前】。1 件だけのグループも載せる。`reasons` は、そのグループが成立した規則に対応する理由の和集合であり、予測の結果だけで 1 件になったグループ（実行中の課題を含まず、fail-closed の規則にも当たらないもの。予測の口を呼ばなかった候補も含む）だけが `[]` になる。委譲の段が `skipped: true` なら `serial_groups` は `[]`。`prediction_head_sha` は予測の口を呼んで `head_sha` を得たときだけ `null` でない。規則と理由の対応: 共有ファイルを持つ組→`shared_files`／`dependency.first` のある組→`dependency`／`unknown` の組→`unknown_pair`／取り込み元の対応が無い候補・Issue 番号を渡せない実行中の課題・20 件を超えて口を呼ばなかった→`not_predictable`／口の呼び出し全体の失敗・`idle` の作業用クローンが無く口を呼べなかった・`issues[].status` が `failed`→`prediction_failed`／`issues[].status` が `budget_exhausted`・周の上限で口を呼べなかった→`prediction_budget`／口の宣言が無い→`no_prediction_declared`／互いに前提にし合う組（`serial_judgment` が真のリポジトリ）→`merge_candidate`／J9 が強いと判断した→`serial_judgment_strong`／J9 が判断できないと返した→`serial_judgment_undetermined`／J9 の呼び出しの失敗・出力の不正→`serial_judgment_failed`／J9 の費用の上限・周の上限・枠超過で判断しなかった→`serial_judgment_budget`／実行中の課題を含む→`running_run`。`judgments` の要素は、判断点 J9 が判断した組の記録で、組の 2 つの課題の ID の配列・判断の結果（`strong | weak | uncertain | failed | budget`）・理由の文字列を持つ（§同時に進めてよいかの判断）。
 - `--auto` の個別の操作と `run` の `--json` は、`cycle` の `phases` の 1 要素と同じ形を `{"phase": {…}}` で返す【仮定】。
 
 #### `status`・`show`・`runs` の拡張
@@ -1265,6 +1286,14 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] その周より前から終了していない委譲の run を持つ課題と同じ直列化グループに入る課題への `flywheel run <C-ID>` は、委譲を起動せず、終了コード 1・`serialized` で終わる【決定 2026-10-01 親 M3P43】
 - [ ] 終了していない委譲の run を持つ課題があるリポジトリで fail-closed の規則が当たると、委譲の候補はすべて `not_started` に理由 `serialized` で出て、`serial_groups` のそのグループは実行中の課題を先頭に持ち、理由が `running_run` を含む
 - [ ] `cycle --json` の委譲の段の `serial_groups` は §IF / API の形である（`internal/cli/jsondoc_test.go` の照合に足して検証する）
+- [ ] `serial_judgment` が偽（省略）のリポジトリでは、J9 が呼ばれず、従来どおりの直列化グループになる（両方が触るファイルがあれば直列、予測の宣言が無ければ全部直列）
+- [ ] `serial_judgment` が真で、両方が触るファイルがある候補どうしの組は、J9 が `weak` を返すと別々のグループ（並列）に、`strong`・`uncertain` を返すと同じグループ（直列。理由が `serial_judgment_strong`・`serial_judgment_undetermined`）に入る（偽の `claude` の出力で 3 つのそれぞれを検証する）
+- [ ] J9 の呼び出しの失敗・出力の不正・1 組の費用の上限での打ち切り・1 周の費用の上限は、組を直列にし、理由が `serial_judgment_failed`・`serial_judgment_budget` を含む（それぞれで検証する）。上限を超えた後の組は J9 が呼ばれない
+- [ ] `dependency.first` のある組は、J9 が呼ばれず、`serial_judgment` が真でも今までどおり直列で、先の方から起動する
+- [ ] 互いに相手を前提に挙げた組（`dependency.stated` が両方向・`first` が `null`）は、J9 が `weak` を返しても直列になり、理由が `merge_candidate` を含む。保留の問いは出ず、周は止まらず、課題は自動でまとまらない
+- [ ] 予測の宣言が無く `serial_judgment` が真のリポジトリでは、候補どうしの組を 1 組ずつ J9 が判断し、`weak` なら並列、それ以外は直列になる。同時に起動しうる数を超えた候補を含む組は、J9 が呼ばれず直列になる
+- [ ] J9 の run は課題に属さず、連続失敗の上限・発生の記録の対象にならない。`judgment_budget_usd.J9`・`serial_judgment_cycle_budget_usd` が 0 以下の `agent.json`、`serial_judgment` が真偽でない `connectors.json` は `config_invalid`
+- [ ] J9 の指示文は、強弱の目安（強い・弱い・判断できない）を含み、特定の実行エンジンの語と、この仕組みの状態・コマンド・設定のキーの語を含まない
 - [ ] `serial_groups[].reasons` は閉集合の定義順に重複なく並ぶ（共有ファイルと依存の両方で成立したグループが `["shared_files", "dependency"]` になることで検証する）
 - [ ] 1 件だけの直列化グループも `serial_groups` に載り、予測の結果だけで 1 件になったグループの `reasons` は `[]` である
 - [ ] 委譲の段が `skipped: true` の周の `serial_groups` は `[]` である
@@ -1319,7 +1348,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] `serialized` は終了コード 1 で終わる（M1 のエラーコードの表の全行の検証に足す）【決定 2026-10-01 親 M3P43】
 - [ ] 実装が出しうるエラーコードの集合は、S1 の集合に `slot_unavailable`・`serialized` を足した集合と一致する（双方向の照合を更新して検証する）
 - [ ] `cycle --json` の `not_started[].reason` の値は、S2 では `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | waiting_external | plan_unavailable` の閉集合に限られる（テストで双方向に照合する）
-- [ ] `serial_groups[].reasons` の値は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | running_run` の閉集合に限られる（テストで双方向に照合する）
+- [ ] `serial_groups[].reasons` の値は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | merge_candidate | serial_judgment_strong | serial_judgment_undetermined | serial_judgment_failed | serial_judgment_budget | running_run` の閉集合に限られる（テストで双方向に照合する）
 
 ### ストアと構造（S2）
 

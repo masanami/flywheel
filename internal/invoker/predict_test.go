@@ -197,3 +197,26 @@ func TestBuildPredictArgs_SeparateElementsAndMinimalBudgetFormat(t *testing.T) {
 		t.Errorf("args = %v, want %v", got, want)
 	}
 }
+
+// dependency.stated[]（どちらの予測が相手を前提に挙げたか）は、読むフィールドとして正規化される。
+func TestDecodePrediction_ReadsDependencyStated(t *testing.T) {
+	out, ok := decodePrediction([]byte(`{"schema": "harness.conflict-prediction/v1", "pairs": [
+	  {"issues": [11, 12], "status": "predicted", "shared_files": [],
+	   "dependency": {"first": null, "stated": [{"issue": 11, "depends_on": 12}, {"issue": 12, "depends_on": 11}]}},
+	  {"issues": [11, 13], "status": "predicted", "shared_files": [], "dependency": {"first": 13, "stated": [{"issue": 11, "depends_on": 13}]}},
+	  {"issues": [12, 13], "status": "unknown", "shared_files": [], "dependency": null}
+	]}`))
+	if !ok {
+		t.Fatal("decodePrediction failed")
+	}
+	want := []core.PredictedDependEdge{{Issue: 11, DependsOn: 12}, {Issue: 12, DependsOn: 11}}
+	if !reflect.DeepEqual(out.Pairs[0].DependencyStated, want) || out.Pairs[0].DependencyFirst != nil {
+		t.Errorf("pair 0 = %+v", out.Pairs[0])
+	}
+	if p := out.Pairs[1]; p.DependencyFirst == nil || *p.DependencyFirst != 13 || len(p.DependencyStated) != 1 {
+		t.Errorf("pair 1 = %+v", p)
+	}
+	if len(out.Pairs[2].DependencyStated) != 0 {
+		t.Errorf("pair 2 = %+v", out.Pairs[2])
+	}
+}

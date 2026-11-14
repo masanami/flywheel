@@ -36,8 +36,8 @@ func TestCyclePhaseJSON_RunPhaseCarriesSerialGroups(t *testing.T) {
 		},
 	})
 	want := []any{
-		map[string]any{"repo": "r", "challenges": []any{"C-9", "C-1", "C-2"}, "reasons": []any{"shared_files", "dependency"}, "prediction_head_sha": "cafe01"},
-		map[string]any{"repo": "r", "challenges": []any{"C-3"}, "reasons": []any{}, "prediction_head_sha": nil},
+		map[string]any{"repo": "r", "challenges": []any{"C-9", "C-1", "C-2"}, "reasons": []any{"shared_files", "dependency"}, "judgments": []any{}, "prediction_head_sha": "cafe01"},
+		map[string]any{"repo": "r", "challenges": []any{"C-3"}, "reasons": []any{}, "judgments": []any{}, "prediction_head_sha": nil},
 	}
 	if !reflect.DeepEqual(got["serial_groups"], want) {
 		t.Errorf("serial_groups = %#v, want %#v", got["serial_groups"], want)
@@ -59,5 +59,24 @@ func TestCyclePhaseJSON_SkippedRunPhaseHasNoSerialGroups(t *testing.T) {
 func TestCyclePhaseJSON_JudgmentPhasesHaveNoSerialGroups(t *testing.T) {
 	if _, ok := phaseDoc(t, core.CyclePhaseResult{Phase: core.CyclePhasePlan})["serial_groups"]; ok {
 		t.Error("only the run phase has serial_groups")
+	}
+}
+
+func TestCyclePhaseJSON_RunPhaseCarriesTheJudgmentsOfAGroup(t *testing.T) {
+	got := phaseDoc(t, core.CyclePhaseResult{
+		Phase: core.CyclePhaseRun,
+		SerialGroups: []core.SerialGroup{{
+			Repo: "r", Challenges: []string{"C-1", "C-2"},
+			Reasons:   []core.SerialGroupReason{core.SerialReasonSharedFiles, core.SerialReasonJudgedStrong},
+			Judgments: []core.SerialJudgment{{Challenges: [2]string{"C-1", "C-2"}, Outcome: core.PairOutcomeStrong, Reason: "同じ規則を決め直す"}},
+		}},
+	})
+	want := []any{map[string]any{
+		"repo": "r", "challenges": []any{"C-1", "C-2"}, "reasons": []any{"shared_files", "serial_judgment_strong"},
+		"judgments":           []any{map[string]any{"challenges": []any{"C-1", "C-2"}, "outcome": "strong", "reason": "同じ規則を決め直す"}},
+		"prediction_head_sha": nil,
+	}}
+	if !reflect.DeepEqual(got["serial_groups"], want) {
+		t.Errorf("serial_groups = %#v, want %#v", got["serial_groups"], want)
 	}
 }

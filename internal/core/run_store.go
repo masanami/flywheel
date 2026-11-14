@@ -107,13 +107,18 @@ const (
 	judgmentJ5 judgmentPoint = "J5"
 	judgmentJ6 judgmentPoint = "J6"
 	judgmentJ8 judgmentPoint = "J8"
+	// judgmentJ9 は 2 つの課題を同時に進めてよいかの判断（J7 は無い）。課題を持たない（J8 と同じ）。
+	judgmentJ9 judgmentPoint = "J9"
 )
+
+// hasNoChallenge は j が課題を持たない判断（J8・J9）かを返す。
+func (j judgmentPoint) hasNoChallenge() bool { return j == judgmentJ8 || j == judgmentJ9 }
 
 // valid は j が J1〜J6・J8 のいずれかであるかを返す（"" には false。空許容は
 // 呼び出し側が kind に応じて判定する）。
 func (j judgmentPoint) valid() bool {
 	switch j {
-	case judgmentJ1, judgmentJ2, judgmentJ3, judgmentJ4, judgmentJ5, judgmentJ6, judgmentJ8:
+	case judgmentJ1, judgmentJ2, judgmentJ3, judgmentJ4, judgmentJ5, judgmentJ6, judgmentJ8, judgmentJ9:
 		return true
 	}
 	return false
@@ -430,8 +435,8 @@ func (in insertRunInput) valid() bool {
 			return false
 		}
 	}
-	if in.Kind == runKindJudgment && in.Judgment == judgmentJ8 {
-		// J8 は課題を持たない判断（predict と同じく課題・計画・再開元を持たない）。セッションは持つ。
+	if in.Kind == runKindJudgment && in.Judgment.hasNoChallenge() {
+		// J8・J9 は課題を持たない判断（predict と同じく課題・計画・再開元を持たない）。セッションは持つ。
 		if in.ChallengeVersion != 0 || in.PlanVersion != nil || in.ResumedFromRunID != nil || in.SessionID == "" {
 			return false
 		}
@@ -470,7 +475,7 @@ func (in insertRunInput) valid() bool {
 //   - 課題に既に終了していない run があれば errActiveRunExists
 //     （部分一意索引 idx_run_active_challenge の違反を翻訳する。AC-168）
 //
-// predict と J8 の run は課題に結び付かないため challengeID は 0 を渡す（NULL で
+// predict と J8・J9 の run は課題に結び付かないため challengeID は 0 を渡す（NULL で
 // 挿入する）。それ以外の run に 0 以下を渡すと ErrValidation。
 //
 // slot_id を指定し、そのスロットに終了していない run が既にあれば
@@ -479,7 +484,7 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 	if !in.valid() {
 		return nil, ErrValidation
 	}
-	noChallenge := in.Kind == runKindPredict || (in.Kind == runKindJudgment && in.Judgment == judgmentJ8)
+	noChallenge := in.Kind == runKindPredict || (in.Kind == runKindJudgment && in.Judgment.hasNoChallenge())
 	if noChallenge != (challengeID == 0) || challengeID < 0 {
 		return nil, ErrValidation
 	}

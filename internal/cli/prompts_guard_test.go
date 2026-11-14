@@ -68,7 +68,7 @@ func realForbiddenSources() invoker.ForbiddenSources {
 func allEmbeddedPromptContents(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8, core.JudgmentJ9} {
 		body, err := invoker.Instructions(j)
 		if err != nil {
 			t.Fatalf("invoker.Instructions(%s): %v", j, err)

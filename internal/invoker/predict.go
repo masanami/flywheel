@@ -41,7 +41,11 @@ type rawPrediction struct {
 			Ignored       bool   `json:"ignored"`
 		} `json:"shared_files"`
 		Dependency *struct {
-			First *int `json:"first"`
+			First  *int `json:"first"`
+			Stated []struct {
+				Issue     int `json:"issue"`
+				DependsOn int `json:"depends_on"`
+			} `json:"stated"`
 		} `json:"dependency"`
 	} `json:"pairs"`
 }
@@ -97,6 +101,9 @@ func decodePrediction(stdout []byte) (*core.ConflictPredictionOutput, bool) {
 		}
 		if p.Dependency != nil {
 			pair.DependencyFirst = p.Dependency.First
+			for _, e := range p.Dependency.Stated {
+				pair.DependencyStated = append(pair.DependencyStated, core.PredictedDependEdge{Issue: e.Issue, DependsOn: e.DependsOn})
+			}
 		}
 		out.Pairs = append(out.Pairs, pair)
 	}
