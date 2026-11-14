@@ -22,7 +22,7 @@ func (f *delegateFixture) answer(t *testing.T, id, answer string, replan bool) (
 	return f.s.ExecuteAnswer(ctx, AnswerRequest{ChallengeID: id, ExpectedVersion: preview.Version, Answer: answer, Replan: replan}, att)
 }
 
-// questionHold は着手中の課題を委譲して問いの保留（PR・ブランチ・費用つき）にする。
+// questionHold は着手中の課題を委譲して問いの保留（成果物〔変更の提案・作業ブランチ〕・費用つき）にする。
 func (f *delegateFixture) questionHold(t *testing.T) string {
 	t.Helper()
 	id := f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) { m["size"] = "S" }))
@@ -31,7 +31,7 @@ func (f *delegateFixture) questionHold(t *testing.T) string {
 	if got := f.detail(t, id).Status; got != StatusAwaitingHuman {
 		t.Fatalf("status = %s, want awaiting_human", got)
 	}
-	// 子が作った PR を成果物として足す（問いの run に付く）。
+	// 子が作った変更の提案を成果物として足す（問いの run に付く）。
 	if err := f.exec(`INSERT INTO run_artifact (run_id, kind, ref, state) VALUES ((SELECT MAX(id) FROM run WHERE kind = 'delegate'), 'pr', 'https://github.com/o/r/pull/7', 'open')`); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestAnswerReplan_RejectedWhenTheHoldWasNotRaisedFromWork(t *testing.T) {
 	}
 }
 
-// 作り直しの入力に回答の文と前の計画が入り、承認の後の委譲は前の PR・ブランチを引き継ぎ、費用は積み上がる。
+// 作り直しの入力に回答の文と前の計画と使った費用が入り、承認の後の委譲は前の成果物を引き継ぎ、費用は積み上がる。
 func TestAnswerReplan_J2InputCarriesAnswerAndPlan_DelegationCarriesTheDeliverableAndSpend(t *testing.T) {
 	f := newDelegateFixture(t)
 	ctx := context.Background()
@@ -136,7 +136,9 @@ func TestAnswerReplan_J2InputCarriesAnswerAndPlan_DelegationCarriesTheDeliverabl
 	}
 	_ = res
 	text := allSectionsText(j2In.Sections)
-	for _, want := range []string{labelJ2Replan, "NEW-DIRECTION-ANSWER", "PLAN-BODY-t"} {
+	// 前の計画の版までに使った費用（問いの run の 2 USD）と、新しい予算はこの額を含む上限として書く旨が入る。
+	for _, want := range []string{labelJ2Replan, "NEW-DIRECTION-ANSWER", "PLAN-BODY-t",
+		"前の計画の版までに使った費用（新しい計画の枠から引かれる積み上げの額）: 実装枠 2 USD", "この額を含む上限として書く"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("J2 input lacks %q:\n%s", want, text)
 		}
@@ -171,7 +173,8 @@ func TestAnswerReplan_J2InputCarriesAnswerAndPlan_DelegationCarriesTheDeliverabl
 		t.Fatal("J3 was not invoked")
 	}
 	j3 := allSectionsText(f.j3Inputs[len(f.j3Inputs)-1].Sections)
-	for _, want := range []string{labelPreviousDeliverable, "https://github.com/o/r/pull/7", "feat/x"} {
+	// 成果物の行は、固定のラベルではなく成果物の種類の値をそのまま出す。
+	for _, want := range []string{labelPreviousDeliverable, "pr: https://github.com/o/r/pull/7", "branch: feat/x"} {
 		if !strings.Contains(j3, want) {
 			t.Errorf("J3 input lacks %q:\n%s", want, j3)
 		}

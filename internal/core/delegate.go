@@ -172,7 +172,7 @@ type delegationContext struct {
 	ResumeBranchPushed bool
 	// Reopen は、課題が本番反映のやり直しで完了から戻されたあと、まだ委譲していないときの戻した記録（#485）。
 	Reopen *reopenNote
-	// Previous は、計画を作り直した後の最初の委譲に渡す、前の計画の成果物（PR・ブランチ）。無ければ nil。
+	// Previous は、計画を作り直した後の最初の委譲に渡す、前の計画の成果物（接続先の成果物。変更の提案・作業ブランチ）。無ければ nil。
 	Previous *previousDeliverable
 }
 

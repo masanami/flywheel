@@ -3,11 +3,13 @@ package core
 // このファイルは、保留への回答に付ける「範囲が変わる」印（T12・docs/features/m1-core.md §状態機械）の
 // 後続の流れを持つ。印の付いた回答は課題を分類済へ戻す（transition.go の IfReplan）。計画を作る判断点（J2）が
 // 回答の文と前の計画を読んで計画を作り直し、計画の承認待ちへ進める（初回の計画と同じゲート）。承認の後の委譲は
-// 前の計画の成果物（PR・ブランチ）を引き継ぎ、使った費用は計画の版をまたいで積み上がる（loadBucketSpend）。
+// 前の計画の成果物（接続先の成果物。変更の提案・作業ブランチ）を引き継ぎ、使った費用は計画の版をまたいで
+// 積み上がる（loadBucketSpend）。
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -47,6 +49,8 @@ type replanNote struct {
 	PlanCreatedAt string
 	// AnsweredAt は回答の時刻。
 	AnsweredAt string
+	// Spent は、前の計画の版までに使った枠ごとの費用（積み上げの対象の額。loadBucketSpend）。
+	Spent bucketSpend
 }
 
 // loadReplanNote は、課題に印の付いた回答済みの保留があるとき、その最後のものと最新の計画を返す。無ければ nil。
@@ -56,7 +60,7 @@ func loadReplanNote(ctx context.Context, tx *sql.Tx, challengeID int64) (*replan
 	err := tx.QueryRowContext(ctx,
 		`SELECT question, answer, answered_at FROM hold WHERE challenge_id = ? AND replan = 1 AND answer IS NOT NULL ORDER BY id DESC LIMIT 1`,
 		challengeID).Scan(&n.Question, &n.Answer, &answeredAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -65,7 +69,7 @@ func loadReplanNote(ctx context.Context, tx *sql.Tx, challengeID int64) (*replan
 	var planCreatedAt string
 	err = tx.QueryRowContext(ctx,
 		`SELECT version, body, created_at FROM task_plan WHERE challenge_id = ? ORDER BY version DESC LIMIT 1`, challengeID).Scan(&n.PlanVersion, &n.PlanBody, &planCreatedAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		n.AnsweredAt = answeredAt
 		return &n, nil
 	}
@@ -74,6 +78,9 @@ func loadReplanNote(ctx context.Context, tx *sql.Tx, challengeID int64) (*replan
 	}
 	n.PlanCreatedAt = planCreatedAt
 	n.AnsweredAt = answeredAt
+	if n.Spent, err = loadBucketSpend(ctx, tx, challengeID, int64(n.PlanVersion)); err != nil {
+		return nil, err
+	}
 	return &n, nil
 }
 
@@ -86,20 +93,28 @@ func formatReplanSection(n *replanNote) string {
 	b.WriteString("回答:\n" + n.Answer + "\n")
 	if n.PlanBody != "" {
 		fmt.Fprintf(&b, "\n前の計画（版 %d）の本文:\n%s\n", n.PlanVersion, n.PlanBody)
+		fmt.Fprintf(&b, "\n前の計画の版までに使った費用（新しい計画の枠から引かれる積み上げの額）: 実装枠 %s USD・レビュー対応枠 %s USD\n",
+			formatUSDAmount(microsToUSD(n.Spent.Impl)), formatUSDAmount(microsToUSD(n.Spent.Review)))
+		b.WriteString("使った費用は計画の版をまたいで積み上がる。新しい計画の各枠の予算は、この額を含む上限として書く。\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// previousDeliverable は前の計画の成果物（PR・ブランチ）。
+// previousDeliverable は前の計画の成果物（接続先の成果物。種類の値〔run_artifact.kind〕と参照の組）。
 type previousDeliverable struct {
-	PRs      []string
-	Branches []string
+	Items []deliverableItem
 }
 
-func (d *previousDeliverable) empty() bool { return len(d.PRs) == 0 && len(d.Branches) == 0 }
+// deliverableItem は成果物 1 件（Kind は成果物の種類の値そのまま）。
+type deliverableItem struct {
+	Kind string
+	Ref  string
+}
+
+func (d *previousDeliverable) empty() bool { return len(d.Items) == 0 }
 
 // loadPreviousDeliverable は、課題に印の付いた回答があり、いまの計画の版（planVersion）の委譲の run がまだ
-// 無いとき、それより前の版の委譲の run の成果物（PR・ブランチ）を返す。該当しなければ nil。
+// 無いとき、それより前の版の委譲の run の成果物（変更の提案・作業ブランチ）を返す。該当しなければ nil。
 func loadPreviousDeliverable(ctx context.Context, tx *sql.Tx, challengeID, planVersion int64) (*previousDeliverable, error) {
 	note, err := loadReplanNote(ctx, tx, challengeID)
 	if err != nil || note == nil {
@@ -133,11 +148,7 @@ func loadPreviousDeliverable(ctx context.Context, tx *sql.Tx, challengeID, planV
 			continue
 		}
 		seen[kind+"\x00"+ref] = true
-		if kind == string(artifactKindPR) {
-			d.PRs = append(d.PRs, ref)
-		} else {
-			d.Branches = append(d.Branches, ref)
-		}
+		d.Items = append(d.Items, deliverableItem{Kind: kind, Ref: ref})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -152,12 +163,9 @@ func loadPreviousDeliverable(ctx context.Context, tx *sql.Tx, challengeID, planV
 func formatPreviousDeliverableSection(d *previousDeliverable) string {
 	var b strings.Builder
 	b.WriteString("この課題は計画を作り直して承認を受けた。前の計画の作業の成果物が残っている。\n")
-	if len(d.PRs) > 0 {
-		b.WriteString("PR: " + strings.Join(d.PRs, ", ") + "\n")
+	for _, it := range d.Items {
+		b.WriteString(it.Kind + ": " + it.Ref + "\n")
 	}
-	if len(d.Branches) > 0 {
-		b.WriteString("ブランチ: " + strings.Join(d.Branches, ", ") + "\n")
-	}
-	b.WriteString("やること: 新しい計画の達成条件に合わせて、この成果物（同じ PR・同じブランチ）を直す。新しい PR・新しいブランチを作らない。")
+	b.WriteString("やること: 新しい計画の達成条件に合わせて、この区画の成果物（同じ変更の提案・同じ作業ブランチ）を直す。新しい変更の提案・新しい作業ブランチを作らない。")
 	return b.String()
 }
