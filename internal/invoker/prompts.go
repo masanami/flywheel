@@ -58,10 +58,11 @@ var judgmentPromptFile = map[core.JudgmentPoint]string{
 	core.JudgmentJ5: "j5.md",
 	core.JudgmentJ6: "j6.md",
 	core.JudgmentJ8: "j8.md",
+	core.JudgmentJ9: "j9.md",
 }
 
 // judgmentPromptLimit は判断点ごとの指示文の分量の上限（バイト。UTF-8）
-// （J1: 4KiB・J2: 12KiB・J3: 8KiB・J4: 4KiB・J5: 9.5KiB・J6: 6KiB・J8: 6KiB。
+// （J1: 4KiB・J2: 12KiB・J3: 8KiB・J4: 4KiB・J5: 9.5KiB・J6: 6KiB・J8: 6KiB・J9: 4KiB。
 // J5 は #466 で 8KiB、#565 で 9KiB、#563 で 9.5KiB へ引き上げた。
 // 仕様は docs/features/m3-invoker-delegation.md §指示文の歯止め）。
 var judgmentPromptLimit = map[string]int{
@@ -72,6 +73,7 @@ var judgmentPromptLimit = map[string]int{
 	"j5.md": 9728,
 	"j6.md": 6144,
 	"j8.md": 6144,
+	"j9.md": 4096,
 }
 
 // briefFixedSectionsTotalLimit は J3 ブリーフの固定の節の雛形の合計の上限

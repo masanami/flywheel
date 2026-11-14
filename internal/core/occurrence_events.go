@@ -18,7 +18,7 @@ func recordsFailureOccurrence(r RunResult, rateLimited bool) bool {
 }
 
 // insertRunOccurrence は run（内部整数 ID）を参照と原因の run とする発生を 1 行作る。課題と周の ID は
-// 同じトランザクションの中で run の行から引く。課題を持たない run（衝突の予測と J8）には作らない。
+// 同じトランザクションの中で run の行から引く。課題を持たない run（衝突の予測と J8・J9）には作らない。
 // それ以外の run が課題を持たないのは不変条件の違反なので、エラーにする。
 func (s *Store) insertRunOccurrence(ctx context.Context, tx *sql.Tx, runID int64, kind OccurrenceKind, outcome OccurrenceOutcome, at time.Time) error {
 	r, err := loadRunByID(ctx, tx, runID)
@@ -28,7 +28,7 @@ func (s *Store) insertRunOccurrence(ctx context.Context, tx *sql.Tx, runID int64
 	if r == nil {
 		return fmt.Errorf("core: insert run occurrence: run %d not found", runID)
 	}
-	if r.Kind == runKindPredict || (r.Kind == runKindJudgment && r.Judgment == judgmentJ8) {
+	if r.Kind == runKindPredict || (r.Kind == runKindJudgment && r.Judgment.hasNoChallenge()) {
 		return nil
 	}
 	cid, ok := parseChallengeID(r.ChallengeID)
