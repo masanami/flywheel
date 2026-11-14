@@ -42,9 +42,42 @@ func TestJ2OutputSchema_AcceptsParentDirectVerdict(t *testing.T) {
 
 const j2ParentDirectOutput = `{"verdict":"parent_direct","question":"UNIQUE-PD-REASON","done_criteria":"UNIQUE-PD-CRITERIA"}`
 
-func TestPlanAutoJ2_ParentDirect_RaisesParentDirectHoldAndReplacesDoneCriteria(t *testing.T) {
+// j2ParentDirectAppended は、元の達成条件 "ORIGINAL-CRITERIA" の後ろへ親の達成条件を書き足した全文。
+const j2ParentDirectAppended = "ORIGINAL-CRITERIA\n\n" + ParentDirectCriteriaHeading + "\n\nUNIQUE-PD-CRITERIA"
+
+// newClassifiedWithCriteria は達成条件 "ORIGINAL-CRITERIA" を持つ分類済の課題を作る。
+func (f *j2Fixture) newClassifiedWithCriteria(t *testing.T, title string) *Challenge {
+	t.Helper()
+	ch, err := f.s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: title, Description: "DESC-" + title, DoneCriteria: "ORIGINAL-CRITERIA"})
+	if err != nil {
+		t.Fatalf("CreateChallenge: %v", err)
+	}
+	if _, err := f.s.ClassifyChallenge(context.Background(), ChannelCLI, ch.ID, ClassifyInput{Priority: "P1"}); err != nil {
+		t.Fatalf("ClassifyChallenge: %v", err)
+	}
+	return ch
+}
+
+func TestAppendParentDirectCriteria(t *testing.T) {
+	section := ParentDirectCriteriaHeading + "\n\nP"
+	for name, tc := range map[string]struct{ original, parent, want string }{
+		"keeps the original and appends": {"O", "P", "O\n\n" + section},
+		"trailing newlines are trimmed":  {"O\n\n", " P\n", "O\n\n" + section},
+		"empty original":                 {"", "P", section},
+		"blank original":                 {" \n", "P", section},
+		"already appended":               {"O\n\n" + section, "P", "O\n\n" + section},
+		"already appended, trailing nl":  {"O\n\n" + section + "\n", "P", "O\n\n" + section + "\n"},
+		"different parent appends again": {"O\n\n" + section, "Q", "O\n\n" + section + "\n\n" + ParentDirectCriteriaHeading + "\n\nQ"},
+	} {
+		if got := appendParentDirectCriteria(tc.original, tc.parent); got != tc.want {
+			t.Errorf("%s: got %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+func TestPlanAutoJ2_ParentDirect_RaisesParentDirectHoldAndAppendsDoneCriteria(t *testing.T) {
 	f := newJ2Fixture(t)
-	ch := f.newClassified(t, "direct", "P1")
+	ch := f.newClassifiedWithCriteria(t, "direct")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
 	res, err := f.run(t, succeededInvoker([]byte(j2ParentDirectOutput)), idPtr(ch.ID))
 	if err != nil {
@@ -62,8 +95,9 @@ func TestPlanAutoJ2_ParentDirect_RaisesParentDirectHoldAndReplacesDoneCriteria(t
 	if h.Kind != HoldKindParentDirect || h.Question != "UNIQUE-PD-REASON" || h.FromStatus != StatusClassified {
 		t.Errorf("hold = %+v", h)
 	}
-	if d.DoneCriteria != "UNIQUE-PD-CRITERIA" {
-		t.Errorf("done_criteria = %q", d.DoneCriteria)
+	// 元の達成条件が残り、その後ろに見出しと親の達成条件が付く。
+	if d.DoneCriteria != j2ParentDirectAppended {
+		t.Errorf("done_criteria = %q, want %q", d.DoneCriteria, j2ParentDirectAppended)
 	}
 	if len(d.Plans) != 0 {
 		t.Errorf("plans = %v, want none", d.Plans)
@@ -116,10 +150,29 @@ func TestPlanAutoJ2_ParentDirect_IsVisibleLikeAManualParentDirectHold(t *testing
 	}
 }
 
-// 戻す道: 既存の回答の操作で保留を解くと課題が分類済（計画待ち）に戻り、J2 が計画し直せる。
-func TestPlanAutoJ2_ParentDirect_AnsweringTheHoldReturnsToClassifiedAndJ2ReplansNextCycle(t *testing.T) {
+// 元の達成条件が空なら、見出しと親の達成条件だけになる。
+func TestPlanAutoJ2_ParentDirect_EmptyOriginalCriteriaBecomesHeadingAndParentCriteria(t *testing.T) {
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "direct", "P1")
+	f.bind(t, ch, 7, simpleThread("b", "c1"))
+	if got := f.detail(t, ch.ID).DoneCriteria; got != "" {
+		t.Fatalf("fixture done_criteria = %q, want empty", got)
+	}
+	if _, err := f.run(t, succeededInvoker([]byte(j2ParentDirectOutput)), idPtr(ch.ID)); err != nil {
+		t.Fatalf("PlanAutoJ2: %v", err)
+	}
+	want := ParentDirectCriteriaHeading + "\n\nUNIQUE-PD-CRITERIA"
+	if got := f.detail(t, ch.ID).DoneCriteria; got != want {
+		t.Errorf("done_criteria = %q, want %q", got, want)
+	}
+}
+
+// 戻す道: 既存の回答の操作で保留を解くと課題が分類済（計画待ち）に戻り、J2 が計画し直せる。
+// 計画し直すときの J2 の入力の「課題」の区画には、元の達成条件と親の達成条件の両方が入る。
+// 再び parent_direct が返っても、同じ内容を二重に書き足さない。
+func TestPlanAutoJ2_ParentDirect_AnsweringTheHoldReturnsToClassifiedAndJ2ReplansNextCycle(t *testing.T) {
+	f := newJ2Fixture(t)
+	ch := f.newClassifiedWithCriteria(t, "direct")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
 	if _, err := f.run(t, succeededInvoker([]byte(j2ParentDirectOutput)), idPtr(ch.ID)); err != nil {
 		t.Fatalf("PlanAutoJ2: %v", err)
@@ -136,12 +189,52 @@ func TestPlanAutoJ2_ParentDirect_AnsweringTheHoldReturnsToClassifiedAndJ2Replans
 	if c2.Status != StatusClassified {
 		t.Fatalf("status = %s, want classified (awaiting plan)", c2.Status)
 	}
-	res, err := f.run(t, succeededInvoker(j2OutputFor(true, nil)), idPtr(ch.ID))
+	var launched JudgmentLaunchInput
+	inv := succeededInvoker(j2OutputFor(true, nil))
+	inv.onInvoke = func(in JudgmentLaunchInput) { launched = in }
+	res, err := f.run(t, inv, idPtr(ch.ID))
 	if err != nil {
 		t.Fatalf("PlanAutoJ2 (second): %v", err)
 	}
 	if res.Items[0].Outcome != "plan" {
 		t.Errorf("second item = %+v, want a plan", res.Items[0])
+	}
+	var challengeSection string
+	for _, sec := range launched.Sections {
+		if sec.Label == labelChallenge {
+			challengeSection = sec.Content
+		}
+	}
+	if !strings.Contains(challengeSection, j2ParentDirectAppended) {
+		t.Errorf("J2 input %q section lacks both criteria %q:\n%s", labelChallenge, j2ParentDirectAppended, challengeSection)
+	}
+}
+
+// 保留を解いた後に J2 がまた parent_direct を返しても、同じ見出しと本文を二重に書き足さない。
+func TestPlanAutoJ2_ParentDirect_SameCriteriaIsNotAppendedTwice(t *testing.T) {
+	f := newJ2Fixture(t)
+	ch := f.newClassifiedWithCriteria(t, "direct")
+	f.bind(t, ch, 7, simpleThread("b", "c1"))
+	if _, err := f.run(t, succeededInvoker([]byte(j2ParentDirectOutput)), idPtr(ch.ID)); err != nil {
+		t.Fatalf("PlanAutoJ2: %v", err)
+	}
+	prev, err := f.s.PrepareAnswer(context.Background(), ch.ID, "まだ委譲できない")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.s.ExecuteAnswer(context.Background(), AnswerRequest{ChallengeID: ch.ID, ExpectedVersion: prev.Version, Answer: "まだ委譲できない"},
+		verifiedAttestationForTest(t, ch.ID)); err != nil {
+		t.Fatalf("ExecuteAnswer: %v", err)
+	}
+	if _, err := f.run(t, succeededInvoker([]byte(j2ParentDirectOutput)), idPtr(ch.ID)); err != nil {
+		t.Fatalf("PlanAutoJ2 (second): %v", err)
+	}
+	d := f.detail(t, ch.ID)
+	if d.Status != StatusAwaitingHuman {
+		t.Fatalf("status = %s, want awaiting_human", d.Status)
+	}
+	if d.DoneCriteria != j2ParentDirectAppended {
+		t.Errorf("done_criteria = %q, want %q (appended once)", d.DoneCriteria, j2ParentDirectAppended)
 	}
 }
 
@@ -162,14 +255,14 @@ func TestPlanAutoJ2_ParentDirect_InvalidOutputChangesNothing(t *testing.T) {
 	}
 }
 
-// 達成条件の置き換えは、保留を立てた作業ログ（hold）の before・after に載る。
-func TestPlanAutoJ2_ParentDirect_DoneCriteriaReplacementIsInTheHoldActivity(t *testing.T) {
+// 達成条件の書き足しは、保留を立てた作業ログ（hold）の before・after に書き足す前と後の全文で載る。
+func TestPlanAutoJ2_ParentDirect_DoneCriteriaAppendIsInTheHoldActivity(t *testing.T) {
 	f := newJ2Fixture(t)
-	ch := f.newClassified(t, "direct", "P1")
+	ch := f.newClassifiedWithCriteria(t, "direct")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
 	prevCriteria := f.detail(t, ch.ID).DoneCriteria
-	if prevCriteria == "UNIQUE-PD-CRITERIA" {
-		t.Fatalf("fixture done_criteria must differ from the output: %q", prevCriteria)
+	if prevCriteria != "ORIGINAL-CRITERIA" {
+		t.Fatalf("fixture done_criteria = %q", prevCriteria)
 	}
 	if _, err := f.run(t, succeededInvoker([]byte(j2ParentDirectOutput)), idPtr(ch.ID)); err != nil {
 		t.Fatalf("PlanAutoJ2: %v", err)
@@ -194,9 +287,9 @@ func TestPlanAutoJ2_ParentDirect_DoneCriteriaReplacementIsInTheHoldActivity(t *t
 	if err := json.Unmarshal(hold.After, &after); err != nil {
 		t.Fatalf("unmarshal After: %v", err)
 	}
-	if before["done_criteria"] != prevCriteria || after["done_criteria"] != "UNIQUE-PD-CRITERIA" {
+	if before["done_criteria"] != prevCriteria || after["done_criteria"] != j2ParentDirectAppended {
 		t.Errorf("hold activity done_criteria before/after = %v/%v, want %q/%q",
-			before["done_criteria"], after["done_criteria"], prevCriteria, "UNIQUE-PD-CRITERIA")
+			before["done_criteria"], after["done_criteria"], prevCriteria, j2ParentDirectAppended)
 	}
 }
 

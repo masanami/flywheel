@@ -1145,8 +1145,9 @@ func (s *Store) applyJ2Uncertain(ctx context.Context, runIDDisplay, challengeIDD
 }
 
 // applyJ2ParentDirect は判定 parent_direct の出力を課題へ写す（T11）。種類が親が直接行う
-// （parent_direct）の保留を、問いを理由として立て、課題の達成条件を親の達成条件で置き換える
-// （保留・達成条件・遷移・作業ログを同じトランザクションで書く）。写す直前に読み直した状態が
+// （parent_direct）の保留を、問いを理由として立て、課題の達成条件の後ろへ見出しを付けて親の
+// 達成条件を書き足す（元の達成条件は残す。appendParentDirectCriteria。保留・達成条件・遷移・
+// 作業ログを同じトランザクションで書く）。写す直前に読み直した状態が
 // 分類済でなければ写さない。保留を解くと保留の前の状態（分類済）へ戻り、次の周で J2 が計画し直す。
 func (s *Store) applyJ2ParentDirect(ctx context.Context, runIDDisplay, challengeIDDisplay, reason, doneCriteria string) (mapped bool, err error) {
 	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpHold, func(ctx context.Context, tc *transitionCtx) error {
@@ -1156,12 +1157,12 @@ func (s *Store) applyJ2ParentDirect(ctx context.Context, runIDDisplay, challenge
 		if _, err := insertHoldKind(ctx, tc, reason, HoldKindParentDirect); err != nil {
 			return err
 		}
-		if doneCriteria != tc.current.DoneCriteria {
-			if _, err := tc.tx.ExecContext(ctx, `UPDATE challenge SET done_criteria = ? WHERE id = ?`, doneCriteria, tc.id); err != nil {
+		if appended := appendParentDirectCriteria(tc.current.DoneCriteria, doneCriteria); appended != tc.current.DoneCriteria {
+			if _, err := tc.tx.ExecContext(ctx, `UPDATE challenge SET done_criteria = ? WHERE id = ?`, appended, tc.id); err != nil {
 				return err
 			}
 			tc.before["done_criteria"] = tc.current.DoneCriteria
-			tc.after["done_criteria"] = doneCriteria
+			tc.after["done_criteria"] = appended
 		}
 		mapped = true
 		return nil
@@ -1173,6 +1174,25 @@ func (s *Store) applyJ2ParentDirect(ctx context.Context, runIDDisplay, challenge
 		return false, err
 	}
 	return mapped, nil
+}
+
+// ParentDirectCriteriaHeading は、J2 が parent_direct を返したときに課題の達成条件の
+// 後ろへ親の達成条件を書き足す区画の見出し。
+const ParentDirectCriteriaHeading = "## 親が直接行うときの達成条件"
+
+// appendParentDirectCriteria は、元の達成条件 original の後ろへ見出しを付けて親の達成条件
+// parent を書き足した全文を返す（元の達成条件は残す）。original が空なら見出しと parent だけに
+// する。同じ見出しと同じ本文がすでに末尾にあれば二重に書き足さず original をそのまま返す。
+func appendParentDirectCriteria(original, parent string) string {
+	section := ParentDirectCriteriaHeading + "\n\n" + strings.TrimSpace(parent)
+	trimmed := strings.TrimRight(original, " \t\r\n")
+	if trimmed == "" {
+		return section
+	}
+	if strings.HasSuffix(trimmed, section) {
+		return original
+	}
+	return trimmed + "\n\n" + section
 }
 
 // errJ2IssuesAlreadyRecorded は、論点の記録がすでにある課題へ issues が返ったことを
