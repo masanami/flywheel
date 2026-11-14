@@ -508,6 +508,90 @@ func loadRunBranch(ctx context.Context, tx *sql.Tx, r runRow, declared []HumanQu
 	return "", nil
 }
 
+// followBranch は、再開でない新しい委譲が追従する前の委譲のブランチと、その run のスロット
+// （表示形。記録が無ければ ""）。
+type followBranch struct {
+	Branch string
+	SlotID string
+}
+
+// loadFollowBranch は同じ課題の委譲の run を新しい順に見て、既定ブランチ以外のブランチ
+// （loadRunBranch と同じ規則で読めるもの）を報告した最も新しい run のブランチとスロットを返す。
+// 無ければ nil（新しい委譲は base へ揃えて始める）。計画の版が変わった後の新しい委譲が既存の
+// PR を追従するとき、そのブランチを別のスロットが checkout したままでも外して起動するために使う（#526）。
+func loadFollowBranch(ctx context.Context, tx *sql.Tx, runs []runRow, declared []HumanQuestionKind, defaultBranch string) (*followBranch, error) {
+	for i := len(runs) - 1; i >= 0; i-- {
+		b, err := loadRunBranch(ctx, tx, runs[i], declared, defaultBranch)
+		if err != nil {
+			return nil, err
+		}
+		if b == "" {
+			continue
+		}
+		// そのブランチの PR がマージ済み・閉じ済みとストアの記録で分かれば追従しない（base へ
+		// 揃える）。マージの後に課題が戻されたとき、古いブランチで新しい委譲を起動しないため。
+		// 記録に無い（GitHub で直接マージ・閉じた）場合は分からず、追従する（gh は呼ばない）。
+		done, err := followedPRFinished(ctx, tx, runIntID(runs[i]))
+		if err != nil {
+			return nil, err
+		}
+		if done {
+			return nil, nil
+		}
+		f := &followBranch{Branch: b}
+		if runs[i].SlotID != nil {
+			f.SlotID = *runs[i].SlotID
+		}
+		return f, nil
+	}
+	return nil, nil
+}
+
+// followedPRFinished は runID の run の成果物の PR が、ストアの記録の上でマージ済み・閉じ済みかを
+// 返す。成果物の PR の状態（照合の時点の merged・closed）か、その PR を参照する実行済みの本番反映
+// （release の不可逆操作）のどちらかがあれば真。
+func followedPRFinished(ctx context.Context, tx *sql.Tx, runID int64) (bool, error) {
+	arts, err := listRunArtifacts(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	type prKey struct {
+		repo string
+		n    int
+	}
+	prs := map[prKey]bool{}
+	for _, a := range arts {
+		if a.Kind != artifactKindPR {
+			continue
+		}
+		if a.State == artifactStateMerged || a.State == artifactStateClosed {
+			return true, nil
+		}
+		if repo, n, ok := parseReleasePullRequestRef(a.Ref); ok {
+			prs[prKey{strings.ToLower(repo), n}] = true
+		}
+	}
+	if len(prs) == 0 {
+		return false, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT ref FROM operation WHERE kind = ? AND state = ?`,
+		string(OperationKindRelease), string(OperationStateExecuted))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var ref sql.NullString
+		if err := rows.Scan(&ref); err != nil {
+			return false, err
+		}
+		if repo, n, ok := parseReleasePullRequestRef(ref.String); ok && prs[prKey{strings.ToLower(repo), n}] {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 // formatQuestionsHold は結末 questions の報告の問いを、保留の問いにする整形した文にする。
 func formatQuestionsHold(rep *DelegationReport) string {
 	var b strings.Builder
@@ -552,7 +636,8 @@ var slotWaitInterval = 200 * time.Millisecond
 // maxIdleRetries は、取れなかった後の状態が idle だった場合に、待たずに連続して取り直す回数の上限。
 const maxIdleRetries = 3
 
-// acquireDelegationSlot は委譲のスロットを割り当てる。新しいセッションの起動は通常の割り当て。
+// acquireDelegationSlot は委譲のスロットを割り当てる。新しいセッションの起動は通常の割り当て
+// （worktree で前の委譲がブランチを報告していれば、そのブランチを checkout し、前の run のスロットを先に試す）。
 // `--resume` の再開は、元のスロット（再開元の run が使ったもの）を次のように使う
 // （M3P16・M3P30・M3P38）:
 //
@@ -562,22 +647,59 @@ const maxIdleRetries = 3
 //   - 中断の後の再開（仕様に定めが無い）: 作業ツリーの状態を引き継ぐため、clone でも元のスロットだけ
 //   - clone でブランチが未 push: 元のスロットだけ。idle でなければ待たずに ErrSlotUnavailable
 func (s *Store) acquireDelegationSlot(ctx context.Context, in DelegateInput, dc *delegationContext, bind SlotBinder) (*SlotAssignment, error) {
-	if dc.Resume == nil || dc.Resume.Target.SlotID == nil {
-		return s.AcquireSlot(ctx, in.Git, dc.Repo, bind)
+	if dc.Resume == nil {
+		// 再開でない新しい委譲: 前の委譲がブランチを報告していれば、そのブランチのまま起動する
+		// （worktree のスロットのとき。前の run のスロットを先に試す。#526）。
+		if dc.Follow != nil && dc.Repo.Slots.Provider == string(slotProviderWorktree) {
+			choice := slotChoice{Prefer: dc.Follow.SlotID, Branch: dc.Follow.Branch}
+			return waitForBranchHolder(ctx, delegationDeadline(in),
+				func() (*SlotAssignment, error) { return s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice) })
+		}
+		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{})
+	}
+	if dc.Resume.Target.SlotID == nil {
+		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{})
 	}
 	original := *dc.Resume.Target.SlotID
 	worktree := dc.Repo.Slots.Provider == string(slotProviderWorktree)
 	if !worktree && dc.ResumeBranchPushed && (dc.Resume.Kind == ResumeKindAnswer || dc.Resume.Kind == ResumeKindRework) {
 		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{Prefer: original})
 	}
-	choice := slotChoice{Only: original}
+	choice := slotChoice{Only: original, Branch: dc.Resume.Branch, KeepTree: dc.Resume.Branch == ""}
 	if !worktree {
 		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice)
 	}
-	deadline := time.Now().Add(time.Duration(in.AgentDecl.TimeoutSec.Delegate) * time.Second)
-	return waitForOriginalSlot(ctx, deadline,
+	return waitForOriginalSlot(ctx, delegationDeadline(in),
 		func() (*SlotAssignment, error) { return s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice) },
 		func() (slotState, error) { return s.slotStateOf(ctx, original) })
+}
+
+// delegationDeadline は、スロットが空くのを待つ上限（委譲の時間の上限）。宣言が無ければ待たない。
+func delegationDeadline(in DelegateInput) time.Time {
+	if in.AgentDecl == nil {
+		return time.Now()
+	}
+	return time.Now().Add(time.Duration(in.AgentDecl.TimeoutSec.Delegate) * time.Second)
+}
+
+// waitForBranchHolder は、追従するブランチを使用中（busy）の他のスロットが checkout している間
+// （errSlotBranchBusy）、そのスロットが空くのを待って取り直す。待つ間はスロットを押さえない。
+// 期限切れは ErrSlotUnavailable。それ以外の結果（未コミットの変更で外せない等）はそのまま返す。
+func waitForBranchHolder(ctx context.Context, deadline time.Time, acquire func() (*SlotAssignment, error)) (*SlotAssignment, error) {
+	for {
+		a, err := acquire()
+		if !errors.Is(err, errSlotBranchBusy) {
+			return a, err
+		}
+		if time.Now().After(deadline) {
+			return nil, ErrSlotUnavailable
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(slotWaitInterval):
+		}
+	}
 }
 
 // waitForOriginalSlot は元のスロットを取れるまで、取り直しを繰り返す。
@@ -588,7 +710,7 @@ func waitForOriginalSlot(ctx context.Context, deadline time.Time,
 	acquire func() (*SlotAssignment, error), stateOf func() (slotState, error)) (*SlotAssignment, error) {
 	idleRetries := 0
 	for {
-		a, err := acquire()
+		a, err := waitForBranchHolder(ctx, deadline, acquire)
 		if !errors.Is(err, ErrSlotUnavailable) {
 			return a, err
 		}
