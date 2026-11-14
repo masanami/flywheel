@@ -807,6 +807,7 @@ export function statusOf(w: MockWorkspace): StatusResponse {
       challenges: actionable.map((m) => ({ ...m.c, unmet_dependencies: [] })),
     },
     approved: { operations: ops("approved") },
+    binary_commit: "unknown",
     needs_human: {
       budget_exhausted: items.flatMap((m) =>
         m.flags.budget ? [m.flags.budget] : [],

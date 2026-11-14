@@ -39,6 +39,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   bind <C-ID> <owner/repo#番号>   （取り込み元の Issue の無い課題を、open の GitHub Issue に紐づける。宣言の取り込み元のリポジトリだけ）
   unbind <C-ID>   （紐づけを外す）
   status
+  version   （動いているバイナリのコミットとストアのスキーマの版）
   log [<ID>]
   ingest [--source <id>]
   mark-read <C-ID>

@@ -22,7 +22,7 @@ func marshal(t *testing.T, v any) string {
 
 func TestEmptyListsAreArraysAndNullsStayNull(t *testing.T) {
 	got := marshal(t, view.FromOverview(&core.Overview{}))
-	want := `{"actionable":{"challenges":[]},"approved":{"operations":[]},"needs_human":{"budget_exhausted":[],"challenges":[],"discrepancies":[],"operations":[],"slots":[],"triage":[]},"parent_agent":{"challenges":[]},"waiting_external":{"challenges":[]}}`
+	want := `{"actionable":{"challenges":[]},"approved":{"operations":[]},"binary_commit":"unknown","needs_human":{"budget_exhausted":[],"challenges":[],"discrepancies":[],"operations":[],"slots":[],"triage":[]},"parent_agent":{"challenges":[]},"waiting_external":{"challenges":[]}}`
 	if got != want {
 		t.Errorf("status:\n got %s\nwant %s", got, want)
 	}
@@ -70,7 +70,7 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 		view.CycleResponse{}, view.CycleStarted{}, view.CycleStatus{}, view.SlotCleared{}, view.SlotResponse{}, view.InitResponse{},
 		view.MarkReadResponse{}, view.BudgetResponse{}, view.ExportBody{}, view.ExportResponse{}, view.ImportBody{}, view.ImportResponse{},
 		view.ApprovalPlan{}, view.ApprovalRelease{}, view.ApprovalOtherOperation{}, view.ApprovalSummary{}, view.ApprovalSummaryResponse{}, view.DirectCompletion{}, view.ChallengeDirectCompletionResponse{}, view.StatusParentAgent{}, view.ShowCardResponse{},
-		view.GraphNode{}, view.GraphEdge{}, view.GraphResponse{},
+		view.GraphNode{}, view.GraphEdge{}, view.GraphResponse{}, view.VersionResponse{},
 	}
 	for _, v := range types {
 		rt := reflect.TypeOf(v)

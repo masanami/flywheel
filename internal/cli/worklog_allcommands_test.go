@@ -42,11 +42,12 @@ import (
 
 // worklogReadOnlyCommands は変更系でないコマンド（上の判定基準）。
 var worklogReadOnlyCommands = map[string]bool{
-	"init":   true,
-	"show":   true,
-	"list":   true,
-	"status": true,
-	"log":    true,
+	"init":    true,
+	"show":    true,
+	"list":    true,
+	"status":  true,
+	"version": true,
+	"log":     true,
 	// runs（#81）は run・cycle・lock 表しか読み書きせず、それらの書き込みは
 	// 作業ログ（activity）に載せない（docs/features/m3-invoker-delegation.md
 	// §クリティカル設計決定 1）。ReapInterruptedRuns による run の更新も

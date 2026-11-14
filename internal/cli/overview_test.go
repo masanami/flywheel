@@ -17,8 +17,8 @@ func TestRunStatus_EmptyWorkspaceReturnsTheBucketsWithEmptyArrays(t *testing.T) 
 	ws := initializedWorkspace(t)
 
 	doc := runJSON(t, ws, "status")
-	if len(doc) != 5 {
-		t.Errorf("status top-level keys = %d, want 5 (the three M1 buckets, waiting_external and parent_agent): %+v", len(doc), doc)
+	if len(doc) != 6 {
+		t.Errorf("status top-level keys = %d, want 6 (the three M1 buckets, waiting_external, parent_agent and binary_commit): %+v", len(doc), doc)
 	}
 	if pa, ok := doc["parent_agent"].(map[string]any); !ok || len(pa) != 1 {
 		t.Errorf("status[\"parent_agent\"] = %v, want an object with only `challenges`", doc["parent_agent"])
