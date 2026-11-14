@@ -854,11 +854,13 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 // reclaimedContractStartWhere は、回収された（interrupted）か回収以外で失敗した契約の start の run で、まだ保留に
 // 写していないものを選ぶ条件（run を r、課題を c と別名にした副問い合わせの本体）。start の run は、契約の run（contract_run）を
 // 作る前に回収されると contract_run を持たない。status の run との区別は「その課題の、先に始まった契約の run が
-// その run の開始時点で終わっていなかった」ことで行う。課題が着手中でなくなっていれば（保留・取り下げ・完了）選ばない。
+// その run の開始時点で終わっていなかった」ことで行う。終わりと同じ時刻（ミリ秒）の run は start の run として扱う:
+// 契約の run を終わらせるのは成功した契約のコマンドの run（start・status・resume・cancel）で、成功以外の run は
+// 終わらせない。この条件は成功以外の run だけを選ぶから。課題が着手中でなくなっていれば（保留・取り下げ・完了）選ばない。
 const reclaimedContractStartWhere = `r.kind = 'contract' AND r.result IS NOT NULL AND r.result <> 'succeeded' AND c.status = 'in_progress'
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.start_run_id = r.id)
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND k.start_run_id < r.id
-		AND (k.ended_at IS NULL OR k.ended_at >= r.started_at))
+		AND (k.ended_at IS NULL OR k.ended_at > r.started_at))
 	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.run_id = r.id)`
 
 // unheldContractStopWhere は、契約の run（k）が failed・cancelled で終わったのに、その後に保留を作れていない

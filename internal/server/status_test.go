@@ -54,7 +54,9 @@ func flywheelBinary(t *testing.T) string {
 			return
 		}
 		cliBinary = filepath.Join(dir, "flywheel")
-		cmd := exec.Command("go", "build", "-o", cliBinary, "github.com/masanami/flywheel/cmd/flywheel")
+		// -buildvcs=false: API を返すのはテストのバイナリ（vcs のビルド情報を持たず binary_commit は "unknown"）
+		// なので、比べる CLI も同じくビルド情報なしで作り、status の binary_commit を揃える（Issue #593）。
+		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", cliBinary, "github.com/masanami/flywheel/cmd/flywheel")
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			cliBuildErr = fmt.Errorf("go build: %w: %s", err, out)

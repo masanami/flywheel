@@ -95,8 +95,11 @@ type StatusWaitingExternal struct {
 
 // StatusResponse は `status` の成功の形。
 type StatusResponse struct {
-	Actionable      StatusActionable      `json:"actionable"`
-	Approved        StatusApproved        `json:"approved"`
+	Actionable StatusActionable `json:"actionable"`
+	Approved   StatusApproved   `json:"approved"`
+	// BinaryCommit は動いているバイナリのコミット（status のテキストの行と同じ値。Issue #593）。
+	// ビルド情報が無いときは "unknown"。
+	BinaryCommit    string                `json:"binary_commit"`
 	NeedsHuman      StatusNeedsHuman      `json:"needs_human"`
 	ParentAgent     StatusParentAgent     `json:"parent_agent"`
 	WaitingExternal StatusWaitingExternal `json:"waiting_external"`
@@ -125,9 +128,14 @@ func FromOverview(ov *core.Overview) StatusResponse {
 	for _, it := range ov.WaitingExternal {
 		waiting = append(waiting, WaitingExternal{ChallengeID: it.ChallengeID, Checks: "pending", PRURL: it.PRURL})
 	}
+	binaryCommit := ov.BinaryCommit
+	if binaryCommit == "" {
+		binaryCommit = core.UnknownBuildValue
+	}
 	return StatusResponse{
-		Actionable: StatusActionable{Challenges: FromActionableChallenges(ov.ActionableChallenges, ov.UnmetDependencies)},
-		Approved:   StatusApproved{Operations: FromOperations(ov.ApprovedOperations)},
+		Actionable:   StatusActionable{Challenges: FromActionableChallenges(ov.ActionableChallenges, ov.UnmetDependencies)},
+		Approved:     StatusApproved{Operations: FromOperations(ov.ApprovedOperations)},
+		BinaryCommit: binaryCommit,
 		NeedsHuman: StatusNeedsHuman{
 			BudgetExhausted: budget,
 			Challenges:      FromChallenges(ov.NeedsHumanChallenges),

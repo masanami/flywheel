@@ -175,6 +175,8 @@ type delegationContext struct {
 	// Follow は再開でない新しい委譲（Resume が nil）が追従する、同じ課題の前の委譲のブランチと
 	// スロット（worktree のスロットのときだけ読む。無ければ nil で base へ揃える。#526）。
 	Follow *followBranch
+	// Previous は、計画を作り直した後の最初の委譲に渡す、前の計画の成果物（接続先の成果物。変更の提案・作業ブランチ）。無ければ nil。
+	Previous *previousDeliverable
 }
 
 // estimateMicros は周の上限の評価額（実装枠の残り ＋ レビュー対応枠の残り）。`--max-budget-usd` と
@@ -373,6 +375,9 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		if dc.Reopen, err = loadReopenNote(ctx, tx, cid); err != nil {
 			return err
 		}
+		if dc.Previous, err = loadPreviousDeliverable(ctx, tx, cid, int64(p.Version)); err != nil {
+			return err
+		}
 		if dc.Binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
 			return err
 		}
@@ -475,6 +480,9 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 	}
 	if dc.Reopen != nil {
 		sections = append(sections, JudgmentDataSection{Label: labelReopenReason, Content: formatReopenSection(dc.Reopen, dc.Repo.DefaultBranch)})
+	}
+	if dc.Previous != nil {
+		sections = append(sections, JudgmentDataSection{Label: labelPreviousDeliverable, Content: formatPreviousDeliverableSection(dc.Previous)})
 	}
 	if t := formatSourceBindingSection(dc.Binding); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "取り込み元の対応", Content: t})

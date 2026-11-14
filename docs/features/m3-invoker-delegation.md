@@ -168,6 +168,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] J2 の run が成功し計画を登録したとき、上流のコメントを落とさずにすべて入力へ含めていれば、core は上流を読んだ記録を付ける。読んだ時点の値には、J2 の直前の取得で得たコメント数と更新日時を使う（ストアの観測値ではない）【決定 2026-09-28 親 M3P14。M2 QH14】
 - [ ] 上流のコメントを 1 件でも落とした J2、失敗した J2、`uncertain` の J2 は、読んだ記録を付けない
 - [ ] J2 が付けた読んだ記録の作業ログ（`upstream_read`）は、経路 `invoker` と原因の run の ID を持ち、人間の `mark-read`（経路 `cli`）と区別できる（M2 §M3 への申し送り）
+- [ ] 保留への回答に「範囲が変わる」印（M1 §範囲が変わる回答）が付いた課題の J2 の入力には、区画「計画の作り直し」（印の付いた最後の回答の問いと文・最新の計画の本文・前の計画の版までに使った枠ごとの費用〔積み上げの対象の額〕と、新しい計画の予算はこの額を含む上限として書く旨）が入る。J2 は回答に従って計画を作り直し、成功すれば計画承認待ちへ進む（自動の承認はしない）。印の無い課題の入力にこの区画は入らない
 
 ### 意思決定の主体の判定 [S2]
 
@@ -198,24 +199,25 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 委譲の報告は、結末（`completed | questions | blocked`）・要約・ブランチ・PR の URL・コミット・品質ゲートの結果・置いた仮定・未検証事項・問いの一覧を持つ（形は §IF / API）
 - [ ] 報告の問いは、それぞれ種類（`requirements | critical_design | acceptance_criteria | safety_tradeoff | cross_repo | scope | product_policy | minor` と、宣言の人間へ上げる問いの種類の id の和集合）・本文・選択肢・推奨を持つ
 - [ ] 実装の委譲の `--max-budget-usd` は、その計画の版の実装枠の残りの額とする（§予算ガード）
+- [ ] 印の付いた回答（M1 §範囲が変わる回答）で計画を作り直し、承認を受けた後の最初の委譲（その計画の版の委譲の run がまだ無いとき）では、J3 の入力に区画「前の計画の成果物」（前の版の委譲の run の接続先の成果物〔変更の提案・作業ブランチ〕を、成果物の種類の値と参照の組で並べる）を入れ、brief に、同じ成果物を新しい計画の達成条件に合わせて直し、新しい変更の提案・作業ブランチを作らないことを書かせる。起動の形は新しいセッション（前の版のセッションは再開しない）
 
 ### 合流と照合 [S2]
 
-- [ ] 委譲の run が終わったら（`launch_failed` を除くどの結果でも）、照合を行う。照合は子の報告に依らない
+- [ ] 委譲の run が終わったら（`launch_failed` を除くどの結果でも）、照合を行う。照合は子の報告に依らない（報告の `branch`・`pr_urls` は調べる先を示すだけで、成果物として記録するのは `gh` が返した値と、`gh` で存在を確かめたブランチ名だけ）
 - [ ] 照合では、スロットの作業ツリーの現在のブランチと、未コミットの変更の有無を調べる
 - [ ] 委譲の割り当て時（起動の前）に、割り当て前の検査で読んだスロットの作業ツリーのブランチを記録する【決定 A 2026-10-04 #115】
 - [ ] 照合では、報告のブランチ（無ければ、割り当て時と異なるスロットの現在のブランチ）がリモートにあるかを `gh` で調べる。報告にブランチが無く、スロットの現在のブランチが割り当て時と同じなら、子はブランチを作らなかったとして今回の成果物は無い扱いとし、前の課題の PR を成果物として記録せず、`release` の登録・検証中への遷移・承認なしの本番反映の検出も起こさない【決定 A 2026-10-04 #115】
 - [ ] 照合では、そのブランチを head とする PR（open・closed・merged のすべて）を `gh` で調べ、URL・状態・base のブランチを run の成果物として記録する
 - [ ] 照合の `gh` の呼び出しはすべて GET である（GitHub へ書き込まない）
 - [ ] スロットの作業ツリーに未コミットの変更が残っていたら、スロットを `needs_attention` にし、人が解除するまでそのスロットへ新しい委譲を割り当てない。flywheel はその変更を消さない（`reset`・`clean`・`checkout --` をしない）
-- [ ] 結果が `succeeded` で結末が `completed` の委譲で、操作の成果物の種類の宣言（`pr | branch | none`）の成果物が照合で確かめられたら、課題を検証中にする（M1 T7）。`pr` は、報告のブランチ（無ければ、割り当て時と異なるスロットの現在のブランチ）を head とする open の PR かマージ済みの PR が見つかれば確かめられたとし、未マージの closed の PR だけなら見つからないものとして次項に従う。既定ブランチへの承認なしのマージは、下の本番反映の検出を優先する。`none` は照合で確かめる成果物が無いので検証中にし、中身は J5 が判定する【決定 2026-10-01 親 M3P41】
+- [ ] 結果が `succeeded` で結末が `completed` の委譲で、操作の成果物の種類の宣言（`pr | branch | none`）の成果物が照合で確かめられたら、課題を検証中にする（M1 T7）。`pr` は、報告のブランチ（無ければ、割り当て時と異なるスロットの現在のブランチ）を head とする open の PR かマージ済みの PR、または報告の `pr_urls` の PR（宣言〔`connectors.json` の `repos[]`〕のリポジトリのものに限る。委譲先と別のリポジトリの PR も成果物にする）で open かマージ済みのものが見つかれば確かめられたとし、未マージの closed の PR だけなら見つからないものとして次項に従う。既定ブランチへの承認なしのマージは、下の本番反映の検出を優先する。`none` は照合で確かめる成果物が無いので検証中にし、中身は J5 が判定する【決定 2026-10-01 親 M3P41】
 - [ ] 結果が `succeeded` で結末が `completed` なのに、宣言の成果物が照合で確かめられなければ、課題を人間対応待ちにし、問いに「子は完了を報告したが成果物が見つからない」ことと照合の結果を書く（M1 T11）
 - [ ] 照合の `gh` の取得の結果は「見つかった」「見つからないと確定」「取得の失敗」の 3 つに分ける。見つからないと確定するのは、ブランチの取得の HTTP 404・head の PR の空の一覧・報告の `pr_urls` の PR の取得の HTTP 404 だけで、それ以外のエラー（接続の失敗・タイムアウト・5xx・認証切れ・レート制限、`gh` が求めたものと別の PR を返したことを含む）はすべて取得の失敗とする。`gh` のエラーの文面から失敗の種類を見分けない【決定 2026-11-08 オーナー #487】
 - [ ] 成果物の種類 `pr` の完了の照合（結果 `succeeded`・結末 `completed`）は、ブランチで引いた経路と `pr_urls` で引いた経路の結果をまとめて判定する。どれか 1 つで成果物が見つかれば「成果物あり」（検証中）、見つからず取得の失敗が 1 つでもあれば「取得の失敗」、全部が見つからないと確定したときだけ「見つからない」（上の項の人間対応待ち。扱いは変えない）【決定 2026-11-08 オーナー #487】
 - [ ] 「取得の失敗」のときは、保留を作らず課題の状態も変えず、課題ごとの照合の取得の失敗の連続回数（ストアの `challenge.reconcile_fetch_failures`。マイグレーション `0016`）を 1 増やす。次の周の `run` は、その課題に子を起動せず、最後の委譲の run の報告（ブランチ・`pr_urls`）と前の照合で調べたブランチで照合だけをやり直し、見つかった成果物をその run の成果物として記録する。連続回数が **3 回**に達したら人間対応待ちにし、問いに取得の失敗であること・連続の回数・最後のエラーのメッセージと照合の結果を書く【決定 2026-11-08 オーナー #487】
 - [ ] 照合の取得の失敗の連続回数は、「成果物あり」か「見つからない」の判定が出たときに 0 に戻す（作業ログなどを後ろから数えない）【決定 2026-11-08 オーナー #487】。回数は失敗した照合の委譲の run（`challenge.reconcile_fetch_run_id`）ごとの連続の失敗で、別の run（保留への回答で再開した子など）の照合の失敗は 1 から数える。やり直しは、失敗した照合の run が最後の委譲の run で、その後に保留も J5 の run も無いときだけ行い、報告が宣言の検査を通らなくなってやり直せなければ人間対応待ちにする【仮定 #487 の実装。オーナーの決定の範囲外の細部】。成果物の種類が `pr` 以外の照合は、この区別の対象外とする（取得の失敗も「見つからない」と同じく人間対応待ち）
-- [ ] 照合で見つけた PR の base が、そのリポジトリの宣言の既定ブランチなら、課題に不可逆操作 `release`（要約は PR のタイトル、参照は PR の URL）を登録する。同じ PR の URL の `release` が既にあれば登録しない（M1 `op add`・D12）
-- [ ] 照合で見つけた PR が既定ブランチへマージ済みで、その PR の `release` が承認されていなければ、課題を人間対応待ちにし、問いに承認なしの本番反映を検出したことを書く【決定 2026-09-28 親 M3P15】
+- [ ] 照合で見つけた PR の base が、そのリポジトリの宣言の既定ブランチなら、課題に不可逆操作 `release`（要約は PR のタイトル、参照は PR の URL）を登録する。同じ PR の URL の `release` が既にあれば登録しない（M1 `op add`・D12）。`pr_urls` で見つかった宣言内の別のリポジトリの PR は、open で base がそのリポジトリの既定ブランチのときだけ登録し、マージ済みのものは登録しない
+- [ ] 照合で見つけた PR が既定ブランチへマージ済みで、その PR の `release` が承認されていなければ、課題を人間対応待ちにし、問いに承認なしの本番反映を検出したことを書く【決定 2026-09-28 親 M3P15】。保留にするのは委譲先のリポジトリの PR だけで、`pr_urls` で見つかった宣言内の別のリポジトリの PR が既定ブランチへマージ済みでも保留にせず、注記だけにする【決定 2026-11-14 オーナー（C-436 の計画 v2）。#489 の実装に仕様を合わせた】。報告の `branch` 欄の不備で結果が `invalid_output` になったときは報告を使わないので `pr_urls` は引かない（スロットの現在のブランチを head とする PR の照合は通常どおり行う。`pr_urls` だけにある PR の承認なしのマージは、再開後の報告で検出する）
 
 ### 保留と再開 [S2]
 
@@ -229,7 +231,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 ### 失敗・差し戻しの上限 [S2]
 
-- [ ] 結果が `errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` の委譲は、課題の状態を変えず、次の周で同じ `session_id` へ `--resume` して、固定の文面（中断の事実と、状態の報告を求める）で再開する
+- [ ] 結果が `errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` の委譲は、課題の状態を変えず、次の周で同じ `session_id` へ `--resume` して、固定の文面（中断の事実と、状態の報告を求める）で再開する。`invalid_output` の後の再開では、core の報告の検査で不備と判定された場合に限り、固定の文言に加えて「前の報告の不備」の区画（報告のどこが不備かの理由。子の報告の値そのものは含めない）を足す（`structured_output` が無い・null の `invalid_output` では足さない）
 - [ ] 結果が `launch_failed` の委譲は、課題の状態を変えず、次の周で失敗した起動と同じ形（新しいセッションの起動なら新しいセッション、`--resume` なら同じ宛先へ `--resume` し同じ入力を渡す）で起動し直す。`launch_failed` は下の連続失敗の数に数える【決定 2026-10-01 親 M3P40】
 - [ ] 同じ計画の版で、上の 2 項目の結果の委譲が連続して 2 回（`.flywheel/agent.json` の連続失敗の上限）に達した課題は、次の周で委譲を起動せず、人間対応待ちにする【決定 2026-09-28 親 M3P17】。上限を検出した周に、その課題を `not_started` に理由 `failure_limit` で示し、保留の問いに上限の種類と回数を書く。連続の数は、保留への回答の後の run から数え直す【決定 2026-10-01 親 M3P39】
 - [ ] 判断点 J1・J2・J5 の自動の段（`classify --auto`・`plan --auto`・`verify --auto`、`cycle` の各段）も、委譲と同じ規則で連続失敗の上限を持つ。上限は `.flywheel/agent.json` の `failure_limit`（委譲と同じ値）で、判断点ごと（J1・J2・J5 を別々に）に、課題の版ごとの連続で数える。結果が `launch_failed`・`errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` の run を失敗に数え、枠超過の run は数えず連続も切らない。上限に達した課題は、その判断点を起動せず、その周の `not_started` に理由 `failure_limit`（詳細に判断点と連続回数）で示して人間対応待ち（T11）にし、保留の問いに判断点と連続回数を書く。連続の数は最後の回答済みの保留より後の run から数え直す。課題の ID を指定した個別の操作には適用しない【決定 2026-10-21 オーナー #279】
@@ -334,6 +336,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 実装の委譲の評価額は、その計画の版の実装枠の残りの額とレビュー対応枠の残りの額の和である（レビュー対応を実装の続きとして予約する＝現行 #173）。`--max-budget-usd` に渡すのと予約額に数えるのは、実装枠の残りの額だけである [S2]
 - [ ] 計画の版の実装枠の残りの額は、承認済みの計画の実装枠の額から、その計画の版の実装の委譲の run の費用の合計を引いた額である（レビュー対応枠も同様。一方の残りを他方へ融通しない）[S2]
 - [ ] 実装枠の残りの額が 1 USD 未満の課題には委譲を起動せず、`status` の `needs_human.budget_exhausted` に出す（費用が `unknown` の失敗に続く再開 1 回を除く。上の費用の記録の項目）[S2]
+- [ ] 枠の費用の合計は、いまの計画の版の run を数える。ただし印の付いた回答（M1 §範囲が変わる回答）で計画を作り直した課題だけは、前の版の run の費用も積み上げる（前の版で使った費用を新しい計画の枠から引く。リセットしない。J2 の入力の区画「計画の作り直し」にこの積み上げの額を入れ、新しい計画の予算はこの額を含む上限として書かせる）。実装枠の打ち切り（結果が `budget_exhausted` の run が最後であることの判定）だけは、いまの計画の版の run で行い、残りの額の計算（委譲の起動・`status` の予算切れの区分）は積み上げた費用で行う
 - [ ] 予算を使い切った課題の予算を増やすのは、人間の本人確認つきの操作 `flywheel budget <C-ID> --impl-usd <額> [--review-usd <額>]` だけである。成立すると、承認の種類 `budget` の記録を残し、その計画の版の枠を指定した額へ置き換える【決定 2026-09-28 オーナー M3H3】[S2]
 - [ ] 衝突の予測の口に渡す上限額（`--max-budget-usd`）は、渡す Issue の件数 × `.flywheel/agent.json` の `conflict_prediction_budget_usd`（1 件あたり。既定 1 USD）とする（【決定 2026-10-01 親 M3P29】）[S2]
 - [ ] 衝突の予測の口の呼び出しの前に、周の既消費額 ＋ 予約額 ＋ 口に渡す上限額 ＞ 周の上限額なら、呼ばない（呼べなかったリポジトリの扱いは §実行スロット）[S2]
@@ -522,6 +525,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - **契約の run の目印**: 契約のコマンド（`start`・`status`・`resume`・`cancel`）1 回ごとの flywheel の run は、専用の `run.kind`（`contract`）で記録する（セッション ID は run の一意のための偽の値）。`kind = delegate` ではないので、委譲の履歴の規則（連続失敗の数え・`--resume` の対象選び・`delegation_failed` の発生）には入らない。コマンドの失敗は契約の run の結果（`launch_failed`・`timed_out` など）に残るだけで、課題の連続失敗には数えない。
 - **start の最中の回収（Q3）**: `start` を呼んでいる最中に、その flywheel の run が回収された場合は（呼んだプロセス自身が気付く場合と、プロセスが止まって別のプロセスが run を `interrupted` で閉じた場合の両方。後者は `PollContractRuns` の先頭〔と周から呼ぶ `HoldUnrecordedContractStops`〕が保留にし、保留にするまではその課題を実行中として数えて委譲しない）、契約の run を作らず、課題を保留（人間対応待ち）にする。問いに、flywheel が追っていない外部の run が残っているかもしれないこと（返された実行 ID があればそれも）を書いてオーナーへ知らせる。自動では委譲し直さない。`status` の最中の回収は契約の run がそのまま残るので、次の周で読み直す。
 - **start が回収以外で失敗したとき（決定 2026-11-12 オーナー）**: `start` が時間切れ・不正な出力・起動の失敗・その他のエラーで終わったときも、回収のときと同じく契約の run を作らず、課題が着手中なら保留にする。コマンドが外部の run を切り離して始めた後に失敗すると、追われていない外部の run が残ったまま 2 本目が始まり、契約の run の kind では連続失敗にも数えないため上限も無いから。問いには失敗の種類（run の結果）とその詳細、追われていない外部の run が残っているかもしれないことを書く。自動では委譲し直さない。記録と保留の間でプロセスが止まった場合も、`HoldUnrecordedContractStops` が失敗で終わった start の run（契約の run を持たないもの）を同じ問いで保留にし、それまではその課題を実行中として数える。
+- **start の run と status の run の見分け（#557）**: 契約の run は列を足さず、「その課題の、先に始まった契約の run が、その run の開始時点で終わっていなかった」ことで status の run と見分ける。直前の契約の run の終わりと同じ時刻（ミリ秒）に始まって失敗した（または回収された）run は start の run として扱い、保留にする（契約の run を終わらせるのは成功した契約のコマンドの run〔start・status・resume・cancel〕で、成功以外の run は終わらせず、保留の対象は成功以外の run だから）。
 - **自動の対象選び（Q4）**: 終わっていない契約の run がある課題は、J1（分類）・J2（計画）・J5（完了の検証）・J6（学び）の自動の対象選びと委譲の対象選びから外す。契約の run が終わる（`succeeded`・`failed`・`cancelled`）か中止されたら対象に戻る（`failed`・`cancelled` は下のとおり保留にするため、回答するまで着手中には戻らない）。
 - **`failed`・`cancelled` の写し**: 契約が `failed` を返しても、課題を自動で失敗にしない。課題が着手中なら保留にし、契約の `summary` を問いに写してオーナーへ見せる。理由は、存在しない run の状態を読んでも `failed` が返る接続ツールがあり（実測）、状態の置き場の設定の違いと本当の失敗を見分けられないため。`cancelled` も同じく保留にして知らせる。どちらも自動では委譲し直さない。保留は理由の発生（`occurrence`）を作らない。
 - **1 つの課題に保留にすべき契約の run が複数あるとき（未決 a）**: 問いは 1 件になる（まとめる・分けるの規則を新たに持たない）。既存の保留の仕組みで決まる: 契約の `start` は課題が着手中で終わっていない契約の run が無いときだけ記録する（`beginContractRun`）ので、着手中の課題が同時に持つ終わっていない契約の run は 1 つ。保留は課題が着手中のときだけ作り（`holdReclaimedContractStart`）、作ると課題は人間対応待ちになるので、同じ課題の 2 件目の保留は作られない（取りこぼしの掃引〔`reclaimedContractStartWhere`・`unheldContractStopWhere`〕も着手中の課題だけを見る）。
@@ -694,17 +698,18 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 | J3 | `{"brief": string}` |
 | J4 | `{"decisions": [{"question_index": int, "decision": "answer\|escalate", "answer": string\|null}]}` |
 | J5 | `{"verdict": "met\|not_met\|uncertain", "reason": string, "feedback": string\|null, "question": string\|null, "deferred_conditions": [{"condition": string, "status": "after_release\|after_human_action"}]\|null}`（`deferred_conditions` は任意。規則は表の下の「J5 の `deferred_conditions`」。M4 S4 で `actual` を足す＝m4-ui-server.md §IF / API「判断点の出力に足すもの（S4）」） |
-| 委譲の報告 | `{"outcome": "completed\|questions\|blocked", "summary": string, "branch": string\|null, "pr_urls": [string], "commits": [string], "quality_gate": string\|null, "assumptions": [string], "unverified": [string], "questions": [{"kind": string, "text": string, "options": [string], "recommendation": string\|null}]}`（`kind` の閉集合は §J3 のとおり、宣言から run ごとに生成する） |
+| 委譲の報告 | `{"outcome": "completed\|questions\|blocked", "summary": string, "branch": string\|null（ブランチ名だけ。git のブランチ名として成り立たない値は `invalid_output`。正は core の再検査 `plausibleBranchName`、スキーマの `branchFieldPattern` は子への手がかり）, "pr_urls": [string], "commits": [string], "quality_gate": string\|null, "assumptions": [string], "unverified": [string], "questions": [{"kind": string, "text": string, "options": [string], "recommendation": string\|null}]}`（`kind` の閉集合は §J3 のとおり、宣言から run ごとに生成する） |
 
 J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/judgment_j5.go` の `j5OutputSchema`・`validateJ5DeferredConditions`・`applyJ5Once`・`j5Operation`・`finalizeJ5Output`、区分の閉集合は `internal/core/judgment_output.go` の `J5ConditionStatusValues`）:
 
 - **任意の項目**。省略・`null`・空の配列は「区分を付けた条件が無い」として扱い、従来どおりに写す。要素は `{"condition": string, "status": "after_release" | "after_human_action"}` で、両方を要し、ほかのキーを持たない。要素は 20 個まで、`condition` は前後の空白を除いて空でなく 2,000 文字以内。外れれば `invalid_output`。
 - `status` の意味: `after_release`＝承認の後の本番反映そのもので満たされる見込みの条件。`after_human_action`＝人の操作の後でしか満たせない条件。
 - `verdict` は、`deferred_conditions` に挙げた条件を除いた残りの条件で決める。core は条件の文面を解釈せず、`verdict` と `status` の区分だけを見て次のとおり振り分ける。
-  - `verdict` が `met` で、`after_human_action` が 1 つも無い（`after_release` だけ、または区分が無い）: 従来の `met` と同じく T8 で完了確認待ちへ進める。`after_release` の条件は T8 の作業ログの `after` に `conditions_after_release`（文字列の配列）として残す。
+  - `verdict` が `met` で、`after_human_action` が 1 つも無く、かつ `after_release` が無い、または課題に待っている本番反映（未承認の `release`）がある: 従来の `met` と同じく T8 で完了確認待ちへ進める。`after_release` の条件は T8 の作業ログの `after` に `conditions_after_release`（文字列の配列）として残す。
   - `verdict` が `met` で、`after_human_action` が 1 つでもある: 完了確認待ちへ進めず、着手中にも戻さない（子を再起動しない）。T10 で人間対応待ちにし、保留の問いは固定の前置き（`J5HumanActionHoldPreamble`）に続けて `after_human_action` の条件を 1 行ずつ並べたものにする。実物は課題に書かず、発生も作らない（失敗ではない）。run の判定の記録は `uncertain` になる。回答（T12）で検証中へ戻り、J5 をやり直す。実物の個数が予想と合わない保留（M4H44）と重なれば、1 つの保留の問いに両方を書く。
+  - `verdict` が `met` で、`after_release` の条件が残り、課題に待っている本番反映（未承認の `release`）が無い（#496・#466）: 完了確認待ちへ進めず、T10 で人間対応待ちにする。保留の問いは固定の前置き（`J5NoReleaseHoldPreamble`）に続けて `after_release` の条件を 1 行ずつ並べたもので、回答の選択肢は「マージ済み」「PR が無い」「条件が不要」。回答（T12）で検証中へ戻り、J5 をやり直す。`after_human_action` の保留と重なるときは、1 つの問いに両方を書く（`deferredHoldQuestion`）。run の判定の記録は `uncertain` と同じ扱い。正本は `judgment_j5.go` の `checksPendingRelease`・`holdsForNoRelease`・`heldByDeferred`。
   - `verdict` が `not_met`・`uncertain`: `deferred_conditions` は振り分けに使わず、従来どおり `not_met` は T9 で着手中、`uncertain` は T10 で人間対応待ちにする。
-- 承認の要約への表示: 完了の承認（`approve`・`reject` の `<C-ID>`）の確認の要約に、最新の T8 の作業ログの `conditions_after_release` を出す（`internal/cli/approval.go` の `writeConditionsAfterRelease`）。その操作で本番反映（`release`）が 1 つ以上承認されるときは見出し「承認で本番反映されると満たされる条件:」、承認されないとき（`--hold-release`・差し戻し・`release` が無い等）は「満たされないまま残る」ことを示す見出しで出す。現状は CLI の要約だけで、API（`internal/view`）・UI には出さない。
+- 承認の要約への表示: 完了の承認（`approve`・`reject` の `<C-ID>`）の確認の要約に、最新の T8 の作業ログの `conditions_after_release` を出す（`internal/cli/approval.go` の `writeConditionsAfterRelease`）。その操作で本番反映（`release`）が 1 つ以上承認されるときは見出し「承認で本番反映されると満たされる条件:」、承認されないとき（`--hold-release`・差し戻し・`release` が無い等）は「満たされないまま残る」ことを示す見出しで出す。出し先は 3 つ: CLI（`writeConditionsAfterRelease`）、API（`internal/view/approval.go` の `ApprovalSummary.ConditionsAfterRelease`・`ConditionsAfterReleaseHeading`。JSON のキーは `conditions_after_release`・`conditions_after_release_heading`）、UI（承認カード）。見出しの文言の正本は `view.ConditionsAfterReleaseHeading(releasing bool)` 1 か所で、CLI と API が同じものを使う。UI の承認は本番反映を承認しない側（`ReleaseHeld`）なので、「満たされないまま残る」側の見出しになる。
 
 #### CLI
 
@@ -1146,6 +1151,8 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] 同じ PR を 2 回の照合で見つけても、その PR の URL の `release` は 1 件だけである
 - [ ] 照合で見つけた PR の base が既定ブランチでなければ（例: 統合ブランチ）、`release` は登録されない
 - [ ] 照合で見つけた PR が既定ブランチへマージ済みで、その PR の `release` が未承認なら、課題が人間対応待ちになり、保留の問いが承認なしの本番反映を検出したことを含む
+- [ ] 成果物の種類 `pr` の完了で、報告の `pr_urls` に宣言内の別のリポジトリの PR があれば、その PR も成果物として記録される。その PR が既定ブランチへマージ済みでも保留にならず、注記だけが残る【決定 2026-11-14 オーナー（C-436 の計画 v2）】
+- [ ] 報告の `branch` 欄がブランチ名でない値（空白・制御文字などを含む）なら、結果が `invalid_output` になり `pr_urls` は引かれない。次の再開の標準入力は「前の報告の不備」の区画を含む
 - [ ] 照合で見つけた PR が既定ブランチへマージ済みでも、その PR の `release` が承認済みなら、この規則では人間対応待ちにならない
 
 ### 保留と再開（S2）
@@ -1165,7 +1172,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 ### 失敗・差し戻しの上限（S2）
 
 - [ ] 委譲の run の結果が `launch_failed`・`errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` のとき、課題の状態と版が変わらない（6 つのそれぞれで検証する）
-- [ ] 結果が `errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` の委譲の後、次の周の委譲は、引数に `--resume <同じ session_id>` を持ち、標準入力が中断の事実と状態の報告を求める埋め込みの固定の文面を含む
+- [ ] 結果が `errored`・`malformed`・`invalid_output`・`timed_out`・`interrupted` の委譲の後、次の周の委譲は、引数に `--resume <同じ session_id>` を持ち、標準入力が中断の事実と状態の報告を求める埋め込みの固定の文面を含み、`invalid_output` の後の再開ではさらに「前の報告の不備」の区画を含む
 - [ ] 新しいセッションの委譲の結果が `launch_failed` だった課題の次の周の委譲は、新しい `--session-id` で起動され、`--resume` を持たない【決定 2026-10-01 親 M3P40】
 - [ ] `--resume` の委譲（回答を渡す再開を含む）の結果が `launch_failed` だった課題の次の周の委譲は、同じ宛先の `session_id` へ `--resume` し、同じ回答・固定の文面を渡す【決定 2026-10-01 親 M3P40】
 - [ ] `failure_limit` が 2 のとき、同じ計画の版で結果 `launch_failed` の委譲が連続して 2 回あった課題は、次の周で委譲が起動されず、人間対応待ちになる（`launch_failed` を連続失敗に数えることの検証）【決定 2026-10-01 親 M3P40】

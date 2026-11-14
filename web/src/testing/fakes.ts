@@ -33,6 +33,7 @@ export class FakeEventSource {
 const emptyStatus = {
   actionable: { challenges: [] },
   approved: { operations: [] },
+  binary_commit: "unknown",
   needs_human: {
     budget_exhausted: [],
     challenges: [],

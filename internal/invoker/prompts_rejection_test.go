@@ -60,3 +60,15 @@ func TestInstructions_J3DoesNotCopyTheRejectionSectionIntoTheBrief(t *testing.T)
 		t.Errorf("Instructions(J3) lacks the ban on copying the whole rejection section")
 	}
 }
+
+func TestInstructions_J2DescribesThePlanRejectionSection(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"「" + core.PlanRejectionsSectionLabel + "」", "満たすべき条件", "後のものに従う"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J2) lacks %q", want)
+		}
+	}
+}

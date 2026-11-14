@@ -79,7 +79,7 @@ M1 の遷移表（**この表に無い遷移はすべて拒否する**）。M1 �
 | T9 | 検証中 | `verify --result not_met` | 着手中 | — |
 | T10 | 検証中 | `verify --result uncertain --question` | 人間対応待ち | — |
 | T11 | 未分類・分類済・着手中・検証中 | `hold --question` | 人間対応待ち | — |
-| T12 | 人間対応待ち | `answer --answer` | 保留に入る直前の状態（T15 が親が直接した完了の差し戻しで立てた保留は、その完了が閉じた保留の直前の状態。#481） | 要【決定 2026-09-21 H8（オーナー）】 |
+| T12 | 人間対応待ち | `answer --answer` | 保留に入る直前の状態（T15 が親が直接した完了の差し戻しで立てた保留は、その完了が閉じた保留の直前の状態。#481） | 要【決定 2026-09-21 H8（オーナー）】。回答に `--replan`（範囲が変わる印）を付けたときの戻り先は §範囲が変わる回答 |
 | T13 | 完了確認待ち | `approve` | 完了（＋未承認の本番反映を承認） | 要 |
 | T14 | 完了確認待ち | `approve --hold-release` | 完了（本番反映は未承認のまま） | 要 |
 | T15 | 完了確認待ち | `reject --reason` | 着手中。ただし、その完了確認待ちが T17 で入ったもの（`challenge.completion_direct` が真）なら人間対応待ち（「親が直接やる」保留を新しく立てて戻す）【決定 2026-11 オーナー（#481 の Q1〜Q4）】 | 要 |
@@ -98,6 +98,18 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 - [ ] 同じ課題への変更が並行しても、変更は 1 つずつ順に適用され、失われない。後から適用される変更は、先の変更を反映した最新の状態に対して遷移表と入力規則で検査される（先の変更で遷移元の状態でなくなっていれば `invalid_transition`）【決定 2026-09-21 PD7（親）】
 - [ ] `conflict` は本人確認つきの操作だけが返す。要約を表示した時点の版と、確認後に書き込む時点の版が違うときである（§クリティカル設計決定 2）【決定 2026-09-21 PD7（親）】
 - [ ] 優先度は `P0 | P1 | P2` の閉集合（現行台帳と同じ）
+
+#### 範囲が変わる回答（`answer --replan`。flywheel#558）
+
+保留への回答で、方針・範囲・達成条件が変わることがある。承認済みの計画を残したまま委譲を再開すると、計画と回答が食い違い、完了の検証（J5）が古い達成条件と成果物の食い違いで判定できなくなる。回答に「範囲が変わる」印（`flywheel answer <ID> --answer <a> --replan`。`--relayed` と併用できる）を付けると、委譲を再開せず、計画を作り直す。
+
+- [ ] 印の付いた回答は、遷移表の T12 の行（行は 1 つのまま）の別の戻り先 `IfReplan`（T15 の `IfCompletionDirect` と同じ書き方）で、保留に入る直前の状態ではなく**分類済**へ戻す。成立するのは、保留に入る直前の状態が着手中・検証中（承認済みの計画に基づく作業の途中）のときだけ。それ以外は `validation_failed`（CLI は端末を開く前に `validation_failed`）で、何も書かない
+- [ ] 印は保留の `replan` 列（スキーマ版 22。回答のあった保留に 1、既存の行と印の無い回答は 0）と、作業ログの `answer` の `after.replan`（`true`）に残る
+- [ ] 分類済へ戻った課題は、計画を作る判断点（J2）の対象になる（M3 §J2 計画）。J2 の入力に、印の付いた回答の問いと文・前の計画の本文が入る（回答より後に作られた計画がある＝作り直した計画を差し戻された後は入らない）。作り直した計画は、初回の計画と同じく**いつも計画承認待ちへ進み**、自動では承認しない
+- [ ] 作り直した計画の承認の後の委譲は、前の計画の委譲が作った接続先の成果物（変更の提案・作業ブランチ。`run_artifact`）を引き継ぎ、同じ成果物を新しい計画の達成条件に合わせて直す（M3 §J3 ブリーフと委譲の起動）。使った費用は計画の版をまたいで積み上がり、新しい計画の予算から引く（リセットしない）。J2 の入力の区画「計画の作り直し」には、前の計画の版までに使った枠ごとの費用（積み上げの対象の額）と、新しい計画の予算はこの額を含む上限として書く旨が入る
+- [ ] 契約の run（form: cli）が終わっていない・保留の間の成功が未処理の課題には、印を付けられない（`validation_failed`。前の計画の run が回答で再開される・検証中へ進むのを防ぐ）
+- [ ] 印の無い回答の動き（保留に入る直前の状態へ戻り、委譲は保留の原因の run のセッションを再開する）は変えない
+- 保留が着手中・検証中の外の状態から出たもの（未分類・分類済）に印は付けられない。分類済へ戻る回答は、もともと次の J2 が保留の記録を読むため、印を要さない
 
 #### 親が直接行った作業の完了（T17。#452）
 
@@ -316,7 +328,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 ##### `status`（#14 で追加。`discrepancies` は #58 で追加）
 
-`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}, "waiting_external": {"challenges": [...]}, "parent_agent": {"challenges": [...]}}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約。`waiting_external` は M3 が、`parent_agent` は #452 が足した）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
+`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}, "waiting_external": {"challenges": [...]}, "parent_agent": {"challenges": [...]}, "binary_commit": "..."}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約。`waiting_external` は M3 が、`parent_agent` は #452 が、区分ではない `binary_commit`〔動いているバイナリのコミット〕は #593 が足した）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
 
 | フィールド | 型 | 内容 |
 |---|---|---|
@@ -332,6 +344,21 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 | `discrepancy`（`needs_human.discrepancies` の要素。1 列目は照合テストが読む要素の名前） | `{"challenge_id", "kinds"}`（`kinds` は `upstream_closed`・`upstream_missing`・`out_of_policy`・`upstream_commented`・`upstream_updated` の空でない部分集合。この列挙の順。`upstream_commented`・`upstream_updated` は #72〔上流の更新の観測と既読〕が追加） |
 
 完了（`done`）の課題と差し戻し済み（`state=rejected`）の不可逆操作はどの一覧にも含めない。各一覧は `id` 昇順（`discrepancies` は `challenge_id` の昇順）。
+
+##### `version`（#593 で追加）
+
+ビルド情報が無いとき（`runtime/debug.ReadBuildInfo` が失敗する・vcs の設定が無い）の `commit`・`time` は文字列 `"unknown"`（`modified` は `false`）。
+
+| フィールド | 型 | 内容 |
+|---|---|---|
+| `commit` | string | ビルドのコミット。無ければ `"unknown"` |
+| `time` | string | コミットの時刻。無ければ `"unknown"` |
+| `modified` | boolean | 未コミットの変更つきのビルドか |
+| `schema_version` | number | ストアのスキーマの版 |
+
+テキスト表示は `commit:`（未コミットの変更つきは `+dirty` を付ける）・`time:`・`modified:`（`true` / `false`）・`schema_version:` の 4 行。
+
+`status --json` の最上位にも `binary_commit`（string。動いているバイナリのコミットで、テキスト表示の先頭の行と同じ値＝未コミットの変更つきは `+dirty` 付き。ビルド情報が無ければ `"unknown"`）を置く（#593。API の `GET …/status` も同じ形）。
 
 ##### `ingest`（#54 で追加。取得・作成・更新の結線は #59）
 
@@ -489,12 +516,13 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel verify <C-ID> --result <met\|not_met\|uncertain> [--question <q>]` | T8〜T10 | — |
 | `flywheel hold <C-ID> --question <q> [--kind <human\|parent_direct>]` | T11 | — |
 | `flywheel complete-direct <C-ID> --artifact <参照>... [--note <s>]` | T17 | — |
-| `flywheel answer <C-ID> --answer <a>` | T12 | 要 |
+| `flywheel answer <C-ID> --answer <a> [--replan]` | T12 | 要 |
 | `flywheel approve <C-ID> [--hold-release]` | T5・T13・T14 | 要 |
 | `flywheel reject <C-ID> --reason <r>` | T6・T15 | 要 |
 | `flywheel op add <C-ID> --kind <release\|delete\|external_send\|other> --summary <s> [--ref <r>]` | 不可逆操作の登録 | — |
 | `flywheel approve <OP-ID>` / `flywheel reject <OP-ID> --reason <r>` | 不可逆操作の単独の承認・差し戻し | 要 |
-| `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作 | — |
+| `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す（`--json` では `binary_commit`） | — |
+| `flywheel version` | 動いているバイナリのビルドのコミット（`vcs.revision`・`vcs.time`・`vcs.modified`）と、そのバイナリが扱うストアのスキーマの版。読み取りだけで、ストアを開かず（`store_too_new` でも動く）、ネットワークにも Git にも触れない。未コミットの変更つきのビルドは commit の表示に `+dirty` を付ける | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |
 | `flywheel ingest [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・冪等な作成と更新・上流の close の検出（#59） | — |
 | `flywheel mark-read <C-ID>` | 上流を読んだ記録を付ける（読んだ時点の値を現在の観測値で上書きする。上流は取り直さない。docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読） | — |
@@ -599,6 +627,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] 問いの文が空の `hold` は、終了コード 1・`validation_failed` で終わり、状態が変わらない
 - [ ] 問いの文が空の `verify --result uncertain` は、終了コード 1・`validation_failed` で終わり、状態が変わらない
 - [ ] 検証中から保留に入った課題に `answer` を行うと、状態が検証中に戻る（T12 の戻り先が「保留に入る直前の状態」であることの検証。着手中・未分類・分類済から入った場合も同様に列挙する）
+- [ ] 着手中の保留に `answer --replan` を行うと、状態が分類済になり、保留の `replan` が真になる。`--replan` の無い `answer` は着手中に戻る。保留が分類済から入ったものへの `answer --replan` は、終了コード 1・`validation_failed` で終わり、状態と作業ログが変わらない（`flywheel help` の `answer` に `--replan` の使い方が載る）
 - [ ] 回答済みの保留の後に同じ課題が再び人間対応待ちに入ると、`show` が示す現在の保留は未回答であり、以前の回答は以前の保留の記録にだけ残る
 - [ ] 計画承認待ちの課題に `plan` を再度行うと、計画の版が 1 増え、以前の版の本文も `show` で読める
 - [ ] 検証中の同じ課題に `verify --result met` と `hold --question <q>` を並行して実行すると、一方だけが成功し、他方は終了コード 1・`invalid_transition` で終わり、課題には成功した側の結果だけが反映される（両方の実行順を検証する）【決定 2026-09-22 H11（オーナー）】

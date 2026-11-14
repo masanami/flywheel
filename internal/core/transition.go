@@ -50,6 +50,10 @@ type TransitionTarget struct {
 	// 値は遷移のたびに runTransition が書き（T17 で真・ほかで偽）、Resolve は読まない（既存の呼び出し元が見る遷移先は
 	// Fixed のまま）。真偽を渡して引くのは ResolveForCompletionDirect。
 	IfCompletionDirect Status
+	// IfReplan は、回答に「範囲が変わる」印が付いたとき（runTransitionParams.replan）の遷移先。ゼロ値なら無い。
+	// T12（answer）だけが持ち、保留に入る直前の状態へ戻さず、計画を作り直す分類済へ戻す。印の付いた回答は
+	// 保留の直前の状態が着手中・検証中（承認済みの計画に基づく作業の途中）のときだけ成立する（ResolveForReplan）。
+	IfReplan Status
 }
 
 // Resolve は遷移先を確定する。固定遷移先の行では preceding を無視して Fixed を返す。
@@ -83,6 +87,27 @@ func (tt TransitionTarget) ResolveForCompletionDirect(table []Transition, preced
 	return tt.Resolve(table, preceding)
 }
 
+// replanSources は、印の付いた回答（IfReplan）が成立する保留の直前の状態。承認済みの計画があり、作り直す
+// 対象がある状態に限る。
+var replanSources = []Status{StatusInProgress, StatusVerifying}
+
+// ResolveForReplan は印の付いた回答の遷移先を確定する。IfReplan を持たない行・preceding が Resolve の検査に
+// 通らない、または replanSources に無いときは、エラーを返す（呼び出し元は ErrValidation に写す）。
+func (tt TransitionTarget) ResolveForReplan(table []Transition, preceding Status) (Status, error) {
+	if tt.IfReplan == NoStatus {
+		return "", fmt.Errorf("core: this transition has no replan target")
+	}
+	if _, err := tt.Resolve(table, preceding); err != nil {
+		return "", err
+	}
+	for _, s := range replanSources {
+		if s == preceding {
+			return tt.IfReplan, nil
+		}
+	}
+	return "", fmt.Errorf("core: replan is not allowed for a hold raised from %q", preceding)
+}
+
 // Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T18）を指す。
 // T11 は遷移元が4つあるため、物理的には ID="T11" の行が4つ存在する。
 type Transition struct {
@@ -114,7 +139,7 @@ var Table = []Transition{
 	{ID: "T11", From: StatusClassified, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
 	{ID: "T11", From: StatusInProgress, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
 	{ID: "T11", From: StatusVerifying, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
-	{ID: "T12", From: StatusAwaitingHuman, Op: OpAnswer, Target: TransitionTarget{ReturnToPrecedingHoldStatus: true}, RequiresVerification: true},
+	{ID: "T12", From: StatusAwaitingHuman, Op: OpAnswer, Target: TransitionTarget{ReturnToPrecedingHoldStatus: true, IfReplan: StatusClassified}, RequiresVerification: true},
 	{ID: "T13", From: StatusAwaitingCompletionApproval, Op: OpApprove, Target: TransitionTarget{Fixed: StatusDone}, RequiresVerification: true},
 	{ID: "T14", From: StatusAwaitingCompletionApproval, Op: OpApproveHoldRelease, Target: TransitionTarget{Fixed: StatusDone}, RequiresVerification: true},
 	// T15: 完了の差し戻し。着手中へ戻す。ただし、いまの完了確認待ちが親が直接行った完了（T17）で入ったもの

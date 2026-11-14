@@ -651,12 +651,26 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	var holds []Hold
 	var sb *sourceBinding
 	var issuesAnswer *string
+	var replan *replanNote
+	var planRejections []CompletionRejection
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		prs, err := loadPlanRejections(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		planRejections = prs
 		hs, err := loadHolds(ctx, tx, cid)
 		if err != nil {
 			return err
 		}
 		holds = hs
+		if replan, err = loadReplanNote(ctx, tx, cid); err != nil {
+			return err
+		}
+		// 回答より後に作られた計画がある（作り直した計画を差し戻された）ときは、古い回答を最新の指示として渡さない。
+		if replan != nil && replan.PlanCreatedAt > replan.AnsweredAt {
+			replan = nil
+		}
 		if len(ch.Issues) > 0 {
 			a, err := loadIssuesAnswer(ctx, tx, cid, ch.IssuesHoldID)
 			if err != nil {
@@ -716,6 +730,12 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	}
 	if holdsText := formatHoldsSection(holds); holdsText != "" {
 		sections = append(sections, JudgmentDataSection{Label: labelHoldRecord, Content: holdsText})
+	}
+	if t := formatPlanRejectionsSection(planRejections); t != "" {
+		sections = append(sections, JudgmentDataSection{Label: PlanRejectionsSectionLabel, Content: t})
+	}
+	if replan != nil {
+		sections = append(sections, JudgmentDataSection{Label: labelJ2Replan, Content: formatReplanSection(replan)})
 	}
 	if len(ch.Issues) > 0 {
 		sections = append(sections, JudgmentDataSection{Label: "論点と回答", Content: formatIssuesSection(ch.Issues, issuesAnswer)})

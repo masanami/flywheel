@@ -248,6 +248,24 @@ test.describe("広い画面（1440px）: 説明の文が長い親の見出し", 
     await page.keyboard.press("Enter");
     await expect(edge).toHaveAttribute("aria-pressed", "true");
     await expect(graph.locator(".graph-edge-label")).not.toHaveCount(0);
+    // 見出しの欄の下の帯（HEAD_GAP）を押しても、その親が選ばれる（線のある所を避けた帯の左端寄り）
+    const gap = await graph.locator('[data-group-gap="C-31"]').boundingBox();
+    if (!gap) throw new Error("帯が無い");
+    const gapX = gap.x + 6;
+    const gapY = gap.y + gap.height / 2;
+    const hitClass = await page.evaluate(
+      ([x, y]) =>
+        document
+          .elementFromPoint(x as number, y as number)
+          ?.getAttribute("class"),
+      [gapX, gapY],
+    );
+    expect(hitClass).toBe("graph-group-head-gap");
+    await page.mouse.click(gapX, gapY);
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.getByRole("dialog")).toContainText("C-31");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     // 見出しはキーボードで押せて、詳細が開く
     await head.focus();
     await page.keyboard.press("Enter");

@@ -310,3 +310,55 @@ func TestRelayed_RejectLogAfterCarriesEvidence(t *testing.T) {
 		t.Fatalf("no reject log after carries relay_session/relay_quote: %s", relayedLog(t, ws))
 	}
 }
+
+// answer --replan は、着手中の保留への回答を、委譲に戻さず分類済（計画の作り直し）へ戻す。
+// 印の無い回答は着手中へ戻る。保留が着手中・検証中から出たものでなければ validation_failed で、何も書かない。
+func TestRelayed_AnswerReplanReturnsToClassified(t *testing.T) {
+	rel := []string{"--relayed", "--session", "s", "--quote", "範囲を変える"}
+	held := func(t *testing.T, ws string) string {
+		id := planPendingChallenge(t, ws)
+		runJSON(t, ws, append([]string{"approve", id}, rel...)...)
+		runJSON(t, ws, "hold", id, "--question", "どうするか")
+		return id
+	}
+
+	t.Run("replan", func(t *testing.T) {
+		ws := initializedWorkspace(t)
+		id := held(t, ws)
+		out := runJSON(t, ws, append([]string{"answer", id, "--answer", "方針を変える", "--replan"}, rel...)...)
+		if got := workStatus(t, ws, id); got != "classified" {
+			t.Errorf("status = %q, want classified", got)
+		}
+		if h := out["hold"].(map[string]any); h["answer"] != "方針を変える" {
+			t.Errorf("hold = %v", h)
+		}
+	})
+	t.Run("without the mark", func(t *testing.T) {
+		ws := initializedWorkspace(t)
+		id := held(t, ws)
+		runJSON(t, ws, append([]string{"answer", id, "--answer", "そのまま続ける"}, rel...)...)
+		if got := workStatus(t, ws, id); got != "in_progress" {
+			t.Errorf("status = %q, want in_progress", got)
+		}
+	})
+	t.Run("hold raised before work started", func(t *testing.T) {
+		ws := initializedWorkspace(t)
+		id := planPendingChallenge(t, ws)
+		runJSON(t, ws, append([]string{"reject", id, "--reason", "r"}, rel...)...)
+		runJSON(t, ws, "hold", id, "--question", "q")
+		requireErrorCode(t, append([]string{"answer", id, "--answer", "a", "--replan", "--workspace", ws}, rel...), 1, CodeValidationFailed)
+		if got := workStatus(t, ws, id); got != "awaiting_human" {
+			t.Errorf("status = %q, want awaiting_human (nothing written)", got)
+		}
+	})
+}
+
+func TestAnswerSummaryText_ReplanShowsTheMark(t *testing.T) {
+	p := &core.AnswerPreview{ChallengeID: "C-1", Title: "t", Question: "q", Answer: "a"}
+	if strings.Contains(answerSummaryText(p, false), "範囲が変わる") {
+		t.Errorf("summary without the mark mentions it")
+	}
+	if !strings.Contains(answerSummaryText(p, true), "範囲が変わる") {
+		t.Errorf("summary with the mark does not show it")
+	}
+}

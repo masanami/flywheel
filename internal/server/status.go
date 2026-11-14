@@ -154,5 +154,10 @@ func statusOverview(ctx context.Context, fleet *Fleet, name string, checks *chec
 		return nil, err
 	}
 	ov.WaitingExternal = core.ResolveWaitingExternal(ctx, cands, checks.checkSource())
+	// 動いているバイナリのコミット（`flywheel status --json` と同じ値。Issue #593）。読めなければ空のまま
+	// で、view が "unknown" にする。
+	if v, err := core.ReadVersion(); err == nil {
+		ov.BinaryCommit = v.CommitLabel()
+	}
 	return ov, nil
 }

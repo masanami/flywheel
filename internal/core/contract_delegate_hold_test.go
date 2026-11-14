@@ -743,3 +743,63 @@ func TestPollContractRuns_ValidatesTheIDBeforeTheSweep(t *testing.T) {
 		t.Fatalf("status = %s, want in_progress（不正な ID では掃引しない）", got)
 	}
 }
+
+// 直前の契約の run の終わりと同じ時刻（ミリ秒）に start が失敗した（または回収された）場合も、status の run と
+// 取り違えず保留にする。成功以外の run は契約の run を終わらせないので、終わりと同時刻の run は start の run である。
+// 境界の反対側（終わりより 1 ms 前に始まった＝その時点で直前の契約の run が終わっていなかった）は status の run として扱い、
+// 保留にしない。時刻はすべて注入した値で固定する。
+func TestHoldUnrecordedContractStops_StartAtSameInstantAsPreviousRunEnd(t *testing.T) {
+	const prevStart = "2025-12-31T23:59:59.000Z"
+	const prevEnd = "2026-01-01T00:00:00.000Z"
+	cases := []struct {
+		name         string
+		startedAt    string
+		result       RunResult
+		wantHeld     int
+		wantQuestion string
+	}{
+		{"timed_out_at_same_instant", prevEnd, RunResultTimedOut, 1, contractStartFailedQuestion(RunResultTimedOut, "timed out", "", "")},
+		{"interrupted_at_same_instant", prevEnd, RunResultInterrupted, 1, contractReclaimedQuestion("", "")},
+		{"timed_out_1ms_before_end", "2025-12-31T23:59:59.999Z", RunResultTimedOut, 0, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newContractFixture(t)
+			prev := f.insertRow(t, `INSERT INTO run (challenge_id, kind, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket)
+				VALUES (?, 'contract', 1, 's0', 1, 'h', ?, ?, ?, 'succeeded', 1000000, 'impl')`, 1, prevStart, prevStart, prevEnd)
+			f.insertRow(t, `INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, max_budget_usd, started_at, observed_at, ended_at)
+				VALUES (?, 'tool', 'ext-prev', ?, 'succeeded', 's', 1000000, ?, ?, ?)`, 1, prev, prevStart, prevEnd, prevEnd)
+			// 直前の契約の run は成功で終わっていて（保留の掃引の対象外）、課題は着手中のまま次の契約のコマンドの run が失敗した場合を想定する。
+			f.insertRow(t, `INSERT INTO run (challenge_id, kind, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, error, max_budget_usd, budget_bucket)
+				VALUES (?, 'contract', 1, 's1', 1, 'h', ?, ?, ?, ?, 'timed out', 1000000, 'impl')`, 1, tc.startedAt, tc.startedAt, prevEnd, string(tc.result))
+			n, err := f.s.HoldUnrecordedContractStops(context.Background())
+			if err != nil || n != tc.wantHeld {
+				t.Fatalf("held = %d, err = %v, want %d", n, err, tc.wantHeld)
+			}
+			d := f.detail(t, f.cid)
+			if tc.wantHeld == 0 {
+				if d.Status != StatusInProgress || len(d.Holds) != 0 {
+					t.Fatalf("status=%s holds=%+v, want in_progress without holds（status の run として扱う）", d.Status, d.Holds)
+				}
+				return
+			}
+			if d.Status != StatusAwaitingHuman || len(d.Holds) != 1 || d.Holds[0].Question != tc.wantQuestion {
+				t.Fatalf("status=%s holds=%+v, want awaiting_human with question %q", d.Status, d.Holds, tc.wantQuestion)
+			}
+		})
+	}
+}
+
+// insertRow は INSERT を実行し、挿入した行の ID を返す。
+func (f *contractFixture) insertRow(t *testing.T, q string, args ...any) int64 {
+	t.Helper()
+	res, err := f.exec(q, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}

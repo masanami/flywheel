@@ -227,7 +227,7 @@ func TestApprovalSummaryText_TitleAndOperationSummaryCannotForgeLines(t *testing
 	if strings.ContainsAny(ops, "\r\x1b\u2028") || strings.Count(ops, "\n") != 7 {
 		t.Errorf("operation summary has raw control: %q", ops)
 	}
-	ans := answerSummaryText(&core.AnswerPreview{ChallengeID: "C-1", Title: evil, Question: "q", Answer: "a"})
+	ans := answerSummaryText(&core.AnswerPreview{ChallengeID: "C-1", Title: evil, Question: "q", Answer: "a"}, false)
 	if strings.ContainsAny(ans, "\r\x1b\u2028") || !strings.Contains(ans, `タイトル: x\n承認`) || strings.Count(ans, "\n") != 4 {
 		t.Errorf("answer summary title: %q", ans)
 	}

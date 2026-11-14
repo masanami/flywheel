@@ -79,6 +79,9 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	"init": {uninitialized: true, setup: func(_ *testing.T, _ string) []string {
 		return []string{"init"}
 	}},
+	"version": {setup: func(_ *testing.T, _ string) []string {
+		return []string{"version"}
+	}},
 	"create": {setup: func(_ *testing.T, _ string) []string {
 		return []string{"create", "--title", "t"}
 	}},

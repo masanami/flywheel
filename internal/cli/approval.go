@@ -250,10 +250,12 @@ func runRejectChallenge(a Args, verifier core.Verifier, id string, reason string
 	}, nil
 }
 
-// runAnswer は `flywheel answer <ID> --answer <a>` の実装（T12）。
+// runAnswer は `flywheel answer <ID> --answer <a> [--replan]` の実装（T12）。--replan は回答に
+// 「範囲が変わる」印を付け、委譲を再開せず計画の作り直しへ戻す（遷移・成立条件は core が持つ）。
 func runAnswer(a Args) (any, error) {
 	id := a.Positional[0]
 	answer := a.Values["answer"]
+	replan := a.Bools["replan"]
 
 	verifier, err := verifierFor(a)
 	if err != nil {
@@ -264,7 +266,10 @@ func runAnswer(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	summary := answerSummaryText(preview)
+	if replan && !core.ReplanAllowedFrom(preview.FromStatus) {
+		return nil, NewError(CodeValidationFailed, "--replan は、保留の直前の状態が着手中・検証中（承認済みの計画に基づく作業の途中）の課題にだけ付けられます")
+	}
+	summary := answerSummaryText(preview, replan)
 	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -274,6 +279,7 @@ func runAnswer(a Args) (any, error) {
 		ChallengeID:     id,
 		ExpectedVersion: preview.Version,
 		Answer:          answer,
+		Replan:          replan,
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -530,12 +536,15 @@ func operationApprovalSummaryText(p *core.OperationApprovalPreview, reason *stri
 
 // answerSummaryText は answer が確認前に /dev/tty へ表示する要約
 // （AC-42: 課題の ID・タイトルと、問い・入力された回答）。
-func answerSummaryText(p *core.AnswerPreview) string {
+func answerSummaryText(p *core.AnswerPreview, replan bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "課題 ID:  %s\n", p.ChallengeID)
 	fmt.Fprintf(&b, "タイトル: %s\n", escapeControl(p.Title))
 	fmt.Fprintf(&b, "問い:     %s\n", escapeControlKeepLines(p.Question))
 	fmt.Fprintf(&b, "回答:     %s\n", p.Answer)
+	if replan {
+		b.WriteString("範囲が変わる: 委譲を再開せず、計画を作り直して承認待ちへ戻す（既存の PR・ブランチは引き継ぐ）\n")
+	}
 	return b.String()
 }
 

@@ -1,6 +1,8 @@
 package core
 
-// このファイルは、完了確認で人間が差し戻した理由（遷移 T15）を、次の J3・委譲の再開・J5 の
+// このファイルは、完了確認で人間が差し戻した理由（遷移 T15）を次の J3・委譲の再開・J5 の入力へ、
+// 計画の承認での差し戻しの理由（kind=plan）を次の J2 の入力へ渡すための収集と整形を持つ。
+// （完了確認の分の説明:）次の J3・委譲の再開・J5 の
 // 入力へ渡すための収集と整形を持つ。理由は approval の行（kind=completion・decision=rejected）の
 // reason にあり、`--relayed` で記録した差し戻しでも同じ（relay_quote は会話の手がかりで、理由ではない）。
 
@@ -21,13 +23,23 @@ type CompletionRejection struct {
 // loadCompletionRejections は課題の完了確認での差し戻しを、古い順（記録した順）に返す。
 // 計画の承認での差し戻し・完了の承認は含めない。
 func loadCompletionRejections(ctx context.Context, tx *sql.Tx, challengeID int64) ([]CompletionRejection, error) {
+	return loadRejectionsOfKind(ctx, tx, challengeID, ApprovalKindCompletion)
+}
+
+// loadPlanRejections は課題の計画の承認での差し戻しを、古い順（記録した順）に返す（J2 の入力へ渡す）。
+// 完了確認での差し戻し・計画の承認は含めない。
+func loadPlanRejections(ctx context.Context, tx *sql.Tx, challengeID int64) ([]CompletionRejection, error) {
+	return loadRejectionsOfKind(ctx, tx, challengeID, ApprovalKindPlan)
+}
+
+func loadRejectionsOfKind(ctx context.Context, tx *sql.Tx, challengeID int64, kind ApprovalKind) ([]CompletionRejection, error) {
 	approvals, err := loadApprovals(ctx, tx, challengeID)
 	if err != nil {
 		return nil, err
 	}
 	var out []CompletionRejection
 	for _, a := range approvals {
-		if a.Kind != ApprovalKindCompletion || a.Decision != ApprovalDecisionRejected || a.Reason == nil {
+		if a.Kind != kind || a.Decision != ApprovalDecisionRejected || a.Reason == nil {
 			continue
 		}
 		if reason := strings.TrimSpace(*a.Reason); reason != "" {
@@ -41,15 +53,29 @@ func loadCompletionRejections(ctx context.Context, tx *sql.Tx, challengeID int64
 // （J3・J5 の指示文がこの名前で区画を指す）。
 const CompletionRejectionsSectionLabel = "人間の差し戻し"
 
+// PlanRejectionsSectionLabel は、計画の差し戻しの理由を J2 の入力へ入れるときの区画の名前（J2 の指示文がこの名前で区画を指す）。
+const PlanRejectionsSectionLabel = "人間の計画の差し戻し"
+
 // formatCompletionRejectionsSection は差し戻しの理由を、日付つきで古い順のテキストへ整形する。
 // 差し戻しが無ければ空文字列を返す（呼び出し側はこの場合に区画を作らない）。
 func formatCompletionRejectionsSection(rs []CompletionRejection) string {
+	return formatRejectionsWithHeader("人間が成果物を確認して差し戻した理由。元の達成条件に足した、満たすべき条件である。古い順に並べている。"+
+		"後の差し戻しが前の差し戻しの方針を置き換えているときは、後のものに従う。", rs)
+}
+
+// formatPlanRejectionsSection は計画の差し戻しの理由を、日付つきで古い順のテキストへ整形する。
+// 差し戻しが無ければ空文字列を返す（呼び出し側はこの場合に区画を作らない）。
+func formatPlanRejectionsSection(rs []CompletionRejection) string {
+	return formatRejectionsWithHeader("人間が計画を確認して差し戻した理由。次の計画が満たすべき条件である。古い順に並べている。"+
+		"後の差し戻しが前の差し戻しの方針を置き換えているときは、後のものに従う。", rs)
+}
+
+func formatRejectionsWithHeader(header string, rs []CompletionRejection) string {
 	if len(rs) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("人間が成果物を確認して差し戻した理由。元の達成条件に足した、満たすべき条件である。古い順に並べている。" +
-		"後の差し戻しが前の差し戻しの方針を置き換えているときは、後のものに従う。")
+	b.WriteString(header)
 	for i, r := range rs {
 		fmt.Fprintf(&b, "\n\n%d. %s\n%s", i+1, r.DecidedAt.UTC().Format("2006-01-02"), r.Reason)
 	}

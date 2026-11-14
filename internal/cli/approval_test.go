@@ -227,7 +227,7 @@ func TestApprovalSummaryText_UnknownKindDoesNotLabelAsPlanOrCompletion(t *testin
 
 func TestAnswerSummaryText_IncludesQuestionAndAnswer(t *testing.T) {
 	p := &core.AnswerPreview{ChallengeID: "C-1", Title: "t", Question: "why?", Answer: "because"}
-	got := answerSummaryText(p)
+	got := answerSummaryText(p, false)
 	for _, want := range []string{"C-1", "t", "why?", "because"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("summary = %q, want it to contain %q", got, want)
