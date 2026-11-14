@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -158,5 +159,74 @@ func TestPlanAutoJ2_ParentDirect_InvalidOutputChangesNothing(t *testing.T) {
 	}
 	if got := f.runResults(t, ch.ID); len(got) != 1 || got[0] != RunResultInvalidOutput {
 		t.Errorf("run results = %v, want [invalid_output]", got)
+	}
+}
+
+// 達成条件の置き換えは、保留を立てた作業ログ（hold）の before・after に載る。
+func TestPlanAutoJ2_ParentDirect_DoneCriteriaReplacementIsInTheHoldActivity(t *testing.T) {
+	f := newJ2Fixture(t)
+	ch := f.newClassified(t, "direct", "P1")
+	f.bind(t, ch, 7, simpleThread("b", "c1"))
+	prevCriteria := f.detail(t, ch.ID).DoneCriteria
+	if prevCriteria == "UNIQUE-PD-CRITERIA" {
+		t.Fatalf("fixture done_criteria must differ from the output: %q", prevCriteria)
+	}
+	if _, err := f.run(t, succeededInvoker([]byte(j2ParentDirectOutput)), idPtr(ch.ID)); err != nil {
+		t.Fatalf("PlanAutoJ2: %v", err)
+	}
+	acts, err := f.s.ListActivities(context.Background(), &ch.ID)
+	if err != nil {
+		t.Fatalf("ListActivities: %v", err)
+	}
+	var hold *Activity
+	for i := range acts {
+		if acts[i].Action == string(OpHold) {
+			hold = &acts[i]
+		}
+	}
+	if hold == nil {
+		t.Fatalf("no hold activity in %+v", acts)
+	}
+	var before, after map[string]any
+	if err := json.Unmarshal(hold.Before, &before); err != nil {
+		t.Fatalf("unmarshal Before: %v", err)
+	}
+	if err := json.Unmarshal(hold.After, &after); err != nil {
+		t.Fatalf("unmarshal After: %v", err)
+	}
+	if before["done_criteria"] != prevCriteria || after["done_criteria"] != "UNIQUE-PD-CRITERIA" {
+		t.Errorf("hold activity done_criteria before/after = %v/%v, want %q/%q",
+			before["done_criteria"], after["done_criteria"], prevCriteria, "UNIQUE-PD-CRITERIA")
+	}
+}
+
+// 写す直前に読み直した状態が分類済でなければ（mapped=false）、保留を立てず・達成条件を変えず、
+// run は成功のまま返す（状態は返さない）。
+func TestPlanAutoJ2_ParentDirect_ChallengeLeftClassifiedDuringJ2_IsNotMapped(t *testing.T) {
+	f := newJ2Fixture(t)
+	ch := f.newClassified(t, "moved", "P1")
+	f.bind(t, ch, 7, simpleThread("b", "c1"))
+	prevCriteria := f.detail(t, ch.ID).DoneCriteria
+	inv := succeededInvoker([]byte(j2ParentDirectOutput))
+	inv.onInvoke = func(JudgmentLaunchInput) {
+		// J2 の実行中に、人間が先に人間対応待ちへ進めた。
+		if _, err := f.s.HoldChallenge(context.Background(), ChannelCLI, ch.ID, HoldInput{Question: "human moved it"}); err != nil {
+			t.Errorf("HoldChallenge: %v", err)
+		}
+	}
+	res, err := f.run(t, inv, idPtr(ch.ID))
+	if err != nil {
+		t.Fatalf("PlanAutoJ2: %v", err)
+	}
+	item := res.Items[0]
+	if item.Status != nil || item.Outcome != "parent_direct" || item.Result != RunResultSucceeded {
+		t.Errorf("item = %+v, want parent_direct outcome, succeeded, and no status (not mapped)", item)
+	}
+	d := f.detail(t, ch.ID)
+	if d.Status != StatusAwaitingHuman || len(d.Holds) != 1 || d.Holds[0].Kind == HoldKindParentDirect || d.Holds[0].Question != "human moved it" {
+		t.Errorf("status %s holds %+v, want only the human's hold", d.Status, d.Holds)
+	}
+	if d.DoneCriteria != prevCriteria {
+		t.Errorf("done_criteria = %q, want unchanged %q", d.DoneCriteria, prevCriteria)
 	}
 }

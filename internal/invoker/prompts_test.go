@@ -145,12 +145,12 @@ func TestJ5Prompt_HasHeadroomBelowLimit(t *testing.T) {
 //
 // self-review 指摘（round1, code-reviewer CONFIRMED）: 当初は J1（4096バイト）
 // の境界だけを検証しており、judgmentPromptLimit の J2〜J5 の値
-// （当時 8192・8192・4096・6144。J2 は #462 で 12288、#536 で 12800（parent_direct の規則を足した。重複する文を詰めても収まらなかった）、J5 は #466 で 8192、#565 で 9216、#563 で 9728）を緩めても検出するテストが無かった。5ファイル
+// （当時 8192・8192・4096・6144。J2 は #462 で 12288、J5 は #466 で 8192、#565 で 9216、#563 で 9728）を緩めても検出するテストが無かった。5ファイル
 // 分をテーブル駆動で回す形に直した。
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
 		"j1.md": 4096,
-		"j2.md": 12800,
+		"j2.md": 12288,
 		"j3.md": 8192,
 		"j4.md": 4096,
 		"j5.md": 9728,
@@ -507,6 +507,7 @@ func TestInstructions_J5DescribesTheAnswersToTheNoReleaseHold(t *testing.T) {
 
 // #450: j2.md は、中以上で論点の記録が無いとき計画ではなく論点を選ぶ確認の段（判断の前）と、
 // 論点不要を返す条件（決まっていることごとの引用）、問い直しの区画、出力の型の説明の行を持つ。
+// サイズと論点の記録の関係の規則は確認の段の 1 か所だけに置く（#536 で出力の型の説明の行から寄せた）。
 func TestInstructions_J2AsksForQuotesBeforeSkippingIssues(t *testing.T) {
 	got, err := Instructions(core.JudgmentJ2)
 	if err != nil {
@@ -542,8 +543,10 @@ func TestInstructions_J2AsksForQuotesBeforeSkippingIssues(t *testing.T) {
 			t.Errorf("the item of no_issues_needed lacks %q", want)
 		}
 	}
-	if !strings.Contains(shape, "計画のサイズが中・大なら、論点の記録（区画「論点と回答」）か論点不要の引用が要る") {
-		t.Errorf("the line about the output shape lacks the size rule: %q", shape)
+	// サイズと論点の記録の関係の規則は「判断の前の確認」の 1 か所に寄せた（#536。上の step の検査が固定する）。
+	// 出力の型の説明の行に同じ規則を重ねて書かない。
+	if shape == "" || strings.Contains(shape, "論点の記録") {
+		t.Errorf("the line about the output shape must exist and must not repeat the size rule: %q", shape)
 	}
 	if !strings.Contains(got, "- 「問い直し」:") {
 		t.Error("the reading list lacks the re-ask section")
