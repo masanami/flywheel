@@ -563,14 +563,14 @@ const maxIdleRetries = 3
 //   - clone でブランチが未 push: 元のスロットだけ。idle でなければ待たずに ErrSlotUnavailable
 func (s *Store) acquireDelegationSlot(ctx context.Context, in DelegateInput, dc *delegationContext, bind SlotBinder) (*SlotAssignment, error) {
 	if dc.Resume == nil || dc.Resume.Target.SlotID == nil {
-		return s.AcquireSlot(ctx, in.Git, dc.Repo, bind)
+		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{})
 	}
 	original := *dc.Resume.Target.SlotID
 	worktree := dc.Repo.Slots.Provider == string(slotProviderWorktree)
 	if !worktree && dc.ResumeBranchPushed && (dc.Resume.Kind == ResumeKindAnswer || dc.Resume.Kind == ResumeKindRework) {
 		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{Prefer: original})
 	}
-	choice := slotChoice{Only: original}
+	choice := slotChoice{Only: original, Branch: dc.Resume.Branch, KeepTree: dc.Resume.Branch == ""}
 	if !worktree {
 		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice)
 	}
