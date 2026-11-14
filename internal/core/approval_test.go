@@ -7,6 +7,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
 // このファイルは verifiedAttestationForTest（transition_exec_test.go。
@@ -1054,5 +1056,34 @@ func TestExecuteAnswer_HoldCarriesCauseRunID(t *testing.T) {
 	}
 	if hold.RunID == nil || *hold.RunID != row.ID {
 		t.Fatalf("hold.RunID = %v, want %s", hold.RunID, row.ID)
+	}
+}
+
+// 承認済みで未実行の release（state=approved）が課題にあるとき、完了の承認の要約はそれを知らせる
+// （承認の見出しが「満たされないまま残る」とは別になる根拠。noWaitingRelease と同じ見方）。
+func TestPrepareApproval_CompletionReportsApprovedUnexecutedRelease(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
+
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval() error = %v", err)
+	}
+	if prev.HasApprovedRelease {
+		t.Fatal("HasApprovedRelease = true with only pending releases, want false")
+	}
+
+	opID, ok := parseOperationID(releases[0].ID)
+	if !ok {
+		t.Fatalf("bad operation id %q", releases[0].ID)
+	}
+	coretest.SetOperationState(t, s.workspace, opID, string(OperationStateApproved))
+	prev, err = s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval() error = %v", err)
+	}
+	if !prev.HasApprovedRelease {
+		t.Error("HasApprovedRelease = false with an approved release, want true")
 	}
 }

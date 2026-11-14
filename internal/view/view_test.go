@@ -99,14 +99,14 @@ func TestFromApprovalPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(false) + `","direct_completion":null,"done_criteria":"d","kind":"completion","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"stages":` + emptyStages + `,"title":"t","version":4}}`
+	want := `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","direct_completion":null,"done_criteria":"d","kind":"completion","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"stages":` + emptyStages + `,"title":"t","version":4}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
 
 	plan := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, Version: 2, PlanVersion: 3, PlanBody: "B"}
 	b, _ = json.Marshal(view.FromApprovalPreview(plan, nil))
-	want = `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(false) + `","direct_completion":null,"done_criteria":null,"kind":"plan","other_pending_operations":[],"pairs":[],"plan":{"body":"B","version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
+	want = `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","direct_completion":null,"done_criteria":null,"kind":"plan","other_pending_operations":[],"pairs":[],"plan":{"body":"B","version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
@@ -138,10 +138,19 @@ func TestApprovalSummaryCarriesConditionsAfterRelease(t *testing.T) {
 
 // CLI（承認の要約）と API が同じ見出しを引く 1 か所。文言は CLI の出力どおり（変えない）。
 func TestConditionsAfterReleaseHeadingWording(t *testing.T) {
-	if got, want := view.ConditionsAfterReleaseHeading(true), "承認で本番反映されると満たされる条件:"; got != want {
+	if got, want := view.ConditionsAfterReleaseHeading(view.OutlookReleasing), "承認で本番反映されると満たされる条件:"; got != want {
 		t.Errorf("releasing heading = %q, want %q", got, want)
 	}
-	if got, want := view.ConditionsAfterReleaseHeading(false), "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"; got != want {
+	if got, want := view.ConditionsAfterReleaseHeading(view.OutlookApprovedRelease), "承認済みの本番反映が走れば満たされる条件:"; got != want {
+		t.Errorf("approved-release heading = %q, want %q", got, want)
+	}
+	if got := view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing); strings.Contains(view.ConditionsAfterReleaseHeading(view.OutlookApprovedRelease), "満たされないまま残る") || got == view.ConditionsAfterReleaseHeading(view.OutlookApprovedRelease) {
+		t.Errorf("approved-release heading must differ from the held one: %q", got)
+	}
+	if view.OutlookFor(true, true) != view.OutlookReleasing || view.OutlookFor(false, true) != view.OutlookApprovedRelease || view.OutlookFor(false, false) != view.OutlookNotReleasing {
+		t.Error("OutlookFor mapping is wrong")
+	}
+	if got, want := view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing), "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"; got != want {
 		t.Errorf("held heading = %q, want %q", got, want)
 	}
 }
@@ -441,6 +450,18 @@ func TestStatusParentAgentSectionHoldsParentAgentChallenges(t *testing.T) {
 	}
 	if strings.Contains(marshal(t, view.FromNeedsHuman(ov)), "C-7") {
 		t.Error("the parent-agent challenge appears in needs_human")
+	}
+}
+
+// API: 承認済みで未実行の release が課題にあれば、UI の承認（本番反映の保留つき）でも「満たされないまま残る」ではない見出し。
+func TestFromApprovalPreviewHeadingFollowsApprovedRelease(t *testing.T) {
+	p := &core.ApprovalPreview{ChallengeID: "C-1", Kind: core.ApprovalKindCompletion, ConditionsAfterRelease: []string{"a"}}
+	if got := view.FromApprovalPreview(p, nil).Approval.ConditionsAfterReleaseHeading; got != view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) {
+		t.Errorf("heading = %q, want the held one", got)
+	}
+	p.HasApprovedRelease = true
+	if got := view.FromApprovalPreview(p, nil).Approval.ConditionsAfterReleaseHeading; got != "承認済みの本番反映が走れば満たされる条件:" {
+		t.Errorf("heading = %q, want the approved-release one", got)
 	}
 }
 
