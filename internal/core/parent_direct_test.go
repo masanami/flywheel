@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // このファイルは、親が直接行った作業を完了として記録する道（課題 #452）の core の振る舞いを確かめる。
@@ -1022,5 +1023,256 @@ func TestExportImport_CarriesTheCompletionDirectFlag(t *testing.T) {
 	got := rejectWithReasonForTest(t, dst, c.ID, "やり直し")
 	if got.Status != StatusAwaitingHuman {
 		t.Errorf("status after reject in the imported store = %q, want awaiting_human", got.Status)
+	}
+}
+
+// 計画承認待ちの課題で、親が直接行う保留を立て、完了として記録し、差し戻されたら親が直接行う保留へ戻る
+// （#519）。承認を待っている計画は一連の流れを通して残る。
+func TestPlanApproval_ParentDirectHoldCompleteDirectAndRejectKeepThePlan(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	cid, _ := parseChallengeID(c.ID)
+	insertPlanRow(t, s, cid, 1, "plan body")
+	planRows := func() int {
+		d, err := s.GetChallenge(context.Background(), c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(d.Plans)
+	}
+
+	if _, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "親が直接行う", Kind: string(HoldKindParentDirect)}); err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	got, dc, err := s.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/1"))
+	if err != nil {
+		t.Fatalf("CompleteDirect: %v", err)
+	}
+	if got.Status != StatusAwaitingCompletionApproval || len(dc.Artifacts) != 1 {
+		t.Fatalf("status=%q artifacts=%v", got.Status, dc.Artifacts)
+	}
+
+	// 差し戻すと、子に任され直さず親が直接行う保留へ戻る。
+	rej := rejectWithReasonForTest(t, s, c.ID, "やり直す")
+	if rej.Status != StatusAwaitingHuman {
+		t.Fatalf("status after reject = %q, want awaiting_human", rej.Status)
+	}
+	d, _ := s.GetChallenge(context.Background(), c.ID)
+	open := d.Holds[len(d.Holds)-1]
+	if !open.Open() || open.Kind != HoldKindParentDirect || open.FromStatus != StatusAwaitingPlanApproval {
+		t.Fatalf("open hold = %+v, want an open parent_direct hold from awaiting_plan_approval", open)
+	}
+	if planRows() != 1 {
+		t.Errorf("plan rows = %d, want 1 (the pending plan must be kept)", planRows())
+	}
+}
+
+// 計画承認待ちから立てた保留を回答で解くと、計画承認待ちへ戻り、承認待ちの計画は残る。
+func TestPlanApproval_AnswerReturnsToPlanApprovalAndKeepsThePlan(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	cid, _ := parseChallengeID(c.ID)
+	insertPlanRow(t, s, cid, 1, "plan body")
+	if _, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "親が直接行う", Kind: string(HoldKindParentDirect)}); err != nil {
+		t.Fatal(err)
+	}
+	if res := dispatchOperation(t, s, c.ID, OpAnswer); res.err != nil {
+		t.Fatalf("answer: %v", res.err)
+	}
+	d, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Status != StatusAwaitingPlanApproval || len(d.Plans) != 1 {
+		t.Fatalf("status=%q plans=%d, want awaiting_plan_approval with 1 plan", d.Status, len(d.Plans))
+	}
+}
+
+// 計画承認待ちから親が直接行う保留を立てた課題を作る（承認待ちの計画を 1 版持つ）。
+func holdFromPlanApprovalForTest(t *testing.T, s *Store) *Challenge {
+	t.Helper()
+	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	insertPlanRowForTest(t, s, c.ID, 1, "plan body")
+	h, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "親が直接行う", Kind: string(HoldKindParentDirect)})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	return h
+}
+
+// 計画承認待ちから立てた親が直接行う保留のあいだは、計画の承認（T5）は invalid_transition で断られ、
+// 状態・計画・作業ログが変わらない（#519）。
+func TestPlanApproval_ParentDirectHoldBlocksPlanApprovalAndChangesNothing(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := holdFromPlanApprovalForTest(t, s)
+	before, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actsBefore := len(activitiesFor(t, s, c.ID))
+
+	if _, err := s.PrepareApproval(context.Background(), c.ID); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("PrepareApproval while held: err = %v, want ErrInvalidTransition", err)
+	}
+	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: before.Version, Decision: ApprovalDecisionApproved,
+	}, verifiedAttestationForTest(t, c.ID)); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("ExecuteApproval while held: err = %v, want ErrInvalidTransition", err)
+	}
+
+	after, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != StatusAwaitingHuman || after.Version != before.Version || len(after.Plans) != 1 || len(after.Approvals) != 0 {
+		t.Fatalf("after = status %q version %d plans %d approvals %d, want unchanged (awaiting_human, v%d, 1 plan, 0 approvals)",
+			after.Status, after.Version, len(after.Plans), len(after.Approvals), before.Version)
+	}
+	if got := len(activitiesFor(t, s, c.ID)); got != actsBefore {
+		t.Errorf("activities = %d, want %d (unchanged)", got, actsBefore)
+	}
+}
+
+// 計画承認待ちから立てた親が直接行う保留のあいだも、親が直接行った完了を差し戻して保留へ戻った後も、
+// 委譲と自動の計画（J2）の対象に選ばれない（選び方は変えず、既存の関数で確かめる。#519）。
+// 保留中と差し戻し後の課題は、委譲の対象になりうる承認済みで spec つきの計画を持たせ、状態だけが
+// 外れる理由になるようにする。
+func TestPlanApproval_ParentDirectHoldIsNotADelegationOrJ2TargetBeforeAndAfterReject(t *testing.T) {
+	f := newDelegateFixture(t)
+	s := f.s
+	fixedActor(t, "alice")
+	ctx := context.Background()
+	// 承認済みで spec つきの計画 v1 を持つ課題を計画承認待ちへ置き（計画 v1 の承認の後に作り直した計画を
+	// 待っている形）、そこから親が直接行う保留を立てる。
+	holdFromPlanApprovalWithApprovedSpec := func(title string) string {
+		t.Helper()
+		id := f.newInProgress(t, title, "P1", planSpec(nil))
+		cid, _ := parseChallengeID(id)
+		if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.Exec(`UPDATE challenge SET status = 'awaiting_plan_approval', version = version + 1 WHERE id = ?`, cid)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		insertPlanRowForTest(t, s, id, 2, "plan v2")
+		if _, err := s.HoldChallenge(ctx, ChannelCLI, id, HoldInput{Question: "親が直接行う", Kind: string(HoldKindParentDirect)}); err != nil {
+			t.Fatalf("hold: %v", err)
+		}
+		return id
+	}
+	held := holdFromPlanApprovalWithApprovedSpec("held")
+	rejected := holdFromPlanApprovalWithApprovedSpec("rejected")
+	if _, _, err := s.CompleteDirect(ctx, ChannelCLI, rejected, completeDirectInput("https://example.com/1")); err != nil {
+		t.Fatal(err)
+	}
+	if r := rejectWithReasonForTest(t, s, rejected, "やり直す"); r.Status != StatusAwaitingHuman {
+		t.Fatalf("status after reject = %q, want awaiting_human", r.Status)
+	}
+	// 比較用（選び方が働いていることの確認）: 保留にしていない分類済の課題は J2 の対象になり、
+	// 同じ形の計画を持つ着手中の課題は委譲の対象になる。
+	other := createAndAdvance(t, s, StatusClassified)
+	otherID, _ := parseChallengeID(other.ID)
+	inProgress := f.newInProgress(t, "in-progress", "P1", planSpec(nil))
+	inProgressID, _ := parseChallengeID(inProgress)
+
+	_, j2, deleg, _ := autoTargetsForTest(t, s)
+	if len(j2) != 1 || j2[0] != otherID {
+		t.Fatalf("J2 targets = %v, want only %d", j2, otherID)
+	}
+	if len(deleg) != 1 || deleg[0] != inProgressID {
+		t.Fatalf("delegation targets = %v, want only %d", deleg, inProgressID)
+	}
+	for _, id := range []string{held, rejected} {
+		cid, _ := parseChallengeID(id)
+		for name, ids := range map[string][]int64{"J2": j2, "delegation": deleg} {
+			for _, got := range ids {
+				if got == cid {
+					t.Errorf("%s targets include %s", name, id)
+				}
+			}
+		}
+	}
+}
+
+// 計画承認待ちから立てた親が直接行う保留のあいだは計画の承認の依頼（承認の要約・カードの approve_plan）が
+// 出ず、回答で計画承認待ちへ戻ると再び出て、承認（T5）すると保留の前から残っていた計画のまま着手中へ進む（#519）。
+func TestPlanApproval_AnswerRestoresTheApprovalRequestAndApprovalProceedsWithTheKeptPlan(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := holdFromPlanApprovalForTest(t, s)
+	hasApprovePlan := func() bool {
+		t.Helper()
+		cur, err := s.GetChallenge(context.Background(), c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		card, err := s.DeriveCard(context.Background(), cur.Challenge, &Overview{}, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range card.NextHumanActions {
+			if a == CardActionApprovePlan {
+				return true
+			}
+		}
+		return false
+	}
+	if hasApprovePlan() {
+		t.Fatal("card offers approve_plan while held, want none")
+	}
+
+	if res := dispatchOperation(t, s, c.ID, OpAnswer); res.err != nil {
+		t.Fatalf("answer: %v", res.err)
+	}
+	if !hasApprovePlan() {
+		t.Fatal("card does not offer approve_plan after the answer")
+	}
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval after the answer: %v", err)
+	}
+	if prev.Kind != ApprovalKindPlan || prev.PlanVersion != 1 || prev.PlanBody != "plan body" {
+		t.Fatalf("preview = kind %q plan v%d %q, want the kept plan v1", prev.Kind, prev.PlanVersion, prev.PlanBody)
+	}
+	got, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, ReleaseHeads: headsForAll(prev),
+	}, verifiedAttestationForTest(t, c.ID))
+	if err != nil {
+		t.Fatalf("ExecuteApproval: %v", err)
+	}
+	if got.Status != StatusInProgress {
+		t.Fatalf("status after plan approval = %q, want in_progress", got.Status)
+	}
+	d, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Plans) != 1 || d.Plans[0].Version != 1 {
+		t.Errorf("plans = %+v, want only the kept v1", d.Plans)
+	}
+}
+
+// 計画承認待ちから来て計画が残っている課題が、親が直接行った完了で完了確認待ちにあるとき、完了の承認の要約は
+// 計画を持たず（計画は計画の承認のときだけ）、親が直接行った完了の記録を持つ（#519。承認画面の API の形への
+// 変換は internal/view の TestFromApprovalPreview_CompletionWithDirectCompletionHasNoPlan が確かめる）。
+func TestPlanApproval_CompletionSummaryAfterCompleteDirectHasDirectCompletionAndNoPlan(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := holdFromPlanApprovalForTest(t, s)
+	if _, _, err := s.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/1")); err != nil {
+		t.Fatal(err)
+	}
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prev.Kind != ApprovalKindCompletion || prev.PlanVersion != 0 || prev.PlanBody != "" {
+		t.Errorf("preview = kind %q plan v%d %q, want completion without a plan", prev.Kind, prev.PlanVersion, prev.PlanBody)
+	}
+	if prev.DirectCompletion == nil || len(prev.DirectCompletion.Artifacts) != 1 || prev.DirectCompletion.Artifacts[0] != "https://example.com/1" {
+		t.Errorf("DirectCompletion = %+v, want the recorded artifact https://example.com/1", prev.DirectCompletion)
 	}
 }
