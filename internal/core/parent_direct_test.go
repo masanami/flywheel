@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // このファイルは、親が直接行った作業を完了として記録する道（課題 #452）の core の振る舞いを確かめる。
@@ -1086,5 +1087,164 @@ func TestPlanApproval_AnswerReturnsToPlanApprovalAndKeepsThePlan(t *testing.T) {
 	}
 	if d.Status != StatusAwaitingPlanApproval || len(d.Plans) != 1 {
 		t.Fatalf("status=%q plans=%d, want awaiting_plan_approval with 1 plan", d.Status, len(d.Plans))
+	}
+}
+
+// 計画承認待ちから親が直接行う保留を立てた課題を作る（承認待ちの計画を 1 版持つ）。
+func holdFromPlanApprovalForTest(t *testing.T, s *Store) *Challenge {
+	t.Helper()
+	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
+	insertPlanRowForTest(t, s, c.ID, 1, "plan body")
+	h, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "親が直接行う", Kind: string(HoldKindParentDirect)})
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	return h
+}
+
+// 計画承認待ちから立てた親が直接行う保留のあいだは、計画の承認（T5）は invalid_transition で断られ、
+// 状態・計画・作業ログが変わらない（#519）。
+func TestPlanApproval_ParentDirectHoldBlocksPlanApprovalAndChangesNothing(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := holdFromPlanApprovalForTest(t, s)
+	before, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actsBefore := len(activitiesFor(t, s, c.ID))
+
+	if _, err := s.PrepareApproval(context.Background(), c.ID); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("PrepareApproval while held: err = %v, want ErrInvalidTransition", err)
+	}
+	if _, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: before.Version, Decision: ApprovalDecisionApproved,
+	}, verifiedAttestationForTest(t, c.ID)); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("ExecuteApproval while held: err = %v, want ErrInvalidTransition", err)
+	}
+
+	after, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != StatusAwaitingHuman || after.Version != before.Version || len(after.Plans) != 1 || len(after.Approvals) != 0 {
+		t.Fatalf("after = status %q version %d plans %d approvals %d, want unchanged (awaiting_human, v%d, 1 plan, 0 approvals)",
+			after.Status, after.Version, len(after.Plans), len(after.Approvals), before.Version)
+	}
+	if got := len(activitiesFor(t, s, c.ID)); got != actsBefore {
+		t.Errorf("activities = %d, want %d (unchanged)", got, actsBefore)
+	}
+}
+
+// 計画承認待ちから立てた親が直接行う保留のあいだも、親が直接行った完了を差し戻して保留へ戻った後も、
+// 委譲と自動の計画（J2）の対象に選ばれない（選び方は変えず、既存の関数で確かめる。#519）。
+func TestPlanApproval_ParentDirectHoldIsNotADelegationOrJ2TargetBeforeAndAfterReject(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	held := holdFromPlanApprovalForTest(t, s)
+	rejected := holdFromPlanApprovalForTest(t, s)
+	if _, _, err := s.CompleteDirect(context.Background(), ChannelCLI, rejected.ID, completeDirectInput("https://example.com/1")); err != nil {
+		t.Fatal(err)
+	}
+	if r := rejectWithReasonForTest(t, s, rejected.ID, "やり直す"); r.Status != StatusAwaitingHuman {
+		t.Fatalf("status after reject = %q, want awaiting_human", r.Status)
+	}
+	// 比較用: 保留にしていない分類済の課題は J2 の対象になる（対象の選び方が働いていることの確認）。
+	other := createAndAdvance(t, s, StatusClassified)
+	otherID, _ := parseChallengeID(other.ID)
+
+	_, j2, deleg, _ := autoTargetsForTest(t, s)
+	if len(j2) != 1 || j2[0] != otherID {
+		t.Fatalf("J2 targets = %v, want only %d", j2, otherID)
+	}
+	for _, c := range []*Challenge{held, rejected} {
+		cid, _ := parseChallengeID(c.ID)
+		for name, ids := range map[string][]int64{"J2": j2, "delegation": deleg} {
+			for _, id := range ids {
+				if id == cid {
+					t.Errorf("%s targets include %s", name, c.ID)
+				}
+			}
+		}
+	}
+}
+
+// 計画承認待ちから立てた親が直接行う保留のあいだは計画の承認の依頼（承認の要約・カードの approve_plan）が
+// 出ず、回答で計画承認待ちへ戻ると再び出て、承認（T5）すると保留の前から残っていた計画のまま着手中へ進む（#519）。
+func TestPlanApproval_AnswerRestoresTheApprovalRequestAndApprovalProceedsWithTheKeptPlan(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := holdFromPlanApprovalForTest(t, s)
+	hasApprovePlan := func() bool {
+		t.Helper()
+		cur, err := s.GetChallenge(context.Background(), c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		card, err := s.DeriveCard(context.Background(), cur.Challenge, &Overview{}, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range card.NextHumanActions {
+			if a == CardActionApprovePlan {
+				return true
+			}
+		}
+		return false
+	}
+	if hasApprovePlan() {
+		t.Fatal("card offers approve_plan while held, want none")
+	}
+
+	if res := dispatchOperation(t, s, c.ID, OpAnswer); res.err != nil {
+		t.Fatalf("answer: %v", res.err)
+	}
+	if !hasApprovePlan() {
+		t.Fatal("card does not offer approve_plan after the answer")
+	}
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("PrepareApproval after the answer: %v", err)
+	}
+	if prev.Kind != ApprovalKindPlan || prev.PlanVersion != 1 || prev.PlanBody != "plan body" {
+		t.Fatalf("preview = kind %q plan v%d %q, want the kept plan v1", prev.Kind, prev.PlanVersion, prev.PlanBody)
+	}
+	got, _, err := s.ExecuteApproval(context.Background(), ApprovalRequest{
+		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved, ReleaseHeads: headsForAll(prev),
+	}, verifiedAttestationForTest(t, c.ID))
+	if err != nil {
+		t.Fatalf("ExecuteApproval: %v", err)
+	}
+	if got.Status != StatusInProgress {
+		t.Fatalf("status after plan approval = %q, want in_progress", got.Status)
+	}
+	d, err := s.GetChallenge(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Plans) != 1 || d.Plans[0].Version != 1 {
+		t.Errorf("plans = %+v, want only the kept v1", d.Plans)
+	}
+}
+
+// 計画承認待ちから来て計画が残っている課題が、親が直接行った完了で完了確認待ちにあるとき、完了の承認の要約は
+// 計画を持たず（計画は計画の承認のときだけ）、親が直接行った完了の記録を持つ（#519。承認画面の API の plan・
+// direct_completion はこの要約から作る）。
+func TestPlanApproval_CompletionSummaryAfterCompleteDirectHasDirectCompletionAndNoPlan(t *testing.T) {
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	c := holdFromPlanApprovalForTest(t, s)
+	if _, _, err := s.CompleteDirect(context.Background(), ChannelCLI, c.ID, completeDirectInput("https://example.com/1")); err != nil {
+		t.Fatal(err)
+	}
+	prev, err := s.PrepareApproval(context.Background(), c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prev.Kind != ApprovalKindCompletion || prev.PlanVersion != 0 || prev.PlanBody != "" {
+		t.Errorf("preview = kind %q plan v%d %q, want completion without a plan", prev.Kind, prev.PlanVersion, prev.PlanBody)
+	}
+	if prev.DirectCompletion == nil || len(prev.DirectCompletion.Artifacts) != 1 {
+		t.Errorf("DirectCompletion = %+v, want the recorded artifacts", prev.DirectCompletion)
 	}
 }
