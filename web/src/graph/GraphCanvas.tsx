@@ -692,6 +692,8 @@ function GroupFrame({
           y={box.headH - HEAD_GAP}
           width={box.w}
           height={HEAD_GAP}
+          fill="transparent"
+          style={{ cursor: "pointer" }}
           onClick={() => p.onOpen(box.id)}
           onMouseEnter={() => p.onHoverNode(box.id)}
           onMouseLeave={() => p.onHoverNode(null)}
