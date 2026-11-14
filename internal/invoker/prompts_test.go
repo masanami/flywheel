@@ -742,7 +742,8 @@ func TestInstructions_J5DescribesTheUnreviewedReportRule(t *testing.T) {
 }
 
 // TestJ2Prompt_MentionsParentDirectVerdict は、J2 の指示文が parent_direct の判定の意味（委譲の計画が立たず
-// 親が直接行うのが適切なときに返し、理由と親の達成条件を書く）を持つことを固定する（#536）。
+// 親が直接行うのが適切なときに、サイズに関わらず判断の前の確認より先に返し、理由と親の達成条件を書く）を
+// 持つことを固定する（#536）。
 func TestJ2Prompt_MentionsParentDirectVerdict(t *testing.T) {
 	fsys, err := promptsSubFS()
 	if err != nil {
@@ -752,7 +753,7 @@ func TestJ2Prompt_MentionsParentDirectVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fs.ReadFile(j2.md): %v", err)
 	}
-	for _, want := range []string{"委譲の計画が立たず、親が直接行うのが適切", "親が何を満たせば終わりか", "4 を選んでよい"} {
+	for _, want := range []string{"委譲の計画が立たず、親が直接行うのが適切", "親が何を満たせば終わりか", "4 を選んでよい", "サイズに関わらず"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("j2.md does not contain %q", want)
 		}
