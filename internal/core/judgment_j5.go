@@ -68,7 +68,7 @@ const maxJ5DeferredConditionRunes = 2000
 const J5HumanActionHoldPreamble = "達成条件のうち、人の操作の後でしか満たせない条件が残っています（ほかの条件は満たしています）。次の操作を終えたら回答してください。回答すると達成の確認をやり直します。"
 
 // J5NoReleaseHoldPreamble は、達成条件の残りに「本番反映で満たされる見込み」の条件があるのに、その課題に
-// 待っている本番反映（未承認の release）が無いときに置く保留の問いの前置き（#466）。続けて該当の条件を
+// 待っている本番反映（未承認か承認済みで未実行の release）が無いときに置く保留の問いの前置き（#466）。続けて該当の条件を
 // 1 行ずつ並べる。完了確認待ちへ進めても、承認で本番反映されるものが無く条件は満たされないまま残る。
 const J5NoReleaseHoldPreamble = "本番反映が無いので条件を満たせない状態です。達成条件のうち、本番反映で満たされる見込みの条件が残っていますが、この課題には待っている本番反映（未承認の release）がありません（ほかの条件は満たしています）。次のどれかを回答してください: 「マージ済み」（PR は既定ブランチへ取り込み済み）・「PR が無い」（本番反映する PR がまだ無い）・「条件が不要」（その条件は要らない）。回答すると達成の確認をやり直します。"
 
@@ -108,7 +108,7 @@ func (v *j5ValidatedOutput) humanActionHoldQuestion() string {
 	return holdQuestion(J5HumanActionHoldPreamble, v.conditionsWith(J5ConditionAfterHumanAction))
 }
 
-// checksPendingRelease は、写すときに課題の待っている本番反映（未承認の release）の有無を確かめる必要が
+// checksPendingRelease は、写すときに課題の待っている本番反映（未承認か承認済みで未実行の release）の有無を確かめる必要が
 // あるか（#466）。区分の無い条件がすべて満たされ（met）、残りに本番反映で満たされる見込みの条件があるとき。
 func (v *j5ValidatedOutput) checksPendingRelease() bool {
 	return v.Verdict == J5VerdictMet && len(v.conditionsWith(J5ConditionAfterRelease)) > 0
@@ -665,13 +665,19 @@ func (s *Store) applyJ5Once(ctx context.Context, runIDDisplay, challengeIDDispla
 	if err != nil {
 		return false, false, err
 	}
+	return s.applyJ5Route(ctx, runIDDisplay, challengeIDDisplay, v, vh, rt)
+}
+
+// applyJ5Route は事前に読んだ根拠 rt に従って写す。書き込みのトランザクションの中で予想と待っている
+// 本番反映を読み直し、rt とずれたら書かずに errJ5StaleExpected を返す。
+func (s *Store) applyJ5Route(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, vh *j5VerifiedHeads, rt j5Route) (mapped, held bool, err error) {
 	op, mismatch, noRelease := rt.op, rt.mismatch, rt.noRelease
 	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, op, func(ctx context.Context, tc *transitionCtx) error {
 		if j5ActualMismatch(v, tc.current.Expected) != mismatch {
 			return errJ5StaleExpected
 		}
 		if v.checksPendingRelease() {
-			now, err := noPendingRelease(ctx, tc.tx, tc.id)
+			now, err := noWaitingRelease(ctx, tc.tx, tc.id)
 			if err != nil {
 				return err
 			}
@@ -750,19 +756,20 @@ type j5Route struct {
 	// mismatch は met で課題の予想が空でなく、実物の個数が予想の個数と違うこと。
 	mismatch bool
 	// noRelease は、本番反映で満たされる見込みの条件が残る met のとき（checksPendingRelease）に限り、
-	// 課題に待っている本番反映（未承認の release）が無いこと。それ以外は false。
+	// 課題に待っている本番反映（未承認か承認済みで未実行の release）が無いこと。それ以外は false。
 	noRelease bool
 }
 
-// noPendingRelease は課題 cid に待っている本番反映（state=pending の kind=release の不可逆操作）が
-// 1 件も無いか。
-func noPendingRelease(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) {
+// noWaitingRelease は課題 cid に待っている本番反映（state が pending か approved の kind=release の
+// 不可逆操作。approved は承認済みで未実行）が 1 件も無いか。事前の読み取りと書き込み内の読み直しの両方が
+// この関数を使う。
+func noWaitingRelease(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) {
 	ops, err := loadOperations(ctx, tx, cid)
 	if err != nil {
 		return false, err
 	}
 	for _, op := range ops {
-		if op.State == OperationStatePending && op.Kind == OperationKindRelease {
+		if (op.State == OperationStatePending || op.State == OperationStateApproved) && op.Kind == OperationKindRelease {
 			return false, nil
 		}
 	}
@@ -794,7 +801,7 @@ func (s *Store) j5Operation(ctx context.Context, challengeIDDisplay string, v *j
 		}
 		expected = ch.Expected
 		if v.checksPendingRelease() {
-			rt.noRelease, err = noPendingRelease(ctx, tx, cid)
+			rt.noRelease, err = noWaitingRelease(ctx, tx, cid)
 		}
 		return err
 	}))

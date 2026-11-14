@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -447,9 +448,13 @@ func TestVerifyAutoJ5_OnlyAfterReleaseLeft_OnlyAPendingReleaseCounts(t *testing.
 		wantEnd Status
 	}{
 		{"a pending delete is not a release", func(t *testing.T, f *j5Fixture) { f.addOperation(t, "delete") }, StatusAwaitingHuman},
-		{"an approved release is not waiting", func(t *testing.T, f *j5Fixture) {
+		{"an approved unexecuted release is waiting", func(t *testing.T, f *j5Fixture) {
 			f.addOperation(t, "release")
 			f.setReleaseState(t, 1, "approved")
+		}, StatusAwaitingCompletionApproval},
+		{"an executed release is not waiting", func(t *testing.T, f *j5Fixture) {
+			f.addOperation(t, "release")
+			f.setReleaseState(t, 1, "executed")
 		}, StatusAwaitingHuman},
 		{"a pending release of another challenge is not this one's", func(t *testing.T, f *j5Fixture) {
 			other, err := f.s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "other"})
@@ -553,5 +558,56 @@ func TestVerifyAutoJ5_NoPendingReleaseWithActualMismatch_OneHoldListsBoth(t *tes
 	}
 	if got := f.detail(t, "C-1").Actual; len(got) != 0 {
 		t.Errorf("actual = %+v, want unchanged (empty)", got)
+	}
+}
+
+// 承認済みで未実行の release しか無くても完了確認待ちへ進み、完了の承認の要約の PendingReleases には
+// state=pending の release だけが入る（approved を二重に承認しない）。条件は要約に出る。
+func TestVerifyAutoJ5_ApprovedUnexecutedReleaseOnly_AwaitsCompletionApprovalWithoutListingItAsPending(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.addOperation(t, "release")
+	f.setReleaseState(t, 1, "approved")
+	f.j5.result = j5OutDeferred("met", nil, nil, [2]string{condAfterRelease, "after_release"})
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusAwaitingCompletionApproval {
+		t.Fatalf("status = %s", got)
+	}
+	if got := f.holdCount(t); got != "0" {
+		t.Errorf("holds = %s, want none", got)
+	}
+	p := f.approvalPreview(t, "C-1")
+	if len(p.PendingReleases) != 0 {
+		t.Errorf("PendingReleases = %+v, want none", p.PendingReleases)
+	}
+	if want := []string{condAfterRelease}; !reflect.DeepEqual(p.ConditionsAfterRelease, want) {
+		t.Errorf("ConditionsAfterRelease = %v, want %v", p.ConditionsAfterRelease, want)
+	}
+}
+
+// 事前の読み取りの後で release の state が変わると、書き込み内の読み直しが食い違いを検出して書かず
+// （errJ5StaleExpected）、選び直した applyJ5 が新しい状態で写す。
+func TestApplyJ5_ReleaseStateChangesAfterTheFirstRead_IsRereadAndReselected(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.addOperation(t, "release")
+	f.setReleaseState(t, 1, "approved")
+	v, ok := validateJ5Output(j5OutDeferred("met", nil, nil, [2]string{condAfterRelease, "after_release"}).StructuredOutput)
+	if !ok {
+		t.Fatal("invalid output")
+	}
+	ctx := context.Background()
+	rt, err := f.s.j5Operation(ctx, "C-1", v)
+	if err != nil || rt.noRelease || rt.op != OpVerifyMet {
+		t.Fatalf("route = %+v, %v", rt, err)
+	}
+	f.setReleaseState(t, 1, "executed") // 最初の読み取りの後で待っている本番反映が無くなる
+	if _, _, err := f.s.applyJ5Route(ctx, "R-1", "C-1", v, nil, rt); !errors.Is(err, errJ5StaleExpected) {
+		t.Fatalf("err = %v, want errJ5StaleExpected", err)
+	}
+	if got := f.detail(t, "C-1").Status; got != StatusVerifying {
+		t.Fatalf("status = %s, want unchanged verifying", got)
 	}
 }
