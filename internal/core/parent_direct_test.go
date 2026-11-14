@@ -69,6 +69,40 @@ func TestHoldChallenge_KindDefaultsToHumanAndAcceptsParentDirect(t *testing.T) {
 	}
 }
 
+// 決定（#519）: 計画承認待ち・完了確認待ちからは、種類を問わず保留を立てられない。
+// 親が直接行った作業を完了として残す道は、計画を承認して着手中へ進めてから hold(parent_direct) → complete-direct。
+func TestHoldChallenge_ParentDirectIsRejectedFromPlanAndCompletionApprovalAndChangesNothing(t *testing.T) {
+	for _, from := range []Status{StatusAwaitingPlanApproval, StatusAwaitingCompletionApproval} {
+		t.Run(string(from), func(t *testing.T) {
+			s := newStoreForTest(t)
+			fixedActor(t, "alice")
+			c := createAndAdvance(t, s, from)
+			before, err := s.ListActivities(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "親が直接行う", Kind: string(HoldKindParentDirect)})
+			if !errors.Is(err, ErrInvalidTransition) {
+				t.Fatalf("err = %v, want ErrInvalidTransition", err)
+			}
+			d, err := s.GetChallenge(context.Background(), c.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.Status != from || d.Version != c.Version || len(d.Holds) != 0 {
+				t.Errorf("challenge changed despite the rejection: %s v%d holds=%d", d.Status, d.Version, len(d.Holds))
+			}
+			after, err := s.ListActivities(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(after) != len(before) {
+				t.Errorf("activity log changed despite the rejection: %d -> %d", len(before), len(after))
+			}
+		})
+	}
+}
+
 func TestHoldChallenge_UnknownKindIsValidationErrorAndChangesNothing(t *testing.T) {
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
