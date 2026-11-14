@@ -434,6 +434,11 @@ func insertHoldID(ctx context.Context, tc *transitionCtx, question string) (int6
 // insertHoldKind は insertHoldID の、保留の種類を指定する版。human 以外のときだけ作業ログの after に種類を載せる
 // （既存の保留の作業ログの形は変えない）。
 func insertHoldKind(ctx context.Context, tc *transitionCtx, question string, kind HoldKind) (int64, error) {
+	// 計画承認待ちから入れるのは親が直接行う保留だけ（承認の待ち先が人のままで、人の対応を待つ保留は意味を持たない）。
+	// 保留を書く入口すべてが通るここで検査する。
+	if tc.current.Status == StatusAwaitingPlanApproval && kind != HoldKindParentDirect {
+		return 0, ErrInvalidTransition
+	}
 	return insertHoldKindFrom(ctx, tc, question, kind, tc.current.Status)
 }
 
