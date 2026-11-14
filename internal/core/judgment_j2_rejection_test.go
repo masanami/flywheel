@@ -110,14 +110,16 @@ func TestPlanAutoJ2_PlanRejections_IgnoresCompletionRejectionsBlankAndOtherChall
 
 // 計画を差し戻した後の J2 が、論点と回答の無いサイズ M の課題で、差し戻しの理由を引用した
 // no_issues_needed を付けた plan を返したとき、論点を問わずに計画として登録される。
+// J2 の入力には差し戻しの区画があり、その本文に引用（理由の部分文字列）が含まれる。
 func TestPlanAutoJ2_PlanRejections_NoIssuesNeededQuotingTheRejectionRegisters(t *testing.T) {
 	f := newJ2Fixture(t)
 	fixedActor(t, "alice")
 	ch := f.newClassified(t, "rejq", "P1")
-	f.rejectPlanForTest(t, ch.ID, "REASON-REJECTED 方式は B にする", rejDay(2026, 11, 4), ttyAtt)
+	const quote = "方式は B にする"
+	f.rejectPlanForTest(t, ch.ID, "REASON-REJECTED "+quote, rejDay(2026, 11, 4), ttyAtt)
 	f.s.now = nil
 	out := j2BigWithNoIssuesNeeded([]any{
-		j2NoIssuesDecision("DECISION-REJ 方式は B", "plan_rejection", "QUOTE-REJ 方式は B にする"),
+		j2NoIssuesDecision("DECISION-REJ 方式は B", "plan_rejection", quote),
 	})
 	inv := &scriptedJ2Invoker{outputs: [][]byte{out}}
 	res, err := f.run(t, inv, idPtr(ch.ID))
@@ -127,14 +129,66 @@ func TestPlanAutoJ2_PlanRejections_NoIssuesNeededQuotingTheRejectionRegisters(t 
 	if len(inv.calls) != 1 || len(res.Items) != 1 || res.Items[0].Outcome != "plan" {
 		t.Fatalf("calls=%d items=%+v", len(inv.calls), res.Items)
 	}
+	var section *string
+	for _, s := range inv.calls[0].Sections {
+		if s.Label == PlanRejectionsSectionLabel {
+			c := s.Content
+			section = &c
+		}
+	}
+	if section == nil {
+		t.Fatalf("J2 input lacks the %q section", PlanRejectionsSectionLabel)
+	}
+	if !strings.Contains(*section, quote) {
+		t.Fatalf("plan rejections section lacks the quote %q:\n%s", quote, *section)
+	}
 	d := f.detail(t, ch.ID)
 	if d.Status != StatusAwaitingPlanApproval {
 		t.Fatalf("status = %s, want awaiting_plan_approval", d.Status)
 	}
 	body := d.Plans[len(d.Plans)-1].Body
-	for _, want := range []string{"QUOTE-REJ", "引用元: " + PlanRejectionsSectionLabel} {
+	for _, want := range []string{"DECISION-REJ", quote, "引用元: " + PlanRejectionsSectionLabel} {
 		if !strings.Contains(body, want) {
 			t.Errorf("plan body lacks %q:\n%s", want, body)
 		}
+	}
+}
+
+// 差し戻しの後でも、引用元の種別が閉集合の外の値、または plan_rejection でも引用が空白だけの
+// no_issues_needed は論点の記録として数えず、計画として登録しない（問い直しでも同じなら保留になる）。
+// 引用が区画の本文に実在するかは照合しない（M4H48）ため、退けるのは形の不備だけ。
+func TestPlanAutoJ2_PlanRejections_InvalidNoIssuesNeededIsNotRegistered(t *testing.T) {
+	cases := map[string]map[string]any{
+		"kind outside the closed set": j2NoIssuesDecision("DECISION-REJ", "plan_rejections", "方式は B にする"),
+		"blank quote":                 j2NoIssuesDecision("DECISION-REJ", "plan_rejection", " \t "),
+	}
+	for name, decision := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newJ2Fixture(t)
+			fixedActor(t, "alice")
+			ch := f.newClassified(t, "rejbad", "P1")
+			f.rejectPlanForTest(t, ch.ID, "REASON-REJECTED 方式は B にする", rejDay(2026, 11, 4), ttyAtt)
+			f.s.now = nil
+			before := f.detail(t, ch.ID)
+			out := j2BigWithNoIssuesNeeded([]any{decision})
+			inv := &scriptedJ2Invoker{outputs: [][]byte{out, out}}
+			res, err := f.run(t, inv, idPtr(ch.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(inv.calls) != 2 || len(res.Items) != 2 || res.Items[0].Result != RunResultInvalidOutput {
+				t.Fatalf("calls=%d items=%+v", len(inv.calls), res.Items)
+			}
+			if res.Items[1].Outcome != string(J2VerdictUncertain) {
+				t.Errorf("second item = %+v, want uncertain", res.Items[1])
+			}
+			d := f.detail(t, ch.ID)
+			if d.Status != StatusAwaitingHuman || len(d.Plans) != len(before.Plans) {
+				t.Fatalf("status=%s plans=%d (before %d), want awaiting_human and no new plan", d.Status, len(d.Plans), len(before.Plans))
+			}
+			if last := d.Holds[len(d.Holds)-1]; !strings.HasPrefix(last.Question, NoIssuesHoldPreamble) {
+				t.Errorf("hold = %+v", last)
+			}
+		})
 	}
 }
