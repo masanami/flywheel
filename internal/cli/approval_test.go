@@ -195,6 +195,21 @@ func TestApprovalSummaryText_CompletionListsTheConditionsSatisfiedByTheRelease(t
 	if got := approvalSummaryText(&noRelease, core.ApprovalDecisionApproved, false, nil); !strings.Contains(got, notReleasing) {
 		t.Errorf("no release: summary = %q, want %q", got, notReleasing)
 	}
+	// 承認済みで未実行の release があれば、この操作で承認されなくても「満たされないまま残る」とは書かない。
+	const approvedRelease = "承認済みの本番反映が走れば満たされる条件:\n  - A が取り込まれている\n  - B\n"
+	withApproved := *p
+	withApproved.PendingReleases = nil
+	withApproved.HasApprovedRelease = true
+	if got := approvalSummaryText(&withApproved, core.ApprovalDecisionApproved, false, nil); !strings.Contains(got, approvedRelease) || strings.Contains(got, "満たされないまま残る") {
+		t.Errorf("approved release: summary = %q, want %q", got, approvedRelease)
+	}
+	withApproved.PendingReleases = p.PendingReleases
+	if got := approvalSummaryText(&withApproved, core.ApprovalDecisionApproved, true, nil); !strings.Contains(got, approvedRelease) || strings.Contains(got, "満たされないまま残る") {
+		t.Errorf("approved release + hold-release: summary = %q, want %q", got, approvedRelease)
+	}
+	if got := approvalSummaryText(&withApproved, core.ApprovalDecisionApproved, false, nil); !strings.Contains(got, releasing) {
+		t.Errorf("approved release + approving a pending one: summary = %q, want %q", got, releasing)
+	}
 	noRelease.ConditionsAfterRelease = nil
 	if got := approvalSummaryText(&noRelease, core.ApprovalDecisionApproved, false, nil); strings.Contains(got, "本番反映で満たされる") || strings.Contains(got, "本番反映されると満たされる") {
 		t.Errorf("summary = %q, must not show the heading without conditions", got)
