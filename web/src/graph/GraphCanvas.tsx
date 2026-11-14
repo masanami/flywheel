@@ -684,6 +684,20 @@ function GroupFrame({
     return (
       <g {...attrs} className="graph-group">
         <rect className="graph-group-box" width={box.w} height={box.h} rx={8} />
+        {/* 見出しの欄の下の帯（HEAD_GAP）の当たり判定。依存の線の下の層に置き、矢じりは線が最前面のまま残す。キーボードは見出し側が受ける */}
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: 見えない帯で、キーボードの操作は見出し（button）が受ける */}
+        <rect
+          className="graph-group-head-gap"
+          data-group-gap={box.id}
+          y={box.headH - HEAD_GAP}
+          width={box.w}
+          height={HEAD_GAP}
+          fill="transparent"
+          style={{ cursor: "pointer" }}
+          onClick={() => p.onOpen(box.id)}
+          onMouseEnter={() => p.onHoverNode(box.id)}
+          onMouseLeave={() => p.onHoverNode(null)}
+        />
       </g>
     );
   const { dims } = p;
