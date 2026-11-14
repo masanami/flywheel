@@ -58,12 +58,13 @@ const (
 	J2SourceKindUpstreamComment J2SourceKind = "upstream_comment"
 	J2SourceKindReferencedIssue J2SourceKind = "referenced_issue"
 	J2SourceKindHoldRecord      J2SourceKind = "hold_record"
+	J2SourceKindPlanRejection   J2SourceKind = "plan_rejection"
 )
 
 // J2SourceKindValues は J2SourceKind の全値。
 var J2SourceKindValues = []J2SourceKind{
 	J2SourceKindChallenge, J2SourceKindUpstreamIssue, J2SourceKindUpstreamComment,
-	J2SourceKindReferencedIssue, J2SourceKindHoldRecord,
+	J2SourceKindReferencedIssue, J2SourceKindHoldRecord, J2SourceKindPlanRejection,
 }
 
 // valid は k が閉集合の値か（前後の空白も許さない）。
@@ -89,6 +90,8 @@ func (k J2SourceKind) sectionLabel() string {
 		return labelUpstreamRefs
 	case J2SourceKindHoldRecord:
 		return labelHoldRecord
+	case J2SourceKindPlanRejection:
+		return PlanRejectionsSectionLabel
 	}
 	return ""
 }

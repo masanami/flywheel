@@ -73,7 +73,7 @@ func validIssuesOutput() []byte {
 // --- 出力の型 ---
 
 func TestJ2SourceKind_ClosedSetIsInAllClosedValuesAndSchema(t *testing.T) {
-	want := []string{"challenge", "upstream_issue", "upstream_comment", "referenced_issue", "hold_record"}
+	want := []string{"challenge", "upstream_issue", "upstream_comment", "referenced_issue", "hold_record", "plan_rejection"}
 	var got []string
 	for _, k := range J2SourceKindValues {
 		got = append(got, string(k))
@@ -232,6 +232,7 @@ func TestJ2SourceKind_LabelsAreTheInputSectionLabels(t *testing.T) {
 		J2SourceKindUpstreamComment: labelUpstreamComments,
 		J2SourceKindReferencedIssue: labelUpstreamRefs,
 		J2SourceKindHoldRecord:      labelHoldRecord,
+		J2SourceKindPlanRejection:   PlanRejectionsSectionLabel,
 	}
 	for _, k := range J2SourceKindValues {
 		if got := k.sectionLabel(); got != want[k] || got == "" {
