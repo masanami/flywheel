@@ -596,7 +596,9 @@ func (s *Store) acquireDelegationSlot(ctx context.Context, in DelegateInput, dc 
 		// 再開でない新しい委譲: 前の委譲がブランチを報告していれば、そのブランチのまま起動する
 		// （worktree のスロットのとき。前の run のスロットを先に試す。#526）。
 		if dc.Follow != nil && dc.Repo.Slots.Provider == string(slotProviderWorktree) {
-			return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{Prefer: dc.Follow.SlotID, Branch: dc.Follow.Branch})
+			choice := slotChoice{Prefer: dc.Follow.SlotID, Branch: dc.Follow.Branch}
+			return waitForBranchHolder(ctx, delegationDeadline(in),
+				func() (*SlotAssignment, error) { return s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice) })
 		}
 		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, slotChoice{})
 	}
@@ -612,10 +614,37 @@ func (s *Store) acquireDelegationSlot(ctx context.Context, in DelegateInput, dc 
 	if !worktree {
 		return s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice)
 	}
-	deadline := time.Now().Add(time.Duration(in.AgentDecl.TimeoutSec.Delegate) * time.Second)
-	return waitForOriginalSlot(ctx, deadline,
+	return waitForOriginalSlot(ctx, delegationDeadline(in),
 		func() (*SlotAssignment, error) { return s.acquireSlot(ctx, in.Git, dc.Repo, bind, choice) },
 		func() (slotState, error) { return s.slotStateOf(ctx, original) })
+}
+
+// delegationDeadline は、スロットが空くのを待つ上限（委譲の時間の上限）。宣言が無ければ待たない。
+func delegationDeadline(in DelegateInput) time.Time {
+	if in.AgentDecl == nil {
+		return time.Now()
+	}
+	return time.Now().Add(time.Duration(in.AgentDecl.TimeoutSec.Delegate) * time.Second)
+}
+
+// waitForBranchHolder は、追従するブランチを使用中（busy）の他のスロットが checkout している間
+// （errSlotBranchBusy）、そのスロットが空くのを待って取り直す。待つ間はスロットを押さえない。
+// 期限切れは ErrSlotUnavailable。それ以外の結果（未コミットの変更で外せない等）はそのまま返す。
+func waitForBranchHolder(ctx context.Context, deadline time.Time, acquire func() (*SlotAssignment, error)) (*SlotAssignment, error) {
+	for {
+		a, err := acquire()
+		if !errors.Is(err, errSlotBranchBusy) {
+			return a, err
+		}
+		if time.Now().After(deadline) {
+			return nil, ErrSlotUnavailable
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(slotWaitInterval):
+		}
+	}
 }
 
 // waitForOriginalSlot は元のスロットを取れるまで、取り直しを繰り返す。
@@ -626,7 +655,7 @@ func waitForOriginalSlot(ctx context.Context, deadline time.Time,
 	acquire func() (*SlotAssignment, error), stateOf func() (slotState, error)) (*SlotAssignment, error) {
 	idleRetries := 0
 	for {
-		a, err := acquire()
+		a, err := waitForBranchHolder(ctx, deadline, acquire)
 		if !errors.Is(err, ErrSlotUnavailable) {
 			return a, err
 		}

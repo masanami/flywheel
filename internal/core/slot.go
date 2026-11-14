@@ -282,9 +282,14 @@ func (s *Store) prepareSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 }
 
 // errSlotBranchHeld は、want のブランチを他のスロットが checkout していて外せない
-// （使用中・未コミットの変更あり）ことを表す。このスロットはこの割り当てでは使わず、
-// needs_attention にもしない。
+// （idle だが未コミットの変更がある等。待っても解けない）ことを表す。このスロットは
+// この割り当てでは使わず、needs_attention にもしない。
 var errSlotBranchHeld = errors.New("core: the branch is checked out in another slot that cannot release it")
+
+// errSlotBranchBusy は、want のブランチを使用中（busy）の他のスロットが checkout していることを
+// 表す。その委譲が終われば外せるので、委譲の割り当ては待って取り直す（waitForBranchHolder）。
+// 待たない呼び出し元には ErrSlotUnavailable として見える。
+var errSlotBranchBusy = fmt.Errorf("%w: the branch is checked out in a busy slot", ErrSlotUnavailable)
 
 // switchSlotTree は worktree のスロットの作業ツリーの先頭を、これから始める委譲に合わせる。
 //   - want が無い: 別の課題のブランチに残っていれば base へ detach する（detached なら何もしない）
@@ -322,6 +327,9 @@ func (s *Store) switchSlotTree(ctx context.Context, git SlotGit, repo ConnectorR
 			}
 			if !ost.Exists || !ost.PointerOK || ost.Branch != want {
 				continue
+			}
+			if o.State == slotStateBusy {
+				return "", "", errSlotBranchBusy
 			}
 			if o.State != slotStateIdle || ost.Dirty {
 				return "", "", errSlotBranchHeld
@@ -400,6 +408,10 @@ func (s *Store) acquireSlot(ctx context.Context, git SlotGit, repo ConnectorRepo
 		tried[next.ID] = true
 
 		reason, baseBranch, err := s.prepareSlot(ctx, git, repo, *next, choice)
+		if errors.Is(err, errSlotBranchBusy) {
+			// どのスロットでもそのブランチは checkout できないので、他を試さずに返す。
+			return nil, errSlotBranchBusy
+		}
 		if errors.Is(err, errSlotBranchHeld) {
 			continue
 		}

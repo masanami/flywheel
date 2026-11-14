@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // 作業ツリーの先頭を揃える規則（前の課題のブランチに残さない・既存の PR のブランチを
@@ -101,7 +102,8 @@ func TestAcquireSlot_FollowUpOnAlreadyCheckedOutBranchDoesNotSwitch(t *testing.T
 }
 
 // 他のスロットが使用中（または変更あり）でそのブランチを外せなければ、割り当てない
-// （無関係なブランチで起動しない）。スロットは needs_attention にもしない。
+// （無関係なブランチで起動しない）。スロットは needs_attention にもしない。使用中のときに
+// 待つのは委譲の割り当て（waitForBranchHolder）で、acquireSlot 自体は待たない。
 func TestAcquireSlot_FollowUpBranchHeldByBusyOrDirtySlotIsUnavailable(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -264,4 +266,141 @@ func TestLoadFollowBranch_NoneWhenNoUsableBranch(t *testing.T) {
 	if len(g.switched) != 1 || g.switched[0] != (SlotSwitchCall{Path: p1, Req: SlotSwitch{Ref: "refs/heads/main"}}) {
 		t.Errorf("switched = %+v, want one detach to base", g.switched)
 	}
+}
+
+// endAndRelease は a の run を終了させてスロットを解放する（別の goroutine から呼べるよう、
+// t を使わずにエラーを返す）。
+func endAndRelease(s *Store, a *SlotAssignment) error {
+	ctx := context.Background()
+	runID, _ := parseRunID(a.RunID)
+	if err := s.mutateSlots(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE run SET result = 'succeeded', ended_at = ? WHERE id = ?`, formatTimestamp(time.Now()), runID)
+		return err
+	}); err != nil {
+		return err
+	}
+	return s.ReleaseSlot(ctx, a.SlotID)
+}
+
+func shortSlotWait(t *testing.T) {
+	old := slotWaitInterval
+	slotWaitInterval = 10 * time.Millisecond
+	t.Cleanup(func() { slotWaitInterval = old })
+}
+
+// 追従するブランチを使用中（busy）の他のスロットが checkout していれば、その委譲が終わるまで
+// 待ち、空いた後にそのブランチで起動する（オーナーの決定。#526）。待つ間は割り当てない
+// （SL-1 を busy で押さえない）。
+func TestAcquireDelegationSlot_WaitsForBusySlotHoldingTheBranch(t *testing.T) {
+	shortSlotWait(t)
+	s := newStoreForTest(t)
+	ctx := context.Background()
+	g := newFakeSlotGit()
+	repo := worktreeRepoForTest(2)
+	p1 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-1")
+	p2 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-2")
+	switchStateAt(g, p1, "", false)
+	switchStateAt(g, p2, "fix/issue-457-pr", false)
+	busy, err := s.acquireSlot(ctx, g, repo, bindRunForTest(ctx), slotChoice{Only: "SL-2", Branch: "fix/issue-457-pr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	released := make(chan error, 1)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		if sl := slotByIDNoT(s, "SL-1"); sl != "idle" {
+			released <- errors.New("SL-1 was " + sl + " while waiting, want idle")
+			return
+		}
+		released <- endAndRelease(s, busy)
+	}()
+	dc := &delegationContext{Repo: repo, Follow: &followBranch{Branch: "fix/issue-457-pr", SlotID: "SL-2"}}
+	in := DelegateInput{Git: g, AgentDecl: &AgentDeclaration{TimeoutSec: AgentTimeoutSec{Delegate: 30}}}
+	a, err := s.acquireDelegationSlot(ctx, in, dc, bindRunForTest(ctx))
+	if rerr := <-released; rerr != nil {
+		t.Fatal(rerr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 解放が取り直しの途中に起きると、SL-1 が SL-2 からブランチを外して checkout することもある。
+	// どちらでも、追従するブランチで起動する。
+	if a.BaseBranch != "fix/issue-457-pr" {
+		t.Errorf("assignment = %+v, want fix/issue-457-pr", a)
+	}
+}
+
+// 使用中のまま待つ上限（委譲の時間の上限）を超えたら ErrSlotUnavailable（全部使用中と同じ扱い）。
+// 再開（Resume.Branch の経路）も同じく待ってから諦める。
+func TestAcquireDelegationSlot_BusyBranchHolderPastDeadlineIsUnavailable(t *testing.T) {
+	shortSlotWait(t)
+	for _, resume := range []bool{false, true} {
+		s := newStoreForTest(t)
+		ctx := context.Background()
+		g := newFakeSlotGit()
+		repo := worktreeRepoForTest(2)
+		p1 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-1")
+		p2 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-2")
+		switchStateAt(g, p1, "", false)
+		switchStateAt(g, p2, "fix/issue-457-pr", false)
+		if _, err := s.acquireSlot(ctx, g, repo, bindRunForTest(ctx), slotChoice{Only: "SL-2", Branch: "fix/issue-457-pr"}); err != nil {
+			t.Fatal(err)
+		}
+		g.switched = nil
+		dc := &delegationContext{Repo: repo, Follow: &followBranch{Branch: "fix/issue-457-pr"}}
+		if resume {
+			sl1 := "SL-1"
+			dc = &delegationContext{Repo: repo, Resume: &resumePlan{Target: runRow{SlotID: &sl1}, Kind: ResumeKindAnswer, Branch: "fix/issue-457-pr"}}
+		}
+		in := DelegateInput{Git: g, AgentDecl: &AgentDeclaration{TimeoutSec: AgentTimeoutSec{Delegate: 1}}}
+		start := time.Now()
+		_, err := s.acquireDelegationSlot(ctx, in, dc, bindRunForTest(ctx))
+		if !errors.Is(err, ErrSlotUnavailable) {
+			t.Fatalf("resume=%v: error = %v, want ErrSlotUnavailable", resume, err)
+		}
+		if el := time.Since(start); el < 900*time.Millisecond {
+			t.Errorf("resume=%v: returned after %v, want to wait until the deadline", resume, el)
+		}
+		if len(g.switched) != 0 {
+			t.Errorf("resume=%v: switched = %+v, want none", resume, g.switched)
+		}
+		if sl := slotByID(t, s, "SL-1"); sl.State != "idle" {
+			t.Errorf("resume=%v: SL-1 = %+v, want idle", resume, sl)
+		}
+	}
+}
+
+// ブランチを持つ他のスロットが idle で未コミットの変更があるときは待たない（待っても解けない）。
+func TestAcquireDelegationSlot_DirtyBranchHolderDoesNotWait(t *testing.T) {
+	s := newStoreForTest(t)
+	ctx := context.Background()
+	g := newFakeSlotGit()
+	repo := worktreeRepoForTest(2)
+	p1 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-1")
+	p2 := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-2")
+	switchStateAt(g, p1, "", false)
+	switchStateAt(g, p2, "fix/issue-457-pr", true)
+	dc := &delegationContext{Repo: repo, Follow: &followBranch{Branch: "fix/issue-457-pr"}}
+	in := DelegateInput{Git: g, AgentDecl: &AgentDeclaration{TimeoutSec: AgentTimeoutSec{Delegate: 30}}}
+	start := time.Now()
+	if _, err := s.acquireDelegationSlot(ctx, in, dc, bindRunForTest(ctx)); !errors.Is(err, ErrSlotUnavailable) {
+		t.Fatalf("error = %v, want ErrSlotUnavailable", err)
+	}
+	if el := time.Since(start); el > 5*time.Second {
+		t.Errorf("waited %v, want no wait", el)
+	}
+}
+
+func slotByIDNoT(s *Store, id string) string {
+	all, err := s.ListSlots(context.Background())
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	for _, sl := range all {
+		if sl.ID == id {
+			return sl.State
+		}
+	}
+	return "missing"
 }
