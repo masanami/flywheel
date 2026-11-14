@@ -113,7 +113,7 @@ func TestRun_DelegatesAndReturnsAPhaseObject(t *testing.T) {
 		t.Fatalf("items = %v", items)
 	}
 	// 直列化グループ: 候補 1 件だけのグループ。取り込み元の対応が無い候補は予測できない（not_predictable）。
-	wantGroups := []any{map[string]any{"repo": "direct-repo", "challenges": []any{id}, "reasons": []any{"not_predictable"}, "prediction_head_sha": nil}}
+	wantGroups := []any{map[string]any{"repo": "direct-repo", "challenges": []any{id}, "reasons": []any{"not_predictable"}, "judgments": []any{}, "prediction_head_sha": nil}}
 	if !reflect.DeepEqual(phase["serial_groups"], wantGroups) {
 		t.Errorf("serial_groups = %#v, want %#v", phase["serial_groups"], wantGroups)
 	}
@@ -463,7 +463,7 @@ func TestRun_PredictionHook_GroupsFromSharedFiles_AndRecordsAPredictRun(t *testi
 
 	phase := phaseOf(t, runJSON(t, ws, "run"))
 	groups, _ := phase["serial_groups"].([]any)
-	want := []any{map[string]any{"repo": "flywheel-repo", "challenges": []any{a, b}, "reasons": []any{"shared_files"}, "prediction_head_sha": "cafe01"}}
+	want := []any{map[string]any{"repo": "flywheel-repo", "challenges": []any{a, b}, "reasons": []any{"shared_files"}, "judgments": []any{}, "prediction_head_sha": "cafe01"}}
 	if !reflect.DeepEqual(groups, want) {
 		t.Errorf("serial_groups = %#v, want %#v", groups, want)
 	}

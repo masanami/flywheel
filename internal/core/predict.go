@@ -36,13 +36,21 @@ type PredictedSharedFile struct {
 	Ignored       bool
 }
 
+// PredictedDependEdge は出力の pairs[].dependency.stated[] の 1 要素（Issue の予測が相手の Issue を
+// 前提に挙げた）。
+type PredictedDependEdge struct {
+	Issue     int
+	DependsOn int
+}
+
 // PredictedPair は出力の pairs[] の 1 要素。DependencyFirst は dependency.first
-// （先に入れるべき側の Issue 番号。null は nil）。
+// （先に入れるべき側の Issue 番号。null は nil）、DependencyStated は dependency.stated[]。
 type PredictedPair struct {
-	Issues          [2]int
-	Status          string
-	SharedFiles     []PredictedSharedFile
-	DependencyFirst *int
+	Issues           [2]int
+	Status           string
+	SharedFiles      []PredictedSharedFile
+	DependencyFirst  *int
+	DependencyStated []PredictedDependEdge
 }
 
 // ConflictPredictionOutput は予測の口の出力を、flywheel が読むフィールドだけに正規化した形

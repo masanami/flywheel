@@ -202,7 +202,7 @@ func (s *Store) recordConflicts(ctx context.Context, cycleID string, predictionR
 		}
 	}
 	var recs []conflictRec
-	for _, e := range predictedEdges(out.Pairs, func(n int) bool { _, ok := idOf[n]; return ok }) {
+	for _, e := range predictedEdges(out.Pairs, func(n int) bool { _, ok := idOf[n]; return ok }, false) {
 		ca, cb := idOf[e.a], idOf[e.b]
 		switch ra, rb := isRunning[e.a], isRunning[e.b]; {
 		case ra && rb:
