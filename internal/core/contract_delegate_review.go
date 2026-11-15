@@ -36,7 +36,10 @@ func hasReviewableArtifact(arts []ContractArtifact) bool {
 
 // submitContractReview は課題が着手中なら、レビュー待ちの成果物を rep の run へ取り込んで検証中へ進める。
 // 取り込みと遷移は同じトランザクションで行う。着手中でなければ（保留・検証中など）何もしない。
-func (s *Store) submitContractReview(ctx context.Context, rep *ContractRunReport) error {
+func (s *Store) submitContractReview(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource) error {
+	if err := s.registerContractReleases(ctx, rs, rep); err != nil {
+		return err
+	}
 	runInt, ok := parseRunID(rep.RunID)
 	if !ok {
 		return nil

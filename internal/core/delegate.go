@@ -532,7 +532,7 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	var pollNotStarted []NotStarted
 	if in.Contract != nil {
 		reports, err := s.PollContractRuns(ctx, ContractPollInput{
-			ChallengeID: in.ChallengeID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl, Client: in.Contract, CycleID: in.CycleID,
+			ChallengeID: in.ChallengeID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl, Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile,
 		})
 		if errors.Is(err, ErrStoreError) {
 			return nil, err

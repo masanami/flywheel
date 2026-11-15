@@ -111,7 +111,7 @@ func sameRequestedAction(row *contractRunRow, ra *ContractRequestedAction) bool 
 // afterContractRead は読めた状態に応じた課題への写しを行う: waiting は求められた操作に従って保留へ写し、
 // succeeded は課題を着手中から検証中へ進める。読みが成功していない（Result が succeeded でない）・既に保留にした
 // ときは何もしない。
-func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, connector *Connector) error {
+func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, connector *Connector, rs *contractReleaseSource) error {
 	if rep.Result != RunResultSucceeded || rep.Held {
 		return nil
 	}
@@ -119,7 +119,7 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 	case ContractStateWaiting:
 		switch contractWaitDestination(rep.RequestedAction, rep.Artifacts) {
 		case contractWaitReview:
-			return s.submitContractReview(ctx, rep)
+			return s.submitContractReview(ctx, rep, rs)
 		case contractWaitOwnerHold:
 		default:
 			return nil
@@ -128,6 +128,9 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 		rep.Held = held
 		return err
 	case ContractStateSucceeded:
+		// succeeded の run は読んだ時点で終わりとして記録済みで、次の周に読み直されない。release を作れなくても検証中へ進める
+		// （進めないと課題が着手中のまま取り残される）。release が無いときは人が op add で補う。
+		_ = s.registerContractReleases(ctx, rs, rep)
 		_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpSubmit,
 			func(ctx context.Context, tc *transitionCtx) error {
 				if tc.current.Status != StatusInProgress {
@@ -299,7 +302,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		return rep, err
 	}
 	if !skipRead {
-		if err := s.afterContractRead(ctx, rep, connector); err != nil {
+		if err := s.afterContractRead(ctx, rep, connector, in.releaseSource()); err != nil {
 			return nil, err
 		}
 	}
@@ -309,8 +312,9 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		}
 	}
 	if !resume && row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindObserve && stillObserving(rep) {
-		// オーナーの保留（人間対応待ち）の間は、接続ツールの run を進める resume を呼ばない。
-		if inProgress, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !inProgress {
+		// オーナーの保留（人間対応待ち）の間は、接続ツールの run を進める resume を呼ばない。課題が完了（本番反映の後に ready を
+		// 返した後の観測の待ち。例: human-merge）でも、run が終わるまで読み進めるために呼ぶ。
+		if ok, err := s.challengeObservable(ctx, row.ChallengeID); err != nil || !ok {
 			return rep, err
 		}
 		return s.resumeObservation(ctx, in, row, connector, binding, planVersion, cycleID, rep)
@@ -344,7 +348,7 @@ func (s *Store) resumeObservation(ctx context.Context, in ContractPollInput, row
 	if rep.Result != RunResultSucceeded {
 		return statusRep, nil
 	}
-	if err := s.afterContractRead(ctx, rep, connector); err != nil {
+	if err := s.afterContractRead(ctx, rep, connector, in.releaseSource()); err != nil {
 		return nil, err
 	}
 	if !rep.State.Terminal() && !rep.Held {
@@ -364,6 +368,17 @@ func (s *Store) challengeInProgress(ctx context.Context, cid int64) (bool, error
 		return err
 	})
 	return inProgress, classifyReadWriteErr(err)
+}
+
+// challengeObservable は、観測の待ちに答え無しの resume を呼んでよい課題か（着手中か完了）。
+func (s *Store) challengeObservable(ctx context.Context, cid int64) (bool, error) {
+	var ok bool
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		ch, err := loadChallenge(ctx, tx, cid)
+		ok = err == nil && ch != nil && (ch.Status == StatusInProgress || ch.Status == StatusDone)
+		return err
+	})
+	return ok, classifyReadWriteErr(err)
 }
 
 // runExistingContractCommand は既存の契約の run に対するコマンド（status・resume・cancel）を 1 回呼んで記録する。
@@ -467,7 +482,7 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 	if crep.Result == RunResultSucceeded && crep.State.Terminal() {
 		rep.State = crep.State
 		// 中止の依頼の応答が succeeded（成果物つき）なら、読んだときと同じく検証中へ進める。
-		return s.afterContractRead(ctx, crep, connector)
+		return s.afterContractRead(ctx, crep, connector, in.releaseSource())
 	}
 	detail := "中止のコマンドが失敗した"
 	if crep.Result != RunResultSucceeded {
@@ -489,7 +504,7 @@ func (s *Store) delegateViaContract(ctx context.Context, in DelegateInput, jc *J
 	}
 	rep, err := s.StartContractDelegation(ctx, ContractStartInput{
 		ChallengeID: dc.Challenge.ID, ConnectorID: dc.Connector.ID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl,
-		Client: in.Contract, CycleID: in.CycleID, MaxBudgetUSD: microsToUSD(dc.ImplBudgetMicros + dc.ReviewBudgetMicros), OnRunInserted: adm.markInserted,
+		Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile, MaxBudgetUSD: microsToUSD(dc.ImplBudgetMicros + dc.ReviewBudgetMicros), OnRunInserted: adm.markInserted,
 	})
 	if err != nil {
 		if jc != nil && errors.Is(err, ErrBudgetExceeded) {

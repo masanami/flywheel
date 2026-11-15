@@ -122,13 +122,13 @@ func (f *contractFixture) start(t *testing.T) (*ContractRunReport, error) {
 	t.Helper()
 	return f.s.StartContractDelegation(context.Background(), ContractStartInput{
 		ChallengeID: f.cid, ConnectorID: "tool", AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client,
-		CycleID: f.cycle(t, 300), MaxBudgetUSD: 5,
+		CycleID: f.cycle(t, 300), MaxBudgetUSD: 5, Reconcile: f.branches,
 	})
 }
 
 func (f *contractFixture) poll(t *testing.T) []ContractRunReport {
 	t.Helper()
-	reps, err := f.s.PollContractRuns(context.Background(), ContractPollInput{AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client, CycleID: f.cycle(t, 300)})
+	reps, err := f.s.PollContractRuns(context.Background(), ContractPollInput{AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client, CycleID: f.cycle(t, 300), Reconcile: f.branches})
 	if err != nil {
 		t.Fatalf("PollContractRuns: %v", err)
 	}
