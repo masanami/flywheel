@@ -846,6 +846,7 @@ func TestInstructions_J8ChecksCriteriaAgainstCurrentStateAndChallengeStatus(t *t
 		"未照合",
 		"状態は未確認",
 		"その提案は出さない",
+		"見送りの欄に、層・対象と根拠（満たしている箇所・コミットや課題）を書く",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J8) lacks %q", want)

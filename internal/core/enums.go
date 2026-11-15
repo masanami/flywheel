@@ -344,6 +344,10 @@ const (
 	ActivityActionImprovement = "improvement"
 )
 
+// ActivityActionImprovementWithheld は作業ログ（entity=run。J8 の run）の action。J8 が達成の条件の
+// 項目がすべて満たし済みのため出さなかった提案（見送り）を、層・対象・満たし済みの根拠とともに残す。課題は作らない。
+const ActivityActionImprovementWithheld = "improvement_withheld"
+
 // ActivityActionBackup は作業ログ（entity=cycle）の action。`cycle` の最後の段 backup の結果を残す。
 const ActivityActionBackup = "backup"
 

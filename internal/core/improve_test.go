@@ -647,3 +647,86 @@ func TestTerminalStatusArgs_AreDerivedFromTheTransitionTable(t *testing.T) {
 		t.Errorf("terminal statuses = %v, want %v", got, want)
 	}
 }
+
+// outWithheld は偽の claude が返す出力に見送りの欄を足す。
+func (f *j8Fixture) outWithheld(props []any, withheld any) {
+	if props == nil {
+		props = []any{}
+	}
+	b, _ := json.Marshal(map[string]any{"proposals": props, "withheld": withheld})
+	f.inv.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: b, ReportedTotalCostUSD: float64Ptr(0.5)}
+}
+
+// 見送りは J8 の run の作業ログ（action=improvement_withheld）に層・対象・根拠を残し、課題は作らない。
+func TestImproveJ8_WithheldIsRecordedWithoutFilingChallenges(t *testing.T) {
+	f := newJ8Fixture(t)
+	f.occ(t, 1, j8Row{})
+	f.outWithheld(nil, []any{map[string]any{"layer": "prompt", "target": "T", "evidence": []string{"j8.md の 2a", "C-3"}}})
+	challenges := f.count(t, `SELECT COUNT(*) FROM challenge`)
+	res := f.manual(t)
+	if res.Result != RunResultSucceeded || len(res.Filed) != 0 || !strings.Contains(res.Note, "withheld 1") {
+		t.Fatalf("res = %+v", res)
+	}
+	if got := f.count(t, `SELECT COUNT(*) FROM challenge`); got != challenges {
+		t.Errorf("challenges = %d, want %d", got, challenges)
+	}
+	acts, err := f.s.ListActivities(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []Activity
+	for _, a := range acts {
+		if a.Action == ActivityActionImprovementWithheld {
+			found = append(found, a)
+		}
+	}
+	if len(found) != 1 || found[0].Entity != "run" || found[0].EntityID != res.RunID {
+		t.Fatalf("withheld activities = %+v (run %s)", found, res.RunID)
+	}
+	var after map[string]any
+	if err := json.Unmarshal(found[0].After, &after); err != nil {
+		t.Fatal(err)
+	}
+	ev, _ := after["evidence"].([]any)
+	if after["improvement_layer"] != "prompt" || after["improvement_target"] != "T" || len(ev) != 2 || ev[0] != "j8.md の 2a" {
+		t.Errorf("after = %v", after)
+	}
+}
+
+// 欄なし・空の配列なら見送りの作業ログは残らない。
+func TestImproveJ8_NoWithheldWritesNoWithheldActivity(t *testing.T) {
+	for name, withheld := range map[string]any{"no field": nil, "empty": []any{}} {
+		t.Run(name, func(t *testing.T) {
+			f := newJ8Fixture(t)
+			f.occ(t, 1, j8Row{})
+			if withheld == nil {
+				f.out(nil)
+			} else {
+				f.outWithheld(nil, withheld)
+			}
+			if res := f.manual(t); res.Result != RunResultSucceeded {
+				t.Fatalf("res = %+v", res)
+			}
+			if n := f.count(t, `SELECT COUNT(*) FROM activity WHERE action = ?`, ActivityActionImprovementWithheld); n != 0 {
+				t.Errorf("withheld activities = %d", n)
+			}
+		})
+	}
+}
+
+// 見送りの欄が不正な形なら出力全体を不正にし、提案も見送りも書かない。
+func TestImproveJ8_InvalidWithheldInvalidatesWholeOutput(t *testing.T) {
+	f := newJ8Fixture(t)
+	ids := f.occ(t, 1, j8Row{})
+	f.outWithheld([]any{j8Proposal("prompt", "T", formatOccurrenceID(ids[0]))},
+		[]any{map[string]any{"layer": "prompt", "target": "U", "evidence": []string{}}})
+	before, challenges := f.handledAll(t), f.count(t, `SELECT COUNT(*) FROM challenge`)
+	res := f.manual(t)
+	if res.Result != RunResultInvalidOutput {
+		t.Fatalf("res = %+v", res)
+	}
+	if f.handledAll(t) != before || f.count(t, `SELECT COUNT(*) FROM challenge`) != challenges ||
+		f.count(t, `SELECT COUNT(*) FROM activity WHERE action IN ('improvement', ?)`, ActivityActionImprovementWithheld) != 0 {
+		t.Errorf("partial write remained")
+	}
+}

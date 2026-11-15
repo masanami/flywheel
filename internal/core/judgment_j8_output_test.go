@@ -148,3 +148,73 @@ func TestAllJudgmentOutputClosedValues_IncludesJ8(t *testing.T) {
 		}
 	}
 }
+
+// 見送りの欄（withheld）は任意。正常・欄なし・null・空の配列は受け入れ、不正な形は出力全体を不正にする。
+func TestValidateJ8Withheld(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		got, ok := validateJ8Withheld([]byte(`{"proposals":[],"withheld":[{"layer":"prompt","target":" internal/invoker/prompts/j8.md ","evidence":[" コミット abc ","C-3"]}]}`))
+		if !ok || len(got) != 1 {
+			t.Fatalf("ok=%v got=%+v", ok, got)
+		}
+		w := got[0]
+		if w.Layer != OccurrenceLayerPrompt || w.Target != "internal/invoker/prompts/j8.md" || len(w.Evidence) != 2 || w.Evidence[0] != "コミット abc" || w.Evidence[1] != "C-3" {
+			t.Errorf("got = %+v", w)
+		}
+	})
+	for name, data := range map[string]string{
+		"no field":    `{"proposals":[]}`,
+		"null":        `{"proposals":[],"withheld":null}`,
+		"empty array": `{"proposals":[],"withheld":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got, ok := validateJ8Withheld([]byte(data)); !ok || len(got) != 0 {
+				t.Errorf("ok=%v got=%+v", ok, got)
+			}
+		})
+	}
+	for name, data := range map[string]string{
+		"not array":        `{"proposals":[],"withheld":{}}`,
+		"missing layer":    `{"proposals":[],"withheld":[{"target":"a","evidence":["e"]}]}`,
+		"missing target":   `{"proposals":[],"withheld":[{"layer":"prompt","evidence":["e"]}]}`,
+		"missing evidence": `{"proposals":[],"withheld":[{"layer":"prompt","target":"a"}]}`,
+		"layer none":       `{"proposals":[],"withheld":[{"layer":"none","target":"a","evidence":["e"]}]}`,
+		"layer out of set": `{"proposals":[],"withheld":[{"layer":"x","target":"a","evidence":["e"]}]}`,
+		"blank target":     `{"proposals":[],"withheld":[{"layer":"prompt","target":" ","evidence":["e"]}]}`,
+		"empty evidence":   `{"proposals":[],"withheld":[{"layer":"prompt","target":"a","evidence":[]}]}`,
+		"blank evidence":   `{"proposals":[],"withheld":[{"layer":"prompt","target":"a","evidence":["e"," "]}]}`,
+		"evidence not str": `{"proposals":[],"withheld":[{"layer":"prompt","target":"a","evidence":[1]}]}`,
+	} {
+		t.Run("invalid "+name, func(t *testing.T) {
+			if _, ok := validateJ8Withheld([]byte(data)); ok {
+				t.Errorf("invalid withheld accepted: %s", data)
+			}
+		})
+	}
+}
+
+// 見送りの欄はスキーマで任意（required に入れない）で、根拠は 1 件以上・空でない文字列。
+func TestJ8OutputSchema_WithheldIsOptional(t *testing.T) {
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties struct {
+			Withheld struct {
+				Items struct {
+					Required   []string                  `json:"required"`
+					Properties map[string]map[string]any `json:"properties"`
+				} `json:"items"`
+			} `json:"withheld"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(j8OutputSchema(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(schema.Required, ",") != "proposals" {
+		t.Errorf("required = %v", schema.Required)
+	}
+	if strings.Join(schema.Properties.Withheld.Items.Required, ",") != "layer,target,evidence" {
+		t.Errorf("withheld required = %v", schema.Properties.Withheld.Items.Required)
+	}
+	if got, ok := schema.Properties.Withheld.Items.Properties["evidence"]["minItems"].(float64); !ok || got != 1 {
+		t.Errorf("evidence minItems = %v", schema.Properties.Withheld.Items.Properties["evidence"]["minItems"])
+	}
+}

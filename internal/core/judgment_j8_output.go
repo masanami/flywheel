@@ -83,6 +83,25 @@ type j8RawOutput struct {
 	Proposals *[]j8RawProposal `json:"proposals"`
 }
 
+// J8Withheld は J8 が達成の条件の項目がすべて満たし済みのため出さなかった提案 1 件（見送り）。
+// core は課題を作らず、J8 の判断の記録（作業ログ）にだけ残す。
+type J8Withheld struct {
+	Layer  OccurrenceLayer
+	Target string
+	// Evidence は満たし済みの根拠（満たしている箇所・コミット・課題など）。1 件以上。
+	Evidence []string
+}
+
+type j8RawWithheld struct {
+	Layer    *string   `json:"layer"`
+	Target   *string   `json:"target"`
+	Evidence *[]string `json:"evidence"`
+}
+
+type j8RawWithheldOutput struct {
+	Withheld *[]j8RawWithheld `json:"withheld"`
+}
+
 // j8OutputSchema は J8 の `--json-schema` に渡すスキーマ。閉集合の値は各閉集合の定義から作る。
 func j8OutputSchema() []byte {
 	str := map[string]any{"type": "string"}
@@ -100,11 +119,21 @@ func j8OutputSchema() []byte {
 		"done_criteria":  nonEmpty,
 	}
 	required := []string{"layer", "target", "cause", "occurrence_ids", "metric", "expected", "action", "title", "done_criteria"}
+	withheld := map[string]any{
+		"layer":    enum(j6StringEnum(J8LayerValues)),
+		"target":   nonEmpty,
+		"evidence": map[string]any{"type": "array", "items": nonEmpty, "minItems": 1},
+	}
 	schema := map[string]any{
 		"type": "object", "additionalProperties": false, "required": []string{"proposals"},
 		"properties": map[string]any{
 			"proposals": map[string]any{"type": "array", "maxItems": J8MaxProposals, "items": map[string]any{
 				"type": "object", "properties": props, "required": required, "additionalProperties": false,
+			}},
+			// withheld は任意。条件の項目がすべて満たし済みで出さなかった提案と、その根拠。
+			"withheld": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object", "properties": withheld, "required": []string{"layer", "target", "evidence"},
+				"additionalProperties": false,
 			}},
 		},
 	}
@@ -177,6 +206,43 @@ func validateJ8Output(data []byte) ([]J8Proposal, bool) {
 		}
 		seenKeys[prop.Key()] = true
 		out = append(out, prop)
+	}
+	return out, true
+}
+
+// validateJ8Withheld は J8 の出力の任意の欄 withheld（見送り）を検査する。欄が無い・null・空の配列は
+// 見送りなし（nil, true）。層が閉集合の外か none・対象が空白だけ・根拠が無いか空白だけの要素を含む・
+// 項目の欠落・形の不正のいずれかなら ok=false（出力全体を不正とする）。
+func validateJ8Withheld(data []byte) ([]J8Withheld, bool) {
+	var raw j8RawWithheldOutput
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, false
+	}
+	if raw.Withheld == nil || len(*raw.Withheld) == 0 {
+		return nil, true
+	}
+	out := make([]J8Withheld, 0, len(*raw.Withheld))
+	for _, w := range *raw.Withheld {
+		if w.Layer == nil || w.Target == nil || w.Evidence == nil {
+			return nil, false
+		}
+		layer := OccurrenceLayer(*w.Layer)
+		if !slices.Contains(J8LayerValues, layer) {
+			return nil, false
+		}
+		target := strings.TrimSpace(*w.Target)
+		if target == "" || len(*w.Evidence) == 0 {
+			return nil, false
+		}
+		ev := make([]string, 0, len(*w.Evidence))
+		for _, e := range *w.Evidence {
+			e = strings.TrimSpace(e)
+			if e == "" {
+				return nil, false
+			}
+			ev = append(ev, e)
+		}
+		out = append(out, J8Withheld{Layer: layer, Target: target, Evidence: ev})
 	}
 	return out, true
 }

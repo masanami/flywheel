@@ -488,3 +488,57 @@ func TestJ8Input_ChallengeStateSection(t *testing.T) {
 		t.Errorf("unrelated challenge in section:\n%s", text)
 	}
 }
+
+// #571: 計画の 4 通り（終了・取りやめ・未了・課題なし）と、課題を引けなかった場合（状態は未確認）を区画に出す。
+// occurrence.challenge_id は NOT NULL の外部キーのため、課題なし・引けない課題は実ストアから読んだ文脈の
+// 明細の課題の ID を書き換えて作り、状態の読み込みは実ストアのトランザクションで行う。
+func TestJ8Input_ChallengeStateSection_NoChallengeAndUnknown(t *testing.T) {
+	s := newStoreForTest(t)
+	mexec(t, s, `INSERT INTO challenge (title, status, reporter, created_at, updated_at)
+		VALUES ('open', 'in_progress', 't', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`)
+	open := j8MaxID(t, s, "challenge")
+	done := j8InsertImprovement(t, s, "prompt", "p", "done")
+	wd := j8InsertImprovement(t, s, "prompt", "q", "withdrawn")
+	j8Occ(t, s, open, j8Row{})
+	noCh := j8Occ(t, s, open, j8Row{})
+	missingOcc := j8Occ(t, s, open, j8Row{})
+	jc := j8Load(t, s, 10)
+	const missing = int64(9999)
+	for gi := range jc.Groups {
+		for di := range jc.Groups[gi].Details {
+			switch jc.Groups[gi].Details[di].ID {
+			case noCh:
+				jc.Groups[gi].Details[di].ChallengeID = 0
+			case missingOcc:
+				jc.Groups[gi].Details[di].ChallengeID = missing
+			}
+		}
+	}
+	err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		var err error
+		jc.ChallengeStates, err = loadJ8ChallengeStates(context.Background(), tx, jc)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := j8Section(t, jc, j8ChallengeStateLabel)
+	for _, want := range []string{
+		"- 課題: " + formatChallengeID(open) + " / 状態: 未了",
+		"- 課題: " + formatChallengeID(done) + " / 状態: 終了",
+		"- 課題: " + formatChallengeID(wd) + " / 状態: 取りやめ",
+		"- 課題: " + formatChallengeID(missing) + " / 状態: 状態は未確認",
+		"- 課題なし: 発生 " + formatOccurrenceID(noCh) + "（課題を持たないので状態は未確認）",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("section lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, formatChallengeID(0)) {
+		t.Errorf("section shows challenge 0:\n%s", text)
+	}
+	detail := j8Section(t, jc, j8OccurrencesLabel)
+	if !strings.Contains(detail, "ID: "+formatOccurrenceID(noCh)+" / ") || !strings.Contains(detail, "/ 課題: なし /") {
+		t.Errorf("detail does not show the occurrence without a challenge:\n%s", detail)
+	}
+}

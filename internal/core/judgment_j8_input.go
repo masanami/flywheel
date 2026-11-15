@@ -80,6 +80,30 @@ type j8Context struct {
 type j8ChallengeState struct {
 	ID     int64
 	Status Status
+	// Unknown は課題を引けなかった（行が無い）ことを表す。区画には「状態は未確認」と出す。
+	Unknown bool
+}
+
+// j8NoChallengeOccurrences は明細の発生のうち課題を持たない（課題の ID が 0）ものの ID を昇順で返す。
+func j8NoChallengeOccurrences(jc *j8Context) []int64 {
+	var out []int64
+	for _, g := range jc.Groups {
+		for _, o := range g.Details {
+			if o.ChallengeID <= 0 {
+				out = append(out, o.ID)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// j8ChallengeRef は明細の課題の欄の表示。課題を持たない発生は「なし」。
+func j8ChallengeRef(id int64) string {
+	if id <= 0 {
+		return "なし"
+	}
+	return formatChallengeID(id)
 }
 
 // j8StateText は課題の状態を J8 に伝える 3 値（終了・取りやめ・未了。指示文に状態の表示名を書けない規則のため、状態の表示名とは別の語を使う）へ写す。
@@ -176,7 +200,8 @@ func loadJ8ChallengeStates(ctx context.Context, tx *sql.Tx, jc *j8Context) ([]j8
 		var st string
 		err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, id).Scan(&st)
 		if errors.Is(err, sql.ErrNoRows) {
-			continue // 課題が無ければ載せない（区画に無い課題は「状態は未確認」）
+			out = append(out, j8ChallengeState{ID: id, Unknown: true}) // 課題を引けなければ「状態は未確認」と載せる
+			continue
 		}
 		if err != nil {
 			return nil, err
@@ -413,7 +438,7 @@ func prepareJ8(jc *j8Context) []JudgmentDataSection {
 		fmt.Fprintf(&b, "- 層: %s / 対象: %s / 件数: %d\n", g.Layer, oneLine(g.Target), g.Count)
 		for _, o := range g.Details {
 			fmt.Fprintf(&b, "  - ID: %s / 種類: %s / 原因: %s / 兆候: %s / 課題: %s / 作成: %s\n",
-				formatOccurrenceID(o.ID), o.Kind, oneLine(o.Cause), oneLine(o.Signal), formatChallengeID(o.ChallengeID), o.At)
+				formatOccurrenceID(o.ID), o.Kind, oneLine(o.Cause), oneLine(o.Signal), j8ChallengeRef(o.ChallengeID), o.At)
 		}
 	}
 	if len(jc.Groups) == 0 {
@@ -459,9 +484,21 @@ func prepareJ8(jc *j8Context) []JudgmentDataSection {
 
 	b.Reset()
 	for _, cs := range jc.ChallengeStates {
-		fmt.Fprintf(&b, "- 課題: %s / 状態: %s\n", formatChallengeID(cs.ID), j8StateText(cs.Status))
+		st := j8StateText(cs.Status)
+		if cs.Unknown {
+			st = "状態は未確認"
+		}
+		fmt.Fprintf(&b, "- 課題: %s / 状態: %s\n", formatChallengeID(cs.ID), st)
 	}
-	if len(jc.ChallengeStates) == 0 {
+	noCh := j8NoChallengeOccurrences(jc)
+	if len(noCh) > 0 {
+		ids := make([]string, len(noCh))
+		for i, id := range noCh {
+			ids[i] = formatOccurrenceID(id)
+		}
+		fmt.Fprintf(&b, "- 課題なし: 発生 %s（課題を持たないので状態は未確認）\n", strings.Join(ids, ", "))
+	}
+	if len(jc.ChallengeStates) == 0 && len(noCh) == 0 {
 		b.WriteString("載せた課題は無い。")
 	}
 	sections = append(sections, JudgmentDataSection{Label: j8ChallengeStateLabel, Content: strings.TrimRight(b.String(), "\n")})
