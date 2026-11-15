@@ -338,6 +338,7 @@ export function seed(): Record<string, MockWorkspace> {
           closed_at: null,
           relay_quote: null,
           relay_session: null,
+          replan: false,
           from_status: "in_progress",
           from_status_label: "着手中",
           kind: "human",

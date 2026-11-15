@@ -172,7 +172,13 @@ func TestFromApprovalAndHoldCopyRelayEvidence(t *testing.T) {
 		h.RelaySession == nil || *h.RelaySession != sess || h.RelayQuote == nil || *h.RelayQuote != quote {
 		t.Errorf("FromHold = %+v, want cli/relayed/%q/%q", h, sess, quote)
 	}
+	if !view.FromHold(core.Hold{Question: "q", FromStatus: core.StatusInProgress, RaisedAt: at, Replan: true}).Replan {
+		t.Error("FromHold(Replan: true).Replan = false, want true")
+	}
 	got := marshal(t, view.FromHold(core.Hold{Question: "q", FromStatus: core.StatusUnclassified, RaisedAt: at}))
+	if !strings.Contains(got, `"replan":false`) {
+		t.Errorf("FromHold(no mark) = %s, want replan:false", got)
+	}
 	for _, k := range []string{`"answered_channel":null`, `"answered_verification":null`, `"relay_quote":null`, `"relay_session":null`} {
 		if !strings.Contains(got, k) {
 			t.Errorf("FromHold(unanswered) = %s, want %s", got, k)

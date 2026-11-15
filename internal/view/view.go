@@ -194,7 +194,9 @@ type Hold struct {
 	RaisedAt     string  `json:"raised_at"`
 	RelayQuote   *string `json:"relay_quote"`
 	RelaySession *string `json:"relay_session"`
-	RunID        *string `json:"run_id"`
+	// Replan は回答に付いた「範囲が変わる」印。真なら、その回答で課題は計画の作り直しへ戻った。
+	Replan bool    `json:"replan"`
+	RunID  *string `json:"run_id"`
 }
 
 // FromHold は core.Hold を Hold へ変換する。
@@ -214,6 +216,7 @@ func FromHold(h core.Hold) Hold {
 		RaisedAt:             FormatTimestamp(h.RaisedAt),
 		RelayQuote:           h.RelayQuote,
 		RelaySession:         h.RelaySession,
+		Replan:               h.Replan,
 		RunID:                h.RunID,
 	}
 }

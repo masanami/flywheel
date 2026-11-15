@@ -139,6 +139,7 @@ it("取り下げで回答なしに閉じた保留は、開いている保留と�
         closed_at: "2026-02-03T00:00:00Z",
         relay_quote: null,
         relay_session: null,
+        replan: false,
         from_status: "in_progress",
         from_status_label: "着手中",
         kind: "human",
@@ -194,6 +195,7 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
         closed_at: null,
         relay_quote: null,
         relay_session: null,
+        replan: false,
         from_status: "in_progress",
         from_status_label: "着手中",
         kind: "human",
@@ -284,6 +286,7 @@ it("AC-119: 外部由来の文字列は文字として出し、script 要素と 
         closed_at: null,
         relay_quote: null,
         relay_session: null,
+        replan: false,
         from_status: "in_progress",
         from_status_label: "",
         kind: "human",
@@ -551,6 +554,7 @@ it("親が直接行う保留が開いているとき、「未回答」ではな�
         closed_at: null,
         relay_quote: null,
         relay_session: null,
+        replan: false,
         from_status: "classified",
         from_status_label: "分類済",
         kind: "parent_direct",
@@ -612,4 +616,41 @@ it("親が直接行った記録の無い課題の詳細には、その節を出�
   const detail = await openDetail();
   await within(detail).findByText(/保留の問いと回答/);
   expect(within(detail).queryByLabelText("親が直接行った記録")).toBeNull();
+});
+
+it("範囲が変わる印（replan）付きの回答の保留には、計画を作り直す旨の印が出る。印の無い回答には出ない", async () => {
+  const base = {
+    answered_at: "t1",
+    answered_by: "me",
+    answered_channel: "tty",
+    answered_verification: "tty_confirm",
+    closed_at: null,
+    relay_quote: null,
+    relay_session: null,
+    from_status: "in_progress",
+    from_status_label: "着手中",
+    kind: "human",
+    raised_at: "t0",
+    run_id: null,
+  };
+  const d = show({
+    holds: [
+      { ...base, answer: "回答", question: "印あり", replan: true },
+      {
+        ...base,
+        answer: "回答",
+        question: "印なし",
+        replan: false,
+        raised_at: "t00",
+      },
+    ],
+  });
+  installFakes(bodies(d, {}));
+  const detail = await openDetail();
+  const marked = (await within(detail).findByText(/印あり$/)).closest("li");
+  expect(marked?.querySelector("[data-replan]")).not.toBeNull();
+  expect(marked?.textContent).toContain("計画を作り直す");
+  const plain = (await within(detail).findByText(/印なし$/)).closest("li");
+  expect(plain?.querySelector("[data-replan]")).toBeNull();
+  expect(plain?.textContent).not.toContain("計画を作り直す");
 });
