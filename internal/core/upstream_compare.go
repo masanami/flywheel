@@ -44,7 +44,7 @@ type UpstreamComparison struct {
 	TotalCommits int
 	Commits      []UpstreamCommit
 	Files        []UpstreamFile
-	// FilesTruncated は変更ファイルの一覧が 1 ページに収まらず、打ち切られているかもしれないこと。
+	// FilesTruncated は変更ファイルの一覧が上流の上限（300 件）に達し、取り切れたと確かめられないこと。
 	FilesTruncated bool
 }
 

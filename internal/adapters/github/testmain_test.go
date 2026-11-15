@@ -115,13 +115,8 @@ func runFakeGH(argv []string) int {
 	case "compare_commits_truncated":
 		fmt.Print(`{"status":"ahead","total_commits":300,"commits":[{"sha":"m1","parents":[],"commit":{"message":"x"}}],"files":[]}`)
 		return 0
-	case "compare_commits_full_files":
-		files := make([]string, 0, 100)
-		for i := 0; i < 100; i++ {
-			files = append(files, fmt.Sprintf(`{"filename":"f%d","patch":"p"}`, i))
-		}
-		fmt.Printf(`{"status":"diverged","total_commits":1,"commits":[{"sha":"c","parents":[{"sha":"p"}],"commit":{"message":"x"}}],"files":[%s]}`, strings.Join(files, ","))
-		return 0
+	case "compare_commits_files_188", "compare_commits_files_300", "compare_commits_files_100":
+		return fakeGHCompareFiles(argv, os.Getenv(envScenario))
 	case "compare_commits_bad_json":
 		fmt.Print(`not json`)
 		return 0
@@ -611,4 +606,23 @@ func fakeGHCommitChecks(argv []string, scenario string) int {
 	}
 	fmt.Fprintf(os.Stderr, "fake gh: unexpected endpoint %q\n", endpoint)
 	return 1
+}
+
+// fakeGHCompareFiles は実 API と同じく、ファイル一覧を 1 ページ目に全件（最大 300）載せ、2 ページ目以降は空で返す。
+func fakeGHCompareFiles(argv []string, scenario string) int {
+	total := map[string]int{"compare_commits_files_188": 188, "compare_commits_files_300": 300, "compare_commits_files_100": 100}[scenario]
+	page := 1
+	for _, a := range argv {
+		if i := strings.Index(a, "&page="); i >= 0 {
+			if n, err := strconv.Atoi(a[i+len("&page="):]); err == nil {
+				page = n
+			}
+		}
+	}
+	files := make([]string, 0, total)
+	for i := 0; page == 1 && i < total; i++ {
+		files = append(files, fmt.Sprintf(`{"filename":"f%d","patch":"p"}`, i))
+	}
+	fmt.Printf(`{"status":"diverged","total_commits":1,"commits":[{"sha":"c","parents":[{"sha":"p"}],"commit":{"message":"x"}}],"files":[%s]}`, strings.Join(files, ","))
+	return 0
 }

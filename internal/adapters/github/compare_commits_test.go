@@ -55,13 +55,36 @@ func TestCompareCommits_ReportsTruncation(t *testing.T) {
 		t.Errorf("comparison = %+v, want the total (300) kept next to the one returned commit", got)
 	}
 
-	t.Setenv(envScenario, "compare_commits_full_files")
-	got, err = newTestClient(t, dir).CompareCommits(context.Background(), "o/r", "v", "h1")
-	if err != nil {
-		t.Fatalf("CompareCommits: %v", err)
+}
+
+func TestCompareCommits_FilesTruncatedOnlyAtApiLimit(t *testing.T) {
+	dir := newFakeGHDir(t)
+	cases := []struct {
+		scenario  string
+		files     int
+		truncated bool
+		calls     int
+	}{
+		{"compare_commits_files_188", 188, false, 1},
+		{"compare_commits_files_100", 100, false, 1},
+		{"compare_commits_files_300", 300, true, 1},
 	}
-	if got.Status != core.UpstreamCompareDiverged || !got.FilesTruncated || len(got.Files) != 100 {
-		t.Errorf("comparison = status %q truncated %v files %d, want diverged with a full page marked truncated", got.Status, got.FilesTruncated, len(got.Files))
+	for _, tc := range cases {
+		logPath := newFakeGHLogPath(t)
+		t.Setenv(envScenario, tc.scenario)
+		t.Setenv(envLogFile, logPath)
+		got, err := newTestClient(t, dir).CompareCommits(context.Background(), "o/r", "v", "h1")
+		if err != nil {
+			t.Fatalf("%s: CompareCommits: %v", tc.scenario, err)
+		}
+		if len(got.Files) != tc.files || got.FilesTruncated != tc.truncated || got.Status != core.UpstreamCompareDiverged || len(got.Commits) != 1 {
+			t.Errorf("%s: files %d truncated %v status %q commits %d, want files %d truncated %v", tc.scenario, len(got.Files), got.FilesTruncated, got.Status, len(got.Commits), tc.files, tc.truncated)
+		}
+		calls := readInvocationLog(t, logPath)
+		if len(calls) != tc.calls {
+			t.Errorf("%s: calls = %d, want %d", tc.scenario, len(calls), tc.calls)
+		}
+		assertAllGET(t, calls)
 	}
 }
 
