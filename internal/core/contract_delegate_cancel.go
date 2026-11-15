@@ -79,10 +79,7 @@ func (s *Store) CancelOpenContractRuns(ctx context.Context, in ContractCancelInp
 		if err != nil {
 			return n, err
 		}
-		workDir, err := s.existingContractWorkDir(ctx, in.AgentDecl, in.ConnDecl, row.ChallengeID, in.WorkDir)
-		if err != nil {
-			return n, err
-		}
+		workDir := existingContractWorkDir(row, in.WorkDir)
 		rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, row, "cancel", command, nil, nil,
 			"課題の取り下げまたは計画の作り直しのため、接続ツールの run の中止を依頼した。")
 		if err != nil {

@@ -221,16 +221,18 @@ type contractRunRow struct {
 	MaxBudget     int64
 	// RequestedKind・RequestedDecider・RequestedText は最後に読んだ求められた操作（無ければ空）。
 	RequestedKind, RequestedDecider, RequestedText string
+	// WorkDir は start を実行した作業ディレクトリ（0023 より前に始めた run は空）。
+	WorkDir string
 }
 
 const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
-	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, '') FROM contract_run`
+	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(work_dir, '') FROM contract_run`
 
 func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, error) {
 	var r contractRunRow
 	var state string
 	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget,
-		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText); err != nil {
+		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.WorkDir); err != nil {
 		return nil, err
 	}
 	r.State = ContractState(state)
@@ -357,14 +359,14 @@ func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration
 	return s.predictionWorkDir(ctx, *repo)
 }
 
-// existingContractWorkDir は既存の契約の run へのコマンド（status・resume・cancel）の作業ディレクトリ。start と同じ決め方で、
-// 決められないときは（読み直しを止めないため）従来どおり contractWorkDir の既定に任せる。
-func (s *Store) existingContractWorkDir(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, cid int64, explicit string) (string, error) {
-	wd, ok, err := s.contractRepoWorkDir(ctx, agent, conn, cid, explicit)
-	if err != nil || !ok {
-		return "", err
+// existingContractWorkDir は既存の契約の run へのコマンド（status・resume・cancel）の作業ディレクトリ。決め直さず、
+// start で記録した作業ディレクトリ（contract_run.work_dir）を使う。記録の無い run（記録を足す前に始めたもの）は
+// ワークスペース（contractWorkDir の既定）で実行する。呼び出し元が WorkDir を明示したときはそれを使う。
+func existingContractWorkDir(row *contractRunRow, explicit string) string {
+	if explicit != "" {
+		return explicit
 	}
-	return wd, nil
+	return row.WorkDir
 }
 
 // StartContractDelegation は課題 1 件の委譲を契約の開始で始める。実行 ID を contract_run に保存し、
@@ -799,10 +801,10 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	if c.Existing == nil {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary,
-				requested_kind, requested_decider, requested_text, cost_usd, max_budget_usd, started_at, observed_at, ended_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				requested_kind, requested_decider, requested_text, cost_usd, max_budget_usd, started_at, observed_at, ended_at, work_dir)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ChallengeIDInt, c.Connector, st.RunID, c.RunIDInt, string(st.State), st.Summary, rk, rd, rt,
-			totalMicros, c.MaxMicros, now, now, endedAt)
+			totalMicros, c.MaxMicros, now, now, endedAt, c.Launch.WorkDir)
 		if err != nil {
 			return err
 		}

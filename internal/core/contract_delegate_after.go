@@ -275,10 +275,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	if err != nil {
 		return nil, err
 	}
-	workDir, err := s.existingContractWorkDir(ctx, in.AgentDecl, in.ConnDecl, row.ChallengeID, in.WorkDir)
-	if err != nil {
-		return nil, err
-	}
+	workDir := existingContractWorkDir(row, in.WorkDir)
 	rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, row, name, command, planVersion, cycleID, "")
 	if err != nil {
 		return nil, err
@@ -339,10 +336,7 @@ func (s *Store) resumeObservation(ctx context.Context, in ContractPollInput, row
 	latest := *row
 	latest.State, latest.Summary, latest.CostMicros = statusRep.State, statusRep.Summary, usdToMicros(statusRep.CostTotalUSD)
 	latest.RequestedKind = contractRequestedKindObserve
-	workDir, err := s.existingContractWorkDir(ctx, in.AgentDecl, in.ConnDecl, row.ChallengeID, in.WorkDir)
-	if err != nil {
-		return nil, err
-	}
+	workDir := existingContractWorkDir(row, in.WorkDir)
 	rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, &latest, "resume", command, planVersion, cycleID, "")
 	if err != nil {
 		return nil, err
@@ -461,10 +455,7 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 		row.ExternalRunID, formatUSDAmount(rep.CostTotalUSD), formatUSDAmount(microsToUSD(row.MaxBudget)))
 	latest := *row
 	latest.State, latest.Summary, latest.CostMicros = rep.State, rep.Summary, usdToMicros(rep.CostTotalUSD)
-	workDir, err := s.existingContractWorkDir(ctx, in.AgentDecl, in.ConnDecl, row.ChallengeID, in.WorkDir)
-	if err != nil {
-		return err
-	}
+	workDir := existingContractWorkDir(row, in.WorkDir)
 	crep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, &latest, "cancel", command, planVersion, cycleID, note)
 	if err != nil {
 		return err
