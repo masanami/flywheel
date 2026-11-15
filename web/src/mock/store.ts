@@ -21,7 +21,7 @@ import type {
   WaitingChallenge,
   Workspace,
 } from "../api/types.gen.ts";
-import type { DiscrepancyKind } from "../labels.ts";
+import { type DiscrepancyKind, HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
 import { type GraphSeed, seedGraphs } from "./graph.ts";
 import { type LargeSpec, largeWorkspace } from "./large.ts";
 
@@ -638,7 +638,7 @@ const CYCLE_KIND: DiscrepancyKind = "dependency_cycle";
 export function isParentAgent(m: MockChallenge): boolean {
   if (m.c.status !== "awaiting_human") return false;
   const open = m.holds.filter((h) => h.answer === null && h.closed_at === null);
-  return open[open.length - 1]?.kind === "parent_direct";
+  return open[open.length - 1]?.kind === HOLD_KIND_PARENT_DIRECT;
 }
 
 export function cardOf(m: MockChallenge): Card {
@@ -844,6 +844,16 @@ export function statusOf(w: MockWorkspace): StatusResponse {
       ),
     },
   };
+}
+
+// 「親が直接行う」保留の例を入れた偽のデータ（`?mock=parent-direct`のときだけ。既定の seed() は件数を使う試験が多いので
+// 例を足さない）。seed() の課題 C-8（人間対応待ち）の開いている保留を、種類が親が直接行うにする。
+export function seedParentDirect(): Record<string, MockWorkspace> {
+  const ws = seed();
+  const m = ws.alpha?.items.find((i) => i.c.id === "C-8");
+  if (!m) throw new Error("seed に C-8 が無い");
+  for (const h of m.holds) h.kind = HOLD_KIND_PARENT_DIRECT;
+  return ws;
 }
 
 // 大きなまとまりの偽のデータ（flywheel#470。`?mock=large` のときだけ）。large は課題 100 件がほぼ 1 つにつながる形、

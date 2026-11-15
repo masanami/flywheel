@@ -3,6 +3,7 @@ import {
   CARD_ACTION_CODES,
   CARD_MODIFIER_CODES,
   DISCREPANCY_KIND_CODES,
+  HOLD_KIND_CODES,
   STATUS_CODES,
 } from "./api/types.gen.ts";
 import {
@@ -12,6 +13,8 @@ import {
   CARD_STATES,
   DISCREPANCY_KINDS,
   DISCREPANCY_LABELS,
+  HOLD_KIND_HUMAN,
+  HOLD_KIND_PARENT_DIRECT,
   MARK_KINDS,
   MARK_LABELS,
   MODIFIER_LABELS,
@@ -23,6 +26,10 @@ it("AC-102: 閉集合のすべてのコードに文言があり、core の定義
   expect([...CARD_MODIFIERS]).toEqual([...CARD_MODIFIER_CODES]);
   expect([...CARD_STATES]).toEqual([...STATUS_CODES]);
   expect([...DISCREPANCY_KINDS]).toEqual([...DISCREPANCY_KIND_CODES]);
+  expect([HOLD_KIND_HUMAN, HOLD_KIND_PARENT_DIRECT]).toEqual([
+    ...HOLD_KIND_CODES,
+  ]);
+  expect(HOLD_KIND_PARENT_DIRECT).toBe("parent_direct");
   for (const [codes, table] of [
     [CARD_STATES, STATE_LABELS],
     [CARD_MODIFIERS, MODIFIER_LABELS],

@@ -432,7 +432,11 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 		b.Reset()
 		b.WriteString("この課題は対話のセッションの親が直接行った（委譲の run も完了の検証も無い）。成果物の参照:\n")
 		for i, d := range jc.DirectCompletions {
-			fmt.Fprintf(&b, "- 記録 %d / %s\n", i+1, formatTimestamp(d.CreatedAt))
+			fmt.Fprintf(&b, "- 記録 %d / %s", i+1, formatTimestamp(d.CreatedAt))
+			if d.ActivityID != nil {
+				fmt.Fprintf(&b, " / ID: %s-%d", j6EvidenceActivity, *d.ActivityID)
+			}
+			b.WriteString("\n")
 			for _, a := range d.Artifacts {
 				fmt.Fprintf(&b, "  - 参照: %s\n", oneLine(a))
 			}

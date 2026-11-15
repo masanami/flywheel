@@ -8,6 +8,7 @@ import type {
 import {
   DEPENDENCY_SATISFIED_LABEL,
   DEPENDENCY_WAITING_LABEL,
+  HOLD_KIND_PARENT_DIRECT,
   STATE_LABELS,
   label,
 } from "../labels.ts";
@@ -361,7 +362,7 @@ export function DetailSections({ l }: { l: Loaded }) {
                   <ClampedText text={h.answer} />
                 ) : h.closed_at !== null ? (
                   `回答なしで閉じた（${h.closed_at}）`
-                ) : h.kind === "parent_direct" ? (
+                ) : h.kind === HOLD_KIND_PARENT_DIRECT ? (
                   PARENT_DIRECT_HOLD_NOTE
                 ) : (
                   "未回答"

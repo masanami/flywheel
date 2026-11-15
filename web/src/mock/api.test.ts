@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ApiClient } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
+import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
 import { createMockApi } from "./api.ts";
 import { MockStore, graphOf } from "./store.ts";
 
@@ -75,7 +76,7 @@ describe("親が直接行う保留（#452）", () => {
     const w = store.workspaces.alpha;
     const m = w?.items.find((i) => i.c.id === "C-8");
     if (!w || !m) throw new Error("fixture");
-    for (const h of m.holds) h.kind = "parent_direct";
+    for (const h of m.holds) h.kind = HOLD_KIND_PARENT_DIRECT;
     return { w, m };
   }
 
