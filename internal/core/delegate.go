@@ -836,7 +836,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	switch {
 	case errors.Is(err, ErrSlotUnavailable):
 		if jc != nil {
-			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedSlotUnavailable}, nil
+			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedSlotUnavailable, Detail: slotUnavailableDetail(err)}, nil
 		}
 		return nil, nil, err
 	case errors.Is(err, ErrBudgetExceeded):
@@ -850,6 +850,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		return nil, nil, err
 	}
 	runIDInt, _ := parseRunID(assignment.RunID)
+	heldNote := s.recordSlotBranchHeld(assignment)
 
 	launch := DelegateLaunchInput{
 		SessionID:      sessionID,
@@ -1003,7 +1004,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		// 起動の最中に回収された run は、ストアの記録（interrupted）を結果にする。
 		return &JudgmentAutoItem{ChallengeID: ch.ID, RunID: assignment.RunID, Result: reaped.Result}, nil, nil
 	}
-	item := &JudgmentAutoItem{ChallengeID: ch.ID, RunID: assignment.RunID, Result: result}
+	item := &JudgmentAutoItem{ChallengeID: ch.ID, RunID: assignment.RunID, Result: result, Note: heldNote}
 	if report != nil {
 		item.Outcome = string(report.Outcome)
 	}
@@ -1012,7 +1013,10 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		if err != nil {
 			return nil, nil, err
 		}
-		item.Status, item.Note = status, note
+		item.Status = status
+		if note != "" {
+			item.Note = heldNote + "; " + note
+		}
 	}
 	return item, nil, nil
 }

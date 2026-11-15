@@ -589,6 +589,12 @@ func TestSwitchTree_DetachToBaseCheckoutBranchAndNeverForces(t *testing.T) {
 	}
 	if err := g.SwitchTree(ctx, t2, core.SlotSwitch{Branch: "pr", Ref: "refs/heads/main"}); !errors.Is(err, core.ErrBranchCheckedOutElsewhere) {
 		t.Errorf("checking out a branch held by another worktree: err = %v, want ErrBranchCheckedOutElsewhere", err)
+	} else {
+		// 持っている作業ツリーのパスを正規化して返す（core が置き場の中かを決める）。
+		var he *core.BranchCheckedOutElsewhereError
+		if !errors.As(err, &he) || he.Path == "" || realPath(he.Path) != realPath(p1) {
+			t.Errorf("holder path = %+v, want the path of %s", he, p1)
+		}
 	}
 	// 元のクローン（走査の外の作業ツリー）が持つブランチも同じ失敗として返す。
 	if err := g.SwitchTree(ctx, t2, core.SlotSwitch{Branch: "main", Ref: "refs/heads/main"}); !errors.Is(err, core.ErrBranchCheckedOutElsewhere) {
@@ -600,5 +606,17 @@ func TestSwitchTree_DetachToBaseCheckoutBranchAndNeverForces(t *testing.T) {
 	// 先頭がダッシュのブランチ名は拒否する。
 	if err := g.SwitchTree(ctx, t2, core.SlotSwitch{Branch: "--orphan", Ref: "refs/heads/main"}); err == nil {
 		t.Error("an option-like branch name was accepted")
+	}
+}
+
+func TestHeldWorktreePath(t *testing.T) {
+	for msg, want := range map[string]string{
+		"fatal: 'fix/b' is already used by worktree at '/a b/c'": "/a b/c",
+		"fatal: 'fix/b' is already checked out at '/x/y'":        "/x/y",
+		"fatal: something else":                                  "",
+	} {
+		if got := heldWorktreePath(&runError{args: []string{"checkout"}, msg: msg}); got != want {
+			t.Errorf("heldWorktreePath(%q) = %q, want %q", msg, got, want)
+		}
 	}
 }

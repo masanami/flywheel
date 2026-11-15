@@ -30,6 +30,8 @@ type fakeSlotGit struct {
 	provisioned SlotTreeState
 	switched    []SlotSwitchCall // SwitchTree の呼び出し（順）
 	switchErr   map[string]error
+	// branchSwitchErr は、ブランチへの checkout（req.Branch が空でない SwitchTree）だけを失敗させる。
+	branchSwitchErr map[string]error
 }
 
 // SlotSwitchCall は fakeSlotGit が記録した SwitchTree の呼び出し。
@@ -79,6 +81,9 @@ func (f *fakeSlotGit) SwitchTree(_ context.Context, tree SlotTree, req SlotSwitc
 	defer f.mu.Unlock()
 	f.switched = append(f.switched, SlotSwitchCall{Path: tree.Path, Req: req})
 	if err := f.switchErr[tree.Path]; err != nil {
+		return err
+	}
+	if err := f.branchSwitchErr[tree.Path]; err != nil && req.Branch != "" {
 		return err
 	}
 	st := f.states[tree.Path]
