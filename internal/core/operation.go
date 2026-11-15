@@ -321,10 +321,12 @@ type OperationApprovalRequest struct {
 	// HeadSHA は承認の① で取った PR の head。release の承認では必須で、空なら ErrConflict。
 	// ② で取り直さず、承認の記録の head_sha にそのまま残す。差し戻しと release 以外では使わない。
 	HeadSHA string
-	// MergeInVerifiedHead は、① が HeadSHA を「この検証の head から既定ブランチを取り込んだだけ（CI は通っている）」と
-	// 判定したときの検証の head（#485）。最新の検証の head と一致するときだけ、HeadSHA が検証の head と異なっていても
-	// 承認し、承認の記録に残す。空は取り込みの判定を伴わない承認。release の承認以外では使わない。
-	MergeInVerifiedHead string
+	// HeadSources は、HeadSHA が最新の検証の head と異なるとき、core が自分で比較して「既定ブランチの取り込みだけで
+	// CI が通っている」ことを確かめるための取得の口。CLI の判定の申告は使わない。口が無い・確かめられないときは ErrConflict。
+	HeadSources ReleaseHeadSources
+	// AcceptUndeterminable は、取り込みだけとも中身の変更とも確かめられない（比較の打ち切り等。人間待ち）head を、
+	// 人が根拠を見て承認する選択。core が自分の評価でも人間待ちと確かめたときだけ有効で、根拠を作業ログに残す。
+	AcceptUndeterminable bool
 }
 
 // ExecuteOperationApproval は `approve <OP-ID>` / `reject <OP-ID> --reason` の
@@ -359,6 +361,14 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 		return nil, nil, ErrNotFound
 	}
 
+	var assessed map[int64]*ReleaseHeadAssessment
+	if req.Decision == ApprovalDecisionApproved && strings.TrimSpace(req.HeadSHA) != "" {
+		var err error
+		if assessed, err = s.assessHeadsForApproval(ctx, map[int64]string{oid: strings.TrimSpace(req.HeadSHA)}, req.HeadSources); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	var opOut IrreversibleOperation
 	var approvalOut Approval
 	err := s.mutateAs(ctx, att.actor, att.channel, att.verification, func(tx *sql.Tx, rec *activityRecorder) error {
@@ -380,7 +390,7 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 
 		// release の承認は、① で取った head を必須とし、J5 が検証した最新の head（記録があれば）と
 		// 一致しなければ承認しない。
-		headSHA, mergeInHead := "", ""
+		headSHA, mergeInHead, undeterminable := "", "", ""
 		if req.Decision == ApprovalDecisionApproved && OperationKind(row.Kind) == OperationKindRelease {
 			headSHA = strings.TrimSpace(req.HeadSHA)
 			if headSHA == "" {
@@ -394,10 +404,11 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 			if err != nil {
 				return err
 			}
-			ok, record := releaseHeadAcceptable(verified, headSHA, strings.TrimSpace(req.MergeInVerifiedHead))
+			ok, record, undet := releaseHeadVerdict(verified, headSHA, assessed[oid], req.AcceptUndeterminable)
 			if !ok {
 				return ErrConflict
 			}
+			undeterminable = undet
 			if record {
 				mergeInHead = *verified
 			}
@@ -423,15 +434,16 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 		}
 
 		newState, approvalRowID, err := approveOperationInTx(ctx, tx, rec, operationApprovalWrite{
-			opID:        oid,
-			challengeID: row.ChallengeID,
-			version:     row.Version,
-			decision:    req.Decision,
-			reason:      req.Reason,
-			att:         att,
-			nowStr:      nowStr,
-			headSHA:     headSHA,
-			mergeInHead: mergeInHead,
+			opID:                   oid,
+			challengeID:            row.ChallengeID,
+			version:                row.Version,
+			decision:               req.Decision,
+			reason:                 req.Reason,
+			att:                    att,
+			nowStr:                 nowStr,
+			headSHA:                headSHA,
+			mergeInHead:            mergeInHead,
+			undeterminableAccepted: undeterminable,
 		})
 		if err != nil {
 			return err
@@ -549,6 +561,9 @@ type operationApprovalWrite struct {
 	// mergeInHead は、取り込みだけと判定して承認したときの検証の head（承認の記録の merge_in_verified_head）。
 	// 空なら NULL。
 	mergeInHead string
+	// undeterminableAccepted は、人間待ち（取り込みだけとも中身の変更とも確かめられない）の head を人が承認したときの、
+	// 判定できなかった理由。作業ログの after に残す。空なら残さない。
+	undeterminableAccepted string
 }
 
 // approveOperationInTx は不可逆操作 1 件について、呼び出し元のトランザクション内で
@@ -611,6 +626,9 @@ func approveOperationInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 	after := map[string]any{"state": string(newState), "version": newVersion}
 	if w.decision == ApprovalDecisionRejected {
 		after["reason"] = *w.reason
+	}
+	if w.undeterminableAccepted != "" {
+		after["undeterminable_head_accepted"] = w.undeterminableAccepted
 	}
 	if w.mergeInHead != "" {
 		after["merge_in_verified_head"] = w.mergeInHead

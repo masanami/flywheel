@@ -138,6 +138,8 @@ func releasePhaseText(res *core.ReleaseExecResult) string {
 		switch t.Action {
 		case core.ReleaseTidyReopened:
 			fmt.Fprintf(&b, "%s\t%s\t(立て直し)\t課題を完了から着手中へ戻し、%s に置き換えた（%s）\n", t.OperationID, t.ChallengeID, t.NewOperationID, t.ReopenReason)
+		case core.ReleaseTidyNeedsHuman:
+			fmt.Fprintf(&b, "%s\t%s\t(人間待ち)\t取り込みだけとも中身の変更とも確かめられません（%s）。承認するか、approve %s --reopen で着手中へ戻すかを選んでください\n", t.OperationID, t.ChallengeID, escapeControl(t.WaitReason), t.OperationID)
 		default:
 			fmt.Fprintf(&b, "%s\t%s\t(閉じた)\t%s\n", t.OperationID, t.ChallengeID, t.ClosedReason)
 		}

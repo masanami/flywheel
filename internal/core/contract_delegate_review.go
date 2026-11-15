@@ -214,6 +214,8 @@ func formatContractReopenNote(n *reopenNote) string {
 		reason = fmt.Sprintf("本番反映の段で、%s が既定ブランチへマージできない状態が連続の上限に達した。", pr)
 	case ReopenReasonContentChanged:
 		reason = fmt.Sprintf("検証の後に、%s へ既定ブランチの取り込み以外の変更が入った。", pr)
+	case ReopenReasonUndeterminable:
+		reason = fmt.Sprintf("検証の後に、%s の head が動き、既定ブランチの取り込みだけとは確かめられなかった（人が着手中へ戻した）。", pr)
 	}
 	return reason + "作業ブランチを既定ブランチへ追従させ、衝突があれば解消し、検査を通して、同じ PR へ反映すること。新しい PR を作らない。"
 }

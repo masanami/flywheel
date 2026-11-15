@@ -113,7 +113,7 @@ func TestReopenChallengeForRelease_MovesTheDoneChallengeBackAndReplacesTheReleas
 	approvalID := insertCompletionApprovalForTest(t, f.s, f.cid)
 	before := snapshotReopen(t, f.s, f.cid)
 
-	res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{
+	res, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{
 		OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable,
 	})
 	if err != nil {
@@ -192,7 +192,7 @@ func TestReopenChallengeForRelease_PendingReleaseIsReplacedToo(t *testing.T) {
 		_, err := tx.Exec(`UPDATE operation SET state = 'pending' WHERE id = ?`, f.opID)
 		return err
 	})
-	res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonContentChanged})
+	res, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonContentChanged})
 	if err != nil || !res.Reopened {
 		t.Fatalf("res = %+v, err = %v, want reopened", res, err)
 	}
@@ -211,7 +211,7 @@ func TestReopenChallengeForRelease_DoesNothingUnlessTheChallengeIsDone(t *testin
 			f := newRelFixture(t)
 			setChallengeStatus(t, f.s, f.cid, st)
 			before := snapshotReopen(t, f.s, f.cid)
-			res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
+			res, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
 			if err != nil {
 				t.Fatalf("err = %v, want nil", err)
 			}
@@ -234,7 +234,7 @@ func TestReopenChallengeForRelease_DoesNothingForOperationsThatAreNotOpenRelease
 				_, err := tx.Exec(`UPDATE operation SET state = ? WHERE id = ?`, string(state), f.opID)
 				return err
 			})
-			res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
+			res, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
 			if err != nil || res.Reopened {
 				t.Fatalf("res = %+v err = %v, want no-op", res, err)
 			}
@@ -254,7 +254,7 @@ func TestReopenChallengeForRelease_DoesNothingForOperationsThatAreNotOpenRelease
 			_, err := tx.Exec(`UPDATE operation SET kind = 'other' WHERE id = ?`, f.opID)
 			return err
 		})
-		res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
+		res, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
 		if err != nil || res.Reopened {
 			t.Fatalf("res = %+v err = %v, want no-op for a non-release", res, err)
 		}
@@ -263,13 +263,13 @@ func TestReopenChallengeForRelease_DoesNothingForOperationsThatAreNotOpenRelease
 
 func TestReopenChallengeForRelease_RejectsBadInput(t *testing.T) {
 	f := newRelFixture(t)
-	if _, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: "merge_failed"}); !errors.Is(err, ErrValidation) {
+	if _, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: "merge_failed"}); !errors.Is(err, ErrValidation) {
 		t.Errorf("unknown reason: err = %v, want ErrValidation", err)
 	}
-	if _, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: "OP-999", Reason: ReopenReasonNotMergeable}); !errors.Is(err, ErrNotFound) {
+	if _, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: "OP-999", Reason: ReopenReasonNotMergeable}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown operation: err = %v, want ErrNotFound", err)
 	}
-	if _, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: "bad", Reason: ReopenReasonNotMergeable}); !errors.Is(err, ErrNotFound) {
+	if _, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: "bad", Reason: ReopenReasonNotMergeable}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("malformed operation: err = %v, want ErrNotFound", err)
 	}
 	if snap := snapshotReopen(t, f.s, f.cid); snap.chStatus != string(StatusDone) {
@@ -281,7 +281,7 @@ func TestReopenChallengeForRelease_RejectsBadInput(t *testing.T) {
 func TestReopenChallengeForRelease_NextCompletionApprovalLinksThePreviousOneAndApprovesTheNewRelease(t *testing.T) {
 	f := newRelFixture(t)
 	prevApproval := insertCompletionApprovalForTest(t, f.s, f.cid)
-	res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
+	res, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
 	if err != nil || !res.Reopened {
 		t.Fatalf("reopen: %+v %v", res, err)
 	}
@@ -336,7 +336,7 @@ func TestReopenChallengeForRelease_NextCompletionApprovalLinksThePreviousOneAndA
 func TestReopenChallengeForRelease_SecondReopenSupersedesOnlyTheEffectiveApproval(t *testing.T) {
 	f := newRelFixture(t)
 	first := insertCompletionApprovalForTest(t, f.s, f.cid)
-	r1, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
+	r1, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
 	if err != nil || !r1.Reopened {
 		t.Fatalf("reopen 1: %+v %v", r1, err)
 	}
@@ -353,7 +353,7 @@ func TestReopenChallengeForRelease_SecondReopenSupersedesOnlyTheEffectiveApprova
 		_, err := tx.Exec(`UPDATE challenge SET status = 'done' WHERE id = ?`, f.cid)
 		return err
 	})
-	r2, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: r1.NewOperationID, Reason: ReopenReasonContentChanged})
+	r2, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: r1.NewOperationID, Reason: ReopenReasonContentChanged})
 	if err != nil || !r2.Reopened {
 		t.Fatalf("reopen 2: %+v %v", r2, err)
 	}
@@ -391,7 +391,7 @@ func TestReopenChallengeForRelease_SupersedesSiblingReleasesWithoutOpenAttempts(
 		return err
 	})
 
-	res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
+	res, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
 	if err != nil || !res.Reopened {
 		t.Fatalf("res = %+v, err = %v, want reopened", res, err)
 	}

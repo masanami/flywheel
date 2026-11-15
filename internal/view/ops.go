@@ -120,6 +120,9 @@ type ReleaseTidied struct {
 	NewOperationID *string `json:"new_operation_id,omitempty"`
 	OperationID    string  `json:"operation_id"`
 	ReopenReason   *string `json:"reopen_reason,omitempty"`
+	// WaitReason は action が needs_human（検証の後に動いた head が取り込みだけとも中身の変更とも確かめられず、人間待ちにした。
+	// 人が承認するか着手中へ戻すかを選ぶ）のときの、判定できなかった理由。
+	WaitReason *string `json:"wait_reason,omitempty"`
 }
 
 // ReleasePhase は release の段（cycle の phases の要素と `op exec` の phase が共有する）の形。
@@ -318,6 +321,7 @@ func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []c
 			NewOperationID: strOrNil(t.NewOperationID),
 			OperationID:    t.OperationID,
 			ReopenReason:   strOrNil(string(t.ReopenReason)),
+			WaitReason:     strOrNil(t.WaitReason),
 		})
 	}
 	outNS := make([]ReleaseNotStarted, 0, len(notStarted))

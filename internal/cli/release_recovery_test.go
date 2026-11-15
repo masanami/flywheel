@@ -465,3 +465,83 @@ func TestOpExec_ClosesAPendingReleaseWhosePRWasMergedOutside(t *testing.T) {
 	requireErrorCode(t, relayedArgs(ws, "approve", op), 1, CodeInvalidTransition)
 	requireErrorCode(t, append(relayedArgs(ws, "reject", op), "--reason", "x"), 1, CodeInvalidTransition)
 }
+
+// --- #517: 人間待ち（取り込みだけとも中身の変更とも確かめられない）---
+
+// miTruncatedRoutes は検証の head v から今の head h への compare の一覧が打ち切られている（取り直しても変わらない）応答。
+func miTruncatedRoutes(v, h string) []fakeGHRoute {
+	return []fakeGHRoute{miCompareRoute(v, h, miCompare(500, []miCommit{{h, []string{v}, "x"}}))}
+}
+
+// 単独の承認は、判定できない理由（打ち切り）を要約に出し、人が承認すれば成立して、理由が JSON の undeterminable に出る。
+func TestUndeterminable_SingleApprovalByAHumanIsAcceptedWithTheReason(t *testing.T) {
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
+	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
+	code, stdout, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.ops[0])...)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr)
+	}
+	doc := decodeJSON(t, stdout)
+	u, _ := doc["undeterminable"].(map[string]any)
+	if u == nil || u["kind"] != "undeterminable" || !strings.Contains(fmt.Sprint(u["detail"]), "truncated") || u["head"] != h {
+		t.Fatalf("undeterminable = %v", u)
+	}
+	if got := f.challengeStatus(t); got != "done" {
+		t.Errorf("challenge status = %s, want done (approved, not moved back)", got)
+	}
+}
+
+// 完了の承認と同時の承認は、判定できない release を外す（人が単独の承認で選ぶ）。
+func TestUndeterminable_CompletionApprovalStillExcludesIt(t *testing.T) {
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
+	code, stdout, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.id)...)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr)
+	}
+	ex := jsonList(t, decodeJSON(t, stdout), "excluded_releases")
+	if len(ex) != 1 || ex[0]["reason"] != "verified_head_mismatch" {
+		t.Fatalf("excluded_releases = %v", ex)
+	}
+}
+
+// 人が承認せず戻す方を選ぶ（approve <OP-ID> --reopen）。core が自分で人間待ちと確かめたときだけ戻る。
+func TestUndeterminable_HumanCanReopenTheChallengeInstead(t *testing.T) {
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
+	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
+	code, stdout, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.ops[0], "--reopen")...)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr)
+	}
+	doc := decodeJSON(t, stdout)
+	if doc["reason"] != "undeterminable" || doc["closed_operation_id"] != f.ops[0] || doc["new_operation_id"] == "" {
+		t.Fatalf("doc = %v", doc)
+	}
+	if got := f.challengeStatus(t); got != "in_progress" {
+		t.Errorf("challenge status = %s, want in_progress", got)
+	}
+}
+
+// 人間待ちでない release（取り込みだけ）は --reopen で戻せない。
+func TestUndeterminable_ReopenIsRefusedWhenCoreDoesNotSeeAHumanWait(t *testing.T) {
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miMergeInRoutes(v, h)))
+	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
+	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.ops[0], "--reopen")...)
+	if code == 0 {
+		t.Fatalf("exit=0, want a refusal (stderr=%s)", stderr)
+	}
+	if got := f.challengeStatus(t); got != "done" {
+		t.Errorf("challenge status = %s, want done", got)
+	}
+}
+
+func TestUndeterminable_ReopenFlagIsOnlyForOperationIDs(t *testing.T) {
+	f, _, _ := newMergeInFixture(t, nil)
+	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.id, "--reopen")...)
+	if code == 0 || !strings.Contains(stderr, "usage_error") {
+		t.Fatalf("exit=%d stderr=%s, want usage_error", code, stderr)
+	}
+}

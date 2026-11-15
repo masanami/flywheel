@@ -418,6 +418,9 @@ type ApprovalRequest struct {
 	// 完了の承認以外（計画・差し戻し・HoldRelease）では使わない。
 	ReleaseHeads       []ReleaseHead
 	ExcludedReleaseIDs []string
+	// HeadSources は、承認する組の head が検証の head と異なるとき、core が自分で比較して「既定ブランチの取り込みだけで
+	// CI が通っている」ことを確かめるための取得の口。CLI の判定の申告は使わない。口が無い・確かめられない組は ErrConflict。
+	HeadSources ReleaseHeadSources
 }
 
 // ExecuteApproval は approve（T5・T13・T14）・reject（T6・T15）の②（書き込み）。
@@ -471,6 +474,23 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 	op := OpReject
 	if req.Decision == ApprovalDecisionApproved {
 		op = OperationForApprove(req.HoldRelease)
+	}
+
+	// 検証の head と異なる head の承認は、core が自分で比較して確かめる（取得はトランザクションの外）。
+	var assessed map[int64]*ReleaseHeadAssessment
+	if req.Decision == ApprovalDecisionApproved && !req.HoldRelease && len(req.ReleaseHeads) > 0 {
+		heads := make(map[int64]string, len(req.ReleaseHeads))
+		for _, rh := range req.ReleaseHeads {
+			oid, ok := parseOperationID(rh.Operation.ID)
+			if !ok || rh.HeadSHA == nil {
+				continue
+			}
+			heads[oid] = strings.TrimSpace(*rh.HeadSHA)
+		}
+		var err error
+		if assessed, err = s.assessHeadsForApproval(ctx, heads, req.HeadSources); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	var approvalOut Approval
@@ -574,7 +594,7 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		// activity とは別に、release の数だけ積む）。T14（HoldRelease==true）・
 		// 計画の承認（kind==ApprovalKindPlan）・reject では行わない。
 		if approvesPendingReleases(kind, req.Decision, req.HoldRelease) {
-			if err := autoApproveReleases(ctx, tc, att, req); err != nil {
+			if err := autoApproveReleases(ctx, tc, att, req, assessed); err != nil {
 				return err
 			}
 		}
@@ -659,7 +679,7 @@ func completionApprovedIsGood(ctx context.Context, tx *sql.Tx, challengeID int64
 // 和集合が未承認の release の全体と一致しなければ、何も書かず ErrConflict を返す（外した release は
 // pending のまま残る）。承認する組に、直前の試行の結果が merged_unapproved の release が入っていれば、
 // 何も書かず ReapprovalForbiddenError（verification_rejected）を返す。
-func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation, req ApprovalRequest) error {
+func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation, req ApprovalRequest, assessed map[int64]*ReleaseHeadAssessment) error {
 	rows, err := tc.tx.QueryContext(ctx,
 		`SELECT id, version, ref FROM operation WHERE challenge_id = ? AND kind = ? AND state = ? ORDER BY id ASC`,
 		tc.id, string(OperationKindRelease), string(OperationStatePending),
@@ -701,7 +721,6 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 	}
 	seen := make(map[int64]bool, len(pending))
 	heads := make(map[int64]string, len(req.ReleaseHeads))
-	mergeIns := make(map[int64]string, len(req.ReleaseHeads))
 	for _, rh := range req.ReleaseHeads {
 		oid, ok := parseOperationID(rh.Operation.ID)
 		if !ok || !pendingIDs[oid] || seen[oid] {
@@ -712,9 +731,6 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 			return ErrConflict
 		}
 		heads[oid] = strings.TrimSpace(*rh.HeadSHA)
-		if rh.MergeInVerifiedHead != nil {
-			mergeIns[oid] = strings.TrimSpace(*rh.MergeInVerifiedHead)
-		}
 	}
 	for _, id := range req.ExcludedReleaseIDs {
 		oid, ok := parseOperationID(id)
@@ -741,7 +757,7 @@ func autoApproveReleases(ctx context.Context, tc *transitionCtx, att Attestation
 		if err != nil {
 			return err
 		}
-		ok, record := releaseHeadAcceptable(verified, head, mergeIns[p.id])
+		ok, record, _ := releaseHeadVerdict(verified, head, assessed[p.id], false)
 		if !ok {
 			return ErrConflict
 		}

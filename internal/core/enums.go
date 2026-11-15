@@ -211,7 +211,7 @@ func ParseClosedReason(s string) (ClosedReason, bool) {
 // ReopenReason は、完了の課題を着手中へ戻した理由（challenge_reopen.reason・approval.superseded_reason）。
 type ReopenReason string
 
-// ReopenReason の3値。本番反映でマージできなくなった場合に限る。
+// ReopenReason の4値。本番反映でマージできなくなった場合に限る。
 const (
 	// ReopenReasonNotMergeable は、本番反映の段で PR が既定ブランチへマージできなくなった（not_mergeable）。
 	ReopenReasonNotMergeable ReopenReason = "not_mergeable"
@@ -219,9 +219,12 @@ const (
 	ReopenReasonLimitReached ReopenReason = "limit_reached"
 	// ReopenReasonContentChanged は、検証の後に取り込み以外の変更が PR に入った。
 	ReopenReasonContentChanged ReopenReason = "content_changed"
+	// ReopenReasonUndeterminable は、検証の後に動いた head が取り込みだけとも中身の変更とも確かめられず（比較の打ち切り・
+	// head 無し等）、人が着手中へ戻す方を選んだ。
+	ReopenReasonUndeterminable ReopenReason = "undeterminable"
 )
 
-var reopenReasonValues = []ReopenReason{ReopenReasonNotMergeable, ReopenReasonLimitReached, ReopenReasonContentChanged}
+var reopenReasonValues = []ReopenReason{ReopenReasonNotMergeable, ReopenReasonLimitReached, ReopenReasonContentChanged, ReopenReasonUndeterminable}
 
 // ParseReopenReason は s を戻した理由として解釈する（前後の空白を除いた完全一致）。
 func ParseReopenReason(s string) (ReopenReason, bool) {

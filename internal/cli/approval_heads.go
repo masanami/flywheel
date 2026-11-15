@@ -51,6 +51,10 @@ type releaseDecision struct {
 	// MergeIn は、取得した head が検証の head と異なるが、既定ブランチの取り込みだけで CI が通っていると判定して
 	// 承認の対象にしたときの評価（検証の head・今の head・後から入ったコミット・直した差分）。② へ渡し、承認の記録に残す。
 	MergeIn *core.ReleaseHeadAssessment
+	// Undeterminable は、検証の head と異なる head が取り込みだけとも中身の変更とも確かめられず（人間待ち）、人が根拠を見て
+	// 承認できるものとして承認の対象にしたときの評価（単独の承認だけ。② へ AcceptUndeterminable として渡す。core が自分でも
+	// 人間待ちと確かめたときだけ成立する）。
+	Undeterminable *core.ReleaseHeadAssessment
 	// Assessment は、検証の head と異なる head を評価した結果（外した理由が verified_head_mismatch のとき。評価できなければ nil）。
 	Assessment *core.ReleaseHeadAssessment
 	// Detail は外した理由の根拠（評価の結果。無ければ空）。
@@ -61,7 +65,7 @@ type releaseDecision struct {
 // 判定の順は 直前の試行の結果が merged_unapproved か → PR の URL か → リポジトリが宣言にあるか → head の取得 → 検証の head との比較。
 // verified は release の ID から最新の検証の head を返す（記録なしは ok=false）。
 // mergedUnapproved は release の ID について、直前の試行の結果が merged_unapproved かを返す。
-func resolveReleaseDecisions(ctx context.Context, lp lookPathFunc, ws string, ops []core.IrreversibleOperation, verified func(id string) (string, bool), mergedUnapproved func(id string) bool) ([]releaseDecision, error) {
+func resolveReleaseDecisions(ctx context.Context, lp lookPathFunc, ws string, ops []core.IrreversibleOperation, verified func(id string) (string, bool), mergedUnapproved func(id string) bool, allowHuman bool) ([]releaseDecision, error) {
 	declared := map[string]bool{}
 	decl, err := core.LoadConnectorsDeclaration(ws)
 	switch {
@@ -114,7 +118,7 @@ func resolveReleaseDecisions(ctx context.Context, lp lookPathFunc, ws string, op
 				continue
 			}
 			if v != out[i].Head {
-				assessVerifiedHeadMismatch(ctx, lp, &out[i], v)
+				assessVerifiedHeadMismatch(ctx, lp, &out[i], v, allowHuman)
 			}
 		}
 	}
@@ -123,8 +127,10 @@ func resolveReleaseDecisions(ctx context.Context, lp lookPathFunc, ws string, op
 
 // assessVerifiedHeadMismatch は、取得した head が検証の head（verified）と異なる release を評価する。
 // 既定ブランチの取り込みだけで今の head の CI が通っていれば、評価した head を承認の対象にする（MergeIn）。
-// そうでなければ（取り込み以外の変更・判定できない・CI が通っていない・取得に失敗）外す。
-func assessVerifiedHeadMismatch(ctx context.Context, lp lookPathFunc, d *releaseDecision, verified string) {
+// そうでなければ（取り込み以外の変更・判定できない・CI が通っていない・取得に失敗）外す。ただし allowHuman（単独の承認）で、
+// 判定できない理由が比較の打ち切り等（人間待ち）のときは、人が根拠を見て承認できるよう承認の対象にする（Undeterminable）。
+// どちらも core が ② で自分で比較し直して確かめる。ここでの判定は表示と、確かめる入力の組み立てにだけ使う。
+func assessVerifiedHeadMismatch(ctx context.Context, lp lookPathFunc, d *releaseDecision, verified string, allowHuman bool) {
 	a, err := core.AssessReleaseHead(ctx, newCheckSource(lp), newCompareSource(lp), *d.Op.Ref, verified)
 	switch {
 	case err != nil:
@@ -136,6 +142,9 @@ func assessVerifiedHeadMismatch(ctx context.Context, lp lookPathFunc, d *release
 	case a.MergeInApprovable():
 		d.Head = a.HeadSHA
 		d.MergeIn = a
+	case allowHuman && a.AcceptableByHuman():
+		d.Head = a.HeadSHA
+		d.Undeterminable = a
 	default:
 		d.Reason = reasonVerifiedHeadMismatch
 		d.Assessment = a
@@ -181,10 +190,6 @@ func coreReleaseHeads(ds []releaseDecision) []core.ReleaseHead {
 	for _, d := range includedReleases(ds) {
 		h := d.Head
 		rh := core.ReleaseHead{Operation: d.Op, HeadSHA: &h}
-		if d.MergeIn != nil {
-			v := d.MergeIn.VerifiedHead
-			rh.MergeInVerifiedHead = &v
-		}
 		out = append(out, rh)
 	}
 	return out
@@ -239,7 +244,7 @@ func completionReleaseDecisions(ctx context.Context, a Args, p *core.ApprovalPre
 		return v, ok
 	}, func(id string) bool {
 		return p.ReapprovalForbidden[id]
-	})
+	}, false)
 }
 
 // operationReleaseDecision は release の単独の承認の ① の判定。外す理由があれば upstream_unavailable
@@ -257,24 +262,32 @@ func operationReleaseDecision(ctx context.Context, a Args, p *core.OperationAppr
 	}, func(string) bool {
 		// 単独の承認の merged_unapproved は core が ① で拒否する（rejectReapproval）。
 		return false
-	})
+	}, true)
 	if err != nil {
 		return nil, err
 	}
 	d := ds[0]
 	if d.Reason != "" {
-		// 課題が完了で、検証の後に取り込み以外の変更が入った（または履歴が書き換わった）release は、承認できない
-		// だけでなく、課題を着手中へ戻して検証し直す道がある（#485）。戻したことを出力して終わる。
-		if d.Reason == reasonVerifiedHeadMismatch && p.ChallengeStatus == core.StatusDone && d.Assessment != nil && d.Assessment.Change.RequiresReverification() {
-			res, err := a.Store.ReopenChallengeForRelease(ctx, core.ChannelCLI, core.ReopenForReleaseInput{OperationID: p.OperationID, Reason: core.ReopenReasonContentChanged})
+		// 課題が完了で、検証の後に取り込み以外の変更が入った（または履歴が書き換わった）release は、承認できないだけでなく、
+		// 課題を着手中へ戻して検証し直す道がある（#485）。戻すかの判定は core が自分で比較して行う（AssessReleaseReopen）。
+		// ここは core に「戻すべきか」を聞いて、戻すと答えられたときに戻す入口を呼ぶだけ。
+		if d.Reason == reasonVerifiedHeadMismatch && p.ChallengeStatus == core.StatusDone {
+			src := headSources(a)
+			as, err := a.Store.AssessReleaseReopen(ctx, p.OperationID, src)
 			if err != nil {
 				return nil, mapCoreErr(err)
 			}
-			if res.Reopened {
-				return nil, newReleaseNotApprovableError(fmt.Sprintf(
-					"%s を承認の対象にできません: %s（%s）。課題 %s を完了から着手中へ戻し、本番反映を %s に置き換えました（%s は取り下げました）。"+
-						"検証をやり直し、完了の承認で %s を承認してください",
-					p.OperationID, d.Reason, d.Detail, res.ChallengeID, res.NewOperationID, res.ClosedOperationID, res.NewOperationID))
+			if as.Verdict == core.ReleaseReopenRequired {
+				res, err := a.Store.ReopenChallengeForRelease(ctx, core.ChannelCLI, core.ReopenForReleaseInput{OperationID: p.OperationID, Reason: core.ReopenReasonContentChanged, Sources: src})
+				if err != nil {
+					return nil, mapCoreErr(err)
+				}
+				if res.Reopened {
+					return nil, newReleaseNotApprovableError(fmt.Sprintf(
+						"%s を承認の対象にできません: %s（%s）。課題 %s を完了から着手中へ戻し、本番反映を %s に置き換えました（%s は取り下げました）。"+
+							"検証をやり直し、完了の承認で %s を承認してください",
+						p.OperationID, d.Reason, d.Detail, res.ChallengeID, res.NewOperationID, res.ClosedOperationID, res.NewOperationID))
+				}
 			}
 		}
 		msg := fmt.Sprintf("%s を承認の対象にできません: %s（%s）", p.OperationID, d.Reason, d.Reason.description())
@@ -284,6 +297,11 @@ func operationReleaseDecision(ctx context.Context, a Args, p *core.OperationAppr
 		return nil, newReleaseNotApprovableError(msg)
 	}
 	return &d, nil
+}
+
+// headSources は core が release の head を自分で評価するための取得の口（比較の結果は core が確かめる）。
+func headSources(a Args) core.ReleaseHeadSources {
+	return core.ReleaseHeadSources{Checks: newCheckSource(a.lookPath()), Compare: newCompareSource(a.lookPath())}
 }
 
 func operationHeadLines(d *releaseDecision) string {
@@ -299,6 +317,10 @@ func operationHeadLines(d *releaseDecision) string {
 	}
 	if d.MergeIn != nil {
 		writeHeadChangeLines(&b, "              ", d.MergeIn)
+	}
+	if d.Undeterminable != nil {
+		writeHeadChangeLines(&b, "              ", d.Undeterminable)
+		fmt.Fprintf(&b, "              ※承認すると、取り込みだけと確かめないまま、この head を承認します。承認せず課題を着手中へ戻して検証し直すなら、この確認を中止して approve %s --reopen を実行してください\n", d.Op.ID)
 	}
 	return b.String()
 }
