@@ -19,12 +19,21 @@ const (
 	SerialReasonPredictionFailed    SerialGroupReason = "prediction_failed"
 	SerialReasonPredictionBudget    SerialGroupReason = "prediction_budget"
 	SerialReasonNoPredictionDeclare SerialGroupReason = "no_prediction_declared"
-	SerialReasonRunningRun          SerialGroupReason = "running_run"
+	// 以下の 5 つは判断点（J9）が絡む理由。merge_candidate は互いに前提にし合う組（1 つの課題にまとめる候補。
+	// 自動ではまとめない）、serial_judgment_* は判断の結果（強い・判断できない・呼び出しの失敗・費用の上限）。
+	SerialReasonMergeCandidate     SerialGroupReason = "merge_candidate"
+	SerialReasonJudgedStrong       SerialGroupReason = "serial_judgment_strong"
+	SerialReasonJudgedUndetermined SerialGroupReason = "serial_judgment_undetermined"
+	SerialReasonJudgmentFailed     SerialGroupReason = "serial_judgment_failed"
+	SerialReasonJudgmentBudget     SerialGroupReason = "serial_judgment_budget"
+	SerialReasonRunningRun         SerialGroupReason = "running_run"
 )
 
 var serialGroupReasonOrder = []SerialGroupReason{
 	SerialReasonSharedFiles, SerialReasonDependency, SerialReasonUnknownPair, SerialReasonNotPredictable,
-	SerialReasonPredictionFailed, SerialReasonPredictionBudget, SerialReasonNoPredictionDeclare, SerialReasonRunningRun,
+	SerialReasonPredictionFailed, SerialReasonPredictionBudget, SerialReasonNoPredictionDeclare,
+	SerialReasonMergeCandidate, SerialReasonJudgedStrong, SerialReasonJudgedUndetermined,
+	SerialReasonJudgmentFailed, SerialReasonJudgmentBudget, SerialReasonRunningRun,
 }
 
 // SerialGroupReasonValues は reasons の閉集合を定義順に返す（CLI の照合用の写し）。
@@ -34,12 +43,14 @@ func SerialGroupReasonValues() []SerialGroupReason {
 
 // SerialGroup は serial_groups の 1 要素。Challenges は実行中の課題を先頭に、続けて委譲の候補を
 // 起動の順に並べる。Reasons は定義順に重複なく並べる。PredictionHeadSHA は予測の口を呼んで
-// head_sha を得たときだけ非 nil。
+// head_sha を得たときだけ非 nil。Judgments は、このグループの課題を含む組のうち判断点（J9）に判断させた
+// 組の記録（判断させなければ空）。
 type SerialGroup struct {
 	Repo              string
 	Challenges        []string
 	Reasons           []SerialGroupReason
 	PredictionHeadSHA *string
+	Judgments         []SerialJudgment
 }
 
 // planCandidate は委譲の候補 1 件。Issue は予測の口へ渡せる Issue 番号（取り込み元の対応が無ければ 0）。
@@ -49,6 +60,8 @@ type planCandidate struct {
 	Issue int
 	Rank  int
 	Seq   int64
+	// Plan は承認済みの計画の本文（J9 に渡す。無ければ空）。
+	Plan string
 }
 
 func (c planCandidate) before(o planCandidate) bool {
@@ -72,6 +85,7 @@ type plannedGroup struct {
 	Candidates []planCandidate
 	Reasons    map[SerialGroupReason]bool
 	HeadSHA    string
+	Judgments  []SerialJudgment
 }
 
 func sortedReasons(set map[SerialGroupReason]bool) []SerialGroupReason {
@@ -92,6 +106,7 @@ func (g *plannedGroup) public() SerialGroup {
 	for _, c := range g.Candidates {
 		sg.Challenges = append(sg.Challenges, c.ID)
 	}
+	sg.Judgments = append(sg.Judgments, g.Judgments...)
 	if g.HeadSHA != "" {
 		h := g.HeadSHA
 		sg.PredictionHeadSHA = &h
@@ -109,6 +124,16 @@ type repoPrediction struct {
 	HeadSHA string
 	// RunID は予測の口を呼んだ run の内部整数 ID（Output が非 nil のときだけ。衝突の記録に使う）。
 	RunID int64
+
+	// 以下は repos[].serial_judgment が true のリポジトリだけが持つ（判断点 J9）。
+	// SerialJudgment が true なら、互いに前提にし合う組（dependency.stated が両方向で first が無い）を直列にする。
+	// Verdicts は判断させた組の結果（候補どうしの組。鍵は課題の内部整数 ID の昇順）。weak だけが並列にする。
+	// UndeclaredJudged は予測の宣言が無いリポジトリを候補どうしの組の判断で作ること（Free は判断した先頭の候補の数。
+	// それより後ろの候補は全員と直列）。
+	SerialJudgment   bool
+	Verdicts         map[pairKey]pairJudgment
+	UndeclaredJudged bool
+	Free             int
 }
 
 func sortCandidates(cs []planCandidate) {
@@ -133,6 +158,9 @@ func buildRepoGroups(repo string, running []planRunning, cands []planCandidate, 
 			g.Reasons[SerialReasonRunningRun] = true
 		}
 		return []plannedGroup{g}
+	}
+	if pred.UndeclaredJudged {
+		return buildUndeclaredJudgedGroups(repo, cands, pred)
 	}
 	if pred.Output == nil {
 		out := make([]plannedGroup, 0, len(cands))
@@ -162,7 +190,29 @@ func buildRepoGroups(repo string, running []planRunning, cands []planCandidate, 
 			parent[c.Issue] = c.Issue
 		}
 	}
-	edges := predictedEdges(pred.Output.Pairs, func(n int) bool { _, ok := parent[n]; return ok })
+	candByIssue := map[int]planCandidate{}
+	for _, c := range cands {
+		if c.Issue > 0 {
+			candByIssue[c.Issue] = c
+		}
+	}
+	var edges []predictedEdge
+	for _, e := range predictedEdges(pred.Output.Pairs, func(n int) bool { _, ok := parent[n]; return ok }, pred.SerialJudgment) {
+		ca, aok := candByIssue[e.a]
+		cb, bok := candByIssue[e.b]
+		if aok && bok {
+			if v, ok := pred.Verdicts[newPairKey(ca, cb)]; ok {
+				// 先後の依存も互いの前提も無い組が weak なら並列にする。それ以外は直列のまま理由を足す。
+				if v.Outcome == PairOutcomeWeak && e.first == 0 && !e.mutual {
+					continue
+				}
+				if r, serial := v.Outcome.serialReason(); serial {
+					e.reasons = append(append([]SerialGroupReason(nil), e.reasons...), r)
+				}
+			}
+		}
+		edges = append(edges, e)
+	}
 	for _, e := range edges {
 		union(e.a, e.b)
 	}
@@ -223,6 +273,104 @@ func buildRepoGroups(repo string, running []planRunning, cands []planCandidate, 
 		}
 		out = append(out, *g)
 	}
+	attachJudgments(out, cands, pred.Verdicts)
+	return out
+}
+
+// attachJudgments は判断させた組の記録を、その組の課題を含むグループに付ける。
+func attachJudgments(groups []plannedGroup, cands []planCandidate, verdicts map[pairKey]pairJudgment) {
+	if len(verdicts) == 0 {
+		return
+	}
+	idOf := map[int64]string{}
+	for _, c := range cands {
+		idOf[c.Seq] = c.ID
+	}
+	keys := make([]pairKey, 0, len(verdicts))
+	for k := range verdicts {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i][0] != keys[j][0] {
+			return keys[i][0] < keys[j][0]
+		}
+		return keys[i][1] < keys[j][1]
+	})
+	for _, k := range keys {
+		v := verdicts[k]
+		rec := SerialJudgment{Challenges: [2]string{idOf[k[0]], idOf[k[1]]}, Outcome: v.Outcome, Reason: v.Reason}
+		for gi := range groups {
+			for _, c := range groups[gi].Candidates {
+				if c.Seq == k[0] || c.Seq == k[1] {
+					groups[gi].Judgments = append(groups[gi].Judgments, rec)
+					break
+				}
+			}
+		}
+	}
+}
+
+// buildUndeclaredJudgedGroups は予測の宣言が無く、判断点で組を判断したリポジトリの直列化グループを作る。
+// 動いている課題が無い前提（あれば判断せず、全員が 1 つのグループに入る）。判断した先頭 Free 件の候補どうしの
+// 組は、weak なら辺を張らず、それ以外は辺を張る。判断しなかった組（Free より後ろの候補を含む組）は辺を張る。
+func buildUndeclaredJudgedGroups(repo string, cands []planCandidate, pred repoPrediction) []plannedGroup {
+	n := len(cands)
+	parent := make([]int, n)
+	for i := range parent {
+		parent[i] = i
+	}
+	find := func(x int) int {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	type edge struct {
+		i, j    int
+		reasons []SerialGroupReason
+	}
+	var edges []edge
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			reasons := []SerialGroupReason{SerialReasonNoPredictionDeclare}
+			if i < pred.Free && j < pred.Free {
+				if v, ok := pred.Verdicts[newPairKey(cands[i], cands[j])]; ok {
+					if v.Outcome == PairOutcomeWeak {
+						continue
+					}
+					if r, serial := v.Outcome.serialReason(); serial {
+						reasons = append(reasons, r)
+					}
+				}
+			}
+			edges = append(edges, edge{i, j, reasons})
+			parent[find(i)] = find(j)
+		}
+	}
+	byRoot := map[int]*plannedGroup{}
+	var order []int
+	for i, c := range cands {
+		root := find(i)
+		g, ok := byRoot[root]
+		if !ok {
+			g = &plannedGroup{Repo: repo, Reasons: map[SerialGroupReason]bool{}, HeadSHA: pred.HeadSHA}
+			byRoot[root] = g
+			order = append(order, root)
+		}
+		g.Candidates = append(g.Candidates, c)
+	}
+	for _, e := range edges {
+		g := byRoot[find(e.i)]
+		for _, r := range e.reasons {
+			g.Reasons[r] = true
+		}
+	}
+	out := make([]plannedGroup, 0, len(order))
+	for _, root := range order {
+		out = append(out, *byRoot[root])
+	}
+	attachJudgments(out, cands, pred.Verdicts)
 	return out
 }
 
@@ -232,12 +380,14 @@ type predictedEdge struct {
 	a, b    int
 	reasons []SerialGroupReason
 	first   int
+	// mutual は互いに相手を前提に挙げた組（dependency.stated が両方向で first が無い）。mutualEnabled のときだけ立つ。
+	mutual bool
 }
 
 // predictedEdges は予測の出力の組から、直列化の理由（shared_files・dependency・unknown_pair）を持つ組を
 // 返す。known が false を返す Issue（候補にも実行中にも無い）を含む組は飛ばす。直列化グループの作り方
 // （buildRepoGroups）と衝突の記録（recordConflicts）が同じ組を使う。
-func predictedEdges(pairs []PredictedPair, known func(issue int) bool) []predictedEdge {
+func predictedEdges(pairs []PredictedPair, known func(issue int) bool, mutualEnabled bool) []predictedEdge {
 	var edges []predictedEdge
 	for _, p := range pairs {
 		a, b := p.Issues[0], p.Issues[1]
@@ -246,6 +396,7 @@ func predictedEdges(pairs []PredictedPair, known func(issue int) bool) []predict
 		}
 		var reasons []SerialGroupReason
 		first := 0
+		mutual := false
 		switch p.Status {
 		case predictPairUnknown:
 			reasons = append(reasons, SerialReasonUnknownPair)
@@ -259,14 +410,31 @@ func predictedEdges(pairs []PredictedPair, known func(issue int) bool) []predict
 			if p.DependencyFirst != nil {
 				reasons = append(reasons, SerialReasonDependency)
 				first = *p.DependencyFirst
+			} else if mutualEnabled && statesBoth(p.DependencyStated, a, b) {
+				reasons = append(reasons, SerialReasonMergeCandidate)
+				mutual = true
 			}
 		}
 		if len(reasons) == 0 {
 			continue
 		}
-		edges = append(edges, predictedEdge{a: a, b: b, reasons: reasons, first: first})
+		edges = append(edges, predictedEdge{a: a, b: b, reasons: reasons, first: first, mutual: mutual})
 	}
 	return edges
+}
+
+// statesBoth は申告 stated が a→b と b→a の両方を含むか（互いに相手を前提に挙げたか）。
+func statesBoth(stated []PredictedDependEdge, a, b int) bool {
+	ab, ba := false, false
+	for _, e := range stated {
+		if e.Issue == a && e.DependsOn == b {
+			ab = true
+		}
+		if e.Issue == b && e.DependsOn == a {
+			ba = true
+		}
+	}
+	return ab && ba
 }
 
 // orderByDependency は cands（優先度・ID の昇順）を、辺 [先, 後] を守って並べ直す。辺で順が

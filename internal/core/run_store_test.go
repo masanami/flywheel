@@ -172,7 +172,7 @@ func TestInsertRun_RejectsInvalidInput(t *testing.T) {
 	cases := map[string]func(in *insertRunInput){
 		"kind が閉集合外":               func(in *insertRunInput) { in.Kind = "other" },
 		"judgment な run に判断点が無い":   func(in *insertRunInput) { in.Judgment = "" },
-		"judgment な run に閉集合外の判断点": func(in *insertRunInput) { in.Judgment = "J9" },
+		"judgment な run に閉集合外の判断点": func(in *insertRunInput) { in.Judgment = "J10" },
 		"delegate な run に判断点がある":   func(in *insertRunInput) { in.Kind = runKindDelegate; in.Judgment = judgmentJ1 },
 		"budget_bucket が閉集合外":      func(in *insertRunInput) { in.BudgetBucket = "other" },
 		"challenge_version が 0":    func(in *insertRunInput) { in.ChallengeVersion = 0 },

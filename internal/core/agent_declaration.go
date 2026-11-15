@@ -51,6 +51,10 @@ const (
 	// defaultConflictPredictionBudgetUSD は conflict_prediction_budget_usd の既定
 	// （衝突の予測 1 件あたりの上限額、USD）。
 	defaultConflictPredictionBudgetUSD = 1.0
+
+	// defaultSerialJudgmentCycleBudgetUSD は serial_judgment_cycle_budget_usd の既定
+	// （同時に進めてよいかの判断〔J9〕に 1 周で使える費用の上限、USD）。
+	defaultSerialJudgmentCycleBudgetUSD = 3.0
 )
 
 var defaultSizeBudgetsUSD = SizeBudgetsUSD{
@@ -59,7 +63,7 @@ var defaultSizeBudgetsUSD = SizeBudgetsUSD{
 	L: SizeBudgetPair{Impl: 100, Review: 40},
 }
 
-var defaultJudgmentBudgetUSD = JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5, J6: 2, J8: 5}
+var defaultJudgmentBudgetUSD = JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5, J6: 2, J8: 5, J9: 0.5}
 
 // SizeBudgetPair はサイズ1段（S・M・L のいずれか）の実装・レビューの予算(USD)。
 type SizeBudgetPair struct {
@@ -74,9 +78,9 @@ type SizeBudgetsUSD struct {
 	L SizeBudgetPair
 }
 
-// JudgmentBudgetUSD は judgment_budget_usd（判断点 J1〜J6・J8 ごとの上限額）。
+// JudgmentBudgetUSD は judgment_budget_usd（判断点 J1〜J6・J8・J9 ごとの上限額。J9 は 1 組あたり）。
 type JudgmentBudgetUSD struct {
-	J1, J2, J3, J4, J5, J6, J8 float64
+	J1, J2, J3, J4, J5, J6, J8, J9 float64
 }
 
 // AgentTimeoutSec は timeout_sec（判断の呼び出し・委譲の時間の上限、秒）。
@@ -114,6 +118,9 @@ type AgentDeclaration struct {
 	// （衝突の予測 1 件あたりの上限額、USD）。
 	ConflictPredictionBudgetUSD float64
 
+	// SerialJudgmentCycleBudgetUSD は serial_judgment_cycle_budget_usd（J9 に 1 周で使える費用の上限、USD）。
+	SerialJudgmentCycleBudgetUSD float64
+
 	// MemoryDir は memory_dir（記憶の置き場。ワークスペースからの相対パスで、
 	// filepath.Clean 済み。絶対パスとワークスペースの外へ出る値は読み込みで
 	// config_invalid にする）。MemoryWriteLimit は memory_write_limit。
@@ -145,10 +152,11 @@ func defaultAgentDeclaration() *AgentDeclaration {
 		FailureLimit:      defaultFailureLimit,
 		ImproveThreshold:  defaultImproveThreshold,
 
-		ConflictPredictionBudgetUSD: defaultConflictPredictionBudgetUSD,
-		MemoryDir:                   defaultMemoryDir,
-		MemoryWriteLimit:            MemoryWriteLimit{Files: defaultMemoryWriteFiles, Bytes: defaultMemoryWriteBytes},
-		DefaultsUsed:                true,
+		ConflictPredictionBudgetUSD:  defaultConflictPredictionBudgetUSD,
+		SerialJudgmentCycleBudgetUSD: defaultSerialJudgmentCycleBudgetUSD,
+		MemoryDir:                    defaultMemoryDir,
+		MemoryWriteLimit:             MemoryWriteLimit{Files: defaultMemoryWriteFiles, Bytes: defaultMemoryWriteBytes},
+		DefaultsUsed:                 true,
 	}
 }
 
@@ -183,11 +191,11 @@ func LoadAgentDeclaration(base string) (*AgentDeclaration, error) {
 	return decl, nil
 }
 
-// JudgmentBudgetFor は判断点 j（J1〜J6・J8）の1回の呼び出しの上限額
+// JudgmentBudgetFor は判断点 j（J1〜J6・J8・J9）の1回の呼び出しの上限額
 // （judgment_budget_usd.<j>）を返す（#83・§予算ガード「判断の呼び出しの
 // --max-budget-usd は、judgment_budget_usd の値」）。呼び出し元
 // （#84〜#86の判断点の入口）は、この値を RunJudgmentInput.MaxBudgetUSD に
-// 渡す。j が J1〜J6・J8 の外なら 0 を返す【仮定】（呼び出し元はJ1〜J6・J8の
+// 渡す。j が J1〜J6・J8・J9 の外なら 0 を返す【仮定】（呼び出し元はJ1〜J6・J8・J9の
 // いずれかしか渡さない。core.JudgmentPoint.valid() で事前に検査されている前提）。
 func (d *AgentDeclaration) JudgmentBudgetFor(j JudgmentPoint) float64 {
 	switch j {
@@ -205,6 +213,8 @@ func (d *AgentDeclaration) JudgmentBudgetFor(j JudgmentPoint) float64 {
 		return d.JudgmentBudgetUSD.J6
 	case JudgmentJ8:
 		return d.JudgmentBudgetUSD.J8
+	case JudgmentJ9:
+		return d.JudgmentBudgetUSD.J9
 	default:
 		return 0
 	}
@@ -246,15 +256,15 @@ var agentTopLevelKeys = map[string]bool{
 	"version": true, "position_file": true, "cycle_budget_usd": true,
 	"size_budgets_usd": true, "max_run_budget_usd": true, "judgment_budget_usd": true,
 	"timeout_sec": true, "max_parallel_runs": true, "rework_limit": true, "failure_limit": true, "improve_threshold": true,
-	"conflict_prediction_budget_usd": true,
-	"memory_dir":                     true, "memory_write_limit": true,
+	"conflict_prediction_budget_usd": true, "serial_judgment_cycle_budget_usd": true,
+	"memory_dir": true, "memory_write_limit": true,
 }
 
 var memoryWriteLimitKeys = map[string]bool{"files": true, "bytes": true}
 
 var sizeBudgetsSizeKeys = map[string]bool{"S": true, "M": true, "L": true}
 var sizeBudgetPairKeys = map[string]bool{"impl": true, "review": true}
-var judgmentBudgetKeys = map[string]bool{"J1": true, "J2": true, "J3": true, "J4": true, "J5": true, "J6": true, "J8": true}
+var judgmentBudgetKeys = map[string]bool{"J1": true, "J2": true, "J3": true, "J4": true, "J5": true, "J6": true, "J8": true, "J9": true}
 var agentTimeoutSecKeys = map[string]bool{"judgment": true, "delegate": true}
 
 // parseAgentDeclaration は data を AgentDeclaration へ変換する。省略された
@@ -372,6 +382,17 @@ func parseAgentDeclaration(data []byte) (*AgentDeclaration, error) {
 		decl.ConflictPredictionBudgetUSD = f
 	} else {
 		decl.ConflictPredictionBudgetUSD = defaultConflictPredictionBudgetUSD
+		usedDefault = true
+	}
+
+	if v, ok := raw["serial_judgment_cycle_budget_usd"]; ok {
+		f, err := decodeUSDAmount(v)
+		if err != nil {
+			return nil, fmt.Errorf("serial_judgment_cycle_budget_usd: %w", err)
+		}
+		decl.SerialJudgmentCycleBudgetUSD = f
+	} else {
+		decl.SerialJudgmentCycleBudgetUSD = defaultSerialJudgmentCycleBudgetUSD
 		usedDefault = true
 	}
 
@@ -640,7 +661,7 @@ func parseJudgmentBudgets(raw json.RawMessage) (JudgmentBudgetUSD, bool, error) 
 		key    string
 		target *float64
 	}{
-		{"J1", &result.J1}, {"J2", &result.J2}, {"J3", &result.J3}, {"J4", &result.J4}, {"J5", &result.J5}, {"J6", &result.J6}, {"J8", &result.J8},
+		{"J1", &result.J1}, {"J2", &result.J2}, {"J3", &result.J3}, {"J4", &result.J4}, {"J5", &result.J5}, {"J6", &result.J6}, {"J8", &result.J8}, {"J9", &result.J9},
 	}
 	for _, f := range fields {
 		v, ok := m[f.key]
@@ -706,6 +727,9 @@ func (d *AgentDeclaration) validate() error {
 		return fmt.Errorf("%w: max_run_budget_usd must be > 0, got %v", ErrConfigInvalid, d.MaxRunBudgetUSD)
 	}
 
+	if d.SerialJudgmentCycleBudgetUSD <= 0 {
+		return fmt.Errorf("%w: serial_judgment_cycle_budget_usd must be > 0, got %v", ErrConfigInvalid, d.SerialJudgmentCycleBudgetUSD)
+	}
 	if d.ConflictPredictionBudgetUSD <= 0 {
 		return fmt.Errorf("%w: conflict_prediction_budget_usd must be > 0, got %v", ErrConfigInvalid, d.ConflictPredictionBudgetUSD)
 	}
@@ -730,7 +754,7 @@ func (d *AgentDeclaration) validate() error {
 		val  float64
 	}{
 		{"J1", d.JudgmentBudgetUSD.J1}, {"J2", d.JudgmentBudgetUSD.J2}, {"J3", d.JudgmentBudgetUSD.J3},
-		{"J4", d.JudgmentBudgetUSD.J4}, {"J5", d.JudgmentBudgetUSD.J5}, {"J6", d.JudgmentBudgetUSD.J6}, {"J8", d.JudgmentBudgetUSD.J8},
+		{"J4", d.JudgmentBudgetUSD.J4}, {"J5", d.JudgmentBudgetUSD.J5}, {"J6", d.JudgmentBudgetUSD.J6}, {"J8", d.JudgmentBudgetUSD.J8}, {"J9", d.JudgmentBudgetUSD.J9},
 	}
 	for _, j := range judgments {
 		if j.val <= 0 {

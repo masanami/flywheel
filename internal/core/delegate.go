@@ -172,6 +172,9 @@ type delegationContext struct {
 	ResumeBranchPushed bool
 	// Reopen は、課題が本番反映のやり直しで完了から戻されたあと、まだ委譲していないときの戻した記録（#485）。
 	Reopen *reopenNote
+	// Follow は再開でない新しい委譲（Resume が nil）が追従する、同じ課題の前の委譲のブランチと
+	// スロット（worktree のスロットのときだけ読む。無ければ nil で base へ揃える。#526）。
+	Follow *followBranch
 	// Previous は、計画を作り直した後の最初の委譲に渡す、前の計画の成果物（接続先の成果物。変更の提案・作業ブランチ）。無ければ nil。
 	Previous *previousDeliverable
 }
@@ -424,6 +427,15 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		err := s.db.Read(ctx, func(tx *sql.Tx) error {
 			b, err := loadRunBranch(ctx, tx, dc.Resume.Target, in.ConnDecl.HumanQuestionKinds, dc.Repo.DefaultBranch)
 			dc.Resume.Branch = b
+			return err
+		})
+		if err = classifyReadWriteErr(err); err != nil {
+			return nil, err
+		}
+	} else if dc.Repo.Slots.Provider == string(slotProviderWorktree) {
+		err := s.db.Read(ctx, func(tx *sql.Tx) error {
+			f, err := loadFollowBranch(ctx, tx, history.Runs, in.ConnDecl.HumanQuestionKinds, dc.Repo.DefaultBranch)
+			dc.Follow = f
 			return err
 		})
 		if err = classifyReadWriteErr(err); err != nil {

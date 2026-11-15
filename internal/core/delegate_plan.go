@@ -105,7 +105,7 @@ func (s *Store) loadPlanCandidate(ctx context.Context, in DelegateInput, cid int
 	if repo == nil {
 		return planOne{}, false, "承認済みの計画のリポジトリが今の宣言に無い", nil
 	}
-	c := planCandidate{ID: ch.ID, Rank: priorityRank(ch.Priority), Seq: cid, Issue: sourceIssueNumber(binding, repo.Remote)}
+	c := planCandidate{ID: ch.ID, Rank: priorityRank(ch.Priority), Seq: cid, Issue: sourceIssueNumber(binding, repo.Remote), Plan: plan.Body}
 	return planOne{cand: c, repo: repo.Name}, true, "", nil
 }
 
@@ -229,6 +229,15 @@ func (s *Store) predictionWorkDir(ctx context.Context, repo ConnectorRepo) (stri
 // predictRepo は repo の予測の結果（または予測が得られなかった理由）を決める。予測の口は、
 // 渡す Issue が 2〜20 件で予測できる候補が 1 件以上あるときだけ、1 回呼ぶ。
 func (s *Store) predictRepo(ctx context.Context, in DelegateInput, repo ConnectorRepo, connector *Connector, running []planRunning, cands []planCandidate) (repoPrediction, error) {
+	// 予測の宣言が無く、同時に判断点（J9）で判断するリポジトリ。動いている課題があれば判断しない（動いている課題との
+	// 組は判断に回さず直列。今までと同じ 1 つのグループになる）。
+	if repo.SerialJudgment && connector.ConflictPrediction == nil && len(running) == 0 && len(cands) >= 2 {
+		verdicts, free, err := s.judgeUndeclaredPairs(ctx, in, repo, cands)
+		if err != nil {
+			return repoPrediction{}, err
+		}
+		return repoPrediction{UndeclaredJudged: true, Verdicts: verdicts, Free: free}, nil
+	}
 	var reasons []SerialGroupReason
 	add := func(r SerialGroupReason) {
 		for _, x := range reasons {
@@ -313,7 +322,14 @@ func (s *Store) predictRepo(ctx context.Context, in DelegateInput, repo Connecto
 		return repoPrediction{FailClosed: reasons, HeadSHA: res.Output.HeadSHA}, nil
 	}
 	runID, _ := parseRunID(res.RunID)
-	return repoPrediction{Output: res.Output, HeadSHA: res.Output.HeadSHA, RunID: runID}, nil
+	rp := repoPrediction{Output: res.Output, HeadSHA: res.Output.HeadSHA, RunID: runID}
+	if repo.SerialJudgment {
+		rp.SerialJudgment = true
+		if rp.Verdicts, err = s.judgeDeclaredPairs(ctx, in, repo, running, cands, res.Output); err != nil {
+			return repoPrediction{}, err
+		}
+	}
+	return rp, nil
 }
 
 func reasonIndex(r SerialGroupReason) int {

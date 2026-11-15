@@ -28,6 +28,14 @@ type fakeSlotGit struct {
 	ensured []WorktreeRequest
 	// EnsureWorktree が成功したとき、そのパスの状態をこの値にする。
 	provisioned SlotTreeState
+	switched    []SlotSwitchCall // SwitchTree の呼び出し（順）
+	switchErr   map[string]error
+}
+
+// SlotSwitchCall は fakeSlotGit が記録した SwitchTree の呼び出し。
+type SlotSwitchCall struct {
+	Path string
+	Req  SlotSwitch
 }
 
 func newFakeSlotGit() *fakeSlotGit {
@@ -63,6 +71,20 @@ func (f *fakeSlotGit) EnsureWorktree(_ context.Context, req WorktreeRequest) (bo
 	f.states[req.Path] = f.provisioned
 	f.added = append(f.added, req.Path)
 	return true, nil
+}
+
+// SwitchTree は、Branch があればそのブランチへ、無ければ detach（Branch ""）へ状態を変える。
+func (f *fakeSlotGit) SwitchTree(_ context.Context, tree SlotTree, req SlotSwitch) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.switched = append(f.switched, SlotSwitchCall{Path: tree.Path, Req: req})
+	if err := f.switchErr[tree.Path]; err != nil {
+		return err
+	}
+	st := f.states[tree.Path]
+	st.Branch = req.Branch
+	f.states[tree.Path] = st
+	return nil
 }
 
 func cloneRepoForTest(paths ...string) ConnectorRepo {

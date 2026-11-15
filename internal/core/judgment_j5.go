@@ -769,11 +769,23 @@ func noWaitingRelease(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) 
 		return false, err
 	}
 	for _, op := range ops {
-		if (op.State == OperationStatePending || op.State == OperationStateApproved) && op.Kind == OperationKindRelease {
+		if isWaitingRelease(op) {
 			return false, nil
 		}
 	}
 	return true, nil
+}
+
+// isApprovedUnexecutedRelease は op が承認済みで未実行の本番反映（state=approved の kind=release）か。
+// 完了の承認の要約（prepareApproval の HasApprovedRelease）と J5 の待っている本番反映の判定が共有する。
+func isApprovedUnexecutedRelease(op IrreversibleOperation) bool {
+	return op.Kind == OperationKindRelease && op.State == OperationStateApproved
+}
+
+// isWaitingRelease は op が待っている本番反映（未承認〔state=pending〕か、承認済みで未実行の
+// kind=release）か。
+func isWaitingRelease(op IrreversibleOperation) bool {
+	return isApprovedUnexecutedRelease(op) || (op.Kind == OperationKindRelease && op.State == OperationStatePending)
 }
 
 // j5Operation は出力を写す遷移の操作を選ぶ。met で課題の予想が空でなく、実物の個数が予想の個数と

@@ -26,9 +26,12 @@ import {
   waitingOf,
 } from "./store.ts";
 
-// 偽のサーバが返す見出し（本物は internal/view の ConditionsAfterReleaseHeading。UI の承認は本番反映を承認しない側）
+// 偽のサーバが返す見出し（本物は internal/view の ConditionsAfterReleaseHeading。UI の承認は本番反映を承認しない側。
+// 承認済みで未実行の release があるときは「満たされないまま残る」ではない見出し）
 const CONDITIONS_AFTER_RELEASE_HEADING =
   "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:";
+const CONDITIONS_AFTER_APPROVED_RELEASE_HEADING =
+  "承認済みの本番反映が走れば満たされる条件:";
 
 export interface MockOptions {
   latencyMs?: number;
@@ -188,12 +191,17 @@ export function createMockApi(
       const releases = m.operations.filter(
         (o) => o.kind === "release" && o.state === "pending",
       );
+      const hasApprovedRelease = m.operations.some(
+        (o) => o.kind === "release" && o.state === "approved",
+      );
       return {
         approval: {
           challenge_id: id,
           conditions_after_release:
             kind === "completion" ? m.conditionsAfterRelease : [],
-          conditions_after_release_heading: CONDITIONS_AFTER_RELEASE_HEADING,
+          conditions_after_release_heading: hasApprovedRelease
+            ? CONDITIONS_AFTER_APPROVED_RELEASE_HEADING
+            : CONDITIONS_AFTER_RELEASE_HEADING,
           // 本物と同じく、いまの完了確認待ちが直接行った完了（T17）で入ったときだけ返す
           direct_completion:
             kind === "completion" && m.completionDirect
