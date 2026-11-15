@@ -142,6 +142,25 @@ func checkedOutElsewhere(err error) bool {
 	return strings.Contains(re.msg, "is already checked out at") || strings.Contains(re.msg, "is already used by worktree at")
 }
 
+// heldWorktreePath は checkedOutElsewhere の失敗が報告した、ブランチを持つ作業ツリーのパスを返す
+// （"... at '<path>'" の形。読み取れなければ ""）。
+func heldWorktreePath(err error) string {
+	var re *runError
+	if !errors.As(err, &re) {
+		return ""
+	}
+	i := strings.Index(re.msg, " at '")
+	if i < 0 {
+		return ""
+	}
+	rest := re.msg[i+len(" at '"):]
+	j := strings.LastIndex(rest, "'")
+	if j <= 0 {
+		return ""
+	}
+	return rest[:j]
+}
+
 type runError struct {
 	args []string
 	msg  string
@@ -333,7 +352,7 @@ func (*Git) SwitchTree(ctx context.Context, tree core.SlotTree, req core.SlotSwi
 		if _, err := run(ctx, gitDir, tree.Path, "show-ref", "--verify", "--quiet", ref); err == nil {
 			_, err := run(ctx, gitDir, tree.Path, "checkout", "-q", req.Branch, "--")
 			if err != nil && checkedOutElsewhere(err) {
-				return fmt.Errorf("%w: %w", core.ErrBranchCheckedOutElsewhere, err)
+				return fmt.Errorf("%w: %w", &core.BranchCheckedOutElsewhereError{Path: heldWorktreePath(err)}, err)
 			}
 			return err
 		} else if exitCode(err) != 1 {

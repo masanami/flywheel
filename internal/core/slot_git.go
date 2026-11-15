@@ -75,6 +75,25 @@ type SlotGit interface {
 // 実装がこれを包んで返す）。core はこの失敗をスロットの欠陥として扱わない。
 var ErrBranchCheckedOutElsewhere = errors.New("core: the branch is checked out in another working tree")
 
+// BranchCheckedOutElsewhereError は ErrBranchCheckedOutElsewhere の詳細（SlotGit の実装が、git が
+// 報告した作業ツリーのパスを入れて返す。Path は分からなければ空）。errors.Is で
+// ErrBranchCheckedOutElsewhere として扱える。どの作業ツリーが持つかの規則は core が決める。
+type BranchCheckedOutElsewhereError struct {
+	Path string
+}
+
+func (e *BranchCheckedOutElsewhereError) Error() string {
+	if e.Path == "" {
+		return ErrBranchCheckedOutElsewhere.Error()
+	}
+	return ErrBranchCheckedOutElsewhere.Error() + " at " + e.Path
+}
+
+// Is は ErrBranchCheckedOutElsewhere と同じ失敗として扱えるようにする。
+func (e *BranchCheckedOutElsewhereError) Is(target error) bool {
+	return target == ErrBranchCheckedOutElsewhere
+}
+
 // SlotSwitch は SlotGit.SwitchTree の入力。Ref は "refs/heads/<既定ブランチ>"。
 type SlotSwitch struct {
 	Branch string
