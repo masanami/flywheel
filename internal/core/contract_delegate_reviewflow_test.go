@@ -198,45 +198,101 @@ func TestPollContractRuns_AfterTheReleaseIsExecutedReadyIsReturnedAndTheRunEnds(
 	}
 }
 
-// (4) 本番反映でマージできず T18 で着手中へ戻った後は、同じ契約の run へ respond と理由を 1 回だけ返し、
-// 次のレビュー待ちでまた検証中へ進む。
+// reopenAfterRelease は検証中の課題を本物の経路で T18 まで進める: release を足し、J5 の met → 完了の承認（D12 で release も承認）
+// → ReopenChallengeForRelease（not_mergeable）で着手中へ戻す。戻した記録が契約の run の開始より新しくなるよう時計を進める。
+func (f *reviewFlowFixture) reopenAfterRelease(t *testing.T, advance func()) {
+	t.Helper()
+	ctx := context.Background()
+	ref := reviewPRURL
+	rel, err := f.s.CreateOperation(ctx, ChannelCLI, OperationInput{ChallengeID: f.cid, Kind: "release", Summary: "PR 1 を本番へ", Ref: &ref})
+	if err != nil {
+		t.Fatalf("op add: %v", err)
+	}
+	f.j5.j5.result = j5Out("met", nil, nil)
+	if _, err := f.s.VerifyAutoJ5(ctx, f.j5.input(f.cycle(t, 300), &f.cid)); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.status(t, f.cid); got != StatusAwaitingCompletionApproval {
+		t.Fatalf("status after J5 met = %s, want awaiting_completion_approval", got)
+	}
+	prev, err := f.s.PrepareApproval(ctx, f.cid)
+	if err != nil || len(prev.PendingReleases) != 1 {
+		t.Fatalf("PrepareApproval = %+v err %v, want one pending release", prev, err)
+	}
+	head := "abc123"
+	if _, _, err := f.s.ExecuteApproval(ctx, ApprovalRequest{
+		ChallengeID: f.cid, ExpectedVersion: prev.Version, Decision: ApprovalDecisionApproved,
+		ReleaseHeads: []ReleaseHead{{Operation: prev.PendingReleases[0], HeadSHA: &head}},
+	}, verifiedAttestationForTest(t, f.cid)); err != nil {
+		t.Fatalf("ExecuteApproval: %v", err)
+	}
+	if got := f.status(t, f.cid); got != StatusDone {
+		t.Fatalf("status after the completion approval = %s, want done", got)
+	}
+	// 完了の後・本番反映の前（release は承認済みで未実行）は ready を返さない。
+	f.poll(t)
+	if len(f.client.resumes) != 0 {
+		t.Fatalf("resumes = %v, want none before the release is executed", f.client.resumes)
+	}
+	advance()
+	res, err := f.s.ReopenChallengeForRelease(ctx, ChannelCLI, ReopenForReleaseInput{OperationID: rel.ID, Reason: ReopenReasonNotMergeable})
+	if err != nil || !res.Reopened {
+		t.Fatalf("ReopenChallengeForRelease = %+v err %v, want reopened", res, err)
+	}
+	if got := f.status(t, f.cid); got != StatusInProgress {
+		t.Fatalf("status after the reopen = %s, want in_progress", got)
+	}
+}
+
+// (4) 本番反映でマージできず T18 で着手中へ戻った後は、同じ契約の run へ respond と理由を 1 回だけ返す（ready は返さない）。
+// 課題は着手中のまま。resume が同じレビュー待ちを返しても取り込み直さず、次の周で状態を読み直してレビュー待ちなら検証中へ進む。
 func TestPollContractRuns_ReopenedForReleaseIsReturnedByRespondOnceAndVerifiesAgain(t *testing.T) {
 	f := newReviewFlowFixture(t)
 	cur := time.Now()
 	f.s.now = func() time.Time { return cur }
 	f.toVerifying(t)
-	cid, _ := parseChallengeID(f.cid)
+	f.reopenAfterRelease(t, func() { cur = cur.Add(time.Hour) })
 	cur = cur.Add(time.Hour)
-	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		res, err := tx.Exec(`INSERT INTO operation (challenge_id, kind, summary, ref, state, created_at) VALUES (?, 'release', 's', 'o/r#1', 'pending', ?)`, cid, formatTimestamp(cur))
-		if err != nil {
-			return err
-		}
-		op, _ := res.LastInsertId()
-		if _, err := tx.Exec(`INSERT INTO challenge_reopen (challenge_id, reason, operation_id, new_operation_id, created_at) VALUES (?, 'not_mergeable', ?, ?, ?)`, cid, op, op, formatTimestamp(cur)); err != nil {
-			return err
-		}
-		_, err = tx.Exec(`UPDATE challenge SET status = 'in_progress' WHERE id = ?`, cid)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	cur = cur.Add(time.Hour)
-	// resume が同じレビュー待ちを返しても（行は waiting・review のまま）、次の周で同じ戻しを返さないことを固定する。
 	f.client.resumeOut = reviewWaitOut()
 	f.poll(t)
 	if len(f.client.resumes) != 1 || !reflect.DeepEqual(f.client.resumes[0][:6], []string{"tool", "resume", "ext-1", "--choice", "respond", "--note"}) ||
-		!strings.Contains(f.client.resumes[0][6], "PR o/r#1") || !strings.Contains(f.client.resumes[0][6], "既定ブランチへ追従") {
+		!strings.Contains(f.client.resumes[0][6], "PR "+reviewPRURL) || !strings.Contains(f.client.resumes[0][6], "既定ブランチへ追従") {
 		t.Fatalf("resumes = %v, want one respond with the reopen reason and the PR", f.client.resumes)
 	}
+	// resume の直後は着手中のまま（resume が返した同じレビュー待ちは取り込み直さない）。
+	if got := f.status(t, f.cid); got != StatusInProgress {
+		t.Fatalf("status right after the respond = %s, want in_progress", got)
+	}
+	// 次の周: 戻しはもう返さず、状態を読み直してレビュー待ちなら検証中へ進む。
 	cur = cur.Add(time.Hour)
+	statuses := len(f.client.statuses)
 	f.client.queue = []ContractLaunchOutput{reviewWaitOut()}
 	f.poll(t)
 	if len(f.client.resumes) != 1 {
 		t.Fatalf("resumes = %d, want 1（同じ戻しを二重に返さない）", len(f.client.resumes))
 	}
+	if len(f.client.statuses) != statuses+1 {
+		t.Fatalf("status calls %d→%d, want one read after the respond", statuses, len(f.client.statuses))
+	}
+	if got := f.status(t, f.cid); got != StatusVerifying {
+		t.Fatalf("status on the first review wait after the respond = %s, want verifying", got)
+	}
+}
+
+// (c) T18 の記録が無い着手中の課題は、成果物つきのレビュー待ちを読んでも resume を呼ばず、検証中へ進む。
+func TestPollContractRuns_InProgressWithoutReopenDoesNotResumeAndVerifies(t *testing.T) {
+	f := newReviewFlowFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.status(t, f.cid); got != StatusInProgress {
+		t.Fatalf("precondition: status = %s, want in_progress", got)
+	}
 	f.client.queue = []ContractLaunchOutput{reviewWaitOut()}
 	f.poll(t)
+	if len(f.client.resumes) != 0 {
+		t.Fatalf("resumes = %v, want none without a reopen record", f.client.resumes)
+	}
 	if got := f.status(t, f.cid); got != StatusVerifying {
 		t.Fatalf("status = %s, want verifying", got)
 	}
