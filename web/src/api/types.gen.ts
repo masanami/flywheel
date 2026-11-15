@@ -604,3 +604,8 @@ export const GRAPH_REGISTERED_VIA_CODES = [
   "unknown",
   "prediction",
 ] as const;
+
+export const HOLD_KIND_CODES = [
+  "human",
+  "parent_direct",
+] as const;

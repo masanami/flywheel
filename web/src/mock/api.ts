@@ -13,6 +13,7 @@ import type {
   ShowCardResponse,
   WorkspaceList,
 } from "../api/types.gen.ts";
+import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
 import {
   type MockChallenge,
   type MockStore,
@@ -156,7 +157,7 @@ export function createMockApi(
                 (h) =>
                   h.answer === null &&
                   h.closed_at === null &&
-                  h.kind !== "parent_direct",
+                  h.kind !== HOLD_KIND_PARENT_DIRECT,
               )
               .map((h) => ({
                 challenge_id: m.c.id,

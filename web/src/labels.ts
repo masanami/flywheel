@@ -1,5 +1,7 @@
 // core が返す閉集合のコードを表示の文言に写す対応表。状態は UI で導かず、文言だけをここで持つ。
 
+import { HOLD_KIND_CODES } from "./api/types.gen.ts";
+
 export const CARD_STATES = [
   "unclassified",
   "classified",
@@ -33,6 +35,9 @@ export const CARD_ACTIONS = [
   "clear_slot",
 ] as const;
 export type CardAction = (typeof CARD_ACTIONS)[number];
+
+// 保留の種類。値は core の閉集合から生成した HOLD_KIND_CODES（types.gen.ts）の要素で、文字列の直書きで比べない。
+export const [HOLD_KIND_HUMAN, HOLD_KIND_PARENT_DIRECT] = HOLD_KIND_CODES;
 
 export const DISCREPANCY_KINDS = [
   "upstream_closed",

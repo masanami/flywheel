@@ -48,6 +48,9 @@ type DirectCompletion struct {
 	// Note は短い説明。無ければ nil。
 	Note      *string
 	CreatedAt time.Time
+	// ActivityID はこの記録を残した遷移（complete_direct）の作業ログの内部整数 ID。J6 が根拠（L-n）に使う。
+	// 読み出した記録にだけ入り、対応する作業ログの行が無ければ nil。
+	ActivityID *int64
 }
 
 // CompleteDirectInput は CompleteDirect の入力。
@@ -155,7 +158,9 @@ func loadOpenHoldKind(ctx context.Context, tx *sql.Tx, cid int64) (int64, HoldKi
 // loadDirectCompletions は課題の直接行った完了の記録を古い順に読む（無ければ空のスライス）。
 func loadDirectCompletions(ctx context.Context, tx *sql.Tx, cid int64) ([]DirectCompletion, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT d.id, d.note, d.created_at, a.ref
+		`SELECT d.id, d.note, d.created_at, a.ref,
+		        (SELECT MAX(l.id) FROM activity l WHERE l.entity = 'challenge' AND l.entity_id = d.challenge_id
+		           AND l.action = 'complete_direct' AND l.at = d.created_at)
 		 FROM direct_completion d LEFT JOIN direct_completion_artifact a ON a.direct_completion_id = d.id
 		 WHERE d.challenge_id = ? ORDER BY d.id ASC, a.position ASC`, cid)
 	if err != nil {
@@ -168,9 +173,10 @@ func loadDirectCompletions(ctx context.Context, tx *sql.Tx, cid int64) ([]Direct
 		var (
 			id        int64
 			note, ref sql.NullString
+			actID     sql.NullInt64
 			createdAt string
 		)
-		if err := rows.Scan(&id, &note, &createdAt, &ref); err != nil {
+		if err := rows.Scan(&id, &note, &createdAt, &ref, &actID); err != nil {
 			return nil, err
 		}
 		if len(out) == 0 || id != lastID {
@@ -182,6 +188,10 @@ func loadDirectCompletions(ctx context.Context, tx *sql.Tx, cid int64) ([]Direct
 			if note.Valid {
 				n := note.String
 				dc.Note = &n
+			}
+			if actID.Valid {
+				a := actID.Int64
+				dc.ActivityID = &a
 			}
 			out = append(out, dc)
 			lastID = id

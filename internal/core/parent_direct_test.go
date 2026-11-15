@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -473,6 +474,28 @@ func TestJ6Input_CarriesTheDirectMarkAndArtifactsInsteadOfRuns(t *testing.T) {
 		if !strings.Contains(section.Content, want) {
 			t.Errorf("section lacks %q:\n%s", want, section.Content)
 		}
+	}
+	// 記録に引用できる ID（作業ログの ID）が付き、保留の ID を通さずに根拠として解決できる。
+	if len(jc.DirectCompletions) != 1 || jc.DirectCompletions[0].ActivityID == nil {
+		t.Fatalf("direct completion has no activity id: %+v", jc.DirectCompletions)
+	}
+	evidence := fmt.Sprintf("L-%d", *jc.DirectCompletions[0].ActivityID)
+	if !strings.Contains(section.Content+"\n", "ID: "+evidence+"\n") {
+		t.Errorf("section lacks %q:\n%s", evidence, section.Content)
+	}
+	err = s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		ev, ok, err := resolveJ6Evidence(context.Background(), tx, cid, evidence)
+		if err != nil || !ok || ev.ref.ActivityID == nil {
+			t.Errorf("resolveJ6Evidence(%q) = %+v, %v, %v", evidence, ev, ok, err)
+		}
+		var action string
+		if err := tx.QueryRow(`SELECT action FROM activity WHERE id = ?`, *jc.DirectCompletions[0].ActivityID).Scan(&action); err != nil || action != "complete_direct" {
+			t.Errorf("activity %s action = %q, %v; want complete_direct", evidence, action, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
