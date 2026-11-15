@@ -34,6 +34,13 @@ func TestHeldStop_EndedDuringHoldIsReportedAfterTheAnswerWithoutRestart(t *testi
 				t.Fatalf("status = %s, want awaiting_human", got)
 			}
 			f.delegationCycle(t)
+			// 答えの前の周では、保留のまま（写しが起きず、保留は 1 件のまま）。
+			if d := f.detail(t, f.cid); d.Status != StatusAwaitingHuman || len(d.Holds) != 1 || !d.Holds[0].Open() {
+				t.Fatalf("before answer: status=%s holds=%+v, want awaiting_human with 1 open hold", d.Status, d.Holds)
+			}
+			if len(f.client.starts) != 1 || len(f.client.resumes) != 0 {
+				t.Fatalf("before answer: starts = %d resumes = %v, want 1 and none", len(f.client.starts), f.client.resumes)
+			}
 			f.answerLatestHold(t, f.cid, "ANSWER-LATE")
 			f.delegationCycle(t)
 			f.delegationCycle(t)
@@ -76,5 +83,28 @@ func TestHeldStop_SweepOfAStopEndedWhileInProgressHasNoDuringHoldNote(t *testing
 	}
 	if strings.Contains(d.Holds[0].Question, "保留の間に") {
 		t.Fatalf("question = %q, want no during-hold note", d.Holds[0].Question)
+	}
+}
+
+// 着手中に failed・cancelled で終わった契約の run を読みの経路（PollContractRuns）が保留にするときは、
+// 保留の間に終わった旨を添えない。
+func TestHeldStop_EndedWhileInProgressHasNoDuringHoldNote(t *testing.T) {
+	for _, st := range []ContractState{ContractStateFailed, ContractStateCancelled} {
+		t.Run(string(st), func(t *testing.T) {
+			f := newContractFixture(t)
+			tickingClock(f)
+			if _, err := f.start(t); err != nil {
+				t.Fatal(err)
+			}
+			f.client.queue = []ContractLaunchOutput{contractOut(st, nil, func(s *ContractStatus) { s.Summary = "要約XYZ" })}
+			f.poll(t)
+			d := f.detail(t, f.cid)
+			if d.Status != StatusAwaitingHuman || len(d.Holds) != 1 || !strings.Contains(d.Holds[0].Question, "要約XYZ") {
+				t.Fatalf("status=%s holds=%+v", d.Status, d.Holds)
+			}
+			if strings.Contains(d.Holds[0].Question, "保留の間に") {
+				t.Fatalf("question = %q, want no during-hold note", d.Holds[0].Question)
+			}
+		})
 	}
 }
