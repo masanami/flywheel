@@ -80,6 +80,7 @@ type reviewReply struct {
 //   - 本番反映が済んでいる（その課題の release が executed）: ready を返して接続ツールの run を終わらせる。
 //   - 課題が着手中で、最後の J5 が not_met で、その後に契約のコマンドを呼んでいない: respond と差し戻しの理由を返す。
 //     差し戻しの上限（agent.ReworkLimit。J5 の not_met の数。保留への回答の後から数え直す）に達していれば、返さず保留にする。
+//   - 課題が着手中で、T18（本番反映でマージできず着手中へ戻した）の記録が最後の契約のコマンドより新しい: respond と理由（既定ブランチへ追従して衝突を解消する）を返す。
 //   - 課題が検証中: 何も呼ばない（Skip）。J5 は「直前の契約の run」の成果物を読むので、新しい読みで押し流さない。
 //
 // 上のどれでもなければ nil（通常の状態の確認へ進む）。
@@ -133,24 +134,51 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM run WHERE challenge_id = ? AND kind = 'contract'`, row.ChallengeID).Scan(&lastContract); err != nil {
 			return err
 		}
-		if len(h.Verifications) == 0 {
-			return nil
+		var note string
+		if n := len(h.Verifications); n > 0 {
+			latest := h.Verifications[n-1]
+			if runIntID(latest) > lastContract && latest.Result == RunResultSucceeded {
+				if v, ok := validateJ5Output([]byte(latest.Output)); ok && v.Verdict == J5VerdictNotMet && v.Feedback != nil {
+					note = *v.Feedback
+					// 差し戻しの上限の保留に答えた後は、オーナーの回答も添える（保留の間に状態を読まないので、指摘は未配達のまま残る）。
+					if n := len(h.Holds); n > 0 && h.Holds[n-1].Answer != nil && holdIsAfterRun(h.Holds[n-1], latest) {
+						note += "\n\nオーナーの回答: " + *h.Holds[n-1].Answer
+					}
+				}
+			}
 		}
-		latest := h.Verifications[len(h.Verifications)-1]
-		if runIntID(latest) <= lastContract || latest.Result != RunResultSucceeded {
-			return nil
-		}
-		v, ok := validateJ5Output([]byte(latest.Output))
-		if !ok || v.Verdict != J5VerdictNotMet || v.Feedback == nil {
-			return nil
-		}
-		note := *v.Feedback
-		// 差し戻しの上限の保留に答えた後は、オーナーの回答も添える（保留の間に状態を読まないので、指摘は未配達のまま残る）。
-		if n := len(h.Holds); n > 0 && h.Holds[n-1].Answer != nil && holdIsAfterRun(h.Holds[n-1], latest) {
-			note += "\n\nオーナーの回答: " + *h.Holds[n-1].Answer
+		if note == "" {
+			// 本番反映でマージできず着手中へ戻された（T18）。戻した記録が最後の契約のコマンドより新しければ、理由を返す。
+			rn, err := loadReopenNoteAfterContract(ctx, tx, row.ChallengeID)
+			if err != nil || rn == nil {
+				return err
+			}
+			note = formatContractReopenNote(rn)
 		}
 		out = &reviewReply{Answer: &contractAnswer{Choice: contractChoiceRespond, Note: note}}
 		return nil
 	})
 	return out, classifyReadWriteErr(err)
+}
+
+// loadReopenNoteAfterContract は、課題の最後の戻した記録（T18）が、その課題の最後の契約のコマンドの開始より新しいときだけ
+// その記録を返す。契約のコマンドを呼んだ後は返さないので、同じ戻しを二重に配達しない。
+func loadReopenNoteAfterContract(ctx context.Context, tx *sql.Tx, challengeID int64) (*reopenNote, error) {
+	return loadReopenNoteAfterRuns(ctx, tx, challengeID, "'contract'")
+}
+
+// formatContractReopenNote は、T18 の後に契約の run へ返す添え書き（理由と、やること）。
+func formatContractReopenNote(n *reopenNote) string {
+	pr := "この課題の PR"
+	if n.Ref != "" {
+		pr = "PR " + n.Ref
+	}
+	reason := fmt.Sprintf("本番反映の段で、%s が既定ブランチへマージできなくなった。", pr)
+	switch n.Reason {
+	case ReopenReasonLimitReached:
+		reason = fmt.Sprintf("本番反映の段で、%s が既定ブランチへマージできない状態が連続の上限に達した。", pr)
+	case ReopenReasonContentChanged:
+		reason = fmt.Sprintf("検証の後に、%s へ既定ブランチの取り込み以外の変更が入った。", pr)
+	}
+	return reason + "作業ブランチを既定ブランチへ追従させ、衝突があれば解消し、検査を通して、同じ PR へ反映すること。新しい PR を作らない。"
 }

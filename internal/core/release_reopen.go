@@ -282,6 +282,11 @@ type reopenNote struct {
 // loadReopenNote は、課題の最後の戻した記録が、その課題の最後の委譲の run の開始より新しいときだけ、その記録を返す
 // （委譲の run が無ければ、戻した記録があれば返す）。追従の委譲が一度起動した後は返さない。
 func loadReopenNote(ctx context.Context, tx *sql.Tx, challengeID int64) (*reopenNote, error) {
+	return loadReopenNoteAfterRuns(ctx, tx, challengeID, "'delegate', 'contract'")
+}
+
+// loadReopenNoteAfterRuns は loadReopenNote の本体。runKinds は比べる run の種類の SQL の列（定数だけを渡す）。
+func loadReopenNoteAfterRuns(ctx context.Context, tx *sql.Tx, challengeID int64, runKinds string) (*reopenNote, error) {
 	var reason string
 	var ref sql.NullString
 	var createdAt string
@@ -295,7 +300,7 @@ func loadReopenNote(ctx context.Context, tx *sql.Tx, challengeID int64) (*reopen
 		return nil, err
 	}
 	var lastRun sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind IN ('delegate', 'contract')`, challengeID).Scan(&lastRun); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind IN (`+runKinds+`)`, challengeID).Scan(&lastRun); err != nil {
 		return nil, err
 	}
 	if lastRun.Valid && lastRun.String >= createdAt {
