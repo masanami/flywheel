@@ -235,7 +235,7 @@ func (f *reviewFlowFixture) reopenAfterRelease(t *testing.T, advance func()) {
 		t.Fatalf("resumes = %v, want none before the release is executed", f.client.resumes)
 	}
 	advance()
-	res, err := f.s.ReopenChallengeForRelease(ctx, ChannelCLI, ReopenForReleaseInput{OperationID: rel.ID, Reason: ReopenReasonNotMergeable})
+	res, err := reopenExecPath(ctx, f.s, ChannelCLI, ReopenForReleaseInput{OperationID: rel.ID, Reason: ReopenReasonNotMergeable})
 	if err != nil || !res.Reopened {
 		t.Fatalf("ReopenChallengeForRelease = %+v err %v, want reopened", res, err)
 	}

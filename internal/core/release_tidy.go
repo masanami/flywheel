@@ -12,7 +12,10 @@ package core
 //     課題が完了なら op add も ErrTerminalState で断られ、戻す道は無い（#539）。
 //   - 課題が完了で、PR の head が J5 の検証の head と異なり、動いた中身を検証し直す必要があると確かに言えるとき
 //     （取り込み以外のコミットが入った・履歴が書き換わった）は、課題を着手中へ戻して release を置き換える。
-//     取り込みだけの変更・判定できない変更は何もしない（承認の ① が取り込みだけを承認する）。
+//     取り込みだけの変更は何もしない（承認の ① が取り込みだけを承認する）。取り込みだけとも中身の変更とも確かめられない
+//     変更（比較の打ち切り・PR に head が無い等）は、何も書かず人間待ち（needs_human）として理由を出す。人が承認するか
+//     着手中へ戻すかを選ぶ。取得の失敗・比較の口が無い場合は何もしない（次の周で読み直す）。
+//     戻す判定は core の AssessReleaseReopen の 1 か所で、CLI の申告は使わない。
 //
 // 読み取りは GET だけで、取得に失敗した release は飛ばす（次の周で読み直す）。
 
@@ -91,7 +94,7 @@ func (s *Store) tidyPendingReleases(ctx context.Context, opts ReleaseExecOptions
 				out = append(out, *item)
 			}
 		case string(artifactStateOpen):
-			item, err := s.reopenIfVerifiedContentChanged(ctx, p, repo, pr, opts)
+			item, err := s.reopenIfVerifiedContentChanged(ctx, p, pr, opts)
 			if err != nil {
 				return out, err
 			}
@@ -164,42 +167,33 @@ func (s *Store) closePendingRelease(ctx context.Context, actor string, p pending
 	return item, nil
 }
 
-// reopenIfVerifiedContentChanged は、完了の課題の承認待ちの release の PR の head が J5 の検証の head と異なり、
-// 動いた中身を検証し直す必要があると確かに言えるときだけ、課題を着手中へ戻す。
-func (s *Store) reopenIfVerifiedContentChanged(ctx context.Context, p pendingReleaseRef, repo string, pr UpstreamPullRequestChecks, opts ReleaseExecOptions) (*ReleaseTidyItem, error) {
-	if opts.Compare == nil || pr.HeadSHA == "" {
-		return nil, nil
-	}
-	var done bool
-	var verified *string
-	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		chal, err := loadChallenge(ctx, tx, p.challengeID)
-		if err != nil {
-			return err
-		}
-		done = chal.Status == StatusDone
-		ref := p.ref
-		verified, err = latestVerifiedHead(ctx, tx, &ref)
-		return err
-	}); err != nil {
-		return nil, classifyReadWriteErr(err)
-	}
-	if !done || verified == nil || *verified == pr.HeadSHA {
-		return nil, nil
-	}
-	change := ClassifyHeadChange(ctx, opts.Compare, repo, pr.Base, *verified, pr.HeadSHA)
-	if !change.RequiresReverification() {
-		return nil, nil
-	}
-	res, err := s.ReopenChallengeForRelease(ctx, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(p.opID), Reason: ReopenReasonContentChanged})
+// reopenIfVerifiedContentChanged は、完了の課題の承認待ちの release の PR の head が J5 の検証の head と異なるとき、
+// core が自分で比較して（AssessReleaseReopen）、動いた中身を検証し直す必要があると確かに言えれば課題を着手中へ戻し、
+// 取り込みだけとも中身の変更とも確かめられなければ（比較の打ち切り・head 無し等）何も書かず人間待ち（needs_human）として返す。
+func (s *Store) reopenIfVerifiedContentChanged(ctx context.Context, p pendingReleaseRef, pr UpstreamPullRequestChecks, opts ReleaseExecOptions) (*ReleaseTidyItem, error) {
+	src := ReleaseHeadSources{Checks: opts.Checks, Compare: opts.Compare}
+	opText := formatOperationID(p.opID)
+	as, err := s.assessReleaseReopen(ctx, opText, src, &pr)
 	if err != nil {
 		return nil, err
 	}
-	if !res.Reopened {
-		return nil, nil
+	switch as.Verdict {
+	case ReleaseReopenNeedsHuman:
+		return &ReleaseTidyItem{
+			OperationID: opText, ChallengeID: formatChallengeID(p.challengeID), Action: ReleaseTidyNeedsHuman, WaitReason: as.Detail,
+		}, nil
+	case ReleaseReopenRequired:
+		res, err := s.reopenChallengeForRelease(ctx, ChannelCLI, opText, ReopenReasonContentChanged, as)
+		if err != nil {
+			return nil, err
+		}
+		if !res.Reopened {
+			return nil, nil
+		}
+		return &ReleaseTidyItem{
+			OperationID: res.ClosedOperationID, ChallengeID: res.ChallengeID, Action: ReleaseTidyReopened,
+			ReopenReason: ReopenReasonContentChanged, NewOperationID: res.NewOperationID,
+		}, nil
 	}
-	return &ReleaseTidyItem{
-		OperationID: res.ClosedOperationID, ChallengeID: res.ChallengeID, Action: ReleaseTidyReopened,
-		ReopenReason: ReopenReasonContentChanged, NewOperationID: res.NewOperationID,
-	}, nil
+	return nil, nil
 }

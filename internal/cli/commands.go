@@ -289,7 +289,7 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			Flags:         append([]flagDef{{Name: "hold-release", HasValue: false}}, relayedFlags()...),
+			Flags:         append([]flagDef{{Name: "hold-release", HasValue: false}, {Name: "reopen", HasValue: false}}, relayedFlags()...),
 			Run:           runApprove,
 		},
 		{

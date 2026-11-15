@@ -108,6 +108,9 @@ const (
 	ReleaseTidyClosed ReleaseTidyAction = "closed"
 	// ReleaseTidyReopened は、検証の後に中身が変わった PR の release を置き換え、完了の課題を着手中へ戻したこと。
 	ReleaseTidyReopened ReleaseTidyAction = "reopened"
+	// ReleaseTidyNeedsHuman は、完了の課題の release の PR の head が検証の後に動いたが、取り込みだけとも中身の変更とも
+	// 確かめられず（比較の打ち切り・head 無し等）、人間待ちにしたこと。何も書かない。人が承認するか着手中へ戻すかを選ぶ。
+	ReleaseTidyNeedsHuman ReleaseTidyAction = "needs_human"
 )
 
 // ReleaseTidyItem は承認待ちの release の片付け 1 件の結果。
@@ -120,6 +123,8 @@ type ReleaseTidyItem struct {
 	// ReopenReason・NewOperationID は Action が reopened のときの戻した理由と新しい release。
 	ReopenReason   ReopenReason
 	NewOperationID string
+	// WaitReason は Action が needs_human のときの、判定できなかった理由。
+	WaitReason string
 }
 
 // PartialReleaseError は release の段が途中でエラーになったとき、それまでに実行済みの結果（マージ済みの

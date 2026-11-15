@@ -5,8 +5,9 @@ package core
 // §本番反映の立て直し。遷移表の T18）を持つ。
 //
 // 呼べるのは ReopenChallengeForRelease（と同じ処理を本番反映の書き込みのトランザクションの中で呼ぶ
-// reopenForReleaseInTx）だけで、CLI のコマンドは無い。完了した課題をほかの理由で戻す口にはしない:
-// 戻す理由は ReopenReason の 3 値（マージできない・連続の上限・検証の後の中身の変更）に限る。
+// reopenForReleaseInTx）だけ。完了した課題をほかの理由で戻す口にはしない:
+// 戻す理由は ReopenReason の 4 値（マージできない・連続の上限・検証の後の中身の変更・取り込みだけとも中身の変更とも
+// 確かめられず人が戻す方を選んだ）に限る。公開の入口は、core が自分で比較して確かめられる後ろの 2 値だけを受ける。
 
 import (
 	"context"
@@ -20,8 +21,14 @@ import (
 type ReopenForReleaseInput struct {
 	// OperationID は立て直す release（"OP-<n>"）。
 	OperationID string
-	// Reason は戻す理由（ReopenReason の値）。閉集合外は ErrValidation。
+	// Reason は戻す理由。公開の入口が受けるのは、core が自分で比較して確かめられる 2 値だけ:
+	// content_changed（取り込み以外の変更が入った・履歴が書き換わったと確かに言える）と
+	// undeterminable（取り込みだけとも中身の変更とも確かめられず、人が戻す方を選んだ）。
+	// not_mergeable・limit_reached は本番反映の段の試行の結果から core 自身が戻すので、この入口では ErrValidation。
+	// 閉集合外も ErrValidation。
 	Reason ReopenReason
+	// Sources は core が自分で比較し直すための取得の口。口が無い・比較できないときは、戻す対象なら ErrConflict。
+	Sources ReleaseHeadSources
 }
 
 // ReopenForReleaseResult は ReopenChallengeForRelease の結果。
@@ -40,16 +47,43 @@ type ReopenForReleaseResult struct {
 // closed（理由 superseded）にし、同じ種類・要約・参照の未承認の release を 1 件作って古い操作と結び、
 // 戻した記録（challenge_reopen）と作業ログを残す。
 //
+// 戻す理由は core が自分で比較して確かめる（AssessReleaseReopen）。判定が理由と合わなければ、何も書かず ErrConflict
+// （content_changed は「検証し直しが確かに要る」、undeterminable は「人間待ち」のときだけ）。
 // 課題が完了でない・操作が release でない・状態が pending か approved でないときは、何も書かず
-// Reopened=false を返す。reason が閉集合外なら ErrValidation、opID が存在しなければ ErrNotFound。
+// Reopened=false を返す。reason が不正なら ErrValidation、opID が存在しなければ ErrNotFound。
 // 新しい release は、戻した課題が検証を通って次の完了の承認を受けるとき、D12 で同時に承認される。
 func (s *Store) ReopenChallengeForRelease(ctx context.Context, ch Channel, in ReopenForReleaseInput) (*ReopenForReleaseResult, error) {
 	if _, ok := ParseReopenReason(string(in.Reason)); !ok {
 		return nil, ErrValidation
 	}
-	opID, ok := parseOperationID(in.OperationID)
+	if in.Reason != ReopenReasonContentChanged && in.Reason != ReopenReasonUndeterminable {
+		return nil, ErrValidation
+	}
+	if _, ok := parseOperationID(in.OperationID); !ok {
+		return nil, ErrNotFound
+	}
+	as, err := s.assessReleaseReopen(ctx, in.OperationID, in.Sources, nil)
+	if err != nil {
+		return nil, err
+	}
+	return s.reopenChallengeForRelease(ctx, ch, in.OperationID, in.Reason, as)
+}
+
+// reopenChallengeForRelease は as（core の評価）が reason に合うことを確かめて戻す。as が戻す対象でない
+// （Eligible が偽）ときは書かずに Reopened=false。評価の検証の head が書き込みの時点の最新と異なれば ErrConflict。
+func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDText string, reason ReopenReason, as *ReleaseReopenAssessment) (*ReopenForReleaseResult, error) {
+	opID, ok := parseOperationID(opIDText)
 	if !ok {
 		return nil, ErrNotFound
+	}
+	if as.Eligible {
+		want := ReleaseReopenRequired
+		if reason == ReopenReasonUndeterminable {
+			want = ReleaseReopenNeedsHuman
+		}
+		if as.Verdict != want || as.Assessment == nil {
+			return nil, ErrConflict
+		}
 	}
 	actor, err := s.resolveActor()
 	if err != nil {
@@ -57,8 +91,34 @@ func (s *Store) ReopenChallengeForRelease(ctx context.Context, ch Channel, in Re
 	}
 	var res *ReopenForReleaseResult
 	err = s.mutateAs(ctx, actor, ch, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
+		if as.Eligible {
+			row, err := loadOperationRow(ctx, tx, opID)
+			if err != nil {
+				return err
+			}
+			var ref *string
+			if row.Ref.Valid {
+				ref = &row.Ref.String
+			}
+			verified, err := latestVerifiedHead(ctx, tx, ref)
+			if err != nil {
+				return err
+			}
+			if verified == nil || *verified != as.Assessment.VerifiedHead {
+				return ErrConflict
+			}
+		}
+		if !as.Eligible {
+			// 判定の時点で戻す対象でなかった。判定から書き込みまでの間に対象になっていても、core が確かめていない理由では戻さない。
+			row, err := loadOperationRow(ctx, tx, opID)
+			if err != nil {
+				return err
+			}
+			res = &ReopenForReleaseResult{ChallengeID: formatChallengeID(row.ChallengeID), ClosedOperationID: formatOperationID(opID)}
+			return nil
+		}
 		var err error
-		res, err = reopenForReleaseInTx(ctx, tx, rec, opID, in.Reason, nil)
+		res, err = reopenForReleaseInTx(ctx, tx, rec, opID, reason, nil)
 		return err
 	})
 	if err != nil {
@@ -329,6 +389,8 @@ func formatReopenSection(n *reopenNote, defaultBranch string) string {
 	switch n.Reason {
 	case ReopenReasonContentChanged:
 		fmt.Fprintf(&b, "理由: 検証の後に、%s へ既定ブランチ（%s）の取り込み以外の変更が入った。入った変更を含めた中身を、もう一度検証する。\n", pr, defaultBranch)
+	case ReopenReasonUndeterminable:
+		fmt.Fprintf(&b, "理由: 検証の後に、%s の head が動き、既定ブランチ（%s）の取り込みだけとは確かめられなかった（人が着手中へ戻した）。動いた中身を含めて、もう一度検証する。\n", pr, defaultBranch)
 	case ReopenReasonLimitReached:
 		fmt.Fprintf(&b, "理由: 本番反映の段で、%s が既定ブランチ（%s）へマージできない状態が連続の上限に達した。\n", pr, defaultBranch)
 	default:

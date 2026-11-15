@@ -38,15 +38,52 @@ func isOperationID(id string) bool {
 func runApprove(a Args) (any, error) {
 	id := a.Positional[0]
 	holdRelease := a.Bools["hold-release"]
+	reopen := a.Bools["reopen"]
 
+	if reopen && (holdRelease || !isOperationID(id)) {
+		return nil, NewError(CodeUsageError, "--reopen は不可逆操作の ID にだけ指定でき、--hold-release とは同時に指定できません")
+	}
 	verifier, err := verifierFor(a)
 	if err != nil {
 		return nil, err
+	}
+	if reopen {
+		return runReopenOperation(a, verifier, id)
 	}
 	if isOperationID(id) {
 		return runApproveOperation(a, verifier, id, holdRelease)
 	}
 	return runApproveChallenge(a, verifier, id, holdRelease)
+}
+
+// runReopenOperation は `flywheel approve <OP-ID> --reopen` の実装。検証の後に動いた head が取り込みだけとも中身の変更とも
+// 確かめられず（人間待ち）、課題が完了の release について、人が承認せず着手中へ戻す方を選ぶ。人間待ちかどうかは core が
+// 自分で比較して確かめ（AssessReleaseReopen）、そうでなければ戻さない。
+func runReopenOperation(a Args, verifier core.Verifier, id string) (any, error) {
+	src := headSources(a)
+	as, err := a.Store.AssessReleaseReopen(context.Background(), id, src)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	if as.Verdict != core.ReleaseReopenNeedsHuman {
+		return nil, NewError(CodeValidationFailed, id+" は人間待ち（取り込みだけとも中身の変更とも確かめられない）ではないため、--reopen で戻せません")
+	}
+	summary := fmt.Sprintf("%s の課題を完了から着手中へ戻し、本番反映を置き換えます。\n理由: 検証の後に PR の head が動き、取り込みだけとも中身の変更とも確かめられませんでした（%s）\n",
+		id, escapeControl(as.Detail))
+	if _, err := core.Verify(core.ChannelCLI, verifier, summary, id); err != nil {
+		return nil, mapCoreErr(err)
+	}
+	res, err := a.Store.ReopenChallengeForRelease(context.Background(), core.ChannelCLI, core.ReopenForReleaseInput{OperationID: id, Reason: core.ReopenReasonUndeterminable, Sources: src})
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	if !res.Reopened {
+		return nil, NewError(CodeValidationFailed, id+" は課題を着手中へ戻せませんでした")
+	}
+	return textOutput{
+		json: view.OperationReopenResponse{ChallengeID: res.ChallengeID, ClosedOperationID: res.ClosedOperationID, NewOperationID: res.NewOperationID, Reason: string(core.ReopenReasonUndeterminable)},
+		text: fmt.Sprintf("%s\t課題 %s を着手中へ戻し、本番反映を %s に置き換えた\n", id, res.ChallengeID, res.NewOperationID),
+	}, nil
 }
 
 // runApproveOperation は `flywheel approve <OP-ID> [--hold-release]` の実装。
@@ -72,12 +109,9 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 	if err != nil {
 		return nil, err
 	}
-	headSHA, mergeInHead := "", ""
+	headSHA := ""
 	if rd != nil {
 		headSHA = rd.Head
-		if rd.MergeIn != nil {
-			mergeInHead = rd.MergeIn.VerifiedHead
-		}
 	}
 
 	summary := operationApprovalSummaryText(preview, nil) + operationHeadLines(rd)
@@ -92,7 +126,8 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 		ExpectedChallengeVersion: preview.ChallengeVersion,
 		Decision:                 core.ApprovalDecisionApproved,
 		HeadSHA:                  headSHA,
-		MergeInVerifiedHead:      mergeInHead,
+		HeadSources:              headSources(a),
+		AcceptUndeterminable:     rd != nil && rd.Undeterminable != nil,
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -101,6 +136,10 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 	if rd != nil && rd.MergeIn != nil {
 		hc := view.FromReleaseHeadAssessment(rd.MergeIn)
 		resp.MergeIn = &hc
+	}
+	if rd != nil && rd.Undeterminable != nil {
+		hc := view.FromReleaseHeadAssessment(rd.Undeterminable)
+		resp.Undeterminable = &hc
 	}
 	return textOutput{json: resp, text: op.ID + "\n"}, nil
 }
@@ -159,6 +198,7 @@ func runApproveChallenge(a Args, verifier core.Verifier, id string, holdRelease 
 		HoldRelease:        holdRelease,
 		ReleaseHeads:       coreReleaseHeads(rds),
 		ExcludedReleaseIDs: excludedIDs(rds),
+		HeadSources:        headSources(a),
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)

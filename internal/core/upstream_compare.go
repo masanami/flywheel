@@ -116,6 +116,10 @@ type HeadChange struct {
 	// HistoryRewritten は、今の head が検証の head の先にない（force-push・rebase 等で履歴が書き換わった）と、
 	// 上流が確かに返したこと。取得の失敗・打ち切りでは立てない。
 	HistoryRewritten bool
+	// HumanDecidable は、判定できない理由が上流の返す量の上限（コミット・ファイルの打ち切り）や、PR 側の head が
+	// 無いことなど、取り直しても変わらない理由であること（取得の失敗・PR が open でない場合は立てない）。
+	// 立っているとき、人が根拠を見て承認するか、課題を着手中へ戻すかを選ぶ（人間待ち）。
+	HumanDecidable bool
 }
 
 // RequiresReverification は、検証の head の中身をそのまま信頼できず、課題を着手中へ戻して検証し直す必要があると
@@ -127,6 +131,19 @@ func (c HeadChange) RequiresReverification() bool {
 
 func undeterminable(format string, args ...any) HeadChange {
 	return HeadChange{Kind: HeadChangeUndeterminable, Detail: fmt.Sprintf(format, args...)}
+}
+
+// undeterminableForHuman は、取り直しても変わらない理由で判定できない（人間待ちにする）HeadChange。
+func undeterminableForHuman(format string, args ...any) HeadChange {
+	c := undeterminable(format, args...)
+	c.HumanDecidable = true
+	return c
+}
+
+// WaitsForHuman は、取り込みだけとも中身の変更とも確かめられず、人が選ぶ（承認するか着手中へ戻すか）べきかを返す。
+// 履歴が書き換わった（検証し直しが確かに必要）場合・取得の失敗の場合は偽。
+func (c HeadChange) WaitsForHuman() bool {
+	return c.Kind == HeadChangeUndeterminable && c.HumanDecidable && !c.HistoryRewritten
 }
 
 // commitSubject は message の 1 行目。
@@ -158,7 +175,7 @@ func ClassifyHeadChange(ctx context.Context, src UpstreamCompareSource, repo, pr
 		return out
 	}
 	if r.TotalCommits > len(r.Commits) {
-		return undeterminable("the commit list is truncated (%d of %d)", len(r.Commits), r.TotalCommits)
+		return undeterminableForHuman("the commit list is truncated (%d of %d)", len(r.Commits), r.TotalCommits)
 	}
 	if len(r.Commits) == 0 {
 		return undeterminable("the comparison has no commits")
@@ -168,14 +185,14 @@ func ClassifyHeadChange(ctx context.Context, src UpstreamCompareSource, repo, pr
 		return undeterminable("compare %s...%s: %v", prBase, shortSHA(currentHead), err)
 	}
 	if p.TotalCommits > len(p.Commits) {
-		return undeterminable("the PR commit list is truncated (%d of %d)", len(p.Commits), p.TotalCommits)
+		return undeterminableForHuman("the PR commit list is truncated (%d of %d)", len(p.Commits), p.TotalCommits)
 	}
 	inP := make(map[string]bool, len(p.Commits))
 	for _, c := range p.Commits {
 		inP[c.SHA] = true
 	}
 	if !inP[currentHead] {
-		return undeterminable("the head %s is not a commit of the PR side of %s", shortSHA(currentHead), prBase)
+		return undeterminableForHuman("the head %s is not a commit of the PR side of %s", shortSHA(currentHead), prBase)
 	}
 
 	out := HeadChange{Kind: HeadChangeMergeInOnly}
@@ -203,8 +220,11 @@ func ClassifyHeadChange(ctx context.Context, src UpstreamCompareSource, repo, pr
 		return out
 	}
 	for _, m := range mergeIns {
-		fix, ok, why := conflictFix(ctx, src, repo, m, inP)
+		fix, ok, why, human := conflictFix(ctx, src, repo, m, inP)
 		if !ok {
+			if human {
+				return undeterminableForHuman("%s", why)
+			}
 			return undeterminable("%s", why)
 		}
 		out.ConflictFixes = append(out.ConflictFixes, fix)
@@ -228,7 +248,7 @@ func isDefaultBranchMerge(c UpstreamCommit, inP map[string]bool) bool {
 
 // conflictFix は取り込みのマージ m の、両方の親と異なるファイルと、PR 側の親（P にある最初の親。無ければ最初の親）からの
 // 差分を返す。ok=false は取得に失敗した・一覧が打ち切られているかもしれない。
-func conflictFix(ctx context.Context, src UpstreamCompareSource, repo string, m UpstreamCommit, inP map[string]bool) (ConflictFix, bool, string) {
+func conflictFix(ctx context.Context, src UpstreamCompareSource, repo string, m UpstreamCommit, inP map[string]bool) (fix ConflictFix, ok bool, why string, human bool) {
 	prSide, defaultSide := m.Parents[0], ""
 	for _, par := range m.Parents {
 		if inP[par] {
@@ -243,31 +263,31 @@ func conflictFix(ctx context.Context, src UpstreamCompareSource, repo string, m 
 		}
 	}
 	if defaultSide == "" {
-		return ConflictFix{}, false, fmt.Sprintf("the merge %s has no default-branch parent", shortSHA(m.SHA))
+		return ConflictFix{}, false, fmt.Sprintf("the merge %s has no default-branch parent", shortSHA(m.SHA)), true
 	}
 	fromPR, err := src.CompareCommits(ctx, repo, prSide, m.SHA)
 	if err != nil {
-		return ConflictFix{}, false, fmt.Sprintf("compare %s...%s: %v", shortSHA(prSide), shortSHA(m.SHA), err)
+		return ConflictFix{}, false, fmt.Sprintf("compare %s...%s: %v", shortSHA(prSide), shortSHA(m.SHA), err), false
 	}
 	fromDefault, err := src.CompareCommits(ctx, repo, defaultSide, m.SHA)
 	if err != nil {
-		return ConflictFix{}, false, fmt.Sprintf("compare %s...%s: %v", shortSHA(defaultSide), shortSHA(m.SHA), err)
+		return ConflictFix{}, false, fmt.Sprintf("compare %s...%s: %v", shortSHA(defaultSide), shortSHA(m.SHA), err), false
 	}
 	if fromPR.FilesTruncated || fromDefault.FilesTruncated {
-		return ConflictFix{}, false, fmt.Sprintf("the changed files of the merge %s may be truncated", shortSHA(m.SHA))
+		return ConflictFix{}, false, fmt.Sprintf("the changed files of the merge %s may be truncated", shortSHA(m.SHA)), true
 	}
 	differsFromDefault := make(map[string]bool, len(fromDefault.Files))
 	for _, f := range fromDefault.Files {
 		differsFromDefault[f.Filename] = true
 	}
-	fix := ConflictFix{MergeCommit: m.SHA}
+	fix = ConflictFix{MergeCommit: m.SHA}
 	for _, f := range fromPR.Files {
 		if !differsFromDefault[f.Filename] {
 			continue
 		}
 		fix.Files = append(fix.Files, ConflictFixFile{Filename: f.Filename, Patch: f.Patch, PatchUnavailable: f.Patch == ""})
 	}
-	return fix, true, ""
+	return fix, true, "", false
 }
 
 func shortSHA(s string) string {
@@ -311,6 +331,13 @@ func (a ReleaseHeadAssessment) MergeInApprovable() bool {
 	return a.Change.Kind == HeadChangeMergeInOnly && a.ChecksPassed
 }
 
+// AcceptableByHuman は、取り込みだけとは確かめられないが、人が根拠を見て承認できる評価かを返す（人間待ち。今の head があるときだけ）。
+// PR 側に head が無い人間待ちは承認できない: 承認の記録に残す head も、本番反映のマージに `--match-head-commit` で渡す
+// head も無く、承認しても実行できないため。その人の出口は `approve <OP-ID> --reopen`（理由 undeterminable）だけ。
+func (a ReleaseHeadAssessment) AcceptableByHuman() bool {
+	return a.HeadSHA != "" && a.PRState == string(artifactStateOpen) && a.Change.WaitsForHuman()
+}
+
 // AssessReleaseHead は ref（PR の URL）の PR の今の head を読み、verifiedHead から動いた中身を評価する。
 // PR が open でなければ判定できない扱いにする。ref が PR の URL でない・PR の取得に失敗したときはエラー。
 // 今の head が verifiedHead と同じなら、Change は空（Kind が空）で返す。
@@ -326,14 +353,23 @@ func AssessReleaseHead(ctx context.Context, checks UpstreamCheckSource, compare 
 	if err != nil {
 		return nil, err
 	}
+	return assessReleaseHeadOfPR(ctx, compare, repo, pr, verifiedHead), nil
+}
+
+// assessReleaseHeadOfPR は取得済みの PR（pr）の今の head を verifiedHead から評価する（AssessReleaseHead の本体）。
+func assessReleaseHeadOfPR(ctx context.Context, compare UpstreamCompareSource, repo string, pr UpstreamPullRequestChecks, verifiedHead string) *ReleaseHeadAssessment {
 	a := &ReleaseHeadAssessment{HeadSHA: pr.HeadSHA, VerifiedHead: verifiedHead, PRState: pr.State, ChecksCount: len(pr.Checks), ChecksPassed: ChecksAllPassed(pr.Checks)}
-	if pr.HeadSHA == "" || pr.HeadSHA == verifiedHead {
-		return a, nil
+	if pr.HeadSHA == verifiedHead {
+		return a
 	}
 	if pr.State != string(artifactStateOpen) {
 		a.Change = undeterminable("the pull request is %s", pr.State)
-		return a, nil
+		return a
+	}
+	if pr.HeadSHA == "" {
+		a.Change = undeterminableForHuman("the pull request has no head")
+		return a
 	}
 	a.Change = ClassifyHeadChange(ctx, compare, repo, pr.Base, verifiedHead, pr.HeadSHA)
-	return a, nil
+	return a
 }

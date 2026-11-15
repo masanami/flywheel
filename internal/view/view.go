@@ -508,6 +508,17 @@ type OperationApprovalResponse struct {
 	// MergeIn は release を「検証の head から既定ブランチを取り込んだだけ（CI は通っている）」と判定して承認したときの評価。
 	MergeIn   *HeadChange `json:"merge_in,omitempty"`
 	Operation Operation   `json:"operation"`
+	// Undeterminable は release を「取り込みだけとも中身の変更とも確かめられない（人間待ち）」まま、人が根拠を見て承認したときの
+	// 評価（kind は undeterminable、detail に判定できなかった理由）。
+	Undeterminable *HeadChange `json:"undeterminable,omitempty"`
+}
+
+// OperationReopenResponse は `approve <OP-ID> --reopen` の結果（人間待ちの release の課題を完了から着手中へ戻し、release を置き換えた）。
+type OperationReopenResponse struct {
+	ChallengeID       string `json:"challenge_id"`
+	ClosedOperationID string `json:"closed_operation_id"`
+	NewOperationID    string `json:"new_operation_id"`
+	Reason            string `json:"reason"`
 }
 
 // ListResponse は `list` の `{"challenges": […]}`。
