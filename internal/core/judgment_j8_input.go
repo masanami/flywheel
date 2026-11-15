@@ -13,6 +13,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -26,10 +27,11 @@ const maxJ8PastImprovements = 10
 
 // J8 の入力の区画のラベル。
 const (
-	j8OccurrencesLabel  = "改修の鍵ごとの発生"
-	j8MetricsLabel      = "指標"
-	j8DefinitionsLabel  = "指標の定義"
-	j8ImprovementsLabel = "過去の改修課題"
+	j8OccurrencesLabel    = "改修の鍵ごとの発生"
+	j8MetricsLabel        = "指標"
+	j8DefinitionsLabel    = "指標の定義"
+	j8ImprovementsLabel   = "過去の改修課題"
+	j8ChallengeStateLabel = "課題の状態"
 )
 
 // j8Occurrence は J8 の入力の明細に載せる発生 1 件。
@@ -70,6 +72,26 @@ type j8Context struct {
 	Groups       []j8KeyGroup
 	Metrics      *MetricsResult
 	Improvements []j8Improvement
+	// ChallengeStates は区画に載せる課題（明細の発生が属する課題と過去の改修課題）の状態。ID の昇順。
+	ChallengeStates []j8ChallengeState
+}
+
+// j8ChallengeState は課題 1 件の状態。J8 が達成の条件で名指しする課題が完了・取り下げでないかを確かめる材料。
+type j8ChallengeState struct {
+	ID     int64
+	Status Status
+}
+
+// j8StateText は課題の状態を J8 に伝える 3 値（終了・取りやめ・未了。指示文に状態の表示名を書けない規則のため、状態の表示名とは別の語を使う）へ写す。
+func j8StateText(st Status) string {
+	switch st {
+	case StatusDone:
+		return "終了"
+	case StatusWithdrawn:
+		return "取りやめ"
+	default:
+		return "未了"
+	}
 }
 
 // DetailOccurrenceIDs は入力の明細に載せた発生の ID の組を返す（J8 の出力検査〔#392〕が、根拠の発生の ID の
@@ -124,7 +146,44 @@ func loadJ8ContextTx(ctx context.Context, tx *sql.Tx, threshold int) (*j8Context
 	if err != nil {
 		return nil, err
 	}
+	jc.ChallengeStates, err = loadJ8ChallengeStates(ctx, tx, jc)
+	if err != nil {
+		return nil, err
+	}
 	return jc, nil
+}
+
+// loadJ8ChallengeStates は明細の発生が属する課題と過去の改修課題の状態を ID の昇順で読む。
+func loadJ8ChallengeStates(ctx context.Context, tx *sql.Tx, jc *j8Context) ([]j8ChallengeState, error) {
+	set := map[int64]bool{}
+	for _, g := range jc.Groups {
+		for _, o := range g.Details {
+			if o.ChallengeID > 0 {
+				set[o.ChallengeID] = true
+			}
+		}
+	}
+	for _, im := range jc.Improvements {
+		set[im.ID] = true
+	}
+	ids := make([]int64, 0, len(set))
+	for id := range set {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	out := make([]j8ChallengeState, 0, len(ids))
+	for _, id := range ids {
+		var st string
+		err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, id).Scan(&st)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue // 課題が無ければ載せない（区画に無い課題は「状態は未確認」）
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j8ChallengeState{ID: id, Status: Status(st)})
+	}
+	return out, nil
 }
 
 // loadJ8Candidates は起動の件数に入りうる発生（見送りの抑えの前）を ID の昇順で返す。
@@ -397,5 +456,14 @@ func prepareJ8(jc *j8Context) []JudgmentDataSection {
 		b.WriteString("過去の改修課題は無い。")
 	}
 	sections = append(sections, JudgmentDataSection{Label: j8ImprovementsLabel, Content: strings.TrimRight(b.String(), "\n")})
+
+	b.Reset()
+	for _, cs := range jc.ChallengeStates {
+		fmt.Fprintf(&b, "- 課題: %s / 状態: %s\n", formatChallengeID(cs.ID), j8StateText(cs.Status))
+	}
+	if len(jc.ChallengeStates) == 0 {
+		b.WriteString("載せた課題は無い。")
+	}
+	sections = append(sections, JudgmentDataSection{Label: j8ChallengeStateLabel, Content: strings.TrimRight(b.String(), "\n")})
 	return sections
 }

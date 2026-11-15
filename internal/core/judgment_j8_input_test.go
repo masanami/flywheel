@@ -462,3 +462,29 @@ func TestPrepareJ8_DefinitionsIncludeTheCompareApprovalCount(t *testing.T) {
 		t.Errorf("approval_count (period) definition changed: %v", defs["approval_count"])
 	}
 }
+
+// #571: J8 の入力に、明細の発生が属する課題と過去の改修課題の状態（終了・取りやめ・未了）を載せる。
+func TestJ8Input_ChallengeStateSection(t *testing.T) {
+	s := newStoreForTest(t)
+	mexec(t, s, `INSERT INTO challenge (title, status, reporter, created_at, updated_at)
+		VALUES ('open', 'in_progress', 't', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`)
+	open := j8MaxID(t, s, "challenge")
+	done := j8InsertImprovement(t, s, "prompt", "p", "done")
+	wd := j8InsertImprovement(t, s, "prompt", "q", "withdrawn")
+	j8Occ(t, s, open, j8Row{})
+	text := j8Section(t, j8Load(t, s, 10), j8ChallengeStateLabel)
+	for _, want := range []string{
+		"- 課題: " + formatChallengeID(open) + " / 状態: 未了",
+		"- 課題: " + formatChallengeID(done) + " / 状態: 終了",
+		"- 課題: " + formatChallengeID(wd) + " / 状態: 取りやめ",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("section lacks %q:\n%s", want, text)
+		}
+	}
+	// 明細の発生も改修課題でもない課題は載せない。
+	other := mChallenge(t, s, "other")
+	if text := j8Section(t, j8Load(t, s, 10), j8ChallengeStateLabel); strings.Contains(text, formatChallengeID(other)) {
+		t.Errorf("unrelated challenge in section:\n%s", text)
+	}
+}

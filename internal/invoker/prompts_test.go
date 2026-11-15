@@ -155,7 +155,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j4.md": 4096,
 		"j5.md": 9728,
 		"j6.md": 6144,
-		"j8.md": 6144,
+		"j8.md": 7168,
 		"j9.md": 4096,
 	}
 
@@ -404,8 +404,8 @@ func TestInstructions_J8AsksForReductionAndMetricHoleCheck(t *testing.T) {
 			t.Errorf("Instructions(J8) lacks %q", want)
 		}
 	}
-	if len(got) > 6144 {
-		t.Errorf("Instructions(J8) is %d bytes, over 6144", len(got))
+	if len(got) > 7168 {
+		t.Errorf("Instructions(J8) is %d bytes, over 7168", len(got))
 	}
 }
 
@@ -827,6 +827,28 @@ func TestJ2Prompt_MentionsParentDirectVerdict(t *testing.T) {
 	for _, want := range []string{"委譲の計画が立たず、親が直接行うのが適切", "親が何を満たせば終わりか", "4 を選んでよい", "サイズに関わらず"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("j2.md does not contain %q", want)
+		}
+	}
+}
+
+// #571: j8.md は、達成の条件の各項目を現物と照らして満たし済みを外すことと、名指しする課題の状態を
+// 課題の状態の区画で確かめることを求める。
+func TestInstructions_J8ChecksCriteriaAgainstCurrentStateAndChallengeStatus(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"対象のファイルの今の中身と照らす",
+		"外したことと根拠",
+		"課題の状態の区画で状態を確かめる",
+		"後を継いだ課題が区画や明細に書かれているときだけ読み替え",
+		"未照合",
+		"状態は未確認",
+		"その提案は出さない",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J8) lacks %q", want)
 		}
 	}
 }
