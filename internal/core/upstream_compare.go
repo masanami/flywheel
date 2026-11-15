@@ -332,6 +332,8 @@ func (a ReleaseHeadAssessment) MergeInApprovable() bool {
 }
 
 // AcceptableByHuman は、取り込みだけとは確かめられないが、人が根拠を見て承認できる評価かを返す（人間待ち。今の head があるときだけ）。
+// PR 側に head が無い人間待ちは承認できない: 承認の記録に残す head も、本番反映のマージに `--match-head-commit` で渡す
+// head も無く、承認しても実行できないため。その人の出口は `approve <OP-ID> --reopen`（理由 undeterminable）だけ。
 func (a ReleaseHeadAssessment) AcceptableByHuman() bool {
 	return a.HeadSHA != "" && a.PRState == string(artifactStateOpen) && a.Change.WaitsForHuman()
 }

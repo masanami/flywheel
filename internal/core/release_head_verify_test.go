@@ -371,3 +371,56 @@ func TestRelease_HumanWaitCanBeResolvedByReopening(t *testing.T) {
 		t.Errorf("snapshot = %+v", snap)
 	}
 }
+
+// --- PR 側に head が無いときの人間待ち（#517 の完了の検証の差し戻し）---
+//
+// head が無い release は、人の承認を断る（承認の記録に残す head も、マージの `--match-head-commit` に渡す head も
+// 無いため）。人の出口は `approve <OP-ID> --reopen`（ReopenChallengeForRelease の理由 undeterminable）だけである。
+
+// (a) head 無しで人間待ちになった release は、人が「確かめないまま承認する」を選んでも承認できない。
+func TestExecuteOperationApproval_HeadlessHumanWaitIsNotApprovable(t *testing.T) {
+	headless := &prFake{pr: UpstreamPullRequestChecks{State: "open", Base: "main", HeadSHA: "", Checks: passingChecks()}}
+	a := assessReleaseHeadOfPR(context.Background(), newFakeCompare(), "o/r", headless.pr, "v")
+	if !a.Change.WaitsForHuman() {
+		t.Fatalf("change = %+v, want a wait for a human", a.Change)
+	}
+	if a.AcceptableByHuman() {
+		t.Fatal("AcceptableByHuman = true for a PR without a head, want false")
+	}
+
+	f := newHeadFixture(t)
+	f.verified(t, hdrefA, "v")
+	before := f.dump(t)
+	if err := f.approveOpWith(t, f.relA, "", sourcesOf(headless, newFakeCompare()), true); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+	if f.dump(t) != before {
+		t.Error("the store changed on a refused approval")
+	}
+}
+
+// (b) head 無しで人間待ちになった release は、理由 undeterminable で課題を着手中へ戻せる（人の出口）。
+func TestRelease_HeadlessHumanWaitCanBeResolvedByReopening(t *testing.T) {
+	for _, state := range []OperationState{OperationStatePending, OperationStateApproved} {
+		t.Run(string(state), func(t *testing.T) {
+			f := newRelFixture(t)
+			f.setOpState(t, state)
+			f.setVerifiedHead(t, "v")
+			f.fake.pr.HeadSHA = ""
+			src := ReleaseHeadSources{Checks: f.fake, Compare: newFakeCompare()}
+			as, err := f.s.AssessReleaseReopen(context.Background(), formatOperationID(f.opID), src)
+			if err != nil || as.Verdict != ReleaseReopenNeedsHuman || !strings.Contains(as.Detail, "no head") {
+				t.Fatalf("assessment = %+v, err = %v, want needs_human (no head)", as, err)
+			}
+			res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{
+				OperationID: formatOperationID(f.opID), Reason: ReopenReasonUndeterminable, Sources: src,
+			})
+			if err != nil || !res.Reopened {
+				t.Fatalf("res = %+v, err = %v", res, err)
+			}
+			if snap := snapshotReopen(t, f.s, f.cid); snap.chStatus != string(StatusInProgress) || len(snap.ops) != 2 {
+				t.Errorf("snapshot = %+v", snap)
+			}
+		})
+	}
+}
