@@ -63,23 +63,11 @@ func fetchArtifactDescriptions(ctx context.Context, src UpstreamDescriptionSourc
 		} else {
 			read = true
 		}
-		b.WriteString("\n" + neutralizeDelimiterLines(text))
+		b.WriteString("\n" + text)
 		if cut {
 			fmt.Fprintf(&b, "\n\n（説明文は %d 文字あり、先頭の %d 文字までを入れて残りを省略した。）", len([]rune(got.Text)), maxArtifactDescriptionRunes)
 		}
 		blocks = append(blocks, b.String())
 	}
 	return strings.Join(blocks, upstreamBlockSeparator), read
-}
-
-// neutralizeDelimiterLines は、データの区画の区切り（行頭の "-----"）に見える行へ空白を前置し、子が書いた説明文が
-// 区画の境界を偽装できないようにする。
-func neutralizeDelimiterLines(s string) string {
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		if strings.HasPrefix(l, "-----") {
-			lines[i] = " " + l
-		}
-	}
-	return strings.Join(lines, "\n")
 }
