@@ -20,15 +20,22 @@ const (
 	contractWaitObserve contractWaitDest = iota
 	// contractWaitOwnerHold はオーナーの保留（人間対応待ち）へ写す。
 	contractWaitOwnerHold
+	// contractWaitReview は成果物のレビュー待ち。保留にせず、成果物を取り込んで課題を検証中へ進める。
+	contractWaitReview
 )
 
 // contractWaitDestination は求められた操作の写し先を決める 1 か所。
 // kind が observe なら読み直すだけ。answer・approve は decider に依らずオーナーの保留へ写す:
 // human はもともとオーナーの承認、any は仕様に写し方が無いので安全側の人の承認、parent は子の問いを
 // 振り分ける判断点（J4）の宛先だが J4 が未実装の間は安全側でオーナーへ上げる（J4 ができたら parent だけをここで分ける）。
-func contractWaitDestination(ra *ContractRequestedAction) contractWaitDest {
+// review は、成果物（pr・branch・commit）があるときだけ検証中へ進める（decider は読まない）。成果物が無ければ、
+// 検証できないので他の求めと同じくオーナーの保留へ写す。
+func contractWaitDestination(ra *ContractRequestedAction, artifacts []ContractArtifact) contractWaitDest {
 	if ra == nil || ra.Kind == "observe" {
 		return contractWaitObserve
+	}
+	if ra.Kind == contractRequestedKindReview && hasReviewableArtifact(artifacts) {
+		return contractWaitReview
 	}
 	return contractWaitOwnerHold
 }
@@ -36,8 +43,11 @@ func contractWaitDestination(ra *ContractRequestedAction) contractWaitDest {
 // contractWaitingQuestion は保留の問い。求められた操作の文と、選択肢があれば選択肢として並べる。
 func contractWaitingQuestion(runID, summary string, ra *ContractRequestedAction, carriesAnswer bool) string {
 	what := "回答"
-	if ra.Kind == "approve" {
+	switch ra.Kind {
+	case "approve":
 		what = "承認"
+	case contractRequestedKindReview:
+		what = "レビュー"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "接続ツールの run（%s）が%sを待っている（求めている相手: %s）。接続ツールの要約: %s\n", runID, what, ra.Decider, summary)
@@ -64,7 +74,7 @@ func resumeCarriesAnswer(c *Connector) bool {
 		return false
 	}
 	for _, a := range c.Commands.Resume {
-		if strings.Contains(a, "{answer}") {
+		if strings.Contains(a, "{answer}") || strings.Contains(a, "{choice}") {
 			return true
 		}
 	}
@@ -107,7 +117,11 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 	}
 	switch rep.State {
 	case ContractStateWaiting:
-		if contractWaitDestination(rep.RequestedAction) != contractWaitOwnerHold {
+		switch contractWaitDestination(rep.RequestedAction, rep.Artifacts) {
+		case contractWaitReview:
+			return s.submitContractReview(ctx, rep)
+		case contractWaitOwnerHold:
+		default:
 			return nil
 		}
 		held, err := s.holdContractWait(ctx, rep, contractWaitingQuestion(rep.ExternalRunID, rep.Summary, rep.RequestedAction, resumeCarriesAnswer(connector)))
@@ -218,14 +232,40 @@ func (s *Store) holdContractWait(ctx context.Context, rep *ContractRunReport, qu
 // 読んだ後に状態の写しと予算の確認を行う。
 func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64) (*ContractRunReport, error) {
 	challengeID := formatChallengeID(row.ChallengeID)
-	answer, resume, err := s.loadContractAnswer(ctx, row, func(answer string) error {
-		// 答えを返すと決める（結び付きを外す）前に、resume の引数を埋められることを確かめる（埋められないまま答えを失わない）。
-		// 答えが無い状態の確認（status）では resume の引数を確かめない（取り込み元を要するのが resume だけの宣言でも状態を読める）。
-		_, err := fillContractArgs(connector.Commands.Resume, challengeID, binding, row.ExternalRunID, answer)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	var answer contractAnswer
+	var resume bool
+	if row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindReview {
+		rr, err := s.pendingReviewReply(ctx, row, planVersion, in.AgentDecl)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case rr == nil:
+		case rr.Skip:
+			return nil, nil
+		case rr.HoldQuestion != "":
+			held, err := s.holdContractWithReason(ctx, rr.HoldRunID, challengeID, rr.HoldQuestion, holdReasonReworkLimit)
+			return &ContractRunReport{ChallengeID: challengeID, ExternalRunID: row.ExternalRunID, Result: RunResultSucceeded,
+				State: row.State, Summary: row.Summary, Held: held}, err
+		default:
+			// 引数を埋められないまま答えを失わないよう、返すと決める前に確かめる。
+			if _, err := fillContractArgs(connector.Commands.Resume, challengeID, binding, row.ExternalRunID, *rr.Answer); err != nil {
+				return nil, err
+			}
+			answer, resume = *rr.Answer, true
+		}
+	}
+	if !resume {
+		a, ok, err := s.loadContractAnswer(ctx, row, func(answer string) error {
+			// 答えを返すと決める（結び付きを外す）前に、resume の引数を埋められることを確かめる（埋められないまま答えを失わない）。
+			// 答えが無い状態の確認（status）では resume の引数を確かめない（取り込み元を要するのが resume だけの宣言でも状態を読める）。
+			_, err := fillContractArgs(connector.Commands.Resume, challengeID, binding, row.ExternalRunID, contractAnswer{Choice: answer})
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		answer, resume = contractAnswer{Choice: a}, ok
 	}
 	args, name := connector.Commands.Status, "status"
 	if resume {
@@ -357,7 +397,7 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 	if err = classifyReadWriteErr(err); err != nil || !inProgress {
 		return err
 	}
-	command, err := fillContractArgs(connector.Commands.Cancel, rep.ChallengeID, binding, row.ExternalRunID, "")
+	command, err := fillContractArgs(connector.Commands.Cancel, rep.ChallengeID, binding, row.ExternalRunID, contractAnswer{})
 	if err != nil {
 		return err
 	}

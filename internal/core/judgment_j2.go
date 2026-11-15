@@ -279,13 +279,13 @@ func checkOperationLaunchable(connector *Connector, op *ConnectorOperation, hasS
 }
 
 // validateCLICommandPlaceholders は cli 形態の commands の引数が、コマンドごとの差し込みの閉集合の中の値だけを要するか検査する。
-// 閉集合は fillContractArgs が埋めるもの: start は invocation と同じ 4 つ、status・cancel はそれに {run_id}、resume はさらに {answer}。
+// 閉集合は fillContractArgs が埋めるもの: start は invocation と同じ 4 つ、status・cancel はそれに {run_id}、resume はさらに {answer}・{choice}・{note}。
 func validateCLICommandPlaceholders(c *Connector) error {
 	if c.Commands == nil {
 		return fmt.Errorf("%w: connector %q (form cli) has no commands", ErrValidation, c.ID)
 	}
 	withRunID := map[string]bool{"{run_id}": true}
-	withAnswer := map[string]bool{"{run_id}": true, "{answer}": true}
+	withAnswer := map[string]bool{"{run_id}": true, "{answer}": true, "{choice}": true, "{note}": true}
 	for _, g := range []struct {
 		name  string
 		args  []string

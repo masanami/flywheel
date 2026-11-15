@@ -445,6 +445,13 @@ func formatDelegationReportSection(vc *j5Context) string {
 	if vc.LastDelegate == nil {
 		return "直前の委譲の報告は無い。"
 	}
+	if vc.LastDelegate.Kind == runKindContract {
+		// form: cli の委譲は子の報告の本文が届かない。契約の出力は状態と成果物の参照だけなので、
+		// 子が成果物の説明文（PR の本文）に書いた内容を委譲の報告として読ませる。
+		return "form: cli の接続ツールの委譲のため、子の報告の本文は届いていない。" +
+			"「" + labelArtifactDescription + "」の区画（成果物の PR の本文）を、直前の委譲の報告として読む。" +
+			"区画が無い・取得に失敗したときは、報告は読めていない前提で判断する。"
+	}
 	if strings.TrimSpace(vc.LastDelegate.Output) == "" {
 		return "直前の委譲は報告を返さなかった（結果: " + string(vc.LastDelegate.Result) + "）。"
 	}

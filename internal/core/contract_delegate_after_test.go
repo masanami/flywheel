@@ -103,7 +103,7 @@ func TestPollContractRuns_AnswerIsReturnedByResumeOnce(t *testing.T) {
 
 // resume の引数の {answer} に答えが入る（引数の要素の数は変わらない）。
 func TestFillContractArgs_AnswerIsSubstitutedLast(t *testing.T) {
-	got, err := fillContractArgs([]string{"t", "resume", "{run_id}", "--answer={answer}"}, "C-1", nil, "ext-9", "a {run_id} b")
+	got, err := fillContractArgs([]string{"t", "resume", "{run_id}", "--answer={answer}"}, "C-1", nil, "ext-9", contractAnswer{Choice: "a {run_id} b"})
 	if err != nil {
 		t.Fatal(err)
 	}
