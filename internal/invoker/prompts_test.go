@@ -409,6 +409,27 @@ func TestInstructions_J8AsksForReductionAndMetricHoleCheck(t *testing.T) {
 	}
 }
 
+// #508: j8.md は、達成の条件の各手順が委譲の子か判断点の出力で実行できるかを確かめ、
+// 実行できない手順を親かオーナーの段に分けることと、判断点の指示文へ書き足す文言に
+// 特定のリポジトリやツールの語を入れないことを求める。
+func TestInstructions_J8CriteriaExecutableAndNoToolSpecificTerms(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 見出しにも出る語ではなく、本文の句で照合する。
+	for _, want := range []string{
+		"委譲の子か判断点の出力で実行できるかを確かめる",
+		"親かオーナーの段に分けて書く",
+		"特定のリポジトリやツールの語",
+		"一般的な言葉で書く",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J8) lacks %q", want)
+		}
+	}
+}
+
 // #444: j2.md の達成条件の項は、達成の確認がこの課題の記録だけで判定できる条件にすることと、
 // 他の課題の将来の実行に依存する確認をテストでの固定かフォローアップの課題へ回すことを求める。
 func TestInstructions_J2CriteriaJudgeableFromOwnRecord(t *testing.T) {
