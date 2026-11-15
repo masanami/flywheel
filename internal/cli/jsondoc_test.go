@@ -1274,8 +1274,6 @@ func addM4RelayEvidenceShape(t *testing.T, doc *documentedJSON) {
 	// closed_at: 取り下げで回答なしに閉じた保留の日時（M4.5 S4。hold.closed_at は #385 の列。
 	// 仕様の JSON の表にはまだ書かれていない）。
 	doc.entity["hold"]["closed_at"] = true
-	// replan: 回答に付いた「範囲が変わる」印（hold.replan。0022）。仕様の JSON の表にはまだ書かれていない。
-	doc.entity["hold"]["replan"] = true
 }
 
 // addM4StageShape は S4 が `--json` に足すキー（challenge の headline・context、show の最上位の
