@@ -95,6 +95,11 @@ test("③ 「ほかの課題」の大枠は、注目とどの線でもつなが�
   const graph = await openGraph(page);
   const closed = othersClosed(graph);
   await expect(closed).toBeVisible();
+  // 件数は大枠に描かれている箱の数。灰色で残した終わった課題（C-19）も数える（開いている 3 件＋灰色 1 件＝4 件）
+  await expect(
+    graph.getByRole("button", { name: "ほかの課題を開く（4 件）" }),
+  ).toBeVisible();
+  await expect(closed.locator("text", { hasText: /^4件$/ })).toBeVisible();
   for (const id of ["C-9", "C-10", "C-11", "C-19"])
     await expect(node(graph, id)).toHaveCount(0);
   // 注目のまとまりは、大枠が畳まれていても見えている（親の中の C-5・C-6 は親を開いて見る）
@@ -262,4 +267,15 @@ test("⑦ 推移的な注目: 起点から 2 段以上先の課題（依存の C
     await expect(target).toBeVisible();
     expect(await inside(frame, target)).toBe(false);
   }
+});
+
+test("⑧ 幅 480px 以下の一覧でも、「ほかの課題」の件数は灰色で残した終わった課題（C-19）を含めて 4 件", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 400, height: 900 });
+  await page.goto("/");
+  await expect(
+    page.getByRole("button", { name: "ほかの課題を開く（4 件）" }),
+  ).toBeVisible();
+  await expect(page.getByText("ほかの課題 4件")).toBeVisible();
 });
