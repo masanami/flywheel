@@ -45,6 +45,23 @@ func ahead(commits ...UpstreamCommit) UpstreamComparison {
 // 履歴の想定: 検証の head v、PR 側のコミット p1(=v の親側)、既定ブランチ main の m1・m2。
 // h1 は v に main の m1 を取り込んだマージ（親は v と m1）。
 
+// 変更が 100 件を超えても、取り切れている（FilesTruncated が偽）なら「取り込みだけ」を判定できる。
+func TestClassifyHeadChange_ManyFilesNotTruncated(t *testing.T) {
+	f := newFakeCompare()
+	f.set("v", "h1", ahead(commit("m1", "main change", "m0"), commit("h1", "Merge branch 'main'", "v", "m1")))
+	f.set("main", "h1", ahead(commit("p0", "feat", "m0"), commit("v", "fix", "p0"), commit("h1", "Merge branch 'main'", "v", "m1")))
+	var files []UpstreamFile
+	for i := 0; i < 188; i++ {
+		files = append(files, UpstreamFile{Filename: "f" + strings.Repeat("x", i%7) + string(rune('a'+i%26)) + "_" + strings.Repeat("1", i/26), Patch: "@@"})
+	}
+	f.set("v", "h1", withFiles(f.results[[2]string{"v", "h1"}], files...))
+	f.set("m1", "h1", UpstreamComparison{Status: UpstreamCompareAhead, TotalCommits: 1, Commits: []UpstreamCommit{commit("v", "fix", "p0")}, Files: files[:3]})
+	got := ClassifyHeadChange(context.Background(), f, "o/r", "main", "v", "h1")
+	if got.Kind != HeadChangeMergeInOnly {
+		t.Fatalf("kind = %q (%s), want merge_in_only", got.Kind, got.Detail)
+	}
+}
+
 func TestClassifyHeadChange_MergeInOnly(t *testing.T) {
 	f := newFakeCompare()
 	// R: v..h1 は、取り込みのマージ h1 と、既定ブランチ側のコミット m1。
