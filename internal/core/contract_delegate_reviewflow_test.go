@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // このファイルは form: cli の接続ツールの run が成果物つきのレビュー待ち（waiting・requested_action.kind = review）に
@@ -194,5 +195,49 @@ func TestPollContractRuns_AfterTheReleaseIsExecutedReadyIsReturnedAndTheRunEnds(
 	f.poll(t)
 	if len(f.client.resumes) != 1 || len(f.client.statuses) != 1 {
 		t.Fatalf("resumes=%d statuses=%d after the run ended, want no more calls", len(f.client.resumes), len(f.client.statuses))
+	}
+}
+
+// (4) 本番反映でマージできず T18 で着手中へ戻った後は、同じ契約の run へ respond と理由を 1 回だけ返し、
+// 次のレビュー待ちでまた検証中へ進む。
+func TestPollContractRuns_ReopenedForReleaseIsReturnedByRespondOnceAndVerifiesAgain(t *testing.T) {
+	f := newReviewFlowFixture(t)
+	cur := time.Now()
+	f.s.now = func() time.Time { return cur }
+	f.toVerifying(t)
+	cid, _ := parseChallengeID(f.cid)
+	cur = cur.Add(time.Hour)
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO operation (challenge_id, kind, summary, ref, state, created_at) VALUES (?, 'release', 's', 'o/r#1', 'pending', ?)`, cid, formatTimestamp(cur))
+		if err != nil {
+			return err
+		}
+		op, _ := res.LastInsertId()
+		if _, err := tx.Exec(`INSERT INTO challenge_reopen (challenge_id, reason, operation_id, new_operation_id, created_at) VALUES (?, 'not_mergeable', ?, ?, ?)`, cid, op, op, formatTimestamp(cur)); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`UPDATE challenge SET status = 'in_progress' WHERE id = ?`, cid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cur = cur.Add(time.Hour)
+	// resume が同じレビュー待ちを返しても（行は waiting・review のまま）、次の周で同じ戻しを返さないことを固定する。
+	f.client.resumeOut = reviewWaitOut()
+	f.poll(t)
+	if len(f.client.resumes) != 1 || !reflect.DeepEqual(f.client.resumes[0][:6], []string{"tool", "resume", "ext-1", "--choice", "respond", "--note"}) ||
+		!strings.Contains(f.client.resumes[0][6], "PR o/r#1") || !strings.Contains(f.client.resumes[0][6], "既定ブランチへ追従") {
+		t.Fatalf("resumes = %v, want one respond with the reopen reason and the PR", f.client.resumes)
+	}
+	cur = cur.Add(time.Hour)
+	f.client.queue = []ContractLaunchOutput{reviewWaitOut()}
+	f.poll(t)
+	if len(f.client.resumes) != 1 {
+		t.Fatalf("resumes = %d, want 1（同じ戻しを二重に返さない）", len(f.client.resumes))
+	}
+	f.client.queue = []ContractLaunchOutput{reviewWaitOut()}
+	f.poll(t)
+	if got := f.status(t, f.cid); got != StatusVerifying {
+		t.Fatalf("status = %s, want verifying", got)
 	}
 }
