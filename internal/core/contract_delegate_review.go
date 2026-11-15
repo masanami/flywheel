@@ -14,6 +14,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 // contractRequestedKindReview は、成果物のレビューを待つ requested_action.kind。
@@ -45,32 +46,24 @@ func (s *Store) submitContractReview(ctx context.Context, rep *ContractRunReport
 			if tc.current.Status != StatusInProgress {
 				return errReconcileNotEligible
 			}
-			verifiedAt := s.currentTime()
-			for _, a := range rep.Artifacts {
-				var kind artifactKind
-				switch a.Kind {
-				case "pr":
-					kind = artifactKindPR
-				case "branch":
-					kind = artifactKindBranch
-				case "commit":
-					kind = artifactKindCommit
-				default:
-					continue
-				}
-				if _, err := insertRunArtifact(ctx, tc.tx, runInt, insertRunArtifactInput{Kind: kind, Ref: a.Ref, VerifiedAt: &verifiedAt}); err != nil {
-					return err
-				}
-				if kind == artifactKindPR {
-					rep.PRs = append(rep.PRs, a.Ref)
-				}
-			}
-			return nil
+			prs, err := importContractArtifacts(ctx, tc.tx, runInt, rep.Artifacts, s.currentTime())
+			rep.PRs = append(rep.PRs, prs...)
+			return err
 		})
 	if err != nil && !errors.Is(err, ErrInvalidTransition) && !errors.Is(err, ErrTerminalState) && !errors.Is(err, errReconcileNotEligible) {
 		return err
 	}
 	return nil
+}
+
+// contractReworkLimitQuestion は、レビュー待ちの契約の run で差し戻しの上限に達したときの保留の問い。通常の委譲の問い
+// （reworkLimitQuestion。回答の後に委譲を起動し直す）とは違い、契約の run は終わらず、回答の後に同じ run へ resume
+// （選択肢 respond、添え書きに差し戻しの指摘とオーナーの回答）を返して直させる。
+func contractReworkLimitQuestion(hit *reworkLimitHit) string {
+	return fmt.Sprintf("差し戻しの上限に達したため、接続ツールの run へ差し戻しを返さず人間対応待ちにした（上限の種類: 差し戻し、回数: %d、上限: %d）。\n"+
+		"直近の検証: %s（達成条件を満たさないと判定された）。接続ツールの run は終わらず開いたまま。"+
+		"回答すると、次の周から数え直して、同じ run へ差し戻しの指摘とあなたの回答を返す（新しい run は起動しない）。",
+		hit.Count, hit.Limit, hit.Last.ID)
 }
 
 // reviewReply は、レビュー待ちの契約の run に対して、この周で flywheel がすることの決定。
@@ -133,7 +126,7 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 			return err
 		}
 		if _, hit := h.decideRework(int(*planVersion), agent.ReworkLimit); hit != nil {
-			out = &reviewReply{HoldQuestion: reworkLimitQuestion(hit), HoldRunID: hit.Last.ID}
+			out = &reviewReply{HoldQuestion: contractReworkLimitQuestion(hit), HoldRunID: hit.Last.ID}
 			return nil
 		}
 		var lastContract int64

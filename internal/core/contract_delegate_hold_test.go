@@ -401,8 +401,9 @@ func TestContractRun_BlocksWithdrawalWhileOpen(t *testing.T) {
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.PrepareWithdraw(context.Background(), f.cid, "不要"); err == nil {
-		t.Fatal("PrepareWithdraw succeeded, want a conflict while the contract run is open")
+	// 要約（①）は止める前に呼ばれるので通り、実行（②）が拒む（先に CancelOpenContractRuns で止める）。
+	if _, err := withdrawForTest(t, f.s, f.cid, "不要"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("withdraw err = %v, want ErrConflict while the contract run is open", err)
 	}
 }
 

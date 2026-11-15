@@ -308,6 +308,10 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		}
 	}
 	if !resume && row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindObserve && stillObserving(rep) {
+		// オーナーの保留（人間対応待ち）の間は、接続ツールの run を進める resume を呼ばない。
+		if inProgress, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !inProgress {
+			return rep, err
+		}
 		return s.resumeObservation(ctx, in, row, connector, binding, planVersion, cycleID, rep)
 	}
 	return rep, nil
@@ -347,6 +351,17 @@ func (s *Store) resumeObservation(ctx context.Context, in ContractPollInput, row
 		}
 	}
 	return rep, nil
+}
+
+// challengeInProgress は課題 cid が着手中か。
+func (s *Store) challengeInProgress(ctx context.Context, cid int64) (bool, error) {
+	var inProgress bool
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		ch, err := loadChallenge(ctx, tx, cid)
+		inProgress = err == nil && ch != nil && ch.Status == StatusInProgress
+		return err
+	})
+	return inProgress, classifyReadWriteErr(err)
 }
 
 // runExistingContractCommand は既存の契約の run に対するコマンド（status・resume・cancel）を 1 回呼んで記録する。
@@ -427,13 +442,7 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 	if usdToMicros(rep.CostTotalUSD) <= row.MaxBudget {
 		return nil
 	}
-	var inProgress bool
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		ch, err := loadChallenge(ctx, tx, row.ChallengeID)
-		inProgress = err == nil && ch != nil && ch.Status == StatusInProgress
-		return err
-	})
-	if err = classifyReadWriteErr(err); err != nil || !inProgress {
+	if inProgress, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !inProgress {
 		return err
 	}
 	command, err := fillContractArgs(connector.Commands.Cancel, rep.ChallengeID, binding, row.ExternalRunID, contractAnswer{})

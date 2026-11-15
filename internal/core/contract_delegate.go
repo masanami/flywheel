@@ -22,6 +22,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"time"
 )
 
 // ContractState は契約（architecture.md §10）の汎用の状態。
@@ -769,8 +770,16 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 		AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND status = 'awaiting_human')`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
 		return err
 	}
-	verifiedAt := s.currentTime()
-	for _, a := range st.Artifacts {
+	prs, err := importContractArtifacts(ctx, tx, c.RunIDInt, st.Artifacts, s.currentTime())
+	report.PRs = append(report.PRs, prs...)
+	return err
+}
+
+// importContractArtifacts は契約の状態の artifacts のうち取り込む種類（pr・branch・commit）を、run（runInt）の成果物として
+// 記録する（成果物の取り込みはここ 1 か所）。取り込んだ PR の参照を返す。
+func importContractArtifacts(ctx context.Context, tx *sql.Tx, runInt int64, arts []ContractArtifact, verifiedAt time.Time) ([]string, error) {
+	var prs []string
+	for _, a := range arts {
 		var kind artifactKind
 		switch a.Kind {
 		case "pr":
@@ -782,14 +791,14 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 		default:
 			continue
 		}
-		if _, err := insertRunArtifact(ctx, tx, c.RunIDInt, insertRunArtifactInput{Kind: kind, Ref: a.Ref, VerifiedAt: &verifiedAt}); err != nil {
-			return err
+		if _, err := insertRunArtifact(ctx, tx, runInt, insertRunArtifactInput{Kind: kind, Ref: a.Ref, VerifiedAt: &verifiedAt}); err != nil {
+			return nil, err
 		}
 		if kind == artifactKindPR {
-			report.PRs = append(report.PRs, a.Ref)
+			prs = append(prs, a.Ref)
 		}
 	}
-	return nil
+	return prs, nil
 }
 
 // PollContractRuns は終わっていない契約の run（contract_run）の状態を、宣言の commands.status で読んで記録する。

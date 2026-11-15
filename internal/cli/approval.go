@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/invoker"
 	"github.com/masanami/flywheel/internal/view"
 )
 
@@ -275,6 +276,17 @@ func runAnswer(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
+	// 計画を作り直すときは、開いた契約の run を先に止める（止めると課題の版が変わりうるので、版を取り直す）。
+	if replan {
+		if n, err := cancelOpenContractRuns(a, id); err != nil {
+			return nil, err
+		} else if n > 0 {
+			if preview, err = a.Store.PrepareAnswer(context.Background(), id, answer); err != nil {
+				return nil, mapCoreErr(err)
+			}
+		}
+	}
+
 	c, hold, err := a.Store.ExecuteAnswer(context.Background(), core.AnswerRequest{
 		ChallengeID:     id,
 		ExpectedVersion: preview.Version,
@@ -312,6 +324,15 @@ func runWithdraw(a Args) (any, error) {
 	att, err := core.Verify(core.ChannelCLI, verifier, withdrawSummaryText(preview), id)
 	if err != nil {
 		return nil, mapCoreErr(err)
+	}
+
+	// 開いた契約の run があれば、先に止める（止めると課題の版が変わりうるので、版を取り直す）。
+	if n, err := cancelOpenContractRuns(a, id); err != nil {
+		return nil, err
+	} else if n > 0 {
+		if preview, err = a.Store.PrepareWithdraw(context.Background(), id, reason); err != nil {
+			return nil, mapCoreErr(err)
+		}
 	}
 
 	c, err := a.Store.ExecuteWithdraw(context.Background(), core.WithdrawRequest{
@@ -597,4 +618,33 @@ func isBidiOrZeroWidth(r rune) bool {
 		return true
 	}
 	return false
+}
+
+// cancelOpenContractRuns は課題の開いた契約の run（form: cli の接続ツールの run）を、宣言の commands.cancel で止める。
+// 開いた run が無ければ宣言も claude も要らず、何もしない。止めた数を返す。
+func cancelOpenContractRuns(a Args, id string) (int, error) {
+	ctx := context.Background()
+	open, err := a.Store.HasOpenContractRun(ctx, id)
+	if err != nil {
+		return 0, mapCoreErr(err)
+	}
+	if !open {
+		return 0, nil
+	}
+	ws := a.Store.Workspace()
+	decl, err := core.LoadAgentDeclaration(ws)
+	if err != nil {
+		return 0, mapCoreErr(err)
+	}
+	conn, err := core.LoadConnectorsDeclaration(ws)
+	if err != nil {
+		return 0, mapCoreErr(err)
+	}
+	n, err := a.Store.CancelOpenContractRuns(ctx, core.ContractCancelInput{
+		ChallengeID: id, AgentDecl: decl, ConnDecl: conn, Client: invoker.NewLauncherWithLookPath(a.LookPath),
+	})
+	if err != nil {
+		return n, mapCoreErr(err)
+	}
+	return n, nil
 }

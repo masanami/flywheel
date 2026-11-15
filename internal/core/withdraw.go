@@ -54,17 +54,19 @@ func errWithdrawReleaseInProgress(challengeID string) error {
 		"core: cannot withdraw challenge %s: a release execution (op exec) is in progress; wait for it to end", challengeID)}
 }
 
-// hasOpenDelegationRun は課題 cid に終わっていない委譲の run があるかを返す。
+// hasOpenContractRunRow は課題 cid に終わっていない契約の run（contract_run。外部の run が動いている・待っている）があるか。
+func hasOpenContractRunRow(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, cid).Scan(&n)
+	return n > 0, err
+}
+
+// hasOpenDelegationRun は課題 cid に終わっていない委譲の run（契約の start の最中を含む）があるかを返す。
 func hasOpenDelegationRun(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) {
 	var n int
 	err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM run WHERE challenge_id = ? AND kind IN (?, ?) AND ended_at IS NULL`,
 		cid, string(RunKindDelegate), string(RunKindContract)).Scan(&n)
-	if err != nil || n > 0 {
-		return n > 0, err
-	}
-	// 周をまたいで続く契約の run（外部の run が動いている）も、取り下げを止める。
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, cid).Scan(&n)
 	return n > 0, err
 }
 
@@ -109,12 +111,23 @@ func openReleaseAttempts(ctx context.Context, tx *sql.Tx, cid int64) ([]*operati
 // release の実行の試行は `op exec` と同じ判定（releaseAttemptStale）で止まったものを開いていないとみなし、
 // その試行を stale として返す（書き込み側が interrupted として閉じる）。止まっていない試行があれば conflict
 // （取り下げで release を rejected にすると、依頼中のマージの結果を記録する経路が働かないため）。
-func checkWithdrawable(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge, at time.Time) (stale []*operationExecutionRow, err error) {
+func checkWithdrawable(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge, at time.Time, contractRunMayBeOpen bool) (stale []*operationExecutionRow, err error) {
 	if IsTerminal(Table, StatusVocabulary, current.Status) {
 		return nil, ErrTerminalState
 	}
 	if current.Status == StatusInProgress {
 		open, err := hasOpenDelegationRun(ctx, tx, cid)
+		if err != nil {
+			return nil, err
+		}
+		if open {
+			return nil, errWithdrawOpenDelegation(current.ID)
+		}
+	}
+	// 開いた契約の run（接続ツール側の run）は、どの状態でも先に止める（CancelOpenContractRuns）。要約（①）は止める前に
+	// 呼ばれるので許し、実行（②）で拒む。
+	if !contractRunMayBeOpen {
+		open, err := hasOpenContractRunRow(ctx, tx, cid)
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +169,7 @@ func (s *Store) PrepareWithdraw(ctx context.Context, id string, reason string) (
 		if err != nil {
 			return err
 		}
-		if _, err := checkWithdrawable(ctx, tx, cid, current, s.currentTime()); err != nil {
+		if _, err := checkWithdrawable(ctx, tx, cid, current, s.currentTime(), true); err != nil {
 			return err
 		}
 		ops, err := loadOperations(ctx, tx, cid)
@@ -212,7 +225,7 @@ func (s *Store) ExecuteWithdraw(ctx context.Context, req WithdrawRequest, att At
 	}
 
 	apply := func(ctx context.Context, tc *transitionCtx) error {
-		stale, err := checkWithdrawable(ctx, tc.tx, tc.id, tc.current, tc.now)
+		stale, err := checkWithdrawable(ctx, tc.tx, tc.id, tc.current, tc.now, false)
 		if err != nil {
 			return err
 		}
