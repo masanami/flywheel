@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -42,15 +44,26 @@ type fakeContractClient struct {
 	startOut ContractLaunchOutput
 	queue    []ContractLaunchOutput
 	last     ContractLaunchOutput
+	// workDirs は呼び出しごとに受け取った WorkDir（コマンド名: start・status・resume・cancel）。
+	workDirs map[string][]string
+}
+
+func (f *fakeContractClient) recordWorkDir(name, dir string) {
+	if f.workDirs == nil {
+		f.workDirs = map[string][]string{}
+	}
+	f.workDirs[name] = append(f.workDirs[name], dir)
 }
 
 func (f *fakeContractClient) Start(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
 	f.starts = append(f.starts, in.Command)
+	f.recordWorkDir("start", in.WorkDir)
 	return f.startOut, nil
 }
 
 func (f *fakeContractClient) Status(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
 	f.statuses = append(f.statuses, in.Command)
+	f.recordWorkDir("status", in.WorkDir)
 	if len(f.queue) > 0 {
 		f.last = f.queue[0]
 		f.queue = f.queue[1:]
@@ -60,11 +73,13 @@ func (f *fakeContractClient) Status(_ context.Context, in ContractLaunchInput) (
 
 func (f *fakeContractClient) Resume(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
 	f.resumes = append(f.resumes, in.Command)
+	f.recordWorkDir("resume", in.WorkDir)
 	return f.resumeOut, nil
 }
 
 func (f *fakeContractClient) Cancel(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
 	f.cancels = append(f.cancels, in.Command)
+	f.recordWorkDir("cancel", in.WorkDir)
 	return f.cancelOut, nil
 }
 
@@ -401,5 +416,137 @@ func TestContractRun_CountsAsAnActiveRunForDelegationTargets(t *testing.T) {
 	}
 	if len(targets) != 0 {
 		t.Fatalf("targets = %v, want none while the contract run is active", targets)
+	}
+}
+
+func TestContractCommands_RunInTheChallengeRepoWorkDir(t *testing.T) {
+	worktreeJSON := strings.Replace(contractConnectorsJSON,
+		`{"provider": "clone", "paths": ["slot1"]}`, `{"provider": "worktree", "base": "repos/base", "count": 2}`, 1)
+	for _, tc := range []struct {
+		name, connectors, rel string
+	}{
+		{"clone は idle の作業用クローン", contractConnectorsJSON, "slot1"},
+		{"worktree は元のクローン（base）", worktreeJSON, "repos/base"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newContractFixtureWith(t, tc.connectors)
+			want := filepath.Join(f.s.workspace, tc.rel)
+			if _, err := f.start(t); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			f.client.last = contractOut(ContractStateRunning, nil, nil)
+			f.poll(t)
+			// 観測の待ちを読んだ後の答え無しの resume も同じ作業ディレクトリで走る。
+			observe := waitingOut(&ContractRequestedAction{Kind: "observe", Decider: "any", Text: "見ている"}, nil)
+			f.client.queue = []ContractLaunchOutput{observe, observe}
+			f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
+			f.poll(t) // 観測の待ちを記録する
+			f.poll(t) // 記録済みの観測の待ちを読み直し、答え無しの resume を呼ぶ
+			f.client.last = contractOut(ContractStateRunning, nil, nil)
+			f.client.cancelOut = contractOut(ContractStateCancelled, nil, nil)
+			if _, err := f.s.CancelOpenContractRuns(context.Background(), ContractCancelInput{
+				ChallengeID: f.cid, AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client}); err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+			for _, name := range []string{"start", "status", "resume", "cancel"} {
+				got := f.client.workDirs[name]
+				if len(got) == 0 {
+					t.Fatalf("%s was not called", name)
+				}
+				for _, d := range got {
+					if d != want {
+						t.Errorf("%s WorkDir = %q, want %q（ワークスペース %q ではなく課題のリポジトリ）", name, d, want, f.s.workspace)
+					}
+				}
+			}
+		})
+	}
+}
+
+// clone に idle の作業用クローンが無いとき、周の委譲は周を止めず slot_unavailable で見送り、start を呼ばない。
+func TestDelegateViaContract_NoIdleCloneIsSlotUnavailable(t *testing.T) {
+	f := newContractFixture(t)
+	if err := f.s.EnsureSlots(context.Background(), f.conn.Repos[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE slot SET state = 'needs_attention', attention_reason = 'x'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	in := f.input(f.cycle(t, 300), nil)
+	in.Contract = f.client
+	dc := &delegationContext{Challenge: f.detail(t, f.cid).Challenge, Connector: f.conn.Connectors[0], ImplBudgetMicros: usdToMicros(3), ReviewBudgetMicros: usdToMicros(2)}
+	item, ns, err := f.s.delegateViaContract(context.Background(), in, NewJudgmentCycle(in.CycleID), dc, nil)
+	if err != nil || item != nil || ns == nil || ns.Reason != NotStartedSlotUnavailable {
+		t.Fatalf("item = %+v not_started = %+v err = %v, want slot_unavailable", item, ns, err)
+	}
+	if len(f.client.starts) != 0 {
+		t.Fatalf("starts = %v, want none", f.client.starts)
+	}
+}
+
+// status・resume・cancel は start で記録した作業ディレクトリで実行し、決め直さない（start で使ったスロットが idle で
+// なくなり、別の idle のスロットがあっても start のスロットのまま）。記録の無い既存の run はワークスペースで実行する。
+func TestContractCommands_UseTheWorkDirRecordedAtStart(t *testing.T) {
+	twoSlots := strings.Replace(contractConnectorsJSON, `"paths": ["slot1"]`, `"paths": ["slot1", "slot2"]`, 1)
+	for _, tc := range []struct {
+		name   string
+		legacy bool // start の後に記録を消し、記録を足す前に始めた run として扱う
+		rel    string
+	}{
+		{"start で記録したスロット", false, "slot1"},
+		{"記録の無い既存の run はワークスペース", true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newContractFixtureWith(t, twoSlots)
+			if _, err := f.start(t); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			if got, want := f.client.workDirs["start"], []string{filepath.Join(f.s.workspace, "slot1")}; len(got) != 1 || got[0] != want[0] {
+				t.Fatalf("start WorkDir = %v, want %v", got, want)
+			}
+			if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+				if _, err := tx.Exec(`UPDATE slot SET state = 'needs_attention', attention_reason = 'x' WHERE path LIKE '%slot1'`); err != nil {
+					return err
+				}
+				if tc.legacy {
+					_, err := tx.Exec(`UPDATE contract_run SET work_dir = NULL`)
+					return err
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			want := f.s.workspace
+			if tc.rel != "" {
+				want = filepath.Join(f.s.workspace, tc.rel)
+			}
+			f.client.last = contractOut(ContractStateRunning, nil, nil)
+			f.poll(t)
+			observe := waitingOut(&ContractRequestedAction{Kind: "observe", Decider: "any", Text: "見ている"}, nil)
+			f.client.queue = []ContractLaunchOutput{observe, observe}
+			f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
+			f.poll(t)
+			f.poll(t)
+			f.client.last = contractOut(ContractStateRunning, nil, nil)
+			f.client.cancelOut = contractOut(ContractStateCancelled, nil, nil)
+			if _, err := f.s.CancelOpenContractRuns(context.Background(), ContractCancelInput{
+				ChallengeID: f.cid, AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client}); err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+			for _, name := range []string{"status", "resume", "cancel"} {
+				got := f.client.workDirs[name]
+				if len(got) == 0 {
+					t.Fatalf("%s was not called", name)
+				}
+				for _, d := range got {
+					if d != want {
+						t.Errorf("%s WorkDir = %q, want %q", name, d, want)
+					}
+				}
+			}
+		})
 	}
 }

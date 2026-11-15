@@ -16,7 +16,8 @@ type ContractCancelInput struct {
 	AgentDecl   *AgentDeclaration
 	ConnDecl    *ConnectorsDeclaration
 	Client      ContractClient
-	WorkDir     string
+	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。
+	WorkDir string
 }
 
 // HasOpenContractRun は、課題に終わっていない契約の run（接続ツール側で動いている・待っている run）があるか。
@@ -78,7 +79,8 @@ func (s *Store) CancelOpenContractRuns(ctx context.Context, in ContractCancelInp
 		if err != nil {
 			return n, err
 		}
-		rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, in.WorkDir, row, "cancel", command, nil, nil,
+		workDir := existingContractWorkDir(row, in.WorkDir)
+		rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, row, "cancel", command, nil, nil,
 			"課題の取り下げまたは計画の作り直しのため、接続ツールの run の中止を依頼した。")
 		if err != nil {
 			return n, err
