@@ -2,6 +2,8 @@ package github
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -207,6 +209,114 @@ func assertCommitChecksCalls(t *testing.T, logPath string) {
 	for i, argv := range calls {
 		if got := argv[len(argv)-1]; !strings.HasPrefix(got, wantPaths[i]) {
 			t.Errorf("call[%d] endpoint = %q, want prefix %q", i, got, wantPaths[i])
+		}
+	}
+}
+
+// ページングの試験。GetCommitChecks と GetPullRequestChecks は listCommitChecks を共有するので、同じ期待を両方の経路で固定する。
+func checksViaBothPaths(t *testing.T, c *Client) map[string]func() ([]core.UpstreamCheck, error) {
+	t.Helper()
+	return map[string]func() ([]core.UpstreamCheck, error){
+		"GetCommitChecks": func() ([]core.UpstreamCheck, error) {
+			return c.GetCommitChecks(context.Background(), "o/r", fixedSHA)
+		},
+		"GetPullRequestChecks": func() ([]core.UpstreamCheck, error) {
+			got, err := c.GetPullRequestChecks(context.Background(), "o/r", 7)
+			// エラー時も got.Checks をそのまま返し、途中までの一覧が漏れないことを試験で確かめられるようにする。
+			return got.Checks, err
+		},
+	}
+}
+
+// pagedEndpoints は、ログから check-runs と status の呼び出しのパスの末尾（クエリ）を順に返す（PR の取得は除く）。
+func pagedEndpoints(t *testing.T, logPath string) []string {
+	t.Helper()
+	requireOnlyGETCalls(t, logPath)
+	var out []string
+	for _, argv := range readInvocationLog(t, logPath) {
+		ep := argv[len(argv)-1]
+		if strings.HasPrefix(ep, "repos/o/r/pulls/") {
+			continue
+		}
+		out = append(out, strings.TrimPrefix(ep, "repos/o/r/commits/"+fixedSHA+"/"))
+	}
+	return out
+}
+
+func TestListCommitChecks_ReadsSecondPageWhenFirstPageIsFull(t *testing.T) {
+	base := "check-runs?page=%d&per_page=100"
+	stBase := "status?page=%d&per_page=100"
+	wantCalls := []string{fmt.Sprintf(base, 1), fmt.Sprintf(base, 2), fmt.Sprintf(stBase, 1), fmt.Sprintf(stBase, 2)}
+	for _, name := range []string{"GetCommitChecks", "GetPullRequestChecks"} {
+		t.Run(name, func(t *testing.T) {
+			dir := newFakeGHDir(t)
+			logPath := newFakeGHLogPath(t)
+			t.Setenv(envScenario, "paged_two")
+			t.Setenv(envLogFile, logPath)
+			c := newTestClient(t, dir)
+			got, err := checksViaBothPaths(t, c)[name]()
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if len(got) != 205 {
+				t.Fatalf("checks = %d, want 205 (103 check runs + 102 statuses)", len(got))
+			}
+			if got[0].Name != "run-p1-0" || got[102].Name != "run-p2-2" || got[103].Name != "st-p1-0" || got[204].Name != "st-p2-1" {
+				t.Errorf("order/boundaries wrong: %+v %+v %+v %+v", got[0], got[102], got[103], got[204])
+			}
+			if got[102].Status != "completed" || got[103].Status != core.UpstreamCheckStatusLegacy {
+				t.Errorf("status normalization wrong: %+v %+v", got[102], got[103])
+			}
+			if calls := pagedEndpoints(t, logPath); !reflect.DeepEqual(calls, wantCalls) {
+				t.Errorf("calls = %v, want %v", calls, wantCalls)
+			}
+		})
+	}
+}
+
+func TestListCommitChecks_EmptySecondPageEndsAtExactly100(t *testing.T) {
+	base := "check-runs?page=%d&per_page=100"
+	stBase := "status?page=%d&per_page=100"
+	wantCalls := []string{fmt.Sprintf(base, 1), fmt.Sprintf(base, 2), fmt.Sprintf(stBase, 1), fmt.Sprintf(stBase, 2)}
+	for _, name := range []string{"GetCommitChecks", "GetPullRequestChecks"} {
+		t.Run(name, func(t *testing.T) {
+			dir := newFakeGHDir(t)
+			logPath := newFakeGHLogPath(t)
+			t.Setenv(envScenario, "paged_exact")
+			t.Setenv(envLogFile, logPath)
+			c := newTestClient(t, dir)
+			got, err := checksViaBothPaths(t, c)[name]()
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if len(got) != 200 {
+				t.Fatalf("checks = %d, want 200 (100 check runs + 100 statuses)", len(got))
+			}
+			if calls := pagedEndpoints(t, logPath); !reflect.DeepEqual(calls, wantCalls) {
+				t.Errorf("calls = %v (a third page must not be read), want %v", calls, wantCalls)
+			}
+		})
+	}
+}
+
+func TestListCommitChecks_SecondPageFailureIsErrorWithoutPartialList(t *testing.T) {
+	for _, tc := range []struct{ scenario, want string }{
+		{"paged_runs_page2_fail", "check runs"},
+		{"paged_status_page2_fail", "commit statuses"},
+	} {
+		for _, name := range []string{"GetCommitChecks", "GetPullRequestChecks"} {
+			t.Run(tc.scenario+"/"+name, func(t *testing.T) {
+				dir := newFakeGHDir(t)
+				t.Setenv(envScenario, tc.scenario)
+				c := newTestClient(t, dir)
+				got, err := checksViaBothPaths(t, c)[name]()
+				if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "page 2") {
+					t.Fatalf("err = %v, want a %s failure on page 2", err, tc.want)
+				}
+				if got != nil {
+					t.Errorf("checks = %d items, want nil on failure", len(got))
+				}
+			})
 		}
 	}
 }

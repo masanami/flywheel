@@ -96,6 +96,8 @@ func runFakeGH(argv []string) int {
 		return fakeGHChecks(argv, os.Getenv(envScenario))
 	case "commit_checks_none", "commit_checks_some", "commit_checks_runs_fail", "commit_checks_status_fail":
 		return fakeGHCommitChecks(argv, os.Getenv(envScenario))
+	case "paged_two", "paged_exact", "paged_runs_page2_fail", "paged_status_page2_fail":
+		return fakeGHPagedChecks(argv, os.Getenv(envScenario))
 	case "pull_body_ok":
 		fmt.Print(`{"html_url":"https://github.com/o/r/pull/7","body":"本文です","head":{"sha":"abc123"}}`)
 		return 0
@@ -606,6 +608,63 @@ func fakeGHCommitChecks(argv []string, scenario string) int {
 	}
 	fmt.Fprintf(os.Stderr, "fake gh: unexpected endpoint %q\n", endpoint)
 	return 1
+}
+
+// fakeGHPagedChecks は check runs と commit statuses が 100 件を超えるコミットの偽の応答（page クエリで返す件数を変える）。
+// PR の取得（repos/o/r/pulls/7）は head の SHA に fixedSHA を返す。
+//   - paged_two: 1 ページ目が 100 件、2 ページ目が check runs 3 件・statuses 2 件
+//   - paged_exact: 1 ページ目が 100 件、2 ページ目が 0 件
+//   - paged_runs_page2_fail / paged_status_page2_fail: 2 ページ目の取得だけが失敗する
+func fakeGHPagedChecks(argv []string, scenario string) int {
+	endpoint, _ := lastEndpointAndDashI(argv)
+	if strings.HasPrefix(endpoint, "repos/o/r/pulls/7") {
+		fmt.Printf(`{"html_url":"https://github.com/o/r/pull/7","title":"t","state":"open","merged_at":null,"base":{"ref":"main","sha":"base456"},"head":{"sha":%q},"mergeable":true,"mergeable_state":"clean","merge_commit_sha":"mc456"}`, fixedSHA)
+		return 0
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fake gh: bad endpoint %q\n", endpoint)
+		return 1
+	}
+	page, _ := strconv.Atoi(u.Query().Get("page"))
+	prefix := "repos/o/r/commits/" + fixedSHA
+	var kind string
+	switch u.Path {
+	case prefix + "/check-runs":
+		kind = "runs"
+	case prefix + "/status":
+		kind = "status"
+	default:
+		fmt.Fprintf(os.Stderr, "fake gh: unexpected endpoint %q\n", endpoint)
+		return 1
+	}
+	if page == 2 && ((kind == "runs" && scenario == "paged_runs_page2_fail") || (kind == "status" && scenario == "paged_status_page2_fail")) {
+		fmt.Fprintln(os.Stderr, "gh: boom")
+		return 1
+	}
+	n := 0
+	switch {
+	case page == 1:
+		n = 100
+	case page == 2 && scenario == "paged_two" && kind == "runs":
+		n = 3
+	case page == 2 && scenario == "paged_two" && kind == "status":
+		n = 2
+	}
+	items := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		if kind == "runs" {
+			items = append(items, fmt.Sprintf(`{"name":"run-p%d-%d","status":"completed","conclusion":"success"}`, page, i))
+		} else {
+			items = append(items, fmt.Sprintf(`{"context":"st-p%d-%d","state":"success"}`, page, i))
+		}
+	}
+	if kind == "runs" {
+		fmt.Printf(`{"total_count":%d,"check_runs":[%s]}`, n, strings.Join(items, ","))
+	} else {
+		fmt.Printf(`{"state":"success","total_count":%d,"statuses":[%s]}`, n, strings.Join(items, ","))
+	}
+	return 0
 }
 
 // fakeGHCompareFiles は実 API と同じく、ファイル一覧を 1 ページ目に全件（最大 300）載せ、2 ページ目以降は空で返す。
