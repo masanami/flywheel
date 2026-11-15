@@ -630,6 +630,8 @@ func TestInstructions_J2ChecksThePlanBeforeOutput(t *testing.T) {
 //	j6.md  | 学び・記憶・フォローアップ       | 無し             | 出力のキー名の括弧書き（classifications 等）
 //	j8.md  | 改修の提案と理由                 | 無し             | 無し
 //
+// J3 は #628 で子への報告の言語を指定する別の文を足した（共通の文ではないので、検査は TestInstructions_J3RequiresChildReportInJapanese）。
+//
 // 出力の型（internal/core の各 jN の出力のスキーマ）はキー名・閉集合の値が英語で、
 // description は J1 の context（日本語）以外に無い。言語を指定する文はどこにも無かった。
 // 共通の規律を置く仕組み（判断点の指示文の共通の部品）は無いので、j3・j4 以外の各指示文に足した。
@@ -649,6 +651,18 @@ func TestInstructions_RequireJapaneseForHumanFacingText(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(%v) lacks the rule to write human-facing text in Japanese", jp)
 		}
+	}
+}
+
+// J3 は人に問いを出さないので共通の文は求めず、子への報告の言語の指定を検査する（文を消すと失敗する）。
+func TestInstructions_J3RequiresChildReportInJapanese(t *testing.T) {
+	const want = "委譲先が返す報告（要約・前提・未検証の項目など）は日本語で書くよう、ブリーフに明記する。入力が英語でも同じ。コードの識別子・パス・コマンド・引用は原文のままでよい。"
+	got, err := Instructions(core.JudgmentJ3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, want) {
+		t.Error("Instructions(J3) lacks the rule to have the child report in Japanese")
 	}
 }
 
