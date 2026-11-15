@@ -6,7 +6,10 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { ApprovalSummary } from "../api/types.gen.ts";
+import {
+  type ApprovalSummary,
+  CONDITIONS_AFTER_RELEASE_HEADINGS,
+} from "../api/types.gen.ts";
 import { installFakes } from "../testing/fakes.ts";
 import { ApprovalPanel } from "./ApprovalPanel.tsx";
 import { ACTUAL_MISSING_MARK, EXPECTED_MISSING_MARK } from "./stage-marks.ts";
@@ -16,9 +19,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// サーバが返す見出し（CLI の「--hold-release」と同じ文言。UI は本番反映を承認しない）
-const HELD_HEADING =
-  "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:";
+// サーバが返す見出し（正本は Go。生成物から引く。UI は本番反映を承認しない側）
+const [HELD_HEADING] = CONDITIONS_AFTER_RELEASE_HEADINGS;
 
 const APPROVAL = "/api/v1/workspaces/alpha/challenges/C-1/approval";
 

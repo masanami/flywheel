@@ -1,5 +1,5 @@
 // このファイルは生成物。編集しない。`go generate ./internal/view` で書き出す。
-// 正本は internal/view の構造体（json タグ）と、view.ClosedSets（core の閉集合の値）。
+// 正本は internal/view の構造体（json タグ）と、view.ClosedSets（core の閉集合の値と、view の承認の見出し）。
 
 export interface StatusResponse {
   actionable: StatusActionable;
@@ -608,4 +608,10 @@ export const GRAPH_REGISTERED_VIA_CODES = [
 export const HOLD_KIND_CODES = [
   "human",
   "parent_direct",
+] as const;
+
+export const CONDITIONS_AFTER_RELEASE_HEADINGS = [
+  "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:",
+  "承認で本番反映されると満たされる条件:",
+  "承認済みの本番反映が走れば満たされる条件:",
 ] as const;

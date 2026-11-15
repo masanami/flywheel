@@ -38,7 +38,7 @@ var roots = []reflect.Type{
 }
 
 const header = "// このファイルは生成物。編集しない。`go generate ./internal/view` で書き出す。\n" +
-	"// 正本は internal/view の構造体（json タグ）と、view.ClosedSets（core の閉集合の値）。\n"
+	"// 正本は internal/view の構造体（json タグ）と、view.ClosedSets（core の閉集合の値と、view の承認の見出し）。\n"
 
 func main() {
 	out := "web/src/api/types.gen.ts"

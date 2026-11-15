@@ -486,3 +486,22 @@ func TestFromApprovalPreview_CompletionWithDirectCompletionHasNoPlan(t *testing.
 		t.Errorf("DirectCompletion = %+v, want the recorded artifact", got.DirectCompletion)
 	}
 }
+
+// UI の偽のサーバとテストは生成物の CONDITIONS_AFTER_RELEASE_HEADINGS を添字（ConditionsOutlook の値）で引く。
+func TestClosedSetsHeadingsIndexedByOutlook(t *testing.T) {
+	for _, cs := range view.ClosedSets() {
+		if cs.Name != "CONDITIONS_AFTER_RELEASE_HEADINGS" {
+			continue
+		}
+		if len(cs.Codes) != 3 {
+			t.Fatalf("見出しは ConditionsOutlook の値の数（3）だけ要る: %d", len(cs.Codes))
+		}
+		for _, o := range []view.ConditionsOutlook{view.OutlookNotReleasing, view.OutlookReleasing, view.OutlookApprovedRelease} {
+			if cs.Codes[int(o)] != view.ConditionsAfterReleaseHeading(o) {
+				t.Errorf("添字 %d の見出しが ConditionsAfterReleaseHeading(%d) と違う", int(o), int(o))
+			}
+		}
+		return
+	}
+	t.Fatal("CONDITIONS_AFTER_RELEASE_HEADINGS が ClosedSets に無い")
+}
