@@ -812,7 +812,11 @@ const slotBranchHeldNoteFile = "slot-branch-held.txt"
 
 // recordSlotBranchHeld は a がブランチを持つ作業ツリーを避けて起動した割り当てなら、その事実（ブランチと
 // 作業ツリーのパス）を run の保存先へ書き、周の結果の補足（Note）にする文を返す（そうでなければ ""）。
-// 書けなくても委譲は止めない（補足は周の結果にも出る）。
+// 書けなくても委譲は止めないが、書けなかったことと理由を補足の後ろに足す（補足は周の結果にも出る）。
+//
+// ストアの既存の記録には置かない: run の output は子の報告、error は失敗の理由（runs が失敗として出す）、
+// 作業ログには run 系を載せない（M3H7）、run_artifact の種類は子の成果物（branch・pr・commit）の閉集合で、
+// どれもスキーマを変えずに「避けた作業ツリー」を入れる形ではない。
 func (s *Store) recordSlotBranchHeld(a *SlotAssignment) string {
 	if a == nil || a.HeldBy == "" {
 		return ""
@@ -820,8 +824,12 @@ func (s *Store) recordSlotBranchHeld(a *SlotAssignment) string {
 	note := fmt.Sprintf("branch %s was checked out in %s (outside the slot); the slot %s was aligned to the default branch instead",
 		a.HeldBranch, a.HeldBy, a.SlotID)
 	dir := runDirPath(s.workspace, a.RunID)
-	if err := os.MkdirAll(dir, 0o755); err == nil {
-		_ = os.WriteFile(filepath.Join(dir, slotBranchHeldNoteFile), []byte(note+"\n"), 0o600)
+	err := os.MkdirAll(dir, 0o755)
+	if err == nil {
+		err = os.WriteFile(filepath.Join(dir, slotBranchHeldNoteFile), []byte(note+"\n"), 0o600)
+	}
+	if err != nil {
+		note += fmt.Sprintf(" (writing %s failed: %s)", slotBranchHeldNoteFile, oneLine(err.Error()))
 	}
 	return note
 }

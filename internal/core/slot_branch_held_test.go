@@ -180,3 +180,21 @@ func TestAcquireSlot_BranchHeldBySlotItselfIsNotAlignedToDefaultBranch(t *testin
 		t.Fatalf("err = %v, want ErrSlotUnavailable", err)
 	}
 }
+
+// run の保存先へ書けなくても委譲は止めず、書けなかったことと理由を補足に出す（失敗を捨てない）。
+func TestRecordSlotBranchHeld_WriteFailureIsInTheNote(t *testing.T) {
+	s := newStoreForTest(t)
+	runs := filepath.Join(s.Workspace(), flywheelDirName, "runs")
+	if err := os.MkdirAll(runs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// run の保存先のディレクトリと同じ名前のファイルを置き、ディレクトリを作れなくする。
+	if err := os.WriteFile(filepath.Join(runs, "R-99"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	holder := filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-1-tmp-1")
+	note := s.recordSlotBranchHeld(&SlotAssignment{SlotID: "SL-1", RunID: "R-99", HeldBy: holder, HeldBranch: "feat/b"})
+	if !strings.Contains(note, holder) || !strings.Contains(note, "writing "+slotBranchHeldNoteFile+" failed") {
+		t.Errorf("note = %q, want the holder and the write failure", note)
+	}
+}
