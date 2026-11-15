@@ -23,13 +23,27 @@ type DataSection struct {
 	Content string
 }
 
+// neutralizeDelimiterLines は、区切りに見える行（行頭の "-----"）の先頭へ空白を 1 つ足し、
+// 外部由来の本文が区画の境界を偽装できないようにする。
+func neutralizeDelimiterLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "-----") {
+			lines[i] = " " + l
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // WrapDataSection は content を、区切りの行で囲んだデータの区画にする。
+// content の中の区切りに見える行は無害にする（全ての区画の共通の処理）。
 func WrapDataSection(label, content string) string {
 	var b strings.Builder
 	b.WriteString(dataSectionBeginPrefix)
 	b.WriteString(label)
 	b.WriteString(dataSectionBeginSuffix)
 	b.WriteString("\n")
+	content = neutralizeDelimiterLines(content)
 	b.WriteString(content)
 	if !strings.HasSuffix(content, "\n") {
 		b.WriteString("\n")
