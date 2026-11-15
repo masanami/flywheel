@@ -533,7 +533,8 @@ func (sch *delegationScheduler) capacity(ctx context.Context, repo ConnectorRepo
 func activeDelegationCount(ctx context.Context, tx *sql.Tx) (int, error) {
 	var n int
 	err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM run WHERE kind = 'delegate' AND result IS NULL)
-		+ (SELECT COUNT(*) FROM (SELECT challenge_id FROM contract_run WHERE ended_at IS NULL
+		+ (SELECT COUNT(*) FROM (SELECT k.challenge_id FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
+			WHERE k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere+`
 			UNION SELECT challenge_id FROM run WHERE kind = 'contract' AND result IS NULL))`).Scan(&n)
 	return n, err
 }

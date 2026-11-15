@@ -62,8 +62,10 @@ type j5Head struct {
 	// WorkDir は J5 の作業ディレクトリ。空なら取り出していない（ワークスペースで起動する）。
 	WorkDir  string
 	Sections []JudgmentDataSection
-	clone    string
-	git      HeadWorktreeGit
+	// DescriptionRead は、成果物の説明文（PR の本文）を 1 件でも取得できたか。
+	DescriptionRead bool
+	clone           string
+	git             HeadWorktreeGit
 }
 
 // removeJ5Head は一時の worktree を消す。呼び出し元の ctx が取り消された後でも、期限つきで行う。
@@ -264,7 +266,9 @@ func (s *Store) prepareJ5Head(ctx context.Context, in J5AutoInput, challengeID s
 		head.Sections = append(head.Sections, JudgmentDataSection{Label: labelPullRequestDiff, Content: diffs})
 	}
 	if in.Descriptions != nil {
-		head.Sections = append(head.Sections, JudgmentDataSection{Label: labelArtifactDescription, Content: fetchArtifactDescriptions(ctx, in.Descriptions, targets)})
+		var content string
+		content, head.DescriptionRead = fetchArtifactDescriptions(ctx, in.Descriptions, targets)
+		head.Sections = append(head.Sections, JudgmentDataSection{Label: labelArtifactDescription, Content: content})
 	}
 	head.Sections = append(head.Sections, JudgmentDataSection{Label: labelPullRequestHeadNotice, Content: strings.Join(append(checkout, notes...), "\n")})
 	return head, nil

@@ -346,6 +346,8 @@ type j5Context struct {
 	Binding      *sourceBinding
 	LastDelegate *runRow
 	Artifacts    []runArtifactRow
+	// ArtifactDescriptionRead は、成果物の説明文（PR の本文）を 1 件でも取得できたか（form: cli の委譲の報告の出どころを決める）。
+	ArtifactDescriptionRead bool
 }
 
 func (s *Store) loadJ5Context(ctx context.Context, ch Challenge) (*j5Context, error) {
@@ -444,6 +446,22 @@ func formatReconciliationSection(vc *j5Context) string {
 func formatDelegationReportSection(vc *j5Context) string {
 	if vc.LastDelegate == nil {
 		return "直前の委譲の報告は無い。"
+	}
+	if vc.LastDelegate.Kind == runKindContract {
+		// form: cli の委譲は子の報告の本文が届かない。成果物の説明文（PR の本文）が取れたら、子がそこに書いた内容を
+		// 委譲の報告として読ませる。取れないときは、契約の出力の summary を委譲の報告とする（契約の出力の生の JSON は渡さない）。
+		if vc.ArtifactDescriptionRead {
+			return "form: cli の接続ツールの委譲のため、子の報告の本文は届いていない。" +
+				"「" + labelArtifactDescription + "」の区画（成果物の PR の本文）を、直前の委譲の報告として読む。"
+		}
+		var out struct {
+			Summary string `json:"summary"`
+		}
+		if err := json.Unmarshal([]byte(vc.LastDelegate.Output), &out); err != nil || strings.TrimSpace(out.Summary) == "" {
+			return "form: cli の接続ツールの委譲のため、子の報告の本文は届いておらず、成果物の PR の本文も、接続ツールの要約（summary）も読めなかった（結果: " +
+				string(vc.LastDelegate.Result) + "）。報告は読めていない前提で判断する。"
+		}
+		return "form: cli の接続ツールの委譲のため、子の報告の本文は届いておらず、成果物の PR の本文も読めなかった。接続ツールの要約（summary）を委譲の報告とする:\n" + out.Summary
 	}
 	if strings.TrimSpace(vc.LastDelegate.Output) == "" {
 		return "直前の委譲は報告を返さなかった（結果: " + string(vc.LastDelegate.Result) + "）。"
@@ -1021,6 +1039,7 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 		return nil, notStarted, nil
 	}
 	defer head.remove(ctx)
+	vc.ArtifactDescriptionRead = head.DescriptionRead
 	sections, notStarted := prepareJ5(ctx, in.Upstream, vc, prs, head.Sections, memoryIndexSections(s.workspace, in.AgentDecl))
 	if notStarted != nil {
 		return nil, notStarted, nil

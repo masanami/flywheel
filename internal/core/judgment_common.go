@@ -73,6 +73,11 @@ func stableSortChallengesByPriority(out []Challenge) {
 	})
 }
 
+// contractRunReviewWaitWhere は、契約の run（k）が成果物のレビュー待ち（waiting・review）で、課題（c）が検証中・完了の承認待ち・
+// 完了の条件。成果物を取り込んで検証中へ進めた後、本番反映で ready を返す（完了になる）まで、さらに ready を返して run が終わるまで
+// 契約の run は開いたままだが、課題の実行中としては数えない。
+const contractRunReviewWaitWhere = `(k.state = 'waiting' AND k.requested_kind = 'review' AND c.status IN ('verifying', 'awaiting_completion_approval', 'done'))`
+
 // challengeHasActiveRun は challengeID（内部整数 ID）の課題が終了していない
 // run を持つかを返す（§判断点の共通の規則「判断の呼び出しの対象にするのは…
 // 終了していない run を持たない課題に限る」）。
@@ -86,7 +91,10 @@ func challengeHasActiveRun(ctx context.Context, tx *sql.Tx, challengeID int64) (
 	}
 	// 周をまたいで続く契約の run（form: cli）も、課題の実行中として数える。
 	var n int
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, challengeID).Scan(&n)
+	// ただし、成果物を出して検証中・完了でレビューを待っている契約の run（contractRunReviewWaitWhere）は数えない
+	// （検証・完了の承認・本番反映の間、J5 などの対象から外さないため）。
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
+		WHERE k.challenge_id = ? AND k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere, challengeID).Scan(&n)
 	if err != nil || n > 0 {
 		return n > 0, err
 	}

@@ -38,8 +38,8 @@ func truncateRunes(s string, n int) (out string, cut bool) {
 }
 
 // fetchArtifactDescriptions は targets の説明文の区画の本文を返す。1 件の取得の失敗は、その成果物のブロックに
-// 理由を書いて続ける（エラーにしない）。
-func fetchArtifactDescriptions(ctx context.Context, src UpstreamDescriptionSource, targets []UpstreamPullRequestChecks) string {
+// 理由を書いて続ける（エラーにしない）。read は、空でない説明文を 1 件でも取得できたか。
+func fetchArtifactDescriptions(ctx context.Context, src UpstreamDescriptionSource, targets []UpstreamPullRequestChecks) (content string, read bool) {
 	var blocks []string
 	for _, a := range targets {
 		repo, number, ok := parsePullRequestURL(a.URL)
@@ -60,6 +60,8 @@ func fetchArtifactDescriptions(ctx context.Context, src UpstreamDescriptionSourc
 		text, cut := truncateRunes(got.Text, maxArtifactDescriptionRunes)
 		if strings.TrimSpace(text) == "" {
 			text = "（説明文なし）"
+		} else {
+			read = true
 		}
 		b.WriteString("\n" + neutralizeDelimiterLines(text))
 		if cut {
@@ -67,7 +69,7 @@ func fetchArtifactDescriptions(ctx context.Context, src UpstreamDescriptionSourc
 		}
 		blocks = append(blocks, b.String())
 	}
-	return strings.Join(blocks, upstreamBlockSeparator)
+	return strings.Join(blocks, upstreamBlockSeparator), read
 }
 
 // neutralizeDelimiterLines は、データの区画の区切り（行頭の "-----"）に見える行へ空白を前置し、子が書いた説明文が

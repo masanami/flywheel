@@ -22,6 +22,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"time"
 )
 
 // ContractState は契約（architecture.md §10）の汎用の状態。
@@ -51,7 +52,7 @@ func (s ContractState) Terminal() bool {
 
 // ContractRequestedAction は契約の requested_action（人または親に求める操作）。
 type ContractRequestedAction struct {
-	Kind    string // answer | approve | observe
+	Kind    string // answer | approve | observe | review
 	Decider string // human | parent | any
 	Text    string
 	// Options は求められた操作が示す選択肢（無ければ空）。
@@ -126,7 +127,7 @@ func validateContractStatus(st *ContractStatus, wantRunID string) string {
 	}
 	if ra := st.RequestedAction; ra != nil {
 		switch ra.Kind {
-		case "answer", "approve", "observe":
+		case "answer", "approve", "observe", "review":
 		default:
 			return fmt.Sprintf("unknown requested_action.kind %q", ra.Kind)
 		}
@@ -196,6 +197,8 @@ type ContractRunReport struct {
 	RequestedAction *ContractRequestedAction
 	// PRs は state が succeeded になったときに run の成果物へ取り込んだ PR の参照。
 	PRs []string
+	// Artifacts は読んだ状態の artifacts（waiting のレビュー待ちの成果物の取り込みに使う）。
+	Artifacts []ContractArtifact
 	// Held は、この呼び出しで課題を保留（人間対応待ち）にしたとき真。waiting の写し・resume の失敗・予算の中止の失敗・契約の run が failed・cancelled で
 	// 終わった、または start の最中に flywheel の run が回収されたときで、自動では委譲し直さない。
 	Held bool
@@ -235,8 +238,8 @@ func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, erro
 
 // fillContractArgs は契約のコマンドの引数の差し込みを埋める。閉集合は invocation と同じ 4 つ
 // （{issue_number}・{issue_url}・{external_key}・{challenge_id}）と、status・resume・cancel の {run_id}
-// （start が返した契約の実行 ID）、resume の {answer}（保留への答え）。引数の要素の数は変えない。
-func fillContractArgs(args []string, challengeID string, sb *sourceBinding, externalRunID, answer string) ([]string, error) {
+// （start が返した契約の実行 ID）、resume の {answer}・{choice}・{note}（保留への答え）。引数の要素の数は変えない。
+func fillContractArgs(args []string, challengeID string, sb *sourceBinding, externalRunID string, answer contractAnswer) ([]string, error) {
 	out := make([]string, len(args))
 	for i, a := range args {
 		v, err := fillInvocation(a, challengeID, sb)
@@ -245,9 +248,32 @@ func fillContractArgs(args []string, challengeID string, sb *sourceBinding, exte
 		}
 		v = strings.ReplaceAll(v, "{run_id}", externalRunID)
 		// 答えは最後に差し込む（答えの中の波括弧を、他の差し込みとして読まない）。
-		out[i] = strings.ReplaceAll(v, "{answer}", answer)
+		// 1 回の置き換えにまとめる（差し込んだ値の中の波括弧を、後の差し込みとして読まない）。
+		out[i] = strings.NewReplacer("{choice}", answer.Choice, "{note}", answer.Note, "{answer}", answer.text()).Replace(v)
 	}
 	return out, nil
+}
+
+// 契約の review の待ちへ flywheel が返す答えの選択肢の値（契約の汎用の値。接続ツールは自分の選択肢へ写す）。
+const (
+	// contractChoiceReady は、成果物が本番反映（マージ）まで済んだことを知らせて run を終わらせる答え。
+	contractChoiceReady = "ready"
+	// contractChoiceRespond は、完了の検証（J5）の差し戻しの理由を添えて、同じ run で直させる答え。
+	contractChoiceRespond = "respond"
+)
+
+// contractAnswer は resume へ渡す答え。Choice は選択肢の値、Note は添え書き（自由な文）。
+// オーナーの保留への答え（分けて受け取る仕組みは未実装）は文全体を Choice として渡し、Note は空。
+type contractAnswer struct {
+	Choice, Note string
+}
+
+// text は {answer} に差し込む文。添え書きがあれば選択肢の値の次の行に続ける。
+func (a contractAnswer) text() string {
+	if a.Note == "" {
+		return a.Choice
+	}
+	return a.Choice + "\n" + a.Note
 }
 
 // checkPlannedContractOperation は承認済みの計画 plan（構造化した出力つき）が選んだ操作を宣言の connector から引き、
@@ -345,7 +371,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if err := checkPlannedContractOperation(plan, connector, binding != nil); err != nil {
 		return nil, err
 	}
-	command, err := fillContractArgs(connector.Commands.Start, in.ChallengeID, binding, "", "")
+	command, err := fillContractArgs(connector.Commands.Start, in.ChallengeID, binding, "", contractAnswer{})
 	if err != nil {
 		return nil, err
 	}
@@ -524,6 +550,7 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 	if status != nil {
 		report.ExternalRunID, report.State, report.Summary = status.RunID, status.State, status.Summary
 		report.RequestedAction = status.RequestedAction
+		report.Artifacts = status.Artifacts
 	}
 
 	// コマンドを起動した以上、記録は ctx の取り消しに関わらず行う。
@@ -683,12 +710,17 @@ func (s *Store) holdForContract(ctx context.Context, c contractCall, question st
 
 // holdReclaimedContractStart は runID を原因の run として、課題が着手中なら保留にする（着手中でなければ偽）。
 func (s *Store) holdReclaimedContractStart(ctx context.Context, runID, challengeID, question string) (bool, error) {
+	return s.holdContractWithReason(ctx, runID, challengeID, question, holdReasonContractStopped)
+}
+
+// holdContractWithReason は holdReclaimedContractStart と同じ保留を、理由 reason で立てる。
+func (s *Store) holdContractWithReason(ctx context.Context, runID, challengeID, question string, reason holdReason) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), runID, challengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
 			if tc.current.Status != StatusInProgress {
 				return errReconcileNotEligible
 			}
-			return s.insertHoldWithOccurrence(ctx, tc, question, holdReasonContractStopped, "")
+			return s.insertHoldWithOccurrence(ctx, tc, question, reason, "")
 		})
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
@@ -738,8 +770,16 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 		AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND status = 'awaiting_human')`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
 		return err
 	}
-	verifiedAt := s.currentTime()
-	for _, a := range st.Artifacts {
+	prs, err := importContractArtifacts(ctx, tx, c.RunIDInt, st.Artifacts, s.currentTime())
+	report.PRs = append(report.PRs, prs...)
+	return err
+}
+
+// importContractArtifacts は契約の状態の artifacts のうち取り込む種類（pr・branch・commit）を、run（runInt）の成果物として
+// 記録する（成果物の取り込みはここ 1 か所）。取り込んだ PR の参照を返す。
+func importContractArtifacts(ctx context.Context, tx *sql.Tx, runInt int64, arts []ContractArtifact, verifiedAt time.Time) ([]string, error) {
+	var prs []string
+	for _, a := range arts {
 		var kind artifactKind
 		switch a.Kind {
 		case "pr":
@@ -751,14 +791,14 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 		default:
 			continue
 		}
-		if _, err := insertRunArtifact(ctx, tx, c.RunIDInt, insertRunArtifactInput{Kind: kind, Ref: a.Ref, VerifiedAt: &verifiedAt}); err != nil {
-			return err
+		if _, err := insertRunArtifact(ctx, tx, runInt, insertRunArtifactInput{Kind: kind, Ref: a.Ref, VerifiedAt: &verifiedAt}); err != nil {
+			return nil, err
 		}
 		if kind == artifactKindPR {
-			report.PRs = append(report.PRs, a.Ref)
+			prs = append(prs, a.Ref)
 		}
 	}
-	return nil
+	return prs, nil
 }
 
 // PollContractRuns は終わっていない契約の run（contract_run）の状態を、宣言の commands.status で読んで記録する。
@@ -836,6 +876,9 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 		var rep *ContractRunReport
 		if err == nil {
 			rep, err = s.pollOne(ctx, in, row, connector, bindings[row.ChallengeID], planVersions[row.ChallengeID], cycleIDInt)
+			if err == nil && rep == nil {
+				continue // 検証中のレビュー待ちは読まない（pendingReviewReply）
+			}
 		}
 		if err != nil {
 			firstErr = firstErrOr(firstErr, err)
