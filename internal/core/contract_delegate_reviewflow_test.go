@@ -368,7 +368,7 @@ func TestPollContractRuns_PlanRejectionIsNotReturnedByRespond(t *testing.T) {
 	err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO approval (challenge_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at)
 		 SELECT id, 'plan', 'rejected', version, 1, 'owner', 'cli', 'tty', 'PLAN-REJECT', ? FROM challenge WHERE id = ?`,
-			formatTimestamp(cur), f.cid)
+			formatTimestamp(cur), f.intID(t))
 		return err
 	})
 	if err != nil {
@@ -380,4 +380,53 @@ func TestPollContractRuns_PlanRejectionIsNotReturnedByRespond(t *testing.T) {
 	if len(f.client.resumes) != 0 {
 		t.Fatalf("resumes = %v, want none for a plan rejection", f.client.resumes)
 	}
+}
+
+// (d2) 未配達の完了の差し戻しが 2 件たまっていたら、1 回の respond の添え書きへ両方の理由を古い順にまとめて返す。
+// その後の周では返さない（resume は増えない）。
+func TestPollContractRuns_StackedCompletionRejectionsAreReturnedOldestFirstInOneRespond(t *testing.T) {
+	f := newReviewFlowFixture(t)
+	cur := time.Now()
+	f.s.now = func() time.Time { return cur }
+	f.toVerifying(t)
+	cur = cur.Add(time.Hour)
+	f.rejectCompletion(t, "REJECT-FIRST")
+	cur = cur.Add(time.Hour)
+	// 2 件目の差し戻し（kind=completion）を、契約のコマンドを呼ぶ前に積む。
+	err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO approval (challenge_id, kind, decision, target_version, plan_version, actor, channel, verification, reason, decided_at)
+		 SELECT id, 'completion', 'rejected', version, 1, 'owner', 'cli', 'tty', 'REJECT-SECOND', ? FROM challenge WHERE id = ?`,
+			formatTimestamp(cur), f.intID(t))
+		return err
+	})
+	if err != nil {
+		t.Fatalf("insert second completion rejection: %v", err)
+	}
+	cur = cur.Add(time.Hour)
+	f.client.resumeOut = reviewWaitOut()
+	f.poll(t)
+	if len(f.client.resumes) != 1 || !reflect.DeepEqual(f.client.resumes[0][:6], []string{"tool", "resume", "ext-1", "--choice", "respond", "--note"}) {
+		t.Fatalf("resumes = %v, want one respond", f.client.resumes)
+	}
+	note := f.client.resumes[0][6]
+	first, second := strings.Index(note, "REJECT-FIRST"), strings.Index(note, "REJECT-SECOND")
+	if first < 0 || second < 0 || first > second {
+		t.Fatalf("note = %q, want both reasons oldest first", note)
+	}
+	cur = cur.Add(time.Hour)
+	f.client.queue = []ContractLaunchOutput{reviewWaitOut()}
+	f.poll(t)
+	if len(f.client.resumes) != 1 {
+		t.Fatalf("resumes = %d, want 1（まとめて返した差し戻しを二重に返さない）", len(f.client.resumes))
+	}
+}
+
+// intID は課題の ID（"C-<n>"）の数値部分（SQL で challenge.id と比べるため）。
+func (f *reviewFlowFixture) intID(t *testing.T) int64 {
+	t.Helper()
+	n, ok := parseChallengeID(f.cid)
+	if !ok {
+		t.Fatalf("parseChallengeID(%q) failed", f.cid)
+	}
+	return n
 }

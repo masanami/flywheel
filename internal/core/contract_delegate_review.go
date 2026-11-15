@@ -159,7 +159,7 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 			}
 		}
 		if note == "" {
-			// 人が完了の承認を差し戻した（T15）。差し戻しの記録が最後の契約のコマンドより新しければ、その理由を返す。
+			// 人が完了の承認を差し戻した（T15）。最後の契約のコマンドより新しい差し戻しがあれば、すべての理由を古い順にまとめて返す。
 			reason, err := loadCompletionRejectionAfterContract(ctx, tx, row.ChallengeID)
 			if err != nil || reason == "" {
 				return err
@@ -178,20 +178,28 @@ func loadReopenNoteAfterContract(ctx context.Context, tx *sql.Tx, challengeID in
 	return loadReopenNoteAfterRuns(ctx, tx, challengeID, "'contract'")
 }
 
-// loadCompletionRejectionAfterContract は、課題の最後の完了確認での差し戻し（T15。理由が空でないもの）が、その課題の最後の
-// 契約のコマンドの開始より新しいときだけ、その理由を返す。契約のコマンドを呼んだ後は返さないので、二重に配達しない。
+// loadCompletionRejectionAfterContract は、課題の完了確認での差し戻し（T15。理由が空でないもの）のうち、その課題の最後の
+// 契約のコマンドの開始より新しいものを、すべて古い順に添え書きへまとめて返す（複数たまっていても 1 回の respond で返す）。
+// 契約のコマンドを呼んだ後は返さないので、二重に配達しない。該当が無ければ空文字列を返す。
 // 計画の承認での差し戻しは含めない。
 func loadCompletionRejectionAfterContract(ctx context.Context, tx *sql.Tx, challengeID int64) (string, error) {
 	rs, err := loadCompletionRejections(ctx, tx, challengeID)
 	if err != nil || len(rs) == 0 {
 		return "", err
 	}
-	last := rs[len(rs)-1]
-	delivered, err := runStartedOnOrAfter(ctx, tx, challengeID, "'contract'", formatTimestamp(last.DecidedAt))
-	if err != nil || delivered {
+	var lastRun sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind = 'contract'`, challengeID).Scan(&lastRun); err != nil {
 		return "", err
 	}
-	return last.Reason, nil
+	var undelivered []CompletionRejection
+	for _, r := range rs {
+		// runStartedOnOrAfter と同じ比べ方: 契約の run の開始が差し戻し以降なら配達済み。
+		if lastRun.Valid && lastRun.String >= formatTimestamp(r.DecidedAt) {
+			continue
+		}
+		undelivered = append(undelivered, r)
+	}
+	return formatCompletionRejectionsSection(undelivered), nil
 }
 
 // formatContractReopenNote は、T18 の後に契約の run へ返す添え書き（理由と、やること）。
