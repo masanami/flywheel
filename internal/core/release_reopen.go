@@ -285,6 +285,16 @@ func loadReopenNote(ctx context.Context, tx *sql.Tx, challengeID int64) (*reopen
 	return loadReopenNoteAfterRuns(ctx, tx, challengeID, "'delegate', 'contract'")
 }
 
+// runStartedOnOrAfter は、課題の runKinds の run のうち最後の開始が at（timestampLayout の文字列）以後か。
+// 「記録が最後の run より新しいか」の比べ方の共通部（T15・T18 の配達済みの判定）。runKinds は定数だけを渡す。
+func runStartedOnOrAfter(ctx context.Context, tx *sql.Tx, challengeID int64, runKinds, at string) (bool, error) {
+	var lastRun sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind IN (`+runKinds+`)`, challengeID).Scan(&lastRun); err != nil {
+		return false, err
+	}
+	return lastRun.Valid && lastRun.String >= at, nil
+}
+
 // loadReopenNoteAfterRuns は loadReopenNote の本体。runKinds は比べる run の種類の SQL の列（定数だけを渡す）。
 func loadReopenNoteAfterRuns(ctx context.Context, tx *sql.Tx, challengeID int64, runKinds string) (*reopenNote, error) {
 	var reason string
@@ -299,12 +309,9 @@ func loadReopenNoteAfterRuns(ctx context.Context, tx *sql.Tx, challengeID int64,
 	if err != nil {
 		return nil, err
 	}
-	var lastRun sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind IN (`+runKinds+`)`, challengeID).Scan(&lastRun); err != nil {
+	started, err := runStartedOnOrAfter(ctx, tx, challengeID, runKinds, createdAt)
+	if err != nil || started {
 		return nil, err
-	}
-	if lastRun.Valid && lastRun.String >= createdAt {
-		return nil, nil
 	}
 	return &reopenNote{Reason: ReopenReason(reason), Ref: ref.String}, nil
 }
