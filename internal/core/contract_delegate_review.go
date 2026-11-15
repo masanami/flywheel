@@ -99,7 +99,8 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 			row.ChallengeID).Scan(&executed); err != nil {
 			return err
 		}
-		if executed > 0 {
+		// ready は課題が完了（本番反映の後）のときだけ返す。検証中などに別の release が executed でも、新しい run へ早すぎる ready を返さない。
+		if executed > 0 && ch.Status == StatusDone {
 			out = &reviewReply{Answer: &contractAnswer{Choice: contractChoiceReady}}
 			return nil
 		}

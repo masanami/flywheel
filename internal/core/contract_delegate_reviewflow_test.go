@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"reflect"
 	"strings"
 	"testing"
@@ -167,6 +168,18 @@ func TestPollContractRuns_AfterTheReleaseIsExecutedReadyIsReturnedAndTheRunEnds(
 		t.Fatalf("resumes = %v, want none before the release", f.client.resumes)
 	}
 	insertReleaseForTest(t, f.s, f.cid, reviewPRURL, OperationStateExecuted, "merge-sha")
+	// 課題がまだ検証中の間は、release が executed でも ready を返さない（J5 と完了の承認の前に終わらせない）。
+	f.poll(t)
+	if len(f.client.resumes) != 0 {
+		t.Fatalf("resumes = %v, want none while the challenge is not done", f.client.resumes)
+	}
+	n, _ := parseChallengeID(f.cid)
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE challenge SET status = ? WHERE id = ?`, string(StatusDone), n)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	f.client.resumeOut = contractOut(ContractStateSucceeded, nil, func(st *ContractStatus) {
 		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}}
 	})
