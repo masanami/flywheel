@@ -6,6 +6,7 @@ package core
 //   - waiting かつ requested_action.kind = review かつ成果物（pr・branch・commit）あり: run の終わりを待たず、成果物を
 //     その読みの run へ取り込んで課題を検証中へ進める（submitContractReview）。契約の run は waiting のまま開いておく。
 //   - 完了の検証（J5）が not_met: 同じ契約の run へ resume（選択肢 respond・添え書きに差し戻しの理由）で返す。
+//   - 人の完了の差し戻し（T15）の後: 最後の契約のコマンドより新しい差し戻しの理由を、同じく resume（respond）で 1 回だけ返す。
 //   - 本番反映（flywheel のマージ）の後: resume（選択肢 ready）で返し、接続ツールの run を終わらせる。
 //
 // 接続ツール固有の名前（ゲート名など）は読まない。見分けるのは契約の汎用の値だけである。
@@ -15,6 +16,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // contractRequestedKindReview は、成果物のレビューを待つ requested_action.kind。
@@ -80,6 +82,8 @@ type reviewReply struct {
 //   - 本番反映が済んでいる（その課題の release が executed）: ready を返して接続ツールの run を終わらせる。
 //   - 課題が着手中で、最後の J5 が not_met で、その後に契約のコマンドを呼んでいない: respond と差し戻しの理由を返す。
 //     差し戻しの上限（agent.ReworkLimit。J5 の not_met の数。保留への回答の後から数え直す）に達していれば、返さず保留にする。
+//   - 課題が着手中で、最後の J5 が未配達の not_met でなく、最後の契約のコマンドより新しい人の完了の差し戻し（T15）がある:
+//     その理由を respond で返す（J5 の経路より前、差し戻しの上限の判定より前に評価する）。
 //   - 課題が検証中: 何も呼ばない（Skip）。J5 は「直前の契約の run」の成果物を読むので、新しい読みで押し流さない。
 //
 // 上のどれでもなければ nil（通常の状態の確認へ進む）。
@@ -125,23 +129,28 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 		if err != nil {
 			return err
 		}
-		if _, hit := h.decideRework(int(*planVersion), agent.ReworkLimit); hit != nil {
-			out = &reviewReply{HoldQuestion: contractReworkLimitQuestion(hit), HoldRunID: hit.Last.ID}
-			return nil
-		}
 		var lastContract int64
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM run WHERE challenge_id = ? AND kind = 'contract'`, row.ChallengeID).Scan(&lastContract); err != nil {
 			return err
 		}
-		if len(h.Verifications) == 0 {
+		// 人が完了の承認を差し戻した（T15）後に契約のコマンドを呼んでいなければ、その理由を respond で返す。
+		// 最後の J5 が未配達の not_met のとき（差し戻しの上限の判定を含む）は、従来の経路が先に扱う。
+		if _, _, undelivered := latestJ5NotMetUndelivered(h, lastContract); !undelivered {
+			note, err := pendingCompletionRejectionNote(ctx, tx, row.ChallengeID, lastContract)
+			if err != nil {
+				return err
+			}
+			if note != "" {
+				out = &reviewReply{Answer: &contractAnswer{Choice: contractChoiceRespond, Note: note}}
+				return nil
+			}
+		}
+		if _, hit := h.decideRework(int(*planVersion), agent.ReworkLimit); hit != nil {
+			out = &reviewReply{HoldQuestion: contractReworkLimitQuestion(hit), HoldRunID: hit.Last.ID}
 			return nil
 		}
-		latest := h.Verifications[len(h.Verifications)-1]
-		if runIntID(latest) <= lastContract || latest.Result != RunResultSucceeded {
-			return nil
-		}
-		v, ok := validateJ5Output([]byte(latest.Output))
-		if !ok || v.Verdict != J5VerdictNotMet || v.Feedback == nil {
+		latest, v, ok := latestJ5NotMetUndelivered(h, lastContract)
+		if !ok {
 			return nil
 		}
 		note := *v.Feedback
@@ -153,4 +162,50 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 		return nil
 	})
 	return out, classifyReadWriteErr(err)
+}
+
+// latestJ5NotMetUndelivered は、最後の J5 が契約のコマンド（lastContract）より後に出た not_met で、まだ差し戻しを返していないとき、
+// その run と検査済みの出力を返す（ok が真）。
+func latestJ5NotMetUndelivered(h *launchHistory, lastContract int64) (runRow, *j5ValidatedOutput, bool) {
+	if len(h.Verifications) == 0 {
+		return runRow{}, nil, false
+	}
+	latest := h.Verifications[len(h.Verifications)-1]
+	if runIntID(latest) <= lastContract || latest.Result != RunResultSucceeded {
+		return runRow{}, nil, false
+	}
+	v, ok := validateJ5Output([]byte(latest.Output))
+	if !ok || v.Verdict != J5VerdictNotMet || v.Feedback == nil {
+		return runRow{}, nil, false
+	}
+	return latest, v, true
+}
+
+// pendingCompletionRejectionNote は、最後の契約のコマンドより新しい人の完了の差し戻し（approval の reason。--relayed の記録も同じ）を
+// 古い順に並べた添え書きを返す。無ければ空文字列。契約のコマンドを呼べば最後のコマンドが新しくなるので、同じ理由は 1 回しか返さない。
+func pendingCompletionRejectionNote(ctx context.Context, tx *sql.Tx, challengeID, lastContract int64) (string, error) {
+	rejections, err := loadCompletionRejections(ctx, tx, challengeID)
+	if err != nil || len(rejections) == 0 {
+		return "", err
+	}
+	var since time.Time
+	if lastContract > 0 {
+		r, err := loadRunByID(ctx, tx, lastContract)
+		if err != nil {
+			return "", err
+		}
+		if r != nil {
+			since = r.StartedAt
+		}
+	}
+	var pending []CompletionRejection
+	for _, r := range rejections {
+		if r.DecidedAt.After(since) {
+			pending = append(pending, r)
+		}
+	}
+	if len(pending) == 0 {
+		return "", nil
+	}
+	return formatCompletionRejectionsSection(pending), nil
 }
