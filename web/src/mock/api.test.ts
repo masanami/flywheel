@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ApiClient } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
+import { CONDITIONS_AFTER_RELEASE_HEADINGS } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
 import { createMockApi } from "./api.ts";
 import { MockStore, graphOf } from "./store.ts";
@@ -59,6 +60,9 @@ describe("承認（偽の ① ②）", () => {
     expect(s.approval.conditions_after_release).toEqual([
       "本番の料金表の画面で、請求書と同じ金額が出る",
     ]);
+    expect(s.approval.conditions_after_release_heading).toBe(
+      CONDITIONS_AFTER_RELEASE_HEADINGS[0],
+    );
     expect(s.approval.conditions_after_release_heading).toContain(
       "満たされないまま残る",
     );
@@ -182,7 +186,7 @@ describe("親が直接行う保留（#452）", () => {
       "C-7",
     );
     expect(s.approval.conditions_after_release_heading).toBe(
-      "承認済みの本番反映が走れば満たされる条件:",
+      CONDITIONS_AFTER_RELEASE_HEADINGS[2],
     );
     expect(s.approval.conditions_after_release_heading).not.toContain(
       "満たされないまま残る",

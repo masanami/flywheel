@@ -3,6 +3,7 @@
 
 import type { ApiClient } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
+import { CONDITIONS_AFTER_RELEASE_HEADINGS } from "../api/types.gen.ts";
 import type {
   ApprovalSummaryResponse,
   CycleStarted,
@@ -27,12 +28,14 @@ import {
   waitingOf,
 } from "./store.ts";
 
-// 偽のサーバが返す見出し（本物は internal/view の ConditionsAfterReleaseHeading。UI の承認は本番反映を承認しない側。
-// 承認済みで未実行の release があるときは「満たされないまま残る」ではない見出し）
-const CONDITIONS_AFTER_RELEASE_HEADING =
-  "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:";
-const CONDITIONS_AFTER_APPROVED_RELEASE_HEADING =
-  "承認済みの本番反映が走れば満たされる条件:";
+// 偽のサーバが返す見出し。正本は internal/view の ConditionsAfterReleaseHeading で、生成物
+// （types.gen.ts）の並びは Go の ConditionsOutlook の値の順（本番反映を承認しない／承認する／承認済みで未実行）。
+// UI の承認は本番反映を承認しない側。
+const [
+  CONDITIONS_AFTER_RELEASE_HEADING,
+  ,
+  CONDITIONS_AFTER_APPROVED_RELEASE_HEADING,
+] = CONDITIONS_AFTER_RELEASE_HEADINGS;
 
 export interface MockOptions {
   latencyMs?: number;
