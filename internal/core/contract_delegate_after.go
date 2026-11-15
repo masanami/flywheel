@@ -275,7 +275,11 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	if err != nil {
 		return nil, err
 	}
-	rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, in.WorkDir, row, name, command, planVersion, cycleID, "")
+	workDir, err := s.existingContractWorkDir(ctx, in.AgentDecl, in.ConnDecl, row.ChallengeID, in.WorkDir)
+	if err != nil {
+		return nil, err
+	}
+	rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, row, name, command, planVersion, cycleID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +339,11 @@ func (s *Store) resumeObservation(ctx context.Context, in ContractPollInput, row
 	latest := *row
 	latest.State, latest.Summary, latest.CostMicros = statusRep.State, statusRep.Summary, usdToMicros(statusRep.CostTotalUSD)
 	latest.RequestedKind = contractRequestedKindObserve
-	rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, in.WorkDir, &latest, "resume", command, planVersion, cycleID, "")
+	workDir, err := s.existingContractWorkDir(ctx, in.AgentDecl, in.ConnDecl, row.ChallengeID, in.WorkDir)
+	if err != nil {
+		return nil, err
+	}
+	rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, &latest, "resume", command, planVersion, cycleID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -453,7 +461,11 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 		row.ExternalRunID, formatUSDAmount(rep.CostTotalUSD), formatUSDAmount(microsToUSD(row.MaxBudget)))
 	latest := *row
 	latest.State, latest.Summary, latest.CostMicros = rep.State, rep.Summary, usdToMicros(rep.CostTotalUSD)
-	crep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, in.WorkDir, &latest, "cancel", command, planVersion, cycleID, note)
+	workDir, err := s.existingContractWorkDir(ctx, in.AgentDecl, in.ConnDecl, row.ChallengeID, in.WorkDir)
+	if err != nil {
+		return err
+	}
+	crep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, &latest, "cancel", command, planVersion, cycleID, note)
 	if err != nil {
 		return err
 	}
@@ -491,6 +503,10 @@ func (s *Store) delegateViaContract(ctx context.Context, in DelegateInput, jc *J
 	if err != nil {
 		if jc != nil && errors.Is(err, ErrBudgetExceeded) {
 			return nil, &NotStarted{ChallengeID: dc.Challenge.ID, Reason: NotStartedCycleBudget}, nil
+		}
+		// clone に idle の作業用クローンが無い（契約のコマンドを実行する作業ディレクトリが決まらない）ときは、周を止めず見送る。
+		if jc != nil && errors.Is(err, ErrSlotUnavailable) {
+			return nil, &NotStarted{ChallengeID: dc.Challenge.ID, Reason: NotStartedSlotUnavailable}, nil
 		}
 		// 宣言の commands.start の差し込みを埋められない等（ErrValidation）は、黙って飛ばさず理由つきで見えるようにする。
 		if jc != nil && errors.Is(err, ErrValidation) {

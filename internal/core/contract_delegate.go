@@ -166,7 +166,7 @@ type ContractStartInput struct {
 	CycleID string
 	// MaxBudgetUSD は run に記録する上限額（周の上限の評価と、状態を読む run の上限に使う）。
 	MaxBudgetUSD float64
-	// WorkDir は契約のコマンドの作業ディレクトリ（空ならワークスペース）。
+	// WorkDir は契約のコマンドの作業ディレクトリ。空なら課題のリポジトリの作業ディレクトリ（contractRepoWorkDir。決められなければ ErrSlotUnavailable）。
 	WorkDir string
 	// OnRunInserted は start の run をストアに記録した直後に呼ぶ（nil なら呼ばない。同時委譲数の数えの二重計上を避けるため）。
 	OnRunInserted func()
@@ -180,7 +180,8 @@ type ContractPollInput struct {
 	ConnDecl    *ConnectorsDeclaration
 	Client      ContractClient
 	CycleID     string
-	WorkDir     string
+	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。
+	WorkDir string
 }
 
 // ContractRunReport は start・status の 1 回の結果。
@@ -321,6 +322,51 @@ func (s *Store) contractWorkDir(workDir string) string {
 	return s.workspace
 }
 
+// contractRepoWorkDir は契約のコマンド（start・status・resume・cancel）の作業ディレクトリを決める。
+// explicit（呼び出し元が渡した WorkDir）が非空ならそれを使う。空なら、課題の承認済みの計画のリポジトリ（repos[]）から
+// 衝突の予測の口と同じ決め方（predictionWorkDir。worktree は元のクローン、clone は idle の作業用クローン）で決める。
+// 決められないとき（承認済みの計画が無い・宣言と合わない・idle の作業用クローンが無い）は ok=false。
+func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, cid int64, explicit string) (string, bool, error) {
+	if explicit != "" {
+		return explicit, true, nil
+	}
+	var plan approvedPlan
+	var planOK bool
+	var binding *sourceBinding
+	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		if plan, planOK, err = loadApprovedPlanAnySpec(ctx, tx, cid); err != nil || !planOK {
+			return err
+		}
+		binding, err = loadSourceBindingByChallengeID(ctx, tx, cid)
+		return err
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return "", false, err
+	}
+	if !planOK || conn == nil {
+		return "", false, nil
+	}
+	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: agent, Conn: conn, HasSource: binding != nil})
+	if !vok {
+		return "", false, nil
+	}
+	repo, _ := conn.findConnectorRepo(validated.Repo)
+	if repo == nil {
+		return "", false, nil
+	}
+	return s.predictionWorkDir(ctx, *repo)
+}
+
+// existingContractWorkDir は既存の契約の run へのコマンド（status・resume・cancel）の作業ディレクトリ。start と同じ決め方で、
+// 決められないときは（読み直しを止めないため）従来どおり contractWorkDir の既定に任せる。
+func (s *Store) existingContractWorkDir(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, cid int64, explicit string) (string, error) {
+	wd, ok, err := s.contractRepoWorkDir(ctx, agent, conn, cid, explicit)
+	if err != nil || !ok {
+		return "", err
+	}
+	return wd, nil
+}
+
 // StartContractDelegation は課題 1 件の委譲を契約の開始で始める。実行 ID を contract_run に保存し、
 // 契約の run の終わりを待たずに返す（再開・中止はしない）。コマンドが成功（JSON を出力）しなかったときは
 // 契約の run を作らず、その結果を run に記録する。
@@ -375,6 +421,13 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if err != nil {
 		return nil, err
 	}
+	workDir, ok, err := s.contractRepoWorkDir(ctx, in.AgentDecl, in.ConnDecl, cid, in.WorkDir)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrSlotUnavailable
+	}
 	maxMicros := usdToMicros(in.MaxBudgetUSD)
 	sessionID, err := newLowercaseUUIDv4()
 	if err != nil {
@@ -397,7 +450,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	rep, err := s.finishContractCall(ctx, contractCall{
 		ChallengeID: in.ChallengeID, ChallengeIDInt: cid, RunIDInt: runIDInt, Connector: connector.ID,
 		Launch: ContractLaunchInput{
-			Workspace: s.workspace, WorkDir: s.contractWorkDir(in.WorkDir), RunDir: runDirPath(s.workspace, formatRunID(runIDInt)),
+			Workspace: s.workspace, WorkDir: s.contractWorkDir(workDir), RunDir: runDirPath(s.workspace, formatRunID(runIDInt)),
 			Command: command, TimeoutSec: in.AgentDecl.TimeoutSec.Delegate,
 		},
 		Invoke: call, MaxMicros: maxMicros,
