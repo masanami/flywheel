@@ -81,6 +81,7 @@ type reviewReply struct {
 //   - 課題が着手中で、最後の J5 が not_met で、その後に契約のコマンドを呼んでいない: respond と差し戻しの理由を返す。
 //     差し戻しの上限（agent.ReworkLimit。J5 の not_met の数。保留への回答の後から数え直す）に達していれば、返さず保留にする。
 //   - 課題が着手中で、T18（本番反映でマージできず着手中へ戻した）の記録が最後の契約のコマンドより新しい: respond と理由（既定ブランチへ追従して衝突を解消する）を返す。
+//   - 課題が着手中で、T15（人が完了の承認を差し戻した）の記録が最後の契約のコマンドより新しい: respond と差し戻しの理由（approval.reason）を返す。
 //   - 課題が検証中: 何も呼ばない（Skip）。J5 は「直前の契約の run」の成果物を読むので、新しい読みで押し流さない。
 //
 // 上のどれでもなければ nil（通常の状態の確認へ進む）。
@@ -150,10 +151,20 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 		if note == "" {
 			// 本番反映でマージできず着手中へ戻された（T18）。戻した記録が最後の契約のコマンドより新しければ、理由を返す。
 			rn, err := loadReopenNoteAfterContract(ctx, tx, row.ChallengeID)
-			if err != nil || rn == nil {
+			if err != nil {
 				return err
 			}
-			note = formatContractReopenNote(rn)
+			if rn != nil {
+				note = formatContractReopenNote(rn)
+			}
+		}
+		if note == "" {
+			// 人が完了の承認を差し戻した（T15）。差し戻しの記録が最後の契約のコマンドより新しければ、その理由を返す。
+			reason, err := loadCompletionRejectionAfterContract(ctx, tx, row.ChallengeID)
+			if err != nil || reason == "" {
+				return err
+			}
+			note = reason
 		}
 		out = &reviewReply{Answer: &contractAnswer{Choice: contractChoiceRespond, Note: note}}
 		return nil
@@ -165,6 +176,22 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 // その記録を返す。契約のコマンドを呼んだ後は返さないので、同じ戻しを二重に配達しない。
 func loadReopenNoteAfterContract(ctx context.Context, tx *sql.Tx, challengeID int64) (*reopenNote, error) {
 	return loadReopenNoteAfterRuns(ctx, tx, challengeID, "'contract'")
+}
+
+// loadCompletionRejectionAfterContract は、課題の最後の完了確認での差し戻し（T15。理由が空でないもの）が、その課題の最後の
+// 契約のコマンドの開始より新しいときだけ、その理由を返す。契約のコマンドを呼んだ後は返さないので、二重に配達しない。
+// 計画の承認での差し戻しは含めない。
+func loadCompletionRejectionAfterContract(ctx context.Context, tx *sql.Tx, challengeID int64) (string, error) {
+	rs, err := loadCompletionRejections(ctx, tx, challengeID)
+	if err != nil || len(rs) == 0 {
+		return "", err
+	}
+	last := rs[len(rs)-1]
+	delivered, err := runStartedOnOrAfter(ctx, tx, challengeID, "'contract'", formatTimestamp(last.DecidedAt))
+	if err != nil || delivered {
+		return "", err
+	}
+	return last.Reason, nil
 }
 
 // formatContractReopenNote は、T18 の後に契約の run へ返す添え書き（理由と、やること）。
