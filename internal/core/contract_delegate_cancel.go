@@ -87,6 +87,15 @@ func (s *Store) CancelOpenContractRuns(ctx context.Context, in ContractCancelInp
 			return n, fmt.Errorf("%w: the contract run %s could not be cancelled (result: %s, state: %s); stop it on the connector side first",
 				ErrConflict, row.ExternalRunID, rep.Result, rep.State)
 		}
+		// 止めた時点で接続ツールの run がちょうど成功していた（succeeded）ときは、保留の間の成功の印（held_success）が付く。
+		// 取り下げ・作り直しのために止めた run の成果物は、保留が解けた後に提出し直さない（作り直す前の計画の成果物のため）。
+		// 印を外さないと、計画の作り直しの検査（ended_at IS NULL OR held_success = 1）が拒み続ける。
+		if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 0 WHERE id = ?`, row.ID)
+			return err
+		}); err != nil {
+			return n, classifyReadWriteErr(err)
+		}
 		n++
 	}
 	return n, nil

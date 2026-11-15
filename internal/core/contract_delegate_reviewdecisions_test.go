@@ -204,3 +204,41 @@ func TestAnswerReplan_StopsTheOpenContractRunWithCancelFirst(t *testing.T) {
 		t.Fatalf("replan after cancel: %+v err %v, want classified", c, err)
 	}
 }
+
+// 3: cancel の応答が succeeded（止めた時点で接続ツールの run がちょうど成功していた）でも、保留の間の成功の印を外し、
+// 計画の作り直し（--replan）へ進める。作り直す前の計画の成果物は、保留が解けた後に提出し直さない。
+func TestAnswerReplan_ProceedsWhenTheCancelReturnsSucceeded(t *testing.T) {
+	f := newReviewFlowFixture(t)
+	f.agent.ReworkLimit = 1
+	f.toVerifying(t)
+	if _, err := f.s.VerifyAutoJ5(context.Background(), f.j5.input(f.cycle(t, 300), &f.cid)); err != nil {
+		t.Fatal(err)
+	}
+	f.poll(t) // 差し戻しの上限の保留
+	if got := f.status(t, f.cid); got != StatusAwaitingHuman {
+		t.Fatalf("status = %s, want awaiting_human", got)
+	}
+	f.client.cancelOut = contractOut(ContractStateSucceeded, nil, nil)
+	if n, err := f.cancelOpen(t); err != nil || n != 1 {
+		t.Fatalf("cancelled %d err %v, want one", n, err)
+	}
+	var held int
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM contract_run WHERE held_success = 1`).Scan(&held)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if held != 0 {
+		t.Fatalf("held_success rows = %d, want 0 after the cancel for withdraw/replan", held)
+	}
+	p, err := f.s.PrepareAnswer(context.Background(), f.cid, "NEW-SCOPE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := f.s.ExecuteAnswer(context.Background(), AnswerRequest{
+		ChallengeID: f.cid, ExpectedVersion: p.Version, Answer: "NEW-SCOPE", Replan: true,
+	}, verifiedAttestationForTest(t, f.cid))
+	if err != nil || c.Status != StatusClassified {
+		t.Fatalf("replan after a cancel answered succeeded: %+v err %v, want classified", c, err)
+	}
+}
