@@ -332,6 +332,10 @@ func TestRelayed_AnswerReplanReturnsToClassified(t *testing.T) {
 		if h := out["hold"].(map[string]any); h["answer"] != "方針を変える" {
 			t.Errorf("hold = %v", h)
 		}
+		holds := runJSON(t, ws, "show", id, "--json")["holds"].([]any)
+		if h := holds[0].(map[string]any); h["replan"] != true {
+			t.Errorf("show --json hold.replan = %v, want true", h["replan"])
+		}
 	})
 	t.Run("without the mark", func(t *testing.T) {
 		ws := initializedWorkspace(t)
@@ -339,6 +343,10 @@ func TestRelayed_AnswerReplanReturnsToClassified(t *testing.T) {
 		runJSON(t, ws, append([]string{"answer", id, "--answer", "そのまま続ける"}, rel...)...)
 		if got := workStatus(t, ws, id); got != "in_progress" {
 			t.Errorf("status = %q, want in_progress", got)
+		}
+		holds := runJSON(t, ws, "show", id, "--json")["holds"].([]any)
+		if h := holds[0].(map[string]any); h["replan"] != false {
+			t.Errorf("show --json hold.replan = %v, want false", h["replan"])
 		}
 	})
 	t.Run("hold raised before work started", func(t *testing.T) {

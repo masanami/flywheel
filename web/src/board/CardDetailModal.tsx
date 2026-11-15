@@ -359,7 +359,15 @@ export function DetailSections({ l }: { l: Loaded }) {
               <div>
                 回答:{" "}
                 {h.answer !== null ? (
-                  <ClampedText text={h.answer} />
+                  <>
+                    <ClampedText text={h.answer} />
+                    {h.replan ? (
+                      <span data-replan="true">
+                        {" "}
+                        （範囲が変わる回答: 計画を作り直す）
+                      </span>
+                    ) : null}
+                  </>
                 ) : h.closed_at !== null ? (
                   `回答なしで閉じた（${h.closed_at}）`
                 ) : h.kind === HOLD_KIND_PARENT_DIRECT ? (

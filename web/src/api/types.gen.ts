@@ -224,6 +224,7 @@ export interface Hold {
   raised_at: string;
   relay_quote: string | null;
   relay_session: string | null;
+  replan: boolean;
   run_id: string | null;
 }
 
