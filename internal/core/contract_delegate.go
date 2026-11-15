@@ -656,6 +656,21 @@ func contractHoldQuestion(c contractCall, recorded, observed *ContractStatus, re
 
 // contractStopQuestion は契約が failed・cancelled を返したときの問い（それ以外の state は空）。
 func contractStopQuestion(state ContractState, runID, summary string) string {
+	return contractStopQuestionDuringHold(state, runID, summary, false)
+}
+
+// contractStopQuestionDuringHold は contractStopQuestion に、duringHold（課題が保留の間に契約の run が終わっていた）のとき
+// その旨を添える。答えたのに何も起きないように見えないよう、答えの後の周で失敗として写すこの問いで、保留の間に終わったことを伝える。
+func contractStopQuestionDuringHold(state ContractState, runID, summary string, duringHold bool) string {
+	q := contractStopQuestionBody(state, runID, summary)
+	if q != "" && duringHold {
+		q += "\nこの run は、課題が保留の間に（回答する前に）終わっていた。先の保留への回答は run には届いておらず、" +
+			"回答は保留の記録に残っている。新しい run は始めていない。"
+	}
+	return q
+}
+
+func contractStopQuestionBody(state ContractState, runID, summary string) string {
 	switch state {
 	case ContractStateFailed:
 		return fmt.Sprintf("接続ツールの run（%s）が failed を返した。接続ツールの要約: %s\n"+
@@ -949,7 +964,10 @@ func (s *Store) HoldUnrecordedContractStops(ctx context.Context) (int, error) {
 			return err
 		}
 		_ = rows.Close()
-		rows, err = tx.QueryContext(ctx, `SELECT k.start_run_id, k.challenge_id, k.state, k.external_run_id, k.summary
+		rows, err = tx.QueryContext(ctx, `SELECT k.start_run_id, k.challenge_id, k.state, k.external_run_id, k.summary,
+				EXISTS (SELECT 1 FROM hold h2 WHERE h2.challenge_id = k.challenge_id AND h2.raised_at < k.ended_at
+					AND (h2.answered_at IS NULL OR h2.answered_at >= k.ended_at)
+					AND (h2.closed_at IS NULL OR h2.closed_at >= k.ended_at))
 			FROM contract_run k JOIN challenge c ON c.id = k.challenge_id WHERE `+unheldContractStopWhere+` ORDER BY k.id`)
 		if err != nil {
 			return err
@@ -958,10 +976,11 @@ func (s *Store) HoldUnrecordedContractStops(ctx context.Context) (int, error) {
 		for rows.Next() {
 			var t target
 			var state, ext, summary string
-			if err := rows.Scan(&t.runID, &t.challengeID, &state, &ext, &summary); err != nil {
+			var duringHold bool
+			if err := rows.Scan(&t.runID, &t.challengeID, &state, &ext, &summary, &duringHold); err != nil {
 				return err
 			}
-			t.question = contractStopQuestion(ContractState(state), ext, summary)
+			t.question = contractStopQuestionDuringHold(ContractState(state), ext, summary, duringHold)
 			targets = append(targets, t)
 		}
 		return rows.Err()
