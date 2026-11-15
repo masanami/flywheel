@@ -177,3 +177,24 @@ func TestParentDirect_ApprovalSummaryAndDetailCarryTheArtifactsThenApprovalCompl
 		t.Errorf("approval summary after completion = %d, want an error", code)
 	}
 }
+
+// 横断の GET /api/v1/needs-human（needsHumanHandler → collectNeedsHuman → view.FromNeedsHuman）にも、
+// 種類が親が直接行う保留の課題（C-2）は載らず、人の対応を待つ課題（C-3・C-4）は載る。
+func TestParentDirect_FleetNeedsHumanExcludesParentDirectHold(t *testing.T) {
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	ws := parentDirectWorkspace(t)
+	port := startServerAt(t, now, core.FleetWorkspace{Name: "w", Path: ws})
+
+	m := mustJSON(t, port, "/api/v1/needs-human")
+	wss := m["workspaces"].([]any)
+	if len(wss) != 1 {
+		t.Fatalf("workspaces = %v, want exactly w", wss)
+	}
+	var got []string
+	for _, c := range wss[0].(map[string]any)["needs_human"].(map[string]any)["challenges"].([]any) {
+		got = append(got, c.(map[string]any)["id"].(string))
+	}
+	if !reflect.DeepEqual(got, []string{"C-3", "C-4"}) {
+		t.Errorf("needs-human challenges = %v, want [C-3 C-4] (C-2 の親が直接行う保留は載せない)", got)
+	}
+}
