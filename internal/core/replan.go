@@ -14,8 +14,9 @@ import (
 	"strings"
 )
 
-// labelJ2Replan は J2 の入力で、計画の作り直しの材料を渡すデータの区画の名前。
-const labelJ2Replan = "計画の作り直し"
+// ReplanSectionLabel は J2 の入力で、計画の作り直しの材料を渡すデータの区画の名前。
+// invoker のテストが指示文の区画名と突き合わせるために公開する。
+const ReplanSectionLabel = "計画の作り直し"
 
 // labelPreviousDeliverable は J3 の入力で、前の計画の成果物を渡すデータの区画の名前。
 const labelPreviousDeliverable = "前の計画の成果物"

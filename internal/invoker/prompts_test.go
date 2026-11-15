@@ -830,3 +830,17 @@ func TestJ2Prompt_MentionsParentDirectVerdict(t *testing.T) {
 		}
 	}
 }
+
+// TestJ2Prompt_ListsReplanSection は、J2 の指示文が区画「計画の作り直し」と、前の計画より回答を優先する扱いを
+// 持つことを固定する（#642）。
+func TestJ2Prompt_ListsReplanSection(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"「" + core.ReplanSectionLabel + "」", "前の計画より回答を優先して計画を作り直す"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J2) lacks %q", want)
+		}
+	}
+}
