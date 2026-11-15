@@ -19,6 +19,9 @@ import (
 // contractRequestedKindReview は、成果物のレビューを待つ requested_action.kind。
 const contractRequestedKindReview = "review"
 
+// contractRequestedKindObserve は、見守るだけの待ち（保留にせず読み直す）の requested_action.kind。
+const contractRequestedKindObserve = "observe"
+
 // hasReviewableArtifact は artifacts に、検証中へ進めるときに取り込む種類（pr・branch・commit）が 1 件でもあるか。
 func hasReviewableArtifact(arts []ContractArtifact) bool {
 	for _, a := range arts {

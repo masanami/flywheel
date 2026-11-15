@@ -134,3 +134,51 @@ func TestVerifyAutoJ5_NilDescriptionsAddsNoDescriptionSection(t *testing.T) {
 		t.Error("a description section was added without a source")
 	}
 }
+
+// delegationReportSection は J5 に渡した「直前の委譲の報告」の区画の中身を返す。
+func (f *prHeadFixture) delegationReportSection(t *testing.T) string {
+	t.Helper()
+	for _, s := range f.j5Inputs[0].Sections {
+		if s.Label == "直前の委譲の報告" {
+			return s.Content
+		}
+	}
+	t.Fatal("no delegation report section")
+	return ""
+}
+
+// asContractDelegation は直前の委譲の run を form: cli の契約の run（出力は契約の JSON）に書き換える。
+func (f *prHeadFixture) asContractDelegation(t *testing.T) {
+	t.Helper()
+	if err := f.exec(`UPDATE run SET kind = 'contract', output = ? WHERE kind = 'delegate'`,
+		`{"contract_version":1,"run_id":"ext-1","state":"waiting","summary":"CONTRACT-SUMMARY"}`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ⑥ form: cli の委譲で成果物の PR の本文が取れたら、その本文（成果物の説明文の区画）を委譲の報告として読む。
+func TestVerifyAutoJ5_ContractDelegationReportIsTheArtifactDescriptionWhenRead(t *testing.T) {
+	f := newPRHeadFixture(t, headOnlySentence+"\n")
+	f.asContractDelegation(t)
+	f.verifyWithDescriptions(t, &fakeDescriptions{got: UpstreamArtifactDescription{Text: "## 概要\n子の自己申告の本文", HeadSHA: f.sha}})
+
+	got := f.delegationReportSection(t)
+	if !strings.Contains(got, "「"+labelArtifactDescription+"」の区画") || strings.Contains(got, "CONTRACT-SUMMARY") || strings.Contains(got, `"state"`) {
+		t.Fatalf("report section = %q, want it to point at the artifact description, not the contract output", got)
+	}
+	if content, ok := f.descriptionSection(); !ok || !strings.Contains(content, "子の自己申告の本文") {
+		t.Fatalf("artifact description section = %q (ok=%v)", content, ok)
+	}
+}
+
+// ⑥ form: cli の委譲で成果物の PR の本文が取れないときは、契約の summary を委譲の報告に戻す。
+func TestVerifyAutoJ5_ContractDelegationReportFallsBackToTheSummaryWhenTheDescriptionIsNotRead(t *testing.T) {
+	f := newPRHeadFixture(t, headOnlySentence+"\n")
+	f.asContractDelegation(t)
+	f.verifyWithDescriptions(t, &fakeDescriptions{err: errors.New("gh failed")})
+
+	got := f.delegationReportSection(t)
+	if !strings.Contains(got, "CONTRACT-SUMMARY") || strings.Contains(got, "「"+labelArtifactDescription+"」の区画（") || strings.Contains(got, `"state"`) {
+		t.Fatalf("report section = %q, want the contract summary as the report", got)
+	}
+}

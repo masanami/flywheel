@@ -196,11 +196,3 @@ func TestPollContractRuns_AfterTheReleaseIsExecutedReadyIsReturnedAndTheRunEnds(
 		t.Fatalf("resumes=%d statuses=%d after the run ended, want no more calls", len(f.client.resumes), len(f.client.statuses))
 	}
 }
-
-// J5 には、子の報告の本文が届かない代わりに成果物の説明文を委譲の報告として読むことを示す。
-func TestFormatDelegationReportSection_ContractRunPointsAtTheArtifactDescription(t *testing.T) {
-	got := formatDelegationReportSection(&j5Context{LastDelegate: &runRow{ID: "R-1", Kind: runKindContract, Result: RunResultSucceeded, Output: `{"state":"waiting"}`}})
-	if !strings.Contains(got, labelArtifactDescription) || strings.Contains(got, `"state"`) {
-		t.Fatalf("section = %q, want it to point at %q and not carry the raw contract output", got, labelArtifactDescription)
-	}
-}

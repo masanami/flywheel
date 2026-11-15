@@ -31,7 +31,7 @@ const (
 // review は、成果物（pr・branch・commit）があるときだけ検証中へ進める（decider は読まない）。成果物が無ければ、
 // 検証できないので他の求めと同じくオーナーの保留へ写す。
 func contractWaitDestination(ra *ContractRequestedAction, artifacts []ContractArtifact) contractWaitDest {
-	if ra == nil || ra.Kind == "observe" {
+	if ra == nil || ra.Kind == contractRequestedKindObserve {
 		return contractWaitObserve
 	}
 	if ra.Kind == contractRequestedKindReview && hasReviewableArtifact(artifacts) {
@@ -304,6 +304,45 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	}
 	if rep.Result == RunResultSucceeded && !rep.State.Terminal() && !rep.Held {
 		if err := s.cancelOverBudget(ctx, in, row, connector, binding, planVersion, cycleID, rep); err != nil {
+			return nil, err
+		}
+	}
+	if !resume && row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindObserve && stillObserving(rep) {
+		return s.resumeObservation(ctx, in, row, connector, binding, planVersion, cycleID, rep)
+	}
+	return rep, nil
+}
+
+// stillObserving は、状態の確認の読み（rep）が成功し、課題を保留にせず、観測の待ち（waiting・observe）のままか。
+func stillObserving(rep *ContractRunReport) bool {
+	return rep.Result == RunResultSucceeded && !rep.Held && rep.State == ContractStateWaiting &&
+		rep.RequestedAction != nil && rep.RequestedAction.Kind == contractRequestedKindObserve
+}
+
+// resumeObservation は、観測の待ちを読み直した後に、答え無しの resume（{answer}・{choice}・{note} を空で差し込む）を
+// 1 回呼ぶ（観測の待ちは、接続ツール側で resume を呼ばれて初めて進むことがある）。時間の上限は他の契約のコマンドと同じ。
+// 引数を埋められない・resume が失敗したときは課題を保留にせず、状態の確認の読み（statusRep）を返す
+// （次の周の読み直しで再び呼ぶだけで、追加のやり直しはしない）。成功したら、返った状態を status と同じに読んで写す。
+func (s *Store) resumeObservation(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, statusRep *ContractRunReport) (*ContractRunReport, error) {
+	command, err := fillContractArgs(connector.Commands.Resume, statusRep.ChallengeID, binding, row.ExternalRunID, contractAnswer{})
+	if err != nil {
+		return statusRep, nil
+	}
+	latest := *row
+	latest.State, latest.Summary, latest.CostMicros = statusRep.State, statusRep.Summary, usdToMicros(statusRep.CostTotalUSD)
+	latest.RequestedKind = contractRequestedKindObserve
+	rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, in.WorkDir, &latest, "resume", command, planVersion, cycleID, "")
+	if err != nil {
+		return nil, err
+	}
+	if rep.Result != RunResultSucceeded {
+		return statusRep, nil
+	}
+	if err := s.afterContractRead(ctx, rep, connector); err != nil {
+		return nil, err
+	}
+	if !rep.State.Terminal() && !rep.Held {
+		if err := s.cancelOverBudget(ctx, in, &latest, connector, binding, planVersion, cycleID, rep); err != nil {
 			return nil, err
 		}
 	}

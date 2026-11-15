@@ -387,3 +387,82 @@ func TestPollContractRuns_MalformedStatusHoldsWithoutUpdatingTheContract(t *test
 		t.Fatalf("in_progress challenges = %d, want 0（保留で人間対応待ち）", n)
 	}
 }
+
+// ⑤ 観測の待ち（observe）を読み直すときは、status に加えて答え無しの resume を 1 回呼び、返った状態を写す。
+func TestPollContractRuns_ObserveWaitIsResumedWithoutAnAnswerWhenReadAgain(t *testing.T) {
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	observe := waitingOut(&ContractRequestedAction{Kind: "observe", Decider: "any", Text: "見ている"}, nil)
+	f.client.queue = []ContractLaunchOutput{observe, observe}
+	f.poll(t) // 初めて observe を読む（直前の記録は observe ではないので resume は呼ばない）
+	if len(f.client.resumes) != 0 {
+		t.Fatalf("resumes = %v, want none on the first read of the wait", f.client.resumes)
+	}
+	f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
+	reps := f.poll(t)
+	want := []string{"tool", "resume", "ext-1", "--answer", ""}
+	if len(f.client.resumes) != 1 || !reflect.DeepEqual(f.client.resumes[0], want) {
+		t.Fatalf("resumes = %v, want one resume %v without an answer", f.client.resumes, want)
+	}
+	if len(f.client.statuses) != 2 {
+		t.Fatalf("statuses = %d, want 2（status に加えて resume を呼ぶ）", len(f.client.statuses))
+	}
+	if len(reps) != 1 || reps[0].State != ContractStateRunning {
+		t.Fatalf("reps = %+v, want the state returned by resume", reps)
+	}
+	if state, _, _, ended := f.contractRow(t); state != "running" || ended {
+		t.Fatalf("contract_run state=%s ended=%v, want running（resume の出力を status と同じく写す）", state, ended)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM hold`); n != 0 {
+		t.Fatalf("holds = %d, want 0", n)
+	}
+}
+
+// 答え無しの resume が失敗しても課題を保留にせず、次の周の読み直しで再び 1 回呼ぶだけにする。
+func TestPollContractRuns_ObserveResumeFailureDoesNotHoldAndIsCalledAgainNextCycle(t *testing.T) {
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{waitingOut(&ContractRequestedAction{Kind: "observe", Decider: "any", Text: "見ている"}, nil)}
+	f.poll(t)
+	f.client.resumeOut = ContractLaunchOutput{Result: RunResultTimedOut, ErrorSummary: "timed out"}
+	f.poll(t)
+	if n := f.count(t, `SELECT COUNT(*) FROM hold`); n != 0 {
+		t.Fatalf("holds = %d, want 0（答え無しの resume の失敗では保留にしない）", n)
+	}
+	if got := f.status(t, f.cid); got != StatusInProgress {
+		t.Fatalf("status = %s, want in_progress", got)
+	}
+	if state, _, _, ended := f.contractRow(t); state != "waiting" || ended {
+		t.Fatalf("contract_run state=%s ended=%v, want waiting", state, ended)
+	}
+	f.poll(t)
+	if len(f.client.resumes) != 2 {
+		t.Fatalf("resumes = %d, want 2（読み直し 1 回につき 1 回。追加のやり直しはしない）", len(f.client.resumes))
+	}
+}
+
+// review・answer・approve の待ちでは、読み直しても答え無しの resume を呼ばない。
+func TestPollContractRuns_NonObserveWaitsAreNotResumedWithoutAnAnswer(t *testing.T) {
+	for _, kind := range []string{"review", "answer", "approve"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newContractFixture(t)
+			if _, err := f.start(t); err != nil {
+				t.Fatal(err)
+			}
+			w := waitingOut(&ContractRequestedAction{Kind: kind, Decider: "human", Text: "待ち"}, nil)
+			f.client.queue = []ContractLaunchOutput{w, w}
+			f.poll(t)
+			f.poll(t)
+			if len(f.client.statuses) < 2 {
+				t.Fatalf("statuses = %d, want the wait to be read again", len(f.client.statuses))
+			}
+			if len(f.client.resumes) != 0 {
+				t.Fatalf("resumes = %v, want none for kind %s", f.client.resumes, kind)
+			}
+		})
+	}
+}
