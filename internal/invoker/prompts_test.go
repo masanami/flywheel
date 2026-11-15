@@ -145,12 +145,12 @@ func TestJ5Prompt_HasHeadroomBelowLimit(t *testing.T) {
 //
 // self-review 指摘（round1, code-reviewer CONFIRMED）: 当初は J1（4096バイト）
 // の境界だけを検証しており、judgmentPromptLimit の J2〜J5 の値
-// （当時 8192・8192・4096・6144。J2 は #462 で 12288、J5 は #466 で 8192、#565 で 9216、#563 で 9728）を緩めても検出するテストが無かった。5ファイル
+// （当時 8192・8192・4096・6144。J2 は #462 で 12288、#642 で 12800、J5 は #466 で 8192、#565 で 9216、#563 で 9728）を緩めても検出するテストが無かった。5ファイル
 // 分をテーブル駆動で回す形に直した。
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
 		"j1.md": 4096,
-		"j2.md": 12288,
+		"j2.md": 12800,
 		"j3.md": 8192,
 		"j4.md": 4096,
 		"j5.md": 9728,
@@ -827,6 +827,20 @@ func TestJ2Prompt_MentionsParentDirectVerdict(t *testing.T) {
 	for _, want := range []string{"委譲の計画が立たず、親が直接行うのが適切", "親が何を満たせば終わりか", "4 を選んでよい", "サイズに関わらず"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("j2.md does not contain %q", want)
+		}
+	}
+}
+
+// TestJ2Prompt_ListsReplanSection は、J2 の指示文が区画「計画の作り直し」と、前の計画より回答を優先する扱いを
+// 持つことを固定する（#642）。
+func TestJ2Prompt_ListsReplanSection(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"「" + core.ReplanSectionLabel + "」", "前の計画より回答を優先して計画を作り直す"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J2) lacks %q", want)
 		}
 	}
 }

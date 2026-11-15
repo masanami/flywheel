@@ -750,7 +750,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		sections = append(sections, JudgmentDataSection{Label: PlanRejectionsSectionLabel, Content: t})
 	}
 	if replan != nil {
-		sections = append(sections, JudgmentDataSection{Label: labelJ2Replan, Content: formatReplanSection(replan)})
+		sections = append(sections, JudgmentDataSection{Label: ReplanSectionLabel, Content: formatReplanSection(replan)})
 	}
 	if len(ch.Issues) > 0 {
 		sections = append(sections, JudgmentDataSection{Label: "論点と回答", Content: formatIssuesSection(ch.Issues, issuesAnswer)})
