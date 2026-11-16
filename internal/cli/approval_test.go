@@ -150,6 +150,30 @@ func TestApprovalSummaryText_PlanIncludesBodyAndVersion(t *testing.T) {
 	}
 }
 
+// 完了の検証が PR のマージ可否を確かめられないまま完了確認待ちへ進めた課題は、完了の承認の要約に
+// 「マージ可否は未確認」と出す。確かめられた課題には出さない（#629）。
+func TestApprovalSummaryText_CompletionShowsMergeabilityUnconfirmed(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		unconfirmed bool
+	}{
+		{"unconfirmed", true},
+		{"confirmed", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &core.ApprovalPreview{
+				ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion,
+				DoneCriteria: "it works", MergeabilityUnconfirmed: tc.unconfirmed,
+			}
+			got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
+			has := strings.Contains(got, "PR のマージ可否: マージ可否は未確認")
+			if has != tc.unconfirmed {
+				t.Errorf("summary = %q, contains the unconfirmed line = %v, want %v", got, has, tc.unconfirmed)
+			}
+		})
+	}
+}
+
 func TestApprovalSummaryText_CompletionIncludesDoneCriteria(t *testing.T) {
 	p := &core.ApprovalPreview{
 		ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion,
