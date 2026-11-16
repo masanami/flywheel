@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -537,6 +538,9 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 		JudgmentDataSection{Label: "照合の結果", Content: formatReconciliationSection(vc)},
 		JudgmentDataSection{Label: "PR の状態とチェックの結果", Content: formatPullRequestSection(prs)},
 	)
+	if t := formatMergeabilitySection(prs); t != "" {
+		sections = append(sections, JudgmentDataSection{Label: labelPullRequestMergeability, Content: t})
+	}
 	sections = append(sections, headSections...)
 	if t := formatHoldsSection(vc.Holds); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "保留の記録", Content: t})
@@ -745,6 +749,12 @@ func (s *Store) applyJ5Route(ctx context.Context, runIDDisplay, challengeIDDispl
 			if conds := v.conditionsWith(J5ConditionAfterRelease); len(conds) > 0 {
 				tc.after[activityKeyConditionsAfterRelease] = conds
 			}
+			// マージ可否を確かめられないまま進めたことは、完了の承認の要約に出すため作業ログ（T8）へ残す。
+			if vh != nil {
+				if urls := unconfirmedMergeability(vh.PRs); len(urls) > 0 {
+					tc.after[activityKeyMergeabilityUnconfirmed] = urls
+				}
+			}
 			// T8 と同じトランザクションで、検証の入力にした head を成果物の行へ残す。
 			return recordVerifiedHeads(ctx, tc.tx, vh)
 		}
@@ -907,6 +917,10 @@ type J5AutoInput struct {
 	CycleID string
 	// Cycle が非 nil なら枠超過の状態をこの JudgmentCycle と共有する。
 	Cycle *JudgmentCycle
+	// MergeableRetries・MergeableInterval は、PR の mergeable が null（GitHub が計算中）のとき、J5 の起動の前に
+	// 取り直す回数と間隔。0 なら取り直さない。
+	MergeableRetries  int
+	MergeableInterval time.Duration
 }
 
 // VerifyAutoJ5 は `flywheel verify --auto [<C-ID>]` の本体（J5）。対象の選び方・CI の待ち・入力・
@@ -1026,6 +1040,7 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 	if waitURL := pendingPullRequestURL(prs); waitURL != "" {
 		return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedWaitingExternal, Detail: waitURL}, nil
 	}
+	prs = refreshUnknownMergeability(ctx, in.Checks, prs, in.MergeableRetries, in.MergeableInterval)
 
 	j5Budget := in.AgentDecl.JudgmentBudgetFor(JudgmentJ5)
 	if err := s.checkCycleBudget(ctx, in.CycleID, j5Budget); err != nil {
@@ -1078,7 +1093,16 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 				vh = &j5VerifiedHeads{RunID: lastRunID, PRs: prs}
 			}
 		}
-		outcome, status, finalResult, err := s.finalizeJ5Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, vh)
+		structured := res.StructuredOutput
+		// 衝突の PR があるのに met が返ったら、core が not_met に置き換える（課題は承認待ちへ進まない）。
+		overridden, err := s.overrideMetForConflict(ctx, res.RunID, structured, prs)
+		if err != nil {
+			return nil, nil, err
+		}
+		if overridden != nil {
+			structured = overridden
+		}
+		outcome, status, finalResult, err := s.finalizeJ5Output(ctx, res.RunID, res.ChallengeID, structured, vh)
 		if err != nil {
 			return nil, nil, err
 		}

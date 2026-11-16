@@ -467,6 +467,9 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 			}
 		}
 		writeConditionsAfterRelease(&b, p.ConditionsAfterRelease, view.OutlookFor(len(effect.Approved) > 0, p.HasApprovedRelease))
+		if p.MergeabilityUnconfirmed {
+			fmt.Fprintf(&b, "PR のマージ可否: %s\n", core.MergeabilityUnconfirmedNote)
+		}
 		fmt.Fprintf(&b, "同時に承認される本番反映 (release): %s\n", operationListSummary(effect.Approved))
 		fmt.Fprintf(&b, "同時には承認されない不可逆操作:     %s\n", operationListSummary(effect.NotApproved))
 		writeReleaseHeadLines(&b, rds)
