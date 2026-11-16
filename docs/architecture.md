@@ -195,7 +195,7 @@ DDL ではなく、何を持つかの合意のための素描である。
 | `source_binding` | challenge_id, source_id, external_key, fingerprint, last_synced_at, upstream_state | 取り込み元との対応。上流の close を保持できる（claude-flywheel#140） |
 | `cycle` | id, started_at, ended_at, result, budget_usd, spent_usd | 現行の `cycle_start` / `cycle_end` |
 | `run` | id, cycle_id（NULL 可）, kind（delegate / adhoc / judgment / contract。contract は `form: cli` の契約のコマンドの実行）, challenge_id, repo, slot_id, session_ref, started_at, ended_at, result, cost_usd | 現行の `delegate_*` / `adhoc_*` に、判断点の呼び出しを加えたもの。**終了していない `run` が「実行中」** |
-| `contract_run` | id, challenge_id, connector_id, external_run_id, start_run_id, state, summary, requested_kind・requested_decider・requested_text, cost_usd, max_budget_usd, wait_hold_id, held_success, started_at, observed_at, ended_at, work_dir | `form: cli` の接続ツールの run（契約の実行 ID）を周をまたいで持つ（0019）。`cost_usd` は契約が報告した累計で、run の費用には前回との差分だけを記録する。終わっていない行は課題ごとに高々 1 つ。`wait_hold_id` は契約の `waiting` を写した保留の ID（0020）で、保留への答えを `resume` で返すとき、その保留の答えだけを返すために使い、返す前に NULL にして二重に返さない。`held_success` は課題が保留の間に契約の run が `succeeded` まで進んだ印（0021）で、答えの後の周で resume も start も呼ばずに検証中へ進めたら 0 に戻す（[M3 の機能仕様](features/m3-invoker-delegation.md) §委譲の流れ（`form: cli`））。`work_dir` は `start` を実行した作業ディレクトリ（0023）で、`status`・`resume`・`cancel` は決め直さずにこれを使う（NULL の既存の行はワークスペース） |
+| `contract_run` | id, challenge_id, connector_id, external_run_id, start_run_id, state, summary, requested_kind・requested_decider・requested_text・requested_resolvable_by, cost_usd, max_budget_usd, wait_hold_id, held_success, started_at, observed_at, ended_at, work_dir | `form: cli` の接続ツールの run（契約の実行 ID）を周をまたいで持つ（0019）。`cost_usd` は契約が報告した累計で、run の費用には前回との差分だけを記録する。終わっていない行は課題ごとに高々 1 つ。`wait_hold_id` は契約の `waiting` を写した保留の ID（0020）で、保留への答えを `resume` で返すとき、その保留の答えだけを返すために使い、返す前に NULL にして二重に返さない。`held_success` は課題が保留の間に契約の run が `succeeded` まで進んだ印（0021）で、答えの後の周で resume も start も呼ばずに検証中へ進めたら 0 に戻す（[M3 の機能仕様](features/m3-invoker-delegation.md) §委譲の流れ（`form: cli`））。`work_dir` は `start` を実行した作業ディレクトリ（0023）で、`status`・`resume`・`cancel` は決め直さずにこれを使う（NULL の既存の行はワークスペース）。`requested_resolvable_by` は最後に読んだ求めの `resolvable_by`（0024。NULL は項目なし＝`answer`）で、`terminal` の待ちへの回答では `resume` を呼ばない判定に使う |
 | `slot` | id, repo, provider（clone / worktree / container）, path, state | 実行環境の払い出し（claude-flywheel#154・§11） |
 | `activity` | id, at, actor, channel, entity, entity_id, action, before, after | 作業ログ（D4）。全ての状態変更を core が自動で記録する |
 | `lock` | name, holder, acquired_at, heartbeat_at | サイクルの並走排他 |
@@ -246,7 +246,7 @@ stateDiagram-v2
 | 0. 観測・取り込み | **core ＋ adapters**（LLM なし） | — |
 | 1. 整理 | core が未分類の課題を列挙 | **J1 分類**: この課題は自ポジションのものか。入力は課題とポジション定義。出力は `mine / not_mine / uncertain` と優先度・サイズの案 |
 | 2. 計画 | core が予算・枠・依存・直列化を算出 | **J2 計画**: タスク案を作る。出力は構造化されたタスク案 |
-| 3. 実行 | core が依存ゲート・スロット割り当て・費用ガード・起動・合流・照合を実行 | **J3 ブリーフ**: 委譲ブリーフを書く。**J4 応答**: 子の問いに答えるか、人間へ上げるかを決める |
+| 3. 実行 | core が依存ゲート・スロット割り当て・費用ガード・起動・合流・照合を実行 | **J3 ブリーフ**: 委譲ブリーフを書く。**J4 応答**: 子の問いに答えるか、人間へ上げるかを決める。**J9 同時に進めてよいか**: この周に起動しうる 2 つの課題の計画を読み、強い・弱い・判断できないを返す（弱いときだけ並列。起動しうる候補は全リポジトリの起動の順と全体の同時委譲数の空きで決め、費用の上限は先に起動する組から使う） |
 | 4. 検証 | core が成果物（PR・コミット）の実在を照合 | **J5 検証**: 成果が完了条件を満たすか。出力は `met / not_met / uncertain` |
 | 5. 学習 | core が出来事ごとに発生の行を記録する（LLM なし） | **J6 学習**: 発生の原因を分類し、知見を Markdown の記憶へ書く（作成と追記だけ。書くのは core＝M4.5 の M45H10） |
 | 6. 報告・コミット | **core**（LLM なし）。レポートは作業ログから生成 | — （J7 要約は作らない＝M4.5 の M45H6） |

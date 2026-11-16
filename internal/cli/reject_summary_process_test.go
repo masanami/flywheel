@@ -208,14 +208,16 @@ func TestReject_CompletionApprovalWithPendingRelease_MatchesApprovalWithD12Reass
 		t.Errorf("approve summary = %q, want %q", approveBody, wantApprove)
 	}
 
-	// reject は、release の振り分けの 2 行だけを D12 の結果（release も
-	// 未承認のまま残る）に置き換え、末尾に理由の 1 行を足したものになる。
+	// reject は、release の振り分けの 2 行だけを今回の操作の結果に置き換え（差し戻しは release を
+	// 承認せず、未実行の release を取り消す〔#657〕ので、取り消す release は「承認されない」側に並べない）、
+	// 取り消す release の行と、末尾に理由の 1 行を足したものになる。
 	const wantReject = "課題 ID:     C-1\n" +
 		"タイトル:    distinctive-release-title\n" +
 		"承認の種類:  完了\n" +
 		"完了条件:    distinctive done criteria\n" +
 		"同時に承認される本番反映 (release): (無し)\n" +
-		"同時には承認されない不可逆操作:     OP-1(release) distinctive release op, OP-2(delete) distinctive delete op\n" +
+		"同時には承認されない不可逆操作:     OP-2(delete) distinctive delete op\n" +
+		"未実行の本番反映 OP-1 を取り消す（マージされない。直して再び完了を承認すると新しい本番反映が立つ）\n" +
 		"理由:        " + reason + "\n"
 	if rejectBody != wantReject {
 		t.Errorf("reject summary = %q, want %q", rejectBody, wantReject)

@@ -55,6 +55,7 @@ var notStartedReasonValues = []NotStartedReason{
 	NotStartedReworkLimit,
 	NotStartedUpstreamFetchFailed,
 	NotStartedSerialized,
+	NotStartedPredictionLimit,
 	NotStartedWaitingExternal,
 	NotStartedPlanUnavailable,
 	NotStartedInProgress,

@@ -149,8 +149,12 @@ func (s *Store) ImproveJ8(ctx context.Context, in ImproveJ8Input) (*ImproveJ8Res
 	if !ok {
 		return invalid()
 	}
+	withheld, ok := validateJ8Withheld(run.StructuredOutput)
+	if !ok {
+		return invalid()
+	}
 	originURL, originNote := s.j8OriginURL(ctx, in, props)
-	m, bad, err := s.applyJ8(ctx, run.RunID, props, jc.DetailOccurrenceIDs(), waitIDs, in.ConnDecl, originURL)
+	m, bad, err := s.applyJ8(ctx, run.RunID, props, withheld, jc.DetailOccurrenceIDs(), waitIDs, in.ConnDecl, originURL)
 	if err != nil {
 		// 写像が硬いエラーで終わった run は、succeeded のままにせず失敗に数える（毎周の呼び直しを
 		// failure_limit で止める）。手動はエラーを返し、自動は結果に注記する。
@@ -176,6 +180,9 @@ func (s *Store) ImproveJ8(ctx context.Context, in ImproveJ8Input) (*ImproveJ8Res
 	}
 	res.Filed, res.Linked, res.Waited = m.Filed, m.Linked, m.Waited
 	res.Note = fmt.Sprintf("filed %d, linked %d, waited %d", len(m.Filed), len(m.Linked), len(m.Waited))
+	if m.Withheld > 0 {
+		res.Note += fmt.Sprintf(", withheld %d", m.Withheld)
+	}
 	if originNote != "" {
 		res.Note += "; " + originNote
 	}

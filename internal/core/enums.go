@@ -182,7 +182,7 @@ var operationStateValues = []OperationState{
 // ClosedReason は state が closed の不可逆操作の閉じた理由（§データモデル `operation.closed_reason`）。
 type ClosedReason string
 
-// ClosedReason の4値。
+// ClosedReason の5値。
 const (
 	// ClosedReasonSuperseded は、本番反映のやり直しで新しい release に置き換えた（取り下げた）。
 	ClosedReasonSuperseded ClosedReason = "superseded"
@@ -193,9 +193,12 @@ const (
 	ClosedReasonMergedUnapproved ClosedReason = "merged_unapproved"
 	// ClosedReasonPRClosed は、承認待ちの release の PR がマージされずに閉じられた。
 	ClosedReasonPRClosed ClosedReason = "pr_closed"
+	// ClosedReasonChallengeRejected は、課題の完了の差し戻しで、未実行（承認待ち・承認済み）の release を取り下げた。
+	// 差し戻した課題を直して再び完了を承認すると、新しい release が立つ。
+	ClosedReasonChallengeRejected ClosedReason = "challenge_rejected"
 )
 
-var closedReasonValues = []ClosedReason{ClosedReasonSuperseded, ClosedReasonMergedOutside, ClosedReasonMergedUnapproved, ClosedReasonPRClosed}
+var closedReasonValues = []ClosedReason{ClosedReasonSuperseded, ClosedReasonMergedOutside, ClosedReasonMergedUnapproved, ClosedReasonPRClosed, ClosedReasonChallengeRejected}
 
 // ParseClosedReason は s を閉じた理由として解釈する（前後の空白を除いた完全一致）。
 func ParseClosedReason(s string) (ClosedReason, bool) {
@@ -346,6 +349,10 @@ const (
 	ActivityActionWithdraw    = "withdraw"
 	ActivityActionImprovement = "improvement"
 )
+
+// ActivityActionImprovementWithheld は作業ログ（entity=run）の action。J8 が、達成の条件の項目がすべて
+// 満たし済みで出さなかった提案（見送り）の層・対象・根拠を、その J8 の run に残す（#571）。
+const ActivityActionImprovementWithheld = "improvement_withheld"
 
 // ActivityActionBackup は作業ログ（entity=cycle）の action。`cycle` の最後の段 backup の結果を残す。
 const ActivityActionBackup = "backup"

@@ -165,3 +165,26 @@ func TestContractCommand_NonStringOptionsAreMalformed(t *testing.T) {
 		})
 	}
 }
+
+// requested_action.resolvable_by は任意。無ければ空、文字列はそのまま、文字列でない値・空文字は閉集合の外として "invalid"。
+func TestContractCommand_ResolvableByIsNormalized(t *testing.T) {
+	cases := map[string]string{
+		``:                            "",
+		`,"resolvable_by":null`:       "",
+		`,"resolvable_by":"answer"`:   "answer",
+		`,"resolvable_by":"terminal"`: "terminal",
+		`,"resolvable_by":"other"`:    "other",
+		`,"resolvable_by":7`:          "invalid",
+		`,"resolvable_by":""`:         "invalid",
+	}
+	for field, want := range cases {
+		in, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"contract_version":1,"run_id":"r","state":"waiting","summary":"","requested_action":{"kind":"approve","decider":"human","text":"t"` + field + `},"artifacts":[],"cost_usd":null}`})
+		out, _ := NewLauncher().Status(context.Background(), in)
+		if out.Result != core.RunResultSucceeded || out.Status == nil || out.Status.RequestedAction == nil {
+			t.Fatalf("field %q: out = %+v", field, out)
+		}
+		if got := out.Status.RequestedAction.ResolvableBy; got != want {
+			t.Errorf("field %q: ResolvableBy = %q, want %q", field, got, want)
+		}
+	}
+}

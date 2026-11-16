@@ -79,8 +79,24 @@ type j8RawProposal struct {
 	DoneCriteria  *string   `json:"done_criteria"`
 }
 
+// J8Withheld は、達成の条件の項目がすべて満たし済みで出さなかった提案 1 件（見送り）。Evidence は満たし済みの
+// 根拠（読み取りで確かめた記述・課題など）。core は見送りを J8 の run の作業ログに残し、課題は作らない。
+type J8Withheld struct {
+	Layer    OccurrenceLayer
+	Target   string
+	Evidence []string
+}
+
+type j8RawWithheld struct {
+	Layer    *string   `json:"layer"`
+	Target   *string   `json:"target"`
+	Evidence *[]string `json:"evidence"`
+}
+
 type j8RawOutput struct {
 	Proposals *[]j8RawProposal `json:"proposals"`
+	// Withheld は任意の欄。無い・空の配列は見送りが無いことを表す。
+	Withheld *[]j8RawWithheld `json:"withheld"`
 }
 
 // j8OutputSchema は J8 の `--json-schema` に渡すスキーマ。閉集合の値は各閉集合の定義から作る。
@@ -100,11 +116,20 @@ func j8OutputSchema() []byte {
 		"done_criteria":  nonEmpty,
 	}
 	required := []string{"layer", "target", "cause", "occurrence_ids", "metric", "expected", "action", "title", "done_criteria"}
+	withheld := map[string]any{
+		"layer":    enum(j6StringEnum(J8LayerValues)),
+		"target":   nonEmpty,
+		"evidence": map[string]any{"type": "array", "items": nonEmpty, "minItems": 1},
+	}
 	schema := map[string]any{
 		"type": "object", "additionalProperties": false, "required": []string{"proposals"},
 		"properties": map[string]any{
 			"proposals": map[string]any{"type": "array", "maxItems": J8MaxProposals, "items": map[string]any{
 				"type": "object", "properties": props, "required": required, "additionalProperties": false,
+			}},
+			"withheld": map[string]any{"type": "array", "maxItems": J8MaxProposals, "items": map[string]any{
+				"type": "object", "properties": withheld, "required": []string{"layer", "target", "evidence"},
+				"additionalProperties": false,
 			}},
 		},
 	}
@@ -177,6 +202,45 @@ func validateJ8Output(data []byte) ([]J8Proposal, bool) {
 		}
 		seenKeys[prop.Key()] = true
 		out = append(out, prop)
+	}
+	return out, true
+}
+
+// validateJ8Withheld は J8 の出力の任意の欄 withheld（見送り）を検査する。欄が無い・空の配列は見送り無しで
+// ok=true。項目の欠落・層が閉集合の外・対象が空白だけ・根拠が無いか空白だけの根拠を含む・件数が
+// J8MaxProposals を超える、のいずれかなら ok=false（出力全体を不正とする）。
+func validateJ8Withheld(data []byte) ([]J8Withheld, bool) {
+	var raw j8RawOutput
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, false
+	}
+	if raw.Withheld == nil {
+		return nil, true
+	}
+	if len(*raw.Withheld) > J8MaxProposals {
+		return nil, false
+	}
+	out := make([]J8Withheld, 0, len(*raw.Withheld))
+	for _, w := range *raw.Withheld {
+		if w.Layer == nil || w.Target == nil || w.Evidence == nil || len(*w.Evidence) == 0 {
+			return nil, false
+		}
+		layer := OccurrenceLayer(*w.Layer)
+		if !slices.Contains(J8LayerValues, layer) {
+			return nil, false
+		}
+		target := strings.TrimSpace(*w.Target)
+		if target == "" {
+			return nil, false
+		}
+		ev := make([]string, 0, len(*w.Evidence))
+		for _, e := range *w.Evidence {
+			if strings.TrimSpace(e) == "" {
+				return nil, false
+			}
+			ev = append(ev, e)
+		}
+		out = append(out, J8Withheld{Layer: layer, Target: target, Evidence: ev})
 	}
 	return out, true
 }

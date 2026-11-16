@@ -461,23 +461,64 @@ func TestPlan_CalledOnceForTwoAndForTwentyIssues(t *testing.T) {
 	}
 }
 
-func TestPlan_TwentyOneIssues_NotCalled_OneGroup_NotPredictable(t *testing.T) {
+// 上限（20 件）を超える候補は、起動の順の先頭から 20 件だけを予測にかけ、残りは理由つきで次の周へ回す。
+// 予測で衝突しない候補は 1 つの直列化グループにまとめられず、並列に起動される。
+func TestPlan_OverPredictionLimit_PredictsFirstTwenty_DefersRest(t *testing.T) {
 	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
-	for i := 0; i < 21; i++ {
-		f.candidate(t, "multi", "P1", 1000+i)
+	var ids []string
+	for i := 0; i < 23; i++ {
+		ids = append(ids, f.candidate(t, "multi", "P1", 1000+i))
 	}
-	cyc := f.cycle(t, 3000)
-	res, err := f.s.RunDelegation(context.Background(), f.in(cyc, nil))
-	if err != nil {
-		t.Fatal(err)
+	res := f.mustRunPlan(t)
+	calls := f.pred.called()
+	if len(calls) != 1 || len(calls[0].Issues) != maxPredictionIssues {
+		t.Fatalf("calls = %+v, want one call with %d Issues", calls, maxPredictionIssues)
 	}
-	if len(f.pred.called()) != 0 {
-		t.Error("the prediction must not be called for more than 20 Issues")
+	for i, n := range calls[0].Issues {
+		if n != 1000+i {
+			t.Fatalf("predicted Issues = %v, want the first 20 in launch order", calls[0].Issues)
+		}
 	}
-	if len(res.SerialGroups) != 1 || len(res.SerialGroups[0].Challenges) != 21 ||
-		!reflect.DeepEqual(res.SerialGroups[0].Reasons, []SerialGroupReason{SerialReasonNotPredictable}) || res.SerialGroups[0].PredictionHeadSHA != nil {
-		t.Errorf("serial groups = %+v", res.SerialGroups)
+	if len(res.NotStarted) != 3 {
+		t.Fatalf("not started = %+v, want 3 deferred", res.NotStarted)
+	}
+	for i, ns := range res.NotStarted {
+		if ns.ChallengeID != ids[20+i] || ns.Reason != NotStartedPredictionLimit || ns.Detail == "" {
+			t.Errorf("not started[%d] = %+v, want %s %s with a detail", i, ns, ids[20+i], NotStartedPredictionLimit)
+		}
+	}
+	if len(res.SerialGroups) != 20 {
+		t.Fatalf("serial groups = %d, want 20 single-challenge groups (not one not_predictable group)", len(res.SerialGroups))
+	}
+	for _, g := range res.SerialGroups {
+		if len(g.Challenges) != 1 || len(g.Reasons) != 0 || g.PredictionHeadSHA == nil {
+			t.Errorf("group = %+v, want a predicted single group", g)
+		}
+	}
+	if len(res.Items) != 20 {
+		t.Errorf("items = %d, want the 20 predicted candidates launched", len(res.Items))
+	}
+}
+
+// 実行中の課題は必ず予測に含め、残りの枠だけを候補に配る。
+func TestPlan_OverPredictionLimit_RunningTakesSlotsFirst(t *testing.T) {
+	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
+	f := newPlanFixture(t)
+	running := f.candidate(t, "multi", "P1", 500)
+	var ids []string
+	for i := 0; i < 20; i++ {
+		ids = append(ids, f.candidate(t, "multi", "P1", 1000+i))
+	}
+	release := f.holdRunning(t, running)
+	defer release()
+	res := f.mustRunPlan(t)
+	calls := f.pred.called()
+	if len(calls) != 1 || len(calls[0].Issues) != maxPredictionIssues || calls[0].Issues[0] != 500 || calls[0].Issues[19] != 1018 {
+		t.Fatalf("calls = %+v, want the running Issue plus the first 19 candidates", calls)
+	}
+	if len(res.NotStarted) != 1 || res.NotStarted[0].ChallengeID != ids[19] || res.NotStarted[0].Reason != NotStartedPredictionLimit {
+		t.Errorf("not started = %+v, want only %s deferred", res.NotStarted, ids[19])
 	}
 }
 

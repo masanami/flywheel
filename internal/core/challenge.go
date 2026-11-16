@@ -92,6 +92,11 @@ type Approval struct {
 	SupersededAt     *time.Time
 	SupersededReason *string
 	SupersededBy     *string
+	// WithdrawnReleases・RunningReleases は完了の差し戻し（ExecuteApproval）の結果だけが埋める。
+	// 前者は取り消した（closed にした）未実行の release の ID、後者は実行中（試行が終わっていない）のため
+	// 取り消さなかった release の ID（マージされうる）。どちらも読み取りの経路では埋めない。
+	WithdrawnReleases []string
+	RunningReleases   []string
 }
 
 // Hold は保留の 1 件（§データモデル hold）。#9 は書き込まない（読み取りだけ実装する）。
@@ -149,6 +154,9 @@ type IrreversibleOperation struct {
 	MergeCommit *string
 	// LastExecutionResult は直前の試行（id が最大の行）の結果。試行が無い・終了していなければ nil。
 	LastExecutionResult *ExecutionResult
+	// LastExecutionDetail は直前の試行の詳細（limit_reached の理由の文など）。試行が無い・終了していない・詳細が空なら nil。
+	// show のテキストの表示だけが読む（JSON のキーには出さない）。
+	LastExecutionDetail *string
 	// ConsecutiveFailures は連続の回数（consecutiveFailures の導出）。
 	ConsecutiveFailures int
 	// WaitingSince は最新の承認の後の最初の試行の開始日時。承認済み（approved）の間だけ値を持つ。
