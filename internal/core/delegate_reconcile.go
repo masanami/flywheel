@@ -371,7 +371,7 @@ var errReconcileNotEligible = errors.New("core: the challenge is no longer in pr
 // 検出（成果物の確認より優先）→ 成果物の確認（結果が succeeded で結末が completed の
 // ときだけ）の順。写す直前に読み直した課題が着手中でなければ、写さない。
 func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, runIDDisplay string,
-	rec *reconciliation, result RunResult, report *DelegationReport, cycleID string) (status *string, note string, err error) {
+	rec *reconciliation, result RunResult, report *DelegationReport, cycleID string, j4 *j4Env) (status *string, note string, err error) {
 	runIDInt, _ := parseRunID(runIDDisplay)
 
 	// release の登録。委譲先のリポジトリの PR は、base が宣言の既定ブランチの PR（状態を問わない）
@@ -421,11 +421,26 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 		return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, q.String(), holdReasonUnapprovedMerge, cycleID, false)
 	}
 
-	// 子の問い・停止の報告（J4 は S3）。保留の原因の run はこの run になる。
+	// 子の問い・停止の報告（問いは J4 へ回すか人間対応待ち）。保留の原因の run はこの run になる。
 	if result == RunResultSucceeded && report != nil {
 		switch report.Outcome {
 		case DelegationOutcomeQuestions:
-			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatQuestionsHold(report), holdReasonQuestions, cycleID, false)
+			question := formatQuestionsHold(report)
+			if j4 != nil {
+				answered, reason, err := s.routeQuestionsToJ4(ctx, dc, report, j4)
+				if err != nil {
+					return nil, "", err
+				}
+				if answered {
+					// 回答は保留に入れない。課題は着手中のまま、次の起動が J4 の回答を渡して子を再開する。
+					j4.Answered = true
+					return nil, "J4 answered the child's questions; the child is resumed with the answers", nil
+				}
+				if reason != "" {
+					question = reason + "\n\n" + question
+				}
+			}
+			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, question, holdReasonQuestions, cycleID, false)
 		case DelegationOutcomeBlocked:
 			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatBlockedHold(report), holdReasonBlocked, cycleID, false)
 		}

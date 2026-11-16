@@ -18,13 +18,14 @@ func waitingOut(ra *ContractRequestedAction, cost *float64) ContractLaunchOutput
 }
 
 // decider と kind による写し分け: observe は読み直し、それ以外（human・parent・any の answer・approve）はオーナーの保留。
+// J4 の口（ContractPollInput.Judgment）が無いときは、decider が parent の answer もオーナーの保留へ写す（J4 の経路は judgment_j4_test.go）。
 func TestPollContractRuns_WaitingIsMappedByKindAndDecider(t *testing.T) {
 	cases := []struct {
 		kind, decider string
 		wantHold      bool
 	}{
 		{"approve", "human", true}, {"answer", "human", true},
-		{"answer", "parent", true}, {"approve", "parent", true}, // J4 ができるまではオーナーの保留
+		{"answer", "parent", true}, {"approve", "parent", true}, // J4 の口が無ければ answer もオーナーの保留。approve は常にオーナー
 		{"approve", "any", true}, {"answer", "any", true}, // 仕様に写し方の無い any は安全側の人の承認
 		{"observe", "human", false}, {"observe", "parent", false}, {"observe", "any", false},
 	}
