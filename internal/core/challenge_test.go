@@ -28,8 +28,8 @@ func fixedActor(t *testing.T, name string) {
 	}
 }
 
-// fixedStoreActor は s の resolveActor が常に name を返すようにする。fixedActor と違い、
-// パッケージ変数 actorSource を書き換えないので、t.Parallel のテストで使える。
+// fixedStoreActor は s の resolveActor が常に name を返すようにする。fixedActor が t に登録した Store 全部へ
+// 効くのに対し、渡した 1 つの Store だけに効く（どちらも t.Parallel のテストで使える）。
 func fixedStoreActor(s *Store, name string) {
 	s.actor = &actorSourceFuncs{
 		userCurrent: func() (*user.User, error) { return &user.User{Username: name}, nil },

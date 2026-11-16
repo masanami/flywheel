@@ -29,16 +29,19 @@ func slotGit(t *testing.T, dir string, args ...string) string {
 	if err != nil {
 		t.Fatalf("git is required: %v", err)
 	}
-	cmd := exec.Command(exe, args...)
-	cmd.Dir = dir
 	var env []string
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "GIT_") {
 			env = append(env, kv)
 		}
 	}
-	cmd.Env = append(env, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
-	out, err := cmd.CombinedOutput()
+	env = append(env, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+	out, err := combinedOutputRetrySignal(func() *exec.Cmd {
+		cmd := exec.Command(exe, args...)
+		cmd.Dir = dir
+		cmd.Env = env
+		return cmd
+	})
 	if err != nil {
 		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
@@ -105,7 +108,7 @@ func installTripwireGH(t *testing.T) string {
 // AC-283〜285・M3P47: origin の URL の各形（https・scp・ssh × .git の有無）を正規化し、大文字小文字を
 // 無視して宣言の remote と一致とみなす。違う名前・未コミットの変更は割り当てずに needs_attention。
 func TestSlotAssignment_OriginFormsAndPreAssignmentChecks_RealGit(t *testing.T) {
-	parallelTools(t, false)
+	parallelTools(t, true) // 製品側の git の起動（adapter）はやり直せず、並列の負荷で稀にシグナルで終わるため並列にしない
 	marker := installTripwireGH(t)
 	forms := []string{
 		"https://github.com/owner/NAME", "https://github.com/owner/NAME.git",
@@ -236,7 +239,6 @@ func TestStatus_NeedsHumanSlotsTextShowsSlot(t *testing.T) {
 // AC-288〜293: worktree の払い出し（実物の git）。count 本・初回の割り当てで作成・使い回し・
 // ref が無い・パスにファイルがある場合は needs_attention。
 func TestSlotWorktree_ProvisioningAndReuse_RealGit(t *testing.T) {
-	t.Parallel()
 	ws := initializedWorkspace(t)
 	base := filepath.Join(ws, "base")
 	slotClone(t, base, "https://github.com/owner/name.git")
@@ -294,7 +296,6 @@ func endRunAndRelease(t *testing.T, s *core.Store, a *core.SlotAssignment) {
 }
 
 func TestSlotWorktree_ProvisioningFailuresMarkNeedsAttention_RealGit(t *testing.T) {
-	t.Parallel()
 	t.Run("default branch ref is missing", func(t *testing.T) {
 		ws := initializedWorkspace(t)
 		slotClone(t, filepath.Join(ws, "base"), "https://github.com/owner/name.git")

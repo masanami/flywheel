@@ -3,11 +3,14 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +42,7 @@ func TestMain(m *testing.M) {
 		confirmHelperMain()
 		return
 	}
+	capTestParallel()
 	cleanup, err := installRealGHGuard()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: %v\n", err)
@@ -242,4 +246,27 @@ func (h *cliBusyHolder) stop(t *testing.T) {
 		_ = h.cmd.Process.Kill()
 		t.Fatal("busy-holder process did not exit after stdin closed")
 	}
+}
+
+// maxTestParallel は t.Parallel のテストの同時実行数の上限。コア数ぶんの同時実行では、-race のテストバイナリが
+// 偽の gh・claude（sh）を大量に起こす負荷で、子プロセスが稀に異常終了し（tsan の CHECK 失敗・SIGSEGV）、テストが
+// 不定に落ちる。-parallel を明示していないときだけ、この値で頭打ちにする。
+const maxTestParallel = 4
+
+func capTestParallel() {
+	flag.Parse()
+	f := flag.Lookup("test.parallel")
+	if f == nil || runtime.GOMAXPROCS(0) <= maxTestParallel {
+		return
+	}
+	explicit := false
+	flag.Visit(func(v *flag.Flag) {
+		if v.Name == "test.parallel" {
+			explicit = true
+		}
+	})
+	if explicit {
+		return
+	}
+	_ = f.Value.Set(strconv.Itoa(maxTestParallel))
 }

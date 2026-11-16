@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -35,4 +38,23 @@ func initializedWorkspace(t *testing.T) string {
 	dir := t.TempDir()
 	copyInitTemplate(t, dir)
 	return dir
+}
+
+// combinedOutputRetrySignal は mk が作るコマンドを実行する。t.Parallel のテストが同時に子プロセスを起こす負荷の下で、
+// macOS では子プロセス（git・sh）が稀に SIGSEGV で終わることがあるため、シグナルでの終了に限って作り直して数回やり直す。
+// 終了コードでの失敗はやり直さない。
+func combinedOutputRetrySignal(mk func() *exec.Cmd) ([]byte, error) {
+	var out []byte
+	var err error
+	for i := 0; i < 3; i++ {
+		out, err = mk().CombinedOutput()
+		var ee *exec.ExitError
+		if err == nil || !errors.As(err, &ee) {
+			return out, err
+		}
+		if ws, ok := ee.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() {
+			return out, err
+		}
+	}
+	return out, err
 }

@@ -71,7 +71,6 @@ func terminate(t *testing.T, cmdProc *os.Process, wait func() int) {
 }
 
 func TestServeFleet_FleetFlagListsWorkspacesInOrder(t *testing.T) {
-	t.Parallel()
 	a, b := initializedWorkspace(t), initializedWorkspace(t)
 	f := writeFleet(t, t.TempDir(), fleetJSON([2]string{"zeta", b}, [2]string{"alpha", a}))
 	cmd, port, _ := startServeChild(t, "--fleet", f)
@@ -126,7 +125,6 @@ func TestServeFleet_InvalidDefaultFileIsConfigInvalid(t *testing.T) {
 }
 
 func TestServeFleet_NoDeclarationBundlesOneWorkspaceFromCwd(t *testing.T) {
-	t.Parallel()
 	ws := initializedWorkspace(t)
 	sub := filepath.Join(ws, "deep", "dir")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -252,7 +250,6 @@ func TestServeFleet_InvalidFleetFileIsConfigInvalid(t *testing.T) {
 }
 
 func TestServeFleet_UnopenableWorkspaceDoesNotStopOthers(t *testing.T) {
-	t.Parallel()
 	good, empty, tooNew := initializedWorkspace(t), t.TempDir(), initializedWorkspace(t)
 	latest, err := core.LatestSchemaVersion()
 	if err != nil {

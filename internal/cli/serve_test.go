@@ -83,7 +83,6 @@ func startServeChildPort(t *testing.T, portArg, dir string, env []string, extra 
 }
 
 func TestServe_ListeningLineAndAddr(t *testing.T) {
-	t.Parallel()
 	cmd, port, _ := startServeChild(t)
 	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 2*time.Second)
 	if err != nil {
@@ -110,7 +109,6 @@ func TestServe_ListeningLineAndAddr(t *testing.T) {
 
 // AC-2: --port <n> を指定すると、そのポートで待ち受ける。
 func TestServe_ExplicitPortIsListenedOn(t *testing.T) {
-	t.Parallel()
 	l, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +132,6 @@ func TestServe_ExplicitPortIsListenedOn(t *testing.T) {
 }
 
 func TestServe_SignalsExitZero(t *testing.T) {
-	t.Parallel()
 	for name, sig := range map[string]syscall.Signal{"SIGTERM": syscall.SIGTERM, "SIGINT": syscall.SIGINT} {
 		t.Run(name, func(t *testing.T) {
 			cmd, port, _ := startServeChild(t)
@@ -195,7 +192,6 @@ func TestServe_BadPortIsUsageError(t *testing.T) {
 // serve を起動し、束ねたワークスペースのストアを実際に開かせた状態（API で ok を確認）で、
 // 同じワークスペースの create と status が成功し、server がロックや独自の行を作らない。
 func TestServe_CoexistsWithCreateAndStatus(t *testing.T) {
-	t.Parallel()
 	ws := initializedWorkspace(t)
 	cmd, port, _ := startServeChild(t, "--workspace", ws)
 	if got := fetchWorkspaces(t, port); len(got) != 1 || got[0].State != "ok" {
@@ -228,7 +224,6 @@ func TestServe_CoexistsWithCreateAndStatus(t *testing.T) {
 }
 
 func TestServe_ForbiddenOriginViaChild(t *testing.T) {
-	t.Parallel()
 	cmd, port, _ := startServeChild(t)
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
 	req.Header.Set("Origin", "http://evil.example")

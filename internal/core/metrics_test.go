@@ -111,12 +111,12 @@ func TestMetrics_EmptyStore(t *testing.T) {
 	}
 }
 
-// useJST はテストの間 time.Local を UTC+9 にする（UTC の実行環境でも、ローカルの日付と UTC の日付を区別する）。
+// useJST は time.Local が UTC+9 であること（TestMain が全テストの前に設定する）を確かめる。
 func useJST(t *testing.T) {
 	t.Helper()
-	old := time.Local
-	time.Local = time.FixedZone("JST", 9*3600)
-	t.Cleanup(func() { time.Local = old })
+	if _, off := time.Now().Zone(); off != 9*3600 {
+		t.Fatalf("time.Local offset = %d, want 32400 (TestMain sets UTC+9)", off)
+	}
 }
 
 func TestMetrics_PeriodTargetsAreInclusiveLocalDays(t *testing.T) {
