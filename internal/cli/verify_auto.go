@@ -70,6 +70,9 @@ func runVerifyAuto(a Args) (any, error) {
 		HeadGit:      git.New(),
 		Connectors:   conn,
 		CycleID:      cyc.ID,
+
+		MergeableRetries:  core.ReleaseMergeableRetries,
+		MergeableInterval: core.ReleaseMergeableInterval,
 	})
 
 	endResult := core.CycleResultCompleted

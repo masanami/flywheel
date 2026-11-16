@@ -94,6 +94,9 @@ type ApprovalPreview struct {
 	// ConditionsAfterRelease は、完了確認待ちへ進めた検証（T8）が「本番反映で満たされる見込み」と
 	// 区分した達成条件（#451）。承認で本番反映されると満たされる条件として要約に出す。無ければ nil。
 	ConditionsAfterRelease []string
+	// MergeabilityUnconfirmed は、完了確認待ちへ進めた検証（T8）が PR のマージ可否を確かめられないまま
+	// 進めたとき true。要約に「マージ可否は未確認」と出す。
+	MergeabilityUnconfirmed bool
 	// PendingReleases は、この完了の承認と同時に承認される未承認の release
 	// （D12）。PendingOperations の kind==release の部分集合。
 	PendingReleases []IrreversibleOperation
@@ -227,6 +230,9 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 				return err
 			}
 			preview.ConditionsAfterRelease = conds
+			if preview.MergeabilityUnconfirmed, err = loadMergeabilityUnconfirmed(ctx, tx, cid); err != nil {
+				return err
+			}
 			// 完了の承認の要約は、同時に承認される release と、同時には承認
 			// されない不可逆操作の一覧を含む（D12・A1）。
 			ops, err := loadOperations(ctx, tx, cid)

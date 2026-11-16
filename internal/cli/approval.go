@@ -470,6 +470,9 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 			}
 		}
 		writeConditionsAfterRelease(&b, p.ConditionsAfterRelease, view.OutlookFor(len(effect.Approved) > 0, p.HasApprovedRelease))
+		if p.MergeabilityUnconfirmed {
+			fmt.Fprintf(&b, "PR のマージ可否: %s\n", core.MergeabilityUnconfirmedNote)
+		}
 		if decision == core.ApprovalDecisionRejected {
 			// 差し戻しは未実行の release を取り消す（規則は core。取り消す release は「承認されない」側から外す）。
 			effect.NotApproved = withoutOperations(effect.NotApproved, p.ReleasesToWithdraw)

@@ -195,7 +195,7 @@ type UpstreamPullRequestChecks struct {
 	BaseSHA string
 	HeadSHA string
 	// Mergeable は REST の `mergeable`。nil は null（GitHub が計算中）、false はマージ不可、
-	// true はマージ可。`mergeable_state` は MergeableState に入れ、core が読むのは `behind` だけ。
+	// true はマージ可。`mergeable_state` は MergeableState に入れる。core は `behind` を BEHIND の判定に、mergeable=false を J5 の衝突の判定（judgment_j5_mergeability.go）に使い、J5 の区画へ両方を書く。
 	Mergeable *bool
 	// MergeCommitSHA は REST の `merge_commit_sha`（マージ済みの PR のマージのコミット。無ければ空）。
 	MergeCommitSHA string

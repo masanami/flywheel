@@ -476,6 +476,7 @@ export interface ApprovalSummary {
   direct_completion: DirectCompletion | null;
   done_criteria: string | null;
   kind: string;
+  mergeability_note: string;
   other_pending_operations: ApprovalOtherOperation[];
   pairs: StagePair[];
   plan: ApprovalPlan | null;
