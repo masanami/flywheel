@@ -21,6 +21,8 @@ import (
 type contractReleaseSource struct {
 	Reconcile UpstreamBranchSource
 	Decl      *ConnectorsDeclaration
+	// J4 は、親が答える待ち（decider が parent・kind が answer）を J4 へ回せるとき真（偽ならオーナーの保留へ写す）。
+	J4 bool
 }
 
 // defaultBranchPRs は arts の pr のうち、宣言のリポジトリで base が既定ブランチの open の PR を返す（重複は 1 件）。
@@ -71,7 +73,7 @@ func (rs *contractReleaseSource) defaultBranchPRs(ctx context.Context, arts []Co
 }
 
 // createReleaseForPR は PR 1 件の release を、同じ課題に同じ PR の release が無ければ登録する（plugin 形態の照合と共通）。
-// 同じ ref の release が既にある（閉じたものを含む）・課題が完了しているときは何もしない。
+// 同じ ref の release が既にある（閉じたものを含む。ただし完了の差し戻しで取り消した〔challenge_rejected〕ものは数えない）・課題が完了しているときは何もしない。
 func (s *Store) createReleaseForPR(ctx context.Context, challengeID string, runInt int64, pr UpstreamPullRequest) error {
 	ref := pr.URL
 	summary := pr.Title

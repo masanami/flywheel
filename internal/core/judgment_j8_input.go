@@ -39,7 +39,9 @@ type j8Occurrence struct {
 	Cause       string
 	Signal      string
 	ChallengeID int64
-	At          string
+	// ChallengeStatus は発生の課題のいまの状態。課題を引けなかったときは空（区画には「状態は未確認」と出す）。
+	ChallengeStatus Status
+	At              string
 }
 
 // j8KeyGroup は改修の鍵 1 組の発生。Count は組のすべての発生の件数、Details は新しい順の最大 5 件。
@@ -130,9 +132,10 @@ func loadJ8ContextTx(ctx context.Context, tx *sql.Tx, threshold int) (*j8Context
 // loadJ8Candidates は起動の件数に入りうる発生（見送りの抑えの前）を ID の昇順で返す。
 func loadJ8Candidates(ctx context.Context, tx *sql.Tx) ([]j8Candidate, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, challenge_id, kind, cause, layer, target, signal, created_at FROM occurrence
-		 WHERE handled IS NULL AND outcome = ? AND cause IS NOT NULL AND cause NOT IN (?, ?)
-		 ORDER BY id ASC`,
+		`SELECT o.id, o.challenge_id, c.status, o.kind, o.cause, o.layer, o.target, o.signal, o.created_at
+		 FROM occurrence o LEFT JOIN challenge c ON c.id = o.challenge_id
+		 WHERE o.handled IS NULL AND o.outcome = ? AND o.cause IS NOT NULL AND o.cause NOT IN (?, ?)
+		 ORDER BY o.id ASC`,
 		string(OccurrenceOutcomeBad), string(OccurrenceCausePerformance), string(OccurrenceCauseNone))
 	if err != nil {
 		return nil, err
@@ -141,10 +144,11 @@ func loadJ8Candidates(ctx context.Context, tx *sql.Tx) ([]j8Candidate, error) {
 	var out []j8Candidate
 	for rows.Next() {
 		var c j8Candidate
-		var layer, target, signal sql.NullString
-		if err := rows.Scan(&c.ID, &c.ChallengeID, &c.Kind, &c.Cause, &layer, &target, &signal, &c.At); err != nil {
+		var status, layer, target, signal sql.NullString
+		if err := rows.Scan(&c.ID, &c.ChallengeID, &status, &c.Kind, &c.Cause, &layer, &target, &signal, &c.At); err != nil {
 			return nil, err
 		}
+		c.ChallengeStatus = Status(nullStrValue(status))
 		c.layer, c.target = nullStrValue(layer), strings.TrimSpace(nullStrValue(target))
 		c.Signal = nullStrValue(signal)
 		out = append(out, c)
@@ -302,6 +306,31 @@ func loadJ8Improvements(ctx context.Context, tx *sql.Tx) ([]j8Improvement, error
 
 // --- 入力の組み立て ---
 
+// j8StatusLabel は課題の状態に、完了・取り下げ・未完了の別を添えた表記を返す。J8 が達成の条件で名指しする
+// 課題がまだ有効かを、状態の値の名前を知らなくても読めるようにする。
+func j8StatusLabel(st Status) string {
+	switch st {
+	case StatusDone:
+		return string(st) + "（完了）"
+	case StatusWithdrawn:
+		return string(st) + "（取り下げ）"
+	default:
+		return string(st) + "（未完了）"
+	}
+}
+
+// j8ChallengeRef は発生の明細の「課題」の欄の表記。課題の ID にいまの状態を添え、課題が無い・状態を
+// 引けなかったときは「状態は未確認」と添える。
+func j8ChallengeRef(id int64, st Status) string {
+	if id <= 0 {
+		return "なし（状態は未確認）"
+	}
+	if st == "" {
+		return formatChallengeID(id) + "（状態は未確認）"
+	}
+	return formatChallengeID(id) + "（状態: " + j8StatusLabel(st) + "）"
+}
+
 func j8Ptr(f *float64) any {
 	if f == nil {
 		return nil
@@ -354,7 +383,7 @@ func prepareJ8(jc *j8Context) []JudgmentDataSection {
 		fmt.Fprintf(&b, "- 層: %s / 対象: %s / 件数: %d\n", g.Layer, oneLine(g.Target), g.Count)
 		for _, o := range g.Details {
 			fmt.Fprintf(&b, "  - ID: %s / 種類: %s / 原因: %s / 兆候: %s / 課題: %s / 作成: %s\n",
-				formatOccurrenceID(o.ID), o.Kind, oneLine(o.Cause), oneLine(o.Signal), formatChallengeID(o.ChallengeID), o.At)
+				formatOccurrenceID(o.ID), o.Kind, oneLine(o.Cause), oneLine(o.Signal), j8ChallengeRef(o.ChallengeID, o.ChallengeStatus), o.At)
 		}
 	}
 	if len(jc.Groups) == 0 {
@@ -381,7 +410,7 @@ func prepareJ8(jc *j8Context) []JudgmentDataSection {
 
 	b.Reset()
 	for _, im := range jc.Improvements {
-		fmt.Fprintf(&b, "- ID: %s / 層: %s / 対象: %s / 状態: %s", formatChallengeID(im.ID), im.Layer, oneLine(im.Target), im.Status)
+		fmt.Fprintf(&b, "- ID: %s / 層: %s / 対象: %s / 状態: %s", formatChallengeID(im.ID), im.Layer, oneLine(im.Target), j8StatusLabel(im.Status))
 		switch {
 		case im.Compare != nil:
 			fmt.Fprintf(&b, " / 適用の時点: %s\n  適用の前: %s\n  適用の後: %s", im.Compare.AppliedAt,

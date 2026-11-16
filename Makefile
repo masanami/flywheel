@@ -94,7 +94,7 @@ lint:
 		echo "(see 'make print-golangci-lint-version' for the pinned version)"; \
 		exit 1; \
 	fi
-	golangci-lint run
+	golangci-lint run --allow-parallel-runners
 
 ## test: go test -race ./... が終了コード 0 で終わることを確認する。-timeout 20m はパッケージごとにかかる。テストの用意を速くした後（flywheel#567）の main の CI（Linux）の実測では、最も遅いパッケージでも約 4.2 分（internal/core 187〜252 秒、internal/cli 180〜222 秒）なので、20m で足りる。
 test:

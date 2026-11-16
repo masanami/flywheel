@@ -100,8 +100,8 @@ func (s *Store) createOperation(ctx context.Context, ch Channel, runID *int64, s
 		if skipDuplicate && in.Ref != nil {
 			var n int
 			if err := tx.QueryRowContext(ctx,
-				`SELECT COUNT(*) FROM operation WHERE challenge_id = ? AND kind = ? AND ref = ?`,
-				cid, string(kind), *in.Ref).Scan(&n); err != nil {
+				`SELECT COUNT(*) FROM operation WHERE challenge_id = ? AND kind = ? AND ref = ? AND NOT (state = ? AND closed_reason = ?)`,
+				cid, string(kind), *in.Ref, string(OperationStateClosed), string(ClosedReasonChallengeRejected)).Scan(&n); err != nil {
 				return err
 			}
 			if n > 0 {

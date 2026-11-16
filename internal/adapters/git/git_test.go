@@ -386,7 +386,11 @@ func TestAllGitCallsCarryExplicitGitDirAndWorkTreeAndNeverFetchOrClone(t *testin
 		if realPath(l.gitDir) == realPath(filepath.Join(other, ".git")) || realPath(l.workTree) == realPath(other) {
 			t.Errorf("git %s inherited the caller's GIT_DIR/GIT_WORK_TREE: %+v", l.args, l)
 		}
-		sub := strings.Fields(l.args)[0]
+		fields := strings.Fields(l.args)
+		for len(fields) > 2 && fields[0] == "-c" { // `-c k=v` を飛ばしてサブコマンドを見る
+			fields = fields[2:]
+		}
+		sub := fields[0]
 		if sub == "fetch" || sub == "clone" || sub == "pull" || sub == "reset" || sub == "clean" || sub == "checkout" {
 			t.Errorf("forbidden git subcommand %q was run: %+v", sub, l)
 		}

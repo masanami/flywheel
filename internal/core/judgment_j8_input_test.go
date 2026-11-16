@@ -303,7 +303,7 @@ func TestJ8Input_PastImprovementsNewestTenWithCompareOnlyWhenApplied(t *testing.
 		t.Errorf("compare differs from MetricsCompare: %v / %+v", err, want)
 	}
 	text := j8Section(t, jc, j8ImprovementsLabel)
-	if !strings.Contains(text, formatChallengeID(ids[10])+" / 層: prompt / 対象: T10 / 状態: done / 適用の時点: "+mAt(5)) ||
+	if !strings.Contains(text, formatChallengeID(ids[10])+" / 層: prompt / 対象: T10 / 状態: done（完了） / 適用の時点: "+mAt(5)) ||
 		!strings.Contains(text, "適用の前:") || !strings.Contains(text, "適用の後:") ||
 		strings.Contains(text, formatChallengeID(ids[0])+" ") {
 		t.Errorf("section = %s", text)
@@ -407,9 +407,9 @@ func TestJ8Input_DoneImprovementWithOpenReleaseShowsAppliedAtButNoComparison(t *
 	}
 	text := j8Section(t, jc, j8ImprovementsLabel)
 	for _, want := range []string{
-		formatChallengeID(executed) + " / 層: prompt / 対象: R / 状態: done / 適用の時点: " + mAt(6) + "（未実行の release があるため前後の指標は比べない）",
-		formatChallengeID(approved) + " / 層: prompt / 対象: A / 状態: done / 適用の時点: " + mAt(4) + "（未実行の release があるため前後の指標は比べない）",
-		formatChallengeID(none) + " / 層: prompt / 対象: N / 状態: done / 適用の時点: なし",
+		formatChallengeID(executed) + " / 層: prompt / 対象: R / 状態: done（完了） / 適用の時点: " + mAt(6) + "（未実行の release があるため前後の指標は比べない）",
+		formatChallengeID(approved) + " / 層: prompt / 対象: A / 状態: done（完了） / 適用の時点: " + mAt(4) + "（未実行の release があるため前後の指標は比べない）",
+		formatChallengeID(none) + " / 層: prompt / 対象: N / 状態: done（完了） / 適用の時点: なし",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("section lacks %q:\n%s", want, text)
@@ -460,5 +460,55 @@ func TestPrepareJ8_DefinitionsIncludeTheCompareApprovalCount(t *testing.T) {
 	}
 	if !strings.Contains(defs["approval_count"]["numerator"], "期間に記録した") {
 		t.Errorf("approval_count (period) definition changed: %v", defs["approval_count"])
+	}
+}
+
+func TestJ8StatusLabel(t *testing.T) {
+	for st, want := range map[Status]string{
+		StatusDone:       "done（完了）",
+		StatusWithdrawn:  "withdrawn（取り下げ）",
+		StatusInProgress: "in_progress（未完了）",
+	} {
+		if got := j8StatusLabel(st); got != want {
+			t.Errorf("j8StatusLabel(%s) = %q, want %q", st, got, want)
+		}
+	}
+}
+
+// #571: 発生の明細の各行の課題に、いまの状態（完了・取り下げ・未完了）を添える。実ストアで固定する。
+func TestJ8Input_DetailRowsCarryTheChallengeStatus(t *testing.T) {
+	s := newStoreForTest(t)
+	done := mChallenge(t, s, "done")
+	mexec(t, s, `UPDATE challenge SET status = 'done' WHERE id = ?`, done)
+	withdrawn := mChallenge(t, s, "withdrawn")
+	mexec(t, s, `UPDATE challenge SET status = 'withdrawn' WHERE id = ?`, withdrawn)
+	open := mChallenge(t, s, "open")
+	mexec(t, s, `UPDATE challenge SET status = 'in_progress' WHERE id = ?`, open)
+	j8Occ(t, s, done, j8Row{target: "A"})
+	j8Occ(t, s, withdrawn, j8Row{target: "B"})
+	j8Occ(t, s, open, j8Row{target: "C"})
+
+	text := j8Section(t, j8Load(t, s, 10), j8OccurrencesLabel)
+	for _, want := range []string{
+		"課題: " + formatChallengeID(done) + "（状態: done（完了））",
+		"課題: " + formatChallengeID(withdrawn) + "（状態: withdrawn（取り下げ））",
+		"課題: " + formatChallengeID(open) + "（状態: in_progress（未完了））",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("section lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+// #571: 課題が無い行・状態を引けなかった行は「状態は未確認」と出す。発生の課題は外部キーで必ず実在するため、
+// 実ストアではこの行を作れない。区画の組み立て（prepareJ8）に直接渡して固定する。
+func TestPrepareJ8_DetailRowWithoutChallengeStatusIsUnconfirmed(t *testing.T) {
+	jc := &j8Context{Metrics: &MetricsResult{}, Groups: []j8KeyGroup{{Layer: "prompt", Target: "T", Count: 2, Details: []j8Occurrence{
+		{ID: 1, Kind: "k", Cause: "context", ChallengeID: 7},
+		{ID: 2, Kind: "k", Cause: "context"},
+	}}}}
+	text := j8Section(t, jc, j8OccurrencesLabel)
+	if !strings.Contains(text, "課題: C-7（状態は未確認）") || !strings.Contains(text, "課題: なし（状態は未確認）") {
+		t.Errorf("section = %s", text)
 	}
 }

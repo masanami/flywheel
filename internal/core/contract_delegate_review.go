@@ -23,6 +23,12 @@ const contractRequestedKindReview = "review"
 // contractRequestedKindObserve は、見守るだけの待ち（保留にせず読み直す）の requested_action.kind。
 const contractRequestedKindObserve = "observe"
 
+// contractRequestedKindAnswer は回答を求める待ち。contractDeciderParent は親が答える相手（J4）。
+const (
+	contractRequestedKindAnswer = "answer"
+	contractDeciderParent       = "parent"
+)
+
 // hasReviewableArtifact は artifacts に、検証中へ進めるときに取り込む種類（pr・branch・commit）が 1 件でもあるか。
 func hasReviewableArtifact(arts []ContractArtifact) bool {
 	for _, a := range arts {

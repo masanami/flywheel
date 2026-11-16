@@ -93,6 +93,8 @@ type launchHistory struct {
 	Holds []holdRef
 	// Verifications は課題の J5 の run（id 昇順。全部の計画の版）。
 	Verifications []runRow
+	// J4Runs は課題の J4 の run（id 昇順。全部の計画の版）。
+	J4Runs []runRow
 }
 
 func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*launchHistory, error) {
@@ -153,6 +155,20 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 		}
 	}
 
+	j4ids, err := judgmentRunIDs(ctx, tx, challengeID, "J4")
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range j4ids {
+		r, err := loadRunByID(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		if r != nil {
+			h.J4Runs = append(h.J4Runs, *r)
+		}
+	}
+
 	hrows, err := tx.QueryContext(ctx,
 		`SELECT id, question, run_id, answer, answered_at, raised_at FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
@@ -190,6 +206,49 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 		h.Holds = append(h.Holds, ref)
 	}
 	return h, hrows.Err()
+}
+
+// judgmentRunIDs は課題の判断点 judgment の run の ID を昇順で返す。
+func judgmentRunIDs(ctx context.Context, tx *sql.Tx, challengeID int64, judgment string) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM run WHERE challenge_id = ? AND kind = 'judgment' AND judgment = ? ORDER BY id ASC`, challengeID, judgment)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// j4AnswerPlan は、委譲の run target の問いに J4 が全問答えた run（target より後で before より前。before が 0 なら上限なし）
+// のうち最後のものを、回答を渡す再開にして返す。無ければ nil。
+func (h *launchHistory) j4AnswerPlan(target runRow, before int64) *resumePlan {
+	var found *runRow
+	for i := range h.J4Runs {
+		r := h.J4Runs[i]
+		id := runIntID(r)
+		if id <= runIntID(target) || (before > 0 && id >= before) || r.Result != RunResultSucceeded {
+			continue
+		}
+		if _, ok := j4StoredAllAnswered(r.Output); ok {
+			found = &h.J4Runs[i]
+		}
+	}
+	if found == nil {
+		return nil
+	}
+	ds, _ := j4StoredAllAnswered(found.Output)
+	plan := &resumePlan{Kind: ResumeKindAnswer, Target: target, Answer: formatJ4Answers(ds)}
+	if qs := j4StoredQuestions(target.Output); len(qs) > 0 {
+		plan.Question = formatQuestionsHold(&DelegationReport{Questions: qs})
+	}
+	return plan
 }
 
 func runIntID(r runRow) int64 {
@@ -291,6 +350,13 @@ func (h *launchHistory) decideLaunch(planVersion, failureLimit int) (resume *res
 		return nil, nil
 	}
 
+	// 最後の委譲の run の問いに J4 が全問答えていて、まだ再開していなければ、回答を渡して再開する（保留は無い）。
+	if last := since[len(since)-1]; last.Result == RunResultSucceeded && last.SessionID != "" {
+		if plan := h.j4AnswerPlan(last, 0); plan != nil {
+			return plan, nil
+		}
+	}
+
 	// 連続失敗の数（枠超過の run は数えず、連続も切らない）。
 	count := 0
 	var last *runRow
@@ -338,6 +404,10 @@ func (h *launchHistory) decideLaunch(planVersion, failureLimit int) (resume *res
 			kind = ResumeKindBudget // 上限到達の後の再開が起動に失敗したら、同じ文面で起動し直す
 		}
 		plan := &resumePlan{Kind: kind, Target: *target}
+		// 失敗した起動が J4 の回答を渡す再開だったなら、同じ回答で起動し直す。
+		if jp := h.j4AnswerPlan(*target, runIntID(latest)); jp != nil && kind == ResumeKindInterrupted {
+			return jp, nil
+		}
 		// 失敗した起動が回答を渡す再開だったか: 再開元の run を原因とする回答済みの保留があるか。
 		for i := len(h.Holds) - 1; i >= 0; i-- {
 			hd := h.Holds[i]

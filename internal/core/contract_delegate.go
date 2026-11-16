@@ -189,16 +189,19 @@ type ContractStartInput struct {
 	WorkDir string
 	// Reconcile は成果物の PR の base と状態の取得（GET だけ）。release の作成に使う。nil なら release は扱わない。
 	Reconcile UpstreamBranchSource
+	// Judgment は J4 の起動の実行者。非 nil なら、start の直後に親の答えを待っていても保留にせず、次の状態の読みで J4 へ回す
+	// （nil ならオーナーの保留へ写す）。
+	Judgment JudgmentInvoker
 	// OnRunInserted は start の run をストアに記録した直後に呼ぶ（nil なら呼ばない。同時委譲数の数えの二重計上を避けるため）。
 	OnRunInserted func()
 }
 
 func (in ContractStartInput) releaseSource() *contractReleaseSource {
-	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl}
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil}
 }
 
 func (in ContractPollInput) releaseSource() *contractReleaseSource {
-	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl}
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil}
 }
 
 // ContractPollInput は Store.PollContractRuns の入力。
@@ -213,6 +216,10 @@ type ContractPollInput struct {
 	Reconcile UpstreamBranchSource
 	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。
 	WorkDir string
+	// Judgment は J4 の起動の実行者。非 nil なら、親の答えを待つ契約の run（decider が parent・kind が answer）を J4 へ回す
+	// （nil ならオーナーの保留へ写す）。Cycle は周の枠超過の共有（nil なら共有しない）。
+	Judgment JudgmentInvoker
+	Cycle    *JudgmentCycle
 }
 
 // ContractRunReport は start・status の 1 回の結果。

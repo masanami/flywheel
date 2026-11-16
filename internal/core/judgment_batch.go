@@ -55,6 +55,7 @@ var notStartedReasonValues = []NotStartedReason{
 	NotStartedReworkLimit,
 	NotStartedUpstreamFetchFailed,
 	NotStartedSerialized,
+	NotStartedPredictionLimit,
 	NotStartedWaitingExternal,
 	NotStartedPlanUnavailable,
 	NotStartedInProgress,
@@ -101,6 +102,8 @@ type JudgmentAutoItem struct {
 	// Note は人が読む補足（例: 計画は登録したが読んだ記録を付けられなかった理由）。
 	// JSON 出力の形には含めず、テキスト出力にだけ使う。空なら無し。
 	Note string
+	// j4Answered は、J4 が子の問いに全問答え、保留を作らなかったとき真（同じ周の再開に使う。出力に含めない）。
+	j4Answered bool
 }
 
 // JudgmentAutoResult は `--auto` の個別の操作の出力（items と not_started）。

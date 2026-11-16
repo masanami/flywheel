@@ -145,7 +145,7 @@ func TestJ5Prompt_HasHeadroomBelowLimit(t *testing.T) {
 //
 // self-review 指摘（round1, code-reviewer CONFIRMED）: 当初は J1（4096バイト）
 // の境界だけを検証しており、judgmentPromptLimit の J2〜J5 の値
-// （当時 8192・8192・4096・6144。J2 は #462 で 12288、J5 は #466 で 8192、#565 で 9216、#563 で 9728）を緩めても検出するテストが無かった。5ファイル
+// （当時 8192・8192・4096・6144。J2 は #462 で 12288、J5 は #466 で 8192、#565 で 9216、#563 で 9728、#654 で 10752）を緩めても検出するテストが無かった。5ファイル
 // 分をテーブル駆動で回す形に直した。
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
@@ -153,9 +153,9 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j2.md": 12288,
 		"j3.md": 8192,
 		"j4.md": 4096,
-		"j5.md": 9728,
+		"j5.md": 10752,
 		"j6.md": 6144,
-		"j8.md": 6144,
+		"j8.md": 8192,
 		"j9.md": 4096,
 	}
 
@@ -404,8 +404,8 @@ func TestInstructions_J8AsksForReductionAndMetricHoleCheck(t *testing.T) {
 			t.Errorf("Instructions(J8) lacks %q", want)
 		}
 	}
-	if len(got) > 6144 {
-		t.Errorf("Instructions(J8) is %d bytes, over 6144", len(got))
+	if len(got) > 8192 {
+		t.Errorf("Instructions(J8) is %d bytes, over 8192", len(got))
 	}
 }
 
@@ -427,6 +427,9 @@ func TestInstructions_J8CriteriaExecutableAndNoToolSpecificTerms(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J8) lacks %q", want)
 		}
+	}
+	if strings.Contains(got, "応答の本文") {
+		t.Errorf("Instructions(J8) must put the withheld evidence in the withheld field, not the response body")
 	}
 }
 
@@ -773,11 +776,34 @@ func TestInstructions_J5DescribesTheUnreviewedReportRule(t *testing.T) {
 		"ほかの未検証の申告",
 		"人による PR のレビューやマージの承認の待ち",
 		"直した後の再レビューは無い",
-		"保留の記録に、レビューの実施を確かめた人の回答（例: 親がレビューして問題なし）があるときも、この扱いをせず回答に従う",
+		"レビューの実施状況（実施・未実施・不明と、その根拠）の記載が無い・空のときは、不明として扱う",
+		"保留の記録に、レビューの実施を確かめた、またはレビュー無しで進めることを認めた人の回答（例: 親がレビューして問題なし・レビューを省いて進めてよい）があるときも、この扱いをせず回答に従う",
+		"その回答の後に来た最初の検証（同じ委譲の報告・同じ PR の head）だけで、差し戻しの後の新しい差分には効かせない",
+		"判断できないの理由が複数あるときは、問いは 1 つのまま、すべての理由をその 1 つの問いに並べる",
 		"満たしていないになるときはそちらを選び、差し戻しの指摘にレビューの実施を含める",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J5) lacks %q", want)
+		}
+	}
+}
+
+// #654: 委譲の指示文（J3 ブリーフの固定の節）は、報告にレビューの実施状況を必ず含め、空にしないことを求める。
+func TestBriefFixedSections_RequireReviewStatusInTheReport(t *testing.T) {
+	fixed, err := BriefFixedSections()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all string
+	for _, f := range fixed {
+		all += f.Body
+	}
+	for _, want := range []string{
+		"レビューの実施状況（実施・未実施・不明のどれかと、その根拠）。要約か確かめていないことに必ず書く。書かなければ、受け取った側は不明として扱う",
+		"レビューの実施状況（実施・未実施・不明と、その根拠）: 要約か確かめていないことに必ず書く",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("brief fixed sections lack %q", want)
 		}
 	}
 }
@@ -841,6 +867,27 @@ func TestJ2Prompt_ListsReplanSection(t *testing.T) {
 	for _, want := range []string{"「" + core.ReplanSectionLabel + "」", "前の計画より回答を優先して計画を作り直す"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J2) lacks %q", want)
+		}
+	}
+}
+
+// #571: j8.md は、達成の条件を対象のいまの中身と課題のいまの状態に照らし、満たし済みの項目を外すこと・
+// 区画に無い課題は「状態は未確認」と書くこと・全項目が満たし済みなら提案を出さないことを求める。
+func TestInstructions_J8CriteriaChecksCurrentState(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"満たし済みの項目は条件から外し",
+		"後を継いだ課題に読み替え",
+		"状態は未確認",
+		"その提案は出さない",
+		"見送りの欄に",
+		"明細の課題の ID と過去の改修課題の区画には、課題の状態が付き",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J8) lacks %q", want)
 		}
 	}
 }

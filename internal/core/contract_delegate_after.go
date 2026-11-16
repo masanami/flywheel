@@ -22,12 +22,14 @@ const (
 	contractWaitOwnerHold
 	// contractWaitReview は成果物のレビュー待ち。保留にせず、成果物を取り込んで課題を検証中へ進める。
 	contractWaitReview
+	// contractWaitParent は親が答える問い（decider が parent・kind が answer）。J4 が答えるか人へ上げる。
+	contractWaitParent
 )
 
 // contractWaitDestination は求められた操作の写し先を決める 1 か所。
-// kind が observe なら読み直すだけ。answer・approve は decider に依らずオーナーの保留へ写す:
-// human はもともとオーナーの承認、any は仕様に写し方が無いので安全側の人の承認、parent は子の問いを
-// 振り分ける判断点（J4）の宛先だが J4 が未実装の間は安全側でオーナーへ上げる（J4 ができたら parent だけをここで分ける）。
+// kind が observe なら読み直すだけ。decider が parent で kind が answer の待ちは、子の問いを振り分ける判断点（J4）へ回す
+// （contractWaitParent）。それ以外の answer・approve は decider に依らずオーナーの保留へ写す（human はもともとオーナーの承認、
+// any は仕様に写し方が無いので安全側の人の承認、parent でも approve は親が代わりに承認しない）。
 // review は、成果物（pr・branch・commit）があるときだけ検証中へ進める（decider は読まない）。成果物が無ければ、
 // 検証できないので他の求めと同じくオーナーの保留へ写す。
 func contractWaitDestination(ra *ContractRequestedAction, artifacts []ContractArtifact) contractWaitDest {
@@ -36,6 +38,10 @@ func contractWaitDestination(ra *ContractRequestedAction, artifacts []ContractAr
 	}
 	if ra.Kind == contractRequestedKindReview && hasReviewableArtifact(artifacts) {
 		return contractWaitReview
+	}
+	// resolvable_by が terminal の待ちは resume では解けないので、J4 の答え（resume で返す）へ回さずオーナーの保留へ写す。
+	if ra.Kind == contractRequestedKindAnswer && ra.Decider == contractDeciderParent && !resolvableByTerminal(ra.ResolvableBy) {
+		return contractWaitParent
 	}
 	return contractWaitOwnerHold
 }
@@ -127,7 +133,14 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 	}
 	switch rep.State {
 	case ContractStateWaiting:
-		switch contractWaitDestination(rep.RequestedAction, rep.Artifacts) {
+		dest := contractWaitDestination(rep.RequestedAction, rep.Artifacts)
+		if dest == contractWaitParent {
+			if rs != nil && rs.J4 {
+				return nil // J4 へ回す（pollOne の answerParentWait）。保留にしない
+			}
+			dest = contractWaitOwnerHold
+		}
+		switch dest {
 		case contractWaitReview:
 			return s.submitContractReview(ctx, rep, rs)
 		case contractWaitOwnerHold:
@@ -320,6 +333,10 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		if err := s.cancelOverBudget(ctx, in, row, connector, binding, planVersion, cycleID, rep); err != nil {
 			return nil, err
 		}
+	}
+	if !resume && in.Judgment != nil && rep.Result == RunResultSucceeded && !rep.Held && rep.State == ContractStateWaiting &&
+		contractWaitDestination(rep.RequestedAction, rep.Artifacts) == contractWaitParent {
+		return s.answerParentWait(ctx, in, row, connector, binding, planVersion, cycleID, rep)
 	}
 	if !resume && row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindObserve && stillObserving(rep) {
 		// オーナーの保留（人間対応待ち）の間は、接続ツールの run を進める resume を呼ばない。課題が完了（本番反映の後に ready を
@@ -517,7 +534,7 @@ func (s *Store) delegateViaContract(ctx context.Context, in DelegateInput, jc *J
 	}
 	rep, err := s.StartContractDelegation(ctx, ContractStartInput{
 		ChallengeID: dc.Challenge.ID, ConnectorID: dc.Connector.ID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl,
-		Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile, MaxBudgetUSD: microsToUSD(dc.ImplBudgetMicros + dc.ReviewBudgetMicros), OnRunInserted: adm.markInserted,
+		Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile, MaxBudgetUSD: microsToUSD(dc.ImplBudgetMicros + dc.ReviewBudgetMicros), Judgment: in.Judgment, OnRunInserted: adm.markInserted,
 	})
 	if err != nil {
 		if jc != nil && errors.Is(err, ErrBudgetExceeded) {
@@ -534,4 +551,74 @@ func (s *Store) delegateViaContract(ctx context.Context, in DelegateInput, jc *J
 		return nil, nil, err
 	}
 	return &JudgmentAutoItem{ChallengeID: rep.ChallengeID, RunID: rep.RunID, Result: rep.Result}, nil, nil
+}
+
+// answerParentWait は、契約の run が親の答えを待っている（decider が parent・kind が answer）とき、J4 を呼ぶ。
+// 全問に答えたら宣言の resume で答えを返し（選択肢があれば選んだ選択肢、無ければ文章）、保留は作らない。
+// 人へ上げる判定・J4 の失敗・再開の上限は、オーナーの保留（保留の問いの冒頭に理由）にする。課題が着手中でなければ何もしない。
+func (s *Store) answerParentWait(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, rep *ContractRunReport) (*ContractRunReport, error) {
+	if inProgress, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !inProgress {
+		return rep, err
+	}
+	ra := rep.RequestedAction
+	text := strings.TrimSpace(ra.Text)
+	if text == "" {
+		text = strings.TrimSpace(rep.Summary)
+	}
+	req := j4Request{
+		ChallengeID: rep.ChallengeID, Questions: []j4Question{{Text: text, Options: ra.Options}},
+		AgentDecl: in.AgentDecl, CycleID: in.CycleID, Invoker: in.Judgment, Cycle: in.Cycle,
+	}
+	if sm := strings.TrimSpace(rep.Summary); sm != "" {
+		req.Extra = []JudgmentDataSection{{Label: "接続ツールの実行の要約", Content: sm}}
+	}
+	res, err := s.runJ4(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	holdOwner := func(reason string) (*ContractRunReport, error) {
+		q := contractWaitingQuestion(rep.ExternalRunID, rep.Summary, ra, resumeCarriesAnswer(connector))
+		if reason != "" {
+			q = reason + "\n\n" + q
+		}
+		held, err := s.holdContractWait(ctx, rep, q)
+		rep.Held = held
+		return rep, err
+	}
+	if !res.Answered {
+		return holdOwner(res.Reason)
+	}
+	d := res.Decisions[0]
+	answer := contractAnswer{Choice: j4AnswerText(d)}
+	if d.Option != nil && len(ra.Options) > 0 {
+		answer = contractAnswer{Choice: *d.Option}
+		if !blankStr(d.Answer) {
+			answer.Note = strings.TrimSpace(*d.Answer)
+		}
+	}
+	command, err := fillContractArgs(connector.Commands.Resume, rep.ChallengeID, binding, row.ExternalRunID, answer)
+	if err != nil {
+		return holdOwner("親が答えたが、接続ツールへ答えを返す宣言の resume の引数を埋められなかった（" + err.Error() + "）。")
+	}
+	latest := *row
+	latest.State, latest.Summary, latest.CostMicros = rep.State, rep.Summary, usdToMicros(rep.CostTotalUSD)
+	latest.RequestedKind, latest.RequestedDecider, latest.RequestedText = ra.Kind, ra.Decider, ra.Text
+	workDir := existingContractWorkDir(row, in.WorkDir)
+	rrep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, &latest, "resume", command, planVersion, cycleID, "")
+	if err != nil {
+		return nil, err
+	}
+	if rrep.Result != RunResultSucceeded {
+		held, err := s.holdReclaimedContractStart(ctx, rrep.RunID, rrep.ChallengeID, contractResumeFailedQuestion(row.ExternalRunID, rrep.Result, rrep.Error))
+		rrep.Held = held
+		return rrep, err
+	}
+	// 答えを返した直後に同じ求めの waiting が返っても、その周では J4 を呼び直さない（次の周の読みで改めて扱う）。
+	if rrep.State == ContractStateWaiting && sameRequestedAction(&latest, rrep.RequestedAction) {
+		return rrep, nil
+	}
+	if err := s.afterContractRead(ctx, rrep, connector, in.releaseSource()); err != nil {
+		return nil, err
+	}
+	return rrep, nil
 }

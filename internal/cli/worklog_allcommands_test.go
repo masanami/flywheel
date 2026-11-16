@@ -451,9 +451,16 @@ var worklogCases = []worklogCase{
 			return []string{"reject", id, "--reason", "r"}
 		},
 		want: func(string) []wantActivity {
-			return []wantActivity{{"challenge", "C-1", "reject",
+			// 差し戻しは、その課題の未実行の本番反映を同じトランザクションで取り消す（OP-1・OP-2。ID の昇順）。
+			closeRelease := func(id string) wantActivity {
+				return wantActivity{"operation", id, "op_close",
+					map[string]any{"state": "pending"},
+					map[string]any{"state": "closed", "version": 2.0, "closed_reason": "challenge_rejected", "reason": "課題の完了が差し戻されたため、未実行の本番反映を取り消した"}}
+			}
+			return []wantActivity{closeRelease("OP-1"), closeRelease("OP-2"), {"challenge", "C-1", "reject",
 				map[string]any{"status": "awaiting_completion_approval"},
-				map[string]any{"approval_kind": "completion", "decision": "rejected", "reason": "r", "status": "in_progress", "target_version": 4.0, "version": 5.0}}}
+				map[string]any{"approval_kind": "completion", "decision": "rejected", "reason": "r", "status": "in_progress", "target_version": 4.0, "version": 5.0,
+					"withdrawn_releases": []any{"OP-1", "OP-2"}}}}
 		},
 	},
 	{

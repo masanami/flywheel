@@ -40,6 +40,22 @@ func TestContractWaitDestination_DoesNotReadText(t *testing.T) {
 	}
 }
 
+// decider が parent で kind が answer の待ちでも、terminal（閉集合の外の値を含む）なら J4（resume で答えを返す）へ回さず
+// オーナーの保留へ写す。answer・項目なしは今までどおり J4 へ回す。
+func TestContractWaitDestination_ParentAnswerTerminalGoesToOwnerHold(t *testing.T) {
+	for rb, want := range map[string]contractWaitDest{
+		"":         contractWaitParent,
+		"answer":   contractWaitParent,
+		"terminal": contractWaitOwnerHold,
+		"unknown":  contractWaitOwnerHold,
+	} {
+		got := contractWaitDestination(&ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "x", ResolvableBy: rb}, nil)
+		if got != want {
+			t.Errorf("resolvable_by=%q: dest = %v, want %v", rb, got, want)
+		}
+	}
+}
+
 // answer・項目なしの保留は、今までどおり resume で答えを返すと案内する。
 func TestContractWaitingQuestion_AnswerStillSaysResume(t *testing.T) {
 	for _, rb := range []string{"", "answer"} {

@@ -192,6 +192,9 @@ type ConnectorRepo struct {
 	// SerialJudgment は repos[].serial_judgment。true なら、同じリポジトリの 2 つの課題を同時に進めてよいかを
 	// 判断点（J9）が判断して、弱ければ並列にする。省略は false（両方が触るファイルがあれば直列、のまま）。
 	SerialJudgment bool
+	// ConflictExcludePaths は repos[].conflict_exclude_paths。衝突の判定（直列化グループ・J9）から外すパスの
+	// パターン。予測の出力の共有ファイルのうち当たるものを、重なりを数える前に除く。省略は空（外さない）。
+	ConflictExcludePaths []string
 }
 
 // ConnectorsDeclaration は .flywheel/connectors.json の中身
@@ -255,7 +258,7 @@ var operationKeys = map[string]bool{
 var cliCommandsKeys = map[string]bool{"start": true, "status": true, "resume": true, "cancel": true}
 var connectorRepoKeys = map[string]bool{
 	"name": true, "remote": true, "default_branch": true, "connector": true, "slots": true,
-	"merge_method": true, "serial_judgment": true,
+	"merge_method": true, "serial_judgment": true, "conflict_exclude_paths": true,
 }
 var connectorRepoSlotsKeys = map[string]bool{"provider": true, "paths": true, "base": true, "count": true}
 
@@ -630,6 +633,14 @@ func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 				return nil, fmt.Errorf("[%d].serial_judgment: %w", i, err)
 			}
 		}
+		if v, ok := rr["conflict_exclude_paths"]; ok {
+			if isJSONNull(v) {
+				return nil, fmt.Errorf("[%d].conflict_exclude_paths: must not be null", i)
+			}
+			if err := json.Unmarshal(v, &r.ConflictExcludePaths); err != nil {
+				return nil, fmt.Errorf("[%d].conflict_exclude_paths: %w", i, err)
+			}
+		}
 		if v, ok := rr["slots"]; ok {
 			// self-review 指摘（round 2）: "slots": null は「省略」と区別され
 			// ず、Slots がゼロ値のまま静かに通ってしまう。
@@ -807,6 +818,11 @@ func validateConnectorRepo(r ConnectorRepo, repoNames map[string]bool, connector
 	case MergeMethodSquash, MergeMethodMerge, MergeMethodRebase:
 	default:
 		return fmt.Errorf("%w: repo %q has invalid merge_method %q (want squash, merge or rebase)", ErrConfigInvalid, r.Name, r.MergeMethod)
+	}
+	for i, pat := range r.ConflictExcludePaths {
+		if err := validateExcludePattern(pat); err != nil {
+			return fmt.Errorf("%w: repo %q has invalid conflict_exclude_paths[%d] %q: %w", ErrConfigInvalid, r.Name, i, pat, err)
+		}
 	}
 	if r.Slots.Provider != "" && !slotsProviderValues[r.Slots.Provider] {
 		return fmt.Errorf("%w: repo %q has invalid slots.provider %q", ErrConfigInvalid, r.Name, r.Slots.Provider)
