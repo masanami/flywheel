@@ -79,9 +79,12 @@ type ApprovalSummary struct {
 	ConditionsAfterReleaseHeading string   `json:"conditions_after_release_heading"`
 	// DirectCompletion は、この完了確認待ちが親が直接行った完了の記録によるときだけ非 null（成果物の参照を
 	// 完了条件と並べて見せる。完了の検証は通っていない）。
-	DirectCompletion       *DirectCompletion        `json:"direct_completion"`
-	DoneCriteria           *string                  `json:"done_criteria"`
-	Kind                   string                   `json:"kind"`
+	DirectCompletion *DirectCompletion `json:"direct_completion"`
+	DoneCriteria     *string           `json:"done_criteria"`
+	Kind             string            `json:"kind"`
+	// MergeabilityNote は、検証が PR のマージ可否を確かめられないまま完了確認待ちへ進めたときだけ
+	// core.MergeabilityUnconfirmedNote（「マージ可否は未確認」）。それ以外は ""。CLI の要約の「PR のマージ可否」の行と同じ。
+	MergeabilityNote       string                   `json:"mergeability_note"`
 	OtherPendingOperations []ApprovalOtherOperation `json:"other_pending_operations"`
 	Pairs                  []StagePair              `json:"pairs"`
 	Plan                   *ApprovalPlan            `json:"plan"`
@@ -121,6 +124,9 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 	case core.ApprovalKindCompletion:
 		dc := p.DoneCriteria
 		s.DoneCriteria = &dc
+		if p.MergeabilityUnconfirmed {
+			s.MergeabilityNote = core.MergeabilityUnconfirmedNote
+		}
 		if p.DirectCompletion != nil {
 			d := FromDirectCompletion(*p.DirectCompletion)
 			s.DirectCompletion = &d

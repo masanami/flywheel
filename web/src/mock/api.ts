@@ -213,6 +213,7 @@ export function createMockApi(
               : null,
           done_criteria: m.c.done_criteria === "" ? null : m.c.done_criteria,
           kind,
+          mergeability_note: "",
           other_pending_operations: m.operations
             .filter((o) => o.state === "pending" && o.kind !== "release")
             .map((o) => ({ id: o.id, kind: o.kind, summary: o.summary })),
