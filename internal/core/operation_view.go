@@ -34,6 +34,10 @@ func fillOperationExecutionInfo(ctx context.Context, tx *sql.Tx, ops []Irreversi
 		if last != nil && last.Result != "" {
 			r := last.Result
 			ops[i].LastExecutionResult = &r
+			if last.Detail != "" {
+				d := last.Detail
+				ops[i].LastExecutionDetail = &d
+			}
 		}
 		if ops[i].ConsecutiveFailures, err = consecutiveFailures(ctx, tx, opID); err != nil {
 			return err

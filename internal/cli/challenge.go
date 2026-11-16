@@ -291,6 +291,14 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 			fmt.Fprintf(&b, " ← %s を置き換え", *op.SupersedesOperationID)
 		}
 		b.WriteString("\n")
+		// 取り消して（承認待ちへ戻して）人の判断を待っている操作は、直前の試行の結果と理由を出す（#658。上限で止めた理由を show で読めるように）。
+		if op.State == core.OperationStatePending && op.LastExecutionResult != nil && isCancelResult(*op.LastExecutionResult) {
+			reason := "-"
+			if op.LastExecutionDetail != nil {
+				reason = escapeControl(*op.LastExecutionDetail)
+			}
+			fmt.Fprintf(&b, "    直前の試行: %s（%s）\n", *op.LastExecutionResult, reason)
+		}
 	}
 	// GitHub Issue との対応（#56）も JSON と同じ項目を出す（m2 仕様 §食い違いの
 	// 表示「show は、対応のある課題について対応の記録…を出力する」）。
@@ -340,4 +348,10 @@ func textOrDash(v any) string {
 		return "-"
 	}
 	return fmt.Sprint(v)
+}
+
+// isCancelResult は、試行の結果が承認を取り消す結果（limit_reached・head_changed 等）か。
+func isCancelResult(r core.ExecutionResult) bool {
+	c, _ := r.Class()
+	return c == core.ExecutionClassCancel
 }

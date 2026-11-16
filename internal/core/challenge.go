@@ -149,6 +149,9 @@ type IrreversibleOperation struct {
 	MergeCommit *string
 	// LastExecutionResult は直前の試行（id が最大の行）の結果。試行が無い・終了していなければ nil。
 	LastExecutionResult *ExecutionResult
+	// LastExecutionDetail は直前の試行の詳細（limit_reached の理由の文など）。試行が無い・終了していない・詳細が空なら nil。
+	// show のテキストの表示だけが読む（JSON のキーには出さない）。
+	LastExecutionDetail *string
 	// ConsecutiveFailures は連続の回数（consecutiveFailures の導出）。
 	ConsecutiveFailures int
 	// WaitingSince は最新の承認の後の最初の試行の開始日時。承認済み（approved）の間だけ値を持つ。

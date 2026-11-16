@@ -106,6 +106,19 @@ func TestRelease_BehindUpdateLimitStopsAfterCumulativeUpdates(t *testing.T) {
 	if !strings.Contains(last.Detail, "既定ブランチが速く進み、取り込みが 3 回続いたため止めました") {
 		t.Errorf("detail = %q, want the behind-limit reason", last.Detail)
 	}
+	// show が読む課題の詳細にも、取り消した操作の直前の試行の理由が載る。
+	d, err := f.s.GetChallenge(context.Background(), formatChallengeID(f.cid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Operations) != 1 {
+		t.Fatalf("operations = %d, want 1", len(d.Operations))
+	}
+	op := d.Operations[0]
+	if op.LastExecutionResult == nil || *op.LastExecutionResult != ExecutionResultLimitReached ||
+		op.LastExecutionDetail == nil || *op.LastExecutionDetail != "既定ブランチが速く進み、取り込みが 3 回続いたため止めました" {
+		t.Errorf("show operation = result %v detail %v, want limit_reached with the behind-limit reason", op.LastExecutionResult, op.LastExecutionDetail)
+	}
 }
 
 // 人が承認し直した後（最新の承認より後）は、取り込みの累計を数え直す。
