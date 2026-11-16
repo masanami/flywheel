@@ -377,3 +377,49 @@ func TestStatus_WaitingExternalIsEmptyWithoutAVerifyingChallengeAndNeverCallsGH(
 		t.Errorf("status called gh without a verifying challenge: %v", got)
 	}
 }
+
+// withPRMergeability は ghChecksRoutes の PR の取得の応答（pulls/1）へ mergeable・mergeable_state を足す。
+// mergeableJSON は JSON の値（true・false・null）。
+func withPRMergeability(routes []fakeGHRoute, mergeableJSON, state string) []fakeGHRoute {
+	out := append([]fakeGHRoute(nil), routes...)
+	out[0].stdout = strings.Replace(out[0].stdout, `{"html_url"`, `{"mergeable":`+mergeableJSON+`,"mergeable_state":"`+state+`","html_url"`, 1)
+	return out
+}
+
+// #629: 偽の gh の PR の応答（mergeable=false・dirty）から、CLI の入口（verify --auto）→ adapter の取得 →
+// core の区画「PR のマージ可否」→ J5 の標準入力・J5 の判定（met）の置き換え → 課題が完了確認待ちに入らない、
+// までを 1 本で通す。core の偽の実装の単体試験だけで済ませない。
+func TestVerifyAuto_ConflictingPR_ReachesJ5StdinAndTheChallengeDoesNotAwaitApproval(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	id := newVerifyingForCase(t, ws, true)
+	withFakeGHRoutesOnPATH(t, withPRMergeability(ghChecksRoutes("open", checkRunsComplete), "false", "dirty"))
+	stdinLog := t.TempDir() + "/j5-stdin.log"
+	route := j5Route("met", nil, nil) // J5 が衝突を見落として met を返しても
+	route.StdinLogPath = stdinLog
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{route}, "")
+
+	doc := runJSON(t, ws, "verify", "--auto", id)
+	items := phaseOf(t, doc)["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items = %v", items)
+	}
+	if item := items[0].(map[string]any); item["result"] != "succeeded" || item["outcome"] != "not_met" || item["status"] != "in_progress" {
+		t.Errorf("item = %v, want not_met / in_progress", item)
+	}
+	show := runJSON(t, ws, "show", id)
+	if got := show["challenge"].(map[string]any)["status"]; got != "in_progress" {
+		t.Errorf("status = %v, want in_progress (not awaiting_completion_approval)", got)
+	}
+	if holds := show["holds"].([]any); len(holds) != 0 {
+		t.Errorf("holds = %v, want none (no question to a human)", holds)
+	}
+	in, err := os.ReadFile(stdinLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"PR のマージ可否", "mergeable=CONFLICTING / mergeStateStatus=DIRTY", "https://github.com/o/r/pull/1"} {
+		if !bytes.Contains(in, []byte(want)) {
+			t.Errorf("J5 stdin lacks %q", want)
+		}
+	}
+}
