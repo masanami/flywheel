@@ -10,6 +10,11 @@ import (
 	"github.com/masanami/flywheel/internal/view"
 )
 
+// runLockedMessage は、周（または別の run）がサイクルの排他を持っているため run を断ったときの表示。
+// 理由（周が実行中）と次にすること（周が終わってから打ち直す・その課題は周に任せる）を示す。
+const runLockedMessage = "周（flywheel cycle）または別の flywheel run が実行中のため、run を断りました（スロットの作業ツリーには触れていません）。" +
+	"次にすること: 周が終わってから flywheel run を打ち直すか、その課題の委譲は周に任せてください。"
+
 // runRun は `flywheel run [<C-ID>]` の実装（#102。docs/features/m3-invoker-delegation.md
 // §J3 ブリーフと委譲の起動）。宣言の読み込み・invoker・上流の取得・git の組み立て・周の開始と
 // 終了だけを行い、対象の選び方・意思決定者の判定・J3・スロットの割り当て・委譲の run の記録は
@@ -49,6 +54,10 @@ func runRun(a Args) (any, error) {
 		BudgetUSD: decl.CycleBudgetUSD,
 		Exclusive: true,
 	})
+	if errors.Is(err, core.ErrLocked) {
+		// 断った理由と次にすることを示す（コードは locked のまま）。
+		return nil, NewError(CodeLocked, runLockedMessage)
+	}
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}

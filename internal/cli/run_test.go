@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
@@ -512,8 +515,27 @@ func TestRun_CycleHoldsTheLock_LockedAndSlotUntouched(t *testing.T) {
 	coretest.InsertLock(t, ws, holder, int64(os.Getpid()), currentHost(t), nowStamp(), nowStamp())
 	orderLog := filepath.Join(t.TempDir(), "order.log")
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{delegateRoute("completed"), j3Route("b")}, orderLog)
+	// ストア上のスロット（空き・割り当て中・要確認）を用意し、呼ぶ前の状態と割り当て先を控える。
+	coretest.InsertSlot(t, ws, "direct-repo", "clone", filepath.Join(ws, "slot-d"), "idle", "")
+	coretest.InsertSlot(t, ws, "flywheel-repo", "clone", filepath.Join(ws, "slot-f"), "needs_attention", "dirty")
+	slotsBefore := listSlotsForTest(t, ws)
 
 	requireJSONErrorEnvelope(t, []string{"run", id, "--workspace", ws}, 1, CodeLocked)
+	// 断ったときの表示に、理由（周が実行中）と次にすること（周の後に打ち直す・周に任せる）が出る。
+	for _, args := range [][]string{{"run", id, "--workspace", ws, "--json"}, {"run", id, "--workspace", ws}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 1 {
+			t.Fatalf("args=%v exit=%d, want 1 (stderr=%s)", args, code, stderr.String())
+		}
+		for _, want := range []string{"実行中", "周が終わってから", "打ち直す", "周に任せて"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Errorf("args=%v stderr lacks %q: %s", args, want, stderr.String())
+			}
+		}
+	}
+	if got := listSlotsForTest(t, ws); !reflect.DeepEqual(got, slotsBefore) {
+		t.Errorf("slots in the store changed: %+v -> %+v", slotsBefore, got)
+	}
 
 	if got := readOrderLog(t, orderLog); len(got) != 0 {
 		t.Errorf("claude was started: %v", got)
@@ -553,8 +575,32 @@ func TestRun_HoldsTheLockWhileRunningAndReleasesAfterwards(t *testing.T) {
 	if _, found := coretest.CycleLockHolder(t, ws); !found {
 		t.Error("the lock is not held while run is delegating")
 	}
+	// run がロックを持っている間は、周（排他を取る BeginCycle）が locked で断られる。
+	st, err := core.OpenWorkspace(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.BeginCycle(context.Background(), core.BeginCycleInput{Trigger: "manual", BudgetUSD: 1, Exclusive: true}); !errors.Is(err, core.ErrLocked) {
+		t.Errorf("BeginCycle while run holds the lock: err = %v, want core.ErrLocked", err)
+	}
+	_ = st.Close()
 	<-done
 	if _, found := coretest.CycleLockHolder(t, ws); found {
 		t.Error("the lock is still held after run finished")
 	}
+}
+
+// listSlotsForTest はストア上のスロットの一覧（状態・割り当て先の run を含む）を返す。
+func listSlotsForTest(t *testing.T, ws string) []core.Slot {
+	t.Helper()
+	st, err := core.OpenWorkspace(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	slots, err := st.ListSlots(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return slots
 }
