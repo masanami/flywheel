@@ -90,7 +90,7 @@ M5 は、旧 claude-flywheel の run-cycle で周を回しているエージェ�
 | 旧側（Tom のワークスペース） | 写し先 | 写し方 |
 |---|---|---|
 | `challenge-sources.md`（取り込み元 `harness-repo-issues`・4 リポジトリ・`self-only`・`[masanami]`・`priority:*` のラベル） | `.flywheel/sources.json` | M2 §宣言ファイルの形。リポジトリは `owner/name` で書く（旧マーカーの外部キー `flywheel#176` には owner が無い＝M2 の未検証事項）【決定 M2 QP1 から導く】 |
-| `positions/harness.md` §5（接続ツール・対話前提の操作・子に決めさせてよい操作・人間へ上げる問いの種類 5 つ） | `.flywheel/connectors.json` | M3 §現行の宣言からの写し方の表【決定 M3 から導く】。flywheel への委譲は、当面 `plugin` 形態の `/claude-harness:impl`（案 A）で宣言する。ただし委譲の形の結論は案 B で、flywheel 側の実装が入るまでの暫定（§他のワークスペースの移行の「claude-harness 5.0 への更新との順番と、委譲の形」）【決定 M5P5・M5H12】 |
+| `positions/harness.md` §5（接続ツール・対話前提の操作・子に決めさせてよい操作・人間へ上げる問いの種類 5 つ） | `.flywheel/connectors.json` | M3 §現行の宣言からの写し方の表【決定 M3 から導く】。flywheel への委譲は、案 B の `form: cli` の接続ツール（`harness-cli`。`harness contract start|status|resume|cancel`）で宣言する。2026-11-16 に、暫定の `plugin` 形態（案 A）から切り替えた（§他のワークスペースの移行の「claude-harness 5.0 への更新との順番と、委譲の形」）【決定 M5P5・M5H12】 |
 | `positions/harness.md` のミッション・守備範囲・関連度の判定基準 | そのまま `positions/harness.md`、`agent.json` の `position_file` で指す | 【決定 M3H2 から導く】。§3・§5 の旧 run-cycle の手順の記述は §旧側にしか無い運用の知識の移し先 |
 | `repos.tsv`（4 リポジトリ）と `.flywheel/repos/<name>` の作業用クローン | `connectors.json` の `repos[]` と `slots` | `repos[]` は claude-harness・claude-flywheel・flywheel の 3 つ。claude-flywheel-board と Tom のワークスペース自身は入れない（Tom の `knowledge` の層の改修課題は Issue にとどまる＝M45H9 の C）【決定 M5P5】。既存のクローンをスロットに使い、クローンの作成と fetch は自動化しない（M3 §やらないこと） |
 | `.flywheel/cadence.json`（`execution_mode: native`・`reflect.every_n_cycles: 10`）と `CLAUDE.md` の費用ガード（委譲 1 回の上限 100 USD） | `.flywheel/agent.json` | 周の上限 300・`improve_threshold` 10（意味は「未処理の bad の発生 10 件」に変わる）・`max_run_budget_usd` 100【決定 M5P5】。`execution_mode` は写さない（新側は手元の実行だけ） |
@@ -222,7 +222,7 @@ M5 は、旧 claude-flywheel の run-cycle で周を回しているエージェ�
 
 **未測**: 人が決める止まり所（V8）の後に汎用の再開で run に戻れるかは、案 A でも案 B でも測っていない（案 A の 3 本で V8 は起きなかった）。止まり所を仕組んだ Issue で、オーナーと待ち合わせて別に測る。案 A を退ける根拠は 1・2 と 4 の前半（段を飛ばしうる）で、V8 には依らない。3 は案 A の観察済みの問題だが、観察が決定（2026-11-09）の後で、案 B 側も実機で未確認のため、決定の理由には加えない（決定の理由は 1・2 と 4 の前半のまま）。4 の後半（CI 待ちの二重）は harness の ticket ワークフロー側の性質で、案 B でも残る課題として別に扱う。ただし案 B の人の承認の経路（Q2=1）はこの測定に懸かっており、戻れないと分かれば見直す。
 
-**暫定**: flywheel の `form: cli` の委譲の実行は未実装なので、実装が入るまで Tom の宣言は `plugin` 形態の `/claude-harness:impl` のままとする（上の 1〜4 の制約を承知の暫定）。暫定の間、端末のない子が V8 の止まり所に当たると解けない（未測）。暫定を抜ける条件は、M3 の S4 の `form: cli` の委譲が入ること。S3 を暫定の `plugin` 形態のまま進めるか、S4 の実装を待つかは、S3 を実装対象にするときに決める。
+**暫定の終わり（2026-11-16）**: M3 の S4 の `form: cli` の委譲が入り、Tom の宣言を案 B（`harness-cli`）へ切り替えた。#664（PR #691）の後、実際の Issue 1 本（#509・PR #703）が、取り込みから本番反映の実行、run の終わり（`succeeded (merged)`）まで、親の手の補い無しに進んだ（記録は #447 のコメント）。S3 は案 B の形で進める。残っている手の補い: 差し戻しの理由が子に届かない masanami/claude-harness#377 の回避（PR へのコメント）と、端末が要るゲート（#631）。
 
 ### 旧 2 repo のアーカイブ [S4]【決定 2026-10-29 オーナー M5H4】
 
@@ -252,7 +252,7 @@ M5 は、旧 claude-flywheel の run-cycle で周を回しているエージェ�
 | 取り込みで、他の課題の `関連Issue` に束ねた Issue を取り込まない | 引き継がない。束ねた Issue があれば照らし合わせで期待の一覧に無い課題として出て、エージェントが取り下げるか assign を外す | M2 は束ねを持たない。Tom はいま束ねた Issue が 0 件（assign 済み 3 件＝台帳 3 件） |
 | 周の終わりの台帳・journal・記憶のパス指定のコミット（`cycle-commit.sh`。push しない） | 書き出しと記憶のコミットとして引き継ぐ（S1） | D10・M45P7 |
 | 関連リポジトリの作業用クローンの fetch（`sync-repos.sh`） | 引き継がない | 子が作業ブランチを `origin` の既定ブランチから切る（M3）。衝突の予測は手元の HEAD に対するもので古いことがある（M3 の仮定）。移した後に予測の古さが問題になれば課題にする |
-| 委譲の起動形 `harness run ticket`（flywheel の実装チケット。shadow の作業ツリー） | 引き継がない。flywheel への委譲は、当面 `plugin` 形態の `/claude-harness:impl` にする（暫定。結論は案 B＝M5H12） | 新しい側は、いまは `cli` 形態の接続ツールを委譲に使わない（実装が入るまでの理由。M5H12）【実コード確証 high: `internal/core/judgment_j2.go` が `cli` 形態の操作を拒む】 |
+| 委譲の起動形 `harness run ticket`（flywheel の実装チケット。shadow の作業ツリー） | 引き継がない。flywheel への委譲は、案 B の `form: cli` の接続ツール（`harness-cli`）で、flywheel が `harness contract` を直接起動する（M5H12。2026-11-16 に暫定の `plugin` 形態から切り替えた） | shadow の固定の作業ツリーと `harness run ticket` の直接の起動は使わない。契約の口で起動・状態の確認・再開・中止を扱う |
 | reflect の滞留の催促（周の数 10） | J8 の起動の件数（未処理の bad の発生 10 件）に置き換わる | M45H8 |
 | 受け箱 `handoff/` | 引き継がない。最後の旧周で空にし、`legacy/` へ移す | M45H7 |
 | 実行モード `container` | 引き継がない（Tom は `native`） | 新しい側のスロットは `clone`・`worktree` だけ（M3 S2） |
@@ -526,4 +526,4 @@ M5 の完了の目安（設計書 §17）のうち、「Tom が新しい flywhee
 - 他のワークスペースの古い形式の台帳を、いまの `ledger-index.rb` が読めること（S3 で確かめる）。
 - 既存の作業用クローン（`.flywheel/repos/<name>`）を新しい側のスロットとして、委譲の子が trust の確認なしに使えること（旧側は `trust-clone.sh` で承認していた）。
 - 案 B で PR の後に run が待つ段（`human-merge`〔観察・人〕等）と、flywheel の本番反映のマージとの噛み合い（案 A では `review` で待ったまま残ることを 3 件観察済み〔上の理由 3〕。案 B は #598 で、本番反映の後に flywheel が `commands.resume` で `ready` を返す流れが入った。harness がマージ済みを観測して `succeeded` で終わる側は claude-harness の契約に依存し、実機では未確認）
-- 人が決める止まり所（V8）の後、端末での `harness approve` の後に汎用の再開で run に戻れるか（案 A でも案 B でも未測。止まり所を仕組んだ Issue で、オーナーと待ち合わせて測る。M5H12）
+- 人が決める止まり所（V8）の後、端末での `harness approve` の後に汎用の再開で run に戻れるか（案 B で 2026-11-16 に 1 件観察: #658 の run の `review-human` のゲートをオーナーが端末の `harness approve` で解き、run が respond の段へ戻った。その後に flywheel の状態の読みで次の待ちまで続くかは、この観察の後に確かめる。M5H12）
