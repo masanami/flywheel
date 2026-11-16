@@ -114,9 +114,10 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 
 	// core のテストが、実際の周・委譲・検証の対象の選択で観測している値。
 	coreObservedReasons := map[string]string{
-		"failure_limit": "TestFailureLimit_ReachedHoldsWithKindAndCountAndReportsNotStarted (internal/core/delegate_resume_test.go)",
-		"rework_limit":  "TestRework_LimitIsDetectedInTheNextCycle_TwoStillLaunch (internal/core/judgment_j5_test.go)",
-		"serialized":    "TestPlan_RunningInSameGroup_Serialized_OtherGroupStarts (internal/core/delegate_plan_test.go)",
+		"failure_limit":    "TestFailureLimit_ReachedHoldsWithKindAndCountAndReportsNotStarted (internal/core/delegate_resume_test.go)",
+		"rework_limit":     "TestRework_LimitIsDetectedInTheNextCycle_TwoStillLaunch (internal/core/judgment_j5_test.go)",
+		"serialized":       "TestPlan_RunningInSameGroup_Serialized_OtherGroupStarts (internal/core/delegate_plan_test.go)",
+		"prediction_limit": "TestPlan_OverPredictionLimit_PredictsFirstTwenty_DefersRest (internal/core/delegate_plan_test.go)",
 		// 計画の版を持たない承認の行（作り直しが必要）は、core のテストが実際の対象の選択で観測する。
 		"plan_unavailable": "TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothingLaunched (internal/core/delegate_plan_approval_test.go)",
 		// release 以外・approved でない操作を指した op exec だけが出す（cycle の release の段は approved の release しか試さない）。
@@ -377,6 +378,8 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedReworkLimit"
 	case "serialized":
 		return "NotStartedSerialized"
+	case "prediction_limit":
+		return "NotStartedPredictionLimit"
 	case "plan_unavailable":
 		return "NotStartedPlanUnavailable"
 	case "not_executable":

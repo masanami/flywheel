@@ -23,6 +23,11 @@ import (
 // 表す（S2。M3P31）。
 const NotStartedSerialized NotStartedReason = "serialized"
 
+// NotStartedPredictionLimit は、そのリポジトリの実行中の課題と委譲の候補の合計が予測の上限
+// （maxPredictionIssues）を超えたため、起動の順で上限より後ろの候補をこの周では起動せず次の周へ
+// 回したことを表す。`cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
+const NotStartedPredictionLimit NotStartedReason = "prediction_limit"
+
 // ErrSerialized は、ID を指定した `run` の課題が、終了していない委譲の run を持つ課題と同じ
 // 直列化グループに入ったことを表す（M3P43。CLI の `serialized`）。
 var ErrSerialized = errors.New("core: the challenge is in the same serial group as a running delegation")
@@ -268,9 +273,7 @@ func (s *Store) predictRepo(ctx context.Context, in DelegateInput, repo Connecto
 			predictable++
 		}
 	}
-	if len(send) > maxPredictionIssues {
-		add(SerialReasonNotPredictable)
-	}
+	// 件数の上限は planDelegation が limitPredictionCandidates で先に適用するので、ここでは超えない。
 	if len(reasons) > 0 {
 		return repoPrediction{FailClosed: reasons}, nil
 	}
@@ -333,6 +336,33 @@ func (s *Store) predictRepo(ctx context.Context, in DelegateInput, repo Connecto
 	return rp, nil
 }
 
+// limitPredictionCandidates は、実行中の課題の件数と候補の件数の合計が予測の上限を超えるとき、実行中の課題を
+// 全部残したうえで、残りの枠に候補を起動の順（優先度・ID の昇順）で先頭から配り、配れなかった候補を理由つきの
+// NotStarted として返す。上限に収まるとき、および予測の口を呼ばないリポジトリ（予測の宣言が無い・
+// 呼び出し側が無い）では、何も回さない。
+func limitPredictionCandidates(connector *Connector, predictorAvailable bool, running []planRunning, cands []planCandidate) ([]planCandidate, []NotStarted) {
+	if connector.ConflictPrediction == nil || !predictorAvailable {
+		return cands, nil
+	}
+	if len(running)+len(cands) <= maxPredictionIssues {
+		return cands, nil
+	}
+	room := maxPredictionIssues - len(running)
+	if room < 0 {
+		room = 0
+	}
+	sorted := append([]planCandidate(nil), cands...)
+	sortCandidates(sorted)
+	var deferred []NotStarted
+	for _, c := range sorted[room:] {
+		deferred = append(deferred, NotStarted{
+			ChallengeID: c.ID, Reason: NotStartedPredictionLimit,
+			Detail: fmt.Sprintf("予測の上限（%d 件）を超えたため次の周へ回した（実行中 %d 件・候補 %d 件）", maxPredictionIssues, len(running), len(cands)),
+		})
+	}
+	return sorted[:room], deferred
+}
+
 func reasonIndex(r SerialGroupReason) int {
 	for i, x := range serialGroupReasonOrder {
 		if x == r {
@@ -389,6 +419,13 @@ func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []
 				continue
 			}
 			return nil, err
+		}
+		// 予測の上限を超える分は、この周では予測にも起動にもかけず次の周へ回す。
+		var deferred []NotStarted
+		cands, deferred = limitPredictionCandidates(connector, in.Predictor != nil, running[repo.Name], cands)
+		plan.notStarted = append(plan.notStarted, deferred...)
+		if len(cands) == 0 {
+			continue
 		}
 		pred, err := s.predictRepo(ctx, in, repo, connector, running[repo.Name], cands)
 		if err != nil {
@@ -866,6 +903,13 @@ func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Ch
 	result := &DelegateResult{SerialGroups: plan.serialGroups()}
 	g := plan.groupOf(ch.ID)
 	if g == nil {
+		// 予測の上限を超えて次の周へ回した課題は、起動せずその理由を返す。
+		for _, ns := range plan.notStarted {
+			if ns.ChallengeID == ch.ID && ns.Reason == NotStartedPredictionLimit {
+				result.NotStarted = append(result.NotStarted, ns)
+				return result, nil
+			}
+		}
 		// 委譲できない課題（承認済みの計画が宣言と合わない等）。従来どおりの検査でエラーにする。
 		item, ns, err := s.delegateOne(ctx, in, nil, ch, nil)
 		if err != nil {
