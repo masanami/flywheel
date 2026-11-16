@@ -6,8 +6,9 @@ package core
 //
 // 【決定 2026-09-28 親】（#83）: `--auto` の個別の操作（`classify --auto` 等）も
 // `cycle` 表に 1 行を作る（trigger は呼び出し元が渡す操作名。例:
-// "classify --auto"）。サイクルの排他ロックを取るのは `flywheel cycle`
-// （BeginCycleInput.Exclusive=true）だけで、個別の操作はロックを取らない
+// "classify --auto"）。サイクルの排他ロックを取るのは `flywheel cycle` と
+// `flywheel run`（BeginCycleInput.Exclusive=true。run はスロットの作業ツリーを
+// 切り替えるため周と同じ排他を取る）だけで、ほかの個別の操作はロックを取らない
 // （BeginCycleInput.Exclusive=false）。どちらも cycle 行を作ることで、
 // 予約額・既消費額の評価（§予算ガード）が同じ規則（cycle_id で束ねる）に乗る。
 //
@@ -103,10 +104,10 @@ type BeginCycleInput struct {
 	Trigger string
 	// BudgetUSD はこの周の上限額（USD）。0以下は ErrValidation。
 	BudgetUSD float64
-	// Exclusive が true なら、サイクルの排他ロックを取る（flywheel cycle が
-	// 使う）。false なら、ロックには触れずに cycle 行だけを作る（--auto の
-	// 個別の操作が使う。§サイクルの排他「個別の操作はサイクルのロックを
-	// 取らない」）。
+	// Exclusive が true なら、サイクルの排他ロックを取る（flywheel cycle と
+	// flywheel run が使う）。false なら、ロックには触れずに cycle 行だけを作る
+	// （--auto の個別の操作が使う。§サイクルの排他「run 以外の個別の操作は
+	// サイクルのロックを取らない」）。
 	Exclusive bool
 }
 
@@ -124,7 +125,7 @@ type BeginCycleInput struct {
 //  4. 新しい cycle 行を作り、その周を保持者としてロックを作る
 //
 // を行う。Exclusive=false のときは、ロックに一切触れず cycle 行だけを作る
-// （§サイクルの排他「個別の操作はサイクルのロックを取らない」。
+// （§サイクルの排他「run 以外の個別の操作はサイクルのロックを取らない」。
 // 同じ課題に対する二重の起動はストアの一意制約〈run の部分一意索引〉で
 // 防ぐ、という既存の規則をそのまま使う）。
 func (s *Store) BeginCycle(ctx context.Context, in BeginCycleInput) (*Cycle, error) {

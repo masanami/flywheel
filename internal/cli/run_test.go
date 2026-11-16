@@ -234,9 +234,9 @@ func TestRun_RunInProgress_ExitOneAndNothingStarted(t *testing.T) {
 	}
 }
 
-// 先に起動した課題は取り込み元の対応が無く Issue 番号を渡せないため、後の呼び出しは同じ直列化グループ
-// （fail-closed）に入り、委譲を起動せず serialized（終了コード 1）で終わる（AC-327・366）。
-func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsSerialized(t *testing.T) {
+// 先に起動した run が動いている間の 2 つ目の run は、サイクルの排他で locked（終了コード 1）になり、
+// 委譲を起動しない。
+func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *testing.T) {
 	ws := setupRunWorkspace(t)
 	a := newInProgressForRun(t, ws, nil)
 	b := newInProgressForRun(t, ws, nil)
@@ -266,18 +266,19 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsSerialized(t 
 	if results[0].code != 0 {
 		t.Errorf("first: exit=%d stderr=%s", results[0].code, results[0].stderr)
 	}
-	if results[1].code != 1 || !strings.Contains(results[1].stderr, `"serialized"`) {
-		t.Errorf("second: exit=%d stderr=%s, want exit 1 serialized", results[1].code, results[1].stderr)
+	// run は周と同じ排他を取るので、先の run が動いている間の 2 つ目の run は、スロットの割り当てに
+	// 進む前に locked で断られる（serialized には至らない）。
+	if results[1].code != 1 || !strings.Contains(results[1].stderr, `"locked"`) {
+		t.Errorf("second: exit=%d stderr=%s, want exit 1 locked", results[1].code, results[1].stderr)
 	}
 	if n := len(delegateRunsOf(t, ws)); n != 1 {
 		t.Errorf("delegate runs = %d, want 1", n)
 	}
 }
 
-// 衝突の予測で 2 課題が別のグループになったときは、後の呼び出しは同じ直列化グループに入らず、
-// 空きスロットが無い（他方のプロセスの run が占めている）ので待たずに slot_unavailable（終了コード 1）
-// で終わる（AC-281。fail-closed で同じグループになる上のテストの serialized は AC-327 が優先）。
-func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIsSlotUnavailable(t *testing.T) {
+// 衝突の予測で 2 課題が別のグループになる場合でも、動いている run があれば 2 つ目の run は
+// サイクルの排他で locked になる（スロットの割り当てには進まない）。
+func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIsLocked(t *testing.T) {
 	ws := setupRunWorkspace(t)
 	script := filepath.Join(t.TempDir(), "predict.sh")
 	// 共有ファイル・依存が無い予測（2 課題は別のグループになる）。
@@ -328,8 +329,8 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIs
 	if results[0].code != 0 {
 		t.Errorf("first: exit=%d stderr=%s", results[0].code, results[0].stderr)
 	}
-	if results[1].code != 1 || !strings.Contains(results[1].stderr, `"slot_unavailable"`) {
-		t.Errorf("second: exit=%d stderr=%s, want exit 1 slot_unavailable", results[1].code, results[1].stderr)
+	if results[1].code != 1 || !strings.Contains(results[1].stderr, `"locked"`) {
+		t.Errorf("second: exit=%d stderr=%s, want exit 1 locked", results[1].code, results[1].stderr)
 	}
 	if n := len(delegateRunsOf(t, ws)); n != 1 {
 		t.Errorf("delegate runs = %d, want 1", n)
@@ -497,5 +498,63 @@ func TestRun_DelegationFailureOccurrenceCarriesTheCycleID(t *testing.T) {
 	cycles := coretest.CycleIDsByTrigger(t, ws, "run")
 	if len(ids) != 1 || len(cycles) != 1 || ids[0] != cycles[0] {
 		t.Fatalf("occurrence cycle ids = %v, want the 'run' cycle %v", ids, cycles)
+	}
+}
+
+// run は周と同じ排他を取る: 周が動いている（生きた保持者がいる）間の run は、待たず locked（終了コード 1）で
+// 断られ、claude を起動せず、スロットの作業ツリー（HEAD・状態）にも触れない。保持者のロックは残る。
+func TestRun_CycleHoldsTheLock_LockedAndSlotUntouched(t *testing.T) {
+	ws := setupRunWorkspace(t)
+	id := newInProgressForRun(t, ws, nil)
+	slotHead := func(dir string) string { return slotGit(t, dir, "rev-parse", "HEAD") }
+	headBefore := slotHead(filepath.Join(ws, "slot-d"))
+	holder := coretest.InsertCycle(t, ws, "other-cycle", 300_000_000, nowStamp())
+	coretest.InsertLock(t, ws, holder, int64(os.Getpid()), currentHost(t), nowStamp(), nowStamp())
+	orderLog := filepath.Join(t.TempDir(), "order.log")
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{delegateRoute("completed"), j3Route("b")}, orderLog)
+
+	requireJSONErrorEnvelope(t, []string{"run", id, "--workspace", ws}, 1, CodeLocked)
+
+	if got := readOrderLog(t, orderLog); len(got) != 0 {
+		t.Errorf("claude was started: %v", got)
+	}
+	if got := slotHead(filepath.Join(ws, "slot-d")); got != headBefore {
+		t.Errorf("slot HEAD changed: %s -> %s", headBefore, got)
+	}
+	if st := slotGit(t, filepath.Join(ws, "slot-d"), "status", "--porcelain"); st != "" {
+		t.Errorf("slot worktree touched: %q", st)
+	}
+	if n := len(delegateRunsOf(t, ws)); n != 0 {
+		t.Errorf("delegate runs = %d, want 0", n)
+	}
+	if h, found := coretest.CycleLockHolder(t, ws); !found || h != holder {
+		t.Errorf("lock holder = %d (found=%v), want the original %d", h, found, holder)
+	}
+}
+
+// run は取った排他を解放する: 動いている間は trigger "run" の周が保持者で、終わった後は排他が残らず、
+// 続く cycle が locked にならない。
+func TestRun_HoldsTheLockWhileRunningAndReleasesAfterwards(t *testing.T) {
+	ws := setupRunWorkspace(t)
+	newInProgressForRun(t, ws, nil)
+	started := filepath.Join(t.TempDir(), "started")
+	route := delegateRoute("completed")
+	route.SleepFirstSeconds = 3
+	route.StartedFile = started
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{route, j3Route("b")}, "")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var stdout, stderr bytes.Buffer
+		run([]string{"run", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	}()
+	waitForFileWithTimeout(t, started, 30*time.Second)
+	if _, found := coretest.CycleLockHolder(t, ws); !found {
+		t.Error("the lock is not held while run is delegating")
+	}
+	<-done
+	if _, found := coretest.CycleLockHolder(t, ws); found {
+		t.Error("the lock is still held after run finished")
 	}
 }

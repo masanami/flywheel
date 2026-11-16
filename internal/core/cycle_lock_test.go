@@ -395,7 +395,7 @@ func TestEndCycle_DoesNotReleaseLockHeldByAnotherCycle(t *testing.T) {
 		t.Fatalf("BeginCycle(holder): %v", err)
 	}
 	// Exclusive=false: ロックには触れず、別の cycle 行だけを作る
-	// （§サイクルの排他「個別の操作はサイクルのロックを取らない」）。
+	// （§サイクルの排他「run 以外の個別の操作はサイクルのロックを取らない」）。
 	other, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "classify --auto", BudgetUSD: 1, Exclusive: false})
 	if err != nil {
 		t.Fatalf("BeginCycle(other, non-exclusive): %v", err)
