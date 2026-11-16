@@ -57,6 +57,25 @@ type ContractRequestedAction struct {
 	Text    string
 	// Options は求められた操作が示す選択肢（無ければ空）。
 	Options []string
+	// ResolvableBy は求められた操作を誰がどう解くか（任意。無ければ空）。answer は答えを resume で返せば解ける、
+	// terminal は接続ツールの外の端末で人が解く必要があり resume では解けない。閉集合の外の値はそのまま持ち、
+	// 扱いは resolvableByTerminal が決める。
+	ResolvableBy string
+}
+
+// 契約の requested_action.resolvable_by の値。
+const (
+	contractResolvableByAnswer   = "answer"
+	contractResolvableByTerminal = "terminal"
+	// ContractResolvableByInvalid は invoker が、文字列でない値・空文字の resolvable_by を渡すための値（閉集合の外。terminal として扱う）。
+	ContractResolvableByInvalid = "invalid"
+)
+
+// resolvableByTerminal は、求められた操作が resume では解けないものとして扱うべきか。
+// 項目が無い（空）・answer は今までどおり答えを resume で返す。それ以外（terminal と閉集合の外の値）は
+// 安全側に terminal として扱い、resume を送らず run を勝手に進めない。判定はこの値だけで行い、text は読まない。
+func resolvableByTerminal(resolvableBy string) bool {
+	return resolvableBy != "" && resolvableBy != contractResolvableByAnswer
 }
 
 // ContractArtifact は契約の artifacts の 1 要素。Kind は pr | branch | commit | other。
@@ -233,18 +252,20 @@ type contractRunRow struct {
 	MaxBudget     int64
 	// RequestedKind・RequestedDecider・RequestedText は最後に読んだ求められた操作（無ければ空）。
 	RequestedKind, RequestedDecider, RequestedText string
+	// RequestedResolvableBy は最後に読んだ求められた操作の resolvable_by（無ければ空）。
+	RequestedResolvableBy string
 	// WorkDir は start を実行した作業ディレクトリ（0023 より前に始めた run は空）。
 	WorkDir string
 }
 
 const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
-	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(work_dir, '') FROM contract_run`
+	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, '') FROM contract_run`
 
 func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, error) {
 	var r contractRunRow
 	var state string
 	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget,
-		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.WorkDir); err != nil {
+		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.RequestedResolvableBy, &r.WorkDir); err != nil {
 		return nil, err
 	}
 	r.State = ContractState(state)
@@ -817,9 +838,12 @@ func (s *Store) holdContractWithReason(ctx context.Context, runID, challengeID, 
 // artifacts の pr・branch・commit をこの run の成果物へ取り込む（1 回だけ。終わった契約の run は読まないため）。
 func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contractCall, st *ContractStatus, totalMicros int64, report *ContractRunReport) error {
 	now := formatTimestamp(s.currentTime())
-	var rk, rd, rt any
+	var rk, rd, rt, rb any
 	if ra := st.RequestedAction; ra != nil {
 		rk, rd, rt = ra.Kind, ra.Decider, ra.Text
+		if ra.ResolvableBy != "" {
+			rb = ra.ResolvableBy
+		}
 	}
 	var endedAt any
 	if st.State.Terminal() {
@@ -828,9 +852,9 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	if c.Existing == nil {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary,
-				requested_kind, requested_decider, requested_text, cost_usd, max_budget_usd, started_at, observed_at, ended_at, work_dir)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			c.ChallengeIDInt, c.Connector, st.RunID, c.RunIDInt, string(st.State), st.Summary, rk, rd, rt,
+				requested_kind, requested_decider, requested_text, requested_resolvable_by, cost_usd, max_budget_usd, started_at, observed_at, ended_at, work_dir)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			c.ChallengeIDInt, c.Connector, st.RunID, c.RunIDInt, string(st.State), st.Summary, rk, rd, rt, rb,
 			totalMicros, c.MaxMicros, now, now, endedAt, c.Launch.WorkDir)
 		if err != nil {
 			return err
@@ -838,9 +862,9 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	} else {
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE contract_run SET state = ?, summary = ?, requested_kind = ?, requested_decider = ?, requested_text = ?,
-				cost_usd = ?, observed_at = ?, ended_at = ?,
-				wait_hold_id = CASE WHEN ? = 'waiting' AND requested_kind IS ? AND requested_decider IS ? AND requested_text IS ? THEN wait_hold_id ELSE NULL END WHERE id = ?`,
-			string(st.State), st.Summary, rk, rd, rt, totalMicros, now, endedAt, string(st.State), rk, rd, rt, c.Existing.ID); err != nil {
+				requested_resolvable_by = ?, cost_usd = ?, observed_at = ?, ended_at = ?,
+				wait_hold_id = CASE WHEN ? = 'waiting' AND requested_kind IS ? AND requested_decider IS ? AND requested_text IS ? AND requested_resolvable_by IS ? THEN wait_hold_id ELSE NULL END WHERE id = ?`,
+			string(st.State), st.Summary, rk, rd, rt, rb, totalMicros, now, endedAt, string(st.State), rk, rd, rt, rb, c.Existing.ID); err != nil {
 			return err
 		}
 	}

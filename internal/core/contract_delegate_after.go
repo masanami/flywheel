@@ -50,8 +50,15 @@ func contractWaitingQuestion(runID, summary string, ra *ContractRequestedAction,
 		what = "レビュー"
 	}
 	var b strings.Builder
+	terminal := resolvableByTerminal(ra.ResolvableBy)
+	if terminal {
+		// 接続ツールの外で解く必要がある。何をするかを書いた text を逐語で先に案内する。
+		if t := strings.TrimSpace(ra.Text); t != "" {
+			b.WriteString("接続ツールの出力（text）: " + t + "\n")
+		}
+	}
 	fmt.Fprintf(&b, "接続ツールの run（%s）が%sを待っている（求めている相手: %s）。接続ツールの要約: %s\n", runID, what, ra.Decider, summary)
-	if t := strings.TrimSpace(ra.Text); t != "" {
+	if t := strings.TrimSpace(ra.Text); t != "" && !terminal {
 		b.WriteString("求められた操作: " + t + "\n")
 	}
 	if len(ra.Options) > 0 {
@@ -60,7 +67,9 @@ func contractWaitingQuestion(runID, summary string, ra *ContractRequestedAction,
 			fmt.Fprintf(&b, "  %d. %s\n", i+1, o)
 		}
 	}
-	if carriesAnswer {
+	if terminal {
+		b.WriteString("この求めは接続ツールの外の端末で人が解く必要があり、resume では解けない。解いてから回答する。回答しても resume は送らず、次の周で接続ツールの run の状態を読み直す。")
+	} else if carriesAnswer {
 		b.WriteString("回答すると、その文を接続ツールへ返して続ける。")
 	} else {
 		b.WriteString("宣言の resume は答えの差し込みを含まないので、回答の文は接続ツールへ渡らない。回答すると、再開の指示だけを接続ツールへ送る。")
@@ -105,7 +114,8 @@ func sameRequestedAction(row *contractRunRow, ra *ContractRequestedAction) bool 
 	if ra == nil {
 		return row.RequestedKind == ""
 	}
-	return row.RequestedKind == ra.Kind && row.RequestedDecider == ra.Decider && row.RequestedText == ra.Text
+	return row.RequestedKind == ra.Kind && row.RequestedDecider == ra.Decider && row.RequestedText == ra.Text &&
+		row.RequestedResolvableBy == ra.ResolvableBy
 }
 
 // afterContractRead は読めた状態に応じた課題への写しを行う: waiting は求められた操作に従って保留へ写し、
@@ -432,7 +442,10 @@ func (s *Store) loadContractAnswer(ctx context.Context, row *contractRunRow, che
 	if err = classifyReadWriteErr(err); err != nil || !found {
 		return "", false, err
 	}
-	if check != nil {
+	// resume では解けない求め（terminal）への答えは接続ツールへ返さない。結び付きだけを外し（同じ答えで周ごとに
+	// 読み直さない）、状態の確認（status）で run の進みを読み直す。
+	terminal := resolvableByTerminal(row.RequestedResolvableBy)
+	if check != nil && !terminal {
 		if err := check(a.String); err != nil {
 			return "", false, err
 		}
@@ -444,7 +457,7 @@ func (s *Store) loadContractAnswer(ctx context.Context, row *contractRunRow, che
 		if qerr != nil {
 			return qerr
 		}
-		if n, _ := res.RowsAffected(); n == 1 {
+		if n, _ := res.RowsAffected(); n == 1 && !terminal {
 			answer, resume = a.String, true
 		}
 		return nil
