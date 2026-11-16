@@ -267,7 +267,7 @@ func TestRelease_MovedHeadWithoutChecksMergesWhenApprovedHeadHadNone(t *testing.
 		t.Fatalf("result = %s, merges = %v, want merged on n1", item.Result, f.fake.mergeArgs)
 	}
 	at := f.attempts(t)
-	if got := at[len(at)-1].Detail; got != "merged with no checks on the updated head (the approved head had none either)" {
+	if got := at[len(at)-1].Detail; got != noChecksMergeDetail {
 		t.Errorf("merged attempt detail = %q, want it to say the merge had no checks", got)
 	}
 }
@@ -292,8 +292,53 @@ func TestRelease_MovedHeadWithoutChecksWaitsWhenApprovedHeadHadChecks(t *testing
 		if name == "read error" && (!strings.Contains(detail, "cannot read the checks of the approved head") || !strings.Contains(detail, "boom")) {
 			t.Errorf("%s: detail = %q, want a read-failure detail", name, detail)
 		}
-		if name == "had checks" && detail != "no checks on the updated head yet" {
+		if name == "had checks" && detail != waitDetailNoChecksYet {
 			t.Errorf("%s: detail = %q", name, detail)
+		}
+	}
+}
+
+// 接続先が GetCommitChecks を持たないときの待ちの detail は、チェックがまだ無い理由とも読み取りの失敗とも見分けられる。
+func TestRelease_MovedHeadWithoutChecksWaitDetailSaysConnectorUnsupported(t *testing.T) {
+	f, cmp := movedHeadFixture(t)
+	f.fake.pr.Checks = nil
+	o := f.opts()
+	o.Compare = cmp
+	if item := f.runWith(t, o); item.Result != ExecutionResultWaitingChecks || len(f.fake.mergeArgs) != 0 {
+		t.Fatalf("result = %s, merges = %v, want waiting_checks", item.Result, f.fake.mergeArgs)
+	}
+	at := f.attempts(t)
+	if got := at[len(at)-1].Detail; got != waitDetailApprovedChecksUnsupported {
+		t.Errorf("detail = %q, want %q", got, waitDetailApprovedChecksUnsupported)
+	}
+	if waitDetailApprovedChecksUnsupported == waitDetailNoChecksYet || strings.HasPrefix(waitDetailApprovedChecksUnsupported, waitDetailApprovedChecksUnreadable) {
+		t.Error("the three waiting reasons must be distinguishable")
+	}
+}
+
+// マージの結果を読めず次の試行で already_merged として閉じるときも、承認した head にチェックが無かったなら
+// チェック 0 件のマージの detail を付ける。承認した head にチェックがあった・読めないときは付けない。
+func TestRelease_AlreadyMergedWithoutChecksGetsTheNoChecksDetail(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cc   *commitChecksFake
+		want string
+	}{
+		"approved none": {&commitChecksFake{}, noChecksMergeDetail},
+		"had checks":    {&commitChecksFake{checks: []UpstreamCheck{{Name: "check", Status: "completed", Conclusion: "success"}}}, ""},
+		"read error":    {&commitChecksFake{err: errors.New("boom")}, ""},
+	} {
+		f, cmp := movedHeadFixture(t)
+		f.fake.pr = UpstreamPullRequestChecks{State: "merged", Base: "main", HeadSHA: "n1", MergeCommitSHA: "mc"}
+		tc.cc.fakeRelease = f.fake
+		o := f.opts()
+		o.Compare = cmp
+		o.Checks = tc.cc
+		if item := f.runWith(t, o); item.Result != ExecutionResultAlreadyMerged || len(f.fake.mergeArgs) != 0 {
+			t.Fatalf("%s: result = %s, merges = %v, want already_merged", name, item.Result, f.fake.mergeArgs)
+		}
+		at := f.attempts(t)
+		if got := at[len(at)-1].Detail; got != tc.want {
+			t.Errorf("%s: detail = %q, want %q", name, got, tc.want)
 		}
 	}
 }

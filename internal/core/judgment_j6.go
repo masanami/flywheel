@@ -660,7 +660,7 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 			if errors.Is(perr, ErrMemoryWriteRejected) {
 				return j6Invalid("memory: %s", strings.TrimPrefix(perr.Error(), ErrMemoryWriteRejected.Error()+": "))
 			}
-			return perr
+			return perr // 環境の失敗（ErrMemoryWriteEnvironment）はそのまま返す。呼び出し側が invalid_output にしない。
 		}
 		var written []memoryWritten
 		if plan != nil {
@@ -1003,6 +1003,15 @@ func (s *Store) learnOne(ctx context.Context, in J6AutoInput, jc *JudgmentCycle,
 	item := &JudgmentAutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
 		outcome, note, finalResult, err := s.finalizeJ6Output(ctx, in, res.RunID, cid, lc.Occurrences, res.StructuredOutput)
+		if err != nil && errors.Is(err, ErrMemoryWriteEnvironment) {
+			// 記憶の置き場を検査できなかった環境の失敗。出力は規則に反していないので、run は succeeded のまま
+			// invalid_output にせず（連続失敗に数えない）、何も書かずに次の周へ残す。
+			if individual {
+				return nil, nil, err
+			}
+			item.Note = "memory write environment failure: " + err.Error()
+			return item, nil, nil
+		}
 		if err != nil {
 			// 写像が硬いエラーで終わった run は、succeeded のままにせず失敗に数える（毎周の呼び直しを
 			// failure_limit で止める）。ID を指定した操作はエラーを返し、自動の選択は他の課題を続ける。

@@ -1508,8 +1508,9 @@ func TestLearnJ6_InvalidSlugReasonHasSinglePrefix(t *testing.T) {
 	}
 }
 
-// 理由つきで invalid_output にしても、run に既にある error は上書きしない。
-func TestInvalidateRunOutputWithReason_KeepsExistingError(t *testing.T) {
+// 理由つきで invalid_output にするとき、run に既にある error（成果物の保存失敗のメモ等）は消さず、
+// 後ろに区切りを入れて J6 の理由を足す。error が空なら理由だけを書く。
+func TestInvalidateRunOutputWithReason_ConcatenatesWithExistingError(t *testing.T) {
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1524,7 +1525,69 @@ func TestInvalidateRunOutputWithReason_KeepsExistingError(t *testing.T) {
 	if err := f.s.invalidateRunOutputWithReason(context.Background(), runID, "new reason"); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.j6Runs(t)[0].Error; got != "original failure" {
-		t.Errorf("run error = %q, want the existing error kept", got)
+	if got, want := f.j6Runs(t)[0].Error, "original failure; j6 invalid_output: new reason"; got != want {
+		t.Errorf("run error = %q, want %q", got, want)
+	}
+	f.exec(t, `UPDATE run SET error = '' WHERE id = ?`, testRunInt(t, runID))
+	if err := f.s.invalidateRunOutputWithReason(context.Background(), runID, "only reason"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.j6Runs(t)[0].Error; got != "only reason" {
+		t.Errorf("run error = %q, want only the reason when the error was empty", got)
+	}
+}
+
+// ID を指定した個別の学習では、環境の失敗はエラーで返り、run は invalid_output にならない。
+func TestLearnJ6_MemoryLstatPermissionErrorIndividualReturnsErrorWithoutInvalidating(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission errors cannot be produced as root")
+	}
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusDone)
+	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
+	f.inv.result = j6Out([]any{j6Cls(o1, "none", "none")}, nil, []any{j6Mem("create", "tacit", "alpha")}, nil)
+	if err := os.MkdirAll(f.memRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(f.memRoot, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(f.memRoot, 0o755) }()
+	if _, err := f.learn(t, idp(c)); !errors.Is(err, ErrMemoryWriteEnvironment) {
+		t.Fatalf("err = %v, want ErrMemoryWriteEnvironment", err)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM run WHERE result = 'invalid_output'`); n != 0 {
+		t.Errorf("invalid_output runs = %d, want 0", n)
+	}
+}
+
+// 記憶の置き場の Lstat が「無い」以外（権限エラー）で失敗したのは環境の失敗。run を invalid_output にせず、
+// 連続失敗に数えない（上限 2 を超えて繰り返しても、対象から外れない）。
+func TestLearnJ6_MemoryLstatPermissionErrorIsNotCountedAsFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission errors cannot be produced as root")
+	}
+	f := newJ6Fixture(t)
+	c := f.challenge(t, StatusDone)
+	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
+	f.inv.result = j6Out([]any{j6Cls(o1, "none", "none")}, nil, []any{j6Mem("create", "tacit", "alpha")}, nil)
+	if err := os.MkdirAll(f.memRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(f.memRoot, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(f.memRoot, 0o755) }()
+	for i := 0; i < 4; i++ {
+		res := f.mustLearn(t, nil)
+		if len(res.NotStarted) != 0 || len(res.Items) != 1 || res.Items[0].Result != RunResultSucceeded || !strings.Contains(res.Items[0].Note, "environment failure") {
+			t.Fatalf("round %d: %+v", i, res)
+		}
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM run WHERE result = 'invalid_output'`); n != 0 {
+		t.Errorf("invalid_output runs = %d, want 0", n)
+	}
+	if f.unclassified(t) != 1 {
+		t.Error("the occurrence must stay unclassified for the next round")
 	}
 }
