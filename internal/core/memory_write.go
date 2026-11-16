@@ -30,6 +30,15 @@ import (
 // invalid_output に写す。
 var ErrMemoryWriteRejected = errors.New("core: memory write rejected")
 
+// ErrMemoryWriteEnvironment は、記憶の置き場の検査が「無い」以外の I/O の失敗（権限エラー等。環境の失敗）で
+// 進めなかったことを表す。出力が規則に反したわけではないので ErrMemoryWriteRejected ではなく、
+// 呼び出し側は invalid_output にも連続失敗の回数にも数えない。
+var ErrMemoryWriteEnvironment = errors.New("core: memory write environment failure")
+
+func memoryEnvFailure(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrMemoryWriteEnvironment, fmt.Sprintf(format, args...))
+}
+
 // 記憶の書き込みの mode。
 const (
 	MemoryModeCreate = "create"
@@ -310,7 +319,7 @@ func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimi
 			// 接頭辞が名前の一部のファイル（experience-experience-….md）は、そのままで届くので変えない。
 			alt, ok, rerr := resolveAppendSlug(root, it, willCreate)
 			if rerr != nil {
-				return nil, false, nil, memoryReject("memory[%d]: append target cannot be inspected: %v", i, rerr)
+				return nil, false, nil, memoryEnvFailure("memory[%d]: append target cannot be inspected: %v", i, rerr)
 			}
 			if !ok {
 				dropped = append(dropped, it.Type+"-"+it.Slug+".md")
@@ -338,7 +347,7 @@ func planMemoryWrites(root memoryRoot, items []memoryItem, limit MemoryWriteLimi
 				return nil, false, nil, memoryReject("memory[%d]: %s is created twice", i, rel)
 			}
 			if exists, err := memoryFileExists(path); err != nil {
-				return nil, false, nil, memoryReject("memory[%d]: %s cannot be inspected: %v", i, rel, err)
+				return nil, false, nil, memoryEnvFailure("memory[%d]: %s cannot be inspected: %v", i, rel, err)
 			} else if exists {
 				return nil, false, nil, memoryReject("memory[%d]: %s already exists", i, rel)
 			}
@@ -454,7 +463,7 @@ func planMemoryIndex(root memoryRoot) (path string, orig []byte, exists bool, er
 		if os.IsNotExist(lerr) {
 			return p, nil, false, nil
 		}
-		return "", nil, false, memoryReject("index cannot be inspected: %v", lerr)
+		return "", nil, false, memoryEnvFailure("index cannot be inspected: %v", lerr)
 	}
 	resolved, rerr := filepath.EvalSymlinks(p)
 	if rerr != nil {

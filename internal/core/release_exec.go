@@ -503,11 +503,20 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 	}
 }
 
+// 承認した head にもチェックが無かったマージの detail と、取り込み後の head にチェックが無くて待つ 3 つの理由の detail。
+const (
+	noChecksMergeDetail                 = "merged with no checks on the updated head (the approved head had none either)"
+	waitDetailNoChecksYet               = "no checks on the updated head yet"
+	waitDetailApprovedChecksUnsupported = "cannot tell whether the approved head had checks: the connector does not support reading commit checks"
+	waitDetailApprovedChecksUnreadable  = "cannot read the checks of the approved head: "
+)
+
 // approvedHeadChecks は、承認した head のチェックの取得結果を 1 回の判定（mergeable の読み直しを含む）の中で使い回す入れ物。
 type approvedHeadChecks struct {
-	done bool
-	none bool
-	err  error
+	done        bool
+	none        bool
+	unsupported bool
+	err         error
 }
 
 // noChecks は、承認した head にチェックが 1 件も付いていなかったと確かめられたときだけ none=true を返す。
@@ -519,6 +528,7 @@ func (a *approvedHeadChecks) noChecks(ctx context.Context, src UpstreamCheckSour
 	a.done = true
 	cs, ok := src.(UpstreamCommitChecksSource)
 	if !ok {
+		a.unsupported = true
 		return false, nil
 	}
 	checks, err := cs.GetCommitChecks(ctx, repo, approvedHead)
@@ -566,7 +576,14 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 	if pr.State == string(artifactStateMerged) {
 		// 取り込みだけで動いた head（flywheel が取り込んでマージを依頼し、結果を読めなかった場合）も、承認した中身のマージ。
 		if pr.HeadSHA == approvedHead || movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) {
-			return releaseJudgment{result: ExecutionResultAlreadyMerged, observedHead: observed, mergeCommit: pr.MergeCommitSHA}
+			detail := ""
+			// マージの結果を読めず次の試行で閉じる経路でも、チェック 0 件のマージの detail を付ける（マージの判定は変えない）。
+			if pr.HeadSHA != approvedHead && len(pr.Checks) == 0 {
+				if none, _ := approved.noChecks(ctx, opts.Checks, repo, approvedHead); none {
+					detail = noChecksMergeDetail
+				}
+			}
+			return releaseJudgment{result: ExecutionResultAlreadyMerged, observedHead: observed, mergeCommit: pr.MergeCommitSHA, detail: detail}
 		}
 		return releaseJudgment{result: ExecutionResultMergedUnapproved, observedHead: observed}
 	}
@@ -605,12 +622,15 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 	// 承認した head にもチェックが 0 件だった（読めない場合は 0 件と見なさない）なら、何も見ていないのは承認の時点から同じなので待たない。
 	noChecksMerge := false
 	if moved && len(pr.Checks) == 0 {
-		none, err := approved.noChecks(ctx, opts.Checks, repo, approvedHead)
+		none, _ := approved.noChecks(ctx, opts.Checks, repo, approvedHead)
 		switch {
-		case err != nil:
-			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "cannot read the checks of the approved head: " + err.Error()}
+		case approved.err != nil:
+			// 取得に失敗した（キャッシュしたエラーを文言に使う）。
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailApprovedChecksUnreadable + approved.err.Error()}
+		case approved.unsupported:
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailApprovedChecksUnsupported}
 		case !none:
-			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "no checks on the updated head yet"}
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailNoChecksYet}
 		}
 		noChecksMerge = true
 	}
@@ -668,7 +688,7 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 	}
 	detail := ""
 	if noChecksMerge {
-		detail = "merged with no checks on the updated head (the approved head had none either)"
+		detail = noChecksMergeDetail
 	}
 	return releaseJudgment{mergeRequested: true, result: ExecutionResultMerged, observedHead: after.HeadSHA, mergeCommit: after.MergeCommitSHA, detail: detail}
 }

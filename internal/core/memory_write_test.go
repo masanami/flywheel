@@ -629,9 +629,9 @@ func TestWriteMemory_PrefixedAppendLstatErrorIsNotTreatedAsMissing(t *testing.T)
 	defer func() { _ = os.Chmod(root, 0o755) }()
 	plan, err := prepareMemoryWrite(ws, decl, []memoryItem{app}, memNow)
 	if err == nil {
-		t.Fatalf("err = nil, plan = %+v; want a rejection (the item must not be dropped)", plan)
+		t.Fatalf("err = nil, plan = %+v; want an environment failure (the item must not be dropped)", plan)
 	}
-	if !errors.Is(err, ErrMemoryWriteRejected) || !strings.Contains(err.Error(), "cannot be inspected") {
-		t.Errorf("err = %v, want a rejection saying the append target cannot be inspected", err)
+	if !errors.Is(err, ErrMemoryWriteEnvironment) || errors.Is(err, ErrMemoryWriteRejected) || !strings.Contains(err.Error(), "cannot be inspected") {
+		t.Errorf("err = %v, want an environment failure (not a rejection) saying the append target cannot be inspected", err)
 	}
 }
