@@ -32,7 +32,8 @@ const planConnectorsJSON = `{
     {"name": "other", "remote": "o/other", "default_branch": "main", "connector": "pc", "slots": {"provider": "clone", "paths": ["o1", "o2"]}},
     {"name": "solo", "remote": "o/solo", "default_branch": "main", "connector": "pc", "slots": {"provider": "clone", "paths": ["s1"]}},
     {"name": "plain", "remote": "o/plain", "default_branch": "main", "connector": "plain", "slots": {"provider": "clone", "paths": ["p1", "p2"]}},
-    {"name": "wt", "remote": "o/wt", "default_branch": "main", "connector": "pc", "slots": {"provider": "worktree", "base": "wt-base", "count": 2}}
+    {"name": "wt", "remote": "o/wt", "default_branch": "main", "connector": "pc", "slots": {"provider": "worktree", "base": "wt-base", "count": 2}},
+    {"name": "excl", "remote": "o/excl", "default_branch": "main", "connector": "pc", "conflict_exclude_paths": ["docs/**", "*.md"], "slots": {"provider": "clone", "paths": ["e1", "e2", "e3"]}}
   ]
 }`
 
@@ -1247,5 +1248,82 @@ func TestAdmitContract_YieldsOnlyTheSlotsEarlierWaitersTake(t *testing.T) {
 				t.Fatalf("err = %v, want ErrSlotUnavailable", err)
 			}
 		})
+	}
+}
+
+func TestPlan_ExcludedPathsOnly_ParallelGroups(t *testing.T) {
+	t.Parallel()
+	f := newPlanFixture(t)
+	a := f.candidate(t, "excl", "P1", 11)
+	b := f.candidate(t, "excl", "P1", 12)
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil, pairOf(11, 12, shared("docs/features/x.md"), shared("README.md")))
+	}
+	res := f.mustRunPlan(t)
+	if want := [][]string{{a}, {b}}; !reflect.DeepEqual(groupsOf(res), want) {
+		t.Fatalf("groups = %v, want %v", groupsOf(res), want)
+	}
+}
+
+func TestPlan_ExcludedPathsPlusOtherSharedFile_StillSerial(t *testing.T) {
+	t.Parallel()
+	f := newPlanFixture(t)
+	a := f.candidate(t, "excl", "P1", 11)
+	b := f.candidate(t, "excl", "P1", 12)
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil, pairOf(11, 12, shared("docs/x.md"), shared("a.go")))
+	}
+	res := f.mustRunPlan(t)
+	if want := [][]string{{a, b}}; !reflect.DeepEqual(groupsOf(res), want) {
+		t.Fatalf("groups = %v, want %v", groupsOf(res), want)
+	}
+	if !reflect.DeepEqual(res.SerialGroups[0].Reasons, []SerialGroupReason{SerialReasonSharedFiles}) {
+		t.Errorf("reasons = %v", res.SerialGroups[0].Reasons)
+	}
+}
+
+func TestPlan_ExcludedPaths_DoNotAffectOtherRepos_AndKeepUnknownAndDependency(t *testing.T) {
+	t.Parallel()
+	f := newPlanFixture(t)
+	// 宣言の無い repo は、同じパスでも従来どおり直列。
+	a := f.candidate(t, "multi", "P1", 11)
+	b := f.candidate(t, "multi", "P1", 12)
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil, pairOf(11, 12, shared("docs/x.md")))
+	}
+	res := f.mustRunPlan(t)
+	if want := [][]string{{a, b}}; !reflect.DeepEqual(groupsOf(res), want) {
+		t.Fatalf("groups = %v, want %v", groupsOf(res), want)
+	}
+	// 外すパスのある repo でも unknown の組は直列（fail-closed は変えない）。
+	f2 := newPlanFixture(t)
+	c := f2.candidate(t, "excl", "P1", 21)
+	d := f2.candidate(t, "excl", "P1", 22)
+	f2.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil, PredictedPair{Issues: [2]int{21, 22}, Status: predictPairUnknown})
+	}
+	res2 := f2.mustRunPlan(t)
+	if want := [][]string{{c, d}}; !reflect.DeepEqual(groupsOf(res2), want) {
+		t.Fatalf("unknown groups = %v, want %v", groupsOf(res2), want)
+	}
+}
+
+func TestPlan_ExcludedPaths_DependencyPairStillSerial(t *testing.T) {
+	t.Parallel()
+	f := newPlanFixture(t)
+	a := f.candidate(t, "excl", "P1", 31)
+	b := f.candidate(t, "excl", "P1", 32)
+	first := 31
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		p := pairOf(31, 32, shared("docs/x.md"))
+		p.DependencyFirst = &first
+		return predictionFor(in, nil, p)
+	}
+	res := f.mustRunPlan(t)
+	if want := [][]string{{a, b}}; !reflect.DeepEqual(groupsOf(res), want) {
+		t.Fatalf("groups = %v, want %v", groupsOf(res), want)
+	}
+	if !reflect.DeepEqual(res.SerialGroups[0].Reasons, []SerialGroupReason{SerialReasonDependency}) {
+		t.Errorf("reasons = %v", res.SerialGroups[0].Reasons)
 	}
 }

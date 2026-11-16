@@ -744,3 +744,56 @@ func TestLoadConnectorsDeclaration_MergeMethodClosedSet(t *testing.T) {
 		}
 	}
 }
+
+// --- conflict_exclude_paths ---
+
+func TestLoadConnectorsDeclaration_ConflictExcludePaths(t *testing.T) {
+	decl, err := loadRepoWithMergeMethod(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decl.Repos[0].ConflictExcludePaths) != 0 {
+		t.Errorf("default = %v, want empty", decl.Repos[0].ConflictExcludePaths)
+	}
+	decl, err = loadRepoWithMergeMethod(t, `, "conflict_exclude_paths": ["docs/**", "*.md", "a/**/b.txt", "x/[ab]?.go"]`)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if got := decl.Repos[0].ConflictExcludePaths; len(got) != 4 || got[0] != "docs/**" {
+		t.Errorf("paths = %v", got)
+	}
+	for _, bad := range []string{`null`, `"docs/**"`, `[1]`, `[null]`, `[""]`, `["/docs/**"]`, `["docs//x"]`, `["../x"]`, `["a/./b"]`, `["a**"]`, `["a/**b/c"]`, `["x/[a"]`, `["a\\b"]`} {
+		if _, err := loadRepoWithMergeMethod(t, `, "conflict_exclude_paths": `+bad); !errors.Is(err, ErrConfigInvalid) {
+			t.Errorf("conflict_exclude_paths %s: error = %v, want ErrConfigInvalid", bad, err)
+		}
+	}
+}
+
+func TestMatchExcludePattern(t *testing.T) {
+	cases := []struct {
+		pat, file string
+		want      bool
+	}{
+		{"docs/**", "docs/a.md", true},
+		{"docs/**", "docs/x/y/a.md", true},
+		{"docs/**", "docs", false},
+		{"docs/**", "src/docs/a.md", false},
+		{"*.md", "README.md", true},
+		{"*.md", "docs/README.md", false},
+		{"**/*.md", "README.md", true},
+		{"**/*.md", "a/b/README.md", true},
+		{"a/**/b.txt", "a/b.txt", true},
+		{"a/**/b.txt", "a/x/y/b.txt", true},
+		{"a/**/b.txt", "a/x/c.txt", false},
+		{"x/?.go", "x/a.go", true},
+		{"x/?.go", "x/ab.go", false},
+		{"**", "any/file", true},
+		{"x/[ab]?.go", "x/a1.go", true},
+		{"x/[ab]?.go", "x/c1.go", false},
+	}
+	for _, c := range cases {
+		if got := matchExcludePattern(c.pat, c.file); got != c.want {
+			t.Errorf("match(%q, %q) = %v, want %v", c.pat, c.file, got, c.want)
+		}
+	}
+}
