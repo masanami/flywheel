@@ -168,8 +168,18 @@ type ContractStartInput struct {
 	MaxBudgetUSD float64
 	// WorkDir は契約のコマンドの作業ディレクトリ。空なら課題のリポジトリの作業ディレクトリ（contractRepoWorkDir。決められなければ ErrSlotUnavailable）。
 	WorkDir string
+	// Reconcile は成果物の PR の base と状態の取得（GET だけ）。release の作成に使う。nil なら release は扱わない。
+	Reconcile UpstreamBranchSource
 	// OnRunInserted は start の run をストアに記録した直後に呼ぶ（nil なら呼ばない。同時委譲数の数えの二重計上を避けるため）。
 	OnRunInserted func()
+}
+
+func (in ContractStartInput) releaseSource() *contractReleaseSource {
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl}
+}
+
+func (in ContractPollInput) releaseSource() *contractReleaseSource {
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl}
 }
 
 // ContractPollInput は Store.PollContractRuns の入力。
@@ -180,6 +190,8 @@ type ContractPollInput struct {
 	ConnDecl    *ConnectorsDeclaration
 	Client      ContractClient
 	CycleID     string
+	// Reconcile は成果物の PR の base と状態の取得（GET だけ）。release の作成と置き換えに使う。nil なら release は扱わない。
+	Reconcile UpstreamBranchSource
 	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。
 	WorkDir string
 }
@@ -460,7 +472,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if err != nil {
 		return nil, err
 	}
-	if err := s.afterContractRead(ctx, rep, connector); err != nil {
+	if err := s.afterContractRead(ctx, rep, connector, in.releaseSource()); err != nil {
 		return nil, err
 	}
 	return rep, nil

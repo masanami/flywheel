@@ -390,16 +390,8 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 		}
 	}
 	for _, pr := range releasePRs {
-		ref := pr.URL
-		summary := pr.Title
-		if strings.TrimSpace(summary) == "" {
-			summary = pr.URL // 要約は空にできないので、タイトルの無い PR は URL を要約にする
-		}
-		_, cerr := s.createOperation(ctx, ChannelInvoker, &runIDInt, true, OperationInput{
-			ChallengeID: dc.Challenge.ID, Kind: string(OperationKindRelease), Summary: summary, Ref: &ref,
-		})
-		if cerr != nil && !errors.Is(cerr, errOperationDuplicate) && !errors.Is(cerr, ErrTerminalState) {
-			return nil, "", cerr
+		if err := s.createReleaseForPR(ctx, dc.Challenge.ID, runIDInt, pr); err != nil {
+			return nil, "", err
 		}
 	}
 
