@@ -146,7 +146,7 @@ func (s *Store) retryReconciliation(ctx context.Context, in DelegateInput, ch Ch
 		return nil, nil, err
 	}
 
-	status, note, err := s.applyReconciliation(ctx, dc, p.Run.ID, rec, RunResultSucceeded, report, in.CycleID)
+	status, note, err := s.applyReconciliation(ctx, dc, p.Run.ID, rec, RunResultSucceeded, report, in.CycleID, nil)
 	if err != nil {
 		return nil, nil, err
 	}

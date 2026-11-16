@@ -21,6 +21,8 @@ import (
 type contractReleaseSource struct {
 	Reconcile UpstreamBranchSource
 	Decl      *ConnectorsDeclaration
+	// J4 は、親が答える待ち（decider が parent・kind が answer）を J4 へ回せるとき真（偽ならオーナーの保留へ写す）。
+	J4 bool
 }
 
 // defaultBranchPRs は arts の pr のうち、宣言のリポジトリで base が既定ブランチの open の PR を返す（重複は 1 件）。

@@ -6,10 +6,13 @@ package core
 //   - 固定した SHA の PR の差分（データの区画）
 //   - 固定した SHA を取り出した一時の git worktree（J5 の作業ディレクトリ）
 //
-// 一時の worktree は、宣言の worktree のスロットの元のクローンから、ワークスペースの
+// 一時の worktree は、宣言の worktree のスロットの元のクローン（clone のスロットは paths の先頭の
+// クローン）から、ワークスペースの
 // .flywheel/worktrees/.j5-heads/<リポジトリ名>/<pid>-<ホスト>-<乱数>/ へ作る。主クローンの checkout も委譲の子のスロットも
-// 変えない。クローンのスロット（元のクローンを持たない）のリポジトリと、手元のクローンに
-// head のコミットが無い PR（flywheel は fetch しない）は取り出さず、そのことを注記して差分だけを渡す。
+// 変えない。手元のクローンに head のコミットが無い PR は、head の 1 コミットだけを一時の ref
+// （refs/flywheel/j5-heads/ の下）へ fetch して取り出す（#509。J5 の head を読むためだけの例外で、
+// 他の口は fetch しない）。一時の ref は検証が終わったら消す。fetch に失敗したときは取り出さず、
+// そのことを注記して差分だけを渡す。
 //
 // PR が複数あるときに取り出すのは 1 件（open を優先し、無ければマージ済みの最初の 1 件）で、
 // 差分はすべての PR について渡す。作業ディレクトリは 1 つしか持てないため。
@@ -44,11 +47,27 @@ const j5HeadsDirName = ".j5-heads"
 // 取り消された後でも行う。
 const j5HeadRemoveTimeout = time.Minute
 
-// HeadWorktreeGit は J5 の一時の worktree を作って消す口。実装は internal/adapters/git。clone は元の
-// クローンの絶対パス。どれも `git fetch`・`git clone` を実行しない。
+// j5HeadFetchTimeout は head の fetch（ネットワーク）に置く時間の上限。超えたら fetch できなかった扱いで、
+// 差分の区画だけで検証する。
+const j5HeadFetchTimeout = 5 * time.Minute
+
+// j5HeadRefPrefix は head の fetch 先の一時の ref の接頭辞。名前は <pid>-<ホスト>-<sha>（sweepJ5Heads が
+// 終了したプロセスのものを見分ける）。
+const j5HeadRefPrefix = "refs/flywheel/j5-heads/"
+
+// HeadWorktreeGit は J5 の一時の worktree と一時の ref を作って消す口。実装は internal/adapters/git。
+// clone は元のクローンの絶対パス。`git clone` は実行しない。`git fetch` を実行してよいのは FetchHead
+// だけ（どの PR を・いつ fetch するかは core が決める）。
 type HeadWorktreeGit interface {
 	// HasCommit は clone に sha のコミットがあるかを返す（無いことはエラーではなく false）。
 	HasCommit(ctx context.Context, clone, sha string) (bool, error)
+	// FetchHead は clone の origin から sha の 1 コミットだけを ref へ fetch する（他のブランチ・タグは
+	// 取らない）。失敗はエラーで返す。
+	FetchHead(ctx context.Context, clone, sha, ref string) error
+	// ListHeadRefs は clone の prefix の下の ref の完全な名前を返す。
+	ListHeadRefs(ctx context.Context, clone, prefix string) ([]string, error)
+	// DeleteHeadRef は clone の ref を消す（無ければ何もしない）。
+	DeleteHeadRef(ctx context.Context, clone, ref string) error
 	// AddHeadWorktree は path へ sha を detached で取り出した worktree を作る。
 	AddHeadWorktree(ctx context.Context, clone, path, sha string) error
 	// RemoveHeadWorktree は path の worktree を未コミットの変更ごと消し、clone の worktree の
@@ -65,7 +84,9 @@ type j5Head struct {
 	// DescriptionRead は、成果物の説明文（PR の本文）を 1 件でも取得できたか。
 	DescriptionRead bool
 	clone           string
-	git             HeadWorktreeGit
+	// ref は fetch した一時の ref。空なら fetch していない。
+	ref string
+	git HeadWorktreeGit
 }
 
 // removeJ5Head は一時の worktree を消す。呼び出し元の ctx が取り消された後でも、期限つきで行う。
@@ -75,11 +96,21 @@ func removeJ5Head(ctx context.Context, git HeadWorktreeGit, clone, path string) 
 	_ = git.RemoveHeadWorktree(rctx, clone, path)
 }
 
-// remove は一時の worktree を消す。消せなければ残りは次の取り出しの sweepJ5Heads が消すので、失敗を
-// 返さない（判定の記録は済んでいる）。
+// removeJ5HeadRef は一時の ref を消す。removeJ5Head と同じく、取り消された後でも期限つきで行う。
+func removeJ5HeadRef(ctx context.Context, git HeadWorktreeGit, clone, ref string) {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), j5HeadRemoveTimeout)
+	defer cancel()
+	_ = git.DeleteHeadRef(rctx, clone, ref)
+}
+
+// remove は一時の worktree と一時の ref を消す。消せなければ残りは次の取り出しの sweepJ5Heads が消すので、
+// 失敗を返さない（判定の記録は済んでいる）。
 func (h *j5Head) remove(ctx context.Context) {
 	if h.WorkDir != "" {
 		removeJ5Head(ctx, h.git, h.clone, h.WorkDir)
+	}
+	if h.ref != "" {
+		removeJ5HeadRef(ctx, h.git, h.clone, h.ref)
 	}
 }
 
@@ -148,6 +179,7 @@ func fetchPullRequestDiffs(ctx context.Context, src UpstreamDiffSource, targets 
 }
 
 // headClone は repo の PR の head を取り出す元のクローンの絶対パスと、宣言のリポジトリ名を返す。
+// worktree のスロットは元のクローン（slots.base）、clone のスロットは paths の先頭のクローン。
 // 取り出せないときは理由を返す。
 func (s *Store) headClone(conn *ConnectorsDeclaration, repo string) (clone, name, reason string) {
 	if conn != nil {
@@ -155,10 +187,13 @@ func (s *Store) headClone(conn *ConnectorsDeclaration, repo string) (clone, name
 			if !strings.EqualFold(r.Remote, repo) {
 				continue
 			}
-			if r.Slots.Provider != string(slotProviderWorktree) {
-				return "", "", "このリポジトリのスロットは元のクローンを持たない（委譲の子の作業用クローンは使わない）"
+			switch {
+			case r.Slots.Provider == string(slotProviderWorktree):
+				return filepath.Join(s.workspace, r.Slots.Base), r.Name, ""
+			case r.Slots.Provider == string(slotProviderClone) && len(r.Slots.Paths) > 0:
+				return filepath.Join(s.workspace, r.Slots.Paths[0]), r.Name, ""
 			}
-			return filepath.Join(s.workspace, r.Slots.Base), r.Name, ""
+			return "", "", "このリポジトリのスロットに、head を取り出すクローンが無い"
 		}
 	}
 	return "", "", "このリポジトリは接続の宣言に無い"
@@ -178,14 +213,35 @@ func sweepJ5Heads(ctx context.Context, git HeadWorktreeGit, clone, dir string) {
 	if err != nil {
 		return
 	}
-	host, _ := os.Hostname()
 	for _, e := range entries {
-		pidText, rest, _ := strings.Cut(e.Name(), "-")
-		pid, err := strconv.ParseInt(pidText, 10, 64)
-		if err != nil || !strings.HasPrefix(rest, j5HeadHostTag()+"-") || isRunProcessAlive(host, pid) {
-			continue
+		if j5HeadEntryOfDeadProcess(e.Name()) {
+			removeJ5Head(ctx, git, clone, filepath.Join(dir, e.Name()))
 		}
-		removeJ5Head(ctx, git, clone, filepath.Join(dir, e.Name()))
+	}
+}
+
+// j5HeadEntryOfDeadProcess は、一時の worktree・一時の ref の名前（<pid>-<ホスト>-…）が、このホストの
+// 終了したプロセスのものかを返す。
+func j5HeadEntryOfDeadProcess(name string) bool {
+	pidText, rest, _ := strings.Cut(name, "-")
+	pid, err := strconv.ParseInt(pidText, 10, 64)
+	if err != nil || !strings.HasPrefix(rest, j5HeadHostTag()+"-") {
+		return false
+	}
+	host, _ := os.Hostname()
+	return !isRunProcessAlive(host, pid)
+}
+
+// sweepJ5HeadRefs は、このホストの終了したプロセスの一時の ref を消す。
+func sweepJ5HeadRefs(ctx context.Context, git HeadWorktreeGit, clone string) {
+	refs, err := git.ListHeadRefs(ctx, clone, j5HeadRefPrefix)
+	if err != nil {
+		return
+	}
+	for _, ref := range refs {
+		if j5HeadEntryOfDeadProcess(strings.TrimPrefix(ref, j5HeadRefPrefix)) {
+			removeJ5HeadRef(ctx, git, clone, ref)
+		}
 	}
 }
 
@@ -236,13 +292,23 @@ func (s *Store) prepareJ5Head(ctx context.Context, in J5AutoInput, challengeID s
 		return failed(fmt.Errorf("core: malformed pull request url %q", pick.URL))
 	}
 	clone, repoName, reason := s.headClone(in.Connectors, repo)
+	var ref string
 	if reason == "" {
+		sweepJ5HeadRefs(ctx, in.HeadGit, clone)
 		has, err := in.HeadGit.HasCommit(ctx, clone, pick.HeadSHA)
 		if err != nil {
 			return failed(err)
 		}
 		if !has {
-			reason = "手元のクローンに head のコミットが無い"
+			ref = fmt.Sprintf("%s%d-%s-%s", j5HeadRefPrefix, os.Getpid(), j5HeadHostTag(), pick.HeadSHA)
+			fctx, cancel := context.WithTimeout(ctx, j5HeadFetchTimeout)
+			err := in.HeadGit.FetchHead(fctx, clone, pick.HeadSHA, ref)
+			cancel()
+			if err != nil {
+				removeJ5HeadRef(ctx, in.HeadGit, clone, ref)
+				ref = ""
+				reason = fmt.Sprintf("手元のクローンに head のコミットが無く、fetch もできなかった（%v）", err)
+			}
 		}
 	}
 	var checkout []string
@@ -251,9 +317,12 @@ func (s *Store) prepareJ5Head(ctx context.Context, in J5AutoInput, challengeID s
 	} else {
 		path, err := s.addJ5HeadWorktree(ctx, in.HeadGit, clone, repoName, pick.HeadSHA)
 		if err != nil {
+			if ref != "" {
+				removeJ5HeadRef(ctx, in.HeadGit, clone, ref)
+			}
 			return failed(err)
 		}
-		head.WorkDir, head.clone = path, clone
+		head.WorkDir, head.clone, head.ref = path, clone, ref
 		checkout = append(checkout, fmt.Sprintf("作業ディレクトリは %s の head（%s）を取り出した作業ツリーである。", pick.URL, pick.HeadSHA))
 		for _, pr := range targets {
 			if pr.URL != pick.URL {
