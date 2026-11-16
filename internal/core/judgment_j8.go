@@ -10,6 +10,8 @@ package core
 //	③ 提案ごとに、同じ改修の鍵の終端でない改修課題があればそこへ紐づけ、無ければ未分類の改修課題を起票し、
 //	   根拠の発生に課題の ID（C-<n>）を付ける。作業ログ（action=improvement）を残す
 //	④ 原因 performance の未処理の発生（入力を組み立てた時点のもの）に「待つ」（wait）を付ける
+//	⑤ 見送り（達成の条件がすべて満たし済みで出さなかった提案）があれば、J8 の run の作業ログ
+//	   （entity=run・action=improvement_withheld）に層・対象・根拠を残す。課題は作らない
 //
 // どこかが失敗すれば課題も印も作業ログも残らない。
 
@@ -35,6 +37,8 @@ type j8Mapped struct {
 	Linked []string
 	// Waited は「待つ」を付けた発生の ID。
 	Waited []string
+	// Withheld は作業ログに残した見送りの件数。
+	Withheld int
 }
 
 // j8DoneCriteria は改修課題の完了条件。層 prompt にだけ分量と禁止語の検査の文を足す。
@@ -80,7 +84,7 @@ func findOpenImprovement(ctx context.Context, tx *sql.Tx, layer OccurrenceLayer,
 // applyJ8 は検査を通った提案を 1 つのトランザクションで写す。allowed は J8 の入力の明細に載せた発生の ID、
 // waitIDs は入力を組み立てた時点の「原因 performance の未処理の発生」。出力がストアの事実に合わなければ
 // invalid=true（何も書かない）。originURL はワークスペースの origin（読めなければ空）。
-func (s *Store) applyJ8(ctx context.Context, runIDDisplay string, props []J8Proposal, allowed map[int64]bool,
+func (s *Store) applyJ8(ctx context.Context, runIDDisplay string, props []J8Proposal, withheld []J8Withheld, allowed map[int64]bool,
 	waitIDs []int64, decl *ConnectorsDeclaration, originURL string) (m j8Mapped, invalid bool, err error) {
 	runInt, ok := parseRunID(runIDDisplay)
 	if !ok {
@@ -155,6 +159,16 @@ func (s *Store) applyJ8(ctx context.Context, runIDDisplay string, props []J8Prop
 				return err
 			}
 			m.Waited = append(m.Waited, formatOccurrenceID(oid))
+		}
+		if len(withheld) > 0 {
+			items := make([]map[string]any, 0, len(withheld))
+			for _, w := range withheld {
+				items = append(items, map[string]any{"layer": string(w.Layer), "target": w.Target, "evidence": w.Evidence})
+			}
+			if err := rec.record("run", runInt, ActivityActionImprovementWithheld, nil, map[string]any{"withheld": items}); err != nil {
+				return err
+			}
+			m.Withheld = len(withheld)
 		}
 		return nil
 	})

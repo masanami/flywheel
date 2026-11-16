@@ -148,3 +148,60 @@ func TestAllJudgmentOutputClosedValues_IncludesJ8(t *testing.T) {
 		}
 	}
 }
+
+// #571: 任意の見送りの欄（withheld）。正常・欄なし（空を含む）・不正な形の 3 通り。
+func TestValidateJ8Withheld_Valid(t *testing.T) {
+	got, ok := validateJ8Withheld([]byte(`{"proposals":[],"withheld":[{"layer":"prompt","target":" a.md ","evidence":["C-3 が満たした","a.md の 2 節"]}]}`))
+	if !ok || len(got) != 1 || got[0].Layer != OccurrenceLayerPrompt || got[0].Target != "a.md" || len(got[0].Evidence) != 2 {
+		t.Fatalf("ok=%v got=%+v", ok, got)
+	}
+}
+
+func TestValidateJ8Withheld_AbsentOrEmptyIsAccepted(t *testing.T) {
+	for _, in := range []string{`{"proposals":[]}`, `{"proposals":[],"withheld":[]}`} {
+		got, ok := validateJ8Withheld([]byte(in))
+		if !ok || len(got) != 0 {
+			t.Errorf("%s: ok=%v got=%v", in, ok, got)
+		}
+		if _, ok := validateJ8Output([]byte(in)); !ok {
+			t.Errorf("%s: proposals rejected", in)
+		}
+	}
+}
+
+func TestValidateJ8Withheld_Invalid(t *testing.T) {
+	for name, w := range map[string]string{
+		"not an array":     `{}`,
+		"missing layer":    `[{"target":"a","evidence":["e"]}]`,
+		"layer none":       `[{"layer":"none","target":"a","evidence":["e"]}]`,
+		"unknown layer":    `[{"layer":"x","target":"a","evidence":["e"]}]`,
+		"blank target":     `[{"layer":"prompt","target":"  ","evidence":["e"]}]`,
+		"missing evidence": `[{"layer":"prompt","target":"a"}]`,
+		"empty evidence":   `[{"layer":"prompt","target":"a","evidence":[]}]`,
+		"blank evidence":   `[{"layer":"prompt","target":"a","evidence":[" "]}]`,
+		"too many": `[{"layer":"prompt","target":"a","evidence":["e"]},{"layer":"prompt","target":"b","evidence":["e"]},` +
+			`{"layer":"prompt","target":"c","evidence":["e"]},{"layer":"prompt","target":"d","evidence":["e"]}]`,
+	} {
+		if _, ok := validateJ8Withheld([]byte(`{"proposals":[],"withheld":` + w + `}`)); ok {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestJ8OutputSchema_HasOptionalWithheld(t *testing.T) {
+	var sc struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(j8OutputSchema(), &sc); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sc.Properties["withheld"]; !ok {
+		t.Fatalf("schema lacks withheld: %s", j8OutputSchema())
+	}
+	for _, r := range sc.Required {
+		if r == "withheld" {
+			t.Errorf("withheld must be optional")
+		}
+	}
+}

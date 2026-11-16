@@ -474,3 +474,41 @@ func TestJ8StatusLabel(t *testing.T) {
 		}
 	}
 }
+
+// #571: 発生の明細の各行の課題に、いまの状態（完了・取り下げ・未完了）を添える。実ストアで固定する。
+func TestJ8Input_DetailRowsCarryTheChallengeStatus(t *testing.T) {
+	s := newStoreForTest(t)
+	done := mChallenge(t, s, "done")
+	mexec(t, s, `UPDATE challenge SET status = 'done' WHERE id = ?`, done)
+	withdrawn := mChallenge(t, s, "withdrawn")
+	mexec(t, s, `UPDATE challenge SET status = 'withdrawn' WHERE id = ?`, withdrawn)
+	open := mChallenge(t, s, "open")
+	mexec(t, s, `UPDATE challenge SET status = 'in_progress' WHERE id = ?`, open)
+	j8Occ(t, s, done, j8Row{target: "A"})
+	j8Occ(t, s, withdrawn, j8Row{target: "B"})
+	j8Occ(t, s, open, j8Row{target: "C"})
+
+	text := j8Section(t, j8Load(t, s, 10), j8OccurrencesLabel)
+	for _, want := range []string{
+		"課題: " + formatChallengeID(done) + "（状態: done（完了））",
+		"課題: " + formatChallengeID(withdrawn) + "（状態: withdrawn（取り下げ））",
+		"課題: " + formatChallengeID(open) + "（状態: in_progress（未完了））",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("section lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+// #571: 課題が無い行・状態を引けなかった行は「状態は未確認」と出す。発生の課題は外部キーで必ず実在するため、
+// 実ストアではこの行を作れない。区画の組み立て（prepareJ8）に直接渡して固定する。
+func TestPrepareJ8_DetailRowWithoutChallengeStatusIsUnconfirmed(t *testing.T) {
+	jc := &j8Context{Metrics: &MetricsResult{}, Groups: []j8KeyGroup{{Layer: "prompt", Target: "T", Count: 2, Details: []j8Occurrence{
+		{ID: 1, Kind: "k", Cause: "context", ChallengeID: 7},
+		{ID: 2, Kind: "k", Cause: "context"},
+	}}}}
+	text := j8Section(t, jc, j8OccurrencesLabel)
+	if !strings.Contains(text, "課題: C-7（状態は未確認）") || !strings.Contains(text, "課題: なし（状態は未確認）") {
+		t.Errorf("section = %s", text)
+	}
+}

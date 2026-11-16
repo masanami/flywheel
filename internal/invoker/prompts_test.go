@@ -428,6 +428,9 @@ func TestInstructions_J8CriteriaExecutableAndNoToolSpecificTerms(t *testing.T) {
 			t.Errorf("Instructions(J8) lacks %q", want)
 		}
 	}
+	if strings.Contains(got, "応答の本文") {
+		t.Errorf("Instructions(J8) must put the withheld evidence in the withheld field, not the response body")
+	}
 }
 
 // #444: j2.md の達成条件の項は、達成の確認がこの課題の記録だけで判定できる条件にすることと、
@@ -857,6 +860,8 @@ func TestInstructions_J8CriteriaChecksCurrentState(t *testing.T) {
 		"後を継いだ課題に読み替え",
 		"状態は未確認",
 		"その提案は出さない",
+		"見送りの欄に",
+		"明細の課題の ID と過去の改修課題の区画には、課題の状態が付き",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J8) lacks %q", want)
