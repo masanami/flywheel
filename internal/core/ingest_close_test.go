@@ -29,6 +29,7 @@ func bindOpenChallenge(t *testing.T, s *Store, title, externalKey string) *Chall
 // --- AC-67: closed ---
 
 func TestIngest_CloseDetection_MissingFromListAndGetIssueClosedMarksClosed(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindOpenChallenge(t, s, "bound", "o/r#1")
@@ -85,6 +86,7 @@ func assertCloseCheckRecorded(t *testing.T, s *Store, ch *Challenge, want string
 // の写像を確かめる（2 つのサブテストは受入基準との対応を示すための名前）。
 
 func TestIngest_CloseDetection_NotFoundStatusesMarkMissing(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{"404", "410"} {
 		t.Run(status, func(t *testing.T) {
 			s := newStoreForTest(t)
@@ -114,6 +116,7 @@ func TestIngest_CloseDetection_NotFoundStatusesMarkMissing(t *testing.T) {
 // --- AC-69: 404・410 以外の失敗は変えず failed ---
 
 func TestIngest_CloseDetection_OtherFailureLeavesOpenAndMarksFailed(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindOpenChallenge(t, s, "bound", "o/r#1")
@@ -145,6 +148,7 @@ func TestIngest_CloseDetection_OtherFailureLeavesOpenAndMarksFailed(t *testing.T
 // --- AC-70: GetIssue が open を返せば変わらない ---
 
 func TestIngest_CloseDetection_StillOpenLeavesUnchanged(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindOpenChallenge(t, s, "bound", "o/r#1")
@@ -169,6 +173,7 @@ func TestIngest_CloseDetection_StillOpenLeavesUnchanged(t *testing.T) {
 // --- AC-71: closed／missing が open の一覧に現れたら reopen する ---
 
 func TestIngest_CloseDetection_ReappearingInOpenListReopens(t *testing.T) {
+	t.Parallel()
 	for _, initial := range []upstreamState{upstreamStateClosed, upstreamStateMissing} {
 		t.Run(string(initial), func(t *testing.T) {
 			s := newStoreForTest(t)
@@ -218,6 +223,7 @@ func TestIngest_CloseDetection_ReappearingInOpenListReopens(t *testing.T) {
 // 完了確認待ちのそれぞれ） ---
 
 func TestIngest_CloseDetection_DoesNotChangeChallengeStatus(t *testing.T) {
+	t.Parallel()
 	statuses := []Status{StatusUnclassified, StatusInProgress, StatusAwaitingCompletionApproval}
 	for _, status := range statuses {
 		t.Run(string(status), func(t *testing.T) {
@@ -248,6 +254,7 @@ func TestIngest_CloseDetection_DoesNotChangeChallengeStatus(t *testing.T) {
 // --- AC-74: 完了した課題の Issue が一覧から消えても GetIssue を呼ばず、対応の記録も変わらない ---
 
 func TestIngest_CloseDetection_DoneChallengeSkipsGetIssueAndBindingUnchanged(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindOpenChallenge(t, s, "bound", "o/r#1")
@@ -279,6 +286,7 @@ func TestIngest_CloseDetection_DoneChallengeSkipsGetIssueAndBindingUnchanged(t *
 // --- 宣言から外したリポジトリ・取り込み元の対応は取得も変更もしない ---
 
 func TestIngest_CloseDetection_UndeclaredRepoIsNotChecked(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	bindOpenChallenge(t, s, "bound", "o/other#1")
@@ -299,6 +307,7 @@ func TestIngest_CloseDetection_UndeclaredRepoIsNotChecked(t *testing.T) {
 // --- 一覧の取得に失敗したリポジトリの課題は変わらない ---
 
 func TestIngest_CloseDetection_ListFetchFailureSkipsCloseCheck(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	bindOpenChallenge(t, s, "bound", "o/r#1")
@@ -322,6 +331,7 @@ func TestIngest_CloseDetection_ListFetchFailureSkipsCloseCheck(t *testing.T) {
 // --- 候補は Issue 番号の昇順で確かめる ---
 
 func TestIngest_CloseDetection_CandidatesAreCheckedInAscendingIssueNumberOrder(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	bindOpenChallenge(t, s, "third", "o/r#30")
@@ -353,6 +363,7 @@ func TestIngest_CloseDetection_CandidatesAreCheckedInAscendingIssueNumberOrder(t
 // --- repo の一致は external_key の repo 部分と大文字小文字を無視して比べる ---
 
 func TestIngest_CloseDetection_RepoMatchIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	// external_key は API の正規の表記（大文字を含む）で記録されている想定。
@@ -377,6 +388,7 @@ func TestIngest_CloseDetection_RepoMatchIsCaseInsensitive(t *testing.T) {
 // 同時に作る。 ---
 
 func TestIngest_CloseDetection_DoneClosedChallengeReappearingIsNotReopened(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := mustCreateChallenge(t, s, "bound")

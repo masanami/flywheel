@@ -16,6 +16,7 @@ import (
 // store.go が既に定義している同じパッケージのヘルパー・定数を再利用する。
 
 func TestGetChallenge_SchemaVersion1Challenge_HasNilSourceBindingAfterUpgrade(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mustMkdirAll(t, filepath.Join(dir, flywheelDirName))
 	dbPath := storeDBPath(dir)

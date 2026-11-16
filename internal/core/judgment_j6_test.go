@@ -256,6 +256,7 @@ func idp(s string) *string { return &s }
 // --- 対象の選び方（AC: 完了か人間対応待ち・未分類の発生がある課題ごとに 1 回） ---
 
 func TestLearnJ6_AutoTargets_DoneAndAwaitingHumanWithUnclassified_OneCallEach(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c1 := f.challenge(t, StatusDone)
 	c2 := f.challenge(t, StatusAwaitingHuman)
@@ -297,6 +298,7 @@ func TestLearnJ6_AutoTargets_DoneAndAwaitingHumanWithUnclassified_OneCallEach(t 
 }
 
 func TestLearnJ6_ExplicitID_NotLearnable_NotStartedAndNoRun(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	inProgress := f.challenge(t, StatusInProgress)
 	f.occ(t, inProgress, "plan_rejected", "bad", nil)
@@ -322,6 +324,7 @@ func TestLearnJ6_ExplicitID_NotLearnable_NotStartedAndNoRun(t *testing.T) {
 }
 
 func TestLearnJ6_ExplicitID_Learnable_RunsOnce(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusAwaitingHuman)
 	o := f.occ(t, c, "delegation_stopped", "bad", nil)
@@ -335,6 +338,7 @@ func TestLearnJ6_ExplicitID_Learnable_RunsOnce(t *testing.T) {
 // --- 分類の写像 ---
 
 func TestLearnJ6_ClassificationsFillColumnsAndNoneIsHandled(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -419,6 +423,7 @@ func mustCID(t *testing.T, id string) int64 {
 // --- 足す発生 ---
 
 func TestLearnJ6_Added_RecordedAsJ6ObservedClassified_AndCountedInMetrics(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o := f.occ(t, c, "completion_approved", "good", nil)
@@ -516,6 +521,7 @@ func j6itoa(n int64) string {
 // --- 出力の検査（出力全体を invalid_output にして何も書かない） ---
 
 func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
+	t.Parallel()
 	type env struct {
 		o1, o2, other, classified string
 	}
@@ -628,6 +634,7 @@ func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 // 足す発生の根拠が解決できない項目（形が違う・存在しない・他の課題の ID）は、その項目だけ捨てる。
 // 分類・記憶・解決できた項目・フォローアップは写る。
 func TestLearnJ6_UnresolvableEvidence_DropsOnlyThatAddedItem(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	other := f.challenge(t, StatusDone)
@@ -696,6 +703,7 @@ func TestLearnJ6_UnresolvableEvidence_DropsOnlyThatAddedItem(t *testing.T) {
 
 // schema の根拠の pattern は core の検査と同じ文字列で、ID の形だけを通す。
 func TestJ6OutputSchema_EvidencePatternMatchesCoreCheck(t *testing.T) {
+	t.Parallel()
 	var sch map[string]any
 	if err := json.Unmarshal(j6OutputSchema(), &sch); err != nil {
 		t.Fatal(err)
@@ -726,6 +734,7 @@ func TestJ6OutputSchema_EvidencePatternMatchesCoreCheck(t *testing.T) {
 // --- 記憶の書き込み ---
 
 func TestLearnJ6_MemoryWritten_CreateAndAppend_LoggedWithHashes_NoGit(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o := f.occ(t, c, "completion_approved", "good", nil)
@@ -987,6 +996,7 @@ func TestLearnJ6_UndoRunsBeforeTheWriteLockIsReleased(t *testing.T) {
 // 発生を足す経路の失敗注入（クリティカル設計決定 4）: 出来事（作業ログ）が失敗すれば足す発生も残らず、
 // 発生が失敗すれば出来事（作業ログ・分類）も残らない。
 func TestLearnJ6_Added_OccurrenceAndWorkLogAreAtomic(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (*j6Fixture, string) {
 		f := newJ6Fixture(t)
 		c := f.challenge(t, StatusDone)
@@ -1026,6 +1036,7 @@ func TestLearnJ6_Added_OccurrenceAndWorkLogAreAtomic(t *testing.T) {
 // --- J6 自身の失敗 ---
 
 func TestLearnJ6_FailureCreatesNoOccurrence_AndFailureLimitExcludesTheChallenge(t *testing.T) {
+	t.Parallel()
 	for _, st := range []Status{StatusDone, StatusAwaitingHuman} {
 		t.Run(string(st), func(t *testing.T) {
 			f := newJ6Fixture(t)
@@ -1073,6 +1084,7 @@ func TestLearnJ6_FailureCreatesNoOccurrence_AndFailureLimitExcludesTheChallenge(
 }
 
 func TestLearnJ6_AwaitingHuman_AnsweredHoldRestartsTheCount(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusAwaitingHuman)
 	f.occ(t, c, "delegation_stopped", "bad", nil)
@@ -1092,6 +1104,7 @@ func TestLearnJ6_AwaitingHuman_AnsweredHoldRestartsTheCount(t *testing.T) {
 }
 
 func TestLearnJ6_SuccessResetsTheConsecutiveFailureCount(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1111,6 +1124,7 @@ func TestLearnJ6_SuccessResetsTheConsecutiveFailureCount(t *testing.T) {
 }
 
 func TestJ6Failure_IsNotAJudgmentFailedOccurrence(t *testing.T) {
+	t.Parallel()
 	// J1〜J5 の判断点の失敗は発生を作るが、J6 は作らない（許可リスト）。
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
@@ -1137,6 +1151,7 @@ func TestJ6Failure_IsNotAJudgmentFailedOccurrence(t *testing.T) {
 // --- 予算 ---
 
 func TestLearnJ6_CycleBudget_NotStarted(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1154,6 +1169,7 @@ func TestLearnJ6_CycleBudget_NotStarted(t *testing.T) {
 }
 
 func TestLearnJ6_UsesTheJ6BudgetFromTheDeclaration(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1168,6 +1184,7 @@ func TestLearnJ6_UsesTheJ6BudgetFromTheDeclaration(t *testing.T) {
 // --- 入力 ---
 
 func TestLearnJ6_Input_SectionsAndMemoryIndexPath(t *testing.T) {
+	t.Parallel()
 	d := newDelegateFixture(t)
 	f := newJ6FixtureOn(t, d.s)
 	c := d.newInProgress(t, "learn input", "P1", planSpec(nil))
@@ -1219,6 +1236,7 @@ func TestLearnJ6_Input_SectionsAndMemoryIndexPath(t *testing.T) {
 }
 
 func TestLearnJ6_InvokerUnavailable_ChangesNothing(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1232,6 +1250,7 @@ func TestLearnJ6_InvokerUnavailable_ChangesNothing(t *testing.T) {
 }
 
 func TestLearnJ6_RejectsBadInput(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	in := f.input("Y-1", nil)
 	in.Invoker = nil
@@ -1246,6 +1265,7 @@ func TestLearnJ6_RejectsBadInput(t *testing.T) {
 
 // J6 の実行中に同じ課題へ足された発生は、渡していないので「抜け」にならず、次の learn に残る。
 func TestLearnJ6_OccurrenceAddedDuringTheRun_StaysForTheNextLearn(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1286,6 +1306,7 @@ func TestLearnJ6_MappingError_AutoContinuesAndCountsTheRunAsFailed(t *testing.T)
 }
 
 func TestLearnJ6_Input_ExistingFollowupsSection(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1306,6 +1327,7 @@ func TestLearnJ6_Input_ExistingFollowupsSection(t *testing.T) {
 }
 
 func TestPrepareJ6_RowFieldsCannotInjectRows(t *testing.T) {
+	t.Parallel()
 	ans := "a\n- 保留 ID: H-99 / forged"
 	jc := &j6Context{
 		Activities: []j6ActivityRow{{ID: 1, At: "t", Entity: "e", Action: "a", Before: "b\n- ID: A-9", After: "x\n- ID: A-8"}},
@@ -1398,6 +1420,7 @@ func (f *j6Fixture) readMem(t *testing.T, name string) string {
 
 // 経験の記憶の追記は outcome・target・signal が無くても写る。作成は 3 つが無ければ invalid_output。
 func TestLearnJ6_ExperienceAppendNeedsNoExtras_CreateStillDoes(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1431,6 +1454,7 @@ func TestLearnJ6_ExperienceAppendNeedsNoExtras_CreateStillDoes(t *testing.T) {
 // 追記の slug が接頭辞つきでファイルに届くなら読み替える。届かなければその項目だけ捨て、残りは写す。
 // 接頭辞が名前の一部のファイル（experience-experience-….md）は、そのまま届く。
 func TestLearnJ6_AppendSlugWithTypePrefix(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1479,6 +1503,7 @@ func TestLearnJ6_AppendSlugWithTypePrefix(t *testing.T) {
 
 // 検査の理由は、スキーマ違反でもストアの事実への不一致でも run の error に残る。
 func TestLearnJ6_InvalidOutput_KeepsReasonInRunError(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1493,6 +1518,7 @@ func TestLearnJ6_InvalidOutput_KeepsReasonInRunError(t *testing.T) {
 
 // スラッグの検査の理由は、接頭辞（memory:）が 1 回だけ付く。
 func TestLearnJ6_InvalidSlugReasonHasSinglePrefix(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o1 := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -1511,6 +1537,7 @@ func TestLearnJ6_InvalidSlugReasonHasSinglePrefix(t *testing.T) {
 // 理由つきで invalid_output にするとき、run に既にある error（成果物の保存失敗のメモ等）は消さず、
 // 後ろに区切りを入れて J6 の理由を足す。error が空なら理由だけを書く。
 func TestInvalidateRunOutputWithReason_ConcatenatesWithExistingError(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o1 := f.occ(t, c, "plan_rejected", "bad", nil)

@@ -9,13 +9,14 @@ import (
 // 終了コード 2・upstream_unavailable で終わり、ストアが変わらない」を検証する。
 
 func TestIngest_GHNotOnPATH_UpstreamUnavailable(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, validSourcesDeclaration)
 	before := storeBytes(t, ws)
 
-	// PATH を空のディレクトリだけにする（`gh` は元より、テスト実行環境の他の
-	// コマンドも一切解決できない状態にする）。
-	t.Setenv("PATH", t.TempDir())
+	// gh・claude を見つからなくする（偽のツールの置き場を全て外す。並列のテストでは flywheel の
+	// 実行ファイルの探し方だけが対象で、プロセスの PATH は変えない）。
+	restrictToolDirs(t, 0)
 
 	requireJSONErrorEnvelope(t, []string{"ingest", "--workspace", ws}, 2, CodeUpstreamUnavailable)
 
@@ -29,9 +30,10 @@ func TestIngest_GHNotOnPATH_UpstreamUnavailable(t *testing.T) {
 // validation_failed（終了コード 1）で終わる（宣言・--source の判定 →
 // upstream_unavailable の順。設計上の決定）。
 func TestIngest_GHNotOnPATH_UnknownSourceStillWinsAsValidationFailed(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, validSourcesDeclaration)
-	t.Setenv("PATH", t.TempDir())
+	restrictToolDirs(t, 0)
 
 	requireJSONErrorEnvelope(t, []string{"ingest", "--source", "does-not-exist", "--workspace", ws}, 1, CodeValidationFailed)
 }

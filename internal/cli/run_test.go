@@ -90,6 +90,7 @@ func delegateRunsOf(t *testing.T, ws string) []map[string]any {
 
 // 成功: {"phase": {...}} の形・委譲の run の記録・固定の節つきの標準入力の保存。
 func TestRun_DelegatesAndReturnsAPhaseObject(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	id := newInProgressForRun(t, ws, nil)
 	orderLog := filepath.Join(t.TempDir(), "order.log")
@@ -161,6 +162,7 @@ func TestRun_DelegatesAndReturnsAPhaseObject(t *testing.T) {
 
 // 委譲の引数: 権限モードは宣言の値・--disallowedTools・セッション ID 等（3 値のそれぞれ）。
 func TestRun_ArgvOfTheDelegationPerPermissionMode(t *testing.T) {
+	parallelTools(t, false)
 	for _, mode := range []string{"default", "acceptEdits", "auto"} {
 		t.Run(mode, func(t *testing.T) {
 			ws := setupRunWorkspace(t)
@@ -201,6 +203,7 @@ func TestRun_ArgvOfTheDelegationPerPermissionMode(t *testing.T) {
 }
 
 func TestRun_NonTargetsAreNotStarted(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	createForCase(t, ws) // 未分類
 	newClassifiedForCase(t, ws)
@@ -215,6 +218,7 @@ func TestRun_NonTargetsAreNotStarted(t *testing.T) {
 }
 
 func TestRun_RunInProgress_ExitOneAndNothingStarted(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	id := newInProgressForRun(t, ws, nil)
 	host, _ := os.Hostname()
@@ -240,6 +244,7 @@ func TestRun_RunInProgress_ExitOneAndNothingStarted(t *testing.T) {
 // 先に起動した run が動いている間の 2 つ目の run は、サイクルの排他で locked（終了コード 1）になり、
 // 委譲を起動しない。
 func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	a := newInProgressForRun(t, ws, nil)
 	b := newInProgressForRun(t, ws, nil)
@@ -255,7 +260,7 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *tes
 	}
 	runOne := func(id string) result {
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"run", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+		code := runWithLookPath([]string{"run", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 		return result{code, stderr.String()}
 	}
 	var wg sync.WaitGroup
@@ -282,6 +287,7 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *tes
 // 衝突の予測で 2 課題が別のグループになる場合でも、動いている run があれば 2 つ目の run は
 // サイクルの排他で locked になる（スロットの割り当てには進まない）。
 func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIsLocked(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	script := filepath.Join(t.TempDir(), "predict.sh")
 	// 共有ファイル・依存が無い予測（2 課題は別のグループになる）。
@@ -289,7 +295,7 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIs
 		"printf '%s' '{\"schema\":\"harness.conflict-prediction/v1\",\"complete\":true,\"error\":null,\"head_sha\":\"cafe01\",\"cost_usd\":0.1,\"unknown_cost_count\":0," +
 		"\"issues\":[{\"issue\":7,\"status\":\"predicted\"},{\"issue\":9,\"status\":\"predicted\"}]," +
 		"\"pairs\":[{\"issues\":[7,9],\"status\":\"predicted\",\"shared_files\":[],\"dependency\":null}]}'\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+	if err := writeExecutable(script, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 	conn := strings.Replace(runConnectorsFixture, `{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "operations"`,
@@ -318,7 +324,7 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIs
 	}
 	runOne := func(id string) result {
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"run", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+		code := runWithLookPath([]string{"run", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 		return result{code, stderr.String()}
 	}
 	var wg sync.WaitGroup
@@ -341,6 +347,7 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIs
 }
 
 func TestRun_DirtySlot_NeedsAttentionAndSlotUnavailable(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	id := newInProgressForRun(t, ws, nil)
 	if err := os.WriteFile(filepath.Join(ws, "slot-d", "dirty.txt"), []byte("x"), 0o644); err != nil {
@@ -356,6 +363,7 @@ func TestRun_DirtySlot_NeedsAttentionAndSlotUnavailable(t *testing.T) {
 }
 
 func TestRun_J3InvalidOutput_NoDelegation(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	newInProgressForRun(t, ws, nil)
 	bad := fakeClaudeRoute{Match: fakeClaudeJ3Match, Tag: "J3", Stdout: `{"is_error":false,"structured_output":{"brief":"b","extra":1}}`}
@@ -376,6 +384,7 @@ func TestRun_J3InvalidOutput_NoDelegation(t *testing.T) {
 }
 
 func TestRun_ConfigAndEnvironmentFailuresStartNothing(t *testing.T) {
+	parallelTools(t, false)
 	t.Run("connectors.json missing", func(t *testing.T) {
 		ws := setupWorkspaceWithPosition(t)
 		argvLog, _ := putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
@@ -405,6 +414,7 @@ func TestRun_ConfigAndEnvironmentFailuresStartNothing(t *testing.T) {
 }
 
 func TestRun_SourceBound_J3GetsUpstreamViaGET_AndReadValuesStay(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	id := newInProgressForRun(t, ws, func(m map[string]any) { m["repo"] = "flywheel-repo"; m["operation"] = "impl-op" })
 	bindChallengeToIssue(t, ws, id, 7, 2, "2026-09-25T09:00:00Z")
@@ -440,6 +450,7 @@ func TestRun_SourceBound_J3GetsUpstreamViaGET_AndReadValuesStay(t *testing.T) {
 // （AC-297・301・334・335・347・351 の CLI 側）。`flywheel run`（ID の省略）も cycle の委譲の段と同じ
 // core の処理を通る。
 func TestRun_PredictionHook_GroupsFromSharedFiles_AndRecordsAPredictRun(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	argvLog := filepath.Join(t.TempDir(), "predict.argv")
 	script := filepath.Join(t.TempDir(), "predict.sh")
@@ -448,7 +459,7 @@ func TestRun_PredictionHook_GroupsFromSharedFiles_AndRecordsAPredictRun(t *testi
 		"printf '%s' '{\"schema\":\"harness.conflict-prediction/v1\",\"complete\":true,\"error\":null,\"head_sha\":\"cafe01\",\"cost_usd\":0.1,\"unknown_cost_count\":0," +
 		"\"issues\":[{\"issue\":7,\"status\":\"predicted\"},{\"issue\":9,\"status\":\"predicted\"}]," +
 		"\"pairs\":[{\"issues\":[7,9],\"status\":\"predicted\",\"shared_files\":[{\"path\":\"a.go\",\"merge_friendly\":false,\"ignored\":false}],\"dependency\":null}]}'\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+	if err := writeExecutable(script, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 	conn := strings.Replace(runConnectorsFixture, `{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "operations"`,
@@ -490,6 +501,7 @@ func TestRun_PredictionHook_GroupsFromSharedFiles_AndRecordsAPredictRun(t *testi
 
 // AC-217: run が作った周の ID を、委譲の失敗の発生が値で持つ。
 func TestRun_DelegationFailureOccurrenceCarriesTheCycleID(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	newInProgressForRun(t, ws, nil)
 	failing := fakeClaudeRoute{Match: fakeClaudeDelegateMatch, Tag: "DELEGATE", Stdout: `{"session_id":"s","is_error":true,"result":"boom"}`}

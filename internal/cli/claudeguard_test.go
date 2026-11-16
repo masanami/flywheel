@@ -40,6 +40,7 @@ func installRealClaudeGuard() (cleanup func(), err error) {
 // 受入基準「go test ./... は、PATH に本物の claude があっても、それを起動しない」の担保:
 // 偽の claude を置かないテストでは、PATH の claude が番兵に解決され、起動すると失敗する。
 func TestRealClaudeGuard_ShadowsAnyClaudeOnPATHUnlessAFakeIsPlaced(t *testing.T) {
+	t.Parallel()
 	path, err := exec.LookPath("claude")
 	if err != nil {
 		t.Fatalf("LookPath(claude): %v (the guard must be on PATH)", err)

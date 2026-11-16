@@ -11,6 +11,7 @@ import (
 )
 
 func TestExitCodeFor_KnownCodes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		code ErrorCode
 		want int
@@ -48,6 +49,7 @@ func TestExitCodeFor_KnownCodes(t *testing.T) {
 }
 
 func TestExitCodeFor_UnknownCodeFallsBackToInternalError(t *testing.T) {
+	t.Parallel()
 	if got := ExitCodeFor(ErrorCode("not_a_real_code")); got != 2 {
 		t.Errorf("ExitCodeFor(unknown) = %d, want 2 (internal_error 相当)", got)
 	}
@@ -58,6 +60,7 @@ func TestExitCodeFor_UnknownCodeFallsBackToInternalError(t *testing.T) {
 // mapCoreErr で正しい ErrorCode（終了コード 1）へ写像されることを検証する
 // （AC-37・AC-44・AC-50）。
 func TestMapCoreErr_VerificationErrors(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		err  error
@@ -84,6 +87,7 @@ func TestMapCoreErr_VerificationErrors(t *testing.T) {
 // core.ErrConfigInvalid が正しい ErrorCode（終了コード 2）へ写像されることを
 // 検証する（AC-1・AC-2）。
 func TestMapCoreErr_ConfigErrors(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		err  error
@@ -111,6 +115,7 @@ func TestMapCoreErr_ConfigErrors(t *testing.T) {
 // 経由せず、runClassifyAuto・runPlanAuto・runCycle が invoker.ErrClaudeNotFound から直接作る
 // （その終了コードは各コマンドのテストが検証する）。
 func TestMapCoreErr_M3Errors(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		err  error
@@ -136,6 +141,7 @@ func TestMapCoreErr_M3Errors(t *testing.T) {
 // TestMapCoreErr_InvalidTransition は #10 で足した core.ErrInvalidTransition が
 // CodeInvalidTransition（終了コード 1）へ写像されることを検証する（AC-24）。
 func TestMapCoreErr_InvalidTransition(t *testing.T) {
+	t.Parallel()
 	got := mapCoreErr(core.ErrInvalidTransition)
 	if got.Code != CodeInvalidTransition {
 		t.Fatalf("mapCoreErr(ErrInvalidTransition).Code = %q, want %q", got.Code, CodeInvalidTransition)
@@ -148,6 +154,7 @@ func TestMapCoreErr_InvalidTransition(t *testing.T) {
 // TestMapCoreErr_Conflict は #12 で足した core.ErrConflict が CodeConflict
 // （終了コード 1）へ写像されることを検証する（AC-46）。
 func TestMapCoreErr_Conflict(t *testing.T) {
+	t.Parallel()
 	got := mapCoreErr(core.ErrConflict)
 	if got.Code != CodeConflict {
 		t.Fatalf("mapCoreErr(ErrConflict).Code = %q, want %q", got.Code, CodeConflict)
@@ -158,6 +165,7 @@ func TestMapCoreErr_Conflict(t *testing.T) {
 }
 
 func TestNewError_SetsCodeAndMessage(t *testing.T) {
+	t.Parallel()
 	err := NewError(CodeNotFound, "C-1 not found")
 	if err.Code != CodeNotFound {
 		t.Errorf("Code = %q, want %q", err.Code, CodeNotFound)
@@ -168,6 +176,7 @@ func TestNewError_SetsCodeAndMessage(t *testing.T) {
 }
 
 func TestParseErrorCodeTable_Synthetic(t *testing.T) {
+	t.Parallel()
 	doc := "intro\n\n| エラーコード | 終了コード | 意味 |\n" +
 		"|---|---|---|\n" +
 		"| `foo_error` | 2 | test |\n" +
@@ -186,6 +195,7 @@ func TestParseErrorCodeTable_Synthetic(t *testing.T) {
 }
 
 func TestErrorCodeTableMatchesSpec(t *testing.T) {
+	t.Parallel()
 	spec := append(loadSpecErrorCodeTable(t), loadM4ErrorCodeTable(t)...)
 	spec = append(spec, loadM45S2ErrorCodeTable(t)...)
 
@@ -296,6 +306,7 @@ const m1BaseErrorCodeCount = 14
 // （実装が実際に出しうることの静的な照合は TestErrorCodeUsageInSourcesMatchesSpecInBothDirections が
 // M1 の表との間で行う）。
 func TestErrorCodeSet_IsM1M2PlusS1CodesInBothDirections(t *testing.T) {
+	t.Parallel()
 	read := func(name string) string {
 		data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", name))
 		if err != nil {
@@ -394,6 +405,7 @@ func loadM45S2ErrorCodeTable(t *testing.T) []codeExit {
 // 表（errorCodeTable）は M2 の 2 を持ち、approve の経路が newReleaseNotApprovableError で 1 を出す。
 // dependency_cycle は S2 で足し、表（errorCodeTable）に終了コード 1 で持つ。
 func TestM45ErrorCodeTable_UpstreamUnavailableIsExit1OnTheApprovePath(t *testing.T) {
+	t.Parallel()
 	m45 := loadM45ErrorCodeTable(t)
 	if len(m45) != 2 {
 		t.Fatalf("M4.5 adds 2 error codes, table has %d: %+v", len(m45), m45)

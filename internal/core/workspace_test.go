@@ -53,6 +53,7 @@ func TestResolveBaseDir_FallsBackToCwdWhenFlagAndEnvEmpty(t *testing.T) {
 }
 
 func TestFindWorkspace_FindsStoreInAncestorDirectory(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	mustMkdirAll(t, filepath.Join(root, flywheelDirName))
 	mustWriteFile(t, storeDBPath(root), []byte("dummy"))
@@ -70,6 +71,7 @@ func TestFindWorkspace_FindsStoreInAncestorDirectory(t *testing.T) {
 }
 
 func TestFindWorkspace_ReturnsFalseWhenNoStoreExistsAnywhereAbove(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	child := filepath.Join(root, "x", "y")
 	mustMkdirAll(t, child)
@@ -80,6 +82,7 @@ func TestFindWorkspace_ReturnsFalseWhenNoStoreExistsAnywhereAbove(t *testing.T) 
 }
 
 func TestFindWorkspace_ChildStoreDoesNotShadowFindingItsOwnAncestor(t *testing.T) {
+	t.Parallel()
 	// 子ディレクトリ自身にストアがあれば、それが最初に見つかる（親へは遡らない）。
 	root := t.TempDir()
 	mustMkdirAll(t, filepath.Join(root, flywheelDirName))

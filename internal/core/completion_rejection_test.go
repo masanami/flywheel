@@ -55,6 +55,7 @@ func (f *delegateFixture) completionRejections(t *testing.T, id string) []Comple
 func rejDay(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 9, 30, 0, 0, time.UTC) }
 
 func TestLoadCompletionRejections_NoRejectionReturnsNothing(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	if got := f.completionRejections(t, id); len(got) != 0 {
@@ -63,6 +64,7 @@ func TestLoadCompletionRejections_NoRejectionReturnsNothing(t *testing.T) {
 }
 
 func TestLoadCompletionRejections_OneRejectionCarriesReasonAndDate(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.rejectCompletionForTest(t, id, "REASON-A", rejDay(2026, 11, 4), ttyAtt)
@@ -73,6 +75,7 @@ func TestLoadCompletionRejections_OneRejectionCarriesReasonAndDate(t *testing.T)
 }
 
 func TestLoadCompletionRejections_TwoOrMoreAreOldestFirstWithTheirDates(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.rejectCompletionForTest(t, id, "REASON-FIRST", rejDay(2026, 11, 4), ttyAtt)
@@ -92,6 +95,7 @@ func TestLoadCompletionRejections_TwoOrMoreAreOldestFirstWithTheirDates(t *testi
 
 // `--relayed` で記録した差し戻しでも、理由は reason の列にあり（relay_quote は会話の手がかりで、理由ではない）、収集できる。
 func TestLoadCompletionRejections_RelayedRejectionUsesTheReasonNotTheQuote(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.rejectCompletionForTest(t, id, "REASON-RELAYED", rejDay(2026, 11, 4), relayedAtt)
@@ -103,6 +107,7 @@ func TestLoadCompletionRejections_RelayedRejectionUsesTheReasonNotTheQuote(t *te
 
 // 計画承認での差し戻しや、完了の承認は含めない。他の課題の差し戻しも含めない。
 func TestLoadCompletionRejections_OnlyCompletionRejectionsOfThisChallenge(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	other := f.newInProgress(t, "other", "P1", planSpec(nil))
@@ -139,12 +144,14 @@ func TestLoadCompletionRejections_OnlyCompletionRejectionsOfThisChallenge(t *tes
 }
 
 func TestFormatCompletionRejectionsSection_NoneIsEmpty(t *testing.T) {
+	t.Parallel()
 	if got := formatCompletionRejectionsSection(nil); got != "" {
 		t.Fatalf("section = %q, want empty (no section for a challenge without rejections)", got)
 	}
 }
 
 func TestFormatCompletionRejectionsSection_PinsTheText(t *testing.T) {
+	t.Parallel()
 	one := []CompletionRejection{{DecidedAt: rejDay(2026, 11, 4), Reason: "REASON-A\nline two"}}
 	wantOne := "人間が成果物を確認して差し戻した理由。元の達成条件に足した、満たすべき条件である。古い順に並べている。" +
 		"後の差し戻しが前の差し戻しの方針を置き換えているときは、後のものに従う。\n\n" +
@@ -162,6 +169,7 @@ func TestFormatCompletionRejectionsSection_PinsTheText(t *testing.T) {
 // --- J3 の入力（#457 手順 3） ---
 
 func TestRunDelegation_J3InputHasTheRejectionSectionWithDatesAndReasons(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.rejectCompletionForTest(t, id, "REASON-FIRST", rejDay(2026, 11, 4), ttyAtt)
@@ -179,6 +187,7 @@ func TestRunDelegation_J3InputHasTheRejectionSectionWithDatesAndReasons(t *testi
 }
 
 func TestRunDelegation_J3InputHasNoRejectionSectionWithoutARejection(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.runDelegation(t, id)
@@ -192,6 +201,7 @@ func TestRunDelegation_J3InputHasNoRejectionSectionWithoutARejection(t *testing.
 // 差し戻しの直後の委譲は再開にならず、J3 を通る新しいセッションになる（最新の J5 は met のため）。
 // その起動の入力に、差し戻しの理由が（J3 の出力に依らず）機械的に載る。
 func TestRunDelegation_NewSessionAfterARejectionCarriesTheRejectionText(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.rejectCompletionForTest(t, id, "REASON-FIRST", rejDay(2026, 11, 4), ttyAtt)
@@ -209,6 +219,7 @@ func TestRunDelegation_NewSessionAfterARejectionCarriesTheRejectionText(t *testi
 }
 
 func TestRunDelegation_LaunchWithoutARejectionCarriesNoRejectionText(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.runDelegation(t, id)
@@ -219,6 +230,7 @@ func TestRunDelegation_LaunchWithoutARejectionCarriesNoRejectionText(t *testing.
 
 // 差し戻しのある課題の再開は、種類に依らず（回答・中断）同じ区画を持つ。
 func TestResume_AfterARejectionAnswerAndInterruptedResumesCarryTheRejectionText(t *testing.T) {
+	t.Parallel()
 	want := formatCompletionRejectionsSection([]CompletionRejection{
 		{DecidedAt: rejDay(2026, 11, 4), Reason: "REASON-FIRST"}, {DecidedAt: rejDay(2026, 11, 6), Reason: "REASON-SECOND"}})
 	setup := func(t *testing.T) (*delegateFixture, string) {
@@ -274,6 +286,7 @@ func (f *j5Fixture) rejectAndRedelegate(t *testing.T, id, reason string, at time
 }
 
 func TestVerifyAutoJ5_InputHasTheRejectionSectionOldestFirstAsConditionsToMeet(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateAndVerifyMet(t, "C-1")
 	f.rejectAndRedelegate(t, "C-1", "REASON-FIRST", rejDay(2026, 11, 4), ttyAtt)
@@ -306,6 +319,7 @@ func TestVerifyAutoJ5_InputHasTheRejectionSectionOldestFirstAsConditionsToMeet(t
 }
 
 func TestVerifyAutoJ5_InputHasNoRejectionSectionWithoutARejection(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	if _, err := f.verify(t, nil); err != nil {
@@ -322,6 +336,7 @@ func TestVerifyAutoJ5_InputHasNoRejectionSectionWithoutARejection(t *testing.T) 
 // その 1 点を満たさない成果物で J5 が not_met と足りない点の指摘を返すと、その指摘が既存の経路で
 // 次の委譲（再開）に渡る（J5 の出力はスタブ）。
 func TestRejectionReasonsReachJ3J5AndTheReworkResumeInOrder_AndANotMetFeedbackReachesTheNextDelegation(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateAndVerifyMet(t, "C-1")
 	f.rejectAndRedelegate(t, "C-1", "REASON-FIRST", rejDay(2026, 11, 4), ttyAtt)

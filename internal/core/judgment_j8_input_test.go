@@ -97,6 +97,7 @@ func j8Section(t *testing.T, jc *j8Context, label string) string {
 }
 
 func TestJ8Input_TriggeringCountOnlyCountsUnhandledClassifiedBadNonPerformance(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	c := mChallenge(t, s, "c")
 	want := map[int64]bool{
@@ -119,6 +120,7 @@ func TestJ8Input_TriggeringCountOnlyCountsUnhandledClassifiedBadNonPerformance(t
 }
 
 func TestJ8Input_GroupsByKeyWithCountAndFiveNewestDetails(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	c := mChallenge(t, s, "c")
 	var ids []int64
@@ -166,6 +168,7 @@ func TestJ8Input_GroupsByKeyWithCountAndFiveNewestDetails(t *testing.T) {
 }
 
 func TestJ8Input_WithdrawnKeyIsSuppressedUntilThresholdOccurrencesAfterTheWithdrawal(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	c := mChallenge(t, s, "c")
 	before1 := j8Occ(t, s, c, j8Row{})
@@ -200,6 +203,7 @@ func TestJ8Input_WithdrawnKeyIsSuppressedUntilThresholdOccurrencesAfterTheWithdr
 }
 
 func TestJ8Input_LastWithdrawalOfTheKeyDecidesAndNoOccurrenceMeansZero(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	c := mChallenge(t, s, "c")
 	first := j8Occ(t, s, c, j8Row{})
@@ -228,6 +232,7 @@ func TestJ8Input_LastWithdrawalOfTheKeyDecidesAndNoOccurrenceMeansZero(t *testin
 }
 
 func TestJ8Input_NonWithdrawnImprovementDoesNotSuppress(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	c := mChallenge(t, s, "c")
 	j8Occ(t, s, c, j8Row{})
@@ -239,6 +244,7 @@ func TestJ8Input_NonWithdrawnImprovementDoesNotSuppress(t *testing.T) {
 }
 
 func TestJ8Input_MetricsAndDefinitionsAreIncluded(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	mDone(t, s, "done", 1)
 	jc := j8Load(t, s, 10)
@@ -271,6 +277,7 @@ func TestJ8Input_MetricsAndDefinitionsAreIncluded(t *testing.T) {
 }
 
 func TestJ8Input_PastImprovementsNewestTenWithCompareOnlyWhenApplied(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	var ids []int64
 	for i := 0; i < 11; i++ {
@@ -311,6 +318,7 @@ func TestJ8Input_PastImprovementsNewestTenWithCompareOnlyWhenApplied(t *testing.
 }
 
 func TestJ8Input_DoesNotWriteAndIsDeterministic(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	c := mChallenge(t, s, "c")
 	j8Occ(t, s, c, j8Row{})
@@ -369,6 +377,7 @@ func j8Snapshot(t *testing.T, s *Store) map[string][]string {
 }
 
 func TestJ8Input_UnreadableWithdrawAfterIsAnError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	c := mChallenge(t, s, "c")
 	j8Occ(t, s, c, j8Row{})
@@ -381,6 +390,7 @@ func TestJ8Input_UnreadableWithdrawAfterIsAnError(t *testing.T) {
 }
 
 func TestJ8Input_DoneImprovementWithOpenReleaseShowsAppliedAtButNoComparison(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	executed := j8InsertImprovement(t, s, "prompt", "R", "done")
 	mRelease(t, s, executed, "executed", mAt(6))
@@ -421,6 +431,7 @@ func TestJ8Input_DoneImprovementWithOpenReleaseShowsAppliedAtButNoComparison(t *
 }
 
 func TestPrepareJ8_RowFieldsCannotInjectRows(t *testing.T) {
+	t.Parallel()
 	jc := &j8Context{
 		Metrics: &MetricsResult{},
 		Groups: []j8KeyGroup{{Layer: "prompt", Target: "T\n- 層: knowledge / 対象: X", Count: 1,
@@ -444,6 +455,7 @@ func TestPrepareJ8_RowFieldsCannotInjectRows(t *testing.T) {
 }
 
 func TestPrepareJ8_DefinitionsIncludeTheCompareApprovalCount(t *testing.T) {
+	t.Parallel()
 	jc := &j8Context{Metrics: &MetricsResult{}}
 	var content string
 	for _, sec := range prepareJ8(jc) {
@@ -464,6 +476,7 @@ func TestPrepareJ8_DefinitionsIncludeTheCompareApprovalCount(t *testing.T) {
 }
 
 func TestJ8StatusLabel(t *testing.T) {
+	t.Parallel()
 	for st, want := range map[Status]string{
 		StatusDone:       "done（完了）",
 		StatusWithdrawn:  "withdrawn（取り下げ）",
@@ -477,6 +490,7 @@ func TestJ8StatusLabel(t *testing.T) {
 
 // #571: 発生の明細の各行の課題に、いまの状態（完了・取り下げ・未完了）を添える。実ストアで固定する。
 func TestJ8Input_DetailRowsCarryTheChallengeStatus(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	done := mChallenge(t, s, "done")
 	mexec(t, s, `UPDATE challenge SET status = 'done' WHERE id = ?`, done)
@@ -503,6 +517,7 @@ func TestJ8Input_DetailRowsCarryTheChallengeStatus(t *testing.T) {
 // #571: 課題が無い行・状態を引けなかった行は「状態は未確認」と出す。発生の課題は外部キーで必ず実在するため、
 // 実ストアではこの行を作れない。区画の組み立て（prepareJ8）に直接渡して固定する。
 func TestPrepareJ8_DetailRowWithoutChallengeStatusIsUnconfirmed(t *testing.T) {
+	t.Parallel()
 	jc := &j8Context{Metrics: &MetricsResult{}, Groups: []j8KeyGroup{{Layer: "prompt", Target: "T", Count: 2, Details: []j8Occurrence{
 		{ID: 1, Kind: "k", Cause: "context", ChallengeID: 7},
 		{ID: 2, Kind: "k", Cause: "context"},

@@ -37,6 +37,7 @@ func opStateReason(t *testing.T, s *Store, opID int64) (state string, reason sql
 }
 
 func TestRejectCompletion_ApprovedRelease_IsClosedAndNeverMerged(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	approval := rejectCompletionForTest(t, f)
 	opID := formatOperationID(f.opID)
@@ -70,6 +71,7 @@ func TestRejectCompletion_ApprovedRelease_IsClosedAndNeverMerged(t *testing.T) {
 }
 
 func TestRejectCompletion_PendingRelease_IsClosed(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	pending := coretest.InsertReleaseOperation(t, f.s.workspace, int(f.cid), "https://github.com/o/r/pull/9", "pending")
 	approval := rejectCompletionForTest(t, f)
@@ -82,6 +84,7 @@ func TestRejectCompletion_PendingRelease_IsClosed(t *testing.T) {
 }
 
 func TestRejectCompletion_RunningRelease_IsNotStopped(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	host, err := os.Hostname()
 	if err != nil {
@@ -100,6 +103,7 @@ func TestRejectCompletion_RunningRelease_IsNotStopped(t *testing.T) {
 }
 
 func TestRejectCompletion_ReapprovalExecutesNewRelease(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m3rg3"}
 	rejectCompletionForTest(t, f)
@@ -147,6 +151,7 @@ func TestRejectCompletion_ReapprovalExecutesNewRelease(t *testing.T) {
 }
 
 func TestRejectCompletion_StaleAttempt_IsWithdrawn(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	attempt := coretest.InsertOperationExecution(t, f.s.workspace, f.opID, coretest.ExecutionAttempt{
 		StartedAt: execTS(1), ApprovedHead: relHead, PID: 1, Host: "other-host",
@@ -171,6 +176,7 @@ func TestRejectCompletion_StaleAttempt_IsWithdrawn(t *testing.T) {
 
 // 差し戻しの確認前の要約（PrepareRejection）は、書き込みと同じ規則で、取り消す release と実行中のため残す release を返す。
 func TestPrepareRejection_ListsReleasesToWithdrawAndRunning(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	pending := coretest.InsertReleaseOperation(t, f.s.workspace, int(f.cid), "https://github.com/o/r/pull/9", "pending")
 	host, err := os.Hostname()

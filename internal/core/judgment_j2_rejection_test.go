@@ -50,6 +50,7 @@ func (f *j2Fixture) j2SectionsAfter(t *testing.T, id string) string {
 }
 
 func TestPlanAutoJ2_PlanRejections_NoRejectionHasNoSection(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "none", "P1")
 	if got := f.j2SectionsAfter(t, ch.ID); got != "" {
@@ -58,6 +59,7 @@ func TestPlanAutoJ2_PlanRejections_NoRejectionHasNoSection(t *testing.T) {
 }
 
 func TestPlanAutoJ2_PlanRejections_ReasonsAreDatedOldestFirst(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	fixedActor(t, "alice")
 	ch := f.newClassified(t, "rej", "P1")
@@ -78,12 +80,14 @@ func TestPlanAutoJ2_PlanRejections_ReasonsAreDatedOldestFirst(t *testing.T) {
 }
 
 func TestFormatPlanRejectionsSection_EmptyWhenNone(t *testing.T) {
+	t.Parallel()
 	if got := formatPlanRejectionsSection(nil); got != "" {
 		t.Fatalf("format(nil) = %q, want empty", got)
 	}
 }
 
 func TestPlanAutoJ2_PlanRejections_IgnoresCompletionRejectionsBlankAndOtherChallenges(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "mine", "P1")
 	other := f.newClassified(t, "other", "P1")
@@ -112,6 +116,7 @@ func TestPlanAutoJ2_PlanRejections_IgnoresCompletionRejectionsBlankAndOtherChall
 // no_issues_needed を付けた plan を返したとき、論点を問わずに計画として登録される。
 // J2 の入力には差し戻しの区画があり、その本文に引用（理由の部分文字列）が含まれる。
 func TestPlanAutoJ2_PlanRejections_NoIssuesNeededQuotingTheRejectionRegisters(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	fixedActor(t, "alice")
 	ch := f.newClassified(t, "rejq", "P1")
@@ -158,6 +163,7 @@ func TestPlanAutoJ2_PlanRejections_NoIssuesNeededQuotingTheRejectionRegisters(t 
 // no_issues_needed は論点の記録として数えず、計画として登録しない（問い直しでも同じなら保留になる）。
 // 引用が区画の本文に実在するかは照合しない（M4H48）ため、退けるのは形の不備だけ。
 func TestPlanAutoJ2_PlanRejections_InvalidNoIssuesNeededIsNotRegistered(t *testing.T) {
+	t.Parallel()
 	cases := map[string]map[string]any{
 		"kind outside the closed set": j2NoIssuesDecision("DECISION-REJ", "plan_rejections", "方式は B にする"),
 		"blank quote":                 j2NoIssuesDecision("DECISION-REJ", "plan_rejection", " \t "),

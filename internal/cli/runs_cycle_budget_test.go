@@ -16,6 +16,7 @@ import (
 // （既存の runs_test.go の他のケースと同じく、cycle_id を設定しないフィクスチャ
 // では常にこうなる）。
 func TestRuns_CycleBudgetUSDIsNullWhenRunHasNoCycle(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	insertRunFixture(t, ws, id, nil)
@@ -35,6 +36,7 @@ func TestRuns_CycleBudgetUSDIsNullWhenRunHasNoCycle(t *testing.T) {
 // cycle_budget_usd が、その周（cycle 行）の budget_usd（USD）であることを
 // 検証する。
 func TestRuns_CycleBudgetUSDReflectsTheRunsCycle(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	cycleID := coretest.InsertCycle(t, ws, "classify --auto", 2_500_000, "2026-09-28T00:00:00.000Z")

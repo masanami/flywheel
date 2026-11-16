@@ -165,7 +165,7 @@ func TestServe_ListenFailed(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"serve", "--port", strconv.Itoa(port), "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"serve", "--port", strconv.Itoa(port), "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 2 {
 		t.Errorf("exit code = %d, want 2 (stderr=%s)", code, stderr.String())
 	}
@@ -182,7 +182,7 @@ func TestServe_BadPortIsUsageError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, p := range []string{"abc", "-1", "65536", ""} {
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"serve", "--port", p, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+		code := runWithLookPath([]string{"serve", "--port", p, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 		if code != 2 || readErrorCode(t, stderr.String()) != "usage_error" {
 			t.Errorf("--port %q: exit=%d stderr=%s, want usage_error", p, code, stderr.String())
 		}
@@ -203,7 +203,7 @@ func TestServe_CoexistsWithCreateAndStatus(t *testing.T) {
 		{"create", "--title", "u", "--workspace", ws, "--json"},
 	} {
 		var stdout, stderr bytes.Buffer
-		if code := run(args, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 {
+		if code := runWithLookPath(args, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 0 {
 			t.Errorf("%v: exit=%d stderr=%s", args, code, stderr.String())
 		}
 	}
@@ -244,6 +244,7 @@ func TestServe_ForbiddenOriginViaChild(t *testing.T) {
 // server が HTTP の応答に使う forbidden_origin は、CLI のエラーコードの表の値と一致し、
 // 終了コード 1 に写る。listen_failed は終了コード 2。
 func TestServeErrorCodes(t *testing.T) {
+	t.Parallel()
 	if string(CodeForbiddenOrigin) != server.CodeForbiddenOrigin {
 		t.Errorf("CodeForbiddenOrigin = %q, server = %q", CodeForbiddenOrigin, server.CodeForbiddenOrigin)
 	}
@@ -281,6 +282,7 @@ func TestServeErrorCodes(t *testing.T) {
 
 // server の core のエラー → エラーコードの写像は、CLI の mapCoreErr と全 sentinel で一致する。
 func TestServerCoreErrMappingMatchesCLI(t *testing.T) {
+	t.Parallel()
 	sentinels := []error{
 		core.ErrStoreNotFound, core.ErrStoreTooNew, core.ErrStoreBusy, core.ErrStoreError, core.ErrNotFound,
 		core.ErrValidation, core.ErrTerminalState, core.ErrInvalidTransition, core.ErrConflict,

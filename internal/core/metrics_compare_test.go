@@ -35,6 +35,7 @@ func compare(t *testing.T, s *Store, cid int64) *MetricsCompareResult {
 }
 
 func TestMetricsCompare_AppliedAtIsLatestReleaseExecutionElseCompletionApproval(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	a := mDone(t, s, "a", 10)
 	if got := compare(t, s, a).AppliedAt; got != mAt(10) {
@@ -50,6 +51,7 @@ func TestMetricsCompare_AppliedAtIsLatestReleaseExecutionElseCompletionApproval(
 }
 
 func TestMetricsCompare_GroupsAreNearestTenExcludingTheTargetAndTheBoundary(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	for d := 1; d <= 12; d++ { // 12 件が前
 		mRun(t, s, mDone(t, s, "b", d), "delegate", nil, int64(d)*1_000_000)
@@ -83,6 +85,7 @@ func TestMetricsCompare_GroupsAreNearestTenExcludingTheTargetAndTheBoundary(t *t
 }
 
 func TestMetricsCompare_AfterGroupIsTheOldestTenAfterTheBoundary(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	target := mDone(t, s, "t", 1)
 	for d := 2; d <= 13; d++ { // 12 件が後
@@ -99,6 +102,7 @@ func TestMetricsCompare_AfterGroupIsTheOldestTenAfterTheBoundary(t *testing.T) {
 }
 
 func TestMetricsCompare_GroupMetricsUseTheGroupsChallengesOnly(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	b1 := mDone(t, s, "b1", 1)
 	mApproval(t, s, b1, "completion", "rejected", "cli", "tty_confirm", mAt(1), `["issues"]`)
@@ -136,6 +140,7 @@ func TestMetricsCompare_GroupMetricsUseTheGroupsChallengesOnly(t *testing.T) {
 }
 
 func TestMetricsCompare_ShortGroupsAndEmpty(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	only := mDone(t, s, "only", 5)
 	r := compare(t, s, only)
@@ -148,6 +153,7 @@ func TestMetricsCompare_ShortGroupsAndEmpty(t *testing.T) {
 }
 
 func TestMetricsCompare_Errors(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	if _, err := s.MetricsCompare(ctx, "C-999"); !errors.Is(err, ErrNotFound) {
@@ -172,6 +178,7 @@ func TestMetricsCompare_Errors(t *testing.T) {
 }
 
 func TestMetricsCompare_DoesNotWriteAndIsDeterministic(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	mDone(t, s, "b", 1)
 	c := mDone(t, s, "t", 2)

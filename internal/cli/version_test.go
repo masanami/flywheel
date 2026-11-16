@@ -33,6 +33,7 @@ func commandsWithVersion(v core.VersionInfo) []Command {
 }
 
 func TestVersionText_Fixed(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		v    core.VersionInfo
@@ -44,7 +45,7 @@ func TestVersionText_Fixed(t *testing.T) {
 	}
 	for _, c := range cases {
 		var o, e bytes.Buffer
-		if code := run([]string{"version", "--workspace", t.TempDir()}, strings.NewReader(""), &o, &e, commandsWithVersion(c.v)); code != 0 {
+		if code := runWithLookPath([]string{"version", "--workspace", t.TempDir()}, strings.NewReader(""), &o, &e, commandsWithVersion(c.v), lookPathFor(t)); code != 0 {
 			t.Fatalf("%s: version: %s", c.name, e.String())
 		}
 		if o.String() != c.want {
@@ -54,6 +55,7 @@ func TestVersionText_Fixed(t *testing.T) {
 }
 
 func TestVersionJSON_Fixed(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		v    core.VersionInfo
@@ -65,7 +67,7 @@ func TestVersionJSON_Fixed(t *testing.T) {
 	}
 	for _, c := range cases {
 		var o, e bytes.Buffer
-		if code := run([]string{"version", "--workspace", t.TempDir(), "--json"}, strings.NewReader(""), &o, &e, commandsWithVersion(c.v)); code != 0 {
+		if code := runWithLookPath([]string{"version", "--workspace", t.TempDir(), "--json"}, strings.NewReader(""), &o, &e, commandsWithVersion(c.v), lookPathFor(t)); code != 0 {
 			t.Fatalf("%s: version --json: %s", c.name, e.String())
 		}
 		if o.String() != c.want {
@@ -75,9 +77,10 @@ func TestVersionJSON_Fixed(t *testing.T) {
 }
 
 func TestStatusShowsBinaryCommit(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	var o, e bytes.Buffer
-	if code := run([]string{"init", "--workspace", ws}, strings.NewReader(""), &o, &e, defaultCommands()); code != 0 {
+	if code := runWithLookPath([]string{"init", "--workspace", ws}, strings.NewReader(""), &o, &e, defaultCommands(), lookPathFor(t)); code != 0 {
 		t.Fatalf("init: %s", e.String())
 	}
 	cases := []struct {
@@ -92,14 +95,14 @@ func TestStatusShowsBinaryCommit(t *testing.T) {
 	for _, c := range cases {
 		o.Reset()
 		e.Reset()
-		if code := run([]string{"status", "--workspace", ws}, strings.NewReader(""), &o, &e, commandsWithVersion(c.v)); code != 0 {
+		if code := runWithLookPath([]string{"status", "--workspace", ws}, strings.NewReader(""), &o, &e, commandsWithVersion(c.v), lookPathFor(t)); code != 0 {
 			t.Fatalf("%s: status: %s", c.name, e.String())
 		}
 		if !strings.HasPrefix(o.String(), "バイナリのコミット: "+c.want+"\n") {
 			t.Errorf("%s: status text lacks leading commit line %q: %q", c.name, c.want, o.String())
 		}
 		o.Reset()
-		if code := run([]string{"status", "--workspace", ws, "--json"}, strings.NewReader(""), &o, &e, commandsWithVersion(c.v)); code != 0 {
+		if code := runWithLookPath([]string{"status", "--workspace", ws, "--json"}, strings.NewReader(""), &o, &e, commandsWithVersion(c.v), lookPathFor(t)); code != 0 {
 			t.Fatalf("%s: status --json: %s", c.name, e.String())
 		}
 		var got struct {
@@ -115,12 +118,13 @@ func TestStatusShowsBinaryCommit(t *testing.T) {
 }
 
 func TestVersion_DefaultReadsRunningBinary(t *testing.T) {
+	t.Parallel()
 	v, err := core.ReadVersion()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var o, e bytes.Buffer
-	if code := run([]string{"version", "--workspace", t.TempDir()}, strings.NewReader(""), &o, &e, defaultCommands()); code != 0 {
+	if code := runWithLookPath([]string{"version", "--workspace", t.TempDir()}, strings.NewReader(""), &o, &e, defaultCommands(), lookPathFor(t)); code != 0 {
 		t.Fatalf("version: %s", e.String())
 	}
 	if o.String() != versionText(v) {
@@ -129,6 +133,7 @@ func TestVersion_DefaultReadsRunningBinary(t *testing.T) {
 }
 
 func TestVersion_WorksOnTooNewStoreAndOutsideWorkspace(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	if _, err := core.Init(ws); err != nil {
 		t.Fatal(err)
@@ -136,7 +141,7 @@ func TestVersion_WorksOnTooNewStoreAndOutsideWorkspace(t *testing.T) {
 	coretest.SetStoreVersion(t, ws, 999999)
 	for _, dir := range []string{ws, t.TempDir()} {
 		var o, e bytes.Buffer
-		if code := run([]string{"version", "--workspace", dir, "--json"}, strings.NewReader(""), &o, &e, defaultCommands()); code != 0 {
+		if code := runWithLookPath([]string{"version", "--workspace", dir, "--json"}, strings.NewReader(""), &o, &e, defaultCommands(), lookPathFor(t)); code != 0 {
 			t.Errorf("version in %s: exit=%d stderr=%s", dir, code, e.String())
 		}
 	}

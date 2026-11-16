@@ -33,6 +33,7 @@ func snapshotChallengeAndLog(t *testing.T, ws, id string) (show, log map[string]
 }
 
 func TestApprove_NoTerminalStdin_StateApprovalsAndActivityLogUnchanged(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -64,6 +65,7 @@ func TestApprove_NoTerminalStdin_StateApprovalsAndActivityLogUnchanged(t *testin
 }
 
 func TestReject_NoTerminalStdin_StateApprovalsAndActivityLogUnchanged(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -95,6 +97,7 @@ func TestReject_NoTerminalStdin_StateApprovalsAndActivityLogUnchanged(t *testing
 }
 
 func TestAnswer_NoTerminalStdin_StateApprovalsAndActivityLogUnchanged(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)

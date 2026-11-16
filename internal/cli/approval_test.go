@@ -17,6 +17,7 @@ import (
 // --- --hold-release（#13 の先取りをしないための CLI 側の入力規則） ---
 
 func TestRunApprove_HoldReleaseOnPlanApprovalIsUsageError(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -44,6 +45,7 @@ func TestRunApprove_HoldReleaseOnPlanApprovalIsUsageError(t *testing.T) {
 // --- OP-ID への --hold-release は usage_error（#13） ---
 
 func TestRunApprove_HoldReleaseOnOperationIDIsUsageError(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t", "--done-criteria", "it works")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -66,6 +68,7 @@ func TestRunApprove_HoldReleaseOnOperationIDIsUsageError(t *testing.T) {
 // not_found が先に返り、終了コードが 2 ではなく 1 になっていた。承認・差し戻し
 // 済みの OP-ID では invalid_transition が先に返っていた）。
 func TestRunApprove_HoldReleaseOnMissingOperationIDIsUsageError(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	requireErrorCode(t, []string{"approve", "OP-999", "--hold-release", "--workspace", ws}, 2, CodeUsageError)
 }
@@ -92,11 +95,13 @@ func findOperation(t *testing.T, show map[string]any, opID string) map[string]an
 // --- 存在しない不可逆操作の ID（#13） ---
 
 func TestRunApprove_NotFoundForMissingOperationID(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	requireErrorCode(t, []string{"approve", "OP-999", "--workspace", ws}, 1, CodeNotFound)
 }
 
 func TestRunReject_NotFoundForMissingOperationID(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	requireErrorCode(t, []string{"reject", "OP-999", "--reason", "r", "--workspace", ws}, 1, CodeNotFound)
 }
@@ -104,6 +109,7 @@ func TestRunReject_NotFoundForMissingOperationID(t *testing.T) {
 // --- AC-48: 理由が空の reject は validation_failed（端末を開く前に決着する） ---
 
 func TestRunReject_EmptyReasonIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -120,11 +126,13 @@ func TestRunReject_EmptyReasonIsValidationFailed(t *testing.T) {
 // --- 対象の ID が存在しない／終端状態（端末を開く前に決着する） ---
 
 func TestRunApprove_NotFoundForMissingID(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	requireErrorCode(t, []string{"approve", "C-999", "--workspace", ws}, 1, CodeNotFound)
 }
 
 func TestRunAnswer_WrongStateIsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -135,6 +143,7 @@ func TestRunAnswer_WrongStateIsInvalidTransition(t *testing.T) {
 // --- 要約テキストの組み立て（純粋関数の単体テスト） ---
 
 func TestApprovalSummaryText_PlanIncludesBodyAndVersion(t *testing.T) {
+	t.Parallel()
 	p := &core.ApprovalPreview{
 		ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan,
 		PlanVersion: 2, PlanBody: "do the thing",
@@ -175,6 +184,7 @@ func TestApprovalSummaryText_CompletionShowsMergeabilityUnconfirmed(t *testing.T
 }
 
 func TestApprovalSummaryText_CompletionIncludesDoneCriteria(t *testing.T) {
+	t.Parallel()
 	p := &core.ApprovalPreview{
 		ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion,
 		DoneCriteria: "it works",
@@ -191,6 +201,7 @@ func TestApprovalSummaryText_CompletionIncludesDoneCriteria(t *testing.T) {
 // 承認されるときだけ「満たされる」と書き、承認されない（--hold-release・差し戻し・release が無い）ときは
 // 満たされないまま残ることを示す。条件が無ければ見出しも出ない。
 func TestApprovalSummaryText_CompletionListsTheConditionsSatisfiedByTheRelease(t *testing.T) {
+	t.Parallel()
 	const releasing = "承認で本番反映されると満たされる条件:\n  - A が取り込まれている\n  - B\n"
 	const notReleasing = "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:\n  - A が取り込まれている\n  - B\n"
 	p := &core.ApprovalPreview{
@@ -241,6 +252,7 @@ func TestApprovalSummaryText_CompletionListsTheConditionsSatisfiedByTheRelease(t
 }
 
 func TestApprovalSummaryText_RejectIncludesReason(t *testing.T) {
+	t.Parallel()
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, PlanVersion: 1, PlanBody: "x"}
 	reason := "not ready"
 	got := approvalSummaryText(p, core.ApprovalDecisionRejected, false, &reason)
@@ -257,6 +269,7 @@ func TestApprovalSummaryText_RejectIncludesReason(t *testing.T) {
 // （runApprove の --hold-release 判定が同じ3値目を理由に fail-closed に
 // 拒否しているのと非対称だった）。
 func TestApprovalSummaryText_UnknownKindDoesNotLabelAsPlanOrCompletion(t *testing.T) {
+	t.Parallel()
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindRelease}
 	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
 	if strings.Contains(got, "種類:  計画") || strings.Contains(got, "種類:  完了") {
@@ -265,6 +278,7 @@ func TestApprovalSummaryText_UnknownKindDoesNotLabelAsPlanOrCompletion(t *testin
 }
 
 func TestAnswerSummaryText_IncludesQuestionAndAnswer(t *testing.T) {
+	t.Parallel()
 	p := &core.AnswerPreview{ChallengeID: "C-1", Title: "t", Question: "why?", Answer: "because"}
 	got := answerSummaryText(p, false)
 	for _, want := range []string{"C-1", "t", "why?", "because"} {

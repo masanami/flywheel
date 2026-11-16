@@ -11,9 +11,10 @@ import (
 )
 
 func TestRun_HelpVariantsPrintUsageAndExitZero(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{{"--help"}, {"-h"}, {"help"}} {
 		var stdout, stderr bytes.Buffer
-		code := run(args, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+		code := runWithLookPath(args, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 		if code != 0 {
 			t.Errorf("args=%v exit=%d, want 0", args, code)
 		}
@@ -35,7 +36,7 @@ func requireErrorCode(t *testing.T, args []string, wantExit int, wantCode ErrorC
 	t.Helper()
 	full := append(append([]string{}, args...), "--json")
 	var stdout, stderr bytes.Buffer
-	code := run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath(full, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != wantExit {
 		t.Fatalf("args=%v exit=%d, want %d (stderr=%s)", args, code, wantExit, stderr.String())
 	}
@@ -60,6 +61,7 @@ func requireErrorCode(t *testing.T, args []string, wantExit int, wantCode ErrorC
 // （#72 で mark-read を登録したときに help への追記が漏れた。登録表を起点に
 // するので、コマンドを足すたびに手書きの一覧を直す必要は無い）。
 func TestUsageText_ListsEveryRegisteredCommand(t *testing.T) {
+	t.Parallel()
 	lines := strings.Split(usageText, "\n")
 	for _, c := range defaultCommands() {
 		name := strings.Join(c.Path, " ")
@@ -77,12 +79,13 @@ func TestUsageText_ListsEveryRegisteredCommand(t *testing.T) {
 }
 
 func TestRun_NoArgsIsUsageError(t *testing.T) {
+	t.Parallel()
 	// requireErrorCode は常に --json を末尾へ追加するため nil には使えない
 	// （args=["--json"] になった瞬間、rawArgs は空でなくなり "未知のコマンド" 分岐を
 	// 通ってしまい、この分岐の担保にならない。確認モードのラウンド2で指摘）。
 	// この分岐だけは --json 無しで直接叩き、テキスト出力とコードの両方を見る。
 	var stdout, stderr bytes.Buffer
-	code := run(nil, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath(nil, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2 (stderr=%s)", code, stderr.String())
 	}
@@ -95,26 +98,32 @@ func TestRun_NoArgsIsUsageError(t *testing.T) {
 }
 
 func TestRun_UnknownCommandIsUsageError(t *testing.T) {
+	t.Parallel()
 	requireErrorCode(t, []string{"nope"}, 2, CodeUsageError)
 }
 
 func TestRun_UnknownFlagIsUsageError(t *testing.T) {
+	t.Parallel()
 	requireErrorCode(t, []string{"create", "--title", "x", "--bogus", "y"}, 2, CodeUsageError)
 }
 
 func TestRun_MissingRequiredFlagIsUsageError(t *testing.T) {
+	t.Parallel()
 	requireErrorCode(t, []string{"create"}, 2, CodeUsageError)
 }
 
 func TestRun_MissingPositionalArgIsUsageError(t *testing.T) {
+	t.Parallel()
 	requireErrorCode(t, []string{"show"}, 2, CodeUsageError)
 }
 
 func TestRun_ExtraPositionalArgIsUsageError(t *testing.T) {
+	t.Parallel()
 	requireErrorCode(t, []string{"show", "C-1", "C-2"}, 2, CodeUsageError)
 }
 
 func TestRun_PlanRequiresExactlyOneOfFileOrStdin(t *testing.T) {
+	t.Parallel()
 	requireErrorCode(t, []string{"plan", "C-1"}, 2, CodeUsageError)
 	requireErrorCode(t, []string{"plan", "C-1", "--file", "x.txt", "--stdin"}, 2, CodeUsageError)
 	// exactly one of --file/--stdin: parsing succeeds, then (once a workspace is
@@ -126,6 +135,7 @@ func TestRun_PlanRequiresExactlyOneOfFileOrStdin(t *testing.T) {
 }
 
 func TestRun_FlagParsesRegardlessOfPositionBeforeOrAfterPositionalArg(t *testing.T) {
+	t.Parallel()
 	var gotBefore, gotAfter Args
 	cmdBefore := Command{
 		Path: []string{"approve"}, MinPositional: 1, MaxPositional: 1,
@@ -133,7 +143,7 @@ func TestRun_FlagParsesRegardlessOfPositionBeforeOrAfterPositionalArg(t *testing
 		Run:   func(a Args) (any, error) { gotBefore = a; return nil, NewError(CodeInternalError, "stub") },
 	}
 	var stdout, stderr bytes.Buffer
-	run([]string{"approve", "--hold-release", "C-1"}, strings.NewReader(""), &stdout, &stderr, []Command{cmdBefore})
+	runWithLookPath([]string{"approve", "--hold-release", "C-1"}, strings.NewReader(""), &stdout, &stderr, []Command{cmdBefore}, lookPathFor(t))
 	if len(gotBefore.Positional) != 1 || gotBefore.Positional[0] != "C-1" || !gotBefore.Bools["hold-release"] {
 		t.Fatalf("flag-before-positional not parsed correctly: %+v", gotBefore)
 	}
@@ -145,13 +155,14 @@ func TestRun_FlagParsesRegardlessOfPositionBeforeOrAfterPositionalArg(t *testing
 	}
 	stdout.Reset()
 	stderr.Reset()
-	run([]string{"approve", "C-1", "--hold-release"}, strings.NewReader(""), &stdout, &stderr, []Command{cmdAfter})
+	runWithLookPath([]string{"approve", "C-1", "--hold-release"}, strings.NewReader(""), &stdout, &stderr, []Command{cmdAfter}, lookPathFor(t))
 	if len(gotAfter.Positional) != 1 || gotAfter.Positional[0] != "C-1" || !gotAfter.Bools["hold-release"] {
 		t.Fatalf("flag-after-positional not parsed correctly: %+v", gotAfter)
 	}
 }
 
 func TestRun_JSONSuccessWritesSingleDocumentToStdoutWithEmptyStderr(t *testing.T) {
+	t.Parallel()
 	testCmd := Command{
 		Path: []string{"widget"},
 		Run: func(Args) (any, error) {
@@ -159,7 +170,7 @@ func TestRun_JSONSuccessWritesSingleDocumentToStdoutWithEmptyStderr(t *testing.T
 		},
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"widget", "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd})
+	code := runWithLookPath([]string{"widget", "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd}, lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}
@@ -180,6 +191,7 @@ func TestRun_JSONSuccessWritesSingleDocumentToStdoutWithEmptyStderr(t *testing.T
 }
 
 func TestRun_JSONFailureWritesErrorEnvelopeToStderrWithEmptyStdout(t *testing.T) {
+	t.Parallel()
 	testCmd := Command{
 		Path: []string{"widget"},
 		Run: func(Args) (any, error) {
@@ -187,7 +199,7 @@ func TestRun_JSONFailureWritesErrorEnvelopeToStderrWithEmptyStdout(t *testing.T)
 		},
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"widget", "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd})
+	code := runWithLookPath([]string{"widget", "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd}, lookPathFor(t))
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1", code)
 	}
@@ -209,8 +221,9 @@ func TestRun_JSONFailureWritesErrorEnvelopeToStderrWithEmptyStdout(t *testing.T)
 }
 
 func TestRun_JSONFlagHonoredEvenWhenFlagParsingFails(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"create", "--bogus", "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"create", "--bogus", "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2", code)
 	}
@@ -221,6 +234,7 @@ func TestRun_JSONFlagHonoredEvenWhenFlagParsingFails(t *testing.T) {
 }
 
 func TestRun_NilTypedErrorFromCommandDoesNotPanic(t *testing.T) {
+	t.Parallel()
 	// Command.Run が (nil, error) を返すとき、その error の動的型が *Error で値が
 	// nil（型付き nil）だと errors.As は true を返しつつ nil ポインタを詰める。
 	// これをそのまま failErr へ渡すとフィールドアクセスで panic するため、
@@ -233,7 +247,7 @@ func TestRun_NilTypedErrorFromCommandDoesNotPanic(t *testing.T) {
 		},
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"widget", "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd})
+	code := runWithLookPath([]string{"widget", "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd}, lookPathFor(t))
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2", code)
 	}
@@ -243,12 +257,13 @@ func TestRun_NilTypedErrorFromCommandDoesNotPanic(t *testing.T) {
 }
 
 func TestRun_NonObjectSuccessPayloadBecomesInternalError(t *testing.T) {
+	t.Parallel()
 	testCmd := Command{
 		Path: []string{"widget"},
 		Run:  func(Args) (any, error) { return []string{"not", "an", "object"}, nil },
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"widget", "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd})
+	code := runWithLookPath([]string{"widget", "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd}, lookPathFor(t))
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2 (envelope enforcement failure -> internal_error)", code)
 	}
@@ -332,6 +347,7 @@ func headingLevel(trimmed string) int {
 // M3 全体〈S1〜S2〉を1つの表にまとめているため、m1 と違い表全体の完全一致は
 // 要求せず、実装済みの `runs` だけを見る。§IF / API「CLI」）。
 func TestRunsCommand_RequiredArgumentsMatchM3IFAPITable(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m3-invoker-delegation.md"))
 	if err != nil {
 		t.Fatalf("read m3 spec: %v", err)
@@ -364,6 +380,7 @@ func TestRunsCommand_RequiredArgumentsMatchM3IFAPITable(t *testing.T) {
 // TestRunsCommand_RequiredArgumentsMatchM3IFAPITable と同じ検査を m3 の §IF / API「CLI」の表に
 // 対して行う（`flywheel cycle [--trigger <t>]`。#86）。--trigger は任意で、位置引数は取らない。
 func TestCycleCommand_RequiredArgumentsMatchM3IFAPITable(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m3-invoker-delegation.md"))
 	if err != nil {
 		t.Fatalf("read m3 spec: %v", err)
@@ -404,6 +421,7 @@ func TestCycleCommand_RequiredArgumentsMatchM3IFAPITable(t *testing.T) {
 // TestOpExecCommand_MatchesM45IFAPITable は、`op exec` の名前と書式（位置引数は任意の 1 つ・
 // 必須のフラグなし）が m4.5 の §IF / API の表のとおりであることを確かめる。
 func TestOpExecCommand_MatchesM45IFAPITable(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
 	if err != nil {
 		t.Fatalf("read m4.5 spec: %v", err)
@@ -435,6 +453,7 @@ func TestOpExecCommand_MatchesM45IFAPITable(t *testing.T) {
 // TestDepCommands_MatchM45IFAPITable は、`dep add`・`dep rm` の名前と書式（依存元 1 つと依存先 1 つ以上の
 // 位置引数・必須のフラグなし）が m4.5 の §IF / API の表のとおりであることを確かめる。
 func TestDepCommands_MatchM45IFAPITable(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
 	if err != nil {
 		t.Fatalf("read m4.5 spec: %v", err)
@@ -461,6 +480,7 @@ func TestDepCommands_MatchM45IFAPITable(t *testing.T) {
 // TestBindUnbindCommands_MatchM2IFAPITable は、`bind`・`unbind` の名前と書式（`bind` は課題と Issue の 2 つ、
 // `unbind` は課題の 1 つの位置引数・必須のフラグなし）が m2 の §IF / API の表のとおりであることを確かめる。
 func TestBindUnbindCommands_MatchM2IFAPITable(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m2-github-issue-ingest.md"))
 	if err != nil {
 		t.Fatalf("read m2 spec: %v", err)
@@ -491,6 +511,7 @@ func TestBindUnbindCommands_MatchM2IFAPITable(t *testing.T) {
 // priority/auto が OneOfGroups の組であること）になっていることを検査する
 // （#84）。
 func TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats(t *testing.T) {
+	t.Parallel()
 	m1Data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m1-core.md"))
 	if err != nil {
 		t.Fatalf("read m1 spec: %v", err)
@@ -555,6 +576,7 @@ func TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats(t *testing.T)
 // OneOfGroups の組であること）になっていることを検査する（#85。classify の
 // TestClassifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats と同じ形）。
 func TestPlanCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats(t *testing.T) {
+	t.Parallel()
 	m1Data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m1-core.md"))
 	if err != nil {
 		t.Fatalf("read m1 spec: %v", err)
@@ -616,6 +638,7 @@ func TestPlanCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats(t *testing.T) {
 // 受け付ける形（--auto が MinPositional を 0 に緩め、result/auto が OneOfGroups の組であること）に
 // なっていることを検査する（classify・plan と同じ形）。
 func TestVerifyCommand_RequiredArgumentsMatchM1AndM3IFAPIFormats(t *testing.T) {
+	t.Parallel()
 	m1Data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m1-core.md"))
 	if err != nil {
 		t.Fatalf("read m1 spec: %v", err)
@@ -749,6 +772,7 @@ var ifAPISkipCommands = map[string]bool{
 // missingRequiredVariants）は登録表の宣言から導くため、宣言から Required が
 // 落ちると列挙ごと消えて気付けない。その根元を仕様書に結び付ける。
 func TestDefaultCommands_RequiredArgumentsMatchIFAPITable(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m1-core.md"))
 	if err != nil {
 		t.Fatalf("read spec: %v", err)
@@ -795,6 +819,7 @@ func TestDefaultCommands_RequiredArgumentsMatchIFAPITable(t *testing.T) {
 // 横断の列挙テスト（allcommands_test.go など）はすべて登録表を起点にするため、
 // 登録表と仕様書をつなぐこの検査も手書きの一覧を持たない。
 func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m1-core.md"))
 	if err != nil {
 		t.Fatalf("read spec: %v", err)
@@ -868,13 +893,14 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 
 // フラグの値としての "--json" は JSON モードを有効にしない（解析成功後は解析結果が正）。
 func TestRun_JSONLiteralAsFlagValueDoesNotEnableJSONMode(t *testing.T) {
+	t.Parallel()
 	testCmd := Command{
 		Path:  []string{"widget"},
 		Flags: []flagDef{{Name: "note", HasValue: true}},
 		Run:   func(Args) (any, error) { return nil, NewError(CodeNotFound, "no such widget") },
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"widget", "--note", "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd})
+	code := runWithLookPath([]string{"widget", "--note", "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd}, lookPathFor(t))
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
@@ -885,8 +911,9 @@ func TestRun_JSONLiteralAsFlagValueDoesNotEnableJSONMode(t *testing.T) {
 
 // 先頭のハイフンが 3 つ以上のトークンは既知のフラグと同一視しない。
 func TestRun_TripleHyphenFlagIsUsageError(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"status", "---json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"status", "---json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2", code)
 	}

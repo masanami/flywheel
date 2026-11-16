@@ -19,7 +19,8 @@ func anySlice(t *testing.T, v any, what string) []any {
 	return a
 }
 
-func TestShow_DependenciesAndDependents(t *testing.T) { // AC-193・AC-194
+func TestShow_DependenciesAndDependents(t *testing.T) {
+	t.Parallel() // AC-193・AC-194
 	ws := initializedWorkspace(t)
 	a, b, c := createForCase(t, ws), createForCase(t, ws), createForCase(t, ws)
 	runJSON(t, ws, "dep", "add", a, b, c)
@@ -51,7 +52,8 @@ func TestShow_DependenciesAndDependents(t *testing.T) { // AC-193・AC-194
 	}
 }
 
-func TestShow_CycleDependencyIsNotSatisfied(t *testing.T) { // 親の決定: 循環は満たされない
+func TestShow_CycleDependencyIsNotSatisfied(t *testing.T) {
+	t.Parallel() // 親の決定: 循環は満たされない
 	ws := initializedWorkspace(t)
 	a, b := createForCase(t, ws), createForCase(t, ws)
 	coretest.InsertDependency(t, ws, challengeIDToInternalID(t, a), challengeIDToInternalID(t, b))
@@ -63,7 +65,8 @@ func TestShow_CycleDependencyIsNotSatisfied(t *testing.T) { // 親の決定: 循
 	}
 }
 
-func TestStatus_UnmetDependencies(t *testing.T) { // AC-183・AC-195
+func TestStatus_UnmetDependencies(t *testing.T) {
+	t.Parallel() // AC-183・AC-195
 	ws := initializedWorkspace(t)
 	a, b, c := createForCase(t, ws), createForCase(t, ws), createForCase(t, ws)
 	runJSON(t, ws, "dep", "add", a, b, c)
@@ -101,7 +104,8 @@ func TestStatus_UnmetDependencies(t *testing.T) { // AC-183・AC-195
 	}
 }
 
-func TestStatus_DependencyCycleDiscrepancyOnePerRingMember(t *testing.T) { // AC-186
+func TestStatus_DependencyCycleDiscrepancyOnePerRingMember(t *testing.T) {
+	t.Parallel() // AC-186
 	ws := initializedWorkspace(t)
 	a, b, c, d := createForCase(t, ws), createForCase(t, ws), createForCase(t, ws), createForCase(t, ws)
 	id := func(s string) int { return challengeIDToInternalID(t, s) }
@@ -128,6 +132,7 @@ func TestStatus_DependencyCycleDiscrepancyOnePerRingMember(t *testing.T) { // AC
 }
 
 func TestText_ShowAndStatusDependencyLines(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	a, b := createForCase(t, ws), createForCase(t, ws)
 	runJSON(t, ws, "dep", "add", a, b)
@@ -148,6 +153,7 @@ func TestText_ShowAndStatusDependencyLines(t *testing.T) {
 
 // 依存・循環のある実出力の要素（dependencies・unmet_dependencies の要素）も、仕様の表から読んだ形と照合する。
 func TestDocumentedShape_DependencyElementsAreCheckedAgainstSpec(t *testing.T) {
+	t.Parallel()
 	doc := loadDocumentedJSON(t)
 	ws := initializedWorkspace(t)
 	a, b, c := createForCase(t, ws), createForCase(t, ws), createForCase(t, ws)
@@ -172,6 +178,7 @@ func TestDocumentedShape_DependencyElementsAreCheckedAgainstSpec(t *testing.T) {
 
 // AC-385: 取り下げた依存先は満たされず、unmet_dependencies[].status は withdrawn。
 func TestStatus_UnmetDependencies_WithdrawnDependency(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	a, b := createForCase(t, ws), createForCase(t, ws)
 	runJSON(t, ws, "dep", "add", a, b)

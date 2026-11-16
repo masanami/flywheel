@@ -62,7 +62,7 @@ func createFullChallenge(t *testing.T, ws string) (id, opID string) {
 // TestRunShow_FullChallenge は疑似端末の子プロセスを伴う準備が重いため、1 つの
 // 課題を JSON とテキストの両方の検査で共有する。
 func TestRunShow_FullChallenge(t *testing.T) {
-	t.Parallel() // 共有の状態（t.Setenv・t.Chdir・パッケージ変数の書き換え）が無いことを確かめた（flywheel#567）
+	// 疑似端末の子プロセスを起動するので t.Parallel にしない（並列の pty の起動が Linux で落ちた既知の事象・flywheel#638）。
 	ws := initializedWorkspace(t)
 	id, opID := createFullChallenge(t, ws)
 
@@ -182,6 +182,7 @@ func requireInOrder(t *testing.T, out string, wants ...string) {
 }
 
 func TestRunShow_TextMarksUnansweredHold(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	runJSON(t, ws, "hold", id, "--question", fullHoldQuestion)
@@ -193,6 +194,7 @@ func TestRunShow_TextMarksUnansweredHold(t *testing.T) {
 // TestInit_TextModeIsHumanReadable は init の --json 無しの出力が Go の map 表記
 // （map[created:true …]）ではなく、項目名と値で読めることを確かめる。
 func TestInit_TextModeIsHumanReadable(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	first := runText(t, dir, "init")
 	second := runText(t, dir, "init")

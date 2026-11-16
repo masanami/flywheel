@@ -26,6 +26,7 @@ func (f *contractFixture) setStatus(t *testing.T, st Status) {
 
 // 1: オーナーの保留の間は、観測の待ちでも答え無しの resume を呼ばない。
 func TestPollContractRuns_ObserveWaitIsNotResumedWhileTheOwnerHold(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -43,6 +44,7 @@ func TestPollContractRuns_ObserveWaitIsNotResumedWhileTheOwnerHold(t *testing.T)
 
 // 2・6(a): 検証中・完了の間も、開いたレビュー待ちの run は実行中の数え・同時委譲数に入らない（着手中は入る）。
 func TestContractReviewWait_IsNotCountedAsActiveWhileVerifyingOrDone(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.toVerifying(t)
 	sch := &delegationScheduler{s: f.s, maxParallel: 1, preRepo: map[string]int{}}
@@ -76,6 +78,7 @@ func TestContractReviewWait_IsNotCountedAsActiveWhileVerifyingOrDone(t *testing.
 
 // 6(b): 完了の検証の問い（J5 の uncertain）で保留の間は、status を呼ばない。
 func TestPollContractRuns_DoesNotReadStatusWhileJ5QuestionHold(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.toVerifying(t)
 	f.j5.j5.result = j5Out("uncertain", nil, "QUESTION-TEXT")
@@ -94,6 +97,7 @@ func TestPollContractRuns_DoesNotReadStatusWhileJ5QuestionHold(t *testing.T) {
 
 // 4・6(c): 差し戻しの上限の保留の問いは契約の run の動きに合わせ、回答の後は同じ run へ respond を返し、note にオーナーの回答が入る。
 func TestPollContractRuns_ReworkLimitHoldQuestionAndAnswerIsReturnedByRespond(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.agent.ReworkLimit = 1
 	f.toVerifying(t)
@@ -123,6 +127,7 @@ func (f *reviewFlowFixture) cancelOpen(t *testing.T) (int, error) {
 
 // 3: 取り下げは、開いた契約の run を止めてから進める。止めないまま取り下げようとすると conflict。
 func TestWithdraw_StopsTheOpenContractRunWithCancelFirst(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.toVerifying(t)
 	if _, err := withdrawForTest(t, f.s, f.cid, "r"); !errors.Is(err, ErrConflict) {
@@ -151,6 +156,7 @@ func TestWithdraw_StopsTheOpenContractRunWithCancelFirst(t *testing.T) {
 
 // cancel が失敗したときは進めない（conflict。run は開いたまま）。
 func TestCancelOpenContractRuns_FailureIsAConflictAndTheRunStaysOpen(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.toVerifying(t)
 	f.client.cancelOut = ContractLaunchOutput{Result: RunResultErrored}
@@ -164,6 +170,7 @@ func TestCancelOpenContractRuns_FailureIsAConflictAndTheRunStaysOpen(t *testing.
 
 // 開いた run が無ければ、宣言も client も要らず何もしない。
 func TestCancelOpenContractRuns_NothingOpenIsANoOp(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	if n, err := f.s.CancelOpenContractRuns(context.Background(), ContractCancelInput{ChallengeID: f.cid}); err != nil || n != 0 {
 		t.Fatalf("n = %d err = %v, want 0 and nil", n, err)
@@ -172,6 +179,7 @@ func TestCancelOpenContractRuns_NothingOpenIsANoOp(t *testing.T) {
 
 // 3: 計画の作り直し（--replan）は、開いた契約の run を止めてから進める。止めないままだと拒む。
 func TestAnswerReplan_StopsTheOpenContractRunWithCancelFirst(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.agent.ReworkLimit = 1
 	f.toVerifying(t)
@@ -208,6 +216,7 @@ func TestAnswerReplan_StopsTheOpenContractRunWithCancelFirst(t *testing.T) {
 // 3: cancel の応答が succeeded（止めた時点で接続ツールの run がちょうど成功していた）でも、保留の間の成功の印を外し、
 // 計画の作り直し（--replan）へ進める。作り直す前の計画の成果物は、保留が解けた後に提出し直さない。
 func TestAnswerReplan_ProceedsWhenTheCancelReturnsSucceeded(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.agent.ReworkLimit = 1
 	f.toVerifying(t)

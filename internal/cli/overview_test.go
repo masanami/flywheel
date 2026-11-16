@@ -14,6 +14,7 @@ import (
 // 機能することを確認する。
 
 func TestRunStatus_EmptyWorkspaceReturnsTheBucketsWithEmptyArrays(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 
 	doc := runJSON(t, ws, "status")
@@ -58,6 +59,7 @@ func TestRunStatus_EmptyWorkspaceReturnsTheBucketsWithEmptyArrays(t *testing.T) 
 }
 
 func TestRunStatus_ChallengesAreClassifiedIntoNeedsHumanAndActionableBuckets(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 
 	human := runJSON(t, ws, "create", "--title", "needs plan approval")["challenge"].(map[string]any)["id"].(string)
@@ -87,6 +89,7 @@ func TestRunStatus_ChallengesAreClassifiedIntoNeedsHumanAndActionableBuckets(t *
 }
 
 func TestRunStatus_PendingOperationAppearsInNeedsHumanOperations(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	id := runJSON(t, ws, "create", "--title", "t")["challenge"].(map[string]any)["id"].(string)
 	opID := prepareReleaseWorkspace(t, ws).addPRRelease(t, id, "ship it")
@@ -204,6 +207,7 @@ func TestRunStatus_TextOutputHasThreeLabeledSectionsWithItemsInTheCorrectSection
 }
 
 func TestRunStatus_DoesNotMutateChallengeState(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := runJSON(t, ws, "create", "--title", "t")["challenge"].(map[string]any)["id"].(string)
 	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, id), "awaiting_plan_approval")

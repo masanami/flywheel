@@ -18,6 +18,7 @@ func (f *j5Fixture) setPRHead(head string) {
 }
 
 func TestVerifyAutoJ5_Met_RecordsTheHeadFetchedBeforeJ5(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.setPRHead("head-before-j5")
@@ -38,6 +39,7 @@ func TestVerifyAutoJ5_Met_RecordsTheHeadFetchedBeforeJ5(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_NotMetAndUncertain_DoNotRecordTheHead(t *testing.T) {
+	t.Parallel()
 	cases := map[string]JudgmentLaunchOutput{
 		"not_met":   j5Out("not_met", "fix", nil),
 		"uncertain": j5Out("uncertain", nil, "q?"),
@@ -60,6 +62,7 @@ func TestVerifyAutoJ5_NotMetAndUncertain_DoNotRecordTheHead(t *testing.T) {
 
 // 実物の個数の不一致で保留に読み替えたときは書かない。
 func TestVerifyAutoJ5_MetTurnedIntoAHoldDoesNotRecordTheHead(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.setPRHead("head-x")
@@ -78,6 +81,7 @@ func TestVerifyAutoJ5_MetTurnedIntoAHoldDoesNotRecordTheHead(t *testing.T) {
 
 // 書くのは、J5 が参照した直前の委譲の run の kind=pr の成果物の行だけ。
 func TestVerifyAutoJ5_MetRecordsHeadOnlyOnTheReferencedDelegationRun(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.setPRHead("head-y")

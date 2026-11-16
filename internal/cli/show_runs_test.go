@@ -30,6 +30,7 @@ func insertEndedRuns(t *testing.T, ws, id string, n int) {
 // AC-154: show --json の runs は、その課題の run を新しい順に最大 20 件出力する。他の課題の
 // run は含まない。要素の形は runs コマンドと同じ（文書の形と照合する）。
 func TestShow_RunsAreNewestFirstAtMost20AndOnlyThisChallenges(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	other := createForCase(t, ws)
@@ -58,6 +59,7 @@ func TestShow_RunsAreNewestFirstAtMost20AndOnlyThisChallenges(t *testing.T) {
 
 // 走った run が無い課題の show --json の runs は空の配列（null でない）。
 func TestShow_RunsIsAnEmptyArrayWhenTheChallengeHasNoRuns(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 

@@ -12,6 +12,7 @@ import (
 
 // 登録表の宣言が、m5 の仕様の §IF / API「CLI に足すもの」の表の行（引数）と一致する。
 func TestExportImportCommands_MatchM5IFAPITable(t *testing.T) {
+	t.Parallel()
 	for name, flag := range map[string]string{"export": "--out <path>", "import": "--in <path>"} {
 		m5SpecLine(t, "| `"+name+" "+flag+"` |", "新しいコマンド")
 		cmd, ok := registeredCommands()[name]
@@ -31,7 +32,7 @@ func TestExportImportCommands_MatchM5IFAPITable(t *testing.T) {
 func runOK(t *testing.T, args ...string) (string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	if code := run(args, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 {
+	if code := runWithLookPath(args, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 0 {
 		t.Fatalf("args=%v exit=%d stderr=%s", args, code, stderr.String())
 	}
 	return stdout.String(), stderr.String()
@@ -39,6 +40,7 @@ func runOK(t *testing.T, args ...string) (string, string) {
 
 // AC-12・AC-13: 往復の後のストアの show <C-ID> --json と log --json は、元のストアの出力と一致する。
 func TestExportImport_RoundTripShowAndLogMatch(t *testing.T) {
+	t.Parallel()
 	src := t.TempDir()
 	if _, err := core.Init(src); err != nil {
 		t.Fatal(err)
@@ -72,6 +74,7 @@ func TestExportImport_RoundTripShowAndLogMatch(t *testing.T) {
 
 // 行のあるストアへの import は validation_failed（終了コードは他のコマンドの validation_failed と同じ）。
 func TestImport_IntoStoreWithRowsIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	src := t.TempDir()
 	if _, err := core.Init(src); err != nil {
 		t.Fatal(err)
@@ -82,7 +85,7 @@ func TestImport_IntoStoreWithRowsIsValidationFailed(t *testing.T) {
 	before := coretest.DumpTables(t, src, "challenge", "activity")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"import", "--in", path, "--workspace", src, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"import", "--in", path, "--workspace", src, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code == 0 || !strings.Contains(stderr.String(), `"validation_failed"`) {
 		t.Errorf("exit=%d stderr=%s, want validation_failed", code, stderr.String())
 	}
@@ -93,6 +96,7 @@ func TestImport_IntoStoreWithRowsIsValidationFailed(t *testing.T) {
 
 // 主キーがぶつからない形（空のストアの書き出しを、行のあるストアへ）でも validation_failed。
 func TestImport_EmptyExportIntoStoreWithRowsIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	empty := t.TempDir()
 	if _, err := core.Init(empty); err != nil {
 		t.Fatal(err)
@@ -108,7 +112,7 @@ func TestImport_EmptyExportIntoStoreWithRowsIsValidationFailed(t *testing.T) {
 	before := coretest.DumpTables(t, dst, tables...)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"import", "--in", path, "--workspace", dst, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"import", "--in", path, "--workspace", dst, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code == 0 || !strings.Contains(stderr.String(), `"validation_failed"`) {
 		t.Errorf("exit=%d stderr=%s, want validation_failed", code, stderr.String())
 	}
@@ -119,13 +123,14 @@ func TestImport_EmptyExportIntoStoreWithRowsIsValidationFailed(t *testing.T) {
 
 // export の書き込みに失敗したとき（out の場所にディレクトリ）は store_error で、ストアを変えない。
 func TestExport_WriteFailureIsStoreError(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	if _, err := core.Init(ws); err != nil {
 		t.Fatal(err)
 	}
 	before := coretest.DumpTables(t, ws, "challenge", "activity", "sqlite_sequence")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"export", "--out", ws, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"export", "--out", ws, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code == 0 || !strings.Contains(stderr.String(), `"store_error"`) {
 		t.Errorf("exit=%d stderr=%s, want store_error", code, stderr.String())
 	}

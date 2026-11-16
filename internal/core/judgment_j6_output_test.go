@@ -22,6 +22,7 @@ const j6ValidOutput = `{
 }`
 
 func TestValidateJ6Output_Valid(t *testing.T) {
+	t.Parallel()
 	got, reason := validateJ6Output([]byte(j6ValidOutput))
 	if reason != "" {
 		t.Fatalf("valid output rejected: %s", reason)
@@ -41,6 +42,7 @@ func TestValidateJ6Output_Valid(t *testing.T) {
 }
 
 func TestValidateJ6Output_EmptyArraysAreValid(t *testing.T) {
+	t.Parallel()
 	if _, reason := validateJ6Output([]byte(`{"classifications":[],"added":[],"memory":[],"followups":[]}`)); reason != "" {
 		t.Error("empty arrays rejected")
 	}
@@ -48,6 +50,7 @@ func TestValidateJ6Output_EmptyArraysAreValid(t *testing.T) {
 
 // 経験の記憶の追記は outcome・target・signal を要らない（作成だけが必須）。
 func TestValidateJ6Output_ExperienceAppendNeedsNoExtras(t *testing.T) {
+	t.Parallel()
 	in := `{"classifications":[],"added":[],"memory":[{"mode":"append","type":"experience","slug":"s","body":"b"}],"followups":[]}`
 	got, reason := validateJ6Output([]byte(in))
 	if reason != "" {
@@ -59,6 +62,7 @@ func TestValidateJ6Output_ExperienceAppendNeedsNoExtras(t *testing.T) {
 }
 
 func TestValidateJ6Output_ReasonNamesTheFailedCheck(t *testing.T) {
+	t.Parallel()
 	in := `{"classifications":[],"added":[],"memory":[{"mode":"create","type":"experience","slug":"s","body":"b"}],"followups":[]}`
 	if _, reason := validateJ6Output([]byte(in)); !strings.Contains(reason, "memory[0]") || !strings.Contains(reason, "outcome") {
 		t.Errorf("reason = %q", reason)
@@ -66,6 +70,7 @@ func TestValidateJ6Output_ReasonNamesTheFailedCheck(t *testing.T) {
 }
 
 func TestValidateJ6Output_Invalid(t *testing.T) {
+	t.Parallel()
 	cls := func(id, cause, layer string) string {
 		return `{"occurrence_id":"` + id + `","cause":"` + cause + `","layer":"` + layer + `","target":"","signal":"s"}`
 	}
@@ -122,6 +127,7 @@ func TestValidateJ6Output_Invalid(t *testing.T) {
 }
 
 func TestJ6OutputSchema_ClosedSetsMatchDefinitions(t *testing.T) {
+	t.Parallel()
 	var schema map[string]any
 	if err := json.Unmarshal(j6OutputSchema(), &schema); err != nil {
 		t.Fatal(err)
@@ -153,6 +159,7 @@ func TestJ6OutputSchema_ClosedSetsMatchDefinitions(t *testing.T) {
 }
 
 func TestJ6_BudgetDefaultAndPoint(t *testing.T) {
+	t.Parallel()
 	if !JudgmentJ6.valid() {
 		t.Error("J6 is not a valid judgment point")
 	}
@@ -166,6 +173,7 @@ func TestJ6_BudgetDefaultAndPoint(t *testing.T) {
 }
 
 func TestAllJudgmentOutputClosedValues_IncludesJ6(t *testing.T) {
+	t.Parallel()
 	have := map[string]bool{}
 	for _, v := range AllJudgmentOutputClosedValues() {
 		have[v] = true

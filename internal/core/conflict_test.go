@@ -65,6 +65,7 @@ func (f *planFixture) planOnly(t *testing.T, ids ...string) {
 // どちらもまだ委譲していない組は、向きの無い関係として（ID の小さい側を challenge_id にして）記録する。
 // 予測した周と、予測の口を呼んだ run を持つ。
 func TestConflict_PlanRecordsNeitherDelegatedPairAsUndirected(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -81,6 +82,7 @@ func TestConflict_PlanRecordsNeitherDelegatedPairAsUndirected(t *testing.T) {
 // 組の理由が shared_files・dependency・unknown_pair のどれでも、同時に委譲しない組として記録する。
 // 共有ファイルが merge_friendly・ignored だけの組（直列化されない）は記録しない。
 func TestConflict_PlanRecordsEverySerializingReasonOnly(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -110,6 +112,7 @@ func TestConflict_PlanRecordsEverySerializingReasonOnly(t *testing.T) {
 // すでに委譲した（終了していない run を持つ）課題と同じ組になった後回しの課題は、
 // 「後回しにした課題 → 先に委譲した課題」の向きで記録する。
 func TestConflict_PlanRecordsCandidateAgainstRunningAsDirected(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	running := f.candidate(t, "multi", "P1", 5)
 	deferred := f.candidate(t, "multi", "P1", 11)
@@ -128,6 +131,7 @@ func TestConflict_PlanRecordsCandidateAgainstRunningAsDirected(t *testing.T) {
 // 委譲を起動する（run を記録する）と、その課題との向きの無い組は「相手 → 起動した課題」の向きになる。
 // 向きが決まるのは run の記録と同じトランザクションの中（委譲の最中に読んでも向きが付いている）。
 func TestConflict_LaunchOrientsTheUndirectedPairsOfTheLaunchedChallenge(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -155,6 +159,7 @@ func TestConflict_LaunchOrientsTheUndirectedPairsOfTheLaunchedChallenge(t *testi
 
 // 向きが付いた組は、後で相手が起動しても反転しない。連鎖の途中の組（b, c）は b を起動した時点で c → b になる。
 func TestConflict_ChainEndsWithEachLaterChallengeYieldingToItsEarlierOne(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P0", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -187,6 +192,7 @@ func TestConflict_ChainEndsWithEachLaterChallengeYieldingToItsEarlierOne(t *test
 // 予測のたびに、その予測の対象どうし（候補と実行中の課題）の組を最新の結果で置き換える。
 // 新しい結果に無い組は消え、対象に入らなかった課題との組は残る。
 func TestConflict_ANewPredictionReplacesThePairsAmongItsOwnChallenges(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -215,6 +221,7 @@ func TestConflict_ANewPredictionReplacesThePairsAmongItsOwnChallenges(t *testing
 
 // 予測が得られなかったとき（prediction_failed など）は、既存の行を消さず、行も足さない。
 func TestConflict_AFailedPredictionKeepsTheExistingRowsAndAddsNone(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -237,6 +244,7 @@ func TestConflict_AFailedPredictionKeepsTheExistingRowsAndAddsNone(t *testing.T)
 
 // 予測の口を呼ばない周（1 課題だけ・予測できる Issue が無い）も、行を変えない。
 func TestConflict_NoPredictionCallLeavesTheRowsAlone(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -253,6 +261,7 @@ func TestConflict_NoPredictionCallLeavesTheRowsAlone(t *testing.T) {
 // 衝突は着手の門にしない: 衝突の行があっても、前提の依存が満たされていれば依存の判定は通り、
 // 依存の評価は衝突の行の有無で変わらない。
 func TestConflict_RowsNeverEnterTheDependencyEvaluation(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -298,6 +307,7 @@ func TestConflict_RowsNeverEnterTheDependencyEvaluation(t *testing.T) {
 
 // 委譲の対象の選び方（依存の判定）は衝突の行を読まない: 衝突の行があっても、前提の無い課題は対象になる。
 func TestConflict_RowDoesNotKeepAChallengeOutOfTheDelegationTargets(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -320,6 +330,7 @@ func TestConflict_RowDoesNotKeepAChallengeOutOfTheDelegationTargets(t *testing.T
 
 // 前提の依存が満たされていれば、衝突の行（相手は未完了）があっても委譲は起動する（衝突は着手の門にしない）。
 func TestConflict_SatisfiedPrerequisiteStartsEvenWithAConflictRow(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	pre := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
@@ -347,6 +358,7 @@ func TestConflict_SatisfiedPrerequisiteStartsEvenWithAConflictRow(t *testing.T) 
 
 // 後回しにした課題を委譲すると、その課題を後回しの側とする向きのある組は外れる（待っている理由に残さない）。
 func TestConflict_LaunchClearsTheDirectedPairsOfTheDeferredChallenge(t *testing.T) {
+	t.Parallel()
 	f := newPlanFixture(t)
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)

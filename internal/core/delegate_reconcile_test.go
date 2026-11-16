@@ -185,6 +185,7 @@ func (f *delegateFixture) status(t *testing.T) Status { return f.detail(t, "C-1"
 
 // AC-220・221: launch_failed を除く 7 つの結果のどれでも照合し、launch_failed では照合しない。
 func TestReconcile_RunsForEveryResultExceptLaunchFailed(t *testing.T) {
+	t.Parallel()
 	for _, r := range []RunResult{RunResultSucceeded, RunResultErrored, RunResultMalformed, RunResultInvalidOutput, RunResultTimedOut, RunResultBudgetExhausted, RunResultInterrupted} {
 		t.Run(string(r), func(t *testing.T) {
 			f := newReconFixture(t, "impl")
@@ -216,6 +217,7 @@ func TestReconcile_RunsForEveryResultExceptLaunchFailed(t *testing.T) {
 
 // AC-222: 報告のブランチと PR の URL は、偽の gh が返さなければ記録されない。
 func TestReconcile_DoesNotTrustTheReport(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	if _, err := f.run(t, nil); err != nil { // 報告は branch feat/x と PR URL を持つ。照合は何も見つけない
 		t.Fatal(err)
@@ -227,6 +229,7 @@ func TestReconcile_DoesNotTrustTheReport(t *testing.T) {
 
 // AC-223・224: 報告のブランチがあればそれで、無ければスロットの現在のブランチで調べる。
 func TestReconcile_BranchSelection(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.setSlotBranch("feat/slot")
 	if _, err := f.run(t, nil); err != nil {
@@ -259,6 +262,7 @@ func TestReconcile_BranchSelection(t *testing.T) {
 
 // AC-225: 見つけた PR は URL・状態・base とともに run の成果物へ記録される。
 func TestReconcile_RecordsBranchAndPRsAsArtifacts(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.branches.branches["feat/x"] = true
 	f.branches.prs["feat/x"] = []UpstreamPullRequest{mkPR(1, "open", "develop"), mkPR(2, "closed", "develop"), mkPR(3, "merged", "develop")}
@@ -282,6 +286,7 @@ func TestReconcile_RecordsBranchAndPRsAsArtifacts(t *testing.T) {
 
 // AC-227・228: 未コミットの変更が残ると needs_attention になり、clear するまで次の委譲は割り当てられない。
 func TestReconcile_DirtySlotNeedsAttentionUntilCleared(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	slotPath := f.s.Workspace() + "/slot1"
 	st := f.git.states[slotPath]
@@ -316,6 +321,7 @@ func TestReconcile_DirtySlotNeedsAttentionUntilCleared(t *testing.T) {
 
 // 作業ツリーの検査に失敗したときも、スロットを解放せず needs_attention にする。
 func TestReconcile_InspectFailureNeedsAttention(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.deleg.onInvoke = func(DelegateLaunchInput) { f.git.errs[f.s.Workspace()+"/slot1"] = errFakeGH }
 	if _, err := f.run(t, nil); err != nil {
@@ -339,6 +345,7 @@ func (f *delegateFixture) setStatus(t *testing.T, id, status string) {
 
 // AC-229〜235: 成果物の確認。
 func TestReconcile_ArtifactCheckMapping(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		operation string
@@ -398,6 +405,7 @@ func TestReconcile_ArtifactCheckMapping(t *testing.T) {
 
 // 提出（検証中）は経路 invoker・原因の run の ID つきで作業ログへ残る（M1 T7）。
 func TestReconcile_SubmitIsLoggedAsInvokerWithRunID(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.branches.prs["feat/x"] = []UpstreamPullRequest{mkPR(1, "open", "develop")}
 	if _, err := f.run(t, nil); err != nil {
@@ -411,6 +419,7 @@ func TestReconcile_SubmitIsLoggedAsInvokerWithRunID(t *testing.T) {
 
 // succeeded 以外では成果物の確認（検証中・保留）をしない。
 func TestReconcile_ArtifactCheckOnlyForSucceededCompleted(t *testing.T) {
+	t.Parallel()
 	f2 := newReconFixture(t, "impl")
 	f2.deleg.result = JudgmentLaunchOutput{Result: RunResultErrored}
 	if _, err := f2.run(t, nil); err != nil {
@@ -423,6 +432,7 @@ func TestReconcile_ArtifactCheckOnlyForSucceededCompleted(t *testing.T) {
 
 // AC-236〜238: release の登録（既定ブランチの base だけ・重複なし）。
 func TestReconcile_ReleaseRegistration(t *testing.T) {
+	t.Parallel()
 	t.Run("default base registers once per PR URL", func(t *testing.T) {
 		f := newReconFixture(t, "impl")
 		f.branches.prs["feat/x"] = []UpstreamPullRequest{mkPR(1, "open", "main")}
@@ -471,6 +481,7 @@ func TestReconcile_ReleaseRegistration(t *testing.T) {
 // AC-239・240・M3P41: 既定ブランチへのマージ済みの PR は、release が未承認なら本番反映の検出が
 // 成果物の確認より優先し、承認済みならこの規則では保留しない。
 func TestReconcile_UnapprovedProductionReleaseDetection(t *testing.T) {
+	t.Parallel()
 	pr := mkPR(1, "merged", "main")
 	t.Run("unapproved", func(t *testing.T) {
 		f := newReconFixture(t, "impl")
@@ -519,6 +530,7 @@ func TestReconcile_UnapprovedProductionReleaseDetection(t *testing.T) {
 // 子が報告したブランチ名が git のブランチ名として不正なら、報告は検査で退けられ
 // （run の結果は invalid_output）、gh を呼ばない。
 func TestReconcile_InvalidReportedBranchNameIsRejectedAndNotLookedUp(t *testing.T) {
+	t.Parallel()
 	for _, b := range []string{"x/../..", "-rf", "a b", "a//b", "feat/.hidden", "x.lock", "a~b", c404Branch} {
 		f := newReconFixture(t, "impl-branch")
 		f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) { m["branch"] = b })
@@ -541,6 +553,7 @@ func TestReconcile_InvalidReportedBranchNameIsRejectedAndNotLookedUp(t *testing.
 // 防御: core の再検査を通らない経路（スロット由来など）で不正なブランチ名が来ても、
 // gatherReconciliation は gh を呼ばない。
 func TestReconcile_GatherDoesNotLookUpAnImplausibleBranch(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl-branch")
 	dc := &delegationContext{Repo: f.conn.Repos[0], Operation: ConnectorOperation{Artifacts: "branch"}}
 	bad := "a b"
@@ -556,6 +569,7 @@ func TestReconcile_GatherDoesNotLookUpAnImplausibleBranch(t *testing.T) {
 
 // タイトルの無い PR でも release の登録で失敗しない（要約は URL）。
 func TestReconcile_ReleaseForPRWithoutTitle(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	pr := mkPR(1, "open", "main")
 	pr.Title = ""
@@ -572,6 +586,7 @@ func TestReconcile_ReleaseForPRWithoutTitle(t *testing.T) {
 // 前の課題の PR を成果物として記録せず、release の登録・検証中への遷移・承認なしの本番反映の
 // 検出も起こさない。
 func TestReconcile_LeftoverSlotBranchIsNotThisDelegationsArtifact(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.setLeftoverBranch("feat/previous")
 	f.branches.branches["feat/previous"] = true
@@ -597,6 +612,7 @@ func TestReconcile_LeftoverSlotBranchIsNotThisDelegationsArtifact(t *testing.T) 
 
 // 決定 A: 割り当て時と異なるブランチへ切り替わっていれば、今回の委譲のブランチとして使う。
 func TestReconcile_ChangedSlotBranchFallsBack(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.setLeftoverBranch("feat/previous")
 	f.setSlotBranch("feat/new")
@@ -611,6 +627,7 @@ func TestReconcile_ChangedSlotBranchFallsBack(t *testing.T) {
 
 // 前の課題の PR（base は既定ブランチでない）が残っていても、検証中へ遷移しない（遷移の単独の検証）。
 func TestReconcile_LeftoverBranchDoesNotVerifyTheChallenge(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.setLeftoverBranch("feat/previous")
 	f.branches.branches["feat/previous"] = true
@@ -627,6 +644,7 @@ func TestReconcile_LeftoverBranchDoesNotVerifyTheChallenge(t *testing.T) {
 // 再開では、割り当て時のブランチが再開元（同じ課題）のブランチなら、報告にブランチが無くても
 // そのブランチで照合する（承認なしの本番反映の検出を落とさない）。
 func TestReconcile_ResumeOnTheChallengesOwnBranchStillReconciles(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.questionAndAnswer(t, id, "feat/x")
@@ -646,6 +664,7 @@ func TestReconcile_ResumeOnTheChallengesOwnBranchStillReconciles(t *testing.T) {
 // 委譲の run の終了と照合の写像の間に課題が取り下げられたら、写さず（状態は取り下げのまま）、
 // 取り下げを検出したことを結果の注記に残す。
 func TestReconcile_WithdrawnBeforeMappingIsNotedAndNotMapped(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.deleg.onInvoke = func(DelegateLaunchInput) { f.setStatus(t, "C-1", "withdrawn") }
 	res, err := f.run(t, nil)
@@ -662,6 +681,7 @@ func TestReconcile_WithdrawnBeforeMappingIsNotedAndNotMapped(t *testing.T) {
 
 // 取り下げ以外の理由（例: 人間対応待ちへ移された）で写さなかったときは、取り下げの注記を出さない。
 func TestReconcile_NotWithdrawnSkipHasNoWithdrawalNote(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.deleg.onInvoke = func(DelegateLaunchInput) { f.setStatus(t, "C-1", "awaiting_human") }
 	res, err := f.run(t, nil)

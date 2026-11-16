@@ -34,7 +34,7 @@ func writeFakeGH(t *testing.T) (dir string, calls func() []string) {
 	dir = t.TempDir()
 	logPath := filepath.Join(dir, "gh-calls.log")
 	script := "#!/bin/sh\n" + fakeGHLogAppendLine(logPath) + "exit 0\n"
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+	if err := writeExecutable(filepath.Join(dir, "gh"), []byte(script)); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
 	return dir, func() []string { return readFakeGHCallLog(t, logPath) }
@@ -87,6 +87,7 @@ func storeBytes(t *testing.T, ws string) []byte {
 // 登録表にあり、位置引数を取らず、`--source` が値ありの任意フラグであることを
 // 検証する（完了条件「`flywheel ingest [--source <id>]` がコマンドの登録表にある」）。
 func TestIngest_RegisteredWithCommonFlagsAndOptionalSource(t *testing.T) {
+	t.Parallel()
 	cmd, ok := registeredCommands()["ingest"]
 	if !ok {
 		t.Fatal(`"ingest" is not a registered command`)
@@ -124,6 +125,7 @@ func TestIngest_RegisteredWithCommonFlagsAndOptionalSource(t *testing.T) {
 // `.flywheel/sources.json` が無いワークスペースで `flywheel ingest` を実行すると、
 // 終了コード 2・`config_not_found` で終わり、ストアが変わらない。`gh` も呼ばれない。
 func TestIngest_MissingDeclaration_ConfigNotFound(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	calls := withFakeGHOnPATH(t)
 	before := storeBytes(t, ws)
@@ -142,6 +144,7 @@ func TestIngest_MissingDeclaration_ConfigNotFound(t *testing.T) {
 // 解釈できない JSON の宣言で `ingest` を実行すると、終了コード 2・
 // `config_invalid` で終わり、ストアが変わらず、`gh` が呼ばれない。
 func TestIngest_UnparseableDeclaration_ConfigInvalid(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, `{ this is not json `)
 	calls := withFakeGHOnPATH(t)
@@ -161,6 +164,7 @@ func TestIngest_UnparseableDeclaration_ConfigInvalid(t *testing.T) {
 // `flywheel ingest --source <宣言に無い id>` は、終了コード 1・
 // `validation_failed` で終わり、ストアが変わらない。
 func TestIngest_UnknownSourceFlag_ValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, validSourcesDeclaration)
 	before := storeBytes(t, ws)
@@ -180,6 +184,7 @@ func TestIngest_UnknownSourceFlag_ValidationFailed(t *testing.T) {
 // `^[a-z0-9][a-z0-9-]*$` に一致する必要がある）ため、宣言に無い id と同じ
 // validation_failed になるべき。
 func TestIngest_ExplicitEmptySourceFlag_ValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, validSourcesDeclaration)
 	before := storeBytes(t, ws)
@@ -198,6 +203,7 @@ func TestIngest_ExplicitEmptySourceFlag_ValidationFailed(t *testing.T) {
 // ストアを開くため）。宣言ファイルを置かない状態でも store_too_new が勝つことで、
 // この順序を確認する。
 func TestIngest_StoreTooNew_DoesNotInvokeGH(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	coretest.SetStoreVersion(t, ws, 999999)
 	calls := withFakeGHOnPATH(t)
@@ -219,6 +225,7 @@ func TestIngest_StoreTooNew_DoesNotInvokeGH(t *testing.T) {
 // 返す」という仮定はここで置き換える。取得・作成・更新の中身そのものの検証は
 // internal/cli/ingest_wiring_test.go・internal/core の各テストが担う）。
 func TestIngest_ValidDeclaration_CallsGHAndReturnsSourceShape(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, validSourcesDeclaration)
 	calls := withFakeGHRoutesOnPATH(t, []fakeGHRoute{
@@ -246,6 +253,7 @@ func TestIngest_ValidDeclaration_CallsGHAndReturnsSourceShape(t *testing.T) {
 // --source に指定した場合も成功することを検証する（validation_failed の判定が
 // 既知の id を誤って拒否しないことの確認）。
 func TestIngest_ValidDeclarationWithKnownSource_Succeeds(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, validSourcesDeclaration)
 	withFakeGHRoutesOnPATH(t, []fakeGHRoute{

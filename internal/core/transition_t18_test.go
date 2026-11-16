@@ -5,6 +5,7 @@ import "testing"
 // T18（#485）: 完了 → 着手中。本番反映でマージできなくなった場合に限る専用の書き込みだけが使う行で、
 // 通常の操作の引き（Lookup）・出る遷移（OutgoingFrom）・終端の判定（IsTerminal）には現れない。
 func TestT18_ReopenForReleaseIsARestrictedRow(t *testing.T) {
+	t.Parallel()
 	tr, ok := LookupRestricted(StatusDone, OpReopenForRelease)
 	if !ok {
 		t.Fatalf("LookupRestricted(done, reopen_for_release) not found")

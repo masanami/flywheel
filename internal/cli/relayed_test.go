@@ -42,7 +42,7 @@ func TestRelayed_ApproveRecordsEvidenceWithoutTTYEvenWithClaudeCode(t *testing.T
 		t.Fatalf("status = %q, approve did not take effect", got)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"log", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 {
+	if code := runWithLookPath([]string{"log", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 0 {
 		t.Fatalf("log exit=%d %s", code, stderr.String())
 	}
 	out := stdout.String()
@@ -54,6 +54,7 @@ func TestRelayed_ApproveRecordsEvidenceWithoutTTYEvenWithClaudeCode(t *testing.T
 }
 
 func TestRelayed_UsageErrorsWriteNothing(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := planPendingChallenge(t, ws)
 	cases := [][]string{
@@ -91,6 +92,7 @@ func TestRelayed_UsageErrorsWriteNothing(t *testing.T) {
 }
 
 func TestRelayed_RejectRecordsAndNonTTYApproveStillTTYRequired(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := planPendingChallenge(t, ws)
 	requireErrorCode(t, []string{"approve", id, "--workspace", ws}, 1, CodeTTYRequired)
@@ -104,6 +106,7 @@ func TestRelayed_RejectRecordsAndNonTTYApproveStillTTYRequired(t *testing.T) {
 }
 
 func TestRelayedVerifier_Contract(t *testing.T) {
+	t.Parallel()
 	v := &relayedVerifier{evidence: core.RelayEvidence{Session: "s", Quote: "q"}}
 	if v.Method() != core.VerificationRelayed || v.Evidence().Session != "s" || v.Evidence().Quote != "q" {
 		t.Fatalf("unexpected verifier: %+v", v)
@@ -121,7 +124,7 @@ func TestRelayedVerifier_Contract(t *testing.T) {
 func relayedLog(t *testing.T, ws string) string {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"log", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 {
+	if code := runWithLookPath([]string{"log", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 0 {
 		t.Fatalf("log exit=%d %s", code, stderr.String())
 	}
 	return stdout.String()
@@ -314,6 +317,7 @@ func TestRelayed_RejectLogAfterCarriesEvidence(t *testing.T) {
 // answer --replan は、着手中の保留への回答を、委譲に戻さず分類済（計画の作り直し）へ戻す。
 // 印の無い回答は着手中へ戻る。保留が着手中・検証中から出たものでなければ validation_failed で、何も書かない。
 func TestRelayed_AnswerReplanReturnsToClassified(t *testing.T) {
+	t.Parallel()
 	rel := []string{"--relayed", "--session", "s", "--quote", "範囲を変える"}
 	held := func(t *testing.T, ws string) string {
 		id := planPendingChallenge(t, ws)
@@ -362,6 +366,7 @@ func TestRelayed_AnswerReplanReturnsToClassified(t *testing.T) {
 }
 
 func TestAnswerSummaryText_ReplanShowsTheMark(t *testing.T) {
+	t.Parallel()
 	p := &core.AnswerPreview{ChallengeID: "C-1", Title: "t", Question: "q", Answer: "a"}
 	if strings.Contains(answerSummaryText(p, false), "範囲が変わる") {
 		t.Errorf("summary without the mark mentions it")

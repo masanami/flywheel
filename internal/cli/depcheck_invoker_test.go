@@ -13,6 +13,7 @@ const invokerPackagePrefix = "github.com/masanami/flywheel/internal/invoker"
 // ストアのパッケージを import しない（go list の依存関係で検査する）」の
 // 検査本体（TestAdaptersPackagesDoNotImportStoreDirectly と同型）。
 func TestInvokerPackagesDoNotImportStoreDirectly(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	pkgs := goListJSON(t, root, "./...")
 
@@ -50,6 +51,7 @@ func TestInvokerPackagesDoNotImportStoreDirectly(t *testing.T) {
 // モジュール外なら標準ライブラリだけであること
 // （TestAdaptersNonTestImportsAreCoreAndStdlibOnly と同型）。
 func TestInvokerNonTestImportsAreCoreAndStdlibOnly(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	pkgs := goListJSON(t, root, "./internal/invoker/...")
 	if len(pkgs) == 0 {

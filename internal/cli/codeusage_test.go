@@ -136,6 +136,7 @@ func mustParseAll(t *testing.T, fset *token.FileSet, sources map[string]string) 
 }
 
 func TestScanErrorCodeUsage_AcceptsConstantReference(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files := mustParseAll(t, fset, map[string]string{
 		"const.go": "package cli\nconst (\n\tCodeFoo ErrorCode = \"foo\"\n)\n",
@@ -152,6 +153,7 @@ func TestScanErrorCodeUsage_AcceptsConstantReference(t *testing.T) {
 }
 
 func TestScanErrorCodeUsage_RejectsRawStringLiteral(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files := mustParseAll(t, fset, map[string]string{
 		"use.go": "package cli\nfunc f() error { return NewError(\"bogus\", \"boom\") }\n",
@@ -163,6 +165,7 @@ func TestScanErrorCodeUsage_RejectsRawStringLiteral(t *testing.T) {
 }
 
 func TestScanErrorCodeUsage_RejectsTypeConversionBypass(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files := mustParseAll(t, fset, map[string]string{
 		"use.go": "package cli\nfunc f() error { return NewError(ErrorCode(\"bogus\"), \"boom\") }\n",
@@ -174,6 +177,7 @@ func TestScanErrorCodeUsage_RejectsTypeConversionBypass(t *testing.T) {
 }
 
 func TestScanErrorCodeUsage_RejectsUnknownIdentifier(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files := mustParseAll(t, fset, map[string]string{
 		"use.go": "package cli\nfunc f(x ErrorCode) error { return NewError(x, \"boom\") }\n",
@@ -252,6 +256,7 @@ func scanDirectErrorConstruction(files []*ast.File, fset *token.FileSet) (violat
 }
 
 func TestScanDirectErrorConstruction_RejectsCompositeLiteral(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files := mustParseAll(t, fset, map[string]string{
 		"use.go": "package cli\nfunc f() error { return &Error{Code: CodeUsageError, Message: \"x\"} }\n",
@@ -263,6 +268,7 @@ func TestScanDirectErrorConstruction_RejectsCompositeLiteral(t *testing.T) {
 }
 
 func TestScanDirectErrorConstruction_AllowsInsideNewError(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files := mustParseAll(t, fset, map[string]string{
 		"errors.go": "package cli\nfunc NewError(code ErrorCode, message string) *Error {\n\treturn &Error{Code: code, Message: message}\n}\n",
@@ -276,6 +282,7 @@ func TestScanDirectErrorConstruction_AllowsInsideNewError(t *testing.T) {
 // 確認モードのラウンド2で code-reviewer が発見: キー無し（位置指定）の複合リテラルは
 // scanDirectErrorConstruction をすり抜けていた（KeyValueExpr だけを見ていたため）。
 func TestScanDirectErrorConstruction_RejectsUnkeyedCompositeLiteral(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files := mustParseAll(t, fset, map[string]string{
 		"use.go": "package cli\nfunc f() error { return &Error{\"bogus_code\", \"boom\"} }\n",
@@ -288,6 +295,7 @@ func TestScanDirectErrorConstruction_RejectsUnkeyedCompositeLiteral(t *testing.T
 
 // 同じくラウンド2の指摘: フィールドへの直接代入（e.Code = ...）もすり抜けていた。
 func TestScanDirectErrorConstruction_RejectsFieldAssignment(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files := mustParseAll(t, fset, map[string]string{
 		"use.go": "package cli\nfunc f(e *Error) { e.Code = ErrorCode(\"bogus\") }\n",
@@ -301,6 +309,7 @@ func TestScanDirectErrorConstruction_RejectsFieldAssignment(t *testing.T) {
 // NewError の例外は errors.go にだけ適用されるべき（他ファイル・他パッケージの
 // 同名関数 NewError が誤って除外対象になっていた、というラウンド2の指摘）。
 func TestScanDirectErrorConstruction_NewErrorExceptionOnlyAppliesInErrorsGo(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files := mustParseAll(t, fset, map[string]string{
 		"not_errors.go": "package cli\nfunc NewError(x string) *Error {\n\treturn &Error{Code: ErrorCode(x)}\n}\n",
@@ -466,6 +475,7 @@ func producibleErrorCodes(t *testing.T, fset *token.FileSet, files []*ast.File, 
 // へ直接要求された場合の防御）。core がこの sentinel を返す箇所は実在するため、
 // 表 ⊆ 実装の側では出しうるものとして数える。
 func TestErrorCodeUsageInSourcesMatchesSpecInBothDirections(t *testing.T) {
+	t.Parallel()
 	fset, files := parseProductionSources(t)
 	consts := collectErrorCodeConstants(files)
 	used, violations := scanErrorCodeUsage(files, fset, consts)

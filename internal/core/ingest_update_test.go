@@ -20,6 +20,7 @@ import (
 // --- AC-49: fingerprint が一致すれば何も変えない ---
 
 func TestIngest_UnchangedFingerprintLeavesEverythingUntouched(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -75,6 +76,7 @@ func TestIngest_UnchangedFingerprintLeavesEverythingUntouched(t *testing.T) {
 // AC-56: タイトルだけが変わった Issue は、fingerprint の入力が本文だけなので
 // 変わらない（unchanged のまま）。
 func TestIngest_TitleOnlyChangeIsUnchanged(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -107,6 +109,7 @@ func TestIngest_TitleOnlyChangeIsUnchanged(t *testing.T) {
 // 起票者・完了条件・優先度・状態・計画は変えない ---
 
 func TestIngest_UpdateReplacesTitleDescriptionUrgencyFingerprintButKeepsClassificationAndPlan(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	urgencyLabels := map[string]string{"priority:high": "高", "priority:low": "低"}
@@ -190,6 +193,7 @@ func TestIngest_UpdateReplacesTitleDescriptionUrgencyFingerprintButKeepsClassifi
 // --- AC-54: 承認・保留・不可逆操作の記録は変わらない ---
 
 func TestIngest_UpdateKeepsApprovalsHoldsAndOperations(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -255,6 +259,7 @@ func holdEqual(a, b Hold) bool {
 // --- AC-57: 記録された fingerprint の版が2以外なら fail-closed ---
 
 func TestIngest_UnknownFingerprintVersionLeavesEverythingUntouched(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := mustCreateChallenge(t, s, "legacy fp")
@@ -300,6 +305,7 @@ func TestIngest_UnknownFingerprintVersionLeavesEverythingUntouched(t *testing.T)
 // --- AC-58: 完了した課題は最優先でスキップする ---
 
 func TestIngest_DoneChallengeIsSkipped(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	insertChallengeWithID(t, s, 1, "done challenge", StatusDone)
@@ -345,6 +351,7 @@ func TestIngest_DoneChallengeIsSkipped(t *testing.T) {
 // --- AC-59: 外部本文はデータ（承認済み等の文言に反応しない） ---
 
 func TestIngest_BodyMentioningApprovalTextDoesNotClassifyOrApprove(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -372,6 +379,7 @@ func TestIngest_BodyMentioningApprovalTextDoesNotClassifyOrApprove(t *testing.T)
 // --- AC-60: 並行した2つの ingest でも1つの外部キーに課題は1つ ---
 
 func TestIngest_ConcurrentIngestsCreateOnlyOneChallengePerExternalKey(t *testing.T) {
+	t.Parallel()
 	fixedActor(t, "alice")
 	ws := t.TempDir()
 	if _, err := Init(ws); err != nil {
@@ -381,11 +389,13 @@ func TestIngest_ConcurrentIngestsCreateOnlyOneChallengePerExternalKey(t *testing
 	if err != nil {
 		t.Fatalf("OpenWorkspace() A error = %v", err)
 	}
+	registerTestStore(t, storeA) // fixedActor の対象にする
 	defer func() { _ = storeA.Close() }()
 	storeB, err := OpenWorkspace(ws)
 	if err != nil {
 		t.Fatalf("OpenWorkspace() B error = %v", err)
 	}
+	registerTestStore(t, storeB) // fixedActor の対象にする
 	defer func() { _ = storeB.Close() }()
 
 	body := "concurrent body"
@@ -465,6 +475,7 @@ func TestIngest_ConcurrentIngestsCreateOnlyOneChallengePerExternalKey(t *testing
 // と同じく、3 件の真ん中（2 件目）に失敗を注入し、失敗より前（1件目）・
 // 失敗そのもの（2件目）・失敗より後（3件目）の 3 つを区別して検証する。
 func TestIngest_FailureDuringUpdateDoesNotLeaveChangesOrAffectOtherIssues(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -565,6 +576,7 @@ func TestIngest_FailureDuringUpdateDoesNotLeaveChangesOrAffectOtherIssues(t *tes
 // --- AC-88: ingest_update の作業ログ ---
 
 func TestIngest_RecordsIngestUpdateActivityWithChangedFieldsAndVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -637,6 +649,7 @@ func TestIngest_RecordsIngestUpdateActivityWithChangedFieldsAndVersion(t *testin
 // 上流の緊急度ラベルが外れると、緊急度は未設定に戻り、ingest_update の after に
 // null で載る（未設定の列は null で載せる＝M1 の H16）。
 func TestIngest_UpdateClearsUrgencyWhenLabelRemoved(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := SourceEntry{ID: "s", Type: SourceTypeGitHubIssue, Repos: []string{"o/r"}, SelfAssignees: []string{"masanami"}, UrgencyLabels: map[string]string{"priority:high": "高"}}

@@ -22,7 +22,7 @@ func TestRun_DelegatedMarker_RejectsEveryCommandExceptHelp(t *testing.T) {
 			t.Run(value+"/"+strings.Join(args, " "), func(t *testing.T) {
 				t.Setenv(core.DelegatedRunEnvVar, value)
 				var stdout, stderr bytes.Buffer
-				code := run(args, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+				code := runWithLookPath(args, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 				if code != 1 {
 					t.Fatalf("exit = %d, want 1 (stderr=%s)", code, stderr.String())
 				}
@@ -43,7 +43,7 @@ func TestRun_DelegatedMarker_RejectsEveryCommandExceptHelp(t *testing.T) {
 func TestRun_DelegatedMarker_JSONErrorCodeIsVerificationRejected(t *testing.T) {
 	t.Setenv(core.DelegatedRunEnvVar, "R-7")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"status", "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"status", "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 1 || !strings.Contains(stderr.String(), `"code":"verification_rejected"`) {
 		t.Errorf("exit=%d stderr=%s", code, stderr.String())
 	}
@@ -53,7 +53,7 @@ func TestRun_DelegatedMarker_HelpStillWorks(t *testing.T) {
 	t.Setenv(core.DelegatedRunEnvVar, "R-7")
 	for _, a := range []string{"help", "--help", "-h"} {
 		var stdout, stderr bytes.Buffer
-		if code := run([]string{a}, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 || stdout.Len() == 0 {
+		if code := runWithLookPath([]string{a}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 0 || stdout.Len() == 0 {
 			t.Errorf("%s: exit=%d stdout=%q stderr=%q", a, code, stdout.String(), stderr.String())
 		}
 	}
@@ -67,6 +67,7 @@ const markerCheckChildEnvVar = "FLYWHEEL_CLI_TEST_MARKER_CHECK_CHILD"
 // 他のテストが目印のせいで全滅する）。通常の環境には目印が無く、TestMain の Unsetenv を消しても
 // 通ってしまうため、目印を付けた子プロセスとして自分自身を起動して確かめる（値が空文字でも設定ありとなる）。
 func TestMain_UnsetsTheDelegatedMarker(t *testing.T) {
+	t.Parallel()
 	if os.Getenv(markerCheckChildEnvVar) == "1" {
 		if v, set := os.LookupEnv(core.DelegatedRunEnvVar); set {
 			t.Fatalf("the marker must be unset by TestMain, got %q", v)
@@ -91,6 +92,7 @@ func TestMain_UnsetsTheDelegatedMarker(t *testing.T) {
 // E2E（AC-219a）: `flywheel run` の一周で、委譲の子（偽の claude）の環境には目印が run の ID で
 // 渡り、判断 J3 の子の環境には渡らない。
 func TestRun_E2E_DelegationChildGetsTheMarkerAndJ3DoesNot(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	id := newInProgressForRun(t, ws, nil)
 	dir := t.TempDir()

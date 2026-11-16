@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -187,6 +186,7 @@ func phaseOfResult(t *testing.T, res *CycleRunResult, name CyclePhase) CyclePhas
 // AC-132: 取り込み・分類・計画の順に段を実行する。取り込みで作られた課題が同じ周の分類・
 // 計画へ進む（段の順は結果の phases の並びと、判断の呼び出しの順で確かめる）。
 func TestRunCycle_RunsIngestClassifyPlanInOrder(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	inv := mineThenPlanInvoker(t)
 	up := &fakeUpstream{issues: map[string][]UpstreamIssue{
@@ -225,6 +225,7 @@ func TestRunCycle_RunsIngestClassifyPlanInOrder(t *testing.T) {
 
 // AC-133: 取り込み元の宣言が無い（Ingest が nil）とき、ingest の段は skipped で、結果を持たない。
 func TestRunCycle_NoIngestInput_IngestPhaseIsSkipped(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	res := f.run(t, f.input(mineThenPlanInvoker(t)))
 
@@ -240,6 +241,7 @@ func TestRunCycle_NoIngestInput_IngestPhaseIsSkipped(t *testing.T) {
 // AC-134・AC-135・AC-136: 接続ツールの宣言（ConnDecl）が無い周は、エラーにならず、計画の段は
 // skipped で J2 を起動せず、分類の段は J1 を起動する。
 func TestRunCycle_NoConnectors_PlanSkippedJ2NotInvokedClassifyRuns(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.create(t, "t-1")
 	inv := mineThenPlanInvoker(t)
@@ -269,6 +271,7 @@ func TestRunCycle_NoConnectors_PlanSkippedJ2NotInvokedClassifyRuns(t *testing.T)
 
 // AC-137: 同じ周の分類の段で分類済になった課題は、同じ周の計画の段で J2 の対象になる。
 func TestRunCycle_ClassifiedInThisCycleIsPlannedInThisCycle(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	ch := f.create(t, "t-1")
 	inv := mineThenPlanInvoker(t)
@@ -287,6 +290,7 @@ func TestRunCycle_ClassifiedInThisCycleIsPlannedInThisCycle(t *testing.T) {
 // AC-138: 各段の対象は優先度 P0→P1→P2→未設定、同じ優先度では ID の昇順で処理される
 // （計画の段で確かめる。分類の段の対象は全員が優先度未設定なので ID の昇順になる）。
 func TestRunCycle_TargetsAreProcessedByPriorityThenID(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.classified(t, "t-1", "P2")
 	f.classified(t, "t-2", "P0")
@@ -315,6 +319,7 @@ func TestRunCycle_TargetsAreProcessedByPriorityThenID(t *testing.T) {
 // AC-139・AC-140: 計画承認待ち・完了確認待ち・人間対応待ちの課題は、どの段の対象にもならず、
 // cycle は承認・差し戻し・保留への回答の作業ログを残さない（残るのは経路 invoker の遷移だけ）。
 func TestRunCycle_SkipsWaitingChallengesAndWritesNoApprovalActivity(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	awaitingPlan := f.classified(t, "t-1", "P0")
 	if _, _, err := f.s.PlanChallenge(context.Background(), ChannelCLI, awaitingPlan.ID, PlanInput{Body: "manual plan"}); err != nil {
@@ -367,6 +372,7 @@ func mustChallengeInt(t *testing.T, id string) int64 {
 
 // AC-141・AC-142: 契機（trigger）を周の記録に残す。
 func TestRunCycle_RecordsTrigger(t *testing.T) {
+	t.Parallel()
 	for _, trigger := range []string{"cron", "manual"} {
 		t.Run(trigger, func(t *testing.T) {
 			f := newCycleFixture(t)
@@ -386,6 +392,7 @@ func TestRunCycle_RecordsTrigger(t *testing.T) {
 // AC-144・AC-145: 周の中の判断の呼び出しが失敗（errored）しても RunCycle はエラーを返さず、
 // その課題の要素の result が errored で、課題の状態は変わらない。
 func TestRunCycle_FailedRunIsAnErroredItemNotAnError(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	ch := f.create(t, "t-1")
 	inv := &cycleFakeInvoker{handle: func(cycleCall) JudgmentLaunchOutput {
@@ -410,6 +417,7 @@ func TestRunCycle_FailedRunIsAnErroredItemNotAnError(t *testing.T) {
 
 // AC-2（core 側）: agent.json の既定値を使ったことを結果の ConfigDefaultsUsed に示す。
 func TestRunCycle_ConfigDefaultsUsed(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.agent.DefaultsUsed = true
 	if got := f.run(t, f.input(mineThenPlanInvoker(t))).ConfigDefaultsUsed; fmt.Sprint(got) != "[agent.json]" {
@@ -425,6 +433,7 @@ func TestRunCycle_ConfigDefaultsUsed(t *testing.T) {
 
 // AC-127（core 側）: 周の既消費額（SpentUSD）は、終了した run の費用の合計。
 func TestRunCycle_SpentUSDIsTheSumOfRunCosts(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.create(t, "t-1")
 	f.create(t, "t-2")
@@ -449,6 +458,7 @@ func TestRunCycle_SpentUSDIsTheSumOfRunCosts(t *testing.T) {
 // 分類の段で枠超過を記録した周は、計画の段の判断の呼び出しも起動しない（理由 rate_limited。
 // 上流の取得もしない）。結果の RateLimited が立つ。
 func TestRunCycle_RateLimitInClassifyPropagatesToPlanPhase(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.classified(t, "t-1", "P0") // 計画の段の対象
 	f.create(t, "t-2")           // 分類の段の対象（この J1 が枠超過になる）
@@ -480,6 +490,7 @@ func TestRunCycle_RateLimitInClassifyPropagatesToPlanPhase(t *testing.T) {
 
 // AC-146: 生きている保持者がいれば RunCycle は ErrLocked で終わり、判断の呼び出しをしない。
 func TestRunCycle_LiveHolder_ReturnsErrLockedWithoutInvoking(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.create(t, "t-1")
 	if _, err := f.s.BeginCycle(context.Background(), BeginCycleInput{Trigger: "other", BudgetUSD: 10, Exclusive: true}); err != nil {
@@ -500,6 +511,7 @@ func TestRunCycle_LiveHolder_ReturnsErrLockedWithoutInvoking(t *testing.T) {
 // AC-148: RunCycle の終了後、排他は解放されている（続けて実行した RunCycle が ErrLocked にならない）。
 // 失敗した周（段の途中のエラー）でも解放される。
 func TestRunCycle_ReleasesTheLockAfterTheCycle(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.create(t, "t-1")
 	f.run(t, f.input(mineThenPlanInvoker(t)))
@@ -533,6 +545,7 @@ func TestRunCycle_ReleasesTheLockAfterTheCycle(t *testing.T) {
 // ctx が段の途中で取り消されても、周を閉じて排他を解放する（解放を ctx に依存させない。
 // 残すと次の cycle が stale の回収を待つまで locked になる）。
 func TestRunCycle_CancelledContextStillEndsTheCycleAndReleasesTheLock(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.create(t, "t-1")
 	f.create(t, "t-2")
@@ -567,12 +580,10 @@ func TestRunCycle_CancelledContextStillEndsTheCycleAndReleasesTheLock(t *testing
 // 周の起動前に actor（OS のログインユーザー名）を解決できなければ、周も排他も作らずに
 // ErrActorUnavailable で終わる（環境の不備で、aborted の周の行を残さない）。
 func TestRunCycle_ActorUnavailable_FailsBeforeStartingACycle(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.create(t, "t-1")
-	withActorSource(t, actorSourceFuncs{
-		userCurrent: func() (*user.User, error) { return nil, errors.New("no user") },
-		getenv:      fakeGetenv(map[string]string{}),
-	})
+	noActorStore(f.s)
 	inv := mineThenPlanInvoker(t)
 
 	_, err := f.s.RunCycle(context.Background(), f.input(inv))
@@ -591,6 +602,7 @@ func TestRunCycle_ActorUnavailable_FailsBeforeStartingACycle(t *testing.T) {
 // J1AutoInput.Cycle・J2AutoInput.Cycle は、CycleID と同じ周の JudgmentCycle でなければ
 // ErrValidation（run に紐づける周の ID の出所が食い違わないようにする）。
 func TestAutoInputs_SharedCycleMustBelongToTheSameCycle(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.create(t, "t-1")
 	f.classified(t, "t-2", "P1")
@@ -623,6 +635,7 @@ func TestAutoInputs_SharedCycleMustBelongToTheSameCycle(t *testing.T) {
 // goroutine で呼ばれるので、ここでは t.Fatalf を使わない（Goexit で RunCycle が
 // 戻らなくなる）。
 func TestRunCycle_HeartbeatsTheLockWhileRunning(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.s.lockHeartbeatInterval = 20 * time.Millisecond
 	f.create(t, "t-1")
@@ -645,6 +658,7 @@ func TestRunCycle_HeartbeatsTheLockWhileRunning(t *testing.T) {
 
 // 入力の検証: Trigger が空・宣言や判断の IF が無いときは ErrValidation で、何も記録しない。
 func TestRunCycle_InvalidInput_IsValidationErrorAndRecordsNothing(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	inv := mineThenPlanInvoker(t)
 	cases := map[string]func(in *CycleRunInput){
@@ -720,6 +734,7 @@ func lockHeartbeatNoFatal(t *testing.T, s *Store) time.Time {
 
 // release の段は最初の段で、接続ツールの宣言（ConnDecl）が無ければ skipped。
 func TestRunCycle_ReleasePhaseIsSkippedWithoutConnectors(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	in := f.input(mineThenPlanInvoker(t))
 	in.ConnDecl, in.Upstream, in.Delegate, in.Git, in.Reconcile, in.Checks, in.Merger = nil, nil, nil, nil, nil, nil, nil
@@ -732,6 +747,7 @@ func TestRunCycle_ReleasePhaseIsSkippedWithoutConnectors(t *testing.T) {
 
 // ある周では、承認済みの release をその周の中で実行する（マージの依頼は 1 回。契機は cycle）。
 func TestRunCycle_ReleasePhaseMergesAnApprovedReleaseInsideTheCycle(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	c := createAndAdvance(t, f.s, StatusDone)
 	opID := coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c.ID)), relRef, relHead, execTS(0))
@@ -776,6 +792,7 @@ func TestRunCycle_ReleasePhaseMergesAnApprovedReleaseInsideTheCycle(t *testing.T
 // release の段でマージした後に後続の段（ここでは分類）が失敗しても、実行済みの結果は
 // PartialReleaseError で運ばれる。
 func TestRunCycle_LaterPhaseErrorKeepsTheExecutedReleases(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	c := createAndAdvance(t, f.s, StatusDone)
 	opID := coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c.ID)), relRef, relHead, execTS(0))
@@ -804,6 +821,7 @@ func TestRunCycle_LaterPhaseErrorKeepsTheExecutedReleases(t *testing.T) {
 
 // release の段の発生は、その周の ID を持つ（AC-217）。
 func TestRunCycle_ReleasePhaseOccurrenceCarriesTheCycleID(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	c := createAndAdvance(t, f.s, StatusDone)
 	coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c.ID)), relRef, relHead, execTS(0))

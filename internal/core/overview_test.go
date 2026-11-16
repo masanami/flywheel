@@ -17,6 +17,7 @@ import (
 // --- 空のストア ---
 
 func TestGetOverview_EmptyStoreReturnsEmptyListsForAllFourBuckets(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 
 	ov, err := s.GetOverview(context.Background())
@@ -40,6 +41,7 @@ func TestGetOverview_EmptyStoreReturnsEmptyListsForAllFourBuckets(t *testing.T) 
 // --- 課題の8状態すべての振り分け ---
 
 func TestGetOverview_ChallengeStatusClassification(t *testing.T) {
+	t.Parallel()
 	// bucket は課題がどの区分に出るべきかを表す（"human"|"actionable"|"none"）。
 	tests := []struct {
 		status Status
@@ -108,6 +110,7 @@ func containsChallengeID(challenges []Challenge, id string) bool {
 // 更新し忘れて「どちらの区分にも現れない・両方に現れる」課題が黙って生じるのを防ぐ。
 // docs/features/m1-core.md §状態機械 の閉包テストと同じ発想）。
 func TestOverviewBuckets_CoverStatusVocabularyExactlyOnce(t *testing.T) {
+	t.Parallel()
 	seen := map[Status]int{}
 	for _, st := range needsHumanStatuses {
 		seen[st]++
@@ -131,6 +134,7 @@ func TestOverviewBuckets_CoverStatusVocabularyExactlyOnce(t *testing.T) {
 // --- 不可逆操作の状態による振り分け ---
 
 func TestGetOverview_PendingOperationGoesToNeedsHumanOperations(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -149,6 +153,7 @@ func TestGetOverview_PendingOperationGoesToNeedsHumanOperations(t *testing.T) {
 }
 
 func TestGetOverview_ApprovedOperationGoesToApprovedOperations(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -179,6 +184,7 @@ func TestGetOverview_ApprovedOperationGoesToApprovedOperations(t *testing.T) {
 
 // AC: 差し戻し済み（rejected）の不可逆操作はどこにも出さない。
 func TestGetOverview_RejectedOperationExcludedFromBothLists(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -220,6 +226,7 @@ func containsOperationID(ops []IrreversibleOperation, id string) bool {
 // --- 完了した課題は除外され、その課題に残る未承認の release だけが出る ---
 
 func TestGetOverview_DoneChallengeExcludedButItsPendingOperationStillShown(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -241,6 +248,7 @@ func TestGetOverview_DoneChallengeExcludedButItsPendingOperationStillShown(t *te
 // --- 読み取り専用: 状態・作業ログを変えない ---
 
 func TestGetOverview_DoesNotMutateChallengeVersionOrActivityLog(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -352,6 +360,7 @@ func insertOperationWithID(t *testing.T, s *Store, id, challengeID int64, state 
 // 明示的に有効化し、overview.go の ORDER BY id ASC が無ければこのテストが実際に
 // 失敗する状態を作ってから検証する。
 func TestGetOverview_ChallengesAndOperationsAreOrderedByIDAscending(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	enableReverseUnorderedSelectsForTest(t, s)
 

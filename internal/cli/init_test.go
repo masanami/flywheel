@@ -15,9 +15,10 @@ import (
 // AC「flywheel init を実行すると、ワークスペースに .flywheel/flywheel.db が
 // 作られ、終了コード 0 で終わる」の CLI 経由の検証。
 func TestInit_CreatesStoreAndExitsZero(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--workspace", dir, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"init", "--workspace", dir, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}
@@ -46,11 +47,12 @@ func TestInit_CreatesStoreAndExitsZero(t *testing.T) {
 // で終わり、その課題が変わらずに残っている」の検証。create は未実装のため、
 // 直接ストアへ課題を 1 件挿入してからワークスペースとして扱う。
 func TestInit_ReRunOnWorkspaceWithAChallengeIsANoOpSuccess(t *testing.T) {
+	t.Parallel()
 	dir := initializedWorkspace(t)
 	insertTestChallenge(t, dir, "keep me")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--workspace", dir, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"init", "--workspace", dir, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}
@@ -79,7 +81,7 @@ func TestInit_UsesWorkspaceFlagRegardlessOfCwd(t *testing.T) {
 	t.Chdir(elsewhere)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--workspace", target, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"init", "--workspace", target, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}
@@ -98,7 +100,7 @@ func TestInit_FallsBackToEnvVarWhenNoWorkspaceFlag(t *testing.T) {
 	t.Setenv("FLYWHEEL_WORKSPACE", target)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"init", "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}
@@ -111,6 +113,7 @@ func TestInit_FallsBackToEnvVarWhenNoWorkspaceFlag(t *testing.T) {
 // AC「親ディレクトリにストアがあるサブディレクトリで init を実行すると、その
 // サブディレクトリに新しいストアが作られ、親のストアは変わらない」の検証。
 func TestInit_DoesNotSearchAncestorsForAnExistingStore(t *testing.T) {
+	t.Parallel()
 	parent := initializedWorkspace(t)
 	insertTestChallenge(t, parent, "parent challenge")
 
@@ -120,7 +123,7 @@ func TestInit_DoesNotSearchAncestorsForAnExistingStore(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--workspace", child, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"init", "--workspace", child, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}
@@ -138,9 +141,10 @@ func TestInit_DoesNotSearchAncestorsForAnExistingStore(t *testing.T) {
 // TestInit_TextModeSucceedsWithoutJSON は --json 無しの出力でもクラッシュせず
 // 成功することの確認（CLI 共通の「--json 無しの出力は人間向け」規約）。
 func TestInit_TextModeSucceedsWithoutJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--workspace", dir}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"init", "--workspace", dir}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}

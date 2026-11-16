@@ -14,6 +14,9 @@ import (
 func runPiped(t *testing.T, args []string, extraEnv ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	cmd, out, errb := newChildCmd(args, extraEnv...)
+	if env := childPathEnv(t); env != "" {
+		cmd.Env = append(cmd.Env, env)
+	}
 	cmd.Stdin = strings.NewReader("")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
@@ -23,6 +26,7 @@ func runPiped(t *testing.T, args []string, extraEnv ...string) (code int, stdout
 }
 
 func TestRelayedE2E_ProcessLevelFlow(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := planPendingChallenge(t, ws)
 

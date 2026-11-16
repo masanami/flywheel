@@ -38,6 +38,7 @@ func countChallenges(t *testing.T, s *Store) int {
 }
 
 func TestInit_CreatesStoreAtResolvedWorkspace(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	res, err := Init(dir)
@@ -56,6 +57,7 @@ func TestInit_CreatesStoreAtResolvedWorkspace(t *testing.T) {
 }
 
 func TestInit_ReRunIsIdempotentAndPreservesExistingData(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	if _, err := Init(dir); err != nil {
@@ -90,6 +92,7 @@ func TestInit_ReRunIsIdempotentAndPreservesExistingData(t *testing.T) {
 }
 
 func TestInit_WritesGitignoreExcludingStoreAndItsSidecarFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := Init(dir); err != nil {
 		t.Fatalf("Init() error = %v", err)
@@ -124,6 +127,7 @@ func TestInit_WritesGitignoreExcludingStoreAndItsSidecarFiles(t *testing.T) {
 // レビュー指摘）。--untracked-files=all で個々のファイル名を展開させて初めて、
 // 除外が効いているかどうかを実際に検証できる。
 func TestInit_GitStatusPorcelainDoesNotShowTheStoreOrItsSidecarFiles(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available in PATH")
 	}
@@ -166,6 +170,7 @@ func TestInit_GitStatusPorcelainDoesNotShowTheStoreOrItsSidecarFiles(t *testing.
 }
 
 func TestInit_DoesNotSearchAncestorsAndDoesNotAffectParentStore(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	if _, err := Init(parent); err != nil {
 		t.Fatalf("Init(parent) error = %v", err)
@@ -188,6 +193,7 @@ func TestInit_DoesNotSearchAncestorsAndDoesNotAffectParentStore(t *testing.T) {
 }
 
 func TestOpenWorkspace_NotFoundWhenNoStoreExists(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	_, err := OpenWorkspace(dir)
 	if !errors.Is(err, ErrStoreNotFound) {
@@ -232,6 +238,7 @@ func TestOpenWorkspace_UsesAncestorStoreFromSubdirectory(t *testing.T) {
 // 遡りはカレントディレクトリを基点にしたときだけ（TestOpenWorkspace_
 // UsesAncestorStoreFromSubdirectory と対で見る）。
 func TestOpenWorkspace_ExplicitWorkspaceFlagDoesNotAscendToAnAncestorStore(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	if _, err := Init(parent); err != nil {
 		t.Fatalf("Init(parent) error = %v", err)
@@ -246,6 +253,7 @@ func TestOpenWorkspace_ExplicitWorkspaceFlagDoesNotAscendToAnAncestorStore(t *te
 }
 
 func TestOpenWorkspace_TooNewRejectsWithoutChangingTheFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := Init(dir); err != nil {
 		t.Fatalf("Init() error = %v", err)
@@ -272,6 +280,7 @@ func TestOpenWorkspace_TooNewRejectsWithoutChangingTheFile(t *testing.T) {
 }
 
 func TestInit_TooNewRejectsWithoutChangingTheFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := Init(dir); err != nil {
 		t.Fatalf("Init() error = %v", err)
@@ -301,6 +310,7 @@ func TestInit_TooNewRejectsWithoutChangingTheFile(t *testing.T) {
 // 新しすぎて開けない init は、.gitignore にも一切触れない（ストアを開いて版の
 // 検査に成功した後にだけ .gitignore を書く、という順序の検証）。
 func TestInit_TooNewDoesNotRewriteGitignore(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := Init(dir); err != nil {
 		t.Fatalf("Init() error = %v", err)
@@ -330,6 +340,7 @@ func TestInit_TooNewDoesNotRewriteGitignore(t *testing.T) {
 // .gitignore は不在のときだけ作る。利用者が既存の .gitignore に行を追記した後で
 // 再実行しても、その行は消えない（再実行は「何も変えずに成功」）。
 func TestInit_ReRunPreservesUserAppendedGitignoreLines(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := Init(dir); err != nil {
 		t.Fatalf("Init() 1回目 error = %v", err)
@@ -387,9 +398,11 @@ func setFutureVersion(t *testing.T, dbPath string) {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	out, err := combinedOutputRetrySignal(func() *exec.Cmd {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		return cmd
+	})
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
@@ -409,6 +422,7 @@ func touch(t *testing.T, path string) {
 // （design-reviewer 指摘: このフックは書き込みロックを保持したまま制御を
 // 止める力を持つため、非テストコードが設定しないことを検査で担保する）。
 func TestStore_ProductionOpenPathsLeaveBeforeCommitNil(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, flywheelDirName), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)

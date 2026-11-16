@@ -53,6 +53,7 @@ func (f *contractFixture) assertAdvancedWithoutCalls(t *testing.T) {
 // 判断待ちの保留の間に succeeded になった課題は、答えの前は保留のまま（周を重ねても）、答えの後の周で検証中へ進む。
 // 答えは resume に使わず保留に残り、完了の検証（J5）の材料に入り、成果物の PR は J5 の「直前の委譲の run」から見える。
 func TestHeldSuccess_WaitingHoldAnsweredAfterSuccessAdvancesWithoutStartOrResume(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -90,6 +91,7 @@ func TestHeldSuccess_WaitingHoldAnsweredAfterSuccessAdvancesWithoutStartOrResume
 
 // 予算超過の中止に失敗した保留（別の理由の保留）の間に succeeded になった課題も同じ。
 func TestHeldSuccess_CancelFailureHoldAdvancesAfterAnswer(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -111,6 +113,7 @@ func TestHeldSuccess_CancelFailureHoldAdvancesAfterAnswer(t *testing.T) {
 
 // resume が失敗した保留の間に succeeded になった課題も同じ。
 func TestHeldSuccess_ResumeFailureHoldAdvancesAfterAnswer(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -143,6 +146,7 @@ func TestHeldSuccess_ResumeFailureHoldAdvancesAfterAnswer(t *testing.T) {
 
 // 保留の間に failed になった課題は、この規則の対象ではない（印を付けず、検証中へ進めない）。
 func TestHeldSuccess_FailedDuringHoldIsNotAdvanced(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -162,6 +166,7 @@ func TestHeldSuccess_FailedDuringHoldIsNotAdvanced(t *testing.T) {
 
 // 着手中のまま succeeded を読む通常の経路は、印を付けずその場で検証中へ進める（従来どおり）。
 func TestHeldSuccess_SucceededWhileInProgressDoesNotMark(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)

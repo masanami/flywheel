@@ -11,6 +11,7 @@ import (
 // J2 の判定 parent_direct（委譲の計画が立たず親が直接行うのが適切な課題）のテスト。
 
 func TestValidateJ2Output_ParentDirectNeedsReasonAndCriteria(t *testing.T) {
+	t.Parallel()
 	vc := j2TestContext(t, false)
 	ok := []byte(`{"verdict":"parent_direct","question":"  周を回して観察する課題で委譲に向かない ","done_criteria":"親が周を回し結果を Issue に残した"}`)
 	v, valid := validateJ2Output(ok, vc)
@@ -35,6 +36,7 @@ func TestValidateJ2Output_ParentDirectNeedsReasonAndCriteria(t *testing.T) {
 }
 
 func TestJ2OutputSchema_AcceptsParentDirectVerdict(t *testing.T) {
+	t.Parallel()
 	if !strings.Contains(string(j2OutputSchema()), `"parent_direct"`) {
 		t.Errorf("schema does not list parent_direct: %s", j2OutputSchema())
 	}
@@ -59,6 +61,7 @@ func (f *j2Fixture) newClassifiedWithCriteria(t *testing.T, title string) *Chall
 }
 
 func TestAppendParentDirectCriteria(t *testing.T) {
+	t.Parallel()
 	section := ParentDirectCriteriaHeading + "\n\nP"
 	for name, tc := range map[string]struct{ original, parent, want string }{
 		"keeps the original and appends": {"O", "P", "O\n\n" + section},
@@ -76,6 +79,7 @@ func TestAppendParentDirectCriteria(t *testing.T) {
 }
 
 func TestPlanAutoJ2_ParentDirect_RaisesParentDirectHoldAndAppendsDoneCriteria(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassifiedWithCriteria(t, "direct")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -121,6 +125,7 @@ func TestPlanAutoJ2_ParentDirect_RaisesParentDirectHoldAndAppendsDoneCriteria(t 
 // 手で立てた parent_direct の保留と同じ見え方: オーナー待ち（needs_human・未回答の問いの一覧）に出ず、
 // 親のエージェントが動く番に出る。
 func TestPlanAutoJ2_ParentDirect_IsVisibleLikeAManualParentDirectHold(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "direct", "P1")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -152,6 +157,7 @@ func TestPlanAutoJ2_ParentDirect_IsVisibleLikeAManualParentDirectHold(t *testing
 
 // 元の達成条件が空なら、見出しと親の達成条件だけになる。
 func TestPlanAutoJ2_ParentDirect_EmptyOriginalCriteriaBecomesHeadingAndParentCriteria(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "direct", "P1")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -171,6 +177,7 @@ func TestPlanAutoJ2_ParentDirect_EmptyOriginalCriteriaBecomesHeadingAndParentCri
 // 計画し直すときの J2 の入力の「課題」の区画には、元の達成条件と親の達成条件の両方が入る。
 // 再び parent_direct が返っても、同じ内容を二重に書き足さない。
 func TestPlanAutoJ2_ParentDirect_AnsweringTheHoldReturnsToClassifiedAndJ2ReplansNextCycle(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassifiedWithCriteria(t, "direct")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -212,6 +219,7 @@ func TestPlanAutoJ2_ParentDirect_AnsweringTheHoldReturnsToClassifiedAndJ2Replans
 
 // 保留を解いた後に J2 がまた parent_direct を返しても、同じ見出しと本文を二重に書き足さない。
 func TestPlanAutoJ2_ParentDirect_SameCriteriaIsNotAppendedTwice(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassifiedWithCriteria(t, "direct")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -239,6 +247,7 @@ func TestPlanAutoJ2_ParentDirect_SameCriteriaIsNotAppendedTwice(t *testing.T) {
 }
 
 func TestPlanAutoJ2_ParentDirect_InvalidOutputChangesNothing(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "direct", "P1")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -257,6 +266,7 @@ func TestPlanAutoJ2_ParentDirect_InvalidOutputChangesNothing(t *testing.T) {
 
 // 達成条件の書き足しは、保留を立てた作業ログ（hold）の before・after に書き足す前と後の全文で載る。
 func TestPlanAutoJ2_ParentDirect_DoneCriteriaAppendIsInTheHoldActivity(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassifiedWithCriteria(t, "direct")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -296,6 +306,7 @@ func TestPlanAutoJ2_ParentDirect_DoneCriteriaAppendIsInTheHoldActivity(t *testin
 // 写す直前に読み直した状態が分類済でなければ（mapped=false）、保留を立てず・達成条件を変えず、
 // run は成功のまま返す（状態は返さない）。
 func TestPlanAutoJ2_ParentDirect_ChallengeLeftClassifiedDuringJ2_IsNotMapped(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "moved", "P1")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))

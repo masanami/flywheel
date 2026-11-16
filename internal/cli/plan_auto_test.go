@@ -124,6 +124,7 @@ func phaseOf(t *testing.T, doc map[string]any) map[string]any {
 // AC-15: connectors.json が無いワークスペースで plan --auto を実行すると、終了コード 2・
 // config_not_found で終わり、偽の claude・偽の gh が起動されず、ストアが変わらない。
 func TestPlanAuto_MissingConnectorsJSON_ConfigNotFound(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newClassifiedForCase(t, ws)
 	argvLog, _ := putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
@@ -144,6 +145,7 @@ func TestPlanAuto_MissingConnectorsJSON_ConfigNotFound(t *testing.T) {
 }
 
 func TestPlanAuto_InvalidConnectorsJSON_ConfigInvalid(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newClassifiedForCase(t, ws)
 	writeConnectorsJSONForTest(t, ws, `{"version": 1, "connectors": [], "repos": [], "no_such_key": 1}`)
@@ -156,6 +158,7 @@ func TestPlanAuto_InvalidConnectorsJSON_ConfigInvalid(t *testing.T) {
 }
 
 func TestPlanAuto_MissingOrDanglingAgentJSON_ConfigInvalidAndClaudeNotInvoked(t *testing.T) {
+	parallelTools(t, false)
 	cases := map[string]string{
 		"no agent.json":                 "",
 		"position_file omitted":         `{}`,
@@ -181,6 +184,7 @@ func TestPlanAuto_MissingOrDanglingAgentJSON_ConfigInvalidAndClaudeNotInvoked(t 
 // AC-27 の plan 版: PATH に claude が無ければ、終了コード 2・invoker_unavailable で終わり、
 // ストアが変わらず、gh も呼ばれない。
 func TestPlanAuto_ClaudeNotOnPATH_InvokerUnavailableAndStoreUnchanged(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
 	before := storeBytes(t, ws)
@@ -194,6 +198,7 @@ func TestPlanAuto_ClaudeNotOnPATH_InvokerUnavailableAndStoreUnchanged(t *testing
 
 // AC-1 の plan 版・#83: 個別の操作も周を作り、既定の周の上限額 300 で評価する。
 func TestPlanAuto_DefaultCycleBudgetIs300USD(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
 	stdout, _ := j2PlanFixture(t, nil)
@@ -214,6 +219,7 @@ func TestPlanAuto_DefaultCycleBudgetIs300USD(t *testing.T) {
 // --- 計画の登録・spec・入力（AC-87 の結線・AC-91・94・95・102） ---
 
 func TestPlanAuto_MappedChallenge_RegistersPlanWithSpecAndFeedsUpstreamToJ2(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
 	bindChallengeToIssue(t, ws, id, 7, 0, "2026-09-20T00:00:00Z")
@@ -328,6 +334,7 @@ func normalizeJSONValue(t *testing.T, v any) any {
 
 // 人が登録した計画の spec は null（show の plans の要素）。
 func TestShow_PlansSpecIsNullForAHumanPlan(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	runJSON(t, ws, "classify", id, "--priority", "P1")
@@ -344,6 +351,7 @@ func TestShow_PlansSpecIsNullForAHumanPlan(t *testing.T) {
 
 // AC-93: 取り込み元の対応の無い課題の J2 は gh を呼ばない。
 func TestPlanAuto_ChallengeWithoutSource_NeverCallsGH(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
 	ghCalls := withFakeGHRoutesOnPATH(t, j2GHRoutes(t))
@@ -363,6 +371,7 @@ func TestPlanAuto_ChallengeWithoutSource_NeverCallsGH(t *testing.T) {
 // AC-91: 上流の取得に失敗した課題は J2 が起動されず、状態と版が変わらず、
 // not_started に upstream_fetch_failed で出る。
 func TestPlanAuto_UpstreamFetchFailure_NotStartedAndNothingChanges(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
 	bindChallengeToIssue(t, ws, id, 7, 0, "2026-09-20T00:00:00Z")
@@ -404,6 +413,7 @@ func TestPlanAuto_UpstreamFetchFailure_NotStartedAndNothingChanges(t *testing.T)
 // gh が PATH に無い環境の上流の取得は、呼ばれたときに失敗を返す（対応の無い課題は
 // gh を要さない）。
 func TestNewUpstreamThreadSource_WithoutGH_FailsOnUseOnly(t *testing.T) {
+	parallelTools(t, false)
 	emptyPATH(t)
 	src := newUpstreamThreadSource(exec.LookPath)
 	if _, err := src.GetIssueThread(context.Background(), "o/r", 1); err == nil {
@@ -417,6 +427,7 @@ func TestNewUpstreamThreadSource_WithoutGH_FailsOnUseOnly(t *testing.T) {
 // --- 判定・不正な出力・対象 ---
 
 func TestPlanAuto_Uncertain_PutsChallengeAwaitingHumanWithQuestion(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
 	b, _ := json.Marshal(map[string]any{"is_error": false, "structured_output": map[string]any{"verdict": "uncertain", "question": "UNIQUE-CLI-QUESTION"}})
@@ -434,6 +445,7 @@ func TestPlanAuto_Uncertain_PutsChallengeAwaitingHumanWithQuestion(t *testing.T)
 }
 
 func TestPlanAuto_InvalidOutput_LeavesChallengeClassified(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
 	stdout, _ := j2PlanFixture(t, func(m map[string]any) { m["repo"] = "no-such-repo" })
@@ -450,6 +462,7 @@ func TestPlanAuto_InvalidOutput_LeavesChallengeClassified(t *testing.T) {
 }
 
 func TestPlanAuto_AllTargets_OnlyClassifiedChallengesAreProcessed(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	classified := newClassifiedForCase(t, ws)
 	unclassified := createForCase(t, ws)
@@ -466,6 +479,7 @@ func TestPlanAuto_AllTargets_OnlyClassifiedChallengesAreProcessed(t *testing.T) 
 }
 
 func TestPlanAuto_ByID_NonClassifiedIsInvalidTransition(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := createForCase(t, ws) // 未分類
 	stdout, _ := j2PlanFixture(t, nil)
@@ -481,6 +495,7 @@ func TestPlanAuto_ByID_NonClassifiedIsInvalidTransition(t *testing.T) {
 // #83 の CLI の形: ID を指定した plan --auto が周の上限で起動できなければ、終了コード 1・
 // budget_exceeded で終わる。
 func TestPlanAuto_ByID_CycleBudgetExceeded(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writePositionFileForTest(t, ws, "pos")
 	writeAgentJSONForTest(t, ws, `{"position_file": "position.md", "cycle_budget_usd": 0.5}`)
@@ -498,6 +513,7 @@ func TestPlanAuto_ByID_CycleBudgetExceeded(t *testing.T) {
 // --- 引数（AC-…の CLI 共通: 手動の引数との同時指定） ---
 
 func TestPlanAuto_WithManualArguments_UsageError(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
 	planFile := writePlanFileForTest(t, "manual body")
@@ -522,6 +538,7 @@ func TestPlanAuto_WithManualArguments_UsageError(t *testing.T) {
 
 // 手動の plan（--file）は従来どおり動く。
 func TestPlan_ManualFileStillRegistersAPlan(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	runJSON(t, ws, "classify", id, "--priority", "P0")

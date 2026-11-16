@@ -48,6 +48,7 @@ func (f *delegateFixture) newApprovedViaAPI(t *testing.T, title string) string {
 }
 
 func TestExecuteApproval_PlanApprovalRecordsPlanVersionAndKeepsChallengeVersionAsTarget(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newApprovedViaAPI(t, "a")
 	detail, err := f.s.GetChallenge(context.Background(), id)
@@ -70,6 +71,7 @@ func TestExecuteApproval_PlanApprovalRecordsPlanVersionAndKeepsChallengeVersionA
 }
 
 func TestExecuteApproval_RejectionRecordsNoPlanVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -101,6 +103,7 @@ func TestExecuteApproval_RejectionRecordsNoPlanVersion(t *testing.T) {
 
 // 完了条件: CLI の approve（core の承認 API）で計画を承認した課題が、run の委譲の候補に入る。
 func TestRunDelegation_ChallengeApprovedThroughTheApprovalAPIIsDelegatedWithTheApprovedPlanVersion(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newApprovedViaAPI(t, "a")
 
@@ -119,6 +122,7 @@ func TestRunDelegation_ChallengeApprovedThroughTheApprovalAPIIsDelegatedWithTheA
 // 完了条件: 承認済みなのに委譲できない課題は、黙って除外せず not_started に理由つきで出る。
 // 計画の版を持たない既存の承認の行は委譲せず、作り直しが必要な旨を示す。
 func TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothingLaunched(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "legacy", "P1", planSpec(nil))
 	cid, _ := parseChallengeID(id)
@@ -146,6 +150,7 @@ func TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothing
 }
 
 func TestRunDelegation_ApprovalPointingAtAMissingPlan_NotStartedWithReason(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "dangling", "P1", planSpec(nil))
 	cid, _ := parseChallengeID(id)
@@ -165,6 +170,7 @@ func TestRunDelegation_ApprovalPointingAtAMissingPlan_NotStartedWithReason(t *te
 }
 
 func TestRunDelegation_ApprovedPlanWithoutSpec_NotStartedWithReason(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "manual", "P1", "")
 	res, err := f.run(t, nil)
@@ -178,6 +184,7 @@ func TestRunDelegation_ApprovedPlanWithoutSpec_NotStartedWithReason(t *testing.T
 
 // ID を指定した run も、承認に計画の版が無い理由（作り直しが必要）を示す。
 func TestRunDelegation_ExplicitID_ApprovalWithoutPlanVersion_ErrorNamesTheReason(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "legacy", "P1", planSpec(nil))
 	cid, _ := parseChallengeID(id)
@@ -196,6 +203,7 @@ func TestRunDelegation_ExplicitID_ApprovalWithoutPlanVersion_ErrorNamesTheReason
 // 完了条件: 承認済みの計画が今の宣言と合わない・verdict が plan でない課題は、候補から黙って
 // 除外せず、理由つきで not_started（plan_unavailable）に出る。
 func TestRunDelegation_ApprovedPlanNotDelegatable_NotStartedWithReason(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		spec string

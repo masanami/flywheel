@@ -18,6 +18,7 @@ func writeFleetFile(t *testing.T, content string) string {
 }
 
 func TestLoadFleetDeclaration_ReadsWorkspacesInOrder(t *testing.T) {
+	t.Parallel()
 	a, b := t.TempDir(), t.TempDir()
 	p := writeFleetFile(t, `{"version":1,"workspaces":[{"name":"zeta","path":"`+b+`"},{"name":"alpha-1","path":"`+a+`"}]}`)
 	got, err := LoadFleetDeclaration(p)
@@ -31,6 +32,7 @@ func TestLoadFleetDeclaration_ReadsWorkspacesInOrder(t *testing.T) {
 }
 
 func TestLoadFleetDeclaration_MissingFileIsConfigNotFound(t *testing.T) {
+	t.Parallel()
 	_, err := LoadFleetDeclaration(filepath.Join(t.TempDir(), "nope.json"))
 	if !errors.Is(err, ErrConfigNotFound) {
 		t.Errorf("err = %v, want ErrConfigNotFound", err)
@@ -38,6 +40,7 @@ func TestLoadFleetDeclaration_MissingFileIsConfigNotFound(t *testing.T) {
 }
 
 func TestLoadFleetDeclaration_RejectsInvalid(t *testing.T) {
+	t.Parallel()
 	abs := t.TempDir()
 	other := t.TempDir()
 	ws := func(entries string) string { return `{"version":1,"workspaces":[` + entries + `]}` }
@@ -82,6 +85,7 @@ func TestLoadFleetDeclaration_RejectsInvalid(t *testing.T) {
 }
 
 func TestLoadFleetDeclaration_EmptyListIsAllowed(t *testing.T) {
+	t.Parallel()
 	got, err := LoadFleetDeclaration(writeFleetFile(t, `{"version":1,"workspaces":[]}`))
 	if err != nil || len(got) != 0 {
 		t.Errorf("got %v, %v", got, err)
@@ -89,6 +93,7 @@ func TestLoadFleetDeclaration_EmptyListIsAllowed(t *testing.T) {
 }
 
 func TestFleetNameFromPath(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"/x/My_Agent.1": "my-agent-1",
 		"/x/_a":         "a",

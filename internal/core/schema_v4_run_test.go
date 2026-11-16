@@ -106,6 +106,7 @@ func openSchemaVersion3Fixture(t *testing.T) (dir string, s *Store) {
 }
 
 func TestOpenWorkspace_UpgradesSchemaVersion3StoreToVersion4(t *testing.T) {
+	t.Parallel()
 	_, s := openSchemaVersion3Fixture(t)
 	ctx := context.Background()
 
@@ -179,6 +180,7 @@ func TestOpenWorkspace_UpgradesSchemaVersion3StoreToVersion4(t *testing.T) {
 // 0004 へ実際に昇格したストア（このファイルのフィクスチャ）でも同じ排他が
 // 効くことを確かめる。
 func TestOpenWorkspace_Version4Store_EnforcesActiveRunExclusivityAfterUpgrade(t *testing.T) {
+	t.Parallel()
 	_, s := openSchemaVersion3Fixture(t)
 
 	first, err := insertRunForTest(t, s, 1, validInsertRunInput())

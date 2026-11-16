@@ -1014,6 +1014,7 @@ func assertDocumentedJSON(t *testing.T, doc documentedJSON, name string, out map
 // 成功時の JSON の形が文書に書かれていることを検査する（出力との照合は
 // TestAllCommands_JSONSuccessWritesSingleDocumentToStdout が各コマンドの成功経路で行う）。
 func TestDocumentedJSON_EveryRegisteredCommandHasASection(t *testing.T) {
+	t.Parallel()
 	doc := loadDocumentedJSON(t)
 	for name := range registeredCommands() {
 		if len(doc.topLevel[name]) == 0 {
@@ -1032,6 +1033,7 @@ func TestDocumentedJSON_EveryRegisteredCommandHasASection(t *testing.T) {
 // 「`cycle` の JSON 出力」の最後の行）。`run` の --json も同じ規則で、文書との照合は
 // 上の run の項（assertDocumentedPhase(t, doc, "run", …)）が担う。ここは classify・plan・verify の --auto を回す。
 func TestDocumentedJSON_AutoOperationsReturnAPhaseObject(t *testing.T) {
+	parallelTools(t, false)
 	m3SpecLine(t, "`--auto` の個別の操作と `run` の `--json` は", "`{\"phase\": {…}}` で返す")
 	doc := loadDocumentedJSON(t)
 

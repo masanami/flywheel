@@ -109,6 +109,7 @@ func (f *headFixture) approveOpWith(t *testing.T, op *IrreversibleOperation, hea
 
 // 指摘 2: core は、検証の head と異なる head の承認を、自分で比較した結果（取り込みだけ・CI）で確かめる。
 func TestExecuteOperationApproval_CoreVerifiesTheHeadItself(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		head    string
@@ -152,6 +153,7 @@ func TestExecuteOperationApproval_CoreVerifiesTheHeadItself(t *testing.T) {
 
 // 完了の承認と同時に承認する release も、core が自分で確かめる（CLI が取り込みだけと言っても使わない）。
 func TestExecuteApproval_CoreVerifiesMergeInItself(t *testing.T) {
+	t.Parallel()
 	f := newHeadFixture(t)
 	f.verified(t, hdrefA, "v")
 	heads := []ReleaseHead{f.rh(f.relA, "hc"), f.rh(f.relB, "anything")}
@@ -173,6 +175,7 @@ func TestExecuteApproval_CoreVerifiesMergeInItself(t *testing.T) {
 // 指摘 3: 人間待ち（取り込みだけとも中身の変更とも確かめられない）の head は、人が選んだときだけ、core が自分でも人間待ちと
 // 確かめた場合に承認でき、理由が作業ログに残る。
 func TestExecuteOperationApproval_HumanAcceptsAnUndeterminableHead(t *testing.T) {
+	t.Parallel()
 	f := newHeadFixture(t)
 	f.verified(t, hdrefA, "v")
 	src := sourcesOf(openPRAt("ht", passingChecks()), compareTruncated())
@@ -196,6 +199,7 @@ func TestExecuteOperationApproval_HumanAcceptsAnUndeterminableHead(t *testing.T)
 
 // 人が選んでも、core の評価が人間待ちでなければ（中身の変更・取得の失敗・口が無い）承認しない。
 func TestExecuteOperationApproval_HumanChoiceDoesNotOverrideContentChanged(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		head string
@@ -224,6 +228,7 @@ func TestExecuteOperationApproval_HumanChoiceDoesNotOverrideContentChanged(t *te
 // --- 戻す判定（指摘 1・3）---
 
 func TestAssessReleaseReopen_Verdicts(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		mod  func(f *relFixture)
@@ -270,6 +275,7 @@ func TestAssessReleaseReopen_Verdicts(t *testing.T) {
 
 // 公開の入口は、戻す理由を core が自分で確かめ、規則に合わなければ何も書かず断る。
 func TestReopenChallengeForRelease_CoreChecksTheReason(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		reason  ReopenReason
@@ -318,6 +324,7 @@ func TestReopenChallengeForRelease_CoreChecksTheReason(t *testing.T) {
 
 // 完了でない課題・戻す対象でない操作は、評価せず今までどおり何も書かず Reopened=false。
 func TestReopenChallengeForRelease_NotEligibleStillReturnsNotReopened(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.setVerifiedHead(t, "v")
 	setChallengeStatus(t, f.s, f.cid, StatusInProgress)
@@ -329,6 +336,7 @@ func TestReopenChallengeForRelease_NotEligibleStillReturnsNotReopened(t *testing
 
 // 指摘 3: 人間待ちは片付けの結果に理由つきで出て、何も書かない。
 func TestRelease_SweepReportsAHumanWaitWithoutWriting(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		head string
@@ -356,6 +364,7 @@ func TestRelease_SweepReportsAHumanWaitWithoutWriting(t *testing.T) {
 
 // 人間待ちの release は、人が承認せず着手中へ戻す方を選べる（待ちのままにならない）。
 func TestRelease_HumanWaitCanBeResolvedByReopening(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.setOpState(t, OperationStatePending)
 	f.setVerifiedHead(t, "v")
@@ -379,6 +388,7 @@ func TestRelease_HumanWaitCanBeResolvedByReopening(t *testing.T) {
 
 // (a) head 無しで人間待ちになった release は、人が「確かめないまま承認する」を選んでも承認できない。
 func TestExecuteOperationApproval_HeadlessHumanWaitIsNotApprovable(t *testing.T) {
+	t.Parallel()
 	headless := &prFake{pr: UpstreamPullRequestChecks{State: "open", Base: "main", HeadSHA: "", Checks: passingChecks()}}
 	a := assessReleaseHeadOfPR(context.Background(), newFakeCompare(), "o/r", headless.pr, "v")
 	if !a.Change.WaitsForHuman() {
@@ -401,6 +411,7 @@ func TestExecuteOperationApproval_HeadlessHumanWaitIsNotApprovable(t *testing.T)
 
 // (b) head 無しで人間待ちになった release は、理由 undeterminable で課題を着手中へ戻せる（人の出口）。
 func TestRelease_HeadlessHumanWaitCanBeResolvedByReopening(t *testing.T) {
+	t.Parallel()
 	for _, state := range []OperationState{OperationStatePending, OperationStateApproved} {
 		t.Run(string(state), func(t *testing.T) {
 			f := newRelFixture(t)

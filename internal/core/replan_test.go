@@ -50,6 +50,7 @@ func (f *delegateFixture) exec(q string, args ...any) error {
 
 // 印の付いた回答は、委譲に戻らず分類済になり、保留に印が残る。
 func TestAnswerReplan_GoesBackToClassifiedAndMarksTheHold(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.questionHold(t)
 
@@ -74,6 +75,7 @@ func TestAnswerReplan_GoesBackToClassifiedAndMarksTheHold(t *testing.T) {
 
 // 印の無い回答の動きは今までどおり（保留の直前の状態へ戻る）。
 func TestAnswerReplan_WithoutTheMarkReturnsToThePrecedingStatus(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.questionHold(t)
 
@@ -88,6 +90,7 @@ func TestAnswerReplan_WithoutTheMarkReturnsToThePrecedingStatus(t *testing.T) {
 
 // 保留の直前の状態が着手中・検証中でなければ、印は成立せず、何も書かない。
 func TestAnswerReplan_RejectedWhenTheHoldWasNotRaisedFromWork(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	ctx := context.Background()
 	ch, err := f.s.CreateChallenge(ctx, ChannelCLI, CreateInput{Title: "x", Description: "d"})
@@ -115,6 +118,7 @@ func TestAnswerReplan_RejectedWhenTheHoldWasNotRaisedFromWork(t *testing.T) {
 
 // 作り直しの入力に回答の文と前の計画と使った費用が入り、承認の後の委譲は前の成果物を引き継ぎ、費用は積み上がる。
 func TestAnswerReplan_J2InputCarriesAnswerAndPlan_DelegationCarriesTheDeliverableAndSpend(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	ctx := context.Background()
 	id := f.questionHold(t)

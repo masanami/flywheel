@@ -183,6 +183,7 @@ func queryHoldRunIDForTest(t *testing.T, s *Store, challengeDisplayID string) *i
 // 保留の複数件の並び順を単体で固定する） ---
 
 func TestPriorityRank_OrdersP0ThenP1ThenP2ThenUnset(t *testing.T) {
+	t.Parallel()
 	p0, p1, p2 := PriorityP0, PriorityP1, PriorityP2
 	ranks := []int{priorityRank(&p0), priorityRank(&p1), priorityRank(&p2), priorityRank(nil)}
 	for i := 1; i < len(ranks); i++ {
@@ -198,6 +199,7 @@ func TestPriorityRank_OrdersP0ThenP1ThenP2ThenUnset(t *testing.T) {
 // 優先度が常に未設定なので、この並び順は #85 の J2（分類済の課題。優先度が
 // 混在する）で初めて意味を持つ。
 func TestLoadChallengesByStatusSorted_OrdersByPriorityThenID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 
@@ -250,6 +252,7 @@ func challengeIDs(cs []Challenge) []string {
 // §判断点の共通の規則「判断点の入力に…すべての保留の問いと回答を古い順に
 // 含める」を、保留が2件以上あるケースで固定する。
 func TestFormatHoldsSection_MultipleHoldsAreOldestFirstAndBothIncluded(t *testing.T) {
+	t.Parallel()
 	older := Hold{Question: "UNIQUE-OLDER-Q", Answer: strPtr("UNIQUE-OLDER-A")}
 	newer := Hold{Question: "UNIQUE-NEWER-Q", Answer: strPtr("UNIQUE-NEWER-A")}
 

@@ -53,6 +53,7 @@ const validConnectorsExample = `{
 
 // 仕様（§IF / API）に載っている例をそのまま解釈できることを確認する。
 func TestLoadConnectorsDeclaration_ValidFullExample(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, validConnectorsExample)
 	decl, err := LoadConnectorsDeclaration(dir)
 	if err != nil {
@@ -91,6 +92,7 @@ func TestLoadConnectorsDeclaration_ValidFullExample(t *testing.T) {
 // --- ファイルが無い場合: config_not_found ---
 
 func TestLoadConnectorsDeclaration_FileNotFound(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	_, err := LoadConnectorsDeclaration(dir)
 	if !errors.Is(err, ErrConfigNotFound) {
@@ -101,6 +103,7 @@ func TestLoadConnectorsDeclaration_FileNotFound(t *testing.T) {
 // --- AC-17: 未知のキー（最上位・接続ツール・操作・リポジトリの各要素） ---
 
 func TestLoadConnectorsDeclaration_UnknownTopLevelKey(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [], "repos": [], "unknown": true}`)
 	if _, err := LoadConnectorsDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("error = %v, want ErrConfigInvalid", err)
@@ -108,6 +111,7 @@ func TestLoadConnectorsDeclaration_UnknownTopLevelKey(t *testing.T) {
 }
 
 func TestLoadConnectorsDeclaration_UnknownConnectorKey(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "unknown": true}
 	], "repos": []}`)
@@ -117,6 +121,7 @@ func TestLoadConnectorsDeclaration_UnknownConnectorKey(t *testing.T) {
 }
 
 func TestLoadConnectorsDeclaration_UnknownOperationKey(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op", "unknown": true}]}
 	], "repos": []}`)
@@ -126,6 +131,7 @@ func TestLoadConnectorsDeclaration_UnknownOperationKey(t *testing.T) {
 }
 
 func TestLoadConnectorsDeclaration_UnknownRepoKey(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": [{"name": "r", "remote": "o/r", "default_branch": "main", "connector": "a", "unknown": true}]}`)
@@ -137,6 +143,7 @@ func TestLoadConnectorsDeclaration_UnknownRepoKey(t *testing.T) {
 // --- AC-18: form の閉集合 ---
 
 func TestLoadConnectorsDeclaration_FormMustBeInClosedSet(t *testing.T) {
+	t.Parallel()
 	for _, form := range []string{"", "bypassPermissions", "cliX", "PLUGIN"} {
 		t.Run(form, func(t *testing.T) {
 			dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
@@ -152,6 +159,7 @@ func TestLoadConnectorsDeclaration_FormMustBeInClosedSet(t *testing.T) {
 // --- AC-19: permission_mode の閉集合（bypassPermissions を含む） ---
 
 func TestLoadConnectorsDeclaration_PermissionModeMustBeInClosedSet(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"bypassPermissions", "", "Auto"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
@@ -167,6 +175,7 @@ func TestLoadConnectorsDeclaration_PermissionModeMustBeInClosedSet(t *testing.T)
 // --- AC-20: invocation の閉集合外の差し込み ---
 
 func TestLoadConnectorsDeclaration_InvocationDisallowedPlaceholder(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "plugin", "permission_mode": "auto", "operations": [
 			{"id": "op", "invocation": "/x {title}"}
@@ -178,6 +187,7 @@ func TestLoadConnectorsDeclaration_InvocationDisallowedPlaceholder(t *testing.T)
 }
 
 func TestLoadConnectorsDeclaration_InvocationAllowedPlaceholders(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "plugin", "permission_mode": "auto", "operations": [
 			{"id": "op", "invocation": "/x {issue_number} {issue_url} {external_key} {challenge_id}"}
@@ -191,6 +201,7 @@ func TestLoadConnectorsDeclaration_InvocationAllowedPlaceholders(t *testing.T) {
 // --- AC-21: リポジトリ名の重複 ---
 
 func TestLoadConnectorsDeclaration_DuplicateRepoName(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": [
@@ -205,6 +216,7 @@ func TestLoadConnectorsDeclaration_DuplicateRepoName(t *testing.T) {
 // --- AC-22: 接続ツールの id の重複 ---
 
 func TestLoadConnectorsDeclaration_DuplicateConnectorID(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op1"}]},
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op2"}]}
@@ -217,6 +229,7 @@ func TestLoadConnectorsDeclaration_DuplicateConnectorID(t *testing.T) {
 // --- AC-23: 同じ接続ツールの中の操作 id の重複（別の接続ツールなら許す） ---
 
 func TestLoadConnectorsDeclaration_DuplicateOperationIDWithinSameConnector(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [
 			{"id": "op"}, {"id": "op"}
@@ -228,6 +241,7 @@ func TestLoadConnectorsDeclaration_DuplicateOperationIDWithinSameConnector(t *te
 }
 
 func TestLoadConnectorsDeclaration_SameOperationIDAcrossDifferentConnectorsIsAllowed(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]},
 		{"id": "b", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
@@ -240,6 +254,7 @@ func TestLoadConnectorsDeclaration_SameOperationIDAcrossDifferentConnectorsIsAll
 // --- AC-24: 宣言に無い接続ツールを指すリポジトリ ---
 
 func TestLoadConnectorsDeclaration_RepoReferencesUnknownConnector(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": [{"name": "r", "remote": "o/r", "default_branch": "main", "connector": "does-not-exist"}]}`)
@@ -251,6 +266,7 @@ func TestLoadConnectorsDeclaration_RepoReferencesUnknownConnector(t *testing.T) 
 // --- AC-25: form: plugin で invocation の無い操作 ---
 
 func TestLoadConnectorsDeclaration_PluginOperationWithoutInvocation(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "plugin", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": []}`)
@@ -260,6 +276,7 @@ func TestLoadConnectorsDeclaration_PluginOperationWithoutInvocation(t *testing.T
 }
 
 func TestLoadConnectorsDeclaration_BriefOperationWithInvocationIsInvalid(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op", "invocation": "/x"}]}
 	], "repos": []}`)
@@ -271,6 +288,7 @@ func TestLoadConnectorsDeclaration_BriefOperationWithInvocationIsInvalid(t *test
 // --- AC-26: form: cli で commands・contract_version の無い接続ツール ---
 
 func TestLoadConnectorsDeclaration_CLIConnectorWithoutCommands(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "cli", "permission_mode": "auto", "contract_version": 1}
 	], "repos": []}`)
@@ -280,6 +298,7 @@ func TestLoadConnectorsDeclaration_CLIConnectorWithoutCommands(t *testing.T) {
 }
 
 func TestLoadConnectorsDeclaration_CLIConnectorWithoutContractVersion(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "cli", "permission_mode": "auto", "commands": {"start": ["start"], "status": ["status"], "resume": ["resume"], "cancel": ["cancel"]}}
 	], "repos": []}`)
@@ -289,6 +308,7 @@ func TestLoadConnectorsDeclaration_CLIConnectorWithoutContractVersion(t *testing
 }
 
 func TestLoadConnectorsDeclaration_CLIConnectorMissingOneCommand(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "cli", "permission_mode": "auto", "contract_version": 1,
 		 "commands": {"start": ["start"], "status": ["status"], "resume": ["resume"]}}
@@ -299,6 +319,7 @@ func TestLoadConnectorsDeclaration_CLIConnectorMissingOneCommand(t *testing.T) {
 }
 
 func TestLoadConnectorsDeclaration_CLIConnectorContractVersionMustBeOne(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "cli", "permission_mode": "auto", "contract_version": 2,
 		 "commands": {"start": ["start"], "status": ["status"], "resume": ["resume"], "cancel": ["cancel"]}}
@@ -309,6 +330,7 @@ func TestLoadConnectorsDeclaration_CLIConnectorContractVersionMustBeOne(t *testi
 }
 
 func TestLoadConnectorsDeclaration_ValidCLIConnector(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "cli", "permission_mode": "auto", "contract_version": 1,
 		 "commands": {"start": ["start"], "status": ["status"], "resume": ["resume"], "cancel": ["cancel"]}}
@@ -329,6 +351,7 @@ func TestLoadConnectorsDeclaration_ValidCLIConnector(t *testing.T) {
 // --- 操作の省略時の既定（interactive=true, counterpart=parent, child_may_decide=false） ---
 
 func TestLoadConnectorsDeclaration_OperationDefaults(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": []}`)
@@ -354,6 +377,7 @@ func TestLoadConnectorsDeclaration_OperationDefaults(t *testing.T) {
 // --- version の省略・不正 ---
 
 func TestLoadConnectorsDeclaration_VersionMustBeOne(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"connectors": [], "repos": []}`,
 		`{"version": 2, "connectors": [], "repos": []}`,
@@ -372,6 +396,7 @@ func TestLoadConnectorsDeclaration_VersionMustBeOne(t *testing.T) {
 // --- connectors・repos の省略は必須キー違反 ---
 
 func TestLoadConnectorsDeclaration_ConnectorsAndReposAreRequired(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"version": 1, "repos": []}`,
 		`{"version": 1, "connectors": []}`,
@@ -387,6 +412,7 @@ func TestLoadConnectorsDeclaration_ConnectorsAndReposAreRequired(t *testing.T) {
 }
 
 func TestLoadConnectorsDeclaration_EmptyConnectorsAndReposIsAllowed(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [], "repos": []}`)
 	decl, err := LoadConnectorsDeclaration(dir)
 	if err != nil {
@@ -400,6 +426,7 @@ func TestLoadConnectorsDeclaration_EmptyConnectorsAndReposIsAllowed(t *testing.T
 // --- human_question_kinds の id 重複（判断が要る細部。fail-closed 側に倒す） ---
 
 func TestLoadConnectorsDeclaration_DuplicateHumanQuestionKindID(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "human_question_kinds": [
 		{"id": "a", "label": "x"}, {"id": "a", "label": "y"}
 	], "connectors": [], "repos": []}`)
@@ -411,6 +438,7 @@ func TestLoadConnectorsDeclaration_DuplicateHumanQuestionKindID(t *testing.T) {
 // --- 未知のキーへの型違い ---
 
 func TestLoadConnectorsDeclaration_UnparseableJSON(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{ not json `)
 	if _, err := LoadConnectorsDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("error = %v, want ErrConfigInvalid", err)
@@ -421,6 +449,7 @@ func TestLoadConnectorsDeclaration_UnparseableJSON(t *testing.T) {
 // 拒否する（agent_declaration_test.go の同名の指摘と同じ理由） ---
 
 func TestLoadConnectorsDeclaration_WholeFileNull(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `null`)
 	if _, err := LoadConnectorsDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("error = %v, want ErrConfigInvalid", err)
@@ -428,6 +457,7 @@ func TestLoadConnectorsDeclaration_WholeFileNull(t *testing.T) {
 }
 
 func TestLoadConnectorsDeclaration_RequiredKeysRejectNull(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"version": 1, "connectors": null, "repos": []}`,
 		`{"version": 1, "connectors": [], "repos": null}`,
@@ -443,6 +473,7 @@ func TestLoadConnectorsDeclaration_RequiredKeysRejectNull(t *testing.T) {
 }
 
 func TestLoadConnectorsDeclaration_OperationNullFieldsAreRejected(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"id": null}`,
 		`{"id": "op", "invocation": null}`,
@@ -466,6 +497,7 @@ func TestLoadConnectorsDeclaration_OperationNullFieldsAreRejected(t *testing.T) 
 // 同じ差し込みの閉集合で検証する ---
 
 func TestLoadConnectorsDeclaration_CLIConnectorEmptyCommandArrayIsInvalid(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "cli", "permission_mode": "auto", "contract_version": 1,
 		 "commands": {"start": [], "status": ["status"], "resume": ["resume"], "cancel": ["cancel"]}}
@@ -482,6 +514,7 @@ func TestLoadConnectorsDeclaration_CLIConnectorEmptyCommandArrayIsInvalid(t *tes
 // 定めていないため、S1 では commands の引数の内容を制限しない（構造的な
 // 検証・非空だけを課す）仮定を置く。
 func TestLoadConnectorsDeclaration_CLIConnectorCommandArgsAreNotRestrictedToInvocationPlaceholders(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "cli", "permission_mode": "auto", "contract_version": 1,
 		 "commands": {"start": ["start"], "status": ["status", "{run_id}"], "resume": ["resume", "{run_id}"], "cancel": ["cancel", "{run_id}"]}}
@@ -494,6 +527,7 @@ func TestLoadConnectorsDeclaration_CLIConnectorCommandArgsAreNotRestrictedToInvo
 // --- self-review 指摘: repos の remote・default_branch・slots.provider の検証 ---
 
 func TestLoadConnectorsDeclaration_RepoRemoteMustMatchOwnerSlashName(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": [{"name": "r", "remote": "not-a-remote", "default_branch": "main", "connector": "a"}]}`)
@@ -503,6 +537,7 @@ func TestLoadConnectorsDeclaration_RepoRemoteMustMatchOwnerSlashName(t *testing.
 }
 
 func TestLoadConnectorsDeclaration_RepoDefaultBranchMustNotBeEmpty(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": [{"name": "r", "remote": "o/r", "default_branch": "", "connector": "a"}]}`)
@@ -512,6 +547,7 @@ func TestLoadConnectorsDeclaration_RepoDefaultBranchMustNotBeEmpty(t *testing.T)
 }
 
 func TestLoadConnectorsDeclaration_RepoSlotsProviderMustBeInClosedSet(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": [{"name": "r", "remote": "o/r", "default_branch": "main", "connector": "a", "slots": {"provider": "bogus", "paths": []}}]}`)
@@ -521,6 +557,7 @@ func TestLoadConnectorsDeclaration_RepoSlotsProviderMustBeInClosedSet(t *testing
 }
 
 func TestLoadConnectorsDeclaration_RepoSlotsProviderCloneIsValid(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": [{"name": "r", "remote": "o/r", "default_branch": "main", "connector": "a", "slots": {"provider": "clone", "paths": ["x"]}}]}`)
@@ -534,6 +571,7 @@ func TestLoadConnectorsDeclaration_RepoSlotsProviderCloneIsValid(t *testing.T) {
 // operations（配列全体）・commands（オブジェクト全体）・slots（オブジェクト
 // 全体）・slots.provider が抜けていた。同じ理由で null を明示的に拒否する。
 func TestLoadConnectorsDeclaration_MoreNullFieldsAreRejected(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"human_question_kinds": `{"version": 1, "human_question_kinds": null, "connectors": [], "repos": []}`,
 		"operations": `{"version": 1, "connectors": [
@@ -569,6 +607,7 @@ func TestLoadConnectorsDeclaration_MoreNullFieldsAreRejected(t *testing.T) {
 // --- fail-closed: 検証の失敗はワークスペースに何も書かない ---
 
 func TestLoadConnectorsDeclaration_InvalidDeclarationChangesNothingOnDisk(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "not-a-form", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": []}`)
@@ -597,6 +636,7 @@ func connectorsWithPrediction(form, cp string) string {
 }
 
 func TestLoadConnectorsDeclaration_ConflictPrediction_ValidOnPluginAndBrief(t *testing.T) {
+	t.Parallel()
 	for _, form := range []string{"plugin", "brief"} {
 		t.Run(form, func(t *testing.T) {
 			dir := writeConnectorsJSON(t, connectorsWithPrediction(form, `{"command": ["predict", "--json"], "schema": "harness.conflict-prediction/v1"}`))
@@ -613,6 +653,7 @@ func TestLoadConnectorsDeclaration_ConflictPrediction_ValidOnPluginAndBrief(t *t
 }
 
 func TestLoadConnectorsDeclaration_ConflictPrediction_OmittedIsNil(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}], "repos": []}`)
 	d, err := LoadConnectorsDeclaration(dir)
 	if err != nil {
@@ -624,6 +665,7 @@ func TestLoadConnectorsDeclaration_ConflictPrediction_OmittedIsNil(t *testing.T)
 }
 
 func TestLoadConnectorsDeclaration_ConflictPrediction_Invalid(t *testing.T) {
+	t.Parallel()
 	const sc = `"schema": "harness.conflict-prediction/v1"`
 	cases := map[string]string{
 		"command missing":       `{` + sc + `}`,
@@ -659,6 +701,7 @@ func repoWithSlots(name, slots string) string {
 }
 
 func TestLoadConnectorsDeclaration_SlotsCloneAndWorktreeTogetherAreValid(t *testing.T) {
+	t.Parallel()
 	dir := writeConnectorsJSON(t, reposWithSlots(
 		repoWithSlots("c", `{"provider": "clone", "paths": [".flywheel/repos/c1", ".flywheel/repos/c2"]}`)+","+
 			repoWithSlots("w", `{"provider": "worktree", "base": ".flywheel/repos/w", "count": 3}`)))
@@ -676,6 +719,7 @@ func TestLoadConnectorsDeclaration_SlotsCloneAndWorktreeTogetherAreValid(t *test
 }
 
 func TestLoadConnectorsDeclaration_Slots_Invalid(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"container provider":          `{"provider": "container", "paths": ["x"]}`,
 		"clone without paths":         `{"provider": "clone"}`,
@@ -719,6 +763,7 @@ func loadRepoWithMergeMethod(t *testing.T, field string) (*ConnectorsDeclaration
 }
 
 func TestLoadConnectorsDeclaration_MergeMethodDefaultsToSquash(t *testing.T) {
+	t.Parallel()
 	decl, err := loadRepoWithMergeMethod(t, "")
 	if err != nil {
 		t.Fatalf("error = %v", err)
@@ -729,6 +774,7 @@ func TestLoadConnectorsDeclaration_MergeMethodDefaultsToSquash(t *testing.T) {
 }
 
 func TestLoadConnectorsDeclaration_MergeMethodClosedSet(t *testing.T) {
+	t.Parallel()
 	for _, m := range []string{"squash", "merge", "rebase"} {
 		decl, err := loadRepoWithMergeMethod(t, `, "merge_method": "`+m+`"`)
 		if err != nil {
@@ -748,6 +794,7 @@ func TestLoadConnectorsDeclaration_MergeMethodClosedSet(t *testing.T) {
 // --- conflict_exclude_paths ---
 
 func TestLoadConnectorsDeclaration_ConflictExcludePaths(t *testing.T) {
+	t.Parallel()
 	decl, err := loadRepoWithMergeMethod(t, "")
 	if err != nil {
 		t.Fatal(err)
@@ -770,6 +817,7 @@ func TestLoadConnectorsDeclaration_ConflictExcludePaths(t *testing.T) {
 }
 
 func TestMatchExcludePattern(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		pat, file string
 		want      bool

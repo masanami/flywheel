@@ -67,6 +67,7 @@ func (f *j5Fixture) assertOneJ5Occurrence(t *testing.T, kind string, cycleID str
 }
 
 func TestJ5Occurrence_NotMet(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.result = j5Out("not_met", "FB", nil)
@@ -78,6 +79,7 @@ func TestJ5Occurrence_NotMet(t *testing.T) {
 }
 
 func TestJ5Occurrence_Uncertain(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.result = j5Out("uncertain", nil, "Q")
@@ -89,6 +91,7 @@ func TestJ5Occurrence_Uncertain(t *testing.T) {
 }
 
 func TestJ5Occurrence_MetWithActualMismatchIsUncertain(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.setExpected(t, "C-1", 2)
@@ -104,6 +107,7 @@ func TestJ5Occurrence_MetWithActualMismatchIsUncertain(t *testing.T) {
 }
 
 func TestJ5Occurrence_MetMakesNone(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	if _, err := f.verify(t, nil); err != nil {
@@ -115,6 +119,7 @@ func TestJ5Occurrence_MetMakesNone(t *testing.T) {
 }
 
 func TestJ5Occurrence_InsertFailureLeavesNoTransition(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(t *testing.T, f *j5Fixture){
 		"not_met":   func(_ *testing.T, f *j5Fixture) { f.j5.result = j5Out("not_met", "FB", nil) },
 		"uncertain": func(_ *testing.T, f *j5Fixture) { f.j5.result = j5Out("uncertain", nil, "Q") },
@@ -160,6 +165,7 @@ func runJudgmentWith(t *testing.T, s *Store, id string, cycleID *string, out Jud
 }
 
 func TestJudgmentOccurrence_CountedFailuresMakeJudgmentFailed(t *testing.T) {
+	t.Parallel()
 	for _, r := range []RunResult{RunResultErrored, RunResultMalformed, RunResultInvalidOutput, RunResultTimedOut, RunResultInterrupted} {
 		t.Run(string(r), func(t *testing.T) {
 			s := newStoreForTest(t)
@@ -190,6 +196,7 @@ func TestJudgmentOccurrence_CountedFailuresMakeJudgmentFailed(t *testing.T) {
 }
 
 func TestJudgmentOccurrence_LaunchFailedMakesJudgmentFailed(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 	if _, err := runJudgmentWith(t, s, id, nil, JudgmentLaunchOutput{}, errors.New("cannot start")); err != nil {
@@ -202,6 +209,7 @@ func TestJudgmentOccurrence_LaunchFailedMakesJudgmentFailed(t *testing.T) {
 }
 
 func TestJudgmentOccurrence_NotCountedResultsMakeNone(t *testing.T) {
+	t.Parallel()
 	cases := map[string]JudgmentLaunchOutput{
 		"succeeded":        {Result: RunResultSucceeded},
 		"budget_exhausted": {Result: RunResultBudgetExhausted},
@@ -222,6 +230,7 @@ func TestJudgmentOccurrence_NotCountedResultsMakeNone(t *testing.T) {
 }
 
 func TestJudgmentOccurrence_InsertFailureLeavesTheRunOpen(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 	boom := failOccurrenceInsert(s)
@@ -242,6 +251,7 @@ func TestJudgmentOccurrence_InsertFailureLeavesTheRunOpen(t *testing.T) {
 // --- 回収の経路（interrupted） ---
 
 func TestReapOccurrence_InterruptedRunsMakeFailureOccurrences(t *testing.T) {
+	t.Parallel()
 	host, _ := os.Hostname()
 	base := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
 	cases := map[string]struct {
@@ -301,6 +311,7 @@ func TestReapOccurrence_InterruptedRunsMakeFailureOccurrences(t *testing.T) {
 }
 
 func TestReapOccurrence_PredictRunMakesNone(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	s.staleAfter = 100 * time.Millisecond
 	var rid int64
@@ -333,6 +344,7 @@ func TestReapOccurrence_PredictRunMakesNone(t *testing.T) {
 }
 
 func TestReclaimOccurrence_DeadHolderRunMakesFailureOccurrence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	s.lockStaleAfter = 100 * time.Millisecond
@@ -392,6 +404,7 @@ func occurrenceRunRef(t *testing.T, s *Store) int64 {
 
 // 再検査で invalid_output に書き換える経路（succeeded で閉じた後）も judgment_failed を作る。
 func TestJ5Occurrence_InvalidOutputRewriteMakesJudgmentFailedAndRollsBack(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: []byte(`{"verdict":"bogus"}`)}

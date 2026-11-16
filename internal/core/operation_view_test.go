@@ -61,6 +61,7 @@ func showOpOf(t *testing.T, s *Store, cid, opID int64) IrreversibleOperation {
 
 // AC-134: 試行がまだ無い承認済みの release。
 func TestOperationView_ApprovedWithoutAttempts(t *testing.T) {
+	t.Parallel()
 	s, cid, opID := releaseFixtureForTest(t)
 	for name, op := range map[string]IrreversibleOperation{"status": approvedOpOf(t, s, opID), "show": showOpOf(t, s, cid, opID)} {
 		if op.ApprovedHead == nil || *op.ApprovedHead != "a1b2c3" {
@@ -74,6 +75,7 @@ func TestOperationView_ApprovedWithoutAttempts(t *testing.T) {
 
 // AC-135: 承認の行が無い release は approved_head が null。
 func TestOperationView_NoApprovalRowHasNilApprovedHead(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -86,6 +88,7 @@ func TestOperationView_NoApprovalRowHasNilApprovedHead(t *testing.T) {
 
 // AC-118: checks_failed → interrupted → not_mergeable の後は 2。直前の試行の結果と待ちの開始も出る。
 func TestOperationView_ConsecutiveFailuresAndLastResultAndWaitingSince(t *testing.T) {
+	t.Parallel()
 	s, cid, opID := releaseFixtureForTest(t)
 	attempt(t, s, opID, 10, ExecutionResultChecksFailed, "a1b2c3")
 	attempt(t, s, opID, 20, ExecutionResultInterrupted, "a1b2c3")
@@ -105,6 +108,7 @@ func TestOperationView_ConsecutiveFailuresAndLastResultAndWaitingSince(t *testin
 
 // 終了していない試行は last_execution_result が null、待ちの開始は持つ。
 func TestOperationView_OpenAttemptHasNilLastResult(t *testing.T) {
+	t.Parallel()
 	s, _, opID := releaseFixtureForTest(t)
 	attempt(t, s, opID, 10, "", "a1b2c3")
 	op := approvedOpOf(t, s, opID)
@@ -118,6 +122,7 @@ func TestOperationView_OpenAttemptHasNilLastResult(t *testing.T) {
 
 // 取り消して承認し直した後の待ちの開始は、承認し直した後の最初の試行。取り消した（pending の）間は持たない。
 func TestOperationView_WaitingSinceIsAfterLatestApprovalAndOnlyWhileApproved(t *testing.T) {
+	t.Parallel()
 	s, cid, opID := releaseFixtureForTest(t)
 	attempt(t, s, opID, 10, ExecutionResultChecksFailed, "a1b2c3")
 	attempt(t, s, opID, 20, ExecutionResultHeadChanged, "a1b2c3")
@@ -143,6 +148,7 @@ func TestOperationView_WaitingSinceIsAfterLatestApprovalAndOnlyWhileApproved(t *
 
 // AC-131・AC-136・AC-137: executed_at・merge_commit は show に出る。executed の操作は status の一覧に出ない。
 func TestOperationView_ExecutedShowsExecutedAtAndMergeCommit(t *testing.T) {
+	t.Parallel()
 	s, cid, opID := releaseFixtureForTest(t)
 	attempt(t, s, opID, 10, ExecutionResultMerged, "a1b2c3")
 	writeForTest(t, s, func(tx *sql.Tx) error {
@@ -166,6 +172,7 @@ func TestOperationView_ExecutedShowsExecutedAtAndMergeCommit(t *testing.T) {
 
 // AC-76・AC-77: 取り消した release は needs_human.operations に出て、last_execution_result を持つ。
 func TestOperationView_CancelledPendingReleaseShowsLastResultInNeedsHuman(t *testing.T) {
+	t.Parallel()
 	s, _, opID := releaseFixtureForTest(t)
 	attempt(t, s, opID, 10, ExecutionResultHeadChanged, "a1b2c3")
 	setOpState(t, s, opID, OperationStatePending)
@@ -184,6 +191,7 @@ func TestOperationView_CancelledPendingReleaseShowsLastResultInNeedsHuman(t *tes
 
 // AC-103: 直前の試行が merged_unapproved の release は discrepancies に出る。
 func TestOverview_Discrepancies_MergedUnapproved(t *testing.T) {
+	t.Parallel()
 	s, cid, opID := releaseFixtureForTest(t)
 	attempt(t, s, opID, 10, ExecutionResultMergedUnapproved, "a1b2c3")
 	setOpState(t, s, opID, OperationStatePending)
@@ -199,6 +207,7 @@ func TestOverview_Discrepancies_MergedUnapproved(t *testing.T) {
 
 // 直前の試行が merged_unapproved でなければ出さない。差し戻し済みも出さない。上流の食い違いだけの要素は operation_id を持たない。
 func TestOverview_Discrepancies_MergedUnapprovedBoundaries(t *testing.T) {
+	t.Parallel()
 	s, cid, opID := releaseFixtureForTest(t)
 	up := bindDiscrepancyFixture(t, s, "closed", "o/r#1", upstreamStateClosed, policyStateInPolicy)
 	attempt(t, s, opID, 10, ExecutionResultMergedUnapproved, "a1b2c3")
@@ -223,6 +232,7 @@ func TestOverview_Discrepancies_MergedUnapprovedBoundaries(t *testing.T) {
 
 // 同じ課題に上流の食い違いがあれば、その要素の kinds に足して operation_id を持たせる。
 func TestOverview_Discrepancies_MergedUnapprovedJoinsUpstreamElement(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindDiscrepancyFixture(t, s, "closed", "o/r#1", upstreamStateClosed, policyStateInPolicy)
@@ -244,6 +254,7 @@ func TestOverview_Discrepancies_MergedUnapprovedJoinsUpstreamElement(t *testing.
 
 // approve の応答の操作も、承認した head を approved_head に持つ。
 func TestExecuteOperationApproval_ResponseCarriesApprovedHead(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)

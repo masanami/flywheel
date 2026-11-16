@@ -309,6 +309,7 @@ func sortedCommandNames(m map[string]Command) []string {
 }
 
 func TestAllCommands_SuccessCasesCoverRegistrationTable(t *testing.T) {
+	t.Parallel()
 	registered := registeredCommands()
 	for name := range registered {
 		if _, ok := allCommandSuccessCases[name]; !ok {
@@ -347,7 +348,7 @@ func requireJSONErrorEnvelope(t *testing.T, args []string, wantExit int, wantCod
 	t.Helper()
 	full := append(append([]string{}, args...), "--json")
 	var stdout, stderr bytes.Buffer
-	code := run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath(full, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != wantExit {
 		t.Fatalf("args=%v exit=%d, want %d (stderr=%s)", args, code, wantExit, stderr.String())
 	}
@@ -423,6 +424,7 @@ func TestAllCommands_JSONSuccessWritesSingleDocumentToStdout(t *testing.T) {
 // TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand が
 // 全コマンドを検査する。
 func TestAllCommands_JSONFailureWritesErrorEnvelopeToStderr(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	for _, name := range sortedCommandNames(registeredCommands()) {
 		cmd := registeredCommands()[name]
@@ -525,6 +527,7 @@ var runLevelUsageErrorCases = [][]string{
 // runLevelUsageErrorCases の件数が一致することを検査する（Run の中の usage_error を
 // 足したのに、ストア不変の列挙へ載せ忘れる取りこぼしを防ぐ）。
 func TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite(t *testing.T) {
+	t.Parallel()
 	fset, files := parseProductionSources(t)
 	sites := 0
 	for _, f := range files {
@@ -551,6 +554,7 @@ func TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite(t *testing.T) 
 // ストアを変更しない（全コマンド。必須引数の組は登録表の宣言から導く）。
 // Run の中で決着する usage_error（runLevelUsageErrorCases）も同じく検査する。
 func TestAllCommands_UnknownFlagAndMissingRequiredArgumentAreUsageErrorAndLeaveStoreUnchanged(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	c1 := createForCase(t, ws) // C-1 を実在させ、欠落以外の引数が妥当な状態で検査する
 	runJSON(t, ws, "op", "add", c1, "--kind", "release", "--summary", "s")

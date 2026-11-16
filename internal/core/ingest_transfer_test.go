@@ -16,6 +16,7 @@ import (
 // --- sentinel の識別性 ---
 
 func TestErrUpstreamIssueTransferred_IsDistinctFromNotFound(t *testing.T) {
+	t.Parallel()
 	if errors.Is(ErrUpstreamIssueTransferred, ErrUpstreamIssueNotFound) {
 		t.Fatal("ErrUpstreamIssueTransferred must not match ErrUpstreamIssueNotFound (404 と移管を区別できること)")
 	}
@@ -38,6 +39,7 @@ func errWrapForTest(err error) error {
 // --- confirmOpenListAbsence: 移管も missing に写す（AC-68 と同じ反映を移管にも適用） ---
 
 func TestIngest_CloseDetection_TransferredMarksMissing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindOpenChallenge(t, s, "bound", "o/r#1")
@@ -66,6 +68,7 @@ func TestIngest_CloseDetection_TransferredMarksMissing(t *testing.T) {
 // --- 移管の反映は課題の状態を変えない（未分類・着手中・完了確認待ちのそれぞれ） ---
 
 func TestIngest_CloseDetection_TransferredDoesNotChangeChallengeStatus(t *testing.T) {
+	t.Parallel()
 	statuses := []Status{StatusUnclassified, StatusInProgress, StatusAwaitingCompletionApproval}
 	for _, status := range statuses {
 		t.Run(string(status), func(t *testing.T) {
@@ -96,6 +99,7 @@ func TestIngest_CloseDetection_TransferredDoesNotChangeChallengeStatus(t *testin
 // --- status の discrepancies に upstream_missing で出る（ingest からの反映を経由した end-to-end） ---
 
 func TestIngest_Transferred_ShowsAsUpstreamMissingDiscrepancy(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindOpenChallenge(t, s, "bound", "o/r#1")

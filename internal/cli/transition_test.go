@@ -16,6 +16,7 @@ import (
 // --- classify ---
 
 func TestRunClassify_SetsPriorityAndReturnsChallengeJSON(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -34,6 +35,7 @@ func TestRunClassify_SetsPriorityAndReturnsChallengeJSON(t *testing.T) {
 }
 
 func TestRunClassify_InvalidPriorityIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -43,6 +45,7 @@ func TestRunClassify_InvalidPriorityIsValidationFailed(t *testing.T) {
 // --- plan ---
 
 func TestRunPlan_FileFlagReadsFileAsBody(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -65,13 +68,14 @@ func TestRunPlan_FileFlagReadsFileAsBody(t *testing.T) {
 }
 
 func TestRunPlan_StdinReadsStdinAsBody(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
 	runJSON(t, ws, "classify", id, "--priority", "P0")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"plan", id, "--stdin", "--workspace", ws, "--json"}, strings.NewReader("via stdin"), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"plan", id, "--stdin", "--workspace", ws, "--json"}, strings.NewReader("via stdin"), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}
@@ -86,6 +90,7 @@ func TestRunPlan_StdinReadsStdinAsBody(t *testing.T) {
 }
 
 func TestRunPlan_MissingFileIsUsageErrorAndUnreadableFileIsInternalError(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -99,17 +104,18 @@ func TestRunPlan_MissingFileIsUsageErrorAndUnreadableFileIsInternalError(t *test
 
 // AC-35: 計画承認待ちの課題に plan を再度行うと、計画の版が1増え、以前の版も show で読める。
 func TestRunPlan_RerunBumpsPlanVersionAndShowHasBothVersions(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
 	runJSON(t, ws, "classify", id, "--priority", "P0")
 
 	var stdout1, stderr1 bytes.Buffer
-	if code := run([]string{"plan", id, "--stdin", "--workspace", ws, "--json"}, strings.NewReader("v1"), &stdout1, &stderr1, defaultCommands()); code != 0 {
+	if code := runWithLookPath([]string{"plan", id, "--stdin", "--workspace", ws, "--json"}, strings.NewReader("v1"), &stdout1, &stderr1, defaultCommands(), lookPathFor(t)); code != 0 {
 		t.Fatalf("plan 1 exit=%d (stderr=%s)", code, stderr1.String())
 	}
 	var stdout2, stderr2 bytes.Buffer
-	if code := run([]string{"plan", id, "--stdin", "--workspace", ws, "--json"}, strings.NewReader("v2"), &stdout2, &stderr2, defaultCommands()); code != 0 {
+	if code := runWithLookPath([]string{"plan", id, "--stdin", "--workspace", ws, "--json"}, strings.NewReader("v2"), &stdout2, &stderr2, defaultCommands(), lookPathFor(t)); code != 0 {
 		t.Fatalf("plan 2 exit=%d (stderr=%s)", code, stderr2.String())
 	}
 	var doc2 map[string]any
@@ -133,6 +139,7 @@ func TestRunPlan_RerunBumpsPlanVersionAndShowHasBothVersions(t *testing.T) {
 // --- submit ---
 
 func TestRunSubmit_AdvancesToVerifying(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -148,6 +155,7 @@ func TestRunSubmit_AdvancesToVerifying(t *testing.T) {
 // --- verify ---
 
 func TestRunVerify_MetAdvancesToAwaitingCompletionApproval(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -161,6 +169,7 @@ func TestRunVerify_MetAdvancesToAwaitingCompletionApproval(t *testing.T) {
 }
 
 func TestRunVerify_UncertainWithQuestionAdvancesToAwaitingHuman(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -184,6 +193,7 @@ func TestRunVerify_UncertainWithQuestionAdvancesToAwaitingHuman(t *testing.T) {
 }
 
 func TestRunVerify_InvalidResultIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -194,6 +204,7 @@ func TestRunVerify_InvalidResultIsValidationFailed(t *testing.T) {
 
 // AC-30: `verify --result met`（または `not_met`）に `--question` を添えると usage_error（終了コード2）。
 func TestRunVerify_MetOrNotMetWithQuestionIsUsageError(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -206,6 +217,7 @@ func TestRunVerify_MetOrNotMetWithQuestionIsUsageError(t *testing.T) {
 
 // AC-32: 問いの文が空の `verify --result uncertain` は validation_failed（終了コード1）。
 func TestRunVerify_UncertainWithoutQuestionIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -218,6 +230,7 @@ func TestRunVerify_UncertainWithoutQuestionIsValidationFailed(t *testing.T) {
 // --- hold ---
 
 func TestRunHold_AdvancesToAwaitingHumanAndRecordsQuestion(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -237,6 +250,7 @@ func TestRunHold_AdvancesToAwaitingHumanAndRecordsQuestion(t *testing.T) {
 
 // AC-31: 問いの文が空の `hold` は validation_failed（終了コード1）。
 func TestRunHold_EmptyQuestionIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -248,6 +262,7 @@ func TestRunHold_EmptyQuestionIsValidationFailed(t *testing.T) {
 // --- テキスト出力 ---
 
 func TestRunTransitionCommands_TextOutputIsChallengeID(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -353,6 +368,7 @@ var operationByCommand = map[string]core.Operation{
 //  3. 各ケースが組み立てる引数列が、登録表（defaultCommands()）のコマンドに
 //     解決できる。
 func TestTransitionCommands_CasesMatchTableOperationsAndRegisteredCommands(t *testing.T) {
+	t.Parallel()
 	caseNames := map[string]bool{}
 	for _, tc := range transitionCommandCases {
 		caseNames[tc.name] = true
@@ -470,6 +486,7 @@ func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T)
 // まま止められる core 側の runConcurrentTransition（internal/core/
 // transition_exec_test.go）が実証する。AC-36 の根拠は core 側にある。
 func TestRun_ConcurrentSubmitAndHold_NoLostUpdateSmoke(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -478,7 +495,7 @@ func TestRun_ConcurrentSubmitAndHold_NoLostUpdateSmoke(t *testing.T) {
 	run1 := func(args []string) (int, map[string]any, string) {
 		var stdout, stderr bytes.Buffer
 		full := append(append([]string{}, args...), "--workspace", ws, "--json")
-		code := run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+		code := runWithLookPath(full, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 		var doc map[string]any
 		if code == 0 {
 			_ = json.Unmarshal(stdout.Bytes(), &doc)

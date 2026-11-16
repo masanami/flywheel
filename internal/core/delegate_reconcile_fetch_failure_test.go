@@ -47,6 +47,7 @@ func assertUnchangedAfterFetchFailure(t *testing.T, f *delegateFixture, res *Del
 
 // (a) 取得の失敗だけでは保留ができず、状態が変わらず、回数が増える。
 func TestReconcileFetchFailure_OnlyFailuresDoNotHoldAndCount(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.branches.err = errFakeGH
 	res, err := f.run(t, nil)
@@ -65,6 +66,7 @@ func TestReconcileFetchFailure_OnlyFailuresDoNotHoldAndCount(t *testing.T) {
 // (b) 次の周では子を起動せず照合だけをやり直し、3 回続けて失敗したら人間対応待ちにする。理由には
 // 取得の失敗・連続の回数・最後のエラーのメッセージが出る。
 func TestReconcileFetchFailure_RetriesWithoutLaunchingAndHoldsOnTheThirdFailure(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.branches.err = errFakeGH
 	for i, want := range []string{"1", "2"} {
@@ -118,6 +120,7 @@ func TestReconcileFetchFailure_RetriesWithoutLaunchingAndHoldsOnTheThirdFailure(
 // (c) 見つからないと確定した場合（ブランチの 404・PR の空の一覧・pr_urls の 404）は、いまと同じく
 // 人間対応待ちにし、問いに「成果物が見つからない」と書く。回数は 0 のまま。
 func TestReconcileFetchFailure_ConfirmedNotFoundStillHolds(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	if _, err := f.run(t, nil); err != nil {
 		t.Fatal(err)
@@ -138,6 +141,7 @@ func TestReconcileFetchFailure_ConfirmedNotFoundStillHolds(t *testing.T) {
 
 // (d) 片方が取得の失敗で、もう片方が見つからない場合は、取得の失敗として扱う。
 func TestReconcileFetchFailure_MixedFailureAndNotFoundIsAFailure(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		setup func(f *delegateFixture)
@@ -163,6 +167,7 @@ func TestReconcileFetchFailure_MixedFailureAndNotFoundIsAFailure(t *testing.T) {
 
 // (e) 引いたもののどれか 1 つで成果物が見つかれば、他が取得の失敗でも成果物あり（検証中・回数 0）。
 func TestReconcileFetchFailure_AnyFoundArtifactWins(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		setup func(f *delegateFixture)
@@ -200,6 +205,7 @@ func TestReconcileFetchFailure_AnyFoundArtifactWins(t *testing.T) {
 // (f) やり直しで「成果物あり」か「見つからない」の判定が出たら、回数を 0 に戻し、ブランチを消す。
 // 見つかった成果物は、元の委譲の run の成果物として記録する。
 func TestReconcileFetchFailure_ResetOnFoundOrNotFound(t *testing.T) {
+	t.Parallel()
 	t.Run("found", func(t *testing.T) {
 		f := newReconFixture(t, "impl")
 		f.branches.err = errFakeGH
@@ -285,6 +291,7 @@ func TestReconcileFetchFailure_ResetOnFoundOrNotFound(t *testing.T) {
 // (g) pr_urls の経路でも同じ区別になる: 報告にブランチが無く、pr_urls の PR の取得だけが失敗したら
 // 取得の失敗（保留なし・回数 1）。gh が別の PR を返したのも取得の失敗。次の周のやり直しで見つかれば成果物あり。
 func TestReconcileFetchFailure_PRURLsPath(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name  string
 		setup func(f *delegateFixture)
@@ -329,6 +336,7 @@ func TestReconcileFetchFailure_PRURLsPath(t *testing.T) {
 // 報告にブランチが無くスロットのブランチを調べた照合のやり直しは、同じスロットのブランチを調べる
 // （スロットは解放済みで、やり直しでは検査しない）。
 func TestReconcileFetchFailure_RetryUsesTheSlotBranchOfTheFirstReconciliation(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.setSlotBranch("feat/slot")
 	f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) {
@@ -359,6 +367,7 @@ func TestReconcileFetchFailure_RetryUsesTheSlotBranchOfTheFirstReconciliation(t 
 
 // ID を指定した `run C-1` でも、照合のやり直しの対象なら子を起動せず照合だけをやり直す。
 func TestReconcileFetchFailure_RunWithIDAlsoRetriesOnly(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.branches.err = errFakeGH
 	if _, err := f.run(t, nil); err != nil {
@@ -377,6 +386,7 @@ func TestReconcileFetchFailure_RunWithIDAlsoRetriesOnly(t *testing.T) {
 
 // 成果物の種類が pr 以外の照合は変えない（branch の取得の失敗は、これまでどおり保留にする）。
 func TestReconcileFetchFailure_BranchArtifactsAreUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl-branch")
 	f.branches.err = errFakeGH
 	if _, err := f.run(t, nil); err != nil {
@@ -394,6 +404,7 @@ func TestReconcileFetchFailure_BranchArtifactsAreUnchanged(t *testing.T) {
 // 上限の保留に回答して再開した子の照合の失敗は、前の run の回数を引き継がず 1 から数える
 // （回数は失敗した照合の run ごとの連続の失敗）。
 func TestReconcileFetchFailure_ANewRunAfterTheLimitHoldCountsFromOne(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.branches.err = errFakeGH
 	for i := 0; i < 3; i++ {
@@ -421,6 +432,7 @@ func TestReconcileFetchFailure_ANewRunAfterTheLimitHoldCountsFromOne(t *testing.
 // 失敗した照合の run より後に J5 の run がある（人が提出して J5 が差し戻した）課題は、照合のやり直しの
 // 対象にしない（通常の起動の判定に任せ、差し戻しの再開を奪わない）。
 func TestReconcileFetchFailure_NotRetriedAfterAJ5Run(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.branches.err = errFakeGH
 	if _, err := f.run(t, nil); err != nil {
@@ -449,6 +461,7 @@ func TestReconcileFetchFailure_NotRetriedAfterAJ5Run(t *testing.T) {
 
 // やり直しの時点で報告が宣言の検査を通らなくなっていたら、着手中のまま残さず人間対応待ちにする。
 func TestReconcileFetchFailure_UnretriableReportHolds(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.branches.err = errFakeGH
 	if _, err := f.run(t, nil); err != nil {

@@ -31,6 +31,7 @@ func bindChallengeWithUnreadUpdate(t *testing.T, s *Store, title string) *Challe
 // --- AC-134・AC-135: mark-read は読んだ時点の値を現在の観測値に合わせる ---
 
 func TestMarkRead_SetsReadValuesToCurrentObservation(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindChallengeWithUnreadUpdate(t, s, "unread")
@@ -64,6 +65,7 @@ func TestMarkRead_SetsReadValuesToCurrentObservation(t *testing.T) {
 // --- AC-139・AC-140: 作業ログに upstream_read が残る ---
 
 func TestMarkRead_RecordsUpstreamReadActivity(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindChallengeWithUnreadUpdate(t, s, "unread")
@@ -101,6 +103,7 @@ func TestMarkRead_RecordsUpstreamReadActivity(t *testing.T) {
 // --- AC-141: mark-read で課題の版が 1 増える ---
 
 func TestMarkRead_BumpsVersionByOne(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindChallengeWithUnreadUpdate(t, s, "unread")
@@ -124,6 +127,7 @@ func TestMarkRead_BumpsVersionByOne(t *testing.T) {
 // --- AC-142: 読んだ時点の値が観測値とすべて同じ課題への mark-read は何も変えずに成功する ---
 
 func TestMarkRead_NoUnreadUpdate_NoOpSuccess(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := mustCreateChallenge(t, s, "already read")
@@ -176,6 +180,7 @@ func TestMarkRead_NoUnreadUpdate_NoOpSuccess(t *testing.T) {
 // 扱う（読んだ時点の件数が大きいまま残ると、その後に足されたコメントに
 // upstream_commented が出ないため）。
 func TestMarkRead_CommentCountDecreasedOnly_AlignsReadValuesToObservation(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := mustCreateChallenge(t, s, "comment deleted")
@@ -270,6 +275,7 @@ func TestMarkRead_CommentCountDecreasedOnly_AlignsReadValuesToObservation(t *tes
 // 更新日時だけをそろえ、変わった read_upstream_updated_at だけを作業ログに載せる
 // （AC-134・AC-135。判定がコメント数だけの比較に退行しないことの検証）。
 func TestMarkRead_UpdatedAtDiffersOnly_AlignsReadUpdatedAt(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := mustCreateChallenge(t, s, "labels changed")
@@ -315,6 +321,7 @@ func TestMarkRead_UpdatedAtDiffersOnly_AlignsReadUpdatedAt(t *testing.T) {
 // --- AC-143: 対応の無い課題への mark-read は validation_failed ---
 
 func TestMarkRead_NoBinding_ValidationFailed(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := mustCreateChallenge(t, s, "no binding")
 
@@ -327,6 +334,7 @@ func TestMarkRead_NoBinding_ValidationFailed(t *testing.T) {
 // --- AC-144: 完了した課題への mark-read は terminal_state ---
 
 func TestMarkRead_DoneChallenge_TerminalState(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindChallengeWithUnreadUpdate(t, s, "done")
@@ -342,6 +350,7 @@ func TestMarkRead_DoneChallenge_TerminalState(t *testing.T) {
 // --- AC-145: 無い ID への mark-read は not_found ---
 
 func TestMarkRead_UnknownID_NotFound(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	for _, id := range []string{"C-999", "not-an-id"} {
 		if _, err := s.MarkRead(context.Background(), ChannelCLI, id); !errors.Is(err, ErrNotFound) {

@@ -93,6 +93,7 @@ func assertRejectedNothingWritten(t *testing.T, ws string, decl *AgentDeclaratio
 }
 
 func TestWriteMemory_CreateWritesFrontmatterIndexAndHash(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	got, err := writeMemory(ws, decl, []memoryItem{tacit("alpha")}, memNow)
 	if err != nil {
@@ -119,6 +120,7 @@ func TestWriteMemory_CreateWritesFrontmatterIndexAndHash(t *testing.T) {
 }
 
 func TestWriteMemory_ExperienceFrontmatter(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	it := memoryItem{Mode: "create", Type: "experience", Slug: "exp1", Description: "d", Confidence: "medium",
 		Outcome: "good", Target: "brief", Signal: "2026-10-24: ok", Body: "b\n\n"}
@@ -137,6 +139,7 @@ func TestWriteMemory_ExperienceFrontmatter(t *testing.T) {
 }
 
 func TestWriteMemory_ExistingIndexAndLegacyLinesUntouched(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	legacy := "# memory/harness INDEX\n\n- [old] experience/high (recurrence 4, resolved 2026-08-30) — x"
 	idxPath := filepath.Join(root, "INDEX.md")
@@ -154,6 +157,7 @@ func TestWriteMemory_ExistingIndexAndLegacyLinesUntouched(t *testing.T) {
 }
 
 func TestWriteMemory_AppendKeepsFrontmatterAndLegacyKeys(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	orig := "---\nname: old\ndescription: d\nmetadata:\n  type: experience\n  recurrence: 3\n  reflected: 2026-09-23\n  applied_as: x\n---\n\n既存の本文"
 	p := filepath.Join(root, "experience-old.md")
@@ -182,6 +186,7 @@ func TestWriteMemory_AppendKeepsFrontmatterAndLegacyKeys(t *testing.T) {
 }
 
 func TestWriteMemory_CreateThenAppendSameFileInOneOutput(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	app := memoryItem{Mode: "append", Type: "tacit", Slug: "alpha", Body: "next"}
 	got, err := writeMemory(ws, decl, []memoryItem{tacit("alpha"), app}, memNow)
@@ -197,6 +202,7 @@ func TestWriteMemory_CreateThenAppendSameFileInOneOutput(t *testing.T) {
 }
 
 func TestWriteMemory_RejectsAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	existing := func(t *testing.T, root string) {
 		if err := os.WriteFile(filepath.Join(root, "tacit-dup.md"), []byte("orig"), 0o644); err != nil {
 			t.Fatal(err)
@@ -251,6 +257,7 @@ func TestWriteMemory_RejectsAndWritesNothing(t *testing.T) {
 }
 
 func TestWriteMemory_Limits(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	// ちょうど 5 件は通る。
 	var five []memoryItem
@@ -290,6 +297,7 @@ func TestWriteMemory_Limits(t *testing.T) {
 }
 
 func TestWriteMemory_NoIndexCreatesIndex_NoRootCreatesRoot(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	decl := defaultAgentDeclaration()
 	decl.MemoryDir = "memory/newdomain"
@@ -308,6 +316,7 @@ func TestWriteMemory_NoIndexCreatesIndex_NoRootCreatesRoot(t *testing.T) {
 }
 
 func TestWriteMemory_DefaultDirWhenDeclNil(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	if _, err := writeMemory(ws, nil, []memoryItem{tacit("a")}, memNow); err != nil {
 		t.Fatal(err)
@@ -318,6 +327,7 @@ func TestWriteMemory_DefaultDirWhenDeclNil(t *testing.T) {
 }
 
 func TestWriteMemory_EmptyItemsWritesNothing(t *testing.T) {
+	t.Parallel()
 	ws, _, decl := memWS(t)
 	before := dirSnapshot(t, ws)
 	got, err := writeMemory(ws, decl, nil, memNow)
@@ -330,6 +340,7 @@ func TestWriteMemory_EmptyItemsWritesNothing(t *testing.T) {
 }
 
 func TestWriteMemory_SymlinkedAppendTargetOutsideRejected(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	outside := filepath.Join(t.TempDir(), "secret.md")
 	if err := os.WriteFile(outside, []byte("secret\n"), 0o644); err != nil {
@@ -346,6 +357,7 @@ func TestWriteMemory_SymlinkedAppendTargetOutsideRejected(t *testing.T) {
 }
 
 func TestWriteMemory_SymlinkedAppendTargetInsideAllowed(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	realPath := filepath.Join(root, "tacit-realPath.md")
 	if err := os.WriteFile(realPath, []byte("r\n"), 0o644); err != nil {
@@ -363,6 +375,7 @@ func TestWriteMemory_SymlinkedAppendTargetInsideAllowed(t *testing.T) {
 }
 
 func TestWriteMemory_CreateOverDanglingSymlinkRejected(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	outside := filepath.Join(t.TempDir(), "new.md")
 	if err := os.Symlink(outside, filepath.Join(root, "tacit-x.md")); err != nil {
@@ -375,6 +388,7 @@ func TestWriteMemory_CreateOverDanglingSymlinkRejected(t *testing.T) {
 }
 
 func TestWriteMemory_IndexSymlinkOutsideRejected(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	outside := filepath.Join(t.TempDir(), "INDEX.md")
 	if err := os.WriteFile(outside, []byte("x\n"), 0o644); err != nil {
@@ -393,6 +407,7 @@ func TestWriteMemory_IndexSymlinkOutsideRejected(t *testing.T) {
 }
 
 func TestWriteMemory_RootSymlinkOutsideRejected(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	outside := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(ws, "memory"), 0o755); err != nil {
@@ -413,6 +428,7 @@ func TestWriteMemory_RootSymlinkOutsideRejected(t *testing.T) {
 }
 
 func TestWriteMemory_RootParentSymlinkOutsideRejectedEvenWhenRootMissing(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	outside := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(ws, "memory")); err != nil {
@@ -483,15 +499,18 @@ func TestWriteMemory_FailureRemovesCreatedRootAndIndex(t *testing.T) {
 }
 
 func TestWriteMemory_DoesNotTouchGit(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
 	ws, _, decl := memWS(t)
 	run := func(args ...string) string {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = ws
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-		out, err := cmd.CombinedOutput()
+		out, err := combinedOutputRetrySignal(func() *exec.Cmd {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = ws
+			cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+			return cmd
+		})
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -514,6 +533,7 @@ func TestWriteMemory_DoesNotTouchGit(t *testing.T) {
 }
 
 func TestMemoryIndexPath(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	if got := memoryIndexPath(ws, decl); got != "" {
 		t.Errorf("no index: %q", got)
@@ -532,6 +552,7 @@ func TestMemoryIndexPath(t *testing.T) {
 }
 
 func TestYAMLScalar(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"plain text":       "plain text",
 		"日本語の説明":           "日本語の説明",
@@ -554,6 +575,7 @@ func TestYAMLScalar(t *testing.T) {
 }
 
 func TestWriteMemory_SymlinkInsideWorkspaceButOutsideMemoryDirRejected(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	other := filepath.Join(ws, "other.md")
 	if err := os.WriteFile(other, []byte("keep\n"), 0o644); err != nil {
@@ -575,6 +597,7 @@ func TestWriteMemory_SymlinkInsideWorkspaceButOutsideMemoryDirRejected(t *testin
 
 // 同じ出力の中の create の後に、接頭辞つきの slug で追記すると、作るファイルへ向け直される（捨てられない）。
 func TestWriteMemory_PrefixedAppendRedirectsToFileCreatedInSameOutput(t *testing.T) {
+	t.Parallel()
 	ws, root, decl := memWS(t)
 	app := memoryItem{Mode: "append", Type: "tacit", Slug: "tacit-alpha", Body: "next"}
 	plan, err := prepareMemoryWrite(ws, decl, []memoryItem{tacit("alpha"), app}, memNow)
@@ -594,6 +617,7 @@ func TestWriteMemory_PrefixedAppendRedirectsToFileCreatedInSameOutput(t *testing
 
 // create より前に書かれた追記（接頭辞つきの slug を含む）も、同じ出力で作るファイルへ向く。
 func TestWriteMemory_AppendBeforeCreateInSameOutputTargetsCreatedFile(t *testing.T) {
+	t.Parallel()
 	for _, slug := range []string{"alpha", "tacit-alpha"} {
 		ws, root, decl := memWS(t)
 		app := memoryItem{Mode: "append", Type: "tacit", Slug: slug, Body: "next"}
@@ -615,6 +639,7 @@ func TestWriteMemory_AppendBeforeCreateInSameOutputTargetsCreatedFile(t *testing
 
 // Lstat の失敗が「無い」以外（権限エラー）のときは、無いものとして項目を捨てず拒否する。
 func TestWriteMemory_PrefixedAppendLstatErrorIsNotTreatedAsMissing(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("permission errors cannot be produced as root")
 	}

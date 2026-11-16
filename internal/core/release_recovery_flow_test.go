@@ -11,6 +11,7 @@ import (
 // 戻した理由の区画が入る）→ J5 が新しい head を検証 → 完了の承認（前の承認と結ばれる）→ 本番反映でマージされる。
 
 func TestRecovery_NotMergeableToMergedRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")

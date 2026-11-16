@@ -9,6 +9,7 @@ import (
 
 // card.headline・card.context は challenge の列と同じ値を返す。
 func TestDeriveCard_HeadlineAndContextFollowTheChallengeColumns(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	card, err := s.DeriveCard(context.Background(), *c, &Overview{}, c.CreatedAt)
 	if err != nil || card.Headline != nil || card.Context != nil {
@@ -26,6 +27,7 @@ func TestDeriveCard_HeadlineAndContextFollowTheChallengeColumns(t *testing.T) {
 
 // ①の要約は show と同じ段階の欄と論点の回答を持ち、pairs は core.Pairs の結果。
 func TestPrepareApproval_CarriesStagesIssuesAnswerAndPairs(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	cid, _ := parseChallengeID(c.ID)
 	if _, err := edit(t, s, c.ID, EditInput{
@@ -66,6 +68,7 @@ func TestPrepareApproval_CarriesStagesIssuesAnswerAndPairs(t *testing.T) {
 }
 
 func TestPrepareApproval_NoStagesGivesEmptyPairsAndNilAnswer(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	cid, _ := parseChallengeID(c.ID)
 	setChallengeStatus(t, s, cid, StatusAwaitingCompletionApproval)

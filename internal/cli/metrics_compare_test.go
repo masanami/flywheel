@@ -28,6 +28,7 @@ func compareWorkspace(t *testing.T) string {
 }
 
 func TestMetricsCompare_JSONShapeMatchesTheSpecAndGroupsAreSplit(t *testing.T) {
+	t.Parallel()
 	ws := compareWorkspace(t)
 	out := runJSON(t, ws, "metrics", "--compare", "C-3")
 	doc := loadDocumentedJSON(t)
@@ -57,6 +58,7 @@ func TestMetricsCompare_JSONShapeMatchesTheSpecAndGroupsAreSplit(t *testing.T) {
 }
 
 func TestMetricsCompare_ErrorsLeaveNothingOnStdout(t *testing.T) {
+	t.Parallel()
 	ws := compareWorkspace(t)
 	for _, tc := range []struct {
 		args []string

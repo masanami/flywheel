@@ -36,6 +36,7 @@ func (f *delegateFixture) overview(t *testing.T) *Overview {
 }
 
 func TestComputeBucketRemaining_NeverShiftsMoneyBetweenBuckets(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name         string
 		b            planBudgets
@@ -63,6 +64,7 @@ func TestComputeBucketRemaining_NeverShiftsMoneyBetweenBuckets(t *testing.T) {
 
 // AC-218・336: --max-budget-usd と予約額（run の max_budget_usd）は実装枠の残りだけ。
 func TestBudget_MaxBudgetAndReservedAreTheImplRemainingOnly(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
 	f.mustRun(t, nil)
@@ -93,6 +95,7 @@ func (f *delegateFixture) refreshInProgress(t *testing.T, id string) {
 // AC-337・338: 評価額は実装枠の残り＋レビュー対応枠の残り。周の上限に（J3 の上限を含めて）ちょうど
 // 入れば起動し、1 µUSD でも超えれば cycle_budget で起動しない。
 func TestBudget_EstimateIsImplPlusReviewRemainingAgainstTheCycleCap(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
 	// J3 の上限 3 ＋ 評価額 80（実装 50 ＋ レビュー対応 30）＝ 83。
@@ -111,6 +114,7 @@ func TestBudget_EstimateIsImplPlusReviewRemainingAgainstTheCycleCap(t *testing.T
 
 // AC-352: 終了していない委譲の上限額の和が予約額に入り、評価式は並列の数で変わらない。
 func TestBudget_ReservedIsTheSumOfOpenRunsCaps(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	f.agent.MaxParallelRuns = 10 // 予算の評価式を検査する（同時の起動の上限は delegate_plan_test.go が検査する）
 	f.newInProgress(t, "a", "P1", budgetSpec(50, 30))
@@ -158,6 +162,7 @@ func (f *delegateFixture) insertOpenDelegateRuns(t *testing.T, cycleID int64, n 
 // AC-339〜341: 実装枠の残りが 0.99 USD なら起動せず run_budget・needs_human.budget_exhausted に出る。
 // 1.00 USD なら起動する。ID を指定した run は budget_exceeded。
 func TestBudget_BelowOneUSDStopsAndExactlyOneLaunches(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(0.99, 30))
 	res, err := f.run(t, nil)
@@ -194,6 +199,7 @@ func TestBudget_BelowOneUSDStopsAndExactlyOneLaunches(t *testing.T) {
 // AC-263・264・342〜346: budget_exhausted の run は課題の状態と版を変えず、枠を使い切ったとして
 // 止まり、flywheel budget で置き換えると同じセッションへ固定の文面で --resume する。
 func TestBudget_ExhaustedRunStopsUntilRaisedThenResumesTheSameSession(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
 	v := f.version(t, id)
@@ -260,6 +266,7 @@ func TestBudget_ExhaustedRunStopsUntilRaisedThenResumesTheSameSession(t *testing
 // --resume の再開に限り、失敗前の実装枠の残りを上限として 1 回だけ（人間の増額なしに）起動を許す。
 // 再開も費用の取れない失敗で終われば、その後は人間が flywheel budget で増やすまで止まる。
 func TestBudget_AResumeAfterAnUnknownCostFailureIsAllowedOnce(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
 	f.agent.FailureLimit = 5
@@ -291,6 +298,7 @@ func TestBudget_AResumeAfterAnUnknownCostFailureIsAllowedOnce(t *testing.T) {
 // 費用が取れた失敗（出所が reported）は実装枠を尽くさないので許可の対象外であり、
 // 費用が取れない失敗でも、人間が枠を置き直して 1 USD 以上が残っていればその額に従う。
 func TestBudget_NoGrantWhenTheFailureCostWasReported(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(5, 30))
 	f.agent.FailureLimit = 5
@@ -305,6 +313,7 @@ func TestBudget_NoGrantWhenTheFailureCostWasReported(t *testing.T) {
 }
 
 func TestExecuteBudget_RejectsAnAmountThatWouldOverflow(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
 	if _, err := f.s.PrepareBudget(context.Background(), id, f.agent, 1e20, nil); !errors.Is(err, ErrValidation) {
@@ -317,6 +326,7 @@ func (f *delegateFixture) j3Calls() int { return len(f.j3Inputs) }
 // AC-342・343: 承認の種類 budget の承認の記録と、approval_kind が budget の approve の作業ログ。
 // 課題の状態と版は変わらず、レビュー対応枠は --review-usd のときだけ置き換わる。
 func TestExecuteBudget_ReviewUnchangedWithoutReviewUSDAndReplacedWithIt(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
 	v := f.version(t, id)
@@ -389,6 +399,7 @@ func TestExecuteBudget_ReviewUnchangedWithoutReviewUSDAndReplacedWithIt(t *testi
 }
 
 func TestExecuteBudget_RejectsInvalidAmountsWrongAttestationAndStaleVersion(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
 	for _, impl := range []float64{0, -1} {
@@ -444,6 +455,7 @@ func TestExecuteBudget_RejectsInvalidAmountsWrongAttestationAndStaleVersion(t *t
 
 // 経路 invoker の本人確認は登録簿が拒否する（枠は変わらない）。
 func TestExecuteBudget_InvokerChannelCannotVerify(t *testing.T) {
+	t.Parallel()
 	if _, err := Verify(ChannelInvoker, &fakeVerifier{method: VerificationTTYConfirm, actor: "x"}, "s", "C-1"); !errors.Is(err, ErrVerificationRejected) {
 		t.Errorf("Verify(invoker) err = %v, want ErrVerificationRejected", err)
 	}
@@ -451,6 +463,7 @@ func TestExecuteBudget_InvokerChannelCannotVerify(t *testing.T) {
 
 // 枠はほかの計画の版・ほかの課題と混ざらない。
 func TestBudget_RemainingIsPerPlanVersion(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(5, 30))
 	f.mustRun(t, nil) // 費用 2.5（版 1）
@@ -482,6 +495,7 @@ func (f *delegateFixture) mustRun(t *testing.T, id *string) {
 // status の budget_exhausted と委譲の起動は、再開の許可の有無を同じ判定（effectiveImplBudget）で
 // 決める。各時点で「status に出ない」と「起動が実装枠で止まらない」が一致することを確かめる。
 func TestBudget_StatusAndLaunchAgreeOnTheResumeGrant(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
 	f.agent.FailureLimit = 5

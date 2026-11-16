@@ -34,6 +34,7 @@ func statusOf(t *testing.T, ws, id string) string {
 }
 
 func TestWithdrawCommand_MatchesM45IFAPITable(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
 	if err != nil {
 		t.Fatalf("read m4.5 spec: %v", err)
@@ -63,6 +64,7 @@ func TestWithdrawCommand_MatchesM45IFAPITable(t *testing.T) {
 
 // AC-372 ほか: 完了以外の 7 状態から取り下げに移り、版を 1 上げ、作業ログと証跡を残し、approval を作らない。
 func TestWithdraw_FromEveryNonTerminalStatus_MovesToWithdrawnAndLogsEvidence(t *testing.T) {
+	t.Parallel()
 	for _, from := range []string{"unclassified", "classified", "awaiting_plan_approval", "in_progress", "verifying", "awaiting_completion_approval", "awaiting_human"} {
 		t.Run(from, func(t *testing.T) {
 			ws := initializedWorkspace(t)
@@ -96,6 +98,7 @@ func TestWithdraw_FromEveryNonTerminalStatus_MovesToWithdrawnAndLogsEvidence(t *
 
 // AC-375: --reason が無い・空は usage_error で、何も書かない。
 func TestWithdraw_MissingOrEmptyReason_IsUsageErrorAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	requireErrorCode(t, []string{"withdraw", id, "--relayed", "--session", "s", "--quote", "q", "--workspace", ws}, 2, CodeUsageError)
@@ -107,6 +110,7 @@ func TestWithdraw_MissingOrEmptyReason_IsUsageErrorAndWritesNothing(t *testing.T
 
 // AC-372: 端末が無く --relayed も無いときは tty_required で、何も書かない。
 func TestWithdraw_NoTerminalAndNoRelayed_IsTTYRequiredAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	cmd, stdout, stderr := newChildCmd([]string{"withdraw", "--workspace", ws, "--json", "--reason", "r", id})
@@ -127,6 +131,7 @@ func TestWithdraw_NoTerminalAndNoRelayed_IsTTYRequiredAndWritesNothing(t *testin
 
 // AC-374・381: 完了・取り下げの課題の取り下げ、取り下げた課題への各操作は terminal_state で、何も書かない。
 func TestWithdraw_TerminalChallenges_AreRejectedWithTerminalStateAndWriteNothing(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	other := createForCase(t, ws)
 	done := createWithStatusForCase(t, ws, "done")
@@ -159,6 +164,7 @@ func TestWithdraw_TerminalChallenges_AreRejectedWithTerminalStateAndWriteNothing
 
 // AC-376: 着手中で終わっていない委譲の run がある課題は conflict で、何も書かない。
 func TestWithdraw_InProgressWithOpenDelegationRun_IsConflict(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createWithStatusForCase(t, ws, "in_progress")
 	host, _ := os.Hostname()
@@ -176,6 +182,7 @@ func TestWithdraw_InProgressWithOpenDelegationRun_IsConflict(t *testing.T) {
 
 // AC-379: pending・approved の不可逆操作は rejected になり、操作ごとに作業ログが残る。
 func TestWithdraw_RejectsPendingAndApprovedOperationsAndLogsEach(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	runJSON(t, ws, "op", "add", id, "--kind", "other", "--summary", "s1")
@@ -225,6 +232,7 @@ func TestWithdraw_RejectsPendingAndApprovedOperationsAndLogsEach(t *testing.T) {
 
 // AC-380: 人間対応待ちの課題の開いている保留は、回答なしで閉じる（closed_at が入り answer は NULL）。
 func TestWithdraw_ClosesOpenHoldWithoutAnswer(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createWithStatusForCase(t, ws, "verifying")
 	runJSON(t, ws, "verify", id, "--result", "uncertain", "--question", "why?")
@@ -249,6 +257,7 @@ func TestWithdraw_ClosesOpenHoldWithoutAnswer(t *testing.T) {
 
 // AC-382 相当: list --status は withdrawn と 取り下げ のどちらでも取り下げた課題を返す。
 func TestWithdraw_ListStatusFindsWithdrawnByCodeAndLabel(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	createForCase(t, ws)

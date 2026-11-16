@@ -33,6 +33,7 @@ func setupWorkspaceWithPosition(t *testing.T) string {
 // 実行すると、既定の周の上限額 300 USD で予算を評価する（#83 が作る周の行の
 // 予算の値を runs で観測する）。
 func TestClassifyAuto_DefaultCycleBudgetIs300USD(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := createForCase(t, ws)
 	putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: j1NotMineFixture})
@@ -53,6 +54,7 @@ func TestClassifyAuto_DefaultCycleBudgetIs300USD(t *testing.T) {
 // AC-3: .flywheel/agent.json が無いワークスペースで classify --auto を実行
 // すると、終了コード 2・config_invalid で終わる。
 func TestClassifyAuto_MissingAgentJSON_ConfigInvalid(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	// AC-14 と同じ理由（position_file が無い＝agent.json が無い）で config_invalid
@@ -64,6 +66,7 @@ func TestClassifyAuto_MissingAgentJSON_ConfigInvalid(t *testing.T) {
 // AC-4: 未知のキーを含む agent.json は、終了コード 2・config_invalid で終わり、
 // 偽の claude が起動されない。
 func TestClassifyAuto_UnknownAgentJSONKey_ConfigInvalidAndClaudeNotInvoked(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writePositionFileForTest(t, ws, "pos")
 	writeAgentJSONForTest(t, ws, `{"position_file": "position.md", "no_such_key": 1}`)
@@ -80,6 +83,7 @@ func TestClassifyAuto_UnknownAgentJSONKey_ConfigInvalidAndClaudeNotInvoked(t *te
 // AC-14: position_file が無い・指すファイルが無い agent.json は、終了コード
 // 2・config_invalid で終わり、偽の claude が起動されない。
 func TestClassifyAuto_MissingOrDanglingPositionFile_ConfigInvalidAndClaudeNotInvoked(t *testing.T) {
+	parallelTools(t, false)
 	cases := []struct {
 		name    string
 		agent   string
@@ -107,6 +111,7 @@ func TestClassifyAuto_MissingOrDanglingPositionFile_ConfigInvalidAndClaudeNotInv
 // AC-16: .flywheel/connectors.json が無いワークスペースでも、classify --auto
 // は J1 を起動する。
 func TestClassifyAuto_WorksWithoutConnectorsJSON(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	// connectors.json を意図的に作らない。
 	if _, err := os.Stat(filepath.Join(ws, ".flywheel", "connectors.json")); err == nil {
@@ -125,6 +130,7 @@ func TestClassifyAuto_WorksWithoutConnectorsJSON(t *testing.T) {
 // AC-27: PATH に claude が無い環境で classify --auto を実行すると、終了コード
 // 2・invoker_unavailable で終わり、ストアが変わらない。
 func TestClassifyAuto_ClaudeNotOnPATH_InvokerUnavailableAndStoreUnchanged(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := createForCase(t, ws)
 	dbPath := filepath.Join(ws, ".flywheel", "flywheel.db")
@@ -147,6 +153,7 @@ func TestClassifyAuto_ClaudeNotOnPATH_InvokerUnavailableAndStoreUnchanged(t *tes
 
 // classify --auto --priority は同時に指定できない（usage_error）。
 func TestClassifyAuto_WithPriority_IsUsageError(t *testing.T) {
+	t.Parallel()
 	ws := setupWorkspaceWithPosition(t)
 	id := createForCase(t, ws)
 	requireJSONErrorEnvelope(t, []string{"classify", "--auto", "--priority", "P1", id, "--workspace", ws}, 2, CodeUsageError)
@@ -155,6 +162,7 @@ func TestClassifyAuto_WithPriority_IsUsageError(t *testing.T) {
 // AC-70: 同じ課題に対する2つの classify --auto <C-ID> を並行して実行すると、
 // run は1つしか作られず、もう一方は終了コード1・run_in_progress で終わる。
 func TestClassifyAuto_ConcurrentSameChallengeID_SecondGetsRunInProgress(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := createForCase(t, ws)
 
@@ -168,13 +176,13 @@ func TestClassifyAuto_ConcurrentSameChallengeID_SecondGetsRunInProgress(t *testi
 	go func() {
 		defer wg.Done()
 		var stdout bytes.Buffer
-		code1 = run([]string{"classify", "--auto", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr1, defaultCommands())
+		code1 = runWithLookPath([]string{"classify", "--auto", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr1, defaultCommands(), lookPathFor(t))
 	}()
 
 	waitForFileWithTimeout(t, started, 10*time.Second)
 
 	var stdout2, stderr2 bytes.Buffer
-	code2 := run([]string{"classify", "--auto", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout2, &stderr2, defaultCommands())
+	code2 := runWithLookPath([]string{"classify", "--auto", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout2, &stderr2, defaultCommands(), lookPathFor(t))
 
 	wg.Wait()
 
@@ -206,6 +214,7 @@ func TestClassifyAuto_ConcurrentSameChallengeID_SecondGetsRunInProgress(t *testi
 // needs_human.triage に、理由と run の ID つきで出る（AC-84。CLI からの結線の
 // 確認）。
 func TestClassifyAuto_NotMine_AppearsInStatusTriage(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := createForCase(t, ws)
 	putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: j1NotMineFixture})
@@ -237,6 +246,7 @@ func TestClassifyAuto_NotMine_AppearsInStatusTriage(t *testing.T) {
 // mine で優先度が付いた J1 の出力は、分類済への遷移を classify --auto の
 // JSON にも反映する（結線の smoke テスト）。
 func TestClassifyAuto_Mine_ClassifiesChallengeAndReportsStatus(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := createForCase(t, ws)
 	putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: j1MineFixture("P1")})
@@ -258,6 +268,7 @@ func TestClassifyAuto_Mine_ClassifiesChallengeAndReportsStatus(t *testing.T) {
 // 終了コード 1・budget_exceeded で終わる（issue #84 の完了条件。AC 自体は
 // #83）。
 func TestClassifyAuto_ExplicitID_OverCycleBudget_BudgetExceeded(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writePositionFileForTest(t, ws, "pos")
 	// judgment_budget_usd.J1 は既定の 1 USD のまま、周の上限だけを 0.5 USD に
@@ -276,6 +287,7 @@ func TestClassifyAuto_ExplicitID_OverCycleBudget_BudgetExceeded(t *testing.T) {
 // ID を省略した classify --auto は、未分類の課題すべてを対象にする（スモーク
 // テスト。対象の選び方の詳細は internal/core のテストが固定する）。
 func TestClassifyAuto_WithoutID_ProcessesAllUnclassifiedChallenges(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id1 := createForCase(t, ws)
 	id2 := createForCase(t, ws)

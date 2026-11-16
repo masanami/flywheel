@@ -39,6 +39,7 @@ func constStrings(t *testing.T, typ string) []string {
 }
 
 func TestCardActionValues_MatchConsts(t *testing.T) {
+	t.Parallel()
 	var got []string
 	for _, v := range CardActionValues() {
 		got = append(got, string(v))
@@ -49,6 +50,7 @@ func TestCardActionValues_MatchConsts(t *testing.T) {
 }
 
 func TestCardModifierValues_MatchConsts(t *testing.T) {
+	t.Parallel()
 	var got []string
 	for _, v := range CardModifierValues() {
 		got = append(got, string(v))

@@ -47,6 +47,7 @@ func ahead(commits ...UpstreamCommit) UpstreamComparison {
 
 // 変更が 100 件を超えても、取り切れている（FilesTruncated が偽）なら「取り込みだけ」を判定できる。
 func TestClassifyHeadChange_ManyFilesNotTruncated(t *testing.T) {
+	t.Parallel()
 	f := newFakeCompare()
 	f.set("v", "h1", ahead(commit("m1", "main change", "m0"), commit("h1", "Merge branch 'main'", "v", "m1")))
 	f.set("main", "h1", ahead(commit("p0", "feat", "m0"), commit("v", "fix", "p0"), commit("h1", "Merge branch 'main'", "v", "m1")))
@@ -63,6 +64,7 @@ func TestClassifyHeadChange_ManyFilesNotTruncated(t *testing.T) {
 }
 
 func TestClassifyHeadChange_MergeInOnly(t *testing.T) {
+	t.Parallel()
 	f := newFakeCompare()
 	// R: v..h1 は、取り込みのマージ h1 と、既定ブランチ側のコミット m1。
 	f.set("v", "h1", ahead(commit("m1", "main change", "m0"), commit("h1", "Merge branch 'main'", "v", "m1")))
@@ -104,6 +106,7 @@ func withFiles(c UpstreamComparison, files ...UpstreamFile) UpstreamComparison {
 }
 
 func TestClassifyHeadChange_ConflictFixFileWithoutPatchIsMarked(t *testing.T) {
+	t.Parallel()
 	f := newFakeCompare()
 	f.set("v", "h1", ahead(commit("h1", "Merge", "v", "m1")))
 	f.set("main", "h1", ahead(commit("v", "fix", "p0"), commit("h1", "Merge", "v", "m1")))
@@ -120,6 +123,7 @@ func TestClassifyHeadChange_ConflictFixFileWithoutPatchIsMarked(t *testing.T) {
 }
 
 func TestClassifyHeadChange_NonMergeCommitOnPRSideIsContentChange(t *testing.T) {
+	t.Parallel()
 	f := newFakeCompare()
 	f.set("v", "h2", ahead(commit("c1", "add feature", "v"), commit("h2", "Merge branch 'main'", "c1", "m1"), commit("m1", "main", "m0")))
 	f.set("main", "h2", ahead(commit("p0", "feat", "m0"), commit("v", "fix", "p0"), commit("c1", "add feature", "v"), commit("h2", "Merge", "c1", "m1")))
@@ -136,6 +140,7 @@ func TestClassifyHeadChange_NonMergeCommitOnPRSideIsContentChange(t *testing.T) 
 }
 
 func TestClassifyHeadChange_MergeOfAnotherUnmergedBranchIsContentChange(t *testing.T) {
+	t.Parallel()
 	f := newFakeCompare()
 	// h3 は、既定ブランチに入っていない別のブランチ x1 を取り込む（x1 も P に入る）。
 	f.set("v", "h3", ahead(commit("x1", "other branch work", "x0"), commit("h3", "Merge branch 'other'", "v", "x1")))
@@ -147,6 +152,7 @@ func TestClassifyHeadChange_MergeOfAnotherUnmergedBranchIsContentChange(t *testi
 }
 
 func TestClassifyHeadChange_MergeWithBothParentsOnPRSideIsContentChange(t *testing.T) {
+	t.Parallel()
 	f := newFakeCompare()
 	f.set("v", "h4", ahead(commit("h4", "Merge branch 'self'", "v", "s1"), commit("s1", "side", "p0")))
 	f.set("main", "h4", ahead(commit("v", "fix", "p0"), commit("s1", "side", "p0"), commit("h4", "Merge", "v", "s1")))
@@ -156,6 +162,7 @@ func TestClassifyHeadChange_MergeWithBothParentsOnPRSideIsContentChange(t *testi
 }
 
 func TestClassifyHeadChange_Undeterminable(t *testing.T) {
+	t.Parallel()
 	merge := func() *fakeCompare {
 		f := newFakeCompare()
 		f.set("v", "h1", ahead(commit("h1", "Merge", "v", "m1")))
@@ -224,6 +231,7 @@ func TestClassifyHeadChange_Undeterminable(t *testing.T) {
 }
 
 func TestChecksAllPassed(t *testing.T) {
+	t.Parallel()
 	ok := UpstreamCheck{Name: "a", Status: "completed", Conclusion: "success"}
 	skipped := UpstreamCheck{Name: "s", Status: "completed", Conclusion: "skipped"}
 	failed := UpstreamCheck{Name: "f", Status: "completed", Conclusion: "failure"}

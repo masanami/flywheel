@@ -54,6 +54,7 @@ func reviewWaitOutFor(url string) ContractLaunchOutput {
 
 // (1) レビュー待ちを取り込んで検証中へ進めたとき、その PR を指す release が 1 件作られる。同じ PR を読み直しても増えない。
 func TestPollContractRuns_ReviewWaitCreatesOneReleaseForTheDefaultBranchPR(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.setPR(1, reviewPRURL, "open", "main")
 	f.toVerifying(t)
@@ -65,6 +66,7 @@ func TestPollContractRuns_ReviewWaitCreatesOneReleaseForTheDefaultBranchPR(t *te
 
 // 宛先が既定ブランチでない PR・宣言にないリポジトリの PR には release を作らない（検証中へは進む）。
 func TestPollContractRuns_ReviewWaitDoesNotCreateReleaseForANonDefaultBasePR(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.setPR(1, reviewPRURL, "open", "develop")
 	f.toVerifying(t)
@@ -75,6 +77,7 @@ func TestPollContractRuns_ReviewWaitDoesNotCreateReleaseForANonDefaultBasePR(t *
 
 // PR の取得に失敗したときは release の無い検証中を作らず、課題は着手中のまま次の周で読み直す。
 func TestPollContractRuns_ReviewWaitWithPRLookupFailureDoesNotVerifyAndIsRetried(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -99,6 +102,7 @@ func TestPollContractRuns_ReviewWaitWithPRLookupFailureDoesNotVerifyAndIsRetried
 
 // (2) 差し戻しの後に別の PR になったとき、前の release は閉じられ（superseded）、新しい release だけが承認の対象になる。
 func TestPollContractRuns_ANewPRAfterReworkSupersedesThePreviousRelease(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.setPR(1, reviewPRURL, "open", "main")
 	f.setPR(2, reviewPRURL2, "open", "main")
@@ -131,6 +135,7 @@ func TestPollContractRuns_ANewPRAfterReworkSupersedesThePreviousRelease(t *testi
 
 // 直す前から残っている誤った release（閉じた古い PR を指したまま）も、次にレビュー待ちを読んだときに置き換わる。
 func TestPollContractRuns_AStaleReleaseLeftFromBeforeIsReplacedOnTheNextRead(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.setPR(2, reviewPRURL2, "open", "main")
 	if _, err := f.start(t); err != nil {
@@ -147,6 +152,7 @@ func TestPollContractRuns_AStaleReleaseLeftFromBeforeIsReplacedOnTheNextRead(t *
 
 // (3) 完了の承認から本番反映のマージ、ready を返すまでが手の補い無しに通る。
 func TestPollContractRuns_ApprovalMergeAndReadyRunWithoutManualRelease(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	ctx := context.Background()
 	f.setPR(1, reviewPRURL, "open", "main")
@@ -189,6 +195,7 @@ func TestPollContractRuns_ApprovalMergeAndReadyRunWithoutManualRelease(t *testin
 
 // (4) ready の後に観測の待ち（human-merge など）を返す接続ツールでも、課題が完了のまま、答え無しの resume で読み進めて run が succeeded になる。
 func TestPollContractRuns_ObserveAfterReadyOnADoneChallengeIsResumedUntilSucceeded(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.setPR(1, reviewPRURL, "open", "main")
 	f.toVerifying(t)
@@ -225,6 +232,7 @@ func TestPollContractRuns_ObserveAfterReadyOnADoneChallengeIsResumedUntilSucceed
 
 // 差し戻しで PR1 → PR2 → PR1 と戻ったとき、承認できる release が作り直される。
 func TestPollContractRuns_ReturningToAnEarlierPRRecreatesAnApprovableRelease(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.setPR(1, reviewPRURL, "open", "main")
 	f.setPR(2, reviewPRURL2, "open", "main")
@@ -252,6 +260,7 @@ func TestPollContractRuns_ReturningToAnEarlierPRRecreatesAnApprovableRelease(t *
 
 // succeeded の写しでも release を作って検証中へ進む。PR の取得に失敗しても、課題を着手中のまま取り残さず検証中へ進める。
 func TestPollContractRuns_SucceededCreatesReleaseAndStillVerifiesWhenTheLookupFails(t *testing.T) {
+	t.Parallel()
 	for _, fail := range []bool{false, true} {
 		f := newReviewFlowFixture(t)
 		if fail {
@@ -286,6 +295,7 @@ func reviewWaitOutForAll(urls ...string) ContractLaunchOutput {
 
 // 同じ PR のレビュー待ちを 2 回読んでも（差し戻しの後に同じ PR でまたレビュー待ちになっても）、release は 1 件のまま。
 func TestPollContractRuns_ReadingTheSamePRTwiceKeepsOneRelease(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.setPR(1, reviewPRURL, "open", "main")
 	f.toVerifying(t)
@@ -308,6 +318,7 @@ func TestPollContractRuns_ReadingTheSamePRTwiceKeepsOneRelease(t *testing.T) {
 
 // 1 回のレビュー待ちで同じ成果物（同じ PR）が重なって届いても、release は 1 件。
 func TestPollContractRuns_ReviewWaitWithTheSamePRListedTwiceCreatesOneRelease(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.setPR(1, reviewPRURL, "open", "main")
 	if _, err := f.start(t); err != nil {
@@ -326,6 +337,7 @@ func TestPollContractRuns_ReviewWaitWithTheSamePRListedTwiceCreatesOneRelease(t 
 
 // 1 回のレビュー待ちに PR が複数あるとき、既定ブランチ（main）宛の PR ごとに 1 件ずつ作り、main 宛でない PR には作らない。
 func TestPollContractRuns_ReviewWaitWithSeveralPRsCreatesOneReleasePerDefaultBranchPR(t *testing.T) {
+	t.Parallel()
 	const reviewPRURL3 = "https://github.com/o/r/pull/3"
 	f := newReviewFlowFixture(t)
 	f.setPR(1, reviewPRURL, "open", "main")

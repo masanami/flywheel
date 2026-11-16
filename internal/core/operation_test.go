@@ -12,6 +12,7 @@ import (
 // --- CreateOperation (`op add`) ---
 
 func TestCreateOperation_RegistersPendingOperationAndReturnsID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -42,6 +43,7 @@ func TestCreateOperation_RegistersPendingOperationAndReturnsID(t *testing.T) {
 
 // AC: 続けて登録した不可逆操作の ID は課題をまたいで作成順に単調増加する。
 func TestCreateOperation_IDsAreMonotonicAcrossChallenges(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c1 := createAndAdvance(t, s, StatusUnclassified)
@@ -62,6 +64,7 @@ func TestCreateOperation_IDsAreMonotonicAcrossChallenges(t *testing.T) {
 
 // op add はその課題の版を1増やす（親要件チケット #4 §アーキテクチャ決定）。
 func TestCreateOperation_BumpsChallengeVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified) // version=1
@@ -87,6 +90,7 @@ func TestCreateOperation_BumpsChallengeVersion(t *testing.T) {
 // 同じトランザクションで作業ログへ残す（log <C-ID> で課題のエントリの
 // version が飛ばないようにするため）。
 func TestCreateOperation_RecordsChallengeEntityActivityEntry(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified) // version=1
@@ -125,6 +129,7 @@ func TestCreateOperation_RecordsChallengeEntityActivityEntry(t *testing.T) {
 }
 
 func TestCreateOperation_InvalidKindIsValidationError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -136,6 +141,7 @@ func TestCreateOperation_InvalidKindIsValidationError(t *testing.T) {
 }
 
 func TestCreateOperation_EmptySummaryIsValidationError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -149,6 +155,7 @@ func TestCreateOperation_EmptySummaryIsValidationError(t *testing.T) {
 }
 
 func TestCreateOperation_NotFoundForMissingOrMalformedChallengeID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -161,6 +168,7 @@ func TestCreateOperation_NotFoundForMissingOrMalformedChallengeID(t *testing.T) 
 }
 
 func TestCreateOperation_DoneChallengeIsTerminalState(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusDone)
@@ -191,6 +199,7 @@ func createPendingOperation(t *testing.T, s *Store, challengeID string, kind str
 }
 
 func TestPrepareOperationApproval_ReturnsPreviewFields(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -219,6 +228,7 @@ func TestPrepareOperationApproval_ReturnsPreviewFields(t *testing.T) {
 }
 
 func TestPrepareOperationApproval_NotFoundForMissingOrMalformedID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	for _, id := range []string{"OP-999", "C-1", "foo"} {
@@ -230,6 +240,7 @@ func TestPrepareOperationApproval_NotFoundForMissingOrMalformedID(t *testing.T) 
 }
 
 func TestPrepareOperationApproval_AlreadyDecidedIsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -253,6 +264,7 @@ func TestPrepareOperationApproval_AlreadyDecidedIsInvalidTransition(t *testing.T
 }
 
 func TestPrepareOperationRejection_EmptyReasonIsValidationErrorBeforeTouchingStore(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -269,6 +281,7 @@ func TestPrepareOperationRejection_EmptyReasonIsValidationErrorBeforeTouchingSto
 // --- ExecuteOperationApproval ---
 
 func TestExecuteOperationApproval_ApprovedRecordsApprovalAndBumpsChallengeVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified) // version=1
@@ -319,6 +332,7 @@ func TestExecuteOperationApproval_ApprovedRecordsApprovalAndBumpsChallengeVersio
 // S2（Issue #39）: approve <OP-ID> も課題の版を上げるので、entity="operation"
 // のエントリに加え entity="challenge" のエントリ（action=op_approve）も残す。
 func TestExecuteOperationApproval_ApprovedRecordsChallengeEntityActivityEntry(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -363,6 +377,7 @@ func TestExecuteOperationApproval_ApprovedRecordsChallengeEntityActivityEntry(t 
 // S2（Issue #39）: reject <OP-ID> も同様に entity="challenge" のエントリ
 // （action=op_reject）を残す。
 func TestExecuteOperationApproval_RejectedRecordsChallengeEntityActivityEntry(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -406,6 +421,7 @@ func TestExecuteOperationApproval_RejectedRecordsChallengeEntityActivityEntry(t 
 }
 
 func TestExecuteOperationApproval_RejectedRecordsReason(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -433,6 +449,7 @@ func TestExecuteOperationApproval_RejectedRecordsReason(t *testing.T) {
 
 // AC: 課題が完了した後でも、残った未承認の release を単独に承認できる（保留した本番反映のため）。
 func TestExecuteOperationApproval_WorksAfterChallengeIsDone(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -456,6 +473,7 @@ func TestExecuteOperationApproval_WorksAfterChallengeIsDone(t *testing.T) {
 }
 
 func TestExecuteOperationApproval_VersionMismatchIsConflict(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -497,6 +515,7 @@ func TestExecuteOperationApproval_VersionMismatchIsConflict(t *testing.T) {
 // 課題の ID・タイトル・状態も見せるため、その前提が崩れたまま本番反映の承認を
 // 成立させてはならない（仕様 §承認の conflict 条項）。
 func TestExecuteOperationApproval_ChallengeChangedIsConflict(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -541,6 +560,7 @@ func TestExecuteOperationApproval_ChallengeChangedIsConflict(t *testing.T) {
 }
 
 func TestExecuteOperationApproval_RejectedWithEmptyReasonIsValidationError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -568,6 +588,7 @@ func mustParseChallengeID(t *testing.T, id string) int64 {
 // log <C-ID> の entity="challenge" のエントリの version は飛ばずに 1 ずつ
 // 増え、最後のエントリの version が課題の現在の版と一致する。
 func TestListActivities_ChallengeEntryVersionsAreConsecutiveAcrossOperationChanges(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified) // version=1
@@ -641,6 +662,7 @@ func failSecondChallengeEntry(tx *sql.Tx, row activityRow) error {
 // op add で課題のエントリの書き込みだけが失敗しても、不可逆操作の登録・課題の
 // 版・不可逆操作のエントリはすべて残らない（同じトランザクションでロールバック）。
 func TestCreateOperation_ChallengeEntryFailureRollsBackEverything(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified) // version=1
@@ -667,6 +689,7 @@ func TestCreateOperation_ChallengeEntryFailureRollsBackEverything(t *testing.T) 
 // approve／reject <OP-ID> で課題のエントリの書き込みだけが失敗しても、不可逆操作の
 // 状態・版、承認の記録、課題の版、不可逆操作のエントリはすべて残らない。
 func TestExecuteOperationApproval_ChallengeEntryFailureRollsBackEverything(t *testing.T) {
+	t.Parallel()
 	for _, decision := range []ApprovalDecision{ApprovalDecisionApproved, ApprovalDecisionRejected} {
 		t.Run(string(decision), func(t *testing.T) {
 			s := newStoreForTest(t)

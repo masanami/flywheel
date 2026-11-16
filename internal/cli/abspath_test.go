@@ -54,6 +54,7 @@ func isAbsoluteGHPathLiteral(v string) bool {
 }
 
 func TestScanAbsolutePaths_DetectsUsersPrefix(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	src := []byte("package example\n\nconst path = \"/Users/example/secret\"\n")
 	violations, err := scanAbsolutePaths(fset, "synthetic.go", src)
@@ -66,6 +67,7 @@ func TestScanAbsolutePaths_DetectsUsersPrefix(t *testing.T) {
 }
 
 func TestScanAbsolutePaths_DetectsHomePrefix(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	src := []byte("package example\n\nconst path = \"/home/example/secret\"\n")
 	violations, err := scanAbsolutePaths(fset, "synthetic.go", src)
@@ -78,6 +80,7 @@ func TestScanAbsolutePaths_DetectsHomePrefix(t *testing.T) {
 }
 
 func TestScanAbsolutePaths_NoFalsePositiveOnUnrelatedPaths(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	src := []byte("package example\n\nconst a = \"/tmp/example\"\nconst b = \"users/example\"\nconst c = \"/etc/passwd\"\n")
 	violations, err := scanAbsolutePaths(fset, "synthetic.go", src)
@@ -93,6 +96,7 @@ func TestScanAbsolutePaths_NoFalsePositiveOnUnrelatedPaths(t *testing.T) {
 // "/usr/local/bin/gh"・"/opt/homebrew/bin/gh" のような gh の絶対パスの
 // 文字列リテラルを検出することを確かめる。
 func TestScanAbsolutePaths_DetectsAbsoluteGHPath(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"/usr/local/bin/gh", "/opt/homebrew/bin/gh"} {
 		fset := token.NewFileSet()
 		src := []byte("package example\n\nconst ghPath = \"" + v + "\"\n")
@@ -111,6 +115,7 @@ func TestScanAbsolutePaths_DetectsAbsoluteGHPath(t *testing.T) {
 // "repos/x/gh"（先頭が "/" でない）を誤検出しないことを確かめる
 // （AC-106「"gh" や "repos/x/gh" は誤検出しない」）。
 func TestScanAbsolutePaths_NoFalsePositiveOnGHLikeStrings(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	src := []byte(`package example
 
@@ -161,6 +166,7 @@ func nonTestGoFilePaths(t *testing.T, root string) []string {
 // TestNoAbsolutePathsInNonTestSources は AC-80 本体: テストを除く Go のコードに
 // 環境固有の絶対パスが含まれないことを検査する。
 func TestNoAbsolutePathsInNonTestSources(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	var allViolations []string
 	for _, path := range nonTestGoFilePaths(t, root) {
@@ -187,6 +193,7 @@ func TestNoAbsolutePathsInNonTestSources(t *testing.T) {
 // コードで確認済み。走査範囲が将来 internal/adapters を除外する方向へ
 // 変わったときにこのテストが検出する）。
 func TestNonTestGoFilesIncludeAdaptersGithub(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	wantSubstring := string(filepath.Separator) + filepath.Join("internal", "adapters", "github") + string(filepath.Separator)
 

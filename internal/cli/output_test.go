@@ -8,6 +8,7 @@ import (
 )
 
 func TestWriteJSONSuccess_NoHTMLEscapingAndSingleTrailingNewline(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	payload := map[string]any{"challenge": map[string]any{"title": "<a> & 日本語"}}
 	if err := writeJSONSuccess(&buf, payload); err != nil {
@@ -35,6 +36,7 @@ func TestWriteJSONSuccess_NoHTMLEscapingAndSingleTrailingNewline(t *testing.T) {
 }
 
 func TestWriteJSONSuccess_RejectsNonObjectTopLevel(t *testing.T) {
+	t.Parallel()
 	cases := []any{
 		[]string{"a", "b"},
 		"just a string",
@@ -54,6 +56,7 @@ func TestWriteJSONSuccess_RejectsNonObjectTopLevel(t *testing.T) {
 }
 
 func TestWriteJSONSuccess_AcceptsObjectTopLevel(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	if err := writeJSONSuccess(&buf, map[string]any{"challenges": []any{}}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -64,6 +67,7 @@ func TestWriteJSONSuccess_AcceptsObjectTopLevel(t *testing.T) {
 }
 
 func TestWriteJSONError_Envelope(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	if err := writeJSONError(&buf, CodeNotFound, "x not found"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -75,6 +79,7 @@ func TestWriteJSONError_Envelope(t *testing.T) {
 }
 
 func TestWriteTextError_Format(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	writeTextError(&buf, CodeNotFound, "x not found")
 	want := "flywheel: x not found (not_found)\n"
@@ -84,6 +89,7 @@ func TestWriteTextError_Format(t *testing.T) {
 }
 
 func TestFormatTimestamp_UTCWithMillisAndZ(t *testing.T) {
+	t.Parallel()
 	tm := time.Date(2026, 9, 21, 8, 30, 0, 123000000, time.UTC)
 	got := FormatTimestamp(tm)
 	want := "2026-09-21T08:30:00.123Z"
@@ -93,6 +99,7 @@ func TestFormatTimestamp_UTCWithMillisAndZ(t *testing.T) {
 }
 
 func TestFormatTimestamp_ConvertsNonUTCInputToUTC(t *testing.T) {
+	t.Parallel()
 	jst := time.FixedZone("JST", 9*3600)
 	tm := time.Date(2026, 9, 21, 17, 30, 0, 0, jst)
 	got := FormatTimestamp(tm)

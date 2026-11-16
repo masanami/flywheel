@@ -21,6 +21,7 @@ func (h *headSource) GetPullRequestChecks(_ context.Context, repo string, n int)
 }
 
 func TestParseReleasePullRequestRef(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		ref  string
 		repo string
@@ -46,6 +47,7 @@ func TestParseReleasePullRequestRef(t *testing.T) {
 }
 
 func TestResolveReleaseHeads(t *testing.T) {
+	t.Parallel()
 	ref := func(s string) *string { return &s }
 	rels := []IrreversibleOperation{
 		{ID: "OP-1", Ref: ref("https://github.com/o/r/pull/3/files")},

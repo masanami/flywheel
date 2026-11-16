@@ -46,6 +46,7 @@ func readForTest(t *testing.T, s *Store, fn func(tx *sql.Tx) error) {
 // --- 状態 executed は未承認にも承認済み（未実行）にも数えない（AC-136・AC-137） ---
 
 func TestOperationStateExecuted_IsNotCountedInStatusLists(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -65,6 +66,7 @@ func TestOperationStateExecuted_IsNotCountedInStatusLists(t *testing.T) {
 }
 
 func TestDeriveCard_ExecutedOperationIsNotAPendingApproval(t *testing.T) {
+	t.Parallel()
 	st := &Overview{NeedsHumanOperations: []IrreversibleOperation{{ChallengeID: "C-1", State: OperationStateExecuted}}}
 	card := deriveCard(Challenge{ID: "C-1", Status: StatusDone}, st, nil, nil, time.Now(), defaultStaleAfter)
 	if len(card.NextHumanActions) != 0 {
@@ -75,6 +77,7 @@ func TestDeriveCard_ExecutedOperationIsNotAPendingApproval(t *testing.T) {
 // --- M3P15: executed の release は承認済みとして数える ---
 
 func TestReleaseApproved_CountsExecutedButNotPendingOrRejected(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -107,6 +110,7 @@ func TestReleaseApproved_CountsExecutedButNotPendingOrRejected(t *testing.T) {
 // --- 試行の書き込み・閉じる・読む（AC-111） ---
 
 func TestOperationExecution_BeginCloseRoundTrip(t *testing.T) {
+	t.Parallel()
 	s, _, opID := releaseFixtureForTest(t)
 	ctx := context.Background()
 	var id int64
@@ -153,6 +157,7 @@ func TestOperationExecution_BeginCloseRoundTrip(t *testing.T) {
 }
 
 func TestOperationExecution_SecondActiveAttemptIsRejectedUntilFirstIsClosed(t *testing.T) {
+	t.Parallel()
 	s, _, opID := releaseFixtureForTest(t)
 	ctx := context.Background()
 	in := beginOperationExecutionInput{StartedAt: execTime(1), PID: 1, Host: "h"}
@@ -181,6 +186,7 @@ func TestOperationExecution_SecondActiveAttemptIsRejectedUntilFirstIsClosed(t *t
 }
 
 func TestOperationExecution_ValidationAndDoubleClose(t *testing.T) {
+	t.Parallel()
 	s, _, opID := releaseFixtureForTest(t)
 	ctx := context.Background()
 	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
@@ -237,6 +243,7 @@ func TestOperationExecution_ValidationAndDoubleClose(t *testing.T) {
 // --- 連続の回数の導出 ---
 
 func TestConsecutiveFailures(t *testing.T) {
+	t.Parallel()
 	type attempt struct {
 		sec    int
 		result ExecutionResult // 空なら終了していない試行
@@ -292,6 +299,7 @@ func TestConsecutiveFailures(t *testing.T) {
 }
 
 func TestConsecutiveFailures_IgnoresOtherOperations(t *testing.T) {
+	t.Parallel()
 	s, cid, op1 := releaseFixtureForTest(t)
 	op2 := coretest.InsertApprovedRelease(t, s.workspace, int(cid), "https://github.com/o/r/pull/2", "ff", execTS(0))
 	coretest.InsertOperationExecution(t, s.workspace, op2, coretest.ExecutionAttempt{
@@ -315,6 +323,7 @@ func TestConsecutiveFailures_IgnoresOtherOperations(t *testing.T) {
 // --- coretest のフィクスチャ（後続のチケットが使う） ---
 
 func TestCoretestFixtures_ApprovalHeadAndVerifiedHead(t *testing.T) {
+	t.Parallel()
 	s, cid, opID := releaseFixtureForTest(t)
 	noHead := coretest.InsertApprovedRelease(t, s.workspace, int(cid), "https://github.com/o/r/pull/9", "", execBase)
 	runID := coretest.InsertRun(t, s.workspace, coretest.InsertRunInput{

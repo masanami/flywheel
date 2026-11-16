@@ -114,6 +114,7 @@ func assertKeysSorted(t *testing.T, data []byte) {
 
 // AC-1・AC-2・AC-5: 最上位のキー・行の無い表も含めたすべての表・sqlite_sequence の行。
 func TestExport_TopLevelShapeAllTablesAndSequences(t *testing.T) {
+	t.Parallel()
 	s, _ := newWorkspaceStore(t) // 行の無い表だけのストア
 	var doc struct {
 		SchemaVersion int                         `json:"schema_version"`
@@ -159,6 +160,7 @@ func TestExport_TopLevelShapeAllTablesAndSequences(t *testing.T) {
 
 // AC-3・AC-4・AC-5: 行は主キーの昇順、キーは辞書順、sequences は sqlite_sequence の行。
 func TestExport_RowsInPrimaryKeyOrderKeysSortedSequencesMatch(t *testing.T) {
+	t.Parallel()
 	s, dir := filledStore(t)
 	// 主キーの順（挿入順と逆）を確かめるため、後から小さい主キーの行は作れないので、複合主キーの表へ足す。
 	coretest.Exec(t, dir, `INSERT INTO task_plan (challenge_id, version, body, created_at) VALUES (1, 0, 'older', '2026-10-29T00:00:00.000Z')`)
@@ -224,6 +226,7 @@ func TestExport_RowsInPrimaryKeyOrderKeysSortedSequencesMatch(t *testing.T) {
 
 // AC-6・AC-8: 2 回の書き出しはバイト単位で一致し、書き出しはストアを変えない。
 func TestExport_IsDeterministicAndDoesNotChangeTheStore(t *testing.T) {
+	t.Parallel()
 	s, dir := filledStore(t)
 	before := dumpAll(t, dir)
 	first := mustExport(t, s)
@@ -238,6 +241,7 @@ func TestExport_IsDeterministicAndDoesNotChangeTheStore(t *testing.T) {
 
 // AC-7: run のディレクトリのファイルの中身は書き出しに現れない。
 func TestExport_DoesNotIncludeRunDirectoryFiles(t *testing.T) {
+	t.Parallel()
 	s, dir := filledStore(t)
 	runDir := filepath.Join(dir, ".flywheel", "runs", "R-1")
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
@@ -254,6 +258,7 @@ func TestExport_DoesNotIncludeRunDirectoryFiles(t *testing.T) {
 
 // ExportToFile は絶対パスを返し、既存のファイルを置き換え、ディレクトリが居る場所へは書かずに store_error 相当で終わる。
 func TestExportToFile_WritesReplacesAndFailsOnDirectory(t *testing.T) {
+	t.Parallel()
 	s, dir := filledStore(t)
 	out := filepath.Join(dir, "out.json")
 	if err := os.WriteFile(out, []byte("old"), 0o644); err != nil {
@@ -281,6 +286,7 @@ func TestExportToFile_WritesReplacesAndFailsOnDirectory(t *testing.T) {
 
 // AC-9・AC-10: 往復で書き出しがバイト単位で一致し、次の ID も同じ。import は作業ログを足さない。
 func TestImport_RoundTripIsByteIdenticalAndKeepsNumbering(t *testing.T) {
+	t.Parallel()
 	src, srcDir := filledStore(t)
 	exported := mustExport(t, src)
 	dst, dstDir := newWorkspaceStore(t)
@@ -309,6 +315,7 @@ func TestImport_RoundTripIsByteIdenticalAndKeepsNumbering(t *testing.T) {
 
 // 整数を float64 で丸めない（2^53 + 1 の費用の列が往復で変わらない）。
 func TestImport_KeepsLargeIntegersExact(t *testing.T) {
+	t.Parallel()
 	src, _ := filledStore(t)
 	exported := mustExport(t, src)
 	if !bytes.Contains(exported, []byte("9007199254740993")) {
@@ -341,6 +348,7 @@ func replaceJSON(t *testing.T, data []byte, mutate func(doc map[string]any)) []b
 
 // AC-11: 空のストアの書き出しの sequences に challenge: 372 を足して import すると、最初の課題は C-373。
 func TestImport_EmptyStoreWithChallengeSequence_FirstCreateIsC373(t *testing.T) {
+	t.Parallel()
 	empty, _ := newWorkspaceStore(t)
 	doc := replaceJSON(t, mustExport(t, empty), func(d map[string]any) {
 		d["sequences"].(map[string]any)["challenge"] = json.Number("372")
@@ -372,6 +380,7 @@ func assertImportRejected(t *testing.T, s *Store, dir string, data []byte) {
 
 // AC-14: 1 つ以上の表に行を持つストアへの import は、何も変えず validation_failed。
 func TestImport_IntoStoreWithRows_IsRejected(t *testing.T) {
+	t.Parallel()
 	src, _ := filledStore(t)
 	exported := mustExport(t, src)
 	dst, dir := newWorkspaceStore(t)
@@ -383,6 +392,7 @@ func TestImport_IntoStoreWithRows_IsRejected(t *testing.T) {
 // AC-14: 主キーがぶつからない形（空のストアの書き出しを、slot だけに行を持つストアへ）でも、
 // 行数の検査で何も変えず validation_failed。
 func TestImport_EmptyExportIntoStoreWithRows_IsRejected(t *testing.T) {
+	t.Parallel()
 	empty, _ := newWorkspaceStore(t)
 	exported := mustExport(t, empty)
 	dst, dir := newWorkspaceStore(t)
@@ -393,6 +403,7 @@ func TestImport_EmptyExportIntoStoreWithRows_IsRejected(t *testing.T) {
 // AC-10: import は sequences の値を採番の状態にする（最大の ID より大きい値でも保つ）。sqlite_sequence に
 // 同じ名前の行が重複しない。
 func TestImport_KeepsSequencesAboveTheLargestID(t *testing.T) {
+	t.Parallel()
 	src, srcDir := filledStore(t)
 	coretest.Exec(t, srcDir, "UPDATE sqlite_sequence SET seq = 10 WHERE name = 'challenge'")
 	coretest.Exec(t, srcDir, "UPDATE sqlite_sequence SET seq = 10 WHERE name = 'run'")
@@ -426,6 +437,7 @@ func TestImport_KeepsSequencesAboveTheLargestID(t *testing.T) {
 
 // rowid が ID でない表（TEXT の主キーの lock）では、sequences の値を最大の ID と比べない。
 func TestImport_SequenceOfTableWithoutIntegerKeyIsNotComparedWithRowid(t *testing.T) {
+	t.Parallel()
 	src, _ := filledStore(t)
 	doc := replaceJSON(t, mustExport(t, src), func(d map[string]any) {
 		if len(d["tables"].(map[string]any)["lock"].([]any)) == 0 {
@@ -441,6 +453,7 @@ func TestImport_SequenceOfTableWithoutIntegerKeyIsNotComparedWithRowid(t *testin
 
 // UTF-8 として不正な TEXT は書き出さず store_error（encoding/json の置き換えで往復が崩れるため）。
 func TestExport_InvalidUTF8TextIsStoreError(t *testing.T) {
+	t.Parallel()
 	s, dir := filledStore(t)
 	coretest.Exec(t, dir, "UPDATE challenge SET title = CAST(x'ff' AS TEXT) WHERE id = 1")
 	if _, _, err := s.Export(context.Background()); !errors.Is(err, ErrStoreError) {
@@ -450,6 +463,7 @@ func TestExport_InvalidUTF8TextIsStoreError(t *testing.T) {
 
 // AC-15: スキーマの版が違う書き出しは、何も変えず validation_failed。
 func TestImport_DifferentSchemaVersion_IsRejected(t *testing.T) {
+	t.Parallel()
 	src, _ := filledStore(t)
 	doc := replaceJSON(t, mustExport(t, src), func(d map[string]any) { d["schema_version"] = json.Number("11") })
 	dst, dir := newWorkspaceStore(t)
@@ -458,6 +472,7 @@ func TestImport_DifferentSchemaVersion_IsRejected(t *testing.T) {
 
 // AC-16: 外部キーの違反（存在しない課題を参照する行）は validation_failed で、すべての表が 0 行のまま。
 func TestImport_ForeignKeyViolation_IsRejectedAndLeavesNoRows(t *testing.T) {
+	t.Parallel()
 	src, _ := filledStore(t)
 	doc := replaceJSON(t, mustExport(t, src), func(d map[string]any) {
 		d["tables"].(map[string]any)["challenge"] = []any{}
@@ -536,6 +551,7 @@ func TestImport_MalformedDocuments_AreRejected(t *testing.T) {
 }
 
 func TestImportFromFile_UnreadableFileIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	s, dir := newWorkspaceStore(t)
 	if _, err := s.ImportFromFile(context.Background(), filepath.Join(dir, "missing.json")); !errors.Is(err, ErrValidation) {
 		t.Errorf("ImportFromFile(missing) = %v, want ErrValidation", err)

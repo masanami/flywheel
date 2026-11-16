@@ -26,6 +26,7 @@ func writeSourcesJSON(t *testing.T, content string) string {
 // --- AC-3〜AC-11: 宣言の検証 ---
 
 func TestLoadSourcesDeclaration_FileNotFound(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir() // .flywheel/sources.json を作らない
 	_, err := LoadSourcesDeclaration(dir)
 	if !errors.Is(err, ErrConfigNotFound) {
@@ -34,6 +35,7 @@ func TestLoadSourcesDeclaration_FileNotFound(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_UnparseableJSON(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{ this is not json `)
 	_, err := LoadSourcesDeclaration(dir)
 	if !errors.Is(err, ErrConfigInvalid) {
@@ -42,6 +44,7 @@ func TestLoadSourcesDeclaration_UnparseableJSON(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_TrailingContentAfterJSONValue(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{"version":1,"sources":[]}garbage`)
 	_, err := LoadSourcesDeclaration(dir)
 	if !errors.Is(err, ErrConfigInvalid) {
@@ -50,6 +53,7 @@ func TestLoadSourcesDeclaration_TrailingContentAfterJSONValue(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_UnknownTopLevelKey(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [],
@@ -62,6 +66,7 @@ func TestLoadSourcesDeclaration_UnknownTopLevelKey(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_UnknownSourceElementKey(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [
@@ -75,6 +80,7 @@ func TestLoadSourcesDeclaration_UnknownSourceElementKey(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_TypeMustBeGitHubIssue(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [
@@ -88,6 +94,7 @@ func TestLoadSourcesDeclaration_TypeMustBeGitHubIssue(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_AssigneePolicyMustBeInClosedSet(t *testing.T) {
+	t.Parallel()
 	cases := []string{"", "SELF-ONLY", "everyone"}
 	for _, policy := range cases {
 		t.Run(policy, func(t *testing.T) {
@@ -106,6 +113,7 @@ func TestLoadSourcesDeclaration_AssigneePolicyMustBeInClosedSet(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_IDMustMatchPattern(t *testing.T) {
+	t.Parallel()
 	cases := []string{"Foo", "-foo", "", "foo_bar", "foo bar"}
 	for _, id := range cases {
 		t.Run(fmt.Sprintf("id=%q", id), func(t *testing.T) {
@@ -124,6 +132,7 @@ func TestLoadSourcesDeclaration_IDMustMatchPattern(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_DuplicateID(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [
@@ -138,6 +147,7 @@ func TestLoadSourcesDeclaration_DuplicateID(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_ReposMustBeNonEmpty(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [
@@ -151,6 +161,7 @@ func TestLoadSourcesDeclaration_ReposMustBeNonEmpty(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_ReposMustMatchOwnerSlashName(t *testing.T) {
+	t.Parallel()
 	cases := []string{"no-slash", "o/n/extra", "/name", "owner/", "o r/name"}
 	for _, repo := range cases {
 		t.Run(fmt.Sprintf("repo=%q", repo), func(t *testing.T) {
@@ -169,6 +180,7 @@ func TestLoadSourcesDeclaration_ReposMustMatchOwnerSlashName(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_SameRepoInTwoSources(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [
@@ -183,6 +195,7 @@ func TestLoadSourcesDeclaration_SameRepoInTwoSources(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_UrgencyLabelsMustBeInClosedSet(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [
@@ -196,6 +209,7 @@ func TestLoadSourcesDeclaration_UrgencyLabelsMustBeInClosedSet(t *testing.T) {
 }
 
 func TestLoadSourcesDeclaration_VersionMustBeOne(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"version": 2, "sources": []}`,
 		`{"sources": []}`,                 // version 省略 = 0
@@ -214,6 +228,7 @@ func TestLoadSourcesDeclaration_VersionMustBeOne(t *testing.T) {
 
 // AC-11: assignee_policy を省略した取り込み元は exclude-others として振る舞う。
 func TestLoadSourcesDeclaration_AssigneePolicyDefaultsToExcludeOthers(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [
@@ -231,6 +246,7 @@ func TestLoadSourcesDeclaration_AssigneePolicyDefaultsToExcludeOthers(t *testing
 
 // 仕様（§IF / API）に載っている例をそのまま解釈できることを確認する。
 func TestLoadSourcesDeclaration_ValidFullExample(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [
@@ -282,6 +298,7 @@ func TestLoadSourcesDeclaration_ValidFullExample(t *testing.T) {
 // 拒否できない（後勝ちで静かに上書きされる）。宣言は完全一致のキーだけを
 // 受け付けるべき（fail-closed）。
 func TestLoadSourcesDeclaration_RejectsCaseVariantDuplicateKey(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"version": 1, "sources": [{"id": "a", "ID": "b", "type": "github-issue", "repos": ["o/r"]}]}`,
 		`{"Version": 1, "version": 1, "sources": []}`,
@@ -300,6 +317,7 @@ func TestLoadSourcesDeclaration_RejectsCaseVariantDuplicateKey(t *testing.T) {
 // code-reviewer/design-reviewer 指摘: dec.More() は次のトークンが '}' や ']' の
 // ときは false を返すため、"{...}}" のような末尾のゴミを見逃す。
 func TestLoadSourcesDeclaration_RejectsTrailingBraceOrBracket(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"version": 1, "sources": []}}`,
 		`{"version": 1, "sources": []}]`,
@@ -320,6 +338,7 @@ func TestLoadSourcesDeclaration_RejectsTrailingBraceOrBracket(t *testing.T) {
 // 引き続き受理される）を固定するテストが無かった。実運用の宣言ファイルは
 // ほぼ必ず末尾に改行を持つため、ここが壊れると全ての正常な宣言が拒否される。
 func TestLoadSourcesDeclaration_AcceptsTrailingNewlineAndWhitespace(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		"{\"version\": 1, \"sources\": []}\n",
 		"{\"version\": 1, \"sources\": []}\r\n  \t\n",
@@ -340,6 +359,7 @@ func TestLoadSourcesDeclaration_AcceptsTrailingNewlineAndWhitespace(t *testing.T
 // Policy() や UrgencyLabels の消費者はどの閉集合の値とも一致しなくなる。
 // 宣言の値は完全一致だけを受け付けるべき。
 func TestLoadSourcesDeclaration_AssigneePolicyAndUrgencyLabelsRejectPaddedValues(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [
@@ -365,6 +385,7 @@ func TestLoadSourcesDeclaration_AssigneePolicyAndUrgencyLabelsRejectPaddedValues
 // "O/R" と "o/r" は同じリポジトリを指す。これを2つの取り込み元に書くのは
 // 「同じリポジトリは宣言全体で1つの取り込み元にだけ書ける」という規則に反する。
 func TestLoadSourcesDeclaration_RepoDuplicateCheckIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{
 		"version": 1,
 		"sources": [
@@ -382,6 +403,7 @@ func TestLoadSourcesDeclaration_RepoDuplicateCheckIsCaseInsensitive(t *testing.T
 // （空配列 `[]` は明示された「0件」として引き続き許容する。
 // TestLoadSourcesDeclaration_EmptySourcesIsAllowed と対）。
 func TestLoadSourcesDeclaration_SourcesKeyIsRequired(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"version": 1}`,
 		`{"version": 1, "sources": null}`,
@@ -399,6 +421,7 @@ func TestLoadSourcesDeclaration_SourcesKeyIsRequired(t *testing.T) {
 // 空の sources 配列は許容する（宣言だけ用意し、取り込み元をまだ書いていない状態。
 // AC には無いが規則に反しないので拒否しない）。
 func TestLoadSourcesDeclaration_EmptySourcesIsAllowed(t *testing.T) {
+	t.Parallel()
 	dir := writeSourcesJSON(t, `{"version": 1, "sources": []}`)
 	decl, err := LoadSourcesDeclaration(dir)
 	if err != nil {
@@ -412,6 +435,7 @@ func TestLoadSourcesDeclaration_EmptySourcesIsAllowed(t *testing.T) {
 // --- login 正規化（大文字小文字の無視・先頭 @ の除去。判定そのものは #56） ---
 
 func TestNormalizeLogin_LowercasesAndStripsLeadingAt(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		want string

@@ -43,7 +43,7 @@ func runBindFailing(t *testing.T, ws string, args ...string) (exit int, code, me
 	t.Helper()
 	full := append(append([]string{}, args...), "--workspace", ws, "--json")
 	var stdout, stderr bytes.Buffer
-	exit = run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	exit = runWithLookPath(full, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if stdout.Len() != 0 {
 		t.Fatalf("args=%v stdout should stay empty on failure, got %q", args, stdout.String())
 	}
@@ -65,6 +65,7 @@ func logLen(t *testing.T, ws string) int {
 }
 
 func TestBind_LinksTheChallengeAndShowsTheBinding(t *testing.T) {
+	parallelTools(t, false)
 	ws, ids, _ := bindWorkspace(t)
 
 	out := runJSON(t, ws, "bind", ids[0], "owner/repo-a#5")
@@ -89,6 +90,7 @@ func TestBind_LinksTheChallengeAndShowsTheBinding(t *testing.T) {
 }
 
 func TestBind_RejectionsMapToCodesAndWriteNothing(t *testing.T) {
+	parallelTools(t, false)
 	ws, ids, calls := bindWorkspace(t)
 	runJSON(t, ws, "bind", ids[0], "owner/repo-a#5")
 	before := logLen(t, ws)
@@ -131,6 +133,7 @@ func TestBind_RejectionsMapToCodesAndWriteNothing(t *testing.T) {
 }
 
 func TestBind_DeclarationAndGHProblemsStopBeforeAnyChange(t *testing.T) {
+	parallelTools(t, false)
 	ws, ids, _ := bindWorkspace(t)
 
 	// 宣言が壊れている
@@ -141,7 +144,7 @@ func TestBind_DeclarationAndGHProblemsStopBeforeAnyChange(t *testing.T) {
 	writeSourcesDeclaration(t, ws, bindDeclaration)
 
 	// gh が PATH に無い
-	t.Setenv("PATH", t.TempDir())
+	restrictToolDirs(t, 0)
 	if exit, code, _ := runBindFailing(t, ws, "bind", ids[0], "owner/repo-a#5"); exit != 2 || code != string(CodeUpstreamUnavailable) {
 		t.Errorf("gh missing: exit=%d code=%q, want 2 upstream_unavailable", exit, code)
 	}
@@ -151,6 +154,7 @@ func TestBind_DeclarationAndGHProblemsStopBeforeAnyChange(t *testing.T) {
 }
 
 func TestBind_WithoutDeclarationFileIsConfigNotFound(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	if exit, code, _ := runBindFailing(t, ws, "bind", id, "owner/repo-a#5"); exit != 2 || code != string(CodeConfigNotFound) {
@@ -159,6 +163,7 @@ func TestBind_WithoutDeclarationFileIsConfigNotFound(t *testing.T) {
 }
 
 func TestUnbind_RemovesTheBindingAndRejectsUnboundOrMissingChallenges(t *testing.T) {
+	parallelTools(t, false)
 	ws, ids, _ := bindWorkspace(t)
 	runJSON(t, ws, "bind", ids[0], "owner/repo-a#5")
 
@@ -197,6 +202,7 @@ func TestUnbind_RemovesTheBindingAndRejectsUnboundOrMissingChallenges(t *testing
 }
 
 func TestUnbind_DoesNotCallGH(t *testing.T) {
+	parallelTools(t, false)
 	ws, ids, calls := bindWorkspace(t)
 	runJSON(t, ws, "bind", ids[0], "owner/repo-a#5")
 	n := len(calls())

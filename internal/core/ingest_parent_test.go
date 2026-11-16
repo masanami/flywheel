@@ -30,6 +30,7 @@ func parentTestSource(repos ...string) []SourceEntry {
 }
 
 func TestIngest_MapsASubIssueToTheParentChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	up := &fakeUpstream{issues: map[string][]UpstreamIssue{"o/r": {subIssue("o/r#1", ""), subIssue("o/r#2", "o/r#1"), subIssue("o/r#3", "o/r#1")}}}
@@ -55,6 +56,7 @@ func TestIngest_MapsASubIssueToTheParentChallenge(t *testing.T) {
 }
 
 func TestIngest_ParentSyncIsIdempotent(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	up := &fakeUpstream{issues: map[string][]UpstreamIssue{"o/r": {subIssue("o/r#1", ""), subIssue("o/r#2", "o/r#1")}}}
@@ -75,6 +77,7 @@ func TestIngest_ParentSyncIsIdempotent(t *testing.T) {
 }
 
 func TestIngest_RemovingTheSubIssueRelationClearsTheParent(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	up := &fakeUpstream{issues: map[string][]UpstreamIssue{"o/r": {subIssue("o/r#1", ""), subIssue("o/r#2", "o/r#1")}}}
@@ -92,6 +95,7 @@ func TestIngest_RemovingTheSubIssueRelationClearsTheParent(t *testing.T) {
 }
 
 func TestIngest_ReparentsWhenTheUpstreamParentChanges(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	up := &fakeUpstream{issues: map[string][]UpstreamIssue{"o/r": {subIssue("o/r#1", ""), subIssue("o/r#2", ""), subIssue("o/r#3", "o/r#1")}}}
@@ -105,6 +109,7 @@ func TestIngest_ReparentsWhenTheUpstreamParentChanges(t *testing.T) {
 
 // 親の Issue が core に無い（取り込みの対象外）ときは付かない。後で親が取り込まれたら付く。
 func TestIngest_NoParentWhileTheParentIssueHasNoChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	up := &fakeUpstream{issues: map[string][]UpstreamIssue{"o/r": {subIssue("o/r#2", "o/r#1")}}}
@@ -122,6 +127,7 @@ func TestIngest_NoParentWhileTheParentIssueHasNoChallenge(t *testing.T) {
 
 // 親の外部キーは大文字小文字を区別せずに照合する。別のリポジトリの親でも、親が後で処理される順でも同じ結果になる。
 func TestIngest_ParentKeyMatchesCaseInsensitivelyAcrossReposAndOrder(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	up := &fakeUpstream{issues: map[string][]UpstreamIssue{
@@ -136,6 +142,7 @@ func TestIngest_ParentKeyMatchesCaseInsensitivelyAcrossReposAndOrder(t *testing.
 
 // 一覧の取得に失敗したリポジトリと、その回の一覧に見えなかった Issue の親子は変えない。
 func TestIngest_LeavesParentsOfUnseenIssuesAndFailedReposAlone(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	up := &fakeUpstream{issues: map[string][]UpstreamIssue{
@@ -160,6 +167,7 @@ func TestIngest_LeavesParentsOfUnseenIssuesAndFailedReposAlone(t *testing.T) {
 
 // 親を付けると輪になるときは、その親子を付けずに取り込みを続ける。
 func TestIngest_SkipsAParentThatWouldCreateACycleAndContinues(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	up := &fakeUpstream{issues: map[string][]UpstreamIssue{"o/r": {subIssue("o/r#1", "o/r#2"), subIssue("o/r#2", "o/r#1"), subIssue("o/r#3", "o/r#1")}}}
@@ -179,6 +187,7 @@ func TestIngest_SkipsAParentThatWouldCreateACycleAndContinues(t *testing.T) {
 
 // 親と子が入れ替わる上流の変更は、課題の ID の順に左右されず入れ替わる。
 func TestIngest_SwapsParentAndChildRegardlessOfIDOrder(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	up := &fakeUpstream{issues: map[string][]UpstreamIssue{"o/r": {subIssue("o/r#1", ""), subIssue("o/r#2", "o/r#1")}}}

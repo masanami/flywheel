@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -105,6 +104,7 @@ func backupOnce(t *testing.T, g WorkspaceGit, declareMemory bool) (*Store, Backu
 }
 
 func TestBackup_CommitsOnlyTheExportWhenMemoryDirIsNotDeclared(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{changed: true}
 	s, res := backupOnce(t, g, false)
 	if res.Outcome != BackupCommitted || res.Commit != "abc123" || res.Detail != "" {
@@ -122,6 +122,7 @@ func TestBackup_CommitsOnlyTheExportWhenMemoryDirIsNotDeclared(t *testing.T) {
 }
 
 func TestBackup_CommitsExportAndDeclaredMemoryDir(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{changed: true}
 	s, res := backupOnce(t, g, true)
 	if res.Outcome != BackupCommitted {
@@ -134,6 +135,7 @@ func TestBackup_CommitsExportAndDeclaredMemoryDir(t *testing.T) {
 }
 
 func TestBackup_UnchangedMakesNoCommit(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{}
 	_, res := backupOnce(t, g, false)
 	if res.Outcome != BackupUnchanged || res.Commit != "" {
@@ -147,6 +149,7 @@ func TestBackup_UnchangedMakesNoCommit(t *testing.T) {
 }
 
 func TestBackup_NotGitWritesTheExportOnly(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{notTree: true}
 	s, res := backupOnce(t, g, true)
 	if res.Outcome != BackupNotGit {
@@ -158,6 +161,7 @@ func TestBackup_NotGitWritesTheExportOnly(t *testing.T) {
 }
 
 func TestBackup_IgnoredExportWithoutMemoryChangeMakesNoCommit(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{ignored: true}
 	_, res := backupOnce(t, g, false)
 	if res.Outcome != BackupIgnored || res.Commit != "" || res.Detail == "" {
@@ -169,6 +173,7 @@ func TestBackup_IgnoredExportWithoutMemoryChangeMakesNoCommit(t *testing.T) {
 }
 
 func TestBackup_IgnoredExportCommitsOnlyMemoryDir(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{ignored: true, changed: true, sha: "mem1"}
 	s, res := backupOnce(t, g, true)
 	if res.Outcome != BackupIgnored || res.Commit != "mem1" {
@@ -180,6 +185,7 @@ func TestBackup_IgnoredExportCommitsOnlyMemoryDir(t *testing.T) {
 }
 
 func TestBackup_CommitFailureIsFailedWithDetail(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{changed: true, commitErr: errors.New("hook rejected")}
 	_, res := backupOnce(t, g, false)
 	if res.Outcome != BackupFailed || !strings.Contains(res.Detail, "hook rejected") {
@@ -188,6 +194,7 @@ func TestBackup_CommitFailureIsFailedWithDetail(t *testing.T) {
 }
 
 func TestBackup_GitProbeFailureIsFailedWithDetail(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{treeErr: errors.New("git not found")}
 	_, res := backupOnce(t, g, false)
 	if res.Outcome != BackupFailed || res.Detail == "" {
@@ -196,6 +203,7 @@ func TestBackup_GitProbeFailureIsFailedWithDetail(t *testing.T) {
 }
 
 func TestBackup_ExportWriteFailureIsFailedWithDetail(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	if err := os.MkdirAll(filepath.Join(s.Workspace(), ".flywheel", "export.json"), 0o755); err != nil {
 		t.Fatal(err)
@@ -211,6 +219,7 @@ func TestBackup_ExportWriteFailureIsFailedWithDetail(t *testing.T) {
 }
 
 func TestBackup_DoesNotWriteTheStore(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	before, _, err := s.Export(context.Background())
 	if err != nil {
@@ -242,6 +251,7 @@ func backupActivities(t *testing.T, s *Store) []Activity {
 }
 
 func TestRunCycle_BackupPhaseIsLastAndRecordsAnActivityRow(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	g := &fakeWorkspaceGit{changed: true}
 	in := f.input(mineThenPlanInvoker(t))
@@ -291,6 +301,7 @@ func assertCommittedBackupRow(t *testing.T, s *Store, cycleID string) {
 }
 
 func TestRunCycle_BackupRunsWithACancelledContext(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.create(t, "t-1")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -317,15 +328,13 @@ func TestRunCycle_BackupRunsWithACancelledContext(t *testing.T) {
 
 // AC-20: ctx を取り消さず、段だけがエラーになった周でも backup を実行する。
 func TestRunCycle_BackupRunsAfterAPhaseError(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	f.create(t, "t-1")
 	// J1 の起動中に actor を解決できなくし、分類の結果の書き込み（ストア）をエラーにする。
 	// backup のコミットの時点で戻す（backup の作業ログを書けるようにする）。
 	inv := &cycleFakeInvoker{handle: func(cycleCall) JudgmentLaunchOutput {
-		withActorSource(t, actorSourceFuncs{
-			userCurrent: func() (*user.User, error) { return nil, errors.New("no user") },
-			getenv:      fakeGetenv(map[string]string{}),
-		})
+		noActorStore(f.s)
 		return succeeded(j1MineP(t, "P1"))
 	}}
 	g := &fakeWorkspaceGit{changed: true, onCommit: func() { fixedActor(t, "alice") }}
@@ -344,6 +353,7 @@ func TestRunCycle_BackupRunsAfterAPhaseError(t *testing.T) {
 
 // AC-21: 周の上限で起動を打ち切った周でも backup を実行する。
 func TestRunCycle_BackupRunsInACycleCutByTheCycleBudget(t *testing.T) {
+	t.Parallel()
 	// 委譲の対象（着手中の課題）がある周で、周の上限を J3 と実装枠には足りない額にする（フィクスチャに J1・J2 の
 	// 対象は無く、判断の呼び出しは起きない。上限の額は J1・J2 の枠の和に 1 を足したもの）。
 	// 委譲の段（run）が not_started: cycle_budget を出し、それでも backup は実行される。
@@ -376,6 +386,7 @@ func TestRunCycle_BackupRunsInACycleCutByTheCycleBudget(t *testing.T) {
 }
 
 func TestRunCycle_BackupIsNotRunWhenTheLockIsHeld(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	g := &fakeWorkspaceGit{changed: true}
 	in := f.input(mineThenPlanInvoker(t))
@@ -397,6 +408,7 @@ func TestRunCycle_BackupIsNotRunWhenTheLockIsHeld(t *testing.T) {
 }
 
 func TestRunCycle_BackupFailureDoesNotFailTheCycle(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	g := &fakeWorkspaceGit{changed: true, commitErr: errors.New("boom")}
 	in := f.input(mineThenPlanInvoker(t))
@@ -411,6 +423,7 @@ func TestRunCycle_BackupFailureDoesNotFailTheCycle(t *testing.T) {
 }
 
 func TestRunCycle_WorkspaceGitIsRequired(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	in := f.input(mineThenPlanInvoker(t))
 	in.WorkspaceGit = nil
@@ -421,6 +434,7 @@ func TestRunCycle_WorkspaceGitIsRequired(t *testing.T) {
 
 // AC-25: memory_dir だけに差があるときも、記憶をコミットする（差の検査に memory_dir を含める）。
 func TestBackup_CommitsWhenOnlyTheMemoryDirChanged(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{changedPaths: map[string]bool{"mem": true}}
 	s, res := backupOnce(t, g, true)
 	if res.Outcome != BackupCommitted || res.Commit != "abc123" {
@@ -433,6 +447,7 @@ func TestBackup_CommitsWhenOnlyTheMemoryDirChanged(t *testing.T) {
 
 // AC-33: 書き出しが除外され memory_dir に差が無いときは ignored で、コミットしない。
 func TestBackup_IgnoredExportWithDeclaredMemoryDirWithoutChangeMakesNoCommit(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{ignored: true}
 	_, res := backupOnce(t, g, true)
 	if res.Outcome != BackupIgnored || res.Commit != "" || res.Detail == "" {
@@ -447,6 +462,7 @@ func TestBackup_IgnoredExportWithDeclaredMemoryDirWithoutChangeMakesNoCommit(t *
 
 // memory_dir が .flywheel を含む場所（"."）を指すときは記憶を外し、そのことを detail に出す。
 func TestBackup_MemoryDirContainingFlywheelIsExcludedWithDetail(t *testing.T) {
+	t.Parallel()
 	g := &fakeWorkspaceGit{changed: true}
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
@@ -464,14 +480,12 @@ func TestBackup_MemoryDirContainingFlywheelIsExcludedWithDetail(t *testing.T) {
 // backup の作業ログの記録だけに失敗しても RunCycle はエラーを返さず、phases に backup の結果を
 // 残す（detail に記録の失敗を足す）。周は completed で閉じ、排他を解放する。
 func TestRunCycle_BackupRecordFailureIsAWarningInDetailAndTheCycleStillCloses(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	g := &fakeWorkspaceGit{changed: true}
 	// backup のコミットの後で actor を解決できなくし、作業ログの書き込み（mutate）を失敗させる。
 	g.onCommit = func() {
-		withActorSource(t, actorSourceFuncs{
-			userCurrent: func() (*user.User, error) { return nil, errors.New("no user") },
-			getenv:      fakeGetenv(map[string]string{}),
-		})
+		noActorStore(f.s)
 	}
 	in := f.input(mineThenPlanInvoker(t))
 	in.WorkspaceGit = g
@@ -526,6 +540,7 @@ func TestRunCycle_BackupTimesOutAsFailedAndTheCycleStillCloses(t *testing.T) {
 
 // 期限の既定値は 120 秒（M5 仕様の決定）。
 func TestBackupTimeoutDefaultIs120Seconds(t *testing.T) {
+	t.Parallel()
 	if backupTimeout != 120*time.Second {
 		t.Errorf("backupTimeout = %s, want 120s", backupTimeout)
 	}
@@ -533,6 +548,7 @@ func TestBackupTimeoutDefaultIs120Seconds(t *testing.T) {
 
 // detached HEAD・rebase・merge・cherry-pick・revert の途中ではコミットせず failed（detail に理由）にする。
 func TestBackupWorkspace_InterruptedStateIsFailedWithoutCommit(t *testing.T) {
+	t.Parallel()
 	for _, reason := range []string{"detached HEAD", "rebase in progress", "merge in progress", "cherry-pick in progress", "revert in progress"} {
 		t.Run(reason, func(t *testing.T) {
 			s := newStoreForTest(t)
@@ -550,6 +566,7 @@ func TestBackupWorkspace_InterruptedStateIsFailedWithoutCommit(t *testing.T) {
 
 // 差が無ければ途中の状態でも unchanged のまま（検査しない）。
 func TestBackupWorkspace_InterruptedStateIsNotCheckedWithoutChanges(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	g := &fakeWorkspaceGit{changed: false, interrupted: "detached HEAD"}
 	res := s.BackupWorkspace(context.Background(), g, defaultAgentDeclaration(), "Y-1")

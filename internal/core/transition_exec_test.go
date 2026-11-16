@@ -39,6 +39,7 @@ func activitiesFor(t *testing.T, s *Store, id string) []Activity {
 // --- ClassifyChallenge ---
 
 func TestClassifyChallenge_SetsPriorityAndAdvancesStatus(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -90,6 +91,7 @@ func TestClassifyChallenge_SetsPriorityAndAdvancesStatus(t *testing.T) {
 }
 
 func TestClassifyChallenge_InvalidPriorityIsValidationErrorAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -111,6 +113,7 @@ func TestClassifyChallenge_InvalidPriorityIsValidationErrorAndChangesNothing(t *
 }
 
 func TestClassifyChallenge_WrongStateIsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -122,6 +125,7 @@ func TestClassifyChallenge_WrongStateIsInvalidTransition(t *testing.T) {
 }
 
 func TestClassifyChallenge_DoneIsTerminalState(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusDone)
@@ -133,6 +137,7 @@ func TestClassifyChallenge_DoneIsTerminalState(t *testing.T) {
 }
 
 func TestClassifyChallenge_NotFoundForMissingOrMalformedID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	for _, id := range []string{"C-999", "OP-1", "foo"} {
@@ -146,6 +151,7 @@ func TestClassifyChallenge_NotFoundForMissingOrMalformedID(t *testing.T) {
 // --- PlanChallenge ---
 
 func TestPlanChallenge_FirstPlanAdvancesToAwaitingPlanApproval(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -177,6 +183,7 @@ func TestPlanChallenge_FirstPlanAdvancesToAwaitingPlanApproval(t *testing.T) {
 // before にそのキーを null で載せる（classify の priority・edit の urgency と
 // そろえる）。
 func TestPlanChallenge_FirstPlanBeforeHasNullPlanVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -208,6 +215,7 @@ func TestPlanChallenge_FirstPlanBeforeHasNullPlanVersion(t *testing.T) {
 
 // AC-35: 計画承認待ちの課題に plan を再度行うと、計画の版が1増え、以前の版も show で読める。
 func TestPlanChallenge_RevisionBumpsPlanVersionAndKeepsPriorVersions(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -280,6 +288,7 @@ func TestPlanChallenge_RevisionBumpsPlanVersionAndKeepsPriorVersions(t *testing.
 }
 
 func TestPlanChallenge_EmptyBodyIsValidationErrorAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -300,6 +309,7 @@ func TestPlanChallenge_EmptyBodyIsValidationErrorAndChangesNothing(t *testing.T)
 }
 
 func TestPlanChallenge_WrongStateIsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -313,6 +323,7 @@ func TestPlanChallenge_WrongStateIsInvalidTransition(t *testing.T) {
 // --- SubmitChallenge ---
 
 func TestSubmitChallenge_AdvancesToVerifying(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusInProgress)
@@ -330,6 +341,7 @@ func TestSubmitChallenge_AdvancesToVerifying(t *testing.T) {
 }
 
 func TestSubmitChallenge_WrongStateIsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -343,6 +355,7 @@ func TestSubmitChallenge_WrongStateIsInvalidTransition(t *testing.T) {
 // --- VerifyChallenge ---
 
 func TestVerifyChallenge_MetAdvancesToAwaitingCompletionApproval(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusVerifying)
@@ -357,6 +370,7 @@ func TestVerifyChallenge_MetAdvancesToAwaitingCompletionApproval(t *testing.T) {
 }
 
 func TestVerifyChallenge_NotMetReturnsToInProgress(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusVerifying)
@@ -371,6 +385,7 @@ func TestVerifyChallenge_NotMetReturnsToInProgress(t *testing.T) {
 }
 
 func TestVerifyChallenge_UncertainRecordsHoldAndAdvancesToAwaitingHuman(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusVerifying)
@@ -410,6 +425,7 @@ func TestVerifyChallenge_UncertainRecordsHoldAndAdvancesToAwaitingHuman(t *testi
 }
 
 func TestVerifyChallenge_InvalidResultIsValidationErrorAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusVerifying)
@@ -428,6 +444,7 @@ func TestVerifyChallenge_InvalidResultIsValidationErrorAndChangesNothing(t *test
 }
 
 func TestVerifyChallenge_UncertainWithEmptyOrMissingQuestionIsValidationError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusVerifying)
@@ -450,6 +467,7 @@ func TestVerifyChallenge_UncertainWithEmptyOrMissingQuestionIsValidationError(t 
 }
 
 func TestVerifyChallenge_MetOrNotMetWithQuestionIsValidationError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusVerifying)
@@ -466,6 +484,7 @@ func TestVerifyChallenge_MetOrNotMetWithQuestionIsValidationError(t *testing.T) 
 // --- HoldChallenge ---
 
 func TestHoldChallenge_AllValidSourcesAdvanceToAwaitingHumanAndRecordFromStatus(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	for _, from := range []Status{StatusUnclassified, StatusClassified, StatusInProgress, StatusVerifying} {
@@ -489,6 +508,7 @@ func TestHoldChallenge_AllValidSourcesAdvanceToAwaitingHumanAndRecordFromStatus(
 }
 
 func TestHoldChallenge_EmptyQuestionIsValidationErrorAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -509,6 +529,7 @@ func TestHoldChallenge_EmptyQuestionIsValidationErrorAndChangesNothing(t *testin
 }
 
 func TestHoldChallenge_WrongStateIsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	// 完了確認待ちは T11 の遷移元に含まれない（親が直接行う保留でも入れない）。
@@ -524,6 +545,7 @@ func TestHoldChallenge_WrongStateIsInvalidTransition(t *testing.T) {
 
 // 計画承認待ちから入れるのは親が直接行う保留だけ。人の対応を待つ保留は拒否し、何も変えない。
 func TestHoldChallenge_PlanApprovalAcceptsOnlyParentDirect(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -544,6 +566,7 @@ func TestHoldChallenge_PlanApprovalAcceptsOnlyParentDirect(t *testing.T) {
 // --- 終端状態（done）はすべての操作を ErrTerminalState で拒否し、何も変えない ---
 
 func TestAllFiveOperations_DoneChallengeIsTerminalStateAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -591,6 +614,7 @@ func TestAllFiveOperations_DoneChallengeIsTerminalStateAndChangesNothing(t *test
 // --- AC-68 相当: 作業ログへの書き込み失敗はロールバックする ---
 
 func TestClassifyChallenge_ActivityInsertFailureRollsBack(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -819,6 +843,7 @@ func allStatuses() []Status {
 // 行うと課題の状態が遷移先になる（全行を列挙して検証する。本人確認が要る行
 // （T5・T6・T12・T13・T14・T15）はフェイク Verifier で確認を成立させて検証する）。
 func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) {
+	t.Parallel()
 	tested := 0
 	for _, tr := range Table {
 		if tr.From == NoStatus || tr.Restricted {
@@ -890,6 +915,7 @@ func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) 
 // への回答は本人確認つきの操作としてだけ成立する」という不変条件が、
 // どの内部ヘルパーを呼んだかだけに依存していた）。
 func TestRunTransition_RequiresVerificationMismatchIsRejected(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -939,11 +965,12 @@ func TestRunTransition_RequiresVerificationMismatchIsRejected(t *testing.T) {
 // ErrNotFound〈exit 1〉ではなく internal_error〈exit 2〉になっていた）。
 // 順序をコードで戻しただけでは再発を防げないため、テストで固定する。
 func TestTransition_MalformedIDTakesPrecedenceOverActorUnavailable(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
-	withActorSource(t, actorSourceFuncs{
+	s.actor = &actorSourceFuncs{
 		userCurrent: func() (*user.User, error) { return nil, errors.New("boom") },
 		getenv:      func(string) string { return "" },
-	})
+	}
 
 	_, err := s.ClassifyChallenge(context.Background(), ChannelCLI, "not-a-valid-id", ClassifyInput{Priority: "P0"})
 	if !errors.Is(err, ErrNotFound) {
@@ -957,6 +984,7 @@ func TestTransition_MalformedIDTakesPrecedenceOverActorUnavailable(t *testing.T)
 // 扱える11操作。T14=approve_hold_release を含む）× allStatuses（語彙 8 状態）
 // の直積のうち、Lookup が ok=false の全組を検証する。
 func TestDispatchTable_AC24_UndefinedCombinationsAreRejectedAndChangeNothing(t *testing.T) {
+	t.Parallel()
 	tested := 0
 	for _, status := range allStatuses() {
 		for _, op := range dispatchedOperations(t) {
@@ -1027,11 +1055,13 @@ func runConcurrentTransition(t *testing.T, ws string, first, second func(s *Stor
 	if err != nil {
 		t.Fatalf("OpenWorkspace() A error = %v", err)
 	}
+	registerTestStore(t, storeA) // fixedActor の対象にする
 	defer func() { _ = storeA.Close() }()
 	storeB, err := OpenWorkspace(ws)
 	if err != nil {
 		t.Fatalf("OpenWorkspace() B error = %v", err)
 	}
+	registerTestStore(t, storeB) // fixedActor の対象にする
 	defer func() { _ = storeB.Close() }()
 
 	reachedHook := make(chan struct{})
@@ -1085,6 +1115,7 @@ func runConcurrentTransition(t *testing.T, ws string, first, second func(s *Stor
 }
 
 func TestConcurrentSubmitAndHold_HoldFirst_SubmitBecomesInvalidTransition(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusInProgress)
@@ -1135,6 +1166,7 @@ func TestConcurrentSubmitAndHold_HoldFirst_SubmitBecomesInvalidTransition(t *tes
 // この順では成り立たない。遷移表を正として、hold も成功し最終状態が
 // awaiting_human・hold.from_status=verifying になることを検証する。
 func TestConcurrentSubmitAndHold_SubmitFirst_HoldAlsoSucceedsBecauseVerifyingIsAValidHoldSource(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusInProgress)
@@ -1188,6 +1220,7 @@ func TestConcurrentSubmitAndHold_SubmitFirst_HoldAlsoSucceedsBecauseVerifyingIsA
 // AC-36 の「両方の実行順を検証する」を、実際に invalid_transition が両順とも
 // 観測できる組（verifying の課題への verify --result met × hold）でも検証する。
 func TestConcurrentVerifyMetAndHold_BothOrdersProduceOneWinnerAndOneInvalidTransition(t *testing.T) {
+	t.Parallel()
 	for _, holdFirst := range []bool{true, false} {
 		s := newStoreForTest(t)
 		fixedActor(t, "alice")

@@ -63,6 +63,7 @@ func writeImproveThreshold(t *testing.T, ws string, n int) {
 
 // `improve` の名前と書式（位置引数なし・必須のフラグなし）が m4.5 の §IF / API の表のとおりであること。
 func TestImproveCommand_MatchesM45IFAPITable(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
 	if err != nil {
 		t.Fatalf("read m4.5 spec: %v", err)
@@ -88,6 +89,7 @@ func TestImproveCommand_MatchesM45IFAPITable(t *testing.T) {
 // AC-326・AC-328・AC-331 相当: connectors.json が無くても improve は J8 を呼び、{"phase": …} の形で
 // run ごとの {created, linked, result, run_id} を返す。経路はどの層も Issue。起票した課題は未分類。
 func TestImprove_WithoutConnectors_CallsJ8AndFilesAnUnclassifiedImprovementChallenge(t *testing.T) {
+	parallelTools(t, false)
 	m45SpecLine(t, "`.flywheel/connectors.json` が無くても、`improve` の段と `flywheel improve` は J8 を呼ぶ")
 	ws := setupWorkspaceWithPosition(t)
 	if _, err := os.Stat(filepath.Join(ws, ".flywheel", "connectors.json")); err == nil {
@@ -128,6 +130,7 @@ func TestImprove_WithoutConnectors_CallsJ8AndFilesAnUnclassifiedImprovementChall
 
 // AC-327・M45P26: 起動の件数が 0 なら J8 を呼ばず、skipped は偽で items は空。
 func TestImprove_NoTriggeringOccurrences_DoesNotCallJ8(t *testing.T) {
+	parallelTools(t, false)
 	m45SpecLine(t, "J8 を呼ばなかった `improve` の段は、`skipped` が偽で、`items` が空である")
 	ws := setupWorkspaceWithPosition(t)
 	argvLog, _ := putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
@@ -145,6 +148,7 @@ func TestImprove_NoTriggeringOccurrences_DoesNotCallJ8(t *testing.T) {
 
 // claude が PATH に無ければ invoker_unavailable で、ストアは変わらない。位置引数は usage_error。
 func TestImprove_ClaudeNotOnPATH_InvokerUnavailable_AndRejectsPositional(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	addJ8Occurrences(t, ws, 1)
 	emptyPATH(t)
@@ -163,14 +167,14 @@ func TestImprove_NeedsNoTerminal_AndIsRejectedInDelegatedChildEnvironment(t *tes
 	ws := setupWorkspaceWithPosition(t)
 	putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"improve", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 {
+	if code := runWithLookPath([]string{"improve", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 0 {
 		t.Fatalf("exit = %d, want 0 without a terminal (stderr=%s)", code, stderr.String())
 	}
 
 	t.Setenv(core.DelegatedRunEnvVar, "R-7")
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"improve", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 1 ||
+	if code := runWithLookPath([]string{"improve", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 1 ||
 		!strings.Contains(stderr.String(), `"code":"verification_rejected"`) || stdout.Len() != 0 {
 		t.Errorf("exit=%d stdout=%q stderr=%s, want the common rejection", code, stdout.String(), stderr.String())
 	}
@@ -179,6 +183,7 @@ func TestImprove_NeedsNoTerminal_AndIsRejectedInDelegatedChildEnvironment(t *tes
 // AC-319・AC-320・AC-321: cycle の最終の段は improve。起動の件数が improve_threshold 未満なら J8 を呼ばず、
 // 以上なら 1 回呼ぶ。connectors.json が無くても skipped にならない。
 func TestCycle_ImprovePhaseIsLast_CallsJ8OnlyAtThreshold(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	writeImproveThreshold(t, ws, 2)
 	occ := addJ8Occurrences(t, ws, 1)
@@ -218,6 +223,7 @@ func TestCycle_ImprovePhaseIsLast_CallsJ8OnlyAtThreshold(t *testing.T) {
 // AC-354・AC-355: 起票した改修課題は次の周の分類の段（J1）の対象になる。計画と完了の承認は、ほかの課題と同じ
 // 種類（plan・completion）で記録される。
 func TestCycle_FiledImprovementChallengeIsClassifiedNextCycle_AndUsesPlanAndCompletionApprovals(t *testing.T) {
+	parallelTools(t, false)
 	m45SpecLine(t, "起票した改修課題は、次の `cycle` の分類の段で J1 の対象になる")
 	ws := setupWorkspaceWithPosition(t)
 	writeImproveThreshold(t, ws, 1)
@@ -271,6 +277,7 @@ func TestCycle_FiledImprovementChallengeIsClassifiedNextCycle_AndUsesPlanAndComp
 // M45P26・AC-342 相当: J8 の失敗が failure_limit 回続くと cycle の improve の段は J8 を呼ばず、課題の ID を持たない
 // not_started（failure_limit）で示す。手動の improve には上限を当てない。
 func TestImprove_FailureLimit_StopsOnlyTheCyclePhase(t *testing.T) {
+	parallelTools(t, false)
 	m45SpecLine(t, "この `not_started` の要素は `challenge_id` を持たない")
 	ws := setupWorkspaceWithPosition(t)
 	writeImproveThreshold(t, ws, 1)
@@ -304,6 +311,7 @@ func TestImprove_FailureLimit_StopsOnlyTheCyclePhase(t *testing.T) {
 // J8 が改修課題を起票した周の `cycle`（--json なし）は、improve の段の起票・紐づけの件数を表示する
 // （cycleResultText の improve の case を消すと既定の「処理 0 件」の表示になり、このテストが落ちる）。
 func TestCycle_Text_ShowsImproveFiledCount(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	writeImproveThreshold(t, ws, 1)
 	occ := addJ8Occurrences(t, ws, 1)
@@ -318,6 +326,7 @@ func TestCycle_Text_ShowsImproveFiledCount(t *testing.T) {
 // 手動の `improve`（--json なし）は、J8 を呼ばなかった理由（not_started の reason）を表示する。
 // 周の上限で起動できない cycle_budget を実ストア・偽の claude で確かめる。
 func TestImprove_Text_ShowsCycleBudgetReason(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	// J8 の 1 回の上限（既定）より周の上限を小さくして、必ず cycle_budget で起動しない。
 	writeAgentJSONForTest(t, ws, `{"position_file": "position.md", "cycle_budget_usd": 0.1}`)
@@ -336,6 +345,7 @@ func TestImprove_Text_ShowsCycleBudgetReason(t *testing.T) {
 // improveText は J8 を呼ばなかった理由ごとに、その reason と（あれば）detail を表示する。
 // 手動の improve は failure_limit・rate_limited に至らないため、表示の関数を直接確かめる。
 func TestImproveText_ShowsEachNotStartedReason(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		ns   core.NotStarted
 		want string

@@ -48,6 +48,7 @@ func countCyclesForTest(t *testing.T, s *Store) int {
 // ErrLocked で終わり、cycle 行が増えない ---
 
 func TestBeginCycle_Exclusive_LiveHolderIsLocked(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 
@@ -81,6 +82,7 @@ func TestBeginCycle_Exclusive_LiveHolderIsLocked(t *testing.T) {
 // interrupted で閉じられる ---
 
 func TestBeginCycle_Exclusive_ReclaimsStaleLockAndClosesOldCycle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	s.lockStaleAfter = 100 * time.Millisecond
@@ -134,6 +136,7 @@ func TestBeginCycle_Exclusive_ReclaimsStaleLockAndClosesOldCycle(t *testing.T) {
 // 回収の前に ReapInterruptedRuns を呼ばないと、その run の費用が old cycle の
 // spent_usd に反映されないまま周が閉じてしまう（二度と埋まらない）。
 func TestBeginCycle_Exclusive_ReclaimReapsOrphanedRunBeforeClosingOldCycle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	s.lockStaleAfter = 100 * time.Millisecond
@@ -201,6 +204,7 @@ func TestBeginCycle_Exclusive_ReclaimReapsOrphanedRunBeforeClosingOldCycle(t *te
 // closeDeadHolderRuns でその run を閉じ、old cycle の spent_usd に費用を
 // 反映する。
 func TestBeginCycle_Exclusive_ReclaimClosesDeadHolderRunEvenIfItsOwnHeartbeatIsNotYetStale(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	s.lockStaleAfter = 100 * time.Millisecond
@@ -266,6 +270,7 @@ func TestBeginCycle_Exclusive_ReclaimClosesDeadHolderRunEvenIfItsOwnHeartbeatIsN
 // 満たすこと。heartbeat が古くてもプロセスが生きていれば回収しない
 // （§サイクルの排他「生きている保持者がいれば…locked」）。
 func TestBeginCycle_Exclusive_LiveProcessKeepsLockEvenWithStaleHeartbeat(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	s.lockStaleAfter = 100 * time.Millisecond
@@ -299,6 +304,7 @@ func TestBeginCycle_Exclusive_LiveProcessKeepsLockEvenWithStaleHeartbeat(t *test
 // 単一ホスト運用が前提。judgment.go の isRunProcessAlive のコメント参照）。
 // ロックの回収でも同じ規則が適用されることを確かめる。
 func TestBeginCycle_Exclusive_DifferentHostIsTreatedAsAlive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	s.lockStaleAfter = 100 * time.Millisecond
@@ -325,6 +331,7 @@ func TestBeginCycle_Exclusive_DifferentHostIsTreatedAsAlive(t *testing.T) {
 // 境界: heartbeat が既定の閾値（300秒）ちょうど・それ未満古いだけでは回収しない
 // （保持者のプロセスが生きていなくても）。s.lockStaleAfter は差し替えず既定値を使う。
 func TestBeginCycle_Exclusive_BoundaryAt300SecondsIsNotStale(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	base := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
@@ -362,6 +369,7 @@ func TestBeginCycle_Exclusive_BoundaryAt300SecondsIsNotStale(t *testing.T) {
 // cycle が locked にならない） ---
 
 func TestEndCycle_ReleasesLockWhenItIsTheHolder(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	cyc, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "cron", BudgetUSD: 10, Exclusive: true})
@@ -388,6 +396,7 @@ func TestEndCycle_ReleasesLockWhenItIsTheHolder(t *testing.T) {
 // --- AC: 保持者が自分でない排他を解放しようとしても、排他は残る ---
 
 func TestEndCycle_DoesNotReleaseLockHeldByAnotherCycle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	holder, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "cron", BudgetUSD: 10, Exclusive: true})
@@ -415,6 +424,7 @@ func TestEndCycle_DoesNotReleaseLockHeldByAnotherCycle(t *testing.T) {
 }
 
 func TestReleaseCycleLock_DoesNotReleaseWhenNotHolder(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	holder, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "cron", BudgetUSD: 10, Exclusive: true})
@@ -452,6 +462,7 @@ func TestReleaseCycleLock_DoesNotReleaseWhenNotHolder(t *testing.T) {
 // --- AC: cycle の実行中も、ID を指定した個別の操作は排他を待たずに実行できる ---
 
 func TestBeginCycle_NonExclusive_DoesNotWaitForExclusiveLock(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	if _, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "cron", BudgetUSD: 10, Exclusive: true}); err != nil {
@@ -471,6 +482,7 @@ func TestBeginCycle_NonExclusive_DoesNotWaitForExclusiveLock(t *testing.T) {
 // --- HeartbeatCycleLock / KeepCycleLock: 補助 API の基本的な振る舞い ---
 
 func TestHeartbeatCycleLock_UpdatesHeartbeatWhenHolder(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	base := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
@@ -495,6 +507,7 @@ func TestHeartbeatCycleLock_UpdatesHeartbeatWhenHolder(t *testing.T) {
 }
 
 func TestHeartbeatCycleLock_ReturnsErrLockLostWhenNotHolder(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	if _, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "cron", BudgetUSD: 10, Exclusive: true}); err != nil {
@@ -510,6 +523,7 @@ func TestHeartbeatCycleLock_ReturnsErrLockLostWhenNotHolder(t *testing.T) {
 }
 
 func TestKeepCycleLock_TicksHeartbeatUntilStopped(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	s.lockHeartbeatInterval = 10 * time.Millisecond
@@ -584,6 +598,7 @@ func TestKeepCycleLock_TicksHeartbeatUntilStopped(t *testing.T) {
 // 呼ばずに goroutine の終了そのもの（keepCycleLockWithStoppedSignal が
 // 返す stopped channel の close）を観測する形に書き直す。
 func TestKeepCycleLock_ExitsWhenContextIsCanceled(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	s := newStoreForTest(t)
 	s.lockHeartbeatInterval = 10 * time.Millisecond

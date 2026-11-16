@@ -43,6 +43,7 @@ func (f *contractFixture) holdQuestions(t *testing.T) []string {
 
 // resume に渡る引数に、保留への答えの中身が入る。
 func TestPollContractRuns_ResumeCarriesTheAnswerTextOfTheWaitingHold(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -60,6 +61,7 @@ func TestPollContractRuns_ResumeCarriesTheAnswerTextOfTheWaitingHold(t *testing.
 
 // start がすぐ waiting を返す経路も、保留に写し、その保留の答えを resume で返す。
 func TestStartContractDelegation_WaitingFromStartIsHeldAndItsAnswerIsReturned(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	f.client.startOut = waitingOut(approveAction(), nil)
 	rep, err := f.start(t)
@@ -76,6 +78,7 @@ func TestStartContractDelegation_WaitingFromStartIsHeldAndItsAnswerIsReturned(t 
 
 // 判断待ちを写した保留の答えだけを返す。予算超過の中止の失敗で立った保留への答えは返さない。
 func TestPollContractRuns_AnswerToAnotherHoldIsNotReturned(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -96,6 +99,7 @@ func TestPollContractRuns_AnswerToAnotherHoldIsNotReturned(t *testing.T) {
 
 // 古い（既に返した）保留の答えを、後の周で返し直さない。resume が失敗しても二重に返さず、保留にする。
 func TestPollContractRuns_FailedResumeHoldsAndTheAnswerIsNotReturnedTwice(t *testing.T) {
+	t.Parallel()
 	for _, res := range []RunResult{RunResultTimedOut, RunResultErrored} {
 		t.Run(string(res), func(t *testing.T) {
 			f := newContractFixture(t)
@@ -127,6 +131,7 @@ func TestPollContractRuns_FailedResumeHoldsAndTheAnswerIsNotReturnedTwice(t *tes
 
 // resume がすぐ戻り、同じ求められた操作の waiting を返しても、同じ問いの保留を立て直さない。
 func TestPollContractRuns_ResumeReturningTheSameWaitingDoesNotAskAgain(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -152,6 +157,7 @@ func TestPollContractRuns_ResumeReturningTheSameWaitingDoesNotAskAgain(t *testin
 
 // 別の求められた操作の waiting なら、新しい問いとして保留に写す。
 func TestPollContractRuns_ResumeReturningAnotherWaitingAsksTheNewQuestion(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -169,6 +175,7 @@ func TestPollContractRuns_ResumeReturningAnotherWaitingAsksTheNewQuestion(t *tes
 
 // 宣言の resume が {answer} を含まないとき、保留の文言は答えが渡ると言わない。
 func TestPollContractRuns_HoldWordingMatchesWhetherResumeCarriesTheAnswer(t *testing.T) {
+	t.Parallel()
 	with := newContractFixture(t)
 	without := newContractFixtureWith(t, strings.Replace(contractConnectorsJSON, `, "--answer", "{answer}"`, "", 1))
 	for _, c := range []struct {
@@ -192,6 +199,7 @@ func TestPollContractRuns_HoldWordingMatchesWhetherResumeCarriesTheAnswer(t *tes
 
 // 予算超過の中止の応答が succeeded（成果物つき）なら、課題を検証中へ進める。次の周が start を呼び直さない。
 func TestPollContractRuns_OverBudgetCancelAnsweredSucceededMovesToVerifying(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -222,6 +230,7 @@ func TestPollContractRuns_OverBudgetCancelAnsweredSucceededMovesToVerifying(t *t
 
 // 比べる上限額は、課題の実装の枠とレビュー対応の枠の残りの合計（実装の枠だけではない）。
 func TestRunDelegation_CLIBudgetIsTheSumOfImplAndReviewRemaining(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	in := f.input(f.cycle(t, 300), idPtr(f.cid))
 	in.Contract = f.client
@@ -257,6 +266,7 @@ func TestRunDelegation_CLIBudgetIsTheSumOfImplAndReviewRemaining(t *testing.T) {
 // 取り込み元の差し込みを要する commands.start の接続ツールは、取り込み元の無い課題の計画を委譲の対象にせず、
 // 黙って飛ばさず理由つきで返す（起動しない）。
 func TestRunDelegation_CLIStartNeedingSourceIsReportedNotSilentlySkipped(t *testing.T) {
+	t.Parallel()
 	f := newContractFixtureWith(t, strings.Replace(contractConnectorsJSON, `"--challenge", "{challenge_id}"`, `"--issue", "{issue_number}"`, 1))
 	in := f.input(f.cycle(t, 300), nil)
 	in.Contract = f.client
@@ -271,6 +281,7 @@ func TestRunDelegation_CLIStartNeedingSourceIsReportedNotSilentlySkipped(t *test
 
 // 委譲の側で start の差し込みを埋められなかったとき（検査をすり抜けた場合）も、周のエラーにも黙殺にもせず not_started で返す。
 func TestDelegateViaContract_UnfillableStartIsNotStarted(t *testing.T) {
+	t.Parallel()
 	f := newContractFixtureWith(t, strings.Replace(contractConnectorsJSON, `"--challenge", "{challenge_id}"`, `"--issue", "{issue_number}"`, 1))
 	in := f.input(f.cycle(t, 300), nil)
 	in.Contract = f.client
@@ -286,6 +297,7 @@ func TestDelegateViaContract_UnfillableStartIsNotStarted(t *testing.T) {
 
 // 同時委譲数（max_parallel_runs）は契約の run も数える。上限に達していれば start を呼ばない。
 func TestRunDelegation_CLIRespectsMaxParallelRuns(t *testing.T) {
+	t.Parallel()
 	// 別のリポジトリ（別の直列化グループ）の課題は、同時委譲数だけで起動を止められる。
 	f := newContractFixtureWith(t, strings.Replace(contractConnectorsJSON, `{"name": "main-repo"`,
 		`{"name": "other-repo", "remote": "o/s", "default_branch": "main", "connector": "tool", "slots": {"provider": "clone", "paths": ["slot-s"]}},
@@ -318,6 +330,7 @@ func TestRunDelegation_CLIRespectsMaxParallelRuns(t *testing.T) {
 
 // 周の状態の読みが失敗したとき、周は止めず、その課題を not_started として結果に見せる。
 func TestRunDelegation_ContractReadFailureIsVisibleInTheResult(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -337,6 +350,7 @@ func TestRunDelegation_ContractReadFailureIsVisibleInTheResult(t *testing.T) {
 
 // 周（RunCycle）は、終わっていない契約の run の状態を読む（契約の起動の口を委譲の段へ渡している）。
 func TestRunCycle_PollsUnfinishedContractRuns(t *testing.T) {
+	t.Parallel()
 	f := newCycleFixture(t)
 	c := createAndAdvance(t, f.s, StatusInProgress)
 	cid := mustParseChallengeID(t, c.ID)
@@ -373,6 +387,7 @@ func TestRunCycle_PollsUnfinishedContractRuns(t *testing.T) {
 
 // 差し戻しの再開の注記（本番反映のやり直し）は、戻した後に始まった契約の run があれば返さない（委譲の run と同じ）。
 func TestLoadReopenNote_ContractRunAfterTheReopenSuppressesTheNote(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	ctx := context.Background()
 	cid, _ := parseChallengeID(f.cid)
@@ -407,6 +422,7 @@ func TestLoadReopenNote_ContractRunAfterTheReopenSuppressesTheNote(t *testing.T)
 
 // 保留に結び付けた後に求められた操作が変わったら、古い保留の答えを新しい問いへの答えとして返さない。
 func TestPollContractRuns_AnswerIsNotReturnedAfterTheRequestedActionChanged(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -426,6 +442,7 @@ func TestPollContractRuns_AnswerIsNotReturnedAfterTheRequestedActionChanged(t *t
 
 // resume の引数を埋められないとき、答えを失わない（結び付きを外さない）。
 func TestPollContractRuns_UnfillableResumeKeepsTheAnswerLink(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -445,6 +462,7 @@ func TestPollContractRuns_UnfillableResumeKeepsTheAnswerLink(t *testing.T) {
 // 差し戻しの後の 2 回目の契約の run は、1 回目に使った分を引いた残りの合計を上限額に記録し、
 // 2 回目の外部の run の累計（cost_usd）はその上限額とだけ比べる（1 回目の費用を足して比べない）。
 func TestRunDelegation_CLISecondContractAfterSendBackDoesNotCountTheFirstCostTwice(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	ctx := context.Background()
 	in := f.input(f.cycle(t, 300), idPtr(f.cid))

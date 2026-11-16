@@ -17,6 +17,7 @@ func autoJ1Once(t *testing.T, s *Store, decl *AgentDeclaration, inv JudgmentInvo
 }
 
 func TestClassifyAutoJ1_HoldsAfterConsecutiveFailuresReachLimit(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -56,6 +57,7 @@ func TestClassifyAutoJ1_HoldsAfterConsecutiveFailuresReachLimit(t *testing.T) {
 }
 
 func TestClassifyAutoJ1_RateLimitedRunsDoNotCountNorBreakStreak(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	if _, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"}); err != nil {
@@ -78,6 +80,7 @@ func TestClassifyAutoJ1_RateLimitedRunsDoNotCountNorBreakStreak(t *testing.T) {
 }
 
 func TestClassifyAutoJ1_FailureCountResetsWhenChallengeVersionChanges(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -101,6 +104,7 @@ func TestClassifyAutoJ1_FailureCountResetsWhenChallengeVersionChanges(t *testing
 }
 
 func TestClassifyAutoJ1_ExplicitIDIgnoresFailureLimit(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -123,6 +127,7 @@ func TestClassifyAutoJ1_ExplicitIDIgnoresFailureLimit(t *testing.T) {
 }
 
 func TestLoadJudgmentLimitHit_CountsPerJudgmentPoint(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -153,6 +158,7 @@ func TestLoadJudgmentLimitHit_CountsPerJudgmentPoint(t *testing.T) {
 }
 
 func TestPlanAutoJ2_HoldsAfterConsecutiveFailuresReachLimit(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "t", "")
 	calls := 0
@@ -194,6 +200,7 @@ func answerHoldForTest(t *testing.T, s *Store, id, answer string) {
 }
 
 func TestClassifyAutoJ1_AnswerAfterTheLimitStartsCountingAgain(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	decl := newAgentDeclForJ1Test(t, s, "pos")
@@ -257,6 +264,7 @@ func (f *j5Fixture) j5FailUntilHeld(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_HoldsAfterConsecutiveFailuresReachLimit(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5FailUntilHeld(t)
@@ -273,6 +281,7 @@ func TestVerifyAutoJ5_HoldsAfterConsecutiveFailuresReachLimit(t *testing.T) {
 // オーナーの決定（2026-10-22 #279）: 人間が回答した保留は、種類を問わず数え直しの起点になる。
 // J5 の連続失敗の上限による保留への回答で、差し戻し（rework_limit）の回数も 0 に戻る。
 func TestVerifyAutoJ5_AnswerToFailureLimitHoldAlsoResetsReworkCount(t *testing.T) {
+	t.Parallel()
 	fixedActor(t, "alice")
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")

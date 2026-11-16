@@ -27,6 +27,7 @@ func phaseDoc(t *testing.T, p core.CyclePhaseResult) map[string]any {
 }
 
 func TestCyclePhaseJSON_RunPhaseCarriesSerialGroups(t *testing.T) {
+	t.Parallel()
 	sha := "cafe01"
 	got := phaseDoc(t, core.CyclePhaseResult{
 		Phase: core.CyclePhaseRun,
@@ -50,6 +51,7 @@ func TestCyclePhaseJSON_RunPhaseCarriesSerialGroups(t *testing.T) {
 }
 
 func TestCyclePhaseJSON_SkippedRunPhaseHasNoSerialGroups(t *testing.T) {
+	t.Parallel()
 	got := phaseDoc(t, core.CyclePhaseResult{Phase: core.CyclePhaseRun, Skipped: true})
 	if g, ok := got["serial_groups"].([]any); !ok || len(g) != 0 || got["skipped"] != true {
 		t.Errorf("phase = %#v, want skipped with serial_groups []", got)
@@ -57,12 +59,14 @@ func TestCyclePhaseJSON_SkippedRunPhaseHasNoSerialGroups(t *testing.T) {
 }
 
 func TestCyclePhaseJSON_JudgmentPhasesHaveNoSerialGroups(t *testing.T) {
+	t.Parallel()
 	if _, ok := phaseDoc(t, core.CyclePhaseResult{Phase: core.CyclePhasePlan})["serial_groups"]; ok {
 		t.Error("only the run phase has serial_groups")
 	}
 }
 
 func TestCyclePhaseJSON_RunPhaseCarriesTheJudgmentsOfAGroup(t *testing.T) {
+	t.Parallel()
 	got := phaseDoc(t, core.CyclePhaseResult{
 		Phase: core.CyclePhaseRun,
 		SerialGroups: []core.SerialGroup{{

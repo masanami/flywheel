@@ -10,6 +10,7 @@ import (
 // 取れなかった後、状態を読む前に他のプロセスが解放して idle を読んだ競合でも、
 // slot_unavailable にせず取り直す。
 func TestWaitForOriginalSlot_IdleAfterUnavailableRetries(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	want := &SlotAssignment{}
 	a, err := waitForOriginalSlot(context.Background(), time.Now().Add(time.Minute),
@@ -27,6 +28,7 @@ func TestWaitForOriginalSlot_IdleAfterUnavailableRetries(t *testing.T) {
 }
 
 func TestWaitForOriginalSlot_NeedsAttentionFails(t *testing.T) {
+	t.Parallel()
 	_, err := waitForOriginalSlot(context.Background(), time.Now().Add(time.Minute),
 		func() (*SlotAssignment, error) { return nil, ErrSlotUnavailable },
 		func() (slotState, error) { return slotStateNeedsAttention, nil })
@@ -36,6 +38,7 @@ func TestWaitForOriginalSlot_NeedsAttentionFails(t *testing.T) {
 }
 
 func TestWaitForOriginalSlot_ExpiredDeadlineFailsEvenIfIdle(t *testing.T) {
+	t.Parallel()
 	_, err := waitForOriginalSlot(context.Background(), time.Now().Add(-time.Second),
 		func() (*SlotAssignment, error) { return nil, ErrSlotUnavailable },
 		func() (slotState, error) { return slotStateIdle, nil })
@@ -46,6 +49,7 @@ func TestWaitForOriginalSlot_ExpiredDeadlineFailsEvenIfIdle(t *testing.T) {
 
 // idle のまま連続して取れない場合は、取り直しに上限を置いて ErrSlotUnavailable を返す。
 func TestWaitForOriginalSlot_IdleForeverStopsAfterBoundedRetries(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	_, err := waitForOriginalSlot(context.Background(), time.Now().Add(time.Minute),
 		func() (*SlotAssignment, error) { calls++; return nil, ErrSlotUnavailable },

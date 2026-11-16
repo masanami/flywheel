@@ -62,6 +62,7 @@ func readFileForTest(t *testing.T, path string) string {
 // TestLearnCommand_MatchesM45IFAPITable は、`learn` の名前と書式（位置引数は任意の 1 つ・必須のフラグなし）が
 // m4.5 の §IF / API の表のとおりであることを確かめる。
 func TestLearnCommand_MatchesM45IFAPITable(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "m4.5-learning-and-self-improvement.md"))
 	if err != nil {
 		t.Fatalf("read m4.5 spec: %v", err)
@@ -88,6 +89,7 @@ func TestLearnCommand_MatchesM45IFAPITable(t *testing.T) {
 // AC-227: ID を指定した learn は、対象の条件を満たす課題なら J6 を 1 回呼び、満たさなければ J6 を呼ばず
 // not_started に理由 not_learnable で示す。
 func TestLearn_WithID_RunsJ6ForLearnableAndNotLearnableOtherwise(t *testing.T) {
+	parallelTools(t, false)
 	m45SpecLine(t, "`flywheel learn <C-ID>` は、その課題が対象の条件を満たせば J6 を 1 回呼び")
 	ws := setupWorkspaceWithPosition(t)
 	learnable, occ := newLearnableForCase(t, ws, "done", 1)
@@ -120,6 +122,7 @@ func TestLearn_WithID_RunsJ6ForLearnableAndNotLearnableOtherwise(t *testing.T) {
 
 // AC-228: ID を省略した learn は、対象を課題の ID の昇順に処理する（J6 は課題 1 件につき 1 回）。
 func TestLearn_WithoutID_ProcessesTargetsInAscendingIDOrder(t *testing.T) {
+	parallelTools(t, false)
 	m45SpecLine(t, "`flywheel learn`（ID なし）は、`learn` の段と同じ対象を課題の ID の昇順に処理する")
 	ws := setupWorkspaceWithPosition(t)
 	first, o1 := newLearnableForCase(t, ws, "awaiting_human", 1)
@@ -142,6 +145,7 @@ func TestLearn_WithoutID_ProcessesTargetsInAscendingIDOrder(t *testing.T) {
 
 // AC-229: learn --json は {"phase": {…}} を返し、phase は cycle の phases の 1 要素と同じ形（phase は "learn"・skipped は false）。
 func TestLearn_JSONIsOnePhaseObject(t *testing.T) {
+	parallelTools(t, false)
 	m45SpecLine(t, "`learn --json` は、`cycle` の `phases` の 1 要素と同じ形を")
 	doc := loadDocumentedJSON(t)
 	ws := setupWorkspaceWithPosition(t)
@@ -164,6 +168,7 @@ func TestLearn_JSONIsOnePhaseObject(t *testing.T) {
 
 // AC-230: connectors.json が無くても learn は動く（J6 は接続ツールの宣言を使わない）。
 func TestLearn_WorksWithoutConnectorsJSON(t *testing.T) {
+	parallelTools(t, false)
 	m45SpecLine(t, "`.flywheel/connectors.json` が無くても、`learn` の段と `flywheel learn` は動く")
 	ws := setupWorkspaceWithPosition(t)
 	if _, err := os.Stat(filepath.Join(ws, ".flywheel", "connectors.json")); err == nil {
@@ -180,6 +185,7 @@ func TestLearn_WorksWithoutConnectorsJSON(t *testing.T) {
 
 // 対象が無い learn は空の phase を返し、J6 を起動しない。claude が無ければ invoker_unavailable で、ストアは変わらない。
 func TestLearn_NoTargets_EmptyPhase_AndClaudeNotOnPATH_InvokerUnavailable(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	argvLog, _ := putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
 	pm := runJSON(t, ws, "learn")["phase"].(map[string]any)
@@ -203,6 +209,7 @@ func TestLearn_NoTargets_EmptyPhase_AndClaudeNotOnPATH_InvokerUnavailable(t *tes
 // AC-222: cycle の phases の最後は learn で、verify の後に実行される。learn の段は connectors.json が無くても
 // skipped にならず、完了の課題の発生を分類する。
 func TestCycle_LearnPhaseIsBeforeImproveAndClassifiesWithoutConnectors(t *testing.T) {
+	parallelTools(t, false)
 	m45SpecLine(t, "`cycle --json` の `phases` の最後の要素は `phase: \"learn\"` である")
 	ws := setupWorkspaceWithPosition(t)
 	id, occ := newLearnableForCase(t, ws, "done", 1)
@@ -234,6 +241,7 @@ func TestCycle_LearnPhaseIsBeforeImproveAndClassifiesWithoutConnectors(t *testin
 
 // AC-285: 1 周目の learn の段で J6 が起票したフォローアップは、2 周目の classify の段（J1）の対象に入る。
 func TestCycle_FollowupFiledByLearnIsClassifiedInTheNextCycle(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	first, occ := newLearnableForCase(t, ws, "done", 1)
 	out, _ := json.Marshal(map[string]any{

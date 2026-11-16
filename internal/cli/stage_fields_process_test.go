@@ -19,6 +19,7 @@ func claudeStructured(t *testing.T, out map[string]any) string {
 
 // J2 の issues: 論点が課題の stages.issues に書かれ、人間対応待ちになる。
 func TestPlanAuto_J2IssuesWritesStageIssuesViaChildProcess(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
 	issue := func(q string) map[string]any {
@@ -58,6 +59,7 @@ func TestPlanAuto_J2IssuesWritesStageIssuesViaChildProcess(t *testing.T) {
 
 // J2 の plan: 予想・やらないことが課題の stages に書かれ、計画が登録される。
 func TestPlanAuto_J2PlanWritesExpectedAndNonGoalsViaChildProcess(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
 	stdout, _ := j2PlanFixture(t, func(m map[string]any) {
@@ -96,6 +98,7 @@ func TestPlanAuto_J2PlanWritesExpectedAndNonGoalsViaChildProcess(t *testing.T) {
 
 // J5 の actual: 実物が課題の stages.actual に書かれる。
 func TestVerifyAuto_J5WritesActualViaChildProcess(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newVerifyingForCase(t, ws, false)
 	route := j5Route("met", nil, nil)

@@ -97,8 +97,9 @@ func (g *execHeadGit) RemoveHeadWorktree(_ context.Context, clone, path string) 
 
 func gitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
-	out, err := cmd.CombinedOutput()
+	out, err := combinedOutputRetrySignal(func() *exec.Cmd {
+		return exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+	})
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
@@ -200,6 +201,7 @@ func (f *prHeadFixture) verifiedHeadsLogged(t *testing.T) []map[string]string {
 
 // ① ② ③ ④ ⑤ を満たした判定で固定する。
 func TestVerifyAutoJ5_ReadsThePullRequestHead_Met(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence+"\n")
 	mainHead := gitOut(t, f.clone, "rev-parse", "HEAD")
 
@@ -268,6 +270,7 @@ func TestVerifyAutoJ5_ReadsThePullRequestHead_Met(t *testing.T) {
 
 // ③ ④ ⑤ を、文が無くて未達の判定で固定する（ファイルはあるが文が無い・ファイルも無い）。
 func TestVerifyAutoJ5_ReadsThePullRequestHead_NotMet(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, "別の文\n")
 	if _, err := f.verifyHead(context.Background(), t); err != nil {
 		t.Fatal(err)
@@ -285,6 +288,7 @@ func TestVerifyAutoJ5_ReadsThePullRequestHead_NotMet(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_FileMissingOnTheHead_NotMet(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, "x\n")
 	// head を、ファイルを持たない既定ブランチのコミットにする。
 	f.sha = gitOut(t, f.clone, "rev-parse", "main")
@@ -303,6 +307,7 @@ func TestVerifyAutoJ5_FileMissingOnTheHead_NotMet(t *testing.T) {
 
 // ⑤ を、失敗（claude が異常終了）と中断（ctx の取り消し）の終わり方で固定する。
 func TestVerifyAutoJ5_RemovesTheWorktreeOnFailureAndCancel(t *testing.T) {
+	t.Parallel()
 	t.Run("failed run", func(t *testing.T) {
 		f := newPRHeadFixture(t, headOnlySentence)
 		inner := f.j5.onInvoke
@@ -335,15 +340,13 @@ func TestVerifyAutoJ5_RemovesTheWorktreeOnFailureAndCancel(t *testing.T) {
 
 // 強制終了で残った worktree は、次の取り出しが消す。実行中のプロセスのものは消さない。
 func TestVerifyAutoJ5_SweepsWorktreesOfDeadProcesses(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence)
 	dir := filepath.Join(f.s.Workspace(), ".flywheel", "worktrees", j5HeadsDirName, "main-repo")
-	cmd := exec.Command("true")
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
-	}
-	dead := filepath.Join(dir, fmt.Sprintf("%d-%s-left", cmd.Process.Pid, j5HeadHostTag()))
+	deadPid := runTrueForDeadPID(t)
+	dead := filepath.Join(dir, fmt.Sprintf("%d-%s-left", deadPid, j5HeadHostTag()))
 	live := filepath.Join(dir, fmt.Sprintf("%d-%s-running", os.Getppid(), j5HeadHostTag()))
-	otherHost := filepath.Join(dir, fmt.Sprintf("%d-00000000-other", cmd.Process.Pid))
+	otherHost := filepath.Join(dir, fmt.Sprintf("%d-00000000-other", deadPid))
 	gitOut(t, f.clone, "worktree", "add", "--detach", dead, f.sha)
 	gitOut(t, f.clone, "worktree", "add", "--detach", live, f.sha)
 	gitOut(t, f.clone, "worktree", "add", "--detach", otherHost, f.sha)
@@ -362,6 +365,7 @@ func TestVerifyAutoJ5_SweepsWorktreesOfDeadProcesses(t *testing.T) {
 
 // 取り出せないときは、差分を渡して理由を注記し、ワークスペースで起動する。
 func TestVerifyAutoJ5_HeadNotCheckedOut_FallsBackToTheDiff(t *testing.T) {
+	t.Parallel()
 	noCommit := func(in *J5AutoInput) { in.HeadGit = &noHeadGit{} }
 	cases := map[string]struct {
 		mut    func(in *J5AutoInput)
@@ -394,6 +398,7 @@ func TestVerifyAutoJ5_HeadNotCheckedOut_FallsBackToTheDiff(t *testing.T) {
 
 // 差分の取得・worktree の作成に失敗したら、J5 を起動せず課題も変えない。
 func TestVerifyAutoJ5_PreparationFailure_DoesNotStart(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(f *prHeadFixture){
 		"diff":     func(f *prHeadFixture) { f.diffs.err = errors.New("gh down") },
 		"worktree": func(f *prHeadFixture) { f.git.addErr = errors.New("locked") },
@@ -421,6 +426,7 @@ func TestVerifyAutoJ5_PreparationFailure_DoesNotStart(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_LargeDiffs(t *testing.T) {
+	t.Parallel()
 	notice := func(f *prHeadFixture) (diff, note string) {
 		for _, s := range f.j5Inputs[0].Sections {
 			switch s.Label {
@@ -458,6 +464,7 @@ func TestVerifyAutoJ5_LargeDiffs(t *testing.T) {
 
 // PR が複数なら open の 1 件を取り出し、差分はすべて渡す。閉じられた未マージの PR は読まない。
 func TestPrepareJ5Head_ManyPullRequests(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence)
 	pr := func(n int, state, sha string) UpstreamPullRequestChecks {
 		return UpstreamPullRequestChecks{URL: fmt.Sprintf("https://github.com/o/r/pull/%d", n), State: state, Base: "main", BaseSHA: "b", HeadSHA: sha}
@@ -484,6 +491,7 @@ func TestPrepareJ5Head_ManyPullRequests(t *testing.T) {
 
 // 読む PR が無い（閉じられた未マージの PR だけ）ときは、今までどおりワークスペースで起動する。
 func TestVerifyAutoJ5_NoReadablePullRequest_RunsInTheWorkspace(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.checks.prs["o/r#1"] = prChecks("closed", checkDone)
@@ -500,6 +508,7 @@ func TestVerifyAutoJ5_NoReadablePullRequest_RunsInTheWorkspace(t *testing.T) {
 
 // 中断で止めた委譲の run は interrupted になり、起動していない（launch_failed）run はそのまま残る。
 func TestRunDelegation_CanceledRunIsInterrupted(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		out  JudgmentLaunchOutput
 		want RunResult
@@ -552,6 +561,7 @@ func (f *prHeadFixture) assertNoTemporaryRefs(t *testing.T, clone string) {
 // だけ一時の ref へ fetch して worktree を作り、差分に無いファイルも読める。終わったら一時の ref も
 // worktree も残らない。
 func TestVerifyAutoJ5_FetchesTheHeadWhenTheCloneLacksIt(t *testing.T) {
+	t.Parallel()
 	for name, provider := range map[string]slotProvider{"worktree slots": slotProviderWorktree, "clone slots": slotProviderClone} {
 		t.Run(name, func(t *testing.T) {
 			f := newPRHeadFixture(t, headOnlySentence+"\n")
@@ -583,6 +593,7 @@ func TestVerifyAutoJ5_FetchesTheHeadWhenTheCloneLacksIt(t *testing.T) {
 
 // head が手元にあるときは fetch しない。
 func TestVerifyAutoJ5_DoesNotFetchWhenTheCloneHasTheHead(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence)
 	if _, err := f.verifyHead(context.Background(), t); err != nil {
 		t.Fatal(err)
@@ -594,6 +605,7 @@ func TestVerifyAutoJ5_DoesNotFetchWhenTheCloneHasTheHead(t *testing.T) {
 
 // fetch に失敗したときは、差分だけを渡して理由を注記し、ワークスペースで起動する（一時の ref は残らない）。
 func TestVerifyAutoJ5_FetchFailure_FallsBackToTheDiff(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence)
 	conn, local := f.fetchFixture(t, slotProviderWorktree)
 	f.git.fetchErr = errors.New("network down")
@@ -613,6 +625,7 @@ func TestVerifyAutoJ5_FetchFailure_FallsBackToTheDiff(t *testing.T) {
 
 // fetch の後に worktree を作れなかったときも、一時の ref を消す。
 func TestVerifyAutoJ5_WorktreeFailureAfterFetch_RemovesTheRef(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence)
 	conn, local := f.fetchFixture(t, slotProviderWorktree)
 	f.git.addErr = errors.New("locked")
@@ -630,15 +643,13 @@ func TestVerifyAutoJ5_WorktreeFailureAfterFetch_RemovesTheRef(t *testing.T) {
 
 // 強制終了で残った一時の ref は次の取り出しが消す（実行中のプロセス・別ホストのものは消さない）。
 func TestVerifyAutoJ5_SweepsTemporaryRefsOfDeadProcesses(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence)
 	conn, local := f.fetchFixture(t, slotProviderWorktree)
-	cmd := exec.Command("true")
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
-	}
-	dead := fmt.Sprintf("%s%d-%s-left", j5HeadRefPrefix, cmd.Process.Pid, j5HeadHostTag())
+	deadPid := runTrueForDeadPID(t)
+	dead := fmt.Sprintf("%s%d-%s-left", j5HeadRefPrefix, deadPid, j5HeadHostTag())
 	live := fmt.Sprintf("%s%d-%s-running", j5HeadRefPrefix, os.Getppid(), j5HeadHostTag())
-	otherHost := fmt.Sprintf("%s%d-00000000-other", j5HeadRefPrefix, cmd.Process.Pid)
+	otherHost := fmt.Sprintf("%s%d-00000000-other", j5HeadRefPrefix, deadPid)
 	for _, ref := range []string{dead, live, otherHost} {
 		gitOut(t, local, "fetch", "--no-tags", "origin", f.sha+":"+ref)
 	}
@@ -655,6 +666,7 @@ func TestVerifyAutoJ5_SweepsTemporaryRefsOfDeadProcesses(t *testing.T) {
 
 // fetch した head の検証が失敗・取り消しで終わっても、一時の ref と worktree が残らない。
 func TestVerifyAutoJ5_RemovesTheFetchedRefOnFailureAndCancel(t *testing.T) {
+	t.Parallel()
 	for name, end := range map[string]func(f *prHeadFixture, cancel func()){
 		"failed run": func(f *prHeadFixture, _ func()) {
 			f.j5.result = JudgmentLaunchOutput{Result: RunResultErrored, ErrorSummary: "boom"}

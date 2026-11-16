@@ -66,6 +66,7 @@ func kindsOf(t *testing.T, e map[string]any) []string {
 // --- AC-80〜83: kinds の内容 ---
 
 func TestRunStatus_Discrepancies_ReflectsUpstreamAndPolicyState(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	closed := createForCase(t, ws)
 	bindSourceForDiscrepancyCase(t, ws, closed, "o/r#1", "closed", "in_policy")
@@ -114,6 +115,7 @@ func equalStrings(a, b []string) bool {
 // （M1 の区分の規則が変わらないことの検証） ---
 
 func TestRunStatus_Discrepancies_UnclassifiedChallengeAlsoAppearsInActionable(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	bindSourceForDiscrepancyCase(t, ws, id, "o/r#1", "closed", "in_policy")
@@ -132,6 +134,7 @@ func TestRunStatus_Discrepancies_UnclassifiedChallengeAlsoAppearsInActionable(t 
 // --- AC-86相当: 食い違いの無いワークスペースは [] ---
 
 func TestRunStatus_Discrepancies_EmptyWorkspaceIsEmptyArray(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	doc := runJSON(t, ws, "status")
 	entries := discrepancyEntries(t, doc)
@@ -143,6 +146,7 @@ func TestRunStatus_Discrepancies_EmptyWorkspaceIsEmptyArray(t *testing.T) {
 // --- status は読み取り専用（discrepancies を読んでも状態を変えない） ---
 
 func TestRunStatus_Discrepancies_DoesNotMutateSourceBinding(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	bindSourceForDiscrepancyCase(t, ws, id, "o/r#1", "closed", "out_of_policy")
@@ -162,6 +166,7 @@ func TestRunStatus_Discrepancies_DoesNotMutateSourceBinding(t *testing.T) {
 // 現れうる）。 ---
 
 func TestRunStatus_Discrepancies_KindsMatchCoreClosedSetBothWays(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	closedID := createForCase(t, ws)
 	bindSourceForDiscrepancyCase(t, ws, closedID, "o/r#1", "closed", "out_of_policy")
@@ -225,6 +230,7 @@ func TestRunStatus_Discrepancies_KindsMatchCoreClosedSetBothWays(t *testing.T) {
 // その見出しは (なし) にならない。 ---
 
 func TestRunStatus_Discrepancies_TextOutputListsThemUnderNeedsHuman(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	bindSourceForDiscrepancyCase(t, ws, id, "o/r#1", "closed", "in_policy")

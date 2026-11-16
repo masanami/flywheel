@@ -17,6 +17,7 @@ import (
 // ストアのオープンを一切行わないことを検証する（ゼロ値で安全側＝既存の
 // cli_test.go の "widget" 系テストがこの回帰に影響されないことの担保でもある）。
 func TestRun_CommandNotRequiringStoreNeverOpensAStore(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	var gotArgs Args
 	testCmd := Command{
@@ -29,7 +30,7 @@ func TestRun_CommandNotRequiringStoreNeverOpensAStore(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	// ワークスペースが存在しないディレクトリを渡しても、RequiresStore=false なら
 	// 失敗しない（ストアを開かないため store_not_found にならない）。
-	code := run([]string{"widget", "--workspace", dir, "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd})
+	code := runWithLookPath([]string{"widget", "--workspace", dir, "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd}, lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}
@@ -45,6 +46,7 @@ func TestRun_CommandNotRequiringStoreNeverOpensAStore(t *testing.T) {
 // AC「ストアが見つからない場所で init 以外のコマンドを実行すると、終了コード 2・
 // store_not_found で終わり、ストアが作られない」の検証。
 func TestRun_CommandRequiringStoreFailsWithStoreNotFoundWhenWorkspaceHasNoStore(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	testCmd := Command{
 		Path:          []string{"widget"},
@@ -62,6 +64,7 @@ func TestRun_CommandRequiringStoreFailsWithStoreNotFoundWhenWorkspaceHasNoStore(
 // コマンドの Run に、開いたワークスペースのストアが Args.Store として渡ることを
 // 検証する。
 func TestRun_CommandRequiringStoreOpensItAndPassesToRun(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := core.Init(dir); err != nil {
 		t.Fatalf("core.Init() setup error = %v", err)
@@ -77,7 +80,7 @@ func TestRun_CommandRequiringStoreOpensItAndPassesToRun(t *testing.T) {
 		},
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"widget", "--workspace", dir, "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd})
+	code := runWithLookPath([]string{"widget", "--workspace", dir, "--json"}, strings.NewReader(""), &stdout, &stderr, []Command{testCmd}, lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}
@@ -92,6 +95,7 @@ func TestRun_CommandRequiringStoreOpensItAndPassesToRun(t *testing.T) {
 // 変わらない（§IF / API の全コマンドを列挙して検証する）」の枠組み。
 // この時点で存在するコマンド（defaultCommands()）を列挙して回す。
 func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := core.Init(dir); err != nil {
 		t.Fatalf("core.Init() setup error = %v", err)
@@ -146,7 +150,7 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 	for _, args := range cases {
 		full := append(append([]string{}, args...), "--workspace", dir, "--json")
 		var stdout, stderr bytes.Buffer
-		code := run(full, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+		code := runWithLookPath(full, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 		if code != 2 {
 			t.Errorf("args=%v exit=%d, want 2 (store_too_new) (stderr=%s)", args, code, stderr.String())
 			continue
@@ -217,7 +221,7 @@ func requireErrorCodeWithCommands(t *testing.T, args []string, wantExit int, wan
 	t.Helper()
 	full := append(append([]string{}, args...), "--json")
 	var stdout, stderr bytes.Buffer
-	code := run(full, strings.NewReader(""), &stdout, &stderr, commands)
+	code := runWithLookPath(full, strings.NewReader(""), &stdout, &stderr, commands, lookPathFor(t))
 	if code != wantExit {
 		t.Fatalf("args=%v exit=%d, want %d (stderr=%s)", args, code, wantExit, stderr.String())
 	}

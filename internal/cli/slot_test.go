@@ -29,16 +29,19 @@ func slotGit(t *testing.T, dir string, args ...string) string {
 	if err != nil {
 		t.Fatalf("git is required: %v", err)
 	}
-	cmd := exec.Command(exe, args...)
-	cmd.Dir = dir
 	var env []string
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "GIT_") {
 			env = append(env, kv)
 		}
 	}
-	cmd.Env = append(env, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
-	out, err := cmd.CombinedOutput()
+	env = append(env, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+	out, err := combinedOutputRetrySignal(func() *exec.Cmd {
+		cmd := exec.Command(exe, args...)
+		cmd.Dir = dir
+		cmd.Env = env
+		return cmd
+	})
 	if err != nil {
 		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
@@ -95,7 +98,7 @@ func installTripwireGH(t *testing.T) string {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "gh-called")
 	script := "#!/bin/sh\necho called >> '" + marker + "'\nexit 1\n"
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+	if err := writeExecutable(filepath.Join(dir, "gh"), []byte(script)); err != nil {
 		t.Fatal(err)
 	}
 	addToolDir(t, dir)
@@ -105,6 +108,7 @@ func installTripwireGH(t *testing.T) string {
 // AC-283〜285・M3P47: origin の URL の各形（https・scp・ssh × .git の有無）を正規化し、大文字小文字を
 // 無視して宣言の remote と一致とみなす。違う名前・未コミットの変更は割り当てずに needs_attention。
 func TestSlotAssignment_OriginFormsAndPreAssignmentChecks_RealGit(t *testing.T) {
+	parallelTools(t, true) // 製品側の git の起動（adapter）はやり直せず、並列の負荷で稀にシグナルで終わるため並列にしない
 	marker := installTripwireGH(t)
 	forms := []string{
 		"https://github.com/owner/NAME", "https://github.com/owner/NAME.git",
@@ -168,6 +172,7 @@ func TestSlotAssignment_OriginFormsAndPreAssignmentChecks_RealGit(t *testing.T) 
 // AC-278: clone のパスが無いスロットは needs_attention（理由はパスが無いこと）で status に出て、
 // ディレクトリは作られない。slot clear で戻せる。
 func TestSlotClone_MissingPathAppearsInStatusAndClearReturnsItToIdle(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	s := openSlotStore(t, ws)
 	_, err := s.AcquireSlot(context.Background(), gitadapter.New(), cloneRepo("clones/gone"), slotBinder)
@@ -209,6 +214,7 @@ func TestSlotClone_MissingPathAppearsInStatusAndClearReturnsItToIdle(t *testing.
 }
 
 func TestSlotClear_ErrorsMapToCLIErrorCodes(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	requireJSONErrorEnvelope(t, []string{"slot", "clear", "SL-9", "--workspace", ws}, 1, CodeNotFound)
 	idle := coretest.InsertSlot(t, ws, "r", "clone", filepath.Join(ws, "c"), "idle", "")
@@ -217,10 +223,11 @@ func TestSlotClear_ErrorsMapToCLIErrorCodes(t *testing.T) {
 }
 
 func TestStatus_NeedsHumanSlotsTextShowsSlot(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	coretest.InsertSlot(t, ws, "r", "clone", filepath.Join(ws, "c"), "needs_attention", "the slot path does not exist")
 	var stdout, stderr strings.Builder
-	code := run([]string{"status", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"status", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit = %d (%s)", code, stderr.String())
 	}
@@ -381,7 +388,9 @@ func TestSlotAssignment_GitCallsCarryEnvAndNeverFetchOrClone_RealGit(t *testing.
 	if err := os.WriteFile(filepath.Join(wrapDir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	addToolDir(t, wrapDir)
+	// internal/adapters/git の New() は git を PATH から探す（差し込み口が無い）ので、t ごとの置き場（addToolDir）は使えず、
+	// プロセスの PATH を書き換える。そのため t.Parallel にしない。
+	t.Setenv("PATH", wrapDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	s := openSlotStore(t, ws)
 	repo := core.ConnectorRepo{Name: "r", Remote: "owner/name", DefaultBranch: "main",

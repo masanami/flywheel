@@ -10,7 +10,8 @@ import (
 
 // J1 の出力の「一言で」「位置づけ」（S4。AC-265〜276・M4P35）のテスト。
 
-func TestJ1OutputSchema_HasHeadlineAndContext(t *testing.T) { // AC-265
+func TestJ1OutputSchema_HasHeadlineAndContext(t *testing.T) {
+	t.Parallel() // AC-265
 	var schema struct {
 		Properties map[string]json.RawMessage `json:"properties"`
 	}
@@ -24,7 +25,8 @@ func TestJ1OutputSchema_HasHeadlineAndContext(t *testing.T) { // AC-265
 	}
 }
 
-func TestValidateJ1Output_MineRequiresHeadlineAndContext(t *testing.T) { // AC-266・267
+func TestValidateJ1Output_MineRequiresHeadlineAndContext(t *testing.T) {
+	t.Parallel() // AC-266・267
 	ok := func(h, c *string) bool {
 		_, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r", Headline: h, Context: c}))
 		return ok
@@ -49,7 +51,8 @@ func TestValidateJ1Output_MineRequiresHeadlineAndContext(t *testing.T) { // AC-2
 	}
 }
 
-func TestValidateJ1Output_NonMineDropsBadTextButKeepsVerdict(t *testing.T) { // AC-268〜275
+func TestValidateJ1Output_NonMineDropsBadTextButKeepsVerdict(t *testing.T) {
+	t.Parallel() // AC-268〜275
 	for _, verdict := range []string{"not_mine", "uncertain"} {
 		raw := j1RawOutput{Verdict: verdict, Reason: "r", Question: strPtr("q?"),
 			Headline: strPtr("  "), Context: strPtr(strings.Repeat("い", 1001))}
@@ -104,7 +107,8 @@ func lastClassifyActivity(t *testing.T, s *Store, id string) (action string, aft
 	return action, after, count
 }
 
-func TestClassifyAutoJ1_Mine_WritesTextAndLogsAfter(t *testing.T) { // AC-266 写像・AC-276
+func TestClassifyAutoJ1_Mine_WritesTextAndLogsAfter(t *testing.T) {
+	t.Parallel() // AC-266 写像・AC-276
 	s := newStoreForTest(t)
 	id := newUnclassified(t, s)
 	runJ1ForText(t, s, id, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r", Headline: strPtr("一言で"), Context: strPtr("位置づけ")})
@@ -121,7 +125,8 @@ func TestClassifyAutoJ1_Mine_WritesTextAndLogsAfter(t *testing.T) { // AC-266 �
 	}
 }
 
-func TestClassifyAutoJ1_MineBadText_InvalidOutputLeavesColumns(t *testing.T) { // AC-266・267
+func TestClassifyAutoJ1_MineBadText_InvalidOutputLeavesColumns(t *testing.T) {
+	t.Parallel() // AC-266・267
 	s := newStoreForTest(t)
 	id := newUnclassified(t, s)
 	res := runJ1ForText(t, s, id, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r", Headline: strPtr("h")})
@@ -135,7 +140,8 @@ func TestClassifyAutoJ1_MineBadText_InvalidOutputLeavesColumns(t *testing.T) { /
 	}
 }
 
-func TestClassifyAutoJ1_Uncertain_WritesValidTextOnly(t *testing.T) { // AC-268〜275
+func TestClassifyAutoJ1_Uncertain_WritesValidTextOnly(t *testing.T) {
+	t.Parallel() // AC-268〜275
 	s := newStoreForTest(t)
 	id := newUnclassified(t, s)
 	res := runJ1ForText(t, s, id, j1RawOutput{Verdict: "uncertain", Question: strPtr("q?"), Reason: "r", Headline: strPtr("一言で"), Context: strPtr(" ")})
@@ -152,7 +158,8 @@ func TestClassifyAutoJ1_Uncertain_WritesValidTextOnly(t *testing.T) { // AC-268�
 	}
 }
 
-func TestClassifyAutoJ1_NotMine_WritesTextWithoutTransition(t *testing.T) { // 起票時の決定・AC-276
+func TestClassifyAutoJ1_NotMine_WritesTextWithoutTransition(t *testing.T) {
+	t.Parallel() // 起票時の決定・AC-276
 	s := newStoreForTest(t)
 	id := newUnclassified(t, s)
 	res := runJ1ForText(t, s, id, j1RawOutput{Verdict: "not_mine", Reason: "r", Headline: strPtr("一言で"), Context: strPtr("位置づけ")})
@@ -176,7 +183,8 @@ func TestClassifyAutoJ1_NotMine_WritesTextWithoutTransition(t *testing.T) { // �
 	}
 }
 
-func TestClassifyAutoJ1_NotMine_BadOrNoText_WritesNothing(t *testing.T) { // AC-268〜275
+func TestClassifyAutoJ1_NotMine_BadOrNoText_WritesNothing(t *testing.T) {
+	t.Parallel() // AC-268〜275
 	for name, raw := range map[string]j1RawOutput{
 		"none":  {Verdict: "not_mine", Reason: "r"},
 		"blank": {Verdict: "not_mine", Reason: "r", Headline: strPtr(" "), Context: strPtr("")},
@@ -198,6 +206,7 @@ func TestClassifyAutoJ1_NotMine_BadOrNoText_WritesNothing(t *testing.T) { // AC-
 }
 
 func TestJ1NotMine_TextWriteKeepsExclusionUntilOtherVersionChange(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := newUnclassified(t, s)
 	runJ1ForText(t, s, id, j1RawOutput{Verdict: "not_mine", Reason: "r", Headline: strPtr("一言で"), Context: strPtr("位置づけ")})
@@ -215,6 +224,7 @@ func TestJ1NotMine_TextWriteKeepsExclusionUntilOtherVersionChange(t *testing.T) 
 }
 
 func TestApplyJ1NotMine_ChallengeChangedSinceRun_WritesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := newUnclassified(t, s)
 	runID := insertFakeRunForTest(t, s, id, judgmentJ1) // 起動時の版 1

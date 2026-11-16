@@ -19,6 +19,7 @@ import (
 // --- PrepareApproval / PrepareRejection ---
 
 func TestPrepareApproval_PlanApprovalIncludesLatestPlanVersionAndBody(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -45,6 +46,7 @@ func TestPrepareApproval_PlanApprovalIncludesLatestPlanVersionAndBody(t *testing
 }
 
 func TestPrepareApproval_CompletionApprovalIncludesDoneCriteria(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t", DoneCriteria: "it works"})
@@ -67,6 +69,7 @@ func TestPrepareApproval_CompletionApprovalIncludesDoneCriteria(t *testing.T) {
 }
 
 func TestPrepareApproval_WrongStateIsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -78,6 +81,7 @@ func TestPrepareApproval_WrongStateIsInvalidTransition(t *testing.T) {
 }
 
 func TestPrepareApproval_DoneIsTerminalState(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusDone)
@@ -89,6 +93,7 @@ func TestPrepareApproval_DoneIsTerminalState(t *testing.T) {
 }
 
 func TestPrepareApproval_NotFoundForMissingOrMalformedID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	for _, id := range []string{"C-999", "OP-1", "foo"} {
@@ -100,6 +105,7 @@ func TestPrepareApproval_NotFoundForMissingOrMalformedID(t *testing.T) {
 }
 
 func TestPrepareRejection_EmptyReasonIsValidationErrorBeforeTouchingStore(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -115,6 +121,7 @@ func TestPrepareRejection_EmptyReasonIsValidationErrorBeforeTouchingStore(t *tes
 // --- PrepareAnswer ---
 
 func TestPrepareAnswer_ReturnsQuestionAndFromStatus(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusVerifying)
@@ -139,6 +146,7 @@ func TestPrepareAnswer_ReturnsQuestionAndFromStatus(t *testing.T) {
 }
 
 func TestPrepareAnswer_EmptyAnswerIsValidationErrorBeforeTouchingStore(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -155,6 +163,7 @@ func TestPrepareAnswer_EmptyAnswerIsValidationErrorBeforeTouchingStore(t *testin
 }
 
 func TestPrepareAnswer_WrongStateIsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -168,6 +177,7 @@ func TestPrepareAnswer_WrongStateIsInvalidTransition(t *testing.T) {
 // --- AC-33: T12 の戻り先は「保留に入る直前の状態」。4 つの from_status を列挙する ---
 
 func TestExecuteAnswer_ReturnsToPrecedingHoldStatusForAllFourSources(t *testing.T) {
+	t.Parallel()
 	for _, from := range []Status{StatusUnclassified, StatusClassified, StatusInProgress, StatusVerifying} {
 		s := newStoreForTest(t)
 		fixedActor(t, "alice")
@@ -212,6 +222,7 @@ func TestExecuteAnswer_ReturnsToPrecedingHoldStatusForAllFourSources(t *testing.
 // before にそのキーを null で載せる（plan の plan_version・classify の
 // priority・edit の urgency とそろえる）。
 func TestExecuteAnswer_BeforeHasNullAnswer(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -253,6 +264,7 @@ func TestExecuteAnswer_BeforeHasNullAnswer(t *testing.T) {
 // --- AC-34: 再び保留に入ると、現在の保留は未回答。以前の回答は以前の保留にだけ残る ---
 
 func TestExecuteAnswer_ReenteringHoldLeavesOldAnswerOnOldHoldAndNewHoldUnanswered(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -294,6 +306,7 @@ func TestExecuteAnswer_ReenteringHoldLeavesOldAnswerOnOldHoldAndNewHoldUnanswere
 // --- AC-46 相当（core 側）: 要約表示後・書き込みまでの間に対象が変わると conflict ---
 
 func TestExecuteApproval_VersionMismatchIsConflictAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -334,6 +347,7 @@ func TestExecuteApproval_VersionMismatchIsConflictAndChangesNothing(t *testing.T
 // 「改訂された計画に古い承認は効かない」: PrepareApproval の後に計画を改訂すると、
 // 古い版を条件にした承認は conflict になる。
 func TestExecuteApproval_RevisedPlanInvalidatesPriorPreview(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -366,6 +380,7 @@ func TestExecuteApproval_RevisedPlanInvalidatesPriorPreview(t *testing.T) {
 // --- AC-47・AC-49: 承認・差し戻しの記録 ---
 
 func TestExecuteApproval_RecordsApprovalWithActorChannelVerificationTargetVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -410,6 +425,7 @@ func TestExecuteApproval_RecordsApprovalWithActorChannelVerificationTargetVersio
 }
 
 func TestExecuteApproval_RejectedRecordsReason(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -441,6 +457,7 @@ func TestExecuteApproval_RejectedRecordsReason(t *testing.T) {
 // --- AC-48: 理由が空の reject は validation_failed ---
 
 func TestExecuteApproval_RejectedWithEmptyReasonIsValidationError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -460,6 +477,7 @@ func TestExecuteApproval_RejectedWithEmptyReasonIsValidationError(t *testing.T) 
 // --- ゼロ値・登録簿外の Attestation は fail-closed に拒否する ---
 
 func TestExecuteApproval_ZeroValueAttestationIsRejectedWithoutChangingState(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -487,6 +505,7 @@ func TestExecuteApproval_ZeroValueAttestationIsRejectedWithoutChangingState(t *t
 }
 
 func TestExecuteAnswer_ZeroValueAttestationIsRejected(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -513,6 +532,7 @@ func TestExecuteAnswer_ZeroValueAttestationIsRejected(t *testing.T) {
 // Attestation しか検証しておらず、attestationValid から registryAllows の
 // 検査を落としても green のままだった）。
 func TestExecuteApproval_NonEmptyActorButUnregisteredChannelIsRejected(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -538,6 +558,7 @@ func TestExecuteApproval_NonEmptyActorButUnregisteredChannelIsRejected(t *testin
 // 完全一致」が Verifier の中だけでなく core の API 境界でも担保されている
 // ことの検証）。
 func TestExecuteApproval_AttestationForDifferentTargetIsRejected(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c1 := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -583,6 +604,7 @@ func insertPlanRowForTest(t *testing.T, s *Store, challengeID string, version in
 // --- 作業ログへの書き込み失敗はロールバックする（承認の記録も残らない） ---
 
 func TestExecuteApproval_ActivityInsertFailureRollsBackApproval(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -620,6 +642,7 @@ func TestExecuteApproval_ActivityInsertFailureRollsBackApproval(t *testing.T) {
 // fail-closed であること（Verify を経由しない直接呼び出し）だけを確認する。)
 
 func TestExecuteApproval_DecisionOutsideClosedSetIsValidationError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -651,6 +674,7 @@ func setUpChallengeAwaitingCompletionWithOperations(t *testing.T, s *Store) (c *
 }
 
 func TestPrepareApproval_CompletionListsPendingReleasesAndOtherOperations(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, releases, others := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -673,6 +697,7 @@ func TestPrepareApproval_CompletionListsPendingReleasesAndOtherOperations(t *tes
 }
 
 func TestExecuteApproval_CompletionApprovesAllPendingReleasesButNotOtherKinds(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, releases, others := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -740,6 +765,7 @@ func TestExecuteApproval_CompletionApprovesAllPendingReleasesButNotOtherKinds(t 
 // AC-56 相当（core 側）: 作業ログには完了の承認と release ごとの承認が別々の
 // エントリとして（それぞれ actor・経路・本人確認の方式つきで）残る。
 func TestExecuteApproval_CompletionRecordsSeparateActivityEntriesForEachRelease(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -788,6 +814,7 @@ func TestExecuteApproval_CompletionRecordsSeparateActivityEntriesForEachRelease(
 
 // T14: `approve --hold-release` は完了だけを承認し release は未承認のまま残す。
 func TestExecuteApproval_HoldReleaseApprovesCompletionOnlyLeavingReleasesPending(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -855,6 +882,7 @@ func TestExecuteApproval_HoldReleaseApprovesCompletionOnlyLeavingReleasesPending
 // --hold-release・差し戻しでは release は 1 件も承認されない。分類は core が
 // 実挙動と同じ述語で決める。
 func TestApprovalPreview_ReleaseEffect(t *testing.T) {
+	t.Parallel()
 	rel := IrreversibleOperation{ID: "OP-1", Kind: OperationKindRelease, State: OperationStatePending}
 	other := IrreversibleOperation{ID: "OP-2", Kind: OperationKindDelete, State: OperationStatePending}
 	completion := &ApprovalPreview{
@@ -916,6 +944,7 @@ func equalStringsForTest(got, want []string) bool {
 // T14 は完了確認待ち以外の対象には core レベルでも invalid_transition
 // （終端なら terminal_state）で拒否される。usage_error は CLI 層の責務。
 func TestExecuteApproval_HoldReleaseOnPlanApprovalIsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -935,6 +964,7 @@ func TestExecuteApproval_HoldReleaseOnPlanApprovalIsInvalidTransition(t *testing
 }
 
 func TestExecuteApproval_RejectedWithHoldReleaseIsValidationError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -953,6 +983,7 @@ func TestExecuteApproval_RejectedWithHoldReleaseIsValidationError(t *testing.T) 
 // AC-46 相当（D12 の conflict の一方）: 完了の承認の要約表示後・確認前に
 // 別プロセスが対象の release を先に承認すると、完了の承認は成立しない。
 func TestExecuteApproval_ConflictWhenAReleaseIsApprovedStandaloneAfterSummaryShown(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -996,6 +1027,7 @@ func TestExecuteApproval_ConflictWhenAReleaseIsApprovedStandaloneAfterSummarySho
 // AC-46 相当（D12 の conflict のもう一方）: 完了の承認の要約表示後・確認前に
 // 別プロセスが op add で不可逆操作を足すと、完了の承認は成立しない。
 func TestExecuteApproval_ConflictWhenOpAddHappensAfterSummaryShown(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, _, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -1023,6 +1055,7 @@ func TestExecuteApproval_ConflictWhenOpAddHappensAfterSummaryShown(t *testing.T)
 }
 
 func TestExecuteAnswer_HoldCarriesCauseRunID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ctx := context.Background()
@@ -1062,6 +1095,7 @@ func TestExecuteAnswer_HoldCarriesCauseRunID(t *testing.T) {
 // 承認済みで未実行の release（state=approved）が課題にあるとき、完了の承認の要約はそれを知らせる
 // （承認の見出しが「満たされないまま残る」とは別になる根拠。noWaitingRelease と同じ見方）。
 func TestPrepareApproval_CompletionReportsApprovedUnexecutedRelease(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)

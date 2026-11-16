@@ -27,6 +27,7 @@ func writeAgentJSON(t *testing.T, content string) string {
 // --- agent.json が無い場合: 全既定値（config_invalid ではない） ---
 
 func TestLoadAgentDeclaration_FileNotFoundUsesAllDefaults(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir() // .flywheel/agent.json を作らない
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
@@ -72,6 +73,7 @@ func TestLoadAgentDeclaration_FileNotFoundUsesAllDefaults(t *testing.T) {
 
 // AC: position_file だけを持つ agent.json は、DefaultsUsed が真になる。
 func TestLoadAgentDeclaration_PositionFileOnly_DefaultsUsedTrue(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `{"position_file": "positions/harness.md"}`)
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
@@ -110,6 +112,7 @@ const allKeysAgentJSON = `{
 
 // AC: すべてのキーを明示した agent.json は、DefaultsUsed が偽になる。
 func TestLoadAgentDeclaration_AllKeysExplicit_DefaultsUsedFalse(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, allKeysAgentJSON)
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
@@ -122,6 +125,7 @@ func TestLoadAgentDeclaration_AllKeysExplicit_DefaultsUsedFalse(t *testing.T) {
 
 // improve_threshold だけを省いた agent.json は、既定値を使い DefaultsUsed が真になる。
 func TestLoadAgentDeclaration_ImproveThresholdOmitted_DefaultsUsedTrue(t *testing.T) {
+	t.Parallel()
 	omitted := strings.Replace(allKeysAgentJSON, `"improve_threshold": 10,`, ``, 1)
 	if omitted == allKeysAgentJSON {
 		t.Fatal("fixture lacks improve_threshold")
@@ -141,6 +145,7 @@ func TestLoadAgentDeclaration_ImproveThresholdOmitted_DefaultsUsedTrue(t *testin
 // 部分指定: size_budgets_usd.S.impl だけを指定した場合、その値を反映しつつ
 // review・M・L は既定値のままで、DefaultsUsed は真になる（部分指定の仮定）。
 func TestLoadAgentDeclaration_PartialSizeBudgets_AppliesLeafDefaults(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `{"size_budgets_usd": {"S": {"impl": 99}}}`)
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
@@ -163,6 +168,7 @@ func TestLoadAgentDeclaration_PartialSizeBudgets_AppliesLeafDefaults(t *testing.
 // --- AC-5〜8: 金額が0以下 ---
 
 func TestLoadAgentDeclaration_CycleBudgetUSDMustBePositive(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"0", "-1", "-0.5"} {
 		t.Run(v, func(t *testing.T) {
 			dir := writeAgentJSON(t, fmt.Sprintf(`{"cycle_budget_usd": %s}`, v))
@@ -175,6 +181,7 @@ func TestLoadAgentDeclaration_CycleBudgetUSDMustBePositive(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_MaxRunBudgetUSDMustBePositive(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"0", "-1"} {
 		t.Run(v, func(t *testing.T) {
 			dir := writeAgentJSON(t, fmt.Sprintf(`{"max_run_budget_usd": %s}`, v))
@@ -187,6 +194,7 @@ func TestLoadAgentDeclaration_MaxRunBudgetUSDMustBePositive(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_JudgmentBudgetUSDMustBePositive(t *testing.T) {
+	t.Parallel()
 	keys := []string{"J1", "J2", "J3", "J4", "J5", "J6"}
 	for _, k := range keys {
 		for _, v := range []string{"0", "-1"} {
@@ -202,6 +210,7 @@ func TestLoadAgentDeclaration_JudgmentBudgetUSDMustBePositive(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_SizeBudgetsUSDMustBePositive(t *testing.T) {
+	t.Parallel()
 	sizes := []string{"S", "M", "L"}
 	fields := []string{"impl", "review"}
 	for _, sz := range sizes {
@@ -222,6 +231,7 @@ func TestLoadAgentDeclaration_SizeBudgetsUSDMustBePositive(t *testing.T) {
 // --- AC-9〜13: 整数キーが正の整数でない（0・負・小数） ---
 
 func TestLoadAgentDeclaration_TimeoutJudgmentMustBePositiveInteger(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"0", "-1", "1.5", "1.0"} {
 		t.Run(v, func(t *testing.T) {
 			dir := writeAgentJSON(t, fmt.Sprintf(`{"timeout_sec": {"judgment": %s}}`, v))
@@ -234,6 +244,7 @@ func TestLoadAgentDeclaration_TimeoutJudgmentMustBePositiveInteger(t *testing.T)
 }
 
 func TestLoadAgentDeclaration_TimeoutDelegateMustBePositiveInteger(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"0", "-1", "1.5"} {
 		t.Run(v, func(t *testing.T) {
 			dir := writeAgentJSON(t, fmt.Sprintf(`{"timeout_sec": {"delegate": %s}}`, v))
@@ -246,6 +257,7 @@ func TestLoadAgentDeclaration_TimeoutDelegateMustBePositiveInteger(t *testing.T)
 }
 
 func TestLoadAgentDeclaration_MaxParallelRunsMustBePositiveInteger(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"0", "-1", "1.5"} {
 		t.Run(v, func(t *testing.T) {
 			dir := writeAgentJSON(t, fmt.Sprintf(`{"max_parallel_runs": %s}`, v))
@@ -258,6 +270,7 @@ func TestLoadAgentDeclaration_MaxParallelRunsMustBePositiveInteger(t *testing.T)
 }
 
 func TestLoadAgentDeclaration_ReworkLimitMustBePositiveInteger(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"0", "-1", "2.5"} {
 		t.Run(v, func(t *testing.T) {
 			dir := writeAgentJSON(t, fmt.Sprintf(`{"rework_limit": %s}`, v))
@@ -287,6 +300,7 @@ func TestLoadAgentDeclaration_BehindUpdateLimitDefaultAndValidation(t *testing.T
 }
 
 func TestLoadAgentDeclaration_FailureLimitMustBePositiveInteger(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"0", "-1", "1.1"} {
 		t.Run(v, func(t *testing.T) {
 			dir := writeAgentJSON(t, fmt.Sprintf(`{"failure_limit": %s}`, v))
@@ -301,6 +315,7 @@ func TestLoadAgentDeclaration_FailureLimitMustBePositiveInteger(t *testing.T) {
 // --- 未知のキー・型違い ---
 
 func TestLoadAgentDeclaration_UnknownTopLevelKey(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `{"unknown_field": true}`)
 	_, err := LoadAgentDeclaration(dir)
 	if !errors.Is(err, ErrConfigInvalid) {
@@ -309,6 +324,7 @@ func TestLoadAgentDeclaration_UnknownTopLevelKey(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_UnknownNestedKey(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"size_budgets_usd": {"XL": {"impl": 1, "review": 1}}}`,
 		`{"size_budgets_usd": {"S": {"impl": 1, "review": 1, "extra": 1}}}`,
@@ -326,6 +342,7 @@ func TestLoadAgentDeclaration_UnknownNestedKey(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_TypeMismatch(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"cycle_budget_usd": "300"}`,
 		`{"cycle_budget_usd": true}`,
@@ -343,6 +360,7 @@ func TestLoadAgentDeclaration_TypeMismatch(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_UnparseableJSON(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `{ not json `)
 	if _, err := LoadAgentDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("error = %v, want ErrConfigInvalid", err)
@@ -352,6 +370,7 @@ func TestLoadAgentDeclaration_UnparseableJSON(t *testing.T) {
 // --- position_file の要求（結線は #84〜#86。ここでは手段だけを確認する） ---
 
 func TestAgentDeclaration_RequirePositionFile_EmptyIsInvalid(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
@@ -363,6 +382,7 @@ func TestAgentDeclaration_RequirePositionFile_EmptyIsInvalid(t *testing.T) {
 }
 
 func TestAgentDeclaration_RequirePositionFile_MissingFileIsInvalid(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `{"position_file": "positions/does-not-exist.md"}`)
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
@@ -374,6 +394,7 @@ func TestAgentDeclaration_RequirePositionFile_MissingFileIsInvalid(t *testing.T)
 }
 
 func TestAgentDeclaration_RequirePositionFile_ExistingFileIsValid(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `{"position_file": "positions/harness.md"}`)
 	if err := os.MkdirAll(filepath.Join(dir, "positions"), 0o755); err != nil {
 		t.Fatalf("mkdir positions: %v", err)
@@ -396,6 +417,7 @@ func TestAgentDeclaration_RequirePositionFile_ExistingFileIsValid(t *testing.T) 
 // 静かにフォールバックしてしまう） ---
 
 func TestLoadAgentDeclaration_WholeFileNull(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `null`)
 	if _, err := LoadAgentDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("error = %v, want ErrConfigInvalid", err)
@@ -403,6 +425,7 @@ func TestLoadAgentDeclaration_WholeFileNull(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_NullLeafValuesAreRejected(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`{"position_file": null}`,
 		`{"size_budgets_usd": null}`,
@@ -423,6 +446,7 @@ func TestLoadAgentDeclaration_NullLeafValuesAreRejected(t *testing.T) {
 // --- fail-closed: 検証の失敗はワークスペースに何も書かない ---
 
 func TestLoadAgentDeclaration_InvalidDeclarationChangesNothingOnDisk(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `{"cycle_budget_usd": -1}`)
 	before := snapshotDir(t, dir)
 
@@ -439,6 +463,7 @@ func TestLoadAgentDeclaration_InvalidDeclarationChangesNothingOnDisk(t *testing.
 // --- #100: conflict_prediction_budget_usd ---
 
 func TestLoadAgentDeclaration_ConflictPredictionBudget_DefaultWhenOmitted(t *testing.T) {
+	t.Parallel()
 	decl, err := LoadAgentDeclaration(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -461,6 +486,7 @@ func TestLoadAgentDeclaration_ConflictPredictionBudget_DefaultWhenOmitted(t *tes
 }
 
 func TestLoadAgentDeclaration_ConflictPredictionBudget_ExplicitValue(t *testing.T) {
+	t.Parallel()
 	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{"conflict_prediction_budget_usd": 2.5}`))
 	if err != nil {
 		t.Fatal(err)
@@ -471,6 +497,7 @@ func TestLoadAgentDeclaration_ConflictPredictionBudget_ExplicitValue(t *testing.
 }
 
 func TestLoadAgentDeclaration_ConflictPredictionBudget_ZeroAndNegativeAreInvalid(t *testing.T) {
+	t.Parallel()
 	for name, v := range map[string]string{"zero": "0", "negative": "-1"} {
 		t.Run(name, func(t *testing.T) {
 			dir := writeAgentJSON(t, `{"conflict_prediction_budget_usd": `+v+`}`)
@@ -482,6 +509,7 @@ func TestLoadAgentDeclaration_ConflictPredictionBudget_ZeroAndNegativeAreInvalid
 }
 
 func TestLoadAgentDeclaration_ConflictPredictionBudget_WrongTypeIsInvalid(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `{"conflict_prediction_budget_usd": "1"}`)
 	if _, err := LoadAgentDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("error = %v, want ErrConfigInvalid", err)
@@ -491,6 +519,7 @@ func TestLoadAgentDeclaration_ConflictPredictionBudget_WrongTypeIsInvalid(t *tes
 // --- memory_dir・memory_write_limit（M4.5 S3。AC-271〜AC-273） ---
 
 func TestLoadAgentDeclaration_MemoryDefaults(t *testing.T) {
+	t.Parallel()
 	decl, err := LoadAgentDeclaration(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -501,6 +530,7 @@ func TestLoadAgentDeclaration_MemoryDefaults(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_MemoryExplicit(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `{"memory_dir": "memory/harness", "memory_write_limit": {"files": 2}}`)
 	decl, err := LoadAgentDeclaration(dir)
 	if err != nil {
@@ -518,6 +548,7 @@ func TestLoadAgentDeclaration_MemoryExplicit(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_MemoryInvalid(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"absolute":      `{"memory_dir": "/etc/memory"}`,
 		"escape":        `{"memory_dir": "../memory"}`,
@@ -545,6 +576,7 @@ func TestLoadAgentDeclaration_MemoryInvalid(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_MemoryDirInsideWorkspaceDotDotAllowed(t *testing.T) {
+	t.Parallel()
 	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{"memory_dir": "a/../memory/x"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -555,6 +587,7 @@ func TestLoadAgentDeclaration_MemoryDirInsideWorkspaceDotDotAllowed(t *testing.T
 }
 
 func TestLoadAgentDeclaration_ImproveThreshold(t *testing.T) {
+	t.Parallel()
 	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{"improve_threshold": 3}`))
 	if err != nil {
 		t.Fatalf("LoadAgentDeclaration: %v", err)
@@ -573,6 +606,7 @@ func TestLoadAgentDeclaration_ImproveThreshold(t *testing.T) {
 }
 
 func TestLoadAgentDeclaration_J8Budget(t *testing.T) {
+	t.Parallel()
 	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{"judgment_budget_usd": {"J8": 7.5}}`))
 	if err != nil {
 		t.Fatalf("LoadAgentDeclaration: %v", err)

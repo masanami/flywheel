@@ -10,18 +10,26 @@ import (
 	"time"
 )
 
-// fixedActor は resolveActor が常に name を返すように actorSource を固定する
-// （新規に発行される課題の reporter・作業ログの actor を予測可能にする）。
+// fixedActor は t の newStoreForTest で開いた Store（これから開くものを含む）の resolveActor が
+// 常に name を返すようにする（新規に発行される課題の reporter・作業ログの actor を予測可能にする）。
+// パッケージ変数 actorSource を書き換えないので、t.Parallel のテストで使える。
+// newStoreForTest を経由しない Store には効かない（その Store は fixedStoreActor を使う）。
 func fixedActor(t *testing.T, name string) {
 	t.Helper()
-	withActorSource(t, actorSourceFuncs{
+	a := &actorSourceFuncs{
 		userCurrent: func() (*user.User, error) { return &user.User{Username: name}, nil },
 		getenv:      fakeGetenv(map[string]string{}),
-	})
+	}
+	testStoreActors.mu.Lock()
+	defer testStoreActors.mu.Unlock()
+	testStoreActors.actor[t] = a
+	for _, s := range testStoreActors.stores[t] {
+		s.actor = a
+	}
 }
 
-// fixedStoreActor は s の resolveActor が常に name を返すようにする。fixedActor と違い、
-// パッケージ変数 actorSource を書き換えないので、t.Parallel のテストで使える。
+// fixedStoreActor は s の resolveActor が常に name を返すようにする。fixedActor が t に登録した Store 全部へ
+// 効くのに対し、渡した 1 つの Store だけに効く（どちらも t.Parallel のテストで使える）。
 func fixedStoreActor(s *Store, name string) {
 	s.actor = &actorSourceFuncs{
 		userCurrent: func() (*user.User, error) { return &user.User{Username: name}, nil },
@@ -29,9 +37,18 @@ func fixedStoreActor(s *Store, name string) {
 	}
 }
 
+// noActorStore は s の resolveActor が常に ErrActorUnavailable を返すようにする（パッケージ変数は書き換えない）。
+func noActorStore(s *Store) {
+	s.actor = &actorSourceFuncs{
+		userCurrent: func() (*user.User, error) { return nil, errors.New("no user") },
+		getenv:      fakeGetenv(map[string]string{}),
+	}
+}
+
 func strPtr(s string) *string { return &s }
 
 func TestCreateChallenge_SetsUnclassifiedStatusVersionAndID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -60,6 +77,7 @@ func TestCreateChallenge_SetsUnclassifiedStatusVersionAndID(t *testing.T) {
 }
 
 func TestCreateChallenge_IDsAreSequentialAcrossCalls(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -77,6 +95,7 @@ func TestCreateChallenge_IDsAreSequentialAcrossCalls(t *testing.T) {
 }
 
 func TestCreateChallenge_TitleIsStoredVerbatimNotTrimmed(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -90,6 +109,7 @@ func TestCreateChallenge_TitleIsStoredVerbatimNotTrimmed(t *testing.T) {
 }
 
 func TestCreateChallenge_EmptyOrWhitespaceTitleIsValidationErrorAndCreatesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -106,6 +126,7 @@ func TestCreateChallenge_EmptyOrWhitespaceTitleIsValidationErrorAndCreatesNothin
 }
 
 func TestCreateChallenge_InvalidUrgencyIsValidationErrorAndCreatesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -121,6 +142,7 @@ func TestCreateChallenge_InvalidUrgencyIsValidationErrorAndCreatesNothing(t *tes
 }
 
 func TestCreateChallenge_ValidUrgencyIsStored(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -135,6 +157,7 @@ func TestCreateChallenge_ValidUrgencyIsStored(t *testing.T) {
 }
 
 func TestCreateChallenge_RecordsActivityLogCreateEntryWithVerificationNone(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -189,6 +212,7 @@ func TestCreateChallenge_RecordsActivityLogCreateEntryWithVerificationNone(t *te
 
 // AC-68: 作業ログへの書き込みを失敗させると、対象の変更も残らない。
 func TestCreateChallenge_ActivityInsertFailureRollsBackChallengeCreation(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -207,6 +231,7 @@ func TestCreateChallenge_ActivityInsertFailureRollsBackChallengeCreation(t *test
 }
 
 func TestGetChallenge_ReturnsErrNotFoundForMissingID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	_, err := s.GetChallenge(context.Background(), "C-999")
 	if !errors.Is(err, ErrNotFound) {
@@ -215,6 +240,7 @@ func TestGetChallenge_ReturnsErrNotFoundForMissingID(t *testing.T) {
 }
 
 func TestGetChallenge_ReturnsErrNotFoundForMalformedID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	for _, id := range []string{"foo", "OP-1", "C-0", "C-01", "C--1", "C-"} {
 		if _, err := s.GetChallenge(context.Background(), id); !errors.Is(err, ErrNotFound) {
@@ -224,6 +250,7 @@ func TestGetChallenge_ReturnsErrNotFoundForMalformedID(t *testing.T) {
 }
 
 func TestGetChallenge_IncludesPlansApprovalsHoldsAndOperations(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -315,6 +342,7 @@ func insertFullChallengeFixtures(t *testing.T, s *Store, challengeID int64) {
 }
 
 func TestListChallenges_OrdersByIDAscending(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	for _, title := range []string{"a", "b", "c"} {
@@ -338,6 +366,7 @@ func TestListChallenges_OrdersByIDAscending(t *testing.T) {
 }
 
 func TestListChallenges_FiltersByStatus(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c1, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "a"})
@@ -365,6 +394,7 @@ func TestListChallenges_FiltersByStatus(t *testing.T) {
 }
 
 func TestListChallenges_InvalidStatusIsValidationError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	for _, status := range []string{"計画承認待ち（未分類 → … → 完了）", "レビュー待ち", "bogus"} {
 		_, err := s.ListChallenges(context.Background(), ListOptions{Status: strPtr(status)})
@@ -375,6 +405,7 @@ func TestListChallenges_InvalidStatusIsValidationError(t *testing.T) {
 }
 
 func TestListChallenges_EmptyResultIsNonNilEmptySlice(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	list, err := s.ListChallenges(context.Background(), ListOptions{})
 	if err != nil {
@@ -402,6 +433,7 @@ func setChallengeStatus(t *testing.T, s *Store, id int64, status Status) {
 }
 
 func TestEditChallenge_ChangesFieldsAndBumpsVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t", Description: "d", DoneCriteria: "dc"})
@@ -433,6 +465,7 @@ func TestEditChallenge_ChangesFieldsAndBumpsVersion(t *testing.T) {
 // 厳密に「新しい時刻に進む」ことを固定する）。Store.now フックで時刻を
 // 固定・進行させ、UpdatedAt がその注入した時刻に一致することを直接検証する。
 func TestEditChallenge_UpdatedAtAdvancesToTheInjectedEditTime(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -458,6 +491,7 @@ func TestEditChallenge_UpdatedAtAdvancesToTheInjectedEditTime(t *testing.T) {
 }
 
 func TestEditChallenge_AllFieldsIncludingUrgency(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -482,6 +516,7 @@ func TestEditChallenge_AllFieldsIncludingUrgency(t *testing.T) {
 }
 
 func TestEditChallenge_InvalidUrgencyIsValidationErrorAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -507,6 +542,7 @@ func TestEditChallenge_InvalidUrgencyIsValidationErrorAndChangesNothing(t *testi
 // `edit --title ""`（または空白のみ）が成功し、CreateChallenge が保証する
 // 「タイトルは必須」という不変条件を edit 経由で壊せてしまっていた。
 func TestEditChallenge_EmptyOrWhitespaceTitleIsValidationErrorAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -531,6 +567,7 @@ func TestEditChallenge_EmptyOrWhitespaceTitleIsValidationErrorAndChangesNothing(
 }
 
 func TestEditChallenge_NotFoundForMissingOrMalformedID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	for _, id := range []string{"C-999", "OP-1", "foo"} {
@@ -542,6 +579,7 @@ func TestEditChallenge_NotFoundForMissingOrMalformedID(t *testing.T) {
 }
 
 func TestEditChallenge_TerminalStateForDoneChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -567,6 +605,7 @@ func TestEditChallenge_TerminalStateForDoneChallenge(t *testing.T) {
 
 // AC-66: 値を変えない edit は終了コード0で終わり、作業ログにエントリを追加しない。
 func TestEditChallenge_NoopWhenValueUnchangedDoesNotBumpVersionOrLog(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -595,6 +634,7 @@ func TestEditChallenge_NoopWhenValueUnchangedDoesNotBumpVersionOrLog(t *testing.
 }
 
 func TestEditChallenge_RecordsOnlyChangedFieldsInActivityLog(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t", Description: "d"})
@@ -637,6 +677,7 @@ func TestEditChallenge_RecordsOnlyChangedFieldsInActivityLog(t *testing.T) {
 
 // AC-68: 作業ログへの書き込みを失敗させると、対象の変更も残らない（edit 版）。
 func TestEditChallenge_ActivityInsertFailureRollsBackEdit(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -664,6 +705,7 @@ func TestEditChallenge_ActivityInsertFailureRollsBackEdit(t *testing.T) {
 }
 
 func TestListActivities_OrdersOldestFirst(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -693,6 +735,7 @@ func TestListActivities_OrdersOldestFirst(t *testing.T) {
 }
 
 func TestListActivities_FiltersByChallengeID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c1, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "a"})
@@ -724,6 +767,7 @@ func TestListActivities_FiltersByChallengeID(t *testing.T) {
 // operation は challenge_id で従属するエンティティであり、他の課題の
 // operation のエントリは含めない。
 func TestListActivities_FiltersByChallengeIDIncludesItsOperations(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c1, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "a"})
@@ -771,6 +815,7 @@ func TestListActivities_FiltersByChallengeIDIncludesItsOperations(t *testing.T) 
 }
 
 func TestListActivities_NotFoundForMissingOrMalformedChallengeID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	for _, id := range []string{"C-999", "OP-1", "foo"} {
 		_, err := s.ListActivities(context.Background(), strPtr(id))
@@ -781,6 +826,7 @@ func TestListActivities_NotFoundForMissingOrMalformedChallengeID(t *testing.T) {
 }
 
 func TestGetChallenge_HoldCarriesCauseRunID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ctx := context.Background()

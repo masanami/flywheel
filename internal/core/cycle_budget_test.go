@@ -15,6 +15,7 @@ import (
 // --- AC-124: J1 の呼び出しの --max-budget-usd は judgment_budget_usd.J1 の値 ---
 
 func TestAgentDeclaration_JudgmentBudgetFor_ReturnsPerPointConfiguredValue(t *testing.T) {
+	t.Parallel()
 	dir := writeAgentJSON(t, `{"judgment_budget_usd": {"J1": 1.5, "J2": 6, "J3": 3, "J4": 2, "J5": 5}}`)
 
 	decl, err := LoadAgentDeclaration(dir)
@@ -32,6 +33,7 @@ func TestAgentDeclaration_JudgmentBudgetFor_ReturnsPerPointConfiguredValue(t *te
 // JudgmentBudgetFor は J1〜J5 の外の値に 0 を返す（【仮定】。閉集合の外を
 // 渡すことは想定しないが、fail-closed で判別不能な額を返さない）。
 func TestAgentDeclaration_JudgmentBudgetFor_ReturnsZeroForUnknownPoint(t *testing.T) {
+	t.Parallel()
 	decl := defaultAgentDeclaration()
 	if got := decl.JudgmentBudgetFor(JudgmentPoint("J7")); got != 0 {
 		t.Errorf("JudgmentBudgetFor(J7) = %v, want 0", got)
@@ -41,6 +43,7 @@ func TestAgentDeclaration_JudgmentBudgetFor_ReturnsZeroForUnknownPoint(t *testin
 // --- AC-125・126: 周の上限超過で起動しない。状態と版は変わらない ---
 
 func TestRunJudgment_CycleBudgetGuard_ThirdLaunchExceedsBudget(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	cyc, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "test", BudgetUSD: 2, Exclusive: false})
@@ -99,6 +102,7 @@ func TestRunJudgment_CycleBudgetGuard_ThirdLaunchExceedsBudget(t *testing.T) {
 // 境界: 既消費額＋予約額＋評価額が周の上限額とちょうど等しい場合は起動できる
 // （§予算ガード「＞ 周の上限額」を評価し…＝等号は起動してよい）。
 func TestRunJudgment_CycleBudgetGuard_EqualToBudgetIsAllowed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	cyc, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "test", BudgetUSD: 1, Exclusive: false})
@@ -124,6 +128,7 @@ func TestRunJudgment_CycleBudgetGuard_EqualToBudgetIsAllowed(t *testing.T) {
 // spent_usd で検証する＝ここでは EndCycle の戻り値の SpentUSD） ---
 
 func TestEndCycle_SpentUSDIsSumOfEndedRunCosts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	cyc, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "test", BudgetUSD: 10, Exclusive: false})
@@ -160,6 +165,7 @@ func TestEndCycle_SpentUSDIsSumOfEndedRunCosts(t *testing.T) {
 // 足される ---
 
 func TestEndCycle_UnknownCostSourceRunCountsFullMaxBudgetAsSpent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	cyc, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "test", BudgetUSD: 10, Exclusive: false})
@@ -193,6 +199,7 @@ func TestEndCycle_UnknownCostSourceRunCountsFullMaxBudgetAsSpent(t *testing.T) {
 // --- AC-129: 終了していない run の上限額は予約額として評価に含まれる ---
 
 func TestRunJudgment_CycleBudgetGuard_OpenRunReservesItsMaxBudget(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	cyc, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "test", BudgetUSD: 1.5, Exclusive: false})
@@ -257,6 +264,7 @@ func TestRunJudgment_CycleBudgetGuard_OpenRunReservesItsMaxBudget(t *testing.T) 
 // 写像は #86 の範囲。ここでは core API の結果で検証する） ---
 
 func TestRunJudgment_CycleBudgetGuard_ReturnsErrBudgetExceededDirectly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	cyc, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "test", BudgetUSD: 1, Exclusive: false})
@@ -277,6 +285,7 @@ func TestRunJudgment_CycleBudgetGuard_ReturnsErrBudgetExceededDirectly(t *testin
 // 予算の評価を一切行わない（後方互換性） ---
 
 func TestRunJudgment_NoCycleID_SkipsBudgetGuard(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
@@ -302,6 +311,7 @@ func TestRunJudgment_NoCycleID_SkipsBudgetGuard(t *testing.T) {
 // --- 周が存在しない・既に終了していれば ErrValidation ---
 
 func TestRunJudgment_CycleBudgetGuard_UnknownOrEndedCycleIsValidationError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
@@ -333,6 +343,7 @@ func TestRunJudgment_CycleBudgetGuard_UnknownOrEndedCycleIsValidationError(t *te
 // 独立に行う） ---
 
 func TestJudgmentCycle_TranslatesBudgetExceededToNotStartedAndContinues(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	cyc, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "classify --auto", BudgetUSD: 1, Exclusive: false})
@@ -376,6 +387,7 @@ func TestJudgmentCycle_TranslatesBudgetExceededToNotStartedAndContinues(t *testi
 // JudgmentCycle のゼロ値（周の ID 未設定）は、#83 より前と同じく run.cycle_id
 // を NULL のまま記録し、予算の評価を行わない（後方互換性）。
 func TestJudgmentCycle_ZeroValue_RecordsNilCycleID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)

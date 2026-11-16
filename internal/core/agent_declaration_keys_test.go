@@ -13,6 +13,7 @@ import (
 // （§指示文の歯止め「一覧を手で写さない。語彙を足せば検査も追従する」の
 // 検証対象そのもの）。
 func TestAgentDeclarationKeys_ContainsAllTopLevelAndNestedKeys(t *testing.T) {
+	t.Parallel()
 	got := AgentDeclarationKeys()
 
 	want := []string{
@@ -52,6 +53,7 @@ func TestAgentDeclarationKeys_ContainsAllTopLevelAndNestedKeys(t *testing.T) {
 // （手で書き写していれば重複や漏れが起きやすいという設計上の懸念に対する
 // 回帰。マップから生成する実装なら自然に満たされる）。
 func TestAgentDeclarationKeys_NoDuplicates(t *testing.T) {
+	t.Parallel()
 	got := AgentDeclarationKeys()
 	seen := map[string]bool{}
 	for _, k := range got {

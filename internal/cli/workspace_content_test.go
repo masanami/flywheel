@@ -99,12 +99,13 @@ func storeFileNames(m map[string][]byte) []string {
 // （課題が 1 件あるワークスペースで init を再実行すると、終了コード 0 で終わり、
 // その課題が変わらずに残っている）を、件数ではなく中身の比較で確かめる。
 func TestInit_ReRunKeepsTheChallengeContentUnchanged(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	seedDetailedChallenge(t, ws, "keep-me")
 	before := storeContentSnapshot(t, ws)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"init", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}
@@ -117,6 +118,7 @@ func TestInit_ReRunKeepsTheChallengeContentUnchanged(t *testing.T) {
 // ストアは変わらない）を、親のストアのファイルの内容と、CLI で読んだ中身の
 // 両方の比較で確かめる。
 func TestInit_InSubdirectoryLeavesParentStoreContentUnchanged(t *testing.T) {
+	t.Parallel()
 	parent := initializedWorkspace(t)
 	seedDetailedChallenge(t, parent, "parent")
 	beforeContent := storeContentSnapshot(t, parent)
@@ -130,7 +132,7 @@ func TestInit_InSubdirectoryLeavesParentStoreContentUnchanged(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--workspace", child, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"init", "--workspace", child, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stderr=%s)", code, stderr.String())
 	}

@@ -32,6 +32,7 @@ func (e *heldTestError) Unwrap() error {
 }
 
 func TestAcquireSlot_BranchHeldInsidePlacementStartsAlignedToDefaultBranch(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -58,6 +59,7 @@ func TestAcquireSlot_BranchHeldInsidePlacementStartsAlignedToDefaultBranch(t *te
 }
 
 func TestAcquireSlot_BranchHeldOutsidePlacementIsUnavailableWithDetail(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -81,6 +83,7 @@ func TestAcquireSlot_BranchHeldOutsidePlacementIsUnavailableWithDetail(t *testin
 
 // 他のスロットが理由なく使えないとき（全スロット使用中）は詳細を付けない。
 func TestAcquireSlot_NoHeldBranchHasNoDetail(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -91,6 +94,7 @@ func TestAcquireSlot_NoHeldBranchHasNoDetail(t *testing.T) {
 }
 
 func TestInWorktreePlacement(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	repo := worktreeRepoForTest(1)
 	area := filepath.Join(s.Workspace(), worktreeSlotsDir, "r")
@@ -110,6 +114,7 @@ func TestInWorktreePlacement(t *testing.T) {
 // 再委譲（差し戻し）のフロー: 前の委譲のブランチを置き場の中の作業ツリーが持つとき、委譲は起動し、
 // どの作業ツリーが持っていたかが結果の補足と run の保存先に残る。
 func TestRunDelegation_RedelegationStartsWhenPreviousBranchIsHeldInsidePlacement(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.worktreeChallenge(t)
 	f.deleg.queue = []JudgmentLaunchOutput{{Result: RunResultSucceeded, ReportedTotalCostUSD: float64Ptr(1), StructuredOutput: reportJSON(func(m map[string]any) {
@@ -140,6 +145,7 @@ func TestRunDelegation_RedelegationStartsWhenPreviousBranchIsHeldInsidePlacement
 
 // 置き場の外が持つときは起動せず、not_started の slot_unavailable に、ブランチと作業ツリーのパスが付く。
 func TestRunDelegation_RedelegationNotStartedWithDetailWhenPreviousBranchIsHeldOutsidePlacement(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.worktreeChallenge(t)
 	f.deleg.queue = []JudgmentLaunchOutput{{Result: RunResultSucceeded, ReportedTotalCostUSD: float64Ptr(1), StructuredOutput: reportJSON(func(m map[string]any) {
@@ -169,6 +175,7 @@ func TestRunDelegation_RedelegationNotStartedWithDetailWhenPreviousBranchIsHeldO
 // ブランチを持つのがスロット自身の作業ツリー（走査で外せなかったもの）なら、置き場の中でも
 // 既定のブランチへそろえず、従来どおりそのスロットは使わない（#526 の扱いを変えない）。
 func TestAcquireSlot_BranchHeldBySlotItselfIsNotAlignedToDefaultBranch(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -183,6 +190,7 @@ func TestAcquireSlot_BranchHeldBySlotItselfIsNotAlignedToDefaultBranch(t *testin
 
 // run の保存先へ書けなくても委譲は止めず、書けなかったことと理由を補足に出す（失敗を捨てない）。
 func TestRecordSlotBranchHeld_WriteFailureIsInTheNote(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	runs := filepath.Join(s.Workspace(), flywheelDirName, "runs")
 	if err := os.MkdirAll(runs, 0o755); err != nil {

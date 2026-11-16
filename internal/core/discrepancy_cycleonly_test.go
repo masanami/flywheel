@@ -3,6 +3,7 @@ package core
 import "testing"
 
 func TestDiscrepancyCycleOnly(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		kinds []DiscrepancyKind

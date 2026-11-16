@@ -203,6 +203,7 @@ func allSectionsText(secs []JudgmentDataSection) string { return sectionsText(se
 // --- 計画の登録（AC-95〜103） ---
 
 func TestPlanAutoJ2_Plan_RegistersPlanBodyAndSpec(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "plan me", "P1")
 	out := j2OutputFor(false, func(m map[string]any) { m["budget_impl_usd"] = 41; m["budget_review_usd"] = 21 })
@@ -259,6 +260,7 @@ func TestPlanAutoJ2_Plan_RegistersPlanBodyAndSpec(t *testing.T) {
 }
 
 func TestPlanAutoJ2_NullBudgetsUseSizeDefaultsInThePlan(t *testing.T) {
+	t.Parallel()
 	// AC-103: null の額はサイズの既定（S 30/25・M 50/30・L 100/40）。
 	for _, c := range []struct{ size, impl, review string }{{"S", "30", "25"}, {"M", "50", "30"}, {"L", "100", "40"}} {
 		t.Run(c.size, func(t *testing.T) {
@@ -278,6 +280,7 @@ func TestPlanAutoJ2_NullBudgetsUseSizeDefaultsInThePlan(t *testing.T) {
 }
 
 func TestPlanAutoJ2_ActivityIsInvokerNoneWithRunID(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "activity", "P1")
 	res, err := f.run(t, succeededInvoker(j2OutputFor(false, nil)), idPtr(ch.ID))
@@ -302,6 +305,7 @@ func TestPlanAutoJ2_ActivityIsInvokerNoneWithRunID(t *testing.T) {
 // --- J2 の入力（AC-91〜94） ---
 
 func TestPlanAutoJ2_InputContainsUpstreamReferencesConnectorsHoldsAndDefaults(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "input", "P1")
 	th := simpleThread("UP-BODY-MARKER 参照 #9 と o/r#10", "UP-COMMENT-1", "UP-COMMENT-2")
@@ -357,6 +361,7 @@ func answerHold(t *testing.T, s *Store, id, answer string) {
 }
 
 func TestPlanAutoJ2_OnlyTheFirstFiveReferencesAreFetched(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "many refs", "P1")
 	f.bind(t, ch, 7, simpleThread("#11 #12 #13 #14 #15 #16 #17"))
@@ -373,6 +378,7 @@ func TestPlanAutoJ2_OnlyTheFirstFiveReferencesAreFetched(t *testing.T) {
 }
 
 func TestPlanAutoJ2_UpstreamFetchFailure_DoesNotStartJ2AndChangesNothing(t *testing.T) {
+	t.Parallel()
 	// AC-91。
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "fetch fails", "P1")
@@ -415,6 +421,7 @@ func TestPlanAutoJ2_UpstreamFetchFailure_DoesNotStartJ2AndChangesNothing(t *test
 }
 
 func TestPlanAutoJ2_ReferenceThatCannotBeFetchedDoesNotBlockJ2(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "dangling ref", "P1")
 	f.bind(t, ch, 7, simpleThread("see #404"))
@@ -428,6 +435,7 @@ func TestPlanAutoJ2_ReferenceThatCannotBeFetchedDoesNotBlockJ2(t *testing.T) {
 }
 
 func TestPlanAutoJ2_ChallengeWithoutSourceNeverCallsUpstream(t *testing.T) {
+	t.Parallel()
 	// AC-93。
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "no source", "P1")
@@ -445,6 +453,7 @@ func TestPlanAutoJ2_ChallengeWithoutSourceNeverCallsUpstream(t *testing.T) {
 }
 
 func TestPlanAutoJ2_OverCapDropsOldestCommentsAndStatesIt(t *testing.T) {
+	t.Parallel()
 	// AC-92。
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "big", "P1")
@@ -469,6 +478,7 @@ func TestPlanAutoJ2_OverCapDropsOldestCommentsAndStatesIt(t *testing.T) {
 
 // S4: cli 形態の操作を選んだ出力は、invalid_output にならず計画として登録される。
 func TestPlanAutoJ2_CLIOperationIsRegisteredAsAPlan(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "cli", "P1")
 	res, err := f.run(t, succeededInvoker(j2OutputFor(false, func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })), idPtr(ch.ID))
@@ -484,6 +494,7 @@ func TestPlanAutoJ2_CLIOperationIsRegisteredAsAPlan(t *testing.T) {
 }
 
 func TestPlanAutoJ2_InvalidOutput_LeavesChallengeClassified(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		hasSource bool
@@ -521,6 +532,7 @@ func TestPlanAutoJ2_InvalidOutput_LeavesChallengeClassified(t *testing.T) {
 // --- uncertain（AC-109） ---
 
 func TestPlanAutoJ2_Uncertain_PutsChallengeOnHoldWithQuestionAndRunID(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "unsure", "P1")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -558,6 +570,7 @@ func TestPlanAutoJ2_Uncertain_PutsChallengeOnHoldWithQuestionAndRunID(t *testing
 // --- 読んだ記録（AC-110〜115） ---
 
 func TestPlanAutoJ2_ReadRecord_UsesValuesFromTheFetchBeforeJ2(t *testing.T) {
+	t.Parallel()
 	// AC-110・115。ストアの観測値 (5, 2026-09-26) は取得の値 (2, 2026-09-25T09) と違う。
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "read", "P1")
@@ -595,6 +608,7 @@ func TestPlanAutoJ2_ReadRecord_UsesValuesFromTheFetchBeforeJ2(t *testing.T) {
 }
 
 func TestPlanAutoJ2_ReadRecord_IsNotAdvancedByAnIngestDuringJ2(t *testing.T) {
+	t.Parallel()
 	// AC-111: 取得の後 J2 の終了までに観測値が進んでも、read は取得の値のまま。
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "race", "P1")
@@ -630,6 +644,7 @@ func TestPlanAutoJ2_ReadRecord_IsNotAdvancedByAnIngestDuringJ2(t *testing.T) {
 // 読んだ記録の書き込みに失敗しても、登録済みの計画の結果は失わない（読んだ記録が
 // 付かないだけ）。失敗の理由は item の Note に残る。
 func TestPlanAutoJ2_ReadRecordFailure_KeepsThePlanAndNotesIt(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "read record fails", "P1")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -662,6 +677,7 @@ func TestPlanAutoJ2_ReadRecordFailure_KeepsThePlanAndNotesIt(t *testing.T) {
 }
 
 func TestPlanAutoJ2_ReadRecord_NotSetWhenACommentWasDropped(t *testing.T) {
+	t.Parallel()
 	// AC-112。
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "dropped", "P1")
@@ -680,6 +696,7 @@ func TestPlanAutoJ2_ReadRecord_NotSetWhenACommentWasDropped(t *testing.T) {
 }
 
 func TestPlanAutoJ2_ReadRecord_NotSetWhenRunIsNotSucceeded(t *testing.T) {
+	t.Parallel()
 	// AC-114。
 	for _, result := range []RunResult{RunResultErrored, RunResultTimedOut, RunResultMalformed, RunResultBudgetExhausted, RunResultInvalidOutput} {
 		t.Run(string(result), func(t *testing.T) {
@@ -706,6 +723,7 @@ func TestPlanAutoJ2_ReadRecord_NotSetWhenRunIsNotSucceeded(t *testing.T) {
 }
 
 func TestPlanAutoJ2_ReadRecord_NotSetWhenTheOutputIsInvalid(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "invalid with source", "P1")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -720,6 +738,7 @@ func TestPlanAutoJ2_ReadRecord_NotSetWhenTheOutputIsInvalid(t *testing.T) {
 // --- 読み直した状態が遷移元でなくなっていたとき ---
 
 func TestPlanAutoJ2_ChallengeLeftClassifiedDuringJ2_OnlyTheRunOutputIsKept(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "moved", "P1")
 	f.bind(t, ch, 7, simpleThread("b", "c1"))
@@ -752,6 +771,7 @@ func TestPlanAutoJ2_ChallengeLeftClassifiedDuringJ2_OnlyTheRunOutputIsKept(t *te
 }
 
 func TestPlanAutoJ2_ChallengeAlreadyHasAPlan_IsNotRevisedByJ2(t *testing.T) {
+	t.Parallel()
 	// T4（計画の改訂）を J2 が行わない: 実行中に人が計画を登録した課題へ写さない。
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "human planned", "P1")
@@ -777,6 +797,7 @@ func TestPlanAutoJ2_ChallengeAlreadyHasAPlan_IsNotRevisedByJ2(t *testing.T) {
 // --- 対象の選び方 ---
 
 func TestPlanAutoJ2_AutoTargets_OnlyClassifiedInPriorityThenIDOrder(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	p2a := f.newClassified(t, "p2-first", "P2")
 	p0 := f.newClassified(t, "p0", "P0")
@@ -828,6 +849,7 @@ func TestPlanAutoJ2_AutoTargets_OnlyClassifiedInPriorityThenIDOrder(t *testing.T
 }
 
 func TestPlanAutoJ2_AutoTargets_ExcludeClosedMissingOutOfPolicyAndActiveRun(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	target := f.newClassified(t, "eligible", "P1")
 	excluded := map[string]struct {
@@ -886,6 +908,7 @@ func TestPlanAutoJ2_AutoTargets_ExcludeClosedMissingOutOfPolicyAndActiveRun(t *t
 }
 
 func TestPlanAutoJ2_ByID_DoesNotApplyPolicyExclusion(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "closed but explicit", "P1")
 	in := validBindingInput("o/r#7")
@@ -904,6 +927,7 @@ func TestPlanAutoJ2_ByID_DoesNotApplyPolicyExclusion(t *testing.T) {
 }
 
 func TestPlanAutoJ2_ByID_RejectsNonClassifiedAndActiveRun(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	unclassified, err := f.s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "u"})
 	if err != nil {
@@ -938,6 +962,7 @@ func TestPlanAutoJ2_ByID_RejectsNonClassifiedAndActiveRun(t *testing.T) {
 // --- 周の枠超過・上限 ---
 
 func TestPlanAutoJ2_RateLimit_StopsRemainingTargetsWithoutFetching(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	first := f.newClassified(t, "first", "P0")
 	second := f.newClassified(t, "second", "P1")
@@ -966,6 +991,7 @@ func TestPlanAutoJ2_RateLimit_StopsRemainingTargetsWithoutFetching(t *testing.T)
 // 周の上限を使い切っているときは、上流の取得（gh の GET）をせずに cycle_budget で
 // 起動しない（取得の失敗より周の上限が先に判定される）。
 func TestPlanAutoJ2_CycleBudgetExhausted_DoesNotFetchUpstream(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "budget mapped", "P1")
 	f.bind(t, ch, 7, simpleThread("b"))
@@ -991,6 +1017,7 @@ func TestPlanAutoJ2_CycleBudgetExhausted_DoesNotFetchUpstream(t *testing.T) {
 }
 
 func TestPlanAutoJ2_CycleBudget_AutoNotStartedByIDError(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "budget", "P1")
 	inv := succeededInvoker(j2OutputFor(false, nil))
@@ -1014,6 +1041,7 @@ func TestPlanAutoJ2_CycleBudget_AutoNotStartedByIDError(t *testing.T) {
 // --- 入力の検査・宣言の不備 ---
 
 func TestPlanAutoJ2_RejectsIncompleteInput(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	inv := succeededInvoker(j2OutputFor(false, nil))
 	cycle := f.beginCycle(t, 300)
@@ -1031,6 +1059,7 @@ func TestPlanAutoJ2_RejectsIncompleteInput(t *testing.T) {
 }
 
 func TestPlanAutoJ2_MissingPositionFile_IsConfigInvalidAndStartsNothing(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "no position", "P1")
 	f.agent.PositionFile = "no-such-position.md"
@@ -1047,6 +1076,7 @@ func TestPlanAutoJ2_MissingPositionFile_IsConfigInvalidAndStartsNothing(t *testi
 }
 
 func TestPlanAutoJ2_InvokerUnavailable_ChangesNothing(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "no claude", "P1")
 	f.bind(t, ch, 7, simpleThread("b"))

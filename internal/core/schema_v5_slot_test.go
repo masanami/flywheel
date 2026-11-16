@@ -92,6 +92,7 @@ func openSchemaVersion4Fixture(t *testing.T) *Store {
 }
 
 func TestOpenWorkspace_UpgradesSchemaVersion4StoreToVersion5(t *testing.T) {
+	t.Parallel()
 	s := openSchemaVersion4Fixture(t)
 	ctx := context.Background()
 
@@ -190,6 +191,7 @@ func TestOpenWorkspace_UpgradesSchemaVersion4StoreToVersion5(t *testing.T) {
 }
 
 func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
+	t.Parallel()
 	s := openSchemaVersion4Fixture(t)
 
 	wantRun := []string{
@@ -217,6 +219,7 @@ func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
 }
 
 func TestSchemaV5_FreshStoreHasSlotTables(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	if got := schemaVersionForTest(t, s); got != 24 {
 		t.Fatalf("schema version = %d, want 24", got)
@@ -257,6 +260,7 @@ func mustSlotForTest(t *testing.T, s *Store) (*slotRow, int64) {
 }
 
 func TestInsertSlot_CreatesIdleSlotAndRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	slot, err := insertSlotForTest(t, s, validSlotInput())
 	if err != nil {
@@ -282,6 +286,7 @@ func TestInsertSlot_CreatesIdleSlotAndRejectsInvalidInput(t *testing.T) {
 }
 
 func TestUpdateSlotState_RecordsAttentionReasonAndEnforcesConsistency(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	_, slotID := mustSlotForTest(t, s)
 	cid := mustCreateChallengeInternalID(t, s, "c")
@@ -333,6 +338,7 @@ func TestUpdateSlotState_RecordsAttentionReasonAndEnforcesConsistency(t *testing
 
 // AC-280: 1 つのスロットを使う終了していない run を 2 つ書き込もうとするとストアが拒否する。
 func TestInsertRun_RejectsSecondActiveRunForSameSlot(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	_, slotID := mustSlotForTest(t, s)
 	c1 := mustCreateChallengeInternalID(t, s, "c1")
@@ -368,6 +374,7 @@ func TestInsertRun_RejectsSecondActiveRunForSameSlot(t *testing.T) {
 
 // ストア自身（スキーマ）がスロットの排他を拒否する（core の検査を経由しない生の INSERT）。
 func TestStore_RawInsertRejectsSecondActiveRunForSameSlot(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	_, slotID := mustSlotForTest(t, s)
 	ins := `INSERT INTO run (kind, pid, host, heartbeat_at, started_at, max_budget_usd, budget_bucket, slot_id, repo)
@@ -388,6 +395,7 @@ func TestStore_RawInsertRejectsSecondActiveRunForSameSlot(t *testing.T) {
 }
 
 func TestInsertRun_DeciderAndRepoValidation(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "c")
 	row := int64Ptr(3)
@@ -428,6 +436,7 @@ func validPredictRunInput() insertRunInput {
 }
 
 func TestInsertRun_PredictRunHasNoChallengePlanOrSession(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	r, err := insertRunForTest(t, s, 0, validPredictRunInput())
 	if err != nil {
@@ -468,6 +477,7 @@ func TestInsertRun_PredictRunHasNoChallengePlanOrSession(t *testing.T) {
 }
 
 func TestUpdateRunEnd_PredictResultAndCostSourceSets(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	end := func(res runResult, src costSource) error {
 		r, err := insertRunForTest(t, s, 0, validPredictRunInput())
@@ -501,6 +511,7 @@ func TestUpdateRunEnd_PredictResultAndCostSourceSets(t *testing.T) {
 // --- run_artifact ---
 
 func TestRunArtifact_InsertListAndValidation(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "c")
 	run, err := insertRunForTest(t, s, cid, validInsertRunInput())
@@ -569,6 +580,7 @@ func TestRunArtifact_InsertListAndValidation(t *testing.T) {
 
 // M3P11: slot・run_artifact の書き込みは作業ログに載せない。
 func TestSlotAndRunArtifactWritesDoNotAppearInActivity(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "c")
 	before := countRowsForTest(t, s, "activity")
@@ -598,6 +610,7 @@ func TestSlotAndRunArtifactWritesDoNotAppearInActivity(t *testing.T) {
 // --- 計画の枠の上書き ---
 
 func TestPlanBudgetOverride_SetLoadAndClear(t *testing.T) {
+	t.Parallel()
 	s := openSchemaVersion4Fixture(t)
 	ctx := context.Background()
 
@@ -680,6 +693,7 @@ func legacyRunRowStringForTest(t *testing.T, s *Store, id int64) string {
 }
 
 func TestInsertSlot_RejectsSameRepoAndPath(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	if _, err := insertSlotForTest(t, s, validSlotInput()); err != nil {
 		t.Fatalf("insertSlot() error = %v", err)
@@ -695,6 +709,7 @@ func TestInsertSlot_RejectsSameRepoAndPath(t *testing.T) {
 }
 
 func TestInsertRun_SlotSpecifiedButChallengeCollisionIsChallengeError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	_, slot1 := mustSlotForTest(t, s)
 	other := validSlotInput()
@@ -723,6 +738,7 @@ func TestInsertRun_SlotSpecifiedButChallengeCollisionIsChallengeError(t *testing
 }
 
 func TestOpenWorkspace_Version5KeepsCycleAndLockColumns(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	if got := pragmaTableInfoColumnsForTest(t, s, "cycle"); !stringSlicesEqual(got,
 		[]string{"id", "trigger", "started_at", "ended_at", "result", "budget_usd", "spent_usd"}) {
@@ -736,6 +752,7 @@ func TestOpenWorkspace_Version5KeepsCycleAndLockColumns(t *testing.T) {
 
 // #143: 0006 は approval に計画の版の列（plan_version。NULL 可）を足す。
 func TestSchemaV6_ApprovalHasNullablePlanVersionColumn(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	if cols := pragmaTableInfoColumnsForTest(t, s, "approval"); !containsString(cols, "plan_version") || !containsString(cols, "target_version") {
 		t.Fatalf("approval columns = %v, want plan_version and target_version", cols)

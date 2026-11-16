@@ -94,6 +94,7 @@ func (f *delegateFixture) runDelegation(t *testing.T, id string) *DelegateResult
 // --- 保留（AC-241・242・282） ---
 
 func TestResume_QuestionsHoldsWithEachQuestionAndTheCauseRun(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.result = questionsOut("feat/x")
@@ -119,6 +120,7 @@ func TestResume_QuestionsHoldsWithEachQuestionAndTheCauseRun(t *testing.T) {
 }
 
 func TestResume_BlockedHoldsWithTheSummary(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: reportJSON(func(m map[string]any) {
@@ -136,6 +138,7 @@ func TestResume_BlockedHoldsWithTheSummary(t *testing.T) {
 
 // AC-282: questions の後にスロットが idle に戻り、同じ周の別の課題に割り当てられる。
 func TestResume_SlotIsIdleAfterQuestionsAndReusedInTheSameCycle(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t) // main-repo のスロットは slot1 の 1 本
 	a := f.newInProgress(t, "a", "P1", planSpec(nil))
 	b := f.newInProgress(t, "b", "P2", planSpec(nil))
@@ -162,6 +165,7 @@ func TestResume_SlotIsIdleAfterQuestionsAndReusedInTheSameCycle(t *testing.T) {
 // --- 回答の後の再開（AC-243〜245） ---
 
 func TestResume_AnswerResumesTheCauseRunSessionWithoutJ3(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.queue = []JudgmentLaunchOutput{questionsOut("feat/x")}
@@ -186,6 +190,7 @@ func TestResume_AnswerResumesTheCauseRunSessionWithoutJ3(t *testing.T) {
 }
 
 func TestResume_HumanHoldAndJudgmentHoldStartANewSession(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"human_hold", "j5_uncertain_hold"} {
 		t.Run(name, func(t *testing.T) {
 			f := newResumeFixture(t)
@@ -285,6 +290,7 @@ func (f *delegateFixture) questionAndAnswer(t *testing.T, id, branch string) {
 }
 
 func TestResume_Clone_PushedBranchUsesAnotherSlotWhenTheOriginalIsBusy(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.branches.branches["feat/x"] = true
@@ -304,6 +310,7 @@ func TestResume_Clone_PushedBranchUsesAnotherSlotWhenTheOriginalIsBusy(t *testin
 }
 
 func TestResume_Clone_UnpushedBranchUsesTheOriginalSlotWhenIdle(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.questionAndAnswer(t, id, "feat/x") // リモートに無い
@@ -315,6 +322,7 @@ func TestResume_Clone_UnpushedBranchUsesTheOriginalSlotWhenIdle(t *testing.T) {
 }
 
 func TestResume_Clone_UnpushedBranchWithBusyOriginalIsSlotUnavailable(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.questionAndAnswer(t, id, "feat/x")
@@ -343,6 +351,7 @@ func (f *delegateFixture) worktreeChallenge(t *testing.T) string {
 }
 
 func TestResume_Worktree_IdleOriginalIsUsedEvenWhenPushedAndOthersAreIdle(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.worktreeChallenge(t)
 	f.branches.branches["feat/w"] = true
@@ -358,6 +367,7 @@ func TestResume_Worktree_IdleOriginalIsUsedEvenWhenPushedAndOthersAreIdle(t *tes
 }
 
 func TestResume_Worktree_NeedsAttentionOriginalIsSlotUnavailable(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.worktreeChallenge(t)
 	f.branches.branches["feat/w"] = true
@@ -420,6 +430,7 @@ func TestResume_Worktree_BusyOriginalWaitsInTheSameCycle(t *testing.T) {
 // --- 失敗の結果と再開（AC-252〜255） ---
 
 func TestResume_FailedResultsKeepStateAndResumeTheSameSessionNextCycle(t *testing.T) {
+	t.Parallel()
 	for _, r := range []RunResult{RunResultErrored, RunResultMalformed, RunResultInvalidOutput, RunResultTimedOut, RunResultInterrupted} {
 		t.Run(string(r), func(t *testing.T) {
 			f := newResumeFixture(t)
@@ -441,6 +452,7 @@ func TestResume_FailedResultsKeepStateAndResumeTheSameSessionNextCycle(t *testin
 }
 
 func TestResume_LaunchFailedKeepsStateAndRepeatsTheSameForm(t *testing.T) {
+	t.Parallel()
 	t.Run("new session", func(t *testing.T) {
 		f := newResumeFixture(t)
 		id := f.newInProgress(t, "t", "P1", planSpec(nil))
@@ -489,6 +501,7 @@ func TestResume_LaunchFailedKeepsStateAndRepeatsTheSameForm(t *testing.T) {
 // --- 連続失敗の上限（AC-256〜262） ---
 
 func TestFailureLimit_ReachedHoldsWithKindAndCountAndReportsNotStarted(t *testing.T) {
+	t.Parallel()
 	for _, results := range [][]RunResult{
 		{RunResultLaunchFailed, RunResultLaunchFailed},
 		{RunResultErrored, RunResultMalformed},
@@ -525,6 +538,7 @@ func TestFailureLimit_ReachedHoldsWithKindAndCountAndReportsNotStarted(t *testin
 }
 
 func TestFailureLimit_NotReachedLaunchesAgain(t *testing.T) {
+	t.Parallel()
 	t.Run("limit 3 with two failures", func(t *testing.T) {
 		f := newResumeFixture(t)
 		f.agent.FailureLimit = 3
@@ -558,6 +572,7 @@ func TestFailureLimit_NotReachedLaunchesAgain(t *testing.T) {
 }
 
 func TestFailureLimit_PreviousPlanVersionAndRateLimitedRunsAreNotCounted(t *testing.T) {
+	t.Parallel()
 	t.Run("previous plan version", func(t *testing.T) {
 		f := newResumeFixture(t)
 		id := f.newInProgress(t, "t", "P1", planSpec(nil))
@@ -606,6 +621,7 @@ func TestFailureLimit_PreviousPlanVersionAndRateLimitedRunsAreNotCounted(t *test
 }
 
 func TestFailureLimit_AnswerRestartsTheCount(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.queue = []JudgmentLaunchOutput{failOut(RunResultErrored), failOut(RunResultErrored)}
@@ -637,6 +653,7 @@ func TestFailureLimit_AnswerRestartsTheCount(t *testing.T) {
 }
 
 func TestResume_ErrorsFromBranchLookupDoNotBlockResume(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.questionAndAnswer(t, id, "feat/x")
@@ -649,6 +666,7 @@ func TestResume_ErrorsFromBranchLookupDoNotBlockResume(t *testing.T) {
 
 // 連続失敗の数え方の単体検査: 失敗 → 成功 → 失敗 は連続して 2 回と数えない（成功が連続を切る）。
 func TestDecideLaunch_ASuccessBreaksTheRunOfFailures(t *testing.T) {
+	t.Parallel()
 	pv := int64(1)
 	mk := func(id string, r RunResult) runRow {
 		return runRow{ID: id, Kind: runKindDelegate, SessionID: "s-" + id, Result: r, PlanVersion: &pv, StartedAt: time.Now()}
@@ -665,6 +683,7 @@ func TestDecideLaunch_ASuccessBreaksTheRunOfFailures(t *testing.T) {
 
 // 既定ブランチは子が作ったブランチではない: 再開のブランチ名にしない。
 func TestResume_DefaultBranchIsNotPassedAsTheBranchToContinue(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.setSlotBranch("main")
@@ -679,6 +698,7 @@ func TestResume_DefaultBranchIsNotPassedAsTheBranchToContinue(t *testing.T) {
 
 // 回答を渡す再開は、保留の問いも渡す（子が出した問いでない保留への回答でも意味が通る）。
 func TestResume_AnswerResumeCarriesTheHoldQuestion(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.queue = []JudgmentLaunchOutput{questionsOut("feat/x")}
@@ -692,6 +712,7 @@ func TestResume_AnswerResumeCarriesTheHoldQuestion(t *testing.T) {
 
 // 中断の後の再開は、クローンでもブランチが push 済みでも元のスロットだけを使う。
 func TestResume_InterruptedUsesOnlyTheOriginalSlot(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.branches.branches["feat/x"] = true
@@ -744,6 +765,7 @@ func (f *delegateFixture) topUpImplBudget(t *testing.T, id string) {
 // 元のスロットの行が idle のまま宣言から外れた再開（取得は ErrSlotUnavailable を返し続ける）は、
 // 待ちループで空回りせず、有限回の取り直しの後に slot_unavailable になる。
 func TestResume_Worktree_IdleOriginalDroppedFromDeclarationIsSlotUnavailable(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.worktreeChallenge(t)
 	f.questionAndAnswer(t, id, "feat/w")

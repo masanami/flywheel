@@ -24,6 +24,7 @@ func (f *headFixture) mergeInOf(t *testing.T, op *IrreversibleOperation) sql.Nul
 // 取り込みだけの承認は、承認の記録と作業ログの after に検証の head を残す（core が自分で比較して確かめた結果。
 // 確かめ方の表は release_head_verify_test.go）。取り込みの判定を伴わない承認は残さない。
 func TestExecuteApproval_MergeInOnlyApprovalRecordsTheVerifiedHead(t *testing.T) {
+	t.Parallel()
 	f := newHeadFixture(t)
 	f.verified(t, hdrefA, "v")
 	src := sourcesOf(openPRAt("h1", passingChecks()), compareMergeIn())
@@ -50,6 +51,7 @@ func TestExecuteApproval_MergeInOnlyApprovalRecordsTheVerifiedHead(t *testing.T)
 
 // head が検証の head と一致していれば、比較を読まない（口が無くても承認でき、取り込みの承認としては残さない）。
 func TestExecuteApproval_MatchingHeadNeedsNoComparison(t *testing.T) {
+	t.Parallel()
 	f := newHeadFixture(t)
 	f.verified(t, hdrefA, "verifiedA")
 	if err := f.approveWith(t, []ReleaseHead{f.rh(f.relA, "verifiedA"), f.rh(f.relB, "x")}, ReleaseHeadSources{}); err != nil {
@@ -62,6 +64,7 @@ func TestExecuteApproval_MatchingHeadNeedsNoComparison(t *testing.T) {
 
 // 取り込みの判定が無ければ、head の不一致は今までどおり conflict。
 func TestExecuteApproval_WithoutSourcesTheMismatchStillConflicts(t *testing.T) {
+	t.Parallel()
 	f := newHeadFixture(t)
 	f.verified(t, hdrefA, "verifiedA")
 	if err := f.approve(t, []ReleaseHead{f.rh(f.relA, "mergedHead"), f.rh(f.relB, "x")}, nil); !errors.Is(err, ErrConflict) {
@@ -74,6 +77,7 @@ func TestExecuteApproval_WithoutSourcesTheMismatchStillConflicts(t *testing.T) {
 
 // show の承認待ちの release は、J5 の検証の head（記録があるとき）を持つ。承認済み以降・記録なしでは持たない。
 func TestGetChallenge_PendingReleaseCarriesTheVerifiedHead(t *testing.T) {
+	t.Parallel()
 	f := newHeadFixture(t)
 	f.verified(t, hdrefA, "verifiedA")
 	d, err := f.s.GetChallenge(context.Background(), f.c.ID)

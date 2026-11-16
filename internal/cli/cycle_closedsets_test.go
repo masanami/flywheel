@@ -93,6 +93,7 @@ func runResultsOf(t *testing.T, ws string) []string {
 // 課題の終了していない run を要る failure_limit・rework_limit・serialized は、core のテストが
 // 同じ値を実際の周の対象の選択で観測している（coreObservedReasons に、その根拠のテストを置く）。
 func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
+	parallelTools(t, false)
 	line := m3SpecLine(t, "`not_started[].reason` は", "S1 は ")
 	spans := backtickSpanRe.FindAllStringSubmatch(line, -1)
 	if len(spans) < 2 {
@@ -249,6 +250,7 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 // 仕様の 2 か所（§IF / API の定義の行と受入基準の行）と core の定義を双方向に照合し、定義順
 // （§IF / API「この定義順に重複なく並べる」）も仕様の行どおりであることを確かめる。
 func TestSerialGroupReasons_AreTheClosedSetInBothDirections(t *testing.T) {
+	t.Parallel()
 	var impl []string
 	for _, r := range core.SerialGroupReasonValues() {
 		impl = append(impl, string(r))
@@ -287,6 +289,7 @@ func TestSerialGroupReasons_AreTheClosedSetInBothDirections(t *testing.T) {
 // invalid_output | succeeded | interrupted の閉集合に限られる（仕様・core の定義・実際の run の
 // 結果を双方向に照合する）。
 func TestRunResults_AreTheDocumentedClosedSetInBothDirections(t *testing.T) {
+	parallelTools(t, false)
 	line := m3SpecLine(t, "run の結果の値は `", "閉集合に限られる")
 	m := backtickSpanRe.FindStringSubmatch(line)
 	if m == nil {
@@ -459,6 +462,7 @@ func m45AddedNotStartedReasons(t *testing.T) []string {
 
 // M4.5 S1: cycle の phase の閉集合は release を最初に持ち、cycle --json の phases の並びがそれに従う。
 func TestCycle_PhasesStartWithReleaseThenTheM3Phases(t *testing.T) {
+	parallelTools(t, false)
 	m45SpecLine(t, "`cycle` は、取り込みの段より前に `release` の段を実行する")
 	// M5 S1 の `backup` の節の最初の項目。M4.5 AC-319（最終要素は improve）の中身は変えず、
 	// 段の並びは backup が最後になる（M45P29 と同じ流儀）。

@@ -5,6 +5,7 @@ import "testing"
 // TestParseStatus_AcceptsExactCode は、状態語彙のコード（例: "unclassified"）と
 // 前後の空白を除いて完全一致したときだけ受理することを検証する。
 func TestParseStatus_AcceptsExactCode(t *testing.T) {
+	t.Parallel()
 	got, ok := ParseStatus("unclassified")
 	if !ok {
 		t.Fatalf("ParseStatus(%q) ok = false, want true", "unclassified")
@@ -16,6 +17,7 @@ func TestParseStatus_AcceptsExactCode(t *testing.T) {
 
 // TestParseStatus_AcceptsExactLabel は、表示名（日本語）との完全一致も受理することを検証する。
 func TestParseStatus_AcceptsExactLabel(t *testing.T) {
+	t.Parallel()
 	got, ok := ParseStatus("未分類")
 	if !ok {
 		t.Fatalf("ParseStatus(%q) ok = false, want true", "未分類")
@@ -28,6 +30,7 @@ func TestParseStatus_AcceptsExactLabel(t *testing.T) {
 // TestParseStatus_TrimsSurroundingWhitespaceOnly は、前後の空白は除いて一致判定する
 // （内部の空白は除かない）ことを検証する（現行 validate-artifact の振る舞いの引き継ぎ）。
 func TestParseStatus_TrimsSurroundingWhitespaceOnly(t *testing.T) {
+	t.Parallel()
 	got, ok := ParseStatus("  unclassified\t\n")
 	if !ok {
 		t.Fatalf("ParseStatus with surrounding whitespace: ok = false, want true")
@@ -40,6 +43,7 @@ func TestParseStatus_TrimsSurroundingWhitespaceOnly(t *testing.T) {
 // TestParseStatus_RejectsPartialMatch は、部分一致（前後に文字列が付く場合）を拒否することを検証する。
 // 現行 validate-artifact のテストが固定する「計画承認待ち（未分類 → … → 完了）」の拒否に相当。
 func TestParseStatus_RejectsPartialMatch(t *testing.T) {
+	t.Parallel()
 	if _, ok := ParseStatus("計画承認待ち（未分類 → … → 完了）"); ok {
 		t.Errorf("ParseStatus with extra surrounding text: ok = true, want false")
 	}
@@ -47,6 +51,7 @@ func TestParseStatus_RejectsPartialMatch(t *testing.T) {
 
 // TestParseStatus_RejectsUnknownValue は、語彙に無い値（現行の「レビュー待ち」相当）を拒否することを検証する。
 func TestParseStatus_RejectsUnknownValue(t *testing.T) {
+	t.Parallel()
 	if _, ok := ParseStatus("レビュー待ち"); ok {
 		t.Errorf("ParseStatus(unknown): ok = true, want false")
 	}
@@ -54,6 +59,7 @@ func TestParseStatus_RejectsUnknownValue(t *testing.T) {
 
 // TestParseStatus_RejectsCaseVariant は、大文字小文字の違いを一致とみなさないことを検証する。
 func TestParseStatus_RejectsCaseVariant(t *testing.T) {
+	t.Parallel()
 	if _, ok := ParseStatus("UNCLASSIFIED"); ok {
 		t.Errorf("ParseStatus(case variant): ok = true, want false")
 	}
@@ -61,6 +67,7 @@ func TestParseStatus_RejectsCaseVariant(t *testing.T) {
 
 // TestParseStatus_RejectsInternalWhitespaceVariant は、内部の空白違いを一致とみなさないことを検証する。
 func TestParseStatus_RejectsInternalWhitespaceVariant(t *testing.T) {
+	t.Parallel()
 	if _, ok := ParseStatus("un classified"); ok {
 		t.Errorf("ParseStatus(internal whitespace variant): ok = true, want false")
 	}
@@ -68,6 +75,7 @@ func TestParseStatus_RejectsInternalWhitespaceVariant(t *testing.T) {
 
 // TestParseStatus_RejectsEmpty は、空文字列（空白のみを含む）を拒否することを検証する。
 func TestParseStatus_RejectsEmpty(t *testing.T) {
+	t.Parallel()
 	if _, ok := ParseStatus("   "); ok {
 		t.Errorf("ParseStatus(whitespace only): ok = true, want false")
 	}
@@ -75,6 +83,7 @@ func TestParseStatus_RejectsEmpty(t *testing.T) {
 
 // TestStatusVocabulary_Has9Entries は、語彙が完了条件どおり9値（M1 の 8 値＋取り下げ）であることを検証する。
 func TestStatusVocabulary_Has9Entries(t *testing.T) {
+	t.Parallel()
 	if len(StatusVocabulary) != 9 {
 		t.Fatalf("len(StatusVocabulary) = %d, want 9", len(StatusVocabulary))
 	}
@@ -83,6 +92,7 @@ func TestStatusVocabulary_Has9Entries(t *testing.T) {
 // TestStatusVocabulary_MatchesSpecCodesAndLabels は、語彙の全9行が
 // docs/features/m1-core.md §状態機械 の表（コード・表示名）と一致することを検証する。
 func TestStatusVocabulary_MatchesSpecCodesAndLabels(t *testing.T) {
+	t.Parallel()
 	want := []StatusVocabEntry{
 		{Code: StatusUnclassified, Label: "未分類"},
 		{Code: StatusClassified, Label: "分類済"},
@@ -106,6 +116,7 @@ func TestStatusVocabulary_MatchesSpecCodesAndLabels(t *testing.T) {
 
 // TestStatusLabel_ReturnsSpecLabel は、Label がコードに対応する表示名を返すことを検証する。
 func TestStatusLabel_ReturnsSpecLabel(t *testing.T) {
+	t.Parallel()
 	got, ok := StatusDone.Label()
 	if !ok {
 		t.Fatalf("StatusDone.Label() ok = false, want true")
@@ -117,6 +128,7 @@ func TestStatusLabel_ReturnsSpecLabel(t *testing.T) {
 
 // TestStatusLabel_UnknownCodeReturnsFalse は、語彙に無いコードでは ok=false を返すことを検証する。
 func TestStatusLabel_UnknownCodeReturnsFalse(t *testing.T) {
+	t.Parallel()
 	if _, ok := Status("bogus").Label(); ok {
 		t.Errorf("Status(bogus).Label() ok = true, want false")
 	}

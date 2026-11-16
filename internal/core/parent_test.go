@@ -45,6 +45,7 @@ func lastParentActivity(t *testing.T, s *Store, id string) Activity {
 }
 
 func TestSetParent_SavesTheParentWithoutBumpingTheVersionAndLogs(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 3)
 	before, err := s.GetChallenge(context.Background(), "C-2")
 	if err != nil {
@@ -77,6 +78,7 @@ func TestSetParent_SavesTheParentWithoutBumpingTheVersionAndLogs(t *testing.T) {
 
 // 2 つ目の親の登録は付け替えになる（親は 1 つまで）。
 func TestSetParent_ASecondParentReplacesTheFirst(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 3)
 	ctx := context.Background()
 	if err := s.SetParent(ctx, ChannelCLI, "C-3", "C-1"); err != nil {
@@ -104,6 +106,7 @@ func TestSetParent_ASecondParentReplacesTheFirst(t *testing.T) {
 }
 
 func TestSetParent_TheSameParentAgainWritesNothing(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 2)
 	ctx := context.Background()
 	if err := s.SetParent(ctx, ChannelCLI, "C-2", "C-1"); err != nil {
@@ -119,6 +122,7 @@ func TestSetParent_TheSameParentAgainWritesNothing(t *testing.T) {
 }
 
 func TestSetParent_RejectsSelfReferenceAndCyclesWithoutWriting(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 3)
 	ctx := context.Background()
 	if err := s.SetParent(ctx, ChannelCLI, "C-1", "C-1"); !errors.Is(err, ErrSelfParent) {
@@ -145,6 +149,7 @@ func TestSetParent_RejectsSelfReferenceAndCyclesWithoutWriting(t *testing.T) {
 }
 
 func TestSetParent_MissingOrMalformedChallengeIsNotFound(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 1)
 	ctx := context.Background()
 	for _, tt := range []struct{ child, parent string }{{"C-1", "C-9"}, {"C-9", "C-1"}, {"x", "C-1"}, {"C-1", "y"}} {
@@ -158,6 +163,7 @@ func TestSetParent_MissingOrMalformedChallengeIsNotFound(t *testing.T) {
 }
 
 func TestClearParent_RemovesTheParentAndLogsOnlyWhenThereWasOne(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 2)
 	ctx := context.Background()
 	if err := s.ClearParent(ctx, ChannelCLI, "C-2"); err != nil {
@@ -192,6 +198,7 @@ func TestClearParent_RemovesTheParentAndLogsOnlyWhenThereWasOne(t *testing.T) {
 
 // 親子は表示にだけ使い、完了した課題にも付け替えできる（状態機械・依存の評価に使わない）。
 func TestSetParent_AllowedOnADoneChallenge(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 2)
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE challenge SET status = 'done' WHERE id = 2`)
@@ -206,6 +213,7 @@ func TestSetParent_AllowedOnADoneChallenge(t *testing.T) {
 
 // 親子は書き出しと再構築で保たれる（ui-relation-graph.md 受入基準）。
 func TestParent_SurvivesExportAndImport(t *testing.T) {
+	t.Parallel()
 	src := depFixture(t, 3)
 	ctx := context.Background()
 	if err := src.SetParent(ctx, ChannelCLI, "C-2", "C-1"); err != nil {

@@ -20,6 +20,7 @@ func depWorkspace(t *testing.T, n int) (ws string, ids []string) {
 }
 
 func TestDepAdd_AddsAllTargetsInOneVersionBumpAndPrintsTheChallenge(t *testing.T) {
+	t.Parallel()
 	ws, ids := depWorkspace(t, 3)
 	out := runJSON(t, ws, "dep", "add", ids[0], ids[1], ids[2])
 	c, ok := out["challenge"].(map[string]any)
@@ -29,6 +30,7 @@ func TestDepAdd_AddsAllTargetsInOneVersionBumpAndPrintsTheChallenge(t *testing.T
 }
 
 func TestDepRm_RemovesAndBumpsVersionOnce(t *testing.T) {
+	t.Parallel()
 	ws, ids := depWorkspace(t, 3)
 	runJSON(t, ws, "dep", "add", ids[0], ids[1], ids[2])
 	out := runJSON(t, ws, "dep", "rm", ids[0], ids[1], ids[2])
@@ -38,6 +40,7 @@ func TestDepRm_RemovesAndBumpsVersionOnce(t *testing.T) {
 }
 
 func TestDep_IdempotentSuccessKeepsTheVersion(t *testing.T) {
+	t.Parallel()
 	ws, ids := depWorkspace(t, 2)
 	runJSON(t, ws, "dep", "add", ids[0], ids[1])
 	out := runJSON(t, ws, "dep", "add", ids[0], ids[1])
@@ -51,6 +54,7 @@ func TestDep_IdempotentSuccessKeepsTheVersion(t *testing.T) {
 }
 
 func TestDep_RejectionsMapToTheDocumentedCodesAndWriteNothing(t *testing.T) {
+	t.Parallel()
 	ws, ids := depWorkspace(t, 3)
 	runJSON(t, ws, "dep", "add", ids[0], ids[1])
 	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, ids[2]), "done")

@@ -194,7 +194,7 @@ func TestServeFleet_WorkspaceFlagIgnoresDefaultFleetFile(t *testing.T) {
 func assertServeFails(t *testing.T, wantCode string, args ...string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	code := run(append(args, "--json"), strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath(append(args, "--json"), strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 2 {
 		t.Errorf("%v: exit code = %d, want 2 (stderr=%s)", args, code, stderr.String())
 	}
