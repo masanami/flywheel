@@ -274,3 +274,73 @@ func TestPollContractRuns_SucceededCreatesReleaseAndStillVerifiesWhenTheLookupFa
 		}
 	}
 }
+
+func reviewWaitOutForAll(urls ...string) ContractLaunchOutput {
+	return contractOut(ContractStateWaiting, nil, func(st *ContractStatus) {
+		st.RequestedAction = &ContractRequestedAction{Kind: "review", Decider: "any", Text: "レビュー待ち", Options: []string{"respond", "ready"}}
+		for _, u := range urls {
+			st.Artifacts = append(st.Artifacts, ContractArtifact{Kind: "pr", Ref: u})
+		}
+	})
+}
+
+// 同じ PR のレビュー待ちを 2 回読んでも（差し戻しの後に同じ PR でまたレビュー待ちになっても）、release は 1 件のまま。
+func TestPollContractRuns_ReadingTheSamePRTwiceKeepsOneRelease(t *testing.T) {
+	f := newReviewFlowFixture(t)
+	f.setPR(1, reviewPRURL, "open", "main")
+	f.toVerifying(t)
+	// 差し戻し（J5 が満たさない）で着手中へ戻し、同じ PR のレビュー待ちをもう一度読む。
+	if _, err := f.s.VerifyAutoJ5(context.Background(), f.j5.input(f.cycle(t, 300), &f.cid)); err != nil {
+		t.Fatal(err)
+	}
+	f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
+	f.poll(t)
+	f.client.queue = []ContractLaunchOutput{reviewWaitOutFor(reviewPRURL)}
+	f.poll(t)
+	if got := f.status(t, f.cid); got != StatusVerifying {
+		t.Fatalf("status = %s, want verifying", got)
+	}
+	want := []releaseRow{{ref: reviewPRURL, state: "pending"}}
+	if got := f.releases(t); !reflect.DeepEqual(got, want) {
+		t.Fatalf("releases = %+v, want %+v", got, want)
+	}
+}
+
+// 1 回のレビュー待ちで同じ成果物（同じ PR）が重なって届いても、release は 1 件。
+func TestPollContractRuns_ReviewWaitWithTheSamePRListedTwiceCreatesOneRelease(t *testing.T) {
+	f := newReviewFlowFixture(t)
+	f.setPR(1, reviewPRURL, "open", "main")
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{reviewWaitOutForAll(reviewPRURL, reviewPRURL)}
+	f.poll(t)
+	if got := f.status(t, f.cid); got != StatusVerifying {
+		t.Fatalf("status = %s, want verifying", got)
+	}
+	want := []releaseRow{{ref: reviewPRURL, state: "pending"}}
+	if got := f.releases(t); !reflect.DeepEqual(got, want) {
+		t.Fatalf("releases = %+v, want %+v", got, want)
+	}
+}
+
+// 1 回のレビュー待ちに PR が複数あるとき、既定ブランチ（main）宛の PR ごとに 1 件ずつ作り、main 宛でない PR には作らない。
+func TestPollContractRuns_ReviewWaitWithSeveralPRsCreatesOneReleasePerDefaultBranchPR(t *testing.T) {
+	const reviewPRURL3 = "https://github.com/o/r/pull/3"
+	f := newReviewFlowFixture(t)
+	f.setPR(1, reviewPRURL, "open", "main")
+	f.setPR(2, reviewPRURL2, "open", "main")
+	f.setPR(3, reviewPRURL3, "open", "develop")
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{reviewWaitOutForAll(reviewPRURL, reviewPRURL2, reviewPRURL3)}
+	f.poll(t)
+	if got := f.status(t, f.cid); got != StatusVerifying {
+		t.Fatalf("status = %s, want verifying", got)
+	}
+	want := []releaseRow{{ref: reviewPRURL, state: "pending"}, {ref: reviewPRURL2, state: "pending"}}
+	if got := f.releases(t); !reflect.DeepEqual(got, want) {
+		t.Fatalf("releases = %+v, want %+v（main 宛でない PR 3 には作らない）", got, want)
+	}
+}
