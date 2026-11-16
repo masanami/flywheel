@@ -380,7 +380,7 @@ func TestWithdraw_J3_DuringJ3_NothingIsLaunched(t *testing.T) {
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.j3.onInvoke = func(in JudgmentLaunchInput) {
-		f.j3Inputs = append(f.j3Inputs, in)
+		f.recordJ3(in)
 		if _, err := withdrawForTest(t, f.s, id, "r"); err != nil {
 			t.Errorf("withdraw: %v", err)
 		}
