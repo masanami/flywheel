@@ -737,3 +737,76 @@ func TestJ9_CandidatesThatCannotStart_DoNotUseTheGlobalCapacity(t *testing.T) {
 		t.Fatalf("J9 calls = %d, want 1 (the multi pair)", n)
 	}
 }
+
+// 全体の空きが 0（max_parallel_runs の枠がほかのリポジトリの委譲で全部使われている）ときは、J9 を呼ばない。
+func TestJ9_GlobalCapacityZero_NeverCallsTheJudgment(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "plain")
+	f.agent.MaxParallelRuns = 1 // 他のリポジトリの 1 件で空きは 0
+	run := f.candidate(t, "other", "P1", 31)
+	release := f.holdRunning(t, run)
+	defer release()
+	a := f.candidate(t, "plain", "P1", 21)
+	b := f.candidate(t, "plain", "P1", 22)
+	in := f.in(f.cycle(t, 300), nil)
+	in.Judgment = inv
+	free, err := f.s.globalDelegationFree(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if free != 0 {
+		t.Fatalf("globalDelegationFree = %d, want 0 (the precondition of this test)", free)
+	}
+	var targets []int64
+	for _, id := range []string{a, b} {
+		n, _ := parseChallengeID(id)
+		targets = append(targets, n)
+	}
+	plan, err := f.s.planDelegation(context.Background(), in, targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(inv.called()); n != 0 {
+		t.Fatalf("J9 calls = %d, want 0 (no global capacity is left)", n)
+	}
+	if len(plan.groups) != 1 || len(plan.groups[0].Candidates) != 2 {
+		t.Errorf("groups = %+v, want one serial group of both candidates", plan.groups)
+	}
+}
+
+// 空いた枠で後から入った候補との組は、1 周の費用の上限の残りの分だけ判断し、残りが足りない組は判断せず直列にする。
+func TestJ9_FreedSlot_PairsOfTheNextCandidate_AreJudgedOnlyWithinTheRemainingBudget(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "plain")
+	f.agent.MaxParallelRuns = 2
+	// 1 組の上限 0.5・費用 0.6 で、1 回目の後（0.6）は 2 回目を足せる（1.1 ≤ 1.6）が、2 回目の後（1.2）は 3 回目を足せない（1.7 > 1.6）。
+	f.agent.SerialJudgmentCycleBudgetUSD = 1.6
+	f.conn.Repos[3].Slots.Paths = []string{"p1", "p2", "p3"}
+	f.git.states[f.s.Workspace()+"/p3"] = SlotTreeState{Exists: true, PointerOK: true, OriginURL: "https://github.com/o/plain.git"}
+	a := f.candidate(t, "plain", "P1", 21)
+	b := f.candidate(t, "plain", "P1", 22)
+	c := f.candidate(t, "plain", "P1", 23)
+	inv.respond = func(_ JudgmentLaunchInput, n int) JudgmentLaunchOutput {
+		if n == 1 {
+			return j9Out("strong", "同じ規則を決め直す", 0.6)
+		}
+		return j9Out("weak", "独立", 0.6)
+	}
+	res := f.runPlanWith(t, inv)
+	texts := j9Texts(inv)
+	if len(texts) != 2 {
+		t.Fatalf("J9 calls = %d, want 2 ((a,b) and one pair of c within the remaining budget)", len(texts))
+	}
+	if !strings.Contains(texts[0], a) || !strings.Contains(texts[0], b) {
+		t.Errorf("first J9 call = %s, want the pair (%s, %s)", texts[0], a, b)
+	}
+	if !strings.Contains(texts[1], c) {
+		t.Errorf("second J9 call = %s, want a pair with the next candidate %s", texts[1], c)
+	}
+	if want := [][]string{{a, b, c}}; !reflect.DeepEqual(groupsOf(res), want) {
+		t.Fatalf("groups = %v, want %v (the pair over the remaining budget is serial)", groupsOf(res), want)
+	}
+	if !hasReason(res.SerialGroups[0].Reasons, SerialReasonJudgmentBudget) {
+		t.Errorf("reasons = %v, want serial_judgment_budget", res.SerialGroups[0].Reasons)
+	}
+}
