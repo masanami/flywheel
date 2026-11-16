@@ -894,3 +894,27 @@ func TestApproveOperationID_Success_AfterChallengeIsDone(t *testing.T) {
 		t.Errorf("operation = %+v, want state=approved", m)
 	}
 }
+
+func TestReject_CompletionApproval_SummaryReportsWithdrawnReleases(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id, release1, release2, _ := setUpChallengeAwaitingCompletionWithOperationsForCLI(t, ws)
+
+	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"reject", "--workspace", ws, "--reason", "not yet", id}, id)
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
+	}
+	for _, want := range []string{release1, release2, "取り消した"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, want it to contain %q", stdout, want)
+		}
+	}
+	show := runJSON(t, ws, "show", id)
+	for _, o := range show["operations"].([]any) {
+		m := o.(map[string]any)
+		if m["id"] == release1 || m["id"] == release2 {
+			if m["state"] != "closed" || m["closed_reason"] != "challenge_rejected" {
+				t.Errorf("operation %v = %v/%v, want closed/challenge_rejected", m["id"], m["state"], m["closed_reason"])
+			}
+		}
+	}
+}

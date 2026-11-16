@@ -587,6 +587,21 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 			}
 		}
 
+		// 完了の差し戻しは、その課題の未実行の release を同じトランザクションで取り消す。
+		if kind == ApprovalKindCompletion && req.Decision == ApprovalDecisionRejected {
+			withdrawn, running, err := withdrawUnexecutedReleases(ctx, tc)
+			if err != nil {
+				return err
+			}
+			approvalOut.WithdrawnReleases, approvalOut.RunningReleases = withdrawn, running
+			if len(withdrawn) > 0 {
+				tc.after["withdrawn_releases"] = withdrawn
+			}
+			if len(running) > 0 {
+				tc.after["running_releases"] = running
+			}
+		}
+
 		// D12: 完了の承認（HoldRelease==false）は、同じトランザクションで
 		// その課題の未承認の release をすべて自動承認する。完了の承認と
 		// release ごとの承認は、それぞれ別の approval 行・別の作業ログの
@@ -897,4 +912,68 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		return nil, nil, err
 	}
 	return c, &holdOut, nil
+}
+
+// withdrawUnexecutedReleases は完了の差し戻しと同じトランザクションで、tc.id の課題の未実行の release
+// （承認待ち・承認済み）を closed（理由 challenge_rejected）にし、作業ログへ理由つきで残す。差し戻した
+// 課題を直して再び完了を承認すると新しい release が立つので、取り消した行は履歴として残す。
+// 試行が終わっていない（マージを依頼している最中の）release は止めず、running として返す。
+func withdrawUnexecutedReleases(ctx context.Context, tc *transitionCtx) (withdrawn, running []string, err error) {
+	rows, err := tc.tx.QueryContext(ctx,
+		`SELECT id, version, state FROM operation WHERE challenge_id = ? AND kind = ? AND state IN (?, ?) ORDER BY id ASC`,
+		tc.id, string(OperationKindRelease), string(OperationStatePending), string(OperationStateApproved))
+	if err != nil {
+		return nil, nil, err
+	}
+	type target struct {
+		id      int64
+		version int
+		state   string
+	}
+	var targets []target
+	for rows.Next() {
+		var t target
+		if err := rows.Scan(&t.id, &t.version, &t.state); err != nil {
+			_ = rows.Close()
+			return nil, nil, err
+		}
+		targets = append(targets, t)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, nil, err
+	}
+	for _, t := range targets {
+		if last, err := latestOperationExecution(ctx, tc.tx, t.id); err != nil {
+			return nil, nil, err
+		} else if last != nil && last.Result == ExecutionResultMergedUnapproved {
+			// 承認なしでマージされた事実は本番反映の片付け（release_tidy）が merged_unapproved で閉じる。ここでは触らない。
+			continue
+		} else if last != nil && last.open() && !releaseAttemptStale(last, tc.now) {
+			running = append(running, formatOperationID(t.id))
+			continue
+		}
+		res, err := tc.tx.ExecContext(ctx,
+			`UPDATE operation SET state = ?, version = ?, closed_reason = ?, closed_at = ? WHERE id = ? AND version = ? AND state = ?`,
+			string(OperationStateClosed), t.version+1, string(ClosedReasonChallengeRejected), tc.nowStr, t.id, t.version, t.state)
+		if err != nil {
+			return nil, nil, err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return nil, nil, err
+		} else if n != 1 {
+			return nil, nil, fmt.Errorf("core: reject completion: expected to close operation %s, updated %d rows", formatOperationID(t.id), n)
+		}
+		if err := tc.rec.record("operation", t.id, ActivityActionOpClose,
+			map[string]any{"state": t.state},
+			map[string]any{"state": string(OperationStateClosed), "version": t.version + 1, "closed_reason": string(ClosedReasonChallengeRejected),
+				"reason": "課題の完了が差し戻されたため、未実行の本番反映を取り消した"}); err != nil {
+			return nil, nil, err
+		}
+		withdrawn = append(withdrawn, formatOperationID(t.id))
+	}
+	return withdrawn, running, nil
 }

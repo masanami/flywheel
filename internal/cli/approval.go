@@ -287,7 +287,7 @@ func runRejectChallenge(a Args, verifier core.Verifier, id string, reason string
 	}
 	return textOutput{
 		json: view.ChallengeApprovalResponse{Approval: view.FromApproval(*approval), Challenge: view.FromChallenge(*c)},
-		text: challengeText(*c),
+		text: challengeText(*c) + rejectReleaseNotes(approval),
 	}, nil
 }
 
@@ -687,4 +687,17 @@ func cancelOpenContractRuns(a Args, id string) (int, error) {
 		return n, mapCoreErr(err)
 	}
 	return n, nil
+}
+
+// rejectReleaseNotes は完了の差し戻しで取り消した本番反映と、実行中のため止めなかった本番反映を伝える行
+// （取り消す規則・実行中の判定は core が持つ。ここは結果を表示するだけ）。
+func rejectReleaseNotes(a *core.Approval) string {
+	var b strings.Builder
+	if len(a.WithdrawnReleases) > 0 {
+		fmt.Fprintf(&b, "未実行の本番反映 %s を取り消した（マージされない。直して再び完了を承認すると新しい本番反映が立つ）\n", strings.Join(a.WithdrawnReleases, ", "))
+	}
+	if len(a.RunningReleases) > 0 {
+		fmt.Fprintf(&b, "実行中のため本番反映 %s は止めていない（マージされうる）\n", strings.Join(a.RunningReleases, ", "))
+	}
+	return b.String()
 }

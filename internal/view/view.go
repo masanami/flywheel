@@ -257,7 +257,7 @@ func FromDirectCompletions(ds []core.DirectCompletion) []DirectCompletion {
 type Operation struct {
 	ApprovedHead *string `json:"approved_head"`
 	ChallengeID  string  `json:"challenge_id"`
-	// ClosedAt・ClosedReason は state が closed の操作の、閉じた日時と理由（superseded・merged_outside・merged_unapproved・pr_closed）。
+	// ClosedAt・ClosedReason は state が closed の操作の、閉じた日時と理由（superseded・merged_outside・merged_unapproved・pr_closed・challenge_rejected）。
 	ClosedAt            *string `json:"closed_at"`
 	ClosedReason        *string `json:"closed_reason"`
 	ConsecutiveFailures int     `json:"consecutive_failures"`
