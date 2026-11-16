@@ -33,8 +33,14 @@ func (f *fakeDiffs) GetCompareDiff(_ context.Context, repo, baseSHA, headSHA str
 	return f.diff, f.err
 }
 
-// noHeadGit は HeadWorktreeGit の偽の実装（手元のクローンにコミットが無い）。
+// noHeadGit は HeadWorktreeGit の偽の実装（手元のクローンにコミットが無く、fetch もできない）。
 type noHeadGit struct{ added int }
+
+func (*noHeadGit) FetchHead(context.Context, string, string, string) error {
+	return errors.New("no origin")
+}
+func (*noHeadGit) ListHeadRefs(context.Context, string, string) ([]string, error) { return nil, nil }
+func (*noHeadGit) DeleteHeadRef(context.Context, string, string) error            { return nil }
 
 func (*noHeadGit) HasCommit(context.Context, string, string) (bool, error) { return false, nil }
 func (g *noHeadGit) AddHeadWorktree(context.Context, string, string, string) error {
@@ -46,9 +52,26 @@ func (*noHeadGit) RemoveHeadWorktree(context.Context, string, string) error { re
 // execHeadGit は HeadWorktreeGit を本物の git で実装する（core は internal/adapters/git を import
 // できない。adapter 自身の検査は internal/adapters/git のテストが持つ）。
 type execHeadGit struct {
-	t       *testing.T
-	addErr  error
-	removed []string
+	t        *testing.T
+	addErr   error
+	fetchErr error
+	fetched  []string // fetch した ref
+	removed  []string
+}
+
+func (g *execHeadGit) FetchHead(_ context.Context, clone, sha, ref string) error {
+	g.fetched = append(g.fetched, ref)
+	gitOut(g.t, clone, "fetch", "--no-tags", "origin", sha+":"+ref)
+	return g.fetchErr // 失敗は ref を書いた後に起きうる
+}
+
+func (g *execHeadGit) ListHeadRefs(_ context.Context, clone, prefix string) ([]string, error) {
+	out, err := exec.Command("git", "-C", clone, "for-each-ref", "--format=%(refname)", prefix).Output()
+	return strings.Fields(string(out)), err
+}
+
+func (g *execHeadGit) DeleteHeadRef(_ context.Context, clone, ref string) error {
+	return exec.Command("git", "-C", clone, "update-ref", "-d", ref).Run()
 }
 
 func (g *execHeadGit) HasCommit(_ context.Context, clone, sha string) (bool, error) {
@@ -344,10 +367,10 @@ func TestVerifyAutoJ5_HeadNotCheckedOut_FallsBackToTheDiff(t *testing.T) {
 		mut    func(in *J5AutoInput)
 		reason string
 	}{
-		"commit missing":     {noCommit, "手元のクローンに head のコミットが無い"},
-		"clone slots":        {func(in *J5AutoInput) { in.Connectors.Repos[0].Slots.Provider = string(slotProviderClone) }, "元のクローンを持たない"},
-		"undeclared repo":    {func(in *J5AutoInput) { in.Connectors.Repos[0].Remote = "o/other" }, "接続の宣言に無い"},
-		"no connectors file": {func(in *J5AutoInput) { in.Connectors = nil }, "接続の宣言に無い"},
+		"commit missing":            {noCommit, "手元のクローンに head のコミットが無く、fetch もできなかった"},
+		"clone slots without paths": {func(in *J5AutoInput) { in.Connectors.Repos[0].Slots.Provider = string(slotProviderClone) }, "head を取り出すクローンが無い"},
+		"undeclared repo":           {func(in *J5AutoInput) { in.Connectors.Repos[0].Remote = "o/other" }, "接続の宣言に無い"},
+		"no connectors file":        {func(in *J5AutoInput) { in.Connectors = nil }, "接続の宣言に無い"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -496,6 +519,172 @@ func TestRunDelegation_CanceledRunIsInterrupted(t *testing.T) {
 			_, _ = f.s.RunDelegation(ctx, f.input(f.cycle(t, 300), &id))
 			if runs := f.delegateRuns(t); len(runs) != 1 || runs[0].Result != tc.want {
 				t.Fatalf("runs = %+v, want one %s run", runs, tc.want)
+			}
+		})
+	}
+}
+
+// fetchFixture は、手元のクローン（fetcher/）が head のコミットを持たない（origin は headRepo の clone）
+// 状態にする。provider が clone のときは paths の先頭を fetcher/ にする。
+func (f *prHeadFixture) fetchFixture(t *testing.T, provider slotProvider) (*ConnectorsDeclaration, string) {
+	t.Helper()
+	local := filepath.Join(f.s.Workspace(), "fetcher")
+	gitOut(t, f.s.Workspace(), "clone", "-q", "--no-tags", "--single-branch", "--no-local", "-b", "main", f.clone, local)
+	if ok, _ := f.git.HasCommit(context.Background(), local, f.sha); ok {
+		t.Fatal("the local clone already has the head")
+	}
+	conn := worktreeConnectors()
+	conn.Repos[0].Slots.Base = "fetcher"
+	if provider == slotProviderClone {
+		conn.Repos[0].Slots = ConnectorRepoSlots{Provider: string(slotProviderClone), Paths: []string{"fetcher"}}
+	}
+	return conn, local
+}
+
+func (f *prHeadFixture) assertNoTemporaryRefs(t *testing.T, clone string) {
+	t.Helper()
+	if refs := gitOut(t, clone, "for-each-ref", j5HeadRefPrefix); refs != "" {
+		t.Errorf("temporary refs remain:\n%s", refs)
+	}
+}
+
+// 手元のクローンに head が無い PR（worktree のスロット・clone のスロットの両方）でも、head を 1 コミット
+// だけ一時の ref へ fetch して worktree を作り、差分に無いファイルも読める。終わったら一時の ref も
+// worktree も残らない。
+func TestVerifyAutoJ5_FetchesTheHeadWhenTheCloneLacksIt(t *testing.T) {
+	for name, provider := range map[string]slotProvider{"worktree slots": slotProviderWorktree, "clone slots": slotProviderClone} {
+		t.Run(name, func(t *testing.T) {
+			f := newPRHeadFixture(t, headOnlySentence+"\n")
+			conn, local := f.fetchFixture(t, provider)
+			in := f.input(f.cycle(t, 300), nil)
+			in.Diffs, in.HeadGit, in.Connectors = f.diffs, f.git, conn
+			if _, err := f.s.VerifyAutoJ5(context.Background(), in); err != nil {
+				t.Fatal(err)
+			}
+			if f.readErr != nil {
+				t.Fatalf("the file only on the head is not readable: %v", f.readErr)
+			}
+			if len(f.git.fetched) != 1 || !strings.HasPrefix(f.git.fetched[0], j5HeadRefPrefix) || !strings.HasSuffix(f.git.fetched[0], "-"+f.sha) {
+				t.Errorf("fetched = %v", f.git.fetched)
+			}
+			if got := f.status(t); got != StatusAwaitingCompletionApproval {
+				t.Errorf("status = %s", got)
+			}
+			if _, err := os.Stat(f.workDir); !os.IsNotExist(err) {
+				t.Errorf("the worktree remains (stat: %v)", err)
+			}
+			if list := gitOut(t, local, "worktree", "list", "--porcelain"); strings.Contains(list, j5HeadsDirName) {
+				t.Errorf("the clone still lists the worktree:\n%s", list)
+			}
+			f.assertNoTemporaryRefs(t, local)
+		})
+	}
+}
+
+// head が手元にあるときは fetch しない。
+func TestVerifyAutoJ5_DoesNotFetchWhenTheCloneHasTheHead(t *testing.T) {
+	f := newPRHeadFixture(t, headOnlySentence)
+	if _, err := f.verifyHead(context.Background(), t); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.git.fetched) != 0 {
+		t.Errorf("fetched = %v", f.git.fetched)
+	}
+}
+
+// fetch に失敗したときは、差分だけを渡して理由を注記し、ワークスペースで起動する（一時の ref は残らない）。
+func TestVerifyAutoJ5_FetchFailure_FallsBackToTheDiff(t *testing.T) {
+	f := newPRHeadFixture(t, headOnlySentence)
+	conn, local := f.fetchFixture(t, slotProviderWorktree)
+	f.git.fetchErr = errors.New("network down")
+	in := f.input(f.cycle(t, 300), nil)
+	in.Diffs, in.HeadGit, in.Connectors = f.diffs, f.git, conn
+	if _, err := f.s.VerifyAutoJ5(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if f.workDir != "" {
+		t.Errorf("WorkDir = %q, want the workspace", f.workDir)
+	}
+	if got := f.stdin(t); !strings.Contains(got, "fetch もできなかった") || !strings.Contains(got, "network down") || !strings.Contains(got, headOnlyDiff) {
+		t.Errorf("stdin lacks the reason or the diff:\n%s", got)
+	}
+	f.assertNoTemporaryRefs(t, local)
+}
+
+// fetch の後に worktree を作れなかったときも、一時の ref を消す。
+func TestVerifyAutoJ5_WorktreeFailureAfterFetch_RemovesTheRef(t *testing.T) {
+	f := newPRHeadFixture(t, headOnlySentence)
+	conn, local := f.fetchFixture(t, slotProviderWorktree)
+	f.git.addErr = errors.New("locked")
+	in := f.input(f.cycle(t, 300), nil)
+	in.Diffs, in.HeadGit, in.Connectors = f.diffs, f.git, conn
+	res, err := f.s.VerifyAutoJ5(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedUpstreamFetchFailed {
+		t.Fatalf("not_started = %+v", res.NotStarted)
+	}
+	f.assertNoTemporaryRefs(t, local)
+}
+
+// 強制終了で残った一時の ref は次の取り出しが消す（実行中のプロセス・別ホストのものは消さない）。
+func TestVerifyAutoJ5_SweepsTemporaryRefsOfDeadProcesses(t *testing.T) {
+	f := newPRHeadFixture(t, headOnlySentence)
+	conn, local := f.fetchFixture(t, slotProviderWorktree)
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	dead := fmt.Sprintf("%s%d-%s-left", j5HeadRefPrefix, cmd.Process.Pid, j5HeadHostTag())
+	live := fmt.Sprintf("%s%d-%s-running", j5HeadRefPrefix, os.Getppid(), j5HeadHostTag())
+	otherHost := fmt.Sprintf("%s%d-00000000-other", j5HeadRefPrefix, cmd.Process.Pid)
+	for _, ref := range []string{dead, live, otherHost} {
+		gitOut(t, local, "fetch", "--no-tags", "origin", f.sha+":"+ref)
+	}
+	in := f.input(f.cycle(t, 300), nil)
+	in.Diffs, in.HeadGit, in.Connectors = f.diffs, f.git, conn
+	if _, err := f.s.VerifyAutoJ5(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	refs := gitOut(t, local, "for-each-ref", "--format=%(refname)", j5HeadRefPrefix)
+	if strings.Contains(refs, dead) || !strings.Contains(refs, live) || !strings.Contains(refs, otherHost) {
+		t.Errorf("refs after the sweep:\n%s", refs)
+	}
+}
+
+// fetch した head の検証が失敗・取り消しで終わっても、一時の ref と worktree が残らない。
+func TestVerifyAutoJ5_RemovesTheFetchedRefOnFailureAndCancel(t *testing.T) {
+	for name, end := range map[string]func(f *prHeadFixture, cancel func()){
+		"failed run": func(f *prHeadFixture, _ func()) {
+			f.j5.result = JudgmentLaunchOutput{Result: RunResultErrored, ErrorSummary: "boom"}
+		},
+		"canceled": func(f *prHeadFixture, cancel func()) {
+			f.j5.result = JudgmentLaunchOutput{Result: RunResultErrored, ErrorSummary: "signal: killed"}
+			cancel()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newPRHeadFixture(t, headOnlySentence)
+			conn, local := f.fetchFixture(t, slotProviderWorktree)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			inner := f.j5.onInvoke
+			f.j5.onInvoke = func(in JudgmentLaunchInput) {
+				inner(in)
+				end(f, cancel)
+			}
+			in := f.input(f.cycle(t, 300), nil)
+			in.Diffs, in.HeadGit, in.Connectors = f.diffs, f.git, conn
+			if _, err := f.s.VerifyAutoJ5(ctx, in); err != nil {
+				t.Fatal(err)
+			}
+			if len(f.git.fetched) != 1 {
+				t.Fatalf("fetched = %v", f.git.fetched)
+			}
+			f.assertNoTemporaryRefs(t, local)
+			if _, err := os.Stat(f.workDir); !os.IsNotExist(err) {
+				t.Errorf("the worktree remains (stat: %v)", err)
 			}
 		})
 	}
