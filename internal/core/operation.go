@@ -188,6 +188,7 @@ type OperationApprovalPreview struct {
 
 // operationRow は operation テーブルの1行分の内部表現（読み取り専用の走査に使う）。
 type operationRow struct {
+	ID          int64
 	ChallengeID int64
 	Kind        string
 	Summary     string
@@ -198,7 +199,7 @@ type operationRow struct {
 }
 
 func loadOperationRow(ctx context.Context, tx *sql.Tx, id int64) (*operationRow, error) {
-	var row operationRow
+	row := operationRow{ID: id}
 	err := tx.QueryRowContext(ctx,
 		`SELECT challenge_id, kind, summary, ref, state, version, created_at FROM operation WHERE id = ?`, id,
 	).Scan(&row.ChallengeID, &row.Kind, &row.Summary, &row.Ref, &row.State, &row.Version, &row.CreatedAt)

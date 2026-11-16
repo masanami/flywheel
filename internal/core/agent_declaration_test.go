@@ -100,6 +100,7 @@ const allKeysAgentJSON = `{
 	"max_parallel_runs": 2,
 	"rework_limit": 3,
 	"failure_limit": 2,
+	"behind_update_limit": 3,
 	"improve_threshold": 10,
 	"conflict_prediction_budget_usd": 1,
 	"serial_judgment_cycle_budget_usd": 3,
@@ -265,6 +266,23 @@ func TestLoadAgentDeclaration_ReworkLimitMustBePositiveInteger(t *testing.T) {
 				t.Fatalf("error = %v, want ErrConfigInvalid", err)
 			}
 		})
+	}
+}
+
+func TestLoadAgentDeclaration_BehindUpdateLimitDefaultAndValidation(t *testing.T) {
+	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{}`))
+	if err != nil || decl.BehindUpdateLimit != 3 {
+		t.Fatalf("default = %v, %v; want 3", decl, err)
+	}
+	decl, err = LoadAgentDeclaration(writeAgentJSON(t, `{"behind_update_limit": 5}`))
+	if err != nil || decl.BehindUpdateLimit != 5 {
+		t.Fatalf("declared = %v, %v; want 5", decl, err)
+	}
+	for _, v := range []string{"0", "-1", "1.1"} {
+		_, err := LoadAgentDeclaration(writeAgentJSON(t, fmt.Sprintf(`{"behind_update_limit": %s}`, v)))
+		if !errors.Is(err, ErrConfigInvalid) {
+			t.Fatalf("%s: error = %v, want ErrConfigInvalid", v, err)
+		}
 	}
 }
 

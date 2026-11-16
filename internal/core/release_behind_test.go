@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -58,6 +59,7 @@ func TestRelease_BehindUpdatesBranchInsteadOfRepeatingMergeFailed(t *testing.T) 
 	f.fake.mergeErr = errors.New("Pull request is not up to date with the base branch")
 	o := f.opts()
 	o.Merger = bf
+	o.Agent.BehindUpdateLimit = f.limit + 2 // 取り込みの上限は別（下のテスト）。ここでは failure_limit に数えないことだけを見る。
 	for i := 0; i < f.limit+2; i++ {
 		item := f.runWith(t, o)
 		if item.Result != ExecutionResultWaitingChecks {
@@ -75,6 +77,83 @@ func TestRelease_BehindUpdatesBranchInsteadOfRepeatingMergeFailed(t *testing.T) 
 	}
 	if st := f.state(t); st.opState != "approved" {
 		t.Errorf("state = %s, want approved", st.opState)
+	}
+}
+
+// 取り込みの累計が上限（既定 3）に達した後に再び BEHIND なら、取り込まずに limit_reached で取り消す（人の判断待ち）。
+func TestRelease_BehindUpdateLimitStopsAfterCumulativeUpdates(t *testing.T) {
+	f, bf := behindFixture(t)
+	o := f.opts()
+	o.Merger = bf
+	for i := 0; i < defaultBehindUpdateLimit; i++ {
+		item := f.runWith(t, o)
+		if item.Result != ExecutionResultWaitingChecks || item.ConsecutiveFailures != 0 {
+			t.Fatalf("run %d: result = %s (failures %d), want waiting_checks not counted", i, item.Result, item.ConsecutiveFailures)
+		}
+	}
+	item := f.runWith(t, o)
+	if item.Result != ExecutionResultLimitReached {
+		t.Fatalf("result = %s, want limit_reached", item.Result)
+	}
+	if len(bf.updates) != defaultBehindUpdateLimit {
+		t.Errorf("updates = %d, want %d (no update after the limit)", len(bf.updates), defaultBehindUpdateLimit)
+	}
+	if st := f.state(t); st.opState != "pending" {
+		t.Errorf("state = %s, want pending", st.opState)
+	}
+	atts := f.attempts(t)
+	last := atts[len(atts)-1]
+	if !strings.Contains(last.Detail, "既定ブランチが速く進み、取り込みが 3 回続いたため止めました") {
+		t.Errorf("detail = %q, want the behind-limit reason", last.Detail)
+	}
+	// show が読む課題の詳細にも、取り消した操作の直前の試行の理由が載る。
+	d, err := f.s.GetChallenge(context.Background(), formatChallengeID(f.cid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Operations) != 1 {
+		t.Fatalf("operations = %d, want 1", len(d.Operations))
+	}
+	op := d.Operations[0]
+	if op.LastExecutionResult == nil || *op.LastExecutionResult != ExecutionResultLimitReached ||
+		op.LastExecutionDetail == nil || *op.LastExecutionDetail != "既定ブランチが速く進み、取り込みが 3 回続いたため止めました" {
+		t.Errorf("show operation = result %v detail %v, want limit_reached with the behind-limit reason", op.LastExecutionResult, op.LastExecutionDetail)
+	}
+}
+
+// 人が承認し直した後（最新の承認より後）は、取り込みの累計を数え直す。
+func TestRelease_BehindUpdateCountResetsAfterReapproval(t *testing.T) {
+	f, bf := behindFixture(t)
+	o := f.opts()
+	o.Merger = bf
+	o.Agent.BehindUpdateLimit = 1
+	f.runWith(t, o)
+	if item := f.runWith(t, o); item.Result != ExecutionResultLimitReached {
+		t.Fatalf("result = %s, want limit_reached", item.Result)
+	}
+	writeForTest(t, f.s, func(tx *sql.Tx) error { // 人の承認し直し（limit_reached の取り消しの後）。
+		_, err := tx.Exec(`UPDATE operation SET state = 'approved', version = version + 1 WHERE id = ?`, f.opID)
+		return err
+	})
+	if item := f.runWith(t, o); item.Result != ExecutionResultWaitingChecks {
+		t.Fatalf("after reapproval: result = %s, want waiting_checks (count reset)", item.Result)
+	}
+	if len(bf.updates) != 2 {
+		t.Errorf("updates = %d, want 2", len(bf.updates))
+	}
+}
+
+// 上限は宣言（behind_update_limit）で変えられる。
+func TestRelease_BehindUpdateLimitIsConfigurable(t *testing.T) {
+	f, bf := behindFixture(t)
+	o := f.opts()
+	o.Merger = bf
+	o.Agent.BehindUpdateLimit = 1
+	if item := f.runWith(t, o); item.Result != ExecutionResultWaitingChecks {
+		t.Fatalf("run 1: result = %s, want waiting_checks", item.Result)
+	}
+	if item := f.runWith(t, o); item.Result != ExecutionResultLimitReached {
+		t.Fatalf("run 2: result = %s, want limit_reached", item.Result)
 	}
 }
 
