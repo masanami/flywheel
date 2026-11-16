@@ -107,7 +107,17 @@ type delegateFixture struct {
 	branches *fakeBranchSource
 	j3       *fakeJudgmentInvoker
 	deleg    *fakeDelegator
+	// j3Mu は j3Inputs への追記を守る（RunDelegation を複数の goroutine から呼ぶテストがあるため）。
+	// 読むのは呼び出しが終わってからなので、読む側は鍵を取らない。
+	j3Mu     sync.Mutex
 	j3Inputs []JudgmentLaunchInput
+}
+
+// recordJ3 は J3 の起動の入力を記録する（複数の goroutine から呼ばれうる）。
+func (f *delegateFixture) recordJ3(in JudgmentLaunchInput) {
+	f.j3Mu.Lock()
+	defer f.j3Mu.Unlock()
+	f.j3Inputs = append(f.j3Inputs, in)
 }
 
 func newDelegateFixture(t *testing.T) *delegateFixture {
@@ -126,7 +136,7 @@ func newDelegateFixture(t *testing.T) *delegateFixture {
 		f.git.states[filepath.Join(s.Workspace(), p)] = SlotTreeState{Exists: true, PointerOK: true, OriginURL: "https://github.com/" + remote + ".git"}
 	}
 	f.j3 = &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: briefJSON("BRIEF-MARKER")}}
-	f.j3.onInvoke = func(in JudgmentLaunchInput) { f.j3Inputs = append(f.j3Inputs, in) }
+	f.j3.onInvoke = f.recordJ3
 	f.deleg = &fakeDelegator{result: JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: reportJSON(nil), ReportedTotalCostUSD: float64Ptr(2.5)}}
 	return f
 }
