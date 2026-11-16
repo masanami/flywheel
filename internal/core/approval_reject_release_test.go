@@ -148,11 +148,47 @@ func TestRejectCompletion_ReapprovalExecutesNewRelease(t *testing.T) {
 
 func TestRejectCompletion_StaleAttempt_IsWithdrawn(t *testing.T) {
 	f := newRelFixture(t)
-	coretest.InsertOperationExecution(t, f.s.workspace, f.opID, coretest.ExecutionAttempt{
+	attempt := coretest.InsertOperationExecution(t, f.s.workspace, f.opID, coretest.ExecutionAttempt{
 		StartedAt: execTS(1), ApprovedHead: relHead, PID: 1, Host: "other-host",
 	})
 	approval := rejectCompletionForTest(t, f)
 	if len(approval.WithdrawnReleases) != 1 || len(approval.RunningReleases) != 0 {
 		t.Fatalf("Withdrawn = %v, Running = %v, want the stale attempt's release withdrawn", approval.WithdrawnReleases, approval.RunningReleases)
+	}
+	// 止まった試行は取り下げ（withdraw）と同じく interrupted として閉じてから行を閉じる。
+	var ended sql.NullString
+	var result sql.NullString
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT ended_at, result FROM operation_execution WHERE id = ?`, attempt).Scan(&ended, &result)
+	})
+	if !ended.Valid || result.String != string(ExecutionResultInterrupted) {
+		t.Errorf("stale attempt = ended %v / result %q, want closed as interrupted", ended, result.String)
+	}
+	if st, r := opStateReason(t, f.s, f.opID); st != "closed" || r.String != string(ClosedReasonChallengeRejected) {
+		t.Errorf("operation = %s/%s, want closed/challenge_rejected", st, r.String)
+	}
+}
+
+// 差し戻しの確認前の要約（PrepareRejection）は、書き込みと同じ規則で、取り消す release と実行中のため残す release を返す。
+func TestPrepareRejection_ListsReleasesToWithdrawAndRunning(t *testing.T) {
+	f := newRelFixture(t)
+	pending := coretest.InsertReleaseOperation(t, f.s.workspace, int(f.cid), "https://github.com/o/r/pull/9", "pending")
+	host, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coretest.InsertOperationExecution(t, f.s.workspace, pending, coretest.ExecutionAttempt{
+		StartedAt: formatTimestamp(time.Now().UTC()), ApprovedHead: relHead, PID: int64(os.Getpid()), Host: host,
+	})
+	setChallengeStatus(t, f.s, f.cid, StatusAwaitingCompletionApproval)
+	prev, err := f.s.PrepareRejection(context.Background(), formatChallengeID(f.cid), "直す")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prev.ReleasesToWithdraw) != 1 || prev.ReleasesToWithdraw[0] != formatOperationID(f.opID) {
+		t.Errorf("ReleasesToWithdraw = %v, want [%s]", prev.ReleasesToWithdraw, formatOperationID(f.opID))
+	}
+	if len(prev.RunningReleases) != 1 || prev.RunningReleases[0] != formatOperationID(pending) {
+		t.Errorf("RunningReleases = %v, want [%s]", prev.RunningReleases, formatOperationID(pending))
 	}
 }

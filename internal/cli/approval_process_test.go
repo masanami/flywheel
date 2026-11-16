@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -916,5 +918,78 @@ func TestReject_CompletionApproval_SummaryReportsWithdrawnReleases(t *testing.T)
 				t.Errorf("operation %v = %v/%v, want closed/challenge_rejected", m["id"], m["state"], m["closed_reason"])
 			}
 		}
+	}
+}
+
+// setUpRejectWithRunningReleaseForCLI は、完了確認待ちの課題に未実行の release を 2 件置き、2 件目に
+// 終わっていない（このテストのプロセスが生きている＝止まっていない）試行を足す。差し戻すと 1 件目は
+// 取り消され、2 件目は実行中のため止められずに残る。
+func setUpRejectWithRunningReleaseForCLI(t *testing.T, ws string) (id, withdrawn, running, del string) {
+	t.Helper()
+	id, withdrawn, running, del = setUpChallengeAwaitingCompletionWithOperationsForCLI(t, ws)
+	host, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opID, err := strconv.ParseInt(strings.TrimPrefix(running, "OP-"), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coretest.InsertOperationExecution(t, ws, opID, coretest.ExecutionAttempt{
+		StartedAt: time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), ApprovedHead: "abc", PID: int64(os.Getpid()), Host: host,
+	})
+	return id, withdrawn, running, del
+}
+
+func TestReject_CompletionApproval_SummaryAndOutputReportWithdrawnAndRunningReleases(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id, withdrawn, running, del := setUpRejectWithRunningReleaseForCLI(t, ws)
+
+	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"reject", "--workspace", ws, "--reason", "not yet", id}, id)
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
+	}
+	// 確認前の要約: 取り消す本番反映と、実行中のためマージされうる本番反映を見通しとして出す。
+	for _, want := range []string{
+		"未実行の本番反映 " + withdrawn + " を取り消す",
+		"実行中のため本番反映 " + running + " は止めない（マージされうる）",
+	} {
+		if !strings.Contains(ptyOutput, want) {
+			t.Errorf("pty output = %q, want it to contain %q", ptyOutput, want)
+		}
+	}
+	// 取り消す release は「同時には承認されない」側に並べない（取り消しを隠さない）。
+	assertOperationListing(t, ptyOutput, notApprovedOperationsPrefix, []string{del, running}, []string{withdrawn})
+	// 実行後の出力: 結果として取り消した ID と、止めなかった ID を出す。
+	for _, want := range []string{
+		"未実行の本番反映 " + withdrawn + " を取り消した",
+		"実行中のため本番反映 " + running + " は止めていない（マージされうる）",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, want it to contain %q", stdout, want)
+		}
+	}
+}
+
+func TestReject_CompletionApproval_JSONReportsWithdrawnAndRunningReleases(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id, withdrawn, running, _ := setUpRejectWithRunningReleaseForCLI(t, ws)
+
+	code, ptyOutput, stdout, stderr := runConfirmedChild(t, []string{"reject", "--workspace", ws, "--json", "--reason", "not yet", id}, id)
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0 (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, ptyOutput)
+	}
+	var got struct {
+		WithdrawnReleases []string `json:"withdrawn_releases"`
+		RunningReleases   []string `json:"running_releases"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v (%q)", err, stdout)
+	}
+	if len(got.WithdrawnReleases) != 1 || got.WithdrawnReleases[0] != withdrawn {
+		t.Errorf("withdrawn_releases = %v, want [%s]", got.WithdrawnReleases, withdrawn)
+	}
+	if len(got.RunningReleases) != 1 || got.RunningReleases[0] != running {
+		t.Errorf("running_releases = %v, want [%s]", got.RunningReleases, running)
 	}
 }

@@ -286,8 +286,11 @@ func runRejectChallenge(a Args, verifier core.Verifier, id string, reason string
 		return nil, mapCoreErr(err)
 	}
 	return textOutput{
-		json: view.ChallengeApprovalResponse{Approval: view.FromApproval(*approval), Challenge: view.FromChallenge(*c)},
-		text: challengeText(*c) + rejectReleaseNotes(approval),
+		json: view.ChallengeApprovalResponse{
+			Approval: view.FromApproval(*approval), Challenge: view.FromChallenge(*c),
+			RunningReleases: approval.RunningReleases, WithdrawnReleases: approval.WithdrawnReleases,
+		},
+		text: challengeText(*c) + rejectReleaseNotes(approval.WithdrawnReleases, approval.RunningReleases, false),
 	}, nil
 }
 
@@ -467,9 +470,16 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 			}
 		}
 		writeConditionsAfterRelease(&b, p.ConditionsAfterRelease, view.OutlookFor(len(effect.Approved) > 0, p.HasApprovedRelease))
+		if decision == core.ApprovalDecisionRejected {
+			// 差し戻しは未実行の release を取り消す（規則は core。取り消す release は「承認されない」側から外す）。
+			effect.NotApproved = withoutOperations(effect.NotApproved, p.ReleasesToWithdraw)
+		}
 		fmt.Fprintf(&b, "同時に承認される本番反映 (release): %s\n", operationListSummary(effect.Approved))
 		fmt.Fprintf(&b, "同時には承認されない不可逆操作:     %s\n", operationListSummary(effect.NotApproved))
 		writeReleaseHeadLines(&b, rds)
+		if decision == core.ApprovalDecisionRejected {
+			b.WriteString(rejectReleaseNotes(p.ReleasesToWithdraw, p.RunningReleases, true))
+		}
 	}
 	if reason != nil {
 		fmt.Fprintf(&b, "理由:        %s\n", *reason)
@@ -691,13 +701,40 @@ func cancelOpenContractRuns(a Args, id string) (int, error) {
 
 // rejectReleaseNotes は完了の差し戻しで取り消した本番反映と、実行中のため止めなかった本番反映を伝える行
 // （取り消す規則・実行中の判定は core が持つ。ここは結果を表示するだけ）。
-func rejectReleaseNotes(a *core.Approval) string {
+// preview が真なら確認前の要約の見通し（「取り消す」「止めない」）、偽なら結果（「取り消した」「止めていない」）を書く。
+func rejectReleaseNotes(withdrawn, running []string, preview bool) string {
 	var b strings.Builder
-	if len(a.WithdrawnReleases) > 0 {
-		fmt.Fprintf(&b, "未実行の本番反映 %s を取り消した（マージされない。直して再び完了を承認すると新しい本番反映が立つ）\n", strings.Join(a.WithdrawnReleases, ", "))
+	if len(withdrawn) > 0 {
+		verb := "取り消した"
+		if preview {
+			verb = "取り消す"
+		}
+		fmt.Fprintf(&b, "未実行の本番反映 %s を%s（マージされない。直して再び完了を承認すると新しい本番反映が立つ）\n", strings.Join(withdrawn, ", "), verb)
 	}
-	if len(a.RunningReleases) > 0 {
-		fmt.Fprintf(&b, "実行中のため本番反映 %s は止めていない（マージされうる）\n", strings.Join(a.RunningReleases, ", "))
+	if len(running) > 0 {
+		verb := "止めていない"
+		if preview {
+			verb = "止めない"
+		}
+		fmt.Fprintf(&b, "実行中のため本番反映 %s は%s（マージされうる）\n", strings.Join(running, ", "), verb)
 	}
 	return b.String()
+}
+
+// withoutOperations は ops から ids の ID の操作を除いた一覧を返す。
+func withoutOperations(ops []core.IrreversibleOperation, ids []string) []core.IrreversibleOperation {
+	if len(ids) == 0 {
+		return ops
+	}
+	drop := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		drop[id] = true
+	}
+	out := make([]core.IrreversibleOperation, 0, len(ops))
+	for _, op := range ops {
+		if !drop[op.ID] {
+			out = append(out, op)
+		}
+	}
+	return out
 }

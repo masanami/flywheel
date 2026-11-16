@@ -111,6 +111,11 @@ type ApprovalPreview struct {
 	// （直前の試行の結果が merged_unapproved か。rejectReapproval と同じ判定）。
 	// CLI が release を同時の承認から外す判定（M45H16）に使い、CLI は結果の比較をしない。
 	ReapprovalForbidden map[string]bool
+	// ReleasesToWithdraw・RunningReleases は、この完了確認待ちを差し戻したときに取り消す未実行の release
+	// （承認待ち・承認済み）の ID と、試行が終わっていない（実行中の）ため止めずに残す release の ID
+	// （マージされうる）。判定は差し戻しの書き込みと同じ releaseOnCompletionRejection。差し戻しの要約が使う。
+	ReleasesToWithdraw []string
+	RunningReleases    []string
 }
 
 // approvesPendingReleases は D12 の規則の正本: 「その操作が、対象の課題の
@@ -228,9 +233,24 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 			if err != nil {
 				return err
 			}
+			now := s.currentTime()
 			for _, op := range ops {
 				if isApprovedUnexecutedRelease(op) {
 					preview.HasApprovedRelease = true
+				}
+				if op.Kind == OperationKindRelease && (op.State == OperationStatePending || op.State == OperationStateApproved) {
+					if oid, ok := parseOperationID(op.ID); ok {
+						action, _, err := releaseOnCompletionRejection(ctx, tx, oid, now)
+						if err != nil {
+							return err
+						}
+						switch action {
+						case rejectReleaseWithdraw:
+							preview.ReleasesToWithdraw = append(preview.ReleasesToWithdraw, op.ID)
+						case rejectReleaseRunning:
+							preview.RunningReleases = append(preview.RunningReleases, op.ID)
+						}
+					}
 				}
 				if op.State != OperationStatePending {
 					continue
@@ -947,14 +967,22 @@ func withdrawUnexecutedReleases(ctx context.Context, tc *transitionCtx) (withdra
 		return nil, nil, err
 	}
 	for _, t := range targets {
-		if last, err := latestOperationExecution(ctx, tc.tx, t.id); err != nil {
+		action, stale, err := releaseOnCompletionRejection(ctx, tc.tx, t.id, tc.now)
+		if err != nil {
 			return nil, nil, err
-		} else if last != nil && last.Result == ExecutionResultMergedUnapproved {
-			// 承認なしでマージされた事実は本番反映の片付け（release_tidy）が merged_unapproved で閉じる。ここでは触らない。
+		}
+		switch action {
+		case rejectReleaseKeep:
 			continue
-		} else if last != nil && last.open() && !releaseAttemptStale(last, tc.now) {
+		case rejectReleaseRunning:
 			running = append(running, formatOperationID(t.id))
 			continue
+		}
+		if stale != nil {
+			// 止まった試行は取り下げ（withdraw）・`op exec` の再実行と同じく interrupted として閉じてから行を閉じる。
+			if err := closeOperationExecution(ctx, tc.tx, stale.ID, closeOperationExecutionInput{EndedAt: tc.now, Result: ExecutionResultInterrupted}); err != nil {
+				return nil, nil, err
+			}
 		}
 		res, err := tc.tx.ExecContext(ctx,
 			`UPDATE operation SET state = ?, version = ?, closed_reason = ?, closed_at = ? WHERE id = ? AND version = ? AND state = ?`,
@@ -976,4 +1004,38 @@ func withdrawUnexecutedReleases(ctx context.Context, tc *transitionCtx) (withdra
 		withdrawn = append(withdrawn, formatOperationID(t.id))
 	}
 	return withdrawn, running, nil
+}
+
+// rejectReleaseAction は完了の差し戻しで未実行の release 1 件をどう扱うか。
+type rejectReleaseAction int
+
+const (
+	// rejectReleaseWithdraw は取り消す（closed・challenge_rejected）。
+	rejectReleaseWithdraw rejectReleaseAction = iota
+	// rejectReleaseRunning は試行が終わっていない（止まっていない）ので止めずに残す（マージされうる）。
+	rejectReleaseRunning
+	// rejectReleaseKeep は直前の試行が merged_unapproved で、本番反映の片付け（release_tidy）に任せて触らない。
+	rejectReleaseKeep
+)
+
+// releaseOnCompletionRejection は完了の差し戻しでの未実行の release（opID）の扱いを決める規則の正本。
+// 差し戻しの要約（prepareApproval）と差し戻しの書き込み（withdrawUnexecutedReleases）が共有する。
+// 取り消す release に止まった（stale の）試行があれば、それを stale で返す（書き込み側が interrupted として閉じる）。
+func releaseOnCompletionRejection(ctx context.Context, tx *sql.Tx, opID int64, now time.Time) (rejectReleaseAction, *operationExecutionRow, error) {
+	last, err := latestOperationExecution(ctx, tx, opID)
+	if err != nil {
+		return 0, nil, err
+	}
+	switch {
+	case last == nil:
+		return rejectReleaseWithdraw, nil, nil
+	case last.Result == ExecutionResultMergedUnapproved:
+		return rejectReleaseKeep, nil, nil
+	case !last.open():
+		return rejectReleaseWithdraw, nil, nil
+	case !releaseAttemptStale(last, now):
+		return rejectReleaseRunning, nil, nil
+	default:
+		return rejectReleaseWithdraw, last, nil
+	}
 }
