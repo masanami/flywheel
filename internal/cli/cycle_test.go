@@ -40,6 +40,7 @@ const cycleFullAgentJSON = `{
   "max_parallel_runs": 2,
   "rework_limit": 3,
   "failure_limit": 2,
+  "behind_update_limit": 3,
   "improve_threshold": 10,
   "conflict_prediction_budget_usd": 1,
   "serial_judgment_cycle_budget_usd": 3,

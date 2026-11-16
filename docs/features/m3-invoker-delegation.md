@@ -670,6 +670,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
   "max_parallel_runs": 2,
   "rework_limit": 3,
   "failure_limit": 2,
+  "behind_update_limit": 3,
   "conflict_prediction_budget_usd": 1,
   "serial_judgment_cycle_budget_usd": 3
 }
@@ -677,6 +678,7 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 
 - `conflict_prediction_budget_usd` は S2 で足す（【決定 2026-10-01 親 M3P29】。金額なので 0 以下は `config_invalid`）。
 - `judgment_budget_usd.J9`（1 組の判断の上限額。既定 0.5）と `serial_judgment_cycle_budget_usd`（1 周の J9 の費用の上限。既定 3）は §同時に進めてよいかの判断（J9）で足す（【決定 2026-11-14 オーナー Q1】。金額なので 0 以下は `config_invalid`）。
+- `behind_update_limit` は本番反映の間に BEHIND の取り込みを依頼してよい累計の回数（正の整数でなければ `config_invalid`。判定の順は m4.5 の §実行の判定の順）。
 - すべてのキーは省略でき、省略したキーは上の値を既定とする。`position_file` だけは既定を持たない（省略したら J1・J2 を起動しない＝`config_invalid`）。
 
 #### `.flywheel/connectors.json`【決定 2026-09-28 オーナー M3H2／親 M3P1】

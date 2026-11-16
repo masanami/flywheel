@@ -38,6 +38,8 @@ const (
 	defaultMaxParallelRuns    = 2
 	defaultReworkLimit        = 3
 	defaultFailureLimit       = 2
+	// defaultBehindUpdateLimit は behind_update_limit の既定（本番反映の間に、BEHIND の取り込みを依頼してよい累計の回数）。
+	defaultBehindUpdateLimit = 3
 	// defaultImproveThreshold は improve_threshold の既定（改修の提案を作る発生の件数のしきい値）。
 	defaultImproveThreshold = 10
 
@@ -111,6 +113,8 @@ type AgentDeclaration struct {
 	MaxParallelRuns   int
 	ReworkLimit       int
 	FailureLimit      int
+	// BehindUpdateLimit は behind_update_limit（正の整数。既定 3）。
+	BehindUpdateLimit int
 	// ImproveThreshold は improve_threshold（正の整数。既定 10）。
 	ImproveThreshold int
 
@@ -150,6 +154,7 @@ func defaultAgentDeclaration() *AgentDeclaration {
 		MaxParallelRuns:   defaultMaxParallelRuns,
 		ReworkLimit:       defaultReworkLimit,
 		FailureLimit:      defaultFailureLimit,
+		BehindUpdateLimit: defaultBehindUpdateLimit,
 		ImproveThreshold:  defaultImproveThreshold,
 
 		ConflictPredictionBudgetUSD:  defaultConflictPredictionBudgetUSD,
@@ -255,7 +260,7 @@ func (d *AgentDeclaration) RequirePositionFile(base string) error {
 var agentTopLevelKeys = map[string]bool{
 	"version": true, "position_file": true, "cycle_budget_usd": true,
 	"size_budgets_usd": true, "max_run_budget_usd": true, "judgment_budget_usd": true,
-	"timeout_sec": true, "max_parallel_runs": true, "rework_limit": true, "failure_limit": true, "improve_threshold": true,
+	"timeout_sec": true, "max_parallel_runs": true, "rework_limit": true, "failure_limit": true, "behind_update_limit": true, "improve_threshold": true,
 	"conflict_prediction_budget_usd": true, "serial_judgment_cycle_budget_usd": true,
 	"memory_dir": true, "memory_write_limit": true,
 }
@@ -360,6 +365,17 @@ func parseAgentDeclaration(data []byte) (*AgentDeclaration, error) {
 		decl.FailureLimit = i
 	} else {
 		decl.FailureLimit = defaultFailureLimit
+		usedDefault = true
+	}
+
+	if v, ok := raw["behind_update_limit"]; ok {
+		i, err := decodeIntLiteral(v)
+		if err != nil {
+			return nil, fmt.Errorf("behind_update_limit: %w", err)
+		}
+		decl.BehindUpdateLimit = i
+	} else {
+		decl.BehindUpdateLimit = defaultBehindUpdateLimit
 		usedDefault = true
 	}
 
@@ -776,6 +792,9 @@ func (d *AgentDeclaration) validate() error {
 	}
 	if d.FailureLimit <= 0 {
 		return fmt.Errorf("%w: failure_limit must be a positive integer, got %d", ErrConfigInvalid, d.FailureLimit)
+	}
+	if d.BehindUpdateLimit <= 0 {
+		return fmt.Errorf("%w: behind_update_limit must be a positive integer, got %d", ErrConfigInvalid, d.BehindUpdateLimit)
 	}
 	if d.ImproveThreshold <= 0 {
 		return fmt.Errorf("%w: improve_threshold must be a positive integer, got %d", ErrConfigInvalid, d.ImproveThreshold)

@@ -62,7 +62,7 @@ type ReleaseExecOptions struct {
 	Compare UpstreamCompareSource
 	// Connectors は PR のリポジトリ・既定ブランチ・マージの方式を引く宣言。
 	Connectors *ConnectorsDeclaration
-	// Agent は failure_limit の出どころ。nil なら既定値。
+	// Agent は failure_limit・behind_update_limit の出どころ。nil なら既定値。
 	Agent *AgentDeclaration
 	// CycleID は発生に持たせる周の ID（"Y-<n>"）。空なら周を持たない（NULL）。形式不正は ErrValidation。
 	CycleID string
@@ -623,6 +623,19 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 	}
 	if pr.MergeableState == UpstreamMergeStateBehind {
 		if u, ok := opts.Merger.(UpstreamPullRequestBranchUpdater); ok {
+			// 取り込みの累計が上限に達していれば、これ以上取り込まず取り消す（limit_reached。人の判断待ち）。
+			var done int
+			if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+				var err error
+				done, err = behindUpdateCount(ctx, tx, row.ID)
+				return err
+			}); err != nil {
+				return releaseJudgment{result: ExecutionResultUpstreamFailed, observedHead: observed, detail: "count branch updates: " + err.Error()}
+			}
+			if limit := behindUpdateLimit(opts.Agent); done >= limit {
+				return releaseJudgment{result: ExecutionResultLimitReached, observedHead: observed,
+					detail: fmt.Sprintf("既定ブランチが速く進み、取り込みが %d 回続いたため止めました", done)}
+			}
 			if err := u.UpdatePullRequestBranch(ctx, repo, number, pr.HeadSHA); err != nil {
 				// 取り込みで衝突が出た（読み直した PR が mergeable=false）なら、衝突の立て直し（not_mergeable）へ回す。
 				if again, gerr := opts.Checks.GetPullRequestChecks(ctx, repo, number); gerr == nil && again.Mergeable != nil && !*again.Mergeable {
@@ -630,7 +643,7 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 				}
 				return releaseJudgment{result: ExecutionResultMergeFailed, observedHead: observed, detail: "update branch: " + err.Error()}
 			}
-			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: "branch updated: the pull request was behind " + decl.DefaultBranch}
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: branchUpdatedDetailPrefix + " the pull request was behind " + decl.DefaultBranch}
 		}
 	}
 	// 11
