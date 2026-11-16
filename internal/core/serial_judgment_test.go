@@ -544,3 +544,196 @@ func TestJ9_Declared_RunningDelegation_IsNotJudged(t *testing.T) {
 		t.Errorf("groups = %v, want %v", groupsOf(res), want)
 	}
 }
+
+// j9Texts は J9 の呼び出しに渡した区画の本文を、呼び出しごとに 1 つの文字列へつないで返す。
+func j9Texts(inv *j9Invoker) []string {
+	var out []string
+	for _, c := range inv.called() {
+		var joined string
+		for _, s := range c.Sections {
+			joined += s.Content + "\n"
+		}
+		out = append(out, joined)
+	}
+	return out
+}
+
+// 全体の同時委譲数の枠がほかのリポジトリの委譲で埋まっているときは、J9 を呼ばない。
+func TestJ9_GlobalCapacityFilledByAnotherRepo_NeverCallsTheJudgment(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "plain")
+	f.agent.MaxParallelRuns = 2 // 他のリポジトリの 1 件で空きは 1。リポジトリごとに数えると 2 件が起動しうる
+	run := f.candidate(t, "other", "P1", 31)
+	release := f.holdRunning(t, run)
+	defer release()
+	a := f.candidate(t, "plain", "P1", 21)
+	b := f.candidate(t, "plain", "P1", 22)
+	in := f.in(f.cycle(t, 300), nil)
+	in.Judgment = inv
+	var targets []int64
+	for _, id := range []string{a, b} {
+		n, _ := parseChallengeID(id)
+		targets = append(targets, n)
+	}
+	plan, err := f.s.planDelegation(context.Background(), in, targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(inv.called()); n != 0 {
+		t.Fatalf("J9 calls = %d, want 0 (the global capacity is filled by another repo)", n)
+	}
+	if len(plan.groups) != 1 || len(plan.groups[0].Candidates) != 2 {
+		t.Errorf("groups = %+v, want one serial group of both candidates", plan.groups)
+	}
+}
+
+// 判断する組は、全リポジトリの起動の順で全体の空きの分だけ取った候補の組に限る。
+func TestJ9_PairsAreLimitedToCandidatesThatCanStartAcrossRepos(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "plain")
+	f.agent.MaxParallelRuns = 2
+	f.candidate(t, "multi", "P0", 11) // 起動の順の先頭（別のリポジトリ）
+	a := f.candidate(t, "plain", "P1", 21)
+	b := f.candidate(t, "plain", "P1", 22)
+	res := f.runPlanWith(t, inv)
+	if n := len(inv.called()); n != 0 {
+		t.Fatalf("J9 calls = %d, want 0 (only one plain candidate can start; its pair is not judged)", n)
+	}
+	var found bool
+	for _, g := range res.SerialGroups {
+		if reflect.DeepEqual(g.Challenges, []string{a, b}) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("groups = %v, want [%s %s] serial", groupsOf(res), a, b)
+	}
+}
+
+// 直列と判断した組で空いた枠は列の次の候補へ回り、その候補との組も判断する。
+func TestJ9_FreedSlotGoesToTheNextCandidate_AndItsPairsAreJudged(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "plain")
+	f.agent.MaxParallelRuns = 2
+	f.conn.Repos[3].Slots.Paths = []string{"p1", "p2", "p3"}
+	f.git.states[f.s.Workspace()+"/p3"] = SlotTreeState{Exists: true, PointerOK: true, OriginURL: "https://github.com/o/plain.git"}
+	a := f.candidate(t, "plain", "P1", 21)
+	b := f.candidate(t, "plain", "P1", 22)
+	c := f.candidate(t, "plain", "P1", 23)
+	inv.respond = func(_ JudgmentLaunchInput, n int) JudgmentLaunchOutput {
+		if n == 1 {
+			return j9Out("strong", "同じ規則を決め直す", 0.1)
+		}
+		return j9Out("weak", "独立", 0.1)
+	}
+	res := f.runPlanWith(t, inv)
+	if n := len(inv.called()); n != 3 {
+		t.Fatalf("J9 calls = %d, want 3 ((a,b) then the pairs of c)", n)
+	}
+	if want := [][]string{{a, b}, {c}}; !reflect.DeepEqual(groupsOf(res), want) {
+		t.Errorf("groups = %v, want %v", groupsOf(res), want)
+	}
+}
+
+// 1 周の費用の上限は、起動の順で先の組（列の上位どうしの組）から使う。
+func TestJ9_CycleBudget_IsSpentOnPairsThatStartFirst(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "multi", "plain")
+	f.agent.MaxParallelRuns = 4
+	f.agent.SerialJudgmentCycleBudgetUSD = 1.0
+	m1 := f.candidate(t, "multi", "P1", 11)
+	m2 := f.candidate(t, "multi", "P1", 12)
+	p1 := f.candidate(t, "plain", "P0", 21)
+	p2 := f.candidate(t, "plain", "P0", 22)
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil, pairOf(11, 12, shared("a.go")))
+	}
+	inv.respond = func(JudgmentLaunchInput, int) JudgmentLaunchOutput { return j9Out("weak", "独立", 0.6) }
+	res := f.runPlanWith(t, inv)
+	texts := j9Texts(inv)
+	if len(texts) != 1 || !strings.Contains(texts[0], p1) || !strings.Contains(texts[0], p2) {
+		t.Fatalf("J9 calls = %v, want one call for the pair (%s, %s) that starts first", texts, p1, p2)
+	}
+	if want := [][]string{{m1, m2}, {p1}, {p2}}; !reflect.DeepEqual(groupsOf(res), want) {
+		t.Errorf("groups = %v, want %v (the multi pair is serial without judgment)", groupsOf(res), want)
+	}
+	if !hasReason(res.SerialGroups[0].Reasons, SerialReasonJudgmentBudget) {
+		t.Errorf("reasons = %v, want serial_judgment_budget", res.SerialGroups[0].Reasons)
+	}
+}
+
+// 互いに前提にし合う組の判断は最後に回り、ほかの組の判断の予算を奪わない。
+func TestJ9_MutualPairs_AreJudgedLast(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "multi", "other")
+	f.agent.MaxParallelRuns = 4
+	f.agent.SerialJudgmentCycleBudgetUSD = 1.0
+	m1 := f.candidate(t, "multi", "P1", 11) // 起動の順で先だが、互いに前提にし合う組
+	m2 := f.candidate(t, "multi", "P1", 12)
+	o1 := f.candidate(t, "other", "P1", 31)
+	o2 := f.candidate(t, "other", "P1", 32)
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil,
+			PredictedPair{Issues: [2]int{11, 12}, Status: predictPairPredicted, DependencyStated: []PredictedDependEdge{{11, 12}, {12, 11}}},
+			pairOf(31, 32, shared("a.go")))
+	}
+	inv.respond = func(JudgmentLaunchInput, int) JudgmentLaunchOutput { return j9Out("weak", "独立", 0.6) }
+	res := f.runPlanWith(t, inv)
+	texts := j9Texts(inv)
+	if len(texts) != 1 || !strings.Contains(texts[0], o1) || !strings.Contains(texts[0], o2) {
+		t.Fatalf("J9 calls = %v, want one call for the shared-file pair (%s, %s) before the mutual pair", texts, o1, o2)
+	}
+	var mutualBudget bool
+	for _, g := range res.SerialGroups {
+		if reflect.DeepEqual(g.Challenges, []string{m1, m2}) {
+			mutualBudget = hasReason(g.Reasons, SerialReasonMergeCandidate) && hasReason(g.Reasons, SerialReasonJudgmentBudget)
+		}
+	}
+	if !mutualBudget {
+		t.Errorf("groups = %+v, want the mutual pair serial with merge_candidate and serial_judgment_budget", res.SerialGroups)
+	}
+}
+
+// 互いに前提にし合う組は、空いた枠で後から入る組より先に周の予算を使わない（反復をまたいでも最後に回る）。
+func TestJ9_MutualPairs_AreJudgedLastAcrossRounds(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "multi", "plain")
+	f.agent.MaxParallelRuns = 3
+	f.agent.SerialJudgmentCycleBudgetUSD = 1.0
+	f.candidate(t, "multi", "P0", 11)
+	f.candidate(t, "multi", "P0", 12)
+	p1 := f.candidate(t, "plain", "P1", 21)
+	p2 := f.candidate(t, "plain", "P1", 22)
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil, PredictedPair{Issues: [2]int{11, 12}, Status: predictPairPredicted,
+			DependencyStated: []PredictedDependEdge{{11, 12}, {12, 11}}})
+	}
+	inv.respond = func(JudgmentLaunchInput, int) JudgmentLaunchOutput { return j9Out("weak", "独立", 0.6) }
+	f.runPlanWith(t, inv)
+	texts := j9Texts(inv)
+	if len(texts) != 1 || !strings.Contains(texts[0], p1) || !strings.Contains(texts[0], p2) {
+		t.Fatalf("J9 calls = %v, want only the plain pair (%s, %s); the mutual pair is judged last and hits the cycle cap", texts, p1, p2)
+	}
+}
+
+// 動いている課題があって予測の宣言が無い（判断しない）リポジトリの候補は起動しないので、全体の空きを使わず、
+// ほかのリポジトリの候補の組が判断される。
+func TestJ9_CandidatesThatCannotStart_DoNotUseTheGlobalCapacity(t *testing.T) {
+	t.Parallel()
+	f, inv := serialJudgmentFixture(t, "multi") // plain は serial_judgment が偽
+	f.agent.MaxParallelRuns = 3
+	run := f.candidate(t, "plain", "P1", 41)
+	release := f.holdRunning(t, run)
+	defer release()
+	f.candidate(t, "plain", "P0", 42) // 動いている課題と同じグループ（起動しない）
+	f.candidate(t, "plain", "P0", 43)
+	f.candidate(t, "multi", "P1", 11)
+	f.candidate(t, "multi", "P1", 12)
+	f.pred.out = func(in PredictLaunchInput) PredictLaunchOutput {
+		return predictionFor(in, nil, pairOf(11, 12, shared("a.go")))
+	}
+	f.runPlanWith(t, inv)
+	if n := len(inv.called()); n != 1 {
+		t.Fatalf("J9 calls = %d, want 1 (the multi pair)", n)
+	}
+}

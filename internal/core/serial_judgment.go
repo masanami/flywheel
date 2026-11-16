@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -126,27 +127,13 @@ func validateJ9Output(data []byte) (J9Verdict, string, bool) {
 	return v, reason, true
 }
 
-// judgedPair は判断に回す組（a が起動の順で先）。
+// judgedPair は判断に回す組（a が起動の順で先）。posA・posB は全リポジトリの起動の順での位置、
+// mutual は互いに前提にし合う組、out は組の予測の出力（予測の宣言が無ければ nil）。
 type judgedPair struct {
 	a, b       planCandidate
-	idxA, idxB int
-}
-
-// serialJudgmentCapacity は repo でこの周に同時に起動しうる候補の数（全体の同時委譲数とリポジトリの
-// スロットの数の小さい方から、動いている課題の数を引く）。判断する組はこの数までの候補の組だけ。
-func serialJudgmentCapacity(in DelegateInput, repo ConnectorRepo, running int) int {
-	k := in.AgentDecl.MaxParallelRuns
-	slots := repo.Slots.Count
-	if repo.Slots.Provider == string(slotProviderClone) {
-		slots = len(repo.Slots.Paths)
-	}
-	if slots > 0 && (k <= 0 || slots < k) {
-		k = slots
-	}
-	if k -= running; k < 0 {
-		k = 0
-	}
-	return k
+	posA, posB int
+	mutual     bool
+	out        *ConflictPredictionOutput
 }
 
 // serialJudgmentSpentMicros は周 cycleID で J9 に使った費用（終了した run は費用、終了していない run は
@@ -295,25 +282,113 @@ func pairPredictionText(out *ConflictPredictionOutput, a, b planCandidate) strin
 	return "この組の予測は得られなかった。2 つの計画だけで判断する。"
 }
 
-// capacityCandidates は、起動の順に並べた候補のうち同時に起動しうる先頭の free 件を返す。
-func capacityCandidates(sorted []planCandidate, free int) []planCandidate {
-	if free > len(sorted) {
-		free = len(sorted)
-	}
-	if free < 0 {
-		free = 0
-	}
-	return sorted[:free]
+// judgeRepo は判断の対象のリポジトリ 1 つ（予測までを終えたもの）。cands は起動の順。
+type judgeRepo struct {
+	repo    ConnectorRepo
+	running []planRunning
+	cands   []planCandidate
+	pred    *repoPrediction
 }
 
-// judgeDeclaredPairs は予測の宣言があるリポジトリで、判断に回す組（候補どうしで、先後の依存が無く、
-// 両方が触る対象がある組、または互いに前提にし合う組。起動しうる数までの候補の組だけ）を判断させる。
-func (s *Store) judgeDeclaredPairs(ctx context.Context, in DelegateInput, repo ConnectorRepo, running []planRunning, cands []planCandidate, out *ConflictPredictionOutput) (map[pairKey]pairJudgment, error) {
-	sorted := append([]planCandidate(nil), cands...)
-	sortCandidates(sorted)
-	head := capacityCandidates(sorted, serialJudgmentCapacity(in, repo, len(running)))
+// judgesPairs はこのリポジトリが組の判断（J9）を使うか。
+func (r *judgeRepo) judgesPairs() bool {
+	return r.pred.UndeclaredJudged || (r.pred.SerialJudgment && r.pred.Output != nil)
+}
+
+// slotRoom はこのリポジトリのスロットの数から、動いている課題の数を引いた数（スロットの宣言が無ければ上限なし）。
+func (r *judgeRepo) slotRoom() int {
+	slots := r.repo.Slots.Count
+	if r.repo.Slots.Provider == string(slotProviderClone) {
+		slots = len(r.repo.Slots.Paths)
+	}
+	if slots <= 0 {
+		return math.MaxInt32
+	}
+	if slots -= len(r.running); slots < 0 {
+		slots = 0
+	}
+	return slots
+}
+
+// globalDelegationFree は全体の同時委譲数の上限（max_parallel_runs）から、全リポジトリで動いている委譲の数を
+// 引いた数（上限の宣言が無ければ上限なし）。
+func (s *Store) globalDelegationFree(ctx context.Context, in DelegateInput) (int, error) {
+	k := in.AgentDecl.MaxParallelRuns
+	if k <= 0 {
+		return math.MaxInt32, nil
+	}
+	var active int
+	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		active, err = activeDelegationCount(ctx, tx)
+		return err
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return 0, err
+	}
+	if k -= active; k < 0 {
+		k = 0
+	}
+	return k, nil
+}
+
+// predFor は head（このリポジトリの起動しうる先頭の候補）での直列化グループを作るための予測の結果を返す。
+func (r *judgeRepo) predFor(head []planCandidate, verdicts map[pairKey]pairJudgment) repoPrediction {
+	p := *r.pred
+	if !r.judgesPairs() {
+		return p
+	}
+	seqs := map[int64]bool{}
+	for _, c := range r.cands {
+		seqs[c.Seq] = true
+	}
+	p.Verdicts = map[pairKey]pairJudgment{}
+	for k, v := range verdicts {
+		if seqs[k[0]] && seqs[k[1]] {
+			p.Verdicts[k] = v
+		}
+	}
+	p.Free = len(head)
+	return p
+}
+
+// startCount は head から同時に起動しうる数（動いている課題を含まない直列化グループの数。動いている課題を含む
+// グループの候補は、判断するリポジトリでだけ候補の数だけ枠を使うものとして数える）。
+func (r *judgeRepo) startCount(head []planCandidate, verdicts map[pairKey]pairJudgment) int {
+	if len(head) == 0 {
+		return 0
+	}
+	n := 0
+	for _, g := range buildRepoGroups(r.repo.Name, r.running, head, r.predFor(head, verdicts)) {
+		if len(g.Running) == 0 {
+			n++
+		} else if r.judgesPairs() {
+			// 動いている課題と同じグループの候補は起動しないが、判断するリポジトリでは枠が空いたと数えると
+			// 同じグループへ候補が際限なく入り、起動しえない組まで判断するので、候補の数だけ枠を使うものとして数える
+			// （判断しないリポジトリは組を判断しないので、起動しない候補は枠を使わない）。
+			n += len(g.Candidates)
+		}
+	}
+	return n
+}
+
+// newPairs は head の候補どうしの組のうち、まだ判断していない判断に回す組を返す。
+func (r *judgeRepo) newPairs(head []planCandidate, pos map[int64]int, done map[pairKey]pairJudgment) []judgedPair {
 	if len(head) < 2 {
-		return nil, nil
+		return nil
+	}
+	mk := func(i, j int, mutual bool, out *ConflictPredictionOutput) judgedPair {
+		return judgedPair{a: head[i], b: head[j], posA: pos[head[i].Seq], posB: pos[head[j].Seq], mutual: mutual, out: out}
+	}
+	var pairs []judgedPair
+	if r.pred.UndeclaredJudged {
+		for i := 0; i < len(head); i++ {
+			for j := i + 1; j < len(head); j++ {
+				if _, ok := done[newPairKey(head[i], head[j])]; !ok {
+					pairs = append(pairs, mk(i, j, false, nil))
+				}
+			}
+		}
+		return pairs
 	}
 	idx := map[int]int{}
 	for i, c := range head {
@@ -322,8 +397,7 @@ func (s *Store) judgeDeclaredPairs(ctx context.Context, in DelegateInput, repo C
 		}
 	}
 	seen := map[pairKey]bool{}
-	var pairs []judgedPair
-	for _, e := range predictedEdges(out.Pairs, func(n int) bool { _, ok := idx[n]; return ok }, true) {
+	for _, e := range predictedEdges(r.pred.Output.Pairs, func(n int) bool { _, ok := idx[n]; return ok }, true) {
 		if e.first != 0 || (!hasReason(e.reasons, SerialReasonSharedFiles) && !hasReason(e.reasons, SerialReasonMergeCandidate)) {
 			continue
 		}
@@ -332,38 +406,132 @@ func (s *Store) judgeDeclaredPairs(ctx context.Context, in DelegateInput, repo C
 			i, j = j, i
 		}
 		key := newPairKey(head[i], head[j])
-		if seen[key] {
+		if _, ok := done[key]; ok || seen[key] {
 			continue
 		}
 		seen[key] = true
-		pairs = append(pairs, judgedPair{a: head[i], b: head[j], idxA: i, idxB: j})
+		pairs = append(pairs, mk(i, j, e.mutual, r.pred.Output))
 	}
-	sortJudgedPairs(pairs)
-	return s.judgePairs(ctx, in, pairs, func(p judgedPair) string { return pairPredictionText(out, p.a, p.b) })
+	return pairs
 }
 
-// judgeUndeclaredPairs は予測の宣言が無いリポジトリで、起動しうる数までの候補の全部の組を判断させる。
-func (s *Store) judgeUndeclaredPairs(ctx context.Context, in DelegateInput, repo ConnectorRepo, cands []planCandidate) (map[pairKey]pairJudgment, int, error) {
-	sorted := append([]planCandidate(nil), cands...)
-	sortCandidates(sorted)
-	free := serialJudgmentCapacity(in, repo, 0)
-	head := capacityCandidates(sorted, free)
-	var pairs []judgedPair
-	for i := 0; i < len(head); i++ {
-		for j := i + 1; j < len(head); j++ {
-			pairs = append(pairs, judgedPair{a: head[i], b: head[j], idxA: i, idxB: j})
+// judgeAcrossRepos は全リポジトリの候補を起動の順に 1 列に並べ、全体の空き（max_parallel_runs から動いている
+// 委譲の数を引いた数）と各リポジトリのスロットの空きの範囲で、上から起動しうる候補を取り、その候補どうしの
+// 組を判断させる。判断の結果（直列）で空いた枠は列の次の候補へ回し、新しく入った候補との組を判断する
+// （費用の上限の残りの分だけ）。判断の結果は各リポジトリの予測の結果（Verdicts・Free）へ入れる。
+func (s *Store) judgeAcrossRepos(ctx context.Context, in DelegateInput, repos []*judgeRepo) error {
+	judging := false
+	for _, r := range repos {
+		if r.judgesPairs() {
+			judging = true
 		}
 	}
-	v, err := s.judgePairs(ctx, in, pairs, func(p judgedPair) string { return pairPredictionText(nil, p.a, p.b) })
-	return v, len(head), err
+	if !judging {
+		return nil
+	}
+	free, err := s.globalDelegationFree(ctx, in)
+	if err != nil {
+		return err
+	}
+	type entry struct {
+		c planCandidate
+		r *judgeRepo
+	}
+	var order []entry
+	for _, r := range repos {
+		for _, c := range r.cands {
+			order = append(order, entry{c, r})
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool { return order[i].c.before(order[j].c) })
+	pos := map[int64]int{}
+	for i, e := range order {
+		pos[e.c.Seq] = i
+	}
+	taken := make([]bool, len(order))
+	heads := map[*judgeRepo][]planCandidate{}
+	verdicts := map[pairKey]pairJudgment{}
+	mutualPairs := map[pairKey]judgedPair{}
+	for {
+		room := free
+		starts := map[*judgeRepo]int{}
+		for _, r := range repos {
+			starts[r] = r.startCount(heads[r], verdicts)
+			room -= starts[r]
+		}
+		added := map[*judgeRepo]int{}
+		grew := false
+		for i, e := range order {
+			if room <= 0 {
+				break
+			}
+			if taken[i] || e.r.slotRoom()-starts[e.r]-added[e.r] <= 0 {
+				continue
+			}
+			taken[i] = true
+			heads[e.r] = append(heads[e.r], e.c)
+			added[e.r]++
+			room--
+			grew = true
+		}
+		if !grew {
+			break
+		}
+		var pairs []judgedPair
+		for _, r := range repos {
+			if !r.judgesPairs() {
+				continue
+			}
+			for _, p := range r.newPairs(heads[r], pos, verdicts) {
+				if p.mutual {
+					// 互いに前提にし合う組は判断の結果に関わらず直列でグループを変えないので、ループを抜けた後に
+					// 残りの予算でまとめて判断する（ほかの組の予算を奪わない）。
+					mutualPairs[newPairKey(p.a, p.b)] = p
+					continue
+				}
+				pairs = append(pairs, p)
+			}
+		}
+		sortJudgedPairs(pairs)
+		got, err := s.judgePairs(ctx, in, pairs, func(p judgedPair) string { return pairPredictionText(p.out, p.a, p.b) })
+		if err != nil {
+			return err
+		}
+		for k, v := range got {
+			verdicts[k] = v
+		}
+	}
+	var last []judgedPair
+	for _, p := range mutualPairs {
+		last = append(last, p)
+	}
+	sortJudgedPairs(last)
+	got, err := s.judgePairs(ctx, in, last, func(p judgedPair) string { return pairPredictionText(p.out, p.a, p.b) })
+	if err != nil {
+		return err
+	}
+	for k, v := range got {
+		verdicts[k] = v
+	}
+	for _, r := range repos {
+		if r.judgesPairs() {
+			*r.pred = r.predFor(heads[r], verdicts)
+		}
+	}
+	return nil
 }
 
+// sortJudgedPairs は判断の順に並べる: 互いに前提にし合う組を最後に回し、それぞれの中は、列の上位どうしの組
+// （後ろの候補の位置、続けて前の候補の位置が小さい組）から。
 func sortJudgedPairs(ps []judgedPair) {
 	sort.SliceStable(ps, func(i, j int) bool {
-		if ps[i].idxA != ps[j].idxA {
-			return ps[i].idxA < ps[j].idxA
+		if ps[i].mutual != ps[j].mutual {
+			return !ps[i].mutual
 		}
-		return ps[i].idxB < ps[j].idxB
+		if ps[i].posB != ps[j].posB {
+			return ps[i].posB < ps[j].posB
+		}
+		return ps[i].posA < ps[j].posA
 	})
 }
 

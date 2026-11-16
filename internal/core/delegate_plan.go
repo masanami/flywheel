@@ -232,11 +232,7 @@ func (s *Store) predictRepo(ctx context.Context, in DelegateInput, repo Connecto
 	// 予測の宣言が無く、同時に判断点（J9）で判断するリポジトリ。動いている課題があれば判断しない（動いている課題との
 	// 組は判断に回さず直列。今までと同じ 1 つのグループになる）。
 	if repo.SerialJudgment && connector.ConflictPrediction == nil && len(running) == 0 && len(cands) >= 2 {
-		verdicts, free, err := s.judgeUndeclaredPairs(ctx, in, repo, cands)
-		if err != nil {
-			return repoPrediction{}, err
-		}
-		return repoPrediction{UndeclaredJudged: true, Verdicts: verdicts, Free: free}, nil
+		return repoPrediction{UndeclaredJudged: true}, nil
 	}
 	var reasons []SerialGroupReason
 	add := func(r SerialGroupReason) {
@@ -325,10 +321,7 @@ func (s *Store) predictRepo(ctx context.Context, in DelegateInput, repo Connecto
 	// 衝突の判定から外すパスのファイルは、重なりを数える前に除く（宣言が空なら何もしない）。
 	rp := repoPrediction{Output: excludeSharedFiles(res.Output, repo.ConflictExcludePaths), HeadSHA: res.Output.HeadSHA, RunID: runID}
 	if repo.SerialJudgment {
-		rp.SerialJudgment = true
-		if rp.Verdicts, err = s.judgeDeclaredPairs(ctx, in, repo, running, cands, rp.Output); err != nil {
-			return repoPrediction{}, err
-		}
+		rp.SerialJudgment = true // 組の判断は全リポジトリの予測の後に judgeAcrossRepos がまとめて行う
 	}
 	return rp, nil
 }
@@ -370,6 +363,12 @@ func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []
 	if err != nil {
 		return nil, err
 	}
+	type plannedRepo struct {
+		repo  ConnectorRepo
+		cands []planCandidate
+		pred  repoPrediction
+	}
+	var prepared []*plannedRepo
 	for i := range in.ConnDecl.Repos {
 		repo := in.ConnDecl.Repos[i]
 		cands := byRepo[repo.Name]
@@ -394,11 +393,24 @@ func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []
 		if err != nil {
 			return nil, err
 		}
+		sorted := append([]planCandidate(nil), cands...)
+		sortCandidates(sorted)
+		prepared = append(prepared, &plannedRepo{repo: repo, cands: sorted, pred: pred})
+	}
+	// 組の判断（J9）は、全リポジトリの予測が揃ってから、全リポジトリの起動の順でまとめて行う。
+	jr := make([]*judgeRepo, 0, len(prepared))
+	for _, p := range prepared {
+		jr = append(jr, &judgeRepo{repo: p.repo, running: running[p.repo.Name], cands: p.cands, pred: &p.pred})
+	}
+	if err := s.judgeAcrossRepos(ctx, in, jr); err != nil {
+		return nil, err
+	}
+	for _, p := range prepared {
 		// 予測が得られたときだけ、衝突の記録（challenge_conflict）を最新の結果で置き換える。
 		// 直列化の判断は記録を読まない（記録は表示のため）。
 		// 記録の失敗は委譲を止めない（衝突は着手の門にしない。記録は表示のため）。
-		_ = s.recordConflicts(ctx, in.CycleID, pred.RunID, running[repo.Name], cands, pred.Output)
-		plan.groups = append(plan.groups, buildRepoGroups(repo.Name, running[repo.Name], cands, pred)...)
+		_ = s.recordConflicts(ctx, in.CycleID, p.pred.RunID, running[p.repo.Name], p.cands, p.pred.Output)
+		plan.groups = append(plan.groups, buildRepoGroups(p.repo.Name, running[p.repo.Name], p.cands, p.pred)...)
 	}
 	return plan, nil
 }
