@@ -322,10 +322,11 @@ func (s *Store) predictRepo(ctx context.Context, in DelegateInput, repo Connecto
 		return repoPrediction{FailClosed: reasons, HeadSHA: res.Output.HeadSHA}, nil
 	}
 	runID, _ := parseRunID(res.RunID)
-	rp := repoPrediction{Output: res.Output, HeadSHA: res.Output.HeadSHA, RunID: runID}
+	// 衝突の判定から外すパスのファイルは、重なりを数える前に除く（宣言が空なら何もしない）。
+	rp := repoPrediction{Output: excludeSharedFiles(res.Output, repo.ConflictExcludePaths), HeadSHA: res.Output.HeadSHA, RunID: runID}
 	if repo.SerialJudgment {
 		rp.SerialJudgment = true
-		if rp.Verdicts, err = s.judgeDeclaredPairs(ctx, in, repo, running, cands, res.Output); err != nil {
+		if rp.Verdicts, err = s.judgeDeclaredPairs(ctx, in, repo, running, cands, rp.Output); err != nil {
 			return repoPrediction{}, err
 		}
 	}
