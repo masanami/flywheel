@@ -44,7 +44,7 @@ type j5RawOutput struct {
 	Actual             *[]StageActual            `json:"actual"`
 	DeferredConditions *[]j5RawDeferredCondition `json:"deferred_conditions"`
 	// ConflictOverriddenFrom は core が衝突の PR のために判定を not_met へ置き換えたときだけ付く、J5 の元の判定
-	// （met か uncertain）。J5 自身の出力には無い（schema に無い）。
+	// （met・uncertain・not_met）。J5 自身の出力には無い（schema に無い）。
 	ConflictOverriddenFrom *string `json:"conflict_overridden_from"`
 }
 
@@ -1113,8 +1113,8 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 			}
 		}
 		structured := res.StructuredOutput
-		// 衝突の PR があるのに met か uncertain が返ったら、core が not_met に置き換える（課題は承認待ちにも
-		// 人への保留にも進まず、着手中へ戻る）。
+		// 衝突の PR があれば、J5 の判定に関わらず core が衝突による差し戻しの not_met に置き換える（課題は承認待ちにも
+		// 人への保留にも進まず、着手中へ戻る。差し戻しの上限と発生には数えない）。
 		overridden, err := s.overrideForConflict(ctx, res.RunID, structured, prs)
 		if err != nil {
 			return nil, nil, err

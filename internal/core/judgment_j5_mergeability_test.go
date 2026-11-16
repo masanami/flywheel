@@ -109,6 +109,45 @@ func TestRework_ConflictOverrideIsNotCountedTowardTheLimit(t *testing.T) {
 	}
 }
 
+// J5 が j5.md の規則に従って衝突を理由に自分で not_met を返す主な経路でも、衝突による差し戻しの印を付ける:
+// 本物の not_met が 2 回あった後でも、上限 3 で人への保留にならず、衝突の指摘（と J5 の指摘）つきで委譲を再開し、
+// 発生（verification_not_met）も増えない。
+func TestRework_ConflictWithJ5sOwnNotMetIsMarkedAndNotCountedTowardTheLimit(t *testing.T) {
+	f := newJ5Fixture(t, "impl")
+	f.delegateToVerifying(t, "C-1")
+	f.agent.ReworkLimit = 3
+	f.notMetRound(t, "C-1")
+	f.runDelegation(t, "C-1")
+	f.notMetRound(t, "C-1")
+	f.runDelegation(t, "C-1")
+
+	f.checks.prs["o/r#1"] = conflictingPR()
+	f.j5.result = j5Out("not_met", "J5-CONFLICT-FEEDBACK", nil)
+	id := "C-1"
+	if _, err := f.verify(t, &id); err != nil {
+		t.Fatal(err)
+	}
+	runs := f.j5Runs(t)
+	v, ok := validateJ5Output([]byte(runs[len(runs)-1].Output))
+	if !ok || v.Verdict != J5VerdictNotMet || v.ConflictOverriddenFrom != string(J5VerdictNotMet) || v.Feedback == nil ||
+		!strings.Contains(*v.Feedback, "衝突を解消") || !strings.Contains(*v.Feedback, "J5-CONFLICT-FEEDBACK") {
+		t.Fatalf("stored J5 output = %q, want a conflict-marked not_met", runs[len(runs)-1].Output)
+	}
+	if got := f.queryString(t, `SELECT COUNT(*) FROM occurrence WHERE challenge_id = 1 AND kind = 'verification_not_met'`); got != "2" {
+		t.Errorf("verification_not_met occurrences = %s, want 2 (the conflict round is not counted)", got)
+	}
+	res := f.runDelegation(t, "C-1")
+	if len(res.NotStarted) != 0 || len(res.Items) != 1 {
+		t.Fatalf("result = %+v, want a launch (the conflict must not hit the rework limit)", res)
+	}
+	if got := f.holdCount(t); got != "0" {
+		t.Errorf("holds = %s, want none", got)
+	}
+	if got := f.lastLaunch(t); got.ResumeKind != ResumeKindRework || !strings.Contains(got.ResumeFeedback, "衝突を解消") {
+		t.Errorf("launch = kind %q feedback %q, want a rework resume with the conflict feedback", got.ResumeKind, got.ResumeFeedback)
+	}
+}
+
 // マージ可否の取り直しで PR を差し替えた後に CI が完了していなければ、J5 を起動せず CI を待つ。
 func TestVerifyAutoJ5_RefreshedPRWithPendingChecks_WaitsForCI(t *testing.T) {
 	f := newJ5Fixture(t, "impl")
