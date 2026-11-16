@@ -533,6 +533,7 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if in.Contract != nil {
 		reports, err := s.PollContractRuns(ctx, ContractPollInput{
 			ChallengeID: in.ChallengeID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl, Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile,
+			Judgment: in.Judgment, Cycle: in.Cycle,
 		})
 		if errors.Is(err, ErrStoreError) {
 			return nil, err
@@ -655,6 +656,30 @@ func appendDelegateOutcome(r *DelegateResult, item *JudgmentAutoItem, notStarted
 // 不足を NotStarted で返し、nil（ID を指定した個別の操作）ならエラーで返す。item と
 // notStarted はどちらか一方だけが非 nil（エラー時は両方 nil）。
 func (s *Store) delegateOne(ctx context.Context, in DelegateInput, jc *JudgmentCycle, ch Challenge, run *delegateRun) (*JudgmentAutoItem, *NotStarted, error) {
+	item, ns, err := s.delegateOnce(ctx, in, jc, ch, run)
+	// J4 が子の問いに全問答えたら、同じ周で子を再開して回答を渡す（再開の回数の上限は J4 の呼び出しの前に確かめる）。
+	for i := 0; i <= j4MaxAnswerResumes && err == nil && ns == nil && item != nil && item.j4Answered; i++ {
+		next, nextNS, nextErr := s.delegateOnce(ctx, in, jc, ch, run)
+		if nextErr != nil {
+			// 1 回目の起動と J4 の回答は記録済み。再開の失敗で操作全体を失敗にせず、次の起動が同じ回答を渡して再開する。
+			item.Note = strings.TrimPrefix(item.Note+"; the resume with the answers failed in this cycle ("+nextErr.Error()+")", "; ")
+			return item, nil, nil
+		}
+		if nextNS != nil {
+			// 再開を起動できなかった。回答は記録済みで、次の周の起動が同じ回答を渡して再開する。
+			item.Note = strings.TrimPrefix(item.Note+"; the resume with the answers is not started in this cycle ("+string(nextNS.Reason)+")", "; ")
+			return item, nil, nil
+		}
+		if next == nil {
+			break
+		}
+		item = next
+	}
+	return item, ns, err
+}
+
+// delegateOnce は delegateOne の 1 回分（J3 または再開の起動と、結果の記録・照合）。
+func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *JudgmentCycle, ch Challenge, run *delegateRun) (*JudgmentAutoItem, *NotStarted, error) {
 	if jc != nil && jc.RateLimited() {
 		return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedRateLimited}, nil
 	}
@@ -1009,10 +1034,12 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		item.Outcome = string(report.Outcome)
 	}
 	if recon != nil {
-		status, note, err := s.applyReconciliation(recordCtx, dc, assignment.RunID, recon, result, report, in.CycleID)
+		j4 := &j4Env{In: in, Cycle: jc, Ctx: ctx}
+		status, note, err := s.applyReconciliation(recordCtx, dc, assignment.RunID, recon, result, report, in.CycleID, j4)
 		if err != nil {
 			return nil, nil, err
 		}
+		item.j4Answered = j4.Answered
 		item.Status = status
 		if note != "" {
 			item.Note = heldNote + "; " + note
