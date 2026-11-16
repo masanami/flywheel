@@ -389,3 +389,69 @@ func TestJ4_ContractStartKeepsAParentAnswerWaitForTheNextPollWhenJ4IsAvailable(t
 		t.Errorf("status = %s, want in_progress without a hold (J4 handles it at the next poll)", f.status(t, f.cid))
 	}
 }
+
+// 意思決定者が human の委譲（操作の宣言が人を相手にする）の問いは、種類が人へ上げるものでなくても J4 を呼ばずオーナーの保留にする。
+func TestJ4_HumanDeciderQuestionsAreNeverGivenToJ4(t *testing.T) {
+	f := newResumeFixture(t)
+	id := f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) { m["operation"] = "define-human" }))
+	f.deleg.result = minorQuestionsOut()
+	r := &j4Router{j4Out: []JudgmentLaunchOutput{answerAll()}}
+	f.runWith(t, r, id)
+
+	if runs := f.delegateRuns(t); len(runs) != 1 || runs[0].Decider != DeciderHuman {
+		t.Fatalf("delegate runs = %+v, want one run decided by human", runs)
+	}
+	if len(r.j4Seen) != 0 {
+		t.Errorf("J4 calls = %d, want 0 (a human decider never goes to J4)", len(r.j4Seen))
+	}
+	if len(f.deleg.launched()) != 1 || f.detail(t, id).Status != StatusAwaitingHuman {
+		t.Fatalf("launches = %d status = %s, want 1 and awaiting_human", len(f.deleg.launched()), f.detail(t, id).Status)
+	}
+	q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`)
+	for _, want := range []string{"QUESTION-ONE", "QUESTION-TWO"} {
+		if !strings.Contains(q, want) {
+			t.Errorf("hold question lacks %q:\n%s", want, q)
+		}
+	}
+}
+
+// J4 の答えを返す resume が失敗したら、保留にして、オーナーが答えて着手中へ戻っても同じ答えを返し直さない。
+func TestJ4_ContractFailedResumeOfTheAnswerHoldsAndIsNotRetried(t *testing.T) {
+	for _, res := range []RunResult{RunResultTimedOut, RunResultErrored} {
+		t.Run(string(res), func(t *testing.T) {
+			f := newContractFixture(t)
+			if _, err := f.start(t); err != nil {
+				t.Fatal(err)
+			}
+			f.client.queue = []ContractLaunchOutput{waitingOut(&ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "Q"}, nil)}
+			f.client.resumeOut = ContractLaunchOutput{Result: res, ErrorSummary: "RESUME-BOOM"}
+			r := &j4Router{j4Out: []JudgmentLaunchOutput{j4Out(dec(1, "answer", nil, "J4-ANSWER"))}}
+			reps := f.pollWith(t, r)
+
+			if len(r.j4Seen) != 1 || len(f.client.resumes) != 1 {
+				t.Fatalf("J4 calls = %d resumes = %v, want 1 and 1", len(r.j4Seen), f.client.resumes)
+			}
+			if len(reps) != 1 || !reps[0].Held || f.status(t, f.cid) != StatusAwaitingHuman {
+				t.Fatalf("reports = %+v status = %s, want a hold", reps, f.status(t, f.cid))
+			}
+			qs := f.holdQuestions(t)
+			if len(qs) != 1 || !strings.Contains(qs[0], "resume") || !strings.Contains(qs[0], "RESUME-BOOM") || !strings.Contains(qs[0], "返し直さない") {
+				t.Fatalf("questions = %q, want the resume failure and no automatic retry", qs)
+			}
+			// 保留の間の周は、失敗した resume をやり直さず、J4 も呼び直さない。
+			f.pollWith(t, r)
+			f.pollWith(t, r)
+			if len(f.client.resumes) != 1 || len(r.j4Seen) != 1 {
+				t.Fatalf("resumes = %d J4 calls = %d, want 1 and 1 (the failed resume is not retried)", len(f.client.resumes), len(r.j4Seen))
+			}
+			// オーナーが答えて着手中へ戻った後も run がまだ同じ waiting なら、前の答えを返し直すのではなく改めて問う
+			// （仕様 §答えの返し「次の周の状態の確認でまだ waiting なら改めて問う」。J4 の新しい呼び出しで、再開の上限に数える）。
+			f.answerLatestHold(t, f.cid, "確かめた")
+			f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
+			f.pollWith(t, r)
+			if len(r.j4Seen) != 2 || len(f.client.resumes) != 2 {
+				t.Fatalf("J4 calls = %d resumes = %d, want a fresh J4 call and one resume", len(r.j4Seen), len(f.client.resumes))
+			}
+		})
+	}
+}
