@@ -54,11 +54,14 @@ func decodeContractStatus(stdout []byte) (*core.ContractStatus, bool) {
 			// options は求められた操作が示す選択肢（任意。文字列の配列）。文字列でない要素が 1 つでもあれば型が合わない
 			// （malformed）として、契約の状態を更新しない。
 			Options []string `json:"options"`
+			// resolvable_by は任意（answer | terminal）。文字列以外・空文字は閉集合の外として core が安全側（terminal）に扱う。
+			ResolvableBy json.RawMessage `json:"resolvable_by"`
 		}
 		if err := json.Unmarshal(raw.RequestedAction, &ra); err != nil {
 			return nil, false
 		}
-		st.RequestedAction = &core.ContractRequestedAction{Kind: ra.Kind, Decider: ra.Decider, Text: ra.Text, Options: ra.Options}
+		st.RequestedAction = &core.ContractRequestedAction{Kind: ra.Kind, Decider: ra.Decider, Text: ra.Text, Options: ra.Options,
+			ResolvableBy: decodeResolvableBy(ra.ResolvableBy)}
 	}
 	for _, a := range raw.Artifacts {
 		st.Artifacts = append(st.Artifacts, core.ContractArtifact{Kind: a.Kind, Ref: a.Ref})
@@ -141,4 +144,17 @@ func (l *Launcher) runContractCommand(ctx context.Context, in core.ContractLaunc
 	}
 	_ = ensureRunsGitignoreEntry(in.Workspace)
 	return out, nil
+}
+
+// decodeResolvableBy は requested_action.resolvable_by を値の文字列へ写す。項目が無い・null は空（今までどおり）。
+// 文字列でない値・空文字は閉集合の外の値として core.ContractResolvableByInvalid を返す（core が安全側に terminal として扱う）。
+func decodeResolvableBy(raw json.RawMessage) string {
+	if len(raw) == 0 || isJSONNull(raw) {
+		return ""
+	}
+	var v string
+	if err := json.Unmarshal(raw, &v); err != nil || v == "" {
+		return core.ContractResolvableByInvalid
+	}
+	return v
 }
