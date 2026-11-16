@@ -99,14 +99,14 @@ func TestFromApprovalPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","direct_completion":null,"done_criteria":"d","kind":"completion","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"stages":` + emptyStages + `,"title":"t","version":4}}`
+	want := `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","direct_completion":null,"done_criteria":"d","kind":"completion","mergeability_note":"","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"stages":` + emptyStages + `,"title":"t","version":4}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
 
 	plan := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, Version: 2, PlanVersion: 3, PlanBody: "B"}
 	b, _ = json.Marshal(view.FromApprovalPreview(plan, nil))
-	want = `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","direct_completion":null,"done_criteria":null,"kind":"plan","other_pending_operations":[],"pairs":[],"plan":{"body":"B","version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
+	want = `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","direct_completion":null,"done_criteria":null,"kind":"plan","mergeability_note":"","other_pending_operations":[],"pairs":[],"plan":{"body":"B","version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
@@ -510,4 +510,16 @@ func TestClosedSetsHeadingsIndexedByOutlook(t *testing.T) {
 		return
 	}
 	t.Fatal("CONDITIONS_AFTER_RELEASE_HEADINGS が ClosedSets に無い")
+}
+
+// 完了の承認の要約（API・UI）にも、CLI と同じ「マージ可否は未確認」を出す（#629 の決定 3）。
+func TestApprovalSummaryCarriesMergeabilityUnconfirmed(t *testing.T) {
+	p := &core.ApprovalPreview{ChallengeID: "C-1", Kind: core.ApprovalKindCompletion, MergeabilityUnconfirmed: true}
+	if got := view.FromApprovalPreview(p, nil).Approval.MergeabilityNote; got != core.MergeabilityUnconfirmedNote {
+		t.Errorf("MergeabilityNote = %q, want %q", got, core.MergeabilityUnconfirmedNote)
+	}
+	p.MergeabilityUnconfirmed = false
+	if got := view.FromApprovalPreview(p, nil).Approval.MergeabilityNote; got != "" {
+		t.Errorf("確認できているのに MergeabilityNote = %q", got)
+	}
 }

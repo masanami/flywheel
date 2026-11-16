@@ -35,6 +35,7 @@ function summary(over: Partial<ApprovalSummary>): {
       direct_completion: null,
       done_criteria: "完了条件",
       kind: "plan",
+      mergeability_note: "",
       other_pending_operations: [],
       pairs: [],
       plan: { body: "計画の本文", version: 1 },
@@ -254,4 +255,21 @@ it("本番反映で満たされる見込みの条件が無ければ、見出し�
     within(el).queryByTestId("approval-conditions-after-release"),
   ).toBeNull();
   expect(within(el).queryByText(HELD_HEADING)).toBeNull();
+});
+
+it("完了の承認の要約に、マージ可否が未確認であることを CLI と同じ文で示す（#629）", async () => {
+  const el = await show(
+    summary({
+      kind: "completion",
+      plan: null,
+      mergeability_note: "マージ可否は未確認",
+    }),
+  );
+  const box = within(el).getByTestId("approval-mergeability");
+  expect(box.textContent).toBe("PR のマージ可否: マージ可否は未確認");
+});
+
+it("マージ可否の注記が無ければ、その行を出さない（#629）", async () => {
+  const el = await show(summary({ kind: "completion", plan: null }));
+  expect(within(el).queryByTestId("approval-mergeability")).toBeNull();
 });

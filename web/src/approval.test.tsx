@@ -77,6 +77,7 @@ function summary(over: Partial<ApprovalSummary> = {}): {
       direct_completion: null,
       done_criteria: "完了条件の本文",
       kind: "completion",
+      mergeability_note: "",
       other_pending_operations: [
         { id: "O-2", kind: "delete", summary: "古いデータの削除" },
       ],

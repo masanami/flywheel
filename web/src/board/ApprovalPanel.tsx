@@ -206,6 +206,11 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           </ul>
         </div>
       )}
+      {completion && summary.mergeability_note !== "" && (
+        <p data-testid="approval-mergeability">
+          PR のマージ可否: {summary.mergeability_note}
+        </p>
+      )}
       {completion && summary.pairs.length > 0 && (
         <div data-testid="approval-pairs">
           <PairsView pairs={summary.pairs} />

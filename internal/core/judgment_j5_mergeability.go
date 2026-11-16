@@ -4,8 +4,10 @@ package core
 //
 //   - 取得した PR の mergeable・mergeable_state を J5 の区画「PR のマージ可否」へ書く
 //   - mergeable が null（GitHub が計算中）の PR は、J5 の起動の前に設定の回数だけ取り直す
-//   - 衝突（mergeable=false）の open な PR があるのに J5 が met を返したら、core が not_met に
-//     置き換える（課題は着手中へ戻り、ブランチの更新が差し戻しの指摘つきの追従の委譲になる。人には問わない）
+//   - 衝突（mergeable=false）の open な PR があるのに J5 が met か uncertain を返したら、core が not_met に
+//     置き換える（課題は着手中へ戻り、ブランチの更新が差し戻しの指摘つきの追従の委譲になる。人には問わない）。
+//     置き換えた出力には元の判定（conflict_overridden_from）と J5 の元の出力（j5_output）を残し、差し戻しの
+//     上限と発生（verification_not_met）には数えない
 //   - なお不明（null）のまま met になった課題は、承認の要約に「マージ可否は未確認」を出す
 //
 // BEHIND（base に遅れているだけ）は衝突として扱わない。取得と正規化は adapter が担い、判定は core が持つ。
@@ -126,16 +128,17 @@ func conflictFeedback(conflicts []UpstreamPullRequestChecks) string {
 	return b.String()
 }
 
-// overrideMetForConflict は J5 の出力が met で、取得した PR に衝突があるとき、出力を not_met（差し戻しの指摘は
-// conflictFeedback）へ置き換えて返し、run の保存済みの出力も同じ内容に書き換える（差し戻しの追従の委譲が、
-// 最新の J5 の run の出力から指摘を読むため）。置き換えなければ nil。
-func (s *Store) overrideMetForConflict(ctx context.Context, runIDDisplay string, structured []byte, prs []UpstreamPullRequestChecks) ([]byte, error) {
+// overrideForConflict は J5 の出力が met か uncertain で、取得した PR に衝突があるとき、出力を not_met（差し戻しの
+// 指摘は conflictFeedback）へ置き換えて返し、run の保存済みの出力も同じ内容に書き換える（差し戻しの追従の委譲が、
+// 最新の J5 の run の出力から指摘を読むため）。置き換えた出力には、J5 の元の判定（conflict_overridden_from）と
+// 元の出力そのもの（j5_output）を残す。置き換えなければ nil。
+func (s *Store) overrideForConflict(ctx context.Context, runIDDisplay string, structured []byte, prs []UpstreamPullRequestChecks) ([]byte, error) {
 	conflicts := conflictingPullRequests(prs)
 	if len(conflicts) == 0 {
 		return nil, nil
 	}
 	v, ok := validateJ5Output(structured)
-	if !ok || v.Verdict != J5VerdictMet {
+	if !ok || v.Verdict == J5VerdictNotMet {
 		return nil, nil
 	}
 	rid, ok := parseRunID(runIDDisplay)
@@ -144,9 +147,11 @@ func (s *Store) overrideMetForConflict(ctx context.Context, runIDDisplay string,
 	}
 	feedback := conflictFeedback(conflicts)
 	out, err := json.Marshal(map[string]any{
-		"verdict":  string(J5VerdictNotMet),
-		"reason":   "PR が base のブランチと衝突しているため、達成条件を満たさない（" + v.Reason + "）",
-		"feedback": feedback,
+		"verdict":                  string(J5VerdictNotMet),
+		"reason":                   "PR が base のブランチと衝突しているため、達成条件を満たさない（" + v.Reason + "）",
+		"feedback":                 feedback,
+		"conflict_overridden_from": string(v.Verdict),
+		"j5_output":                json.RawMessage(structured),
 	})
 	if err != nil {
 		return nil, err
