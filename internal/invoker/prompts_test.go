@@ -155,7 +155,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j4.md": 4096,
 		"j5.md": 9728,
 		"j6.md": 6144,
-		"j8.md": 6144,
+		"j8.md": 8192,
 		"j9.md": 4096,
 	}
 
@@ -404,8 +404,8 @@ func TestInstructions_J8AsksForReductionAndMetricHoleCheck(t *testing.T) {
 			t.Errorf("Instructions(J8) lacks %q", want)
 		}
 	}
-	if len(got) > 6144 {
-		t.Errorf("Instructions(J8) is %d bytes, over 6144", len(got))
+	if len(got) > 8192 {
+		t.Errorf("Instructions(J8) is %d bytes, over 8192", len(got))
 	}
 }
 
@@ -841,6 +841,25 @@ func TestJ2Prompt_ListsReplanSection(t *testing.T) {
 	for _, want := range []string{"「" + core.ReplanSectionLabel + "」", "前の計画より回答を優先して計画を作り直す"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J2) lacks %q", want)
+		}
+	}
+}
+
+// #571: j8.md は、達成の条件を対象のいまの中身と課題のいまの状態に照らし、満たし済みの項目を外すこと・
+// 区画に無い課題は「状態は未確認」と書くこと・全項目が満たし済みなら提案を出さないことを求める。
+func TestInstructions_J8CriteriaChecksCurrentState(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"満たし済みの項目は条件から外し",
+		"後を継いだ課題に読み替え",
+		"状態は未確認",
+		"その提案は出さない",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J8) lacks %q", want)
 		}
 	}
 }

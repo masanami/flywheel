@@ -302,6 +302,19 @@ func loadJ8Improvements(ctx context.Context, tx *sql.Tx) ([]j8Improvement, error
 
 // --- 入力の組み立て ---
 
+// j8StatusLabel は課題の状態に、完了・取り下げ・未完了の別を添えた表記を返す。J8 が達成の条件で名指しする
+// 課題がまだ有効かを、状態の値の名前を知らなくても読めるようにする。
+func j8StatusLabel(st Status) string {
+	switch st {
+	case StatusDone:
+		return string(st) + "（完了）"
+	case StatusWithdrawn:
+		return string(st) + "（取り下げ）"
+	default:
+		return string(st) + "（未完了）"
+	}
+}
+
 func j8Ptr(f *float64) any {
 	if f == nil {
 		return nil
@@ -381,7 +394,7 @@ func prepareJ8(jc *j8Context) []JudgmentDataSection {
 
 	b.Reset()
 	for _, im := range jc.Improvements {
-		fmt.Fprintf(&b, "- ID: %s / 層: %s / 対象: %s / 状態: %s", formatChallengeID(im.ID), im.Layer, oneLine(im.Target), im.Status)
+		fmt.Fprintf(&b, "- ID: %s / 層: %s / 対象: %s / 状態: %s", formatChallengeID(im.ID), im.Layer, oneLine(im.Target), j8StatusLabel(im.Status))
 		switch {
 		case im.Compare != nil:
 			fmt.Fprintf(&b, " / 適用の時点: %s\n  適用の前: %s\n  適用の後: %s", im.Compare.AppliedAt,

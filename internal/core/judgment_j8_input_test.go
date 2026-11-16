@@ -303,7 +303,7 @@ func TestJ8Input_PastImprovementsNewestTenWithCompareOnlyWhenApplied(t *testing.
 		t.Errorf("compare differs from MetricsCompare: %v / %+v", err, want)
 	}
 	text := j8Section(t, jc, j8ImprovementsLabel)
-	if !strings.Contains(text, formatChallengeID(ids[10])+" / 層: prompt / 対象: T10 / 状態: done / 適用の時点: "+mAt(5)) ||
+	if !strings.Contains(text, formatChallengeID(ids[10])+" / 層: prompt / 対象: T10 / 状態: done（完了） / 適用の時点: "+mAt(5)) ||
 		!strings.Contains(text, "適用の前:") || !strings.Contains(text, "適用の後:") ||
 		strings.Contains(text, formatChallengeID(ids[0])+" ") {
 		t.Errorf("section = %s", text)
@@ -407,9 +407,9 @@ func TestJ8Input_DoneImprovementWithOpenReleaseShowsAppliedAtButNoComparison(t *
 	}
 	text := j8Section(t, jc, j8ImprovementsLabel)
 	for _, want := range []string{
-		formatChallengeID(executed) + " / 層: prompt / 対象: R / 状態: done / 適用の時点: " + mAt(6) + "（未実行の release があるため前後の指標は比べない）",
-		formatChallengeID(approved) + " / 層: prompt / 対象: A / 状態: done / 適用の時点: " + mAt(4) + "（未実行の release があるため前後の指標は比べない）",
-		formatChallengeID(none) + " / 層: prompt / 対象: N / 状態: done / 適用の時点: なし",
+		formatChallengeID(executed) + " / 層: prompt / 対象: R / 状態: done（完了） / 適用の時点: " + mAt(6) + "（未実行の release があるため前後の指標は比べない）",
+		formatChallengeID(approved) + " / 層: prompt / 対象: A / 状態: done（完了） / 適用の時点: " + mAt(4) + "（未実行の release があるため前後の指標は比べない）",
+		formatChallengeID(none) + " / 層: prompt / 対象: N / 状態: done（完了） / 適用の時点: なし",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("section lacks %q:\n%s", want, text)
@@ -460,5 +460,17 @@ func TestPrepareJ8_DefinitionsIncludeTheCompareApprovalCount(t *testing.T) {
 	}
 	if !strings.Contains(defs["approval_count"]["numerator"], "期間に記録した") {
 		t.Errorf("approval_count (period) definition changed: %v", defs["approval_count"])
+	}
+}
+
+func TestJ8StatusLabel(t *testing.T) {
+	for st, want := range map[Status]string{
+		StatusDone:       "done（完了）",
+		StatusWithdrawn:  "withdrawn（取り下げ）",
+		StatusInProgress: "in_progress（未完了）",
+	} {
+		if got := j8StatusLabel(st); got != want {
+			t.Errorf("j8StatusLabel(%s) = %q, want %q", st, got, want)
+		}
 	}
 }
