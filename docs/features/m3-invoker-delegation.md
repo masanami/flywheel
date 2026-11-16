@@ -818,7 +818,7 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 - `slot clear`（S2）: `{"slot": {"slot_id", "repo", "path", "state"}}`（戻した後のスロット）【仮定: 形】。
 - `status.waiting_external`（S2。最上位の 4 つ目のキー）: `{"challenges": [{"challenge_id", "pr_url", "checks": "pending"}]}`。
 - `show`: 最上位に `runs`（新しい順・最大 20 件。要素は `runs` の要素と同じ形で、周の上限額 `cycle_budget_usd` を含む。`--auto` の個別の操作が既定の周の上限額で評価したことは、この値で観測する【決定 2026-09-28 親】（#83））を足し、`plans` の要素に `spec`（J2 の構造化した出力。無ければ `null`）を足す。
-- `runs`: `{"runs": [{"id", "kind", "judgment", "challenge_id", "cycle_id", "cycle_budget_usd", "session_id", "result", "rate_limited", "cost_usd", "cost_source", "max_budget_usd", "started_at", "ended_at"}]}`。`cycle_budget_usd` は `cycle_id` が `null`（周の外で記録された run）なら `null`、そうでなければその周の上限額（USD）【決定 2026-09-28 親】（#83）。
+- `runs`: `{"runs": [{"id", "kind", "judgment", "challenge_id", "cycle_id", "cycle_budget_usd", "session_id", "result", "rate_limited", "cost_usd", "cost_source", "max_budget_usd", "started_at", "ended_at", "error"}]}`。`cycle_budget_usd` は `cycle_id` が `null`（周の外で記録された run）なら `null`、そうでなければその周の上限額（USD）【決定 2026-09-28 親】（#83）。 `error` は run の失敗の要約（`run.error`）で、無ければ `null`。`show` の runs の要素も同じ形。テキストの `runs` は、失敗した run にだけ `error` の 1 行目（長ければ切る）を添える。
 - M1 の `internal/cli/jsondoc_test.go` に、新しいコマンドと上の拡張を足す。
 
 #### 作業ログ

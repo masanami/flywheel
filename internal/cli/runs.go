@@ -43,6 +43,22 @@ func runsText(runs []core.Run) string {
 			result = "(実行中)"
 		}
 		fmt.Fprintf(&b, "%s %s %s challenge=%s result=%s rate_limited=%t\n", r.ID, r.Kind, r.Judgment, r.ChallengeID, result, r.RateLimited)
+		if r.Error != "" && r.Result != "" && r.Result != core.RunResultSucceeded {
+			fmt.Fprintf(&b, "  error: %s\n", errorSummary(r.Error))
+		}
 	}
 	return b.String()
+}
+
+// runErrorSummaryMax は runs のテキストに添える error の 1 行目の最大の長さ（文字数）。
+const runErrorSummaryMax = 120
+
+// errorSummary は error の 1 行目を返す。長ければ切って「…」を付ける。
+func errorSummary(e string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(e), "\n")
+	rs := []rune(strings.TrimSpace(line))
+	if len(rs) > runErrorSummaryMax {
+		return string(rs[:runErrorSummaryMax]) + "…"
+	}
+	return string(rs)
 }

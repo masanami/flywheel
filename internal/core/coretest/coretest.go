@@ -172,6 +172,7 @@ type InsertRunInput struct {
 	BudgetBucket     string
 	CostUSD          *int64
 	CostSource       string
+	Error            string // ""ならNULL
 }
 
 // InsertRun は run を1件挿入し、割り当てられた内部整数IDを返す。
@@ -197,11 +198,11 @@ func InsertRun(t *testing.T, workspace string, in InsertRunInput) int64 {
 		res, err := tx.Exec(
 			`INSERT INTO run (cycle_id, challenge_id, kind, judgment, challenge_version, session_id,
 				session_id_mismatch, pid, host, heartbeat_at, started_at, ended_at, result,
-				rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source)
-			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source, error)
+			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			cycleID, in.ChallengeID, in.Kind, nullable(in.Judgment), in.ChallengeVersion, in.SessionID,
 			in.PID, in.Host, in.HeartbeatAt, in.StartedAt, nullable(in.EndedAt), nullable(in.Result),
-			in.RateLimited, in.MaxBudgetUSD, in.BudgetBucket, in.CostUSD, nullable(in.CostSource),
+			in.RateLimited, in.MaxBudgetUSD, in.BudgetBucket, in.CostUSD, nullable(in.CostSource), nullable(in.Error),
 		)
 		if err != nil {
 			return err

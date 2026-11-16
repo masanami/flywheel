@@ -75,6 +75,7 @@ const run = (id: string, started_at: string) => ({
   cycle_budget_usd: null,
   cycle_id: null,
   ended_at: null,
+  error: null,
   flywheel_version: null,
   id,
   judgment: null,

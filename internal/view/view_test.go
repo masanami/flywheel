@@ -37,7 +37,7 @@ func TestEmptyListsAreArraysAndNullsStayNull(t *testing.T) {
 func TestRunKeysAreSortedAndNullable(t *testing.T) {
 	at := time.Date(2026, 10, 10, 1, 2, 3, 4_000_000, time.UTC)
 	got := marshal(t, view.FromRun(core.Run{ID: "R-1", Kind: "judgment", StartedAt: at, MaxBudgetUSD: 2}))
-	want := `{"challenge_id":null,"cost_source":null,"cost_usd":null,"cycle_budget_usd":null,"cycle_id":null,"ended_at":null,"flywheel_version":null,"id":"R-1","judgment":null,"kind":"judgment","max_budget_usd":2,"rate_limited":false,"result":null,"session_id":null,"started_at":"2026-10-10T01:02:03.004Z"}`
+	want := `{"challenge_id":null,"cost_source":null,"cost_usd":null,"cycle_budget_usd":null,"cycle_id":null,"ended_at":null,"error":null,"flywheel_version":null,"id":"R-1","judgment":null,"kind":"judgment","max_budget_usd":2,"rate_limited":false,"result":null,"session_id":null,"started_at":"2026-10-10T01:02:03.004Z"}`
 	if got != want {
 		t.Errorf("run:\n got %s\nwant %s", got, want)
 	}
@@ -510,6 +510,13 @@ func TestClosedSetsHeadingsIndexedByOutlook(t *testing.T) {
 		return
 	}
 	t.Fatal("CONDITIONS_AFTER_RELEASE_HEADINGS が ClosedSets に無い")
+}
+
+func TestFromRun_Error(t *testing.T) {
+	got := marshal(t, view.FromRun(core.Run{ID: "R-1", Error: "boom"}))
+	if !strings.Contains(got, `"error":"boom"`) {
+		t.Errorf("got %s", got)
+	}
 }
 
 // 完了の承認の要約（API・UI）にも、CLI と同じ「マージ可否は未確認」を出す（#629 の決定 3）。

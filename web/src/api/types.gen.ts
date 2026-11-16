@@ -291,6 +291,7 @@ export interface Run {
   cycle_budget_usd: number | null;
   cycle_id: string | null;
   ended_at: string | null;
+  error: string | null;
   flywheel_version: string | null;
   id: string;
   judgment: string | null;

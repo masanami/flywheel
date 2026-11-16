@@ -374,6 +374,7 @@ type Run struct {
 	CycleBudgetUSD  *float64 `json:"cycle_budget_usd"`
 	CycleID         *string  `json:"cycle_id"`
 	EndedAt         *string  `json:"ended_at"`
+	Error           *string  `json:"error"`
 	FlywheelVersion *string  `json:"flywheel_version"`
 	ID              string   `json:"id"`
 	Judgment        *string  `json:"judgment"`
@@ -394,6 +395,7 @@ func FromRun(r core.Run) Run {
 		CycleBudgetUSD:  r.CycleBudgetUSD,
 		CycleID:         r.CycleID,
 		EndedAt:         ts(r.EndedAt),
+		Error:           strOrNil(r.Error),
 		FlywheelVersion: r.FlywheelVersion,
 		ID:              r.ID,
 		Judgment:        strOrNil(string(r.Judgment)),
