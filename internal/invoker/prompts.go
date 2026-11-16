@@ -72,7 +72,7 @@ var judgmentPromptLimit = map[string]int{
 	"j4.md": 4096,
 	"j5.md": 10752,
 	"j6.md": 6144,
-	"j8.md": 6144,
+	"j8.md": 8192,
 	"j9.md": 4096,
 }
 

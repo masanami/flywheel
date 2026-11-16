@@ -647,3 +647,65 @@ func TestTerminalStatusArgs_AreDerivedFromTheTransitionTable(t *testing.T) {
 		t.Errorf("terminal statuses = %v, want %v", got, want)
 	}
 }
+
+// #571: 見送り（withheld）は J8 の run の作業ログに残し、課題は作らない。欄が無ければ残さず、不正な形なら
+// 出力全体を不正にして何も書かない。
+func TestImproveJ8_WithheldIsRecordedOnTheRunActivity(t *testing.T) {
+	withheld := []any{map[string]any{"layer": "prompt", "target": "T", "evidence": []string{"C-3 が満たした"}}}
+	set := func(f *j8Fixture, w any) {
+		m := map[string]any{"proposals": []any{}}
+		if w != nil {
+			m["withheld"] = w
+		}
+		b, _ := json.Marshal(m)
+		f.inv.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: b, ReportedTotalCostUSD: float64Ptr(0.5)}
+	}
+	t.Run("recorded", func(t *testing.T) {
+		f := newJ8Fixture(t)
+		f.occ(t, 1, j8Row{})
+		set(f, withheld)
+		challenges := f.count(t, `SELECT COUNT(*) FROM challenge`)
+		res := f.manual(t)
+		if res.Result != RunResultSucceeded || len(res.Filed) != 0 || !strings.Contains(res.Note, "withheld 1") {
+			t.Fatalf("res = %+v", res)
+		}
+		runInt, _ := parseRunID(res.RunID)
+		var after string
+		if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+			return tx.QueryRow(`SELECT after FROM activity WHERE entity = 'run' AND entity_id = ? AND action = ? AND run_id = ?`,
+				runInt, ActivityActionImprovementWithheld, runInt).Scan(&after)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if after != `{"withheld":[{"evidence":["C-3 が満たした"],"layer":"prompt","target":"T"}]}` {
+			t.Errorf("after = %s", after)
+		}
+		if f.count(t, `SELECT COUNT(*) FROM challenge`) != challenges {
+			t.Errorf("a challenge was filed for a withheld proposal")
+		}
+	})
+	t.Run("absent", func(t *testing.T) {
+		f := newJ8Fixture(t)
+		f.occ(t, 1, j8Row{})
+		set(f, nil)
+		if res := f.manual(t); res.Result != RunResultSucceeded {
+			t.Fatalf("res = %+v", res)
+		}
+		if n := f.count(t, `SELECT COUNT(*) FROM activity WHERE action = ?`, ActivityActionImprovementWithheld); n != 0 {
+			t.Errorf("withheld rows = %d", n)
+		}
+	})
+	t.Run("malformed", func(t *testing.T) {
+		f := newJ8Fixture(t)
+		ok := f.occ(t, 1, j8Row{})[0]
+		b, _ := json.Marshal(map[string]any{"proposals": []any{j8Proposal("prompt", "T", formatOccurrenceID(ok))},
+			"withheld": []any{map[string]any{"layer": "prompt", "target": " "}}})
+		f.inv.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: b, ReportedTotalCostUSD: float64Ptr(0.5)}
+		before := f.handledAll(t)
+		res := f.manual(t)
+		if res.Result != RunResultInvalidOutput || len(res.Filed) != 0 || f.handledAll(t) != before ||
+			f.count(t, `SELECT COUNT(*) FROM activity WHERE action IN ('improvement', ?)`, ActivityActionImprovementWithheld) != 0 {
+			t.Errorf("res = %+v handled = %s", res, f.handledAll(t))
+		}
+	})
+}
