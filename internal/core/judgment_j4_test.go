@@ -81,6 +81,7 @@ func (f *delegateFixture) countRows(t *testing.T, q string) int {
 }
 
 func TestValidateJ4Output(t *testing.T) {
+	t.Parallel()
 	qs := []j4Question{{Kind: "minor", Text: "q1", Options: []string{"A", "B"}}, {Text: "q2"}}
 	ok := func(s string) bool { _, v := validateJ4Output([]byte(s), qs); return v }
 	if !ok(`{"decisions":[{"question_index":1,"decision":"answer","option":"A","answer":null},{"question_index":2,"decision":"answer","option":null,"answer":"x"}]}`) {
@@ -107,6 +108,7 @@ func TestValidateJ4Output(t *testing.T) {
 }
 
 func TestJ4Schema_EnumComesFromTheDecisionValues(t *testing.T) {
+	t.Parallel()
 	var m map[string]any
 	if err := json.Unmarshal(j4OutputSchema(), &m); err != nil {
 		t.Fatal(err)
@@ -118,6 +120,7 @@ func TestJ4Schema_EnumComesFromTheDecisionValues(t *testing.T) {
 }
 
 func TestJ4_AllAnswerResumesTheChildInTheSameCycleWithoutAHold(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.queue = []JudgmentLaunchOutput{minorQuestionsOut(), {Result: RunResultSucceeded, StructuredOutput: reportJSON(nil), ReportedTotalCostUSD: float64Ptr(1)}}
@@ -153,6 +156,7 @@ func TestJ4_AllAnswerResumesTheChildInTheSameCycleWithoutAHold(t *testing.T) {
 }
 
 func TestJ4_AnyEscalateHoldsWithTheReasonAndTheDelegationRun(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.result = minorQuestionsOut()
@@ -175,6 +179,7 @@ func TestJ4_AnyEscalateHoldsWithTheReasonAndTheDelegationRun(t *testing.T) {
 }
 
 func TestJ4_RuleKindsAndInvalidOrFailedJ4GoToTheHuman(t *testing.T) {
+	t.Parallel()
 	t.Run("scope is never given to J4", func(t *testing.T) {
 		f := newResumeFixture(t)
 		id := f.newInProgress(t, "t", "P1", planSpec(nil))
@@ -211,6 +216,7 @@ func TestJ4_RuleKindsAndInvalidOrFailedJ4GoToTheHuman(t *testing.T) {
 }
 
 func TestJ4_ResumeLimitIsThreePerChainAndTheFourthGoesToTheHuman(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.result = minorQuestionsOut() // 毎回また問いで止まる
@@ -233,6 +239,7 @@ func TestJ4_ResumeLimitIsThreePerChainAndTheFourthGoesToTheHuman(t *testing.T) {
 
 // 同じ周で再開できなくても、回答は run に残り、次の起動が同じ回答を渡して再開する（新しいセッションで始めない）。
 func TestJ4_PendingAnswerIsResumedByTheNextLaunchDecision(t *testing.T) {
+	t.Parallel()
 	pv := int64(1)
 	deleg := runRow{ID: "R-1", Kind: runKindDelegate, SessionID: "sess", Result: RunResultSucceeded, PlanVersion: &pv,
 		Output: string(minorQuestionsOut().StructuredOutput)}
@@ -270,6 +277,7 @@ func (f *contractFixture) pollWith(t *testing.T, r *j4Router) []ContractRunRepor
 }
 
 func TestJ4_ContractParentAnswerWaitIsAnsweredByResumeWithTheChosenOption(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -291,6 +299,7 @@ func TestJ4_ContractParentAnswerWaitIsAnsweredByResumeWithTheChosenOption(t *tes
 }
 
 func TestJ4_ContractWithoutOptionsIsAnsweredWithText(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -305,6 +314,7 @@ func TestJ4_ContractWithoutOptionsIsAnsweredWithText(t *testing.T) {
 }
 
 func TestJ4_ContractEscalateHoldsAndOtherWaitsDoNotCallJ4(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		action ContractRequestedAction
@@ -346,6 +356,7 @@ func TestJ4_ContractEscalateHoldsAndOtherWaitsDoNotCallJ4(t *testing.T) {
 }
 
 func TestJ4_ContractResumeIsLimitedToThreeAnswersAndTheFourthGoesToTheOwner(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -366,6 +377,7 @@ func TestJ4_ContractResumeIsLimitedToThreeAnswersAndTheFourthGoesToTheOwner(t *t
 }
 
 func TestJ4_DeclaredHumanKindIsNeverGivenToJ4(t *testing.T) {
+	t.Parallel()
 	qs := []DelegationQuestion{{Kind: "minor", Text: "x"}, {Kind: "my_kind", Text: "y"}}
 	if !j4RuleEscalates(qs, []HumanQuestionKind{{ID: "my_kind", Label: "L"}}) {
 		t.Error("a declared human question kind must escalate")
@@ -376,6 +388,7 @@ func TestJ4_DeclaredHumanKindIsNeverGivenToJ4(t *testing.T) {
 }
 
 func TestJ4_ContractStartKeepsAParentAnswerWaitForTheNextPollWhenJ4IsAvailable(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	f.client.startOut = waitingOut(&ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "Q"}, nil)
 	_, err := f.s.StartContractDelegation(context.Background(), ContractStartInput{
@@ -392,6 +405,7 @@ func TestJ4_ContractStartKeepsAParentAnswerWaitForTheNextPollWhenJ4IsAvailable(t
 
 // 意思決定者が human の委譲（操作の宣言が人を相手にする）の問いは、種類が人へ上げるものでなくても J4 を呼ばずオーナーの保留にする。
 func TestJ4_HumanDeciderQuestionsAreNeverGivenToJ4(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) { m["operation"] = "define-human" }))
 	f.deleg.result = minorQuestionsOut()
@@ -417,6 +431,7 @@ func TestJ4_HumanDeciderQuestionsAreNeverGivenToJ4(t *testing.T) {
 
 // J4 の答えを返す resume が失敗したら、保留にして、オーナーが答えて着手中へ戻っても同じ答えを返し直さない。
 func TestJ4_ContractFailedResumeOfTheAnswerHoldsAndIsNotRetried(t *testing.T) {
+	t.Parallel()
 	for _, res := range []RunResult{RunResultTimedOut, RunResultErrored} {
 		t.Run(string(res), func(t *testing.T) {
 			f := newContractFixture(t)

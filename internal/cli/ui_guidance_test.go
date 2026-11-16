@@ -13,6 +13,7 @@ import (
 // TestUIGuidanceTemplatesExistInCLI は UI の案内の雛形（web/src/guidance.json）の
 // サブコマンドとフラグが、CLI のコマンドの定義に実在することを照合する（AC-109）。
 func TestUIGuidanceTemplatesExistInCLI(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "web", "src", "guidance.json"))
 	if err != nil {
 		t.Fatal(err)

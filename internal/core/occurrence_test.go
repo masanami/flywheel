@@ -13,6 +13,7 @@ import (
 // AC-218 ほか: 発生の閉集合・内部ヘルパ・課題の origin（マイグレーション 0011）。
 
 func TestParseOccurrenceKind_ClosedSetOf13(t *testing.T) {
+	t.Parallel()
 	want := []string{
 		"plan_rejected", "completion_rejected", "completion_approved", "verification_not_met",
 		"verification_uncertain", "delegation_failed", "judgment_failed", "failure_limit_hold",
@@ -34,6 +35,7 @@ func TestParseOccurrenceKind_ClosedSetOf13(t *testing.T) {
 }
 
 func TestOccurrenceClosedSets(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"core", "j6"} {
 		if _, ok := ParseOccurrenceSource(v); !ok {
 			t.Errorf("source %q rejected", v)
@@ -145,6 +147,7 @@ func writeEventWithOccurrence(ctx context.Context, s *Store, cid int64, cycleID 
 }
 
 func TestInsertOccurrenceRow_WritesCoreRowWithNullClassification(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "t")
 	before := countActivityRows(t, s)
@@ -174,6 +177,7 @@ func TestInsertOccurrenceRow_WritesCoreRowWithNullClassification(t *testing.T) {
 }
 
 func TestInsertOccurrenceRow_CarriesCycleIDAndOutcomeAsGiven(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "t")
 	var cycleID int64
@@ -198,6 +202,7 @@ func TestInsertOccurrenceRow_CarriesCycleIDAndOutcomeAsGiven(t *testing.T) {
 
 // 発生の挿入が失敗すれば、同じトランザクションの出来事も残らない（失敗注入のフック）。
 func TestInsertOccurrenceRow_FailureRollsBackTheEvent(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "t")
 	before := countActivityRows(t, s)
@@ -217,6 +222,7 @@ func TestInsertOccurrenceRow_FailureRollsBackTheEvent(t *testing.T) {
 
 // 出来事の書き込みが失敗すれば、発生も残らない。
 func TestInsertOccurrenceRow_EventFailureLeavesNoOccurrence(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "t")
 	boom := errors.New("event failed")
@@ -245,6 +251,7 @@ func TestInsertOccurrenceRow_EventFailureLeavesNoOccurrence(t *testing.T) {
 }
 
 func TestInsertOccurrenceRow_RejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "t")
 	one := int64(1)
@@ -280,6 +287,7 @@ func challengeOriginOf(t *testing.T, s *Store, id int64) (origin string, followu
 
 // AC-286: create で作った課題の origin は manual、followup_of は NULL。
 func TestCreateChallenge_OriginIsManual(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "t")
 	origin, followupOf := challengeOriginOf(t, s, cid)
@@ -290,6 +298,7 @@ func TestCreateChallenge_OriginIsManual(t *testing.T) {
 
 // AC-286: 取り込みで作った課題の origin は ingest。
 func TestIngest_CreatedChallengeOriginIsIngest(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -313,6 +322,7 @@ func TestIngest_CreatedChallengeOriginIsIngest(t *testing.T) {
 
 // insertChallengeRow は followup_of を受けられる（値を入れるのは #362）。
 func TestInsertChallengeRow_AcceptsFollowupOf(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	of := "C-7"
 	var id int64
@@ -339,6 +349,7 @@ func TestInsertChallengeRow_AcceptsFollowupOf(t *testing.T) {
 // coretest.FailOccurrenceInserts は DB 側で発生の挿入を失敗させ、出来事を巻き戻す
 // （CLI のテストなど別プロセスから使う口）。
 func TestCoretestFailOccurrenceInserts_RollsBackTheEvent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := Init(dir); err != nil {
 		t.Fatal(err)

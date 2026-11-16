@@ -23,6 +23,7 @@ func bindUnreadChallengeForMarkRead(t *testing.T, ws string) string {
 
 // AC-137: mark-read は gh を呼ばない（偽の gh への呼び出しが 0 回）。
 func TestMarkRead_DoesNotInvokeGH(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	id := bindUnreadChallengeForMarkRead(t, ws)
 	calls := withFakeGHRoutesOnPATH(t, nil)
@@ -39,11 +40,12 @@ func TestMarkRead_DoesNotInvokeGH(t *testing.T) {
 // AC-138: mark-read は、標準入力と標準出力が端末でなくても成功する
 // （本人確認 none）。
 func TestMarkRead_SucceedsWithoutATerminal(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := bindUnreadChallengeForMarkRead(t, ws)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"mark-read", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"mark-read", id, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (stdout=%q stderr=%q) (AC-138)", code, stdout.String(), stderr.String())
 	}

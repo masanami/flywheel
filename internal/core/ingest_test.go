@@ -155,6 +155,7 @@ func sourceResult(t *testing.T, res *IngestResult, sourceID string) SourceIngest
 // --- AC-12: assignee_policy 省略は exclude-others として振る舞う ---
 
 func TestIngest_OmittedAssigneePolicyBehavesAsExcludeOthers(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -176,6 +177,7 @@ func TestIngest_OmittedAssigneePolicyBehavesAsExcludeOthers(t *testing.T) {
 // --- AC-23〜AC-29: assignee のポリシー ---
 
 func TestIngest_AssigneePolicy(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		source     SourceEntry
@@ -227,6 +229,7 @@ func TestIngest_AssigneePolicy(t *testing.T) {
 
 // AC-29: login の比較は大文字小文字を無視し、self_assignees の先頭の "@" を除く。
 func TestIngest_LoginComparisonIgnoresCaseAndLeadingAt(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := selfOnlySource("s", []string{"o/r"}, []string{"@MasaNami"})
@@ -243,6 +246,7 @@ func TestIngest_LoginComparisonIgnoresCaseAndLeadingAt(t *testing.T) {
 // AC-29（比較の両側）: assignee 側の login（GitHub は正規の表記で返す）と
 // gh api user の login も、大文字小文字を無視して比較する。
 func TestIngest_LoginComparisonIgnoresCaseOnBothSides(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		self     []string
@@ -272,6 +276,7 @@ func TestIngest_LoginComparisonIgnoresCaseOnBothSides(t *testing.T) {
 
 // AC-30: self_assignees を省略した取り込み元は gh api user の login を使う。
 func TestIngest_OmittedSelfAssignees_ResolvesViaCurrentLogin(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := selfOnlySource("s", []string{"o/r"}, nil)
@@ -292,6 +297,7 @@ func TestIngest_OmittedSelfAssignees_ResolvesViaCurrentLogin(t *testing.T) {
 // AC-31: self_assignees を省略し gh api user が失敗すると、self-only は新しい
 // Issue を1件も取り込まず、self_assignees_resolved が false。
 func TestIngest_OmittedSelfAssignees_ResolutionFailure_SelfOnlyIngestsNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := selfOnlySource("s", []string{"o/r"}, nil)
@@ -314,6 +320,7 @@ func TestIngest_OmittedSelfAssignees_ResolutionFailure_SelfOnlyIngestsNothing(t 
 
 // AC-32: 同じ状況で exclude-others は assignee のいない Issue だけを取り込む。
 func TestIngest_OmittedSelfAssignees_ResolutionFailure_ExcludeOthersIngestsUnassignedOnly(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, nil)
@@ -340,6 +347,7 @@ func TestIngest_OmittedSelfAssignees_ResolutionFailure_ExcludeOthersIngestsUnass
 // 再判定されない（前回 in_policy の課題の Issue に他人を assign しておいても
 // in_policy のまま）。
 func TestIngest_OmittedSelfAssignees_ResolutionFailure_DoesNotReevaluateExistingBindings(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := mustCreateChallenge(t, s, "already bound")
@@ -362,6 +370,7 @@ func TestIngest_OmittedSelfAssignees_ResolutionFailure_DoesNotReevaluateExisting
 // --- AC-34〜AC-48: 冪等な作成（対応の無い、ポリシーに合う Issue から課題を作る） ---
 
 func TestIngest_CreatesUnclassifiedChallengeFromNewMatchingIssue(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("harness-repo-issues", []string{"masanami/flywheel"}, []string{"masanami"})
@@ -443,6 +452,7 @@ func TestIngest_CreatesUnclassifiedChallengeFromNewMatchingIssue(t *testing.T) {
 // AC-39・AC-40: 緊急度は urgency_labels の完全一致。異なる緊急度へ写るラベルが
 // 複数あれば未設定。
 func TestIngest_UrgencyFromLabels(t *testing.T) {
+	t.Parallel()
 	urgencyLabels := map[string]string{
 		"priority:high": "高", "priority:medium": "中", "priority:low": "低", "P0": "高",
 	}
@@ -488,6 +498,7 @@ func urgencyPtr(u Urgency) *Urgency { return &u }
 // AC-48: create で作った課題の show（GetChallenge）は source_binding に null
 // （nil）を出力する。
 func TestGetChallenge_CreateChallengeHasNilSourceBinding(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := mustCreateChallenge(t, s, "no source")
 	detail, err := s.GetChallenge(context.Background(), ch.ID)
@@ -502,6 +513,7 @@ func TestGetChallenge_CreateChallengeHasNilSourceBinding(t *testing.T) {
 // --- AC-87: 作業ログ ---
 
 func TestIngest_RecordsIngestCreateActivity(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -554,6 +566,7 @@ func TestIngest_RecordsIngestCreateActivity(t *testing.T) {
 // fakeUpstream の ListOpenIssues をブロックしている間に、別の *Store からの
 // CreateChallenge が store_busy にならずに成功することで検証する。
 func TestIngest_DoesNotHoldWriteLockWhileFetching(t *testing.T) {
+	t.Parallel()
 	fixedActor(t, "alice")
 	ws := t.TempDir()
 	if _, err := Init(ws); err != nil {
@@ -563,11 +576,13 @@ func TestIngest_DoesNotHoldWriteLockWhileFetching(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenWorkspace() A error = %v", err)
 	}
+	registerTestStore(t, storeA) // fixedActor の対象にする
 	defer func() { _ = storeA.Close() }()
 	storeB, err := OpenWorkspace(ws)
 	if err != nil {
 		t.Fatalf("OpenWorkspace() B error = %v", err)
 	}
+	registerTestStore(t, storeB) // fixedActor の対象にする
 	defer func() { _ = storeB.Close() }()
 
 	entered := make(chan struct{})
@@ -625,6 +640,7 @@ func TestIngest_DoesNotHoldWriteLockWhileFetching(t *testing.T) {
 // 1 つの Issue の反映で失敗を注入しても、それより前に反映した Issue の課題は
 // 残る（1 Issue = 1 トランザクションであることの検証）。
 func TestIngest_FailureOnOneIssueDoesNotRollBackEarlierIssues(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -690,6 +706,7 @@ func TestIngest_FailureOnOneIssueDoesNotRollBackEarlierIssues(t *testing.T) {
 // になり policy_state_change が 1 件記録される。resolved=false の回（AC-33）は
 // 再判定されず in_policy のまま、追加の作業ログも残らない。
 func TestIngest_BoundIssuesAreNeitherCreatedNorExcluded(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name             string
 		src              SourceEntry
@@ -772,11 +789,12 @@ func TestIngest_BoundIssuesAreNeitherCreatedNorExcluded(t *testing.T) {
 // actor（OS のログインユーザー名）を解決できない環境では、上流へ接続せずに
 // ErrActorUnavailable で終わり、何も作らない（M1 の書き込みコマンドと同じ）。
 func TestIngest_ActorUnavailable_FailsBeforeFetching(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
-	withActorSource(t, actorSourceFuncs{
+	s.actor = &actorSourceFuncs{
 		userCurrent: func() (*user.User, error) { return nil, errors.New("no user") },
 		getenv:      fakeGetenv(map[string]string{}),
-	})
+	}
 	src := excludeOthersSource("s", []string{"o/r"}, nil)
 	up := &fakeUpstream{login: "masanami", issues: map[string][]UpstreamIssue{
 		"o/r": {issueFixture("o/r#1", "https://github.com/o/r/issues/1", "t", "b", "carol", nil, nil)},
@@ -797,6 +815,7 @@ func TestIngest_ActorUnavailable_FailsBeforeFetching(t *testing.T) {
 // ctx が取り消されたら、残りの取得・反映をせずに error を返す（Issue ごとの
 // failed に薄めない）。
 func TestIngest_ContextCanceled_ReturnsError(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -823,6 +842,7 @@ func TestIngest_ContextCanceled_ReturnsError(t *testing.T) {
 
 // result の閉集合は仕様の列挙（§IF / API `ingest` の JSON 出力）と一致する。
 func TestIngestOutcomeValues_MatchSpec(t *testing.T) {
+	t.Parallel()
 	want := []string{"created", "updated", "unchanged", "skipped_done", "fingerprint_unknown_version", "failed"}
 	got := IngestOutcomeValues()
 	if len(got) != len(want) {

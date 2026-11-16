@@ -30,6 +30,7 @@ func bindInPolicyChallenge(t *testing.T, s *Store, title, externalKey, body stri
 // --- AC-76: selfAssignees に無い人が assign されると out_of_policy になる ---
 
 func TestIngest_Policy_AssigneeOutsideSelfAssigneesBecomesOutOfPolicy(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	body := "body"
@@ -54,6 +55,7 @@ func TestIngest_Policy_AssigneeOutsideSelfAssigneesBecomesOutOfPolicy(t *testing
 // --- AC-77: self-only で assignee がいなくなると out_of_policy になる ---
 
 func TestIngest_Policy_SelfOnlyBecomesOutOfPolicyWhenUnassigned(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	body := "body"
@@ -73,6 +75,7 @@ func TestIngest_Policy_SelfOnlyBecomesOutOfPolicyWhenUnassigned(t *testing.T) {
 // --- AC-78: out_of_policy がポリシーに合う状態に戻れば in_policy に戻る ---
 
 func TestIngest_Policy_OutOfPolicyReturnsToInPolicy(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	body := "body"
@@ -99,6 +102,7 @@ func TestIngest_Policy_OutOfPolicyReturnsToInPolicy(t *testing.T) {
 // （未分類・着手中のそれぞれ） ---
 
 func TestIngest_Policy_OutOfPolicyDoesNotDeleteOrChangeStatus(t *testing.T) {
+	t.Parallel()
 	for _, status := range []Status{StatusUnclassified, StatusInProgress} {
 		t.Run(string(status), func(t *testing.T) {
 			s := newStoreForTest(t)
@@ -132,6 +136,7 @@ func TestIngest_Policy_OutOfPolicyDoesNotDeleteOrChangeStatus(t *testing.T) {
 // --- selfAssignees の解決に失敗した回はポリシーを再判定しない（AC-33 と同じ趣旨） ---
 
 func TestIngest_Policy_NotReevaluatedWhenSelfAssigneesUnresolved(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	body := "body"
@@ -157,6 +162,7 @@ func TestIngest_Policy_NotReevaluatedWhenSelfAssigneesUnresolved(t *testing.T) {
 // reopen（upstream_state_change）とポリシーの再判定（policy_state_change）が
 // 同時に起きる場合。
 func TestIngest_Policy_ReopenAndPolicyChangeInOneReflectionShareVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	body := "body"
@@ -220,6 +226,7 @@ func TestIngest_Policy_ReopenAndPolicyChangeInOneReflectionShareVersion(t *testi
 // 人間記入欄の更新（ingest_update）と reopen（upstream_state_change）が同時に
 // 起きる場合も、版は1回だけ増え、記録の順は ingest_update → upstream_state_change。
 func TestIngest_Policy_HumanFieldUpdateAndReopenInOneReflectionShareVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := mustCreateChallenge(t, s, "bound")

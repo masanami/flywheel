@@ -140,6 +140,7 @@ func runApproval(t *testing.T, s *Store, c *Challenge, dec ApprovalDecision, att
 }
 
 func TestExecuteApproval_RecordsOccurrencePerRoute(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		status   Status
@@ -190,6 +191,7 @@ func TestExecuteApproval_RecordsOccurrencePerRoute(t *testing.T) {
 }
 
 func TestExecuteApproval_CompletionRejectionIsDecidedByKindNotRejectedFields(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -212,6 +214,7 @@ func TestExecuteApproval_CompletionRejectionIsDecidedByKindNotRejectedFields(t *
 }
 
 func TestExecuteApproval_PlanApprovalMakesNoOccurrence(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -226,6 +229,7 @@ func TestExecuteApproval_PlanApprovalMakesNoOccurrence(t *testing.T) {
 
 // AC-219・AC-220・AC-221
 func TestExecuteApproval_CompletionApprovedOutcomeRule(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		seed func(t *testing.T, s *Store, cid int64)
@@ -311,6 +315,7 @@ func seedRejection(t *testing.T, s *Store, cid int64) {
 
 // AC-215
 func TestExecuteApproval_ConflictLeavesNoOccurrence(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingCompletionApproval)
@@ -332,6 +337,7 @@ func TestExecuteApproval_ConflictLeavesNoOccurrence(t *testing.T) {
 
 // AC-216: 発生の挿入の失敗で承認の行・遷移・作業ログが残らない。
 func TestExecuteApproval_OccurrenceInsertFailureRollsEverythingBack(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		status Status
@@ -382,6 +388,7 @@ func TestExecuteApproval_OccurrenceInsertFailureRollsEverythingBack(t *testing.T
 
 // AC-216 の逆向き: coretest の DB トリガで挿入を失敗させても同じ。
 func TestExecuteApproval_TriggerFailureRollsBackApproval(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := Init(dir); err != nil {
 		t.Fatal(err)
@@ -390,6 +397,7 @@ func TestExecuteApproval_TriggerFailureRollsBackApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	registerTestStore(t, s) // fixedActor の対象にする
 	closed := false
 	t.Cleanup(func() {
 		if !closed {
@@ -410,6 +418,7 @@ func TestExecuteApproval_TriggerFailureRollsBackApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	registerTestStore(t, s) // fixedActor の対象にする
 	t.Cleanup(func() { _ = s.Close() })
 	_, _, err = s.ExecuteApproval(context.Background(), ApprovalRequest{
 		ChallengeID: c.ID, ExpectedVersion: prev.Version, Decision: ApprovalDecisionRejected, Reason: strPtr("no"),
@@ -429,6 +438,7 @@ func TestExecuteApproval_TriggerFailureRollsBackApproval(t *testing.T) {
 // 完了の承認で release が自動承認されるときも、発生の参照は kind=completion の行で、
 // 発生の挿入の失敗では release の承認も含めてすべて残らない。
 func TestExecuteApproval_CompletionWithReleasesReferencesCompletionRow(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -451,6 +461,7 @@ func TestExecuteApproval_CompletionWithReleasesReferencesCompletionRow(t *testin
 }
 
 func TestExecuteApproval_OccurrenceFailureAlsoRollsBackReleaseApprovals(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, _, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -467,6 +478,7 @@ func TestExecuteApproval_OccurrenceFailureAlsoRollsBackReleaseApprovals(t *testi
 // AC-215: 発生の挿入より後の書き込み（作業ログ）を DB のトリガで失敗させると、差し戻しの承認の行・
 // 遷移とともに、すでに挿入した発生の行も残らない（同じトランザクション）。
 func TestExecuteApproval_LateWriteFailureLeavesNoOccurrence(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		status Status
@@ -514,6 +526,7 @@ func TestExecuteApproval_LateWriteFailureLeavesNoOccurrence(t *testing.T) {
 
 // AC-215: 先に別の差し戻しが成立していて版が古い 2 回目の差し戻しは conflict で、発生は 1 行のまま増えない。
 func TestExecuteApproval_StaleRejectionConflictDoesNotAddOccurrence(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)

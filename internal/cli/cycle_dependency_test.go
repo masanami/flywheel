@@ -19,6 +19,7 @@ func newUnmetDependencyTarget(t *testing.T, ws string) string {
 
 // AC-179: 依存先が満たされていない課題も、cycle の分類（J1）の段で分類され、結果が記録される。
 func TestCycle_UnmetDependencyDoesNotStopTheClassifyPhase(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := createTitled(t, ws, "dependent")
 	dep := newUnmetDependencyTarget(t, ws)
@@ -42,6 +43,7 @@ func TestCycle_UnmetDependencyDoesNotStopTheClassifyPhase(t *testing.T) {
 
 // AC-180: 依存先が満たされていない課題も、cycle の計画（J2）の段で計画され、結果が記録される。
 func TestCycle_UnmetDependencyDoesNotStopThePlanPhase(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := createTitled(t, ws, "dependent")
 	classifyManually(t, ws, id, "P1")
@@ -63,6 +65,7 @@ func TestCycle_UnmetDependencyDoesNotStopThePlanPhase(t *testing.T) {
 
 // AC-181: 依存先が満たされていない課題も、cycle の検証（J5）の段で検証され、結果が記録される。
 func TestCycle_UnmetDependencyDoesNotStopTheVerifyPhase(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newVerifyingForCase(t, ws, true)
 	dep := newUnmetDependencyTarget(t, ws)
@@ -85,6 +88,7 @@ func TestCycle_UnmetDependencyDoesNotStopTheVerifyPhase(t *testing.T) {
 // AC-178: 依存先（完了）の release が承認済みで未実行のとき、1 回の cycle の release の段でそれが実行済みに
 // なり、同じ周の run の段で依存元の委譲が起動される（段の順 release → run に依存することを cycle で固定する）。
 func TestCycle_ReleaseExecutedInTheSameCycleUnblocksTheRunPhase(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	// 委譲の宣言に、release の PR の o/r を足す。
 	writeConnectorsJSONForTest(t, ws, strings.Replace(runConnectorsFixture, `"repos": [`,
@@ -132,6 +136,7 @@ func TestCycle_ReleaseExecutedInTheSameCycleUnblocksTheRunPhase(t *testing.T) {
 
 // J2 が出した depends_on は、承認の後の委譲の判定で依存元を止める（一続きの確認）。
 func TestCycle_J2DependsOnStopsTheDelegationAfterPlanApproval(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	id := createTitled(t, ws, "dependent")
 	classifyManually(t, ws, id, "P1")

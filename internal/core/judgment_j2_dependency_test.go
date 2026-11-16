@@ -32,6 +32,7 @@ func j2DepIDs(t *testing.T, ids ...string) []int64 {
 }
 
 func TestJ2OutputSchema_DependsOn(t *testing.T) {
+	t.Parallel()
 	var decoded map[string]any
 	if err := json.Unmarshal(j2OutputSchema(), &decoded); err != nil {
 		t.Fatal(err)
@@ -48,6 +49,7 @@ func TestJ2OutputSchema_DependsOn(t *testing.T) {
 }
 
 func TestValidateJ2Output_DependsOnSchema(t *testing.T) {
+	t.Parallel()
 	vc := j2TestContext(t, true)
 	if _, ok := validateJ2Output(j2DepOut("C-1", nil), vc); ok {
 		t.Errorf("string depends_on must be invalid")
@@ -78,6 +80,7 @@ func TestValidateJ2Output_DependsOnSchema(t *testing.T) {
 
 // AC-187: 存在する ID なら計画の登録と同じトランザクションで依存を足す。
 func TestPlanAutoJ2_DependsOn_AddsDependenciesWithPlan(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	a := f.newClassified(t, "a", "P1")
 	b := f.newClassified(t, "b", "P1")
@@ -127,6 +130,7 @@ func TestPlanAutoJ2_DependsOn_AddsDependenciesWithPlan(t *testing.T) {
 
 // AC-188〜AC-191: 存在しない ID・自己参照・循環（完了済みを通る輪を含む）は計画も依存も書かない。
 func TestPlanAutoJ2_DependsOn_InvalidWritesNothingAndIsInvalidOutput(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		deps func(ch, other *Challenge) []string
@@ -172,6 +176,7 @@ func TestPlanAutoJ2_DependsOn_InvalidWritesNothingAndIsInvalidOutput(t *testing.
 
 // 循環の検査は課題の状態によらず、すべての辺（完了した課題を通る輪も）で行う。
 func TestPlanAutoJ2_DependsOn_CycleThroughDoneChallengeIsRejected(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	mid := f.newClassified(t, "mid", "P1")
 	ch := f.newClassified(t, "target", "P1")
@@ -199,6 +204,7 @@ func TestPlanAutoJ2_DependsOn_CycleThroughDoneChallengeIsRejected(t *testing.T) 
 
 // AC-192: depends_on が無い出力は既存の依存を変えない（空配列も同じ）。
 func TestPlanAutoJ2_DependsOn_AbsentKeepsExistingDependencies(t *testing.T) {
+	t.Parallel()
 	for _, deps := range []any{nil, []string{}, "null"} {
 		f := newJ2Fixture(t)
 		a := f.newClassified(t, "a", "P1")
@@ -229,6 +235,7 @@ func TestPlanAutoJ2_DependsOn_AbsentKeepsExistingDependencies(t *testing.T) {
 
 // 既にある依存だけを書いた出力は、足すものが無いので dep_add を残さない。
 func TestPlanAutoJ2_DependsOn_AlreadyPresentLogsNothing(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	a := f.newClassified(t, "a", "P1")
 	ch := f.newClassified(t, "c", "P1")
@@ -248,6 +255,7 @@ func TestPlanAutoJ2_DependsOn_AlreadyPresentLogsNothing(t *testing.T) {
 
 // 計画を登録しない判定（予想が空での保留・uncertain）では依存を書かない（無効な ID でも invalid_output にしない）。
 func TestPlanAutoJ2_DependsOn_NotWrittenWhenPlanIsNotRegistered(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	a := f.newClassified(t, "a", "P1")
 	ch := f.newClassified(t, "held", "P1")

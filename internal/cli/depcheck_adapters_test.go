@@ -28,6 +28,7 @@ const githubAdapterImportPath = "github.com/masanami/flywheel/internal/adapters/
 // の Imports/TestImports/XTestImports（直接 import のみ）で判定する
 // （TestStorePackageIsOnlyImportedFromWithinCore と同じ手法）。
 func TestAdaptersPackagesDoNotImportStoreDirectly(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	pkgs := goListJSON(t, root, "./...")
 
@@ -75,6 +76,7 @@ const modulePath = "github.com/masanami/flywheel"
 // 標準ライブラリだけ（先頭の要素に "." を含むパス＝外部モジュールを含まない）
 // であること。
 func TestAdaptersNonTestImportsAreCoreAndStdlibOnly(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	pkgs := goListJSON(t, root, "./internal/adapters/...")
 	if len(pkgs) == 0 {

@@ -25,6 +25,7 @@ import (
 // --- AC-65: conflict の経路は作業ログを増やさない ---
 
 func TestExecuteApproval_ConflictDoesNotAddActivityLogEntry(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -61,6 +62,7 @@ func TestExecuteApproval_ConflictDoesNotAddActivityLogEntry(t *testing.T) {
 // --- AC-65: verification_rejected の経路は作業ログを増やさない ---
 
 func TestExecuteApproval_VerificationRejectedDoesNotAddActivityLogEntry(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -93,6 +95,7 @@ func TestExecuteApproval_VerificationRejectedDoesNotAddActivityLogEntry(t *testi
 // 「承認・差し戻し・保留への回答」に共通する操作全般の性質であり、
 // approve だけの検証に閉じない）。
 func TestExecuteAnswer_VerificationRejectedDoesNotAddActivityLogEntry(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -122,6 +125,7 @@ func TestExecuteAnswer_VerificationRejectedDoesNotAddActivityLogEntry(t *testing
 // --- AC-47: 承認が成立すると decided_at が設定される ---
 
 func TestExecuteApproval_RecordsDecidedAt(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -165,6 +169,7 @@ func TestExecuteApproval_RecordsDecidedAt(t *testing.T) {
 // --- AC-56: D12 で release ごとに記録される作業ログの channel は cli ---
 
 func TestExecuteApproval_CompletionReleaseApprovalActivityChannelIsCLI(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)

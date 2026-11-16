@@ -140,6 +140,7 @@ func collapseConsecutive(in []string) []string {
 // AC-2: position_file だけを持つ agent.json のワークスペースでの cycle --json の
 // config_defaults_used は agent.json を含む。全キーを明示した agent.json では含まない。
 func TestCycle_PositionFileOnlyAgentJSON_ConfigDefaultsUsedIncludesAgentJSON(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t) // agent.json は {"position_file": "position.md"} だけ
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 
@@ -152,6 +153,7 @@ func TestCycle_PositionFileOnlyAgentJSON_ConfigDefaultsUsedIncludesAgentJSON(t *
 }
 
 func TestCycle_FullyExplicitAgentJSON_ConfigDefaultsUsedIsEmptyArray(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writePositionFileForTest(t, ws, "pos")
 	writeAgentJSONForTest(t, ws, cycleFullAgentJSON)
@@ -171,6 +173,7 @@ func TestCycle_FullyExplicitAgentJSON_ConfigDefaultsUsedIsEmptyArray(t *testing.
 // 実行する（偽の gh と偽の claude の呼び出しの順で検証する）。取り込みで作られた課題が
 // 同じ周で分類・計画される。
 func TestCycle_WithSources_RunsIngestClassifyPlanInOrder(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	writeSourcesDeclaration(t, ws, cycleSourcesJSON)
 	order := filepath.Join(t.TempDir(), "order.log")
@@ -204,6 +207,7 @@ func TestCycle_WithSources_RunsIngestClassifyPlanInOrder(t *testing.T) {
 // AC-133: sources.json の無いワークスペースの cycle の出力で、ingest の段は skipped: true・
 // result: null で、gh は呼ばれない。
 func TestCycle_WithoutSources_IngestPhaseIsSkipped(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	ghCalls := withFakeGHRoutesOnPATH(t, nil)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, "")
@@ -226,6 +230,7 @@ func TestCycle_WithoutSources_IngestPhaseIsSkipped(t *testing.T) {
 // 終わり、plan の段は skipped: true（items・not_started は空）で J2 を起動せず、分類の段は
 // J1 を起動する。
 func TestCycle_WithoutConnectors_PlanSkippedExitZeroClassifyStillRuns(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t) // connectors.json は置かない
 	id := createTitled(t, ws, "only-classify")
 	order := filepath.Join(t.TempDir(), "order.log")
@@ -254,6 +259,7 @@ func TestCycle_WithoutConnectors_PlanSkippedExitZeroClassifyStillRuns(t *testing
 
 // AC-137: 同じ周の分類の段で分類済になった課題は、同じ周の計画の段で J2 の対象になる。
 func TestCycle_ClassifiedInThisCycleIsPlannedInThisCycle(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := createTitled(t, ws, "one-shot")
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, "")
@@ -273,6 +279,7 @@ func TestCycle_ClassifiedInThisCycleIsPlannedInThisCycle(t *testing.T) {
 // AC-138: 各段の対象は、優先度 P0・P1・P2・未設定の順、同じ優先度では ID の昇順で処理される。
 // 計画の段（P0→P1→P2 の順）と、優先度未設定の分類の段（ID の昇順）で確かめる。
 func TestCycle_TargetsAreProcessedByPriorityThenID(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	p2a := createTitled(t, ws, "p2-a") // C-1
 	p0a := createTitled(t, ws, "p0-a") // C-2
@@ -302,6 +309,7 @@ func TestCycle_TargetsAreProcessedByPriorityThenID(t *testing.T) {
 // AC-139: 計画承認待ち・完了確認待ち・人間対応待ちの課題は、cycle のどの段でも判断の呼び出しの
 // 対象にならない。
 func TestCycle_DoesNotInvokeJudgmentsForChallengesWaitingForAHuman(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	awaitingPlan := createPlannedForCase(t, ws)                                          // C-1: 計画承認待ち
 	awaitingCompletion := createWithStatusForCase(t, ws, "awaiting_completion_approval") // C-2
@@ -328,6 +336,7 @@ func TestCycle_DoesNotInvokeJudgmentsForChallengesWaitingForAHuman(t *testing.T)
 // AC-140: cycle は、承認・差し戻し・保留への回答の作業ログを残さない（残るのは経路 invoker の
 // 分類・計画の遷移だけ）。
 func TestCycle_RecordsNoApprovalRejectionOrAnswerActivity(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	createPlannedForCase(t, ws)
 	held := createForCase(t, ws)
@@ -364,6 +373,7 @@ func TestCycle_RecordsNoApprovalRejectionOrAnswerActivity(t *testing.T) {
 
 // AC-141・AC-142: --trigger の値が周の記録の契機になる。省略すると manual。
 func TestCycle_TriggerIsRecorded(t *testing.T) {
+	parallelTools(t, false)
 	cases := []struct {
 		name string
 		args []string
@@ -393,6 +403,7 @@ func TestCycle_TriggerIsRecorded(t *testing.T) {
 // --trigger を空文字列で明示すると、省略の manual に化けず validation_failed で終わる
 // （ingest の --source と同じく、指定の有無を区別する）。周は作られない。
 func TestCycle_EmptyTrigger_IsValidationFailedAndCreatesNoCycle(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	createTitled(t, ws, "t")
 	order := filepath.Join(t.TempDir(), "order.log")
@@ -413,12 +424,13 @@ func TestCycle_EmptyTrigger_IsValidationFailedAndCreatesNoCycle(t *testing.T) {
 // AC-143: cycle --json は標準出力に JSON を 1 つだけ出力する（形は jsondoc_test.go の
 // 文書との照合が allCommandSuccessCases["cycle"] 経由で検証する）。
 func TestCycle_JSONIsASingleDocumentOnStdout(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	createTitled(t, ws, "doc-shape")
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, "")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"cycle", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"cycle", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("exit=%d stderr=%q, want 0 and empty", code, stderr.String())
 	}
@@ -433,6 +445,7 @@ func TestCycle_JSONIsASingleDocumentOnStdout(t *testing.T) {
 // AC-144・AC-145: 周の中の判断の呼び出しが失敗（errored）しても、cycle は終了コード 0 で終わり、
 // その課題の要素の result が errored である（課題の状態は変わらない）。
 func TestCycle_ErroredRunIsShownInTheResultAndExitCodeIsZero(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := createTitled(t, ws, "will-error")
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{
@@ -455,6 +468,7 @@ func TestCycle_ErroredRunIsShownInTheResultAndExitCodeIsZero(t *testing.T) {
 
 // AC-127 の CLI の形: cycle --json の spent_usd は、終了した run の費用の合計である。
 func TestCycle_SpentUSDIsTheSumOfRunCosts(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	createTitled(t, ws, "a")
 	createTitled(t, ws, "b")
@@ -476,6 +490,7 @@ func TestCycle_SpentUSDIsTheSumOfRunCosts(t *testing.T) {
 // --- 宣言・環境の不備は周を始めない ---
 
 func TestCycle_InvalidDeclarations_ConfigInvalidAndNothingInvoked(t *testing.T) {
+	parallelTools(t, false)
 	cases := []struct {
 		name  string
 		setup func(t *testing.T, ws string)
@@ -528,6 +543,7 @@ func TestCycle_InvalidDeclarations_ConfigInvalidAndNothingInvoked(t *testing.T) 
 // PATH に claude が無い環境の cycle は、終了コード 2・invoker_unavailable で終わり、周も排他も
 // 作らず、ストアを変えない。
 func TestCycle_ClaudeNotOnPATH_InvokerUnavailableAndStoreUnchanged(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	createTitled(t, ws, "t")
 	before := storeBytes(t, ws)
@@ -543,13 +559,14 @@ func TestCycle_ClaudeNotOnPATH_InvokerUnavailableAndStoreUnchanged(t *testing.T)
 // sources.json があるのに gh が PATH に無い cycle は、ingest と同じく upstream_unavailable
 // （終了コード 2）で、周を始めない。
 func TestCycle_SourcesWithoutGH_UpstreamUnavailable(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	writeSourcesDeclaration(t, ws, cycleSourcesJSON)
 	createTitled(t, ws, "t")
 	order := filepath.Join(t.TempDir(), "order.log")
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, order)
 	// PATH の先頭に置いた偽の claude のディレクトリだけを残し、gh を見つからなくする。
-	t.Setenv("PATH", strings.SplitN(os.Getenv("PATH"), string(os.PathListSeparator), 2)[0])
+	restrictToolDirs(t, 1)
 	before := storeBytes(t, ws)
 
 	requireJSONErrorEnvelope(t, []string{"cycle", "--workspace", ws}, 2, CodeUpstreamUnavailable)
@@ -565,11 +582,12 @@ func TestCycle_SourcesWithoutGH_UpstreamUnavailable(t *testing.T) {
 // 宣言の不備は環境の不備（gh の不在）より先に報告する: sources.json があり gh が無く、かつ
 // connectors.json が不正なら、upstream_unavailable ではなく config_invalid。
 func TestCycle_InvalidConnectorsIsReportedBeforeMissingGH(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	writeSourcesDeclaration(t, ws, cycleSourcesJSON)
 	writeConnectorsJSONForTest(t, ws, `{"version": 1, "connectors": [], "repos": [], "no_such_key": 1}`)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
-	t.Setenv("PATH", strings.SplitN(os.Getenv("PATH"), string(os.PathListSeparator), 2)[0])
+	restrictToolDirs(t, 1)
 
 	requireJSONErrorEnvelope(t, []string{"cycle", "--workspace", ws}, 2, CodeConfigInvalid)
 }
@@ -590,6 +608,7 @@ func currentHost(t *testing.T) string {
 // AC-146: 生きている保持者が排他を持っている間の cycle は、終了コード 1・locked で終わり、
 // 偽の gh・偽の claude が呼ばれない。保持者のロックは残る。
 func TestCycle_LiveHolder_LockedAndNothingInvoked(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	writeSourcesDeclaration(t, ws, cycleSourcesJSON)
 	createTitled(t, ws, "t")
@@ -622,6 +641,7 @@ func deadPID(t *testing.T) int64 {
 // AC-147: heartbeat が 300 秒より古く、保持者のプロセスが生きていない排他は、次の cycle が
 // 回収して取得し、古い周を interrupted で閉じる。終了後は解放される。
 func TestCycle_StaleHolder_IsReclaimedAndReleased(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	createTitled(t, ws, "t")
 	holder := coretest.InsertCycle(t, ws, "dead-cycle", 300_000_000, "2026-09-28T00:00:00.000Z")
@@ -643,6 +663,7 @@ func TestCycle_StaleHolder_IsReclaimedAndReleased(t *testing.T) {
 
 // AC-148: cycle の終了後、排他が解放されている（続けて実行した cycle が locked にならない）。
 func TestCycle_ReleasesTheLock_SecondCycleIsNotLocked(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	createTitled(t, ws, "t")
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
@@ -661,6 +682,7 @@ func TestCycle_ReleasesTheLock_SecondCycleIsNotLocked(t *testing.T) {
 // AC-150: cycle の実行中も、ID を指定した classify --auto <C-ID> は排他を待たずに実行できる
 // （cycle の最初の J1 が眠っている間に、別の課題への classify --auto が完了する）。
 func TestCycle_RunningCycleDoesNotBlockClassifyAutoByID(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	first := createTitled(t, ws, "first")   // cycle の J1 が最初に処理して眠る
 	second := createTitled(t, ws, "second") // 実行中の cycle と並行して classify --auto <C-ID> する
@@ -681,7 +703,7 @@ func TestCycle_RunningCycleDoesNotBlockClassifyAutoByID(t *testing.T) {
 		defer wg.Done()
 		defer close(cycleDone)
 		var stdout bytes.Buffer
-		cycleExit = run([]string{"cycle", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &cycleStderr, defaultCommands())
+		cycleExit = runWithLookPath([]string{"cycle", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &cycleStderr, defaultCommands(), lookPathFor(t))
 	}()
 	waitForFileWithTimeout(t, started, 10*time.Second)
 
@@ -690,7 +712,7 @@ func TestCycle_RunningCycleDoesNotBlockClassifyAutoByID(t *testing.T) {
 		t.Fatal("the running cycle does not hold the exclusive lock")
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"classify", "--auto", second, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"classify", "--auto", second, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	select {
 	case <-cycleDone:
 		t.Fatal("cycle finished before classify --auto returned: the test cannot tell whether classify --auto waited for the lock")
@@ -712,6 +734,7 @@ func TestCycle_RunningCycleDoesNotBlockClassifyAutoByID(t *testing.T) {
 
 // AC-177b: --json を付けない cycle は、周の開始の直後に 1 行 `周 <ID> を開始した` を最初に書く。
 func TestCycle_Text_StartLineIsWrittenFirst(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 
@@ -725,10 +748,11 @@ func TestCycle_Text_StartLineIsWrittenFirst(t *testing.T) {
 
 // AC-177b: --json の出力は開始の行を含まない単一の文書のまま。
 func TestCycle_JSON_HasNoStartLine(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"cycle", "--json", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"cycle", "--json", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 || strings.Contains(stdout.String(), "を開始した") || !strings.HasPrefix(stdout.String(), "{") {
 		t.Errorf("exit=%d stdout=%q", code, stdout.String())
 	}
@@ -736,10 +760,11 @@ func TestCycle_JSON_HasNoStartLine(t *testing.T) {
 
 // AC-177b: BeginCycle より前に失敗したときは開始の行を書かない。
 func TestCycle_Text_NoStartLineWhenFailingBeforeBeginCycle(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	emptyPATH(t)
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"cycle", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"cycle", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code == 0 || stdout.Len() != 0 {
 		t.Errorf("exit=%d stdout=%q", code, stdout.String())
 	}
@@ -749,6 +774,7 @@ func TestCycle_Text_NoStartLineWhenFailingBeforeBeginCycle(t *testing.T) {
 // 周を最後まで進める（UI の server は合図を読んだら標準出力を手放す）。
 // 子プロセスの標準出力を、読み口を閉じたパイプにする。signal.Notify を外すと子は SIGPIPE で落ちる。
 func TestCycle_Text_ClosedStdoutReader_DoesNotDieBySIGPIPE(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := createTitled(t, ws, "SIGPIPE")
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
@@ -761,6 +787,9 @@ func TestCycle_Text_ClosedStdoutReader_DoesNotDieBySIGPIPE(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd, _, stderr := newChildCmd([]string{"cycle", "--workspace", ws})
+	if env := childPathEnv(t); env != "" {
+		cmd.Env = append(cmd.Env, env)
+	}
 	cmd.Stdout = w
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

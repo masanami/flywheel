@@ -85,7 +85,7 @@ func putFakeClaudeOnPATH(t *testing.T, opts fakeClaudeOpts) (argvLogPath, stdinL
 // 環境の再現。invoker_unavailable のテストが使う）。
 func emptyPATH(t *testing.T) {
 	t.Helper()
-	t.Setenv("PATH", t.TempDir())
+	restrictToolDirs(t, 0)
 }
 
 // waitForFileWithTimeout は path が現れるまで待つ（最大 timeout。100ms 間隔の

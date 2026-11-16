@@ -122,6 +122,7 @@ func TestApproveHead_CompletionSummaryShowsFullAndShortHeadsBeforeTheConfirmatio
 }
 
 func TestApproveHead_RelayedCompletionRecordsHeadsAndPrintsReleases(t *testing.T) {
+	parallelTools(t, false)
 	h1, h2 := releaseHead(1, 0), releaseHead(2, 0)
 	f := newCompletionFixture(t, map[int]string{1: h1, 2: h2}, releasePRURL(1), releasePRURL(2))
 	doc := f.relayed(t, f.id)
@@ -142,6 +143,7 @@ func TestApproveHead_RelayedCompletionRecordsHeadsAndPrintsReleases(t *testing.T
 // --- 外す理由（AC-7〜AC-13） ---
 
 func TestApproveHead_CompletionLeavesUnapprovableReleasesPendingAndStillCompletes(t *testing.T) {
+	parallelTools(t, false)
 	good := releaseHead(1, 0)
 	f := newCompletionFixture(t, map[int]string{1: good, 2: ""}, releasePRURL(1), releasePRURL(2), "https://example.com/not-a-pr", "https://github.com/x/undeclared/pull/3")
 	doc := f.relayed(t, f.id)
@@ -252,6 +254,7 @@ func TestApproveHead_VerifiedHeadMismatchExcludesAndMatchOrNoRecordApproves(t *t
 }
 
 func TestApproveHead_RelayedJSONNamesVerifiedHeadMismatch(t *testing.T) {
+	parallelTools(t, false)
 	f := newCompletionFixture(t, map[int]string{1: releaseHead(1, 0)}, releasePRURL(1))
 	f.verified(t, releasePRURL(1), releaseHead(1, 1))
 	ex := jsonList(t, f.relayed(t, f.id), "excluded_releases")
@@ -264,6 +267,7 @@ func TestApproveHead_RelayedJSONNamesVerifiedHeadMismatch(t *testing.T) {
 // 取得した head と異なるので、正しい実装は verified_head_mismatch で外し、NULL の行を最新として扱う
 // （記録なしとみなす）実装は承認してしまう。
 func TestApproveHead_ComparesWithTheLatestNonNullVerifiedHead(t *testing.T) {
+	parallelTools(t, false)
 	h := releaseHead(1, 0)
 	f := newCompletionFixture(t, map[int]string{1: h}, releasePRURL(1))
 	f.verified(t, releasePRURL(1), h)                 // 古い行: 一致
@@ -314,8 +318,8 @@ func TestApproveHead_OperationWithVerifiedHeadMismatchIsUpstreamUnavailable(t *t
 func assertRelayedOperationRejected(t *testing.T, f *completionFixture, op string, wantExit int, wantCode ErrorCode, detail string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"approve", op, "--relayed", "--session", "s", "--quote", "q", "--workspace", f.ws, "--json"},
-		strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"approve", op, "--relayed", "--session", "s", "--quote", "q", "--workspace", f.ws, "--json"},
+		strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != wantExit || readErrorCode(t, stderr.String()) != string(wantCode) || !strings.Contains(stderr.String(), detail) {
 		t.Errorf("relayed %s: exit=%d stderr=%s, want exit %d %s naming %s", op, code, stderr.String(), wantExit, wantCode, detail)
 	}
@@ -410,7 +414,7 @@ func TestApproveHead_TheRecordedHeadIsTheOneFetchedAtTheSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := "#!/bin/sh\ncase \"$*\" in\n*check-runs*) echo '{\"total_count\":0,\"check_runs\":[]}';;\n*status*) echo '{\"state\":\"success\",\"total_count\":0,\"statuses\":[]}';;\n*) cat " + resp + ";;\nesac\n"
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+	if err := writeExecutable(filepath.Join(dir, "gh"), []byte(script)); err != nil {
 		t.Fatal(err)
 	}
 	addToolDir(t, dir)
@@ -448,6 +452,7 @@ func TestApproveHead_OperationRevokedAsMergedUnapprovedIsRejectedBeforeTheConfir
 // --- 完了した課題の pending の release は approve <OP-ID> で承認できる（AC-37）。--hold-release は release を承認しない ---
 
 func TestApproveHead_DoneChallengesPendingReleaseCanBeApprovedByOperationID(t *testing.T) {
+	parallelTools(t, false)
 	f := newCompletionFixture(t, map[int]string{1: releaseHead(1, 0)}, releasePRURL(1))
 	runJSON(t, f.ws, "approve", f.id, "--hold-release", "--relayed", "--session", "s", "--quote", "q")
 	if f.challengeStatus(t) != "done" || f.state(t, f.ops[0]) != "pending" {
@@ -460,6 +465,7 @@ func TestApproveHead_DoneChallengesPendingReleaseCanBeApprovedByOperationID(t *t
 }
 
 func TestApproveHead_HoldReleaseCreatesNoReleaseApproval(t *testing.T) {
+	parallelTools(t, false)
 	f := newCompletionFixture(t, map[int]string{1: releaseHead(1, 0)}, releasePRURL(1))
 	doc := runJSON(t, f.ws, "approve", f.id, "--hold-release", "--relayed", "--session", "s", "--quote", "q")
 	if n := coretest.CountReleaseApprovals(t, f.ws); n != 0 {
@@ -495,6 +501,7 @@ func TestApproveHead_CompletionExcludesAReleaseRevokedAsMergedUnapprovedOnTheTer
 }
 
 func TestApproveHead_RelayedJSONNamesMergedUnapproved(t *testing.T) {
+	parallelTools(t, false)
 	f := newCompletionFixture(t, map[int]string{1: releaseHead(1, 0)}, releasePRURL(1))
 	f.revokedAsMergedUnapproved(t, f.ops[0])
 	ex := jsonList(t, f.relayed(t, f.id), "excluded_releases")

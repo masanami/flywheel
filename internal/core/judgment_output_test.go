@@ -6,6 +6,7 @@ import "testing"
 // mine/not_mine/uncertain の3値であることを固定する
 // （docs/features/m3-invoker-delegation.md §IF / API「判断点の出力」）。
 func TestJ1VerdictValues_Are3ClosedValues(t *testing.T) {
+	t.Parallel()
 	want := []J1Verdict{J1VerdictMine, J1VerdictNotMine, J1VerdictUncertain}
 	if len(J1VerdictValues) != len(want) {
 		t.Fatalf("len(J1VerdictValues) = %d, want %d", len(J1VerdictValues), len(want))
@@ -23,6 +24,7 @@ func TestJ1VerdictValues_Are3ClosedValues(t *testing.T) {
 // TestJ2VerdictValues_Are4ClosedValues は J2 の判定の閉集合が plan/uncertain/issues/parent_direct の
 // 4値であることを固定する。
 func TestJ2VerdictValues_Are4ClosedValues(t *testing.T) {
+	t.Parallel()
 	want := []J2Verdict{J2VerdictPlan, J2VerdictUncertain, J2VerdictIssues, J2VerdictParentDirect}
 	if len(J2VerdictValues) != len(want) {
 		t.Fatalf("len(J2VerdictValues) = %d, want %d", len(J2VerdictValues), len(want))
@@ -37,6 +39,7 @@ func TestJ2VerdictValues_Are4ClosedValues(t *testing.T) {
 // TestJudgmentSizeValues_AreSML は J1・J2 のサイズ案の閉集合が S/M/L である
 // ことを固定する。
 func TestJudgmentSizeValues_AreSML(t *testing.T) {
+	t.Parallel()
 	want := []JudgmentSize{JudgmentSizeS, JudgmentSizeM, JudgmentSizeL}
 	if len(JudgmentSizeValues) != len(want) {
 		t.Fatalf("len(JudgmentSizeValues) = %d, want %d", len(JudgmentSizeValues), len(want))
@@ -54,6 +57,7 @@ func TestJudgmentSizeValues_AreSML(t *testing.T) {
 // TestJ4DecisionValues_AreAnswerEscalate は J4 の問いごとの判定の閉集合が
 // answer/escalate であることを固定する。
 func TestJ4DecisionValues_AreAnswerEscalate(t *testing.T) {
+	t.Parallel()
 	want := []J4Decision{J4DecisionAnswer, J4DecisionEscalate}
 	if len(J4DecisionValues) != len(want) {
 		t.Fatalf("len(J4DecisionValues) = %d, want %d", len(J4DecisionValues), len(want))
@@ -68,6 +72,7 @@ func TestJ4DecisionValues_AreAnswerEscalate(t *testing.T) {
 // TestJ5VerdictValues_Are3ClosedValues は J5 の判定の閉集合が
 // met/not_met/uncertain の3値であることを固定する。
 func TestJ5VerdictValues_Are3ClosedValues(t *testing.T) {
+	t.Parallel()
 	want := []J5Verdict{J5VerdictMet, J5VerdictNotMet, J5VerdictUncertain}
 	if len(J5VerdictValues) != len(want) {
 		t.Fatalf("len(J5VerdictValues) = %d, want %d", len(J5VerdictValues), len(want))
@@ -82,6 +87,7 @@ func TestJ5VerdictValues_Are3ClosedValues(t *testing.T) {
 // TestDelegationOutcomeValues_Are3ClosedValues は委譲の報告の outcome の
 // 閉集合が completed/questions/blocked であることを固定する。
 func TestDelegationOutcomeValues_Are3ClosedValues(t *testing.T) {
+	t.Parallel()
 	want := []DelegationOutcome{DelegationOutcomeCompleted, DelegationOutcomeQuestions, DelegationOutcomeBlocked}
 	if len(DelegationOutcomeValues) != len(want) {
 		t.Fatalf("len(DelegationOutcomeValues) = %d, want %d", len(DelegationOutcomeValues), len(want))
@@ -98,6 +104,7 @@ func TestDelegationOutcomeValues_Are3ClosedValues(t *testing.T) {
 // （宣言の human_question_kinds はこれとは別に動的な id を持つため、ここには
 // 含めない）。
 func TestQuestionKindValues_Are8BuiltInValues(t *testing.T) {
+	t.Parallel()
 	want := []QuestionKind{
 		QuestionKindRequirements,
 		QuestionKindCriticalDesign,
@@ -131,6 +138,7 @@ func TestQuestionKindValues_Are8BuiltInValues(t *testing.T) {
 // AllJudgmentOutputClosedValues が全ての閉集合の値を1つの一覧へ合成する
 // ことを検証する（internal/invoker の禁止語生成の入力になる正本）。
 func TestAllJudgmentOutputClosedValues_ContainsEveryEnum(t *testing.T) {
+	t.Parallel()
 	got := AllJudgmentOutputClosedValues()
 	mustContain := []string{
 		"P0", "P1", "P2",

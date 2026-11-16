@@ -257,6 +257,7 @@ func (f *delegateFixture) slotStates(t *testing.T) map[string]string {
 // --- 意思決定者の判定（AC-190〜199） ---
 
 func TestDecideDecider_FiveRowsEvaluatedTopDown(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		op      ConnectorOperation
@@ -287,6 +288,7 @@ func TestDecideDecider_FiveRowsEvaluatedTopDown(t *testing.T) {
 }
 
 func TestRunDelegation_RecordsDeciderAndRowOnTheRun(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		mut  func(m map[string]any)
@@ -328,6 +330,7 @@ func TestRunDelegation_RecordsDeciderAndRowOnTheRun(t *testing.T) {
 // --- 対象（AC-200〜202） ---
 
 func TestRunDelegation_OmittedID_OnlyInProgressWithApprovedPlanAndNoActiveRun(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	ctx := context.Background()
 	target := f.newInProgress(t, "target", "P1", planSpec(nil))
@@ -374,6 +377,7 @@ func TestRunDelegation_OmittedID_OnlyInProgressWithApprovedPlanAndNoActiveRun(t 
 }
 
 func TestRunDelegation_OrdersByPriorityThenID(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	a := f.newInProgress(t, "a-p2", "P2", planSpec(func(m map[string]any) { m["repo"] = "direct-repo"; m["operation"] = "brief" }))
 	b := f.newInProgress(t, "b-p0", "P0", planSpec(nil))
@@ -392,6 +396,7 @@ func TestRunDelegation_OrdersByPriorityThenID(t *testing.T) {
 }
 
 func TestRunDelegation_ExplicitID_ErrorsForStatusAndActiveRun(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	ctx := context.Background()
 	ch, _ := f.s.CreateChallenge(ctx, ChannelCLI, CreateInput{Title: "x"})
@@ -422,6 +427,7 @@ func TestRunDelegation_ExplicitID_ErrorsForStatusAndActiveRun(t *testing.T) {
 }
 
 func TestRunDelegation_ExplicitID_PlanWithoutSpecIsValidationError(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "manual", "P1", "")
 	if _, err := f.run(t, &id); !errors.Is(err, ErrValidation) {
@@ -435,6 +441,7 @@ func TestRunDelegation_ExplicitID_PlanWithoutSpecIsValidationError(t *testing.T)
 // --- J3 の入力・出力（AC-203〜211） ---
 
 func TestRunDelegation_J3InputHasPlanSpecHoldsOperationAndDecider(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	spec := planSpec(nil)
 	id := f.newInProgress(t, "t", "P1", spec)
@@ -464,6 +471,7 @@ func TestRunDelegation_J3InputHasPlanSpecHoldsOperationAndDecider(t *testing.T) 
 }
 
 func TestRunDelegation_J3InputFetchesUpstream_AndLeavesReadValuesUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "src", "P1", planSpec(func(m map[string]any) { m["operation"] = "impl-src" }))
 	ch := &Challenge{ID: id}
@@ -509,6 +517,7 @@ func (f *delegateFixture) detail(t *testing.T, id string) *ChallengeDetail {
 }
 
 func TestRunDelegation_UpstreamFetchFailure_StartsNothing(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "src", "P1", planSpec(func(m map[string]any) { m["operation"] = "impl-src" }))
 	in := validBindingInput("o/r#7")
@@ -529,6 +538,7 @@ func TestRunDelegation_UpstreamFetchFailure_StartsNothing(t *testing.T) {
 }
 
 func TestRunDelegation_J3OutputSchemaHasOnlyBrief(t *testing.T) {
+	t.Parallel()
 	var m map[string]any
 	if err := json.Unmarshal(j3OutputSchema(), &m); err != nil {
 		t.Fatal(err)
@@ -540,6 +550,7 @@ func TestRunDelegation_J3OutputSchemaHasOnlyBrief(t *testing.T) {
 }
 
 func TestRunDelegation_J3InvalidOutputOrNotSucceeded_NoDelegationAndStateUnchanged(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		out  JudgmentLaunchOutput
@@ -579,6 +590,7 @@ func TestRunDelegation_J3InvalidOutputOrNotSucceeded_NoDelegationAndStateUnchang
 }
 
 func TestRunDelegation_J3BudgetAndTimeoutComeFromDeclaration(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	f.agent.JudgmentBudgetUSD.J3 = 1.25
 	f.newInProgress(t, "t", "P1", planSpec(nil))
@@ -595,6 +607,7 @@ func TestRunDelegation_J3BudgetAndTimeoutComeFromDeclaration(t *testing.T) {
 // --- 委譲の起動（AC-209〜215） ---
 
 func TestRunDelegation_LaunchInput_WorkDirPermissionModeBriefInvocationBudget(t *testing.T) {
+	t.Parallel()
 	modes := map[string]PermissionMode{"harness": PermissionModeAcceptEdits, "direct": PermissionModeDefault}
 	f := newDelegateFixture(t)
 	f.newInProgress(t, "plugin", "P0", planSpec(nil))
@@ -661,6 +674,7 @@ func TestRunDelegation_LaunchInput_WorkDirPermissionModeBriefInvocationBudget(t 
 }
 
 func TestRunDelegation_MaxBudgetUsesPlanImplBudgetAndItsOverride(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) { m["budget_impl_usd"] = 41 }))
 	if _, err := f.run(t, nil); err != nil {
@@ -696,6 +710,7 @@ func TestRunDelegation_MaxBudgetUsesPlanImplBudgetAndItsOverride(t *testing.T) {
 func ptrInt64(v int64) *int64 { return &v }
 
 func TestRunDelegation_RecordsResultCostAndReleasesSlot(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	f.newInProgress(t, "t", "P1", planSpec(nil))
 	// 結末 blocked は保留（人間対応待ち）になる。
@@ -725,6 +740,7 @@ func TestRunDelegation_RecordsResultCostAndReleasesSlot(t *testing.T) {
 }
 
 func TestRunDelegation_NonSucceededResultsStillReleaseSlot(t *testing.T) {
+	t.Parallel()
 	for _, r := range []RunResult{RunResultErrored, RunResultTimedOut, RunResultMalformed, RunResultBudgetExhausted, RunResultInvalidOutput, RunResultLaunchFailed} {
 		t.Run(string(r), func(t *testing.T) {
 			f := newDelegateFixture(t)
@@ -744,6 +760,7 @@ func TestRunDelegation_NonSucceededResultsStillReleaseSlot(t *testing.T) {
 }
 
 func TestRunDelegation_InvalidReportBecomesInvalidOutput(t *testing.T) {
+	t.Parallel()
 	bad := map[string][]byte{
 		"unknown outcome": reportJSON(func(m map[string]any) { m["outcome"] = "done" }),
 		"missing key":     reportJSON(func(m map[string]any) { delete(m, "unverified") }),
@@ -777,6 +794,7 @@ func TestRunDelegation_InvalidReportBecomesInvalidOutput(t *testing.T) {
 }
 
 func TestDelegationReport_QuestionKindsAreBaseEightPlusDeclared(t *testing.T) {
+	t.Parallel()
 	declared := []HumanQuestionKind{{ID: "release_timing", Label: "x"}}
 	for _, k := range append(QuestionKindValues, QuestionKind("release_timing")) {
 		out := reportJSON(func(m map[string]any) {
@@ -809,6 +827,7 @@ func TestDelegationReport_QuestionKindsAreBaseEightPlusDeclared(t *testing.T) {
 // --- スロット（AC-281・365） ---
 
 func TestRunDelegation_ExplicitID_NoUsableSlot_SlotUnavailableAndNoRun(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	if err := f.s.EnsureSlots(context.Background(), f.conn.Repos[0]); err != nil {
@@ -839,6 +858,7 @@ func TestRunDelegation_ExplicitID_NoUsableSlot_SlotUnavailableAndNoRun(t *testin
 }
 
 func TestRunDelegation_OneSlotTwoChallenges_OnlyOneLaunches(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	a := f.newInProgress(t, "a", "P1", planSpec(nil))
 	b := f.newInProgress(t, "b", "P1", planSpec(nil))
@@ -873,6 +893,7 @@ func TestRunDelegation_OneSlotTwoChallenges_OnlyOneLaunches(t *testing.T) {
 }
 
 func TestRunDelegation_DirtySlotIsNotAssigned(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	p := filepath.Join(f.s.Workspace(), "slot1")
@@ -890,6 +911,7 @@ func TestRunDelegation_DirtySlotIsNotAssigned(t *testing.T) {
 // --- 周の上限・枠超過 ---
 
 func TestRunDelegation_CycleBudgetTooSmallForImplSlot(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	cycleID := f.cycle(t, 10) // 実装枠 50 は入らない（J3 の 3 は入る）
@@ -913,6 +935,7 @@ func TestRunDelegation_CycleBudgetTooSmallForImplSlot(t *testing.T) {
 }
 
 func TestRunDelegation_RateLimitedStopsLaterCandidates(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	// 別のリポジトリの候補は別のグループで並行に起動されうるので、同時の起動を 1 つにして順に処理する。
 	f.agent.MaxParallelRuns = 1
@@ -931,6 +954,7 @@ func TestRunDelegation_RateLimitedStopsLaterCandidates(t *testing.T) {
 // 中断した委譲の run のスロットは、子がまだ動いているかもしれないので needs_attention にする。
 // 回収の後に子が戻っても、回収済みの run は上書きされない。
 func TestReapInterruptedRuns_MarksTheDelegationSlotNeedsAttention(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.s.staleAfter = time.Nanosecond
@@ -965,12 +989,14 @@ func TestReapInterruptedRuns_MarksTheDelegationSlotNeedsAttention(t *testing.T) 
 }
 
 func TestDelegationReport_QuestionsOutcomeNeedsAQuestion(t *testing.T) {
+	t.Parallel()
 	if _, ok := validateDelegationReport(reportJSON(func(m map[string]any) { m["outcome"] = "questions" }), nil); ok {
 		t.Error("outcome questions without any question must be invalid")
 	}
 }
 
 func TestRunDelegation_StatusChangedAfterJ3_ExplicitIDIsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	n, _ := parseChallengeID(id)
@@ -989,6 +1015,7 @@ func TestRunDelegation_StatusChangedAfterJ3_ExplicitIDIsInvalidTransition(t *tes
 }
 
 func TestRunDelegation_OmittedID_OneBadPlanDoesNotStopTheOthers(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	f.newInProgress(t, "bad", "P0", planSpec(func(m map[string]any) { m["repo"] = "gone-repo" }))
 	good := f.newInProgress(t, "good", "P1", planSpec(nil))
@@ -1002,6 +1029,7 @@ func TestRunDelegation_OmittedID_OneBadPlanDoesNotStopTheOthers(t *testing.T) {
 }
 
 func TestRunDelegation_SourceIssuePassedToTheLaunch(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "src", "P1", planSpec(func(m map[string]any) { m["operation"] = "impl-src" }))
 	in := validBindingInput("o/r#7")
@@ -1021,6 +1049,7 @@ func TestRunDelegation_SourceIssuePassedToTheLaunch(t *testing.T) {
 }
 
 func TestRunDelegation_RejectsIncompleteInput(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	in := f.input(f.cycle(t, 300), nil)
 	in.Delegate = nil

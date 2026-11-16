@@ -109,6 +109,7 @@ func snapshotReopen(t *testing.T, s *Store, cid int64) reopenSnapshot {
 }
 
 func TestReopenChallengeForRelease_MovesTheDoneChallengeBackAndReplacesTheRelease(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	approvalID := insertCompletionApprovalForTest(t, f.s, f.cid)
 	before := snapshotReopen(t, f.s, f.cid)
@@ -187,6 +188,7 @@ func TestReopenChallengeForRelease_MovesTheDoneChallengeBackAndReplacesTheReleas
 }
 
 func TestReopenChallengeForRelease_PendingReleaseIsReplacedToo(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	writeForTest(t, f.s, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE operation SET state = 'pending' WHERE id = ?`, f.opID)
@@ -206,6 +208,7 @@ func TestReopenChallengeForRelease_PendingReleaseIsReplacedToo(t *testing.T) {
 }
 
 func TestReopenChallengeForRelease_DoesNothingUnlessTheChallengeIsDone(t *testing.T) {
+	t.Parallel()
 	for _, st := range []Status{StatusInProgress, StatusAwaitingCompletionApproval, StatusAwaitingHuman, StatusWithdrawn} {
 		t.Run(string(st), func(t *testing.T) {
 			f := newRelFixture(t)
@@ -227,6 +230,7 @@ func TestReopenChallengeForRelease_DoesNothingUnlessTheChallengeIsDone(t *testin
 }
 
 func TestReopenChallengeForRelease_DoesNothingForOperationsThatAreNotOpenReleases(t *testing.T) {
+	t.Parallel()
 	for _, state := range []OperationState{OperationStateRejected, OperationStateExecuted, OperationStateClosed} {
 		t.Run(string(state), func(t *testing.T) {
 			f := newRelFixture(t)
@@ -262,6 +266,7 @@ func TestReopenChallengeForRelease_DoesNothingForOperationsThatAreNotOpenRelease
 }
 
 func TestReopenChallengeForRelease_RejectsBadInput(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	if _, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: "merge_failed"}); !errors.Is(err, ErrValidation) {
 		t.Errorf("unknown reason: err = %v, want ErrValidation", err)
@@ -279,6 +284,7 @@ func TestReopenChallengeForRelease_RejectsBadInput(t *testing.T) {
 
 // 次の完了の承認が成立したとき、前の承認の行に新しい承認を結び、新しい release を同時に承認する。
 func TestReopenChallengeForRelease_NextCompletionApprovalLinksThePreviousOneAndApprovesTheNewRelease(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	prevApproval := insertCompletionApprovalForTest(t, f.s, f.cid)
 	res, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
@@ -334,6 +340,7 @@ func TestReopenChallengeForRelease_NextCompletionApprovalLinksThePreviousOneAndA
 
 // 2 回戻しても、有効な完了の承認は常に 1 件で、前の承認はその次の承認に結ばれる。
 func TestReopenChallengeForRelease_SecondReopenSupersedesOnlyTheEffectiveApproval(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	first := insertCompletionApprovalForTest(t, f.s, f.cid)
 	r1, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
@@ -381,6 +388,7 @@ func TestReopenChallengeForRelease_SecondReopenSupersedesOnlyTheEffectiveApprova
 // 戻すとき、同じ課題のほかの承認済み・承認待ちの release も置き換える（前の完了の承認で同時に承認された release を、
 // 課題が着手中の間に実行させない）。終わっていない実行の試行がある release は置き換えない。
 func TestReopenChallengeForRelease_SupersedesSiblingReleasesWithoutOpenAttempts(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	const otherRef = "https://github.com/o/r/pull/9"
 	const busyRef = "https://github.com/o/r/pull/10"

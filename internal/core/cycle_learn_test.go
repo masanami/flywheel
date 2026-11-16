@@ -18,6 +18,7 @@ func (f *j6Fixture) cycleInput() CycleRunInput {
 // learn の段は最後に実行され、接続ツールの宣言（ConnDecl）が無くても skipped にならず、未分類の発生を持つ
 // 完了の課題ごとに J6 を 1 回呼ぶ。
 func TestRunCycle_LearnPhaseRunsLastWithoutConnectors(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -54,6 +55,7 @@ func TestRunCycle_LearnPhaseRunsLastWithoutConnectors(t *testing.T) {
 // learn の段が足す発生（J6 の added）の経路で、出来事（作業ログの learn）と発生は同じトランザクションで書かれる
 // （§クリティカル設計決定 4）。どちらかの書き込みが失敗すれば、もう一方も残らない。周は続行し、run は invalid_output になる。
 func TestRunCycle_LearnPhase_OccurrenceAndWorkLogAreAtomic(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) *j6Fixture {
 		f := newJ6Fixture(t)
 		c := f.challenge(t, StatusDone)

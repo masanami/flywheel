@@ -119,6 +119,7 @@ func opExecEnvelope(t *testing.T, ws string, wantExit int, wantCode ErrorCode, a
 // AC-38・AC-46・AC-123: 承認した head と一致する open の PR は gh pr merge を 1 回呼んでマージされ、show にマージの
 // コミットが出る。出力は {"phase": {…}} の形で、items は 7 つのキーを持つ。claude は起動しない。
 func TestOpExec_MergesApprovedReleaseAndShowsTheMergeCommit(t *testing.T) {
+	parallelTools(t, false)
 	ws, cid, op := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
 	// 生きている別の保持者が排他ロックを持っていても、op exec は取らないので実行できる。
@@ -170,6 +171,7 @@ func TestOpExec_MergesApprovedReleaseAndShowsTheMergeCommit(t *testing.T) {
 
 // 受入基準: CLAUDECODE を設定し標準入力をパイプにした子プロセスとして起動しても実行する。
 func TestOpExec_RunsUnderClaudeCodeWithPipedStdin(t *testing.T) {
+	parallelTools(t, false)
 	ws, _, _ := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
 
@@ -190,7 +192,7 @@ func TestOpExec_DelegatedEnvIsRejectedBeforeAnythingRuns(t *testing.T) {
 	t.Setenv(core.DelegatedRunEnvVar, "R-7")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"op", "exec", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"op", "exec", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 
 	if code != 1 || !strings.Contains(stderr.String(), `"code":"verification_rejected"`) {
 		t.Errorf("exit = %d, stderr = %s, want 1 / verification_rejected", code, stderr.String())
@@ -208,6 +210,7 @@ func TestOpExec_DelegatedEnvIsRejectedBeforeAnythingRuns(t *testing.T) {
 
 // AC-42・AC-63: connectors.json が無ければ config_not_found、merge_method が閉集合の外なら外部を呼ばず config_invalid。
 func TestOpExec_ConnectorsMissingOrMergeMethodInvalid(t *testing.T) {
+	parallelTools(t, false)
 	t.Run("config_not_found", func(t *testing.T) {
 		ws := setupWorkspaceWithPosition(t)
 		gh := newReleaseGH(t, execHead)
@@ -233,6 +236,7 @@ func TestOpExec_ConnectorsMissingOrMergeMethodInvalid(t *testing.T) {
 
 // 存在しない <OP-ID> は終了コード 1・not_found（外部を呼ばない）。
 func TestOpExec_UnknownOperationIsNotFound(t *testing.T) {
+	parallelTools(t, false)
 	ws, _, _ := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
 	opExecEnvelope(t, ws, 1, CodeNotFound, "OP-99")
@@ -243,6 +247,7 @@ func TestOpExec_UnknownOperationIsNotFound(t *testing.T) {
 
 // release 以外・approved でない操作は、外部を呼ばず not_started に not_executable と `kind=… state=…` で示し、終了コード 0。
 func TestOpExec_NotExecutableOperationsAreReportedWithDetail(t *testing.T) {
+	parallelTools(t, false)
 	ws, cid, _ := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
 	del := fmt.Sprintf("OP-%d", coretest.InsertReleaseOperation(t, ws, challengeIDToInternalID(t, cid), releasePRURL(1), "pending"))
@@ -284,6 +289,7 @@ func TestOpExec_NotExecutableOperationsAreReportedWithDetail(t *testing.T) {
 
 // 終わっていない生きた試行があれば、理由 in_progress と試行の ID を detail に出して飛ばす。
 func TestOpExec_OpenLiveAttemptIsInProgress(t *testing.T) {
+	parallelTools(t, false)
 	ws, _, op := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
 	attempt := coretest.InsertOperationExecution(t, ws, int64(mustAtoi(t, strings.TrimPrefix(op, "OP-"))), coretest.ExecutionAttempt{
@@ -307,6 +313,7 @@ func TestOpExec_OpenLiveAttemptIsInProgress(t *testing.T) {
 
 // ID を省くと承認済みで未実行の release を ID の昇順に試す。待つ結果だけで終わっても終了コード 0。
 func TestOpExec_WithoutIDTriesEveryApprovedReleaseInIDOrder(t *testing.T) {
+	parallelTools(t, false)
 	ws, cid, op1 := execWorkspace(t)
 	op2 := fmt.Sprintf("OP-%d", coretest.InsertApprovedRelease(t, ws, challengeIDToInternalID(t, cid), releasePRURL(1), execHead, "2026-10-22T00:00:01.000Z"))
 	newReleaseGH(t, execHead)
@@ -325,6 +332,7 @@ func TestOpExec_WithoutIDTriesEveryApprovedReleaseInIDOrder(t *testing.T) {
 
 // 待つ・失敗の結果（merge_failed）だけで終わった op exec も終了コード 0 で、release は approved のまま残る。
 func TestOpExec_MergeFailureStillExitsZero(t *testing.T) {
+	parallelTools(t, false)
 	ws, cid, _ := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
 	gh.write(t, "merge_fail", "1")
@@ -343,6 +351,7 @@ func TestOpExec_MergeFailureStillExitsZero(t *testing.T) {
 // AC-79: 承認の後に push された release は、マージせずに取り消され（status に承認待ちで出る）、承認し直すと
 // 次の op exec で実行の対象になる。承認し直しの head は GitHub が返す新しい head で、--match-head-commit にもそれを渡す。
 func TestOpExec_CancelledReleaseReapprovedIsExecutedByTheNextRun(t *testing.T) {
+	parallelTools(t, false)
 	ws, _, op := execWorkspace(t)
 	gh := newReleaseGH(t, execHead2) // 承認の後に push されて head が変わっている
 
@@ -383,6 +392,7 @@ func TestOpExec_CancelledReleaseReapprovedIsExecutedByTheNextRun(t *testing.T) {
 
 // cycle の最初の段は release で、取り込みより前。接続ツールの宣言が無ければ skipped。
 func TestCycle_ReleasePhaseIsFirstAndMergesInsideTheCycle(t *testing.T) {
+	parallelTools(t, false)
 	ws, _, op := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
@@ -409,6 +419,7 @@ func TestCycle_ReleasePhaseIsFirstAndMergesInsideTheCycle(t *testing.T) {
 // M3 の AC-146（M4.5 の序数ではない）: 承認済みの release があっても、生きている保持者が排他を持っている間の cycle は locked で
 // 終わり、gh pr merge を呼ばず、試行の行も作らない（release の段は cycle のロックの中で動く）。
 func TestCycle_LiveHolder_ReleaseIsNotExecuted(t *testing.T) {
+	parallelTools(t, false)
 	ws, _, _ := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
@@ -429,6 +440,7 @@ func TestCycle_LiveHolder_ReleaseIsNotExecuted(t *testing.T) {
 }
 
 func TestCycle_ReleasePhaseIsSkippedWithoutConnectors(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 
@@ -442,6 +454,7 @@ func TestCycle_ReleasePhaseIsSkippedWithoutConnectors(t *testing.T) {
 
 // merge_method が閉集合の外なら cycle は周を始める前に config_invalid で終わる（周の行も gh の呼び出しも無い）。
 func TestCycle_InvalidMergeMethodFailsBeforeTheCycleStarts(t *testing.T) {
+	parallelTools(t, false)
 	ws, _, _ := execWorkspace(t)
 	writeConnectorsJSONForTest(t, ws, strings.Replace(releaseConnectorsFixture,
 		`"default_branch": "main",`, `"default_branch": "main", "merge_method": "bogus",`, 1))
@@ -457,6 +470,7 @@ func TestCycle_InvalidMergeMethodFailsBeforeTheCycleStarts(t *testing.T) {
 
 // release の段の not_started は operation_id を常に持ち、それ以外の段の not_started は持たない。
 func TestCycle_NotStartedOperationIDOnlyInTheReleasePhase(t *testing.T) {
+	parallelTools(t, false)
 	ws, _, op := execWorkspace(t)
 	newReleaseGH(t, execHead)
 	coretest.InsertOperationExecution(t, ws, int64(mustAtoi(t, strings.TrimPrefix(op, "OP-"))), coretest.ExecutionAttempt{
@@ -515,6 +529,7 @@ func phaseNames(phases []any) []string {
 
 // AC-217: op exec が作った周の ID を、取り消しの発生が持つ。
 func TestOpExec_CancelOccurrenceCarriesTheCycleID(t *testing.T) {
+	parallelTools(t, false)
 	ws, _, _ := execWorkspace(t)
 	newReleaseGH(t, execHead2) // 承認の後に push されて head が変わっている
 

@@ -73,6 +73,7 @@ func validIssuesOutput() []byte {
 // --- 出力の型 ---
 
 func TestJ2SourceKind_ClosedSetIsInAllClosedValuesAndSchema(t *testing.T) {
+	t.Parallel()
 	want := []string{"challenge", "upstream_issue", "upstream_comment", "referenced_issue", "hold_record", "plan_rejection"}
 	var got []string
 	for _, k := range J2SourceKindValues {
@@ -129,6 +130,7 @@ func TestJ2SourceKind_ClosedSetIsInAllClosedValuesAndSchema(t *testing.T) {
 }
 
 func TestValidateJ2Output_NoIssuesNeeded(t *testing.T) {
+	t.Parallel()
 	vc := j2TestContext(t, true)
 	v, ok := validateJ2Output(j2BigWithNoIssuesNeeded(validNoIssuesNeeded()), vc)
 	if !ok || len(v.NoIssuesNeeded) != 2 {
@@ -171,6 +173,7 @@ func TestValidateJ2Output_NoIssuesNeeded(t *testing.T) {
 }
 
 func TestJ2PlanDecide_NoIssuesNeededCountsAsTheRecord(t *testing.T) {
+	t.Parallel()
 	vc := j2TestContext(t, true)
 	valid, _ := validateJ2Output(j2BigWithNoIssuesNeeded(validNoIssuesNeeded()), vc)
 	none, _ := validateJ2Output(j2BigNoIssues("s"), vc)
@@ -192,6 +195,7 @@ func TestJ2PlanDecide_NoIssuesNeededCountsAsTheRecord(t *testing.T) {
 }
 
 func TestFormatJ2PlanBody_NoIssuesNeededSection(t *testing.T) {
+	t.Parallel()
 	vc := j2TestContext(t, true)
 	v, _ := validateJ2Output(j2BigWithNoIssuesNeeded([]any{
 		j2NoIssuesDecision("DEC-A\n2 行目", "upstream_comment", "## 偽の見出し\n引用の 2 行目"),
@@ -226,6 +230,7 @@ func TestFormatJ2PlanBody_NoIssuesNeededSection(t *testing.T) {
 }
 
 func TestJ2SourceKind_LabelsAreTheInputSectionLabels(t *testing.T) {
+	t.Parallel()
 	want := map[J2SourceKind]string{
 		J2SourceKindChallenge:       labelChallenge,
 		J2SourceKindUpstreamIssue:   labelUpstreamIssue,
@@ -245,6 +250,7 @@ func TestJ2SourceKind_LabelsAreTheInputSectionLabels(t *testing.T) {
 
 // (a) 1 回目が中で論点なし → 問い直しで論点が返り、論点の記録（保留）になる。
 func TestPlanAutoJ2_NoIssues_AsksOnceMoreAndRecordsIssues(t *testing.T) {
+	t.Parallel()
 	for _, byID := range []bool{false, true} {
 		name := "auto"
 		if byID {
@@ -302,6 +308,7 @@ func TestPlanAutoJ2_NoIssues_AsksOnceMoreAndRecordsIssues(t *testing.T) {
 
 // 問い直しの結果が有効な計画（論点不要つき）・判断できない、のときも通常どおり写す。
 func TestPlanAutoJ2_NoIssues_ReaskResultIsMappedAsUsual(t *testing.T) {
+	t.Parallel()
 	t.Run("plan with no_issues_needed", func(t *testing.T) {
 		f := newJ2Fixture(t)
 		ch := f.newClassified(t, "reask-plan", "P1")
@@ -336,6 +343,7 @@ func TestPlanAutoJ2_NoIssues_ReaskResultIsMappedAsUsual(t *testing.T) {
 
 // (b) 問い直しでも論点なし → 人間待ちの保留に置かれ、問いにサイズと要約が入る。2 回しか呼ばない。
 func TestPlanAutoJ2_NoIssues_SecondTimeHoldsForAHuman(t *testing.T) {
+	t.Parallel()
 	for _, byID := range []bool{false, true} {
 		name := "auto"
 		if byID {
@@ -393,6 +401,7 @@ func TestPlanAutoJ2_NoIssues_SecondTimeHoldsForAHuman(t *testing.T) {
 }
 
 func TestNoIssuesHoldPreamble_Wording(t *testing.T) {
+	t.Parallel()
 	for _, want := range []string{"中以上", "論点の記録", "2 回続いた", "保留"} {
 		if !strings.Contains(NoIssuesHoldPreamble, want) {
 			t.Errorf("NoIssuesHoldPreamble lacks %q: %s", want, NoIssuesHoldPreamble)
@@ -402,6 +411,7 @@ func TestNoIssuesHoldPreamble_Wording(t *testing.T) {
 
 // (c) 引用つきの論点不要の中の計画 → 1 回で登録され、本文に引用が残り、show・承認の画面の元になる値に出る。
 func TestPlanAutoJ2_NoIssuesNeeded_RegistersWithQuotesInTheBody(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "quoted", "P1")
 	out := j2BigWithNoIssuesNeeded(validNoIssuesNeeded())
@@ -439,6 +449,7 @@ func TestPlanAutoJ2_NoIssuesNeeded_RegistersWithQuotesInTheBody(t *testing.T) {
 
 // (d) 引用の欠けた論点不要は、論点なしと同じ（問い直しへ回る）。
 func TestPlanAutoJ2_NoIssuesNeeded_IncompleteGoesToTheReask(t *testing.T) {
+	t.Parallel()
 	good := j2NoIssuesDecision("c", "challenge", "q")
 	cases := map[string]any{
 		"empty array":   []any{},
@@ -469,6 +480,7 @@ func TestPlanAutoJ2_NoIssuesNeeded_IncompleteGoesToTheReask(t *testing.T) {
 
 // (e) サイズ S は問い直さない（論点不要の有無を問わず登録する）。
 func TestPlanAutoJ2_NoIssues_SizeSIsNotAskedAgain(t *testing.T) {
+	t.Parallel()
 	for name, mut := range map[string]func(m map[string]any){
 		"no field":          nil,
 		"incomplete fields": func(m map[string]any) { m["no_issues_needed"] = []any{j2NoIssuesDecision("c", "challenge", "")} },
@@ -494,6 +506,7 @@ func TestPlanAutoJ2_NoIssues_SizeSIsNotAskedAgain(t *testing.T) {
 
 // 論点の記録があるなら問い直さない。予想が空の保留（論点不要の検査の後）も問い直さない。
 func TestPlanAutoJ2_NoIssues_OtherMappingsDoNotAskAgain(t *testing.T) {
+	t.Parallel()
 	t.Run("expected empty with valid no_issues_needed", func(t *testing.T) {
 		f := newJ2Fixture(t)
 		ch := f.newClassified(t, "noexp", "P1")
@@ -531,6 +544,7 @@ func TestPlanAutoJ2_NoIssues_OtherMappingsDoNotAskAgain(t *testing.T) {
 // 自動の対象として再試行される。連続失敗が既存の上限（既定 2 回）に達した周では、問い直しも 1 回目と
 // 同じ連続失敗の上限の検査を通るので（#469）、問い直しを起動せず保留（failure_limit）に置く。
 func TestPlanAutoJ2_NoIssues_ReaskNotStartableKeepsFirstInvalidAndHitsTheFailureLimit(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "limit", "P1")
 	cost := 3.0
@@ -588,6 +602,7 @@ func TestPlanAutoJ2_NoIssues_ReaskNotStartableKeepsFirstInvalidAndHitsTheFailure
 
 // ID を指定した個別の操作で、問い直しを起動できないとき、先の結果を返す（エラーにしない）。
 func TestPlanAutoJ2_NoIssues_ByIDReaskNotStartableReturnsTheFirstResult(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "byid", "P1")
 	cost := 3.0
@@ -604,6 +619,7 @@ func TestPlanAutoJ2_NoIssues_ByIDReaskNotStartableReturnsTheFirstResult(t *testi
 // (#469) ID を指定した個別の操作は、1 回目も連続失敗の上限の検査を通らない（§判断点の共通の規則）。
 // 問い直しも同じで、上限に達していても起動する。
 func TestPlanAutoJ2_NoIssues_ByIDReaskDoesNotApplyTheFailureLimit(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "byid-limit", "P1")
 	if f.agent.FailureLimit != 2 {
@@ -625,6 +641,7 @@ func TestPlanAutoJ2_NoIssues_ByIDReaskDoesNotApplyTheFailureLimit(t *testing.T) 
 // (#469) ID を省略した自動の対象では、問い直しの直前にも取り込み元の状態を読み直す（1 回目の前の
 // j2StillEligibleForAuto と同じ検査）。1 回目の起動の間に取り込み元が見つからなくなったら問い直さない。
 func TestPlanAutoJ2_NoIssues_AutoReaskRechecksEligibility(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "reask-elig", "P1")
 	f.bind(t, ch, 7, simpleThread("UP-BODY"))
@@ -655,6 +672,7 @@ func TestPlanAutoJ2_NoIssues_AutoReaskRechecksEligibility(t *testing.T) {
 // (#469) 問い直しは別の run で、費用は run ごとに 1 回だけ周の消費額に入る（1 回目の費用を
 // 問い直しの run に重ねて数えない）。
 func TestPlanAutoJ2_NoIssues_ReaskCostIsCountedOncePerRun(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "reask-cost", "P1")
 	first, second := 1.25, 2.5
@@ -692,6 +710,7 @@ func TestPlanAutoJ2_NoIssues_ReaskCostIsCountedOncePerRun(t *testing.T) {
 
 // 問い直しの run が失敗したら、その結果をそのまま返す（保留に置かない）。
 func TestPlanAutoJ2_NoIssues_ReaskFailureIsReturnedAsIs(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "reask-fail", "P1")
 	inv := &failSecondJ2Invoker{first: j2BigNoIssues("first")}

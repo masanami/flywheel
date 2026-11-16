@@ -149,6 +149,7 @@ func slotByID(t *testing.T, s *Store, id string) Slot {
 }
 
 func TestNormalizeRemoteURL(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		in   string
 		want string
@@ -183,6 +184,7 @@ func TestNormalizeRemoteURL(t *testing.T) {
 // AC-278・M3P45: clone のパスが無いと needs_attention（理由はパスが無いこと）になり、
 // ディレクトリを作らない。使えるスロットが 0 本なら ErrSlotUnavailable。
 func TestAcquireSlot_ClonePathMissingMarksNeedsAttentionAndUnavailable(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit() // 状態を持たないパス = Exists:false
@@ -213,6 +215,7 @@ func TestAcquireSlot_ClonePathMissingMarksNeedsAttentionAndUnavailable(t *testin
 }
 
 func TestAcquireSlot_ChecksBeforeAssignment(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		state SlotTreeState
@@ -252,6 +255,7 @@ func pathExists(p string) (bool, error) {
 
 // 全 URL 形（https・scp・ssh、`.git` の有無）× 大文字小文字違いで割り当てられる（AC-284・285）。
 func TestAcquireSlot_AcceptsEveryOriginURLForm(t *testing.T) {
+	t.Parallel()
 	forms := []string{
 		"https://github.com/O/R", "https://github.com/O/R.git",
 		"git@github.com:O/R", "git@github.com:O/R.git",
@@ -276,6 +280,7 @@ func TestAcquireSlot_AcceptsEveryOriginURLForm(t *testing.T) {
 
 // 失敗したスロットは needs_attention にして次の idle のスロットを試す。needs_attention は選ばない。
 func TestAcquireSlot_SkipsFailedSlotAndNeverReassignsNeedsAttentionUntilCleared(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	repo := cloneRepoForTest("a", "b")
@@ -321,6 +326,7 @@ func TestAcquireSlot_SkipsFailedSlotAndNeverReassignsNeedsAttentionUntilCleared(
 }
 
 func TestClearSlot_Errors(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	if _, err := s.ClearSlot(ctx, "SL-9"); !errors.Is(err, ErrNotFound) {
@@ -339,6 +345,7 @@ func TestClearSlot_Errors(t *testing.T) {
 
 // slot の書き込み（作成・割り当て・解放・needs_attention・clear）は作業ログに載せない。
 func TestSlotWritesDoNotAppearInActivityLog(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -363,6 +370,7 @@ func TestSlotWritesDoNotAppearInActivityLog(t *testing.T) {
 
 // AC-288〜293 の core 側: worktree は count 本・初回の割り当てで払い出し・使い回し・失敗は needs_attention。
 func TestAcquireSlot_WorktreeProvisionsOnceAndReuses(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -411,6 +419,7 @@ func TestAcquireSlot_WorktreeProvisionsOnceAndReuses(t *testing.T) {
 }
 
 func TestAcquireSlot_WorktreeProvisioningFailureAndPointerMismatch(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -434,6 +443,7 @@ func TestAcquireSlot_WorktreeProvisioningFailureAndPointerMismatch(t *testing.T)
 
 // 2 つのプロセス（ここでは 2 つのハンドル）が同じスロットを取らない。
 func TestAcquireSlot_ConcurrentAcquirersNeverShareASlot(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	s2, err := OpenWorkspace(s.Workspace())
 	if err != nil {
@@ -473,6 +483,7 @@ func TestAcquireSlot_ConcurrentAcquirersNeverShareASlot(t *testing.T) {
 
 // ReleaseSlot は busy だけを idle にし、無いスロットは ErrNotFound。
 func TestAcquireSlot_ReleaseOnlyAffectsBusySlot(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	if err := s.EnsureSlots(ctx, cloneRepoForTest("a")); err != nil {
@@ -487,6 +498,7 @@ func TestAcquireSlot_ReleaseOnlyAffectsBusySlot(t *testing.T) {
 }
 
 func TestAcquireSlot_NoDeclaredSlotsIsUnavailable(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	repo := ConnectorRepo{Name: "r", Remote: "o/r", DefaultBranch: "main"}
@@ -497,6 +509,7 @@ func TestAcquireSlot_NoDeclaredSlotsIsUnavailable(t *testing.T) {
 
 // git を起動できない失敗は、スロットを needs_attention にせず AcquireSlot のエラーで返す。
 func TestAcquireSlot_GitUnavailableIsNotASlotProblem(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -511,6 +524,7 @@ func TestAcquireSlot_GitUnavailableIsNotASlotProblem(t *testing.T) {
 }
 
 func TestEnsureSlots_WorktreeNameMustBeASinglePathElementAndIsGitignored(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	bad := worktreeRepoForTest(1)

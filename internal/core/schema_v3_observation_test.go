@@ -75,11 +75,13 @@ func openSchemaVersion2FixtureWithBinding(t *testing.T, externalKey string) (dir
 	if err != nil {
 		t.Fatalf("OpenWorkspace() error = %v", err)
 	}
+	registerTestStore(t, s) // fixedActor の対象にする
 	t.Cleanup(func() { _ = s.Close() })
 	return dir, s
 }
 
 func TestOpenWorkspace_UpgradesSchemaVersion2StoreToVersion3WithDefaults(t *testing.T) {
+	t.Parallel()
 	_, s := openSchemaVersion2FixtureWithBinding(t, "o/r#1")
 
 	// AC-151: 版が 3 になる（その後 0004 が足され最新版は 4 になったが、この
@@ -119,6 +121,7 @@ func TestOpenWorkspace_UpgradesSchemaVersion2StoreToVersion3WithDefaults(t *test
 // --- AC-156〜159: 0003 の前に作られた対応が初めて観測値を得るときの扱い ---
 
 func TestIngest_PreSchemaV3Binding_FirstObservation(t *testing.T) {
+	t.Parallel()
 	_, s := openSchemaVersion2FixtureWithBinding(t, "o/r#1")
 	fixedActor(t, "alice")
 

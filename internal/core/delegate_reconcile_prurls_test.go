@@ -46,6 +46,7 @@ func (f *delegateFixture) prArtifacts(t *testing.T) []runArtifactRow {
 // --- 委譲先のリポジトリの PR（ブランチで見つからなくても pr_urls で見つかる） ---
 
 func TestReconcilePRURLs_DelegatedRepoOpenOrMergedIsAnArtifactEvenWithoutTheBranch(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"open", "merged"} {
 		t.Run(state, func(t *testing.T) {
 			f := newReconFixture(t, "impl")
@@ -70,6 +71,7 @@ func TestReconcilePRURLs_DelegatedRepoOpenOrMergedIsAnArtifactEvenWithoutTheBran
 }
 
 func TestReconcilePRURLs_DelegatedRepoMergedIntoDefaultWithoutApprovalStillHolds(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.reportPRs("https://github.com/o/r/pull/9")
 	f.givePull(pullPR("o/r", 9, "merged", "main"))
@@ -83,6 +85,7 @@ func TestReconcilePRURLs_DelegatedRepoMergedIntoDefaultWithoutApprovalStillHolds
 }
 
 func TestReconcilePRURLs_DelegatedRepoOpenIntoDefaultRegistersARelease(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.reportPRs("https://github.com/o/r/pull/9")
 	f.givePull(pullPR("o/r", 9, "open", "main"))
@@ -101,6 +104,7 @@ func TestReconcilePRURLs_DelegatedRepoOpenIntoDefaultRegistersARelease(t *testin
 // --- 委譲先と別の、宣言内のリポジトリの PR ---
 
 func TestReconcilePRURLs_OtherDeclaredRepoMergedGoesToVerificationWithGHValues(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	// 子の書き方（大文字小文字・末尾の /files）に依らず、記録するのは gh が返した html_url。
 	f.reportPRs("https://github.com/O/S/pull/5/files")
@@ -130,6 +134,7 @@ func TestReconcilePRURLs_OtherDeclaredRepoMergedGoesToVerificationWithGHValues(t
 }
 
 func TestReconcilePRURLs_OtherDeclaredRepoOpenRegistersAReleaseOnlyForItsDefaultBranch(t *testing.T) {
+	t.Parallel()
 	t.Run("base is that repository's default branch", func(t *testing.T) {
 		f := newReconFixture(t, "impl")
 		f.reportPRs("https://github.com/o/s/pull/5")
@@ -163,6 +168,7 @@ func TestReconcilePRURLs_OtherDeclaredRepoOpenRegistersAReleaseOnlyForItsDefault
 // 別のリポジトリの PR を run の成果物に記録したとき、J5 の前に呼ぶチェックの取得は URL から
 // リポジトリを引く。
 func TestReconcilePRURLs_RecordedOtherRepoPRIsFetchedByItsOwnRepoForTheChecks(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.reportPRs("https://github.com/o/s/pull/5")
 	f.givePull(pullPR("o/s", 5, "merged", "develop"))
@@ -183,6 +189,7 @@ func TestReconcilePRURLs_RecordedOtherRepoPRIsFetchedByItsOwnRepoForTheChecks(t 
 // --- 成果物なし（保留） ---
 
 func TestReconcilePRURLs_NoArtifactHolds(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		urls      []string
@@ -235,6 +242,7 @@ func TestReconcilePRURLs_NoArtifactHolds(t *testing.T) {
 
 // 取得に失敗した PR は、別に成果物ありの PR があっても、その PR だけが記録されない。
 func TestReconcilePRURLs_OneFailureDoesNotHideAnotherPR(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.reportPRs("https://github.com/o/s/pull/4", "https://github.com/o/s/pull/5")
 	f.branches.pullErrs["o/s#4"] = errors.New("boom")
@@ -253,6 +261,7 @@ func TestReconcilePRURLs_OneFailureDoesNotHideAnotherPR(t *testing.T) {
 
 // 同じ PR は 1 回だけ調べて 1 件だけ記録する（書き方が違っても、head で見つかった PR と重なっても）。
 func TestReconcilePRURLs_DuplicatesAreCollapsed(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) {
 		m["branch"] = "feat/x"
@@ -278,6 +287,7 @@ func TestReconcilePRURLs_DuplicatesAreCollapsed(t *testing.T) {
 
 // 報告の pr_urls がどれほど多くても調べる件数は有限。
 func TestReconcilePRURLs_TheNumberOfLookupsIsBounded(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	var urls []string
 	for i := 1; i <= maxReportedPRLookups+10; i++ {
@@ -295,6 +305,7 @@ func TestReconcilePRURLs_TheNumberOfLookupsIsBounded(t *testing.T) {
 // --- 照合の対象外（変わらないこと） ---
 
 func TestReconcilePRURLs_OnlyForCompletedReportsOfPROperations(t *testing.T) {
+	t.Parallel()
 	t.Run("operation with branch artifacts", func(t *testing.T) {
 		f := newReconFixture(t, "impl-branch")
 		f.reportPRs("https://github.com/o/s/pull/5")

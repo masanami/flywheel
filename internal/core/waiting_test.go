@@ -19,6 +19,7 @@ func waitingOf(t *testing.T, s *Store, id string) WaitingReasons {
 }
 
 func TestWaiting_ListsUnmetPrerequisitesAndTheConflictThisChallengeYieldsTo(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusInProgress, StatusDone, StatusClassified, StatusClassified)
 	// C-4 は C-2（完了）と C-3（未完了）に依存し、C-1 を先に委譲させて後回しにした。
 	insertDepEdge(t, s, 4, 2)
@@ -37,6 +38,7 @@ func TestWaiting_ListsUnmetPrerequisitesAndTheConflictThisChallengeYieldsTo(t *t
 
 // 待っている側だけが理由を持つ: 先に委譲した課題・向きの無い組の課題には「後回し」が付かない。
 func TestWaiting_OnlyTheDeferredSideOfADirectedConflictWaits(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusInProgress, StatusClassified, StatusClassified)
 	insertConflictForTest(t, s, 2, 1, true)  // C-2 が C-1 に譲った
 	insertConflictForTest(t, s, 2, 3, false) // C-2 と C-3 は向きが決まっていない
@@ -49,6 +51,7 @@ func TestWaiting_OnlyTheDeferredSideOfADirectedConflictWaits(t *testing.T) {
 
 // 相手が完了・取り下げになった衝突、自分が終わった課題には、待っている理由が無い。空は nil でなく空スライス。
 func TestWaiting_FinishedSidesAndEmptyListsAreNotNil(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusDone, StatusClassified, StatusWithdrawn)
 	insertConflictForTest(t, s, 2, 1, true)
 	insertConflictForTest(t, s, 3, 2, true)

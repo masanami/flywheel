@@ -60,6 +60,7 @@ func (f *fakeUpstreamIssueSource) CurrentLogin(_ context.Context) (string, error
 // 別途必要になる。ここでは IF・型・sentinel error の「形」が固まっていることを
 // 固定する目的にとどめ、構造を変えない。
 func TestUpstreamIssueSource_FakeSatisfiesInterface(t *testing.T) {
+	t.Parallel()
 	var _ UpstreamIssueSource = (*fakeUpstreamIssueSource)(nil)
 
 	fake := &fakeUpstreamIssueSource{
@@ -108,6 +109,7 @@ func TestUpstreamIssueSource_FakeSatisfiesInterface(t *testing.T) {
 // （§機能全体の設計「1件の取得の"見つからない"とそれ以外の失敗を区別できる
 // エラーの形」）。
 func TestUpstreamIssueSource_NotFoundIsDistinguishableFromOtherFailures(t *testing.T) {
+	t.Parallel()
 	fake := &fakeUpstreamIssueSource{
 		issueByKey: map[string]UpstreamIssue{},
 	}

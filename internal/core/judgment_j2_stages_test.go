@@ -18,6 +18,7 @@ func j2Expected(n int) []any {
 }
 
 func TestValidateJ2Output_StageFields(t *testing.T) {
+	t.Parallel()
 	vc := j2TestContext(t, true)
 	longRunes := strings.Repeat("あ", MaxStageRunes+1)
 	bad := []struct {
@@ -65,6 +66,7 @@ func TestValidateJ2Output_StageFields(t *testing.T) {
 }
 
 func TestJ2OutputSchema_StageFields(t *testing.T) {
+	t.Parallel()
 	var decoded map[string]any
 	if err := json.Unmarshal(j2OutputSchema(), &decoded); err != nil {
 		t.Fatal(err)
@@ -79,6 +81,7 @@ func TestJ2OutputSchema_StageFields(t *testing.T) {
 }
 
 func TestPlanAutoJ2_Plan_WritesStageFieldsAndActivity(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "stages", "P1")
 	// 前の実物・やらないこと・図は plan で置き換わる／消える。
@@ -132,6 +135,7 @@ func TestPlanAutoJ2_Plan_WritesStageFieldsAndActivity(t *testing.T) {
 }
 
 func TestPlanAutoJ2_Plan_OmittedFieldsClearNonGoalsFigureAndKeepExpected(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "keep", "P1")
 	exp := `[{"kind":"ui","scene":"KEEP","before":"b","after":"a"}]`
@@ -163,6 +167,7 @@ func TestPlanAutoJ2_Plan_OmittedFieldsClearNonGoalsFigureAndKeepExpected(t *test
 // AC-301・AC-302: 予想が NULL の課題で、サイズ S の plan は expected が [] でも null でも
 // 計画として登録され、課題の expected は NULL のまま（[] を書かない）。
 func TestPlanAutoJ2_Plan_SizeSAllowsEmptyExpectedAndNoIssues(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		expected any
@@ -198,6 +203,7 @@ func TestPlanAutoJ2_Plan_SizeSAllowsEmptyExpectedAndNoIssues(t *testing.T) {
 // 論点の記録も論点不要の引用も無いサイズ M・L の plan は登録されない（#450: 1 回目は捨てて 1 回だけ問い直し、
 // 問い直しでも同じなら保留に置く。詳しくは judgment_j2_noissues_test.go）。
 func TestPlanAutoJ2_Plan_SizeMLWithoutIssuesRecordIsNeverRegistered(t *testing.T) {
+	t.Parallel()
 	for _, size := range []string{"M", "L"} {
 		f := newJ2Fixture(t)
 		ch := f.newClassified(t, "nolog", "P1")
@@ -220,6 +226,7 @@ func TestPlanAutoJ2_Plan_SizeMLWithoutIssuesRecordIsNeverRegistered(t *testing.T
 }
 
 func TestPlanAutoJ2_Plan_IssuesRecordedViaEditCountsEvenWithoutHoldID(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "edit-issues", "P1")
 	f.recordIssues(t, ch.ID)
@@ -237,6 +244,7 @@ func TestPlanAutoJ2_Plan_IssuesRecordedViaEditCountsEvenWithoutHoldID(t *testing
 
 // AC-298: サイズ M・L × expected の []・null の 4 通りのどれも、計画を登録せず人間対応待ちになる。
 func TestPlanAutoJ2_Plan_SizeMLWithEmptyExpectedHoldsWithoutPlan(t *testing.T) {
+	t.Parallel()
 	for _, size := range []string{"M", "L"} {
 		for _, exp := range []struct {
 			name string
@@ -281,6 +289,7 @@ func TestPlanAutoJ2_Plan_SizeMLWithEmptyExpectedHoldsWithoutPlan(t *testing.T) {
 }
 
 func TestPlanAutoJ2_Plan_SizeMLUsesCurrentExpectedWhenOutputHasNone(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "cur", "P1")
 	f.recordIssues(t, ch.ID)
@@ -299,6 +308,7 @@ func TestPlanAutoJ2_Plan_SizeMLUsesCurrentExpectedWhenOutputHasNone(t *testing.T
 }
 
 func TestPlanAutoJ2_Issues_IgnoresStageFields(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "iss", "P1")
 	out := j2IssuesOutput(func(m map[string]any) {
@@ -315,6 +325,7 @@ func TestPlanAutoJ2_Issues_IgnoresStageFields(t *testing.T) {
 }
 
 func TestPlanAutoJ2_InputCarriesCurrentStages(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "in", "P1")
 	var launched JudgmentLaunchInput

@@ -14,6 +14,7 @@ const gitAdapterImportPath = "github.com/masanami/flywheel/internal/adapters/git
 // 標準ライブラリだけで、（4）internal/core 配下（テストファイルを含む）が
 // internal/adapters/git を import しない。
 func TestGitAdapterImportDirections(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	pkgs := goListJSON(t, root, "./...")
 

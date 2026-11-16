@@ -22,6 +22,7 @@ func switchStateAt(g *fakeSlotGit, path, branch string, dirty bool) {
 
 // 前の課題のブランチに残っているスロットは、起動の前に base へ detach される。
 func TestAcquireSlot_WorktreeLeftOnAnotherIssueBranchIsDetachedToBase(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -42,6 +43,7 @@ func TestAcquireSlot_WorktreeLeftOnAnotherIssueBranchIsDetachedToBase(t *testing
 
 // detached のスロット・clone のスロットは切り替えない。
 func TestAcquireSlot_DetachedWorktreeAndCloneAreNotSwitched(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -63,6 +65,7 @@ func TestAcquireSlot_DetachedWorktreeAndCloneAreNotSwitched(t *testing.T) {
 // 追従するブランチを他の idle のスロットが checkout していれば、そちらを base へ外してから
 // このスロットへ checkout する。
 func TestAcquireSlot_FollowUpBranchHeldByIdleSlotIsReleasedThenCheckedOut(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -90,6 +93,7 @@ func TestAcquireSlot_FollowUpBranchHeldByIdleSlotIsReleasedThenCheckedOut(t *tes
 
 // すでにそのブランチにいるスロットは何も切り替えない。
 func TestAcquireSlot_FollowUpOnAlreadyCheckedOutBranchDoesNotSwitch(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -107,6 +111,7 @@ func TestAcquireSlot_FollowUpOnAlreadyCheckedOutBranchDoesNotSwitch(t *testing.T
 // （無関係なブランチで起動しない）。スロットは needs_attention にもしない。使用中のときに
 // 待つのは委譲の割り当て（waitForBranchHolder）で、acquireSlot 自体は待たない。
 func TestAcquireSlot_FollowUpBranchHeldByBusyOrDirtySlotIsUnavailable(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		dirty bool
@@ -143,6 +148,7 @@ func TestAcquireSlot_FollowUpBranchHeldByBusyOrDirtySlotIsUnavailable(t *testing
 
 // 切り替えに失敗したスロットは割り当てずに needs_attention にする。
 func TestAcquireSlot_SwitchFailureMarksNeedsAttention(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -159,6 +165,7 @@ func TestAcquireSlot_SwitchFailureMarksNeedsAttention(t *testing.T) {
 
 // ブランチが分からない再開（KeepTree）は、作業ツリーの先頭を動かさない。
 func TestAcquireSlot_KeepTreeDoesNotSwitch(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	g := newFakeSlotGit()
 	switchStateAt(g, filepath.Join(s.Workspace(), worktreeSlotsDir, "r", "SL-1"), "fix/own", false)
@@ -174,6 +181,7 @@ func TestAcquireSlot_KeepTreeDoesNotSwitch(t *testing.T) {
 // 再開でない新しい委譲（計画の版が変わった後）でも、前の委譲が SL-2 でブランチ B を報告し、
 // SL-2 が B を checkout したまま idle なら、新しい委譲は B のまま起動される（#526）。
 func TestAcquireDelegationSlot_NewDelegationFollowsPreviousRunBranch(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -212,6 +220,7 @@ func TestAcquireDelegationSlot_NewDelegationFollowsPreviousRunBranch(t *testing.
 // 前の run のスロットが分からず別のスロットに割り当てるときも、B を checkout している
 // idle・変更なしのスロットから B を外して、割り当てたスロットで checkout する。
 func TestAcquireDelegationSlot_NewDelegationReleasesBranchFromOtherIdleSlot(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -238,6 +247,7 @@ func TestAcquireDelegationSlot_NewDelegationReleasesBranchFromOtherIdleSlot(t *t
 
 // 前の run が無い・ブランチが既定ブランチ・報告が読めないときは追従しない（base へ揃える）。
 func TestLoadFollowBranch_NoneWhenNoUsableBranch(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	for name, runs := range map[string][]runRow{
@@ -375,6 +385,7 @@ func TestAcquireDelegationSlot_BusyBranchHolderPastDeadlineIsUnavailable(t *test
 
 // ブランチを持つ他のスロットが idle で未コミットの変更があるときは待たない（待っても解けない）。
 func TestAcquireDelegationSlot_DirtyBranchHolderDoesNotWait(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -410,6 +421,7 @@ func slotByIDNoT(s *Store, id string) string {
 // 前の委譲のブランチの PR がマージ済み・閉じ済みとストアの記録で分かるときは追従しない
 // （base へ揃える）。成果物の PR の状態か、その PR を参照する実行済みの本番反映で判断する（#526 F4）。
 func TestLoadFollowBranch_NoneWhenPreviousPRIsMergedOrClosed(t *testing.T) {
+	t.Parallel()
 	const prURL = "https://github.com/o/r/pull/7"
 	for _, tc := range []struct {
 		name      string
@@ -472,6 +484,7 @@ func TestLoadFollowBranch_NoneWhenPreviousPRIsMergedOrClosed(t *testing.T) {
 // checkout が「他の作業ツリーが持つ」で失敗するときは、そのスロットを使わず needs_attention にも
 // しない（idle のスロットが次々と needs_attention にならない。#526 F3）。
 func TestAcquireSlot_BranchHeldOutsideTheSlotsDoesNotMarkNeedsAttention(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	g := newFakeSlotGit()
@@ -497,6 +510,7 @@ func TestAcquireSlot_BranchHeldOutsideTheSlotsDoesNotMarkNeedsAttention(t *testi
 // (a) 各委譲は望むブランチのスロットで起動され、(b) 割り当て済みのスロットの先頭は他の割り当てで
 // 動かない（#526 F1）。
 func TestAcquireSlot_ConcurrentAssignmentsDoNotSwitchEachOthersSlot(t *testing.T) {
+	t.Parallel()
 	for i := 0; i < 20; i++ {
 		s := newStoreForTest(t)
 		ctx := context.Background()
@@ -535,6 +549,7 @@ func TestAcquireSlot_ConcurrentAssignmentsDoNotSwitchEachOthersSlot(t *testing.T
 // 同じブランチを追従する並行の割り当てでは、片方だけがそのブランチで起動し、もう片方は
 // 割り当て済みのスロットからブランチを外さない（使用中なので ErrSlotUnavailable）。
 func TestAcquireSlot_ConcurrentSameBranchDoesNotMoveTheAssignedSlot(t *testing.T) {
+	t.Parallel()
 	for i := 0; i < 20; i++ {
 		s := newStoreForTest(t)
 		ctx := context.Background()

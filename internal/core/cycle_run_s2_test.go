@@ -35,6 +35,7 @@ func (f *j5Fixture) cycleInput(inv JudgmentInvoker) CycleRunInput {
 // 着手中の課題は、同じ周の委譲の段で委譲され、同じ周の検証の段で J5 の対象になる。J5 の最初の起動は、
 // その周の委譲の run がすべて終わってからである（run の started_at と ended_at で検証する）。
 func TestRunCycle_DelegatesThenVerifiesInTheSameCycle(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.branches.branches["feat/x"] = true
 	f.branches.prs["feat/x"] = []UpstreamPullRequest{mkPR(1, "open", "develop")}
@@ -76,6 +77,7 @@ func TestRunCycle_DelegatesThenVerifiesInTheSameCycle(t *testing.T) {
 
 // PR のチェックが完了していなければ、検証の段は J5 を起動せず、not_started に waiting_external で示す。
 func TestRunCycle_VerifyPhase_PendingChecksAreWaitingExternal(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.branches.branches["feat/x"] = true
 	f.branches.prs["feat/x"] = []UpstreamPullRequest{mkPR(1, "open", "develop")}
@@ -101,6 +103,7 @@ func TestRunCycle_VerifyPhase_PendingChecksAreWaitingExternal(t *testing.T) {
 
 // 接続ツールの宣言が無い周は、委譲と検証の段を skipped にし（J3・J5 を起動せず）、エラーにしない。
 func TestRunCycle_NoConnectors_RunAndVerifyPhasesAreSkipped(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	var calls []JudgmentPoint
 	in := f.cycleInput(cycleS2Invoker("met", &calls))

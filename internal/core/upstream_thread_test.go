@@ -10,6 +10,7 @@ import (
 // --- ExtractUpstreamReferences（純粋関数）のテスト ---
 
 func TestExtractUpstreamReferences_BareSameRepo(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "See #50 for details.", nil)
 	want := []UpstreamReference{{Repo: "masanami/flywheel", Number: 50}}
 	if !refsEqual(refs, want) {
@@ -18,6 +19,7 @@ func TestExtractUpstreamReferences_BareSameRepo(t *testing.T) {
 }
 
 func TestExtractUpstreamReferences_OwnerNameForm(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "See other/repo#7 for details.", nil)
 	want := []UpstreamReference{{Repo: "other/repo", Number: 7}}
 	if !refsEqual(refs, want) {
@@ -26,6 +28,7 @@ func TestExtractUpstreamReferences_OwnerNameForm(t *testing.T) {
 }
 
 func TestExtractUpstreamReferences_URLForm(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "See https://github.com/third/repo/issues/9 for details.", nil)
 	want := []UpstreamReference{{Repo: "third/repo", Number: 9}}
 	if !refsEqual(refs, want) {
@@ -38,6 +41,7 @@ func TestExtractUpstreamReferences_URLForm(t *testing.T) {
 // 拾われないことを確かめる（"#" の直後が数字でないため upstreamRefBareRe 自体が
 // 一致しない）。
 func TestExtractUpstreamReferences_URLWithTrailingAnchor_IsNotConfusedWithBareRef(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "https://github.com/third/repo/issues/9#issuecomment-123", nil)
 	want := []UpstreamReference{{Repo: "third/repo", Number: 9}}
 	if !refsEqual(refs, want) {
@@ -46,6 +50,7 @@ func TestExtractUpstreamReferences_URLWithTrailingAnchor_IsNotConfusedWithBareRe
 }
 
 func TestExtractUpstreamReferences_BoundaryRejectsWordPrefixedHash(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "abc#1", nil)
 	if len(refs) != 0 {
 		t.Fatalf("refs = %+v, want none (abc#1 must not be captured as a reference)", refs)
@@ -56,6 +61,7 @@ func TestExtractUpstreamReferences_BoundaryRejectsWordPrefixedHash(t *testing.T)
 // （"&#39;"）と番号 0（"#0"）を参照として拾わないことを確かめる（参照の枠 5 件を
 // 無駄に消費させない）。
 func TestExtractUpstreamReferences_RejectsHTMLEntityAndZero(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "it&#39;s #0 and other/repo#0 and #3", nil)
 	want := []UpstreamReference{{Repo: "masanami/flywheel", Number: 3}}
 	if !refsEqual(refs, want) {
@@ -64,6 +70,7 @@ func TestExtractUpstreamReferences_RejectsHTMLEntityAndZero(t *testing.T) {
 }
 
 func TestExtractUpstreamReferences_BoundaryRejectsWordSuffixedNumber(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "#12abc", nil)
 	if len(refs) != 0 {
 		t.Fatalf("refs = %+v, want none (#12abc must not be captured as a reference)", refs)
@@ -76,6 +83,7 @@ func TestExtractUpstreamReferences_BoundaryRejectsWordSuffixedNumber(t *testing.
 // （修正前は unicode.IsLetter を使っており、"詳細は#12を参照" のような書き方
 // で抽出できていなかった）。
 func TestExtractUpstreamReferences_BareRefAdjacentToJapaneseText_IsCaptured(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "詳細は#12を参照。", nil)
 	want := []UpstreamReference{{Repo: "masanami/flywheel", Number: 12}}
 	if !refsEqual(refs, want) {
@@ -88,6 +96,7 @@ func TestExtractUpstreamReferences_BareRefAdjacentToJapaneseText_IsCaptured(t *t
 // 適用し、パスの末尾2セグメントを repo への参照として誤って拾わない
 // （修正前は "a/b/c#5" から誤って {b/c, 5} を抽出していた）。
 func TestExtractUpstreamReferences_OwnerNameForm_RejectsPathPrefixedMatch(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "see a/b/c#5 for details.", nil)
 	if len(refs) != 0 {
 		t.Fatalf("refs = %+v, want none (a/b/c#5 must not be captured as other/repo#N)", refs)
@@ -102,6 +111,7 @@ func TestExtractUpstreamReferences_OwnerNameForm_RejectsPathPrefixedMatch(t *tes
 // {com/group, 12} を抽出してしまうと、無関係な参照が maxUpstreamReferences の
 // 枠を無駄に消費する）。
 func TestExtractUpstreamReferences_OwnerNameForm_RejectsDotPrefixedDomainMatch(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "see gitlab.com/group#12 for details.", nil)
 	if len(refs) != 0 {
 		t.Fatalf("refs = %+v, want none (gitlab.com/group#12 must not be captured as group#12)", refs)
@@ -109,6 +119,7 @@ func TestExtractUpstreamReferences_OwnerNameForm_RejectsDotPrefixedDomainMatch(t
 }
 
 func TestExtractUpstreamReferences_OwnerNameForm_RejectsWordSuffixedNumber(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "see other/repo#123abc for details.", nil)
 	if len(refs) != 0 {
 		t.Fatalf("refs = %+v, want none (other/repo#123abc must not be captured)", refs)
@@ -121,6 +132,7 @@ func TestExtractUpstreamReferences_OwnerNameForm_RejectsWordSuffixedNumber(t *te
 // が正しく許可されることを検証済み。ここでは数字にそのまま英字が続く壊れた
 // 形が拒否されることを確認する）。
 func TestExtractUpstreamReferences_URLForm_RejectsWordSuffixedNumber(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "see https://github.com/third/repo/issues/9abc for details.", nil)
 	if len(refs) != 0 {
 		t.Fatalf("refs = %+v, want none (a malformed trailing word after the issue number must not be captured)", refs)
@@ -128,6 +140,7 @@ func TestExtractUpstreamReferences_URLForm_RejectsWordSuffixedNumber(t *testing.
 }
 
 func TestExtractUpstreamReferences_HeadingWithoutDigitIsNotCaptured(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "# 見出し", nil)
 	if len(refs) != 0 {
 		t.Fatalf("refs = %+v, want none (a heading without digits must not be captured)", refs)
@@ -135,6 +148,7 @@ func TestExtractUpstreamReferences_HeadingWithoutDigitIsNotCaptured(t *testing.T
 }
 
 func TestExtractUpstreamReferences_DedupesCaseInsensitiveOwnerNameKey(t *testing.T) {
+	t.Parallel()
 	body := "See other/Repo#7 and later OTHER/repo#7 again."
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, body, nil)
 	want := []UpstreamReference{{Repo: "other/Repo", Number: 7}}
@@ -144,6 +158,7 @@ func TestExtractUpstreamReferences_DedupesCaseInsensitiveOwnerNameKey(t *testing
 }
 
 func TestExtractUpstreamReferences_ExcludesSelfReference(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "See #100 and also #50.", nil)
 	want := []UpstreamReference{{Repo: "masanami/flywheel", Number: 50}}
 	if !refsEqual(refs, want) {
@@ -152,6 +167,7 @@ func TestExtractUpstreamReferences_ExcludesSelfReference(t *testing.T) {
 }
 
 func TestExtractUpstreamReferences_ExcludesSelfReferenceCaseInsensitiveRepo(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "See Masanami/Flywheel#100 and also #50.", nil)
 	want := []UpstreamReference{{Repo: "masanami/flywheel", Number: 50}}
 	if !refsEqual(refs, want) {
@@ -162,6 +178,7 @@ func TestExtractUpstreamReferences_ExcludesSelfReferenceCaseInsensitiveRepo(t *t
 // TestExtractUpstreamReferences_OrderIsBodyThenCommentsInSequence は、出現順が
 // 本文→コメントの順（コメントは引数の順＝作成順）で保たれることを確認する。
 func TestExtractUpstreamReferences_OrderIsBodyThenCommentsInSequence(t *testing.T) {
+	t.Parallel()
 	comments := []UpstreamComment{
 		{Body: "first comment mentions #20"},
 		{Body: "second comment mentions #10"},
@@ -178,6 +195,7 @@ func TestExtractUpstreamReferences_OrderIsBodyThenCommentsInSequence(t *testing.
 }
 
 func TestExtractUpstreamReferences_NoTruncationAtSix(t *testing.T) {
+	t.Parallel()
 	refs := ExtractUpstreamReferences("masanami/flywheel", 100, "#1 #2 #3 #4 #5 #6", nil)
 	if len(refs) != 6 {
 		t.Fatalf("len(refs) = %d, want 6 (truncation to 5 is FetchUpstreamContext's responsibility, not extraction's)", len(refs))
@@ -259,6 +277,7 @@ func TestFetchUpstreamContext_FakeSatisfiesInterface(_ *testing.T) {
 }
 
 func TestFetchUpstreamContext_ReturnsThreadAndFetchesSingleReference(t *testing.T) {
+	t.Parallel()
 	src := &fakeUpstreamThreadSource{
 		threads: map[string]UpstreamIssueThread{
 			"masanami/flywheel#100": {
@@ -291,6 +310,7 @@ func TestFetchUpstreamContext_ReturnsThreadAndFetchesSingleReference(t *testing.
 }
 
 func TestFetchUpstreamContext_ThreadFetchFailure_ReturnsError(t *testing.T) {
+	t.Parallel()
 	src := &fakeUpstreamThreadSource{threadErr: errors.New("network timeout")}
 	_, err := FetchUpstreamContext(context.Background(), src, "masanami/flywheel", 100)
 	if err == nil {
@@ -303,6 +323,7 @@ func TestFetchUpstreamContext_ThreadFetchFailure_ReturnsError(t *testing.T) {
 // 判定できる）ことを、課題自身のスレッドの取得経路でも確かめる
 // （UpstreamThreadSource のコメントが謳う契約の直接確認。self-review 指摘）。
 func TestFetchUpstreamContext_ThreadFetchFailure_PreservesNotFoundSentinel(t *testing.T) {
+	t.Parallel()
 	src := &fakeUpstreamThreadSource{threadErr: ErrUpstreamIssueNotFound}
 	_, err := FetchUpstreamContext(context.Background(), src, "masanami/flywheel", 100)
 	if !errors.Is(err, ErrUpstreamIssueNotFound) {
@@ -313,6 +334,7 @@ func TestFetchUpstreamContext_ThreadFetchFailure_PreservesNotFoundSentinel(t *te
 // TestFetchUpstreamContext_ThreadFetchFailure_PreservesTransferredSentinel は
 // 同様に ErrUpstreamIssueTransferred も伝わることを確かめる。
 func TestFetchUpstreamContext_ThreadFetchFailure_PreservesTransferredSentinel(t *testing.T) {
+	t.Parallel()
 	src := &fakeUpstreamThreadSource{threadErr: ErrUpstreamIssueTransferred}
 	_, err := FetchUpstreamContext(context.Background(), src, "masanami/flywheel", 100)
 	if !errors.Is(err, ErrUpstreamIssueTransferred) {
@@ -323,6 +345,7 @@ func TestFetchUpstreamContext_ThreadFetchFailure_PreservesTransferredSentinel(t 
 // TestFetchUpstreamContext_SixReferences_OnlyFirstFiveFetched は AC-89:
 // 参照が 6 件以上あるときは出現順の最初の 5 件だけを取得する。
 func TestFetchUpstreamContext_SixReferences_OnlyFirstFiveFetched(t *testing.T) {
+	t.Parallel()
 	src := &fakeUpstreamThreadSource{
 		threads: map[string]UpstreamIssueThread{
 			"masanami/flywheel#100": {
@@ -359,6 +382,7 @@ func TestFetchUpstreamContext_SixReferences_OnlyFirstFiveFetched(t *testing.T) {
 // TestFetchUpstreamContext_DepthOne_ReferencedIssuesReferencesAreNotFetched は
 // AC-90: 参照先がさらに参照する Issue は取得しない（深さ 1）。
 func TestFetchUpstreamContext_DepthOne_ReferencedIssuesReferencesAreNotFetched(t *testing.T) {
+	t.Parallel()
 	src := &fakeUpstreamThreadSource{
 		threads: map[string]UpstreamIssueThread{
 			"masanami/flywheel#100": {
@@ -391,6 +415,7 @@ func TestFetchUpstreamContext_DepthOne_ReferencedIssuesReferencesAreNotFetched(t
 // 取得が 404 で失敗しても、その参照をスキップとして記録し全体は失敗にしない
 // ことを確かめる。
 func TestFetchUpstreamContext_NotFoundReference_IsSkippedNotFailed(t *testing.T) {
+	t.Parallel()
 	src := &fakeUpstreamThreadSource{
 		threads: map[string]UpstreamIssueThread{
 			"masanami/flywheel#100": {
@@ -421,6 +446,7 @@ func TestFetchUpstreamContext_NotFoundReference_IsSkippedNotFailed(t *testing.T)
 // TestFetchUpstreamContext_TransferredReference_IsSkippedNotFailed は、参照先が
 // 移管（ErrUpstreamIssueTransferred）でも同様にスキップとして扱う。
 func TestFetchUpstreamContext_TransferredReference_IsSkippedNotFailed(t *testing.T) {
+	t.Parallel()
 	src := &fakeUpstreamThreadSource{
 		threads: map[string]UpstreamIssueThread{
 			"masanami/flywheel#100": {
@@ -442,6 +468,7 @@ func TestFetchUpstreamContext_TransferredReference_IsSkippedNotFailed(t *testing
 // TestFetchUpstreamContext_OtherReferenceFailure_FailsWholeFetch は、404・移管
 // 以外の失敗（例: 時間切れ）は全体の失敗として返すことを確かめる。
 func TestFetchUpstreamContext_OtherReferenceFailure_FailsWholeFetch(t *testing.T) {
+	t.Parallel()
 	src := &fakeUpstreamThreadSource{
 		threads: map[string]UpstreamIssueThread{
 			"masanami/flywheel#100": {
@@ -464,6 +491,7 @@ func TestFetchUpstreamContext_OtherReferenceFailure_FailsWholeFetch(t *testing.T
 // 参照のうち先頭 5 件目までにスキップ（404）があっても、6 件目目の参照は
 // 埋め合わせで取得されないことを確かめる（【仮定】）。
 func TestFetchUpstreamContext_SkippedReferenceStillConsumesASlot(t *testing.T) {
+	t.Parallel()
 	src := &fakeUpstreamThreadSource{
 		threads: map[string]UpstreamIssueThread{
 			"masanami/flywheel#100": {

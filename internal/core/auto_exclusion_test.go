@@ -74,6 +74,7 @@ func newClosedVerifyingFixture(t *testing.T) *j5Fixture {
 // (a) 本番反映が実行済みで PR のマージが記録され、取り込み元が closed → 完了の検証の対象に入り、
 // not_started に出ない。後続の完了の承認・学びの対象選びでも外れない。
 func TestAutoExclusion_ClosedByOwnRelease_IsVerifiedThenApprovedThenLearned(t *testing.T) {
+	t.Parallel()
 	f := newClosedVerifyingFixture(t)
 	insertReleaseForTest(t, f.s, "C-1", relRef, OperationStateExecuted, "mc1")
 	setBindingStateForTest(t, f.s, "C-1", upstreamStateClosed, policyStateInPolicy)
@@ -119,6 +120,7 @@ func TestAutoExclusion_ClosedByOwnRelease_IsVerifiedThenApprovedThenLearned(t *t
 // (a) の続き: 自身の本番反映で閉じた課題が完了の検証で not_met になり着手中へ戻っても、委譲（手直し）の
 // 対象から外れない（完了までの経路の段すべてに当てる）。
 func TestAutoExclusion_ClosedByOwnRelease_ReworkDelegationIsNotExcluded(t *testing.T) {
+	t.Parallel()
 	f := newClosedVerifyingFixture(t)
 	insertReleaseForTest(t, f.s, "C-1", relRef, OperationStateExecuted, "mc1")
 	setBindingStateForTest(t, f.s, "C-1", upstreamStateClosed, policyStateInPolicy)
@@ -146,6 +148,7 @@ func TestAutoExclusion_ClosedByOwnRelease_ReworkDelegationIsNotExcluded(t *testi
 // (b) 本番反映の記録が無い・足りないまま closed、missing、範囲外 → 完了の検証の対象から外れ、
 // not_started に種類ごとの理由（Detail は取り込み元の URL）で出る。J5 は起動しない。
 func TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		upstream upstreamState
@@ -202,6 +205,7 @@ func TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind(t *testing.
 
 // 分類・計画・委譲の段でも、食い違いで外した課題を not_started に理由つきで出す（対象には入れない）。
 func TestAutoExclusion_OtherStagesReportTheExcludedChallenges(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	ctx := context.Background()
 	unclassified, err := f.s.CreateChallenge(ctx, ChannelCLI, CreateInput{Title: "u", Description: "d"})
@@ -261,6 +265,7 @@ func TestAutoExclusion_OtherStagesReportTheExcludedChallenges(t *testing.T) {
 // 次の 1 周の release の段が PR をマージして取り込み元が閉じる。同じ周の取り込みの段が閉じたことを
 // 記録し、続く検証の段が J5 を起動して完了の承認待ちまで進む（not_started は空）。
 func TestRunCycle_Y10_ReleaseClosesTheSourceAndVerifyStillRunsInTheSameCycle(t *testing.T) {
+	t.Parallel()
 	f := newClosedVerifyingFixture(t)
 	// 1 回目の J5 が uncertain で問いを上げ、課題は人間対応待ちになる。
 	f.j5.result = j5Out("uncertain", nil, "QUESTION")
@@ -316,6 +321,7 @@ func TestRunCycle_Y10_ReleaseClosesTheSourceAndVerifyStillRunsInTheSameCycle(t *
 // 述語の境界: 本番反映の前に記録された reopen は妨げない。release が複数あるときは、条件を満たすものが
 // 1 つあれば足りる（条件を満たさない release が先にあっても）。
 func TestClosedByOwnRelease_ReopenBeforeTheReleaseAndSeveralReleases(t *testing.T) {
+	t.Parallel()
 	check := func(t *testing.T, f *j5Fixture, want bool) {
 		t.Helper()
 		var got bool

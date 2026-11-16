@@ -7,6 +7,7 @@ import "testing"
 // TestUnknownStatusesReferencedByTable_RealTableIsClean は、実際の Table・
 // StatusVocabulary の組で参照違反が無いことを検証する（AC-25 本体）。
 func TestUnknownStatusesReferencedByTable_RealTableIsClean(t *testing.T) {
+	t.Parallel()
 	got := UnknownStatusesReferencedByTable(Table, StatusVocabulary)
 	if len(got) != 0 {
 		t.Errorf("UnknownStatusesReferencedByTable(real) = %v, want empty", got)
@@ -17,6 +18,7 @@ func TestUnknownStatusesReferencedByTable_RealTableIsClean(t *testing.T) {
 // 状態を参照する行を混入させた破損データを検出できることを検証する
 // （検出ロジック自体を壊れた入力に対して単体で検査する）。
 func TestUnknownStatusesReferencedByTable_DetectsUnknownFrom(t *testing.T) {
+	t.Parallel()
 	corrupted := append([]Transition{}, Table...)
 	corrupted = append(corrupted, Transition{
 		ID: "T-broken", From: Status("no_such_status"), Op: OpClassify,
@@ -31,6 +33,7 @@ func TestUnknownStatusesReferencedByTable_DetectsUnknownFrom(t *testing.T) {
 // TestUnknownStatusesReferencedByTable_DetectsUnknownTarget は、固定遷移先に
 // 語彙に無い状態を参照する行を混入させた破損データを検出できることを検証する。
 func TestUnknownStatusesReferencedByTable_DetectsUnknownTarget(t *testing.T) {
+	t.Parallel()
 	corrupted := append([]Transition{}, Table...)
 	corrupted = append(corrupted, Transition{
 		ID: "T-broken", From: StatusUnclassified, Op: OpAnswer,
@@ -47,6 +50,7 @@ func TestUnknownStatusesReferencedByTable_DetectsUnknownTarget(t *testing.T) {
 // 破損データを検出できることを検証する（From の NoStatus は T1 の正当な表現だが、
 // 固定遷移先の NoStatus は設定漏れであり、AC-25 の検査をすり抜けさせない）。
 func TestUnknownStatusesReferencedByTable_DetectsMissingFixedTarget(t *testing.T) {
+	t.Parallel()
 	corrupted := append([]Transition{}, Table...)
 	corrupted = append(corrupted, Transition{
 		ID: "T-broken", From: StatusUnclassified, Op: Operation("bogus_op"),
@@ -68,6 +72,7 @@ func TestUnknownStatusesReferencedByTable_DetectsMissingFixedTarget(t *testing.T
 // 実 Table では T12 を経由せずとも、T1→T2→T3→T5→T7→T8→T13 の主経路と
 // T10 だけで8状態すべてに到達できる。
 func TestUnreachableFromCreate_RealTableIsClean(t *testing.T) {
+	t.Parallel()
 	got := UnreachableFromCreate(Table, StatusVocabulary)
 	if len(got) != 0 {
 		t.Errorf("UnreachableFromCreate(real) = %v, want empty", got)
@@ -78,6 +83,7 @@ func TestUnreachableFromCreate_RealTableIsClean(t *testing.T) {
 // 到達経路を欠いた破損データ（遷移表から特定の状態への遷移を全て除去したもの）を
 // 検出できることを検証する（T13・T14 除去で完了が到達不能になるケース）。
 func TestUnreachableFromCreate_DetectsUnreachableStatus(t *testing.T) {
+	t.Parallel()
 	var corrupted []Transition
 	for _, tr := range Table {
 		if tr.ID == "T13" || tr.ID == "T14" {
@@ -111,6 +117,7 @@ func TestUnreachableFromCreate_DetectsUnreachableStatus(t *testing.T) {
 // 経由の正規到達は無く、T5 は発火しない）。hold は「今その状態にいる」ことが
 // 前提の遷移であり、結果として新しい状態を生む遷移ではないため、これは偽陰性である。
 func TestUnreachableFromCreate_DoesNotMaskUnreachabilityViaHold(t *testing.T) {
+	t.Parallel()
 	var corrupted []Transition
 	for _, tr := range Table {
 		if tr.ID == "T2" {
@@ -134,6 +141,7 @@ func TestUnreachableFromCreate_DoesNotMaskUnreachabilityViaHold(t *testing.T) {
 // 唯一の到達経路（T7）を除去した場合に検証中が到達不能と検出されることを検証する
 // （同じ hold 迂回到達の偽陰性が、T10 の遷移元である検証中についても起きないことの確認）。
 func TestUnreachableFromCreate_DetectsUnreachableStatusViaSubmit(t *testing.T) {
+	t.Parallel()
 	var corrupted []Transition
 	for _, tr := range Table {
 		if tr.ID == "T7" {
@@ -156,6 +164,7 @@ func TestUnreachableFromCreate_DetectsUnreachableStatusViaSubmit(t *testing.T) {
 // TestUnreachableFromCreate_DetectsMissingT1 は、T1（create）自体が無い
 // 破損データでは、未分類を含め全状態が到達不能になることを検証する。
 func TestUnreachableFromCreate_DetectsMissingT1(t *testing.T) {
+	t.Parallel()
 	var corrupted []Transition
 	for _, tr := range Table {
 		if tr.ID == "T1" {
@@ -174,6 +183,7 @@ func TestUnreachableFromCreate_DetectsMissingT1(t *testing.T) {
 // TestOutgoingFrom_Done_RealTableIsEmpty は、実際の Table で完了から出る遷移が
 // 無いことを検証する（AC-27 本体）。
 func TestOutgoingFrom_Done_RealTableIsEmpty(t *testing.T) {
+	t.Parallel()
 	got := OutgoingFrom(Table, StatusDone)
 	if len(got) != 0 {
 		t.Errorf("OutgoingFrom(Table, done) = %v, want empty", got)
@@ -183,6 +193,7 @@ func TestOutgoingFrom_Done_RealTableIsEmpty(t *testing.T) {
 // TestOutgoingFrom_Done_DetectsInjectedOutgoingTransition は、完了から出る遷移を
 // 混入させた破損データを検出できることを検証する。
 func TestOutgoingFrom_Done_DetectsInjectedOutgoingTransition(t *testing.T) {
+	t.Parallel()
 	corrupted := append([]Transition{}, Table...)
 	corrupted = append(corrupted, Transition{
 		ID: "T-broken", From: StatusDone, Op: OpClassify,
@@ -198,6 +209,7 @@ func TestOutgoingFrom_Done_DetectsInjectedOutgoingTransition(t *testing.T) {
 
 // 条件つきの遷移先が語彙に無い状態を指す破損データを検出できる（無い＝NoStatus は正当なので報告しない）。
 func TestUnknownStatusesReferencedByTable_DetectsUnknownIfCompletionDirect(t *testing.T) {
+	t.Parallel()
 	corrupted := append([]Transition{}, Table...)
 	corrupted = append(corrupted, Transition{
 		ID: "T-broken", From: StatusUnclassified, Op: OpAnswer,
@@ -211,6 +223,7 @@ func TestUnknownStatusesReferencedByTable_DetectsUnknownIfCompletionDirect(t *te
 
 // 条件つきの遷移先だけが到達の経路になる状態も、到達できるものとして数える（From が到達済みのとき）。
 func TestUnreachableFromCreate_FollowsIfCompletionDirect(t *testing.T) {
+	t.Parallel()
 	vocab := []StatusVocabEntry{{Code: StatusUnclassified}, {Code: StatusClassified}, {Code: StatusInProgress}}
 	table := []Transition{
 		{ID: "T1", From: NoStatus, Op: OpCreate, Target: TransitionTarget{Fixed: StatusUnclassified}},

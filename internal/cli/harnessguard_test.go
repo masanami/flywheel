@@ -38,6 +38,7 @@ func installRealHarnessGuard() (cleanup func(), err error) {
 // 受入基準「go test ./... は、PATH に本物の harness があっても、それを起動しない」の担保:
 // PATH の harness は番兵に解決され、起動すると失敗する。
 func TestRealHarnessGuard_ShadowsAnyHarnessOnPATH(t *testing.T) {
+	t.Parallel()
 	path, err := exec.LookPath("harness")
 	if err != nil {
 		t.Fatalf("LookPath(harness): %v (the guard must be on PATH)", err)

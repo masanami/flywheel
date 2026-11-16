@@ -36,6 +36,7 @@ func setupHeldBranchWorkspace(t *testing.T) (ws, id string) {
 // ① 置き場の中の作業ツリー（前の委譲の子の一時の作業ツリー）が持つ: 委譲は起動し、スロットは既定の
 // ブランチの detached HEAD で、持ち主のパスとブランチが run の保存先の記録に残る。
 func TestCycle_PreviousBranchHeldInsidePlacement_StartsDetachedAndRecordsHolder_RealGit(t *testing.T) {
+	parallelTools(t, false)
 	ws, id := setupHeldBranchWorkspace(t)
 	base := filepath.Join(ws, "slot-d")
 	holder := filepath.Join(ws, ".flywheel", "worktrees", "direct-repo", "SL-1-tmp-1")
@@ -79,6 +80,7 @@ func TestCycle_PreviousBranchHeldInsidePlacement_StartsDetachedAndRecordsHolder_
 // ② 置き場の外（元のクローン）が持つ: 委譲は起動せず、cycle --json の not_started[] は理由
 // slot_unavailable で、detail にブランチ名と持ち主のパスが入る。
 func TestCycle_PreviousBranchHeldOutsidePlacement_NotStartedWithDetail_RealGit(t *testing.T) {
+	parallelTools(t, false)
 	ws, id := setupHeldBranchWorkspace(t)
 	base := filepath.Join(ws, "slot-d")
 	slotGit(t, base, "checkout", "-q", "feat/held")

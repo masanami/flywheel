@@ -23,6 +23,7 @@ func (f *countingJudgmentInvoker) InvokeJudgment(_ context.Context, _ JudgmentLa
 // not_started に理由 rate_limited で出る（未分類の課題を 3 件置き、1 件目で
 // 枠超過を返して検証する）」・「枠超過で起動しなかった課題の状態と版は変わらない」。
 func TestJudgmentCycle_StopsLaunchingAfterRateLimited(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	ids := []string{
@@ -102,6 +103,7 @@ func TestJudgmentCycle_StopsLaunchingAfterRateLimited(t *testing.T) {
 
 // 枠超過でない run が続く周は、すべて起動する。
 func TestJudgmentCycle_LaunchesAllWhenNotRateLimited(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	inv := &countingJudgmentInvoker{results: []JudgmentLaunchOutput{

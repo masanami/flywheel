@@ -182,6 +182,7 @@ func requireInOrder(t *testing.T, out string, wants ...string) {
 }
 
 func TestRunShow_TextMarksUnansweredHold(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	runJSON(t, ws, "hold", id, "--question", fullHoldQuestion)
@@ -193,6 +194,7 @@ func TestRunShow_TextMarksUnansweredHold(t *testing.T) {
 // TestInit_TextModeIsHumanReadable は init の --json 無しの出力が Go の map 表記
 // （map[created:true …]）ではなく、項目名と値で読めることを確かめる。
 func TestInit_TextModeIsHumanReadable(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	first := runText(t, dir, "init")
 	second := runText(t, dir, "init")

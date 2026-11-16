@@ -1253,6 +1253,7 @@ func TestPlan_ExplicitID_SingleSlot_SeparateGroups_SlotUnavailable(t *testing.T)
 // 契約の run（form: cli）の許可は、待ちの列の優先度・ID の昇順を守る: 前にいる claude の課題が今すぐ許可できる分の枠は先に譲り、
 // 譲ってもなお枠が残るなら許可する（契約は待たないので、余裕があるのに譲るだけで拒否しない）。
 func TestAdmitContract_YieldsOnlyTheSlotsEarlierWaitersTake(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	conn := &ConnectorsDeclaration{
 		Connectors: []Connector{{ID: "pc", Form: ConnectorFormPlugin}, {ID: "cl", Form: ConnectorFormCLI}},

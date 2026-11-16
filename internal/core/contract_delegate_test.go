@@ -157,6 +157,7 @@ func (f *contractFixture) count(t *testing.T, q string) int64 {
 }
 
 func TestStartContractDelegation_SavesExternalRunIDAndReturnsWithoutWaiting(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	rep, err := f.start(t)
 	if err != nil {
@@ -178,6 +179,7 @@ func TestStartContractDelegation_SavesExternalRunIDAndReturnsWithoutWaiting(t *t
 }
 
 func TestStartContractDelegation_SecondStartWhileActiveIsRunInProgress(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatalf("start: %v", err)
@@ -191,6 +193,7 @@ func TestStartContractDelegation_SecondStartWhileActiveIsRunInProgress(t *testin
 }
 
 func TestStartContractDelegation_FailedOrInvalidOutputCreatesNoContractRun(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		out  ContractLaunchOutput
 		want RunResult
@@ -221,6 +224,7 @@ func TestStartContractDelegation_FailedOrInvalidOutputCreatesNoContractRun(t *te
 }
 
 func TestStartContractDelegation_RejectsNonCLIConnectorAndNotInProgress(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	other := newDelegateFixture(t)
 	_, err := f.s.StartContractDelegation(context.Background(), ContractStartInput{
@@ -239,6 +243,7 @@ func TestStartContractDelegation_RejectsNonCLIConnectorAndNotInProgress(t *testi
 }
 
 func TestPollContractRuns_RunningAndWaitingAreRecordedAndCarriedToTheNextCycle(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -272,6 +277,7 @@ func TestPollContractRuns_RunningAndWaitingAreRecordedAndCarriedToTheNextCycle(t
 }
 
 func TestPollContractRuns_SucceededImportsPRArtifactsOnceAndStopsPolling(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -301,6 +307,7 @@ func TestPollContractRuns_SucceededImportsPRArtifactsOnceAndStopsPolling(t *test
 }
 
 func TestPollContractRuns_FailedAndCancelledEndTheContractRunWithoutArtifacts(t *testing.T) {
+	t.Parallel()
 	for _, st := range []ContractState{ContractStateFailed, ContractStateCancelled} {
 		t.Run(string(st), func(t *testing.T) {
 			f := newContractFixture(t)
@@ -326,6 +333,7 @@ func TestPollContractRuns_FailedAndCancelledEndTheContractRunWithoutArtifacts(t 
 }
 
 func TestPollContractRuns_ReadFailureKeepsTheStateAndRecordsTheResult(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -347,6 +355,7 @@ func TestPollContractRuns_ReadFailureKeepsTheStateAndRecordsTheResult(t *testing
 
 // 状態の確認でも、contract_version が合わない応答は取り込まずに失敗（invalid_output）にする。
 func TestPollContractRuns_WrongContractVersionIsInvalidOutputAndImportsNothing(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -369,6 +378,7 @@ func TestPollContractRuns_WrongContractVersionIsInvalidOutputAndImportsNothing(t
 
 // 費用: 契約の cost_usd は孫を含む累計。状態を何度読んでも二重に数えない（差分だけを run に記録し、累計で置き換える）。
 func TestContractCost_CumulativeIsNotDoubleCountedAcrossReads(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	f.client.startOut = contractOut(ContractStateRunning, float64Ptr(1), nil)
 	if _, err := f.start(t); err != nil {
@@ -403,6 +413,7 @@ func TestContractCost_CumulativeIsNotDoubleCountedAcrossReads(t *testing.T) {
 }
 
 func TestContractRun_CountsAsAnActiveRunForDelegationTargets(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -420,6 +431,7 @@ func TestContractRun_CountsAsAnActiveRunForDelegationTargets(t *testing.T) {
 }
 
 func TestContractCommands_RunInTheChallengeRepoWorkDir(t *testing.T) {
+	t.Parallel()
 	worktreeJSON := strings.Replace(contractConnectorsJSON,
 		`{"provider": "clone", "paths": ["slot1"]}`, `{"provider": "worktree", "base": "repos/base", "count": 2}`, 1)
 	for _, tc := range []struct {
@@ -465,6 +477,7 @@ func TestContractCommands_RunInTheChallengeRepoWorkDir(t *testing.T) {
 
 // clone に idle の作業用クローンが無いとき、周の委譲は周を止めず slot_unavailable で見送り、start を呼ばない。
 func TestDelegateViaContract_NoIdleCloneIsSlotUnavailable(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if err := f.s.EnsureSlots(context.Background(), f.conn.Repos[0]); err != nil {
 		t.Fatal(err)
@@ -490,6 +503,7 @@ func TestDelegateViaContract_NoIdleCloneIsSlotUnavailable(t *testing.T) {
 // status・resume・cancel は start で記録した作業ディレクトリで実行し、決め直さない（start で使ったスロットが idle で
 // なくなり、別の idle のスロットがあっても start のスロットのまま）。記録の無い既存の run はワークスペースで実行する。
 func TestContractCommands_UseTheWorkDirRecordedAtStart(t *testing.T) {
+	t.Parallel()
 	twoSlots := strings.Replace(contractConnectorsJSON, `"paths": ["slot1"]`, `"paths": ["slot1", "slot2"]`, 1)
 	for _, tc := range []struct {
 		name   string

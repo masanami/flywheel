@@ -93,6 +93,7 @@ func local(d string, hour, minute int) string {
 }
 
 func TestMetrics_EmptyStore(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	m, err := s.Metrics(context.Background(), MetricsOptions{})
 	if err != nil {
@@ -159,6 +160,7 @@ func TestMetrics_PeriodTargetsAreInclusiveLocalDays(t *testing.T) {
 }
 
 func TestMetrics_RejectionRate(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	at := local("2026-03-01", 12, 0)
 	a := mChallenge(t, s, "a") // 完了の差し戻しを 2 回（欄 issues+expected、issues）
@@ -188,6 +190,7 @@ func TestMetrics_RejectionRate(t *testing.T) {
 }
 
 func TestMetrics_ResumeAndCost(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	at := local("2026-03-01", 12, 0)
 	a := mChallenge(t, s, "a")
@@ -220,6 +223,7 @@ func TestMetrics_ResumeAndCost(t *testing.T) {
 }
 
 func TestMetrics_CostMedianOdd(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	at := local("2026-03-01", 12, 0)
 	for i, cost := range []int64{1_000_000, 2_000_000, 10_000_000} {
@@ -240,6 +244,7 @@ func TestMetrics_CostMedianOdd(t *testing.T) {
 }
 
 func TestMetrics_ApprovalCountCoversAllRowsInPeriod(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	a := mChallenge(t, s, "a")
 	b := mChallenge(t, s, "b") // 完了の承認を受けない課題の承認も数える
@@ -267,6 +272,7 @@ func TestMetrics_ApprovalCountCoversAllRowsInPeriod(t *testing.T) {
 }
 
 func TestMetrics_Occurrences(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	a := mChallenge(t, s, "a")
 	in := local("2026-03-02", 9, 0)
@@ -297,6 +303,7 @@ func TestMetrics_Occurrences(t *testing.T) {
 }
 
 func TestMetrics_DoesNotWriteAndIsDeterministic(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	a := mChallenge(t, s, "a")
 	mApproval(t, s, a, "completion", "approved", "cli", "tty_confirm", local("2026-03-02", 9, 0), nil)
@@ -327,6 +334,7 @@ func TestMetrics_DoesNotWriteAndIsDeterministic(t *testing.T) {
 }
 
 func TestMetricsDefinitions_CoverEveryMetricWithStrings(t *testing.T) {
+	t.Parallel()
 	d := MetricsDefinitions()
 	if len(d) != len(MetricsMetricNames) {
 		t.Fatalf("definitions has %d entries, want %d", len(d), len(MetricsMetricNames))
@@ -342,6 +350,7 @@ func TestMetricsDefinitions_CoverEveryMetricWithStrings(t *testing.T) {
 // AC-298: 人の承認の件数の軸（種類・決定・経路・本人確認の方式）は、経路の違う行・release・budget の行を
 // 別々の組として数え、期間外の行は数えない（どれかの軸を落とすと件数の組が変わって検出できる）。
 func TestMetrics_ApprovalCountSeparatesKindDecisionChannelAndVerification(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	a := mChallenge(t, s, "a")
 	b := mChallenge(t, s, "b")

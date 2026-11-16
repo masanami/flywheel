@@ -261,6 +261,7 @@ func TestAnswer_Success_ReturnsToVerifyingAndDisplaysQuestionAndAnswer(t *testin
 // --- AC-37: 端末なしで approve・reject・answer を実行すると tty_required ---
 
 func TestApprove_NoTerminalStdin_ReturnsTTYRequired(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -288,6 +289,7 @@ func TestApprove_NoTerminalStdin_ReturnsTTYRequired(t *testing.T) {
 }
 
 func TestReject_NoTerminalStdin_ReturnsTTYRequired(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -309,6 +311,7 @@ func TestReject_NoTerminalStdin_ReturnsTTYRequired(t *testing.T) {
 }
 
 func TestAnswer_NoTerminalStdin_ReturnsTTYRequired(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)

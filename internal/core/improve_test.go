@@ -142,6 +142,7 @@ func (f *j8Fixture) challengeField(t *testing.T, id string, col string) string {
 }
 
 func TestImproveJ8_AutoCallsOnlyAtThreshold_AC320_321(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	f.occ(t, 9, j8Row{})
 	if res := f.auto(t); res.Called || f.calls != 0 || res.Triggering != 9 {
@@ -154,6 +155,7 @@ func TestImproveJ8_AutoCallsOnlyAtThreshold_AC320_321(t *testing.T) {
 }
 
 func TestImproveJ8_ManualCallsAtOneOrMore_AC325(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	if res := f.manual(t); res.Called || f.calls != 0 {
 		t.Fatalf("0 occurrences: res = %+v calls = %d", res, f.calls)
@@ -165,6 +167,7 @@ func TestImproveJ8_ManualCallsAtOneOrMore_AC325(t *testing.T) {
 }
 
 func TestImproveJ8_ValidationErrors(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	for name, in := range map[string]ImproveJ8Input{
 		"auto without a cycle": {},
@@ -180,6 +183,7 @@ func TestImproveJ8_ValidationErrors(t *testing.T) {
 }
 
 func TestImproveJ8_FailureLimit_AutoOnly_AC331(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	f.occ(t, 10, j8Row{})
 	f.inv.result = JudgmentLaunchOutput{Result: RunResultErrored}
@@ -205,6 +209,7 @@ func TestImproveJ8_FailureLimit_AutoOnly_AC331(t *testing.T) {
 
 // 枠超過の run は失敗の連続に数えず、連続も切らない（失敗 → 枠超過 → 失敗の並び）。
 func TestImproveJ8_FailureLimit_RateLimitedIsSkipped_AC331(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	f.occ(t, 10, j8Row{})
 	f.inv.result = JudgmentLaunchOutput{Result: RunResultErrored}
@@ -231,6 +236,7 @@ func TestImproveJ8_FailureLimit_RateLimitedIsSkipped_AC331(t *testing.T) {
 }
 
 func TestImproveJ8_InvalidOutputCountsTowardFailureLimit(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	f.occ(t, 10, j8Row{})
 	f.inv.result = JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: []byte(`{"proposals":[{"layer":"none"}]}`)}
@@ -245,6 +251,7 @@ func TestImproveJ8_InvalidOutputCountsTowardFailureLimit(t *testing.T) {
 }
 
 func TestImproveJ8_PerformanceWait_AC334_337_347(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	perf := f.occ(t, 2, j8Row{cause: "performance"})
 	ctxs := f.occ(t, 3, j8Row{})
@@ -285,6 +292,7 @@ func TestImproveJ8_PerformanceWait_AC334_337_347(t *testing.T) {
 }
 
 func TestImproveJ8_EvidenceOutsideInput_InvalidOutputWritesNothing_AC342_346(t *testing.T) {
+	t.Parallel()
 	for name, mk := range map[string]func(f *j8Fixture, t *testing.T) string{
 		"nonexistent": func(_ *j8Fixture, _ *testing.T) string { return "O-99999" },
 		"handled": func(f *j8Fixture, t *testing.T) string {
@@ -328,6 +336,7 @@ func TestImproveJ8_EvidenceOutsideInput_InvalidOutputWritesNothing_AC342_346(t *
 }
 
 func TestImproveJ8_FilesImprovementChallenges_AC348_349_350_352_356_357(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	p := f.occ(t, 2, j8Row{})
 	k := f.occ(t, 1, j8Row{layer: "knowledge", target: "K"})
@@ -395,6 +404,7 @@ func TestImproveJ8_FilesImprovementChallenges_AC348_349_350_352_356_357(t *testi
 }
 
 func TestImproveJ8_RoutesFromDeclaration(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	ids := f.occ(t, 2, j8Row{layer: "knowledge", target: "K"})
 	f.out([]any{j8Proposal("knowledge", "K", formatOccurrenceID(ids[0]))})
@@ -414,6 +424,7 @@ func TestImproveJ8_RoutesFromDeclaration(t *testing.T) {
 }
 
 func TestImproveJ8_OriginInspectFailureIsNotedAndRoutesToIssue(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	ids := f.occ(t, 2, j8Row{layer: "knowledge", target: "K"})
 	f.out([]any{j8Proposal("knowledge", "K", formatOccurrenceID(ids[0]))})
@@ -431,6 +442,7 @@ func TestImproveJ8_OriginInspectFailureIsNotedAndRoutesToIssue(t *testing.T) {
 
 // 手動の improve で写像が硬いエラーになったときも、origin の検査の失敗の注記をエラーに残す。
 func TestImproveJ8_ManualMappingErrorKeepsTheOriginNote(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	ids := f.occ(t, 2, j8Row{layer: "knowledge", target: "K"})
 	f.out([]any{j8Proposal("knowledge", "K", formatOccurrenceID(ids[0]))})
@@ -448,6 +460,7 @@ func TestImproveJ8_ManualMappingErrorKeepsTheOriginNote(t *testing.T) {
 }
 
 func TestImproveJ8_AtomicWhenWritesFail_AC351(t *testing.T) {
+	t.Parallel()
 	boom := errors.New("injected failure")
 	for name, inject := range map[string]func(s *Store){
 		"challenge insert": func(s *Store) { s.insertChallenge = func(*sql.Tx, ImprovementKey) error { return boom } },
@@ -489,6 +502,7 @@ func TestImproveJ8_AtomicWhenWritesFail_AC351(t *testing.T) {
 }
 
 func TestImproveJ8_AutoMappingErrorIsCountedAsInvalidOutput(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	f.occ(t, 10, j8Row{})
 	f.s.insertChallenge = func(*sql.Tx, ImprovementKey) error { return errors.New("injected") }
@@ -504,6 +518,7 @@ func TestImproveJ8_AutoMappingErrorIsCountedAsInvalidOutput(t *testing.T) {
 }
 
 func TestImproveJ8_InvalidateFailureIsReportedWithTheMappingError(t *testing.T) {
+	t.Parallel()
 	boomMap := errors.New("map boom")
 	// 写像が失敗した時点で ctx を取り消し、続く invalidateRunOutput の書き込みも失敗させる。
 	run := func(t *testing.T, in ImproveJ8Input) (*ImproveJ8Result, error) {
@@ -565,6 +580,7 @@ func (s *Store) mustOccIDs(t *testing.T) []int64 {
 }
 
 func TestImproveJ8_DuplicateSuppression_AC358_359_360_361(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	ids := f.occ(t, 5, j8Row{})
 	open := j8InsertImprovement(t, f.s, "prompt", "T", "in_progress")
@@ -592,6 +608,7 @@ func TestImproveJ8_DuplicateSuppression_AC358_359_360_361(t *testing.T) {
 }
 
 func TestImproveJ8_DifferentLayerIsDifferentKey_AC361(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	ids := f.occ(t, 1, j8Row{layer: "entry_skill", target: "T"})
 	j8InsertImprovement(t, f.s, "prompt", "T", "unclassified")
@@ -602,6 +619,7 @@ func TestImproveJ8_DifferentLayerIsDifferentKey_AC361(t *testing.T) {
 }
 
 func TestImproveJ8_ConcurrentJ8_RecheckInvalidatesWholeOutput(t *testing.T) {
+	t.Parallel()
 	for name, target := range map[string]string{"evidence": "evidence", "wait": "wait"} {
 		t.Run(name, func(t *testing.T) {
 			f := newJ8Fixture(t)
@@ -627,6 +645,7 @@ func TestImproveJ8_ConcurrentJ8_RecheckInvalidatesWholeOutput(t *testing.T) {
 }
 
 func TestImproveJ8_RunFailureWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newJ8Fixture(t)
 	f.occ(t, 1, j8Row{cause: "performance"})
 	f.occ(t, 1, j8Row{})
@@ -638,6 +657,7 @@ func TestImproveJ8_RunFailureWritesNothing(t *testing.T) {
 }
 
 func TestTerminalStatusArgs_AreDerivedFromTheTransitionTable(t *testing.T) {
+	t.Parallel()
 	got := map[any]bool{}
 	for _, a := range terminalStatusArgs() {
 		got[a] = true
@@ -651,6 +671,7 @@ func TestTerminalStatusArgs_AreDerivedFromTheTransitionTable(t *testing.T) {
 // #571: 見送り（withheld）は J8 の run の作業ログに残し、課題は作らない。欄が無ければ残さず、不正な形なら
 // 出力全体を不正にして何も書かない。
 func TestImproveJ8_WithheldIsRecordedOnTheRunActivity(t *testing.T) {
+	t.Parallel()
 	withheld := []any{map[string]any{"layer": "prompt", "target": "T", "evidence": []string{"C-3 が満たした"}}}
 	set := func(f *j8Fixture, w any) {
 		m := map[string]any{"proposals": []any{}}

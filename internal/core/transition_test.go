@@ -5,6 +5,7 @@ import "testing"
 // TestLookup_T1_CreateHasNoSource は、T1（create）が遷移元を持たず、
 // 常に未分類を返すことを検証する。
 func TestLookup_T1_CreateHasNoSource(t *testing.T) {
+	t.Parallel()
 	tr, ok := Lookup(NoStatus, OpCreate)
 	if !ok {
 		t.Fatalf("Lookup(NoStatus, OpCreate) ok = false, want true")
@@ -24,6 +25,7 @@ func TestLookup_T1_CreateHasNoSource(t *testing.T) {
 // TestLookup_AllRows は T1〜T15（T11は4遷移元に展開）の全行が
 // docs/features/m1-core.md §状態機械 の遷移表と一致することを検証する。
 func TestLookup_AllRows(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		id      string
 		from    Status
@@ -83,6 +85,7 @@ func TestLookup_AllRows(t *testing.T) {
 // TestLookup_T13AndT14AreDistinctRows は、同じ遷移元（完了確認待ち）から
 // approve と approve --hold-release が別の行として引けることを検証する。
 func TestLookup_T13AndT14AreDistinctRows(t *testing.T) {
+	t.Parallel()
 	t13, ok := Lookup(StatusAwaitingCompletionApproval, OpApprove)
 	if !ok {
 		t.Fatalf("T13 not found")
@@ -105,6 +108,7 @@ func TestLookup_T13AndT14AreDistinctRows(t *testing.T) {
 // TestLookup_T8ToT10AreDistinctRows は、検証中からの verify の3つの結果が
 // 別の行として引けることを検証する。
 func TestLookup_T8ToT10AreDistinctRows(t *testing.T) {
+	t.Parallel()
 	met, ok := Lookup(StatusVerifying, OpVerifyMet)
 	if !ok {
 		t.Fatalf("T8 not found")
@@ -134,6 +138,7 @@ func TestLookup_T8ToT10AreDistinctRows(t *testing.T) {
 // TestLookup_AllPairsNotInTableAreRejected は、8状態×既知の操作の直積のうち
 // 表に無い組がすべて不可（ok=false）であることを検証する（T1 は遷移元を持たないため対象外）。
 func TestLookup_AllPairsNotInTableAreRejected(t *testing.T) {
+	t.Parallel()
 	valid := map[[2]string]bool{}
 	for _, tr := range Table {
 		if tr.From == NoStatus || tr.Restricted {
@@ -170,6 +175,7 @@ func TestLookup_AllPairsNotInTableAreRejected(t *testing.T) {
 // TestLookup_CreateNotAvailableFromExistingStatus は、既存の状態から create は
 // 引けないことを検証する（T1 の遷移元は「なし」のみ）。
 func TestLookup_CreateNotAvailableFromExistingStatus(t *testing.T) {
+	t.Parallel()
 	if _, ok := Lookup(StatusUnclassified, OpCreate); ok {
 		t.Errorf("Lookup(unclassified, create) ok = true, want false")
 	}
@@ -177,6 +183,7 @@ func TestLookup_CreateNotAvailableFromExistingStatus(t *testing.T) {
 
 // TestTable_RowCount は、Table の物理行数が28（T1〜T18、うちT11が5遷移元・T16が7遷移元に展開）であることを検証する。
 func TestTable_RowCount(t *testing.T) {
+	t.Parallel()
 	if len(Table) != 28 {
 		t.Fatalf("len(Table) = %d, want 28", len(Table))
 	}
@@ -186,6 +193,7 @@ func TestTable_RowCount(t *testing.T) {
 // T12 の Resolve が、保留の直前状態として妥当な状態（T10・T11 の遷移元）を
 // そのまま返すことを検証する。
 func TestTransitionTargetResolve_PrecedingHold_AcceptsValidPreceding(t *testing.T) {
+	t.Parallel()
 	tr, ok := Lookup(StatusAwaitingHuman, OpAnswer)
 	if !ok {
 		t.Fatalf("T12 not found")
@@ -204,6 +212,7 @@ func TestTransitionTargetResolve_PrecedingHold_AcceptsValidPreceding(t *testing.
 // TestTransitionTargetResolve_PrecedingHold_RejectsInvalidPreceding は、
 // T10・T11 の遷移元になり得ない状態（例: 完了）を直前状態として渡すとエラーになることを検証する。
 func TestTransitionTargetResolve_PrecedingHold_RejectsInvalidPreceding(t *testing.T) {
+	t.Parallel()
 	tr, ok := Lookup(StatusAwaitingHuman, OpAnswer)
 	if !ok {
 		t.Fatalf("T12 not found")
@@ -216,6 +225,7 @@ func TestTransitionTargetResolve_PrecedingHold_RejectsInvalidPreceding(t *testin
 // TestHoldEntrySources は、人間対応待ちへ遷移できる状態の集合
 // （T10・T11 の遷移元の和集合）が、未分類・分類済・計画承認待ち・着手中・検証中であることを検証する。
 func TestHoldEntrySources(t *testing.T) {
+	t.Parallel()
 	got := HoldEntrySources(Table)
 	want := map[Status]bool{
 		StatusUnclassified:         true,
@@ -238,6 +248,7 @@ func TestHoldEntrySources(t *testing.T) {
 // 人間対応待ちを固定遷移先に持っていても対象に含めないことを検証する
 // （fail-closed）。
 func TestHoldEntrySources_ExcludesNoStatusFrom(t *testing.T) {
+	t.Parallel()
 	corrupted := append([]Transition{}, Table...)
 	corrupted = append(corrupted, Transition{
 		ID: "T-broken", From: NoStatus, Op: OpCreate,
@@ -253,6 +264,7 @@ func TestHoldEntrySources_ExcludesNoStatusFrom(t *testing.T) {
 
 // TestIsTerminal_Done は、完了が終端状態（出る遷移が無い）であることを検証する（AC-27相当）。
 func TestIsTerminal_Done(t *testing.T) {
+	t.Parallel()
 	if !IsTerminal(Table, StatusVocabulary, StatusDone) {
 		t.Errorf("IsTerminal(Table, vocab, done) = false, want true")
 	}
@@ -260,6 +272,7 @@ func TestIsTerminal_Done(t *testing.T) {
 
 // TestIsTerminal_Withdrawn は、取り下げが終端状態（出る遷移が無い）であることを検証する（AC-373）。
 func TestIsTerminal_Withdrawn(t *testing.T) {
+	t.Parallel()
 	if !IsTerminal(Table, StatusVocabulary, StatusWithdrawn) {
 		t.Errorf("IsTerminal(Table, vocab, withdrawn) = false, want true")
 	}
@@ -268,6 +281,7 @@ func TestIsTerminal_Withdrawn(t *testing.T) {
 // TestTable_T16_WithdrawFromEveryStatusExceptTerminals は、取り下げの行が完了・取り下げ以外の7状態
 // すべてにあり、本人確認つきで、遷移先が取り下げであることを検証する（行数 18→25）。
 func TestTable_T16_WithdrawFromEveryStatusExceptTerminals(t *testing.T) {
+	t.Parallel()
 	for _, e := range StatusVocabulary {
 		tr, ok := Lookup(e.Code, OpWithdraw)
 		if e.Code == StatusDone || e.Code == StatusWithdrawn {
@@ -284,6 +298,7 @@ func TestTable_T16_WithdrawFromEveryStatusExceptTerminals(t *testing.T) {
 
 // TestIsTerminal_NonTerminalStatuses は、完了・取り下げ以外の状態が終端でないことを検証する。
 func TestIsTerminal_NonTerminalStatuses(t *testing.T) {
+	t.Parallel()
 	for _, e := range StatusVocabulary {
 		if e.Code == StatusDone || e.Code == StatusWithdrawn {
 			continue
@@ -297,6 +312,7 @@ func TestIsTerminal_NonTerminalStatuses(t *testing.T) {
 // TestIsTerminal_RejectsUnknownStatus は、語彙に無い状態を fail-closed で
 // 終端扱いしない（false を返す）ことを検証する（未知状態を終端＝完了と同列に扱う fail-open を避ける）。
 func TestIsTerminal_RejectsUnknownStatus(t *testing.T) {
+	t.Parallel()
 	if IsTerminal(Table, StatusVocabulary, Status("no_such_status")) {
 		t.Errorf("IsTerminal(Table, vocab, unknown) = true, want false (fail-closed)")
 	}
@@ -305,6 +321,7 @@ func TestIsTerminal_RejectsUnknownStatus(t *testing.T) {
 // TestOperationForVerify_MapsAllKnownResults は、VerifyResult の3値すべてが
 // 対応する Operation（T8〜T10）へ写像され、Lookup(検証中, op) で引けることを検証する。
 func TestOperationForVerify_MapsAllKnownResults(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		result VerifyResult
 		wantOp Operation
@@ -327,6 +344,7 @@ func TestOperationForVerify_MapsAllKnownResults(t *testing.T) {
 // TestOperationForVerify_RejectsUnknownResult は、閉集合外の VerifyResult では
 // ok=false を返すことを検証する。
 func TestOperationForVerify_RejectsUnknownResult(t *testing.T) {
+	t.Parallel()
 	if _, ok := OperationForVerify(VerifyResult("bogus")); ok {
 		t.Errorf("OperationForVerify(bogus) ok = true, want false")
 	}
@@ -335,6 +353,7 @@ func TestOperationForVerify_RejectsUnknownResult(t *testing.T) {
 // TestOperationForApprove_MapsHoldReleaseFlag は、--hold-release の有無に応じて
 // approve と approve_hold_release が正しく区別されることを検証する。
 func TestOperationForApprove_MapsHoldReleaseFlag(t *testing.T) {
+	t.Parallel()
 	if got := OperationForApprove(false); got != OpApprove {
 		t.Errorf("OperationForApprove(false) = %q, want %q", got, OpApprove)
 	}

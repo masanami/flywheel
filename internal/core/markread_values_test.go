@@ -13,6 +13,7 @@ import (
 // （ストアの観測値でそろえる）は変えない。
 
 func TestMarkReadWithValues_SetsGivenValuesNotStoreObservation(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	// ストアの観測値は (コメント 3 件・2026-09-25T08:00:00Z)。J2 の直前の取得は
@@ -40,6 +41,7 @@ func TestMarkReadWithValues_SetsGivenValuesNotStoreObservation(t *testing.T) {
 }
 
 func TestMarkReadWithValues_ActivityCarriesChannelAndRunID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindChallengeWithUnreadUpdate(t, s, "run id")
@@ -70,6 +72,7 @@ func TestMarkReadWithValues_ActivityCarriesChannelAndRunID(t *testing.T) {
 }
 
 func TestMarkReadWithValues_SameAsCurrentReadValuesIsNoOp(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindChallengeWithUnreadUpdate(t, s, "noop")
@@ -102,6 +105,7 @@ func TestMarkReadWithValues_SameAsCurrentReadValuesIsNoOp(t *testing.T) {
 }
 
 func TestMarkReadWithValues_RejectsNegativeCountAndBadRunID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindChallengeWithUnreadUpdate(t, s, "validation")
@@ -122,6 +126,7 @@ func TestMarkReadWithValues_RejectsNegativeCountAndBadRunID(t *testing.T) {
 }
 
 func TestMarkReadWithValues_NilValuesBehavesLikeMarkRead(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindChallengeWithUnreadUpdate(t, s, "nil values")
@@ -138,6 +143,7 @@ func TestMarkReadWithValues_NilValuesBehavesLikeMarkRead(t *testing.T) {
 // 読んだ時点の値・原因の run を渡せるのは経路 invoker だけ（人間の経路は、ストアの
 // 観測値でそろえる MarkRead だけ）。
 func TestMarkReadWithValues_ValuesAndRunIDRequireTheInvokerChannel(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindChallengeWithUnreadUpdate(t, s, "channel guard")

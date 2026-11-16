@@ -50,6 +50,7 @@ func assertDependencyNotStarted(t *testing.T, res *DelegateResult, id, detail st
 }
 
 func TestDependency_IDOmittedRun_UnmetDependencyNotStartedWithSortedDetail(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	a, b := f.newDepTarget(t), f.newDepTarget(t)
@@ -65,6 +66,7 @@ func TestDependency_IDOmittedRun_UnmetDependencyNotStartedWithSortedDetail(t *te
 }
 
 func TestDependency_OnlyUnmetTargetsAppearInDetail(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	done, open := f.newDepTarget(t), f.newDepTarget(t)
@@ -78,6 +80,7 @@ func TestDependency_OnlyUnmetTargetsAppearInDetail(t *testing.T) {
 }
 
 func TestDependency_IDGivenRun_UnmetIsNotStartedNotAnError(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	a := f.newDepTarget(t)
@@ -93,6 +96,7 @@ func TestDependency_IDGivenRun_UnmetIsNotStartedNotAnError(t *testing.T) {
 }
 
 func TestDependency_MetDependencyLaunches_BothPaths(t *testing.T) {
+	t.Parallel()
 	for _, byID := range []bool{false, true} {
 		f := newResumeFixture(t)
 		id := f.newInProgress(t, "t", "P1", planSpec(nil))
@@ -115,6 +119,7 @@ func TestDependency_MetDependencyLaunches_BothPaths(t *testing.T) {
 
 // 依存先が完了でも、その release が承認済みで未実行なら満たされず、実行済みになった周に起動する（AC-178 の core 側）。
 func TestDependency_OpenReleaseBlocksUntilExecuted(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	a := f.newDepTarget(t)
@@ -139,6 +144,7 @@ func TestDependency_OpenReleaseBlocksUntilExecuted(t *testing.T) {
 
 // 保留への回答による --resume も依存で止め、保留と回答を消費しない。満たされた周に同じ回答で再開する。
 func TestDependency_AnswerResumeIsBlockedWithoutConsumingTheAnswer(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.questionAndAnswer(t, id, "feat/x")
@@ -177,6 +183,7 @@ func TestDependency_AnswerResumeIsBlockedWithoutConsumingTheAnswer(t *testing.T)
 
 // 循環に含まれる課題と、それに依存する課題は起動しない。循環の相手が完了でも detail は空にならない。
 func TestDependency_CycleMembersAndTheirDependentsAreNotStarted(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	a := f.newInProgress(t, "a", "P1", planSpec(nil))
 	b := f.newDepTarget(t)
@@ -217,6 +224,7 @@ func TestDependency_CycleMembersAndTheirDependentsAreNotStarted(t *testing.T) {
 
 // run <C-ID> は、依存の判定より先に状態と計画を検査する（ID を省いた経路と同じ順。M45H20）。
 func TestDependency_IDGivenRun_StateIsCheckedBeforeDependency(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	cid, _ := parseChallengeID(id)
@@ -233,6 +241,7 @@ func TestDependency_IDGivenRun_StateIsCheckedBeforeDependency(t *testing.T) {
 }
 
 func TestDependency_IDGivenRun_PlanIsCheckedBeforeDependency(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	// 構造化した出力の無い計画（人が登録した計画）。
 	id := f.newInProgress(t, "t", "P1", "")

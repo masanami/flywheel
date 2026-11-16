@@ -13,6 +13,7 @@ import (
 const c404Branch = "fix/issue-437-j6-evidence-id-pattern (flywheel; merged and cleaned up by the run)"
 
 func TestDelegationReport_BranchFieldMustBeABranchNameOrNull(t *testing.T) {
+	t.Parallel()
 	str := func(s string) *string { return &s }
 	cases := []struct {
 		name   string
@@ -47,6 +48,7 @@ func TestDelegationReport_BranchFieldMustBeABranchNameOrNull(t *testing.T) {
 }
 
 func TestDelegationReportSchema_BranchHasAPatternThatRejectsNotes(t *testing.T) {
+	t.Parallel()
 	var schema map[string]any
 	if err := json.Unmarshal(delegationReportSchema(nil), &schema); err != nil {
 		t.Fatal(err)
@@ -79,6 +81,7 @@ func TestDelegationReportSchema_BranchHasAPatternThatRejectsNotes(t *testing.T) 
 // 注記つきの branch の報告は invalid_output になり、課題の状態は変わらず、不備の理由が
 // run に残る。
 func TestRunDelegation_AnnotatedBranchIsInvalidOutputWithAReason(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.deleg.result.StructuredOutput = reportJSON(func(m map[string]any) { m["branch"] = c404Branch })
 	res, err := f.run(t, nil)
@@ -99,6 +102,7 @@ func TestRunDelegation_AnnotatedBranchIsInvalidOutputWithAReason(t *testing.T) {
 
 // invalid_output の後の再開で、子は不備の理由を受け取り、報告を直せる。
 func TestResume_AfterInvalidOutputCarriesTheReasonToTheChild(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.queue = []JudgmentLaunchOutput{{
@@ -119,6 +123,7 @@ func TestResume_AfterInvalidOutputCarriesTheReasonToTheChild(t *testing.T) {
 
 // 失敗が invalid_output 以外の再開には、不備の理由を渡さない。
 func TestResume_AfterOtherFailuresCarriesNoProblem(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.queue = []JudgmentLaunchOutput{failOut(RunResultErrored)}

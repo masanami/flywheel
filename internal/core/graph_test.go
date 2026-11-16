@@ -45,6 +45,7 @@ func nodeByID(t *testing.T, g *ChallengeGraph, id string) GraphNode {
 }
 
 func TestChallengeGraph_EmptyStoreHasEmptyNonNilLists(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t)
 	g := mustGraph(t, s)
 	if g.Nodes == nil || g.Edges == nil || len(g.Nodes) != 0 || len(g.Edges) != 0 {
@@ -53,6 +54,7 @@ func TestChallengeGraph_EmptyStoreHasEmptyNonNilLists(t *testing.T) {
 }
 
 func TestChallengeGraph_NodesAreInNumericIDOrderWithTheirFields(t *testing.T) {
+	t.Parallel()
 	statuses := make([]Status, 11)
 	for i := range statuses {
 		statuses[i] = StatusClassified
@@ -84,6 +86,7 @@ func TestChallengeGraph_NodesAreInNumericIDOrderWithTheirFields(t *testing.T) {
 
 // 取り下げた課題は、システムが進めている課題ではなく取り下げの区分になる。人間の操作待ちが残っていれば人間が先。
 func TestChallengeGraph_WithdrawnIsItsOwnCategory(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusWithdrawn, StatusWithdrawn, StatusDone)
 	// C-2 は取り下げ済みだが、承認待ちの本番反映（人間の操作待ち）を持つ。
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
@@ -103,6 +106,7 @@ func TestChallengeGraph_WithdrawnIsItsOwnCategory(t *testing.T) {
 }
 
 func TestGraphCategoryValues_IsTheSixCategoriesInOrder(t *testing.T) {
+	t.Parallel()
 	want := []GraphCategory{GraphCategoryHuman, GraphCategoryExternal, GraphCategoryParentAgent, GraphCategoryDone, GraphCategoryWithdrawn, GraphCategorySystem}
 	if got := GraphCategoryValues(); !reflect.DeepEqual(got, want) {
 		t.Errorf("GraphCategoryValues = %v, want %v", got, want)
@@ -111,6 +115,7 @@ func TestGraphCategoryValues_IsTheSixCategoriesInOrder(t *testing.T) {
 
 // 区分は 人間 > 外部 > 完了 > システム の順で、カードの next_human_actions と状態から決まる。
 func TestChallengeGraph_CategoryFollowsTheCardDerivation(t *testing.T) {
+	t.Parallel()
 	s, cs := graphStore(t, StatusClassified, StatusAwaitingPlanApproval, StatusDone, StatusDone, StatusInProgress)
 	// C-4 は完了だが、承認待ちの本番反映（人間の操作待ち）を持つ。
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
@@ -133,6 +138,7 @@ func TestChallengeGraph_CategoryFollowsTheCardDerivation(t *testing.T) {
 // 状態と人間の操作待ち（何をするか）は、カードの導出（state・next_human_actions）をそのまま持つ。
 // 人間の操作待ちが無い課題は空の並び（nil ではない）。
 func TestChallengeGraph_NodeCarriesTheCardStateAndNextHumanActions(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusClassified, StatusAwaitingPlanApproval, StatusInProgress, StatusDone)
 	// C-4 は完了だが、承認待ちの本番反映（approve_operation）を持つ。
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
@@ -164,6 +170,7 @@ func graphPriority(p Priority) *Priority { return &p }
 
 // 優先度は課題の優先度（カード／一覧と同じ値）。付いていなければ nil。
 func TestChallengeGraph_NodeCarriesThePriority(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusClassified, StatusClassified, StatusClassified)
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE challenge SET priority = CASE id WHEN 1 THEN 'P0' WHEN 2 THEN 'P2' END WHERE id IN (1, 2)`)
@@ -182,6 +189,7 @@ func TestChallengeGraph_NodeCarriesThePriority(t *testing.T) {
 }
 
 func TestChallengeGraph_RunningAndStaleFollowTheHeartbeat(t *testing.T) {
+	t.Parallel()
 	s, cs := graphStore(t, StatusInProgress, StatusInProgress, StatusInProgress)
 	cardInsertRun(t, s, cs[0], graphNow.Add(-10*time.Second), nil) // 動いている
 	cardInsertRun(t, s, cs[1], graphNow.Add(-time.Hour), nil)      // 記録が途絶えている
@@ -198,6 +206,7 @@ func TestChallengeGraph_RunningAndStaleFollowTheHeartbeat(t *testing.T) {
 }
 
 func TestChallengeGraph_ParentIDsAreReturned(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusClassified, StatusClassified, StatusClassified)
 	ctx := context.Background()
 	if err := s.SetParent(ctx, ChannelCLI, "C-2", "C-1"); err != nil {
@@ -219,6 +228,7 @@ func TestChallengeGraph_ParentIDsAreReturned(t *testing.T) {
 }
 
 func TestChallengeGraph_EdgesCarryKindSatisfactionAndRegistration(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusDone, StatusClassified, StatusClassified, StatusClassified)
 	ctx := context.Background()
 	if _, err := s.AddDependencies(ctx, ChannelCLI, "C-3", []string{"C-2"}); err != nil { // manual。先行は未完了
@@ -269,6 +279,7 @@ func TestChallengeGraph_EdgesCarryKindSatisfactionAndRegistration(t *testing.T) 
 
 // 満たされているかは依存の評価（完了で、開いた本番反映が無い）と同じ規則。
 func TestChallengeGraph_SatisfiedIsFalseWhileTheDependencyHasAnOpenRelease(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusDone, StatusClassified)
 	insertDepEdge(t, s, 2, 1)
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
@@ -286,6 +297,7 @@ func TestChallengeGraph_SatisfiedIsFalseWhileTheDependencyHasAnOpenRelease(t *te
 
 // 依存の循環がストアにあっても失敗にしない。辺はそのまま返す。
 func TestChallengeGraph_ReturnsEdgesOfADependencyCycle(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusDone, StatusDone)
 	insertDepEdge(t, s, 1, 2)
 	insertDepEdge(t, s, 2, 1)
@@ -302,6 +314,7 @@ func TestChallengeGraph_ReturnsEdgesOfADependencyCycle(t *testing.T) {
 
 // 同じストアと同じ現在時刻からは、バイト列として同じ結果になる。ストアは書かない。
 func TestChallengeGraph_IsDeterministicAndReadOnly(t *testing.T) {
+	t.Parallel()
 	s, cs := graphStore(t, StatusInProgress, StatusAwaitingPlanApproval, StatusDone)
 	ctx := context.Background()
 	cardInsertRun(t, s, cs[0], graphNow.Add(-time.Hour), nil)
@@ -356,6 +369,7 @@ func insertConflictForTest(t *testing.T, s *Store, challenge, with int64, direct
 // directed=true、向きの無い組は directed=false（from は ID の小さい側）。satisfied は常に false、
 // registered_via は prediction、registered_at は challenge_conflict.created_at。前提の辺は directed=true。
 func TestChallengeGraph_ConflictEdgesCarryDirectionAndPredictionRegistration(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusInProgress, StatusClassified, StatusClassified, StatusClassified)
 	insertDepEdge(t, s, 4, 1)
 	insertConflictForTest(t, s, 2, 1, true)  // C-2 を後回しにして C-1 を先に委譲した
@@ -395,6 +409,7 @@ func TestChallengeGraph_ConflictEdgesCarryDirectionAndPredictionRegistration(t *
 
 // 片方が完了・取り下げになった衝突は返さない（行は残る）。
 func TestChallengeGraph_ConflictEdgesWithAFinishedChallengeAreNotReturned(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusDone, StatusClassified, StatusWithdrawn, StatusClassified, StatusClassified)
 	insertConflictForTest(t, s, 2, 1, true)  // 先に委譲した側が完了
 	insertConflictForTest(t, s, 3, 4, true)  // 後回しにした側が取り下げ
@@ -410,6 +425,7 @@ func TestChallengeGraph_ConflictEdgesWithAFinishedChallengeAreNotReturned(t *tes
 
 // 衝突の行は前提の依存の辺（satisfied・登録の経路）に影響しない。
 func TestChallengeGraph_ConflictRowsDoNotChangePrerequisiteEdges(t *testing.T) {
+	t.Parallel()
 	s, _ := graphStore(t, StatusInProgress, StatusClassified)
 	insertDepEdge(t, s, 2, 1)
 	before := mustGraph(t, s)

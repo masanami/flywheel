@@ -65,6 +65,7 @@ func insertDepEdge(t *testing.T, s *Store, from, to int64) {
 }
 
 func TestAddDependencies_CreatesRowsBumpsVersionOnceAndLogs(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 3)
 	c, err := s.AddDependencies(context.Background(), ChannelCLI, "C-1", []string{"C-3", "C-2"})
 	if err != nil {
@@ -94,6 +95,7 @@ func TestAddDependencies_CreatesRowsBumpsVersionOnceAndLogs(t *testing.T) {
 }
 
 func TestRemoveDependencies_DeletesRowsBumpsVersionOnceAndLogs(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 3)
 	if _, err := s.AddDependencies(context.Background(), ChannelCLI, "C-1", []string{"C-2", "C-3"}); err != nil {
 		t.Fatal(err)
@@ -116,6 +118,7 @@ func TestRemoveDependencies_DeletesRowsBumpsVersionOnceAndLogs(t *testing.T) {
 
 // 作業ログの after.depends_on には、実際に足した・外した依存先だけが載る（既にある・もとから無い依存先は載らない）。
 func TestChangeDependencies_LogsOnlyChangedTargetsWhenMixed(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 3)
 	ctx := context.Background()
 	if _, err := s.AddDependencies(ctx, ChannelCLI, "C-1", []string{"C-2"}); err != nil {
@@ -158,6 +161,7 @@ func TestChangeDependencies_LogsOnlyChangedTargetsWhenMixed(t *testing.T) {
 }
 
 func TestChangeDependencies_IdempotentWritesNothing(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 2)
 	if _, err := s.AddDependencies(context.Background(), ChannelCLI, "C-1", []string{"C-2"}); err != nil {
 		t.Fatal(err)
@@ -183,6 +187,7 @@ func TestChangeDependencies_IdempotentWritesNothing(t *testing.T) {
 }
 
 func TestChangeDependencies_RejectionsWriteNothing(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 4)
 	ctx := context.Background()
 	if _, err := s.AddDependencies(ctx, ChannelCLI, "C-1", []string{"C-2"}); err != nil {
@@ -254,6 +259,7 @@ func TestChangeDependencies_RejectionsWriteNothing(t *testing.T) {
 }
 
 func TestAddDependencies_ThreeRingAndRingThroughDoneChallengeAreCycles(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 3)
 	ctx := context.Background()
 	for _, p := range [][2]string{{"C-1", "C-2"}, {"C-2", "C-3"}} {
@@ -272,6 +278,7 @@ func TestAddDependencies_ThreeRingAndRingThroughDoneChallengeAreCycles(t *testin
 }
 
 func TestAddDependencies_AnyRejectedTargetAddsNone(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 3)
 	ctx := context.Background()
 	if _, err := s.AddDependencies(ctx, ChannelCLI, "C-2", []string{"C-1"}); err != nil {
@@ -286,6 +293,7 @@ func TestAddDependencies_AnyRejectedTargetAddsNone(t *testing.T) {
 }
 
 func TestAddDependencies_ActivityFailureRollsBack(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 2)
 	s.insertActivity = func(_ *sql.Tx, _ activityRow) error { return errors.New("boom") }
 	if _, err := s.AddDependencies(context.Background(), ChannelCLI, "C-1", []string{"C-2"}); err == nil {
@@ -324,6 +332,7 @@ func setReleaseOp(t *testing.T, s *Store, cid int64, state string) {
 }
 
 func TestEvaluateDependencies_MetOnlyWhenDoneAndNoOpenRelease(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 4)
 	ctx := context.Background()
 	if _, err := s.AddDependencies(ctx, ChannelCLI, "C-1", []string{"C-2", "C-3", "C-4"}); err != nil {
@@ -354,6 +363,7 @@ func TestEvaluateDependencies_MetOnlyWhenDoneAndNoOpenRelease(t *testing.T) {
 }
 
 func TestEvaluateDependencies_CyclicTargetIsUnmetEvenWhenDoneAndReleased(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 4)
 	insertDepEdge(t, s, 1, 2)
 	insertDepEdge(t, s, 2, 3)
@@ -381,6 +391,7 @@ func TestEvaluateDependencies_CyclicTargetIsUnmetEvenWhenDoneAndReleased(t *test
 // 完了で release を持たない依存先と、release が rejected だけの依存先は満たされている
 // （未実行と数えるのは pending・approved だけ）。
 func TestEvaluateDependencies_MetWhenDoneWithoutReleaseOrOnlyRejectedRelease(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 3)
 	if _, err := s.AddDependencies(context.Background(), ChannelCLI, "C-1", []string{"C-2", "C-3"}); err != nil {
 		t.Fatal(err)

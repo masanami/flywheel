@@ -10,6 +10,7 @@ import (
 
 // 出どころ improvement の課題だけが改修の鍵を持つ（AC-407・AC-408）。
 func TestInsertChallengeRow_ImprovementKeyInvariant(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	of := "C-1"
@@ -66,6 +67,7 @@ func TestInsertChallengeRow_ImprovementKeyInvariant(t *testing.T) {
 
 // show の challenge.Improvement は改修課題でだけ値を持つ（AC-353）。
 func TestShowChallenge_Improvement(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	a := cardChallenge(t, s, StatusInProgress)
@@ -94,6 +96,7 @@ func TestShowChallenge_Improvement(t *testing.T) {
 
 // closed_at を持つ保留は開いていない保留として数えない（AC-409 の前提）。
 func TestOpenHold_ExcludesClosedHolds(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	a := cardChallenge(t, s, StatusInProgress)

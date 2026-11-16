@@ -44,6 +44,7 @@ func idsOf(t *testing.T, v any) []string {
 }
 
 func TestRunHold_KindFlag(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := parentDirectHeld(t, ws, "")
 	show := runJSON(t, ws, "show", id)
@@ -69,6 +70,7 @@ func TestRunHold_KindFlag(t *testing.T) {
 }
 
 func TestRunCompleteDirect_RecordsArtifactsAndNoteAndMovesToAwaitingCompletionApproval(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := parentDirectHeld(t, ws, "結果が Issue に書かれている")
 
@@ -105,6 +107,7 @@ func TestRunCompleteDirect_RecordsArtifactsAndNoteAndMovesToAwaitingCompletionAp
 }
 
 func TestRunCompleteDirect_NoteIsOptional(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := parentDirectHeld(t, ws, "")
 	doc := runJSON(t, ws, "complete-direct", id, "--artifact", "https://example.com/1")
@@ -114,6 +117,7 @@ func TestRunCompleteDirect_NoteIsOptional(t *testing.T) {
 }
 
 func TestRunCompleteDirect_Rejections(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	direct := parentDirectHeld(t, ws, "")
 
@@ -142,6 +146,7 @@ func TestRunCompleteDirect_Rejections(t *testing.T) {
 }
 
 func TestRunCompleteDirect_WithdrawnAndDoneAreTerminal(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := parentDirectHeld(t, ws, "")
 	runJSON(t, ws, "complete-direct", id, "--artifact", "https://example.com/1")
@@ -153,6 +158,7 @@ func TestRunCompleteDirect_WithdrawnAndDoneAreTerminal(t *testing.T) {
 }
 
 func TestRunStatus_ParentDirectHoldIsParentAgentsTurn(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	direct := parentDirectHeld(t, ws, "")
 	human := classifiedChallenge(t, ws, "")
@@ -190,6 +196,7 @@ func TestRunStatus_ParentDirectHoldIsParentAgentsTurn(t *testing.T) {
 }
 
 func TestRunStatus_ParentDirectChallengeMovesToNeedsHumanAfterCompleteDirect(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := parentDirectHeld(t, ws, "")
 	runJSON(t, ws, "complete-direct", id, "--artifact", "https://example.com/1")
@@ -203,6 +210,7 @@ func TestRunStatus_ParentDirectChallengeMovesToNeedsHumanAfterCompleteDirect(t *
 }
 
 func TestRunShow_TextListsDirectCompletionAndHoldKind(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := parentDirectHeld(t, ws, "")
 	runJSON(t, ws, "complete-direct", id, "--artifact", "https://example.com/result", "--note", "確かめた")
@@ -215,6 +223,7 @@ func TestRunShow_TextListsDirectCompletionAndHoldKind(t *testing.T) {
 }
 
 func TestApprovalSummaryText_ShowsDirectCompletionArtifactsAlongsideDoneCriteria(t *testing.T) {
+	t.Parallel()
 	note := "親が確かめた"
 	p := &core.ApprovalPreview{
 		ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion, Version: 3,
@@ -242,6 +251,7 @@ func TestApprovalSummaryText_ShowsDirectCompletionArtifactsAlongsideDoneCriteria
 }
 
 func TestUsageText_MentionsCompleteDirectAndHoldKind(t *testing.T) {
+	t.Parallel()
 	for _, want := range []string{"complete-direct", "--kind <human|parent_direct>"} {
 		if !strings.Contains(usageText, want) {
 			t.Errorf("usageText lacks %q", want)

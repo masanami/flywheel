@@ -19,6 +19,7 @@ func j6Followups(n int) []any {
 }
 
 func TestLearnJ6_Followups_FiledAsUnclassified_AC280_281_283_284(t *testing.T) {
+	t.Parallel()
 	for _, n := range []int{1, 3} {
 		t.Run(j6itoa(int64(n)), func(t *testing.T) {
 			f := newJ6Fixture(t)
@@ -118,6 +119,7 @@ func TestLearnJ6_Followups_FiledAsUnclassified_AC280_281_283_284(t *testing.T) {
 }
 
 func TestLearnJ6_Followups_FourOrMore_InvalidOutputWritesNothing_AC282(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusDone)
 	o := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -135,6 +137,7 @@ func TestLearnJ6_Followups_FourOrMore_InvalidOutputWritesNothing_AC282(t *testin
 
 // 起票は J6 の写像と同じトランザクション。起票の後の失敗で、起票した課題・作業ログ・記憶が残らない。
 func TestLearnJ6_Followups_AtomicWithMapping(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		fail func(row activityRow, followups int) bool

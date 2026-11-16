@@ -64,6 +64,7 @@ func TestIngest_GHCallTimesOut_RepoFailsButCommandFinishes(t *testing.T) {
 // 別の OS プロセスとして起動する。`ingest` 自身は（`gh` を実プロセスとして
 // 起動する以外は）このテストプロセス内の goroutine で走らせる。
 func TestIngest_DoesNotHoldStoreWriteLockWhileGHIsInFlight(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, singleSourceForTimingDeclaration)
 
@@ -74,7 +75,7 @@ func TestIngest_DoesNotHoldStoreWriteLockWhileGHIsInFlight(t *testing.T) {
 	ingestDone := make(chan int, 1)
 	var ingestStdout, ingestStderr bytes.Buffer
 	go func() {
-		ingestDone <- run([]string{"ingest", "--workspace", ws, "--json"}, strings.NewReader(""), &ingestStdout, &ingestStderr, defaultCommands())
+		ingestDone <- runWithLookPath([]string{"ingest", "--workspace", ws, "--json"}, strings.NewReader(""), &ingestStdout, &ingestStderr, defaultCommands(), lookPathFor(t))
 	}()
 	// ingest の goroutine は、このテストがどの経路で終わっても（成功・
 	// t.Fatal のどちらでも）必ず回収する（code-reviewer 指摘の再発防止:

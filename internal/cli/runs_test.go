@@ -52,6 +52,7 @@ func insertRunFixture(t *testing.T, ws, challengeID string, overrides func(*core
 
 // AC-151: `flywheel runs --json` は run を新しい順に出力する。
 func TestRuns_NewestFirst(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id1 := createForCase(t, ws)
 	id2 := createForCase(t, ws)
@@ -80,6 +81,7 @@ func TestRuns_NewestFirst(t *testing.T) {
 
 // AC-152: `flywheel runs <C-ID> --json` は、その課題の run だけを出力する。
 func TestRuns_FiltersByChallengeID(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id1 := createForCase(t, ws)
 	id2 := createForCase(t, ws)
@@ -101,6 +103,7 @@ func TestRuns_FiltersByChallengeID(t *testing.T) {
 
 // AC-153: `flywheel runs --open --json` は、終了していない run だけを出力する。
 func TestRuns_OpenFlagExcludesEndedRuns(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	insertRunFixture(t, ws, id, func(in *coretest.InsertRunInput) {
@@ -121,6 +124,7 @@ func TestRuns_OpenFlagExcludesEndedRuns(t *testing.T) {
 // §IF / API「runs」の形: 終了していないrunはresult・cost_usd・cost_source・
 // ended_atがnull、judgmentが値を持つ。
 func TestRuns_OpenRunHasNullResultAndCost(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	insertRunFixture(t, ws, id, nil)
@@ -148,6 +152,7 @@ func TestRuns_OpenRunHasNullResultAndCost(t *testing.T) {
 }
 
 func TestRuns_EndedRunHasCostAndResult(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	insertRunFixture(t, ws, id, func(in *coretest.InsertRunInput) {
@@ -182,6 +187,7 @@ func TestRuns_EndedRunHasCostAndResult(t *testing.T) {
 // AC「次にflywheel runsの実行でその run の結果がinterruptedになる」（heartbeat
 // が300秒より古く、記録したプロセスが生きていない）。
 func TestRuns_ReapsStaleHeartbeatIntoInterrupted(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	host, err := os.Hostname()
@@ -208,6 +214,7 @@ func TestRuns_ReapsStaleHeartbeatIntoInterrupted(t *testing.T) {
 // 形と一致する。要素が 1 件も無い成功経路の照合（allCommandSuccessCases）では要素の形は
 // 比べられないため、終了した run と終了していない run を 1 件ずつ置いて照合する。
 func TestRuns_ElementsMatchTheDocumentedShape(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id1 := createForCase(t, ws)
 	id2 := createForCase(t, ws)

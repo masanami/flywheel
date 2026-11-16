@@ -112,6 +112,7 @@ func decodeObject(t *testing.T, raw json.RawMessage) map[string]any {
 // --- bind の正常系 ---
 
 func TestBind_RecordsBindingActivityAndVersion_WithoutReplacingTitleAndDescription(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	f.putIssue("o/r#7", "UP-TITLE", "UP-BODY")
 	ch := f.newChallenge(t, "OWN-TITLE", "OWN-DESC")
@@ -163,6 +164,7 @@ func TestBind_RecordsBindingActivityAndVersion_WithoutReplacingTitleAndDescripti
 }
 
 func TestBind_RepoMatchIgnoresCaseAndUsesTheUpstreamCanonicalKey(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	// 宣言は "Org/Mixed"。利用者は小文字で書き、上流の応答の正規の表記は "Org/Mixed#4"。
 	f.putIssue("Org/Mixed#4", "T", "B")
@@ -178,6 +180,7 @@ func TestBind_RepoMatchIgnoresCaseAndUsesTheUpstreamCanonicalKey(t *testing.T) {
 }
 
 func TestBind_IssueKeyedInDifferentCaseIsStillTheSameIssue(t *testing.T) {
+	t.Parallel()
 	// 他の課題が "o/r#1" に対応しているとき、"O/R#1" と書いて bind しても、上流の正規の表記
 	// （"o/r#1"）で④を判定するので拒まれる。
 	f := newBindFixture(t)
@@ -193,6 +196,7 @@ func TestBind_IssueKeyedInDifferentCaseIsStillTheSameIssue(t *testing.T) {
 }
 
 func TestBind_TerminalAndManualChallengesAreNotRestricted(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	f.putIssue("o/r#1", "T", "B")
 	ch := f.newChallenge(t, "t", "d")
@@ -337,6 +341,7 @@ func bindRejectionCases() []bindRejectionCase {
 }
 
 func TestBind_Rejections_RecordNothing(t *testing.T) {
+	t.Parallel()
 	for _, tc := range bindRejectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newBindFixture(t)
@@ -358,6 +363,7 @@ func TestBind_Rejections_RecordNothing(t *testing.T) {
 }
 
 func TestBind_RejectionReasonsAreDistinguishableByMessage(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	f.putIssue("o/r#1", "T", "B")
 	f.putIssue("o/r#2", "T", "B")
@@ -403,6 +409,7 @@ func TestBind_RejectionReasonsAreDistinguishableByMessage(t *testing.T) {
 }
 
 func TestBind_AlreadyBoundChallenge_DoesNotCallUpstream(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	f.putIssue("o/r#1", "T", "B")
 	f.putIssue("o/r#2", "T", "B")
@@ -420,6 +427,7 @@ func TestBind_AlreadyBoundChallenge_DoesNotCallUpstream(t *testing.T) {
 }
 
 func TestBind_UndeclaredRepo_DoesNotCallUpstream(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	ch := f.newChallenge(t, "t", "d")
 	if _, err := f.bind(ch.ID, "x/undeclared#1"); !errors.Is(err, ErrRepoNotDeclared) {
@@ -446,6 +454,7 @@ func (r *bindRaceUpstream) GetIssue(ctx context.Context, repo string, number int
 }
 
 func TestBind_RereadsConditionsInsideTheWriteTransaction(t *testing.T) {
+	t.Parallel()
 	t.Run("the issue gets bound to another challenge after the fetch", func(t *testing.T) {
 		f := newBindFixture(t)
 		f.putIssue("o/r#1", "T", "B")
@@ -489,6 +498,7 @@ func TestBind_RereadsConditionsInsideTheWriteTransaction(t *testing.T) {
 // --- bind の後の取り込み ---
 
 func TestBind_ThenIngestUpdatesTheBoundChallengeWithoutCreatingANewOne(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	// 本文は課題の説明と同じ。それでも fingerprint が本物と一致しないので、見出しが置き換わる。
 	f.putIssue("o/r#7", "UP-TITLE", "SAME-BODY")
@@ -521,6 +531,7 @@ func TestBind_ThenIngestUpdatesTheBoundChallengeWithoutCreatingANewOne(t *testin
 }
 
 func TestBind_ThenIngestReplacesDescriptionAndUrgency(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	issue := f.putIssue("o/r#7", "UP-TITLE", "UP-BODY")
 	ch := f.newChallenge(t, "OWN-TITLE", "OWN-DESC")
@@ -541,6 +552,7 @@ func TestBind_ThenIngestReplacesDescriptionAndUrgency(t *testing.T) {
 // --- bind の後の J2 ---
 
 func TestBind_ThenJ2CanSelectAnOperationThatNeedsTheSource(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "bind then plan", "P1")
 	implOutput := j2OutputFor(true, nil) // flywheel/impl は {issue_number} を持つ操作
@@ -592,6 +604,7 @@ func TestBind_ThenJ2CanSelectAnOperationThatNeedsTheSource(t *testing.T) {
 // --- unbind ---
 
 func TestUnbind_RemovesBindingRecordsActivityAndBumpsVersion(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	f.putIssue("o/r#7", "UP-TITLE", "UP-BODY")
 	ch := f.newChallenge(t, "OWN-TITLE", "OWN-DESC")
@@ -633,6 +646,7 @@ func TestUnbind_RemovesBindingRecordsActivityAndBumpsVersion(t *testing.T) {
 }
 
 func TestUnbind_Rejections_RecordNothing(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	ch := f.newChallenge(t, "t", "d")
 	before := f.state(t, ch.ID)
@@ -651,6 +665,7 @@ func TestUnbind_Rejections_RecordNothing(t *testing.T) {
 }
 
 func TestUnbind_ThenIngestCreatesANewChallengeAndLeavesTheOriginalAlone(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	f.putIssue("o/r#7", "UP-TITLE", "UP-BODY") // assignee なし＝exclude-others のポリシーに合う
 	ch := f.newChallenge(t, "OWN-TITLE", "OWN-DESC")
@@ -674,6 +689,7 @@ func TestUnbind_ThenIngestCreatesANewChallengeAndLeavesTheOriginalAlone(t *testi
 }
 
 func TestBindUnbindBind_TheFreedIssueCanBeBoundToAnotherChallenge(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	f.putIssue("o/r#7", "T", "B")
 	first := f.newChallenge(t, "first", "d")
@@ -692,6 +708,7 @@ func TestBindUnbindBind_TheFreedIssueCanBeBoundToAnotherChallenge(t *testing.T) 
 // --- 親子・書き出し／再構築との整合 ---
 
 func TestUnbind_DoesNotDisturbParentSyncOrExport(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	parentIssue := f.putIssue("o/r#1", "PARENT", "pb")
 	childIssue := f.putIssue("o/r#2", "CHILD", "cb")
@@ -723,6 +740,7 @@ func TestUnbind_DoesNotDisturbParentSyncOrExport(t *testing.T) {
 }
 
 func TestBind_ExportImportRoundTripKeepsTheBindMarker(t *testing.T) {
+	t.Parallel()
 	f := newBindFixture(t)
 	f.putIssue("o/r#7", "T", "B")
 	ch := f.newChallenge(t, "t", "d")

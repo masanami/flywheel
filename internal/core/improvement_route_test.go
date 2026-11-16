@@ -3,6 +3,7 @@ package core
 import "testing"
 
 func TestImprovementRoute(t *testing.T) {
+	t.Parallel()
 	decl := &ConnectorsDeclaration{Repos: []ConnectorRepo{
 		{Name: "fw", Remote: "MasaNami/Flywheel"},
 		{Name: "ws", Remote: "acme/workspace"},

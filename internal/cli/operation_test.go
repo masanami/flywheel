@@ -12,6 +12,7 @@ import (
 // （疑似端末を使う経路）が担う。
 
 func TestRunOpAdd_RegistersPendingOperationAndReturnsID(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -47,6 +48,7 @@ func TestRunOpAdd_RegistersPendingOperationAndReturnsID(t *testing.T) {
 }
 
 func TestRunOpAdd_RefIsOptional(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -60,6 +62,7 @@ func TestRunOpAdd_RefIsOptional(t *testing.T) {
 
 // AC: 続けて登録した不可逆操作の ID は課題をまたいで作成順に単調増加する。
 func TestRunOpAdd_IDsAreMonotonicAcrossChallenges(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	c1 := runJSON(t, ws, "create", "--title", "t1")["challenge"].(map[string]any)["id"].(string)
 	c2 := runJSON(t, ws, "create", "--title", "t2")["challenge"].(map[string]any)["id"].(string)
@@ -72,6 +75,7 @@ func TestRunOpAdd_IDsAreMonotonicAcrossChallenges(t *testing.T) {
 }
 
 func TestRunOpAdd_InvalidKindIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -85,6 +89,7 @@ func TestRunOpAdd_InvalidKindIsValidationFailed(t *testing.T) {
 }
 
 func TestRunOpAdd_MissingRequiredFlagsIsUsageError(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -94,6 +99,7 @@ func TestRunOpAdd_MissingRequiredFlagsIsUsageError(t *testing.T) {
 }
 
 func TestRunOpAdd_DoneChallengeIsTerminalState(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -103,6 +109,7 @@ func TestRunOpAdd_DoneChallengeIsTerminalState(t *testing.T) {
 }
 
 func TestRunOpAdd_TextOutputIsOperationID(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)

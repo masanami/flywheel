@@ -71,6 +71,7 @@ func (f *relFixture) wantSingleOccurrence(t *testing.T, kind string) relOccurren
 
 // AC-211: 取り消しの結果ごとに release_withdrawn が 1 行。参照は試行。周の ID を持つ。
 func TestRelease_CancelResultsCreateReleaseWithdrawn(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		setup func(f *relFixture)
@@ -117,6 +118,7 @@ func TestRelease_CancelResultsCreateReleaseWithdrawn(t *testing.T) {
 
 // 周を持たない呼び出し（CycleID が空）の発生は cycle_id が NULL。
 func TestRelease_CancelWithoutCycleHasNullCycleID(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.pr.HeadSHA = "zzz"
 	f.run(t)
@@ -126,6 +128,7 @@ func TestRelease_CancelWithoutCycleHasNullCycleID(t *testing.T) {
 }
 
 func TestRelease_InvalidOrUnknownCycleIDIsValidationBeforeAnyExecution(t *testing.T) {
+	t.Parallel()
 	for _, id := range []string{"bogus", "Y-999"} {
 		f := newRelFixture(t)
 		o := f.opts()
@@ -141,6 +144,7 @@ func TestRelease_InvalidOrUnknownCycleIDIsValidationBeforeAnyExecution(t *testin
 
 // AC-212: merged_unapproved は unapproved_merge だけ（release_withdrawn は作らない）。
 func TestRelease_MergedUnapprovedCreatesOnlyUnapprovedMerge(t *testing.T) {
+	t.Parallel()
 	// 先頭の読み取りで承認と違う head のままマージ済み。
 	f := newRelFixture(t)
 	f.fake.pr.State = "merged"
@@ -161,6 +165,7 @@ func TestRelease_MergedUnapprovedCreatesOnlyUnapprovedMerge(t *testing.T) {
 
 // AC-214: 待つ結果・実行済み・interrupted では発生を作らない。
 func TestRelease_NoOccurrenceForWaitingExecutedInterrupted(t *testing.T) {
+	t.Parallel()
 	// 完了の課題の not_mergeable は課題を戻す（#485）ので、待つ結果としては完了でない課題で確かめる。
 	f := newRelFixtureAt(t, StatusInProgress)
 	f.limit = 100
@@ -223,6 +228,7 @@ func TestRelease_NoOccurrenceForWaitingExecutedInterrupted(t *testing.T) {
 
 // 発生の挿入が失敗すれば、取り消し（試行の閉じ・状態・版・作業ログ）も残らない。
 func TestRelease_OccurrenceInsertFailureRollsBackCancel(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"head_changed", "merged_unapproved"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newRelFixture(t)
@@ -260,6 +266,7 @@ func TestRelease_OccurrenceInsertFailureRollsBackCancel(t *testing.T) {
 
 // 実行済み（merged）の経路は、発生の挿入の失敗の影響を受けない（発生を作らないため）。
 func TestRelease_ExecutedIgnoresOccurrenceHook(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	f.s.insertOccurrence = func(*sql.Tx, occurrenceRow) error { return errors.New("must not be called") }
@@ -271,6 +278,7 @@ func TestRelease_ExecutedIgnoresOccurrenceHook(t *testing.T) {
 // --- AC-213: 取り消された後にマージされた release（AC-52a）---
 
 func TestRelease_WithdrawnThenMergedWritesOneTransactionLikeCancel(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
@@ -301,6 +309,7 @@ func TestRelease_WithdrawnThenMergedWritesOneTransactionLikeCancel(t *testing.T)
 
 // 試行がすでに閉じていて新しい試行を足す場合も、発生の参照は足した試行。
 func TestRelease_WithdrawnThenMergedNewAttemptIsReferenced(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	f.fake.onMerge = func() {
@@ -325,6 +334,7 @@ func TestRelease_WithdrawnThenMergedNewAttemptIsReferenced(t *testing.T) {
 
 // 別の呼び出しが同じマージを記録済みで何も書かなかったときは、発生・作業ログ・版の更新を作らない。
 func TestRelease_WithdrawnAlreadyRecordedWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	f.fake.onMerge = func() {
@@ -361,6 +371,7 @@ func TestRelease_WithdrawnAlreadyRecordedWritesNothing(t *testing.T) {
 
 // 取り消されておらず（approved）記録が衝突しただけの経路は、発生を作らない。
 func TestRelease_ConflictWithoutWithdrawalCreatesNoOccurrence(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	f.fake.onMerge = func() {
@@ -382,6 +393,7 @@ func TestRelease_ConflictWithoutWithdrawalCreatesNoOccurrence(t *testing.T) {
 
 // 発生の挿入が失敗すれば、この経路の試行の閉じ・版の更新・作業ログも残らず、merge_unconfirmed になる。
 func TestRelease_WithdrawnOccurrenceInsertFailureRollsBack(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }

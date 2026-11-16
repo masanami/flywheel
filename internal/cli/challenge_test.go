@@ -58,6 +58,7 @@ func challengeIDToInternalID(t *testing.T, id string) int {
 }
 
 func TestRunCreate_ReturnsUnclassifiedChallengeWithExpectedFields(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	wantActor := resolveExpectedActor(t)
 
@@ -96,6 +97,7 @@ func TestRunCreate_ReturnsUnclassifiedChallengeWithExpectedFields(t *testing.T) 
 }
 
 func TestRunCreate_EmptyTitleIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	requireErrorCode(t, []string{"create", "--title", "   ", "--workspace", ws}, 1, CodeValidationFailed)
 	if coretest.CountChallenges(t, ws) != 0 {
@@ -104,6 +106,7 @@ func TestRunCreate_EmptyTitleIsValidationFailed(t *testing.T) {
 }
 
 func TestRunCreate_InvalidUrgencyIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	requireErrorCode(t, []string{"create", "--title", "t", "--urgency", "bogus", "--workspace", ws}, 1, CodeValidationFailed)
 	if coretest.CountChallenges(t, ws) != 0 {
@@ -112,6 +115,7 @@ func TestRunCreate_InvalidUrgencyIsValidationFailed(t *testing.T) {
 }
 
 func TestRunShow_ReturnsEmptyListsForAFreshChallenge(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -133,11 +137,13 @@ func TestRunShow_ReturnsEmptyListsForAFreshChallenge(t *testing.T) {
 }
 
 func TestRunShow_NotFoundForMissingID(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	requireErrorCode(t, []string{"show", "C-999", "--workspace", ws}, 1, CodeNotFound)
 }
 
 func TestRunList_FiltersByStatusCodeAndLabel(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	runJSON(t, ws, "create", "--title", "a")
 	created := runJSON(t, ws, "create", "--title", "b")
@@ -157,6 +163,7 @@ func TestRunList_FiltersByStatusCodeAndLabel(t *testing.T) {
 }
 
 func TestRunList_InvalidStatusIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	for _, status := range []string{"計画承認待ち（未分類 → … → 完了）", "レビュー待ち"} {
 		requireErrorCode(t, []string{"list", "--status", status, "--workspace", ws}, 1, CodeValidationFailed)
@@ -164,6 +171,7 @@ func TestRunList_InvalidStatusIsValidationFailed(t *testing.T) {
 }
 
 func TestRunList_EmptyWorkspaceReturnsEmptyArray(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	doc := runJSON(t, ws, "list")
 	challenges, ok := doc["challenges"].([]any)
@@ -176,6 +184,7 @@ func TestRunList_EmptyWorkspaceReturnsEmptyArray(t *testing.T) {
 }
 
 func TestRunEdit_UpdatesFieldsAndBumpsVersion(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -191,6 +200,7 @@ func TestRunEdit_UpdatesFieldsAndBumpsVersion(t *testing.T) {
 }
 
 func TestRunEdit_NoChangeFlagsIsUsageError(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -198,6 +208,7 @@ func TestRunEdit_NoChangeFlagsIsUsageError(t *testing.T) {
 }
 
 func TestRunEdit_EmptyTitleIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -205,6 +216,7 @@ func TestRunEdit_EmptyTitleIsValidationFailed(t *testing.T) {
 }
 
 func TestRunEdit_DoneChallengeIsTerminalState(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -214,6 +226,7 @@ func TestRunEdit_DoneChallengeIsTerminalState(t *testing.T) {
 }
 
 func TestRunLog_OrdersActivitiesOldestFirstAndOmitsRejectedOrNoopChanges(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	created := runJSON(t, ws, "create", "--title", "t")
 	id := created["challenge"].(map[string]any)["id"].(string)
@@ -245,6 +258,7 @@ func TestRunLog_OrdersActivitiesOldestFirstAndOmitsRejectedOrNoopChanges(t *test
 }
 
 func TestRunLog_WithoutIDReturnsAllChallenges(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	runJSON(t, ws, "create", "--title", "a")
 	runJSON(t, ws, "create", "--title", "b")
@@ -260,6 +274,7 @@ func TestRunLog_WithoutIDReturnsAllChallenges(t *testing.T) {
 }
 
 func TestRunLog_NotFoundForMissingChallengeID(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	requireErrorCode(t, []string{"log", "C-999", "--workspace", ws}, 1, CodeNotFound)
 }
@@ -279,6 +294,7 @@ func runText(t *testing.T, ws string, args ...string) string {
 // TestRun_TextOutputIsHumanReadable は --json 無しの出力が map の %v ダンプではなく
 // 人間向けの行であることを確認する（形式の安定は保証しないため、緩い検査に留める）。
 func TestRun_TextOutputIsHumanReadable(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	if got := runText(t, ws, "create", "--title", "テキスト表示"); got != "C-1\n" {
 		t.Fatalf("create text = %q, want %q", got, "C-1\n")
@@ -298,6 +314,7 @@ func TestRun_TextOutputIsHumanReadable(t *testing.T) {
 }
 
 func TestRunEdit_StageFlagsWriteAndShowThem(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := runJSON(t, ws, "create", "--title", "t")["challenge"].(map[string]any)["id"].(string)
 
@@ -350,6 +367,7 @@ func requireVersion(t *testing.T, ws, id string, want float64) {
 }
 
 func TestRunEdit_InvalidStageValueIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := runJSON(t, ws, "create", "--title", "t")["challenge"].(map[string]any)["id"].(string)
 	requireErrorCode(t, []string{"edit", id, "--issues", `[]x`, "--workspace", ws}, 1, CodeValidationFailed)
@@ -359,6 +377,7 @@ func TestRunEdit_InvalidStageValueIsValidationFailed(t *testing.T) {
 }
 
 func TestRunEdit_RelayedIsUsageError(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := runJSON(t, ws, "create", "--title", "t")["challenge"].(map[string]any)["id"].(string)
 	requireErrorCode(t, []string{"edit", id, "--headline", "h", "--relayed", "--workspace", ws}, 2, CodeUsageError)
@@ -366,6 +385,7 @@ func TestRunEdit_RelayedIsUsageError(t *testing.T) {
 }
 
 func TestRunEdit_StageFlagOnDoneChallengeIsTerminalState(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := runJSON(t, ws, "create", "--title", "t")["challenge"].(map[string]any)["id"].(string)
 	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, id), "done")

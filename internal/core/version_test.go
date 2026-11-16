@@ -6,6 +6,7 @@ import (
 )
 
 func TestVersionFromBuildInfo(t *testing.T) {
+	t.Parallel()
 	latest, err := LatestSchemaVersion()
 	if err != nil {
 		t.Fatal(err)

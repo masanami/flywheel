@@ -80,6 +80,7 @@ func callsContain(calls []string, substr string) bool {
 // も変わらない。 ---
 
 func TestIngest_SourceFlag_OnlyFetchesSelectedSourceRepos(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, twoSourceDeclaration)
 
@@ -132,6 +133,7 @@ func TestIngest_SourceFlag_OnlyFetchesSelectedSourceRepos(t *testing.T) {
 // 宣言の順に処理する（code-reviewer 指摘の再発防止: 上のテストは --source に
 // よる絞り込みしか検証しておらず、順序そのものを検証するテストが無かった）。
 func TestIngest_NoSourceFlag_ProcessesAllSourcesInDeclaredOrder(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	writeSourcesDeclaration(t, ws, twoSourceDeclaration)
 
@@ -183,6 +185,7 @@ func TestIngest_NoSourceFlag_ProcessesAllSourcesInDeclaredOrder(t *testing.T) {
 // 課題になり、Pull Request は課題にならない。 ---
 
 func TestIngest_ThreePagesOfIssues_AllBecomeChallengesAndPullRequestsAreExcluded(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	decl := `{
   "version": 1,
@@ -248,6 +251,7 @@ func TestIngest_ThreePagesOfIssues_AllBecomeChallengesAndPullRequestsAreExcluded
 // 対応する既存の課題は何も変わらない。 ---
 
 func TestIngest_OneRepoListFailure_OtherRepoStillIngestedAndFailedRepoUnchanged(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	decl := `{
   "version": 1,
@@ -270,7 +274,7 @@ func TestIngest_OneRepoListFailure_OtherRepoStillIngestedAndFailedRepoUnchanged(
 	})
 
 	var stdout, stderr strings.Builder
-	code := run([]string{"ingest", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"ingest", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (partial success. stdout=%q stderr=%q)", code, stdout.String(), stderr.String())
 	}

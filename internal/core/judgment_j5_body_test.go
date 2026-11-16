@@ -40,6 +40,7 @@ func (f *prHeadFixture) verifyWithDescriptions(t *testing.T, b UpstreamDescripti
 }
 
 func TestVerifyAutoJ5_PassesTheArtifactDescription(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence+"\n")
 	b := &fakeDescriptions{got: UpstreamArtifactDescription{Text: "## 概要\n子の自己申告の本文", HeadSHA: f.sha}}
 	f.verifyWithDescriptions(t, b)
@@ -65,6 +66,7 @@ func TestVerifyAutoJ5_PassesTheArtifactDescription(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_ArtifactDescription_NotesAHeadMismatch(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence+"\n")
 	f.verifyWithDescriptions(t, &fakeDescriptions{got: UpstreamArtifactDescription{Text: "古い本文", HeadSHA: "older-head"}})
 
@@ -80,6 +82,7 @@ func TestVerifyAutoJ5_ArtifactDescription_NotesAHeadMismatch(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_ArtifactDescription_TruncatesAtTheLimit(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence+"\n")
 	text := strings.Repeat("あ", maxArtifactDescriptionRunes) + "末尾"
 	f.verifyWithDescriptions(t, &fakeDescriptions{got: UpstreamArtifactDescription{Text: text, HeadSHA: f.sha}})
@@ -101,6 +104,7 @@ func TestVerifyAutoJ5_ArtifactDescription_TruncatesAtTheLimit(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_ArtifactDescription_FetchFailureDoesNotStopJ5(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence+"\n")
 	f.verifyWithDescriptions(t, &fakeDescriptions{err: errors.New("fetch: boom")})
 
@@ -117,6 +121,7 @@ func TestVerifyAutoJ5_ArtifactDescription_FetchFailureDoesNotStopJ5(t *testing.T
 }
 
 func TestVerifyAutoJ5_NilDescriptionsAddsNoDescriptionSection(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence+"\n")
 	f.verifyWithDescriptions(t, nil)
 	if _, ok := f.descriptionSection(); ok {
@@ -147,6 +152,7 @@ func (f *prHeadFixture) asContractDelegation(t *testing.T) {
 
 // ⑥ form: cli の委譲で成果物の PR の本文が取れたら、その本文（成果物の説明文の区画）を委譲の報告として読む。
 func TestVerifyAutoJ5_ContractDelegationReportIsTheArtifactDescriptionWhenRead(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence+"\n")
 	f.asContractDelegation(t)
 	f.verifyWithDescriptions(t, &fakeDescriptions{got: UpstreamArtifactDescription{Text: "## 概要\n子の自己申告の本文", HeadSHA: f.sha}})
@@ -162,6 +168,7 @@ func TestVerifyAutoJ5_ContractDelegationReportIsTheArtifactDescriptionWhenRead(t
 
 // ⑥ form: cli の委譲で成果物の PR の本文が取れないときは、契約の summary を委譲の報告に戻す。
 func TestVerifyAutoJ5_ContractDelegationReportFallsBackToTheSummaryWhenTheDescriptionIsNotRead(t *testing.T) {
+	t.Parallel()
 	f := newPRHeadFixture(t, headOnlySentence+"\n")
 	f.asContractDelegation(t)
 	f.verifyWithDescriptions(t, &fakeDescriptions{err: errors.New("gh failed")})

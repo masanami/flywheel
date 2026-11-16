@@ -233,6 +233,7 @@ func TestConfirm_Success_ControllingTerminalWithMatchingID(t *testing.T) {
 // TestConfirm_NoTerminalStdin_ReturnsTTYRequired は AC-37: 標準入力がパイプ
 // （端末なし）の場合、対象 ID を流し込んでも tty_required で拒否される。
 func TestConfirm_NoTerminalStdin_ReturnsTTYRequired(t *testing.T) {
+	t.Parallel()
 	cmd, stdout, stderr := newConfirmChildCmd("C-12")
 	cmd.Stdin = strings.NewReader("C-12\n")
 

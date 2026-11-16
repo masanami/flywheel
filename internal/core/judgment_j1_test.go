@@ -53,6 +53,7 @@ func succeededInvoker(output []byte) *fakeJudgmentInvoker {
 // --- j1OutputSchema・validateJ1Output ---
 
 func TestJ1OutputSchema_ContainsClosedValues(t *testing.T) {
+	t.Parallel()
 	schema := j1OutputSchema()
 	var decoded map[string]any
 	if err := json.Unmarshal(schema, &decoded); err != nil {
@@ -73,6 +74,7 @@ func TestJ1OutputSchema_ContainsClosedValues(t *testing.T) {
 }
 
 func TestValidateJ1Output_MineRequiresPriority(t *testing.T) {
+	t.Parallel()
 	// AC-77: mine で優先度が null は invalid。
 	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", Reason: "r"})); ok {
 		t.Error("want ok=false when mine has no priority")
@@ -83,6 +85,7 @@ func TestValidateJ1Output_MineRequiresPriority(t *testing.T) {
 }
 
 func TestValidateJ1Output_UncertainRequiresQuestion(t *testing.T) {
+	t.Parallel()
 	// AC-80: uncertain で問いが null は invalid。
 	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "uncertain", Reason: "r"})); ok {
 		t.Error("want ok=false when uncertain has no question")
@@ -93,6 +96,7 @@ func TestValidateJ1Output_UncertainRequiresQuestion(t *testing.T) {
 }
 
 func TestValidateJ1Output_UnknownVerdictIsInvalid(t *testing.T) {
+	t.Parallel()
 	// AC-86: 判定が閉集合の外の値は invalid_output。
 	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "maybe", Reason: "r"})); ok {
 		t.Error("want ok=false for an unknown verdict")
@@ -100,6 +104,7 @@ func TestValidateJ1Output_UnknownVerdictIsInvalid(t *testing.T) {
 }
 
 func TestValidateJ1Output_NotMineDoesNotRequireExtras(t *testing.T) {
+	t.Parallel()
 	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "not_mine", Reason: "r"})); !ok {
 		t.Error("want ok=true for not_mine without priority/question")
 	}
@@ -108,6 +113,7 @@ func TestValidateJ1Output_NotMineDoesNotRequireExtras(t *testing.T) {
 // --- buildJ1Sections（入力の組み立て） ---
 
 func TestBuildJ1Sections_IncludesChallengeFieldsAndPosition(t *testing.T) {
+	t.Parallel()
 	// AC-75。
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "UNIQUE-POSITION-MARKER このエージェントの担当範囲")
@@ -136,6 +142,7 @@ func TestBuildJ1Sections_IncludesChallengeFieldsAndPosition(t *testing.T) {
 
 // AC-74: 保留の記録（問いと回答）を J1 の入力に含める。
 func TestBuildJ1Sections_IncludesHoldQuestionsAndAnswers(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -178,6 +185,7 @@ func TestBuildJ1Sections_IncludesHoldQuestionsAndAnswers(t *testing.T) {
 // 検証する（design-reviewer 指摘・round1 CONFIRMED。§J1「J1 の入力は…
 // 取り込み元の対応の記録（あれば）…である」）。
 func TestBuildJ1Sections_IncludesSourceBindingWhenPresent(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -205,6 +213,7 @@ func TestBuildJ1Sections_IncludesSourceBindingWhenPresent(t *testing.T) {
 
 // 対応の無い課題（`create` で作った課題）では区画を作らない。
 func TestBuildJ1Sections_NoSourceBindingSectionWhenAbsent(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -238,6 +247,7 @@ func indexOfString(haystack, needle string) int {
 // --- 経路 invoker の作業ログ（AC-67）・本人確認の拒否（AC-68） ---
 
 func TestApplyJ1Mine_RecordsActivityWithInvokerChannelAndRunID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
 	if err != nil {
@@ -266,6 +276,7 @@ func TestApplyJ1Mine_RecordsActivityWithInvokerChannelAndRunID(t *testing.T) {
 }
 
 func TestApplyJ1Uncertain_RecordsActivityWithInvokerChannelAndRunID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
 	if err != nil {
@@ -304,6 +315,7 @@ func TestApplyJ1Uncertain_RecordsActivityWithInvokerChannelAndRunID(t *testing.T
 }
 
 func TestVerify_RejectsChannelInvoker_ForApprove(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{method: VerificationTTYConfirm, actor: "tester"}
 	_, err := Verify(ChannelInvoker, v, "approve summary", "C-1")
 	if !errors.Is(err, ErrVerificationRejected) {
@@ -315,6 +327,7 @@ func TestVerify_RejectsChannelInvoker_ForApprove(t *testing.T) {
 }
 
 func TestVerify_RejectsChannelInvoker_ForReject(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{method: VerificationTTYConfirm, actor: "tester"}
 	_, err := Verify(ChannelInvoker, v, "reject summary", "C-1")
 	if !errors.Is(err, ErrVerificationRejected) {
@@ -323,6 +336,7 @@ func TestVerify_RejectsChannelInvoker_ForReject(t *testing.T) {
 }
 
 func TestVerify_RejectsChannelInvoker_ForAnswer(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{method: VerificationTTYConfirm, actor: "tester"}
 	_, err := Verify(ChannelInvoker, v, "answer summary", "C-1")
 	if !errors.Is(err, ErrVerificationRejected) {
@@ -333,6 +347,7 @@ func TestVerify_RejectsChannelInvoker_ForAnswer(t *testing.T) {
 // --- 対象の選び方（AC-69・71・72・73） ---
 
 func TestSelectJ1AutoTargets_ExcludesChallengeWithActiveRun(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
 	if err != nil {
@@ -358,6 +373,7 @@ func TestSelectJ1AutoTargets_ExcludesChallengeWithActiveRun(t *testing.T) {
 }
 
 func TestSelectJ1AutoTargets_ExcludesUpstreamClosedOrMissing(t *testing.T) {
+	t.Parallel()
 	for _, upstream := range []string{"closed", "missing"} {
 		t.Run(upstream, func(t *testing.T) {
 			s := newStoreForTest(t)
@@ -386,6 +402,7 @@ func TestSelectJ1AutoTargets_ExcludesUpstreamClosedOrMissing(t *testing.T) {
 }
 
 func TestSelectJ1AutoTargets_ExcludesOutOfPolicy(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
 	if err != nil {
@@ -411,6 +428,7 @@ func TestSelectJ1AutoTargets_ExcludesOutOfPolicy(t *testing.T) {
 
 // AC-73: 上流の状態が closed の未分類の課題も、ID を指定すれば J1 の対象になる。
 func TestClassifyAutoJ1_ExplicitIDIgnoresUpstreamExclusion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -434,6 +452,7 @@ func TestClassifyAutoJ1_ExplicitIDIgnoresUpstreamExclusion(t *testing.T) {
 // --- 写像（AC-76〜86） ---
 
 func TestClassifyAutoJ1_Mine_ClassifiesWithPriority(t *testing.T) {
+	t.Parallel()
 	// AC-76。
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
@@ -465,6 +484,7 @@ func TestClassifyAutoJ1_Mine_ClassifiesWithPriority(t *testing.T) {
 }
 
 func TestClassifyAutoJ1_MineWithoutPriority_InvalidOutputLeavesChallengeUnchanged(t *testing.T) {
+	t.Parallel()
 	// AC-77。
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
@@ -500,6 +520,7 @@ func TestClassifyAutoJ1_MineWithoutPriority_InvalidOutputLeavesChallengeUnchange
 }
 
 func TestClassifyAutoJ1_Uncertain_HoldsWithQuestion(t *testing.T) {
+	t.Parallel()
 	// AC-78。
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
@@ -527,6 +548,7 @@ func TestClassifyAutoJ1_Uncertain_HoldsWithQuestion(t *testing.T) {
 }
 
 func TestClassifyAutoJ1_UncertainWithoutQuestion_InvalidOutput(t *testing.T) {
+	t.Parallel()
 	// AC-80。
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
@@ -548,6 +570,7 @@ func TestClassifyAutoJ1_UncertainWithoutQuestion_InvalidOutput(t *testing.T) {
 }
 
 func TestClassifyAutoJ1_NotMine_LeavesChallengeUnchanged(t *testing.T) {
+	t.Parallel()
 	// AC-81。
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
@@ -579,6 +602,7 @@ func TestClassifyAutoJ1_NotMine_LeavesChallengeUnchanged(t *testing.T) {
 }
 
 func TestClassifyAutoJ1_UnknownVerdict_InvalidOutput(t *testing.T) {
+	t.Parallel()
 	// AC-86。
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
@@ -622,6 +646,7 @@ func assertStoredRunResultForTest(t *testing.T, s *Store, runIDDisplay string, w
 // --- not_mine の除外・triage（AC-82・83・84・85） ---
 
 func TestJ1NotMine_ExcludedFromAutoTargetsUntilVersionChanges(t *testing.T) {
+	t.Parallel()
 	// AC-82・83。
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
@@ -653,6 +678,7 @@ func TestJ1NotMine_ExcludedFromAutoTargetsUntilVersionChanges(t *testing.T) {
 }
 
 func TestJ1NotMine_AppearsInTriageWithRunIDAndReason(t *testing.T) {
+	t.Parallel()
 	// AC-84。
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
@@ -682,6 +708,7 @@ func TestJ1NotMine_AppearsInTriageWithRunIDAndReason(t *testing.T) {
 }
 
 func TestJ1NotMine_ClassifiedManuallyRemovesFromTriage(t *testing.T) {
+	t.Parallel()
 	// AC-85。
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
@@ -710,6 +737,7 @@ func TestJ1NotMine_ClassifiedManuallyRemovesFromTriage(t *testing.T) {
 }
 
 func TestGetOverview_NeedsHumanTriage_EmptyIsNotNil(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ov, err := s.GetOverview(context.Background())
 	if err != nil {
@@ -723,6 +751,7 @@ func TestGetOverview_NeedsHumanTriage_EmptyIsNotNil(t *testing.T) {
 // --- ID を指定した個別の操作の状態条件・並行実行 ---
 
 func TestClassifyAutoJ1_ExplicitID_NotUnclassified_IsInvalidTransition(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -743,6 +772,7 @@ func TestClassifyAutoJ1_ExplicitID_NotUnclassified_IsInvalidTransition(t *testin
 // AC-70: 同じ課題に対する2つの classify --auto <C-ID> を並行して実行すると、
 // run は1つしか作られず、もう一方は run_in_progress で終わる。
 func TestClassifyAutoJ1_ConcurrentExplicitID_OnlyOneRunStarts(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -807,6 +837,7 @@ func TestClassifyAutoJ1_ConcurrentExplicitID_OnlyOneRunStarts(t *testing.T) {
 // 分類済へ進めた場合、uncertain の出力は課題を人間対応待ちへ進めない
 // ことを検証する。
 func TestApplyJ1Uncertain_ChallengeNoLongerUnclassified_DoesNotMap(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"})
@@ -909,6 +940,7 @@ func (f *blockingSequenceInvoker) InvokeJudgment(_ context.Context, _ JudgmentLa
 // out_of_policy になった場合、2件目は起動されない（run が作られず、
 // items にも現れない）ことを検証する。1件目は影響を受けず処理される。
 func TestClassifyAutoJ1_AutoMode_ReevaluatesExclusionsAtLaunchTime(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	ch1, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "first"})

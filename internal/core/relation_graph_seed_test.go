@@ -41,6 +41,7 @@ const RelationGraphSeedEnvVar = "FLYWHEEL_E2E_SEED_WORKSPACE"
 //	C-18 完了。C-12（完了）の前提。動いている課題の前提でも親でもないので既定で隠れ、C-18 → C-12 の線も描かれない
 //	C-19 完了。C-11 の前提（灰色で残り、ほかの課題の大枠の中に置かれる）
 func TestRelationGraphSeed(t *testing.T) {
+	t.Parallel()
 	dir := os.Getenv(RelationGraphSeedEnvVar)
 	if dir == "" {
 		dir = t.TempDir()

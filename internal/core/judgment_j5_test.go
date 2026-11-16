@@ -149,6 +149,7 @@ func (f *j5Fixture) stdin(t *testing.T) string {
 // --- 出力の検査 ---
 
 func TestValidateJ5Output(t *testing.T) {
+	t.Parallel()
 	str := func(s string) *string { return &s }
 	cases := []struct {
 		name string
@@ -180,6 +181,7 @@ func TestValidateJ5Output(t *testing.T) {
 }
 
 func TestJ5OutputSchema_HasTheFourKeysAndTheClosedVerdicts(t *testing.T) {
+	t.Parallel()
 	var schema struct {
 		Properties map[string]struct {
 			Enum []string `json:"enum"`
@@ -208,6 +210,7 @@ func TestJ5OutputSchema_HasTheFourKeysAndTheClosedVerdicts(t *testing.T) {
 // --- 対象（AC-268） ---
 
 func TestVerifyAutoJ5_OmittedID_OnlyVerifyingChallengesWithoutAnActiveRun(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1") // 検証中・終了していない run なし
 	other := f.newInProgress(t, "other", "P1", planSpec(nil))
@@ -239,6 +242,7 @@ func TestVerifyAutoJ5_OmittedID_OnlyVerifyingChallengesWithoutAnActiveRun(t *tes
 }
 
 func TestVerifyAutoJ5_ExplicitID_StatusAndActiveRunErrors(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	id := "C-1" // 着手中
 	if _, err := f.verify(t, &id); !errors.Is(err, ErrInvalidTransition) {
@@ -261,6 +265,7 @@ func TestVerifyAutoJ5_ExplicitID_StatusAndActiveRunErrors(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_RejectsIncompleteInput(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	base := f.input(f.cycle(t, 300), nil)
 	for name, mut := range map[string]func(in *J5AutoInput){
@@ -281,6 +286,7 @@ func TestVerifyAutoJ5_RejectsIncompleteInput(t *testing.T) {
 // --- CI の待ち（AC-269・270・271・M3P42） ---
 
 func TestVerifyAutoJ5_PendingChecks_NoJ5NoChangeAndWaitingExternal(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.checks.prs["o/r#1"] = prChecks("open", checkDone, checkRunning)
@@ -314,6 +320,7 @@ func TestVerifyAutoJ5_PendingChecks_NoJ5NoChangeAndWaitingExternal(t *testing.T)
 }
 
 func TestVerifyAutoJ5_AllChecksCompleted_J5RunsAndSeesTheResultsIncludingFailures(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.checks.prs["o/r#1"] = prChecks("open", checkDone, checkFailed)
@@ -335,6 +342,7 @@ func TestVerifyAutoJ5_AllChecksCompleted_J5RunsAndSeesTheResultsIncludingFailure
 }
 
 func TestVerifyAutoJ5_ClosedUnmergedPRChecksAreNotWaitedFor(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.checks.prs["o/r#1"] = prChecks("closed", checkRunning)
@@ -345,6 +353,7 @@ func TestVerifyAutoJ5_ClosedUnmergedPRChecksAreNotWaitedFor(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_NoPR_BranchAndNone_ChecksNotQueriedAndInputSaysSo(t *testing.T) {
+	t.Parallel()
 	for _, operation := range []string{"impl-branch", "impl-none"} {
 		t.Run(operation, func(t *testing.T) {
 			f := newJ5Fixture(t, operation)
@@ -368,6 +377,7 @@ func TestVerifyAutoJ5_NoPR_BranchAndNone_ChecksNotQueriedAndInputSaysSo(t *testi
 }
 
 func TestVerifyAutoJ5_ChecksFetchFailure_NotStartedAsUpstreamFetchFailed(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.checks.err = errors.New("gh down")
@@ -387,6 +397,7 @@ func TestVerifyAutoJ5_ChecksFetchFailure_NotStartedAsUpstreamFetchFailed(t *test
 // --- 入力（AC-272〜274） ---
 
 func TestVerifyAutoJ5_InputHasAllSections(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	cid, _ := parseChallengeID("C-1")
@@ -436,6 +447,7 @@ func (f *j5Fixture) attachSource(t *testing.T, id, key string, repo string, numb
 }
 
 func TestVerifyAutoJ5_InputHasTheUpstreamLatestState(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.attachSource(t, "C-1", "o/r#42", "o/r", 42, "UP-BODY", "UP-COMMENT")
@@ -455,6 +467,7 @@ func TestVerifyAutoJ5_InputHasTheUpstreamLatestState(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_UpstreamFetchFailure_NotStartedAndUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.attachSource(t, "C-1", "o/r#42", "o/r", 42, "UP-BODY")
@@ -472,6 +485,7 @@ func TestVerifyAutoJ5_UpstreamFetchFailure_NotStartedAndUnchanged(t *testing.T) 
 }
 
 func TestVerifyAutoJ5_EmptyChallengeDoneCriteria_UsesThePlansDoneCriteria(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
@@ -493,6 +507,7 @@ func TestVerifyAutoJ5_EmptyChallengeDoneCriteria_UsesThePlansDoneCriteria(t *tes
 }
 
 func TestVerifyAutoJ5_PlanWithoutSpec_StillVerifiesWithTheChallengesCriteria(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	id := f.newInProgress(t, "manual", "P0", "") // 人が登録した計画（構造化した出力なし）
 	f.setStatus(t, id, "verifying")
@@ -508,6 +523,7 @@ func TestVerifyAutoJ5_PlanWithoutSpec_StillVerifiesWithTheChallengesCriteria(t *
 // --- 起動の引数と記録（AC-219） ---
 
 func TestVerifyAutoJ5_LaunchUsesTheJ5BudgetTimeoutSchemaAndRecordsThePlanVersion(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.agent.JudgmentBudgetUSD.J5 = 4.25
@@ -526,6 +542,7 @@ func TestVerifyAutoJ5_LaunchUsesTheJ5BudgetTimeoutSchemaAndRecordsThePlanVersion
 }
 
 func TestVerifyAutoJ5_CycleBudget_ExplicitIDErrorsAndOmittedIDNotStarted(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.agent.JudgmentBudgetUSD.J5 = 5
@@ -544,6 +561,7 @@ func TestVerifyAutoJ5_CycleBudget_ExplicitIDErrorsAndOmittedIDNotStarted(t *test
 }
 
 func TestVerifyAutoJ5_RateLimitedCycleStartsNothing(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	jc := NewJudgmentCycle(f.cycle(t, 300))
@@ -559,6 +577,7 @@ func TestVerifyAutoJ5_RateLimitedCycleStartsNothing(t *testing.T) {
 // --- 出力の検査と写像（AC-275〜277） ---
 
 func TestVerifyAutoJ5_InvalidOutputs_BecomeInvalidOutputAndLeaveTheChallenge(t *testing.T) {
+	t.Parallel()
 	cases := map[string]JudgmentLaunchOutput{
 		"not_met with null feedback":   j5Out("not_met", nil, nil),
 		"uncertain with null question": j5Out("uncertain", nil, nil),
@@ -587,6 +606,7 @@ func TestVerifyAutoJ5_InvalidOutputs_BecomeInvalidOutputAndLeaveTheChallenge(t *
 }
 
 func TestVerifyAutoJ5_NotSucceeded_DoesNotMap(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.result = JudgmentLaunchOutput{Result: RunResultErrored, ErrorSummary: "boom"}
@@ -611,6 +631,7 @@ func (f *j5Fixture) lastActivity(t *testing.T, id string) (action, channel strin
 }
 
 func TestVerifyAutoJ5_Met_AwaitsCompletionApproval(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	res, err := f.verify(t, nil)
@@ -632,6 +653,7 @@ func TestVerifyAutoJ5_Met_AwaitsCompletionApproval(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_NotMet_ReturnsToInProgress(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.result = j5Out("not_met", "FEEDBACK-TEXT", nil)
@@ -651,6 +673,7 @@ func TestVerifyAutoJ5_NotMet_ReturnsToInProgress(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_Uncertain_HoldsWithTheQuestionAndTheCauseRun(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.result = j5Out("uncertain", nil, "QUESTION-FOR-HUMAN")
@@ -671,6 +694,7 @@ func TestVerifyAutoJ5_Uncertain_HoldsWithTheQuestionAndTheCauseRun(t *testing.T)
 }
 
 func TestVerifyAutoJ5_StatusChangedWhileJ5Ran_IsNotMapped(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.onInvoke = func(JudgmentLaunchInput) { f.setStatus(t, "C-1", "awaiting_human") }
@@ -698,6 +722,7 @@ func (f *j5Fixture) notMetRound(t *testing.T, id string) {
 }
 
 func TestRework_NotMetResumesThePreviousDelegationSessionWithTheFeedback(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	first := f.delegateRuns(t)[0]
@@ -721,6 +746,7 @@ func TestRework_NotMetResumesThePreviousDelegationSessionWithTheFeedback(t *test
 }
 
 func TestRework_LimitIsDetectedInTheNextCycle_TwoStillLaunch(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.agent.ReworkLimit = 3
@@ -761,6 +787,7 @@ func TestRework_LimitIsDetectedInTheNextCycle_TwoStillLaunch(t *testing.T) {
 }
 
 func TestRework_AnswerAfterTheLimitStartsCountingAgain(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.agent.ReworkLimit = 2
@@ -790,6 +817,7 @@ func TestRework_AnswerAfterTheLimitStartsCountingAgain(t *testing.T) {
 }
 
 func TestRework_LimitCountsOnlyTheSamePlanVersion(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.agent.ReworkLimit = 2
@@ -819,6 +847,7 @@ func TestRework_LimitCountsOnlyTheSamePlanVersion(t *testing.T) {
 }
 
 func TestRework_WithoutNotMetTheNormalFlowIsUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	// J5 の uncertain の後に人間が回答して着手中へ戻っても、差し戻しの再開にはならない。
@@ -838,6 +867,7 @@ func TestRework_WithoutNotMetTheNormalFlowIsUnchanged(t *testing.T) {
 }
 
 func TestRework_LaunchFailedRetryStillCarriesTheFeedback(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	first := f.delegateRuns(t)[0]
@@ -855,6 +885,7 @@ func TestRework_LaunchFailedRetryStillCarriesTheFeedback(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_ExplicitID_ActiveRunWinsOverPendingChecks(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.checks.prs["o/r#1"] = prChecks("open", checkRunning)
@@ -875,6 +906,7 @@ func TestVerifyAutoJ5_ExplicitID_ActiveRunWinsOverPendingChecks(t *testing.T) {
 }
 
 func TestCheckCompleted_LegacyStatusesAndCheckRuns(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		c    UpstreamCheck
 		want bool
@@ -951,6 +983,7 @@ func actualItems(n int) []map[string]string {
 }
 
 func TestValidateJ5Output_Actual(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("あ", MaxStageRunes+1)
 	cases := []struct {
 		name string
@@ -984,6 +1017,7 @@ func TestValidateJ5Output_Actual(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_Actual_MetAndNotMetWriteItInTheSameTransaction(t *testing.T) {
+	t.Parallel()
 	for _, verdict := range []string{"met", "not_met"} {
 		t.Run(verdict, func(t *testing.T) {
 			f := newJ5Fixture(t, "impl")
@@ -1013,6 +1047,7 @@ func TestVerifyAutoJ5_Actual_MetAndNotMetWriteItInTheSameTransaction(t *testing.
 // AC-320〜AC-322: 予想が 2 個の課題で met の実物の個数がそろわなければ（AC が挙げる 1 個と、多すぎる 3 個）、
 // 完了確認待ちにせず人間対応待ちにし、actual は写す前の値のままにする。
 func TestVerifyAutoJ5_Actual_CountMismatchHoldsAndDoesNotWrite(t *testing.T) {
+	t.Parallel()
 	for _, n := range []int{1, 3} {
 		t.Run(fmt.Sprintf("actual %d", n), func(t *testing.T) {
 			f := newJ5Fixture(t, "impl")
@@ -1052,6 +1087,7 @@ func TestVerifyAutoJ5_Actual_CountMismatchHoldsAndDoesNotWrite(t *testing.T) {
 // AC-324・AC-325: not_met・実物 1 個の出力は、予想の有無・個数にかかわらず着手中へ戻し、
 // actual を出力の値にする（個数の照合は met だけ）。
 func TestVerifyAutoJ5_Actual_NotMetWithOneActualReturnsToInProgressAndWritesIt(t *testing.T) {
+	t.Parallel()
 	for _, expected := range []int{0, 2} {
 		t.Run(fmt.Sprintf("expected %d", expected), func(t *testing.T) {
 			f := newJ5Fixture(t, "impl")
@@ -1081,6 +1117,7 @@ func TestVerifyAutoJ5_Actual_NotMetWithOneActualReturnsToInProgressAndWritesIt(t
 }
 
 func TestVerifyAutoJ5_Actual_NoExpectedMetWithoutActualStillMovesToT8(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	if _, err := f.verify(t, nil); err != nil {
@@ -1092,6 +1129,7 @@ func TestVerifyAutoJ5_Actual_NoExpectedMetWithoutActualStillMovesToT8(t *testing
 }
 
 func TestVerifyAutoJ5_Actual_InvalidShapeIsInvalidOutput(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.result = j5OutWithActual("met", actualItems(4))
@@ -1102,6 +1140,7 @@ func TestVerifyAutoJ5_Actual_InvalidShapeIsInvalidOutput(t *testing.T) {
 }
 
 func TestVerifyAutoJ5_Actual_StatusChangedWhileJ5Ran_DoesNotWrite(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.result = j5OutWithActual("met", actualItems(1))
@@ -1115,6 +1154,7 @@ func TestVerifyAutoJ5_Actual_StatusChangedWhileJ5Ran_DoesNotWrite(t *testing.T) 
 }
 
 func TestVerifyAutoJ5_Actual_InputCarriesTheExpected(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.setExpected(t, "C-1", 1)
@@ -1129,6 +1169,7 @@ func TestVerifyAutoJ5_Actual_InputCarriesTheExpected(t *testing.T) {
 // #563: 委譲の報告の未検証の欄にレビュー未実施・不明の申告があれば、その文が J5 に渡る入力にそのまま載る
 // （J5 の指示文の規則が読む材料。判定そのものは claude が行うので、ここでは入力を固定する）。
 func TestVerifyAutoJ5_InputCarriesTheUnreviewedDeclarationOfTheReport(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.deleg.result = JudgmentLaunchOutput{Result: RunResultSucceeded, ReportedTotalCostUSD: float64Ptr(2.5), StructuredOutput: reportJSON(func(m map[string]any) {
 		m["unverified"] = []string{"自己レビューが走り切ったか不明", "独立レビュー未実施"}
@@ -1149,6 +1190,7 @@ func TestVerifyAutoJ5_InputCarriesTheUnreviewedDeclarationOfTheReport(t *testing
 // 「保留の記録」の節にその回答が載り、委譲の報告の申告も並んで載る
 // （j5.md の回答の例外を J5 が適用できる材料が揃う。【決定 2026-11-13 オーナー #563】）。
 func TestVerifyAutoJ5_InputCarriesTheReviewAnswerAlongsideTheUnreviewedDeclaration(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.deleg.result = JudgmentLaunchOutput{Result: RunResultSucceeded, ReportedTotalCostUSD: float64Ptr(2.5), StructuredOutput: reportJSON(func(m map[string]any) {
 		m["unverified"] = []string{"独立レビュー未実施"}

@@ -25,6 +25,7 @@ func rejectedFieldsOfLog(t *testing.T, ws string) []any {
 }
 
 func TestParseArgs_RepeatableFlagCollectsInOrder(t *testing.T) {
+	t.Parallel()
 	cmd := Command{Path: []string{"x"}, Flags: []flagDef{{Name: "field", HasValue: true, Repeatable: true}, {Name: "reason", HasValue: true}}, MaxPositional: 1}
 	got, err := parseArgs([]string{"--field", "b", "--reason=r", "--field=a", "id"}, cmd)
 	if err != nil {
@@ -42,6 +43,7 @@ func TestParseArgs_RepeatableFlagCollectsInOrder(t *testing.T) {
 }
 
 func TestRejectField_DedupAndClosedSetOrder(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := planPendingChallenge(t, ws)
 	args := append([]string{"reject", id, "--reason", "no", "--field", "figure", "--field", "issues", "--field", "figure"}, rel("q")...)
@@ -56,6 +58,7 @@ func TestRejectField_DedupAndClosedSetOrder(t *testing.T) {
 }
 
 func TestRejectField_NoFieldIsNull(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := planPendingChallenge(t, ws)
 	runJSON(t, ws, append([]string{"reject", id, "--reason", "no"}, rel("q")...)...)
@@ -65,6 +68,7 @@ func TestRejectField_NoFieldIsNull(t *testing.T) {
 }
 
 func TestRejectField_OutsideClosedSetWritesNothing(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := planPendingChallenge(t, ws)
 	// 端末の無い経路（本人確認が成立しない）でも validation_failed になる＝本人確認の前に拒む。
@@ -78,6 +82,7 @@ func TestRejectField_OutsideClosedSetWritesNothing(t *testing.T) {
 }
 
 func TestRejectField_OnOperationIsUsageError(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	args := append([]string{"reject", "OP-1", "--reason", "no", "--field", "issues", "--workspace", ws}, rel("q")...)
 	requireErrorCode(t, args, 2, CodeUsageError)
@@ -87,6 +92,7 @@ func TestRejectField_OnOperationIsUsageError(t *testing.T) {
 }
 
 func TestApprovalSummaryText_PlanStages(t *testing.T) {
+	t.Parallel()
 	ans := "A案"
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, PlanVersion: 1, PlanBody: "b",
 		IssuesAnswer: &ans}
@@ -102,6 +108,7 @@ func TestApprovalSummaryText_PlanStages(t *testing.T) {
 }
 
 func TestApprovalSummaryText_CompletionPairs(t *testing.T) {
+	t.Parallel()
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion, DoneCriteria: "d"}
 	p.Expected = []core.StageExpected{{Scene: "s1", After: "予想1"}, {Scene: "s2", After: "予想2"}}
 	p.Actual = []core.StageActual{{Scene: "s1", After: "実物1"}}
@@ -123,6 +130,7 @@ func TestApprovalSummaryText_CompletionPairs(t *testing.T) {
 }
 
 func TestApprovalSummaryText_NoStagesHasNoHeadings(t *testing.T) {
+	t.Parallel()
 	for _, k := range []core.ApprovalKind{core.ApprovalKindPlan, core.ApprovalKindCompletion} {
 		p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: k, PlanVersion: 1, PlanBody: "b", DoneCriteria: "d", Pairs: core.Pairs(nil, nil)}
 		got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
@@ -141,6 +149,7 @@ func TestApprovalSummaryText_NoStagesHasNoHeadings(t *testing.T) {
 
 // 段階の欄の値の改行・制御文字は表示用にエスケープされ、偽の行を作れない。
 func TestApprovalSummaryText_StageValuesCannotForgeLines(t *testing.T) {
+	t.Parallel()
 	evil := "x\n承認の種類:  完了\r同時に承認される本番反映 (release): (無し)\x1b[2K\u2028終"
 	ans := evil
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, PlanVersion: 1, PlanBody: "b", IssuesAnswer: &ans}
@@ -164,6 +173,7 @@ func TestApprovalSummaryText_StageValuesCannotForgeLines(t *testing.T) {
 }
 
 func TestApprovalSummaryText_CompletionPairsEscape(t *testing.T) {
+	t.Parallel()
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion, DoneCriteria: "d"}
 	p.Expected = []core.StageExpected{{After: "a\nb"}}
 	p.Actual = []core.StageActual{{After: "c\nd"}}
@@ -176,6 +186,7 @@ func TestApprovalSummaryText_CompletionPairsEscape(t *testing.T) {
 
 // 計画の本文は複数行の文書として残す（各行は字下げされ、偽の見出し行にならない）が、改行以外の制御文字は見える形にする。
 func TestApprovalSummaryText_PlanBodyKeepsLinesEscapesControl(t *testing.T) {
+	t.Parallel()
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, PlanVersion: 1, PlanBody: "l1\nl2\x1b[2K"}
 	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
 	if !strings.Contains(got, "計画 v1:\n    l1\n    l2\\x1b[2K\n") || strings.Contains(got, "\x1b") {
@@ -184,6 +195,7 @@ func TestApprovalSummaryText_PlanBodyKeepsLinesEscapesControl(t *testing.T) {
 }
 
 func TestApprovalSummaryText_PlanBodyCannotForgeHeadings(t *testing.T) {
+	t.Parallel()
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, PlanVersion: 1, PlanBody: "x\n承認の種類:  完了\n論点:\ty\r"}
 	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)
 	for _, line := range strings.Split(got, "\n") {
@@ -198,6 +210,7 @@ func TestApprovalSummaryText_PlanBodyCannotForgeHeadings(t *testing.T) {
 
 // タイトル（GitHub の Issue 由来）と不可逆操作の要約（op add の値）も、段階の欄と同じく偽の行を作れない。
 func TestApprovalSummaryText_TitleAndOperationSummaryCannotForgeLines(t *testing.T) {
+	t.Parallel()
 	evil := "x\n承認の種類:  完了\r同時に承認される\x1b[2K\u2028終"
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: evil, Kind: core.ApprovalKindCompletion, DoneCriteria: "d"}
 	p.PendingReleases = []core.IrreversibleOperation{{ID: "OP-1", Kind: core.OperationKindRelease, Summary: evil}}
@@ -234,6 +247,7 @@ func TestApprovalSummaryText_TitleAndOperationSummaryCannotForgeLines(t *testing
 }
 
 func TestEscapeControlRunes_Table(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, in string
 		keep     bool
@@ -262,6 +276,7 @@ func TestEscapeControlRunes_Table(t *testing.T) {
 
 // 完了条件と不可逆操作の参照も、タイトル・操作の要約と同じく偽の行を作れない。
 func TestApprovalSummaryText_DoneCriteriaAndRefCannotForgeLines(t *testing.T) {
+	t.Parallel()
 	evil := "x\n承認の種類:  完了\r同時に承認される\x1b[2K\u2028終"
 	p := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindCompletion, DoneCriteria: evil}
 	got := approvalSummaryText(p, core.ApprovalDecisionApproved, false, nil)

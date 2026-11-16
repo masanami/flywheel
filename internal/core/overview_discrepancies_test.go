@@ -47,6 +47,7 @@ func kindsEqual(a, b []DiscrepancyKind) bool {
 // --- AC-80: upstream_state=closed の未完了課題 ---
 
 func TestGetOverview_Discrepancies_UpstreamClosed(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := bindDiscrepancyFixture(t, s, "closed", "o/r#1", upstreamStateClosed, policyStateInPolicy)
 
@@ -63,6 +64,7 @@ func TestGetOverview_Discrepancies_UpstreamClosed(t *testing.T) {
 // --- AC-81: upstream_state=missing の未完了課題 ---
 
 func TestGetOverview_Discrepancies_UpstreamMissing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := bindDiscrepancyFixture(t, s, "missing", "o/r#1", upstreamStateMissing, policyStateInPolicy)
 
@@ -79,6 +81,7 @@ func TestGetOverview_Discrepancies_UpstreamMissing(t *testing.T) {
 // --- AC-82: policy_state=out_of_policy の未完了課題 ---
 
 func TestGetOverview_Discrepancies_OutOfPolicy(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := bindDiscrepancyFixture(t, s, "oop", "o/r#1", upstreamStateOpen, policyStateOutOfPolicy)
 
@@ -95,6 +98,7 @@ func TestGetOverview_Discrepancies_OutOfPolicy(t *testing.T) {
 // --- AC-83: closed かつ out_of_policy の課題は両方の kinds を含む ---
 
 func TestGetOverview_Discrepancies_ClosedAndOutOfPolicyIncludesBothKinds(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := bindDiscrepancyFixture(t, s, "both", "o/r#1", upstreamStateClosed, policyStateOutOfPolicy)
 
@@ -111,6 +115,7 @@ func TestGetOverview_Discrepancies_ClosedAndOutOfPolicyIncludesBothKinds(t *test
 // --- AC-84: 食い違いのある課題が完了すると discrepancies に出なくなる ---
 
 func TestGetOverview_Discrepancies_DisappearsWhenChallengeCompletes(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := bindDiscrepancyFixture(t, s, "closed", "o/r#1", upstreamStateClosed, policyStateInPolicy)
 	cid := mustParseChallengeID(t, ch.ID)
@@ -128,6 +133,7 @@ func TestGetOverview_Discrepancies_DisappearsWhenChallengeCompletes(t *testing.T
 // --- 対応の無い課題（create で作った課題）は候補にならない（AC-86 の補助） ---
 
 func TestGetOverview_Discrepancies_ChallengeWithoutBindingIsNeverACandidate(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	mustCreateChallenge(t, s, "no binding")
 
@@ -143,6 +149,7 @@ func TestGetOverview_Discrepancies_ChallengeWithoutBindingIsNeverACandidate(t *t
 // --- AC-86: 食い違いの無いワークスペースは空配列 ---
 
 func TestGetOverview_Discrepancies_EmptyWorkspaceReturnsEmptySlice(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ov, err := s.GetOverview(context.Background())
 	if err != nil {
@@ -156,6 +163,7 @@ func TestGetOverview_Discrepancies_EmptyWorkspaceReturnsEmptySlice(t *testing.T)
 // --- challenge_id 昇順 ---
 
 func TestGetOverview_Discrepancies_OrderedByChallengeIDAscending(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	insertChallengeWithID(t, s, 5, "c5", StatusUnclassified)
 	insertChallengeWithID(t, s, 2, "c2", StatusUnclassified)
@@ -180,6 +188,7 @@ func TestGetOverview_Discrepancies_OrderedByChallengeIDAscending(t *testing.T) {
 // は #72〔上流の更新の観測と既読〕が足す） ---
 
 func TestDiscrepancyKindValues_MatchSpecClosedSet(t *testing.T) {
+	t.Parallel()
 	want := []string{"upstream_closed", "upstream_missing", "out_of_policy", "upstream_commented", "upstream_updated", "merged_unapproved", "dependency_cycle"}
 	got := DiscrepancyKindValues()
 	if len(got) != len(want) {

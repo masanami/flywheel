@@ -70,6 +70,7 @@ func goListJSON(t *testing.T, dir string, args ...string) []goListPackage {
 }
 
 func TestStorePackageIsOnlyImportedFromWithinCore(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	pkgs := goListJSON(t, root, "./...")
 
@@ -104,6 +105,7 @@ func TestStorePackageIsOnlyImportedFromWithinCore(t *testing.T) {
 // いた（レビュー指摘）。internal/core/coretest（internal/core 配下）に委譲する
 // ことで、この import 自体を internal/core の外へ出さない。
 func TestSQLiteDriverIsOnlyImportedFromWithinCore(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	// modernc.org/sqlite は外部モジュールであり、"./..." には（この module 内の
 	// パッケージとしては）現れない。ここでは、この module 内のパッケージが直接
@@ -140,6 +142,7 @@ const creackPTYImportPath = "github.com/creack/pty"
 // （-test を付けない go list -deps）に github.com/creack/pty が含まれない
 // ことを検査する（TestProductionBinaryDoesNotDependOnCoretest と同型）。
 func TestProductionBinaryDoesNotDependOnCreackPTY(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	cmd := exec.Command("go", "list", "-deps", "./cmd/flywheel")
 	cmd.Dir = root
@@ -163,6 +166,7 @@ func TestProductionBinaryDoesNotDependOnCreackPTY(t *testing.T) {
 // internal/core/coretest が含まれないこと。coretest はテスト支援専用であり
 // (testing パッケージを import する)、本番バイナリへ紛れ込んではならない。
 func TestProductionBinaryDoesNotDependOnCoretest(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	cmd := exec.Command("go", "list", "-deps", "./cmd/flywheel")
 	cmd.Dir = root
@@ -193,6 +197,7 @@ const invokerImportPath = "github.com/masanami/flywheel/internal/invoker"
 // internal/core（テストファイルを含む）が internal/invoker・
 // internal/adapters/* を import していないことを、go list の依存関係で検証する。
 func TestCoreDoesNotImportInvokerOrAdapters(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	pkgs := goListJSON(t, root, "./...")
 
@@ -238,6 +243,7 @@ func dependsOn(deps []string, target string) bool {
 // internal/invoker を（テストファイルを含め）import しないことを検査する。
 // internal/adapters/github は waiting_external の組み立てだけに使えるので禁止しない。
 func TestServerImportDirection(t *testing.T) {
+	t.Parallel()
 	pkgs := goListJSON(t, repoRoot(t), "./...")
 	forbidden := []string{storeImportPath, "github.com/masanami/flywheel/internal/cli", invokerImportPath, "github.com/masanami/flywheel/internal/adapters/git"}
 	saw := false
@@ -268,6 +274,7 @@ func TestServerImportDirection(t *testing.T) {
 // この module 自身以外が modernc.org/sqlite と golang.org/x/term（とそれらの推移的依存）だけであること
 // を、go list -deps -f の Module から検査する（AC-136）。
 func TestProductionDependenciesStayWithinAllowedSet(t *testing.T) {
+	t.Parallel()
 	cmd := exec.Command("go", "list", "-deps", "-f", "{{if .Module}}{{.Module.Path}}{{end}}", "./cmd/flywheel")
 	cmd.Dir = repoRoot(t)
 	var stdout, stderr bytes.Buffer

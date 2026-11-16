@@ -35,6 +35,7 @@ func completeDirectInput(refs ...string) CompleteDirectInput {
 // --- 遷移表（T17） ---
 
 func TestTable_T17_CompleteDirectFromAwaitingHuman(t *testing.T) {
+	t.Parallel()
 	tr, ok := Lookup(StatusAwaitingHuman, OpCompleteDirect)
 	if !ok || tr.ID != "T17" || tr.Target.Fixed != StatusAwaitingCompletionApproval || tr.Target.ReturnToPrecedingHoldStatus || tr.RequiresVerification {
 		t.Fatalf("Lookup(awaiting_human, complete_direct) = %+v, ok=%v, want T17 -> awaiting_completion_approval without verification", tr, ok)
@@ -52,6 +53,7 @@ func TestTable_T17_CompleteDirectFromAwaitingHuman(t *testing.T) {
 // --- 保留の種類 ---
 
 func TestHoldChallenge_KindDefaultsToHumanAndAcceptsParentDirect(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
@@ -72,6 +74,7 @@ func TestHoldChallenge_KindDefaultsToHumanAndAcceptsParentDirect(t *testing.T) {
 }
 
 func TestHoldChallenge_UnknownKindIsValidationErrorAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -87,6 +90,7 @@ func TestHoldChallenge_UnknownKindIsValidationErrorAndChangesNothing(t *testing.
 
 // 回答（T12）は従来どおり、種類が親が直接行うの保留からも保留の前の状態へ戻る。
 func TestAnswer_ReturnsFromParentDirectHoldToPrecedingStatus(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, s, StatusClassified)
@@ -99,6 +103,7 @@ func TestAnswer_ReturnsFromParentDirectHoldToPrecedingStatus(t *testing.T) {
 // --- CompleteDirect ---
 
 func TestCompleteDirect_MovesToAwaitingCompletionApprovalRecordsArtifactsAndClosesHold(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, s, StatusClassified)
@@ -153,6 +158,7 @@ func TestCompleteDirect_MovesToAwaitingCompletionApprovalRecordsArtifactsAndClos
 }
 
 func TestCompleteDirect_NoteIsOptional(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, s, StatusUnclassified)
@@ -166,6 +172,7 @@ func TestCompleteDirect_NoteIsOptional(t *testing.T) {
 }
 
 func TestCompleteDirect_RejectsWithoutAnArtifactAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	for name, in := range map[string]CompleteDirectInput{
 		"none":       {},
 		"blank only": {Artifacts: []string{"  ", ""}},
@@ -188,6 +195,7 @@ func TestCompleteDirect_RejectsWithoutAnArtifactAndChangesNothing(t *testing.T) 
 }
 
 func TestCompleteDirect_RejectsAHumanHold(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusClassified)
@@ -206,6 +214,7 @@ func TestCompleteDirect_RejectsAHumanHold(t *testing.T) {
 
 // 種類は「いま開いている保留」で決める。以前の保留が親が直接行うでも、いまの保留が人の対応を待つなら使えない。
 func TestCompleteDirect_UsesTheOpenHoldNotAnEarlierOne(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, s, StatusClassified)
@@ -222,6 +231,7 @@ func TestCompleteDirect_UsesTheOpenHoldNotAnEarlierOne(t *testing.T) {
 }
 
 func TestCompleteDirect_RejectsEveryOtherStatus(t *testing.T) {
+	t.Parallel()
 	for _, e := range StatusVocabulary {
 		if e.Code == StatusAwaitingHuman {
 			continue
@@ -247,6 +257,7 @@ func TestCompleteDirect_RejectsEveryOtherStatus(t *testing.T) {
 }
 
 func TestCompleteDirect_UnknownChallengeIsNotFound(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	for _, id := range []string{"C-99", "nonsense"} {
@@ -280,6 +291,7 @@ func autoTargetsForTest(t *testing.T, s *Store) (j1, j2, deleg, j5 []int64) {
 }
 
 func TestParentDirectChallenge_IsNeverAnAutoTargetWhileHeldNorAfterCompleteDirect(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	// 分類済から保留に置いた課題（回答で戻せば J2 の対象になる状態）。
@@ -330,6 +342,7 @@ func approveCompletionForTest(t *testing.T, s *Store, id string) {
 }
 
 func TestApproval_SummaryCarriesTheDirectCompletionArtifactsAlongsideDoneCriteria(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t", DoneCriteria: "結果が Issue に書かれている"})
@@ -360,6 +373,7 @@ func TestApproval_SummaryCarriesTheDirectCompletionArtifactsAlongsideDoneCriteri
 }
 
 func TestApproval_OrdinaryCompletionHasNoDirectCompletion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingCompletionApproval)
@@ -375,6 +389,7 @@ func TestApproval_OrdinaryCompletionHasNoDirectCompletion(t *testing.T) {
 // 差し戻されて別の道（検証の met＝T8）で再び完了確認待ちに来たとき、前の直接行った記録を承認の根拠として見せない。
 // 親が直接した完了の差し戻しは「親が直接やる」保留へ戻る（#481）ので、回答で保留の前の状態へ戻してから進める。
 func TestApproval_StaleDirectCompletionIsNotShownAfterRejectionAndReentry(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, s, StatusInProgress)
@@ -411,6 +426,7 @@ func TestApproval_StaleDirectCompletionIsNotShownAfterRejectionAndReentry(t *tes
 }
 
 func TestApproval_AfterApprovalItIsAnOrdinaryCompletionCountedAndMarkedDirect(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, s, StatusClassified)
@@ -446,6 +462,7 @@ func TestApproval_AfterApprovalItIsAnOrdinaryCompletionCountedAndMarkedDirect(t 
 // --- J6 の入力 ---
 
 func TestJ6Input_CarriesTheDirectMarkAndArtifactsInsteadOfRuns(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, s, StatusClassified)
@@ -500,6 +517,7 @@ func TestJ6Input_CarriesTheDirectMarkAndArtifactsInsteadOfRuns(t *testing.T) {
 }
 
 func TestJ6Input_OrdinaryChallengeHasNoDirectCompletionSection(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusDone)
@@ -518,6 +536,7 @@ func TestJ6Input_OrdinaryChallengeHasNoDirectCompletionSection(t *testing.T) {
 // --- status・カード・関係グラフ ---
 
 func TestOverview_ParentDirectHoldIsParentAgentsTurnNotNeedsHuman(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	direct := holdAsParentDirect(t, s, StatusClassified)
@@ -551,6 +570,7 @@ func TestOverview_ParentDirectHoldIsParentAgentsTurnNotNeedsHuman(t *testing.T) 
 }
 
 func TestOverview_ParentDirectChallengeLeavesParentAgentSectionWhenCompletedDirectly(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, s, StatusClassified)
@@ -570,6 +590,7 @@ func TestOverview_ParentDirectChallengeLeavesParentAgentSectionWhenCompletedDire
 }
 
 func TestListUnansweredHolds_ExcludesParentDirectHolds(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	holdAsParentDirect(t, s, StatusClassified)
@@ -587,6 +608,7 @@ func TestListUnansweredHolds_ExcludesParentDirectHolds(t *testing.T) {
 }
 
 func TestCard_ParentDirectHoldHasNoAnswerQuestionAction(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	direct := holdAsParentDirect(t, s, StatusClassified)
@@ -615,6 +637,7 @@ func TestCard_ParentDirectHoldHasNoAnswerQuestionAction(t *testing.T) {
 }
 
 func TestChallengeGraph_ParentDirectHoldIsParentAgentCategory(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	direct := holdAsParentDirect(t, s, StatusClassified)
@@ -648,6 +671,7 @@ func TestChallengeGraph_ParentDirectHoldIsParentAgentCategory(t *testing.T) {
 
 // 親が直接行う保留の課題に、ほかの人間の操作待ち（不可逆操作の承認など）があれば、区分は人間の操作待ちが先に当たる。
 func TestChallengeGraph_HumanActionOutranksParentAgent(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	direct := holdAsParentDirect(t, s, StatusClassified)
@@ -673,6 +697,7 @@ func TestChallengeGraph_HumanActionOutranksParentAgent(t *testing.T) {
 }
 
 func TestGraphCategoryValues_IncludesParentAgent(t *testing.T) {
+	t.Parallel()
 	var found bool
 	for _, c := range GraphCategoryValues() {
 		found = found || c == GraphCategoryParentAgent
@@ -745,6 +770,7 @@ func rejectWithReasonForTest(t *testing.T, s *Store, id, reason string) *Challen
 }
 
 func TestTable_T15_HasADirectCompletionTargetOfAwaitingHuman(t *testing.T) {
+	t.Parallel()
 	tr, ok := Lookup(StatusAwaitingCompletionApproval, OpReject)
 	if !ok || tr.ID != "T15" || !tr.RequiresVerification {
 		t.Fatalf("Lookup(awaiting_completion_approval, reject) = %+v, ok=%v", tr, ok)
@@ -775,6 +801,7 @@ func TestTable_T15_HasADirectCompletionTargetOfAwaitingHuman(t *testing.T) {
 // ① 親が直接した完了の差し戻しは、着手中ではなく「親が直接やる」保留（人間対応待ち）へ戻る。保留を立てた元の状態に
 // よらず同じで（②）、戻した保留の from_status は元の保留の from_status、問いの文は差し戻しの理由（③）。
 func TestReject_OfADirectCompletionReturnsToAParentDirectHold(t *testing.T) {
+	t.Parallel()
 	for _, from := range []Status{StatusUnclassified, StatusClassified, StatusInProgress, StatusVerifying} {
 		t.Run(string(from), func(t *testing.T) {
 			s := newStoreForTest(t)
@@ -840,6 +867,7 @@ func TestReject_OfADirectCompletionReturnsToAParentDirectHold(t *testing.T) {
 // ④ 差し戻した保留から、親が再び complete-direct で完了確認待ちへ進められ、承認の要約には新しい記録が出る。
 // もう一度差し戻しても、同じ元の状態の保留へ戻る。
 func TestReject_DirectCompletionCanBeCompletedAgainAndRejectedAgain(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, s, StatusClassified)
@@ -881,6 +909,7 @@ func TestReject_DirectCompletionCanBeCompletedAgainAndRejectedAgain(t *testing.T
 
 // ⑤ 通常の完了（T8 由来）の差し戻しは従来どおり着手中へ戻り、保留は立たない。
 func TestReject_OfAnOrdinaryCompletionStillReturnsToInProgressWithoutAHold(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusVerifying)
@@ -909,6 +938,7 @@ func TestReject_OfAnOrdinaryCompletionStillReturnsToInProgressWithoutAHold(t *te
 
 // 別の課題が direct 由来でも、通常の課題の差し戻しには影響しない（値は課題ごと）。
 func TestReject_DirectFlagIsPerChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	direct := holdAsParentDirect(t, s, StatusClassified)
@@ -926,6 +956,7 @@ func TestReject_DirectFlagIsPerChallenge(t *testing.T) {
 
 // ⑥ 値は T17 で真、ほかのすべての遷移で偽。完了確認待ちを出るとき（T13・T14・T15・T16）に消える。
 func TestCompletionDirect_IsTrueOnlyAfterT17AndClearedWhenLeaving(t *testing.T) {
+	t.Parallel()
 	enter := func(t *testing.T, s *Store) *Challenge {
 		t.Helper()
 		c := holdAsParentDirect(t, s, StatusClassified)
@@ -998,6 +1029,7 @@ func TestCompletionDirect_IsTrueOnlyAfterT17AndClearedWhenLeaving(t *testing.T) 
 // 承認の要約が「いまの完了確認待ちが T17 から来たか」を見るのは、作業ログではなく課題の記録（#481）。
 // 作業ログの行が無くても（取り込んだ・手で直したストア）、値が真なら記録を見せる。
 func TestApproval_DirectCompletionFollowsTheRecordNotTheActivityLog(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, s, StatusClassified)
@@ -1022,6 +1054,7 @@ func TestApproval_DirectCompletionFollowsTheRecordNotTheActivityLog(t *testing.T
 
 // ストアの書き出し・再構築（M5 S1）で値が往復する。
 func TestExportImport_CarriesTheCompletionDirectFlag(t *testing.T) {
+	t.Parallel()
 	src, _ := newWorkspaceStore(t)
 	fixedActor(t, "alice")
 	c := holdAsParentDirect(t, src, StatusClassified)
@@ -1052,6 +1085,7 @@ func TestExportImport_CarriesTheCompletionDirectFlag(t *testing.T) {
 // 計画承認待ちの課題で、親が直接行う保留を立て、完了として記録し、差し戻されたら親が直接行う保留へ戻る
 // （#519）。承認を待っている計画は一連の流れを通して残る。
 func TestPlanApproval_ParentDirectHoldCompleteDirectAndRejectKeepThePlan(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -1093,6 +1127,7 @@ func TestPlanApproval_ParentDirectHoldCompleteDirectAndRejectKeepThePlan(t *test
 
 // 計画承認待ちから立てた保留を回答で解くと、計画承認待ちへ戻り、承認待ちの計画は残る。
 func TestPlanApproval_AnswerReturnsToPlanApprovalAndKeepsThePlan(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -1128,6 +1163,7 @@ func holdFromPlanApprovalForTest(t *testing.T, s *Store) *Challenge {
 // 計画承認待ちから立てた親が直接行う保留のあいだは、計画の承認（T5）は invalid_transition で断られ、
 // 状態・計画・作業ログが変わらない（#519）。
 func TestPlanApproval_ParentDirectHoldBlocksPlanApprovalAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdFromPlanApprovalForTest(t, s)
@@ -1164,6 +1200,7 @@ func TestPlanApproval_ParentDirectHoldBlocksPlanApprovalAndChangesNothing(t *tes
 // 保留中と差し戻し後の課題は、委譲の対象になりうる承認済みで spec つきの計画を持たせ、状態だけが
 // 外れる理由になるようにする。
 func TestPlanApproval_ParentDirectHoldIsNotADelegationOrJ2TargetBeforeAndAfterReject(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	s := f.s
 	fixedActor(t, "alice")
@@ -1223,6 +1260,7 @@ func TestPlanApproval_ParentDirectHoldIsNotADelegationOrJ2TargetBeforeAndAfterRe
 // 計画承認待ちから立てた親が直接行う保留のあいだは計画の承認の依頼（承認の要約・カードの approve_plan）が
 // 出ず、回答で計画承認待ちへ戻ると再び出て、承認（T5）すると保留の前から残っていた計画のまま着手中へ進む（#519）。
 func TestPlanApproval_AnswerRestoresTheApprovalRequestAndApprovalProceedsWithTheKeptPlan(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdFromPlanApprovalForTest(t, s)
@@ -1282,6 +1320,7 @@ func TestPlanApproval_AnswerRestoresTheApprovalRequestAndApprovalProceedsWithThe
 // 計画を持たず（計画は計画の承認のときだけ）、親が直接行った完了の記録を持つ（#519。承認画面の API の形への
 // 変換は internal/view の TestFromApprovalPreview_CompletionWithDirectCompletionHasNoPlan が確かめる）。
 func TestPlanApproval_CompletionSummaryAfterCompleteDirectHasDirectCompletionAndNoPlan(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := holdFromPlanApprovalForTest(t, s)

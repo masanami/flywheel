@@ -14,6 +14,7 @@ import (
 // 規則（ポリシー・冪等な作成）は internal/core/ingest_test.go が検証する。
 
 func TestRunShow_SourceBindingNullForPlainCreatedChallenge(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 
@@ -24,6 +25,7 @@ func TestRunShow_SourceBindingNullForPlainCreatedChallenge(t *testing.T) {
 }
 
 func TestRunShow_SourceBindingReflectsIngestedChallenge(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 
@@ -82,6 +84,7 @@ func TestRunShow_SourceBindingReflectsIngestedChallenge(t *testing.T) {
 }
 
 func TestRunShow_TextOutputShowsNoSourceBinding(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	if text := runText(t, ws, "show", id); !strings.Contains(text, "取り込み元:    -\n") {

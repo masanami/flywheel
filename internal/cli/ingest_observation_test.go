@@ -13,6 +13,7 @@ import (
 // comments_count・upstream_updated_at・unread が反映後の値になる。
 
 func TestIngest_JSONItem_ReflectsObservationValues(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	const repo = "owner/observation-json-repo"
 	decl := `{
@@ -67,6 +68,7 @@ func TestIngest_JSONItem_ReflectsObservationValues(t *testing.T) {
 // 場合も [] のまま。ingestResultJSON はネットワークにも DB にも触れない
 // 純粋な変換関数なので、core.IngestItemResult を直接組み立てて検証する。
 func TestIngestResultJSON_TotalFailureItem_NullsOutUnknownFields(t *testing.T) {
+	t.Parallel()
 	errMsg := "boom"
 	result := &core.IngestResult{Sources: []core.SourceIngestResult{{
 		ID:                    "s",

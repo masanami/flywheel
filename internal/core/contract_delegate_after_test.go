@@ -20,6 +20,7 @@ func waitingOut(ra *ContractRequestedAction, cost *float64) ContractLaunchOutput
 // decider と kind による写し分け: observe は読み直し、それ以外（human・parent・any の answer・approve）はオーナーの保留。
 // J4 の口（ContractPollInput.Judgment）が無いときは、decider が parent の answer もオーナーの保留へ写す（J4 の経路は judgment_j4_test.go）。
 func TestPollContractRuns_WaitingIsMappedByKindAndDecider(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		kind, decider string
 		wantHold      bool
@@ -56,6 +57,7 @@ func TestPollContractRuns_WaitingIsMappedByKindAndDecider(t *testing.T) {
 
 // requested_action の選択肢は、保留の問いに選択肢として並ぶ。
 func TestPollContractRuns_WaitingHoldShowsTheOptions(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -75,6 +77,7 @@ func TestPollContractRuns_WaitingHoldShowsTheOptions(t *testing.T) {
 
 // 保留への答えは commands.resume で返り、同じ答えを二重に返さない。
 func TestPollContractRuns_AnswerIsReturnedByResumeOnce(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -104,6 +107,7 @@ func TestPollContractRuns_AnswerIsReturnedByResumeOnce(t *testing.T) {
 
 // resume の引数の {answer} に答えが入る（引数の要素の数は変わらない）。
 func TestFillContractArgs_AnswerIsSubstitutedLast(t *testing.T) {
+	t.Parallel()
 	got, err := fillContractArgs([]string{"t", "resume", "{run_id}", "--answer={answer}"}, "C-1", nil, "ext-9", contractAnswer{Choice: "a {run_id} b"})
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +119,7 @@ func TestFillContractArgs_AnswerIsSubstitutedLast(t *testing.T) {
 
 // 合計を上回ったら cancel で中止して保留にする。同額では中止しない。
 func TestPollContractRuns_OverBudgetCancelsAndHolds(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t) // run の上限額 5 USD
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -147,6 +152,7 @@ func TestPollContractRuns_OverBudgetCancelsAndHolds(t *testing.T) {
 
 // 中止が失敗したときも保留にし、費用が増え続けうることを問いに書く。自動ではやり直さない。
 func TestPollContractRuns_CancelFailureHoldsAndIsNotRetried(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -172,6 +178,7 @@ func TestPollContractRuns_CancelFailureHoldsAndIsNotRetried(t *testing.T) {
 
 // succeeded で課題は着手中から検証中へ進み、成果物が J5 から見える。
 func TestPollContractRuns_SucceededMovesTheChallengeToVerifyingAndJ5SeesTheArtifacts(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -194,6 +201,7 @@ func TestPollContractRuns_SucceededMovesTheChallengeToVerifyingAndJ5SeesTheArtif
 
 // 委譲の run と契約の run のどちらから成果物を取っても、J5 の入力は同じになる。
 func TestLoadJ5Context_SameForDelegateAndContractRuns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newContractFixture(t)
 	other := f.newInProgress(t, "D", "P2", planSpec(nil))
@@ -237,6 +245,7 @@ func TestLoadJ5Context_SameForDelegateAndContractRuns(t *testing.T) {
 
 // cli 形態の操作の計画で委譲するとき、claude の子も J3 も起動せず、宣言の start を呼んで実行 ID を記録し、その周の委譲を終える。
 func TestRunDelegation_CLIPlanStartsTheContractWithoutAChild(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	in := f.input(f.cycle(t, 300), idPtr(f.cid))
 	in.Contract = f.client
@@ -267,6 +276,7 @@ func TestRunDelegation_CLIPlanStartsTheContractWithoutAChild(t *testing.T) {
 
 // 周（RunDelegation）は、終わっていない契約の run を持つ課題について状態を読む。
 func TestRunDelegation_PollsUnfinishedContractRuns(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -285,6 +295,7 @@ func TestRunDelegation_PollsUnfinishedContractRuns(t *testing.T) {
 // resume だけが取り込み元の差し込みを要する宣言に変わっても、答えが無い確認（status）では resume の引数を確かめず、状態が読まれて
 // 終わりを検知できる。答えがあるときだけ resume の引数を確かめ、埋められなければ答えを失わずにエラーにする。
 func TestPollContractRuns_ResumeNeedingSourceIsOnlyCheckedWhenAnswering(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -301,6 +312,7 @@ func TestPollContractRuns_ResumeNeedingSourceIsOnlyCheckedWhenAnswering(t *testi
 }
 
 func TestPollContractRuns_AnswerWithUnfillableResumeKeepsTheAnswer(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -328,6 +340,7 @@ func TestPollContractRuns_AnswerWithUnfillableResumeKeepsTheAnswer(t *testing.T)
 // 委譲は start を呼ばず not_started（plan_unavailable）になる。StartContractDelegation も起動の前に J2 と同じ検査を通し、
 // start を呼ばずに ErrValidation を返す。
 func TestRunDelegation_DeclarationChangedAfterJ2DoesNotStartTheContract(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, cmd string }{
 		{"start-outside-closed-set", "start"}, {"start-needs-source", "start"},
 		{"status-outside-closed-set", "status"}, {"status-needs-source", "status"},
@@ -365,6 +378,7 @@ func TestRunDelegation_DeclarationChangedAfterJ2DoesNotStartTheContract(t *testi
 // 状態の確認の出力の型が合わない（malformed。例: requested_action.options に文字列でない要素がある）ときは、契約の状態を
 // 更新せず、課題を保留にする。問いに選択肢を文字列にして並べない。
 func TestPollContractRuns_MalformedStatusHoldsWithoutUpdatingTheContract(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -391,6 +405,7 @@ func TestPollContractRuns_MalformedStatusHoldsWithoutUpdatingTheContract(t *test
 
 // ⑤ 観測の待ち（observe）を読み直すときは、status に加えて答え無しの resume を 1 回呼び、返った状態を写す。
 func TestPollContractRuns_ObserveWaitIsResumedWithoutAnAnswerWhenReadAgain(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -423,6 +438,7 @@ func TestPollContractRuns_ObserveWaitIsResumedWithoutAnAnswerWhenReadAgain(t *te
 
 // 答え無しの resume が失敗しても課題を保留にせず、次の周の読み直しで再び 1 回呼ぶだけにする。
 func TestPollContractRuns_ObserveResumeFailureDoesNotHoldAndIsCalledAgainNextCycle(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -448,6 +464,7 @@ func TestPollContractRuns_ObserveResumeFailureDoesNotHoldAndIsCalledAgainNextCyc
 
 // review・answer・approve の待ちでは、読み直しても答え無しの resume を呼ばない。
 func TestPollContractRuns_NonObserveWaitsAreNotResumedWithoutAnAnswer(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"review", "answer", "approve"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newContractFixture(t)

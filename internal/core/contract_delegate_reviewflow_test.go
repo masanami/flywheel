@@ -54,6 +54,7 @@ func (f *reviewFlowFixture) toVerifying(t *testing.T) {
 
 // (1) waiting・review・成果物ありは、run の終わりを待たずに成果物を取り込み、課題を検証中へ進める。
 func TestPollContractRuns_ReviewWaitWithArtifactMovesTheChallengeToVerifyingAndKeepsTheRunOpen(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.toVerifying(t)
 	if n := f.count(t, `SELECT COUNT(*) FROM run_artifact WHERE kind = 'pr' AND ref = '`+reviewPRURL+`'`); n != 1 {
@@ -75,6 +76,7 @@ func TestPollContractRuns_ReviewWaitWithArtifactMovesTheChallengeToVerifyingAndK
 
 // レビュー待ちでも成果物が無ければ検証できないので、他の求めと同じくオーナーの保留へ写す。
 func TestPollContractRuns_ReviewWaitWithoutArtifactIsHeldForTheOwner(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -90,6 +92,7 @@ func TestPollContractRuns_ReviewWaitWithoutArtifactIsHeldForTheOwner(t *testing.
 
 // 成果物が pr・branch・commit のどれでもないとき（other だけ）は検証中へ進めない。
 func TestPollContractRuns_ReviewWaitWithOnlyOtherArtifactIsNotSubmitted(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -107,6 +110,7 @@ func TestPollContractRuns_ReviewWaitWithOnlyOtherArtifactIsNotSubmitted(t *testi
 // (2) J5 が not_met なら、同じ契約の run へ resume（選択肢 respond・添え書きに差し戻しの理由）を返し、課題は着手中のまま。
 // 次のレビュー待ちで、また検証中へ進む。
 func TestPollContractRuns_NotMetIsReturnedByResumeAndTheNextReviewWaitVerifiesAgain(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.toVerifying(t)
 	if _, err := f.s.VerifyAutoJ5(context.Background(), f.j5.input(f.cycle(t, 300), &f.cid)); err != nil {
@@ -136,6 +140,7 @@ func TestPollContractRuns_NotMetIsReturnedByResumeAndTheNextReviewWaitVerifiesAg
 
 // 差し込んだ値の中の波括弧は、後の差し込みとして読まない。
 func TestFillContractArgs_ValuesAreNotReSubstituted(t *testing.T) {
+	t.Parallel()
 	got, err := fillContractArgs([]string{"{choice}|{note}"}, "C-1", nil, "ext", contractAnswer{Choice: "respond", Note: "x {answer} {choice}"})
 	if err != nil || got[0] != "respond|x {answer} {choice}" {
 		t.Fatalf("got %v err %v", got, err)
@@ -144,6 +149,7 @@ func TestFillContractArgs_ValuesAreNotReSubstituted(t *testing.T) {
 
 // 差し戻しが上限に達したら、resume を返さず課題を保留にする。
 func TestPollContractRuns_NotMetAtTheReworkLimitHoldsInsteadOfResuming(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.agent.ReworkLimit = 1
 	f.toVerifying(t)
@@ -161,6 +167,7 @@ func TestPollContractRuns_NotMetAtTheReworkLimitHoldsInsteadOfResuming(t *testin
 
 // (3) 本番反映（release が executed）の後に ready を返し、接続ツールの run が succeeded で終わる。
 func TestPollContractRuns_AfterTheReleaseIsExecutedReadyIsReturnedAndTheRunEnds(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.toVerifying(t)
 	// 本番反映の前は何も返さない。
@@ -247,6 +254,7 @@ func (f *reviewFlowFixture) reopenAfterRelease(t *testing.T, advance func()) {
 // (4) 本番反映でマージできず T18 で着手中へ戻った後は、同じ契約の run へ respond と理由を 1 回だけ返す（ready は返さない）。
 // 課題は着手中のまま。resume が同じレビュー待ちを返しても取り込み直さず、次の周で状態を読み直してレビュー待ちなら検証中へ進む。
 func TestPollContractRuns_ReopenedForReleaseIsReturnedByRespondOnceAndVerifiesAgain(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	cur := time.Now()
 	f.s.now = func() time.Time { return cur }
@@ -281,6 +289,7 @@ func TestPollContractRuns_ReopenedForReleaseIsReturnedByRespondOnceAndVerifiesAg
 
 // (c) T18 の記録が無い着手中の課題は、成果物つきのレビュー待ちを読んでも resume を呼ばず、検証中へ進む。
 func TestPollContractRuns_InProgressWithoutReopenDoesNotResumeAndVerifies(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -326,6 +335,7 @@ func (f *reviewFlowFixture) rejectCompletion(t *testing.T, reason string) {
 // (d) 人が完了の承認を差し戻した（T15）後は、同じ契約の run へ respond と差し戻しの理由を 1 回だけ返す。
 // 課題は着手中のまま。resume が同じレビュー待ちを返しても取り込み直さず、次のレビュー待ちで再び検証中へ進む。
 func TestPollContractRuns_CompletionRejectionIsReturnedByRespondOnceAndVerifiesAgain(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	cur := time.Now()
 	f.s.now = func() time.Time { return cur }
@@ -359,6 +369,7 @@ func TestPollContractRuns_CompletionRejectionIsReturnedByRespondOnceAndVerifiesA
 
 // (e) 計画の承認での差し戻し（kind=plan）の記録は、着手中の課題でも respond で返さない。
 func TestPollContractRuns_PlanRejectionIsNotReturnedByRespond(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -385,6 +396,7 @@ func TestPollContractRuns_PlanRejectionIsNotReturnedByRespond(t *testing.T) {
 // (d2) 未配達の完了の差し戻しが 2 件たまっていたら、1 回の respond の添え書きへ両方の理由を古い順にまとめて返す。
 // その後の周では返さない（resume は増えない）。
 func TestPollContractRuns_StackedCompletionRejectionsAreReturnedOldestFirstInOneRespond(t *testing.T) {
+	t.Parallel()
 	f := newReviewFlowFixture(t)
 	cur := time.Now()
 	f.s.now = func() time.Time { return cur }

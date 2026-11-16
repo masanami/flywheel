@@ -78,6 +78,7 @@ func wantCols(t *testing.T, got relayCols, ch, ver string, session, quote *strin
 
 // AC-249: 手がかりの空な relayed は Confirm にも触れず verification_rejected。
 func TestVerify_RelayedWithoutEvidenceIsRejectedWithoutConfirm(t *testing.T) {
+	t.Parallel()
 	for _, ev := range []RelayEvidence{{}, {Session: "s"}, {Quote: "q"}, {Session: "  ", Quote: "q"}, {Session: "s", Quote: "\t"}} {
 		fv := &fakeVerifier{method: VerificationRelayed, actor: "alice", evidence: ev}
 		if _, err := Verify(ChannelCLI, fv, "s", "C-1"); !errors.Is(err, ErrVerificationRejected) {
@@ -93,6 +94,7 @@ func TestVerify_RelayedWithoutEvidenceIsRejectedWithoutConfirm(t *testing.T) {
 
 // (ui, relayed)・(invoker, relayed) は登録簿に無い。
 func TestVerify_RelayedOnlyRegisteredForCLI(t *testing.T) {
+	t.Parallel()
 	ev := RelayEvidence{Session: "s", Quote: "q"}
 	for _, ch := range []Channel{ChannelUI, ChannelInvoker} {
 		if _, err := Verify(ch, &fakeVerifier{method: VerificationRelayed, actor: "a", evidence: ev}, "s", "C-1"); !errors.Is(err, ErrVerificationRejected) {
@@ -108,6 +110,7 @@ func TestVerify_RelayedOnlyRegisteredForCLI(t *testing.T) {
 
 // AC-251: relayed 以外の方式は、Verifier が手がかりを返しても Attestation に載せない。
 func TestVerify_NonRelayedDropsEvidence(t *testing.T) {
+	t.Parallel()
 	fv := &fakeVerifier{method: VerificationTTYConfirm, actor: "alice", evidence: RelayEvidence{Session: "s", Quote: "q"}}
 	att, err := Verify(ChannelCLI, fv, "s", "C-1")
 	if err != nil {
@@ -120,6 +123,7 @@ func TestVerify_NonRelayedDropsEvidence(t *testing.T) {
 
 // AC-235/238/240: 計画の承認（relayed）。
 func TestExecuteApproval_RelayedRecordsEvidenceInApprovalAndActivity(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -141,6 +145,7 @@ func TestExecuteApproval_RelayedRecordsEvidenceInApprovalAndActivity(t *testing.
 }
 
 func TestExecuteApproval_RelayedRejectionRecordsEvidence(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -157,6 +162,7 @@ func TestExecuteApproval_RelayedRejectionRecordsEvidence(t *testing.T) {
 
 // AC-251: tty_confirm の記録の relay_* は NULL で、作業ログにも relay_* が無い。
 func TestExecuteApproval_TTYConfirmLeavesRelayNullAndOutOfActivity(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -178,6 +184,7 @@ func TestExecuteApproval_TTYConfirmLeavesRelayNullAndOutOfActivity(t *testing.T)
 
 // AC-236/237/239/240: 回答の経路・方式と手がかり。
 func TestExecuteAnswer_RecordsAnsweredChannelVerificationAndEvidence(t *testing.T) {
+	t.Parallel()
 	answer := func(t *testing.T, att func(id string) Attestation) (*Store, string) {
 		s := newStoreForTest(t)
 		fixedActor(t, "alice")
@@ -215,6 +222,7 @@ func TestExecuteAnswer_RecordsAnsweredChannelVerificationAndEvidence(t *testing.
 
 // AC-238/240: 不可逆操作の承認（relayed）と、完了の承認に伴う release の一括承認。
 func TestExecuteOperationApproval_RelayedRecordsEvidence(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -240,6 +248,7 @@ func TestExecuteOperationApproval_RelayedRecordsEvidence(t *testing.T) {
 }
 
 func TestExecuteApproval_RelayedCompletionApprovalRecordsEvidenceOnAutoApprovedRelease(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -262,6 +271,7 @@ func TestExecuteApproval_RelayedCompletionApprovalRecordsEvidenceOnAutoApprovedR
 
 // AC-250: 予算の増額（relayed）。
 func TestExecuteBudget_RelayedRecordsEvidence(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", budgetSpec(50, 30))
 	p, err := f.s.PrepareBudget(context.Background(), id, f.agent, 80, nil)
@@ -282,6 +292,7 @@ func TestExecuteBudget_RelayedRecordsEvidence(t *testing.T) {
 // AC-249: 手がかりの無い relayed の Attestation（パッケージ内でだけ組める）を
 // Execute* に直接渡しても、何も書かず verification_rejected になる。
 func TestExecute_RelayedAttestationWithoutEvidenceIsRejectedAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -312,6 +323,7 @@ func TestExecute_RelayedAttestationWithoutEvidenceIsRejectedAndWritesNothing(t *
 // AC-252: GetChallenge（show --json の元）が承認・保留の会話の手がかりを返す。
 // relayed は両方に値、tty_confirm・未回答は nil。
 func TestGetChallenge_ExposesRelayEvidenceOfApprovalAndHold(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
@@ -392,6 +404,7 @@ func TestGetChallenge_ExposesRelayEvidenceOfApprovalAndHold(t *testing.T) {
 // AC-252: 端末の確認（tty_confirm）で回答した保留は、経路・方式が入り手がかりは nil。
 // 返す Hold と GetChallenge（show --json の元）の両方で確かめる。
 func TestExecuteAnswer_TTYConfirmReturnsChannelVerificationAndNilEvidence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
@@ -440,6 +453,7 @@ func wantApprovalRelay(t *testing.T, name string, a Approval, verification, sess
 
 // AC-252: 不可逆操作（release）の承認が返す Approval と GetChallenge の承認に手がかりが載る。
 func TestExecuteOperationApproval_ReturnsRelayEvidence(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, verification, session, quote string
 	}{{"relayed", "relayed", "so", "qo"}, {"tty_confirm", "tty_confirm", "", ""}} {
@@ -478,6 +492,7 @@ func TestExecuteOperationApproval_ReturnsRelayEvidence(t *testing.T) {
 
 // AC-252: 予算の承認が返す Approval と GetChallenge の承認に手がかりが載る。
 func TestExecuteBudget_ReturnsRelayEvidence(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, verification, session, quote string
 	}{{"relayed", "relayed", "sb", "qb"}, {"tty_confirm", "tty_confirm", "", ""}} {

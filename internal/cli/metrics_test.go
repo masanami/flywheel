@@ -59,6 +59,7 @@ func asMap(t *testing.T, v any) map[string]any {
 }
 
 func TestMetrics_PeriodSelectsTargetsInclusivelyAndEchoesThePeriod(t *testing.T) {
+	t.Parallel()
 	ws := metricsWorkspace(t)
 	out := runJSON(t, ws, "metrics", "--since", "2026-03-01", "--until", "2026-03-03")
 	if out["target_challenges"] != 2.0 {
@@ -88,6 +89,7 @@ func TestMetrics_PeriodSelectsTargetsInclusivelyAndEchoesThePeriod(t *testing.T)
 }
 
 func TestMetrics_ZeroTargetsHaveNullValues(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	out := runJSON(t, ws, "metrics")
 	ms := asMap(t, out["metrics"])
@@ -100,6 +102,7 @@ func TestMetrics_ZeroTargetsHaveNullValues(t *testing.T) {
 }
 
 func TestMetrics_InvalidDatesAreUsageErrors(t *testing.T) {
+	t.Parallel()
 	ws := metricsWorkspace(t)
 	for _, args := range [][]string{
 		{"metrics", "--since", "2026-3-1"},
@@ -151,9 +154,10 @@ func TestMetrics_JSONHasDefinitionsForEveryMetricAndIsDeterministic(t *testing.T
 }
 
 func TestMetrics_TextShowsPeriodTargetsMetricsAndOccurrences(t *testing.T) {
+	t.Parallel()
 	ws := metricsWorkspace(t)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"metrics", "--since", "2026-03-01", "--until", "2026-03-03", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 {
+	if code := runWithLookPath([]string{"metrics", "--since", "2026-03-01", "--until", "2026-03-03", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -167,6 +171,7 @@ func TestMetrics_TextShowsPeriodTargetsMetricsAndOccurrences(t *testing.T) {
 // AC-288・AC-300・AC-304・AC-305: 判断点も claude も起動せず、ストアの行を変えず、端末なし・CLAUDECODE あり・
 // connectors.json なしで動く。
 func TestMetrics_ReadsOnlyWithoutClaudeConnectorsOrTerminal(t *testing.T) {
+	parallelTools(t, false)
 	ws := metricsWorkspace(t)
 	if _, err := os.Stat(filepath.Join(ws, ".flywheel", "connectors.json")); err == nil {
 		t.Fatal("fixture unexpectedly has connectors.json")

@@ -21,6 +21,7 @@ func insertBindingForTest(t *testing.T, s *Store, cid int64, upstream, policy st
 }
 
 func TestGetChallenge_DependenciesAndDependents(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 5)
 	ctx := context.Background()
 	if _, err := s.AddDependencies(ctx, ChannelCLI, "C-1", []string{"C-2", "C-3", "C-4"}); err != nil {
@@ -63,6 +64,7 @@ func TestGetChallenge_DependenciesAndDependents(t *testing.T) {
 }
 
 func TestGetChallenge_CyclicDependencyIsNotSatisfiedEvenWhenDone(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 2)
 	insertDepEdge(t, s, 1, 2)
 	insertDepEdge(t, s, 2, 1)
@@ -77,6 +79,7 @@ func TestGetChallenge_CyclicDependencyIsNotSatisfiedEvenWhenDone(t *testing.T) {
 }
 
 func TestGetOverview_UnmetDependenciesAndCycleDiscrepancies(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 7)
 	ctx := context.Background()
 	// C-1 は C-2（未完了）と C-3（完了・release 済み）に依存。C-4 は依存なし。
@@ -143,6 +146,7 @@ func TestGetOverview_UnmetDependenciesAndCycleDiscrepancies(t *testing.T) {
 }
 
 func TestGetOverview_NoCycleNoDiscrepancy(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 3)
 	if _, err := s.AddDependencies(context.Background(), ChannelCLI, "C-1", []string{"C-2"}); err != nil {
 		t.Fatal(err)
@@ -159,6 +163,7 @@ func TestGetOverview_NoCycleNoDiscrepancy(t *testing.T) {
 // 輪に含まれる課題が上流の食い違いも持つとき、要素は 1 つだけで kinds に両方が入る（輪の課題ごとに要素を 1 つ）。
 // 食い違いは課題 ID の昇順（上流の食い違いの C-9 が、あとから足す輪の C-1・C-2 より後ろ）。
 func TestGetOverview_CycleMergesIntoExistingDiscrepancyAndOrdersByChallengeID(t *testing.T) {
+	t.Parallel()
 	s := depFixture(t, 9)
 	insertDepEdge(t, s, 1, 2)
 	insertDepEdge(t, s, 2, 1)

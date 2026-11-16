@@ -89,7 +89,7 @@ func miMergeInRoutes(v, h string) []fakeGHRoute {
 func runCLIRaw(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	code = run(args, strings.NewReader(""), &out, &errOut, defaultCommands())
+	code = runWithLookPath(args, strings.NewReader(""), &out, &errOut, defaultCommands(), lookPathFor(t))
 	return code, out.String(), errOut.String()
 }
 
@@ -127,6 +127,7 @@ func concatRoutes(rs ...[]fakeGHRoute) []fakeGHRoute {
 // --- D: 完了の承認 ---
 
 func TestMergeIn_RelayedCompletionApprovesTheMovedHeadAndPrintsWhatCameIn(t *testing.T) {
+	parallelTools(t, false)
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miMergeInRoutes(v, h)))
 
@@ -209,6 +210,7 @@ func TestMergeIn_TerminalSummaryShowsTheVerifiedHeadTheCommitsAndTheFixedDiffBef
 }
 
 func TestMergeIn_NotApprovedUnlessMergeInOnlyAndCIPasses(t *testing.T) {
+	parallelTools(t, false)
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	cases := []struct {
 		name   string
@@ -250,6 +252,7 @@ func TestMergeIn_NotApprovedUnlessMergeInOnlyAndCIPasses(t *testing.T) {
 
 // 検証の head と一致していれば、取り込みの判定は要らない（GitHub の比較を読まない）。
 func TestMergeIn_MatchingHeadNeedsNoComparison(t *testing.T) {
+	parallelTools(t, false)
 	h := releaseHead(1, 0)
 	f := newCompletionFixture(t, map[int]string{1: h}, releasePRURL(1))
 	f.verified(t, releasePRURL(1), h)
@@ -268,6 +271,7 @@ func TestMergeIn_MatchingHeadNeedsNoComparison(t *testing.T) {
 
 // (d) 別の課題に付け直した release（op add で着手中でない課題に付けたもの）でも、同じ PR の検証の head と比べて同じ判定になる。
 func TestMergeIn_ReleaseAttachedToAnotherChallengeIsAssessedAgainstThePRsVerifiedHead(t *testing.T) {
+	parallelTools(t, false)
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miMergeInRoutes(v, h)))
 	// 検証の記録は元の課題 f.id の run にある。release は別の課題 C2 に付け直す。
@@ -295,6 +299,7 @@ func TestMergeIn_ReleaseAttachedToAnotherChallengeIsAssessedAgainstThePRsVerifie
 // --- D: 単独の承認と (ii) ---
 
 func TestMergeIn_SingleOperationApprovalOfAMergeInHead(t *testing.T) {
+	parallelTools(t, false)
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miMergeInRoutes(v, h)))
 	code, stdout, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.ops[0])...)
@@ -313,6 +318,7 @@ func TestMergeIn_SingleOperationApprovalOfAMergeInHead(t *testing.T) {
 
 // 課題が完了で、検証の後に取り込み以外の変更が入った release を承認しようとすると、承認せず、課題を着手中へ戻す。
 func TestMergeIn_SingleApprovalOfAContentChangeOnADoneChallengeReopensTheChallenge(t *testing.T) {
+	parallelTools(t, false)
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	routes := concatRoutes(miRoutes(1, h, "", "true"), []fakeGHRoute{
 		miCompareRoute(v, h, miCompare(2, []miCommit{{miLast, []string{v}, "add feature"}, {h, []string{miLast, miMain}, "Merge"}})),
@@ -344,6 +350,7 @@ func TestMergeIn_SingleApprovalOfAContentChangeOnADoneChallengeReopensTheChallen
 
 // 取得の失敗など、履歴が書き換わったと確かめられないときは、完了の課題でも戻さない。
 func TestMergeIn_SingleApprovalWhenTheComparisonIsUnavailableDoesNotReopen(t *testing.T) {
+	parallelTools(t, false)
 	h := releaseHead(1, 1)
 	f, _, _ := newMergeInFixture(t, miRoutes(1, h, "", "true"))
 	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
@@ -359,6 +366,7 @@ func TestMergeIn_SingleApprovalWhenTheComparisonIsUnavailableDoesNotReopen(t *te
 // --- show ---
 
 func TestShow_PendingReleaseWhoseHeadMovedShowsWhatCameIn(t *testing.T) {
+	parallelTools(t, false)
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miMergeInRoutes(v, h)))
 	doc := runJSON(t, f.ws, "show", f.id)
@@ -377,6 +385,7 @@ func TestShow_PendingReleaseWhoseHeadMovedShowsWhatCameIn(t *testing.T) {
 }
 
 func TestShow_NoHeadChangeKeyWhenTheHeadDidNotMove(t *testing.T) {
+	parallelTools(t, false)
 	h := releaseHead(1, 0)
 	f := newCompletionFixture(t, map[int]string{1: h}, releasePRURL(1))
 	f.verified(t, releasePRURL(1), h)
@@ -394,6 +403,7 @@ func execOpsJSON(t *testing.T, ws string, args ...string) map[string]any {
 }
 
 func TestOpExec_NotMergeableOnADoneChallengeMovesItBackToInProgress(t *testing.T) {
+	parallelTools(t, false)
 	ws, cid, op := execWorkspace(t)
 	routes := []fakeGHRoute{
 		{match: "repos/o/r/commits/" + execHead + "/check-runs?page=1&per_page=100", stdout: `{"total_count":0,"check_runs":[]}`},
@@ -431,6 +441,7 @@ func prMergedRoute(n int) []fakeGHRoute {
 }
 
 func TestOpExec_ClosesAPendingReleaseWhosePRWasMergedOutside(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	writePositionFileForTest(t, ws, "pos")
 	writeAgentJSONForTest(t, ws, `{"position_file": "position.md"}`)
@@ -475,6 +486,7 @@ func miTruncatedRoutes(v, h string) []fakeGHRoute {
 
 // 単独の承認は、判定できない理由（打ち切り）を要約に出し、人が承認すれば成立して、理由が JSON の undeterminable に出る。
 func TestUndeterminable_SingleApprovalByAHumanIsAcceptedWithTheReason(t *testing.T) {
+	parallelTools(t, false)
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
 	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
@@ -494,6 +506,7 @@ func TestUndeterminable_SingleApprovalByAHumanIsAcceptedWithTheReason(t *testing
 
 // 完了の承認と同時の承認は、判定できない release を外す（人が単独の承認で選ぶ）。
 func TestUndeterminable_CompletionApprovalStillExcludesIt(t *testing.T) {
+	parallelTools(t, false)
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
 	code, stdout, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.id)...)
@@ -508,6 +521,7 @@ func TestUndeterminable_CompletionApprovalStillExcludesIt(t *testing.T) {
 
 // 人が承認せず戻す方を選ぶ（approve <OP-ID> --reopen）。core が自分で人間待ちと確かめたときだけ戻る。
 func TestUndeterminable_HumanCanReopenTheChallengeInstead(t *testing.T) {
+	parallelTools(t, false)
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
 	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
@@ -526,6 +540,7 @@ func TestUndeterminable_HumanCanReopenTheChallengeInstead(t *testing.T) {
 
 // 人間待ちでない release（取り込みだけ）は --reopen で戻せない。
 func TestUndeterminable_ReopenIsRefusedWhenCoreDoesNotSeeAHumanWait(t *testing.T) {
+	parallelTools(t, false)
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miMergeInRoutes(v, h)))
 	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
@@ -539,6 +554,7 @@ func TestUndeterminable_ReopenIsRefusedWhenCoreDoesNotSeeAHumanWait(t *testing.T
 }
 
 func TestUndeterminable_ReopenFlagIsOnlyForOperationIDs(t *testing.T) {
+	parallelTools(t, false)
 	f, _, _ := newMergeInFixture(t, nil)
 	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.id, "--reopen")...)
 	if code == 0 || !strings.Contains(stderr, "usage_error") {

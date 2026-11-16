@@ -28,6 +28,7 @@ func newWorkspaceStoreForTest(t *testing.T) (*Store, string) {
 	if err != nil {
 		t.Fatalf("OpenWorkspace() setup error = %v", err)
 	}
+	registerTestStore(t, s) // fixedActor の対象にする
 	t.Cleanup(func() { _ = s.Close() })
 	return s, dir
 }
@@ -39,7 +40,8 @@ func assertNothingWritten(t *testing.T, dir, before string) {
 	}
 }
 
-func TestUIRefusedOperationApprovalWritesNothing(t *testing.T) { // AC-169
+func TestUIRefusedOperationApprovalWritesNothing(t *testing.T) {
+	t.Parallel() // AC-169
 	s, dir := newWorkspaceStoreForTest(t)
 	fixedActor(t, "alice")
 	_, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -60,7 +62,8 @@ func TestUIRefusedOperationApprovalWritesNothing(t *testing.T) { // AC-169
 	}
 }
 
-func TestUIRefusedOperationRejectionWritesNothing(t *testing.T) { // AC-170
+func TestUIRefusedOperationRejectionWritesNothing(t *testing.T) {
+	t.Parallel() // AC-170
 	s, dir := newWorkspaceStoreForTest(t)
 	fixedActor(t, "alice")
 	_, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -81,7 +84,8 @@ func TestUIRefusedOperationRejectionWritesNothing(t *testing.T) { // AC-170
 	}
 }
 
-func TestUIRefusedBudgetIncreaseWritesNothing(t *testing.T) { // AC-171（存在する課題・承認済みの計画に対して呼ぶ）
+func TestUIRefusedBudgetIncreaseWritesNothing(t *testing.T) {
+	t.Parallel() // AC-171（存在する課題・承認済みの計画に対して呼ぶ）
 	s, dir := newWorkspaceStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)

@@ -97,6 +97,7 @@ func mustCreateChallengeInternalID(t *testing.T, s *Store, title string) int64 {
 // --- run: 作成・取得 ---
 
 func TestInsertRun_CreatesJudgmentRunReadableByID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "issue-1")
 
@@ -147,6 +148,7 @@ func TestInsertRun_CreatesJudgmentRunReadableByID(t *testing.T) {
 }
 
 func TestInsertRun_CreatesDelegateRunWithNullJudgmentAndOptionalRefs(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "issue-2")
 	planVersion := int64(3)
@@ -169,6 +171,7 @@ func TestInsertRun_CreatesDelegateRunWithNullJudgmentAndOptionalRefs(t *testing.
 }
 
 func TestInsertRun_RejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(in *insertRunInput){
 		"kind が閉集合外":               func(in *insertRunInput) { in.Kind = "other" },
 		"judgment な run に判断点が無い":   func(in *insertRunInput) { in.Judgment = "" },
@@ -208,6 +211,7 @@ func mustParseRunIDForTest(t *testing.T, id string) int64 {
 // --- run: AC-168 課題ごとの排他 ---
 
 func TestInsertRun_RejectsSecondActiveRunForSameChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "one active run")
 
@@ -229,6 +233,7 @@ func TestInsertRun_RejectsSecondActiveRunForSameChallenge(t *testing.T) {
 }
 
 func TestInsertRun_AllowsActiveRunForDifferentChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	first := mustCreateChallengeInternalID(t, s, "first")
 	second := mustCreateChallengeInternalID(t, s, "second")
@@ -242,6 +247,7 @@ func TestInsertRun_AllowsActiveRunForDifferentChallenge(t *testing.T) {
 }
 
 func TestInsertRun_AllowsNewActiveRunAfterFirstEnded(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "ends then new")
 
@@ -264,6 +270,7 @@ func TestInsertRun_AllowsNewActiveRunAfterFirstEnded(t *testing.T) {
 }
 
 func TestLoadActiveRunByChallengeID_ReturnsActiveRunAndNilAfterItEnds(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "active run lookup")
 
@@ -296,6 +303,7 @@ func TestLoadActiveRunByChallengeID_ReturnsActiveRunAndNilAfterItEnds(t *testing
 }
 
 func TestLoadActiveRunByChallengeID_ReturnsNilWhenChallengeHasNoRun(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "no run yet")
 
@@ -311,6 +319,7 @@ func TestLoadActiveRunByChallengeID_ReturnsNilWhenChallengeHasNoRun(t *testing.T
 // --- run: 終了列の更新 ---
 
 func TestUpdateRunEnd_SetsEndedAtResultAndCostFields(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "ends with cost")
 	created, err := insertRunForTest(t, s, cid, validInsertRunInput())
@@ -369,6 +378,7 @@ func TestUpdateRunEnd_SetsEndedAtResultAndCostFields(t *testing.T) {
 // 確かめられない。生の列を直接 `error IS NULL` で読み、UPDATE が error 列自体を
 // 書き換えなくなる／"" を書き込むように壊れる変異の両方を検出できるようにする。
 func TestUpdateRunEnd_LeavesErrorUnsetWhenEmpty(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "no error")
 	created, err := insertRunForTest(t, s, cid, validInsertRunInput())
@@ -409,6 +419,7 @@ func isRunErrorColumnNullForTest(t *testing.T, s *Store, id int64) bool {
 }
 
 func TestUpdateRunEnd_RejectsMissingOrInvalidResult(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "invalid end")
 	created, err := insertRunForTest(t, s, cid, validInsertRunInput())
@@ -433,6 +444,7 @@ func TestUpdateRunEnd_RejectsMissingOrInvalidResult(t *testing.T) {
 }
 
 func TestUpdateRunEnd_ReturnsNilForMissingRun(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	got, err := updateRunEndForTest(t, s, 999999, updateRunEndInput{
 		EndedAt: time.Now(),
@@ -449,6 +461,7 @@ func TestUpdateRunEnd_ReturnsNilForMissingRun(t *testing.T) {
 // --- run: heartbeat ---
 
 func TestUpdateRunHeartbeat_UpdatesHeartbeatAt(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "heartbeat")
 	created, err := insertRunForTest(t, s, cid, validInsertRunInput())
@@ -468,6 +481,7 @@ func TestUpdateRunHeartbeat_UpdatesHeartbeatAt(t *testing.T) {
 }
 
 func TestUpdateRunHeartbeat_RejectsZeroTime(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "heartbeat invalid")
 	created, err := insertRunForTest(t, s, cid, validInsertRunInput())
@@ -514,6 +528,7 @@ func mustParseCycleIDForTest(t *testing.T, id string) int64 {
 }
 
 func TestInsertCycle_CreatesCycleReadableByID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	startedAt := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
 	created, err := insertCycleForTest(t, s, insertCycleInput{Trigger: "cron", StartedAt: startedAt, BudgetUSD: 1_000_000})
@@ -540,6 +555,7 @@ func TestInsertCycle_CreatesCycleReadableByID(t *testing.T) {
 }
 
 func TestInsertCycle_RejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	cases := map[string]insertCycleInput{
 		"trigger が空":      {Trigger: "", StartedAt: time.Now(), BudgetUSD: 1},
 		"started_at がゼロ値": {Trigger: "cron", BudgetUSD: 1},
@@ -556,6 +572,7 @@ func TestInsertCycle_RejectsInvalidInput(t *testing.T) {
 }
 
 func TestUpdateCycleEnd_RejectsInvalidResult(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	created, err := insertCycleForTest(t, s, insertCycleInput{Trigger: "cron", StartedAt: time.Now(), BudgetUSD: 1})
 	if err != nil {
@@ -610,6 +627,7 @@ func loadLockForTest(t *testing.T, s *Store, name string) (*lockRow, error) {
 }
 
 func TestInsertLock_CreatesAndReadsAndHeartbeatsAndDeletes(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cycle, err := insertCycleForTest(t, s, insertCycleInput{Trigger: "cron", StartedAt: time.Now(), BudgetUSD: 1})
 	if err != nil {
@@ -659,6 +677,7 @@ func TestInsertLock_CreatesAndReadsAndHeartbeatsAndDeletes(t *testing.T) {
 }
 
 func TestInsertLock_RejectsDuplicateName(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cycle, err := insertCycleForTest(t, s, insertCycleInput{Trigger: "cron", StartedAt: time.Now(), BudgetUSD: 1})
 	if err != nil {
@@ -676,6 +695,7 @@ func TestInsertLock_RejectsDuplicateName(t *testing.T) {
 }
 
 func TestInsertLock_RejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	cycle, err := insertCycleForTest(t, s, insertCycleInput{Trigger: "cron", StartedAt: time.Now(), BudgetUSD: 1})
 	if err != nil {
@@ -705,6 +725,7 @@ func TestInsertLock_RejectsInvalidInput(t *testing.T) {
 }
 
 func TestInsertRun_J8HasNoChallengeButOtherJudgmentsDo(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	in := validInsertRunInput()
 	in.Judgment, in.ChallengeVersion = judgmentJ8, 0

@@ -12,6 +12,7 @@ import (
 // （docs/features/m2-github-issue-ingest.md §実行の起点「flywheel ingest は、
 // 宣言のすべての取り込み元を宣言の順に処理する」）。
 func TestSelectSources_OmittedSourceIDReturnsAllInDeclarationOrder(t *testing.T) {
+	t.Parallel()
 	decl := &SourcesDeclaration{
 		Version: 1,
 		Sources: []SourceEntry{
@@ -32,6 +33,7 @@ func TestSelectSources_OmittedSourceIDReturnsAllInDeclarationOrder(t *testing.T)
 // 「flywheel ingest --source <id> は、指定した取り込み元のリポジトリだけを
 // 取得する」の前段（対象の絞り込み）を検証する。
 func TestSelectSources_KnownIDReturnsOnlyThatSource(t *testing.T) {
+	t.Parallel()
 	decl := &SourcesDeclaration{
 		Version: 1,
 		Sources: []SourceEntry{
@@ -52,6 +54,7 @@ func TestSelectSources_KnownIDReturnsOnlyThatSource(t *testing.T) {
 // --source <宣言に無い id> は、終了コード 1・validation_failed で終わり、
 // ストアが変わらない」の core 側の判定を検証する。
 func TestSelectSources_UnknownIDReturnsErrValidation(t *testing.T) {
+	t.Parallel()
 	decl := &SourcesDeclaration{
 		Version: 1,
 		Sources: []SourceEntry{
@@ -71,6 +74,7 @@ func TestSelectSources_UnknownIDReturnsErrValidation(t *testing.T) {
 // 許さないため、空文字列はどの宣言の id とも一致しえず、ErrValidation になる
 // べきである。
 func TestSelectSources_ExplicitEmptyStringReturnsErrValidation(t *testing.T) {
+	t.Parallel()
 	decl := &SourcesDeclaration{
 		Version: 1,
 		Sources: []SourceEntry{
@@ -87,6 +91,7 @@ func TestSelectSources_ExplicitEmptyStringReturnsErrValidation(t *testing.T) {
 // 取り込み元が1つも無いワークスペース（`{"version":1,"sources":[]}`）で
 // --source を省略したときに、空の一覧（エラーではない）を返すことを検証する。
 func TestSelectSources_EmptyDeclarationAndOmittedIDReturnsEmptySlice(t *testing.T) {
+	t.Parallel()
 	decl := &SourcesDeclaration{Version: 1, Sources: []SourceEntry{}}
 	got, err := SelectSources(decl, nil)
 	if err != nil {

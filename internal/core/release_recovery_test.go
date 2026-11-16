@@ -64,6 +64,7 @@ func (f *relFixture) challengeStatus(t *testing.T) (Status, int) {
 
 // (i) 完了の課題の release が not_mergeable になったら、試行を not_mergeable で閉じ、課題を着手中へ戻す。
 func TestRelease_NotMergeableOnADoneChallengeReopensItAndReplacesTheRelease(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	prior := insertCompletionApprovalForTest(t, f.s, f.cid)
 	no := false
@@ -98,6 +99,7 @@ func TestRelease_NotMergeableOnADoneChallengeReopensItAndReplacesTheRelease(t *t
 
 // 連続の上限に達した not_mergeable でも、完了の課題なら戻す。戻した理由は limit_reached。
 func TestRelease_NotMergeableAtTheFailureLimitReopensWithReasonLimitReached(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.limit = 2
 	f.fake.pr.Checks = []UpstreamCheck{{Status: "completed", Conclusion: "failure"}}
@@ -118,6 +120,7 @@ func TestRelease_NotMergeableAtTheFailureLimitReopensWithReasonLimitReached(t *t
 
 // 課題が完了でなければ、今までどおり数える待ちで、上限で取り消して pending へ戻す。
 func TestRelease_NotMergeableOnAChallengeThatIsNotDoneKeepsTheWaitAndLimitBehavior(t *testing.T) {
+	t.Parallel()
 	f := newRelFixtureAt(t, StatusInProgress)
 	f.limit = 2
 	no := false
@@ -140,6 +143,7 @@ func TestRelease_NotMergeableOnAChallengeThatIsNotDoneKeepsTheWaitAndLimitBehavi
 
 // (e) 承認していない head でマージ済みになった release は、pending へ戻さず closed（merged_unapproved）にする。
 func TestRelease_MergedUnapprovedClosesTheReleaseKeepingTheOccurrence(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.pr = UpstreamPullRequestChecks{State: "merged", Base: "main", HeadSHA: "zzz"}
 	item := f.run(t)
@@ -167,6 +171,7 @@ func TestRelease_MergedUnapprovedClosesTheReleaseKeepingTheOccurrence(t *testing
 
 // (e) 承認待ちの release の PR がマージ済みなら、周の release の段が closed（merged_outside）にする。
 func TestRelease_SweepClosesAPendingReleaseWhoseHasBeenMerged(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.setOpState(t, OperationStatePending)
 	f.fake.pr = UpstreamPullRequestChecks{State: "merged", Base: "main", HeadSHA: relHead}
@@ -198,6 +203,7 @@ func TestRelease_SweepClosesAPendingReleaseWhoseHasBeenMerged(t *testing.T) {
 
 // 承認待ちの release の PR がマージされずに閉じられていれば、周の release の段が closed（pr_closed）にする。
 func TestRelease_SweepClosesAPendingReleaseWhosePRWasClosedUnmerged(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.setOpState(t, OperationStatePending)
 	f.fake.pr = UpstreamPullRequestChecks{State: "closed", Base: "main", HeadSHA: relHead}
@@ -239,6 +245,7 @@ func TestRelease_SweepClosesAPendingReleaseWhosePRWasClosedUnmerged(t *testing.T
 // 課題が完了でなければ、人の登録（CreateOperation。`op add --kind release`）は同じ参照でも通る。
 // 委譲の照合の登録（createOperation の skipDuplicate）は、閉じた release を同じ参照の重複として数えて作らない。
 func TestRelease_PRClosedReleaseIsRestoredOnlyByAHumanRegistrationWhileNotDone(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newRelFixtureAt(t, StatusInProgress)
 	f.setOpState(t, OperationStatePending)
@@ -265,6 +272,7 @@ func TestRelease_PRClosedReleaseIsRestoredOnlyByAHumanRegistrationWhileNotDone(t
 
 // 課題が完了なら、pr_closed で閉じた release を人の登録で戻す道も、委譲の照合の道も断られる（ErrTerminalState。#539）。
 func TestRelease_PRClosedReleaseCannotBeRegisteredAgainWhenTheChallengeIsDone(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newRelFixture(t)
 	f.setOpState(t, OperationStatePending)
@@ -284,6 +292,7 @@ func TestRelease_PRClosedReleaseCannotBeRegisteredAgainWhenTheChallengeIsDone(t 
 
 // 直前の試行の結果が merged_unapproved の承認待ちの release は、その理由を保って閉じる。
 func TestRelease_SweepKeepsMergedUnapprovedAsTheClosedReason(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.pr = UpstreamPullRequestChecks{State: "merged", Base: "main", HeadSHA: "zzz"}
 	// 取り消しの後でマージされた事象（pending のまま、直前の試行が merged_unapproved）を作る。
@@ -302,6 +311,7 @@ func TestRelease_SweepKeepsMergedUnapprovedAsTheClosedReason(t *testing.T) {
 }
 
 func TestRelease_SweepLeavesOpenAndUnreadablePendingReleasesAlone(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		mod  func(f *relFixture)
@@ -327,6 +337,7 @@ func TestRelease_SweepLeavesOpenAndUnreadablePendingReleasesAlone(t *testing.T) 
 
 // ID を指定した op exec は承認待ちの release を読まない。
 func TestRelease_SweepOnlyRunsWhenNoIDIsGiven(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.setOpState(t, OperationStatePending)
 	f.fake.pr = UpstreamPullRequestChecks{State: "merged", Base: "main", HeadSHA: relHead}
@@ -344,6 +355,7 @@ func TestRelease_SweepOnlyRunsWhenNoIDIsGiven(t *testing.T) {
 
 // (iii) 完了の課題の承認待ちの release の PR に、検証の後に取り込み以外の変更が入っていれば、課題を着手中へ戻す。
 func TestRelease_SweepReopensADoneChallengeWhenTheVerifiedPRContentChanged(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.setOpState(t, OperationStatePending)
 	f.setVerifiedHead(t, "verified")
@@ -363,6 +375,7 @@ func TestRelease_SweepReopensADoneChallengeWhenTheVerifiedPRContentChanged(t *te
 }
 
 func TestRelease_SweepDoesNotReopenForAMergeInOnlyChangeOrWithoutASource(t *testing.T) {
+	t.Parallel()
 	merge := func() *fakeCompare {
 		cmp := newFakeCompare()
 		cmp.set("verified", "newhead", withFiles(ahead(commit("m1", "main", "m0"), commit("newhead", "Merge", "verified", "m1")), UpstreamFile{Filename: "a", Patch: "p"}))
@@ -401,6 +414,7 @@ func TestRelease_SweepDoesNotReopenForAMergeInOnlyChangeOrWithoutASource(t *test
 
 // 履歴が書き換わった（force-push 等）と上流が返したときは、検証し直す必要があるので戻す。
 func TestRelease_SweepReopensWhenTheHistoryWasRewritten(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.setOpState(t, OperationStatePending)
 	f.setVerifiedHead(t, "verified")

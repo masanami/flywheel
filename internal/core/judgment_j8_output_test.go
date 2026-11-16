@@ -18,6 +18,7 @@ func j8Out(props ...string) []byte {
 }
 
 func TestValidateJ8Output_Valid(t *testing.T) {
+	t.Parallel()
 	got, ok := validateJ8Output(j8Out(
 		j8Prop("prompt", " internal/invoker/prompts/j1.md ", "context", "O-1", "O-2"),
 		j8Prop("knowledge", "memory/a.md", "permission", "O-3"),
@@ -35,6 +36,7 @@ func TestValidateJ8Output_Valid(t *testing.T) {
 }
 
 func TestValidateJ8Output_EmptyProposalsIsValid(t *testing.T) {
+	t.Parallel()
 	got, ok := validateJ8Output([]byte(`{"proposals":[]}`))
 	if !ok || len(got) != 0 {
 		t.Errorf("ok=%v got=%v", ok, got)
@@ -42,6 +44,7 @@ func TestValidateJ8Output_EmptyProposalsIsValid(t *testing.T) {
 }
 
 func TestValidateJ8Output_Invalid(t *testing.T) {
+	t.Parallel()
 	good := j8Prop("prompt", "a", "context", "O-1")
 	replace := func(from, to string) []byte {
 		return []byte(strings.Replace(string(j8Out(good)), from, to, 1))
@@ -89,12 +92,14 @@ func TestValidateJ8Output_Invalid(t *testing.T) {
 }
 
 func TestValidateJ8Output_SameTargetDifferentLayerIsDifferentKey(t *testing.T) {
+	t.Parallel()
 	if _, ok := validateJ8Output(j8Out(j8Prop("prompt", "a", "context", "O-1"), j8Prop("knowledge", "a", "context", "O-2"))); !ok {
 		t.Error("same target in different layers rejected")
 	}
 }
 
 func TestJ8OutputSchema_HasNoWaitsAndClosedSets(t *testing.T) {
+	t.Parallel()
 	var schema map[string]any
 	if err := json.Unmarshal(j8OutputSchema(), &schema); err != nil {
 		t.Fatal(err)
@@ -117,6 +122,7 @@ func TestJ8OutputSchema_HasNoWaitsAndClosedSets(t *testing.T) {
 
 // 検査が空白だけを拒否する文字列の項目は、スキーマでも空を許さない（minLength: 1）。
 func TestJ8OutputSchema_NonEmptyStringsMatchValidation(t *testing.T) {
+	t.Parallel()
 	var schema struct {
 		Properties struct {
 			Proposals struct {
@@ -138,6 +144,7 @@ func TestJ8OutputSchema_NonEmptyStringsMatchValidation(t *testing.T) {
 }
 
 func TestAllJudgmentOutputClosedValues_IncludesJ8(t *testing.T) {
+	t.Parallel()
 	got := map[string]bool{}
 	for _, v := range AllJudgmentOutputClosedValues() {
 		got[v] = true
@@ -151,6 +158,7 @@ func TestAllJudgmentOutputClosedValues_IncludesJ8(t *testing.T) {
 
 // #571: 任意の見送りの欄（withheld）。正常・欄なし（空を含む）・不正な形の 3 通り。
 func TestValidateJ8Withheld_Valid(t *testing.T) {
+	t.Parallel()
 	got, ok := validateJ8Withheld([]byte(`{"proposals":[],"withheld":[{"layer":"prompt","target":" a.md ","evidence":["C-3 が満たした","a.md の 2 節"]}]}`))
 	if !ok || len(got) != 1 || got[0].Layer != OccurrenceLayerPrompt || got[0].Target != "a.md" || len(got[0].Evidence) != 2 {
 		t.Fatalf("ok=%v got=%+v", ok, got)
@@ -158,6 +166,7 @@ func TestValidateJ8Withheld_Valid(t *testing.T) {
 }
 
 func TestValidateJ8Withheld_AbsentOrEmptyIsAccepted(t *testing.T) {
+	t.Parallel()
 	for _, in := range []string{`{"proposals":[]}`, `{"proposals":[],"withheld":[]}`} {
 		got, ok := validateJ8Withheld([]byte(in))
 		if !ok || len(got) != 0 {
@@ -170,6 +179,7 @@ func TestValidateJ8Withheld_AbsentOrEmptyIsAccepted(t *testing.T) {
 }
 
 func TestValidateJ8Withheld_Invalid(t *testing.T) {
+	t.Parallel()
 	for name, w := range map[string]string{
 		"not an array":     `{}`,
 		"missing layer":    `[{"target":"a","evidence":["e"]}]`,
@@ -189,6 +199,7 @@ func TestValidateJ8Withheld_Invalid(t *testing.T) {
 }
 
 func TestJ8OutputSchema_HasOptionalWithheld(t *testing.T) {
+	t.Parallel()
 	var sc struct {
 		Required   []string                   `json:"required"`
 		Properties map[string]json.RawMessage `json:"properties"`

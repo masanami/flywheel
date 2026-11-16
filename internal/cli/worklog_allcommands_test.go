@@ -652,6 +652,7 @@ var worklogCases = []worklogCase{
 }
 
 func TestWorklog_CasesCoverRegistrationTable(t *testing.T) {
+	t.Parallel()
 	registered := registeredCommands()
 	mutating := map[string]bool{}
 	for _, c := range worklogCases {
@@ -683,6 +684,7 @@ func TestWorklog_CasesCoverRegistrationTable(t *testing.T) {
 }
 
 func TestWorklog_CasesCoverEveryTransitionTableRow(t *testing.T) {
+	t.Parallel()
 	covered := map[core.Transition]bool{}
 	for _, c := range worklogCases {
 		if c.transition != nil {

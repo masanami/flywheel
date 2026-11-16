@@ -42,6 +42,7 @@ func j2IssuesOutputN(n int, mut func(m map[string]any)) []byte {
 }
 
 func TestJ2VerdictValues_IncludesIssuesAndSchemaEnum(t *testing.T) {
+	t.Parallel()
 	var decoded map[string]any
 	if err := json.Unmarshal(j2OutputSchema(), &decoded); err != nil {
 		t.Fatal(err)
@@ -59,6 +60,7 @@ func TestJ2VerdictValues_IncludesIssuesAndSchemaEnum(t *testing.T) {
 }
 
 func TestValidateJ2Output_Issues(t *testing.T) {
+	t.Parallel()
 	vc := j2TestContext(t, true)
 	issue := func(n int, rec int) map[string]any {
 		var opts []any
@@ -151,6 +153,7 @@ func TestValidateJ2Output_Issues(t *testing.T) {
 
 // AC-278: 論点 3・4・5 個のどれも、人間対応待ちになる。
 func TestPlanAutoJ2_Issues_HoldsWithQuestionIssuesAndHoldID(t *testing.T) {
+	t.Parallel()
 	for _, n := range []int{3, 4, 5} {
 		t.Run(strconv.Itoa(n)+" issues", func(t *testing.T) {
 			f := newJ2Fixture(t)
@@ -200,6 +203,7 @@ func TestPlanAutoJ2_Issues_HoldsWithQuestionIssuesAndHoldID(t *testing.T) {
 }
 
 func TestPlanAutoJ2_Issues_AcceptedEvenWithSmallSizeAndIgnoresPlanFields(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "small", "P1")
 	out := j2IssuesOutput(func(m map[string]any) { m["size"] = "S"; m["repo"] = "ghost" })
@@ -212,6 +216,7 @@ func TestPlanAutoJ2_Issues_AcceptedEvenWithSmallSizeAndIgnoresPlanFields(t *test
 }
 
 func TestPlanAutoJ2_Issues_InvalidLeavesChallengeUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "bad", "P1")
 	before := f.detail(t, ch.ID)
@@ -229,6 +234,7 @@ func TestPlanAutoJ2_Issues_InvalidLeavesChallengeUnchanged(t *testing.T) {
 }
 
 func TestPlanAutoJ2_Issues_AnswerReturnsToClassifiedAndSecondIssuesIsInvalid(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "twice", "P1")
 	if _, err := f.run(t, succeededInvoker(j2IssuesOutput(nil)), idPtr(ch.ID)); err != nil {
@@ -271,6 +277,7 @@ func TestPlanAutoJ2_Issues_AnswerReturnsToClassifiedAndSecondIssuesIsInvalid(t *
 }
 
 func TestPlanAutoJ2_Issues_NoIssuesSectionWithoutRecord(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "none", "P1")
 	var launched JudgmentLaunchInput
@@ -285,6 +292,7 @@ func TestPlanAutoJ2_Issues_NoIssuesSectionWithoutRecord(t *testing.T) {
 }
 
 func TestPlanAutoJ2_Issues_ChallengeLeftClassifiedDuringJ2_WritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "moved", "P1")
 	inv := succeededInvoker(j2IssuesOutput(nil))

@@ -186,6 +186,7 @@ func relAfter(t *testing.T, a Activity) map[string]any {
 // --- 実行済み ---
 
 func TestExecuteReleases_AllConditionsPass_MergesOnceAndMarksExecuted(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m3rg3"}
 	before := f.state(t)
@@ -221,6 +222,7 @@ func TestExecuteReleases_AllConditionsPass_MergesOnceAndMarksExecuted(t *testing
 }
 
 func TestExecuteReleases_MergeMethodFlagFollowsDeclaration(t *testing.T) {
+	t.Parallel()
 	for _, m := range []string{"squash", "merge", "rebase"} {
 		f := newRelFixture(t)
 		o := f.opts()
@@ -235,6 +237,7 @@ func TestExecuteReleases_MergeMethodFlagFollowsDeclaration(t *testing.T) {
 }
 
 func TestExecuteReleases_MergeNotReflected_Unconfirmed_NotCounted(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	item := f.run(t) // 依頼の後の読み取りも open のまま
 	if item.Result != ExecutionResultMergeUnconfirmed || item.ConsecutiveFailures != 0 {
@@ -249,6 +252,7 @@ func TestExecuteReleases_MergeNotReflected_Unconfirmed_NotCounted(t *testing.T) 
 }
 
 func TestExecuteReleases_MergedWithOtherHeadAfterRequest_MergedUnapproved(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: "zzz", MergeCommitSHA: "m"}
 	item := f.run(t)
@@ -262,6 +266,7 @@ func TestExecuteReleases_MergedWithOtherHeadAfterRequest_MergedUnapproved(t *tes
 }
 
 func TestExecuteReleases_MergeRequestFails_MergeFailedCounted(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.mergeErr = errors.New("boom")
 	item := f.run(t)
@@ -274,6 +279,7 @@ func TestExecuteReleases_MergeRequestFails_MergeFailedCounted(t *testing.T) {
 }
 
 func TestExecuteReleases_AlreadyMergedWithApprovedHead_NoMergeCall(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "x", HeadSHA: relHead, MergeCommitSHA: "mc"}
 	item := f.run(t)
@@ -288,6 +294,7 @@ func TestExecuteReleases_AlreadyMergedWithApprovedHead_NoMergeCall(t *testing.T)
 // --- 判定の順 ---
 
 func TestJudgmentOrder(t *testing.T) {
+	t.Parallel()
 	failedCheck := []UpstreamCheck{{Name: "ci", Status: "completed", Conclusion: "failure"}}
 	pendingCheck := []UpstreamCheck{{Name: "ci", Status: "in_progress"}}
 	cases := []struct {
@@ -334,6 +341,7 @@ func TestJudgmentOrder(t *testing.T) {
 }
 
 func TestCheckClassification(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		c    UpstreamCheck
 		want checkOutcome
@@ -362,6 +370,7 @@ func TestCheckClassification(t *testing.T) {
 }
 
 func TestNoApprovedHead_And_Unsupported_CancelWithoutExternalCall(t *testing.T) {
+	t.Parallel()
 	// head_sha が NULL
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
@@ -405,6 +414,7 @@ func TestNoApprovedHead_And_Unsupported_CancelWithoutExternalCall(t *testing.T) 
 // --- 取り消し ---
 
 func TestCancel_BumpsVersionsKeepsApprovalWritesTwoLogs(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.pr.HeadSHA = "zzz"
 	before := f.state(t)
@@ -455,6 +465,7 @@ func TestCancel_BumpsVersionsKeepsApprovalWritesTwoLogs(t *testing.T) {
 }
 
 func TestWaitingResults_WriteOnlyAttemptRow_NoLog(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.pr.Checks = []UpstreamCheck{{Status: "queued"}}
 	for i := 0; i < 4; i++ {
@@ -478,6 +489,7 @@ func TestWaitingResults_WriteOnlyAttemptRow_NoLog(t *testing.T) {
 }
 
 func TestFailureLimit_ReachedCancelsWithLimitReached(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.limit = 2
 	f.fake.pr.Checks = []UpstreamCheck{{Status: "completed", Conclusion: "failure"}}
@@ -506,6 +518,7 @@ func TestFailureLimit_ReachedCancelsWithLimitReached(t *testing.T) {
 }
 
 func TestConsecutiveFailures_WaitingInBetweenAndInterruptedDoNotBreakOrCount(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.limit = 3
 	f.fake.pr.Checks = []UpstreamCheck{{Status: "completed", Conclusion: "failure"}}
@@ -525,6 +538,7 @@ func TestConsecutiveFailures_WaitingInBetweenAndInterruptedDoNotBreakOrCount(t *
 }
 
 func TestReapprovalResetsConsecutiveFailures(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.limit = 5
 	f.fake.pr.Checks = []UpstreamCheck{{Status: "completed", Conclusion: "failure"}}
@@ -550,6 +564,7 @@ func TestReapprovalResetsConsecutiveFailures(t *testing.T) {
 // --- 対象外・回収 ---
 
 func TestNotExecutable_NotReleaseOrNotApproved(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	other := coretest.InsertReleaseOperation(t, f.s.workspace, int(f.cid), relRef, "pending")
 	exec := coretest.InsertReleaseOperation(t, f.s.workspace, int(f.cid), relRef, "executed")
@@ -584,6 +599,7 @@ func TestNotExecutable_NotReleaseOrNotApproved(t *testing.T) {
 
 // AC-60: 承認済みでも release 以外（external_send・other）は実行せず、操作の state と version を変えない。
 func TestNotExecutable_ApprovedNonReleaseKindsAreLeftUntouched(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	ids := map[string]int64{}
 	for _, kind := range []string{"external_send", "other"} {
@@ -619,6 +635,7 @@ func TestNotExecutable_ApprovedNonReleaseKindsAreLeftUntouched(t *testing.T) {
 }
 
 func TestUnknownOperationID_NotFound_NothingExecuted(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	for _, id := range []string{"OP-999", "bogus"} {
 		_, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID), id}, f.opts())
@@ -632,6 +649,7 @@ func TestUnknownOperationID_NotFound_NothingExecuted(t *testing.T) {
 }
 
 func TestExecuteReleases_WithoutIDs_RunsApprovedReleasesInIDOrder(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	second := coretest.InsertApprovedRelease(t, f.s.workspace, int(f.cid), relRef, relHead, execTS(1))
 	coretest.InsertReleaseOperation(t, f.s.workspace, int(f.cid), relRef, "pending")
@@ -645,6 +663,7 @@ func TestExecuteReleases_WithoutIDs_RunsApprovedReleasesInIDOrder(t *testing.T) 
 }
 
 func TestExecuteReleases_RequiresDependencies(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	o := f.opts()
 	o.Merger = nil
@@ -654,6 +673,7 @@ func TestExecuteReleases_RequiresDependencies(t *testing.T) {
 }
 
 func TestReap_OpenAttempt(t *testing.T) {
+	t.Parallel()
 	host, _ := os.Hostname()
 	deadPID := int64(2147480000)
 	cases := []struct {
@@ -711,6 +731,7 @@ func TestReap_OpenAttempt(t *testing.T) {
 func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
 
 func TestReap_ThenAlreadyMerged(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	coretest.InsertOperationExecution(t, f.s.workspace, f.opID, coretest.ExecutionAttempt{StartedAt: formatTimestamp(execTime(0)), Host: "elsewhere", PID: 1})
 	f.now = execTime(0).Add(16 * time.Minute)
@@ -722,6 +743,7 @@ func TestReap_ThenAlreadyMerged(t *testing.T) {
 }
 
 func TestCycleTriggerRecordedInLog(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.pr.HeadSHA = "zzz"
 	o := f.opts()
@@ -736,6 +758,7 @@ func TestCycleTriggerRecordedInLog(t *testing.T) {
 }
 
 func TestWriteFailure_RollsBackEverything(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.pr.HeadSHA = "zzz"
 	// 課題の版を実行中に変えて楽観ロックを失敗させる代わりに、書き込みの関数を直接失敗させる。
@@ -771,6 +794,7 @@ func countAction(as []Activity, action string) int {
 // AC-125: 試行を始めた後に別の呼び出しが操作を変えたとき、not_started の in_progress の detail は
 // 終わっていない試行の ID（固定の文字列ではない）である。
 func TestExecuteReleases_ChangedAfterAttemptStartedReportsTheAttemptID(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	// マージの依頼が失敗した（依頼していない）場合は、従来どおり not_started になる（M45H18）。
 	f.fake.mergeErr = errors.New("merge refused")
@@ -797,6 +821,7 @@ func TestExecuteReleases_ChangedAfterAttemptStartedReportsTheAttemptID(t *testin
 
 // M45H18: マージを依頼した後に試行の記録が衝突しても、release は merge_unconfirmed として出力に残る。
 func TestExecuteReleases_ConflictAfterMergeRequestIsMergeUnconfirmed(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "rejected") }
@@ -816,6 +841,7 @@ func TestExecuteReleases_ConflictAfterMergeRequestIsMergeUnconfirmed(t *testing.
 // #344: マージの依頼の後に release が pending へ取り消されていてマージ済みなら、merged_unapproved として
 // 記録し、status の食い違いに出し、承認し直しを拒む。
 func TestExecuteReleases_WithdrawnThenMerged_RecordsMergedUnapproved(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
@@ -859,6 +885,7 @@ func TestExecuteReleases_WithdrawnThenMerged_RecordsMergedUnapproved(t *testing.
 // #344: 依頼の後の読み取りが失敗しても、取り消された後の読み取りでマージ済みと分かれば merged_unapproved。
 // 依頼した試行そのものを閉じ、試行は 1 行のまま。
 func TestExecuteReleases_WithdrawnThenMergedSeenOnSecondRead(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.onMerge = func() {
 		coretest.SetOperationState(t, f.s.workspace, f.opID, "pending")
@@ -879,6 +906,7 @@ func TestExecuteReleases_WithdrawnThenMergedSeenOnSecondRead(t *testing.T) {
 
 // #344: 取り消された後で、マージ済みと確かめられないなら記録を足さず merge_unconfirmed のまま。
 func TestExecuteReleases_WithdrawnAndNotMerged_StaysMergeUnconfirmed(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
 	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
@@ -898,6 +926,7 @@ func TestExecuteReleases_WithdrawnAndNotMerged_StaysMergeUnconfirmed(t *testing.
 // #344: 依頼の後の読み取りではマージ済みと見えず（merge_unconfirmed）、取り消された後の追加の読み取り
 // 1 回でマージ済みと分かれば、merged_unapproved の試行が 1 行書かれる。
 func TestExecuteReleases_WithdrawnThenMergedSeenOnlyByAdditionalRead(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	merged := UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	f.fake.prSeq = []UpstreamPullRequestChecks{openPR(), openPR(), merged}
@@ -928,6 +957,7 @@ func TestExecuteReleases_WithdrawnThenMergedSeenOnlyByAdditionalRead(t *testing.
 
 // #344: 取り消された後の追加の読み取りでもマージ済みと分からなければ、記録を足さず merge_unconfirmed のまま。
 func TestExecuteReleases_WithdrawnAndAdditionalReadNotMerged_StaysMergeUnconfirmed(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.prSeq = []UpstreamPullRequestChecks{openPR()}
 	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
@@ -951,6 +981,7 @@ func TestExecuteReleases_WithdrawnAndAdditionalReadNotMerged_StaysMergeUnconfirm
 // M45H18: 別の実行の口が試行を閉じ、release は approved のまま残る衝突では、items に merge_unconfirmed で
 // 載り、release は approved のまま、merged_unapproved は足されない。
 func TestExecuteReleases_AttemptClosedByOtherExecutorStaysApprovedMergeUnconfirmed(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	f.fake.onMerge = func() {
@@ -981,6 +1012,7 @@ func TestExecuteReleases_AttemptClosedByOtherExecutorStaysApprovedMergeUnconfirm
 
 // M45H18: マージの依頼の前（先頭の読み取りで merged_unapproved）の衝突は not_started のまま。
 func TestExecuteReleases_ConflictBeforeMergeRequestStaysNotStarted(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: "other", MergeCommitSHA: "m1"}
 	f.fake.onGet = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
@@ -998,6 +1030,7 @@ func TestExecuteReleases_ConflictBeforeMergeRequestStaysNotStarted(t *testing.T)
 
 // 2 件目でエラーになっても、1 件目の実行済みの結果は ExecuteReleases の戻り値に残る（op exec が出力に残す）。
 func TestExecuteReleases_ErrorOnALaterReleaseKeepsThePartialResult(t *testing.T) {
+	t.Parallel()
 	f := newRelFixture(t)
 	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	c2 := createAndAdvance(t, f.s, StatusDone)

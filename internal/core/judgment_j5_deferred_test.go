@@ -32,6 +32,7 @@ const (
 )
 
 func TestValidateJ5Output_DeferredConditions(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		in   string
@@ -68,6 +69,7 @@ func TestValidateJ5Output_DeferredConditions(t *testing.T) {
 }
 
 func TestJ5OutputSchema_HasTheDeferredConditionsWithTheClosedStatuses(t *testing.T) {
+	t.Parallel()
 	var schema struct {
 		Properties map[string]struct {
 			Type     json.RawMessage `json:"type"`
@@ -102,6 +104,7 @@ func TestJ5OutputSchema_HasTheDeferredConditionsWithTheClosedStatuses(t *testing
 }
 
 func TestAllJudgmentOutputClosedValues_IncludesTheJ5ConditionStatuses(t *testing.T) {
+	t.Parallel()
 	all := strings.Join(AllJudgmentOutputClosedValues(), "\n")
 	for _, v := range J5ConditionStatusValues {
 		if !strings.Contains(all, string(v)) {
@@ -135,6 +138,7 @@ func (f *j5Fixture) holdCount(t *testing.T) string {
 // (b) 区分の無い未達・不確かが無く、残りが「本番反映で満たされる見込み」だけで、待っている本番反映
 // （未承認の release）があれば、完了確認待ちへ進み、承認の要約にその条件が出る（#466 の (d)）。
 func TestVerifyAutoJ5_OnlyAfterReleaseLeftWithAPendingRelease_AwaitsCompletionApprovalAndTheSummaryListsThem(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.addOperation(t, "release")
@@ -162,6 +166,7 @@ func TestVerifyAutoJ5_OnlyAfterReleaseLeftWithAPendingRelease_AwaitsCompletionAp
 // (c) 区分の無い未達・不確かが無く、「人の操作の後でしか満たせない」が 1 つでもあれば、着手中に戻さず
 // 人間待ちの保留へ置き、理由に該当の条件を書く。次の周で子は起動されない。回答すると検証中へ戻る。
 func TestVerifyAutoJ5_AfterHumanActionLeft_HoldsWithTheConditionsAndDoesNotRelaunchTheChild(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.addOperation(t, "release") // 待っている本番反映があれば、本番反映が無い旨は保留に足さない
@@ -227,6 +232,7 @@ func TestVerifyAutoJ5_AfterHumanActionLeft_HoldsWithTheConditionsAndDoesNotRelau
 // 人の操作の後でしか満たせない条件と、予想と実物の個数の食い違いが重なると、食い違いの保留に条件も書き、
 // 実物は課題へ書かない。
 func TestVerifyAutoJ5_AfterHumanActionWithActualMismatch_OneHoldListsBoth(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.setExpected(t, "C-1", 2)
@@ -256,6 +262,7 @@ func TestVerifyAutoJ5_AfterHumanActionWithActualMismatch_OneHoldListsBoth(t *tes
 
 // 人の操作の保留（T10）では、他の T10 と同じく実物を課題へ書かない。
 func TestVerifyAutoJ5_AfterHumanAction_DoesNotWriteTheActual(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	b, _ := json.Marshal(map[string]any{
@@ -274,6 +281,7 @@ func TestVerifyAutoJ5_AfterHumanAction_DoesNotWriteTheActual(t *testing.T) {
 
 // 作業ログの値が読めなくても、表示だけの値なので承認の①を止めない。
 func TestPrepareApproval_UnreadableConditionsAfterReleaseAreIgnored(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	if _, err := f.verify(t, nil); err != nil {
@@ -294,6 +302,7 @@ func TestPrepareApproval_UnreadableConditionsAfterReleaseAreIgnored(t *testing.T
 
 // (d) 区分の無い未達は、従来どおり着手中へ戻る（区分の無い旧い出力も同じ）。
 func TestVerifyAutoJ5_NotMetWithoutCategories_ReturnsToInProgressAsBefore(t *testing.T) {
+	t.Parallel()
 	for name, out := range map[string]JudgmentLaunchOutput{
 		"old output":  j5Out("not_met", "FEEDBACK-TEXT", nil),
 		"empty array": j5OutDeferred("not_met", "FEEDBACK-TEXT", nil),
@@ -317,6 +326,7 @@ func TestVerifyAutoJ5_NotMetWithoutCategories_ReturnsToInProgressAsBefore(t *tes
 
 // 区分の無い met（旧い出力）は、従来どおり完了確認待ちへ進み、要約に区分の条件は出ない。
 func TestVerifyAutoJ5_MetWithoutCategories_SummaryHasNoConditionsAfterRelease(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	if _, err := f.verify(t, nil); err != nil {
@@ -333,6 +343,7 @@ func TestVerifyAutoJ5_MetWithoutCategories_SummaryHasNoConditionsAfterRelease(t 
 // (e) 区分の付いた条件と区分の無い未達・不確かが混在するとき: 区分の無い未達があれば着手中へ戻り、
 // 区分の無い不確かがあればその問いで保留になる（人の操作の保留の理由にはしない）。
 func TestVerifyAutoJ5_CategoriesMixedWithPlainVerdicts(t *testing.T) {
+	t.Parallel()
 	both := [][2]string{{condAfterRelease, "after_release"}, {condAfterHuman, "after_human_action"}}
 	t.Run("not_met with both categories returns to in_progress", func(t *testing.T) {
 		f := newJ5Fixture(t, "impl")
@@ -389,6 +400,7 @@ func TestVerifyAutoJ5_CategoriesMixedWithPlainVerdicts(t *testing.T) {
 // 完了確認待ちへ進んでしまう。進めず、「本番反映が無いので条件を満たせない」と条件を問いに書いた人間待ちの
 // 保留へ置く。着手中へ戻さず（子を再起動しない）、失敗ではないので発生も作らず、実物は課題へ書かない。
 func TestVerifyAutoJ5_OnlyAfterReleaseLeftWithNoPendingRelease_HoldsAndDoesNotRelaunchTheChild(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	launches := len(f.deleg.launched())
@@ -442,6 +454,7 @@ func TestVerifyAutoJ5_OnlyAfterReleaseLeftWithNoPendingRelease_HoldsAndDoesNotRe
 // 待っている本番反映と数えるのは、その課題の未承認（pending）か承認済みで未実行（approved）の release だけ。
 // release 以外の未承認の操作や、終わった release（実行済み・却下・取り消し）は数えない。
 func TestVerifyAutoJ5_OnlyAfterReleaseLeft_OnlyAPendingOrApprovedReleaseCounts(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		setup   func(t *testing.T, f *j5Fixture)
@@ -492,6 +505,7 @@ func TestVerifyAutoJ5_OnlyAfterReleaseLeft_OnlyAPendingOrApprovedReleaseCounts(t
 
 // (e) 本番反映が無い保留へ回答すると、課題は検証中へ戻り（T12）、J5 が回答に従って判定し直す。
 func TestVerifyAutoJ5_NoPendingReleaseHold_AnswerReturnsToVerifyingAndTheNextJudgmentDecides(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.result = j5OutDeferred("met", nil, nil, [2]string{condAfterRelease, "after_release"})
@@ -523,6 +537,7 @@ func TestVerifyAutoJ5_NoPendingReleaseHold_AnswerReturnsToVerifyingAndTheNextJud
 // 両方を伝える（人の操作の後に回答しても、すぐ次の保留になる往復を避ける）。待っている本番反映があれば
 // 人の操作の保留のまま（after_release の条件は書かない）。
 func TestVerifyAutoJ5_AfterHumanActionAndAfterReleaseWithNoPendingRelease_OneHoldListsBoth(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.result = j5OutDeferred("met", nil, nil,
@@ -545,6 +560,7 @@ func TestVerifyAutoJ5_AfterHumanActionAndAfterReleaseWithNoPendingRelease_OneHol
 
 // 予想と実物の個数の食い違いの保留にも、本番反映が無い旨と条件を書き、回答の往復を 1 回にする。
 func TestVerifyAutoJ5_NoPendingReleaseWithActualMismatch_OneHoldListsBoth(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.setExpected(t, "C-1", 2)
@@ -572,6 +588,7 @@ func TestVerifyAutoJ5_NoPendingReleaseWithActualMismatch_OneHoldListsBoth(t *tes
 // 承認済みで未実行の release しか無くても完了確認待ちへ進み、完了の承認の要約の PendingReleases には
 // state=pending の release だけが入る（approved を二重に承認しない）。条件は要約に出る。
 func TestVerifyAutoJ5_ApprovedUnexecutedReleaseOnly_AwaitsCompletionApprovalWithoutListingItAsPending(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.addOperation(t, "release")
@@ -615,6 +632,7 @@ func (f *j5Fixture) j5ReleaseRoute(t *testing.T) (*j5ValidatedOutput, j5Route) {
 // (a) 待っている release があった→無くなった: 選び直すと人間待ちの保留に置く。
 // (b) 無かった→現れた: 選び直すと保留を作らず完了確認待ちへ進む。
 func TestApplyJ5_ReleaseStateChangesAfterTheFirstRead_IsRereadAndReselected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t.Run("a waiting release disappears", func(t *testing.T) {
 		f := newJ5Fixture(t, "impl")

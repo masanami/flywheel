@@ -12,6 +12,7 @@ import (
 // 引数は allCommandSuccessCases の成功経路のものを流用する（plan の本文のように、
 // 入力の検証が ID の存在チェックより先に行われる引数も妥当な値になる）。
 func TestIDCommands_NotFoundForMissingChallengeAndOperationID(t *testing.T) {
+	t.Parallel()
 	tested := 0
 	for _, name := range sortedCommandNames(registeredCommands()) {
 		cmd := registeredCommands()[name]
@@ -20,6 +21,7 @@ func TestIDCommands_NotFoundForMissingChallengeAndOperationID(t *testing.T) {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
+			parallelTools(t, tc.needsTTY) // 偽の gh・claude の場所は t ごとに渡す（t.Setenv しない）。pty を使うケースは並列にしない
 			ws := initializedWorkspace(t)
 			args := tc.setup(t, ws)
 			idAt := len(cmd.Path)

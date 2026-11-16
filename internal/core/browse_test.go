@@ -67,6 +67,7 @@ func staleOpenRunFixture(t *testing.T) *Store {
 }
 
 func TestListRunsWithoutReap_DoesNotChangeRows(t *testing.T) {
+	t.Parallel()
 	s := staleOpenRunFixture(t)
 	before := snapshotTables(t, s)
 	runs, err := s.ListRunsWithoutReap(context.Background(), RunListOptions{})
@@ -82,6 +83,7 @@ func TestListRunsWithoutReap_DoesNotChangeRows(t *testing.T) {
 }
 
 func TestListRuns_StillReapsStaleRun(t *testing.T) {
+	t.Parallel()
 	s := staleOpenRunFixture(t)
 	runs, err := s.ListRuns(context.Background(), RunListOptions{})
 	if err != nil {
@@ -140,6 +142,7 @@ func TestResolveWorkspaceDir(t *testing.T) {
 }
 
 func TestSchemaVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	v, err := s.SchemaVersion(context.Background())
 	latest, lerr := LatestSchemaVersion()
@@ -159,6 +162,7 @@ func TestSchemaVersion(t *testing.T) {
 }
 
 func TestListUnansweredHolds(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	mk := func(title string) int64 {
@@ -234,6 +238,7 @@ func TestListUnansweredHolds(t *testing.T) {
 }
 
 func TestListUnansweredHolds_EmptyIsNonNil(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	got, err := s.ListUnansweredHolds(context.Background())
 	if err != nil || got == nil || len(got) != 0 {
@@ -242,6 +247,7 @@ func TestListUnansweredHolds_EmptyIsNonNil(t *testing.T) {
 }
 
 func TestReadRunReport(t *testing.T) {
+	t.Parallel()
 	s := staleOpenRunFixture(t) // R-1 が存在する
 	ctx := context.Background()
 
@@ -319,6 +325,7 @@ func (noChecks) GetPullRequestChecks(context.Context, string, int) (UpstreamPull
 }
 
 func TestGetChallengeWithoutReap_DoesNotChangeRows(t *testing.T) {
+	t.Parallel()
 	s := staleOpenRunFixture(t)
 	before := snapshotTables(t, s)
 	d, err := s.GetChallengeWithoutReap(context.Background(), "C-1")
@@ -335,6 +342,7 @@ func TestGetChallengeWithoutReap_DoesNotChangeRows(t *testing.T) {
 }
 
 func TestGetOverviewFor_DoesNotReapStaleRun(t *testing.T) {
+	t.Parallel()
 	s := staleOpenRunFixture(t)
 	before := snapshotTables(t, s)
 	if _, err := s.GetOverviewFor(context.Background(), nil); err != nil {

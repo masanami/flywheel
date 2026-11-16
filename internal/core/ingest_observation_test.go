@@ -23,6 +23,7 @@ func observedIssue(externalKey, url, title, body, reporter string, assignees, la
 // --- AC-111〜114: 取り込みで作られた課題の観測値・読んだ時点の値 ---
 
 func TestIngest_CreatedChallenge_HasObservationFields(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -67,6 +68,7 @@ func TestIngest_CreatedChallenge_HasObservationFields(t *testing.T) {
 // --- AC-115・AC-116: 作成直後の未読の種類 ---
 
 func TestIngest_CreatedChallenge_UnreadKindsRightAfterCreation(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name          string
 		comments      int
@@ -124,6 +126,7 @@ func kindsContain(kinds []DiscrepancyKind, want DiscrepancyKind) bool {
 // --- AC-117〜120: 本文が変わらず観測値だけが変わった取り込み ---
 
 func TestIngest_ObservationOnlyChange_UpdatesValuesAndStaysUnchanged(t *testing.T) {
+	t.Parallel()
 	t.Run("コメント数だけ増える", func(t *testing.T) {
 		s := newStoreForTest(t)
 		fixedActor(t, "alice")
@@ -184,6 +187,7 @@ func TestIngest_ObservationOnlyChange_UpdatesValuesAndStaysUnchanged(t *testing.
 // --- AC-121: 観測値だけが変わっても人間記入欄と fingerprint は変わらない ---
 
 func TestIngest_ObservationOnlyChange_DoesNotTouchHumanFieldsOrFingerprint(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -218,6 +222,7 @@ func TestIngest_ObservationOnlyChange_DoesNotTouchHumanFieldsOrFingerprint(t *te
 // --- AC-122・AC-123: 観測値の置き換えは読んだ時点の値を変えない ---
 
 func TestIngest_ObservationReplace_DoesNotChangeReadValues(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -270,6 +275,7 @@ func TestIngest_ObservationReplace_DoesNotChangeReadValues(t *testing.T) {
 // --- AC-124・AC-125: unreadKinds の判定条件（純粋関数の直接検証） ---
 
 func TestUnreadKinds_CommentsCountThreshold(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name           string
 		comments, read int
@@ -296,6 +302,7 @@ func TestUnreadKinds_CommentsCountThreshold(t *testing.T) {
 }
 
 func TestUnreadKinds_UpdatedAtDiffers(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name        string
 		upstream    string
@@ -324,6 +331,7 @@ func TestUnreadKinds_UpdatedAtDiffers(t *testing.T) {
 // --- AC-126・AC-127: 完了した課題の観測値は変わらない ---
 
 func TestIngest_DoneChallenge_ObservationUnchanged(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -360,6 +368,7 @@ func TestIngest_DoneChallenge_ObservationUnchanged(t *testing.T) {
 // --- AC-128: 一覧の取得に失敗したリポジトリの課題は観測値が変わらない ---
 
 func TestIngest_ListFetchFailure_ObservationUnchanged(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := mustCreateChallenge(t, s, "bound")
@@ -388,6 +397,7 @@ func TestIngest_ListFetchFailure_ObservationUnchanged(t *testing.T) {
 // --- AC-129・AC-130: close の確かめの応答から観測値を置き換える ---
 
 func TestIngest_CloseDetection_ClosedResponseUpdatesObservation(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindOpenChallenge(t, s, "bound", "o/r#1")
@@ -443,6 +453,7 @@ func bindOpenChallengeWithObservation(t *testing.T, s *Store, title, externalKey
 // 既読）。self-review 指摘: この分岐だけ observation の更新テストが無く、
 // computeObservationChange の呼び出しを消しても検出できなかった。
 func TestIngest_CloseDetection_StillOpenResponseUpdatesObservation(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindOpenChallengeWithObservation(t, s, "bound", "o/r#1", 1, "2026-09-20T00:00:00Z")
@@ -473,6 +484,7 @@ func TestIngest_CloseDetection_StillOpenResponseUpdatesObservation(t *testing.T)
 // 指摘: 既存の missing のテストは観測値が既定値（0・""）のままの binding しか
 // 使っておらず、「変えない」と「初期値のまま」を区別できていなかった。
 func TestIngest_CloseDetection_MissingResponse_ObservationUnchanged(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindOpenChallengeWithObservation(t, s, "bound", "o/r#1", 3, "2026-09-20T00:00:00Z")
@@ -498,6 +510,7 @@ func TestIngest_CloseDetection_MissingResponse_ObservationUnchanged(t *testing.T
 
 // close の確かめで GetIssue が 404/410 以外で失敗したときも、観測値を変えない。
 func TestIngest_CloseDetection_OtherFailure_ObservationUnchanged(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := bindOpenChallengeWithObservation(t, s, "bound", "o/r#1", 3, "2026-09-20T00:00:00Z")
@@ -525,6 +538,7 @@ func TestIngest_CloseDetection_OtherFailure_ObservationUnchanged(t *testing.T) {
 // を記録し、版を 1 増やす ---
 
 func TestIngest_ObservationOnlyChange_RecordsActivityAndBumpsVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -582,6 +596,7 @@ func TestIngest_ObservationOnlyChange_RecordsActivityAndBumpsVersion(t *testing.
 // エントリの after.version が同じ ---
 
 func TestIngest_BodyAndObservationChangeTogether_SingleVersionBump(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	src := excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})
@@ -637,6 +652,7 @@ func TestIngest_BodyAndObservationChangeTogether_SingleVersionBump(t *testing.T)
 // --- AC-160: fingerprint の版が未知でも、観測値の更新は行う ---
 
 func TestIngest_UnknownFingerprintVersion_ObservationStillUpdates(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := mustCreateChallenge(t, s, "legacy fp")

@@ -33,6 +33,7 @@ func groupIDs(gs []plannedGroup) [][]string {
 }
 
 func TestBuildRepoGroups_SharedFilesAreConnectedComponents(t *testing.T) {
+	t.Parallel()
 	cands := []planCandidate{candN(1, 11, 1), candN(2, 12, 1), candN(3, 13, 1), candN(4, 14, 1)}
 	out := &ConflictPredictionOutput{Pairs: []PredictedPair{pairOf(11, 12, shared("a.go")), pairOf(12, 13, shared("b.go")), pairOf(13, 14)}}
 	gs := buildRepoGroups("r", nil, cands, repoPrediction{Output: out})
@@ -48,6 +49,7 @@ func TestBuildRepoGroups_SharedFilesAreConnectedComponents(t *testing.T) {
 }
 
 func TestBuildRepoGroups_MergeFriendlyAndIgnoredDoNotJoin(t *testing.T) {
+	t.Parallel()
 	for _, mark := range []string{"merge_friendly", "ignored"} {
 		f := shared("package-lock.json")
 		if mark == "merge_friendly" {
@@ -71,6 +73,7 @@ func TestBuildRepoGroups_MergeFriendlyAndIgnoredDoNotJoin(t *testing.T) {
 }
 
 func TestBuildRepoGroups_UnknownPairAndDependencyJoin(t *testing.T) {
+	t.Parallel()
 	first := 12
 	out := &ConflictPredictionOutput{Pairs: []PredictedPair{
 		{Issues: [2]int{11, 12}, Status: predictPairUnknown},
@@ -89,6 +92,7 @@ func TestBuildRepoGroups_UnknownPairAndDependencyJoin(t *testing.T) {
 }
 
 func TestBuildRepoGroups_ReasonsAreInDefinitionOrderWithoutDuplicates(t *testing.T) {
+	t.Parallel()
 	first := 12
 	p := pairOf(11, 12, shared("a.go"))
 	p.DependencyFirst = &first
@@ -100,6 +104,7 @@ func TestBuildRepoGroups_ReasonsAreInDefinitionOrderWithoutDuplicates(t *testing
 }
 
 func TestBuildRepoGroups_DependencyEdgeOrdersBeforePriority(t *testing.T) {
+	t.Parallel()
 	first := 12 // C-2（優先度が低い）を先に入れる
 	p := pairOf(11, 12)
 	p.DependencyFirst = &first
@@ -111,6 +116,7 @@ func TestBuildRepoGroups_DependencyEdgeOrdersBeforePriority(t *testing.T) {
 }
 
 func TestBuildRepoGroups_NoEdgesOrdersByPriorityThenID(t *testing.T) {
+	t.Parallel()
 	out := &ConflictPredictionOutput{Pairs: []PredictedPair{pairOf(11, 12, shared("a")), pairOf(12, 13, shared("a"))}}
 	gs := buildRepoGroups("r", nil, []planCandidate{candN(3, 13, 0), candN(1, 11, 1), candN(2, 12, 0)}, repoPrediction{Output: out})
 	if got, want := groupIDs(gs), [][]string{{"C-2", "C-3", "C-1"}}; !reflect.DeepEqual(got, want) {
@@ -119,6 +125,7 @@ func TestBuildRepoGroups_NoEdgesOrdersByPriorityThenID(t *testing.T) {
 }
 
 func TestBuildRepoGroups_CyclicEdgesAreAllIgnored(t *testing.T) {
+	t.Parallel()
 	// 11 → 12 と 12 → 11 の循環。辺をすべて無視し、優先度・ID の昇順（C-2 は優先度が高い）にする。
 	one, two := 11, 12
 	p1, p2 := pairOf(11, 12), pairOf(11, 12)
@@ -132,6 +139,7 @@ func TestBuildRepoGroups_CyclicEdgesAreAllIgnored(t *testing.T) {
 }
 
 func TestBuildRepoGroups_FailClosedPutsEverythingInOneGroup(t *testing.T) {
+	t.Parallel()
 	cands := []planCandidate{candN(2, 12, 1), candN(1, 11, 1)}
 	running := []planRunning{{ID: "C-9", Issue: 19, Seq: 9}}
 	gs := buildRepoGroups("r", running, cands, repoPrediction{FailClosed: []SerialGroupReason{SerialReasonPredictionFailed}, HeadSHA: "abc"})
@@ -148,6 +156,7 @@ func TestBuildRepoGroups_FailClosedPutsEverythingInOneGroup(t *testing.T) {
 }
 
 func TestBuildRepoGroups_RunningJoinsTheComponent(t *testing.T) {
+	t.Parallel()
 	out := &ConflictPredictionOutput{Pairs: []PredictedPair{pairOf(19, 11, shared("a")), pairOf(11, 12), pairOf(19, 12)}}
 	running := []planRunning{{ID: "C-9", Issue: 19, Seq: 9}}
 	gs := buildRepoGroups("r", running, []planCandidate{candN(1, 11, 1), candN(2, 12, 1)}, repoPrediction{Output: out})
@@ -160,6 +169,7 @@ func TestBuildRepoGroups_RunningJoinsTheComponent(t *testing.T) {
 }
 
 func TestBuildRepoGroups_NoPredictionMakesOneGroupPerCandidate(t *testing.T) {
+	t.Parallel()
 	gs := buildRepoGroups("r", nil, []planCandidate{candN(1, 11, 1)}, repoPrediction{})
 	if len(gs) != 1 || len(sortedReasons(gs[0].Reasons)) != 0 {
 		t.Fatalf("groups = %+v", gs)

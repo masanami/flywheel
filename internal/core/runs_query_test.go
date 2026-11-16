@@ -10,6 +10,7 @@ import (
 )
 
 func TestListRuns_NewestFirst(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	base := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
 	// 課題ごとに終了していない run は高々1つ（一意制約）なので、3件を同時に
@@ -43,6 +44,7 @@ func TestListRuns_NewestFirst(t *testing.T) {
 }
 
 func TestListRuns_FiltersByChallengeID(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id1 := createChallengeForJudgmentTest(t, s)
 	id2 := createChallengeForJudgmentTest(t, s)
@@ -75,6 +77,7 @@ func TestListRuns_FiltersByChallengeID(t *testing.T) {
 }
 
 func TestListRuns_UnknownChallengeIDIsNotFound(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	missing := "C-999"
 	_, err := s.ListRuns(context.Background(), RunListOptions{ChallengeID: &missing})
@@ -84,6 +87,7 @@ func TestListRuns_UnknownChallengeIDIsNotFound(t *testing.T) {
 }
 
 func TestListRuns_OpenOnlyExcludesEndedRuns(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 	cid, _ := parseChallengeID(id)
@@ -127,6 +131,7 @@ func TestListRuns_OpenOnlyExcludesEndedRuns(t *testing.T) {
 // AC-154（core 側）: GetChallenge（show の元）の Runs は、その課題の run を新しい順に
 // 最大 20 件返す。他の課題の run は含めない。
 func TestGetChallenge_RunsAreNewestFirstAndCappedAt20(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 	other := createChallengeForJudgmentTest(t, s)
@@ -190,6 +195,7 @@ func TestGetChallenge_RunsAreNewestFirstAndCappedAt20(t *testing.T) {
 
 // AC-154（core 側）: run の無い課題の Runs は空スライス（nil でない）。
 func TestGetChallenge_NoRunsIsEmptySlice(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 	detail, err := s.GetChallenge(context.Background(), id)

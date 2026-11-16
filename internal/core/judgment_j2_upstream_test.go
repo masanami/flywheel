@@ -40,6 +40,7 @@ func testUpstreamContext(body string, comments ...string) UpstreamContext {
 }
 
 func TestBuildUpstreamInput_IncludesBodyCommentsAndReferences(t *testing.T) {
+	t.Parallel()
 	uc := testUpstreamContext("BODY-MARKER", "COMMENT-1-MARKER", "COMMENT-2-MARKER")
 	uc.References = []UpstreamReferencedIssue{
 		{Reference: UpstreamReference{Repo: "o/r", Number: 9}, Fetched: true, Issue: UpstreamIssue{ExternalKey: "o/r#9", Title: "REF-TITLE", Body: "REF-BODY-MARKER", State: "open"}},
@@ -69,6 +70,7 @@ func TestBuildUpstreamInput_IncludesBodyCommentsAndReferences(t *testing.T) {
 // AC-92: 課題自身の本文とコメントだけで 200,000 バイトを超えるときは、古い
 // コメントから落とし、落としたことを入力に明記する。
 func TestBuildUpstreamInput_DropsOldestCommentsWhenOverCap(t *testing.T) {
+	t.Parallel()
 	big := strings.Repeat("あ", 30000) // 90,000 バイト
 	uc := testUpstreamContext("BODY", "OLDEST-"+big, "MIDDLE-"+big, "NEWEST-"+big)
 
@@ -111,6 +113,7 @@ func totalUpstreamBytes(in j2UpstreamInput) int {
 }
 
 func TestBuildUpstreamInput_DropsReferencesFromTheEndBeforeComments(t *testing.T) {
+	t.Parallel()
 	medium := strings.Repeat("a", 60000)
 	uc := testUpstreamContext("BODY", "COMMENT-KEPT-"+medium)
 	for i, name := range []string{"FIRST", "SECOND", "THIRD"} {
@@ -147,6 +150,7 @@ func TestBuildUpstreamInput_DropsReferencesFromTheEndBeforeComments(t *testing.T
 }
 
 func TestBuildUpstreamInput_ExactlyAtCapIsNotDropped(t *testing.T) {
+	t.Parallel()
 	// 区画の形式に依らず境界を確かめるため、上限ちょうどになる本文を探索して作る。
 	uc := testUpstreamContext("")
 	overhead := totalUpstreamBytes(buildUpstreamInput(uc))
@@ -169,6 +173,7 @@ func TestBuildUpstreamInput_ExactlyAtCapIsNotDropped(t *testing.T) {
 }
 
 func TestBuildUpstreamInput_TruncatedBodyStaysValidUTF8AndIsNotFullyRead(t *testing.T) {
+	t.Parallel()
 	uc := testUpstreamContext(strings.Repeat("あ", 100000)) // 300,000 バイト・コメント無し
 	in := buildUpstreamInput(uc)
 	if !in.BodyTruncated {
@@ -191,6 +196,7 @@ func TestBuildUpstreamInput_TruncatedBodyStaysValidUTF8AndIsNotFullyRead(t *test
 }
 
 func TestBuildUpstreamInput_NotesReferencesThatCouldNotBeFetched(t *testing.T) {
+	t.Parallel()
 	uc := testUpstreamContext("BODY")
 	uc.References = []UpstreamReferencedIssue{
 		{Reference: UpstreamReference{Repo: "o/r", Number: 404}, Fetched: false},
@@ -208,6 +214,7 @@ func TestBuildUpstreamInput_NotesReferencesThatCouldNotBeFetched(t *testing.T) {
 // 同じ区画の中のブロックを区切る空行も上限に数える: ブロックの長さの合計だけなら
 // 上限以内でも、区切りを足すと超える入力では、コメントを落とす。
 func TestBuildUpstreamInput_CountsBlockSeparatorsAgainstTheCap(t *testing.T) {
+	t.Parallel()
 	const n = 10
 	base := testUpstreamContext("b")
 	own := len(formatUpstreamIssueBlock(base.Thread.Issue, "b"))

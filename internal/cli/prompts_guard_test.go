@@ -96,6 +96,7 @@ func allEmbeddedPromptContents(t *testing.T) map[string]string {
 // ブリーフの固定の節が、コードの定義から生成した禁止語を1つも含まないことを
 // 検証する。
 func TestRealPrompts_ContainNoForbiddenTerms(t *testing.T) {
+	t.Parallel()
 	terms := invoker.ForbiddenTerms(realForbiddenSources())
 	for name, content := range allEmbeddedPromptContents(t) {
 		if hits := invoker.FindForbiddenTerms(content, terms); len(hits) != 0 {
@@ -109,6 +110,7 @@ func TestRealPrompts_ContainNoForbiddenTerms(t *testing.T) {
 // （語彙の8値のそれぞれを差し込んだフィクスチャで検証する）」を、
 // 8値それぞれのコードと表示名の両方で検証する。
 func TestForbiddenTerms_DetectsEachStateVocabularyValue(t *testing.T) {
+	t.Parallel()
 	terms := invoker.ForbiddenTerms(realForbiddenSources())
 	for _, e := range core.StatusVocabulary {
 		t.Run(string(e.Code)+"/code", func(t *testing.T) {
@@ -132,6 +134,7 @@ func TestForbiddenTerms_DetectsEachStateVocabularyValue(t *testing.T) {
 // 「指示文にflywheelのサブコマンド名が現れると、禁止語のテストが失敗する」を
 // 検証する。
 func TestForbiddenTerms_DetectsEachSubcommandName(t *testing.T) {
+	t.Parallel()
 	terms := invoker.ForbiddenTerms(realForbiddenSources())
 	for _, tok := range subcommandTokens() {
 		t.Run(tok, func(t *testing.T) {
@@ -148,6 +151,7 @@ func TestForbiddenTerms_DetectsEachSubcommandName(t *testing.T) {
 // 「指示文に.flywheel/agent.jsonのキー名が現れると、禁止語のテストが失敗する」
 // を検証する（S/M/L・J1〜J5のような1〜2文字のキーも含む）。
 func TestForbiddenTerms_DetectsEachAgentDeclarationKey(t *testing.T) {
+	t.Parallel()
 	terms := invoker.ForbiddenTerms(realForbiddenSources())
 	for _, key := range core.AgentDeclarationKeys() {
 		t.Run(key, func(t *testing.T) {
@@ -164,6 +168,7 @@ func TestForbiddenTerms_DetectsEachAgentDeclarationKey(t *testing.T) {
 // 「指示文に判断点の出力スキーマの閉集合の値が現れると、禁止語のテストが
 // 失敗する」を検証する。
 func TestForbiddenTerms_DetectsEachOutputClosedValue(t *testing.T) {
+	t.Parallel()
 	terms := invoker.ForbiddenTerms(realForbiddenSources())
 	for _, v := range core.AllJudgmentOutputClosedValues() {
 		t.Run(v, func(t *testing.T) {
@@ -183,6 +188,7 @@ func TestForbiddenTerms_DetectsEachOutputClosedValue(t *testing.T) {
 // テスト用の値を加えた複製で検証する（core.StatusVocabulary 自体は
 // 変更しない）。
 func TestForbiddenTerms_GeneratedFromCode_PicksUpNewStateVocabularyValue(t *testing.T) {
+	t.Parallel()
 	extendedVocab := make([]core.StatusVocabEntry, len(core.StatusVocabulary), len(core.StatusVocabulary)+1)
 	copy(extendedVocab, core.StatusVocabulary)
 	extendedVocab = append(extendedVocab, core.StatusVocabEntry{
@@ -209,6 +215,7 @@ func TestForbiddenTerms_GeneratedFromCode_PicksUpNewStateVocabularyValue(t *test
 // TestForbiddenTerms_DetectsJ6ClosedValues は、J6 の出力の閉集合の値
 // （原因・層・mode・記憶の種類）が指示文に現れると検出されることを検証する。
 func TestForbiddenTerms_DetectsJ6ClosedValues(t *testing.T) {
+	t.Parallel()
 	terms := invoker.ForbiddenTerms(realForbiddenSources())
 	for _, v := range []string{"context", "permission", "performance", "connector_skill", "entry_skill", "knowledge", "create", "append", "tacit", "reference"} {
 		hits := invoker.FindForbiddenTerms("本文に "+v+" がある。", terms)
@@ -221,6 +228,7 @@ func TestForbiddenTerms_DetectsJ6ClosedValues(t *testing.T) {
 // TestForbiddenTerms_DetectsJ8ClosedValues は、J8 の出力の閉集合の値（指標・種類）が
 // 指示文に現れると検出されることを検証する。
 func TestForbiddenTerms_DetectsJ8ClosedValues(t *testing.T) {
+	t.Parallel()
 	terms := invoker.ForbiddenTerms(realForbiddenSources())
 	for _, v := range []string{"rejection_rate", "resume_count", "cost_per_challenge", "approval_count", "add", "reduce", "improve_threshold", "J8"} {
 		hits := invoker.FindForbiddenTerms("本文に "+v+" がある。", terms)

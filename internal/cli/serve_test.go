@@ -83,6 +83,7 @@ func startServeChildPort(t *testing.T, portArg, dir string, env []string, extra 
 }
 
 func TestServe_ListeningLineAndAddr(t *testing.T) {
+	t.Parallel()
 	cmd, port, _ := startServeChild(t)
 	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 2*time.Second)
 	if err != nil {
@@ -109,6 +110,7 @@ func TestServe_ListeningLineAndAddr(t *testing.T) {
 
 // AC-2: --port <n> を指定すると、そのポートで待ち受ける。
 func TestServe_ExplicitPortIsListenedOn(t *testing.T) {
+	t.Parallel()
 	l, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -132,6 +134,7 @@ func TestServe_ExplicitPortIsListenedOn(t *testing.T) {
 }
 
 func TestServe_SignalsExitZero(t *testing.T) {
+	t.Parallel()
 	for name, sig := range map[string]syscall.Signal{"SIGTERM": syscall.SIGTERM, "SIGINT": syscall.SIGINT} {
 		t.Run(name, func(t *testing.T) {
 			cmd, port, _ := startServeChild(t)
@@ -165,7 +168,7 @@ func TestServe_ListenFailed(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"serve", "--port", strconv.Itoa(port), "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath([]string{"serve", "--port", strconv.Itoa(port), "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	if code != 2 {
 		t.Errorf("exit code = %d, want 2 (stderr=%s)", code, stderr.String())
 	}
@@ -182,7 +185,7 @@ func TestServe_BadPortIsUsageError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, p := range []string{"abc", "-1", "65536", ""} {
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"serve", "--port", p, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+		code := runWithLookPath([]string{"serve", "--port", p, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 		if code != 2 || readErrorCode(t, stderr.String()) != "usage_error" {
 			t.Errorf("--port %q: exit=%d stderr=%s, want usage_error", p, code, stderr.String())
 		}
@@ -192,6 +195,7 @@ func TestServe_BadPortIsUsageError(t *testing.T) {
 // serve を起動し、束ねたワークスペースのストアを実際に開かせた状態（API で ok を確認）で、
 // 同じワークスペースの create と status が成功し、server がロックや独自の行を作らない。
 func TestServe_CoexistsWithCreateAndStatus(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	cmd, port, _ := startServeChild(t, "--workspace", ws)
 	if got := fetchWorkspaces(t, port); len(got) != 1 || got[0].State != "ok" {
@@ -203,7 +207,7 @@ func TestServe_CoexistsWithCreateAndStatus(t *testing.T) {
 		{"create", "--title", "u", "--workspace", ws, "--json"},
 	} {
 		var stdout, stderr bytes.Buffer
-		if code := run(args, strings.NewReader(""), &stdout, &stderr, defaultCommands()); code != 0 {
+		if code := runWithLookPath(args, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t)); code != 0 {
 			t.Errorf("%v: exit=%d stderr=%s", args, code, stderr.String())
 		}
 	}
@@ -224,6 +228,7 @@ func TestServe_CoexistsWithCreateAndStatus(t *testing.T) {
 }
 
 func TestServe_ForbiddenOriginViaChild(t *testing.T) {
+	t.Parallel()
 	cmd, port, _ := startServeChild(t)
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
 	req.Header.Set("Origin", "http://evil.example")
@@ -244,6 +249,7 @@ func TestServe_ForbiddenOriginViaChild(t *testing.T) {
 // server が HTTP の応答に使う forbidden_origin は、CLI のエラーコードの表の値と一致し、
 // 終了コード 1 に写る。listen_failed は終了コード 2。
 func TestServeErrorCodes(t *testing.T) {
+	t.Parallel()
 	if string(CodeForbiddenOrigin) != server.CodeForbiddenOrigin {
 		t.Errorf("CodeForbiddenOrigin = %q, server = %q", CodeForbiddenOrigin, server.CodeForbiddenOrigin)
 	}
@@ -281,6 +287,7 @@ func TestServeErrorCodes(t *testing.T) {
 
 // server の core のエラー → エラーコードの写像は、CLI の mapCoreErr と全 sentinel で一致する。
 func TestServerCoreErrMappingMatchesCLI(t *testing.T) {
+	t.Parallel()
 	sentinels := []error{
 		core.ErrStoreNotFound, core.ErrStoreTooNew, core.ErrStoreBusy, core.ErrStoreError, core.ErrNotFound,
 		core.ErrValidation, core.ErrTerminalState, core.ErrInvalidTransition, core.ErrConflict,

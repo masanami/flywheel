@@ -94,6 +94,7 @@ func busyHolderMain() {
 // 「待ってから失敗する」時間の長さを assert しない（fail-closed の結果
 // store_busy になること自体を検証する）。
 func TestRun_InitReturnsStoreBusyWhileAnotherProcessHoldsTheWriteLock(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	flywheelDir := filepath.Join(dir, ".flywheel")
 	if err := os.MkdirAll(flywheelDir, 0o755); err != nil {

@@ -72,6 +72,7 @@ func statusOfChallenge(t *testing.T, ws, id string) string {
 }
 
 func TestVerifyAuto_WithResult_IsUsageErrorAndNothingRuns(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newVerifyingForCase(t, ws, true)
 	argvLog, _ := putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: `{"is_error":false}`})
@@ -95,6 +96,7 @@ func TestVerifyAuto_WithResult_IsUsageErrorAndNothingRuns(t *testing.T) {
 }
 
 func TestVerifyAuto_ClaudeNotOnPATH_InvokerUnavailableAndStoreUnchanged(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	newVerifyingForCase(t, ws, true)
 	emptyPATH(t)
@@ -107,6 +109,7 @@ func TestVerifyAuto_ClaudeNotOnPATH_InvokerUnavailableAndStoreUnchanged(t *testi
 
 // agent.json が無くても（全キーが省略可能）既定の宣言で動き、周の上限額は既定の 300 USD で評価される。
 func TestVerifyAuto_WithoutAgentJSON_UsesTheDefaultCycleBudget(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	id := newVerifyingForCase(t, ws, false)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j5Route("met", nil, nil)}, "")
@@ -126,6 +129,7 @@ func TestVerifyAuto_WithoutAgentJSON_UsesTheDefaultCycleBudget(t *testing.T) {
 
 // agent.json の judgment_budget_usd.J5 が、J5 の `--max-budget-usd` になる（判断点ごとの上限額）。
 func TestVerifyAuto_J5BudgetComesFromAgentJSON(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	writeAgentJSONForTest(t, ws, `{"position_file": "position.md", "judgment_budget_usd": {"J5": 2.5}}`)
 	id := newVerifyingForCase(t, ws, false)
@@ -146,6 +150,7 @@ func TestVerifyAuto_J5BudgetComesFromAgentJSON(t *testing.T) {
 }
 
 func TestVerifyAuto_PendingChecks_WaitingExternalInPhaseAndStatusAndJ5NotStarted(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newVerifyingForCase(t, ws, true)
 	calls := withFakeGHRoutesOnPATH(t, ghChecksRoutes("open", checkRunsPending))
@@ -191,6 +196,7 @@ func TestVerifyAuto_PendingChecks_WaitingExternalInPhaseAndStatusAndJ5NotStarted
 }
 
 func TestVerifyAuto_CompletedChecks_J5RunsWithTheChecksAndMapsMet(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newVerifyingForCase(t, ws, true)
 	withFakeGHRoutesOnPATH(t, ghChecksRoutes("open", checkRunsComplete))
@@ -245,6 +251,7 @@ func withPRBodyField(routes []fakeGHRoute, bodyJSON string) []fakeGHRoute {
 
 // 偽の gh の PR の本文が、adapter の取得（GetArtifactDescription）→ core の区画 → J5 の標準入力まで 1 本で届く。
 func TestVerifyAuto_PRBody_ReachesJ5StdinAsArtifactDescription(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newVerifyingForCase(t, ws, true)
 	withFakeGHRoutesOnPATH(t, withPRBodyField(ghChecksRoutes("open", checkRunsComplete), `"PR-BODY-MARKER-CLI"`))
@@ -271,6 +278,7 @@ func TestVerifyAuto_PRBody_ReachesJ5StdinAsArtifactDescription(t *testing.T) {
 // PR の本文の取得に失敗しても J5 は止まらず（偽の claude が起動される）、区画に失敗が書かれる。
 // 本文の型を壊し（数値）、本文を読まないチェックの取得は通したまま、説明文の取得だけを失敗させる。
 func TestVerifyAuto_PRBodyFetchFails_J5StillRunsAndStdinSaysSo(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newVerifyingForCase(t, ws, true)
 	withFakeGHRoutesOnPATH(t, withPRBodyField(ghChecksRoutes("open", checkRunsComplete), `12345`))
@@ -295,6 +303,7 @@ func TestVerifyAuto_PRBodyFetchFails_J5StillRunsAndStdinSaysSo(t *testing.T) {
 }
 
 func TestVerifyAuto_NoPR_NeverCallsGHAndStdinSaysSo(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newVerifyingForCase(t, ws, false)
 	installedGuardCalls := withFakeGHRoutesOnPATH(t, nil) // どの gh の呼び出しも失敗する偽の gh
@@ -318,6 +327,7 @@ func TestVerifyAuto_NoPR_NeverCallsGHAndStdinSaysSo(t *testing.T) {
 }
 
 func TestVerifyAuto_InvalidOutput_LeavesTheChallengeVerifying(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newVerifyingForCase(t, ws, false)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j5Route("not_met", nil, nil)}, "")
@@ -331,6 +341,7 @@ func TestVerifyAuto_InvalidOutput_LeavesTheChallengeVerifying(t *testing.T) {
 }
 
 func TestVerifyAuto_Uncertain_HoldsWithTheQuestion(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newVerifyingForCase(t, ws, false)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j5Route("uncertain", nil, "HUMAN-QUESTION-CLI")}, "")
@@ -345,6 +356,7 @@ func TestVerifyAuto_Uncertain_HoldsWithTheQuestion(t *testing.T) {
 }
 
 func TestVerifyAuto_OmittedID_OnlyVerifyingChallenges(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	verifying := newVerifyingForCase(t, ws, false)
 	other := newClassifiedForCase(t, ws)
@@ -359,6 +371,7 @@ func TestVerifyAuto_OmittedID_OnlyVerifyingChallenges(t *testing.T) {
 }
 
 func TestVerifyAuto_ByID_NotVerifyingIsInvalidTransition(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	id := newClassifiedForCase(t, ws)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j5Route("met", nil, nil)}, "")
@@ -366,6 +379,7 @@ func TestVerifyAuto_ByID_NotVerifyingIsInvalidTransition(t *testing.T) {
 }
 
 func TestStatus_WaitingExternalIsEmptyWithoutAVerifyingChallengeAndNeverCallsGH(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	newClassifiedForCase(t, ws)
 	calls := withFakeGHRoutesOnPATH(t, nil)

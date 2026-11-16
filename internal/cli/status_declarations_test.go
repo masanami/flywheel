@@ -12,13 +12,14 @@ func statusRun(t *testing.T, ws string, extra ...string) (int, string, string) {
 	t.Helper()
 	args := append([]string{"status", "--workspace", ws}, extra...)
 	var stdout, stderr bytes.Buffer
-	code := run(args, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+	code := runWithLookPath(args, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 	return code, stdout.String(), stderr.String()
 }
 
 // status は cycle と同じ宣言の検査をし、不備なら config_invalid（終了コード 2）で終わる。
 // --json の有無を問わない。
 func TestStatus_InvalidDeclarations_ConfigInvalid(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		setup func(t *testing.T, ws string)
@@ -62,6 +63,7 @@ func TestStatus_InvalidDeclarations_ConfigInvalid(t *testing.T) {
 
 // 正しい 3 つの宣言でも、宣言が無くても、status は終了コード 0 で動く。
 func TestStatus_ValidOrAbsentDeclarations_Exit0(t *testing.T) {
+	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
 		ws := setupJ2Workspace(t)
 		writeSourcesDeclaration(t, ws, cycleSourcesJSON)

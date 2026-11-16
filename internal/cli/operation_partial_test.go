@@ -9,6 +9,7 @@ import (
 
 // release の段が途中でエラーになっても、それまでに実行済みのマージはエラーの文言に残る。
 func TestWithExecutedReleases_KeepsThePartialResultInTheMessage(t *testing.T) {
+	t.Parallel()
 	e := withExecutedReleases(NewError(CodeStoreError, "boom"), []core.ReleaseExecItem{
 		{OperationID: "OP-1", Result: core.ExecutionResultMerged, MergeCommit: "m1"},
 		{OperationID: "OP-2", Result: core.ExecutionResultHeadChanged},

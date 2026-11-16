@@ -11,6 +11,7 @@ import (
 )
 
 func TestRunJudgment_CycleBudgetGuard_ActiveRunTakesPrecedenceOverBudget(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStoreForTest(t)
 	cyc, err := s.BeginCycle(ctx, BeginCycleInput{Trigger: "test", BudgetUSD: 1, Exclusive: false})

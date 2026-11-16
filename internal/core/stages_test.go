@@ -49,6 +49,7 @@ func mustJSON(t *testing.T, v any) string {
 }
 
 func TestNormalizeIssues_CountsAndShape(t *testing.T) {
+	t.Parallel()
 	for n, wantOK := range map[int]bool{0: true, 1: false, 2: false, 3: true, 4: true, 5: true, 6: false} {
 		got, err := NormalizeIssues(issuesN(n))
 		if (err == nil) != wantOK {
@@ -93,6 +94,7 @@ func TestNormalizeIssues_CountsAndShape(t *testing.T) {
 }
 
 func TestNormalizeExpectedActualNonGoals(t *testing.T) {
+	t.Parallel()
 	for n, wantOK := range map[int]bool{0: true, 1: true, 3: true, 4: false} {
 		if _, err := NormalizeExpected(expectedN(n)); (err == nil) != wantOK {
 			t.Errorf("expected n=%d: err = %v", n, err)
@@ -132,6 +134,7 @@ func TestNormalizeExpectedActualNonGoals(t *testing.T) {
 }
 
 func TestStageLengthLimits(t *testing.T) {
+	t.Parallel()
 	// 文字数は Unicode のコードポイント（日本語 100 文字は 100 文字）。
 	if err := CheckHeadline(strings.Repeat("あ", 100)); err != nil {
 		t.Errorf("100 chars: %v", err)
@@ -168,6 +171,7 @@ func TestStageLengthLimits(t *testing.T) {
 }
 
 func TestParseStageJSON(t *testing.T) {
+	t.Parallel()
 	if got, err := ParseIssuesJSON("[]"); err != nil || got != nil {
 		t.Errorf("[] = %v, %v; want nil, nil", got, err)
 	}
@@ -194,6 +198,7 @@ func TestParseStageJSON(t *testing.T) {
 }
 
 func TestPairs(t *testing.T) {
+	t.Parallel()
 	if got := Pairs(nil, nil); got == nil || len(got) != 0 {
 		t.Errorf("Pairs(nil,nil) = %#v, want empty non-nil", got)
 	}
@@ -221,6 +226,7 @@ func TestPairs(t *testing.T) {
 }
 
 func TestNormalizeRejectedFields(t *testing.T) {
+	t.Parallel()
 	got, ok := NormalizeRejectedFields([]string{"figure", "issues", "figure", " expected "})
 	if !ok || !reflect.DeepEqual(got, []RejectedField{RejectedFieldIssues, RejectedFieldExpected, RejectedFieldFigure}) {
 		t.Errorf("got %v, %v; want closed-set order without duplicates", got, ok)
@@ -262,6 +268,7 @@ func lastActivity(t *testing.T, s *Store, id string) Activity {
 }
 
 func TestEditChallenge_WritesEachStageFieldAndRoundTrips(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	issues := issuesN(3)
 	in := EditInput{
@@ -316,6 +323,7 @@ func TestEditChallenge_WritesEachStageFieldAndRoundTrips(t *testing.T) {
 }
 
 func TestEditChallenge_EmptyStringClearsToNull(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	if _, err := edit(t, s, c.ID, EditInput{Headline: strPtr("h"), Context: strPtr("c"), Issues: strPtr(mustJSON(t, issuesN(3))),
 		Expected: strPtr(mustJSON(t, expectedN(1))), Actual: strPtr(mustJSON(t, actualN(1))), NonGoals: strPtr(`["a"]`), Figure: strPtr("f")}); err != nil {
@@ -349,6 +357,7 @@ func TestEditChallenge_EmptyStringClearsToNull(t *testing.T) {
 }
 
 func TestEditChallenge_InvalidStageValueIsValidationAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	before := lastActivity(t, s, c.ID)
 	for name, in := range map[string]EditInput{
@@ -382,6 +391,7 @@ func make11() []string {
 }
 
 func TestEditChallenge_ValidationComesBeforeExistenceAndTerminal(t *testing.T) {
+	t.Parallel()
 	s, _ := newChallengeForStages(t)
 	if _, err := edit(t, s, "C-999", EditInput{Headline: strPtr("  ")}); !errors.Is(err, ErrValidation) {
 		t.Errorf("missing id + invalid value: %v, want ErrValidation", err)
@@ -396,6 +406,7 @@ func TestEditChallenge_ValidationComesBeforeExistenceAndTerminal(t *testing.T) {
 }
 
 func TestEditChallenge_SameStageValueIsNoOp(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	in := EditInput{Headline: strPtr("h"), Issues: strPtr(mustJSON(t, issuesN(3)))}
 	first, err := edit(t, s, c.ID, in)
@@ -434,6 +445,7 @@ func activityCount(t *testing.T, s *Store, id string) int {
 }
 
 func TestEditChallenge_ChangingIssuesClearsIssuesHoldAndAnswer(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	if _, err := edit(t, s, c.ID, EditInput{Issues: strPtr(mustJSON(t, issuesN(3)))}); err != nil {
 		t.Fatal(err)
@@ -486,6 +498,7 @@ func TestEditChallenge_ChangingIssuesClearsIssuesHoldAndAnswer(t *testing.T) {
 }
 
 func TestIssuesAnswer_UnansweredHoldIsNil(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	cid, _ := parseChallengeID(c.ID)
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
@@ -507,6 +520,7 @@ func TestIssuesAnswer_UnansweredHoldIsNil(t *testing.T) {
 
 // 遷移の写像が段階の欄を、課題の遷移・作業ログと同じトランザクションで書ける。
 func TestRunTransition_WritesStageFieldsWithTheTransition(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	h := "一言"
 	got, err := s.transition(context.Background(), ChannelCLI, c.ID, OpClassify, func(_ context.Context, tc *transitionCtx) error {
@@ -550,6 +564,7 @@ func TestRunTransition_WritesStageFieldsWithTheTransition(t *testing.T) {
 }
 
 func TestRunTransition_WithoutPatchLeavesStageFieldsAlone(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	if _, err := edit(t, s, c.ID, EditInput{Headline: strPtr("h"), Issues: strPtr(mustJSON(t, issuesN(3)))}); err != nil {
 		t.Fatal(err)
@@ -564,6 +579,7 @@ func TestRunTransition_WithoutPatchLeavesStageFieldsAlone(t *testing.T) {
 }
 
 func TestExecuteApproval_RecordsRejectedFieldsInClosedSetOrder(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -601,6 +617,7 @@ func TestExecuteApproval_RecordsRejectedFieldsInClosedSetOrder(t *testing.T) {
 }
 
 func TestExecuteApproval_ApprovalHasNullRejectedFieldsAndRejectsFields(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -627,6 +644,7 @@ func TestExecuteApproval_ApprovalHasNullRejectedFieldsAndRejectsFields(t *testin
 }
 
 func TestPatchStages_CalledTwiceKeepsOriginalBefore(t *testing.T) {
+	t.Parallel()
 	s, c := newChallengeForStages(t)
 	if _, err := edit(t, s, c.ID, EditInput{Issues: strPtr(mustJSON(t, issuesN(3)))}); err != nil {
 		t.Fatal(err)

@@ -56,6 +56,7 @@ func cardInsertRun(t *testing.T, s *Store, c Challenge, hb time.Time, slotID *in
 }
 
 func TestDeriveCard_HeartbeatBoundary(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		sec  int
@@ -82,6 +83,7 @@ func TestDeriveCard_HeartbeatBoundary(t *testing.T) {
 }
 
 func TestDeriveCard_NoRunNoModifiersAndEmptyLists(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	c := cardChallenge(t, s, StatusClassified)
 	card, err := s.DeriveCard(context.Background(), c, nil, time.Now())
@@ -95,6 +97,7 @@ func TestDeriveCard_NoRunNoModifiersAndEmptyLists(t *testing.T) {
 
 // 8 つのうち 3 つ以上（計画承認待ち・triage・予算切れ・未承認操作・食い違い）が重なる課題は定義順で並ぶ。
 func TestDeriveCard_ActionsOrderMultiple(t *testing.T) {
+	t.Parallel()
 	c := Challenge{ID: "C-1", Status: StatusAwaitingPlanApproval}
 	st := &Overview{
 		NeedsHumanTriage:          []TriageItem{{ChallengeID: "C-1"}},
@@ -110,6 +113,7 @@ func TestDeriveCard_ActionsOrderMultiple(t *testing.T) {
 }
 
 func TestDeriveCard_OtherChallengesIgnoredAndCompletedPendingOp(t *testing.T) {
+	t.Parallel()
 	st := &Overview{
 		NeedsHumanTriage:     []TriageItem{{ChallengeID: "C-2"}},
 		NeedsHumanOperations: []IrreversibleOperation{{ChallengeID: "C-1", State: OperationStatePending}},
@@ -121,6 +125,7 @@ func TestDeriveCard_OtherChallengesIgnoredAndCompletedPendingOp(t *testing.T) {
 }
 
 func TestDeriveCard_StateActions(t *testing.T) {
+	t.Parallel()
 	for st, want := range map[Status]CardAction{
 		StatusAwaitingPlanApproval:       CardActionApprovePlan,
 		StatusAwaitingCompletionApproval: CardActionApproveCompletion,
@@ -135,6 +140,7 @@ func TestDeriveCard_StateActions(t *testing.T) {
 
 // 5 つの modifier がすべて成り立つ課題は定義順で並び、スロットは run.slot_id 経由で結ぶ。
 func TestDeriveCard_AllModifiersAndSlotLink(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
@@ -211,6 +217,7 @@ func TestDeriveCard_AllModifiersAndSlotLink(t *testing.T) {
 
 // 他の課題の行・他の課題の run に結んだスロット・終了済みの古い run だけでは、何も付かない。
 func TestDeriveCard_OtherChallengesAndEndedRunsDoNotLeak(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
@@ -273,6 +280,7 @@ func TestDeriveCard_OtherChallengesAndEndedRunsDoNotLeak(t *testing.T) {
 
 // 閾値は s.staleAfter（ReapInterruptedRuns と同じ値）に従う。
 func TestDeriveCard_UsesStoreStaleThreshold(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	s.staleAfter = 10 * time.Second
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
@@ -290,6 +298,7 @@ func TestDeriveCard_UsesStoreStaleThreshold(t *testing.T) {
 // スロットは直近の run の課題にだけ結ぶ。過去にそのスロットを使っただけの課題には、
 // SlotIDs も clear_slot も付かない。
 func TestDeriveCard_SlotBindsOnlyToLatestRunChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
@@ -363,6 +372,7 @@ func TestDeriveCard_SlotBindsOnlyToLatestRunChallenge(t *testing.T) {
 
 // M45H19: 種類が dependency_cycle だけの食い違いは印にも review_discrepancy にも数えない。他の種類が混ざれば数える。
 func TestDeriveCard_CycleOnlyDiscrepancyNotCounted(t *testing.T) {
+	t.Parallel()
 	c := Challenge{ID: "C-1", Status: StatusInProgress}
 	cycle := DiscrepancyKindDependencyCycle
 	cases := []struct {

@@ -27,6 +27,7 @@ func withdrawForTest(t *testing.T, s *Store, id, reason string) (*Challenge, err
 }
 
 func TestPrepareWithdraw_ValidationNotFoundAndPreview(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := createAndAdvance(t, s, StatusAwaitingHuman)
@@ -51,6 +52,7 @@ func TestPrepareWithdraw_ValidationNotFoundAndPreview(t *testing.T) {
 }
 
 func TestExecuteWithdraw_RejectsWrongAttestationAndStaleVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := createAndAdvance(t, s, StatusClassified)
@@ -77,6 +79,7 @@ func TestExecuteWithdraw_RejectsWrongAttestationAndStaleVersion(t *testing.T) {
 
 // (ui, none) は取り下げを受けない（UI には口を置かない。M45H28）。
 func TestExecuteWithdraw_UINoneAttestationIsRejected(t *testing.T) {
+	t.Parallel()
 	if registryPermits(ChannelUI, VerificationNone, actionWithdraw) {
 		t.Error("(ui, none) must not permit withdraw")
 	}
@@ -88,6 +91,7 @@ func TestExecuteWithdraw_UINoneAttestationIsRejected(t *testing.T) {
 // last_occurrence_id は取り下げた時点の発生の id の全体の最大（課題を問わない。#391 の見送りの抑えの鍵）。
 // 別の課題の発生を後に作り、途中の id を欠番にして、件数・課題単位の最大と区別する。
 func TestExecuteWithdraw_LastOccurrenceIDIsTheMaxOccurrenceID(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusClassified)
 	other := f.challenge(t, StatusClassified)
@@ -117,6 +121,7 @@ func TestExecuteWithdraw_LastOccurrenceIDIsTheMaxOccurrenceID(t *testing.T) {
 
 // AC-389: 取り下げは課題の出どころ（取り込み・人の手・フォローアップ・改修課題）を問わない。
 func TestWithdraw_AnyOrigin_Succeeds(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	base := createAndAdvance(t, s, StatusClassified)
@@ -153,6 +158,7 @@ func TestWithdraw_AnyOrigin_Succeeds(t *testing.T) {
 
 // 着手中で終わっていない委譲の run がある課題は conflict で、何も書かない（M45H29）。
 func TestWithdraw_InProgressWithOpenDelegationRun_IsConflictAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := createAndAdvance(t, s, StatusInProgress)
@@ -177,6 +183,7 @@ func TestWithdraw_InProgressWithOpenDelegationRun_IsConflictAndWritesNothing(t *
 
 // 終わった委譲の run だけなら取り下げられる。判断の run（開いていても）は取り下げを止めない。
 func TestWithdraw_InProgressWithOnlyJudgmentOrClosedRuns_Succeeds(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := createAndAdvance(t, s, StatusInProgress)
@@ -196,6 +203,7 @@ func TestWithdraw_InProgressWithOnlyJudgmentOrClosedRuns_Succeeds(t *testing.T) 
 // AC-376: ① の後・② の前に委譲の run が始まると、版の照合では検出できない（run の記録は課題の版を上げない）。
 // ② のトランザクションの中の再検査が conflict にし、何も書かない。
 func TestWithdraw_DelegationStartedAfterPrepare_IsConflictAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := createAndAdvance(t, s, StatusInProgress)
@@ -246,6 +254,7 @@ func approvedReleaseWithAttempt(t *testing.T, s *Store, id string, pid int64, ho
 
 // プロセスの生きている試行（`op exec` がマージを依頼している最中）は conflict で、何も書かない。
 func TestWithdraw_LiveReleaseExecutionAttempt_IsConflictAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := createAndAdvance(t, s, StatusAwaitingCompletionApproval)
@@ -279,6 +288,7 @@ func TestWithdraw_LiveReleaseExecutionAttempt_IsConflictAndWritesNothing(t *test
 // プロセスの死んだ（止まった）試行は開いていないとみなし、取り下げのトランザクションで interrupted として閉じる
 // （`op exec` の再実行＝本番へのマージ以外に閉じる経路を残す。M45H29）。
 func TestWithdraw_StaleReleaseExecutionAttempt_IsClosedAsInterruptedAndWithdraws(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := createAndAdvance(t, s, StatusAwaitingCompletionApproval)
@@ -315,6 +325,7 @@ func TestWithdraw_StaleReleaseExecutionAttempt_IsClosedAsInterruptedAndWithdraws
 
 // J6 の入力の「承認と保留の記録」は、閉じた保留を未回答と書かない（#385 の申し送り）。
 func TestWithdraw_J6Input_ClosedHoldIsNotUnanswered(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusWithdrawn)
 	cid, _ := parseChallengeID(c)
@@ -331,6 +342,7 @@ func TestWithdraw_J6Input_ClosedHoldIsNotUnanswered(t *testing.T) {
 
 // 判断の run が走っている間に取り下げられた課題へは、写像が何も書かずに終わる（J1〜J5。M45H13）。
 func TestWithdraw_J1Mapping_OnWithdrawnChallenge_WritesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := createAndAdvance(t, s, StatusUnclassified)
@@ -355,6 +367,7 @@ func TestWithdraw_J1Mapping_OnWithdrawnChallenge_WritesNothing(t *testing.T) {
 }
 
 func TestWithdraw_J2Mapping_DuringJ2_OnlyTheRunOutputIsKept(t *testing.T) {
+	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "withdrawn during J2", "P1")
 	inv := succeededInvoker(j2OutputFor(false, nil))
@@ -377,6 +390,7 @@ func TestWithdraw_J2Mapping_DuringJ2_OnlyTheRunOutputIsKept(t *testing.T) {
 }
 
 func TestWithdraw_J3_DuringJ3_NothingIsLaunched(t *testing.T) {
+	t.Parallel()
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.j3.onInvoke = func(in JudgmentLaunchInput) {
@@ -397,6 +411,7 @@ func TestWithdraw_J3_DuringJ3_NothingIsLaunched(t *testing.T) {
 }
 
 func TestWithdraw_J5_DuringJ5_VerdictRecordedButNotMapped(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.j5.onInvoke = func(JudgmentLaunchInput) {
@@ -418,6 +433,7 @@ func TestWithdraw_J5_DuringJ5_VerdictRecordedButNotMapped(t *testing.T) {
 
 // 取り下げた課題を依存先にした依存は満たされない（M45P14）。
 func TestWithdraw_DependencyOnWithdrawnChallenge_IsNotSatisfied(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	a := f.newDepTarget(t)
@@ -435,6 +451,7 @@ func TestWithdraw_DependencyOnWithdrawnChallenge_IsNotSatisfied(t *testing.T) {
 
 // 取り下げた課題の未分類の発生は J6 の対象になる（M45P32）。
 func TestWithdraw_J6AutoTarget_IncludesWithdrawnChallengeWithUnclassifiedOccurrence(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusWithdrawn)
 	o := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -454,6 +471,7 @@ func TestWithdraw_J6AutoTarget_IncludesWithdrawnChallengeWithUnclassifiedOccurre
 
 // 閉じた保留はどの読み取りでも開いている保留として扱わない（#397 の申し送り）。
 func TestWithdraw_ClosedHold_IsNotOpenInAnyReadPath(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	ch := createAndAdvance(t, s, StatusVerifying)
@@ -485,6 +503,7 @@ func TestWithdraw_ClosedHold_IsNotOpenInAnyReadPath(t *testing.T) {
 
 // 取り下げた課題は、分類・計画・委譲・検証の段の対象にならない（AC-383）。
 func TestWithdraw_IsNotATargetOfClassifyPlanDelegateVerifyStages(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newResumeFixture(t)
 	mk := func(status Status) (string, int64) {
@@ -548,6 +567,7 @@ func TestWithdraw_IsNotATargetOfClassifyPlanDelegateVerifyStages(t *testing.T) {
 
 // 取り下げた課題を ID で指定した learn も対象の条件を満たす（AC-386）。
 func TestWithdraw_J6ExplicitTarget_IsLearnable(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusWithdrawn)
 	o := f.occ(t, c, "plan_rejected", "bad", nil)
@@ -570,6 +590,7 @@ func TestWithdraw_J6ExplicitTarget_IsLearnable(t *testing.T) {
 // 完了の承認を受けていない。対象の条件は承認だけで決まるため、この構造が崩れないことをここで固定する
 // （取り下げ側に承認済みの完了が付く状態は作れない。計画の承認と完了の却下だけを持たせる）。
 func TestWithdraw_IsNotAMetricsTarget(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	done := mChallenge(t, s, "done")
 	withdrawn := mChallenge(t, s, "withdrawn")

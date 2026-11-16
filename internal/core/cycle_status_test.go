@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"os"
-	"os/exec"
 	"testing"
 	"time"
 )
@@ -41,11 +40,7 @@ func seedLock(t *testing.T, s *Store, holder int64, heartbeat time.Time) {
 	t.Helper()
 	host, _ := os.Hostname()
 	// 存在しないことが確かな pid（終了して回収済みの子）。生きていると判定されると回収の経路を通らない。
-	cmd := exec.Command("true")
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
-	}
-	dead := int64(cmd.Process.Pid)
+	dead := int64(runTrueForDeadPID(t))
 	err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
 		_, err := insertLock(context.Background(), tx, insertLockInput{
 			Name: cycleLockName, Holder: holder, PID: dead, Host: host, AcquiredAt: heartbeat, HeartbeatAt: heartbeat,
@@ -58,6 +53,7 @@ func seedLock(t *testing.T, s *Store, holder int64, heartbeat time.Time) {
 }
 
 func TestReadCycleStatus_Empty(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	got, err := s.ReadCycleStatus(context.Background())
 	if err != nil {
@@ -69,6 +65,7 @@ func TestReadCycleStatus_Empty(t *testing.T) {
 }
 
 func TestReadCycleStatus_HeartbeatBoundary(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		age  time.Duration
 		want CycleState
@@ -94,6 +91,7 @@ func TestReadCycleStatus_HeartbeatBoundary(t *testing.T) {
 }
 
 func TestReadCycleStatus_NoLockOpenCycleIsIdle(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	seedCycle(t, s, statusBase, nil, "")
 	got, err := s.ReadCycleStatus(context.Background())
@@ -106,6 +104,7 @@ func TestReadCycleStatus_NoLockOpenCycleIsIdle(t *testing.T) {
 }
 
 func TestReadCycleStatus_IndividualOpCyclesExcluded(t *testing.T) {
+	t.Parallel()
 	triggers := []string{"run", "classify --auto", "plan --auto", "verify --auto", "improve", "learn", "op exec"}
 	s := newStoreForTest(t)
 	for i, tr := range triggers {
@@ -136,6 +135,7 @@ func TestReadCycleStatus_IndividualOpCyclesExcluded(t *testing.T) {
 }
 
 func TestReadCycleStatus_Last(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	e1 := statusBase.Add(time.Minute)
 	e2 := statusBase.Add(3 * time.Minute)
@@ -159,6 +159,7 @@ func TestReadCycleStatus_Last(t *testing.T) {
 }
 
 func TestReadCycleStatus_NumericIDOrder(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	var lastStart time.Time
 	for i := 0; i < 11; i++ {
@@ -176,6 +177,7 @@ func TestReadCycleStatus_NumericIDOrder(t *testing.T) {
 }
 
 func TestReadCycleStatus_DoesNotReclaim(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := seedCycle(t, s, statusBase, nil, "")
 	seedLock(t, s, id, statusBase)
@@ -191,6 +193,7 @@ func TestReadCycleStatus_DoesNotReclaim(t *testing.T) {
 
 // 仕様は ID の最大で決める。時計が巻き戻って ID が大きい周の時刻が古くても、ID の最大を採る。
 func TestReadCycleStatus_LastIsByIDNotByTime(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	e1 := statusBase.Add(time.Hour)
 	seedCycle(t, s, statusBase.Add(50*time.Minute), &e1, CycleResultAborted) // ID 小・時刻が新しい
@@ -208,6 +211,7 @@ func TestReadCycleStatus_LastIsByIDNotByTime(t *testing.T) {
 
 // AC-179: ロックが無ければ、終了していない周が（trigger ui の周でも run の周でも）あっても idle。
 func TestReadCycleStatus_NoLockOpenCycleIsIdleForEachTrigger(t *testing.T) {
+	t.Parallel()
 	for _, tr := range []string{"ui", "run", "cron", "classify --auto", "plan --auto", "verify --auto"} {
 		t.Run(tr, func(t *testing.T) {
 			s := newStoreForTest(t)
@@ -226,6 +230,7 @@ func TestReadCycleStatus_NoLockOpenCycleIsIdleForEachTrigger(t *testing.T) {
 // AC-180: cycle の周より ID の大きい個別の操作の周（7 つの trigger のそれぞれ。終了したものと
 // 終了していないもの）は、last_started_at・last_ended_at・last_result に影響しない。
 func TestReadCycleStatus_NewerIndividualOpCyclesNeverAffectLast(t *testing.T) {
+	t.Parallel()
 	for _, tr := range []string{"run", "classify --auto", "plan --auto", "verify --auto", "improve", "learn", "op exec"} {
 		t.Run(tr+"/cycle は終了済み", func(t *testing.T) {
 			s := newStoreForTest(t)

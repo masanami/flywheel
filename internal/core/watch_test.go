@@ -15,6 +15,7 @@ const watchHelperEnv = "FLYWHEEL_CORE_TEST_WATCH_WRITER"
 // 書き込みを 1 回して終わる（"challenge" = 課題の作成、"heartbeat" = run の heartbeat
 // の更新だけ）。
 func TestWatchWriterHelper(t *testing.T) {
+	t.Parallel()
 	op := os.Getenv(watchHelperEnv)
 	if op == "" {
 		t.Skip("helper process only")
@@ -57,6 +58,7 @@ func newWatchedWorkspace(t *testing.T) (*Store, *WorkspaceWatcher) {
 
 // AC-85: どのストアも変わらない間は変化を返さない。
 func TestWorkspaceWatcher_NoChangeWhileStoreIsUntouched(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	_, w := newWatchedWorkspace(t)
 	if got := w.Poll(ctx); !got.Available || got.Changed {
@@ -72,6 +74,7 @@ func TestWorkspaceWatcher_NoChangeWhileStoreIsUntouched(t *testing.T) {
 // 自分の接続の書き込みでも別の接続（別プロセス）の書き込みでも、課題の作成を検出し、
 // 検出の後は変化を返さなくなる。
 func TestWorkspaceWatcher_DetectsChallengeCreatedByAnotherProcess(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, w := newWatchedWorkspace(t)
 	w.Poll(ctx)
@@ -86,6 +89,7 @@ func TestWorkspaceWatcher_DetectsChallengeCreatedByAnotherProcess(t *testing.T) 
 
 // AC-84: 課題・保留・作業ログに変化が無く、run の heartbeat だけが更新されたときも検出する。
 func TestWorkspaceWatcher_DetectsHeartbeatOnlyUpdateByAnotherProcess(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, w := newWatchedWorkspace(t)
 	runID := insertFakeRunForTest(t, s, mustCreateChallenge(t, s, "c").ID, JudgmentJ1)
@@ -108,6 +112,7 @@ func TestWorkspaceWatcher_DetectsHeartbeatOnlyUpdateByAnotherProcess(t *testing.
 
 // ストアが無いワークスペースはエラーで落とさず状態として返し、現れたら変化として返す。
 func TestWorkspaceWatcher_MissingStoreIsReportedAsState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	w := NewWorkspaceWatcher(dir)
@@ -129,6 +134,7 @@ func TestWorkspaceWatcher_MissingStoreIsReportedAsState(t *testing.T) {
 }
 
 func TestWorkspaceWatcher_StoreDisappearingAndUnopenableAreStates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, w := newWatchedWorkspace(t)
 	w.Poll(ctx)
@@ -149,6 +155,7 @@ func TestWorkspaceWatcher_StoreDisappearingAndUnopenableAreStates(t *testing.T) 
 
 // ストアのファイルが差し替えられたら（古い接続が古いファイルを見続けないよう）開き直して変化として返す。
 func TestWorkspaceWatcher_ReopensWhenStoreFileIsReplaced(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	if _, err := Init(dir); err != nil {

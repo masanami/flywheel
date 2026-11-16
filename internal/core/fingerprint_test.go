@@ -12,6 +12,7 @@ import (
 // scripts/tests/fixtures/ingest-fp/issue-130-body.txt を internal/core/testdata へ
 // 写したもの）の fingerprint が "2:9c56b5c0a92d" になる。
 func TestFingerprint_GoldenFixtureIssue130(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join("testdata", "ingest-fp", "issue-130-body.txt")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -28,6 +29,7 @@ func TestFingerprint_GoldenFixtureIssue130(t *testing.T) {
 // 親要件チケットの指示どおりの内容であることを固定する（8,591 バイト・
 // ファイル全体の SHA-256 が 5daa7cdc6e728b82956d267e96d3c17112ce1bc976669f4ff9eeb9e7ec891980）。
 func TestFingerprintGoldenFixture_ByteCountAndSHA256(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join("testdata", "ingest-fp", "issue-130-body.txt")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -47,6 +49,7 @@ func TestFingerprintGoldenFixture_ByteCountAndSHA256(t *testing.T) {
 // AC-62（境界値の既知ベクタ）: 本文 "hello" は 2cf24dba5fb0、空の本文と空白だけの
 // 本文は e3b0c44298fc になる。
 func TestFingerprint_KnownVectorsAndBoundaries(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		body string
@@ -74,6 +77,7 @@ func TestFingerprint_KnownVectorsAndBoundaries(t *testing.T) {
 // TestFingerprint_KnownVectorsAndBoundaries を補い、VT・FF が本文の途中では
 // 意味を持ち、先頭・末尾でだけ trim されることを固定する（"a" との同値比較）。
 func TestFingerprint_LeadingTrailingVerticalTabAndFormFeedAreTrimmed(t *testing.T) {
+	t.Parallel()
 	want := Fingerprint("a")
 	got := Fingerprint("\v\fa\f\v")
 	if got != want {
@@ -84,6 +88,7 @@ func TestFingerprint_LeadingTrailingVerticalTabAndFormFeedAreTrimmed(t *testing.
 // AC-63・AC-64・AC-65（正規化のケース。現行 ingest-fp.test.sh §3 の正規化ケースを
 // Go のテストへ移植したもの）。base は "a\nb" の fingerprint。
 func TestFingerprint_NormalizationSameValue(t *testing.T) {
+	t.Parallel()
 	base := Fingerprint("a\nb")
 	cases := []struct {
 		name string
@@ -109,6 +114,7 @@ func TestFingerprint_NormalizationSameValue(t *testing.T) {
 // "a\rb" は CR 除去後 "ab" になる（改行が無くなる）ため、"a\nb" とは別の値になる。
 // 上のテーブルにこの期待だけ食い違いが出るため、独立したテストで固定する。
 func TestFingerprint_LoneCRRemovesTheCRWithoutInsertingNewline(t *testing.T) {
+	t.Parallel()
 	got := Fingerprint("a\rb")
 	want := Fingerprint("ab")
 	if got != want {
@@ -117,6 +123,7 @@ func TestFingerprint_LoneCRRemovesTheCRWithoutInsertingNewline(t *testing.T) {
 }
 
 func TestFingerprint_NormalizationDifferentValue(t *testing.T) {
+	t.Parallel()
 	base := Fingerprint("a\nb")
 	cases := []struct {
 		name string
@@ -141,6 +148,7 @@ func TestFingerprint_NormalizationDifferentValue(t *testing.T) {
 // AC-65: 末尾に全角空白（U+3000）を持つ本文と持たない本文は違う fingerprint に
 // なる（strings.TrimSpace を使っていないことの直接的な検証）。
 func TestFingerprint_TrailingFullWidthSpaceIsSignificant(t *testing.T) {
+	t.Parallel()
 	withoutFullWidthSpace := Fingerprint("a\nb")
 	withFullWidthSpace := Fingerprint("a\nb　")
 	if withoutFullWidthSpace == withFullWidthSpace {
@@ -151,6 +159,7 @@ func TestFingerprint_TrailingFullWidthSpaceIsSignificant(t *testing.T) {
 // AC-57 の前提: hasKnownFingerprintVersion は記録された fingerprint の版が
 // FingerprintVersion（2）と一致するかを判定する（#57 の fail-closed 分岐が使う）。
 func TestHasKnownFingerprintVersion(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		fp   string
@@ -173,6 +182,7 @@ func TestHasKnownFingerprintVersion(t *testing.T) {
 
 // 決定性: 同じ入力を2回通しても同じ値。
 func TestFingerprint_Deterministic(t *testing.T) {
+	t.Parallel()
 	body := "some body\nwith multiple lines\n"
 	first := Fingerprint(body)
 	second := Fingerprint(body)

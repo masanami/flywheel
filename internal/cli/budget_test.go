@@ -76,6 +76,7 @@ func TestBudget_ConfirmedFromATerminalReplacesTheBucketsAndLeavesAnApproval(t *t
 
 // 標準入力が端末でなければ拒否し、枠は変わらない。
 func TestBudget_NoTerminalStdinIsRejectedAndLeavesTheBucketsUnchanged(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createExhaustedForCase(t, ws, "0.5")
 	cmd, stdout, stderr := newChildCmd([]string{"budget", id, "--impl-usd", "80", "--workspace", ws, "--json"})
@@ -128,6 +129,7 @@ func assertBudgetUnchanged(t *testing.T, ws, id string) {
 
 // --impl-usd の無い budget は終了コード 2・usage_error（ストアは変わらない）。
 func TestBudget_WithoutImplUSDIsUsageError(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createExhaustedForCase(t, ws, "0.5")
 	for _, args := range [][]string{
@@ -135,7 +137,7 @@ func TestBudget_WithoutImplUSDIsUsageError(t *testing.T) {
 		{"budget", id, "--review-usd", "20"},
 	} {
 		var stdout, stderr bytes.Buffer
-		code := run(append(append([]string{}, args...), "--workspace", ws, "--json"), strings.NewReader(""), &stdout, &stderr, defaultCommands())
+		code := runWithLookPath(append(append([]string{}, args...), "--workspace", ws, "--json"), strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 		if code != 2 || readErrorCode(t, stderr.String()) != string(CodeUsageError) {
 			t.Errorf("args=%v exit=%d stderr=%q, want 2 / usage_error", args, code, stderr.String())
 		}
@@ -145,11 +147,12 @@ func TestBudget_WithoutImplUSDIsUsageError(t *testing.T) {
 
 // 0 以下の額は端末を開く前に validation_failed で拒否する。
 func TestBudget_NonPositiveAmountIsRejectedBeforeAskingForConfirmation(t *testing.T) {
+	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createExhaustedForCase(t, ws, "0.5")
 	for _, amount := range []string{"0", "-5"} {
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"budget", id, "--impl-usd=" + amount, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands())
+		code := runWithLookPath([]string{"budget", id, "--impl-usd=" + amount, "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))
 		if code != 1 || readErrorCode(t, stderr.String()) != string(CodeValidationFailed) {
 			t.Errorf("--impl-usd %s: exit=%d stderr=%q, want 1 / validation_failed", amount, code, stderr.String())
 		}

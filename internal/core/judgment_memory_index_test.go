@@ -45,6 +45,7 @@ func requireNoIndexSection(t *testing.T, secs []JudgmentDataSection) {
 }
 
 func TestMemoryIndexSections_NoIndexOrOutsideSymlink_ReturnsNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := defaultAgentDeclaration()
 	if got := memoryIndexSections(s.Workspace(), decl); got != nil {
@@ -71,6 +72,7 @@ func TestMemoryIndexSections_NoIndexOrOutsideSymlink_ReturnsNothing(t *testing.T
 }
 
 func TestJ2Input_MemoryIndex(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		with bool
@@ -101,6 +103,7 @@ func TestJ2Input_MemoryIndex(t *testing.T) {
 }
 
 func TestJ3Input_MemoryIndex(t *testing.T) {
+	t.Parallel()
 	for _, with := range []bool{true, false} {
 		f := newDelegateFixture(t)
 		id := f.newInProgress(t, "t", "P1", planSpec(nil))
@@ -121,6 +124,7 @@ func TestJ3Input_MemoryIndex(t *testing.T) {
 }
 
 func TestJ5Input_MemoryIndex(t *testing.T) {
+	t.Parallel()
 	for _, with := range []bool{true, false} {
 		f := newJ5Fixture(t, "impl")
 		f.delegateToVerifying(t, "C-1")
@@ -144,6 +148,7 @@ func TestJ5Input_MemoryIndex(t *testing.T) {
 }
 
 func TestJ1Input_NeverHasMemoryIndex(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	writeMemoryIndex(t, s, decl)

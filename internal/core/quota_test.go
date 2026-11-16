@@ -13,12 +13,14 @@ import "testing"
 // internal/invoker から internal/core へ移した（quota.go 参照）。
 
 func TestIsRateLimited_ExactPrefixMatch(t *testing.T) {
+	t.Parallel()
 	if !IsRateLimited(rateLimitPrefix + "weekly limit · resets 3pm") {
 		t.Fatal("exact prefix match should be rate limited")
 	}
 }
 
 func TestIsRateLimited_StripsLeadingWhitespace(t *testing.T) {
+	t.Parallel()
 	if !IsRateLimited("   " + rateLimitPrefix + "weekly limit") {
 		t.Fatal("leading spaces should be stripped before matching")
 	}
@@ -28,6 +30,7 @@ func TestIsRateLimited_StripsLeadingWhitespace(t *testing.T) {
 }
 
 func TestIsRateLimited_MultilineResultStillMatchesOnFirstLine(t *testing.T) {
+	t.Parallel()
 	if !IsRateLimited(rateLimitPrefix + "Opus limit · resets 5pm\n続きの行") {
 		t.Fatal("multi-line result should match on the first line")
 	}
@@ -35,6 +38,7 @@ func TestIsRateLimited_MultilineResultStillMatchesOnFirstLine(t *testing.T) {
 
 // 枠の名前を限定しない（weekly 決め打ちでない）。
 func TestIsRateLimited_DoesNotHardcodeLimitName(t *testing.T) {
+	t.Parallel()
 	names := []string{
 		"weekly limit · resets 3pm",
 		"session limit · resets 5pm",
@@ -53,6 +57,7 @@ func TestIsRateLimited_DoesNotHardcodeLimitName(t *testing.T) {
 
 // 先頭一致であって部分一致ではない（自己言及の誤検知を塞ぐ）。
 func TestIsRateLimited_DoesNotMatchSelfReferenceMidString(t *testing.T) {
+	t.Parallel()
 	selfRef := "この規定を実装しました。判定は `" + rateLimitPrefix + "` の先頭一致であって部分一致ではありません。"
 	if IsRateLimited(selfRef) {
 		t.Fatal("a report that quotes the prefix mid-string must not be treated as rate limited")
@@ -60,6 +65,7 @@ func TestIsRateLimited_DoesNotMatchSelfReferenceMidString(t *testing.T) {
 }
 
 func TestIsRateLimited_DoesNotMatchBacktickQuotedAtStart(t *testing.T) {
+	t.Parallel()
 	quoted := "`" + rateLimitPrefix + "` を先頭一致で判定する判定器を追加しました。"
 	if IsRateLimited(quoted) {
 		t.Fatal("a backtick-quoted mention must not match (only an exact literal prefix matches)")
@@ -67,6 +73,7 @@ func TestIsRateLimited_DoesNotMatchBacktickQuotedAtStart(t *testing.T) {
 }
 
 func TestIsRateLimited_DoesNotMatchSecondLineHeadOfMultilineReport(t *testing.T) {
+	t.Parallel()
 	report := "実装が完了しました。変更点:\n" + rateLimitPrefix + "への先頭一致で枠超過を判定します。"
 	if IsRateLimited(report) {
 		t.Fatal("a mention on the second line's head must not match")
@@ -75,6 +82,7 @@ func TestIsRateLimited_DoesNotMatchSecondLineHeadOfMultilineReport(t *testing.T)
 
 // 境界（1文字ずれ・大小・引用符の異体字）は安全側へ倒す。
 func TestIsRateLimited_BoundaryCasesFailSafe(t *testing.T) {
+	t.Parallel()
 	short := rateLimitPrefix[:len(rateLimitPrefix)-1] // 末尾の半角スペースを欠く
 	if IsRateLimited(short + "weekly limit") {
 		t.Fatal("missing the trailing space boundary must not match")
@@ -93,6 +101,7 @@ func TestIsRateLimited_BoundaryCasesFailSafe(t *testing.T) {
 
 // 判定不能は「枠超過ではない」側へ倒す。
 func TestIsRateLimited_UndeterminableFailsToNotRateLimited(t *testing.T) {
+	t.Parallel()
 	cases := []string{"", "  \n\t  ", "実装が完了しました。PR を作成済みです。"}
 	for _, c := range cases {
 		if IsRateLimited(c) {
@@ -104,6 +113,7 @@ func TestIsRateLimited_UndeterminableFailsToNotRateLimited(t *testing.T) {
 // 返り値 JSON をまるごと流し込む誤用も安全側へ倒れる（"{" で始まり先頭一致
 // しない）。
 func TestIsRateLimited_RawJSONDumpDoesNotMatch(t *testing.T) {
+	t.Parallel()
 	raw := `{"type":"result","subtype":"success","result":"` + rateLimitPrefix + `weekly limit"}`
 	if IsRateLimited(raw) {
 		t.Fatal("a raw JSON dump of the response must not match (it does not start with the prefix itself)")

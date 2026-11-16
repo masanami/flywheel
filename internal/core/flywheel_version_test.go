@@ -9,6 +9,7 @@ import (
 )
 
 func TestVersionFromSettings(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		in   []debug.BuildSetting
@@ -27,6 +28,7 @@ func TestVersionFromSettings(t *testing.T) {
 
 // go test のバイナリには VCS の情報が無く NULL になる（M45P22）。
 func TestBuildFlywheelVersion_NullUnderGoTest(t *testing.T) {
+	t.Parallel()
 	if got := buildFlywheelVersion(); got != "" {
 		t.Skipf("VCS info present: %q", got)
 	}
@@ -104,6 +106,7 @@ func TestInsertRun_WritesFlywheelVersionForEveryKind(t *testing.T) {
 
 // show の challenge.followup_of（NULL なら nil）。
 func TestShowChallenge_FollowupOf(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ctx := context.Background()
 	a := cardChallenge(t, s, StatusInProgress)

@@ -15,6 +15,7 @@ import (
 // --- 作成 ---
 
 func TestInsertSourceBinding_CreatesBindingReadableByChallengeIDAndExternalKey(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := mustCreateChallenge(t, s, "issue-49")
 	at := time.Date(2026, 9, 26, 1, 2, 3, 0, time.UTC)
@@ -60,6 +61,7 @@ func TestInsertSourceBinding_CreatesBindingReadableByChallengeIDAndExternalKey(t
 // 1 つの外部キーに 2 つ目の対応を書き込もうとすると、ストアが一意制約で拒否する
 // （insertSourceBinding は事前の読み取りで重複を判定せず、制約の違反を翻訳する）。
 func TestInsertSourceBinding_StoreRejectsSecondBindingForSameExternalKey(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	first := mustCreateChallenge(t, s, "first")
 	second := mustCreateChallenge(t, s, "second")
@@ -87,6 +89,7 @@ func TestInsertSourceBinding_StoreRejectsSecondBindingForSameExternalKey(t *test
 }
 
 func TestInsertSourceBinding_RejectsSecondBindingForSameChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := mustCreateChallenge(t, s, "one binding only")
 
@@ -111,6 +114,7 @@ func TestInsertSourceBinding_RejectsSecondBindingForSameChallenge(t *testing.T) 
 }
 
 func TestInsertSourceBinding_RejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(in *createSourceBindingInput){
 		"source_id が空":         func(in *createSourceBindingInput) { in.SourceID = "" },
 		"external_key が空":      func(in *createSourceBindingInput) { in.ExternalKey = "" },
@@ -139,6 +143,7 @@ func TestInsertSourceBinding_RejectsInvalidInput(t *testing.T) {
 // --- 取得 ---
 
 func TestGetSourceBindingByChallengeID_ReturnsNilWhenChallengeHasNoBinding(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := mustCreateChallenge(t, s, "no binding")
 
@@ -149,6 +154,7 @@ func TestGetSourceBindingByChallengeID_ReturnsNilWhenChallengeHasNoBinding(t *te
 }
 
 func TestGetSourceBindingByChallengeID_RejectsMalformedOrMissingChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	for _, id := range []string{"not-an-id", "C-999"} {
 		if _, err := s.getSourceBindingByChallengeID(context.Background(), id); !errors.Is(err, ErrNotFound) {
@@ -158,6 +164,7 @@ func TestGetSourceBindingByChallengeID_RejectsMalformedOrMissingChallenge(t *tes
 }
 
 func TestGetSourceBindingByExternalKey_ReturnsNilWhenNoBindingExists(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	sb, err := s.getSourceBindingByExternalKey(context.Background(), "owner/repo#1")
 	if err != nil || sb != nil {
@@ -168,6 +175,7 @@ func TestGetSourceBindingByExternalKey_ReturnsNilWhenNoBindingExists(t *testing.
 // --- 更新 ---
 
 func TestApplySourceBindingUpdate_UpdatesGivenFieldsAndAdvancesUpdatedAt(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := mustCreateChallenge(t, s, "issue-49")
 	createdAt := time.Date(2026, 9, 26, 0, 0, 0, 0, time.UTC)
@@ -200,6 +208,7 @@ func TestApplySourceBindingUpdate_UpdatesGivenFieldsAndAdvancesUpdatedAt(t *test
 }
 
 func TestApplySourceBindingUpdate_DoesNotWriteWhenNothingChanges(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := mustCreateChallenge(t, s, "issue-49")
 	createdAt := time.Date(2026, 9, 26, 0, 0, 0, 0, time.UTC)
@@ -224,6 +233,7 @@ func TestApplySourceBindingUpdate_DoesNotWriteWhenNothingChanges(t *testing.T) {
 }
 
 func TestApplySourceBindingUpdate_ReturnsNilWhenNoBindingExists(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	ch := mustCreateChallenge(t, s, "no binding")
 
@@ -235,6 +245,7 @@ func TestApplySourceBindingUpdate_ReturnsNilWhenNoBindingExists(t *testing.T) {
 }
 
 func TestApplySourceBindingUpdate_RejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	empty := ""
 	badUpstream := upstreamState("reopened")
 	badPolicy := policyState("unknown")
@@ -270,6 +281,7 @@ func TestApplySourceBindingUpdate_RejectsInvalidInput(t *testing.T) {
 // 既存の課題・承認の記録・作業ログが件数と内容とも保持される。既存の課題に対応は
 // 無い。
 func TestOpenWorkspace_UpgradesSchemaVersion1StoreToVersion2AndPreservesExistingData(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mustMkdirAll(t, filepath.Join(dir, flywheelDirName))
 	dbPath := storeDBPath(dir)

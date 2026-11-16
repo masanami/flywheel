@@ -26,6 +26,7 @@ func (f *fakeVerifier) Confirm(_, _ string) (string, error) {
 }
 
 func TestVerificationRegistry_CLITTYConfirmAllowedAndOthersRejected(t *testing.T) {
+	t.Parallel()
 	if !registryAllows(ChannelCLI, VerificationTTYConfirm) {
 		t.Fatal("want (cli, tty_confirm) to be allowed")
 	}
@@ -41,6 +42,7 @@ func TestVerificationRegistry_CLITTYConfirmAllowedAndOthersRejected(t *testing.T
 }
 
 func TestVerificationRegistry_HasCLITTYConfirmRelayedAndUINone(t *testing.T) {
+	t.Parallel()
 	if len(verificationRegistry) != 3 {
 		t.Fatalf("len(verificationRegistry) = %d, want 3", len(verificationRegistry))
 	}
@@ -50,6 +52,7 @@ func TestVerificationRegistry_HasCLITTYConfirmRelayedAndUINone(t *testing.T) {
 }
 
 func TestVerify_RejectsUnregisteredChannelWithoutCallingConfirm(t *testing.T) {
+	t.Parallel()
 	fv := &fakeVerifier{method: VerificationNone, actor: "alice"}
 	_, err := Verify(ChannelCLI, fv, "summary", "C-1")
 	if !errors.Is(err, ErrVerificationRejected) {
@@ -61,6 +64,7 @@ func TestVerify_RejectsUnregisteredChannelWithoutCallingConfirm(t *testing.T) {
 }
 
 func TestVerify_RejectsUnknownVerificationMethodWithoutCallingConfirm(t *testing.T) {
+	t.Parallel()
 	fv := &fakeVerifier{method: Verification("unknown"), actor: "alice"}
 	_, err := Verify(ChannelCLI, fv, "summary", "C-1")
 	if !errors.Is(err, ErrVerificationRejected) {
@@ -72,6 +76,7 @@ func TestVerify_RejectsUnknownVerificationMethodWithoutCallingConfirm(t *testing
 }
 
 func TestVerify_RejectsUnknownChannelWithoutCallingConfirm(t *testing.T) {
+	t.Parallel()
 	fv := &fakeVerifier{method: VerificationTTYConfirm, actor: "alice"}
 	_, err := Verify(Channel("mobile"), fv, "summary", "C-1")
 	if !errors.Is(err, ErrVerificationRejected) {
@@ -83,6 +88,7 @@ func TestVerify_RejectsUnknownChannelWithoutCallingConfirm(t *testing.T) {
 }
 
 func TestVerify_SucceedsAndReturnsAttestationForRegisteredEntry(t *testing.T) {
+	t.Parallel()
 	fv := &fakeVerifier{method: VerificationTTYConfirm, actor: "alice"}
 	att, err := Verify(ChannelCLI, fv, "summary", "C-1")
 	if err != nil {
@@ -106,6 +112,7 @@ func TestVerify_SucceedsAndReturnsAttestationForRegisteredEntry(t *testing.T) {
 // verifier が nil でも Verify が panic せず ErrVerificationRejected で
 // fail-closed に拒否すること。
 func TestVerify_RejectsNilVerifierWithoutPanicking(t *testing.T) {
+	t.Parallel()
 	_, err := Verify(ChannelCLI, nil, "summary", "C-1")
 	if !errors.Is(err, ErrVerificationRejected) {
 		t.Fatalf("Verify() error = %v, want ErrVerificationRejected", err)
@@ -113,6 +120,7 @@ func TestVerify_RejectsNilVerifierWithoutPanicking(t *testing.T) {
 }
 
 func TestVerify_PropagatesErrTTYRequiredFromConfirm(t *testing.T) {
+	t.Parallel()
 	fv := &fakeVerifier{method: VerificationTTYConfirm, err: ErrTTYRequired}
 	_, err := Verify(ChannelCLI, fv, "summary", "C-1")
 	if !errors.Is(err, ErrTTYRequired) {
@@ -124,6 +132,7 @@ func TestVerify_PropagatesErrTTYRequiredFromConfirm(t *testing.T) {
 }
 
 func TestVerify_PropagatesErrConfirmationMismatchFromConfirm(t *testing.T) {
+	t.Parallel()
 	fv := &fakeVerifier{method: VerificationTTYConfirm, err: ErrConfirmationMismatch}
 	_, err := Verify(ChannelCLI, fv, "summary", "C-1")
 	if !errors.Is(err, ErrConfirmationMismatch) {

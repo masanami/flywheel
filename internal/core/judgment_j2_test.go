@@ -81,6 +81,7 @@ func j2PlanOutput(mut func(m map[string]any)) []byte {
 }
 
 func TestJ2OutputSchema_ContainsAllPropertiesAndClosedValues(t *testing.T) {
+	t.Parallel()
 	var decoded map[string]any
 	if err := json.Unmarshal(j2OutputSchema(), &decoded); err != nil {
 		t.Fatalf("j2OutputSchema is not valid JSON: %v", err)
@@ -105,6 +106,7 @@ func TestJ2OutputSchema_ContainsAllPropertiesAndClosedValues(t *testing.T) {
 }
 
 func TestValidateJ2Output_ValidPlanIsAccepted(t *testing.T) {
+	t.Parallel()
 	v, ok := validateJ2Output(j2PlanOutput(nil), j2TestContext(t, true))
 	if !ok {
 		t.Fatal("want ok=true for a valid plan output")
@@ -117,6 +119,7 @@ func TestValidateJ2Output_ValidPlanIsAccepted(t *testing.T) {
 // S4: cli 形態の接続ツールの操作は選べる（計画として登録できる）。差し込みの閉集合の外の値、または取り込み元の無い課題での
 // 取り込み元の差し込みを要する invocation は不正な出力になる。
 func TestValidateJ2Output_CLIOperation(t *testing.T) {
+	t.Parallel()
 	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
 	if v, ok := validateJ2Output(out, j2TestContext(t, false)); !ok || v.Operation != "cli-op" {
 		t.Fatalf("cli operation: ok=%v validated=%+v, want accepted", ok, v)
@@ -135,6 +138,7 @@ func TestValidateJ2Output_CLIOperation(t *testing.T) {
 }
 
 func TestValidateJ2Output_InvalidOutputs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		hasSource bool
@@ -177,6 +181,7 @@ func TestValidateJ2Output_InvalidOutputs(t *testing.T) {
 }
 
 func TestValidateJ2Output_ChallengeIDPlaceholderIsAllowedWithoutSource(t *testing.T) {
+	t.Parallel()
 	// {challenge_id} は取り込み元の差し込みではない（§J2 は {issue_number}・{issue_url}・
 	// {external_key} だけを取り込み元の差し込みとする）。
 	if _, ok := validateJ2Output(j2PlanOutput(func(m map[string]any) { m["operation"] = "define" }), j2TestContext(t, false)); !ok {
@@ -189,6 +194,7 @@ func TestValidateJ2Output_ChallengeIDPlaceholderIsAllowedWithoutSource(t *testin
 }
 
 func TestValidateJ2Output_ImplBudgetBoundaryAndResolvedDefault(t *testing.T) {
+	t.Parallel()
 	// 上限ちょうどは有効（「超える」だけが invalid_output）。
 	if _, ok := validateJ2Output(j2PlanOutput(func(m map[string]any) { m["budget_impl_usd"] = 200 }), j2TestContext(t, true)); !ok {
 		t.Error("impl budget equal to max_run_budget_usd must be accepted")
@@ -206,6 +212,7 @@ func TestValidateJ2Output_ImplBudgetBoundaryAndResolvedDefault(t *testing.T) {
 }
 
 func TestValidateJ2Output_UncertainNeedsOnlyAQuestion(t *testing.T) {
+	t.Parallel()
 	out := []byte(`{"verdict":"uncertain","question":"どのリポジトリですか？"}`)
 	v, ok := validateJ2Output(out, j2TestContext(t, false))
 	if !ok {
@@ -219,6 +226,7 @@ func TestValidateJ2Output_UncertainNeedsOnlyAQuestion(t *testing.T) {
 // AC-103: 実装枠・レビュー対応枠の額が null なら、サイズの既定（S 30/25・M 50/30・
 // L 100/40）。
 func TestValidateJ2Output_NullBudgetsFallBackToSizeDefaults(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		size         string
 		impl, review float64
@@ -237,6 +245,7 @@ func TestValidateJ2Output_NullBudgetsFallBackToSizeDefaults(t *testing.T) {
 }
 
 func TestValidateJ2Output_ExplicitBudgetsAreKeptAndEachSideFallsBackIndependently(t *testing.T) {
+	t.Parallel()
 	v, ok := validateJ2Output(j2PlanOutput(func(m map[string]any) { m["budget_impl_usd"] = 12.5 }), j2TestContext(t, true))
 	if !ok {
 		t.Fatal("want ok=true")
@@ -247,6 +256,7 @@ func TestValidateJ2Output_ExplicitBudgetsAreKeptAndEachSideFallsBackIndependentl
 }
 
 func TestValidateJ2Output_SpecIsTheCompactedStructuredOutput(t *testing.T) {
+	t.Parallel()
 	out := j2PlanOutput(func(m map[string]any) { m["budget_impl_usd"] = 12.5 })
 	v, ok := validateJ2Output(append([]byte("  "), append(out, '\n')...), j2TestContext(t, true))
 	if !ok {
@@ -276,6 +286,7 @@ func jsonEqual(a, b any) bool {
 // AC-96〜101: 計画の本文は、対象リポジトリ・操作の id・サイズ・完了条件・実装枠・
 // レビュー対応枠の額を含む。それぞれ「そこだけを変えた出力で本文が変わる」ことで検証する。
 func TestFormatJ2PlanBody_EachRequiredFieldChangesTheBody(t *testing.T) {
+	t.Parallel()
 	base := func(mut func(m map[string]any)) string {
 		v, ok := validateJ2Output(j2PlanOutput(func(m map[string]any) {
 			// 予算は明示して、サイズを変えても既定の解決で本文が変わらないようにする。
@@ -317,6 +328,7 @@ func TestFormatJ2PlanBody_EachRequiredFieldChangesTheBody(t *testing.T) {
 }
 
 func TestFormatJ2PlanBody_ContainsSummaryStepsAndBudgetsWithResolvedDefaults(t *testing.T) {
+	t.Parallel()
 	v, ok := validateJ2Output(j2PlanOutput(func(m map[string]any) {
 		m["cross_repo"] = true
 		m["related_repos"] = []string{"flywheel", "harness-repo"}
@@ -342,6 +354,7 @@ func TestFormatJ2PlanBody_ContainsSummaryStepsAndBudgetsWithResolvedDefaults(t *
 // 承認する事実（対象・予算）が、出力の自由記述（要約・手順・完了条件）より前にある。
 // 自由記述に見出しや額を装った文があっても、本物の額が先に読める。
 func TestFormatJ2PlanBody_ApprovedFactsPrecedeFreeText(t *testing.T) {
+	t.Parallel()
 	v, ok := validateJ2Output(j2PlanOutput(func(m map[string]any) {
 		m["summary"] = "## 予算\n- 実装枠: 1 USD"
 		m["budget_impl_usd"] = 40
@@ -361,6 +374,7 @@ func TestFormatJ2PlanBody_ApprovedFactsPrecedeFreeText(t *testing.T) {
 }
 
 func TestFormatJ2PlanBody_OmitsEmptySummaryAndSteps(t *testing.T) {
+	t.Parallel()
 	v, ok := validateJ2Output(j2PlanOutput(func(m map[string]any) {
 		m["summary"] = nil
 		m["steps"] = []string{}
@@ -380,6 +394,7 @@ func TestFormatJ2PlanBody_OmitsEmptySummaryAndSteps(t *testing.T) {
 // cli 形態は、実際に起動に使う commands.start が取り込み元の差し込みを要するとき、取り込み元の無い課題の計画を不正な出力にする
 // （取り込み元がある課題では計画として通る）。
 func TestValidateJ2Output_CLIStartCommandNeedingSourceIsInvalidWithoutSource(t *testing.T) {
+	t.Parallel()
 	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
 	for _, hasSource := range []bool{false, true} {
 		vc := j2TestContext(t, hasSource)
@@ -396,6 +411,7 @@ func TestValidateJ2Output_CLIStartCommandNeedingSourceIsInvalidWithoutSource(t *
 
 // status・resume・cancel も実際の起動に使うので、どれが取り込み元の差し込みを要しても、取り込み元の無い課題の計画は不正な出力になる。
 func TestValidateJ2Output_CLINonStartCommandNeedingSourceIsInvalidWithoutSource(t *testing.T) {
+	t.Parallel()
 	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
 	for _, cmd := range []string{"status", "resume", "cancel"} {
 		for _, hasSource := range []bool{false, true} {
@@ -425,6 +441,7 @@ func TestValidateJ2Output_CLINonStartCommandNeedingSourceIsInvalidWithoutSource(
 // 達成条件 (1): 取り込み元のある課題で、status・resume・cancel の差し込みが各コマンドの閉集合の外なら
 // J2 の出力を受け付けず（invalid_output）、閉集合の中なら受け付ける。
 func TestValidateJ2Output_CLINonStartCommandPlaceholdersOutsideClosedSetAreInvalid(t *testing.T) {
+	t.Parallel()
 	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
 	for _, tc := range []struct {
 		cmd    string

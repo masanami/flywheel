@@ -42,6 +42,7 @@ func (f *contractFixture) status(t *testing.T, id string) Status {
 
 // 契約の run は専用の kind で記録し、委譲の履歴の規則（run の一覧・連続失敗・delegation_failed）に入れない。
 func TestContractRun_HasItsOwnKindAndStaysOutOfTheDelegationHistory(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	f.client.startOut = contractOut(ContractStateRunning, nil, nil)
 	if _, err := f.start(t); err != nil {
@@ -74,6 +75,7 @@ func TestContractRun_HasItsOwnKindAndStaysOutOfTheDelegationHistory(t *testing.T
 
 // failed・cancelled は課題を失敗にも再委譲にもせず保留にし、契約の summary を問いへ写す。
 func TestPollContractRuns_FailedAndCancelledHoldTheChallengeWithTheSummary(t *testing.T) {
+	t.Parallel()
 	for _, st := range []ContractState{ContractStateFailed, ContractStateCancelled} {
 		t.Run(string(st), func(t *testing.T) {
 			f := newContractFixture(t)
@@ -107,6 +109,7 @@ func TestPollContractRuns_FailedAndCancelledHoldTheChallengeWithTheSummary(t *te
 
 // running・求められた操作の無い waiting は保留にしない。
 func TestPollContractRuns_OtherStatesDoNotHold(t *testing.T) {
+	t.Parallel()
 	for _, st := range []ContractState{ContractStateRunning, ContractStateWaiting} {
 		f := newContractFixture(t)
 		if _, err := f.start(t); err != nil {
@@ -124,6 +127,7 @@ func TestPollContractRuns_OtherStatesDoNotHold(t *testing.T) {
 
 // start の最中に flywheel の run が回収されたら、課題を保留にして、追われていない外部の run が残りうることを問いに書く。
 func TestStartContractDelegation_ReclaimedDuringStartHoldsTheChallenge(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	rc := &reclaimingClient{fakeContractClient: f.client}
 	rc.onStart = func() {
@@ -164,6 +168,7 @@ func TestStartContractDelegation_ReclaimedDuringStartHoldsTheChallenge(t *testin
 
 // 終わっていない契約の run を持つ課題は、J1・J2・J5 の自動の対象選びから外れる（終われば戻る）。
 func TestContractRun_ExcludesTheChallengeFromJudgmentAutoTargets(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil { // 課題 1（着手中）の契約の run を開く
 		t.Fatal(err)
@@ -222,6 +227,7 @@ func TestContractRun_ExcludesTheChallengeFromJudgmentAutoTargets(t *testing.T) {
 
 // 1 件の読みが失敗しても、残りの契約の run を読み続ける。
 func TestPollContractRuns_ContinuesAfterOneReadFails(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -246,6 +252,7 @@ func TestPollContractRuns_ContinuesAfterOneReadFails(t *testing.T) {
 
 // 複数のプロセスが同じ契約の run を同時に読んでも、費用を二重に数えない。
 func TestPollContractRuns_ConcurrentReadsDoNotDoubleCountCost(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -290,6 +297,7 @@ func (c *statusOnlyClient) Status(context.Context, ContractLaunchInput) (Contrac
 
 // 別のプロセスが回収した（run を interrupted で閉じただけの）契約の start も、課題を保留にする。それまでは委譲の対象に戻さない。
 func TestHoldUnrecordedContractStops_ReclaimedStartByAnotherProcess(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	sid, _ := newLowercaseUUIDv4()
 	runID, err := f.s.beginContractRun(context.Background(), 1, nil, nil, sid, usdToMicros(5), true)
@@ -327,6 +335,7 @@ func TestHoldUnrecordedContractStops_ReclaimedStartByAnotherProcess(t *testing.T
 
 // 契約の run を終わりにしたあと保留を作る前に止まった課題も、次の読みの先頭で保留にする。
 func TestHoldUnrecordedContractStops_FailedWithoutHold(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -344,6 +353,7 @@ func TestHoldUnrecordedContractStops_FailedWithoutHold(t *testing.T) {
 // 終わっていない契約の run を持つ課題は、J6（学び）の自動の対象選びからも外れ、ID を省略した学びでも
 // 判断が起動しない。契約の run が終われば対象に戻り、学びが走る。
 func TestContractRun_ExcludesTheChallengeFromJ6AutoTargets(t *testing.T) {
+	t.Parallel()
 	f := newJ6Fixture(t)
 	c := f.challenge(t, StatusAwaitingHuman)
 	f.occ(t, c, "plan_rejected", "bad", nil)
@@ -396,6 +406,7 @@ func TestContractRun_ExcludesTheChallengeFromJ6AutoTargets(t *testing.T) {
 
 // 終わっていない契約の run（外部の run が動いている）がある課題は、取り下げられない。
 func TestContractRun_BlocksWithdrawalWhileOpen(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	f.client.startOut = contractOut(ContractStateRunning, nil, nil)
 	if _, err := f.start(t); err != nil {
@@ -409,6 +420,7 @@ func TestContractRun_BlocksWithdrawalWhileOpen(t *testing.T) {
 
 // 回収された start を保留に写す前は、課題に start を重ねて呼べない（外部の run を二重に作らない）。
 func TestStartContractDelegation_RefusedWhileReclaimedStartIsNotYetHeld(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	sid, _ := newLowercaseUUIDv4()
 	runID, err := f.s.beginContractRun(context.Background(), 1, nil, nil, sid, usdToMicros(5), true)
@@ -482,6 +494,7 @@ func (f *contractFixture) isDelegationTarget(t *testing.T) bool {
 // start が回収以外で失敗した（時間切れ・不正な出力・起動の失敗・その他のエラー）ときも課題を保留にし、
 // 失敗の種類と、追われていない外部の run が残りうることを問いに書く。自動では委譲し直さない。
 func TestStartContractDelegation_FailureHoldsTheChallengeWithTheFailureKind(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		out  ContractLaunchOutput
 		want RunResult
@@ -522,6 +535,7 @@ func TestStartContractDelegation_FailureHoldsTheChallengeWithTheFailureKind(t *t
 // start の run を失敗で記録した後、保留を作る前にプロセスが止まった課題も、掃引で保留にする（失敗の種類を問いに書く）。
 // それまでは実行中として数え、委譲の対象に戻さない。
 func TestHoldUnrecordedContractStops_FailedStartWithoutHold(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	sid, _ := newLowercaseUUIDv4()
 	runID, err := f.s.beginContractRun(context.Background(), 1, nil, nil, sid, usdToMicros(5), true)
@@ -549,6 +563,7 @@ func TestHoldUnrecordedContractStops_FailedStartWithoutHold(t *testing.T) {
 
 // 回収の経路（古い run の回収・死んだ周の持ち主の run の回収）で契約の run を閉じても、delegation_failed を作らない。
 func TestContractRun_ReapingDoesNotCreateDelegationFailed(t *testing.T) {
+	t.Parallel()
 	t.Run("ReapInterruptedRuns", func(t *testing.T) {
 		f := newContractFixture(t)
 		sid, _ := newLowercaseUUIDv4()
@@ -597,6 +612,7 @@ func TestContractRun_ReapingDoesNotCreateDelegationFailed(t *testing.T) {
 // 契約の run が failed・cancelled で終わったのに保留がまだ無い間（記録と保留の間でプロセスが止まり、掃引の前）は、
 // その課題を実行中として数え、委譲の対象に戻さない・start を重ねて呼べない。
 func TestContractRun_StoppedButNotYetHeldCountsAsRunning(t *testing.T) {
+	t.Parallel()
 	for _, st := range []string{"failed", "cancelled"} {
 		t.Run(st, func(t *testing.T) {
 			f := newContractFixture(t)
@@ -628,6 +644,7 @@ func TestContractRun_StoppedButNotYetHeldCountsAsRunning(t *testing.T) {
 
 // 同時委譲数の数えに、終わっていない契約の run を持つ課題を含める（周をまたいで続く契約の run も動いている委譲）。
 func TestContractRun_CountsTowardParallelDelegations(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	sch := &delegationScheduler{s: f.s, maxParallel: 1, preRepo: map[string]int{}}
 	capOf := func() slotCapacity {
@@ -670,6 +687,7 @@ func TestContractRun_CountsTowardParallelDelegations(t *testing.T) {
 
 // 前の周から続く終わっていない契約の run を持つ課題は、動いている委譲として衝突の予測へ渡す。
 func TestContractRun_IsARunningDelegationForPrediction(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	f.client.startOut = contractOut(ContractStateRunning, nil, nil)
 	if _, err := f.s.StartContractDelegation(context.Background(), ContractStartInput{
@@ -698,6 +716,7 @@ func TestContractRun_IsARunningDelegationForPrediction(t *testing.T) {
 
 // 掃引の 1 件の保留が失敗しても、残りの掃引と状態の読みを続け、失敗は返り値で知らせる。
 func TestPollContractRuns_SweepFailureDoesNotStopTheReads(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil { // 課題 1: 保留にし損ねた停止（掃引の対象）
 		t.Fatal(err)
@@ -728,6 +747,7 @@ func TestPollContractRuns_SweepFailureDoesNotStopTheReads(t *testing.T) {
 
 // ID を指定した確認では、ID の形式の検査を掃引より先に行う（不正な ID なら何も保留にしない）。
 func TestPollContractRuns_ValidatesTheIDBeforeTheSweep(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -750,6 +770,7 @@ func TestPollContractRuns_ValidatesTheIDBeforeTheSweep(t *testing.T) {
 // 境界の反対側（終わりより 1 ms 前に始まった＝その時点で直前の契約の run が終わっていなかった）は status の run として扱い、
 // 保留にしない。時刻はすべて注入した値で固定する。
 func TestHoldUnrecordedContractStops_StartAtSameInstantAsPreviousRunEnd(t *testing.T) {
+	t.Parallel()
 	const prevStart = "2025-12-31T23:59:59.000Z"
 	const prevEnd = "2026-01-01T00:00:00.000Z"
 	cases := []struct {

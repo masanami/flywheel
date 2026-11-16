@@ -55,6 +55,7 @@ func float64Ptr(f float64) *float64 { return &f }
 // --- Available()（invoker_unavailable相当）は何も記録・変更しない ---
 
 func TestRunJudgment_AvailableError_ChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 
@@ -92,6 +93,7 @@ func TestRunJudgment_AvailableError_ChangesNothing(t *testing.T) {
 // --- ①: run は起動より前にsession_idとともに記録される ---
 
 func TestRunJudgment_RecordsRunBeforeInvoking(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 
@@ -133,6 +135,7 @@ func TestRunJudgment_RecordsRunBeforeInvoking(t *testing.T) {
 // --- ②: 子を待つ間は書き込みロックを持たない ---
 
 func TestRunJudgment_DoesNotHoldWriteLockWhileWaiting(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 
@@ -182,6 +185,7 @@ func TestRunJudgment_DoesNotHoldWriteLockWhileWaiting(t *testing.T) {
 // --- heartbeat の更新 ---
 
 func TestRunJudgment_UpdatesHeartbeatWhileWaiting(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	s.heartbeatInterval = 30 * time.Millisecond
 	id := createChallengeForJudgmentTest(t, s)
@@ -231,6 +235,7 @@ func TestRunJudgment_UpdatesHeartbeatWhileWaiting(t *testing.T) {
 // --- ErrRunInProgress ---
 
 func TestRunJudgment_SecondConcurrentCallIsRunInProgress(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 
@@ -265,6 +270,7 @@ func TestRunJudgment_SecondConcurrentCallIsRunInProgress(t *testing.T) {
 // --- 結果の記録・session_idの不一致 ---
 
 func TestRunJudgment_RecordsSessionIDMismatch(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 
@@ -298,6 +304,7 @@ func TestRunJudgment_RecordsSessionIDMismatch(t *testing.T) {
 // --- 結果が succeeded 以外は課題の状態・版を変えない ---
 
 func TestRunJudgment_NonSucceededDoesNotChangeChallengeVersion(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 	before, err := s.GetChallenge(context.Background(), id)
@@ -328,6 +335,7 @@ func TestRunJudgment_NonSucceededDoesNotChangeChallengeVersion(t *testing.T) {
 // --- 費用の記録（computeRunCost の直接検証と RunJudgment 経由の検証） ---
 
 func TestComputeRunCost_NewSessionReported(t *testing.T) {
+	t.Parallel()
 	cost, source := computeRunCost(RunResultSucceeded, float64Ptr(0.5), false, nil, 100_000_000)
 	if cost != 500_000 || source != CostSourceReported {
 		t.Errorf("cost=%d source=%v, want 500000/reported", cost, source)
@@ -335,6 +343,7 @@ func TestComputeRunCost_NewSessionReported(t *testing.T) {
 }
 
 func TestComputeRunCost_NoReportedCostIsUnknown(t *testing.T) {
+	t.Parallel()
 	cost, source := computeRunCost(RunResultSucceeded, nil, false, nil, 1_000_000)
 	if cost != 1_000_000 || source != CostSourceUnknown {
 		t.Errorf("cost=%d source=%v, want 1000000/unknown", cost, source)
@@ -342,6 +351,7 @@ func TestComputeRunCost_NoReportedCostIsUnknown(t *testing.T) {
 }
 
 func TestComputeRunCost_TimedOutMalformedInterruptedAreUnknown(t *testing.T) {
+	t.Parallel()
 	for _, r := range []RunResult{RunResultTimedOut, RunResultMalformed, RunResultInterrupted} {
 		cost, source := computeRunCost(r, float64Ptr(0.9), false, nil, 2_000_000)
 		if cost != 2_000_000 || source != CostSourceUnknown {
@@ -351,6 +361,7 @@ func TestComputeRunCost_TimedOutMalformedInterruptedAreUnknown(t *testing.T) {
 }
 
 func TestComputeRunCost_LaunchFailedIsZero(t *testing.T) {
+	t.Parallel()
 	cost, source := computeRunCost(RunResultLaunchFailed, nil, false, nil, 5_000_000)
 	if cost != 0 {
 		t.Errorf("cost = %d, want 0", cost)
@@ -362,6 +373,7 @@ func TestComputeRunCost_LaunchFailedIsZero(t *testing.T) {
 
 // AC: 直前のrunが0.2→0.35を報告する場合に0.15になる（出所はdelta）。
 func TestComputeRunCost_ResumeDeltaIsPreviousSubtractedFromCurrent(t *testing.T) {
+	t.Parallel()
 	prev := int64(200_000) // $0.20
 	cost, source := computeRunCost(RunResultSucceeded, float64Ptr(0.35), true, &prev, 100_000_000)
 	if cost != 150_000 || source != CostSourceDelta {
@@ -370,6 +382,7 @@ func TestComputeRunCost_ResumeDeltaIsPreviousSubtractedFromCurrent(t *testing.T)
 }
 
 func TestComputeRunCost_NegativeDeltaFallsBackToMaxBudgetUnknown(t *testing.T) {
+	t.Parallel()
 	prev := int64(500_000)
 	cost, source := computeRunCost(RunResultSucceeded, float64Ptr(0.1), true, &prev, 3_000_000)
 	if cost != 3_000_000 || source != CostSourceUnknown {
@@ -382,6 +395,7 @@ func TestComputeRunCost_NegativeDeltaFallsBackToMaxBudgetUnknown(t *testing.T) {
 // reported 扱いにしてはならない（§費用の記録「直前のrunの報告が無い…ときは
 // …unknownにする」）。
 func TestComputeRunCost_ResumeWithNoPreviousReportIsUnknown(t *testing.T) {
+	t.Parallel()
 	cost, source := computeRunCost(RunResultSucceeded, float64Ptr(0.3), true, nil, 5_000_000)
 	if cost != 5_000_000 || source != CostSourceUnknown {
 		t.Errorf("cost=%d source=%v, want 5000000/unknown (resume with no previous report must fail closed)", cost, source)
@@ -390,6 +404,7 @@ func TestComputeRunCost_ResumeWithNoPreviousReportIsUnknown(t *testing.T) {
 
 // RunJudgment 経由で --resume（ResumeFromRunID）の費用の差分計算を検証する。
 func TestRunJudgment_ResumeComputesDeltaCostFromPreviousRun(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 
@@ -468,6 +483,7 @@ func TestRunJudgment_ResumeComputesDeltaCostFromPreviousRun(t *testing.T) {
 // 同じ課題の run だけを再開先にできる。別の課題の run を指定すると
 // ErrValidation になり、何も記録しない。
 func TestRunJudgment_ResumeFromAnotherChallengeIsRejected(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id1 := createChallengeForJudgmentTest(t, s)
 	id2 := createChallengeForJudgmentTest(t, s)
@@ -511,13 +527,17 @@ func deadPID(t *testing.T) int64 {
 		t.Fatalf("start throwaway process: %v", err)
 	}
 	pid := cmd.Process.Pid
-	if err := cmd.Wait(); err != nil {
+	// 終了コードやシグナルでの終了（*exec.ExitError）は無視する。ここで要るのは「プロセスが終わって pid が空いた」
+	// ことだけで、t.Parallel のテストが同時に子プロセスを起こす負荷の下では、sh が稀に SIGSEGV で終わることがある。
+	var exitErr *exec.ExitError
+	if err := cmd.Wait(); err != nil && !errors.As(err, &exitErr) {
 		t.Fatalf("wait throwaway process: %v", err)
 	}
 	return int64(pid)
 }
 
 func TestReapInterruptedRuns_StaleHeartbeatAndDeadProcessBecomesInterrupted(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	s.staleAfter = 100 * time.Millisecond
 	id := createChallengeForJudgmentTest(t, s)
@@ -566,6 +586,7 @@ func TestReapInterruptedRuns_StaleHeartbeatAndDeadProcessBecomesInterrupted(t *t
 }
 
 func TestReapInterruptedRuns_LiveProcessIsNotClosedEvenIfHeartbeatIsStale(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	s.staleAfter = 100 * time.Millisecond
 	id := createChallengeForJudgmentTest(t, s)
@@ -609,6 +630,7 @@ func TestReapInterruptedRuns_LiveProcessIsNotClosedEvenIfHeartbeatIsStale(t *tes
 }
 
 func TestListRuns_ReapsInterruptedRunsFirst(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	s.staleAfter = 50 * time.Millisecond
 	id := createChallengeForJudgmentTest(t, s)
@@ -640,6 +662,7 @@ func TestListRuns_ReapsInterruptedRunsFirst(t *testing.T) {
 // 既定の閾値（300 秒）の境界を固定する: s.staleAfter を差し替えず、heartbeat が
 // 301 秒古い run は回収され、299 秒古い run は回収されない。
 func TestReapInterruptedRuns_DefaultThresholdIs300Seconds(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		age  time.Duration
 		want RunResult
@@ -683,6 +706,7 @@ func TestReapInterruptedRuns_DefaultThresholdIs300Seconds(t *testing.T) {
 // --- J8: 課題を持たない判断 ---
 
 func TestRunJudgment_J8HasNoChallengeAndKeepsCost(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{
 		Result: RunResultSucceeded, StructuredOutput: []byte(`{"proposals":[]}`), ReportedTotalCostUSD: float64Ptr(1.25),
@@ -713,6 +737,7 @@ func TestRunJudgment_J8HasNoChallengeAndKeepsCost(t *testing.T) {
 }
 
 func TestRunJudgment_J8RunsMayOverlapBecauseNoChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	block := make(chan struct{})
 	invoked := make(chan struct{})
@@ -746,6 +771,7 @@ func TestRunJudgment_J8RunsMayOverlapBecauseNoChallenge(t *testing.T) {
 }
 
 func TestRunJudgment_J8RejectsChallengeAndResume(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
 	inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
@@ -766,6 +792,7 @@ func TestRunJudgment_J8RejectsChallengeAndResume(t *testing.T) {
 }
 
 func TestRunJudgment_J1RequiresChallengeStill(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
 	if _, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentJ1, MaxBudgetUSD: 1, Invoker: inv}); !errors.Is(err, ErrNotFound) {
@@ -774,6 +801,7 @@ func TestRunJudgment_J1RequiresChallengeStill(t *testing.T) {
 }
 
 func TestRunJudgment_J8FailureCreatesNoOccurrence(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	for _, res := range []RunResult{RunResultErrored, RunResultMalformed, RunResultTimedOut, RunResultInvalidOutput} {
 		inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: res}}
@@ -793,6 +821,7 @@ func TestRunJudgment_J8FailureCreatesNoOccurrence(t *testing.T) {
 }
 
 func TestReapInterruptedRuns_J8CreatesNoOccurrence(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	s.staleAfter = 100 * time.Millisecond
 	host, _ := os.Hostname()

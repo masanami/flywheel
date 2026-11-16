@@ -40,6 +40,7 @@ func findItemByExternalKey(t *testing.T, items []map[string]any, externalKey str
 }
 
 func TestIngest_ResultValuesCoverClosedSetBothWays(t *testing.T) {
+	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	const repo = "owner/closed-set-repo"
 	decl := `{

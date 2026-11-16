@@ -35,6 +35,7 @@ func ghPlainGET(call string) bool {
 // 検証の段で J5 の対象にする。委譲の run が終わってから J5 を起動する。flywheel が呼んだ gh は
 // すべて GET である（AC-353・354・355・357・362）。
 func TestCycle_AllFivePhases_DelegatesAndVerifiesInTheSameCycleWithOnlyGETs(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	writeSourcesDeclaration(t, ws, cycleSourcesJSON)
 	id := newInProgressForRun(t, ws, nil)
@@ -120,6 +121,7 @@ func TestCycle_AllFivePhases_DelegatesAndVerifiesInTheSameCycleWithOnlyGETs(t *t
 // connectors.json の無いワークスペースの cycle は、run と verify の段を skipped にし（対象になりうる課題が
 // あっても）J3・J5 を起動せず、終了コード 0 で終わる（AC-356）。
 func TestCycle_WithoutConnectors_RunAndVerifyPhasesAreSkipped(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	// connectors.json が実在すれば J3（委譲）・J5（検証）の対象になる課題を置く。
 	newInProgressForRun(t, ws, nil)
@@ -150,6 +152,7 @@ func TestCycle_WithoutConnectors_RunAndVerifyPhasesAreSkipped(t *testing.T) {
 // 計画承認待ち・完了確認待ち・人間対応待ちの課題は、委譲・検証のどちらの段の対象にもならず、
 // cycle は承認を行わない（AC-358）。
 func TestCycle_WaitingChallengesAreNotTargetsOfRunOrVerify(t *testing.T) {
+	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	ids := map[string]string{}
 	for status, c := range map[string]string{"awaiting_plan_approval": "a", "awaiting_completion_approval": "b", "awaiting_human": "c"} {

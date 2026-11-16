@@ -16,6 +16,7 @@ func uiAttestationForTest(t *testing.T, id string) Attestation {
 }
 
 func TestRegistryPermits_PerEntryActionSets(t *testing.T) {
+	t.Parallel()
 	all := []attestedAction{
 		actionApprovePlan, actionApproveCompletion, actionApproveCompletionHold, actionReject,
 		actionAnswer, actionBudget, actionOperationApprove, actionOperationReject,
@@ -35,6 +36,7 @@ func TestRegistryPermits_PerEntryActionSets(t *testing.T) {
 }
 
 func TestExecuteApproval_UIApprovesPlan(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusAwaitingPlanApproval)
@@ -61,6 +63,7 @@ func TestExecuteApproval_UIApprovesPlan(t *testing.T) {
 }
 
 func TestExecuteApproval_UICompletionHoldOKButReleaseApprovalAndRejectRefused(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c, _, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -120,6 +123,7 @@ func TestExecuteApproval_UICompletionHoldOKButReleaseApprovalAndRejectRefused(t 
 }
 
 func TestExecuteAnswer_UIRefused(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
@@ -146,6 +150,7 @@ func TestExecuteAnswer_UIRefused(t *testing.T) {
 }
 
 func TestExecuteBudget_UIRefused(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	_, err := s.ExecuteBudget(context.Background(), BudgetRequest{ChallengeID: "C-1", ExpectedVersion: 1, PlanVersion: 1, ImplUSD: 80}, uiAttestationForTest(t, "C-1"))
 	if !errors.Is(err, ErrVerificationRejected) {
@@ -154,6 +159,7 @@ func TestExecuteBudget_UIRefused(t *testing.T) {
 }
 
 func TestExecuteOperationApproval_UIRefused(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 	_, releases, _ := setUpChallengeAwaitingCompletionWithOperations(t, s)
@@ -175,6 +181,7 @@ func TestExecuteOperationApproval_UIRefused(t *testing.T) {
 }
 
 func TestActionForTransition_CoversExactlyVerificationRows(t *testing.T) {
+	t.Parallel()
 	for _, tr := range Table {
 		_, ok := actionForTransition(tr)
 		if ok != tr.RequiresVerification {

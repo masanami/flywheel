@@ -19,6 +19,7 @@ func tickingClock(f *contractFixture) {
 }
 
 func TestHeldStop_EndedDuringHoldIsReportedAfterTheAnswerWithoutRestart(t *testing.T) {
+	t.Parallel()
 	for _, st := range []ContractState{ContractStateFailed, ContractStateCancelled} {
 		t.Run(string(st), func(t *testing.T) {
 			f := newContractFixture(t)
@@ -69,6 +70,7 @@ func TestHeldStop_EndedDuringHoldIsReportedAfterTheAnswerWithoutRestart(t *testi
 // 着手中に終わり、保留を作る前にプロセスが止まった契約の run を掃引（HoldUnrecordedContractStops）が保留にするときは、
 // 保留の間に終わった旨を添えない。回答なしで閉じた古い保留があっても同じ。
 func TestHeldStop_SweepOfAStopEndedWhileInProgressHasNoDuringHoldNote(t *testing.T) {
+	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
@@ -89,6 +91,7 @@ func TestHeldStop_SweepOfAStopEndedWhileInProgressHasNoDuringHoldNote(t *testing
 // 着手中に failed・cancelled で終わった契約の run を読みの経路（PollContractRuns）が保留にするときは、
 // 保留の間に終わった旨を添えない。
 func TestHeldStop_EndedWhileInProgressHasNoDuringHoldNote(t *testing.T) {
+	t.Parallel()
 	for _, st := range []ContractState{ContractStateFailed, ContractStateCancelled} {
 		t.Run(string(st), func(t *testing.T) {
 			f := newContractFixture(t)

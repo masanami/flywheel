@@ -89,6 +89,7 @@ func wantKinds(t *testing.T, rows []occRow, want ...string) {
 }
 
 func TestOccurrence_CountedFailureCreatesDelegationFailedWithRunRefCauseAndCycle(t *testing.T) {
+	t.Parallel()
 	for _, r := range []RunResult{RunResultErrored, RunResultMalformed, RunResultInvalidOutput, RunResultTimedOut, RunResultLaunchFailed} {
 		t.Run(string(r), func(t *testing.T) {
 			f := newResumeFixture(t)
@@ -112,6 +113,7 @@ func TestOccurrence_CountedFailureCreatesDelegationFailedWithRunRefCauseAndCycle
 }
 
 func TestOccurrence_RateLimitedFailureAndSuccessCreateNothing(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	limited := failOut(RunResultErrored)
@@ -128,6 +130,7 @@ func TestOccurrence_RateLimitedFailureAndSuccessCreateNothing(t *testing.T) {
 }
 
 func TestOccurrence_BudgetExhaustedCreatesOnlyBudgetExhausted(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.result = failOut(RunResultBudgetExhausted)
@@ -142,6 +145,7 @@ func TestOccurrence_BudgetExhaustedCreatesOnlyBudgetExhausted(t *testing.T) {
 }
 
 func TestOccurrence_QuestionsAndBlockedCreateDelegationStoppedReferencingTheHold(t *testing.T) {
+	t.Parallel()
 	for name, out := range map[string]JudgmentLaunchOutput{
 		"questions": questionsOut("feat/x"),
 		"blocked": {Result: RunResultSucceeded, ReportedTotalCostUSD: float64Ptr(1), StructuredOutput: reportJSON(func(m map[string]any) {
@@ -164,6 +168,7 @@ func TestOccurrence_QuestionsAndBlockedCreateDelegationStoppedReferencingTheHold
 }
 
 func TestOccurrence_MissingArtifactHoldCreatesNothing(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl") // 成果物の種類が pr で、見つからない
 	if _, err := f.run(t, nil); err != nil {
 		t.Fatal(err)
@@ -175,6 +180,7 @@ func TestOccurrence_MissingArtifactHoldCreatesNothing(t *testing.T) {
 }
 
 func TestOccurrence_UnapprovedMergeCreatesUnapprovedMergeReferencingTheHold(t *testing.T) {
+	t.Parallel()
 	f := newReconFixture(t, "impl")
 	f.branches.prs["feat/x"] = []UpstreamPullRequest{mkPR(1, "merged", "main")}
 	if _, err := f.run(t, nil); err != nil {
@@ -189,6 +195,7 @@ func TestOccurrence_UnapprovedMergeCreatesUnapprovedMergeReferencingTheHold(t *t
 }
 
 func TestOccurrence_NotEligibleReconciliationCreatesNothing(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.result = questionsOut("feat/x")
@@ -205,6 +212,7 @@ func TestOccurrence_NotEligibleReconciliationCreatesNothing(t *testing.T) {
 }
 
 func TestOccurrence_DelegationFailureLimitHoldCreatesFailureLimitHold(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	f.deleg.queue = []JudgmentLaunchOutput{failOut(RunResultErrored), failOut(RunResultTimedOut)}
@@ -224,6 +232,7 @@ func TestOccurrence_DelegationFailureLimitHoldCreatesFailureLimitHold(t *testing
 }
 
 func TestOccurrence_ReworkLimitHoldCreatesFailureLimitHold(t *testing.T) {
+	t.Parallel()
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
 	f.agent.ReworkLimit = 2
@@ -241,6 +250,7 @@ func TestOccurrence_ReworkLimitHoldCreatesFailureLimitHold(t *testing.T) {
 }
 
 func TestOccurrence_JudgmentFailureLimitHoldCreatesFailureLimitHold(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	decl := newAgentDeclForJ1Test(t, s, "pos")
 	if _, err := s.CreateChallenge(context.Background(), ChannelCLI, CreateInput{Title: "t"}); err != nil {
@@ -262,6 +272,7 @@ func TestOccurrence_JudgmentFailureLimitHoldCreatesFailureLimitHold(t *testing.T
 
 // 発生の挿入が失敗すれば、run の終了も保留も残らない。
 func TestOccurrence_InsertFailureRollsBackRunEnd(t *testing.T) {
+	t.Parallel()
 	f := newResumeFixture(t)
 	id := f.newInProgress(t, "t", "P1", planSpec(nil))
 	boom := errors.New("injected")
@@ -278,6 +289,7 @@ func TestOccurrence_InsertFailureRollsBackRunEnd(t *testing.T) {
 }
 
 func TestOccurrence_InsertFailureRollsBackHolds(t *testing.T) {
+	t.Parallel()
 	boom := errors.New("injected")
 	holds := func(t *testing.T, s *Store) int {
 		var n int
@@ -342,6 +354,7 @@ func TestOccurrence_InsertFailureRollsBackHolds(t *testing.T) {
 // 課題を持たない run に発生を作らないのは衝突の予測と J8 だけ。それ以外の判断の run が課題を
 // 持たなければ（不変条件の違反）エラーにする。
 func TestInsertRunOccurrence_OnlyJ8AndPredictMayLackChallenge(t *testing.T) {
+	t.Parallel()
 	s := newStoreForTest(t)
 	in := validInsertRunInput()
 	in.Judgment, in.ChallengeVersion = judgmentJ8, 0
