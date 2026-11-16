@@ -3,8 +3,10 @@ package cli
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
+	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
@@ -222,4 +224,65 @@ func TestRuns_ElementsMatchTheDocumentedShape(t *testing.T) {
 		t.Fatalf("runs = %v, want 2 elements to compare", runs)
 	}
 	assertDocumentedJSON(t, loadDocumentedJSON(t), "runs", doc)
+}
+
+// 失敗した run は runs --json・show --json の runs に error を出し、テキストの runs には 1 行目を添える。
+// error が空の run は従来どおり（null・テキストに error 行なし）。
+func TestRuns_ErrorShownInJSONShowAndText(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id := createForCase(t, ws)
+	insertRunFixture(t, ws, id, func(in *coretest.InsertRunInput) {
+		in.EndedAt = "2026-09-28T00:01:00.000Z"
+		in.Result = "errored"
+		in.CostSource = "unknown"
+		in.Error = "first line\nsecond line"
+	})
+	insertRunFixture(t, ws, id, func(in *coretest.InsertRunInput) {
+		in.SessionID = "33333333-3333-3333-3333-333333333333"
+		in.EndedAt = "2026-09-28T00:02:00.000Z"
+		in.Result = "succeeded"
+		in.CostSource = "unknown"
+	})
+
+	runs := runJSON(t, ws, "runs", id)["runs"].([]any)
+	if e := runs[1].(map[string]any)["error"]; e != "first line\nsecond line" {
+		t.Errorf("runs error = %v", e)
+	}
+	if e := runs[0].(map[string]any)["error"]; e != nil {
+		t.Errorf("empty error = %v, want null", e)
+	}
+	shown := runJSON(t, ws, "show", id)["runs"].([]any)
+	if e := shown[0].(map[string]any)["error"]; e != nil {
+		t.Errorf("show empty error = %v, want null", e)
+	}
+	if e := shown[1].(map[string]any)["error"]; e != "first line\nsecond line" {
+		t.Errorf("show error = %v", e)
+	}
+}
+
+func TestErrorSummary(t *testing.T) {
+	if got := errorSummary("a\nb"); got != "a" {
+		t.Errorf("got %q", got)
+	}
+	exact := strings.Repeat("あ", runErrorSummaryMax)
+	if got := errorSummary(exact); got != exact {
+		t.Errorf("exact-length got %q", got)
+	}
+	if got := errorSummary(exact + "x"); got != exact+"…" {
+		t.Errorf("over-by-one got %q", got)
+	}
+	long := strings.Repeat("あ", 300)
+	if got := errorSummary(long); got != strings.Repeat("あ", runErrorSummaryMax)+"…" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestRunsText_ErrorLineOnlyForFailedRuns(t *testing.T) {
+	failed := core.Run{ID: "R-2", Result: core.RunResult("errored"), Error: "boom\nmore"}
+	ok := core.Run{ID: "R-1", Result: core.RunResultSucceeded, Error: "note on a succeeded run"}
+	open := core.Run{ID: "R-0", Error: "note on an open run"}
+	got := runsText([]core.Run{failed, ok, open})
+	if !strings.Contains(got, "  error: boom\n") || strings.Count(got, "error:") != 1 {
+		t.Errorf("got %q", got)
+	}
 }

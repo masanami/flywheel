@@ -35,6 +35,8 @@ type Run struct {
 	EndedAt        *time.Time
 	// FlywheelVersion は run を作った flywheel の版。記録の無い run（0011 より前）は nil。
 	FlywheelVersion *string
+	// Error は run の失敗の要約（ストアの run.error）。無ければ ""。
+	Error string
 }
 
 // RunListOptions は ListRuns の絞り込み条件。
@@ -156,6 +158,7 @@ func toPublicRun(r *runRow, cycleBudgetsMicros map[int64]int64) Run {
 		MaxBudgetUSD: microsToUSD(r.MaxBudgetUSD),
 		StartedAt:    r.StartedAt,
 		EndedAt:      r.EndedAt,
+		Error:        r.Error,
 	}
 	if r.FlywheelVersion != "" {
 		v := r.FlywheelVersion
