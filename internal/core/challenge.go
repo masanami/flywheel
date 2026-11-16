@@ -92,6 +92,11 @@ type Approval struct {
 	SupersededAt     *time.Time
 	SupersededReason *string
 	SupersededBy     *string
+	// WithdrawnReleases・RunningReleases は完了の差し戻し（ExecuteApproval）の結果だけが埋める。
+	// 前者は取り消した（closed にした）未実行の release の ID、後者は実行中（試行が終わっていない）のため
+	// 取り消さなかった release の ID（マージされうる）。どちらも読み取りの経路では埋めない。
+	WithdrawnReleases []string
+	RunningReleases   []string
 }
 
 // Hold は保留の 1 件（§データモデル hold）。#9 は書き込まない（読み取りだけ実装する）。

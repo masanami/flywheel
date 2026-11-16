@@ -111,6 +111,11 @@ type ApprovalPreview struct {
 	// （直前の試行の結果が merged_unapproved か。rejectReapproval と同じ判定）。
 	// CLI が release を同時の承認から外す判定（M45H16）に使い、CLI は結果の比較をしない。
 	ReapprovalForbidden map[string]bool
+	// ReleasesToWithdraw・RunningReleases は、この完了確認待ちを差し戻したときに取り消す未実行の release
+	// （承認待ち・承認済み）の ID と、試行が終わっていない（実行中の）ため止めずに残す release の ID
+	// （マージされうる）。判定は差し戻しの書き込みと同じ releaseOnCompletionRejection。差し戻しの要約が使う。
+	ReleasesToWithdraw []string
+	RunningReleases    []string
 }
 
 // approvesPendingReleases は D12 の規則の正本: 「その操作が、対象の課題の
@@ -228,9 +233,24 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 			if err != nil {
 				return err
 			}
+			now := s.currentTime()
 			for _, op := range ops {
 				if isApprovedUnexecutedRelease(op) {
 					preview.HasApprovedRelease = true
+				}
+				if op.Kind == OperationKindRelease && (op.State == OperationStatePending || op.State == OperationStateApproved) {
+					if oid, ok := parseOperationID(op.ID); ok {
+						action, _, err := releaseOnCompletionRejection(ctx, tx, oid, now)
+						if err != nil {
+							return err
+						}
+						switch action {
+						case rejectReleaseWithdraw:
+							preview.ReleasesToWithdraw = append(preview.ReleasesToWithdraw, op.ID)
+						case rejectReleaseRunning:
+							preview.RunningReleases = append(preview.RunningReleases, op.ID)
+						}
+					}
 				}
 				if op.State != OperationStatePending {
 					continue
@@ -587,6 +607,21 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 			}
 		}
 
+		// 完了の差し戻しは、その課題の未実行の release を同じトランザクションで取り消す。
+		if kind == ApprovalKindCompletion && req.Decision == ApprovalDecisionRejected {
+			withdrawn, running, err := withdrawUnexecutedReleases(ctx, tc)
+			if err != nil {
+				return err
+			}
+			approvalOut.WithdrawnReleases, approvalOut.RunningReleases = withdrawn, running
+			if len(withdrawn) > 0 {
+				tc.after["withdrawn_releases"] = withdrawn
+			}
+			if len(running) > 0 {
+				tc.after["running_releases"] = running
+			}
+		}
+
 		// D12: 完了の承認（HoldRelease==false）は、同じトランザクションで
 		// その課題の未承認の release をすべて自動承認する。完了の承認と
 		// release ごとの承認は、それぞれ別の approval 行・別の作業ログの
@@ -897,4 +932,110 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		return nil, nil, err
 	}
 	return c, &holdOut, nil
+}
+
+// withdrawUnexecutedReleases は完了の差し戻しと同じトランザクションで、tc.id の課題の未実行の release
+// （承認待ち・承認済み）を closed（理由 challenge_rejected）にし、作業ログへ理由つきで残す。差し戻した
+// 課題を直して再び完了を承認すると新しい release が立つので、取り消した行は履歴として残す。
+// 試行が終わっていない（マージを依頼している最中の）release は止めず、running として返す。
+func withdrawUnexecutedReleases(ctx context.Context, tc *transitionCtx) (withdrawn, running []string, err error) {
+	rows, err := tc.tx.QueryContext(ctx,
+		`SELECT id, version, state FROM operation WHERE challenge_id = ? AND kind = ? AND state IN (?, ?) ORDER BY id ASC`,
+		tc.id, string(OperationKindRelease), string(OperationStatePending), string(OperationStateApproved))
+	if err != nil {
+		return nil, nil, err
+	}
+	type target struct {
+		id      int64
+		version int
+		state   string
+	}
+	var targets []target
+	for rows.Next() {
+		var t target
+		if err := rows.Scan(&t.id, &t.version, &t.state); err != nil {
+			_ = rows.Close()
+			return nil, nil, err
+		}
+		targets = append(targets, t)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, nil, err
+	}
+	for _, t := range targets {
+		action, stale, err := releaseOnCompletionRejection(ctx, tc.tx, t.id, tc.now)
+		if err != nil {
+			return nil, nil, err
+		}
+		switch action {
+		case rejectReleaseKeep:
+			continue
+		case rejectReleaseRunning:
+			running = append(running, formatOperationID(t.id))
+			continue
+		}
+		if stale != nil {
+			// 止まった試行は取り下げ（withdraw）・`op exec` の再実行と同じく interrupted として閉じてから行を閉じる。
+			if err := closeOperationExecution(ctx, tc.tx, stale.ID, closeOperationExecutionInput{EndedAt: tc.now, Result: ExecutionResultInterrupted}); err != nil {
+				return nil, nil, err
+			}
+		}
+		res, err := tc.tx.ExecContext(ctx,
+			`UPDATE operation SET state = ?, version = ?, closed_reason = ?, closed_at = ? WHERE id = ? AND version = ? AND state = ?`,
+			string(OperationStateClosed), t.version+1, string(ClosedReasonChallengeRejected), tc.nowStr, t.id, t.version, t.state)
+		if err != nil {
+			return nil, nil, err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return nil, nil, err
+		} else if n != 1 {
+			return nil, nil, fmt.Errorf("core: reject completion: expected to close operation %s, updated %d rows", formatOperationID(t.id), n)
+		}
+		if err := tc.rec.record("operation", t.id, ActivityActionOpClose,
+			map[string]any{"state": t.state},
+			map[string]any{"state": string(OperationStateClosed), "version": t.version + 1, "closed_reason": string(ClosedReasonChallengeRejected),
+				"reason": "課題の完了が差し戻されたため、未実行の本番反映を取り消した"}); err != nil {
+			return nil, nil, err
+		}
+		withdrawn = append(withdrawn, formatOperationID(t.id))
+	}
+	return withdrawn, running, nil
+}
+
+// rejectReleaseAction は完了の差し戻しで未実行の release 1 件をどう扱うか。
+type rejectReleaseAction int
+
+const (
+	// rejectReleaseWithdraw は取り消す（closed・challenge_rejected）。
+	rejectReleaseWithdraw rejectReleaseAction = iota
+	// rejectReleaseRunning は試行が終わっていない（止まっていない）ので止めずに残す（マージされうる）。
+	rejectReleaseRunning
+	// rejectReleaseKeep は直前の試行が merged_unapproved で、本番反映の片付け（release_tidy）に任せて触らない。
+	rejectReleaseKeep
+)
+
+// releaseOnCompletionRejection は完了の差し戻しでの未実行の release（opID）の扱いを決める規則の正本。
+// 差し戻しの要約（prepareApproval）と差し戻しの書き込み（withdrawUnexecutedReleases）が共有する。
+// 取り消す release に止まった（stale の）試行があれば、それを stale で返す（書き込み側が interrupted として閉じる）。
+func releaseOnCompletionRejection(ctx context.Context, tx *sql.Tx, opID int64, now time.Time) (rejectReleaseAction, *operationExecutionRow, error) {
+	last, err := latestOperationExecution(ctx, tx, opID)
+	if err != nil {
+		return 0, nil, err
+	}
+	switch {
+	case last == nil:
+		return rejectReleaseWithdraw, nil, nil
+	case last.Result == ExecutionResultMergedUnapproved:
+		return rejectReleaseKeep, nil, nil
+	case !last.open():
+		return rejectReleaseWithdraw, nil, nil
+	case !releaseAttemptStale(last, now):
+		return rejectReleaseRunning, nil, nil
+	default:
+		return rejectReleaseWithdraw, last, nil
+	}
 }

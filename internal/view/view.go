@@ -257,7 +257,7 @@ func FromDirectCompletions(ds []core.DirectCompletion) []DirectCompletion {
 type Operation struct {
 	ApprovedHead *string `json:"approved_head"`
 	ChallengeID  string  `json:"challenge_id"`
-	// ClosedAt・ClosedReason は state が closed の操作の、閉じた日時と理由（superseded・merged_outside・merged_unapproved・pr_closed）。
+	// ClosedAt・ClosedReason は state が closed の操作の、閉じた日時と理由（superseded・merged_outside・merged_unapproved・pr_closed・challenge_rejected）。
 	ClosedAt            *string `json:"closed_at"`
 	ClosedReason        *string `json:"closed_reason"`
 	ConsecutiveFailures int     `json:"consecutive_failures"`
@@ -469,6 +469,10 @@ type ChallengeApprovalResponse struct {
 	Challenge        Challenge         `json:"challenge"`
 	ExcludedReleases []ExcludedRelease `json:"excluded_releases,omitempty"`
 	Releases         []ApprovedRelease `json:"releases,omitempty"`
+	// RunningReleases・WithdrawnReleases は完了の差し戻しだけが持つ。前者は試行が終わっていない（実行中の）ため
+	// 止めなかった release の ID（マージされうる）、後者は取り消した（closed・challenge_rejected）未実行の release の ID。
+	RunningReleases   []string `json:"running_releases,omitempty"`
+	WithdrawnReleases []string `json:"withdrawn_releases,omitempty"`
 }
 
 // ApprovedRelease は完了の承認で同時に承認した release 1 件と、承認の記録に残した head（完全形）。
