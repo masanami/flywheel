@@ -710,38 +710,24 @@ export function graphOf(w: MockWorkspace): GraphResponse {
         title: m.c.title,
       };
     });
-  // 衝突は、片方が完了・取り下げになったら API が返さない（行は残る）。前提は先行が完了していれば満たされている
-  const finished = (id: string) => {
-    const st = byId.get(id)?.c.status;
-    return st === "done" || st === "withdrawn";
-  };
+  // 前提は先行が完了していれば満たされている
   const edges = w.graph.deps
-    .filter(
-      (d) => d.kind !== "conflict" || !(finished(d.from) || finished(d.to)),
-    )
-    .sort(
-      (a, b) =>
-        idNum(a.from) - idNum(b.from) ||
-        idNum(a.to) - idNum(b.to) ||
-        Number(a.kind === "conflict") - Number(b.kind === "conflict"),
-    )
+    .sort((a, b) => idNum(a.from) - idNum(b.from) || idNum(a.to) - idNum(b.to))
     .map((d) => ({
-      directed: d.directed ?? true,
+      directed: true,
       from: d.from,
       kind: d.kind,
       registered_at: new Date(
         Date.parse("2026-10-10T00:00:00Z") + d.minutes * 60_000,
       ).toISOString(),
       registered_via: d.via,
-      satisfied:
-        d.kind === "prerequisite" && byId.get(d.from)?.c.status === "done",
+      satisfied: byId.get(d.from)?.c.status === "done",
       to: d.to,
     }));
   return { edges, nodes };
 }
 
-// 課題 id が待っている理由（`GET …/challenges/{id}` の waiting）。まだ終わっていない前提の課題と、
-// 衝突のため後回しにした相手（向きのある衝突で from が id、相手も終わっていないもの）。id 自身が終わっていれば空。
+// 課題 id が待っている理由（`GET …/challenges/{id}` の waiting）。まだ終わっていない前提の課題。id 自身が終わっていれば空。
 export function waitingOf(w: MockWorkspace, id: string): Waiting {
   const byId = new Map(w.items.map((m) => [m.c.id, m]));
   const idNum = (x: string) => Number(x.replace(/^\D+/, ""));
@@ -754,21 +740,10 @@ export function waitingOf(w: MockWorkspace, id: string): Waiting {
     status: byId.get(other)?.c.status ?? "",
     title: byId.get(other)?.c.title ?? "",
   });
-  if (ended(id)) return { conflicts: [], prerequisites: [] };
+  if (ended(id)) return { prerequisites: [] };
   const sorted = (xs: string[]) => [...xs].sort((a, b) => idNum(a) - idNum(b));
   const deps = w.graph.deps;
   return {
-    conflicts: sorted(
-      deps
-        .filter(
-          (d) =>
-            d.kind === "conflict" &&
-            d.directed !== false &&
-            d.from === id &&
-            !ended(d.to),
-        )
-        .map((d) => d.to),
-    ).map(pick),
     prerequisites: sorted(
       deps
         .filter(

@@ -7,17 +7,24 @@ import (
 	"testing"
 )
 
+// migrationsUpTo は本番のマイグレーションのうち、版が version 以下のものを返す
+// （challenge_conflict は 0025 で消えるので、この表を読むテストは 18 までを当てる）。
+func migrationsUpTo(t *testing.T, version int) []Migration {
+	t.Helper()
+	var out []Migration
+	for _, m := range prodMigrations(t) {
+		if m.Version <= version {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // スキーマ版 17 のストアを開くと 0018 が当たり、既存の課題・依存・親子の行の値は変わらず、
 // 空の challenge_conflict ができて版は 18 になる。
 func TestOpen_AppliesChallengeConflictMigrationToAVersion17Store(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "flywheel.db")
-	var upTo17 []Migration
-	for _, m := range prodMigrations(t) {
-		if m.Version <= 17 {
-			upTo17 = append(upTo17, m)
-		}
-	}
-	old, err := Open(path, upTo17)
+	old, err := Open(path, migrationsUpTo(t, 17))
 	if err != nil {
 		t.Fatalf("Open(v17) error = %v", err)
 	}
@@ -39,13 +46,13 @@ func TestOpen_AppliesChallengeConflictMigrationToAVersion17Store(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := Open(path, prodMigrations(t))
+	db, err := Open(path, migrationsUpTo(t, 18))
 	if err != nil {
-		t.Fatalf("Open(latest) error = %v", err)
+		t.Fatalf("Open(v18) error = %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if got := userVersion(t, db); got != 24 {
-		t.Fatalf("user_version = %d, want 24", got)
+	if got := userVersion(t, db); got != 18 {
+		t.Fatalf("user_version = %d, want 18", got)
 	}
 	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
 		var challenges, deps, parents, conflicts int
@@ -64,7 +71,7 @@ func TestOpen_AppliesChallengeConflictMigrationToAVersion17Store(t *testing.T) {
 // 組は主キー（challenge_id, conflicts_with_id）。自己参照・存在しない課題への参照・
 // 向きの無い組で challenge_id が相手より大きい行は入らない。
 func TestChallengeConflict_ConstraintsAndForeignKeys(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "flywheel.db"), prodMigrations(t))
+	db, err := Open(filepath.Join(t.TempDir(), "flywheel.db"), migrationsUpTo(t, 18))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

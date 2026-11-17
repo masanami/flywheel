@@ -601,7 +601,7 @@ test.describe("広い画面（1280px）", () => {
   }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "ボード", exact: true }).click();
-    // C-19 は前提（C-5・C-17）で待っている。偽の API は衝突も返すが、画面は出さない
+    // C-19 は前提（C-5・C-17）で待っている。画面は衝突を出さない
     await page.getByTestId("card-C-19").first().getByRole("button").click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -619,9 +619,7 @@ test.describe("広い画面（1280px）", () => {
     await expect(page.getByText("待っている理由")).toHaveCount(0);
   });
 
-  test("衝突の線は描かれず、凡例にも衝突の項目が無い（偽の API は衝突の辺を返す）", async ({
-    page,
-  }) => {
+  test("衝突の線は描かれず、凡例にも衝突の項目が無い", async ({ page }) => {
     await page.goto("/");
     const graph = page.getByRole("group", { name: "alpha の課題の関係グラフ" });
     await expect(graph).toBeVisible();

@@ -7,7 +7,7 @@ import { STATE_LABELS, label } from "../labels.ts";
 
 export const WAITING_TITLE = "待っている理由";
 
-export type WaitingBasis = "prerequisite" | "conflict";
+export type WaitingBasis = "prerequisite";
 
 // 待っている理由の 1 行。id は待っている相手の課題。
 export interface WaitingRow {
@@ -24,10 +24,6 @@ export interface WaitingRow {
   category?: string;
   swatchTitle?: string;
 }
-
-// 衝突の行の見出し。後回しにした課題が、どの課題に譲ったか。
-export const conflictKindLabel = (otherId: string): string =>
-  `衝突のため後回し: ${otherId}`;
 
 // 前提の行の見出し。
 export const PREREQUISITE_LABEL = BASIS_LABELS.prerequisite;

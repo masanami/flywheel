@@ -83,7 +83,7 @@ function bodies() {
       issues_answer: null,
       non_goals: ["やらないこと1"],
     },
-    waiting: { conflicts: [], prerequisites: [] },
+    waiting: { prerequisites: [] },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-2"] = { activities: [] };
   f["/api/v1/workspaces/alpha/challenges/C-2/approval"] = {

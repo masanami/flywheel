@@ -138,7 +138,7 @@ function setup(
       issues_answer: null,
       non_goals: null,
     },
-    waiting: { conflicts: [], prerequisites: [] },
+    waiting: { prerequisites: [] },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-1"] = { activities: [] };
   return installFakes({ ...f, ...extra });
@@ -318,7 +318,7 @@ function fixturesFor(): Record<string, unknown> {
       issues_answer: null,
       non_goals: null,
     },
-    waiting: { conflicts: [], prerequisites: [] },
+    waiting: { prerequisites: [] },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-1"] = { activities: [] };
   return f;

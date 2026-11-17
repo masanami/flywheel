@@ -517,7 +517,7 @@ func (f *planFixture) countRuns(t *testing.T, where string) int {
 }
 
 // 同じリポジトリの着手中の課題 2 件は、記録した前提が無く、枠に空きがあれば、1 回の委譲の段で両方起動する。
-// 予測も J9 も起動せず、記録も書かない。
+// 予測も J9 も起動しない。
 func TestPlan_SameRepoCandidates_BothLaunchInOnePass_WithoutPredictionOrJ9(t *testing.T) {
 	t.Parallel()
 	f := newPlanFixture(t)
@@ -532,9 +532,6 @@ func TestPlan_SameRepoCandidates_BothLaunchInOnePass_WithoutPredictionOrJ9(t *te
 	}
 	if got := f.countRuns(t, `judgment = 'J9'`); got != 0 {
 		t.Errorf("J9 runs = %d, want 0", got)
-	}
-	if got := len(conflictRowsForTest(t, f.s)); got != 0 {
-		t.Errorf("challenge_conflict rows = %d, want 0", got)
 	}
 }
 

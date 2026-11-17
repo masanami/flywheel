@@ -54,9 +54,7 @@ export type Dimensions = Dims & {
   calloutLines: number;
 };
 
-// 前提の線と衝突の線は、同じ箱の組でも別の線なので、鍵も分ける
-export const edgeKey = (e: { from: string; to: string; basis?: string }) =>
-  `${e.basis === "conflict" ? "conflict:" : ""}${e.from}:${e.to}`;
+export const edgeKey = (e: { from: string; to: string }) => `${e.from}:${e.to}`;
 
 export interface CanvasProps {
   ws: string;
@@ -998,21 +996,6 @@ export function GraphCanvas(p: CanvasProps) {
         >
           <path d="M 0 0 L 10 5 L 0 10 z" className="graph-arrow" />
         </marker>
-        {/* 衝突のための順番の線は、先端を中抜きの矢じりにして実線の矢印と見分ける */}
-        <marker
-          id="graph-arrow-conflict"
-          viewBox="0 0 10 10"
-          refX="9"
-          refY="5"
-          markerWidth="7"
-          markerHeight="7"
-          orient="auto-start-reverse"
-        >
-          <path
-            d="M 1 1 L 9 5 L 1 9 z"
-            className="graph-arrow graph-arrow-open"
-          />
-        </marker>
       </defs>
       {/* 大枠の枠は依存の線より下、開いた親の見出しは線より上に描く（線が見出しの文字の上を通らない。flywheel#482）。
           どちらも外側から内側の順。「ほかの課題」の大枠は見出しごと線より下のまま */}
@@ -1028,7 +1011,6 @@ export function GraphCanvas(p: CanvasProps) {
         const picked = p.selectedEdge === key;
         const lit = picked || (p.focused !== null && p.edgeLit(e.from, e.to));
         const focus = p.focused !== null || p.selectedEdge !== null;
-        const conflict = e.basis === "conflict";
         const pick = () => p.onSelectEdge(key);
         const name = edgeName(e);
         return (
@@ -1047,13 +1029,7 @@ export function GraphCanvas(p: CanvasProps) {
                 p.dimmed(e.to) ||
                 undefined
               }
-              markerEnd={
-                !e.directed
-                  ? undefined
-                  : conflict
-                    ? "url(#graph-arrow-conflict)"
-                    : "url(#graph-arrow)"
-              }
+              markerEnd={e.directed ? "url(#graph-arrow)" : undefined}
             />
             {/* 細い線は押しにくいので、太い透明な線を重ねて当たり判定にする */}
             <path
