@@ -1,4 +1,4 @@
-// 詳細のモーダルの「待っている理由」。まだ満たされていない前提の課題と、衝突のため後回しにした相手を、別の行で並べる。
+// 詳細のモーダルの「待っている理由」。まだ満たされていない前提の課題を並べる。
 // ボードから開いた詳細（API の waiting）と、関係グラフから開いた詳細（グラフの辺）が同じ部品・同じ表示を使う。
 
 import type { Waiting } from "../api/types.gen.ts";
@@ -17,7 +17,7 @@ export interface WaitingRow {
   // 題名の後ろに付く印（「（完了）」「（実施中）」「（着手中）」など。無ければ空）
   marks: string;
   basis: WaitingBasis;
-  // 理由の見出し。前提は種類の文、衝突は「衝突のため後回し: C-xx」
+  // 理由の見出し（前提は種類の文）
   kindLabel: string;
   detail: string;
   // 区分の色（グラフから開いたときだけ。無ければ色見本を出さない）
@@ -68,7 +68,7 @@ export function WaitingReasonsSection({ rows }: { rows: WaitingRow[] }) {
   );
 }
 
-// API（`GET …/challenges/{id}` の waiting）の行。前提を先に、続けて衝突。印は相手の課題の状態の名前。
+// API（`GET …/challenges/{id}` の waiting）の行。印は相手の課題の状態の名前。
 export function waitingRowsOfShow(w: Waiting): WaitingRow[] {
   const mark = (status: string) => `（${label(STATE_LABELS, status)}）`;
   return [
@@ -81,17 +81,6 @@ export function waitingRowsOfShow(w: Waiting): WaitingRow[] {
         basis: "prerequisite",
         kindLabel: PREREQUISITE_LABEL,
         detail: "まだ満たされていない前提の課題",
-      }),
-    ),
-    ...w.conflicts.map(
-      (c): WaitingRow => ({
-        key: `conflict:${c.challenge_id}`,
-        id: c.challenge_id,
-        title: c.title,
-        marks: mark(c.status),
-        basis: "conflict",
-        kindLabel: conflictKindLabel(c.challenge_id),
-        detail: `同時に走らせると衝突すると予測したため、${c.challenge_id} を先に委譲した`,
       }),
     ),
   ];

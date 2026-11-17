@@ -72,23 +72,14 @@ async function mountGraph() {
   return await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
 }
 
-it("実データの形: 衝突の辺が描かれる（向きありは中抜きの矢じり、向きなしは矢じりなし）。取り下げの相手との衝突は出ない", async () => {
+it("実データの形: API が衝突の辺を返しても衝突の線は描かない（AC-48）。前提の線は変わらない", async () => {
   const group = await mountGraph();
   const conflicts = [
     ...group.querySelectorAll<SVGPathElement>(
       'path.graph-edge[data-basis="conflict"]',
     ),
   ];
-  expect(
-    conflicts.map((e) => [e.dataset.from, e.dataset.to, e.dataset.directed]),
-  ).toEqual([
-    ["C-2", "C-3", "false"],
-    ["C-4", "C-6", "true"],
-  ]);
-  expect(conflicts[0]?.hasAttribute("marker-end")).toBe(false);
-  expect(conflicts[1]?.getAttribute("marker-end")).toBe(
-    "url(#graph-arrow-conflict)",
-  );
+  expect(conflicts).toEqual([]);
   // 前提の線は変わらず実線の矢じり（C-5 → C-4）
   const prereq = group.querySelector<SVGPathElement>(
     'path.graph-edge[data-basis="prerequisite"]',
@@ -97,7 +88,7 @@ it("実データの形: 衝突の辺が描かれる（向きありは中抜き�
   expect(prereq?.getAttribute("marker-end")).toBe("url(#graph-arrow)");
 });
 
-it("実データの形: グラフから開いた C-4 の詳細に、前提 C-5 と、衝突のため後回し C-6 が別の行で出る", async () => {
+it("実データの形: グラフから開いた C-4 の詳細に、前提 C-5 の行だけが出る（衝突の行は無い）", async () => {
   const group = await mountGraph();
   fireEvent.click(box(group, "C-4"));
   const content = await screen.findByTestId("card-detail-content");
@@ -108,9 +99,8 @@ it("実データの形: グラフから開いた C-4 の詳細に、前提 C-5 �
   const rows = [...sec.querySelectorAll("li")];
   expect(rows.map((li) => [li.dataset.basis, li.dataset.from])).toEqual([
     ["prerequisite", "C-5"],
-    ["conflict", "C-6"],
   ]);
-  expect(rows[1]?.textContent).toContain("衝突のため後回し: C-6");
+  expect(sec.textContent).not.toContain("衝突");
   const dialog = content.closest("dialog") as HTMLDialogElement;
   act(() => {
     dialog.dispatchEvent(new Event("close"));
@@ -120,7 +110,7 @@ it("実データの形: グラフから開いた C-4 の詳細に、前提 C-5 �
   );
 });
 
-it("実データの形: ボードから開いた C-4 の詳細も、同じ 2 行（前提と衝突のため後回し）を出す。先に委譲した C-6・向きの無い C-2 には出ない", async () => {
+it("実データの形: ボードから開いた C-4 の詳細も、前提の行だけを出す。衝突の相手だった C-6・C-2 には待っている理由の節が出ない", async () => {
   await mountGraph();
   fireEvent.click(screen.getByRole("button", { name: "ボード" }));
   const open = async (id: string) => {
@@ -150,11 +140,8 @@ it("実データの形: ボードから開いた C-4 の詳細も、同じ 2 行
       li.dataset.basis,
       li.dataset.from,
     ]),
-  ).toEqual([
-    ["prerequisite", "C-5"],
-    ["conflict", "C-6"],
-  ]);
-  expect(sec.textContent).toContain("衝突のため後回し: C-6");
+  ).toEqual([["prerequisite", "C-5"]]);
+  expect(sec.textContent).not.toContain("衝突");
   await close(c4);
   for (const id of ["C-6", "C-2"]) {
     const content = await open(id);

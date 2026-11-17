@@ -466,7 +466,7 @@ const waitingOf = (
   return { conflicts: conflicts.map(w), prerequisites: prerequisites.map(w) };
 };
 
-it("待っている理由: まだ終わっていない前提の課題と、衝突のため後回しにした相手が、別の行で出る", async () => {
+it("待っている理由: まだ終わっていない前提の課題の行だけが出る。API が衝突を返しても衝突の行は出ない（AC-49）", async () => {
   installFakes(
     bodies(
       show({
@@ -489,16 +489,14 @@ it("待っている理由: まだ終わっていない前提の課題と、衝�
   expect(rows.map((li) => [li.dataset.basis, li.dataset.from])).toEqual([
     ["prerequisite", "C-5"],
     ["prerequisite", "C-7"],
-    ["conflict", "C-408"],
   ]);
   // 前提の行: 題名と相手の状態・種類
   expect(rows[0]?.textContent).toContain("題名C-5");
   expect(rows[0]?.textContent).toContain("（着手中）");
   expect(rows[0]?.textContent).toContain("終わらないと始められない");
-  // 衝突の行は別の行で「衝突のため後回し: C-xx」。前提の行には混ざらない
-  expect(rows[2]?.textContent).toContain("衝突のため後回し: C-408");
-  expect(rows[2]?.textContent).toContain("題名C-408");
-  expect(rows[0]?.textContent).not.toContain("衝突のため後回し");
+  // 衝突の欄は無い
+  expect(sec.textContent).not.toContain("衝突");
+  expect(sec.querySelector('li[data-basis="conflict"]')).toBeNull();
   // 「課題」の節の後ろ（計画などの節の前）に出る
   const join = within(content).getByTestId("ledger-join");
   expect(
@@ -506,20 +504,20 @@ it("待っている理由: まだ終わっていない前提の課題と、衝�
   ).toBeTruthy();
 });
 
-it("待っている理由: 衝突だけのときは衝突の行だけ、前提だけのときは前提の行だけ。どちらも無ければ節ごと出さない", async () => {
+it("待っている理由: 衝突だけのときは節ごと出さない、前提があれば前提の行だけ。どちらも無ければ節ごと出さない", async () => {
   installFakes(
     bodies(
       show({ waiting: waitingOf([], [{ id: "C-408", status: "verifying" }]) }),
     ),
   );
   let content = await openDetail();
-  let sec = await within(content).findByRole("region", {
-    name: "待っている理由",
-    hidden: true,
-  });
-  expect([...sec.querySelectorAll("li")].map((li) => li.dataset.basis)).toEqual(
-    ["conflict"],
-  );
+  await within(content).findByText("計画（0）");
+  expect(
+    within(content).queryByRole("region", {
+      name: "待っている理由",
+      hidden: true,
+    }),
+  ).toBeNull();
   cleanup();
 
   installFakes(
@@ -528,7 +526,7 @@ it("待っている理由: 衝突だけのときは衝突の行だけ、前提�
     ),
   );
   content = await openDetail();
-  sec = await within(content).findByRole("region", {
+  const sec = await within(content).findByRole("region", {
     name: "待っている理由",
     hidden: true,
   });

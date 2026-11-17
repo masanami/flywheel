@@ -13,7 +13,6 @@ import {
   OTHERS_LABEL,
   categoryLabel,
   compareIds,
-  conflictNotesOf,
   humanChips,
   neighborsOf,
 } from "./model.ts";
@@ -37,13 +36,6 @@ export interface NarrowListProps {
 
 const idsText = (ids: string[]) => (ids.length > 0 ? ids.join("、") : "なし");
 
-// 衝突の相手を、この課題から見た役割で文字にする。向きの無い組は「衝突の可能性」（どちらを先にするかが未定）。
-const CONFLICT_LABELS = {
-  yields: "衝突のため後回し",
-  preferred: "衝突で先に委譲",
-  undirected: "衝突の可能性（順序は未定）",
-} as const;
-
 function Row({ id, p }: { id: string; p: NarrowListProps }) {
   const info = p.infos.get(id);
   if (!info) return null;
@@ -53,7 +45,6 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
   const near = neighborsOf(id, p.relations);
   const folded = isParent && !open ? p.inside(id) : null;
   const chips = humanChips(info.node);
-  const conflicts = conflictNotesOf(id, p.relations);
   return (
     <li
       className="graph-list-item"
@@ -116,11 +107,6 @@ function Row({ id, p }: { id: string; p: NarrowListProps }) {
       <div className="graph-list-rel">
         <span>先行: {idsText(near.predecessors)}</span>
         <span>後続: {idsText(near.successors)}</span>
-        {conflicts.map((c) => (
-          <span key={`${c.kind}:${c.id}`} data-conflict={c.kind}>
-            {CONFLICT_LABELS[c.kind]}: {c.id}
-          </span>
-        ))}
       </div>
       {open ? (
         <ul className="graph-list-children">

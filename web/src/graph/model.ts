@@ -194,13 +194,10 @@ export function relationsOf(g: GraphResponse): ChallengeRelation[] {
   for (const n of g.nodes)
     if (n.parent_id !== null)
       rels.push({ from: n.parent_id, kind: "parent_of", to: n.id });
+  // API はまだ衝突の辺を返してよい。画面は衝突を使わないので、ここで捨てる
   for (const e of g.edges)
-    rels.push({
-      from: e.from,
-      kind: e.kind === "conflict" ? "conflicts_with" : "depends_on",
-      to: e.to,
-      edge: e,
-    });
+    if (e.kind !== "conflict")
+      rels.push({ from: e.from, kind: "depends_on", to: e.to, edge: e });
   return rels;
 }
 
