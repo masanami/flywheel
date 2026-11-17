@@ -326,8 +326,8 @@ func TestOpenWorkspace_UpgradesSchemaVersion1StoreToVersion2AndPreservesExisting
 	ctx := context.Background()
 
 	// 0004（#78）を足した後の最新版は 4（AC-99 の文言と同じ改訂。AC-165）。
-	if got := schemaVersionForTest(t, s); got != 25 {
-		t.Fatalf("schema version = %d, want 25 (AC-99)", got)
+	if got, want := schemaVersionForTest(t, s), latestSchemaVersionForTest(t); got != want {
+		t.Fatalf("schema version = %d, want %d (AC-99)", got, want)
 	}
 
 	// AC-100: 課題の件数と内容。
@@ -483,6 +483,17 @@ func schemaVersionForTest(t *testing.T, s *Store) int {
 		return tx.QueryRow("PRAGMA user_version").Scan(&v)
 	}); err != nil {
 		t.Fatalf("read user_version: %v", err)
+	}
+	return v
+}
+
+// latestSchemaVersionForTest はこのバイナリが知る最新のスキーマ版を返す。版の数字を直に書かず、
+// 版を上げてもテストを直さずに済むようにする。
+func latestSchemaVersionForTest(t *testing.T) int {
+	t.Helper()
+	v, err := LatestSchemaVersion()
+	if err != nil {
+		t.Fatalf("LatestSchemaVersion: %v", err)
 	}
 	return v
 }

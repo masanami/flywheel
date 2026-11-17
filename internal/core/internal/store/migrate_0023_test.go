@@ -40,8 +40,8 @@ func TestOpen_AppliesContractWorkDirMigrationToAVersion22Store(t *testing.T) {
 		t.Fatalf("Open(latest) error = %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if got := userVersion(t, db); got != 25 {
-		t.Fatalf("user_version = %d, want 25", got)
+	if got, want := userVersion(t, db), latestProdVersion(t); got != want {
+		t.Fatalf("user_version = %d, want %d", got, want)
 	}
 	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
 		var wd sql.NullString

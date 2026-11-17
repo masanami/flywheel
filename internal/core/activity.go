@@ -92,6 +92,8 @@ func formatEntityID(entity string, id int64) string {
 		return formatCycleID(id)
 	case "run":
 		return formatRunID(id)
+	case "task":
+		return formatTaskID(id)
 	default:
 		return fmt.Sprintf("%d", id)
 	}
