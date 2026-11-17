@@ -796,3 +796,48 @@ func (f *contractFixture) insertRow(t *testing.T, q string, args ...any) int64 {
 	}
 	return id
 }
+
+// オーナーの回答待ち（契約の run が waiting で課題が保留）は同時委譲数に数えない（AC-50）。
+// 着手中の run は従来どおり数え（AC-52）、回答を受けて着手中へ戻れば数える（AC-53）。
+// 課題ごとの「実行中か」の判定は保留の間も真のまま（AC-55: 同じ課題へ新しい委譲を起動しない）。
+// このテストは数えだけを検証する。委譲の段を通した検証（AC-50〜AC-55。回答による再開〔resume〕が上限で止まらないことを含む）は
+// contract_delegate_ownerwait_test.go にある。
+func TestContractRun_OwnerWaitIsNotCountedTowardParallelDelegations(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	sch := &delegationScheduler{s: f.s, maxParallel: 1, preRepo: map[string]int{}}
+	n, _ := parseChallengeID(f.cid)
+	ask := waitingOut(&ContractRequestedAction{Kind: "answer", Decider: "human", Text: "どうする"}, nil)
+	f.client.startOut = contractOut(ContractStateRunning, nil, nil)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{ask}
+	f.poll(t)
+	f.setStatus(t, StatusInProgress)
+	for _, tc := range []struct {
+		st        Status
+		wantTotal int
+	}{
+		{StatusInProgress, 1}, {StatusAwaitingHuman, 0}, {StatusInProgress, 1},
+	} {
+		f.setStatus(t, tc.st)
+		c, err := sch.capacity(context.Background(), ConnectorRepo{Name: "none"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.dbTotal != tc.wantTotal {
+			t.Errorf("%s: dbTotal = %d, want %d", tc.st, c.dbTotal, tc.wantTotal)
+		}
+		var active bool
+		if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
+			active, err = challengeHasActiveRun(context.Background(), tx, n)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !active {
+			t.Errorf("%s: challengeHasActiveRun = false, want true", tc.st)
+		}
+	}
+}
