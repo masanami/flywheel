@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>いま進められること（試作）</title>
+<link rel="stylesheet" href="proto.css">
+</head>
+<body>
+<div class="proto-note">試作です。データは見本で、ボタンは画面の行き来だけをします。<a href="index.html">場面の一覧へ</a></div>
+<div class="shell">
+<nav class="rail"><a class="agent all" href="w10-all.html" title="すべてのエージェント">∀<span class="badge">3</span><small>すべて</small></a><a class="agent on" href="w8-now.html" title="Tom（開発の道具の開発と保守）">T<span class="badge">4</span><small>Tom</small></a><a class="agent" href="w2-issue-article.html" title="Mary（記事と広報）">M<span class="badge">1</span><small>Mary</small></a><a class="agent" href="w1-issues-empty.html" title="Ken（経理）">K<small>Ken</small></a><a class="agent add" href="#" title="エージェントを足す（flywheel#535）">＋<small>足す</small></a></nav>
+<div class="shell-main">
+<div class="top">
+  <span class="ws">Tom</span>
+  <nav><a href="w8-now.html" class="on">いま進められること</a><a href="w1-issues.html" class="">課題</a><a href="w7-followups.html" class="">フォローアップ</a><a href="w9-cycle.html" class="">サイクル</a></nav>
+  <span class="cycle"><span class="dot"></span>サイクル: 走っている（タスク 2 件を見ている）</span>
+</div>
+<div class="layout">
+<main>
+<h1>いま進められること</h1>
+<div class="meta"><span>あなたの承認 <b>2 件</b></span><span>あなたの回答 <b>2 件</b></span><span>取り込めるもの <b>3 件</b></span><span>未のフォローアップ <b>7 件</b></span></div>
+<h2>あなたを待っている（4 件）</h2>
+<div class="box wait"><ul class="plain">
+<li><span class="pill wait">計画の承認</span> <a href="w4-plan-approval.html"><b>設定の読み込みの誤りを、起動のときに知らせる</b></a><div class="hint">問い 2 つ（どちらも推奨を選んである）・タスク 4 件・上限 12 USD。承認すると 4 件が走り始める</div><div class="actions"><a class="btn primary" href="w4-plan-approval.html">計画を見る</a></div></li>
+<li><span class="pill wait">完了の承認</span> <a href="w2-issue-alldone.html"><b>検証の結果に、確かめた手順を添える</b></a><div class="hint">タスク 3 / 3 済み・課題の単位の確かめ 2 / 2・費用 5.8 / 8 USD</div><div class="actions"><a class="btn primary" href="w5-completion.html">確かめの結果を見る</a></div></li>
+<li><span class="pill wait">回答</span> <b>前の成果物が閉じられていたときは、どうしますか</b> <span class="hint"><a href="w2-issue-running.html">差し戻しの後も、同じ成果物で作業を続けられるようにする</a> › ④ 実装・12 分</span>
+<div class="actions"><a class="btn primary" href="w3-task-answered.html">新しく作り直して続ける（推奨）</a><a class="btn" href="#">作り直さずに、このタスクを止める</a><a class="btn" href="w3-task-waiting.html">くわしく見る</a></div></li>
+<li><span class="pill wait">回答</span> <b>失敗の理由が長いときは、1 行に切り詰めますか</b> <span class="hint"><a href="w2-issue-sv.html">記録の表示に、失敗の理由を添える</a> › ② 表示に出す・40 分</span>
+<div class="actions"><a class="btn primary" href="#">切り詰めて、全文は開くと見える（推奨）</a><a class="btn" href="#">全文をそのまま出す</a><a class="btn" href="#">くわしく見る</a></div></li></ul>
+<div class="hint">選ぶだけの問いは、ここで続けて答えられます。相談したいときは、右の欄で話します。</div></div>
+<h2>取り込めるもの（3 件）</h2>
+<div class="box"><table><tr><th></th><th>取り込み元にあって、まだ取り込んでいないもの</th><th>取り込むと</th></tr>
+<tr><td><input type="checkbox" checked></td><td>Issue #734（親）と子 3 件　記録の書き出しを、期間で絞れるようにする</td><td class="hint">課題 1 件・タスクの案 3 件（子がタスクになる）</td></tr>
+<tr><td><input type="checkbox" checked></td><td>Issue #731　表示の時刻を、利用者の地域の時刻で出す</td><td class="hint">課題 1 件</td></tr>
+<tr><td><input type="checkbox"></td><td>Issue #733　長い題名が、一覧で切れる</td><td class="hint">課題 1 件</td></tr></table>
+<div class="actions"><a class="btn" href="w9-cycle.html">選んだ 2 件を取り込んで、計画まで進める</a><span class="hint">見込み: 分類と計画で 約 1.8 USD。計画が出来たら、承認を求めます。選ばなかったものは、ここに残ります。</span></div></div>
+<div class="hint">走っている課題と、課題ごとのタスクの進みは、<a href="w1-issues.html">課題</a>のツリーで見られます。</div>
+</main>
+<aside class="chat" id="chat">
+<div class="chat-h"><b>Tom</b><span class="hint" style="margin-right:auto;margin-left:6px">オーケストレーター</span><button class="btn sm" onclick="document.body.classList.toggle('chat-off')">たたむ</button></div>
+<div class="chat-ctx">いま見ているもの: いま進められること</div><div class="chat-b"><div class="msg o">提案です。<br>1. 「設定の読み込みの誤り」の計画を承認する（4 タスクが走り始めます）。<br>2. 問い 2 件に答える（どちらも推奨のままなら、ボタンで済みます）。<br>3. 取り込めるもののうち、#734 と #731 を先に取り込むのがよいです。#733 は見た目だけの件なので、急ぎません。<br>どれから進めますか。</div></div>
+<div class="chat-f"><textarea rows="2" placeholder="オーケストレーターに話す（試作では送れません）"></textarea></div>
+</aside>
+</div>
+</div>
+</div>
+<button class="btn chat-open" onclick="document.body.classList.toggle('chat-off')">Tom と話す</button>
+
+</body>
+</html>

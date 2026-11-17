@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>計画の本文（試作）</title>
+<link rel="stylesheet" href="proto.css">
+</head>
+<body>
+<div class="proto-note">試作です。データは見本で、ボタンは画面の行き来だけをします。<a href="index.html">場面の一覧へ</a></div>
+<div class="shell">
+<nav class="rail"><a class="agent all" href="w10-all.html" title="すべてのエージェント">∀<span class="badge">3</span><small>すべて</small></a><a class="agent on" href="w8-now.html" title="Tom（開発の道具の開発と保守）">T<span class="badge">4</span><small>Tom</small></a><a class="agent" href="w2-issue-article.html" title="Mary（記事と広報）">M<span class="badge">1</span><small>Mary</small></a><a class="agent" href="w1-issues-empty.html" title="Ken（経理）">K<small>Ken</small></a><a class="agent add" href="#" title="エージェントを足す（flywheel#535）">＋<small>足す</small></a></nav>
+<div class="shell-main">
+<div class="top">
+  <span class="ws">Tom</span>
+  <nav><a href="w8-now.html" class="">いま進められること</a><a href="w1-issues.html" class="on">課題</a><a href="w7-followups.html" class="">フォローアップ</a><a href="w9-cycle.html" class="">サイクル</a></nav>
+  <span class="cycle"><span class="dot"></span>サイクル: 走っている（タスク 2 件を見ている）</span>
+</div>
+<div class="layout">
+<main>
+<div class="crumb"><a href="w1-issues.html">課題</a> ›</div><h1>差し戻しの後も、同じ成果物で作業を続けられるようにする</h1><div class="meta"><span>状態 <span class="pill run">走っている 1</span> <span class="pill wait">あなた待ち 1</span></span><span>タスク <b>2 / 6 済み</b></span></div><div class="actions" style="margin:12px 0 8px"><a class="btn sm" href="w2-issue-running.html">ツリー</a><a class="btn sm" href="w10-history.html">経緯</a><a class="btn sm primary" href="w10-markdown.html">計画の本文</a></div>
+<div class="cols"><div><div class="box"><h3 style="color:var(--muted)">整えて出したとき（案）</h3>
+<h2 style="margin-top:6px">方針</h2><p>委譲先に <b>前の成果物</b> を入力で渡し、新しく作り直さずに続きから作業させる。</p>
+<h2>完了したら見えるもの</h2><ul><li>差し戻した後の作業が、前と同じ成果物に積まれる</li><li>残った作業場所で、次の作業が止まらない</li></ul>
+<h2>入力の形</h2><p>入力の名前は <code>previous_artifact</code> で、場所と名前の 2 つを持つ。</p>
+<table><tr><th>欄</th><th>中身</th><th>必須</th></tr><tr><td><code>location</code></td><td>成果物の場所</td><td>はい</td></tr><tr><td><code>name</code></td><td>作業の名前</td><td>はい</td></tr></table>
+<h2>やらないこと</h2><ol><li>いまの呼び出し方を変えない</li><li>差し戻しの回数の上限は変えない</li></ol></div></div>
+<div><div class="box"><h3 style="color:var(--muted)">いまの出方（そのままの文字）</h3><pre style="white-space:pre-wrap;font-size:12px;margin:0">## 方針
+委譲先に **前の成果物** を入力で渡し、新しく作り直さずに続きから作業させる。
+
+## 完了したら見えるもの
+- 差し戻した後の作業が、前と同じ成果物に積まれる
+- 残った作業場所で、次の作業が止まらない
+
+## 入力の形
+入力の名前は `previous_artifact` で、場所と名前の 2 つを持つ。
+
+| 欄 | 中身 | 必須 |
+|---|---|---|
+| `location` | 成果物の場所 | はい |
+| `name` | 作業の名前 | はい |
+
+## やらないこと
+1. いまの呼び出し方を変えない
+2. 差し戻しの回数の上限は変えない</pre></div></div></div>
+<div class="hint">計画・説明・完了条件・問いの本文に、同じ整え方を使います。本文の中の生の HTML は通しません。</div>
+</main>
+<aside class="chat" id="chat">
+<div class="chat-h"><b>Tom</b><span class="hint" style="margin-right:auto;margin-left:6px">オーケストレーター</span><button class="btn sm" onclick="document.body.classList.toggle('chat-off')">たたむ</button></div>
+<div class="chat-ctx">いま見ているもの: 課題「差し戻しの後も、同じ成果物で作業を続けられるようにする」</div><div class="chat-b"><div class="msg o">おはようございます。いま、あなたを待っているものは 1 件です。④ の実装の問い（前の成果物が閉じられていたとき）で、推奨は「新しく作り直して続ける」です。</div><div class="msg o">ほかのタスクは進んでいます。③ は検査の失敗が 1 回あり、スーパーバイザーが差し戻しました。</div></div>
+<div class="chat-f"><textarea rows="2" placeholder="オーケストレーターに話す（試作では送れません）"></textarea></div>
+</aside>
+</div>
+</div>
+</div>
+<button class="btn chat-open" onclick="document.body.classList.toggle('chat-off')">Tom と話す</button>
+
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>課題（試作）</title>
+<link rel="stylesheet" href="proto.css">
+</head>
+<body>
+<div class="proto-note">試作です。データは見本で、ボタンは画面の行き来だけをします。<a href="index.html">場面の一覧へ</a></div>
+<div class="shell">
+<nav class="rail"><a class="agent all" href="w10-all.html" title="すべてのエージェント">∀<span class="badge">3</span><small>すべて</small></a><a class="agent on" href="w8-now.html" title="Tom（開発の道具の開発と保守）">T<span class="badge">4</span><small>Tom</small></a><a class="agent" href="w2-issue-article.html" title="Mary（記事と広報）">M<span class="badge">1</span><small>Mary</small></a><a class="agent" href="w1-issues-empty.html" title="Ken（経理）">K<small>Ken</small></a><a class="agent add" href="#" title="エージェントを足す（flywheel#535）">＋<small>足す</small></a></nav>
+<div class="shell-main">
+<div class="top">
+  <span class="ws">Tom</span>
+  <nav><a href="w8-now.html" class="">いま進められること</a><a href="w1-issues.html" class="on">課題</a><a href="w7-followups.html" class="">フォローアップ</a><a href="w9-cycle.html" class="">サイクル</a></nav>
+  <span class="cycle"><span class="dot"></span>サイクル: 走っている（タスク 2 件を見ている）</span>
+</div>
+<div class="layout">
+<main>
+<h1>課題</h1><div class="legend">
+<span class="pill run">走っている</span>
+<span class="pill wait">あなたを待っている</span>
+<span class="pill next">次に走る（前提は済み）</span>
+<span class="pill pre">前提を待っている</span>
+<span class="pill done">済み</span>
+<span class="hint">線は前提です（左が終わると、右が走れます）。点線の枠は、計画の後に足したタスクです。</span>
+</div>
+<div class="box"><h3><a href="w4-plan-approval.html">設定の読み込みの誤りを、起動のときに知らせる</a> <span class="pill wait">計画の承認を待っている</span></h3><div class="meta"><span>タスク <b>0 / 4</b></span><span>費用 <b>0 / 12 USD</b></span><span>未のフォローアップ <b>0</b></span></div><div class="tree"><div style="position:relative;width:976px;height:78px"><svg class="edges" width="976" height="78"><path d="M202,39 C234,39 234,39 266,39" /><path d="M456,39 C488,39 488,39 520,39" /><path d="M710,39 C742,39 742,39 774,39" /></svg><a class="task next" href="#" style="position:absolute;left:12px;top:12px;width:190px;height:54px">① 誤りの種類を洗う<small>承認の後に走る</small></a><a class="task pre" href="#" style="position:absolute;left:266px;top:12px;width:190px;height:54px">② 知らせ方を決める<small></small></a><a class="task pre" href="#" style="position:absolute;left:520px;top:12px;width:190px;height:54px">③ 実装<small></small></a><a class="task pre" href="#" style="position:absolute;left:774px;top:12px;width:190px;height:54px">④ 確かめ<small></small></a></div></div></div>
+<div class="box"><h3><a href="w2-issue-running.html">差し戻しの後も、同じ成果物で作業を続けられるようにする</a> <span class="pill run">走っている 1</span> <span class="pill wait">あなた待ち 1</span></h3><div class="meta"><span>タスク <b>2 / 6</b></span><span>費用 <b>11.2 / 30 USD</b></span><span>未のフォローアップ <b>3</b></span><span>統合先 <b>使う</b></span></div><div class="tree"><div style="position:relative;width:976px;height:146px"><svg class="edges" width="976" height="146"><path d="M202,73 C234,73 234,73 266,73" /><path d="M456,73 C488,73 488,39 520,39" /><path d="M456,73 C488,73 488,107 520,107" /><path d="M710,39 C742,39 742,73 774,73" /><path d="M710,107 C742,107 742,73 774,73" /></svg><a class="task done" href="#" style="position:absolute;left:12px;top:46px;width:190px;height:54px">① 仕様<small>済み</small></a><a class="task done" href="#" style="position:absolute;left:266px;top:46px;width:190px;height:54px">② 設計<small>済み</small></a><a class="task run" href="#" style="position:absolute;left:520px;top:12px;width:190px;height:54px">③ 入力を受ける<small>走っている</small></a><a class="task wait" href="w3-task-waiting.html" style="position:absolute;left:520px;top:80px;width:190px;height:54px">④ 同じ成果物で続ける<small>あなた待ち</small></a><a class="task pre" href="#" style="position:absolute;left:774px;top:46px;width:190px;height:54px">⑤ 結合の確かめ<small>前提待ち</small></a></div></div></div>
+<div class="box"><h3><a href="w2-issue-sv.html">記録の表示に、失敗の理由を添える</a> <span class="pill run">走っている 2</span></h3><div class="meta"><span>タスク <b>1 / 3</b></span><span>費用 <b>4.0 / 8 USD</b></span><span>未のフォローアップ <b>0</b></span><span>統合先 <b>使う</b></span></div><div class="tree"><div style="position:relative;width:468px;height:146px"><svg class="edges" width="468" height="146"><path d="M202,39 C234,39 234,39 266,39" /><path d="M202,39 C234,39 234,107 266,107" /></svg><a class="task done" href="#" style="position:absolute;left:12px;top:12px;width:190px;height:54px">① 理由の形を決める<small>済み</small></a><a class="task run" href="#" style="position:absolute;left:266px;top:12px;width:190px;height:54px">② 表示に出す<small>走っている</small></a><a class="task run" href="#" style="position:absolute;left:266px;top:80px;width:190px;height:54px">③ 説明を直す<small>走っている</small></a></div></div></div>
+<details><summary>完了した課題を開く（最近の 2 件）</summary><div class="box"><h3><a href="w2-issue-alldone.html">検証の差分に、説明の文を添える</a> <span class="pill done">完了・反映済み</span></h3><div class="meta"><span>タスク <b>3 / 3</b></span><span>費用 <b>6.3 / 8 USD</b></span><span>未のフォローアップ <b>2</b></span><span>昨日 18:20 に反映</span></div><div class="tree"><div style="position:relative;width:722px;height:78px"><svg class="edges" width="722" height="78"><path d="M202,39 C234,39 234,39 266,39" /><path d="M456,39 C488,39 488,39 520,39" /></svg><a class="task done" href="#" style="position:absolute;left:12px;top:12px;width:190px;height:54px">① 文の形を決める<small>済み</small></a><a class="task done" href="#" style="position:absolute;left:266px;top:12px;width:190px;height:54px">② 差分に添える<small>済み</small></a><a class="task done" href="#" style="position:absolute;left:520px;top:12px;width:190px;height:54px">③ 確かめ<small>済み</small></a></div></div></div></details>
+<div class="hint">課題どうしを結ぶ線は、記録した前提があるときだけ引きます。同じ場所を触りそう、という関係は出しません。</div>
+</main>
+<aside class="chat" id="chat">
+<div class="chat-h"><b>Tom</b><span class="hint" style="margin-right:auto;margin-left:6px">オーケストレーター</span><button class="btn sm" onclick="document.body.classList.toggle('chat-off')">たたむ</button></div>
+<div class="chat-ctx">いま見ているもの: 課題の一覧</div><div class="chat-b"><div class="msg o">ツリーの表示です。黄色の枠は、前提が済んでいて次に走るタスクです。</div></div>
+<div class="chat-f"><textarea rows="2" placeholder="オーケストレーターに話す（試作では送れません）"></textarea></div>
+</aside>
+</div>
+</div>
+</div>
+<button class="btn chat-open" onclick="document.body.classList.toggle('chat-off')">Tom と話す</button>
+
+</body>
+</html>
