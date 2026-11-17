@@ -421,7 +421,6 @@ export interface ShowCardResponse {
 }
 
 export interface Waiting {
-  conflicts: WaitingChallenge[];
   prerequisites: WaitingChallenge[];
 }
 
@@ -598,14 +597,12 @@ export const GRAPH_CATEGORY_CODES = [
 
 export const GRAPH_EDGE_KIND_CODES = [
   "prerequisite",
-  "conflict",
 ] as const;
 
 export const GRAPH_REGISTERED_VIA_CODES = [
   "plan",
   "manual",
   "unknown",
-  "prediction",
 ] as const;
 
 export const HOLD_KIND_CODES = [

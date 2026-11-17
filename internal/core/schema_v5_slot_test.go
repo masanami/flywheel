@@ -97,8 +97,8 @@ func TestOpenWorkspace_UpgradesSchemaVersion4StoreToVersion5(t *testing.T) {
 	ctx := context.Background()
 
 	// AC-370: 版が 5 になる。
-	if got := schemaVersionForTest(t, s); got != 24 {
-		t.Fatalf("schema version = %d, want 24 (AC-370: 版 5 の表は保たれる)", got)
+	if got := schemaVersionForTest(t, s); got != 25 {
+		t.Fatalf("schema version = %d, want 25 (AC-370: 版 5 の表は保たれる)", got)
 	}
 	// #143: 既存の承認の行は plan_version が NULL のまま（推測で計画を割り当てない）。
 	var total, nonNull int
@@ -221,8 +221,8 @@ func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
 func TestSchemaV5_FreshStoreHasSlotTables(t *testing.T) {
 	t.Parallel()
 	s := newStoreForTest(t)
-	if got := schemaVersionForTest(t, s); got != 24 {
-		t.Fatalf("schema version = %d, want 24", got)
+	if got := schemaVersionForTest(t, s); got != 25 {
+		t.Fatalf("schema version = %d, want 25", got)
 	}
 	if !tableExistsForTest(t, s, "slot") || !tableExistsForTest(t, s, "run_artifact") {
 		t.Fatalf("slot and run_artifact tables must exist")

@@ -63,7 +63,7 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
       issues_answer: null,
       non_goals: null,
     },
-    waiting: { conflicts: [], prerequisites: [] },
+    waiting: { prerequisites: [] },
   };
   return { ...base, ...over };
 }
@@ -454,29 +454,23 @@ it("M4.5 AC-196: 依存先が無い課題では欄を出さない", async () => 
 
 // --- 待っている理由（ボードから開いた詳細。API の waiting） ---
 
-const waitingOf = (
-  prerequisites: { id: string; status: string }[],
-  conflicts: { id: string; status: string }[],
-) => {
+const waitingOf = (prerequisites: { id: string; status: string }[]) => {
   const w = (x: { id: string; status: string }) => ({
     challenge_id: x.id,
     status: x.status,
     title: `題名${x.id}`,
   });
-  return { conflicts: conflicts.map(w), prerequisites: prerequisites.map(w) };
+  return { prerequisites: prerequisites.map(w) };
 };
 
-it("待っている理由: まだ終わっていない前提の課題の行だけが出る。API が衝突を返しても衝突の行は出ない（AC-49）", async () => {
+it("待っている理由: まだ終わっていない前提の課題の行だけが出る", async () => {
   installFakes(
     bodies(
       show({
-        waiting: waitingOf(
-          [
-            { id: "C-5", status: "in_progress" },
-            { id: "C-7", status: "classified" },
-          ],
-          [{ id: "C-408", status: "in_progress" }],
-        ),
+        waiting: waitingOf([
+          { id: "C-5", status: "in_progress" },
+          { id: "C-7", status: "classified" },
+        ]),
       }),
     ),
   );
@@ -494,9 +488,6 @@ it("待っている理由: まだ終わっていない前提の課題の行だ�
   expect(rows[0]?.textContent).toContain("題名C-5");
   expect(rows[0]?.textContent).toContain("（着手中）");
   expect(rows[0]?.textContent).toContain("終わらないと始められない");
-  // 衝突の欄は無い
-  expect(sec.textContent).not.toContain("衝突");
-  expect(sec.querySelector('li[data-basis="conflict"]')).toBeNull();
   // 「課題」の節の後ろ（計画などの節の前）に出る
   const join = within(content).getByTestId("ledger-join");
   expect(
@@ -504,12 +495,8 @@ it("待っている理由: まだ終わっていない前提の課題の行だ�
   ).toBeTruthy();
 });
 
-it("待っている理由: 衝突だけのときは節ごと出さない、前提があれば前提の行だけ。どちらも無ければ節ごと出さない", async () => {
-  installFakes(
-    bodies(
-      show({ waiting: waitingOf([], [{ id: "C-408", status: "verifying" }]) }),
-    ),
-  );
+it("待っている理由: 前提が無ければ節ごと出さない、あれば前提の行だけを出す", async () => {
+  installFakes(bodies(show({ waiting: waitingOf([]) })));
   let content = await openDetail();
   await within(content).findByText("計画（0）");
   expect(
@@ -521,9 +508,7 @@ it("待っている理由: 衝突だけのときは節ごと出さない、前�
   cleanup();
 
   installFakes(
-    bodies(
-      show({ waiting: waitingOf([{ id: "C-5", status: "classified" }], []) }),
-    ),
+    bodies(show({ waiting: waitingOf([{ id: "C-5", status: "classified" }]) })),
   );
   content = await openDetail();
   const sec = await within(content).findByRole("region", {

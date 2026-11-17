@@ -166,7 +166,6 @@ export function largeShape(connected: boolean): LargeShape {
     dep(childId(g, 1), childId(g, 2), "prerequisite");
     dep(childId(g, 2), childId(g, 3), "prerequisite");
     dep(childId(g, 3), childId(g, 4), "prerequisite");
-    dep(childId(g, 1), childId(g, 5), "conflict");
     dep(childId(g, 3), childId(g, 6), "prerequisite");
     if (g + 1 < LARGE_PARENTS)
       dep(childId(g, 4), childId(g + 1, 1), "prerequisite");

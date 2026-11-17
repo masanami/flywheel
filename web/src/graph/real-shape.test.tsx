@@ -12,14 +12,13 @@ import type { GraphResponse, Waiting } from "../api/types.gen.ts";
 import type { LiveState, WorkspaceData } from "../live/useLive.ts";
 import { createMockApi } from "../mock/api.ts";
 import { MockStore } from "../mock/store.ts";
-import golden from "../testing/conflict-api.golden.json";
+import golden from "../testing/relation-api.golden.json";
 import { RelationScreen } from "./RelationScreen.tsx";
 import { WAITING_TITLE } from "./WaitingReasons.tsx";
 
-// 実データの形での画面の確かめ。手書きの偽の応答（mock）ではなく、ストアに入れた衝突の行から本物の API が返した値
+// 実データの形での画面の確かめ。手書きの偽の応答（mock）ではなく、本物の API が返した値
 // （internal/server の TestGraphAPI_RealShapeGoldenForTheWebScreen が同じファイルと照合する）を、関係グラフとボードの
-// 詳細に通す。graph の C-4 は前提の C-5 を待ち、C-6 に譲って後回しにした。C-2・C-3 は向きの無い衝突。C-3 と C-7（取り下げ）の
-// 衝突は API が返さない。
+// 詳細に通す。graph の C-4 は前提の C-5 を待つ。
 
 const graph = golden.graph as GraphResponse;
 const waiting = golden.waiting as Record<string, Waiting>;
@@ -54,7 +53,7 @@ beforeEach(() => {
     // 詳細の API の waiting は、本物の API が返した値にする
     challenge: async (ws, id) => ({
       ...(await mock.challenge(ws, id)),
-      waiting: waiting[id] ?? { conflicts: [], prerequisites: [] },
+      waiting: waiting[id] ?? { prerequisites: [] },
     }),
   };
   setApi(api);
@@ -72,14 +71,11 @@ async function mountGraph() {
   return await screen.findByRole("group", { name: "alpha の課題の関係グラフ" });
 }
 
-it("実データの形: API が衝突の辺を返しても衝突の線は描かない（AC-48）。前提の線は変わらない", async () => {
+it("実データの形: 前提の線だけを描く", async () => {
   const group = await mountGraph();
-  const conflicts = [
-    ...group.querySelectorAll<SVGPathElement>(
-      'path.graph-edge[data-basis="conflict"]',
-    ),
-  ];
-  expect(conflicts).toEqual([]);
+  expect(
+    group.querySelectorAll('path.graph-edge[data-basis="prerequisite"]'),
+  ).toHaveLength(1);
   // 前提の線は変わらず実線の矢じり（C-5 → C-4）
   const prereq = group.querySelector<SVGPathElement>(
     'path.graph-edge[data-basis="prerequisite"]',
@@ -88,7 +84,7 @@ it("実データの形: API が衝突の辺を返しても衝突の線は描か�
   expect(prereq?.getAttribute("marker-end")).toBe("url(#graph-arrow)");
 });
 
-it("実データの形: グラフから開いた C-4 の詳細に、前提 C-5 の行だけが出る（衝突の行は無い）", async () => {
+it("実データの形: グラフから開いた C-4 の詳細に、前提 C-5 の行だけが出る", async () => {
   const group = await mountGraph();
   fireEvent.click(box(group, "C-4"));
   const content = await screen.findByTestId("card-detail-content");
@@ -110,7 +106,7 @@ it("実データの形: グラフから開いた C-4 の詳細に、前提 C-5 �
   );
 });
 
-it("実データの形: ボードから開いた C-4 の詳細も、前提の行だけを出す。衝突の相手だった C-6・C-2 には待っている理由の節が出ない", async () => {
+it("実データの形: ボードから開いた C-4 の詳細も、前提の行だけを出す。待っている理由の無い C-6・C-2 には節が出ない", async () => {
   await mountGraph();
   fireEvent.click(screen.getByRole("button", { name: "ボード" }));
   const open = async (id: string) => {

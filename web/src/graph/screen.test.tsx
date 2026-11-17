@@ -94,8 +94,6 @@ const GRAPH: GraphResponse = {
   ],
   edges: [
     edge("C-12", "C-6", { satisfied: true }),
-    // C-4 は、実施中の C-5 に譲って後回しにした（衝突の辺は from＝後回し・to＝先に委譲）
-    edge("C-4", "C-5", { kind: "conflict", registered_via: "prediction" }),
     edge("C-12", "C-10", { registered_via: "unknown", satisfied: true }),
     edge("C-16", "C-10"),
     edge("C-10", "C-18"),
@@ -767,13 +765,12 @@ it("更新なしの課題は「⚠ 更新なし（要確認）」と出し、実
   expect(stale).toHaveAccessibleName(/更新なし/);
 });
 
-it("線: 先行の成果を使う依存は実線の矢じりだけで、衝突の線は描かない（AC-48）", async () => {
+it("線: 依存は実線の矢じりだけで描く", async () => {
   await mount();
   const group = await graphGroup();
   const edges = [...group.querySelectorAll<SVGPathElement>("path.graph-edge")];
   const prereq = edges.filter((e) => e.dataset.basis === "prerequisite");
   expect(prereq.length).toBeGreaterThan(0);
-  expect(edges.filter((e) => e.dataset.basis === "conflict")).toEqual([]);
   for (const e of prereq)
     expect(e.getAttribute("marker-end")).toBe("url(#graph-arrow)");
   // 札は、押すまで（重ねるまで）出ない
@@ -913,11 +910,11 @@ it("待っている先行が無い課題の詳細には、待っている理由�
   expect(within(content).queryByText(WAITING_TITLE)).toBeNull();
 });
 
-it("ボードから開いた詳細にも、待っている理由の節を出す。前提の行だけで、衝突の欄は無い（AC-49）", async () => {
+it("ボードから開いた詳細にも、待っている理由の節を出す。前提の行だけが並ぶ", async () => {
   await mount();
   await graphGroup();
   fireEvent.click(screen.getByRole("button", { name: "ボード" }));
-  // C-19 は、前提（C-5・C-17。どちらも終わっていない）と衝突（実施中の C-6 に譲って後回し）の両方で待っている
+  // C-19 は、前提（C-5・C-17。どちらも終わっていない）を待っている
   const card = await screen.findByTestId("card-C-19");
   fireEvent.click(within(card).getByRole("button"));
   const content = await screen.findByTestId("card-detail-content");
@@ -949,89 +946,6 @@ it("ボードから開いた詳細で、待っている理由が無い課題に�
   expect(within(content).queryByText(WAITING_TITLE)).toBeNull();
 });
 
-// --- 衝突の辺（kind=conflict）。from＝後回しにした課題、to＝先に委譲した課題 ---
-
-it("グラフから開いた詳細: API が衝突の辺を返しても、衝突の行は出ない（前提の行だけ）", async () => {
-  graphFor = async () => ({
-    nodes: [
-      node("C-1", { running: true }),
-      node("C-2"),
-      node("C-3", { state: "classified" }),
-      node("C-4"),
-    ],
-    edges: [
-      edge("C-1", "C-3"), // C-3 は C-1 を前提にも待つ
-      edge("C-3", "C-1", { kind: "conflict", registered_via: "prediction" }), // C-3 は C-1 に譲った
-      edge("C-2", "C-4", {
-        kind: "conflict",
-        directed: false,
-        registered_via: "prediction",
-      }),
-    ],
-  });
-  await mount();
-  const group = await graphGroup();
-  const rowsOf = async (id: string) => {
-    fireEvent.click(box(group, id));
-    const content = await screen.findByTestId("card-detail-content");
-    const sec = within(content).queryByRole("region", {
-      name: WAITING_TITLE,
-      hidden: true,
-    });
-    const rows = sec
-      ? [...sec.querySelectorAll("li")].map((li) => [
-          li.dataset.basis,
-          li.dataset.from,
-          li.textContent ?? "",
-        ])
-      : [];
-    const dialog = content.closest("dialog") as HTMLDialogElement;
-    act(() => {
-      dialog.dispatchEvent(new Event("close"));
-    });
-    await waitFor(() =>
-      expect(screen.queryByTestId("card-detail-content")).toBeNull(),
-    );
-    return rows;
-  };
-  const c3 = await rowsOf("C-3");
-  expect(c3.map((r) => [r[0], r[1]])).toEqual([["prerequisite", "C-1"]]);
-  expect(c3[0]?.[2]).not.toContain("衝突");
-  expect(await rowsOf("C-1")).toEqual([]);
-  expect(await rowsOf("C-2")).toEqual([]);
-  expect(await rowsOf("C-4")).toEqual([]);
-});
-
-it("衝突の線: API が衝突の辺を返しても描かない（AC-48）", async () => {
-  graphFor = async () => ({
-    nodes: [
-      node("C-1", { running: true }),
-      node("C-2"),
-      node("C-3"),
-      node("C-4"),
-    ],
-    edges: [
-      edge("C-1", "C-2"), // 前提: C-2 は C-1 を待つ
-      edge("C-2", "C-1", { kind: "conflict", registered_via: "prediction" }),
-      edge("C-3", "C-4", {
-        kind: "conflict",
-        directed: false,
-        registered_via: "prediction",
-      }),
-    ],
-  });
-  await mount();
-  const group = await graphGroup();
-  const edges = [...group.querySelectorAll<SVGPathElement>("path.graph-edge")];
-  expect(edges.map((e) => e.dataset.basis)).toEqual(["prerequisite"]);
-  expect(
-    within(group).queryByRole("button", { name: /^依存 C-3 — C-4/ }),
-  ).toBeNull();
-  expect(
-    within(group).queryByRole("button", { name: /^依存 C-2 → C-1/ }),
-  ).toBeNull();
-});
-
 it("線: 畳んだ親の中の課題への線は親の箱から出て、押すと理由の札が出て、もう一度押すと消える", async () => {
   graphFor = async () => ({
     nodes: [
@@ -1055,7 +969,7 @@ it("線: 畳んだ親の中の課題への線は親の箱から出て、押す�
   expect(group.querySelector(".graph-edge-label")).toBeNull();
 });
 
-it("凡例に、衝突の線の項目が無い（AC-48）", async () => {
+it("凡例に、衝突の線の項目が無い", async () => {
   await mount();
   const group = await graphGroup();
   fireEvent.click(screen.getByText("? 凡例"));
@@ -1063,7 +977,6 @@ it("凡例に、衝突の線の項目が無い（AC-48）", async () => {
   expect(help.textContent).toContain("実線の矢印");
   expect(help.textContent).not.toContain("破線の矢印");
   expect(help.textContent).not.toContain("衝突");
-  expect(group.querySelector('[data-basis="conflict"]')).toBeNull();
 });
 
 it("読み込み中・失敗・課題が無いときの表示", async () => {
@@ -1122,9 +1035,7 @@ it("幅 480px 以下ではグラフの代わりに親ごとに畳んだ一覧を
   expect(c12.textContent).toContain("先行: なし");
   expect(c12.textContent).toContain("後続: C-6、C-10");
   expect(item("C-4").textContent).toContain("人間の操作待ち");
-  // 衝突は出さない
   expect(item("C-4").textContent).toContain("先行: なし");
-  expect(item("C-4").textContent).not.toContain("衝突");
   // 開閉は広い画面と同じ規則（実施中・人間待ちの子孫を持つ親は開いている）
   expect(
     within(list).getByRole("button", { name: "C-14 を畳む" }),

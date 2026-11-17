@@ -72,10 +72,10 @@ it("偽の API の graph: ID の数の昇順・区分と実施中と更新なし
   });
   expect(node("C-14")?.parent_id).toBeNull();
   expect(new Set(g.edges.map((e) => e.kind))).toEqual(
-    new Set(["prerequisite", "conflict"]),
+    new Set(["prerequisite"]),
   );
   expect(new Set(g.edges.map((e) => e.registered_via))).toEqual(
-    new Set(["plan", "manual", "unknown", "prediction"]),
+    new Set(["plan", "manual", "unknown"]),
   );
   const keys = g.edges.map((e) => [e.from, e.to]);
   const sorted = [...keys].sort(
@@ -84,52 +84,17 @@ it("偽の API の graph: ID の数の昇順・区分と実施中と更新なし
       Number(a[1]?.slice(2)) - Number(b[1]?.slice(2)),
   );
   expect(keys).toEqual(sorted);
-  // 先行が完了している前提だけが満たされている。衝突は満たされていない（終わった側があれば返さない）
+  // 先行が完了している前提だけが満たされている
   for (const e of g.edges)
-    expect(e.satisfied).toBe(
-      e.kind === "prerequisite" && node(e.from)?.category === "done",
-    );
+    expect(e.satisfied).toBe(node(e.from)?.category === "done");
 });
 
-it("偽の API の graph の衝突: 後回し → 先に委譲の向き・向きの無い組・終わった相手との組は返さない・前提と衝突の両方で待つ課題", () => {
-  const alpha = new MockStore().workspaces.alpha;
-  if (!alpha) throw new Error("alpha が無い");
-  const g = graphOf(alpha);
-  const conflicts = g.edges.filter((e) => e.kind === "conflict");
-  const pairs = conflicts.map((e) => [e.from, e.to, e.directed]);
-  expect(pairs).toEqual([
-    ["C-19", "C-6", true],
-    ["C-20", "C-5", true],
-    ["C-20", "C-26", false],
-    ["C-26", "C-6", true],
-  ]);
-  // 終わった（C-12 は完了、C-21 は取り下げ）課題との衝突は、行があっても返さない
-  expect(
-    alpha.graph.deps.filter(
-      (d) => d.kind === "conflict" && (d.to === "C-12" || d.to === "C-21"),
-    ),
-  ).toHaveLength(2);
-  expect(conflicts.some((e) => e.to === "C-12" || e.to === "C-21")).toBe(false);
-  // 向きの無い組の from は ID の小さい側
-  for (const e of conflicts.filter((x) => !x.directed))
-    expect(Number(e.from.slice(2))).toBeLessThan(Number(e.to.slice(2)));
-});
-
-it("偽の API の waiting: 前提と衝突を別の一覧で返す。先に委譲した側・向きの無い組・終わった相手の衝突には後回しが付かない", () => {
+it("偽の API の waiting: まだ終わっていない前提だけを返す。自分が終わった課題には理由が無い", () => {
   const alpha = new MockStore().workspaces.alpha;
   if (!alpha) throw new Error("alpha が無い");
   const ids = (xs: { challenge_id: string }[]) => xs.map((x) => x.challenge_id);
-  // C-19 は前提（C-5・C-17）と衝突（C-6 に譲る）の両方で待っている
   const w19 = waitingOf(alpha, "C-19");
   expect(ids(w19.prerequisites)).toEqual(["C-5", "C-17"]);
-  expect(ids(w19.conflicts)).toEqual(["C-6"]);
-  expect(w19.conflicts[0]).toMatchObject({ status: "in_progress" });
-  // C-20 は C-5 に譲った。向きの無い C-26 との組、取り下げの C-21 との組は理由にならない
-  expect(ids(waitingOf(alpha, "C-20").conflicts)).toEqual(["C-5"]);
-  expect(ids(waitingOf(alpha, "C-5").conflicts)).toEqual([]);
-  // 自分が終わった課題には理由が無い
-  expect(waitingOf(alpha, "C-12")).toEqual({
-    conflicts: [],
-    prerequisites: [],
-  });
+  expect(Object.keys(w19)).toEqual(["prerequisites"]);
+  expect(waitingOf(alpha, "C-12")).toEqual({ prerequisites: [] });
 });
