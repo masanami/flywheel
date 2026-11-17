@@ -1,5 +1,5 @@
-// 関係グラフから開いた詳細のモーダルに差し込む「待っている理由」。その課題が直接待っている先行課題（前提）と、
-// 衝突のため後回しにした相手を、別の行で並べる。表示の部品は、ボードから開いた詳細と共通
+// 関係グラフから開いた詳細のモーダルに差し込む「待っている理由」。その課題が直接待っている先行課題（前提）を並べる。
+// 表示の部品は、ボードから開いた詳細と共通
 // （board/WaitingReasonsSection）。ボードは API の waiting を、ここはグラフの辺を出どころにする。
 
 import {
@@ -67,10 +67,7 @@ export function waitingRowsOfGraph(
       swatchTitle: i ? categoryLabel(i.category) : "",
     };
   };
-  return [
-    ...waitingOn(id, relations).map((r) => row(r.from, r)),
-    ...yieldingTo(id, relations).map((r) => row(r.to, r)),
-  ];
+  return [...waitingOn(id, relations).map((r) => row(r.from, r))];
 }
 
 export function WaitingReasons({

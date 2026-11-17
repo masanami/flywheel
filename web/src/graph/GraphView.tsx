@@ -462,10 +462,6 @@ export function GraphView({
                   {BASIS_LABELS.prerequisite}（先行の成果を使う）
                 </li>
                 <li>
-                  <b>破線の矢印</b>: 先行 → 後続。
-                  {BASIS_LABELS.conflict}（同じものを触るので順に走らせる）
-                </li>
-                <li>
                   <b>矢印の理由</b>: 線を押すか重ねると、なぜ待つのかを出す
                 </li>
                 <li>
