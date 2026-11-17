@@ -27,7 +27,7 @@ S1 は、このうち D29 と D33 の一部を先に入れる。直列化グル�
 
 S1（外す）の要件。
 
-- [ ] 委譲の段は、直列化グループを作らない。課題どうしを順に並べるか（直列にするか）は、記録した前提（`challenge_dependency`）・同時に走らせる数の上限（`max_parallel_runs`）・スロットの空きだけで決める。いまある起動の条件（実行の予算の不足・連続失敗の上限・差し戻しの上限）は変えない。
+- [ ] 委譲の段は、直列化グループを作らない。課題どうしを順に並べるか（直列にするか）は、記録した前提（`challenge_dependency`）・同時に走らせる数の上限（`max_parallel_runs`）・スロットの空きだけで決める。起動しなかった理由（`not_started` の理由）のうち、`serialized`・`prediction_limit` 以外の条件は変えない。
 - [ ] 委譲の段は、委譲先の衝突の予測の口を起動しない。
 - [ ] 委譲の段は、同時に進めてよいかの判断点（J9）を呼ばない。
 - [ ] 記録した前提の判定（前提が終わっていない課題を起動しない）は変えない。
@@ -203,7 +203,7 @@ S1（外す）の受入基準。
 - [ ] `kind = predict` の run があるストアで、`flywheel runs --json` が終了コード 0 で終わる。
 - [ ] `kind = predict` の run があるストアで、`flywheel runs --json` の出力に、その run が `kind` の値 `predict` で出る。
 - [ ] core の run を記録する口は、`kind = predict` の新しい run を受け付けない。
-- [ ] 終わっていない `kind = predict` の run があるストアでサイクルを回すと、その run が「中断」で終わり、サイクルは失敗しない。
+- [ ] 終わっていない `kind = predict` の run（心拍が古く、起動したプロセスが残っていないもの）があるストアでサイクルを回すと、その run が「中断」で終わり、サイクルは失敗しない。
 - [ ] core の判断点を呼ぶ口は、判断点 `J9` の呼び出しを受け付けない。
 - [ ] `judgment = J9` の run があるストアで、`flywheel runs --json` が終了コード 0 で終わる。
 - [ ] `judgment = J9` の run があるストアで、`flywheel runs --json` の出力に、その run が `judgment` の値 `J9` で出る。
@@ -238,9 +238,10 @@ S1（外す）の受入基準。
 - [ ] `docs/features/m3-invoker-delegation.md` の「同時に進めてよいかの判断（判断点 J9）」の節に、外した旨と、`core-redesign.md` への参照がある。
 - [ ] `docs/features/m3-invoker-delegation.md` の「7. 同じリポジトリの並列と衝突の予測（外部システム連携）」の節に、外した旨と、`core-redesign.md` への参照がある。
 - [ ] `docs/features/ui-relation-graph.md` の衝突の節に、外した旨と、`core-redesign.md` への参照がある。
+- [ ] `docs/features/m3-invoker-delegation.md` のエラーコードの表の `serialized` の行に、外した旨がある（同じ文書の、起動しなかった理由の列挙と S2 の受入基準の節は、当時の記録として書き換えない。上の 3 つの節の注記で足りる）。
 - [ ] `docs/features/m1-core.md` の `serialized` を定めた箇所に、外した旨と、`core-redesign.md` への参照がある。
 - [ ] `docs/features/m4-ui-server.md` の、CLI にあって API の表に無いコードの列挙に、`serialized` が無い。
-- [ ] `docs/architecture.md` の §11（同時に走らせる数とスロット）の見直しの注記に、衝突の予測と直列化グループは外した旨と、`core-redesign.md` への参照がある。
+- [ ] `docs/architecture.md` の 「11. 実行環境（スロット）」の見直しの注記に、衝突の予測と直列化グループは外した旨と、`core-redesign.md` への参照がある。
 
 ### 全体
 
