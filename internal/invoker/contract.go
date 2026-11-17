@@ -158,3 +158,20 @@ func decodeResolvableBy(raw json.RawMessage) string {
 	}
 	return v
 }
+
+func isJSONNull(raw json.RawMessage) bool {
+	t := bytes.TrimSpace(raw)
+	return len(t) == 0 || bytes.Equal(t, []byte("null"))
+}
+
+// decodeNumber は raw が JSON の数なら (値, true)。無い・null・数でないは (0, false)。
+func decodeNumber(raw json.RawMessage) (float64, bool) {
+	if isJSONNull(raw) {
+		return 0, false
+	}
+	var v float64
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return 0, false
+	}
+	return v, true
+}

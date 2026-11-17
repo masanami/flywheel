@@ -188,3 +188,10 @@ func TestContractCommand_ResolvableByIsNormalized(t *testing.T) {
 		}
 	}
 }
+
+func sameDir(t *testing.T, a, b string) bool {
+	t.Helper()
+	ra, err1 := filepath.EvalSymlinks(a)
+	rb, err2 := filepath.EvalSymlinks(b)
+	return err1 == nil && err2 == nil && ra == rb
+}

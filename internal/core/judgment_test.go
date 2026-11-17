@@ -853,3 +853,20 @@ func TestReapInterruptedRuns_J8CreatesNoOccurrence(t *testing.T) {
 		t.Errorf("occurrence rows = %d, want 0", n)
 	}
 }
+
+// J9 は過去の run を読むための値としてだけ残る。判断点を呼ぶ口は受け付けず、何も起動・記録しない。
+func TestRunJudgment_RejectsJ9(t *testing.T) {
+	t.Parallel()
+	s := newStoreForTest(t)
+	inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
+	if _, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentPoint("J9"), MaxBudgetUSD: 5, Stdin: []byte("x"), Invoker: inv}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("J9: err = %v, want ErrValidation", err)
+	}
+	runs, err := s.ListRunsWithoutReap(context.Background(), RunListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Errorf("runs = %d, want 0", len(runs))
+	}
+}

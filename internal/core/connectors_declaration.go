@@ -151,9 +151,6 @@ type Connector struct {
 	Operations      []ConnectorOperation
 	Commands        *CLICommands // form: cli 以外は通常 nil
 	ContractVersion *int         // form: cli 以外は通常 nil
-
-	// ConflictPrediction は省略できる（nil）。形態 plugin・brief のどちらにも置ける。
-	ConflictPrediction *ConflictPrediction
 }
 
 // ConnectorRepoSlots は repos[].slots。Paths は provider が clone のとき、
@@ -163,20 +160,6 @@ type ConnectorRepoSlots struct {
 	Paths    []string
 	Base     string
 	Count    int
-}
-
-// conflictPredictionSchemaV1 は conflict_prediction.schema の閉集合の唯一の値。
-const conflictPredictionSchemaV1 = "harness.conflict-prediction/v1"
-
-var conflictPredictionSchemaValues = map[string]bool{conflictPredictionSchemaV1: true}
-
-var conflictPredictionKeys = map[string]bool{"command": true, "schema": true}
-
-// ConflictPrediction は接続ツールの conflict_prediction
-// （予測の口の宣言。起動は別チケットの範囲）。
-type ConflictPrediction struct {
-	Command []string // nil は「キーが無い」（validate が拒否する）
-	Schema  string
 }
 
 // ConnectorRepo は repos の1要素。
@@ -189,12 +172,6 @@ type ConnectorRepo struct {
 	// MergeMethod は承認済みの release のマージの方式（squash | merge | rebase）。
 	// キーを省略したときは読み込みが squash を入れる。
 	MergeMethod string
-	// SerialJudgment は repos[].serial_judgment。true なら、同じリポジトリの 2 つの課題を同時に進めてよいかを
-	// 判断点（J9）が判断して、弱ければ並列にする。省略は false（両方が触るファイルがあれば直列、のまま）。
-	SerialJudgment bool
-	// ConflictExcludePaths は repos[].conflict_exclude_paths。衝突の判定（直列化グループ・J9）から外すパスの
-	// パターン。予測の出力の共有ファイルのうち当たるものを、重なりを数える前に除く。省略は空（外さない）。
-	ConflictExcludePaths []string
 }
 
 // ConnectorsDeclaration は .flywheel/connectors.json の中身
@@ -249,7 +226,7 @@ var connectorsTopLevelKeys = map[string]bool{
 var humanQuestionKindKeys = map[string]bool{"id": true, "label": true}
 var connectorKeys = map[string]bool{
 	"id": true, "form": true, "permission_mode": true, "operations": true,
-	"commands": true, "contract_version": true, "conflict_prediction": true,
+	"commands": true, "contract_version": true,
 }
 var operationKeys = map[string]bool{
 	"id": true, "invocation": true, "interactive": true, "counterpart": true,
@@ -258,7 +235,7 @@ var operationKeys = map[string]bool{
 var cliCommandsKeys = map[string]bool{"start": true, "status": true, "resume": true, "cancel": true}
 var connectorRepoKeys = map[string]bool{
 	"name": true, "remote": true, "default_branch": true, "connector": true, "slots": true,
-	"merge_method": true, "serial_judgment": true, "conflict_exclude_paths": true,
+	"merge_method": true,
 }
 var connectorRepoSlotsKeys = map[string]bool{"provider": true, "paths": true, "base": true, "count": true}
 
@@ -367,6 +344,9 @@ func parseConnectors(raw json.RawMessage) ([]Connector, bool, error) {
 	conns := make([]Connector, 0, len(rawList))
 	defaultsUsed := false
 	for i, rc := range rawList {
+		if err := rejectRemovedKeys(rc, []string{"conflict_prediction"}, fmt.Sprintf("[%d]", i)); err != nil {
+			return nil, false, err
+		}
 		if err := rejectUnknownKeys(rc, connectorKeys, fmt.Sprintf("[%d]", i)); err != nil {
 			return nil, false, err
 		}
@@ -414,59 +394,9 @@ func parseConnectors(raw json.RawMessage) ([]Connector, bool, error) {
 			}
 			c.ContractVersion = &cv
 		}
-		if v, ok := rc["conflict_prediction"]; ok {
-			cp, err := parseConflictPrediction(v)
-			if err != nil {
-				return nil, false, fmt.Errorf("[%d].conflict_prediction: %w", i, err)
-			}
-			c.ConflictPrediction = cp
-		}
 		conns = append(conns, c)
 	}
 	return conns, defaultsUsed, nil
-}
-
-func parseConflictPrediction(raw json.RawMessage) (*ConflictPrediction, error) {
-	if isJSONNull(raw) {
-		return nil, fmt.Errorf("must not be null")
-	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, err
-	}
-	if err := rejectUnknownKeys(m, conflictPredictionKeys, "conflict_prediction"); err != nil {
-		return nil, err
-	}
-	cp := &ConflictPrediction{}
-	if v, ok := m["command"]; ok {
-		if isJSONNull(v) {
-			return nil, fmt.Errorf("command: must not be null")
-		}
-		var elems []json.RawMessage
-		if err := json.Unmarshal(v, &elems); err != nil {
-			return nil, fmt.Errorf("command: %w", err)
-		}
-		cp.Command = make([]string, 0, len(elems))
-		for i, e := range elems {
-			var s string
-			if isJSONNull(e) {
-				return nil, fmt.Errorf("command[%d]: must be a string", i)
-			}
-			if err := json.Unmarshal(e, &s); err != nil {
-				return nil, fmt.Errorf("command[%d]: %w", i, err)
-			}
-			cp.Command = append(cp.Command, s)
-		}
-	}
-	if v, ok := m["schema"]; ok {
-		if isJSONNull(v) {
-			return nil, fmt.Errorf("schema: must not be null")
-		}
-		if err := json.Unmarshal(v, &cp.Schema); err != nil {
-			return nil, fmt.Errorf("schema: %w", err)
-		}
-	}
-	return cp, nil
 }
 
 func parseOperations(raw json.RawMessage) ([]ConnectorOperation, bool, error) {
@@ -592,6 +522,9 @@ func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 	}
 	repos := make([]ConnectorRepo, 0, len(rawList))
 	for i, rr := range rawList {
+		if err := rejectRemovedKeys(rr, []string{"serial_judgment", "conflict_exclude_paths"}, fmt.Sprintf("[%d]", i)); err != nil {
+			return nil, err
+		}
 		if err := rejectUnknownKeys(rr, connectorRepoKeys, fmt.Sprintf("[%d]", i)); err != nil {
 			return nil, err
 		}
@@ -623,22 +556,6 @@ func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 			}
 			if err := json.Unmarshal(v, &r.MergeMethod); err != nil {
 				return nil, fmt.Errorf("[%d].merge_method: %w", i, err)
-			}
-		}
-		if v, ok := rr["serial_judgment"]; ok {
-			if isJSONNull(v) {
-				return nil, fmt.Errorf("[%d].serial_judgment: must not be null", i)
-			}
-			if err := json.Unmarshal(v, &r.SerialJudgment); err != nil {
-				return nil, fmt.Errorf("[%d].serial_judgment: %w", i, err)
-			}
-		}
-		if v, ok := rr["conflict_exclude_paths"]; ok {
-			if isJSONNull(v) {
-				return nil, fmt.Errorf("[%d].conflict_exclude_paths: must not be null", i)
-			}
-			if err := json.Unmarshal(v, &r.ConflictExcludePaths); err != nil {
-				return nil, fmt.Errorf("[%d].conflict_exclude_paths: %w", i, err)
 			}
 		}
 		if v, ok := rr["slots"]; ok {
@@ -819,11 +736,6 @@ func validateConnectorRepo(r ConnectorRepo, repoNames map[string]bool, connector
 	default:
 		return fmt.Errorf("%w: repo %q has invalid merge_method %q (want squash, merge or rebase)", ErrConfigInvalid, r.Name, r.MergeMethod)
 	}
-	for i, pat := range r.ConflictExcludePaths {
-		if err := validateExcludePattern(pat); err != nil {
-			return fmt.Errorf("%w: repo %q has invalid conflict_exclude_paths[%d] %q: %w", ErrConfigInvalid, r.Name, i, pat, err)
-		}
-	}
 	if r.Slots.Provider != "" && !slotsProviderValues[r.Slots.Provider] {
 		return fmt.Errorf("%w: repo %q has invalid slots.provider %q", ErrConfigInvalid, r.Name, r.Slots.Provider)
 	}
@@ -863,21 +775,6 @@ func validateConnector(c Connector, connectorIDs map[string]bool) error {
 	if c.Form == ConnectorFormCLI {
 		if err := validateCLICommands(c); err != nil {
 			return err
-		}
-	}
-
-	if c.ConflictPrediction != nil {
-		cp := c.ConflictPrediction
-		if len(cp.Command) == 0 {
-			return fmt.Errorf("%w: connector %q conflict_prediction.command must be a non-empty array of strings", ErrConfigInvalid, c.ID)
-		}
-		for i, a := range cp.Command {
-			if a == "" {
-				return fmt.Errorf("%w: connector %q conflict_prediction.command[%d] must not be empty", ErrConfigInvalid, c.ID, i)
-			}
-		}
-		if !conflictPredictionSchemaValues[cp.Schema] {
-			return fmt.Errorf("%w: connector %q conflict_prediction.schema %q is not one of [%s]", ErrConfigInvalid, c.ID, cp.Schema, conflictPredictionSchemaV1)
 		}
 	}
 

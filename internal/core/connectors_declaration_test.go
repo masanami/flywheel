@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -623,7 +624,7 @@ func TestLoadConnectorsDeclaration_InvalidDeclarationChangesNothingOnDisk(t *tes
 	}
 }
 
-// --- #100: conflict_prediction・slots.provider（clone | worktree） ---
+// --- #100: slots.provider（clone | worktree） ---
 
 // connectorsWithPrediction は接続ツール a（form）に conflict_prediction を置いた宣言を返す。
 func connectorsWithPrediction(form, cp string) string {
@@ -633,62 +634,6 @@ func connectorsWithPrediction(form, cp string) string {
 	}
 	return `{"version": 1, "connectors": [{"id": "a", "form": "` + form + `", "permission_mode": "auto", "operations": [` + op + `],
 		"conflict_prediction": ` + cp + `}], "repos": []}`
-}
-
-func TestLoadConnectorsDeclaration_ConflictPrediction_ValidOnPluginAndBrief(t *testing.T) {
-	t.Parallel()
-	for _, form := range []string{"plugin", "brief"} {
-		t.Run(form, func(t *testing.T) {
-			dir := writeConnectorsJSON(t, connectorsWithPrediction(form, `{"command": ["predict", "--json"], "schema": "harness.conflict-prediction/v1"}`))
-			d, err := LoadConnectorsDeclaration(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			cp := d.Connectors[0].ConflictPrediction
-			if cp == nil || len(cp.Command) != 2 || cp.Schema != "harness.conflict-prediction/v1" {
-				t.Fatalf("ConflictPrediction = %+v", cp)
-			}
-		})
-	}
-}
-
-func TestLoadConnectorsDeclaration_ConflictPrediction_OmittedIsNil(t *testing.T) {
-	t.Parallel()
-	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}], "repos": []}`)
-	d, err := LoadConnectorsDeclaration(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.Connectors[0].ConflictPrediction != nil {
-		t.Fatalf("want nil")
-	}
-}
-
-func TestLoadConnectorsDeclaration_ConflictPrediction_Invalid(t *testing.T) {
-	t.Parallel()
-	const sc = `"schema": "harness.conflict-prediction/v1"`
-	cases := map[string]string{
-		"command missing":       `{` + sc + `}`,
-		"command empty":         `{"command": [], ` + sc + `}`,
-		"command non-string":    `{"command": ["a", 1], ` + sc + `}`,
-		"command empty element": `{"command": [""], ` + sc + `}`,
-		"command null element":  `{"command": ["a", null], ` + sc + `}`,
-		"command not array":     `{"command": "a", ` + sc + `}`,
-		"schema missing":        `{"command": ["a"]}`,
-		"schema outside set":    `{"command": ["a"], "schema": "harness.conflict-prediction/v2"}`,
-		"schema empty":          `{"command": ["a"], "schema": ""}`,
-		"schema non-string":     `{"command": ["a"], "schema": 1}`,
-		"unknown key":           `{"command": ["a"], ` + sc + `, "extra": 1}`,
-		"null":                  `null`,
-	}
-	for name, cp := range cases {
-		t.Run(name, func(t *testing.T) {
-			dir := writeConnectorsJSON(t, connectorsWithPrediction("brief", cp))
-			if _, err := LoadConnectorsDeclaration(dir); !errors.Is(err, ErrConfigInvalid) {
-				t.Fatalf("error = %v, want ErrConfigInvalid", err)
-			}
-		})
-	}
 }
 
 func reposWithSlots(slots string) string {
@@ -791,57 +736,44 @@ func TestLoadConnectorsDeclaration_MergeMethodClosedSet(t *testing.T) {
 	}
 }
 
-// --- conflict_exclude_paths ---
+// --- 無くした項目（removed）が残っている宣言は config_invalid で止める ---
 
-func TestLoadConnectorsDeclaration_ConflictExcludePaths(t *testing.T) {
-	t.Parallel()
-	decl, err := loadRepoWithMergeMethod(t, "")
-	if err != nil {
-		t.Fatal(err)
+func assertRemovedKeyRejected(t *testing.T, err error, key string) {
+	t.Helper()
+	if !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("error = %v, want ErrConfigInvalid", err)
 	}
-	if len(decl.Repos[0].ConflictExcludePaths) != 0 {
-		t.Errorf("default = %v, want empty", decl.Repos[0].ConflictExcludePaths)
-	}
-	decl, err = loadRepoWithMergeMethod(t, `, "conflict_exclude_paths": ["docs/**", "*.md", "a/**/b.txt", "x/[ab]?.go"]`)
-	if err != nil {
-		t.Fatalf("error = %v", err)
-	}
-	if got := decl.Repos[0].ConflictExcludePaths; len(got) != 4 || got[0] != "docs/**" {
-		t.Errorf("paths = %v", got)
-	}
-	for _, bad := range []string{`null`, `"docs/**"`, `[1]`, `[null]`, `[""]`, `["/docs/**"]`, `["docs//x"]`, `["../x"]`, `["a/./b"]`, `["a**"]`, `["a/**b/c"]`, `["x/[a"]`, `["a\\b"]`} {
-		if _, err := loadRepoWithMergeMethod(t, `, "conflict_exclude_paths": `+bad); !errors.Is(err, ErrConfigInvalid) {
-			t.Errorf("conflict_exclude_paths %s: error = %v, want ErrConfigInvalid", bad, err)
-		}
+	msg := err.Error()
+	if !strings.Contains(msg, key) || !strings.Contains(msg, "removed") || strings.Contains(msg, "unknown key") {
+		t.Errorf("error = %q, want it to name %q and say removed (not unknown key)", msg, key)
 	}
 }
 
-func TestMatchExcludePattern(t *testing.T) {
+func TestLoadConnectorsDeclaration_RemovedRepoKeysAreRejected(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		pat, file string
-		want      bool
-	}{
-		{"docs/**", "docs/a.md", true},
-		{"docs/**", "docs/x/y/a.md", true},
-		{"docs/**", "docs", false},
-		{"docs/**", "src/docs/a.md", false},
-		{"*.md", "README.md", true},
-		{"*.md", "docs/README.md", false},
-		{"**/*.md", "README.md", true},
-		{"**/*.md", "a/b/README.md", true},
-		{"a/**/b.txt", "a/b.txt", true},
-		{"a/**/b.txt", "a/x/y/b.txt", true},
-		{"a/**/b.txt", "a/x/c.txt", false},
-		{"x/?.go", "x/a.go", true},
-		{"x/?.go", "x/ab.go", false},
-		{"**", "any/file", true},
-		{"x/[ab]?.go", "x/a1.go", true},
-		{"x/[ab]?.go", "x/c1.go", false},
+	for _, c := range []struct{ key, field string }{
+		{"serial_judgment", `, "serial_judgment": true`},
+		{"serial_judgment", `, "serial_judgment": false`},
+		{"conflict_exclude_paths", `, "conflict_exclude_paths": ["docs/**"]`},
+	} {
+		_, err := loadRepoWithMergeMethod(t, c.field)
+		assertRemovedKeyRejected(t, err, c.key)
 	}
-	for _, c := range cases {
-		if got := matchExcludePattern(c.pat, c.file); got != c.want {
-			t.Errorf("match(%q, %q) = %v, want %v", c.pat, c.file, got, c.want)
-		}
+}
+
+func TestLoadConnectorsDeclaration_RemovedConflictPredictionIsRejected(t *testing.T) {
+	t.Parallel()
+	for _, form := range []string{"plugin", "brief"} {
+		dir := writeConnectorsJSON(t, connectorsWithPrediction(form, `{"command": ["predict", "--json"], "schema": "harness.conflict-prediction/v1"}`))
+		_, err := LoadConnectorsDeclaration(dir)
+		assertRemovedKeyRejected(t, err, "conflict_prediction")
+	}
+}
+
+func TestLoadConnectorsDeclaration_UnknownKeyKeepsItsOwnMessage(t *testing.T) {
+	t.Parallel()
+	_, err := loadRepoWithMergeMethod(t, `, "no_such_key": 1`)
+	if !errors.Is(err, ErrConfigInvalid) || !strings.Contains(err.Error(), "unknown key") {
+		t.Fatalf("error = %v, want ErrConfigInvalid with unknown key", err)
 	}
 }

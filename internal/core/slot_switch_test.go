@@ -442,8 +442,8 @@ func TestLoadFollowBranch_NoneWhenPreviousPRIsMergedOrClosed(t *testing.T) {
 			if err := s.db.Write(ctx, func(tx *sql.Tx) error {
 				now := time.Now()
 				r, err := insertRun(ctx, tx, 0, insertRunInput{
-					Kind: runKindPredict, PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now,
-					MaxBudgetUSD: 1, BudgetBucket: budgetBucketPredict, Repo: "r",
+					Kind: runKindJudgment, Judgment: judgmentJ8, SessionID: "s", PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now,
+					MaxBudgetUSD: 1, BudgetBucket: budgetBucketJudgment, Repo: "r",
 				})
 				if err != nil {
 					return err
