@@ -500,7 +500,7 @@ func TestErrorCodeUsageInSourcesMatchesSpecInBothDirections(t *testing.T) {
 	}
 	produced := producibleErrorCodes(t, fset, files, consts)
 	for code := range specCodes {
-		if httpOnlyErrorCodes[code] {
+		if httpOnlyErrorCodes[code] || removedErrorCodes[code] {
 			continue
 		}
 		if !produced[code] {
@@ -512,3 +512,7 @@ func TestErrorCodeUsageInSourcesMatchesSpecInBothDirections(t *testing.T) {
 // httpOnlyErrorCodes は仕様の表にあるが HTTP の応答だけで使い、CLI は出さないコード
 // （docs/features/m4-ui-server.md §エラーコードの追加）。「CLI が出しうる」検査の対象外。
 var httpOnlyErrorCodes = map[ErrorCode]bool{CodeForbiddenOrigin: true}
+
+// removedErrorCodes は仕様の表に当時の行が残るが、実装から外したコード（直列化グループの廃止。
+// docs/features/core-redesign.md）。「CLI が出しうる」検査の対象外。
+var removedErrorCodes = map[ErrorCode]bool{"serialized": true}

@@ -70,35 +70,3 @@ func matchSegments(pat, file []string) bool {
 	}
 	return len(file) == 0
 }
-
-// excludedByAny は file がいずれかのパターンに当たるか。
-func excludedByAny(patterns []string, file string) bool {
-	file = strings.TrimPrefix(file, "./")
-	for _, p := range patterns {
-		if matchExcludePattern(p, file) {
-			return true
-		}
-	}
-	return false
-}
-
-// excludeSharedFiles は予測の出力の pairs[].shared_files から、patterns に当たるファイルを除いた写しを返す
-// （元の出力は変えない）。patterns が空なら out をそのまま返す。status・dependency は変えない。
-func excludeSharedFiles(out *ConflictPredictionOutput, patterns []string) *ConflictPredictionOutput {
-	if out == nil || len(patterns) == 0 {
-		return out
-	}
-	cp := *out
-	cp.Pairs = make([]PredictedPair, len(out.Pairs))
-	for i, p := range out.Pairs {
-		np := p
-		np.SharedFiles = nil
-		for _, f := range p.SharedFiles {
-			if !excludedByAny(patterns, f.Path) {
-				np.SharedFiles = append(np.SharedFiles, f)
-			}
-		}
-		cp.Pairs[i] = np
-	}
-	return &cp
-}

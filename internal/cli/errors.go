@@ -70,9 +70,6 @@ const (
 	// CodeSlotUnavailable は #102 で追加（指定した課題のリポジトリに空いている
 	// スロットが無い。同上「エラーコードの追加」）。core.ErrSlotUnavailable を写す。
 	CodeSlotUnavailable ErrorCode = "slot_unavailable"
-	// CodeSerialized は #106 で追加（指定した課題が、終了していない委譲の run を持つ課題と同じ
-	// 直列化グループに入る。同上「エラーコードの追加」）。core.ErrSerialized を写す。
-	CodeSerialized ErrorCode = "serialized"
 	// CodeListenFailed と CodeForbiddenOrigin は M4 S1 で追加（docs/features/m4-ui-server.md
 	// §IF / API「エラーコードの追加」）。listen_failed は `serve` が 127.0.0.1 のポートを
 	// bind できない。forbidden_origin は server が HTTP の応答で使うだけで、CLI は出さない
@@ -116,7 +113,6 @@ var errorCodeTable = []codeExit{
 	{CodeRunInProgress, 1},
 	{CodeBudgetExceeded, 1},
 	{CodeSlotUnavailable, 1},
-	{CodeSerialized, 1},
 	{CodeListenFailed, 2},
 	{CodeForbiddenOrigin, 1},
 	{CodeDependencyCycle, 1},
@@ -207,8 +203,6 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeBudgetExceeded, err.Error())
 	case errors.Is(err, core.ErrSlotUnavailable):
 		return NewError(CodeSlotUnavailable, err.Error())
-	case errors.Is(err, core.ErrSerialized):
-		return NewError(CodeSerialized, err.Error())
 	case errors.Is(err, core.ErrDependencyCycle):
 		return NewError(CodeDependencyCycle, err.Error())
 	case errors.Is(err, core.ErrSelfDependency):

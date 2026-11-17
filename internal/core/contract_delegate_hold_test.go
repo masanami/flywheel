@@ -685,35 +685,6 @@ func TestContractRun_CountsTowardParallelDelegations(t *testing.T) {
 	}
 }
 
-// 前の周から続く終わっていない契約の run を持つ課題は、動いている委譲として衝突の予測へ渡す。
-func TestContractRun_IsARunningDelegationForPrediction(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	f.client.startOut = contractOut(ContractStateRunning, nil, nil)
-	if _, err := f.s.StartContractDelegation(context.Background(), ContractStartInput{
-		ChallengeID: f.cid, ConnectorID: "tool", AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client,
-		MaxBudgetUSD: 5, // 周の外で始めた（＝この周より前から続く）契約の run
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// リポジトリは承認済みの計画から引く（計画の検査は委譲の宣言で行うので、同じリポジトリを持つ委譲の宣言を渡す）。
-	running, err := f.s.loadRunningDelegations(context.Background(), DelegateInput{CycleID: f.cycle(t, 300), AgentDecl: f.agent, ConnDecl: newDelegateFixture(t).conn})
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, rs := range running {
-		for _, r := range rs {
-			if r.ID == f.cid {
-				found = true
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("running = %+v, want the challenge with the open contract run", running)
-	}
-}
-
 // 掃引の 1 件の保留が失敗しても、残りの掃引と状態の読みを続け、失敗は返り値で知らせる。
 func TestPollContractRuns_SweepFailureDoesNotStopTheReads(t *testing.T) {
 	t.Parallel()

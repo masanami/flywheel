@@ -134,22 +134,6 @@ type ReleasePhase struct {
 	Tidied     []ReleaseTidied     `json:"tidied"`
 }
 
-// SerialJudgment は serial_groups[].judgments の要素（判断点が判断した組の記録）。
-type SerialJudgment struct {
-	Challenges []string `json:"challenges"`
-	Outcome    string   `json:"outcome"`
-	Reason     string   `json:"reason"`
-}
-
-// SerialGroup は委譲の段の serial_groups の要素。
-type SerialGroup struct {
-	Challenges        []string         `json:"challenges"`
-	Judgments         []SerialJudgment `json:"judgments"`
-	PredictionHeadSHA *string          `json:"prediction_head_sha"`
-	Reasons           []string         `json:"reasons"`
-	Repo              string           `json:"repo"`
-}
-
 // JudgmentPhase は分類・計画・検証の段の形（cycle の phases の要素と `--auto` の phase が共有する）。
 type JudgmentPhase struct {
 	Items      []PhaseItem       `json:"items"`
@@ -158,13 +142,12 @@ type JudgmentPhase struct {
 	Skipped    bool              `json:"skipped"`
 }
 
-// DelegationPhase は委譲の段（run）の形。JudgmentPhase に serial_groups を足した形。
+// DelegationPhase は委譲の段（run）の形。
 type DelegationPhase struct {
-	Items        []PhaseItem       `json:"items"`
-	NotStarted   []PhaseNotStarted `json:"not_started"`
-	Phase        string            `json:"phase"`
-	SerialGroups []SerialGroup     `json:"serial_groups"`
-	Skipped      bool              `json:"skipped"`
+	Items      []PhaseItem       `json:"items"`
+	NotStarted []PhaseNotStarted `json:"not_started"`
+	Phase      string            `json:"phase"`
+	Skipped    bool              `json:"skipped"`
 }
 
 // ImproveItem は improve の段と `improve` の items の要素。
@@ -240,28 +223,6 @@ func phaseNotStarted(items []core.NotStarted) []PhaseNotStarted {
 	return out
 }
 
-func serialGroups(groups []core.SerialGroup) []SerialGroup {
-	out := make([]SerialGroup, 0, len(groups))
-	for _, g := range groups {
-		reasons := make([]string, 0, len(g.Reasons))
-		for _, r := range g.Reasons {
-			reasons = append(reasons, string(r))
-		}
-		judgments := make([]SerialJudgment, 0, len(g.Judgments))
-		for _, j := range g.Judgments {
-			judgments = append(judgments, SerialJudgment{Challenges: []string{j.Challenges[0], j.Challenges[1]}, Outcome: string(j.Outcome), Reason: j.Reason})
-		}
-		out = append(out, SerialGroup{
-			Challenges:        append([]string{}, g.Challenges...),
-			Judgments:         judgments,
-			PredictionHeadSHA: g.PredictionHeadSHA,
-			Reasons:           reasons,
-			Repo:              g.Repo,
-		})
-	}
-	return out
-}
-
 // FromJudgmentPhase は判断の段の結果を変換する。phase は `classify | plan | verify` の値。
 func FromJudgmentPhase(phase string, skipped bool, res *core.JudgmentAutoResult) JudgmentPhase {
 	return JudgmentPhase{Items: phaseItems(res.Items), NotStarted: phaseNotStarted(res.NotStarted), Phase: phase, Skipped: skipped}
@@ -270,11 +231,10 @@ func FromJudgmentPhase(phase string, skipped bool, res *core.JudgmentAutoResult)
 // FromDelegationPhase は委譲の段（run）の結果を変換する。
 func FromDelegationPhase(skipped bool, res *core.JudgmentAutoResult) DelegationPhase {
 	return DelegationPhase{
-		Items:        phaseItems(res.Items),
-		NotStarted:   phaseNotStarted(res.NotStarted),
-		Phase:        "run",
-		SerialGroups: serialGroups(res.SerialGroups),
-		Skipped:      skipped,
+		Items:      phaseItems(res.Items),
+		NotStarted: phaseNotStarted(res.NotStarted),
+		Phase:      "run",
+		Skipped:    skipped,
 	}
 }
 
@@ -350,7 +310,7 @@ func FromCyclePhase(p core.CyclePhaseResult) any {
 		}
 		return out
 	}
-	res := &core.JudgmentAutoResult{Items: p.Items, NotStarted: p.NotStarted, SerialGroups: p.SerialGroups}
+	res := &core.JudgmentAutoResult{Items: p.Items, NotStarted: p.NotStarted}
 	if p.Phase == core.CyclePhaseRun {
 		return FromDelegationPhase(p.Skipped, res)
 	}
