@@ -282,25 +282,13 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *tes
 	}
 }
 
-// 衝突の予測で 2 課題が別のグループになる場合でも、動いている run があれば 2 つ目の run は
+// 同じリポジトリの 2 課題でも、動いている run があれば 2 つ目の run は
 // サイクルの排他で locked になる（スロットの割り当てには進まない）。
-func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIsLocked(t *testing.T) {
+func TestRun_SingleSlot_TwoProcessesRaceForIt_OtherIsLocked(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
-	script := filepath.Join(t.TempDir(), "predict.sh")
-	// 共有ファイル・依存が無い予測（2 課題は別のグループになる）。
-	body := "#!/bin/sh\n" +
-		"printf '%s' '{\"schema\":\"harness.conflict-prediction/v1\",\"complete\":true,\"error\":null,\"head_sha\":\"cafe01\",\"cost_usd\":0.1,\"unknown_cost_count\":0," +
-		"\"issues\":[{\"issue\":7,\"status\":\"predicted\"},{\"issue\":9,\"status\":\"predicted\"}]," +
-		"\"pairs\":[{\"issues\":[7,9],\"status\":\"predicted\",\"shared_files\":[],\"dependency\":null}]}'\n"
-	if err := writeExecutable(script, []byte(body)); err != nil {
-		t.Fatal(err)
-	}
-	conn := strings.Replace(runConnectorsFixture, `{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "operations"`,
-		`{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "conflict_prediction": {"command": ["`+script+`"], "schema": "harness.conflict-prediction/v1"}, "operations"`, 1)
+	conn := runConnectorsFixture
 	conn = strings.Replace(conn, `"remote": "o/flywheel"`, `"remote": "o/r"`, 1)
-	// 予測の口の作業ディレクトリは、clone では idle のスロットだけ（1 本が塞がると予測できず fail-closed で
-	// 同じグループになる）。worktree は元のクローンなので、スロットが 1 本でも塞がっていて予測できる。
 	conn = strings.Replace(conn, `"slots": {"provider": "clone", "paths": ["slot-f"]}`, `"slots": {"provider": "worktree", "base": "slot-f", "count": 1}`, 1)
 	slotGit(t, filepath.Join(ws, "slot-f"), "remote", "set-url", "origin", "https://github.com/o/r.git")
 	writeConnectorsJSONForTest(t, ws, conn)
@@ -312,7 +300,7 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIs
 	withFakeGHRoutesOnPATH(t, append(j2GHRoutes(t), fakeGHRoute{match: "repos/o/r/issues/9/comments?per_page=100&page=1", stdout: "[]"}))
 	started := filepath.Join(t.TempDir(), "started")
 	route := delegateRoute("completed")
-	route.SleepFirstSeconds = 6 // 後続が予測の口と gh を通る間も、先行がスロットを持ち続ける余裕
+	route.SleepFirstSeconds = 6 // 後続が gh を通る間も、先行がスロットを持ち続ける余裕
 	route.StartedFile = started
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{route, j3Route("b")}, "")
 

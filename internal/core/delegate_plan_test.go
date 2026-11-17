@@ -22,7 +22,6 @@ const planConnectorsJSON = `{
   "human_question_kinds": [],
   "connectors": [
     {"id": "pc", "form": "plugin", "permission_mode": "acceptEdits",
-     "conflict_prediction": {"command": ["predict"], "schema": "harness.conflict-prediction/v1"},
      "operations": [{"id": "impl", "invocation": "/h:impl {challenge_id}", "interactive": false, "child_may_decide": true, "artifacts": "pr"}]},
     {"id": "plain", "form": "plugin", "permission_mode": "acceptEdits",
      "operations": [{"id": "impl", "invocation": "/h:impl {challenge_id}", "interactive": false, "child_may_decide": true, "artifacts": "pr"}]}
@@ -33,7 +32,7 @@ const planConnectorsJSON = `{
     {"name": "solo", "remote": "o/solo", "default_branch": "main", "connector": "pc", "slots": {"provider": "clone", "paths": ["s1"]}},
     {"name": "plain", "remote": "o/plain", "default_branch": "main", "connector": "plain", "slots": {"provider": "clone", "paths": ["p1", "p2"]}},
     {"name": "wt", "remote": "o/wt", "default_branch": "main", "connector": "pc", "slots": {"provider": "worktree", "base": "wt-base", "count": 2}},
-    {"name": "excl", "remote": "o/excl", "default_branch": "main", "connector": "pc", "conflict_exclude_paths": ["docs/**", "*.md"], "slots": {"provider": "clone", "paths": ["e1", "e2", "e3"]}}
+    {"name": "excl", "remote": "o/excl", "default_branch": "main", "connector": "pc", "slots": {"provider": "clone", "paths": ["e1", "e2", "e3"]}}
   ]
 }`
 
@@ -518,15 +517,10 @@ func (f *planFixture) countRuns(t *testing.T, where string) int {
 }
 
 // 同じリポジトリの着手中の課題 2 件は、記録した前提が無く、枠に空きがあれば、1 回の委譲の段で両方起動する。
-// 衝突の予測の宣言と serial_judgment が宣言にあっても、予測も J9 も起動せず、記録も書かない。
+// 予測も J9 も起動せず、記録も書かない。
 func TestPlan_SameRepoCandidates_BothLaunchInOnePass_WithoutPredictionOrJ9(t *testing.T) {
 	t.Parallel()
 	f := newPlanFixture(t)
-	for i := range f.conn.Repos {
-		if f.conn.Repos[i].Name == "multi" {
-			f.conn.Repos[i].SerialJudgment = true
-		}
-	}
 	a := f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
 	res := f.mustRunPlan(t)

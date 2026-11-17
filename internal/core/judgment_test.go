@@ -853,3 +853,56 @@ func TestReapInterruptedRuns_J8CreatesNoOccurrence(t *testing.T) {
 		t.Errorf("occurrence rows = %d, want 0", n)
 	}
 }
+
+// J9 は過去の run を読むための値としてだけ残る。判断点を呼ぶ口は受け付けず、何も起動・記録しない。
+func TestRunJudgment_RejectsJ9(t *testing.T) {
+	t.Parallel()
+	s := newStoreForTest(t)
+	inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
+	if _, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentPoint("J9"), MaxBudgetUSD: 5, Stdin: []byte("x"), Invoker: inv}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("J9: err = %v, want ErrValidation", err)
+	}
+	runs, err := s.ListRunsWithoutReap(context.Background(), RunListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Errorf("runs = %d, want 0", len(runs))
+	}
+}
+
+// #736 の完了条件のうち、core の口が新しい predict の run と J9 の呼び出しを受け付けないこと。
+// サブテスト名の先頭が基準の番号。
+func TestRemovedPredictAndJ9_EntrancesRejectNewOnes(t *testing.T) {
+	t.Parallel()
+	t.Run("AC-37 run を記録する口は kind=predict の新しい run を受け付けない", func(t *testing.T) {
+		t.Parallel()
+		s := newStoreForTest(t)
+		if _, err := insertRunForTest(t, s, 0, validPredictRunInput()); !errors.Is(err, ErrValidation) {
+			t.Fatalf("insertRun(predict): error = %v, want ErrValidation", err)
+		}
+		runs, err := s.ListRunsWithoutReap(context.Background(), RunListOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(runs) != 0 {
+			t.Errorf("runs = %d, want 0 (a rejected predict run must not be recorded)", len(runs))
+		}
+	})
+	t.Run("AC-39 判断点を呼ぶ口は J9 の呼び出しを受け付けない", func(t *testing.T) {
+		t.Parallel()
+		s := newStoreForTest(t)
+		inv := &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded}}
+		_, err := s.RunJudgment(context.Background(), RunJudgmentInput{Judgment: JudgmentPoint("J9"), MaxBudgetUSD: 5, Stdin: []byte("x"), Invoker: inv})
+		if !errors.Is(err, ErrValidation) {
+			t.Fatalf("RunJudgment(J9): error = %v, want ErrValidation", err)
+		}
+		runs, err := s.ListRunsWithoutReap(context.Background(), RunListOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(runs) != 0 {
+			t.Errorf("runs = %d, want 0 (a rejected J9 call must not start a run)", len(runs))
+		}
+	})
+}

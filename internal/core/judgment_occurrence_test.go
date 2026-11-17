@@ -319,15 +319,11 @@ func TestReapOccurrence_PredictRunMakesNone(t *testing.T) {
 	base := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return base }
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		r, err := insertRun(context.Background(), tx, 0, insertRunInput{
-			Kind: runKindPredict, PID: deadPID(t), Host: host, HeartbeatAt: base, StartedAt: base,
-			MaxBudgetUSD: 1, BudgetBucket: budgetBucketPredict, Repo: "o/r",
+		var err error
+		rid, err = insertLegacyPredictRunTx(context.Background(), tx, insertRunInput{
+			PID: deadPID(t), Host: host, HeartbeatAt: base, StartedAt: base, MaxBudgetUSD: 1, Repo: "o/r",
 		})
-		if err != nil {
-			return err
-		}
-		rid = testRunInt(t, r.ID)
-		return nil
+		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
