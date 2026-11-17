@@ -48,6 +48,8 @@
 
 ### 衝突（core）
 
+> **外した（2026-11-17 の設計の見直し・区切り 1）**: 衝突の記録（`challenge_conflict`）・辺の種類 `conflict`・登録の経路 `prediction`・待っている理由の「衝突のため後回し」（API の `waiting.conflicts[]`）・衝突の線と一覧の「衝突のため後回し」等の表示は外した（表はマイグレーションで消え、過去の記録は残らない）。辺は前提（`prerequisite`）だけである。以下は当時の決定の記録で、現行の振る舞いではない（§関係グラフの API・§画面（web）・§受入基準の衝突の記述も同じ）。参照: [core の見直し](core-redesign.md)。
+
 衝突の予測の結果（`harness predict-conflicts` の出力。[M3 の仕様](m3-invoker-delegation.md) §実行スロット）を、core が保存し、関係グラフの API が衝突の辺（`kind=conflict`）として返す【決定 2026-11-05 オーナー（flywheel#474）】。
 
 - **別の表に置く**: 衝突は `challenge_conflict`（マイグレーション 0018）に記録し、`challenge_dependency` と、それを使う依存の評価・委譲の対象の選び方・起動の判定は変えない。依存の判定は `challenge_conflict` を読まない。衝突は着手の門にしない（前提の依存が満たされていれば、衝突の行があっても依存の判定は通る）【決定 2026-11-05 オーナー Q3=2】
