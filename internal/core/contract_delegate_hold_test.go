@@ -798,6 +798,7 @@ func (f *contractFixture) insertRow(t *testing.T, q string, args ...any) int64 {
 }
 
 // オーナーの回答待ち（契約の run が waiting で課題が保留）は同時委譲数に数えない（AC-50）。
+// この AC-<n> は core の見直しの区切り S1（docs/features/core-redesign.md。番号は masanami/flywheel#732 の受入基準の並び順）の番号。
 // 着手中の run は従来どおり数え（AC-52）、回答を受けて着手中へ戻れば数える（AC-53）。
 // 課題ごとの「実行中か」の判定は保留の間も真のまま（AC-55: 同じ課題へ新しい委譲を起動しない）。
 // このテストは数えだけを検証する。委譲の段を通した検証（AC-50〜AC-55。回答による再開〔resume〕が上限で止まらないことを含む）は

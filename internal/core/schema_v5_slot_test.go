@@ -394,7 +394,7 @@ func TestStore_RawInsertRejectsSecondActiveRunForSameSlot(t *testing.T) {
 	}
 }
 
-func TestInsertRun_DeciderAndRepoValidation(t *testing.T) {
+func TestInsertRun_DeciderValidation(t *testing.T) {
 	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "c")
@@ -402,12 +402,11 @@ func TestInsertRun_DeciderAndRepoValidation(t *testing.T) {
 
 	in := validInsertRunInput()
 	in.Decider, in.DeciderRow = deciderChild, row
-	in.Repo = "o/r"
 	r, err := insertRunForTest(t, s, cid, in)
 	if err != nil {
 		t.Fatalf("insertRun() error = %v", err)
 	}
-	if r.Decider != deciderChild || r.DeciderRow == nil || *r.DeciderRow != 3 || r.Repo != "o/r" {
+	if r.Decider != deciderChild || r.DeciderRow == nil || *r.DeciderRow != 3 {
 		t.Fatalf("run = %+v", r)
 	}
 	for name, mut := range map[string]func(*insertRunInput){
@@ -431,7 +430,7 @@ func validPredictRunInput() insertRunInput {
 		Kind: runKindPredict, PID: 7, Host: "h",
 		HeartbeatAt:  time.Date(2026, 10, 1, 0, 5, 0, 0, time.UTC),
 		StartedAt:    time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
-		MaxBudgetUSD: 100_000, BudgetBucket: budgetBucketPredict, Repo: "o/r",
+		MaxBudgetUSD: 100_000, BudgetBucket: budgetBucketPredict,
 	}
 }
 
@@ -440,8 +439,8 @@ func validPredictRunInput() insertRunInput {
 func insertLegacyPredictRunTx(ctx context.Context, tx *sql.Tx, in insertRunInput) (int64, error) {
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO run (kind, pid, host, heartbeat_at, started_at, rate_limited, max_budget_usd, budget_bucket, repo)
-		 VALUES ('predict', ?, ?, ?, ?, 0, ?, 'predict', ?)`,
-		in.PID, in.Host, formatTimestamp(in.HeartbeatAt), formatTimestamp(in.StartedAt), in.MaxBudgetUSD, in.Repo)
+		 VALUES ('predict', ?, ?, ?, ?, 0, ?, 'predict', 'o/r')`,
+		in.PID, in.Host, formatTimestamp(in.HeartbeatAt), formatTimestamp(in.StartedAt), in.MaxBudgetUSD)
 	if err != nil {
 		return 0, err
 	}
@@ -488,14 +487,15 @@ func TestInsertRun_RejectsPredictJ9AndPredictBucket(t *testing.T) {
 	}
 }
 
-// 過去の predict の行は読め、終わっていない行を終わらせる更新（サイクルの後片付けの「中断」）は受け付ける。
+// 過去の predict の行は読め、終わっていない行を終わらせる更新は、サイクルの後片付けの「中断」（interrupted）だけを受け付ける
+// （それ以外の結果・cost_source: delta は受け付けない。出どころ: core の見直しの区切り S1・全体のレビュー）。
 func TestLegacyPredictRun_CanBeReadAndFinished(t *testing.T) {
 	t.Parallel()
 	s := newStoreForTest(t)
 	end := func(res runResult, src costSource) error {
 		id := insertLegacyPredictRunForTest(t, s)
 		r, err := loadRunForTest(t, s, id)
-		if err != nil || r == nil || r.Kind != runKindPredict || r.BudgetBucket != budgetBucketPredict || r.Repo != "o/r" {
+		if err != nil || r == nil || r.Kind != runKindPredict || r.BudgetBucket != budgetBucketPredict {
 			t.Fatalf("legacy predict run = %+v, err = %v", r, err)
 		}
 		_, err = updateRunEndForTest(t, s, id, updateRunEndInput{
@@ -503,21 +503,19 @@ func TestLegacyPredictRun_CanBeReadAndFinished(t *testing.T) {
 		})
 		return err
 	}
-	for _, res := range []runResult{runResultSucceeded, runResultLaunchFailed, runResultTimedOut,
-		runResultMalformed, runResultErrored, runResultInterrupted} {
-		if err := end(res, costSourceReported); err != nil {
-			t.Fatalf("predict result %s: error = %v", res, err)
-		}
+	if err := end(runResultInterrupted, costSourceReported); err != nil {
+		t.Fatalf("predict result interrupted: error = %v", err)
 	}
-	if err := end(runResultSucceeded, costSourceUnknown); err != nil {
+	if err := end(runResultInterrupted, costSourceUnknown); err != nil {
 		t.Fatalf("predict unknown cost source: %v", err)
 	}
-	for _, res := range []runResult{runResultBudgetExhausted, runResultInvalidOutput} {
+	for _, res := range []runResult{runResultSucceeded, runResultLaunchFailed, runResultTimedOut, runResultMalformed,
+		runResultErrored, runResultBudgetExhausted, runResultInvalidOutput} {
 		if err := end(res, costSourceReported); !errors.Is(err, ErrValidation) {
 			t.Fatalf("predict result %s: error = %v, want ErrValidation", res, err)
 		}
 	}
-	if err := end(runResultSucceeded, costSourceDelta); !errors.Is(err, ErrValidation) {
+	if err := end(runResultInterrupted, costSourceDelta); !errors.Is(err, ErrValidation) {
 		t.Fatalf("predict delta cost source: error = %v, want ErrValidation", err)
 	}
 }

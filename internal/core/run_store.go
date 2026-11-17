@@ -184,17 +184,6 @@ func (b budgetBucket) valid() bool {
 	return false
 }
 
-// predictRunResultValid は（過去に作られた）predict の run を終わらせる更新の result として許される値かを返す
-// （succeeded | launch_failed | timed_out | malformed | errored | interrupted）。
-func predictRunResultValid(r runResult) bool {
-	switch r {
-	case runResultSucceeded, runResultLaunchFailed, runResultTimedOut, runResultMalformed,
-		runResultErrored, runResultInterrupted:
-		return true
-	}
-	return false
-}
-
 // decider は run.decider（その run の意思決定の主体）。
 type decider string
 
@@ -262,8 +251,8 @@ type runRow struct {
 	Output               string
 	Error                string
 	// 0005 で足した列。SlotID は表示形（"SL-<n>"）。Decider は "" が NULL、
-	// DeciderRow・Repo は nil / "" が NULL。predict の run は ChallengeID・
-	// SessionID が "" 、ChallengeVersion が 0（NULL）になる。
+	// DeciderRow・Repo は nil / "" が NULL。Repo は過去の predict の run だけが持つ（新しく作る run は NULL）。
+	// predict の run は ChallengeID・SessionID が "" 、ChallengeVersion が 0（NULL）になる。
 	SlotID     *string
 	Decider    decider
 	DeciderRow *int64
@@ -409,11 +398,10 @@ type insertRunInput struct {
 	MaxBudgetUSD     int64
 	BudgetBucket     budgetBucket
 	// 0005 で足した入力。SlotID は slot の内部整数 ID。Decider と DeciderRow は
-	// 両方指定するか両方省略する（DeciderRow は 1〜5）。Repo は predict で必須。
+	// 両方指定するか両方省略する（DeciderRow は 1〜5）。
 	SlotID     *int64
 	Decider    decider
 	DeciderRow *int64
-	Repo       string
 }
 
 func (in insertRunInput) valid() bool {
@@ -496,13 +484,13 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 			session_id, session_id_mismatch, resumed_from_run_id, pid, host, heartbeat_at, started_at,
 			ended_at, result, rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source,
 			reported_total_cost_usd, output, error, slot_id, decider, decider_row, repo, flywheel_version)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, NULL, ?)`,
 		int64PtrColumn(in.CycleID), string(in.Kind), nullableTextColumn(string(in.Judgment)), challengeIDCol,
 		challengeVersionCol, int64PtrColumn(in.PlanVersion), sessionIDCol, int64PtrColumn(in.ResumedFromRunID),
 		in.PID, in.Host, formatTimestamp(in.HeartbeatAt), formatTimestamp(in.StartedAt),
 		in.MaxBudgetUSD, string(in.BudgetBucket),
 		int64PtrColumn(in.SlotID), nullableTextColumn(string(in.Decider)), int64PtrColumn(in.DeciderRow),
-		nullableTextColumn(in.Repo), nullableTextColumn(flywheelVersion()),
+		nullableTextColumn(flywheelVersion()),
 	)
 	if store.IsUniqueViolation(err) {
 		// 部分一意索引のどちらに当たったかは、スロットを指定していて、その
@@ -593,9 +581,9 @@ func updateRunEnd(ctx context.Context, tx *sql.Tx, id int64, in updateRunEndInpu
 		return nil, err
 	}
 	if runKind(kind) == runKindPredict {
-		// predict の result は 6 値、cost_source は reported か unknown
-		// （delta は使わない）。
-		if !predictRunResultValid(in.Result) || in.CostSource == costSourceDelta {
+		// 過去の predict の行に許す更新は、終わっていない行をサイクルの後片付けが中断にするものだけ。
+		// cost_source は reported か unknown（delta は使わない）。
+		if in.Result != runResultInterrupted || in.CostSource == costSourceDelta {
 			return nil, ErrValidation
 		}
 	}

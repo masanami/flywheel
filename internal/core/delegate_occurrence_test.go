@@ -351,7 +351,7 @@ func TestOccurrence_InsertFailureRollsBackHolds(t *testing.T) {
 	})
 }
 
-// 課題を持たない run に発生を作らないのは衝突の予測と J8 だけ。それ以外の判断の run が課題を
+// 課題を持たない run に発生を作らないのは J8（と過去の記録に残る predict）だけ。それ以外の判断の run が課題を
 // 持たなければ（不変条件の違反）エラーにする。
 func TestInsertRunOccurrence_OnlyJ8AndPredictMayLackChallenge(t *testing.T) {
 	t.Parallel()

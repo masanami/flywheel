@@ -434,6 +434,7 @@ func TestM45ErrorCodeTable_UpstreamUnavailableIsExit1OnTheApprovePath(t *testing
 }
 
 // AC-10: CLI が定義するエラーコードの一覧に serialized が無い。
+// AC-10 は core の見直しの区切り S1（docs/features/core-redesign.md。番号は masanami/flywheel#732 の受入基準の並び順）の番号。
 func TestErrorCodeTable_HasNoSerialized(t *testing.T) {
 	t.Parallel()
 	for _, e := range errorCodeTable {

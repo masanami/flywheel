@@ -10,8 +10,8 @@ import (
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
-// このファイルは #736（親 #732 のスライス S1）の完了条件を、基準ごとに CLI の口で確かめる。
-// サブテスト名の先頭が基準の番号（AC-<n>）。
+// このファイルは、core の見直しの区切り S1（docs/features/core-redesign.md）の受入基準のうち宣言の古い項目を止める分を、基準ごとに CLI の口で確かめる。
+// サブテスト名の先頭が基準の番号（AC-<n>）。番号は masanami/flywheel#732 の受入基準の並び順で、ほかの仕様の同じ番号とは無関係。
 
 // removedKeyCase は、無くした宣言の項目 1 つを、その項目が元あった位置に置いた宣言。
 type removedKeyCase struct {

@@ -859,7 +859,8 @@ func TestInstructions_J8CriteriaChecksCurrentState(t *testing.T) {
 	}
 }
 
-// #736 の完了条件のうち、J9 の指示文が無いこと。サブテスト名の先頭が基準の番号。
+// core の見直しの区切り S1（docs/features/core-redesign.md）の受入基準のうち、J9 の指示文が無いこと。
+// サブテスト名の先頭が基準の番号（masanami/flywheel#732 の受入基準の並び順。ほかの仕様の同じ番号とは無関係）。
 func TestPrompts_J9IsGone(t *testing.T) {
 	t.Run("AC-56 internal/invoker/prompts/j9.md が無い", func(t *testing.T) {
 		if _, err := os.Stat(filepath.Join("prompts", "j9.md")); !errors.Is(err, fs.ErrNotExist) {

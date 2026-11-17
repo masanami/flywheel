@@ -9,7 +9,7 @@ it("偽の関係: 先行が完了していない依存の後続は、分類済�
   const all = { ...new MockStore().workspaces, ...seedLarge() };
   for (const [name, w] of Object.entries(all)) {
     const status = new Map(w.items.map((m) => [m.c.id, m.c.status]));
-    // 前提の依存だけが順序を決める（衝突は同時に走らせないだけで、着手の門ではない）
+    // 前提だけが順序を決める
     for (const d of w.graph.deps.filter((x) => x.kind === "prerequisite")) {
       const from = status.get(d.from);
       const to = status.get(d.to);

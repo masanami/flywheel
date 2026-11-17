@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// このファイルは、オーナーの回答待ち・レビュー待ちの契約の run を同時委譲数に数えない扱い（Issue #735・AC-50〜AC-55）を、
+// このファイルは、オーナーの回答待ち・レビュー待ちの契約の run を同時委譲数に数えない扱い（AC-50〜AC-55。core の見直しの区切り S1〔docs/features/core-redesign.md。番号は masanami/flywheel#732 の受入基準の並び順〕）を、
 // 委譲の段（RunDelegation）を実際に通して検証する。実ストア・偽の ContractClient。
 
 // ownerWaitConnectorsJSON は、別のリポジトリ（other-repo）を足した宣言。2 つの課題を別々のリポジトリへ向け、

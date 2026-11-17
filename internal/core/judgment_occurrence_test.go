@@ -321,7 +321,7 @@ func TestReapOccurrence_PredictRunMakesNone(t *testing.T) {
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
 		var err error
 		rid, err = insertLegacyPredictRunTx(context.Background(), tx, insertRunInput{
-			PID: deadPID(t), Host: host, HeartbeatAt: base, StartedAt: base, MaxBudgetUSD: 1, Repo: "o/r",
+			PID: deadPID(t), Host: host, HeartbeatAt: base, StartedAt: base, MaxBudgetUSD: 1,
 		})
 		return err
 	}); err != nil {

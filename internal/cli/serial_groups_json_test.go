@@ -9,6 +9,7 @@ import (
 )
 
 // 委譲の段（run）の phase は、判断の段と同じ形（items・not_started・phase・skipped）で、serial_groups のキーを持たない。
+// このファイルの AC-<n> は、core の見直しの区切り S1（docs/features/core-redesign.md。番号は masanami/flywheel#732 の受入基準の並び順）の受入基準の番号。
 
 // phaseDoc は cycle の段を JSON へマーシャルして読み戻す（出力の形そのものを検査する）。
 func phaseDoc(t *testing.T, p core.CyclePhaseResult) map[string]any {

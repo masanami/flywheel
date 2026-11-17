@@ -92,7 +92,7 @@ const (
 	JudgmentJ8 JudgmentPoint = judgmentJ8
 )
 
-// RunKind は run.kind（判断の呼び出し・委譲の起動・契約のコマンドの実行）の公開する閉集合（衝突の予測の predict は含まない）。
+// RunKind は run.kind（判断の呼び出し・委譲の起動・契約のコマンドの実行）の公開する閉集合（過去の記録に残る predict は含まない）。
 type RunKind = runKind
 
 // RunKind の公開する値。

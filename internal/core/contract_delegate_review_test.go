@@ -298,7 +298,7 @@ func TestDelegateViaContract_UnfillableStartIsNotStarted(t *testing.T) {
 // 同時委譲数（max_parallel_runs）は契約の run も数える。上限に達していれば start を呼ばない。
 func TestRunDelegation_CLIRespectsMaxParallelRuns(t *testing.T) {
 	t.Parallel()
-	// 別のリポジトリ（別の直列化グループ）の課題は、同時委譲数だけで起動を止められる。
+	// 別のリポジトリの課題は、同時委譲数だけで起動を止められる。
 	f := newContractFixtureWith(t, strings.Replace(contractConnectorsJSON, `{"name": "main-repo"`,
 		`{"name": "other-repo", "remote": "o/s", "default_branch": "main", "connector": "tool", "slots": {"provider": "clone", "paths": ["slot-s"]}},
     {"name": "main-repo"`, 1))

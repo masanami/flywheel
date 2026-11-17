@@ -106,7 +106,7 @@ func bindRunForTest(ctx context.Context) SlotBinder {
 		now := time.Now()
 		r, err := insertRun(ctx, tx, 0, insertRunInput{
 			Kind: runKindJudgment, Judgment: judgmentJ8, SessionID: "s", PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now,
-			MaxBudgetUSD: 1, BudgetBucket: budgetBucketJudgment, SlotID: &slotID, Repo: "r",
+			MaxBudgetUSD: 1, BudgetBucket: budgetBucketJudgment, SlotID: &slotID,
 		})
 		if err != nil {
 			return 0, err
