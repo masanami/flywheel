@@ -495,6 +495,12 @@ func (r *delegateRun) admitContract(ctx context.Context) (*admission, error) {
 	sch.pre++
 	sch.preRepo[""]++
 	sch.own++
+	// 許可した候補は待ちの列から外す。外さないと、start が終わるまで列に残り、後ろの候補の earlierFitCountLocked が
+	// 許可済みのこの候補を「今すぐ許可できる前の候補」として数え、pre と二重に数えて枠を塞ぐ。
+	// dequeueLocked は列に無ければ何もしないので、executePlan の goroutine の defer の dequeue と重なっても安全。
+	if r.w != nil {
+		sch.dequeueLocked(r.w)
+	}
 	return &admission{sch: sch, repo: ""}, nil
 }
 

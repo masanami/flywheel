@@ -13,8 +13,8 @@ package core
 //	⑤ トランザクションの外で委譲の子を待つ（heartbeat を更新する）
 //	⑥ 結果と費用を記録し、スロットを解放する
 //
-// 照合（delegate_reconcile.go）はここに含める。結末の課題の状態への写像（#104）、衝突の
-// 予測と直列化グループ（#106）はここに含めない。固定の節の組み立て（埋め込みの雛形）
+// 照合（delegate_reconcile.go）はここに含める。結末の課題の状態への写像（#104）と、候補ごとの
+// 並行の実行の計画（delegate_plan.go）はここに含めない。固定の節の組み立て（埋め込みの雛形）
 // と claude の起動は internal/invoker が持ち、core は DelegationInvoker の IF だけを
 // 知る（core は invoker を import しない）。
 
@@ -29,7 +29,7 @@ import (
 
 // DelegatedRunEnvVar は、委譲の子の環境に invoker だけが渡す目印の環境変数名。値は委譲する
 // run の ID。CLI は、この変数が（空文字でも）設定されている環境からの `help` を除く全コマンドを
-// 拒否する。判断 J1〜J5 と衝突予測の起動には渡さない。
+// 拒否する。判断 J1〜J5 の起動には渡さない。
 const DelegatedRunEnvVar = "FLYWHEEL_DELEGATED_RUN"
 
 // DelegateLaunchInput は Store.RunDelegation が DelegationInvoker へ渡す、委譲の

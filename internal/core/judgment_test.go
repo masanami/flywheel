@@ -871,8 +871,8 @@ func TestRunJudgment_RejectsJ9(t *testing.T) {
 	}
 }
 
-// #736 の完了条件のうち、core の口が新しい predict の run と J9 の呼び出しを受け付けないこと。
-// サブテスト名の先頭が基準の番号。
+// core の見直しの区切り S1（docs/features/core-redesign.md）の受入基準のうち、core の口が新しい predict の run と J9 の呼び出しを受け付けないこと。
+// サブテスト名の先頭が基準の番号（masanami/flywheel#732 の受入基準の並び順。ほかの仕様の同じ番号とは無関係）。
 func TestRemovedPredictAndJ9_EntrancesRejectNewOnes(t *testing.T) {
 	t.Parallel()
 	t.Run("AC-37 run を記録する口は kind=predict の新しい run を受け付けない", func(t *testing.T) {

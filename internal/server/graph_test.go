@@ -12,7 +12,11 @@ import (
 
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/core/coretest"
+	"github.com/masanami/flywheel/internal/view"
 )
+
+// このファイルのサブテスト名の AC-<n> は、core の見直しの区切り S1（docs/features/core-redesign.md。番号は masanami/flywheel#732 の
+// 受入基準の並び順）の受入基準の番号。同じファイルの別の仕様の番号とは無関係。
 
 // docs/features/ui-relation-graph.md §関係グラフの API を、実ストア・実際の HTTP の要求で検証する。
 
@@ -220,9 +224,17 @@ func TestGraphAPI_EdgeVocabularyHasNoConflict(t *testing.T) {
 	port := startServerAt(t, now, core.FleetWorkspace{Name: "w", Path: ws})
 	edges := mustJSON(t, port, "/api/v1/workspaces/w/graph")["edges"].([]any)
 
+	// API が返しうる値の閉集合（view が生成物へ書き出す一覧）。返った辺 1 本の値だけでなく、集合そのものを確かめる。
+	closed := map[string][]string{}
+	for _, cs := range view.ClosedSets() {
+		closed[cs.Name] = cs.Codes
+	}
 	t.Run("AC-44_edge_kinds_have_no_conflict", func(t *testing.T) {
 		if len(edges) == 0 {
 			t.Fatal("no edges returned")
+		}
+		if got := closed["GRAPH_EDGE_KIND_CODES"]; !reflect.DeepEqual(got, []string{"prerequisite"}) {
+			t.Errorf("辺の種類の閉集合 = %v, want [prerequisite]", got)
 		}
 		for _, e := range edges {
 			if k := e.(map[string]any)["kind"]; k == "conflict" {
@@ -233,6 +245,9 @@ func TestGraphAPI_EdgeVocabularyHasNoConflict(t *testing.T) {
 	t.Run("AC-45_registered_via_has_no_prediction", func(t *testing.T) {
 		if len(edges) == 0 {
 			t.Fatal("no edges returned")
+		}
+		if got := closed["GRAPH_REGISTERED_VIA_CODES"]; !reflect.DeepEqual(got, []string{"plan", "manual", "unknown"}) {
+			t.Errorf("登録の経路の閉集合 = %v, want [plan manual unknown]", got)
 		}
 		for _, e := range edges {
 			if v := e.(map[string]any)["registered_via"]; v == "prediction" {

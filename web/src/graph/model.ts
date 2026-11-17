@@ -401,7 +401,7 @@ export function seedReason(n: GraphNode): FocusReason | null {
   return null;
 }
 
-// 表示中の課題を、依存の線（前提・後続・衝突）と親子の線（親と子の両方向）でつながるまとまりに分ける。
+// 表示中の課題を、前提の線（前提・後続）と親子の線（親と子の両方向）でつながるまとまりに分ける。
 // 表示している終わった課題を通る線もつながりに数える（画面に描く線と同じ）。隠れた課題につながる関係は数えない。
 // 返すのは課題の ID → まとまりの代表の ID。
 function componentsOf(
@@ -533,8 +533,6 @@ export interface LayoutEdge {
   // この線が表す依存（畳んだ親へつなぎ替えると複数になる）。理由と種類はここから引く
   relations: ChallengeRelation[];
   basis: DependencyBasis;
-  // 線に向きがあるか（矢じりを付けるか）。前提は常に true。向きの無い衝突だけ false
-  directed: boolean;
 }
 
 export interface Layout {
@@ -859,13 +857,11 @@ export function layoutGraph(
       ancestorsOf(b, pm).includes(a)
     )
       continue;
-    const directed = true;
     const key = `${a}:${b}`;
     const merged = seen.get(key);
     if (merged) {
       merged.relations.push(r);
       merged.basis = basisOf(merged.relations);
-      merged.directed = merged.directed && directed;
       continue;
     }
     const ba = at.get(a);
@@ -879,7 +875,6 @@ export function layoutGraph(
       mid: geo.mid,
       relations: [r],
       basis: basisOf([r]),
-      directed,
     };
     seen.set(key, edge);
     edges.push(edge);

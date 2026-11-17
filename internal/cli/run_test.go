@@ -240,8 +240,9 @@ func TestRun_RunInProgress_ExitOneAndNothingStarted(t *testing.T) {
 }
 
 // 先に起動した run が動いている間の 2 つ目の run は、サイクルの排他で locked（終了コード 1）になり、
-// 委譲を起動しない。
-func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *testing.T) {
+// 委譲を起動しない。下の _OtherIsLocked との違いはスロットの宣言: こちらは標準の宣言（clone のスロット 1 本）、
+// 下は worktree のスロット 1 本を同じリポジトリの 2 課題が取り合う宣言。どちらでも結果は locked になる。
+func TestRun_SingleCloneSlot_SecondRunWhileFirstRuns_IsLocked(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	a := newInProgressForRun(t, ws, nil)
@@ -272,8 +273,8 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *tes
 	if results[0].code != 0 {
 		t.Errorf("first: exit=%d stderr=%s", results[0].code, results[0].stderr)
 	}
-	// run は周と同じ排他を取るので、先の run が動いている間の 2 つ目の run は、スロットの割り当てに
-	// 進む前に locked で断られる（serialized には至らない）。
+	// run はサイクルと同じ排他を取るので、先の run が動いている間の 2 つ目の run は、スロットの割り当てに
+	// 進む前に locked で断られる。
 	if results[1].code != 1 || !strings.Contains(results[1].stderr, `"locked"`) {
 		t.Errorf("second: exit=%d stderr=%s, want exit 1 locked", results[1].code, results[1].stderr)
 	}
@@ -282,9 +283,10 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *tes
 	}
 }
 
-// 同じリポジトリの 2 課題でも、動いている run があれば 2 つ目の run は
-// サイクルの排他で locked になる（スロットの割り当てには進まない）。
-func TestRun_SingleSlot_TwoProcessesRaceForIt_OtherIsLocked(t *testing.T) {
+// 同じリポジトリの 2 課題が worktree のスロット 1 本を取り合う宣言でも、動いている run があれば 2 つ目の run は
+// サイクルの排他で locked になる（スロットの割り当てには進まない）。上の _SecondRunWhileFirstRuns_IsLocked との違いは
+// スロットの宣言（こちらは worktree の 1 本）だけで、残す意図は宣言の種類によらず排他が先に効くこと。
+func TestRun_SingleWorktreeSlot_SameRepoSecondRun_IsLocked(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	conn := runConnectorsFixture

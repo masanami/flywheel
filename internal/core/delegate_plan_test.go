@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// このファイルは #106（親要件チケット #98 §実行スロット「同じリポジトリの並列と直列化グループ」・
-// §予算ガード）の委譲の段の実行計画を、実ストア・偽の予測の口・偽の判断／委譲の IF・偽の SlotGit で
-// 検証する（AC-279・297〜335・347〜351・366・369 の core 側）。
+// このファイルは委譲の段の実行計画（候補ごとの並行な実行・枠の許可・予算ガード。#106）を、
+// 実ストア・偽の判断／委譲の IF・偽の SlotGit で検証する（番号は docs/features/m3-invoker-delegation.md の受入基準。AC-279・297〜335・347〜351・366・369 の core 側。このうち衝突の予測と直列化グループの基準は、core の見直しの区切り S1 で外したので、残っているのは枠・優先度・予算の部分）。
+// 同じリポジトリの候補は直列化せず、枠に空きがあれば並行に起動する。
 
 const planConnectorsJSON = `{
   "version": 1,
@@ -279,7 +279,7 @@ func (f *planFixture) holdRunning(t *testing.T, id string) (release func()) {
 	return rel
 }
 
-// --- 予測の口に渡す Issue の順と呼ぶ条件（AC-297〜300） ---
+// --- 枠待ち・優先度の順・上限 ---
 
 func TestPlan_RateLimitedStopsTheWaitingCandidate(t *testing.T) {
 	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
@@ -411,7 +411,7 @@ func TestPlan_CycleBudgetAndRunBudget_AfterWaiting(t *testing.T) {
 	f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
 	// 最初の起動（J3 の 3 ＋ 実装枠 50 ＋ レビュー対応枠 30）だけが入る周の上限。2 件目は、1 件目の費用
-	// （J3 の 3 ＋ 委譲の 2.5）と予測の 0.7 が数えられた後では入らない。
+	// （J3 の 3 ＋ 委譲の 2.5）が数えられた後では入らない。
 	res, err := f.s.RunDelegation(context.Background(), f.in(f.cycle(t, 88), nil))
 	if err != nil {
 		t.Fatal(err)
@@ -421,7 +421,7 @@ func TestPlan_CycleBudgetAndRunBudget_AfterWaiting(t *testing.T) {
 	}
 }
 
-// --- 予測の口の呼び出しの順と予算・記録（AC-334・335・347〜351） ---
+// --- 予算・記録 ---
 
 // 実装枠の残りが起動の最小額に満たない候補は run_budget で起動しない（J3 の費用を払う前）。
 func TestPlan_RunBudget_NotStarted(t *testing.T) {
@@ -442,8 +442,8 @@ func TestPlan_RunBudget_NotStarted(t *testing.T) {
 	}
 }
 
-// 使えるスロットが 1 本のリポジトリ（worktree。予測は元のクローンで呼べる）で、衝突しない（別グループの）2 課題を別々の呼び出しで起動すると、後の呼び出しは
-// serialized ではなく slot_unavailable で終わる（AC-1120 の前提: 同じグループに入らない）。
+// 使えるスロットが 1 本のリポジトリ（worktree）で、同じリポジトリの 2 課題を別々の呼び出しで起動すると、
+// 後の呼び出しは slot_unavailable で終わる（待たない。AC-1120）。
 func TestPlan_ExplicitID_SingleSlot_SlotUnavailable(t *testing.T) {
 	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
 	f := newPlanFixture(t)
@@ -500,6 +500,47 @@ func TestAdmitContract_YieldsOnlyTheSlotsEarlierWaitersTake(t *testing.T) {
 				t.Fatalf("err = %v, want ErrSlotUnavailable", err)
 			}
 		})
+	}
+}
+
+// 同じリポジトリの契約（form: cli）の候補が 1 回の委譲の段で並ぶとき、許可した候補は待ちの列から外れる。
+// 外れていないと、許可済みで start の終わっていない候補が「前にいて今すぐ許可できる候補」として数えられ、
+// 実行中の数との二重の数えになって、枠に空きがあるのに後ろの候補が slot_unavailable で見送られる
+// （出どころ: core の見直しの区切り S1・全体のレビュー）。
+func TestAdmitContract_AdmittedCandidateLeavesTheQueue_NoDoubleCount(t *testing.T) {
+	t.Parallel()
+	f := newDelegateFixture(t)
+	conn := &ConnectorsDeclaration{
+		Connectors: []Connector{{ID: "cl", Form: ConnectorFormCLI}},
+		Repos:      []ConnectorRepo{{Name: "clirepo", Connector: "cl"}},
+	}
+	sch := newDelegationScheduler(f.s, DelegateInput{AgentDecl: &AgentDeclaration{MaxParallelRuns: 8}, ConnDecl: conn})
+	sch.pre = 5 // 実行中（記録前の許可済み）の起動が 5 件
+	var waiters []*schedWaiter
+	for i := 1; i <= 3; i++ {
+		w := sch.newWaiter(conn.Repos[0], planCandidate{Rank: 1, Seq: int64(i)})
+		sch.enqueue(w)
+		waiters = append(waiters, w)
+	}
+	for i, w := range waiters {
+		adm, err := (&delegateRun{sch: sch, w: w}).admitContract(context.Background())
+		if err != nil {
+			t.Fatalf("候補 %d 件目: err = %v, want 許可（上限 8・実行中 5+%d）", i+1, err, i)
+		}
+		if w.queued {
+			t.Errorf("候補 %d 件目: 許可した後も待ちの列に残っている", i+1)
+		}
+		_ = adm
+	}
+	// executePlan の goroutine の defer による外し直しが重なっても安全であること。
+	for _, w := range waiters {
+		sch.dequeue(w)
+	}
+	// 上限いっぱい（5+3=8）なら、4 件目は見送る。
+	extra := sch.newWaiter(conn.Repos[0], planCandidate{Rank: 1, Seq: 4})
+	sch.enqueue(extra)
+	if _, err := (&delegateRun{sch: sch, w: extra}).admitContract(context.Background()); !errors.Is(err, ErrSlotUnavailable) {
+		t.Errorf("4 件目: err = %v, want ErrSlotUnavailable", err)
 	}
 }
 

@@ -366,7 +366,7 @@ func (s *Store) contractWorkDir(workDir string) string {
 
 // contractRepoWorkDir は契約のコマンド（start・status・resume・cancel）の作業ディレクトリを決める。
 // explicit（呼び出し元が渡した WorkDir）が非空ならそれを使う。空なら、課題の承認済みの計画のリポジトリ（repos[]）から
-// 衝突の予測の口と同じ決め方（repoIdleWorkDir。worktree は元のクローン、clone は idle の作業用クローン）で決める。
+// repoIdleWorkDir で決める（worktree は元のクローン、clone は状態が idle の作業用クローンのうち paths の順で最初のもの）。
 // 決められないとき（承認済みの計画が無い・宣言と合わない・idle の作業用クローンが無い）は ok=false。
 func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, cid int64, explicit string) (string, bool, error) {
 	if explicit != "" {

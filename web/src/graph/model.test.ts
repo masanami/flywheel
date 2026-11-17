@@ -111,7 +111,7 @@ it("関係: parent_id は親子の関係に、辺は依存の関係（先行が 
   expect(rels[1]?.edge?.registered_via).toBe("plan");
 });
 
-it("線の種類: 依存はすべて、終わらないと始められない線", () => {
+it("線の種類: 前提はすべて、終わらないと始められない線", () => {
   const e: ChallengeRelation = {
     ...dep("C-1", "C-2"),
     edge: edge("C-1", "C-2", { kind: "prerequisite" }),
@@ -357,7 +357,7 @@ it("注目: 複数に当たるときは①②③の順で最初に当たった�
   expect(reasons(nodes)).toEqual({ "C-1": "human", "C-2": "working" });
 });
 
-it("注目 ④: 起点の依存の相手（前提・後続・衝突）は、段数に関係なく推移的に前に出る", () => {
+it("注目 ④: 起点の前提の相手（前提・後続）は、段数に関係なく推移的に前に出る", () => {
   const nodes = [
     node("C-1", { state: "in_progress" }), // 起点
     todoNode("C-2"), // C-1 の前提
