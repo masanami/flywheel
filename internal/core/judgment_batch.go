@@ -54,8 +54,6 @@ var notStartedReasonValues = []NotStartedReason{
 	NotStartedFailureLimit,
 	NotStartedReworkLimit,
 	NotStartedUpstreamFetchFailed,
-	NotStartedSerialized,
-	NotStartedPredictionLimit,
 	NotStartedWaitingExternal,
 	NotStartedPlanUnavailable,
 	NotStartedInProgress,
@@ -110,8 +108,6 @@ type JudgmentAutoItem struct {
 type JudgmentAutoResult struct {
 	Items      []JudgmentAutoItem
 	NotStarted []NotStarted
-	// SerialGroups は委譲の段（run）が作った直列化グループ（他の段では nil）。
-	SerialGroups []SerialGroup
 }
 
 // JudgmentCycle は 1 つの周の中の判断の呼び出しを束ね、§枠超過の「枠超過を

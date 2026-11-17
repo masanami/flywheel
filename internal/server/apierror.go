@@ -26,7 +26,6 @@ const (
 	CodeRunInProgress        = "run_in_progress"
 	CodeBudgetExceeded       = "budget_exceeded"
 	CodeSlotUnavailable      = "slot_unavailable"
-	CodeSerialized           = "serialized"
 )
 
 // errorStatus はエラーコードから HTTP の状態コードを決める（閉集合の表。表に無いものは 500）。
@@ -88,8 +87,6 @@ func CodeForCoreErr(err error) string {
 		return CodeBudgetExceeded
 	case errors.Is(err, core.ErrSlotUnavailable):
 		return CodeSlotUnavailable
-	case errors.Is(err, core.ErrSerialized):
-		return CodeSerialized
 	default:
 		return CodeInternalError
 	}
@@ -97,7 +94,7 @@ func CodeForCoreErr(err error) string {
 
 // apiCodeForCoreErr は API の失敗の本文に載せる code。§IF / API の表に列挙した値だけを通し、
 // 表に無いコード（CLI の tty_required・config_*・run_in_progress・budget_exceeded・
-// slot_unavailable・serialized、今後 CodeForCoreErr に足されるものを含む）は internal_error に寄せる。
+// slot_unavailable、今後 CodeForCoreErr に足されるものを含む）は internal_error に寄せる。
 func apiCodeForCoreErr(err error) string {
 	switch code := CodeForCoreErr(err); code {
 	case CodeNotFound, CodeStoreNotFound, CodeValidationFailed, CodeUsageError,

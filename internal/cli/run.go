@@ -79,7 +79,6 @@ func runRun(a Args) (any, error) {
 		Upstream:    newUpstreamThreadSource(a.lookPath()),
 		Git:         git.New(),
 		Reconcile:   newBranchSource(a.lookPath()),
-		Predictor:   launcher,
 		CycleID:     cyc.ID,
 	})
 

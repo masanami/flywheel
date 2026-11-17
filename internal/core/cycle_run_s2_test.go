@@ -116,7 +116,7 @@ func TestRunCycle_NoConnectors_RunAndVerifyPhasesAreSkipped(t *testing.T) {
 
 	for _, name := range []CyclePhase{CyclePhaseRun, CyclePhaseVerify} {
 		p := phaseOfResult(t, res, name)
-		if !p.Skipped || len(p.Items) != 0 || len(p.NotStarted) != 0 || len(p.SerialGroups) != 0 {
+		if !p.Skipped || len(p.Items) != 0 || len(p.NotStarted) != 0 {
 			t.Errorf("%s phase = %+v, want skipped and empty", name, p)
 		}
 	}
