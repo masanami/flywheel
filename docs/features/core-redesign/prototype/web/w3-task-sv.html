@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>タスクの詳細（試作）</title>
+<link rel="stylesheet" href="proto.css">
+</head>
+<body>
+<div class="proto-note">試作です。データは見本で、ボタンは画面の行き来だけをします。<a href="index.html">場面の一覧へ</a></div>
+<div class="shell">
+<nav class="rail"><a class="agent all" href="w10-all.html" title="すべてのエージェント">∀<span class="badge">3</span><small>すべて</small></a><a class="agent on" href="w8-now.html" title="Tom（開発の道具の開発と保守）">T<span class="badge">4</span><small>Tom</small></a><a class="agent" href="w2-issue-article.html" title="Mary（記事と広報）">M<span class="badge">1</span><small>Mary</small></a><a class="agent" href="w1-issues-empty.html" title="Ken（経理）">K<small>Ken</small></a><a class="agent add" href="#" title="エージェントを足す（flywheel#535）">＋<small>足す</small></a></nav>
+<div class="shell-main">
+<div class="top">
+  <span class="ws">Tom</span>
+  <nav><a href="w8-now.html" class="">いま進められること</a><a href="w1-issues.html" class="on">課題</a><a href="w7-followups.html" class="">フォローアップ</a><a href="w9-cycle.html" class="">サイクル</a></nav>
+  <span class="cycle"><span class="dot"></span>サイクル: 走っている（タスク 2 件を見ている）</span>
+</div>
+<div class="layout">
+<main>
+<div class="crumb"><a href="w1-issues.html">課題</a> › <a href="w2-issue-running.html">差し戻しの後も、同じ成果物で作業を続けられるようにする</a> ›</div>
+<h1>③ 実装: 入力を受ける</h1>
+<div class="meta"><span>状態 <span class="pill run">やり直し中</span> <span class="pill sv">スーパーバイザーが手を打った</span></span><span>前提 <b>② 設計</b>（済み）</span><span>この後 <b>⑤ 結合の確かめ</b></span><span>費用 <b>4.1 USD</b></span></div>
+<div class="box"><h3>委譲先の実行がいまいる段</h3><span class="pill run">実装</span> <span class="pill err">品質の検査</span> <span class="pill ">自己レビュー</span> <span class="pill ">成果物を出す</span> <span class="pill ">検証を待つ</span> <div class="hint">段の名前は委譲先（claude-harness）が返したものを、そのまま並べています。</div></div>
+<div class="cols"><div>
+<div class="box"><h3>このタスクでやること</h3>委譲先の開発のフローに、前の成果物（場所と名前）を任意の入力として足す。入力があれば、新しく作らずにそこで作業を続ける。
+<h3>完了条件</h3><ul><li>入力があるとき、同じ成果物に変更が積まれる</li><li>入力が無いとき、いままでどおり新しく始まる</li><li>品質の検査が通る</li></ul>
+<h3>やらないこと</h3>いまの呼び出し方を変えない。ほかのタスク（④・⑤・⑥）の範囲には触れない。</div>
+<div class="box"><h3>意思決定の記録</h3><table><tr><th>いつ</th><th>誰が</th><th>何を決めたか</th></tr><tr><td style="white-space:nowrap">計画の承認のとき</td><td><span class="pill wait">あなた</span></td><td><b>問い「入力は必須にしますか」→ 任意にする</b><div class="hint">計画の問いへの答え（推奨のまま承認）</div></td></tr><tr><td style="white-space:nowrap">14:02</td><td><span class="pill sv">スーパーバイザー</span></td><td><b>添え書きを付けて、委譲先へ差し戻した（1 回目）</b><div class="hint">品質の検査の失敗。添え書き: 「入力が空の文字のときの扱いを、設計の 3 節に合わせて直すこと」</div></td></tr></table><div class="hint">このタスクに関わる決定だけを、起きた順に並べています。</div></div>
+</div><div><div class="box sv"><h3>スーパーバイザーが打った手</h3>
+<b>添え書きを付けて、委譲先へ差し戻した</b>（1 回目・14:02）
+<ul><li><b>起きたこと</b>: 品質の検査が失敗して、実行が止まった</li><li><b>調べたこと</b>: 失敗は、足した入力のテストが 1 件。ほかは通っている</li><li><b>添え書き</b>: 「入力が空の文字のときの扱いを、設計の 3 節に合わせて直すこと」</li></ul>
+<div class="hint">同じ止まり方が 2 回続いたら、あなたへ上げます。</div></div>
+<div class="box"><h3>成果物</h3><span class="hint">まだありません。</span></div></div></div>
+
+</main>
+<aside class="chat" id="chat">
+<div class="chat-h"><b>Tom</b><span class="hint" style="margin-right:auto;margin-left:6px">オーケストレーター</span><button class="btn sm" onclick="document.body.classList.toggle('chat-off')">たたむ</button></div>
+<div class="chat-ctx">いま見ているもの: 課題「差し戻しの後も、同じ成果物で作業を続けられるようにする」</div><div class="chat-b"><div class="msg o">おはようございます。いま、あなたを待っているものは 1 件です。④ の実装の問い（前の成果物が閉じられていたとき）で、推奨は「新しく作り直して続ける」です。</div><div class="msg o">ほかのタスクは進んでいます。③ は検査の失敗が 1 回あり、スーパーバイザーが差し戻しました。</div></div>
+<div class="chat-f"><textarea rows="2" placeholder="オーケストレーターに話す（試作では送れません）"></textarea></div>
+</aside>
+</div>
+</div>
+</div>
+<button class="btn chat-open" onclick="document.body.classList.toggle('chat-off')">Tom と話す</button>
+
+</body>
+</html>

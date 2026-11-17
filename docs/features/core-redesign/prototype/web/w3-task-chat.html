@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>タスクの詳細（試作）</title>
+<link rel="stylesheet" href="proto.css">
+</head>
+<body>
+<div class="proto-note">試作です。データは見本で、ボタンは画面の行き来だけをします。<a href="index.html">場面の一覧へ</a></div>
+<div class="shell">
+<nav class="rail"><a class="agent all" href="w10-all.html" title="すべてのエージェント">∀<span class="badge">3</span><small>すべて</small></a><a class="agent on" href="w8-now.html" title="Tom（開発の道具の開発と保守）">T<span class="badge">4</span><small>Tom</small></a><a class="agent" href="w2-issue-article.html" title="Mary（記事と広報）">M<span class="badge">1</span><small>Mary</small></a><a class="agent" href="w1-issues-empty.html" title="Ken（経理）">K<small>Ken</small></a><a class="agent add" href="#" title="エージェントを足す（flywheel#535）">＋<small>足す</small></a></nav>
+<div class="shell-main">
+<div class="top">
+  <span class="ws">Tom</span>
+  <nav><a href="w8-now.html" class="">いま進められること</a><a href="w1-issues.html" class="on">課題</a><a href="w7-followups.html" class="">フォローアップ</a><a href="w9-cycle.html" class="">サイクル</a></nav>
+  <span class="cycle"><span class="dot"></span>サイクル: 走っている（タスク 2 件を見ている）</span>
+</div>
+<div class="layout">
+<main>
+<div class="crumb"><a href="w1-issues.html">課題</a> › <a href="w2-issue-running.html">差し戻しの後も、同じ成果物で作業を続けられるようにする</a> ›</div>
+<h1>④ 実装: 同じ成果物で続ける</h1>
+<div class="meta"><span>状態 <span class="pill wait">あなたの回答を待っている</span></span><span>前提 <b>② 設計</b>（済み）</span><span>この後 <b>⑤ 結合の確かめ</b></span><span>費用 <b>3.2 USD</b></span></div>
+<div class="box wait"><h3>あなたへの問い <span class="pill wait">12 分待っている</span></h3>
+<b>前の成果物が閉じられていたときは、どうしますか</b>
+<div class="hint">差し戻しの時点で、前の成果物が人の手で閉じられていることがあります。設計には、この場合の扱いが書かれていません。</div>
+<div class="actions"><a class="btn primary" href="w3-task-answered.html">新しく作り直して続ける（推奨）</a><a class="btn" href="w3-task-answered.html">作り直さずに、このタスクを止める</a><a class="btn" href="w3-task-chat.html">オーケストレーターと相談する</a></div>
+<div class="hint">選ぶだけで答えられる問いは、ここで答えられます。選択肢に無い答えや、範囲・完了条件が変わる答えは、対話で伝えます。</div>
+<details><summary>スーパーバイザーがあなたへ上げた理由</summary>計画・設計・過去の事例の記憶に、根拠が見つかりませんでした（似た事例は 1 件。そのときは作り直した）。推奨: 新しく作り直して続ける</details></div>
+<div class="box"><h3>委譲先の実行がいまいる段</h3><span class="pill wait">実装</span> <span class="pill ">品質の検査</span> <span class="pill ">自己レビュー</span> <span class="pill ">成果物を出す</span> <span class="pill ">検証を待つ</span> </div>
+<div class="box"><h3>このタスクでやること</h3>入力で受けた前の成果物の場所で、新しく作らずに作業を続ける。
+<h3>完了条件</h3><ul><li>差し戻した後の変更が、同じ成果物に積まれる</li><li>品質の検査が通る</li></ul></div>
+<div class="box"><h3>意思決定の記録</h3><span class="hint">まだありません。問いへの回答・スーパーバイザーの手・検証の結果が、起きた順にここへ残ります。</span></div>
+</main>
+<aside class="chat" id="chat">
+<div class="chat-h"><b>Tom</b><span class="hint" style="margin-right:auto;margin-left:6px">オーケストレーター</span><button class="btn sm" onclick="document.body.classList.toggle('chat-off')">たたむ</button></div>
+<div class="chat-ctx">いま見ているもの: 課題「差し戻しの後も、同じ成果物で作業を続けられるようにする」</div><div class="chat-b"><div class="msg o">④ の問いについてですね。前の成果物が閉じられていたときの扱いが、設計に書かれていません。推奨は「新しく作り直して続ける」です。</div><div class="msg u">閉じた理由が「範囲の取り違え」のときは、作り直すと同じ間違いを繰り返さない？</div><div class="msg o">その心配はあります。閉じた成果物に理由のコメントがあるときは、それを添えて作り直す形にできます。ただ、これは選択肢に無い答えで、④ の完了条件が 1 つ増えます。計画を作り直して、もう一度承認をいただく形になります。そうしますか。</div><div class="msg u">それでお願い。</div><div class="msg o">承知しました。回答を記録し、計画を作り直します。出来たら、計画の承認をお願いします。</div></div>
+<div class="chat-f"><textarea rows="2" placeholder="オーケストレーターに話す（試作では送れません）"></textarea></div>
+</aside>
+</div>
+</div>
+</div>
+<button class="btn chat-open" onclick="document.body.classList.toggle('chat-off')">Tom と話す</button>
+
+</body>
+</html>

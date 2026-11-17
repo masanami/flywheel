@@ -1,0 +1,116 @@
+/* 試作用のスタイル。いまの画面（web/src/styles.css）の配色をおおまかに写したもの。本番のコードではない。 */
+:root{--bg:#f7f7f8;--fg:#1c1c1f;--muted:#6b6b70;--link:#1a56db;--border:#dcdce0;--card:#fff;--card-border:#e2e2e6;
+--wait-bg:#fdf3e0;--wait-border:#e8b93f;--run-bg:#ddf1ec;--run-border:#7cc4b4;--next-bg:#fff1c9;--next-border:#c98a12;
+--pre-bg:#eef3fb;--pre-border:#9db4dd;--done-bg:#ededea;--done-fg:#77777c;--err:#b3261e;--sv-bg:#f1ecfb;--sv-border:#a996d8;--accent:#1c1c1f;--accent-fg:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#17181c;--fg:#e7e7ea;--muted:#9a9aa2;--link:#8ab4f8;--border:#303138;--card:#24252b;--card-border:#34353c;
+--wait-bg:#3a301a;--wait-border:#caa03a;--run-bg:#1f3a33;--run-border:#4f9c8b;--next-bg:#3d3416;--next-border:#c98a12;
+--pre-bg:#232c3d;--pre-border:#5b76a8;--done-bg:#2a2b30;--done-fg:#8d8d95;--err:#f2b8b5;--sv-bg:#2c2640;--sv-border:#7d6bb5;--accent:#e7e7ea;--accent-fg:#17181c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN",Meiryo,sans-serif;font-size:14px;line-height:1.6}
+a{color:var(--link)}
+.proto-note{background:#1c1c1f;color:#e7e7ea;font-size:12px;padding:6px 16px}
+.proto-note a{color:#8ab4f8}
+.top{display:flex;gap:16px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--card);flex-wrap:wrap}
+.top .ws{font-weight:700}
+.top nav{display:flex;gap:4px;flex-wrap:wrap}
+.top nav a{padding:4px 10px;border-radius:999px;text-decoration:none;color:var(--fg);border:1px solid transparent}
+.top nav a.on{background:var(--accent);color:var(--accent-fg)}
+.top .cycle{margin-left:auto;font-size:12px;color:var(--muted)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--run-border);margin-right:6px}
+.dot.idle{background:var(--muted)}
+main{max-width:1180px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 6px}
+h2{font-size:15px;margin:22px 0 8px}
+h3{font-size:14px;margin:14px 0 6px}
+.crumb{font-size:12px;color:var(--muted)}
+.meta{display:flex;gap:8px 18px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:8px}
+.meta b{color:var(--fg);font-weight:600}
+.pill{display:inline-block;padding:1px 9px;border-radius:999px;border:1px solid var(--border);font-size:12px;background:var(--card);white-space:nowrap}
+.pill.wait{background:var(--wait-bg);border-color:var(--wait-border)}
+.pill.run{background:var(--run-bg);border-color:var(--run-border)}
+.pill.next{background:var(--next-bg);border-color:var(--next-border)}
+.pill.pre{background:var(--pre-bg);border-color:var(--pre-border)}
+.pill.done{background:var(--done-bg);color:var(--done-fg)}
+.pill.sv{background:var(--sv-bg);border-color:var(--sv-border)}
+.pill.err{border-color:var(--err);color:var(--err)}
+.box{background:var(--card);border:1px solid var(--card-border);border-radius:10px;padding:12px 14px;margin:10px 0}
+.box.wait{background:var(--wait-bg);border-color:var(--wait-border)}
+.box.sv{background:var(--sv-bg);border-color:var(--sv-border)}
+.box.err{border-color:var(--err)}
+.box h3:first-child,.box h2:first-child{margin-top:0}
+.cols{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px}
+@media (max-width:860px){.cols{grid-template-columns:1fr}}
+.btn{display:inline-block;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--fg);text-decoration:none;font-size:14px;cursor:pointer;font-family:inherit}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.hint{font-size:12px;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+th{color:var(--muted);font-weight:600;white-space:nowrap}
+ul.plain{list-style:none;padding:0;margin:0}
+ul.plain li{padding:6px 0;border-bottom:1px solid var(--border)}
+ul.plain li:last-child{border-bottom:none}
+/* タスクのツリー（案 G を出発点にした形。左から右へ前提の順） */
+.tree{display:flex;align-items:flex-start;gap:0;overflow-x:auto;padding:14px 10px;background:var(--card);border:1px solid var(--card-border);border-radius:10px}
+.tcol{display:flex;flex-direction:column;gap:10px;min-width:168px}
+.tarrow{align-self:center;color:var(--pre-border);font-weight:700;padding:0 8px;font-size:18px;user-select:none}
+.task{display:block;border:2px solid var(--card-border);border-radius:9px;padding:6px 10px;background:var(--card);color:var(--fg);text-decoration:none;font-size:13px;position:relative}
+.task small{display:block;color:var(--muted);font-size:11px}
+.task.run{background:var(--run-bg);border-color:var(--run-border)}
+.task.wait{background:var(--wait-bg);border-color:var(--wait-border)}
+.task.next{background:var(--next-bg);border-color:var(--next-border)}
+.task.pre{background:var(--pre-bg);border-color:var(--pre-border)}
+.task.done{background:var(--done-bg);color:var(--done-fg);border-color:var(--done-bg)}
+.task.added{border-style:dashed}
+.legend{display:flex;gap:6px 10px;flex-wrap:wrap;font-size:12px;margin:8px 0}
+.q{border:1px solid var(--card-border);border-radius:10px;padding:10px 12px;margin:8px 0;background:var(--card)}
+.q label{display:block;padding:3px 0;cursor:pointer}
+.q .rec{font-size:11px;color:var(--muted);margin-left:6px}
+.q.changed{border-color:var(--wait-border);background:var(--wait-bg)}
+textarea,input[type=text]{width:100%;font:inherit;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--fg)}
+details{margin:6px 0}
+summary{cursor:pointer;color:var(--link)}
+.bar{height:6px;border-radius:3px;background:var(--border);overflow:hidden;width:140px;display:inline-block;vertical-align:middle}
+.bar i{display:block;height:100%;background:var(--run-border)}
+code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--done-bg);padding:1px 5px;border-radius:4px}
+/* 線でつなぐツリー */
+.tree svg.edges{position:absolute;left:0;top:0;pointer-events:none}
+.tree svg.edges path{fill:none;stroke:var(--pre-border);stroke-width:2.5}
+.tree .task{overflow:hidden;line-height:1.35}
+/* オーケストレーターとの対話（サイドバー） */
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;align-items:start}
+.layout main{margin:0;max-width:none}
+.chat{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--card)}
+.chat-h{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border)}
+.chat-b{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.chat-f{padding:8px 12px;border-top:1px solid var(--border)}
+.msg{padding:7px 10px;border-radius:10px;font-size:13px;max-width:95%}
+.msg.o{background:var(--done-bg);align-self:flex-start}
+.msg.u{background:var(--pre-bg);border:1px solid var(--pre-border);align-self:flex-end}
+.btn.sm{padding:2px 8px;font-size:12px}
+.chat-open{display:none;position:fixed;right:16px;bottom:16px}
+body.chat-off .layout{grid-template-columns:minmax(0,1fr)}
+body.chat-off .chat{display:none}
+body.chat-off .chat-open{display:inline-block}
+@media (max-width:900px){.layout{grid-template-columns:1fr}.chat{position:static;height:auto;border-left:none;border-top:1px solid var(--border)}}
+.chat-ctx{padding:6px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);background:var(--bg)}
+/* サイクルの構造 */
+.flow{display:flex;align-items:stretch;gap:4px;overflow-x:auto;padding:6px 0}
+.flow>i{align-self:center;font-style:normal;color:var(--pre-border);font-weight:700}
+.fstep{border:1px solid var(--card-border);border-radius:9px;padding:6px 9px;background:var(--bg);min-width:104px;font-size:12px;display:flex;flex-direction:column;gap:3px;align-items:flex-start}
+.fstep b{font-size:13px}.fstep small{color:var(--muted)}
+.fstep.gate{border:2px solid var(--wait-border);background:var(--wait-bg)}
+.fstep.big{min-width:430px;background:var(--card)}
+.flow.inner{padding:2px 0}.fstep .sub{font-size:11px;color:var(--muted)}
+/* 左の列（エージェントの切り替え） */
+.shell{display:grid;grid-template-columns:64px minmax(0,1fr);min-height:100vh}
+.rail{background:#1c1c1f;display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 0;position:sticky;top:0;height:100vh}
+.agent{position:relative;width:42px;height:42px;border-radius:12px;background:#3a3b42;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;text-decoration:none;margin-bottom:12px}
+.agent small{position:absolute;top:44px;left:-8px;right:-8px;text-align:center;font-size:10px;font-weight:400;color:#b5b5bd}
+.agent.on{background:#fff;color:#1c1c1f;outline:3px solid #7cc4b4}
+.agent.all{border-radius:50%}
+.agent.add{background:transparent;border:1px dashed #6b6b70;margin-top:auto;margin-bottom:18px}
+.agent .badge{position:absolute;top:-6px;right:-6px;background:#e8b93f;color:#1c1c1f;border-radius:999px;font-size:10px;min-width:17px;height:17px;display:flex;align-items:center;justify-content:center;padding:0 4px}
+.shell-main{min-width:0}
+.chat{height:calc(100vh - 0px)}
