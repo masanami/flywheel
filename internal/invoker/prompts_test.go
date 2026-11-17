@@ -1,7 +1,10 @@
 package invoker
 
 import (
+	"errors"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -854,4 +857,25 @@ func TestInstructions_J8CriteriaChecksCurrentState(t *testing.T) {
 			t.Errorf("Instructions(J8) lacks %q", want)
 		}
 	}
+}
+
+// #736 の完了条件のうち、J9 の指示文が無いこと。サブテスト名の先頭が基準の番号。
+func TestPrompts_J9IsGone(t *testing.T) {
+	t.Run("AC-56 internal/invoker/prompts/j9.md が無い", func(t *testing.T) {
+		if _, err := os.Stat(filepath.Join("prompts", "j9.md")); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("prompts/j9.md on disk: err = %v, want not exist", err)
+		}
+		fsys, err := promptsSubFS()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fs.Stat(fsys, "j9.md"); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("embedded j9.md: err = %v, want not exist", err)
+		}
+	})
+	t.Run("AC-57 指示文の分量の上限の表に j9.md の行が無い", func(t *testing.T) {
+		if limit, ok := judgmentPromptLimit["j9.md"]; ok {
+			t.Errorf("judgmentPromptLimit has j9.md = %d, want no entry", limit)
+		}
+	})
 }
