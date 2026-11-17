@@ -304,12 +304,18 @@ func (sch *delegationScheduler) capacity(ctx context.Context, repo ConnectorRepo
 	return c, classifyReadWriteErr(err)
 }
 
+// ownerWaitContractRunWhere は、契約の run（k）がオーナーの承認・回答を待っているだけ（waiting で、課題〔c〕が保留）の条件。
+// 同時に走らせる数にだけ使う。課題ごとの「実行中か」の判定（challengeHasActiveRun）には混ぜない
+// （保留の課題へ新しい委譲を起動させないため）。
+const ownerWaitContractRunWhere = `(k.state = 'waiting' AND c.status = 'awaiting_human')`
+
 // activeDelegationCount は終わっていない委譲の run と、終わっていない契約の run（form: cli）を持つ課題の数。
+// レビュー待ち（contractRunReviewWaitWhere）とオーナーの回答待ち（ownerWaitContractRunWhere）の契約の run は数えない。
 func activeDelegationCount(ctx context.Context, tx *sql.Tx) (int, error) {
 	var n int
 	err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM run WHERE kind = 'delegate' AND result IS NULL)
 		+ (SELECT COUNT(*) FROM (SELECT k.challenge_id FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere+`
+			WHERE k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere+` AND NOT `+ownerWaitContractRunWhere+`
 			UNION SELECT challenge_id FROM run WHERE kind = 'contract' AND result IS NULL))`).Scan(&n)
 	return n, err
 }
