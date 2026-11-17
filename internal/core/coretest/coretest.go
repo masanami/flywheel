@@ -981,6 +981,19 @@ func FillAllTables(t *testing.T, workspace string) {
 			  VALUES (1, 'delegation', 2, 1, 's1', 1, 1, 'testhost', ?, ?, ?, 'succeeded', 50000000, 'impl')`, []any{at, at, at}},
 			{`INSERT INTO run_artifact (run_id, kind, ref, state, base, verified_at) VALUES (1, 'pr', 'o/r#3', 'open', 'main', ?)`, []any{at}},
 			{`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, cost_usd, max_budget_usd, started_at, observed_at) VALUES (1, 'tool', 'ext-1', 1, 'running', 's', 1500000, 5000000, ?, ?)`, []any{at, at}},
+			{`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, created_at, updated_at)
+			  VALUES (1, 1, 'a', 't1 "quoted" <&>', 'body', 'done', '["x"]', 'o/r', 'pull_request', 'pending', ?, ?)`, []any{at, at}},
+			{`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, created_at, updated_at)
+			  VALUES (1, 1, NULL, 't2', 'body', 'done', NULL, 'o/r', 'pull_request', 'done', ?, ?)`, []any{at, at}},
+			{`INSERT INTO task_dependency (task_id, depends_on_id) VALUES (2, 1)`, nil},
+			{`INSERT INTO plan_answer (challenge_id, plan_version, question_number, choice, text, recommended, actor, channel, verification, relay_session, relay_quote, answered_at)
+			  VALUES (1, 1, 1, 2, NULL, 1, 'tester', 'cli', 'tty_confirm', 's', 'q', ?)`, []any{at}},
+			{`INSERT INTO plan_answer (challenge_id, plan_version, question_number, choice, text, recommended, actor, channel, verification, relay_session, relay_quote, answered_at)
+			  VALUES (1, 1, 2, NULL, '文の答え', 0, 'tester', 'cli', 'tty_confirm', NULL, NULL, ?)`, []any{at}},
+			{`UPDATE run SET task_id = 1 WHERE id = 1`, nil},
+			{`UPDATE contract_run SET task_id = 1 WHERE id = 1`, nil},
+			{`UPDATE hold SET task_id = 2 WHERE id = 1`, nil},
+			{`UPDATE challenge SET uses_integration = 1 WHERE id = 1`, nil},
 			{`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after, run_id)
 			  VALUES (?, 'tester', 'cli', 'none', 'challenge', 1, 'create', NULL, '{"title":"c1"}', 1)`, []any{at}},
 			{`INSERT INTO occurrence (challenge_id, activity_id, kind, outcome, source, created_at) VALUES (1, 1, 'completion_rejected', 'bad', 'core', ?)`, []any{at}},

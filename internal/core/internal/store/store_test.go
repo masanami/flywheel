@@ -512,7 +512,7 @@ func TestOpen_AppliesSourceBindingMigrationAndReachesVersion2(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	if got, want := userVersion(t, db), 25; got != want {
+	if got, want := userVersion(t, db), latestProdVersion(t); got != want {
 		t.Fatalf("user_version = %d, want %d", got, want)
 	}
 	if !tableExists(t, db, "source_binding") {
@@ -639,4 +639,11 @@ func setUserVersion(t *testing.T, path string, version int) {
 	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
 		t.Fatalf("setUserVersion: exec: %v", err)
 	}
+}
+
+// latestProdVersion は本番のマイグレーション集合の最新の版を返す。版の数字を直に書かず、
+// 次の区切りで版を上げてもテストを直さずに済むようにする。
+func latestProdVersion(t *testing.T) int {
+	t.Helper()
+	return latestVersion(prodMigrations(t))
 }

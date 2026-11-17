@@ -445,10 +445,15 @@ func insertHoldKind(ctx context.Context, tc *transitionCtx, question string, kin
 // insertHoldKindFrom は insertHoldKind の、保留に入る直前の状態（hold.from_status。回答で戻る先）を指定する版。
 // 遷移前の状態と戻り先が違う T15（親が直接した完了の差し戻し）が使う。
 func insertHoldKindFrom(ctx context.Context, tc *transitionCtx, question string, kind HoldKind, from Status) (int64, error) {
+	return insertHoldKindFromTask(ctx, tc, question, kind, from, nil)
+}
+
+// insertHoldKindFromTask は insertHoldKindFrom の、保留が結び付くタスク（hold.task_id。nil は NULL）を指定する版。
+func insertHoldKindFromTask(ctx context.Context, tc *transitionCtx, question string, kind HoldKind, from Status, taskID *int64) (int64, error) {
 	res, err := tc.tx.ExecContext(ctx,
-		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind)
-		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`,
-		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind),
+		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind, task_id)
+		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)`,
+		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind), int64PtrColumn(taskID),
 	)
 	if err != nil {
 		return 0, err

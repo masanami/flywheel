@@ -263,17 +263,24 @@ type contractRunRow struct {
 	RequestedResolvableBy string
 	// WorkDir は start を実行した作業ディレクトリ（0023 より前に始めた run は空）。
 	WorkDir string
+	// TaskID は結び付くタスクの内部整数 ID（0026。nil は NULL）。
+	TaskID *int64
 }
 
 const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
-	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, '') FROM contract_run`
+	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, ''), task_id FROM contract_run`
 
 func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, error) {
 	var r contractRunRow
 	var state string
+	var taskID sql.NullInt64
 	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget,
-		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.RequestedResolvableBy, &r.WorkDir); err != nil {
+		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.RequestedResolvableBy, &r.WorkDir, &taskID); err != nil {
 		return nil, err
+	}
+	if taskID.Valid {
+		v := taskID.Int64
+		r.TaskID = &v
 	}
 	r.State = ContractState(state)
 	return &r, nil
@@ -573,6 +580,8 @@ type contractCall struct {
 	Invoke         func(context.Context, ContractLaunchInput) (ContractLaunchOutput, error)
 	MaxMicros      int64
 	Existing       *contractRunRow
+	// TaskIDInt は contract_run を新しく作るときに書く task_id（nil は NULL。既存の行の task_id は変えない）。
+	TaskIDInt *int64
 	// StopNote は、中止の理由（予算の超過）。契約が cancelled・failed を返して保留にするときの問いの先頭に付く。
 	StopNote string
 }
@@ -859,10 +868,10 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	if c.Existing == nil {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary,
-				requested_kind, requested_decider, requested_text, requested_resolvable_by, cost_usd, max_budget_usd, started_at, observed_at, ended_at, work_dir)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				requested_kind, requested_decider, requested_text, requested_resolvable_by, cost_usd, max_budget_usd, started_at, observed_at, ended_at, work_dir, task_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ChallengeIDInt, c.Connector, st.RunID, c.RunIDInt, string(st.State), st.Summary, rk, rd, rt, rb,
-			totalMicros, c.MaxMicros, now, now, endedAt, c.Launch.WorkDir)
+			totalMicros, c.MaxMicros, now, now, endedAt, c.Launch.WorkDir, int64PtrColumn(c.TaskIDInt))
 		if err != nil {
 			return err
 		}

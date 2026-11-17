@@ -482,3 +482,28 @@ func ParseChallengeOrigin(s string) (ChallengeOrigin, bool) {
 	}
 	return "", false
 }
+
+// TaskStatus はタスク（task.status）の状態。課題の状態（Status）とは別の閉集合。
+type TaskStatus string
+
+// TaskStatus の 5 値。
+const (
+	TaskStatusPending    TaskStatus = "pending"
+	TaskStatusInProgress TaskStatus = "in_progress"
+	TaskStatusVerifying  TaskStatus = "verifying"
+	TaskStatusDone       TaskStatus = "done"
+	TaskStatusCancelled  TaskStatus = "cancelled"
+)
+
+var taskStatusValues = []TaskStatus{TaskStatusPending, TaskStatusInProgress, TaskStatusVerifying, TaskStatusDone, TaskStatusCancelled}
+
+// ParseTaskStatus は s をタスクの状態として解釈する。前後の空白を除いた完全一致のみ受理する。
+func ParseTaskStatus(s string) (TaskStatus, bool) {
+	trimmed := strings.TrimSpace(s)
+	for _, v := range taskStatusValues {
+		if string(v) == trimmed {
+			return v, true
+		}
+	}
+	return "", false
+}

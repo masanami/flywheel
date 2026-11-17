@@ -95,8 +95,8 @@ func TestChallengeConflictDropped(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = db.Close() }()
-		if got := userVersion(t, db); got != 25 {
-			t.Errorf("user_version = %d, want 25", got)
+		if got := userVersion(t, db); got != latestProdVersion(t) {
+			t.Errorf("user_version = %d, want %d", got, latestProdVersion(t))
 		}
 	})
 	t.Run("AC-32_version_24_store_with_conflict_rows_loses_the_table", func(t *testing.T) {
