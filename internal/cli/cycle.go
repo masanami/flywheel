@@ -157,7 +157,6 @@ func runCycle(a Args) (any, error) {
 		HeadGit:      headGit,
 		Merger:       merger,
 		Compare:      compare,
-		Predictor:    launcher,
 		// backup の段の口。connectors.json の有無にかかわらず組み立てる。
 		WorkspaceGit: git.NewWorkspace(),
 		OnBegin:      onBegin,

@@ -442,8 +442,8 @@ func TestLoadFollowBranch_NoneWhenPreviousPRIsMergedOrClosed(t *testing.T) {
 			if err := s.db.Write(ctx, func(tx *sql.Tx) error {
 				now := time.Now()
 				r, err := insertRun(ctx, tx, 0, insertRunInput{
-					Kind: runKindPredict, PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now,
-					MaxBudgetUSD: 1, BudgetBucket: budgetBucketPredict, Repo: "r",
+					Kind: runKindJudgment, Judgment: judgmentJ8, SessionID: "s", PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now,
+					MaxBudgetUSD: 1, BudgetBucket: budgetBucketJudgment,
 				})
 				if err != nil {
 					return err
@@ -506,7 +506,7 @@ func TestAcquireSlot_BranchHeldOutsideTheSlotsDoesNotMarkNeedsAttention(t *testi
 	}
 }
 
-// 同じプロセスの並行の割り当て（直列グループごとの goroutine）が、同じスロットを切り替え合わない:
+// 同じプロセスの並行の割り当て（候補ごとの goroutine）が、同じスロットを切り替え合わない:
 // (a) 各委譲は望むブランチのスロットで起動され、(b) 割り当て済みのスロットの先頭は他の割り当てで
 // 動かない（#526 F1）。
 func TestAcquireSlot_ConcurrentAssignmentsDoNotSwitchEachOthersSlot(t *testing.T) {

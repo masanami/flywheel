@@ -499,7 +499,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | `config_invalid` | 500 |
 | `internal_error` とその他 | 500 |
 
-API の失敗の `code` は上の表に列挙した値（と `forbidden_origin`）だけである。CLI にあって表に無いコード（`tty_required`・`config_not_found`・`run_in_progress`・`budget_exceeded`・`slot_unavailable`・`serialized`）に当たる core のエラーは、API では `internal_error`（500）で返す【決定 2026-10-11 オーナー・AC-51】。`config_invalid` は `GET …/status` の宣言の検査の失敗で返すため表に入れる【決定 2026-10-31 オーナー・Issue #427】。
+API の失敗の `code` は上の表に列挙した値（と `forbidden_origin`）だけである。CLI にあって表に無いコード（`tty_required`・`config_not_found`・`run_in_progress`・`budget_exceeded`・`slot_unavailable`。以前はここに `serialized` も含まれていたが、直列化グループとともに core の見直しの区切り S1 で外した）に当たる core のエラーは、API では `internal_error`（500）で返す【決定 2026-10-11 オーナー・AC-51】。`config_invalid` は `GET …/status` の宣言の検査の失敗で返すため表に入れる【決定 2026-10-31 オーナー・Issue #427】。
 
 Host・Origin・CSRF の検査で拒否した要求は、core を呼ばずに 403 と `{"error":{"code":"forbidden_origin","message"}}` を返す【仮定: コード名】。
 

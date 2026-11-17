@@ -45,13 +45,11 @@ type GraphEdgeKind string
 const (
 	// GraphEdgePrerequisite は終わらないと始められない（先行の成果を使う）。
 	GraphEdgePrerequisite GraphEdgeKind = "prerequisite"
-	// GraphEdgeConflict は同時に走らせると衝突する（同じものを触るので順に走らせる）。
-	GraphEdgeConflict GraphEdgeKind = "conflict"
 )
 
 // GraphEdgeKindValues は GraphEdgeKind の閉集合の写しを返す。
 func GraphEdgeKindValues() []GraphEdgeKind {
-	return []GraphEdgeKind{GraphEdgePrerequisite, GraphEdgeConflict}
+	return []GraphEdgeKind{GraphEdgePrerequisite}
 }
 
 // GraphRegisteredVia は依存を登録した経路（閉集合）。
@@ -65,13 +63,11 @@ const (
 	GraphRegisteredViaManual GraphRegisteredVia = "manual"
 	// GraphRegisteredViaUnknown は作業ログから決まらない。
 	GraphRegisteredViaUnknown GraphRegisteredVia = "unknown"
-	// GraphRegisteredViaPrediction は衝突の予測の結果（衝突の辺だけ）。
-	GraphRegisteredViaPrediction GraphRegisteredVia = "prediction"
 )
 
 // GraphRegisteredViaValues は GraphRegisteredVia の閉集合の写しを返す。
 func GraphRegisteredViaValues() []GraphRegisteredVia {
-	return []GraphRegisteredVia{GraphRegisteredViaPlan, GraphRegisteredViaManual, GraphRegisteredViaUnknown, GraphRegisteredViaPrediction}
+	return []GraphRegisteredVia{GraphRegisteredViaPlan, GraphRegisteredViaManual, GraphRegisteredViaUnknown}
 }
 
 // GraphNode は課題 1 件のノード。
@@ -96,18 +92,16 @@ type GraphNode struct {
 }
 
 // GraphEdge は依存 1 本。前提（Kind=prerequisite）は From が先行（依存先）、To が後続（依存元）。
-// 衝突（Kind=conflict）は From が後回しにした課題、To が先に委譲した課題で、Directed=false の
-// 組は向きを持たない（From は ID の小さい側）。
 type GraphEdge struct {
 	From string
 	To   string
 	Kind GraphEdgeKind
-	// Directed は辺の向きがあるか。前提は常に true。衝突は、後回し → 先に委譲が決まっているときだけ true。
+	// Directed は辺の向きがあるか。前提は常に true。
 	Directed bool
-	// Satisfied は依存が満たされているか（依存の評価と同じ規則）。衝突は常に false（片方が終わった衝突は返さない）。
+	// Satisfied は依存が満たされているか（依存の評価と同じ規則）。
 	Satisfied     bool
 	RegisteredVia GraphRegisteredVia
-	// RegisteredAt は challenge_dependency.created_at または challenge_conflict.created_at（記録された文字列そのまま）。
+	// RegisteredAt は challenge_dependency.created_at（記録された文字列そのまま）。
 	RegisteredAt string
 }
 
@@ -266,31 +260,6 @@ func fillGraphRelations(ctx context.Context, tx *sql.Tx, g *ChallengeGraph) erro
 			Satisfied: satisfied, RegisteredVia: registered, RegisteredAt: e.createdAt,
 		})
 	}
-	conflicts, err := loadActiveConflictsTx(ctx, tx)
-	if err != nil {
-		return err
-	}
-	for _, c := range conflicts {
-		g.Edges = append(g.Edges, GraphEdge{
-			From: formatChallengeID(c.Challenge), To: formatChallengeID(c.With), Kind: GraphEdgeConflict, Directed: c.Directed,
-			Satisfied: false, RegisteredVia: GraphRegisteredViaPrediction, RegisteredAt: c.CreatedAt,
-		})
-	}
-	// 前提と衝突を合わせて (From, To) の数の昇順（同じ組なら前提が先）。
-	sort.SliceStable(g.Edges, func(i, j int) bool {
-		a, b := g.Edges[i], g.Edges[j]
-		an, _ := parseChallengeID(a.From)
-		bn, _ := parseChallengeID(b.From)
-		if an != bn {
-			return an < bn
-		}
-		at, _ := parseChallengeID(a.To)
-		bt, _ := parseChallengeID(b.To)
-		if at != bt {
-			return at < bt
-		}
-		return a.Kind == GraphEdgePrerequisite && b.Kind == GraphEdgeConflict
-	})
 	return nil
 }
 

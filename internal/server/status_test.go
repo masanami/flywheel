@@ -626,7 +626,7 @@ func TestAPICodeForCoreErr_OnlyTableCodes(t *testing.T) {
 		core.ErrValidation, core.ErrTerminalState, core.ErrInvalidTransition, core.ErrConflict,
 		core.ErrActorUnavailable, core.ErrTTYRequired, core.ErrConfirmationMismatch, core.ErrVerificationRejected,
 		core.ErrConfigNotFound, core.ErrConfigInvalid, core.ErrLocked, core.ErrRunInProgress,
-		core.ErrBudgetExceeded, core.ErrSlotUnavailable, core.ErrSerialized, fmt.Errorf("unexpected"),
+		core.ErrBudgetExceeded, core.ErrSlotUnavailable, fmt.Errorf("unexpected"),
 	}
 	for _, e := range sentinels {
 		code := apiCodeForCoreErr(fmt.Errorf("wrapped: %w", e))
@@ -646,7 +646,7 @@ func TestAPICodeForCoreErr_OnlyTableCodes(t *testing.T) {
 	if got := apiCodeForCoreErr(core.ErrConfigInvalid); got != CodeConfigInvalid {
 		t.Errorf("ErrConfigInvalid: %q, want config_invalid", got)
 	}
-	for _, e := range []error{core.ErrTTYRequired, core.ErrConfigNotFound, core.ErrRunInProgress, core.ErrBudgetExceeded, core.ErrSlotUnavailable, core.ErrSerialized} {
+	for _, e := range []error{core.ErrTTYRequired, core.ErrConfigNotFound, core.ErrRunInProgress, core.ErrBudgetExceeded, core.ErrSlotUnavailable} {
 		if got := apiCodeForCoreErr(e); got != CodeInternalError {
 			t.Errorf("%v: %q, want internal_error", e, got)
 		}

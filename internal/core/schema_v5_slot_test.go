@@ -97,8 +97,8 @@ func TestOpenWorkspace_UpgradesSchemaVersion4StoreToVersion5(t *testing.T) {
 	ctx := context.Background()
 
 	// AC-370: 版が 5 になる。
-	if got := schemaVersionForTest(t, s); got != 24 {
-		t.Fatalf("schema version = %d, want 24 (AC-370: 版 5 の表は保たれる)", got)
+	if got := schemaVersionForTest(t, s); got != 25 {
+		t.Fatalf("schema version = %d, want 25 (AC-370: 版 5 の表は保たれる)", got)
 	}
 	// #143: 既存の承認の行は plan_version が NULL のまま（推測で計画を割り当てない）。
 	var total, nonNull int
@@ -221,8 +221,8 @@ func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
 func TestSchemaV5_FreshStoreHasSlotTables(t *testing.T) {
 	t.Parallel()
 	s := newStoreForTest(t)
-	if got := schemaVersionForTest(t, s); got != 24 {
-		t.Fatalf("schema version = %d, want 24", got)
+	if got := schemaVersionForTest(t, s); got != 25 {
+		t.Fatalf("schema version = %d, want 25", got)
 	}
 	if !tableExistsForTest(t, s, "slot") || !tableExistsForTest(t, s, "run_artifact") {
 		t.Fatalf("slot and run_artifact tables must exist")
@@ -394,7 +394,7 @@ func TestStore_RawInsertRejectsSecondActiveRunForSameSlot(t *testing.T) {
 	}
 }
 
-func TestInsertRun_DeciderAndRepoValidation(t *testing.T) {
+func TestInsertRun_DeciderValidation(t *testing.T) {
 	t.Parallel()
 	s := newStoreForTest(t)
 	cid := mustCreateChallengeInternalID(t, s, "c")
@@ -402,12 +402,11 @@ func TestInsertRun_DeciderAndRepoValidation(t *testing.T) {
 
 	in := validInsertRunInput()
 	in.Decider, in.DeciderRow = deciderChild, row
-	in.Repo = "o/r"
 	r, err := insertRunForTest(t, s, cid, in)
 	if err != nil {
 		t.Fatalf("insertRun() error = %v", err)
 	}
-	if r.Decider != deciderChild || r.DeciderRow == nil || *r.DeciderRow != 3 || r.Repo != "o/r" {
+	if r.Decider != deciderChild || r.DeciderRow == nil || *r.DeciderRow != 3 {
 		t.Fatalf("run = %+v", r)
 	}
 	for name, mut := range map[string]func(*insertRunInput){
@@ -431,79 +430,92 @@ func validPredictRunInput() insertRunInput {
 		Kind: runKindPredict, PID: 7, Host: "h",
 		HeartbeatAt:  time.Date(2026, 10, 1, 0, 5, 0, 0, time.UTC),
 		StartedAt:    time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
-		MaxBudgetUSD: 100_000, BudgetBucket: budgetBucketPredict, Repo: "o/r",
+		MaxBudgetUSD: 100_000, BudgetBucket: budgetBucketPredict,
 	}
 }
 
-func TestInsertRun_PredictRunHasNoChallengePlanOrSession(t *testing.T) {
+// insertLegacyPredictRunTx は、過去の実行の記録として残っている predict の行を、書き込みの検査を通さずに
+// 作る（新しく作る経路は無い。読み取り・終わらせる更新が過去の行を受け付けることを確かめるための準備）。
+func insertLegacyPredictRunTx(ctx context.Context, tx *sql.Tx, in insertRunInput) (int64, error) {
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO run (kind, pid, host, heartbeat_at, started_at, rate_limited, max_budget_usd, budget_bucket, repo)
+		 VALUES ('predict', ?, ?, ?, ?, 0, ?, 'predict', 'o/r')`,
+		in.PID, in.Host, formatTimestamp(in.HeartbeatAt), formatTimestamp(in.StartedAt), in.MaxBudgetUSD)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func insertLegacyPredictRunForTest(t *testing.T, s *Store) int64 {
+	t.Helper()
+	var id int64
+	err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		var err error
+		id, err = insertLegacyPredictRunTx(context.Background(), tx, validPredictRunInput())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("insert legacy predict run: %v", err)
+	}
+	return id
+}
+
+// 新しく作る run には、predict・J9・predict の予算の枠を受け付けない。
+func TestInsertRun_RejectsPredictJ9AndPredictBucket(t *testing.T) {
 	t.Parallel()
 	s := newStoreForTest(t)
-	r, err := insertRunForTest(t, s, 0, validPredictRunInput())
-	if err != nil {
-		t.Fatalf("insertRun(predict) error = %v", err)
+	if _, err := insertRunForTest(t, s, 0, validPredictRunInput()); !errors.Is(err, ErrValidation) {
+		t.Fatalf("insertRun(predict): error = %v, want ErrValidation", err)
 	}
-	if r.Kind != runKindPredict || r.ChallengeID != "" || r.ChallengeVersion != 0 || r.PlanVersion != nil ||
-		r.SessionID != "" || r.Repo != "o/r" || r.PID != 7 || r.Host != "h" || r.HeartbeatAt.IsZero() ||
-		r.BudgetBucket != budgetBucketPredict {
-		t.Fatalf("predict run = %+v", r)
+	j9 := validInsertRunInput()
+	j9.Kind, j9.Judgment, j9.ChallengeVersion, j9.SessionID, j9.BudgetBucket = runKindJudgment, judgmentJ9, 0, "s", budgetBucketJudgment
+	if _, err := insertRunForTest(t, s, 0, j9); !errors.Is(err, ErrValidation) {
+		t.Fatalf("insertRun(J9): error = %v, want ErrValidation", err)
 	}
-	// predict の run は課題を持たないので、課題ごとの排他の対象外（複数同時に持てる）。
-	if _, err := insertRunForTest(t, s, 0, validPredictRunInput()); err != nil {
-		t.Fatalf("second predict run error = %v", err)
-	}
-
 	cid := mustCreateChallengeInternalID(t, s, "c")
-	for name, mut := range map[string]func(*insertRunInput){
-		"with resumed_from": func(in *insertRunInput) { in.ResumedFromRunID = int64Ptr(1) },
-		"missing repo":      func(in *insertRunInput) { in.Repo = "" },
-		"with session":      func(in *insertRunInput) { in.SessionID = "s" },
-		"with plan version": func(in *insertRunInput) { in.PlanVersion = int64Ptr(1) },
-		"with challenge v":  func(in *insertRunInput) { in.ChallengeVersion = 1 },
-		"with judgment":     func(in *insertRunInput) { in.Judgment = judgmentJ1 },
-		"wrong bucket":      func(in *insertRunInput) { in.BudgetBucket = budgetBucketJudgment },
-	} {
-		bad := validPredictRunInput()
-		mut(&bad)
-		if _, err := insertRunForTest(t, s, 0, bad); !errors.Is(err, ErrValidation) {
-			t.Fatalf("%s: error = %v, want ErrValidation", name, err)
-		}
+	bucket := validInsertRunInput()
+	bucket.BudgetBucket = budgetBucketPredict
+	if _, err := insertRunForTest(t, s, cid, bucket); !errors.Is(err, ErrValidation) {
+		t.Fatalf("insertRun(predict bucket): error = %v, want ErrValidation", err)
 	}
-	if _, err := insertRunForTest(t, s, cid, validPredictRunInput()); !errors.Is(err, ErrValidation) {
-		t.Fatalf("predict with challenge id: error = %v, want ErrValidation", err)
-	}
-	if _, err := insertRunForTest(t, s, 0, validInsertRunInput()); !errors.Is(err, ErrValidation) {
-		t.Fatalf("non-predict without challenge id: error = %v, want ErrValidation", err)
+	// 判断点を呼ぶ口も J9 を受け付ける形では入らない（J8 は通る）。
+	j8 := validInsertRunInput()
+	j8.Kind, j8.Judgment, j8.ChallengeVersion, j8.SessionID, j8.BudgetBucket = runKindJudgment, judgmentJ8, 0, "s", budgetBucketJudgment
+	if _, err := insertRunForTest(t, s, 0, j8); err != nil {
+		t.Fatalf("insertRun(J8): %v", err)
 	}
 }
 
-func TestUpdateRunEnd_PredictResultAndCostSourceSets(t *testing.T) {
+// 過去の predict の行は読め、終わっていない行を終わらせる更新は、サイクルの後片付けの「中断」（interrupted）だけを受け付ける
+// （それ以外の結果・cost_source: delta は受け付けない。出どころ: core の見直しの区切り S1・全体のレビュー）。
+func TestLegacyPredictRun_CanBeReadAndFinished(t *testing.T) {
 	t.Parallel()
 	s := newStoreForTest(t)
 	end := func(res runResult, src costSource) error {
-		r, err := insertRunForTest(t, s, 0, validPredictRunInput())
-		if err != nil {
-			t.Fatalf("insertRun(predict): %v", err)
+		id := insertLegacyPredictRunForTest(t, s)
+		r, err := loadRunForTest(t, s, id)
+		if err != nil || r == nil || r.Kind != runKindPredict || r.BudgetBucket != budgetBucketPredict {
+			t.Fatalf("legacy predict run = %+v, err = %v", r, err)
 		}
-		_, err = updateRunEndForTest(t, s, mustParseRunIDForTest(t, r.ID), updateRunEndInput{
+		_, err = updateRunEndForTest(t, s, id, updateRunEndInput{
 			EndedAt: time.Now(), Result: res, CostSource: src, CostUSD: int64Ptr(10),
 		})
 		return err
 	}
-	for _, res := range []runResult{runResultSucceeded, runResultLaunchFailed, runResultTimedOut,
-		runResultMalformed, runResultErrored, runResultInterrupted} {
-		if err := end(res, costSourceReported); err != nil {
-			t.Fatalf("predict result %s: error = %v", res, err)
-		}
+	if err := end(runResultInterrupted, costSourceReported); err != nil {
+		t.Fatalf("predict result interrupted: error = %v", err)
 	}
-	if err := end(runResultSucceeded, costSourceUnknown); err != nil {
+	if err := end(runResultInterrupted, costSourceUnknown); err != nil {
 		t.Fatalf("predict unknown cost source: %v", err)
 	}
-	for _, res := range []runResult{runResultBudgetExhausted, runResultInvalidOutput} {
+	for _, res := range []runResult{runResultSucceeded, runResultLaunchFailed, runResultTimedOut, runResultMalformed,
+		runResultErrored, runResultBudgetExhausted, runResultInvalidOutput} {
 		if err := end(res, costSourceReported); !errors.Is(err, ErrValidation) {
 			t.Fatalf("predict result %s: error = %v, want ErrValidation", res, err)
 		}
 	}
-	if err := end(runResultSucceeded, costSourceDelta); !errors.Is(err, ErrValidation) {
+	if err := end(runResultInterrupted, costSourceDelta); !errors.Is(err, ErrValidation) {
 		t.Fatalf("predict delta cost source: error = %v, want ErrValidation", err)
 	}
 }
@@ -757,4 +769,62 @@ func TestSchemaV6_ApprovalHasNullablePlanVersionColumn(t *testing.T) {
 	if cols := pragmaTableInfoColumnsForTest(t, s, "approval"); !containsString(cols, "plan_version") || !containsString(cols, "target_version") {
 		t.Fatalf("approval columns = %v, want plan_version and target_version", cols)
 	}
+}
+
+// 過去の predict・J9 の行は、一覧・費用の集計・書き出し→再構築で、別の値へ書き換わらずに通る。
+func TestLegacyPredictAndJ9Rows_SurviveListMetricsAndExportImport(t *testing.T) {
+	t.Parallel()
+	s := newStoreForTest(t)
+	ctx := context.Background()
+	insertLegacyPredictRunForTest(t, s)
+	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		now := formatTimestamp(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO run (kind, judgment, session_id, pid, host, heartbeat_at, started_at, ended_at, result, rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source)
+			 VALUES ('judgment', 'J9', 's', 1, 'h', ?, ?, ?, 'succeeded', 0, 500000, 'judgment', 1000, 'reported')`, now, now, now)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	check := func(name string, st *Store) {
+		runs, err := st.ListRunsWithoutReap(ctx, RunListOptions{})
+		if err != nil {
+			t.Fatalf("%s: list: %v", name, err)
+		}
+		var predict, j9 bool
+		for _, r := range runs {
+			predict = predict || r.Kind == runKindPredict
+			j9 = j9 || (r.Kind == runKindJudgment && r.Judgment == judgmentJ9)
+		}
+		if len(runs) != 2 || !predict || !j9 {
+			t.Fatalf("%s: runs = %+v, want the predict run and the J9 run unchanged", name, runs)
+		}
+		if _, err := st.Metrics(ctx, MetricsOptions{}); err != nil {
+			t.Fatalf("%s: metrics: %v", name, err)
+		}
+		// 値は別の値へ書き換わらない（生の行で確かめる）。
+		var bucket, repo string
+		if err := st.db.Read(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `SELECT budget_bucket, repo FROM run WHERE kind = 'predict'`).Scan(&bucket, &repo)
+		}); err != nil || bucket != "predict" || repo != "o/r" {
+			t.Fatalf("%s: predict row bucket=%q repo=%q err=%v", name, bucket, repo, err)
+		}
+		var cost int64
+		var result, src string
+		if err := st.db.Read(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `SELECT cost_usd, result, cost_source FROM run WHERE judgment = 'J9'`).Scan(&cost, &result, &src)
+		}); err != nil || cost != 1000 || result != "succeeded" || src != "reported" {
+			t.Fatalf("%s: J9 row cost=%d result=%q src=%q err=%v", name, cost, result, src, err)
+		}
+	}
+	check("source", s)
+	data, _, err := s.Export(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := newStoreForTest(t)
+	if _, err := dst.Import(ctx, data); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	check("imported", dst)
 }

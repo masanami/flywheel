@@ -198,6 +198,14 @@ func TestErrorCodeTableMatchesSpec(t *testing.T) {
 	t.Parallel()
 	spec := append(loadSpecErrorCodeTable(t), loadM4ErrorCodeTable(t)...)
 	spec = append(spec, loadM45S2ErrorCodeTable(t)...)
+	// 直列化グループの廃止（docs/features/core-redesign.md）で外した serialized は、仕様の表に当時の行が残る。
+	kept := spec[:0:0]
+	for _, row := range spec {
+		if row.Code != "serialized" {
+			kept = append(kept, row)
+		}
+	}
+	spec = kept
 
 	if len(spec) != len(errorCodeTable) {
 		t.Fatalf("spec table has %d rows, implementation has %d (spec=%+v impl=%+v)",
@@ -293,8 +301,8 @@ func parseErrorCodeTable(t *testing.T, doc string) []codeExit {
 var m3S2OnlyErrorCodes = map[ErrorCode]bool{"slot_unavailable": true, "serialized": true}
 
 // m3S2ImplementedErrorCodes は m3S2OnlyErrorCodes のうち、実装済みで期待の集合に数えるもの
-// （slot_unavailable は #102、serialized は #106 が実装し、両方が期待の集合に入る。AC-367）。
-var m3S2ImplementedErrorCodes = map[ErrorCode]bool{"slot_unavailable": true, "serialized": true}
+// （slot_unavailable は期待の集合に入る。serialized は直列化グループの廃止で外したので、仕様の表に行が残っていても数えない）。
+var m3S2ImplementedErrorCodes = map[ErrorCode]bool{"slot_unavailable": true}
 
 // m1BaseErrorCodeCount は M1 の表のうち、M1 自身が定めた行数（`verification_rejected` まで。
 // その後ろの行は M2・M3 の実装チケットが同じ表へ足したもの）。
@@ -422,5 +430,16 @@ func TestM45ErrorCodeTable_UpstreamUnavailableIsExit1OnTheApprovePath(t *testing
 	e := newReleaseNotApprovableError("m")
 	if e.Code != CodeUpstreamUnavailable || e.ExitCode != 1 {
 		t.Errorf("newReleaseNotApprovableError = %+v", e)
+	}
+}
+
+// AC-10: CLI が定義するエラーコードの一覧に serialized が無い。
+// AC-10 は core の見直しの区切り S1（docs/features/core-redesign.md。番号は masanami/flywheel#732 の受入基準の並び順）の番号。
+func TestErrorCodeTable_HasNoSerialized(t *testing.T) {
+	t.Parallel()
+	for _, e := range errorCodeTable {
+		if e.Code == "serialized" {
+			t.Errorf("errorCodeTable contains the removed code %q", e.Code)
+		}
 	}
 }

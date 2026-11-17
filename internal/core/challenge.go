@@ -202,7 +202,7 @@ type ChallengeDetail struct {
 	// 無ければ空スライス（nil でない）。
 	Dependencies []DependencyView
 	Dependents   []string
-	// Waiting は課題が待っている理由（まだ終わっていない前提の課題と、衝突のため後回しにした相手）。
+	// Waiting は課題が待っている理由（まだ終わっていない前提の課題）。
 	// ボードの詳細（API）だけが読む。
 	Waiting WaitingReasons
 	// FollowupOf はJ6 のフォローアップで起票した課題の元の課題の ID（challenge.followup_of。S3。applyJ6 が設定）。無ければ nil。

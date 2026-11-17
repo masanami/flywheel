@@ -712,15 +712,6 @@ summary.graph-tool-btn::-webkit-details-marker {
 }
 
 /* 3 巡目（2026-10-14 オーナー: ノードが ID と題名だけでは読めない）: 一言で・位置づけ・依存の理由 */
-/* 依存の線の種類: 衝突のための順番は破線と中抜きの矢じり */
-.graph-edge[data-basis="conflict"] {
-  stroke-dasharray: 5 4;
-}
-.graph-arrow-open {
-  fill: var(--board-card-bg);
-  stroke: var(--graph-edge);
-  stroke-width: 1.4;
-}
 .graph-edge-hit {
   fill: none;
   stroke: transparent;
@@ -743,9 +734,6 @@ summary.graph-tool-btn::-webkit-details-marker {
   fill: var(--board-card-bg);
   stroke: var(--graph-edge-lit);
   stroke-width: 1;
-}
-.graph-edge-label[data-basis="conflict"] rect {
-  stroke-dasharray: 3 2;
 }
 .graph-edge-label text {
   fill: var(--board-fg);
@@ -817,9 +805,6 @@ summary.graph-tool-btn::-webkit-details-marker {
   margin: 0.35rem 0;
   padding-left: 0.5rem;
   border-left: 3px solid var(--graph-edge-lit);
-}
-.graph-waiting li[data-basis="conflict"] {
-  border-left-style: dashed;
 }
 .graph-waiting-reason {
   margin-top: 0.1rem;

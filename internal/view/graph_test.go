@@ -32,18 +32,3 @@ func TestGraphResponseKeysAreSortedAndNullable(t *testing.T) {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
-
-// 衝突の辺は kind=conflict・registered_via=prediction で、向きの無い組は directed=false。
-func TestGraphResponseConflictEdge(t *testing.T) {
-	g := &core.ChallengeGraph{Edges: []core.GraphEdge{
-		{From: "C-409", To: "C-408", Kind: core.GraphEdgeConflict, Directed: true, RegisteredVia: core.GraphRegisteredViaPrediction, RegisteredAt: "2026-11-05T01:02:03.000Z"},
-		{From: "C-1", To: "C-2", Kind: core.GraphEdgeConflict, Directed: false, RegisteredVia: core.GraphRegisteredViaPrediction, RegisteredAt: "2026-11-05T01:02:03.000Z"},
-	}}
-	got := marshal(t, view.FromChallengeGraph(g))
-	want := `{"edges":[` +
-		`{"directed":true,"from":"C-409","kind":"conflict","registered_at":"2026-11-05T01:02:03.000Z","registered_via":"prediction","satisfied":false,"to":"C-408"},` +
-		`{"directed":false,"from":"C-1","kind":"conflict","registered_at":"2026-11-05T01:02:03.000Z","registered_via":"prediction","satisfied":false,"to":"C-2"}],"nodes":[]}`
-	if got != want {
-		t.Errorf("got  %s\nwant %s", got, want)
-	}
-}

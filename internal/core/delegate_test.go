@@ -882,10 +882,8 @@ func TestRunDelegation_OneSlotTwoChallenges_OnlyOneLaunches(t *testing.T) {
 	}
 	close(f.deleg.block)
 	second := <-errs
-	// 先に起動した課題は取り込み元の対応が無く Issue 番号を渡せないため、後の呼び出しの計画の時点で
-	// 起動が見えていれば serialized、見えていなければ割り当ての時点で slot_unavailable になる。
-	if (!errors.Is(first, ErrSlotUnavailable) && !errors.Is(first, ErrSerialized)) || second != nil {
-		t.Fatalf("results = (%v, %v), want one ErrSlotUnavailable/ErrSerialized and one success", first, second)
+	if !errors.Is(first, ErrSlotUnavailable) || second != nil {
+		t.Fatalf("results = (%v, %v), want one ErrSlotUnavailable and one success", first, second)
 	}
 	if n := len(f.deleg.launched()); n != 1 {
 		t.Errorf("launches = %d, want 1", n)

@@ -86,11 +86,11 @@ func runResultsOf(t *testing.T, ws string) []string {
 
 // AC-163・AC-367・AC-368: cycle --json の not_started[].reason の値は、S2 では cycle_budget |
 // rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit |
-// upstream_fetch_failed | serialized | waiting_external | plan_unavailable の閉集合に限られる（仕様・core の定義・実際の
+// upstream_fetch_failed | waiting_external | plan_unavailable の閉集合（serialized・prediction_limit は外した）に限られる（仕様・core の定義・実際の
 // 出力の 3 者を双方向に照合する）。
 //
 // 実際の出力（cycle --json）で観測できるものはここで観測する。連続失敗・差し戻しの履歴や、他の
-// 課題の終了していない run を要る failure_limit・rework_limit・serialized は、core のテストが
+// 課題の終了していない run を要る failure_limit・rework_limit は、core のテストが
 // 同じ値を実際の周の対象の選択で観測している（coreObservedReasons に、その根拠のテストを置く）。
 func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	parallelTools(t, false)
@@ -103,6 +103,8 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	spec := pipeSet(spans[1][1])
 	// M4.5 が足す理由（S1: in_progress・not_executable、S2: dependency、S3: not_learnable）は m4.5 の仕様の行から読む。
 	spec = append(spec, m45AddedNotStartedReasons(t)...)
+	// 直列化グループの廃止（docs/features/core-redesign.md）で外した理由は、仕様の当時の記録には残るが、実装の閉集合には無い。
+	spec = withoutStrings(spec, "serialized", "prediction_limit")
 	sort.Strings(spec)
 
 	var impl []string
@@ -115,10 +117,8 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 
 	// core のテストが、実際の周・委譲・検証の対象の選択で観測している値。
 	coreObservedReasons := map[string]string{
-		"failure_limit":    "TestFailureLimit_ReachedHoldsWithKindAndCountAndReportsNotStarted (internal/core/delegate_resume_test.go)",
-		"rework_limit":     "TestRework_LimitIsDetectedInTheNextCycle_TwoStillLaunch (internal/core/judgment_j5_test.go)",
-		"serialized":       "TestPlan_RunningInSameGroup_Serialized_OtherGroupStarts (internal/core/delegate_plan_test.go)",
-		"prediction_limit": "TestPlan_OverPredictionLimit_PredictsFirstTwenty_DefersRest (internal/core/delegate_plan_test.go)",
+		"failure_limit": "TestFailureLimit_ReachedHoldsWithKindAndCountAndReportsNotStarted (internal/core/delegate_resume_test.go)",
+		"rework_limit":  "TestRework_LimitIsDetectedInTheNextCycle_TwoStillLaunch (internal/core/judgment_j5_test.go)",
 		// 計画の版を持たない承認の行（作り直しが必要）は、core のテストが実際の対象の選択で観測する。
 		"plan_unavailable": "TestRunDelegation_ApprovalWithoutPlanVersion_NotStartedWithReasonAndNothingLaunched (internal/core/delegate_plan_approval_test.go)",
 		// release 以外・approved でない操作を指した op exec だけが出す（cycle の release の段は approved の release しか試さない）。
@@ -245,46 +245,6 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	}
 }
 
-// AC-369: serial_groups[].reasons の値は shared_files | dependency | unknown_pair | not_predictable |
-// prediction_failed | prediction_budget | no_prediction_declared | running_run の閉集合に限られる。
-// 仕様の 2 か所（§IF / API の定義の行と受入基準の行）と core の定義を双方向に照合し、定義順
-// （§IF / API「この定義順に重複なく並べる」）も仕様の行どおりであることを確かめる。
-func TestSerialGroupReasons_AreTheClosedSetInBothDirections(t *testing.T) {
-	t.Parallel()
-	var impl []string
-	for _, r := range core.SerialGroupReasonValues() {
-		impl = append(impl, string(r))
-	}
-
-	// 受入基準の行: 2 つ目のバッククォートの span が閉集合（1 つ目はフィールド名）。
-	acLine := m3SpecLine(t, "`serial_groups[].reasons` の値は", "閉集合に限られる")
-	acSpans := backtickSpanRe.FindAllStringSubmatch(acLine, -1)
-	if len(acSpans) != 2 {
-		t.Fatalf("expected the field name and the closed set as backtick spans in %q", acLine)
-	}
-	acSet := pipeSet(acSpans[1][1])
-	if !equalStringSlices(acSet, sortedStrings(impl)) {
-		t.Errorf("core.SerialGroupReasonValues() = %v, acceptance criterion set = %v", sortedStrings(impl), acSet)
-	}
-
-	// §IF / API の定義の行: `reasons` は `a | b | …` の閉集合で、この定義順に並べる。
-	defLine := m3SpecLine(t, "`reasons` は `shared_files", "閉集合で、この定義順に")
-	var defOrder []string
-	for _, sp := range backtickSpanRe.FindAllStringSubmatch(defLine, -1) {
-		if strings.Contains(sp[1], "|") && strings.Contains(sp[1], "shared_files") {
-			for _, part := range strings.Split(sp[1], "|") {
-				defOrder = append(defOrder, strings.TrimSpace(part))
-			}
-		}
-	}
-	if !equalStringSlices(defOrder, impl) {
-		t.Errorf("core.SerialGroupReasonValues() = %v, spec definition order = %v", impl, defOrder)
-	}
-	if !equalStringSlices(sortedStrings(defOrder), acSet) {
-		t.Errorf("spec definition set = %v, acceptance criterion set = %v", sortedStrings(defOrder), acSet)
-	}
-}
-
 // AC-164: run の結果の値は launch_failed | timed_out | malformed | budget_exhausted | errored |
 // invalid_output | succeeded | interrupted の閉集合に限られる（仕様・core の定義・実際の run の
 // 結果を双方向に照合する）。
@@ -379,10 +339,6 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedFailureLimit"
 	case "rework_limit":
 		return "NotStartedReworkLimit"
-	case "serialized":
-		return "NotStartedSerialized"
-	case "prediction_limit":
-		return "NotStartedPredictionLimit"
 	case "plan_unavailable":
 		return "NotStartedPlanUnavailable"
 	case "not_executable":
@@ -477,4 +433,19 @@ func TestCycle_PhasesStartWithReleaseThenTheM3Phases(t *testing.T) {
 	if !equalStringSlices(got, want) {
 		t.Errorf("phases = %v, want %v", got, want)
 	}
+}
+
+// withoutStrings は xs から drop の値を除いた写しを返す。
+func withoutStrings(xs []string, drop ...string) []string {
+	var out []string
+outer:
+	for _, x := range xs {
+		for _, d := range drop {
+			if x == d {
+				continue outer
+			}
+		}
+		out = append(out, x)
+	}
+	return out
 }

@@ -205,7 +205,7 @@ func TestMetrics_ResumeAndCost(t *testing.T) {
 	mRun(t, s, a, "judgment", nil, nil)             // 費用不明
 	mRun(t, s, b, "delegate", nil, int64(1_000_000))
 	mRun(t, s, x, "delegate", r1, int64(9_000_000))    // 対象外の課題
-	mRun(t, s, nil, "judgment", nil, int64(7_000_000)) // 課題に紐づかない（衝突の予測）
+	mRun(t, s, nil, "judgment", nil, int64(7_000_000)) // 課題に紐づかない判断の run
 	mRun(t, s, nil, "judgment", nil, nil)
 
 	m, err := s.Metrics(context.Background(), MetricsOptions{})

@@ -83,8 +83,8 @@ const (
 	// 同じく課題・セッションに結び付くが、委譲の履歴の規則（連続失敗の数え・--resume の対象選び・
 	// delegation_failed の発生）には入れない。セッション ID は run の一意のために採る偽の値。
 	runKindContract runKind = "contract"
-	// runKindPredict は衝突の予測（flywheel の predict）の実行。課題・計画・
-	// セッションに結び付かず、repo を必須とする（0005）。
+	// runKindPredict は衝突の予測（flywheel の predict）の実行。新しく作る経路は無く、
+	// 過去の行を読む（費用の集計・runs の表示）ためと、終わっていない行を終わらせる更新のために残す。
 	runKindPredict runKind = "predict"
 )
 
@@ -107,7 +107,8 @@ const (
 	judgmentJ5 judgmentPoint = "J5"
 	judgmentJ6 judgmentPoint = "J6"
 	judgmentJ8 judgmentPoint = "J8"
-	// judgmentJ9 は 2 つの課題を同時に進めてよいかの判断（J7 は無い）。課題を持たない（J8 と同じ）。
+	// judgmentJ9 は 2 つの課題を同時に進めてよいかの判断（J7 は無い）。新しく呼ぶ経路は無く、
+	// 過去の run を読むためだけに残す。課題を持たない（J8 と同じ）。
 	judgmentJ9 judgmentPoint = "J9"
 )
 
@@ -183,17 +184,6 @@ func (b budgetBucket) valid() bool {
 	return false
 }
 
-// predictRunResultValid は predict の run の result として許される値かを返す
-// （succeeded | launch_failed | timed_out | malformed | errored | interrupted）。
-func predictRunResultValid(r runResult) bool {
-	switch r {
-	case runResultSucceeded, runResultLaunchFailed, runResultTimedOut, runResultMalformed,
-		runResultErrored, runResultInterrupted:
-		return true
-	}
-	return false
-}
-
 // decider は run.decider（その run の意思決定の主体）。
 type decider string
 
@@ -261,8 +251,8 @@ type runRow struct {
 	Output               string
 	Error                string
 	// 0005 で足した列。SlotID は表示形（"SL-<n>"）。Decider は "" が NULL、
-	// DeciderRow・Repo は nil / "" が NULL。predict の run は ChallengeID・
-	// SessionID が "" 、ChallengeVersion が 0（NULL）になる。
+	// DeciderRow・Repo は nil / "" が NULL。Repo は過去の predict の run だけが持つ（新しく作る run は NULL）。
+	// predict の run は ChallengeID・SessionID が "" 、ChallengeVersion が 0（NULL）になる。
 	SlotID     *string
 	Decider    decider
 	DeciderRow *int64
@@ -408,15 +398,18 @@ type insertRunInput struct {
 	MaxBudgetUSD     int64
 	BudgetBucket     budgetBucket
 	// 0005 で足した入力。SlotID は slot の内部整数 ID。Decider と DeciderRow は
-	// 両方指定するか両方省略する（DeciderRow は 1〜5）。Repo は predict で必須。
+	// 両方指定するか両方省略する（DeciderRow は 1〜5）。
 	SlotID     *int64
 	Decider    decider
 	DeciderRow *int64
-	Repo       string
 }
 
 func (in insertRunInput) valid() bool {
 	if !in.Kind.valid() || !in.BudgetBucket.valid() {
+		return false
+	}
+	// 新しく作る run には、過去の記録を読むためだけに残した値（predict・J9）を受け付けない。
+	if in.Kind == runKindPredict || in.Judgment == judgmentJ9 || in.BudgetBucket == budgetBucketPredict {
 		return false
 	}
 	switch in.Kind {
@@ -428,22 +421,13 @@ func (in insertRunInput) valid() bool {
 		if in.Judgment != "" {
 			return false
 		}
-	case runKindPredict:
-		// predict は課題・計画・セッションに結び付かない。repo が必須。
-		if in.Judgment != "" || in.ChallengeVersion != 0 || in.PlanVersion != nil ||
-			in.SessionID != "" || in.ResumedFromRunID != nil || in.Repo == "" || in.BudgetBucket != budgetBucketPredict {
-			return false
-		}
 	}
 	if in.Kind == runKindJudgment && in.Judgment.hasNoChallenge() {
-		// J8・J9 は課題を持たない判断（predict と同じく課題・計画・再開元を持たない）。セッションは持つ。
+		// J8 は課題を持たない判断（課題・計画・再開元を持たない）。セッションは持つ。
 		if in.ChallengeVersion != 0 || in.PlanVersion != nil || in.ResumedFromRunID != nil || in.SessionID == "" {
 			return false
 		}
-	} else if in.Kind != runKindPredict && (in.ChallengeVersion <= 0 || in.SessionID == "") {
-		return false
-	}
-	if in.Kind != runKindPredict && in.BudgetBucket == budgetBucketPredict {
+	} else if in.ChallengeVersion <= 0 || in.SessionID == "" {
 		return false
 	}
 	if (in.Decider == "") != (in.DeciderRow == nil) {
@@ -475,7 +459,7 @@ func (in insertRunInput) valid() bool {
 //   - 課題に既に終了していない run があれば errActiveRunExists
 //     （部分一意索引 idx_run_active_challenge の違反を翻訳する。AC-168）
 //
-// predict と J8・J9 の run は課題に結び付かないため challengeID は 0 を渡す（NULL で
+// J8 の run は課題に結び付かないため challengeID は 0 を渡す（NULL で
 // 挿入する）。それ以外の run に 0 以下を渡すと ErrValidation。
 //
 // slot_id を指定し、そのスロットに終了していない run が既にあれば
@@ -484,7 +468,7 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 	if !in.valid() {
 		return nil, ErrValidation
 	}
-	noChallenge := in.Kind == runKindPredict || (in.Kind == runKindJudgment && in.Judgment.hasNoChallenge())
+	noChallenge := in.Kind == runKindJudgment && in.Judgment.hasNoChallenge()
 	if noChallenge != (challengeID == 0) || challengeID < 0 {
 		return nil, ErrValidation
 	}
@@ -500,13 +484,13 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 			session_id, session_id_mismatch, resumed_from_run_id, pid, host, heartbeat_at, started_at,
 			ended_at, result, rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source,
 			reported_total_cost_usd, output, error, slot_id, decider, decider_row, repo, flywheel_version)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, NULL, ?)`,
 		int64PtrColumn(in.CycleID), string(in.Kind), nullableTextColumn(string(in.Judgment)), challengeIDCol,
 		challengeVersionCol, int64PtrColumn(in.PlanVersion), sessionIDCol, int64PtrColumn(in.ResumedFromRunID),
 		in.PID, in.Host, formatTimestamp(in.HeartbeatAt), formatTimestamp(in.StartedAt),
 		in.MaxBudgetUSD, string(in.BudgetBucket),
 		int64PtrColumn(in.SlotID), nullableTextColumn(string(in.Decider)), int64PtrColumn(in.DeciderRow),
-		nullableTextColumn(in.Repo), nullableTextColumn(flywheelVersion()),
+		nullableTextColumn(flywheelVersion()),
 	)
 	if store.IsUniqueViolation(err) {
 		// 部分一意索引のどちらに当たったかは、スロットを指定していて、その
@@ -597,9 +581,9 @@ func updateRunEnd(ctx context.Context, tx *sql.Tx, id int64, in updateRunEndInpu
 		return nil, err
 	}
 	if runKind(kind) == runKindPredict {
-		// predict の result は 6 値、cost_source は reported か unknown
-		// （delta は使わない）。
-		if !predictRunResultValid(in.Result) || in.CostSource == costSourceDelta {
+		// 過去の predict の行に許す更新は、終わっていない行をサイクルの後片付けが中断にするものだけ。
+		// cost_source は reported か unknown（delta は使わない）。
+		if in.Result != runResultInterrupted || in.CostSource == costSourceDelta {
 			return nil, ErrValidation
 		}
 	}

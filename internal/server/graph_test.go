@@ -12,7 +12,11 @@ import (
 
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/core/coretest"
+	"github.com/masanami/flywheel/internal/view"
 )
+
+// このファイルのサブテスト名の AC-<n> は、core の見直しの区切り S1（docs/features/core-redesign.md。番号は masanami/flywheel#732 の
+// 受入基準の並び順）の受入基準の番号。同じファイルの別の仕様の番号とは無関係。
 
 // docs/features/ui-relation-graph.md §関係グラフの API を、実ストア・実際の HTTP の要求で検証する。
 
@@ -211,95 +215,84 @@ func errorCode(t *testing.T, body string) string {
 	return c
 }
 
-// 実データの形: ストアに入れた衝突の行が、API を経由して kind=conflict の辺になる（向きあり・向きなし）。
-// 片方が完了・取り下げになった衝突は返さない。前提の辺は変わらない。
-func TestGraphAPI_ConflictEdgesComeFromTheStoredRows(t *testing.T) {
+// 関係グラフの API の辺の種類・登録の経路の値の集合と、前提の辺（AC-44・AC-45・AC-47）。
+func TestGraphAPI_EdgeVocabularyHasNoConflict(t *testing.T) {
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	ws := graphWorkspace(t, now)
-	const at = "2026-11-05T01:02:03.000Z"
-	ins := `INSERT INTO challenge_conflict (challenge_id, conflicts_with_id, directed, created_at) VALUES (?, ?, ?, ?)`
-	coretest.Exec(t, ws, ins, 6, 5, 1, at) // C-6 を後回しにして C-5 を先に委譲した
-	coretest.Exec(t, ws, ins, 2, 3, 0, at) // C-2 と C-3 はまだどちらも委譲していない
-	coretest.Exec(t, ws, ins, 3, 7, 1, at) // C-7 は取り下げ済み（返さない）
+	dir, _ := writeFakeGH(t, ghRoutesPending())
+	withGHOnPATH(t, dir)
+	port := startServerAt(t, now, core.FleetWorkspace{Name: "w", Path: ws})
+	edges := mustJSON(t, port, "/api/v1/workspaces/w/graph")["edges"].([]any)
+
+	// API が返しうる値の閉集合（view が生成物へ書き出す一覧）。返った辺 1 本の値だけでなく、集合そのものを確かめる。
+	closed := map[string][]string{}
+	for _, cs := range view.ClosedSets() {
+		closed[cs.Name] = cs.Codes
+	}
+	t.Run("AC-44_edge_kinds_have_no_conflict", func(t *testing.T) {
+		if len(edges) == 0 {
+			t.Fatal("no edges returned")
+		}
+		if got := closed["GRAPH_EDGE_KIND_CODES"]; !reflect.DeepEqual(got, []string{"prerequisite"}) {
+			t.Errorf("辺の種類の閉集合 = %v, want [prerequisite]", got)
+		}
+		for _, e := range edges {
+			if k := e.(map[string]any)["kind"]; k == "conflict" {
+				t.Errorf("edge kind = %v", k)
+			}
+		}
+	})
+	t.Run("AC-45_registered_via_has_no_prediction", func(t *testing.T) {
+		if len(edges) == 0 {
+			t.Fatal("no edges returned")
+		}
+		if got := closed["GRAPH_REGISTERED_VIA_CODES"]; !reflect.DeepEqual(got, []string{"plan", "manual", "unknown"}) {
+			t.Errorf("登録の経路の閉集合 = %v, want [plan manual unknown]", got)
+		}
+		for _, e := range edges {
+			if v := e.(map[string]any)["registered_via"]; v == "prediction" {
+				t.Errorf("registered_via = %v", v)
+			}
+		}
+	})
+	t.Run("AC-47_two_challenges_with_a_recorded_prerequisite_give_one_prerequisite_edge", func(t *testing.T) {
+		if len(edges) != 1 {
+			t.Fatalf("edges = %v, want exactly one", edges)
+		}
+		e := edges[0].(map[string]any)
+		if e["from"] != "C-5" || e["to"] != "C-4" || e["kind"] != "prerequisite" {
+			t.Errorf("edge = %v, want prerequisite C-5 -> C-4", e)
+		}
+	})
+}
+
+// 課題の詳細の API（GET …/challenges/{id}）の waiting は、まだ終わっていない前提の課題だけを返す（AC-46）。
+func TestChallengeAPI_WaitingHasOnlyPrerequisites(t *testing.T) {
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	ws := graphWorkspace(t, now)
 	dir, _ := writeFakeGH(t, ghRoutesPending())
 	withGHOnPATH(t, dir)
 	port := startServerAt(t, now, core.FleetWorkspace{Name: "w", Path: ws})
 
-	m := mustJSON(t, port, "/api/v1/workspaces/w/graph")
-	type edge struct {
-		From, To, Kind, Via string
-		Directed, Satisfied bool
-	}
-	var got []edge
-	for _, e := range m["edges"].([]any) {
-		x := e.(map[string]any)
-		assertKeys(t, "edge", x, "from", "to", "kind", "directed", "satisfied", "registered_via", "registered_at")
-		got = append(got, edge{x["from"].(string), x["to"].(string), x["kind"].(string), x["registered_via"].(string), x["directed"].(bool), x["satisfied"].(bool)})
-		if x["kind"] == "conflict" && x["registered_at"] != at {
-			t.Errorf("conflict registered_at = %v, want %s", x["registered_at"], at)
+	t.Run("AC-46_waiting_has_no_conflicts_key", func(t *testing.T) {
+		for _, id := range []string{"C-2", "C-3", "C-4", "C-6"} {
+			w := mustJSON(t, port, "/api/v1/workspaces/w/challenges/"+id)["waiting"].(map[string]any)
+			assertKeys(t, id+" waiting", w, "prerequisites")
 		}
-	}
-	want := []edge{
-		{"C-2", "C-3", "conflict", "prediction", false, false},
-		{"C-5", "C-4", "prerequisite", "manual", true, false},
-		{"C-6", "C-5", "conflict", "prediction", true, false},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("edges = %+v, want %+v", got, want)
-	}
+		w4 := mustJSON(t, port, "/api/v1/workspaces/w/challenges/C-4")["waiting"].(map[string]any)
+		pre := w4["prerequisites"].([]any)
+		if len(pre) != 1 || pre[0].(map[string]any)["challenge_id"] != "C-5" {
+			t.Errorf("C-4 prerequisites = %v, want C-5", pre)
+		}
+	})
 }
 
-// ボードの詳細の API（GET …/challenges/{id}）の waiting は、まだ終わっていない前提の課題と、
-// 衝突のため後回しにした相手を別の一覧で返す。先に委譲した側・向きの無い組には付かない。
-func TestChallengeAPI_WaitingListsPrerequisitesAndTheConflictSeparately(t *testing.T) {
-	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
-	ws := graphWorkspace(t, now)
-	const at = "2026-11-05T01:02:03.000Z"
-	ins := `INSERT INTO challenge_conflict (challenge_id, conflicts_with_id, directed, created_at) VALUES (?, ?, ?, ?)`
-	coretest.Exec(t, ws, ins, 4, 6, 1, at) // C-4 は C-6 に譲った（C-4 は前提の C-5 も待っている）
-	coretest.Exec(t, ws, ins, 2, 3, 0, at)
-	dir, _ := writeFakeGH(t, ghRoutesPending())
-	withGHOnPATH(t, dir)
-	port := startServerAt(t, now, core.FleetWorkspace{Name: "w", Path: ws})
-
-	waiting := func(id string) map[string]any {
-		w := mustJSON(t, port, "/api/v1/workspaces/w/challenges/"+id)["waiting"].(map[string]any)
-		assertKeys(t, "waiting", w, "prerequisites", "conflicts")
-		return w
-	}
-	w4 := waiting("C-4")
-	pre := w4["prerequisites"].([]any)
-	conf := w4["conflicts"].([]any)
-	if len(pre) != 1 || len(conf) != 1 {
-		t.Fatalf("C-4 waiting = %v", w4)
-	}
-	p0 := pre[0].(map[string]any)
-	assertKeys(t, "prerequisite", p0, "challenge_id", "status", "title")
-	if p0["challenge_id"] != "C-5" {
-		t.Errorf("prerequisite = %v, want C-5", p0)
-	}
-	if c0 := conf[0].(map[string]any); c0["challenge_id"] != "C-6" {
-		t.Errorf("conflict = %v, want C-6", c0)
-	}
-	for _, id := range []string{"C-6", "C-2", "C-3"} {
-		w := waiting(id)
-		if len(w["conflicts"].([]any)) != 0 {
-			t.Errorf("%s waiting = %v, want no conflicts (not the deferred side)", id, w)
-		}
-	}
-}
-
-// 画面（web）の「実データの形」の確かめ。ストアに衝突の行を入れ、API を経由した値（graph と、課題ごとの waiting）を
-// web/src/testing/conflict-api.golden.json と照合する。web の Vitest は同じファイルを読んで、関係グラフとボードの詳細を
+// 画面（web）の「実データの形」の確かめ。API を経由した値（graph と、課題ごとの waiting）を
+// web/src/testing/relation-api.golden.json と照合する。web の Vitest は同じファイルを読んで、関係グラフとボードの詳細を
 // 描く（mock の手書きの形ではなく、本物の API の形で画面を確かめる）。更新は FLYWHEEL_UPDATE_GOLDEN=1 で書き直す。
 func TestGraphAPI_RealShapeGoldenForTheWebScreen(t *testing.T) {
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	ws := graphWorkspace(t, now)
-	const at = "2026-11-05T01:02:03.000Z"
-	ins := `INSERT INTO challenge_conflict (challenge_id, conflicts_with_id, directed, created_at) VALUES (?, ?, ?, ?)`
-	coretest.Exec(t, ws, ins, 4, 6, 1, at) // C-4 は前提の C-5 を待ち、C-6 に譲って後回しにした
-	coretest.Exec(t, ws, ins, 2, 3, 0, at) // 向きの無い組
-	coretest.Exec(t, ws, ins, 3, 7, 1, at) // 相手の C-7 が取り下げ済み（返さない）
 	// 前提の登録の日時は実時計なので、照合できるよう固定する（作業ログの at も同じ値にして経路 manual を保つ）
 	coretest.Exec(t, ws, `UPDATE challenge_dependency SET created_at = ?`, "2026-11-02T00:00:00.000Z")
 	coretest.Exec(t, ws, `UPDATE activity SET at = ? WHERE action = 'dep_add'`, "2026-11-02T00:00:00.000Z")
@@ -318,7 +311,7 @@ func TestGraphAPI_RealShapeGoldenForTheWebScreen(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = append(got, '\n')
-	const golden = "../../web/src/testing/conflict-api.golden.json"
+	const golden = "../../web/src/testing/relation-api.golden.json"
 	if os.Getenv("FLYWHEEL_UPDATE_GOLDEN") == "1" {
 		if err := os.WriteFile(golden, got, 0o644); err != nil {
 			t.Fatal(err)
@@ -329,6 +322,6 @@ func TestGraphAPI_RealShapeGoldenForTheWebScreen(t *testing.T) {
 		t.Fatalf("read golden: %v (FLYWHEEL_UPDATE_GOLDEN=1 go test ./internal/server -run RealShapeGolden で書き出す)", err)
 	}
 	if string(want) != string(got) {
-		t.Errorf("API の応答が web/src/testing/conflict-api.golden.json と違う。意図した変更なら FLYWHEEL_UPDATE_GOLDEN=1 で書き直し、web の Vitest も通す\n got: %s", got)
+		t.Errorf("API の応答が web/src/testing/relation-api.golden.json と違う。意図した変更なら FLYWHEEL_UPDATE_GOLDEN=1 で書き直し、web の Vitest も通す\n got: %s", got)
 	}
 }

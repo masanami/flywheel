@@ -144,8 +144,8 @@ func TestCycle_WithoutConnectors_RunAndVerifyPhasesAreSkipped(t *testing.T) {
 			t.Errorf("%s phase = %v, want skipped with no items and no not_started", name, p)
 		}
 	}
-	if groups := cyclePhase(t, doc, "run")["serial_groups"].([]any); len(groups) != 0 {
-		t.Errorf("run.serial_groups = %v, want []", groups)
+	if _, ok := cyclePhase(t, doc, "run")["serial_groups"]; ok {
+		t.Errorf("run phase has a serial_groups key: %v", cyclePhase(t, doc, "run"))
 	}
 }
 

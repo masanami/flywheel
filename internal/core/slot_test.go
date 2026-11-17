@@ -100,13 +100,13 @@ func worktreeRepoForTest(count int) ConnectorRepo {
 	return ConnectorRepo{Name: "r", Remote: "o/r", DefaultBranch: "main", Slots: ConnectorRepoSlots{Provider: "worktree", Base: "base", Count: count}}
 }
 
-// bindRunForTest は predict の run を slot_id 付きで作る SlotBinder。
+// bindRunForTest は課題を持たない判断（J8）の run を slot_id 付きで作る SlotBinder。
 func bindRunForTest(ctx context.Context) SlotBinder {
 	return func(tx *sql.Tx, slotID int64) (int64, error) {
 		now := time.Now()
 		r, err := insertRun(ctx, tx, 0, insertRunInput{
-			Kind: runKindPredict, PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now,
-			MaxBudgetUSD: 1, BudgetBucket: budgetBucketPredict, SlotID: &slotID, Repo: "r",
+			Kind: runKindJudgment, Judgment: judgmentJ8, SessionID: "s", PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now,
+			MaxBudgetUSD: 1, BudgetBucket: budgetBucketJudgment, SlotID: &slotID,
 		})
 		if err != nil {
 			return 0, err

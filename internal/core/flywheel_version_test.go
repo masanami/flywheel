@@ -66,8 +66,8 @@ func TestInsertRun_WritesFlywheelVersionForEveryKind(t *testing.T) {
 			j.Kind, j.Judgment = runKindJudgment, judgmentJ5
 			d := base
 			d.Kind = runKindDelegate
-			p := insertRunInput{Kind: runKindPredict, Repo: "a/b", PID: 2147483646, Host: cardHost(t), HeartbeatAt: now, StartedAt: now,
-				MaxBudgetUSD: 1_000_000, BudgetBucket: budgetBucketPredict}
+			p := insertRunInput{Kind: runKindJudgment, Judgment: judgmentJ8, SessionID: "66666666-6666-4666-8666-666666666666", PID: 2147483646, Host: cardHost(t), HeartbeatAt: now, StartedAt: now,
+				MaxBudgetUSD: 1_000_000, BudgetBucket: budgetBucketJudgment}
 			err := s.db.Write(ctx, func(tx *sql.Tx) error {
 				if _, err := insertRun(ctx, tx, cid, j); err != nil {
 					return err

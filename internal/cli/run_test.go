@@ -116,10 +116,8 @@ func TestRun_DelegatesAndReturnsAPhaseObject(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items = %v", items)
 	}
-	// 直列化グループ: 候補 1 件だけのグループ。取り込み元の対応が無い候補は予測できない（not_predictable）。
-	wantGroups := []any{map[string]any{"repo": "direct-repo", "challenges": []any{id}, "reasons": []any{"not_predictable"}, "judgments": []any{}, "prediction_head_sha": nil}}
-	if !reflect.DeepEqual(phase["serial_groups"], wantGroups) {
-		t.Errorf("serial_groups = %#v, want %#v", phase["serial_groups"], wantGroups)
+	if _, ok := phase["serial_groups"]; ok {
+		t.Errorf("phase has a serial_groups key: %v", phase)
 	}
 	it := items[0].(map[string]any)
 	if it["challenge_id"] != id || it["result"] != "succeeded" || it["outcome"] != "completed" || it["status"] != "verifying" {
@@ -242,8 +240,9 @@ func TestRun_RunInProgress_ExitOneAndNothingStarted(t *testing.T) {
 }
 
 // 先に起動した run が動いている間の 2 つ目の run は、サイクルの排他で locked（終了コード 1）になり、
-// 委譲を起動しない。
-func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *testing.T) {
+// 委譲を起動しない。下の _OtherIsLocked との違いはスロットの宣言: こちらは標準の宣言（clone のスロット 1 本）、
+// 下は worktree のスロット 1 本を同じリポジトリの 2 課題が取り合う宣言。どちらでも結果は locked になる。
+func TestRun_SingleCloneSlot_SecondRunWhileFirstRuns_IsLocked(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
 	a := newInProgressForRun(t, ws, nil)
@@ -274,8 +273,8 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *tes
 	if results[0].code != 0 {
 		t.Errorf("first: exit=%d stderr=%s", results[0].code, results[0].stderr)
 	}
-	// run は周と同じ排他を取るので、先の run が動いている間の 2 つ目の run は、スロットの割り当てに
-	// 進む前に locked で断られる（serialized には至らない）。
+	// run はサイクルと同じ排他を取るので、先の run が動いている間の 2 つ目の run は、スロットの割り当てに
+	// 進む前に locked で断られる。
 	if results[1].code != 1 || !strings.Contains(results[1].stderr, `"locked"`) {
 		t.Errorf("second: exit=%d stderr=%s, want exit 1 locked", results[1].code, results[1].stderr)
 	}
@@ -284,25 +283,14 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_OneLaunchesTheOtherIsLocked(t *tes
 	}
 }
 
-// 衝突の予測で 2 課題が別のグループになる場合でも、動いている run があれば 2 つ目の run は
-// サイクルの排他で locked になる（スロットの割り当てには進まない）。
-func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIsLocked(t *testing.T) {
+// 同じリポジトリの 2 課題が worktree のスロット 1 本を取り合う宣言でも、動いている run があれば 2 つ目の run は
+// サイクルの排他で locked になる（スロットの割り当てには進まない）。上の _SecondRunWhileFirstRuns_IsLocked との違いは
+// スロットの宣言（こちらは worktree の 1 本）だけで、残す意図は宣言の種類によらず排他が先に効くこと。
+func TestRun_SingleWorktreeSlot_SameRepoSecondRun_IsLocked(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
-	script := filepath.Join(t.TempDir(), "predict.sh")
-	// 共有ファイル・依存が無い予測（2 課題は別のグループになる）。
-	body := "#!/bin/sh\n" +
-		"printf '%s' '{\"schema\":\"harness.conflict-prediction/v1\",\"complete\":true,\"error\":null,\"head_sha\":\"cafe01\",\"cost_usd\":0.1,\"unknown_cost_count\":0," +
-		"\"issues\":[{\"issue\":7,\"status\":\"predicted\"},{\"issue\":9,\"status\":\"predicted\"}]," +
-		"\"pairs\":[{\"issues\":[7,9],\"status\":\"predicted\",\"shared_files\":[],\"dependency\":null}]}'\n"
-	if err := writeExecutable(script, []byte(body)); err != nil {
-		t.Fatal(err)
-	}
-	conn := strings.Replace(runConnectorsFixture, `{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "operations"`,
-		`{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "conflict_prediction": {"command": ["`+script+`"], "schema": "harness.conflict-prediction/v1"}, "operations"`, 1)
+	conn := runConnectorsFixture
 	conn = strings.Replace(conn, `"remote": "o/flywheel"`, `"remote": "o/r"`, 1)
-	// 予測の口の作業ディレクトリは、clone では idle のスロットだけ（1 本が塞がると予測できず fail-closed で
-	// 同じグループになる）。worktree は元のクローンなので、スロットが 1 本でも塞がっていて予測できる。
 	conn = strings.Replace(conn, `"slots": {"provider": "clone", "paths": ["slot-f"]}`, `"slots": {"provider": "worktree", "base": "slot-f", "count": 1}`, 1)
 	slotGit(t, filepath.Join(ws, "slot-f"), "remote", "set-url", "origin", "https://github.com/o/r.git")
 	writeConnectorsJSONForTest(t, ws, conn)
@@ -314,7 +302,7 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIs
 	withFakeGHRoutesOnPATH(t, append(j2GHRoutes(t), fakeGHRoute{match: "repos/o/r/issues/9/comments?per_page=100&page=1", stdout: "[]"}))
 	started := filepath.Join(t.TempDir(), "started")
 	route := delegateRoute("completed")
-	route.SleepFirstSeconds = 6 // 後続が予測の口と gh を通る間も、先行がスロットを持ち続ける余裕
+	route.SleepFirstSeconds = 6 // 後続が gh を通る間も、先行がスロットを持ち続ける余裕
 	route.StartedFile = started
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{route, j3Route("b")}, "")
 
@@ -343,6 +331,116 @@ func TestRun_SingleSlot_TwoProcessesRaceForIt_SeparateGroupsByPrediction_OtherIs
 	}
 	if n := len(delegateRunsOf(t, ws)); n != 1 {
 		t.Errorf("delegate runs = %d, want 1", n)
+	}
+}
+
+// 契約の接続ツール（form: cli）の宣言。start はすぐ戻り、実行は排他の外で走り続ける。clone のスロットは 2 本（空きは 2 件分）。
+const runContractConnectorsFixture = `{
+  "version": 1,
+  "connectors": [
+    {"id": "tool", "form": "cli", "permission_mode": "default",
+     "commands": {
+       "start": ["tool", "start", "--challenge", "{challenge_id}"],
+       "status": ["tool", "status", "{run_id}"],
+       "resume": ["tool", "resume", "{run_id}", "--answer", "{answer}"],
+       "cancel": ["tool", "cancel", "{run_id}"]
+     },
+     "contract_version": 1,
+     "operations": [{"id": "impl", "interactive": false, "child_may_decide": true, "artifacts": "pr"}]}
+  ],
+  "repos": [
+    {"name": "tool-repo", "remote": "o/r", "default_branch": "main", "connector": "tool", "slots": {"provider": "clone", "paths": ["slot-a", "slot-b"]}}
+  ]
+}`
+
+// putFakeContractToolOnPATH は契約の偽の接続ツール tool を PATH の先頭に足す。start は終わらない実行（running）を
+// すぐ返し（run_id は引数の課題の ID から "ext-<課題の ID>"）、status も running を返す。呼ばれた引数列は logPath へ 1 行ずつ追記する。
+func putFakeContractToolOnPATH(t *testing.T, logPath string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> " + shellSingleQuote(logPath) + "\n" +
+		"case \"$1\" in\n" +
+		"start) printf '{\"contract_version\":1,\"run_id\":\"ext-%s\",\"state\":\"running\",\"summary\":\"s\"}\\n' \"$3\";;\n" +
+		"status) printf '{\"contract_version\":1,\"run_id\":\"%s\",\"state\":\"running\",\"summary\":\"s\"}\\n' \"$2\";;\n" +
+		"*) exit 1;;\n" +
+		"esac\n"
+	dir := t.TempDir()
+	if err := writeExecutable(filepath.Join(dir, "tool"), []byte(script)); err != nil {
+		t.Fatalf("write fake contract tool: %v", err)
+	}
+	addToolDir(t, dir)
+}
+
+// 出どころ: core の見直しの区切り S1（docs/features/core-redesign.md。親は masanami/flywheel#732）の受入基準の
+// 並び順の AC-3。同じリポジトリに委譲先のフローを通る委譲（form: cli の契約の実行）が走っているとき、別の
+// `flywheel run <課題の ID>` は、同時に走らせる数の上限とスロットに空きがあれば、その課題を起動する。
+// 契約の start はすぐ戻り、実行は排他の外で走り続けるので、1 件目の run が終わればサイクルの排他は外れている。
+// 同期で走る形の委譲（指示文を直接渡す形・スキルを呼ぶ形）が走っている間は locked になる（上の 2 つのテスト。変えない）。
+func TestRun_AC3_ContractRunRunning_SecondRunOfSameRepoLaunches(t *testing.T) {
+	parallelTools(t, false)
+	ws := setupWorkspaceWithPosition(t)
+	writeAgentJSONForTest(t, ws, `{"position_file": "position.md", "max_parallel_runs": 2}`)
+	writeConnectorsJSONForTest(t, ws, runContractConnectorsFixture)
+	slotClone(t, filepath.Join(ws, "slot-a"), "https://github.com/o/r.git")
+	slotClone(t, filepath.Join(ws, "slot-b"), "https://github.com/o/r.git")
+	mut := func(m map[string]any) { m["repo"] = "tool-repo"; m["operation"] = "impl" }
+	a := newInProgressForRun(t, ws, mut)
+	b := newInProgressForRun(t, ws, mut)
+	toolLog := filepath.Join(t.TempDir(), "tool.log")
+	putFakeContractToolOnPATH(t, toolLog)
+	// run は claude の有無を確かめるが、form: cli の委譲は claude を起動しない（どの呼び出しにも応じない偽の claude）。
+	putRoutedFakeClaudeOnPATH(t, nil, "")
+
+	runOne := func(id string) (code int, stdout, stderr string) {
+		var o, e bytes.Buffer
+		code = runWithLookPath([]string{"run", id, "--workspace", ws, "--json"}, strings.NewReader(""), &o, &e, defaultCommands(), lookPathFor(t))
+		return code, o.String(), e.String()
+	}
+	unfinishedContractRuns := func() int {
+		n := 0
+		for _, line := range strings.Split(coretest.DumpTables(t, ws, "contract_run"), "\n") {
+			if strings.HasPrefix(line, "[") && strings.Contains(line, " running ") {
+				n++
+			}
+		}
+		return n
+	}
+
+	if code, _, stderr := runOne(a); code != 0 {
+		t.Fatalf("first: exit=%d stderr=%s", code, stderr)
+	}
+	if n := unfinishedContractRuns(); n != 1 {
+		t.Fatalf("unfinished contract runs after the first run = %d, want 1", n)
+	}
+
+	code, stdout, stderr := runOne(b)
+	if code != 0 {
+		t.Fatalf("second: exit=%d stderr=%s, want 0 (not locked, serialized or slot_unavailable)", code, stderr)
+	}
+	for _, bad := range []string{`"locked"`, `"serialized"`, `"slot_unavailable"`} {
+		if strings.Contains(stdout+stderr, bad) {
+			t.Errorf("second: output contains %s: stdout=%s stderr=%s", bad, stdout, stderr)
+		}
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("second: stdout is not JSON: %v (%q)", err, stdout)
+	}
+	items := phaseOf(t, doc)["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["challenge_id"] != b {
+		t.Errorf("second: items = %v, want %s launched", items, b)
+	}
+	if n := unfinishedContractRuns(); n != 2 {
+		t.Errorf("unfinished contract runs after the second run = %d, want 2", n)
+	}
+	starts := 0
+	for _, line := range readOrderLog(t, toolLog) {
+		if strings.HasPrefix(line, "start ") {
+			starts++
+		}
+	}
+	if starts != 2 {
+		t.Errorf("tool start calls = %d, want 2 (log: %v)", starts, readOrderLog(t, toolLog))
 	}
 }
 
@@ -443,59 +541,6 @@ func TestRun_SourceBound_J3GetsUpstreamViaGET_AndReadValuesStay(t *testing.T) {
 	sb, _ := runJSON(t, ws, "show", id)["source_binding"].(map[string]any)
 	if sb == nil || sb["read_comments_count"] != float64(0) {
 		t.Errorf("source_binding = %v, the read values must not change", sb)
-	}
-}
-
-// 衝突の予測の口（宣言の command に置いた偽の実行ファイル）が呼ばれ、結果から直列化グループができる
-// （AC-297・301・334・335・347・351 の CLI 側）。`flywheel run`（ID の省略）も cycle の委譲の段と同じ
-// core の処理を通る。
-func TestRun_PredictionHook_GroupsFromSharedFiles_AndRecordsAPredictRun(t *testing.T) {
-	parallelTools(t, false)
-	ws := setupRunWorkspace(t)
-	argvLog := filepath.Join(t.TempDir(), "predict.argv")
-	script := filepath.Join(t.TempDir(), "predict.sh")
-	// PATH が偽の実行ファイルの置き場だけでも動くよう、シェルの組み込みだけを使う。
-	body := "#!/bin/sh\necho \"$@\" >> " + shellSingleQuote(argvLog) + "\n" +
-		"printf '%s' '{\"schema\":\"harness.conflict-prediction/v1\",\"complete\":true,\"error\":null,\"head_sha\":\"cafe01\",\"cost_usd\":0.1,\"unknown_cost_count\":0," +
-		"\"issues\":[{\"issue\":7,\"status\":\"predicted\"},{\"issue\":9,\"status\":\"predicted\"}]," +
-		"\"pairs\":[{\"issues\":[7,9],\"status\":\"predicted\",\"shared_files\":[{\"path\":\"a.go\",\"merge_friendly\":false,\"ignored\":false}],\"dependency\":null}]}'\n"
-	if err := writeExecutable(script, []byte(body)); err != nil {
-		t.Fatal(err)
-	}
-	conn := strings.Replace(runConnectorsFixture, `{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "operations"`,
-		`{"id": "harness", "form": "plugin", "permission_mode": "acceptEdits", "conflict_prediction": {"command": ["`+script+`"], "schema": "harness.conflict-prediction/v1"}, "operations"`, 1)
-	// 取り込み元の Issue（o/r）が対象リポジトリの Issue であるときだけ、番号を予測の口へ渡せる。
-	conn = strings.Replace(conn, `"remote": "o/flywheel"`, `"remote": "o/r"`, 1)
-	slotGit(t, filepath.Join(ws, "slot-f"), "remote", "set-url", "origin", "https://github.com/o/r.git")
-	writeConnectorsJSONForTest(t, ws, conn)
-	mut := func(m map[string]any) { m["repo"] = "flywheel-repo"; m["operation"] = "impl-op" }
-	a := newInProgressForRun(t, ws, mut)
-	b := newInProgressForRun(t, ws, mut)
-	bindChallengeToIssue(t, ws, a, 7, 2, "2026-09-25T09:00:00Z")
-	bindChallengeToIssue(t, ws, b, 9, 0, "2026-09-25T09:00:00Z")
-	withFakeGHRoutesOnPATH(t, append(j2GHRoutes(t), fakeGHRoute{match: "repos/o/r/issues/9/comments?per_page=100&page=1", stdout: "[]"}))
-	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{delegateRoute("completed"), j3Route("b")}, "")
-
-	phase := phaseOf(t, runJSON(t, ws, "run"))
-	groups, _ := phase["serial_groups"].([]any)
-	want := []any{map[string]any{"repo": "flywheel-repo", "challenges": []any{a, b}, "reasons": []any{"shared_files"}, "judgments": []any{}, "prediction_head_sha": "cafe01"}}
-	if !reflect.DeepEqual(groups, want) {
-		t.Errorf("serial_groups = %#v, want %#v", groups, want)
-	}
-	if raw, _ := os.ReadFile(argvLog); strings.TrimSpace(string(raw)) != "--max-budget-usd 2 7 9" {
-		t.Errorf("prediction argv = %q, want \"--max-budget-usd 2 7 9\"", raw)
-	}
-	var predict []map[string]any
-	for _, r := range runJSON(t, ws, "runs")["runs"].([]any) {
-		if m := r.(map[string]any); m["kind"] == "predict" {
-			predict = append(predict, m)
-		}
-	}
-	if len(predict) != 1 || predict[0]["challenge_id"] != nil || predict[0]["result"] != "succeeded" {
-		t.Errorf("predict runs = %v", predict)
-	}
-	if n := len(delegateRunsOf(t, ws)); n != 2 {
-		t.Errorf("delegate runs = %d, want both candidates launched one after the other", n)
 	}
 }
 

@@ -685,35 +685,6 @@ func TestContractRun_CountsTowardParallelDelegations(t *testing.T) {
 	}
 }
 
-// 前の周から続く終わっていない契約の run を持つ課題は、動いている委譲として衝突の予測へ渡す。
-func TestContractRun_IsARunningDelegationForPrediction(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	f.client.startOut = contractOut(ContractStateRunning, nil, nil)
-	if _, err := f.s.StartContractDelegation(context.Background(), ContractStartInput{
-		ChallengeID: f.cid, ConnectorID: "tool", AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client,
-		MaxBudgetUSD: 5, // 周の外で始めた（＝この周より前から続く）契約の run
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// リポジトリは承認済みの計画から引く（計画の検査は委譲の宣言で行うので、同じリポジトリを持つ委譲の宣言を渡す）。
-	running, err := f.s.loadRunningDelegations(context.Background(), DelegateInput{CycleID: f.cycle(t, 300), AgentDecl: f.agent, ConnDecl: newDelegateFixture(t).conn})
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, rs := range running {
-		for _, r := range rs {
-			if r.ID == f.cid {
-				found = true
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("running = %+v, want the challenge with the open contract run", running)
-	}
-}
-
 // 掃引の 1 件の保留が失敗しても、残りの掃引と状態の読みを続け、失敗は返り値で知らせる。
 func TestPollContractRuns_SweepFailureDoesNotStopTheReads(t *testing.T) {
 	t.Parallel()
@@ -824,4 +795,50 @@ func (f *contractFixture) insertRow(t *testing.T, q string, args ...any) int64 {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// オーナーの回答待ち（契約の run が waiting で課題が保留）は同時委譲数に数えない（AC-50）。
+// この AC-<n> は core の見直しの区切り S1（docs/features/core-redesign.md。番号は masanami/flywheel#732 の受入基準の並び順）の番号。
+// 着手中の run は従来どおり数え（AC-52）、回答を受けて着手中へ戻れば数える（AC-53）。
+// 課題ごとの「実行中か」の判定は保留の間も真のまま（AC-55: 同じ課題へ新しい委譲を起動しない）。
+// このテストは数えだけを検証する。委譲の段を通した検証（AC-50〜AC-55。回答による再開〔resume〕が上限で止まらないことを含む）は
+// contract_delegate_ownerwait_test.go にある。
+func TestContractRun_OwnerWaitIsNotCountedTowardParallelDelegations(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	sch := &delegationScheduler{s: f.s, maxParallel: 1, preRepo: map[string]int{}}
+	n, _ := parseChallengeID(f.cid)
+	ask := waitingOut(&ContractRequestedAction{Kind: "answer", Decider: "human", Text: "どうする"}, nil)
+	f.client.startOut = contractOut(ContractStateRunning, nil, nil)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{ask}
+	f.poll(t)
+	f.setStatus(t, StatusInProgress)
+	for _, tc := range []struct {
+		st        Status
+		wantTotal int
+	}{
+		{StatusInProgress, 1}, {StatusAwaitingHuman, 0}, {StatusInProgress, 1},
+	} {
+		f.setStatus(t, tc.st)
+		c, err := sch.capacity(context.Background(), ConnectorRepo{Name: "none"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.dbTotal != tc.wantTotal {
+			t.Errorf("%s: dbTotal = %d, want %d", tc.st, c.dbTotal, tc.wantTotal)
+		}
+		var active bool
+		if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
+			active, err = challengeHasActiveRun(context.Background(), tx, n)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !active {
+			t.Errorf("%s: challengeHasActiveRun = false, want true", tc.st)
+		}
+	}
 }

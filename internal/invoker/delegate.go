@@ -27,8 +27,8 @@ func delegatedEnv(base []string, runID string) []string {
 	return append(withoutDelegatedMarker(base), core.DelegatedRunEnvVar+"="+runID)
 }
 
-// withoutDelegatedMarker は base から委譲の目印を取り除いた環境を返す。判断 J1〜J5 と衝突の予測の
-// 起動は、親の環境に目印があっても子へ渡さない。
+// withoutDelegatedMarker は base から委譲の目印を取り除いた環境を返す。判断 J1〜J5 の起動は、親の環境に
+// 目印があっても子へ渡さない。
 func withoutDelegatedMarker(base []string) []string {
 	prefix := core.DelegatedRunEnvVar + "="
 	env := make([]string, 0, len(base)+1)

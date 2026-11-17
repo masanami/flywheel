@@ -21,7 +21,6 @@ type GraphNode struct {
 }
 
 // GraphEdge は graph の edges[] の要素（依存 1 本）。前提（kind=prerequisite）は from が先行（依存先）、to が後続（依存元）。
-// 衝突（kind=conflict）は from が後回しにした課題、to が先に委譲した課題（directed=false の組は向きが無く、from は ID の小さい側）。
 type GraphEdge struct {
 	Directed      bool   `json:"directed"`
 	From          string `json:"from"`

@@ -524,8 +524,8 @@ func TestLauncher_InvokeDelegation_ResumePassesTheMarkerToo(t *testing.T) {
 	}
 }
 
-// 判断（J1〜J5）の起動と衝突予測の起動には目印を渡さない。
-func TestLauncher_InvokeJudgmentAndPredict_DoNotPassTheMarker(t *testing.T) {
+// 判断（J1〜J5）の起動には目印を渡さない。
+func TestLauncher_InvokeJudgment_DoesNotPassTheMarker(t *testing.T) {
 	setFakeClaudePath(t, newFakeClaudeDir(t))
 	ws := newWorkspace(t)
 	envLog := filepath.Join(t.TempDir(), "env.log")
@@ -539,14 +539,6 @@ func TestLauncher_InvokeJudgmentAndPredict_DoNotPassTheMarker(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(envLog); string(got) != "present=false value=" {
 		t.Errorf("judgment env log = %q, want no marker", got)
-	}
-	_ = os.Remove(envLog)
-	in, _, _ := predictInput(t, fakeClaudeFixture{Stdout: samplePrediction, EnvLogPath: envLog})
-	if _, err := NewLauncher().Predict(context.Background(), in); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := os.ReadFile(envLog); string(got) != "present=false value=" {
-		t.Errorf("predict env log = %q, want no marker", got)
 	}
 }
 

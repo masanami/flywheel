@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -137,4 +139,35 @@ func TestExport_WriteFailureIsStoreError(t *testing.T) {
 	if after := coretest.DumpTables(t, ws, "challenge", "activity", "sqlite_sequence"); after != before {
 		t.Error("a failed export changed the store")
 	}
+}
+
+// AC-34 の確かめ（衝突の記録の表を外した。出どころ: core の見直しの区切り S1〔docs/features/core-redesign.md。番号は masanami/flywheel#732 の受入基準の並び順〕）: `flywheel export` の出力の tables に challenge_conflict が無い。
+func TestExport(t *testing.T) {
+	t.Parallel()
+	t.Run("AC-34_export_output_has_no_challenge_conflict_table", func(t *testing.T) {
+		t.Parallel()
+		src := t.TempDir()
+		if _, err := core.Init(src); err != nil {
+			t.Fatal(err)
+		}
+		coretest.FillAllTables(t, src)
+		path := filepath.Join(t.TempDir(), "export.json")
+		runJSON(t, src, "export", "--out", path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc struct {
+			Tables map[string]json.RawMessage `json:"tables"`
+		}
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatal(err)
+		}
+		if len(doc.Tables) == 0 {
+			t.Fatal("export has no tables")
+		}
+		if _, ok := doc.Tables["challenge_conflict"]; ok {
+			t.Error("export tables contain challenge_conflict")
+		}
+	})
 }

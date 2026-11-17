@@ -54,6 +54,17 @@ func isJSONNull(raw json.RawMessage) bool {
 	return string(bytes.TrimSpace(raw)) == "null"
 }
 
+// rejectRemovedKeys は、無くした項目（removed）が残っている宣言を拒む。知らないキーを拒む
+// rejectUnknownKeys とは別の文にし、項目の名前と決まった語 `removed` を出す。
+func rejectRemovedKeys(raw map[string]json.RawMessage, removed []string, context string) error {
+	for _, k := range removed {
+		if _, ok := raw[k]; ok {
+			return fmt.Errorf("%s: %q has been removed (removed); delete it from the declaration", context, k)
+		}
+	}
+	return nil
+}
+
 // rejectUnknownKeys は raw のキーがすべて known（大文字小文字の完全一致）に
 // 含まれることを確認する。含まれないキーがあれば、そのキーを含むエラーを
 // context を付けて返す（fail-closed。encoding/json の DisallowUnknownFields は

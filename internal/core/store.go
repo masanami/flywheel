@@ -30,7 +30,7 @@ type Store struct {
 
 	// slotMu は同じプロセスの中のスロットの割り当てを直列にする（acquireSlot の 1 回の試行の
 	// 「検査・作業ツリーの切り替え〔prepareSlot〕→ busy にする〔assignSlot〕」を囲む）。
-	// 並行の委譲（直列グループごとの goroutine）が同じスロットを切り替え合わないため（#526）。
+	// 並行の委譲（候補ごとの goroutine）が同じスロットを切り替え合わないため（#526）。
 	slotMu sync.Mutex
 
 	// now はテストが時刻を差し替えるためのフック。nil なら time.Now を使う

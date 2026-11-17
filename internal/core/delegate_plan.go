@@ -1,9 +1,8 @@
 package core
 
-// このファイルは委譲の段の実行計画（親要件チケット #98 §実行スロット「同じリポジトリの並列と
-// 直列化グループ」・M3P25〜M3P34・M3P43・M3H8）を持つ: 委譲の候補と実行中の課題の収集、
-// 衝突の予測の口の呼び出し（リポジトリごとに 1 回）、直列化グループの決定（serial_group.go の
-// 純粋な規則）、グループごとの並行な実行、同時の起動の上限とスロットの枠待ち。
+// このファイルは委譲の段の実行計画を持つ: 委譲の候補の収集、候補ごとの並行な実行、
+// 同時の起動の上限とスロットの枠待ち。課題どうしを順に並べるかは、記録した前提
+// （challenge_dependency）・同時に走らせる数の上限（max_parallel_runs）・スロットの空きだけで決める。
 // 個別の `flywheel run`（ID の指定の有無を問わない）も Store.RunDelegation を通るので、
 // 同じ処理に乗る。
 
@@ -14,58 +13,35 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"time"
-)
-
-// NotStartedSerialized は、実行中の課題と同じ直列化グループに入ったため起動しなかったことを
-// 表す（S2。M3P31）。
-const NotStartedSerialized NotStartedReason = "serialized"
-
-// NotStartedPredictionLimit は、そのリポジトリの実行中の課題と委譲の候補の合計が予測の上限
-// （maxPredictionIssues）を超えたため、起動の順で上限より後ろの候補をこの周では起動せず次の周へ
-// 回したことを表す。`cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
-const NotStartedPredictionLimit NotStartedReason = "prediction_limit"
-
-// ErrSerialized は、ID を指定した `run` の課題が、終了していない委譲の run を持つ課題と同じ
-// 直列化グループに入ったことを表す（M3P43。CLI の `serialized`）。
-var ErrSerialized = errors.New("core: the challenge is in the same serial group as a running delegation")
-
-// 予測の口へ渡す Issue の件数の範囲（口の受け付ける件数。仮定）。
-const (
-	minPredictionIssues = 2
-	maxPredictionIssues = 20
 )
 
 // delegationWaitInterval は枠待ちの再評価の間隔の既定値。
 var delegationWaitInterval = slotWaitInterval
 
+// plannedCandidate は委譲の候補 1 件と、その課題のリポジトリ。候補 1 件が実行の 1 つの単位。
+type plannedCandidate struct {
+	Repo string
+	Cand planCandidate
+}
+
 // delegationPlan は委譲の段の実行計画。
 type delegationPlan struct {
-	groups []plannedGroup
+	// candidates は起動の順（優先度・ID の昇順）。
+	candidates []plannedCandidate
 	// notStarted は、承認済みなのに委譲の候補にできなかった課題（理由つき。黙って除外しない）。
 	notStarted []NotStarted
 }
 
-func (p *delegationPlan) serialGroups() []SerialGroup {
-	out := make([]SerialGroup, 0, len(p.groups))
-	for i := range p.groups {
-		out = append(out, p.groups[i].public())
-	}
-	return out
-}
-
-// groupOf は課題 id を候補に持つグループを返す。
-func (p *delegationPlan) groupOf(id string) *plannedGroup {
-	for i := range p.groups {
-		for _, c := range p.groups[i].Candidates {
-			if c.ID == id {
-				return &p.groups[i]
-			}
+// candidateOf は課題 id の候補を返す。
+func (p *delegationPlan) candidateOf(id string) (plannedCandidate, bool) {
+	for _, c := range p.candidates {
+		if c.Cand.ID == id {
+			return c, true
 		}
 	}
-	return nil
+	return plannedCandidate{}, false
 }
 
 // planOne は planDelegation が候補 1 件について読む事実。
@@ -110,102 +86,13 @@ func (s *Store) loadPlanCandidate(ctx context.Context, in DelegateInput, cid int
 	if repo == nil {
 		return planOne{}, false, "承認済みの計画のリポジトリが今の宣言に無い", nil
 	}
-	c := planCandidate{ID: ch.ID, Rank: priorityRank(ch.Priority), Seq: cid, Issue: sourceIssueNumber(binding, repo.Remote), Plan: plan.Body}
+	c := planCandidate{ID: ch.ID, Rank: priorityRank(ch.Priority), Seq: cid}
 	return planOne{cand: c, repo: repo.Name}, true, "", nil
 }
 
-// sourceIssueNumber は取り込み元の対応から予測の口へ渡せる Issue 番号を返す（渡せなければ 0）。
-// 取り込み元の Issue が対象リポジトリ（remote）の Issue でなければ、番号は別の Issue を指すので
-// 渡せない（0）。
-func sourceIssueNumber(sb *sourceBinding, remote string) int {
-	if sb == nil {
-		return 0
-	}
-	srcRepo, n, ok := parseExternalKey(sb.ExternalKey)
-	if !ok || n <= 0 || !strings.EqualFold(srcRepo, remote) {
-		return 0
-	}
-	return n
-}
-
-// loadRunningDelegations は、その周より前から終了していない委譲の run を持つ課題を、リポジトリごとに
-// 読む（スロットのリポジトリ。スロットが無ければ承認済みの計画のリポジトリ）。その周より前に始めた
-// 終わっていない契約の run（form: cli。周をまたいで続く）を持つ課題も、動いている委譲として含める。
-func (s *Store) loadRunningDelegations(ctx context.Context, in DelegateInput) (map[string][]planRunning, error) {
-	cycleInt, _ := parseCycleID(in.CycleID)
-	type raw struct {
-		cid  int64
-		repo string
-	}
-	var raws []raw
-	var bindings = map[int64]*sourceBinding{}
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx,
-			`SELECT r.challenge_id, COALESCE(sl.repo, '') FROM run r LEFT JOIN slot sl ON sl.id = r.slot_id
-			 WHERE r.kind = 'delegate' AND r.result IS NULL AND (r.cycle_id IS NULL OR r.cycle_id <> ?)
-			 UNION ALL
-			 SELECT k.challenge_id, '' FROM contract_run k JOIN run r ON r.id = k.start_run_id
-			 WHERE k.ended_at IS NULL AND (r.cycle_id IS NULL OR r.cycle_id <> ?)
-			 ORDER BY 1 ASC`, cycleInt, cycleInt)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var x raw
-			if err := rows.Scan(&x.cid, &x.repo); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			raws = append(raws, x)
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		for i := range raws {
-			b, err := loadSourceBindingByChallengeID(ctx, tx, raws[i].cid)
-			if err != nil {
-				return err
-			}
-			bindings[raws[i].cid] = b
-			if raws[i].repo != "" {
-				continue
-			}
-			if p, ok, err := loadApprovedPlan(ctx, tx, raws[i].cid); err != nil {
-				return err
-			} else if ok {
-				if v, ok := validateJ2Output([]byte(p.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: b != nil}); ok {
-					raws[i].repo = v.Repo
-				}
-			}
-		}
-		return nil
-	})
-	if err = classifyReadWriteErr(err); err != nil {
-		return nil, err
-	}
-	remoteOf := map[string]string{}
-	for _, r := range in.ConnDecl.Repos {
-		remoteOf[r.Name] = r.Remote
-	}
-	out := map[string][]planRunning{}
-	seen := map[int64]bool{}
-	for _, x := range raws {
-		if x.repo == "" || seen[x.cid] {
-			continue
-		}
-		seen[x.cid] = true
-		out[x.repo] = append(out[x.repo], planRunning{ID: formatChallengeID(x.cid), Issue: sourceIssueNumber(bindings[x.cid], remoteOf[x.repo]), Seq: x.cid})
-	}
-	return out, nil
-}
-
-// predictionWorkDir は予測の口の作業ディレクトリを返す。worktree は元のクローン、clone は
+// repoIdleWorkDir は契約のコマンドの作業ディレクトリ（リポジトリ単位）を返す。worktree は元のクローン、clone は
 // 状態が idle の作業用クローンのうち paths の順で最初のもの。idle が無ければ ok=false。
-func (s *Store) predictionWorkDir(ctx context.Context, repo ConnectorRepo) (string, bool, error) {
+func (s *Store) repoIdleWorkDir(ctx context.Context, repo ConnectorRepo) (string, bool, error) {
 	if slotProvider(repo.Slots.Provider) == slotProviderWorktree {
 		return filepath.Join(s.workspace, repo.Slots.Base), true, nil
 	}
@@ -231,143 +118,9 @@ func (s *Store) predictionWorkDir(ctx context.Context, repo ConnectorRepo) (stri
 	return "", false, nil
 }
 
-// predictRepo は repo の予測の結果（または予測が得られなかった理由）を決める。予測の口は、
-// 渡す Issue が 2〜20 件で予測できる候補が 1 件以上あるときだけ、1 回呼ぶ。
-func (s *Store) predictRepo(ctx context.Context, in DelegateInput, repo ConnectorRepo, connector *Connector, running []planRunning, cands []planCandidate) (repoPrediction, error) {
-	// 予測の宣言が無く、同時に判断点（J9）で判断するリポジトリ。動いている課題があれば判断しない（動いている課題との
-	// 組は判断に回さず直列。今までと同じ 1 つのグループになる）。
-	if repo.SerialJudgment && connector.ConflictPrediction == nil && len(running) == 0 && len(cands) >= 2 {
-		return repoPrediction{UndeclaredJudged: true}, nil
-	}
-	var reasons []SerialGroupReason
-	add := func(r SerialGroupReason) {
-		for _, x := range reasons {
-			if x == r {
-				return
-			}
-		}
-		reasons = append(reasons, r)
-	}
-	var send []int
-	rs := append([]planRunning(nil), running...)
-	sort.SliceStable(rs, func(i, j int) bool { return rs[i].Seq < rs[j].Seq })
-	for _, r := range rs {
-		if r.Issue == 0 {
-			add(SerialReasonNotPredictable)
-		} else {
-			send = append(send, r.Issue)
-		}
-	}
-	sorted := append([]planCandidate(nil), cands...)
-	sortCandidates(sorted)
-	predictable := 0
-	for _, c := range sorted {
-		if c.Issue == 0 {
-			add(SerialReasonNotPredictable)
-		} else {
-			send = append(send, c.Issue)
-			predictable++
-		}
-	}
-	// 件数の上限は planDelegation が limitPredictionCandidates で先に適用するので、ここでは超えない。
-	if len(reasons) > 0 {
-		return repoPrediction{FailClosed: reasons}, nil
-	}
-	if len(send) < minPredictionIssues || predictable < 1 {
-		return repoPrediction{}, nil
-	}
-	if connector.ConflictPrediction == nil {
-		return repoPrediction{FailClosed: []SerialGroupReason{SerialReasonNoPredictionDeclare}}, nil
-	}
-	if in.Predictor == nil {
-		return repoPrediction{FailClosed: []SerialGroupReason{SerialReasonPredictionFailed}}, nil
-	}
-	workDir, ok, err := s.predictionWorkDir(ctx, repo)
-	if err != nil {
-		return repoPrediction{}, err
-	}
-	if !ok {
-		return repoPrediction{FailClosed: []SerialGroupReason{SerialReasonPredictionFailed}}, nil
-	}
-	res, err := s.runPrediction(ctx, predictRunInput{
-		CycleID: in.CycleID, Repo: repo.Name, Declaration: *connector.ConflictPrediction, WorkDir: workDir, Issues: send,
-		MaxBudgetUSD: float64(len(send)) * in.AgentDecl.ConflictPredictionBudgetUSD,
-		TimeoutSec:   in.AgentDecl.TimeoutSec.Judgment, Predictor: in.Predictor,
-	})
-	switch {
-	case errors.Is(err, ErrBudgetExceeded):
-		return repoPrediction{FailClosed: []SerialGroupReason{SerialReasonPredictionBudget}}, nil
-	case err != nil:
-		return repoPrediction{}, err
-	}
-	if res.Output == nil {
-		return repoPrediction{FailClosed: []SerialGroupReason{SerialReasonPredictionFailed}}, nil
-	}
-	status := map[int]string{}
-	for _, i := range res.Output.Issues {
-		status[i.Issue] = i.Status
-	}
-	for _, n := range send {
-		switch status[n] {
-		case predictIssuePredicted:
-		case predictIssueBudgetExhausted:
-			add(SerialReasonPredictionBudget)
-		default: // failed、または出力に無い
-			add(SerialReasonPredictionFailed)
-		}
-	}
-	if len(reasons) > 0 {
-		sort.SliceStable(reasons, func(i, j int) bool { return reasonIndex(reasons[i]) < reasonIndex(reasons[j]) })
-		return repoPrediction{FailClosed: reasons, HeadSHA: res.Output.HeadSHA}, nil
-	}
-	runID, _ := parseRunID(res.RunID)
-	// 衝突の判定から外すパスのファイルは、重なりを数える前に除く（宣言が空なら何もしない）。
-	rp := repoPrediction{Output: excludeSharedFiles(res.Output, repo.ConflictExcludePaths), HeadSHA: res.Output.HeadSHA, RunID: runID}
-	if repo.SerialJudgment {
-		rp.SerialJudgment = true // 組の判断は全リポジトリの予測の後に judgeAcrossRepos がまとめて行う
-	}
-	return rp, nil
-}
-
-// limitPredictionCandidates は、実行中の課題の件数と候補の件数の合計が予測の上限を超えるとき、実行中の課題を
-// 全部残したうえで、残りの枠に候補を起動の順（優先度・ID の昇順）で先頭から配り、配れなかった候補を理由つきの
-// NotStarted として返す。上限に収まるとき、および予測の口を呼ばないリポジトリ（予測の宣言が無い・
-// 呼び出し側が無い）では、何も回さない。
-func limitPredictionCandidates(connector *Connector, predictorAvailable bool, running []planRunning, cands []planCandidate) ([]planCandidate, []NotStarted) {
-	if connector.ConflictPrediction == nil || !predictorAvailable {
-		return cands, nil
-	}
-	if len(running)+len(cands) <= maxPredictionIssues {
-		return cands, nil
-	}
-	room := maxPredictionIssues - len(running)
-	if room < 0 {
-		room = 0
-	}
-	sorted := append([]planCandidate(nil), cands...)
-	sortCandidates(sorted)
-	var deferred []NotStarted
-	for _, c := range sorted[room:] {
-		deferred = append(deferred, NotStarted{
-			ChallengeID: c.ID, Reason: NotStartedPredictionLimit,
-			Detail: fmt.Sprintf("予測の上限（%d 件）を超えたため次の周へ回した（実行中 %d 件・候補 %d 件）", maxPredictionIssues, len(running), len(cands)),
-		})
-	}
-	return sorted[:room], deferred
-}
-
-func reasonIndex(r SerialGroupReason) int {
-	for i, x := range serialGroupReasonOrder {
-		if x == r {
-			return i
-		}
-	}
-	return len(serialGroupReasonOrder)
-}
-
-// planDelegation は targets（課題の内部整数 ID）の委譲の実行計画を作る: 候補をリポジトリごとに
-// 集め、実行中の課題を読み、予測の口を呼び、直列化グループを決める。委譲できない課題
-// （承認済みの計画が宣言と合わない）は候補にせず、理由つきで plan.notStarted に載せる。
+// planDelegation は targets（課題の内部整数 ID）の委譲の実行計画を作る: 委譲の候補を集め、
+// 起動の順（優先度・ID の昇順）に並べる。委譲できない課題（承認済みの計画が宣言と合わない）は
+// 候補にせず、理由つきで plan.notStarted に載せる。
 func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []int64) (*delegationPlan, error) {
 	if err := s.ReapInterruptedRuns(ctx); err != nil {
 		return nil, err
@@ -386,27 +139,13 @@ func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []
 		}
 	}
 	plan := &delegationPlan{notStarted: notStarted}
-	if len(byRepo) == 0 {
-		return plan, nil
-	}
-	running, err := s.loadRunningDelegations(ctx, in)
-	if err != nil {
-		return nil, err
-	}
-	type plannedRepo struct {
-		repo  ConnectorRepo
-		cands []planCandidate
-		pred  repoPrediction
-	}
-	var prepared []*plannedRepo
 	for i := range in.ConnDecl.Repos {
 		repo := in.ConnDecl.Repos[i]
 		cands := byRepo[repo.Name]
 		if len(cands) == 0 {
 			continue
 		}
-		_, connector := in.ConnDecl.findConnectorRepo(repo.Name)
-		if connector == nil {
+		if _, connector := in.ConnDecl.findConnectorRepo(repo.Name); connector == nil {
 			continue
 		}
 		if err := s.EnsureSlots(ctx, repo); err != nil {
@@ -419,42 +158,28 @@ func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []
 			}
 			return nil, err
 		}
-		// 予測の上限を超える分は、この周では予測にも起動にもかけず次の周へ回す。
-		var deferred []NotStarted
-		cands, deferred = limitPredictionCandidates(connector, in.Predictor != nil, running[repo.Name], cands)
-		plan.notStarted = append(plan.notStarted, deferred...)
-		if len(cands) == 0 {
-			continue
+		for _, c := range cands {
+			plan.candidates = append(plan.candidates, plannedCandidate{Repo: repo.Name, Cand: c})
 		}
-		pred, err := s.predictRepo(ctx, in, repo, connector, running[repo.Name], cands)
-		if err != nil {
-			return nil, err
-		}
-		sorted := append([]planCandidate(nil), cands...)
-		sortCandidates(sorted)
-		prepared = append(prepared, &plannedRepo{repo: repo, cands: sorted, pred: pred})
 	}
-	// 組の判断（J9）は、全リポジトリの予測が揃ってから、全リポジトリの起動の順でまとめて行う。
-	jr := make([]*judgeRepo, 0, len(prepared))
-	for _, p := range prepared {
-		jr = append(jr, &judgeRepo{repo: p.repo, running: running[p.repo.Name], cands: p.cands, pred: &p.pred})
+	// 起動の順（優先度・ID の昇順）に並べる。
+	all := make([]planCandidate, 0, len(plan.candidates))
+	repoOf := map[string]string{}
+	for _, pc := range plan.candidates {
+		all = append(all, pc.Cand)
+		repoOf[pc.Cand.ID] = pc.Repo
 	}
-	if err := s.judgeAcrossRepos(ctx, in, jr); err != nil {
-		return nil, err
-	}
-	for _, p := range prepared {
-		// 予測が得られたときだけ、衝突の記録（challenge_conflict）を最新の結果で置き換える。
-		// 直列化の判断は記録を読まない（記録は表示のため）。
-		// 記録の失敗は委譲を止めない（衝突は着手の門にしない。記録は表示のため）。
-		_ = s.recordConflicts(ctx, in.CycleID, p.pred.RunID, running[p.repo.Name], p.cands, p.pred.Output)
-		plan.groups = append(plan.groups, buildRepoGroups(p.repo.Name, running[p.repo.Name], p.cands, p.pred)...)
+	sortCandidates(all)
+	plan.candidates = plan.candidates[:0]
+	for _, c := range all {
+		plan.candidates = append(plan.candidates, plannedCandidate{Repo: repoOf[c.ID], Cand: c})
 	}
 	return plan, nil
 }
 
-// --- 同時の起動の上限と枠待ち（M3P33） ---
+// --- 同時の起動の上限と枠待ち ---
 
-// schedWaiter は枠を待つグループの先頭の課題。
+// schedWaiter は枠を待つ候補 1 件。
 type schedWaiter struct {
 	repo   ConnectorRepo
 	rank   int
@@ -579,12 +304,18 @@ func (sch *delegationScheduler) capacity(ctx context.Context, repo ConnectorRepo
 	return c, classifyReadWriteErr(err)
 }
 
+// ownerWaitContractRunWhere は、契約の run（k）がオーナーの承認・回答を待っているだけ（waiting で、課題〔c〕が保留）の条件。
+// 同時に走らせる数にだけ使う。課題ごとの「実行中か」の判定（challengeHasActiveRun）には混ぜない
+// （保留の課題へ新しい委譲を起動させないため）。
+const ownerWaitContractRunWhere = `(k.state = 'waiting' AND c.status = 'awaiting_human')`
+
 // activeDelegationCount は終わっていない委譲の run と、終わっていない契約の run（form: cli）を持つ課題の数。
+// レビュー待ち（contractRunReviewWaitWhere）とオーナーの回答待ち（ownerWaitContractRunWhere）の契約の run は数えない。
 func activeDelegationCount(ctx context.Context, tx *sql.Tx) (int, error) {
 	var n int
 	err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM run WHERE kind = 'delegate' AND result IS NULL)
 		+ (SELECT COUNT(*) FROM (SELECT k.challenge_id FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere+`
+			WHERE k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere+` AND NOT `+ownerWaitContractRunWhere+`
 			UNION SELECT challenge_id FROM run WHERE kind = 'contract' AND result IS NULL))`).Scan(&n)
 	return n, err
 }
@@ -711,7 +442,7 @@ func (sch *delegationScheduler) admit(ctx context.Context, w *schedWaiter, wait 
 	}
 }
 
-// --- グループごとの並行な実行 ---
+// --- 候補ごとの並行な実行 ---
 
 // delegateRun は delegateOne へ渡す、スケジューラと待ちの列の中の自分（nil なら制限しない）。
 type delegateRun struct {
@@ -764,6 +495,12 @@ func (r *delegateRun) admitContract(ctx context.Context) (*admission, error) {
 	sch.pre++
 	sch.preRepo[""]++
 	sch.own++
+	// 許可した候補は待ちの列から外す。外さないと、start が終わるまで列に残り、後ろの候補の earlierFitCountLocked が
+	// 許可済みのこの候補を「今すぐ許可できる前の候補」として数え、pre と二重に数えて枠を塞ぐ。
+	// dequeueLocked は列に無ければ何もしないので、executePlan の goroutine の defer の dequeue と重なっても安全。
+	if r.w != nil {
+		sch.dequeueLocked(r.w)
+	}
 	return &admission{sch: sch, repo: ""}, nil
 }
 
@@ -774,10 +511,10 @@ type delegateOutcome struct {
 	ns   *NotStarted
 }
 
-// executePlan は plan のグループを、グループごとに並行に（グループの中は順に）実行する。
+// executePlan は plan の候補を、候補ごとに並行に実行する。枠の許可は優先度・ID の昇順。
 func (s *Store) executePlan(ctx context.Context, in DelegateInput, jc *JudgmentCycle, plan *delegationPlan) (*DelegateResult, error) {
 	sch := newDelegationScheduler(s, in)
-	// 致命的なエラーでは、新しい起動と枠待ちだけを止める（すでに動いている他のグループの委譲は、
+	// 致命的なエラーでは、新しい起動と枠待ちだけを止める（すでに動いている他の委譲は、
 	// 親の ctx のまま最後まで動かして記録する）。
 	waitCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -799,71 +536,50 @@ func (s *Store) executePlan(ctx context.Context, in DelegateInput, jc *JudgmentC
 		mu.Unlock()
 	}
 
-	// 先頭の課題は、グループを並行に始める前に待ちの列へ入れる（同時に始めたとき、優先度・ID の
-	// 昇順を守るため）。
-	heads := make([]*schedWaiter, len(plan.groups))
-	repos := make([]ConnectorRepo, len(plan.groups))
-	for i := range plan.groups {
-		g := &plan.groups[i]
-		repo, _ := in.ConnDecl.findConnectorRepo(g.Repo)
+	// 候補は、並行に始める前に待ちの列へ入れる（同時に始めたとき、優先度・ID の昇順を守るため）。
+	waiters := make([]*schedWaiter, len(plan.candidates))
+	for i, pc := range plan.candidates {
+		repo, _ := in.ConnDecl.findConnectorRepo(pc.Repo)
 		if repo == nil {
 			continue
 		}
-		repos[i] = *repo
-		if len(g.Running) == 0 && len(g.Candidates) > 0 {
-			heads[i] = sch.newWaiter(*repo, g.Candidates[0])
-			sch.enqueue(heads[i])
-		}
+		waiters[i] = sch.newWaiter(*repo, pc.Cand)
+		sch.enqueue(waiters[i])
 	}
 
 	var wg sync.WaitGroup
-	for i := range plan.groups {
-		g := plan.groups[i]
-		head := heads[i]
-		repo := repos[i]
+	for i := range plan.candidates {
+		c := plan.candidates[i].Cand
+		w := waiters[i]
+		if w == nil {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if head != nil {
-				defer sch.dequeue(head)
+			defer sch.dequeue(w)
+			if waitCtx.Err() != nil {
+				return
 			}
-			for j, c := range g.Candidates {
-				if len(g.Running) > 0 {
-					record(delegateOutcome{rank: c.Rank, seq: c.Seq, ns: &NotStarted{ChallengeID: c.ID, Reason: NotStartedSerialized}})
-					continue
-				}
-				if waitCtx.Err() != nil {
-					return
-				}
-				ch, err := s.loadChallengeForAuto(ctx, c.ID)
-				if err != nil {
-					fail(err)
-					return
-				}
-				if ch.Status != StatusInProgress {
-					if j == 0 && head != nil {
-						sch.dequeue(head)
-					}
-					continue
-				}
-				w := head
-				if j > 0 || w == nil {
-					w = sch.newWaiter(repo, c)
-					sch.enqueue(w)
-				}
-				item, ns, err := s.delegateOne(ctx, in, jc, *ch, &delegateRun{sch: sch, w: w, waitCtx: waitCtx})
-				sch.dequeue(w)
-				if err != nil {
-					// 1 件の課題の問題（承認済みの計画が今の宣言と合わない等）で、他の課題の委譲を
-					// 止めない。ストアの障害など、それ以外のエラーだけが全体を打ち切る。
-					if errors.Is(err, ErrRunInProgress) || errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrValidation) {
-						continue
-					}
-					fail(err)
-					return
-				}
-				record(delegateOutcome{rank: c.Rank, seq: c.Seq, item: item, ns: ns})
+			ch, err := s.loadChallengeForAuto(ctx, c.ID)
+			if err != nil {
+				fail(err)
+				return
 			}
+			if ch.Status != StatusInProgress {
+				return
+			}
+			item, ns, err := s.delegateOne(ctx, in, jc, *ch, &delegateRun{sch: sch, w: w, waitCtx: waitCtx})
+			if err != nil {
+				// 1 件の課題の問題（承認済みの計画が今の宣言と合わない等）で、他の課題の委譲を
+				// 止めない。ストアの障害など、それ以外のエラーだけが全体を打ち切る。
+				if errors.Is(err, ErrRunInProgress) || errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrValidation) {
+					return
+				}
+				fail(err)
+				return
+			}
+			record(delegateOutcome{rank: c.Rank, seq: c.Seq, item: item, ns: ns})
 		}()
 	}
 	wg.Wait()
@@ -876,15 +592,14 @@ func (s *Store) executePlan(ctx context.Context, in DelegateInput, jc *JudgmentC
 		}
 		return outcomes[i].seq < outcomes[j].seq
 	})
-	result := &DelegateResult{SerialGroups: plan.serialGroups()}
+	result := &DelegateResult{}
 	for _, o := range outcomes {
 		appendDelegateOutcome(result, o.item, o.ns)
 	}
 	return result, nil
 }
 
-// runSingleDelegation は ID を指定した `run <C-ID>` の本体。同じ直列化グループに終了していない
-// 委譲の run を持つ課題がいれば、委譲を起動せず ErrSerialized を返す。
+// runSingleDelegation は ID を指定した `run <C-ID>` の本体。
 func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Challenge) (*DelegateResult, error) {
 	cid, _ := parseChallengeID(ch.ID)
 	// 状態（呼び出し元の RunDelegation が検査済み）と計画の検査は、ID を省いた経路（selectDelegationTargets）と
@@ -912,16 +627,9 @@ func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Ch
 	if err != nil {
 		return nil, err
 	}
-	result := &DelegateResult{SerialGroups: plan.serialGroups()}
-	g := plan.groupOf(ch.ID)
-	if g == nil {
-		// 予測の上限を超えて次の周へ回した課題は、起動せずその理由を返す。
-		for _, ns := range plan.notStarted {
-			if ns.ChallengeID == ch.ID && ns.Reason == NotStartedPredictionLimit {
-				result.NotStarted = append(result.NotStarted, ns)
-				return result, nil
-			}
-		}
+	result := &DelegateResult{}
+	pc, found := plan.candidateOf(ch.ID)
+	if !found {
 		// 委譲できない課題（承認済みの計画が宣言と合わない等）。従来どおりの検査でエラーにする。
 		item, ns, err := s.delegateOne(ctx, in, nil, ch, nil)
 		if err != nil {
@@ -930,18 +638,9 @@ func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Ch
 		appendDelegateOutcome(result, item, ns)
 		return result, nil
 	}
-	if len(g.Running) > 0 {
-		return nil, fmt.Errorf("%w: %s", ErrSerialized, ch.ID)
-	}
-	repo, _ := in.ConnDecl.findConnectorRepo(g.Repo)
+	repo, _ := in.ConnDecl.findConnectorRepo(pc.Repo)
 	sch := newDelegationScheduler(s, in)
-	var c planCandidate
-	for _, x := range g.Candidates {
-		if x.ID == ch.ID {
-			c = x
-		}
-	}
-	item, ns, err := s.delegateOne(ctx, in, nil, ch, &delegateRun{sch: sch, w: sch.newWaiter(*repo, c)})
+	item, ns, err := s.delegateOne(ctx, in, nil, ch, &delegateRun{sch: sch, w: sch.newWaiter(*repo, pc.Cand)})
 	if err != nil {
 		return nil, err
 	}

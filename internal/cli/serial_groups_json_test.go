@@ -2,15 +2,14 @@ package cli
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
 
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/view"
 )
 
-// #106: 委譲の段（run）の phase は判断の段の形に serial_groups を足した形で、skipped の段は [] を持つ
-// （AC-329〜333・369 の出力の形。段の結線は cycle の仕上げのチケット）。
+// 委譲の段（run）の phase は、判断の段と同じ形（items・not_started・phase・skipped）で、serial_groups のキーを持たない。
+// このファイルの AC-<n> は、core の見直しの区切り S1（docs/features/core-redesign.md。番号は masanami/flywheel#732 の受入基準の並び順）の受入基準の番号。
 
 // phaseDoc は cycle の段を JSON へマーシャルして読み戻す（出力の形そのものを検査する）。
 func phaseDoc(t *testing.T, p core.CyclePhaseResult) map[string]any {
@@ -26,61 +25,41 @@ func phaseDoc(t *testing.T, p core.CyclePhaseResult) map[string]any {
 	return out
 }
 
-func TestCyclePhaseJSON_RunPhaseCarriesSerialGroups(t *testing.T) {
+// AC-6: `flywheel cycle --json` の委譲の段の出力に serial_groups のキーが無い。
+func TestCyclePhaseJSON_RunPhaseHasNoSerialGroups(t *testing.T) {
 	t.Parallel()
-	sha := "cafe01"
-	got := phaseDoc(t, core.CyclePhaseResult{
-		Phase: core.CyclePhaseRun,
-		SerialGroups: []core.SerialGroup{
-			{Repo: "r", Challenges: []string{"C-9", "C-1", "C-2"}, Reasons: []core.SerialGroupReason{core.SerialReasonSharedFiles, core.SerialReasonDependency}, PredictionHeadSHA: &sha},
-			{Repo: "r", Challenges: []string{"C-3"}, Reasons: nil},
-		},
-	})
-	want := []any{
-		map[string]any{"repo": "r", "challenges": []any{"C-9", "C-1", "C-2"}, "reasons": []any{"shared_files", "dependency"}, "judgments": []any{}, "prediction_head_sha": "cafe01"},
-		map[string]any{"repo": "r", "challenges": []any{"C-3"}, "reasons": []any{}, "judgments": []any{}, "prediction_head_sha": nil},
-	}
-	if !reflect.DeepEqual(got["serial_groups"], want) {
-		t.Errorf("serial_groups = %#v, want %#v", got["serial_groups"], want)
-	}
-	for _, k := range []string{"phase", "skipped", "items", "not_started"} {
-		if _, ok := got[k]; !ok {
-			t.Errorf("run phase lacks %q: %v", k, got)
+	for _, skipped := range []bool{false, true} {
+		got := phaseDoc(t, core.CyclePhaseResult{Phase: core.CyclePhaseRun, Skipped: skipped})
+		if _, ok := got["serial_groups"]; ok {
+			t.Errorf("skipped=%v: run phase has serial_groups: %v", skipped, got)
+		}
+		for _, k := range []string{"phase", "skipped", "items", "not_started"} {
+			if _, ok := got[k]; !ok {
+				t.Errorf("skipped=%v: run phase lacks %q: %v", skipped, k, got)
+			}
 		}
 	}
 }
 
-func TestCyclePhaseJSON_SkippedRunPhaseHasNoSerialGroups(t *testing.T) {
+// AC-7: `flywheel run --json` の出力（委譲の段の phase の形）に serial_groups のキーが無い。
+func TestRunJSON_DelegationPhaseHasNoSerialGroups(t *testing.T) {
 	t.Parallel()
-	got := phaseDoc(t, core.CyclePhaseResult{Phase: core.CyclePhaseRun, Skipped: true})
-	if g, ok := got["serial_groups"].([]any); !ok || len(g) != 0 || got["skipped"] != true {
-		t.Errorf("phase = %#v, want skipped with serial_groups []", got)
+	raw, err := json.Marshal(view.FromDelegationPhase(false, &core.JudgmentAutoResult{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["serial_groups"]; ok {
+		t.Errorf("delegation phase has serial_groups: %v", got)
 	}
 }
 
 func TestCyclePhaseJSON_JudgmentPhasesHaveNoSerialGroups(t *testing.T) {
 	t.Parallel()
 	if _, ok := phaseDoc(t, core.CyclePhaseResult{Phase: core.CyclePhasePlan})["serial_groups"]; ok {
-		t.Error("only the run phase has serial_groups")
-	}
-}
-
-func TestCyclePhaseJSON_RunPhaseCarriesTheJudgmentsOfAGroup(t *testing.T) {
-	t.Parallel()
-	got := phaseDoc(t, core.CyclePhaseResult{
-		Phase: core.CyclePhaseRun,
-		SerialGroups: []core.SerialGroup{{
-			Repo: "r", Challenges: []string{"C-1", "C-2"},
-			Reasons:   []core.SerialGroupReason{core.SerialReasonSharedFiles, core.SerialReasonJudgedStrong},
-			Judgments: []core.SerialJudgment{{Challenges: [2]string{"C-1", "C-2"}, Outcome: core.PairOutcomeStrong, Reason: "同じ規則を決め直す"}},
-		}},
-	})
-	want := []any{map[string]any{
-		"repo": "r", "challenges": []any{"C-1", "C-2"}, "reasons": []any{"shared_files", "serial_judgment_strong"},
-		"judgments":           []any{map[string]any{"challenges": []any{"C-1", "C-2"}, "outcome": "strong", "reason": "同じ規則を決め直す"}},
-		"prediction_head_sha": nil,
-	}}
-	if !reflect.DeepEqual(got["serial_groups"], want) {
-		t.Errorf("serial_groups = %#v, want %#v", got["serial_groups"], want)
+		t.Error("no phase has serial_groups")
 	}
 }

@@ -17,7 +17,7 @@ const realHarnessGuardExit = 99
 // installRealHarnessGuard は、呼び出されると失敗するだけの番兵の harness を置いたディレクトリを
 // PATH の先頭に足す（m3-invoker-delegation.md 受入基準「go test ./... は、PATH に本物の claude・gh・
 // harness があっても、それらを起動しない」。installRealGHGuard・installRealClaudeGuard の harness 版。
-// 衝突の予測の口は宣言の command を起動する。テストは偽の実行ファイルのパスを command に置く）。
+// form: cli の契約のコマンドは宣言の command を起動する。テストは偽の実行ファイルのパスを command に置く）。
 func installRealHarnessGuard() (cleanup func(), err error) {
 	dir, err := os.MkdirTemp("", "flywheel-cli-harness-guard-")
 	if err != nil {

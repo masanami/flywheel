@@ -65,7 +65,7 @@ function detail(figure: string | null): ShowCardResponse {
       issues_answer: null,
       non_goals: null,
     },
-    waiting: { conflicts: [], prerequisites: [] },
+    waiting: { prerequisites: [] },
   };
 }
 

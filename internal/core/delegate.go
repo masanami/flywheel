@@ -13,8 +13,8 @@ package core
 //	⑤ トランザクションの外で委譲の子を待つ（heartbeat を更新する）
 //	⑥ 結果と費用を記録し、スロットを解放する
 //
-// 照合（delegate_reconcile.go）はここに含める。結末の課題の状態への写像（#104）、衝突の
-// 予測と直列化グループ（#106）はここに含めない。固定の節の組み立て（埋め込みの雛形）
+// 照合（delegate_reconcile.go）はここに含める。結末の課題の状態への写像（#104）と、候補ごとの
+// 並行の実行の計画（delegate_plan.go）はここに含めない。固定の節の組み立て（埋め込みの雛形）
 // と claude の起動は internal/invoker が持ち、core は DelegationInvoker の IF だけを
 // 知る（core は invoker を import しない）。
 
@@ -29,7 +29,7 @@ import (
 
 // DelegatedRunEnvVar は、委譲の子の環境に invoker だけが渡す目印の環境変数名。値は委譲する
 // run の ID。CLI は、この変数が（空文字でも）設定されている環境からの `help` を除く全コマンドを
-// 拒否する。判断 J1〜J5 と衝突予測の起動には渡さない。
+// 拒否する。判断 J1〜J5 の起動には渡さない。
 const DelegatedRunEnvVar = "FLYWHEEL_DELEGATED_RUN"
 
 // DelegateLaunchInput は Store.RunDelegation が DelegationInvoker へ渡す、委譲の
@@ -116,9 +116,6 @@ type DelegateInput struct {
 	// Reconcile は委譲の後の照合が呼ぶ、リモートのブランチと head ブランチの PR の取得
 	// （GET だけ）。
 	Reconcile UpstreamBranchSource
-	// Predictor は衝突の予測の口の起動（nil なら予測の口を呼べず、予測が要るリポジトリの
-	// 委譲の候補は 1 つの直列化グループに入る）。
-	Predictor ConflictPredictor
 	// CycleID はこの操作が属する周（BeginCycle が返した ID）。空は ErrValidation。
 	CycleID string
 	// Cycle が非 nil なら、枠超過の状態をこの JudgmentCycle と共有する。
@@ -625,11 +622,6 @@ func (s *Store) runDelegationAfterPoll(ctx context.Context, in DelegateInput) (*
 	if jc == nil {
 		jc = NewJudgmentCycle(in.CycleID)
 	}
-	// 枠超過を記録した周は、残りの判断の呼び出しと委譲を起動しない。予測の口の呼び出しも同じで、
-	// 起動しない候補のために費用を積まない（予測の口が無いときと同じ扱いにする）。
-	if jc.RateLimited() {
-		in.Predictor = nil
-	}
 	plan, err := s.planDelegation(ctx, in, targetIDs)
 	if err != nil {
 		return nil, err
@@ -849,10 +841,6 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		n, ok := parseRunID(row.ID)
 		if !ok {
 			return 0, fmt.Errorf("core: malformed run id %q", row.ID)
-		}
-		// 委譲を起動した課題との向きの無い衝突の組に、「相手 → この課題」の向きを付ける（run の記録と同じ書き込み）。
-		if err := orientConflictsTx(ctx, tx, cid); err != nil {
-			return 0, err
 		}
 		return n, nil
 	}

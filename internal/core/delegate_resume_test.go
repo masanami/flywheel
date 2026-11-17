@@ -248,7 +248,7 @@ func (f *delegateFixture) repo(t *testing.T, name string) ConnectorRepo {
 	return *r
 }
 
-// occupy は repo の path のスロットを predict の run で使用中にする。
+// occupy は repo の path のスロットを assignSlot で割り当て済み（使用中）にして、その割り当てを返す。
 func (f *delegateFixture) occupy(t *testing.T, repo, slotRel string) *SlotAssignment {
 	t.Helper()
 	ctx := context.Background()

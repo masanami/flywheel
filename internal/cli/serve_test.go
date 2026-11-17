@@ -269,7 +269,6 @@ func TestServeErrorCodes(t *testing.T) {
 		CodeRunInProgress:        server.CodeRunInProgress,
 		CodeBudgetExceeded:       server.CodeBudgetExceeded,
 		CodeSlotUnavailable:      server.CodeSlotUnavailable,
-		CodeSerialized:           server.CodeSerialized,
 	} {
 		if string(cliCode) != serverCode {
 			t.Errorf("cli %q != server %q", cliCode, serverCode)
@@ -288,7 +287,7 @@ func TestServerCoreErrMappingMatchesCLI(t *testing.T) {
 		core.ErrValidation, core.ErrTerminalState, core.ErrInvalidTransition, core.ErrConflict,
 		core.ErrActorUnavailable, core.ErrTTYRequired, core.ErrConfirmationMismatch, core.ErrVerificationRejected,
 		core.ErrConfigNotFound, core.ErrConfigInvalid, core.ErrLocked, core.ErrRunInProgress,
-		core.ErrBudgetExceeded, core.ErrSlotUnavailable, core.ErrSerialized, errors.New("unexpected"),
+		core.ErrBudgetExceeded, core.ErrSlotUnavailable, errors.New("unexpected"),
 	}
 	for _, e := range sentinels {
 		wrapped := fmt.Errorf("wrapped: %w", e)
