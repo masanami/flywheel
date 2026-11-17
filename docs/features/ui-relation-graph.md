@@ -163,7 +163,7 @@
 - [ ] `GET …/challenges/{id}` の `waiting` が、まだ終わっていない前提の課題と、衝突のため後回しにした相手を別の一覧で返し、先に委譲した側・向きの無い組・相手が終わった衝突には後回しが付かない（`internal/core`・`internal/server` のテスト）
 - [ ] ボードから開いた詳細にも「待っている理由」が出て、前提の行と「衝突のため後回し: C-xx」の行が別になる。グラフから開いた詳細と同じ部品（Vitest のコンポーネントのテスト・ブラウザの E2E）
 - [ ] 衝突の線は、向きのある組が中抜きの矢じり（後回し → 先に委譲）、向きの無い組が矢じりなしの破線で描かれ、前提の線と合わせて循環に見えても配置が壊れない（`web/src/graph/model.test.ts` の純粋関数・Vitest のコンポーネントのテスト・ブラウザの E2E）
-- [ ] 実データの形での画面の確かめ: ストアに入れた衝突の行から API を経由した値を `web/src/testing/relation-api.golden.json` と照合し（`internal/server`）、同じファイルを関係グラフとボードの詳細に通す（`web/src/graph/real-shape.test.tsx`）
+- [ ] 実データの形での画面の確かめ: ストアに入れた衝突の行から API を経由した値を `web/src/testing/conflict-api.golden.json`（core の見直しの区切り S1 で `relation-api.golden.json` に改名し、中身は前提の辺だけにした）と照合し（`internal/server`）、同じファイルを関係グラフとボードの詳細に通す（`web/src/graph/real-shape.test.tsx`）
 
 ## 本物の serve の E2E（flywheel#463）
 

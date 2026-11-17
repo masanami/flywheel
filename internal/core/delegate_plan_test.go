@@ -14,7 +14,7 @@ import (
 )
 
 // このファイルは委譲の段の実行計画（候補ごとの並行な実行・枠の許可・予算ガード。#106）を、
-// 実ストア・偽の判断／委譲の IF・偽の SlotGit で検証する（AC-279・297〜335・347〜351・366・369 の core 側）。
+// 実ストア・偽の判断／委譲の IF・偽の SlotGit で検証する（番号は docs/features/m3-invoker-delegation.md の受入基準。AC-279・297〜335・347〜351・366・369 の core 側。このうち衝突の予測と直列化グループの基準は、core の見直しの区切り S1 で外したので、残っているのは枠・優先度・予算の部分）。
 // 同じリポジトリの候補は直列化せず、枠に空きがあれば並行に起動する。
 
 const planConnectorsJSON = `{
@@ -279,7 +279,7 @@ func (f *planFixture) holdRunning(t *testing.T, id string) (release func()) {
 	return rel
 }
 
-// --- 枠待ち・優先度の順・上限（AC-297〜300） ---
+// --- 枠待ち・優先度の順・上限 ---
 
 func TestPlan_RateLimitedStopsTheWaitingCandidate(t *testing.T) {
 	t.Parallel() // 共有の状態（パッケージ変数の書き換え・t.Setenv）が無い。Store ごとの actor・待ちの間隔を使う（flywheel#578）
@@ -421,7 +421,7 @@ func TestPlan_CycleBudgetAndRunBudget_AfterWaiting(t *testing.T) {
 	}
 }
 
-// --- 予算・記録（AC-334・335・347〜351） ---
+// --- 予算・記録 ---
 
 // 実装枠の残りが起動の最小額に満たない候補は run_budget で起動しない（J3 の費用を払う前）。
 func TestPlan_RunBudget_NotStarted(t *testing.T) {
