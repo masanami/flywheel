@@ -334,6 +334,116 @@ func TestRun_SingleWorktreeSlot_SameRepoSecondRun_IsLocked(t *testing.T) {
 	}
 }
 
+// 契約の接続ツール（form: cli）の宣言。start はすぐ戻り、実行は排他の外で走り続ける。clone のスロットは 2 本（空きは 2 件分）。
+const runContractConnectorsFixture = `{
+  "version": 1,
+  "connectors": [
+    {"id": "tool", "form": "cli", "permission_mode": "default",
+     "commands": {
+       "start": ["tool", "start", "--challenge", "{challenge_id}"],
+       "status": ["tool", "status", "{run_id}"],
+       "resume": ["tool", "resume", "{run_id}", "--answer", "{answer}"],
+       "cancel": ["tool", "cancel", "{run_id}"]
+     },
+     "contract_version": 1,
+     "operations": [{"id": "impl", "interactive": false, "child_may_decide": true, "artifacts": "pr"}]}
+  ],
+  "repos": [
+    {"name": "tool-repo", "remote": "o/r", "default_branch": "main", "connector": "tool", "slots": {"provider": "clone", "paths": ["slot-a", "slot-b"]}}
+  ]
+}`
+
+// putFakeContractToolOnPATH は契約の偽の接続ツール tool を PATH の先頭に足す。start は終わらない実行（running）を
+// すぐ返し（run_id は引数の課題の ID から "ext-<課題の ID>"）、status も running を返す。呼ばれた引数列は logPath へ 1 行ずつ追記する。
+func putFakeContractToolOnPATH(t *testing.T, logPath string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> " + shellSingleQuote(logPath) + "\n" +
+		"case \"$1\" in\n" +
+		"start) printf '{\"contract_version\":1,\"run_id\":\"ext-%s\",\"state\":\"running\",\"summary\":\"s\"}\\n' \"$3\";;\n" +
+		"status) printf '{\"contract_version\":1,\"run_id\":\"%s\",\"state\":\"running\",\"summary\":\"s\"}\\n' \"$2\";;\n" +
+		"*) exit 1;;\n" +
+		"esac\n"
+	dir := t.TempDir()
+	if err := writeExecutable(filepath.Join(dir, "tool"), []byte(script)); err != nil {
+		t.Fatalf("write fake contract tool: %v", err)
+	}
+	addToolDir(t, dir)
+}
+
+// 出どころ: core の見直しの区切り S1（docs/features/core-redesign.md。親は masanami/flywheel#732）の受入基準の
+// 並び順の AC-3。同じリポジトリに委譲先のフローを通る委譲（form: cli の契約の実行）が走っているとき、別の
+// `flywheel run <課題の ID>` は、同時に走らせる数の上限とスロットに空きがあれば、その課題を起動する。
+// 契約の start はすぐ戻り、実行は排他の外で走り続けるので、1 件目の run が終わればサイクルの排他は外れている。
+// 同期で走る形の委譲（指示文を直接渡す形・スキルを呼ぶ形）が走っている間は locked になる（上の 2 つのテスト。変えない）。
+func TestRun_AC3_ContractRunRunning_SecondRunOfSameRepoLaunches(t *testing.T) {
+	parallelTools(t, false)
+	ws := setupWorkspaceWithPosition(t)
+	writeAgentJSONForTest(t, ws, `{"position_file": "position.md", "max_parallel_runs": 2}`)
+	writeConnectorsJSONForTest(t, ws, runContractConnectorsFixture)
+	slotClone(t, filepath.Join(ws, "slot-a"), "https://github.com/o/r.git")
+	slotClone(t, filepath.Join(ws, "slot-b"), "https://github.com/o/r.git")
+	mut := func(m map[string]any) { m["repo"] = "tool-repo"; m["operation"] = "impl" }
+	a := newInProgressForRun(t, ws, mut)
+	b := newInProgressForRun(t, ws, mut)
+	toolLog := filepath.Join(t.TempDir(), "tool.log")
+	putFakeContractToolOnPATH(t, toolLog)
+	// run は claude の有無を確かめるが、form: cli の委譲は claude を起動しない（どの呼び出しにも応じない偽の claude）。
+	putRoutedFakeClaudeOnPATH(t, nil, "")
+
+	runOne := func(id string) (code int, stdout, stderr string) {
+		var o, e bytes.Buffer
+		code = runWithLookPath([]string{"run", id, "--workspace", ws, "--json"}, strings.NewReader(""), &o, &e, defaultCommands(), lookPathFor(t))
+		return code, o.String(), e.String()
+	}
+	unfinishedContractRuns := func() int {
+		n := 0
+		for _, line := range strings.Split(coretest.DumpTables(t, ws, "contract_run"), "\n") {
+			if strings.HasPrefix(line, "[") && strings.Contains(line, " running ") {
+				n++
+			}
+		}
+		return n
+	}
+
+	if code, _, stderr := runOne(a); code != 0 {
+		t.Fatalf("first: exit=%d stderr=%s", code, stderr)
+	}
+	if n := unfinishedContractRuns(); n != 1 {
+		t.Fatalf("unfinished contract runs after the first run = %d, want 1", n)
+	}
+
+	code, stdout, stderr := runOne(b)
+	if code != 0 {
+		t.Fatalf("second: exit=%d stderr=%s, want 0 (not locked, serialized or slot_unavailable)", code, stderr)
+	}
+	for _, bad := range []string{`"locked"`, `"serialized"`, `"slot_unavailable"`} {
+		if strings.Contains(stdout+stderr, bad) {
+			t.Errorf("second: output contains %s: stdout=%s stderr=%s", bad, stdout, stderr)
+		}
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("second: stdout is not JSON: %v (%q)", err, stdout)
+	}
+	items := phaseOf(t, doc)["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["challenge_id"] != b {
+		t.Errorf("second: items = %v, want %s launched", items, b)
+	}
+	if n := unfinishedContractRuns(); n != 2 {
+		t.Errorf("unfinished contract runs after the second run = %d, want 2", n)
+	}
+	starts := 0
+	for _, line := range readOrderLog(t, toolLog) {
+		if strings.HasPrefix(line, "start ") {
+			starts++
+		}
+	}
+	if starts != 2 {
+		t.Errorf("tool start calls = %d, want 2 (log: %v)", starts, readOrderLog(t, toolLog))
+	}
+}
+
 func TestRun_DirtySlot_NeedsAttentionAndSlotUnavailable(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
