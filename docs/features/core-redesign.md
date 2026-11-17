@@ -27,36 +27,36 @@ S1 は、このうち D29 と D33 の一部を先に入れる。直列化グル�
 
 S1（外す）の要件。
 
-- [ ] 委譲の段は、直列化グループを作らない。委譲の対象は、記録した前提（`challenge_dependency`）・同時に走らせる数の上限（`max_parallel_runs`）・スロットの空きだけで決める。
+- [ ] 委譲の段は、直列化グループを作らない。課題どうしを順に並べるか（直列にするか）は、記録した前提（`challenge_dependency`）・同時に走らせる数の上限（`max_parallel_runs`）・スロットの空きだけで決める。いまある起動の条件（実行の予算の不足・連続失敗の上限・差し戻しの上限）は変えない。
 - [ ] 委譲の段は、委譲先の衝突の予測の口を起動しない。
 - [ ] 委譲の段は、同時に進めてよいかの判断点（J9）を呼ばない。
 - [ ] 記録した前提の判定（前提が終わっていない課題を起動しない）は変えない。
-- [ ] 委譲先の宣言（`connectors.json`）から `conflict_prediction`・`repos[].serial_judgment`・`repos[].conflict_exclude_paths` を無くす。残っている宣言は、設定の誤りとして止める。
+- [ ] 委譲先の宣言（`connectors.json`）から `connectors[].conflict_prediction`・`repos[].serial_judgment`・`repos[].conflict_exclude_paths` を無くす。残っている宣言は、設定の誤りとして止める。
 - [ ] エージェントの宣言（`agent.json`）から `conflict_prediction_budget_usd`・`serial_judgment_cycle_budget_usd`・`judgment_budget_usd.J9` を無くす。残っている宣言は、設定の誤りとして止める。
 - [ ] 衝突の記録の表（`challenge_conflict`）を、マイグレーションで消す。
 - [ ] 過去の実行の記録（`kind = predict` の run・`judgment = J9` の run）は、読めるままにする。新しくは作らない。
-- [ ] CLI の出力から `serial_groups` と、起動しなかった理由 `serialized`・`prediction_limit`、エラーコード `serialized` を無くす。
+- [ ] CLI の出力から `serial_groups` と、起動しなかった理由 `serialized`・`prediction_limit`、エラーコード `serialized` を無くす。API のエラーコード `serialized`（`internal/server/apierror.go`）も無くす。
 - [ ] 関係グラフと「待っている理由」から、衝突の線と衝突の欄を無くす（core・view・API・Web）。前提の線は変えない。
-- [ ] 契約の実行（`form: cli`）のうち、実行の状態が `waiting` で、課題の状態が人間対応待ち（`awaiting_human`）のものを、同時委譲数に数えない。計画の承認待ち・完了の承認待ちの課題には、動いている契約の実行が無いので、この条件の対象にならない。
+- [ ] 契約の実行（`form: cli`）のうち、実行の状態が `waiting` で、課題の状態が保留（オーナーの回答待ち。`awaiting_human`）のものを、同時に走らせる数に数えない。完了の承認待ちの課題に残るレビュー待ちの実行は、次の項の既存の扱いで数えない。
 - [ ] レビュー待ちの契約の実行（実行の状態が `waiting`・求めている操作が `review` で、課題が検証中・完了の承認待ち・完了）を数えない既存の扱いは変えない。
-- [ ] 課題 1 件ごとの「実行中か」の判定（同じ課題へ二重に起動しないための判定）は変えない。
-- [ ] 外した機能を定めていた仕様の節（`docs/features/m3-invoker-delegation.md` の直列化グループ・J9・衝突の予測、`docs/features/ui-relation-graph.md` の衝突、`docs/features/m1-core.md` の `serialized`）に、この区切りで外したことを書く。
+- [ ] 課題 1 件ごとの「実行中か」の判定（同じ課題へ二重に起動しないための判定）は変えない。レビュー待ちを除く条件（`contractRunReviewWaitWhere`）は、同時に走らせる数の数え方と、この判定の両方が使っている。保留の実行を数えない条件は、数え方の側だけに足し、この判定には足さない。
+- [ ] 外した機能を定めていた仕様の節（`docs/features/m3-invoker-delegation.md` の直列化グループ・J9・衝突の予測、`docs/features/ui-relation-graph.md` の衝突、`docs/features/m1-core.md` と `docs/features/m4-ui-server.md` の `serialized`）に、この区切りで外したことを書く。
 - [ ] 判断点の指示文 `internal/invoker/prompts/j9.md` を消す。
 - [ ] 指示文の分量の上限の表から、J9 の行を消す。
 - [ ] 判断点 J9 の識別子は、過去の run を読むための値としてだけ残す。呼び出せる判断点の一覧からは外す。
-- [ ] オーナーの回答による契約の実行の再開は、同時委譲数の上限で止めない（上限は、新しい起動だけを抑える）。
+- [ ] オーナーの回答による契約の実行の再開は、同時に走らせる数の上限で止めない（上限は、新しい起動だけを抑える）。
 - [ ] リポジトリの `CLAUDE.md` のパッケージの表から、衝突の予測の口（`internal/invoker` の `Predict`・core の `ConflictPredictor`）の記述を消す。
 
 ## 技術的な制約・方針
 
 - 使用技術: 既存のまま（Go・SQLite・React）。本番の依存は増やさない。
 - 変更対象（S1）:
-  - `internal/core`: `delegate.go`・`contract_delegate.go`・`delegate_plan.go`・`serial_group.go`・`serial_judgment.go`・`predict.go`・`conflict.go`・`conflict_exclude.go`・`graph.go`・`waiting.go`・`connectors_declaration.go`・`agent_declaration.go`・`judgment_common.go`・`run_store.go` と、ストアのマイグレーション。
-  - `internal/invoker`（`predict.go`・`prompts`）、`internal/view`（`ops.go`・`graph.go`・`browse.go`）、`internal/cli`（`errors.go`・`run.go`・`cycle.go`）、`internal/server`（`apierror.go`）、`web/src`（`graph/`・`board/WaitingReasonsSection.tsx`・`api/types.gen.ts`・`mock/`・`e2e/`）。
-  - テストの追従は、上の各項に含む（全表を埋めるテストの支え `internal/core/coretest`、書き出しの検査 `internal/core/export_test.go` の表の一覧、スキーマの版を直に書いているテストを含む）。
+  - `internal/core`: `delegate.go`・`contract_delegate.go`・`delegate_plan.go`・`serial_group.go`・`serial_judgment.go`・`predict.go`・`conflict.go`・`conflict_exclude.go`・`graph.go`・`waiting.go`・`connectors_declaration.go`・`agent_declaration.go`・`judgment_common.go`・`run_store.go`・`cycle_run.go`・`judgment_batch.go`・`judgment.go`・`judgment_output.go`・`occurrence_events.go` と、ストアのマイグレーション。
+  - `internal/invoker`（`predict.go`・`prompts`）、`internal/view`（`ops.go`・`graph.go`・`browse.go`）、`internal/cli`（`errors.go`・`run.go`・`cycle.go`）、`internal/server`（`apierror.go`）、`web/src`（`graph/`・`board/WaitingReasonsSection.tsx`・`api/types.gen.ts`・`mock/`）、`web/e2e`。
+  - テストの追従は、上の各項に含む（全表を埋めるテストの支え `internal/core/coretest`、書き出しの検査 `internal/core/export_test.go` の表の一覧、スキーマの版を直に書いているテスト、`challenge_conflict` を直に読み書きしているテスト〔`internal/server/graph_test.go`・`internal/core/graph_test.go`・`internal/core/internal/store/migrate_0018_test.go`〕を含む）。`serial_group.go` にある候補の並べ替え（`planCandidate`・`planRunning`・`sortCandidates`）は委譲の計画が使うので、置き場所を移して残す。
 - 既存コードとの関係:
   - 契約の作業ディレクトリを決める処理は、いま衝突の予測と同じ関数（`predictionWorkDir`）を使っている。予測を外しても、この処理は名前を改めて残す。
-  - `internal/core/serial_judgment.go` にある、同時委譲数の空きの計算は、J9 だけが使っている。スロットと同時委譲数の数え方（`activeDelegationCount`・`delegationScheduler`・契約の起動の可否を決める `admitContract`）は `internal/core/delegate_plan.go` にあり、そちらを残す。
+  - `internal/core/serial_judgment.go` にある、同時に走らせる数の空きの計算は、J9 だけが使っている。スロットと同時に走らせる数の数え方（`activeDelegationCount`・`delegationScheduler`・契約の起動の可否を決める `admitContract`）は `internal/core/delegate_plan.go` にあり、そちらを残す。
   - 同時に走らせる数とスロットの割り当て（`delegationScheduler`）は残す。グループの先頭を待ちの列に入れる作りを、候補 1 件を 1 つの単位として扱う形に改める。
   - 受入基準・決定を変える必要に気付いたら、変えずに PR の説明へ「仕様への指摘」として書く（`CLAUDE.md`）。
 - 既定ブランチが一時的に動かなくなることを許す（オーナー 2026-11-17）。ただし S1 は、それだけで main に入れて動く形にする。
@@ -71,8 +71,8 @@ S1 は、新しい画面を作らない。いまの関係グラフから、衝�
 
 | ux.md のシナリオ # | 対応する受入基準（本文の先頭部分を引用。無ければ「なし（理由）」） |
 |---|---|
-| 1・3・4・5・6・8・14・18・19 | なし（S2 で扱う。課題のツリー・計画の承認・取り込み・フォローアップ・エージェントの切り替え・`flywheel status` は、ストアの土台と一緒に作る） |
-| 11・12 | なし（S3 で扱う。完了の承認の画面と、対話での完了と反映の承認は、反映を委譲先に任せる形と一緒に作る） |
+| 1・3・4・5・6・8・14・18・19 | なし（S2 で扱う。課題のツリー・計画の承認・取り込み・フォローアップ・エージェントの切り替え・`flywheel status` は、ストアの土台と一緒に作る。このうち、承認や取り込みがサイクルを始める部分〔3・4・19〕、スーパーバイザーの記録〔6・8〕、対話の欄に出る部分〔1・18〕は S4 で足す。S2 では、記録までを行い、続きはオーナーが始めた次のサイクルで進む） |
+| 11・12 | なし（S3 で扱う。完了の承認の画面と、対話での完了と反映の承認は、反映を委譲先に任せる形と一緒に作る。12 のうち画面の中の対話の欄は S4 で足し、S3 では端末の対話で受ける） |
 | 2・7・9・10・13・15・16・17 | なし（S4 で扱う。問いへの回答・対話の欄・スーパーバイザーの記録・サイクルの様子は、長く走るサイクルと一緒に作る） |
 
 ## クリティカル設計決定
@@ -80,20 +80,20 @@ S1 は、新しい画面を作らない。いまの関係グラフから、衝�
 ### DB スキーマ: 衝突の記録の表（S1）
 
 - **採用案**: マイグレーションを 1 本足し、`challenge_conflict` の表と、その索引を消す（スキーマの版は 25 になる）。過去の衝突の記録は消える。
-- **理由**: この表を読むのは、直列化グループとグラフの衝突の線だけで、どちらも外す。過去の記録を読む用途が無い。残すと、全表を埋めるテストの支え（`coretest.FillAllTables`）と書き出しの検査に、使わない表の追従が残り続ける（オーナー 2026-11-17）。
+- **理由**: この表を読むのは、直列化グループと、グラフの衝突の線・「待っている理由」の衝突の欄（`graph.go`・`waiting.go`）だけで、どれも外す。過去の記録を読む用途が無い。残すと、全表を埋めるテストの支え（`coretest.FillAllTables`）と書き出しの検査に、使わない表の追従が残り続ける（オーナー 2026-11-17）。
 - **代替案**: 表を残し、書き込みと読み取りだけをやめる。却下の理由は上のとおり。
-- **影響範囲**: `internal/core/internal/store/migrations`、`internal/core/conflict.go`、`coretest.FillAllTables`、`internal/core/export_test.go` の表の一覧、スキーマの版を直に書いているテスト。書き出しと再構築（`Export`・`Import`）は表を列挙する作りなので、コードの変更は要らない。版 24 の書き出しは、版 25 のバイナリでは再構築できない（版の一致を求める既存の作りのまま）。
+- **影響範囲**: `internal/core/internal/store/migrations`、`internal/core/conflict.go`・`graph.go`・`waiting.go`・`delegate_plan.go`、`coretest.FillAllTables`、`internal/core/export_test.go` の表の一覧、スキーマの版を直に書いているテスト、表を直に読み書きしているテスト（`internal/server/graph_test.go`・`internal/core/graph_test.go`。`internal/core/internal/store/migrate_0018_test.go` は最新まで当てた後で表を読むので、当てる版を 18 までに絞る）。書き出しと再構築（`Export`・`Import`）は表を列挙する作りなので、コードの変更は要らない。版 24 の書き出しは、版 25 のバイナリでは再構築できない（版の一致を求める既存の作りのまま）。
 
 ### DB スキーマ: 過去の実行の記録（S1）
 
-- **採用案**: `run.kind = 'predict'` と `run.judgment = 'J9'` を、読み取りで受け付ける値として残す。新しく書く経路は無くす。
+- **採用案**: `run.kind = 'predict'` と `run.judgment = 'J9'` を、読み取りで受け付ける値として残す。予測の run が持つ予算の枠の値（`run.budget_bucket = 'predict'`）も同じく残す。新しく作る経路は無くす。すでにある行を終わらせる更新（終わっていない run を、サイクルの後片付けが「中断」にする）は受け付けるままにする。
 - **理由**: 2026-11-01〜11-16 に、予測の run が 58 本、J9 の run が 105 本ある。費用の集計と `flywheel runs` の表示の根拠を消さない（オーナー 2026-11-17）。
 - **代替案**: 過去の行を消す、または別の値へ書き換える。費用の記録が失われるので採らない。
 - **影響範囲**: `internal/core/run_store.go` の値の検査（読み取りと書き込みで受け付ける値を分ける）、`view` の run の表示。
 
 ### 宣言の互換: 無くした項目（S1）
 
-- **採用案**: 無くした項目が残っている宣言は、設定の誤り（`config_invalid`）として止める。エラーの文に、項目の名前と、無くなった旨を出す。
+- **採用案**: 無くした項目が残っている宣言は、設定の誤り（`config_invalid`）として止める。エラーの文に、項目の名前と、無くなった旨（決まった語 `removed`）を出す。知らないキーを拒む既存のエラーの文（`unknown key`）とは別の文にする。
 - **理由**: 宣言は、知らないキーを拒む閉じた集合として検査している。黙って無視すると、設定が効いていると思い込んだまま動かすことになる（オーナー 2026-11-17）。
 - **代替案**: 黙って無視して動かす。上の理由で採らない。
 - **影響範囲**: `internal/core/connectors_declaration.go`・`internal/core/agent_declaration.go`。Tom のワークスペースの宣言の直しが、S1 を main に入れるときに要る。
@@ -121,7 +121,7 @@ S1 の分け方の案（最終の分解は `/create-ticket` で行う）。
 1. core: 委譲の計画から、直列化グループ・衝突の予測・J9 を外す（宣言の項目・予算の項目・指示文・invoker の予測の口を含む）。`predictionWorkDir` は、契約の作業ディレクトリを決める処理として、名前を改めて残す。
 2. store と core: 衝突の記録の表を消し、グラフと「待っている理由」から衝突を外す（view・API・エラーコード・CLI の出力を含む）。
 3. web: グラフと詳細の画面から、衝突の線と欄を消す（生成した型・偽のデータ・ブラウザの試験を含む）。
-4. core: オーナーの回答待ちの契約の実行を、同時委譲数に数えない。
+4. core: オーナーの回答待ちの契約の実行を、同時に走らせる数に数えない。
 5. docs: 外した機能の仕様の節に、外したことを書く。
 
 1 と 2 は同じファイル（`internal/core/delegate_plan.go`）に触れるので、順に行う。3 は 2 の後、4 と 5 は 1 の後なら並行にできる。
@@ -157,9 +157,9 @@ S1（外す）の受入基準。
 
 ### 委譲の対象の決め方
 
-- [ ] 同じリポジトリの着手中の課題が 2 件あり、どちらにも記録した前提が無く、同時委譲数の上限とスロットに 2 件分の空きがあるとき、1 回の委譲の段で 2 件とも起動する。
+- [ ] 同じリポジトリの着手中の課題が 2 件あり、どちらにも記録した前提が無く、同時に走らせる数の上限とスロットに 2 件分の空きがあるとき、1 回の委譲の段で 2 件とも起動する。
 - [ ] 記録した前提が終わっていない課題は、委譲の段で起動しない。
-- [ ] 同じリポジトリに走っている委譲があるときに `flywheel run <課題の ID>` を実行しても、同時委譲数の上限とスロットに空きがあれば、その課題を起動する。
+- [ ] 同じリポジトリに走っている委譲があるときに `flywheel run <課題の ID>` を実行しても、同時に走らせる数の上限とスロットに空きがあれば、その課題を起動する。
 - [ ] 委譲の段を実行しても、`kind = predict` の run が新しく記録されない。
 - [ ] 委譲の段を実行しても、`judgment = J9` の run が新しく記録されない。
 
@@ -170,21 +170,28 @@ S1（外す）の受入基準。
 - [ ] core が定義する、起動しなかった理由（`not_started` の理由）の値の一覧に、`serialized` が無い。
 - [ ] core が定義する、起動しなかった理由（`not_started` の理由）の値の一覧に、`prediction_limit` が無い。
 - [ ] CLI が定義するエラーコードの一覧に、`serialized` が無い。
+- [ ] API が定義するエラーコードの一覧（`internal/server/apierror.go`）に、`serialized` が無い。
 
 ### 宣言
 
-- [ ] `connectors.json` に `conflict_prediction` があると、`config_invalid` のエラーになる。
+- [ ] `connectors.json` の `connectors[]` に `conflict_prediction` があると、`config_invalid` のエラーになる。
 - [ ] `connectors.json` の `repos[]` に `serial_judgment` があると、`config_invalid` のエラーになる。
 - [ ] `connectors.json` の `repos[]` に `conflict_exclude_paths` があると、`config_invalid` のエラーになる。
 - [ ] `agent.json` に `conflict_prediction_budget_usd` があると、`config_invalid` のエラーになる。
 - [ ] `agent.json` に `serial_judgment_cycle_budget_usd` があると、`config_invalid` のエラーになる。
 - [ ] `agent.json` の `judgment_budget_usd` に `J9` があると、`config_invalid` のエラーになる。
-- [ ] `connectors.json` に `conflict_prediction` があるときのエラーの文に、`conflict_prediction` が含まれる。
+- [ ] `connectors.json` の `connectors[]` に `conflict_prediction` があるときのエラーの文に、`conflict_prediction` が含まれる。
 - [ ] `connectors.json` の `repos[]` に `serial_judgment` があるときのエラーの文に、`serial_judgment` が含まれる。
 - [ ] `connectors.json` の `repos[]` に `conflict_exclude_paths` があるときのエラーの文に、`conflict_exclude_paths` が含まれる。
 - [ ] `agent.json` に `conflict_prediction_budget_usd` があるときのエラーの文に、`conflict_prediction_budget_usd` が含まれる。
 - [ ] `agent.json` に `serial_judgment_cycle_budget_usd` があるときのエラーの文に、`serial_judgment_cycle_budget_usd` が含まれる。
 - [ ] `agent.json` の `judgment_budget_usd` に `J9` があるときのエラーの文に、`J9` が含まれる。
+- [ ] `connectors.json` の `connectors[]` に `conflict_prediction` があるときのエラーの文に、`removed` が含まれる。
+- [ ] `connectors.json` の `repos[]` に `serial_judgment` があるときのエラーの文に、`removed` が含まれる。
+- [ ] `connectors.json` の `repos[]` に `conflict_exclude_paths` があるときのエラーの文に、`removed` が含まれる。
+- [ ] `agent.json` に `conflict_prediction_budget_usd` があるときのエラーの文に、`removed` が含まれる。
+- [ ] `agent.json` に `serial_judgment_cycle_budget_usd` があるときのエラーの文に、`removed` が含まれる。
+- [ ] `agent.json` の `judgment_budget_usd` に `J9` があるときのエラーの文に、`removed` が含まれる。
 
 ### ストア
 
@@ -196,6 +203,7 @@ S1（外す）の受入基準。
 - [ ] `kind = predict` の run があるストアで、`flywheel runs --json` が終了コード 0 で終わる。
 - [ ] `kind = predict` の run があるストアで、`flywheel runs --json` の出力に、その run が `kind` の値 `predict` で出る。
 - [ ] core の run を記録する口は、`kind = predict` の新しい run を受け付けない。
+- [ ] 終わっていない `kind = predict` の run があるストアでサイクルを回すと、その run が「中断」で終わり、サイクルは失敗しない。
 - [ ] core の判断点を呼ぶ口は、判断点 `J9` の呼び出しを受け付けない。
 - [ ] `judgment = J9` の run があるストアで、`flywheel runs --json` が終了コード 0 で終わる。
 - [ ] `judgment = J9` の run があるストアで、`flywheel runs --json` の出力に、その run が `judgment` の値 `J9` で出る。
@@ -213,12 +221,12 @@ S1（外す）の受入基準。
 
 ### 同時に走らせる数の数え方
 
-- [ ] 同時委譲数の上限が 1 で、実行の状態が `waiting`・課題の状態が人間対応待ち（`awaiting_human`）の契約の実行が 1 本あるとき、別の課題の委譲が起動する。
-- [ ] 同時委譲数の上限が 1 で、レビュー待ち（求めている操作が `review`・課題が検証中）の契約の実行が 1 本あるとき、別の課題の委譲が起動する。
-- [ ] 同時委譲数の上限が 1 で、課題が着手中で動いている契約の実行が 1 本あるとき、別の課題の委譲は起動しない。
-- [ ] 同時委譲数の上限が 1 で、オーナーの回答を受けて課題が着手中へ戻った契約の実行が 1 本あるとき、別の課題の委譲は起動しない。
-- [ ] 同時委譲数の上限が 1 で、動いている契約の実行が 1 本あるときに、別の課題のオーナーの回答待ちの実行へ `flywheel answer` で回答すると、次の委譲の段が、その実行へ再開のコマンド（宣言の `resume`）を送る。
-- [ ] 課題がオーナーの回答待ちで止まっている契約の実行があるとき、その課題へ新しい委譲を起動しない。
+- [ ] 同時に走らせる数の上限が 1 で、実行の状態が `waiting`・課題の状態が保留（`awaiting_human`）の契約の実行が 1 本あるとき、別の課題の委譲が起動する。
+- [ ] 同時に走らせる数の上限が 1 で、レビュー待ち（求めている操作が `review`・課題が検証中）の契約の実行が 1 本あるとき、別の課題の委譲が起動する。
+- [ ] 同時に走らせる数の上限が 1 で、課題が着手中で動いている契約の実行が 1 本あるとき、別の課題の委譲は起動しない。
+- [ ] 同時に走らせる数の上限が 1 で、オーナーの回答を受けて課題が着手中へ戻った契約の実行が 1 本あるとき、別の課題の委譲は起動しない。
+- [ ] 同時に走らせる数の上限が 1 で、動いている契約の実行が 1 本あるときに、別の課題のオーナーの回答待ちの実行へ `flywheel answer` で回答すると、次の委譲の段が、その実行へ再開のコマンド（宣言の `resume`）を送る。
+- [ ] オーナーの回答を受けて課題が着手中へ戻り、契約の実行がまだ終わっていないとき、その課題へ新しい委譲を起動しない。
 
 ### 指示文と文書
 
@@ -226,10 +234,13 @@ S1（外す）の受入基準。
 - [ ] 指示文の分量の上限の表に、`j9.md` の行が無い。
 - [ ] リポジトリの `CLAUDE.md` に、`ConflictPredictor` の文字列が無い。
 - [ ] リポジトリの `CLAUDE.md` に、「衝突の予測」の文字列が無い。
-- [ ] `docs/features/m3-invoker-delegation.md` の「同じリポジトリの並列と直列化グループ」の節に、外した旨と、`core-redesign.md` への参照がある。
-- [ ] `docs/features/m3-invoker-delegation.md` の「同時に進めてよいかの判断（J9）」の節に、外した旨と、`core-redesign.md` への参照がある。
+- [ ] `docs/features/m3-invoker-delegation.md` の機能要件の節「同じリポジトリの並列と直列化グループ【決定 2026-10-01…】」（見出しの段は `####`）に、外した旨と、`core-redesign.md` への参照がある。
+- [ ] `docs/features/m3-invoker-delegation.md` の「同時に進めてよいかの判断（判断点 J9）」の節に、外した旨と、`core-redesign.md` への参照がある。
+- [ ] `docs/features/m3-invoker-delegation.md` の「7. 同じリポジトリの並列と衝突の予測（外部システム連携）」の節に、外した旨と、`core-redesign.md` への参照がある。
 - [ ] `docs/features/ui-relation-graph.md` の衝突の節に、外した旨と、`core-redesign.md` への参照がある。
 - [ ] `docs/features/m1-core.md` の `serialized` を定めた箇所に、外した旨と、`core-redesign.md` への参照がある。
+- [ ] `docs/features/m4-ui-server.md` の、CLI にあって API の表に無いコードの列挙に、`serialized` が無い。
+- [ ] `docs/architecture.md` の §11（同時に走らせる数とスロット）の見直しの注記に、衝突の予測と直列化グループは外した旨と、`core-redesign.md` への参照がある。
 
 ### 全体
 
