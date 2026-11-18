@@ -122,10 +122,7 @@ func (s *Store) CountCycleWorkInWorkspace(ctx context.Context, agent *AgentDecla
 
 // countImprove は改修提案の段が判断点を呼ぶ条件（ImproveJ8 の自動の呼び出しと同じ）を満たせば 1、満たさなければ 0。
 func (s *Store) countImprove(ctx context.Context, tx *sql.Tx, agent *AgentDeclaration) (int, error) {
-	threshold := agent.ImproveThreshold
-	if threshold <= 0 {
-		threshold = defaultImproveThreshold
-	}
+	threshold := improveThreshold(agent)
 	jc, err := loadJ8ContextTx(ctx, tx, threshold)
 	if err != nil {
 		return 0, err
@@ -144,9 +141,11 @@ func (s *Store) countImprove(ctx context.Context, tx *sql.Tx, agent *AgentDeclar
 }
 
 // countRunnableDelegations は委譲の対象（selectDelegationTargets の選んだ課題）のうち、サイクルを回しても
-// 起動しないと LLM を呼ばずに決まるもの（plan_unavailable・run_budget・failure_limit・rework_limit）を除いた件数。
-// 完了の照合のやり直し（子を起動しない）は進むものとして数える。判定は委譲の段と同じ関数（loadPlanCandidate・
-// loadDelegationContext）で行い、書き込みをしない。
+// 何も進まないと LLM を呼ばずに決まるもの（plan_unavailable・run_budget）を除いた件数。
+// 完了の照合のやり直し（子を起動しない）は進むものとして数える。連続の失敗の上限・やり直しの上限に達した課題も
+// 数える（委譲の段が、その課題を人間対応待ちにしてオーナーへ見せる。数えから外すと、ほかに進むものが無いときに
+// サイクルが始まらず、課題が着手中のまま、どこにも出ずに止まる）。判定は委譲の段と同じ関数（loadPlanCandidate・
+// loadDelegationContext・implBudgetExhausted）で行い、書き込みをしない。
 func (s *Store) countRunnableDelegations(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, targets []int64) (int, error) {
 	in := DelegateInput{AgentDecl: agent, ConnDecl: conn}
 	retries, rest, err := s.splitReconcileRetries(ctx, targets)
@@ -174,8 +173,9 @@ func (s *Store) countRunnableDelegations(ctx context.Context, agent *AgentDeclar
 			n++ // 読み切れない理由は多めに数える
 			continue
 		}
-		if dc.LimitHit != nil || dc.ReworkHit != nil || dc.ImplBudgetMicros < minImplLaunchMicros {
-			continue // failure_limit・rework_limit・run_budget
+		// 委譲の段（delegateOnce）と同じ順で見る: 失敗の上限・やり直しの上限は、段が保留を作るので進むもの。
+		if dc.LimitHit == nil && dc.ReworkHit == nil && dc.implBudgetExhausted() {
+			continue // run_budget（状況の「予算切れ」に出る。サイクルを回しても変わらない）
 		}
 		n++
 	}

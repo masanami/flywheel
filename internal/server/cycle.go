@@ -143,9 +143,9 @@ func execLauncher(executable func() (string, error)) cycleLauncher {
 				code = -1
 			}
 			if code == 0 {
-				return false, nil // 合図の前に終了コード 0 で終わった（周を始めなかった）。
+				return false, nil // 合図の前に終了コード 0 で終わった（サイクルを始めなかった）。
 			}
-			return false, fmt.Errorf("周の開始の前にサイクルが終了した（終了コード %d）: %s", code, errTail.String())
+			return false, fmt.Errorf("サイクルを始める前に、起動したプロセスが終了した（終了コード %d）: %s", code, errTail.String())
 		case <-timer.C:
 			return true, nil // 合図も終了も無い。子は止めない（Wait は goroutine が回収する）。
 		}

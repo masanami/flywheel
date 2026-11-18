@@ -166,7 +166,8 @@ M3 の J2 は、core の同じ公開 API で読んだ記録を付ける（§M3 �
 - [ ] `flywheel ingest --source <id>` は、指定した取り込み元だけを処理する。宣言に無い id は `validation_failed`
 - [ ] `flywheel ingest <指定>... [--source <id>]`（S2b。AC-305）は、選んだ Issue だけを新しい課題にする。指定は `<owner>/<repo>#<番号>`（大文字と小文字を区別しない。記録には上流の正規の表記を使う）か番号だけ。番号だけの指定は、取り込めるものの中で（`--source` があればその取り込み元の中で）ちょうど 1 つのときに受け、0 件・2 件以上は `validation_failed`。取り込めるものの判定は、`--source` を付けても宣言の取り込み元の全部を読んで行う
 - [ ] 指定のどれか 1 つでも取り込めるもの（方針に合い、課題でも子でもない、開いている Issue）に無ければ、どれも取り込まずに `validation_failed`。`self_assignees` を解決できない取り込み元の Issue は取り込めるものに入れず、指定して取り込もうとしたときは `upstream_unavailable`。同じ Issue を 2 度並べたら `usage_error`。全部の作成は 1 つのトランザクションで行い、その中で課題になっていないことを読み直す
-- [ ] `flywheel ingest <指定>... --json` の根は `ingested`（要素は `challenge_id`・`external_key`・`children`。この区切りでは `children` は `0`）。作る課題は、状態 `unclassified`・`origin` が `ingest`・`source_binding` を持ち、作業ログに `ingest_create` を残す
+- [ ] `flywheel ingest <指定>... --json` の根は `ingested`（要素は `challenge_id`・`external_key`・`children`。`children` は、その課題に記録した取り込み元の子の件数）。作る課題は、状態 `unclassified`・`origin` が `ingest`・`source_binding` を持ち、作業ログに `ingest_create` を残す
+- [ ] 選んだ Issue に子孫の Issue があるとき（取り込めるものの中で、直の親をたどって決まる範囲。16 段まで）、子孫は課題にせず、その課題の「取り込み元の子」（`source_child`）として、課題と同じトランザクションで記録する。記録した子の題名・本文・上流の状態は、引数の無い `ingest`（とサイクルの取り込みの段）が追従する（開いている Issue の一覧から消えた子は、対応のある課題と同じ決まりで 1 件ずつ確かめて `closed`・`missing` を決める。取り込みの後に上流で足された子は記録しない）。子として記録されている Issue と、同じコマンドの別の指定の子孫にあたる Issue は選べない（`validation_failed`）。宣言のどれかのリポジトリを読めないときは、子孫を決めきれないので、どれも取り込まない（`upstream_unavailable`）。決まりの正は [core-redesign.md](core-redesign.md)（区切り S2b）
 - [ ] `flywheel ingest --json` は、取り込み元・リポジトリごとの結果（作成・更新・変化なし・対象外・完了済みでスキップ・上流の状態の変化・ポリシーの状態の変化・失敗）を出力する（形は §IF / API）
 - [ ] リポジトリ単位の失敗があっても、コマンドは終了コード 0 で終わり、失敗は結果に示す【決定 2026-09-24 親 QP4】
 - [ ] 定期実行の仕組み（スケジューラ）は持たない。定期実行は cron などの外部から `flywheel ingest` を呼ぶ
@@ -183,7 +184,8 @@ M3 の J2 は、core の同じ公開 API で読んだ記録を付ける（§M3 �
 - [ ] `external_key` には、上流の応答の正規の表記（大文字小文字）を使う。④もその表記で判定する
 - [ ] `unbind` は、対応のある課題だけを対象にする（無ければ拒む）。対応の削除・作業ログ・課題の版の +1 を 1 つの書き込みトランザクションで記録する。課題の見出し・説明・親子・依存は変えず、上流へは接続しない
 - [ ] どちらも承認を要さず、`--relayed` も端末での本人確認も持たない（`dep add`・`edit` と同じ扱い。本人確認の方式は `none`）
-- [ ] `unbind` の後の `ingest` は、その Issue を「対応の無い Issue」として扱う。宣言のポリシーに合えば新しい課題として作る（元の課題とは別。元の課題は変わらない）
+- [ ] `unbind` の後の `ingest` は、その Issue を「対応の無い Issue」として扱う。宣言のポリシーに合えば新しい課題として作る（元の課題とは別。元の課題は変わらない） 【core の見直しの区切り S2b で改めた点】引数の無い `ingest` は、対応の無い Issue を課題にしなくなった。`unbind` した Issue は、取り込めるもの（`flywheel status` の `ingestable`）に戻り、オーナーが選んで取り込んだとき（`flywheel ingest <指定>...`）にだけ、新しい課題になる
+- [ ] 【core の見直しの区切り S2b で足した点】取り込み元の子の記録を持つ課題の `unbind` は、その課題の子の記録も消す（消した子は、取り込めるものに戻る）。その課題に、終わっていない実行（`run`）か、終わっていない契約の実行（`contract_run`）があるときは、`validation_failed` で拒む（子の記録を持たない課題の `unbind` は変わらない）。`bind` は、ほかの課題の子として記録されている Issue を `validation_failed` で拒む。課題を取り下げても、子の記録は消さない。決まりの正は [core-redesign.md](core-redesign.md)
 - [ ] 範囲外: Issue の起票・閉じた Issue の許可・承認の口・即時の見出し置換・GitHub 以外の取り込み元・他リポジトリ
 
 `bind` が記録する対応は、取り込みで課題を作ったときと同じ値で作る【仮定】。`source_id` は Issue のリポジトリを含む宣言の取り込み元の `id`（複数あれば宣言の順で最初）、`url` は Issue の URL、`upstream_state` は `open`、観測値は取得した Issue の値、読んだ時点のコメント数は 0・読んだ時点の更新日時は観測値と同じ、`policy_state` は `in_policy`（次の取り込みが `self_assignees` を解決できた回に再判定される）。

@@ -60,10 +60,7 @@ func (s *Store) ImproveJ8(ctx context.Context, in ImproveJ8Input) (*ImproveJ8Res
 	if in.Cycle != nil && in.Cycle.cycleID != in.CycleID {
 		return nil, ErrValidation
 	}
-	threshold := in.AgentDecl.ImproveThreshold
-	if threshold <= 0 {
-		threshold = defaultImproveThreshold
-	}
+	threshold := improveThreshold(in.AgentDecl)
 
 	// 入力の事実と「待つ」を付ける発生は、同じ読み取りで読む。
 	var jc *j8Context
@@ -210,4 +207,13 @@ func (s *Store) j8OriginURL(ctx context.Context, in ImproveJ8Input, props []J8Pr
 		return st.OriginURL, ""
 	}
 	return "", ""
+}
+
+// improveThreshold は改修提案の段が判断点を自動で呼ぶ、起動の件数のしきい値（宣言に無ければ既定）。
+// 段（ImproveJ8）と、サイクルを回すと進むものの数え（countImprove）が、同じ値を使う。
+func improveThreshold(agent *AgentDeclaration) int {
+	if agent.ImproveThreshold > 0 {
+		return agent.ImproveThreshold
+	}
+	return defaultImproveThreshold
 }

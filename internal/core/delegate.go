@@ -719,7 +719,7 @@ func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *Judgment
 	}
 
 	// 実装枠の残りが起動の最小額に満たなければ、J3 の費用を払う前に起動しない。
-	if dc.ImplBudgetMicros < minImplLaunchMicros {
+	if dc.implBudgetExhausted() {
 		if jc != nil {
 			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedRunBudget,
 				Detail: budgetShortfallDetail(bucketRemaining{Impl: dc.ImplBudgetMicros, Review: dc.ReviewBudgetMicros})}, nil
@@ -1089,4 +1089,10 @@ func dependencyNotStarted(eval *dependencyEvaluation, challengeID string, cid in
 		return nil
 	}
 	return &NotStarted{ChallengeID: challengeID, Reason: NotStartedDependency, Detail: strings.Join(unmet, ",")}
+}
+
+// implBudgetExhausted は実装枠の残りが起動の最小額に満たないか（起動しなかった理由 run_budget）。
+// 委譲の段（delegateOnce）と、サイクルを回すと進むものの数え（countRunnableDelegations）が、同じ判定を使う。
+func (dc *delegationContext) implBudgetExhausted() bool {
+	return dc.ImplBudgetMicros < minImplLaunchMicros
 }

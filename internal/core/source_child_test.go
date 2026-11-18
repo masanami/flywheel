@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -542,5 +544,147 @@ func TestSourceChild_AC291_292_DetailCarriesTheChildren(t *testing.T) { // #776
 	if len(d.SourceChildren) != 2 || d.SourceChildren[0].ExternalKey != "o/r#2" || d.SourceChildren[0].ParentExternalKey != "o/r#1" ||
 		d.SourceChildren[0].Title != "t-o/r#2" || d.SourceChildren[0].UpstreamState != "open" || d.SourceChildren[0].URL == "" {
 		t.Errorf("SourceChildren = %+v", d.SourceChildren)
+	}
+}
+
+// 記録した子の追従で、ストアへの書き込みに失敗したときは、黙って捨てず、その子の失敗の項目として出す
+// （取り込みの全体は止めない。ほかの子の追従は続ける）。開いている一覧にある子と、一覧から消えた子の両方で確かめる。
+func TestSourceChild_FollowUpWriteFailureIsReportedAsAFailedItem(t *testing.T) { // #770 の仕上げ
+	t.Parallel()
+	f := newChildFix(t)
+	f.put("o/r#1", "")
+	f.put("o/r#2", "o/r#1")
+	f.put("o/r#3", "o/r#1")
+	f.put("o/r#4", "o/r#1")
+	f.mustSel("o/r#1")
+	// o/r#2 は題名が変わる（開いている一覧にある）。o/r#3 は上流で閉じた（一覧から消えた）。o/r#4 は題名が変わる（失敗させない）。
+	repo := f.up.issues["o/r"]
+	for i := range repo {
+		switch repo[i].ExternalKey {
+		case "o/r#2":
+			repo[i].Title = "renamed 2"
+		case "o/r#4":
+			repo[i].Title = "renamed 4"
+		}
+	}
+	f.drop("o/r#3")
+	closed := f.up.getIssue["o/r#3"]
+	closed.State = "closed"
+	f.up.getIssue["o/r#3"] = closed
+	// o/r#2 と o/r#3 の行の更新だけを失敗させる。
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TRIGGER fail_child_update BEFORE UPDATE ON source_child
+			WHEN NEW.external_key IN ('o/r#2', 'o/r#3') BEGIN SELECT RAISE(ABORT, 'boom'); END`)
+		return err
+	}); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	res, err := f.s.Ingest(context.Background(), ChannelCLI, IngestInput{Sources: f.sources, Upstream: f.up})
+	if err != nil {
+		t.Fatalf("Ingest() error = %v, want nil (a child's write failure must not stop the ingest)", err)
+	}
+	failed := map[string]string{}
+	for _, sr := range res.Sources {
+		for _, rr := range sr.Repos {
+			for _, it := range rr.Items {
+				if it.Result == IngestOutcomeFailed && it.Error != nil {
+					failed[it.ExternalKey] = *it.Error
+				}
+			}
+		}
+	}
+	for _, key := range []string{"o/r#2", "o/r#3"} {
+		if msg, ok := failed[key]; !ok || !strings.Contains(msg, "boom") {
+			t.Errorf("failed item of %s = %q (found=%v), want a failed item carrying the write error", key, msg, ok)
+		}
+	}
+	if len(failed) != 2 {
+		t.Errorf("failed items = %v, want exactly the 2 children whose write failed", failed)
+	}
+	if got := f.str(`SELECT title FROM source_child WHERE external_key = 'o/r#2'`); got != "t-o/r#2" {
+		t.Errorf("title of o/r#2 = %q, want unchanged", got)
+	}
+	if got := f.state("o/r#3"); got != "open" {
+		t.Errorf("state of o/r#3 = %q, want open (the write failed)", got)
+	}
+	if got := f.str(`SELECT title FROM source_child WHERE external_key = 'o/r#4'`); got != "renamed 4" {
+		t.Errorf("title of o/r#4 = %q, want renamed 4 (the other child is still followed)", got)
+	}
+}
+
+// AC-131（#775 の確かめの補い）: 上流で閉じている Issue（Issue はあるが、開いている Issue の一覧に無い）を指定すると、
+// 検査のエラーになり、課題は増えない。
+func TestIngestSelected_AC131_AClosedIssueCannotBeSelected(t *testing.T) {
+	t.Parallel()
+	f := newChildFix(t)
+	f.put("o/r#1", "")
+	f.put("o/r#2", "")
+	f.drop("o/r#1")
+	closed := f.up.getIssue["o/r#1"]
+	closed.State = "closed"
+	f.up.getIssue["o/r#1"] = closed
+	if _, err := f.sel("o/r#1"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("AC-131: error = %v, want ErrValidation", err)
+	}
+	if _, err := f.sel("o/r#2", "o/r#1"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("AC-131: error with an ingestable one = %v, want ErrValidation", err)
+	}
+	if n := countChallenges(t, f.s); n != 0 {
+		t.Errorf("AC-131: challenges = %d, want 0", n)
+	}
+}
+
+// 宣言にあるほかのリポジトリの一覧を読めなかったときは、そこにある子孫を決めきれないので、子が欠けた課題を作らず、
+// 上流を取得できないエラーにする（読めるようになれば、子と一緒に取り込める）。
+func TestIngestSelected_UnreadableOtherRepoStopsTheSelectionInsteadOfDroppingChildren(t *testing.T) { // #770 の仕上げ
+	t.Parallel()
+	f := newChildFix(t)
+	f.put("o/r#1", "")
+	f.put("o/x#5", "o/r#1") // 宣言にある別の取り込み元（s2）の子
+	f.up.errs = map[string]error{"o/x": errors.New("list failed")}
+	if _, err := f.sel("o/r#1"); !errors.Is(err, ErrUpstreamFetchFailed) {
+		t.Fatalf("error = %v, want ErrUpstreamFetchFailed", err)
+	}
+	if n := countChallenges(t, f.s); n != 0 || f.children() != 0 {
+		t.Fatalf("challenges = %d, children = %d, want nothing written", n, f.children())
+	}
+	// 読めるようになれば、子と一緒に取り込める。
+	f.up.errs = nil
+	if res := f.mustSel("o/r#1"); len(res.Ingested) != 1 || res.Ingested[0].Children != 1 {
+		t.Fatalf("Ingested = %+v, want 1 challenge with 1 child", res.Ingested)
+	}
+}
+
+// AC-136（#775 の確かめの補い）: 2 つを指定し、上流を読んだ後に、片方がほかの操作で課題になっていたら、
+// 検査のエラーになり、もう片方も課題にならない（全部の作成は 1 つのトランザクション）。
+func TestIngestSelected_AC136_OneTakenAfterTheUpstreamReadCreatesNeitherOfTheTwo(t *testing.T) {
+	t.Parallel()
+	f := newChildFix(t)
+	f.put("o/r#1", "")
+	f.put("o/r#2", "")
+	// 上流の一覧を読んだ直後（書き込みのトランザクションの前）に、ほかの操作が o/r#2 を課題にする。
+	other := &fakeUpstream{issues: f.up.issues, login: "masanami", getIssue: f.up.getIssue, getIssueErr: map[string]error{}}
+	var once sync.Once
+	f.up.onListOpenIssues = func(repo string) {
+		if repo != "o/x" { // 宣言の最後のリポジトリの一覧を読み終える時に差し込む
+			return
+		}
+		once.Do(func() {
+			if _, err := f.s.IngestSelected(context.Background(), ChannelCLI, IngestSelectedInput{Sources: f.sources, Specs: []string{"o/r#2"}, Upstream: other}); err != nil {
+				t.Errorf("the other operation failed: %v", err)
+			}
+		})
+	}
+	_, err := f.sel("o/r#1", "o/r#2")
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("AC-136: error = %v, want ErrValidation", err)
+	}
+	// 課題は、ほかの操作が作った o/r#2 の 1 件だけ。o/r#1 は課題になっていない。
+	if n := countChallenges(t, f.s); n != 1 {
+		t.Fatalf("AC-136: challenges = %d, want 1 (only the one made by the other operation)", n)
+	}
+	if got := f.str(`SELECT external_key FROM source_binding`); got != "o/r#2" {
+		t.Errorf("AC-136: binding = %q, want o/r#2 only", got)
 	}
 }

@@ -345,3 +345,43 @@ func TestCountCycleWork_AC211_OpenUpstreamIssueWithoutAChallengeIsZero(t *testin
 		t.Fatalf("challenges = %d, want 0 (counting must not ingest)", n)
 	}
 }
+
+// 連続の失敗の上限に達した着手中の課題は、サイクルを回すと進むものに数える（委譲の段が、その課題を人間対応待ちにして
+// オーナーへ見せる。数えから外すと、ほかに進むものが無いときにサイクルが始まらず、課題が着手中のまま止まる）。
+// 段が保留にした後は、数えない。
+func TestCountCycleWork_FailureLimitHitIsCountedUntilTheStagePutsItOnHold(t *testing.T) {
+	t.Parallel()
+	f := newResumeFixture(t)
+	id := f.newInProgress(t, "t", "P1", planSpec(nil))
+	f.deleg.queue = []JudgmentLaunchOutput{failOut(RunResultLaunchFailed), failOut(RunResultLaunchFailed)}
+	f.runDelegation(t, id)
+	f.runDelegation(t, id)
+	ctx := context.Background()
+
+	w, err := f.s.CountCycleWork(ctx, f.agent, f.conn)
+	if err != nil {
+		t.Fatalf("CountCycleWork: %v", err)
+	}
+	if w.Stages.Run != 1 || w.Total != 1 {
+		t.Fatalf("work = %+v, want run=1 (the stage will put the challenge on hold)", *w)
+	}
+	// 数えたとおり、段を回すと進む: 起動はせず、人間対応待ちになる。
+	res, err := f.s.RunDelegation(ctx, f.input(f.cycle(t, 300), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedFailureLimit {
+		t.Fatalf("notStarted = %+v, want failure_limit", res.NotStarted)
+	}
+	if got := f.detail(t, id).Status; got != StatusAwaitingHuman {
+		t.Fatalf("status = %s, want awaiting_human", got)
+	}
+	// 保留になった後は、オーナーの回答待ちなので、数えない。
+	w, err = f.s.CountCycleWork(ctx, f.agent, f.conn)
+	if err != nil {
+		t.Fatalf("CountCycleWork: %v", err)
+	}
+	if w.Stages.Run != 0 {
+		t.Errorf("run = %d after the hold, want 0", w.Stages.Run)
+	}
+}

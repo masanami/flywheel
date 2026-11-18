@@ -214,10 +214,14 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 				}
 				observed.observe(issue)
 				if _, isChild := children[issue.ExternalKey]; isChild {
-					// 記録した子は、題名・本文・上流の状態を追従する。課題の項目には数えない。
-					// 子の更新の失敗は、その子だけのことにして続ける（次の取り込みで追従し直す）。
-					if err := s.refreshSourceChild(ctx, actor, ch, issue, upstreamStateOpen); err != nil && ctx.Err() != nil {
-						return nil, err
+					// 記録した子は、題名・本文・上流の状態を追従する。うまくいった子は、項目に数えない。
+					// 子の更新の失敗は、その子だけのことにして続けるが、黙って捨てず、失敗の項目として出す
+					// （対応のある課題の 1 件の失敗と同じ扱い。閉じた子が開いたまま残ると、そのタスクが起動されうる）。
+					if err := s.refreshSourceChild(ctx, actor, ch, issue, upstreamStateOpen); err != nil {
+						if ctx.Err() != nil {
+							return nil, err
+						}
+						rr.Items = append(rr.Items, failedSourceChildItem(issue.ExternalKey, err))
 					}
 					continue
 				}
@@ -251,9 +255,11 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 				return nil, err
 			}
 			rr.Items = append(rr.Items, closeItems...)
-			if err := s.checkUnseenSourceChildren(ctx, actor, ch, repo, children, issues, in.Upstream); err != nil && ctx.Err() != nil {
+			childItems, err := s.checkUnseenSourceChildren(ctx, actor, ch, repo, children, issues, in.Upstream)
+			if err != nil {
 				return nil, err
 			}
+			rr.Items = append(rr.Items, childItems...)
 			sr.Repos = append(sr.Repos, rr)
 		}
 		result.Sources = append(result.Sources, sr)

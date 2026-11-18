@@ -267,7 +267,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 ##### `show`
 
-`{"challenge": {…}, "plans": [...], "approvals": [...], "holds": [...], "direct_completions": [...], "followups": [...], "operations": [...], "source_binding": {…}}`。`challenge` は上表と同じ形。`source_binding` は下表と同じ形（一覧ではなく単一のオブジェクト。対応の無い課題は `null`。#56 で追加）。
+`{"challenge": {…}, "plans": [...], "approvals": [...], "holds": [...], "direct_completions": [...], "followups": [...], "operations": [...], "source_binding": {…}, "source_children": [...]}`。`challenge` は上表と同じ形。`source_binding` は下表と同じ形（一覧ではなく単一のオブジェクト。対応の無い課題は `null`。#56 で追加）。
 
 | 一覧 | 要素の形 |
 |---|---|
@@ -278,6 +278,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 | `followups` | `{"id", "challenge_id", "title", "detail", "source", "status", "note", "reason", "promoted_challenge_id", "created_at", "updated_at"}`（その課題のフォローアップを状態を問わず全部、ID の昇順。無ければ `[]`。`id` は `"F-<n>"`。`challenge_id`・`note`・`reason`・`promoted_challenge_id` は `null` 可。`status` は `open`\|`done`\|`dropped`。S2b） |
 | `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
 | `source_binding` | `{"source_id", "external_key", "url", "fingerprint", "upstream_state", "policy_state", "comments_count", "upstream_updated_at", "read_comments_count", "read_upstream_updated_at", "created_at", "updated_at"}`（対応の無い課題では `source_binding` 自体が `null`。`comments_count`・`upstream_updated_at`・`read_comments_count`・`read_upstream_updated_at` は #72（上流の更新の観測と既読）が追加。`upstream_updated_at`・`read_upstream_updated_at` は未設定なら `null`） |
+| `source_children` | `{"external_key", "title", "url", "upstream_state", "parent_external_key"}`（その課題の取り込み元の子を、記録した順に全部。無ければ `[]`。`upstream_state` は `open`\|`closed`\|`missing`、`parent_external_key` は直の親の識別。タスクとの対応は、`tasks[]` の `source_key`〔対応する子の `external_key` か `null`〕で読む。S2b。決まりの正は [core-redesign.md](core-redesign.md)） |
 
 #9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。#12 で `approvals` への書き込みと `holds` の `answer`・`answered_at`・`answered_by` の記録が入った。#13 で `operations` への書き込み（`op add`）と、完了の承認による `release` の一括承認（D12）が入った）。`source_binding` は #56（M2）が GitHub Issue から取り込んだ課題に対して作る（`create` で作った課題・スキーマ版 1 から上げたストアの既存の課題は `null`）。
 
