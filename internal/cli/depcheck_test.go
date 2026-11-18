@@ -241,7 +241,8 @@ func dependsOn(deps []string, target string) bool {
 
 // TestServerImportDirection は internal/server が、ストアのパッケージ・internal/cli・
 // internal/invoker を（テストファイルを含め）import しないことを検査する。
-// internal/adapters/github は waiting_external の組み立てだけに使えるので禁止しない。
+// internal/adapters/github は waiting_external と、状況の API の取り込めるもの（上流の Issue を読む口〔UpstreamIssueSource〕）の
+// 組み立てだけに使えるので禁止しない。
 func TestServerImportDirection(t *testing.T) {
 	t.Parallel()
 	pkgs := goListJSON(t, repoRoot(t), "./...")

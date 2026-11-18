@@ -36,6 +36,11 @@ var actionableStatuses = []Status{
 type Overview struct {
 	// CycleWork はサイクルを回すと進むものの数え（呼び出し元が CountCycleWork で入れる。nil は全て 0）。
 	CycleWork *CycleWork
+	// Ingestable は取り込めるもの（呼び出し元が ResolveIngestable の結果を入れる。nil は読んでいない）。
+	Ingestable *Ingestable
+	// FollowupsOpen は未のフォローアップの件数（上げてあって、上げた先の課題が取り下げでないものを除く。
+	// GetOverviewFor が数える）。
+	FollowupsOpen int
 	// NeedsHumanChallenges は計画承認待ち・完了確認待ち・人間対応待ちの課題
 	// （id 昇順）。人間対応待ちのうち、いま開いている保留の種類が親が直接行うの課題は
 	// ParentAgentChallenges へ分けて、ここには含めない。
@@ -460,7 +465,9 @@ func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*O
 			return err
 		}
 		result.NeedsHumanBudgetExhausted = exhausted
-		return nil
+
+		result.FollowupsOpen, err = countOpenFollowupsToTriage(ctx, tx)
+		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err

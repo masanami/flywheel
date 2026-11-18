@@ -179,19 +179,19 @@ func TestRunStatus_ParentDirectHoldIsParentAgentsTurn(t *testing.T) {
 	}
 
 	text := runText(t, ws, "status")
-	if !strings.Contains(text, "親のエージェントが動く番:") {
+	if !strings.Contains(text, "オーケストレーターの番:") {
 		t.Fatalf("status text lacks the parent agent section:\n%s", text)
 	}
-	section := text[strings.Index(text, "親のエージェントが動く番:"):]
-	if i := strings.Index(section, "システムが次に進められるもの:"); i >= 0 {
+	section := text[strings.Index(text, "オーケストレーターの番:"):]
+	if i := strings.Index(section, "外を待っているもの:"); i >= 0 {
 		section = section[:i]
 	}
 	if !strings.Contains(section, direct) || strings.Contains(section, human) {
 		t.Errorf("parent agent section = %q, want only %s", section, direct)
 	}
-	humanSection := text[:strings.Index(text, "親のエージェントが動く番:")]
+	humanSection := text[:strings.Index(text, "オーケストレーターの番:")]
 	if strings.Contains(humanSection, direct) {
-		t.Errorf("the human section lists the parent-direct challenge:\n%s", humanSection)
+		t.Errorf("the sections that wait for you list the parent-direct challenge:\n%s", humanSection)
 	}
 }
 

@@ -458,7 +458,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | メソッドとパス | 返す形 |
 |---|---|
 | `GET /api/v1/workspaces` | `{"workspaces": [{"name", "path", "state", "error"}]}`。`state` は `ok \| store_not_found \| store_too_new \| store_error` の閉集合、`error` は `ok` のとき `null` |
-| `GET /api/v1/workspaces/{name}/status` | `flywheel status --json` と同じ形 |
+| `GET /api/v1/workspaces/{name}/status[?ingestable=true]` | `flywheel status --json` と同じ形。`ingestable` は、問い合わせに `ingestable=true` が付いたときだけ、server が `internal/adapters/github` から上流の Issue を読む口（`UpstreamIssueSource`）を組み立てて core へ渡して読み、同じストアでの `flywheel status --json` と同じ値を返す。付いていないときは `null` で、上流の Issue の一覧（`issues?state=open`）を読まない。`followups`・`cycle_work` は常に返す。ストアから読むもの（課題になっている Issue と子の記録）を先に読み、借りを返してから上流を読む |
 | `GET /api/v1/workspaces/{name}/challenges` | `flywheel list --json` と同じ形の各要素に `card`（下の「カードの面」）を足したもの |
 | `GET /api/v1/workspaces/{name}/challenges/{id}` | `flywheel show --json` と同じ形の最上位に `card` を足したもの |
 | `GET /api/v1/workspaces/{name}/log?challenge={id}` | `flywheel log [<C-ID>] --json` と同じ形 |

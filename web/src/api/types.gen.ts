@@ -6,6 +6,8 @@ export interface StatusResponse {
   approved: StatusApproved;
   binary_commit: string;
   cycle_work: CycleWork;
+  followups: StatusFollowups;
+  ingestable: Ingestable | null;
   needs_human: StatusNeedsHuman;
   parent_agent: StatusParentAgent;
   waiting_external: StatusWaitingExternal;
@@ -79,6 +81,34 @@ export interface CycleWorkStages {
   release: number;
   run: number;
   verify: number;
+}
+
+export interface StatusFollowups {
+  open: number;
+}
+
+export interface Ingestable {
+  error: string | null;
+  items: IngestableItem[];
+}
+
+export interface IngestableItem {
+  children: IngestableChild[];
+  external_key: string;
+  number: number;
+  parent_challenge_id: string | null;
+  parent_external_key: string | null;
+  repo: string;
+  title: string;
+  url: string;
+}
+
+export interface IngestableChild {
+  external_key: string;
+  number: number;
+  parent_external_key: string;
+  title: string;
+  url: string;
 }
 
 export interface StatusNeedsHuman {

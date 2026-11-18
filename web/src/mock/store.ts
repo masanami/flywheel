@@ -800,6 +800,8 @@ export function statusOf(w: MockWorkspace): StatusResponse {
       },
       total: 0,
     },
+    followups: { open: 0 },
+    ingestable: null,
     needs_human: {
       budget_exhausted: items.flatMap((m) =>
         m.flags.budget ? [m.flags.budget] : [],

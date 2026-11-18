@@ -77,7 +77,7 @@ func loadTakenExternalKeys(ctx context.Context, q interface {
 }
 
 // ScanIngestable は sources（宣言の取り込み元の全部）の開いている Issue を読み、
-// 取り込めるもの（isIngestable）を返す。状況の出力（後続）もこの関数を使う予定。
+// 取り込めるもの（isIngestable）を返す。状況の出力（ListIngestable）もこの判定を使う。
 func (s *Store) ScanIngestable(ctx context.Context, sources []SourceEntry, upstream UpstreamIssueSource) (*IngestScan, error) {
 	var taken map[string]bool
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
@@ -88,7 +88,11 @@ func (s *Store) ScanIngestable(ctx context.Context, sources []SourceEntry, upstr
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
+	return scanIngestable(ctx, taken, sources, upstream)
+}
 
+// scanIngestable は ScanIngestable の上流を読む部分（ストアには触れない）。
+func scanIngestable(ctx context.Context, taken map[string]bool, sources []SourceEntry, upstream UpstreamIssueSource) (*IngestScan, error) {
 	scan := &IngestScan{}
 	seen := map[string]bool{}
 	for _, src := range sources {

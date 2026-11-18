@@ -345,7 +345,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 ##### `status`（#14 で追加。`discrepancies` は #58 で追加）
 
-`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}, "waiting_external": {"challenges": [...]}, "parent_agent": {"challenges": [...]}, "binary_commit": "...", "cycle_work": {"total": 0, "stages": {...}}}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約。`waiting_external` は M3 が、`parent_agent` は #452 が、区分ではない `binary_commit`〔動いているバイナリのコミット〕は #593 が足した）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
+`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}, "waiting_external": {"challenges": [...]}, "parent_agent": {"challenges": [...]}, "binary_commit": "...", "cycle_work": {"total": 0, "stages": {...}}, "followups": {"open": 0}, "ingestable": {"items": [...], "error": null}}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約。`waiting_external` は M3 が、`parent_agent` は #452 が、区分ではない `binary_commit`〔動いているバイナリのコミット〕は #593 が足した）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
 
 | フィールド | 型 | 内容 |
 |---|---|---|
@@ -358,9 +358,15 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 | 一覧 | 要素の形 |
 |---|---|
+| `ingestable_item`（`ingestable.items` の要素＝取り込めるものの根） | `{"external_key", "number", "repo", "title", "url", "parent_external_key", "parent_challenge_id", "children"}`（`parent_external_key` は親が無ければ `null`、`parent_challenge_id` は親がすでに課題になっているときの課題の ID で、無ければ `null`） |
+| `ingestable_child`（`ingestable.items[].children` の要素） | `{"external_key", "number", "title", "url", "parent_external_key"}` |
 | `discrepancy`（`needs_human.discrepancies` の要素。1 列目は照合テストが読む要素の名前） | `{"challenge_id", "kinds"}`（`kinds` は `upstream_closed`・`upstream_missing`・`out_of_policy`・`upstream_commented`・`upstream_updated` の空でない部分集合。この列挙の順。`upstream_commented`・`upstream_updated` は #72〔上流の更新の観測と既読〕が追加） |
 
 完了（`done`）の課題と差し戻し済み（`state=rejected`）の不可逆操作はどの一覧にも含めない。各一覧は `id` 昇順（`discrepancies` は `challenge_id` の昇順）。
+
+最上位の `followups`（object）は未のフォローアップの件数 `open`（number）。上げてあって、上げた先の課題が取り下げでないものは数えない（上げた先が取り下げなら数える）。
+
+最上位の `ingestable`（object）は取り込めるもの（S2b）で、`items`（array。要素は上表の `ingestable_item`）と `error`（string \| null）を持つ。`flywheel status` は常に読む。API の `GET …/status` は問い合わせに `ingestable=true` が付いたときだけ上流を読んで同じ形を返し、付いていないときは `null` で、上流の Issue の一覧を読まない（`followups`・`cycle_work` は常に出る）。判定（開いている・取り込み元の方針に合う・課題になっていない・どの課題の子でもない）は `flywheel ingest <指定>` と同じ 1 つの関数で行う。親子は開いている Issue の一覧の親の識別だけで組み立て、直の親が取り込めるものに無い Issue（親の無いものを含む）を根に並べ、親が取り込めるものにある Issue はいちばん上の親の `children` に深さを問わず平らに入れる（取り込みが子として記録する範囲と同じ。16 段で打ち切り、親の記録の輪の中の Issue と 16 段たどっても根に着かない Issue は、どれも根に並べて互いを子孫にしない）。上流を読めなかった（一覧の取得の失敗・`self_assignees` を解決できない取り込み元・`gh` が無い）ときは `error` に理由を入れ、終了コードは 0 のまま（解決できない取り込み元の Issue は `items` に入れない）。`sources.json` が無いワークスペースでは `items` は `[]`・`error` は `null`。
 
 ##### `version`（#593 で追加）
 
@@ -544,7 +550,7 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel followup done <F-ID>... --note <確かめた結果>` | フォローアップを済みにする。本人確認は要らない（端末が無くても `--relayed` が無くても成功する）。`--note` が無ければ `usage_error`、空なら `validation_failed`。同じ ID の重複は `usage_error`。1 つでも存在しなければ `not_found`、未でなければ `validation_failed` で、どれも変えない | — |
 | `flywheel followup drop <F-ID>... --reason <理由> [--relayed --session <s> --quote <q>]` | フォローアップを捨てる。本人確認は 1 回で、要約に全部の ID と題名を出す。打ち込む対象は ID を番号の小さい順にカンマでつないだもの（`F-<a>,F-<b>`）。違えば `confirmation_mismatch`。端末も `--relayed` も無ければ `tty_required`。検査は `done` と同じ | 要 |
 | `flywheel followup promote <F-ID> [--relayed --session <s> --quote <q>]` | 未のフォローアップを新しい課題（未分類）に上げる（1 回に 1 件。2 つ並べたら `usage_error`）。`--json` の根は `followup`（上げたもの）と `challenge`（作った課題）。上げてあるものは、上げた先の課題が取り下げのときだけ上げ直せる（それ以外は `validation_failed`） | 要 |
-| `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す（`--json` では `binary_commit`） | — |
+| `flywheel status` | 見出し「いま進められること」の下に、あなたの承認を待っているもの・あなたの回答を待っているもの・そのほかの、あなたの操作を待っているもの（あるときだけ）・取り込めるもの・サイクルを回すと進むもの・オーケストレーターの番・外を待っているもの・承認済みの不可逆操作・未のフォローアップの件数を出す。あなたを待っているもの・取り込めるもの・サイクルを回すと進むものが無いときは、その旨を出す。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す（`--json` では `binary_commit`） | — |
 | `flywheel version` | 動いているバイナリのビルドのコミット（`vcs.revision`・`vcs.time`・`vcs.modified`）と、そのバイナリが扱うストアのスキーマの版。読み取りだけで、ストアを開かず（`store_too_new` でも動く）、ネットワークにも Git にも触れない。未コミットの変更つきのビルドは commit の表示に `+dirty` を付ける | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |
 | `flywheel ingest [<指定>...] [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・上流の close の検出（#59）。引数なしは取り込み済みの追従だけ（新しい課題は作らない）、`<指定>...`（`<owner>/<repo>#<番号>` か番号）は選んだ Issue だけを課題にする（S2b） | — |
