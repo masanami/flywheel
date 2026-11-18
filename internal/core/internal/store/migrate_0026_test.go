@@ -168,7 +168,7 @@ func TestTaskMigration(t *testing.T) {
 		}
 		cols := tableColumnInfo(t, db, "task")
 		required := []string{"id", "challenge_id", "plan_version", "title", "body", "done_criteria", "repo", "operation", "status", "created_at", "updated_at"}
-		nullable := []string{"key", "non_goals"}
+		nullable := []string{"key", "non_goals", "source_key"}
 		if len(cols) != len(required)+len(nullable) {
 			t.Errorf("task columns = %v, want %d columns", cols, len(required)+len(nullable))
 		}

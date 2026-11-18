@@ -1052,6 +1052,13 @@ func FillAllTables(t *testing.T, workspace string) {
 			  VALUES (1, 1, 1, 2, NULL, 1, 'tester', 'cli', 'tty_confirm', 's', 'q', ?)`, []any{at}},
 			{`INSERT INTO plan_answer (challenge_id, plan_version, question_number, choice, text, recommended, actor, channel, verification, relay_session, relay_quote, answered_at)
 			  VALUES (1, 1, 2, NULL, '文の答え', 0, 'tester', 'cli', 'tty_confirm', NULL, NULL, ?)`, []any{at}},
+			{`INSERT INTO followup (challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, created_at, updated_at)
+			  VALUES (1, 'f1 "quoted"', 'detail', 'learn', 'open', NULL, NULL, 2, ?, ?)`, []any{at, at}},
+			{`INSERT INTO followup (challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, created_at, updated_at)
+			  VALUES (NULL, 'f2', NULL, 'learn', 'dropped', NULL, '要らない', NULL, ?, ?)`, []any{at, at}},
+			{`INSERT INTO source_child (challenge_id, source_id, external_key, parent_external_key, url, title, body, upstream_state, created_at, updated_at)
+			  VALUES (1, 'src', 'o/r#9', 'o/r#1', 'https://github.com/o/r/issues/9', 't', 'b', 'open', ?, ?)`, []any{at, at}},
+			{`UPDATE task SET source_key = 'o/r#9' WHERE id = 1`, nil},
 			{`UPDATE run SET task_id = 1 WHERE id = 1`, nil},
 			{`UPDATE contract_run SET task_id = 1 WHERE id = 1`, nil},
 			{`UPDATE hold SET task_id = 2 WHERE id = 1`, nil},

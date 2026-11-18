@@ -264,6 +264,12 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 		if err := rec.record("challenge", cid, string(p.op), tc.before, tc.after); err != nil {
 			return err
 		}
+		// 完了（T13・T14 の両方）になる課題へ上げてある未のフォローアップを、同じトランザクションで済みにする。
+		if target == StatusDone {
+			if err := completeFollowupsPromotedTo(ctx, tx, rec, cid); err != nil {
+				return err
+			}
+		}
 
 		result = &Challenge{
 			ID:           formatChallengeID(cid),
