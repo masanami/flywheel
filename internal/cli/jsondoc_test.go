@@ -884,6 +884,8 @@ var jsonEntityOf = map[string]string{
 	"items":   "item",
 	// runs（#81。docs/features/m3-invoker-delegation.md §IF / API「runs」）。
 	"runs": "run",
+	// show の followups と followup list の followups の要素（S2b）。
+	"followups": "followup",
 	// slot clear の slot（S2。§IF / API の「slot clear」の行）。
 	"slot": "slot",
 	// status.needs_human.budget_exhausted（S2。§IF / API の「status.needs_human.budget_exhausted」の行）。

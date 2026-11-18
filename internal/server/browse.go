@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/masanami/flywheel/internal/core"
@@ -176,6 +177,29 @@ func challengeHandler(fleet *Fleet, checks *checkCache, now func() time.Time) ht
 		ov := read.resolve(ctx, checks)
 		writeJSON(w, http.StatusOK, view.FromChallengeDetailCard(d, runs.Derive(d.Challenge, ov, now())))
 	}
+}
+
+// followupsHandler は GET /api/v1/workspaces/{name}/followups[?status=…][&challenge=…]（読み取りだけ）。
+// status の既定は open（`flywheel followup list` と同じ）。絞り込みの規則は core.ListFollowups が持つ。
+func followupsHandler(fleet *Fleet) http.HandlerFunc {
+	return withStore(fleet, func(w http.ResponseWriter, r *http.Request, st *core.Store) {
+		q := r.URL.Query()
+		status := "open"
+		if q.Has("status") {
+			status = q.Get("status")
+			// 空の値は CLI の `--status ""` と同じく不正（core は空を「全部」と読むので、ここで止める）。
+			if _, ok := core.ParseFollowupStatus(status); !ok && strings.TrimSpace(status) != "all" {
+				writeCoreError(w, core.ErrValidation)
+				return
+			}
+		}
+		fs, err := st.ListFollowups(r.Context(), core.FollowupFilter{Status: status, ChallengeID: q.Get("challenge")})
+		if err != nil {
+			writeCoreError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, view.FromFollowupList(fs))
+	})
 }
 
 func logHandler(fleet *Fleet) http.HandlerFunc {
