@@ -575,22 +575,25 @@ func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID,
 				}
 			}
 		}
-		// run の行へ書く対象リポジトリは、タスクの行のもの。タスクの行を読めないときは、start は止め、
-		// 既にある契約の run へのコマンド（読み直し・再開・中止）は repo を空のまま続ける（記録のために run を止めない）。
+		// run の行へ書く対象リポジトリは、タスクの行のもの。タスクの行が無いときは、start は止め、既にある契約の run への
+		// コマンド（読み直し・再開・中止）は、タスクに結び付けずに続ける（記録のために run を止めない）。
 		var taskRepo string
+		runTask := taskID
 		if taskID != nil {
 			err := tx.QueryRowContext(ctx, `SELECT repo FROM task WHERE id = ?`, *taskID).Scan(&taskRepo)
 			switch {
 			case errors.Is(err, sql.ErrNoRows) && isStart:
 				return ErrNotFound
-			case err != nil && !errors.Is(err, sql.ErrNoRows):
+			case errors.Is(err, sql.ErrNoRows):
+				runTask = nil
+			case err != nil:
 				return err
 			}
 		}
 		row, err := insertRun(ctx, tx, cid, insertRunInput{
 			CycleID: cycleID, Kind: runKindContract, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
 			SessionID: sessionID, PID: int64(os.Getpid()), Host: host, HeartbeatAt: now, StartedAt: now,
-			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: taskID, Repo: taskRepo,
+			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: runTask, Repo: taskRepo,
 		})
 		if err != nil {
 			return err
