@@ -59,7 +59,8 @@ func (t PlanTaskView) Identifier() string {
 }
 
 // PlanView は課題の最新の計画の読み取りの結果。Structured は、計画が構造化した出力（spec）を持つか
-// （持たない計画は Body だけが意味を持つ）。Summary・BudgetUSD・UsesIntegration は計画が書かなかったとき nil。
+// （持たない計画は Body だけが意味を持つ）。Summary・UsesIntegration は計画が書かなかったとき nil。
+// BudgetUSD は計画の枠の額（計画が書いた額。無ければ宣言のサイズごとの既定）で、決められないとき nil。
 type PlanView struct {
 	ChallengeID string
 	Title       string
@@ -73,12 +74,14 @@ type PlanView struct {
 	NonGoals        []string
 	Topics          []PlanTopicView
 	Tasks           []PlanTaskView
-	BudgetUSD       *float64 // 実装の枠とレビュー対応の枠の合計
+	BudgetUSD       *float64 // 実装の枠とレビュー対応の枠の合計（その版の予算の増額を当てた額）
 	UsesIntegration *bool
 }
 
 // GetPlanView は課題の最新の計画を読む。課題が無ければ ErrNotFound、計画が無ければ ErrValidation。
-func (s *Store) GetPlanView(ctx context.Context, id string) (*PlanView, error) {
+// agent は、計画が額を書いていない枠をサイズごとの既定から決めるための宣言（nil 可。nil で既定が要るときは、
+// 予算の上限を決められないものとして BudgetUSD を nil にする）。
+func (s *Store) GetPlanView(ctx context.Context, id string, agent *AgentDeclaration) (*PlanView, error) {
 	cid, ok := parseChallengeID(id)
 	if !ok {
 		return nil, ErrNotFound
@@ -89,7 +92,7 @@ func (s *Store) GetPlanView(ctx context.Context, id string) (*PlanView, error) {
 		if err != nil {
 			return err
 		}
-		pv, err := loadPlanView(ctx, tx, cid)
+		pv, err := loadPlanView(ctx, tx, cid, agent)
 		if err != nil {
 			return err
 		}
@@ -107,7 +110,8 @@ func (s *Store) GetPlanView(ctx context.Context, id string) (*PlanView, error) {
 }
 
 // loadPlanView は課題の最新の計画を読む。計画が無ければ nil（エラーにしない）。ChallengeID・Title・Status は埋めない。
-func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64) (*PlanView, error) {
+// agent は予算の上限をサイズごとの既定から決めるための宣言（nil 可）。
+func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclaration) (*PlanView, error) {
 	var (
 		version int64
 		body    string
@@ -133,14 +137,15 @@ func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64) (*PlanView, error)
 	pv.Expected = raw.Expected
 	pv.NonGoals = raw.NonGoals
 	pv.UsesIntegration = raw.UsesIntegration
-	if raw.BudgetImplUSD != nil || raw.BudgetReviewUSD != nil {
-		var sum float64
-		if raw.BudgetImplUSD != nil {
-			sum += *raw.BudgetImplUSD
+	// 予算の上限は、委譲が使うのと同じ規則で決める（計画が書いた額。無い枠は、宣言のサイズごとの既定。
+	// その版に `flywheel budget` の増額があれば、置き換えた額）。
+	if implUSD, reviewUSD, ok := resolveSpecBudgets(spec.String, agent); ok {
+		override, err := loadPlanBudgetOverride(ctx, tx, cid, version)
+		if err != nil {
+			return nil, err
 		}
-		if raw.BudgetReviewUSD != nil {
-			sum += *raw.BudgetReviewUSD
-		}
+		b := applyBudgetOverride(implUSD, reviewUSD, override)
+		sum := microsToUSD(b.Impl + b.Review)
 		pv.BudgetUSD = &sum
 	}
 

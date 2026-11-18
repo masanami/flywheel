@@ -32,7 +32,9 @@ func runCreate(a Args) (any, error) {
 func runShow(a Args) (any, error) {
 	ctx := context.Background()
 	if a.Bools["plan"] {
-		pv, err := a.Store.GetPlanView(ctx, a.Positional[0])
+		// サイズごとの既定を引く宣言は、予算の上限の表示にだけ使う（読めなくても計画は出す）。
+		decl, _ := core.LoadAgentDeclaration(a.Store.Workspace())
+		pv, err := a.Store.GetPlanView(ctx, a.Positional[0], decl)
 		if err != nil {
 			return nil, mapCoreErr(err)
 		}

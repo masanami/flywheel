@@ -553,11 +553,9 @@ func insertTaskPlanVersion(ctx context.Context, tc *transitionCtx, body string, 
 	return plan, nil
 }
 
-// SubmitChallenge は着手中の課題を検証中へ進める（T7）。操作固有の書き込みは無い。
+// SubmitChallenge は着手中の課題を検証中へ進める（T7）。起動できるタスクがちょうど 1 個なら、そのタスクも検証中にする。
 func (s *Store) SubmitChallenge(ctx context.Context, ch Channel, id string) (*Challenge, error) {
-	return s.transition(ctx, ch, id, OpSubmit, func(_ context.Context, _ *transitionCtx) error {
-		return nil
-	})
+	return s.transition(ctx, ch, id, OpSubmit, submitTaskInTransition)
 }
 
 // VerifyChallenge は検証結果を記録する（T8・T9・T10）。Result が閉集合外なら
@@ -586,6 +584,10 @@ func (s *Store) VerifyChallenge(ctx context.Context, ch Channel, id string, in V
 	}
 
 	return s.transition(ctx, ch, id, op, func(ctx context.Context, tc *transitionCtx) error {
+		// 検証中のタスクがちょうど 1 個なら、完了の検証の判断点（J5）と同じ結果にする（保留の結び付けは、保留を作る前に決める）。
+		if err := verifyTaskByHandInTransition(ctx, tc, result); err != nil {
+			return err
+		}
 		if result == VerifyResultUncertain {
 			return insertHold(ctx, tc, *in.Question)
 		}

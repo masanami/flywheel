@@ -234,3 +234,45 @@ func TestAnswerPlanCLI_TerminalConfirmationRecordsTheAnswer(t *testing.T) {
 		t.Errorf("status = %s, want classified", got)
 	}
 }
+
+// planWithTaskCaseSpec はタスク 1 件（問いなし）の計画の構造化した出力。
+const planWithTaskCaseSpec = `{"verdict":"plan","size":"S","topics":[],"uses_integration":false,"tasks":[` +
+	`{"key":"t1","title":"TASK-TITLE-1","body":"B","done_criteria":"D","non_goals":[],"depends_on":[],"repo":"direct-repo","operation":"brief-op"}]}`
+
+// AC-93: `flywheel log <課題の ID>` の出力に、その課題のタスクの記録（entity が task）が含まれる。
+// 計画の承認（CLI の口）がタスクを作り、その記録が、課題を指定した作業ログの CLI の出力に出ることを確かめる。
+func TestLogCLI_ChallengeLogIncludesItsTaskRecords(t *testing.T) {
+	t.Parallel()
+	ws := initializedWorkspace(t)
+	id := createPlannedForCase(t, ws)
+	coretest.SetPlanSpec(t, ws, challengeIDToInternalID(t, id), 1, planWithTaskCaseSpec)
+	other := runJSON(t, ws, "create", "--title", "other")["challenge"].(map[string]any)["id"].(string)
+
+	var out, errb bytes.Buffer
+	args := append([]string{"approve", id}, strings.Fields(relayedTail)...)
+	args = append(args, "--workspace", ws, "--json")
+	if code := runWithLookPath(args, strings.NewReader(""), &out, &errb, defaultCommands(), lookPathFor(t)); code != 0 {
+		t.Fatalf("approve: exit=%d stderr=%s", code, errb.String())
+	}
+
+	taskEntries := func(doc map[string]any) []map[string]any {
+		var found []map[string]any
+		for _, a := range doc["activities"].([]any) {
+			if m := a.(map[string]any); m["entity"] == "task" {
+				found = append(found, m)
+			}
+		}
+		return found
+	}
+	got := taskEntries(runJSON(t, ws, "log", id))
+	if len(got) != 1 {
+		t.Fatalf("task entries in `log %s` = %v, want exactly the created task", id, got)
+	}
+	if got[0]["action"] != "create" || got[0]["entity_id"] != "T-1" {
+		t.Errorf("task entry = %v, want action create for T-1", got[0])
+	}
+	// ほかの課題の作業ログには出ない。
+	if leaked := taskEntries(runJSON(t, ws, "log", other)); len(leaked) != 0 {
+		t.Errorf("task entries in `log %s` = %v, want none (the task belongs to %s)", other, leaked, id)
+	}
+}
