@@ -392,6 +392,7 @@ export interface Task {
   operation: string;
   plan_version: number;
   repo: string;
+  source_key: string | null;
   status: string;
   title: string;
 }
@@ -565,6 +566,7 @@ export interface ApprovalPlan {
 export interface ApprovalPlanTask {
   depends_on: string[];
   key: string;
+  source: string | null;
   title: string;
 }
 

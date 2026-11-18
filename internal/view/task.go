@@ -5,6 +5,7 @@ import "github.com/masanami/flywheel/internal/core"
 // このファイルはタスク（課題の下の作業の単位）と、計画の論点・問いの JSON の形を持つ。
 
 // Task は show の tasks の要素。DependsOn は前提のタスクの ID（"T-<n>"）。NonGoals・DependsOn は無ければ `[]`。
+// source_key は対応する取り込み元の子の external_key（対応しなければ null）。
 type Task struct {
 	Body         string   `json:"body"`
 	DependsOn    []string `json:"depends_on"`
@@ -14,6 +15,7 @@ type Task struct {
 	Operation    string   `json:"operation"`
 	PlanVersion  int64    `json:"plan_version"`
 	Repo         string   `json:"repo"`
+	SourceKey    *string  `json:"source_key"`
 	Status       string   `json:"status"`
 	Title        string   `json:"title"`
 }
@@ -23,7 +25,8 @@ func FromTasks(ts []core.Task) []Task {
 	out := make([]Task, 0, len(ts))
 	for _, t := range ts {
 		out = append(out, Task{
-			Body: t.Body, DependsOn: append([]string{}, t.DependsOn...), DoneCriteria: t.DoneCriteria, ID: t.ID,
+			SourceKey: strOrNil(t.SourceKey),
+			Body:      t.Body, DependsOn: append([]string{}, t.DependsOn...), DoneCriteria: t.DoneCriteria, ID: t.ID,
 			NonGoals: append([]string{}, t.NonGoals...), Operation: t.Operation, PlanVersion: t.PlanVersion,
 			Repo: t.Repo, Status: string(t.Status), Title: t.Title,
 		})
@@ -79,11 +82,12 @@ func FromPlanTopics(ts []core.PlanTopicView) []PlanTopic {
 }
 
 // PlanTask は `show --plan --json` のタスク 1 件。id・status は承認の後だけ（承認の前は null）。depends_on は、
-// 承認の前は前提のタスクの key、承認の後は前提のタスクの ID。
+// 承認の前は前提のタスクの key、承認の後は前提のタスクの ID。source は対応する取り込み元の子の external_key（対応しなければ null）。
 type PlanTask struct {
 	DependsOn []string `json:"depends_on"`
 	ID        *string  `json:"id"`
 	Key       string   `json:"key"`
+	Source    *string  `json:"source"`
 	Status    *string  `json:"status"`
 	Title     string   `json:"title"`
 }
@@ -113,7 +117,7 @@ type PlanOverviewResponse struct {
 func FromPlanView(p *core.PlanView) PlanOverviewResponse {
 	tasks := make([]PlanTask, 0, len(p.Tasks))
 	for _, t := range p.Tasks {
-		pt := PlanTask{DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Title: t.Title}
+		pt := PlanTask{DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Source: strOrNil(t.Source), Title: t.Title}
 		if t.ID != "" {
 			id, st := t.ID, string(t.Status)
 			pt.ID, pt.Status = &id, &st

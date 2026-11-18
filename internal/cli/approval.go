@@ -663,6 +663,9 @@ func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
 		fmt.Fprintf(b, "タスクのツリー（%d 件・統合先を使うか: %s）:\n", len(p.PlanTasks), usesIntegrationText(p.PlanUsesIntegration))
 		for _, t := range p.PlanTasks {
 			line := fmt.Sprintf("  %s %s", t.Identifier(), escapeControl(t.Title))
+			if t.Source != "" {
+				line += "（取り込み元の子: " + escapeControl(t.Source) + "）"
+			}
 			if len(t.DependsOn) > 0 {
 				line += "（前提: " + strings.Join(t.DependsOn, "・") + "）"
 			}

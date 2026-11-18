@@ -290,3 +290,24 @@ func checkUnbindSafeForChildren(ctx context.Context, tx *sql.Tx, cid int64, id s
 	}
 	return nil
 }
+
+// SourceChildrenSectionLabel は J2 の入力の区画「取り込み元の子」の見出し。
+const SourceChildrenSectionLabel = "取り込み元の子"
+
+// formatSourceChildrenSection は J2 の入力の区画「取り込み元の子」の本文を整形する。子ごとに識別（external_key）・
+// 題名・直の親の識別・本文を出す（孫の直の親は、子の external_key）。記録した値だけを使い、上流は読まない。
+func formatSourceChildrenSection(children []SourceChild) string {
+	var b strings.Builder
+	b.WriteString("課題の取り込み元の Issue の下にある子（孫を含む）。タスクのツリーの初期値として読む。子 1 件にタスク 1 件を基本とし、まとめる・分ける・子に無いタスクを足すのは計画を作る側が決める。\n")
+	for i, c := range children {
+		fmt.Fprintf(&b, "\n子 %d\n  external_key: %s\n  題名: %s\n", i+1, c.ExternalKey, c.Title)
+		if c.ParentExternalKey != "" {
+			fmt.Fprintf(&b, "  直の親: %s\n", c.ParentExternalKey)
+		}
+		b.WriteString("  本文:\n")
+		for _, line := range strings.Split(strings.TrimRight(c.Body, "\n"), "\n") {
+			b.WriteString("    " + line + "\n")
+		}
+	}
+	return b.String()
+}

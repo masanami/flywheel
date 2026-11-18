@@ -40,6 +40,7 @@ func loadLaunchableTasks(ctx context.Context, tx *sql.Tx, cid int64) ([]Task, er
 //
 //   - 起動できるタスクが 0 個 → no_tasks
 //   - 課題が統合先を使う（uses_integration が 1）、または起動できるタスクが 2 個以上 → integration_unavailable
+//   - ちょうど 1 個で、そのタスクが対応する子が起動を妨げる（taskUpstreamExclusion）→ upstream_closed・upstream_missing
 //   - ちょうど 1 個 → 起動できる（task を返す。NotStarted は nil）
 //
 // 計画の検査（validateJ2Output）はここで掛けない（呼び出し側が、起動できるときだけ後で行う）。
@@ -58,6 +59,10 @@ func launchGate(ctx context.Context, tx *sql.Tx, challengeID string, cid int64) 
 	if len(tasks) >= 2 || (integ != nil && *integ) {
 		return nil, &NotStarted{ChallengeID: challengeID, Reason: NotStartedIntegrationUnavailable,
 			Detail: "統合先を使う課題と、起動できるタスクが 2 個以上の課題は、後の区切りまで起動しない"}, nil
+	}
+	// タスクが対応する子の上流の状態（記録が無い・閉じた・無い）で起動しない。
+	if ns, err := taskUpstreamExclusion(ctx, tx, challengeID, cid, &tasks[0]); err != nil || ns != nil {
+		return nil, ns, err
 	}
 	return &tasks[0], nil, nil
 }

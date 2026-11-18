@@ -426,6 +426,9 @@ func planViewText(p *core.PlanView) string {
 		if t.ID != "" {
 			line += fmt.Sprintf(" [%s]", t.Status.Label())
 		}
+		if t.Source != "" {
+			line += "（取り込み元の子: " + escapeControl(t.Source) + "）"
+		}
 		if len(t.DependsOn) > 0 {
 			line += "（前提: " + strings.Join(t.DependsOn, "・") + "）"
 		}

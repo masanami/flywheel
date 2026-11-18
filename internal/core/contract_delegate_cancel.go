@@ -46,7 +46,7 @@ func (s *Store) CancelOpenContractRuns(ctx context.Context, in ContractCancelInp
 	}
 	cid, _ := parseChallengeID(in.ChallengeID)
 	var rows []*contractRunRow
-	var binding *sourceBinding
+	bindings := map[*contractRunRow]*sourceBinding{}
 	err = s.db.Read(ctx, func(tx *sql.Tx) error {
 		rs, err := tx.QueryContext(ctx, contractRunSelect+` WHERE ended_at IS NULL AND challenge_id = ? ORDER BY id`, cid)
 		if err != nil {
@@ -63,8 +63,12 @@ func (s *Store) CancelOpenContractRuns(ctx context.Context, in ContractCancelInp
 		if err := rs.Err(); err != nil {
 			return err
 		}
-		binding, err = loadSourceBindingByChallengeID(ctx, tx, cid)
-		return err
+		for _, r := range rows {
+			if bindings[r], err = loadTaskSourceBinding(ctx, tx, cid, r.TaskID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return 0, err
@@ -75,7 +79,7 @@ func (s *Store) CancelOpenContractRuns(ctx context.Context, in ContractCancelInp
 		if err != nil {
 			return n, err
 		}
-		command, err := fillContractArgs(connector.Commands.Cancel, in.ChallengeID, binding, row.ExternalRunID, contractAnswer{})
+		command, err := fillContractArgs(connector.Commands.Cancel, in.ChallengeID, bindings[row], row.ExternalRunID, contractAnswer{})
 		if err != nil {
 			return n, err
 		}

@@ -53,6 +53,8 @@ type TaskInput struct {
 	Repo         string
 	Operation    string
 	DependsOn    []string
+	// SourceKey は対応する取り込み元の子の external_key（"" は NULL＝子に対応しないタスク）。
+	SourceKey string
 }
 
 // Task はタスク 1 件（前提のタスクの ID つき）。ID・DependsOn の要素は表示形（"T-<n>"）、ChallengeID は "C-<n>"。
@@ -70,8 +72,10 @@ type Task struct {
 	Operation    string
 	Status       TaskStatus
 	DependsOn    []string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// SourceKey は対応する取り込み元の子の external_key（"" は NULL）。
+	SourceKey string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 func (in TaskInput) valid() bool {
@@ -134,10 +138,10 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 			nonGoals = string(b)
 		}
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			challengeID, planVersion, nullableTextColumn(t.Key), t.Title, t.Body, t.DoneCriteria, nonGoals, t.Repo, t.Operation,
-			string(TaskStatusPending), nowStr, nowStr)
+			string(TaskStatusPending), nullableTextColumn(t.SourceKey), nowStr, nowStr)
 		if store.IsUniqueViolation(err) {
 			return nil, errDuplicateTaskKey
 		}
@@ -170,20 +174,21 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 	return out, nil
 }
 
-const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, created_at, updated_at FROM task`
+const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at FROM task`
 
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var (
 		id, challengeID, planVersion int64
-		key, nonGoals                sql.NullString
+		key, nonGoals, sourceKey     sql.NullString
 		status, createdAt, updatedAt string
 		t                            Task
 	)
 	if err := row.Scan(&id, &challengeID, &planVersion, &key, &t.Title, &t.Body, &t.DoneCriteria, &nonGoals, &t.Repo, &t.Operation,
-		&status, &createdAt, &updatedAt); err != nil {
+		&status, &sourceKey, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	t.ID, t.ChallengeID, t.PlanVersion, t.Key, t.Status = formatTaskID(id), formatChallengeID(challengeID), planVersion, key.String, TaskStatus(status)
+	t.SourceKey = sourceKey.String
 	if nonGoals.Valid {
 		if err := json.Unmarshal([]byte(nonGoals.String), &t.NonGoals); err != nil {
 			return nil, fmt.Errorf("task %s non_goals: %w", t.ID, err)
