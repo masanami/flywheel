@@ -511,3 +511,97 @@ func TestListActivities_ForChallengeIncludesItsFollowupRecords(t *testing.T) {
 		t.Errorf("followup activities of a = %v", got)
 	}
 }
+
+// #774: 捨てる前の読み取りだけの検査（本人確認を求める前に終える）は、DropFollowups と同じ規則・同じ順で
+// 拒み、通るときは番号の小さい順で返し、ストアを変えない。
+func TestPrepareFollowupDrop_SameRulesAndOrderAsDropAndReadOnly(t *testing.T) {
+	t.Parallel()
+	s := newFollowupStore(t)
+	c := fuChallenge(t, s, "c")
+	f1 := fuCreate(t, s, c.ID, "one", "")
+	f2 := fuCreate(t, s, c.ID, "two", "")
+	done := fuCreate(t, s, c.ID, "done", "")
+	if _, err := s.CompleteFollowups(context.Background(), ChannelCLI, []string{done.ID}, "確かめた"); err != nil {
+		t.Fatal(err)
+	}
+	before := len(fuActs(t, s, "followup", ActivityActionFollowupDrop))
+	ctx := context.Background()
+
+	// 通るとき: 指定の順に依らず、番号の小さい順。
+	got, err := s.PrepareFollowupDrop(ctx, []string{f2.ID, f1.ID}, "不要")
+	if err != nil || len(got) != 2 || got[0].ID != f1.ID || got[1].ID != f2.ID {
+		t.Fatalf("PrepareFollowupDrop = %+v, %v; want [%s %s]", got, err, f1.ID, f2.ID)
+	}
+	// 拒むとき（DropFollowups と同じエラー）。
+	cases := []struct {
+		name   string
+		ids    []string
+		reason string
+		want   error
+	}{
+		{"存在しない ID", []string{f1.ID, "F-999"}, "不要", ErrNotFound},
+		{"形の違う ID", []string{"X-1"}, "不要", ErrNotFound},
+		{"未でない", []string{f1.ID, done.ID}, "不要", ErrValidation},
+		{"理由が空", []string{f1.ID}, "  ", ErrValidation},
+		{"理由が空で、存在しない ID もある（理由が先）", []string{"F-999"}, "", ErrValidation},
+	}
+	for _, tc := range cases {
+		if _, err := s.PrepareFollowupDrop(ctx, tc.ids, tc.reason); !errors.Is(err, tc.want) {
+			t.Errorf("%s: PrepareFollowupDrop error = %v, want %v", tc.name, err, tc.want)
+		}
+		// 同じ入力を DropFollowups に渡しても、同じ種類のエラーになる。
+		target, _ := FollowupAttestationTarget(tc.ids)
+		if _, err := s.DropFollowups(ctx, tc.ids, tc.reason, fuAtt(t, target)); !errors.Is(err, tc.want) {
+			t.Errorf("%s: DropFollowups error = %v, want %v (same as the prepare check)", tc.name, err, tc.want)
+		}
+	}
+	// 読み取りだけ: どのフォローアップも変わらず、記録も増えない。
+	for _, id := range []string{f1.ID, f2.ID} {
+		if st := fuGet(t, s, id).Status; st != FollowupStatusOpen {
+			t.Errorf("%s status = %s, want open", id, st)
+		}
+	}
+	if n := len(fuActs(t, s, "followup", ActivityActionFollowupDrop)); n != before {
+		t.Errorf("followup_drop activities %d → %d, want unchanged", before, n)
+	}
+}
+
+// #774: 課題に上げる前の読み取りだけの検査は、PromoteFollowup と同じ規則で拒み、ストアを変えない。
+func TestPrepareFollowupPromote_SameRulesAsPromoteAndReadOnly(t *testing.T) {
+	t.Parallel()
+	s := newFollowupStore(t)
+	c := fuChallenge(t, s, "c")
+	open := fuCreate(t, s, c.ID, "open", "")
+	done := fuCreate(t, s, c.ID, "done", "")
+	if _, err := s.CompleteFollowups(context.Background(), ChannelCLI, []string{done.ID}, "確かめた"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	challenges := func() int {
+		cs, err := s.ListChallenges(ctx, ListOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(cs)
+	}
+	before := challenges()
+	if f, err := s.PrepareFollowupPromote(ctx, open.ID); err != nil || f.ID != open.ID {
+		t.Fatalf("PrepareFollowupPromote(open) = %+v, %v", f, err)
+	}
+	if _, err := s.PrepareFollowupPromote(ctx, done.ID); !errors.Is(err, ErrValidation) {
+		t.Errorf("PrepareFollowupPromote(done) error = %v, want ErrValidation", err)
+	}
+	if _, err := s.PrepareFollowupPromote(ctx, "F-999"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("PrepareFollowupPromote(missing) error = %v, want ErrNotFound", err)
+	}
+	if got := challenges(); got != before {
+		t.Errorf("challenges %d → %d, want unchanged (prepare is read-only)", before, got)
+	}
+	// 上げてある（上げた先が取り下げでない）ものは、上げ直せない。
+	if _, _, err := s.PromoteFollowup(ctx, open.ID, fuAtt(t, open.ID)); err != nil {
+		t.Fatalf("PromoteFollowup: %v", err)
+	}
+	if _, err := s.PrepareFollowupPromote(ctx, open.ID); !errors.Is(err, ErrValidation) {
+		t.Errorf("PrepareFollowupPromote(already promoted) error = %v, want ErrValidation", err)
+	}
+}

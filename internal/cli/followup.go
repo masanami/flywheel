@@ -96,3 +96,99 @@ func followupCountsText(fs []core.Followup) string {
 	}
 	return fmt.Sprintf("フォローアップ: 未 %d 件・済み %d 件・捨てた %d 件\n", open, done, dropped)
 }
+
+// rejectDuplicateFollowupIDs は同じ ID を 2 度並べた指定を usage_error にする（ストアを変える前）。
+func rejectDuplicateFollowupIDs(ids []string) error {
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			return NewError(CodeUsageError, "同じ ID を 2 度指定できません: "+id)
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+// runFollowupDone は `flywheel followup done <ID>... --note <確かめた結果>` の実装。本人確認は求めない
+// （操作した人と経路は core が作業ログへ残す）。--note が無ければ必須フラグの欠落（usage_error）、
+// 空なら core が validation_failed にする。複数の ID は core が全部検査してから変える。
+func runFollowupDone(a Args) (any, error) {
+	if err := rejectDuplicateFollowupIDs(a.Positional); err != nil {
+		return nil, err
+	}
+	fs, err := a.Store.CompleteFollowups(context.Background(), core.ChannelCLI, a.Positional, a.Values["note"])
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	return textOutput{json: view.FromFollowupList(fs), text: followupIDsText(fs)}, nil
+}
+
+// runFollowupDrop は `flywheel followup drop <ID>... --reason <理由> [--relayed …]` の実装。本人確認は
+// 1 回で、要約に指定した全部の ID と題名を出し、打ち込む対象の文字列は core.FollowupAttestationTarget が
+// 決める（番号の小さい順にカンマでつないだもの）。本人確認が通ってから core が全件を検査して変える。
+func runFollowupDrop(a Args) (any, error) {
+	if err := rejectDuplicateFollowupIDs(a.Positional); err != nil {
+		return nil, err
+	}
+	reason := a.Values["reason"]
+	verifier, err := verifierFor(a)
+	if err != nil {
+		return nil, err
+	}
+	// 存在・未であること・理由の検査は core が持つ（本人確認を求める前に終える）。
+	targets, err := a.Store.PrepareFollowupDrop(context.Background(), a.Positional, reason)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	target, ok := core.FollowupAttestationTarget(a.Positional)
+	if !ok {
+		return nil, NewError(CodeNotFound, "フォローアップが見つかりません")
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "次のフォローアップを捨てます（%d 件）。\n", len(targets))
+	for _, f := range targets {
+		fmt.Fprintf(&b, "  %s\t%s\n", f.ID, escapeControl(f.Title))
+	}
+	fmt.Fprintf(&b, "理由: %s\n", escapeControl(reason))
+	att, err := core.Verify(core.ChannelCLI, verifier, b.String(), target)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	fs, err := a.Store.DropFollowups(context.Background(), a.Positional, reason, att)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	return textOutput{json: view.FromFollowupList(fs), text: followupIDsText(fs)}, nil
+}
+
+// runFollowupPromote は `flywheel followup promote <ID> [--relayed …]` の実装（1 回に 1 件）。
+func runFollowupPromote(a Args) (any, error) {
+	id := a.Positional[0]
+	verifier, err := verifierFor(a)
+	if err != nil {
+		return nil, err
+	}
+	f, err := a.Store.PrepareFollowupPromote(context.Background(), id)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	summary := fmt.Sprintf("次のフォローアップを新しい課題（未分類）に上げます。\n  %s\t%s\n", f.ID, escapeControl(f.Title))
+	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	c, fu, err := a.Store.PromoteFollowup(context.Background(), id, att)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	return textOutput{json: view.FromFollowupPromote(*c, *fu), text: c.ID + "\n"}, nil
+}
+
+// followupIDsText は変えたフォローアップの ID を 1 行ずつ出す。
+func followupIDsText(fs []core.Followup) string {
+	var b strings.Builder
+	for _, f := range fs {
+		b.WriteString(f.ID + "\n")
+	}
+	return b.String()
+}

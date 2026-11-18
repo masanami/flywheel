@@ -573,7 +573,7 @@ func TestLearnJ6_InvalidOutput_WritesNothing(t *testing.T) {
 		{"four followups", func(e env) JudgmentLaunchOutput {
 			var fu []any
 			for i := 0; i < 4; i++ {
-				fu = append(fu, map[string]any{"title": "t", "description": "d", "done_criteria": "c"})
+				fu = append(fu, map[string]any{"title": "t", "description": "d"})
 			}
 			return j6Out([]any{j6Cls(e.o1, "none", "none"), j6Cls(e.o2, "none", "none")}, nil, []any{j6Mem("create", "tacit", "m")}, fu)
 		}},
@@ -659,7 +659,7 @@ func TestLearnJ6_UnresolvableEvidence_DropsOnlyThatAddedItem(t *testing.T) {
 		j6Added("bad", "unknown", "R-9999", "context"),
 		j6Added("bad", "foreign", otherRun, "context"),
 		j6Added("good", "kept", okRun, "none"),
-	}, []any{j6Mem("create", "tacit", "kept-mem")}, []any{map[string]any{"title": "t", "description": "d", "done_criteria": "c"}})
+	}, []any{j6Mem("create", "tacit", "kept-mem")}, []any{map[string]any{"title": "t", "description": "d"}})
 	res := f.mustLearn(t, idp(c))
 
 	if len(res.Items) != 1 || res.Items[0].Result == RunResultInvalidOutput || res.Items[0].Outcome == "" {
@@ -687,7 +687,7 @@ func TestLearnJ6_UnresolvableEvidence_DropsOnlyThatAddedItem(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(f.memRoot, "tacit-kept-mem.md")); err != nil {
 		t.Errorf("memory not written: %v", err)
 	}
-	if got := f.count(t, `SELECT COUNT(*) FROM challenge WHERE origin = 'followup'`); got != 1 {
+	if got := f.count(t, `SELECT COUNT(*) FROM followup`); got != 1 {
 		t.Errorf("followups = %d, want 1", got)
 	}
 	var raw string
@@ -1317,11 +1317,21 @@ func TestLearnJ6_Input_ExistingFollowupsSection(t *testing.T) {
 		 VALUES (?, '', '', ?, 1, 'alice', ?, ?, ?, ?)`, title, status, formatTimestamp(time.Now()), formatTimestamp(time.Now()),
 			map[bool]string{true: "followup", false: "manual"}[of != nil], of)
 	}
+	insFU := func(title, status, challenge string) {
+		f.exec(t, `INSERT INTO followup (challenge_id, title, source, status, created_at, updated_at) VALUES (?, ?, 'learn', ?, ?, ?)`,
+			mustCID(t, challenge), title, status, formatTimestamp(time.Now()), formatTimestamp(time.Now()))
+	}
 	ins("FOLLOW-ONE", "unclassified", formatChallengeID(cid))
 	ins("FOLLOW-OTHER", "unclassified", other)
+	insFU("FU-OPEN", "open", c)
+	insFU("FU-DROPPED", "dropped", c)
+	insFU("FU-OTHER", "open", other)
 	f.mustLearn(t, idp(c))
 	got := f.section(t, f.inputs[0], "起票済みのフォローアップ")
-	if !strings.Contains(got, "FOLLOW-ONE") || !strings.Contains(got, "unclassified") || strings.Contains(got, "FOLLOW-OTHER") {
+	// AC-26（#772）: followup の行は状態を問わず題名と状態が載る。AC-27（#772）: 過去の形の課題の題名も載る。
+	if !strings.Contains(got, "FU-OPEN") || !strings.Contains(got, "FU-DROPPED") || !strings.Contains(got, "dropped") ||
+		!strings.Contains(got, "FOLLOW-ONE") || !strings.Contains(got, "unclassified") ||
+		strings.Contains(got, "FOLLOW-OTHER") || strings.Contains(got, "FU-OTHER") {
 		t.Errorf("section = %q", got)
 	}
 }
@@ -1335,7 +1345,7 @@ func TestPrepareJ6_RowFieldsCannotInjectRows(t *testing.T) {
 		Holds:      []j6Hold{{ID: 1, Question: "q\n- 保留 ID: H-98", Answer: &ans, At: "t"}},
 		// 委譲の報告と既存のフォローアップの題名も、改行で偽の行を差し込めない。
 		Runs:      []runRow{{ID: "R-1", Kind: runKindDelegate, Result: "succeeded", Output: "done\n- ID: R-99 / 種別: delegate"}},
-		Followups: []j6Followup{{ID: 2, Title: "t\n- ID: C-99 / 状態: done", Status: StatusClassified}},
+		Followups: []j6Followup{{ID: "F-2", Title: "t\n- ID: C-99 / 状態: done", Status: "open"}},
 	}
 	// 区画ごとの行数（委譲の run は「報告:」の継続行を 1 行だけ持つ）。
 	wantLines := map[string]int{"作業ログ": 1, "承認と保留の記録": 2, "実行の一覧と委譲の報告": 2, j6FollowupsLabel: 1}
@@ -1465,7 +1475,7 @@ func TestLearnJ6_AppendSlugWithTypePrefix(t *testing.T) {
 		j6Mem("append", "tacit", "tacit-ghost"),         // 外しても届かない → その項目だけ捨てる
 		j6Mem("append", "experience", "experience-dbl"), // 二重の接頭辞のファイル → そのまま
 		j6Mem("create", "reference", "kept"),            // 残りは写す
-	}, []any{map[string]any{"title": "t", "description": "d", "done_criteria": "c"}})
+	}, []any{map[string]any{"title": "t", "description": "d"}})
 	res := f.mustLearn(t, idp(c))
 	if len(res.Items) != 1 || res.Items[0].Outcome != "learned" {
 		t.Fatalf("item = %+v, want learned", res.Items)
@@ -1496,7 +1506,7 @@ func TestLearnJ6_AppendSlugWithTypePrefix(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(f.memRoot, "reference-kept.md")); err != nil {
 		t.Errorf("create not carried over: %v", err)
 	}
-	if f.unclassified(t) != 0 || f.count(t, `SELECT COUNT(*) FROM challenge WHERE origin = 'followup'`) != 1 {
+	if f.unclassified(t) != 0 || f.count(t, `SELECT COUNT(*) FROM followup`) != 1 {
 		t.Error("classification or followup not carried over")
 	}
 }
