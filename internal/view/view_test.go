@@ -22,7 +22,7 @@ func marshal(t *testing.T, v any) string {
 
 func TestEmptyListsAreArraysAndNullsStayNull(t *testing.T) {
 	got := marshal(t, view.FromOverview(&core.Overview{}))
-	want := `{"actionable":{"challenges":[]},"approved":{"operations":[]},"binary_commit":"unknown","cycle_work":{"stages":{"classify":0,"cleanup":0,"improve":0,"learn":0,"plan":0,"release":0,"run":0,"verify":0},"total":0},"needs_human":{"budget_exhausted":[],"challenges":[],"discrepancies":[],"operations":[],"slots":[],"triage":[]},"parent_agent":{"challenges":[]},"waiting_external":{"challenges":[]}}`
+	want := `{"actionable":{"challenges":[]},"approved":{"operations":[]},"binary_commit":"unknown","cycle_work":{"stages":{"classify":0,"cleanup":0,"improve":0,"learn":0,"plan":0,"release":0,"run":0,"verify":0},"total":0},"followups":{"open":0},"ingestable":null,"needs_human":{"budget_exhausted":[],"challenges":[],"discrepancies":[],"operations":[],"slots":[],"triage":[]},"parent_agent":{"challenges":[]},"waiting_external":{"challenges":[]}}`
 	if got != want {
 		t.Errorf("status:\n got %s\nwant %s", got, want)
 	}

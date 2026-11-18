@@ -911,6 +911,16 @@ func assertDocumentedEntities(t *testing.T, doc documentedJSON, where string, v 
 			// status の actionable.challenges[] は共有の課題の形に unmet_dependencies を足した形（M4.5 S2）。
 			entity, known = "actionable_challenge", true
 		}
+		if k == "followups" && where == "status" {
+			// status.followups は未の件数 {"open"}（show・followup list の followups〔一覧〕ではない）。
+			known = false
+		}
+		if k == "items" && where == "status.ingestable" {
+			entity, known = "ingestable_item", true // ingest の items の要素ではない
+		}
+		if k == "children" && strings.HasPrefix(where, "status.ingestable.items[") {
+			entity, known = "ingestable_child", true
+		}
 		switch x := val.(type) {
 		case map[string]any:
 			if !known {
