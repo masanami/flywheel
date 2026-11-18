@@ -443,6 +443,7 @@ func TestCycle_ReleasePhaseIsSkippedWithoutConnectors(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 
 	doc := cycleDoc(t, ws)
 

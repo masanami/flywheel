@@ -378,7 +378,7 @@ func TestIngest_BodyMentioningApprovalTextDoesNotClassifyOrApprove(t *testing.T)
 
 // --- AC-60: 並行した2つの ingest でも1つの外部キーに課題は1つ ---
 
-func TestIngest_ConcurrentIngestsCreateOnlyOneChallengePerExternalKey(t *testing.T) {
+func TestIngestSelected_ConcurrentSelectionsCreateOnlyOneChallengePerExternalKey(t *testing.T) {
 	t.Parallel()
 	fixedActor(t, "alice")
 	ws := t.TempDir()
@@ -415,12 +415,11 @@ func TestIngest_ConcurrentIngestsCreateOnlyOneChallengePerExternalKey(t *testing
 	}
 	upB := &fakeUpstream{issues: map[string][]UpstreamIssue{"o/r": {issue}}}
 
-	var resA *IngestResult
 	var errA error
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		resA, errA = storeA.Ingest(context.Background(), ChannelCLI, IngestInput{Sources: []SourceEntry{src}, Upstream: upA})
+		_, errA = storeA.IngestSelected(context.Background(), ChannelCLI, IngestSelectedInput{Sources: []SourceEntry{src}, Specs: []string{"o/r#1"}, Upstream: upA})
 	}()
 	// 失敗経路（t.Fatal）でも取得を解放し、A の Ingest の終了を待ってから後始末する
 	// （close(done) は何度受信しても即座に返るので、下の本流の受信と重複しても
@@ -436,28 +435,20 @@ func TestIngest_ConcurrentIngestsCreateOnlyOneChallengePerExternalKey(t *testing
 		t.Fatal("timed out waiting for A's fetch to start")
 	}
 
-	resB, err := storeB.Ingest(context.Background(), ChannelCLI, IngestInput{Sources: []SourceEntry{src}, Upstream: upB})
+	resB, err := storeB.IngestSelected(context.Background(), ChannelCLI, IngestSelectedInput{Sources: []SourceEntry{src}, Specs: []string{"o/r#1"}, Upstream: upB})
 	if err != nil {
-		t.Fatalf("Ingest() B error = %v", err)
+		t.Fatalf("IngestSelected() B error = %v", err)
 	}
-	itemB := findIngestItem(resB, "o/r#1")
-	if itemB == nil || itemB.Result != IngestOutcomeCreated {
-		t.Fatalf("B item = %+v, want created", itemB)
+	if len(resB.Ingested) != 1 || resB.Ingested[0].ExternalKey != "o/r#1" {
+		t.Fatalf("B ingested = %+v, want o/r#1", resB.Ingested)
 	}
 
 	releaseFetch()
 	<-done
-	if errA != nil {
-		t.Fatalf("Ingest() A error = %v", errA)
-	}
-	itemA := findIngestItem(resA, "o/r#1")
-	if itemA == nil {
-		t.Fatalf("A item = nil, want non-nil (対応が既にある Issue として反映される)")
-	}
-	// AC-60: A は B に先を越されるので、created ではなく冪等な更新（fingerprint が
-	// 同じ本文なので unchanged）に回る。
-	if itemA.Result != IngestOutcomeUnchanged {
-		t.Fatalf("A item = %+v, want unchanged (先を越された分岐は冪等な更新へ回る)", itemA)
+	// AC-60: A は上流を読んだ後に B に先を越されるので、作成のトランザクションの中の読み直しで
+	// validation_failed になり、課題は作られない。
+	if !errors.Is(errA, ErrValidation) {
+		t.Fatalf("IngestSelected() A error = %v, want ErrValidation (先を越された)", errA)
 	}
 
 	all, err := storeA.ListChallenges(context.Background(), ListOptions{})

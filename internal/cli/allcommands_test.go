@@ -174,6 +174,22 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	"log": {setup: func(t *testing.T, ws string) []string {
 		return []string{"log", createForCase(t, ws)}
 	}},
+	"followup list": {setup: func(t *testing.T, ws string) []string {
+		coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+		return []string{"followup", "list", "--status", "all"}
+	}},
+	"followup done": {setup: func(t *testing.T, ws string) []string {
+		coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+		return []string{"followup", "done", "F-1", "--note", "n"}
+	}},
+	"followup drop": {needsTTY: true, setup: func(t *testing.T, ws string) []string {
+		coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+		return []string{"followup", "drop", "F-1", "--reason", "r"}
+	}},
+	"followup promote": {needsTTY: true, setup: func(t *testing.T, ws string) []string {
+		coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+		return []string{"followup", "promote", "F-1"}
+	}},
 	"mark-read": {setup: func(t *testing.T, ws string) []string {
 		id := createForCase(t, ws)
 		bindSourceForDiscrepancyCase(t, ws, id, "o/r#1", "open", "in_policy")
@@ -266,7 +282,8 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		return []string{"slot", "clear", fmt.Sprintf("SL-%d", id)}
 	}},
 	"ingest": {setup: func(t *testing.T, ws string) []string {
-		writeSourcesDeclaration(t, ws, validSourcesDeclaration)
+		// 選んで取り込むには self_assignees を解決できる必要があるので、明示する（gh api user を呼ばせない）。
+		writeSourcesDeclaration(t, ws, `{"version": 1, "sources": [{"id": "harness-repo-issues", "type": "github-issue", "repos": ["example-owner/example-repo"], "self_assignees": ["someone"]}]}`)
 		// #59 で取得と反映を結線した後は、この横断テスト（jsondoc の形の照合。
 		// AC-94）が実際に items 配下の要素（item の形）まで踏むよう、偽の gh に
 		// 1 件の Issue を返させる（空の一覧だと item の形が一度も照合されない）。
@@ -275,6 +292,8 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 				{Number: 1, Title: "allcommands smoke", Body: "body", Repo: "example-owner/example-repo"},
 			}), 0),
 		})
+		// 課題にするのは選んだ Issue だけなので、先に 1 件選んでから追従（引数なしの ingest）を流す。
+		runJSON(t, ws, "ingest", "example-owner/example-repo#1")
 		return []string{"ingest"}
 	}},
 }
@@ -502,6 +521,8 @@ var runLevelUsageErrorCases = [][]string{
 	{"serve", "--port", "abc"},                                     // --port が 0〜65535 の整数でない（bind する前に拒否する）
 	{"serve", "--port", "0", "--fleet", "/nonexistent/fleet.json"}, // --fleet と --workspace の同時指定（この列挙は --workspace を足して呼ぶ）
 	{"edit", "C-1"}, // 変更する項目が 1 つも無い
+	{"followup", "done", "F-1", "F-1", "--note", "n"},           // 同じ ID を 2 度指定した（drop も同じ関数。S2b）
+	{"followup", "list", "--status", "bogus"},                   // --status が open・done・dropped・all のいずれでもない（S2b）
 	{"plan", "C-1", "--file", "/nonexistent/flywheel-plan.txt"}, // --file が読めない
 	{"verify", "C-1", "--result", "met", "--question", "q"},     // met と --question の同時指定
 	{"approve", "OP-1", "--hold-release"},                       // 不可逆操作の ID への --hold-release

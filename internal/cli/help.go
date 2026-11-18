@@ -42,10 +42,14 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   dep rm <C-ID> <依存先の C-ID>...
   bind <C-ID> <owner/repo#番号>   （取り込み元の Issue の無い課題を、open の GitHub Issue に紐づける。宣言の取り込み元のリポジトリだけ）
   unbind <C-ID>   （紐づけを外す）
+  followup list [--status <open|done|dropped|all>] [--challenge <C-ID>]   （フォローアップの一覧。既定は未だけ）
+  followup done <F-ID>... --note <確かめた結果>   （済みにする。本人確認は要らない）
+  followup drop <F-ID>... --reason <理由> [--relayed --session <s> --quote <q>]   （捨てる）
+  followup promote <F-ID> [--relayed --session <s> --quote <q>]   （新しい課題に上げる。1 回に 1 件）
   status
   version   （動いているバイナリのコミットとストアのスキーマの版）
   log [<ID>]
-  ingest [--source <id>]
+  ingest [<指定>...] [--source <id>]   （<指定> は <owner>/<repo>#<番号> か番号。選んだ Issue だけを課題にする）
   mark-read <C-ID>
   runs [<C-ID>] [--open]
   metrics [--since <YYYY-MM-DD>] [--until <YYYY-MM-DD>] [--compare <C-ID>]

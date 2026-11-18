@@ -63,10 +63,12 @@ func TestStatus_InvalidDeclarations_ConfigInvalid(t *testing.T) {
 
 // 正しい 3 つの宣言でも、宣言が無くても、status は終了コード 0 で動く。
 func TestStatus_ValidOrAbsentDeclarations_Exit0(t *testing.T) {
-	t.Parallel()
+	parallelTools(t, false)
 	t.Run("valid", func(t *testing.T) {
 		ws := setupJ2Workspace(t)
 		writeSourcesDeclaration(t, ws, cycleSourcesJSON)
+		// status は上流の Issue の一覧を読む。実の gh・ネットワークに頼らず、偽の gh を使う。
+		withFakeGHRoutesOnPATH(t, []fakeGHRoute{fakeGHListRoute("o/r", 1, "[]", 0)})
 		for _, extra := range [][]string{nil, {"--json"}} {
 			if code, _, stderr := statusRun(t, ws, extra...); code != 0 {
 				t.Fatalf("exit=%d stderr=%s", code, stderr)

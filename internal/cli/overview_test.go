@@ -18,8 +18,8 @@ func TestRunStatus_EmptyWorkspaceReturnsTheBucketsWithEmptyArrays(t *testing.T) 
 	ws := initializedWorkspace(t)
 
 	doc := runJSON(t, ws, "status")
-	if len(doc) != 6 {
-		t.Errorf("status top-level keys = %d, want 6 (the three M1 buckets, waiting_external, parent_agent and binary_commit): %+v", len(doc), doc)
+	if len(doc) != 9 {
+		t.Errorf("status top-level keys = %d, want 9 (the three M1 buckets, waiting_external, parent_agent, binary_commit, cycle_work, followups and ingestable): %+v", len(doc), doc)
 	}
 	if pa, ok := doc["parent_agent"].(map[string]any); !ok || len(pa) != 1 {
 		t.Errorf("status[\"parent_agent\"] = %v, want an object with only `challenges`", doc["parent_agent"])
@@ -144,13 +144,13 @@ func TestRunStatus_RejectedOperationIsExcludedFromStatus(t *testing.T) {
 	}
 }
 
-// TestRunStatus_TextOutputHasThreeLabeledSectionsWithItemsInTheCorrectSection は、
-// 3見出しが出力されることに加え、各見出しの配下に対応する項目（人間待ちの課題・
-// 進められる課題・承認済みの不可逆操作）が実際に現れることを、見出しで区切った
+// TestRunStatus_TextOutputPutsItemsInTheirSections は、
+// 見出しが出力されることに加え、各見出しの配下に対応する項目（あなたの承認を待っている課題・
+// 承認済みの不可逆操作）が実際に現れることを、見出しで区切った
 // セクションごとに検証する（self-review 指摘: 旧版は文字列が出力全体のどこかに
 // 現れるかしか見ておらず、項目が誤った見出しの下に出ていても、あるいは承認済みの
 // 不可逆操作が一度もテキストに出なくても検出できなかった）。
-func TestRunStatus_TextOutputHasThreeLabeledSectionsWithItemsInTheCorrectSection(t *testing.T) {
+func TestRunStatus_TextOutputPutsItemsInTheirSections(t *testing.T) {
 	ws := initializedWorkspace(t)
 
 	waitingID := runJSON(t, ws, "create", "--title", "waiting title")["challenge"].(map[string]any)["id"].(string)
@@ -166,43 +166,34 @@ func TestRunStatus_TextOutputHasThreeLabeledSectionsWithItemsInTheCorrectSection
 	}
 
 	got := runText(t, ws, "status")
-	humanHeading := "人間の操作を待っているもの"
-	actionableHeading := "システムが次に進められるもの"
+	approvalHeading := "あなたの承認を待っているもの"
+	answerHeading := "あなたの回答を待っているもの"
 	approvedHeading := "承認済みの不可逆操作"
 
-	humanIdx := strings.Index(got, humanHeading)
-	actionableIdx := strings.Index(got, actionableHeading)
+	approvalIdx := strings.Index(got, approvalHeading)
+	answerIdx := strings.Index(got, answerHeading)
 	approvedIdx := strings.Index(got, approvedHeading)
-	if humanIdx < 0 || actionableIdx < 0 || approvedIdx < 0 {
-		t.Fatalf("status text output = %q, want all three section headings", got)
+	if approvalIdx < 0 || answerIdx < 0 || approvedIdx < 0 {
+		t.Fatalf("status text output = %q, want the approval, answer and approved section headings", got)
 	}
-	if humanIdx >= actionableIdx || actionableIdx >= approvedIdx {
-		t.Fatalf("section headings out of order: human=%d actionable=%d approved=%d (output=%q)", humanIdx, actionableIdx, approvedIdx, got)
+	if approvalIdx >= answerIdx || answerIdx >= approvedIdx {
+		t.Fatalf("section headings out of order: approval=%d answer=%d approved=%d (output=%q)", approvalIdx, answerIdx, approvedIdx, got)
 	}
 
-	humanSection := got[humanIdx:actionableIdx]
-	actionableSection := got[actionableIdx:approvedIdx]
+	approvalSection := got[approvalIdx:answerIdx]
 	approvedSection := got[approvedIdx:]
 
-	if !strings.Contains(humanSection, "waiting title") {
-		t.Errorf("human section = %q, want it to contain %q", humanSection, "waiting title")
+	if !strings.Contains(approvalSection, "waiting title") {
+		t.Errorf("approval section = %q, want it to contain %q", approvalSection, "waiting title")
 	}
-	if strings.Contains(actionableSection, "waiting title") || strings.Contains(approvedSection, "waiting title") {
-		t.Errorf("\"waiting title\" leaked outside the human section (actionable=%q approved=%q)", actionableSection, approvedSection)
+	if strings.Contains(approvedSection, "waiting title") {
+		t.Errorf("\"waiting title\" leaked into the approved section (%q)", approvedSection)
 	}
-
-	if !strings.Contains(actionableSection, "actionable title") {
-		t.Errorf("actionable section = %q, want it to contain %q", actionableSection, "actionable title")
-	}
-	if strings.Contains(humanSection, "actionable title") || strings.Contains(approvedSection, "actionable title") {
-		t.Errorf("\"actionable title\" leaked outside the actionable section (human=%q approved=%q)", humanSection, approvedSection)
-	}
-
 	if !strings.Contains(approvedSection, "approved summary") {
 		t.Errorf("approved section = %q, want it to contain %q", approvedSection, "approved summary")
 	}
-	if strings.Contains(humanSection, "approved summary") || strings.Contains(actionableSection, "approved summary") {
-		t.Errorf("\"approved summary\" leaked outside the approved section (human=%q actionable=%q)", humanSection, actionableSection)
+	if strings.Contains(approvalSection, "approved summary") {
+		t.Errorf("\"approved summary\" leaked into the approval section (%q)", approvalSection)
 	}
 }
 
@@ -252,4 +243,19 @@ func containsString(xs []string, x string) bool {
 		}
 	}
 	return false
+}
+
+// status --json の cycle_work は、サイクルを回すと進むものの数え（total は stages の合計）。未分類の課題は classify に数える。
+func TestRunStatus_CycleWorkCountsWhatTheCycleCanAdvance(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	createTitled(t, ws, "t")
+
+	cw, ok := runJSON(t, ws, "status")["cycle_work"].(map[string]any)
+	if !ok {
+		t.Fatal("status has no cycle_work object")
+	}
+	stages, _ := cw["stages"].(map[string]any)
+	if cw["total"] != float64(1) || stages["classify"] != float64(1) || len(stages) != 8 {
+		t.Errorf("cycle_work = %v, want total 1 with classify 1 over 8 stages", cw)
+	}
 }

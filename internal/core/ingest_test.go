@@ -105,11 +105,61 @@ func excludeOthersSource(id string, repos, selfAssignees []string) SourceEntry {
 	return SourceEntry{ID: id, Type: SourceTypeGitHubIssue, Repos: repos, AssigneePolicy: &p, SelfAssignees: selfAssignees}
 }
 
+// selectAllIngestableForTest は取り込めるもの（ScanIngestable）の全部を選んで課題にする
+// （選んで取り込む形での「最初の取り込み」。作った課題の external_key を返す）。
+func selectAllIngestableForTest(t *testing.T, s *Store, sources []SourceEntry, upstream UpstreamIssueSource) map[string]bool {
+	t.Helper()
+	scan, err := s.ScanIngestable(context.Background(), sources, upstream)
+	if err != nil {
+		t.Fatalf("ScanIngestable() error = %v", err)
+	}
+	created := map[string]bool{}
+	if len(scan.Candidates) == 0 {
+		return created
+	}
+	// 親と子を同じコマンドに並べて選ぶことはできない（子孫は取り込み元の子になる）ので、
+	// 取り込めるものの全部を、それぞれ独立した課題として 1 つのトランザクションで作る
+	// （課題の ID は上流の一覧の順）。
+	actor, err := s.resolveActor()
+	if err != nil {
+		t.Fatalf("resolveActor() error = %v", err)
+	}
+	if err := s.mutateAs(context.Background(), actor, ChannelCLI, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
+		for _, c := range scan.Candidates {
+			if _, err := insertIngestedChallenge(context.Background(), tx, rec, c.Source, c.Issue); err != nil {
+				return err
+			}
+			created[c.Issue.ExternalKey] = true
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("insertIngestedChallenge error = %v", err)
+	}
+	return created
+}
+
+// runIngestForTest は取り込めるものを全部選んで課題にしてから、追従（Ingest）を 1 回行う。
+// 選んで作った課題の要素は、追従では unchanged になるので、作成の結果（created）として
+// 読み替えて返す（作成の振る舞いを確かめるテストがそのまま読めるように）。
 func runIngestForTest(t *testing.T, s *Store, sources []SourceEntry, upstream UpstreamIssueSource) *IngestResult {
 	t.Helper()
+	created := selectAllIngestableForTest(t, s, sources, upstream)
 	res, err := s.Ingest(context.Background(), ChannelCLI, IngestInput{Sources: sources, Upstream: upstream})
 	if err != nil {
 		t.Fatalf("Ingest() error = %v", err)
+	}
+	for si := range res.Sources {
+		for ri := range res.Sources[si].Repos {
+			items := res.Sources[si].Repos[ri].Items
+			for ii := range items {
+				if created[items[ii].ExternalKey] {
+					if items[ii].Result != IngestOutcomeUnchanged {
+						t.Fatalf("選んだ直後の追従の結果 = %+v, want unchanged", items[ii])
+					}
+					items[ii].Result = IngestOutcomeCreated
+				}
+			}
+		}
 	}
 	return res
 }
@@ -218,9 +268,16 @@ func TestIngest_AssigneePolicy(t *testing.T) {
 				t.Fatalf("created = %v, want %v (item=%+v)", created, tc.wantCreate, item)
 			}
 			if !tc.wantCreate {
+				// 方針に合わない Issue はどの件数にも数えず、選んでも取り込めない。
 				repo := findRepoResult(res, "s", "o/r")
-				if repo == nil || repo.Excluded != 1 {
-					t.Fatalf("excluded = %+v, want 1", repo)
+				if repo == nil || repo.Excluded != 0 || len(repo.Items) != 0 {
+					t.Fatalf("repo = %+v, want no items and excluded=0 (方針に合わない Issue は数えない)", repo)
+				}
+				_, err := s.IngestSelected(context.Background(), ChannelCLI, IngestSelectedInput{
+					Sources: []SourceEntry{tc.source}, Specs: []string{"o/r#1"}, Upstream: up,
+				})
+				if !errors.Is(err, ErrValidation) {
+					t.Fatalf("IngestSelected(o/r#1) error = %v, want ErrValidation", err)
 				}
 			}
 		})
@@ -313,9 +370,10 @@ func TestIngest_OmittedSelfAssignees_ResolutionFailure_SelfOnlyIngestsNothing(t 
 		t.Fatalf("SelfAssigneesResolved = true, want false (AC-31)")
 	}
 	repo := findRepoResult(res, "s", "o/r")
-	if repo == nil || len(repo.Items) != 0 || repo.Excluded != 2 {
-		t.Fatalf("repo = %+v, want 0 items, excluded=2 (AC-31: self-only は新しい Issue を1件も取り込まない)", repo)
+	if repo == nil || len(repo.Items) != 0 || repo.Excluded != 0 {
+		t.Fatalf("repo = %+v, want 0 items, excluded=0 (AC-31: self-only は新しい Issue を1件も取り込まない)", repo)
 	}
+	assertIngestSelectedUnavailable(t, s, []SourceEntry{src}, up, "o/r#2")
 }
 
 // AC-32: 同じ状況で exclude-others は assignee のいない Issue だけを取り込む。
@@ -331,15 +389,32 @@ func TestIngest_OmittedSelfAssignees_ResolutionFailure_ExcludeOthersIngestsUnass
 		},
 	}}
 	res := runIngestForTest(t, s, []SourceEntry{src}, up)
-	if item := findIngestItem(res, "o/r#1"); item == nil || item.Result != IngestOutcomeCreated {
-		t.Fatalf("o/r#1 = %+v, want created (AC-32: assignee のいない Issue)", item)
+	// 方針の判定に要る利用者を解決できなかった取り込み元の Issue は、取り込めるものに入れない
+	// （exclude-others の assignee のいない Issue も同じ）。
+	if item := findIngestItem(res, "o/r#1"); item != nil {
+		t.Fatalf("o/r#1 = %+v, want not ingested (self_assignees を解決できない)", item)
 	}
 	if item := findIngestItem(res, "o/r#2"); item != nil {
 		t.Fatalf("o/r#2 = %+v, want not ingested (assignee あり)", item)
 	}
 	repo := findRepoResult(res, "s", "o/r")
-	if repo == nil || repo.Excluded != 1 {
-		t.Fatalf("excluded = %+v, want 1", repo)
+	if repo == nil || repo.Excluded != 0 {
+		t.Fatalf("excluded = %+v, want 0", repo)
+	}
+	assertIngestSelectedUnavailable(t, s, []SourceEntry{src}, up, "o/r#1")
+}
+
+// assertIngestSelectedUnavailable は、self_assignees を解決できない取り込み元の Issue を
+// 指定しても upstream_unavailable（ErrUpstreamFetchFailed）になり、課題が作られないことを確かめる。
+func assertIngestSelectedUnavailable(t *testing.T, s *Store, sources []SourceEntry, up UpstreamIssueSource, spec string) {
+	t.Helper()
+	_, err := s.IngestSelected(context.Background(), ChannelCLI, IngestSelectedInput{Sources: sources, Specs: []string{spec}, Upstream: up})
+	if !errors.Is(err, ErrUpstreamFetchFailed) {
+		t.Fatalf("IngestSelected(%s) error = %v, want ErrUpstreamFetchFailed", spec, err)
+	}
+	all, lerr := s.ListChallenges(context.Background(), ListOptions{})
+	if lerr != nil || len(all) != 0 {
+		t.Fatalf("challenges = %d, %v, want 0 (何も作らない)", len(all), lerr)
 	}
 }
 
@@ -474,7 +549,7 @@ func TestIngest_UrgencyFromLabels(t *testing.T) {
 			s := newStoreForTest(t)
 			fixedActor(t, "alice")
 			src := SourceEntry{ID: "s", Type: SourceTypeGitHubIssue, Repos: []string{"o/r"}, UrgencyLabels: urgencyLabels}
-			up := &fakeUpstream{issues: map[string][]UpstreamIssue{
+			up := &fakeUpstream{login: "masanami", issues: map[string][]UpstreamIssue{
 				"o/r": {issueFixture("o/r#1", "https://github.com/o/r/issues/1", "t", "b", "carol", nil, tc.labels)},
 			}}
 			res := runIngestForTest(t, s, []SourceEntry{src}, up)
@@ -637,15 +712,13 @@ func TestIngest_DoesNotHoldWriteLockWhileFetching(t *testing.T) {
 	<-done
 }
 
-// 1 つの Issue の反映で失敗を注入しても、それより前に反映した Issue の課題は
-// 残る（1 Issue = 1 トランザクションであることの検証）。
-func TestIngest_FailureOnOneIssueDoesNotRollBackEarlierIssues(t *testing.T) {
+// 選んだ Issue の作成は 1 つのトランザクションで行う。2 件目の作成で失敗を注入すると、
+// 1 件目も残らない（どれも作らない）。
+func TestIngestSelected_FailureOnOneIssueRollsBackAll(t *testing.T) {
 	t.Parallel()
 	s := newStoreForTest(t)
 	fixedActor(t, "alice")
 
-	// insertActivity は external_key を直接は知らないため、2件目の ingest_create
-	// 呼び出しだけを数えて狙い撃ちで失敗させる。
 	failInjected := errors.New("injected activity failure")
 	callCount := 0
 	s.insertActivity = func(tx *sql.Tx, row activityRow) error {
@@ -667,30 +740,18 @@ func TestIngest_FailureOnOneIssueDoesNotRollBackEarlierIssues(t *testing.T) {
 			issueFixture("o/r#3", "https://github.com/o/r/issues/3", "third", "b3", "carol", nil, nil),
 		},
 	}}
-	res := runIngestForTest(t, s, []SourceEntry{src}, up)
-
-	first := findIngestItem(res, "o/r#1")
-	if first == nil || first.Result != IngestOutcomeCreated {
-		t.Fatalf("o/r#1 = %+v, want created (前に反映した Issue は残る)", first)
-	}
-	second := findIngestItem(res, "o/r#2")
-	if second == nil || second.Result != IngestOutcomeFailed {
-		t.Fatalf("o/r#2 = %+v, want failed (注入した失敗)", second)
-	}
-	third := findIngestItem(res, "o/r#3")
-	if third == nil || third.Result != IngestOutcomeCreated {
-		t.Fatalf("o/r#3 = %+v, want created (失敗した Issue の後も続行する)", third)
-	}
-
-	if sb, err := s.getSourceBindingByExternalKey(context.Background(), "o/r#2"); err != nil || sb != nil {
-		t.Fatalf("source_binding(o/r#2) = %+v, %v, want nil, nil（失敗したトランザクションは何も残さない）", sb, err)
+	_, err := s.IngestSelected(context.Background(), ChannelCLI, IngestSelectedInput{
+		Sources: []SourceEntry{src}, Specs: []string{"o/r#1", "o/r#2", "o/r#3"}, Upstream: up,
+	})
+	if !errors.Is(err, failInjected) {
+		t.Fatalf("IngestSelected() error = %v, want the injected failure", err)
 	}
 	all, err := s.ListChallenges(context.Background(), ListOptions{})
 	if err != nil {
 		t.Fatalf("ListChallenges() error = %v", err)
 	}
-	if len(all) != 2 {
-		t.Fatalf("課題の件数 = %d, want 2（1件目・3件目だけが残る）", len(all))
+	if len(all) != 0 {
+		t.Fatalf("課題の件数 = %d, want 0（失敗したトランザクションは何も残さない）", len(all))
 	}
 }
 

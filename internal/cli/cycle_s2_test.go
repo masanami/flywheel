@@ -58,6 +58,8 @@ func TestCycle_AllFivePhases_DelegatesAndVerifiesInTheSameCycleWithOnlyGETs(t *t
 	child := delegateRoute("completed")
 	child.ShellBefore = "git -C " + shellSingleQuote(filepath.Join(ws, "slot-d")) + " checkout -q -b feat/child"
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t), j3Route("BRIEF-CYCLE"), child, j5Route("met", nil, nil)}, orderLog)
+	// 周の取り込みの段は追従だけを行う。課題にするのは選んだ Issue だけなので、先に選ぶ（C-2）。
+	runJSON(t, ws, "ingest", "o/r#1")
 
 	doc := cycleDoc(t, ws)
 
@@ -127,6 +129,7 @@ func TestCycle_WithoutConnectors_RunAndVerifyPhasesAreSkipped(t *testing.T) {
 	newInProgressForRun(t, ws, nil)
 	newVerifyingForCase(t, ws, false)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 
 	doc := cycleDoc(t, ws)
 	for _, r := range runJSON(t, ws, "runs")["runs"].([]any) {
@@ -162,6 +165,7 @@ func TestCycle_WaitingChallengesAreNotTargetsOfRunOrVerify(t *testing.T) {
 		ids[status] = id
 	}
 	putRoutedFakeClaudeOnPATH(t, nil, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 
 	doc := cycleDoc(t, ws)
 

@@ -48,6 +48,8 @@ var worklogReadOnlyCommands = map[string]bool{
 	"status":  true,
 	"version": true,
 	"log":     true,
+	// followup list（S2b）は読み取りだけ。
+	"followup list": true,
 	// runs（#81）は run・cycle・lock 表しか読み書きせず、それらの書き込みは
 	// 作業ログ（activity）に載せない（docs/features/m3-invoker-delegation.md
 	// §クリティカル設計決定 1）。ReapInterruptedRuns による run の更新も
@@ -196,6 +198,41 @@ var worklogCases = []worklogCase{
 			return []wantActivity{{"challenge", "C-1", "edit",
 				map[string]any{"title": "t", "description": "", "done_criteria": "d", "urgency": nil},
 				map[string]any{"title": "x", "description": "d1", "done_criteria": "d2", "urgency": "低", "version": 2.0}}}
+		},
+	},
+	{
+		name: "followup done", command: "followup done",
+		setup: func(t *testing.T, ws string) []string {
+			coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+			return []string{"followup", "done", "F-1", "--note", "n"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"followup", "F-1", "followup_done",
+				map[string]any{"status": "open"}, map[string]any{"status": "done", "note": "n"}}}
+		},
+	},
+	{
+		name: "followup drop", command: "followup drop",
+		setup: func(t *testing.T, ws string) []string {
+			coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+			return []string{"followup", "drop", "F-1", "--reason", "r"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"followup", "F-1", "followup_drop",
+				map[string]any{"status": "open"}, map[string]any{"status": "dropped", "reason": "r"}}}
+		},
+	},
+	{
+		name: "followup promote", command: "followup promote",
+		setup: func(t *testing.T, ws string) []string {
+			coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+			return []string{"followup", "promote", "F-1"}
+		},
+		want: func(actor string) []wantActivity {
+			return []wantActivity{
+				{"challenge", "C-2", "create", nil, map[string]any{"title": "f", "description": "d", "done_criteria": "", "urgency": nil, "reporter": actor, "status": "unclassified", "origin": "followup", "followup_of": "C-1"}},
+				{"followup", "F-1", "followup_promote", map[string]any{"promoted_challenge_id": nil}, map[string]any{"promoted_challenge_id": "C-2"}},
+			}
 		},
 	},
 	{
@@ -593,8 +630,8 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
-		// #59: ingest は取得と反映を結線した後、対応の無い・ポリシーに合う
-		// Issue から課題を作るたびに ingest_create を記録する（§作業ログと版）。
+		// #59: ingest は、選んだ（取り込めるものに合う）Issue から課題を作るたびに
+		// ingest_create を記録する（§作業ログと版）。
 		name: "ingest create", command: "ingest",
 		setup: func(t *testing.T, ws string) []string {
 			decl := `{
@@ -609,7 +646,7 @@ var worklogCases = []worklogCase{
 					{Number: 1, Title: "ingest smoke title", Body: "ingest smoke body", Reporter: "reporter", Repo: worklogIngestRepo},
 				}), 0),
 			})
-			return []string{"ingest"}
+			return []string{"ingest", worklogIngestRepo + "#1"}
 		},
 		want: func(string) []wantActivity {
 			return []wantActivity{{"challenge", "C-1", "ingest_create", nil,
@@ -625,14 +662,13 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
-		// #86: cycle は取り込みの段で ingest と同じ core の処理を呼ぶので、課題を作るたびに
-		// 経路 cli の ingest_create を記録する。分類・計画の段の遷移は経路 invoker で
+		// #86: cycle は取り込みの段で ingest の追従と同じ core の処理を呼ぶが、新しい課題は作らないので
+		// ingest_create を記録しない。分類・計画の段の遷移は経路 invoker で
 		// 記録される（TestCycle_RecordsNoApprovalRejectionOrAnswerActivity が検証する）が、
-		// この表の検査は経路 cli 固定のため、J1 が not_mine を返して遷移を起こさない設定で
-		// ingest_create だけを記録させる。承認・差し戻し・回答は cycle からは記録されない。
+		// この表の検査は経路 cli 固定のため、J1 が not_mine を返して遷移を起こさない設定にする。承認・差し戻し・回答は cycle からは記録されない。
 		// 周の最後の段 backup は entity=cycle・action=backup を残す（テスト用のワークスペースは
 		// Git の作業ツリーでないので outcome は not_git。M5 S1）。
-		name: "cycle ingest create", command: "cycle",
+		name: "cycle ingest follow-up", command: "cycle",
 		setup: func(t *testing.T, ws string) []string {
 			writePositionFileForTest(t, ws, "pos")
 			writeAgentJSONForTest(t, ws, `{"position_file": "position.md"}`)
@@ -648,19 +684,15 @@ var worklogCases = []worklogCase{
 				}), 0),
 			})
 			putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{{Match: fakeClaudeJ1Match, Tag: "J1", Stdout: j1NotMineFixture}}, "")
+			// 進められるものが無いと周は始まらない（上流の課題は数えに入らない）ので、未分類の課題を 1 件置く（C-1）。
+			createTitled(t, ws, "pre-existing")
+			// 周の取り込みの段は取り込み済みの追従だけを行う。課題にするのは選んだ Issue だけなので、先に選ぶ（C-2）。
+			runJSON(t, ws, "ingest", worklogIngestRepo+"#1")
 			return []string{"cycle"}
 		},
 		want: func(string) []wantActivity {
-			return []wantActivity{{"challenge", "C-1", "ingest_create", nil,
-				map[string]any{
-					"title":         "cycle ingest title",
-					"description":   "cycle ingest body",
-					"done_criteria": "",
-					"urgency":       nil,
-					"status":        "unclassified",
-					"reporter":      "reporter",
-					"external_key":  worklogIngestRepo + "#1",
-				}},
+			// 追従で上流に変化が無ければ作業ログは増えず、ingest_create も記録されない（新しい課題を作らない）。
+			return []wantActivity{
 				{"cycle", "Y-1", "backup", nil, map[string]any{"outcome": "not_git", "commit": nil, "detail": nil}}}
 		},
 	},

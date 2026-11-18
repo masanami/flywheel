@@ -453,7 +453,7 @@ J4 に回す範囲は 2 つで、同じ指示文（`internal/invoker/prompts/j4.
 ### 指示文の歯止め（設計書 §8.3・P7）【決定 2026-09-28 親 M3P4】[S1]
 
 - [ ] 判断点ごとの指示文と、ブリーフの固定の節の雛形は、`internal/invoker/prompts/` の下にファイルとして置き、`embed` でバイナリに埋め込む（実行時にワークスペースやプラグインから読まない）
-- [ ] 指示文の分量の上限をテストで固定する（J1: 4 KiB・J2: 12482 バイト（約 12.2 KiB）〔#462 で 8 KiB から 12 KiB、#749 で 12482 バイト（12288 に、区画「問いと回答」の説明の 194 バイトを足した値）へ引き上げ〕・J3: 8 KiB・J4: 4 KiB・J5: 11354 バイト（約 11.1 KiB）〔#466 で 6 KiB から 8 KiB、#565 で 9 KiB、#563 で 9.5 KiB、#654 で 10.5 KiB、#629 で 11354 バイト（10752 に #629 で足した 602 バイトを足した値）へ引き上げ〕・ブリーフの固定の節の雛形の合計: 12 KiB。UTF-8 のバイト数）
+- [ ] 指示文の分量の上限をテストで固定する（J1: 4 KiB・J2: 13312 バイト（13 KiB）〔#462 で 8 KiB から 12 KiB、#749 で 12482 バイト（12288 に、区画「問いと回答」の説明の 194 バイトを足した値）、#778 で 13312 バイト（取り込み元の子の区画と source の書き方）へ引き上げ〕・J3: 8 KiB・J4: 4 KiB・J5: 11354 バイト（約 11.1 KiB）〔#466 で 6 KiB から 8 KiB、#565 で 9 KiB、#563 で 9.5 KiB、#654 で 10.5 KiB、#629 で 11354 バイト（10752 に #629 で足した 602 バイトを足した値）へ引き上げ〕・ブリーフの固定の節の雛形の合計: 12 KiB。UTF-8 のバイト数）
 - [ ] 指示文とブリーフの固定の節の雛形に次のいずれかが現れたら、テストが失敗する: 状態のコードと表示名（M1 の 8 値）・`flywheel` のサブコマンド名・`.flywheel/agent.json` のキー名・判断点の出力スキーマの閉集合の値・金額の数字（`$` か `USD` を伴う数）
 - [ ] 上の禁止の一覧は、コードの定義（状態の語彙・コマンドの一覧・設定のキー・出力スキーマ）から生成する（一覧を手で写さない。語彙を足せば検査も追従する）
 - [ ] 判断点の出力の閉集合の値は、出力スキーマ（`--json-schema`）だけで子に伝える
@@ -822,14 +822,18 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 {
   "cycle": {"id": "Y-3", "trigger": "cron", "started_at": "…", "ended_at": "…", "result": "completed", "budget_usd": 300, "spent_usd": 7.42},
   "config_defaults_used": ["agent.json"],
+  "not_started_reason": null,
   "phases": [
     {"phase": "ingest", "skipped": false, "result": {"sources": []}},
     {"phase": "classify", "skipped": false, "items": [{"challenge_id": "C-12", "run_id": "R-40", "result": "succeeded", "outcome": "mine", "status": "classified"}], "not_started": [{"challenge_id": "C-13", "reason": "cycle_budget"}]},
     {"phase": "plan", "skipped": false, "items": [], "not_started": []}
   ],
-  "rate_limited": false
+  "rate_limited": false,
+  "started": true
 }
 ```
+
+- 周を始めたときは `started` が `true`・`not_started_reason` が `null`。サイクルを回すと進むものが無いときは、周の記録を作らず、どの段も実行せず、バックアップも行わず、終了コード 0 で `started` が `false`・`not_started_reason` が `"nothing_to_advance"`・`cycle` が `null`・`phases` が `[]` になる（`config_defaults_used`・`rate_limited` は同じ形のまま。`rate_limited` は `false`）。進むものの数えは `status --json` の `cycle_work` と同じ（LLM を呼ばず、上流を読まない。宣言の不備は件数に関わらず `config_invalid`）。テキスト表示は始めなかった旨と理由を出し、開始の合図の行（`周 <ID> を開始した`）の形にしない。
 
 - `phase` は `ingest | classify | plan | run | verify` の閉集合（S1 は前の 3 つ）。`ingest` の `result` は M2 の `ingest --json` と同じ形（`.flywheel/sources.json` が無ければ `skipped: true`・`result: null`）。`plan`・`run`・`verify` の段は `.flywheel/connectors.json` が無ければ `skipped: true`・`items: []`・`not_started: []`。どの段も `skipped` を持つ。
 - `items[].outcome` は判断点の判定（J1・J2・J5）か委譲の結末。`items[].status` は写した後の課題の状態（写さなかったら `null`）。

@@ -18,7 +18,7 @@ const j6ValidOutput = `{
     {"mode": "create", "type": "experience", "slug": "s1", "description": "d", "confidence": "high", "sources": ["run:3"], "outcome": "good", "target": "t", "signal": "s", "body": "b"},
     {"mode": "append", "type": "tacit", "slug": "s2", "body": "b2"}
   ],
-  "followups": [{"title": "t", "description": "d", "done_criteria": "c"}]
+  "followups": [{"title": "t", "description": "d"}]
 }`
 
 func TestValidateJ6Output_Valid(t *testing.T) {
@@ -36,7 +36,7 @@ func TestValidateJ6Output_Valid(t *testing.T) {
 	if len(got.Memory) != 2 || got.Memory[0].Mode != MemoryModeCreate || got.Memory[0].Sources[0] != "run:3" || got.Memory[1].Mode != MemoryModeAppend {
 		t.Errorf("memory = %+v", got.Memory)
 	}
-	if len(got.Followups) != 1 || got.Followups[0].DoneCriteria != "c" {
+	if len(got.Followups) != 1 || got.Followups[0].Title != "t" || got.Followups[0].Description != "d" {
 		t.Errorf("followups = %+v", got.Followups)
 	}
 }
@@ -80,7 +80,7 @@ func TestValidateJ6Output_Invalid(t *testing.T) {
 	goodAdded := `{"outcome":"bad","kind":"k","evidence":"e","cause":"context","layer":"prompt","target":"t","signal":"s"}`
 	goodMem := `{"mode":"create","type":"tacit","slug":"s","body":"b"}`
 	// 土台そのものが受理されること（以降のケースは 1 か所だけ壊す）。
-	if _, reason := validateJ6Output([]byte(wrap(cls("O-1", "context", "prompt"), goodAdded, goodMem, `{"title":"t","description":"d","done_criteria":"c"}`))); reason != "" {
+	if _, reason := validateJ6Output([]byte(wrap(cls("O-1", "context", "prompt"), goodAdded, goodMem, `{"title":"t","description":"d"}`))); reason != "" {
 		t.Fatal("base fixture must be accepted")
 	}
 	cases := map[string]string{
@@ -96,8 +96,9 @@ func TestValidateJ6Output_Invalid(t *testing.T) {
 		"memory missing type":       wrap("", "", `{"mode":"create","slug":"s","body":"b"}`, ""),
 		"memory missing slug":       wrap("", "", `{"mode":"create","type":"tacit","body":"b"}`, ""),
 		"experience create lacking": wrap("", "", `{"mode":"create","type":"experience","slug":"s","description":"d","confidence":"high","body":"b"}`, ""),
-		"followup missing desc":     wrap("", "", "", `{"title":"t","done_criteria":"c"}`),
-		"followup missing done":     wrap("", "", "", `{"title":"t","description":"d"}`),
+		"followup missing desc":     wrap("", "", "", `{"title":"t"}`),
+		"followup newline title":    wrap("", "", "", `{"title":"a\nb","description":"d"}`),
+		"followup blank title":      wrap("", "", "", `{"title":"  ","description":"d"}`),
 		"not json":                  `nope`,
 		"missing classifications":   `{"added":[],"memory":[],"followups":[]}`,
 		"missing followups":         `{"classifications":[],"added":[],"memory":[]}`,
@@ -115,7 +116,7 @@ func TestValidateJ6Output_Invalid(t *testing.T) {
 		"memory unknown type":       wrap("", "", strings.Replace(goodMem, `"tacit"`, `"note"`, 1), ""),
 		"memory missing body":       wrap("", "", `{"mode":"create","type":"tacit","slug":"s"}`, ""),
 		"experience missing extra":  wrap("", "", `{"mode":"create","type":"experience","slug":"s","body":"b","outcome":"good","target":"t"}`, ""),
-		"followup missing title":    wrap("", "", "", `{"description":"d","done_criteria":"c"}`),
+		"followup missing title":    wrap("", "", "", `{"description":"d"}`),
 	}
 	for name, in := range cases {
 		t.Run(name, func(t *testing.T) {

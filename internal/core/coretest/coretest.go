@@ -449,6 +449,7 @@ func insertPlanTasks(tx *sql.Tx, challengeID, version int, spec string) error {
 			DependsOn    []string `json:"depends_on"`
 			Repo         string   `json:"repo"`
 			Operation    string   `json:"operation"`
+			Source       string   `json:"source"`
 		} `json:"tasks"`
 	}
 	if err := json.Unmarshal([]byte(spec), &out); err != nil {
@@ -461,9 +462,13 @@ func insertPlanTasks(tx *sql.Tx, challengeID, version int, spec string) error {
 		if err != nil {
 			return err
 		}
-		res, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-			challengeID, version, tk.Key, tk.Title, tk.Body, tk.DoneCriteria, string(nonGoals), tk.Repo, tk.Operation, at, at)
+		var sourceKey any // source を持たないタスクは NULL（承認と同じ）
+		if tk.Source != "" {
+			sourceKey = tk.Source
+		}
+		res, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+			challengeID, version, tk.Key, tk.Title, tk.Body, tk.DoneCriteria, string(nonGoals), tk.Repo, tk.Operation, sourceKey, at, at)
 		if err != nil {
 			return err
 		}
@@ -1052,6 +1057,13 @@ func FillAllTables(t *testing.T, workspace string) {
 			  VALUES (1, 1, 1, 2, NULL, 1, 'tester', 'cli', 'tty_confirm', 's', 'q', ?)`, []any{at}},
 			{`INSERT INTO plan_answer (challenge_id, plan_version, question_number, choice, text, recommended, actor, channel, verification, relay_session, relay_quote, answered_at)
 			  VALUES (1, 1, 2, NULL, '文の答え', 0, 'tester', 'cli', 'tty_confirm', NULL, NULL, ?)`, []any{at}},
+			{`INSERT INTO followup (challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, created_at, updated_at)
+			  VALUES (1, 'f1 "quoted"', 'detail', 'learn', 'open', NULL, NULL, 2, ?, ?)`, []any{at, at}},
+			{`INSERT INTO followup (challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, created_at, updated_at)
+			  VALUES (NULL, 'f2', NULL, 'learn', 'dropped', NULL, '要らない', NULL, ?, ?)`, []any{at, at}},
+			{`INSERT INTO source_child (challenge_id, source_id, external_key, parent_external_key, url, title, body, upstream_state, created_at, updated_at)
+			  VALUES (1, 'src', 'o/r#9', 'o/r#1', 'https://github.com/o/r/issues/9', 't', 'b', 'open', ?, ?)`, []any{at, at}},
+			{`UPDATE task SET source_key = 'o/r#9' WHERE id = 1`, nil},
 			{`UPDATE run SET task_id = 1 WHERE id = 1`, nil},
 			{`UPDATE contract_run SET task_id = 1 WHERE id = 1`, nil},
 			{`UPDATE hold SET task_id = 2 WHERE id = 1`, nil},
@@ -1128,4 +1140,61 @@ func QueryRows(t *testing.T, workspace, query string, args ...any) [][]any {
 		t.Fatalf("coretest: QueryRows(%q): %v", query, err)
 	}
 	return out
+}
+
+// FollowupRow は InsertFollowup が書くフォローアップ 1 行。ChallengeID が 0 なら課題に属さない。
+// Status が空なら open、Source が空なら learn。Note・Reason・PromotedChallengeID が空（0）なら NULL。
+type FollowupRow struct {
+	ChallengeID         int
+	Title               string
+	Detail              string
+	Source              string
+	Status              string
+	Note                string
+	Reason              string
+	PromotedChallengeID int
+}
+
+// InsertFollowup はテスト専用のフィクスチャとして、フォローアップを 1 行と、その作成の作業ログ（create）を 1 件挿入し、
+// 内部整数 ID を返す（本番の createFollowup が書く列と同じ）。
+func InsertFollowup(t *testing.T, workspace string, r FollowupRow) int64 {
+	t.Helper()
+	if r.Status == "" {
+		r.Status = "open"
+	}
+	if r.Source == "" {
+		r.Source = "learn"
+	}
+	nullInt := func(n int) any {
+		if n == 0 {
+			return nil
+		}
+		return n
+	}
+	nullStr := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	const at = "2026-11-18T00:00:00.000Z"
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var id int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO followup (challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			nullInt(r.ChallengeID), r.Title, nullStr(r.Detail), r.Source, r.Status, nullStr(r.Note), nullStr(r.Reason), nullInt(r.PromotedChallengeID), at, at)
+		if err != nil {
+			return err
+		}
+		if id, err = res.LastInsertId(); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after) VALUES (?, 'tester', 'cli', 'none', 'followup', ?, 'create', NULL, ?)`,
+			at, id, `{"status":"`+r.Status+`","title":"`+r.Title+`"}`)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertFollowup: %v", err)
+	}
+	return id
 }

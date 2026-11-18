@@ -787,6 +787,21 @@ export function statusOf(w: MockWorkspace): StatusResponse {
     },
     approved: { operations: ops("approved") },
     binary_commit: "unknown",
+    cycle_work: {
+      stages: {
+        classify: 0,
+        cleanup: 0,
+        improve: 0,
+        learn: 0,
+        plan: 0,
+        release: 0,
+        run: 0,
+        verify: 0,
+      },
+      total: 0,
+    },
+    followups: { open: 0 },
+    ingestable: null,
     needs_human: {
       budget_exhausted: items.flatMap((m) =>
         m.flags.budget ? [m.flags.budget] : [],

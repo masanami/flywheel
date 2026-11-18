@@ -27,7 +27,8 @@ const defaultCycleTrigger = "manual"
 // 読み込み順（個別の操作と同じ形。どの段で失敗しても、それより後は行わず周も始めない）:
 // agent.json の読み込み・検証 → RequirePositionFile → sources.json（無ければ取り込みの段は
 // skipped。不備なら config_invalid）→ connectors.json（無ければ計画・委譲・検証の段は skipped。
-// 不備なら config_invalid）→ 取り込みの段があれば gh の有無（無ければ
+// 不備なら config_invalid）→ サイクルを回すと進むものの数え（0 件なら、ここで「始めなかった」を返して
+// 終わる。道具は探さない）→ 取り込みの段があれば gh の有無（無ければ
 // upstream_unavailable）→ claude の有無（無ければ invoker_unavailable）→ RunCycle。
 // 宣言の不備は環境の不備（gh・claude の不在）より先に報告する。
 // 生きている別の cycle があれば core が locked を返す。周の中の run の失敗は結果に示すだけで、
@@ -52,8 +53,8 @@ func runCycle(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	// 宣言はすべて読み・検証してから（どれかが不備なら config_invalid）、gh・claude の有無を
-	// 確かめる。読み込みはストアを変えないので、どの失敗でも周は始まらない。
+	// 宣言はすべて読み・検証してから（どれかが不備なら config_invalid）、進められるものを数え、
+	// 始めるときだけ gh・claude の有無を確かめる。読み込みはストアを変えないので、どの失敗でもサイクルは始まらない。
 	var selected []core.SourceEntry
 	hasSources := false
 	sources, err := core.LoadSourcesDeclaration(ws)
@@ -80,6 +81,25 @@ func runCycle(a Args) (any, error) {
 		// connectors.json が無い: 計画・委譲・検証の段は skipped（J2・J3・J5 を起動せず、エラーにしない）。
 	default:
 		return nil, mapCoreErr(err)
+	}
+
+	// サイクルを回すと進むものを数える（LLM を呼ばず、上流を読まない）。無ければサイクルを始めない（記録を作らず、
+	// どの段も実行せず、バックアップも行わない。終了コードは 0）。数えからサイクルの記録までの間に対象が無くなることは許す。
+	// 数えは道具を使わないので、gh・claude の有無を確かめる前に行う（進められるものが無いワークスペースでは、
+	// 道具が無くても「始めなかった」で終わる。道具が要るのは、始めるときだけ）。
+	work, err := a.Store.CountCycleWork(ctx, agent, conn)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	if work.Total == 0 {
+		defaults := []string{}
+		if agent.DefaultsUsed {
+			defaults = append(defaults, "agent.json")
+		}
+		return textOutput{
+			json: view.FromCycleNotStarted(defaults, core.CycleNotStartedNothingToAdvance),
+			text: "進められるものが無いので、サイクルを始めなかった（理由: " + core.CycleNotStartedNothingToAdvance + "）\n",
+		}, nil
 	}
 
 	var ingest *core.CycleIngestInput

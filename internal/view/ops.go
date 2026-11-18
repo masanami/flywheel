@@ -36,6 +36,27 @@ type IngestResponse struct {
 	Sources []IngestSource `json:"sources"`
 }
 
+// IngestedItem は `ingest <指定>...` の ingested の要素（選んで課題にした Issue 1 件）。
+type IngestedItem struct {
+	ChallengeID string `json:"challenge_id"`
+	Children    int    `json:"children"`
+	ExternalKey string `json:"external_key"`
+}
+
+// IngestedResponse は `ingest <指定>...` の成功の形。
+type IngestedResponse struct {
+	Ingested []IngestedItem `json:"ingested"`
+}
+
+// FromIngestSelectedResult は core.IngestSelectedResult を IngestedResponse へ変換する。
+func FromIngestSelectedResult(res *core.IngestSelectedResult) IngestedResponse {
+	items := make([]IngestedItem, 0, len(res.Ingested))
+	for _, c := range res.Ingested {
+		items = append(items, IngestedItem{ChallengeID: c.ChallengeID, Children: c.Children, ExternalKey: c.ExternalKey})
+	}
+	return IngestedResponse{Ingested: items}
+}
+
 // FromIngestResult は core.IngestResult を IngestResponse へ変換する。
 func FromIngestResult(res *core.IngestResult) IngestResponse {
 	sources := make([]IngestSource, 0, len(res.Sources))
@@ -329,11 +350,26 @@ type Cycle struct {
 }
 
 // CycleResponse は `cycle` の成功の形。
+// 周を始めなかったとき（進められるものが無い）は、started が false・not_started_reason が理由・cycle が null・phases が空。
 type CycleResponse struct {
 	ConfigDefaultsUsed []string `json:"config_defaults_used"`
-	Cycle              Cycle    `json:"cycle"`
+	Cycle              *Cycle   `json:"cycle"`
+	NotStartedReason   *string  `json:"not_started_reason"`
 	Phases             []any    `json:"phases"`
 	RateLimited        bool     `json:"rate_limited"`
+	Started            bool     `json:"started"`
+}
+
+// FromCycleNotStarted は、周を始めなかった（サイクルを回すと進むものが無い）ときの CycleResponse。
+func FromCycleNotStarted(defaultsUsed []string, reason string) CycleResponse {
+	if defaultsUsed == nil {
+		defaultsUsed = []string{}
+	}
+	return CycleResponse{
+		ConfigDefaultsUsed: defaultsUsed,
+		NotStartedReason:   &reason,
+		Phases:             []any{},
+	}
 }
 
 // FromCycleRunResult は core.CycleRunResult を CycleResponse へ変換する。
@@ -345,7 +381,8 @@ func FromCycleRunResult(res *core.CycleRunResult) CycleResponse {
 	}
 	return CycleResponse{
 		ConfigDefaultsUsed: res.ConfigDefaultsUsed,
-		Cycle: Cycle{
+		Started:            true,
+		Cycle: &Cycle{
 			BudgetUSD: c.BudgetUSD,
 			EndedAt:   ts(c.EndedAt),
 			ID:        c.ID,
@@ -411,6 +448,7 @@ type BudgetResponse struct {
 }
 
 // CycleStarted は `POST /api/v1/workspaces/{name}/cycle` の成功の形。
+// started が false のときは、サイクルを回すと進むものが無く、周を始めなかった。
 type CycleStarted struct {
 	Started bool `json:"started"`
 }

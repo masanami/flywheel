@@ -76,6 +76,8 @@ type j2RawTask struct {
 	DependsOn    []string `json:"depends_on"`
 	Repo         string   `json:"repo"`
 	Operation    string   `json:"operation"`
+	// Source は対応する取り込み元の子の external_key（任意。無い・null・空は子に対応しない）。
+	Source string `json:"source"`
 }
 
 // j2Topic は検査済みの論点 1 つ。
@@ -95,6 +97,8 @@ type j2Task struct {
 	DependsOn    []string
 	Repo         string
 	Operation    string
+	// Source は対応する取り込み元の子の external_key（"" は対応しない）。
+	Source string
 }
 
 // j2ValidatedOutput は core の閉集合・必須の組・宣言との突き合わせを通った J2 の
@@ -132,6 +136,9 @@ type j2ValidatedOutput struct {
 	// DependsOn は plan のときの依存先の課題 ID（出力のまま。存在・自己参照・循環は
 	// 計画を登録する書き込みの中で検査する。無い・null・空は nil）。
 	DependsOn []string
+	// OpenChildKeys は出力を検査した時点で上流で開いていた取り込み元の子の external_key（記録した順）。
+	// 計画の本文の「タスクにしなかった取り込み元の子」に使う。子の検査をしない検査（委譲の再検査）では空。
+	OpenChildKeys []string
 	// Spec は構造化した出力の JSON を空白を除いて詰めたもの（task_plan.spec。
 	// null の額も出力のまま残す＝「spec は構造化した出力と一致する」）。
 	Spec []byte
@@ -154,6 +161,12 @@ type j2ValidationContext struct {
 	// 取り込み元の差し込み（{issue_number}・{issue_url}・{external_key}）を持つ
 	// 操作を選んだ出力は不正（§J2）。
 	HasSource bool
+	// CheckSource が真のとき、タスクの source は OpenChildKeys（上流で開いている子の external_key。
+	// 子が無ければ空）のどれかでなければならない。偽のとき source の値の突き合わせはしない
+	// （承認済みの計画を委譲の段で読み直すとき。子はその後に閉じうる）。同じ source を 2 つのタスクが
+	// 持つ計画は、どちらでも不正。
+	CheckSource   bool
+	OpenChildKeys []string
 }
 
 // j2OutputSchema は J2 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -222,6 +235,7 @@ func j2OutputSchema() []byte {
 				"depends_on":    stringArray,
 				"repo":          map[string]any{"type": "string"},
 				"operation":     map[string]any{"type": "string"},
+				"source":        nullableString,
 			},
 			"required":             []string{"key", "title", "body", "done_criteria", "non_goals", "depends_on", "repo", "operation"},
 			"additionalProperties": false,
@@ -503,6 +517,9 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		Question:          raw.Question,
 		Spec:              spec.Bytes(),
 	}
+	if vc.CheckSource {
+		v.OpenChildKeys = vc.OpenChildKeys
+	}
 	if raw.Summary != nil {
 		v.Summary = *raw.Summary
 	}
@@ -519,7 +536,19 @@ func validateJ2Tasks(in []j2RawTask, vc j2ValidationContext) ([]j2Task, bool) {
 	}
 	byKey := make(map[string]int, len(in))
 	inputs := make([]TaskInput, len(in))
+	openChild := make(map[string]bool, len(vc.OpenChildKeys))
+	for _, k := range vc.OpenChildKeys {
+		openChild[k] = true
+	}
+	usedSource := map[string]bool{}
 	for i, t := range in {
+		// source は、あれば上流で開いている子の記録にある値で、タスクをまたいで重ならない。
+		if t.Source != "" {
+			if strings.TrimSpace(t.Source) != t.Source || usedSource[t.Source] || (vc.CheckSource && !openChild[t.Source]) {
+				return nil, false
+			}
+			usedSource[t.Source] = true
+		}
 		for _, s := range []string{t.Key, t.Title, t.Body, t.DoneCriteria} {
 			if checkText("tasks", s, MaxStageRunes) != nil {
 				return nil, false
@@ -567,7 +596,7 @@ func validateJ2Tasks(in []j2RawTask, vc j2ValidationContext) ([]j2Task, bool) {
 		}
 		out = append(out, j2Task{
 			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria,
-			NonGoals: nonGoals, DependsOn: t.DependsOn, Repo: t.Repo, Operation: t.Operation,
+			NonGoals: nonGoals, DependsOn: t.DependsOn, Repo: t.Repo, Operation: t.Operation, Source: t.Source,
 		})
 	}
 	return out, true
@@ -603,6 +632,26 @@ func formatUSDAmount(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
+// UntaskedChildrenHeading は計画の本文で、どのタスクも指さない取り込み元の子を並べる見出し。
+const UntaskedChildrenHeading = "タスクにしなかった取り込み元の子"
+
+// untaskedChildKeys は、どのタスクも source で指さない、上流で開いている子の external_key を返す。
+func untaskedChildKeys(v *j2ValidatedOutput) []string {
+	used := map[string]bool{}
+	for _, t := range v.Tasks {
+		if t.Source != "" {
+			used[t.Source] = true
+		}
+	}
+	var out []string
+	for _, k := range v.OpenChildKeys {
+		if !used[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 // formatJ2PlanBody は検査済みの plan の出力を、計画の本文（Markdown）へ決定的に
 // 整形する（§J2「出力を計画の本文へ決定的に整形し」）。サイズ・実装枠・レビュー対応枠の額・
 // 統合先を使うか・論点（題名・どう決めたか）・問い（番号・文・選択肢のラベル・推奨の印）・
@@ -628,6 +677,9 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, oneLine(t.Title))
 		b.WriteString("   - 対象リポジトリ: " + t.Repo + "\n")
 		b.WriteString("   - 操作: " + t.Operation + "\n")
+		if t.Source != "" {
+			b.WriteString("   - 取り込み元の子: " + oneLine(t.Source) + "\n")
+		}
 		if len(t.DependsOn) == 0 {
 			b.WriteString("   - 前提: なし\n")
 			continue
@@ -641,6 +693,12 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 			}
 		}
 		b.WriteString("   - 前提: " + strings.Join(titles, "、") + "\n")
+	}
+	if untasked := untaskedChildKeys(v); len(untasked) > 0 {
+		b.WriteString("\n## " + UntaskedChildrenHeading + "\n\n")
+		for _, k := range untasked {
+			b.WriteString("- " + oneLine(k) + "\n")
+		}
 	}
 	if s := strings.TrimSpace(v.Summary); s != "" {
 		b.WriteString("\n## 方針\n\n" + s + "\n")
@@ -740,6 +798,8 @@ type j2Prepared struct {
 	Sections []JudgmentDataSection
 	// HasSource は課題が取り込み元の対応を持つか（出力の検査に使う）。
 	HasSource bool
+	// OpenChildKeys は課題の、上流で開いている取り込み元の子の external_key（記録した順。出力の検査に使う）。
+	OpenChildKeys []string
 	// Read が非 nil のときだけ、計画を登録した後に読んだ記録を付けてよい
 	// （取り込み元の対応があり、最新のコメントをすべて入力へ含めた場合）。値は
 	// J2 の直前の取得で得たコメント数と更新日時（ストアの観測値ではない）。
@@ -771,6 +831,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 
 	var holds []Hold
 	var sb *sourceBinding
+	var children []SourceChild
 	var replan *replanNote
 	var planRejections []CompletionRejection
 	var planAnswersText string
@@ -798,8 +859,20 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 			replan = nil
 		}
 		b, err := loadSourceBindingByChallengeID(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
 		sb = b
-		return err
+		all, err := loadSourceChildren(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		for _, c := range all {
+			if c.UpstreamState == string(upstreamStateOpen) {
+				children = append(children, c)
+			}
+		}
+		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, nil, err
@@ -867,6 +940,12 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	}
 	if upstream != nil {
 		sections = append(sections, upstream.Sections...)
+	}
+	if len(children) > 0 {
+		sections = append(sections, JudgmentDataSection{Label: SourceChildrenSectionLabel, Content: formatSourceChildrenSection(children)})
+		for _, c := range children {
+			prepared.OpenChildKeys = append(prepared.OpenChildKeys, c.ExternalKey)
+		}
 	}
 	sections = append(sections,
 		JudgmentDataSection{Label: "対象リポジトリと操作の宣言", Content: formatJ2DeclarationSection(in.ConnDecl, prepared.HasSource, in.AgentDecl)},
@@ -1517,7 +1596,7 @@ func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
 		fin, err := s.finalizeJ2Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, j2Finalize{
-			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource},
+			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, OpenChildKeys: prepared.OpenChildKeys},
 			Read:       prepared.Read,
 		})
 		if err != nil {

@@ -142,12 +142,14 @@ func TestText_ShowAndStatusDependencyLines(t *testing.T) {
 	if out := runText(t, ws, "show", b); !strings.Contains(out, "依存先:        -\n") || !strings.Contains(out, "依存元:        "+a+"\n") {
 		t.Errorf("show %s text = %q", b, out)
 	}
+	// 状況の文の出力は区分ごとの件数・一覧だけを出す（#779）。満たされていない依存先は JSON の
+	// actionable.challenges[].unmet_dependencies が持つ。
 	out := runText(t, ws, "status")
-	if !strings.Contains(out, "満たされていない依存先: "+b+"\n") {
-		t.Errorf("status text lacks the unmet dependency of %s: %q", a, out)
+	if strings.Contains(out, "満たされていない依存先") {
+		t.Errorf("status text must not list unmet dependencies any more: %q", out)
 	}
-	if strings.Count(out, "満たされていない依存先") != 1 {
-		t.Errorf("only %s has an unmet dependency: %q", a, out)
+	if !strings.Contains(out, "サイクルを回すと進むもの: 2 件\n") {
+		t.Errorf("status text lacks the cycle-work total: %q", out)
 	}
 }
 

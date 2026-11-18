@@ -184,7 +184,7 @@ func TestIngest_NoSourceFlag_ProcessesAllSourcesInDeclaredOrder(t *testing.T) {
 // --- AC-16・AC-17: 3 ページ 250 件のうち、ポリシーに合う Issue がすべて
 // 課題になり、Pull Request は課題にならない。 ---
 
-func TestIngest_ThreePagesOfIssues_AllBecomeChallengesAndPullRequestsAreExcluded(t *testing.T) {
+func TestIngest_ThreePagesOfIssues_SelectedIssuesBecomeChallengesAndPullRequestsAreExcluded(t *testing.T) {
 	parallelTools(t, false)
 	ws := initializedWorkspace(t)
 	decl := `{
@@ -217,6 +217,25 @@ func TestIngest_ThreePagesOfIssues_AllBecomeChallengesAndPullRequestsAreExcluded
 		fakeGHListRoute("owner/big-repo", 3, fakeGHIssueListBody(t, page3), 0),
 	})
 
+	// Pull Request の番号は取り込めるものに無い（選ぶと validation_failed。何も作らない）。
+	requireJSONErrorEnvelope(t, []string{"ingest", "owner/big-repo#900", "--workspace", ws}, 1, CodeValidationFailed)
+
+	specs := make([]string, 0, 210)
+	for i := 1; i <= 210; i++ {
+		specs = append(specs, fmt.Sprintf("owner/big-repo#%d", i))
+	}
+	selected := runJSON(t, ws, append([]string{"ingest"}, specs...)...)
+	ingested := selected["ingested"].([]any)
+	if len(ingested) != 210 {
+		t.Fatalf("len(ingested) = %d, want 210 (選んだ Issue がすべて課題になる)", len(ingested))
+	}
+	for _, raw := range ingested {
+		it := raw.(map[string]any)
+		if it["children"] != 0.0 || it["challenge_id"] == nil || it["external_key"] == nil {
+			t.Errorf("ingested item = %+v, want challenge_id/external_key and children=0", it)
+		}
+	}
+
 	got := runJSON(t, ws, "ingest")
 
 	sources := got["sources"].([]any)
@@ -231,11 +250,11 @@ func TestIngest_ThreePagesOfIssues_AllBecomeChallengesAndPullRequestsAreExcluded
 	}
 	items := itemsOf(t, repo)
 	if len(items) != 210 {
-		t.Fatalf("len(items) = %d, want 210 (すべての Issue が課題になり、Pull Request は含まれない)", len(items))
+		t.Fatalf("len(items) = %d, want 210 (追従は課題になった 210 件だけを並べ、Pull Request は含まれない)", len(items))
 	}
 	for _, it := range items {
-		if it["result"] != "created" {
-			t.Errorf("item.result = %v, want created: %+v", it["result"], it)
+		if it["result"] != "unchanged" {
+			t.Errorf("item.result = %v, want unchanged: %+v", it["result"], it)
 		}
 	}
 
@@ -272,6 +291,8 @@ func TestIngest_OneRepoListFailure_OtherRepoStillIngestedAndFailedRepoUnchanged(
 		}), 0),
 		{match: "repos/owner/broken-repo/issues?state=open&per_page=100&page=1", stdout: "gh: simulated list failure", exit: 1},
 	})
+
+	runJSON(t, ws, "ingest", "owner/ok-repo#1") // 課題にするのは選んだ Issue だけ
 
 	var stdout, stderr strings.Builder
 	code := runWithLookPath([]string{"ingest", "--workspace", ws, "--json"}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))

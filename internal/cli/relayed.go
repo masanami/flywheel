@@ -10,7 +10,7 @@ import (
 // 操作を記録する口）の Verifier を持つ。端末での確認（tty_confirm）はここでは
 // 行わない。人間用の口（tty_confirm）は変えない。
 
-// relayedFlags は approve・reject・answer・budget が受ける、relayed のフラグ。
+// relayedFlags は approve・reject・answer・budget・withdraw・followup drop・followup promote が受ける、relayed のフラグ。
 func relayedFlags() []flagDef {
 	return []flagDef{
 		{Name: "relayed", HasValue: false},

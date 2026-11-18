@@ -292,6 +292,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 			}
 		}
 	}
+	if len(d.Followups) > 0 {
+		b.WriteString(followupCountsText(d.Followups))
+	}
 	fmt.Fprintf(&b, "不可逆操作:    %d 件\n", len(d.Operations))
 	for _, op := range d.Operations {
 		fmt.Fprintf(&b, "  %s %s %s [%s]", op.ID, op.Kind, op.Summary, op.State)
@@ -323,6 +326,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 		fmt.Fprintf(&b, "  URL: %s\n", sb.URL)
 		fmt.Fprintf(&b, "  上流: %s  ポリシー: %s  fingerprint: %s\n", sb.UpstreamState, sb.PolicyState, sb.Fingerprint)
 		fmt.Fprintf(&b, "  対応の作成: %s  更新: %s\n", FormatTimestamp(sb.CreatedAt), FormatTimestamp(sb.UpdatedAt))
+	}
+	if len(d.SourceChildren) > 0 {
+		fmt.Fprintf(&b, "取り込み元の子: %d 件\n", len(d.SourceChildren))
 	}
 	return b.String()
 }
@@ -419,6 +425,9 @@ func planViewText(p *core.PlanView) string {
 		line := fmt.Sprintf("  %s %s", t.Identifier(), escapeControl(t.Title))
 		if t.ID != "" {
 			line += fmt.Sprintf(" [%s]", t.Status.Label())
+		}
+		if t.Source != "" {
+			line += "（取り込み元の子: " + escapeControl(t.Source) + "）"
 		}
 		if len(t.DependsOn) > 0 {
 			line += "（前提: " + strings.Join(t.DependsOn, "・") + "）"

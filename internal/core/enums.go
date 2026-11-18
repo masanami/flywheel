@@ -336,8 +336,9 @@ const (
 	ActivityActionParentClear = "parent_clear"
 )
 
-// 作業ログ（entity=challenge）の action。J6（learn）が課題の発生を分類した・
-// フォローアップの課題を起票した（followup）ときに残す。
+// 作業ログ（entity=challenge）の action。学びの判断点（J6。learn）が課題の発生を分類したときに learn を残す。
+// followup は、区切り S2b より前に、学びの判断点がフォローアップを課題として起票したときに残した記録
+// （いまは書かない。過去の記録に残っているので、値は残す。いまのフォローアップは entity=followup の create）。
 const (
 	ActivityActionLearn    = "learn"
 	ActivityActionFollowup = "followup"
@@ -353,6 +354,14 @@ const (
 // ActivityActionImprovementWithheld は作業ログ（entity=run）の action。J8 が、達成の条件の項目がすべて
 // 満たし済みで出さなかった提案（見送り）の層・対象・根拠を、その J8 の run に残す（#571）。
 const ActivityActionImprovementWithheld = "improvement_withheld"
+
+// 作業ログ（entity=followup）の action。create はフォローアップを書いた記録で、
+// ほかの 3 つが済み・捨てた・課題に上げた記録。
+const (
+	ActivityActionFollowupDone    = "followup_done"
+	ActivityActionFollowupDrop    = "followup_drop"
+	ActivityActionFollowupPromote = "followup_promote"
+)
 
 // ActivityActionBackup は作業ログ（entity=cycle）の action。`cycle` の最後の段 backup の結果を残す。
 const ActivityActionBackup = "backup"

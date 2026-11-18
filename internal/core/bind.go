@@ -156,6 +156,12 @@ func (s *Store) BindChallenge(ctx context.Context, ch Channel, in BindInput) (*C
 			return fmt.Errorf("%w: %s is bound to %s", ErrIssueBoundElsewhere, issue.ExternalKey, holder.ChallengeID)
 		}
 
+		if isChild, err := sourceChildExists(ctx, tx, issue.ExternalKey); err != nil {
+			return err
+		} else if isChild {
+			return fmt.Errorf("%w: %s is recorded as a source child of another challenge", ErrValidation, issue.ExternalKey)
+		}
+
 		sb, err := insertSourceBinding(ctx, tx, rec.at, cid, createSourceBindingInput{
 			SourceID:              src.ID,
 			ExternalKey:           issue.ExternalKey,
@@ -248,6 +254,18 @@ func (s *Store) UnbindChallenge(ctx context.Context, ch Channel, id string) (*Ch
 		if sb == nil {
 			return fmt.Errorf("%w: %s", ErrNotBound, current.ID)
 		}
+		children, err := loadSourceChildren(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if len(children) > 0 {
+			if err := checkUnbindSafeForChildren(ctx, tx, cid, current.ID); err != nil {
+				return err
+			}
+			if _, err := deleteSourceChildren(ctx, tx, cid); err != nil {
+				return err
+			}
+		}
 		if err := deleteSourceBinding(ctx, tx, cid); err != nil {
 			return err
 		}
@@ -268,6 +286,9 @@ func (s *Store) UnbindChallenge(ctx context.Context, ch Channel, id string) (*Ch
 			"fingerprint":    sb.Fingerprint,
 			"upstream_state": string(sb.UpstreamState),
 			"policy_state":   string(sb.PolicyState),
+		}
+		if len(children) > 0 {
+			before["source_children"] = len(children)
 		}
 		if err := rec.record("challenge", cid, "unbind", before, map[string]any{"version": newVersion}); err != nil {
 			return err

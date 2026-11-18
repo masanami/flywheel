@@ -194,6 +194,8 @@ type ChallengeDetail struct {
 	// 対応が無ければ nil（`create` で作った課題・スキーマ版 1 から上げたストアの
 	// 既存の課題。AC-48・AC-103）。
 	SourceBinding *SourceBinding
+	// SourceChildren は課題の取り込み元の子（記録した順。無ければ空のスライス）。
+	SourceChildren []SourceChild
 	// Runs は課題の run の一覧（新しい順・最大 20 件。#86。docs/features/
 	// m3-invoker-delegation.md §観測「show は、課題の run の一覧…を示す」）。
 	// 無ければ空スライス（nil でない）。
@@ -215,6 +217,8 @@ type ChallengeDetail struct {
 	Tasks []Task
 	// UsesIntegration は課題が統合先を使うか（challenge.uses_integration）。未決か過去の課題は nil。
 	UsesIntegration *bool
+	// Followups は課題にぶら下がるフォローアップ（状態を問わず全部。ID の昇順）。無ければ空のスライス（nil でない）。
+	Followups []Followup
 }
 
 // ImprovementKey は改修課題の鍵（challenge.improvement_layer・improvement_target。マイグレーション 0012）。
@@ -829,6 +833,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		detail.SourceBinding = sb.toPublic()
+		if detail.SourceChildren, err = loadSourceChildren(ctx, tx, cid); err != nil {
+			return err
+		}
 
 		answer, err := loadIssuesAnswer(ctx, tx, cid, c.IssuesHoldID)
 		if err != nil {
@@ -856,6 +863,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		if detail.UsesIntegration, err = challengeUsesIntegration(ctx, tx, cid); err != nil {
+			return err
+		}
+		if detail.Followups, err = listFollowups(ctx, tx, FollowupFilter{ChallengeID: id}); err != nil {
 			return err
 		}
 		var followupOf, impLayer, impTarget sql.NullString

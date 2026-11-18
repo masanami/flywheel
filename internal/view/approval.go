@@ -55,10 +55,11 @@ type ApprovalPlan struct {
 }
 
 // ApprovalPlanTask は計画承認待ちの要約のタスク 1 件。承認の前はタスクの ID が無いので、計画の中の識別子（key）と、
-// 前提のタスクの key で出す。
+// 前提のタスクの key で出す。source は対応する取り込み元の子の external_key（対応しなければ null）。
 type ApprovalPlanTask struct {
 	DependsOn []string `json:"depends_on"`
 	Key       string   `json:"key"`
+	Source    *string  `json:"source"`
 	Title     string   `json:"title"`
 }
 
@@ -134,7 +135,7 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 	case core.ApprovalKindPlan:
 		tasks := make([]ApprovalPlanTask, 0, len(p.PlanTasks))
 		for _, t := range p.PlanTasks {
-			tasks = append(tasks, ApprovalPlanTask{DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Title: t.Title})
+			tasks = append(tasks, ApprovalPlanTask{DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Source: strOrNil(t.Source), Title: t.Title})
 		}
 		s.Plan = &ApprovalPlan{Body: p.PlanBody, Tasks: tasks, Topics: FromPlanTopics(p.PlanTopics), UsesIntegration: p.PlanUsesIntegration, Version: p.PlanVersion}
 	case core.ApprovalKindCompletion:

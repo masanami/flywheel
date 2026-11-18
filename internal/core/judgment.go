@@ -689,47 +689,56 @@ func (s *Store) effectiveStaleAfter() time.Duration {
 	return s.staleAfter
 }
 
+// staleRun は ReapInterruptedRuns が閉じる対象の run（結果が無く、心拍が古く、プロセスが生きていない）。
+type staleRun struct {
+	id           int64
+	pid          int64
+	host         string
+	maxBudgetUSD int64
+}
+
+// loadStaleRuns は ReapInterruptedRuns と、サイクルで進むものの数え（CountCycleWork の片付け）が共有する、
+// 閉じる対象の選び方（読み取りだけ）。
+func (s *Store) loadStaleRuns(ctx context.Context, tx *sql.Tx) ([]staleRun, error) {
+	threshold := s.effectiveStaleAfter()
+	now := s.currentTime()
+	var out []staleRun
+	rows, err := tx.QueryContext(ctx, `SELECT id, pid, host, heartbeat_at, max_budget_usd FROM run WHERE result IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id, pid, maxBudgetUSD int64
+		var host, hbStr string
+		if err := rows.Scan(&id, &pid, &host, &hbStr, &maxBudgetUSD); err != nil {
+			return nil, err
+		}
+		hb, err := parseTimestamp(hbStr)
+		if err != nil {
+			return nil, err
+		}
+		if now.Sub(hb) <= threshold {
+			continue
+		}
+		if isRunProcessAlive(host, pid) {
+			continue
+		}
+		out = append(out, staleRun{id: id, pid: pid, host: host, maxBudgetUSD: maxBudgetUSD})
+	}
+	return out, rows.Err()
+}
+
 // ReapInterruptedRuns は、終了していない run のうち heartbeat が
 // defaultStaleAfter（テストは s.staleAfter で差し替え可能）より古く、
 // 記録したプロセスがそのホストで生きていないものを interrupted で閉じる
 // （§invoker の共通の規則）。ListRuns（flywheel runs）・RunJudgment の入口が
 // 呼ぶ。
 func (s *Store) ReapInterruptedRuns(ctx context.Context) error {
-	threshold := s.effectiveStaleAfter()
-	now := s.currentTime()
-
-	type candidate struct {
-		id           int64
-		pid          int64
-		host         string
-		maxBudgetUSD int64
-	}
-	var candidates []candidate
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT id, pid, host, heartbeat_at, max_budget_usd FROM run WHERE result IS NULL`)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			var id, pid, maxBudgetUSD int64
-			var host, hbStr string
-			if err := rows.Scan(&id, &pid, &host, &hbStr, &maxBudgetUSD); err != nil {
-				return err
-			}
-			hb, err := parseTimestamp(hbStr)
-			if err != nil {
-				return err
-			}
-			if now.Sub(hb) <= threshold {
-				continue
-			}
-			if isRunProcessAlive(host, pid) {
-				continue
-			}
-			candidates = append(candidates, candidate{id: id, pid: pid, host: host, maxBudgetUSD: maxBudgetUSD})
-		}
-		return rows.Err()
+	var candidates []staleRun
+	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		candidates, err = s.loadStaleRuns(ctx, tx)
+		return err
 	})
 	if err != nil {
 		return classifyReadWriteErr(err)

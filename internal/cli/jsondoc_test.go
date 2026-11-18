@@ -701,6 +701,14 @@ var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true
 // assertDocumentedJSON の共通の検査が見る）。
 func assertDocumentedCycle(t *testing.T, doc documentedJSON, out map[string]any) {
 	t.Helper()
+	if started, _ := out["started"].(bool); !started {
+		// 周を始めなかった（進めるものが無い）形: cycle は null・phases は空・理由つき。
+		phases, isArr := out["phases"].([]any)
+		if out["cycle"] != nil || !isArr || len(phases) != 0 || out["not_started_reason"] != "nothing_to_advance" {
+			t.Errorf("cycle (not started): cycle=%#v phases=%#v not_started_reason=%#v, want null / [] / nothing_to_advance", out["cycle"], out["phases"], out["not_started_reason"])
+		}
+		return
+	}
 	rec, ok := out["cycle"].(map[string]any)
 	if !ok {
 		t.Errorf("cycle: `cycle` is not an object: %#v", out["cycle"])
@@ -876,6 +884,11 @@ var jsonEntityOf = map[string]string{
 	"items":   "item",
 	// runs（#81。docs/features/m3-invoker-delegation.md §IF / API「runs」）。
 	"runs": "run",
+	// show の followups と followup list の followups の要素（S2b）。
+	"followups": "followup",
+	// show の source_children の要素（S2b。取り込み元の子）。文書の表の行の名前は、末尾の s を除いても変わらない
+	// （children）ので、要素の形の名前も source_children のままになる。
+	"source_children": "source_children",
 	// slot clear の slot（S2。§IF / API の「slot clear」の行）。
 	"slot": "slot",
 	// status.needs_human.budget_exhausted（S2。§IF / API の「status.needs_human.budget_exhausted」の行）。
@@ -899,6 +912,16 @@ func assertDocumentedEntities(t *testing.T, doc documentedJSON, where string, v 
 		if k == "challenges" && strings.HasSuffix(where, "actionable") {
 			// status の actionable.challenges[] は共有の課題の形に unmet_dependencies を足した形（M4.5 S2）。
 			entity, known = "actionable_challenge", true
+		}
+		if k == "followups" && where == "status" {
+			// status.followups は未の件数 {"open"}（show・followup list の followups〔一覧〕ではない）。
+			known = false
+		}
+		if k == "items" && where == "status.ingestable" {
+			entity, known = "ingestable_item", true // ingest の items の要素ではない
+		}
+		if k == "children" && strings.HasPrefix(where, "status.ingestable.items[") {
+			entity, known = "ingestable_child", true
 		}
 		switch x := val.(type) {
 		case map[string]any:

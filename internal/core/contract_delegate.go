@@ -486,7 +486,14 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if err := checkPlannedContractOperation(plan, connector, binding != nil, task.Operation); err != nil {
 		return nil, err
 	}
-	command, err := fillContractArgs(connector.Commands.Start, in.ChallengeID, binding, "", contractAnswer{})
+	var taskSource *sourceBinding
+	if err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		taskSource, err = loadTaskSourceBinding(ctx, tx, cid, taskID)
+		return err
+	}); classifyReadWriteErr(err) != nil {
+		return nil, classifyReadWriteErr(err)
+	}
+	command, err := fillContractArgs(connector.Commands.Start, in.ChallengeID, taskSource, "", contractAnswer{})
 	if err != nil {
 		return nil, err
 	}
@@ -1002,7 +1009,7 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 		firstErr = firstErrOr(firstErr, err)
 	}
 	var rows []*contractRunRow
-	bindings := map[int64]*sourceBinding{}
+	bindings := map[*contractRunRow]*sourceBinding{}
 	planVersions := map[int64]*int64{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		q := contractRunSelect + ` WHERE ended_at IS NULL`
@@ -1027,7 +1034,7 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 			return err
 		}
 		for _, r := range rows {
-			if bindings[r.ChallengeID], err = loadSourceBindingByChallengeID(ctx, tx, r.ChallengeID); err != nil {
+			if bindings[r], err = loadTaskSourceBinding(ctx, tx, r.ChallengeID, r.TaskID); err != nil {
 				return err
 			}
 			if p, found, err := loadApprovedPlanAnySpec(ctx, tx, r.ChallengeID); err != nil {
@@ -1051,7 +1058,7 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 		connector, err := findCLIConnector(in.ConnDecl, row.ConnectorID)
 		var rep *ContractRunReport
 		if err == nil {
-			rep, err = s.pollOne(ctx, in, row, connector, bindings[row.ChallengeID], planVersions[row.ChallengeID], cycleIDInt)
+			rep, err = s.pollOne(ctx, in, row, connector, bindings[row], planVersions[row.ChallengeID], cycleIDInt)
 			if err == nil && rep == nil {
 				continue // 検証中のレビュー待ちは読まない（pendingReviewReply）
 			}

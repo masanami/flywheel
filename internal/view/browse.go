@@ -68,12 +68,14 @@ type ShowCardResponse struct {
 	Card              Card               `json:"card"`
 	Challenge         ShowChallenge      `json:"challenge"`
 	DirectCompletions []DirectCompletion `json:"direct_completions"`
+	Followups         []Followup         `json:"followups"`
 	Holds             []Hold             `json:"holds"`
 	Operations        []Operation        `json:"operations"`
 	Pairs             []StagePair        `json:"pairs"`
 	Plans             []PlanDetail       `json:"plans"`
 	Runs              []Run              `json:"runs"`
 	SourceBinding     *SourceBinding     `json:"source_binding"`
+	SourceChildren    []SourceChild      `json:"source_children"`
 	Stages            Stages             `json:"stages"`
 	Tasks             []Task             `json:"tasks"`
 	Waiting           Waiting            `json:"waiting"`
@@ -104,8 +106,8 @@ func fromWaitingChallenges(ws []core.WaitingChallenge) []WaitingChallenge {
 func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card) ShowCardResponse {
 	s := FromChallengeDetail(d)
 	return ShowCardResponse{
-		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, DirectCompletions: s.DirectCompletions, Holds: s.Holds,
-		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, Stages: s.Stages,
+		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: s.Holds,
+		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
 		Tasks:   s.Tasks,
 		Waiting: Waiting{Prerequisites: fromWaitingChallenges(d.Waiting.Prerequisites)},
 	}

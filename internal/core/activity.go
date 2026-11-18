@@ -94,6 +94,8 @@ func formatEntityID(entity string, id int64) string {
 		return formatRunID(id)
 	case "task":
 		return formatTaskID(id)
+	case "followup":
+		return formatFollowupID(id)
 	default:
 		return fmt.Sprintf("%d", id)
 	}
@@ -131,9 +133,9 @@ func (s *Store) ListActivities(ctx context.Context, challengeID *string) ([]Acti
 			// 差し戻し）も含める。operation は challenge に従属するエンティティ
 			// であり、「その課題の作業ログ」に含めないと op add・単独の承認・
 			// 差し戻しが log <C-ID> から見えなくなる。
-			// タスク（task。計画の承認で作る）も課題に従属するので、不可逆操作と同じく含める。
-			query += ` WHERE (entity = 'challenge' AND entity_id = ?) OR (entity = 'operation' AND entity_id IN (SELECT id FROM operation WHERE challenge_id = ?)) OR (entity = 'task' AND entity_id IN (SELECT id FROM task WHERE challenge_id = ?))`
-			args = append(args, *cid, *cid, *cid)
+			// タスク（task。計画の承認で作る）・フォローアップ（followup）も課題に従属するので、不可逆操作と同じく含める。
+			query += ` WHERE (entity = 'challenge' AND entity_id = ?) OR (entity = 'operation' AND entity_id IN (SELECT id FROM operation WHERE challenge_id = ?)) OR (entity = 'task' AND entity_id IN (SELECT id FROM task WHERE challenge_id = ?)) OR (entity = 'followup' AND entity_id IN (SELECT id FROM followup WHERE challenge_id = ?))`
+			args = append(args, *cid, *cid, *cid, *cid)
 		}
 		query += ` ORDER BY id ASC`
 

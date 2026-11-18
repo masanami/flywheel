@@ -93,6 +93,13 @@ func sameJSON(t *testing.T, got, want string) {
 	}
 }
 
+// statusRequestIngestable は問い合わせに ingestable=true を付けた状況の API を呼ぶ（本文は同じストアでの
+// `flywheel status --json` と同じ。付けないと ingestable は null）。
+func statusRequestIngestable(t *testing.T, port int, name string) (int, string) {
+	t.Helper()
+	return getPath(t, port, "/api/v1/workspaces/"+name+"/status?ingestable=true", "127.0.0.1:"+strconv.Itoa(port), "")
+}
+
 func statusRequest(t *testing.T, port int, name string) (int, string) {
 	t.Helper()
 	return getPath(t, port, "/api/v1/workspaces/"+name+"/status", "127.0.0.1:"+strconv.Itoa(port), "")
@@ -227,7 +234,7 @@ func TestStatusAPI_EqualsCLIStatusJSON(t *testing.T) {
 	withGHOnPATH(t, dir)
 	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
 
-	code, body := statusRequest(t, port, "w")
+	code, body := statusRequestIngestable(t, port, "w")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", code, body)
 	}
@@ -235,6 +242,15 @@ func TestStatusAPI_EqualsCLIStatusJSON(t *testing.T) {
 		t.Errorf("waiting_external.challenges = %d, want 1 (the fixture must exercise gh): %s", n, body)
 	}
 	sameJSON(t, body, cliStatusJSON(t, ws))
+	// 状況の API の応答の根に、サイクルを回すと進むものの数え（cycle_work）がある（問い合わせに ingestable=true が無くても。
+	// core の見直し S2b・masanami/flywheel#777 の AC-286）。
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &root); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := root["cycle_work"]; !ok {
+		t.Errorf("status API has no cycle_work key: %s", body)
+	}
 }
 
 // budgetWorkspace は、着手中で承認済みの計画（サイズ M・額は agent.json の既定から引く）を持つ課題
@@ -286,7 +302,7 @@ func TestStatusAPI_UnreadableAgentJSONEqualsCLI(t *testing.T) {
 	ws := budgetWorkspace(t)
 	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
 
-	code, body := statusRequest(t, port, "w")
+	code, body := statusRequestIngestable(t, port, "w")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", code, body)
 	}
@@ -376,7 +392,7 @@ func TestStatusAPI_WithoutGHIs200AndEqualsCLI(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // gh も何も無い
 	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
 
-	code, body := statusRequest(t, port, "w")
+	code, body := statusRequestIngestable(t, port, "w")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", code, body)
 	}
@@ -674,4 +690,63 @@ func TestCodeForCoreErr(t *testing.T) {
 			t.Errorf("CodeForCoreErr(%v) = %q, want %q", err, got, want)
 		}
 	}
+}
+
+const ingestableTestSources = `{"version":1,"sources":[{"id":"s","type":"github-issue","repos":["o/r"],"self_assignees":["me"]}]}`
+
+// AC-283・AC-284・AC-285（#779）: 問い合わせに ingestable=true が無いとき、ingestable は null（AC-283）で、上流の Issue の一覧を
+// 読まず（AC-284）、followups のキーはある（AC-285）。
+func TestStatusAPI_AC283_AC284_AC285_IngestableIsNullAndUpstreamNotReadWithoutQuery(t *testing.T) {
+	ws := verifyingWorkspace(t)
+	if err := os.WriteFile(filepath.Join(ws, ".flywheel", "sources.json"), []byte(ingestableTestSources), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes := ghRoutesPending()
+	routes["repos/o/r/issues?state=open&per_page=100&page=1"] = `[]`
+	dir, _ := writeFakeGH(t, routes)
+	withGHOnPATH(t, dir)
+	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
+
+	code, body := getPath(t, port, "/api/v1/workspaces/w/status", "127.0.0.1:"+strconv.Itoa(port), "")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", code, body)
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &root); err != nil {
+		t.Fatal(err)
+	}
+	if string(root["ingestable"]) != "null" {
+		t.Errorf("ingestable = %s, want null", root["ingestable"])
+	}
+	for _, k := range []string{"followups", "cycle_work"} {
+		if _, ok := root[k]; !ok {
+			t.Errorf("status API has no %s key: %s", k, body)
+		}
+	}
+	log, _ := os.ReadFile(filepath.Join(dir, "calls.log"))
+	if strings.Contains(string(log), "issues?state=open") {
+		t.Errorf("upstream issue list was read without ingestable=true: %s", log)
+	}
+}
+
+// AC-287（#779）: ingestable=true を付けると上流の Issue の一覧を読み、本文は同じストアでの `flywheel status --json` と同じ。
+func TestStatusAPI_AC287_IngestableTrueReadsUpstreamAndEqualsCLI(t *testing.T) {
+	ws := verifyingWorkspace(t)
+	if err := os.WriteFile(filepath.Join(ws, ".flywheel", "sources.json"), []byte(ingestableTestSources), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes := ghRoutesPending()
+	routes["repos/o/r/issues?state=open&per_page=100&page=1"] = `[{"number":7,"title":"取り込める","body":"","user":{"login":"me"},"assignees":[],"labels":[],"state":"open","html_url":"https://github.com/o/r/issues/7","repository_url":"https://api.github.com/repos/o/r","comments":0,"updated_at":"2026-01-01T00:00:00Z"}]`
+	dir, _ := writeFakeGH(t, routes)
+	withGHOnPATH(t, dir)
+	_, port := startFleetServer(t, core.FleetWorkspace{Name: "w", Path: ws})
+
+	code, body := statusRequestIngestable(t, port, "w")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", code, body)
+	}
+	if !strings.Contains(body, `"external_key":"o/r#7"`) {
+		t.Errorf("ingestable lacks o/r#7: %s", body)
+	}
+	sameJSON(t, body, cliStatusJSON(t, ws))
 }

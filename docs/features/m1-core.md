@@ -267,7 +267,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 ##### `show`
 
-`{"challenge": {…}, "plans": [...], "approvals": [...], "holds": [...], "direct_completions": [...], "operations": [...], "source_binding": {…}}`。`challenge` は上表と同じ形。`source_binding` は下表と同じ形（一覧ではなく単一のオブジェクト。対応の無い課題は `null`。#56 で追加）。
+`{"challenge": {…}, "plans": [...], "approvals": [...], "holds": [...], "direct_completions": [...], "followups": [...], "operations": [...], "source_binding": {…}, "source_children": [...]}`。`challenge` は上表と同じ形。`source_binding` は下表と同じ形（一覧ではなく単一のオブジェクト。対応の無い課題は `null`。#56 で追加）。
 
 | 一覧 | 要素の形 |
 |---|---|
@@ -275,10 +275,24 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 | `approvals` | `{"id", "kind", "decision", "operation_id", "target_version", "actor", "channel", "verification", "reason", "decided_at", "merge_in_verified_head", "superseded_at", "superseded_reason", "superseded_by"}`（`operation_id`・`reason` は `null` 可。`id` は承認の行の ID `"AP-<n>"`。`merge_in_verified_head` は release を「検証の head から既定ブランチを取り込んだだけ」と判定して承認したときの検証の head、`superseded_at`・`superseded_reason`・`superseded_by` は完了の承認が本番反映のやり直しで置き換えられた日時・理由・置き換えた次の完了の承認の ID。有効な承認と、これらに当てはまらない承認は `null`。M4.5 §本番反映の立て直し・#485） |
 | `holds` | `{"question", "from_status", "from_status_label", "kind", "raised_at", "answer", "answered_at", "answered_by", "closed_at", "replan"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`。`closed_at` は保留を回答なしで閉じた時刻〔課題の取り下げ〔M4.5〕と、親が直接行った作業の完了の記録〔T17。#452〕〕で、閉じていなければ `null`。`kind` は保留の種類 `human`\|`parent_direct`。`replan` は回答に「範囲が変わる」印〔`answer --replan`。§範囲が変わる回答〕が付いたかの真偽で、未回答と印の無い回答は `false`） |
 | `direct_completions` | `{"artifacts", "note", "created_at"}`（親が直接行った完了の記録。古い順で、無ければ `[]`。`artifacts` は成果物の参照の文字列の配列〔1 件以上〕、`note` は短い説明で無ければ `null`。1 件以上あることが「親が直接行った」印。#452） |
+| `followups` | `{"id", "challenge_id", "title", "detail", "source", "status", "note", "reason", "promoted_challenge_id", "created_at", "updated_at"}`（その課題のフォローアップを状態を問わず全部、ID の昇順。無ければ `[]`。`id` は `"F-<n>"`。`challenge_id`・`note`・`reason`・`promoted_challenge_id` は `null` 可。`status` は `open`\|`done`\|`dropped`。S2b） |
 | `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
 | `source_binding` | `{"source_id", "external_key", "url", "fingerprint", "upstream_state", "policy_state", "comments_count", "upstream_updated_at", "read_comments_count", "read_upstream_updated_at", "created_at", "updated_at"}`（対応の無い課題では `source_binding` 自体が `null`。`comments_count`・`upstream_updated_at`・`read_comments_count`・`read_upstream_updated_at` は #72（上流の更新の観測と既読）が追加。`upstream_updated_at`・`read_upstream_updated_at` は未設定なら `null`） |
+| `source_children` | `{"external_key", "title", "url", "upstream_state", "parent_external_key"}`（その課題の取り込み元の子を、記録した順に全部。無ければ `[]`。`upstream_state` は `open`\|`closed`\|`missing`、`parent_external_key` は直の親の識別。タスクとの対応は、`tasks[]` の `source_key`〔対応する子の `external_key` か `null`〕で読む。S2b。決まりの正は [core-redesign.md](core-redesign.md)） |
 
 #9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。#12 で `approvals` への書き込みと `holds` の `answer`・`answered_at`・`answered_by` の記録が入った。#13 で `operations` への書き込み（`op add`）と、完了の承認による `release` の一括承認（D12）が入った）。`source_binding` は #56（M2）が GitHub Issue から取り込んだ課題に対して作る（`create` で作った課題・スキーマ版 1 から上げたストアの既存の課題は `null`）。
+
+##### `followup list`（S2b で追加）
+
+`{"followups": [{…}, ...]}`。要素は `show` の `followups` の要素と同じ形。`--status`（`open`\|`done`\|`dropped`\|`all`。既定は `open`）は状態だけで絞り、上げてあるもの（`promoted_challenge_id` があるもの）も未のうちに数える。`--challenge <C-ID>` はその課題のものだけに絞る。
+
+##### `followup done`・`followup drop`（S2b で追加）
+
+`{"followups": [{…}, ...]}`。要素は `show` の `followups` の要素と同じ形で、変えた後の状態（`done`・`dropped`。指定した ID の順）。
+
+##### `followup promote`（S2b で追加）
+
+`{"challenge": {…}, "followup": {…}}`。`challenge` は作った課題（上表と同じ形）、`followup` は上げたフォローアップ（`show` の `followups` の要素と同じ形。`status` は `open` のまま、`promoted_challenge_id` が作った課題の ID）。
 
 ##### `list`
 
@@ -306,13 +320,13 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 | `actor` | string | 実行した OS のログインユーザー名 |
 | `channel` | string | 経路（`cli`） |
 | `verification` | string | 本人確認の方式（本人確認の無い操作は `none`） |
-| `entity` | string | `challenge`\|`operation`\|`cycle`\|`task`（`task` は core の見直し S2a で追加。タスクの作成と状態の変化のエントリで、`action` は `create` と `task_status`。[core-redesign.md](core-redesign.md)）（`operation` は #13 で追加。不可逆操作の登録・単独の承認・差し戻し・D12 の一括承認のエントリ。`cycle` は M5 S1 で追加。`cycle` の `backup` の段の結果のエントリで、`action` は `backup` だけ） |
-| `entity_id` | string | `entity` が `challenge` なら `"C-<n>"`、`operation` なら `"OP-<n>"`、`cycle` なら `"Y-<n>"`、`task` なら `"T-<n>"` |
-| `action` | string | `create`\|`edit`\|`classify`\|`plan`\|`submit`\|`verify_met`\|`verify_not_met`\|`verify_uncertain`\|`hold`\|`complete_direct`\|`approve`\|`approve_hold_release`\|`reject`\|`answer`\|`op_add`\|`op_approve`\|`op_reject`\|`op_close`\|`reopen_for_release`\|`answer_plan`\|`task_status`\|`backup`（`answer_plan`・`task_status` は core の見直し S2a で追加した。`answer_plan` は `entity=challenge` のときだけで、計画の問いへの答えの記録〔T19 を含む。`after` は `version` と、答えた問いの番号と答え〔`answers`〕、分類済へ戻るときは `status`〕。`task_status` は `entity=task` のときだけで、タスクの状態の変化の記録〔`after` は `status`〕。`entity=task` の `create` はタスクの作成の記録）（`backup` は M5 S1 で追加し、`entity=cycle` のときだけ使う。`op_add`・`approve_hold_release` は #13 で追加。`op_approve`・`op_reject` は #39 で追加。`op_add` は `entity=operation`（不可逆操作自身の登録）と `entity=challenge`（`op add` が課題の版を1つ上げたことの記録。#39）の両方で使う。`op_approve`・`op_reject` は `entity=challenge` のときだけ（`<OP-ID>` への approve／reject が課題の版を1つ上げたことの記録。#39。同じ `entity=challenge` の `approve`／`reject`〔課題そのものの承認・差し戻し。`approval_kind` を持つ〕と紛れないための別語彙）。`action` の意味と `after` の形は `entity` との組で決まり、同じ `entity` の中で 1 つの `action` に 2 つの意味を持たせない（#39）。`approve_hold_release` は `entity=challenge` のときだけ〔`approve <C-ID> --hold-release`＝T14〕。`approve`・`reject` は `entity=challenge`・`entity=operation` の両方で使う。`op_close`・`reopen_for_release` は #485 で追加した。`op_close` は `entity=operation`〔不可逆操作を `closed` にした記録。`after` は `state`・`version`・`closed_reason`〕と `entity=challenge`〔承認待ちの release を閉じて課題の版を 1 つ上げた記録〕で使う。`reopen_for_release` は `entity=challenge` のときだけ〔T18。`after` は `status`・`version`・`reason`・`operation_id`・`new_operation_id`〕） |
+| `entity` | string | `challenge`\|`operation`\|`cycle`\|`task`\|`followup`（`followup` は core の見直し S2b で追加。フォローアップの作成・済み・捨てた・課題に上げた記録。`action` は `create`・`followup_done`・`followup_drop`・`followup_promote`）（`task` は core の見直し S2a で追加。タスクの作成と状態の変化のエントリで、`action` は `create` と `task_status`。[core-redesign.md](core-redesign.md)）（`operation` は #13 で追加。不可逆操作の登録・単独の承認・差し戻し・D12 の一括承認のエントリ。`cycle` は M5 S1 で追加。`cycle` の `backup` の段の結果のエントリで、`action` は `backup` だけ） |
+| `entity_id` | string | `entity` が `challenge` なら `"C-<n>"`、`operation` なら `"OP-<n>"`、`cycle` なら `"Y-<n>"`、`task` なら `"T-<n>"`、`followup` なら `"F-<n>"` |
+| `action` | string | `create`\|`edit`\|`classify`\|`plan`\|`submit`\|`verify_met`\|`verify_not_met`\|`verify_uncertain`\|`hold`\|`complete_direct`\|`approve`\|`approve_hold_release`\|`reject`\|`answer`\|`op_add`\|`op_approve`\|`op_reject`\|`op_close`\|`reopen_for_release`\|`answer_plan`\|`task_status`\|`backup`\|`followup_done`\|`followup_drop`\|`followup_promote`（`followup_*` は core の見直し S2b で追加し、`entity=followup` のときだけ使う。`after` は `followup_done` が `status`・`note`、`followup_drop` が `status`・`reason`〔対話で受けた記録は `relay_session`・`relay_quote` も〕、`followup_promote` が上げた先の課題 `promoted_challenge_id`〔対話で受けた記録は `relay_session`・`relay_quote` も〕。`entity=followup` の `create` はフォローアップを書いた記録）（`answer_plan`・`task_status` は core の見直し S2a で追加した。`answer_plan` は `entity=challenge` のときだけで、計画の問いへの答えの記録〔T19 を含む。`after` は `version` と、答えた問いの番号と答え〔`answers`〕、分類済へ戻るときは `status`〕。`task_status` は `entity=task` のときだけで、タスクの状態の変化の記録〔`after` は `status`〕。`entity=task` の `create` はタスクの作成の記録）（`backup` は M5 S1 で追加し、`entity=cycle` のときだけ使う。`op_add`・`approve_hold_release` は #13 で追加。`op_approve`・`op_reject` は #39 で追加。`op_add` は `entity=operation`（不可逆操作自身の登録）と `entity=challenge`（`op add` が課題の版を1つ上げたことの記録。#39）の両方で使う。`op_approve`・`op_reject` は `entity=challenge` のときだけ（`<OP-ID>` への approve／reject が課題の版を1つ上げたことの記録。#39。同じ `entity=challenge` の `approve`／`reject`〔課題そのものの承認・差し戻し。`approval_kind` を持つ〕と紛れないための別語彙）。`action` の意味と `after` の形は `entity` との組で決まり、同じ `entity` の中で 1 つの `action` に 2 つの意味を持たせない（#39）。`approve_hold_release` は `entity=challenge` のときだけ〔`approve <C-ID> --hold-release`＝T14〕。`approve`・`reject` は `entity=challenge`・`entity=operation` の両方で使う。`op_close`・`reopen_for_release` は #485 で追加した。`op_close` は `entity=operation`〔不可逆操作を `closed` にした記録。`after` は `state`・`version`・`closed_reason`〕と `entity=challenge`〔承認待ちの release を閉じて課題の版を 1 つ上げた記録〕で使う。`reopen_for_release` は `entity=challenge` のときだけ〔T18。`after` は `status`・`version`・`reason`・`operation_id`・`new_operation_id`〕） |
 | `before` | object \| null | 変わった項目だけの JSON オブジェクト。`create`、`entity=operation` の `op_add`、`entity=challenge` の `op_add`・`op_approve`・`op_reject`（#39）、`entity=cycle` は常に `null`。**`before` には `version` を載せない**（H7 の「変わった項目」に版も含まれるが、変更前の版は `after` の `version` − 1 として求まるため。#39）。課題から一意に引ける単一の値（課題の列、現在の計画の版、現在の保留への回答）が未設定から値を得た場合（`classify` の `priority`、`edit` の `urgency`、`plan` の初回〔T3〕の `plan_version`、`answer` の `answer`）は、その項目のキーを `null` で載せる（#39。`priority`・`urgency` は元からこの形、`plan_version`・`answer` は #39 でそろえた）。一方、履歴として新しく積まれる行の内容（保留の `question`、承認の `approval_kind`・`decision`・`target_version`・`reason`、不可逆操作の登録内容）はこの規則の対象外（キー自体を持たない） |
-| `after` | object \| null | 変わった項目だけの JSON オブジェクト。`create`・`op_add`（`entity=operation`）・`entity=cycle`・`entity=task` 以外は常に `version` を含む（**例外: `entity=task` の `after` は状態〔`status`〕を含み、版〔`version`〕を含まない。タスクは版を持たない**。core の見直し S2a）（`entity=cycle` の `after` は `version` を持たず、`outcome`・`commit`・`detail` を持つ）（`entity=operation` の `version` は不可逆操作自身の版）。状態が変わる遷移では `status`（T4 のように状態が変わらない遷移では含まない）、`classify` は `priority`、`plan` は `plan_version`、保留に入る操作（`verify_uncertain`・`hold`）は `question` を含む、`entity=challenge` の `approve`・`approve_hold_release`・`reject` は `approval_kind`・`decision`・`target_version`（`reject` はさらに `reason`）を含む、`answer` は `answer` を含む、`answer_plan` は `answers`（と、分類済へ戻るときは `status`）を含む、`entity=operation` の `op_add` は `operation_id`・`kind`・`summary`・`ref`・`state` を含む、`entity=operation` の `approve`・`reject` は `state`（`reject` はさらに `reason`）を含む、`entity=challenge` の `op_add`・`op_approve`・`op_reject`（#39）は `version` と、原因になった不可逆操作への参照 `operation_id` を含む |
+| `after` | object \| null | 変わった項目だけの JSON オブジェクト。`create`・`op_add`（`entity=operation`）・`entity=cycle`・`entity=task`・`entity=followup` 以外は常に `version` を含む（`entity=followup` の `after` は版を持たない）（**例外: `entity=task` の `after` は状態〔`status`〕を含み、版〔`version`〕を含まない。タスクは版を持たない**。core の見直し S2a）（`entity=cycle` の `after` は `version` を持たず、`outcome`・`commit`・`detail` を持つ）（`entity=operation` の `version` は不可逆操作自身の版）。状態が変わる遷移では `status`（T4 のように状態が変わらない遷移では含まない）、`classify` は `priority`、`plan` は `plan_version`、保留に入る操作（`verify_uncertain`・`hold`）は `question` を含む、`entity=challenge` の `approve`・`approve_hold_release`・`reject` は `approval_kind`・`decision`・`target_version`（`reject` はさらに `reason`）を含む、`answer` は `answer` を含む、`answer_plan` は `answers`（と、分類済へ戻るときは `status`）を含む、`entity=operation` の `op_add` は `operation_id`・`kind`・`summary`・`ref`・`state` を含む、`entity=operation` の `approve`・`reject` は `state`（`reject` はさらに `reason`）を含む、`entity=challenge` の `op_add`・`op_approve`・`op_reject`（#39）は `version` と、原因になった不可逆操作への参照 `operation_id` を含む |
 
-`log [<C-ID>]` は、`<C-ID>` を指定した場合、その課題自身のエントリ（`entity=challenge`）に加え、その課題が持つ不可逆操作のエントリ（`entity=operation`。`operation.challenge_id` で従属する行）も古い順に含める（#13）。その課題のタスクのエントリ（`entity=task`。`task.challenge_id` で従属する行。core の見直し S2a）も、不可逆操作のエントリと同じ扱いで含める。`<C-ID>` を省略した場合は全エンティティを対象にする。
+`log [<C-ID>]` は、`<C-ID>` を指定した場合、その課題自身のエントリ（`entity=challenge`）に加え、その課題が持つ不可逆操作のエントリ（`entity=operation`。`operation.challenge_id` で従属する行）も古い順に含める（#13）。その課題のタスクのエントリ（`entity=task`。`task.challenge_id` で従属する行。core の見直し S2a）も、不可逆操作のエントリと同じ扱いで含める。その課題のフォローアップのエントリ（`entity=followup`。`followup.challenge_id` で従属する行。core の見直し S2b）も同じ扱いで含める。`<C-ID>` を省略した場合は全エンティティを対象にする。
 
 `op add`（`entity=operation` の `op_add`）と `<OP-ID>` への単独の approve／reject（`entity=operation` の `approve`／`reject`）は、同じ操作で対象の課題の版も1つ上げる（親要件チケット #4 §アーキテクチャ決定）。この版の変化を作業ログに残すため、`entity=operation` のエントリと同じトランザクションで `entity=challenge` のエントリ（`action` は順に `op_add`・`op_approve`・`op_reject`）も記録する（#39。これが無いと `log <C-ID>` で課題のエントリの `version` が飛んで見え、仕様冒頭の「すべての変更を作業ログに残す」と食い違う）。一方、D12（完了の承認〔T13〕による release の一括承認）で `entity=operation` に記録される `approve` は、その完了の承認自身の `entity=challenge` の `approve` エントリが既に版の変化を記録しているため、release ごとの `entity=challenge` エントリは追加しない（二重記録の回避）。
 
@@ -332,7 +346,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 ##### `status`（#14 で追加。`discrepancies` は #58 で追加）
 
-`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}, "waiting_external": {"challenges": [...]}, "parent_agent": {"challenges": [...]}, "binary_commit": "..."}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約。`waiting_external` は M3 が、`parent_agent` は #452 が、区分ではない `binary_commit`〔動いているバイナリのコミット〕は #593 が足した）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
+`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}, "waiting_external": {"challenges": [...]}, "parent_agent": {"challenges": [...]}, "binary_commit": "...", "cycle_work": {"total": 0, "stages": {...}}, "followups": {"open": 0}, "ingestable": {"items": [...], "error": null}}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約。`waiting_external` は M3 が、`parent_agent` は #452 が、区分ではない `binary_commit`〔動いているバイナリのコミット〕は #593 が足した）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
 
 | フィールド | 型 | 内容 |
 |---|---|---|
@@ -345,9 +359,15 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 | 一覧 | 要素の形 |
 |---|---|
+| `ingestable_item`（`ingestable.items` の要素＝取り込めるものの根） | `{"external_key", "number", "repo", "title", "url", "parent_external_key", "parent_challenge_id", "children"}`（`parent_external_key` は親が無ければ `null`、`parent_challenge_id` は親がすでに課題になっているときの課題の ID で、無ければ `null`） |
+| `ingestable_child`（`ingestable.items[].children` の要素） | `{"external_key", "number", "title", "url", "parent_external_key"}` |
 | `discrepancy`（`needs_human.discrepancies` の要素。1 列目は照合テストが読む要素の名前） | `{"challenge_id", "kinds"}`（`kinds` は `upstream_closed`・`upstream_missing`・`out_of_policy`・`upstream_commented`・`upstream_updated` の空でない部分集合。この列挙の順。`upstream_commented`・`upstream_updated` は #72〔上流の更新の観測と既読〕が追加） |
 
 完了（`done`）の課題と差し戻し済み（`state=rejected`）の不可逆操作はどの一覧にも含めない。各一覧は `id` 昇順（`discrepancies` は `challenge_id` の昇順）。
+
+最上位の `followups`（object）は未のフォローアップの件数 `open`（number）。上げてあって、上げた先の課題が取り下げでないものは数えない（上げた先が取り下げなら数える）。
+
+最上位の `ingestable`（object）は取り込めるもの（S2b）で、`items`（array。要素は上表の `ingestable_item`）と `error`（string \| null）を持つ。`flywheel status` は常に読む。API の `GET …/status` は問い合わせに `ingestable=true` が付いたときだけ上流を読んで同じ形を返し、付いていないときは `null` で、上流の Issue の一覧を読まない（`followups`・`cycle_work` は常に出る）。判定（開いている・取り込み元の方針に合う・課題になっていない・どの課題の子でもない）は `flywheel ingest <指定>` と同じ 1 つの関数で行う。親子は開いている Issue の一覧の親の識別だけで組み立て、直の親が取り込めるものに無い Issue（親の無いものを含む）を根に並べ、親が取り込めるものにある Issue はいちばん上の親の `children` に深さを問わず平らに入れる（取り込みが子として記録する範囲と同じ。16 段で打ち切り、親の記録の輪の中の Issue と 16 段たどっても根に着かない Issue は、どれも根に並べて互いを子孫にしない）。上流を読めなかった（一覧の取得の失敗・`self_assignees` を解決できない取り込み元・`gh` が無い）ときは `error` に理由を入れ、終了コードは 0 のまま（解決できない取り込み元の Issue は `items` に入れない）。`sources.json` が無いワークスペースでは `items` は `[]`・`error` は `null`。
 
 ##### `version`（#593 で追加）
 
@@ -364,6 +384,8 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 `status --json` の最上位にも `binary_commit`（string。動いているバイナリのコミットで、テキスト表示の先頭の行と同じ値＝未コミットの変更つきは `+dirty` 付き。ビルド情報が無ければ `"unknown"`）を置く（#593。API の `GET …/status` も同じ形）。
 
+最上位の `cycle_work`（object）は、サイクルを回すと進むものの数え（API の `GET …/status` も同じで、取り込めるものの有無に関わらず出る）。`total`（number。`stages` の値の合計）と `stages`（`release`・`classify`・`plan`・`run`・`verify`・`learn`・`improve`・`cleanup` の件数。number）を持つ。LLM を呼ばず、上流を読まず、状態を変えない。各段が対象を選ぶ関数と同じ関数で数え、迷うときは多めに数える。`run` は、委譲の対象のうち起動しないと決まるもの（`plan_unavailable`・`no_tasks`・`integration_unavailable`・`upstream_closed`・`upstream_missing`・`out_of_policy`・`dependency`・`run_budget`）を除いた件数と、終わっていない契約の実行の本数の合計（連続の失敗の上限 `failure_limit`・やり直しの上限 `rework_limit` に達した課題は数える。委譲の段が、その課題を保留にするため）。`improve` は判断点を呼ぶ条件を満たせば 1、満たさなければ 0。`cleanup` はサイクルの始めの片付けが閉じる対象の run の数。connectors.json が無ければ `release`・`plan`・`run`・`verify` は 0。
+
 ##### `ingest`（#54 で追加。取得・作成・更新の結線は #59）
 
 `{"sources": [...]}`。docs/features/m2-github-issue-ingest.md §IF / API「`ingest` の JSON 出力」の形。
@@ -375,9 +397,9 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 | `items`（`repo` の一覧。要素の名前は `item`） | `{"external_key", "challenge_id", "result", "upstream_state", "policy_state", "comments_count", "upstream_updated_at", "unread", "error"}`（`comments_count`・`upstream_updated_at`・`unread` は #72〔上流の更新の観測と既読〕が追加） |
 
 - `result` は `created`\|`updated`\|`unchanged`\|`skipped_done`\|`fingerprint_unknown_version`\|`failed` の閉集合（`core.IngestOutcomeValues()` と同じ順）。
-- `items` は課題を作った・対応のある Issue だけを並べる。ポリシーに合わない新しい Issue は `excluded` の件数だけに数える。
+- `items` は課題を作った・対応のある Issue を並べる（ほかに入るのは、追従の書き込みに失敗した取り込み元の子の `failed` の要素だけ。下の `error`（`item` の要素）の項。S2b）。ポリシーに合わない新しい Issue は `excluded` の件数だけに数える。
 - `error`（`repo` の要素）は一覧の取得の失敗の要約。成功なら `null`。一覧の取得に失敗したリポジトリの `items` は `[]`・`excluded` は `0`。
-- `error`（`item` の要素）は、その要素の反映が失敗した（`result` が `failed`）ことの要約。一覧の取得後・1件の取得（close の確かめ）・書き込みの反映のいずれの失敗も含みうる。成功なら `null`。
+- `error`（`item` の要素）は、その要素の反映が失敗した（`result` が `failed`）ことの要約。一覧の取得後・1件の取得（close の確かめ）・書き込みの反映のいずれの失敗も含みうる。成功なら `null`。 記録した取り込み元の子（S2b。`show` の `source_children`）の追従で、ストアへの書き込みに失敗したときも、その子の `external_key` を持つ `failed` の要素が `items` に入る（課題の要素ではないので `challenge_id`・`upstream_state`・`policy_state` は `null`。`error` は「取り込み元の子の追従に失敗: 」で始まるので、課題の対応の失敗と見分けられる）。うまく追従できた子は `items` に入れない。
 - `challenge_id`・`upstream_state`・`policy_state` は、(1) 新規作成の反映が失敗した場合、(2) 対応（`source_binding`）のある Issue の冪等な更新の反映自体が失敗した場合、(3) close の確かめ（1 件の取得）自体は成功したが、その後の反映（書き込みトランザクションでの読み直し・更新）が失敗した場合、のいずれでも `null` になる（既知の対応の情報を積まずに `failed` を返す実装になっている）。`null` にならないのは、close の確かめの **1 件の取得**（`GetIssue`）自体が失敗した場合だけで、この場合は読み直した対応の値をそのまま出力する。
 - `comments_count`・`upstream_updated_at`・`unread`（docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読）は反映後の観測値・未読の更新の種類。上の3つ（`challenge_id`・`upstream_state`・`policy_state`）が `null` になる場合（対応の情報を積まずに `failed` を返す実装）は、`comments_count`・`upstream_updated_at` も同じく「不明」を表すため `null` になる（#5 の規約「未設定の任意値は `null`」。実装チケットの仮定）。`unread` はこの場合も「空の一覧は `[]`」の規則どおり `[]` のまま（他の一覧フィールドと同じ扱い）。`upstream_updated_at` は、上記以外にも `0003` の前に作られ、まだ観測していない対応では `null`。`unread` は `upstream_commented`\|`upstream_updated` の部分集合（`status` の `kinds` と同じ判定。無ければ `[]`）。
 
@@ -525,10 +547,14 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel reject <C-ID> --reason <r>` | T6・T15 | 要 |
 | `flywheel op add <C-ID> --kind <release\|delete\|external_send\|other> --summary <s> [--ref <r>]` | 不可逆操作の登録 | — |
 | `flywheel approve <OP-ID>` / `flywheel reject <OP-ID> --reason <r>` | 不可逆操作の単独の承認・差し戻し | 要 |
-| `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す（`--json` では `binary_commit`） | — |
+| `flywheel followup list [--status <open\|done\|dropped\|all>] [--challenge <C-ID>]` | フォローアップの一覧（読み取りだけ）。既定は未。状態の閉集合外は `usage_error`、存在しない課題は `not_found`。文の出力は課題ごとにまとめ、課題に属さないものを最後に出す | — |
+| `flywheel followup done <F-ID>... --note <確かめた結果>` | フォローアップを済みにする。本人確認は要らない（端末が無くても `--relayed` が無くても成功する）。`--note` が無ければ `usage_error`、空なら `validation_failed`。同じ ID の重複は `usage_error`。1 つでも存在しなければ `not_found`、未でなければ `validation_failed` で、どれも変えない | — |
+| `flywheel followup drop <F-ID>... --reason <理由> [--relayed --session <s> --quote <q>]` | フォローアップを捨てる。本人確認は 1 回で、要約に全部の ID と題名を出す。打ち込む対象は ID を番号の小さい順にカンマでつないだもの（`F-<a>,F-<b>`）。違えば `confirmation_mismatch`。端末も `--relayed` も無ければ `tty_required`。検査は `done` と同じ | 要 |
+| `flywheel followup promote <F-ID> [--relayed --session <s> --quote <q>]` | 未のフォローアップを新しい課題（未分類）に上げる（1 回に 1 件。2 つ並べたら `usage_error`）。`--json` の根は `followup`（上げたもの）と `challenge`（作った課題）。上げてあるものは、上げた先の課題が取り下げのときだけ上げ直せる（それ以外は `validation_failed`） | 要 |
+| `flywheel status` | 見出し「いま進められること」の下に、あなたの承認を待っているもの・あなたの回答を待っているもの・そのほかの、あなたの操作を待っているもの（あるときだけ）・取り込めるもの・サイクルを回すと進むもの・オーケストレーターの番・外を待っているもの・承認済みの不可逆操作・未のフォローアップの件数を出す。あなたを待っているもの・取り込めるもの・サイクルを回すと進むものが無いときは、その旨を出す。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す（`--json` では `binary_commit`） | — |
 | `flywheel version` | 動いているバイナリのビルドのコミット（`vcs.revision`・`vcs.time`・`vcs.modified`）と、そのバイナリが扱うストアのスキーマの版。読み取りだけで、ストアを開かず（`store_too_new` でも動く）、ネットワークにも Git にも触れない。未コミットの変更つきのビルドは commit の表示に `+dirty` を付ける | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |
-| `flywheel ingest [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・冪等な作成と更新・上流の close の検出（#59） | — |
+| `flywheel ingest [<指定>...] [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・上流の close の検出（#59）。引数なしは取り込み済みの追従だけ（新しい課題は作らない）、`<指定>...`（`<owner>/<repo>#<番号>` か番号）は選んだ Issue だけを課題にする（S2b） | — |
 | `flywheel mark-read <C-ID>` | 上流を読んだ記録を付ける（読んだ時点の値を現在の観測値で上書きする。上流は取り直さない。docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読） | — |
 
 共通フラグ: `--workspace <dir>`・`--json`。

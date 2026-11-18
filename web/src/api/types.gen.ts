@@ -5,6 +5,9 @@ export interface StatusResponse {
   actionable: StatusActionable;
   approved: StatusApproved;
   binary_commit: string;
+  cycle_work: CycleWork;
+  followups: StatusFollowups;
+  ingestable: Ingestable | null;
   needs_human: StatusNeedsHuman;
   parent_agent: StatusParentAgent;
   waiting_external: StatusWaitingExternal;
@@ -62,6 +65,50 @@ export interface Operation {
   supersedes: string | null;
   version: number;
   waiting_since: string | null;
+}
+
+export interface CycleWork {
+  stages: CycleWorkStages;
+  total: number;
+}
+
+export interface CycleWorkStages {
+  classify: number;
+  cleanup: number;
+  improve: number;
+  learn: number;
+  plan: number;
+  release: number;
+  run: number;
+  verify: number;
+}
+
+export interface StatusFollowups {
+  open: number;
+}
+
+export interface Ingestable {
+  error: string | null;
+  items: IngestableItem[];
+}
+
+export interface IngestableItem {
+  children: IngestableChild[];
+  external_key: string;
+  number: number;
+  parent_challenge_id: string | null;
+  parent_external_key: string | null;
+  repo: string;
+  title: string;
+  url: string;
+}
+
+export interface IngestableChild {
+  external_key: string;
+  number: number;
+  parent_external_key: string;
+  title: string;
+  url: string;
 }
 
 export interface StatusNeedsHuman {
@@ -140,6 +187,7 @@ export interface ShowResponse {
   approvals: Approval[];
   challenge: ShowChallenge;
   direct_completions: DirectCompletion[];
+  followups: Followup[];
   holds: Hold[];
   operations: Operation[];
   pairs: StagePair[];
@@ -147,6 +195,7 @@ export interface ShowResponse {
   release_head_changes?: ReleaseHeadChange[];
   runs: Run[];
   source_binding: SourceBinding | null;
+  source_children: SourceChild[];
   stages: Stages;
   tasks: Task[];
 }
@@ -210,6 +259,20 @@ export interface DirectCompletion {
   artifacts: string[];
   created_at: string;
   note: string | null;
+}
+
+export interface Followup {
+  challenge_id: string | null;
+  created_at: string;
+  detail: string;
+  id: string;
+  note: string | null;
+  promoted_challenge_id: string | null;
+  reason: string | null;
+  source: string;
+  status: string;
+  title: string;
+  updated_at: string;
 }
 
 export interface Hold {
@@ -322,6 +385,14 @@ export interface SourceBinding {
   url: string;
 }
 
+export interface SourceChild {
+  external_key: string;
+  parent_external_key: string;
+  title: string;
+  upstream_state: string;
+  url: string;
+}
+
 export interface Stages {
   actual: StageActual[] | null;
   expected: StageExpected[] | null;
@@ -351,6 +422,7 @@ export interface Task {
   operation: string;
   plan_version: number;
   repo: string;
+  source_key: string | null;
   status: string;
   title: string;
 }
@@ -427,12 +499,14 @@ export interface ShowCardResponse {
   card: Card;
   challenge: ShowChallenge;
   direct_completions: DirectCompletion[];
+  followups: Followup[];
   holds: Hold[];
   operations: Operation[];
   pairs: StagePair[];
   plans: PlanDetail[];
   runs: Run[];
   source_binding: SourceBinding | null;
+  source_children: SourceChild[];
   stages: Stages;
   tasks: Task[];
   waiting: Waiting;
@@ -522,6 +596,7 @@ export interface ApprovalPlan {
 export interface ApprovalPlanTask {
   depends_on: string[];
   key: string;
+  source: string | null;
   title: string;
 }
 
@@ -591,6 +666,10 @@ export interface GraphNode {
   stale: boolean;
   state: string;
   title: string;
+}
+
+export interface FollowupListResponse {
+  followups: Followup[];
 }
 
 export const CARD_ACTION_CODES = [

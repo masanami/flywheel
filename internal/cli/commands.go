@@ -378,6 +378,40 @@ func defaultCommands() []Command {
 			Run:  runVersion,
 		},
 		{
+			// docs/features/core-redesign.md S2b。読み取りだけ（--status の既定は open）。
+			Path:          []string{"followup", "list"},
+			RequiresStore: true,
+			Flags:         []flagDef{{Name: "status", HasValue: true}, {Name: "challenge", HasValue: true}},
+			Run:           runFollowupList,
+		},
+		{
+			// 済みにする。本人確認は求めない（--note が必須。無ければ必須フラグの欠落）。
+			Path:          []string{"followup", "done"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: UnlimitedPositional,
+			Flags:         []flagDef{{Name: "note", HasValue: true, Required: true}},
+			Run:           runFollowupDone,
+		},
+		{
+			// 捨てる。本人確認つき（端末か --relayed）。
+			Path:          []string{"followup", "drop"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: UnlimitedPositional,
+			Flags:         append([]flagDef{{Name: "reason", HasValue: true, Required: true}}, relayedFlags()...),
+			Run:           runFollowupDrop,
+		},
+		{
+			// 課題に上げる（1 回に 1 件）。本人確認つき（端末か --relayed）。
+			Path:          []string{"followup", "promote"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: 1,
+			Flags:         relayedFlags(),
+			Run:           runFollowupPromote,
+		},
+		{
 			Path:          []string{"status"},
 			RequiresStore: true,
 			Run:           runStatus,
@@ -393,8 +427,12 @@ func defaultCommands() []Command {
 			// Issue #54: 宣言の読み込み・--source の絞り込み・config_*/store_too_new
 			// の写像だけを行う（取り込みの本体は #59）。--dry-run は S2 のため
 			// ここでは足さない。
+			// 引数が無ければ取り込み済みの追従だけ（新しい課題は作らない）。
+			// `<指定>...`（`<owner>/<repo>#<番号>` か番号）は選んだ Issue だけを課題にする。
 			Path:          []string{"ingest"},
 			RequiresStore: true,
+			MinPositional: 0,
+			MaxPositional: UnlimitedPositional,
 			Flags:         []flagDef{{Name: "source", HasValue: true}},
 			Run:           runIngest,
 		},

@@ -80,6 +80,16 @@ func (cc cachedChecks) GetPullRequestChecks(ctx context.Context, repo string, nu
 	return checks, err
 }
 
+// newGitHubIssueSource は要求ごとに gh を探して、上流の Issue を読む口を作る。組み立てに失敗したら
+// そのエラーを返す（呼び出し元が ingestable の error に入れる）。
+func newGitHubIssueSource() (core.UpstreamIssueSource, error) {
+	client, err := github.New(github.Options{})
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
 // unavailableCheckSource は gh を組み立てられないときの、取得を常に失敗させる口
 // （CLI の newCheckSource と同じ）。
 type unavailableCheckSource struct{ err error }
@@ -108,14 +118,16 @@ func (c *checkCache) checkSource() core.UpstreamCheckSource {
 }
 
 // statusHandler は GET /api/v1/workspaces/{name}/status。本文は
-// `flywheel status --json` と同じ形（internal/view の型）。
+// `flywheel status --json` と同じ形（internal/view の型）。ingestable は問い合わせに `ingestable=true` が
+// 付いたときだけ上流を読んで返し、無いときは null（上流の Issue の一覧を読まない）。
 func statusHandler(fleet *Fleet, checks *checkCache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusNotFound, CodeNotFound, "not found")
 			return
 		}
-		ov, err := statusOverview(r.Context(), fleet, r.PathValue("name"), checks)
+		withIngestable := r.URL.Query().Get("ingestable") == "true"
+		ov, err := statusOverview(r.Context(), fleet, r.PathValue("name"), checks, withIngestable)
 		if err != nil {
 			var le *LookupError
 			if errors.As(err, &le) {
@@ -132,26 +144,55 @@ func statusHandler(fleet *Fleet, checks *checkCache) http.HandlerFunc {
 // statusOverview は status の Overview を返す。ストアの読み取りの借りを持つのは、ストアを読む間
 // （基本の Overview と waiting_external の候補の導出）だけで、gh によるチェックの取得は借りを
 // 返した後に行う（遅い gh が、ストアの状態更新の Lock を待たせないように）。
-func statusOverview(ctx context.Context, fleet *Fleet, name string, checks *checkCache) (*core.Overview, error) {
+func statusOverview(ctx context.Context, fleet *Fleet, name string, checks *checkCache, withIngestable bool) (*core.Overview, error) {
 	st, release, le := fleet.Acquire(ctx, name)
 	if le != nil {
 		return nil, le
 	}
+	var ingState *core.IngestableState
+	var ingSources []core.SourceEntry
 	ov, cands, err := func() (*core.Overview, []core.WaitingExternalCandidate, error) {
 		defer release()
 		// status は CLI と同じ宣言の検査をし、不備なら config_invalid で終わる。
-		if _, err := core.CheckDeclarations(st.Workspace()); err != nil {
+		agent, err := core.CheckDeclarations(st.Workspace())
+		if err != nil {
 			return nil, nil, err
 		}
 		ov, err := baseOverview(ctx, st)
 		if err != nil {
 			return nil, nil, err
 		}
+		if ov.CycleWork, err = st.CountCycleWorkInWorkspace(ctx, agent); err != nil {
+			return nil, nil, err
+		}
+		if withIngestable {
+			// 取り込めるものの判定に要るストアの記録は、借りている間に読む（上流は借りを返した後に読む）。
+			switch decl, err := core.LoadSourcesDeclaration(st.Workspace()); {
+			case err == nil:
+				ingSources = decl.Sources
+			case errors.Is(err, core.ErrConfigNotFound):
+			default:
+				return nil, nil, err
+			}
+			if ingState, err = st.ReadIngestableState(ctx); err != nil {
+				return nil, nil, err
+			}
+		}
 		cands, err := st.WaitingExternalCandidates(ctx)
 		return ov, cands, err
 	}()
 	if err != nil {
 		return nil, err
+	}
+	if withIngestable {
+		ov.Ingestable = &core.Ingestable{Items: []core.IngestableItem{}}
+		if len(ingSources) > 0 {
+			if src, serr := newGitHubIssueSource(); serr != nil {
+				ov.Ingestable = core.IngestableUnavailable(serr)
+			} else {
+				ov.Ingestable = core.ResolveIngestable(ctx, ingState, ingSources, src)
+			}
+		}
 	}
 	ov.WaitingExternal = core.ResolveWaitingExternal(ctx, cands, checks.checkSource())
 	// 動いているバイナリのコミット（`flywheel status --json` と同じ値。Issue #593）。読めなければ空のまま

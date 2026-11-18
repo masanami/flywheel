@@ -93,13 +93,107 @@ type StatusWaitingExternal struct {
 	Challenges []WaitingExternal `json:"challenges"`
 }
 
+// CycleWorkStages は status.cycle_work.stages（サイクルを回すと進むものの、段ごとの件数）。
+type CycleWorkStages struct {
+	Classify int `json:"classify"`
+	Cleanup  int `json:"cleanup"`
+	Improve  int `json:"improve"`
+	Learn    int `json:"learn"`
+	Plan     int `json:"plan"`
+	Release  int `json:"release"`
+	Run      int `json:"run"`
+	Verify   int `json:"verify"`
+}
+
+// CycleWork は status.cycle_work。total は stages の値の合計。
+type CycleWork struct {
+	Stages CycleWorkStages `json:"stages"`
+	Total  int             `json:"total"`
+}
+
+// FromCycleWork は core.CycleWork を変換する（nil は全て 0）。
+func FromCycleWork(w *core.CycleWork) CycleWork {
+	if w == nil {
+		return CycleWork{}
+	}
+	st := w.Stages
+	return CycleWork{
+		Stages: CycleWorkStages{
+			Classify: st.Classify, Cleanup: st.Cleanup, Improve: st.Improve, Learn: st.Learn,
+			Plan: st.Plan, Release: st.Release, Run: st.Run, Verify: st.Verify,
+		},
+		Total: w.Total,
+	}
+}
+
+// IngestableChild は status.ingestable.items[].children の要素。
+type IngestableChild struct {
+	ExternalKey       string `json:"external_key"`
+	Number            int    `json:"number"`
+	ParentExternalKey string `json:"parent_external_key"`
+	Title             string `json:"title"`
+	URL               string `json:"url"`
+}
+
+// IngestableItem は status.ingestable.items の要素（取り込めるものの根）。
+type IngestableItem struct {
+	Children          []IngestableChild `json:"children"`
+	ExternalKey       string            `json:"external_key"`
+	Number            int               `json:"number"`
+	ParentChallengeID *string           `json:"parent_challenge_id"`
+	ParentExternalKey *string           `json:"parent_external_key"`
+	Repo              string            `json:"repo"`
+	Title             string            `json:"title"`
+	URL               string            `json:"url"`
+}
+
+// Ingestable は status.ingestable。error は上流を読めなかった理由（読めたときは null）。
+type Ingestable struct {
+	Error *string          `json:"error"`
+	Items []IngestableItem `json:"items"`
+}
+
+// StatusFollowups は status.followups。
+type StatusFollowups struct {
+	Open int `json:"open"`
+}
+
+// FromIngestable は core.Ingestable を変換する（nil は null）。
+func FromIngestable(in *core.Ingestable) *Ingestable {
+	if in == nil {
+		return nil
+	}
+	items := make([]IngestableItem, 0, len(in.Items))
+	for _, it := range in.Items {
+		kids := make([]IngestableChild, 0, len(it.Children))
+		for _, k := range it.Children {
+			kids = append(kids, IngestableChild{ExternalKey: k.ExternalKey, Number: k.Number, ParentExternalKey: k.ParentExternalKey, Title: k.Title, URL: k.URL})
+		}
+		item := IngestableItem{Children: kids, ExternalKey: it.ExternalKey, Number: it.Number, Repo: it.Repo, Title: it.Title, URL: it.URL}
+		if it.ParentExternalKey != "" {
+			p := it.ParentExternalKey
+			item.ParentExternalKey = &p
+		}
+		if it.ParentChallengeID != "" {
+			p := it.ParentChallengeID
+			item.ParentChallengeID = &p
+		}
+		items = append(items, item)
+	}
+	return &Ingestable{Error: in.Error, Items: items}
+}
+
 // StatusResponse は `status` の成功の形。
 type StatusResponse struct {
 	Actionable StatusActionable `json:"actionable"`
 	Approved   StatusApproved   `json:"approved"`
 	// BinaryCommit は動いているバイナリのコミット（status のテキストの行と同じ値。Issue #593）。
 	// ビルド情報が無いときは "unknown"。
-	BinaryCommit    string                `json:"binary_commit"`
+	BinaryCommit string          `json:"binary_commit"`
+	CycleWork    CycleWork       `json:"cycle_work"`
+	Followups    StatusFollowups `json:"followups"`
+	// Ingestable は取り込めるもの。状況の API は問い合わせに ingestable=true が付いたときだけ読み、無いときは null。
+	Ingestable      *Ingestable           `json:"ingestable"`
 	NeedsHuman      StatusNeedsHuman      `json:"needs_human"`
 	ParentAgent     StatusParentAgent     `json:"parent_agent"`
 	WaitingExternal StatusWaitingExternal `json:"waiting_external"`
@@ -136,6 +230,9 @@ func FromOverview(ov *core.Overview) StatusResponse {
 		Actionable:   StatusActionable{Challenges: FromActionableChallenges(ov.ActionableChallenges, ov.UnmetDependencies)},
 		Approved:     StatusApproved{Operations: FromOperations(ov.ApprovedOperations)},
 		BinaryCommit: binaryCommit,
+		CycleWork:    FromCycleWork(ov.CycleWork),
+		Followups:    StatusFollowups{Open: ov.FollowupsOpen},
+		Ingestable:   FromIngestable(ov.Ingestable),
 		NeedsHuman: StatusNeedsHuman{
 			BudgetExhausted: budget,
 			Challenges:      FromChallenges(ov.NeedsHumanChallenges),
