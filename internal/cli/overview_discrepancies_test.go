@@ -236,12 +236,12 @@ func TestRunStatus_Discrepancies_TextOutputListsThemUnderNeedsHuman(t *testing.T
 	bindSourceForDiscrepancyCase(t, ws, id, "o/r#1", "closed", "in_policy")
 
 	got := runText(t, ws, "status")
-	humanIdx := strings.Index(got, "人間の操作を待っているもの")
-	actionableIdx := strings.Index(got, "システムが次に進められるもの")
-	if humanIdx < 0 || actionableIdx < 0 || humanIdx >= actionableIdx {
-		t.Fatalf("status text output = %q, want the needs-human heading before the actionable heading", got)
+	humanIdx := strings.Index(got, "そのほかの、あなたの操作を待っているもの")
+	nextIdx := strings.Index(got, "取り込めるもの")
+	if humanIdx < 0 || nextIdx < 0 || humanIdx >= nextIdx {
+		t.Fatalf("status text output = %q, want the other-operations heading before the ingestable heading", got)
 	}
-	humanSection := got[humanIdx:actionableIdx]
+	humanSection := got[humanIdx:nextIdx]
 	if !strings.Contains(humanSection, id) || !strings.Contains(humanSection, "upstream_closed") {
 		t.Errorf("needs-human section = %q, want %s with upstream_closed", humanSection, id)
 	}
