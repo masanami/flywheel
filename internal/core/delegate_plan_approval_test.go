@@ -211,6 +211,8 @@ func TestRunDelegation_ApprovedPlanNotDelegatable_NotStartedWithReason(t *testin
 	}{
 		{"unknown repo", planSpec(func(m map[string]any) { m["repo"] = "no-such-repo" }), "今の宣言と合わない"},
 		{"not a structured output", `{"verdict":"plan"}`, "今の宣言と合わない"},
+		{"the old shape without tasks", `{"verdict":"plan","summary":"s","steps":["a"],"repo":"main-repo","operation":"impl","size":"S","done_criteria":"d","cross_repo":false,"related_repos":[]}`, "今の宣言と合わない"},
+		{"two tasks are not launched yet", twoTaskPlanSpec(), "タスクが 1 件でない"},
 		{"verdict is not plan", `{"verdict":"uncertain","question":"Q?"}`, "verdict が plan でない"},
 	}
 	for _, tc := range cases {
@@ -232,5 +234,34 @@ func TestRunDelegation_ApprovedPlanNotDelegatable_NotStartedWithReason(t *testin
 				t.Error("J3 must not start")
 			}
 		})
+	}
+}
+
+// twoTaskPlanSpec は検査を通る、タスクが 2 件（統合先を使う）の計画の構造化した出力。
+func twoTaskPlanSpec() string {
+	return planSpec(func(m map[string]any) {
+		m["tasks"] = []any{j2TestTask("a", "main-repo", "impl"), j2TestTask("b", "main-repo", "impl")}
+		m["uses_integration"] = true
+	})
+}
+
+// タスクが 2 件の計画は、課題の ID を指定した委譲でも起動しない（validation_failed 相当の ErrValidation）。
+// タスクが 1 件の計画は、そのタスクの repo・operation で起動する。
+func TestRunDelegation_ExplicitID_TwoTaskPlanIsNotLaunched_OneTaskPlanUsesTheTask(t *testing.T) {
+	t.Parallel()
+	f := newDelegateFixture(t)
+	two := f.newInProgress(t, "two", "P1", twoTaskPlanSpec())
+	if _, err := f.run(t, &two); !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation for a 2-task plan", err)
+	}
+	if len(f.j3Inputs) != 0 {
+		t.Error("J3 must not start for a 2-task plan")
+	}
+	one := f.newInProgress(t, "one", "P1", planSpec(nil))
+	if _, err := f.run(t, &one); err != nil {
+		t.Fatalf("a 1-task plan must be launchable: %v", err)
+	}
+	if len(f.j3Inputs) != 1 {
+		t.Errorf("J3 inputs = %d, want 1 (the 1-task plan launched with the task's repo and operation)", len(f.j3Inputs))
 	}
 }

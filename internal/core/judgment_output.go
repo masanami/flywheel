@@ -38,66 +38,17 @@ var J1VerdictValues = []J1Verdict{J1VerdictMine, J1VerdictNotMine, J1VerdictUnce
 // J2Verdict は J2（計画）の判定の閉集合。
 type J2Verdict string
 
-// J2Verdict の4値。
+// J2Verdict の3値。
 const (
 	J2VerdictPlan      J2Verdict = "plan"
 	J2VerdictUncertain J2Verdict = "uncertain"
-	J2VerdictIssues    J2Verdict = "issues"
 	// J2VerdictParentDirect は、委譲の計画が立たず親が直接行うのが適切な課題（理由は question、
 	// 親が満たすべき達成条件は done_criteria）。種類 parent_direct の保留を立てる。
 	J2VerdictParentDirect J2Verdict = "parent_direct"
 )
 
 // J2VerdictValues は J2Verdict の全値。
-var J2VerdictValues = []J2Verdict{J2VerdictPlan, J2VerdictUncertain, J2VerdictIssues, J2VerdictParentDirect}
-
-// J2SourceKind は J2 の「論点は不要」の決定が引用した元の種別（J2 が読む区画に対応する閉集合）。
-type J2SourceKind string
-
-// J2SourceKind の値。
-const (
-	J2SourceKindChallenge       J2SourceKind = "challenge"
-	J2SourceKindUpstreamIssue   J2SourceKind = "upstream_issue"
-	J2SourceKindUpstreamComment J2SourceKind = "upstream_comment"
-	J2SourceKindReferencedIssue J2SourceKind = "referenced_issue"
-	J2SourceKindHoldRecord      J2SourceKind = "hold_record"
-	J2SourceKindPlanRejection   J2SourceKind = "plan_rejection"
-)
-
-// J2SourceKindValues は J2SourceKind の全値。
-var J2SourceKindValues = []J2SourceKind{
-	J2SourceKindChallenge, J2SourceKindUpstreamIssue, J2SourceKindUpstreamComment,
-	J2SourceKindReferencedIssue, J2SourceKindHoldRecord, J2SourceKindPlanRejection,
-}
-
-// valid は k が閉集合の値か（前後の空白も許さない）。
-func (k J2SourceKind) valid() bool {
-	for _, v := range J2SourceKindValues {
-		if k == v {
-			return true
-		}
-	}
-	return false
-}
-
-// sectionLabel は k が指す J2 の入力の区画の名前（計画の本文で人が読む引用元の名前になる）。
-func (k J2SourceKind) sectionLabel() string {
-	switch k {
-	case J2SourceKindChallenge:
-		return labelChallenge
-	case J2SourceKindUpstreamIssue:
-		return labelUpstreamIssue
-	case J2SourceKindUpstreamComment:
-		return labelUpstreamComments
-	case J2SourceKindReferencedIssue:
-		return labelUpstreamRefs
-	case J2SourceKindHoldRecord:
-		return labelHoldRecord
-	case J2SourceKindPlanRejection:
-		return PlanRejectionsSectionLabel
-	}
-	return ""
-}
+var J2VerdictValues = []J2Verdict{J2VerdictPlan, J2VerdictUncertain, J2VerdictParentDirect}
 
 // JudgmentSize は J1・J2 が出すサイズ案の閉集合（S|M|L。
 // .flywheel/agent.json の size_budgets_usd のキーと同じ3文字だが、後者は
@@ -233,9 +184,6 @@ func AllJudgmentOutputClosedValues() []string {
 		vals = append(vals, string(v))
 	}
 	for _, v := range JudgmentSizeValues {
-		vals = append(vals, string(v))
-	}
-	for _, v := range J2SourceKindValues {
 		vals = append(vals, string(v))
 	}
 	for _, v := range J4DecisionValues {

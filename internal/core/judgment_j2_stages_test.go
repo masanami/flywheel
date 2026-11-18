@@ -200,48 +200,6 @@ func TestPlanAutoJ2_Plan_SizeSAllowsEmptyExpectedAndNoIssues(t *testing.T) {
 	}
 }
 
-// 論点の記録も論点不要の引用も無いサイズ M・L の plan は登録されない（#450: 1 回目は捨てて 1 回だけ問い直し、
-// 問い直しでも同じなら保留に置く。詳しくは judgment_j2_noissues_test.go）。
-func TestPlanAutoJ2_Plan_SizeMLWithoutIssuesRecordIsNeverRegistered(t *testing.T) {
-	t.Parallel()
-	for _, size := range []string{"M", "L"} {
-		f := newJ2Fixture(t)
-		ch := f.newClassified(t, "nolog", "P1")
-		out := j2OutputFor(false, func(m map[string]any) { m["size"] = size })
-		inv := succeededInvoker(out)
-		calls := 0
-		inv.onInvoke = func(JudgmentLaunchInput) { calls++ }
-		res, err := f.run(t, inv, idPtr(ch.ID))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if calls != 2 || len(res.Items) != 2 || res.Items[0].Result != RunResultInvalidOutput {
-			t.Errorf("%s: calls=%d items=%+v, want the first invalid_output and one re-ask", size, calls, res.Items)
-		}
-		after := f.detail(t, ch.ID)
-		if after.Status != StatusAwaitingHuman || len(after.Plans) != 0 || after.Expected != nil || after.Issues != nil || len(after.Holds) != 1 {
-			t.Errorf("%s: challenge = %+v plans=%d holds=%d", size, after.Challenge, len(after.Plans), len(after.Holds))
-		}
-	}
-}
-
-func TestPlanAutoJ2_Plan_IssuesRecordedViaEditCountsEvenWithoutHoldID(t *testing.T) {
-	t.Parallel()
-	f := newJ2Fixture(t)
-	ch := f.newClassified(t, "edit-issues", "P1")
-	f.recordIssues(t, ch.ID)
-	if d := f.detail(t, ch.ID); d.IssuesHoldID != nil {
-		t.Fatalf("issues_hold_id = %v, want NULL", d.IssuesHoldID)
-	}
-	out := j2OutputFor(false, func(m map[string]any) { m["size"] = "L" })
-	if _, err := f.run(t, succeededInvoker(out), idPtr(ch.ID)); err != nil {
-		t.Fatal(err)
-	}
-	if d := f.detail(t, ch.ID); d.Status != StatusAwaitingPlanApproval {
-		t.Errorf("status = %s", d.Status)
-	}
-}
-
 // AC-298: サイズ M・L × expected の []・null の 4 通りのどれも、計画を登録せず人間対応待ちになる。
 func TestPlanAutoJ2_Plan_SizeMLWithEmptyExpectedHoldsWithoutPlan(t *testing.T) {
 	t.Parallel()
@@ -253,7 +211,6 @@ func TestPlanAutoJ2_Plan_SizeMLWithEmptyExpectedHoldsWithoutPlan(t *testing.T) {
 			t.Run(size+"/"+exp.name, func(t *testing.T) {
 				f := newJ2Fixture(t)
 				ch := f.newClassified(t, "noexp", "P1")
-				f.recordIssues(t, ch.ID)
 				before := f.detail(t, ch.ID)
 				out := j2OutputFor(false, func(m map[string]any) {
 					m["size"] = size
@@ -292,7 +249,6 @@ func TestPlanAutoJ2_Plan_SizeMLUsesCurrentExpectedWhenOutputHasNone(t *testing.T
 	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "cur", "P1")
-	f.recordIssues(t, ch.ID)
 	exp := `[{"kind":"behavior","scene":"CUR","before":"b","after":"a"}]`
 	if _, err := f.s.EditChallenge(context.Background(), ChannelCLI, ch.ID, EditInput{Expected: &exp}); err != nil {
 		t.Fatal(err)
@@ -304,23 +260,6 @@ func TestPlanAutoJ2_Plan_SizeMLUsesCurrentExpectedWhenOutputHasNone(t *testing.T
 	d := f.detail(t, ch.ID)
 	if d.Status != StatusAwaitingPlanApproval || len(d.Expected) != 1 || d.Expected[0].Scene != "CUR" {
 		t.Errorf("status=%s expected=%+v", d.Status, d.Expected)
-	}
-}
-
-func TestPlanAutoJ2_Issues_IgnoresStageFields(t *testing.T) {
-	t.Parallel()
-	f := newJ2Fixture(t)
-	ch := f.newClassified(t, "iss", "P1")
-	out := j2IssuesOutput(func(m map[string]any) {
-		m["expected"] = []any{map[string]any{"kind": "bad"}}
-		m["figure"] = ""
-	})
-	if _, err := f.run(t, succeededInvoker(out), idPtr(ch.ID)); err != nil {
-		t.Fatal(err)
-	}
-	d := f.detail(t, ch.ID)
-	if d.Status != StatusAwaitingHuman || d.Expected != nil || d.Figure != nil {
-		t.Errorf("status=%s fields=%+v", d.Status, d.StageFields)
 	}
 }
 

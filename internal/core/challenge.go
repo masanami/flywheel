@@ -232,11 +232,10 @@ type EditInput struct {
 	Description  *string
 	DoneCriteria *string
 	Urgency      *string
-	// Headline・Context・Figure は文字列、Issues・Expected・Actual・NonGoals は JSON の配列の
+	// Headline・Context・Figure は文字列、Expected・Actual・NonGoals は JSON の配列の
 	// 文字列（欄の形は stages.go）。空文字は NULL にする。
 	Headline *string
 	Context  *string
-	Issues   *string
 	Expected *string
 	Actual   *string
 	NonGoals *string
@@ -1080,13 +1079,6 @@ func (in EditInput) stagePatch() (StagePatch, error) {
 			return p, err
 		}
 		p.Figure = StageSet(v)
-	}
-	if in.Issues != nil {
-		v, err := parseEditJSON(*in.Issues, ParseIssuesJSON)
-		if err != nil {
-			return p, err
-		}
-		p.Issues = StageSet(v)
 	}
 	if in.Expected != nil {
 		v, err := parseEditJSON(*in.Expected, ParseExpectedJSON)

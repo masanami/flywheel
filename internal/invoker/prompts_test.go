@@ -439,7 +439,7 @@ func TestInstructions_J2CriteriaJudgeableFromOwnRecord(t *testing.T) {
 	}
 	var line string
 	for _, l := range strings.Split(got, "\n") {
-		if strings.Contains(l, "- 達成条件:") {
+		if strings.Contains(l, "- 達成条件（課題の達成条件）:") {
 			line = l
 			break
 		}
@@ -473,7 +473,7 @@ func TestInstructions_J2CriteriaStopBeforeTheReleaseAndHumanActionsGoToTheSteps(
 		t.Fatalf("Instructions(J2) lacks the item %q", prefix)
 		return ""
 	}
-	criteria := item("- 達成条件:")
+	criteria := item("- 達成条件（課題の達成条件）:")
 	for _, want := range []string{
 		"達成条件は、この課題の本番反映の一歩手前まで（例: 成果物が揃い、自動の検査が通る）にする",
 		"人の操作は達成条件に入れない",
@@ -482,8 +482,8 @@ func TestInstructions_J2CriteriaStopBeforeTheReleaseAndHumanActionsGoToTheSteps(
 			t.Errorf("the item of 達成条件 in Instructions(J2) lacks %q", want)
 		}
 	}
-	if steps := item("- 手順:"); !strings.Contains(steps, "本番反映の後に人が行う作業があれば、手順の末尾に『本番反映の後に人が行うこと』として書く") {
-		t.Errorf("the item of 手順 in Instructions(J2) lacks where to write the human work after the release: %q", steps)
+	if tasks := item("- タスク（tasks）:"); !strings.Contains(tasks, "本番反映の後に人が行う作業は、最後のタスクの body の末尾に『本番反映の後に人が行うこと』として書く") {
+		t.Errorf("the item of タスク in Instructions(J2) lacks where to write the human work after the release: %q", tasks)
 	}
 }
 
@@ -532,51 +532,33 @@ func TestInstructions_J5DescribesTheAnswersToTheNoReleaseHold(t *testing.T) {
 	}
 }
 
-// #450: j2.md は、中以上で論点の記録が無いとき計画ではなく論点を選ぶ確認の段（判断の前）と、
-// 論点不要を返す条件（決まっていることごとの引用）、問い直しの区画、出力の型の説明の行を持つ。
-// サイズと論点の記録の関係の規則は確認の段の 1 か所だけに置く（#536 で出力の型の説明の行から寄せた）。
-func TestInstructions_J2AsksForQuotesBeforeSkippingIssues(t *testing.T) {
+// j2.md は、論点と問いを計画と同じ 1 回の出力で返すこと・タスク・統合先を使うかを求める。先に論点だけを返す段・
+// 論点不要の根拠・問い直しの区画・論点と回答の区画は持たない（core の見直し S2a。AC-53 は no_issues_needed の文字列が無いこと）。
+func TestInstructions_J2DescribesTopicsTasksAndNoRemovedSections(t *testing.T) {
 	got, err := Instructions(core.JudgmentJ2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirm := strings.Index(got, "## 判断の前の確認")
-	judge := strings.Index(got, "## 判断\n")
-	if confirm < 0 || judge < 0 || confirm > judge {
-		t.Fatalf("the confirmation step must come before the judgment section: %d %d", confirm, judge)
-	}
-	step := got[confirm:judge]
 	for _, want := range []string{
-		"区画「論点と回答」が無く、見込みのサイズが中以上なら、1 は選ばず 3 を選ぶ",
-		"決まったことすべてを区画の文で引用できるときだけ、1 に論点不要（no_issues_needed）と引用を付けてよい",
-		"引用できない決定が 1 つでもあれば 3 を選ぶ",
+		"論点（topics）",
+		"問い（0〜3 件）",
+		"論点と問いは、計画と同じ 1 回の出力で返す",
+		"タスク（tasks）: 1〜12 件",
+		"前提のタスクの識別子の配列（depends_on",
+		"対象リポジトリ（repo",
+		"統合先を使うか（uses_integration）",
+		"タスクが 2 件以上なら真にする",
+		"タスクが 1 件の計画では、課題の達成条件とタスクの達成条件が食い違わないように書く",
+		"課題の全体について書く",
 	} {
-		if !strings.Contains(step, want) {
-			t.Errorf("the confirmation step lacks %q", want)
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J2) lacks %q", want)
 		}
 	}
-	// 1 の項目に論点不要の意味、読むものに問い直しの区画、出力の型の説明の行にサイズと記録の関係。
-	var item, shape string
-	for _, l := range strings.Split(got, "\n") {
-		switch {
-		case strings.Contains(l, "- 論点不要（no_issues_needed）:"):
-			item = l
-		case strings.Contains(l, "出力の形式（どの項目にどんな値を入れるか）"):
-			shape = l
+	for _, gone := range []string{"no_issues_needed", "論点不要", "「論点と回答」", "「問い直し」", "判断の前の確認", "手順:", "steps"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("Instructions(J2) still contains %q", gone)
 		}
-	}
-	for _, want := range []string{"確認の条件を満たすときだけ", "中身・引用元の種別", "引用の文"} {
-		if !strings.Contains(item, want) {
-			t.Errorf("the item of no_issues_needed lacks %q", want)
-		}
-	}
-	// サイズと論点の記録の関係の規則は「判断の前の確認」の 1 か所に寄せた（#536。上の step の検査が固定する）。
-	// 出力の型の説明の行に同じ規則を重ねて書かない。
-	if shape == "" || strings.Contains(shape, "論点の記録") {
-		t.Errorf("the line about the output shape must exist and must not repeat the size rule: %q", shape)
-	}
-	if !strings.Contains(got, "- 「問い直し」:") {
-		t.Error("the reading list lacks the re-ask section")
 	}
 }
 
@@ -676,7 +658,7 @@ func TestInstructions_J2StepsExcludeOperationsDelegatedChildCannotUse(t *testing
 	}
 	for _, want := range []string{
 		"この仕組みのコマンド（CLI・サーバの起動を含む）を help 以外使えない",
-		"計画の子の手順にも論点の選択肢にも入れない",
+		"タスクの手順にも論点の選択肢にも入れない",
 		"親かオーナーの段",
 		"PR の CI で確かめる",
 	} {
@@ -744,7 +726,7 @@ func TestInstructions_J2AggregateIssueQuestionAndChosenOptionCoverage(t *testing
 		"「親が子の Issue を起票して取り込み、依存でつなぐ」",
 		"「取りまとめの課題は、親が直接行う種類の保留にする」",
 		"どちらかを推奨にする",
-		"ラベルだけでなく、その選択肢が何を確かめる／何を作るためのものかを、計画の手順と達成条件に全部写す",
+		"ラベルだけでなく、それが何を確かめる／何を作るためのものかを、タスクの body と達成条件に全部写す",
 		"写せない部分があれば計画に入れず、2 で問う",
 		"手元での実行に書き換え、実行したコマンドと成否の要旨を PR の説明に残させる",
 	} {
@@ -806,7 +788,7 @@ func TestBriefFixedSections_RequireReviewStatusInTheReport(t *testing.T) {
 }
 
 // TestJ2Prompt_MentionsParentDirectVerdict は、J2 の指示文が parent_direct の判定の意味（委譲の計画が立たず
-// 親が直接行うのが適切なときに、サイズに関わらず判断の前の確認より先に返し、理由と親の達成条件を書く）を
+// 親が直接行うのが適切なときに、理由と親の達成条件を書く）を
 // 持つことを固定する（#536）。
 func TestJ2Prompt_MentionsParentDirectVerdict(t *testing.T) {
 	fsys, err := promptsSubFS()
@@ -817,7 +799,7 @@ func TestJ2Prompt_MentionsParentDirectVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fs.ReadFile(j2.md): %v", err)
 	}
-	for _, want := range []string{"委譲の計画が立たず、親が直接行うのが適切", "親が何を満たせば終わりか", "4 を選んでよい", "サイズに関わらず"} {
+	for _, want := range []string{"委譲の計画が立たず、親が直接行うのが適切", "親が何を満たせば終わりか"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("j2.md does not contain %q", want)
 		}

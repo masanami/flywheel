@@ -3,43 +3,36 @@ package cli
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
 // 仕様 §S4「ストアと JSON の形」の冒頭の注記: J2・J5 の段階の欄の書き込みを、偽の claude の
 // 子プロセスの経路（CLI → core → ストア → show）で 1 本ずつ通す（J1 は classify_auto_test.go）。
 
-func claudeStructured(t *testing.T, out map[string]any) string {
-	t.Helper()
-	b, err := json.Marshal(map[string]any{"is_error": false, "structured_output": out})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
-}
-
-// J2 の issues: 論点が課題の stages.issues に書かれ、人間対応待ちになる。
-func TestPlanAuto_J2IssuesWritesStageIssuesViaChildProcess(t *testing.T) {
+// AC-175: 過去の論点の記録（challenge.issues）がある課題で、show --json の stages.issues にその記録が出る
+// （判定 issues と edit --issues は外したので、記録は列へ直接書いた過去のものとして作る）。回答（issues_answer）も出る。
+func TestShow_PastIssuesRecordIsShownInStagesIssues(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
 	id := newClassifiedForCase(t, ws)
+	cid := challengeIDToInternalID(t, id)
 	issue := func(q string) map[string]any {
 		return map[string]any{"question": q, "recommended": 2, "options": []any{
 			map[string]any{"label": "甲-" + q, "example": nil}, map[string]any{"label": "乙-" + q, "example": "例"}}}
 	}
-	putFakeClaudeOnPATH(t, fakeClaudeOpts{Stdout: claudeStructured(t, map[string]any{
-		"verdict": "issues", "issues": []any{issue("QA"), issue("QB"), issue("QC")},
-	})})
-
-	item := phaseOf(t, runJSON(t, ws, "plan", "--auto", id))["items"].([]any)[0].(map[string]any)
-	if item["outcome"] != "issues" || item["status"] != "awaiting_human" {
-		t.Fatalf("item = %v", item)
+	b, err := json.Marshal([]any{issue("QA"), issue("QB"), issue("QC")})
+	if err != nil {
+		t.Fatal(err)
 	}
+	coretest.InsertAnsweredHold(t, ws, cid, "論点に答えてください", "classified", "2026-10-19T00:00:00.000Z")
+	coretest.Exec(t, ws, `UPDATE challenge SET issues = ?, issues_hold_id = (SELECT MAX(id) FROM hold WHERE challenge_id = ?) WHERE id = ?`, string(b), cid, cid)
+
 	show := runJSON(t, ws, "show", id)
 	issues, _ := show["stages"].(map[string]any)["issues"].([]any)
 	if len(issues) != 3 || issues[0].(map[string]any)["question"] != "QA" || issues[2].(map[string]any)["question"] != "QC" {
-		t.Errorf("stages.issues = %v", issues)
+		t.Fatalf("stages.issues = %v", issues)
 	}
-	// 選択肢（ラベルと例）が子プロセスの経路で実物として書かれる。
 	opts, _ := issues[0].(map[string]any)["options"].([]any)
 	if len(opts) != 2 || opts[0].(map[string]any)["label"] != "甲-QA" || opts[0].(map[string]any)["example"] != nil ||
 		opts[1].(map[string]any)["label"] != "乙-QA" || opts[1].(map[string]any)["example"] != "例" {
@@ -48,12 +41,8 @@ func TestPlanAuto_J2IssuesWritesStageIssuesViaChildProcess(t *testing.T) {
 	if issues[0].(map[string]any)["recommended"] != float64(2) {
 		t.Errorf("recommended = %v", issues[0].(map[string]any)["recommended"])
 	}
-	// issues_hold_id が指す保留に回答が付くまで、回答は空（show に hold id は出ないので issues_answer で固定する）。
-	if show["stages"].(map[string]any)["issues_answer"] != nil {
-		t.Errorf("issues_answer = %v, want null", show["stages"].(map[string]any)["issues_answer"])
-	}
-	if len(show["plans"].([]any)) != 0 || len(show["holds"].([]any)) != 1 {
-		t.Errorf("plans/holds = %v / %v", show["plans"], show["holds"])
+	if show["stages"].(map[string]any)["issues_answer"] != "a" {
+		t.Errorf("issues_answer = %v, want the answer of the hold", show["stages"].(map[string]any)["issues_answer"])
 	}
 }
 

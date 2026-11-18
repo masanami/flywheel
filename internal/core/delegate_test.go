@@ -270,7 +270,7 @@ func TestDecideDecider_FiveRowsEvaluatedTopDown(t *testing.T) {
 		{"row1 beats row2", ConnectorOperation{Interactive: true, Counterpart: CounterpartHuman}, true, nil, DeciderHuman, 1},
 		{"row2 cross_repo", ConnectorOperation{Interactive: false, ChildMayDecide: true}, true, nil, DeciderParent, 2},
 		{"row2 two related repos", ConnectorOperation{Interactive: false, ChildMayDecide: true}, false, []string{"a", "b"}, DeciderParent, 2},
-		{"one related repo is single-repo", ConnectorOperation{Interactive: false, ChildMayDecide: true}, false, []string{"a"}, DeciderChild, 4},
+		{"one related repo equal to the task repo is single-repo", ConnectorOperation{Interactive: false, ChildMayDecide: true}, false, []string{"a"}, DeciderChild, 4},
 		{"row3 parent", ConnectorOperation{Interactive: true, Counterpart: CounterpartParent}, false, nil, DeciderParent, 3},
 		{"row3 counterpart omitted", ConnectorOperation{Interactive: true}, false, nil, DeciderParent, 3},
 		{"row3 interactive with child_may_decide", ConnectorOperation{Interactive: true, ChildMayDecide: true}, false, nil, DeciderParent, 3},
@@ -279,11 +279,24 @@ func TestDecideDecider_FiveRowsEvaluatedTopDown(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, row := DecideDecider(c.op, c.cross, c.related)
+			got, row := DecideDecider(c.op, "a", c.cross, c.related)
 			if got != c.want || row != c.row {
 				t.Errorf("DecideDecider = (%s, %d), want (%s, %d)", got, row, c.want, c.row)
 			}
 		})
+	}
+}
+
+// 関係するリポジトリは、対象のタスクの対象リポジトリ以外に関係するものなので、行 2 の数え方には対象のタスクの
+// 対象リポジトリを含める。
+func TestDecideDecider_CountsTheTaskRepoAmongTheRelatedRepos(t *testing.T) {
+	t.Parallel()
+	op := ConnectorOperation{Interactive: false, ChildMayDecide: true}
+	if got, row := DecideDecider(op, "task-repo", false, []string{"other"}); got != DeciderParent || row != 2 {
+		t.Errorf("task repo + one other related repo = (%s, %d), want (parent, 2)", got, row)
+	}
+	if got, row := DecideDecider(op, "task-repo", false, []string{"task-repo"}); got != DeciderChild || row != 4 {
+		t.Errorf("only the task repo = (%s, %d), want (child, 4)", got, row)
 	}
 }
 

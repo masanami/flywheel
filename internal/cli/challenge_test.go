@@ -322,8 +322,7 @@ func TestRunEdit_StageFlagsWriteAndShowThem(t *testing.T) {
 		"--headline", "一言", "--context", "位置づけ",
 		"--non-goals", `["x","y"]`, "--figure", "graph TD; A-->B",
 		"--expected", `[{"kind":"cli","scene":"s","before":"b","after":"a"}]`,
-		"--actual", `[{"scene":"s","after":"a"}]`,
-		"--issues", `[{"question":"q1","options":[{"label":"a","example":null},{"label":"b","example":null}],"recommended":1},{"question":"q2","options":[{"label":"a","example":null},{"label":"b","example":null}],"recommended":2},{"question":"q3","options":[{"label":"a","example":null},{"label":"b","example":null}],"recommended":1}]`)
+		"--actual", `[{"scene":"s","after":"a"}]`)
 	if doc["challenge"].(map[string]any)["version"] != float64(2) {
 		t.Errorf("version = %v, want 2", doc["challenge"].(map[string]any)["version"])
 	}
@@ -334,7 +333,7 @@ func TestRunEdit_StageFlagsWriteAndShowThem(t *testing.T) {
 	}
 
 	st := shown["stages"].(map[string]any)
-	for _, k := range []string{"issues", "expected", "actual", "non_goals", "figure"} {
+	for _, k := range []string{"expected", "actual", "non_goals", "figure"} {
 		if st[k] == nil {
 			t.Errorf("stages.%s = nil, want a value", k)
 		}
@@ -344,14 +343,14 @@ func TestRunEdit_StageFlagsWriteAndShowThem(t *testing.T) {
 	}
 
 	// 空文字は NULL にする。
-	runJSON(t, ws, "edit", id, "--headline", "", "--non-goals", "", "--figure", "", "--expected", "", "--actual", "", "--issues", "", "--context", "")
+	runJSON(t, ws, "edit", id, "--headline", "", "--non-goals", "", "--figure", "", "--expected", "", "--actual", "", "--context", "")
 	shown = runJSON(t, ws, "show", id)
 	c = shown["challenge"].(map[string]any)
 	if c["headline"] != nil || c["context"] != nil {
 		t.Errorf("headline/context = %v / %v, want nil", c["headline"], c["context"])
 	}
 	st = shown["stages"].(map[string]any)
-	for _, k := range []string{"issues", "expected", "actual", "non_goals", "figure"} {
+	for _, k := range []string{"expected", "actual", "non_goals", "figure"} {
 		if st[k] != nil {
 			t.Errorf("stages.%s = %v, want nil", k, st[k])
 		}
@@ -370,7 +369,7 @@ func TestRunEdit_InvalidStageValueIsValidationFailed(t *testing.T) {
 	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := runJSON(t, ws, "create", "--title", "t")["challenge"].(map[string]any)["id"].(string)
-	requireErrorCode(t, []string{"edit", id, "--issues", `[]x`, "--workspace", ws}, 1, CodeValidationFailed)
+	requireErrorCode(t, []string{"edit", id, "--expected", `[]x`, "--workspace", ws}, 1, CodeValidationFailed)
 	requireErrorCode(t, []string{"edit", id, "--headline", "   ", "--workspace", ws}, 1, CodeValidationFailed)
 	requireErrorCode(t, []string{"edit", id, "--non-goals", `[" "]`, "--workspace", ws}, 1, CodeValidationFailed)
 	requireVersion(t, ws, id, 1)
@@ -391,4 +390,18 @@ func TestRunEdit_StageFlagOnDoneChallengeIsTerminalState(t *testing.T) {
 	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, id), "done")
 	requireErrorCode(t, []string{"edit", id, "--headline", "h", "--workspace", ws}, 1, CodeTerminalState)
 	requireVersion(t, ws, id, 1)
+}
+
+// AC-174: `flywheel edit <課題の ID> --issues <値>` は usage_error になり、何も変えない。
+func TestRunEdit_IssuesFlagIsRemovedAndIsUsageError(t *testing.T) {
+	t.Parallel()
+	ws := initializedWorkspace(t)
+	id := runJSON(t, ws, "create", "--title", "t")["challenge"].(map[string]any)["id"].(string)
+	valid := `[{"question":"q1","options":[{"label":"a","example":null},{"label":"b","example":null}],"recommended":1},{"question":"q2","options":[{"label":"a","example":null},{"label":"b","example":null}],"recommended":2},{"question":"q3","options":[{"label":"a","example":null},{"label":"b","example":null}],"recommended":1}]`
+	requireErrorCode(t, []string{"edit", id, "--issues", valid, "--workspace", ws}, 2, CodeUsageError)
+	requireErrorCode(t, []string{"edit", id, "--headline", "h", "--issues", valid, "--workspace", ws}, 2, CodeUsageError)
+	requireVersion(t, ws, id, 1)
+	if st := runJSON(t, ws, "show", id)["stages"].(map[string]any); st["issues"] != nil {
+		t.Errorf("stages.issues = %v, want nil", st["issues"])
+	}
 }
