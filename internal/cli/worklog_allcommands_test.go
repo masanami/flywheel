@@ -648,10 +648,12 @@ var worklogCases = []worklogCase{
 				}), 0),
 			})
 			putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{{Match: fakeClaudeJ1Match, Tag: "J1", Stdout: j1NotMineFixture}}, "")
+			// 進められるものが無いと周は始まらない（上流の課題は数えに入らない）ので、未分類の課題を 1 件置く（C-1）。
+			createTitled(t, ws, "pre-existing")
 			return []string{"cycle"}
 		},
 		want: func(string) []wantActivity {
-			return []wantActivity{{"challenge", "C-1", "ingest_create", nil,
+			return []wantActivity{{"challenge", "C-2", "ingest_create", nil,
 				map[string]any{
 					"title":         "cycle ingest title",
 					"description":   "cycle ingest body",

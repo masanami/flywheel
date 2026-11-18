@@ -89,6 +89,19 @@ function awaitingApproval(): Record<string, unknown> {
     actionable: { challenges: [] },
     approved: { operations: [] },
     binary_commit: "unknown",
+    cycle_work: {
+      stages: {
+        classify: 0,
+        cleanup: 0,
+        improve: 0,
+        learn: 0,
+        plan: 0,
+        release: 0,
+        run: 0,
+        verify: 0,
+      },
+      total: 0,
+    },
     needs_human: {
       budget_exhausted: [],
       challenges: [challenge],

@@ -18,8 +18,8 @@ func TestRunStatus_EmptyWorkspaceReturnsTheBucketsWithEmptyArrays(t *testing.T) 
 	ws := initializedWorkspace(t)
 
 	doc := runJSON(t, ws, "status")
-	if len(doc) != 6 {
-		t.Errorf("status top-level keys = %d, want 6 (the three M1 buckets, waiting_external, parent_agent and binary_commit): %+v", len(doc), doc)
+	if len(doc) != 7 {
+		t.Errorf("status top-level keys = %d, want 7 (the three M1 buckets, waiting_external, parent_agent, binary_commit and cycle_work): %+v", len(doc), doc)
 	}
 	if pa, ok := doc["parent_agent"].(map[string]any); !ok || len(pa) != 1 {
 		t.Errorf("status[\"parent_agent\"] = %v, want an object with only `challenges`", doc["parent_agent"])
@@ -252,4 +252,19 @@ func containsString(xs []string, x string) bool {
 		}
 	}
 	return false
+}
+
+// status --json の cycle_work は、サイクルを回すと進むものの数え（total は stages の合計）。未分類の課題は classify に数える。
+func TestRunStatus_CycleWorkCountsWhatTheCycleCanAdvance(t *testing.T) {
+	ws := setupWorkspaceWithPosition(t)
+	createTitled(t, ws, "t")
+
+	cw, ok := runJSON(t, ws, "status")["cycle_work"].(map[string]any)
+	if !ok {
+		t.Fatal("status has no cycle_work object")
+	}
+	stages, _ := cw["stages"].(map[string]any)
+	if cw["total"] != float64(1) || stages["classify"] != float64(1) || len(stages) != 8 {
+		t.Errorf("cycle_work = %v, want total 1 with classify 1 over 8 stages", cw)
+	}
 }

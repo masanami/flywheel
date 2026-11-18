@@ -329,11 +329,26 @@ type Cycle struct {
 }
 
 // CycleResponse は `cycle` の成功の形。
+// 周を始めなかったとき（進められるものが無い）は、started が false・not_started_reason が理由・cycle が null・phases が空。
 type CycleResponse struct {
 	ConfigDefaultsUsed []string `json:"config_defaults_used"`
-	Cycle              Cycle    `json:"cycle"`
+	Cycle              *Cycle   `json:"cycle"`
+	NotStartedReason   *string  `json:"not_started_reason"`
 	Phases             []any    `json:"phases"`
 	RateLimited        bool     `json:"rate_limited"`
+	Started            bool     `json:"started"`
+}
+
+// FromCycleNotStarted は、周を始めなかった（サイクルを回すと進むものが無い）ときの CycleResponse。
+func FromCycleNotStarted(defaultsUsed []string, reason string) CycleResponse {
+	if defaultsUsed == nil {
+		defaultsUsed = []string{}
+	}
+	return CycleResponse{
+		ConfigDefaultsUsed: defaultsUsed,
+		NotStartedReason:   &reason,
+		Phases:             []any{},
+	}
 }
 
 // FromCycleRunResult は core.CycleRunResult を CycleResponse へ変換する。
@@ -345,7 +360,8 @@ func FromCycleRunResult(res *core.CycleRunResult) CycleResponse {
 	}
 	return CycleResponse{
 		ConfigDefaultsUsed: res.ConfigDefaultsUsed,
-		Cycle: Cycle{
+		Started:            true,
+		Cycle: &Cycle{
 			BudgetUSD: c.BudgetUSD,
 			EndedAt:   ts(c.EndedAt),
 			ID:        c.ID,
@@ -411,6 +427,7 @@ type BudgetResponse struct {
 }
 
 // CycleStarted は `POST /api/v1/workspaces/{name}/cycle` の成功の形。
+// started が false のときは、サイクルを回すと進むものが無く、周を始めなかった。
 type CycleStarted struct {
 	Started bool `json:"started"`
 }

@@ -35,6 +35,9 @@ func runStatus(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	ov.BinaryCommit = binaryCommit(a)
+	if ov.CycleWork, err = a.Store.CountCycleWorkInWorkspace(ctx, decl); err != nil {
+		return nil, mapCoreErr(err)
+	}
 	return textOutput{
 		json: view.FromOverview(ov),
 		text: overviewText(ov),

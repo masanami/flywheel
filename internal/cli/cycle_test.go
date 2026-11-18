@@ -47,7 +47,18 @@ const cycleFullAgentJSON = `{
 }`
 
 // cycleDoc は `cycle --json` の出力の最上位（cycle・config_defaults_used・phases・rate_limited）。
+// 周を始めなかった（進められるものが無い）ときは、テストの前提の不備として失敗にする（始めない形を見るテストは cycleDocAllowNotStarted を使う）。
 func cycleDoc(t *testing.T, ws string, args ...string) map[string]any {
+	t.Helper()
+	doc := cycleDocAllowNotStarted(t, ws, args...)
+	if doc["started"] == false {
+		t.Fatalf("cycle did not start (nothing to advance): %v — seed something the cycle can advance", doc)
+	}
+	return doc
+}
+
+// cycleDocAllowNotStarted は cycleDoc と同じだが、周を始めなかった形も返す。
+func cycleDocAllowNotStarted(t *testing.T, ws string, args ...string) map[string]any {
 	t.Helper()
 	return runJSON(t, ws, append([]string{"cycle"}, args...)...)
 }
@@ -141,6 +152,7 @@ func TestCycle_PositionFileOnlyAgentJSON_ConfigDefaultsUsedIncludesAgentJSON(t *
 	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t) // agent.json は {"position_file": "position.md"} だけ
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 
 	doc := cycleDoc(t, ws)
 
@@ -156,6 +168,7 @@ func TestCycle_FullyExplicitAgentJSON_ConfigDefaultsUsedIsEmptyArray(t *testing.
 	writePositionFileForTest(t, ws, "pos")
 	writeAgentJSONForTest(t, ws, cycleFullAgentJSON)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 
 	doc := cycleDoc(t, ws)
 
@@ -182,6 +195,8 @@ func TestCycle_WithSources_RunsIngestClassifyPlanInOrder(t *testing.T) {
 		{match: "repos/o/r/issues/1/comments?per_page=100&page=1", stdout: "[]"},
 	}, order)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, order)
+	// 上流の課題は数えに入らないので、進められる課題を 1 件置いておく（C-1。取り込む課題は C-2）。
+	createTitled(t, ws, "pre-existing")
 
 	doc := cycleDoc(t, ws)
 
@@ -193,12 +208,12 @@ func TestCycle_WithSources_RunsIngestClassifyPlanInOrder(t *testing.T) {
 		t.Errorf("phases = %v, want [release ingest classify plan run verify learn improve backup]", names)
 	}
 	got := collapseConsecutive(orderLogTags(readOrderLog(t, order)))
-	want := []string{"gh", "claude J1", "gh", "claude J2"}
+	want := []string{"gh", "claude J1", "claude J2", "gh", "claude J2"}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("call order = %v, want %v (ingest's gh, J1, J2's upstream gh, J2)", got, want)
+		t.Errorf("call order = %v, want %v (ingest's gh, J1 for both, J2 for the unbound C-1, then J2's upstream gh and J2 for the ingested C-2)", got, want)
 	}
-	if got := challengeStatusOf(t, ws, "C-1"); got != "awaiting_plan_approval" {
-		t.Errorf("C-1 status = %q, want awaiting_plan_approval (ingested, classified and planned in this cycle)", got)
+	if got := challengeStatusOf(t, ws, "C-2"); got != "awaiting_plan_approval" {
+		t.Errorf("C-1 status = %q, want awaiting_plan_approval (C-2: ingested, classified and planned in this cycle)", got)
 	}
 }
 
@@ -209,6 +224,7 @@ func TestCycle_WithoutSources_IngestPhaseIsSkipped(t *testing.T) {
 	ws := setupJ2Workspace(t)
 	ghCalls := withFakeGHRoutesOnPATH(t, nil)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 
 	doc := cycleDoc(t, ws)
 
@@ -384,6 +400,7 @@ func TestCycle_TriggerIsRecorded(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			ws := setupWorkspaceWithPosition(t)
 			putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+			createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 
 			doc := cycleDoc(t, ws, c.args...)
 
@@ -670,7 +687,8 @@ func TestCycle_ReleasesTheLock_SecondCycleIsNotLocked(t *testing.T) {
 	if _, found := coretest.CycleLockHolder(t, ws); found {
 		t.Fatal("the lock row remains after the first cycle")
 	}
-	doc := cycleDoc(t, ws) // 2 回目も終了コード 0
+	createTitled(t, ws, "t2") // 進められるものが無いと周は始まらない
+	doc := cycleDoc(t, ws)    // 2 回目も終了コード 0
 
 	if doc["cycle"].(map[string]any)["id"] != "Y-2" {
 		t.Errorf("second cycle id = %v, want Y-2", doc["cycle"].(map[string]any)["id"])
@@ -735,6 +753,7 @@ func TestCycle_Text_StartLineIsWrittenFirst(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupWorkspaceWithPosition(t)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 
 	out := runText(t, ws, "cycle")
 
@@ -800,4 +819,52 @@ func TestCycle_Text_ClosedStdoutReader_DoesNotDieBySIGPIPE(t *testing.T) {
 	if got := challengeStatusOf(t, ws, id); got != "classified" {
 		t.Errorf("status = %q, want classified (the cycle must run to the end)", got)
 	}
+}
+
+// 進められるものが無いワークスペースの cycle は、周の記録を作らず、どの段も実行せず（gh・claude を呼ばず）、
+// 終了コード 0 で終わる。--json は started: false・理由・cycle: null・phases: []。
+func TestCycle_NothingToAdvance_DoesNotStartTheCycle(t *testing.T) {
+	parallelTools(t, false)
+	ws := setupWorkspaceWithPosition(t)
+	order := filepath.Join(t.TempDir(), "order.log")
+	withFakeGHRoutesOrderedOnPATH(t, nil, order)
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, order)
+
+	doc := cycleDocAllowNotStarted(t, ws)
+
+	if doc["started"] != false || doc["not_started_reason"] != "nothing_to_advance" || doc["cycle"] != nil {
+		t.Fatalf("doc = %v, want started=false, not_started_reason=nothing_to_advance, cycle=null", doc)
+	}
+	if phases, ok := doc["phases"].([]any); !ok || len(phases) != 0 {
+		t.Errorf("phases = %#v, want an empty array", doc["phases"])
+	}
+	if got := readOrderLog(t, order); len(got) != 0 {
+		t.Errorf("gh/claude were invoked: %v", got)
+	}
+	if runs := runJSON(t, ws, "runs")["runs"].([]any); len(runs) != 0 {
+		t.Errorf("runs = %v, want none", runs)
+	}
+}
+
+// 始めなかったときの文の出力は、始めなかった旨と理由を出し、開始の合図の行（「を開始した」で終わる行）にしない。
+func TestCycle_NothingToAdvance_TextSaysItDidNotStart(t *testing.T) {
+	parallelTools(t, false)
+	ws := setupWorkspaceWithPosition(t)
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+
+	out := runText(t, ws, "cycle")
+
+	if strings.Contains(out, "を開始した") || !strings.Contains(out, "始めなかった") || !strings.Contains(out, "nothing_to_advance") {
+		t.Errorf("text = %q, want a not-started line with the reason and no start signal", out)
+	}
+}
+
+// 宣言に不備があれば、進むものの数に関わらず config_invalid（見直し前と同じ）。
+func TestCycle_NothingToAdvance_InvalidDeclarationIsStillConfigInvalid(t *testing.T) {
+	parallelTools(t, false)
+	ws := setupWorkspaceWithPosition(t)
+	writeAgentJSONForTest(t, ws, `{"position_file": "position.md", "cycle_budget_usd": -1}`)
+	putRoutedFakeClaudeOnPATH(t, nil, "")
+
+	requireJSONErrorEnvelope(t, []string{"cycle", "--workspace", ws}, 2, CodeConfigInvalid)
 }
