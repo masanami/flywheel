@@ -285,6 +285,14 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 `{"followups": [{…}, ...]}`。要素は `show` の `followups` の要素と同じ形。`--status`（`open`\|`done`\|`dropped`\|`all`。既定は `open`）は状態だけで絞り、上げてあるもの（`promoted_challenge_id` があるもの）も未のうちに数える。`--challenge <C-ID>` はその課題のものだけに絞る。
 
+##### `followup done`・`followup drop`（S2b で追加）
+
+`{"followups": [{…}, ...]}`。要素は `show` の `followups` の要素と同じ形で、変えた後の状態（`done`・`dropped`。指定した ID の順）。
+
+##### `followup promote`（S2b で追加）
+
+`{"challenge": {…}, "followup": {…}}`。`challenge` は作った課題（上表と同じ形）、`followup` は上げたフォローアップ（`show` の `followups` の要素と同じ形。`status` は `open` のまま、`promoted_challenge_id` が作った課題の ID）。
+
 ##### `list`
 
 `{"challenges": [{…}, ...]}`。要素は `challenge`（上表）と同じ形。
@@ -539,6 +547,9 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel op add <C-ID> --kind <release\|delete\|external_send\|other> --summary <s> [--ref <r>]` | 不可逆操作の登録 | — |
 | `flywheel approve <OP-ID>` / `flywheel reject <OP-ID> --reason <r>` | 不可逆操作の単独の承認・差し戻し | 要 |
 | `flywheel followup list [--status <open\|done\|dropped\|all>] [--challenge <C-ID>]` | フォローアップの一覧（読み取りだけ）。既定は未。状態の閉集合外は `usage_error`、存在しない課題は `not_found`。文の出力は課題ごとにまとめ、課題に属さないものを最後に出す | — |
+| `flywheel followup done <F-ID>... --note <確かめた結果>` | フォローアップを済みにする。本人確認は要らない（端末が無くても `--relayed` が無くても成功する）。`--note` が無ければ `usage_error`、空なら `validation_failed`。同じ ID の重複は `usage_error`。1 つでも存在しなければ `not_found`、未でなければ `validation_failed` で、どれも変えない | — |
+| `flywheel followup drop <F-ID>... --reason <理由> [--relayed --session <s> --quote <q>]` | フォローアップを捨てる。本人確認は 1 回で、要約に全部の ID と題名を出す。打ち込む対象は ID を番号の小さい順にカンマでつないだもの（`F-<a>,F-<b>`）。違えば `confirmation_mismatch`。端末も `--relayed` も無ければ `tty_required`。検査は `done` と同じ | 要 |
+| `flywheel followup promote <F-ID> [--relayed --session <s> --quote <q>]` | 未のフォローアップを新しい課題（未分類）に上げる（1 回に 1 件。2 つ並べたら `usage_error`）。`--json` の根は `followup`（上げたもの）と `challenge`（作った課題）。上げてあるものは、上げた先の課題が取り下げのときだけ上げ直せる（それ以外は `validation_failed`） | 要 |
 | `flywheel status` | 見出し「いま進められること」の下に、あなたの承認を待っているもの・あなたの回答を待っているもの・そのほかの、あなたの操作を待っているもの（あるときだけ）・取り込めるもの・サイクルを回すと進むもの・オーケストレーターの番・外を待っているもの・承認済みの不可逆操作・未のフォローアップの件数を出す。あなたを待っているもの・取り込めるもの・サイクルを回すと進むものが無いときは、その旨を出す。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す（`--json` では `binary_commit`） | — |
 | `flywheel version` | 動いているバイナリのビルドのコミット（`vcs.revision`・`vcs.time`・`vcs.modified`）と、そのバイナリが扱うストアのスキーマの版。読み取りだけで、ストアを開かず（`store_too_new` でも動く）、ネットワークにも Git にも触れない。未コミットの変更つきのビルドは commit の表示に `+dirty` を付ける | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |

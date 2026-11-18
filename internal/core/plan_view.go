@@ -48,6 +48,8 @@ type PlanTaskView struct {
 	Title     string
 	DependsOn []string
 	Status    TaskStatus
+	// Source は対応する取り込み元の子の external_key（対応しなければ空）。
+	Source string
 }
 
 // Identifier はタスクを指す識別子（承認の後はタスクの ID、承認の前は key）。
@@ -183,7 +185,7 @@ func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclar
 		}
 	}
 	for _, t := range raw.Tasks {
-		tv := PlanTaskView{Key: t.Key, Title: t.Title, DependsOn: append([]string{}, t.DependsOn...)}
+		tv := PlanTaskView{Key: t.Key, Title: t.Title, Source: t.Source, DependsOn: append([]string{}, t.DependsOn...)}
 		if row, ok := byKey[t.Key]; ok {
 			tv.ID, tv.Status = row.ID, row.Status
 			tv.DependsOn = append([]string{}, row.DependsOn...)

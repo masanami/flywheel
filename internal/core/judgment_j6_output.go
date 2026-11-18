@@ -74,9 +74,8 @@ type j6RawMemory struct {
 }
 
 type j6RawFollowup struct {
-	Title        *string `json:"title"`
-	Description  *string `json:"description"`
-	DoneCriteria *string `json:"done_criteria"`
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
 }
 
 type j6RawOutput struct {
@@ -106,11 +105,10 @@ type J6Added struct {
 	Signal   string
 }
 
-// J6Followup は J6 が出力するフォローアップの課題 1 件。
+// J6Followup は J6 が出力するフォローアップ 1 件（題名は 1 行）。
 type J6Followup struct {
-	Title        string
-	Description  string
-	DoneCriteria string
+	Title       string
+	Description string
 }
 
 // j6ValidatedOutput は検査を通った J6 の出力。
@@ -162,8 +160,8 @@ func j6OutputSchema() []byte {
 			"body":        str,
 		}, []string{"mode", "type", "slug", "body"})},
 		"followups": map[string]any{"type": "array", "maxItems": maxJ6Followups, "items": obj(map[string]any{
-			"title": str, "description": str, "done_criteria": str,
-		}, []string{"title", "description", "done_criteria"})},
+			"title": str, "description": str,
+		}, []string{"title", "description"})},
 	}, []string{"classifications", "added", "memory", "followups"})
 	b, _ := json.Marshal(schema)
 	return b
@@ -257,10 +255,13 @@ func validateJ6Output(data []byte) (*j6ValidatedOutput, string) {
 		out.Memory = append(out.Memory, item)
 	}
 	for fi, f := range *raw.Followups {
-		if j6Blank(f.Title) || f.Description == nil || f.DoneCriteria == nil {
-			return nil, fmt.Sprintf("followups[%d]: title, description and done_criteria are required", fi)
+		if f.Title == nil || f.Description == nil {
+			return nil, fmt.Sprintf("followups[%d]: title and description are required", fi)
 		}
-		out.Followups = append(out.Followups, J6Followup{Title: *f.Title, Description: *f.Description, DoneCriteria: *f.DoneCriteria})
+		if !followupTitleValid(*f.Title) {
+			return nil, fmt.Sprintf("followups[%d]: title must be a non-empty single line", fi)
+		}
+		out.Followups = append(out.Followups, J6Followup{Title: *f.Title, Description: *f.Description})
 	}
 	return out, ""
 }

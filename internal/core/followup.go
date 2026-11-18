@@ -430,19 +430,11 @@ func promoteFollowup(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att
 	if err != nil {
 		return nil, nil, err
 	}
-	if f.Status != FollowupStatusOpen {
-		return nil, nil, ErrValidation
+	if err := checkPromotable(ctx, tx, f); err != nil {
+		return nil, nil, err
 	}
 	var prevPromoted any
 	if f.PromotedChallengeID != nil {
-		pid, _ := parseChallengeID(*f.PromotedChallengeID)
-		prev, err := loadChallenge(ctx, tx, pid)
-		if err != nil {
-			return nil, nil, err
-		}
-		if prev.Status != StatusWithdrawn {
-			return nil, nil, ErrValidation
-		}
 		prevPromoted = *f.PromotedChallengeID
 	}
 	origin, followupOf := ChallengeOriginManual, (*string)(nil)
@@ -589,4 +581,82 @@ func (s *Store) PromoteFollowup(ctx context.Context, id string, att Attestation)
 		return nil, nil, err
 	}
 	return ch, fu, nil
+}
+
+// checkPromotable は f を課題に上げてよいかを検査する。未であること、上げてあるなら上げた先の課題が
+// 取り下げであること（それ以外は ErrValidation）。
+func checkPromotable(ctx context.Context, tx *sql.Tx, f *Followup) error {
+	if f.Status != FollowupStatusOpen {
+		return ErrValidation
+	}
+	if f.PromotedChallengeID == nil {
+		return nil
+	}
+	pid, _ := parseChallengeID(*f.PromotedChallengeID)
+	prev, err := loadChallenge(ctx, tx, pid)
+	if err != nil {
+		return err
+	}
+	if prev.Status != StatusWithdrawn {
+		return ErrValidation
+	}
+	return nil
+}
+
+// PrepareFollowupDrop は捨てる前の本人確認の要約のために、ids のフォローアップを番号の小さい順で返す（読み取りだけ）。
+// 理由が空なら ErrValidation、存在しないものがあれば ErrNotFound、未でないものがあれば ErrValidation
+// （DropFollowups と同じ規則・同じ順。本人確認を求める前に終えるために使う）。
+func (s *Store) PrepareFollowupDrop(ctx context.Context, ids []string, reason string) ([]Followup, error) {
+	// 検査の順は dropFollowups と同じ（理由 → ID の形 → 存在 → 未であること）。
+	if strings.TrimSpace(reason) == "" {
+		return nil, ErrValidation
+	}
+	if _, ok := FollowupAttestationTarget(ids); !ok {
+		return nil, ErrNotFound
+	}
+	var out []Followup
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		nums, err := parseFollowupIDs(ids)
+		if err != nil {
+			return err
+		}
+		sort.Slice(nums, func(i, j int) bool { return nums[i] < nums[j] })
+		fs, err := loadOpenFollowups(ctx, tx, nums)
+		if err != nil {
+			return err
+		}
+		for _, f := range fs {
+			out = append(out, *f)
+		}
+		return nil
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// PrepareFollowupPromote は課題に上げる前の本人確認の要約のために、id のフォローアップを返す（読み取りだけ）。
+// PromoteFollowup と同じ規則（存在しなければ ErrNotFound、上げてよくなければ ErrValidation）で検査する。
+func (s *Store) PrepareFollowupPromote(ctx context.Context, id string) (*Followup, error) {
+	n, ok := parseFollowupID(id)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	var out *Followup
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		f, err := loadFollowup(ctx, tx, n)
+		if err != nil {
+			return err
+		}
+		if err := checkPromotable(ctx, tx, f); err != nil {
+			return err
+		}
+		out = f
+		return nil
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

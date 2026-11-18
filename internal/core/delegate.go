@@ -151,6 +151,8 @@ type delegationContext struct {
 	// Rejections は完了確認での差し戻しの理由（古い順。無ければ空）。
 	Rejections []CompletionRejection
 	Binding    *sourceBinding
+	// TaskSource は Task の実行へ渡す取り込み元（差し込みの値。決め方は resolveTaskSourceBinding）。渡さないとき nil。
+	TaskSource *sourceBinding
 	Validated  *j2ValidatedOutput
 	Repo       ConnectorRepo
 	Connector  Connector
@@ -394,6 +396,11 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		if dc.Binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
 			return err
 		}
+		if len(tasks) == 1 {
+			if dc.TaskSource, err = loadTaskSourceBinding(ctx, tx, cid, taskIDPtr(&tasks[0])); err != nil {
+				return err
+			}
+		}
 		if override, err = loadPlanBudgetOverride(ctx, tx, cid, int64(p.Version)); err != nil {
 			return err
 		}
@@ -463,7 +470,7 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		}
 	}
 	if connector.Form == ConnectorFormPlugin {
-		inv, err := fillInvocation(dc.Operation.Invocation, ch.ID, dc.Binding)
+		inv, err := fillInvocation(dc.Operation.Invocation, ch.ID, dc.TaskSource)
 		if err != nil {
 			return nil, err
 		}
@@ -914,9 +921,9 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 
 		HumanRejections: formatCompletionRejectionsSection(dc.Rejections),
 	}
-	if dc.Binding != nil {
-		if _, n, ok := parseExternalKey(dc.Binding.ExternalKey); ok {
-			launch.SourceIssueNumber, launch.SourceIssueURL = n, dc.Binding.URL
+	if dc.TaskSource != nil {
+		if _, n, ok := parseExternalKey(dc.TaskSource.ExternalKey); ok {
+			launch.SourceIssueNumber, launch.SourceIssueURL = n, dc.TaskSource.URL
 		}
 	}
 	if dc.Resume != nil {

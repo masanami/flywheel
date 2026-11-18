@@ -54,7 +54,7 @@ func parsePlanSpec(spec *string) planSpecView {
 	for _, t := range raw.Tasks {
 		v.Tasks = append(v.Tasks, TaskInput{
 			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria, NonGoals: t.NonGoals,
-			Repo: t.Repo, Operation: t.Operation, DependsOn: t.DependsOn,
+			Repo: t.Repo, Operation: t.Operation, DependsOn: t.DependsOn, SourceKey: t.Source,
 		})
 	}
 	v.UsesIntegration = raw.UsesIntegration
