@@ -29,6 +29,7 @@ func TestIngest_JSONItem_ReflectsObservationValues(t *testing.T) {
 		}), 0),
 	})
 
+	runJSON(t, ws, "ingest", repo+"#1") // 課題にするのは選んだ Issue だけ。追従の結果を読む
 	res := runJSON(t, ws, "ingest")
 	sources := res["sources"].([]any)
 	items := itemsOf(t, repoOf(t, findSourceByID(t, sources, "observation-json-source"), repo))

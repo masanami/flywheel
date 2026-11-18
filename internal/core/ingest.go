@@ -17,8 +17,8 @@ import (
 // ロックなし）→③Issue ごとに書き込みトランザクション（BEGIN IMMEDIATE）の中で
 // 最新の状態を読み直して反映する、の順に進む。
 //
-// この骨格は #56 が作った（対応の無い、ポリシーに合う Issue から課題を作る
-// ＝ingest_create）。#57 が対応のある Issue の冪等な更新（reconcileBoundIssue。
+// 課題を作るのは、オーナーが選んだ Issue だけ（IngestSelected。ingest_select.go）。
+// Ingest は対応のある課題の追従だけを行い、対応の無い Issue は無視する。#57 が対応のある Issue の冪等な更新（reconcileBoundIssue。
 // fingerprint の 3 分岐・完了した課題のスキップ・ingest_update）を、#58 が次を
 // 足した:
 //   - open の一覧に現れた対応: reconcileBoundIssue の 1 つの書き込みトランザク
@@ -48,7 +48,8 @@ import (
 // であり、`unchanged` は上流の状態・ポリシーの状態が変わった場合も含む」）。
 type IngestOutcome string
 
-// IngestOutcome の値（仕様の列挙の順）。
+// IngestOutcome の値（仕様の列挙の順）。IngestOutcomeCreated は S2b から Ingest が出さない
+// （作成は IngestSelected）。閉集合の互換のために残す。
 const (
 	IngestOutcomeCreated                   IngestOutcome = "created"
 	IngestOutcomeUpdated                   IngestOutcome = "updated"
@@ -109,8 +110,9 @@ type RepoIngestResult struct {
 	// Error は一覧の取得が失敗したときだけ非 nil（部分成功。§機能要件「取得」
 	// 「一覧の取得に失敗したリポジトリは、そのリポジトリについて何も変更せず、
 	// 結果に失敗として示す。他のリポジトリの処理は続ける」）。
-	Error    *string
-	Items    []IngestItemResult
+	Error *string
+	Items []IngestItemResult
+	// Excluded は互換のために残すキーで、いつも 0（対応の無い Issue は数えない）。
 	Excluded int
 }
 
@@ -206,8 +208,12 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 					return nil, err
 				}
 				observed.observe(issue)
-				_, isBound := bound[issue.ExternalKey]
-				item, excluded, err := s.ingestOneIssue(ctx, actor, ch, src, selfAssignees, resolved, isBound, issue)
+				if _, isBound := bound[issue.ExternalKey]; !isBound {
+					// 対応の無い Issue は新しい課題にしない（選んだものだけを
+					// IngestSelected が作る）。どの件数にも数えない。
+					continue
+				}
+				item, err := s.reconcileBoundIssue(ctx, actor, ch, src, selfAssignees, resolved, issue)
 				switch {
 				case err != nil:
 					msg := err.Error()
@@ -216,8 +222,6 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 						Result:      IngestOutcomeFailed,
 						Error:       &msg,
 					})
-				case excluded:
-					rr.Excluded++
 				case item != nil:
 					rr.Items = append(rr.Items, *item)
 				}
@@ -243,44 +247,6 @@ func (s *Store) Ingest(ctx context.Context, ch Channel, in IngestInput) (*Ingest
 		return nil, err
 	}
 	return result, nil
-}
-
-// ingestOneIssue は 1 件の Issue を判定する:
-//   - 対応が既にあれば、reconcileBoundIssue で冪等な更新を行う
-//   - 対応が無く、ポリシーに合わなければ excluded=true
-//   - 対応が無く、ポリシーに合えば課題と対応を作り、item を返す
-//
-// 対応の有無（isBound）は①で読んだ値。実際の作成・更新は
-// createChallengeFromIssue／reconcileBoundIssue が 1 つの書き込みトランザクション
-// の中で読み直してから行う（③）。
-//
-// self_assignees の解決に失敗した取り込み元でも、対応のある Issue の冪等な更新は
-// 行う【仮定】。AC-33 が除くのはポリシーの再判定（#58）だけで、fingerprint に
-// よる人間記入欄の置き換えには例外が無いため。
-func (s *Store) ingestOneIssue(ctx context.Context, actor string, ch Channel, src SourceEntry, selfAssignees map[string]bool, resolved bool, isBound bool, issue UpstreamIssue) (item *IngestItemResult, excluded bool, err error) {
-	if isBound {
-		item, err := s.reconcileBoundIssue(ctx, actor, ch, src, selfAssignees, resolved, issue)
-		return item, false, err
-	}
-
-	if !issueMatchesAssigneePolicy(src.Policy(), selfAssignees, issue.Assignees) {
-		return nil, true, nil
-	}
-
-	created, err := s.createChallengeFromIssue(ctx, actor, ch, src, issue)
-	if err != nil {
-		if errors.Is(err, errSourceBindingExternalKeyTaken) {
-			// ①の後に並行した別の取り込みがこの外部キーの対応を先に作った
-			// （AC-60）。このトランザクションはロールバックされ課題も作られない。
-			// 書き込みトランザクションは BEGIN IMMEDIATE で直列化されるので、
-			// 先に作った側は既にコミット済みで、reconcileBoundIssue の③の読み直し
-			// で必ず見える。「対応が既にある」分岐と同じ冪等な更新へ回す。
-			item, err := s.reconcileBoundIssue(ctx, actor, ch, src, selfAssignees, resolved, issue)
-			return item, false, err
-		}
-		return nil, false, err
-	}
-	return created, false, nil
 }
 
 // reconcileBoundIssue は対応が既にある Issue を、1 つの書き込みトランザクション
@@ -575,67 +541,47 @@ func applyIngestReflection(ctx context.Context, tx *sql.Tx, rec *activityRecorde
 	return &item, nil
 }
 
-// createChallengeFromIssue は 1 つの書き込みトランザクションの中で、対応が
-// まだ無いことを読み直してから（③）、状態 未分類 の課題と source_binding を
-// 作り、ingest_create を作業ログへ記録する（§冪等な作成と更新・§作業ログと版）。
-func (s *Store) createChallengeFromIssue(ctx context.Context, actor string, ch Channel, src SourceEntry, issue UpstreamIssue) (*IngestItemResult, error) {
+// insertIngestedChallenge は書き込みトランザクションの中で、状態 未分類 の課題と
+// source_binding を作り、ingest_create を作業ログへ記録する（§冪等な作成と更新・
+// §作業ログと版）。対応がまだ無いことの読み直し（③）は呼び出し側が同じ
+// トランザクションの中で済ませる。
+func insertIngestedChallenge(ctx context.Context, tx *sql.Tx, rec *activityRecorder, src SourceEntry, issue UpstreamIssue) (*sourceBinding, error) {
 	urgency := computeIngestUrgency(issue.Labels, src.UrgencyLabels)
 	fp := Fingerprint(issue.Body)
 
-	var item *IngestItemResult
-	err := s.mutateAs(ctx, actor, ch, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
-		// ③最新の状態を読み直す: ingestOneIssue の事前チェックからこのトランザ
-		// クションを開くまでの間に、別のプロセスが同じ外部キーの対応を作って
-		// いないかを確認する。
-		existing, err := loadSourceBindingByExternalKey(ctx, tx, issue.ExternalKey)
-		if err != nil {
-			return err
-		}
-		if existing != nil {
-			return errSourceBindingExternalKeyTaken
-		}
+	id, _, err := insertChallengeRow(ctx, tx, rec.at, issue.Title, issue.Body, "", urgency, issue.Reporter, ChallengeOriginIngest, nil, nil)
+	if err != nil {
+		return nil, err
+	}
 
-		id, _, err := insertChallengeRow(ctx, tx, rec.at, issue.Title, issue.Body, "", urgency, issue.Reporter, ChallengeOriginIngest, nil, nil)
-		if err != nil {
-			return err
-		}
-
-		// 作成時の観測値は Issue の comments・updated_at、読んだ時点のコメント数は
-		// 0、読んだ時点の更新日時は作成時の観測値の更新日時にする（本文は読んだ
-		// もの、コメントは未読とみなす＝QH11）。
-		sb, err := insertSourceBinding(ctx, tx, rec.at, id, createSourceBindingInput{
-			SourceID:              src.ID,
-			ExternalKey:           issue.ExternalKey,
-			URL:                   issue.URL,
-			Fingerprint:           fp,
-			UpstreamState:         upstreamStateOpen,
-			PolicyState:           policyStateInPolicy,
-			CommentsCount:         issue.Comments,
-			UpstreamUpdatedAt:     issue.UpdatedAt,
-			ReadCommentsCount:     0,
-			ReadUpstreamUpdatedAt: issue.UpdatedAt,
-		})
-		if err != nil {
-			return err
-		}
-
-		// after は課題の人間記入欄と external_key（M1 の create と同じく version
-		// は載せない。§作業ログと版）。観測値は載せない（作成時の観測値は show で
-		// 読める。§作業ログと版の注記）。
-		after := createdChallengeAfter(issue.Title, issue.Body, "", urgency, issue.Reporter)
-		after["external_key"] = sb.ExternalKey
-		if err := rec.record("challenge", id, "ingest_create", nil, after); err != nil {
-			return err
-		}
-
-		createdItem := ingestItemFromBinding(sb, IngestOutcomeCreated)
-		item = &createdItem
-		return nil
+	// 作成時の観測値は Issue の comments・updated_at、読んだ時点のコメント数は
+	// 0、読んだ時点の更新日時は作成時の観測値の更新日時にする（本文は読んだ
+	// もの、コメントは未読とみなす＝QH11）。
+	sb, err := insertSourceBinding(ctx, tx, rec.at, id, createSourceBindingInput{
+		SourceID:              src.ID,
+		ExternalKey:           issue.ExternalKey,
+		URL:                   issue.URL,
+		Fingerprint:           fp,
+		UpstreamState:         upstreamStateOpen,
+		PolicyState:           policyStateInPolicy,
+		CommentsCount:         issue.Comments,
+		UpstreamUpdatedAt:     issue.UpdatedAt,
+		ReadCommentsCount:     0,
+		ReadUpstreamUpdatedAt: issue.UpdatedAt,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return item, nil
+
+	// after は課題の人間記入欄と external_key（M1 の create と同じく version
+	// は載せない。§作業ログと版）。観測値は載せない（作成時の観測値は show で
+	// 読める。§作業ログと版の注記）。
+	after := createdChallengeAfter(issue.Title, issue.Body, "", urgency, issue.Reporter)
+	after["external_key"] = sb.ExternalKey
+	if err := rec.record("challenge", id, "ingest_create", nil, after); err != nil {
+		return nil, err
+	}
+	return sb, nil
 }
 
 // resolveIngestSelfAssignees は src の self_assignees を正規化した集合にする。

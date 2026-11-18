@@ -393,8 +393,12 @@ func defaultCommands() []Command {
 			// Issue #54: 宣言の読み込み・--source の絞り込み・config_*/store_too_new
 			// の写像だけを行う（取り込みの本体は #59）。--dry-run は S2 のため
 			// ここでは足さない。
+			// 引数が無ければ取り込み済みの追従だけ（新しい課題は作らない）。
+			// `<指定>...`（`<owner>/<repo>#<番号>` か番号）は選んだ Issue だけを課題にする。
 			Path:          []string{"ingest"},
 			RequiresStore: true,
+			MinPositional: 0,
+			MaxPositional: UnlimitedPositional,
 			Flags:         []flagDef{{Name: "source", HasValue: true}},
 			Run:           runIngest,
 		},

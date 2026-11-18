@@ -181,7 +181,7 @@ func TestCycle_FullyExplicitAgentJSON_ConfigDefaultsUsedIsEmptyArray(t *testing.
 // --- AC-132〜136: 段の順・skipped ---
 
 // AC-132: sources.json のあるワークスペースの cycle は、取り込み・分類・計画の順に段を
-// 実行する（偽の gh と偽の claude の呼び出しの順で検証する）。取り込みで作られた課題が
+// 実行する（偽の gh と偽の claude の呼び出しの順で検証する）。選んで取り込んだ課題が
 // 同じ周で分類・計画される。
 func TestCycle_WithSources_RunsIngestClassifyPlanInOrder(t *testing.T) {
 	parallelTools(t, false)
@@ -197,6 +197,8 @@ func TestCycle_WithSources_RunsIngestClassifyPlanInOrder(t *testing.T) {
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, order)
 	// 上流の課題は数えに入らないので、進められる課題を 1 件置いておく（C-1。取り込む課題は C-2）。
 	createTitled(t, ws, "pre-existing")
+	// 周の取り込みの段は追従だけを行い、新しい課題を作らない。課題にするのは選んだ Issue だけなので、先に選ぶ（C-2）。
+	runJSON(t, ws, "ingest", "o/r#1")
 
 	doc := cycleDoc(t, ws)
 

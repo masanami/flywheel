@@ -18,7 +18,8 @@ import (
 // 環境変数・フラグで変えられるようにしない。設計上の【仮定】）。
 var ingestGHTimeout time.Duration
 
-// runIngest は `flywheel ingest [--source <id>]` の実装。
+// runIngest は `flywheel ingest [<指定>...] [--source <id>]` の実装。<指定> があれば runIngestSelected、
+// 無ければ取り込み済みの追従だけを行う（新しい課題は作らない）。
 //
 // 宣言の読み込みと検証（core.LoadSourcesDeclaration）・`--source` の対象の
 // 絞り込み（core.SelectSources）は #54 の範囲のまま。本チケット（#59）は、
@@ -53,6 +54,9 @@ func runIngest(a Args) (any, error) {
 	if v, ok := a.Values["source"]; ok {
 		sourceID = &v
 	}
+	if len(a.Positional) > 0 {
+		return runIngestSelected(a, decl, sourceID)
+	}
 	selected, err := core.SelectSources(decl, sourceID)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -78,6 +82,29 @@ func runIngest(a Args) (any, error) {
 		json: view.FromIngestResult(result),
 		text: ingestResultText(result),
 	}, nil
+}
+
+// runIngestSelected は `flywheel ingest <指定>... [--source <id>]` の実装。選んだ Issue だけを
+// 新しい課題にする（判定・作成は core.Store.IngestSelected。CLI は写すだけ）。
+func runIngestSelected(a Args, decl *core.SourcesDeclaration, sourceID *string) (any, error) {
+	client, err := newIngestClient(a.lookPath())
+	if err != nil {
+		return nil, err
+	}
+	res, err := a.Store.IngestSelected(context.Background(), core.ChannelCLI, core.IngestSelectedInput{
+		Sources:  decl.Sources,
+		SourceID: sourceID,
+		Specs:    a.Positional,
+		Upstream: client,
+	})
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	var b strings.Builder
+	for _, c := range res.Ingested {
+		fmt.Fprintf(&b, "%s を課題 %s にしました\n", c.ExternalKey, c.ChallengeID)
+	}
+	return textOutput{json: view.FromIngestSelectedResult(res), text: b.String()}, nil
 }
 
 // newIngestClient は取り込み（`ingest`・`cycle` の取り込みの段）が使う `gh` のクライアントを
