@@ -886,8 +886,9 @@ var jsonEntityOf = map[string]string{
 	"runs": "run",
 	// show の followups と followup list の followups の要素（S2b）。
 	"followups": "followup",
-	// show の source_children の要素（S2b。取り込み元の子）。
-	"source_children": "source_child",
+	// show の source_children の要素（S2b。取り込み元の子）。文書の表の行の名前は、末尾の s を除いても変わらない
+	// （children）ので、要素の形の名前も source_children のままになる。
+	"source_children": "source_children",
 	// slot clear の slot（S2。§IF / API の「slot clear」の行）。
 	"slot": "slot",
 	// status.needs_human.budget_exhausted（S2。§IF / API の「status.needs_human.budget_exhausted」の行）。

@@ -173,11 +173,21 @@ func (s *Store) countRunnableDelegations(ctx context.Context, agent *AgentDeclar
 			n++ // 読み切れない理由は多めに数える
 			continue
 		}
-		// 委譲の段（delegateOnce）と同じ順で見る: 失敗の上限・やり直しの上限は、段が保留を作るので進むもの。
-		if dc.LimitHit == nil && dc.ReworkHit == nil && dc.implBudgetExhausted() {
+		if !dc.advancesWhenTheStageRuns() {
 			continue // run_budget（状況の「予算切れ」に出る。サイクルを回しても変わらない）
 		}
 		n++
 	}
 	return n, nil
+}
+
+// advancesWhenTheStageRuns は、委譲の段がこの課題に着くと何かが進むか（delegateOnce と同じ順で見る）。
+// 連続の失敗の上限・やり直しの上限に達していれば、段がその課題を人間対応待ちにするので、進む（実装枠が尽きていても、
+// 段は先に上限を見る）。上限に達しておらず、実装枠が尽きていれば、段は起動しないので、進まない（run_budget）。
+// それ以外は、起動するので、進む。
+func (dc *delegationContext) advancesWhenTheStageRuns() bool {
+	if dc.LimitHit != nil || dc.ReworkHit != nil {
+		return true
+	}
+	return !dc.implBudgetExhausted()
 }

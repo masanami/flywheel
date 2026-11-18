@@ -381,7 +381,7 @@ M1 §成功時の JSON 出力の規約に従う（包みなし・snake_case・�
 
 - `result` は `created | updated | unchanged | skipped_done | fingerprint_unknown_version | failed` の閉集合。`result` は人間記入欄と fingerprint についての結果であり、`unchanged` は上流の状態・ポリシーの状態が変わった場合も含む。上流の状態・ポリシーの状態の変化は、同じ要素の `upstream_state`・`policy_state` の値（変化後）と作業ログで読む。
 - `comments_count`・`upstream_updated_at` は反映後の観測値、`unread` は反映後の記録から導いた未読の更新の種類（`upstream_commented | upstream_updated` の部分集合。この列挙の順に並べる。無ければ `[]`。`status` の `kinds` と同じ判定）である【決定 2026-09-26 オーナー QH10】。`result` は観測値について何も表さず、観測値だけが変わった要素の `result` は `unchanged` である。`upstream_updated_at` は `0003` の前に作られ、まだ観測していない対応では `null`。
-- `items` は、対応のある Issue だけを並べる。対応の無い Issue はどの件数にも数えず、`excluded` はいつも `0`（キーは残す。S2b）。`result` の `created` は閉集合の値として残るが、引数なしの `ingest` は出さない（作成は `ingest <指定>...` の `ingested`）。
+- `items` は、対応のある Issue を並べる（ほかに入るのは、追従の書き込みに失敗した取り込み元の子の `failed` の要素だけ。下の `error` の項）。対応の無い Issue はどの件数にも数えず、`excluded` はいつも `0`（キーは残す。S2b）。`result` の `created` は閉集合の値として残るが、引数なしの `ingest` は出さない（作成は `ingest <指定>...` の `ingested`）。
 - `error` はリポジトリの一覧の取得か、1 件の取得の失敗の要約（文字列）。成功なら `null`。 【core の見直しの区切り S2b で足した点】記録した取り込み元の子の追従で、ストアへの書き込みに失敗したときも、その子の `external_key` を持つ `failed` の要素を `items` に入れる（`challenge_id` などは `null`。`error` は「取り込み元の子の追従に失敗: 」で始まる）。
 - 一覧の取得に失敗したリポジトリの `items` は `[]`、`excluded` は `0` である。
 

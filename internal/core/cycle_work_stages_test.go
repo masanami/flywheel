@@ -385,3 +385,29 @@ func TestCountCycleWork_FailureLimitHitIsCountedUntilTheStagePutsItOnHold(t *tes
 		t.Errorf("run = %d after the hold, want 0", w.Stages.Run)
 	}
 }
+
+// 数えの判定（委譲の段がこの課題に着くと何かが進むか）を、上限と実装枠の組み合わせの全部で確かめる。
+// 失敗の上限・やり直しの上限に達した課題は、実装枠が尽きていても進む（段が、枠より先に上限を見て、人間対応待ちにする）。
+func TestDelegationContext_AdvancesWhenTheStageRuns(t *testing.T) {
+	t.Parallel()
+	enough, exhausted := minImplLaunchMicros, minImplLaunchMicros-1
+	for _, tc := range []struct {
+		name   string
+		limit  *failureLimitHit
+		rework *reworkLimitHit
+		impl   int64
+		want   bool
+	}{
+		{"上限なし・枠あり", nil, nil, enough, true},
+		{"上限なし・枠が尽きた（run_budget）", nil, nil, exhausted, false},
+		{"失敗の上限・枠あり", &failureLimitHit{}, nil, enough, true},
+		{"失敗の上限・枠が尽きた", &failureLimitHit{}, nil, exhausted, true},
+		{"やり直しの上限・枠あり", nil, &reworkLimitHit{}, enough, true},
+		{"やり直しの上限・枠が尽きた", nil, &reworkLimitHit{}, exhausted, true},
+	} {
+		dc := &delegationContext{LimitHit: tc.limit, ReworkHit: tc.rework, ImplBudgetMicros: tc.impl}
+		if got := dc.advancesWhenTheStageRuns(); got != tc.want {
+			t.Errorf("%s: advancesWhenTheStageRuns() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

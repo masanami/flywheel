@@ -27,7 +27,8 @@ const defaultCycleTrigger = "manual"
 // 読み込み順（個別の操作と同じ形。どの段で失敗しても、それより後は行わず周も始めない）:
 // agent.json の読み込み・検証 → RequirePositionFile → sources.json（無ければ取り込みの段は
 // skipped。不備なら config_invalid）→ connectors.json（無ければ計画・委譲・検証の段は skipped。
-// 不備なら config_invalid）→ 取り込みの段があれば gh の有無（無ければ
+// 不備なら config_invalid）→ サイクルを回すと進むものの数え（0 件なら、ここで「始めなかった」を返して
+// 終わる。道具は探さない）→ 取り込みの段があれば gh の有無（無ければ
 // upstream_unavailable）→ claude の有無（無ければ invoker_unavailable）→ RunCycle。
 // 宣言の不備は環境の不備（gh・claude の不在）より先に報告する。
 // 生きている別の cycle があれば core が locked を返す。周の中の run の失敗は結果に示すだけで、

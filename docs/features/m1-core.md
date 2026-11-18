@@ -397,7 +397,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 | `items`（`repo` の一覧。要素の名前は `item`） | `{"external_key", "challenge_id", "result", "upstream_state", "policy_state", "comments_count", "upstream_updated_at", "unread", "error"}`（`comments_count`・`upstream_updated_at`・`unread` は #72〔上流の更新の観測と既読〕が追加） |
 
 - `result` は `created`\|`updated`\|`unchanged`\|`skipped_done`\|`fingerprint_unknown_version`\|`failed` の閉集合（`core.IngestOutcomeValues()` と同じ順）。
-- `items` は課題を作った・対応のある Issue だけを並べる。ポリシーに合わない新しい Issue は `excluded` の件数だけに数える。
+- `items` は課題を作った・対応のある Issue を並べる（ほかに入るのは、追従の書き込みに失敗した取り込み元の子の `failed` の要素だけ。下の `error`（`item` の要素）の項。S2b）。ポリシーに合わない新しい Issue は `excluded` の件数だけに数える。
 - `error`（`repo` の要素）は一覧の取得の失敗の要約。成功なら `null`。一覧の取得に失敗したリポジトリの `items` は `[]`・`excluded` は `0`。
 - `error`（`item` の要素）は、その要素の反映が失敗した（`result` が `failed`）ことの要約。一覧の取得後・1件の取得（close の確かめ）・書き込みの反映のいずれの失敗も含みうる。成功なら `null`。 記録した取り込み元の子（S2b。`show` の `source_children`）の追従で、ストアへの書き込みに失敗したときも、その子の `external_key` を持つ `failed` の要素が `items` に入る（課題の要素ではないので `challenge_id`・`upstream_state`・`policy_state` は `null`。`error` は「取り込み元の子の追従に失敗: 」で始まるので、課題の対応の失敗と見分けられる）。うまく追従できた子は `items` に入れない。
 - `challenge_id`・`upstream_state`・`policy_state` は、(1) 新規作成の反映が失敗した場合、(2) 対応（`source_binding`）のある Issue の冪等な更新の反映自体が失敗した場合、(3) close の確かめ（1 件の取得）自体は成功したが、その後の反映（書き込みトランザクションでの読み直し・更新）が失敗した場合、のいずれでも `null` になる（既知の対応の情報を積まずに `failed` を返す実装になっている）。`null` にならないのは、close の確かめの **1 件の取得**（`GetIssue`）自体が失敗した場合だけで、この場合は読み直した対応の値をそのまま出力する。
