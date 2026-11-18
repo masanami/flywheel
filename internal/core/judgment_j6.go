@@ -108,7 +108,8 @@ type j6Context struct {
 	Runs              []runRow
 	// Followups はこの課題にぶら下がる followup の行（状態を問わない）。ID の昇順。
 	Followups []j6Followup
-	// PastFollowups は過去の形（この課題を followup_of に持つ、出どころが followup の課題）。ID の昇順。
+	// PastFollowups はこの課題を followup_of に持つ課題。過去の形（学びの判断点が課題として起票したもの）と、
+	// この課題のフォローアップを上げて作った課題の両方が入る。ID の昇順。
 	PastFollowups []j6Followup
 }
 
