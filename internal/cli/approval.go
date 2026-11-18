@@ -633,6 +633,7 @@ func writeConditionsAfterRelease(b *strings.Builder, conds []string, outlook vie
 // writePlanStageSummary は計画の承認の要約へ、論点の各問いと回答・予想の各例・やらないことを
 // 書く。段階の欄が NULL の見出しは出さない（すべて NULL なら何も足さない）。
 func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
+	writePlanTopics(b, p.PlanTopics)
 	if len(p.Issues) > 0 {
 		b.WriteString("論点:\n")
 		for i, is := range p.Issues {
@@ -656,6 +657,16 @@ func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
 		b.WriteString("やらないこと:\n")
 		for _, g := range p.NonGoals {
 			fmt.Fprintf(b, "  - %s\n", escapeControl(g))
+		}
+	}
+	if len(p.PlanTasks) > 0 {
+		fmt.Fprintf(b, "タスクのツリー（%d 件・統合先を使うか: %s）:\n", len(p.PlanTasks), usesIntegrationText(p.PlanUsesIntegration))
+		for _, t := range p.PlanTasks {
+			line := fmt.Sprintf("  %s %s", t.Identifier(), escapeControl(t.Title))
+			if len(t.DependsOn) > 0 {
+				line += "（前提: " + strings.Join(t.DependsOn, "・") + "）"
+			}
+			b.WriteString(line + "\n")
 		}
 	}
 }

@@ -497,6 +497,23 @@ const (
 
 var taskStatusValues = []TaskStatus{TaskStatusPending, TaskStatusInProgress, TaskStatusVerifying, TaskStatusDone, TaskStatusCancelled}
 
+// Label はタスクの状態の表示名（端末の表示用）。
+func (s TaskStatus) Label() string {
+	switch s {
+	case TaskStatusPending:
+		return "未着手"
+	case TaskStatusInProgress:
+		return "作業中"
+	case TaskStatusVerifying:
+		return "検証中"
+	case TaskStatusDone:
+		return "済み"
+	case TaskStatusCancelled:
+		return "取りやめ"
+	}
+	return string(s)
+}
+
 // ParseTaskStatus は s をタスクの状態として解釈する。前後の空白を除いた完全一致のみ受理する。
 func ParseTaskStatus(s string) (TaskStatus, bool) {
 	trimmed := strings.TrimSpace(s)

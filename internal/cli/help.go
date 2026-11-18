@@ -14,7 +14,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
 コマンド:
   init
   create --title <t> [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>]
-  show <ID>
+  show <ID> [--plan]   （--plan＝最新の計画の方針・問いと推奨・タスクのツリー・予算の上限・統合先を使うかを出す）
   list [--status <状態>]
   edit <ID> [--title <t>] [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>]
             [--headline <h>] [--context <c>] [--expected <json>] [--actual <json>]

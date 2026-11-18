@@ -85,6 +85,11 @@ type ApprovalPreview struct {
 	// Kind == ApprovalKindPlan のときだけ有効（最新の計画の版と本文）。
 	PlanVersion int
 	PlanBody    string
+	// PlanTopics・PlanTasks・PlanUsesIntegration は最新の計画の論点と問い（答えつき）・タスク（前提は計画の中の key）・統合先を使うか。
+	// 構造化した出力を持たない計画では、論点・タスクは空で UsesIntegration は nil。
+	PlanTopics          []PlanTopicView
+	PlanTasks           []PlanTaskView
+	PlanUsesIntegration *bool
 
 	// Kind == ApprovalKindCompletion のときだけ有効。
 	DoneCriteria string
@@ -205,6 +210,13 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 			case err == nil:
 				preview.PlanVersion = version
 				preview.PlanBody = body
+				pv, err := loadPlanView(ctx, tx, cid)
+				if err != nil {
+					return err
+				}
+				if pv != nil {
+					preview.PlanTopics, preview.PlanTasks, preview.PlanUsesIntegration = pv.Topics, pv.Tasks, pv.UsesIntegration
+				}
 			case errors.Is(err, sql.ErrNoRows):
 				// 計画承認待ちなのに計画行が無い状態は本来到達しない
 				// （PlanChallenge が常に計画を登録してから遷移する）。以前は

@@ -169,6 +169,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM4StageShape(t, &doc)
 	addM45OperationShape(t, &doc)
 	addM45DependencyKeysShape(t, &doc)
+	addCoreRedesignS2aShowShape(t, &doc)
 	return doc
 }
 
@@ -1567,4 +1568,30 @@ func addM45MetricsCompareShape(t *testing.T, doc *documentedJSON) {
 		}
 	}
 	doc.entity["metrics_compare_group"] = group
+}
+
+// addCoreRedesignS2aShowShape は core の見直しの区切り S2a が show --json に足したキー（根の `tasks`・
+// `challenge.uses_integration`・`runs[]` と `holds[]` の `task_id`）を doc へ合成する。core-redesign.md の
+// 画面・API設計が、これらのキーを足すと書いていることを確かめた上で足す（第 2 の正本を持たず、文書の記述が
+// 消えたらここで落ちる）。
+func addCoreRedesignS2aShowShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "core-redesign.md"))
+	if err != nil {
+		t.Fatalf("read core-redesign spec: %v", err)
+	}
+	if !strings.Contains(string(data), "根に `tasks`") ||
+		!strings.Contains(string(data), "`challenge` に `uses_integration`") ||
+		!strings.Contains(string(data), "`runs[]` と `holds[]` の要素に `task_id`") {
+		t.Fatal("core-redesign spec does not document the S2a keys of show --json (tasks / uses_integration / task_id)")
+	}
+	if len(doc.topLevel["show"]) == 0 || len(doc.entity["run"]) == 0 || len(doc.entity["hold"]) == 0 || len(doc.entity["show_challenge"]) == 0 {
+		t.Fatal("documented shapes of show / run / hold / show_challenge not found")
+	}
+	for _, shape := range doc.topLevel["show"] {
+		shape["tasks"] = true
+	}
+	doc.entity["run"]["task_id"] = true
+	doc.entity["hold"]["task_id"] = true
+	doc.entity["show_challenge"]["uses_integration"] = true
 }

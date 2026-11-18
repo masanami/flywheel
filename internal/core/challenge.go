@@ -110,6 +110,8 @@ type Hold struct {
 	AnsweredAt *time.Time
 	AnsweredBy *string
 	RunID      *string // 保留の原因の run の ID（"R-<n>"）。無ければ nil
+	// TaskID は保留が結び付くタスクの ID（"T-<n>"。0026）。課題の単位の保留と過去の行は nil。
+	TaskID *string
 	// AnsweredChannel・AnsweredVerification は回答の経路と本人確認の方式。未回答・
 	// 記録の無い既存の行は nil。RelaySession・RelayQuote は方式 relayed の回答の
 	// 会話の手がかり（M4P24）。relayed 以外は nil。
@@ -209,6 +211,10 @@ type ChallengeDetail struct {
 	FollowupOf *string
 	// Improvement は改修課題（origin=improvement）の改修の鍵。改修課題でなければ nil。
 	Improvement *ImprovementKey
+	// Tasks は課題のタスク（ID の昇順。前提のタスクの ID つき）。無ければ空のスライス（nil でない）。
+	Tasks []Task
+	// UsesIntegration は課題が統合先を使うか（challenge.uses_integration）。未決か過去の課題は nil。
+	UsesIntegration *bool
 }
 
 // ImprovementKey は改修課題の鍵（challenge.improvement_layer・improvement_target。マイグレーション 0012）。
@@ -432,7 +438,7 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT question, from_status, raised_at, answer, answered_at, answered_by, run_id,
-		        answered_channel, answered_verification, relay_session, relay_quote, closed_at, kind, replan
+		        answered_channel, answered_verification, relay_session, relay_quote, closed_at, kind, replan, task_id
 		 FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -450,10 +456,15 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			relQuote, closedAtStr             sql.NullString
 			kind                              string
 			replan                            int
+			taskID                            sql.NullInt64
 			h                                 Hold
 		)
-		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind, &replan); err != nil {
+		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind, &replan, &taskID); err != nil {
 			return nil, err
+		}
+		if taskID.Valid {
+			v := formatTaskID(taskID.Int64)
+			h.TaskID = &v
 		}
 		h.Replan = replan == 1
 		h.Kind = HoldKind(kind)
@@ -839,6 +850,12 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 		}
 		detail.Waiting, err = loadWaitingReasons(ctx, tx, cid, c.Status, eval)
 		if err != nil {
+			return err
+		}
+		if detail.Tasks, err = listTasks(ctx, tx, cid); err != nil {
+			return err
+		}
+		if detail.UsesIntegration, err = challengeUsesIntegration(ctx, tx, cid); err != nil {
 			return err
 		}
 		var followupOf, impLayer, impTarget sql.NullString

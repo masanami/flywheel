@@ -203,6 +203,7 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
   result: null,
   session_id: null,
   started_at: iso(45),
+  task_id: null,
   ...p,
 });
 
@@ -347,6 +348,7 @@ export function seed(): Record<string, MockWorkspace> {
             "旧テーブルの deleted_at が NULL の行を移行対象に含めてよいですか？ 含めると 3 万件増えます。",
           raised_at: iso(90),
           run_id: null,
+          task_id: null,
         },
       ],
     }),

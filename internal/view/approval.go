@@ -44,10 +44,22 @@ func ConditionsAfterReleaseHeading(o ConditionsOutlook) string {
 	return "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"
 }
 
-// ApprovalPlan は計画承認待ちの要約の計画（最新の版と本文）。
+// ApprovalPlan は計画承認待ちの要約の計画（最新の版と本文、論点と問い、タスク、統合先を使うか）。
+// 構造化した出力を持たない計画では topics・tasks は []、uses_integration は null。
 type ApprovalPlan struct {
-	Body    string `json:"body"`
-	Version int    `json:"version"`
+	Body            string             `json:"body"`
+	Tasks           []ApprovalPlanTask `json:"tasks"`
+	Topics          []PlanTopic        `json:"topics"`
+	UsesIntegration *bool              `json:"uses_integration"`
+	Version         int                `json:"version"`
+}
+
+// ApprovalPlanTask は計画承認待ちの要約のタスク 1 件。承認の前はタスクの ID が無いので、計画の中の識別子（key）と、
+// 前提のタスクの key で出す。
+type ApprovalPlanTask struct {
+	DependsOn []string `json:"depends_on"`
+	Key       string   `json:"key"`
+	Title     string   `json:"title"`
 }
 
 // ApprovalRelease は完了の承認で扱う未承認の release 1 件。HeadSHA は ref が PR の URL でない・
@@ -120,7 +132,11 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 	s.ConditionsAfterReleaseHeading = ConditionsAfterReleaseHeading(OutlookFor(false, p.HasApprovedRelease))
 	switch p.Kind {
 	case core.ApprovalKindPlan:
-		s.Plan = &ApprovalPlan{Body: p.PlanBody, Version: p.PlanVersion}
+		tasks := make([]ApprovalPlanTask, 0, len(p.PlanTasks))
+		for _, t := range p.PlanTasks {
+			tasks = append(tasks, ApprovalPlanTask{DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Title: t.Title})
+		}
+		s.Plan = &ApprovalPlan{Body: p.PlanBody, Tasks: tasks, Topics: FromPlanTopics(p.PlanTopics), UsesIntegration: p.PlanUsesIntegration, Version: p.PlanVersion}
 	case core.ApprovalKindCompletion:
 		dc := p.DoneCriteria
 		s.DoneCriteria = &dc

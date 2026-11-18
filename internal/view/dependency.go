@@ -45,7 +45,9 @@ type ShowChallenge struct {
 	Title        string          `json:"title"`
 	UpdatedAt    string          `json:"updated_at"`
 	Urgency      *string         `json:"urgency"`
-	Version      int             `json:"version"`
+	// UsesIntegration は課題が統合先を使うか（計画の承認で決まる）。未決か過去の課題は null。
+	UsesIntegration *bool `json:"uses_integration"`
+	Version         int   `json:"version"`
 }
 
 // ImprovementKey は show の challenge.improvement（改修課題の鍵。改修課題以外では null）。
@@ -103,7 +105,7 @@ func FromShowChallenge(d *core.ChallengeDetail) ShowChallenge {
 		Context: c.Context, CreatedAt: c.CreatedAt, Dependencies: FromDependencies(d.Dependencies), Dependents: dependents,
 		Description: c.Description, DoneCriteria: c.DoneCriteria, FollowupOf: d.FollowupOf, Headline: c.Headline, ID: c.ID, Improvement: imp, Priority: c.Priority,
 		Reporter: c.Reporter, Status: c.Status, StatusLabel: c.StatusLabel, Title: c.Title, UpdatedAt: c.UpdatedAt,
-		Urgency: c.Urgency, Version: c.Version,
+		Urgency: c.Urgency, UsesIntegration: d.UsesIntegration, Version: c.Version,
 	}
 }
 
