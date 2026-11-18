@@ -402,8 +402,54 @@ func TestInstructions_J6ForbidsDuplicateFollowups(t *testing.T) {
 	if !strings.Contains(got, "- "+label+":") {
 		t.Errorf("Instructions(J6) lacks the description of the section %s", label)
 	}
-	if !strings.Contains(got, label+"にある課題と同じ内容のものは重複させない") {
+	if !strings.Contains(got, label+"にあるものと同じ内容のものは重複させない") {
 		t.Errorf("Instructions(J6) lacks the instruction not to duplicate %s", label)
+	}
+}
+
+// AC-28（#772）: j6.md に「新しい課題の案」の語が無い。
+func TestInstructions_J6HasNoNewChallengeProposalWord_AC28(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "新しい課題の案") {
+		t.Error("Instructions(J6) still contains 「新しい課題の案」")
+	}
+}
+
+// AC-29（#772）: j6.md に「達成条件」の語が無い。
+func TestInstructions_J6HasNoDoneCriteriaWord_AC29(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "達成条件") {
+		t.Error("Instructions(J6) still contains 「達成条件」")
+	}
+}
+
+// AC-30（#772）: j6.md の、見出しに「フォローアップ」を含む節に「1 行」の語がある。
+func TestInstructions_J6FollowupSectionSaysOneLine_AC30(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, sec := range strings.Split("\n"+got, "\n#") {
+		head, body, _ := strings.Cut(sec, "\n")
+		if strings.HasPrefix(head, "#") && !strings.HasPrefix(head, "##") {
+			continue
+		}
+		if strings.Contains(head, "フォローアップ") && !strings.Contains(head, "「") {
+			found = true
+			if !strings.Contains(body, "1 行") {
+				t.Errorf("section %q lacks 「1 行」", head)
+			}
+		}
+	}
+	if !found {
+		t.Error("no section whose heading contains フォローアップ")
 	}
 }
 
