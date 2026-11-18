@@ -93,6 +93,39 @@ type StatusWaitingExternal struct {
 	Challenges []WaitingExternal `json:"challenges"`
 }
 
+// CycleWorkStages は status.cycle_work.stages（サイクルを回すと進むものの、段ごとの件数）。
+type CycleWorkStages struct {
+	Classify int `json:"classify"`
+	Cleanup  int `json:"cleanup"`
+	Improve  int `json:"improve"`
+	Learn    int `json:"learn"`
+	Plan     int `json:"plan"`
+	Release  int `json:"release"`
+	Run      int `json:"run"`
+	Verify   int `json:"verify"`
+}
+
+// CycleWork は status.cycle_work。total は stages の値の合計。
+type CycleWork struct {
+	Stages CycleWorkStages `json:"stages"`
+	Total  int             `json:"total"`
+}
+
+// FromCycleWork は core.CycleWork を変換する（nil は全て 0）。
+func FromCycleWork(w *core.CycleWork) CycleWork {
+	if w == nil {
+		return CycleWork{}
+	}
+	st := w.Stages
+	return CycleWork{
+		Stages: CycleWorkStages{
+			Classify: st.Classify, Cleanup: st.Cleanup, Improve: st.Improve, Learn: st.Learn,
+			Plan: st.Plan, Release: st.Release, Run: st.Run, Verify: st.Verify,
+		},
+		Total: w.Total,
+	}
+}
+
 // StatusResponse は `status` の成功の形。
 type StatusResponse struct {
 	Actionable StatusActionable `json:"actionable"`
@@ -100,6 +133,7 @@ type StatusResponse struct {
 	// BinaryCommit は動いているバイナリのコミット（status のテキストの行と同じ値。Issue #593）。
 	// ビルド情報が無いときは "unknown"。
 	BinaryCommit    string                `json:"binary_commit"`
+	CycleWork       CycleWork             `json:"cycle_work"`
 	NeedsHuman      StatusNeedsHuman      `json:"needs_human"`
 	ParentAgent     StatusParentAgent     `json:"parent_agent"`
 	WaitingExternal StatusWaitingExternal `json:"waiting_external"`
@@ -136,6 +170,7 @@ func FromOverview(ov *core.Overview) StatusResponse {
 		Actionable:   StatusActionable{Challenges: FromActionableChallenges(ov.ActionableChallenges, ov.UnmetDependencies)},
 		Approved:     StatusApproved{Operations: FromOperations(ov.ApprovedOperations)},
 		BinaryCommit: binaryCommit,
+		CycleWork:    FromCycleWork(ov.CycleWork),
 		NeedsHuman: StatusNeedsHuman{
 			BudgetExhausted: budget,
 			Challenges:      FromChallenges(ov.NeedsHumanChallenges),

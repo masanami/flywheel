@@ -34,6 +34,8 @@ var actionableStatuses = []Status{
 
 // Overview は GetOverview の結果（`flywheel status` の3区分）。
 type Overview struct {
+	// CycleWork はサイクルを回すと進むものの数え（呼び出し元が CountCycleWork で入れる。nil は全て 0）。
+	CycleWork *CycleWork
 	// NeedsHumanChallenges は計画承認待ち・完了確認待ち・人間対応待ちの課題
 	// （id 昇順）。人間対応待ちのうち、いま開いている保留の種類が親が直接行うの課題は
 	// ParentAgentChallenges へ分けて、ここには含めない。

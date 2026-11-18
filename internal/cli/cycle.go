@@ -130,6 +130,23 @@ func runCycle(a Args) (any, error) {
 		contract = launcher
 	}
 
+	// サイクルを回すと進むものを数える（LLM を呼ばず、上流を読まない）。無ければ周を始めない（記録を作らず、
+	// どの段も実行せず、バックアップも行わない。終了コードは 0）。数えから周の記録までの間に対象が無くなることは許す。
+	work, err := a.Store.CountCycleWork(ctx, agent, conn)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	if work.Total == 0 {
+		defaults := []string{}
+		if agent.DefaultsUsed {
+			defaults = append(defaults, "agent.json")
+		}
+		return textOutput{
+			json: view.FromCycleNotStarted(defaults, core.CycleNotStartedNothingToAdvance),
+			text: "進められるものが無いので、サイクルを始めなかった（理由: " + core.CycleNotStartedNothingToAdvance + "）\n",
+		}, nil
+	}
+
 	// 周の開始を標準出力へ知らせる（UI の server が起動の合図として読む）。--json では書かない。
 	// 読み手が消えても EPIPE で落ちないよう SIGPIPE を無視し、書き込みの失敗は無視する。
 	var onBegin func(string)

@@ -17,6 +17,22 @@ import (
 	"github.com/masanami/flywheel/internal/core"
 )
 
+// initWorkspaceWithWork は、サイクルを回すと進むもの（未分類の課題 1 件）を持つワークスペースを返す。
+// 進むものが無いワークスペースでは、POST は子を起動せずに started: false を返す。
+func initWorkspaceWithWork(t *testing.T) string {
+	t.Helper()
+	ws := initWorkspace(t)
+	st, err := core.OpenWorkspace(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.CreateChallenge(context.Background(), core.ChannelCLI, core.CreateInput{Title: "t", DoneCriteria: "d"}); err != nil {
+		t.Fatal(err)
+	}
+	return ws
+}
+
 // fakeExecutable は引数と作業ディレクトリを rec に書いてから長く眠る実行ファイルを作る。
 // テストの終了時に子を止める。
 func fakeExecutable(t *testing.T) (exe, rec string) {
@@ -75,7 +91,7 @@ func countingServer(t *testing.T, ws string) (port int, calls *int32) {
 	}
 	calls = new(int32)
 	s := newServerWithLauncher(ln, []core.FleetWorkspace{{Name: "w", Path: ws}}, eventsConfig{},
-		func(string) error { atomic.AddInt32(calls, 1); return nil })
+		func(string) (bool, error) { atomic.AddInt32(calls, 1); return true, nil })
 	errc := make(chan error, 1)
 	go func() { errc <- s.Serve() }()
 	t.Cleanup(func() {
@@ -100,7 +116,7 @@ func waitFile(t *testing.T, p string) string {
 const cyclePath = "/api/v1/workspaces/w/cycle"
 
 func TestCyclePostStartsProcessWithArgsAndCwd(t *testing.T) {
-	ws := initWorkspace(t)
+	ws := initWorkspaceWithWork(t)
 	exe, rec := fakeExecutable(t)
 	port := startCycleServer(t, exe, ws)
 	code, body := apiPost(t, port, cyclePath, "")
@@ -122,7 +138,7 @@ func TestCyclePostStartsProcessWithArgsAndCwd(t *testing.T) {
 }
 
 func TestCyclePostRespondsWithoutWaitingForChild(t *testing.T) {
-	ws := initWorkspace(t)
+	ws := initWorkspaceWithWork(t)
 	exe, _ := fakeExecutable(t) // 60 秒眠る
 	port := startCycleServer(t, exe, ws)
 	start := time.Now()
@@ -245,7 +261,7 @@ func TestCycleGetStates(t *testing.T) {
 // scriptLauncherServer は script を実行ファイルとして POST を受ける server を立てる。
 func scriptLauncherServer(t *testing.T, script string) (port int, ws string) {
 	t.Helper()
-	ws = initWorkspace(t)
+	ws = initWorkspaceWithWork(t)
 	exe := filepath.Join(t.TempDir(), "fake-flywheel")
 	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
 		t.Fatal(err)
@@ -344,6 +360,41 @@ func TestCyclePostNoSignalNorExitReturnsStartedWithinFiveSeconds(t *testing.T) {
 
 func TestCyclePostSignalThenExitStillStarted(t *testing.T) {
 	port, _ := scriptLauncherServer(t, "echo '周 Y-1 を開始した'\nexit 2\n")
+	if code, body := apiPost(t, port, cyclePath, ""); code != 200 || strings.TrimSpace(body) != `{"started":true}` {
+		t.Fatalf("POST = %d %s", code, body)
+	}
+}
+
+// サイクルを回すと進むものが無いときは、子のプロセスを起動せずに started: false を返す（エラーにしない）。
+func TestCyclePostNothingToAdvanceReturnsNotStartedWithoutLaunching(t *testing.T) {
+	ws := initWorkspace(t)
+	if err := os.WriteFile(filepath.Join(ws, ".flywheel", "agent.json"), []byte(`{"version":1,"position_file":"position.md"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "position.md"), []byte("p"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	port, calls := countingServer(t, ws)
+	code, body := apiPost(t, port, cyclePath, "")
+	if code != 200 || strings.TrimSpace(body) != `{"started":false}` {
+		t.Fatalf("POST = %d %s", code, body)
+	}
+	if n := atomic.LoadInt32(calls); n != 0 {
+		t.Errorf("起動が %d 回呼ばれた", n)
+	}
+}
+
+// 合図の前に終了コード 0 で終わった子は、周を始めなかった（started: false。エラーにしない）。
+func TestCyclePostChildExitsZeroBeforeSignalIsNotStarted(t *testing.T) {
+	port, _ := scriptLauncherServer(t, "echo '進められるものが無いので、サイクルを始めなかった（理由: nothing_to_advance）'\nexit 0\n")
+	if code, body := apiPost(t, port, cyclePath, ""); code != 200 || strings.TrimSpace(body) != `{"started":false}` {
+		t.Fatalf("POST = %d %s", code, body)
+	}
+}
+
+// 最初の行が合図の形でなければ合図にしない。「を開始した」で終わる行だけが開始の合図。
+func TestCyclePostOnlyTheSignalLineShapeCountsAsStarted(t *testing.T) {
+	port, _ := scriptLauncherServer(t, "echo 'warning: something'\necho '周 Y-1 を開始した'\nexec sleep 60\n")
 	if code, body := apiPost(t, port, cyclePath, ""); code != 200 || strings.TrimSpace(body) != `{"started":true}` {
 		t.Fatalf("POST = %d %s", code, body)
 	}

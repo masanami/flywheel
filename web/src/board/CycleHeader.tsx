@@ -46,9 +46,14 @@ export function CycleHeader({
     setBusy(true);
     setNotice(null);
     try {
-      await api.startCycle(workspace);
+      const res = await api.startCycle(workspace);
       if (alive.current)
-        setNotice({ kind: "started", text: "1 周を起動しました。" });
+        setNotice({
+          kind: "started",
+          text: res.started
+            ? "1 周を起動しました。"
+            : "進められるものが無いので、周を始めませんでした。",
+        });
     } catch (e) {
       if (!alive.current) return;
       if (e instanceof ApiError && e.code === "locked") {
