@@ -161,7 +161,13 @@ it("AC-207: approve_plan を持つ課題の詳細に、開いたとき ① を�
   const { requests } = setup("awaiting_plan_approval", ["approve_plan"], {
     [APPROVAL]: summary({
       kind: "plan",
-      plan: { body: "承認する計画", version: 2 },
+      plan: {
+        body: "承認する計画",
+        tasks: [],
+        topics: [],
+        uses_integration: null,
+        version: 2,
+      },
       releases: [],
       other_pending_operations: [],
       release_held: false,
@@ -254,7 +260,13 @@ it("AC-212: conflict なら ① を読み直して最新の要約を示し、自
       summary({
         kind: "plan",
         version: reads === 1 ? 3 : 4,
-        plan: { body: reads === 1 ? "古い計画" : "新しい計画", version: 1 },
+        plan: {
+          body: reads === 1 ? "古い計画" : "新しい計画",
+          tasks: [],
+          topics: [],
+          uses_integration: null,
+          version: 1,
+        },
       }),
     );
   };

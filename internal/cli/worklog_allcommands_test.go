@@ -396,6 +396,21 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
+		// T19: 計画の承認待ちの課題の問い（計画の構造化した出力にある）への、推奨と違う選択肢の答え。
+		name: "T19 answer (plan question)", command: "answer", transition: tableRow("T19", core.StatusAwaitingPlanApproval),
+		setup: func(t *testing.T, ws string) []string {
+			id := createPlannedForCase(t, ws)
+			coretest.SetPlanSpec(t, ws, challengeIDToInternalID(t, id), 1, planAnswerCaseSpec)
+			return []string{"answer", id, "--choice", "Q1=1"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"challenge", "C-1", "answer_plan",
+				map[string]any{"status": "awaiting_plan_approval"},
+				map[string]any{"status": "classified", "version": 4.0,
+					"answers": []any{map[string]any{"question": 1.0, "choice": 1.0, "recommended": false}}}}}
+		},
+	},
+	{
 		// T17（#452）: 親が直接行う保留（分類済から）にある課題の完了の記録。保留は setup が立てる。
 		name: "T17 complete-direct", command: "complete-direct", transition: tableRow("T17", core.StatusAwaitingHuman),
 		setup: func(t *testing.T, ws string) []string {
@@ -880,7 +895,16 @@ func TestWorklog_NoActivityMutationCommandsAddNoActivity(t *testing.T) {
 			args := tc.setup(t, ws)
 			before := allActivities(t, ws)
 			runCommandForWorklog(t, name, args, ws)
-			if added := allActivities(t, ws)[len(before):]; len(added) != 0 {
+			// 委譲の起動が残す、タスクの状態の変化の作業ログ（経路 invoker・entity=task・action=task_status）だけは、
+			// この検査の対象から外す（core のテストが検証する）。それ以外の作業ログが増えたら落とす。
+			var added []map[string]any
+			for _, a := range allActivities(t, ws)[len(before):] {
+				if a["channel"] == "invoker" && a["entity"] == "task" && a["action"] == "task_status" {
+					continue
+				}
+				added = append(added, a)
+			}
+			if len(added) != 0 {
 				t.Errorf("%s added %d activities, want 0: %v", name, len(added), added)
 			}
 		})

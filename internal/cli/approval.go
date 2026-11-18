@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
@@ -298,8 +299,19 @@ func runRejectChallenge(a Args, verifier core.Verifier, id string, reason string
 // 「範囲が変わる」印を付け、委譲を再開せず計画の作り直しへ戻す（遷移・成立条件は core が持つ）。
 func runAnswer(a Args) (any, error) {
 	id := a.Positional[0]
-	answer := a.Values["answer"]
+	_, hasAnswer := a.Values["answer"]
 	replan := a.Bools["replan"]
+	planItems := len(a.Multi["choice"]) + len(a.Multi["text"])
+	if planItems > 0 {
+		if hasAnswer || replan {
+			return nil, NewError(CodeUsageError, "--choice・--text は --answer・--replan と同時に指定できません")
+		}
+		return runPlanAnswer(a, id)
+	}
+	if !hasAnswer {
+		return nil, NewError(CodeUsageError, "--answer（保留への回答）か、--choice・--text（計画の問いへの答え）のどれかを指定してください")
+	}
+	answer := a.Values["answer"]
 
 	verifier, err := verifierFor(a)
 	if err != nil {
@@ -343,6 +355,104 @@ func runAnswer(a Args) (any, error) {
 		json: view.ChallengeHoldResponse{Challenge: view.FromChallenge(*c), Hold: view.FromHold(*hold)},
 		text: challengeText(*c),
 	}, nil
+}
+
+// parsePlanAnswerItems は --choice <問い>=<選択肢の番号>・--text <問い>=<文> を答えの一覧へ読む。問いは Q1 でも 1 でも受ける。
+// `=` と値が無い・番号の形が不正・同じ問いの重複は usage_error。
+func parsePlanAnswerItems(choices, texts []string) ([]core.PlanAnswerItem, error) {
+	var items []core.PlanAnswerItem
+	seen := map[int64]bool{}
+	parse := func(flag, raw string, isChoice bool) error {
+		q, v, ok := strings.Cut(raw, "=")
+		if !ok || strings.TrimSpace(v) == "" {
+			return NewError(CodeUsageError, fmt.Sprintf("--%s は <問いの番号>=<値> の形で指定してください: %q", flag, raw))
+		}
+		n, err := strconv.ParseInt(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(q), "Q"), "q"), 10, 64)
+		if err != nil || n < 1 {
+			return NewError(CodeUsageError, fmt.Sprintf("--%s の問いの番号は Q1 か 1 の形で指定してください: %q", flag, raw))
+		}
+		if seen[n] {
+			return NewError(CodeUsageError, fmt.Sprintf("問い Q%d への答えが 2 回指定されています", n))
+		}
+		seen[n] = true
+		it := core.PlanAnswerItem{Question: n}
+		if isChoice {
+			c, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+			if err != nil || c < 1 {
+				return NewError(CodeUsageError, fmt.Sprintf("--choice の選択肢の番号は 1 以上の整数で指定してください: %q", raw))
+			}
+			it.Choice = &c
+		} else {
+			it.Text = &v
+		}
+		items = append(items, it)
+		return nil
+	}
+	for _, c := range choices {
+		if err := parse("choice", c, true); err != nil {
+			return nil, err
+		}
+	}
+	for _, t := range texts {
+		if err := parse("text", t, false); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+// runPlanAnswer は `flywheel answer <ID> --choice … --text …` の実装（計画の承認待ちの問いへの答え。T19）。
+// 形は runAnswer と同じ ① 要約 → core.Verify → ② 実行。分類済へ戻すか・記録だけかは core が決める。
+func runPlanAnswer(a Args, id string) (any, error) {
+	items, err := parsePlanAnswerItems(a.Multi["choice"], a.Multi["text"])
+	if err != nil {
+		return nil, err
+	}
+	verifier, err := verifierFor(a)
+	if err != nil {
+		return nil, err
+	}
+	preview, err := a.Store.PreparePlanAnswer(context.Background(), id, items)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	att, err := core.Verify(core.ChannelCLI, verifier, planAnswerSummaryText(preview), id)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	c, _, err := a.Store.ExecutePlanAnswer(context.Background(), core.PlanAnswerRequest{
+		ChallengeID: id, ExpectedVersion: preview.Version, Answers: items,
+	}, att)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
+}
+
+// planAnswerSummaryText は計画の問いへの答えが確認前に /dev/tty へ表示する要約。
+func planAnswerSummaryText(p *core.PlanAnswerPreview) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "課題 ID:  %s\n", p.ChallengeID)
+	fmt.Fprintf(&b, "タイトル: %s\n", escapeControl(p.Title))
+	fmt.Fprintf(&b, "計画の版: %d\n", p.PlanVersion)
+	for _, l := range p.Answers {
+		fmt.Fprintf(&b, "問い Q%d: %s\n", l.Question, escapeControl(l.QuestionText))
+		if l.Choice != nil {
+			mark := "推奨と違う"
+			if l.Recommended {
+				mark = "推奨と同じ"
+			}
+			fmt.Fprintf(&b, "  答え:   %d) %s（%s）\n", *l.Choice, escapeControl(l.ChoiceLabel), mark)
+		} else {
+			fmt.Fprintf(&b, "  答え:   %s\n", escapeControl(*l.Text))
+		}
+	}
+	if p.ReturnsToClassified {
+		b.WriteString("結果: 課題を分類済へ戻し、計画を作り直す（新しい版の計画を承認し直す）\n")
+	} else {
+		b.WriteString("結果: 答えを記録するだけ（課題の状態は計画の承認待ちのまま）\n")
+	}
+	return b.String()
 }
 
 // runWithdraw は `flywheel withdraw <C-ID> --reason <理由>` の実装（課題の取り下げ。M45H28）。
@@ -523,6 +633,7 @@ func writeConditionsAfterRelease(b *strings.Builder, conds []string, outlook vie
 // writePlanStageSummary は計画の承認の要約へ、論点の各問いと回答・予想の各例・やらないことを
 // 書く。段階の欄が NULL の見出しは出さない（すべて NULL なら何も足さない）。
 func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
+	writePlanTopics(b, p.PlanTopics)
 	if len(p.Issues) > 0 {
 		b.WriteString("論点:\n")
 		for i, is := range p.Issues {
@@ -546,6 +657,16 @@ func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
 		b.WriteString("やらないこと:\n")
 		for _, g := range p.NonGoals {
 			fmt.Fprintf(b, "  - %s\n", escapeControl(g))
+		}
+	}
+	if len(p.PlanTasks) > 0 {
+		fmt.Fprintf(b, "タスクのツリー（%d 件・統合先を使うか: %s）:\n", len(p.PlanTasks), usesIntegrationText(p.PlanUsesIntegration))
+		for _, t := range p.PlanTasks {
+			line := fmt.Sprintf("  %s %s", t.Identifier(), escapeControl(t.Title))
+			if len(t.DependsOn) > 0 {
+				line += "（前提: " + strings.Join(t.DependsOn, "・") + "）"
+			}
+			b.WriteString(line + "\n")
 		}
 	}
 }

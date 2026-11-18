@@ -37,6 +37,8 @@ type Run struct {
 	FlywheelVersion *string
 	// Error は run の失敗の要約（ストアの run.error）。無ければ ""。
 	Error string
+	// TaskID は run が結び付くタスクの ID（"T-<n>"）。課題の単位の実行と過去の run は nil。
+	TaskID *string
 }
 
 // RunListOptions は ListRuns の絞り込み条件。
@@ -159,6 +161,7 @@ func toPublicRun(r *runRow, cycleBudgetsMicros map[int64]int64) Run {
 		StartedAt:    r.StartedAt,
 		EndedAt:      r.EndedAt,
 		Error:        r.Error,
+		TaskID:       r.TaskID,
 	}
 	if r.FlywheelVersion != "" {
 		v := r.FlywheelVersion

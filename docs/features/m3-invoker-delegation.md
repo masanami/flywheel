@@ -167,6 +167,8 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
 - [ ] 取り込み元の対応のある課題では、本文と全コメントに現れる Issue への参照（同じリポジトリの `#<番号>`・`<owner>/<name>#<番号>`・`https://github.com/<owner>/<name>/issues/<番号>`）を出現順に最大 5 件まで取得し、その本文を入力に含める（参照先のコメントと、参照先がさらに参照する Issue は取得しない）【決定 2026-09-28 親 M3P14】
 - [ ] 上流の取得に失敗したら、J2 を起動せず、その課題の結果に失敗として示す（計画する時点の上流を読めないまま計画しない）
 - [ ] 上流の入力の合計が 200,000 バイトを超えるときは、参照先の Issue の本文を後ろから落として収める。課題自身の本文とコメントだけで超えるときは、古いコメントから落とし、落としたことを入力に明記する【決定 2026-09-28 親 M3P14】
+> **改めた（core の見直し・区切り S2a）**: 判定 `issues`（論点だけを先に問う段）は外し、計画を作る判断点（J2）は方針・論点と問い・タスクのツリーを 1 回で出す。この節の項目に残る `issues`・「論点が無く中以上なら論点を返す」規則（`parent_direct` の項目の「サイズや論点の記録の有無に関わらず」を含む）と、出力の項目の並び（要約・手順・対象リポジトリ・操作の id が出力の根にある形）は、見直し前の記録。いまの形は [core の見直し](core-redesign.md) を正とする。
+
 - [ ] J2 の出力は、判定（`plan | uncertain | issues | parent_direct`）・要約・手順・対象リポジトリ・操作の id・サイズ（`S | M | L`）・完了条件・実装枠の額・レビュー対応枠の額・複数リポジトリにまたがるか・関係するリポジトリ・問いである（形は §IF / API）
 - [ ] 判定が `plan` の出力は、宣言にある対象リポジトリと、そのリポジトリの接続ツールの操作の id を必須とする（宣言に無ければ `invalid_output`）
 - [ ] 判定が `plan` の出力で選んだ操作の `invocation` が取り込み元の差し込み（`{issue_number}`・`{issue_url}`・`{external_key}`）を持つとき、取り込み元の対応の無い課題では `invalid_output` にする
@@ -190,6 +192,9 @@ M3 の完了の目安は **1 件の課題が、取り込みから完了確認待
   3. 操作が対話前提（対話相手の宣言が `parent`、または対話相手の宣言が無い）→ `parent`
   4. 操作が対話前提でなく、単一リポジトリで完結し、子に決定を委ねてよい操作として宣言されている → `child`
   5. 上のどれにも当たらない → `parent`
+
+  > **改めた（core の見直し・区切り S2a）**: 対象リポジトリと操作は、起動するタスクのものを使う。行 2 の「関係するリポジトリが 2 つ以上」は、起動するタスクの対象リポジトリを数えに含めて数える（計画の出力の「関係するリポジトリ」は、対象リポジトリ以外に関係するものを挙げるため。対象リポジトリのほかに 1 つでも挙がっていれば行 2 に当たる）。参照: [core の見直し](core-redesign.md)。
+
 - [ ] 操作の宣言で「対話前提か」が省略されていれば、対話前提として扱う（宣言が無いことを「子が決めてよい」と読まない）
 - [ ] 意思決定者と行の番号は run に記録し、ブリーフの冒頭に固定の文面で書く
 
@@ -448,7 +453,7 @@ J4 に回す範囲は 2 つで、同じ指示文（`internal/invoker/prompts/j4.
 ### 指示文の歯止め（設計書 §8.3・P7）【決定 2026-09-28 親 M3P4】[S1]
 
 - [ ] 判断点ごとの指示文と、ブリーフの固定の節の雛形は、`internal/invoker/prompts/` の下にファイルとして置き、`embed` でバイナリに埋め込む（実行時にワークスペースやプラグインから読まない）
-- [ ] 指示文の分量の上限をテストで固定する（J1: 4 KiB・J2: 12 KiB〔#462 で 8 KiB から引き上げ〕・J3: 8 KiB・J4: 4 KiB・J5: 11354 バイト（約 11.1 KiB）〔#466 で 6 KiB から 8 KiB、#565 で 9 KiB、#563 で 9.5 KiB、#654 で 10.5 KiB、#629 で 11354 バイト（10752 に #629 で足した 602 バイトを足した値）へ引き上げ〕・ブリーフの固定の節の雛形の合計: 12 KiB。UTF-8 のバイト数）
+- [ ] 指示文の分量の上限をテストで固定する（J1: 4 KiB・J2: 12482 バイト（約 12.2 KiB）〔#462 で 8 KiB から 12 KiB、#749 で 12482 バイト（12288 に、区画「問いと回答」の説明の 194 バイトを足した値）へ引き上げ〕・J3: 8 KiB・J4: 4 KiB・J5: 11354 バイト（約 11.1 KiB）〔#466 で 6 KiB から 8 KiB、#565 で 9 KiB、#563 で 9.5 KiB、#654 で 10.5 KiB、#629 で 11354 バイト（10752 に #629 で足した 602 バイトを足した値）へ引き上げ〕・ブリーフの固定の節の雛形の合計: 12 KiB。UTF-8 のバイト数）
 - [ ] 指示文とブリーフの固定の節の雛形に次のいずれかが現れたら、テストが失敗する: 状態のコードと表示名（M1 の 8 値）・`flywheel` のサブコマンド名・`.flywheel/agent.json` のキー名・判断点の出力スキーマの閉集合の値・金額の数字（`$` か `USD` を伴う数）
 - [ ] 上の禁止の一覧は、コードの定義（状態の語彙・コマンドの一覧・設定のキー・出力スキーマ）から生成する（一覧を手で写さない。語彙を足せば検査も追従する）
 - [ ] 判断点の出力の閉集合の値は、出力スキーマ（`--json-schema`）だけで子に伝える
@@ -777,7 +782,7 @@ J4 に回す範囲は 2 つで、同じ指示文（`internal/invoker/prompts/j4.
 | 判断点 | 出力 |
 |---|---|
 | J1 | `{"verdict": "mine\|not_mine\|uncertain", "priority": "P0\|P1\|P2"\|null, "size": "S\|M\|L"\|null, "reason": string, "question": string\|null}` |
-| J2 | `{"verdict": "plan\|uncertain\|issues\|parent_direct", "summary": string, "steps": [string], "repo": string, "operation": string, "size": "S\|M\|L", "done_criteria": string, "budget_impl_usd": number\|null, "budget_review_usd": number\|null, "cross_repo": bool, "related_repos": [string], "question": string\|null}`（`uncertain` のときは `question` 以外を `null` または空にしてよい。`parent_direct` のときは `question`〔理由〕と `done_criteria`〔親の達成条件〕が必須で、ほかは `null` または空にしてよい） |
+| J2 | **core の見直し（区切り S2a）で出力の形を改めた**: 方針・論点と問い（`topics`。各論点が `questions` を持つ）・タスクのツリーを 1 回で出し、判定 `issues`（論点だけを先に問う段）は外した。新しい形は [core-redesign.md](core-redesign.md) を正とする。以下は見直し前の形（過去の課題の記録の読み取りに残る）: `{"verdict": "plan\|uncertain\|issues\|parent_direct", "summary": string, "steps": [string], "repo": string, "operation": string, "size": "S\|M\|L", "done_criteria": string, "budget_impl_usd": number\|null, "budget_review_usd": number\|null, "cross_repo": bool, "related_repos": [string], "question": string\|null}`（`uncertain` のときは `question` 以外を `null` または空にしてよい。`parent_direct` のときは `question`〔理由〕と `done_criteria`〔親の達成条件〕が必須で、ほかは `null` または空にしてよい） |
 | J3 | `{"brief": string}` |
 | J4 | `{"decisions": [{"question_index": int, "decision": "answer\|escalate", "option": string\|null, "answer": string\|null}]}`（`question_index` は 1 始まり。`option` は選択肢のある問いで選んだ選択肢。規則は §J4） |
 | J5 | `{"verdict": "met\|not_met\|uncertain", "reason": string, "feedback": string\|null, "question": string\|null, "deferred_conditions": [{"condition": string, "status": "after_release\|after_human_action"}]\|null}`（`deferred_conditions` は任意。規則は表の下の「J5 の `deferred_conditions`」。M4 S4 で `actual` を足す＝m4-ui-server.md §IF / API「判断点の出力に足すもの（S4）」） |
@@ -829,6 +834,7 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 - `phase` は `ingest | classify | plan | run | verify` の閉集合（S1 は前の 3 つ）。`ingest` の `result` は M2 の `ingest --json` と同じ形（`.flywheel/sources.json` が無ければ `skipped: true`・`result: null`）。`plan`・`run`・`verify` の段は `.flywheel/connectors.json` が無ければ `skipped: true`・`items: []`・`not_started: []`。どの段も `skipped` を持つ。
 - `items[].outcome` は判断点の判定（J1・J2・J5）か委譲の結末。`items[].status` は写した後の課題の状態（写さなかったら `null`）。
 - `not_started[].reason` は `cycle_budget | rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit | upstream_fetch_failed | serialized | prediction_limit | waiting_external | plan_unavailable` の閉集合（S1 は `cycle_budget | rate_limited | upstream_fetch_failed`。`serialized` は S2 で、【決定 2026-10-01 親 M3P31】。`prediction_limit` は S2 で、予測の上限（20 件）を超えて次の周へ回した候補の理由（§実行スロット「同じリポジトリの並列と直列化グループ」）。`waiting_external` は S2 で、【決定 2026-10-01 親 M3P42】）。 `plan_unavailable` は、計画の承認が済んでいるのに承認済みの計画を引けない課題（承認に計画の版が無い〔課題の作り直しが必要。再承認の遷移もマイグレーションによる版の補完も持たない〕・版の計画が無い・構造化した出力が無い）と、承認済みの計画が今の宣言と合わない課題（構造化した出力が宣言と合わない・verdict が `plan` でない・リポジトリや接続ツールが宣言に無い）を `run` が黙って除外しないための値で、理由は `Detail`（テキスト出力）に付く【決定 2026-10-06 #143 オーナー・承認に計画の版を記録する（`approval.plan_version`・マイグレーション 0006）】。
+- **core の見直し（区切り S2a）で足した理由**: 着手中の課題に起動できるタスクが無いときの `no_tasks` と、課題が統合先を使う・起動できるタスクが 2 個以上あるときの `integration_unavailable`。上の行の閉集合には書き足さず（上の行は当時の記録）、定義は [core の見直し](core-redesign.md) を正とする。
 - `run` の段（S2）は `serial_groups: [{"repo", "challenges": [<C-ID>…], "reasons": [<理由>…], "judgments": [<組の判断の記録>…], "prediction_head_sha": string|null}]` を持つ。`challenges` は、実行中の課題を先頭に、続けて委譲の候補を起動の順に並べる。`reasons` は `shared_files | dependency | unknown_pair | not_predictable | prediction_failed | prediction_budget | no_prediction_declared | merge_candidate | serial_judgment_strong | serial_judgment_undetermined | serial_judgment_failed | serial_judgment_budget | running_run` の閉集合で、この定義順に重複なく並べる【仮定: キー名と理由の名前】。1 件だけのグループも載せる。`reasons` は、そのグループが成立した規則に対応する理由の和集合であり、予測の結果だけで 1 件になったグループ（実行中の課題を含まず、fail-closed の規則にも当たらないもの。予測の口を呼ばなかった候補も含む）だけが `[]` になる。委譲の段が `skipped: true` なら `serial_groups` は `[]`。`prediction_head_sha` は予測の口を呼んで `head_sha` を得たときだけ `null` でない。規則と理由の対応: 共有ファイルを持つ組→`shared_files`／`dependency.first` のある組→`dependency`／`unknown` の組→`unknown_pair`／取り込み元の対応が無い候補・Issue 番号を渡せない実行中の課題／口の呼び出し全体の失敗・`idle` の作業用クローンが無く口を呼べなかった・`issues[].status` が `failed`→`prediction_failed`／`issues[].status` が `budget_exhausted`・周の上限で口を呼べなかった→`prediction_budget`／口の宣言が無い→`no_prediction_declared`／互いに前提にし合う組（`serial_judgment` が真のリポジトリ）→`merge_candidate`／J9 が強いと判断した→`serial_judgment_strong`／J9 が判断できないと返した→`serial_judgment_undetermined`／J9 の呼び出しの失敗・出力の不正→`serial_judgment_failed`／J9 の費用の上限・周の上限・枠超過で判断しなかった→`serial_judgment_budget`／実行中の課題を含む→`running_run`。`judgments` の要素は、判断点 J9 が判断した組の記録で、組の 2 つの課題の ID の配列・判断の結果（`strong | weak | uncertain | failed | budget`）・理由の文字列を持つ（§同時に進めてよいかの判断）。
 
 > **外した（core の見直しの区切り S1）**: 上の `serial_groups` と、`not_started[].reason` の `serialized`・`prediction_limit` は外した。`cycle --json` の `run` の段は、判断の段と同じ形（`items`・`not_started`・`phase`・`skipped`）だけを持つ。上の項目は当時の記録で、現行の振る舞いではない。参照: [core の見直し](core-redesign.md)。

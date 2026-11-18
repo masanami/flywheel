@@ -48,47 +48,39 @@ func mustJSON(t *testing.T, v any) string {
 	return string(b)
 }
 
-func TestNormalizeIssues_CountsAndShape(t *testing.T) {
+func TestCheckStageQuestion_Shape(t *testing.T) {
 	t.Parallel()
-	for n, wantOK := range map[int]bool{0: true, 1: false, 2: false, 3: true, 4: true, 5: true, 6: false} {
-		got, err := NormalizeIssues(issuesN(n))
+	for n, wantOK := range map[int]bool{0: false, 1: false, 2: true, 5: true, 6: false} {
+		q := validIssue()
+		q.Options = make([]StageOption, n)
+		for i := range q.Options {
+			q.Options[i] = StageOption{Label: "x"}
+		}
+		q.Recommended = 1
+		err := checkStageQuestion(q)
 		if (err == nil) != wantOK {
-			t.Errorf("issues n=%d: err = %v, wantOK %v", n, err, wantOK)
+			t.Errorf("options n=%d: err = %v, wantOK %v", n, err, wantOK)
 		}
 		if err != nil && !errors.Is(err, ErrValidation) {
-			t.Errorf("issues n=%d: err = %v, want ErrValidation", n, err)
-		}
-		if n == 0 && got != nil {
-			t.Errorf("0 issues = %v, want nil (NULL)", got)
-		}
-	}
-	for n, wantOK := range map[int]bool{1: false, 2: true, 5: true, 6: false} {
-		is := issuesN(3)
-		is[1].Options = make([]StageOption, n)
-		for i := range is[1].Options {
-			is[1].Options[i] = StageOption{Label: "x"}
-		}
-		is[1].Recommended = 1
-		if _, err := NormalizeIssues(is); (err == nil) != wantOK {
-			t.Errorf("options n=%d: err = %v, wantOK %v", n, err, wantOK)
+			t.Errorf("options n=%d: err = %v, want ErrValidation", n, err)
 		}
 	}
 	for rec, wantOK := range map[int]bool{0: false, 1: true, 2: true, 3: false, -1: false} {
-		is := issuesN(3)
-		is[0].Recommended = rec
-		if _, err := NormalizeIssues(is); (err == nil) != wantOK {
+		q := validIssue()
+		q.Recommended = rec
+		if err := checkStageQuestion(q); (err == nil) != wantOK {
 			t.Errorf("recommended=%d: err = %v, wantOK %v", rec, err, wantOK)
 		}
 	}
 	blank := "  "
-	is := issuesN(3)
-	is[0].Options[0].Example = &blank
-	if _, err := NormalizeIssues(is); err == nil {
+	q := validIssue()
+	q.Options[0].Example = &blank
+	if checkStageQuestion(q) == nil {
 		t.Error("blank example accepted")
 	}
-	is = issuesN(3)
-	is[2].Question = " \n"
-	if _, err := NormalizeIssues(is); err == nil {
+	q = validIssue()
+	q.Question = " \n"
+	if checkStageQuestion(q) == nil {
 		t.Error("blank question accepted")
 	}
 }
@@ -172,10 +164,10 @@ func TestStageLengthLimits(t *testing.T) {
 
 func TestParseStageJSON(t *testing.T) {
 	t.Parallel()
-	if got, err := ParseIssuesJSON("[]"); err != nil || got != nil {
+	if got, err := ParseExpectedJSON("[]"); err != nil || got != nil {
 		t.Errorf("[] = %v, %v; want nil, nil", got, err)
 	}
-	if got, err := ParseIssuesJSON(mustJSON(t, issuesN(3))); err != nil || len(got) != 3 {
+	if got, err := ParseExpectedJSON(mustJSON(t, expectedN(3))); err != nil || len(got) != 3 {
 		t.Errorf("valid = %v, %v", got, err)
 	}
 	for name, text := range map[string]string{
@@ -270,11 +262,9 @@ func lastActivity(t *testing.T, s *Store, id string) Activity {
 func TestEditChallenge_WritesEachStageFieldAndRoundTrips(t *testing.T) {
 	t.Parallel()
 	s, c := newChallengeForStages(t)
-	issues := issuesN(3)
 	in := EditInput{
 		Headline: strPtr("一言"),
 		Context:  strPtr("位置"),
-		Issues:   strPtr(mustJSON(t, issues)),
 		Expected: strPtr(mustJSON(t, expectedN(2))),
 		Actual:   strPtr(mustJSON(t, actualN(1))),
 		NonGoals: strPtr(`["x","y"]`),
@@ -293,7 +283,7 @@ func TestEditChallenge_WritesEachStageFieldAndRoundTrips(t *testing.T) {
 	}
 	for name, got := range map[string]StageFields{"returned": got.StageFields, "reloaded": d.StageFields} {
 		if got.Headline == nil || *got.Headline != "一言" || got.Context == nil || *got.Context != "位置" ||
-			!reflect.DeepEqual(got.Issues, issues) || !reflect.DeepEqual(got.Expected, expectedN(2)) ||
+			!reflect.DeepEqual(got.Expected, expectedN(2)) ||
 			!reflect.DeepEqual(got.Actual, actualN(1)) || !reflect.DeepEqual(got.NonGoals, []string{"x", "y"}) ||
 			got.Figure == nil || *got.Figure != "graph TD; A-->B" {
 			t.Errorf("%s stage fields = %+v", name, got)
@@ -305,13 +295,13 @@ func TestEditChallenge_WritesEachStageFieldAndRoundTrips(t *testing.T) {
 	if err := json.Unmarshal(act.After, &after); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"headline", "context", "issues", "expected", "actual", "non_goals", "figure", "version"} {
+	for _, k := range []string{"headline", "context", "expected", "actual", "non_goals", "figure", "version"} {
 		if _, ok := after[k]; !ok {
 			t.Errorf("after lacks %q: %v", k, after)
 		}
 	}
-	if _, ok := after["issues"].([]any); !ok {
-		t.Errorf("after.issues = %T, want an interpreted array", after["issues"])
+	if _, ok := after["expected"].([]any); !ok {
+		t.Errorf("after.expected = %T, want an interpreted array", after["expected"])
 	}
 	var before map[string]any
 	if err := json.Unmarshal(act.Before, &before); err != nil {
@@ -325,11 +315,11 @@ func TestEditChallenge_WritesEachStageFieldAndRoundTrips(t *testing.T) {
 func TestEditChallenge_EmptyStringClearsToNull(t *testing.T) {
 	t.Parallel()
 	s, c := newChallengeForStages(t)
-	if _, err := edit(t, s, c.ID, EditInput{Headline: strPtr("h"), Context: strPtr("c"), Issues: strPtr(mustJSON(t, issuesN(3))),
+	if _, err := edit(t, s, c.ID, EditInput{Headline: strPtr("h"), Context: strPtr("c"),
 		Expected: strPtr(mustJSON(t, expectedN(1))), Actual: strPtr(mustJSON(t, actualN(1))), NonGoals: strPtr(`["a"]`), Figure: strPtr("f")}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := edit(t, s, c.ID, EditInput{Headline: strPtr(""), Context: strPtr(""), Issues: strPtr(""), Expected: strPtr(""),
+	got, err := edit(t, s, c.ID, EditInput{Headline: strPtr(""), Context: strPtr(""), Expected: strPtr(""),
 		Actual: strPtr(""), NonGoals: strPtr(""), Figure: strPtr("")})
 	if err != nil {
 		t.Fatal(err)
@@ -365,7 +355,6 @@ func TestEditChallenge_InvalidStageValueIsValidationAndChangesNothing(t *testing
 		"headline long":    {Headline: strPtr(strings.Repeat("a", 101))},
 		"context long":     {Context: strPtr(strings.Repeat("a", 1001))},
 		"figure long":      {Figure: strPtr(strings.Repeat("a", 16385))},
-		"issues 2":         {Issues: strPtr(mustJSON(t, issuesN(2)))},
 		"expected 4":       {Expected: strPtr(mustJSON(t, expectedN(4)))},
 		"actual 4":         {Actual: strPtr(mustJSON(t, actualN(4)))},
 		"non_goals 11":     {NonGoals: strPtr(mustJSON(t, make11()))},
@@ -408,7 +397,7 @@ func TestEditChallenge_ValidationComesBeforeExistenceAndTerminal(t *testing.T) {
 func TestEditChallenge_SameStageValueIsNoOp(t *testing.T) {
 	t.Parallel()
 	s, c := newChallengeForStages(t)
-	in := EditInput{Headline: strPtr("h"), Issues: strPtr(mustJSON(t, issuesN(3)))}
+	in := EditInput{Headline: strPtr("h"), Expected: strPtr(mustJSON(t, expectedN(3)))}
 	first, err := edit(t, s, c.ID, in)
 	if err != nil {
 		t.Fatal(err)
@@ -442,59 +431,6 @@ func activityCount(t *testing.T, s *Store, id string) int {
 		t.Fatal(err)
 	}
 	return len(acts)
-}
-
-func TestEditChallenge_ChangingIssuesClearsIssuesHoldAndAnswer(t *testing.T) {
-	t.Parallel()
-	s, c := newChallengeForStages(t)
-	if _, err := edit(t, s, c.ID, EditInput{Issues: strPtr(mustJSON(t, issuesN(3)))}); err != nil {
-		t.Fatal(err)
-	}
-	cid, _ := parseChallengeID(c.ID)
-	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		res, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by)
-			VALUES (?, 'q', 'unclassified', '2026-10-19T00:00:00.000Z', '答え', '2026-10-19T00:00:01.000Z', 'alice')`, cid)
-		if err != nil {
-			return err
-		}
-		hid, _ := res.LastInsertId()
-		_, err = tx.Exec(`UPDATE challenge SET issues_hold_id = ? WHERE id = ?`, hid, cid)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	d, err := s.GetChallenge(context.Background(), c.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.IssuesHoldID == nil || d.IssuesAnswer == nil || *d.IssuesAnswer != "答え" {
-		t.Fatalf("IssuesHoldID = %v, IssuesAnswer = %v; want the hold's answer", d.IssuesHoldID, d.IssuesAnswer)
-	}
-
-	// issues を同じ値で指定しても参照は残る。
-	if _, err := edit(t, s, c.ID, EditInput{Issues: strPtr(mustJSON(t, issuesN(3)))}); err != nil {
-		t.Fatal(err)
-	}
-	d, _ = s.GetChallenge(context.Background(), c.ID)
-	if d.IssuesHoldID == nil || d.IssuesAnswer == nil {
-		t.Errorf("unchanged issues cleared the reference: %v %v", d.IssuesHoldID, d.IssuesAnswer)
-	}
-
-	// 変えたら参照も回答も外れる。
-	if _, err := edit(t, s, c.ID, EditInput{Issues: strPtr(mustJSON(t, issuesN(4)))}); err != nil {
-		t.Fatal(err)
-	}
-	d, _ = s.GetChallenge(context.Background(), c.ID)
-	if d.IssuesHoldID != nil || d.IssuesAnswer != nil {
-		t.Errorf("after changing issues: hold %v answer %v, want nil", d.IssuesHoldID, d.IssuesAnswer)
-	}
-	var before, after map[string]any
-	act := lastActivity(t, s, c.ID)
-	_ = json.Unmarshal(act.Before, &before)
-	_ = json.Unmarshal(act.After, &after)
-	if before["issues_hold_id"] == nil || after["issues_hold_id"] != nil {
-		t.Errorf("activity before/after issues_hold_id = %v / %v", before["issues_hold_id"], after["issues_hold_id"])
-	}
 }
 
 func TestIssuesAnswer_UnansweredHoldIsNil(t *testing.T) {
@@ -566,9 +502,11 @@ func TestRunTransition_WritesStageFieldsWithTheTransition(t *testing.T) {
 func TestRunTransition_WithoutPatchLeavesStageFieldsAlone(t *testing.T) {
 	t.Parallel()
 	s, c := newChallengeForStages(t)
-	if _, err := edit(t, s, c.ID, EditInput{Headline: strPtr("h"), Issues: strPtr(mustJSON(t, issuesN(3)))}); err != nil {
+	if _, err := edit(t, s, c.ID, EditInput{Headline: strPtr("h")}); err != nil {
 		t.Fatal(err)
 	}
+	cid, _ := parseChallengeID(c.ID)
+	setIssuesForTest(t, s, cid, issuesN(3))
 	got, err := s.ClassifyChallenge(context.Background(), ChannelCLI, c.ID, ClassifyInput{Priority: "P0"})
 	if err != nil {
 		t.Fatal(err)
@@ -646,10 +584,8 @@ func TestExecuteApproval_ApprovalHasNullRejectedFieldsAndRejectsFields(t *testin
 func TestPatchStages_CalledTwiceKeepsOriginalBefore(t *testing.T) {
 	t.Parallel()
 	s, c := newChallengeForStages(t)
-	if _, err := edit(t, s, c.ID, EditInput{Issues: strPtr(mustJSON(t, issuesN(3)))}); err != nil {
-		t.Fatal(err)
-	}
 	cid, _ := parseChallengeID(c.ID)
+	setIssuesForTest(t, s, cid, issuesN(3))
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
 		for i := 0; i < 9; i++ {
 			if _, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (?, 'q', 'unclassified', '2026-10-19T00:00:00.000Z')`, cid); err != nil {

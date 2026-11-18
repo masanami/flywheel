@@ -591,6 +591,7 @@ func TestFailureLimit_PreviousPlanVersionAndRateLimitedRunsAreNotCounted(t *test
 		}); err != nil {
 			t.Fatal(err)
 		}
+		seedPlanTasks(t, f.s, cid, 2)
 		n := len(f.deleg.launched())
 		res := f.runDelegation(t, id)
 		if len(f.deleg.launched()) != n+1 || len(res.NotStarted) != 0 {

@@ -75,6 +75,7 @@ type ShowCardResponse struct {
 	Runs              []Run              `json:"runs"`
 	SourceBinding     *SourceBinding     `json:"source_binding"`
 	Stages            Stages             `json:"stages"`
+	Tasks             []Task             `json:"tasks"`
 	Waiting           Waiting            `json:"waiting"`
 }
 
@@ -105,6 +106,7 @@ func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card) ShowCardR
 	return ShowCardResponse{
 		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, DirectCompletions: s.DirectCompletions, Holds: s.Holds,
 		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, Stages: s.Stages,
+		Tasks:   s.Tasks,
 		Waiting: Waiting{Prerequisites: fromWaitingChallenges(d.Waiting.Prerequisites)},
 	}
 }

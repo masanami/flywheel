@@ -732,6 +732,24 @@ func dispatchOperation(t *testing.T, s *Store, id string, op Operation) dispatch
 			ChallengeID: id, ExpectedVersion: prev.Version, Answer: answer,
 		}, att)
 		return resultOf(c, err)
+	case OpAnswerPlan:
+		// 問いが 1 つ（選択肢 2 つ・推奨は 1）の構造化した計画を置き、推奨と違う選択肢（2）で答える。
+		cid, _ := parseChallengeID(id)
+		spec := `{"topics":[{"title":"t","decision":"d","questions":[{"question":"q","options":[{"label":"a"},{"label":"b"}],"recommended":1}]}]}`
+		if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+			_, err := tx.Exec(`UPDATE task_plan SET spec = ? WHERE challenge_id = ?`, spec, cid)
+			return err
+		}); err != nil {
+			t.Fatalf("set spec: %v", err)
+		}
+		items := []PlanAnswerItem{{Question: 1, Choice: func() *int64 { v := int64(2); return &v }()}}
+		prev, err := s.PreparePlanAnswer(context.Background(), id, items)
+		if err != nil {
+			return dispatchResult{err: err}
+		}
+		att := verifiedAttestationForTest(t, id)
+		c, _, err := s.ExecutePlanAnswer(context.Background(), PlanAnswerRequest{ChallengeID: id, ExpectedVersion: prev.Version, Answers: items}, att)
+		return resultOf(c, err)
 	default:
 		t.Fatalf("dispatchOperation: unsupported op %q", op)
 		return dispatchResult{}
@@ -817,7 +835,7 @@ func dispatchedOperations(t *testing.T) []Operation {
 	want := map[Operation]bool{
 		OpClassify: true, OpPlan: true, OpSubmit: true,
 		OpVerifyMet: true, OpVerifyNotMet: true, OpVerifyUncertain: true, OpHold: true,
-		OpApprove: true, OpReject: true, OpAnswer: true, OpApproveHoldRelease: true, OpWithdraw: true, OpCompleteDirect: true,
+		OpApprove: true, OpReject: true, OpAnswer: true, OpApproveHoldRelease: true, OpWithdraw: true, OpCompleteDirect: true, OpAnswerPlan: true,
 	}
 	if len(ops) != len(want) {
 		t.Fatalf("dispatchable operations derived from Table = %v, want exactly %v (a new operation token needs a dispatch entry)", ops, want)

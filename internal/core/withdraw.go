@@ -246,6 +246,10 @@ func (s *Store) ExecuteWithdraw(ctx context.Context, req WithdrawRequest, att At
 				return err
 			}
 		}
+		// 取り下げた課題のタスクのうち、終わっていないものを取りやめる（done は残す）。
+		if err := cancelUnfinishedTasks(ctx, tc.tx, tc.rec, tc.id); err != nil {
+			return err
+		}
 		var lastOccurrence int64
 		if err := tc.tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM occurrence`).Scan(&lastOccurrence); err != nil {
 			return err

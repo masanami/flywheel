@@ -46,7 +46,8 @@ func j2PlanFixture(t *testing.T, mut func(m map[string]any)) (stdout string, out
 	output = map[string]any{
 		"verdict":           "plan",
 		"summary":           "SUMMARY-CLI-MARKER",
-		"steps":             []string{"step one", "step two"},
+		"topics":            []any{},
+		"uses_integration":  false,
 		"repo":              "direct-repo",
 		"operation":         "brief-op",
 		"size":              "S",
@@ -60,6 +61,16 @@ func j2PlanFixture(t *testing.T, mut func(m map[string]any)) (stdout string, out
 	if mut != nil {
 		mut(output)
 	}
+	// 便宜上、mut は根の "repo"・"operation" を書き換えられる（"tasks" を書かなければ、それらを唯一のタスクの
+	// repo・operation にする）。根の "repo"・"operation" は出力に含めない。
+	if _, has := output["tasks"]; !has {
+		output["tasks"] = []any{map[string]any{
+			"key": "t1", "title": "TASK-CLI-TITLE", "body": "TASK-CLI-BODY", "done_criteria": "TASK-CLI-DONE",
+			"non_goals": []string{}, "depends_on": []string{}, "repo": output["repo"], "operation": output["operation"],
+		}}
+	}
+	delete(output, "repo")
+	delete(output, "operation")
 	b, err := json.Marshal(map[string]any{"is_error": false, "structured_output": output})
 	if err != nil {
 		t.Fatal(err)

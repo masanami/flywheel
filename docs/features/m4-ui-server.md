@@ -91,6 +91,8 @@ M4 の完了の目安は「ボードから計画・完了を承認でき、対�
 
 ### カードの段階の欄と論点の段 [S4]
 
+> **core の見直し（S2a）で、論点を計画の前に問う段を外した**。計画を作る判断点（J2）は、方針・論点と問い・タスクのツリーを 1 回で出し、論点の問いへの答えは計画の承認と同時に受ける（判定 `issues` と、論点の保留・`stages.issues_answer` で受ける段は無くなる）。以下の本文は、過去の課題の表示に使う記録（課題の `issues`・`issues_hold_id` と、差し戻しの欄の名前 `issues`）が残っているため消さずに置く。新しい形は [core-redesign.md](core-redesign.md)（区切り S2a）を正とする。
+
 設計書 D20・§カードの段階の欄と論点の段（flywheel#175）に対応する。課題カードを要件定義・計画承認・完了確認で同じ 1 枚として埋め、計画承認の時点で完成形の予想を見せ、完了確認で同じ欄を実物で埋めて突き合わせる。旧側では、計画承認で見る面（何をやるか）と完了確認で見る面（何ができたか）が違うため、ずれが完了確認まで見えず差し戻しが増えていた（オーナー・2026-10-09）。
 
 段階の欄は次の 5 つで、いずれもカードの面ではなく詳細に置く（M4H23）。
@@ -399,7 +401,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | コマンド | 足すフラグ | 内容 |
 |---|---|---|
 | `flywheel edit <C-ID>` | `--headline <文>`・`--context <文>` | 「一言で」「位置づけ」を置き換える |
-| `flywheel edit <C-ID>` | `--issues <JSON>`・`--expected <JSON>`・`--actual <JSON>`・`--non-goals <JSON>` | 段階の欄を置き換える。JSON の形は下の「段階の欄の形（S4）」で、判断点の出力と同じ検査を通す |
+| `flywheel edit <C-ID>` | （core の見直し〔S2a〕で `--issues` は外し、`usage_error` にした。[core-redesign.md](core-redesign.md)）`--issues <JSON>`・`--expected <JSON>`・`--actual <JSON>`・`--non-goals <JSON>` | 段階の欄を置き換える。JSON の形は下の「段階の欄の形（S4）」で、判断点の出力と同じ検査を通す |
 | `flywheel edit <C-ID>` | `--figure <Mermaid のテキスト>` | 図を置き換える。テキストが Mermaid として解釈できるかは検査しない（UI が解釈できなければテキストで示す） |
 | `flywheel reject <C-ID> --reason <理由>` | `--field <欄>`（複数可） | 差し戻しがずれた欄。値は `issues`・`expected`・`non_goals`・`figure` の閉集合【決定 2026-10-19 親 M4P36】。`--relayed` と併用できる |
 
@@ -412,7 +414,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | 判断点 | 足すフィールド | 規則 |
 |---|---|---|
 | J1 | `headline`（string \| null）・`context`（string \| null） | 判定が `mine` なら、両方とも空白だけでなく長さの上限に収まる文字列を要する（外れれば `invalid_output`）。`not_mine`・`uncertain` では、空白だけでなく上限に収まる値だけを課題に書き、それ以外は無いものとして扱う（判定は捨てない） |
-| J2 | 判定に `issues` を足す。`issues`（論点の配列）・`expected`（予想の配列）・`non_goals`（文字列の配列）・`figure`（string \| null） | `issues` の判定は論点 3〜5 個を要し、`plan` の項目（`summary`・`steps`・`repo`・`operation`・`size`・`done_criteria`・予算の額・`cross_repo`・`related_repos`・`expected`・`non_goals`・`figure`）は検査せず無視する。`plan` の判定は従来の必須の組に加え、サイズが `M`・`L` なら予想 1 個以上を要する（空なら M4H39 の保留）。`issues` の判定のとき `expected` 以下は無視する。`plan` は省略可の `no_issues_needed`（null か `[{"content": string, "source_kind": "challenge" \| "upstream_issue" \| "upstream_comment" \| "referenced_issue" \| "hold_record" \| "plan_rejection", "quote": string}]`）を持てる（M4H48。要素が 1 件以上あり、すべての項目が空白を除いて非空で `source_kind` が閉集合の値のときだけ論点の記録として数える）。サイズが `M`・`L` で論点の記録も有効な `no_issues_needed` も無い `plan` は、1 回目は `invalid_output`、問い直しでも同じなら保留（M4H47） |
+| J2 | （core の見直し〔S2a〕で判定 `issues` は外した。[core-redesign.md](core-redesign.md)。以下は見直し前の形）判定に `issues` を足す。`issues`（論点の配列）・`expected`（予想の配列）・`non_goals`（文字列の配列）・`figure`（string \| null） | `issues` の判定は論点 3〜5 個を要し、`plan` の項目（`summary`・`steps`・`repo`・`operation`・`size`・`done_criteria`・予算の額・`cross_repo`・`related_repos`・`expected`・`non_goals`・`figure`）は検査せず無視する。`plan` の判定は従来の必須の組に加え、サイズが `M`・`L` なら予想 1 個以上を要する（空なら M4H39 の保留）。`issues` の判定のとき `expected` 以下は無視する。`plan` は省略可の `no_issues_needed`（null か `[{"content": string, "source_kind": "challenge" \| "upstream_issue" \| "upstream_comment" \| "referenced_issue" \| "hold_record" \| "plan_rejection", "quote": string}]`）を持てる（M4H48。要素が 1 件以上あり、すべての項目が空白を除いて非空で `source_kind` が閉集合の値のときだけ論点の記録として数える）。サイズが `M`・`L` で論点の記録も有効な `no_issues_needed` も無い `plan` は、1 回目は `invalid_output`、問い直しでも同じなら保留（M4H47） |
 | J5 | `actual`（実物の配列） | 判定が `met` で課題の予想が空でなければ、予想と同じ個数を要する（合わなければ保留＝【決定 2026-10-19 オーナー M4H44】） |
 
 - 指示文の上限（`internal/invoker/prompts.go` の `judgmentPromptLimit`。J1 4,096・J2 12,288〔#462 で 8,192 から引き上げ〕・J5 9,728 バイト〔起草時は 6,144 バイト。その後引き上げ済み〕）は変えない。足す規則は上限に収める（2026-10-19 の時点で J1 1,796・J2 5,001・J5 3,796 バイト【実コード確証 high】。足した後に収まるかは【要確認】。2026-11-04 の #450 で確認の段・問い直しの区画・論点不要の項目を足した後の J2 は 8,186 バイト〔当時の上限 8,192。#462 で 12 KiB へ引き上げ〕【実コード確証 high】で、上限に収めるため既存の文の重複を削った）。規則の正本は core の検査で、指示文には要点だけを書く。それでも収まらなければ、上限を変えずに仕様への指摘として PR の説明に書く（実装チケットの完了条件に `CheckPromptSizes` が通ることを含める）。
@@ -1011,6 +1013,8 @@ S1 は 2026-10-12（flywheel#159）、S2 は 2026-10-18（flywheel#212）、S3 �
 
 ### S4: 論点の段（J2）
 
+> **この節の受入基準のうち、論点を計画の前に問う段（判定 `issues`・論点の保留・`stages.issues_answer`）に関わるものは、core の見直し（S2a）で段を外したため、新しい実装では成り立たない**（判定 `issues` は計画を作る判断点〔J2〕の出力から無くなり、論点は計画の出力の `topics` で計画と同時に出す）。節は、過去の課題の表示に使う記録が残っているため消さずに置く。新しい形の受入基準は [core-redesign.md](core-redesign.md)（区切り S2a）の §受入基準にある。
+
 - [ ] J2 の `--json-schema` の `verdict` の列挙は `issues` を含む
 - [ ] 論点の記録の無い分類済の課題で、判定 `issues`・論点 3 個・4 個・5 個の J2 の出力を写すと、課題が人間対応待ちになる（3 つの個数を列挙して確かめる）
 - [ ] 判定 `issues` の出力を写すと、課題の `issues` が出力の論点と等しくなる
@@ -1091,6 +1095,8 @@ S1 は 2026-10-12（flywheel#159）、S2 は 2026-10-18（flywheel#212）、S3 �
 - [ ] 段階の欄がすべて NULL の課題の承認の要約は、S3 の要約と同じ文を示す（欄の見出しを出さない）
 
 ### S4: 人が直す口（`edit`）と差し戻しのずれた欄
+
+> core の見直し（S2a）で `flywheel edit --issues` は外し、`usage_error` にした（[core-redesign.md](core-redesign.md)）。この節の `--issues` に関する基準は、過去の課題の記録の読み取りのために消さずに置き、新しい実装では成り立たない。差し戻しの欄の名前 `issues` は残る。
 
 - [ ] `flywheel edit <C-ID> --headline <文>` は、課題の `headline` をその文にする
 - [ ] `flywheel edit <C-ID> --context <文>` は、課題の `context` をその文にする

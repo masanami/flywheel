@@ -32,6 +32,7 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
       context: null,
       created_at: "2026-01-01T00:00:00Z",
       dependencies: [],
+      uses_integration: null,
       dependents: [],
       followup_of: null,
       improvement: null,
@@ -63,6 +64,7 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
       issues_answer: null,
       non_goals: null,
     },
+    tasks: [],
     waiting: { prerequisites: [] },
   };
   return { ...base, ...over };
@@ -85,6 +87,7 @@ const run = (id: string, started_at: string) => ({
   result: null,
   session_id: null,
   started_at,
+  task_id: null,
 });
 
 const act1 = (at: string, action: string) => ({
@@ -147,6 +150,7 @@ it("取り下げで回答なしに閉じた保留は、開いている保留と�
         question: "閉じた問い",
         raised_at: "t0",
         run_id: null,
+        task_id: null,
       },
     ],
   });
@@ -203,6 +207,7 @@ it("AC-112〜118: 計画は版の順、run は新しい順、作業ログは古�
         question: "保留の問い",
         raised_at: "t0",
         run_id: null,
+        task_id: null,
       },
     ],
     operations: [
@@ -294,6 +299,7 @@ it("AC-119: 外部由来の文字列は文字として出し、script 要素と 
         question: XSS,
         raised_at: "t0",
         run_id: null,
+        task_id: null,
       },
     ],
   });
@@ -545,6 +551,7 @@ it("親が直接行う保留が開いているとき、「未回答」ではな�
         question: "親が直接行う",
         raised_at: "t0",
         run_id: null,
+        task_id: null,
       },
     ],
   });
@@ -616,6 +623,7 @@ it("範囲が変わる印（replan）付きの回答の保留には、計画を�
     kind: "human",
     raised_at: "t0",
     run_id: null,
+    task_id: null,
   };
   const d = show({
     holds: [

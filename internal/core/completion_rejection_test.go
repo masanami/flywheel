@@ -16,6 +16,8 @@ func (f *delegateFixture) rejectCompletionForTest(t *testing.T, id, reason strin
 	t.Helper()
 	ctx := context.Background()
 	f.setStatus(t, id, string(StatusAwaitingCompletionApproval))
+	// 完了の検証を通さずに完了の承認待ちへ置いたので、検証が「満たした」で進めていたはずのタスクの状態（done）を合わせる。
+	moveVerifyingTasksRaw(t, f.s, TaskStatusDone)
 	f.s.now = func() time.Time { return at }
 	t.Cleanup(func() { f.s.now = nil })
 	prev, err := f.s.PrepareRejection(ctx, id, reason)

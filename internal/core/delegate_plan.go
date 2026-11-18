@@ -57,12 +57,16 @@ func (s *Store) loadPlanCandidate(ctx context.Context, in DelegateInput, cid int
 	var plan approvedPlan
 	var planOK bool
 	var binding *sourceBinding
+	var tasks []Task
 	err = s.db.Read(ctx, func(tx *sql.Tx) error {
 		var err error
 		if ch, err = loadChallenge(ctx, tx, cid); err != nil {
 			return err
 		}
 		if plan, planOK, err = loadApprovedPlan(ctx, tx, cid); err != nil || !planOK {
+			return err
+		}
+		if tasks, err = loadLaunchableTasks(ctx, tx, cid); err != nil {
 			return err
 		}
 		binding, err = loadSourceBindingByChallengeID(ctx, tx, cid)
@@ -81,10 +85,13 @@ func (s *Store) loadPlanCandidate(ctx context.Context, in DelegateInput, cid int
 	if validated.Verdict != J2VerdictPlan {
 		return planOne{}, false, "承認済みの計画の verdict が plan でない", nil
 	}
-	// validateJ2Output が、リポジトリと接続ツールが宣言にあることまで検査済み。
-	repo, _ := in.ConnDecl.findConnectorRepo(validated.Repo)
+	// 委譲は起動できるタスクがちょうど 1 個の課題だけを起動する。対象のリポジトリはタスクの行のもの。
+	if len(tasks) != 1 {
+		return planOne{}, false, "起動できるタスクが 1 個でない", nil
+	}
+	repo, _ := in.ConnDecl.findConnectorRepo(tasks[0].Repo)
 	if repo == nil {
-		return planOne{}, false, "承認済みの計画のリポジトリが今の宣言に無い", nil
+		return planOne{}, false, "起動するタスクのリポジトリが今の宣言に無い", nil
 	}
 	c := planCandidate{ID: ch.ID, Rank: priorityRank(ch.Priority), Seq: cid}
 	return planOne{cand: c, repo: repo.Name}, true, "", nil
@@ -622,6 +629,19 @@ func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Ch
 	}
 	if depNS != nil {
 		return &DelegateResult{NotStarted: []NotStarted{*depNS}}, nil
+	}
+	// 起動できるタスクの数と統合先の使用。計画の検査より前で、記録した前提の後（ID を省いた段と同じ順）。
+	var taskNS *NotStarted
+	err = s.db.Read(ctx, func(tx *sql.Tx) error {
+		_, ns, err := launchGate(ctx, tx, ch.ID, cid)
+		taskNS = ns
+		return err
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return nil, err
+	}
+	if taskNS != nil {
+		return &DelegateResult{NotStarted: []NotStarted{*taskNS}}, nil
 	}
 	plan, err := s.planDelegation(ctx, in, []int64{cid})
 	if err != nil {

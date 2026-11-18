@@ -38,7 +38,13 @@ function summary(over: Partial<ApprovalSummary>): {
       mergeability_note: "",
       other_pending_operations: [],
       pairs: [],
-      plan: { body: "計画の本文", version: 1 },
+      plan: {
+        body: "計画の本文",
+        tasks: [],
+        topics: [],
+        uses_integration: null,
+        version: 1,
+      },
       release_held: false,
       releases: [],
       stages: {
@@ -170,7 +176,15 @@ const NO_ISSUES_SECTION =
 
 it("計画に論点を不要とした根拠の引用があれば、その節と引用の文を示す（#469）", async () => {
   const el = await show(
-    summary({ plan: { body: PLAN_HEAD + NO_ISSUES_SECTION, version: 2 } }),
+    summary({
+      plan: {
+        body: PLAN_HEAD + NO_ISSUES_SECTION,
+        tasks: [],
+        topics: [],
+        uses_integration: null,
+        version: 2,
+      },
+    }),
   );
   const plan = within(el).getByText(/## 論点を不要とした根拠/);
   expect(plan.tagName).toBe("PRE");
@@ -181,7 +195,17 @@ it("計画に論点を不要とした根拠の引用があれば、その節と�
 });
 
 it("計画に論点を不要とした根拠の引用が無ければ、その節を出さない（#469）", async () => {
-  const el = await show(summary({ plan: { body: PLAN_HEAD, version: 2 } }));
+  const el = await show(
+    summary({
+      plan: {
+        body: PLAN_HEAD,
+        tasks: [],
+        topics: [],
+        uses_integration: null,
+        version: 2,
+      },
+    }),
+  );
   expect(within(el).getByText(/## 完了条件/).tagName).toBe("PRE");
   expect(el.textContent).not.toContain("論点を不要とした根拠");
   expect(el.textContent).not.toContain("QUOTE-ONE");

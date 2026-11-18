@@ -14,9 +14,10 @@ const (
 	DeciderChild  Decider = deciderChild
 )
 
-// DecideDecider は、選ばれた操作の宣言と J2 の出力（複数リポジトリにまたがるか・
-// 関係するリポジトリ）から、意思決定者と該当した行の番号（1〜5）を返す。行は上から
-// 評価し、最初に一致した行を採る。
+// DecideDecider は、選ばれた操作の宣言・対象のタスクの対象リポジトリ（repo）・J2 の出力
+// （複数リポジトリにまたがるか・関係するリポジトリ）から、意思決定者と該当した行の番号（1〜5）を
+// 返す。行は上から評価し、最初に一致した行を採る。関係するリポジトリは、対象のタスクの対象
+// リポジトリ以外に関係するものなので、行 2 の数え方には repo を含める。
 //
 //  1. 操作が対話前提で、対話相手が human → human
 //  2. 複数リポジトリにまたがる（crossRepo、または関係するリポジトリが 2 つ以上）→ parent
@@ -26,11 +27,11 @@ const (
 //
 // 宣言の省略は読み込みの時点で既定値（interactive は true、counterpart は parent、
 // child_may_decide は false）に置き換わっており、省略を「子が決めてよい」と読まない。
-func DecideDecider(op ConnectorOperation, crossRepo bool, relatedRepos []string) (Decider, int) {
+func DecideDecider(op ConnectorOperation, repo string, crossRepo bool, relatedRepos []string) (Decider, int) {
 	if op.Interactive && op.Counterpart == CounterpartHuman {
 		return DeciderHuman, 1
 	}
-	distinct := map[string]bool{}
+	distinct := map[string]bool{repo: true}
 	for _, r := range relatedRepos {
 		distinct[r] = true
 	}
