@@ -170,7 +170,6 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM45OperationShape(t, &doc)
 	addM45DependencyKeysShape(t, &doc)
 	addCoreRedesignS2aShowShape(t, &doc)
-	addCoreRedesignS2bShowShape(t, &doc)
 	return doc
 }
 
@@ -887,6 +886,9 @@ var jsonEntityOf = map[string]string{
 	"runs": "run",
 	// show の followups と followup list の followups の要素（S2b）。
 	"followups": "followup",
+	// show の source_children の要素（S2b。取り込み元の子）。文書の表の行の名前は、末尾の s を除いても変わらない
+	// （children）ので、要素の形の名前も source_children のままになる。
+	"source_children": "source_children",
 	// slot clear の slot（S2。§IF / API の「slot clear」の行）。
 	"slot": "slot",
 	// status.needs_human.budget_exhausted（S2。§IF / API の「status.needs_human.budget_exhausted」の行）。
@@ -1615,20 +1617,4 @@ func addCoreRedesignS2aShowShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["run"]["task_id"] = true
 	doc.entity["hold"]["task_id"] = true
 	doc.entity["show_challenge"]["uses_integration"] = true
-}
-
-// addCoreRedesignS2bShowShape は core の見直しの区切り S2b が show --json に足したキー（根の `source_children`）を、
-// 仕様（core-redesign.md）に書いてあることを確かめたうえで、文書化された形へ足す。
-func addCoreRedesignS2bShowShape(t *testing.T, doc *documentedJSON) {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "core-redesign.md"))
-	if err != nil {
-		t.Fatalf("read core-redesign spec: %v", err)
-	}
-	if !strings.Contains(string(data), "`source_children`（配列。要素は `external_key`・`title`・`url`・`upstream_state`・`parent_external_key`）") {
-		t.Fatal("core-redesign spec does not document source_children of show --json")
-	}
-	for _, shape := range doc.topLevel["show"] {
-		shape["source_children"] = true
-	}
 }

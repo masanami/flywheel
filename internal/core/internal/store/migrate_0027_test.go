@@ -14,8 +14,10 @@ const migrationFollowupVersion = 27
 func TestFollowupMigration(t *testing.T) {
 	t.Run("fresh_store_has_followup_source_child_and_source_key", func(t *testing.T) {
 		db := openFresh(t)
-		if got := userVersion(t, db); got < migrationFollowupVersion {
-			t.Errorf("user_version = %d, want >= %d", got, migrationFollowupVersion)
+		// AC-1: 新しく作ったストアの版は、最新の版（この区切りでは 27）。後の区切りで版が上がっても落ちないよう、
+		// 「最新の版と一致し、27 以上」で固定する（版 26 のテストと同じ形）。
+		if got := userVersion(t, db); got != latestProdVersion(t) || got < migrationFollowupVersion {
+			t.Errorf("user_version = %d, want the latest %d (>= %d)", got, latestProdVersion(t), migrationFollowupVersion)
 		}
 		fu := tableColumnInfo(t, db, "followup")
 		for c, notNull := range map[string]bool{
@@ -85,6 +87,10 @@ func TestFollowupMigration(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = db.Close() }()
+		// AC-2: 版 26 のストアを開くと、版が上がる（最新の版と一致し、27 以上）。
+		if got := userVersion(t, db); got != latestProdVersion(t) || got < migrationFollowupVersion {
+			t.Errorf("user_version after upgrading from 26 = %d, want the latest %d (>= %d)", got, latestProdVersion(t), migrationFollowupVersion)
+		}
 		if got := countRows(t, db, "challenge"); got != 1 {
 			t.Errorf("challenge rows = %d, want 1", got)
 		}

@@ -51,7 +51,7 @@ export function CycleHeader({
         setNotice({
           kind: "started",
           text: res.started
-            ? "1 周を起動しました。"
+            ? "サイクルを始めました。"
             : "進められるものが無いので、サイクルを始めませんでした。",
         });
     } catch (e) {

@@ -138,3 +138,77 @@ func TestSpec_AC322_ArchitectureSection21NoteHasS2b(t *testing.T) {
 		}
 	}
 }
+
+// sectionBodyByPrefix は、見出しの行が prefix で始まる節の本文を返す（見出しの後ろに決定の印が付く文書のため）。
+func sectionBodyByPrefix(t *testing.T, doc, prefix string) string {
+	t.Helper()
+	for _, l := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(l, prefix) {
+			return sectionBody(t, doc, l)
+		}
+	}
+	t.Fatalf("no heading starting with %q", prefix)
+	return ""
+}
+
+// AC-304（#775 の文書の確かめの補い）: m2 の「取り込みの対象」の節に、取り込みが新しい課題を自動では作らなくなった旨と、
+// core-redesign.md への参照がある。
+func TestSpec_AC304_M2IngestTargetSectionSaysNoAutomaticChallenges(t *testing.T) {
+	t.Parallel()
+	body := sectionBodyByPrefix(t, readRepoDoc(t, "docs", "features", "m2-github-issue-ingest.md"), "### 取り込みの対象")
+	if !strings.Contains(body, "core-redesign.md") {
+		t.Error("AC-304: the section does not refer to core-redesign.md")
+	}
+	// 言い回しそのもの（「自動では課題にしなくなった」）を見る。語の有無だけだと、反対の意味の文でも通るため。
+	if !strings.Contains(body, "開いている Issue を自動では課題にしなくなった") {
+		t.Errorf("AC-304: the section does not say that ingest no longer creates challenges automatically:\n%s", body)
+	}
+}
+
+// AC-305: m2 の「実行の起点」の節に、選んで取り込む口（flywheel ingest <指定>...）がある。
+func TestSpec_AC305_M2EntryPointSectionHasTheSelectiveIngest(t *testing.T) {
+	t.Parallel()
+	body := sectionBodyByPrefix(t, readRepoDoc(t, "docs", "features", "m2-github-issue-ingest.md"), "### 実行の起点")
+	if !strings.Contains(body, "`flywheel ingest <指定>...") {
+		t.Errorf("AC-305: the section lacks `flywheel ingest <指定>...`:\n%s", body)
+	}
+}
+
+// worklogDocLine は、m1-core.md の作業ログの説明のうち、キー key（entity・entity_id・action）を説明する行を返す。
+func worklogDocLine(t *testing.T, key string) string {
+	t.Helper()
+	for _, l := range strings.Split(readRepoDoc(t, "docs", "features", "m1-core.md"), "\n") {
+		if strings.HasPrefix(l, "| `"+key+"` |") {
+			return l
+		}
+	}
+	t.Fatalf("m1-core.md has no worklog row for %q", key)
+	return ""
+}
+
+// AC-309: m1-core.md の作業ログの entity の一覧に、followup がある。
+func TestSpec_AC309_M1CoreWorklogEntityListHasFollowup(t *testing.T) {
+	t.Parallel()
+	if l := worklogDocLine(t, "entity"); !strings.Contains(l, "`followup`") {
+		t.Errorf("AC-309: the entity row lacks `followup`: %s", l)
+	}
+}
+
+// AC-310: m1-core.md の作業ログの entity_id の説明に、F-<番号> の形がある。
+func TestSpec_AC310_M1CoreWorklogEntityIDHasTheFollowupIDShape(t *testing.T) {
+	t.Parallel()
+	if l := worklogDocLine(t, "entity_id"); !strings.Contains(l, `"F-<n>"`) {
+		t.Errorf("AC-310: the entity_id row lacks the F-<n> shape: %s", l)
+	}
+}
+
+// AC-311: m1-core.md の作業ログの action の一覧に、followup_done・followup_drop・followup_promote がある。
+func TestSpec_AC311_M1CoreWorklogActionListHasTheFollowupActions(t *testing.T) {
+	t.Parallel()
+	l := worklogDocLine(t, "action")
+	for _, a := range []string{"`followup_done`", "`followup_drop`", "`followup_promote`"} {
+		if !strings.Contains(l, a) {
+			t.Errorf("AC-311: the action row lacks %s: %s", a, l)
+		}
+	}
+}

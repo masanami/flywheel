@@ -781,6 +781,7 @@ func TestCycle_JSON_HasNoStartLine(t *testing.T) {
 func TestCycle_Text_NoStartLineWhenFailingBeforeBeginCycle(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupJ2Workspace(t)
+	createTitled(t, ws, "t") // 進められるものを 1 件置く（0 件だと、道具を探す前に「始めなかった」で終わる）
 	emptyPATH(t)
 	var stdout, stderr bytes.Buffer
 	code := runWithLookPath([]string{"cycle", "--workspace", ws}, strings.NewReader(""), &stdout, &stderr, defaultCommands(), lookPathFor(t))

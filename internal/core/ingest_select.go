@@ -272,6 +272,8 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 	}
 
 	// 子孫は、取り込めるものの中だけで親をたどって決める。同じコマンドの別の指定の子孫にあたる指定は拒む。
+	// 一覧を読めなかったリポジトリ・方針を判定できなかった取り込み元にある子孫は、取り込めるものに入らないので、
+	// 子として記録されない（<owner>/<repo>#<番号> の指定は、その Issue のリポジトリを読めれば受ける）。
 	planned := make([][]plannedChild, len(chosen))
 	for i, c := range chosen {
 		planned[i] = planSourceChildren(c, scan.Candidates)

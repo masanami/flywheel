@@ -46,6 +46,8 @@ func TestSourceChildCLI_AC291_292_ShowJSONCarriesSourceChildren(t *testing.T) { 
 	ws := childSetup(t)
 	runJSON(t, ws, "ingest", childRepo+"#1")
 	got := runJSON(t, ws, "show", "C-1")
+	// 文書（m1-core.md の show の形）との照合を、子の要素がある出力でかける（空の配列では、要素の形が照合されない）。
+	assertDocumentedJSON(t, loadDocumentedJSON(t), "show", got)
 	kids, ok := got["source_children"].([]any) // AC-291
 	if !ok || len(kids) != 2 {
 		t.Fatalf("AC-291 #776: source_children = %v, want 2 elements at the root", got["source_children"])

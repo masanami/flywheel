@@ -207,8 +207,9 @@ func (s *Store) setSourceChildState(ctx context.Context, actor string, ch Channe
 
 // checkUnseenSourceChildren は repo の開いている一覧（seenIssues）に現れなかった、開いていると記録した子を
 // 1 件ずつ上流に確かめ、closed・missing を決める（対応のある課題の checkUnseenOpenBindings と同じ決まり）。
-// 確かめられなかったときは変えない。
-func (s *Store) checkUnseenSourceChildren(ctx context.Context, actor string, ch Channel, repo string, snaps map[string]sourceChildSnapshot, seenIssues []UpstreamIssue, upstream UpstreamIssueSource) error {
+// 確かめられなかったときは変えない。ストアへの書き込みに失敗した子は、失敗の項目として返す（その子だけのことにして
+// 続ける）。エラーを返すのは、取り消し（ctx）のときだけ。
+func (s *Store) checkUnseenSourceChildren(ctx context.Context, actor string, ch Channel, repo string, snaps map[string]sourceChildSnapshot, seenIssues []UpstreamIssue, upstream UpstreamIssueSource) ([]IngestItemResult, error) {
 	seen := make(map[string]bool, len(seenIssues))
 	for _, issue := range seenIssues {
 		seen[issue.ExternalKey] = true
@@ -230,31 +231,38 @@ func (s *Store) checkUnseenSourceChildren(ctx context.Context, actor string, ch 
 		cands = append(cands, candidate{key: key, repo: keyRepo, number: number})
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].number < cands[j].number })
+	var failed []IngestItemResult
 	for _, c := range cands {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
 		issue, getErr := upstream.GetIssue(ctx, c.repo, c.number)
+		var writeErr error
 		switch {
 		case isUpstreamGone(getErr):
-			if err := s.setSourceChildState(ctx, actor, ch, c.key, upstreamStateMissing); err != nil {
-				if ctx.Err() != nil {
-					return err
-				}
-			}
+			writeErr = s.setSourceChildState(ctx, actor, ch, c.key, upstreamStateMissing)
 		case getErr != nil:
 			// 確かめられなかったときは変えない。
 		case issue.State == "closed":
-			if err := s.refreshSourceChild(ctx, actor, ch, withKey(issue, c.key), upstreamStateClosed); err != nil && ctx.Err() != nil {
-				return err
-			}
+			writeErr = s.refreshSourceChild(ctx, actor, ch, withKey(issue, c.key), upstreamStateClosed)
 		default:
-			if err := s.refreshSourceChild(ctx, actor, ch, withKey(issue, c.key), upstreamStateOpen); err != nil && ctx.Err() != nil {
-				return err
+			writeErr = s.refreshSourceChild(ctx, actor, ch, withKey(issue, c.key), upstreamStateOpen)
+		}
+		if writeErr != nil {
+			if ctx.Err() != nil {
+				return nil, writeErr
 			}
+			failed = append(failed, failedSourceChildItem(c.key, writeErr))
 		}
 	}
-	return nil
+	return failed, nil
+}
+
+// failedSourceChildItem は、記録した子の追従の書き込みに失敗したことを表す取り込みの項目
+// （対応のある課題の 1 件の失敗と同じ形。課題の ID・対応の情報は積まない）。
+func failedSourceChildItem(externalKey string, err error) IngestItemResult {
+	msg := "取り込み元の子の追従に失敗: " + err.Error()
+	return IngestItemResult{ExternalKey: externalKey, Result: IngestOutcomeFailed, Error: &msg}
 }
 
 // isUpstreamGone は GetIssue の失敗が「上流に無い」（404・410・移管）かを返す。
