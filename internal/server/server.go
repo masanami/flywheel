@@ -64,7 +64,9 @@ func New(ln net.Listener, workspaces []core.FleetWorkspace) *Server {
 // newServer は SSE の時間の設定を渡せる版（テストが間隔を短くする）。サイクルの起動は常に失敗させ、
 // テストが自分のバイナリを別プロセスとして起動しないようにする。
 func newServer(ln net.Listener, workspaces []core.FleetWorkspace, cfg eventsConfig) *Server {
-	return newServerWithLauncher(ln, workspaces, cfg, func(string) error { return errors.New("サイクルの起動はこの server では無効") })
+	return newServerWithLauncher(ln, workspaces, cfg, func(string) (bool, error) {
+		return false, errors.New("サイクルの起動はこの server では無効")
+	})
 }
 
 // newServerWithLauncher はサイクルの起動の仕方を渡せる版（テストが偽の実行ファイルを使う）。

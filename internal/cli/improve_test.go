@@ -290,6 +290,11 @@ func TestImprove_FailureLimit_StopsOnlyTheCyclePhase(t *testing.T) {
 			t.Fatalf("cycle %d improve items = %v, want one invalid_output run", i+1, items)
 		}
 	}
+	// 失敗の上限に達した後は、改修提案の段は進むものに数えない（ほかに進むものが無ければ周は始まらない）。
+	if doc := cycleDocAllowNotStarted(t, ws); doc["started"] != false || doc["not_started_reason"] != "nothing_to_advance" {
+		t.Fatalf("cycle at the failure limit with nothing else to advance = %v, want not started", doc)
+	}
+	createTitled(t, ws, "t") // 周を始めさせる（J1 の対象）。improve の段が上限を理由つきで示す。
 	doc := cycleDoc(t, ws)
 	imp := cyclePhase(t, doc, "improve")
 	ns := phaseNotStarted(t, imp)

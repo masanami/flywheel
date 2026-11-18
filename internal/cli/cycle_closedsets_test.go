@@ -129,6 +129,12 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"upstream_closed":  "TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind (internal/core/auto_exclusion_test.go)",
 		"upstream_missing": "TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind (internal/core/auto_exclusion_test.go)",
 		"out_of_policy":    "TestAutoExclusion_VerifyExcludesDiscrepanciesWithAReasonPerKind (internal/core/auto_exclusion_test.go)",
+		// 起動しないと LLM を呼ばずに決まる課題は、サイクルを回すと進むものの数えから外れ（進むものが他に無ければ周が始まらない）、
+		// cycle の出力には現れない。委譲の段（core）のテストが観測する。
+		"run_budget":              "TestBudget_BelowOneUSDStopsAndExactlyOneLaunches (internal/core/budget_test.go)",
+		"dependency":              "TestDependency_IDOmittedRun_UnmetDependencyNotStartedWithSortedDetail (internal/core/delegate_dependency_test.go)",
+		"integration_unavailable": "TestDelegateTask_AC117_TwoTasksReasonIsIntegrationUnavailable (internal/core/delegate_task_test.go)",
+		"no_tasks":                "TestDelegateTask_AC121_NoTasksForAnOldShapePlan (internal/core/delegate_task_test.go)",
 	}
 	observed := map[string]bool{}
 	for r, ref := range coreObservedReasons {
@@ -194,13 +200,6 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
 		observe(cycleDoc(t, ws))
 	})
-	t.Run("run_budget", func(t *testing.T) {
-		ws := setupRunWorkspace(t)
-		// 実装枠が起動の最小額（1 USD）に満たない計画。
-		newInProgressForRun(t, ws, func(m map[string]any) { m["budget_impl_usd"] = 0.5 })
-		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
-		observe(cycleDoc(t, ws))
-	})
 	t.Run("in_progress", func(t *testing.T) {
 		// 終わっていない生きた試行を持つ承認済みの release は、cycle の release の段が飛ばす。
 		ws, _, op := execWorkspace(t)
@@ -221,28 +220,6 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		for _, n := range phaseNotStarted(t, pm) {
 			observed[n["reason"].(string)] = true
 		}
-	})
-	t.Run("dependency", func(t *testing.T) {
-		// 依存先が未完了の着手中の課題は、cycle の run の段が起動しない。
-		ws := setupRunWorkspace(t)
-		id := newInProgressForRun(t, ws, nil)
-		runJSON(t, ws, "dep", "add", id, createForCase(t, ws))
-		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
-		observe(cycleDoc(t, ws))
-	})
-	t.Run("integration_unavailable", func(t *testing.T) {
-		// 起動できるタスクが 2 個ある（統合先を使う）着手中の課題は、cycle の run の段が起動しない。
-		ws := setupRunWorkspace(t)
-		newTwoTaskIntegrationForRun(t, ws)
-		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
-		observe(cycleDoc(t, ws))
-	})
-	t.Run("no_tasks", func(t *testing.T) {
-		// タスクを持たない過去の形の計画（tasks のキーが無い）で task の行が無い着手中の課題は、cycle の run の段が起動しない。
-		ws := setupRunWorkspace(t)
-		newOldShapePlanForRun(t, ws)
-		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
-		observe(cycleDoc(t, ws))
 	})
 	t.Run("waiting_external", func(t *testing.T) {
 		ws := setupRunWorkspace(t)
@@ -363,6 +340,12 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedDependency"
 	case "not_learnable":
 		return "NotStartedNotLearnable"
+	case "run_budget":
+		return "NotStartedRunBudget"
+	case "integration_unavailable":
+		return "NotStartedIntegrationUnavailable"
+	case "no_tasks":
+		return "NotStartedNoTasks"
 	case "upstream_closed":
 		return "NotStartedUpstreamClosed"
 	case "upstream_missing":
@@ -441,6 +424,7 @@ func TestCycle_PhasesStartWithReleaseThenTheM3Phases(t *testing.T) {
 	m5SpecLine(t, "`cycle --json` の `phases` の最後の要素は `phase: \"backup\"` である")
 	ws := setupWorkspaceWithPosition(t)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 	var got []string
 	for _, p := range cycleDoc(t, ws)["phases"].([]any) {
 		got = append(got, p.(map[string]any)["phase"].(string))

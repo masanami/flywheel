@@ -701,6 +701,14 @@ var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true
 // assertDocumentedJSON の共通の検査が見る）。
 func assertDocumentedCycle(t *testing.T, doc documentedJSON, out map[string]any) {
 	t.Helper()
+	if started, _ := out["started"].(bool); !started {
+		// 周を始めなかった（進めるものが無い）形: cycle は null・phases は空・理由つき。
+		phases, isArr := out["phases"].([]any)
+		if out["cycle"] != nil || !isArr || len(phases) != 0 || out["not_started_reason"] != "nothing_to_advance" {
+			t.Errorf("cycle (not started): cycle=%#v phases=%#v not_started_reason=%#v, want null / [] / nothing_to_advance", out["cycle"], out["phases"], out["not_started_reason"])
+		}
+		return
+	}
 	rec, ok := out["cycle"].(map[string]any)
 	if !ok {
 		t.Errorf("cycle: `cycle` is not an object: %#v", out["cycle"])

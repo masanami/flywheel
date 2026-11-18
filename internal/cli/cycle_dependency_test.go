@@ -160,6 +160,8 @@ func TestCycle_J2DependsOnStopsTheDelegationAfterPlanApproval(t *testing.T) {
 
 	// 計画を承認し、次の周の委譲の段が依存で止まる。
 	runJSON(t, ws, "approve", id, "--relayed", "--session", "s", "--quote", "q")
+	// 依存が終わっていない課題は進むものに数えない。周を始めさせるために、進められる課題を 1 件置く。
+	createTitled(t, ws, "other")
 	doc = cycleDoc(t, ws)
 	ns := phaseNotStarted(t, cyclePhase(t, doc, "run"))
 	if len(ns) != 1 || ns[0]["challenge_id"] != id || ns[0]["reason"] != "dependency" || ns[0]["detail"] != dep {

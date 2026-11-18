@@ -235,6 +235,15 @@ func TestStatusAPI_EqualsCLIStatusJSON(t *testing.T) {
 		t.Errorf("waiting_external.challenges = %d, want 1 (the fixture must exercise gh): %s", n, body)
 	}
 	sameJSON(t, body, cliStatusJSON(t, ws))
+	// 状況の API の応答の根に、サイクルを回すと進むものの数え（cycle_work）がある（問い合わせに ingestable=true が無くても。
+	// core の見直し S2b・masanami/flywheel#777 の AC-286）。
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &root); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := root["cycle_work"]; !ok {
+		t.Errorf("status API has no cycle_work key: %s", body)
+	}
 }
 
 // budgetWorkspace は、着手中で承認済みの計画（サイズ M・額は agent.json の既定から引く）を持つ課題

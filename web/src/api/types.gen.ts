@@ -5,6 +5,7 @@ export interface StatusResponse {
   actionable: StatusActionable;
   approved: StatusApproved;
   binary_commit: string;
+  cycle_work: CycleWork;
   needs_human: StatusNeedsHuman;
   parent_agent: StatusParentAgent;
   waiting_external: StatusWaitingExternal;
@@ -62,6 +63,22 @@ export interface Operation {
   supersedes: string | null;
   version: number;
   waiting_since: string | null;
+}
+
+export interface CycleWork {
+  stages: CycleWorkStages;
+  total: number;
+}
+
+export interface CycleWorkStages {
+  classify: number;
+  cleanup: number;
+  improve: number;
+  learn: number;
+  plan: number;
+  release: number;
+  run: number;
+  verify: number;
 }
 
 export interface StatusNeedsHuman {

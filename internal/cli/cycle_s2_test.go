@@ -127,6 +127,7 @@ func TestCycle_WithoutConnectors_RunAndVerifyPhasesAreSkipped(t *testing.T) {
 	newInProgressForRun(t, ws, nil)
 	newVerifyingForCase(t, ws, false)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 
 	doc := cycleDoc(t, ws)
 	for _, r := range runJSON(t, ws, "runs")["runs"].([]any) {
@@ -162,6 +163,7 @@ func TestCycle_WaitingChallengesAreNotTargetsOfRunOrVerify(t *testing.T) {
 		ids[status] = id
 	}
 	putRoutedFakeClaudeOnPATH(t, nil, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 
 	doc := cycleDoc(t, ws)
 

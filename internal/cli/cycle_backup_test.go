@@ -54,6 +54,7 @@ func backupWorkspace(t *testing.T) string {
 func backupPhaseOf(t *testing.T, ws string) map[string]any {
 	t.Helper()
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	createTitled(t, ws, "t") // 進められるものが無いと周は始まらない
 	doc := cycleDoc(t, ws)
 	phases := doc["phases"].([]any)
 	last := phases[len(phases)-1].(map[string]any)

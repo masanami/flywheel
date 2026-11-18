@@ -332,7 +332,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 ##### `status`（#14 で追加。`discrepancies` は #58 で追加）
 
-`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}, "waiting_external": {"challenges": [...]}, "parent_agent": {"challenges": [...]}, "binary_commit": "..."}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約。`waiting_external` は M3 が、`parent_agent` は #452 が、区分ではない `binary_commit`〔動いているバイナリのコミット〕は #593 が足した）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
+`{"needs_human": {"challenges": [...], "operations": [...], "discrepancies": [...]}, "actionable": {"challenges": [...]}, "approved": {"operations": [...]}, "waiting_external": {"challenges": [...]}, "parent_agent": {"challenges": [...]}, "binary_commit": "...", "cycle_work": {"total": 0, "stages": {...}}}`【仮定】。3 つの区分を最上位の 3 キーで分け（#5 の規約。`waiting_external` は M3 が、`parent_agent` は #452 が、区分ではない `binary_commit`〔動いているバイナリのコミット〕は #593 が足した）、各区分の下に一覧を複数形の名前つきキーで置く（「人間の操作を待っているもの」は課題・不可逆操作・食い違いの 3 種類を含むため）。区分のキーに `awaiting_human` を使わないのは、状態のコード `awaiting_human`（人間対応待ち。この区分に入る 3 状態の 1 つ）と紛れるため。
 
 | フィールド | 型 | 内容 |
 |---|---|---|
@@ -363,6 +363,8 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 テキスト表示は `commit:`（未コミットの変更つきは `+dirty` を付ける）・`time:`・`modified:`（`true` / `false`）・`schema_version:` の 4 行。
 
 `status --json` の最上位にも `binary_commit`（string。動いているバイナリのコミットで、テキスト表示の先頭の行と同じ値＝未コミットの変更つきは `+dirty` 付き。ビルド情報が無ければ `"unknown"`）を置く（#593。API の `GET …/status` も同じ形）。
+
+最上位の `cycle_work`（object）は、サイクルを回すと進むものの数え（API の `GET …/status` も同じで、取り込めるものの有無に関わらず出る）。`total`（number。`stages` の値の合計）と `stages`（`release`・`classify`・`plan`・`run`・`verify`・`learn`・`improve`・`cleanup` の件数。number）を持つ。LLM を呼ばず、上流を読まず、状態を変えない。各段が対象を選ぶ関数と同じ関数で数え、迷うときは多めに数える。`run` は、委譲の対象のうち起動しないと決まるもの（`plan_unavailable`・`no_tasks`・`integration_unavailable`・`upstream_closed`・`upstream_missing`・`out_of_policy`・`dependency`・`run_budget`・`failure_limit`・`rework_limit`）を除いた件数と、終わっていない契約の実行の本数の合計。`improve` は判断点を呼ぶ条件を満たせば 1、満たさなければ 0。`cleanup` は周の始めの片付けが閉じる対象の run の数。connectors.json が無ければ `release`・`plan`・`run`・`verify` は 0。
 
 ##### `ingest`（#54 で追加。取得・作成・更新の結線は #59）
 
