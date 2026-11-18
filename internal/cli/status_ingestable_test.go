@@ -123,7 +123,7 @@ func TestStatus_AC244_AC245_UpstreamUnavailableKeepsExitZeroAndSetsError(t *test
 // AC-248（#779）: self_assignees を解決できない取り込み元の Issue は items に無く、error は null でない。
 func TestStatus_AC248_UnresolvedSelfAssigneesSetsError(t *testing.T) {
 	parallelTools(t, false)
-	ws := ingestableSetup(t, `"assignee_policy":"exclude_others"`) // self_assignees 省略＝gh api user で解決（偽の gh に経路が無い）
+	ws := ingestableSetup(t, `"assignee_policy":"exclude-others"`) // self_assignees 省略＝gh api user で解決（偽の gh に経路が無い）
 	ing := ingestableOf(t, runJSON(t, ws, "status"))
 	if ing["error"] == nil || len(ing["items"].([]any)) != 0 {
 		t.Errorf("ingestable = %v, want no items and an error", ing)
@@ -274,4 +274,29 @@ func TestStatusText_AC280_AC281_AC282_NothingToAdvanceIsStated(t *testing.T) {
 	if !strings.Contains(got, nothing) || !strings.Contains(got, "1 件") {
 		t.Errorf("text with only a followup = %q, want %q and the followup count", got, nothing)
 	}
+}
+
+// AC-247（#779）: sources.json に取り込み元が 1 つも無い（`"sources": []`）とき、gh が無くても items は空・error は null
+// （状況の API と同じ）。
+func TestStatus_AC247_EmptySourcesDoesNotNeedUpstream(t *testing.T) {
+	parallelTools(t, false)
+	ws := initializedWorkspace(t)
+	writeSourcesDeclaration(t, ws, `{"version":1,"sources":[]}`)
+	restrictToolDirs(t, 0)
+	ing := ingestableOf(t, runJSON(t, ws, "status"))
+	if ing["error"] != nil || len(ing["items"].([]any)) != 0 {
+		t.Errorf("ingestable = %v, want empty items and null error", ing)
+	}
+}
+
+// 文書の形（status.ingestable.items[].children を含む）と実出力の照合。実際に子のある items で確かめる。
+func TestStatus_AC230_DocumentedShapeWithIngestableChildren(t *testing.T) {
+	parallelTools(t, false)
+	ws := ingestableSetup(t, `"self_assignees":["me"]`)
+	out := runJSON(t, ws, "status")
+	items := ingestableOf(t, out)["items"].([]any)
+	if len(items) == 0 || len(items[0].(map[string]any)["children"].([]any)) == 0 {
+		t.Fatalf("fixture must have an item with children: %v", items)
+	}
+	assertDocumentedJSON(t, loadDocumentedJSON(t), "status", out)
 }

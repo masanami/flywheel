@@ -59,6 +59,9 @@ func statusIngestable(ctx context.Context, a Args) (*core.Ingestable, error) {
 		}
 		return nil, err
 	}
+	if len(decl.Sources) == 0 { // 取り込み元が無ければ上流の口を組み立てない（API と同じ。gh が無くても error にしない）
+		return &core.Ingestable{Items: []core.IngestableItem{}}, nil
+	}
 	st, err := a.Store.ReadIngestableState(ctx)
 	if err != nil {
 		return nil, err

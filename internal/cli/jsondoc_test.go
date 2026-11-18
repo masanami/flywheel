@@ -918,7 +918,7 @@ func assertDocumentedEntities(t *testing.T, doc documentedJSON, where string, v 
 		if k == "items" && where == "status.ingestable" {
 			entity, known = "ingestable_item", true // ingest の items の要素ではない
 		}
-		if k == "children" && where == "status.ingestable.items[0]" {
+		if k == "children" && strings.HasPrefix(where, "status.ingestable.items[") {
 			entity, known = "ingestable_child", true
 		}
 		switch x := val.(type) {

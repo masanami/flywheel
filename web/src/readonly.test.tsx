@@ -102,6 +102,8 @@ function awaitingApproval(): Record<string, unknown> {
       },
       total: 0,
     },
+    followups: { open: 0 },
+    ingestable: null,
     needs_human: {
       budget_exhausted: [],
       challenges: [challenge],
