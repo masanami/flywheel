@@ -86,6 +86,7 @@ func TestRecovery_NotMergeableToMergedRoundTrip(t *testing.T) {
 	}
 
 	// 追従の委譲: J3 の入力に、戻した理由の区画が入る。
+	reopenVerifyingTasks(t, f.s)
 	before := len(f.j3Inputs)
 	f.runDelegation(t, "C-1")
 	if len(f.j3Inputs) != before+1 {

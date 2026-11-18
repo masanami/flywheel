@@ -11,6 +11,7 @@ package coretest
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -421,11 +422,72 @@ func InsertApprovedPlan(t *testing.T, workspace string, challengeID int, body, s
 			challengeID, challengeID, "2026-09-25T00:00:00.000Z"); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`UPDATE challenge SET status = 'in_progress', version = version + 1 WHERE id = ?`, challengeID)
-		return err
+		if _, err := tx.Exec(`UPDATE challenge SET status = 'in_progress', version = version + 1 WHERE id = ?`, challengeID); err != nil {
+			return err
+		}
+		// 計画の承認が行う、構造化した出力のタスクの記録（pending のタスクの行と、統合先を使うか）。
+		return insertPlanTasks(tx, challengeID, 1, spec)
 	}); err != nil {
 		t.Fatalf("coretest: InsertApprovedPlan(%d): %v", challengeID, err)
 	}
+}
+
+// insertPlanTasks は構造化した出力 spec の tasks から、計画の版 version のタスクの行（状態は pending）と前提の行を作り、
+// uses_integration があれば課題へ記録する（計画の承認の記録と同じ内容）。spec が空・タスクを持たない過去の形なら何もしない。
+func insertPlanTasks(tx *sql.Tx, challengeID, version int, spec string) error {
+	if spec == "" {
+		return nil
+	}
+	var out struct {
+		UsesIntegration *bool `json:"uses_integration"`
+		Tasks           []struct {
+			Key          string   `json:"key"`
+			Title        string   `json:"title"`
+			Body         string   `json:"body"`
+			DoneCriteria string   `json:"done_criteria"`
+			NonGoals     []string `json:"non_goals"`
+			DependsOn    []string `json:"depends_on"`
+			Repo         string   `json:"repo"`
+			Operation    string   `json:"operation"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(spec), &out); err != nil {
+		return nil // 構造化した出力として読めない計画は、タスクを作らない
+	}
+	const at = "2026-09-25T00:00:00.000Z"
+	ids := map[string]int64{}
+	for _, tk := range out.Tasks {
+		nonGoals, err := json.Marshal(tk.NonGoals)
+		if err != nil {
+			return err
+		}
+		res, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+			challengeID, version, tk.Key, tk.Title, tk.Body, tk.DoneCriteria, string(nonGoals), tk.Repo, tk.Operation, at, at)
+		if err != nil {
+			return err
+		}
+		if ids[tk.Key], err = res.LastInsertId(); err != nil {
+			return err
+		}
+	}
+	for _, tk := range out.Tasks {
+		for _, dep := range tk.DependsOn {
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO task_dependency (task_id, depends_on_id) VALUES (?, ?)`, ids[tk.Key], ids[dep]); err != nil {
+				return err
+			}
+		}
+	}
+	if out.UsesIntegration != nil {
+		v := 0
+		if *out.UsesIntegration {
+			v = 1
+		}
+		if _, err := tx.Exec(`UPDATE challenge SET uses_integration = ? WHERE id = ?`, v, challengeID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // InsertRunArtifact はテスト専用のフィクスチャとして、runID（内部整数 ID）の run の成果物を

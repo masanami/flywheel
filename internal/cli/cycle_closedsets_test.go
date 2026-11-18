@@ -105,6 +105,8 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	spec = append(spec, m45AddedNotStartedReasons(t)...)
 	// 直列化グループの廃止（docs/features/core-redesign.md）で外した理由は、仕様の当時の記録には残るが、実装の閉集合には無い。
 	spec = withoutStrings(spec, "serialized", "prediction_limit")
+	// タスクを単位にする委譲（docs/features/core-redesign.md の区切り S2a）が足した理由。M3 の仕様の行には無い。
+	spec = append(spec, "integration_unavailable", "no_tasks")
 	sort.Strings(spec)
 
 	var impl []string
@@ -225,6 +227,29 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		ws := setupRunWorkspace(t)
 		id := newInProgressForRun(t, ws, nil)
 		runJSON(t, ws, "dep", "add", id, createForCase(t, ws))
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
+		observe(cycleDoc(t, ws))
+	})
+	t.Run("integration_unavailable", func(t *testing.T) {
+		// 起動できるタスクが 2 個ある（統合先を使う）着手中の課題は、cycle の run の段が起動しない。
+		ws := setupRunWorkspace(t)
+		newInProgressForRun(t, ws, func(m map[string]any) {
+			task := func(key string) map[string]any {
+				return map[string]any{"key": key, "title": "T-" + key, "body": "B", "done_criteria": "D",
+					"non_goals": []string{}, "depends_on": []string{}, "repo": "direct-repo", "operation": "brief-op"}
+			}
+			m["tasks"] = []any{task("a"), task("b")}
+			m["uses_integration"] = true
+		})
+		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
+		observe(cycleDoc(t, ws))
+	})
+	t.Run("no_tasks", func(t *testing.T) {
+		// タスクを持たない過去の形の計画（tasks のキーが無い）で task の行が無い着手中の課題は、cycle の run の段が起動しない。
+		ws := setupRunWorkspace(t)
+		id := createForCase(t, ws)
+		coretest.InsertApprovedPlan(t, ws, challengeIDToInternalID(t, id), "PLAN-BODY-OLD",
+			`{"verdict":"plan","summary":"s","steps":["a"],"repo":"direct-repo","operation":"brief-op","size":"S","done_criteria":"d","cross_repo":false,"related_repos":[]}`)
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
 		observe(cycleDoc(t, ws))
 	})

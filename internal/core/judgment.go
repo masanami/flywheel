@@ -269,6 +269,9 @@ type RunJudgmentInput struct {
 	// PlanVersion が非 nil なら、run の plan_version に記録する（J5 が、同じ計画の版の差し戻しの
 	// 回数を数えるために使う。他の判断点は nil のまま）。
 	PlanVersion *int64
+	// TaskID が非 nil なら、run の task_id（タスクの内部整数 ID）に記録する（J3 が、起動するタスクを結び付ける。
+	// 他の判断点は nil のまま）。
+	TaskID *int64
 	// WorkDir が空でなければ、ワークスペースの代わりにこのディレクトリで起動する（J5 だけが使う）。
 	WorkDir string
 }
@@ -436,6 +439,7 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 			StartedAt:        now,
 			MaxBudgetUSD:     maxBudgetMicros,
 			BudgetBucket:     budgetBucketJudgment,
+			TaskID:           in.TaskID,
 		})
 		if err != nil {
 			return err

@@ -576,10 +576,14 @@ func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, ru
 				return err
 			}
 		}
+		taskID := taskIDPtr(&dc.Task)
 		if op == OpHold {
+			// 委譲の子の問い・停止で作る保留は、起動したタスクに結び付ける。
+			tc.taskID = taskID
 			return s.insertHoldWithOccurrence(ctx, tc, question, reason, cycleID)
 		}
-		return nil
+		// 委譲の結果で課題が検証中へ進むとき、タスクも検証中にする（課題の遷移と同じトランザクション）。
+		return verifyTaskInTransition(ctx, tc, taskID)
 	})
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {

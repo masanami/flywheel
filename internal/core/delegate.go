@@ -144,7 +144,10 @@ type approvedPlan struct {
 type delegationContext struct {
 	Challenge Challenge
 	Plan      approvedPlan
-	Holds     []Hold
+	// Task は起動するタスク（課題の task の行のうち状態が pending か in_progress の、ちょうど 1 個）。
+	// 対象のリポジトリと操作・run と保留の task_id・J3 の区画「タスク」はこのタスクのもの。
+	Task  Task
+	Holds []Hold
 	// Rejections は完了確認での差し戻しの理由（古い順。無ければ空）。
 	Rejections []CompletionRejection
 	Binding    *sourceBinding
@@ -314,6 +317,15 @@ func selectDelegationTargets(ctx context.Context, tx *sql.Tx) (out []int64, skip
 			skipped = append(skipped, *ns)
 			continue
 		}
+		// 起動できるタスクの数と統合先の使用（計画の検査より先。計画の構造化した出力ではなくタスクの行で数える）。
+		_, ns, err := launchGate(ctx, tx, ch.ID, cid)
+		if err != nil {
+			return nil, nil, err
+		}
+		if ns != nil {
+			skipped = append(skipped, *ns)
+			continue
+		}
 		out = append(out, cid)
 	}
 	return out, skipped, nil
@@ -350,6 +362,7 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	var history *launchHistory
 	var planOK bool
 	var unavailable error
+	var tasks []Task
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		p, gap, detail, err := lookupApprovedPlan(ctx, tx, cid)
 		if err != nil {
@@ -362,6 +375,9 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		dc.Plan, planOK = p, ok
 		if !ok {
 			return nil
+		}
+		if tasks, err = loadLaunchableTasks(ctx, tx, cid); err != nil {
+			return err
 		}
 		if dc.Holds, err = loadHolds(ctx, tx, cid); err != nil {
 			return err
@@ -401,11 +417,13 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	if !ok || validated.Verdict != J2VerdictPlan {
 		return nil, fmt.Errorf("%w: the approved plan does not match the current declarations", ErrValidation)
 	}
-	// 委譲はタスクがちょうど 1 件の計画だけを起動する（複数のタスクの実行は後の区切りで入れる）。
-	task, ok := validated.soleTask()
-	if !ok {
-		return nil, fmt.Errorf("%w: the approved plan does not have exactly one task", ErrValidation)
+	// 委譲は起動できるタスクがちょうど 1 個の課題だけを起動する（複数のタスクの実行は後の区切りで入れる）。
+	// 対象のリポジトリと操作はタスクの行のもの。
+	if len(tasks) != 1 {
+		return nil, fmt.Errorf("%w: the challenge does not have exactly one launchable task", ErrValidation)
 	}
+	task := tasks[0]
+	dc.Task = task
 	dc.Validated = validated
 	repo, connector := in.ConnDecl.findConnectorRepo(task.Repo)
 	if repo == nil || connector == nil {
@@ -473,6 +491,7 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 			ch.Title, ch.Description, ch.DoneCriteria, urgency, priority, ch.Reporter)},
 		{Label: "承認済みの計画の本文", Content: dc.Plan.Body},
 		{Label: "承認済みの計画の構造化した出力", Content: dc.Plan.Spec},
+		{Label: labelTaskSection, Content: formatTaskSection(dc.Task)},
 	}
 	if t := formatCompletionRejectionsSection(dc.Rejections); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: CompletionRejectionsSectionLabel, Content: t})
@@ -751,6 +770,7 @@ func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *Judgment
 		return nil, notStarted, err
 	}
 
+	taskID := taskIntID(&dc.Task)
 	runIn := RunJudgmentInput{
 		ChallengeID:  ch.ID,
 		Judgment:     JudgmentJ3,
@@ -759,6 +779,7 @@ func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *Judgment
 		Sections:     sections,
 		OutputSchema: j3OutputSchema(),
 		Invoker:      in.Judgment,
+		TaskID:       &taskID,
 	}
 	var j3 *RunJudgmentResult
 	if jc != nil {
@@ -820,6 +841,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	}
 	planVersion := int64(dc.Plan.Version)
 	deciderRow := int64(dc.DeciderRow)
+	taskID := taskIntID(&dc.Task)
 
 	bind := func(tx *sql.Tx, slotID int64) (int64, error) {
 		cur, err := loadChallenge(ctx, tx, cid)
@@ -839,6 +861,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 			PlanVersion: &planVersion, SessionID: sessionID, ResumedFromRunID: resumedFrom, PID: pid, Host: host,
 			HeartbeatAt: now, StartedAt: now, MaxBudgetUSD: dc.ImplBudgetMicros, BudgetBucket: budgetBucketImpl,
 			SlotID: &slotID, Decider: dc.Decider, DeciderRow: &deciderRow,
+			TaskID: &taskID, Repo: dc.Task.Repo,
 		})
 		if err != nil {
 			return 0, err
@@ -846,6 +869,10 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		n, ok := parseRunID(row.ID)
 		if !ok {
 			return 0, fmt.Errorf("core: malformed run id %q", row.ID)
+		}
+		// 委譲の起動でタスクを作業中にする（pending のときだけ。再開・やり直しでは変えない。run の記録と同じトランザクション）。
+		if err := s.startTaskTx(ctx, tx, taskID, &n); err != nil {
+			return 0, err
 		}
 		return n, nil
 	}

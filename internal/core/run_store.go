@@ -251,7 +251,7 @@ type runRow struct {
 	Output               string
 	Error                string
 	// 0005 で足した列。SlotID は表示形（"SL-<n>"）。Decider は "" が NULL、
-	// DeciderRow・Repo は nil / "" が NULL。Repo は過去の predict の run だけが持つ（新しく作る run は NULL）。
+	// DeciderRow・Repo は nil / "" が NULL。Repo は委譲の run（起動するタスクの repo）と過去の predict の run が持つ。
 	// predict の run は ChallengeID・SessionID が "" 、ChallengeVersion が 0（NULL）になる。
 	SlotID     *string
 	Decider    decider
@@ -410,6 +410,8 @@ type insertRunInput struct {
 	DeciderRow *int64
 	// TaskID は run が結び付くタスクの内部整数 ID（0026。nil は NULL）。
 	TaskID *int64
+	// Repo は run が対象にするリポジトリの名前（"" は NULL）。委譲の run は、起動するタスクの repo を書く。
+	Repo string
 }
 
 func (in insertRunInput) valid() bool {
@@ -495,13 +497,13 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 			session_id, session_id_mismatch, resumed_from_run_id, pid, host, heartbeat_at, started_at,
 			ended_at, result, rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source,
 			reported_total_cost_usd, output, error, slot_id, decider, decider_row, repo, flywheel_version, task_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, NULL, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?)`,
 		int64PtrColumn(in.CycleID), string(in.Kind), nullableTextColumn(string(in.Judgment)), challengeIDCol,
 		challengeVersionCol, int64PtrColumn(in.PlanVersion), sessionIDCol, int64PtrColumn(in.ResumedFromRunID),
 		in.PID, in.Host, formatTimestamp(in.HeartbeatAt), formatTimestamp(in.StartedAt),
 		in.MaxBudgetUSD, string(in.BudgetBucket),
 		int64PtrColumn(in.SlotID), nullableTextColumn(string(in.Decider)), int64PtrColumn(in.DeciderRow),
-		nullableTextColumn(flywheelVersion()), int64PtrColumn(in.TaskID),
+		nullableTextColumn(in.Repo), nullableTextColumn(flywheelVersion()), int64PtrColumn(in.TaskID),
 	)
 	if store.IsUniqueViolation(err) {
 		// 部分一意索引のどちらに当たったかは、スロットを指定していて、その

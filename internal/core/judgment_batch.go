@@ -45,6 +45,16 @@ const (
 	NotStartedOutOfPolicy     NotStartedReason = "out_of_policy"
 )
 
+// NotStartedNoTasks は、着手中の課題に起動できるタスク（task の行で状態が pending か in_progress のもの）が
+// 1 個も無く、委譲を起動しなかったことを表す。
+// `cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
+const NotStartedNoTasks NotStartedReason = "no_tasks"
+
+// NotStartedIntegrationUnavailable は、課題が統合先を使う（challenge.uses_integration が 1）、または起動できる
+// タスクが 2 個以上あり、統合先の入る後の区切りまで委譲を起動しないことを表す。
+// `cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
+const NotStartedIntegrationUnavailable NotStartedReason = "integration_unavailable"
+
 // notStartedReasonValues は NotStartedReason の閉集合（仕様の列挙の順）。
 var notStartedReasonValues = []NotStartedReason{
 	NotStartedCycleBudget,
@@ -63,6 +73,8 @@ var notStartedReasonValues = []NotStartedReason{
 	NotStartedUpstreamClosed,
 	NotStartedUpstreamMissing,
 	NotStartedOutOfPolicy,
+	NotStartedIntegrationUnavailable,
+	NotStartedNoTasks,
 }
 
 // NotStartedReasonValues は NotStartedReason の閉集合（§IF / API「cycle の JSON 出力」の

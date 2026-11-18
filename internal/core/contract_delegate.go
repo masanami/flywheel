@@ -326,26 +326,16 @@ func (a contractAnswer) text() string {
 	return a.Choice + "\n" + a.Note
 }
 
-// checkPlannedContractOperation は承認済みの計画 plan（構造化した出力つき）が選んだ操作を宣言の connector から引き、
+// checkPlannedContractOperation は起動するタスクの操作 operation を宣言の connector から引き、
 // J2 と同じ checkOperationLaunchable で検査する。計画が無い・構造化した出力が無い・操作が
 // connector の宣言に無いときも ErrValidation（起動しない）。
-func checkPlannedContractOperation(plan approvedPlan, connector *Connector, hasSource bool) error {
+func checkPlannedContractOperation(plan approvedPlan, connector *Connector, hasSource bool, operation string) error {
 	if !plan.HasSpec {
 		return fmt.Errorf("%w: the challenge has no approved plan with a structured spec", ErrValidation)
 	}
-	var spec struct {
-		Tasks []struct {
-			Operation string `json:"operation"`
-		} `json:"tasks"`
+	if !json.Valid([]byte(plan.Spec)) {
+		return fmt.Errorf("%w: the approved plan spec is malformed", ErrValidation)
 	}
-	if err := json.Unmarshal([]byte(plan.Spec), &spec); err != nil {
-		return fmt.Errorf("%w: the approved plan spec is malformed: %s", ErrValidation, err.Error())
-	}
-	// 委譲はタスクがちょうど 1 件の計画だけを起動する。
-	if len(spec.Tasks) != 1 {
-		return fmt.Errorf("%w: the approved plan does not have exactly one task", ErrValidation)
-	}
-	operation := spec.Tasks[0].Operation
 	for i := range connector.Operations {
 		if connector.Operations[i].ID == operation {
 			return checkOperationLaunchable(connector, &connector.Operations[i], hasSource)
@@ -382,9 +372,17 @@ func (s *Store) contractWorkDir(workDir string) string {
 // explicit（呼び出し元が渡した WorkDir）が非空ならそれを使う。空なら、課題の承認済みの計画のリポジトリ（repos[]）から
 // repoIdleWorkDir で決める（worktree は元のクローン、clone は状態が idle の作業用クローンのうち paths の順で最初のもの）。
 // 決められないとき（承認済みの計画が無い・宣言と合わない・idle の作業用クローンが無い）は ok=false。
-func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, cid int64, explicit string) (string, bool, error) {
+func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, cid int64, explicit, taskRepo string) (string, bool, error) {
 	if explicit != "" {
 		return explicit, true, nil
+	}
+	if taskRepo != "" {
+		// 起動するタスクの対象リポジトリ（タスクの行のもの）。
+		repo, _ := conn.findConnectorRepo(taskRepo)
+		if repo == nil {
+			return "", false, nil
+		}
+		return s.repoIdleWorkDir(ctx, *repo)
 	}
 	var plan approvedPlan
 	var planOK bool
@@ -445,6 +443,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	var binding *sourceBinding
 	var planVersion *int64
 	var plan approvedPlan
+	var tasks []Task
 	err = s.db.Read(ctx, func(tx *sql.Tx) error {
 		ch, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
@@ -468,20 +467,30 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 			planVersion = &v
 			plan = p
 		}
+		tasks, err = loadLaunchableTasks(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
 	// 起動の前に、J2 と同じ関数で承認済みの計画の操作を検査する（J2 の後に宣言が変わっても、検査していない引数で起動しない）。
-	if err := checkPlannedContractOperation(plan, connector, binding != nil); err != nil {
+	// 委譲は起動できるタスクがちょうど 1 個の課題だけを起動する。対象のリポジトリと操作はタスクの行のもの。
+	if len(tasks) != 1 {
+		return nil, fmt.Errorf("%w: the challenge does not have exactly one launchable task", ErrValidation)
+	}
+	task := tasks[0]
+	taskID := taskIDPtr(&task)
+	if err := checkPlannedContractOperation(plan, connector, binding != nil, task.Operation); err != nil {
 		return nil, err
 	}
 	command, err := fillContractArgs(connector.Commands.Start, in.ChallengeID, binding, "", contractAnswer{})
 	if err != nil {
 		return nil, err
 	}
-	workDir, ok, err := s.contractRepoWorkDir(ctx, in.AgentDecl, in.ConnDecl, cid, in.WorkDir)
+	workDir, ok, err := s.contractRepoWorkDir(ctx, in.AgentDecl, in.ConnDecl, cid, in.WorkDir, task.Repo)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +506,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if n, ok := parseCycleID(in.CycleID); ok {
 		cycleIDInt = &n
 	}
-	runIDInt, err := s.beginContractRun(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true)
+	runIDInt, err := s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +522,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 			Workspace: s.workspace, WorkDir: s.contractWorkDir(workDir), RunDir: runDirPath(s.workspace, formatRunID(runIDInt)),
 			Command: command, TimeoutSec: in.AgentDecl.TimeoutSec.Delegate,
 		},
-		Invoke: call, MaxMicros: maxMicros,
+		Invoke: call, MaxMicros: maxMicros, TaskIDInt: taskID,
 	})
 	if err != nil {
 		return nil, err
@@ -524,9 +533,17 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	return rep, nil
 }
 
-// beginContractRun は契約のコマンド 1 回ぶんの run を記録する。start のときは周の上限を評価し、課題に
-// 終わっていない契約の run・run があれば ErrRunInProgress にする。
+// beginContractRun は beginContractRunForTask を、タスクに結び付けずに呼ぶ（start 以外の状態の確認・resume・cancel）。
 func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool) (int64, error) {
+	return s.beginContractRunForTask(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, nil)
+}
+
+// beginContractRunForTask は契約のコマンド 1 回ぶんの run を記録する。start のときは周の上限を評価し、課題に
+// 終わっていない契約の run・run があれば ErrRunInProgress にする。
+//
+// taskID が非 nil（start のとき、起動するタスク）なら、pending のタスクを in_progress にする（run の記録と同じトランザクション。
+// すでに in_progress のタスクでは変えない）。
+func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID *int64) (int64, error) {
 	host, _ := os.Hostname()
 	now := s.currentTime()
 	var runIDInt int64
@@ -569,6 +586,9 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 			return fmt.Errorf("core: malformed run id %q", row.ID)
 		}
 		runIDInt = n
+		if isStart && taskID != nil {
+			return s.startTaskTx(ctx, tx, *taskID, &n)
+		}
 		return nil
 	})
 	switch {
@@ -849,6 +869,12 @@ func (s *Store) holdContractWithReason(ctx context.Context, runID, challengeID, 
 		func(ctx context.Context, tc *transitionCtx) error {
 			if tc.current.Status != StatusInProgress {
 				return errReconcileNotEligible
+			}
+			// 起動できるタスクがちょうど 1 個なら、保留をそのタスクに結び付ける（start の失敗では契約の run がまだ無い）。
+			if tasks, err := loadLaunchableTasks(ctx, tc.tx, tc.id); err != nil {
+				return err
+			} else if len(tasks) == 1 {
+				tc.taskID = taskIDPtr(&tasks[0])
 			}
 			return s.insertHoldWithOccurrence(ctx, tc, question, reason, "")
 		})

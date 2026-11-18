@@ -208,17 +208,27 @@ func TestRunDelegation_ApprovedPlanNotDelegatable_NotStartedWithReason(t *testin
 		name string
 		spec string
 		want string
+		// reason は起動しなかった理由。タスクの行が 1 個ある計画は計画の検査で plan_unavailable、タスクの行が無い・
+		// 2 個以上の計画は、計画の検査より前のタスクの数の判定で no_tasks・integration_unavailable になる。
+		reason NotStartedReason
+		// withTask が真なら、構造化した出力にタスクが無くても task の行を 1 個足す（計画の検査まで進める）。
+		withTask bool
 	}{
-		{"unknown repo", planSpec(func(m map[string]any) { m["repo"] = "no-such-repo" }), "今の宣言と合わない"},
-		{"not a structured output", `{"verdict":"plan"}`, "今の宣言と合わない"},
-		{"the old shape without tasks", `{"verdict":"plan","summary":"s","steps":["a"],"repo":"main-repo","operation":"impl","size":"S","done_criteria":"d","cross_repo":false,"related_repos":[]}`, "今の宣言と合わない"},
-		{"two tasks are not launched yet", twoTaskPlanSpec(), "タスクが 1 件でない"},
-		{"verdict is not plan", `{"verdict":"uncertain","question":"Q?"}`, "verdict が plan でない"},
+		{"unknown repo", planSpec(func(m map[string]any) { m["repo"] = "no-such-repo" }), "今の宣言と合わない", NotStartedPlanUnavailable, false},
+		{"not a structured output", `{"verdict":"plan"}`, "", NotStartedNoTasks, false},
+		{"the old shape without tasks", `{"verdict":"plan","summary":"s","steps":["a"],"repo":"main-repo","operation":"impl","size":"S","done_criteria":"d","cross_repo":false,"related_repos":[]}`, "", NotStartedNoTasks, false},
+		{"the old shape with a task row", `{"verdict":"plan","summary":"s","steps":["a"],"repo":"main-repo","operation":"impl","size":"S","done_criteria":"d","cross_repo":false,"related_repos":[]}`, "今の宣言と合わない", NotStartedPlanUnavailable, true},
+		{"two tasks are not launched yet", twoTaskPlanSpec(), "", NotStartedIntegrationUnavailable, false},
+		{"verdict is not plan", `{"verdict":"uncertain","question":"Q?"}`, "verdict が plan でない", NotStartedPlanUnavailable, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newDelegateFixture(t)
 			id := f.newInProgress(t, "x", "P1", tc.spec)
+			if tc.withTask {
+				cid, _ := parseChallengeID(id)
+				addTaskRowForTest(t, f.s, cid, 1, "t1", "main-repo", "impl")
+			}
 			res, err := f.run(t, nil)
 			if err != nil {
 				t.Fatalf("RunDelegation: %v", err)
@@ -227,8 +237,8 @@ func TestRunDelegation_ApprovedPlanNotDelegatable_NotStartedWithReason(t *testin
 				t.Fatalf("items = %+v not_started = %+v, want one not_started", res.Items, res.NotStarted)
 			}
 			ns := res.NotStarted[0]
-			if ns.ChallengeID != id || ns.Reason != NotStartedPlanUnavailable || ns.Detail == "" || !strings.Contains(ns.Detail, tc.want) {
-				t.Errorf("not_started = %+v, want %s plan_unavailable with a detail containing %q", ns, id, tc.want)
+			if ns.ChallengeID != id || ns.Reason != tc.reason || ns.Detail == "" || !strings.Contains(ns.Detail, tc.want) {
+				t.Errorf("not_started = %+v, want %s %s with a detail containing %q", ns, id, tc.reason, tc.want)
 			}
 			if len(f.j3Inputs) != 0 {
 				t.Error("J3 must not start")
@@ -245,14 +255,15 @@ func twoTaskPlanSpec() string {
 	})
 }
 
-// タスクが 2 件の計画は、課題の ID を指定した委譲でも起動しない（validation_failed 相当の ErrValidation）。
-// タスクが 1 件の計画は、そのタスクの repo・operation で起動する。
+// タスクが 2 件の計画は、課題の ID を指定した委譲でも起動しない（エラーではなく、起動しなかった理由
+// integration_unavailable として返す）。タスクが 1 件の計画は、そのタスクの repo・operation で起動する。
 func TestRunDelegation_ExplicitID_TwoTaskPlanIsNotLaunched_OneTaskPlanUsesTheTask(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
 	two := f.newInProgress(t, "two", "P1", twoTaskPlanSpec())
-	if _, err := f.run(t, &two); !errors.Is(err, ErrValidation) {
-		t.Fatalf("err = %v, want ErrValidation for a 2-task plan", err)
+	res, err := f.run(t, &two)
+	if err != nil || len(res.Items) != 0 || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedIntegrationUnavailable {
+		t.Fatalf("res = %+v err = %v, want not_started integration_unavailable for a 2-task plan", res, err)
 	}
 	if len(f.j3Inputs) != 0 {
 		t.Error("J3 must not start for a 2-task plan")
