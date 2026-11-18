@@ -67,6 +67,9 @@ type transitionCtx struct {
 	// （#13: D12 の完了の承認が、release ごとに entity="operation" のエントリを
 	// 追加で積む）。
 	rec *activityRecorder
+	// taskID は、この遷移で作る保留（hold.task_id）が結び付くタスクの内部整数 ID。委譲の子の問い・停止で作る
+	// 保留が apply で設定する（nil は NULL＝タスクに結び付かない保留）。
+	taskID *int64
 }
 
 // transitionPrecedingResolver は、遷移先の解決（tr.Target.Resolve）に渡す
@@ -445,7 +448,7 @@ func insertHoldKind(ctx context.Context, tc *transitionCtx, question string, kin
 // insertHoldKindFrom は insertHoldKind の、保留に入る直前の状態（hold.from_status。回答で戻る先）を指定する版。
 // 遷移前の状態と戻り先が違う T15（親が直接した完了の差し戻し）が使う。
 func insertHoldKindFrom(ctx context.Context, tc *transitionCtx, question string, kind HoldKind, from Status) (int64, error) {
-	return insertHoldKindFromTask(ctx, tc, question, kind, from, nil)
+	return insertHoldKindFromTask(ctx, tc, question, kind, from, tc.taskID)
 }
 
 // insertHoldKindFromTask は insertHoldKindFrom の、保留が結び付くタスク（hold.task_id。nil は NULL）を指定する版。

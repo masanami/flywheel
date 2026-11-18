@@ -895,7 +895,15 @@ func TestWorklog_NoActivityMutationCommandsAddNoActivity(t *testing.T) {
 			args := tc.setup(t, ws)
 			before := allActivities(t, ws)
 			runCommandForWorklog(t, name, args, ws)
-			if added := allActivities(t, ws)[len(before):]; len(added) != 0 {
+			// 経路 invoker の作業ログ（課題の写像・タスクの状態の変化 entity=task・action=task_status）は、委譲の結果の
+			// 写しで、経路 cli 固定のこの検査の対象ではない（core のテストが検証する）。
+			var added []map[string]any
+			for _, a := range allActivities(t, ws)[len(before):] {
+				if a["channel"] != "invoker" {
+					added = append(added, a)
+				}
+			}
+			if len(added) != 0 {
 				t.Errorf("%s added %d activities, want 0: %v", name, len(added), added)
 			}
 		})

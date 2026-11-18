@@ -187,6 +187,8 @@ func (f *delegateFixture) newInProgress(t *testing.T, title, priority, spec stri
 	if err != nil {
 		t.Fatalf("make in_progress: %v", err)
 	}
+	// 計画の承認が行うタスクの記録（構造化した出力のある計画だけ）。
+	seedPlanTasks(t, f.s, cid, 1)
 	return ch.ID
 }
 

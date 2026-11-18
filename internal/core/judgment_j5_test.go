@@ -719,6 +719,7 @@ func (f *j5Fixture) notMetRound(t *testing.T, id string) {
 	if _, err := f.verify(t, &id); err != nil {
 		t.Fatal(err)
 	}
+	reopenVerifyingTasks(t, f.s)
 }
 
 func TestRework_NotMetResumesThePreviousDelegationSessionWithTheFeedback(t *testing.T) {
@@ -837,6 +838,7 @@ func TestRework_LimitCountsOnlyTheSamePlanVersion(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	seedPlanTasks(t, f.s, cid, 2)
 	res := f.runDelegation(t, "C-1")
 	if len(res.NotStarted) != 0 || len(res.Items) != 1 {
 		t.Fatalf("result = %+v, want a launch for the new plan version", res)
@@ -856,6 +858,7 @@ func TestRework_WithoutNotMetTheNormalFlowIsUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.answerLatestHold(t, "C-1", "A")
+	reopenVerifyingTasks(t, f.s)
 	launches := len(f.deleg.launched())
 	f.runDelegation(t, "C-1")
 	if len(f.deleg.launched()) != launches+1 {

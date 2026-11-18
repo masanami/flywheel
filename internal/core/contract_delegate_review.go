@@ -57,7 +57,10 @@ func (s *Store) submitContractReview(ctx context.Context, rep *ContractRunReport
 			}
 			prs, err := importContractArtifacts(ctx, tc.tx, runInt, rep.Artifacts, s.currentTime())
 			rep.PRs = append(rep.PRs, prs...)
-			return err
+			if err != nil {
+				return err
+			}
+			return verifyContractTask(ctx, tc, rep.ExternalRunID)
 		})
 	if err != nil && !errors.Is(err, ErrInvalidTransition) && !errors.Is(err, ErrTerminalState) && !errors.Is(err, errReconcileNotEligible) {
 		return err

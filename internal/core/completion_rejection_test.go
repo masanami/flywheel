@@ -279,6 +279,7 @@ func (f *j5Fixture) delegateAndVerifyMet(t *testing.T, id string) {
 func (f *j5Fixture) rejectAndRedelegate(t *testing.T, id, reason string, at time.Time, att func(*testing.T, string) Attestation) {
 	t.Helper()
 	f.rejectCompletionForTest(t, id, reason, at, att)
+	reopenVerifyingTasks(t, f.s)
 	f.runDelegation(t, id) // 新しいセッション（J3 を通る）。委譲の後に検証中へ進む
 	if got := f.detail(t, id).Status; got != StatusVerifying {
 		t.Fatalf("status after the redelegation = %s, want verifying", got)
@@ -383,6 +384,7 @@ func TestRejectionReasonsReachJ3J5AndTheReworkResumeInOrder_AndANotMetFeedbackRe
 	if got := f.detail(t, "C-1").Status; got != StatusInProgress {
 		t.Fatalf("status after not_met = %s, want in_progress", got)
 	}
+	reopenVerifyingTasks(t, f.s)
 
 	// 次の委譲: 差し戻しの再開。J5 の指摘と 2 回分の理由の両方が渡り、J3 は呼ばれない。
 	j3Calls := len(f.j3Inputs)

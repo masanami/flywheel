@@ -100,6 +100,7 @@ func TestRework_ConflictOverrideIsNotCountedTowardTheLimit(t *testing.T) {
 	if _, err := f.verify(t, &id); err != nil {
 		t.Fatal(err)
 	}
+	reopenVerifyingTasks(t, f.s)
 	res := f.runDelegation(t, "C-1")
 	if len(res.NotStarted) != 0 || len(res.Items) != 1 {
 		t.Fatalf("result = %+v, want a launch (the conflict must not hit the rework limit)", res)
@@ -127,6 +128,7 @@ func TestRework_ConflictWithJ5sOwnNotMetIsMarkedAndNotCountedTowardTheLimit(t *t
 	if _, err := f.verify(t, &id); err != nil {
 		t.Fatal(err)
 	}
+	reopenVerifyingTasks(t, f.s)
 	runs := f.j5Runs(t)
 	v, ok := validateJ5Output([]byte(runs[len(runs)-1].Output))
 	if !ok || v.Verdict != J5VerdictNotMet || v.ConflictOverriddenFrom != string(J5VerdictNotMet) || v.Feedback == nil ||

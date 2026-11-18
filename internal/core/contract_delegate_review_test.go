@@ -515,6 +515,7 @@ func TestRunDelegation_CLISecondContractAfterSendBackDoesNotCountTheFirstCostTwi
 	if _, err := f.exec(`UPDATE challenge SET status = 'in_progress', version = version + 1 WHERE id = ?`, cid); err != nil {
 		t.Fatal(err)
 	}
+	reopenVerifyingTasks(t, f.s)
 	ext2 := func(st *ContractStatus) { st.RunID = "ext-2" }
 	f.client.startOut = contractOut(ContractStateRunning, nil, ext2)
 	in2 := f.input(f.cycle(t, 300), idPtr(f.cid))
