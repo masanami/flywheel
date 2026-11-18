@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
 // initWorkspaceWithWork は、サイクルを回すと進むもの（未分類の課題 1 件）を持つワークスペースを返す。
@@ -381,6 +383,10 @@ func TestCyclePostNothingToAdvanceReturnsNotStartedWithoutLaunching(t *testing.T
 	}
 	if n := atomic.LoadInt32(calls); n != 0 {
 		t.Errorf("起動が %d 回呼ばれた", n)
+	}
+	// サイクルの記録は作られない（AC-225）。
+	if n := fmt.Sprint(coretest.QueryRows(t, ws, "SELECT COUNT(*) FROM cycle")[0][0]); n != "0" {
+		t.Errorf("cycle rows = %s, want 0", n)
 	}
 }
 
