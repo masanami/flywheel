@@ -694,8 +694,9 @@ func TestCodeForCoreErr(t *testing.T) {
 
 const ingestableTestSources = `{"version":1,"sources":[{"id":"s","type":"github-issue","repos":["o/r"],"self_assignees":["me"]}]}`
 
-// AC-252（#779）: 問い合わせに ingestable=true が無いとき ingestable は null で、上流の Issue の一覧を読まない。
-func TestStatusAPI_AC252_IngestableIsNullAndUpstreamNotReadWithoutQuery(t *testing.T) {
+// AC-283・AC-284・AC-285（#779）: 問い合わせに ingestable=true が無いとき、ingestable は null（AC-283）で、上流の Issue の一覧を
+// 読まず（AC-284）、followups のキーはある（AC-285）。
+func TestStatusAPI_AC283_AC284_AC285_IngestableIsNullAndUpstreamNotReadWithoutQuery(t *testing.T) {
 	ws := verifyingWorkspace(t)
 	if err := os.WriteFile(filepath.Join(ws, ".flywheel", "sources.json"), []byte(ingestableTestSources), 0o644); err != nil {
 		t.Fatal(err)
@@ -728,8 +729,8 @@ func TestStatusAPI_AC252_IngestableIsNullAndUpstreamNotReadWithoutQuery(t *testi
 	}
 }
 
-// AC-253（#779）: ingestable=true を付けると上流の Issue の一覧を読み、本文は同じストアでの `flywheel status --json` と同じ。
-func TestStatusAPI_AC253_IngestableTrueReadsUpstreamAndEqualsCLI(t *testing.T) {
+// AC-287（#779）: ingestable=true を付けると上流の Issue の一覧を読み、本文は同じストアでの `flywheel status --json` と同じ。
+func TestStatusAPI_AC287_IngestableTrueReadsUpstreamAndEqualsCLI(t *testing.T) {
 	ws := verifyingWorkspace(t)
 	if err := os.WriteFile(filepath.Join(ws, ".flywheel", "sources.json"), []byte(ingestableTestSources), 0o644); err != nil {
 		t.Fatal(err)

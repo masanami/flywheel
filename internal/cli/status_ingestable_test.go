@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -299,4 +301,103 @@ func TestStatus_AC230_DocumentedShapeWithIngestableChildren(t *testing.T) {
 		t.Fatalf("fixture must have an item with children: %v", items)
 	}
 	assertDocumentedJSON(t, loadDocumentedJSON(t), "status", out)
+}
+
+// ingestableKeys は ingestable.items の根と、その children の external_key を全部返す。
+func ingestableKeys(t *testing.T, doc map[string]any) map[string]bool {
+	t.Helper()
+	out := map[string]bool{}
+	for _, e := range ingestableOf(t, doc)["items"].([]any) {
+		it := e.(map[string]any)
+		out[it["external_key"].(string)] = true
+		for _, c := range it["children"].([]any) {
+			out[c.(map[string]any)["external_key"].(string)] = true
+		}
+	}
+	return out
+}
+
+// AC-162（#776 から引き継いだ確かめ。#779）: 子の記録を持つ課題の対応を外す（unbind）と、消した子の Issue が
+// `flywheel status --json` の ingestable.items に出る（親も取り込めるものへ戻るので、子は親の children に入る）。
+func TestStatus_AC162_ChildRemovedByUnbindIsIngestableAgain(t *testing.T) {
+	parallelTools(t, false)
+	ws := ingestableSetup(t, `"self_assignees":["someone"]`)
+	child := ingRepo + "#2"
+	runJSON(t, ws, "ingest", ingRepo+"#1")
+	if kids := runJSON(t, ws, "show", "C-1")["source_children"].([]any); len(kids) != 1 {
+		t.Fatalf("setup: source_children = %v, want the child recorded", kids)
+	}
+	if got := ingestableKeys(t, runJSON(t, ws, "status")); got[child] {
+		t.Fatalf("before unbind: %s is in ingestable.items though it is recorded as a child: %v", child, got)
+	}
+	runJSON(t, ws, "unbind", "C-1")
+	if got := ingestableKeys(t, runJSON(t, ws, "status")); !got[child] {
+		t.Errorf("AC-162: after unbind, %s is not in ingestable.items: %v", child, got)
+	}
+}
+
+func readDocForStatusTest(t *testing.T, rel ...string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(append([]string{repoRoot(t)}, rel...)...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// AC-308（#779）: m1-core.md の status の形の説明に、ingestable・followups・cycle_work がある。
+func TestSpec_AC308_M1CoreStatusShapeHasTheS2bKeys(t *testing.T) {
+	t.Parallel()
+	found := false
+	for _, line := range strings.Split(readDocForStatusTest(t, "docs", "features", "m1-core.md"), "\n") {
+		if !strings.HasPrefix(line, "`{\"needs_human\":") {
+			continue
+		}
+		found = true
+		for _, k := range []string{"\"ingestable\":", "\"followups\":", "\"cycle_work\":"} {
+			if !strings.Contains(line, k) {
+				t.Errorf("AC-308: the status shape in m1-core.md lacks %s", k)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("AC-308: m1-core.md has no line documenting the status shape")
+	}
+}
+
+// AC-313（#779）: m4-ui-server.md の状況の API の説明に、ingestable=true の問い合わせがある。
+func TestSpec_AC313_M4StatusAPIRowMentionsTheIngestableQuery(t *testing.T) {
+	t.Parallel()
+	found := false
+	for _, line := range strings.Split(readDocForStatusTest(t, "docs", "features", "m4-ui-server.md"), "\n") {
+		if !strings.HasPrefix(line, "| `GET /api/v1/workspaces/{name}/status") {
+			continue
+		}
+		found = true
+		if !strings.Contains(line, "ingestable=true") {
+			t.Errorf("AC-313: the status API row lacks ingestable=true: %s", line)
+		}
+	}
+	if !found {
+		t.Fatal("AC-313: m4-ui-server.md has no row for the status API")
+	}
+}
+
+// AC-320（#779）: CLAUDE.md のモジュール構成の規約に、internal/server が、状況の API の取り込めるもののために
+// 上流の Issue を読む口を組み立ててよい旨がある。
+func TestSpec_AC320_ClaudeMDAllowsServerToBuildTheUpstreamIssueSource(t *testing.T) {
+	t.Parallel()
+	found := false
+	for _, line := range strings.Split(readDocForStatusTest(t, "CLAUDE.md"), "\n") {
+		if !strings.Contains(line, "`internal/server` が `internal/adapters/github` を import してよいのは") {
+			continue
+		}
+		found = true
+		if !strings.Contains(line, "取り込めるもの") || !strings.Contains(line, "UpstreamIssueSource") {
+			t.Errorf("AC-320: the import rule of internal/server does not allow building the upstream issue source: %s", line)
+		}
+	}
+	if !found {
+		t.Fatal("AC-320: CLAUDE.md has no import rule for internal/server")
+	}
 }
