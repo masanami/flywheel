@@ -117,13 +117,23 @@ func selectAllIngestableForTest(t *testing.T, s *Store, sources []SourceEntry, u
 	if len(scan.Candidates) == 0 {
 		return created
 	}
-	specs := make([]string, 0, len(scan.Candidates))
-	for _, c := range scan.Candidates {
-		specs = append(specs, c.Issue.ExternalKey)
-		created[c.Issue.ExternalKey] = true
+	// 親と子を同じコマンドに並べて選ぶことはできない（子孫は取り込み元の子になる）ので、
+	// 取り込めるものの全部を、それぞれ独立した課題として 1 つのトランザクションで作る
+	// （課題の ID は上流の一覧の順）。
+	actor, err := s.resolveActor()
+	if err != nil {
+		t.Fatalf("resolveActor() error = %v", err)
 	}
-	if _, err := s.IngestSelected(context.Background(), ChannelCLI, IngestSelectedInput{Sources: sources, Specs: specs, Upstream: upstream}); err != nil {
-		t.Fatalf("IngestSelected() error = %v", err)
+	if err := s.mutateAs(context.Background(), actor, ChannelCLI, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
+		for _, c := range scan.Candidates {
+			if _, err := insertIngestedChallenge(context.Background(), tx, rec, c.Source, c.Issue); err != nil {
+				return err
+			}
+			created[c.Issue.ExternalKey] = true
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("insertIngestedChallenge error = %v", err)
 	}
 	return created
 }
