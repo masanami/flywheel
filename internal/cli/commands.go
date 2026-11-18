@@ -378,6 +378,13 @@ func defaultCommands() []Command {
 			Run:  runVersion,
 		},
 		{
+			// docs/features/core-redesign.md S2b。読み取りだけ（--status の既定は open）。
+			Path:          []string{"followup", "list"},
+			RequiresStore: true,
+			Flags:         []flagDef{{Name: "status", HasValue: true}, {Name: "challenge", HasValue: true}},
+			Run:           runFollowupList,
+		},
+		{
 			Path:          []string{"status"},
 			RequiresStore: true,
 			Run:           runStatus,

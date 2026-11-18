@@ -217,6 +217,8 @@ type ChallengeDetail struct {
 	Tasks []Task
 	// UsesIntegration は課題が統合先を使うか（challenge.uses_integration）。未決か過去の課題は nil。
 	UsesIntegration *bool
+	// Followups は課題にぶら下がるフォローアップ（状態を問わず全部。ID の昇順）。無ければ空のスライス（nil でない）。
+	Followups []Followup
 }
 
 // ImprovementKey は改修課題の鍵（challenge.improvement_layer・improvement_target。マイグレーション 0012）。
@@ -861,6 +863,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		if detail.UsesIntegration, err = challengeUsesIntegration(ctx, tx, cid); err != nil {
+			return err
+		}
+		if detail.Followups, err = listFollowups(ctx, tx, FollowupFilter{ChallengeID: id}); err != nil {
 			return err
 		}
 		var followupOf, impLayer, impTarget sql.NullString

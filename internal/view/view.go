@@ -565,10 +565,12 @@ type ShowResponse struct {
 	Challenge ShowChallenge `json:"challenge"`
 	// DirectCompletions は親が直接行った完了の記録（古い順。無ければ []）。1 件以上あることが「親が直接行った」印。
 	DirectCompletions []DirectCompletion `json:"direct_completions"`
-	Holds             []Hold             `json:"holds"`
-	Operations        []Operation        `json:"operations"`
-	Pairs             []StagePair        `json:"pairs"`
-	Plans             []PlanDetail       `json:"plans"`
+	// Followups は課題のフォローアップ（状態を問わず全部。無ければ []）。
+	Followups  []Followup   `json:"followups"`
+	Holds      []Hold       `json:"holds"`
+	Operations []Operation  `json:"operations"`
+	Pairs      []StagePair  `json:"pairs"`
+	Plans      []PlanDetail `json:"plans"`
 	// ReleaseHeadChanges は承認待ちの release のうち、PR の head が J5 の検証の head から動いたものの評価
 	// （CLI の show だけが足す。GitHub を読めなかった release・head が動いていない release は載せない。無ければ出さない）。
 	ReleaseHeadChanges []ReleaseHeadChange `json:"release_head_changes,omitempty"`
@@ -586,6 +588,7 @@ func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 		Approvals:         FromApprovals(d.Approvals),
 		Challenge:         FromShowChallenge(d),
 		DirectCompletions: FromDirectCompletions(d.DirectCompletions),
+		Followups:         FromFollowups(d.Followups),
 		Holds:             FromHolds(d.Holds),
 		Operations:        FromOperations(d.Operations),
 		Pairs:             FromPairs(core.Pairs(d.Expected, d.Actual)),

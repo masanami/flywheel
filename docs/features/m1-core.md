@@ -267,7 +267,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 ##### `show`
 
-`{"challenge": {…}, "plans": [...], "approvals": [...], "holds": [...], "direct_completions": [...], "operations": [...], "source_binding": {…}}`。`challenge` は上表と同じ形。`source_binding` は下表と同じ形（一覧ではなく単一のオブジェクト。対応の無い課題は `null`。#56 で追加）。
+`{"challenge": {…}, "plans": [...], "approvals": [...], "holds": [...], "direct_completions": [...], "followups": [...], "operations": [...], "source_binding": {…}}`。`challenge` は上表と同じ形。`source_binding` は下表と同じ形（一覧ではなく単一のオブジェクト。対応の無い課題は `null`。#56 で追加）。
 
 | 一覧 | 要素の形 |
 |---|---|
@@ -275,10 +275,15 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 | `approvals` | `{"id", "kind", "decision", "operation_id", "target_version", "actor", "channel", "verification", "reason", "decided_at", "merge_in_verified_head", "superseded_at", "superseded_reason", "superseded_by"}`（`operation_id`・`reason` は `null` 可。`id` は承認の行の ID `"AP-<n>"`。`merge_in_verified_head` は release を「検証の head から既定ブランチを取り込んだだけ」と判定して承認したときの検証の head、`superseded_at`・`superseded_reason`・`superseded_by` は完了の承認が本番反映のやり直しで置き換えられた日時・理由・置き換えた次の完了の承認の ID。有効な承認と、これらに当てはまらない承認は `null`。M4.5 §本番反映の立て直し・#485） |
 | `holds` | `{"question", "from_status", "from_status_label", "kind", "raised_at", "answer", "answered_at", "answered_by", "closed_at", "replan"}`（`answer`・`answered_at`・`answered_by` は未回答なら `null`。`closed_at` は保留を回答なしで閉じた時刻〔課題の取り下げ〔M4.5〕と、親が直接行った作業の完了の記録〔T17。#452〕〕で、閉じていなければ `null`。`kind` は保留の種類 `human`\|`parent_direct`。`replan` は回答に「範囲が変わる」印〔`answer --replan`。§範囲が変わる回答〕が付いたかの真偽で、未回答と印の無い回答は `false`） |
 | `direct_completions` | `{"artifacts", "note", "created_at"}`（親が直接行った完了の記録。古い順で、無ければ `[]`。`artifacts` は成果物の参照の文字列の配列〔1 件以上〕、`note` は短い説明で無ければ `null`。1 件以上あることが「親が直接行った」印。#452） |
+| `followups` | `{"id", "challenge_id", "title", "detail", "source", "status", "note", "reason", "promoted_challenge_id", "created_at", "updated_at"}`（その課題のフォローアップを状態を問わず全部、ID の昇順。無ければ `[]`。`id` は `"F-<n>"`。`challenge_id`・`note`・`reason`・`promoted_challenge_id` は `null` 可。`status` は `open`\|`done`\|`dropped`。S2b） |
 | `operations` | `{"id", "challenge_id", "kind", "summary", "ref", "state", "version", "created_at"}`（`id`・`challenge_id` は `"OP-<n>"`・`"C-<n>"`。`ref` は `null` 可） |
 | `source_binding` | `{"source_id", "external_key", "url", "fingerprint", "upstream_state", "policy_state", "comments_count", "upstream_updated_at", "read_comments_count", "read_upstream_updated_at", "created_at", "updated_at"}`（対応の無い課題では `source_binding` 自体が `null`。`comments_count`・`upstream_updated_at`・`read_comments_count`・`read_upstream_updated_at` は #72（上流の更新の観測と既読）が追加。`upstream_updated_at`・`read_upstream_updated_at` は未設定なら `null`） |
 
 #9 は `plans`・`approvals`・`holds`・`operations` への書き込み操作を持たないため、これらは常に読み取り専用だった（#10 で `plans`・`holds` への書き込みが入った。#12 で `approvals` への書き込みと `holds` の `answer`・`answered_at`・`answered_by` の記録が入った。#13 で `operations` への書き込み（`op add`）と、完了の承認による `release` の一括承認（D12）が入った）。`source_binding` は #56（M2）が GitHub Issue から取り込んだ課題に対して作る（`create` で作った課題・スキーマ版 1 から上げたストアの既存の課題は `null`）。
+
+##### `followup list`（S2b で追加）
+
+`{"followups": [{…}, ...]}`。要素は `show` の `followups` の要素と同じ形。`--status`（`open`\|`done`\|`dropped`\|`all`。既定は `open`）は状態だけで絞り、上げてあるもの（`promoted_challenge_id` があるもの）も未のうちに数える。`--challenge <C-ID>` はその課題のものだけに絞る。
 
 ##### `list`
 
@@ -527,6 +532,7 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel reject <C-ID> --reason <r>` | T6・T15 | 要 |
 | `flywheel op add <C-ID> --kind <release\|delete\|external_send\|other> --summary <s> [--ref <r>]` | 不可逆操作の登録 | — |
 | `flywheel approve <OP-ID>` / `flywheel reject <OP-ID> --reason <r>` | 不可逆操作の単独の承認・差し戻し | 要 |
+| `flywheel followup list [--status <open\|done\|dropped\|all>] [--challenge <C-ID>]` | フォローアップの一覧（読み取りだけ）。既定は未。状態の閉集合外は `usage_error`、存在しない課題は `not_found`。文の出力は課題ごとにまとめ、課題に属さないものを最後に出す | — |
 | `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す（`--json` では `binary_commit`） | — |
 | `flywheel version` | 動いているバイナリのビルドのコミット（`vcs.revision`・`vcs.time`・`vcs.modified`）と、そのバイナリが扱うストアのスキーマの版。読み取りだけで、ストアを開かず（`store_too_new` でも動く）、ネットワークにも Git にも触れない。未コミットの変更つきのビルドは commit の表示に `+dirty` を付ける | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |

@@ -157,6 +157,7 @@ export interface ShowResponse {
   approvals: Approval[];
   challenge: ShowChallenge;
   direct_completions: DirectCompletion[];
+  followups: Followup[];
   holds: Hold[];
   operations: Operation[];
   pairs: StagePair[];
@@ -228,6 +229,20 @@ export interface DirectCompletion {
   artifacts: string[];
   created_at: string;
   note: string | null;
+}
+
+export interface Followup {
+  challenge_id: string | null;
+  created_at: string;
+  detail: string;
+  id: string;
+  note: string | null;
+  promoted_challenge_id: string | null;
+  reason: string | null;
+  source: string;
+  status: string;
+  title: string;
+  updated_at: string;
 }
 
 export interface Hold {
@@ -453,6 +468,7 @@ export interface ShowCardResponse {
   card: Card;
   challenge: ShowChallenge;
   direct_completions: DirectCompletion[];
+  followups: Followup[];
   holds: Hold[];
   operations: Operation[];
   pairs: StagePair[];
@@ -618,6 +634,10 @@ export interface GraphNode {
   stale: boolean;
   state: string;
   title: string;
+}
+
+export interface FollowupListResponse {
+  followups: Followup[];
 }
 
 export const CARD_ACTION_CODES = [

@@ -42,6 +42,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   dep rm <C-ID> <依存先の C-ID>...
   bind <C-ID> <owner/repo#番号>   （取り込み元の Issue の無い課題を、open の GitHub Issue に紐づける。宣言の取り込み元のリポジトリだけ）
   unbind <C-ID>   （紐づけを外す）
+  followup list [--status <open|done|dropped|all>] [--challenge <C-ID>]   （フォローアップの一覧。既定は未だけ）
   status
   version   （動いているバイナリのコミットとストアのスキーマの版）
   log [<ID>]
