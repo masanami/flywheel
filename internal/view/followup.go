@@ -42,3 +42,14 @@ func FromFollowups(fs []core.Followup) []Followup {
 func FromFollowupList(fs []core.Followup) FollowupListResponse {
 	return FollowupListResponse{Followups: FromFollowups(fs)}
 }
+
+// FollowupPromoteResponse は `followup promote` の成功の形。followup は上げたフォローアップ、challenge は作った課題。
+type FollowupPromoteResponse struct {
+	Challenge Challenge `json:"challenge"`
+	Followup  Followup  `json:"followup"`
+}
+
+// FromFollowupPromote は上げたフォローアップと作った課題を FollowupPromoteResponse へ変換する。
+func FromFollowupPromote(c core.Challenge, f core.Followup) FollowupPromoteResponse {
+	return FollowupPromoteResponse{Challenge: FromChallenge(c), Followup: FromFollowups([]core.Followup{f})[0]}
+}
