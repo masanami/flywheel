@@ -369,6 +369,24 @@ func FromSourceBinding(b *core.SourceBinding) *SourceBinding {
 	}
 }
 
+// SourceChild は課題の取り込み元の子の形。
+type SourceChild struct {
+	ExternalKey       string `json:"external_key"`
+	ParentExternalKey string `json:"parent_external_key"`
+	Title             string `json:"title"`
+	UpstreamState     string `json:"upstream_state"`
+	URL               string `json:"url"`
+}
+
+// FromSourceChildren は core.SourceChild の一覧を変換する（無ければ []）。
+func FromSourceChildren(cs []core.SourceChild) []SourceChild {
+	out := make([]SourceChild, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, SourceChild{ExternalKey: c.ExternalKey, ParentExternalKey: c.ParentExternalKey, Title: c.Title, UpstreamState: c.UpstreamState, URL: c.URL})
+	}
+	return out
+}
+
 // Run は run の形。
 type Run struct {
 	ChallengeID     *string  `json:"challenge_id"`
@@ -558,6 +576,7 @@ type ShowResponse struct {
 	ReleaseHeadChanges []ReleaseHeadChange `json:"release_head_changes,omitempty"`
 	Runs               []Run               `json:"runs"`
 	SourceBinding      *SourceBinding      `json:"source_binding"`
+	SourceChildren     []SourceChild       `json:"source_children"`
 	Stages             Stages              `json:"stages"`
 	// Tasks は課題のタスク（ID の昇順。無ければ []）。
 	Tasks []Task `json:"tasks"`
@@ -576,6 +595,7 @@ func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 		Plans:             FromPlans(d.Plans),
 		Runs:              FromRuns(d.Runs),
 		SourceBinding:     FromSourceBinding(d.SourceBinding),
+		SourceChildren:    FromSourceChildren(d.SourceChildren),
 		Stages:            FromStages(d.StageFields, d.IssuesAnswer),
 		Tasks:             FromTasks(d.Tasks),
 	}

@@ -134,7 +134,7 @@ type IngestSelectedInput struct {
 type IngestedChallenge struct {
 	ChallengeID string
 	ExternalKey string
-	// Children は取り込み元の子の記録の数（この課題では 0）。
+	// Children は記録した取り込み元の子の数。
 	Children int
 }
 
@@ -267,6 +267,21 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 		return nil, fmt.Errorf("%w: %q is not an ingestable issue (already a challenge, closed, out of policy, or not found)", ErrValidation, sp.raw)
 	}
 
+	// 子孫は、取り込めるものの中だけで親をたどって決める。同じコマンドの別の指定の子孫にあたる指定は拒む。
+	planned := make([][]plannedChild, len(chosen))
+	for i, c := range chosen {
+		planned[i] = planSourceChildren(c, scan.Candidates)
+	}
+	for i, kids := range planned {
+		for _, kid := range kids {
+			for j, other := range chosen {
+				if i != j && strings.EqualFold(kid.cand.Issue.ExternalKey, other.Issue.ExternalKey) {
+					return nil, fmt.Errorf("%w: %s is a descendant of %s, which is also selected", ErrValidation, other.Issue.ExternalKey, chosen[i].Issue.ExternalKey)
+				}
+			}
+		}
+	}
+
 	out := &IngestSelectedResult{Ingested: make([]IngestedChallenge, 0, len(chosen))}
 	err = s.mutateAs(ctx, actor, ch, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
 		// 上流を読んだ後に課題になっていないことを、このトランザクションの中で読み直す。
@@ -275,7 +290,7 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 			return err
 		}
 		out.Ingested = out.Ingested[:0]
-		for _, c := range chosen {
+		for i, c := range chosen {
 			if taken[c.Issue.ExternalKey] {
 				return fmt.Errorf("%w: %s became a challenge or a child after the upstream was read", ErrValidation, c.Issue.ExternalKey)
 			}
@@ -283,7 +298,20 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 			if err != nil {
 				return err
 			}
-			out.Ingested = append(out.Ingested, IngestedChallenge{ChallengeID: sb.ChallengeID, ExternalKey: sb.ExternalKey})
+			cid, ok := parseChallengeID(sb.ChallengeID)
+			if !ok {
+				return fmt.Errorf("core: ingest: malformed challenge id %q", sb.ChallengeID)
+			}
+			for _, kid := range planned[i] {
+				if taken[kid.cand.Issue.ExternalKey] {
+					return fmt.Errorf("%w: %s became a challenge or a child after the upstream was read", ErrValidation, kid.cand.Issue.ExternalKey)
+				}
+				if err := insertSourceChild(ctx, tx, rec.at, cid, kid.cand.Source.ID, kid.cand.Issue, kid.parentKey); err != nil {
+					return err
+				}
+				taken[kid.cand.Issue.ExternalKey] = true
+			}
+			out.Ingested = append(out.Ingested, IngestedChallenge{ChallengeID: sb.ChallengeID, ExternalKey: sb.ExternalKey, Children: len(planned[i])})
 		}
 		return nil
 	})
