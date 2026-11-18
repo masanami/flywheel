@@ -107,3 +107,24 @@ func TestIngestSelect_UnresolvedSelfAssigneesIsUpstreamUnavailable(t *testing.T)
 	})
 	requireJSONErrorEnvelope(t, []string{"ingest", selectRepo + "#1", "--workspace", ws}, 2, CodeUpstreamUnavailable)
 }
+
+// 対応の無い、開いている Issue が上流にあるとき、サイクルを回しても、取り込みの段で課題は増えない
+// （core の見直し S2b・masanami/flywheel#775 の AC-110）。サイクルが始まるよう、進められる課題を 1 件置く。
+func TestIngestSelect_CycleIngestStageCreatesNoChallengeForUnboundIssues(t *testing.T) {
+	parallelTools(t, false)
+	ws := setupWorkspaceWithPosition(t)
+	writeSourcesDeclaration(t, ws, cycleSourcesJSON)
+	issue := marshalFakeGHIssue(t, fakeGHIssue{Number: 1, Title: "unbound", Body: "body", Repo: "o/r", UpdatedAt: "2026-09-25T09:00:00Z"})
+	withFakeGHRoutesOnPATH(t, []fakeGHRoute{fakeGHListRoute("o/r", 1, "["+issue+"]", 0)})
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+	createTitled(t, ws, "pre-existing")
+
+	doc := cycleDoc(t, ws)
+
+	if ingest := cyclePhase(t, doc, "ingest"); ingest["skipped"] != false {
+		t.Fatalf("ingest phase = %v, want it executed", ingest)
+	}
+	if n := len(runJSON(t, ws, "list")["challenges"].([]any)); n != 1 {
+		t.Fatalf("challenges = %d, want 1 (取り込みの段は新しい課題を作らない)", n)
+	}
+}

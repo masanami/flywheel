@@ -218,3 +218,27 @@ func TestIngest_FollowUpNeverCreatesAChallengeAndCountsNothingForUnboundIssues(t
 		}
 	}
 }
+
+// 取り込めるものを 2 つ並べると、課題が 2 つ増える（core の見直し S2b・masanami/flywheel#775 の AC-128）。
+// 指定しなかった取り込めるもの（o/q#1）は課題にならない（AC-129）。
+func TestIngestSelected_TwoSpecsCreateTwoChallengesInTheGivenOrder(t *testing.T) {
+	t.Parallel()
+	s, src, up := selectFixture(t)
+	res, err := s.IngestSelected(context.Background(), ChannelCLI, IngestSelectedInput{Sources: []SourceEntry{src}, Specs: []string{"o/q#7", "o/r#1"}, Upstream: up})
+	if err != nil {
+		t.Fatalf("IngestSelected() error = %v", err)
+	}
+	if len(res.Ingested) != 2 || res.Ingested[0].ExternalKey != "o/q#7" || res.Ingested[1].ExternalKey != "o/r#1" {
+		t.Fatalf("Ingested = %+v, want o/q#7 then o/r#1", res.Ingested)
+	}
+	if n := countChallenges(t, s); n != 2 {
+		t.Fatalf("challenges = %d, want 2", n)
+	}
+	scan, err := s.ScanIngestable(context.Background(), []SourceEntry{src}, up)
+	if err != nil {
+		t.Fatalf("ScanIngestable() error = %v", err)
+	}
+	if len(scan.Candidates) != 1 || scan.Candidates[0].Issue.ExternalKey != "o/q#1" {
+		t.Fatalf("still ingestable = %+v, want only o/q#1（指定しなかったものは課題にならず、取り込めるもののまま）", scan.Candidates)
+	}
+}
