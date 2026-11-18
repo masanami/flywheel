@@ -201,6 +201,41 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
+		name: "followup done", command: "followup done",
+		setup: func(t *testing.T, ws string) []string {
+			coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+			return []string{"followup", "done", "F-1", "--note", "n"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"followup", "F-1", "followup_done",
+				map[string]any{"status": "open"}, map[string]any{"status": "done", "note": "n"}}}
+		},
+	},
+	{
+		name: "followup drop", command: "followup drop",
+		setup: func(t *testing.T, ws string) []string {
+			coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+			return []string{"followup", "drop", "F-1", "--reason", "r"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"followup", "F-1", "followup_drop",
+				map[string]any{"status": "open"}, map[string]any{"status": "dropped", "reason": "r"}}}
+		},
+	},
+	{
+		name: "followup promote", command: "followup promote",
+		setup: func(t *testing.T, ws string) []string {
+			coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+			return []string{"followup", "promote", "F-1"}
+		},
+		want: func(actor string) []wantActivity {
+			return []wantActivity{
+				{"challenge", "C-2", "create", nil, map[string]any{"title": "f", "description": "d", "done_criteria": "", "urgency": nil, "reporter": actor, "status": "unclassified", "origin": "followup", "followup_of": "C-1"}},
+				{"followup", "F-1", "followup_promote", map[string]any{"promoted_challenge_id": nil}, map[string]any{"promoted_challenge_id": "C-2"}},
+			}
+		},
+	},
+	{
 		name: "dep add", command: "dep add",
 		setup: func(t *testing.T, ws string) []string {
 			id := createForCase(t, ws)

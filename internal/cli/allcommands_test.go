@@ -178,6 +178,18 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
 		return []string{"followup", "list", "--status", "all"}
 	}},
+	"followup done": {setup: func(t *testing.T, ws string) []string {
+		coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+		return []string{"followup", "done", "F-1", "--note", "n"}
+	}},
+	"followup drop": {needsTTY: true, setup: func(t *testing.T, ws string) []string {
+		coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+		return []string{"followup", "drop", "F-1", "--reason", "r"}
+	}},
+	"followup promote": {needsTTY: true, setup: func(t *testing.T, ws string) []string {
+		coretest.InsertFollowup(t, ws, coretest.FollowupRow{ChallengeID: challengeIDToInternalID(t, createForCase(t, ws)), Title: "f", Detail: "d"})
+		return []string{"followup", "promote", "F-1"}
+	}},
 	"mark-read": {setup: func(t *testing.T, ws string) []string {
 		id := createForCase(t, ws)
 		bindSourceForDiscrepancyCase(t, ws, id, "o/r#1", "open", "in_policy")
@@ -509,6 +521,7 @@ var runLevelUsageErrorCases = [][]string{
 	{"serve", "--port", "abc"},                                     // --port が 0〜65535 の整数でない（bind する前に拒否する）
 	{"serve", "--port", "0", "--fleet", "/nonexistent/fleet.json"}, // --fleet と --workspace の同時指定（この列挙は --workspace を足して呼ぶ）
 	{"edit", "C-1"}, // 変更する項目が 1 つも無い
+	{"followup", "done", "F-1", "F-1", "--note", "n"},           // 同じ ID を 2 度指定した（drop も同じ関数。S2b）
 	{"followup", "list", "--status", "bogus"},                   // --status が open・done・dropped・all のいずれでもない（S2b）
 	{"plan", "C-1", "--file", "/nonexistent/flywheel-plan.txt"}, // --file が読めない
 	{"verify", "C-1", "--result", "met", "--question", "q"},     // met と --question の同時指定

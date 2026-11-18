@@ -385,6 +385,33 @@ func defaultCommands() []Command {
 			Run:           runFollowupList,
 		},
 		{
+			// 済みにする。本人確認は求めない（--note が必須。無ければ必須フラグの欠落）。
+			Path:          []string{"followup", "done"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: UnlimitedPositional,
+			Flags:         []flagDef{{Name: "note", HasValue: true, Required: true}},
+			Run:           runFollowupDone,
+		},
+		{
+			// 捨てる。本人確認つき（端末か --relayed）。
+			Path:          []string{"followup", "drop"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: UnlimitedPositional,
+			Flags:         append([]flagDef{{Name: "reason", HasValue: true, Required: true}}, relayedFlags()...),
+			Run:           runFollowupDrop,
+		},
+		{
+			// 課題に上げる（1 回に 1 件）。本人確認つき（端末か --relayed）。
+			Path:          []string{"followup", "promote"},
+			RequiresStore: true,
+			MinPositional: 1,
+			MaxPositional: 1,
+			Flags:         relayedFlags(),
+			Run:           runFollowupPromote,
+		},
+		{
 			Path:          []string{"status"},
 			RequiresStore: true,
 			Run:           runStatus,
