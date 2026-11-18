@@ -75,6 +75,7 @@ function bodies() {
     runs: [],
     pairs: [],
     source_binding: null,
+    source_children: [],
     stages: {
       actual: null,
       expected: null,

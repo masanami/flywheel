@@ -169,6 +169,8 @@ type fakeGHIssue struct {
 	// センチネルと衝突するため、gh の応答としては使わない）。
 	Comments  int
 	UpdatedAt string
+	// ParentNumber は同じリポジトリの親の Issue 番号（sub-issue の親。0 なら親なし）。
+	ParentNumber int
 }
 
 // marshalFakeGHIssue は 1 件の Issue を gh api の応答と同じ JSON（1 行）へ
@@ -207,6 +209,9 @@ func marshalFakeGHIssue(t *testing.T, iss fakeGHIssue) string {
 		"repository_url": fmt.Sprintf("https://api.github.com/repos/%s", iss.Repo),
 		"comments":       iss.Comments,
 		"updated_at":     updatedAt,
+	}
+	if iss.ParentNumber > 0 {
+		payload["parent_issue_url"] = fmt.Sprintf("https://api.github.com/repos/%s/issues/%d", iss.Repo, iss.ParentNumber)
 	}
 	if iss.PullRequest {
 		payload["pull_request"] = fakeGHPullRequestRef{URL: fmt.Sprintf("https://api.github.com/repos/%s/pulls/%d", iss.Repo, iss.Number)}

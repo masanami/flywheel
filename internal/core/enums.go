@@ -336,8 +336,9 @@ const (
 	ActivityActionParentClear = "parent_clear"
 )
 
-// 作業ログ（entity=challenge）の action。J6（learn）が課題の発生を分類した・
-// フォローアップの課題を起票した（followup）ときに残す。
+// 作業ログ（entity=challenge）の action。学びの判断点（J6。learn）が課題の発生を分類したときに learn を残す。
+// followup は、区切り S2b より前に、学びの判断点がフォローアップを課題として起票したときに残した記録
+// （いまは書かない。過去の記録に残っているので、値は残す。いまのフォローアップは entity=followup の create）。
 const (
 	ActivityActionLearn    = "learn"
 	ActivityActionFollowup = "followup"

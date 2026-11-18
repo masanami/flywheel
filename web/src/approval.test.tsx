@@ -130,6 +130,7 @@ function setup(
     runs: [],
     pairs: [],
     source_binding: null,
+    source_children: [],
     stages: {
       actual: null,
       expected: null,
@@ -322,6 +323,7 @@ function fixturesFor(): Record<string, unknown> {
     runs: [],
     pairs: [],
     source_binding: null,
+    source_children: [],
     stages: {
       actual: null,
       expected: null,

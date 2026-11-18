@@ -165,6 +165,7 @@ export interface ShowResponse {
   release_head_changes?: ReleaseHeadChange[];
   runs: Run[];
   source_binding: SourceBinding | null;
+  source_children: SourceChild[];
   stages: Stages;
   tasks: Task[];
 }
@@ -354,6 +355,14 @@ export interface SourceBinding {
   url: string;
 }
 
+export interface SourceChild {
+  external_key: string;
+  parent_external_key: string;
+  title: string;
+  upstream_state: string;
+  url: string;
+}
+
 export interface Stages {
   actual: StageActual[] | null;
   expected: StageExpected[] | null;
@@ -466,6 +475,7 @@ export interface ShowCardResponse {
   plans: PlanDetail[];
   runs: Run[];
   source_binding: SourceBinding | null;
+  source_children: SourceChild[];
   stages: Stages;
   tasks: Task[];
   waiting: Waiting;
