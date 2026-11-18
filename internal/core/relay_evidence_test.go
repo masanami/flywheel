@@ -101,7 +101,7 @@ func TestVerify_RelayedOnlyRegisteredForCLI(t *testing.T) {
 			t.Errorf("channel %s: err = %v, want ErrVerificationRejected", ch, err)
 		}
 	}
-	for _, act := range []attestedAction{actionApprovePlan, actionApproveCompletion, actionApproveCompletionHold, actionReject, actionAnswer, actionBudget, actionOperationApprove, actionOperationReject} {
+	for _, act := range []attestedAction{actionApprovePlan, actionApproveCompletion, actionApproveCompletionHold, actionReject, actionAnswer, actionBudget, actionOperationApprove, actionOperationReject, actionFollowupDrop, actionFollowupPromote} {
 		if !registryPermits(ChannelCLI, VerificationRelayed, act) {
 			t.Errorf("(cli, relayed) does not permit %s", act)
 		}

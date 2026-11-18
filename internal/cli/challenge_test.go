@@ -136,6 +136,23 @@ func TestRunShow_ReturnsEmptyListsForAFreshChallenge(t *testing.T) {
 	}
 }
 
+// 出どころがフォローアップの過去の課題（学びの判断点が起票していたもの）は、フォローアップの行へ移さず、
+// 課題のまま読める（core の見直し S2b・masanami/flywheel#771 の AC-11）。
+func TestRunShow_DoneChallengeWhoseOriginIsFollowupIsStillReadable(t *testing.T) {
+	t.Parallel()
+	ws := initializedWorkspace(t)
+	runJSON(t, ws, "create", "--title", "元の課題")
+	created := runJSON(t, ws, "create", "--title", "過去のフォローアップの課題")
+	id := created["challenge"].(map[string]any)["id"].(string)
+	coretest.Exec(t, ws, `UPDATE challenge SET origin = 'followup', followup_of = 'C-1', status = 'done' WHERE id = 2`)
+
+	doc := runJSON(t, ws, "show", id)
+	c := doc["challenge"].(map[string]any)
+	if c["status"] != "done" || c["followup_of"] != "C-1" {
+		t.Errorf("challenge = %+v, want status done and followup_of C-1", c)
+	}
+}
+
 func TestRunShow_NotFoundForMissingID(t *testing.T) {
 	t.Parallel()
 	ws := initializedWorkspace(t)

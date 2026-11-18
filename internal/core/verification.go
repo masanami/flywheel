@@ -110,6 +110,8 @@ const (
 	actionBudget                attestedAction = "budget"
 	actionOperationApprove      attestedAction = "operation_approve"
 	actionOperationReject       attestedAction = "operation_reject"
+	actionFollowupDrop          attestedAction = "followup_drop"
+	actionFollowupPromote       attestedAction = "followup_promote"
 )
 
 // actionForTransition は本人確認つきの遷移（遷移表の RequiresVerification）の
