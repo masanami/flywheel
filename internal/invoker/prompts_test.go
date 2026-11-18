@@ -141,6 +141,29 @@ func TestJ5Prompt_HasHeadroomBelowLimit(t *testing.T) {
 	}
 }
 
+// TestJ5Prompt_TaskSectionRequiresBothTheChallengeAndTheTaskDoneCriteria は、j5.md が区画「タスク」を読むものに挙げ、
+// 区画があるときは課題の達成条件とタスクの満たす条件（完了条件。指示文は禁止語「完了」を避けてこう書く）の両方を満たしたときだけ「満たしている」を選ぶと述べることを確かめる。
+func TestJ5Prompt_TaskSectionRequiresBothTheChallengeAndTheTaskDoneCriteria(t *testing.T) {
+	ins, err := Instructions(core.JudgmentJ5)
+	if err != nil {
+		t.Fatalf("Instructions(J5): %v", err)
+	}
+	var line string
+	for _, l := range strings.Split(ins, "\n") {
+		if strings.HasPrefix(l, "- 「タスク」:") {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("j5.md has no bullet for the 「タスク」 section")
+	}
+	for _, want := range []string{"この区画があるとき", "「達成条件」", "タスクの満たす条件", "両方を満たしている", "満たしているを選ぶ", "どちらか一方でも満たしていなければ満たしていないを選び"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the 「タスク」 bullet lacks %q:\n%s", want, line)
+		}
+	}
+}
+
 // TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails は AC「上限を1バイト
 // 超えるフィクスチャで失敗することも検証する」を、J1〜J5 の5ファイルすべての
 // 上限で固定する（三角測量: ちょうど上限は通り、+1バイトで落ちることの両方を
