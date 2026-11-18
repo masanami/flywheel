@@ -233,23 +233,14 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	t.Run("integration_unavailable", func(t *testing.T) {
 		// 起動できるタスクが 2 個ある（統合先を使う）着手中の課題は、cycle の run の段が起動しない。
 		ws := setupRunWorkspace(t)
-		newInProgressForRun(t, ws, func(m map[string]any) {
-			task := func(key string) map[string]any {
-				return map[string]any{"key": key, "title": "T-" + key, "body": "B", "done_criteria": "D",
-					"non_goals": []string{}, "depends_on": []string{}, "repo": "direct-repo", "operation": "brief-op"}
-			}
-			m["tasks"] = []any{task("a"), task("b")}
-			m["uses_integration"] = true
-		})
+		newTwoTaskIntegrationForRun(t, ws)
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
 		observe(cycleDoc(t, ws))
 	})
 	t.Run("no_tasks", func(t *testing.T) {
 		// タスクを持たない過去の形の計画（tasks のキーが無い）で task の行が無い着手中の課題は、cycle の run の段が起動しない。
 		ws := setupRunWorkspace(t)
-		id := createForCase(t, ws)
-		coretest.InsertApprovedPlan(t, ws, challengeIDToInternalID(t, id), "PLAN-BODY-OLD",
-			`{"verdict":"plan","summary":"s","steps":["a"],"repo":"direct-repo","operation":"brief-op","size":"S","done_criteria":"d","cross_repo":false,"related_repos":[]}`)
+		newOldShapePlanForRun(t, ws)
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("b"), delegateRoute("completed")}, "")
 		observe(cycleDoc(t, ws))
 	})
