@@ -48,6 +48,8 @@ var worklogReadOnlyCommands = map[string]bool{
 	"status":  true,
 	"version": true,
 	"log":     true,
+	// followup list（S2b）は読み取りだけ。
+	"followup list": true,
 	// runs（#81）は run・cycle・lock 表しか読み書きせず、それらの書き込みは
 	// 作業ログ（activity）に載せない（docs/features/m3-invoker-delegation.md
 	// §クリティカル設計決定 1）。ReapInterruptedRuns による run の更新も

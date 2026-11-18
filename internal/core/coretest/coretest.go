@@ -1136,3 +1136,60 @@ func QueryRows(t *testing.T, workspace, query string, args ...any) [][]any {
 	}
 	return out
 }
+
+// FollowupRow は InsertFollowup が書くフォローアップ 1 行。ChallengeID が 0 なら課題に属さない。
+// Status が空なら open、Source が空なら learn。Note・Reason・PromotedChallengeID が空（0）なら NULL。
+type FollowupRow struct {
+	ChallengeID         int
+	Title               string
+	Detail              string
+	Source              string
+	Status              string
+	Note                string
+	Reason              string
+	PromotedChallengeID int
+}
+
+// InsertFollowup はテスト専用のフィクスチャとして、フォローアップを 1 行と、その作成の作業ログ（create）を 1 件挿入し、
+// 内部整数 ID を返す（本番の createFollowup が書く列と同じ）。
+func InsertFollowup(t *testing.T, workspace string, r FollowupRow) int64 {
+	t.Helper()
+	if r.Status == "" {
+		r.Status = "open"
+	}
+	if r.Source == "" {
+		r.Source = "learn"
+	}
+	nullInt := func(n int) any {
+		if n == 0 {
+			return nil
+		}
+		return n
+	}
+	nullStr := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	const at = "2026-11-18T00:00:00.000Z"
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var id int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO followup (challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			nullInt(r.ChallengeID), r.Title, nullStr(r.Detail), r.Source, r.Status, nullStr(r.Note), nullStr(r.Reason), nullInt(r.PromotedChallengeID), at, at)
+		if err != nil {
+			return err
+		}
+		if id, err = res.LastInsertId(); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after) VALUES (?, 'tester', 'cli', 'none', 'followup', ?, 'create', NULL, ?)`,
+			at, id, `{"status":"`+r.Status+`","title":"`+r.Title+`"}`)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertFollowup: %v", err)
+	}
+	return id
+}

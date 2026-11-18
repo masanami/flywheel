@@ -50,6 +50,7 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
       version: 1,
     },
     direct_completions: [],
+    followups: [],
     holds: [],
     operations: [],
     plans: [],

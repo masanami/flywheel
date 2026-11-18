@@ -462,6 +462,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | `GET /api/v1/workspaces/{name}/challenges` | `flywheel list --json` と同じ形の各要素に `card`（下の「カードの面」）を足したもの |
 | `GET /api/v1/workspaces/{name}/challenges/{id}` | `flywheel show --json` と同じ形の最上位に `card` を足したもの |
 | `GET /api/v1/workspaces/{name}/log?challenge={id}` | `flywheel log [<C-ID>] --json` と同じ形 |
+| `GET /api/v1/workspaces/{name}/followups[?status={open\|done\|dropped\|all}][&challenge={id}]` | `flywheel followup list [--status <状態>] [--challenge <C-ID>] --json` と同じ形（`status` の既定は `open`）。読み取りだけで、書き込みの口は持たない |
 | `GET /api/v1/workspaces/{name}/runs` | `flywheel runs --json` と同じ形 |
 | `GET /api/v1/needs-human` | `{"workspaces": [{"name", "needs_human"}], "unreadable_workspaces": ["<名前>"]}`。`needs_human` は各ワークスペースの `status.needs_human` と同じ形。`state` が `ok` でないワークスペースは含めない。`state` が `ok` と判定されたが、ストアを借りる・読むのに失敗した（`store_busy` 等）ワークスペースは `workspaces` から除き、名前を `unreadable_workspaces` に入れて残りを 200 で返す（fleet 全体を 1 件のエラーにしない。無ければ `[]`）。要求の取り消しだけは、残りを返さずエラーにする |
 | `GET /api/v1/questions` | `{"questions": [{"workspace", "challenge_id", "title", "question", "raised_at", "from_status", "run_id"}], "unreadable_workspaces": ["<名前>"]}`。`unreadable_workspaces` は `needs-human` と同じ扱い（読めなかったワークスペースの保留は含めず、名前を入れて残りを返す。無ければ `[]`）。値の表現は CLI にそろえる（`run_id` は `runs --json` と同じ `R-<正の整数>` か `null`、`raised_at` と `from_status` は `show --json` の保留と同じ）。未回答の保留だけを `raised_at` の古い順（同時刻は `workspace`、`challenge_id` の順） |

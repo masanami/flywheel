@@ -292,6 +292,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 			}
 		}
 	}
+	if len(d.Followups) > 0 {
+		b.WriteString(followupCountsText(d.Followups))
+	}
 	fmt.Fprintf(&b, "不可逆操作:    %d 件\n", len(d.Operations))
 	for _, op := range d.Operations {
 		fmt.Fprintf(&b, "  %s %s %s [%s]", op.ID, op.Kind, op.Summary, op.State)

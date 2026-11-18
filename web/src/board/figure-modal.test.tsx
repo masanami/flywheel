@@ -52,6 +52,7 @@ function detail(figure: string | null): ShowCardResponse {
       version: 1,
     },
     direct_completions: [],
+    followups: [],
     holds: [],
     operations: [],
     plans: [],
