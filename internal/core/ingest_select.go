@@ -271,14 +271,9 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 		return nil, fmt.Errorf("%w: %q is not an ingestable issue (already a challenge, closed, out of policy, or not found)", ErrValidation, sp.raw)
 	}
 
-	// 子孫は、取り込めるものの中だけで親をたどって決める。一覧を読めなかったリポジトリ・方針を判定できなかった
-	// 取り込み元があると、そこにある子孫が取り込めるものに入らないので、子孫を決めきれない。子が黙って欠けた課題を
-	// 作らないよう、判定できなかったものとして止める（読めるようになってから取り込む）。
-	if len(scan.ListFailed) > 0 || len(scan.Unresolved) > 0 {
-		return nil, unavailable("the descendants of the selected issues")
-	}
-
-	// 同じコマンドの別の指定の子孫にあたる指定は拒む。
+	// 子孫は、取り込めるものの中だけで親をたどって決める。同じコマンドの別の指定の子孫にあたる指定は拒む。
+	// 一覧を読めなかったリポジトリ・方針を判定できなかった取り込み元にある子孫は、取り込めるものに入らないので、
+	// 子として記録されない（<owner>/<repo>#<番号> の指定は、その Issue のリポジトリを読めれば受ける）。
 	planned := make([][]plannedChild, len(chosen))
 	for i, c := range chosen {
 		planned[i] = planSourceChildren(c, scan.Candidates)

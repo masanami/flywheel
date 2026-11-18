@@ -635,24 +635,27 @@ func TestIngestSelected_AC131_AClosedIssueCannotBeSelected(t *testing.T) {
 	}
 }
 
-// 宣言にあるほかのリポジトリの一覧を読めなかったときは、そこにある子孫を決めきれないので、子が欠けた課題を作らず、
-// 上流を取得できないエラーにする（読めるようになれば、子と一緒に取り込める）。
-func TestIngestSelected_UnreadableOtherRepoStopsTheSelectionInsteadOfDroppingChildren(t *testing.T) { // #770 の仕上げ
+// 宣言にあるほかのリポジトリの一覧を読めなかったとき、<owner>/<repo>#<番号> の指定は、その Issue のリポジトリを
+// 読めれば受ける（読めたリポジトリの取り込みは続ける）。読めなかったリポジトリにある子は、取り込めるものに入らないので、
+// 子として記録されない（いまの決まり。読めなかったときに止めるかは、仕様が決めていない）。
+func TestIngestSelected_UnreadableOtherRepoDoesNotBlockAnExplicitSelection(t *testing.T) { // #770 の仕上げ
 	t.Parallel()
 	f := newChildFix(t)
 	f.put("o/r#1", "")
 	f.put("o/x#5", "o/r#1") // 宣言にある別の取り込み元（s2）の子
 	f.up.errs = map[string]error{"o/x": errors.New("list failed")}
-	if _, err := f.sel("o/r#1"); !errors.Is(err, ErrUpstreamFetchFailed) {
-		t.Fatalf("error = %v, want ErrUpstreamFetchFailed", err)
+	res := f.mustSel("o/r#1")
+	if len(res.Ingested) != 1 || res.Ingested[0].Children != 0 {
+		t.Fatalf("Ingested = %+v, want 1 challenge with 0 children (the child's repo could not be read)", res.Ingested)
 	}
-	if n := countChallenges(t, f.s); n != 0 || f.children() != 0 {
-		t.Fatalf("challenges = %d, children = %d, want nothing written", n, f.children())
-	}
-	// 読めるようになれば、子と一緒に取り込める。
+	// 読めなかったリポジトリの子は、読めるようになると、取り込めるものに（親の課題つきで）現れる。
 	f.up.errs = nil
-	if res := f.mustSel("o/r#1"); len(res.Ingested) != 1 || res.Ingested[0].Children != 1 {
-		t.Fatalf("Ingested = %+v, want 1 challenge with 1 child", res.Ingested)
+	scan, err := f.s.ScanIngestable(context.Background(), f.sources, f.up)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scan.Candidates) != 1 || scan.Candidates[0].Issue.ExternalKey != "o/x#5" {
+		t.Fatalf("ingestable = %+v, want o/x#5 only", scan.Candidates)
 	}
 }
 

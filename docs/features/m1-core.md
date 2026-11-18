@@ -399,7 +399,7 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 - `result` は `created`\|`updated`\|`unchanged`\|`skipped_done`\|`fingerprint_unknown_version`\|`failed` の閉集合（`core.IngestOutcomeValues()` と同じ順）。
 - `items` は課題を作った・対応のある Issue だけを並べる。ポリシーに合わない新しい Issue は `excluded` の件数だけに数える。
 - `error`（`repo` の要素）は一覧の取得の失敗の要約。成功なら `null`。一覧の取得に失敗したリポジトリの `items` は `[]`・`excluded` は `0`。
-- `error`（`item` の要素）は、その要素の反映が失敗した（`result` が `failed`）ことの要約。一覧の取得後・1件の取得（close の確かめ）・書き込みの反映のいずれの失敗も含みうる。成功なら `null`。
+- `error`（`item` の要素）は、その要素の反映が失敗した（`result` が `failed`）ことの要約。一覧の取得後・1件の取得（close の確かめ）・書き込みの反映のいずれの失敗も含みうる。成功なら `null`。 記録した取り込み元の子（S2b。`show` の `source_children`）の追従で、ストアへの書き込みに失敗したときも、その子の `external_key` を持つ `failed` の要素が `items` に入る（課題の要素ではないので `challenge_id`・`upstream_state`・`policy_state` は `null`。`error` は「取り込み元の子の追従に失敗: 」で始まるので、課題の対応の失敗と見分けられる）。うまく追従できた子は `items` に入れない。
 - `challenge_id`・`upstream_state`・`policy_state` は、(1) 新規作成の反映が失敗した場合、(2) 対応（`source_binding`）のある Issue の冪等な更新の反映自体が失敗した場合、(3) close の確かめ（1 件の取得）自体は成功したが、その後の反映（書き込みトランザクションでの読み直し・更新）が失敗した場合、のいずれでも `null` になる（既知の対応の情報を積まずに `failed` を返す実装になっている）。`null` にならないのは、close の確かめの **1 件の取得**（`GetIssue`）自体が失敗した場合だけで、この場合は読み直した対応の値をそのまま出力する。
 - `comments_count`・`upstream_updated_at`・`unread`（docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読）は反映後の観測値・未読の更新の種類。上の3つ（`challenge_id`・`upstream_state`・`policy_state`）が `null` になる場合（対応の情報を積まずに `failed` を返す実装）は、`comments_count`・`upstream_updated_at` も同じく「不明」を表すため `null` になる（#5 の規約「未設定の任意値は `null`」。実装チケットの仮定）。`unread` はこの場合も「空の一覧は `[]`」の規則どおり `[]` のまま（他の一覧フィールドと同じ扱い）。`upstream_updated_at` は、上記以外にも `0003` の前に作られ、まだ観測していない対応では `null`。`unread` は `upstream_commented`\|`upstream_updated` の部分集合（`status` の `kinds` と同じ判定。無ければ `[]`）。
 

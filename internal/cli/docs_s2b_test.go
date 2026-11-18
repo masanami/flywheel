@@ -159,7 +159,8 @@ func TestSpec_AC304_M2IngestTargetSectionSaysNoAutomaticChallenges(t *testing.T)
 	if !strings.Contains(body, "core-redesign.md") {
 		t.Error("AC-304: the section does not refer to core-redesign.md")
 	}
-	if !strings.Contains(body, "自動") || !strings.Contains(body, "課題に") {
+	// 言い回しそのもの（「自動では課題にしなくなった」）を見る。語の有無だけだと、反対の意味の文でも通るため。
+	if !strings.Contains(body, "開いている Issue を自動では課題にしなくなった") {
 		t.Errorf("AC-304: the section does not say that ingest no longer creates challenges automatically:\n%s", body)
 	}
 }
