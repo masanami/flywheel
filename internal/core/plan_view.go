@@ -74,7 +74,7 @@ type PlanView struct {
 	NonGoals        []string
 	Topics          []PlanTopicView
 	Tasks           []PlanTaskView
-	BudgetUSD       *float64 // 実装の枠とレビュー対応の枠の合計（予算の増額の上書きは含めない）
+	BudgetUSD       *float64 // 実装の枠とレビュー対応の枠の合計（その版の予算の増額を当てた額）
 	UsesIntegration *bool
 }
 
@@ -137,9 +137,15 @@ func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclar
 	pv.Expected = raw.Expected
 	pv.NonGoals = raw.NonGoals
 	pv.UsesIntegration = raw.UsesIntegration
-	// 予算の上限は、委譲が使うのと同じ規則で決める（計画が書いた額。無い枠は、宣言のサイズごとの既定）。
+	// 予算の上限は、委譲が使うのと同じ規則で決める（計画が書いた額。無い枠は、宣言のサイズごとの既定。
+	// その版に `flywheel budget` の増額があれば、置き換えた額）。
 	if implUSD, reviewUSD, ok := resolveSpecBudgets(spec.String, agent); ok {
-		sum := implUSD + reviewUSD
+		override, err := loadPlanBudgetOverride(ctx, tx, cid, version)
+		if err != nil {
+			return nil, err
+		}
+		b := applyBudgetOverride(implUSD, reviewUSD, override)
+		sum := microsToUSD(b.Impl + b.Review)
 		pv.BudgetUSD = &sum
 	}
 

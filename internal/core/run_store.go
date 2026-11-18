@@ -251,7 +251,7 @@ type runRow struct {
 	Output               string
 	Error                string
 	// 0005 で足した列。SlotID は表示形（"SL-<n>"）。Decider は "" が NULL、
-	// DeciderRow・Repo は nil / "" が NULL。Repo は委譲の run（起動するタスクの repo）と過去の predict の run が持つ。
+	// DeciderRow・Repo は nil / "" が NULL。Repo は委譲の run・契約のコマンドの run（どちらも結び付くタスクの repo）と過去の predict の run が持つ。
 	// predict の run は ChallengeID・SessionID が "" 、ChallengeVersion が 0（NULL）になる。
 	SlotID     *string
 	Decider    decider
@@ -410,7 +410,7 @@ type insertRunInput struct {
 	DeciderRow *int64
 	// TaskID は run が結び付くタスクの内部整数 ID（0026。nil は NULL）。
 	TaskID *int64
-	// Repo は run が対象にするリポジトリの名前（"" は NULL）。委譲の run は、起動するタスクの repo を書く。
+	// Repo は run が対象にするリポジトリの名前（"" は NULL）。委譲の run と契約のコマンドの run は、結び付くタスクの repo を書く。
 	Repo string
 }
 

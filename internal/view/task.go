@@ -88,7 +88,7 @@ type PlanTask struct {
 	Title     string   `json:"title"`
 }
 
-// PlanOverview は `show --plan --json` の plan。budget_usd は実装の枠とレビュー対応の枠の合計（計画が書いた額。書いていない枠は宣言のサイズごとの既定。決められないとき null）。
+// PlanOverview は `show --plan --json` の plan。budget_usd は実装の枠とレビュー対応の枠の合計（計画が書いた額。書いていない枠は宣言のサイズごとの既定。その版の予算の増額があれば置き換えた額。決められないとき null）。
 type PlanOverview struct {
 	Body            string          `json:"body"`
 	BudgetUSD       *float64        `json:"budget_usd"`

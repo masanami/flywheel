@@ -60,10 +60,10 @@ func TestManualTask_AC193_SubmitMovesTheInProgressTaskToVerifying(t *testing.T) 
 	if got := taskStatusOf(t, f.s, id, "t1"); got != TaskStatusVerifying {
 		t.Errorf("task status = %s, want verifying", got)
 	}
-	// 状態の変化は、課題の遷移と同じ操作の作業ログ（経路 cli）に残る。
-	acts := taskStatusActivities(t, f.s, TaskStatusVerifying)
-	if len(acts) != 1 {
-		t.Errorf("verifying task_status activities = %+v, want exactly one", acts)
+	// 状態の変化は、課題の遷移と同じ操作の作業ログ（経路 cli。原因の run は無い）に 1 件だけ残る。
+	rows := coretestRows(t, f.s, `SELECT channel, run_id FROM activity WHERE entity = 'task' AND action = 'task_status' AND json_extract(after, '$.status') = 'verifying'`)
+	if len(rows) != 1 || rows[0][0] != string(ChannelCLI) || rows[0][1] != nil {
+		t.Errorf("verifying task_status activities (channel, run_id) = %v, want exactly one by cli without a run", rows)
 	}
 }
 
@@ -124,8 +124,8 @@ func TestManualTask_AC197_AfterManualNotMetTheTaskIsDelegatedAgain(t *testing.T)
 		t.Fatalf("result = %+v, want one launch and no not_started", res)
 	}
 	runs := f.delegateRuns(t)
-	if len(runs) != 1 || runs[0].TaskID == nil {
-		t.Fatalf("delegate runs = %+v, want one run tied to the task", runs)
+	if want := firstTaskID(t, f.s, id); len(runs) != 1 || runs[0].TaskID == nil || *runs[0].TaskID != want {
+		t.Fatalf("delegate runs = %+v, want one run tied to the task %s", runs, want)
 	}
 }
 
@@ -167,17 +167,37 @@ func TestManualTask_RejectingAfterManualMetReopensTheTask(t *testing.T) {
 	}
 }
 
-// 検証中のタスクが無い課題（タスクを持たない過去の形）では、手の記録はタスクに触れず、保留もタスクに結び付けない。
-func TestManualTask_NoVerifyingTaskLeavesTheHoldUntied(t *testing.T) {
+// AC-203・AC-204: 検証中のタスクが 2 個の課題では、手の記録はどのタスクも動かさず、保留もタスクに結び付けない
+// （「ちょうど 1 個のときだけ」の規則。met・not_met・uncertain のそれぞれで確かめる）。
+func TestManualTask_TwoVerifyingTasksAreLeftUntouchedAndTheHoldIsUntied(t *testing.T) {
 	t.Parallel()
-	f := newDelegateFixture(t)
-	id := f.newInProgress(t, "old", "P1", oldShapePlanSpec)
-	cid, _ := parseChallengeID(id)
-	submitByHand(t, f.s, id)
-	q := "QUESTION"
-	verifyByHand(t, f.s, id, "uncertain", &q)
-	if got := f.queryString(t, `SELECT COUNT(*) FROM hold WHERE challenge_id = ? AND task_id IS NOT NULL`, cid); got != "0" {
-		t.Errorf("holds tied to a task = %s, want 0", got)
+	for _, result := range []string{"met", "not_met", "uncertain"} {
+		f := newDelegateFixture(t)
+		id := f.newInProgress(t, "two", "P1", twoTaskPlanSpec())
+		cid, _ := parseChallengeID(id)
+		submitByHand(t, f.s, id)
+		for key := range taskStatusMap(t, f.s, cid) {
+			setTaskStatusRaw(t, f.s, cid, key, TaskStatusVerifying)
+		}
+		before := taskStatusMap(t, f.s, cid)
+		if len(before) != 2 {
+			t.Fatalf("tasks = %v, want two", before)
+		}
+		var q *string
+		if result == "uncertain" {
+			s := "QUESTION"
+			q = &s
+		}
+		verifyByHand(t, f.s, id, result, q)
+		assertTaskStatuses(t, f.s, cid, before)
+		if got := f.queryString(t, `SELECT COUNT(*) FROM hold WHERE challenge_id = ? AND task_id IS NOT NULL`, cid); got != "0" {
+			t.Errorf("%s: holds tied to a task = %s, want 0", result, got)
+		}
+		if result == "uncertain" {
+			if got := f.queryString(t, `SELECT COUNT(*) FROM hold WHERE challenge_id = ?`, cid); got != "1" {
+				t.Errorf("holds = %s, want the one made by the uncertain verdict", got)
+			}
+		}
 	}
 }
 
@@ -223,4 +243,37 @@ func TestManualTask_AC200_AC201_ContractCommandRunsHaveTheTaskIDAndRepo(t *testi
 			t.Errorf("run[%d].repo = %v, want %s", i, r.repo, task.Repo)
 		}
 	}
+}
+
+// coretestRows は q の結果の行を返す（列の値は、SQLite の型のまま。NULL は nil）。
+func coretestRows(t *testing.T, s *Store, q string, args ...any) [][]any {
+	t.Helper()
+	var out [][]any
+	err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		rs, err := tx.Query(q, args...)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rs.Close() }()
+		cols, err := rs.Columns()
+		if err != nil {
+			return err
+		}
+		for rs.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rs.Scan(ptrs...); err != nil {
+				return err
+			}
+			out = append(out, vals)
+		}
+		return rs.Err()
+	})
+	if err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+	return out
 }

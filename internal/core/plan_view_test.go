@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 )
@@ -115,5 +116,26 @@ func TestGetPlanView_LegacyPlanAndMissingPlan(t *testing.T) {
 	}
 	if pv.Structured || pv.Body != "LEGACY-BODY" || len(pv.Tasks) != 0 || len(pv.Topics) != 0 {
 		t.Errorf("plan view = %+v, want the body only", pv)
+	}
+}
+
+// AC-205: 最新の計画の版に `flywheel budget` の増額（task_plan の枠の上書き）があるとき、予算の上限は、増額を当てた額で出る。
+// 実装の枠を 60 USD に置き換えると、レビュー対応の枠はサイズ M の既定（30）のままで、合計は 90。
+func TestGetPlanView_BudgetAppliesTheOverrideOfThePlanVersion(t *testing.T) {
+	f := newPAFixture(t, 1, false)
+	cid, _ := parseChallengeID(f.id)
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE task_plan SET impl_budget_usd = ? WHERE challenge_id = ? AND version = 1`, usdToMicros(60), cid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agent := &AgentDeclaration{SizeBudgetsUSD: SizeBudgetsUSD{S: SizeBudgetPair{30, 25}, M: SizeBudgetPair{50, 30}, L: SizeBudgetPair{100, 40}}}
+	pv, err := f.s.GetPlanView(context.Background(), f.id, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pv.BudgetUSD == nil || *pv.BudgetUSD != 90 {
+		t.Errorf("BudgetUSD = %v, want 90 (60 by the override + 30 from the size default)", pv.BudgetUSD)
 	}
 }
