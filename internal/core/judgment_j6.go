@@ -106,35 +106,54 @@ type j6Context struct {
 	Activities        []j6ActivityRow
 	ActivityCut       int
 	Runs              []runRow
-	// Followups はこの課題を followup_of に持つ既存の課題（J6 が前に起票したもの）。ID の昇順。
+	// Followups はこの課題にぶら下がる followup の行（状態を問わない）。ID の昇順。
 	Followups []j6Followup
+	// PastFollowups は過去の形（この課題を followup_of に持つ、出どころが followup の課題）。ID の昇順。
+	PastFollowups []j6Followup
 }
 
 // j6Followup はこの課題から起票済みのフォローアップ 1 件（題名と状態）。
 type j6Followup struct {
-	ID     int64
+	ID     string // 表示の ID（F-<n> または C-<n>）
 	Title  string
-	Status Status
+	Status string
 }
 
-func loadJ6Followups(ctx context.Context, tx *sql.Tx, cid int64) ([]j6Followup, error) {
-	rows, err := tx.QueryContext(ctx,
+func loadJ6Followups(ctx context.Context, tx *sql.Tx, cid int64) (rows []j6Followup, past []j6Followup, err error) {
+	fr, err := tx.QueryContext(ctx,
+		`SELECT id, title, status FROM followup WHERE challenge_id = ? ORDER BY id ASC`, cid)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = fr.Close() }()
+	for fr.Next() {
+		var id int64
+		var f j6Followup
+		if err := fr.Scan(&id, &f.Title, &f.Status); err != nil {
+			return nil, nil, err
+		}
+		f.ID = formatFollowupID(id)
+		rows = append(rows, f)
+	}
+	if err := fr.Err(); err != nil {
+		return nil, nil, err
+	}
+	pr, err := tx.QueryContext(ctx,
 		`SELECT id, title, status FROM challenge WHERE followup_of = ? ORDER BY id ASC`, formatChallengeID(cid))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []j6Followup
-	for rows.Next() {
+	defer func() { _ = pr.Close() }()
+	for pr.Next() {
+		var id int64
 		var f j6Followup
-		var st string
-		if err := rows.Scan(&f.ID, &f.Title, &st); err != nil {
-			return nil, err
+		if err := pr.Scan(&id, &f.Title, &f.Status); err != nil {
+			return nil, nil, err
 		}
-		f.Status = Status(st)
-		out = append(out, f)
+		f.ID = formatChallengeID(id)
+		past = append(past, f)
 	}
-	return out, rows.Err()
+	return rows, past, pr.Err()
 }
 
 func nullStrValue(n sql.NullString) string {
@@ -335,7 +354,7 @@ func (s *Store) loadJ6Context(ctx context.Context, cid int64) (*j6Context, error
 		if jc.Runs, err = loadJ6Runs(ctx, tx, cid); err != nil {
 			return err
 		}
-		jc.Followups, err = loadJ6Followups(ctx, tx, cid)
+		jc.Followups, jc.PastFollowups, err = loadJ6Followups(ctx, tx, cid)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -480,10 +499,10 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 	sections = append(sections, JudgmentDataSection{Label: "承認と保留の記録", Content: strings.TrimRight(b.String(), "\n")})
 
 	b.Reset()
-	for _, f := range jc.Followups {
-		fmt.Fprintf(&b, "- ID: %s / 状態: %s / 題名: %s\n", formatChallengeID(f.ID), f.Status, oneLine(f.Title))
+	for _, f := range append(append([]j6Followup{}, jc.Followups...), jc.PastFollowups...) {
+		fmt.Fprintf(&b, "- ID: %s / 状態: %s / 題名: %s\n", f.ID, f.Status, oneLine(f.Title))
 	}
-	if len(jc.Followups) == 0 {
+	if len(jc.Followups)+len(jc.PastFollowups) == 0 {
 		b.WriteString("既存のフォローアップは無い。")
 	}
 	sections = append(sections, JudgmentDataSection{Label: j6FollowupsLabel, Content: strings.TrimRight(b.String(), "\n")})
@@ -715,21 +734,16 @@ func (s *Store) applyJ6(ctx context.Context, runIDDisplay string, cid int64, v *
 				return err
 			}
 		}
-		// フォローアップは未分類の課題として同じトランザクションで起票する（保留は作らない）。
+		// フォローアップは課題にぶら下げた 1 行として同じトランザクションで書く（課題は起票せず、保留も作らない）。
 		filed := []string{}
-		source := formatChallengeID(cid)
 		for _, f := range v.Followups {
-			fid, _, err := insertChallengeRow(ctx, tx, rec.at, f.Title, f.Description, f.DoneCriteria, nil, rec.actor, ChallengeOriginFollowup, &source, nil)
+			fid, err := createFollowup(ctx, tx, rec, FollowupInput{
+				ChallengeID: formatChallengeID(cid), Title: f.Title, Detail: f.Description, Source: FollowupSourceLearn,
+			})
 			if err != nil {
 				return err
 			}
-			after := createdChallengeAfter(f.Title, f.Description, f.DoneCriteria, nil, rec.actor)
-			after["origin"] = string(ChallengeOriginFollowup)
-			after["followup_of"] = source
-			if err := rec.record("challenge", fid, ActivityActionFollowup, nil, after); err != nil {
-				return err
-			}
-			filed = append(filed, formatChallengeID(fid))
+			filed = append(filed, formatFollowupID(fid))
 		}
 		return rec.record("challenge", cid, ActivityActionLearn, nil, map[string]any{
 			"classified": len(v.Classifications),
