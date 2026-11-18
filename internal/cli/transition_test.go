@@ -323,6 +323,8 @@ var transitionCommandCases = []transitionCommandCase{
 	{"approve", func(_ *testing.T, id string) []string { return []string{"approve", id} }},
 	{"reject", func(_ *testing.T, id string) []string { return []string{"reject", id, "--reason", "r"} }},
 	{"answer", func(_ *testing.T, id string) []string { return []string{"answer", id, "--answer", "a"} }},
+	// answer --choice（T19。計画の承認待ちの問いへの答え）: 計画の承認待ち以外の課題は invalid_transition／terminal_state。
+	{"answerPlan", func(_ *testing.T, id string) []string { return []string{"answer", id, "--choice", "Q1=1"} }},
 	// withdraw（M4.5 S4）: 完了・取り下げの課題は core.PrepareWithdraw（①）が端末を開く前に terminal_state を返す。
 	{"withdraw", func(_ *testing.T, id string) []string { return []string{"withdraw", id, "--reason", "r"} }},
 	// approve --hold-release（T14。#13）: 計画承認待ちの課題への --hold-release は
@@ -349,6 +351,7 @@ var operationByCommand = map[string]core.Operation{
 	"approve":            core.OpApprove,
 	"reject":             core.OpReject,
 	"answer":             core.OpAnswer,
+	"answerPlan":         core.OpAnswerPlan,
 	"withdraw":           core.OpWithdraw,
 	"approveHoldRelease": core.OpApproveHoldRelease,
 }
@@ -467,14 +470,14 @@ func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T)
 			})
 		}
 	}
-	// 11 コマンド（#13 で approveHoldRelease、M4.5 S4 で withdraw、#452 で completeDirect を追加）× 9 状態 = 99 組のうち、
+	// 12 コマンド（#13 で approveHoldRelease、M4.5 S4 で withdraw、#452 で completeDirect、T19 で answerPlan を追加）× 9 状態 = 108 組のうち、
 	// 遷移表にある組（T2=1・T3/T4=2・T7=1・T8=1・T11=5・approve=2〈T5・T13〉・
 	// reject=2〈T6・T15〉・answer=1〈T12〉・approveHoldRelease=1〈T14〉・withdraw=7〈T16〉・
-	// completeDirect=1〈T17〉の計 24）と、
+	// completeDirect=1〈T17〉・answerPlan=1〈T19〉の計 25）と、
 	// この汎用枠組みでは検証できない1組（approveHoldRelease/計画承認待ち。
-	// usage_error であり、専用テストが担う）を除いた 74 組を回したことを固定する。
-	if tested != 74 {
-		t.Fatalf("tested %d undefined (command, status) combinations, want 74", tested)
+	// usage_error であり、専用テストが担う）を除いた 82 組を回したことを固定する。
+	if tested != 82 {
+		t.Fatalf("tested %d undefined (command, status) combinations, want 82", tested)
 	}
 }
 

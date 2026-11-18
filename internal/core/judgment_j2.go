@@ -773,7 +773,13 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	var sb *sourceBinding
 	var replan *replanNote
 	var planRejections []CompletionRejection
+	var planAnswersText string
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		pa, err := loadPlanAnswersSection(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		planAnswersText = pa
 		prs, err := loadPlanRejections(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -846,6 +852,9 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	}
 	if t := formatPlanRejectionsSection(planRejections); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: PlanRejectionsSectionLabel, Content: t})
+	}
+	if planAnswersText != "" {
+		sections = append(sections, JudgmentDataSection{Label: PlanAnswersSectionLabel, Content: planAnswersText})
 	}
 	if replan != nil {
 		sections = append(sections, JudgmentDataSection{Label: ReplanSectionLabel, Content: formatReplanSection(replan)})

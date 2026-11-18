@@ -19,7 +19,7 @@ func TestRegistryPermits_PerEntryActionSets(t *testing.T) {
 	t.Parallel()
 	all := []attestedAction{
 		actionApprovePlan, actionApproveCompletion, actionApproveCompletionHold, actionReject,
-		actionAnswer, actionBudget, actionOperationApprove, actionOperationReject,
+		actionAnswer, actionAnswerPlan, actionBudget, actionOperationApprove, actionOperationReject,
 	}
 	for _, a := range all {
 		if !registryPermits(ChannelCLI, VerificationTTYConfirm, a) {

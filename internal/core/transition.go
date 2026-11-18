@@ -15,15 +15,19 @@ type Operation string
 // --hold-release 有無）はそれぞれ別のトークンにして、同じ遷移元からでも
 // 別の行として引けるようにする。
 const (
-	OpCreate             Operation = "create"
-	OpClassify           Operation = "classify"
-	OpPlan               Operation = "plan"
-	OpSubmit             Operation = "submit"
-	OpVerifyMet          Operation = "verify_met"
-	OpVerifyNotMet       Operation = "verify_not_met"
-	OpVerifyUncertain    Operation = "verify_uncertain"
-	OpHold               Operation = "hold"
-	OpAnswer             Operation = "answer"
+	OpCreate          Operation = "create"
+	OpClassify        Operation = "classify"
+	OpPlan            Operation = "plan"
+	OpSubmit          Operation = "submit"
+	OpVerifyMet       Operation = "verify_met"
+	OpVerifyNotMet    Operation = "verify_not_met"
+	OpVerifyUncertain Operation = "verify_uncertain"
+	OpHold            Operation = "hold"
+	OpAnswer          Operation = "answer"
+	// OpAnswerPlan は、計画の承認待ちの課題の問いへの答えのうち、推奨と違う選択肢か文の答えを含むもの（T19）。
+	// 課題を分類済へ戻し、次の計画の段で計画を作り直させる。推奨と同じ選択肢だけの答えは遷移を起こさない
+	// （記録だけを行い、課題の版を 1 つ上げる）。
+	OpAnswerPlan         Operation = "answer_plan"
 	OpApprove            Operation = "approve"
 	OpApproveHoldRelease Operation = "approve_hold_release"
 	OpReject             Operation = "reject"
@@ -108,7 +112,7 @@ func (tt TransitionTarget) ResolveForReplan(table []Transition, preceding Status
 	return "", fmt.Errorf("core: replan is not allowed for a hold raised from %q", preceding)
 }
 
-// Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T18）を指す。
+// Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T19）を指す。
 // T11 は遷移元が5つあるため、物理的には ID="T11" の行が5つ存在する。
 type Transition struct {
 	ID                   string
@@ -121,7 +125,7 @@ type Transition struct {
 	Restricted bool
 }
 
-// Table は遷移表 T1〜T18 の正本。docs/features/m1-core.md §状態機械 の
+// Table は遷移表 T1〜T19 の正本。docs/features/m1-core.md §状態機械 の
 // 遷移表と1対1に対応する（T11 は遷移元5つに展開して5行として持つ）。
 // この表に無い（状態, 操作）の組はすべて不可（Lookup が ok=false を返す）。
 var Table = []Transition{
@@ -168,6 +172,9 @@ var Table = []Transition{
 	// だけが使う制限つきの行で、通常の操作の対象にならない。本人確認は要さない（エージェントの記録。戻す理由は
 	// 本番反映の結果か、検証の後の中身の変更で、人の承認はやり直しの完了の承認で受ける）。
 	{ID: "T18", From: StatusDone, Op: OpReopenForRelease, Target: TransitionTarget{Fixed: StatusInProgress}, Restricted: true},
+	// T19: 計画の問いへの、推奨と違う（か文の）答え。計画の承認待ちから分類済へ戻して計画を作り直させる
+	// （差し戻し T6 と同じ経路）。本人確認つき。
+	{ID: "T19", From: StatusAwaitingPlanApproval, Op: OpAnswerPlan, Target: TransitionTarget{Fixed: StatusClassified}, RequiresVerification: true},
 }
 
 // Lookup は (from, op) から遷移表の行を引く。表に無い組は ok=false を返す

@@ -520,6 +520,12 @@ var runLevelUsageErrorCases = [][]string{
 	{"metrics", "--compare", "C-1", "--since", "2026-03-01"},    // --compare と --since・--until の同時指定（M4.5 S4）
 	{"dep", "add", "C-1", "C-1"},                                // 自分自身を依存先にした（core が ErrSelfDependency を返し usage_error に写る。M4.5 S2）
 	{"withdraw", "C-1", "--reason", " "},                        // --reason が空白だけ（M4.5 S4。無いときは必須フラグの欠落）
+	{"answer", "C-1", "--choice", "Q1=1", "--answer", "a"},      // --choice・--text と --answer・--replan の同時指定
+	{"answer", "C-1"},                                           // --answer・--choice・--text のどれも無い
+	{"answer", "C-1", "--choice", "Q1"},                         // --choice・--text に = と値が無い
+	{"answer", "C-1", "--choice", "Qx=1"},                       // 問いの番号が Q1 か 1 の形でない
+	{"answer", "C-1", "--choice", "Q1=1", "--choice", "1=2"},    // 同じ問いの番号を 2 度指定した
+	{"answer", "C-1", "--choice", "Q1=x"},                       // 選択肢の番号が 1 以上の整数でない
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の
