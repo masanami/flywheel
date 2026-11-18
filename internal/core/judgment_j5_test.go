@@ -719,7 +719,6 @@ func (f *j5Fixture) notMetRound(t *testing.T, id string) {
 	if _, err := f.verify(t, &id); err != nil {
 		t.Fatal(err)
 	}
-	reopenVerifyingTasks(t, f.s)
 }
 
 func TestRework_NotMetResumesThePreviousDelegationSessionWithTheFeedback(t *testing.T) {
@@ -858,7 +857,8 @@ func TestRework_WithoutNotMetTheNormalFlowIsUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.answerLatestHold(t, "C-1", "A")
-	reopenVerifyingTasks(t, f.s)
+	// answerLatestHold は保留への回答の遷移を通さずに課題を着手中へ直に置く。タスクも合わせて着手中へ置く。
+	moveVerifyingTasksRaw(t, f.s, TaskStatusInProgress)
 	launches := len(f.deleg.launched())
 	f.runDelegation(t, "C-1")
 	if len(f.deleg.launched()) != launches+1 {

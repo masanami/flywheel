@@ -64,17 +64,18 @@ func setAllTasksStatus(t *testing.T, s *Store, cid int64, from, to TaskStatus) {
 	}
 }
 
-// reopenVerifyingTasks は、検証中だったタスクを作業中へ戻す（作業ログを残さない）。課題が検証中から着手中へ戻る遷移
-// （差し戻し・完了の差し戻し・反映のやり直し）でのタスクの状態は後の課題が core へ入れるので、この課題の時点の core は
-// その遷移でタスクを動かさない。差し戻しの後に再び委譲するテストは、その遷移の後にこの口でタスクを戻す。
-func reopenVerifyingTasks(t *testing.T, s *Store) {
+// moveVerifyingTasksRaw は、検証中（verifying）のタスクを to へ直に書き換える（作業ログを残さない）。
+// テストの足場が core の遷移を通さずに課題の状態を直に書き換える箇所（完了の検証を通さずに完了の承認待ちへ置く・
+// 保留への回答を通さずに着手中へ置く）で、本物の遷移なら core が進めていたタスクの状態を合わせるためだけに使う。
+// core の遷移を通すテストでは使わない（遷移がタスクを進める）。
+func moveVerifyingTasksRaw(t *testing.T, s *Store, to TaskStatus) {
 	t.Helper()
 	err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE task SET status = 'in_progress' WHERE status = 'verifying'`)
+		_, err := tx.Exec(`UPDATE task SET status = ? WHERE status = 'verifying'`, string(to))
 		return err
 	})
 	if err != nil {
-		t.Fatalf("reopenVerifyingTasks: %v", err)
+		t.Fatalf("moveVerifyingTasksRaw: %v", err)
 	}
 }
 

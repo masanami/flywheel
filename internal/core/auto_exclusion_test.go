@@ -131,7 +131,6 @@ func TestAutoExclusion_ClosedByOwnRelease_ReworkDelegationIsNotExcluded(t *testi
 	if got := f.detail(t, "C-1").Status; got != StatusInProgress {
 		t.Fatalf("status = %s, want in progress", got)
 	}
-	reopenVerifyingTasks(t, f.s)
 	var ids []int64
 	var skipped []NotStarted
 	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
