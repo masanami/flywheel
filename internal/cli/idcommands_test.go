@@ -20,6 +20,9 @@ func TestIDCommands_NotFoundForMissingChallengeAndOperationID(t *testing.T) {
 		if !ok || (cmd.MaxPositional < 1 && cmd.MaxPositional != UnlimitedPositional) {
 			continue
 		}
+		if name == "ingest" {
+			continue // ingest の引数は Issue の指定（<owner>/<repo>#<番号> か番号）で、課題・不可逆操作の ID ではない
+		}
 		t.Run(name, func(t *testing.T) {
 			parallelTools(t, tc.needsTTY) // 偽の gh・claude の場所は t ごとに渡す（t.Setenv しない）。pty を使うケースは並列にしない
 			ws := initializedWorkspace(t)

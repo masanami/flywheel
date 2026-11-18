@@ -109,12 +109,18 @@ func TestIngest_ResultValuesCoverClosedSetBothWays(t *testing.T) {
 		repo + "#3": "skipped_done",
 		repo + "#4": "fingerprint_unknown_version",
 		repo + "#5": "failed",
-		repo + "#6": "created",
 	}
 	for key, want := range wantResultByKey {
 		item := findItemByExternalKey(t, items, key)
 		if item["result"] != want {
 			t.Errorf("item[%s].result = %v, want %q", key, item["result"], want)
+		}
+	}
+
+	// 対応の無い #6 は課題にならず、どの item にも現れない（課題にするのは選んだ Issue だけ）。
+	for _, it := range items {
+		if it["external_key"] == repo+"#6" {
+			t.Errorf("item for %s#6 = %v, want none (対応の無い Issue は追従で課題にしない)", repo, it)
 		}
 	}
 
@@ -130,6 +136,13 @@ func TestIngest_ResultValuesCoverClosedSetBothWays(t *testing.T) {
 	want := map[string]bool{}
 	for _, v := range core.IngestOutcomeValues() {
 		want[string(v)] = true
+		if v == core.IngestOutcomeCreated {
+			// created は閉集合の値として残すが、追従の ingest は出さない（作成は `ingest <指定>...`）。
+			if seen[string(v)] {
+				t.Errorf("ingest --json が result %q を出力した。追従は新しい課題を作らない", v)
+			}
+			continue
+		}
 		if !seen[string(v)] {
 			t.Errorf("core.IngestOutcomeValues() の %q が ingest --json のどの item.result にも現れなかった (seen=%v)", v, seen)
 		}

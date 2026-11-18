@@ -58,6 +58,8 @@ func TestCycle_AllFivePhases_DelegatesAndVerifiesInTheSameCycleWithOnlyGETs(t *t
 	child := delegateRoute("completed")
 	child.ShellBefore = "git -C " + shellSingleQuote(filepath.Join(ws, "slot-d")) + " checkout -q -b feat/child"
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t), j3Route("BRIEF-CYCLE"), child, j5Route("met", nil, nil)}, orderLog)
+	// 周の取り込みの段は追従だけを行う。課題にするのは選んだ Issue だけなので、先に選ぶ（C-2）。
+	runJSON(t, ws, "ingest", "o/r#1")
 
 	doc := cycleDoc(t, ws)
 

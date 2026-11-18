@@ -95,8 +95,8 @@ func TestIngest_RegisteredWithCommonFlagsAndOptionalSource(t *testing.T) {
 	if !cmd.RequiresStore {
 		t.Error("ingest must RequiresStore (store_not_found/store_too_new/store_busy を一様に扱うため)")
 	}
-	if cmd.MinPositional != 0 || cmd.MaxPositional != 0 {
-		t.Errorf("ingest must take no positional arguments, got min=%d max=%d", cmd.MinPositional, cmd.MaxPositional)
+	if cmd.MinPositional != 0 || cmd.MaxPositional != UnlimitedPositional {
+		t.Errorf("ingest must take optional issue specs (0 or more positional arguments), got min=%d max=%d", cmd.MinPositional, cmd.MaxPositional)
 	}
 	var sourceFlag *flagDef
 	for i := range cmd.Flags {

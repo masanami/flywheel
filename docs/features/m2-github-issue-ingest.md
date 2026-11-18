@@ -53,14 +53,16 @@ GitHub Issue を課題としてストアへ取り込む adapter を、LLM を一
 
 ### 取り込みの対象（assignee のポリシー）【決定 2026-09-24 オーナー QH4／親 QP8】
 
+> **core の見直し（S2b）で変わった点**: 取り込みは、開いている Issue を自動では課題にしなくなった。新しい課題を作るのは、オーナーが選んだ Issue だけ（`flywheel ingest <指定>...`。§実行の起点）。サイクルの取り込みの段と、引数の無い `flywheel ingest` は、取り込み済みの課題の追従（題名・本文・上流の状態・ポリシーの状態・観測値・親子の同期）だけを行う。下の「取り込まれる」「対象にする」は、「選んで取り込める（取り込めるもの）」と読む。取り込めるものは、取り込み元の方針に合い、まだ課題になっておらず、どの課題の子としても記録されていない、開いている Issue（`docs/features/core-redesign.md` の S2b。AC-304）。
+
 - [ ] `self_assignees` の login と Issue の assignee の login は、大文字小文字を無視し、先頭の `@` を除いて比較する
 - [ ] `self-only` は、assignee が 1 人以上いて、全員が `self_assignees` に含まれる Issue だけを対象にする
 - [ ] `exclude-others` は、assignee がいない Issue と、全員が `self_assignees` に含まれる Issue を対象にする
 - [ ] `self_assignees` を省略した取り込み元は、`gh api user` の login を `self_assignees` とみなす
-- [ ] `self_assignees` を省略し、その解決に失敗したときは、`self-only` の取り込み元は新しい Issue を何も対象にしない（現行と同じ安全側）
-- [ ] `self_assignees` を省略し、その解決に失敗したときは、`exclude-others` の取り込み元は新しい Issue のうち assignee がいないものだけを対象にする（現行と同じ安全側）
+- [ ] `self_assignees` を省略し、その解決に失敗したときは、`self-only` の取り込み元は新しい Issue を何も対象にしない
+- [ ] `self_assignees` を省略し、その解決に失敗したときは、その取り込み元の Issue は取り込めるものに入れない（S2b。`exclude-others` の assignee のいない Issue も同じ）
 - [ ] `self_assignees` を省略し、その解決に失敗したときは、対応済みの課題のポリシーの再判定をしない（取り込みの安全側＝取り込まないと、対象から外す判定の安全側＝外さないは向きが逆のため。§ポリシーに合わなくなった課題 の規則より優先する）
-- [ ] ポリシーに合わない新しい Issue は課題にせず、結果に「対象外（assignee）」として数える
+- [ ] ポリシーに合わない新しい Issue は課題にしない。S2b から、対応の無い Issue は結果のどの件数にも数えず、`excluded` はいつも `0`（AC-321）
 - [ ] 関連度（自ポジションのものか）の判定はしない。ポリシーに合う Issue はすべて取り込む【決定 2026-09-24 オーナー QH7】
 
 関連度の判定は M3 の J1（分類）が担う（M2 の範囲外）。
@@ -162,6 +164,9 @@ M3 の J2 は、core の同じ公開 API で読んだ記録を付ける（§M3 �
 
 - [ ] `flywheel ingest` は、宣言のすべての取り込み元を宣言の順に処理する
 - [ ] `flywheel ingest --source <id>` は、指定した取り込み元だけを処理する。宣言に無い id は `validation_failed`
+- [ ] `flywheel ingest <指定>... [--source <id>]`（S2b。AC-305）は、選んだ Issue だけを新しい課題にする。指定は `<owner>/<repo>#<番号>`（大文字と小文字を区別しない。記録には上流の正規の表記を使う）か番号だけ。番号だけの指定は、取り込めるものの中で（`--source` があればその取り込み元の中で）ちょうど 1 つのときに受け、0 件・2 件以上は `validation_failed`。取り込めるものの判定は、`--source` を付けても宣言の取り込み元の全部を読んで行う
+- [ ] 指定のどれか 1 つでも取り込めるもの（方針に合い、課題でも子でもない、開いている Issue）に無ければ、どれも取り込まずに `validation_failed`。`self_assignees` を解決できない取り込み元の Issue は取り込めるものに入れず、指定して取り込もうとしたときは `upstream_unavailable`。同じ Issue を 2 度並べたら `usage_error`。全部の作成は 1 つのトランザクションで行い、その中で課題になっていないことを読み直す
+- [ ] `flywheel ingest <指定>... --json` の根は `ingested`（要素は `challenge_id`・`external_key`・`children`。この区切りでは `children` は `0`）。作る課題は、状態 `unclassified`・`origin` が `ingest`・`source_binding` を持ち、作業ログに `ingest_create` を残す
 - [ ] `flywheel ingest --json` は、取り込み元・リポジトリごとの結果（作成・更新・変化なし・対象外・完了済みでスキップ・上流の状態の変化・ポリシーの状態の変化・失敗）を出力する（形は §IF / API）
 - [ ] リポジトリ単位の失敗があっても、コマンドは終了コード 0 で終わり、失敗は結果に示す【決定 2026-09-24 親 QP4】
 - [ ] 定期実行の仕組み（スケジューラ）は持たない。定期実行は cron などの外部から `flywheel ingest` を呼ぶ
@@ -340,7 +345,7 @@ M3 の J2 は、core の同じ公開 API で読んだ記録を付ける（§M3 �
 
 | コマンド | 内容 | 本人確認 |
 |---|---|---|
-| `flywheel ingest [--source <id>]` | 取り込み（作成・更新・上流の状態・ポリシーの状態・観測値の反映） | — |
+| `flywheel ingest [<指定>...] [--source <id>]` | 引数なし: 取り込み済みの課題の追従（更新・上流の状態・ポリシーの状態・観測値の反映。新しい課題は作らない）。`<指定>...` あり: 選んだ Issue だけを課題にする（S2b） | — |
 | `flywheel mark-read <C-ID>` | 上流を読んだ記録を付ける（読んだ時点の値を現在の観測値で上書きする。上流は取り直さない）【決定 2026-09-26 オーナー QH13】 | —（`none`） |
 | `flywheel bind <C-ID> <owner/repo#番号>` | 取り込み元の Issue の無い課題を、`open` の GitHub Issue に紐づける（§課題と Issue の紐づけ）【決定 2026-11-08 オーナー（flywheel#473）】 | —（`none`） |
 | `flywheel unbind <C-ID>` | 紐づけを外す。上流へは接続しない | —（`none`） |
@@ -374,7 +379,7 @@ M1 §成功時の JSON 出力の規約に従う（包みなし・snake_case・�
 
 - `result` は `created | updated | unchanged | skipped_done | fingerprint_unknown_version | failed` の閉集合。`result` は人間記入欄と fingerprint についての結果であり、`unchanged` は上流の状態・ポリシーの状態が変わった場合も含む。上流の状態・ポリシーの状態の変化は、同じ要素の `upstream_state`・`policy_state` の値（変化後）と作業ログで読む。
 - `comments_count`・`upstream_updated_at` は反映後の観測値、`unread` は反映後の記録から導いた未読の更新の種類（`upstream_commented | upstream_updated` の部分集合。この列挙の順に並べる。無ければ `[]`。`status` の `kinds` と同じ判定）である【決定 2026-09-26 オーナー QH10】。`result` は観測値について何も表さず、観測値だけが変わった要素の `result` は `unchanged` である。`upstream_updated_at` は `0003` の前に作られ、まだ観測していない対応では `null`。
-- `items` は、課題を作った・対応のある Issue だけを並べる。ポリシーに合わない新しい Issue は件数（`excluded`）だけを出す。
+- `items` は、対応のある Issue だけを並べる。対応の無い Issue はどの件数にも数えず、`excluded` はいつも `0`（キーは残す。S2b）。`result` の `created` は閉集合の値として残るが、引数なしの `ingest` は出さない（作成は `ingest <指定>...` の `ingested`）。
 - `error` はリポジトリの一覧の取得か、1 件の取得の失敗の要約（文字列）。成功なら `null`。
 - 一覧の取得に失敗したリポジトリの `items` は `[]`、`excluded` は `0` である。
 
@@ -513,7 +518,7 @@ M2 では決めず、M3 の設計への入力として記録する（flywheel#65
 ### 取り込みの対象（assignee のポリシー）
 
 - [ ] `self-only` の取り込み元では、assignee が `self_assignees` の 1 人だけの Issue が取り込まれる
-- [ ] `self-only` の取り込み元では、assignee のいない Issue は取り込まれず、`excluded` に数えられる
+- [ ] `self-only` の取り込み元では、assignee のいない Issue は取り込めるものに入らず、`excluded` に数えない（S2b。AC-321）
 - [ ] `self-only` の取り込み元では、`self_assignees` に無い人が 1 人でも assign された Issue は取り込まれない（自分との co-assign を含む）
 - [ ] `self-only` の取り込み元では、`self_assignees` に宣言した 2 つのアカウントが co-assign された Issue が取り込まれる
 - [ ] `exclude-others` の取り込み元では、assignee のいない Issue が取り込まれる

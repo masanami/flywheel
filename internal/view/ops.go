@@ -36,6 +36,27 @@ type IngestResponse struct {
 	Sources []IngestSource `json:"sources"`
 }
 
+// IngestedItem は `ingest <指定>...` の ingested の要素（選んで課題にした Issue 1 件）。
+type IngestedItem struct {
+	ChallengeID string `json:"challenge_id"`
+	Children    int    `json:"children"`
+	ExternalKey string `json:"external_key"`
+}
+
+// IngestedResponse は `ingest <指定>...` の成功の形。
+type IngestedResponse struct {
+	Ingested []IngestedItem `json:"ingested"`
+}
+
+// FromIngestSelectedResult は core.IngestSelectedResult を IngestedResponse へ変換する。
+func FromIngestSelectedResult(res *core.IngestSelectedResult) IngestedResponse {
+	items := make([]IngestedItem, 0, len(res.Ingested))
+	for _, c := range res.Ingested {
+		items = append(items, IngestedItem{ChallengeID: c.ChallengeID, Children: c.Children, ExternalKey: c.ExternalKey})
+	}
+	return IngestedResponse{Ingested: items}
+}
+
 // FromIngestResult は core.IngestResult を IngestResponse へ変換する。
 func FromIngestResult(res *core.IngestResult) IngestResponse {
 	sources := make([]IngestSource, 0, len(res.Sources))

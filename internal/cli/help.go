@@ -45,7 +45,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   status
   version   （動いているバイナリのコミットとストアのスキーマの版）
   log [<ID>]
-  ingest [--source <id>]
+  ingest [<指定>...] [--source <id>]   （<指定> は <owner>/<repo>#<番号> か番号。選んだ Issue だけを課題にする）
   mark-read <C-ID>
   runs [<C-ID>] [--open]
   metrics [--since <YYYY-MM-DD>] [--until <YYYY-MM-DD>] [--compare <C-ID>]

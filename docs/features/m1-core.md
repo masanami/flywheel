@@ -530,7 +530,7 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel status` | 人間待ち・進められるもの・承認済みの不可逆操作。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す（`--json` では `binary_commit`） | — |
 | `flywheel version` | 動いているバイナリのビルドのコミット（`vcs.revision`・`vcs.time`・`vcs.modified`）と、そのバイナリが扱うストアのスキーマの版。読み取りだけで、ストアを開かず（`store_too_new` でも動く）、ネットワークにも Git にも触れない。未コミットの変更つきのビルドは commit の表示に `+dirty` を付ける | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |
-| `flywheel ingest [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・冪等な作成と更新・上流の close の検出（#59） | — |
+| `flywheel ingest [<指定>...] [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・上流の close の検出（#59）。引数なしは取り込み済みの追従だけ（新しい課題は作らない）、`<指定>...`（`<owner>/<repo>#<番号>` か番号）は選んだ Issue だけを課題にする（S2b） | — |
 | `flywheel mark-read <C-ID>` | 上流を読んだ記録を付ける（読んだ時点の値を現在の観測値で上書きする。上流は取り直さない。docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読） | — |
 
 共通フラグ: `--workspace <dir>`・`--json`。

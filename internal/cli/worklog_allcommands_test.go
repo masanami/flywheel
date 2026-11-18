@@ -593,8 +593,8 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
-		// #59: ingest は取得と反映を結線した後、対応の無い・ポリシーに合う
-		// Issue から課題を作るたびに ingest_create を記録する（§作業ログと版）。
+		// #59: ingest は、選んだ（取り込めるものに合う）Issue から課題を作るたびに
+		// ingest_create を記録する（§作業ログと版）。
 		name: "ingest create", command: "ingest",
 		setup: func(t *testing.T, ws string) []string {
 			decl := `{
@@ -609,7 +609,7 @@ var worklogCases = []worklogCase{
 					{Number: 1, Title: "ingest smoke title", Body: "ingest smoke body", Reporter: "reporter", Repo: worklogIngestRepo},
 				}), 0),
 			})
-			return []string{"ingest"}
+			return []string{"ingest", worklogIngestRepo + "#1"}
 		},
 		want: func(string) []wantActivity {
 			return []wantActivity{{"challenge", "C-1", "ingest_create", nil,
@@ -625,14 +625,13 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
-		// #86: cycle は取り込みの段で ingest と同じ core の処理を呼ぶので、課題を作るたびに
-		// 経路 cli の ingest_create を記録する。分類・計画の段の遷移は経路 invoker で
+		// #86: cycle は取り込みの段で ingest の追従と同じ core の処理を呼ぶが、新しい課題は作らないので
+		// ingest_create を記録しない。分類・計画の段の遷移は経路 invoker で
 		// 記録される（TestCycle_RecordsNoApprovalRejectionOrAnswerActivity が検証する）が、
-		// この表の検査は経路 cli 固定のため、J1 が not_mine を返して遷移を起こさない設定で
-		// ingest_create だけを記録させる。承認・差し戻し・回答は cycle からは記録されない。
+		// この表の検査は経路 cli 固定のため、J1 が not_mine を返して遷移を起こさない設定にする。承認・差し戻し・回答は cycle からは記録されない。
 		// 周の最後の段 backup は entity=cycle・action=backup を残す（テスト用のワークスペースは
 		// Git の作業ツリーでないので outcome は not_git。M5 S1）。
-		name: "cycle ingest create", command: "cycle",
+		name: "cycle ingest follow-up", command: "cycle",
 		setup: func(t *testing.T, ws string) []string {
 			writePositionFileForTest(t, ws, "pos")
 			writeAgentJSONForTest(t, ws, `{"position_file": "position.md"}`)
@@ -650,19 +649,13 @@ var worklogCases = []worklogCase{
 			putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{{Match: fakeClaudeJ1Match, Tag: "J1", Stdout: j1NotMineFixture}}, "")
 			// 進められるものが無いと周は始まらない（上流の課題は数えに入らない）ので、未分類の課題を 1 件置く（C-1）。
 			createTitled(t, ws, "pre-existing")
+			// 周の取り込みの段は取り込み済みの追従だけを行う。課題にするのは選んだ Issue だけなので、先に選ぶ（C-2）。
+			runJSON(t, ws, "ingest", worklogIngestRepo+"#1")
 			return []string{"cycle"}
 		},
 		want: func(string) []wantActivity {
-			return []wantActivity{{"challenge", "C-2", "ingest_create", nil,
-				map[string]any{
-					"title":         "cycle ingest title",
-					"description":   "cycle ingest body",
-					"done_criteria": "",
-					"urgency":       nil,
-					"status":        "unclassified",
-					"reporter":      "reporter",
-					"external_key":  worklogIngestRepo + "#1",
-				}},
+			// 追従で上流に変化が無ければ作業ログは増えず、ingest_create も記録されない（新しい課題を作らない）。
+			return []wantActivity{
 				{"cycle", "Y-1", "backup", nil, map[string]any{"outcome": "not_git", "commit": nil, "detail": nil}}}
 		},
 	},

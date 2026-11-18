@@ -197,6 +197,8 @@ func TestRunCycle_RunsIngestClassifyPlanInOrder(t *testing.T) {
 
 	in := f.input(inv)
 	in.Ingest = &CycleIngestInput{Sources: []SourceEntry{selfOnlySource("src", []string{"o/r"}, []string{"masanami"})}, Upstream: up, Channel: ChannelCLI}
+	// 課題にするのはオーナーが選んだ Issue だけ。周の取り込みの段は追従だけを行うので、先に選んで課題にしておく。
+	selectAllIngestableForTest(t, f.s, in.Ingest.Sources, up)
 	// 取り込み元の対応のある課題は operation の invocation が取り込み元の差し込みを持てるので、
 	// J2 の出力は impl（invocation に {issue_number}）を使ってよい。
 	inv.handle = func(c cycleCall) JudgmentLaunchOutput {
@@ -212,7 +214,7 @@ func TestRunCycle_RunsIngestClassifyPlanInOrder(t *testing.T) {
 		t.Fatalf("phases = %v, want %v", got, want)
 	}
 	if got := inv.judgments(); fmt.Sprint(got) != fmt.Sprint([]JudgmentPoint{JudgmentJ1, JudgmentJ2}) {
-		t.Errorf("judgment calls = %v, want [J1 J2] (the challenge created by ingest is classified then planned in this cycle)", got)
+		t.Errorf("judgment calls = %v, want [J1 J2] (the challenge selected for ingest is classified then planned in this cycle)", got)
 	}
 	ing := phaseOfResult(t, res, CyclePhaseIngest)
 	if ing.Skipped || ing.Ingest == nil || len(ing.Ingest.Sources) != 1 {

@@ -65,7 +65,7 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 		view.RunsResponse{}, view.Discrepancy{}, view.Triage{}, view.BudgetExhausted{}, view.WaitingExternal{},
 		view.Slot{}, view.StatusNeedsHuman{}, view.StatusActionable{}, view.StatusApproved{},
 		view.StatusWaitingExternal{}, view.StatusResponse{}, view.IngestItem{}, view.IngestRepo{},
-		view.IngestSource{}, view.IngestResponse{}, view.PhaseItem{}, view.PhaseNotStarted{}, view.ReleaseNotStarted{}, view.ReleaseItem{}, view.ReleasePhase{},
+		view.IngestSource{}, view.IngestResponse{}, view.IngestedItem{}, view.IngestedResponse{}, view.PhaseItem{}, view.PhaseNotStarted{}, view.ReleaseNotStarted{}, view.ReleaseItem{}, view.ReleasePhase{},
 		view.JudgmentPhase{}, view.DelegationPhase{}, view.IngestPhase{}, view.PhaseResponse{}, view.Cycle{},
 		view.CycleResponse{}, view.CycleStarted{}, view.CycleStatus{}, view.SlotCleared{}, view.SlotResponse{}, view.InitResponse{},
 		view.MarkReadResponse{}, view.BudgetResponse{}, view.ExportBody{}, view.ExportResponse{}, view.ImportBody{}, view.ImportResponse{},
