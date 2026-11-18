@@ -68,14 +68,6 @@ func TestValidateJ2Output_DependsOnSchema(t *testing.T) {
 	if _, ok := validateJ2Output([]byte(`{"verdict":"uncertain","question":"q","depends_on":["C-1"]}`), vc); !ok {
 		t.Errorf("uncertain with depends_on must be valid")
 	}
-	issues := `{"verdict":"issues","issues":[` + `{"question":"q","options":[{"label":"a"},{"label":"b"}],"recommended":1},`
-	issues += `{"question":"q","options":[{"label":"a"},{"label":"b"}],"recommended":1},{"question":"q","options":[{"label":"a"},{"label":"b"}],"recommended":1}]`
-	if _, ok := validateJ2Output([]byte(issues+`,"depends_on":5}`), vc); ok {
-		t.Errorf("issues with bad depends_on must be invalid")
-	}
-	if _, ok := validateJ2Output([]byte(issues+`,"depends_on":["C-1"]}`), vc); !ok {
-		t.Errorf("issues with depends_on must be valid")
-	}
 }
 
 // AC-187: 存在する ID なら計画の登録と同じトランザクションで依存を足す。
@@ -259,7 +251,6 @@ func TestPlanAutoJ2_DependsOn_NotWrittenWhenPlanIsNotRegistered(t *testing.T) {
 	f := newJ2Fixture(t)
 	a := f.newClassified(t, "a", "P1")
 	ch := f.newClassified(t, "held", "P1")
-	f.recordIssues(t, ch.ID)
 	out := j2DepOut([]string{a.ID, "C-9999"}, func(m map[string]any) { m["size"] = "M"; delete(m, "expected") })
 	res, err := f.run(t, succeededInvoker(out), idPtr(ch.ID))
 	if err != nil {

@@ -21,7 +21,7 @@ import (
 // docs/features/m5-tom-migration-and-switchover.md S1（AC-1〜AC-16）。実ストアで書き出しと再構築を検証する。
 
 var allTablesForExportTest = []string{"activity", "approval", "challenge", "challenge_dependency", "challenge_parent", "challenge_reopen", "contract_run", "cycle", "direct_completion", "direct_completion_artifact", "hold", "lock",
-	"occurrence", "operation", "operation_execution", "run", "run_artifact", "slot", "source_binding", "task_plan"}
+	"occurrence", "operation", "operation_execution", "plan_answer", "run", "run_artifact", "slot", "source_binding", "task", "task_dependency", "task_plan"}
 
 func newWorkspaceStore(t *testing.T) (*Store, string) {
 	t.Helper()
@@ -556,4 +556,57 @@ func TestImportFromFile_UnreadableFileIsValidationFailed(t *testing.T) {
 	if _, err := s.ImportFromFile(context.Background(), filepath.Join(dir, "missing.json")); !errors.Is(err, ErrValidation) {
 		t.Errorf("ImportFromFile(missing) = %v, want ErrValidation", err)
 	}
+}
+
+// タスクの表の往復（core の見直しの区切り S2a・masanami/flywheel#750 の AC-10〜AC-12）。
+// 書き出して別のストアへ再構築し、再構築したストアの表に、書き出した行の全列が同じ値である。
+func TestImport_TaskTablesRowsSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		ac, table string
+		minRows   int
+	}{
+		{"AC-10", "task", 2},
+		{"AC-11", "task_dependency", 1},
+		{"AC-12", "plan_answer", 2},
+	} {
+		t.Run(tc.ac+"_"+tc.table, func(t *testing.T) {
+			t.Parallel()
+			src, srcDir := filledStore(t)
+			dst, dstDir := newWorkspaceStore(t)
+			if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+				t.Fatalf("Import: %v", err)
+			}
+			want := coretest.DumpTables(t, srcDir, tc.table)
+			got := coretest.DumpTables(t, dstDir, tc.table)
+			// 先頭の "[table]" の行を除いた行数が、書き出した行数。
+			if rows := strings.Count(want, "\n") - 1; rows < tc.minRows {
+				t.Fatalf("the source store has %d %s rows, want >= %d", rows, tc.table, tc.minRows)
+			}
+			if got != want {
+				t.Errorf("%s rows after the round trip differ:\nwant:\n%s\ngot:\n%s", tc.table, want, got)
+			}
+		})
+	}
+	// 追加した列（task_id・uses_integration）の値も往復で残る。
+	t.Run("task_id_and_uses_integration_columns", func(t *testing.T) {
+		t.Parallel()
+		src, _ := filledStore(t)
+		dst, _ := newWorkspaceStore(t)
+		if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+			t.Fatal(err)
+		}
+		for _, q := range []string{
+			"SELECT task_id FROM run WHERE id = 1", "SELECT task_id FROM contract_run WHERE id = 1",
+			"SELECT task_id FROM hold WHERE id = 1", "SELECT uses_integration FROM challenge WHERE id = 1",
+		} {
+			var v sql.NullInt64
+			if err := dst.db.Read(context.Background(), func(tx *sql.Tx) error { return tx.QueryRow(q).Scan(&v) }); err != nil {
+				t.Fatalf("%s: %v", q, err)
+			}
+			if !v.Valid {
+				t.Errorf("%s = NULL after the round trip, want a value", q)
+			}
+		}
+	})
 }

@@ -837,6 +837,7 @@ func TestRework_LimitCountsOnlyTheSamePlanVersion(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	seedPlanTasks(t, f.s, cid, 2)
 	res := f.runDelegation(t, "C-1")
 	if len(res.NotStarted) != 0 || len(res.Items) != 1 {
 		t.Fatalf("result = %+v, want a launch for the new plan version", res)
@@ -856,6 +857,8 @@ func TestRework_WithoutNotMetTheNormalFlowIsUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.answerLatestHold(t, "C-1", "A")
+	// answerLatestHold は保留への回答の遷移を通さずに課題を着手中へ直に置く。タスクも合わせて着手中へ置く。
+	moveVerifyingTasksRaw(t, f.s, TaskStatusInProgress)
 	launches := len(f.deleg.launched())
 	f.runDelegation(t, "C-1")
 	if len(f.deleg.launched()) != launches+1 {

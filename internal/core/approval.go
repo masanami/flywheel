@@ -85,6 +85,11 @@ type ApprovalPreview struct {
 	// Kind == ApprovalKindPlan のときだけ有効（最新の計画の版と本文）。
 	PlanVersion int
 	PlanBody    string
+	// PlanTopics・PlanTasks・PlanUsesIntegration は最新の計画の論点と問い（答えつき）・タスク（前提は計画の中の key）・統合先を使うか。
+	// 構造化した出力を持たない計画では、論点・タスクは空で UsesIntegration は nil。
+	PlanTopics          []PlanTopicView
+	PlanTasks           []PlanTaskView
+	PlanUsesIntegration *bool
 
 	// Kind == ApprovalKindCompletion のときだけ有効。
 	DoneCriteria string
@@ -205,6 +210,14 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 			case err == nil:
 				preview.PlanVersion = version
 				preview.PlanBody = body
+				// 承認の要約は予算の上限を計画の本文で出すので、宣言は渡さない。
+				pv, err := loadPlanView(ctx, tx, cid, nil)
+				if err != nil {
+					return err
+				}
+				if pv != nil {
+					preview.PlanTopics, preview.PlanTasks, preview.PlanUsesIntegration = pv.Topics, pv.Tasks, pv.UsesIntegration
+				}
 			case errors.Is(err, sql.ErrNoRows):
 				// 計画承認待ちなのに計画行が無い状態は本来到達しない
 				// （PlanChallenge が常に計画を登録してから遷移する）。以前は
@@ -570,9 +583,19 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		if err := s.recordApprovalOccurrence(ctx, tc, kind, req.Decision, approvalRowID); err != nil {
 			return err
 		}
+		// 計画の承認は、答えの無い問いへの推奨の記録・タスクの行の作成・統合先を使うかの記録を、同じトランザクションで行う。
+		if kind == ApprovalKindPlan && req.Decision == ApprovalDecisionApproved && planVersionOut != nil {
+			if err := onPlanApproved(ctx, tc, att, int64(*planVersionOut)); err != nil {
+				return err
+			}
+		}
 		// 本番反映のやり直し（#485）で置き換えられた前の完了の承認に、この承認を結ぶ。
 		if kind == ApprovalKindCompletion && req.Decision == ApprovalDecisionApproved {
 			if err := linkSupersededApprovals(ctx, tc.tx, tc.id, approvalRowID); err != nil {
+				return err
+			}
+			// 課題が完了になるので、終わっていないタスク（オーケストレーターが直接行った完了を承認したときに残る）を取りやめる。
+			if err := cancelUnfinishedTasks(ctx, tc.tx, tc.rec, tc.id); err != nil {
 				return err
 			}
 		}
@@ -615,6 +638,13 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 
 		// 完了の差し戻しは、その課題の未実行の release を同じトランザクションで取り消す。
 		if kind == ApprovalKindCompletion && req.Decision == ApprovalDecisionRejected {
+			// 課題が着手中へ戻るとき、承認済みの計画の版の done のタスクを in_progress にする。
+			// オーケストレーターの直接の完了の差し戻し（保留へ戻る）ではタスクの状態を変えない。
+			if tc.target == StatusInProgress {
+				if err := reopenDoneTasks(ctx, tc.tx, tc.rec, tc.id); err != nil {
+					return err
+				}
+			}
 			withdrawn, running, err := withdrawUnexecutedReleases(ctx, tc)
 			if err != nil {
 				return err

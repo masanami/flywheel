@@ -743,6 +743,8 @@ func parseIFAPISignature(tokens []string) ifAPISignature {
 // （commands.go の該当箇所のコメントを参照）。
 var ifAPIRequiredFlagExceptions = map[string]map[string]bool{
 	"hold": {"question": true},
+	// answer は --answer（保留への回答）か --choice・--text（計画の問いへの答え）のどちらかを runAnswer が検査する。
+	"answer": {"answer": true},
 }
 
 // ifAPISkipCommands は、m1-core.md の §IF / API の書式だけでは登録表の宣言と

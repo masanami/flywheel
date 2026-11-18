@@ -479,6 +479,7 @@ func TestBudget_RemainingIsPerPlanVersion(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	seedPlanTasks(t, f.s, cid, 2) // 新しい版の承認が、前の版のタスクを取りやめて新しい版のタスクを作る
 	f.mustRun(t, &id)
 	if got := f.lastLaunch(t).MaxBudgetUSD; got != 5 {
 		t.Errorf("new plan version cap = %v, want the full 5 (version 1's spend does not carry over)", got)

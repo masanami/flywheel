@@ -105,6 +105,7 @@ const (
 	actionApproveCompletionHold attestedAction = "approve_completion_hold" // T14（HoldRelease=true）
 	actionReject                attestedAction = "reject"                  // T6・T15
 	actionAnswer                attestedAction = "answer"                  // T12
+	actionAnswerPlan            attestedAction = "answer_plan"             // T19（推奨と同じ答えだけの記録も同じ種類で照らす）
 	actionWithdraw              attestedAction = "withdraw"                // T16
 	actionBudget                attestedAction = "budget"
 	actionOperationApprove      attestedAction = "operation_approve"
@@ -125,6 +126,8 @@ func actionForTransition(tr Transition) (attestedAction, bool) {
 		return actionReject, true
 	case "T12":
 		return actionAnswer, true
+	case "T19":
+		return actionAnswerPlan, true
 	case "T16":
 		return actionWithdraw, true
 	}
@@ -145,7 +148,7 @@ type verificationRegistryEntry struct {
 // （§クリティカル設計決定 1）。データ（テーブル）として持ち、組ごとに受けられる
 // 操作の集合を持つ（M4P23。検査は core に置き、server を通らない経路でも範囲が
 // 崩れないようにする）。(cli, tty_confirm)・(cli, relayed) は全操作、(ui, none) は計画の承認と
-// 本番反映の保留つきの完了の承認だけ（差し戻し・回答・予算の増額・不可逆操作・
+// 本番反映の保留つきの完了の承認だけ（差し戻し・回答・計画の問いへの答え・予算の増額・不可逆操作・
 // 保留を外した完了の承認は受けない）。
 var verificationRegistry = []verificationRegistryEntry{
 	{Channel: ChannelCLI, Verification: VerificationTTYConfirm, anyAction: true},

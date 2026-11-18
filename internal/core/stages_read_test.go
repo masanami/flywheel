@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -31,10 +32,12 @@ func TestPrepareApproval_CarriesStagesIssuesAnswerAndPairs(t *testing.T) {
 	s, c := newChallengeForStages(t)
 	cid, _ := parseChallengeID(c.ID)
 	if _, err := edit(t, s, c.ID, EditInput{
-		Issues: strPtr(mustJSON(t, issuesN(3))), Expected: strPtr(mustJSON(t, expectedN(2))), Actual: strPtr(mustJSON(t, actualN(1))),
+		Expected: strPtr(mustJSON(t, expectedN(2))), Actual: strPtr(mustJSON(t, actualN(1))),
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// 過去の論点の記録（新しくは書かない。読み出しだけ残す）は、列へ直接書く。
+	setIssuesForTest(t, s, cid, issuesN(3))
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
 		res, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer) VALUES (?, 'q', 'unclassified', '2026-10-19T00:00:00.000Z', '決定')`, cid)
 		if err != nil {
@@ -78,5 +81,21 @@ func TestPrepareApproval_NoStagesGivesEmptyPairsAndNilAnswer(t *testing.T) {
 	}
 	if prev.Pairs == nil || len(prev.Pairs) != 0 || prev.IssuesAnswer != nil || prev.Issues != nil {
 		t.Errorf("preview = %+v", prev)
+	}
+}
+
+// setIssuesForTest は過去の論点の記録（challenge.issues）を列へ直接書く（edit --issues と判定 issues は外したので、
+// 過去の記録を読み出す試験の前提はここで作る）。
+func setIssuesForTest(t *testing.T, s *Store, cid int64, issues []StageIssue) {
+	t.Helper()
+	b, err := json.Marshal(issues)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE challenge SET issues = ? WHERE id = ?`, string(b), cid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -28,81 +28,89 @@ import (
 
 // --- J2 の出力スキーマ・検査 ---
 
+// 計画の件数の上限（J2 の出力の tasks・topics・topics[].questions）。
+const (
+	MinPlanTasks         = 1
+	MaxPlanTasks         = 12
+	MaxPlanTopics        = 5
+	MaxQuestionsPerTopic = 3
+)
+
 // j2RawOutput は J2 の構造化出力（`--json-schema` に渡した形）をそのまま受ける
 // 生の形（§IF / API「判断点の出力」J2 の行）。
 type j2RawOutput struct {
-	Verdict         string   `json:"verdict"`
-	Summary         *string  `json:"summary"`
-	Steps           []string `json:"steps"`
-	Repo            *string  `json:"repo"`
-	Operation       *string  `json:"operation"`
-	Size            *string  `json:"size"`
-	DoneCriteria    *string  `json:"done_criteria"`
-	BudgetImplUSD   *float64 `json:"budget_impl_usd"`
-	BudgetReviewUSD *float64 `json:"budget_review_usd"`
-	CrossRepo       *bool    `json:"cross_repo"`
-	RelatedRepos    []string `json:"related_repos"`
-	Question        *string  `json:"question"`
+	Verdict         string       `json:"verdict"`
+	Summary         *string      `json:"summary"`
+	Topics          []j2RawTopic `json:"topics"`
+	DoneCriteria    *string      `json:"done_criteria"`
+	Tasks           []j2RawTask  `json:"tasks"`
+	UsesIntegration *bool        `json:"uses_integration"`
+	Size            *string      `json:"size"`
+	BudgetImplUSD   *float64     `json:"budget_impl_usd"`
+	BudgetReviewUSD *float64     `json:"budget_review_usd"`
+	CrossRepo       *bool        `json:"cross_repo"`
+	RelatedRepos    []string     `json:"related_repos"`
+	Question        *string      `json:"question"`
 	// Expected・NonGoals・Figure は段階の欄（無い・null は「書かない」）。
 	Expected []StageExpected `json:"expected"`
 	NonGoals []string        `json:"non_goals"`
 	Figure   *string         `json:"figure"`
 	// DependsOn は省略可の依存先の課題 ID（M45P3）。ストアを読む検査は写像の中で行う。
 	DependsOn []string `json:"depends_on"`
-	// NoIssuesNeeded は plan のときの省略可の「論点は不要」の決定（#450）。中身の検査は
-	// normalizeNoIssuesNeeded が行う（空・欠けは出力全体を不正にせず、論点なしと同じに扱う）。
-	NoIssuesNeeded []j2NoIssuesEntry `json:"no_issues_needed"`
 }
 
-// j2NoIssuesEntry は J2 が「論点は不要」とするときの、決まっていること 1 つ。出力の読み取りと
-// 計画の本文の組み立てにだけ使う core の内部の型（#469 で公開をやめた。core の外では使わない）。
-// 中身（Content）・引用元の種別（SourceKind。J2SourceKindValues の値）・引用の文（Quote）の
-// すべてが空白除去後に非空のときだけ有効。core は引用が本文に実在するかを照合しない
-// （取り違えは、計画の本文に並べた引用を見た人が差し戻しで直す）。
-type j2NoIssuesEntry struct {
-	Content    string       `json:"content"`
-	SourceKind J2SourceKind `json:"source_kind"`
-	Quote      string       `json:"quote"`
+// j2RawTopic は J2 の出力の論点 1 つ（題名・どう決めたか・問い 0〜3 件）の生の形。
+type j2RawTopic struct {
+	Title     string       `json:"title"`
+	Decision  string       `json:"decision"`
+	Questions []StageIssue `json:"questions"`
 }
 
-// normalizeNoIssuesNeeded は決定の列を検査する。1 件以上あり、どれも有効なときだけ（空白を
-// 除いた）列を返し、空・欠け・閉集合の外が 1 件でもあれば nil（論点の記録として数えない）。
-func normalizeNoIssuesNeeded(in []j2NoIssuesEntry) []j2NoIssuesEntry {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]j2NoIssuesEntry, 0, len(in))
-	for _, d := range in {
-		d.Content = strings.TrimSpace(d.Content)
-		d.Quote = strings.TrimSpace(d.Quote)
-		if d.Content == "" || d.Quote == "" || !d.SourceKind.valid() {
-			return nil
-		}
-		out = append(out, d)
-	}
-	return out
+// j2RawTask は J2 の出力のタスク 1 つの生の形。
+type j2RawTask struct {
+	Key          string   `json:"key"`
+	Title        string   `json:"title"`
+	Body         string   `json:"body"`
+	DoneCriteria string   `json:"done_criteria"`
+	NonGoals     []string `json:"non_goals"`
+	DependsOn    []string `json:"depends_on"`
+	Repo         string   `json:"repo"`
+	Operation    string   `json:"operation"`
 }
 
-// j2RawIssuesOutput は verdict が issues のときだけ読む形。plan の項目は読まない
-// （型が合わなくても issues の検査に影響させない＝無視する）。
-type j2RawIssuesOutput struct {
-	Verdict string       `json:"verdict"`
-	Issues  []StageIssue `json:"issues"`
-	// DependsOn は書かないが、型だけは検証する（スキーマの検証）。
-	DependsOn []string `json:"depends_on"`
+// j2Topic は検査済みの論点 1 つ。
+type j2Topic struct {
+	Title     string
+	Decision  string
+	Questions []StageIssue
+}
+
+// j2Task は検査済みのタスク 1 つ（リポジトリと操作は宣言にあり、起動できる操作）。
+type j2Task struct {
+	Key          string
+	Title        string
+	Body         string
+	DoneCriteria string
+	NonGoals     []string
+	DependsOn    []string
+	Repo         string
+	Operation    string
 }
 
 // j2ValidatedOutput は core の閉集合・必須の組・宣言との突き合わせを通った J2 の
-// 出力。plan のときは Repo〜RelatedRepos・Resolved*・Spec が、uncertain のときは
-// Question が、issues のときは Issues が有効である。
+// 出力。plan のときは Size〜Spec が、uncertain のときは Question が、parent_direct のときは
+// Question と ParentDirectCriteria が有効である。
 type j2ValidatedOutput struct {
 	Verdict      J2Verdict
 	Summary      string
-	Steps        []string
-	Repo         string
-	Operation    string
 	Size         JudgmentSize
 	DoneCriteria string
+	// Topics は plan のときの論点（検査済み。0〜5 件）。
+	Topics []j2Topic
+	// Tasks は plan のときのタスク（検査済み。1〜12 件）。
+	Tasks []j2Task
+	// UsesIntegration は plan のときの統合先を使うか（タスクが 2 件以上なら真）。
+	UsesIntegration bool
 	// BudgetImplUSD・BudgetReviewUSD は出力の値そのもの（null は nil のまま）。
 	BudgetImplUSD   *float64
 	BudgetReviewUSD *float64
@@ -116,8 +124,6 @@ type j2ValidatedOutput struct {
 	// ParentDirectCriteria は parent_direct のときの、親が満たすべき達成条件（検査済み。空白を除いた値）。
 	// 理由は Question に入る。
 	ParentDirectCriteria string
-	// Issues は issues のときの論点（検査済み。3〜5 件）。
-	Issues []StageIssue
 	// Expected・NonGoals・Figure は plan のときの段階の欄（検査済み。無い・0 個・null は
 	// nil。Expected が nil なら課題のいまの値を残す）。
 	Expected []StageExpected
@@ -126,12 +132,18 @@ type j2ValidatedOutput struct {
 	// DependsOn は plan のときの依存先の課題 ID（出力のまま。存在・自己参照・循環は
 	// 計画を登録する書き込みの中で検査する。無い・null・空は nil）。
 	DependsOn []string
-	// NoIssuesNeeded は plan のときの有効な「論点は不要」の決定（検査済み。無い・無効は nil）。
-	// サイズ M・L の計画では、課題に論点の記録が無くてもこれがあれば計画を登録する。
-	NoIssuesNeeded []j2NoIssuesEntry
 	// Spec は構造化した出力の JSON を空白を除いて詰めたもの（task_plan.spec。
 	// null の額も出力のまま残す＝「spec は構造化した出力と一致する」）。
 	Spec []byte
+}
+
+// soleTask は計画のタスクがちょうど 1 件のときそのタスクを返す。委譲（見直しの途中のつなぎ）は、
+// 1 件の計画だけを起動する。2 件以上の計画は起動しない。
+func (v *j2ValidatedOutput) soleTask() (*j2Task, bool) {
+	if len(v.Tasks) != 1 {
+		return nil, false
+	}
+	return &v.Tasks[0], true
 }
 
 // j2ValidationContext は出力の検査が突き合わせる、宣言と課題の事実。
@@ -156,27 +168,62 @@ func j2OutputSchema() []byte {
 	}
 	sizes := []any{string(JudgmentSizeS), string(JudgmentSizeM), string(JudgmentSizeL), nil}
 	nullableString := map[string]any{"type": []string{"string", "null"}}
-	issuesSchema := map[string]any{
-		"type": "array",
+	stringArray := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+	questionSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"question": map[string]any{"type": "string"},
+			"options": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"label":   map[string]any{"type": "string"},
+						"example": nullableString,
+					},
+					"required":             []string{"label"},
+					"additionalProperties": false,
+				},
+			},
+			"recommended": map[string]any{"type": "integer"},
+		},
+		"required":             []string{"question", "options", "recommended"},
+		"additionalProperties": false,
+	}
+	topicsSchema := map[string]any{
+		"type":     "array",
+		"maxItems": MaxPlanTopics,
 		"items": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"question": map[string]any{"type": "string"},
-				"options": map[string]any{
-					"type": "array",
-					"items": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"label":   map[string]any{"type": "string"},
-							"example": nullableString,
-						},
-						"required":             []string{"label"},
-						"additionalProperties": false,
-					},
+				"title":    map[string]any{"type": "string"},
+				"decision": map[string]any{"type": "string"},
+				"questions": map[string]any{
+					"type":     "array",
+					"maxItems": MaxQuestionsPerTopic,
+					"items":    questionSchema,
 				},
-				"recommended": map[string]any{"type": "integer"},
 			},
-			"required":             []string{"question", "options", "recommended"},
+			"required":             []string{"title", "decision", "questions"},
+			"additionalProperties": false,
+		},
+	}
+	tasksSchema := map[string]any{
+		"type":     "array",
+		"maxItems": MaxPlanTasks,
+		"items": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"key":           map[string]any{"type": "string"},
+				"title":         map[string]any{"type": "string"},
+				"body":          map[string]any{"type": "string"},
+				"done_criteria": map[string]any{"type": "string"},
+				"non_goals":     map[string]any{"type": []string{"array", "null"}, "maxItems": MaxNonGoals, "items": map[string]any{"type": "string"}},
+				"depends_on":    stringArray,
+				"repo":          map[string]any{"type": "string"},
+				"operation":     map[string]any{"type": "string"},
+			},
+			"required":             []string{"key", "title", "body", "done_criteria", "non_goals", "depends_on", "repo", "operation"},
 			"additionalProperties": false,
 		},
 	}
@@ -200,48 +247,27 @@ func j2OutputSchema() []byte {
 		"maxItems": MaxNonGoals,
 		"items":    map[string]any{"type": "string"},
 	}
-	// 最小長などはスキーマで強制しない（空・欠けは core が論点なしと同じに扱う）。
-	sourceKinds := make([]string, 0, len(J2SourceKindValues))
-	for _, k := range J2SourceKindValues {
-		sourceKinds = append(sourceKinds, string(k))
-	}
-	noIssuesNeededSchema := map[string]any{
-		"type": []string{"array", "null"},
-		"items": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"content":     map[string]any{"type": "string"},
-				"source_kind": map[string]any{"type": "string", "enum": sourceKinds},
-				"quote":       map[string]any{"type": "string"},
-			},
-			"required":             []string{"content", "source_kind", "quote"},
-			"additionalProperties": false,
-		},
-	}
 	nullableNumber := map[string]any{"type": []string{"number", "null"}}
-	stringArray := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"verdict":           map[string]any{"type": "string", "enum": verdicts},
 			"summary":           nullableString,
-			"steps":             stringArray,
-			"repo":              nullableString,
-			"operation":         nullableString,
-			"size":              map[string]any{"type": []string{"string", "null"}, "enum": sizes},
+			"topics":            topicsSchema,
 			"done_criteria":     nullableString,
+			"expected":          expectedSchema,
+			"non_goals":         nonGoalsSchema,
+			"figure":            nullableString,
+			"depends_on":        stringArray,
+			"tasks":             tasksSchema,
+			"uses_integration":  map[string]any{"type": []string{"boolean", "null"}},
+			"size":              map[string]any{"type": []string{"string", "null"}, "enum": sizes},
 			"budget_impl_usd":   nullableNumber,
 			"budget_review_usd": nullableNumber,
 			"cross_repo":        map[string]any{"type": []string{"boolean", "null"}},
 			"related_repos":     stringArray,
 			"question":          nullableString,
-			"issues":            issuesSchema,
-			"expected":          expectedSchema,
-			"non_goals":         nonGoalsSchema,
-			"figure":            nullableString,
-			"depends_on":        stringArray,
-			"no_issues_needed":  noIssuesNeededSchema,
 		},
 		"required":             []string{"verdict"},
 		"additionalProperties": false,
@@ -351,33 +377,17 @@ func (d *ConnectorsDeclaration) findConnectorRepo(name string) (*ConnectorRepo, 
 // validateJ2Output は data（run の StructuredOutput）を検査する
 // （§結果の判別「core が閉集合と必須の組…を検査し直す」・§J2）。次のいずれかで
 // ok=false（run の結果は invalid_output になる）:
-//   - JSON として解釈できない・判定が plan|uncertain|issues|parent_direct の外
+//   - JSON として解釈できない・判定が plan|uncertain|parent_direct の外
 //   - uncertain で問いが無い・空
-//   - plan で: 対象リポジトリが宣言に無い／そのリポジトリの接続ツールに操作が無い／
-//     形態 cli の操作／取り込み元の対応の無い課題で取り込み元の差し込みを持つ操作／
-//     サイズが S・M・L の外または無い／達成条件が空／複数リポジトリにまたがるかが
-//     無い／額が 0 以下／実装枠（null はサイズの既定へ解決した額）が
-//     max_run_budget_usd を超える／関係するリポジトリが宣言に無い
+//   - plan で: 統合先を使うかが無い／サイズが S・M・L の外または無い／達成条件が空／
+//     複数リポジトリにまたがるかが無い／額が 0 以下／実装枠（null はサイズの既定へ解決した額）が
+//     max_run_budget_usd を超える／関係するリポジトリが宣言に無い／
+//     タスクが 1〜12 件でない・key が空か重なる・題名・何をするか・完了条件が空・
+//     前提が自分自身・計画に無い key・循環／タスクの対象リポジトリが宣言に無い・
+//     そのリポジトリの接続ツールに操作が無い・起動できない操作（取り込み元の無い課題で
+//     取り込み元の差し込みを要する操作を含む）／タスクが 2 件以上で統合先を使わない／
+//     論点が 6 件以上・問いが 1 つの論点に 4 件以上・選択肢が 2〜5 個でない・推奨が選択肢の外
 func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, bool) {
-	var head struct {
-		Verdict string `json:"verdict"`
-	}
-	if err := json.Unmarshal(data, &head); err != nil {
-		return nil, false
-	}
-	if J2Verdict(head.Verdict) == J2VerdictIssues {
-		// 論点は件数・選択肢・推奨・文字列を検査する。plan の項目は読まない。
-		var iss j2RawIssuesOutput
-		if err := json.Unmarshal(data, &iss); err != nil || len(iss.Issues) == 0 {
-			return nil, false
-		}
-		issues, err := NormalizeIssues(iss.Issues)
-		if err != nil || len(issues) == 0 {
-			return nil, false
-		}
-		return &j2ValidatedOutput{Verdict: J2VerdictIssues, Issues: issues}, true
-	}
-
 	var raw j2RawOutput
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, false
@@ -407,27 +417,21 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		return nil, false
 	}
 
-	// cross_repo は意思決定の主体の判定（S2）が読む安全に関わる項目なので、無い
-	// 出力を「またがらない」と読まず、不正とする。
-	if raw.Repo == nil || raw.Operation == nil || raw.Size == nil || raw.DoneCriteria == nil || raw.CrossRepo == nil {
+	// cross_repo は意思決定の主体の判定（S2）が読む安全に関わる項目、uses_integration は
+	// 統合先を使うかの決定なので、無い出力を既定値と読まず、不正とする。
+	if raw.Size == nil || raw.DoneCriteria == nil || raw.CrossRepo == nil || raw.UsesIntegration == nil {
 		return nil, false
 	}
-	repo, connector := vc.Conn.findConnectorRepo(*raw.Repo)
-	if repo == nil || connector == nil {
+	tasks, ok := validateJ2Tasks(raw.Tasks, vc)
+	if !ok {
 		return nil, false
 	}
-	var op *ConnectorOperation
-	for i := range connector.Operations {
-		if connector.Operations[i].ID == *raw.Operation {
-			op = &connector.Operations[i]
-			break
-		}
-	}
-	if op == nil {
+	// 2 件以上のタスクは統合先へ入れる（1 件ならどちらでもよい）。
+	if len(tasks) >= 2 && !*raw.UsesIntegration {
 		return nil, false
 	}
-	// 起動できる操作だけを選べる。委譲の起動（StartContractDelegation）も同じ関数で検査する。
-	if checkOperationLaunchable(connector, op, vc.HasSource) != nil {
+	topics, ok := validateJ2Topics(raw.Topics)
+	if !ok {
 		return nil, false
 	}
 
@@ -482,11 +486,11 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 
 	v := &j2ValidatedOutput{
 		Verdict:           J2VerdictPlan,
-		Steps:             raw.Steps,
-		Repo:              *raw.Repo,
-		Operation:         *raw.Operation,
 		Size:              size,
 		DoneCriteria:      *raw.DoneCriteria,
+		Topics:            topics,
+		Tasks:             tasks,
+		UsesIntegration:   *raw.UsesIntegration,
 		BudgetImplUSD:     raw.BudgetImplUSD,
 		BudgetReviewUSD:   raw.BudgetReviewUSD,
 		ResolvedImplUSD:   impl,
@@ -496,7 +500,6 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		NonGoals:          nonGoals,
 		Figure:            raw.Figure,
 		DependsOn:         raw.DependsOn,
-		NoIssuesNeeded:    normalizeNoIssuesNeeded(raw.NoIssuesNeeded),
 		Question:          raw.Question,
 		Spec:              spec.Bytes(),
 	}
@@ -507,6 +510,93 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 	return v, true
 }
 
+// validateJ2Tasks は plan のタスクを検査する（1〜12 件・key・必須の文字列・前提・対象リポジトリと操作）。
+// 対象リポジトリと操作には、見直し前に根の repo・operation へ掛けていた検査（findConnectorRepo と
+// checkOperationLaunchable）をタスクごとに掛ける。取り込み元の有無は課題の単位（vc.HasSource）で見る。
+func validateJ2Tasks(in []j2RawTask, vc j2ValidationContext) ([]j2Task, bool) {
+	if len(in) < MinPlanTasks || len(in) > MaxPlanTasks {
+		return nil, false
+	}
+	byKey := make(map[string]int, len(in))
+	inputs := make([]TaskInput, len(in))
+	for i, t := range in {
+		for _, s := range []string{t.Key, t.Title, t.Body, t.DoneCriteria} {
+			if checkText("tasks", s, MaxStageRunes) != nil {
+				return nil, false
+			}
+		}
+		if _, dup := byKey[t.Key]; dup {
+			return nil, false
+		}
+		byKey[t.Key] = i
+		inputs[i] = TaskInput{Key: t.Key, DependsOn: t.DependsOn}
+	}
+	for _, t := range in {
+		for _, k := range t.DependsOn {
+			if _, ok := byKey[k]; !ok || k == t.Key {
+				return nil, false
+			}
+		}
+	}
+	if hasDependencyCycle(inputs, byKey) {
+		return nil, false
+	}
+	out := make([]j2Task, 0, len(in))
+	for _, t := range in {
+		repo, connector := vc.Conn.findConnectorRepo(t.Repo)
+		if repo == nil || connector == nil {
+			return nil, false
+		}
+		var op *ConnectorOperation
+		for i := range connector.Operations {
+			if connector.Operations[i].ID == t.Operation {
+				op = &connector.Operations[i]
+				break
+			}
+		}
+		if op == nil {
+			return nil, false
+		}
+		// 起動できる操作だけを選べる。委譲の起動（StartContractDelegation）も同じ関数で検査する。
+		if checkOperationLaunchable(connector, op, vc.HasSource) != nil {
+			return nil, false
+		}
+		nonGoals, err := NormalizeNonGoals(t.NonGoals)
+		if err != nil {
+			return nil, false
+		}
+		out = append(out, j2Task{
+			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria,
+			NonGoals: nonGoals, DependsOn: t.DependsOn, Repo: t.Repo, Operation: t.Operation,
+		})
+	}
+	return out, true
+}
+
+// validateJ2Topics は plan の論点を検査する（0〜5 件。題名・どう決めたかは空にできない。問いは
+// 論点ごとに 0〜3 件で、問いの文・選択肢 2〜5 個・推奨が選択肢の位置を指す）。
+func validateJ2Topics(in []j2RawTopic) ([]j2Topic, bool) {
+	if len(in) > MaxPlanTopics {
+		return nil, false
+	}
+	out := make([]j2Topic, 0, len(in))
+	for _, t := range in {
+		if checkText("topics.title", t.Title, MaxStageRunes) != nil || checkText("topics.decision", t.Decision, MaxStageRunes) != nil {
+			return nil, false
+		}
+		if len(t.Questions) > MaxQuestionsPerTopic {
+			return nil, false
+		}
+		for _, q := range t.Questions {
+			if checkStageQuestion(q) != nil {
+				return nil, false
+			}
+		}
+		out = append(out, j2Topic(t))
+	}
+	return out, true
+}
+
 // --- 計画の本文の整形 ---
 
 func formatUSDAmount(v float64) string {
@@ -514,52 +604,70 @@ func formatUSDAmount(v float64) string {
 }
 
 // formatJ2PlanBody は検査済みの plan の出力を、計画の本文（Markdown）へ決定的に
-// 整形する（§J2「出力を計画の本文へ決定的に整形し」）。対象リポジトリ・操作の id・
-// サイズ・完了条件・実装枠・レビュー対応枠の額を必ず含む（人間は計画の承認で、この
-// 額と操作を承認する＝設計書 §9）。時刻・乱数など、出力以外の値は含めない。
+// 整形する（§J2「出力を計画の本文へ決定的に整形し」）。サイズ・実装枠・レビュー対応枠の額・
+// 統合先を使うか・論点（題名・どう決めたか）・問い（番号・文・選択肢のラベル・推奨の印）・
+// タスクのツリー（題名・前提・対象リポジトリ・操作）を必ず含む（人間は計画の承認で、この
+// 額とタスクを承認する＝設計書 §9）。時刻・乱数など、出力以外の値は含めない。
 func formatJ2PlanBody(v *j2ValidatedOutput) string {
 	var b strings.Builder
 	b.WriteString("# 計画\n\n")
-	// 人が承認する事実（対象・予算）を先頭に置き、出力の自由記述（要約・手順・
-	// 完了条件）はその後に置く。自由記述の中に見出しや額を装った文があっても、
+	// 人が承認する事実（サイズ・予算・統合先）を先頭に置き、出力の自由記述（方針・
+	// 論点・完了条件）はその後に置く。自由記述の中に見出しや額を装った文があっても、
 	// 承認する事実が先に読めるようにするため。
-	b.WriteString("## 対象\n\n")
-	b.WriteString("- リポジトリ: " + v.Repo + "\n")
-	b.WriteString("- 操作: " + v.Operation + "\n")
+	b.WriteString("## サイズと予算\n\n")
 	b.WriteString("- サイズ: " + string(v.Size) + "\n")
-	if v.CrossRepo {
-		b.WriteString("- 複数リポジトリにまたがる: はい\n")
-	} else {
-		b.WriteString("- 複数リポジトリにまたがる: いいえ\n")
-	}
+	b.WriteString("- 実装枠: " + formatUSDAmount(v.ResolvedImplUSD) + " USD\n")
+	b.WriteString("- レビュー対応枠: " + formatUSDAmount(v.ResolvedReviewUSD) + " USD\n")
+	b.WriteString("- 統合先を使う: " + yesNo(v.UsesIntegration) + "\n")
+	b.WriteString("- 複数リポジトリにまたがる: " + yesNo(v.CrossRepo) + "\n")
 	if len(v.RelatedRepos) > 0 {
 		b.WriteString("- 関係するリポジトリ: " + strings.Join(v.RelatedRepos, "、") + "\n")
 	}
-	b.WriteString("\n## 予算\n\n")
-	b.WriteString("- 実装枠: " + formatUSDAmount(v.ResolvedImplUSD) + " USD\n")
-	b.WriteString("- レビュー対応枠: " + formatUSDAmount(v.ResolvedReviewUSD) + " USD\n")
-	if s := strings.TrimSpace(v.Summary); s != "" {
-		b.WriteString("\n## 要約\n\n" + s + "\n")
-	}
-	if len(v.Steps) > 0 {
-		b.WriteString("\n## 手順\n\n")
-		for i, step := range v.Steps {
-			fmt.Fprintf(&b, "%d. %s\n", i+1, strings.TrimSpace(step))
+	b.WriteString("\n## タスク\n\n")
+	for i, t := range v.Tasks {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, oneLine(t.Title))
+		b.WriteString("   - 対象リポジトリ: " + t.Repo + "\n")
+		b.WriteString("   - 操作: " + t.Operation + "\n")
+		if len(t.DependsOn) == 0 {
+			b.WriteString("   - 前提: なし\n")
+			continue
 		}
+		titles := make([]string, 0, len(t.DependsOn))
+		for _, k := range t.DependsOn {
+			for _, o := range v.Tasks {
+				if o.Key == k {
+					titles = append(titles, oneLine(o.Title))
+				}
+			}
+		}
+		b.WriteString("   - 前提: " + strings.Join(titles, "、") + "\n")
 	}
-	b.WriteString("\n## 完了条件\n\n" + strings.TrimSpace(v.DoneCriteria) + "\n")
-	if len(v.NoIssuesNeeded) > 0 {
-		b.WriteString("\n## 論点を不要とした根拠\n\n")
-		for i, d := range v.NoIssuesNeeded {
-			fmt.Fprintf(&b, "%d. %s\n", i+1, oneLine(d.Content))
-			b.WriteString("   - 引用元: " + d.SourceKind.sectionLabel() + "\n")
-			b.WriteString("   - 引用:\n")
-			// 引用の中の見出しや箇条書きが本文の構造に見えないよう、各行を引用の記号で始める。
-			for _, line := range strings.Split(strings.ReplaceAll(d.Quote, "\r\n", "\n"), "\n") {
-				b.WriteString("     > " + line + "\n")
+	if s := strings.TrimSpace(v.Summary); s != "" {
+		b.WriteString("\n## 方針\n\n" + s + "\n")
+	}
+	if len(v.Topics) > 0 {
+		b.WriteString("\n## 論点\n")
+		n := 0
+		for i, t := range v.Topics {
+			fmt.Fprintf(&b, "\n### %d. %s\n\n", i+1, oneLine(t.Title))
+			b.WriteString("決めたこと: " + oneLine(t.Decision) + "\n")
+			for _, q := range t.Questions {
+				n++
+				fmt.Fprintf(&b, "\nQ%d. %s\n", n, oneLine(q.Question))
+				for j, o := range q.Options {
+					fmt.Fprintf(&b, "  %d) %s", j+1, oneLine(o.Label))
+					if o.Example != nil {
+						b.WriteString("（例: " + oneLine(*o.Example) + "）")
+					}
+					if j+1 == q.Recommended {
+						b.WriteString("【推奨】")
+					}
+					b.WriteString("\n")
+				}
 			}
 		}
 	}
+	b.WriteString("\n## 完了条件\n\n" + strings.TrimSpace(v.DoneCriteria) + "\n")
 	return b.String()
 }
 
@@ -621,12 +729,10 @@ func (s *Store) j2StillEligibleForAuto(ctx context.Context, cid int64) (*NotStar
 
 // --- J2 の入力の組み立て ---
 
-// J2 の入力の区画の名前。J2SourceKind（論点不要の引用元の種別）が指す区画の名前と共有する。
+// J2 の入力の区画の名前。
 const (
 	labelChallenge  = "課題"
 	labelHoldRecord = "保留の記録"
-	// labelJ2Reask は問い直しの起動にだけ足す区画の名前。
-	labelJ2Reask = "問い直し"
 )
 
 // j2Prepared は J2 の 1 回の起動の準備（入力の区画と、写像で使う事実）。
@@ -665,10 +771,15 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 
 	var holds []Hold
 	var sb *sourceBinding
-	var issuesAnswer *string
 	var replan *replanNote
 	var planRejections []CompletionRejection
+	var planAnswersText string
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		pa, err := loadPlanAnswersSection(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		planAnswersText = pa
 		prs, err := loadPlanRejections(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -685,13 +796,6 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		// 回答より後に作られた計画がある（作り直した計画を差し戻された）ときは、古い回答を最新の指示として渡さない。
 		if replan != nil && replan.PlanCreatedAt > replan.AnsweredAt {
 			replan = nil
-		}
-		if len(ch.Issues) > 0 {
-			a, err := loadIssuesAnswer(ctx, tx, cid, ch.IssuesHoldID)
-			if err != nil {
-				return err
-			}
-			issuesAnswer = a
 		}
 		b, err := loadSourceBindingByChallengeID(ctx, tx, cid)
 		sb = b
@@ -749,11 +853,11 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	if t := formatPlanRejectionsSection(planRejections); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: PlanRejectionsSectionLabel, Content: t})
 	}
+	if planAnswersText != "" {
+		sections = append(sections, JudgmentDataSection{Label: PlanAnswersSectionLabel, Content: planAnswersText})
+	}
 	if replan != nil {
 		sections = append(sections, JudgmentDataSection{Label: ReplanSectionLabel, Content: formatReplanSection(replan)})
-	}
-	if len(ch.Issues) > 0 {
-		sections = append(sections, JudgmentDataSection{Label: "論点と回答", Content: formatIssuesSection(ch.Issues, issuesAnswer)})
 	}
 	if stagesText := formatJ2StagesSection(ch); stagesText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "いまの予想・やらないこと・図", Content: stagesText})
@@ -771,19 +875,6 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	sections = append(sections, memoryIndexSections(s.workspace, in.AgentDecl)...)
 	prepared.Sections = sections
 	return prepared, nil, nil
-}
-
-// formatIssuesSection は課題の論点（問い・選択肢・推奨）と、その保留の回答を整形する。
-func formatIssuesSection(issues []StageIssue, answer *string) string {
-	var b strings.Builder
-	writeIssuesText(&b, issues, "")
-	b.WriteString("\n回答: ")
-	if answer != nil {
-		b.WriteString(*answer)
-	} else {
-		b.WriteString("(未回答)")
-	}
-	return b.String()
 }
 
 // formatJ2StagesSection は課題のいまの予想・やらないこと・図を整形する（どれも無ければ空）。
@@ -805,22 +896,6 @@ func formatJ2StagesSection(ch Challenge) string {
 		b.WriteString("図（Mermaid）:\n" + *ch.Figure + "\n")
 	}
 	return b.String()
-}
-
-// writeIssuesText は論点を Q<n>.・選択肢 <n>)・推奨の行へ整形して b へ書く
-// （保留の問いと J2 の入力の区画が共有する。sep は各論点の前に置く文字列）。
-func writeIssuesText(b *strings.Builder, issues []StageIssue, sep string) {
-	for i, is := range issues {
-		fmt.Fprintf(b, "%sQ%d. %s\n", sep, i+1, is.Question)
-		for j, o := range is.Options {
-			fmt.Fprintf(b, "  %d) %s", j+1, o.Label)
-			if o.Example != nil {
-				b.WriteString("（例: " + *o.Example + "）")
-			}
-			b.WriteString("\n")
-		}
-		fmt.Fprintf(b, "  推奨: %d\n", is.Recommended)
-	}
 }
 
 func yesNo(b bool) string {
@@ -891,9 +966,6 @@ type j2PlanKind int
 const (
 	// j2PlanNotEligible は課題が分類済でなくなっている（写さない）。
 	j2PlanNotEligible j2PlanKind = iota
-	// j2PlanNoIssues はサイズ M・L なのに論点の記録も、有効な論点不要の決定も無い
-	// （1 回目は invalid_output にして問い直す）。
-	j2PlanNoIssues
 	// j2PlanInvalidDependsOn は depends_on に存在しない ID・自己参照・循環がある
 	// （計画も依存も書かず、呼び出し元が invalid_output にする）。
 	j2PlanInvalidDependsOn
@@ -901,47 +973,7 @@ const (
 	j2PlanExpectedEmpty
 	// j2PlanRegister は計画を登録する。
 	j2PlanRegister
-	// j2PlanNoIssuesHold は問い直しでも j2PlanNoIssues だった（計画を登録せず保留）。
-	// 問い直しの起動でだけ、j2PlanNoIssues の代わりにこの種類になる。
-	j2PlanNoIssuesHold
 )
-
-// j2DiscardedPlan は j2PlanNoIssues で捨てた計画のうち、問い直しと保留の問いに載せる事実。
-type j2DiscardedPlan struct {
-	Size    JudgmentSize
-	Summary string
-}
-
-// j2MaxDiscardedSummaryRunes は捨てた計画の要約を問い直しの区画・保留の問いに載せる上限（文字数）。
-const j2MaxDiscardedSummaryRunes = 300
-
-func newJ2DiscardedPlan(v *j2ValidatedOutput) *j2DiscardedPlan {
-	summary := oneLine(v.Summary)
-	if r := []rune(summary); len(r) > j2MaxDiscardedSummaryRunes {
-		summary = string(r[:j2MaxDiscardedSummaryRunes]) + "…"
-	}
-	if summary == "" {
-		summary = "(要約なし)"
-	}
-	return &j2DiscardedPlan{Size: v.Size, Summary: summary}
-}
-
-// formatJ2ReaskSection は問い直しの起動にだけ足す区画（先の出力を捨てた理由と、今回返すもの）。
-func formatJ2ReaskSection(d *j2DiscardedPlan) string {
-	return "先の出力は、中以上の計画だったが、区画「論点と回答」（論点の記録）も、" +
-		"論点を不要とする根拠（決まっていることごとの中身・引用元の種別・引用の文）も無かったため、捨てた。\n" +
-		"捨てた計画のサイズ: " + string(d.Size) + "\n" +
-		"捨てた計画の要約: " + d.Summary + "\n" +
-		"今回は、論点を 3〜5 件返すか、条件を満たす論点不要とその引用を付けた計画を返す。"
-}
-
-// j2NoIssuesHoldQuestion は問い直しでも論点の記録が無かったときの保留の問い
-// （固定の冒頭の文＋捨てた 2 つの計画のサイズと要約）。
-func j2NoIssuesHoldQuestion(first, second *j2DiscardedPlan) string {
-	return NoIssuesHoldPreamble + "\n" +
-		"1 回目に捨てた計画: サイズ " + string(first.Size) + "・要約: " + first.Summary + "\n" +
-		"2 回目に捨てた計画: サイズ " + string(second.Size) + "・要約: " + second.Summary
-}
 
 // errJ2PlanStale は、写す直前に読み直した課題が事前の読み取りと違う判定になったことを表す。
 var errJ2PlanStale = errors.New("core: challenge changed while mapping J2 plan")
@@ -950,21 +982,17 @@ var errJ2PlanStale = errors.New("core: challenge changed while mapping J2 plan")
 type j2PlanMapping struct {
 	// Mapped は計画の登録か保留のどちらかを書いたとき true。
 	Mapped bool
-	// Kind が j2PlanNoIssues・j2PlanInvalidDependsOn なら何も書いていない（呼び出し元が invalid_output にする）。
+	// Kind が j2PlanInvalidDependsOn なら何も書いていない（呼び出し元が invalid_output にする）。
 	Kind j2PlanKind
 }
 
 // j2PlanDecide は検査済みの plan の出力を課題 ch の現在の値に当てて、写し方を決める。
-// 論点の記録の検査（M4P34。有効な論点不要の決定も論点の記録として扱う）を先に行い、予想の規則
-// （M4P38）はそれを通った出力にだけ当てる。
+// 予想の規則（M4P38）だけを当てる（論点の記録の検査は無い。論点は計画の中に持つ）。
 func j2PlanDecide(ch *Challenge, v *j2ValidatedOutput) j2PlanKind {
 	if ch.Status != StatusClassified {
 		return j2PlanNotEligible
 	}
 	big := v.Size == JudgmentSizeM || v.Size == JudgmentSizeL
-	if big && ch.Issues == nil && len(v.NoIssuesNeeded) == 0 {
-		return j2PlanNoIssues
-	}
 	if big && len(v.Expected) == 0 && len(ch.Expected) == 0 {
 		return j2PlanExpectedEmpty
 	}
@@ -986,12 +1014,9 @@ func j2ExpectedEmptyQuestion(question *string) string {
 // 弾けない。J2 の対象は分類済の課題だけなので、写す直前に読み直した状態を照合する。
 // 予想が空のままのサイズ M・L は計画を登録せず保留（T11）にする。操作は事前の読み取りで
 // 選び、書き込みの中で読み直した判定がずれたら（間に edit が入った）書かずに選び直す。
-//
-// reask が非 nil のときは問い直しの起動の写像で、j2PlanNoIssues になる出力は書かずに捨てず、
-// 計画を登録せず保留（j2PlanNoIssuesHold。問いは reask＝1 回目に捨てた計画と v の事実）にする。
-func (s *Store) applyJ2Plan(ctx context.Context, runIDDisplay, challengeIDDisplay, body string, v *j2ValidatedOutput, reask *j2DiscardedPlan) (j2PlanMapping, error) {
+func (s *Store) applyJ2Plan(ctx context.Context, runIDDisplay, challengeIDDisplay, body string, v *j2ValidatedOutput) (j2PlanMapping, error) {
 	for attempt := 0; attempt < 3; attempt++ {
-		m, err := s.applyJ2PlanOnce(ctx, runIDDisplay, challengeIDDisplay, body, v, reask)
+		m, err := s.applyJ2PlanOnce(ctx, runIDDisplay, challengeIDDisplay, body, v)
 		if !errors.Is(err, errJ2PlanStale) {
 			return m, err
 		}
@@ -999,7 +1024,7 @@ func (s *Store) applyJ2Plan(ctx context.Context, runIDDisplay, challengeIDDispla
 	return j2PlanMapping{}, ErrConflict
 }
 
-func (s *Store) applyJ2PlanOnce(ctx context.Context, runIDDisplay, challengeIDDisplay, body string, v *j2ValidatedOutput, reask *j2DiscardedPlan) (j2PlanMapping, error) {
+func (s *Store) applyJ2PlanOnce(ctx context.Context, runIDDisplay, challengeIDDisplay, body string, v *j2ValidatedOutput) (j2PlanMapping, error) {
 	cid, ok := parseChallengeID(challengeIDDisplay)
 	if !ok {
 		return j2PlanMapping{}, ErrNotFound
@@ -1013,35 +1038,20 @@ func (s *Store) applyJ2PlanOnce(ctx context.Context, runIDDisplay, challengeIDDi
 	if err != nil {
 		return j2PlanMapping{}, err
 	}
-	decide := func(ch *Challenge) j2PlanKind {
-		k := j2PlanDecide(ch, v)
-		if k == j2PlanNoIssues && reask != nil {
-			return j2PlanNoIssuesHold
-		}
-		return k
-	}
-	kind := decide(pre)
-	switch kind {
-	case j2PlanNotEligible, j2PlanNoIssues:
+	kind := j2PlanDecide(pre, v)
+	if kind == j2PlanNotEligible {
 		return j2PlanMapping{Kind: kind}, nil
 	}
 
 	op := OpPlan
-	if kind == j2PlanExpectedEmpty || kind == j2PlanNoIssuesHold {
+	if kind == j2PlanExpectedEmpty {
 		op = OpHold
 	}
 	specText := string(v.Spec)
 	m := j2PlanMapping{Kind: kind}
 	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, op, func(ctx context.Context, tc *transitionCtx) error {
-		if decide(tc.current) != kind {
+		if j2PlanDecide(tc.current, v) != kind {
 			return errJ2PlanStale
-		}
-		if kind == j2PlanNoIssuesHold {
-			if err := insertHold(ctx, tc, j2NoIssuesHoldQuestion(reask, newJ2DiscardedPlan(v))); err != nil {
-				return err
-			}
-			m.Mapped = true
-			return nil
 		}
 		if kind == j2PlanExpectedEmpty {
 			if err := insertHold(ctx, tc, j2ExpectedEmptyQuestion(v.Question)); err != nil {
@@ -1195,80 +1205,28 @@ func appendParentDirectCriteria(original, parent string) string {
 	return trimmed + "\n\n" + section
 }
 
-// errJ2IssuesAlreadyRecorded は、論点の記録がすでにある課題へ issues が返ったことを
-// 表す内部の sentinel（論点の段は課題ごとに 1 回。写さず run を invalid_output にする）。
-var errJ2IssuesAlreadyRecorded = errors.New("core: challenge already has an issues record")
-
-// formatIssuesQuestion は論点の保留の問いの文を決定的に組み立てる
-// （固定の冒頭の文→論点ごとに Q<n>.・選択肢 <n>)・推奨。番号は 1 から）。
-func formatIssuesQuestion(issues []StageIssue) string {
-	var b strings.Builder
-	b.WriteString(IssuesQuestionPreamble + "\n")
-	writeIssuesText(&b, issues, "\n")
-	return b.String()
-}
-
-// applyJ2Issues は判定 issues の出力を課題へ写す（T11。論点と保留の参照を、保留・
-// 遷移・作業ログと同じトランザクションで書く）。写す直前に読み直した状態が分類済で
-// なければ写さない。論点の記録がすでにあれば記録済み（hasRecord）として何も書かない。
-func (s *Store) applyJ2Issues(ctx context.Context, runIDDisplay, challengeIDDisplay string, issues []StageIssue) (mapped, hasRecord bool, err error) {
-	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpHold, func(ctx context.Context, tc *transitionCtx) error {
-		if tc.current.Status != StatusClassified {
-			return errJ2MappingNotEligible
-		}
-		if tc.current.Issues != nil {
-			return errJ2IssuesAlreadyRecorded
-		}
-		holdID, err := insertHoldID(ctx, tc, formatIssuesQuestion(issues))
-		if err != nil {
-			return err
-		}
-		tc.patchStages(StagePatch{Issues: StageSet(issues), IssuesHoldID: StageSet(&holdID)})
-		mapped = true
-		return nil
-	})
-	if err != nil {
-		if errors.Is(err, errJ2IssuesAlreadyRecorded) {
-			return false, true, nil
-		}
-		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errJ2MappingNotEligible) {
-			return false, false, nil
-		}
-		return false, false, err
-	}
-	return mapped, false, nil
-}
-
 // j2Finalize は finalizeJ2Output が使う、起動の前に決まっていた事実。
 type j2Finalize struct {
 	Validation j2ValidationContext
 	// Read は j2Prepared.Read（nil なら読んだ記録を付けない）。
 	Read *readValues
-	// Reask は問い直しの起動のとき、1 回目に捨てた計画（それ以外は nil）。非 nil のとき、
-	// 論点の記録の無い中以上の計画は捨てずに保留にする。
-	Reask *j2DiscardedPlan
 }
 
 // j2Finalized は finalizeJ2Output の結果。Outcome は判定の文字列（invalid_output に落ちた場合は
 // 空）、Status は写した後の課題の状態コード（写さなかった場合は nil）、Result は最終的な run の
 // 結果、Note は人が読む補足（読んだ記録を付けられなかったときの理由。無ければ空）。
-// Discarded は j2PlanNoIssues で捨てた計画（問い直しの対象。それ以外は nil）。
 type j2Finalized struct {
-	Outcome   string
-	Status    *string
-	Result    RunResult
-	Note      string
-	Discarded *j2DiscardedPlan
+	Outcome string
+	Status  *string
+	Result  RunResult
+	Note    string
 }
 
 // finalizeJ2Output は run が succeeded の場合に、core の再検査（閉集合・必須の組・
-// 宣言との突き合わせ）→写像（plan/uncertain/issues/parent_direct。issues は論点の記録がすでにあれば写さず invalid_output）→読んだ記録を行う。再検査に落ちたら
+// 宣言との突き合わせ）→写像（plan/uncertain/parent_direct）→読んだ記録を行う。再検査に落ちたら
 // run の結果を invalid_output へ更新し、課題は変えない。
 //
-// 論点の記録の無い中以上の plan（j2PlanNoIssues）は、1 回目の起動では run を invalid_output に
-// して課題を変えず、捨てた計画を Discarded に返す（呼び出し元が問い直す）。問い直しの起動
-// （fin.Reask が非 nil）では、計画を登録せず保留にし、判断できない（uncertain）と同じ
-// 結果（成功・人間対応待ち）を返す。
+// 問いを持つ plan も、問いが 0 件の plan も、保留を作らずに計画を登録する（課題は計画の承認待ちになる）。
 //
 // 読んだ記録（§J2・決定 M3P14・QH14）は、計画を実際に登録できたときだけ、J2 の
 // 直前の取得の値で付ける。J2 の後に取り込みで観測値が進んでいても、その値は
@@ -1277,11 +1235,11 @@ type j2Finalized struct {
 // 計画の結果は失わない（読んだ記録が付かないだけ＝未読の更新が残る安全な側）。
 // 失敗は Note に残す。
 func (s *Store) finalizeJ2Output(ctx context.Context, runIDDisplay, challengeIDDisplay string, structuredOutput []byte, fin j2Finalize) (j2Finalized, error) {
-	invalid := func(discarded *j2DiscardedPlan) (j2Finalized, error) {
+	invalid := func() (j2Finalized, error) {
 		if err := s.invalidateRunOutput(ctx, runIDDisplay); err != nil {
 			return j2Finalized{}, err
 		}
-		return j2Finalized{Result: RunResultInvalidOutput, Discarded: discarded}, nil
+		return j2Finalized{Result: RunResultInvalidOutput}, nil
 	}
 	succeeded := func(outcome J2Verdict, status Status) j2Finalized {
 		st := string(status)
@@ -1290,25 +1248,22 @@ func (s *Store) finalizeJ2Output(ctx context.Context, runIDDisplay, challengeIDD
 
 	validated, ok := validateJ2Output(structuredOutput, fin.Validation)
 	if !ok {
-		return invalid(nil)
+		return invalid()
 	}
 
 	switch validated.Verdict {
 	case J2VerdictPlan:
-		pm, err := s.applyJ2Plan(ctx, runIDDisplay, challengeIDDisplay, formatJ2PlanBody(validated), validated, fin.Reask)
+		pm, err := s.applyJ2Plan(ctx, runIDDisplay, challengeIDDisplay, formatJ2PlanBody(validated), validated)
 		if err != nil {
 			return j2Finalized{}, err
 		}
-		switch pm.Kind {
-		case j2PlanNoIssues:
-			return invalid(newJ2DiscardedPlan(validated))
-		case j2PlanInvalidDependsOn:
-			return invalid(nil)
+		if pm.Kind == j2PlanInvalidDependsOn {
+			return invalid()
 		}
 		if !pm.Mapped {
 			return j2Finalized{Outcome: string(J2VerdictPlan), Result: RunResultSucceeded}, nil
 		}
-		if pm.Kind == j2PlanExpectedEmpty || pm.Kind == j2PlanNoIssuesHold {
+		if pm.Kind == j2PlanExpectedEmpty {
 			return succeeded(J2VerdictUncertain, StatusAwaitingHuman), nil
 		}
 		out := succeeded(J2VerdictPlan, StatusAwaitingPlanApproval)
@@ -1338,18 +1293,6 @@ func (s *Store) finalizeJ2Output(ctx context.Context, runIDDisplay, challengeIDD
 			return succeeded(J2VerdictParentDirect, StatusAwaitingHuman), nil
 		}
 		return j2Finalized{Outcome: string(J2VerdictParentDirect), Result: RunResultSucceeded}, nil
-	case J2VerdictIssues:
-		mapped, hasRecord, err := s.applyJ2Issues(ctx, runIDDisplay, challengeIDDisplay, validated.Issues)
-		if err != nil {
-			return j2Finalized{}, err
-		}
-		if hasRecord {
-			return invalid(nil)
-		}
-		if mapped {
-			return succeeded(J2VerdictIssues, StatusAwaitingHuman), nil
-		}
-		return j2Finalized{Outcome: string(J2VerdictIssues), Result: RunResultSucceeded}, nil
 	default:
 		return j2Finalized{Result: RunResultSucceeded}, nil
 	}
@@ -1380,7 +1323,7 @@ type J2AutoInput struct {
 
 // J2AutoItem は `plan --auto` が処理した課題 1 件の結果（judgment_batch.go の
 // JudgmentAutoItem。`classify --auto` の J1AutoItem と同じ形）。J2 の Outcome は
-// plan/uncertain/issues/parent_direct。
+// plan/uncertain/parent_direct。
 type J2AutoItem = JudgmentAutoItem
 
 // J2AutoResult は Store.PlanAutoJ2 の出力（JudgmentAutoResult）。
@@ -1399,8 +1342,6 @@ type J2AutoResult = JudgmentAutoResult
 //     処理する。枠超過・周の上限・上流の取得の失敗で起動しなかった課題は
 //     NotStarted へ、並行して他から起動された課題（ErrRunInProgress）は静かに
 //     スキップする。
-//   - どちらの経路も、1 回目の出力が論点の記録の無い中以上の計画なら、同じ周の中で 1 回だけ
-//     問い直す（planOneJ2）。Items は run ごとに 1 件なので、問い直した課題は 2 件並ぶ。
 func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, error) {
 	if in.AgentDecl == nil || in.ConnDecl == nil || in.Invoker == nil || in.Upstream == nil || in.CycleID == "" {
 		return nil, ErrValidation
@@ -1488,8 +1429,7 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 	return result, nil
 }
 
-// j2AutoPreLaunch は ID を省略した自動の対象で J2 を起動する直前の検査（PlanAutoJ2 の 1 回目の前と、
-// planOneJ2 の問い直しの前が共有する。#469）。課題を読み直し、分類済でなければ (nil, nil, nil)
+// j2AutoPreLaunch は ID を省略した自動の対象で J2 を起動する直前の検査（PlanAutoJ2）。課題を読み直し、分類済でなければ (nil, nil, nil)
 // （並行して状態が変わった。例: 人間が先に計画を登録した＝起動しない）。取り込み元の状態で外れれば
 // その理由、連続失敗の上限に達していれば課題を保留に置いて failure_limit を NotStarted に返す。
 // 保留に置く前に課題が対象でなくなっていれば (nil, nil, nil)。起動してよければ読み直した課題を返す。
@@ -1515,17 +1455,7 @@ func (s *Store) j2AutoPreLaunch(ctx context.Context, in J2AutoInput, cid int64) 
 // planOneJ2 は課題 1 件の J2 を実行する。jc が非 nil なら周の枠超過・周の上限の
 // 扱いを JudgmentCycle に任せ（NotStarted を返す）、nil（ID を指定した個別の操作）
 // なら周の上限で起動できないとき ErrBudgetExceeded を返す。
-//
-// 1 回目の写像が j2PlanNoIssues（論点の記録の無い中以上の計画）なら、同じ周の中で 1 回だけ
-// 問い直す（上流は取得し直さず、区画に問い直しの区画を足して同じ経路で起動する。run は別の
-// run として費用・連続失敗の数え方の対象になる）。問い直しでも同じなら保留に置く。ID を省略した
-// 自動の対象（jc が非 nil）では、問い直しの直前にも 1 回目の前と同じ資格の検査と連続失敗の上限の
-// 検査を、課題を読み直して行う（#469。j2AutoPreLaunch。外れたら問い直さず、上限なら failure_limit の
-// 保留に置く）。問い直しを起動できなかった（資格・連続失敗の上限・周の上限・枠超過）ときは、1 回目の
-// 結果（invalid_output）を返し、起動できなかった理由を notStarted に載せる（個別の操作でもエラーに
-// しない）。課題が並行して分類済でなくなっていた・終了していない run があったときは、理由を載せずに
-// 1 回目の結果だけを返す（1 回目の前に同じことが起きたときに静かにスキップするのと同じ）。
-// 返り値の items は run ごとに 1 件（問い直したときは 2 件）。
+// 返り値の items は run ごとに 1 件（J2 の呼び出しは 1 回）。
 func (s *Store) planOneJ2(ctx context.Context, in J2AutoInput, jc *JudgmentCycle, ch Challenge) ([]J2AutoItem, *NotStarted, error) {
 	if jc != nil && jc.RateLimited() {
 		// 枠超過を記録した周では、上流の取得（gh の呼び出し）もしない。
@@ -1548,60 +1478,22 @@ func (s *Store) planOneJ2(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 		return nil, notStarted, err
 	}
 
-	item, notStarted, discarded, err := s.runJ2Once(ctx, in, jc, ch, prepared, prepared.Sections, nil)
+	item, notStarted, err := s.runJ2Once(ctx, in, jc, ch, prepared)
 	if err != nil || notStarted != nil {
 		return nil, notStarted, err
 	}
-	items := []J2AutoItem{*item}
-	if discarded == nil {
-		return items, nil, nil
-	}
-
-	if jc != nil {
-		// ID を省略した自動の対象では、問い直しも 1 回目の起動の前（PlanAutoJ2）と同じ検査
-		// （j2AutoPreLaunch）を、課題を読み直して通る（#469）。1 回目の invalid_output で連続失敗の
-		// 上限に達しうるため、そのまま起動すると上限を超える。個別の操作（jc が nil）は 1 回目と
-		// 同じく検査しない。入力の区画は 1 回目のもの（prepared）を使う（上流は取得し直さない）。
-		cid, _ := parseChallengeID(ch.ID)
-		cur, ns, err := s.j2AutoPreLaunch(ctx, in, cid)
-		if err != nil {
-			return nil, nil, err
-		}
-		if ns != nil {
-			return items, ns, nil
-		}
-		if cur == nil {
-			return items, nil, nil
-		}
-	}
-
-	sections := append(append([]JudgmentDataSection(nil), prepared.Sections...),
-		JudgmentDataSection{Label: labelJ2Reask, Content: formatJ2ReaskSection(discarded)})
-	again, notStarted, _, err := s.runJ2Once(ctx, in, jc, ch, prepared, sections, discarded)
-	switch {
-	case errors.Is(err, ErrBudgetExceeded):
-		return items, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedCycleBudget}, nil
-	case errors.Is(err, ErrRunInProgress):
-		return items, nil, nil
-	case err != nil:
-		return nil, nil, err
-	case notStarted != nil:
-		return items, notStarted, nil
-	}
-	return append(items, *again), nil, nil
+	return []J2AutoItem{*item}, nil, nil
 }
 
-// runJ2Once は J2 を 1 回起動して結果を写す（planOneJ2 の 1 回目と問い直しが共有する）。
-// sections が入力の区画、reask が非 nil なら問い直しの起動。返り値の item と notStarted は
-// どちらか一方だけが非 nil（エラー時は両方 nil）。discarded は写像が j2PlanNoIssues になった
-// 計画（問い直しの対象。問い直しの起動では常に nil）。
-func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle, ch Challenge, prepared *j2Prepared, sections []JudgmentDataSection, reask *j2DiscardedPlan) (*J2AutoItem, *NotStarted, *j2DiscardedPlan, error) {
+// runJ2Once は J2 を 1 回起動して結果を写す。返り値の item と notStarted は
+// どちらか一方だけが非 nil（エラー時は両方 nil）。
+func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle, ch Challenge, prepared *j2Prepared) (*J2AutoItem, *NotStarted, error) {
 	runIn := RunJudgmentInput{
 		ChallengeID:  ch.ID,
 		Judgment:     JudgmentJ2,
 		MaxBudgetUSD: in.AgentDecl.JudgmentBudgetFor(JudgmentJ2),
 		TimeoutSec:   in.AgentDecl.TimeoutSec.Judgment,
-		Sections:     sections,
+		Sections:     prepared.Sections,
 		OutputSchema: j2OutputSchema(),
 		Invoker:      in.Invoker,
 	}
@@ -1611,33 +1503,30 @@ func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	if jc != nil {
 		res, notStarted, err = jc.RunJudgment(ctx, s, runIn)
 		if err != nil || notStarted != nil {
-			return nil, notStarted, nil, err
+			return nil, notStarted, err
 		}
 	} else {
 		cycleID := in.CycleID
 		runIn.CycleID = &cycleID
 		res, err = s.RunJudgment(ctx, runIn)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 	}
 
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
-	var discarded *j2DiscardedPlan
 	if res.Result == RunResultSucceeded {
 		fin, err := s.finalizeJ2Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, j2Finalize{
 			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource},
 			Read:       prepared.Read,
-			Reask:      reask,
 		})
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		item.Outcome = fin.Outcome
 		item.Status = fin.Status
 		item.Result = fin.Result
 		item.Note = fin.Note
-		discarded = fin.Discarded
 	}
-	return &item, nil, discarded, nil
+	return &item, nil, nil
 }

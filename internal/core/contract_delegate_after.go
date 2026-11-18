@@ -160,8 +160,10 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 					return errReconcileNotEligible
 				}
 				// 読んだ後で答えが付いて着手中へ戻っていたときは、ここで進めるので印は不要。
-				_, err := tc.tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 0 WHERE challenge_id = ? AND external_run_id = ?`, tc.id, rep.ExternalRunID)
-				return err
+				if _, err := tc.tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 0 WHERE challenge_id = ? AND external_run_id = ?`, tc.id, rep.ExternalRunID); err != nil {
+					return err
+				}
+				return verifyContractTask(ctx, tc, rep.ExternalRunID)
 			})
 		if err != nil && !errors.Is(err, ErrInvalidTransition) && !errors.Is(err, ErrTerminalState) && !errors.Is(err, errReconcileNotEligible) {
 			return err
@@ -215,8 +217,10 @@ func (s *Store) SubmitHeldContractSuccesses(ctx context.Context, only *int64) (i
 				if tc.current.Status != StatusInProgress {
 					return errReconcileNotEligible
 				}
-				_, err := tc.tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 0 WHERE challenge_id = ? AND external_run_id = ?`, tc.id, t.externalRun)
-				return err
+				if _, err := tc.tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 0 WHERE challenge_id = ? AND external_run_id = ?`, tc.id, t.externalRun); err != nil {
+					return err
+				}
+				return verifyContractTask(ctx, tc, t.externalRun)
 			})
 		switch {
 		case err == nil:
@@ -237,6 +241,12 @@ func (s *Store) holdContractWait(ctx context.Context, rep *ContractRunReport, qu
 			if tc.current.Status != StatusInProgress {
 				return errReconcileNotEligible
 			}
+			// 契約の run が結び付くタスクに、保留も結び付ける。
+			taskID, err := contractRunTaskID(ctx, tc.tx, tc.id, rep.ExternalRunID)
+			if err != nil {
+				return err
+			}
+			tc.taskID = taskID
 			holdID, err := s.insertHoldWithOccurrenceID(ctx, tc, question, holdReasonContractStopped, "")
 			if err != nil {
 				return err
@@ -414,7 +424,8 @@ func (s *Store) runExistingContractCommand(ctx context.Context, client ContractC
 	if err != nil {
 		return nil, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err)
 	}
-	runIDInt, err := s.beginContractRun(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false)
+	// コマンド 1 回ごとの run の行も、契約の run が結び付くタスクに結び付ける（過去の行は nil のまま）。
+	runIDInt, err := s.beginContractRunForTask(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false, row.TaskID)
 	if err != nil {
 		return nil, err
 	}

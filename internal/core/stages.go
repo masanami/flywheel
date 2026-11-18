@@ -23,8 +23,6 @@ const (
 	MaxStageRunes    = 2000
 	MaxFigureBytes   = 16384
 
-	MinIssues   = 3
-	MaxIssues   = 5
 	MinOptions  = 2
 	MaxOptions  = 5
 	MinExpected = 1
@@ -39,13 +37,8 @@ const (
 	PairActualMissingMark = "実物なし"
 	// PairExpectedMissingMark は実物に対応する予想の例が無い位置（実物が予想より多い）の印。
 	PairExpectedMissingMark = "予想なし"
-	// IssuesQuestionPreamble は論点の保留の問いの冒頭の文。
-	IssuesQuestionPreamble = "論点に答えてください。答えは 1 回の回答にまとめてください"
 	// ExpectedEmptyHoldPreamble はサイズ M・L の計画で予想を書けなかったときの保留の問いの冒頭の文。
 	ExpectedEmptyHoldPreamble = "完了したら見えるもの（予想）を書けませんでした。"
-	// NoIssuesHoldPreamble はサイズ M・L の計画で論点の記録も論点を不要とする根拠の引用も無い出力が
-	// 問い直しを挟んで 2 回続いたときの保留の問いの冒頭の文。
-	NoIssuesHoldPreamble = "サイズ中以上の計画に要る論点の記録（または論点を不要とする根拠の引用）が無い出力が 2 回続いたため、計画を登録せず保留にしました。"
 	// ActualMismatchHoldPreamble は実物を予想の例ごとに確かめられなかったときの保留の問いの冒頭の文。
 	ActualMismatchHoldPreamble = "完了したら見えるもの（予想）の例ごとに実物を確かめられませんでした。"
 )
@@ -134,36 +127,29 @@ func CheckFigure(s string) error {
 	return nil
 }
 
-// NormalizeIssues は論点を検査し、要素 0 個なら nil を返す。
-func NormalizeIssues(in []StageIssue) ([]StageIssue, error) {
-	if len(in) == 0 {
-		return nil, nil
+// checkStageQuestion は問い 1 つ（問いの文・選択肢 2〜5 個・推奨）を検査する。
+// 計画の論点の問い（J2 の出力の topics[].questions）が使う。
+func checkStageQuestion(is StageIssue) error {
+	if err := checkText("question", is.Question, MaxStageRunes); err != nil {
+		return err
 	}
-	if len(in) < MinIssues || len(in) > MaxIssues {
-		return nil, errStageShape("issues must have %d-%d items", MinIssues, MaxIssues)
+	if len(is.Options) < MinOptions || len(is.Options) > MaxOptions {
+		return errStageShape("question.options must have %d-%d items", MinOptions, MaxOptions)
 	}
-	for _, is := range in {
-		if err := checkText("issues.question", is.Question, MaxStageRunes); err != nil {
-			return nil, err
+	for _, o := range is.Options {
+		if err := checkText("question.options.label", o.Label, MaxStageRunes); err != nil {
+			return err
 		}
-		if len(is.Options) < MinOptions || len(is.Options) > MaxOptions {
-			return nil, errStageShape("issues.options must have %d-%d items", MinOptions, MaxOptions)
-		}
-		for _, o := range is.Options {
-			if err := checkText("issues.options.label", o.Label, MaxStageRunes); err != nil {
-				return nil, err
-			}
-			if o.Example != nil {
-				if err := checkText("issues.options.example", *o.Example, MaxStageRunes); err != nil {
-					return nil, err
-				}
+		if o.Example != nil {
+			if err := checkText("question.options.example", *o.Example, MaxStageRunes); err != nil {
+				return err
 			}
 		}
-		if is.Recommended < 1 || is.Recommended > len(is.Options) {
-			return nil, errStageShape("issues.recommended must be within 1-%d", len(is.Options))
-		}
 	}
-	return in, nil
+	if is.Recommended < 1 || is.Recommended > len(is.Options) {
+		return errStageShape("question.recommended must be within 1-%d", len(is.Options))
+	}
+	return nil
 }
 
 // NormalizeExpected は予想を検査し、要素 0 個なら nil を返す。
@@ -241,16 +227,6 @@ func decodeStageJSON[T any](text string) ([]T, error) {
 		return nil, errStageShape("unexpected data after JSON value")
 	}
 	return out, nil
-}
-
-// ParseIssuesJSON は論点の JSON を解釈して検査する（Parse*JSON は edit のフラグと
-// 同じ入口）。要素 0 個の配列は nil。
-func ParseIssuesJSON(text string) ([]StageIssue, error) {
-	v, err := decodeStageJSON[StageIssue](text)
-	if err != nil {
-		return nil, err
-	}
-	return NormalizeIssues(v)
 }
 
 // ParseExpectedJSON は予想の JSON を解釈して検査する。

@@ -46,8 +46,8 @@ func TestGetChallenge_SchemaVersion1Challenge_HasNilSourceBindingAfterUpgrade(t 
 	defer func() { _ = s.Close() }()
 
 	// 0004（#78）を足した後の最新版は 4（AC-99 の文言と同じ改訂。AC-165）。
-	if got := schemaVersionForTest(t, s); got != 25 {
-		t.Fatalf("schema version = %d, want 25", got)
+	if got, want := schemaVersionForTest(t, s), latestSchemaVersionForTest(t); got != want {
+		t.Fatalf("schema version = %d, want %d", got, want)
 	}
 
 	detail, err := s.GetChallenge(context.Background(), "C-1")

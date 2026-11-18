@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
@@ -30,6 +31,15 @@ func runCreate(a Args) (any, error) {
 // runShow は `flywheel show <C-ID>` の実装。
 func runShow(a Args) (any, error) {
 	ctx := context.Background()
+	if a.Bools["plan"] {
+		// サイズごとの既定を引く宣言は、予算の上限の表示にだけ使う（読めなくても計画は出す）。
+		decl, _ := core.LoadAgentDeclaration(a.Store.Workspace())
+		pv, err := a.Store.GetPlanView(ctx, a.Positional[0], decl)
+		if err != nil {
+			return nil, mapCoreErr(err)
+		}
+		return textOutput{json: view.FromPlanView(pv), text: planViewText(pv)}, nil
+	}
 	detail, err := a.Store.GetChallenge(ctx, a.Positional[0])
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -107,7 +117,6 @@ func runEdit(a Args) (any, error) {
 		{"urgency", &in.Urgency},
 		{"headline", &in.Headline},
 		{"context", &in.Context},
-		{"issues", &in.Issues},
 		{"expected", &in.Expected},
 		{"actual", &in.Actual},
 		{"non-goals", &in.NonGoals},
@@ -121,7 +130,7 @@ func runEdit(a Args) (any, error) {
 		}
 	}
 	if !specified {
-		return nil, NewError(CodeUsageError, "edit には --title / --description / --done-criteria / --urgency / --headline / --context / --issues / --expected / --actual / --non-goals / --figure のいずれか1つ以上を指定してください")
+		return nil, NewError(CodeUsageError, "edit には --title / --description / --done-criteria / --urgency / --headline / --context / --expected / --actual / --non-goals / --figure のいずれか1つ以上を指定してください")
 	}
 
 	c, err := a.Store.EditChallenge(context.Background(), core.ChannelCLI, a.Positional[0], in)
@@ -212,6 +221,11 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	}
 	fmt.Fprintf(&b, "依存先:        %s\n", textOrDash(joinOrNil(deps)))
 	fmt.Fprintf(&b, "依存元:        %s\n", textOrDash(joinOrNil(d.Dependents)))
+	fmt.Fprintf(&b, "統合先:        %s\n", usesIntegrationText(d.UsesIntegration))
+	fmt.Fprintf(&b, "タスク:        %d 件\n", len(d.Tasks))
+	for _, t := range d.Tasks {
+		fmt.Fprintf(&b, "  %s %s [%s (%s)]\n", t.ID, escapeControl(t.Title), t.Status.Label(), t.Status)
+	}
 	fmt.Fprintf(&b, "計画:          %d 版\n", len(d.Plans))
 	// 計画は全版の本文まで出す（受入基準 17・35 の「show で読める」をテキスト
 	// 出力にも適用する【決定 2026-09-23（オーナー）】）。
@@ -354,4 +368,98 @@ func textOrDash(v any) string {
 func isCancelResult(r core.ExecutionResult) bool {
 	c, _ := r.Class()
 	return c == core.ExecutionClassCancel
+}
+
+// usesIntegrationText は統合先を使うかの表示（未決か過去の課題は「未決」）。
+func usesIntegrationText(v *bool) string {
+	switch {
+	case v == nil:
+		return "未決"
+	case *v:
+		return "使う"
+	}
+	return "使わない"
+}
+
+// planViewText は `show --plan` の表示。最新の計画の方針・完了したら見えるもの・やらないこと・問いと推奨・
+// タスクのツリー・予算の上限・統合先を使うかを文で出す。承認の前はタスクの前提を計画の中の識別子（key）で、
+// 承認の後はタスクの ID で出す（core の PlanTaskView が識別子を決める）。構造化した出力を持たない計画は本文だけを出す。
+func planViewText(p *core.PlanView) string {
+	var b strings.Builder
+	label, _ := p.Status.Label()
+	fmt.Fprintf(&b, "%s  %s   [%s]\n", p.ChallengeID, escapeControl(p.Title), label)
+	fmt.Fprintf(&b, "計画の版: %d\n", p.Version)
+	if !p.Structured {
+		b.WriteString("（この計画は構造化した出力を持たないので、本文だけを出します）\n")
+		b.WriteString(indentLines(escapeControlKeepLines(p.Body), "  "))
+		return b.String()
+	}
+	if p.Summary != nil {
+		fmt.Fprintf(&b, "方針: %s\n", escapeControl(*p.Summary))
+	}
+	if len(p.Expected) > 0 {
+		b.WriteString("完了したら見えるもの:\n")
+		for _, e := range p.Expected {
+			fmt.Fprintf(&b, "  - %s\n      変更前: %s\n      変更後: %s\n", escapeControl(e.Scene), escapeControl(e.Before), escapeControl(e.After))
+		}
+	}
+	if len(p.NonGoals) > 0 {
+		b.WriteString("やらないこと:\n")
+		for _, g := range p.NonGoals {
+			fmt.Fprintf(&b, "  - %s\n", escapeControl(g))
+		}
+	}
+	writePlanTopics(&b, p.Topics)
+	budget := "未設定"
+	if p.BudgetUSD != nil {
+		budget = strconv.FormatFloat(*p.BudgetUSD, 'f', -1, 64) + " USD"
+	}
+	fmt.Fprintf(&b, "タスクのツリー（%d 件・上限 %s・統合先を使うか: %s）:\n", len(p.Tasks), budget, usesIntegrationText(p.UsesIntegration))
+	for _, t := range p.Tasks {
+		line := fmt.Sprintf("  %s %s", t.Identifier(), escapeControl(t.Title))
+		if t.ID != "" {
+			line += fmt.Sprintf(" [%s]", t.Status.Label())
+		}
+		if len(t.DependsOn) > 0 {
+			line += "（前提: " + strings.Join(t.DependsOn, "・") + "）"
+		}
+		b.WriteString(line + "\n")
+	}
+	return b.String()
+}
+
+// writePlanTopics は論点ごとに、問いと選択肢・推奨の印・答え（記録があれば）を書く。論点が無ければ何も書かない。
+func writePlanTopics(b *strings.Builder, topics []core.PlanTopicView) {
+	if len(topics) == 0 {
+		return
+	}
+	b.WriteString("問いと推奨:\n")
+	for _, t := range topics {
+		fmt.Fprintf(b, "  論点: %s\n", escapeControl(t.Title))
+		for _, q := range t.Questions {
+			fmt.Fprintf(b, "    Q%d %s\n", q.Number, escapeControl(q.Question))
+			for j, o := range q.Options {
+				mark := ""
+				if j+1 == q.Recommended {
+					mark = "（推奨）"
+				}
+				fmt.Fprintf(b, "      %d) %s%s\n", j+1, escapeControl(o.Label), mark)
+			}
+			switch a := q.Answer; {
+			case a == nil:
+			case a.Text != nil:
+				fmt.Fprintf(b, "      答え（文）: %s\n", escapeControl(*a.Text))
+			case a.Choice != nil:
+				lbl := fmt.Sprintf("選択肢 %d", *a.Choice)
+				if a.Label != nil {
+					lbl = fmt.Sprintf("%d) %s", *a.Choice, escapeControl(*a.Label))
+				}
+				note := "（推奨と違う）"
+				if a.Recommended {
+					note = "（推奨と同じ）"
+				}
+				fmt.Fprintf(b, "      答え: %s%s\n", lbl, note)
+			}
+		}
+	}
 }
