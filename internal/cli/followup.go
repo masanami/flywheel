@@ -135,13 +135,14 @@ func runFollowupDrop(a Args) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	target, ok := core.FollowupAttestationTarget(a.Positional)
-	if !ok {
-		return nil, NewError(CodeNotFound, "フォローアップが見つかりません")
-	}
+	// 存在・未であること・理由の検査は core が持つ（本人確認を求める前に終える）。
 	targets, err := a.Store.PrepareFollowupDrop(context.Background(), a.Positional, reason)
 	if err != nil {
 		return nil, mapCoreErr(err)
+	}
+	target, ok := core.FollowupAttestationTarget(a.Positional)
+	if !ok {
+		return nil, NewError(CodeNotFound, "フォローアップが見つかりません")
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "次のフォローアップを捨てます（%d 件）。\n", len(targets))

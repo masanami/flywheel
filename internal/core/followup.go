@@ -604,9 +604,13 @@ func checkPromotable(ctx context.Context, tx *sql.Tx, f *Followup) error {
 }
 
 // PrepareFollowupDrop は捨てる前の本人確認の要約のために、ids のフォローアップを番号の小さい順で返す（読み取りだけ）。
-// 存在しないものがあれば ErrNotFound、未でないものがあれば ErrValidation、理由が空なら ErrValidation
-// （DropFollowups と同じ規則。本人確認を求める前に終えるために使う）。
+// 理由が空なら ErrValidation、存在しないものがあれば ErrNotFound、未でないものがあれば ErrValidation
+// （DropFollowups と同じ規則・同じ順。本人確認を求める前に終えるために使う）。
 func (s *Store) PrepareFollowupDrop(ctx context.Context, ids []string, reason string) ([]Followup, error) {
+	// 検査の順は dropFollowups と同じ（理由 → ID の形 → 存在 → 未であること）。
+	if strings.TrimSpace(reason) == "" {
+		return nil, ErrValidation
+	}
 	if _, ok := FollowupAttestationTarget(ids); !ok {
 		return nil, ErrNotFound
 	}
@@ -620,9 +624,6 @@ func (s *Store) PrepareFollowupDrop(ctx context.Context, ids []string, reason st
 		fs, err := loadOpenFollowups(ctx, tx, nums)
 		if err != nil {
 			return err
-		}
-		if strings.TrimSpace(reason) == "" {
-			return ErrValidation
 		}
 		for _, f := range fs {
 			out = append(out, *f)
