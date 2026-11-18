@@ -424,7 +424,8 @@ func (s *Store) runExistingContractCommand(ctx context.Context, client ContractC
 	if err != nil {
 		return nil, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err)
 	}
-	runIDInt, err := s.beginContractRun(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false)
+	// コマンド 1 回ごとの run の行も、契約の run が結び付くタスクに結び付ける（過去の行は nil のまま）。
+	runIDInt, err := s.beginContractRunForTask(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false, row.TaskID)
 	if err != nil {
 		return nil, err
 	}

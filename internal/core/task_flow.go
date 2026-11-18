@@ -103,3 +103,35 @@ func cancelUnfinishedTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorde
 		taskFilter{Statuses: []TaskStatus{TaskStatusPending, TaskStatusInProgress, TaskStatusVerifying}}, TaskStatusCancelled)
 	return err
 }
+
+// submitTaskInTransition は、手で課題を検証中へ進める遷移（T7。`flywheel submit`）と同じトランザクションで、起動できる
+// タスク（pending・in_progress）がちょうど 1 個のときだけ、そのタスクを verifying にする（委譲の結果で課題が検証中へ
+// 進むときと同じ結果にする）。0 個・2 個以上のときは、どのタスクも動かさない。
+func submitTaskInTransition(ctx context.Context, tc *transitionCtx) error {
+	tasks, err := loadLaunchableTasks(ctx, tc.tx, tc.id)
+	if err != nil || len(tasks) != 1 {
+		return err
+	}
+	_, err = setTaskStatus(ctx, tc.tx, tc.rec, taskIntID(&tasks[0]), TaskStatusVerifying)
+	return err
+}
+
+// verifyTaskByHandInTransition は、手で検証の結果を記録する遷移（T8・T9・T10。`flywheel verify --result`）と同じ
+// トランザクションで、検証中のタスクがちょうど 1 個のときだけ、完了の検証の判断点（J5）と同じ結果にする:
+// met はタスクを done、not_met は in_progress、uncertain はタスクを動かさず、この遷移で作る保留をそのタスクに結び付ける。
+func verifyTaskByHandInTransition(ctx context.Context, tc *transitionCtx, result VerifyResult) error {
+	task, err := loadVerifyingTask(ctx, tc.tx, tc.id)
+	if err != nil || task == nil {
+		return err
+	}
+	taskID := taskIDPtr(task)
+	switch result {
+	case VerifyResultMet:
+		return moveVerifyingTask(ctx, tc, taskID, TaskStatusDone)
+	case VerifyResultNotMet:
+		return moveVerifyingTask(ctx, tc, taskID, TaskStatusInProgress)
+	default:
+		tc.taskID = taskID
+		return nil
+	}
+}

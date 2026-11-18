@@ -533,7 +533,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	return rep, nil
 }
 
-// beginContractRun は beginContractRunForTask を、タスクに結び付けずに呼ぶ（start 以外の状態の確認・resume・cancel）。
+// beginContractRun は beginContractRunForTask を、タスクに結び付けずに呼ぶ（タスクに結び付かない過去の契約の run へのコマンドと、テスト）。
 func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool) (int64, error) {
 	return s.beginContractRunForTask(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, nil)
 }
@@ -541,8 +541,9 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 // beginContractRunForTask は契約のコマンド 1 回ぶんの run を記録する。start のときは周の上限を評価し、課題に
 // 終わっていない契約の run・run があれば ErrRunInProgress にする。
 //
-// taskID が非 nil（start のとき、起動するタスク）なら、pending のタスクを in_progress にする（run の記録と同じトランザクション。
-// すでに in_progress のタスクでは変えない）。
+// taskID が非 nil（start のときは起動するタスク、status・resume・cancel のときは契約の run が結び付くタスク）なら、
+// run の行（kind=contract）の task_id と repo（タスクの対象リポジトリ）へ記録する。start のときは、pending のタスクを
+// in_progress にする（run の記録と同じトランザクション。すでに in_progress のタスクでは変えない）。
 func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID *int64) (int64, error) {
 	host, _ := os.Hostname()
 	now := s.currentTime()
@@ -573,10 +574,18 @@ func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID,
 				}
 			}
 		}
+		var taskRepo string
+		if taskID != nil {
+			task, err := loadTask(ctx, tx, *taskID)
+			if err != nil {
+				return err
+			}
+			taskRepo = task.Repo
+		}
 		row, err := insertRun(ctx, tx, cid, insertRunInput{
 			CycleID: cycleID, Kind: runKindContract, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
 			SessionID: sessionID, PID: int64(os.Getpid()), Host: host, HeartbeatAt: now, StartedAt: now,
-			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl,
+			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: taskID, Repo: taskRepo,
 		})
 		if err != nil {
 			return err
