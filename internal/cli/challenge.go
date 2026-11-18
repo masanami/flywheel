@@ -324,6 +324,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 		fmt.Fprintf(&b, "  上流: %s  ポリシー: %s  fingerprint: %s\n", sb.UpstreamState, sb.PolicyState, sb.Fingerprint)
 		fmt.Fprintf(&b, "  対応の作成: %s  更新: %s\n", FormatTimestamp(sb.CreatedAt), FormatTimestamp(sb.UpdatedAt))
 	}
+	if len(d.SourceChildren) > 0 {
+		fmt.Fprintf(&b, "取り込み元の子: %d 件\n", len(d.SourceChildren))
+	}
 	return b.String()
 }
 

@@ -58,6 +58,7 @@ function detail(figure: string | null): ShowCardResponse {
     runs: [],
     pairs: [],
     source_binding: null,
+    source_children: [],
     stages: {
       actual: null,
       expected: null,

@@ -127,6 +127,7 @@ function awaitingApproval(): Record<string, unknown> {
       runs: [],
       pairs: S4_PAIRS,
       source_binding: null,
+      source_children: [],
       stages: S4_STAGES,
       waiting: { prerequisites: [] },
     },
