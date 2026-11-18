@@ -25,7 +25,8 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   verify (<ID> --result <met|not_met|uncertain> [--question <q>] | --auto [<C-ID>])
   hold <ID> [--question <q>] [--kind <human|parent_direct>]   （parent_direct＝対話のセッションの親が直接行う課題の保留）
   complete-direct <ID> --artifact <参照>... [--note <s>]   （親が直接行った作業を成果物の参照つきで記録し、完了確認待ちへ進める）
-  answer <ID> --answer <a> [--replan] [--relayed --session <s> --quote <q>]
+  answer <ID> (--answer <a> [--replan] | (--choice <Q番号>=<選択肢の番号> | --text <Q番号>=<文>)...) [--relayed --session <s> --quote <q>]
+            （--choice・--text＝計画の承認待ちの問いへの答え。推奨と違う選択肢か文の答えがあれば、課題を分類済へ戻して計画を作り直す）
             （--replan＝範囲・方針・達成条件が変わる回答の印。委譲を再開せず、計画を作り直して計画の承認待ちへ戻す。着手中・検証中の保留だけ）
   approve <ID> [--hold-release | --reopen] [--relayed --session <s> --quote <q>]
             （--reopen＝OP-ID だけ。検証の後に動いた head が取り込みだけとも中身の変更とも確かめられず人間待ちの release について、

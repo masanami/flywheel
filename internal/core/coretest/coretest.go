@@ -1033,3 +1033,37 @@ func FillAllTables(t *testing.T, workspace string) {
 		t.Fatalf("coretest: FillAllTables: %v", err)
 	}
 }
+
+// QueryRows はテスト専用に、query の結果の全行を返す（値は database/sql が返す型のまま。NULL は nil）。
+func QueryRows(t *testing.T, workspace, query string, args ...any) [][]any {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var out [][]any
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		rows, err := tx.Query(query, args...)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		cols, err := rows.Columns()
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				return err
+			}
+			out = append(out, vals)
+		}
+		return rows.Err()
+	}); err != nil {
+		t.Fatalf("coretest: QueryRows(%q): %v", query, err)
+	}
+	return out
+}

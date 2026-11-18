@@ -570,6 +570,12 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		if err := s.recordApprovalOccurrence(ctx, tc, kind, req.Decision, approvalRowID); err != nil {
 			return err
 		}
+		// 計画の承認は、答えの無い問いへの推奨の記録・タスクの行の作成・統合先を使うかの記録を、同じトランザクションで行う。
+		if kind == ApprovalKindPlan && req.Decision == ApprovalDecisionApproved && planVersionOut != nil {
+			if err := onPlanApproved(ctx, tc, att, int64(*planVersionOut)); err != nil {
+				return err
+			}
+		}
 		// 本番反映のやり直し（#485）で置き換えられた前の完了の承認に、この承認を結ぶ。
 		if kind == ApprovalKindCompletion && req.Decision == ApprovalDecisionApproved {
 			if err := linkSupersededApprovals(ctx, tc.tx, tc.id, approvalRowID); err != nil {
