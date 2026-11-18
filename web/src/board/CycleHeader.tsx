@@ -52,7 +52,7 @@ export function CycleHeader({
           kind: "started",
           text: res.started
             ? "1 周を起動しました。"
-            : "進められるものが無いので、周を始めませんでした。",
+            : "進められるものが無いので、サイクルを始めませんでした。",
         });
     } catch (e) {
       if (!alive.current) return;
