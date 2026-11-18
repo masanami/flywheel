@@ -148,6 +148,7 @@ export interface ShowResponse {
   runs: Run[];
   source_binding: SourceBinding | null;
   stages: Stages;
+  tasks: Task[];
 }
 
 export interface Approval {
@@ -188,6 +189,7 @@ export interface ShowChallenge {
   title: string;
   updated_at: string;
   urgency: string | null;
+  uses_integration: boolean | null;
   version: number;
 }
 
@@ -226,6 +228,7 @@ export interface Hold {
   relay_session: string | null;
   replan: boolean;
   run_id: string | null;
+  task_id: string | null;
 }
 
 export interface StagePair {
@@ -301,6 +304,7 @@ export interface Run {
   result: string | null;
   session_id: string | null;
   started_at: string;
+  task_id: string | null;
 }
 
 export interface SourceBinding {
@@ -336,6 +340,19 @@ export interface StageIssue {
 export interface StageOption {
   example: string | null;
   label: string;
+}
+
+export interface Task {
+  body: string;
+  depends_on: string[];
+  done_criteria: string;
+  id: string;
+  non_goals: string[];
+  operation: string;
+  plan_version: number;
+  repo: string;
+  status: string;
+  title: string;
 }
 
 export interface LogResponse {
@@ -417,6 +434,7 @@ export interface ShowCardResponse {
   runs: Run[];
   source_binding: SourceBinding | null;
   stages: Stages;
+  tasks: Task[];
   waiting: Waiting;
 }
 
@@ -495,7 +513,37 @@ export interface ApprovalOtherOperation {
 
 export interface ApprovalPlan {
   body: string;
+  tasks: ApprovalPlanTask[];
+  topics: PlanTopic[];
+  uses_integration: boolean | null;
   version: number;
+}
+
+export interface ApprovalPlanTask {
+  depends_on: string[];
+  key: string;
+  title: string;
+}
+
+export interface PlanTopic {
+  decision: string;
+  questions: PlanQuestion[];
+  title: string;
+}
+
+export interface PlanQuestion {
+  answer: PlanAnswer | null;
+  number: number;
+  options: StageOption[];
+  question: string;
+  recommended: number;
+}
+
+export interface PlanAnswer {
+  choice: number | null;
+  label: string | null;
+  recommended: boolean;
+  text: string | null;
 }
 
 export interface ApprovalRelease {

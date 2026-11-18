@@ -34,6 +34,7 @@ function detail(figure: string | null): ShowCardResponse {
       context: null,
       created_at: "2026-01-01T00:00:00Z",
       dependencies: [],
+      uses_integration: null,
       dependents: [],
       followup_of: null,
       improvement: null,
@@ -65,6 +66,7 @@ function detail(figure: string | null): ShowCardResponse {
       issues_answer: null,
       non_goals: null,
     },
+    tasks: [],
     waiting: { prerequisites: [] },
   };
 }

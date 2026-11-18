@@ -197,6 +197,8 @@ type Hold struct {
 	// Replan は回答に付いた「範囲が変わる」印。真なら、その回答で課題は計画の作り直しへ戻った。
 	Replan bool    `json:"replan"`
 	RunID  *string `json:"run_id"`
+	// TaskID は保留が結び付くタスクの ID（"T-<n>"）。課題の単位の保留と過去の行は null。
+	TaskID *string `json:"task_id"`
 }
 
 // FromHold は core.Hold を Hold へ変換する。
@@ -218,6 +220,7 @@ func FromHold(h core.Hold) Hold {
 		RelaySession:         h.RelaySession,
 		Replan:               h.Replan,
 		RunID:                h.RunID,
+		TaskID:               h.TaskID,
 	}
 }
 
@@ -384,6 +387,8 @@ type Run struct {
 	Result          *string  `json:"result"`
 	SessionID       *string  `json:"session_id"`
 	StartedAt       string   `json:"started_at"`
+	// TaskID は run が結び付くタスクの ID（"T-<n>"）。課題の単位の実行と過去の run は null。
+	TaskID *string `json:"task_id"`
 }
 
 // FromRun は core.Run を Run へ変換する。
@@ -405,6 +410,7 @@ func FromRun(r core.Run) Run {
 		Result:          strOrNil(string(r.Result)),
 		SessionID:       strOrNil(r.SessionID),
 		StartedAt:       FormatTimestamp(r.StartedAt),
+		TaskID:          r.TaskID,
 	}
 }
 
@@ -551,6 +557,8 @@ type ShowResponse struct {
 	Runs               []Run               `json:"runs"`
 	SourceBinding      *SourceBinding      `json:"source_binding"`
 	Stages             Stages              `json:"stages"`
+	// Tasks は課題のタスク（ID の昇順。無ければ []）。
+	Tasks []Task `json:"tasks"`
 }
 
 // FromChallengeDetail は core.ChallengeDetail を ShowResponse へ変換する。
@@ -566,6 +574,7 @@ func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 		Runs:              FromRuns(d.Runs),
 		SourceBinding:     FromSourceBinding(d.SourceBinding),
 		Stages:            FromStages(d.StageFields, d.IssuesAnswer),
+		Tasks:             FromTasks(d.Tasks),
 	}
 }
 

@@ -37,7 +37,7 @@ func TestEmptyListsAreArraysAndNullsStayNull(t *testing.T) {
 func TestRunKeysAreSortedAndNullable(t *testing.T) {
 	at := time.Date(2026, 10, 10, 1, 2, 3, 4_000_000, time.UTC)
 	got := marshal(t, view.FromRun(core.Run{ID: "R-1", Kind: "judgment", StartedAt: at, MaxBudgetUSD: 2}))
-	want := `{"challenge_id":null,"cost_source":null,"cost_usd":null,"cycle_budget_usd":null,"cycle_id":null,"ended_at":null,"error":null,"flywheel_version":null,"id":"R-1","judgment":null,"kind":"judgment","max_budget_usd":2,"rate_limited":false,"result":null,"session_id":null,"started_at":"2026-10-10T01:02:03.004Z"}`
+	want := `{"challenge_id":null,"cost_source":null,"cost_usd":null,"cycle_budget_usd":null,"cycle_id":null,"ended_at":null,"error":null,"flywheel_version":null,"id":"R-1","judgment":null,"kind":"judgment","max_budget_usd":2,"rate_limited":false,"result":null,"session_id":null,"started_at":"2026-10-10T01:02:03.004Z","task_id":null}`
 	if got != want {
 		t.Errorf("run:\n got %s\nwant %s", got, want)
 	}
@@ -106,7 +106,7 @@ func TestFromApprovalPreview(t *testing.T) {
 
 	plan := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, Version: 2, PlanVersion: 3, PlanBody: "B"}
 	b, _ = json.Marshal(view.FromApprovalPreview(plan, nil))
-	want = `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","direct_completion":null,"done_criteria":null,"kind":"plan","mergeability_note":"","other_pending_operations":[],"pairs":[],"plan":{"body":"B","version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
+	want = `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","direct_completion":null,"done_criteria":null,"kind":"plan","mergeability_note":"","other_pending_operations":[],"pairs":[],"plan":{"body":"B","tasks":[],"topics":[],"uses_integration":null,"version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
@@ -338,7 +338,7 @@ func TestShowAndActionableChallengeCarryEveryChallengeKey(t *testing.T) {
 		got   map[string]bool
 		added []string
 	}{
-		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"dependencies", "dependents", "followup_of", "improvement"}},
+		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"dependencies", "dependents", "followup_of", "improvement", "uses_integration"}},
 		"ActionableChallenge": {tags(view.ActionableChallenge{}), []string{"unmet_dependencies"}},
 	} {
 		want := map[string]bool{}

@@ -90,6 +90,7 @@ export function createMockApi(
         challenge: {
           ...m.c,
           dependencies: [],
+          uses_integration: null,
           dependents: [],
           followup_of: null,
           improvement: null,
@@ -102,6 +103,7 @@ export function createMockApi(
         pairs: pairsOf(m.stages),
         source_binding: null,
         stages: m.stages,
+        tasks: [],
         waiting: waitingOf(wsOf(name), id),
       };
     },
@@ -220,7 +222,13 @@ export function createMockApi(
           pairs: pairsOf(m.stages),
           plan:
             kind === "plan" && plan
-              ? { body: plan.body, version: plan.version }
+              ? {
+                  body: plan.body,
+                  tasks: [],
+                  topics: [],
+                  uses_integration: null,
+                  version: plan.version,
+                }
               : null,
           release_held: kind === "completion",
           releases:
@@ -262,6 +270,7 @@ export function createMockApi(
         challenge: {
           ...m.c,
           dependencies: [],
+          uses_integration: null,
           dependents: [],
           followup_of: null,
           improvement: null,
@@ -274,6 +283,7 @@ export function createMockApi(
         pairs: pairsOf(m.stages),
         source_binding: null,
         stages: m.stages,
+        tasks: [],
         waiting: waitingOf(wsOf(name), id),
       };
     },

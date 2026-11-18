@@ -146,6 +146,7 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
+			Flags:         []flagDef{{Name: "plan", HasValue: false}},
 			Run:           runShow,
 		},
 		{
