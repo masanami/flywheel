@@ -334,17 +334,24 @@ func checkPlannedContractOperation(plan approvedPlan, connector *Connector, hasS
 		return fmt.Errorf("%w: the challenge has no approved plan with a structured spec", ErrValidation)
 	}
 	var spec struct {
-		Operation string `json:"operation"`
+		Tasks []struct {
+			Operation string `json:"operation"`
+		} `json:"tasks"`
 	}
 	if err := json.Unmarshal([]byte(plan.Spec), &spec); err != nil {
 		return fmt.Errorf("%w: the approved plan spec is malformed: %s", ErrValidation, err.Error())
 	}
+	// 委譲はタスクがちょうど 1 件の計画だけを起動する。
+	if len(spec.Tasks) != 1 {
+		return fmt.Errorf("%w: the approved plan does not have exactly one task", ErrValidation)
+	}
+	operation := spec.Tasks[0].Operation
 	for i := range connector.Operations {
-		if connector.Operations[i].ID == spec.Operation {
+		if connector.Operations[i].ID == operation {
 			return checkOperationLaunchable(connector, &connector.Operations[i], hasSource)
 		}
 	}
-	return fmt.Errorf("%w: operation %q is not declared for connector %q", ErrValidation, spec.Operation, connector.ID)
+	return fmt.Errorf("%w: operation %q is not declared for connector %q", ErrValidation, operation, connector.ID)
 }
 
 func findCLIConnector(d *ConnectorsDeclaration, id string) (*Connector, error) {
@@ -399,7 +406,11 @@ func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration
 	if !vok {
 		return "", false, nil
 	}
-	repo, _ := conn.findConnectorRepo(validated.Repo)
+	task, ok := validated.soleTask()
+	if !ok {
+		return "", false, nil
+	}
+	repo, _ := conn.findConnectorRepo(task.Repo)
 	if repo == nil {
 		return "", false, nil
 	}

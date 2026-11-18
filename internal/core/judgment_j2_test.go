@@ -52,12 +52,23 @@ func j2TestContext(t *testing.T, hasSource bool) j2ValidationContext {
 	return j2ValidationContext{Agent: defaultAgentDeclaration(), Conn: j2TestConnectors(t), HasSource: hasSource}
 }
 
+// j2TestTask は検査を通るタスク 1 件（mut で 1 つずつ壊して使う）。
+func j2TestTask(key, repo, operation string) map[string]any {
+	return map[string]any{
+		"key": key, "title": "タスク " + key, "body": "TASK-BODY-" + key, "done_criteria": "完了条件 " + key,
+		"non_goals": []string{}, "depends_on": []string{}, "repo": repo, "operation": operation,
+	}
+}
+
 // j2PlanOutput は検査を通る plan の出力（mut で 1 つずつ壊して使う）。
+// 便宜上、mut は根の "repo"・"operation" を書き換えられる（"tasks" を書かなければ、それらを唯一のタスクの
+// repo・operation にする。"tasks" を書けばそれをそのまま使う）。根の "repo"・"operation" は出力に含めない。
 func j2PlanOutput(mut func(m map[string]any)) []byte {
 	m := map[string]any{
 		"verdict":           "plan",
 		"summary":           "要約 SUMMARY-MARKER",
-		"steps":             []string{"手順 1", "手順 2"},
+		"topics":            []any{},
+		"uses_integration":  false,
 		"repo":              "flywheel",
 		"operation":         "impl",
 		"size":              "M",
@@ -76,6 +87,13 @@ func j2PlanOutput(mut func(m map[string]any)) []byte {
 	if mut != nil {
 		mut(m)
 	}
+	if _, has := m["tasks"]; !has {
+		repo, _ := m["repo"].(string)
+		operation, _ := m["operation"].(string)
+		m["tasks"] = []any{j2TestTask("t1", repo, operation)}
+	}
+	delete(m, "repo")
+	delete(m, "operation")
 	b, _ := json.Marshal(m)
 	return b
 }
@@ -90,8 +108,8 @@ func TestJ2OutputSchema_ContainsAllPropertiesAndClosedValues(t *testing.T) {
 	if !ok {
 		t.Fatalf("properties missing: %#v", decoded)
 	}
-	for _, key := range []string{"verdict", "summary", "steps", "repo", "operation", "size", "done_criteria",
-		"budget_impl_usd", "budget_review_usd", "cross_repo", "related_repos", "question", "issues", "expected", "non_goals", "figure"} {
+	for _, key := range []string{"verdict", "summary", "topics", "done_criteria", "expected", "non_goals", "figure", "depends_on",
+		"tasks", "uses_integration", "size", "budget_impl_usd", "budget_review_usd", "cross_repo", "related_repos", "question"} {
 		if _, ok := props[key]; !ok {
 			t.Errorf("properties is missing %q", key)
 		}
@@ -111,7 +129,7 @@ func TestValidateJ2Output_ValidPlanIsAccepted(t *testing.T) {
 	if !ok {
 		t.Fatal("want ok=true for a valid plan output")
 	}
-	if v.Verdict != J2VerdictPlan || v.Repo != "flywheel" || v.Operation != "impl" || v.Size != JudgmentSizeM {
+	if v.Verdict != J2VerdictPlan || len(v.Tasks) != 1 || v.Tasks[0].Repo != "flywheel" || v.Tasks[0].Operation != "impl" || v.Size != JudgmentSizeM {
 		t.Errorf("validated = %+v", v)
 	}
 }
@@ -121,7 +139,7 @@ func TestValidateJ2Output_ValidPlanIsAccepted(t *testing.T) {
 func TestValidateJ2Output_CLIOperation(t *testing.T) {
 	t.Parallel()
 	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
-	if v, ok := validateJ2Output(out, j2TestContext(t, false)); !ok || v.Operation != "cli-op" {
+	if v, ok := validateJ2Output(out, j2TestContext(t, false)); !ok || v.Tasks[0].Operation != "cli-op" {
 		t.Fatalf("cli operation: ok=%v validated=%+v, want accepted", ok, v)
 	}
 	for name, inv := range map[string]string{"outside the closed set": "run {unknown}", "source value without source": "run {issue_number}"} {
@@ -169,7 +187,7 @@ func TestValidateJ2Output_InvalidOutputs(t *testing.T) {
 		{"uncertain with a blank question", true, j2PlanOutput(func(m map[string]any) { m["verdict"] = "uncertain"; m["question"] = " " })},
 		{"cross_repo missing (a missing judgment is not 'single repository')", true, j2PlanOutput(func(m map[string]any) { delete(m, "cross_repo") })},
 		{"cross_repo null", true, j2PlanOutput(func(m map[string]any) { m["cross_repo"] = nil })},
-		{"steps of the wrong type", true, j2PlanOutput(func(m map[string]any) { m["steps"] = []int{1, 2} })},
+		{"tasks of the wrong type", true, j2PlanOutput(func(m map[string]any) { m["tasks"] = []int{1, 2} })},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -327,7 +345,7 @@ func TestFormatJ2PlanBody_EachRequiredFieldChangesTheBody(t *testing.T) {
 	}
 }
 
-func TestFormatJ2PlanBody_ContainsSummaryStepsAndBudgetsWithResolvedDefaults(t *testing.T) {
+func TestFormatJ2PlanBody_ContainsSummaryTasksAndBudgetsWithResolvedDefaults(t *testing.T) {
 	t.Parallel()
 	v, ok := validateJ2Output(j2PlanOutput(func(m map[string]any) {
 		m["cross_repo"] = true
@@ -338,7 +356,7 @@ func TestFormatJ2PlanBody_ContainsSummaryStepsAndBudgetsWithResolvedDefaults(t *
 	}
 	body := formatJ2PlanBody(v)
 	for _, want := range []string{
-		"SUMMARY-MARKER", "手順 1", "手順 2", "flywheel", "impl", "DONE-MARKER",
+		"SUMMARY-MARKER", "タスク t1", "flywheel", "impl", "DONE-MARKER",
 		"サイズ: M", "実装枠: 50 USD", "レビュー対応枠: 30 USD", "harness-repo",
 	} {
 		if !strings.Contains(body, want) {
@@ -351,7 +369,7 @@ func TestFormatJ2PlanBody_ContainsSummaryStepsAndBudgetsWithResolvedDefaults(t *
 	}
 }
 
-// 承認する事実（対象・予算）が、出力の自由記述（要約・手順・完了条件）より前にある。
+// 承認する事実（サイズ・予算・タスク）が、出力の自由記述（方針・完了条件）より前にある。
 // 自由記述に見出しや額を装った文があっても、本物の額が先に読める。
 func TestFormatJ2PlanBody_ApprovedFactsPrecedeFreeText(t *testing.T) {
 	t.Parallel()
@@ -368,23 +386,23 @@ func TestFormatJ2PlanBody_ApprovedFactsPrecedeFreeText(t *testing.T) {
 	if approved < 0 || imitation < 0 || approved > imitation {
 		t.Errorf("the approved budget (%d) must come before the free text that imitates it (%d):\n%s", approved, imitation, body)
 	}
-	if strings.Index(body, "## 対象") > strings.Index(body, "## 要約") {
-		t.Errorf("the target section must precede the summary:\n%s", body)
+	if strings.Index(body, "## サイズと予算") > strings.Index(body, "## 方針") {
+		t.Errorf("the budget section must precede the policy:\n%s", body)
 	}
 }
 
-func TestFormatJ2PlanBody_OmitsEmptySummaryAndSteps(t *testing.T) {
+func TestFormatJ2PlanBody_OmitsEmptySummaryAndTopics(t *testing.T) {
 	t.Parallel()
 	v, ok := validateJ2Output(j2PlanOutput(func(m map[string]any) {
 		m["summary"] = nil
-		m["steps"] = []string{}
+		m["topics"] = []any{}
 	}), j2TestContext(t, true))
 	if !ok {
 		t.Fatal("test setup: output must be valid")
 	}
 	body := formatJ2PlanBody(v)
-	if strings.Contains(body, "## 要約") || strings.Contains(body, "## 手順") {
-		t.Errorf("empty summary/steps sections must be omitted:\n%s", body)
+	if strings.Contains(body, "## 方針") || strings.Contains(body, "## 論点") {
+		t.Errorf("empty summary/topics sections must be omitted:\n%s", body)
 	}
 	if strings.TrimSpace(body) == "" {
 		t.Errorf("body must not be empty")

@@ -166,7 +166,6 @@ func defaultCommands() []Command {
 				{Name: "urgency", HasValue: true},
 				{Name: "headline", HasValue: true},
 				{Name: "context", HasValue: true},
-				{Name: "issues", HasValue: true},
 				{Name: "expected", HasValue: true},
 				{Name: "actual", HasValue: true},
 				{Name: "non-goals", HasValue: true},

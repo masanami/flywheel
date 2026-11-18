@@ -107,7 +107,6 @@ func runEdit(a Args) (any, error) {
 		{"urgency", &in.Urgency},
 		{"headline", &in.Headline},
 		{"context", &in.Context},
-		{"issues", &in.Issues},
 		{"expected", &in.Expected},
 		{"actual", &in.Actual},
 		{"non-goals", &in.NonGoals},
@@ -121,7 +120,7 @@ func runEdit(a Args) (any, error) {
 		}
 	}
 	if !specified {
-		return nil, NewError(CodeUsageError, "edit には --title / --description / --done-criteria / --urgency / --headline / --context / --issues / --expected / --actual / --non-goals / --figure のいずれか1つ以上を指定してください")
+		return nil, NewError(CodeUsageError, "edit には --title / --description / --done-criteria / --urgency / --headline / --context / --expected / --actual / --non-goals / --figure のいずれか1つ以上を指定してください")
 	}
 
 	c, err := a.Store.EditChallenge(context.Background(), core.ChannelCLI, a.Positional[0], in)

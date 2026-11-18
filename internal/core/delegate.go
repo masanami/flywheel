@@ -401,20 +401,25 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	if !ok || validated.Verdict != J2VerdictPlan {
 		return nil, fmt.Errorf("%w: the approved plan does not match the current declarations", ErrValidation)
 	}
+	// 委譲はタスクがちょうど 1 件の計画だけを起動する（複数のタスクの実行は後の区切りで入れる）。
+	task, ok := validated.soleTask()
+	if !ok {
+		return nil, fmt.Errorf("%w: the approved plan does not have exactly one task", ErrValidation)
+	}
 	dc.Validated = validated
-	repo, connector := in.ConnDecl.findConnectorRepo(validated.Repo)
+	repo, connector := in.ConnDecl.findConnectorRepo(task.Repo)
 	if repo == nil || connector == nil {
-		return nil, fmt.Errorf("%w: unknown repository %q", ErrValidation, validated.Repo)
+		return nil, fmt.Errorf("%w: unknown repository %q", ErrValidation, task.Repo)
 	}
 	dc.Repo, dc.Connector = *repo, *connector
 	for _, op := range connector.Operations {
-		if op.ID == validated.Operation {
+		if op.ID == task.Operation {
 			dc.Operation = op
 		}
 	}
 	rem := computeBucketRemaining(applyBudgetOverride(validated.ResolvedImplUSD, validated.ResolvedReviewUSD, override), spend)
 	dc.ImplBudgetMicros, dc.ReviewBudgetMicros = rem.Impl, rem.Review
-	dc.Decider, dc.DeciderRow = DecideDecider(dc.Operation, validated.CrossRepo, validated.RelatedRepos)
+	dc.Decider, dc.DeciderRow = DecideDecider(dc.Operation, task.Repo, validated.CrossRepo, validated.RelatedRepos)
 	decision := history.decideLaunchFull(dc.Plan.Version, in.AgentDecl)
 	dc.Resume, dc.LimitHit, dc.ReworkHit = decision.Resume, decision.LimitHit, decision.ReworkHit
 	// 費用が取れない失敗の後の再開に限り、失敗前の実装枠の残りを上限に 1 回だけ起動を許す。

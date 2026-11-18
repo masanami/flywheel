@@ -81,8 +81,13 @@ func (s *Store) loadPlanCandidate(ctx context.Context, in DelegateInput, cid int
 	if validated.Verdict != J2VerdictPlan {
 		return planOne{}, false, "承認済みの計画の verdict が plan でない", nil
 	}
+	// 委譲はタスクがちょうど 1 件の計画だけを起動する。2 件以上の計画は起動しない。
+	task, ok := validated.soleTask()
+	if !ok {
+		return planOne{}, false, "承認済みの計画のタスクが 1 件でない", nil
+	}
 	// validateJ2Output が、リポジトリと接続ツールが宣言にあることまで検査済み。
-	repo, _ := in.ConnDecl.findConnectorRepo(validated.Repo)
+	repo, _ := in.ConnDecl.findConnectorRepo(task.Repo)
 	if repo == nil {
 		return planOne{}, false, "承認済みの計画のリポジトリが今の宣言に無い", nil
 	}
