@@ -357,6 +357,8 @@ type j5Context struct {
 	Binding      *sourceBinding
 	LastDelegate *runRow
 	Artifacts    []runArtifactRow
+	// Task は完了の検証の対象のタスク（課題のタスクのうち verifying のものがちょうど 1 個のとき。それ以外は nil）。
+	Task *Task
 	// ArtifactDescriptionRead は、成果物の説明文（PR の本文）を 1 件でも取得できたか（form: cli の委譲の報告の出どころを決める）。
 	ArtifactDescriptionRead bool
 }
@@ -389,6 +391,9 @@ func (s *Store) loadJ5Context(ctx context.Context, ch Challenge) (*j5Context, er
 			return err
 		}
 		if vc.Binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
+			return err
+		}
+		if vc.Task, err = loadVerifyingTask(ctx, tx, cid); err != nil {
 			return err
 		}
 		var lastID int64
@@ -528,6 +533,9 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 		{Label: "課題", Content: fmt.Sprintf("タイトル: %s\n\n説明:\n%s\n\n緊急度: %s\n優先度: %s\n起票者: %s",
 			ch.Title, ch.Description, urgency, priority, ch.Reporter)},
 		{Label: "達成条件", Content: criteria + "\n\n（出所: " + origin + "）"},
+	}
+	if vc.Task != nil {
+		sections = append(sections, JudgmentDataSection{Label: labelTaskSection, Content: formatTaskSection(*vc.Task)})
 	}
 	if t := formatCompletionRejectionsSection(vc.Rejections); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: CompletionRejectionsSectionLabel, Content: t})
@@ -718,6 +726,16 @@ func (s *Store) applyJ5Route(ctx context.Context, runIDDisplay, challengeIDDispl
 			}
 		}
 		mapped = true
+		// 完了の検証の対象のタスク（run の task_id）。この遷移で作る保留はこのタスクに結び付ける。
+		var verifyTask *int64
+		if tc.runID != nil {
+			t, err := runTaskID(ctx, tc.tx, *tc.runID)
+			if err != nil {
+				return err
+			}
+			verifyTask = t
+			tc.taskID = t
+		}
 		// どの判定でも、検証した head を作業ログに残す（成果物の行へ残すのは met だけ）。
 		if heads := vh.logEntries(); len(heads) > 0 {
 			tc.after[activityKeyVerifiedHeads] = heads
@@ -755,7 +773,10 @@ func (s *Store) applyJ5Route(ctx context.Context, runIDDisplay, challengeIDDispl
 			if v.ConflictOverriddenFrom != "" {
 				// 衝突の PR のための core の置き換え: 達成条件の未達ではないので、発生（verification_not_met）に
 				// 数えない（完了の承認の良し悪し〔completionApprovedIsGood〕を下げない）。
-				return nil
+				return moveVerifyingTask(ctx, tc, verifyTask, TaskStatusInProgress)
+			}
+			if err := moveVerifyingTask(ctx, tc, verifyTask, TaskStatusInProgress); err != nil {
+				return err
 			}
 			return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationNotMet)
 		}
@@ -769,6 +790,10 @@ func (s *Store) applyJ5Route(ctx context.Context, runIDDisplay, challengeIDDispl
 				if urls := unconfirmedMergeability(vh.PRs); len(urls) > 0 {
 					tc.after[activityKeyMergeabilityUnconfirmed] = urls
 				}
+			}
+			// 課題が完了の承認待ちへ進むので、検証したタスクを done にする。
+			if err := moveVerifyingTask(ctx, tc, verifyTask, TaskStatusDone); err != nil {
+				return err
 			}
 			// T8 と同じトランザクションで、検証の入力にした head を成果物の行へ残す。
 			return recordVerifiedHeads(ctx, tc.tx, vh)
@@ -1090,6 +1115,9 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 		Invoker:      in.Invoker,
 		PlanVersion:  &planVersion,
 		WorkDir:      head.WorkDir,
+	}
+	if vc.Task != nil {
+		runIn.TaskID = taskIDPtr(vc.Task)
 	}
 	var res *RunJudgmentResult
 	if jc != nil {

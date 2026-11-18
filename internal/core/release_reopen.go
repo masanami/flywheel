@@ -212,6 +212,11 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		return nil, fmt.Errorf("core: reopen for release: expected to reopen challenge %s, updated %d rows", res.ChallengeID, n)
 	}
 
+	// 課題が着手中へ戻るので、承認済みの計画の版の done のタスクを in_progress にする。
+	if err := reopenDoneTasks(ctx, tx, rec, row.ChallengeID); err != nil {
+		return nil, err
+	}
+
 	newOpID := formatOperationID(newID)
 	challengeAfter := map[string]any{
 		"status": string(tr.Target.Fixed), "version": newVersion, "reason": string(reason),

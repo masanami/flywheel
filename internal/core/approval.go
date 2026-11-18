@@ -581,6 +581,10 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 			if err := linkSupersededApprovals(ctx, tc.tx, tc.id, approvalRowID); err != nil {
 				return err
 			}
+			// 課題が完了になるので、終わっていないタスク（オーケストレーターが直接行った完了を承認したときに残る）を取りやめる。
+			if err := cancelUnfinishedTasks(ctx, tc.tx, tc.rec, tc.id); err != nil {
+				return err
+			}
 		}
 
 		tc.after["approval_kind"] = string(kind)
@@ -621,6 +625,13 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 
 		// 完了の差し戻しは、その課題の未実行の release を同じトランザクションで取り消す。
 		if kind == ApprovalKindCompletion && req.Decision == ApprovalDecisionRejected {
+			// 課題が着手中へ戻るとき、承認済みの計画の版の done のタスクを in_progress にする。
+			// オーケストレーターの直接の完了の差し戻し（保留へ戻る）ではタスクの状態を変えない。
+			if tc.target == StatusInProgress {
+				if err := reopenDoneTasks(ctx, tc.tx, tc.rec, tc.id); err != nil {
+					return err
+				}
+			}
 			withdrawn, running, err := withdrawUnexecutedReleases(ctx, tc)
 			if err != nil {
 				return err
