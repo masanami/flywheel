@@ -449,6 +449,7 @@ func insertPlanTasks(tx *sql.Tx, challengeID, version int, spec string) error {
 			DependsOn    []string `json:"depends_on"`
 			Repo         string   `json:"repo"`
 			Operation    string   `json:"operation"`
+			Source       string   `json:"source"`
 		} `json:"tasks"`
 	}
 	if err := json.Unmarshal([]byte(spec), &out); err != nil {
@@ -461,9 +462,13 @@ func insertPlanTasks(tx *sql.Tx, challengeID, version int, spec string) error {
 		if err != nil {
 			return err
 		}
-		res, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-			challengeID, version, tk.Key, tk.Title, tk.Body, tk.DoneCriteria, string(nonGoals), tk.Repo, tk.Operation, at, at)
+		var sourceKey any // source を持たないタスクは NULL（承認と同じ）
+		if tk.Source != "" {
+			sourceKey = tk.Source
+		}
+		res, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+			challengeID, version, tk.Key, tk.Title, tk.Body, tk.DoneCriteria, string(nonGoals), tk.Repo, tk.Operation, sourceKey, at, at)
 		if err != nil {
 			return err
 		}
