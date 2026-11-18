@@ -210,7 +210,8 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 			case err == nil:
 				preview.PlanVersion = version
 				preview.PlanBody = body
-				pv, err := loadPlanView(ctx, tx, cid)
+				// 承認の要約は予算の上限を計画の本文で出すので、宣言は渡さない。
+				pv, err := loadPlanView(ctx, tx, cid, nil)
 				if err != nil {
 					return err
 				}

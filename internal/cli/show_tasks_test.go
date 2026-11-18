@@ -380,3 +380,19 @@ func TestApprove_PlanSummaryShowsQuestionsAndTaskTitles(t *testing.T) {
 		t.Errorf("the summary lacks whether the integration branch is used:\n%s", ptyOutput)
 	}
 }
+
+// AC-202: 計画が額を書いていないとき、`show --plan` の予算の上限は、宣言のサイズごとの既定の合計で出る（「未設定」にならない。
+// 委譲が使う額と同じ規則）。初期の宣言のサイズ S の既定は、実装 30・レビュー対応 25。
+func TestShowPlan_BudgetFallsBackToTheSizeDefaults(t *testing.T) {
+	t.Parallel()
+	ws := initializedWorkspace(t)
+	id := createPlannedForCase(t, ws)
+	coretest.SetPlanSpec(t, ws, challengeIDToInternalID(t, id), 1,
+		`{"verdict":"plan","size":"S","summary":"S","topics":[],"uses_integration":false,"tasks":[`+
+			`{"key":"t1","title":"TT","body":"B","done_criteria":"D","non_goals":[],"depends_on":[],"repo":"direct-repo","operation":"brief-op"}]}`)
+	text := runText(t, ws, "show", id, "--plan")
+	line := lineContaining(text, "タスクのツリー")
+	if !strings.Contains(line, "上限 55 USD") {
+		t.Errorf("the plan line = %q, want the size default 55 USD (30 + 25)", line)
+	}
+}

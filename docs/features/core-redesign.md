@@ -136,7 +136,7 @@ S2a（ストアと計画）の要件。
 S2a は、新しい画面を作らない。端末のコマンドと API の形を足す（画面は S2c）。端末の出力の並びは、試作の `cli/scenes.md` の C2・C4 に合わせる。ただし、承認の前の計画のツリーは、タスクの ID がまだ無いので、計画の中の識別子（`key`）と題名で出す。C2 の「サイクルを始めました」の行は、S4 まで出さない。C4 のうち、フォローアップとスーパーバイザーの行も、それぞれの区切りまで出さない。
 
 - `flywheel answer <課題の ID> [--choice <問いの番号>=<選択肢の番号>]… [--text <問いの番号>=<文>]… [--relayed --session <会話の識別> --quote <発言の要旨>]`。問いの番号は `Q1` の形でも、数字だけでも受ける。`--choice` か `--text` を 1 つ以上要る。保留への回答（`--answer`・`--replan`）とは同時に使えない。試作（`cli/scenes.md` の C2）は `--question Q1 --choice 2` の形だったが、フラグ 1 つで問いと答えの組が決まる形に改めた（いまの引数の解析は、繰り返すフラグどうしの並びの対応を持たないため。試作のフラグは案で、`ux.md` の未決に挙げてある）。
-- `flywheel show <課題の ID> --plan`。予算の上限は、実装の枠とレビュー対応の枠の合計の額で出す。
+- `flywheel show <課題の ID> --plan`。予算の上限は、実装の枠とレビュー対応の枠の合計の額で出す。額は委譲が使うのと同じ規則で決める（計画が書いた額。書いていない枠は、宣言のサイズごとの既定。`flywheel budget` での増額は含めない。決められないときは「未設定」）。`--json` を付けると、根に `plan`（`challenge_id`・`title`・`version`・`structured`〔構造化した出力を持つか〕・`body`・`summary`・`expected`・`non_goals`・`topics`〔承認の要約の API の `approval.plan.topics` と同じ形〕・`tasks`〔要素は `key`・`title`・`depends_on`・`id`・`status`。`id` と `status` は承認の前は null〕・`budget_usd`・`uses_integration`）を出す（全体の確かめで書き足した）。
 - `flywheel show <課題の ID> --json` と `GET /api/v1/workspaces/{name}/challenges/{id}`: 根に `tasks`（配列。要素は `id`〔`T-<番号>`〕・`title`・`body`・`done_criteria`・`non_goals`・`depends_on`〔タスクの ID の配列〕・`repo`・`operation`・`status`・`plan_version`）。`challenge` に `uses_integration`（真・偽・null）。`runs[]` と `holds[]` の要素に `task_id`（タスクの ID か null）。
 - `GET /api/v1/workspaces/{name}/challenges/{id}/approval`: `approval.plan` に `topics`（要素は `title`・`decision`・`questions`。問いは `number`・`question`・`options`・`recommended`・`answer`）・`tasks`（要素は `key`・`title`・`depends_on`）・`uses_integration`。
 - 画面のボタンでの計画の承認（`POST …/challenges/{id}/approve`）の本文は変えない（版だけ）。画面のボタンで問いに答える口は、S2a では作らない（下の「クリティカル設計決定」）。
@@ -519,3 +519,4 @@ S2a（ストアと計画）の受入基準。状態と値は、コードでの�
 - [ ] そのとき、タスクの `status` は `verifying` のままである。
 - [ ] 契約の形の委譲で、コマンド 1 回ごとの実行（`run`。`kind = contract`）の `task_id` が、そのタスクの ID である。
 - [ ] 契約の形の委譲で、コマンド 1 回ごとの実行（`run`。`kind = contract`）の `repo` が、タスクの対象リポジトリである。
+- [ ] 計画が実装の枠とレビュー対応の枠の額を書いていないとき、`flywheel show <課題の ID> --plan` の予算の上限は、宣言のサイズごとの既定の合計の額で出る。

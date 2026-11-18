@@ -10,18 +10,28 @@ import (
 // （masanami/flywheel#755）を、実ストアで確かめる。端末・API の形は internal/cli・internal/server のテストが持つ。
 
 // 承認の前は、タスクの ID が無く、前提は計画の中の key。問いは通し番号つきで、答えの無い問いの answer は nil。
-// 予算は実装の枠（41.5）だけが書かれているので、その額。
+// 予算の上限は、委譲と同じ規則で決める: 計画は実装の枠（41.5）だけを書いているので、レビュー対応の枠は宣言のサイズ M の
+// 既定（30）を使い、合計は 71.5。
 func TestGetPlanView_BeforeApprovalUsesKeysAndHasNoTaskIDs(t *testing.T) {
 	f := newPAFixture(t, 3, true)
-	pv, err := f.s.GetPlanView(context.Background(), f.id)
+	agent := &AgentDeclaration{SizeBudgetsUSD: SizeBudgetsUSD{S: SizeBudgetPair{30, 25}, M: SizeBudgetPair{50, 30}, L: SizeBudgetPair{100, 40}}}
+	pv, err := f.s.GetPlanView(context.Background(), f.id, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !pv.Structured || pv.Version != 1 || pv.Status != StatusAwaitingPlanApproval {
 		t.Fatalf("plan view = %+v", pv)
 	}
-	if pv.BudgetUSD == nil || *pv.BudgetUSD != 41.5 {
-		t.Errorf("BudgetUSD = %v, want 41.5", pv.BudgetUSD)
+	if pv.BudgetUSD == nil || *pv.BudgetUSD != 71.5 {
+		t.Errorf("BudgetUSD = %v, want 71.5 (41.5 written + 30 from the size default)", pv.BudgetUSD)
+	}
+	// 宣言が無く、既定が要るときは、決められないものとして nil（書かれた額だけを上限として見せない）。
+	noDecl, err := f.s.GetPlanView(context.Background(), f.id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noDecl.BudgetUSD != nil {
+		t.Errorf("BudgetUSD without a declaration = %v, want nil", *noDecl.BudgetUSD)
 	}
 	if pv.UsesIntegration == nil || !*pv.UsesIntegration {
 		t.Errorf("UsesIntegration = %v, want true", pv.UsesIntegration)
@@ -48,7 +58,7 @@ func TestGetPlanView_AfterApprovalUsesTaskIDs(t *testing.T) {
 	if err := f.approve(t, ttyAtt(t, f.id)); err != nil {
 		t.Fatal(err)
 	}
-	pv, err := f.s.GetPlanView(context.Background(), f.id)
+	pv, err := f.s.GetPlanView(context.Background(), f.id, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,16 +100,16 @@ func TestChallengeDetail_WithoutTasksHasAnEmptySliceAndNoIntegrationDecision(t *
 func TestGetPlanView_LegacyPlanAndMissingPlan(t *testing.T) {
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "legacy", "P1")
-	if _, err := f.s.GetPlanView(context.Background(), ch.ID); !errors.Is(err, ErrValidation) {
+	if _, err := f.s.GetPlanView(context.Background(), ch.ID, nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("no plan: err = %v, want ErrValidation", err)
 	}
-	if _, err := f.s.GetPlanView(context.Background(), "C-9999"); !errors.Is(err, ErrNotFound) {
+	if _, err := f.s.GetPlanView(context.Background(), "C-9999", nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("no challenge: err = %v, want ErrNotFound", err)
 	}
 	if _, _, err := f.s.PlanChallenge(context.Background(), ChannelCLI, ch.ID, PlanInput{Body: "LEGACY-BODY"}); err != nil {
 		t.Fatal(err)
 	}
-	pv, err := f.s.GetPlanView(context.Background(), ch.ID)
+	pv, err := f.s.GetPlanView(context.Background(), ch.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
