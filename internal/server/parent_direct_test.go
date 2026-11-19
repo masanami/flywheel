@@ -66,32 +66,10 @@ func parentDirectWorkspace(t *testing.T) string {
 	return ws
 }
 
-func TestParentDirect_GraphStatusBoardAndQuestionsSeparateItFromHumanTurns(t *testing.T) {
+func TestParentDirect_StatusBoardAndQuestionsSeparateItFromHumanTurns(t *testing.T) {
 	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	ws := parentDirectWorkspace(t)
 	port := startServerAt(t, now, core.FleetWorkspace{Name: "w", Path: ws})
-
-	// 関係グラフ: C-2 だけが parent_agent（状態は人間対応待ちのまま、人間の操作は空）。
-	code, body := apiGet(t, port, "/api/v1/workspaces/w/graph")
-	if code != http.StatusOK {
-		t.Fatalf("graph = %d %s", code, body)
-	}
-	category, state, actions := map[string]string{}, map[string]string{}, map[string][]string{}
-	for _, n := range decodeMap(t, body)["nodes"].([]any) {
-		m := n.(map[string]any)
-		id := m["id"].(string)
-		category[id], state[id], actions[id] = m["category"].(string), m["state"].(string), strs(m["next_human_actions"])
-	}
-	wantCategory := map[string]string{"C-1": "system", "C-2": "parent_agent", "C-3": "human", "C-4": "human", "C-5": "done", "C-6": "withdrawn", "C-7": "system"}
-	if !reflect.DeepEqual(category, wantCategory) {
-		t.Errorf("categories = %v, want %v", category, wantCategory)
-	}
-	if state["C-2"] != "awaiting_human" || len(actions["C-2"]) != 0 {
-		t.Errorf("C-2 state/actions = %s/%v, want awaiting_human/[]", state["C-2"], actions["C-2"])
-	}
-	if !reflect.DeepEqual(actions["C-3"], []string{"answer_question"}) || !reflect.DeepEqual(actions["C-4"], []string{"approve_completion"}) {
-		t.Errorf("human actions: C-3=%v C-4=%v", actions["C-3"], actions["C-4"])
-	}
 
 	// status: parent_agent に C-2 だけ、needs_human には C-3・C-4。
 	status := mustJSON(t, port, "/api/v1/workspaces/w/status")
@@ -109,12 +87,20 @@ func TestParentDirect_GraphStatusBoardAndQuestionsSeparateItFromHumanTurns(t *te
 		t.Errorf("status.needs_human.challenges = %v, want [C-3 C-4]", got)
 	}
 
-	// ボードのカード: C-2 に問いに答える操作は出ない。
+	// ボードのカード: C-2 に問いに答える操作は出ず（状態は人間対応待ちのまま）、オーナーが答える保留の C-3 と、
+	// 直接行った完了の承認待ちの C-4 には、人間の操作が出る。
+	state, actions := map[string]string{}, map[string][]string{}
 	for _, c := range mustJSON(t, port, "/api/v1/workspaces/w/challenges")["challenges"].([]any) {
 		m := c.(map[string]any)
-		if m["id"] == "C-2" && len(strs(m["card"].(map[string]any)["next_human_actions"])) != 0 {
-			t.Errorf("C-2 card next_human_actions = %v, want none", m["card"])
-		}
+		card := m["card"].(map[string]any)
+		id := m["id"].(string)
+		state[id], actions[id] = card["state"].(string), strs(card["next_human_actions"])
+	}
+	if state["C-2"] != "awaiting_human" || len(actions["C-2"]) != 0 {
+		t.Errorf("C-2 card state/actions = %s/%v, want awaiting_human/[]", state["C-2"], actions["C-2"])
+	}
+	if !reflect.DeepEqual(actions["C-3"], []string{"answer_question"}) || !reflect.DeepEqual(actions["C-4"], []string{"approve_completion"}) {
+		t.Errorf("human actions: C-3=%v C-4=%v", actions["C-3"], actions["C-4"])
 	}
 
 	// 未回答の問い（オーナーが答えるもの）には C-3 だけ。

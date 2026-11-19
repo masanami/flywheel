@@ -4,7 +4,6 @@ import type {
   CycleStarted,
   CycleStatus,
   FollowupListResponse,
-  GraphResponse,
   ListCardResponse,
   LogResponse,
   NeedsHumanResponse,
@@ -103,12 +102,7 @@ export interface CycleApi {
   startCycle(name: string): Promise<CycleStarted>;
 }
 
-// 課題の関係グラフ（core の記録だけから決定的に導く。上流には問い合わせない）。
-export interface GraphApi {
-  challengeGraph(name: string): Promise<GraphResponse>;
-}
-
-export type ApiClient = ReadApi & ApprovalApi & CycleApi & GraphApi;
+export type ApiClient = ReadApi & ApprovalApi & CycleApi;
 
 const readApi: ReadApi = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
@@ -150,15 +144,10 @@ const cycleApi: CycleApi = {
   startCycle: (name) => post<CycleStarted>(`${ws(name)}/cycle`),
 };
 
-const graphApi: GraphApi = {
-  challengeGraph: (name) => get<GraphResponse>(`${ws(name)}/graph`),
-};
-
 const realApi: ApiClient = {
   ...readApi,
   ...approvalApi,
   ...cycleApi,
-  ...graphApi,
 };
 
 // 呼び出し口は差し替えられる。開発時の mock モードだけが setApi でブラウザ内の偽の API を入れる。
@@ -187,7 +176,6 @@ export const api: ApiClient = {
   approvalSummary: (n, id) => impl.approvalSummary(n, id),
   approve: (n, id, v) => impl.approve(n, id, v),
   startCycle: (n) => impl.startCycle(n),
-  challengeGraph: (n) => impl.challengeGraph(n),
 };
 
 export const eventsPath = "/api/v1/events";

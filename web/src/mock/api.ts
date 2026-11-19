@@ -27,7 +27,6 @@ import {
   type MockWorkspace,
   STATUS_LABEL,
   cardOf,
-  graphOf,
   ingestableOf,
   pairsOf,
   statusOf,
@@ -365,10 +364,6 @@ export function createMockApi(
     async cycle(name) {
       await wait();
       return wsOf(name).cycle;
-    },
-    async challengeGraph(name) {
-      await wait();
-      return graphOf(wsOf(name));
     },
   };
   return api;

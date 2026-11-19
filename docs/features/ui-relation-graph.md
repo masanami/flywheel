@@ -46,6 +46,8 @@
 - 親を付けると循環になるときは、その親子を付けずに取り込みを続ける（取り込み全体を失敗にしない）【仮定】
 - `/create-ticket` で課題を分解すると sub-issue が付くので、それがそのまま親の大枠になる【決定 Q2=2】
 
+> **外した（core の見直しの区切り S2c・#813）**: 関係グラフの API（`GET /api/v1/workspaces/{name}/graph`。以後は 404 `not_found`）・view の型・core の口・照合用の見本（`web/src/testing/relation-api.golden.json`）・グラフ専用の種（`TestRelationGraphSeed`）・本物の serve の関係グラフの試験は外した。課題どうしの前提は課題のツリーの API の `dependencies`・課題の詳細の `challenge.dependencies`・`dependents`、親子はツリーの `parent`・`children` で出す。本物の serve の試験は新しい種（`TestE2ESeed`）と `web/e2e-real/screens.spec.ts` に置き換えた。以下は当時の決定の記録で、現行の振る舞いではない。参照: [core の見直し](core-redesign.md)。
+
 ### 衝突（core）
 
 > **外した（2026-11-17 の設計の見直し・core の見直しの区切り S1）**: 衝突の記録（`challenge_conflict`）・辺の種類 `conflict`・登録の経路 `prediction`・待っている理由の「衝突のため後回し」（API の `waiting.conflicts[]`）・衝突の線と一覧の「衝突のため後回し」等の表示は外した（表はマイグレーションで消え、過去の記録は残らない）。辺は前提（`prerequisite`）だけである。以下は当時の決定の記録で、現行の振る舞いではない（§関係グラフの API・§画面（web）・§受入基準の衝突の記述も同じ）。参照: [core の見直し](core-redesign.md)。

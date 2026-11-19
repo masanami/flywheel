@@ -66,7 +66,7 @@ jobs:
           path: web/test-results
           if-no-files-found: ignore
 
-  # 関係グラフのブラウザの E2E を、本物の flywheel serve と種のストアに向けて流す（flywheel#463）。
+  # 課題のツリー・フォローアップ・「いま進められること」・計画の承認のブラウザの E2E を、本物の flywheel serve と種のストアに向けて流す。
   # make check には入れない。偽の API の E2E（make e2e）とは別の設定・別の置き場（web/e2e-real/）。
   e2e-real:
     runs-on: ubuntu-latest
