@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { AllScreen } from "../all/AllScreen.tsx";
-import { api } from "../api/client.ts";
 import { ChallengesScreen } from "../challenges/ChallengesScreen.tsx";
 import { CycleScreen } from "../cycle/CycleScreen.tsx";
 import { ChallengeDetail } from "../detail/ChallengeDetail.tsx";
@@ -9,11 +8,11 @@ import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { NowScreen } from "../now/NowScreen.tsx";
 import { PlanApprovalScreen } from "../plan-approval/PlanApprovalScreen.tsx";
+import { TaskDetail } from "../task/TaskDetail.tsx";
 import { AgentRail } from "./AgentRail.tsx";
 import { NotFound } from "./NotFound.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { type Route, hrefOf, useHashRoute } from "./route.ts";
-import { useScreenData } from "./useScreenData.ts";
 
 export const NO_AGENTS_TEXT = "エージェントがありません。";
 export { LOADING_TEXT };
@@ -143,9 +142,12 @@ function AgentBody({
       );
     case "task":
       return (
-        <TaskBody
+        <TaskDetail
           live={live}
           agentName={agentName}
+          workspacePath={
+            live.workspaces.find((w) => w.name === agentName)?.path ?? ""
+          }
           id={route.id}
           taskId={route.taskId}
         />
@@ -172,31 +174,4 @@ function ChallengeGate({
     return <NotFound homeHref={homeOf(agentName)} />;
   }
   return <>{children}</>;
-}
-
-function TaskBody({
-  live,
-  agentName,
-  id,
-  taskId,
-}: {
-  live: LiveState;
-  agentName: string;
-  id: string;
-  taskId: string;
-}) {
-  const { result } = useScreenData(live, agentName, () => api.tree(agentName));
-  if (result.state === "loading") return <p>{LOADING_TEXT}</p>;
-  if (result.state === "error")
-    return <p role="alert">{String(result.error)}</p>;
-  const tree = result.data;
-  const found = [...tree.challenges, ...tree.recent_done]
-    .find((c) => c.id === id)
-    ?.tasks.find((t) => t.id === taskId);
-  if (!found) return <NotFound homeHref={homeOf(agentName)} />;
-  return (
-    <section aria-labelledby="screen-title">
-      <h2 id="screen-title">タスクの詳細</h2>
-    </section>
-  );
 }

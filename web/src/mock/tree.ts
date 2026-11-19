@@ -59,9 +59,10 @@ const chain: TreeTask[] = Array.from({ length: 8 }, (_, i) =>
   task(
     `s${i + 1}`,
     `手順 ${i + 1} を進める`,
-    i < 3 ? "done" : i === 3 ? "running" : "blocked",
+    i < 3 ? "done" : i === 3 ? "running" : i === 4 ? "waiting" : "blocked",
     i === 0 ? [] : [`s${i}`],
     `T-${40 + i}`,
+    i < 5 ? 1.5 : 0,
   ),
 );
 
@@ -239,20 +240,28 @@ export function alphaDetailExtras(id: string): Extras {
         url: "https://example.com/billing/issues/30",
       },
     ],
-    tasks: [
-      {
-        body: "",
-        depends_on: [],
-        done_criteria: "",
-        id: "T-40",
-        non_goals: [],
+    tasks: Array.from({ length: 8 }, (_, i): Task => {
+      const tid = `T-${40 + i}`;
+      return {
+        body:
+          i === 3
+            ? "旧基盤の集計クエリを、新基盤の表へ書き出す形に直す。\n\n- 書き出し先の表を決める\n- 列の名前を旧基盤とそろえる"
+            : `手順 ${i + 1} の作業。`,
+        depends_on: i === 0 ? [] : [`T-${39 + i}`],
+        done_criteria:
+          i === 3
+            ? "- 件数が旧基盤と一致する\n- 集計が 3 日続けて成功する"
+            : "- 手順が済んでいる",
+        id: tid,
+        non_goals:
+          i === 3 ? ["旧基盤のジョブは止めない", "画面は変えない"] : [],
         operation: "",
         plan_version: 1,
         repo: "",
-        source_key: "example/billing#29",
-        status: "done",
-        title: "集計クエリの書き直し",
-      },
-    ],
+        source_key: i === 0 ? "example/billing#29" : null,
+        status: i < 3 ? "done" : i < 5 ? "in_progress" : "pending",
+        title: `手順 ${i + 1} を進める`,
+      };
+    }),
   };
 }
