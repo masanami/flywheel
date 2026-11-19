@@ -30,6 +30,7 @@ import {
   toCard,
   waitingOf,
 } from "./store.ts";
+import { alphaTree } from "./tree.ts";
 
 /** 課題の詳細の tree の空の値（試作の画面が使うまでは、タスクも件数も持たない）。 */
 function emptyTree(
@@ -116,6 +117,10 @@ export function createMockApi(
     },
     async tree(name): Promise<TreeResponse> {
       await wait();
+      if (name === "alpha") {
+        wsOf(name);
+        return alphaTree();
+      }
       const all = wsOf(name).items.map((m) =>
         emptyTree(
           m.c.id,
