@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client.ts";
 import type { TreeChallenge } from "../api/types.gen.ts";
 import {
+  DEPENDENCY_UNMET_LABEL,
   LEGEND_EDGE_HINT,
   PHASE_LEGEND_LABELS,
   PHASE_LEGEND_ORDER,
@@ -11,12 +12,10 @@ import { hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
 import { WAITING_LABELS, waitingKindsOfActions } from "../shell/waiting.ts";
 import { TaskTree } from "../tree/TaskTree.tsx";
+import { usd } from "../usd.ts";
 
 export const NO_CHALLENGES_TEXT = "開いている課題はありません。";
 const LOADING = "読み込んでいます";
-
-// 費用は小数 2 桁までで、末尾の 0 を落とす（30 は「30」、11.2 は「11.2」）。
-const usd = (n: number) => String(Number(n.toFixed(2)));
 
 // 課題の画面。課題のツリーの API を、この画面を開いている間だけ読み、そのエージェントの変化の通し番号が進んだら読み直す。
 // 区分・進み・費用・件数は API の値をそのまま出す（画面では導かない）。
@@ -167,7 +166,7 @@ function ChallengeFrame({
               </a>{" "}
               <span className="status-pill">{d.status_label}</span>
               {d.satisfied ? null : (
-                <span className="dep-unmet"> 未完了</span>
+                <span className="dep-unmet"> {DEPENDENCY_UNMET_LABEL}</span>
               )}{" "}
             </span>
           ))}

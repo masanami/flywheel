@@ -69,11 +69,21 @@ function destinations(agents: string[], challengeId?: string): Destination[] {
             expect(screen.queryByText(LOADING_TEXT)).not.toBeInTheDocument(),
           ),
       },
+      {
+        id: `${first}/challenge-history`,
+        hash: `${c}/history`,
+        wait: () => screen.findByTestId("challenge-detail"),
+      },
+      {
+        id: `${first}/challenge-plan`,
+        hash: `${c}/plan`,
+        wait: () => screen.findByTestId("challenge-detail"),
+      },
       // 課題の詳細は最後に開く（この後、詳細の中を操作する）。
       {
         id: `${first}/challenge`,
         hash: c,
-        wait: () => screen.findByTestId("card-detail-content"),
+        wait: () => screen.findByTestId("challenge-detail"),
       },
     );
   }
@@ -210,10 +220,30 @@ function awaitingApproval(): Record<string, unknown> {
       card,
       challenge,
       direct_completions: [],
+      followups: [],
       holds: [],
       operations: [],
       plans: [],
       runs: [],
+      tasks: [],
+      tree: {
+        budget_usd: null,
+        children: [],
+        cost_usd: 0,
+        dependencies: [],
+        followups_open: 0,
+        id: "C-1",
+        next_human_actions: ["approve_plan"],
+        parent: null,
+        status: "awaiting_plan_approval",
+        status_label: "",
+        tasks: [],
+        tasks_done: 0,
+        tasks_total: 0,
+        title: "題名",
+        updated_at: "2026-11-01T00:00:00.000Z",
+        uses_integration: null,
+      },
       pairs: S4_PAIRS,
       source_binding: null,
       source_children: [],
@@ -273,8 +303,9 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
       fireEvent.click(b);
     }
   });
-  const m = await screen.findByTestId("card-detail-content");
-  // S4 の画面（段階の欄・図・承認の要約）が出ている
+  const m = await screen.findByTestId("challenge-detail");
+  // 「計画の本文」の切り替えで段階の欄・図が出る
+  fireEvent.click(within(m).getByRole("link", { name: "計画の本文" }));
   await within(m).findByTestId("stages-detail");
   await within(m).findByTestId("figure-svg");
   // 計画の承認は、計画の承認の画面のボタンで行う

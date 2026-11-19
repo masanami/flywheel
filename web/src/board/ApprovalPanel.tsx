@@ -9,14 +9,6 @@ import { PairsView } from "./StagesDetail.tsx";
 export const APPROVE_PLAN = "approve_plan";
 export const APPROVE_COMPLETION = "approve_completion";
 
-export function approvalKindOf(
-  actions: string[],
-): "plan" | "completion" | null {
-  if (actions.includes(APPROVE_PLAN)) return "plan";
-  if (actions.includes(APPROVE_COMPLETION)) return "completion";
-  return null;
-}
-
 const HELD_NOTE =
   "本番反映（release）は保留のまま残ります。この画面の承認では本番に届きません。";
 const HEAD_MISSING = "取得できませんでした";

@@ -124,6 +124,7 @@ function setup(
     card: c,
     challenge: challenge(state),
     direct_completions: [],
+    followups: [],
     holds: [],
     operations: [],
     plans: [],
@@ -168,7 +169,7 @@ async function open() {
   window.location.hash = "#/a/alpha/challenges/C-1";
   render(<App />);
   act(() => FakeEventSource.latest.open());
-  return await screen.findByTestId("card-detail-content");
+  return await screen.findByTestId("challenge-detail");
 }
 
 const btn = (m: HTMLElement, name: string | RegExp) =>
@@ -202,7 +203,7 @@ it("AC-208: approve_completion を持つ課題の詳細に完了の承認のボ�
 it("AC-209: 状態の文字列が承認待ちでも next_human_actions に承認のコードが無ければボタンも ① も無い", async () => {
   const { requests } = setup("awaiting_plan_approval", ["triage"]);
   const m = await open();
-  await within(m).findByText("計画（0）");
+  await within(m).findByTestId("detail-waiting");
   expect(
     within(m).queryByRole("button", { name: /承認/, hidden: true }),
   ).toBeNull();
@@ -325,6 +326,7 @@ function fixturesFor(): Record<string, unknown> {
     card: c,
     challenge: challenge("awaiting_completion_approval"),
     direct_completions: [],
+    followups: [],
     holds: [],
     operations: [],
     plans: [],
@@ -485,7 +487,7 @@ it.each(["triage", "review_discrepancy", "clear_slot"])(
   async (code) => {
     setup("in_progress", [code]);
     const m = await open();
-    await within(m).findByText("計画（0）");
+    await within(m).findByTestId("detail-waiting");
     expect(m.textContent).not.toContain(CONVERSATION_NOTE);
     expect(within(m).queryByTestId("conversation-note")).toBeNull();
   },

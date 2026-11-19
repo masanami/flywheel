@@ -9,11 +9,18 @@ const CLAMP_LINES = 3;
 // resetKey で受け取り（畳み直し・測り直し）、改行の扱いは中身の要素に任せる。
 // 渡し方は 2 つだけ: 文字（text）か、要素の並び（children と resetKey の組）。両方を渡す・resetKey を
 // 省く、という使い方は型で通さない。
-type ClampedTextProps =
+// lines は畳んだときの行数（既定 3）。
+type ClampedTextProps = (
   | { text: string; children?: undefined; resetKey?: undefined }
-  | { text?: undefined; children: ReactNode; resetKey: string };
+  | { text?: undefined; children: ReactNode; resetKey: string }
+) & { lines?: number };
 
-export function ClampedText({ text, children, resetKey }: ClampedTextProps) {
+export function ClampedText({
+  text,
+  children,
+  resetKey,
+  lines = CLAMP_LINES,
+}: ClampedTextProps) {
   const key = text ?? resetKey ?? "";
   const Tag = text === undefined ? "div" : "span";
   const [open, setOpen] = useState(false);
@@ -54,7 +61,7 @@ export function ClampedText({ text, children, resetKey }: ClampedTextProps) {
           !open
             ? {
                 display: "-webkit-box",
-                WebkitLineClamp: CLAMP_LINES,
+                WebkitLineClamp: lines,
                 WebkitBoxOrient: "vertical",
                 overflow: "hidden",
                 ...pre,

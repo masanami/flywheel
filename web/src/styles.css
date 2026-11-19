@@ -562,6 +562,9 @@ body {
   color: var(--board-muted-fg);
 }
 .md table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 0.5em 0;
 }
@@ -829,6 +832,101 @@ a.task-box:hover {
   margin: 0.5rem 0;
 }
 
+/* 課題の詳細の画面: 題名・項目・あなたを待っているもの・切り替え・中身 */
+.detail {
+  min-width: 0;
+  max-width: 880px;
+  padding: 0.5rem 0 1.5rem;
+}
+.detail h2 {
+  margin: 0.5rem 0;
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+}
+.detail h3 {
+  margin: 1rem 0 0.4rem;
+  font-size: 1rem;
+}
+.detail h4 {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.9rem;
+}
+.detail-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+}
+.detail-items dt {
+  color: var(--board-muted-fg);
+  font-size: 0.75rem;
+}
+.detail-items dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.detail-waiting {
+  min-width: 0;
+  margin: 0.75rem 0;
+  padding: 0.25rem 0.75rem 0.5rem;
+  border: 1px solid var(--board-needs-human-border);
+  border-radius: 8px;
+  background: var(--board-needs-human-bg);
+}
+.detail-waiting h3 {
+  margin-top: 0.4rem;
+}
+.detail-waiting ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.detail-waiting pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.detail-question {
+  margin: 0.3rem 0;
+  overflow-wrap: anywhere;
+}
+.detail-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 1rem 0 0.5rem;
+  border-bottom: 1px solid var(--board-border);
+}
+.detail-switch a {
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px 6px 0 0;
+  color: var(--board-link);
+  text-decoration: none;
+}
+.detail-switch a[aria-current="page"] {
+  background: var(--board-chip-active-bg);
+  color: var(--board-chip-active-fg);
+}
+.detail-tree,
+.detail-plan {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.plan-versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.25rem 0;
+}
+.plan-versions button[aria-pressed="true"] {
+  background: var(--board-chip-active-bg);
+  color: var(--board-chip-active-fg);
+}
+.detail-plan-meta {
+  overflow-wrap: anywhere;
+  margin: 0.25rem 0;
+  color: var(--board-muted-fg);
+  font-size: 0.8rem;
+}
 /* ---- 「いま進められること」 ---- */
 .now-screen {
   min-width: 0;

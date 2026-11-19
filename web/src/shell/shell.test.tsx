@@ -339,17 +339,21 @@ it("AC-416 #803: 画面に「グラフ」と「ボード」を切り替える口
   expect(screen.queryByRole("link", { name: /グラフ|ボード/ })).toBeNull();
 });
 
-it("#803: 課題の詳細は、モーダルではなく通常の本文として出す", async () => {
+it("#803: 課題の詳細は、モーダルではなく通常の本文として出す（課題の詳細の API が not_found なら見つかりません）", async () => {
   window.location.hash = "#/a/alpha/challenges/C-9";
   installFakes({
     ...bodiesOf([{ name: "alpha" }]),
     "/api/v1/workspaces/alpha/challenges": { challenges: [] },
+    "/api/v1/workspaces/alpha/challenges/C-9": () =>
+      new Response(
+        JSON.stringify({ error: { code: "not_found", message: "無い" } }),
+        { status: 404 },
+      ),
   });
   render(<App />);
   await act(async () => {
     FakeEventSource.latest.open();
   });
-  // 一覧に無い課題は「見つかりません」
   expect(await screen.findByText("見つかりません。")).toBeInTheDocument();
   expect(document.querySelector("dialog")).toBeNull();
 });
