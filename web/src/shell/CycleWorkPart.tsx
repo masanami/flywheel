@@ -1,7 +1,7 @@
 import type { CycleWork } from "../api/types.gen.ts";
 import { guidesForContext } from "../guidance.ts";
 import { CYCLE_WORK_STAGES, CYCLE_WORK_STAGE_LABELS } from "../labels.ts";
-import { CycleStartButton } from "../shell/CycleStartButton.tsx";
+import { CycleStartButton } from "./CycleStartButton.tsx";
 
 export const NO_CYCLE_WORK_TEXT =
   "進められるものが無いので、サイクルは始めません。";
@@ -52,7 +52,7 @@ export function CycleWorkPart({
       />
       {cycleState === "stale" && cycleGuide ? (
         <p className="now-hint">
-          サイクルが止まっているかもしれないので、この画面からは始められません。端末で実行してください:{" "}
+          サイクルが止まっているかもしれないので、この画面からは始められません。端末で次のコマンドを実行すると、止まったサイクルを片付けてから始めます:{" "}
           <code className="now-command">{cycleGuide.command}</code>
         </p>
       ) : null}

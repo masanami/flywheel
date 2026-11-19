@@ -214,6 +214,15 @@ function Operations({ show }: { show: ShowCardResponse }) {
         {show.operations.map((o) => (
           <li key={o.id}>
             {o.kind} / {o.state}: <ClampedText text={o.summary} />
+            {o.ref ? (
+              <span
+                className="detail-operation-ref"
+                data-testid="operation-ref"
+              >
+                {" "}
+                （参照: {o.ref}）
+              </span>
+            ) : null}
           </li>
         ))}
       </ul>

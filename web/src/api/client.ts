@@ -32,7 +32,7 @@ async function failure(res: Response, what: string): Promise<ApiError> {
   return new ApiError(code, message, res.status);
 }
 
-// 読み取りは GET（SSE は EventSource）。書き込みは下の post だけで、呼ぶのは承認と 1 周の起動の POST に限る。
+// 読み取りは GET（SSE は EventSource）。書き込みは下の post だけで、呼ぶのは計画の承認・完了の承認・「サイクルを回す」の POST に限る。
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path, {
     method: "GET",
@@ -91,13 +91,13 @@ export interface ReadApi {
   questions(): Promise<QuestionsResponse>;
 }
 
-// ボードのボタンでの承認（M1 の 2 段階）。① 要約と版を得る → ② 版を添えて承認する。
+// 承認（計画の承認・完了の承認。2 段階）。① 要約と版を得る → ② 版を添えて承認する。
 export interface ApprovalApi {
   approvalSummary(name: string, id: string): Promise<ApprovalSummaryResponse>;
   approve(name: string, id: string, version: number): Promise<ShowCardResponse>;
 }
 
-// 列の見出しの 1 周の起動（M4H11）。成功は {"started": true}。
+// 「サイクルを回す」のボタンが呼ぶサイクルの起動。成功は {"started": true}。
 export interface CycleApi {
   startCycle(name: string): Promise<CycleStarted>;
 }

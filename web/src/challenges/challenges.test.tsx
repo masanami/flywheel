@@ -286,6 +286,40 @@ it("AC-202 #807: 「完了した課題を開く」を押すと、完了した課
   expect(frames()).toHaveLength(1);
 });
 
+it("#798: エージェントを切り替えても、前のエージェントで開いた「完了した課題」の開いた状態は残らない", async () => {
+  window.location.hash = "#/a/alpha/challenges";
+  const fakes = installFakes({
+    ...fixtures(),
+    [TREE_URL]: { challenges: [], recent_done: [challenge("C-8")] },
+    "/api/v1/workspaces/beta/tree": {
+      challenges: [],
+      recent_done: [challenge("C-18")],
+    },
+  });
+  render(<App />);
+  await act(async () => {
+    FakeEventSource.latest.open();
+  });
+  fireEvent.click(
+    await screen.findByRole("button", { name: /完了した課題を開く/ }),
+  );
+  expect(await screen.findByText("課題 C-8")).toBeInTheDocument();
+  act(() => {
+    window.location.hash = "#/a/beta/challenges";
+  });
+  await waitFor(() =>
+    expect(
+      fakes.requests.some((r) => r.url === "/api/v1/workspaces/beta/tree"),
+    ).toBe(true),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: /完了した課題を開く/ }),
+    ).toHaveAttribute("aria-expanded", "false"),
+  );
+  expect(screen.queryByText("課題 C-18")).toBeNull();
+});
+
 it("AC-203 #807: recent_done が空のとき「完了した課題を開く」は出ない", async () => {
   await open({ challenges: [challenge("C-1")], recent_done: [] });
   await screen.findByText("課題 C-1");

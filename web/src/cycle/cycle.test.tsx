@@ -1,4 +1,10 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   CYCLE_RESULTS,
@@ -9,9 +15,9 @@ import {
   CYCLE_WORK_STAGE_LABELS,
   cycleStateText,
 } from "../labels.ts";
+import { NO_CYCLE_WORK_TEXT } from "../shell/CycleWorkPart.tsx";
 import { type Agent, openAgents } from "../testing/agents.tsx";
 import { cycleResultText } from "./CycleScreen.tsx";
-import { NO_CYCLE_WORK_TEXT } from "./CycleWorkPart.tsx";
 
 // サイクルの画面の受入基準を 1 つずつ直接確かめる。Issue #806。
 
@@ -172,4 +178,41 @@ it("#806: 止まっているかもしれないときは、端末のコマンド�
   expect(
     within(part).getByRole("button", { name: "サイクルを回す" }),
   ).toBeDisabled();
+});
+
+it("#798: エージェントを切り替えても、前のエージェントの「サイクルを始めました。」は残らない", async () => {
+  await openAgents([agent, { ...agent, name: "beta" }], "#/a/alpha/cycle", {
+    "POST /api/v1/workspaces/alpha/cycle": { started: true },
+    "POST /api/v1/workspaces/beta/cycle": { started: true },
+  });
+  const part = await screen.findByTestId("cycle-work");
+  await waitFor(() =>
+    expect(
+      within(part).getByRole("button", { name: "サイクルを回す" }),
+    ).toBeEnabled(),
+  );
+  fireEvent.click(within(part).getByRole("button", { name: "サイクルを回す" }));
+  expect(await screen.findByText("サイクルを始めました。")).toBeInTheDocument();
+  act(() => {
+    window.location.hash = "#/a/beta/cycle";
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId("cycle-work")).toBeInTheDocument(),
+  );
+  expect(screen.queryByText("サイクルを始めました。")).toBeNull();
+});
+
+it("#798: 止まっているかもしれないときの案内は、端末で flywheel cycle を実行すると、止まったサイクルを片付けてから始める旨を伝える", async () => {
+  await openAgents(
+    [{ ...agent, cycle: { ...agent.cycle, state: "stale" } }],
+    "#/a/alpha/cycle",
+  );
+  const part = await screen.findByTestId("cycle-work");
+  const code = await within(part).findByText(
+    "flywheel cycle --workspace '/w/alpha'",
+  );
+  const note = code.closest("p");
+  expect(note).toHaveTextContent("止まったサイクルを片付けてから始めます");
+  expect(note).toHaveTextContent("端末で");
+  expect(note).toHaveTextContent("この画面からは始められません");
 });

@@ -1,5 +1,5 @@
 // 課題どうしの偽の前提（依存）。開発時の mock モードだけが読み込む。課題の詳細の waiting（まだ終わっていない前提）が使う。
-// store.ts の課題に対し、大枠の中の依存（分岐と合流）・大枠をまたぐ依存が見えるようにする（循環なし）。
+// store.ts の課題に対し、親子の中の依存（分岐と合流）・親子をまたぐ依存が見えるようにする（循環なし）。
 
 export type MockEdgeKind = "prerequisite";
 
@@ -36,7 +36,7 @@ export function seedDeps(): { alpha: DepSeed; beta: DepSeed } {
         dep("C-19", "C-2", "prerequisite"),
         dep("C-21", "C-18", "prerequisite"),
         dep("C-23", "C-24", "prerequisite"),
-        // 大枠の外の C-34 から、説明の文が長い親 C-31 の子 C-32 へ（線が親の見出しを縦切る。flywheel#482）
+        // 親子の外の C-34 から、説明の文が長い親 C-31 の子 C-32 へ（課題の詳細の「関係する課題」に出る。flywheel#482）
         dep("C-34", "C-32", "prerequisite"),
       ],
     },

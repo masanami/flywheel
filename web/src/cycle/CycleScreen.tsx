@@ -6,7 +6,7 @@ import {
   cycleStateText,
 } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
-import { CycleWorkPart } from "./CycleWorkPart.tsx";
+import { CycleWorkPart } from "../shell/CycleWorkPart.tsx";
 
 export const NO_TIME_TEXT = "まだありません";
 

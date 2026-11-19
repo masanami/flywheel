@@ -14,6 +14,7 @@ import type {
   Question,
   StatusResponse,
 } from "../api/types.gen.ts";
+import { RELOAD_TEXT } from "../labels.ts";
 import { POLL_MS } from "../live/useLive.ts";
 import {
   FakeEventSource,
@@ -580,6 +581,35 @@ describe("取り込めるもの", () => {
     const a = (await screen.findByText("取り込み元 1")).closest("a");
     expect(a?.getAttribute("href")).toBe("https://example.invalid/1");
   });
+  it("#798: 取り込めるものの行と子の行のリンクは、http(s) 以外（javascript: など）なら href を持たない（# になる）", async () => {
+    await openNow({
+      ingestable: {
+        error: null,
+        items: [
+          item(7, {
+            title: "危ない行",
+            url: "javascript:alert(1)",
+            children: [
+              {
+                external_key: "o/r#71",
+                number: 71,
+                parent_external_key: "o/r#7",
+                title: "危ない子",
+                url: "javascript:alert(2)",
+              },
+            ],
+          }),
+        ],
+      },
+    });
+    const a = (await screen.findByText("危ない行")).closest("a");
+    expect(a?.getAttribute("href")).toBe("#");
+    const c = screen.getByText("危ない子").closest("a");
+    expect(c?.getAttribute("href")).toBe("#");
+    for (const el of document.querySelectorAll("a")) {
+      expect(el.getAttribute("href") ?? "").not.toMatch(/^javascript:/i);
+    }
+  });
   it("AC-152 #805: 子が 3 件ある行に、子の件数の 3 が出る", async () => {
     await openNow({ ingestable: two });
     const row = (await screen.findByText("取り込み元 1")).closest("li");
@@ -759,6 +789,32 @@ describe("サイクルを回すと進むもの", () => {
       await screen.findByText(/ほかのサイクルが走っている/),
     ).toBeInTheDocument();
   });
+});
+
+describe("サイクルを回す: 拒否されたとき", () => {
+  it.each([
+    ["403 forbidden_origin", 403, "forbidden_origin"],
+    ["403 だけ", 403, "something"],
+    ["forbidden_origin だけ", 400, "forbidden_origin"],
+  ])(
+    "#798: 403・forbidden_origin（%s）では再読み込みを促し、再送しない",
+    async (_n, status, code) => {
+      const denied: FakeResponder = () =>
+        new Response(JSON.stringify({ error: { code, message: "拒否" } }), {
+          status,
+        });
+      const { requests } = await openNow({
+        stages: { plan: 1 },
+        post: denied,
+      });
+      fireEvent.click(screen.getByRole("button", { name: "サイクルを回す" }));
+      const note = await screen.findByText(/ページを再読み込みして/);
+      expect(note).toHaveTextContent(RELOAD_TEXT);
+      expect(note.getAttribute("role")).toBe("alert");
+      await new Promise((r) => setTimeout(r, 50));
+      expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
+    },
+  );
 });
 
 describe("何も無いとき", () => {

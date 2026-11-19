@@ -164,6 +164,10 @@ export const CYCLE_STATE_LABELS: Record<CycleState, string> = {
 // 読み込みの最中に出す文（枠と各画面で同じ）。
 export const LOADING_TEXT = "読み込んでいます";
 
+// 書き込みの口が 403・forbidden_origin で拒否されたときの案内（計画の承認と「サイクルを回す」で同じ文）。
+export const RELOAD_TEXT =
+  "操作を受け付けられませんでした。ページを再読み込みしてからやり直してください（自動では再送しません）。";
+
 // サイクルの画面・「すべて」の区分に出す、状態だけの語（上の帯の語から「サイクル: 」を除いたもの）。
 export const CYCLE_STATE_SHORT_LABELS: Record<CycleState, string> = {
   running: "走っている",

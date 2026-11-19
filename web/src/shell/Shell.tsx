@@ -94,13 +94,20 @@ function AgentBody({
 }) {
   switch (route.kind) {
     case "agent":
+      // 画面が自分の状態（ボタンの結果・開いた状態）を持つものは、エージェントごとに作り直す（key）。
       switch (route.screen) {
         case "now":
           return (
             <NowScreen key={agentName} live={live} agentName={agentName} />
           );
         case "challenges":
-          return <ChallengesScreen live={live} agentName={agentName} />;
+          return (
+            <ChallengesScreen
+              key={agentName}
+              live={live}
+              agentName={agentName}
+            />
+          );
         case "followups":
           return (
             <FollowupsScreen
@@ -111,7 +118,9 @@ function AgentBody({
             />
           );
         case "cycle":
-          return <CycleScreen live={live} agentName={agentName} />;
+          return (
+            <CycleScreen key={agentName} live={live} agentName={agentName} />
+          );
       }
       return null;
     case "challenge":

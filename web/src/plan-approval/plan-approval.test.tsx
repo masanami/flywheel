@@ -521,6 +521,71 @@ it("AC-342/343 #811: conflict で失敗すると、計画が変わった旨が�
   ).toEqual(['{"version":7}', '{"version":8}']);
 });
 
+// 読み直しで、表示中の計画の版が変わったときは、承認のボタンの近くに知らせを出す。#798 の全体のレビュー。
+const UPDATED_TEXT =
+  "計画が更新されました。内容を確かめてから承認してください。";
+
+async function openWithVersions(versions: number[], approve?: () => Response) {
+  let reads = 0;
+  const r = await open(
+    () => {
+      const v = versions[Math.min(reads, versions.length - 1)];
+      reads++;
+      return json(200, summary({ version: v }));
+    },
+    { extra: { [APPROVE]: approve ?? {} } },
+  );
+  await screen.findByTestId("plan-approval");
+  return { ...r, reads: () => reads };
+}
+
+const changed = async () => {
+  await act(async () => {
+    FakeEventSource.latest.send({
+      type: "workspace_changed",
+      workspace: "alpha",
+    });
+  });
+};
+
+it("#798: 読み直しで計画の版が変わると、承認のボタンの近くに知らせ（role=alert）が出る", async () => {
+  const { reads } = await openWithVersions([7, 8]);
+  expect(screen.queryByText(UPDATED_TEXT)).toBeNull();
+  await changed();
+  await waitFor(() => expect(reads()).toBe(2));
+  const note = await screen.findByText(UPDATED_TEXT);
+  expect(note.getAttribute("role")).toBe("alert");
+  expect(note.closest(".approval-control")).toBe(
+    (await approveBtn()).closest(".approval-control"),
+  );
+});
+
+it("#798: 読み直しても版が変わらなければ、知らせは出ない", async () => {
+  const { reads } = await openWithVersions([7, 7]);
+  await changed();
+  await waitFor(() => expect(reads()).toBe(2));
+  await new Promise((r) => setTimeout(r, 50));
+  expect(screen.queryByText(UPDATED_TEXT)).toBeNull();
+});
+
+it("#798: 知らせが出た後に押すと、新しい版で承認が送られ、知らせは消える", async () => {
+  const { requests, reads } = await openWithVersions([7, 8], () =>
+    json(200, {}),
+  );
+  await changed();
+  await waitFor(() => expect(reads()).toBe(2));
+  await screen.findByText(UPDATED_TEXT);
+  // 押すまでは出したまま（さらに版が変わらない読み直しがあっても消えない）
+  await changed();
+  await waitFor(() => expect(reads()).toBe(3));
+  expect(screen.getByText(UPDATED_TEXT)).toBeInTheDocument();
+  fireEvent.click(await approveBtn());
+  await screen.findByText("承認しました。");
+  expect(
+    requests.filter((r) => r.method === "POST").map((r) => r.body),
+  ).toEqual(['{"version":8}']);
+});
+
 it("AC-344 #811: 承認の口が conflict 以外のコードで失敗すると、エラーの文が出る", async () => {
   await opened(summary(), {
     extra: {

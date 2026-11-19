@@ -652,6 +652,38 @@ it("AC-254 #808: 不可逆操作がある課題の詳細に、その種類と状
   expect(o).toHaveTextContent("本番へ反映する");
 });
 
+it("#798: 不可逆操作の行に、参照（ref）があるときは文字で添える（リンクにしない）。無いときは出さない", async () => {
+  const op = {
+    approved_head: null,
+    challenge_id: "C-1",
+    closed_at: null,
+    closed_reason: null,
+    consecutive_failures: 0,
+    created_at: "",
+    executed_at: null,
+    id: "O-1",
+    kind: "release",
+    last_execution_result: null,
+    merge_commit: null,
+    ref: "https://example.invalid/pull/3",
+    state: "pending",
+    summary: "本番へ反映する",
+    superseded_by: null,
+    supersedes: null,
+    version: 1,
+    waiting_since: null,
+  };
+  const { root } = await open(
+    show({ operations: [op, { ...op, id: "O-2", ref: null }] }),
+  );
+  const o = q(root).getByTestId("detail-operations");
+  const rows = o.querySelectorAll("li");
+  expect(rows).toHaveLength(2);
+  expect(rows[0]).toHaveTextContent("参照: https://example.invalid/pull/3");
+  expect(rows[0]?.querySelector("a")).toBeNull();
+  expect(rows[1]).not.toHaveTextContent("参照");
+});
+
 it("AC-273 #808: 「計画の本文」を押すと、URL のハッシュが #/a/<名前>/challenges/<C>/plan になる", async () => {
   const { root } = await open(show());
   fireEvent.click(q(root).getByRole("link", { name: "計画の本文" }));

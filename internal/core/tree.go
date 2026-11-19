@@ -238,13 +238,19 @@ func (s *Store) buildTreeNodes(ctx context.Context, all, picked []Challenge, age
 			if err := fillTreeTasks(ctx, tx, cid, agent, sh, &n); err != nil {
 				return err
 			}
+			// 課題の一覧（all）と、親子・前提（sh）は別の読み取りで読むので、その間に増えた課題を sh だけが指すことがある。
+			// 一覧に無い課題は、ID と題名が空の要素にせず飛ばす（親は nil のまま）。次の読み直しで出る。
 			for _, d := range sh.eval.Dependencies[cid] {
-				dep := byID[formatChallengeID(d.DependsOn)]
+				dep, ok := byID[formatChallengeID(d.DependsOn)]
+				if !ok {
+					continue
+				}
 				n.Dependencies = append(n.Dependencies, TreeDependency{ChallengeID: dep.ID, Title: dep.Title, Status: dep.Status, Satisfied: d.Met})
 			}
 			if p, ok := sh.parents[cid]; ok {
-				pc := byID[formatChallengeID(p)]
-				n.Parent = &TreeRelative{ChallengeID: pc.ID, Title: pc.Title, Status: pc.Status}
+				if pc, ok := byID[formatChallengeID(p)]; ok {
+					n.Parent = &TreeRelative{ChallengeID: pc.ID, Title: pc.Title, Status: pc.Status}
+				}
 			}
 			var kids []int64
 			for child, parent := range sh.parents {
@@ -254,7 +260,10 @@ func (s *Store) buildTreeNodes(ctx context.Context, all, picked []Challenge, age
 			}
 			sort.Slice(kids, func(a, b int) bool { return kids[a] < kids[b] })
 			for _, k := range kids {
-				kc := byID[formatChallengeID(k)]
+				kc, ok := byID[formatChallengeID(k)]
+				if !ok {
+					continue
+				}
 				n.Children = append(n.Children, TreeRelative{ChallengeID: kc.ID, Title: kc.Title, Status: kc.Status})
 			}
 			out = append(out, n)

@@ -1,14 +1,16 @@
-import { CycleWorkPart } from "../cycle/CycleWorkPart.tsx";
 import { type Guide, guidesForContext, shellQuote } from "../guidance.ts";
+import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
+import { safeHref } from "../safeHref.ts";
+import { CycleWorkPart } from "../shell/CycleWorkPart.tsx";
 import { hrefOf } from "../shell/route.ts";
 import {
   NO_WAITING_TEXT,
   WAITING_LABELS,
   waitingKindGroup,
 } from "../shell/waiting.ts";
+import { type WaitingRow, buildWaitingRows } from "../shell/waitingRows.ts";
 import { useIngestable } from "./useIngestable.ts";
-import { type WaitingRow, buildWaitingRows } from "./waitingRows.ts";
 
 export const INGEST_LOADING_TEXT = "読んでいます";
 export const INGEST_TERMINAL_NOTE = "取り込みは、端末か対話で行います。";
@@ -36,7 +38,7 @@ export function NowScreen({
     return (
       <section aria-labelledby="screen-title">
         <h2 id="screen-title">いま進められること</h2>
-        <p>読み込んでいます</p>
+        <p>{LOADING_TEXT}</p>
       </section>
     );
   }
@@ -139,7 +141,11 @@ export function NowScreen({
             {ingestItems.map((it) => (
               <li key={it.external_key} className="now-row">
                 <span className="now-hint">#{it.number}</span>{" "}
-                <a href={it.url} target="_blank" rel="noreferrer">
+                <a
+                  href={safeHref(it.url) ?? "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   <b>{it.title}</b>
                 </a>
                 {it.children.length > 0 ? (
@@ -172,7 +178,11 @@ export function NowScreen({
                   <ul className="now-children">
                     {it.children.map((ch) => (
                       <li key={ch.external_key}>
-                        <a href={ch.url} target="_blank" rel="noreferrer">
+                        <a
+                          href={safeHref(ch.url) ?? "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
                           {ch.title}
                         </a>
                       </li>
