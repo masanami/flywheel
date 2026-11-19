@@ -1,4 +1,4 @@
-import { type Guide, guidesForContext } from "../guidance.ts";
+import { type Guide, guidesForContext, shellQuote } from "../guidance.ts";
 import { CYCLE_WORK_STAGES, CYCLE_WORK_STAGE_LABELS } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { CycleStartButton } from "../shell/CycleStartButton.tsx";
@@ -163,9 +163,9 @@ export function NowScreen({
                 ) : null}
                 {ingestGuide ? (
                   <code className="now-command">
-                    {ingestGuide.command.replaceAll(
-                      "<external_key>",
-                      () => it.external_key,
+                    {/* external_key は # を含む。シェルの設定によっては # が特別な意味を持つので、1 語として引用する */}
+                    {ingestGuide.command.replaceAll("<external_key>", () =>
+                      shellQuote(it.external_key),
                     )}
                   </code>
                 ) : null}

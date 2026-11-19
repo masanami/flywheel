@@ -599,7 +599,7 @@ describe("取り込めるもの", () => {
     const row = (await screen.findByText("取り込み元 2")).closest("li");
     expect(
       within(row as HTMLElement).getByText(
-        "flywheel ingest o/r#2 --workspace '/w/alpha'",
+        "flywheel ingest 'o/r#2' --workspace '/w/alpha'",
       ),
     ).toBeInTheDocument();
   });
