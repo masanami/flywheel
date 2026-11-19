@@ -10,13 +10,12 @@ import {
   RUN_RESULT_LABELS,
   RUN_RUNNING_LABEL,
   WHO_AGENT_RUN,
-  WHO_ME_RELAYED,
-  WHO_ME_TTY,
-  WHO_ME_UI,
 } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
 import { usd } from "../usd.ts";
+import { shortTime } from "../when.ts";
+import { whoOf as whoLabel } from "../who.ts";
 
 // 絞りの種類。実行の記録は作業ログの記録ではないので、種類は "run"。
 export const HISTORY_FILTERS = [
@@ -79,12 +78,10 @@ function relayQuote(after: unknown): string | null {
 }
 
 function whoOf(a: Activity): { who: string; quote: string | null } {
-  if (a.verification === "relayed")
-    return { who: WHO_ME_RELAYED, quote: relayQuote(a.after) };
-  if (a.channel === "ui") return { who: WHO_ME_UI, quote: null };
-  if (a.channel === "cli" && a.verification === "tty_confirm")
-    return { who: WHO_ME_TTY, quote: null };
-  return { who: a.channel, quote: null };
+  return {
+    who: whoLabel(a.channel, a.verification),
+    quote: a.verification === "relayed" ? relayQuote(a.after) : null,
+  };
 }
 
 const known = (table: Record<string, string>, v: string): string =>
@@ -139,13 +136,6 @@ function time(s: string): number {
   return Number.isNaN(t) ? 0 : t;
 }
 
-export function formatAt(s: string): string {
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return s;
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 // 「経緯」の中身。作業ログ（その課題の ID つき）と実行の記録を、新しい順に 1 本の時系列にする。
 // 作業ログの API は、この部品を開いている間（「経緯」を選んでいる間）だけ読み、変化の通し番号が進んだら読み直す。
 export function History({
@@ -197,7 +187,7 @@ export function History({
         <ol className="history-list">
           {shown.map((r) => (
             <li key={r.key} data-testid="history-row">
-              <time dateTime={r.at}>{formatAt(r.at)}</time>
+              <time dateTime={r.at}>{shortTime(r.at)}</time>
               <span className="history-who" data-testid="history-who">
                 {r.who}
               </span>

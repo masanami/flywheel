@@ -13,7 +13,11 @@ import { safeHref } from "../detail/Items.tsx";
 import {
   HOLD_KIND_PARENT_DIRECT,
   LOADING_TEXT,
+  NO_COST_LABEL,
   PHASE_LABELS,
+  RUN_KIND_LABELS,
+  RUN_RESULT_LABELS,
+  RUN_RUNNING_LABEL,
   UPSTREAM_STATE_LABELS,
   label,
 } from "../labels.ts";
@@ -23,13 +27,11 @@ import { NotFound } from "../shell/NotFound.tsx";
 import { hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
 import { usd } from "../usd.ts";
-import {
-  DELEGATION_KINDS,
-  RUN_KIND_LABELS,
-  RUN_RESULT_LABELS,
-  RUN_RUNNING_TEXT,
-  shortTime,
-} from "./labels.ts";
+import { shortTime } from "../when.ts";
+import { whoOf } from "../who.ts";
+
+// 委譲の実行（報告の API を呼ぶ対象）の種類。
+const DELEGATION_KINDS = ["delegate", "contract"];
 
 // タスクの詳細の画面。課題の詳細の API の応答を、タスクの ID で結んで作る（tasks = 本文、tree.tasks = 区分・費用）。
 // 区分と費用は core が返した値をそのまま出す。画面のボタンは置かず、回答は端末のコマンドの案内で示す。
@@ -277,16 +279,11 @@ function TaskView({
   );
 }
 
-const CHANNEL_LABELS: Record<string, string> = {
-  relayed: "あなた（対話）",
-  ui: "あなた（画面）",
-};
-const answeredBy = (h: Hold): string | null => {
-  if (h.answered_channel === null) return null;
-  if (h.answered_channel === "cli" && h.answered_verification === "tty_confirm")
-    return "あなた（端末）";
-  return label(CHANNEL_LABELS, h.answered_channel);
-};
+// 誰が答えたか。経緯の行と同じ決め方（経路と本人確認の方式）。
+const answeredBy = (h: Hold): string | null =>
+  h.answered_channel === null
+    ? null
+    : whoOf(h.answered_channel, h.answered_verification);
 
 function Holds({ holds }: { holds: Hold[] }) {
   return (
@@ -368,12 +365,12 @@ function RunsView({
             {" ・ "}
             <span data-testid="run-result">
               {r.result === null
-                ? RUN_RUNNING_TEXT
+                ? RUN_RUNNING_LABEL
                 : label(RUN_RESULT_LABELS, r.result)}
             </span>
             {" ・ "}
             <span data-testid="run-cost">
-              {r.cost_usd === null ? "費用 不明" : `${usd(r.cost_usd)} USD`}
+              {r.cost_usd === null ? NO_COST_LABEL : `${usd(r.cost_usd)} USD`}
             </span>
             {" ・ 始まり "}
             <time data-testid="run-started" dateTime={r.started_at}>

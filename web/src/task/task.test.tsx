@@ -547,11 +547,28 @@ it("#810: 前提・この後のリンクの横に、そのタスクの表示の�
   ).toBeTruthy();
 });
 
-it("#810: 回答の行に、答えた経路が出る", async () => {
-  const { root } = await open(
-    show({ holds: [hold({ answer: "はい", answered_channel: "relayed" })] }),
-  );
-  expect(within(root).getByTestId("task-hold-by").textContent).toContain(
-    "あなた（対話）",
-  );
-});
+// 誰が答えたかは、経路と本人確認の方式の組で決まる（対話で受けた回答は、経路が cli・方式が relayed で記録される）。
+it.each([
+  ["cli", "relayed", "あなた（対話）"],
+  ["ui", "none", "あなた（画面）"],
+  ["cli", "tty_confirm", "あなた（端末）"],
+  ["invoker", "none", "invoker"],
+])(
+  "#810: 回答の行に、誰が答えたかが出る（経路 %s・方式 %s）",
+  async (channel, verification, want) => {
+    const { root } = await open(
+      show({
+        holds: [
+          hold({
+            answer: "はい",
+            answered_channel: channel,
+            answered_verification: verification,
+          }),
+        ],
+      }),
+    );
+    expect(within(root).getByTestId("task-hold-by").textContent).toContain(
+      want,
+    );
+  },
+);

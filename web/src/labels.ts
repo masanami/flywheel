@@ -311,7 +311,8 @@ export const RUN_RESULT_LABELS: Record<string, string> = {
   interrupted: "中断",
 };
 export const RUN_RUNNING_LABEL = "実行中";
-export const NO_COST_LABEL = "費用なし";
+// 実行の記録に費用の値が無い（null）とき。0 とは違う。
+export const NO_COST_LABEL = "費用の記録なし";
 
 // 経緯の「誰が」
 export const WHO_ME_RELAYED = "あなた（対話）";
