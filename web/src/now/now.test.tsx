@@ -581,7 +581,7 @@ describe("取り込めるもの", () => {
     const a = (await screen.findByText("取り込み元 1")).closest("a");
     expect(a?.getAttribute("href")).toBe("https://example.invalid/1");
   });
-  it("#798: 取り込めるものの行と子の行のリンクは、http(s) 以外（javascript: など）なら href を持たない（# になる）", async () => {
+  it("#798: 取り込めるものの行と子の行は、行き先が http(s) 以外（javascript: など）なら、リンクにせず文字として出す", async () => {
     await openNow({
       ingestable: {
         error: null,
@@ -602,10 +602,8 @@ describe("取り込めるもの", () => {
         ],
       },
     });
-    const a = (await screen.findByText("危ない行")).closest("a");
-    expect(a?.getAttribute("href")).toBe("#");
-    const c = screen.getByText("危ない子").closest("a");
-    expect(c?.getAttribute("href")).toBe("#");
+    expect((await screen.findByText("危ない行")).closest("a")).toBeNull();
+    expect(screen.getByText("危ない子").closest("a")).toBeNull();
     for (const el of document.querySelectorAll("a")) {
       expect(el.getAttribute("href") ?? "").not.toMatch(/^javascript:/i);
     }

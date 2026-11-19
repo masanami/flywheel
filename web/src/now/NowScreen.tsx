@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { type Guide, guidesForContext, shellQuote } from "../guidance.ts";
 import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
@@ -141,13 +142,9 @@ export function NowScreen({
             {ingestItems.map((it) => (
               <li key={it.external_key} className="now-row">
                 <span className="now-hint">#{it.number}</span>{" "}
-                <a
-                  href={safeHref(it.url) ?? "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                >
+                <SourceLink url={it.url}>
                   <b>{it.title}</b>
-                </a>
+                </SourceLink>
                 {it.children.length > 0 ? (
                   <span className="now-hint">子 {it.children.length} 件</span>
                 ) : null}
@@ -178,13 +175,7 @@ export function NowScreen({
                   <ul className="now-children">
                     {it.children.map((ch) => (
                       <li key={ch.external_key}>
-                        <a
-                          href={safeHref(ch.url) ?? "#"}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {ch.title}
-                        </a>
+                        <SourceLink url={ch.url}>{ch.title}</SourceLink>
                       </li>
                     ))}
                   </ul>
@@ -203,6 +194,24 @@ export function NowScreen({
         cycleState={cycleState}
       />
     </section>
+  );
+}
+
+// 取り込み元の行き先。http(s) だけをリンクにし、それ以外は文字として出す（判定は safeHref の 1 つ）。
+function SourceLink({
+  url,
+  children,
+}: {
+  url: string;
+  children: ReactNode;
+}) {
+  const href = safeHref(url);
+  return href ? (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  ) : (
+    <span>{children}</span>
   );
 }
 
