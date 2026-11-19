@@ -251,3 +251,70 @@ export const FOLLOWUP_SOURCE_LABELS: Record<string, string> = {
 // 種類が親が直接行うの保留が開いているときの表示（オーナーが答える問いではない）。
 export const PARENT_DIRECT_HOLD_NOTE =
   "親のエージェントが直接行う保留（オーナーが答える問いではありません）";
+
+// 経緯の「何が起きたか」。画面が知っている作業ログの action の値ごとの文言。知らない値は値のまま出す。
+export const HISTORY_ACTION_LABELS: Record<string, string> = {
+  plan: "計画を作った",
+  approve: "承認した",
+  approve_hold_release: "完了を承認した（反映は保留のまま）",
+  reject: "差し戻した",
+  hold: "あなたへの問いを上げた",
+  answer: "問いに答えた",
+  answer_plan: "計画の問いに答えた",
+  submit: "完了の検証へ出した",
+  verify_met: "完了条件を満たしていると確かめた",
+  verify_not_met: "完了条件を満たしていないと確かめた",
+  verify_uncertain: "完了条件を満たしているか判断できなかった",
+  create: "課題を作った",
+  "task:create": "タスクを足した",
+  "followup:create": "フォローアップを足した",
+  task_status: "タスクの状態が変わった",
+  classify: "分類した",
+  withdraw: "取り下げた",
+  dep_add: "前提を足した",
+  dep_rm: "前提を外した",
+  parent_set: "親を付けた",
+  parent_clear: "親を外した",
+  learn: "学びを記録した",
+  followup: "フォローアップを足した",
+  followup_done: "フォローアップを済みにした",
+  followup_drop: "フォローアップを捨てた",
+  followup_promote: "フォローアップを課題に上げた",
+  op_execute: "不可逆操作を実行した",
+  op_close: "不可逆操作を閉じた",
+};
+
+// 実行の記録の「何の実行か」。判断点は役割の言葉で呼び、番号は括弧で添える。知らない値は値のまま出す。
+export const JUDGMENT_LABELS: Record<string, string> = {
+  J1: "分類する判断点（J1）",
+  J2: "計画を作る判断点（J2）",
+  J3: "委譲の指示文を書く判断点（J3）",
+  J4: "問いを振り分ける判断点（J4）",
+  J5: "完了を検証する判断点（J5）",
+  J6: "学びを書く判断点（J6）",
+  J8: "改修を提案する判断点（J8）",
+};
+export const RUN_KIND_LABELS: Record<string, string> = {
+  judgment: "判断点",
+  delegate: "委譲",
+  contract: "委譲",
+  predict: "衝突の予測",
+};
+export const RUN_RESULT_LABELS: Record<string, string> = {
+  succeeded: "成功",
+  errored: "失敗",
+  launch_failed: "起動に失敗",
+  timed_out: "時間切れ",
+  malformed: "出力が読めなかった",
+  invalid_output: "出力が不正だった",
+  budget_exhausted: "予算を使い切った",
+  interrupted: "中断",
+};
+export const RUN_RUNNING_LABEL = "実行中";
+export const NO_COST_LABEL = "費用なし";
+
+// 経緯の「誰が」
+export const WHO_ME_RELAYED = "あなた（対話）";
+export const WHO_ME_UI = "あなた（画面）";
+export const WHO_ME_TTY = "あなた（端末）";
+export const WHO_AGENT_RUN = "エージェント";
