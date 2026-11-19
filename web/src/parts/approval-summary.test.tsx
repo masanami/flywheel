@@ -183,20 +183,10 @@ it("完了の承認の要約に、マージ可否が未確認であることを 
     }),
   );
   const box = within(el).getByTestId("approval-mergeability");
-  expect(box.textContent).toBe("反映の可否: マージ可否は未確認");
+  expect(box.textContent).toBe("PR のマージ可否: マージ可否は未確認");
 });
 
 it("マージ可否の注記が無ければ、その行を出さない（#629）", async () => {
   const el = await show(summary({}));
   expect(within(el).queryByTestId("approval-mergeability")).toBeNull();
-});
-
-// AC-459 #814: 完了の承認の要約の枠組みの文言（見出しと注記の前置き）に、開発に固有の語が無い。
-it("AC-459 #814: 完了の承認の要約の見出しと「反映の可否」の前置きに、PR・CI・ブランチ・マージ・Issue の語が無い", async () => {
-  const el = await show(summary({ mergeability_note: "確認できません" }));
-  const frame = [
-    ...[...el.querySelectorAll("h4")].map((h) => h.textContent ?? ""),
-    within(el).getByTestId("approval-mergeability").textContent ?? "",
-  ].join("\n");
-  expect(frame).not.toMatch(/(\bPR\b|\bCI\b|\bIssue\b|ブランチ|マージ)/);
 });

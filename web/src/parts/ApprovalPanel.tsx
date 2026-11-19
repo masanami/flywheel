@@ -176,7 +176,7 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
       )}
       {summary.mergeability_note !== "" && (
         <p data-testid="approval-mergeability">
-          反映の可否: {summary.mergeability_note}
+          PR のマージ可否: {summary.mergeability_note}
         </p>
       )}
       {summary.pairs.length > 0 && (
@@ -196,7 +196,7 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           ))}
         </ul>
       )}
-      <h4>反映（release）の対象</h4>
+      <h4>本番反映（release）の PR</h4>
       {summary.releases.length === 0 ? (
         <p>なし</p>
       ) : (
