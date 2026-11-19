@@ -8,11 +8,11 @@ type ClosedSet struct {
 	Codes []string
 }
 
-// ClosedSets は core の閉集合（課題カードの操作・修飾・状態・食い違いの種類、関係グラフの区分・依存の種類・登録の経路、保留の種類、タスクの表示の区分）を
+// ClosedSets は core の閉集合（課題カードの操作・修飾・状態・食い違いの種類、保留の種類、タスクの表示の区分）を
 // 生成物（web/src/api/types.gen.ts）へ書き出すための一覧。順序は core の定義の順。
 // 例外として CONDITIONS_AFTER_RELEASE_HEADINGS は view が持つ承認の見出しで、添字は ConditionsOutlook の値。
 func ClosedSets() []ClosedSet {
-	var actions, modifiers, states, kinds, categories, edgeKinds, registeredVia, holdKinds, phases []string
+	var actions, modifiers, states, kinds, holdKinds, phases []string
 	for _, v := range core.CardActionValues() {
 		actions = append(actions, string(v))
 	}
@@ -24,15 +24,6 @@ func ClosedSets() []ClosedSet {
 	}
 	for _, v := range core.DiscrepancyKindValues() {
 		kinds = append(kinds, string(v))
-	}
-	for _, v := range core.GraphCategoryValues() {
-		categories = append(categories, string(v))
-	}
-	for _, v := range core.GraphEdgeKindValues() {
-		edgeKinds = append(edgeKinds, string(v))
-	}
-	for _, v := range core.GraphRegisteredViaValues() {
-		registeredVia = append(registeredVia, string(v))
 	}
 	for _, v := range core.HoldKindValues() {
 		holdKinds = append(holdKinds, string(v))
@@ -50,9 +41,6 @@ func ClosedSets() []ClosedSet {
 		{Name: "CARD_MODIFIER_CODES", Codes: modifiers},
 		{Name: "STATUS_CODES", Codes: states},
 		{Name: "DISCREPANCY_KIND_CODES", Codes: kinds},
-		{Name: "GRAPH_CATEGORY_CODES", Codes: categories},
-		{Name: "GRAPH_EDGE_KIND_CODES", Codes: edgeKinds},
-		{Name: "GRAPH_REGISTERED_VIA_CODES", Codes: registeredVia},
 		{Name: "HOLD_KIND_CODES", Codes: holdKinds},
 		{Name: "TASK_PHASE_CODES", Codes: phases},
 		{Name: "CONDITIONS_AFTER_RELEASE_HEADINGS", Codes: headings},

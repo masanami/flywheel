@@ -10,7 +10,6 @@ import type {
   CycleStatus,
   CycleWork,
   DirectCompletion,
-  GraphResponse,
   Hold,
   Ingestable,
   Operation,
@@ -83,7 +82,7 @@ export interface MockWorkspace {
   cycle: CycleStatus;
   // サイクルを回すと進むもの（状況の API の cycle_work）。無ければ 0 件。
   cycleWork?: CycleWork;
-  // 関係グラフの偽の関係（親子・依存）。応答は graphOf が課題の導出と合わせて作る
+  // 課題どうしの偽の関係（親子・依存）。課題の詳細の waiting が使う
   graph: GraphSeed;
 }
 
@@ -428,7 +427,7 @@ export function seed(): Record<string, MockWorkspace> {
         },
       },
     }),
-    // 関係グラフの案（flywheel#176）で親の大枠として見せる課題。人間の操作は待たない。
+    // 人間の操作は待たない着手中の課題。
     mk("C-14", "旧基盤の撤去", "in_progress", {
       priority: "P2",
       headline: "旧バッチ基盤を止めて消す",
@@ -461,12 +460,12 @@ export function seed(): Record<string, MockWorkspace> {
       priority: "P2",
       headline: "新しいビルドの成果物を出す手順に書き換える",
     }),
-    // 自動では解けない外部待ちの例（他チームへの相談待ち。案の印 waiting_party を graph.ts が持つ）
+    // 自動では解けない外部待ちの例（他チームへの相談待ち）
     mk("C-20", "返金 API の上限の確認", "in_progress", {
       priority: "P1",
       headline: "決済チームに返金 API の上限を問い合わせている",
     }),
-    // 取り下げた課題。動いている課題（C-18）の前提なので、既定でも灰色で出る（graph.ts）
+    // 取り下げた課題。動いている課題（C-18）の前提
     mk("C-21", "旧テーブルの参照元の洗い出し", "withdrawn", {
       priority: "P2",
       headline: "別の調査で済んだので取り下げた",
@@ -743,7 +742,7 @@ export function seed(): Record<string, MockWorkspace> {
         last_ended_at: null,
         last_result: null,
       },
-      graph: { parents: {}, deps: [] },
+      graph: { deps: [] },
     },
   };
 }
@@ -798,56 +797,6 @@ export function cardOf(m: MockChallenge): Card {
     slot_ids: f.slot ? [f.slot.slot_id] : [],
     state: s,
   };
-}
-
-// `GET …/graph` の偽の応答。区分・running・stale は課題のカードの導出と同じ規則（人間 > 完了 > 取り下げ > システム。
-// 外部待ちは core から出ない）。登録の日時は 2026-10-10T00:00:00Z からの経過分。
-export function graphOf(w: MockWorkspace): GraphResponse {
-  const byId = new Map(w.items.map((m) => [m.c.id, m]));
-  const idNum = (id: string) => Number(id.replace(/^\D+/, ""));
-  const nodes = [...w.items]
-    .sort((a, b) => idNum(a.c.id) - idNum(b.c.id))
-    .map((m) => {
-      const card = cardOf(m);
-      const category =
-        card.next_human_actions.length > 0
-          ? "human"
-          : isParentAgent(m)
-            ? "parent_agent"
-            : m.c.status === "done"
-              ? "done"
-              : m.c.status === "withdrawn"
-                ? "withdrawn"
-                : "system";
-      return {
-        category,
-        context: m.context,
-        headline: m.headline,
-        id: m.c.id,
-        next_human_actions: card.next_human_actions,
-        parent_id: w.graph.parents[m.c.id] ?? null,
-        priority: m.c.priority,
-        running: !!(m.flags.running || m.flags.unresponsive),
-        stale: !!m.flags.unresponsive,
-        state: card.state,
-        title: m.c.title,
-      };
-    });
-  // 前提は先行が完了していれば満たされている
-  const edges = w.graph.deps
-    .sort((a, b) => idNum(a.from) - idNum(b.from) || idNum(a.to) - idNum(b.to))
-    .map((d) => ({
-      directed: true,
-      from: d.from,
-      kind: d.kind,
-      registered_at: new Date(
-        Date.parse("2026-10-10T00:00:00Z") + d.minutes * 60_000,
-      ).toISOString(),
-      registered_via: d.via,
-      satisfied: byId.get(d.from)?.c.status === "done",
-      to: d.to,
-    }));
-  return { edges, nodes };
 }
 
 // 課題 id が待っている理由（`GET …/challenges/{id}` の waiting）。まだ終わっていない前提の課題。id 自身が終わっていれば空。

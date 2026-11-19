@@ -10,7 +10,7 @@
 //   起点でない動いている課題を置かない（「ほかの課題」が空になる形を確かめるため）。
 // - 状態: 連鎖の前のほう（親 1〜3）は終わった課題が多く、親 4・5 に着手中・実行中、親 6〜9 は分類済・計画承認待ちが多い。
 //   親 6〜9 の多くは起点ではなく、起点から何段も先で推移的に注目に入る。
-//   先行が完了していない依存の後続は、分類済か計画承認待ちに直す（mock/graph.test.ts の規則）。
+//   先行が完了していない依存の後続は、分類済か計画承認待ちに直す。
 
 import type { MockDep } from "./graph.ts";
 import type { MockChallenge, MockWorkspace } from "./store.ts";
@@ -40,7 +40,6 @@ export interface LargeSpec {
 
 export interface LargeShape {
   specs: LargeSpec[];
-  parents: Record<string, string>;
   deps: MockDep[];
 }
 
@@ -134,18 +133,9 @@ const TASKS = [
 // 線でつながる形。connected が false なら、同じ課題から親子と依存をすべて抜く。
 export function largeShape(connected: boolean): LargeShape {
   const specs: LargeSpec[] = [];
-  const parents: Record<string, string> = {};
   const deps: MockDep[] = [];
-  let n = 0;
   const dep = (from: string, to: string, kind: MockDep["kind"]) => {
-    const vias: MockDep["via"][] = ["plan", "manual", "unknown"];
-    deps.push({
-      from,
-      to,
-      kind,
-      via: vias[n % 3] ?? "plan",
-      minutes: 60 * ++n,
-    });
+    deps.push({ from, to, kind });
   };
   for (let g = 0; g < LARGE_PARENTS; g++) {
     specs.push({
@@ -161,7 +151,6 @@ export function largeShape(connected: boolean): LargeShape {
         title: `${AREAS[g]}${TASKS[i]}`,
         ...draftChild(g, i),
       });
-      parents[childId(g, i)] = i >= 7 ? childId(g, 0) : parentId(g);
     }
     dep(childId(g, 1), childId(g, 2), "prerequisite");
     dep(childId(g, 2), childId(g, 3), "prerequisite");
@@ -189,9 +178,7 @@ export function largeShape(connected: boolean): LargeShape {
     to.unresponsive = false;
     to.operation = false;
   }
-  return connected
-    ? { specs, parents, deps }
-    : { specs, parents: {}, deps: [] };
+  return connected ? { specs, deps } : { specs, deps: [] };
 }
 
 // mock の課題の作り方（store.ts の mk 等）を受け取り、ワークスペースを組み立てる（循環 import を避ける）。
@@ -206,6 +193,6 @@ export function largeWorkspace(
     ...base,
     meta: { error: null, name, path: `/mock/${name}`, state: "ok" },
     items: shape.specs.map(build),
-    graph: { parents: shape.parents, deps: shape.deps },
+    graph: { deps: shape.deps },
   };
 }

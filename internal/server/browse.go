@@ -143,19 +143,6 @@ func challengesHandler(fleet *Fleet, checks *checkCache, now func() time.Time) h
 	}
 }
 
-// graphHandler は GET /api/v1/workspaces/{name}/graph（課題の関係グラフ）。core の記録だけから作り、
-// 上流（GitHub）にも LLM にも問い合わせない。
-func graphHandler(fleet *Fleet, now func() time.Time) http.HandlerFunc {
-	return withStore(fleet, func(w http.ResponseWriter, r *http.Request, st *core.Store) {
-		g, err := st.ChallengeGraph(r.Context(), now())
-		if err != nil {
-			writeCoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, view.FromChallengeGraph(g))
-	})
-}
-
 // treeHandler は GET /api/v1/workspaces/{name}/tree（課題のツリー）。core の記録だけから作り、上流（GitHub）にも
 // LLM にも問い合わせず、ストアへ書かない。予算の上限は、ワークスペースの宣言を読んで決める。
 func treeHandler(fleet *Fleet, now func() time.Time) http.HandlerFunc {

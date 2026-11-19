@@ -4,7 +4,7 @@ import { ApiError } from "../api/error.ts";
 import { CONDITIONS_AFTER_RELEASE_HEADINGS } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
 import { createMockApi } from "./api.ts";
-import { MockStore, graphOf } from "./store.ts";
+import { MockStore } from "./store.ts";
 
 let api: ApiClient;
 beforeEach(() => {
@@ -84,7 +84,7 @@ describe("親が直接行う保留（#452）", () => {
     return { w, m };
   }
 
-  it("status は parent_agent に出して needs_human から外し、カードは問いに答える操作を出さず、グラフの区分は parent_agent", async () => {
+  it("status は parent_agent に出して needs_human から外し、カードは問いに答える操作を出さない", async () => {
     const store = new MockStore();
     const { w } = makeParentDirect(store);
     const a = createMockApi(store, { latencyMs: 0 });
@@ -97,12 +97,6 @@ describe("親が直接行う保留（#452）", () => {
     );
     expect(card?.card.state).toBe("awaiting_human");
     expect(card?.card.next_human_actions).toEqual([]);
-    const node = graphOf(w).nodes.find((n) => n.id === "C-8");
-    expect(node?.category).toBe("parent_agent");
-    // 終わった課題・関係を持たない課題は従来どおり
-    const cats = new Map(graphOf(w).nodes.map((n) => [n.id, n.category]));
-    expect(cats.get("C-12")).toBe("done");
-    expect(cats.get("C-21")).toBe("withdrawn");
     // オーナーが答える問いにも出ない（C-28 のタスクの問いは親が直接行う保留ではないので残る）
     expect((await a.questions()).questions.map((x) => x.challenge_id)).toEqual([
       "C-28",
