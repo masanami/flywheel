@@ -4,21 +4,21 @@ import {
   guidesFor,
   showsConversationNote,
 } from "../guidance.ts";
-import type { Challenge } from "./types.ts";
 
 // 詳細の操作の案内。ボタンで承認できない操作には端末のコマンドを示し、
 // 対話で伝えれば LLM が記録できる操作にはその旨を添える。
 export function ApprovalGuide({
-  challenge,
+  challengeId,
+  actions,
   workspacePath,
   className,
 }: {
-  challenge: Challenge;
+  challengeId: string;
+  actions: string[];
   workspacePath: string;
   className?: string;
 }) {
-  const actions = challenge.nextHumanActions;
-  const guides = guidesFor(challenge.id, workspacePath, actions);
+  const guides = guidesFor(challengeId, workspacePath, actions);
   const conversation = showsConversationNote(actions);
   if (guides.length === 0 && !conversation) {
     return null;

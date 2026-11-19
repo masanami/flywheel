@@ -30,7 +30,7 @@ import {
   toCard,
   waitingOf,
 } from "./store.ts";
-import { alphaTree } from "./tree.ts";
+import { alphaDetailExtras, alphaTree } from "./tree.ts";
 
 /** 課題の詳細の tree の空の値（試作の画面が使うまでは、タスクも件数も持たない）。 */
 function emptyTree(
@@ -99,6 +99,47 @@ export function createMockApi(
     return m;
   };
 
+  // 課題の詳細の応答。alpha は課題のツリーの偽の応答（alphaTree）の値をそのまま tree に使い、
+  // 画面が core の値を出すだけであることを確かめられるようにする。それ以外のエージェントは空の tree。
+  const showOf = (
+    name: string,
+    id: string,
+    m: MockChallenge,
+  ): ShowCardResponse => {
+    const t =
+      name === "alpha"
+        ? [...alphaTree().challenges, ...alphaTree().recent_done].find(
+            (x) => x.id === id,
+          )
+        : undefined;
+    const extra = name === "alpha" ? alphaDetailExtras(id) : {};
+    return {
+      approvals: m.approvals,
+      card: cardOf(m),
+      challenge: {
+        ...m.c,
+        dependencies: [],
+        uses_integration: t?.uses_integration ?? null,
+        dependents: extra.dependents ?? [],
+        followup_of: null,
+        improvement: null,
+      },
+      direct_completions: m.directCompletions,
+      followups: extra.followups ?? [],
+      holds: m.holds,
+      operations: m.operations,
+      plans: m.plans,
+      runs: m.runs,
+      pairs: pairsOf(m.stages),
+      source_binding: extra.source_binding ?? null,
+      source_children: extra.source_children ?? [],
+      stages: m.stages,
+      tasks: extra.tasks ?? [],
+      tree: t ?? emptyTree(m.c.id, m.c.title, m.c.status, m.c.status_label),
+      waiting: waitingOf(wsOf(name), id),
+    };
+  };
+
   const api: ApiClient = {
     async workspaces(): Promise<WorkspaceList> {
       await wait();
@@ -146,31 +187,7 @@ export function createMockApi(
     async challenge(name, id): Promise<ShowCardResponse> {
       await wait();
       const m = itemOf(name, id);
-      return {
-        approvals: m.approvals,
-        card: cardOf(m),
-        challenge: {
-          ...m.c,
-          dependencies: [],
-          uses_integration: null,
-          dependents: [],
-          followup_of: null,
-          improvement: null,
-        },
-        direct_completions: m.directCompletions,
-        followups: [],
-        holds: m.holds,
-        operations: m.operations,
-        plans: m.plans,
-        runs: m.runs,
-        pairs: pairsOf(m.stages),
-        source_binding: null,
-        source_children: [],
-        stages: m.stages,
-        tasks: [],
-        tree: emptyTree(m.c.id, m.c.title, m.c.status, m.c.status_label),
-        waiting: waitingOf(wsOf(name), id),
-      };
+      return showOf(name, id, m);
     },
     async log(name, id): Promise<LogResponse> {
       await wait();
@@ -332,31 +349,7 @@ export function createMockApi(
       m.completionDirect = false;
       m.c.status_label = STATUS_LABEL[m.c.status] ?? m.c.status;
       m.c.version += 1;
-      return {
-        approvals: m.approvals,
-        card: cardOf(m),
-        challenge: {
-          ...m.c,
-          dependencies: [],
-          uses_integration: null,
-          dependents: [],
-          followup_of: null,
-          improvement: null,
-        },
-        direct_completions: m.directCompletions,
-        followups: [],
-        holds: m.holds,
-        operations: m.operations,
-        plans: m.plans,
-        runs: m.runs,
-        pairs: pairsOf(m.stages),
-        source_binding: null,
-        source_children: [],
-        stages: m.stages,
-        tasks: [],
-        tree: emptyTree(m.c.id, m.c.title, m.c.status, m.c.status_label),
-        waiting: waitingOf(wsOf(name), id),
-      };
+      return showOf(name, id, m);
     },
     async cycle(name) {
       await wait();

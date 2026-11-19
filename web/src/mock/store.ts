@@ -479,6 +479,16 @@ export function seed(): Record<string, MockWorkspace> {
     // 4 つを待つ。広い幅のノード・一覧の行で、チップが題名や「▶ 実施中」と重ならないかを見る
     mk("C-28", "請求データの夜間集計を新しい基盤へ載せ替える", "in_progress", {
       priority: "P1",
+      description:
+        "夜間の集計を新しい基盤へ載せ替える。**旧基盤の負荷**を下げるのが目的。",
+      done_criteria:
+        "- 新基盤で夜間集計が **3 日続けて** 成功する\n- 旧基盤のジョブを止めても請求が崩れない",
+      plans: [
+        plan(
+          1,
+          "## 方針\n\n旧基盤の集計を、新基盤の同じ表へ書き出す形に置き換える。\n\n| 手順 | 担当 | 確かめ方 | 備考 |\n| --- | --- | --- | --- |\n| 1. 書き出し先の表を作る | 基盤 | 表がある | 列の名前は旧基盤とそろえる。長い説明が続いても枠の中で横にスクロールできる |\n| 2. 集計クエリを移す | 請求 | 件数が一致する | 夜間の 3 時に走らせる |\n\n```sql\nSELECT customer_id, SUM(amount) AS total FROM invoices WHERE closed_at >= now() - interval '1 day' GROUP BY customer_id ORDER BY total DESC;\n```",
+        ),
+      ],
       headline: "夜間集計を新基盤で回し、旧基盤の負荷を下げる",
       flags: {
         running: true,

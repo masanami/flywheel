@@ -1,10 +1,8 @@
 import type { ReactNode } from "react";
 import { api } from "../api/client.ts";
-import { CardDetail } from "../board/CardDetail.tsx";
-import { toAgentBoard } from "../board/adapt.ts";
 import { ChallengesScreen } from "../challenges/ChallengesScreen.tsx";
+import { ChallengeDetail } from "../detail/ChallengeDetail.tsx";
 import type { LiveState } from "../live/useLive.ts";
-import { RefreshKeyContext } from "../nav.tsx";
 import { AgentRail } from "./AgentRail.tsx";
 import { CycleStartButton } from "./CycleStartButton.tsx";
 import { NotFound } from "./NotFound.tsx";
@@ -132,7 +130,17 @@ function AgentBody({
       }
       return null;
     case "challenge":
-      return <ChallengeBody live={live} agentName={agentName} id={route.id} />;
+      return (
+        <ChallengeDetail
+          live={live}
+          agentName={agentName}
+          workspacePath={
+            live.workspaces.find((w) => w.name === agentName)?.path ?? ""
+          }
+          id={route.id}
+          view={route.view}
+        />
+      );
     case "approve_plan":
       return (
         <ChallengeGate live={live} agentName={agentName} id={route.id}>
@@ -172,36 +180,6 @@ function ChallengeGate({
     return <NotFound homeHref={homeOf(agentName)} />;
   }
   return <>{children}</>;
-}
-
-function ChallengeBody({
-  live,
-  agentName,
-  id,
-}: {
-  live: LiveState;
-  agentName: string;
-  id: string;
-}) {
-  const agent = live.workspaces.find((w) => w.name === agentName);
-  const data = live.data[agentName];
-  const challenge =
-    agent && data
-      ? toAgentBoard(agent, data).challenges.find((c) => c.id === id)
-      : undefined;
-  return (
-    <ChallengeGate live={live} agentName={agentName} id={id}>
-      {agent && challenge ? (
-        <RefreshKeyContext.Provider value={live.lastUpdated}>
-          <CardDetail
-            challenge={challenge}
-            agentName={agentName}
-            workspacePath={agent.path}
-          />
-        </RefreshKeyContext.Provider>
-      ) : null}
-    </ChallengeGate>
-  );
 }
 
 function TaskBody({

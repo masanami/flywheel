@@ -2,6 +2,10 @@
 // ここでは画面が出すだけであることを確かめられるよう、値を直に書く。開発時の mock モードだけが読み込む。
 
 import type {
+  Followup,
+  SourceBinding,
+  SourceChild,
+  Task,
   TreeChallenge,
   TreeResponse,
   TreeTask,
@@ -170,4 +174,85 @@ export function alphaTree(): TreeResponse {
     }),
   ];
   return { challenges, recent_done };
+}
+
+// 課題の詳細（課題の詳細の API）で、alpha の課題に足す値。C-28 は、取り込み元の子・フォローアップ・
+// 前提にされている課題を持つ（幅 360px の画面で折り返しや横の溢れを確かめるため、長い題名・長い URL も含む）。
+type Extras = {
+  dependents?: string[];
+  followups?: Followup[];
+  source_binding?: SourceBinding | null;
+  source_children?: SourceChild[];
+  tasks?: Task[];
+};
+
+const followup = (id: string, status: string, title: string): Followup => ({
+  challenge_id: "C-28",
+  created_at: "2026-11-01T00:00:00.000Z",
+  detail: "",
+  id,
+  note: null,
+  promoted_challenge_id: null,
+  reason: null,
+  source: "learn",
+  status,
+  title,
+  updated_at: "2026-11-01T00:00:00.000Z",
+});
+
+export function alphaDetailExtras(id: string): Extras {
+  if (id !== "C-28") return {};
+  return {
+    dependents: ["C-20"],
+    followups: [
+      followup("F-1", "open", "集計の遅い夜のログを整理する"),
+      followup("F-2", "open", "旧基盤の撤去の手順を書き出す"),
+      followup("F-3", "done", "テーブル名の揺れを直す"),
+    ],
+    source_binding: {
+      comments_count: 0,
+      created_at: "2026-10-01T00:00:00.000Z",
+      external_key: "example/billing#28",
+      fingerprint: "x",
+      policy_state: "in_policy",
+      read_comments_count: 0,
+      read_upstream_updated_at: null,
+      source_id: "example",
+      updated_at: "2026-10-01T00:00:00.000Z",
+      upstream_state: "open",
+      upstream_updated_at: null,
+      url: "https://example.com/billing/issues/28",
+    },
+    source_children: [
+      {
+        external_key: "example/billing#29",
+        parent_external_key: "example/billing#28",
+        title: "集計クエリを新しい基盤向けに書き直す",
+        upstream_state: "open",
+        url: "https://example.com/billing/issues/29/with/a/very/long/path/that/should/wrap/instead/of/overflowing/the/page",
+      },
+      {
+        external_key: "example/billing#30",
+        parent_external_key: "example/billing#28",
+        title: "旧基盤の夜間ジョブを止める",
+        upstream_state: "closed",
+        url: "https://example.com/billing/issues/30",
+      },
+    ],
+    tasks: [
+      {
+        body: "",
+        depends_on: [],
+        done_criteria: "",
+        id: "T-40",
+        non_goals: [],
+        operation: "",
+        plan_version: 1,
+        repo: "",
+        source_key: "example/billing#29",
+        status: "done",
+        title: "集計クエリの書き直し",
+      },
+    ],
+  };
 }

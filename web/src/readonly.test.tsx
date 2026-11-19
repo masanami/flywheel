@@ -73,7 +73,7 @@ function destinations(agents: string[], challengeId?: string): Destination[] {
       {
         id: `${first}/challenge`,
         hash: c,
-        wait: () => screen.findByTestId("card-detail-content"),
+        wait: () => screen.findByTestId("challenge-detail"),
       },
     );
   }
@@ -150,8 +150,8 @@ function awaitingApproval(): Record<string, unknown> {
     context: null,
     headline: null,
     modifiers: [],
-    next_human_actions: ["approve_plan"],
-    state: "awaiting_plan_approval",
+    next_human_actions: ["approve_completion"],
+    state: "awaiting_completion_approval",
   };
   const challenge = {
     created_at: "",
@@ -162,7 +162,7 @@ function awaitingApproval(): Record<string, unknown> {
     id: "C-1",
     priority: null,
     reporter: "me",
-    status: "awaiting_plan_approval",
+    status: "awaiting_completion_approval",
     status_label: "",
     title: "題名",
     updated_at: "",
@@ -210,10 +210,30 @@ function awaitingApproval(): Record<string, unknown> {
       card,
       challenge,
       direct_completions: [],
+      followups: [],
       holds: [],
       operations: [],
       plans: [],
       runs: [],
+      tasks: [],
+      tree: {
+        budget_usd: null,
+        children: [],
+        cost_usd: 0,
+        dependencies: [],
+        followups_open: 0,
+        id: "C-1",
+        next_human_actions: ["approve_completion"],
+        parent: null,
+        status: "awaiting_completion_approval",
+        status_label: "完了確認待ち",
+        tasks: [],
+        tasks_done: 0,
+        tasks_total: 0,
+        title: "題名",
+        updated_at: "2026-11-01T00:00:00.000Z",
+        uses_integration: null,
+      },
       pairs: S4_PAIRS,
       source_binding: null,
       source_children: [],
@@ -225,11 +245,15 @@ function awaitingApproval(): Record<string, unknown> {
       approval: {
         challenge_id: "C-1",
         done_criteria: "完了条件",
-        kind: "plan",
+        kind: "completion",
         other_pending_operations: [],
+        conditions_after_release: [],
+        conditions_after_release_heading: "",
+        direct_completion: null,
+        mergeability_note: "",
         pairs: S4_PAIRS,
-        plan: { body: "承認する計画", version: 1 },
-        release_held: false,
+        plan: null,
+        release_held: true,
         releases: [],
         stages: S4_STAGES,
         title: "題名",
@@ -265,14 +289,15 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
       fireEvent.click(b);
     }
   });
-  const m = await screen.findByTestId("card-detail-content");
-  // S4 の画面（段階の欄・図・承認の要約）が出ている
+  const m = await screen.findByTestId("challenge-detail");
+  // 「計画の本文」の切り替えで段階の欄・図が出る。完了の承認の要約も出ている
+  fireEvent.click(within(m).getByRole("link", { name: "計画の本文" }));
   await within(m).findByTestId("stages-detail");
   await within(m).findByTestId("figure-svg");
-  await within(m).findByTestId("approval-stages");
+  await within(m).findByTestId("approval-summary");
   fireEvent.click(
     await within(m).findByRole("button", {
-      name: "計画を承認する",
+      name: /完了を承認する/,
       hidden: true,
     }),
   );
