@@ -181,3 +181,25 @@ export const CYCLE_WORK_STAGE_LABELS: Record<keyof CycleWorkStages, string> = {
   improve: "改修の提案",
   cleanup: "片付け",
 };
+
+// 課題の画面の凡例。区分の語は PHASE_LABELS と同じで、「次に走る」だけ括弧の補足を添える。
+export const PHASE_LEGEND_ORDER = [
+  "running",
+  "waiting",
+  "next",
+  "blocked",
+  "done",
+] as const satisfies readonly TaskPhase[];
+
+export const PHASE_LEGEND_LABELS: Record<
+  (typeof PHASE_LEGEND_ORDER)[number],
+  string
+> = {
+  running: PHASE_LABELS.running,
+  waiting: PHASE_LABELS.waiting,
+  next: "次に走る（前提は済み）",
+  blocked: PHASE_LABELS.blocked,
+  done: PHASE_LABELS.done,
+};
+
+export const LEGEND_EDGE_HINT = "線は前提です（左が終わると、右が走れます）。";

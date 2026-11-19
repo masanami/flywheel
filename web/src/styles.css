@@ -29,6 +29,15 @@
   --board-source-runs-bg: #eafbf1;
   --board-source-runs-fg: #2f8a55;
 
+  /* タスクの表示の区分（phase）の箱の背景。6 つの値は、明るい配色でも暗い配色でも互いに異なる。 */
+  --phase-running-bg: #dbe8fb;
+  --phase-waiting-bg: #fdf3e0;
+  --phase-next-bg: #fff6bf;
+  --phase-blocked-bg: #ececef;
+  --phase-done-bg: #dff5e7;
+  --phase-cancelled-bg: #f7dede;
+  --phase-border: #9a9aa2;
+
   /* カラムヘッダのサイクル状態（P3-2）・実行中セクションの配色。 */
   --cycle-status-running-fg: #2f5fa8;
   --cycle-status-idle-fg: #9aa0a6;
@@ -82,6 +91,14 @@
     --board-source-ledger-fg: #c2c2c8;
     --board-source-runs-bg: #1f3a2b;
     --board-source-runs-fg: #8fd6ac;
+
+    --phase-running-bg: #24314a;
+    --phase-waiting-bg: #3a301a;
+    --phase-next-bg: #4a4416;
+    --phase-blocked-bg: #2c2d33;
+    --phase-done-bg: #1f3a2b;
+    --phase-cancelled-bg: #4a2323;
+    --phase-border: #6b6b72;
 
     --cycle-status-running-fg: #9dc0f5;
     --cycle-status-idle-fg: #9a9aa2;
@@ -679,6 +696,137 @@ body {
 }
 .cycle-notice {
   margin-left: 0.5rem;
+}
+
+/* 課題の画面: 凡例・課題の枠・タスクのツリー */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+}
+.legend-hint {
+  color: var(--board-muted-fg);
+}
+.phase-pill {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--phase-border);
+  border-radius: 999px;
+}
+.phase-pill[data-phase="running"],
+.task-box[data-phase="running"] {
+  background: var(--phase-running-bg);
+}
+.phase-pill[data-phase="waiting"],
+.task-box[data-phase="waiting"] {
+  background: var(--phase-waiting-bg);
+}
+.phase-pill[data-phase="next"],
+.task-box[data-phase="next"] {
+  background: var(--phase-next-bg);
+}
+.phase-pill[data-phase="blocked"],
+.task-box[data-phase="blocked"] {
+  background: var(--phase-blocked-bg);
+}
+.phase-pill[data-phase="done"],
+.task-box[data-phase="done"] {
+  background: var(--phase-done-bg);
+}
+.phase-pill[data-phase="cancelled"],
+.task-box[data-phase="cancelled"] {
+  background: var(--phase-cancelled-bg);
+}
+.challenge-frame {
+  min-width: 0;
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--board-card-border);
+  border-radius: 8px;
+  background: var(--board-card-bg);
+}
+.challenge-frame h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+.status-pill,
+.action-pill {
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--board-border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: normal;
+}
+.action-pill {
+  background: var(--board-needs-human-bg);
+  border-color: var(--board-needs-human-border);
+}
+.frame-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-size: 0.85rem;
+  color: var(--board-muted-fg);
+}
+.frame-meta b {
+  color: var(--board-fg);
+}
+.frame-deps {
+  margin: 0.4rem 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.dep-unmet {
+  color: var(--board-error-fg);
+}
+.tree-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin-top: 0.5rem;
+}
+.tree-canvas {
+  position: relative;
+}
+.tree-edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.tree-edges path {
+  fill: none;
+  stroke: var(--phase-border);
+  stroke-width: 1.5;
+}
+.task-box {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--phase-border);
+  border-radius: 6px;
+  color: var(--board-fg);
+  text-decoration: none;
+  overflow: hidden;
+}
+a.task-box:hover {
+  border-color: var(--board-link);
+}
+.task-title {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-phase {
+  color: var(--board-muted-fg);
+}
+.done-toggle {
+  margin: 0.5rem 0;
 }
 
 /* ---- 「いま進められること」 ---- */
