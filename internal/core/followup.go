@@ -254,14 +254,16 @@ func (s *Store) ListFollowups(ctx context.Context, f FollowupFilter) ([]Followup
 	return out, nil
 }
 
-// countOpenFollowupsToTriage は、未のうち、上げてあって上げた先の課題が取り下げでないもの
-// （オーナーがもう扱いを決めて進んでいるもの）を除いた件数。状況（status）の未の件数が使う。
+// openFollowupToTriageCond は「未で、オーナーがまだ扱いを決めていない」フォローアップの条件（表の別名は f）。
+// 未のうち、上げてあって上げた先の課題が取り下げでないもの（もう扱いを決めて進んでいるもの）を除く。
+// 状況（status）の未の件数と、課題のツリーの未のフォローアップの件数が、同じ条件を使う。
+const openFollowupToTriageCond = `f.status = '` + string(FollowupStatusOpen) + `' AND (f.promoted_challenge_id IS NULL
+	OR EXISTS (SELECT 1 FROM challenge c WHERE c.id = f.promoted_challenge_id AND c.status = '` + string(StatusWithdrawn) + `'))`
+
+// countOpenFollowupsToTriage は、openFollowupToTriageCond に当たるフォローアップの件数。状況（status）の未の件数が使う。
 func countOpenFollowupsToTriage(ctx context.Context, tx *sql.Tx) (int, error) {
 	var n int
-	err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM followup f WHERE f.status = ? AND (f.promoted_challenge_id IS NULL
-		   OR EXISTS (SELECT 1 FROM challenge c WHERE c.id = f.promoted_challenge_id AND c.status = ?))`,
-		string(FollowupStatusOpen), string(StatusWithdrawn)).Scan(&n)
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM followup f WHERE `+openFollowupToTriageCond).Scan(&n)
 	return n, err
 }
 

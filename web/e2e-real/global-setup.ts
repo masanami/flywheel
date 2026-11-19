@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-// 本物の serve の E2E の準備の段（flywheel#463）。
+// 本物の serve の E2E の準備の段。
 //   1. 一時ディレクトリに HOME・XDG_CONFIG_HOME・作業ディレクトリ・ワークスペース（seed）を作る
-//   2. Go のテスト TestRelationGraphSeed で、ワークスペースへ種のストアを毎回作る
+//   2. Go のテスト TestE2ESeed（internal/core/e2e_seed_test.go）で、ワークスペースへ種のストアを毎回作る
 //   3. ビルド済みの build/flywheel を `serve --port 0 --workspace <ワークスペース>` で起動し、
 //      標準エラーの `listening on <addr>` から番地を読んで、試験へ環境変数で渡す
 // 一時の HOME・XDG_CONFIG_HOME は serve にだけ渡す（Go のキャッシュと Playwright のブラウザの置き場は
@@ -92,13 +92,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   try {
     execFileSync(
       "go",
-      [
-        "test",
-        "-count=1",
-        "-run",
-        "^TestRelationGraphSeed$",
-        "./internal/core/",
-      ],
+      ["test", "-count=1", "-run", "^TestE2ESeed$", "./internal/core/"],
       {
         cwd: repoRoot,
         env: { ...process.env, [SEED_ENV]: workspace },

@@ -8,6 +8,18 @@ import (
 
 // docs/features/ui-relation-graph.md §待っている理由。ボードの詳細は、まだ終わっていない前提の課題を示す。
 
+// relationStore は statuses の順に C-1, C-2, … の課題（その状態）を持つ実ストア。
+func relationStore(t *testing.T, statuses ...Status) (*Store, []Challenge) {
+	t.Helper()
+	s := newStoreForTest(t)
+	fixedActor(t, "alice")
+	var cs []Challenge
+	for _, st := range statuses {
+		cs = append(cs, cardChallenge(t, s, st))
+	}
+	return s, cs
+}
+
 func waitingOf(t *testing.T, s *Store, id string) WaitingReasons {
 	t.Helper()
 	d, err := s.GetChallengeWithoutReap(context.Background(), id)
@@ -19,7 +31,7 @@ func waitingOf(t *testing.T, s *Store, id string) WaitingReasons {
 
 func TestWaiting_ListsOnlyUnmetPrerequisites(t *testing.T) {
 	t.Parallel()
-	s, _ := graphStore(t, StatusInProgress, StatusDone, StatusClassified, StatusClassified)
+	s, _ := relationStore(t, StatusInProgress, StatusDone, StatusClassified, StatusClassified)
 	// C-4 は C-2（完了）と C-3（未完了）に依存する。
 	insertDepEdge(t, s, 4, 2)
 	insertDepEdge(t, s, 4, 3)
@@ -33,7 +45,7 @@ func TestWaiting_ListsOnlyUnmetPrerequisites(t *testing.T) {
 // 自分が終わった課題には、待っている理由が無い。空は nil でなく空スライス。
 func TestWaiting_FinishedChallengeAndEmptyListAreNotNil(t *testing.T) {
 	t.Parallel()
-	s, _ := graphStore(t, StatusClassified, StatusDone, StatusWithdrawn)
+	s, _ := relationStore(t, StatusClassified, StatusDone, StatusWithdrawn)
 	insertDepEdge(t, s, 2, 1)
 	insertDepEdge(t, s, 3, 1)
 	for _, id := range []string{"C-1", "C-2", "C-3"} {

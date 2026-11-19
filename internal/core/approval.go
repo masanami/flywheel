@@ -90,6 +90,13 @@ type ApprovalPreview struct {
 	PlanTopics          []PlanTopicView
 	PlanTasks           []PlanTaskView
 	PlanUsesIntegration *bool
+	// PlanTaskPhases は PlanTasks と同じ順のタスクの表示の区分（承認の前なので next か blocked）。
+	PlanTaskPhases []TaskPhase
+	// PlanSummary は計画の一言の要約（書かれていない・過去の形の計画では nil）。PlanBudgetUSD は計画の予算の上限
+	// （PrepareApprovalFor に宣言を渡したときだけ、宣言のサイズごとの既定も使って決める。決められないとき nil）。
+	// 端末の approve の要約と --json はどちらも使わない。
+	PlanSummary   *string
+	PlanBudgetUSD *float64
 
 	// Kind == ApprovalKindCompletion のときだけ有効。
 	DoneCriteria string
@@ -165,7 +172,7 @@ func (p *ApprovalPreview) ReleaseEffect(decision ApprovalDecision, holdRelease b
 // ErrTerminalState、計画承認待ち・完了確認待ちのいずれでもなければ
 // ErrInvalidTransition（Lookup(current.Status, OpApprove/OpReject) の定義域と
 // 一致する。T5・T6・T13・T15 以外の（状態, 操作）の組は遷移表に無い）。
-func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPreview, error) {
+func (s *Store) prepareApproval(ctx context.Context, id string, agent *AgentDeclaration) (*ApprovalPreview, error) {
 	cid, ok := parseChallengeID(id)
 	if !ok {
 		return nil, ErrNotFound
@@ -210,13 +217,14 @@ func (s *Store) prepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 			case err == nil:
 				preview.PlanVersion = version
 				preview.PlanBody = body
-				// 承認の要約は予算の上限を計画の本文で出すので、宣言は渡さない。
-				pv, err := loadPlanView(ctx, tx, cid, nil)
+				// 予算の上限は、宣言が渡されたとき（API）だけ決める。端末の要約は予算の上限を出さない。
+				pv, err := loadPlanView(ctx, tx, cid, agent)
 				if err != nil {
 					return err
 				}
 				if pv != nil {
 					preview.PlanTopics, preview.PlanTasks, preview.PlanUsesIntegration = pv.Topics, pv.Tasks, pv.UsesIntegration
+					preview.PlanTaskPhases, preview.PlanSummary, preview.PlanBudgetUSD = planTaskPhases(pv.Tasks), pv.Summary, pv.BudgetUSD
 				}
 			case errors.Is(err, sql.ErrNoRows):
 				// 計画承認待ちなのに計画行が無い状態は本来到達しない
@@ -351,7 +359,13 @@ func loadConditionsAfterRelease(ctx context.Context, tx *sql.Tx, cid int64) ([]s
 
 // PrepareApproval は approve の①（読み取り）。
 func (s *Store) PrepareApproval(ctx context.Context, id string) (*ApprovalPreview, error) {
-	return s.prepareApproval(ctx, id)
+	return s.prepareApproval(ctx, id, nil)
+}
+
+// PrepareApprovalFor は PrepareApproval に、計画の予算の上限をサイズごとの既定から決めるための宣言を渡す版
+// （API の承認の要約が使う。nil なら PrepareApproval と同じ）。
+func (s *Store) PrepareApprovalFor(ctx context.Context, id string, agent *AgentDeclaration) (*ApprovalPreview, error) {
+	return s.prepareApproval(ctx, id, agent)
 }
 
 // PrepareRejection は reject の①（読み取り）。reason が
@@ -369,7 +383,7 @@ func (s *Store) PrepareRejection(ctx context.Context, id string, reason string) 
 	if strings.TrimSpace(reason) == "" {
 		return nil, ErrValidation
 	}
-	return s.prepareApproval(ctx, id)
+	return s.prepareApproval(ctx, id, nil)
 }
 
 // AnswerPreview は PrepareAnswer が返す、answer の①（読み取り）の結果。

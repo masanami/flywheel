@@ -7,26 +7,60 @@ import { CONDITIONS_AFTER_RELEASE_HEADINGS } from "../api/types.gen.ts";
 import type {
   ApprovalSummaryResponse,
   CycleStarted,
+  FollowupListResponse,
   LogResponse,
   NeedsHumanResponse,
   QuestionsResponse,
   RunReportResponse,
   ShowCardResponse,
+  TreeChallenge,
+  TreeResponse,
   WorkspaceList,
 } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
+import { ALPHA_FOLLOWUPS } from "./followups.ts";
+import { alphaLogExtras } from "./log.ts";
+import { RICH_PLANS } from "./plan.ts";
 import {
   type MockChallenge,
   type MockStore,
   type MockWorkspace,
   STATUS_LABEL,
   cardOf,
-  graphOf,
+  ingestableOf,
   pairsOf,
   statusOf,
   toCard,
   waitingOf,
 } from "./store.ts";
+import { alphaDetailExtras, alphaTree } from "./tree.ts";
+
+/** 課題の詳細の tree の空の値（試作の画面が使うまでは、タスクも件数も持たない）。 */
+function emptyTree(
+  id: string,
+  title: string,
+  status: string,
+  statusLabel: string,
+): TreeChallenge {
+  return {
+    budget_usd: null,
+    children: [],
+    cost_usd: 0,
+    dependencies: [],
+    followups_open: 0,
+    id,
+    next_human_actions: [],
+    parent: null,
+    status,
+    status_label: statusLabel,
+    tasks: [],
+    tasks_done: 0,
+    tasks_total: 0,
+    title,
+    updated_at: "2026-11-01T00:00:00.000Z",
+    uses_integration: null,
+  };
+}
 
 // 偽のサーバが返す見出し。正本は internal/view の ConditionsAfterReleaseHeading で、生成物
 // （types.gen.ts）の並びは Go の ConditionsOutlook の値の順（本番反映を承認しない／承認する／承認済みで未実行）。
@@ -68,6 +102,47 @@ export function createMockApi(
     return m;
   };
 
+  // 課題の詳細の応答。alpha は課題のツリーの偽の応答（alphaTree）の値をそのまま tree に使い、
+  // 画面が core の値を出すだけであることを確かめられるようにする。それ以外のエージェントは空の tree。
+  const showOf = (
+    name: string,
+    id: string,
+    m: MockChallenge,
+  ): ShowCardResponse => {
+    const t =
+      name === "alpha"
+        ? [...alphaTree().challenges, ...alphaTree().recent_done].find(
+            (x) => x.id === id,
+          )
+        : undefined;
+    const extra = name === "alpha" ? alphaDetailExtras(id) : {};
+    return {
+      approvals: m.approvals,
+      card: cardOf(m),
+      challenge: {
+        ...m.c,
+        dependencies: [],
+        uses_integration: t?.uses_integration ?? null,
+        dependents: extra.dependents ?? [],
+        followup_of: null,
+        improvement: null,
+      },
+      direct_completions: m.directCompletions,
+      followups: extra.followups ?? [],
+      holds: m.holds,
+      operations: m.operations,
+      plans: m.plans,
+      runs: m.runs,
+      pairs: pairsOf(m.stages),
+      source_binding: extra.source_binding ?? null,
+      source_children: extra.source_children ?? [],
+      stages: m.stages,
+      tasks: extra.tasks ?? [],
+      tree: t ?? emptyTree(m.c.id, m.c.title, m.c.status, m.c.status_label),
+      waiting: waitingOf(wsOf(name), id),
+    };
+  };
+
   const api: ApiClient = {
     async workspaces(): Promise<WorkspaceList> {
       await wait();
@@ -77,6 +152,42 @@ export function createMockApi(
       await wait();
       return statusOf(wsOf(name));
     },
+    async statusIngestable(name) {
+      await wait();
+      return {
+        ...statusOf(wsOf(name)),
+        ingestable: ingestableOf(name),
+      };
+    },
+    async tree(name): Promise<TreeResponse> {
+      await wait();
+      if (name === "alpha") {
+        wsOf(name);
+        return alphaTree();
+      }
+      const all = wsOf(name).items.map((m) =>
+        emptyTree(
+          m.c.id,
+          m.c.title,
+          m.c.status,
+          STATUS_LABEL[m.c.status] ?? m.c.status,
+        ),
+      );
+      return {
+        challenges: all.filter((t) => t.status !== "done"),
+        recent_done: all.filter((t) => t.status === "done"),
+      };
+    },
+    async followups(name, status): Promise<FollowupListResponse> {
+      await wait();
+      wsOf(name);
+      const all = name === "alpha" ? ALPHA_FOLLOWUPS : [];
+      return {
+        followups: all.filter(
+          (f) => status === "all" || f.status === (status ?? "open"),
+        ),
+      };
+    },
     async challenges(name) {
       await wait();
       return { challenges: wsOf(name).items.map(toCard) };
@@ -84,36 +195,14 @@ export function createMockApi(
     async challenge(name, id): Promise<ShowCardResponse> {
       await wait();
       const m = itemOf(name, id);
-      return {
-        approvals: m.approvals,
-        card: cardOf(m),
-        challenge: {
-          ...m.c,
-          dependencies: [],
-          uses_integration: null,
-          dependents: [],
-          followup_of: null,
-          improvement: null,
-        },
-        direct_completions: m.directCompletions,
-        followups: [],
-        holds: m.holds,
-        operations: m.operations,
-        plans: m.plans,
-        runs: m.runs,
-        pairs: pairsOf(m.stages),
-        source_binding: null,
-        source_children: [],
-        stages: m.stages,
-        tasks: [],
-        waiting: waitingOf(wsOf(name), id),
-      };
+      return showOf(name, id, m);
     },
     async log(name, id): Promise<LogResponse> {
       await wait();
       const m = itemOf(name, id);
       return {
         activities: [
+          ...alphaLogExtras(id),
           {
             action: "create",
             actor: m.c.reporter,
@@ -172,6 +261,7 @@ export function createMockApi(
                 question: h.question,
                 raised_at: h.raised_at,
                 run_id: null,
+                task_id: null,
                 title: m.c.title,
                 workspace: w.meta.name,
               })),
@@ -226,9 +316,12 @@ export function createMockApi(
             kind === "plan" && plan
               ? {
                   body: plan.body,
+                  budget_usd: null,
+                  summary: null,
                   tasks: [],
                   topics: [],
                   uses_integration: null,
+                  ...RICH_PLANS[`${name}/${id}`],
                   version: plan.version,
                 }
               : null,
@@ -266,38 +359,11 @@ export function createMockApi(
       m.completionDirect = false;
       m.c.status_label = STATUS_LABEL[m.c.status] ?? m.c.status;
       m.c.version += 1;
-      return {
-        approvals: m.approvals,
-        card: cardOf(m),
-        challenge: {
-          ...m.c,
-          dependencies: [],
-          uses_integration: null,
-          dependents: [],
-          followup_of: null,
-          improvement: null,
-        },
-        direct_completions: m.directCompletions,
-        followups: [],
-        holds: m.holds,
-        operations: m.operations,
-        plans: m.plans,
-        runs: m.runs,
-        pairs: pairsOf(m.stages),
-        source_binding: null,
-        source_children: [],
-        stages: m.stages,
-        tasks: [],
-        waiting: waitingOf(wsOf(name), id),
-      };
+      return showOf(name, id, m);
     },
     async cycle(name) {
       await wait();
       return wsOf(name).cycle;
-    },
-    async challengeGraph(name) {
-      await wait();
-      return graphOf(wsOf(name));
     },
   };
   return api;

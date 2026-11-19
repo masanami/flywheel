@@ -509,7 +509,52 @@ export interface ShowCardResponse {
   source_children: SourceChild[];
   stages: Stages;
   tasks: Task[];
+  tree: TreeChallenge;
   waiting: Waiting;
+}
+
+export interface TreeChallenge {
+  budget_usd: number | null;
+  children: TreeRelative[];
+  cost_usd: number;
+  dependencies: TreeDependency[];
+  followups_open: number;
+  id: string;
+  next_human_actions: string[];
+  parent: TreeRelative | null;
+  status: string;
+  status_label: string;
+  tasks: TreeTask[];
+  tasks_done: number;
+  tasks_total: number;
+  title: string;
+  updated_at: string;
+  uses_integration: boolean | null;
+}
+
+export interface TreeRelative {
+  challenge_id: string;
+  status: string;
+  status_label: string;
+  title: string;
+}
+
+export interface TreeDependency {
+  challenge_id: string;
+  satisfied: boolean;
+  status: string;
+  status_label: string;
+  title: string;
+}
+
+export interface TreeTask {
+  cost_usd: number;
+  depends_on: string[];
+  id: string | null;
+  key: string;
+  phase: string;
+  status: string | null;
+  title: string;
 }
 
 export interface Waiting {
@@ -543,6 +588,7 @@ export interface Question {
   question: string;
   raised_at: string;
   run_id: string | null;
+  task_id: string | null;
   title: string;
   workspace: string;
 }
@@ -587,6 +633,8 @@ export interface ApprovalOtherOperation {
 
 export interface ApprovalPlan {
   body: string;
+  budget_usd: number | null;
+  summary: string | null;
   tasks: ApprovalPlanTask[];
   topics: PlanTopic[];
   uses_integration: boolean | null;
@@ -596,6 +644,7 @@ export interface ApprovalPlan {
 export interface ApprovalPlanTask {
   depends_on: string[];
   key: string;
+  phase: string;
   source: string | null;
   title: string;
 }
@@ -639,33 +688,9 @@ export interface CycleStarted {
   started: boolean;
 }
 
-export interface GraphResponse {
-  edges: GraphEdge[];
-  nodes: GraphNode[];
-}
-
-export interface GraphEdge {
-  directed: boolean;
-  from: string;
-  kind: string;
-  registered_at: string;
-  registered_via: string;
-  satisfied: boolean;
-  to: string;
-}
-
-export interface GraphNode {
-  category: string;
-  context: string | null;
-  headline: string | null;
-  id: string;
-  next_human_actions: string[];
-  parent_id: string | null;
-  priority: string | null;
-  running: boolean;
-  stale: boolean;
-  state: string;
-  title: string;
+export interface TreeResponse {
+  challenges: TreeChallenge[];
+  recent_done: TreeChallenge[];
 }
 
 export interface FollowupListResponse {
@@ -713,28 +738,18 @@ export const DISCREPANCY_KIND_CODES = [
   "dependency_cycle",
 ] as const;
 
-export const GRAPH_CATEGORY_CODES = [
-  "human",
-  "external",
-  "parent_agent",
-  "done",
-  "withdrawn",
-  "system",
-] as const;
-
-export const GRAPH_EDGE_KIND_CODES = [
-  "prerequisite",
-] as const;
-
-export const GRAPH_REGISTERED_VIA_CODES = [
-  "plan",
-  "manual",
-  "unknown",
-] as const;
-
 export const HOLD_KIND_CODES = [
   "human",
   "parent_direct",
+] as const;
+
+export const TASK_PHASE_CODES = [
+  "running",
+  "waiting",
+  "next",
+  "blocked",
+  "done",
+  "cancelled",
 ] as const;
 
 export const CONDITIONS_AFTER_RELEASE_HEADINGS = [

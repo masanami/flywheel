@@ -30,7 +30,7 @@ export class FakeEventSource {
   }
 }
 
-const emptyStatus = {
+export const emptyStatus = {
   actionable: { challenges: [] },
   approved: { operations: [] },
   binary_commit: "unknown",

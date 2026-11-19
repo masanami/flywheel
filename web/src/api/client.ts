@@ -3,7 +3,7 @@ import type {
   ApprovalSummaryResponse,
   CycleStarted,
   CycleStatus,
-  GraphResponse,
+  FollowupListResponse,
   ListCardResponse,
   LogResponse,
   NeedsHumanResponse,
@@ -11,6 +11,7 @@ import type {
   RunReportResponse,
   ShowCardResponse,
   StatusResponse,
+  TreeResponse,
   WorkspaceChanged,
   WorkspaceList,
 } from "./types.gen.ts";
@@ -31,7 +32,7 @@ async function failure(res: Response, what: string): Promise<ApiError> {
   return new ApiError(code, message, res.status);
 }
 
-// 読み取りは GET（SSE は EventSource）。書き込みは下の post だけで、呼ぶのは承認と 1 周の起動の POST に限る。
+// 読み取りは GET（SSE は EventSource）。書き込みは下の post だけで、呼ぶのは計画の承認・完了の承認・「サイクルを回す」の POST に限る。
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path, {
     method: "GET",
@@ -75,6 +76,12 @@ const ws = (name: string) => `/api/v1/workspaces/${encodeURIComponent(name)}`;
 export interface ReadApi {
   workspaces(): Promise<WorkspaceList>;
   status(name: string): Promise<StatusResponse>;
+  // 取り込めるもの（上流の読み取り）を含む状況。「いま進められること」の画面だけが呼ぶ。
+  statusIngestable(name: string): Promise<StatusResponse>;
+  // 課題のツリー（表示の区分・タスクの進み・費用・未のフォローアップの件数は core の値）。
+  tree(name: string): Promise<TreeResponse>;
+  // フォローアップ。status の既定は open。
+  followups(name: string, status?: string): Promise<FollowupListResponse>;
   challenges(name: string): Promise<ListCardResponse>;
   cycle(name: string): Promise<CycleStatus>;
   challenge(name: string, id: string): Promise<ShowCardResponse>;
@@ -84,27 +91,29 @@ export interface ReadApi {
   questions(): Promise<QuestionsResponse>;
 }
 
-// ボードのボタンでの承認（M1 の 2 段階）。① 要約と版を得る → ② 版を添えて承認する。
+// 承認（計画の承認・完了の承認。2 段階）。① 要約と版を得る → ② 版を添えて承認する。
 export interface ApprovalApi {
   approvalSummary(name: string, id: string): Promise<ApprovalSummaryResponse>;
   approve(name: string, id: string, version: number): Promise<ShowCardResponse>;
 }
 
-// 列の見出しの 1 周の起動（M4H11）。成功は {"started": true}。
+// 「サイクルを回す」のボタンが呼ぶサイクルの起動。成功は {"started": true}。
 export interface CycleApi {
   startCycle(name: string): Promise<CycleStarted>;
 }
 
-// 課題の関係グラフ（core の記録だけから決定的に導く。上流には問い合わせない）。
-export interface GraphApi {
-  challengeGraph(name: string): Promise<GraphResponse>;
-}
-
-export type ApiClient = ReadApi & ApprovalApi & CycleApi & GraphApi;
+export type ApiClient = ReadApi & ApprovalApi & CycleApi;
 
 const readApi: ReadApi = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
   status: (name) => get<StatusResponse>(`${ws(name)}/status`),
+  statusIngestable: (name) =>
+    get<StatusResponse>(`${ws(name)}/status?ingestable=true`),
+  tree: (name) => get<TreeResponse>(`${ws(name)}/tree`),
+  followups: (name, status) =>
+    get<FollowupListResponse>(
+      `${ws(name)}/followups${status === undefined ? "" : `?status=${encodeURIComponent(status)}`}`,
+    ),
   challenges: (name) => get<ListCardResponse>(`${ws(name)}/challenges`),
   cycle: (name) => get<CycleStatus>(`${ws(name)}/cycle`),
   challenge: (name, id) =>
@@ -135,15 +144,10 @@ const cycleApi: CycleApi = {
   startCycle: (name) => post<CycleStarted>(`${ws(name)}/cycle`),
 };
 
-const graphApi: GraphApi = {
-  challengeGraph: (name) => get<GraphResponse>(`${ws(name)}/graph`),
-};
-
 const realApi: ApiClient = {
   ...readApi,
   ...approvalApi,
   ...cycleApi,
-  ...graphApi,
 };
 
 // 呼び出し口は差し替えられる。開発時の mock モードだけが setApi でブラウザ内の偽の API を入れる。
@@ -159,6 +163,9 @@ export function resetApi(): void {
 export const api: ApiClient = {
   workspaces: () => impl.workspaces(),
   status: (n) => impl.status(n),
+  statusIngestable: (n) => impl.statusIngestable(n),
+  tree: (n) => impl.tree(n),
+  followups: (n, s) => impl.followups(n, s),
   challenges: (n) => impl.challenges(n),
   cycle: (n) => impl.cycle(n),
   challenge: (n, id) => impl.challenge(n, id),
@@ -169,7 +176,6 @@ export const api: ApiClient = {
   approvalSummary: (n, id) => impl.approvalSummary(n, id),
   approve: (n, id, v) => impl.approve(n, id, v),
   startCycle: (n) => impl.startCycle(n),
-  challengeGraph: (n) => impl.challengeGraph(n),
 };
 
 export const eventsPath = "/api/v1/events";

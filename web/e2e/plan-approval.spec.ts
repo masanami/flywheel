@@ -1,0 +1,62 @@
+import { expect, test } from "@playwright/test";
+
+// 計画の承認の画面を、偽のデータ（mock モード。alpha の C-3 は計画の承認待ち）で確かめる。#811
+
+const pageOverflows = (page: import("@playwright/test").Page) =>
+  page.evaluate(
+    () =>
+      document.documentElement.scrollWidth >
+      document.documentElement.clientWidth,
+  );
+
+async function openPlan(page: import("@playwright/test").Page) {
+  await page.goto("/#/a/alpha/challenges/C-3/approve-plan");
+  await expect(
+    page.getByRole("heading", { name: /^計画の承認: / }),
+  ).toBeVisible();
+  await expect(page.getByTestId("plan-approval")).toBeVisible();
+}
+
+test("AC-427 #811: 偽のデータで「この計画を承認する」を押すと、「承認しました。」が出る", async ({
+  page,
+}) => {
+  await openPlan(page);
+  await page.getByRole("button", { name: "この計画を承認する" }).click();
+  await expect(page.getByText("承認しました。")).toBeVisible();
+  await expect(
+    page.getByText("続きは、次のサイクルで進みます。"),
+  ).toBeVisible();
+});
+
+test("#798: 広い画面（幅 1280px）では、「問いと推奨」が、方針の右に並ぶ", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openPlan(page);
+  const main = await page.getByTestId("plan-main").boundingBox();
+  const side = await page.getByTestId("plan-topics").boundingBox();
+  if (!main || !side) throw new Error("区画の位置を読めない");
+  expect(side.x).toBeGreaterThanOrEqual(main.x + main.width);
+  // 上の端がそろう（右の区画が、左の区画の下に回っていない）
+  expect(Math.abs(side.y - main.y)).toBeLessThan(2);
+});
+
+test("#798: 狭い画面（幅 360px）では、「問いと推奨」が、計画の中身の下に並ぶ", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await openPlan(page);
+  const main = await page.getByTestId("plan-main").boundingBox();
+  const side = await page.getByTestId("plan-topics").boundingBox();
+  if (!main || !side) throw new Error("区画の位置を読めない");
+  expect(side.y).toBeGreaterThanOrEqual(main.y + main.height);
+});
+
+test("AC-433 #811: 幅 360px で、計画の承認の画面は、ページ全体が横にスクロールしない", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await openPlan(page);
+  await expect(page.getByTestId("task-box").first()).toBeVisible();
+  expect(await pageOverflows(page)).toBe(false);
+});

@@ -13,7 +13,7 @@ import (
 
 // このファイルは、親が直接行った作業を完了として記録する道（課題 #452）の core の振る舞いを確かめる。
 // 保留の種類（parent_direct）・遷移 T17・成果物の参照・自動の対象からの除外・承認後の完了・
-// status と関係グラフの区分を、実ストアで固定する。
+// status を、実ストアで固定する。
 
 func holdAsParentDirect(t *testing.T, s *Store, from Status) *Challenge {
 	t.Helper()
@@ -533,7 +533,7 @@ func TestJ6Input_OrdinaryChallengeHasNoDirectCompletionSection(t *testing.T) {
 	}
 }
 
-// --- status・カード・関係グラフ ---
+// --- status・カード ---
 
 func TestOverview_ParentDirectHoldIsParentAgentsTurnNotNeedsHuman(t *testing.T) {
 	t.Parallel()
@@ -633,77 +633,6 @@ func TestCard_ParentDirectHoldHasNoAnswerQuestionAction(t *testing.T) {
 	}
 	if len(ch.NextHumanActions) != 1 || ch.NextHumanActions[0] != CardActionAnswerQuestion {
 		t.Errorf("human card actions = %v, want [answer_question]", ch.NextHumanActions)
-	}
-}
-
-func TestChallengeGraph_ParentDirectHoldIsParentAgentCategory(t *testing.T) {
-	t.Parallel()
-	s := newStoreForTest(t)
-	fixedActor(t, "alice")
-	direct := holdAsParentDirect(t, s, StatusClassified)
-	human := createAndAdvance(t, s, StatusClassified)
-	if _, err := s.HoldChallenge(context.Background(), ChannelCLI, human.ID, HoldInput{Question: "聞く"}); err != nil {
-		t.Fatal(err)
-	}
-	done := createAndAdvance(t, s, StatusDone)
-	withdrawn := createAndAdvance(t, s, StatusWithdrawn)
-	_ = createAndAdvance(t, s, StatusClassified) // 関係を持たない課題
-
-	g, err := s.ChallengeGraph(context.Background(), s.currentTime())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cat := map[string]GraphCategory{}
-	state := map[string]Status{}
-	for _, n := range g.Nodes {
-		cat[n.ID], state[n.ID] = n.Category, n.State
-	}
-	if cat[direct.ID] != GraphCategoryParentAgent || state[direct.ID] != StatusAwaitingHuman {
-		t.Errorf("direct node = %s/%s, want parent_agent/awaiting_human", cat[direct.ID], state[direct.ID])
-	}
-	if cat[human.ID] != GraphCategoryHuman {
-		t.Errorf("human-hold node category = %s, want human", cat[human.ID])
-	}
-	if cat[done.ID] != GraphCategoryDone || cat[withdrawn.ID] != GraphCategoryWithdrawn {
-		t.Errorf("done/withdrawn categories = %s/%s", cat[done.ID], cat[withdrawn.ID])
-	}
-}
-
-// 親が直接行う保留の課題に、ほかの人間の操作待ち（不可逆操作の承認など）があれば、区分は人間の操作待ちが先に当たる。
-func TestChallengeGraph_HumanActionOutranksParentAgent(t *testing.T) {
-	t.Parallel()
-	s := newStoreForTest(t)
-	fixedActor(t, "alice")
-	direct := holdAsParentDirect(t, s, StatusClassified)
-	if _, err := s.CreateOperation(context.Background(), ChannelCLI, OperationInput{ChallengeID: direct.ID, Kind: "other", Summary: "s"}); err != nil {
-		t.Fatal(err)
-	}
-	g, err := s.ChallengeGraph(context.Background(), s.currentTime())
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, n := range g.Nodes {
-		if n.ID == direct.ID {
-			found = true
-			if n.Category != GraphCategoryHuman {
-				t.Errorf("category = %s, want human (a pending operation needs the owner)", n.Category)
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("node %s missing from the graph", direct.ID)
-	}
-}
-
-func TestGraphCategoryValues_IncludesParentAgent(t *testing.T) {
-	t.Parallel()
-	var found bool
-	for _, c := range GraphCategoryValues() {
-		found = found || c == GraphCategoryParentAgent
-	}
-	if !found {
-		t.Errorf("GraphCategoryValues() = %v lacks parent_agent", GraphCategoryValues())
 	}
 }
 

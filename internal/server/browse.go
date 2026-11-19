@@ -87,13 +87,18 @@ func writeLookupOrCoreError(w http.ResponseWriter, err error) {
 	writeCoreError(w, err)
 }
 
+// agentDeclOrNil はワークスペースのエージェントの宣言を読む（読めなければ nil。宣言を読めなくても動かす）。
+func agentDeclOrNil(st *core.Store) *core.AgentDeclaration {
+	decl, err := core.LoadAgentDeclaration(st.Workspace())
+	if err != nil {
+		return nil
+	}
+	return decl
+}
+
 // baseOverview は waiting_external を入れない Overview（宣言を読めなくても動かす。CLI の status と同じ）。
 func baseOverview(ctx context.Context, st *core.Store) (*core.Overview, error) {
-	decl, derr := core.LoadAgentDeclaration(st.Workspace())
-	if derr != nil {
-		decl = nil
-	}
-	return st.GetOverviewFor(ctx, decl)
+	return st.GetOverviewFor(ctx, agentDeclOrNil(st))
 }
 
 func challengesHandler(fleet *Fleet, checks *checkCache, now func() time.Time) http.HandlerFunc {
@@ -138,16 +143,16 @@ func challengesHandler(fleet *Fleet, checks *checkCache, now func() time.Time) h
 	}
 }
 
-// graphHandler は GET /api/v1/workspaces/{name}/graph（課題の関係グラフ）。core の記録だけから作り、
-// 上流（GitHub）にも LLM にも問い合わせない。
-func graphHandler(fleet *Fleet, now func() time.Time) http.HandlerFunc {
+// treeHandler は GET /api/v1/workspaces/{name}/tree（課題のツリー）。core の記録だけから作り、上流（GitHub）にも
+// LLM にも問い合わせず、ストアへ書かない。予算の上限は、ワークスペースの宣言を読んで決める。
+func treeHandler(fleet *Fleet, now func() time.Time) http.HandlerFunc {
 	return withStore(fleet, func(w http.ResponseWriter, r *http.Request, st *core.Store) {
-		g, err := st.ChallengeGraph(r.Context(), now())
+		t, err := st.ChallengeTree(r.Context(), agentDeclOrNil(st), now())
 		if err != nil {
 			writeCoreError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, view.FromChallengeGraph(g))
+		writeJSON(w, http.StatusOK, view.FromChallengeTree(t))
 	})
 }
 
@@ -160,11 +165,15 @@ func challengeHandler(fleet *Fleet, checks *checkCache, now func() time.Time) ht
 		var d *core.ChallengeDetail
 		var runs *core.CardRuns
 		var read *cardRead
+		var tree *core.TreeChallenge
 		err := readForCards(ctx, fleet, r.PathValue("name"), func(st *core.Store) (err error) {
 			if d, err = st.GetChallengeWithoutReap(ctx, r.PathValue("id")); err != nil {
 				return err
 			}
 			if runs, err = st.LoadCardRuns(ctx, d.Challenge); err != nil {
+				return err
+			}
+			if tree, err = st.ChallengeTreeNode(ctx, d.ID, agentDeclOrNil(st), now()); err != nil {
 				return err
 			}
 			read, err = loadCardOverview(ctx, st)
@@ -175,7 +184,7 @@ func challengeHandler(fleet *Fleet, checks *checkCache, now func() time.Time) ht
 			return
 		}
 		ov := read.resolve(ctx, checks)
-		writeJSON(w, http.StatusOK, view.FromChallengeDetailCard(d, runs.Derive(d.Challenge, ov, now())))
+		writeJSON(w, http.StatusOK, view.FromChallengeDetailCard(d, runs.Derive(d.Challenge, ov, now()), *tree))
 	}
 }
 

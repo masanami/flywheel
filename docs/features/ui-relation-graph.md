@@ -1,5 +1,7 @@
 # 課題の関係グラフ（flywheel#176 の第 1 区切り）
 
+> **S2c でグラフの画面と API を外した（2026-11-19）**: 区切り S2c（[core-redesign.md](core-redesign.md)）で、関係グラフの画面・API（`GET /api/v1/workspaces/{name}/graph`）・型・core の口・テスト・見本・種・試験を外した。以下は、外す前の決定と要件の記録として残す。記録した前提は課題のツリーの API（`GET /api/v1/workspaces/{name}/tree`）の `dependencies` と、課題の詳細の API の `tree`・`challenge.dependencies`・`dependents` で、課題の親子はツリーの要素の `parent`・`children` で出す。
+
 - 状態: draft（実装チケット flywheel#176 の PR で起草）。2026-10-13・10-14・10-17〜18 に、試作（PR #210・PR #240。`web/src/mock/`・`web/src/proposal/` に閉じ、本番のビルドには入らない）をオーナーが `npm run dev:mock` で触って決めた形を、本実装の範囲（関係グラフだけ）について書き戻した。§決定事項の記録
 - 前段: [M4 の機能仕様](m4-ui-server.md)（ボード・詳細のモーダル・カードの区分の印・「更新なし」〔M4H34〕）・[M4.5 の機能仕様](m4.5-learning-and-self-improvement.md)（課題どうしの依存 `challenge_dependency`〔M45H12〕）・[M2 の機能仕様](m2-github-issue-ingest.md)（取り込み）。ここで【決定】済みの事項は前提にし、再検討しない
 - 2026-11-05 に flywheel#474（衝突の予測の結果の保存と、ボードの詳細の「待っている理由」。オーナーの決定と論点 Q1〜Q4 の回答）を反映した。§衝突（core）・§決定事項の記録の 11/05（#474）
@@ -45,6 +47,8 @@
 - 一覧の取得に失敗したリポジトリ・この回に見えなかった Issue（閉じた・取り込みの対象から外れた）の課題の親子は変えない【仮定】
 - 親を付けると循環になるときは、その親子を付けずに取り込みを続ける（取り込み全体を失敗にしない）【仮定】
 - `/create-ticket` で課題を分解すると sub-issue が付くので、それがそのまま親の大枠になる【決定 Q2=2】
+
+> **外した（core の見直しの区切り S2c・#813）**: 関係グラフの API（`GET /api/v1/workspaces/{name}/graph`。以後は 404 `not_found`）・view の型・core の口・照合用の見本（`web/src/testing/relation-api.golden.json`）・グラフ専用の種（`TestRelationGraphSeed`）・本物の serve の関係グラフの試験は外した。課題どうしの前提は課題のツリーの API の `dependencies`・課題の詳細の `challenge.dependencies`・`dependents`、親子はツリーの `parent`・`children` で出す。本物の serve の試験は新しい種（`TestE2ESeed`）と `web/e2e-real/screens.spec.ts` に置き換えた。以下は当時の決定の記録で、現行の振る舞いではない。参照: [core の見直し](core-redesign.md)。
 
 ### 衝突（core）
 

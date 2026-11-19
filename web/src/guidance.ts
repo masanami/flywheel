@@ -1,8 +1,15 @@
 import guidance from "./guidance.json";
 
-interface Template {
+// 案内を出す場面。課題の操作（next_human_actions のコード）に結び付く案内は actions で、
+// 結び付かない案内（取り込み・フォローアップなど）は、それを出す画面の名前 context で書く。どちらか一方だけを持つ。
+export interface When {
+  actions?: string[];
+  context?: string;
+}
+
+export interface Template {
   id: string;
-  when: { actions: string[] };
+  when: When;
   template: string;
   note?: string;
 }
@@ -34,12 +41,27 @@ export function guidesFor(
   actions: string[],
 ): Guide[] {
   return (guidance.templates as Template[])
-    .filter((t) => t.when.actions.some((a) => actions.includes(a)))
+    .filter((t) => t.when.actions?.some((a) => actions.includes(a)))
     .map((t) => ({
       id: t.id,
       command: t.template
         .replaceAll("<C-ID>", () => challengeId)
         .replaceAll("<パス>", () => shellQuote(workspacePath)),
+      ...(t.note ? { note: t.note } : {}),
+    }));
+}
+
+// 課題の操作に結び付かない案内を、場面の名前（context）から作る。差し込み口（<理由> など）はそのまま残す。
+export function guidesForContext(
+  context: string,
+  workspacePath: string,
+  templates: Template[] = guidance.templates as Template[],
+): Guide[] {
+  return templates
+    .filter((t) => t.when.context === context)
+    .map((t) => ({
+      id: t.id,
+      command: t.template.replaceAll("<パス>", () => shellQuote(workspacePath)),
       ...(t.note ? { note: t.note } : {}),
     }));
 }

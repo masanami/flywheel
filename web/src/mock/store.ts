@@ -8,9 +8,10 @@ import type {
   Challenge,
   ChallengeCard,
   CycleStatus,
+  CycleWork,
   DirectCompletion,
-  GraphResponse,
   Hold,
+  Ingestable,
   Operation,
   PlanDetail,
   Run,
@@ -22,7 +23,7 @@ import type {
   Workspace,
 } from "../api/types.gen.ts";
 import { type DiscrepancyKind, HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
-import { type GraphSeed, seedGraphs } from "./graph.ts";
+import { type DepSeed, seedDeps } from "./deps.ts";
 import { type LargeSpec, largeWorkspace } from "./large.ts";
 
 export interface Flags {
@@ -79,8 +80,10 @@ export interface MockWorkspace {
   meta: Workspace;
   items: MockChallenge[];
   cycle: CycleStatus;
-  // 関係グラフの偽の関係（親子・依存）。応答は graphOf が課題の導出と合わせて作る
-  graph: GraphSeed;
+  // サイクルを回すと進むもの（状況の API の cycle_work）。無ければ 0 件。
+  cycleWork?: CycleWork;
+  // 課題どうしの偽の前提（依存）。課題の詳細の waiting が使う
+  deps: DepSeed;
 }
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -197,7 +200,7 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
   flywheel_version: null,
   id,
   judgment: null,
-  kind: "delegation",
+  kind: "delegate",
   max_budget_usd: 10,
   rate_limited: false,
   result: null,
@@ -207,10 +210,34 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
   ...p,
 });
 
+const taskHold = (
+  task_id: string,
+  raised_at: string,
+  p: Partial<Hold>,
+): Hold => ({
+  answer: null,
+  answered_at: null,
+  answered_by: null,
+  answered_channel: null,
+  answered_verification: null,
+  closed_at: null,
+  from_status: "in_progress",
+  from_status_label: "着手中",
+  kind: "human",
+  question: "",
+  raised_at,
+  relay_quote: null,
+  relay_session: null,
+  replan: false,
+  run_id: null,
+  task_id,
+  ...p,
+});
+
 const LONG = `${"この値はカードに全文を出すと幅 320px の列で何行にも伸びる。".repeat(8)}\n2 行目: 外部の Issue 本文をそのまま取り込んだ想定の長い説明。`;
 
 export function seed(): Record<string, MockWorkspace> {
-  const graphs = seedGraphs();
+  const depSeeds = seedDeps();
   const alpha: MockChallenge[] = [
     mk("C-1", "ログイン画面の文言を直す", "unclassified", {
       description: "ボタンの文言が「送信」のままになっている。",
@@ -400,7 +427,7 @@ export function seed(): Record<string, MockWorkspace> {
         },
       },
     }),
-    // 関係グラフの案（flywheel#176）で親の大枠として見せる課題。人間の操作は待たない。
+    // 人間の操作は待たない着手中の課題。
     mk("C-14", "旧基盤の撤去", "in_progress", {
       priority: "P2",
       headline: "旧バッチ基盤を止めて消す",
@@ -433,24 +460,23 @@ export function seed(): Record<string, MockWorkspace> {
       priority: "P2",
       headline: "新しいビルドの成果物を出す手順に書き換える",
     }),
-    // 自動では解けない外部待ちの例（他チームへの相談待ち。案の印 waiting_party を graph.ts が持つ）
+    // 自動では解けない外部待ちの例（他チームへの相談待ち）
     mk("C-20", "返金 API の上限の確認", "in_progress", {
       priority: "P1",
       headline: "決済チームに返金 API の上限を問い合わせている",
     }),
-    // 取り下げた課題。動いている課題（C-18）の前提なので、既定でも灰色で出る（graph.ts）
+    // 取り下げた課題。動いている課題（C-18）の前提
     mk("C-21", "旧テーブルの参照元の洗い出し", "withdrawn", {
       priority: "P2",
       headline: "別の調査で済んだので取り下げた",
     }),
-    // 何ともつながらない完了の課題。既定では隠れ、「終わった課題もすべて表示」で出る
+    // 何ともつながらない完了の課題。課題の画面では、「完了した課題を開く」を押すまで出ない
     mk("C-22", "ログ出力の整理", "done", {
       priority: "P3",
       version: 4,
       headline: "不要なログ出力を削った",
     }),
-    // 注目の課題とどの線でもつながらない TODO（分類待ち・計画待ち）のうち、優先度が P1 以下のものは「ほかの課題」の大枠に
-    // まとまる（既定で畳む）。C-23 → C-24 の依存のまとまりごと入る。優先度が P0 の C-25 は、線が無くても大枠に入らず前に出る
+    // 分類待ち・計画待ちの課題。C-23 → C-24 は依存でつながる 2 件。優先度が P0 の C-25 は、ほかとつながらない 1 件
     mk("C-23", "エラーページの文言の見直し", "unclassified", {
       priority: "P3",
       urgency: "低",
@@ -460,7 +486,7 @@ export function seed(): Record<string, MockWorkspace> {
       priority: "P2",
       headline: "出力時に文字コードを選べるようにする",
     }),
-    // 人間の操作待ちの親 C-3 の子（着手中）。C-3 を開くと、大枠の見出しの右上にもチップが出る（親を開くまで中は見えない）
+    // 人間の操作待ちの親 C-3 の子（着手中）。親の課題の詳細の「関係する課題」に子として出る
     mk("C-26", "再送の重複テストの追加", "in_progress", {
       priority: "P2",
       headline: "冪等キーの再送が 1 通だけ届くことを確かめるテストを足す",
@@ -475,10 +501,20 @@ export function seed(): Record<string, MockWorkspace> {
       urgency: "高",
       description: "決済 API が断続的に 500 を返している。",
     }),
-    // 人間の操作待ちのチップが多い課題（flywheel#464）。実施中のまま、トリアージ・予算・操作の承認・食い違いの
-    // 4 つを待つ。広い幅のノード・一覧の行で、チップが題名や「▶ 実施中」と重ならないかを見る
+    // 人間の操作待ちが多い課題（flywheel#464）。実施中のまま、トリアージ・予算・操作の承認・食い違いの
+    // 4 つを待つ（待ちが多い課題の例）
     mk("C-28", "請求データの夜間集計を新しい基盤へ載せ替える", "in_progress", {
       priority: "P1",
+      description:
+        "夜間の集計を新しい基盤へ載せ替える。**旧基盤の負荷**を下げるのが目的。",
+      done_criteria:
+        "- 新基盤で夜間集計が **3 日続けて** 成功する\n- 旧基盤のジョブを止めても請求が崩れない",
+      plans: [
+        plan(
+          1,
+          "## 方針\n\n旧基盤の集計を、新基盤の同じ表へ書き出す形に置き換える。\n\n| 手順 | 担当 | 確かめ方 | 備考 |\n| --- | --- | --- | --- |\n| 1. 書き出し先の表を作る | 基盤 | 表がある | 列の名前は旧基盤とそろえる。長い説明が続いても枠の中で横にスクロールできる |\n| 2. 集計クエリを移す | 請求 | 件数が一致する | 夜間の 3 時に走らせる |\n\n```sql\nSELECT customer_id, SUM(amount) AS total FROM invoices WHERE closed_at >= now() - interval '1 day' GROUP BY customer_id ORDER BY total DESC;\n```",
+        ),
+      ],
       headline: "夜間集計を新基盤で回し、旧基盤の負荷を下げる",
       flags: {
         running: true,
@@ -494,13 +530,70 @@ export function seed(): Record<string, MockWorkspace> {
         },
         discrepancy: ["upstream_updated"],
       },
-      runs: [run("R-11", "C-28", { started_at: iso(20) })],
+      // タスクの詳細の実行の記録（#810）。T-43 は委譲が 2 件（古い方は失敗・新しい方は実行中）、T-42 は別のタスクの実行。
+      runs: [
+        run("R-11", "C-28", { started_at: iso(20) }),
+        // 経緯の実行の行（#809）。判断点の実行と、タスクに付いた失敗の実行。
+        run("R-14", "C-28", {
+          kind: "judgment",
+          judgment: "J2",
+          started_at: iso(310),
+          result: "succeeded",
+          cost_usd: 0.42,
+        }),
+        run("R-18", "C-28", {
+          kind: "delegate",
+          task_id: "T-40",
+          started_at: iso(70),
+          result: "errored",
+          cost_usd: 3.1,
+        }),
+        run("R-15", "C-28", {
+          kind: "delegate",
+          task_id: "T-43",
+          started_at: iso(60),
+          ended_at: iso(50),
+          result: "errored",
+          cost_usd: 0.8,
+        }),
+        run("R-16", "C-28", {
+          kind: "delegate",
+          task_id: "T-43",
+          started_at: iso(30),
+          cost_usd: 1.25,
+        }),
+        run("R-17", "C-28", {
+          kind: "delegate",
+          task_id: "T-42",
+          started_at: iso(90),
+          ended_at: iso(80),
+          result: "succeeded",
+        }),
+      ],
+      // タスクの詳細の問いと回答（#810）。T-44 は答え待ち、T-43 は対話で答えて計画の作り直しへ回した回答、T-42 は別のタスクの問い。
+      holds: [
+        taskHold("T-44", iso(15), {
+          question: "書き出し先の表が既にあるときは、作り直しますか。",
+        }),
+        taskHold("T-43", iso(70), {
+          question: "列の名前は旧基盤とそろえますか。",
+          answer: "そろえる",
+          answered_at: iso(65),
+          relay_quote: "旧基盤とそろえてほしい",
+          replan: true,
+        }),
+        taskHold("T-42", iso(100), {
+          question: "別のタスクの問い。",
+          answer: "はい",
+          answered_at: iso(95),
+        }),
+      ],
       operations: [
         op("O-1", "C-28", "release", "pending", "集計の切り替えを本番へ反映"),
       ],
     }),
-    // チップが多い親（flywheel#464）。完了の承認・トリアージ・予算・操作の承認・食い違いの 5 つを待ちながら自身も実施中で、
-    // 実施中の子 C-30 を持つので既定で開く。開いた大枠の見出しで、チップが題名や「▶ 実施中」と重ならないかを見る
+    // 人間の操作待ちが多い親（flywheel#464）。完了の承認・トリアージ・予算・操作の承認・食い違いの 5 つを待ちながら
+    // 自身も実施中で、実施中の子 C-30 を持つ（待ちが多い親の例）
     mk(
       "C-29",
       "問い合わせ窓口の一本化と旧フォームの撤去",
@@ -534,8 +627,8 @@ export function seed(): Record<string, MockWorkspace> {
       flags: { running: true },
       runs: [run("R-13", "C-30", { started_at: iso(10) })],
     }),
-    // 一言でと位置づけが長い親（flywheel#482）。一言では見出しの幅で 2 行に、位置づけは 3 行以上に折り返し、畳むと
-    // 末尾に「続き」が出る。別の課題 C-34 から子 C-32 へ依存の線が向かい、線が見出しの上を縦切る形を作る
+    // 一言でと位置づけが長い親（flywheel#482）。長い文は折り返し、畳むと末尾に「続き」が出る。
+    // 別の課題 C-34 が子 C-32 を前提にしている形を作る
     mk("C-31", "配布形式 v5 への切り替え", "in_progress", {
       priority: "P1",
       headline:
@@ -595,7 +688,20 @@ export function seed(): Record<string, MockWorkspace> {
         last_ended_at: iso(90),
         last_result: "completed",
       },
-      graph: graphs.alpha,
+      cycleWork: {
+        stages: {
+          classify: 1,
+          cleanup: 0,
+          improve: 0,
+          learn: 0,
+          plan: 1,
+          release: 0,
+          run: 1,
+          verify: 0,
+        },
+        total: 3,
+      },
+      deps: depSeeds.alpha,
     },
     beta: {
       meta: ok("beta"),
@@ -606,7 +712,20 @@ export function seed(): Record<string, MockWorkspace> {
         last_ended_at: iso(2000),
         last_result: "completed",
       },
-      graph: graphs.beta,
+      cycleWork: {
+        stages: {
+          classify: 0,
+          cleanup: 0,
+          improve: 0,
+          learn: 0,
+          plan: 0,
+          release: 1,
+          run: 0,
+          verify: 1,
+        },
+        total: 2,
+      },
+      deps: depSeeds.beta,
     },
     gamma: {
       meta: {
@@ -622,7 +741,7 @@ export function seed(): Record<string, MockWorkspace> {
         last_ended_at: null,
         last_result: null,
       },
-      graph: { parents: {}, deps: [] },
+      deps: { deps: [] },
     },
   };
 }
@@ -679,56 +798,6 @@ export function cardOf(m: MockChallenge): Card {
   };
 }
 
-// `GET …/graph` の偽の応答。区分・running・stale は課題のカードの導出と同じ規則（人間 > 完了 > 取り下げ > システム。
-// 外部待ちは core から出ない）。登録の日時は 2026-10-10T00:00:00Z からの経過分。
-export function graphOf(w: MockWorkspace): GraphResponse {
-  const byId = new Map(w.items.map((m) => [m.c.id, m]));
-  const idNum = (id: string) => Number(id.replace(/^\D+/, ""));
-  const nodes = [...w.items]
-    .sort((a, b) => idNum(a.c.id) - idNum(b.c.id))
-    .map((m) => {
-      const card = cardOf(m);
-      const category =
-        card.next_human_actions.length > 0
-          ? "human"
-          : isParentAgent(m)
-            ? "parent_agent"
-            : m.c.status === "done"
-              ? "done"
-              : m.c.status === "withdrawn"
-                ? "withdrawn"
-                : "system";
-      return {
-        category,
-        context: m.context,
-        headline: m.headline,
-        id: m.c.id,
-        next_human_actions: card.next_human_actions,
-        parent_id: w.graph.parents[m.c.id] ?? null,
-        priority: m.c.priority,
-        running: !!(m.flags.running || m.flags.unresponsive),
-        stale: !!m.flags.unresponsive,
-        state: card.state,
-        title: m.c.title,
-      };
-    });
-  // 前提は先行が完了していれば満たされている
-  const edges = w.graph.deps
-    .sort((a, b) => idNum(a.from) - idNum(b.from) || idNum(a.to) - idNum(b.to))
-    .map((d) => ({
-      directed: true,
-      from: d.from,
-      kind: d.kind,
-      registered_at: new Date(
-        Date.parse("2026-10-10T00:00:00Z") + d.minutes * 60_000,
-      ).toISOString(),
-      registered_via: d.via,
-      satisfied: byId.get(d.from)?.c.status === "done",
-      to: d.to,
-    }));
-  return { edges, nodes };
-}
-
 // 課題 id が待っている理由（`GET …/challenges/{id}` の waiting）。まだ終わっていない前提の課題。id 自身が終わっていれば空。
 export function waitingOf(w: MockWorkspace, id: string): Waiting {
   const byId = new Map(w.items.map((m) => [m.c.id, m]));
@@ -744,7 +813,7 @@ export function waitingOf(w: MockWorkspace, id: string): Waiting {
   });
   if (ended(id)) return { prerequisites: [] };
   const sorted = (xs: string[]) => [...xs].sort((a, b) => idNum(a) - idNum(b));
-  const deps = w.graph.deps;
+  const deps = w.deps.deps;
   return {
     prerequisites: sorted(
       deps
@@ -763,6 +832,70 @@ export const toCard = (m: MockChallenge): ChallengeCard => ({
   ...m.c,
   card: cardOf(m),
 });
+
+// 取り込めるものの偽のデータ（`ingestable=true` を付けた問い合わせにだけ返す。alpha だけが持つ）。
+// 子のある親・既存の課題の下に入る子・単独の 3 件。
+export function ingestableOf(name: string): Ingestable {
+  if (name !== "alpha") return { error: null, items: [] };
+  const url = (n: number) => `https://example.invalid/issues/${n}`;
+  const ext = (n: number) => `example/repo#${n}`;
+  return {
+    error: null,
+    items: [
+      {
+        children: [
+          {
+            external_key: ext(902),
+            number: 902,
+            parent_external_key: ext(901),
+            title: "取り込める例: 書き出しの期間の指定を足す",
+            url: url(902),
+          },
+          {
+            external_key: ext(903),
+            number: 903,
+            parent_external_key: ext(901),
+            title: "取り込める例: 書き出しの形式を選べるようにする",
+            url: url(903),
+          },
+        ],
+        external_key: ext(901),
+        number: 901,
+        parent_challenge_id: null,
+        parent_external_key: null,
+        repo: "example/repo",
+        title: "取り込める例: 記録の書き出しを期間で絞れるようにする",
+        url: url(901),
+      },
+      {
+        children: [],
+        external_key: ext(904),
+        number: 904,
+        parent_challenge_id: "C-2",
+        parent_external_key: null,
+        repo: "example/repo",
+        title: "取り込める例: 検索の並びを選べるようにする",
+        url: url(904),
+      },
+    ],
+  };
+}
+
+// サイクルを回すと進むものの偽の数え方（本物は core が数える）。分類待ち・計画待ち・検証待ちの課題を段ごとに数える。
+function cycleWorkOf(items: MockChallenge[]): CycleWork {
+  const n = (s: string) => items.filter((m) => m.c.status === s).length;
+  const stages = {
+    classify: n("unclassified"),
+    cleanup: 0,
+    improve: 0,
+    learn: 0,
+    plan: n("classified"),
+    release: 0,
+    run: 0,
+    verify: n("verifying"),
+  };
+  return { stages, total: Object.values(stages).reduce((a, b) => a + b, 0) };
+}
 
 export function statusOf(w: MockWorkspace): StatusResponse {
   const items = w.items;
@@ -787,19 +920,7 @@ export function statusOf(w: MockWorkspace): StatusResponse {
     },
     approved: { operations: ops("approved") },
     binary_commit: "unknown",
-    cycle_work: {
-      stages: {
-        classify: 0,
-        cleanup: 0,
-        improve: 0,
-        learn: 0,
-        plan: 0,
-        release: 0,
-        run: 0,
-        verify: 0,
-      },
-      total: 0,
-    },
+    cycle_work: w.cycleWork ?? cycleWorkOf(items),
     followups: { open: 0 },
     ingestable: null,
     needs_human: {

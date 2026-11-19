@@ -31,7 +31,7 @@ const cycleTriggerUI = "ui"
 type cycleLauncher func(workspacePath string) (started bool, err error)
 
 const (
-	// cycleSignalWait は周の開始の合図を待つ最大の時間。
+	// cycleSignalWait は周の開始の合図を待つ最大の時間（本番の値。execLauncher が使う）。
 	cycleSignalWait = 3 * time.Second
 	// cycleStderrTail はエラーの message に入れる子の標準エラーの末尾の最大バイト数。
 	cycleStderrTail = 2048
@@ -104,8 +104,15 @@ func (w *tailWriter) String() string {
 
 // execLauncher は executable が返す実行ファイルを `cycle --trigger ui --workspace <path>` で起動する。
 // 子の標準出力・標準エラーは合図か終了までだけ見て、その後は読み捨てる（記録は残さない）。
-// server の終了で子を止めないよう、子は別のセッションにする。
+// server の終了で子を止めないよう、子は別のセッションにする。合図を待つ時間は cycleSignalWait（本番の口）。
 func execLauncher(executable func() (string, error)) cycleLauncher {
+	return execLauncherWait(executable, cycleSignalWait)
+}
+
+// execLauncherWait は、合図を待つ時間（合図も終了も無いまま「始まった」を返すまでの時間）を渡せる版。
+// 本番は execLauncher を通して cycleSignalWait を使う。合図か子の終了で結果が決まるはずのテストだけが、
+// 時計で結果が決まらないよう、長い値を渡してこの口を直接呼ぶ。
+func execLauncherWait(executable func() (string, error), signalWait time.Duration) cycleLauncher {
 	return func(workspacePath string) (bool, error) {
 		exe, err := executable()
 		if err != nil {
@@ -123,7 +130,7 @@ func execLauncher(executable func() (string, error)) cycleLauncher {
 		done := make(chan error, 1)
 		go func() { done <- cmd.Wait() }()
 
-		timer := time.NewTimer(cycleSignalWait)
+		timer := time.NewTimer(signalWait)
 		defer timer.Stop()
 		select {
 		case <-out.signal:

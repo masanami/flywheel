@@ -15,36 +15,90 @@ function jsFiles(dir: string): string[] {
   );
 }
 
-// 本番のビルド（flywheel serve に埋め込む）に、偽の API と UX 案の画面が入らないこと。
-// 関係グラフの画面の文言（「関係の無い課題」「親をすべて開く」など）は本番の画面になったので、検査の対象にしない。
-it("本番のビルドに偽の API・モックの画面を含めない", async () => {
-  const out = mkdtempSync(join(tmpdir(), "flywheel-web-build-"));
-  try {
-    await build({
-      logLevel: "silent",
-      build: { outDir: out, emptyOutDir: true },
-    });
-    const files = jsFiles(out);
-    expect(files.length).toBeGreaterThan(0);
-    const code = files.map((f) => readFileSync(f, "utf8")).join("\n");
-    // 画面の文言・モックのデータの文字列は、ミニファイしても残る
-    for (const marker of [
-      "ボード（案）",
-      "人間の操作待ち（案）",
-      "通知メールの二重送信を止める",
-      "優先度方針: 厳格",
-      "関係グラフ（案）",
-      "旧基盤の撤去",
-      "古いバッチの撤去",
-      "検索 API にページングを足す",
-      "mock-org/",
-    ]) {
-      expect(code, marker).not.toContain(marker);
+// 新しい偽のデータ（web/src/mock/）に固有の文言。本番のビルドの成果物に入っていないことの目印にする。
+// どれも偽のデータの課題の題名・エージェントの文言で、画面の枠組みの文言ではない。
+const MOCK_MARKERS = [
+  "ログイン画面の文言を直す",
+  "通知メールの再送制御",
+  "移行スクリプトの失敗調査",
+  "古いバッチの撤去",
+  "旧基盤の撤去",
+  "検索 API にページングを足す",
+  "請求データの夜間集計を新しい基盤へ載せ替える",
+  "ストアが見つかりません",
+  "誤りの種類を洗う",
+  "取り込める例: 記録の書き出しを期間で絞れるようにする",
+];
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory()
+      ? sourceFiles(join(dir, e.name))
+      : /\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)
+        ? [join(dir, e.name)]
+        : [],
+  );
+}
+
+// 本番のビルド（flywheel serve に埋め込む）の成果物の JS をひとまとめにした文字列。ビルドは 1 回だけ行う。
+let built: Promise<string> | undefined;
+function productionCode(): Promise<string> {
+  built ??= (async () => {
+    const out = mkdtempSync(join(tmpdir(), "flywheel-web-build-"));
+    try {
+      await build({
+        logLevel: "silent",
+        build: { outDir: out, emptyOutDir: true },
+      });
+      const files = jsFiles(out);
+      expect(files.length).toBeGreaterThan(0);
+      return files.map((f) => readFileSync(f, "utf8")).join("\n");
+    } finally {
+      rmSync(out, { recursive: true, force: true });
     }
-  } finally {
-    rmSync(out, { recursive: true, force: true });
+  })();
+  return built;
+}
+
+// 本番のビルドに、偽の API と偽のデータの文言が入らないこと（AC-419・#803）。
+it("AC-419 #803: 本番のビルドに偽の API・偽のデータの文言を含めない", async () => {
+  const code = await productionCode();
+  // 画面の文言・偽のデータの文字列は、ミニファイしても残る
+  for (const marker of MOCK_MARKERS) {
+    expect(code, marker).not.toContain(marker);
   }
 }, 60_000);
+
+// 画面には、置き場所を指す「ワークスペース」の語を出さない（エージェントと書く）。API のパスとキーは英字の workspaces なので、日本語の語は成果物に入らない（AC-443・#814）。
+it("AC-443 #814: 本番のビルドの成果物に「ワークスペース」の文字は入っていない", async () => {
+  expect(await productionCode()).not.toContain("ワークスペース");
+}, 60_000);
+
+// サイクルを「1 周」「周」とは書かない（AC-444・#814）。空白の有無と全角の数字の書き方も確かめる。
+it("AC-444 #814: 本番のビルドの成果物に「1 周」の文字は入っていない", async () => {
+  const code = await productionCode();
+  expect(code).not.toMatch(/[1１]\s*周/);
+  expect(code).not.toContain("一周");
+}, 60_000);
+
+// 目印が偽のデータの外（本番の画面）にあると、本番のビルドに入って 419 の検査が落ち続ける。
+// 目印はどれも web/src/mock/ の中にあることを確かめる（AC-420・#803）。
+it("AC-420 #803: ビルドの検査の目印は、どれも偽のデータ（web/src/mock/）の中にある", () => {
+  const mockDir = join(import.meta.dirname, "mock");
+  const mock = sourceFiles(mockDir)
+    .map((f) => readFileSync(f, "utf8"))
+    .join("\n");
+  for (const marker of MOCK_MARKERS) {
+    expect(mock, marker).toContain(marker);
+  }
+  const prod = sourceFiles(import.meta.dirname)
+    .filter((f) => !f.startsWith(mockDir) && !f.endsWith("build.test.ts"))
+    .map((f) => readFileSync(f, "utf8"))
+    .join("\n");
+  for (const marker of MOCK_MARKERS) {
+    expect(prod, marker).not.toContain(marker);
+  }
+});
 
 it("本番のビルドは manifest を出さない（D3）", async () => {
   const out = mkdtempSync(join(tmpdir(), "flywheel-web-build-"));
