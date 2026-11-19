@@ -13,7 +13,9 @@ test("AC-440 #813: 本物の serve で、課題の画面に、種にした課題
   page,
 }) => {
   await page.goto(`/#/a/${AGENT}/challenges`);
-  await expect(page.getByRole("heading", { name: "課題" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "課題", exact: true }),
+  ).toBeVisible();
   const frame = page
     .getByTestId("challenge-frame")
     .filter({ hasText: "着手中の課題" });
