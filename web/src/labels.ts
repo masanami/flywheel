@@ -125,3 +125,33 @@ export function label<K extends string>(
 ): string {
   return (table as Record<string, string>)[code] ?? code;
 }
+
+// タスクの表示の区分（phase）。区分は core が決め、ここは語だけを持つ。
+export const TASK_PHASES = [
+  "running",
+  "waiting",
+  "next",
+  "blocked",
+  "done",
+  "cancelled",
+] as const;
+export type TaskPhase = (typeof TASK_PHASES)[number];
+
+export const PHASE_LABELS: Record<TaskPhase, string> = {
+  running: "走っている",
+  waiting: "あなたを待っている",
+  next: "次に走る",
+  blocked: "前提を待っている",
+  done: "済み",
+  cancelled: "取りやめ",
+};
+
+// サイクルの状態（サイクルの API の state）。値は core が決め、ここは上の帯に出す語だけを持つ。
+export const CYCLE_STATES = ["running", "idle", "stale"] as const;
+export type CycleState = (typeof CYCLE_STATES)[number];
+
+export const CYCLE_STATE_LABELS: Record<CycleState, string> = {
+  running: "サイクル: 走っている",
+  idle: "サイクル: 走っていない",
+  stale: "サイクル: 止まっているかもしれない",
+};

@@ -144,10 +144,10 @@ function bodies(
 }
 
 async function openDetail() {
-  render(<App initialView="board" />);
+  // 課題の詳細は URL のハッシュで開く（#803。前はボードのカードを押して開いていた）。
+  window.location.hash = "#/a/alpha/challenges/C-1";
+  render(<App />);
   act(() => FakeEventSource.latest.open());
-  const card = await screen.findByTestId("card-C-1");
-  fireEvent.click(within(card).getByRole("button"));
   return await screen.findByTestId("card-detail-content");
 }
 

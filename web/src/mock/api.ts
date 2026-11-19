@@ -7,12 +7,14 @@ import { CONDITIONS_AFTER_RELEASE_HEADINGS } from "../api/types.gen.ts";
 import type {
   ApprovalSummaryResponse,
   CycleStarted,
+  FollowupListResponse,
   LogResponse,
   NeedsHumanResponse,
   QuestionsResponse,
   RunReportResponse,
   ShowCardResponse,
   TreeChallenge,
+  TreeResponse,
   WorkspaceList,
 } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
@@ -104,6 +106,33 @@ export function createMockApi(
     async status(name) {
       await wait();
       return statusOf(wsOf(name));
+    },
+    async statusIngestable(name) {
+      await wait();
+      return {
+        ...statusOf(wsOf(name)),
+        ingestable: { error: null, items: [] },
+      };
+    },
+    async tree(name): Promise<TreeResponse> {
+      await wait();
+      const all = wsOf(name).items.map((m) =>
+        emptyTree(
+          m.c.id,
+          m.c.title,
+          m.c.status,
+          STATUS_LABEL[m.c.status] ?? m.c.status,
+        ),
+      );
+      return {
+        challenges: all.filter((t) => t.status !== "done"),
+        recent_done: all.filter((t) => t.status === "done"),
+      };
+    },
+    async followups(name): Promise<FollowupListResponse> {
+      await wait();
+      wsOf(name);
+      return { followups: [] };
     },
     async challenges(name) {
       await wait();

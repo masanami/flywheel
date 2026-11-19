@@ -1,8 +1,6 @@
-// 詳細のモーダルの「待っている理由」。まだ満たされていない前提の課題を並べる。
-// ボードから開いた詳細（API の waiting）と、関係グラフから開いた詳細（グラフの辺）が同じ部品・同じ表示を使う。
+// 課題の詳細の「待っている理由」。まだ満たされていない前提の課題を並べる（API の waiting）。
 
 import type { Waiting } from "../api/types.gen.ts";
-import { BASIS_LABELS } from "../graph/model.ts";
 import { STATE_LABELS, label } from "../labels.ts";
 
 export const WAITING_TITLE = "待っている理由";
@@ -26,13 +24,13 @@ export interface WaitingRow {
 }
 
 // 前提の行の見出し。
-export const PREREQUISITE_LABEL = BASIS_LABELS.prerequisite;
+export const PREREQUISITE_LABEL = "終わらないと始められない";
 
 export function WaitingReasonsSection({ rows }: { rows: WaitingRow[] }) {
   // 待っている理由が無ければ節ごと出さない
   if (rows.length === 0) return null;
   return (
-    <section aria-label={WAITING_TITLE} className="graph-waiting">
+    <section aria-label={WAITING_TITLE} className="waiting-reasons">
       <h3>{WAITING_TITLE}</h3>
       <ul>
         {rows.map((r) => (
@@ -42,7 +40,7 @@ export function WaitingReasonsSection({ rows }: { rows: WaitingRow[] }) {
             data-category={r.category}
             data-basis={r.basis}
           >
-            <div className="graph-waiting-head">
+            <div className="waiting-reasons-head">
               {r.category !== undefined ? (
                 <span
                   className="graph-swatch"
@@ -53,8 +51,8 @@ export function WaitingReasonsSection({ rows }: { rows: WaitingRow[] }) {
               <b>{r.id}</b> {r.title}
               {r.marks}
             </div>
-            <div className="graph-waiting-reason">
-              <span className="graph-waiting-kind">{r.kindLabel}</span>
+            <div className="waiting-reasons-reason">
+              <span className="waiting-reasons-kind">{r.kindLabel}</span>
               <span>{r.detail}</span>
             </div>
           </li>

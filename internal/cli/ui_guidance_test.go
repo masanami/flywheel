@@ -20,7 +20,11 @@ func TestUIGuidanceTemplatesExistInCLI(t *testing.T) {
 	}
 	var g struct {
 		Templates []struct {
-			ID       string   `json:"id"`
+			ID   string `json:"id"`
+			When struct {
+				Actions []string `json:"actions"`
+				Context string   `json:"context"`
+			} `json:"when"`
 			Command  []string `json:"command"`
 			Flags    []string `json:"flags"`
 			Template string   `json:"template"`
@@ -34,6 +38,10 @@ func TestUIGuidanceTemplatesExistInCLI(t *testing.T) {
 	}
 	flagRe := regexp.MustCompile(`--[a-z][a-z-]*`)
 	for _, tpl := range g.Templates {
+		// 出す場面は、課題の操作（actions）か画面の名前（context）のどちらか一方だけで書く。
+		if (len(tpl.When.Actions) > 0) == (tpl.When.Context != "") {
+			t.Errorf("%s: when は actions か context のどちらか一方だけを持つ: %+v", tpl.ID, tpl.When)
+		}
 		var cmd *Command
 		for _, c := range defaultCommands() {
 			c := c

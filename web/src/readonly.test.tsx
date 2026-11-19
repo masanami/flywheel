@@ -9,25 +9,95 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import { type MermaidLike, setMermaidLoader } from "./board/loadMermaid.ts";
-import { screens } from "./screens.tsx";
+import { LOADING_TEXT } from "./shell/Shell.tsx";
 import { FakeEventSource, fixtures, installFakes } from "./testing/fakes.ts";
 
 afterEach(() => {
+  window.location.hash = "";
   setMermaidLoader();
   vi.unstubAllGlobals();
   document.head.innerHTML = "";
 });
 
-// 本番の画面の一覧はボードだけ。ボードを操作したときの要求と DOM を検査する（詳細のモーダルは detail.test.tsx の T12 が検査する）。
-async function operate(check: (container: HTMLElement, id: string) => void) {
-  const { container } = render(<App initialView="board" />);
+// いまある行き先の一覧。後の課題が行き先を足したら、ここへ 1 行足す（操作の検査はこの一覧を全部たどる）。
+// wait は、その行き先の画面が出たことを待つ口。
+interface Destination {
+  id: string;
+  hash: string;
+  wait: () => Promise<unknown>;
+}
+const title = (name: string) => () =>
+  screen.findByRole("heading", { level: 2, name });
+function destinations(agents: string[], challengeId?: string): Destination[] {
+  const out: Destination[] = [
+    { id: "all", hash: "#/all", wait: title("すべてのエージェント") },
+  ];
+  for (const a of agents) {
+    out.push(
+      {
+        id: `${a}/now`,
+        hash: `#/a/${a}/now`,
+        wait: title("いま進められること"),
+      },
+      {
+        id: `${a}/challenges`,
+        hash: `#/a/${a}/challenges`,
+        wait: title("課題"),
+      },
+      {
+        id: `${a}/followups`,
+        hash: `#/a/${a}/followups`,
+        wait: title("フォローアップ"),
+      },
+      { id: `${a}/cycle`, hash: `#/a/${a}/cycle`, wait: title("サイクル") },
+    );
+  }
+  const first = agents[0];
+  if (first !== undefined && challengeId !== undefined) {
+    const c = `#/a/${first}/challenges/${challengeId}`;
+    out.push(
+      {
+        id: `${first}/approve-plan`,
+        hash: `${c}/approve-plan`,
+        wait: title("計画の承認"),
+      },
+      {
+        id: `${first}/task`,
+        hash: `${c}/tasks/T-1`,
+        wait: () =>
+          waitFor(() =>
+            expect(screen.queryByText(LOADING_TEXT)).not.toBeInTheDocument(),
+          ),
+      },
+      // 課題の詳細は最後に開く（この後、詳細の中を操作する）。
+      {
+        id: `${first}/challenge`,
+        hash: c,
+        wait: () => screen.findByTestId("card-detail-content"),
+      },
+    );
+  }
+  return out;
+}
+
+// いまある行き先を全部たどり、行き先ごとに check を呼ぶ（課題の詳細の中身は detail.test.tsx の T12 が検査する）。
+async function operate(
+  dests: Destination[],
+  check: (container: HTMLElement, id: string) => void,
+) {
+  window.location.hash = "";
+  const { container } = render(<App />);
   act(() => FakeEventSource.latest.open());
   await waitFor(() =>
     expect(screen.getAllByText(/alpha/).length).toBeGreaterThan(0),
   );
-  for (const s of screens) {
-    expect(screen.getByRole("region", { name: s.title })).toBeInTheDocument();
-    check(container, s.id);
+  for (const d of dests) {
+    await act(async () => {
+      window.location.hash = d.hash;
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    await d.wait();
+    check(container, d.id);
   }
 }
 
@@ -60,7 +130,21 @@ const S4_PAIRS = [
   { expected: S4_STAGES.expected[1], actual: null },
 ];
 
-// AC-221 の fleet に置く承認待ちの課題（帯 → 詳細のモーダル → 承認のボタンまで操作するため）。
+// AC-221 の fleet に置く承認待ちの課題（課題の詳細 → 承認のボタンまで操作するため）。
+const idleCycle = {
+  last_ended_at: null,
+  last_result: null,
+  last_started_at: null,
+  state: "idle",
+};
+const noNeedsHuman = {
+  budget_exhausted: [],
+  challenges: [],
+  discrepancies: [],
+  operations: [],
+  slots: [],
+  triage: [],
+};
 function awaitingApproval(): Record<string, unknown> {
   const card = {
     context: null,
@@ -100,7 +184,7 @@ function awaitingApproval(): Record<string, unknown> {
         run: 0,
         verify: 0,
       },
-      total: 0,
+      total: 1,
     },
     followups: { open: 0 },
     ingestable: null,
@@ -117,6 +201,9 @@ function awaitingApproval(): Record<string, unknown> {
   const base = "/api/v1/workspaces/alpha";
   return {
     [`${base}/status`]: status,
+    // 「サイクルを回す」を押せるのは、進むものが 1 件以上あり、サイクルが走っていないときだけ（#803）。
+    [`${base}/cycle`]: idleCycle,
+    "/api/v1/workspaces/beta/status": { ...status, needs_human: noNeedsHuman },
     [`${base}/challenges`]: { challenges: [{ ...challenge, card }] },
     [`${base}/challenges/C-1`]: {
       approvals: [],
@@ -168,17 +255,16 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
     ...fixtures(),
     ...awaitingApproval(),
     "POST /api/v1/workspaces/alpha/cycle": { started: true },
+    "POST /api/v1/workspaces/beta/cycle": { started: true },
   });
-  await operate(() => {});
-  fireEvent.click(screen.getByRole("button", { name: "完了を表示" }));
-  for (const b of screen.getAllByRole("button", { name: "1 周を起動" })) {
-    fireEvent.click(b);
-  }
-  // 帯の承認待ち → カード → 詳細のモーダル → 承認のボタン
-  const strip = screen.getByRole("region", { name: "人間待ちの帯" });
-  fireEvent.click(within(strip).getByRole("button", { name: "承認待ち 1" }));
-  const c = await screen.findByTestId("card-C-1");
-  fireEvent.click(within(c).getByRole("button"));
+  // 行き先を全部たどり、「サイクルを回す」のボタンがある行き先（いま進められること・サイクル）では押す。
+  await operate(destinations(["alpha", "beta"], "C-1"), () => {
+    for (const b of screen.queryAllByRole("button", {
+      name: "サイクルを回す",
+    })) {
+      fireEvent.click(b);
+    }
+  });
   const m = await screen.findByTestId("card-detail-content");
   // S4 の画面（段階の欄・図・承認の要約）が出ている
   await within(m).findByTestId("stages-detail");
@@ -199,7 +285,8 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
   );
   await waitFor(() => expect(requests.length).toBeGreaterThan(5));
   const posts = () => requests.filter((r) => r.method === "POST");
-  await waitFor(() => expect(posts()).toHaveLength(3));
+  // 承認が 1 回と、サイクルを回すのが 2 つのエージェント × 2 つの画面（いま進められること・サイクル）。
+  await waitFor(() => expect(posts()).toHaveLength(5));
   // 承認の操作で記録した要求に POST …/approve が実際に現れる
   expect(
     posts().filter(
@@ -212,6 +299,8 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
       .map((r) => r.url),
   ).toEqual([
     "/api/v1/workspaces/alpha/cycle",
+    "/api/v1/workspaces/alpha/cycle",
+    "/api/v1/workspaces/beta/cycle",
     "/api/v1/workspaces/beta/cycle",
   ]);
   const allowed = [
@@ -235,12 +324,13 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
 });
 
 it("AC-124: 描画した画面の DOM に form 要素が無い", async () => {
-  installFakes();
+  installFakes({ ...fixtures(), ...awaitingApproval() });
+  const dests = destinations(["alpha", "beta"], "C-1");
   const seen: string[] = [];
-  await operate((container, id) => {
+  await operate(dests, (container, id) => {
     seen.push(id);
     expect(container.querySelector("form"), id).toBeNull();
   });
-  expect(seen).toEqual(screens.map((s) => s.id));
+  expect(seen).toEqual(dests.map((d) => d.id));
   expect(within(document.body).queryAllByRole("form")).toHaveLength(0);
 });

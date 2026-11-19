@@ -1,6 +1,7 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
+import { CYCLE_STATE_LABELS } from "./labels.ts";
 import { POLL_MS, RECONNECT_MS } from "./live/useLive.ts";
 import { FakeEventSource, fixtures, installFakes } from "./testing/fakes.ts";
 
@@ -8,20 +9,27 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 afterEach(() => {
+  window.location.hash = "";
   vi.useRealTimers();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(document, "visibilityState");
 });
 
+// useLive（一覧・集約・エージェントごとの読み込みと、通知・再接続・60 秒ごとの取り直し）の動きを、
+// 画面の枠組み（#803。既定の行き先は先頭のエージェントの「いま進められること」）の上で確かめる。
+const connection = () => screen.getByTestId("connection");
+
 async function mounted() {
   const { requests } = installFakes();
-  render(<App initialView="board" />);
+  render(<App />);
   act(() => FakeEventSource.latest.open());
-  await waitFor(() => expect(screen.getByText(/alpha/)).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getAllByText(/alpha/).length).toBeGreaterThan(0),
+  );
   return requests;
 }
 
-it("AC-87/204/206: workspace_changed は該当 ws の status/challenges と fleet の needs-human だけを取り直し、questions は要求しない（cycle も取り直す）", async () => {
+it("AC-87/204/206: workspace_changed は該当 ws の status/challenges/cycle と fleet の needs-human・questions だけを取り直す（#803 から問いの一覧も読む）", async () => {
   const requests = await mounted();
   requests.length = 0;
   act(() =>
@@ -30,7 +38,7 @@ it("AC-87/204/206: workspace_changed は該当 ws の status/challenges と flee
       workspace: "alpha",
     }),
   );
-  await waitFor(() => expect(requests).toHaveLength(5));
+  await waitFor(() => expect(requests).toHaveLength(6));
   expect(requests.map((r) => r.url).sort()).toEqual(
     [
       "/api/v1/workspaces",
@@ -38,6 +46,7 @@ it("AC-87/204/206: workspace_changed は該当 ws の status/challenges と flee
       "/api/v1/workspaces/alpha/challenges",
       "/api/v1/workspaces/alpha/cycle",
       "/api/v1/needs-human",
+      "/api/v1/questions",
     ].sort(),
   );
   expect(requests.some((r) => r.url.includes("/beta/"))).toBe(false);
@@ -52,26 +61,8 @@ it("AC-205: 他のワークスペースへの通知では alpha の status・cha
       workspace: "beta",
     }),
   );
-  await waitFor(() => expect(requests).toHaveLength(5));
+  await waitFor(() => expect(requests).toHaveLength(6));
   expect(requests.some((r) => r.url.includes("/alpha/"))).toBe(false);
-});
-
-it("AC-199/200: 列の見出しに状態と最後の周の終了時刻・結果が出て、周がまだ無ければそう示す", async () => {
-  await mounted();
-  const alpha = await screen.findByRole("region", { name: "alpha の列" });
-  await waitFor(() =>
-    expect(within(alpha).getByTestId("cycle-header")).toHaveTextContent(
-      "実行中",
-    ),
-  );
-  expect(within(alpha).getByTestId("cycle-header")).toHaveTextContent(
-    "2026-10-17T01:00:00Z 完了",
-  );
-  const beta = screen.getByRole("region", { name: "beta の列" });
-  expect(within(beta).getByTestId("cycle-header")).toHaveTextContent("停止中");
-  expect(within(beta).getByTestId("cycle-header")).toHaveTextContent(
-    "周はまだありません",
-  );
 });
 
 it("keep-alive 等の workspace_changed でない通知では何も要求しない", async () => {
@@ -86,11 +77,12 @@ it("AC-88/89: 切断すると切れていることと最終更新時刻を表示
   const fetchedAt = new Date("2026-03-04T05:06:07Z");
   vi.setSystemTime(fetchedAt);
   await mounted();
-  expect(screen.getByRole("status")).toHaveTextContent("接続中");
+  // つながっている間は「切断中」を出さない（#803 の AC-97。前は「接続中」と出していた）。
+  expect(connection()).not.toHaveTextContent("切断中");
   // 切断の時刻は取得の時刻と離しておく（最終更新は最後に取得できた時刻であり、切断の時刻ではない）。
   vi.setSystemTime(new Date(fetchedAt.getTime() + 3_600_000));
   act(() => FakeEventSource.latest.fail());
-  const status = screen.getByRole("status");
+  const status = connection();
   expect(status).toHaveTextContent("切断中");
   expect(status).toHaveTextContent("最終更新:");
   expect(status).not.toHaveTextContent("未取得");
@@ -108,6 +100,7 @@ it("AC-90/91: 切断後に再接続を試み、つながったら全ワークス
   const requests = await mounted();
   const first = FakeEventSource.latest;
   act(() => first.fail());
+  expect(connection()).toHaveTextContent("切断中");
   expect(first.closed).toBe(true);
   const n = FakeEventSource.instances.length;
   act(() => {
@@ -116,7 +109,7 @@ it("AC-90/91: 切断後に再接続を試み、つながったら全ワークス
   expect(FakeEventSource.instances.length).toBe(n + 1);
   requests.length = 0;
   act(() => FakeEventSource.latest.open());
-  await waitFor(() => expect(requests.length).toBe(8));
+  await waitFor(() => expect(requests.length).toBe(9));
   expect(requests.map((r) => r.url)).toEqual(
     expect.arrayContaining([
       "/api/v1/workspaces",
@@ -127,9 +120,10 @@ it("AC-90/91: 切断後に再接続を試み、つながったら全ワークス
       "/api/v1/workspaces/alpha/cycle",
       "/api/v1/workspaces/beta/cycle",
       "/api/v1/needs-human",
+      "/api/v1/questions",
     ]),
   );
-  expect(screen.getByRole("status")).toHaveTextContent("接続中");
+  expect(connection()).not.toHaveTextContent("切断中");
 });
 
 it("fleet の集約の取得に失敗しても、一覧と各ワークスペースの表示は残る", async () => {
@@ -137,50 +131,38 @@ it("fleet の集約の取得に失敗しても、一覧と各ワークスペー�
     Object.entries(fixtures()).filter(([k]) => k !== "/api/v1/needs-human"),
   );
   installFakes(b);
-  render(<App initialView="board" />);
+  render(<App />);
   act(() => FakeEventSource.latest.open());
-  await waitFor(() => expect(screen.getByText(/alpha/)).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getAllByText(/alpha/).length).toBeGreaterThan(0),
+  );
   await waitFor(() =>
     expect(screen.getAllByRole("alert").length).toBeGreaterThan(0),
   );
 });
 
-it("GET …/cycle だけが失敗しても、その列の課題の表示は残り、見出しだけが出ない", async () => {
+it("GET …/cycle だけが失敗しても、そのエージェントの画面は残り、サイクルの状態だけが出ない", async () => {
   const b = fixtures();
   b["/api/v1/workspaces/alpha/cycle"] = () =>
     new Response("{}", { status: 500 });
   installFakes(b);
-  render(<App initialView="board" />);
+  render(<App />);
   act(() => FakeEventSource.latest.open());
-  const beta = await screen.findByRole("region", { name: "beta の列" });
-  await waitFor(() =>
-    expect(within(beta).getByTestId("cycle-header")).toBeInTheDocument(),
-  );
-  const alpha = screen.getByRole("region", { name: "alpha の列" });
-  expect(within(alpha).queryByTestId("cycle-header")).toBeNull();
-  expect(alpha).not.toHaveTextContent("500");
-});
-
-it("読めないワークスペースの列には見出しを出さない", async () => {
-  const b = fixtures();
-  b["/api/v1/workspaces"] = {
-    workspaces: [
-      { error: null, name: "alpha", path: "/w/alpha", state: "ok" },
-      { error: "x", name: "gamma", path: "/w/gamma", state: "store_not_found" },
-    ],
-  };
-  installFakes(b);
-  render(<App initialView="board" />);
-  act(() => FakeEventSource.latest.open());
-  const gamma = await screen.findByRole("region", { name: "gamma の列" });
+  // alpha（先頭。既定の行き先）の画面は出る。
+  expect(
+    await screen.findByRole("heading", {
+      level: 2,
+      name: "いま進められること",
+    }),
+  ).toBeInTheDocument();
   await waitFor(() =>
     expect(
-      within(screen.getByRole("region", { name: "alpha の列" })).getByTestId(
-        "cycle-header",
-      ),
+      screen.getByRole("navigation", { name: "画面" }),
     ).toBeInTheDocument(),
   );
-  expect(within(gamma).queryByTestId("cycle-header")).toBeNull();
+  expect(screen.queryByTestId("cycle-state")).toBeNull();
+  expect(document.body).not.toHaveTextContent("500");
+  expect(screen.queryByTestId("agent-error")).toBeNull();
 });
 
 function setVisibility(v: "visible" | "hidden") {
@@ -229,7 +211,7 @@ it("AC-206b: hidden の間は 60 秒の何倍進めても発行しない", async
   setVisibility("visible");
 });
 
-it("AC-206c: 取り直した cycle が running→stale なら見出しが「更新なし」に変わる", async () => {
+it("AC-206c: 取り直した cycle が running→stale なら、上の帯のサイクルの状態が「止まっているかもしれない」に変わる", async () => {
   setVisibility("visible");
   const b = fixtures();
   let n = 0;
@@ -246,69 +228,19 @@ it("AC-206c: 取り直した cycle が running→stale なら見出しが「更�
     );
   };
   installFakes(b);
-  render(<App initialView="board" />);
+  render(<App />);
   act(() => FakeEventSource.latest.open());
-  const alpha = await screen.findByRole("region", { name: "alpha の列" });
   await waitFor(() =>
-    expect(within(alpha).getByTestId("cycle-header")).toHaveTextContent(
-      "実行中",
+    expect(screen.getByTestId("cycle-state")).toHaveTextContent(
+      CYCLE_STATE_LABELS.running,
     ),
   );
   act(() => {
     vi.advanceTimersByTime(POLL_MS);
   });
   await waitFor(() =>
-    expect(within(alpha).getByTestId("cycle-header")).toHaveTextContent(
-      "更新なし",
+    expect(screen.getByTestId("cycle-state")).toHaveTextContent(
+      CYCLE_STATE_LABELS.stale,
     ),
   );
-});
-
-it("AC-206c: 取り直した challenges の card.modifiers に unresponsive が加わるとカードに「更新なし」が出る", async () => {
-  setVisibility("visible");
-  const b = fixtures();
-  let n = 0;
-  b["/api/v1/workspaces/alpha/challenges"] = () => {
-    n += 1;
-    const modifiers = n === 1 ? ["running"] : ["running", "unresponsive"];
-    return new Response(
-      JSON.stringify({
-        challenges: [
-          {
-            created_at: "",
-            description: "",
-            done_criteria: "",
-            id: "C-1",
-            priority: null,
-            reporter: "",
-            status: "in_progress",
-            status_label: "",
-            title: "題名C-1",
-            updated_at: "",
-            urgency: null,
-            version: 1,
-            card: {
-              context: null,
-              headline: null,
-              modifiers,
-              next_human_actions: [],
-              slot_ids: [],
-              state: "in_progress",
-            },
-          },
-        ],
-      }),
-      { status: 200 },
-    );
-  };
-  installFakes(b);
-  render(<App initialView="board" />);
-  act(() => FakeEventSource.latest.open());
-  const alpha = await screen.findByRole("region", { name: "alpha の列" });
-  await waitFor(() => expect(alpha).toHaveTextContent("題名C-1"));
-  expect(alpha).not.toHaveTextContent("更新なし（要確認）");
-  act(() => {
-    vi.advanceTimersByTime(POLL_MS);
-  });
-  await waitFor(() => expect(alpha).toHaveTextContent("更新なし（要確認）"));
 });
