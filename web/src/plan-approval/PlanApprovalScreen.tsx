@@ -270,73 +270,80 @@ function PlanView({
         </a>
       </p>
 
-      {legacy && plan ? (
-        <section aria-label="計画の本文" data-testid="plan-legacy-body">
-          <h3>計画の本文</h3>
-          <Markdown text={plan.body} />
-        </section>
-      ) : (
-        plan?.summary != null && (
-          <section aria-label="方針" data-testid="plan-summary">
-            <h3>方針</h3>
-            <Markdown text={plan.summary} />
-          </section>
-        )
-      )}
-      <>
-        {expected !== null && expected.length > 0 && (
-          <section aria-label="完了したら見えるもの" data-stage="expected">
-            <h3>完了したら見えるもの</h3>
-            <ol>
-              {expected.map((e, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: 固定の一覧
-                <li key={i} data-field="expected">
-                  <div data-field="scene">
-                    場面: <ClampedText text={e.scene} />
-                  </div>
-                  <div data-field="before">
-                    いま: <ClampedText text={e.before} />
-                  </div>
-                  <div data-field="after">
-                    終わった後: <ClampedText text={e.after} />
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </section>
-        )}
-        {non_goals !== null && non_goals.length > 0 && (
-          <section aria-label="やらないこと" data-stage="non-goals">
-            <h3>やらないこと</h3>
-            <ul>
-              {non_goals.map((g, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: 固定の一覧
-                <li key={i}>
-                  <ClampedText text={g} />
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {plan && plan.tasks.length > 0 && (
-          <section aria-label="タスクのツリー">
-            <h3>
-              タスクのツリー（
-              <span data-testid="plan-task-count">{plan.tasks.length}</span>）
-            </h3>
-            {/* 承認の前はタスクの ID が無いので、箱は押せない（リンクにしない） */}
-            <TaskTree tasks={plan.tasks} />
-          </section>
-        )}
-        <FigureView figure={figure} />
-        {legacy && summary.stages.issues !== null && (
-          <IssuesView issues={summary.stages.issues} />
-        )}
-        {legacy && summary.stages.issues_answer !== null && (
-          <IssuesAnswerView answer={summary.stages.issues_answer} />
-        )}
+      {/* 広い画面では、左に計画の中身、右に「問いと推奨」を並べる。狭い画面では縦に並ぶ（styles.css の .plan-cols） */}
+      <div className="plan-cols" data-testid="plan-cols">
+        <div className="plan-main" data-testid="plan-main">
+          {legacy && plan ? (
+            <section aria-label="計画の本文" data-testid="plan-legacy-body">
+              <h3>計画の本文</h3>
+              <Markdown text={plan.body} />
+            </section>
+          ) : (
+            plan?.summary != null && (
+              <section aria-label="方針" data-testid="plan-summary">
+                <h3>方針</h3>
+                <Markdown text={plan.summary} />
+              </section>
+            )
+          )}
+          {expected !== null && expected.length > 0 && (
+            <section aria-label="完了したら見えるもの" data-stage="expected">
+              <h3>完了したら見えるもの</h3>
+              <ol>
+                {expected.map((e, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 固定の一覧
+                  <li key={i} data-field="expected">
+                    <div data-field="scene">
+                      場面: <ClampedText text={e.scene} />
+                    </div>
+                    <div data-field="before">
+                      いま: <ClampedText text={e.before} />
+                    </div>
+                    <div data-field="after">
+                      終わった後: <ClampedText text={e.after} />
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+          {non_goals !== null && non_goals.length > 0 && (
+            <section aria-label="やらないこと" data-stage="non-goals">
+              <h3>やらないこと</h3>
+              <ul>
+                {non_goals.map((g, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 固定の一覧
+                  <li key={i}>
+                    <ClampedText text={g} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {plan && plan.tasks.length > 0 && (
+            <section aria-label="タスクのツリー">
+              <h3>
+                タスクのツリー（
+                <span data-testid="plan-task-count">{plan.tasks.length}</span>）
+              </h3>
+              {/* 承認の前はタスクの ID が無いので、箱は押せない（リンクにしない） */}
+              <TaskTree tasks={plan.tasks} />
+            </section>
+          )}
+          <FigureView figure={figure} />
+          {legacy && summary.stages.issues !== null && (
+            <IssuesView issues={summary.stages.issues} />
+          )}
+          {legacy && summary.stages.issues_answer !== null && (
+            <IssuesAnswerView answer={summary.stages.issues_answer} />
+          )}
+        </div>
         {!legacy && (
-          <section aria-label="問いと推奨" data-testid="plan-topics">
+          <section
+            aria-label="問いと推奨"
+            className="plan-side"
+            data-testid="plan-topics"
+          >
             <h3>問いと推奨</h3>
             {plan?.topics.map((t, i) => (
               <TopicView key={`${i}:${t.title}`} topic={t} />
@@ -358,7 +365,7 @@ function PlanView({
             )}
           </section>
         )}
-      </>
+      </div>
 
       <div className="approval-control">
         {/* 食い違い（conflict）の直後は、同じことを伝える文がもう出ているので、重ねて出さない。 */}

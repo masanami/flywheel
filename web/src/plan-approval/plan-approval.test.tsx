@@ -208,6 +208,17 @@ it("AC-317 #811: 方針（plan.summary）が出る", async () => {
   ).toBeInTheDocument();
 });
 
+it("#798: 計画の中身（方針・ツリー）は左の区画に、「問いと推奨」はその隣の右の区画に入る", async () => {
+  await opened(summary({ plan: plan({ summary: "方針の本文" }) }));
+  const cols = screen.getByTestId("plan-cols");
+  const main = screen.getByTestId("plan-main");
+  const side = screen.getByTestId("plan-topics");
+  // 2 つの区画が、並びの枠の直下に、左（計画の中身）・右（問いと推奨）の順で入る
+  expect(Array.from(cols.children)).toEqual([main, side]);
+  expect(main).toContainElement(screen.getByTestId("plan-summary"));
+  expect(main).not.toContainElement(side);
+});
+
 it("AC-318 #811: 完了したら見えるものの、場面・いま・終わった後が出る", async () => {
   await opened(
     summary({

@@ -28,6 +28,30 @@ test("AC-427 #811: 偽のデータで「この計画を承認する」を押す�
   ).toBeVisible();
 });
 
+test("#798: 広い画面（幅 1280px）では、「問いと推奨」が、方針の右に並ぶ", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openPlan(page);
+  const main = await page.getByTestId("plan-main").boundingBox();
+  const side = await page.getByTestId("plan-topics").boundingBox();
+  if (!main || !side) throw new Error("区画の位置を読めない");
+  expect(side.x).toBeGreaterThanOrEqual(main.x + main.width);
+  // 上の端がそろう（右の区画が、左の区画の下に回っていない）
+  expect(Math.abs(side.y - main.y)).toBeLessThan(2);
+});
+
+test("#798: 狭い画面（幅 360px）では、「問いと推奨」が、計画の中身の下に並ぶ", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await openPlan(page);
+  const main = await page.getByTestId("plan-main").boundingBox();
+  const side = await page.getByTestId("plan-topics").boundingBox();
+  if (!main || !side) throw new Error("区画の位置を読めない");
+  expect(side.y).toBeGreaterThanOrEqual(main.y + main.height);
+});
+
 test("AC-433 #811: 幅 360px で、計画の承認の画面は、ページ全体が横にスクロールしない", async ({
   page,
 }) => {
