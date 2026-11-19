@@ -26,7 +26,9 @@ test("AC-437 #806: 幅 360px で、サイクルの画面は、ページ全体が
   page,
 }) => {
   await page.goto("/#/a/alpha/cycle");
-  await expect(page.getByRole("heading", { name: "サイクル" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "サイクル", exact: true }),
+  ).toBeVisible();
   await expect(page.getByTestId("cycle-last-started")).toBeVisible();
   await expect(page.getByTestId("cycle-work-total")).toHaveText("3");
   await noHorizontalScroll(page);
@@ -55,7 +57,9 @@ test.describe("中身（既定の幅）", () => {
     page,
   }) => {
     await page.goto("/#/a/beta/cycle");
-    await expect(page.getByRole("heading", { name: "サイクル" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "サイクル", exact: true }),
+    ).toBeVisible();
     await expect(page.getByTestId("cycle-screen-state")).toHaveText(
       "走っていない",
     );
