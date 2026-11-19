@@ -201,7 +201,7 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
   flywheel_version: null,
   id,
   judgment: null,
-  kind: "delegation",
+  kind: "delegate",
   max_budget_usd: 10,
   rate_limited: false,
   result: null,
@@ -508,7 +508,23 @@ export function seed(): Record<string, MockWorkspace> {
         },
         discrepancy: ["upstream_updated"],
       },
-      runs: [run("R-11", "C-28", { started_at: iso(20) })],
+      runs: [
+        run("R-11", "C-28", { started_at: iso(20) }),
+        run("R-14", "C-28", {
+          kind: "judgment",
+          judgment: "J2",
+          started_at: iso(310),
+          result: "succeeded",
+          cost_usd: 0.42,
+        }),
+        run("R-15", "C-28", {
+          kind: "delegate",
+          task_id: "T-40",
+          started_at: iso(70),
+          result: "errored",
+          cost_usd: 3.1,
+        }),
+      ],
       operations: [
         op("O-1", "C-28", "release", "pending", "集計の切り替えを本番へ反映"),
       ],

@@ -5,6 +5,7 @@ import type { LiveState } from "../live/useLive.ts";
 import { NotFound } from "../shell/NotFound.tsx";
 import { CHALLENGE_VIEWS, type ChallengeView, hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
+import { History } from "./History.tsx";
 import { Items } from "./Items.tsx";
 import { PlanView } from "./PlanView.tsx";
 import { TreeView } from "./TreeView.tsx";
@@ -83,9 +84,7 @@ export function ChallengeDetail({
       ) : null}
       {view === "plan" ? <PlanView key={id} show={show} /> : null}
       {view === "history" ? (
-        <section aria-label="経緯" data-testid="detail-history">
-          <p>経緯はまだ表示できません。</p>
-        </section>
+        <History key={id} live={live} agentName={agentName} show={show} />
       ) : null}
     </article>
   );

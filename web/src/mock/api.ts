@@ -19,6 +19,7 @@ import type {
 } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
 import { ALPHA_FOLLOWUPS } from "./followups.ts";
+import { alphaLogExtras } from "./log.ts";
 import { RICH_PLANS } from "./plan.ts";
 import {
   type MockChallenge,
@@ -202,6 +203,7 @@ export function createMockApi(
       const m = itemOf(name, id);
       return {
         activities: [
+          ...alphaLogExtras(id),
           {
             action: "create",
             actor: m.c.reporter,
