@@ -985,6 +985,26 @@ a.task-box:hover {
 .plan-approved-note {
   max-width: 100%;
 }
+/* 計画の中身（左）と「問いと推奨」（右）。狭い画面では縦に並べる */
+.plan-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 1.5rem;
+}
+.plan-main,
+.plan-side {
+  min-width: 0;
+}
+@media (min-width: 60rem) {
+  .plan-cols {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    align-items: start;
+  }
+  /* 「問いと推奨」が無い（過去の形の計画）ときは、1 列のまま */
+  .plan-cols > .plan-main:only-child {
+    grid-column: 1 / -1;
+  }
+}
 .plan-meta {
   display: grid;
   grid-template-columns: max-content 1fr;
