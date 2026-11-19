@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
+import { AllScreen } from "../all/AllScreen.tsx";
 import { api } from "../api/client.ts";
 import { CardDetail } from "../board/CardDetail.tsx";
 import { toAgentBoard } from "../board/adapt.ts";
 import { ChallengesScreen } from "../challenges/ChallengesScreen.tsx";
+import { CycleScreen } from "../cycle/CycleScreen.tsx";
 import type { LiveState } from "../live/useLive.ts";
 import { RefreshKeyContext } from "../nav.tsx";
 import { AgentRail } from "./AgentRail.tsx";
@@ -11,12 +13,6 @@ import { NotFound } from "./NotFound.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { type Route, hrefOf, useHashRoute } from "./route.ts";
 import { useScreenData } from "./useScreenData.ts";
-import {
-  WAITING_KINDS,
-  WAITING_LABELS,
-  waitingCounts,
-  waitingTotal,
-} from "./waiting.ts";
 
 export const NO_AGENTS_TEXT = "エージェントがありません。";
 export const LOADING_TEXT = "読み込んでいます";
@@ -119,16 +115,7 @@ function AgentBody({
             </section>
           );
         case "cycle":
-          return (
-            <section aria-labelledby="screen-title">
-              <h2 id="screen-title">サイクル</h2>
-              <CycleStartButton
-                workspace={agentName}
-                total={total}
-                cycleState={cycleState}
-              />
-            </section>
-          );
+          return <CycleScreen live={live} agentName={agentName} />;
       }
       return null;
     case "challenge":
@@ -227,31 +214,6 @@ function TaskBody({
   return (
     <section aria-labelledby="screen-title">
       <h2 id="screen-title">タスクの詳細</h2>
-    </section>
-  );
-}
-
-// すべて: あなたを待っているものの横断。エージェントごとに種類と件数を出す。
-function AllScreen({ live }: { live: LiveState }) {
-  return (
-    <section aria-labelledby="screen-title">
-      <h2 id="screen-title">すべてのエージェント</h2>
-      <ul>
-        {live.workspaces.map((w) => {
-          const nh = live.needsHuman?.workspaces.find((x) => x.name === w.name);
-          const counts = nh ? waitingCounts(nh.needs_human) : null;
-          return (
-            <li key={w.name}>
-              <a href={homeOf(w.name)}>{w.name}</a>
-              {counts && waitingTotal(counts) > 0
-                ? ` ${WAITING_KINDS.filter((k) => counts[k] > 0)
-                    .map((k) => `${WAITING_LABELS[k]} ${counts[k]}`)
-                    .join("・")}`
-                : null}
-            </li>
-          );
-        })}
-      </ul>
     </section>
   );
 }

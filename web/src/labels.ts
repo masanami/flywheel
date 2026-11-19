@@ -1,6 +1,7 @@
 // core が返す閉集合のコードを表示の文言に写す対応表。状態は UI で導かず、文言だけをここで持つ。
 
 import { HOLD_KIND_CODES } from "./api/types.gen.ts";
+import type { CycleWorkStages } from "./api/types.gen.ts";
 
 export const CARD_STATES = [
   "unclassified",
@@ -154,6 +155,59 @@ export const CYCLE_STATE_LABELS: Record<CycleState, string> = {
   running: "サイクル: 走っている",
   idle: "サイクル: 走っていない",
   stale: "サイクル: 止まっているかもしれない",
+};
+
+// サイクルの画面・「すべて」の区分に出す、状態だけの語（上の帯の語から「サイクル: 」を除いたもの）。
+export const CYCLE_STATE_SHORT_LABELS: Record<CycleState, string> = {
+  running: "走っている",
+  idle: "走っていない",
+  stale: "止まっているかもしれない",
+};
+
+export function cycleStateText(state: string): string {
+  return (CYCLE_STATES as readonly string[]).includes(state)
+    ? CYCLE_STATE_SHORT_LABELS[state as CycleState]
+    : state;
+}
+
+// 最後のサイクルの結果（サイクルの API の last_result。core の閉集合）。
+export const CYCLE_RESULTS = ["completed", "aborted", "interrupted"] as const;
+export type CycleResult = (typeof CYCLE_RESULTS)[number];
+
+export const CYCLE_RESULT_LABELS: Record<CycleResult, string> = {
+  completed: "最後まで終わった",
+  aborted: "途中でやめた",
+  interrupted: "途中で止まった",
+};
+
+// サイクルを回すと進むものの段（状況の API の cycle_work.stages のキー）。表示の順もこの並び。
+export const CYCLE_STAGES = [
+  "release",
+  "classify",
+  "plan",
+  "run",
+  "verify",
+  "learn",
+  "improve",
+  "cleanup",
+] as const satisfies readonly (keyof CycleWorkStages)[];
+export type CycleStage = (typeof CYCLE_STAGES)[number];
+
+// 型の検査: core の段が増えたら、ここで型エラーになる。
+type _AllStagesListed = Exclude<keyof CycleWorkStages, CycleStage> extends never
+  ? true
+  : never;
+export const STAGES_COMPLETE: _AllStagesListed = true;
+
+export const CYCLE_STAGE_LABELS: Record<CycleStage, string> = {
+  release: "反映",
+  classify: "分類",
+  plan: "計画",
+  run: "委譲",
+  verify: "完了の検証",
+  learn: "学び",
+  improve: "改修の提案",
+  cleanup: "片付け",
 };
 
 // 課題の画面の凡例。区分の語は PHASE_LABELS と同じで、「次に走る」だけ括弧の補足を添える。
