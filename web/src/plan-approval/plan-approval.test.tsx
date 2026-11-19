@@ -208,15 +208,43 @@ it("AC-317 #811: 方針（plan.summary）が出る", async () => {
   ).toBeInTheDocument();
 });
 
-it("#798: 計画の中身（方針・ツリー）は左の区画に、「問いと推奨」はその隣の右の区画に入る", async () => {
-  await opened(summary({ plan: plan({ summary: "方針の本文" }) }));
+it("#798: 計画の中身（方針・完了したら見えるもの・やらないこと・ツリー）は左の区画に、「問いと推奨」はその隣の右の区画に入る", async () => {
+  await opened(
+    summary({
+      plan: plan({ summary: "方針の本文" }),
+      stages: {
+        actual: null,
+        figure: null,
+        issues: null,
+        issues_answer: null,
+        expected: [
+          { kind: "ui", scene: "通知の画面", before: "前", after: "後" },
+        ],
+        non_goals: ["受信側は作らない"],
+      },
+    }),
+  );
   const cols = screen.getByTestId("plan-cols");
   const main = screen.getByTestId("plan-main");
   const side = screen.getByTestId("plan-topics");
   // 2 つの区画が、並びの枠の直下に、左（計画の中身）・右（問いと推奨）の順で入る
   expect(Array.from(cols.children)).toEqual([main, side]);
-  expect(main).toContainElement(screen.getByTestId("plan-summary"));
-  expect(main).not.toContainElement(side);
+  for (const el of [
+    screen.getByTestId("plan-summary"),
+    screen.getByRole("region", { name: "完了したら見えるもの" }),
+    screen.getByRole("region", { name: "やらないこと" }),
+    screen.getByRole("region", { name: "タスクのツリー" }),
+  ]) {
+    expect(main).toContainElement(el);
+  }
+});
+
+it("#798: 過去の形の計画（「問いと推奨」が無い）では、並びの枠の中は、計画の中身の区画 1 つだけ", async () => {
+  await opened(legacy());
+  const cols = screen.getByTestId("plan-cols");
+  const main = screen.getByTestId("plan-main");
+  expect(Array.from(cols.children)).toEqual([main]);
+  expect(main).toContainElement(screen.getByTestId("plan-legacy-body"));
 });
 
 it("AC-318 #811: 完了したら見えるものの、場面・いま・終わった後が出る", async () => {
