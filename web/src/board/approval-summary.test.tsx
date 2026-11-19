@@ -40,6 +40,8 @@ function summary(over: Partial<ApprovalSummary>): {
       pairs: [],
       plan: {
         body: "計画の本文",
+        budget_usd: null,
+        summary: null,
         tasks: [],
         topics: [],
         uses_integration: null,
@@ -179,6 +181,8 @@ it("計画に論点を不要とした根拠の引用があれば、その節と�
     summary({
       plan: {
         body: PLAN_HEAD + NO_ISSUES_SECTION,
+        budget_usd: null,
+        summary: null,
         tasks: [],
         topics: [],
         uses_integration: null,
@@ -199,6 +203,8 @@ it("計画に論点を不要とした根拠の引用が無ければ、その節�
     summary({
       plan: {
         body: PLAN_HEAD,
+        budget_usd: null,
+        summary: null,
         tasks: [],
         topics: [],
         uses_integration: null,
