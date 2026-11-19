@@ -1,4 +1,9 @@
 import type { Workspace } from "../api/types.gen.ts";
+import {
+  CYCLE_STATES,
+  CYCLE_STATE_LABELS,
+  type CycleState,
+} from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { type AgentScreen, type Route, hrefOf } from "./route.ts";
 
@@ -8,13 +13,6 @@ export const TOP_ITEMS: { screen: AgentScreen; label: string }[] = [
   { screen: "followups", label: "フォローアップ" },
   { screen: "cycle", label: "サイクル" },
 ];
-
-// サイクルの状態の語。core の state の値すべてに文言がある。
-export const CYCLE_STATE_TEXT: Record<"running" | "idle" | "stale", string> = {
-  running: "サイクル: 走っている",
-  idle: "サイクル: 走っていない",
-  stale: "サイクル: 止まっているかもしれない",
-};
 
 // 課題の詳細・タスクの詳細・計画の承認の画面では「課題」を選んでいることにする。
 function selectedScreen(r: Route): AgentScreen | null {
@@ -44,8 +42,8 @@ export function TopBar({
   const sel = current ? selectedScreen(current) : null;
   const cycleState = agent ? live.data[agent.name]?.cycle?.state : undefined;
   const cycleText =
-    cycleState && cycleState in CYCLE_STATE_TEXT
-      ? CYCLE_STATE_TEXT[cycleState as keyof typeof CYCLE_STATE_TEXT]
+    cycleState && CYCLE_STATES.some((c) => c === cycleState)
+      ? CYCLE_STATE_LABELS[cycleState as CycleState]
       : undefined;
   return (
     <header className="top-bar">
@@ -70,11 +68,20 @@ export function TopBar({
           </ul>
         </nav>
       ) : null}
-      <span className="top-bar-status">
+      <span className="top-bar-status" data-testid="connection">
         {readable && cycleText ? (
           <span data-testid="cycle-state">{cycleText}</span>
         ) : null}
-        {live.connected ? null : <output>切断中</output>}
+        {live.connected ? null : (
+          <>
+            <output>切断中</output>
+            {/* 最後に読めた時刻（切れた時刻ではない）。見直し前と同じ。 */}
+            <span className="top-bar-updated">
+              最終更新:{" "}
+              {live.lastUpdated ? live.lastUpdated.toLocaleString() : "未取得"}
+            </span>
+          </>
+        )}
       </span>
     </header>
   );

@@ -29,6 +29,7 @@ import {
   WAITING_KINDS,
   WAITING_LABELS,
   waitingCounts,
+  waitingKindGroup,
   waitingTotal,
 } from "./waiting.ts";
 
@@ -52,12 +53,25 @@ it("#803: あなたを待っているものの種類は 8 つで、全部に語�
   expect(WAITING_KINDS.map((k) => WAITING_LABELS[k])).toEqual([
     "計画の承認",
     "完了の承認",
-    "回答",
     "不可逆操作の承認",
+    "回答",
     "食い違い",
     "予算の増額",
     "トリアージ",
     "スロットの片付け",
+  ]);
+});
+
+it("#803: 承認の 3 種（計画・完了・不可逆操作）は同じまとまり approval で、並びで隣り合う。ほかはまとまりを持たない", () => {
+  expect(WAITING_KINDS.map((k) => [k, waitingKindGroup(k)])).toEqual([
+    ["plan_approval", "approval"],
+    ["completion_approval", "approval"],
+    ["operation", "approval"],
+    ["answer", undefined],
+    ["discrepancy", undefined],
+    ["budget", undefined],
+    ["triage", undefined],
+    ["slot", undefined],
   ]);
 });
 

@@ -12,6 +12,8 @@ import {
   CARD_ACTIONS,
   CARD_MODIFIERS,
   CARD_STATES,
+  CYCLE_STATES,
+  CYCLE_STATE_LABELS,
   DISCREPANCY_KINDS,
   DISCREPANCY_LABELS,
   HOLD_KIND_HUMAN,
@@ -70,4 +72,14 @@ it("M4H34: unresponsive の文言は「更新なし」で、「応答なし」�
 it("表示の区分（phase）の全部の値に文言があり、core の定義と一致する", () => {
   expect([...TASK_PHASES]).toEqual([...TASK_PHASE_CODES]);
   for (const p of TASK_PHASES) expect(PHASE_LABELS[p], p).toBeTruthy();
+});
+
+it("#803: サイクルの状態（state）の全部の値に文言がある（値は core の idle・running・stale）", () => {
+  expect([...CYCLE_STATES].sort()).toEqual(["idle", "running", "stale"]);
+  for (const c of CYCLE_STATES) expect(CYCLE_STATE_LABELS[c], c).toBeTruthy();
+  expect(CYCLE_STATE_LABELS).toEqual({
+    idle: "サイクル: 走っていない",
+    running: "サイクル: 走っている",
+    stale: "サイクル: 止まっているかもしれない",
+  });
 });

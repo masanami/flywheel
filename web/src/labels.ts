@@ -145,3 +145,13 @@ export const PHASE_LABELS: Record<TaskPhase, string> = {
   done: "済み",
   cancelled: "取りやめ",
 };
+
+// サイクルの状態（サイクルの API の state）。値は core が決め、ここは上の帯に出す語だけを持つ。
+export const CYCLE_STATES = ["running", "idle", "stale"] as const;
+export type CycleState = (typeof CYCLE_STATES)[number];
+
+export const CYCLE_STATE_LABELS: Record<CycleState, string> = {
+  running: "サイクル: 走っている",
+  idle: "サイクル: 走っていない",
+  stale: "サイクル: 止まっているかもしれない",
+};
