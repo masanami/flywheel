@@ -284,8 +284,7 @@ func loadTreeShared(ctx context.Context, tx *sql.Tx) (*treeShared, error) {
 		return nil, err
 	}
 	// 未のフォローアップの数え方は、状況の followups.open と同じ（上げてあって、上げた先が取り下げでないものは数えない）。
-	if err := scanPairs(ctx, tx, `SELECT f.challenge_id, COUNT(*) FROM followup f WHERE f.challenge_id IS NOT NULL AND f.status = '`+string(FollowupStatusOpen)+`'
-		AND (f.promoted_challenge_id IS NULL OR EXISTS (SELECT 1 FROM challenge c WHERE c.id = f.promoted_challenge_id AND c.status = '`+string(StatusWithdrawn)+`'))
+	if err := scanPairs(ctx, tx, `SELECT f.challenge_id, COUNT(*) FROM followup f WHERE f.challenge_id IS NOT NULL AND `+openFollowupToTriageCond+`
 		GROUP BY f.challenge_id`, func(k, v int64) { sh.followups[k] = int(v) }); err != nil {
 		return nil, err
 	}
