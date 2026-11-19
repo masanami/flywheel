@@ -59,7 +59,7 @@ function destinations(agents: string[], challengeId?: string): Destination[] {
       {
         id: `${first}/approve-plan`,
         hash: `${c}/approve-plan`,
-        wait: title("計画の承認"),
+        wait: title("計画の承認: 題名"),
       },
       {
         id: `${first}/task`,
@@ -228,7 +228,15 @@ function awaitingApproval(): Record<string, unknown> {
         kind: "plan",
         other_pending_operations: [],
         pairs: S4_PAIRS,
-        plan: { body: "承認する計画", version: 1 },
+        plan: {
+          body: "承認する計画",
+          budget_usd: null,
+          summary: "方針の本文",
+          tasks: [],
+          topics: [],
+          uses_integration: null,
+          version: 1,
+        },
         release_held: false,
         releases: [],
         stages: S4_STAGES,
@@ -269,14 +277,12 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
   // S4 の画面（段階の欄・図・承認の要約）が出ている
   await within(m).findByTestId("stages-detail");
   await within(m).findByTestId("figure-svg");
-  await within(m).findByTestId("approval-stages");
+  // 計画の承認は、計画の承認の画面のボタンで行う
+  window.location.hash = "#/a/alpha/challenges/C-1/approve-plan";
   fireEvent.click(
-    await within(m).findByRole("button", {
-      name: "計画を承認する",
-      hidden: true,
-    }),
+    await screen.findByRole("button", { name: "この計画を承認する" }),
   );
-  await within(m).findByText("承認しました。", {}, { timeout: 2000 });
+  await screen.findByText("承認しました。", {}, { timeout: 2000 });
   act(() =>
     FakeEventSource.latest.send({
       type: "workspace_changed",

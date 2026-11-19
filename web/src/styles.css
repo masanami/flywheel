@@ -981,3 +981,34 @@ a.task-box:hover {
   overflow-x: auto;
   white-space: pre;
 }
+
+/* 計画の承認の画面 */
+.plan-approval,
+.plan-approved-note {
+  max-width: 100%;
+}
+.plan-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0 0 0.75rem;
+}
+.plan-meta dt {
+  font-weight: bold;
+}
+.plan-meta dd {
+  margin: 0;
+}
+.plan-topic {
+  border-left: 3px solid currentColor;
+  padding-left: 0.75rem;
+  margin: 0.75rem 0;
+  overflow-wrap: anywhere;
+}
+.plan-recommended-mark {
+  font-weight: bold;
+}
+.plan-approval pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

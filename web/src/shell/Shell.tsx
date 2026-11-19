@@ -7,6 +7,7 @@ import { FollowupsScreen } from "../followups/FollowupsScreen.tsx";
 import type { LiveState } from "../live/useLive.ts";
 import { RefreshKeyContext } from "../nav.tsx";
 import { NowScreen } from "../now/NowScreen.tsx";
+import { PlanApprovalScreen } from "../plan-approval/PlanApprovalScreen.tsx";
 import { AgentRail } from "./AgentRail.tsx";
 import { CycleStartButton } from "./CycleStartButton.tsx";
 import { NotFound } from "./NotFound.tsx";
@@ -138,9 +139,15 @@ function AgentBody({
     case "approve_plan":
       return (
         <ChallengeGate live={live} agentName={agentName} id={route.id}>
-          <section aria-labelledby="screen-title">
-            <h2 id="screen-title">計画の承認</h2>
-          </section>
+          <PlanApprovalScreen
+            key={`${agentName}/${route.id}`}
+            live={live}
+            agentName={agentName}
+            id={route.id}
+            workspacePath={
+              live.workspaces.find((w) => w.name === agentName)?.path ?? ""
+            }
+          />
         </ChallengeGate>
       );
     case "task":

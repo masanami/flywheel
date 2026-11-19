@@ -32,6 +32,13 @@
       "template": "flywheel answer <C-ID> --workspace <パス> --answer <回答>"
     },
     {
+      "id": "answer-choice",
+      "when": { "context": "plan_approval" },
+      "command": ["answer"],
+      "flags": ["workspace", "choice"],
+      "template": "flywheel answer <C-ID> --workspace <パス> --choice <問いの番号>=<選択肢の番号>"
+    },
+    {
       "id": "approve-operation",
       "when": { "actions": ["approve_operation"] },
       "command": ["approve"],
@@ -89,14 +96,6 @@
       "flags": ["workspace"],
       "template": "flywheel followup promote <F-ID> --workspace <パス>",
       "note": "課題に上げます（1 回に 1 件。本人確認が要ります）"
-    },
-    {
-      "id": "answer-choice",
-      "when": { "context": "answer-choice" },
-      "command": ["answer"],
-      "flags": ["workspace", "choice"],
-      "template": "flywheel answer <C-ID> --workspace <パス> --choice <選択肢の番号>",
-      "note": "計画の承認待ちの問いに、選択肢の番号で答えます"
     }
   ]
 }

@@ -176,30 +176,19 @@ const btn = (m: HTMLElement, name: string | RegExp) =>
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status });
 
-it("AC-207: approve_plan を持つ課題の詳細に、開いたとき ① を呼んで計画の要約と承認のボタンが出る", async () => {
-  const { requests } = setup("awaiting_plan_approval", ["approve_plan"], {
-    [APPROVAL]: summary({
-      kind: "plan",
-      plan: {
-        body: "承認する計画",
-        budget_usd: null,
-        summary: null,
-        tasks: [],
-        topics: [],
-        uses_integration: null,
-        version: 2,
-      },
-      releases: [],
-      other_pending_operations: [],
-      release_held: false,
-    }),
-  });
+it("AC-207: approve_plan を持つ課題の詳細には、承認のボタンではなく計画の承認の画面へのリンクが出る（#811）", async () => {
+  const { requests } = setup("awaiting_plan_approval", ["approve_plan"]);
   const m = await open();
-  await btn(m, "計画を承認する");
-  expect(within(m).getByText("承認する計画")).toBeInTheDocument();
-  expect(requests.some((r) => r.url === APPROVAL && r.method === "GET")).toBe(
-    true,
-  );
+  const link = await within(m).findByRole("link", {
+    name: "計画の承認の画面を開く",
+    hidden: true,
+  });
+  expect(link).toHaveAttribute("href", "#/a/alpha/challenges/C-1/approve-plan");
+  expect(
+    within(m).queryByRole("button", { name: /承認/, hidden: true }),
+  ).toBeNull();
+  // 詳細を開いただけでは承認の要約を読まない（読むのは承認の画面）
+  expect(requests.some((r) => r.url === APPROVAL)).toBe(false);
 });
 
 it("AC-208: approve_completion を持つ課題の詳細に完了の承認のボタンが出る", async () => {
@@ -221,11 +210,11 @@ it("AC-209: 状態の文字列が承認待ちでも next_human_actions に承認
 });
 
 it("AC-209: 承認のコードがあれば状態の文字列が何でもボタンが出る", async () => {
-  setup("in_progress", ["approve_plan"], {
-    [APPROVAL]: summary({ kind: "plan", plan: null }),
+  setup("in_progress", ["approve_completion"], {
+    [APPROVAL]: summary(),
   });
   const m = await open();
-  await btn(m, "計画を承認する");
+  await btn(m, /完了を承認する/);
 });
 
 it("AC-210/213: 完了の要約に完了条件・同時には承認されない不可逆操作・release の head（取れなければその旨）・保留のままを示す", async () => {
@@ -251,12 +240,16 @@ it("AC-210/213: 完了の要約に完了条件・同時には承認されない�
 });
 
 it("AC-211: ボタンは開いたときの版を CSRF つきで ② に送り、承認後は承認済みを示す", async () => {
-  const { requests } = setup("awaiting_plan_approval", ["approve_plan"], {
-    [APPROVAL]: summary({ kind: "plan", version: 7 }),
-    [APPROVE]: () => json(200, {}),
-  });
+  const { requests } = setup(
+    "awaiting_completion_approval",
+    ["approve_completion"],
+    {
+      [APPROVAL]: summary({ version: 7 }),
+      [APPROVE]: () => json(200, {}),
+    },
+  );
   const m = await open();
-  fireEvent.click(await btn(m, "計画を承認する"));
+  fireEvent.click(await btn(m, /完了を承認する/));
   await within(m).findByText("承認しました。", {}, { timeout: 2000 });
   const posts = requests.filter((r) => r.method === "POST");
   expect(posts).toHaveLength(1);
@@ -279,21 +272,14 @@ it("AC-212: conflict なら ① を読み直して最新の要約を示し、自
     return json(
       200,
       summary({
-        kind: "plan",
         version: reads === 1 ? 3 : 4,
-        plan: {
-          body: reads === 1 ? "古い計画" : "新しい計画",
-          budget_usd: null,
-          summary: null,
-          tasks: [],
-          topics: [],
-          uses_integration: null,
-          version: 1,
-        },
+        done_criteria: reads === 1 ? "古い条件" : "新しい条件",
       }),
     );
   };
-  const { requests } = setup("awaiting_plan_approval", ["approve_plan"]);
+  const { requests } = setup("awaiting_completion_approval", [
+    "approve_completion",
+  ]);
   // setup の後から応答を差し込む（GET の応答も関数で返す）
   vi.stubGlobal(
     "fetch",
@@ -313,15 +299,15 @@ it("AC-212: conflict なら ① を読み直して最新の要約を示し、自
     }),
   );
   const m = await open();
-  fireEvent.click(await btn(m, "計画を承認する"));
+  fireEvent.click(await btn(m, /完了を承認する/));
   await within(m).findByText(
     /最新の要約を読み直しました/,
     {},
     { timeout: 2000 },
   );
-  await within(m).findByText("新しい計画");
+  await within(m).findByText("新しい条件");
   expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
-  fireEvent.click(await btn(m, "計画を承認する"));
+  fireEvent.click(await btn(m, /完了を承認する/));
   await within(m).findByText("承認しました。");
   const posts = requests.filter((r) => r.method === "POST");
   expect(posts.map((p) => p.body)).toEqual(['{"version":3}', '{"version":4}']);
@@ -330,14 +316,14 @@ it("AC-212: conflict なら ① を読み直して最新の要約を示し、自
 // conflict のテストが GET の本文を引き直すための固定の本文。
 function fixturesFor(): Record<string, unknown> {
   const f = fixtures();
-  const c = card("awaiting_plan_approval", ["approve_plan"]);
+  const c = card("awaiting_completion_approval", ["approve_completion"]);
   f["/api/v1/workspaces/alpha/challenges"] = {
-    challenges: [{ ...challenge("awaiting_plan_approval"), card: c }],
+    challenges: [{ ...challenge("awaiting_completion_approval"), card: c }],
   };
   f["/api/v1/workspaces/alpha/challenges/C-1"] = {
     approvals: [],
     card: c,
-    challenge: challenge("awaiting_plan_approval"),
+    challenge: challenge("awaiting_completion_approval"),
     direct_completions: [],
     holds: [],
     operations: [],
@@ -385,12 +371,16 @@ it.each([
 ])(
   "403・forbidden_origin（%s）では再読み込みを促し、再送しない",
   async (_n, status, code) => {
-    const { requests } = setup("awaiting_plan_approval", ["approve_plan"], {
-      [APPROVAL]: summary({ kind: "plan" }),
-      [APPROVE]: () => json(status, { error: { code, message: "拒否" } }),
-    });
+    const { requests } = setup(
+      "awaiting_completion_approval",
+      ["approve_completion"],
+      {
+        [APPROVAL]: summary(),
+        [APPROVE]: () => json(status, { error: { code, message: "拒否" } }),
+      },
+    );
     const m = await open();
-    fireEvent.click(await btn(m, "計画を承認する"));
+    fireEvent.click(await btn(m, /完了を承認する/));
     await within(m).findByText(/ページを再読み込みして/, {}, { timeout: 2000 });
     await new Promise((r) => setTimeout(r, 50));
     expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
@@ -398,12 +388,16 @@ it.each([
 );
 
 it("UI が送る要求は GET と …/approve の POST だけ", async () => {
-  const { requests } = setup("awaiting_plan_approval", ["approve_plan"], {
-    [APPROVAL]: summary({ kind: "plan" }),
-    [APPROVE]: () => json(200, {}),
-  });
+  const { requests } = setup(
+    "awaiting_completion_approval",
+    ["approve_completion"],
+    {
+      [APPROVAL]: summary(),
+      [APPROVE]: () => json(200, {}),
+    },
+  );
   const m = await open();
-  fireEvent.click(await btn(m, "計画を承認する"));
+  fireEvent.click(await btn(m, /完了を承認する/));
   await within(m).findByText("承認しました。");
   await waitFor(() => expect(requests.length).toBeGreaterThan(0));
   for (const r of requests) {
@@ -422,9 +416,7 @@ const guideText = async (m: HTMLElement) =>
   ).textContent ?? "";
 
 it("AC-214: approve_plan には reject の端末のコマンドと対話の案内", async () => {
-  setup("awaiting_plan_approval", ["approve_plan"], {
-    [APPROVAL]: summary({ kind: "plan" }),
-  });
+  setup("awaiting_plan_approval", ["approve_plan"]);
   const t = await guideText(await open());
   expect(t).toContain(
     "flywheel reject C-1 --workspace '/w/alpha' --reason <理由>",
@@ -471,7 +463,7 @@ it("AC-217: 案内の文言の定数は空でなく、5 つの操作それぞれ
       state,
       [code],
       state === "awaiting_plan_approval"
-        ? { [APPROVAL]: summary({ kind: "plan" }) }
+        ? {}
         : state === "awaiting_completion_approval"
           ? { [APPROVAL]: summary() }
           : {},
@@ -498,3 +490,14 @@ it.each(["triage", "review_discrepancy", "clear_slot"])(
     expect(within(m).queryByTestId("conversation-note")).toBeNull();
   },
 );
+
+it("#811: 完了の承認のパネルは、要約が plan を返したら承認のボタンを出さない", async () => {
+  setup("awaiting_completion_approval", ["approve_completion"], {
+    [APPROVAL]: summary({ kind: "plan" }),
+  });
+  const m = await open();
+  await within(m).findByText(/完了の承認待ちではありません/);
+  expect(
+    within(m).queryByRole("button", { name: /承認する/, hidden: true }),
+  ).toBeNull();
+});
