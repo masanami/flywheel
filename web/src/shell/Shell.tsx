@@ -9,7 +9,6 @@ import type { LiveState } from "../live/useLive.ts";
 import { RefreshKeyContext } from "../nav.tsx";
 import { NowScreen } from "../now/NowScreen.tsx";
 import { AgentRail } from "./AgentRail.tsx";
-import { CycleStartButton } from "./CycleStartButton.tsx";
 import { NotFound } from "./NotFound.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { type Route, hrefOf, useHashRoute } from "./route.ts";
@@ -90,8 +89,6 @@ function AgentBody({
   agentName: string;
 }) {
   const data = live.data[agentName];
-  const total = data?.status?.cycle_work.total ?? 0;
-  const cycleState = data?.cycle?.state ?? "";
 
   switch (route.kind) {
     case "agent":
