@@ -211,6 +211,30 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
   ...p,
 });
 
+const taskHold = (
+  task_id: string,
+  raised_at: string,
+  p: Partial<Hold>,
+): Hold => ({
+  answer: null,
+  answered_at: null,
+  answered_by: null,
+  answered_channel: null,
+  answered_verification: null,
+  closed_at: null,
+  from_status: "in_progress",
+  from_status_label: "着手中",
+  kind: "human",
+  question: "",
+  raised_at,
+  relay_quote: null,
+  relay_session: null,
+  replan: false,
+  run_id: null,
+  task_id,
+  ...p,
+});
+
 const LONG = `${"この値はカードに全文を出すと幅 320px の列で何行にも伸びる。".repeat(8)}\n2 行目: 外部の Issue 本文をそのまま取り込んだ想定の長い説明。`;
 
 export function seed(): Record<string, MockWorkspace> {
@@ -508,8 +532,10 @@ export function seed(): Record<string, MockWorkspace> {
         },
         discrepancy: ["upstream_updated"],
       },
+      // タスクの詳細の実行の記録（#810）。T-43 は委譲が 2 件（古い方は失敗・新しい方は実行中）、T-42 は別のタスクの実行。
       runs: [
         run("R-11", "C-28", { started_at: iso(20) }),
+        // 経緯の実行の行（#809）。判断点の実行と、タスクに付いた失敗の実行。
         run("R-14", "C-28", {
           kind: "judgment",
           judgment: "J2",
@@ -517,12 +543,51 @@ export function seed(): Record<string, MockWorkspace> {
           result: "succeeded",
           cost_usd: 0.42,
         }),
-        run("R-15", "C-28", {
+        run("R-18", "C-28", {
           kind: "delegate",
           task_id: "T-40",
           started_at: iso(70),
           result: "errored",
           cost_usd: 3.1,
+        }),
+        run("R-15", "C-28", {
+          kind: "delegate",
+          task_id: "T-43",
+          started_at: iso(60),
+          ended_at: iso(50),
+          result: "errored",
+          cost_usd: 0.8,
+        }),
+        run("R-16", "C-28", {
+          kind: "delegate",
+          task_id: "T-43",
+          started_at: iso(30),
+          cost_usd: 1.25,
+        }),
+        run("R-17", "C-28", {
+          kind: "delegate",
+          task_id: "T-42",
+          started_at: iso(90),
+          ended_at: iso(80),
+          result: "succeeded",
+        }),
+      ],
+      // タスクの詳細の問いと回答（#810）。T-44 は答え待ち、T-43 は対話で答えて計画の作り直しへ回した回答、T-42 は別のタスクの問い。
+      holds: [
+        taskHold("T-44", iso(15), {
+          question: "書き出し先の表が既にあるときは、作り直しますか。",
+        }),
+        taskHold("T-43", iso(70), {
+          question: "列の名前は旧基盤とそろえますか。",
+          answer: "そろえる",
+          answered_at: iso(65),
+          relay_quote: "旧基盤とそろえてほしい",
+          replan: true,
+        }),
+        taskHold("T-42", iso(100), {
+          question: "別のタスクの問い。",
+          answer: "はい",
+          answered_at: iso(95),
         }),
       ],
       operations: [

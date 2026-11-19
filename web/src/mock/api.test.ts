@@ -33,7 +33,7 @@ describe("読み取り（types.gen.ts の形）", () => {
     expect(nh.workspaces.map((w) => w.name)).toEqual(["alpha", "beta"]);
     expect(status.needs_human.challenges.map((c) => c.id)).toContain("C-3");
     const q = await api.questions();
-    expect(q.questions.map((x) => x.challenge_id)).toEqual(["C-8"]);
+    expect(q.questions.map((x) => x.challenge_id)).toEqual(["C-8", "C-28"]);
   });
   it("サイクルの状態は GET …/cycle と同じ形（state・last_*）で返る", async () => {
     const c = await api.cycle("alpha");
@@ -103,10 +103,10 @@ describe("親が直接行う保留（#452）", () => {
     const cats = new Map(graphOf(w).nodes.map((n) => [n.id, n.category]));
     expect(cats.get("C-12")).toBe("done");
     expect(cats.get("C-21")).toBe("withdrawn");
-    // オーナーが答える問いにも出ない
-    expect((await a.questions()).questions.map((x) => x.challenge_id)).toEqual(
-      [],
-    );
+    // オーナーが答える問いにも出ない（C-28 のタスクの問いは親が直接行う保留ではないので残る）
+    expect((await a.questions()).questions.map((x) => x.challenge_id)).toEqual([
+      "C-28",
+    ]);
   });
 
   it("種類が人の対応を待つ保留の課題は、従来どおり needs_human と問いに出る", async () => {

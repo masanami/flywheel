@@ -1181,3 +1181,29 @@ a.task-box:hover {
 .history-quote {
   flex-basis: 100%;
 }
+/* ---- タスクの詳細（#810） ---- */
+.task-detail {
+  overflow-wrap: anywhere;
+}
+.task-crumb {
+  margin: 0;
+  color: var(--board-muted-fg);
+  font-size: 0.85rem;
+}
+.task-links,
+.task-runs,
+.task-holds {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.task-runs {
+  list-style: none;
+  padding-left: 0;
+}
+.task-runs li {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--board-border);
+}
+.task-holds > li {
+  margin-bottom: 0.5rem;
+}
