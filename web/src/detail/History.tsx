@@ -120,7 +120,8 @@ function runRow(r: Run, taskTitle: (id: string) => string): Row {
       : known(RUN_KIND_LABELS, r.kind);
   const result =
     r.result === null ? RUN_RUNNING_LABEL : known(RUN_RESULT_LABELS, r.result);
-  const cost = r.cost_usd === null ? NO_COST_LABEL : `$${usd(r.cost_usd)}`;
+  // 費用の書き方は、課題の項目と同じ（数と USD）。
+  const cost = r.cost_usd === null ? NO_COST_LABEL : `${usd(r.cost_usd)} USD`;
   return {
     key: `r${r.id}`,
     at: r.started_at,

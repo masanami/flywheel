@@ -263,7 +263,7 @@ it("AC-266 #809: 「計画と承認」は plan・approve・approve_hold_release�
     [
       "計画を作った",
       "承認した",
-      "完了の承認を、保留にしたまま反映した",
+      "完了を承認した（反映は保留のまま）",
       "差し戻した",
     ].sort(),
   );
@@ -354,11 +354,11 @@ it("AC-272 #809: 実行の記録の行に、何の実行か（判断点の名前
     "計画を作る判断点（J2）",
   );
   expect(within(j).getByTestId("history-detail")).toHaveTextContent(
-    "成功・$0.42",
+    "成功・0.42 USD",
   );
   expect(within(d).getByTestId("history-what")).toHaveTextContent("委譲");
   expect(within(d).getByTestId("history-detail")).toHaveTextContent(
-    "失敗・$3.1",
+    "失敗・3.1 USD",
   );
 });
 

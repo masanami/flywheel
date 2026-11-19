@@ -256,7 +256,7 @@ export const PARENT_DIRECT_HOLD_NOTE =
 export const HISTORY_ACTION_LABELS: Record<string, string> = {
   plan: "計画を作った",
   approve: "承認した",
-  approve_hold_release: "完了の承認を、保留にしたまま反映した",
+  approve_hold_release: "完了を承認した（反映は保留のまま）",
   reject: "差し戻した",
   hold: "あなたへの問いを上げた",
   answer: "問いに答えた",
