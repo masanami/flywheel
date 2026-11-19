@@ -562,6 +562,115 @@ func TestChallengeTree_NextHumanActions_AC50_802(t *testing.T) {
 	t.Errorf("next_human_actions = %v, want approve_plan included", n.NextHumanActions)
 }
 
+// AC-50（#798 の全体のレビューで足した）: 課題のツリーの next_human_actions は、課題の一覧のカードの導出（DeriveCard）と
+// 課題ごとに同じ値・同じ並びである。人間の操作が出る課題と出ない課題を混ぜて確かめる。
+func TestChallengeTree_NextHumanActionsEqualCardDerivation_AC50_798(t *testing.T) {
+	f := newTreeFx(t)
+	statuses := []string{"awaiting_plan_approval", "awaiting_human", "awaiting_completion_approval", "in_progress", "unclassified", "classified"}
+	for i, st := range statuses {
+		f.challenge(fmt.Sprintf("課題 %d %s", i+1, st), st)
+	}
+	ctx := context.Background()
+	ov, err := f.s.GetOverviewFor(ctx, f.decl())
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := f.s.ListChallenges(ctx, ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := f.tree().Challenges
+	if len(nodes) != len(statuses) || len(all) != len(statuses) {
+		t.Fatalf("nodes = %v, all = %d, want %d", treeIDs(nodes), len(all), len(statuses))
+	}
+	sawEmpty, sawNonEmpty := false, false
+	for i, c := range all {
+		card, err := f.s.DeriveCard(ctx, c, ov, treeNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if nodes[i].ID != c.ID {
+			t.Fatalf("nodes[%d].ID = %s, want %s", i, nodes[i].ID, c.ID)
+		}
+		if !reflect.DeepEqual(nodes[i].NextHumanActions, card.NextHumanActions) {
+			t.Errorf("%s (%s): tree next_human_actions = %v, card = %v", c.ID, c.Status, nodes[i].NextHumanActions, card.NextHumanActions)
+		}
+		if len(card.NextHumanActions) == 0 {
+			sawEmpty = true
+		} else {
+			sawNonEmpty = true
+		}
+	}
+	if !sawEmpty || !sawNonEmpty {
+		t.Errorf("fixture must mix challenges with and without actions (empty=%v, non-empty=%v)", sawEmpty, sawNonEmpty)
+	}
+}
+
+// 課題の一覧と、親子・前提は別の読み取りで読む。その間に増えた課題を親子・前提だけが指しているとき（一覧に無い課題）は、
+// ID と題名が空の要素を返さず、その要素を飛ばす（#798 の全体のレビュー）。
+func TestBuildTreeNodes_SkipsRelationsMissingFromTheList_798(t *testing.T) {
+	f := newTreeFx(t)
+	pre := f.challenge("前提の課題", "in_progress")
+	main := f.challenge("本体", "in_progress")
+	child := f.challenge("子", "in_progress")
+	coretest.InsertDependency(t, f.ws, main, pre)
+	coretest.Exec(t, f.ws, `INSERT INTO challenge_parent (challenge_id, parent_id, created_at) VALUES (?, ?, '2026-11-01T00:00:00.000Z')`, child, main)
+	ctx := context.Background()
+	all, err := f.s.ListChallenges(ctx, ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pick := func(id int) Challenge {
+		for _, c := range all {
+			if c.ID == formatChallengeID(int64(id)) {
+				return c
+			}
+		}
+		t.Fatalf("challenge %d not in the list", id)
+		return Challenge{}
+	}
+	without := func(ids ...int) []Challenge {
+		var out []Challenge
+	next:
+		for _, c := range all {
+			for _, id := range ids {
+				if c.ID == formatChallengeID(int64(id)) {
+					continue next
+				}
+			}
+			out = append(out, c)
+		}
+		return out
+	}
+	t.Run("a prerequisite and a child that are not in the list are skipped", func(t *testing.T) {
+		nodes, err := f.s.buildTreeNodes(ctx, without(pre, child), []Challenge{pick(main)}, f.decl(), treeNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(nodes[0].Dependencies) != 0 || len(nodes[0].Children) != 0 {
+			t.Errorf("dependencies = %+v, children = %+v, want both empty", nodes[0].Dependencies, nodes[0].Children)
+		}
+	})
+	t.Run("a parent that is not in the list stays nil", func(t *testing.T) {
+		nodes, err := f.s.buildTreeNodes(ctx, without(main), []Challenge{pick(child)}, f.decl(), treeNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if nodes[0].Parent != nil {
+			t.Errorf("parent = %+v, want nil", nodes[0].Parent)
+		}
+	})
+	t.Run("relations that are in the list are still returned", func(t *testing.T) {
+		nodes, err := f.s.buildTreeNodes(ctx, all, []Challenge{pick(main)}, f.decl(), treeNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(nodes[0].Dependencies) != 1 || nodes[0].Dependencies[0].ChallengeID == "" || len(nodes[0].Children) != 1 || nodes[0].Children[0].ChallengeID == "" {
+			t.Errorf("dependencies = %+v, children = %+v", nodes[0].Dependencies, nodes[0].Children)
+		}
+	})
+}
+
 func TestChallengeTree_UsesIntegration_AC51to53_802(t *testing.T) {
 	f := newTreeFx(t)
 	t.Run("AC-51 an approved plan that does not use integration is false", func(t *testing.T) {

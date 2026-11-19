@@ -53,7 +53,7 @@ const initial: LiveState = {
 
 async function loadWorkspace(name: string): Promise<WorkspaceData> {
   try {
-    // 列の見出しは補助の表示。cycle だけが失敗しても課題の表示は残し、見出しを出さない。
+    // サイクルの状態は補助の表示。cycle だけが失敗しても課題の表示は残し、サイクルの状態を出さない。
     const [status, challenges, cycle] = await Promise.all([
       api.status(name),
       api.challenges(name),

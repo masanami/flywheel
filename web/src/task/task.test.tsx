@@ -408,6 +408,26 @@ it("AC-295 #810: 「問いと回答」に、そのタスクの保留の問いと
   expect(rows[1]?.textContent).toContain("新しい問い");
 });
 
+it("#798: 保留の回答は Markdown として整えて出る（箇条書きが li になる。「回答:」の語は残る）", async () => {
+  const { root } = await open(
+    show({
+      holds: [
+        hold({
+          question: "どうしますか",
+          answer: "次の 2 つにする:\n\n- 案A を採る\n- **案B** は見送る",
+        }),
+      ],
+    }),
+  );
+  const a = within(root).getByTestId("task-hold-answer");
+  expect(a.textContent).toContain("回答:");
+  expect([...a.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+    "案A を採る",
+    "案B は見送る",
+  ]);
+  expect(a.querySelector("li strong")?.textContent).toBe("案B");
+});
+
 it("AC-296 #810: 「問いと回答」に、ほかのタスクの保留は出ない", async () => {
   const { root } = await open(holdsShow());
   expect(within(root).queryByText("別のタスクの問い")).toBeNull();

@@ -1,6 +1,6 @@
 import type { Question, StatusNeedsHuman } from "../api/types.gen.ts";
-import { buildWaitingRows } from "../now/waitingRows.ts";
 import type { WaitingKind } from "../shell/waiting.ts";
+import { buildWaitingRows } from "../shell/waitingRows.ts";
 
 export interface WaitingItem {
   // 行ごとに一意な鍵（エージェントの中で）。

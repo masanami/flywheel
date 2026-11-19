@@ -297,7 +297,8 @@ function Holds({ holds }: { holds: Hold[] }) {
             </div>
             {h.answer !== null ? (
               <div data-testid="task-hold-answer">
-                <b>回答:</b> {h.answer}
+                <b>回答:</b>
+                <Markdown text={h.answer} />
                 {answeredBy(h) !== null ? (
                   <p data-testid="task-hold-by">答えた人: {answeredBy(h)}</p>
                 ) : null}

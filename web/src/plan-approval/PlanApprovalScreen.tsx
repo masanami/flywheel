@@ -7,6 +7,7 @@ import type {
   PlanTopic,
 } from "../api/types.gen.ts";
 import { guidesFor, guidesForContext } from "../guidance.ts";
+import { LOADING_TEXT, RELOAD_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { ClampedText } from "../parts/ClampedText.tsx";
@@ -16,6 +17,7 @@ import { CycleStartButton } from "../shell/CycleStartButton.tsx";
 import { hrefOf } from "../shell/route.ts";
 import { type ScreenData, useScreenData } from "../shell/useScreenData.ts";
 import { TaskTree } from "../tree/TaskTree.tsx";
+import { usd } from "../usd.ts";
 
 export const NOT_AWAITING_PLAN_TEXT =
   "この課題は、計画の承認待ちではありません。";
@@ -23,13 +25,11 @@ export const APPROVED_TEXT = "承認しました。";
 export const NEXT_CYCLE_TEXT = "続きは、次のサイクルで進みます。";
 export const CONFLICT_TEXT =
   "計画が変わりました。最新の計画を読み直しました。内容を確かめて、もう一度承認してください。";
-export const RELOAD_TEXT =
-  "操作を受け付けられませんでした。ページを再読み込みしてからやり直してください（自動では再送しません）。";
+export const PLAN_UPDATED_TEXT =
+  "計画が更新されました。内容を確かめてから承認してください。";
 export const RECOMMEND_OK_TEXT = "推奨のままでよければ、そのまま承認できます。";
 export const NO_QUESTIONS_TEXT = "問いはありません。";
 export const BUDGET_UNSET_TEXT = "未設定";
-
-const usd = (n: number) => String(Number(n.toFixed(2)));
 
 // 計画の承認の画面。承認の要約の API の応答から、計画の中身（方針・完了したら見えるもの・やらないこと・
 // ツリー・問いと推奨・予算の上限・統合先）を出す。区分（phase）は応答の値をそのまま出し、画面では導かない。
@@ -53,6 +53,19 @@ export function PlanApprovalScreen({
   );
   // 承認が通った後は、課題の状態が進んで要約が読めなくなるので、読み直した結果ではなく、承認した時点の題名で出す。
   const [approved, setApproved] = useState<{ title: string } | null>(null);
+  // 開いている間に、読み直しで計画の版が変わったら知らせる。直前に表示していた版（seen）と、読み直した版を比べる。
+  // 中身の入れ替えそのものは useScreenData が行い、承認の口へ送る版は表示している応答の版のまま。
+  // 知らせは、承認を押すか、画面を開き直す（この部品が作り直される）まで出したままにする。
+  const [seen, setSeen] = useState<number | null>(null);
+  const [updated, setUpdated] = useState(false);
+  const shownVersion =
+    result.state === "ready" && result.data.approval.kind === "plan"
+      ? result.data.approval.version
+      : null;
+  if (shownVersion !== null && shownVersion !== seen) {
+    setSeen(shownVersion);
+    if (seen !== null) setUpdated(true);
+  }
   const challengeHref = hrefOf({
     kind: "challenge",
     name: agentName,
@@ -86,6 +99,8 @@ export function PlanApprovalScreen({
       id={id}
       workspacePath={workspacePath}
       challengeHref={challengeHref}
+      updated={updated}
+      onApproveStart={() => setUpdated(false)}
       onApproved={(title) => setApproved({ title })}
     />
   );
@@ -110,6 +125,8 @@ function Body({
   id,
   workspacePath,
   challengeHref,
+  updated,
+  onApproveStart,
   onApproved,
 }: {
   result: ScreenData<{ approval: ApprovalSummary }>;
@@ -118,9 +135,11 @@ function Body({
   id: string;
   workspacePath: string;
   challengeHref: string;
+  updated: boolean;
+  onApproveStart: () => void;
   onApproved: (title: string) => void;
 }) {
-  if (result.state === "loading") return <p>読み込んでいます</p>;
+  if (result.state === "loading") return <p>{LOADING_TEXT}</p>;
   if (result.state === "error") {
     const e = result.error;
     if (e instanceof ApiError && e.code === "invalid_transition") {
@@ -137,6 +156,8 @@ function Body({
       agentName={agentName}
       id={id}
       workspacePath={workspacePath}
+      updated={updated}
+      onApproveStart={onApproveStart}
       onApproved={onApproved}
     />
   );
@@ -148,6 +169,8 @@ function PlanView({
   agentName,
   id,
   workspacePath,
+  updated,
+  onApproveStart,
   onApproved,
 }: {
   summary: ApprovalSummary;
@@ -155,6 +178,8 @@ function PlanView({
   agentName: string;
   id: string;
   workspacePath: string;
+  updated: boolean;
+  onApproveStart: () => void;
   onApproved: (title: string) => void;
 }) {
   const plan = summary.plan;
@@ -173,6 +198,7 @@ function PlanView({
   const approve = async () => {
     setBusy(true);
     setNotice(null);
+    onApproveStart();
     try {
       await api.approve(agentName, id, summary.version);
       // 承認が通った後は、要約の読み直しが先に着いてこの部品が外れていても、承認した旨を出す（親が持つ）。
@@ -335,6 +361,16 @@ function PlanView({
       </>
 
       <div className="approval-control">
+        {/* 食い違い（conflict）の直後は、同じことを伝える文がもう出ているので、重ねて出さない。 */}
+        {updated && notice !== CONFLICT_TEXT && (
+          <p
+            className="approval-control-error"
+            role="alert"
+            data-testid="plan-updated"
+          >
+            {PLAN_UPDATED_TEXT}
+          </p>
+        )}
         <button
           type="button"
           className="approval-control-confirm"

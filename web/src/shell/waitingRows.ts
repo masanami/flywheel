@@ -4,8 +4,8 @@ import type {
   Workspace,
 } from "../api/types.gen.ts";
 import { DISCREPANCY_LABELS, label } from "../labels.ts";
-import { type Route, hrefOf } from "../shell/route.ts";
-import { WAITING_KINDS, type WaitingKind } from "../shell/waiting.ts";
+import { type Route, hrefOf } from "./route.ts";
+import { WAITING_KINDS, type WaitingKind } from "./waiting.ts";
 
 // 「あなたを待っている」の 1 行。種類の並びは WAITING_KINDS、同じ種類の中は API の並び。
 export interface WaitingRow {

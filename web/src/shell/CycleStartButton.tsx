@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
+import { RELOAD_TEXT } from "../labels.ts";
 
 // 「サイクルを回す」のボタン。「いま進められること」・サイクルの画面・計画の承認の後で共通に使う。
 // 押せるのは、サイクルを回すと進むものが 1 件以上あり、サイクルの状態が走っていない（idle）ときだけ。
@@ -50,6 +51,11 @@ export function CycleStartButton({
       if (!alive.current) return;
       if (e instanceof ApiError && e.code === "locked") {
         setNote({ failed: false, text: CYCLE_LOCKED_NOTE });
+      } else if (
+        e instanceof ApiError &&
+        (e.status === 403 || e.code === "forbidden_origin")
+      ) {
+        setNote({ failed: true, text: RELOAD_TEXT });
       } else {
         const m = e instanceof Error ? e.message : String(e);
         setNote({ failed: true, text: `サイクルを始められませんでした: ${m}` });
