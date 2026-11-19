@@ -791,7 +791,12 @@ it("AC-279 #808: 予想（stages.expected）がある課題の「計画の本文
       hash: PLAN_HASH,
     },
   );
-  expect(q(root).getByTestId("stages-detail")).toHaveTextContent("決済の画面");
+  // 「決済の画面」は実物の場面（「決済の画面（実物）」）にも含まれるので、予想の側にだけある文字で確かめる。
+  const expected = q(root)
+    .getByTestId("stages-detail")
+    .querySelector('[data-field="expected"]');
+  expect(expected).toHaveTextContent("決済の画面");
+  expect(expected).toHaveTextContent("予想の見え方");
 });
 
 it("AC-280 #808: 実物（stages.actual）がある課題の「計画の本文」に、実物の場面が出る", async () => {
