@@ -6,12 +6,12 @@ import type {
   PlanQuestion,
   PlanTopic,
 } from "../api/types.gen.ts";
-import { ClampedText } from "../board/ClampedText.tsx";
-import { FigureView } from "../board/FigureView.tsx";
-import { IssuesAnswerView, IssuesView } from "../board/StagesDetail.tsx";
 import { guidesFor, guidesForContext } from "../guidance.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
+import { ClampedText } from "../parts/ClampedText.tsx";
+import { FigureView } from "../parts/FigureView.tsx";
+import { IssuesAnswerView, IssuesView } from "../parts/StagesDetail.tsx";
 import { CycleStartButton } from "../shell/CycleStartButton.tsx";
 import { hrefOf } from "../shell/route.ts";
 import { type ScreenData, useScreenData } from "../shell/useScreenData.ts";

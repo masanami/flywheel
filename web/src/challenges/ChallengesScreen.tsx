@@ -4,6 +4,7 @@ import type { TreeChallenge } from "../api/types.gen.ts";
 import {
   DEPENDENCY_UNMET_LABEL,
   LEGEND_EDGE_HINT,
+  LOADING_TEXT,
   PHASE_LEGEND_LABELS,
   PHASE_LEGEND_ORDER,
 } from "../labels.ts";
@@ -15,7 +16,6 @@ import { TaskTree } from "../tree/TaskTree.tsx";
 import { usd } from "../usd.ts";
 
 export const NO_CHALLENGES_TEXT = "開いている課題はありません。";
-const LOADING = "読み込んでいます";
 
 // 課題の画面。課題のツリーの API を、この画面を開いている間だけ読み、そのエージェントの変化の通し番号が進んだら読み直す。
 // 区分・進み・費用・件数は API の値をそのまま出す（画面では導かない）。
@@ -34,7 +34,7 @@ export function ChallengesScreen({
     <section aria-labelledby="screen-title">
       <h2 id="screen-title">課題</h2>
       <Legend />
-      {result.state === "loading" ? <p>{LOADING}</p> : null}
+      {result.state === "loading" ? <p>{LOADING_TEXT}</p> : null}
       {result.state === "error" ? (
         <p role="alert">{String(result.error)}</p>
       ) : null}

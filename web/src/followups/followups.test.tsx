@@ -201,6 +201,20 @@ it("AC-363 #812: 行に題名が出る", async () => {
   expect(screen.getByTestId("followup-row")).toHaveTextContent("固有の題名");
 });
 
+it("#814: 出どころ learn は「学び」と出る", async () => {
+  await open([fu("F-1", { source: "learn" })]);
+  expect(screen.getByTestId("followup-source")).toHaveTextContent(
+    "出どころ: 学び",
+  );
+});
+
+it("#814: 出どころが constructor のような継承されたキーの名前でも、そのまま文字で出る", async () => {
+  await open([fu("F-1", { source: "constructor" })]);
+  expect(screen.getByTestId("followup-source")).toHaveTextContent(
+    "出どころ: constructor",
+  );
+});
+
 it("AC-364 #812: 行に出どころ（source）が出る", async () => {
   await open([fu("F-1", { source: "固有の出どころ" })]);
   expect(screen.getByTestId("followup-source")).toHaveTextContent(

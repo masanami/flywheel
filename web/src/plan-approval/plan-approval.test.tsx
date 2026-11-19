@@ -647,7 +647,7 @@ it("#811: 過去の形の計画でも、完了したら見えるものとやら�
   ).toHaveTextContent("旧の場面");
 });
 
-// 見直し前の承認の要約のテスト（board/approval-summary.test.tsx）が守っていた動きを、新しい画面で守る。
+// 見直し前の承認の要約のテスト（parts/approval-summary.test.tsx）が守っていた動きを、新しい画面で守る。
 
 it("#811: 過去の形の計画では、段階の欄の論点と、その回答が出る（見直し前の AC-386）", async () => {
   const s = legacy();

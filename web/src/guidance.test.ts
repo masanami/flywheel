@@ -59,3 +59,13 @@ it("<パス> は単一引用符で囲み、中の単一引用符は '\\'' にす
     "flywheel reject C-1 --workspace '/tmp/a$$b$&' --reason <理由>",
   );
 });
+
+// AC-445 #814: S2c で足した案内（本番に届く完了の承認の案内 approve-with-release 以外）に「本番反映」の文字は入らない。
+it("AC-445 #814: guidance.json の S2c で足した案内に「本番反映」の文字は入っていない", async () => {
+  const { default: json } = await import("./guidance.json");
+  const s2c = json.templates.filter((t) => t.id !== "approve-with-release");
+  expect(s2c.length).toBeGreaterThan(0);
+  for (const t of s2c) {
+    expect(JSON.stringify(t), t.id).not.toContain("本番反映");
+  }
+});

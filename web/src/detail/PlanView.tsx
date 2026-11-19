@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { ShowCardResponse } from "../api/types.gen.ts";
-import { ClampedText } from "../board/ClampedText.tsx";
-import { FigureView } from "../board/FigureView.tsx";
-import { StagesDetail } from "../board/StagesDetail.tsx";
 import { Markdown } from "../markdown/Markdown.tsx";
+import { ClampedText } from "../parts/ClampedText.tsx";
+import { FigureView } from "../parts/FigureView.tsx";
+import { StagesDetail } from "../parts/StagesDetail.tsx";
+import { shortTime } from "../when.ts";
 
 // 計画の本文は長いので、畳むときの行数を多めにする。
 const PLAN_LINES = 12;
@@ -48,7 +49,9 @@ export function PlanView({ show }: { show: ShowCardResponse }) {
             </div>
           ) : null}
           <p className="detail-plan-meta">
-            v{plan.version}（{plan.created_at}）
+            v{plan.version}（
+            <time dateTime={plan.created_at}>{shortTime(plan.created_at)}</time>
+            ）
           </p>
           <Body text={plan.body} lines={PLAN_LINES} />
         </section>

@@ -118,12 +118,13 @@ func TestE2ESeed(t *testing.T) {
 	must(err)
 	must(st.Close())
 
-	// C-1: 分類済みにして計画を登録する（計画承認待ちになる）。構造化した出力（タスク 2 件・問い 1 件）を付ける。
-	coretest.SetChallengeStatus(t, dir, 1, "classified")
+	// C-1: 分類済みにして計画を登録する（計画承認待ちになる）。分類は公開の口（ClassifyChallenge）で記録する。構造化した出力（タスク 2 件・問い 1 件）を付ける。
 	st, err = core.OpenWorkspace(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, err = st.ClassifyChallenge(ctx, core.ChannelCLI, "C-1", core.ClassifyInput{Priority: "P2"})
+	must(err)
 	_, _, err = st.PlanChallenge(ctx, core.ChannelCLI, "C-1", core.PlanInput{Body: "計画の本文。\n\n- 手順 1\n- 手順 2"})
 	must(err)
 	must(st.Close())

@@ -1,5 +1,6 @@
 import { type Token, type Tokens, lexer } from "marked";
 import { Fragment, type ReactNode } from "react";
+import { safeHref } from "../safeHref.ts";
 
 // 本文を Markdown として整える部品。marked は字句解析（lexer）だけを使い、その並びから
 // React の要素を組み立てる。HTML の文字列は作らない（要素に文字列を差し込む口は使わない）。
@@ -8,16 +9,6 @@ import { Fragment, type ReactNode } from "react";
 
 // 本文の見出し（# = 1）を、画面の見出しより下の段にそろえる。# は h3、###### 以降は h6。
 const HEADING_OFFSET = 2;
-
-function safeHref(href: string | null | undefined): string | null {
-  if (!href) return null;
-  try {
-    const u = new URL(href);
-    return u.protocol === "http:" || u.protocol === "https:" ? href : null;
-  } catch {
-    return null;
-  }
-}
 
 // 子要素の key は、並びの位置で足りる（本文は不変の入力から毎回組み立て直す）
 function k(i: number, prefix: string): string {

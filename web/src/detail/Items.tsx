@@ -1,4 +1,5 @@
 import type { ShowCardResponse } from "../api/types.gen.ts";
+import { safeHref } from "../safeHref.ts";
 import { usd } from "../usd.ts";
 
 // 課題の項目。状態・取り込み元・統合先・タスクの進み・費用・予算の上限。
@@ -17,7 +18,7 @@ export function Items({ show }: { show: ShowCardResponse }) {
           <dt>取り込み元</dt>
           <dd>
             <a
-              href={safeHref(binding.url)}
+              href={safeHref(binding.url) ?? "#"}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -61,14 +62,4 @@ export function Items({ show }: { show: ShowCardResponse }) {
       ) : null}
     </dl>
   );
-}
-
-// 外部由来の行き先は http(s) だけをリンクにする。それ以外は行き先を持たない（# のまま）。
-export function safeHref(url: string): string {
-  try {
-    const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:" ? url : "#";
-  } catch {
-    return "#";
-  }
 }

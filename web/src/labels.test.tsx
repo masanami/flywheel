@@ -26,6 +26,7 @@ import {
   PHASE_LABELS,
   STATE_LABELS,
   TASK_PHASES,
+  label,
 } from "./labels.ts";
 import { emptyStatus } from "./testing/fakes.ts";
 
@@ -103,4 +104,13 @@ it("#805: サイクルを回すと進むものの 8 つの段すべてに語が�
     "改修の提案",
     "片付け",
   ]);
+});
+
+// #814 掃除 5: label() は表の自前のキーだけを引く。継承されたキーの名前の値は、そのまま文字で返る。
+it("#814: label() は、constructor・toString・__proto__ のような名前の値を、そのまま文字で返す", () => {
+  const table = { a: "あ" };
+  expect(label(table, "a")).toBe("あ");
+  for (const code of ["constructor", "toString", "hasOwnProperty", "__proto__"])
+    expect(label(table, code), code).toBe(code);
+  expect(label(table, "未知")).toBe("未知");
 });

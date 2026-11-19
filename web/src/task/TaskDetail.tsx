@@ -8,8 +8,6 @@ import type {
   Task,
   TreeTask,
 } from "../api/types.gen.ts";
-import { ApprovalGuide } from "../board/ApprovalGuide.tsx";
-import { safeHref } from "../detail/Items.tsx";
 import {
   HOLD_KIND_PARENT_DIRECT,
   LOADING_TEXT,
@@ -23,6 +21,8 @@ import {
 } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
+import { ApprovalGuide } from "../parts/ApprovalGuide.tsx";
+import { safeHref } from "../safeHref.ts";
 import { NotFound } from "../shell/NotFound.tsx";
 import { hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
@@ -208,7 +208,7 @@ function TaskView({
               {child ? (
                 <>
                   <a
-                    href={safeHref(child.url)}
+                    href={safeHref(child.url) ?? "#"}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -225,7 +225,7 @@ function TaskView({
           </div>
         ) : null}
       </dl>
-      {node.phase === "waiting" ? (
+      {node.phase === "waiting" || openHolds.length > 0 ? (
         <section
           className="detail-waiting"
           aria-label="あなたを待っているもの"

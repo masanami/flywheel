@@ -40,24 +40,45 @@ function sourceFiles(dir: string): string[] {
   );
 }
 
-// 本番のビルド（flywheel serve に埋め込む）に、偽の API と偽のデータの文言が入らないこと（AC-419・#803）。
-it("AC-419 #803: 本番のビルドに偽の API・偽のデータの文言を含めない", async () => {
-  const out = mkdtempSync(join(tmpdir(), "flywheel-web-build-"));
-  try {
-    await build({
-      logLevel: "silent",
-      build: { outDir: out, emptyOutDir: true },
-    });
-    const files = jsFiles(out);
-    expect(files.length).toBeGreaterThan(0);
-    const code = files.map((f) => readFileSync(f, "utf8")).join("\n");
-    // 画面の文言・偽のデータの文字列は、ミニファイしても残る
-    for (const marker of MOCK_MARKERS) {
-      expect(code, marker).not.toContain(marker);
+// 本番のビルド（flywheel serve に埋め込む）の成果物の JS をひとまとめにした文字列。ビルドは 1 回だけ行う。
+let built: Promise<string> | undefined;
+function productionCode(): Promise<string> {
+  built ??= (async () => {
+    const out = mkdtempSync(join(tmpdir(), "flywheel-web-build-"));
+    try {
+      await build({
+        logLevel: "silent",
+        build: { outDir: out, emptyOutDir: true },
+      });
+      const files = jsFiles(out);
+      expect(files.length).toBeGreaterThan(0);
+      return files.map((f) => readFileSync(f, "utf8")).join("\n");
+    } finally {
+      rmSync(out, { recursive: true, force: true });
     }
-  } finally {
-    rmSync(out, { recursive: true, force: true });
+  })();
+  return built;
+}
+
+// 本番のビルドに、偽の API と偽のデータの文言が入らないこと（AC-419・#803）。
+it("AC-419 #803: 本番のビルドに偽の API・偽のデータの文言を含めない", async () => {
+  const code = await productionCode();
+  // 画面の文言・偽のデータの文字列は、ミニファイしても残る
+  for (const marker of MOCK_MARKERS) {
+    expect(code, marker).not.toContain(marker);
   }
+}, 60_000);
+
+// 画面には、置き場所を指す「ワークスペース」の語を出さない（エージェントと書く）。API のパスとキーは英字の workspaces なので、日本語の語は成果物に入らない（AC-443・#814）。
+it("AC-443 #814: 本番のビルドの成果物に「ワークスペース」の文字は入っていない", async () => {
+  expect(await productionCode()).not.toContain("ワークスペース");
+}, 60_000);
+
+// サイクルを「1 周」「周」とは書かない（AC-444・#814）。空白の有無と全角の数字の書き方も確かめる。
+it("AC-444 #814: 本番のビルドの成果物に「1 周」の文字は入っていない", async () => {
+  const code = await productionCode();
+  expect(code).not.toMatch(/[1１]\s*周/);
+  expect(code).not.toContain("一周");
 }, 60_000);
 
 // 目印が偽のデータの外（本番の画面）にあると、本番のビルドに入って 419 の検査が落ち続ける。

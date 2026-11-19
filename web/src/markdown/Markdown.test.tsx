@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render } from "@testing-library/react";
 import { expect, it } from "vitest";
-import { ClampedText } from "../board/ClampedText.tsx";
+import { ClampedText } from "../parts/ClampedText.tsx";
 import { Markdown } from "./Markdown.tsx";
 
 // 各テストの名前に、対応する受入基準（AC-<番号>）と Issue #804 を書く。

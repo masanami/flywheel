@@ -353,6 +353,35 @@ it("AC-294 #810: phase が waiting のタスクの詳細に、ボタンは無い
   expect(within(root).queryAllByRole("button")).toHaveLength(0);
 });
 
+// #814 掃除 6: 「あなたを待っているもの」は、答えていないオーナー宛ての保留があるとき出す（区分が waiting でなくても）。
+it("#814: 区分が waiting でなくても、答えていないオーナー宛ての保留があれば「あなたを待っているもの」が出る", async () => {
+  const { root } = await open(
+    show({
+      nodes: [N("T-2", { phase: "running" })],
+      holds: [hold({ question: "走りながら上げた問い" })],
+    }),
+  );
+  const w = within(within(root).getByTestId("task-waiting"));
+  expect(w.getByText("走りながら上げた問い")).toBeTruthy();
+});
+
+it("#814: 区分が waiting なら、保留が見つからなくても案内は出す", async () => {
+  const { root } = await open(
+    show({ nodes: [N("T-2", { phase: "waiting" })], holds: [] }),
+  );
+  expect(within(root).getByTestId("task-waiting")).toBeTruthy();
+});
+
+it("#814: 区分が waiting でなく、保留も答え済みなら「あなたを待っているもの」は出さない", async () => {
+  const { root } = await open(
+    show({
+      nodes: [N("T-2", { phase: "running" })],
+      holds: [hold({ answer: "はい" })],
+    }),
+  );
+  expect(within(root).queryByTestId("task-waiting")).toBeNull();
+});
+
 const holdsShow = () =>
   show({
     holds: [

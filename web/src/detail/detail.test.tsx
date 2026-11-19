@@ -15,9 +15,10 @@ import type {
   ShowCardResponse,
   TreeTask,
 } from "../api/types.gen.ts";
-import { type MermaidLike, setMermaidLoader } from "../board/loadMermaid.ts";
+import { type MermaidLike, setMermaidLoader } from "../parts/loadMermaid.ts";
 import { bodies, show } from "../testing/detailFixture.ts";
 import { FakeEventSource, fixtures, installFakes } from "../testing/fakes.ts";
+import { shortTime } from "../when.ts";
 
 // 課題の詳細の画面（#808）。完了条件の 1 つずつを、名前の AC-<番号> が直接確かめる。
 // ブラウザの試験（AC-104・AC-105・AC-431・AC-436）は web/e2e/detail.spec.ts にある。
@@ -690,6 +691,23 @@ it("AC-276 #808: 「計画の本文」に、課題の完了条件が出る", asy
   const { root } = await open(show(), { hash: PLAN_HASH });
   expect(q(root).getByTestId("detail-done-criteria")).toHaveTextContent(
     "完了条件の本文",
+  );
+});
+
+it("#814 掃除 9: 計画の本文の版の日時は shortTime の書き方で出て、正確な値は time 要素の dateTime に持つ", async () => {
+  const { root } = await open(
+    show({
+      plans: [{ ...plan(1, "本文"), created_at: "2026-11-16T11:09:22.711Z" }],
+    }),
+    { hash: PLAN_HASH },
+  );
+  const t = within(q(root).getByTestId("plan-body")).getByText(
+    shortTime("2026-11-16T11:09:22.711Z"),
+  );
+  expect(t.tagName).toBe("TIME");
+  expect(t).toHaveAttribute("datetime", "2026-11-16T11:09:22.711Z");
+  expect(q(root).getByTestId("plan-body")).not.toHaveTextContent(
+    "2026-11-16T11:09:22.711Z",
   );
 });
 

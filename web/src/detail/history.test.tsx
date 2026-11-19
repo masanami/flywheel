@@ -248,7 +248,7 @@ it("AC-265 #809: 「問いと回答」は hold・answer・answer_plan の行だ�
   await firstRow(root);
   pick(root, "問いと回答");
   expect([...whatOf(root)].sort()).toEqual(
-    ["あなたへの問いを上げた", "問いに答えた", "計画の問いに答えた"].sort(),
+    ["保留にして、問いを上げた", "問いに答えた", "計画の問いに答えた"].sort(),
   );
 });
 
@@ -277,7 +277,7 @@ it("AC-267 #809: 「計画と承認」は、entity が operation の approve の
   const { root } = await open(operationOnly);
   await firstRow(root);
   pick(root, "計画と承認");
-  expect(whatOf(root)).toEqual(["承認した"]);
+  expect(whatOf(root)).toEqual(["不可逆操作を承認した"]);
 });
 
 it("AC-268 #809: 「完了の検証」は submit・verify_met・verify_not_met・verify_uncertain の行だけを出す", async () => {
@@ -378,4 +378,79 @@ it("#809: 作業ログの読み込みに失敗したら、エラーを出す", a
   await waitFor(() =>
     expect(within(root).getByRole("alert")).toBeInTheDocument(),
   );
+});
+
+// #814 掃除 8: ストアに実際にある記録の語。足した語ごとに、その語が出ることを確かめる。
+const ADDED_WORDS: [string, string, string][] = [
+  ["challenge", "hold", "保留にして、問いを上げた"],
+  ["operation", "approve", "不可逆操作を承認した"],
+  ["operation", "reject", "不可逆操作を差し戻した"],
+  ["operation", "op_add", "不可逆操作を足した"],
+  ["challenge", "op_approve", "不可逆操作を承認した"],
+  ["challenge", "op_reject", "不可逆操作を差し戻した"],
+  [
+    "challenge",
+    "complete_direct",
+    "オーケストレーターが直接行った作業を、完了として記録した",
+  ],
+  ["challenge", "reopen_for_release", "反映できなかったので、着手中へ戻した"],
+  ["challenge", "ingest_create", "取り込み元から課題を作った"],
+  ["challenge", "ingest_update", "取り込み元の変更を取り込んだ"],
+  ["challenge", "bind", "取り込み元と対応付けた"],
+  ["challenge", "unbind", "取り込み元との対応を外した"],
+  ["challenge", "edit", "課題を書き換えた"],
+  ["challenge", "improvement", "改修の提案から課題を作った"],
+  ["challenge", "upstream_read", "取り込み元の更新を読んだと記録した"],
+  [
+    "challenge",
+    "upstream_observation_change",
+    "取り込み元のコメント数・更新日時の観測が変わった",
+  ],
+  ["challenge", "upstream_state_change", "取り込み元の状態が変わった"],
+  [
+    "challenge",
+    "policy_state_change",
+    "取り込みの方針の範囲内か外かが変わった",
+  ],
+];
+
+it.each(ADDED_WORDS)(
+  "#814: 記録 %s:%s は「%s」と出る",
+  async (entity, action, word) => {
+    const { root } = await open([act1({ entity, entity_id: "C-1", action })]);
+    const r = await firstRow(root);
+    expect(within(r).getByTestId("history-what")).toHaveTextContent(word);
+    expect(within(r).getByTestId("history-what").textContent).toBe(word);
+  },
+);
+
+it("#814: 足した語は、絞りの種類の対応を変えない（不可逆操作の承認・差し戻しは「計画と承認」、そのほかの足した語は「すべて」だけ）", async () => {
+  const { root } = await open(
+    ADDED_WORDS.map(([entity, action], i) =>
+      act1({
+        entity,
+        entity_id: "C-1",
+        action,
+        at: `2026-11-01T0${(i % 9) + 1}:00:00Z`,
+      }),
+    ),
+  );
+  await firstRow(root);
+  pick(root, "計画と承認");
+  expect([...whatOf(root)].sort()).toEqual(
+    ["不可逆操作を承認した", "不可逆操作を差し戻した"].sort(),
+  );
+  pick(root, "問いと回答");
+  expect(whatOf(root)).toEqual(["保留にして、問いを上げた"]);
+  pick(root, "完了の検証");
+  expect(whatOf(root)).toEqual([]);
+});
+
+it("#814: 表に無い記録の値と、constructor のような継承されたキーは、値のまま出る", async () => {
+  const { root } = await open([
+    act1({ action: "constructor" }),
+    act1({ action: "toString", at: "2026-11-01T02:00:00Z" }),
+  ]);
+  await firstRow(root);
+  expect([...whatOf(root)].sort()).toEqual(["constructor", "toString"]);
 });
