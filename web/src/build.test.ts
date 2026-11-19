@@ -27,6 +27,7 @@ const MOCK_MARKERS = [
   "請求データの夜間集計を新しい基盤へ載せ替える",
   "ストアが見つかりません",
   "誤りの種類を洗う",
+  "取り込める例: 記録の書き出しを期間で絞れるようにする",
 ];
 
 function sourceFiles(dir: string): string[] {

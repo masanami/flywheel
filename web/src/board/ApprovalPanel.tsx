@@ -192,37 +192,33 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           <PairsView pairs={summary.pairs} />
         </div>
       )}
-      {
-        <>
-          <h4>同時には承認されない不可逆操作</h4>
-          {summary.other_pending_operations.length === 0 ? (
-            <p>なし</p>
-          ) : (
-            <ul>
-              {summary.other_pending_operations.map((o) => (
-                <li key={o.id}>
-                  {o.id} / {o.kind}: {o.summary}
-                </li>
-              ))}
-            </ul>
-          )}
-          <h4>本番反映（release）の PR</h4>
-          {summary.releases.length === 0 ? (
-            <p>なし</p>
-          ) : (
-            <ul>
-              {summary.releases.map((r) => (
-                <li key={r.id} data-release={r.id}>
-                  {r.id}: {r.summary}
-                  {r.ref ? `（${r.ref}）` : ""} ・ head:{" "}
-                  {r.head_sha ? <code>{r.head_sha}</code> : HEAD_MISSING}
-                </li>
-              ))}
-            </ul>
-          )}
-          <p data-testid="release-held">{HELD_NOTE}</p>
-        </>
-      }
+      <h4>同時には承認されない不可逆操作</h4>
+      {summary.other_pending_operations.length === 0 ? (
+        <p>なし</p>
+      ) : (
+        <ul>
+          {summary.other_pending_operations.map((o) => (
+            <li key={o.id}>
+              {o.id} / {o.kind}: {o.summary}
+            </li>
+          ))}
+        </ul>
+      )}
+      <h4>本番反映（release）の PR</h4>
+      {summary.releases.length === 0 ? (
+        <p>なし</p>
+      ) : (
+        <ul>
+          {summary.releases.map((r) => (
+            <li key={r.id} data-release={r.id}>
+              {r.id}: {r.summary}
+              {r.ref ? `（${r.ref}）` : ""} ・ head:{" "}
+              {r.head_sha ? <code>{r.head_sha}</code> : HEAD_MISSING}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p data-testid="release-held">{HELD_NOTE}</p>
     </div>
   );
 }

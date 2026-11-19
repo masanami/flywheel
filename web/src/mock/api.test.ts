@@ -193,3 +193,17 @@ describe("親が直接行う保留（#452）", () => {
     );
   });
 });
+
+describe("フォローアップ（偽のデータ）", () => {
+  it("AC-422 #812: alpha は、未・済み・捨てたのフォローアップを 1 件以上ずつ持つ", async () => {
+    const all = await api.followups("alpha", "all");
+    for (const s of ["open", "done", "dropped"]) {
+      expect(
+        all.followups.filter((f) => f.status === s).length,
+      ).toBeGreaterThan(0);
+    }
+    const open = await api.followups("alpha");
+    expect(open.followups).toHaveLength(3);
+    expect(open.followups.every((f) => f.status === "open")).toBe(true);
+  });
+});

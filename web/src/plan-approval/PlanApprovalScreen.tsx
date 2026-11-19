@@ -175,7 +175,8 @@ function PlanView({
     setNotice(null);
     try {
       await api.approve(agentName, id, summary.version);
-      if (alive.current) onApproved(summary.title);
+      // 承認が通った後は、要約の読み直しが先に着いてこの部品が外れていても、承認した旨を出す（親が持つ）。
+      onApproved(summary.title);
     } catch (e) {
       if (!alive.current) return;
       if (e instanceof ApiError && e.code === "conflict") {

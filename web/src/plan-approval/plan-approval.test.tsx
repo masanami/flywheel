@@ -599,3 +599,75 @@ it("#811: 過去の形の計画でも、完了したら見えるものとやら�
     screen.getByRole("region", { name: "完了したら見えるもの" }),
   ).toHaveTextContent("旧の場面");
 });
+
+// 見直し前の承認の要約のテスト（board/approval-summary.test.tsx）が守っていた動きを、新しい画面で守る。
+
+it("#811: 過去の形の計画では、段階の欄の論点と、その回答が出る（見直し前の AC-386）", async () => {
+  const s = legacy();
+  s.approval.stages = {
+    ...s.approval.stages,
+    issues: [
+      {
+        question: "どちらにする？",
+        recommended: 2,
+        options: [
+          { label: "案A", example: null },
+          { label: "案B", example: null },
+        ],
+      },
+    ],
+    issues_answer: "案Bで決定",
+  };
+  await opened(s);
+  expect(screen.getByText("どちらにする？")).toBeInTheDocument();
+  expect(screen.getByText("案Bで決定")).toBeInTheDocument();
+});
+
+it("#811: 段階の欄が全部 null の計画では、完了したら見えるもの・やらないことの見出しを出さない", async () => {
+  await opened();
+  expect(
+    screen.queryByRole("region", { name: "完了したら見えるもの" }),
+  ).toBeNull();
+  expect(screen.queryByRole("region", { name: "やらないこと" })).toBeNull();
+  expect(screen.queryByText("論点")).toBeNull();
+});
+
+// 過去の形の計画の本文は、加工せずに Markdown として出す。節と引用の文を落とさないこと・画面の側で節を
+// 足さないことを固定する（#469）。
+const PLAN_HEAD =
+  "# 計画\n\n## 対象\n\n- リポジトリ: flywheel\n- 操作: impl\n\n## 完了条件\n\n完了条件の文\n";
+const NO_ISSUES_SECTION =
+  "\n## 論点を不要とした根拠\n\n1. DECISION-ONE 方式は A に決まっている\n   - 引用元: 上流のコメント\n   - 引用:\n     > QUOTE-ONE A 方式で進める\n";
+
+it("#811: 過去の形の計画の本文に、論点を不要とした根拠の節があれば、その節と引用の文が出る（#469）", async () => {
+  await opened(
+    summary({
+      plan: plan({
+        tasks: [],
+        summary: null,
+        body: PLAN_HEAD + NO_ISSUES_SECTION,
+      }),
+    }),
+  );
+  const body = screen.getByTestId("plan-legacy-body");
+  expect(
+    within(body).getByRole("heading", { name: "論点を不要とした根拠" }),
+  ).toBeInTheDocument();
+  expect(body).toHaveTextContent("DECISION-ONE 方式は A に決まっている");
+  expect(body).toHaveTextContent("引用元: 上流のコメント");
+  expect(body.querySelector("blockquote")).toHaveTextContent(
+    "QUOTE-ONE A 方式で進める",
+  );
+});
+
+it("#811: 過去の形の計画の本文に、論点を不要とした根拠の節が無ければ、その節を出さない（#469）", async () => {
+  await opened(
+    summary({ plan: plan({ tasks: [], summary: null, body: PLAN_HEAD }) }),
+  );
+  const body = screen.getByTestId("plan-legacy-body");
+  expect(
+    within(body).getByRole("heading", { name: "完了条件" }),
+  ).toBeInTheDocument();
+  expect(body.textContent).not.toContain("論点を不要とした根拠");
+  expect(body.textContent).not.toContain("QUOTE-ONE");
+});

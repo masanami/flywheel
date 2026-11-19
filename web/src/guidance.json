@@ -51,6 +51,51 @@
       "command": ["budget"],
       "flags": ["workspace", "impl-usd"],
       "template": "flywheel budget <C-ID> --workspace <パス> --impl-usd <額>"
+    },
+    {
+      "id": "ingest",
+      "when": { "context": "ingest" },
+      "command": ["ingest"],
+      "flags": ["workspace"],
+      "template": "flywheel ingest <external_key> --workspace <パス>"
+    },
+    {
+      "id": "cycle",
+      "when": { "context": "cycle" },
+      "command": ["cycle"],
+      "flags": ["workspace"],
+      "template": "flywheel cycle --workspace <パス>"
+    },
+    {
+      "id": "slot-clear",
+      "when": { "context": "slot" },
+      "command": ["slot", "clear"],
+      "flags": ["workspace"],
+      "template": "flywheel slot clear <SLOT-ID> --workspace <パス>"
+    },
+    {
+      "id": "followup-done",
+      "when": { "context": "followups" },
+      "command": ["followup", "done"],
+      "flags": ["workspace", "note"],
+      "template": "flywheel followup done <F-ID> --workspace <パス> --note <確かめた結果>",
+      "note": "済みにします（確かめた結果を書きます）"
+    },
+    {
+      "id": "followup-drop",
+      "when": { "context": "followups" },
+      "command": ["followup", "drop"],
+      "flags": ["workspace", "reason"],
+      "template": "flywheel followup drop <F-ID> --workspace <パス> --reason <理由>",
+      "note": "捨てます（本人確認が要ります）"
+    },
+    {
+      "id": "followup-promote",
+      "when": { "context": "followups" },
+      "command": ["followup", "promote"],
+      "flags": ["workspace"],
+      "template": "flywheel followup promote <F-ID> --workspace <パス>",
+      "note": "課題に上げます（1 回に 1 件。本人確認が要ります）"
     }
   ]
 }
