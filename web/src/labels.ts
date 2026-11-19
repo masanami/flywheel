@@ -157,6 +157,32 @@ export const CYCLE_STATE_LABELS: Record<CycleState, string> = {
   stale: "サイクル: 止まっているかもしれない",
 };
 
+// 読み込みの最中に出す文（枠と各画面で同じ）。
+export const LOADING_TEXT = "読み込んでいます";
+
+// サイクルの画面・「すべて」の区分に出す、状態だけの語（上の帯の語から「サイクル: 」を除いたもの）。
+export const CYCLE_STATE_SHORT_LABELS: Record<CycleState, string> = {
+  running: "走っている",
+  idle: "走っていない",
+  stale: "止まっているかもしれない",
+};
+
+export function cycleStateText(state: string): string {
+  return (CYCLE_STATES as readonly string[]).includes(state)
+    ? CYCLE_STATE_SHORT_LABELS[state as CycleState]
+    : state;
+}
+
+// 最後のサイクルの結果（サイクルの API の last_result。core の閉集合）。
+export const CYCLE_RESULTS = ["completed", "aborted", "interrupted"] as const;
+export type CycleResult = (typeof CYCLE_RESULTS)[number];
+
+export const CYCLE_RESULT_LABELS: Record<CycleResult, string> = {
+  completed: "最後まで終わった",
+  aborted: "途中でやめた",
+  interrupted: "途中で止まった",
+};
+
 // サイクルを回すと進むものの段（状況の API の cycle_work.stages のキー）。表示の順もこの並び。
 // 段の件数は core が数え、ここは語と並びだけを持つ（Record の型で、全部のキーに語があることを守る）。
 export const CYCLE_WORK_STAGES = [

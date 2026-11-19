@@ -81,6 +81,8 @@ export interface MockWorkspace {
   meta: Workspace;
   items: MockChallenge[];
   cycle: CycleStatus;
+  // サイクルを回すと進むもの（状況の API の cycle_work）。無ければ 0 件。
+  cycleWork?: CycleWork;
   // 関係グラフの偽の関係（親子・依存）。応答は graphOf が課題の導出と合わせて作る
   graph: GraphSeed;
 }
@@ -597,6 +599,19 @@ export function seed(): Record<string, MockWorkspace> {
         last_ended_at: iso(90),
         last_result: "completed",
       },
+      cycleWork: {
+        stages: {
+          classify: 1,
+          cleanup: 0,
+          improve: 0,
+          learn: 0,
+          plan: 1,
+          release: 0,
+          run: 1,
+          verify: 0,
+        },
+        total: 3,
+      },
       graph: graphs.alpha,
     },
     beta: {
@@ -607,6 +622,19 @@ export function seed(): Record<string, MockWorkspace> {
         last_started_at: iso(2010),
         last_ended_at: iso(2000),
         last_result: "completed",
+      },
+      cycleWork: {
+        stages: {
+          classify: 0,
+          cleanup: 0,
+          improve: 0,
+          learn: 0,
+          plan: 0,
+          release: 1,
+          run: 0,
+          verify: 1,
+        },
+        total: 2,
       },
       graph: graphs.beta,
     },
@@ -853,7 +881,7 @@ export function statusOf(w: MockWorkspace): StatusResponse {
     },
     approved: { operations: ops("approved") },
     binary_commit: "unknown",
-    cycle_work: cycleWorkOf(items),
+    cycle_work: w.cycleWork ?? cycleWorkOf(items),
     followups: { open: 0 },
     ingestable: null,
     needs_human: {
