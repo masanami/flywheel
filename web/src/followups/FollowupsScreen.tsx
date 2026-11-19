@@ -2,6 +2,12 @@ import type { ReactNode } from "react";
 import { api } from "../api/client.ts";
 import type { ChallengeCard, Followup } from "../api/types.gen.ts";
 import { guidesForContext } from "../guidance.ts";
+import {
+  FOLLOWUP_SOURCE_LABELS,
+  FOLLOWUP_STATUS_LABELS,
+  LOADING_TEXT,
+  label,
+} from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { type Route, hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
@@ -9,15 +15,9 @@ import { useScreenData } from "../shell/useScreenData.ts";
 export const FOLLOWUP_STATUSES = ["open", "done", "dropped"] as const;
 export type FollowupStatus = (typeof FOLLOWUP_STATUSES)[number];
 
-const STATUS_LABELS: Record<FollowupStatus, string> = {
-  open: "未",
-  done: "済み",
-  dropped: "捨てた",
-};
 export const NO_OPEN_FOLLOWUPS_TEXT = "未のフォローアップはありません。";
 export const UNATTACHED_TEXT = "課題に属さないもの";
 export const GUIDANCE_CONTEXT = "followups";
-const LOADING = "読み込んでいます";
 
 // ?status= の値。open・done・dropped のどれでもなければ open。
 export function statusOf(value: string | undefined): FollowupStatus {
@@ -105,7 +105,7 @@ export function FollowupsScreen({
   return (
     <section aria-labelledby="screen-title" className="followups">
       <h2 id="screen-title">フォローアップ</h2>
-      {result.state === "loading" ? <p>{LOADING}</p> : null}
+      {result.state === "loading" ? <p>{LOADING_TEXT}</p> : null}
       {result.state === "error" ? (
         <p role="alert">{String(result.error)}</p>
       ) : null}
@@ -123,7 +123,7 @@ export function FollowupsScreen({
                 aria-pressed={s === status}
                 onClick={() => choose(s)}
               >
-                {STATUS_LABELS[s]}（{count(s)}）
+                {label(FOLLOWUP_STATUS_LABELS, s)}（{count(s)}）
               </button>
             ))}
           </fieldset>
@@ -142,7 +142,7 @@ export function FollowupsScreen({
             <p data-testid="followup-empty">
               {status === "open"
                 ? NO_OPEN_FOLLOWUPS_TEXT
-                : `${STATUS_LABELS[status]}のフォローアップはありません。`}
+                : `${label(FOLLOWUP_STATUS_LABELS, status)}のフォローアップはありません。`}
             </p>
           ) : (
             groupByChallenge(shown).map((g) => {
@@ -216,7 +216,9 @@ function FollowupRow({
     <li className="followup-row" data-testid="followup-row">
       <div className="followup-title">{f.title}</div>
       <div className="followup-meta">
-        <span data-testid="followup-source">出どころ: {f.source}</span>{" "}
+        <span data-testid="followup-source">
+          出どころ: {label(FOLLOWUP_SOURCE_LABELS, f.source)}
+        </span>{" "}
         <span data-testid="followup-created">
           できた日時: {new Date(f.created_at).toLocaleString()}
         </span>

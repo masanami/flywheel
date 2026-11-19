@@ -23,7 +23,7 @@ import type {
   Workspace,
 } from "../api/types.gen.ts";
 import { type DiscrepancyKind, HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
-import { type GraphSeed, seedGraphs } from "./graph.ts";
+import { type DepSeed, seedDeps } from "./deps.ts";
 import { type LargeSpec, largeWorkspace } from "./large.ts";
 
 export interface Flags {
@@ -83,7 +83,7 @@ export interface MockWorkspace {
   // サイクルを回すと進むもの（状況の API の cycle_work）。無ければ 0 件。
   cycleWork?: CycleWork;
   // 課題どうしの偽の前提（依存）。課題の詳細の waiting が使う
-  graph: GraphSeed;
+  deps: DepSeed;
 }
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -237,7 +237,7 @@ const taskHold = (
 const LONG = `${"この値はカードに全文を出すと幅 320px の列で何行にも伸びる。".repeat(8)}\n2 行目: 外部の Issue 本文をそのまま取り込んだ想定の長い説明。`;
 
 export function seed(): Record<string, MockWorkspace> {
-  const graphs = seedGraphs();
+  const depSeeds = seedDeps();
   const alpha: MockChallenge[] = [
     mk("C-1", "ログイン画面の文言を直す", "unclassified", {
       description: "ボタンの文言が「送信」のままになっている。",
@@ -702,7 +702,7 @@ export function seed(): Record<string, MockWorkspace> {
         },
         total: 3,
       },
-      graph: graphs.alpha,
+      deps: depSeeds.alpha,
     },
     beta: {
       meta: ok("beta"),
@@ -726,7 +726,7 @@ export function seed(): Record<string, MockWorkspace> {
         },
         total: 2,
       },
-      graph: graphs.beta,
+      deps: depSeeds.beta,
     },
     gamma: {
       meta: {
@@ -742,7 +742,7 @@ export function seed(): Record<string, MockWorkspace> {
         last_ended_at: null,
         last_result: null,
       },
-      graph: { deps: [] },
+      deps: { deps: [] },
     },
   };
 }
@@ -814,7 +814,7 @@ export function waitingOf(w: MockWorkspace, id: string): Waiting {
   });
   if (ended(id)) return { prerequisites: [] };
   const sorted = (xs: string[]) => [...xs].sort((a, b) => idNum(a) - idNum(b));
-  const deps = w.graph.deps;
+  const deps = w.deps.deps;
   return {
     prerequisites: sorted(
       deps

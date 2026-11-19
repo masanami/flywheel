@@ -10,7 +10,7 @@ export interface MockDep {
   kind: MockEdgeKind;
 }
 
-export interface GraphSeed {
+export interface DepSeed {
   deps: MockDep[];
 }
 
@@ -22,7 +22,7 @@ const dep = (from: string, to: string, kind: MockEdgeKind): MockDep => ({
 
 // 依存の後続（to）は、先行（from）が完了していない限り分類済か計画承認待ちに留まる。
 // 着手済みの課題は、完了した先行の後ろか連鎖の先頭に置く。
-export function seedGraphs(): { alpha: GraphSeed; beta: GraphSeed } {
+export function seedDeps(): { alpha: DepSeed; beta: DepSeed } {
   return {
     alpha: {
       deps: [

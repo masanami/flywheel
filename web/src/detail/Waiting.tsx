@@ -1,9 +1,9 @@
 import type { ShowCardResponse } from "../api/types.gen.ts";
-import { ApprovalGuide } from "../board/ApprovalGuide.tsx";
-import { ApprovalPanel } from "../board/ApprovalPanel.tsx";
-import { ClampedText } from "../board/ClampedText.tsx";
 import { HOLD_KIND_PARENT_DIRECT, PARENT_DIRECT_HOLD_NOTE } from "../labels.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
+import { ApprovalGuide } from "../parts/ApprovalGuide.tsx";
+import { ApprovalPanel } from "../parts/ApprovalPanel.tsx";
+import { ClampedText } from "../parts/ClampedText.tsx";
 import { hrefOf } from "../shell/route.ts";
 import {
   NO_WAITING_TEXT,

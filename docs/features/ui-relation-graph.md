@@ -1,5 +1,7 @@
 # 課題の関係グラフ（flywheel#176 の第 1 区切り）
 
+> **S2c でグラフの画面と API を外した（2026-11-19）**: 区切り S2c（[core-redesign.md](core-redesign.md)）で、関係グラフの画面・API（`GET /api/v1/workspaces/{name}/graph`）・型・core の口・テスト・見本・種・試験を外した。以下は、外す前の決定と要件の記録として残す。記録した前提は課題のツリーの API（`GET /api/v1/workspaces/{name}/tree`）の `dependencies` と、課題の詳細の API の `tree`・`challenge.dependencies`・`dependents` で、課題の親子はツリーの要素の `parent`・`children` で出す。
+
 - 状態: draft（実装チケット flywheel#176 の PR で起草）。2026-10-13・10-14・10-17〜18 に、試作（PR #210・PR #240。`web/src/mock/`・`web/src/proposal/` に閉じ、本番のビルドには入らない）をオーナーが `npm run dev:mock` で触って決めた形を、本実装の範囲（関係グラフだけ）について書き戻した。§決定事項の記録
 - 前段: [M4 の機能仕様](m4-ui-server.md)（ボード・詳細のモーダル・カードの区分の印・「更新なし」〔M4H34〕）・[M4.5 の機能仕様](m4.5-learning-and-self-improvement.md)（課題どうしの依存 `challenge_dependency`〔M45H12〕）・[M2 の機能仕様](m2-github-issue-ingest.md)（取り込み）。ここで【決定】済みの事項は前提にし、再検討しない
 - 2026-11-05 に flywheel#474（衝突の予測の結果の保存と、ボードの詳細の「待っている理由」。オーナーの決定と論点 Q1〜Q4 の回答）を反映した。§衝突（core）・§決定事項の記録の 11/05（#474）

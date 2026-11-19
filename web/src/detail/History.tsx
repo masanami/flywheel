@@ -10,6 +10,7 @@ import {
   RUN_RESULT_LABELS,
   RUN_RUNNING_LABEL,
   WHO_AGENT_RUN,
+  label,
 } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
@@ -84,9 +85,6 @@ function whoOf(a: Activity): { who: string; quote: string | null } {
   };
 }
 
-const known = (table: Record<string, string>, v: string): string =>
-  (Object.hasOwn(table, v) ? table[v] : undefined) ?? v;
-
 function activityRow(
   a: Activity,
   i: number,
@@ -100,7 +98,7 @@ function activityRow(
     task: a.entity === "task" ? taskTitle(a.entity_id) : null,
     who,
     quote,
-    what: known(
+    what: label(
       HISTORY_ACTION_LABELS,
       Object.hasOwn(HISTORY_ACTION_LABELS, `${a.entity}:${a.action}`)
         ? `${a.entity}:${a.action}`
@@ -113,10 +111,10 @@ function activityRow(
 function runRow(r: Run, taskTitle: (id: string) => string): Row {
   const of =
     r.kind === "judgment" && r.judgment !== null
-      ? known(JUDGMENT_LABELS, r.judgment)
-      : known(RUN_KIND_LABELS, r.kind);
+      ? label(JUDGMENT_LABELS, r.judgment)
+      : label(RUN_KIND_LABELS, r.kind);
   const result =
-    r.result === null ? RUN_RUNNING_LABEL : known(RUN_RESULT_LABELS, r.result);
+    r.result === null ? RUN_RUNNING_LABEL : label(RUN_RESULT_LABELS, r.result);
   // 費用の書き方は、課題の項目と同じ（数と USD）。
   const cost = r.cost_usd === null ? NO_COST_LABEL : `${usd(r.cost_usd)} USD`;
   return {

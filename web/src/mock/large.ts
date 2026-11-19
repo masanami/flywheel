@@ -12,7 +12,7 @@
 //   親 6〜9 の多くは起点ではなく、起点から何段も先で推移的に注目に入る。
 //   先行が完了していない依存の後続は、分類済か計画承認待ちに直す。
 
-import type { MockDep } from "./graph.ts";
+import type { MockDep } from "./deps.ts";
 import type { MockChallenge, MockWorkspace } from "./store.ts";
 
 export const LARGE_PARENTS = 9;
@@ -186,13 +186,13 @@ export function largeWorkspace(
   name: string,
   connected: boolean,
   build: (s: LargeSpec) => MockChallenge,
-  base: Omit<MockWorkspace, "items" | "graph" | "meta">,
+  base: Omit<MockWorkspace, "items" | "deps" | "meta">,
 ): MockWorkspace {
   const shape = largeShape(connected);
   return {
     ...base,
     meta: { error: null, name, path: `/mock/${name}`, state: "ok" },
     items: shape.specs.map(build),
-    graph: { deps: shape.deps },
+    deps: { deps: shape.deps },
   };
 }

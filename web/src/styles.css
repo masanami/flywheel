@@ -223,82 +223,12 @@ body {
   padding: 1rem 0;
 }
 
-/* 承認フッターは、本文が長くても手元に留める（判断材料を見ながら承認できるように）。
- * スクロールの基準は .shell-body。 */
-.card-detail-footer {
-  position: sticky;
-  bottom: 0;
-  margin-top: 0.75rem;
-  padding: 0.6rem 0;
-  background: var(--board-bg);
-  border-top: 1px solid var(--board-border);
-}
-
-.card-detail-header {
-  margin-bottom: 0.75rem;
-}
-
-.card-detail-title {
-  margin: 0;
-  font-size: 1.05rem;
-}
-
-.waiting-reasons ul {
-  padding-left: 1.2rem;
-}
-
-/* ラベル列は内容ぶんだけ（auto）・値列が残りすべて（1fr）。モーダル幅が
- * 広がってもラベル列は伸びないため、増えた幅はそのまま値の可読域になる
- * （Issue #153 の確認事項）。ラベルは日本語 2〜6 文字なので折り返さない。 */
-.card-detail-fields {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.3rem 0.75rem;
-  margin: 0 0 1rem;
-  font-size: 0.85rem;
-}
-
-.card-detail-fields dt {
-  color: var(--board-muted-fg);
-  white-space: nowrap;
-}
-
-.card-detail-fields dd {
-  margin: 0;
-}
-
-/* カードの 4 項目（#185）: 詳細の先頭。カードの面と同じく、ラベルを小さく
- * 値の上に積み、長文は折り返して全文を出す。 */
-.card-detail-card-fields {
-  margin: 0 0 1rem;
-  font-size: 0.85rem;
-}
-
-.card-detail-card-fields dt {
-  font-size: 0.75rem;
-  color: var(--board-muted-fg);
-}
-
-.card-detail-card-fields dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 /* 複数行フィールド（説明・完了条件・タスク案。#151）: 台帳の改行とネストの
  * インデントをそのまま見せる。長い引用ブロック（ingest 由来の説明）でも
  * 横スクロールを出さないよう、途中でも折り返す。 */
 .card-detail-multiline {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-/* 説明は ingest 由来だと実データで数千文字のブロック引用になる（#151）。
- * モーダル全体の 1 本スクロールに委ねると、下に続く作業ログまでの距離が伸び、
- * 説明そのものも読み飛ばしにくくなるため、この欄だけ高さを制限して内部で
- * スクロールさせる（FR-13 の承認対象は説明より上に並べてある）。 */
-.card-detail-description {
-  max-height: 14rem;
-  overflow-y: auto;
 }
 
 /* 課題の一枚絵（fig。#180・FR-14）: dt/dd のラッパ div（dl の子として妥当）は
@@ -335,36 +265,6 @@ body {
    color/cursor 指定が UA の disabled 既定表示（GrayText 化等）を上書きして
    しまい無反応に見えるため、明示的に視覚的フィードバックを与える
    （セルフレビュー指摘・Issue #124）。 */
-
-.card-detail-log-loading,
-.card-detail-log-error,
-.card-detail-log-empty {
-  font-size: 0.8rem;
-  color: var(--board-muted-fg);
-}
-
-.card-detail-log-error {
-  color: var(--board-needs-human-border);
-}
-
-/* 課題台帳セクション（#94・#96・#102 FR-B2/FR-B3。challenge prop を直接表示。
- * join は行わない）・取得元表示セクション（#85・#96 FR-A1/FR-A3/FR-A4）。
- * クラス名は既存の join 前提の命名を維持している（testid 同様、変更は必須で
- * はないため）。既存の card-detail-fields dl スタイルを
- * 流用しつつ、見出し・外枠だけ独自クラスで区切る。両セクションで共通する
- * 宣言はセレクタリストにまとめ、重複定義を避ける（セルフレビュー指摘対応。
- * 既存の .card-detail-log-heading 等の書き換えは避け、新規セレクタとして
- * 追記するに留める）。 */
-.card-detail-ledger-join,
-.card-detail-provenance {
-  margin: 0 0 1rem;
-}
-
-.card-detail-ledger-join-heading,
-.card-detail-provenance-heading {
-  font-size: 0.85rem;
-  margin: 0 0 0.5rem;
-}
 
 /* 常設ターミナル領域（P2）。ボードは残り高さに追従し（.board 参照）、
  * ここは flex-shrink しない固定高さのボックスとして下部を占有する。

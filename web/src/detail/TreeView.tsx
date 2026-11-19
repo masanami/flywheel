@@ -1,5 +1,4 @@
 import type { ShowCardResponse, TreeRelative } from "../api/types.gen.ts";
-import { ClampedText } from "../board/ClampedText.tsx";
 import {
   DEPENDENCY_SATISFIED_LABEL,
   DEPENDENCY_UNMET_LABEL,
@@ -8,9 +7,10 @@ import {
   UPSTREAM_STATE_LABELS,
   label,
 } from "../labels.ts";
+import { ClampedText } from "../parts/ClampedText.tsx";
+import { safeHref } from "../safeHref.ts";
 import { hrefOf } from "../shell/route.ts";
 import { TaskTree } from "../tree/TaskTree.tsx";
-import { safeHref } from "./Items.tsx";
 
 const challengeHref = (agentName: string, id: string) =>
   hrefOf({ kind: "challenge", name: agentName, id, view: "tree" });
@@ -108,7 +108,7 @@ function SourceChildren({ show }: { show: ShowCardResponse }) {
           return (
             <li key={c.external_key}>
               <a
-                href={safeHref(c.url)}
+                href={safeHref(c.url) ?? "#"}
                 target="_blank"
                 rel="noopener noreferrer"
               >

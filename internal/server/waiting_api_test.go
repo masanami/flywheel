@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -14,22 +13,6 @@ import (
 // 受入基準の並び順）の受入基準の番号。同じファイルの別の仕様の番号とは無関係。
 
 // 課題の詳細の API の waiting を、実ストア・実際の HTTP の要求で検証する。関係グラフの API は外した（#813・AC-72）。
-
-func startServerAt(t *testing.T, now time.Time, ws ...core.FleetWorkspace) int {
-	t.Helper()
-	ln, err := Listen(0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := newServer(ln, ws, eventsConfig{now: func() time.Time { return now }})
-	errc := make(chan error, 1)
-	go func() { errc <- s.Serve() }()
-	t.Cleanup(func() {
-		_ = s.Shutdown()
-		<-errc
-	})
-	return ln.Addr().(*net.TCPAddr).Port
-}
 
 // relationsWorkspace は cardsEndToEndWorkspace（C-1〜C-6。人間の操作待ち・応答なし・CI の待ちを含む）に、
 // 依存・親子を足したワークスペース。

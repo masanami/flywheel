@@ -88,11 +88,11 @@ export const DISCREPANCY_LABELS: Record<DiscrepancyKind, string> = {
   out_of_policy: "取り込みの方針の範囲外",
   upstream_commented: "上流に新しいコメント",
   upstream_updated: "上流が更新された",
-  merged_unapproved: "承認なしでマージされた",
+  merged_unapproved: "承認なしで反映された",
   dependency_cycle: "依存が循環している",
 };
 
-// カードの面に出す区分の印（M4H23）。API の値から UI が導く（board/marks.ts）。
+// カードの面に出す区分の印（M4H23）。API の値から UI が導く（marks.ts は S2c の仕上げで外した。値の表だけ残してある）。
 export const MARK_KINDS = [
   "needs_human",
   "external",
@@ -124,7 +124,11 @@ export function label<K extends string>(
   table: Record<K, string>,
   code: string,
 ): string {
-  return (table as Record<string, string>)[code] ?? code;
+  // 継承されたキー（constructor・toString など）は表の値ではないので、自前のキーだけを引く。
+  const v = Object.hasOwn(table, code)
+    ? (table as Record<string, string>)[code]
+    : undefined;
+  return v ?? code;
 }
 
 // タスクの表示の区分（phase）。区分は core が決め、ここは語だけを持つ。
@@ -256,9 +260,11 @@ export const PARENT_DIRECT_HOLD_NOTE =
 export const HISTORY_ACTION_LABELS: Record<string, string> = {
   plan: "計画を作った",
   approve: "承認した",
+  "operation:approve": "不可逆操作を承認した",
+  "operation:reject": "不可逆操作を差し戻した",
   approve_hold_release: "完了を承認した（反映は保留のまま）",
   reject: "差し戻した",
-  hold: "あなたへの問いを上げた",
+  hold: "保留にして、問いを上げた",
   answer: "問いに答えた",
   answer_plan: "計画の問いに答えた",
   submit: "完了の検証へ出した",
@@ -282,6 +288,22 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
   followup_promote: "フォローアップを課題に上げた",
   op_execute: "不可逆操作を実行した",
   op_close: "不可逆操作を閉じた",
+  op_add: "不可逆操作を足した",
+  op_approve: "不可逆操作を承認した",
+  op_reject: "不可逆操作を差し戻した",
+  complete_direct: "オーケストレーターが直接行った作業を、完了として記録した",
+  reopen_for_release: "反映をやり直すため、完了から着手中へ戻した",
+  ingest_create: "取り込み元から課題を作った",
+  ingest_update: "取り込み元の変更を取り込んだ",
+  bind: "取り込み元と対応付けた",
+  unbind: "取り込み元との対応を外した",
+  edit: "課題を書き換えた",
+  improvement: "改修の提案から課題を作った",
+  upstream_read: "取り込み元の更新を読んだと記録した",
+  upstream_observation_change:
+    "取り込み元のコメント数・更新日時の観測が変わった",
+  upstream_state_change: "取り込み元の状態が変わった",
+  policy_state_change: "取り込みの方針の範囲内か外かが変わった",
 };
 
 // 実行の記録の「何の実行か」。判断点は役割の言葉で呼び、番号は括弧で添える。知らない値は値のまま出す。
