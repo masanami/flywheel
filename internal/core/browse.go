@@ -83,6 +83,8 @@ type UnansweredHold struct {
 	RaisedAt    time.Time
 	FromStatus  Status
 	RunID       *string
+	// TaskID は保留が付いているタスクの ID（"T-<n>"）。タスクに付いていなければ nil。
+	TaskID *string
 }
 
 // ListUnansweredHolds は未回答の保留を raised_at の古い順（同時刻は課題の ID の
@@ -91,7 +93,7 @@ func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, erro
 	out := []UnansweredHold{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx,
-			`SELECT h.challenge_id, c.title, h.question, h.raised_at, h.from_status, h.run_id
+			`SELECT h.challenge_id, c.title, h.question, h.raised_at, h.from_status, h.run_id, h.task_id
 			 FROM hold h JOIN challenge c ON c.id = h.challenge_id
 			 WHERE h.answer IS NULL AND h.closed_at IS NULL AND h.kind = ?
 			 ORDER BY h.raised_at, h.challenge_id, h.id`, string(HoldKindHuman))
@@ -105,9 +107,10 @@ func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, erro
 				raisedAt   string
 				fromStatus string
 				runID      sql.NullInt64
+				taskID     sql.NullInt64
 				h          UnansweredHold
 			)
-			if err := rows.Scan(&cid, &h.Title, &h.Question, &raisedAt, &fromStatus, &runID); err != nil {
+			if err := rows.Scan(&cid, &h.Title, &h.Question, &raisedAt, &fromStatus, &runID, &taskID); err != nil {
 				return err
 			}
 			t, err := parseTimestamp(raisedAt)
@@ -120,6 +123,10 @@ func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, erro
 			if runID.Valid {
 				v := formatRunID(runID.Int64)
 				h.RunID = &v
+			}
+			if taskID.Valid {
+				v := formatTaskID(taskID.Int64)
+				h.TaskID = &v
 			}
 			out = append(out, h)
 		}

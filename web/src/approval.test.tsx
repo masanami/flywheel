@@ -140,6 +140,24 @@ function setup(
       non_goals: null,
     },
     waiting: { prerequisites: [] },
+    tree: {
+      budget_usd: null,
+      children: [],
+      cost_usd: 0,
+      dependencies: [],
+      followups_open: 0,
+      id: "C-1",
+      next_human_actions: [],
+      parent: null,
+      status: "in_progress",
+      status_label: "着手中",
+      tasks: [],
+      tasks_done: 0,
+      tasks_total: 0,
+      title: "t",
+      updated_at: "2026-11-01T00:00:00.000Z",
+      uses_integration: null,
+    },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-1"] = { activities: [] };
   return installFakes({ ...f, ...extra });
@@ -164,6 +182,8 @@ it("AC-207: approve_plan を持つ課題の詳細に、開いたとき ① を�
       kind: "plan",
       plan: {
         body: "承認する計画",
+        budget_usd: null,
+        summary: null,
         tasks: [],
         topics: [],
         uses_integration: null,
@@ -263,6 +283,8 @@ it("AC-212: conflict なら ① を読み直して最新の要約を示し、自
         version: reads === 1 ? 3 : 4,
         plan: {
           body: reads === 1 ? "古い計画" : "新しい計画",
+          budget_usd: null,
+          summary: null,
           tasks: [],
           topics: [],
           uses_integration: null,
@@ -333,6 +355,24 @@ function fixturesFor(): Record<string, unknown> {
       non_goals: null,
     },
     waiting: { prerequisites: [] },
+    tree: {
+      budget_usd: null,
+      children: [],
+      cost_usd: 0,
+      dependencies: [],
+      followups_open: 0,
+      id: "C-1",
+      next_human_actions: [],
+      parent: null,
+      status: "in_progress",
+      status_label: "着手中",
+      tasks: [],
+      tasks_done: 0,
+      tasks_total: 0,
+      title: "t",
+      updated_at: "2026-11-01T00:00:00.000Z",
+      uses_integration: null,
+    },
   };
   f["/api/v1/workspaces/alpha/log?challenge=C-1"] = { activities: [] };
   return f;

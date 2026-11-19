@@ -41,7 +41,7 @@ func approvalSummaryHandler(fleet *Fleet, heads func() core.UpstreamCheckSource)
 		ctx := r.Context()
 		var p *core.ApprovalPreview
 		err := readForCards(ctx, fleet, r.PathValue("name"), func(st *core.Store) (err error) {
-			p, err = st.PrepareApproval(ctx, r.PathValue("id"))
+			p, err = st.PrepareApprovalFor(ctx, r.PathValue("id"), agentDeclOrNil(st))
 			return err
 		})
 		if err != nil {
@@ -91,34 +91,33 @@ func approveHandler(fleet *Fleet, checks *checkCache, now func() time.Time) http
 		var (
 			d    *core.ChallengeDetail
 			runs *core.CardRuns
+			tree *core.TreeChallenge
 			read *cardRead
 		)
 		err := readForCards(ctx, fleet, r.PathValue("name"), func(st *core.Store) error {
 			var err error
-			if d, runs, read, err = approveAndRead(ctx, st, id, version); err != nil {
-				return err
-			}
-			return nil
+			d, runs, tree, read, err = approveAndRead(ctx, st, id, version, now())
+			return err
 		})
 		if err != nil {
 			writeLookupOrCoreError(w, err)
 			return
 		}
 		ov := read.resolve(ctx, checks)
-		writeJSON(w, http.StatusOK, view.FromChallengeDetailCard(d, runs.Derive(d.Challenge, ov, now())))
+		writeJSON(w, http.StatusOK, view.FromChallengeDetailCard(d, runs.Derive(d.Challenge, ov, now()), *tree))
 	}
 }
 
 // approveAndRead は状態から承認の種類を決めて承認し、承認後の課題の全体像を読む。
 // 種類の判定（①）で状態が対象外なら、版の違いより先に invalid_transition で拒否する。
-func approveAndRead(ctx context.Context, st *core.Store, id string, version int) (*core.ChallengeDetail, *core.CardRuns, *cardRead, error) {
+func approveAndRead(ctx context.Context, st *core.Store, id string, version int, now time.Time) (*core.ChallengeDetail, *core.CardRuns, *core.TreeChallenge, *cardRead, error) {
 	preview, err := st.PrepareApproval(ctx, id)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	att, err := core.Verify(core.ChannelUI, noneVerifier{}, "", preview.ChallengeID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	// 計画の承認に保留の概念は無い。完了の承認は常に本番反映の保留つき（T14）。
 	_, _, err = st.ExecuteApproval(ctx, core.ApprovalRequest{
@@ -128,19 +127,23 @@ func approveAndRead(ctx context.Context, st *core.Store, id string, version int)
 		HoldRelease:     preview.Kind == core.ApprovalKindCompletion,
 	}, att)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	d, err := st.GetChallengeWithoutReap(ctx, preview.ChallengeID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	runs, err := st.LoadCardRuns(ctx, d.Challenge)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+	tree, err := st.ChallengeTreeNode(ctx, d.ID, agentDeclOrNil(st), now)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 	read, err := loadCardOverview(ctx, st)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return d, runs, read, nil
+	return d, runs, tree, read, nil
 }

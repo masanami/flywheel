@@ -47,7 +47,10 @@ func ConditionsAfterReleaseHeading(o ConditionsOutlook) string {
 // ApprovalPlan は計画承認待ちの要約の計画（最新の版と本文、論点と問い、タスク、統合先を使うか）。
 // 構造化した出力を持たない計画では topics・tasks は []、uses_integration は null。
 type ApprovalPlan struct {
-	Body            string             `json:"body"`
+	Body string `json:"body"`
+	// BudgetUSD・Summary は `show --plan --json` の plan.budget_usd・plan.summary と同じ値（API だけ。端末の approve の要約と --json には無い）。
+	BudgetUSD       *float64           `json:"budget_usd"`
+	Summary         *string            `json:"summary"`
 	Tasks           []ApprovalPlanTask `json:"tasks"`
 	Topics          []PlanTopic        `json:"topics"`
 	UsesIntegration *bool              `json:"uses_integration"`
@@ -55,10 +58,11 @@ type ApprovalPlan struct {
 }
 
 // ApprovalPlanTask は計画承認待ちの要約のタスク 1 件。承認の前はタスクの ID が無いので、計画の中の識別子（key）と、
-// 前提のタスクの key で出す。source は対応する取り込み元の子の external_key（対応しなければ null）。
+// 前提のタスクの key で出す。phase は表示の区分（承認の前なので next か blocked）。source は対応する取り込み元の子の external_key（対応しなければ null）。
 type ApprovalPlanTask struct {
 	DependsOn []string `json:"depends_on"`
 	Key       string   `json:"key"`
+	Phase     string   `json:"phase"`
 	Source    *string  `json:"source"`
 	Title     string   `json:"title"`
 }
@@ -134,10 +138,14 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 	switch p.Kind {
 	case core.ApprovalKindPlan:
 		tasks := make([]ApprovalPlanTask, 0, len(p.PlanTasks))
-		for _, t := range p.PlanTasks {
-			tasks = append(tasks, ApprovalPlanTask{DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Source: strOrNil(t.Source), Title: t.Title})
+		for i, t := range p.PlanTasks {
+			phase := ""
+			if i < len(p.PlanTaskPhases) {
+				phase = string(p.PlanTaskPhases[i])
+			}
+			tasks = append(tasks, ApprovalPlanTask{DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Phase: phase, Source: strOrNil(t.Source), Title: t.Title})
 		}
-		s.Plan = &ApprovalPlan{Body: p.PlanBody, Tasks: tasks, Topics: FromPlanTopics(p.PlanTopics), UsesIntegration: p.PlanUsesIntegration, Version: p.PlanVersion}
+		s.Plan = &ApprovalPlan{Body: p.PlanBody, BudgetUSD: p.PlanBudgetUSD, Summary: p.PlanSummary, Tasks: tasks, Topics: FromPlanTopics(p.PlanTopics), UsesIntegration: p.PlanUsesIntegration, Version: p.PlanVersion}
 	case core.ApprovalKindCompletion:
 		dc := p.DoneCriteria
 		s.DoneCriteria = &dc

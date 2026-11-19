@@ -78,6 +78,7 @@ type ShowCardResponse struct {
 	SourceChildren    []SourceChild      `json:"source_children"`
 	Stages            Stages             `json:"stages"`
 	Tasks             []Task             `json:"tasks"`
+	Tree              TreeChallenge      `json:"tree"`
 	Waiting           Waiting            `json:"waiting"`
 }
 
@@ -102,13 +103,14 @@ func fromWaitingChallenges(ws []core.WaitingChallenge) []WaitingChallenge {
 	return out
 }
 
-// FromChallengeDetailCard は課題の全体像とそのカードを ShowCardResponse へ変換する。
-func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card) ShowCardResponse {
+// FromChallengeDetailCard は課題の全体像・そのカード・課題のツリーの要素を ShowCardResponse へ変換する。
+func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card, tree core.TreeChallenge) ShowCardResponse {
 	s := FromChallengeDetail(d)
 	return ShowCardResponse{
 		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: s.Holds,
 		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
 		Tasks:   s.Tasks,
+		Tree:    FromTreeChallenge(tree),
 		Waiting: Waiting{Prerequisites: fromWaitingChallenges(d.Waiting.Prerequisites)},
 	}
 }
@@ -131,13 +133,14 @@ func FromNeedsHuman(ov *core.Overview) StatusNeedsHuman {
 	return FromOverview(ov).NeedsHuman
 }
 
-// Question は `GET /api/v1/questions` の 1 要素（未回答の保留）。
+// Question は `GET /api/v1/questions` の 1 要素（未回答の保留）。task_id は保留が付いているタスクの ID（無ければ null）。
 type Question struct {
 	ChallengeID string  `json:"challenge_id"`
 	FromStatus  string  `json:"from_status"`
 	Question    string  `json:"question"`
 	RaisedAt    string  `json:"raised_at"`
 	RunID       *string `json:"run_id"`
+	TaskID      *string `json:"task_id"`
 	Title       string  `json:"title"`
 	Workspace   string  `json:"workspace"`
 }
@@ -153,7 +156,7 @@ type QuestionsResponse struct {
 func FromUnansweredHold(workspace string, h core.UnansweredHold) Question {
 	return Question{
 		ChallengeID: h.ChallengeID, FromStatus: string(h.FromStatus), Question: h.Question,
-		RaisedAt: FormatTimestamp(h.RaisedAt), RunID: h.RunID, Title: h.Title, Workspace: workspace,
+		RaisedAt: FormatTimestamp(h.RaisedAt), RunID: h.RunID, TaskID: h.TaskID, Title: h.Title, Workspace: workspace,
 	}
 }
 

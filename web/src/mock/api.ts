@@ -12,6 +12,7 @@ import type {
   QuestionsResponse,
   RunReportResponse,
   ShowCardResponse,
+  TreeChallenge,
   WorkspaceList,
 } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
@@ -27,6 +28,33 @@ import {
   toCard,
   waitingOf,
 } from "./store.ts";
+
+/** 課題の詳細の tree の空の値（試作の画面が使うまでは、タスクも件数も持たない）。 */
+function emptyTree(
+  id: string,
+  title: string,
+  status: string,
+  statusLabel: string,
+): TreeChallenge {
+  return {
+    budget_usd: null,
+    children: [],
+    cost_usd: 0,
+    dependencies: [],
+    followups_open: 0,
+    id,
+    next_human_actions: [],
+    parent: null,
+    status,
+    status_label: statusLabel,
+    tasks: [],
+    tasks_done: 0,
+    tasks_total: 0,
+    title,
+    updated_at: "2026-11-01T00:00:00.000Z",
+    uses_integration: null,
+  };
+}
 
 // 偽のサーバが返す見出し。正本は internal/view の ConditionsAfterReleaseHeading で、生成物
 // （types.gen.ts）の並びは Go の ConditionsOutlook の値の順（本番反映を承認しない／承認する／承認済みで未実行）。
@@ -106,6 +134,7 @@ export function createMockApi(
         source_children: [],
         stages: m.stages,
         tasks: [],
+        tree: emptyTree(m.c.id, m.c.title, m.c.status, m.c.status_label),
         waiting: waitingOf(wsOf(name), id),
       };
     },
@@ -172,6 +201,7 @@ export function createMockApi(
                 question: h.question,
                 raised_at: h.raised_at,
                 run_id: null,
+                task_id: null,
                 title: m.c.title,
                 workspace: w.meta.name,
               })),
@@ -226,6 +256,8 @@ export function createMockApi(
             kind === "plan" && plan
               ? {
                   body: plan.body,
+                  budget_usd: null,
+                  summary: null,
                   tasks: [],
                   topics: [],
                   uses_integration: null,
@@ -288,6 +320,7 @@ export function createMockApi(
         source_children: [],
         stages: m.stages,
         tasks: [],
+        tree: emptyTree(m.c.id, m.c.title, m.c.status, m.c.status_label),
         waiting: waitingOf(wsOf(name), id),
       };
     },

@@ -106,7 +106,7 @@ func TestFromApprovalPreview(t *testing.T) {
 
 	plan := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, Version: 2, PlanVersion: 3, PlanBody: "B"}
 	b, _ = json.Marshal(view.FromApprovalPreview(plan, nil))
-	want = `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","direct_completion":null,"done_criteria":null,"kind":"plan","mergeability_note":"","other_pending_operations":[],"pairs":[],"plan":{"body":"B","tasks":[],"topics":[],"uses_integration":null,"version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
+	want = `{"approval":{"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","direct_completion":null,"done_criteria":null,"kind":"plan","mergeability_note":"","other_pending_operations":[],"pairs":[],"plan":{"body":"B","budget_usd":null,"summary":null,"tasks":[],"topics":[],"uses_integration":null,"version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"title":"t","version":2}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
@@ -240,7 +240,7 @@ func TestShowCarriesPairsOutsideStages(t *testing.T) {
 	}}}
 	for name, got := range map[string]string{
 		"show":      marshal(t, view.FromChallengeDetail(d)),
-		"show-card": marshal(t, view.FromChallengeDetailCard(d, &core.Card{})),
+		"show-card": marshal(t, view.FromChallengeDetailCard(d, &core.Card{}, core.TreeChallenge{})),
 	} {
 		if !strings.Contains(got, `"pairs":[{"actual":null,"expected":{"after":"a","before":"b","kind":"ui","scene":"s1"}}]`) {
 			t.Errorf("%s: pairs missing: %s", name, got)
@@ -442,7 +442,7 @@ func TestDirectCompletionIsCarriedByApprovalSummaryShowAndHold(t *testing.T) {
 	if empty := marshal(t, view.FromChallengeDetail(&core.ChallengeDetail{})); !strings.Contains(empty, `"direct_completions":[]`) {
 		t.Errorf("an ordinary challenge's show must have an empty direct_completions array: %s", empty)
 	}
-	card := marshal(t, view.FromChallengeDetailCard(d, &core.Card{}))
+	card := marshal(t, view.FromChallengeDetailCard(d, &core.Card{}, core.TreeChallenge{}))
 	if !strings.Contains(card, `"direct_completions":[{`) {
 		t.Errorf("show card lacks direct_completions: %s", card)
 	}

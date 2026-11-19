@@ -68,6 +68,24 @@ function show(over: Partial<ShowCardResponse> = {}): ShowCardResponse {
     },
     tasks: [],
     waiting: { prerequisites: [] },
+    tree: {
+      budget_usd: null,
+      children: [],
+      cost_usd: 0,
+      dependencies: [],
+      followups_open: 0,
+      id: "C-1",
+      next_human_actions: [],
+      parent: null,
+      status: "in_progress",
+      status_label: "着手中",
+      tasks: [],
+      tasks_done: 0,
+      tasks_total: 0,
+      title: "t",
+      updated_at: "2026-11-01T00:00:00.000Z",
+      uses_integration: null,
+    },
   };
   return { ...base, ...over };
 }
