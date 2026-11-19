@@ -32,6 +32,13 @@
       "template": "flywheel answer <C-ID> --workspace <パス> --answer <回答>"
     },
     {
+      "id": "answer-choice",
+      "when": { "context": "plan_approval" },
+      "command": ["answer"],
+      "flags": ["workspace", "choice"],
+      "template": "flywheel answer <C-ID> --workspace <パス> --choice <問いの番号>=<選択肢の番号>"
+    },
+    {
       "id": "approve-operation",
       "when": { "actions": ["approve_operation"] },
       "command": ["approve"],
@@ -65,6 +72,30 @@
       "command": ["slot", "clear"],
       "flags": ["workspace"],
       "template": "flywheel slot clear <SLOT-ID> --workspace <パス>"
+    },
+    {
+      "id": "followup-done",
+      "when": { "context": "followups" },
+      "command": ["followup", "done"],
+      "flags": ["workspace", "note"],
+      "template": "flywheel followup done <F-ID> --workspace <パス> --note <確かめた結果>",
+      "note": "済みにします（確かめた結果を書きます）"
+    },
+    {
+      "id": "followup-drop",
+      "when": { "context": "followups" },
+      "command": ["followup", "drop"],
+      "flags": ["workspace", "reason"],
+      "template": "flywheel followup drop <F-ID> --workspace <パス> --reason <理由>",
+      "note": "捨てます（本人確認が要ります）"
+    },
+    {
+      "id": "followup-promote",
+      "when": { "context": "followups" },
+      "command": ["followup", "promote"],
+      "flags": ["workspace"],
+      "template": "flywheel followup promote <F-ID> --workspace <パス>",
+      "note": "課題に上げます（1 回に 1 件。本人確認が要ります）"
     }
   ]
 }

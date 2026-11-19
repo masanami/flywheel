@@ -3,6 +3,8 @@ import { buildWaitingRows } from "../now/waitingRows.ts";
 import type { WaitingKind } from "../shell/waiting.ts";
 
 export interface WaitingItem {
+  // 行ごとに一意な鍵（エージェントの中で）。
+  key: string;
   kind: WaitingKind;
   title: string;
   // 行き先。スロットの片付けは行き先が無い。
@@ -27,13 +29,20 @@ export function waitingItems(
   ).map((r) =>
     r.kind === "slot"
       ? {
+          key: r.key,
           kind: r.kind,
           title: `${r.title}（${r.hint ?? ""}）`,
           href: null,
           note: "片付けは端末で行います。",
         }
       : r.kind === "operation"
-        ? { kind: r.kind, title: r.title, href: r.href, note: r.hint }
-        : { kind: r.kind, title: r.title, href: r.href },
+        ? {
+            key: r.key,
+            kind: r.kind,
+            title: r.title,
+            href: r.href,
+            note: r.hint,
+          }
+        : { key: r.key, kind: r.kind, title: r.title, href: r.href },
   );
 }

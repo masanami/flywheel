@@ -5,9 +5,12 @@ import { CardDetail } from "../board/CardDetail.tsx";
 import { toAgentBoard } from "../board/adapt.ts";
 import { ChallengesScreen } from "../challenges/ChallengesScreen.tsx";
 import { CycleScreen } from "../cycle/CycleScreen.tsx";
+import { FollowupsScreen } from "../followups/FollowupsScreen.tsx";
+import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { RefreshKeyContext } from "../nav.tsx";
 import { NowScreen } from "../now/NowScreen.tsx";
+import { PlanApprovalScreen } from "../plan-approval/PlanApprovalScreen.tsx";
 import { AgentRail } from "./AgentRail.tsx";
 import { NotFound } from "./NotFound.tsx";
 import { TopBar } from "./TopBar.tsx";
@@ -15,11 +18,11 @@ import { type Route, hrefOf, useHashRoute } from "./route.ts";
 import { useScreenData } from "./useScreenData.ts";
 
 export const NO_AGENTS_TEXT = "エージェントがありません。";
-export const LOADING_TEXT = "読み込んでいます";
+export { LOADING_TEXT };
 
 // 画面の枠組み: 左の列（エージェント）・上の帯・本文。右の対話の欄は作らない。
 export function Shell({ live }: { live: LiveState }) {
-  const [route] = useHashRoute();
+  const [route, go] = useHashRoute();
   const agents = live.workspaces;
   const first = agents[0];
 
@@ -57,7 +60,9 @@ export function Shell({ live }: { live: LiveState }) {
       </p>
     );
   } else {
-    body = <AgentBody live={live} route={current} agentName={agent.name} />;
+    body = (
+      <AgentBody live={live} route={current} agentName={agent.name} go={go} />
+    );
   }
 
   return (
@@ -83,10 +88,12 @@ function AgentBody({
   live,
   route,
   agentName,
+  go,
 }: {
   live: LiveState;
   route: Exclude<Route, { kind: "all" } | { kind: "unknown" }>;
   agentName: string;
+  go: (r: Route, opts?: { replace?: boolean }) => void;
 }) {
   const data = live.data[agentName];
 
@@ -101,9 +108,12 @@ function AgentBody({
           return <ChallengesScreen live={live} agentName={agentName} />;
         case "followups":
           return (
-            <section aria-labelledby="screen-title">
-              <h2 id="screen-title">フォローアップ</h2>
-            </section>
+            <FollowupsScreen
+              live={live}
+              agentName={agentName}
+              query={route.query}
+              onNavigate={go}
+            />
           );
         case "cycle":
           return <CycleScreen live={live} agentName={agentName} />;
@@ -114,9 +124,15 @@ function AgentBody({
     case "approve_plan":
       return (
         <ChallengeGate live={live} agentName={agentName} id={route.id}>
-          <section aria-labelledby="screen-title">
-            <h2 id="screen-title">計画の承認</h2>
-          </section>
+          <PlanApprovalScreen
+            key={`${agentName}/${route.id}`}
+            live={live}
+            agentName={agentName}
+            id={route.id}
+            workspacePath={
+              live.workspaces.find((w) => w.name === agentName)?.path ?? ""
+            }
+          />
         </ChallengeGate>
       );
     case "task":

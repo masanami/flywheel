@@ -1,17 +1,14 @@
-import { cycleStateText } from "../labels.ts";
+import { LOADING_TEXT, cycleStateText } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { hrefOf } from "../shell/route.ts";
 import {
+  NO_WAITING_TEXT,
   WAITING_LABELS,
   waitingCounts,
   waitingKindGroup,
   waitingTotal,
 } from "../shell/waiting.ts";
 import { waitingItems } from "./items.ts";
-
-import { LOADING_TEXT } from "../shell/Shell.tsx";
-
-export const NO_WAITING_TEXT = "あなたを待っているものはありません。";
 
 // すべてのエージェント。横断で見るのは、あなたを待っているものだけ。区分と件数は API の値から数え、
 // 画面の側に決まりを持たない（waitingCounts は core の区分の数え方の写し）。
@@ -51,9 +48,8 @@ export function AllScreen({ live }: { live: LiveState }) {
           <p>{NO_WAITING_TEXT}</p>
         ) : (
           <ul className="all-waiting" data-testid="all-waiting">
-            {rows.map(({ agent, item }, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: 同じ種類・題名が並びうる。並びは API の順で安定
-              <li key={i} data-testid="all-waiting-row">
+            {rows.map(({ agent, item }) => (
+              <li key={`${agent}:${item.key}`} data-testid="all-waiting-row">
                 <b className="all-agent-name">{agent}</b>{" "}
                 <span
                   className="action-pill"

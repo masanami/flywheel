@@ -2,10 +2,10 @@ import {
   CYCLE_RESULTS,
   CYCLE_RESULT_LABELS,
   type CycleResult,
+  LOADING_TEXT,
   cycleStateText,
 } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
-import { LOADING_TEXT } from "../shell/Shell.tsx";
 import { CycleWorkPart } from "./CycleWorkPart.tsx";
 
 export const NO_TIME_TEXT = "まだありません";
@@ -72,6 +72,7 @@ export function CycleScreen({
       )}
       <CycleWorkPart
         workspace={agentName}
+        workspacePath={live.workspaces.find((w) => w.name === agentName)?.path}
         work={data?.status?.cycle_work}
         cycleState={cycle?.state ?? ""}
       />

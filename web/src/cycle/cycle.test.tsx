@@ -11,6 +11,7 @@ import {
 } from "../labels.ts";
 import { type Agent, openAgents } from "../testing/agents.tsx";
 import { cycleResultText } from "./CycleScreen.tsx";
+import { NO_CYCLE_WORK_TEXT } from "./CycleWorkPart.tsx";
 
 // サイクルの画面の受入基準を 1 つずつ直接確かめる。Issue #806。
 
@@ -141,4 +142,34 @@ it("#806: サイクルの状態・結果・段の全部の値に文言がある"
     "改修の提案",
     "片付け",
   ]);
+});
+
+it("#806: サイクルを回すと進むものの区分は、「いま進められること」と同じ部品で、同じ中身が出る", async () => {
+  await openAgents([agent], "#/a/alpha/cycle");
+  const onCycle = (await screen.findByTestId("cycle-work")).textContent;
+  expect(onCycle).toContain("サイクルを回すと進むもの（3 件）");
+  window.location.hash = "#/a/alpha/now";
+  await screen.findByRole("heading", { name: "いま進められること" });
+  expect((await screen.findByTestId("cycle-work")).textContent).toBe(onCycle);
+});
+
+it("#806: 進められるものが 0 件のとき、始めない旨が出て、「サイクルを回す」は押せない", async () => {
+  await openAgents([{ ...agent, cycleWork: { total: 0 } }], "#/a/alpha/cycle");
+  const part = await screen.findByTestId("cycle-work");
+  await within(part).findByText(NO_CYCLE_WORK_TEXT);
+  expect(
+    within(part).getByRole("button", { name: "サイクルを回す" }),
+  ).toBeDisabled();
+});
+
+it("#806: 止まっているかもしれないときは、端末のコマンドの案内が出て、「サイクルを回す」は押せない", async () => {
+  await openAgents(
+    [{ ...agent, cycle: { ...agent.cycle, state: "stale" } }],
+    "#/a/alpha/cycle",
+  );
+  const part = await screen.findByTestId("cycle-work");
+  await within(part).findByText("flywheel cycle --workspace '/w/alpha'");
+  expect(
+    within(part).getByRole("button", { name: "サイクルを回す" }),
+  ).toBeDisabled();
 });

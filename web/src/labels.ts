@@ -157,6 +157,9 @@ export const CYCLE_STATE_LABELS: Record<CycleState, string> = {
   stale: "サイクル: 止まっているかもしれない",
 };
 
+// 読み込みの最中に出す文（枠と各画面で同じ）。
+export const LOADING_TEXT = "読み込んでいます";
+
 // サイクルの画面・「すべて」の区分に出す、状態だけの語（上の帯の語から「サイクル: 」を除いたもの）。
 export const CYCLE_STATE_SHORT_LABELS: Record<CycleState, string> = {
   running: "走っている",

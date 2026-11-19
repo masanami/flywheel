@@ -18,6 +18,8 @@ import type {
   WorkspaceList,
 } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
+import { ALPHA_FOLLOWUPS } from "./followups.ts";
+import { RICH_PLANS } from "./plan.ts";
 import {
   type MockChallenge,
   type MockStore,
@@ -135,10 +137,15 @@ export function createMockApi(
         recent_done: all.filter((t) => t.status === "done"),
       };
     },
-    async followups(name): Promise<FollowupListResponse> {
+    async followups(name, status): Promise<FollowupListResponse> {
       await wait();
       wsOf(name);
-      return { followups: [] };
+      const all = name === "alpha" ? ALPHA_FOLLOWUPS : [];
+      return {
+        followups: all.filter(
+          (f) => status === "all" || f.status === (status ?? "open"),
+        ),
+      };
     },
     async challenges(name) {
       await wait();
@@ -296,6 +303,7 @@ export function createMockApi(
                   tasks: [],
                   topics: [],
                   uses_integration: null,
+                  ...RICH_PLANS[`${name}/${id}`],
                   version: plan.version,
                 }
               : null,
