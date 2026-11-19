@@ -1,6 +1,9 @@
 module github.com/masanami/flywheel
 
-go 1.26.0
+// 1.26.11 以上を求める。1.26.5 より前の 1.26 系には、macOS（Apple シリコン）で -race を付けたテストが
+// 子のプロセスを起動するとき、まれに落ちる・固まる不具合がある（golang/go#79804。直しは 1.26.5 から。
+// flywheel#768）。1.26.5 より下げない。1.26.11 は、上げた時点で手元で確かめた修正版。
+go 1.26.11
 
 require (
 	github.com/creack/pty v1.1.24
