@@ -112,3 +112,40 @@ func TestUIGuidanceTemplatesExistInCLI(t *testing.T) {
 		}
 	}
 }
+
+// TestUIGuidanceHasNowScreenContexts は「いま進められること」の画面が出す端末のコマンドの案内
+// （取り込み・サイクル・スロットの片付け）が、画面の名前（context）つきで雛形にあることを確かめる（Issue #805）。
+func TestUIGuidanceHasNowScreenContexts(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "web", "src", "guidance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g struct {
+		Templates []struct {
+			When struct {
+				Context string `json:"context"`
+			} `json:"when"`
+			Template string `json:"template"`
+		} `json:"templates"`
+	}
+	if err := json.Unmarshal(raw, &g); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"ingest": "flywheel ingest ",
+		"cycle":  "flywheel cycle ",
+		"slot":   "flywheel slot clear ",
+	}
+	for ctx, prefix := range want {
+		found := false
+		for _, tpl := range g.Templates {
+			if tpl.When.Context == ctx && strings.HasPrefix(tpl.Template, prefix) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("context %q の案内（%q で始まる雛形）が無い", ctx, prefix)
+		}
+	}
+}

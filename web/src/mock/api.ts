@@ -26,6 +26,7 @@ import {
   STATUS_LABEL,
   cardOf,
   graphOf,
+  ingestableOf,
   pairsOf,
   statusOf,
   toCard,
@@ -113,7 +114,7 @@ export function createMockApi(
       await wait();
       return {
         ...statusOf(wsOf(name)),
-        ingestable: { error: null, items: [] },
+        ingestable: ingestableOf(name),
       };
     },
     async tree(name): Promise<TreeResponse> {
