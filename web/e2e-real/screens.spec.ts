@@ -45,6 +45,13 @@ test("AC-441 #813: 本物の serve で、フォローアップの一覧に、種
       .getByTestId("followup-row")
       .filter({ hasText: "済みのフォローアップ" }),
   ).toBeVisible();
+  // 捨てたへ切り替えると、捨てた題名が出る
+  await page.getByRole("button", { name: /^捨てた/ }).click();
+  await expect(
+    page
+      .getByTestId("followup-row")
+      .filter({ hasText: "捨てたフォローアップ" }),
+  ).toBeVisible();
 });
 
 test("AC-442 #813: 本物の serve で、「いま進められること」に、種にした計画の承認待ちの課題の題名が出る", async ({

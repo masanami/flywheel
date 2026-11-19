@@ -87,12 +87,20 @@ func TestParentDirect_StatusBoardAndQuestionsSeparateItFromHumanTurns(t *testing
 		t.Errorf("status.needs_human.challenges = %v, want [C-3 C-4]", got)
 	}
 
-	// ボードのカード: C-2 に問いに答える操作は出ない。
+	// ボードのカード: C-2 に問いに答える操作は出ず（状態は人間対応待ちのまま）、オーナーが答える保留の C-3 と、
+	// 直接行った完了の承認待ちの C-4 には、人間の操作が出る。
+	state, actions := map[string]string{}, map[string][]string{}
 	for _, c := range mustJSON(t, port, "/api/v1/workspaces/w/challenges")["challenges"].([]any) {
 		m := c.(map[string]any)
-		if m["id"] == "C-2" && len(strs(m["card"].(map[string]any)["next_human_actions"])) != 0 {
-			t.Errorf("C-2 card next_human_actions = %v, want none", m["card"])
-		}
+		card := m["card"].(map[string]any)
+		id := m["id"].(string)
+		state[id], actions[id] = card["state"].(string), strs(card["next_human_actions"])
+	}
+	if state["C-2"] != "awaiting_human" || len(actions["C-2"]) != 0 {
+		t.Errorf("C-2 card state/actions = %s/%v, want awaiting_human/[]", state["C-2"], actions["C-2"])
+	}
+	if !reflect.DeepEqual(actions["C-3"], []string{"answer_question"}) || !reflect.DeepEqual(actions["C-4"], []string{"approve_completion"}) {
+		t.Errorf("human actions: C-3=%v C-4=%v", actions["C-3"], actions["C-4"])
 	}
 
 	// 未回答の問い（オーナーが答えるもの）には C-3 だけ。

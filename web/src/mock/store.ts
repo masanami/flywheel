@@ -82,7 +82,7 @@ export interface MockWorkspace {
   cycle: CycleStatus;
   // サイクルを回すと進むもの（状況の API の cycle_work）。無ければ 0 件。
   cycleWork?: CycleWork;
-  // 課題どうしの偽の関係（親子・依存）。課題の詳細の waiting が使う
+  // 課題どうしの偽の前提（依存）。課題の詳細の waiting が使う
   graph: GraphSeed;
 }
 

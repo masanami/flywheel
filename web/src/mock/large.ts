@@ -130,7 +130,7 @@ const TASKS = [
   "の手順書を書く",
 ];
 
-// 線でつながる形。connected が false なら、同じ課題から親子と依存をすべて抜く。
+// 前提でつながる形。connected が false なら、同じ課題から依存をすべて抜く。
 export function largeShape(connected: boolean): LargeShape {
   const specs: LargeSpec[] = [];
   const deps: MockDep[] = [];
