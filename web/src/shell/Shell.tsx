@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { api } from "../api/client.ts";
 import { CardDetail } from "../board/CardDetail.tsx";
 import { toAgentBoard } from "../board/adapt.ts";
+import { ChallengesScreen } from "../challenges/ChallengesScreen.tsx";
 import type { LiveState } from "../live/useLive.ts";
 import { RefreshKeyContext } from "../nav.tsx";
 import { AgentRail } from "./AgentRail.tsx";
@@ -110,11 +111,7 @@ function AgentBody({
             </section>
           );
         case "challenges":
-          return (
-            <section aria-labelledby="screen-title">
-              <h2 id="screen-title">課題</h2>
-            </section>
-          );
+          return <ChallengesScreen live={live} agentName={agentName} />;
         case "followups":
           return (
             <section aria-labelledby="screen-title">

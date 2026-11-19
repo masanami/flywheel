@@ -26,6 +26,7 @@ const MOCK_MARKERS = [
   "検索 API にページングを足す",
   "請求データの夜間集計を新しい基盤へ載せ替える",
   "ストアが見つかりません",
+  "誤りの種類を洗う",
 ];
 
 function sourceFiles(dir: string): string[] {
