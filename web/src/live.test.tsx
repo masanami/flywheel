@@ -20,6 +20,9 @@ afterEach(() => {
 const connection = () => screen.getByTestId("connection");
 
 async function mounted() {
+  // 「いま進められること」は開いたときに ingestable=true の状況を読む（#805）。読み込みの要求の数を測る
+  // この試験では、その画面を開かないよう「すべて」を開く。
+  window.location.hash = "#/all";
   const { requests } = installFakes();
   render(<App />);
   act(() => FakeEventSource.latest.open());

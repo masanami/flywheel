@@ -65,8 +65,9 @@ it("AC-383 #806: 「あなたを待っている」に、2 つのエージェン�
   expect(r[0]).toHaveTextContent("計画を待つ課題");
   expect(r[3]).toHaveTextContent("完了の承認");
   // 不可逆操作の承認の題名は課題の一覧から引く
-  expect(r[2]).toHaveTextContent("不可逆操作の承認");
-  expect(r[2]).toHaveTextContent("不可逆の課題");
+  // 並びは種類の順（承認 → 回答）。同じ種類の中は API の並び。
+  expect(r[1]).toHaveTextContent("不可逆操作の承認");
+  expect(r[1]).toHaveTextContent("不可逆の課題");
   expect(
     screen.getByRole("heading", { name: "あなたを待っている（4 件）" }),
   ).toBeInTheDocument();
@@ -80,8 +81,8 @@ it("AC-384 #806: 行のリンクは、そのエージェントの画面（#/a/<�
   );
   expect(hrefs).toEqual([
     "#/a/alpha/challenges/C-1/approve-plan",
-    "#/a/alpha/challenges/C-2",
     "#/a/alpha/challenges/C-9",
+    "#/a/alpha/challenges/C-2",
     "#/a/beta/challenges/C-3",
   ]);
   for (const h of hrefs) expect(h).toMatch(/^#\/a\/(alpha|beta)\//);
@@ -177,7 +178,7 @@ it("#806: 回答の行は問いの文を出し、保留がタスクに付いて�
     },
   });
   await waitFor(async () => expect(await rows()).toHaveLength(3));
-  const r = (await rows())[1] as HTMLElement;
+  const r = (await rows())[2] as HTMLElement;
   expect(r).toHaveTextContent("価格は税込みですか");
   expect(within(r).getByRole("link").getAttribute("href")).toBe(
     "#/a/alpha/challenges/C-2/tasks/T-5",

@@ -3,10 +3,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   CYCLE_RESULTS,
   CYCLE_RESULT_LABELS,
-  CYCLE_STAGES,
-  CYCLE_STAGE_LABELS,
   CYCLE_STATES,
   CYCLE_STATE_SHORT_LABELS,
+  CYCLE_WORK_STAGES,
+  CYCLE_WORK_STAGE_LABELS,
   cycleStateText,
 } from "../labels.ts";
 import { type Agent, openAgents } from "../testing/agents.tsx";
@@ -131,7 +131,7 @@ it("#806: サイクルの状態・結果・段の全部の値に文言がある"
   for (const r of CYCLE_RESULTS) {
     expect(cycleResultText(r)).toBe(CYCLE_RESULT_LABELS[r]);
   }
-  expect(CYCLE_STAGES.map((s) => CYCLE_STAGE_LABELS[s])).toEqual([
+  expect(CYCLE_WORK_STAGES.map((s) => CYCLE_WORK_STAGE_LABELS[s])).toEqual([
     "反映",
     "分類",
     "計画",

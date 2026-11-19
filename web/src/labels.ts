@@ -181,7 +181,8 @@ export const CYCLE_RESULT_LABELS: Record<CycleResult, string> = {
 };
 
 // サイクルを回すと進むものの段（状況の API の cycle_work.stages のキー）。表示の順もこの並び。
-export const CYCLE_STAGES = [
+// 段の件数は core が数え、ここは語と並びだけを持つ（Record の型で、全部のキーに語があることを守る）。
+export const CYCLE_WORK_STAGES = [
   "release",
   "classify",
   "plan",
@@ -191,15 +192,9 @@ export const CYCLE_STAGES = [
   "improve",
   "cleanup",
 ] as const satisfies readonly (keyof CycleWorkStages)[];
-export type CycleStage = (typeof CYCLE_STAGES)[number];
+export type CycleWorkStage = (typeof CYCLE_WORK_STAGES)[number];
 
-// 型の検査: core の段が増えたら、ここで型エラーになる。
-type _AllStagesListed = Exclude<keyof CycleWorkStages, CycleStage> extends never
-  ? true
-  : never;
-export const STAGES_COMPLETE: _AllStagesListed = true;
-
-export const CYCLE_STAGE_LABELS: Record<CycleStage, string> = {
+export const CYCLE_WORK_STAGE_LABELS: Record<keyof CycleWorkStages, string> = {
   release: "反映",
   classify: "分類",
   plan: "計画",

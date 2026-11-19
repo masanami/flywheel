@@ -1,5 +1,5 @@
 import type { CycleWork } from "../api/types.gen.ts";
-import { CYCLE_STAGES, CYCLE_STAGE_LABELS } from "../labels.ts";
+import { CYCLE_WORK_STAGES, CYCLE_WORK_STAGE_LABELS } from "../labels.ts";
 import { CycleStartButton } from "../shell/CycleStartButton.tsx";
 
 // サイクルを回すと進むもの（合計と段ごとの件数）と「サイクルを回す」のボタン。
@@ -21,9 +21,9 @@ export function CycleWorkPart({
       </p>
       {work ? (
         <ul className="cycle-work-stages">
-          {CYCLE_STAGES.filter((s) => work.stages[s] > 0).map((s) => (
+          {CYCLE_WORK_STAGES.filter((s) => work.stages[s] > 0).map((s) => (
             <li key={s} data-stage={s}>
-              {CYCLE_STAGE_LABELS[s]} <b>{work.stages[s]}</b>
+              {CYCLE_WORK_STAGE_LABELS[s]} <b>{work.stages[s]}</b>
             </li>
           ))}
         </ul>

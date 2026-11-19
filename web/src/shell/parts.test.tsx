@@ -251,10 +251,19 @@ it("#803: 偽の API は課題のツリー・フォローアップ・ingestable 
   const api = createMockApi(new MockStore(), { latencyMs: 0 });
   expect((await api.tree("alpha")).challenges.length).toBeGreaterThan(0);
   expect((await api.followups("alpha")).followups).toEqual([]);
-  expect((await api.statusIngestable("alpha")).ingestable).toEqual({
-    error: null,
-    items: [],
-  });
+  const ing = (await api.statusIngestable("alpha")).ingestable;
+  expect(ing?.error).toBeNull();
+  expect(ing?.items.length).toBeGreaterThan(0);
+});
+
+it("AC-423 #805: 偽のデータの状況は、ingestable=true を付けた問い合わせにだけ、取り込めるものを返す", async () => {
+  const api = createMockApi(new MockStore(), { latencyMs: 0 });
+  expect((await api.status("alpha")).ingestable).toBeNull();
+  const ing = (await api.statusIngestable("alpha")).ingestable;
+  expect(ing?.items.length).toBeGreaterThan(0);
+  // 子のある親と、既存の課題の下に入るものの両方の形を持つ
+  expect(ing?.items.some((i) => i.children.length > 0)).toBe(true);
+  expect(ing?.items.some((i) => i.parent_challenge_id !== null)).toBe(true);
 });
 
 it("#803: 実 API の口は ingestable=true・tree・followups の URL を呼ぶ", async () => {

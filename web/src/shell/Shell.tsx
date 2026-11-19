@@ -7,6 +7,7 @@ import { ChallengesScreen } from "../challenges/ChallengesScreen.tsx";
 import { CycleScreen } from "../cycle/CycleScreen.tsx";
 import type { LiveState } from "../live/useLive.ts";
 import { RefreshKeyContext } from "../nav.tsx";
+import { NowScreen } from "../now/NowScreen.tsx";
 import { AgentRail } from "./AgentRail.tsx";
 import { CycleStartButton } from "./CycleStartButton.tsx";
 import { NotFound } from "./NotFound.tsx";
@@ -97,14 +98,7 @@ function AgentBody({
       switch (route.screen) {
         case "now":
           return (
-            <section aria-labelledby="screen-title">
-              <h2 id="screen-title">いま進められること</h2>
-              <CycleStartButton
-                workspace={agentName}
-                total={total}
-                cycleState={cycleState}
-              />
-            </section>
+            <NowScreen key={agentName} live={live} agentName={agentName} />
           );
         case "challenges":
           return <ChallengesScreen live={live} agentName={agentName} />;
