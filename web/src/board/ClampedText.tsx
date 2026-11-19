@@ -7,15 +7,13 @@ const CLAMP_LINES = 3;
 // 切れているかは、畳んだ要素の scrollHeight > clientHeight で測る（文字数や改行では決めない）。
 // 文字だけでなく、整えた本文（要素の並び）も children で包める。children のときは、文字が変わった合図を
 // resetKey で受け取り（畳み直し・測り直し）、改行の扱いは中身の要素に任せる。
-export function ClampedText({
-  text,
-  children,
-  resetKey,
-}: {
-  text?: string;
-  children?: ReactNode;
-  resetKey?: string;
-}) {
+// 渡し方は 2 つだけ: 文字（text）か、要素の並び（children と resetKey の組）。両方を渡す・resetKey を
+// 省く、という使い方は型で通さない。
+type ClampedTextProps =
+  | { text: string; children?: undefined; resetKey?: undefined }
+  | { text?: undefined; children: ReactNode; resetKey: string };
+
+export function ClampedText({ text, children, resetKey }: ClampedTextProps) {
   const key = text ?? resetKey ?? "";
   const Tag = text === undefined ? "div" : "span";
   const [open, setOpen] = useState(false);

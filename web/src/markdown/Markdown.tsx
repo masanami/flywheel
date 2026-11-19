@@ -78,8 +78,14 @@ function inlineOne(t: Token, inLink: boolean): ReactNode {
   }
 }
 
+// チェックつきの箇条書きの印（[ ]・[x]・[X]）は、書いてある文字のまま出す（marked は印を本文から外すので、
+// 項目の元の文字から取り出す）
+const TASK_MARK = /^\s*(?:[-*+]|\d+[.)])\s+(\[[ xX]\])/;
+
 function listItem(item: Tokens.ListItem, i: number): ReactNode {
-  const mark = item.task ? `[${item.checked ? "x" : " "}] ` : "";
+  const mark = item.task
+    ? `${TASK_MARK.exec(item.raw)?.[1] ?? (item.checked ? "[x]" : "[ ]")} `
+    : "";
   return (
     <li key={k(i, "li")}>
       {mark}
@@ -170,6 +176,11 @@ function blockOne(t: Token): ReactNode {
   }
 }
 
+// 段落の中の 1 つの改行も、改行として出す（breaks）。本文は、Issue の説明や判断点が書いた文で、
+// 改行がそのまま見える前提で書かれている（見直し前の画面も、改行をそのまま出していた）。
+// marked は、渡した設定を既定の値と混ぜないので、gfm（表・自動のリンク）も一緒に渡す。
+const LEXER_OPTIONS = { gfm: true, breaks: true };
+
 export function Markdown({ text }: { text: string }) {
-  return <div className="md">{blocks(lexer(text))}</div>;
+  return <div className="md">{blocks(lexer(text, LEXER_OPTIONS))}</div>;
 }

@@ -102,6 +102,23 @@ it("AC-402 #804: ~~文字~~ は書いてある文字のまま出る", () => {
   expect(c.querySelector("del, s")).toBeNull();
 });
 
+it("#804: 段落の中の 1 つの改行は、改行として出る", () => {
+  const c = md("一行目\n二行目");
+  const p = c.querySelector("p");
+  expect(p?.querySelectorAll("br")).toHaveLength(1);
+  expect(p?.textContent).toBe("一行目二行目");
+});
+
+it("#804: チェックつきの箇条書きの印は、書いてある文字のまま出る（[X] を [x] に直さない）", () => {
+  const items = md("- [X] 済み\n- [ ] 未\n- ふつう").querySelectorAll("li");
+  expect(Array.from(items).map((li) => li.textContent)).toEqual([
+    "[X] 済み",
+    "[ ] 未",
+    "ふつう",
+  ]);
+  expect(md("- [x] a").querySelector("input")).toBeNull();
+});
+
 it("AC-403 #804: <https://example.com/> は行き先が https://example.com/ のリンクになる", () => {
   const a = md("<https://example.com/>").querySelector("a");
   expect(a?.getAttribute("href")).toBe("https://example.com/");
