@@ -1,6 +1,7 @@
 // core が返す閉集合のコードを表示の文言に写す対応表。状態は UI で導かず、文言だけをここで持つ。
 
 import { HOLD_KIND_CODES } from "./api/types.gen.ts";
+import type { CycleWorkStages } from "./api/types.gen.ts";
 
 export const CARD_STATES = [
   "unclassified",
@@ -154,6 +155,31 @@ export const CYCLE_STATE_LABELS: Record<CycleState, string> = {
   running: "サイクル: 走っている",
   idle: "サイクル: 走っていない",
   stale: "サイクル: 止まっているかもしれない",
+};
+
+// サイクルを回すと進むものの段（状況の API の cycle_work.stages のキー）。表示の順もこの並び。
+// 段の件数は core が数え、ここは語と並びだけを持つ（Record の型で、全部のキーに語があることを守る）。
+export const CYCLE_WORK_STAGES = [
+  "release",
+  "classify",
+  "plan",
+  "run",
+  "verify",
+  "learn",
+  "improve",
+  "cleanup",
+] as const satisfies readonly (keyof CycleWorkStages)[];
+export type CycleWorkStage = (typeof CYCLE_WORK_STAGES)[number];
+
+export const CYCLE_WORK_STAGE_LABELS: Record<keyof CycleWorkStages, string> = {
+  release: "反映",
+  classify: "分類",
+  plan: "計画",
+  run: "委譲",
+  verify: "完了の検証",
+  learn: "学び",
+  improve: "改修の提案",
+  cleanup: "片付け",
 };
 
 // 課題の画面の凡例。区分の語は PHASE_LABELS と同じで、「次に走る」だけ括弧の補足を添える。
