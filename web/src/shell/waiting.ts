@@ -1,4 +1,4 @@
-import type { StatusNeedsHuman } from "../api/types.gen.ts";
+import type { CARD_ACTION_CODES, StatusNeedsHuman } from "../api/types.gen.ts";
 
 // あなたを待っているものの種類。表示の順もこの並び。後の画面（いま進められること・すべて）が共通に使う。
 export const WAITING_KINDS = [
@@ -36,6 +36,32 @@ export function waitingKindGroup(
   kind: WaitingKind,
 ): WaitingKindGroup | undefined {
   return APPROVAL_KINDS.includes(kind) ? "approval" : undefined;
+}
+
+// 課題の next_human_actions のコード（core の値の集合）と、種類の対応。core に値が増えたら、型の検査で気付く。
+type CardAction = (typeof CARD_ACTION_CODES)[number];
+const ACTION_WAITING_KIND: Record<CardAction, WaitingKind> = {
+  approve_plan: "plan_approval",
+  approve_completion: "completion_approval",
+  approve_operation: "operation",
+  answer_question: "answer",
+  review_discrepancy: "discrepancy",
+  increase_budget: "budget",
+  triage: "triage",
+  clear_slot: "slot",
+};
+
+// 課題の next_human_actions から、あなたを待っているものの種類を、WAITING_KINDS の並びで返す（重複は 1 つ。
+// 知らないコードは出さない）。課題の枠の見出し・課題の詳細が使う。
+export function waitingKindsOfActions(
+  actions: readonly string[],
+): WaitingKind[] {
+  const kinds = new Set<WaitingKind>();
+  for (const a of actions) {
+    const k = (ACTION_WAITING_KIND as Record<string, WaitingKind>)[a];
+    if (k) kinds.add(k);
+  }
+  return WAITING_KINDS.filter((k) => kinds.has(k));
 }
 
 export type WaitingCounts = Record<WaitingKind, number>;

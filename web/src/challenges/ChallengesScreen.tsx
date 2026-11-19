@@ -9,26 +9,11 @@ import {
 import type { LiveState } from "../live/useLive.ts";
 import { hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
-import { WAITING_LABELS, type WaitingKind } from "../shell/waiting.ts";
+import { WAITING_LABELS, waitingKindsOfActions } from "../shell/waiting.ts";
 import { TaskTree } from "../tree/TaskTree.tsx";
 
 export const NO_CHALLENGES_TEXT = "開いている課題はありません。";
 const LOADING = "読み込んでいます";
-
-// next_human_actions のコードを、「いま進められること」と同じ語（WAITING_LABELS）の種類へ写す。
-const ACTION_KIND: Record<string, WaitingKind> = {
-  approve_plan: "plan_approval",
-  approve_completion: "completion_approval",
-  approve_operation: "operation",
-  answer_question: "answer",
-  review_discrepancy: "discrepancy",
-  increase_budget: "budget",
-  triage: "triage",
-  clear_slot: "slot",
-};
-const waitingKinds = (actions: string[]): WaitingKind[] => [
-  ...new Set(actions.flatMap((a) => (ACTION_KIND[a] ? [ACTION_KIND[a]] : []))),
-];
 
 // 費用は小数 2 桁までで、末尾の 0 を落とす（30 は「30」、11.2 は「11.2」）。
 const usd = (n: number) => String(Number(n.toFixed(2)));
@@ -120,7 +105,7 @@ function ChallengeFrame({
       <h3>
         <a href={detail}>{c.title}</a>{" "}
         <span className="status-pill">{c.status_label}</span>
-        {waitingKinds(c.next_human_actions).map((k) => (
+        {waitingKindsOfActions(c.next_human_actions).map((k) => (
           <span key={k}>
             {" "}
             <span className="action-pill">{WAITING_LABELS[k]}</span>

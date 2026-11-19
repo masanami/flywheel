@@ -30,6 +30,7 @@ import {
   WAITING_LABELS,
   waitingCounts,
   waitingKindGroup,
+  waitingKindsOfActions,
   waitingTotal,
 } from "./waiting.ts";
 
@@ -73,6 +74,20 @@ it("#803: 承認の 3 種（計画・完了・不可逆操作）は同じまと�
     ["triage", undefined],
     ["slot", undefined],
   ]);
+});
+
+it("#807: next_human_actions の種類は、あなたを待っているものの並びで返り、重複と知らないコードは出ない", () => {
+  expect(
+    waitingKindsOfActions([
+      "increase_budget",
+      "answer_question",
+      "unknown_code",
+      "approve_operation",
+      "answer_question",
+      "approve_plan",
+    ]),
+  ).toEqual(["plan_approval", "operation", "answer", "budget"]);
+  expect(waitingKindsOfActions([])).toEqual([]);
 });
 
 it("#803: 件数の数え方 — 循環だけの食い違いは数えず、食い違いは課題ごとに 1 件", () => {
