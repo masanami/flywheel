@@ -44,6 +44,27 @@
       "command": ["budget"],
       "flags": ["workspace", "impl-usd"],
       "template": "flywheel budget <C-ID> --workspace <パス> --impl-usd <額>"
+    },
+    {
+      "id": "ingest",
+      "when": { "context": "ingest" },
+      "command": ["ingest"],
+      "flags": ["workspace"],
+      "template": "flywheel ingest <external_key> --workspace <パス>"
+    },
+    {
+      "id": "cycle",
+      "when": { "context": "cycle" },
+      "command": ["cycle"],
+      "flags": ["workspace"],
+      "template": "flywheel cycle --workspace <パス>"
+    },
+    {
+      "id": "slot-clear",
+      "when": { "context": "slot" },
+      "command": ["slot", "clear"],
+      "flags": ["workspace"],
+      "template": "flywheel slot clear <SLOT-ID> --workspace <パス>"
     }
   ]
 }

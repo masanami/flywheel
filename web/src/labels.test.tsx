@@ -14,6 +14,8 @@ import {
   CARD_STATES,
   CYCLE_STATES,
   CYCLE_STATE_LABELS,
+  CYCLE_WORK_STAGES,
+  CYCLE_WORK_STAGE_LABELS,
   DISCREPANCY_KINDS,
   DISCREPANCY_LABELS,
   HOLD_KIND_HUMAN,
@@ -25,6 +27,7 @@ import {
   STATE_LABELS,
   TASK_PHASES,
 } from "./labels.ts";
+import { emptyStatus } from "./testing/fakes.ts";
 
 it("AC-102: 閉集合のすべてのコードに文言があり、core の定義と一致する", () => {
   expect([...CARD_ACTIONS]).toEqual([...CARD_ACTION_CODES]);
@@ -82,4 +85,22 @@ it("#803: サイクルの状態（state）の全部の値に文言がある（�
     running: "サイクル: 走っている",
     stale: "サイクル: 止まっているかもしれない",
   });
+});
+
+it("#805: サイクルを回すと進むものの 8 つの段すべてに語があり、状況の API の段のキーと一致する", () => {
+  const keys = Object.keys(emptyStatus.cycle_work.stages).sort();
+  expect([...CYCLE_WORK_STAGES].sort()).toEqual(keys);
+  for (const s of CYCLE_WORK_STAGES) {
+    expect(CYCLE_WORK_STAGE_LABELS[s], s).toBeTruthy();
+  }
+  expect(CYCLE_WORK_STAGES.map((s) => CYCLE_WORK_STAGE_LABELS[s])).toEqual([
+    "反映",
+    "分類",
+    "計画",
+    "委譲",
+    "完了の検証",
+    "学び",
+    "改修の提案",
+    "片付け",
+  ]);
 });
