@@ -1,6 +1,8 @@
 import type { CARD_ACTION_CODES, StatusNeedsHuman } from "../api/types.gen.ts";
 
 // あなたを待っているものの種類。表示の順もこの並び。後の画面（いま進められること・すべて）が共通に使う。
+export const NO_WAITING_TEXT = "あなたを待っているものはありません。";
+
 export const WAITING_KINDS = [
   "plan_approval",
   "completion_approval",
