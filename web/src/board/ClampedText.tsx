@@ -1,25 +1,37 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
 const CLAMP_LINES = 3;
 
 // 外部由来の文字列はプレーンテキストのまま出す（HTML・Markdown として解釈しない）。
 // 長い値は既定で数行に切り詰め、実際に切れているときだけ、下線を引いた文字のリンクで全文を開ける。
 // 切れているかは、畳んだ要素の scrollHeight > clientHeight で測る（文字数や改行では決めない）。
-export function ClampedText({ text }: { text: string }) {
+// 文字だけでなく、整えた本文（要素の並び）も children で包める。children のときは、文字が変わった合図を
+// resetKey で受け取り（畳み直し・測り直し）、改行の扱いは中身の要素に任せる。
+export function ClampedText({
+  text,
+  children,
+  resetKey,
+}: {
+  text?: string;
+  children?: ReactNode;
+  resetKey?: string;
+}) {
+  const key = text ?? resetKey ?? "";
+  const Tag = text === undefined ? "div" : "span";
   const [open, setOpen] = useState(false);
   // 開く前に切れていたか。開いた状態では切れないので、開く前の測定を覚えておき、「折りたたむ」を出し続ける
   const [clipped, setClipped] = useState(false);
-  const [seen, setSeen] = useState(text);
-  const ref = useRef<HTMLSpanElement>(null);
+  const [seen, setSeen] = useState(key);
+  const ref = useRef<HTMLDivElement & HTMLSpanElement>(null);
 
   // 文字列が変わったら畳み直す（測り直せるように）
-  if (seen !== text) {
-    setSeen(text);
+  if (seen !== key) {
+    setSeen(key);
     setOpen(false);
   }
 
   // 描画のあと（開閉・文字列の変化）と、大きさが変わったときに測る。開いている間は測らない。
-  // biome-ignore lint/correctness/useExhaustiveDependencies: text と open の変化が測り直しの合図
+  // biome-ignore lint/correctness/useExhaustiveDependencies: key と open の変化が測り直しの合図
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -32,11 +44,12 @@ export function ClampedText({ text }: { text: string }) {
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [text, open]);
+  }, [key, open]);
 
+  const pre = text === undefined ? {} : { whiteSpace: "pre-wrap" as const };
   return (
-    <span>
-      <span
+    <Tag>
+      <Tag
         ref={ref}
         data-clamped={!open ? "true" : "false"}
         style={
@@ -46,13 +59,13 @@ export function ClampedText({ text }: { text: string }) {
                 WebkitLineClamp: CLAMP_LINES,
                 WebkitBoxOrient: "vertical",
                 overflow: "hidden",
-                whiteSpace: "pre-wrap",
+                ...pre,
               }
-            : { whiteSpace: "pre-wrap" }
+            : pre
         }
       >
-        {text}
-      </span>
+        {text ?? children}
+      </Tag>
       {clipped || open ? (
         <button
           type="button"
@@ -62,6 +75,6 @@ export function ClampedText({ text }: { text: string }) {
           {open ? "折りたたむ" : "全文を開く"}
         </button>
       ) : null}
-    </span>
+    </Tag>
   );
 }

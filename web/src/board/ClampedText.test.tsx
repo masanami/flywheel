@@ -121,3 +121,17 @@ it("「全文を開く／折りたたむ」の文字色は、リンクの色で�
   expect(rule).not.toMatch(/color:\s*var\(--board-link\)/);
   expect(rule).toMatch(/text-decoration:\s*underline/);
 });
+
+it("AC-415 #804: 要素の並び（children）も、切れていれば「全文を開く」で全部を出せる", () => {
+  sizes(120, 60);
+  const { container } = render(
+    <ClampedText resetKey="a">
+      <p>一段落目</p>
+      <p>二段落目</p>
+    </ClampedText>,
+  );
+  expect(container.querySelector('[data-clamped="true"]')).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "全文を開く" }));
+  expect(container.querySelector('[data-clamped="true"]')).toBeNull();
+  expect(container.querySelectorAll("p")).toHaveLength(2);
+});
