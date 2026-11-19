@@ -16,6 +16,7 @@ import type {
   TreeTask,
 } from "../api/types.gen.ts";
 import { type MermaidLike, setMermaidLoader } from "../board/loadMermaid.ts";
+import { bodies, show } from "../testing/detailFixture.ts";
 import { FakeEventSource, fixtures, installFakes } from "../testing/fakes.ts";
 
 // 課題の詳細の画面（#808）。完了条件の 1 つずつを、名前の AC-<番号> が直接確かめる。
@@ -83,110 +84,6 @@ const followup = (id: string, status: string, title: string): Followup => ({
   title,
   updated_at: "2026-11-01T00:00:00Z",
 });
-
-type Over = Partial<Omit<ShowCardResponse, "tree" | "challenge" | "card">> & {
-  tree?: Partial<ShowCardResponse["tree"]>;
-  challenge?: Partial<ShowCardResponse["challenge"]>;
-  actions?: string[];
-};
-
-function show(over: Over = {}): ShowCardResponse {
-  const { tree, challenge, actions, ...rest } = over;
-  const acts = actions ?? [];
-  return {
-    approvals: [],
-    card: {
-      context: null,
-      headline: null,
-      modifiers: [],
-      next_human_actions: acts,
-      slot_ids: [],
-      state: "in_progress",
-    },
-    challenge: {
-      context: null,
-      created_at: "2026-01-01T00:00:00Z",
-      dependencies: [],
-      dependents: [],
-      description: "説明の本文",
-      done_criteria: "完了条件の本文",
-      followup_of: null,
-      headline: null,
-      id: "C-1",
-      improvement: null,
-      priority: null,
-      reporter: "me",
-      status: "in_progress",
-      status_label: "着手中",
-      title: "請求の集計を直す",
-      updated_at: "2026-01-01T00:00:00Z",
-      urgency: null,
-      uses_integration: null,
-      version: 3,
-      ...challenge,
-    },
-    direct_completions: [],
-    followups: [],
-    holds: [],
-    operations: [],
-    pairs: [],
-    plans: [],
-    runs: [],
-    source_binding: null,
-    source_children: [],
-    stages: {
-      actual: null,
-      expected: null,
-      figure: null,
-      issues: null,
-      issues_answer: null,
-      non_goals: null,
-    },
-    tasks: [],
-    waiting: { prerequisites: [] },
-    tree: {
-      budget_usd: null,
-      children: [],
-      cost_usd: 0,
-      dependencies: [],
-      followups_open: 0,
-      id: "C-1",
-      next_human_actions: acts,
-      parent: null,
-      status: "in_progress",
-      status_label: "着手中",
-      tasks: [],
-      tasks_done: 0,
-      tasks_total: 0,
-      title: "請求の集計を直す",
-      updated_at: "2026-11-01T00:00:00.000Z",
-      uses_integration: null,
-      ...tree,
-    },
-    ...rest,
-  };
-}
-
-function bodies(detail: ShowCardResponse, extra: Record<string, unknown> = {}) {
-  const f = fixtures();
-  return {
-    ...f,
-    [`${BASE}/challenges`]: {
-      challenges: [
-        { ...detail.challenge, card: detail.card },
-        // 題名を引くための別の課題
-        {
-          ...detail.challenge,
-          id: "C-2",
-          title: "後から続く課題",
-          card: detail.card,
-        },
-      ],
-    },
-    [`${BASE}/challenges/C-1`]: detail,
-    ...extra,
-  };
-}
 
 async function open(
   detail: ShowCardResponse,
@@ -935,8 +832,9 @@ it("AC-413 #808: 長い計画の本文は、開いた直後は途中までが出
 it("#808: 「経緯」の切り替えは URL（…/history）と置き場を持つ", async () => {
   const { root } = await open(show(), {
     hash: "#/a/alpha/challenges/C-1/history",
+    extra: { [`${BASE}/log?challenge=C-1`]: { activities: [] } },
   });
-  expect(q(root).getByTestId("detail-history")).toBeInTheDocument();
+  expect(await q(root).findByTestId("detail-history")).toBeInTheDocument();
   expect(q(root).getByRole("link", { name: "経緯" })).toHaveAttribute(
     "aria-current",
     "page",

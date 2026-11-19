@@ -1145,6 +1145,42 @@ a.task-box:hover {
   border-bottom: 1px solid var(--board-border);
   overflow-wrap: anywhere;
 }
+.history {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.25rem 0 0.5rem;
+}
+.history-filters button[aria-pressed="true"] {
+  background: var(--board-chip-active-bg);
+  color: var(--board-chip-active-fg);
+}
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.history-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.6rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--board-border);
+  min-width: 0;
+}
+.history-list time {
+  white-space: nowrap;
+}
+.history-who {
+  font-weight: 600;
+}
+.history-quote {
+  flex-basis: 100%;
+}
 /* ---- タスクの詳細（#810） ---- */
 .task-detail {
   overflow-wrap: anywhere;

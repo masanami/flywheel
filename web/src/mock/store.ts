@@ -201,7 +201,7 @@ const run = (id: string, challenge_id: string, p: Partial<Run> = {}): Run => ({
   flywheel_version: null,
   id,
   judgment: null,
-  kind: "delegation",
+  kind: "delegate",
   max_budget_usd: 10,
   rate_limited: false,
   result: null,
@@ -535,6 +535,21 @@ export function seed(): Record<string, MockWorkspace> {
       // タスクの詳細の実行の記録（#810）。T-43 は委譲が 2 件（古い方は失敗・新しい方は実行中）、T-42 は別のタスクの実行。
       runs: [
         run("R-11", "C-28", { started_at: iso(20) }),
+        // 経緯の実行の行（#809）。判断点の実行と、タスクに付いた失敗の実行。
+        run("R-14", "C-28", {
+          kind: "judgment",
+          judgment: "J2",
+          started_at: iso(310),
+          result: "succeeded",
+          cost_usd: 0.42,
+        }),
+        run("R-18", "C-28", {
+          kind: "delegate",
+          task_id: "T-40",
+          started_at: iso(70),
+          result: "errored",
+          cost_usd: 3.1,
+        }),
         run("R-15", "C-28", {
           kind: "delegate",
           task_id: "T-43",
