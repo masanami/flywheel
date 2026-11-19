@@ -1,5 +1,6 @@
 import { api } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
+import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { NotFound } from "../shell/NotFound.tsx";
 import { CHALLENGE_VIEWS, type ChallengeView, hrefOf } from "../shell/route.ts";
@@ -8,8 +9,6 @@ import { Items } from "./Items.tsx";
 import { PlanView } from "./PlanView.tsx";
 import { TreeView } from "./TreeView.tsx";
 import { Waiting } from "./Waiting.tsx";
-
-const LOADING_TEXT = "読み込んでいます";
 
 const VIEW_LABELS: Record<ChallengeView, string> = {
   tree: "ツリー",

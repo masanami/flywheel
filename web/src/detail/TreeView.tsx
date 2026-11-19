@@ -1,6 +1,8 @@
 import type { ShowCardResponse, TreeRelative } from "../api/types.gen.ts";
 import { ClampedText } from "../board/ClampedText.tsx";
 import {
+  DEPENDENCY_SATISFIED_LABEL,
+  DEPENDENCY_UNMET_LABEL,
   FOLLOWUP_SOURCE_LABELS,
   FOLLOWUP_STATUS_LABELS,
   UPSTREAM_STATE_LABELS,
@@ -166,7 +168,9 @@ function Related({
                 <a href={challengeHref(agentName, d.challenge_id)}>{d.title}</a>{" "}
                 <span className="status-pill">{d.status_label}</span>{" "}
                 <span className={d.satisfied ? undefined : "dep-unmet"}>
-                  {d.satisfied ? "満たされている" : "未完了"}
+                  {d.satisfied
+                    ? DEPENDENCY_SATISFIED_LABEL
+                    : DEPENDENCY_UNMET_LABEL}
                 </span>
               </li>
             ))}

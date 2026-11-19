@@ -408,6 +408,46 @@ it("AC-336 #811: 「この計画を承認する」で、承認の口が approval
   expect(posts).toHaveLength(1);
   expect(posts[0]?.url).toBe("/api/v1/workspaces/alpha/challenges/C-1/approve");
   expect(posts[0]?.body).toBe('{"version":7}');
+  // CSRF の値を載せて送る（見直し前の AC-211）
+  expect(posts[0]?.headers["X-Flywheel-CSRF"]).toBe("tok");
+});
+
+it("#811: 画面が送る要求は、GET と承認の口の POST だけ（見直し前の詳細のテストから移した）", async () => {
+  const { requests } = await opened(summary(), {
+    extra: { [APPROVE]: {} },
+  });
+  fireEvent.click(await approveBtn());
+  await screen.findByText("承認しました。");
+  expect(requests.length).toBeGreaterThan(0);
+  for (const r of requests) {
+    if (r.method === "GET") continue;
+    expect(r.method).toBe("POST");
+    expect(r.url).toMatch(/\/challenges\/C-1\/approve$/);
+  }
+});
+
+it("#811: 一覧の状態の文字列が承認待ちでなくても、要約が計画の承認を返せばボタンが出る（見直し前の AC-209）", async () => {
+  await opened(summary(), {
+    extra: {
+      "/api/v1/workspaces/alpha/challenges": {
+        challenges: [
+          {
+            id: "C-1",
+            title: "通知の再送",
+            status: "in_progress",
+            card: {
+              context: null,
+              headline: null,
+              modifiers: [],
+              next_human_actions: ["approve_plan"],
+              state: "in_progress",
+            },
+          },
+        ],
+      },
+    },
+  });
+  expect(await approveBtn()).toBeEnabled();
 });
 
 async function approved(o: Opts = {}) {
@@ -567,17 +607,24 @@ it("AC-412 #811: 論点の decision の **太字** が、強調の要素にな�
   expect(strong?.textContent).toBe("大事");
 });
 
-it("#811: 403 では再読み込みを促し、再送しない", async () => {
-  const { requests } = await opened(summary(), {
-    extra: {
-      [APPROVE]: () =>
-        json(403, { error: { code: "forbidden_origin", message: "拒否" } }),
-    },
-  });
-  fireEvent.click(await approveBtn());
-  await screen.findByText(/ページを再読み込みして/);
-  expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
-});
+it.each([
+  ["403 forbidden_origin", 403, "forbidden_origin"],
+  ["403 だけ", 403, "something"],
+  ["forbidden_origin だけ", 400, "forbidden_origin"],
+])(
+  "#811: 403・forbidden_origin（%s）では再読み込みを促し、再送しない",
+  async (_n, status, code) => {
+    const { requests } = await opened(summary(), {
+      extra: {
+        [APPROVE]: () => json(status, { error: { code, message: "拒否" } }),
+      },
+    });
+    fireEvent.click(await approveBtn());
+    await screen.findByText(/ページを再読み込みして/);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
+  },
+);
 
 it("#811: 問いが 0 件でも、論点の題名と decision は出る", async () => {
   await opened(withTopics([topic({ title: "問い無しの論点", questions: [] })]));

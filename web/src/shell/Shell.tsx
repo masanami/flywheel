@@ -93,8 +93,6 @@ function AgentBody({
   agentName: string;
   go: (r: Route, opts?: { replace?: boolean }) => void;
 }) {
-  const data = live.data[agentName];
-
   switch (route.kind) {
     case "agent":
       switch (route.screen) {

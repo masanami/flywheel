@@ -112,6 +112,10 @@ export const MARK_LABELS: Record<MarkKind, string> = {
   approved_operation: "承認済みの操作が未実行",
 };
 
+// 前提の課題の充足の表示。値は API の satisfied をそのまま写す（画面では導かない）。
+export const DEPENDENCY_SATISFIED_LABEL = "満たされている";
+export const DEPENDENCY_UNMET_LABEL = "未完了";
+
 export const NO_ACTION_LABEL = "なし（エージェントが進める）";
 export const NO_PRIORITY_LABEL = "優先度なし";
 
@@ -244,7 +248,6 @@ export const FOLLOWUP_SOURCE_LABELS: Record<string, string> = {
   learn: "学び",
 };
 
-export const NO_WAITING_TEXT = "あなたを待っているものはありません。";
 // 種類が親が直接行うの保留が開いているときの表示（オーナーが答える問いではない）。
 export const PARENT_DIRECT_HOLD_NOTE =
   "親のエージェントが直接行う保留（オーナーが答える問いではありません）";

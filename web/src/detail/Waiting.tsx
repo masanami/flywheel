@@ -2,14 +2,14 @@ import type { ShowCardResponse } from "../api/types.gen.ts";
 import { ApprovalGuide } from "../board/ApprovalGuide.tsx";
 import { ApprovalPanel } from "../board/ApprovalPanel.tsx";
 import { ClampedText } from "../board/ClampedText.tsx";
-import {
-  HOLD_KIND_PARENT_DIRECT,
-  NO_WAITING_TEXT,
-  PARENT_DIRECT_HOLD_NOTE,
-} from "../labels.ts";
+import { HOLD_KIND_PARENT_DIRECT, PARENT_DIRECT_HOLD_NOTE } from "../labels.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { hrefOf } from "../shell/route.ts";
-import { WAITING_LABELS, waitingKindsOfActions } from "../shell/waiting.ts";
+import {
+  NO_WAITING_TEXT,
+  WAITING_LABELS,
+  waitingKindsOfActions,
+} from "../shell/waiting.ts";
 
 // 種類の語は課題の画面と同じ（shell/waiting.ts）。知らないコードは生のコードを出す。
 const waitingLabel = (a: string): string => {

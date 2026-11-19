@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client.ts";
 import type { TreeChallenge } from "../api/types.gen.ts";
 import {
+  DEPENDENCY_UNMET_LABEL,
   LEGEND_EDGE_HINT,
   PHASE_LEGEND_LABELS,
   PHASE_LEGEND_ORDER,
@@ -165,7 +166,7 @@ function ChallengeFrame({
               </a>{" "}
               <span className="status-pill">{d.status_label}</span>
               {d.satisfied ? null : (
-                <span className="dep-unmet"> 未完了</span>
+                <span className="dep-unmet"> {DEPENDENCY_UNMET_LABEL}</span>
               )}{" "}
             </span>
           ))}
