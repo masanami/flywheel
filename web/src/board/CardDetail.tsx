@@ -13,6 +13,7 @@ import {
   label,
 } from "../labels.ts";
 import { RefreshKeyContext } from "../nav.tsx";
+import { hrefOf } from "../shell/route.ts";
 import { ApprovalGuide } from "./ApprovalGuide.tsx";
 import { ApprovalPanel, approvalKindOf } from "./ApprovalPanel.tsx";
 import { CardFields } from "./CardFields.tsx";
@@ -200,12 +201,23 @@ export function CardDetail({
         <DetailSections l={loadState.loaded} />
       )}
 
-      {approvalKind && (
+      {approvalKind === "plan" && (
+        <p data-testid="plan-approval-link">
+          <a
+            href={hrefOf({
+              kind: "approve_plan",
+              name: agentName,
+              id: challenge.id,
+            })}
+          >
+            計画の承認の画面を開く
+          </a>
+        </p>
+      )}
+      {approvalKind === "completion" && (
         <ApprovalPanel
-          key={approvalKind}
           workspace={agentName}
           challengeId={challenge.id}
-          kind={approvalKind}
           onApproved={() => setLocalReload((n) => n + 1)}
         />
       )}

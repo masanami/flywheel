@@ -3,13 +3,7 @@ import { api } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
 import type { ApprovalSummary } from "../api/types.gen.ts";
 import { DirectCompletionView } from "./DirectCompletionView.tsx";
-import {
-  ExpectedView,
-  IssuesAnswerView,
-  IssuesView,
-  NonGoalsView,
-  PairsView,
-} from "./StagesDetail.tsx";
+import { PairsView } from "./StagesDetail.tsx";
 
 // 承認のボタンを出すコード。課題の状態の文字列では絞らない。
 export const APPROVE_PLAN = "approve_plan";
@@ -40,12 +34,10 @@ type Phase =
 export function ApprovalPanel({
   workspace,
   challengeId,
-  kind,
   onApproved,
 }: {
   workspace: string;
   challengeId: string;
-  kind: "plan" | "completion";
   onApproved: () => void;
 }) {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
@@ -109,11 +101,8 @@ export function ApprovalPanel({
     }
   };
 
-  // ラベルは ① が返した種類（サーバが現在の状態から決めたもの）に合わせる。読み込み前は prop の種類。
-  const shown =
-    phase.kind === "ready" || phase.kind === "done" ? phase.summary.kind : kind;
-  const buttonLabel =
-    shown === "plan" ? "計画を承認する" : "完了を承認する（本番反映は保留）";
+  // 完了の承認だけを扱う（計画の承認は plan-approval/ の画面）。
+  const buttonLabel = "完了を承認する（本番反映は保留）";
 
   return (
     <section
@@ -121,7 +110,7 @@ export function ApprovalPanel({
       className="approval-panel"
       data-testid="approval-panel"
     >
-      <h3>{shown === "plan" ? "計画の承認" : "完了の承認"}</h3>
+      <h3>完了の承認</h3>
       {phase.kind === "loading" && <p>承認の要約を読み込み中...</p>}
       {phase.kind === "error" && (
         <p className="approval-control-error" role="alert">
@@ -131,7 +120,12 @@ export function ApprovalPanel({
       {(phase.kind === "ready" || phase.kind === "done") && (
         <Summary summary={phase.summary} />
       )}
-      {phase.kind === "ready" && (
+      {phase.kind === "ready" && phase.summary.kind !== "completion" && (
+        <p role="alert">
+          この課題は、完了の承認待ちではありません。課題の画面を開き直してください。
+        </p>
+      )}
+      {phase.kind === "ready" && phase.summary.kind === "completion" && (
         <div className="approval-control">
           <button
             type="button"
@@ -164,8 +158,6 @@ function messageOf(e: unknown): string {
 
 // ① の要約。完了では、同時には承認されない不可逆操作・release の PR の head・保留のまま残ることを示す。
 function Summary({ summary }: { summary: ApprovalSummary }) {
-  const completion = summary.kind === "completion";
-  const { issues, issues_answer, expected, non_goals } = summary.stages;
   return (
     <div className="approval-summary" data-testid="approval-summary">
       <p>
@@ -177,26 +169,10 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           <p className="card-detail-multiline">{summary.done_criteria}</p>
         </>
       )}
-      {completion && summary.direct_completion && (
+      {summary.direct_completion && (
         <DirectCompletionView completion={summary.direct_completion} showNote />
       )}
-      {summary.plan && (
-        <>
-          <h4>承認する計画（v{summary.plan.version}）</h4>
-          <pre style={{ whiteSpace: "pre-wrap" }}>{summary.plan.body}</pre>
-        </>
-      )}
-      {!completion && (
-        <div data-testid="approval-stages">
-          {issues !== null && <IssuesView issues={issues} />}
-          {issues_answer !== null && (
-            <IssuesAnswerView answer={issues_answer} />
-          )}
-          {expected !== null && <ExpectedView expected={expected} />}
-          {non_goals !== null && <NonGoalsView nonGoals={non_goals} />}
-        </div>
-      )}
-      {completion && summary.conditions_after_release.length > 0 && (
+      {summary.conditions_after_release.length > 0 && (
         <div data-testid="approval-conditions-after-release">
           <h4>{summary.conditions_after_release_heading}</h4>
           <ul>
@@ -206,17 +182,17 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           </ul>
         </div>
       )}
-      {completion && summary.mergeability_note !== "" && (
+      {summary.mergeability_note !== "" && (
         <p data-testid="approval-mergeability">
           PR のマージ可否: {summary.mergeability_note}
         </p>
       )}
-      {completion && summary.pairs.length > 0 && (
+      {summary.pairs.length > 0 && (
         <div data-testid="approval-pairs">
           <PairsView pairs={summary.pairs} />
         </div>
       )}
-      {completion && (
+      {
         <>
           <h4>同時には承認されない不可逆操作</h4>
           {summary.other_pending_operations.length === 0 ? (
@@ -246,7 +222,7 @@ function Summary({ summary }: { summary: ApprovalSummary }) {
           )}
           <p data-testid="release-held">{HELD_NOTE}</p>
         </>
-      )}
+      }
     </div>
   );
 }

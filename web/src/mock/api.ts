@@ -18,6 +18,7 @@ import type {
   WorkspaceList,
 } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
+import { RICH_PLANS } from "./plan.ts";
 import {
   type MockChallenge,
   type MockStore,
@@ -295,6 +296,7 @@ export function createMockApi(
                   tasks: [],
                   topics: [],
                   uses_integration: null,
+                  ...RICH_PLANS[`${name}/${id}`],
                   version: plan.version,
                 }
               : null,
