@@ -63,8 +63,11 @@ export function Waiting({
             {a === "approve_plan" ? (
               <>
                 {" "}
-                <a href={hrefOf({ kind: "approve_plan", name: agentName, id })}>
-                  計画の承認の画面へ
+                <a
+                  href={hrefOf({ kind: "approve_plan", name: agentName, id })}
+                  data-testid="plan-approval-link"
+                >
+                  計画の承認の画面を開く
                 </a>
               </>
             ) : null}
@@ -72,7 +75,6 @@ export function Waiting({
               <ApprovalPanel
                 workspace={agentName}
                 challengeId={id}
-                kind="completion"
                 onApproved={onApproved}
               />
             ) : null}

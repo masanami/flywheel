@@ -2,7 +2,10 @@ import type { ReactNode } from "react";
 import { api } from "../api/client.ts";
 import { ChallengesScreen } from "../challenges/ChallengesScreen.tsx";
 import { ChallengeDetail } from "../detail/ChallengeDetail.tsx";
+import { FollowupsScreen } from "../followups/FollowupsScreen.tsx";
 import type { LiveState } from "../live/useLive.ts";
+import { NowScreen } from "../now/NowScreen.tsx";
+import { PlanApprovalScreen } from "../plan-approval/PlanApprovalScreen.tsx";
 import { AgentRail } from "./AgentRail.tsx";
 import { CycleStartButton } from "./CycleStartButton.tsx";
 import { NotFound } from "./NotFound.tsx";
@@ -21,7 +24,7 @@ export const LOADING_TEXT = "読み込んでいます";
 
 // 画面の枠組み: 左の列（エージェント）・上の帯・本文。右の対話の欄は作らない。
 export function Shell({ live }: { live: LiveState }) {
-  const [route] = useHashRoute();
+  const [route, go] = useHashRoute();
   const agents = live.workspaces;
   const first = agents[0];
 
@@ -59,7 +62,9 @@ export function Shell({ live }: { live: LiveState }) {
       </p>
     );
   } else {
-    body = <AgentBody live={live} route={current} agentName={agent.name} />;
+    body = (
+      <AgentBody live={live} route={current} agentName={agent.name} go={go} />
+    );
   }
 
   return (
@@ -85,10 +90,12 @@ function AgentBody({
   live,
   route,
   agentName,
+  go,
 }: {
   live: LiveState;
   route: Exclude<Route, { kind: "all" } | { kind: "unknown" }>;
   agentName: string;
+  go: (r: Route, opts?: { replace?: boolean }) => void;
 }) {
   const data = live.data[agentName];
   const total = data?.status?.cycle_work.total ?? 0;
@@ -99,22 +106,18 @@ function AgentBody({
       switch (route.screen) {
         case "now":
           return (
-            <section aria-labelledby="screen-title">
-              <h2 id="screen-title">いま進められること</h2>
-              <CycleStartButton
-                workspace={agentName}
-                total={total}
-                cycleState={cycleState}
-              />
-            </section>
+            <NowScreen key={agentName} live={live} agentName={agentName} />
           );
         case "challenges":
           return <ChallengesScreen live={live} agentName={agentName} />;
         case "followups":
           return (
-            <section aria-labelledby="screen-title">
-              <h2 id="screen-title">フォローアップ</h2>
-            </section>
+            <FollowupsScreen
+              live={live}
+              agentName={agentName}
+              query={route.query}
+              onNavigate={go}
+            />
           );
         case "cycle":
           return (
@@ -144,9 +147,15 @@ function AgentBody({
     case "approve_plan":
       return (
         <ChallengeGate live={live} agentName={agentName} id={route.id}>
-          <section aria-labelledby="screen-title">
-            <h2 id="screen-title">計画の承認</h2>
-          </section>
+          <PlanApprovalScreen
+            key={`${agentName}/${route.id}`}
+            live={live}
+            agentName={agentName}
+            id={route.id}
+            workspacePath={
+              live.workspaces.find((w) => w.name === agentName)?.path ?? ""
+            }
+          />
         </ChallengeGate>
       );
     case "task":

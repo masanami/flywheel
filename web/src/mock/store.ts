@@ -8,9 +8,11 @@ import type {
   Challenge,
   ChallengeCard,
   CycleStatus,
+  CycleWork,
   DirectCompletion,
   GraphResponse,
   Hold,
+  Ingestable,
   Operation,
   PlanDetail,
   Run,
@@ -774,6 +776,70 @@ export const toCard = (m: MockChallenge): ChallengeCard => ({
   card: cardOf(m),
 });
 
+// 取り込めるものの偽のデータ（`ingestable=true` を付けた問い合わせにだけ返す。alpha だけが持つ）。
+// 子のある親・既存の課題の下に入る子・単独の 3 件。
+export function ingestableOf(name: string): Ingestable {
+  if (name !== "alpha") return { error: null, items: [] };
+  const url = (n: number) => `https://example.invalid/issues/${n}`;
+  const ext = (n: number) => `example/repo#${n}`;
+  return {
+    error: null,
+    items: [
+      {
+        children: [
+          {
+            external_key: ext(902),
+            number: 902,
+            parent_external_key: ext(901),
+            title: "取り込める例: 書き出しの期間の指定を足す",
+            url: url(902),
+          },
+          {
+            external_key: ext(903),
+            number: 903,
+            parent_external_key: ext(901),
+            title: "取り込める例: 書き出しの形式を選べるようにする",
+            url: url(903),
+          },
+        ],
+        external_key: ext(901),
+        number: 901,
+        parent_challenge_id: null,
+        parent_external_key: null,
+        repo: "example/repo",
+        title: "取り込める例: 記録の書き出しを期間で絞れるようにする",
+        url: url(901),
+      },
+      {
+        children: [],
+        external_key: ext(904),
+        number: 904,
+        parent_challenge_id: "C-2",
+        parent_external_key: null,
+        repo: "example/repo",
+        title: "取り込める例: 検索の並びを選べるようにする",
+        url: url(904),
+      },
+    ],
+  };
+}
+
+// サイクルを回すと進むものの偽の数え方（本物は core が数える）。分類待ち・計画待ち・検証待ちの課題を段ごとに数える。
+function cycleWorkOf(items: MockChallenge[]): CycleWork {
+  const n = (s: string) => items.filter((m) => m.c.status === s).length;
+  const stages = {
+    classify: n("unclassified"),
+    cleanup: 0,
+    improve: 0,
+    learn: 0,
+    plan: n("classified"),
+    release: 0,
+    run: 0,
+    verify: n("verifying"),
+  };
+  return { stages, total: Object.values(stages).reduce((a, b) => a + b, 0) };
+}
+
 export function statusOf(w: MockWorkspace): StatusResponse {
   const items = w.items;
   const parentAgent = items.filter(isParentAgent);
@@ -797,19 +863,7 @@ export function statusOf(w: MockWorkspace): StatusResponse {
     },
     approved: { operations: ops("approved") },
     binary_commit: "unknown",
-    cycle_work: {
-      stages: {
-        classify: 0,
-        cleanup: 0,
-        improve: 0,
-        learn: 0,
-        plan: 0,
-        release: 0,
-        run: 0,
-        verify: 0,
-      },
-      total: 0,
-    },
+    cycle_work: cycleWorkOf(items),
     followups: { open: 0 },
     ingestable: null,
     needs_human: {

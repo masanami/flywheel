@@ -177,21 +177,19 @@ const btn = (m: HTMLElement, name: string | RegExp) =>
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status });
 
-it("AC-207 #808: approve_plan を持つ課題の詳細は、計画の承認の画面へのリンクを出し、① も承認のボタンも出さない", async () => {
-  const { requests } = setup("awaiting_plan_approval", ["approve_plan"], {
-    [APPROVAL]: summary({ kind: "plan" }),
-  });
+it("AC-207: approve_plan を持つ課題の詳細には、承認のボタンではなく計画の承認の画面へのリンクが出る（#811）", async () => {
+  const { requests } = setup("awaiting_plan_approval", ["approve_plan"]);
   const m = await open();
   const link = await within(m).findByRole("link", {
-    name: "計画の承認の画面へ",
+    name: "計画の承認の画面を開く",
+    hidden: true,
   });
-  expect(link.getAttribute("href")).toBe(
-    "#/a/alpha/challenges/C-1/approve-plan",
-  );
+  expect(link).toHaveAttribute("href", "#/a/alpha/challenges/C-1/approve-plan");
   expect(
     within(m).queryByRole("button", { name: /承認/, hidden: true }),
   ).toBeNull();
-  expect(requests.some((r) => r.url.endsWith("/approval"))).toBe(false);
+  // 詳細を開いただけでは承認の要約を読まない（読むのは承認の画面）
+  expect(requests.some((r) => r.url === APPROVAL)).toBe(false);
 });
 
 it("AC-208: approve_completion を持つ課題の詳細に完了の承認のボタンが出る", async () => {
@@ -276,7 +274,7 @@ it("AC-212: conflict なら ① を読み直して最新の要約を示し、自
       200,
       summary({
         version: reads === 1 ? 3 : 4,
-        done_criteria: reads === 1 ? "古い完了条件" : "新しい完了条件",
+        done_criteria: reads === 1 ? "古い条件" : "新しい条件",
       }),
     );
   };
@@ -308,7 +306,7 @@ it("AC-212: conflict なら ① を読み直して最新の要約を示し、自
     {},
     { timeout: 2000 },
   );
-  await within(m).findByText("新しい完了条件");
+  await within(m).findByText("新しい条件");
   expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
   fireEvent.click(await btn(m, /完了を承認する/));
   await within(m).findByText("承認しました。");
@@ -420,9 +418,7 @@ const guideText = async (m: HTMLElement) =>
   ).textContent ?? "";
 
 it("AC-214: approve_plan には reject の端末のコマンドと対話の案内", async () => {
-  setup("awaiting_plan_approval", ["approve_plan"], {
-    [APPROVAL]: summary({ kind: "plan" }),
-  });
+  setup("awaiting_plan_approval", ["approve_plan"]);
   const t = await guideText(await open());
   expect(t).toContain(
     "flywheel reject C-1 --workspace '/w/alpha' --reason <理由>",
@@ -469,7 +465,7 @@ it("AC-217: 案内の文言の定数は空でなく、5 つの操作それぞれ
       state,
       [code],
       state === "awaiting_plan_approval"
-        ? { [APPROVAL]: summary({ kind: "plan" }) }
+        ? {}
         : state === "awaiting_completion_approval"
           ? { [APPROVAL]: summary() }
           : {},
@@ -708,4 +704,15 @@ describe.skip("計画の承認の動き（旧詳細の形。#811 が移す）", 
       expect(r.url).toMatch(/\/challenges\/C-1\/approve$/);
     }
   });
+});
+
+it("#811: 完了の承認のパネルは、要約が plan を返したら承認のボタンを出さない", async () => {
+  setup("awaiting_completion_approval", ["approve_completion"], {
+    [APPROVAL]: summary({ kind: "plan" }),
+  });
+  const m = await open();
+  await within(m).findByText(/完了の承認待ちではありません/);
+  expect(
+    within(m).queryByRole("button", { name: /承認する/, hidden: true }),
+  ).toBeNull();
 });

@@ -36,6 +36,32 @@ func TestUIGuidanceTemplatesExistInCLI(t *testing.T) {
 	if len(g.Templates) == 0 {
 		t.Fatal("雛形が 1 つも無い")
 	}
+	// AC-375 #812: S2c で足す案内（ingest・answer の --choice・followup done/drop/promote・cycle）が雛形に在る。
+	need := map[string]string{
+		"ingest":           "ingest",
+		"answer-choice":    "answer --choice",
+		"followup-done":    "followup done --note",
+		"followup-drop":    "followup drop --reason",
+		"followup-promote": "followup promote",
+		"cycle":            "cycle",
+	}
+	for _, tpl := range g.Templates {
+		if want, ok := need[tpl.ID]; ok {
+			got := strings.Join(tpl.Command, " ")
+			for _, f := range tpl.Flags {
+				if f == "choice" || f == "note" || f == "reason" {
+					got += " --" + f
+				}
+			}
+			if got != want {
+				t.Errorf("%s: コマンドとフラグ %q が期待 %q と違う", tpl.ID, got, want)
+			}
+			delete(need, tpl.ID)
+		}
+	}
+	for id := range need {
+		t.Errorf("S2c の案内 %s が guidance.json に無い", id)
+	}
 	flagRe := regexp.MustCompile(`--[a-z][a-z-]*`)
 	for _, tpl := range g.Templates {
 		// 出す場面は、課題の操作（actions）か画面の名前（context）のどちらか一方だけで書く。
@@ -83,6 +109,43 @@ func TestUIGuidanceTemplatesExistInCLI(t *testing.T) {
 		}
 		if !strings.HasPrefix(tpl.Template, "flywheel "+strings.Join(tpl.Command, " ")+" ") {
 			t.Errorf("%s: 雛形がサブコマンドで始まらない: %q", tpl.ID, tpl.Template)
+		}
+	}
+}
+
+// TestUIGuidanceHasNowScreenContexts は「いま進められること」の画面が出す端末のコマンドの案内
+// （取り込み・サイクル・スロットの片付け）が、画面の名前（context）つきで雛形にあることを確かめる（Issue #805）。
+func TestUIGuidanceHasNowScreenContexts(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "web", "src", "guidance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g struct {
+		Templates []struct {
+			When struct {
+				Context string `json:"context"`
+			} `json:"when"`
+			Template string `json:"template"`
+		} `json:"templates"`
+	}
+	if err := json.Unmarshal(raw, &g); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"ingest": "flywheel ingest ",
+		"cycle":  "flywheel cycle ",
+		"slot":   "flywheel slot clear ",
+	}
+	for ctx, prefix := range want {
+		found := false
+		for _, tpl := range g.Templates {
+			if tpl.When.Context == ctx && strings.HasPrefix(tpl.Template, prefix) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("context %q の案内（%q で始まる雛形）が無い", ctx, prefix)
 		}
 	}
 }

@@ -405,7 +405,7 @@ it("AC-233 #808: approve_plan がある課題の詳細の、あなたを待っ�
   const { root } = await open(show({ actions: ["approve_plan"] }));
   const w = q(root).getByTestId("detail-waiting");
   expect(
-    within(w).getByRole("link", { name: "計画の承認の画面へ" }),
+    within(w).getByRole("link", { name: "計画の承認の画面を開く" }),
   ).toHaveAttribute("href", "#/a/alpha/challenges/C-1/approve-plan");
 });
 
