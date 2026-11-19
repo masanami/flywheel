@@ -921,7 +921,8 @@ a.task-box:hover {
   background: var(--board-chip-active-bg);
   color: var(--board-chip-active-fg);
 }
-.plan-meta {
+.detail-plan-meta {
+  overflow-wrap: anywhere;
   margin: 0.25rem 0;
   color: var(--board-muted-fg);
   font-size: 0.8rem;

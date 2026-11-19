@@ -47,7 +47,7 @@ export function PlanView({ show }: { show: ShowCardResponse }) {
               ))}
             </div>
           ) : null}
-          <p className="plan-meta">
+          <p className="detail-plan-meta">
             v{plan.version}（{plan.created_at}）
           </p>
           <Body text={plan.body} lines={PLAN_LINES} />
