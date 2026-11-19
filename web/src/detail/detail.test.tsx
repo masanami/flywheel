@@ -484,6 +484,39 @@ it("AC-236 #808: answer_question がある課題の詳細に、その保留の�
   expect(within(w).queryByText("答え済みの問い")).toBeNull();
 });
 
+it("#808（旧詳細の移し）: 取り下げで回答なしに閉じた保留は、あなたを待っているものに出ない", async () => {
+  const { root } = await open(
+    show({
+      actions: ["answer_question"],
+      holds: [
+        hold({ question: "開いた問い" }),
+        hold({ question: "閉じた問い", closed_at: "2026-02-03T00:00:00Z" }),
+      ],
+    }),
+  );
+  const w = q(root).getByTestId("detail-waiting");
+  expect(within(w).getByText("開いた問い")).toBeInTheDocument();
+  expect(within(w).queryByText("閉じた問い")).toBeNull();
+});
+
+it("#808（旧詳細の移し）: 外部由来の文字列（題名・説明・計画の本文・保留の問い）は文字として出て、script・img 要素と onerror 属性ができない", async () => {
+  const EVIL = `${XSS}<img src=x onerror=alert(1)>`;
+  const { root } = await open(
+    show({
+      actions: ["answer_question"],
+      challenge: { title: EVIL, description: EVIL },
+      holds: [hold({ question: EVIL })],
+      plans: [plan(1, EVIL)],
+    }),
+    { hash: PLAN_HASH },
+  );
+  await q(root).findByTestId("plan-body");
+  expect(document.body.textContent).toContain("onerror=alert(1)");
+  expect(document.body.querySelector("script")).toBeNull();
+  expect(document.body.querySelector("img")).toBeNull();
+  expect(document.body.querySelector("[onerror]")).toBeNull();
+});
+
 it("AC-237 #808: 保留がタスクに付いているとき、そのタスクの題名と、タスクの詳細へのリンクが出る", async () => {
   const { root } = await open(
     show({

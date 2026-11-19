@@ -7,7 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { ApprovalSummary } from "./api/types.gen.ts";
 import { CONVERSATION_NOTE } from "./guidance.ts";
@@ -496,3 +496,216 @@ it.each(["triage", "review_discrepancy", "clear_slot"])(
     expect(within(m).queryByTestId("conversation-note")).toBeNull();
   },
 );
+
+// ---------------------------------------------------------------------------
+// 計画の承認の動き（見直し前の詳細のボタンの形のまま残す。describe.skip）。
+// 課題の詳細から計画の承認のボタンを外したので（計画の承認は承認の画面が受け持つ。#811）、
+// ここは今は動かさない。#811 が計画の承認の画面のテストへ移すときの原本として消さずに置く。
+// ---------------------------------------------------------------------------
+describe.skip("計画の承認の動き（旧詳細の形。#811 が移す）", () => {
+  it("AC-207: approve_plan を持つ課題の詳細に、開いたとき ① を呼んで計画の要約と承認のボタンが出る", async () => {
+    const { requests } = setup("awaiting_plan_approval", ["approve_plan"], {
+      [APPROVAL]: summary({
+        kind: "plan",
+        plan: {
+          body: "承認する計画",
+          budget_usd: null,
+          summary: null,
+          tasks: [],
+          topics: [],
+          uses_integration: null,
+          version: 2,
+        },
+        releases: [],
+        other_pending_operations: [],
+        release_held: false,
+      }),
+    });
+    const m = await open();
+    await btn(m, "計画を承認する");
+    expect(within(m).getByText("承認する計画")).toBeInTheDocument();
+    expect(requests.some((r) => r.url === APPROVAL && r.method === "GET")).toBe(
+      true,
+    );
+  });
+
+  it("AC-209: 承認のコード approve_plan があれば状態の文字列が何でもボタンが出る", async () => {
+    setup("in_progress", ["approve_plan"], {
+      [APPROVAL]: summary({ kind: "plan", plan: null }),
+    });
+    const m = await open();
+    await btn(m, "計画を承認する");
+  });
+
+  it("AC-211: ボタンは開いたときの版を CSRF つきで ② に送り、承認後は承認済みを示す", async () => {
+    const { requests } = setup("awaiting_plan_approval", ["approve_plan"], {
+      [APPROVAL]: summary({ kind: "plan", version: 7 }),
+      [APPROVE]: () => json(200, {}),
+    });
+    const m = await open();
+    fireEvent.click(await btn(m, "計画を承認する"));
+    await within(m).findByText("承認しました。", {}, { timeout: 2000 });
+    const posts = requests.filter((r) => r.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.url).toBe(
+      "/api/v1/workspaces/alpha/challenges/C-1/approve",
+    );
+    expect(posts[0]?.body).toBe('{"version":7}');
+    expect(posts[0]?.headers["X-Flywheel-CSRF"]).toBe("tok-123");
+  });
+
+  it("AC-212: conflict なら ① を読み直して最新の要約を示し、自動で再送せず、押し直すと新しい版を送る", async () => {
+    let call = 0;
+    const responder: FakeResponder = () => {
+      call++;
+      return call === 1
+        ? json(409, { error: { code: "conflict", message: "版が違う" } })
+        : json(200, {});
+    };
+    let reads = 0;
+    const summaryResponder: FakeResponder = () => {
+      reads++;
+      return json(
+        200,
+        summary({
+          kind: "plan",
+          version: reads === 1 ? 3 : 4,
+          plan: {
+            body: reads === 1 ? "古い計画" : "新しい計画",
+            budget_usd: null,
+            summary: null,
+            tasks: [],
+            topics: [],
+            uses_integration: null,
+            version: 1,
+          },
+        }),
+      );
+    };
+    const { requests } = setup("awaiting_plan_approval", ["approve_plan"]);
+    // setup の後から応答を差し込む（GET の応答も関数で返す）
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const method = (init?.method ?? "GET").toUpperCase();
+        const rec: Recorded = {
+          url: String(input),
+          method,
+          headers: {},
+          body: typeof init?.body === "string" ? init.body : null,
+        };
+        requests.push(rec);
+        if (rec.url === APPROVAL) return summaryResponder(rec);
+        if (method === "POST") return responder(rec);
+        const b = (planFixturesFor() as Record<string, unknown>)[rec.url];
+        return b === undefined ? json(404, {}) : json(200, b);
+      }),
+    );
+    const m = await open();
+    fireEvent.click(await btn(m, "計画を承認する"));
+    await within(m).findByText(
+      /最新の要約を読み直しました/,
+      {},
+      { timeout: 2000 },
+    );
+    await within(m).findByText("新しい計画");
+    expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
+    fireEvent.click(await btn(m, "計画を承認する"));
+    await within(m).findByText("承認しました。");
+    const posts = requests.filter((r) => r.method === "POST");
+    expect(posts.map((p) => p.body)).toEqual([
+      '{"version":3}',
+      '{"version":4}',
+    ]);
+  });
+
+  // conflict のテストが GET の本文を引き直すための固定の本文。
+  function planFixturesFor(): Record<string, unknown> {
+    const f = fixtures();
+    const c = card("awaiting_plan_approval", ["approve_plan"]);
+    f["/api/v1/workspaces/alpha/challenges"] = {
+      challenges: [{ ...challenge("awaiting_plan_approval"), card: c }],
+    };
+    f["/api/v1/workspaces/alpha/challenges/C-1"] = {
+      approvals: [],
+      card: c,
+      challenge: challenge("awaiting_plan_approval"),
+      direct_completions: [],
+      holds: [],
+      operations: [],
+      plans: [],
+      runs: [],
+      pairs: [],
+      source_binding: null,
+      source_children: [],
+      stages: {
+        actual: null,
+        expected: null,
+        figure: null,
+        issues: null,
+        issues_answer: null,
+        non_goals: null,
+      },
+      waiting: { prerequisites: [] },
+      tree: {
+        budget_usd: null,
+        children: [],
+        cost_usd: 0,
+        dependencies: [],
+        followups_open: 0,
+        id: "C-1",
+        next_human_actions: [],
+        parent: null,
+        status: "in_progress",
+        status_label: "着手中",
+        tasks: [],
+        tasks_done: 0,
+        tasks_total: 0,
+        title: "t",
+        updated_at: "2026-11-01T00:00:00.000Z",
+        uses_integration: null,
+      },
+    };
+    f["/api/v1/workspaces/alpha/log?challenge=C-1"] = { activities: [] };
+    return f;
+  }
+
+  it.each([
+    ["403 forbidden_origin", 403, "forbidden_origin"],
+    ["403 だけ", 403, "something"],
+    ["forbidden_origin だけ", 400, "forbidden_origin"],
+  ])(
+    "403・forbidden_origin（%s）では再読み込みを促し、再送しない",
+    async (_n, status, code) => {
+      const { requests } = setup("awaiting_plan_approval", ["approve_plan"], {
+        [APPROVAL]: summary({ kind: "plan" }),
+        [APPROVE]: () => json(status, { error: { code, message: "拒否" } }),
+      });
+      const m = await open();
+      fireEvent.click(await btn(m, "計画を承認する"));
+      await within(m).findByText(
+        /ページを再読み込みして/,
+        {},
+        { timeout: 2000 },
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
+    },
+  );
+
+  it("UI が送る要求は GET と …/approve の POST だけ", async () => {
+    const { requests } = setup("awaiting_plan_approval", ["approve_plan"], {
+      [APPROVAL]: summary({ kind: "plan" }),
+      [APPROVE]: () => json(200, {}),
+    });
+    const m = await open();
+    fireEvent.click(await btn(m, "計画を承認する"));
+    await within(m).findByText("承認しました。");
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    for (const r of requests) {
+      if (r.method === "GET") continue;
+      expect(r.method).toBe("POST");
+      expect(r.url).toMatch(/\/challenges\/C-1\/approve$/);
+    }
+  });
+});

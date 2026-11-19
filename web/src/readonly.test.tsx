@@ -69,6 +69,16 @@ function destinations(agents: string[], challengeId?: string): Destination[] {
             expect(screen.queryByText(LOADING_TEXT)).not.toBeInTheDocument(),
           ),
       },
+      {
+        id: `${first}/challenge-history`,
+        hash: `${c}/history`,
+        wait: () => screen.findByTestId("challenge-detail"),
+      },
+      {
+        id: `${first}/challenge-plan`,
+        hash: `${c}/plan`,
+        wait: () => screen.findByTestId("challenge-detail"),
+      },
       // 課題の詳細は最後に開く（この後、詳細の中を操作する）。
       {
         id: `${first}/challenge`,
