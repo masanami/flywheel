@@ -67,14 +67,31 @@ func fakeExecutable(t *testing.T) (exe, rec string) {
 	return exe, rec
 }
 
+// testSignalWait は、合図か子の終了で結果が決まるテストが渡す待ち時間。本番の 3 秒（cycleSignalWait）を
+// そのまま使うと、検査を重ねて遅いときに、偽の子が終わる前に待ち時間が切れて「始まった」が返り、テストが
+// 落ちる（flywheel#825）。長い値にして、時計ではなく合図か子の終了で結果が決まるようにする。
+const testSignalWait = 2 * time.Minute
+
+// startCycleServer は、合図か子の終了で結果が決まる待ち時間（testSignalWait）で server を立てる。
 func startCycleServer(t *testing.T, exe, ws string) int {
+	t.Helper()
+	return startCycleServerWait(t, exe, ws, testSignalWait)
+}
+
+// startCycleServerWait は、合図を待つ時間を渡して server を立てる。
+func startCycleServerWait(t *testing.T, exe, ws string, signalWait time.Duration) int {
+	t.Helper()
+	return startCycleServerWith(t, ws, execLauncherWait(func() (string, error) { return exe, nil }, signalWait))
+}
+
+// startCycleServerWith は、起動の口を渡して server を立てる。
+func startCycleServerWith(t *testing.T, ws string, launch cycleLauncher) int {
 	t.Helper()
 	ln, err := Listen(0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := newServerWithLauncher(ln, []core.FleetWorkspace{{Name: "w", Path: ws}}, eventsConfig{},
-		execLauncher(func() (string, error) { return exe, nil }))
+	s := newServerWithLauncher(ln, []core.FleetWorkspace{{Name: "w", Path: ws}}, eventsConfig{}, launch)
 	errc := make(chan error, 1)
 	go func() { errc <- s.Serve() }()
 	t.Cleanup(func() {
@@ -147,7 +164,8 @@ func TestCyclePostRespondsWithoutWaitingForChild(t *testing.T) {
 	if code, body := apiPost(t, port, cyclePath, ""); code != 200 {
 		t.Fatalf("POST = %d %s", code, body)
 	}
-	if d := time.Since(start); d > 5*time.Second {
+	// 合図で返る（子の 60 秒の終了は待たない）。上限は、検査を重ねて遅いときでも合図までに十分な長さにする。
+	if d := time.Since(start); d > 30*time.Second {
 		t.Errorf("応答に %v かかった", d)
 	}
 }
@@ -260,15 +278,27 @@ func TestCycleGetStates(t *testing.T) {
 	}
 }
 
-// scriptLauncherServer は script を実行ファイルとして POST を受ける server を立てる。
+// scriptLauncherServer は script を実行ファイルとして POST を受ける server を立てる（待ち時間は testSignalWait）。
 func scriptLauncherServer(t *testing.T, script string) (port int, ws string) {
 	t.Helper()
+	return scriptLauncherServerWait(t, script, testSignalWait)
+}
+
+// scriptLauncherServerWait は、合図を待つ時間を渡す版。
+func scriptLauncherServerWait(t *testing.T, script string, signalWait time.Duration) (port int, ws string) {
+	t.Helper()
 	ws = initWorkspaceWithWork(t)
+	return startCycleServerWait(t, scriptExecutable(t, script), ws, signalWait), ws
+}
+
+// scriptExecutable は script を偽の実行ファイルとして書き出す。
+func scriptExecutable(t *testing.T, script string) string {
+	t.Helper()
 	exe := filepath.Join(t.TempDir(), "fake-flywheel")
 	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return startCycleServer(t, exe, ws), ws
+	return exe
 }
 
 func TestCyclePostChildExitsBeforeSignalIsInternalError(t *testing.T) {
@@ -348,15 +378,36 @@ func TestCyclePostExitCode1StderrCases(t *testing.T) {
 	}
 }
 
-func TestCyclePostNoSignalNorExitReturnsStartedWithinFiveSeconds(t *testing.T) {
-	port, _ := scriptLauncherServer(t, "exec sleep 60\n")
+// 合図も終了も無い子（60 秒眠る）では、本番の口（execLauncher。待ち時間は 3 秒）は、3 秒待ってから、
+// 子の終了を待たずに started: true を返す。結果は時間の経過だけで決まる（子は合図も終了もしない）ので、
+// 検査を重ねて遅いときでも、下限は割らない。
+func TestCyclePostNoSignalNorExitReturnsStartedAfterThreeSeconds(t *testing.T) {
+	ws := initWorkspaceWithWork(t)
+	exe := scriptExecutable(t, "exec sleep 60\n")
+	port := startCycleServerWith(t, ws, execLauncher(func() (string, error) { return exe, nil }))
 	start := time.Now()
 	code, body := apiPost(t, port, cyclePath, "")
 	if code != 200 || strings.TrimSpace(body) != `{"started":true}` {
 		t.Fatalf("POST = %d %s", code, body)
 	}
-	if d := time.Since(start); d < 2500*time.Millisecond || d > 5*time.Second {
+	// 下限: 本番の待ち時間（3 秒）より前には返らない。上限: 子（60 秒眠る）の終了は待たない。
+	if d := time.Since(start); d < 2500*time.Millisecond || d > 30*time.Second {
 		t.Errorf("応答までの時間 = %v", d)
+	}
+}
+
+// 待ち時間を渡す口（execLauncherWait）は、渡した待ち時間のとおりに待つ。本番の 3 秒より長い値を渡して、
+// それより前に返らないことを確かめる（引数を見ずに 3 秒で返ると落ちる。下限だけなので、遅いときも落ちない）。
+func TestCyclePostNoSignalNorExitHonorsThePassedWait(t *testing.T) {
+	const wait = cycleSignalWait + 1500*time.Millisecond
+	port, _ := scriptLauncherServerWait(t, "exec sleep 60\n", wait)
+	start := time.Now()
+	code, body := apiPost(t, port, cyclePath, "")
+	if code != 200 || strings.TrimSpace(body) != `{"started":true}` {
+		t.Fatalf("POST = %d %s", code, body)
+	}
+	if d := time.Since(start); d < wait {
+		t.Errorf("待ち時間（%v）より前に返った: %v", wait, d)
 	}
 }
 

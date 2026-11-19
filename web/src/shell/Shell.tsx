@@ -1,26 +1,22 @@
 import type { ReactNode } from "react";
+import { AllScreen } from "../all/AllScreen.tsx";
 import { api } from "../api/client.ts";
 import { ChallengesScreen } from "../challenges/ChallengesScreen.tsx";
+import { CycleScreen } from "../cycle/CycleScreen.tsx";
 import { ChallengeDetail } from "../detail/ChallengeDetail.tsx";
 import { FollowupsScreen } from "../followups/FollowupsScreen.tsx";
+import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { NowScreen } from "../now/NowScreen.tsx";
 import { PlanApprovalScreen } from "../plan-approval/PlanApprovalScreen.tsx";
 import { AgentRail } from "./AgentRail.tsx";
-import { CycleStartButton } from "./CycleStartButton.tsx";
 import { NotFound } from "./NotFound.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { type Route, hrefOf, useHashRoute } from "./route.ts";
 import { useScreenData } from "./useScreenData.ts";
-import {
-  WAITING_KINDS,
-  WAITING_LABELS,
-  waitingCounts,
-  waitingTotal,
-} from "./waiting.ts";
 
 export const NO_AGENTS_TEXT = "エージェントがありません。";
-export const LOADING_TEXT = "読み込んでいます";
+export { LOADING_TEXT };
 
 // 画面の枠組み: 左の列（エージェント）・上の帯・本文。右の対話の欄は作らない。
 export function Shell({ live }: { live: LiveState }) {
@@ -98,8 +94,6 @@ function AgentBody({
   go: (r: Route, opts?: { replace?: boolean }) => void;
 }) {
   const data = live.data[agentName];
-  const total = data?.status?.cycle_work.total ?? 0;
-  const cycleState = data?.cycle?.state ?? "";
 
   switch (route.kind) {
     case "agent":
@@ -120,16 +114,7 @@ function AgentBody({
             />
           );
         case "cycle":
-          return (
-            <section aria-labelledby="screen-title">
-              <h2 id="screen-title">サイクル</h2>
-              <CycleStartButton
-                workspace={agentName}
-                total={total}
-                cycleState={cycleState}
-              />
-            </section>
-          );
+          return <CycleScreen live={live} agentName={agentName} />;
       }
       return null;
     case "challenge":
@@ -214,31 +199,6 @@ function TaskBody({
   return (
     <section aria-labelledby="screen-title">
       <h2 id="screen-title">タスクの詳細</h2>
-    </section>
-  );
-}
-
-// すべて: あなたを待っているものの横断。エージェントごとに種類と件数を出す。
-function AllScreen({ live }: { live: LiveState }) {
-  return (
-    <section aria-labelledby="screen-title">
-      <h2 id="screen-title">すべてのエージェント</h2>
-      <ul>
-        {live.workspaces.map((w) => {
-          const nh = live.needsHuman?.workspaces.find((x) => x.name === w.name);
-          const counts = nh ? waitingCounts(nh.needs_human) : null;
-          return (
-            <li key={w.name}>
-              <a href={homeOf(w.name)}>{w.name}</a>
-              {counts && waitingTotal(counts) > 0
-                ? ` ${WAITING_KINDS.filter((k) => counts[k] > 0)
-                    .map((k) => `${WAITING_LABELS[k]} ${counts[k]}`)
-                    .join("・")}`
-                : null}
-            </li>
-          );
-        })}
-      </ul>
     </section>
   );
 }
