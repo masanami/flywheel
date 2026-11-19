@@ -11,14 +11,18 @@
   "templates": [
     {
       "id": "reject",
-      "when": { "actions": ["approve_plan", "approve_completion"] },
+      "when": {
+        "actions": ["approve_plan", "approve_completion"]
+      },
       "command": ["reject"],
       "flags": ["workspace", "reason"],
       "template": "flywheel reject <C-ID> --workspace <パス> --reason <理由>"
     },
     {
       "id": "approve-with-release",
-      "when": { "actions": ["approve_completion"] },
+      "when": {
+        "actions": ["approve_completion"]
+      },
       "command": ["approve"],
       "flags": ["workspace"],
       "template": "flywheel approve <C-ID> --workspace <パス>",
@@ -26,24 +30,90 @@
     },
     {
       "id": "answer",
-      "when": { "actions": ["answer_question"] },
+      "when": {
+        "actions": ["answer_question"]
+      },
       "command": ["answer"],
       "flags": ["workspace", "answer"],
       "template": "flywheel answer <C-ID> --workspace <パス> --answer <回答>"
     },
     {
       "id": "approve-operation",
-      "when": { "actions": ["approve_operation"] },
+      "when": {
+        "actions": ["approve_operation"]
+      },
       "command": ["approve"],
       "flags": ["workspace"],
       "template": "flywheel approve <OP-ID> --workspace <パス>"
     },
     {
       "id": "budget",
-      "when": { "actions": ["increase_budget"] },
+      "when": {
+        "actions": ["increase_budget"]
+      },
       "command": ["budget"],
       "flags": ["workspace", "impl-usd"],
       "template": "flywheel budget <C-ID> --workspace <パス> --impl-usd <額>"
+    },
+    {
+      "id": "followup-done",
+      "when": {
+        "context": "followups"
+      },
+      "command": ["followup", "done"],
+      "flags": ["workspace", "note"],
+      "template": "flywheel followup done <F-ID> --workspace <パス> --note <確かめた結果>",
+      "note": "済みにします（確かめた結果を書きます）"
+    },
+    {
+      "id": "followup-drop",
+      "when": {
+        "context": "followups"
+      },
+      "command": ["followup", "drop"],
+      "flags": ["workspace", "reason"],
+      "template": "flywheel followup drop <F-ID> --workspace <パス> --reason <理由>",
+      "note": "捨てます（本人確認が要ります）"
+    },
+    {
+      "id": "followup-promote",
+      "when": {
+        "context": "followups"
+      },
+      "command": ["followup", "promote"],
+      "flags": ["workspace"],
+      "template": "flywheel followup promote <F-ID> --workspace <パス>",
+      "note": "課題に上げます（1 回に 1 件。本人確認が要ります）"
+    },
+    {
+      "id": "ingest",
+      "when": {
+        "context": "ingest"
+      },
+      "command": ["ingest"],
+      "flags": ["workspace"],
+      "template": "flywheel ingest <指定> --workspace <パス>",
+      "note": "上流の課題を、選んだものだけ取り込みます"
+    },
+    {
+      "id": "answer-choice",
+      "when": {
+        "context": "answer-choice"
+      },
+      "command": ["answer"],
+      "flags": ["workspace", "choice"],
+      "template": "flywheel answer <C-ID> --workspace <パス> --choice <選択肢の番号>",
+      "note": "計画の承認待ちの問いに、選択肢の番号で答えます"
+    },
+    {
+      "id": "cycle",
+      "when": {
+        "context": "cycle"
+      },
+      "command": ["cycle"],
+      "flags": ["workspace"],
+      "template": "flywheel cycle --workspace <パス>",
+      "note": "サイクルを端末から回します"
     }
   ]
 }

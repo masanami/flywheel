@@ -36,6 +36,32 @@ func TestUIGuidanceTemplatesExistInCLI(t *testing.T) {
 	if len(g.Templates) == 0 {
 		t.Fatal("雛形が 1 つも無い")
 	}
+	// AC-375 #812: S2c で足す案内（ingest・answer の --choice・followup done/drop/promote・cycle）が雛形に在る。
+	need := map[string]string{
+		"ingest":           "ingest",
+		"answer-choice":    "answer --choice",
+		"followup-done":    "followup done --note",
+		"followup-drop":    "followup drop --reason",
+		"followup-promote": "followup promote",
+		"cycle":            "cycle",
+	}
+	for _, tpl := range g.Templates {
+		if want, ok := need[tpl.ID]; ok {
+			got := strings.Join(tpl.Command, " ")
+			for _, f := range tpl.Flags {
+				if f == "choice" || f == "note" || f == "reason" {
+					got += " --" + f
+				}
+			}
+			if got != want {
+				t.Errorf("%s: コマンドとフラグ %q が期待 %q と違う", tpl.ID, got, want)
+			}
+			delete(need, tpl.ID)
+		}
+	}
+	for id := range need {
+		t.Errorf("S2c の案内 %s が guidance.json に無い", id)
+	}
 	flagRe := regexp.MustCompile(`--[a-z][a-z-]*`)
 	for _, tpl := range g.Templates {
 		// 出す場面は、課題の操作（actions）か画面の名前（context）のどちらか一方だけで書く。

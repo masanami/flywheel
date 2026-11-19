@@ -828,3 +828,77 @@ a.task-box:hover {
 .done-toggle {
   margin: 0.5rem 0;
 }
+
+/* フォローアップの画面: 切り替え・課題ごとのまとまり・端末のコマンドの案内（幅 360px でも横にあふれさせない） */
+.followup-switch {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+.followup-tab {
+  padding: 0.2rem 0.75rem;
+  border: 1px solid var(--board-border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.followup-tab[aria-pressed="true"] {
+  background: var(--board-card-bg);
+  font-weight: bold;
+}
+.followup-group {
+  min-width: 0;
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--board-card-border);
+  border-radius: 8px;
+  background: var(--board-card-bg);
+}
+.followup-group h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+.followup-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.followup-row {
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--board-border);
+  overflow-wrap: anywhere;
+}
+.followup-row:first-child {
+  border-top: 0;
+}
+.followup-title {
+  font-weight: bold;
+}
+.followup-meta,
+.followup-note {
+  font-size: 0.85rem;
+  color: var(--board-muted-fg);
+}
+.followup-row p {
+  margin: 0.25rem 0 0;
+  white-space: pre-wrap;
+}
+.followup-guide {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+.followup-guide ul {
+  padding-left: 1.2rem;
+}
+.followup-guide code {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}
