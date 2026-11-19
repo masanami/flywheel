@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { api } from "../api/client.ts";
 import type {
   Activity,
@@ -92,14 +92,10 @@ const PARENT_DIRECT_HOLD_NOTE =
 // 保留の原因の run が無い（run_id が null）ときの表示。
 const CAUSE_RUN_NONE = "なし（原因の run は記録されていない）";
 
-type CardDetailModalProps = {
+type CardDetailProps = {
   challenge: Challenge;
   agentName: string;
   workspacePath: string;
-  onClose: () => void;
-  // 関係グラフの画面が渡す差し込み口（待っている理由。グラフの辺から作る）。「課題」の節の後ろに描く。
-  // 省略時（ボード）は、詳細の API の waiting から同じ部品で同じ位置に描く。
-  supplement?: React.ReactNode;
 };
 
 type LoadState =
@@ -107,37 +103,17 @@ type LoadState =
   | { status: "success"; loaded: Loaded }
   | { status: "error" };
 
-export function CardDetailModal({
+// 課題の詳細の本文。モーダル（dialog）ではなく通常の本文として出す（完了の承認のボタンが途中の状態でも使える）。
+// 作り替えは課題の詳細の画面の課題。
+export function CardDetail({
   challenge,
   agentName,
   workspacePath,
-  onClose,
-  supplement,
-}: CardDetailModalProps) {
+}: CardDetailProps) {
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const refreshKey = useContext(RefreshKeyContext);
   const [localReload, setLocalReload] = useState(0);
   const approvalKind = approvalKindOf(challenge.nextHumanActions);
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const mouseDownOnDialog = useRef(false);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  // <dialog> の showModal() で開く（Esc・フォーカストラップ・背景の不活性化はブラウザの標準動作に任せる）。
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) {
-      return;
-    }
-    if (!dialog.open && typeof dialog.showModal === "function") {
-      dialog.showModal();
-    }
-    const handleClose = () => onCloseRef.current();
-    dialog.addEventListener("close", handleClose);
-    return () => dialog.removeEventListener("close", handleClose);
-  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey は再取得の合図
   useEffect(() => {
@@ -155,120 +131,91 @@ export function CardDetailModal({
     };
   }, [agentName, challenge.id, refreshKey, localReload]);
 
-  const close = () => {
-    const dialog = dialogRef.current;
-    if (dialog?.open) {
-      dialog.close();
-    } else {
-      onCloseRef.current();
-    }
-  };
-
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: 背景クリックで閉じるのは補助。キーボードの Esc は <dialog> が標準で閉じる
-    <dialog
-      ref={dialogRef}
-      className="card-detail-modal"
-      data-testid="modal-overlay"
-      aria-labelledby="card-detail-modal-title"
-      onMouseDown={(event) => {
-        mouseDownOnDialog.current = event.target === event.currentTarget;
-      }}
-      onClick={(event) => {
-        if (mouseDownOnDialog.current && event.target === event.currentTarget) {
-          close();
-        }
-        mouseDownOnDialog.current = false;
-      }}
+    <article
+      className="card-detail"
+      data-testid="card-detail-content"
+      aria-labelledby="card-detail-title"
     >
-      <div
-        className="card-detail-modal-content"
-        data-testid="card-detail-content"
-      >
-        <div className="card-detail-modal-header">
-          <h2
-            id="card-detail-modal-title"
-            className="card-detail-modal-title"
-            data-testid="detail-headline"
-          >
-            {challenge.headline ?? challenge.title}
-          </h2>
-          <button type="button" className="modal-close-button" onClick={close}>
-            閉じる
-          </button>
-        </div>
-
-        <CardFields
-          challenge={challenge}
-          className="card-detail-card-fields"
-          testId="card-detail-card-fields"
-        />
-
-        <dl className="card-detail-fields">
-          <dt>ID</dt>
-          <dd>{challenge.id}</dd>
-          <dt>タイトル</dt>
-          <dd>{challenge.title}</dd>
-          <dt>ステータス</dt>
-          <dd>{challenge.status}</dd>
-          <dt>優先度</dt>
-          <dd>{challenge.priority ?? "-"}</dd>
-          <dt>要対応</dt>
-          <dd>{challenge.needsHuman ? "はい" : "いいえ"}</dd>
-        </dl>
-
-        <section className="card-detail-ledger-join" data-testid="ledger-join">
-          <h3 className="card-detail-ledger-join-heading">課題</h3>
-          <dl className="card-detail-fields">
-            <dt>完了条件</dt>
-            <dd
-              className="card-detail-multiline"
-              data-testid="ledger-completion-criteria"
-            >
-              {challenge.completionCriteria ?? "-"}
-            </dd>
-            <dt>説明</dt>
-            <dd
-              className="card-detail-multiline card-detail-description"
-              data-testid="ledger-description"
-            >
-              {challenge.description ?? "-"}
-            </dd>
-          </dl>
-        </section>
-
-        {supplement ??
-          (loadState.status === "success" ? (
-            <ShowWaitingReasons waiting={loadState.loaded.show.waiting} />
-          ) : null)}
-
-        {loadState.status === "loading" && (
-          <div className="card-detail-log-loading">読み込み中...</div>
-        )}
-        {loadState.status === "error" && (
-          <div className="card-detail-log-error">詳細の取得に失敗しました</div>
-        )}
-        {loadState.status === "success" && (
-          <DetailSections l={loadState.loaded} />
-        )}
-
-        {approvalKind && (
-          <ApprovalPanel
-            key={approvalKind}
-            workspace={agentName}
-            challengeId={challenge.id}
-            kind={approvalKind}
-            onApproved={() => setLocalReload((n) => n + 1)}
-          />
-        )}
-
-        <ApprovalGuide
-          challenge={challenge}
-          workspacePath={workspacePath}
-          className="card-detail-modal-footer"
-        />
+      <div className="card-detail-header">
+        <h2
+          id="card-detail-title"
+          className="card-detail-title"
+          data-testid="detail-headline"
+        >
+          {challenge.headline ?? challenge.title}
+        </h2>
       </div>
-    </dialog>
+
+      <CardFields
+        challenge={challenge}
+        className="card-detail-card-fields"
+        testId="card-detail-card-fields"
+      />
+
+      <dl className="card-detail-fields">
+        <dt>ID</dt>
+        <dd>{challenge.id}</dd>
+        <dt>タイトル</dt>
+        <dd>{challenge.title}</dd>
+        <dt>ステータス</dt>
+        <dd>{challenge.status}</dd>
+        <dt>優先度</dt>
+        <dd>{challenge.priority ?? "-"}</dd>
+        <dt>要対応</dt>
+        <dd>{challenge.needsHuman ? "はい" : "いいえ"}</dd>
+      </dl>
+
+      <section className="card-detail-ledger-join" data-testid="ledger-join">
+        <h3 className="card-detail-ledger-join-heading">課題</h3>
+        <dl className="card-detail-fields">
+          <dt>完了条件</dt>
+          <dd
+            className="card-detail-multiline"
+            data-testid="ledger-completion-criteria"
+          >
+            {challenge.completionCriteria ?? "-"}
+          </dd>
+          <dt>説明</dt>
+          <dd
+            className="card-detail-multiline card-detail-description"
+            data-testid="ledger-description"
+          >
+            {challenge.description ?? "-"}
+          </dd>
+        </dl>
+      </section>
+
+      {loadState.status === "success" ? (
+        <ShowWaitingReasons waiting={loadState.loaded.show.waiting} />
+      ) : null}
+
+      {loadState.status === "loading" && (
+        <div className="card-detail-log-loading">読み込み中...</div>
+      )}
+      {loadState.status === "error" && (
+        <div className="card-detail-log-error">詳細の取得に失敗しました</div>
+      )}
+      {loadState.status === "success" && (
+        <DetailSections l={loadState.loaded} />
+      )}
+
+      {approvalKind && (
+        <ApprovalPanel
+          key={approvalKind}
+          workspace={agentName}
+          challengeId={challenge.id}
+          kind={approvalKind}
+          onApproved={() => setLocalReload((n) => n + 1)}
+        />
+      )}
+
+      <ApprovalGuide
+        challenge={challenge}
+        workspacePath={workspacePath}
+        className="card-detail-footer"
+      />
+    </article>
   );
 }
 

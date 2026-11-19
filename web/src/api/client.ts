@@ -3,6 +3,7 @@ import type {
   ApprovalSummaryResponse,
   CycleStarted,
   CycleStatus,
+  FollowupListResponse,
   GraphResponse,
   ListCardResponse,
   LogResponse,
@@ -11,6 +12,7 @@ import type {
   RunReportResponse,
   ShowCardResponse,
   StatusResponse,
+  TreeResponse,
   WorkspaceChanged,
   WorkspaceList,
 } from "./types.gen.ts";
@@ -75,6 +77,12 @@ const ws = (name: string) => `/api/v1/workspaces/${encodeURIComponent(name)}`;
 export interface ReadApi {
   workspaces(): Promise<WorkspaceList>;
   status(name: string): Promise<StatusResponse>;
+  // 取り込めるもの（上流の読み取り）を含む状況。「いま進められること」の画面だけが呼ぶ。
+  statusIngestable(name: string): Promise<StatusResponse>;
+  // 課題のツリー（表示の区分・タスクの進み・費用・未のフォローアップの件数は core の値）。
+  tree(name: string): Promise<TreeResponse>;
+  // フォローアップ。status の既定は open。
+  followups(name: string, status?: string): Promise<FollowupListResponse>;
   challenges(name: string): Promise<ListCardResponse>;
   cycle(name: string): Promise<CycleStatus>;
   challenge(name: string, id: string): Promise<ShowCardResponse>;
@@ -105,6 +113,13 @@ export type ApiClient = ReadApi & ApprovalApi & CycleApi & GraphApi;
 const readApi: ReadApi = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
   status: (name) => get<StatusResponse>(`${ws(name)}/status`),
+  statusIngestable: (name) =>
+    get<StatusResponse>(`${ws(name)}/status?ingestable=true`),
+  tree: (name) => get<TreeResponse>(`${ws(name)}/tree`),
+  followups: (name, status) =>
+    get<FollowupListResponse>(
+      `${ws(name)}/followups${status === undefined ? "" : `?status=${encodeURIComponent(status)}`}`,
+    ),
   challenges: (name) => get<ListCardResponse>(`${ws(name)}/challenges`),
   cycle: (name) => get<CycleStatus>(`${ws(name)}/cycle`),
   challenge: (name, id) =>
@@ -159,6 +174,9 @@ export function resetApi(): void {
 export const api: ApiClient = {
   workspaces: () => impl.workspaces(),
   status: (n) => impl.status(n),
+  statusIngestable: (n) => impl.statusIngestable(n),
+  tree: (n) => impl.tree(n),
+  followups: (n, s) => impl.followups(n, s),
   challenges: (n) => impl.challenges(n),
   cycle: (n) => impl.cycle(n),
   challenge: (n, id) => impl.challenge(n, id),

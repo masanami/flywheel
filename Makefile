@@ -45,7 +45,7 @@ gate:
 	$(MAKE) check
 	$(MAKE) e2e
 
-## e2e-real: 関係グラフのブラウザの E2E を、本物の flywheel serve に向けて流す（Playwright。web/e2e-real/）。
+## e2e-real: 枠が開くことのブラウザの E2E を、本物の flywheel serve に向けて流す（Playwright。web/e2e-real/）。
 ## make check と make e2e には入れない。ui-build と build の後に、準備の段（web/e2e-real/global-setup.ts）が
 ## 一時ディレクトリへ種のストア（Go の TestRelationGraphSeed）を作り、build/flywheel を serve --port 0 で起動する。
 ## 委譲の子の環境（FLYWHEEL_DELEGATED_RUN がある）では serve が拒否されて失敗する（CI のジョブ e2e-real で流す）。

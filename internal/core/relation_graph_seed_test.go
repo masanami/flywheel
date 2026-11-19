@@ -13,13 +13,13 @@ import (
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
-// RelationGraphSeedEnvVar は、関係グラフの本物の serve の E2E（web/e2e-real/。`make e2e-real`）の種の
+// RelationGraphSeedEnvVar は、本物の serve の E2E（web/e2e-real/。`make e2e-real`）の種の
 // ストアを作るワークスペースのディレクトリ。渡されなければ t.TempDir() に作り、make check では種の中身の
 // 検査だけをする（docs/features/ui-relation-graph.md §本物の serve の E2E）。
 const RelationGraphSeedEnvVar = "FLYWHEEL_E2E_SEED_WORKSPACE"
 
-// relationGraphSeed は種の課題の一覧。ID は作る順（C-1 から）で、web/e2e-real/relation-graph.spec.ts の
-// 期待値はこの ID に依る。
+// relationGraphSeed は種の課題の一覧。ID は作る順（C-1 から）。画面の作り替え（core の見直しの S2c）の後の課題の
+// 本物の serve の試験が、この ID に依る。
 //
 //	C-1  人間の操作待ち（未回答の問い）。注目の起点。C-12（完了）の後続
 //	C-2  計画待ち P2。C-1 の後続（依存で 1 段）

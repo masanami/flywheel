@@ -4,6 +4,7 @@ import type {
   CycleStatus,
   ListCardResponse,
   NeedsHumanResponse,
+  QuestionsResponse,
   StatusResponse,
   Workspace,
 } from "../api/types.gen.ts";
@@ -20,8 +21,15 @@ export interface LiveState {
   // 最後に読み込みに成功した時刻。まだ無ければ null。
   lastUpdated: Date | null;
   workspaces: Workspace[];
+  // エージェントの一覧を 1 回でも読めたか。読めるまでは「見つかりません」を出さない。
+  listLoaded: boolean;
   data: Record<string, WorkspaceData>;
   needsHuman: NeedsHumanResponse | null;
+  // 問いの一覧（全エージェント横断）。まだ読めていなければ null。
+  questions: QuestionsResponse | null;
+  // エージェントごとの変化の通し番号。workspace_changed の合図と 60 秒ごとの読み直しで進む。
+  // 画面ごとの読み込み（useScreenData）は、そのエージェントの番号が進んだら読み直す。
+  revision: Record<string, number>;
   loadError: string | null;
   fleetError: string | null;
 }
@@ -34,8 +42,11 @@ const initial: LiveState = {
   connected: false,
   lastUpdated: null,
   workspaces: [],
+  listLoaded: false,
   data: {},
   needsHuman: null,
+  questions: null,
+  revision: {},
   loadError: null,
   fleetError: null,
 };
@@ -68,12 +79,15 @@ export function useLive(): LiveState {
 
   const refreshFleet = useCallback(async () => {
     const token = ++gen.current.fleet;
-    // 問いの一覧（GET /api/v1/questions）は要求しない。問いは課題の詳細に出す（M4H22・M4H23）。
-    const [nh] = await Promise.allSettled([api.needsHuman()]);
+    const [nh, qs] = await Promise.allSettled([
+      api.needsHuman(),
+      api.questions(),
+    ]);
     if (token !== gen.current.fleet) return;
     setState((s) => ({
       ...s,
       needsHuman: nh.status === "fulfilled" ? nh.value : s.needsHuman,
+      questions: qs.status === "fulfilled" ? qs.value : s.questions,
       lastUpdated: nh.status === "fulfilled" ? new Date() : s.lastUpdated,
       fleetError: nh.status === "rejected" ? String(nh.reason) : null,
     }));
@@ -87,6 +101,7 @@ export function useLive(): LiveState {
     setState((s) => ({
       ...s,
       data: { ...s.data, [name]: d },
+      revision: { ...s.revision, [name]: (s.revision[name] ?? 0) + 1 },
       lastUpdated: d.error ? s.lastUpdated : new Date(),
     }));
   }, []);
@@ -101,6 +116,7 @@ export function useLive(): LiveState {
       setState((s) => ({
         ...s,
         workspaces: list.workspaces,
+        listLoaded: true,
         lastUpdated: new Date(),
         loadError: null,
       }));
@@ -133,6 +149,7 @@ export function useLive(): LiveState {
       if (!cur || cur.error) return s;
       return {
         ...s,
+        revision: { ...s.revision, [name]: (s.revision[name] ?? 0) + 1 },
         data: {
           ...s.data,
           [name]: {

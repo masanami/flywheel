@@ -125,3 +125,23 @@ export function label<K extends string>(
 ): string {
   return (table as Record<string, string>)[code] ?? code;
 }
+
+// タスクの表示の区分（phase）。区分は core が決め、ここは語だけを持つ。
+export const TASK_PHASES = [
+  "running",
+  "waiting",
+  "next",
+  "blocked",
+  "done",
+  "cancelled",
+] as const;
+export type TaskPhase = (typeof TASK_PHASES)[number];
+
+export const PHASE_LABELS: Record<TaskPhase, string> = {
+  running: "走っている",
+  waiting: "あなたを待っている",
+  next: "次に走る",
+  blocked: "前提を待っている",
+  done: "済み",
+  cancelled: "取りやめ",
+};
