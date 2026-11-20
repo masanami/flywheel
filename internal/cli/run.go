@@ -79,6 +79,8 @@ func runRun(a Args) (any, error) {
 		Upstream:    newUpstreamThreadSource(a.lookPath()),
 		Git:         git.New(),
 		Reconcile:   newBranchSource(a.lookPath()),
+		Checks:      newCheckSource(a.lookPath()),
+		Compare:     newCompareSource(a.lookPath()),
 		CycleID:     cyc.ID,
 	})
 

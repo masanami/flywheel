@@ -332,6 +332,8 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			Upstream:  in.Upstream,
 			Git:       in.Git,
 			Reconcile: in.Reconcile,
+			Checks:    in.Checks,
+			Compare:   in.Compare,
 			CycleID:   cycleID,
 			Cycle:     jc,
 		})
