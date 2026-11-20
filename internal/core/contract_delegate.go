@@ -1219,8 +1219,9 @@ func (s *Store) afterContractSucceeded(ctx context.Context, tx *sql.Tx, c contra
 		return nil // 反映の段が読んだ成果物は、課題の成果物の記録へ取り込まない（完了の検証が読む直前の委譲の実行の成果物を変えない）
 	}
 	// 課題が保留（awaiting_human）の間に succeeded を読んだ印。答えの後の周で、start も resume も呼ばずに検証中へ進める。
+	// 統合先を使う課題には付けない（SubmitHeldContractSuccesses が扱わず、印が残ると実行中と数え続けて止まるため。終わった実行のタスクは委譲の段が委譲し直す）。
 	if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 1 WHERE challenge_id = ? AND external_run_id = ?
-		AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND status = 'awaiting_human')`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
+		AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND status = 'awaiting_human' AND COALESCE(uses_integration, 0) = 0)`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
 		return err
 	}
 	prs, err := importContractArtifacts(ctx, tx, c.RunIDInt, st.Artifacts, s.currentTime())

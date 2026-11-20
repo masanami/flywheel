@@ -336,12 +336,23 @@ const (
 	holdReasonFactsUnmet        holdReason = "facts_unmet"
 	// holdReasonTasksBlocked は、統合先を使う課題が、前提のタスクの取りやめで進めようが無い保留（発生は作らない）。
 	holdReasonTasksBlocked holdReason = "tasks_blocked"
+	// 統合先を使う課題のタスクの実行を受け取れない保留（発生は作らない）。integration_ref_invalid は反映先宛ての成果物がある・
+	// 統合先の識別が足りない・課題に記録した統合先と違う、delegate_ended は成果物が統合先へ入らないまま実行が終わった、
+	// merged_unverified は検証を経ずに成果物が統合先へ入っていた。
+	holdReasonIntegrationRefInvalid holdReason = "integration_ref_invalid"
+	holdReasonDelegateEnded         holdReason = "delegate_ended"
+	holdReasonMergedUnverified      holdReason = "merged_unverified"
 )
 
-// persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない 3 つの理由と、進めようが無い理由だけが書く
+// persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない理由（統合先を使う課題のものを含む）と、進めようが無い理由だけが書く
 // （ほかの保留の hold.reason は NULL）。
 func (r holdReason) persisted() bool {
-	return r == holdReasonLandUnavailable || r == holdReasonContentRefInvalid || r == holdReasonFactsUnmet || r == holdReasonTasksBlocked
+	switch r {
+	case holdReasonLandUnavailable, holdReasonContentRefInvalid, holdReasonFactsUnmet, holdReasonTasksBlocked,
+		holdReasonIntegrationRefInvalid, holdReasonDelegateEnded, holdReasonMergedUnverified:
+		return true
+	}
+	return false
 }
 
 // occurrenceKind は保留の理由に対応する発生の種類。発生を作らない理由は false。
