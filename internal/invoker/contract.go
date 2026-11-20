@@ -28,8 +28,8 @@ type rawContractStatus struct {
 	Artifacts       []struct {
 		Kind string `json:"kind"`
 		Ref  string `json:"ref"`
-		// role は任意（文字列）。文字列でないと型が合わない（malformed）。
-		Role *string `json:"role"`
+		// role は任意（文字列）。在って文字列でない（null を含む）と型が合わない（malformed）。
+		Role json.RawMessage `json:"role"`
 	} `json:"artifacts"`
 	CostUSD json.RawMessage `json:"cost_usd"`
 	// facts は任意（名前から文字列への対応）。形が合わなければ無いものとして扱い、出力の全体は malformed にしない。
@@ -70,7 +70,10 @@ func decodeContractStatus(stdout []byte) (*core.ContractStatus, bool) {
 	for _, a := range raw.Artifacts {
 		art := core.ContractArtifact{Kind: a.Kind, Ref: a.Ref}
 		if a.Role != nil {
-			art.Role = *a.Role
+			// キーが在る。null は Go の復号では「無い」と区別できないので、生の値を文字列として読み直す。
+			if isJSONNull(a.Role) || json.Unmarshal(a.Role, &art.Role) != nil {
+				return nil, false
+			}
 		}
 		st.Artifacts = append(st.Artifacts, art)
 	}

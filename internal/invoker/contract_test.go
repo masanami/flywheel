@@ -212,11 +212,13 @@ func TestContractCommand_ArtifactRoleIsNormalized(t *testing.T) {
 
 // 成果物の role が文字列でなければ、契約の出力の誤り（malformed）にし、状態を返さない。
 func TestContractCommand_NonStringArtifactRoleIsMalformed(t *testing.T) {
-	in, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"contract_version": 1, "run_id": "r-1", "state": "succeeded", "summary": "s",
-	  "requested_action": null, "artifacts": [{"kind": "commit", "ref": "a1", "role": 3}], "cost_usd": null}`})
-	out, err := NewLauncher().Status(context.Background(), in)
-	if err != nil || out.Result != core.RunResultMalformed || out.Status != nil {
-		t.Fatalf("out = %+v err = %v, want malformed without a status", out, err)
+	for _, role := range []string{`3`, `null`, `["integration"]`} {
+		in, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"contract_version": 1, "run_id": "r-1", "state": "succeeded", "summary": "s",
+	  "requested_action": null, "artifacts": [{"kind": "commit", "ref": "a1", "role": ` + role + `}], "cost_usd": null}`})
+		out, err := NewLauncher().Status(context.Background(), in)
+		if err != nil || out.Result != core.RunResultMalformed || out.Status != nil {
+			t.Fatalf("role %s: out = %+v err = %v, want malformed without a status", role, out, err)
+		}
 	}
 }
 
