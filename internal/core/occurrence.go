@@ -346,6 +346,10 @@ const (
 	// land_refused は「入れてよい」が届いたのに、同じ中身のレビュー待ちが戻った。
 	holdReasonChecksFailed holdReason = "checks_failed"
 	holdReasonLandRefused  holdReason = "land_refused"
+	// 統合先を使う課題の、上げる依頼（反映先へ上げる反映の依頼）の保留（発生は作らない）。reflect_unavailable はリポジトリに反映の依頼の口が無い、
+	// reflect_failed は上げる依頼を始められなかった・完了でない課題の上げる依頼が終わりの状態を返した。
+	holdReasonReflectUnavailable holdReason = "reflect_unavailable"
+	holdReasonReflectFailed      holdReason = "reflect_failed"
 )
 
 // persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない理由（統合先を使う課題のものを含む）と、進めようが無い理由だけが書く
@@ -353,7 +357,8 @@ const (
 func (r holdReason) persisted() bool {
 	switch r {
 	case holdReasonLandUnavailable, holdReasonContentRefInvalid, holdReasonFactsUnmet, holdReasonTasksBlocked,
-		holdReasonIntegrationRefInvalid, holdReasonDelegateEnded, holdReasonMergedUnverified, holdReasonChecksFailed, holdReasonLandRefused:
+		holdReasonIntegrationRefInvalid, holdReasonDelegateEnded, holdReasonMergedUnverified, holdReasonChecksFailed, holdReasonLandRefused,
+		holdReasonReflectUnavailable, holdReasonReflectFailed:
 		return true
 	}
 	return false
@@ -394,7 +399,23 @@ func (s *Store) insertHoldWithOccurrence(ctx context.Context, tc *transitionCtx,
 
 // insertHoldWithOccurrenceID は insertHoldWithOccurrence の、作った保留の ID を返す版。
 func (s *Store) insertHoldWithOccurrenceID(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string) (int64, error) {
-	holdID, err := insertHoldID(ctx, tc, question)
+	return s.insertHoldWithOccurrenceIDFrom(ctx, tc, question, reason, cycleID, tc.current.Status)
+}
+
+// insertHoldWithOccurrenceFrom は insertHoldWithOccurrence の、回答で戻る先（hold.from_status）を指定する版。
+func (s *Store) insertHoldWithOccurrenceFrom(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string, from Status) error {
+	_, err := s.insertHoldWithOccurrenceIDFrom(ctx, tc, question, reason, cycleID, from)
+	return err
+}
+
+func (s *Store) insertHoldWithOccurrenceIDFrom(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string, from Status) (int64, error) {
+	var holdID int64
+	var err error
+	if from == tc.current.Status {
+		holdID, err = insertHoldID(ctx, tc, question)
+	} else {
+		holdID, err = insertHoldKindFrom(ctx, tc, question, HoldKindHuman, from)
+	}
 	if err != nil {
 		return 0, err
 	}

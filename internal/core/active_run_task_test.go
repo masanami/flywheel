@@ -263,7 +263,12 @@ func TestLoadOpenRunInTx_IgnoresTaskRunsOfIntegrationChallenges(t *testing.T) {
 	reflect := f.insertRow(t, `INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, cost_usd, max_budget_usd,
 			started_at, observed_at, kind)
 		SELECT challenge_id, connector_id, 'ext-3', start_run_id, 'running', 'r', 0, max_budget_usd, started_at, observed_at, 'reflect' FROM contract_run WHERE id = ?`, f.run1)
+	// 完了でない課題の反映の依頼（上げる依頼）は、委譲の段の先頭の状態の確認が読むので、反映の段は読まない。完了の課題のものは読む。
+	if r := load(); r != nil {
+		t.Fatalf("a reflect request of an undone challenge must not be read by the release stage, got %+v", r)
+	}
+	f.exec1(t, `UPDATE challenge SET status = 'done' WHERE id = ?`, f.cidInt)
 	if r := load(); r == nil || r.row.ID != reflect {
-		t.Fatalf("a reflect request of an integration challenge must be read, got %+v", r)
+		t.Fatalf("a reflect request of a done integration challenge must be read, got %+v", r)
 	}
 }

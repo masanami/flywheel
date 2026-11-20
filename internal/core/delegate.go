@@ -688,6 +688,25 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 
 // runDelegationAfterPoll は RunDelegation の、契約の run の状態の読みより後の本体。
 func (s *Store) runDelegationAfterPoll(ctx context.Context, in DelegateInput) (*DelegateResult, error) {
+	// 統合先を使う課題の、全部のタスクが済んだときの上げる依頼を始める（タスクの起動より先。始めた課題は、タスクの起動の対象にならない）。
+	reflects, handled, err := s.startIntegrationReflects(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if in.ChallengeID != nil && handled {
+		return reflects, nil
+	}
+	res, err := s.runDelegationTasks(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	res.Items = append(reflects.Items, res.Items...)
+	res.NotStarted = append(reflects.NotStarted, res.NotStarted...)
+	return res, nil
+}
+
+// runDelegationTasks は runDelegationAfterPoll の、タスクの起動の部分。
+func (s *Store) runDelegationTasks(ctx context.Context, in DelegateInput) (*DelegateResult, error) {
 	if in.ChallengeID != nil {
 		ch, err := s.loadChallengeForAuto(ctx, *in.ChallengeID)
 		if err != nil {
