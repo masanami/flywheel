@@ -58,7 +58,8 @@ func TestReopen_ALandSentBetweenTheReadAndTheWriteBlocksTheReopen(t *testing.T) 
 	f.wantNotReopened(t, err)
 }
 
-// 同じ並びで、「入れてよい」の応答が待ちの状態だった（記録の状態が running にならない）ときも、land_ref・land_delivered の違いで止まる。
+// 同じ並びで、「入れてよい」の応答が待ちの状態だった（記録の状態が running にならない）ときも、止まる
+// （止める条件ごとの確かめは TestTaskRunUnchangedInTx_Cases）。
 func TestReopen_ALandAnsweredWithAWaitingStateBetweenTheReadAndTheWriteBlocksTheReopen(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
@@ -152,12 +153,32 @@ func TestTaskRunUnchangedInTx_Cases(t *testing.T) {
 	if err := check(withAttempt); err != nil {
 		t.Errorf("no newer attempt: err = %v, want nil", err)
 	}
-	set(`INSERT INTO operation_execution (operation_id, started_at, ended_at, result, approved_head, pid, host) VALUES (1, 'x', 'x', 'land_unconfirmed', 'h', 1, 'testhost')`)
+	set(`INSERT INTO operation_execution (operation_id, started_at, ended_at, result, approved_head, pid, host) VALUES (1, ?, ?, 'land_unconfirmed', 'h', 1, 'testhost')`, execTS(1), execTS(2))
 	if err := check(withAttempt); !errors.Is(err, errReopenBlockedByRun) {
 		t.Errorf("a newer attempt of the release: err = %v, want blocked", err)
 	}
 	set(`UPDATE contract_run SET ended_at = 'x' WHERE id = ?`, id)
 	if err := check(nil); err != nil {
 		t.Errorf("no unfinished task run: err = %v, want nil", err)
+	}
+}
+
+// 戻す前の読みの時点で、その課題の反映の操作に終わっていない試行（反映の段が「入れてよい」を返す途中かもしれない）があれば、
+// 委譲先を読まずに、何も書かず競合で終わる（その試行が読みの後に閉じても、最後の試行の ID は変わらないので、読みの側で止める）。
+func TestReopen_AnOpenAttemptAtTheReadBlocksTheReopenWithoutReadingTheDelegate(t *testing.T) {
+	t.Parallel()
+	f := newLandFixture(t)
+	cmp := f.contentChangedCompare()
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO operation_execution (operation_id, started_at, approved_head, pid, host) VALUES (1, ?, ?, 1, 'testhost')`, execTS(1), f.head)
+		return err
+	})
+	statuses := len(f.client.statuses)
+	called := false
+	f.s.reopenReadDone = func() { called = true }
+	_, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, f.reopenInput(cmp))
+	f.wantNotReopened(t, err)
+	if len(f.client.statuses) != statuses || called {
+		t.Errorf("statuses +%d, reached the write = %v, want the reopen to stop at the read", len(f.client.statuses)-statuses, called)
 	}
 }
