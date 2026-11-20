@@ -48,9 +48,16 @@ func TestPolish1_FactsUnmetAnswerIsDeliveredPerTaskNotPerChallenge(t *testing.T)
 	f.sql(t, `INSERT INTO run (cycle_id, kind, challenge_id, challenge_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket, task_id)
 		SELECT cycle_id, 'contract', challenge_id, challenge_version, 'other-session', pid, host, heartbeat_at, '2999-01-01T00:00:00.000Z', '2999-01-01T00:00:01.000Z', 'succeeded', max_budget_usd, budget_bucket, ?
 		FROM run WHERE kind = 'contract' ORDER BY id DESC LIMIT 1`, tid)
+	// 別のタスクの facts_unmet の保留も、回答より後に回答されている（別のタスクの回答が、このタスクへ混ざらない）。
+	f.sql(t, `INSERT INTO hold (challenge_id, question, reason, from_status, raised_at, answer, answered_at, answered_by, task_id)
+		VALUES (?, 'q2', 'facts_unmet', 'in_progress', '2998-01-01T00:00:00.000Z', 'OTHER-TASK-ANSWER', '2998-01-01T00:00:01.000Z', 'owner', ?)`, f.intID(t), tid)
 	f.readOnce(t, unmet)
-	if note := f.lastNote(t); !strings.Contains(note, "OWNER-ANSWER-TEXT") {
+	note := f.lastNote(t)
+	if !strings.Contains(note, "OWNER-ANSWER-TEXT") {
 		t.Fatalf("note = %q, want the owner's answer (another task's run must not hide it)", note)
+	}
+	if strings.Contains(note, "OTHER-TASK-ANSWER") {
+		t.Fatalf("note = %q, must not carry another task's answer", note)
 	}
 }
 
@@ -146,10 +153,19 @@ func TestPolish1_UpRequestEndedWhileHeldIsHandledAfterTheAnswer(t *testing.T) {
 	if _, _, _, ended := f.reflectRow(t); ended {
 		t.Fatal("the up request run was ended while the challenge was held (the ending would be lost)")
 	}
+	if got := f.queryString(t, `SELECT state FROM contract_run WHERE kind = 'reflect'`); got.String != string(ContractStateFailed) {
+		t.Fatalf("recorded state = %q while held, want failed (the read continues while held)", got.String)
+	}
 	f.sqlExec(t, `UPDATE challenge SET status = 'in_progress' WHERE id = ?`, mustChallengeInt(t, id))
 	f.readWith(t, contractOut(ContractStateFailed, nil, nil))
 	if got := f.lastReason(t, id); got != string(holdReasonReflectFailed) {
 		t.Fatalf("reason = %q, want reflect_failed", got)
+	}
+	if _, _, _, ended := f.reflectRow(t); !ended {
+		t.Fatal("the up request run is still open after the hold was raised")
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM hold`); n != 1 {
+		t.Fatalf("holds = %d, want exactly 1 (the ending read while held must not raise one)", n)
 	}
 }
 
