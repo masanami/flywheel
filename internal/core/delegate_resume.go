@@ -85,6 +85,8 @@ type holdRef struct {
 	Answer     *string
 	AnsweredAt *time.Time
 	RaisedAt   time.Time
+	// TaskID は保留が結び付くタスクの表示形（"T-<n>"。nil が NULL＝課題の単位の保留と過去の行）。
+	TaskID *string
 }
 
 // launchHistory は課題の委譲の run（id 昇順。全部の計画の版）と保留（id 昇順）。
@@ -95,6 +97,44 @@ type launchHistory struct {
 	Verifications []runRow
 	// J4Runs は課題の J4 の run（id 昇順。全部の計画の版）。
 	J4Runs []runRow
+}
+
+// forTask は履歴を、タスク taskID（"T-<n>"）の単位に絞った写しを返す。あるタスクの失敗・差し戻し・保留が、
+// 同じ課題の別のタスクの連続失敗・差し戻しの数や再開の対象に入らないようにする。
+// タスクに結び付かない run（task_id が NULL。課題の単位の実行と、タスクの列を持たない過去の行）は、どのタスクの履歴にも残す
+// （タスクが 1 個の課題の動きを変えない）。保留は、保留自身のタスクが別のものなら外し、タスクの列が無ければ原因の run が別のタスクのものなら外す（どちらも無い保留は課題の単位なので残す）。
+func (h *launchHistory) forTask(taskID string) *launchHistory {
+	mine := func(r runRow) bool { return r.TaskID == nil || *r.TaskID == taskID }
+	out := &launchHistory{}
+	other := map[int64]bool{} // 別のタスクの run の ID（保留の原因の判定用）
+	for _, rs := range [][]runRow{h.Runs, h.Verifications, h.J4Runs} {
+		for _, r := range rs {
+			if !mine(r) {
+				other[runIntID(r)] = true
+			}
+		}
+	}
+	filter := func(rs []runRow) []runRow {
+		var o []runRow
+		for _, r := range rs {
+			if mine(r) {
+				o = append(o, r)
+			}
+		}
+		return o
+	}
+	out.Runs, out.Verifications, out.J4Runs = filter(h.Runs), filter(h.Verifications), filter(h.J4Runs)
+	for _, hd := range h.Holds {
+		if hd.TaskID != nil {
+			if *hd.TaskID != taskID {
+				continue
+			}
+		} else if hd.RunID != nil && other[*hd.RunID] {
+			continue // タスクの列を持たない保留は、原因の run のタスクで推し量る
+		}
+		out.Holds = append(out.Holds, hd)
+	}
+	return out
 }
 
 func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*launchHistory, error) {
@@ -170,7 +210,7 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 	}
 
 	hrows, err := tx.QueryContext(ctx,
-		`SELECT id, question, run_id, answer, answered_at, raised_at FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
+		`SELECT id, question, run_id, answer, answered_at, raised_at, task_id FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
 	}
@@ -181,9 +221,14 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 			runID                  sql.NullInt64
 			answer, answeredAtText sql.NullString
 			raisedAtText           string
+			holdTask               sql.NullInt64
 		)
-		if err := hrows.Scan(&ref.ID, &ref.Question, &runID, &answer, &answeredAtText, &raisedAtText); err != nil {
+		if err := hrows.Scan(&ref.ID, &ref.Question, &runID, &answer, &answeredAtText, &raisedAtText, &holdTask); err != nil {
 			return nil, err
+		}
+		if holdTask.Valid {
+			v := formatTaskID(holdTask.Int64)
+			ref.TaskID = &v
 		}
 		if runID.Valid {
 			v := runID.Int64

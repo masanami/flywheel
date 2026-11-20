@@ -246,9 +246,10 @@ func listBudgetExhausted(ctx context.Context, tx *sql.Tx, agent *AgentDeclaratio
 				return nil, err
 			}
 			implRem := rem.Impl
-			// 費用が取れない失敗の後の再開が許される間は、人間の増額を待たない（タスクが 1 個の課題だけ。この履歴は課題の単位）。
-			if history != nil && planVersionTaskCount(bs, tb.PlanVersion) == 1 {
-				implRem = history.effectiveImplBudget(plan.Version, history.decideLaunchFull(plan.Version, agent), implRem)
+			// 費用が取れない失敗の後の再開が許される間は、人間の増額を待たない（履歴はこのタスクの単位に絞る）。
+			if history != nil {
+				th := history.forTask(formatTaskID(tb.TaskID))
+				implRem = th.effectiveImplBudget(plan.Version, th.decideLaunchFull(plan.Version, agent), implRem)
 			}
 			if implRem >= minImplLaunchMicros {
 				continue
