@@ -164,6 +164,32 @@ func TestJ5Prompt_TaskSectionRequiresBothTheChallengeAndTheTaskDoneCriteria(t *t
 	}
 }
 
+// TestJ5Prompt_TaskVerification は、j5.md が、区画「対応する取り込み元」の本文にある満たす条件（完了条件）でも確かめる旨（AC-74）と、
+// タスクの検証ではほかのタスクの範囲が済んでいないことを理由に満たしていないを選ばない旨（AC-108）を述べることを確かめる。
+func TestJ5Prompt_TaskVerification(t *testing.T) {
+	ins, err := Instructions(core.JudgmentJ5)
+	if err != nil {
+		t.Fatalf("Instructions(J5): %v", err)
+	}
+	var source string
+	for _, l := range strings.Split(ins, "\n") {
+		if strings.HasPrefix(l, "- 「対応する取り込み元」:") {
+			source = l
+		}
+	}
+	if source == "" {
+		t.Fatalf("j5.md has no bullet for the 「対応する取り込み元」 section")
+	}
+	for _, want := range []string{"本文にある満たす条件", "タスクの満たす条件", "満たしていないを選び"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("the 「対応する取り込み元」 bullet lacks %q:\n%s", want, source)
+		}
+	}
+	if want := "ほかのタスクの範囲が済んでいないことを理由に満たしていないを選ばない"; !strings.Contains(ins, want) {
+		t.Errorf("j5.md lacks %q", want)
+	}
+}
+
 // TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails は AC「上限を1バイト
 // 超えるフィクスチャで失敗することも検証する」を、J1〜J5 の5ファイルすべての
 // 上限で固定する（三角測量: ちょうど上限は通り、+1バイトで落ちることの両方を
@@ -179,7 +205,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j2.md": 13312,
 		"j3.md": 8192,
 		"j4.md": 4096,
-		"j5.md": 11717,
+		"j5.md": 12346,
 		"j6.md": 6144,
 		"j8.md": 8192,
 	}

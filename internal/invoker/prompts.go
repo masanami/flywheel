@@ -64,6 +64,7 @@ var judgmentPromptFile = map[core.JudgmentPoint]string{
 // （J1: 4KiB・J2: 13312B（13KiB）・J3: 8KiB・J4: 4KiB・J5: 11717B・J6: 6KiB・J8: 6KiB。
 // J5 は #466 で 8KiB、#565 で 9KiB、#563 で 9.5KiB、#654 で 10.5KiB、#629 で 11354B（#654 の 10752 に、#629 で j5.md へ足した 602 バイトを足した値）へ引き上げた。
 // J5 は core の見直し（区切り S3a）で、11354 に、j5.md へ足した区画「委譲先が値で返したこと」の説明の 363 バイトを足した値へ引き上げた。
+// J5 は S3b のタスクの検証で、j5.md へ足した区画「対応する取り込み元」の説明とタスクの検証の扱いの 629 バイトを足した 12346 へ引き上げた。
 // J2 は core の見直し（区切り S2a。flywheel#749）で、12288 に、j2.md へ足した区画「問いと回答」の説明の 194 バイトを足した値へ引き上げた。
 // J2 は S2b の取り込み元の子の区画と source の書き方（j2.md へ 511 バイト）で、13312（13KiB）へ引き上げた。
 // 仕様は docs/features/m3-invoker-delegation.md §指示文の歯止め）。
@@ -72,7 +73,7 @@ var judgmentPromptLimit = map[string]int{
 	"j2.md": 13312,
 	"j3.md": 8192,
 	"j4.md": 4096,
-	"j5.md": 11717,
+	"j5.md": 12346,
 	"j6.md": 6144,
 	"j8.md": 8192,
 }

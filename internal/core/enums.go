@@ -329,6 +329,10 @@ const (
 	ActivityActionDepRm  = "dep_rm"
 )
 
+// ActivityActionTaskVerify は作業ログ（entity=task）の action。タスクの検証（J5）の結果を書いたときに残し、after に判定・
+// 検証した中身の識別を持つ。
+const ActivityActionTaskVerify = "task_verify"
+
 // 作業ログ（entity=challenge）の action。親子（challenge_parent）を付けた（付け替えを含む。
 // before に前の親）・外したときに残す。課題の版は上げない。
 const (
