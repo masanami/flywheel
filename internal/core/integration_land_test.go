@@ -524,6 +524,22 @@ func TestLandVerified_GuardsAfterTheReadDoNotReturnLand(t *testing.T) {
 	}
 }
 
+// 保留中の課題では、取り込みだけで動いた中身も、検証した中身を改めない（着手中の確かめが、状態の確認の間に保留になった課題でも効く）。
+func TestLandVerified_HeldChallengeKeepsTheVerifiedContentOfAMovedReview(t *testing.T) {
+	t.Parallel()
+	f := newIgLandFixture(t)
+	f.setMergeInOnly()
+	f.checks.commits[newContent] = igPassingChecks
+	f.onStatus = func() { f.sql(t, `UPDATE challenge SET status = 'awaiting_human'`) }
+	f.read(t, intakeOut(integOptsWithLd, movedArts, nil))
+	if got := f.ref(t, "verified_ref"); got != landContent {
+		t.Fatalf("verified_ref = %q, want it kept while the challenge is held", got)
+	}
+	if len(f.client.resumes) != 0 {
+		t.Fatalf("resumes = %d, want 0", len(f.client.resumes))
+	}
+}
+
 var landedArts = []ContractArtifact{{Kind: "pr", Ref: landPRURL}, integBranchArt, {Kind: "commit", Ref: "dddddddd", Role: "integration"}}
 
 // landAndSucceed は land を返してから、succeeded を読む（artifacts と PR の head・状態は呼び出し元が決める）。
@@ -593,6 +609,22 @@ func TestLandSucceeded_NotLandedHoldsDelegateEnded(t *testing.T) {
 	}
 }
 
+// AC-130: 成果物の PR が、統合先ではない別のブランチへマージ済みなら、統合先へは入っていない（delegate_ended）。
+func TestLandSucceeded_MergedIntoAnotherBranchHoldsDelegateEnded(t *testing.T) {
+	t.Parallel()
+	f := newIgLandFixture(t)
+	f.landed(t)
+	f.checks.prs["o/r#7"] = UpstreamPullRequestChecks{URL: landPRURL, State: "merged", Base: "main", HeadSHA: landContent}
+	f.setPR(7, landPRURL, "merged", "main")
+	f.succeed(t)
+	if got := f.lastHoldReason(t); got != string(holdReasonDelegateEnded) {
+		t.Fatalf("reason = %q", got)
+	}
+	if f.taskStatus(t) == "done" {
+		t.Fatal("the task is done")
+	}
+}
+
 // AC-132・AC-133: 入った中身が land_ref と違えば merged_unverified（タスクは done にしない）。
 func TestLandSucceeded_OtherContentHoldsMergedUnverified(t *testing.T) {
 	t.Parallel()
@@ -626,6 +658,10 @@ func TestLandSucceeded_UnreadableUpstreamRetriesNextRead(t *testing.T) {
 	if f.taskStatus(t) != "done" { // AC-135
 		t.Fatalf("task = %s", f.taskStatus(t))
 	}
+	if n := f.count(t, `SELECT COUNT(*) FROM run_artifact WHERE kind = 'commit' AND ref = 'dddddddd' AND role = 'integration'
+		AND run_id = (SELECT MAX(id) FROM run WHERE kind = 'contract')`); n != 1 { // AC-129（done にした読みの run に残る）
+		t.Fatalf("integration content artifacts of the last read = %d", n)
+	}
 }
 
 // 入っていない・入った中身が違うときの保留と、契約の実行の終わった記録は、同じトランザクションで書く（終わりの記録だけが失敗して、
@@ -635,7 +671,7 @@ func TestLandSucceeded_HoldAndEndedRecordAreWrittenTogether(t *testing.T) {
 	f := newIgLandFixture(t)
 	f.landed(t)
 	f.setPR(7, landPRURL, "open", integBranch)
-	f.sql(t, `CREATE TRIGGER fail_end BEFORE UPDATE OF ended_at ON contract_run BEGIN SELECT RAISE(ABORT, 'boom'); END`)
+	f.sql(t, `CREATE TRIGGER fail_end BEFORE UPDATE OF ended_at ON contract_run WHEN NEW.ended_at IS NOT NULL BEGIN SELECT RAISE(ABORT, 'boom'); END`)
 	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, func(st *ContractStatus) { st.Artifacts = landedArts })}
 	_, _ = f.s.PollContractRuns(context.Background(), ContractPollInput{
 		AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client, CycleID: f.cycle(t, 300), Reconcile: f.branches, Checks: f.checks, Compare: f.compare,
@@ -653,6 +689,23 @@ func TestLandSucceeded_HoldAndEndedRecordAreWrittenTogether(t *testing.T) {
 	}
 	if f.text(t, `SELECT COALESCE(ended_at, '') FROM contract_run`) == "" {
 		t.Fatal("the contract run is not ended")
+	}
+}
+
+// AC-134: 成果物の PR を上流から読めない（PR の取得の失敗）ときも、何も変えず（保留にもしない）、次の状態の確認でやり直す。
+func TestLandSucceeded_UnreadablePullRequestRetriesNextRead(t *testing.T) {
+	t.Parallel()
+	f := newIgLandFixture(t)
+	f.landed(t)
+	f.branches.pullErrs["o/r#7"] = errors.New("boom")
+	f.succeed(t)
+	if f.taskStatus(t) != "verifying" || f.status(t, f.cid) != StatusInProgress || f.count(t, `SELECT COUNT(*) FROM hold`) != 0 {
+		t.Fatalf("task = %s, status = %s", f.taskStatus(t), f.status(t, f.cid))
+	}
+	delete(f.branches.pullErrs, "o/r#7")
+	f.succeed(t)
+	if f.taskStatus(t) != "done" { // AC-135
+		t.Fatalf("task = %s", f.taskStatus(t))
 	}
 }
 
