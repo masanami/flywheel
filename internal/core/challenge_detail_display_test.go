@@ -79,9 +79,24 @@ func TestChallengeDetail_EmptyFrameColumnsFallBackToThePlanAndKeepRecordedHalf(t
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, tk := range d.Tasks { // 計画が両方の額を書いている（99・88）ので、その額が枠になる
+		if tk.BudgetImplUSD != 99 || tk.BudgetReviewUSD != 88 {
+			t.Errorf("task %s frame = %v / %v, want the plan's 99 / 88", tk.ID, tk.BudgetImplUSD, tk.BudgetReviewUSD)
+		}
+	}
+	// 計画が額を書かず、サイズだけのときは、宣言のサイズごとの既定（宣言の無いワークスペースでは既定の宣言）から引く。
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE task_plan SET spec = json_remove(spec, '$.budget_impl_usd', '$.budget_review_usd') WHERE challenge_id = ?`, cid)
+		return err
+	})
+	d, err = f.s.GetChallenge(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantM := defaultAgentDeclaration().SizeBudgetsUSD.M
 	for _, tk := range d.Tasks {
-		if tk.BudgetImplUSD == 0 && tk.BudgetReviewUSD == 0 {
-			t.Logf("task %s frame unresolved without a declaration: 0 / 0", tk.ID)
+		if wantM.Impl == 0 || tk.BudgetImplUSD != wantM.Impl || tk.BudgetReviewUSD != wantM.Review {
+			t.Errorf("task %s frame = %v / %v, want the size M default %+v", tk.ID, tk.BudgetImplUSD, tk.BudgetReviewUSD, wantM)
 		}
 	}
 	writeForTest(t, f.s, func(tx *sql.Tx) error {
