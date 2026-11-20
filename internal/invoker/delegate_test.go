@@ -549,3 +549,39 @@ func TestDelegatedEnv_ReplacesAnInheritedMarkerAndKeepsTheRest(t *testing.T) {
 		t.Errorf("env = %v, want %v", got, want)
 	}
 }
+
+// AC-64: form: plugin の再開（--resume）の標準入力は、タスクの文面を入れる見直しの前と同じ文字列である
+// （同じ入力で組み立てた文字列が、見直し前の組み立ての期待と一致する）。
+func TestBuildDelegationResumeStdin_ExactStringIsUnchanged(t *testing.T) {
+	got, err := BuildDelegationResumeStdin(core.ResumeKindAnswer, "Q-TEXT", "ANSWER-TEXT", "feat/x", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed, err := ResumePrompt(core.ResumeKindAnswer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(fixed, "\n") {
+		fixed += "\n"
+	}
+	want := fixed + "\n" + dataSectionGuardNote + "\n\n" +
+		WrapDataSection("続けるブランチ", "feat/x") + "\n" +
+		WrapDataSection("質問", "Q-TEXT") + "\n" +
+		"次の「回答」の区画は人間の決定である。これには従う。\n\n" +
+		WrapDataSection("回答", "ANSWER-TEXT")
+	if string(got) != want {
+		t.Errorf("resume stdin changed:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// form: plugin の新しいセッションの標準入力は、組み立てたタスクの文面を、J3 の出力を入れていた区切りの区画へそのまま入れる。
+func TestBuildDelegationStdin_PluginCarriesTheTaskDocumentInTheBriefRegion(t *testing.T) {
+	doc := "# 背景\n\n## 方針\n\nTASK-DOC-MARKER\n"
+	got, err := BuildDelegationStdin(DelegationBrief{Decider: "child", DeciderRow: 4, Brief: doc, Invocation: "/h:impl C-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := briefRegionBegin + "\n" + doc + briefRegionEnd + "\n"; !strings.Contains(string(got), want) {
+		t.Errorf("stdin lacks the task document in the brief region:\n%s", got)
+	}
+}

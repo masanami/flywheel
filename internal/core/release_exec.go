@@ -96,10 +96,10 @@ type ReleaseTidyAction string
 const (
 	// ReleaseTidyClosed は、PR がマージ済みの承認待ちの release を closed にしたこと。
 	ReleaseTidyClosed ReleaseTidyAction = "closed"
-	// ReleaseTidyReopened は、検証の後に中身が変わった PR の release を置き換え、完了の課題を着手中へ戻したこと。
+	// ReleaseTidyReopened は、検証の後に中身が変わった PR の release を置き換え、完了の課題を検証中へ戻したこと。
 	ReleaseTidyReopened ReleaseTidyAction = "reopened"
 	// ReleaseTidyNeedsHuman は、完了の課題の release の PR の head が検証の後に動いたが、取り込みだけとも中身の変更とも
-	// 確かめられず（比較の打ち切り・head 無し等）、人間待ちにしたこと。何も書かない。人が承認するか着手中へ戻すかを選ぶ。
+	// 確かめられず（比較の打ち切り・head 無し等）、人間待ちにしたこと。何も書かない。人が承認するか検証中へ戻すかを選ぶ。
 	ReleaseTidyNeedsHuman ReleaseTidyAction = "needs_human"
 )
 

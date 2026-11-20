@@ -31,7 +31,7 @@ func (f *delegateFixture) newApprovedViaAPI(t *testing.T, title string) string {
 	}
 	cid, _ := parseChallengeID(ch.ID)
 	if err := f.s.db.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE task_plan SET spec = ? WHERE challenge_id = ? AND version = 2`, planSpec(nil), cid)
+		_, err := tx.Exec(`UPDATE task_plan SET spec = ? WHERE challenge_id = ? AND version = 2`, briefSpec(nil), cid)
 		return err
 	}); err != nil {
 		t.Fatalf("set spec: %v", err)
@@ -268,7 +268,7 @@ func TestRunDelegation_ExplicitID_TwoTaskPlanIsNotLaunched_OneTaskPlanUsesTheTas
 	if len(f.j3Inputs) != 0 {
 		t.Error("J3 must not start for a 2-task plan")
 	}
-	one := f.newInProgress(t, "one", "P1", planSpec(nil))
+	one := f.newInProgress(t, "one", "P1", briefSpec(nil))
 	if _, err := f.run(t, &one); err != nil {
 		t.Fatalf("a 1-task plan must be launchable: %v", err)
 	}

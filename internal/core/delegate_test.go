@@ -39,6 +39,7 @@ const delegateConnectorsJSON = `{
   "repos": [
     {"name": "main-repo", "remote": "o/r", "default_branch": "main", "connector": "harness", "slots": {"provider": "clone", "paths": ["slot1"]}},
     {"name": "sibling", "remote": "o/s", "default_branch": "main", "connector": "harness", "slots": {"provider": "clone", "paths": ["slot-s"]}},
+    {"name": "main-brief", "remote": "o/r", "default_branch": "main", "connector": "direct", "slots": {"provider": "clone", "paths": ["slot1"]}},
     {"name": "direct-repo", "remote": "o/d", "default_branch": "main", "connector": "direct", "slots": {"provider": "clone", "paths": ["slot-d"]}}
   ]
 }`
@@ -150,6 +151,17 @@ func planSpec(mut func(m map[string]any)) string {
 			mut(m)
 		}
 	}))
+}
+
+// briefSpec は planSpec の、form: brief の接続ツールの操作（J3 を呼ぶ形態）を使う計画。リポジトリ main-brief は main-repo と同じ
+// リモート・スロットを持つ（form: plugin は J3 を呼ばないため、J3 の入力・費用・呼び出しを確かめる試験が使う）。
+func briefSpec(mut func(m map[string]any)) string {
+	return planSpec(func(m map[string]any) {
+		m["repo"], m["operation"] = "main-brief", "brief"
+		if mut != nil {
+			mut(m)
+		}
+	})
 }
 
 // newInProgress は着手中で承認済みの計画（版 1。spec 付き）を持つ課題を作る。spec が空なら
@@ -348,16 +360,16 @@ func TestRunDelegation_OmittedID_OnlyInProgressWithApprovedPlanAndNoActiveRun(t 
 	t.Parallel()
 	f := newDelegateFixture(t)
 	ctx := context.Background()
-	target := f.newInProgress(t, "target", "P1", planSpec(nil))
+	target := f.newInProgress(t, "target", "P1", briefSpec(nil))
 
 	unclassified, _ := f.s.CreateChallenge(ctx, ChannelCLI, CreateInput{Title: "unclassified"})
 	_ = unclassified
-	classified := f.newInProgress(t, "classified", "P1", planSpec(nil))
-	awaitingApproval := f.newInProgress(t, "awaiting", "P1", planSpec(nil))
-	verifying := f.newInProgress(t, "verifying", "P1", planSpec(nil))
-	onHold := f.newInProgress(t, "hold", "P1", planSpec(nil))
+	classified := f.newInProgress(t, "classified", "P1", briefSpec(nil))
+	awaitingApproval := f.newInProgress(t, "awaiting", "P1", briefSpec(nil))
+	verifying := f.newInProgress(t, "verifying", "P1", briefSpec(nil))
+	onHold := f.newInProgress(t, "hold", "P1", briefSpec(nil))
 	noSpec := f.newInProgress(t, "nospec", "P1", "")
-	busy := f.newInProgress(t, "busy", "P1", planSpec(nil))
+	busy := f.newInProgress(t, "busy", "P1", briefSpec(nil))
 	for id, st := range map[string]string{classified: "classified", awaitingApproval: "awaiting_plan_approval", verifying: "verifying", onHold: "awaiting_human"} {
 		n, _ := parseChallengeID(id)
 		if err := f.s.db.Write(ctx, func(tx *sql.Tx) error {
@@ -458,7 +470,7 @@ func TestRunDelegation_ExplicitID_PlanWithoutSpecIsValidationError(t *testing.T)
 func TestRunDelegation_J3InputHasPlanSpecHoldsOperationAndDecider(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
-	spec := planSpec(nil)
+	spec := briefSpec(nil)
 	id := f.newInProgress(t, "t", "P1", spec)
 	n, _ := parseChallengeID(id)
 	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
@@ -488,7 +500,7 @@ func TestRunDelegation_J3InputHasPlanSpecHoldsOperationAndDecider(t *testing.T) 
 func TestRunDelegation_J3InputFetchesUpstream_AndLeavesReadValuesUnchanged(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
-	id := f.newInProgress(t, "src", "P1", planSpec(func(m map[string]any) { m["operation"] = "impl-src" }))
+	id := f.newInProgress(t, "src", "P1", briefSpec(nil))
 	ch := &Challenge{ID: id}
 	// f.bind 相当（j2Fixture と同じ形）。
 	key := "o/r#7"
@@ -506,6 +518,9 @@ func TestRunDelegation_J3InputFetchesUpstream_AndLeavesReadValuesUnchanged(t *te
 	if _, err := f.run(t, nil); err != nil {
 		t.Fatal(err)
 	}
+	if len(f.j3Inputs) == 0 {
+		t.Fatal("J3 was not called")
+	}
 	text := sectionsText(f.j3Inputs[0].Sections)
 	for _, want := range []string{"UP-BODY-MARKER", "UP-COMMENT-ONE", "UP-COMMENT-TWO"} {
 		if !strings.Contains(text, want) {
@@ -515,10 +530,6 @@ func TestRunDelegation_J3InputFetchesUpstream_AndLeavesReadValuesUnchanged(t *te
 	after := f.detail(t, id).SourceBinding
 	if after.ReadCommentsCount != before.ReadCommentsCount || after.ReadUpstreamUpdatedAt != before.ReadUpstreamUpdatedAt {
 		t.Errorf("read values changed: before=%+v after=%+v", before, after)
-	}
-	// plugin の invocation の差し込みは取り込み元の Issue 番号で埋まる。
-	if got := f.deleg.launched()[0].Invocation; got != "/h:impl 7 "+id {
-		t.Errorf("Invocation = %q, want %q", got, "/h:impl 7 "+id)
 	}
 }
 
@@ -534,7 +545,7 @@ func (f *delegateFixture) detail(t *testing.T, id string) *ChallengeDetail {
 func TestRunDelegation_UpstreamFetchFailure_StartsNothing(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
-	id := f.newInProgress(t, "src", "P1", planSpec(func(m map[string]any) { m["operation"] = "impl-src" }))
+	id := f.newInProgress(t, "src", "P1", briefSpec(nil))
 	in := validBindingInput("o/r#7")
 	if _, err := createSourceBindingForTest(f.s, id, time.Now(), in); err != nil {
 		t.Fatal(err)
@@ -580,7 +591,7 @@ func TestRunDelegation_J3InvalidOutputOrNotSucceeded_NoDelegationAndStateUnchang
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := newDelegateFixture(t)
-			id := f.newInProgress(t, "t", "P1", planSpec(nil))
+			id := f.newInProgress(t, "t", "P1", briefSpec(nil))
 			before := f.detail(t, id)
 			f.j3.result = c.out
 			res, err := f.run(t, nil)
@@ -608,7 +619,7 @@ func TestRunDelegation_J3BudgetAndTimeoutComeFromDeclaration(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
 	f.agent.JudgmentBudgetUSD.J3 = 1.25
-	f.newInProgress(t, "t", "P1", planSpec(nil))
+	f.newInProgress(t, "t", "P1", briefSpec(nil))
 	var got JudgmentLaunchInput
 	f.j3.onInvoke = func(in JudgmentLaunchInput) { got = in }
 	if _, err := f.run(t, nil); err != nil {
@@ -648,8 +659,11 @@ func TestRunDelegation_LaunchInput_WorkDirPermissionModeBriefInvocationBudget(t 
 	if ins[0].WorkDir != filepath.Join(f.s.Workspace(), "slot1") || ins[0].PermissionMode != modes["harness"] {
 		t.Errorf("plugin launch = %+v", ins[0])
 	}
-	if ins[0].Invocation == "" || ins[0].Brief != "BRIEF-MARKER" {
-		t.Errorf("plugin: Invocation=%q Brief=%q", ins[0].Invocation, ins[0].Brief)
+	if ins[0].Invocation == "" || !strings.HasPrefix(ins[0].Brief, "# 背景\n") {
+		t.Errorf("plugin: Invocation=%q Brief=%q (want the task document, not a J3 output)", ins[0].Invocation, ins[0].Brief)
+	}
+	if ins[1].Brief != "BRIEF-MARKER" {
+		t.Errorf("brief: Brief=%q, want the J3 output", ins[1].Brief)
 	}
 	if ins[1].WorkDir != filepath.Join(f.s.Workspace(), "slot-d") || ins[1].PermissionMode != modes["direct"] {
 		t.Errorf("brief launch = %+v", ins[1])
@@ -1011,7 +1025,7 @@ func TestDelegationReport_QuestionsOutcomeNeedsAQuestion(t *testing.T) {
 func TestRunDelegation_StatusChangedAfterJ3_ExplicitIDIsInvalidTransition(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
-	id := f.newInProgress(t, "t", "P1", planSpec(nil))
+	id := f.newInProgress(t, "t", "P1", briefSpec(nil))
 	n, _ := parseChallengeID(id)
 	f.j3.onInvoke = func(JudgmentLaunchInput) {
 		_ = f.s.db.Write(context.Background(), func(tx *sql.Tx) error {

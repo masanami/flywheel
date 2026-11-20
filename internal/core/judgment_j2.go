@@ -297,6 +297,7 @@ func j2OutputSchema() []byte {
 // この同じ関数を通る（J2 で検査した後に宣言が変わっても、検査していない引数で起動しない）。
 //   - cli 形態: op.Invocation と commands（start・status・resume・cancel・reflect）の引数が、cliCommandPlaceholders の表のそれぞれの差し込みの閉集合の中の値だけを要する
 //   - 取り込み元の無い課題: op.Invocation も cli の commands も、取り込み元の差し込みを要しない
+//     （commands.start に {task_file} を書いた cli の宣言は、commands について要してよい）
 func checkOperationLaunchable(connector *Connector, op *ConnectorOperation, hasSource bool) error {
 	if connector == nil || op == nil {
 		return fmt.Errorf("%w: unknown connector or operation", ErrValidation)
@@ -312,7 +313,8 @@ func checkOperationLaunchable(connector *Connector, op *ConnectorOperation, hasS
 	if !hasSource && invocationNeedsSource(op.Invocation) {
 		return fmt.Errorf("%w: operation %q needs the source issue but the challenge has none", ErrValidation, op.ID)
 	}
-	if !hasSource && cliCommandsNeedSource(connector) {
+	// commands.start に {task_file} を書いた宣言は、取り込み元の無いタスクも起動する（取り込み元の差し込みは空の文字列で渡る）。
+	if !hasSource && !startTakesTaskFile(connector) && cliCommandsNeedSource(connector) {
 		return fmt.Errorf("%w: connector %q commands need the source issue but the challenge has none", ErrValidation, connector.ID)
 	}
 	return nil
@@ -1038,7 +1040,7 @@ func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, age
 			}
 			line := "    - id: " + op.ID + "｜対話前提: " + yesNo(op.Interactive) + "｜成果物: " + artifacts
 			switch {
-			case !hasSource && (invocationNeedsSource(op.Invocation) || cliCommandsNeedSource(connector)):
+			case !hasSource && (invocationNeedsSource(op.Invocation) || (!startTakesTaskFile(connector) && cliCommandsNeedSource(connector))):
 				line += "｜注記: 取り込み元の Issue の情報を必要とするため、この課題では選べない"
 			}
 			b.WriteString(line + "\n")

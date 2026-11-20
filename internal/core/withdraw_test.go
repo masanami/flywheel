@@ -392,7 +392,7 @@ func TestWithdraw_J2Mapping_DuringJ2_OnlyTheRunOutputIsKept(t *testing.T) {
 func TestWithdraw_J3_DuringJ3_NothingIsLaunched(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
-	id := f.newInProgress(t, "t", "P1", planSpec(nil))
+	id := f.newInProgress(t, "t", "P1", briefSpec(nil))
 	f.j3.onInvoke = func(in JudgmentLaunchInput) {
 		f.recordJ3(in)
 		if _, err := withdrawForTest(t, f.s, id, "r"); err != nil {

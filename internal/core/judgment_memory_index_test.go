@@ -106,7 +106,7 @@ func TestJ3Input_MemoryIndex(t *testing.T) {
 	t.Parallel()
 	for _, with := range []bool{true, false} {
 		f := newDelegateFixture(t)
-		id := f.newInProgress(t, "t", "P1", planSpec(nil))
+		id := f.newInProgress(t, "t", "P1", briefSpec(nil))
 		var p string
 		if with {
 			p = writeMemoryIndex(t, f.s, f.agent)
