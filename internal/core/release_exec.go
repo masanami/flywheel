@@ -59,8 +59,10 @@ type ReleaseExecOptions struct {
 	Compare UpstreamCompareSource
 	// Connectors は PR のリポジトリ・既定ブランチを引く宣言。
 	Connectors *ConnectorsDeclaration
-	// Agent は failure_limit の出どころ。nil なら既定値。
+	// Agent は failure_limit と、契約のコマンドの時間の上限の出どころ。nil なら既定値。
 	Agent *AgentDeclaration
+	// Contract は契約のコマンド（status・resume）の起動。課題に対応する契約の実行があるときに使う（nil なら読めなかったものとして扱う）。
+	Contract ContractClient
 	// CycleID は発生に持たせる周の ID（"Y-<n>"）。空なら周を持たない（NULL）。形式不正は ErrValidation。
 	CycleID string
 	// cycleID は ExecuteReleases が CycleID を解釈した内部整数 ID。
@@ -83,7 +85,8 @@ type ReleaseExecItem struct {
 	ObservedHead        string
 	MergeCommit         string
 	ConsecutiveFailures int
-	// Route は反映の依頼の経路。結果が waiting_outside のとき ReleaseRouteOutside（それ以外は空）。
+	// Route は反映の依頼の経路（ReleaseRouteWaitingRun・ReleaseRouteReflectRequest・ReleaseRouteOutside）。対応する契約の実行が無い・
+	// 対応しない実行を待つときは空。
 	Route string
 }
 
@@ -272,6 +275,10 @@ type releaseJudgment struct {
 	observedHead string
 	mergeCommit  string
 	detail       string
+	// route は試行の route（空は null）。
+	route string
+	// landDeliveredRunID が 0 でないとき、結果を書く書き込みで、その契約の実行の「入れてよい」が届いた記録（land_delivered）を真にする。
+	landDeliveredRunID int64
 }
 
 func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExecOptions) (*ReleaseExecItem, *NotStarted, error) {
@@ -359,6 +366,25 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 	}
 
 	j, err := s.judgeRelease(ctx, row, approvedRow, opts)
+	if errors.Is(err, errReleaseContractBusy) {
+		// 契約のコマンドを呼ぶための実行の記録を作れない。開いた試行の行を消して（試行の行を増やさない）、次の反映の段でやり直す。
+		detail := ""
+		_ = s.db.Read(ctx, func(tx *sql.Tx) error {
+			if a, e := loadActiveRunByChallengeID(ctx, tx, row.ChallengeID); e == nil && a != nil {
+				detail = a.ID
+			}
+			return nil
+		})
+		if derr := s.db.Write(ctx, func(tx *sql.Tx) error { return deleteOpenOperationExecution(ctx, tx, attempt.ID) }); classifyReadWriteErr(derr) != nil {
+			s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
+		}
+		return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID), Reason: NotStartedInProgress, Detail: detail}, nil
+	}
+	if errors.Is(err, ErrConflict) {
+		s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
+		return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
+			Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
+	}
 	if err != nil {
 		s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
 		return nil, nil, err
@@ -513,15 +539,6 @@ func (a *approvedHeadChecks) noChecks(ctx context.Context, src UpstreamCheckSour
 	return a.none, nil
 }
 
-// unfinishedContractRuns は課題の終わっていない契約の実行の数を返す。
-func (s *Store) unfinishedContractRuns(ctx context.Context, challengeID int64) (int, error) {
-	var n int
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, challengeID).Scan(&n)
-	})
-	return n, classifyReadWriteErr(err)
-}
-
 // judgeRelease は成果物を上流から読んで確かめ（承認した中身・宛先・入っているか・閉じているか・取り込みだけの変わり方・
 // チェック）、道を選んで結果を返す。読み取りだけで、反映先へは何も書かない。
 //
@@ -529,9 +546,37 @@ func (s *Store) unfinishedContractRuns(ctx context.Context, challengeID int64) (
 // 取り込んだ後の head のすべてのチェック（必須でないものを含む。1 件以上）が成功していることを確かめてから進む
 // （承認し直さない）。ただし承認した head にもチェックが 0 件だったと確かめられたときは、0 件のままでも進む。
 //
-// この区切りで選べる道は、終わっていない契約の実行がある（waiting_delegate）か、無い（waiting_outside）かだけ。
+// 道は chooseReleasePath が選ぶ（タスクの実行へ「入れてよい」を返す・対応しない実行を待つ・flywheel の外での反映を待つ）。
 // 返すエラーは、ストアを読めなかったときだけ。
 func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions) (releaseJudgment, error) {
+	run, err := s.loadReleaseRun(ctx, row)
+	if err != nil {
+		return releaseJudgment{}, err
+	}
+	// 対応する契約の実行があれば、先に commands.status で読む（「入れてよい」を返したか・最後に読んだ状態が何かによらない）。
+	var rep *ContractRunReport
+	if run != nil && run.corresponds {
+		var early *releaseJudgment
+		if rep, early, err = s.readReleaseRun(ctx, opts, run); err != nil {
+			return releaseJudgment{}, err
+		}
+		if early != nil {
+			early.route = run.route()
+			return *early, nil
+		}
+	}
+	j, err := s.judgeReleaseUpstream(ctx, row, approvedHead, opts, run, rep)
+	if err != nil {
+		return releaseJudgment{}, err
+	}
+	if j.route == "" && j.result != ExecutionResultWaitingOutside {
+		j.route = run.route()
+	}
+	return j, nil
+}
+
+// judgeReleaseUpstream は judgeRelease の、成果物を上流から読んで確かめ、道を選ぶ部分。
+func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport) (releaseJudgment, error) {
 	approved := &approvedHeadChecks{}
 	// 1
 	if approvedHead == "" {
@@ -612,16 +657,8 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailNoChecksYet}, nil
 		}
 	}
-	// 道: 終わっていない契約の実行があれば、委譲先を何も呼ばずに待つ（その先の道はこの区切りでは持たない）。
-	// 無ければ、flywheel の外で反映先へ入るのを待つ。入ったことは次の判定の 4 が読む。
-	unfinished, err := s.unfinishedContractRuns(ctx, row.ChallengeID)
-	if err != nil {
-		return releaseJudgment{}, err
-	}
-	if unfinished > 0 {
-		return releaseJudgment{result: ExecutionResultWaitingDelegate, observedHead: observed}, nil
-	}
-	return releaseJudgment{result: ExecutionResultWaitingOutside, observedHead: observed}, nil
+	// 道（通す中身は、成果物のいまの中身。承認した中身と同じか、反映先の最新の取り込みだけを足したもの）。
+	return s.chooseReleasePath(ctx, row, opts, run, rep, pr.HeadSHA, observed)
 }
 
 // lastDecidedExecutionResult は opID の、閉じた試行のうち最後のもの（interrupted を除く）の結果を返す（無ければ空）。

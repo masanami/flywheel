@@ -6,7 +6,6 @@ package core
 //   - waiting かつ requested_action.kind = review かつ成果物（pr・branch・commit）あり: run の終わりを待たず、成果物を
 //     その読みの run へ取り込んで課題を検証中へ進める（submitContractReview）。契約の run は waiting のまま開いておく。
 //   - 完了の検証（J5）が not_met: 同じ契約の run へ resume（選択肢 respond・添え書きに差し戻しの理由）で返す。
-//   - 本番反映（flywheel のマージ）の後: resume（選択肢 ready）で返し、接続ツールの run を終わらせる。
 //
 // 接続ツール固有の名前（ゲート名など）は読まない。見分けるのは契約の汎用の値だけである。
 
@@ -89,7 +88,6 @@ type reviewReply struct {
 }
 
 // pendingReviewReply は、レビュー待ち（waiting・review）の契約の run 1 件について、flywheel が返す答えを決める。
-//   - 本番反映が済んでいる（その課題の release が executed）: ready を返して接続ツールの run を終わらせる。
 //   - 課題が着手中で、最後の J5 が not_met で、その後に契約のコマンドを呼んでいない: respond と差し戻しの理由を返す。
 //     差し戻しの上限（agent.ReworkLimit。J5 の not_met の数。保留への回答の後から数え直す）に達していれば、返さず保留にする。
 //   - 課題が着手中で、T15（人が完了の承認を差し戻した）の記録が最後の契約のコマンドより新しい: respond と差し戻しの理由（approval.reason）を返す。
@@ -102,16 +100,6 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 		ch, err := loadChallenge(ctx, tx, row.ChallengeID)
 		if err != nil || ch == nil {
 			return err
-		}
-		var executed int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operation WHERE challenge_id = ? AND kind = 'release' AND state = 'executed'`,
-			row.ChallengeID).Scan(&executed); err != nil {
-			return err
-		}
-		// ready は課題が完了（本番反映の後）のときだけ返す。検証中などに別の release が executed でも、新しい run へ早すぎる ready を返さない。
-		if executed > 0 && ch.Status == StatusDone {
-			out = &reviewReply{Answer: &contractAnswer{Choice: contractChoiceReady}}
-			return nil
 		}
 		var noWaitHold bool
 		if err := tx.QueryRowContext(ctx, `SELECT wait_hold_id IS NULL FROM contract_run WHERE id = ?`, row.ID).Scan(&noWaitHold); err != nil {

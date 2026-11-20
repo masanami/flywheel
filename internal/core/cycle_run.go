@@ -261,6 +261,7 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			Compare:    in.Compare,
 			Connectors: in.ConnDecl,
 			Agent:      in.AgentDecl,
+			Contract:   in.Contract,
 			Trigger:    ReleaseExecTriggerCycle,
 			CycleID:    cycleID,
 		})
