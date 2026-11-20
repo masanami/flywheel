@@ -168,7 +168,7 @@ func TestTaskMigration(t *testing.T) {
 		}
 		cols := tableColumnInfo(t, db, "task")
 		required := []string{"id", "challenge_id", "plan_version", "title", "body", "done_criteria", "repo", "operation", "status", "created_at", "updated_at"}
-		nullable := []string{"key", "non_goals", "source_key"}
+		nullable := []string{"key", "non_goals", "source_key", "budget_impl_micros", "budget_review_micros"} // 後の 2 つは版 29 で足す
 		if len(cols) != len(required)+len(nullable) {
 			t.Errorf("task columns = %v, want %d columns", cols, len(required)+len(nullable))
 		}
@@ -241,7 +241,7 @@ func TestTaskMigration(t *testing.T) {
 			t.Errorf("challenge.uses_integration: present=%v notnull=%v; want present and nullable", ok, nn)
 		}
 	})
-	t.Run("existing_active_run_indexes_are_unchanged", func(t *testing.T) {
+	t.Run("existing_active_run_indexes_are_unchanged_by_0026", func(t *testing.T) {
 		indexSQL := func(db *DB, name string) string {
 			var got string
 			if err := db.Read(context.Background(), func(tx *sql.Tx) error {
@@ -256,7 +256,11 @@ func TestTaskMigration(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = old.Close() }()
-		db := openFresh(t)
+		db, err := Open(filepath.Join(t.TempDir(), "v28.db"), migrationsUpTo(t, 28)) // 版 29 が索引を作り直すので、26〜28 では変わらないことを見る
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = db.Close() }()
 		for _, name := range []string{"idx_run_active_challenge", "idx_contract_run_active_challenge"} {
 			if before, after := indexSQL(old, name), indexSQL(db, name); before != after {
 				t.Errorf("index %s changed:\n before: %s\n after:  %s", name, before, after)

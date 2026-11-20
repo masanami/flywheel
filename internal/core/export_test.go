@@ -638,3 +638,30 @@ func TestImport_S3aColumnsSurviveTheRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// 版 29 で足した列（task の予算・challenge.integration_ref・contract_run.verified_ref・approval.task_id・run.reflect）の値は、
+// 書き出し→空のストアへの再構築で同じになる。
+func TestImport_S3bColumnsSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	src, _ := filledStore(t)
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+		t.Fatal(err)
+	}
+	for query, want := range map[string]string{
+		`SELECT budget_impl_micros || '|' || budget_review_micros FROM task WHERE id = 1`: `3000000|1500000`,
+		`SELECT integration_ref FROM challenge WHERE id = 1`:                              `feat/issue-1`,
+		`SELECT verified_ref FROM contract_run WHERE id = 1`:                              `deadbeef`,
+		`SELECT CAST(task_id AS TEXT) FROM approval WHERE id = 1`:                         `1`,
+		`SELECT CAST(reflect AS TEXT) FROM run WHERE id = 2`:                              `1`,
+		`SELECT CAST(reflect AS TEXT) FROM run WHERE id = 1`:                              `0`,
+	} {
+		var got string
+		if err := dst.db.Read(context.Background(), func(tx *sql.Tx) error { return tx.QueryRow(query).Scan(&got) }); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		if got != want {
+			t.Errorf("%s = %q, want %q", query, got, want)
+		}
+	}
+}
