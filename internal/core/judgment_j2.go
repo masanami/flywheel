@@ -295,7 +295,7 @@ func j2OutputSchema() []byte {
 // checkOperationLaunchable は接続ツール connector の操作 op を、取り込み元の有無が hasSource の課題で起動できるかを
 // 検査する（できなければ ErrValidation）。J2 の出力の検査と、form: cli の委譲の起動（StartContractDelegation）が
 // この同じ関数を通る（J2 で検査した後に宣言が変わっても、検査していない引数で起動しない）。
-//   - cli 形態: op.Invocation と commands（start・status・resume・cancel）の引数が、それぞれの差し込みの閉集合の中の値だけを要する
+//   - cli 形態: op.Invocation と commands（start・status・resume・cancel・reflect）の引数が、cliCommandPlaceholders の表のそれぞれの差し込みの閉集合の中の値だけを要する
 //   - 取り込み元の無い課題: op.Invocation も cli の commands も、取り込み元の差し込みを要しない
 func checkOperationLaunchable(connector *Connector, op *ConnectorOperation, hasSource bool) error {
 	if connector == nil || op == nil {
