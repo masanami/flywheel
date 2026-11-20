@@ -799,3 +799,76 @@ func TestResume_Worktree_IdleOriginalDroppedFromDeclarationIsSlotUnavailable(t *
 		t.Errorf("notStarted = %+v, launches %d→%d", res.NotStarted, launches, len(f.deleg.launched()))
 	}
 }
+
+// あるタスクの委譲の失敗は、同じ課題の別のタスクの連続失敗の数に入らない（タスクの単位に絞る）。
+func TestLaunchHistoryForTask_FailuresOfAnotherTaskDoNotCount(t *testing.T) {
+	t.Parallel()
+	pv := int64(1)
+	mk := func(id, task string, r RunResult) runRow {
+		tk := task
+		return runRow{ID: id, Kind: runKindDelegate, SessionID: "s-" + id, Result: r, PlanVersion: &pv, StartedAt: time.Now(), TaskID: &tk}
+	}
+	h := &launchHistory{Runs: []runRow{mk("R-1", "T-1", RunResultErrored), mk("R-2", "T-2", RunResultErrored), mk("R-3", "T-1", RunResultErrored)}}
+	if _, limit := h.forTask("T-2").decideLaunch(1, 2); limit != nil {
+		t.Errorf("T-2 limit = %+v, want none (only 1 own failure)", limit)
+	}
+	_, limit := h.forTask("T-1").decideLaunch(1, 2)
+	if limit == nil || limit.Count != 2 || limit.Last.ID != "R-3" {
+		t.Errorf("T-1 limit = %+v, want count 2 ending at R-3", limit)
+	}
+	// 別のタスクの run へは再開しない。
+	if resume, _ := h.forTask("T-2").decideLaunch(1, 5); resume == nil || resume.Target.ID != "R-2" {
+		t.Errorf("T-2 resume = %+v, want the session of R-2", resume)
+	}
+	// タスクに結び付かない run は、どのタスクにも残す（タスクが 1 個の課題の動きは変わらない）。
+	h2 := &launchHistory{Runs: []runRow{{ID: "R-1", Kind: runKindDelegate, SessionID: "s", Result: RunResultErrored, PlanVersion: &pv, StartedAt: time.Now()}}}
+	if len(h2.forTask("T-1").Runs) != 1 {
+		t.Error("a run without a task must stay in every task's history")
+	}
+}
+
+// あるタスクへの差し戻し（J5 の not_met）は、同じ課題の別のタスクの差し戻しの数に入らない。
+func TestLaunchHistoryForTask_ReworksOfAnotherTaskDoNotCount(t *testing.T) {
+	t.Parallel()
+	pv := int64(1)
+	notMet := `{"verdict":"not_met","reason":"r","feedback":"fix"}`
+	mkV := func(id, task string) runRow {
+		tk := task
+		return runRow{ID: id, Kind: runKindJudgment, Judgment: "J5", Result: RunResultSucceeded, PlanVersion: &pv, TaskID: &tk, StartedAt: time.Now(), Output: notMet}
+	}
+	h := &launchHistory{Verifications: []runRow{mkV("R-1", "T-1"), mkV("R-2", "T-2"), mkV("R-3", "T-1")}}
+	if _, hit := h.forTask("T-2").decideRework(1, 2); hit != nil {
+		t.Errorf("T-2 hit = %+v, want none (only 1 own rework)", hit)
+	}
+	if _, hit := h.forTask("T-1").decideRework(1, 2); hit == nil || hit.Count != 2 {
+		t.Errorf("T-1 hit = %+v, want count 2", hit)
+	}
+}
+
+// 別のタスクの run を原因とする保留は、このタスクの履歴に入らない。
+func TestLaunchHistoryForTask_HoldOfAnotherTaskIsExcluded(t *testing.T) {
+	t.Parallel()
+	pv := int64(1)
+	t1, t2 := "T-1", "T-2"
+	r1 := int64(1)
+	ans := "go"
+	h := &launchHistory{
+		Runs: []runRow{
+			{ID: "R-1", Kind: runKindDelegate, SessionID: "s1", Result: RunResultSucceeded, PlanVersion: &pv, TaskID: &t1, StartedAt: time.Now()},
+			{ID: "R-2", Kind: runKindDelegate, SessionID: "s2", Result: RunResultErrored, PlanVersion: &pv, TaskID: &t2, StartedAt: time.Now()},
+		},
+		Holds: []holdRef{{ID: 1, RunID: &r1, Answer: &ans, RaisedAt: time.Now()}, {ID: 2, Answer: &ans, RaisedAt: time.Now()}},
+	}
+	if got := h.forTask("T-2").Holds; len(got) != 1 || got[0].ID != 2 {
+		t.Errorf("T-2 holds = %+v, want only the challenge-level hold", got)
+	}
+	// 保留自身のタスクが別のものなら、原因の run が履歴に無くても外す（契約の run を原因とする保留など）。
+	h.Holds = append(h.Holds, holdRef{ID: 3, Answer: &ans, RaisedAt: time.Now(), TaskID: &t1})
+	if got := h.forTask("T-2").Holds; len(got) != 1 {
+		t.Errorf("T-2 holds = %+v, want the hold of T-1 excluded", got)
+	}
+	h.Holds = h.Holds[:2]
+	if got := h.forTask("T-1").Holds; len(got) != 2 {
+		t.Errorf("T-1 holds = %d, want 2", len(got))
+	}
+}

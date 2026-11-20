@@ -444,7 +444,7 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 	var unavailable error
 	var tasks []Task
 	var taskRem bucketRemaining
-	var taskRemOK, taskRemSole bool
+	var taskRemOK bool
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		p, gap, detail, err := lookupApprovedPlan(ctx, tx, cid)
 		if err != nil {
@@ -499,7 +499,7 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 						if taskRem, err = taskRemaining(ctx, tx, cid, tb, bs); err != nil {
 							return err
 						}
-						taskRemOK, taskRemSole = true, planVersionTaskCount(bs, tb.PlanVersion) == 1
+						taskRemOK = true
 					}
 				}
 			}
@@ -528,6 +528,7 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 	}
 	task := tasks[0]
 	dc.Task = task
+	history = history.forTask(task.ID) // 失敗・差し戻し・再開の対象は、このタスクのものだけ
 	dc.Validated = validated
 	repo, connector := in.ConnDecl.findConnectorRepo(task.Repo)
 	if repo == nil || connector == nil {
@@ -549,10 +550,8 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 	dc.Resume, dc.LimitHit, dc.ReworkHit = decision.Resume, decision.LimitHit, decision.ReworkHit
 	// 費用が取れない失敗の後の再開に限り、失敗前の実装枠の残りを上限に 1 回だけ起動を許す。
 	// 人間が flywheel budget で枠を置き直して 1 USD 以上が残っているときは、その額に従う。
-	// 履歴は課題の単位なので、再開の許可は、同じ計画の版にタスクが 1 個だけの課題に限って適用する（status の予算切れと同じ規則）。
-	if !taskRemOK || taskRemSole {
-		dc.ImplBudgetMicros = history.effectiveImplBudget(dc.Plan.Version, decision, dc.ImplBudgetMicros)
-	}
+	// 履歴はタスクの単位に絞ってあるので、再開の許可もタスクごとに判定する（status の予算切れと同じ規則）。
+	dc.ImplBudgetMicros = history.effectiveImplBudget(dc.Plan.Version, decision, dc.ImplBudgetMicros)
 	if dc.Resume != nil {
 		err := s.db.Read(ctx, func(tx *sql.Tx) error {
 			b, err := loadRunBranch(ctx, tx, dc.Resume.Target, in.ConnDecl.HumanQuestionKinds, dc.Repo.DefaultBranch)

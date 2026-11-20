@@ -126,12 +126,21 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 		if err != nil {
 			return err
 		}
+		if row.TaskID != nil {
+			h = h.forTask(formatTaskID(*row.TaskID))
+		}
 		if _, hit := h.decideRework(int(*planVersion), agent.ReworkLimit); hit != nil {
 			out = &reviewReply{HoldQuestion: contractReworkLimitQuestion(hit), HoldRunID: hit.Last.ID}
 			return nil
 		}
 		var lastContract int64
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM run WHERE challenge_id = ? AND kind = 'contract' AND operation_id IS NULL`, row.ChallengeID).Scan(&lastContract); err != nil {
+		contractQ, contractArgs := `SELECT COALESCE(MAX(id), 0) FROM run WHERE challenge_id = ? AND kind = 'contract' AND operation_id IS NULL`, []any{row.ChallengeID}
+		if row.TaskID != nil {
+			// 差し戻しの指摘を渡したかは、このタスクの契約の run だけで比べる（別のタスクの run を挟んでも指摘は渡す）。
+			contractQ += ` AND task_id = ?`
+			contractArgs = append(contractArgs, *row.TaskID)
+		}
+		if err := tx.QueryRowContext(ctx, contractQ, contractArgs...).Scan(&lastContract); err != nil {
 			return err
 		}
 		var note string
