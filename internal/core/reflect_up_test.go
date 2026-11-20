@@ -173,9 +173,13 @@ func TestUpRequest_AC157_AC158_CancelledTasksAreNotCounted(t *testing.T) {
 	gcid, _ := parseChallengeID(gid)
 	setTaskStatusRaw(t, g.s, gcid, "a", TaskStatusCancelled)
 	setTaskStatusRaw(t, g.s, gcid, "b", TaskStatusCancelled)
-	g.runDelegationStage(t, nil)
+	res := g.runDelegationStage(t, nil)
 	if got := g.reflectStarts(); len(got) != 0 { // AC-158
 		t.Fatalf("all cancelled: reflect starts = %v, want none", got)
+	}
+	// 済みが 0 個の課題は、上げる依頼の対象にならない（始めようとして「統合先を使えない」で断られるのではない）。
+	if n := notStartedByReason(res, NotStartedIntegrationUnavailable); len(n) != 0 || len(res.Items) != 0 {
+		t.Fatalf("all cancelled: result = %+v, want the challenge not to be a candidate of the up request", res)
 	}
 }
 
@@ -191,9 +195,13 @@ func TestUpRequest_AC159_ChallengeWithoutIntegrationDoesNotStart(t *testing.T) {
 	id := f.newMulti(t, "plain", "P1", false, multiTask{key: "a"})
 	cid, _ := parseChallengeID(id)
 	setTaskStatusRaw(t, f.s, cid, "a", TaskStatusDone)
-	f.runDelegationStage(t, nil)
+	res := f.runDelegationStage(t, nil)
 	if got := f.reflectStarts(); len(got) != 0 {
 		t.Fatalf("reflect starts = %v, want none", got)
+	}
+	// 統合先を使わない課題は、上げる依頼の保留（統合先の識別が無い）にもならない（上げる依頼の対象にならない）。
+	if rs := f.holdReasons(t, id); len(rs) != 0 || len(res.Items) != 0 || f.statusOf(t, id) != StatusInProgress {
+		t.Fatalf("holds %v items %+v status %s, want the challenge left alone", rs, res.Items, f.statusOf(t, id))
 	}
 }
 
@@ -219,9 +227,13 @@ func TestUpRequest_AC194_AnUnfinishedContractRunPreventsStarting(t *testing.T) {
 	f, id := newUpFixture(t, upConnectorsJSON())
 	cid, _ := parseChallengeID(id)
 	insertOpenContractRun(t, f.s, cid, "ext-9")
-	f.runDelegationStage(t, nil)
+	res := f.runDelegationStage(t, nil)
 	if got := f.reflectStarts(); len(got) != 0 {
 		t.Fatalf("reflect starts = %v, want none", got)
+	}
+	// 始める条件の段階で外れる（始めようとして「別の実行がある」で断られるのではない）。
+	if n := notStartedByReason(res, NotStartedInProgress); len(n) != 0 || len(res.Items) != 0 {
+		t.Fatalf("result = %+v, want the challenge not to be a candidate of the up request", res)
 	}
 }
 
@@ -426,6 +438,14 @@ func TestUpRequest_AC196_AC197_AC198_AC199_AFailedRequestEndsTheRecordClosesTheO
 	}
 	if got := f.lastReason(t, id); got != string(holdReasonReflectFailed) {
 		t.Errorf("reason = %q, want reflect_failed", got)
+	}
+	// 保留は検証中から直接立てる（遷移 1 つ）が、回答で戻る先は着手中（戻れば、次の委譲の段が上げる依頼を始め直す）。
+	var from string
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT from_status FROM hold ORDER BY id DESC LIMIT 1`).Scan(&from)
+	})
+	if from != string(StatusInProgress) {
+		t.Errorf("hold.from_status = %q, want in_progress", from)
 	}
 	if q := f.holdQuestionsOf(t, id); !strings.Contains(q, "failed") || !strings.Contains(q, "委譲先の失敗の要約") {
 		t.Errorf("question = %q, want the read state and the summary", q)
@@ -649,5 +669,88 @@ func TestUpRequest_ReviewWithoutExactlyOnePRAndOneContentRefIsHeld(t *testing.T)
 		if got := f.statusOf(t, id); got != StatusAwaitingHuman {
 			t.Errorf("%s: status = %s", name, got)
 		}
+	}
+}
+
+// 始める条件（reflectCandidates）: 着手中で、統合先を使い、未完のタスクが 0 個、済みが 1 個以上、終わっていない契約の実行が無い課題だけ。
+// 委譲の段の経路の試験（上）は、開始の後の段階（作業ディレクトリ・実行の始まり）でも外れるので、条件そのものを直接確かめる。
+func TestUpRequest_TheStartingConditionsAreSelectedByTheCandidates(t *testing.T) {
+	t.Parallel()
+	candidates := func(f *contractFixture) []int64 {
+		t.Helper()
+		ids, err := f.s.reflectCandidates(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ids
+	}
+	f, id := newUpFixture(t, upConnectorsJSON(), multiTask{key: "a"}, multiTask{key: "b"})
+	cid, _ := parseChallengeID(id)
+	if got := candidates(f); len(got) != 1 || got[0] != cid {
+		t.Fatalf("all done: candidates = %v, want [%d]", got, cid)
+	}
+	setTaskStatusRaw(t, f.s, cid, "b", TaskStatusCancelled)
+	if got := candidates(f); len(got) != 1 {
+		t.Fatalf("done + cancelled: candidates = %v, want 1", got)
+	}
+	setTaskStatusRaw(t, f.s, cid, "a", TaskStatusCancelled)
+	if got := candidates(f); len(got) != 0 {
+		t.Fatalf("all cancelled: candidates = %v, want none", got)
+	}
+	setTaskStatusRaw(t, f.s, cid, "a", TaskStatusDone)
+	for _, st := range []string{"awaiting_human", "verifying", "awaiting_completion_approval", "done"} {
+		f.sqlExec(t, `UPDATE challenge SET status = ? WHERE id = ?`, st, cid)
+		if got := candidates(f); len(got) != 0 {
+			t.Fatalf("challenge %s: candidates = %v, want none (only in_progress)", st, got)
+		}
+	}
+	f.sqlExec(t, `UPDATE challenge SET status = 'in_progress' WHERE id = ?`, cid)
+	f.sqlExec(t, `UPDATE challenge SET uses_integration = 0 WHERE id = ?`, cid)
+	if got := candidates(f); len(got) != 0 {
+		t.Fatalf("not using an integration: candidates = %v, want none", got)
+	}
+	f.sqlExec(t, `UPDATE challenge SET uses_integration = 1 WHERE id = ?`, cid)
+	insertOpenContractRun(t, f.s, cid, "ext-9")
+	if got := candidates(f); len(got) != 0 {
+		t.Fatalf("an unfinished contract run: candidates = %v, want none", got)
+	}
+}
+
+// 委譲の段の状態の確認が読む上げる依頼は、着手中・検証中の課題のものだけ。保留中・完了の承認待ちの課題のものは読まない
+// （保留中でも取り消す処理は課題の単位の確かめの Issue〔#888〕が足す。それまでの、読まない動きを確かめる）。
+func TestUpRequest_TheStatusReadCoversOnlyInProgressAndVerifyingChallenges(t *testing.T) {
+	t.Parallel()
+	for _, st := range []string{"awaiting_human", "awaiting_completion_approval"} {
+		f, _ := newUpFixture(t, upConnectorsJSON())
+		f.startUp(t)
+		f.sqlExec(t, `UPDATE challenge SET status = ?`, st)
+		f.runDelegationStage(t, nil)
+		if len(f.client.statuses) != 0 {
+			t.Errorf("challenge %s: statuses = %v, want none", st, f.client.statuses)
+		}
+	}
+}
+
+// 検証中の課題の上げる依頼のレビュー待ちは、読み直さない（読むたびに run が増えて、取り込んだ成果物が「最後の委譲の実行」から隠れるため）。
+func TestUpRequest_TheReviewOfAVerifyingChallengeIsNotReadAgain(t *testing.T) {
+	t.Parallel()
+	f, id := newUpFixture(t, upConnectorsJSON())
+	f.setUpPR("main")
+	f.startUp(t)
+	f.readWith(t, upReviewOut([]string{"respond", "land"}, upArtsOK...))
+	if got := f.statusOf(t, id); got != StatusVerifying {
+		t.Fatalf("status = %s, want verifying", got)
+	}
+	runs := countRows(t, f.s, `SELECT COUNT(*) FROM run`)
+	statuses := len(f.client.statuses)
+	f.runDelegationStage(t, nil)
+	if got := len(f.client.statuses); got != statuses {
+		t.Errorf("statuses %d -> %d, want the verifying challenge's review not read", statuses, got)
+	}
+	if got := countRows(t, f.s, `SELECT COUNT(*) FROM run`); got != runs {
+		t.Errorf("runs %d -> %d, want none added", runs, got)
+	}
+	if got := f.releases(t); len(got) != 1 {
+		t.Errorf("releases = %+v, want 1", got)
 	}
 }
