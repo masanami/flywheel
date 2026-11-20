@@ -571,8 +571,8 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 
 // runDirPath は runID の run の保存先の絶対パス（.flywheel/runs/<runID>/）を
 // 返す（§invoker の共通の規則「ワークスペースの.flywheel/runs/<runの ID>/に
-// 保存する」）。ディレクトリの作成自体は internal/invoker が行う（RunDir は
-// ただの計算済みパス）。
+// 保存する」）。ディレクトリの作成は internal/invoker が行う（RunDir は
+// ただの計算済みパス）。ただし form: cli の start は、タスクの文面（task.md）を置くために core が作る。
 func runDirPath(workspace, runID string) string {
 	return workspace + string(os.PathSeparator) + flywheelDirName + string(os.PathSeparator) + "runs" + string(os.PathSeparator) + runID
 }

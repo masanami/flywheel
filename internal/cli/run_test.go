@@ -514,7 +514,8 @@ func TestRun_ConfigAndEnvironmentFailuresStartNothing(t *testing.T) {
 func TestRun_SourceBound_J3GetsUpstreamViaGET_AndReadValuesStay(t *testing.T) {
 	parallelTools(t, false)
 	ws := setupRunWorkspace(t)
-	id := newInProgressForRun(t, ws, func(m map[string]any) { m["repo"] = "flywheel-repo"; m["operation"] = "impl-op" })
+	// form: plugin は J3 を呼ばないので、J3 を呼ぶ形態（brief）の操作で確かめる。
+	id := newInProgressForRun(t, ws, func(m map[string]any) { m["repo"] = "direct-repo"; m["operation"] = "brief-op" })
 	bindChallengeToIssue(t, ws, id, 7, 2, "2026-09-25T09:00:00Z")
 	ghCalls := withFakeGHRoutesOnPATH(t, j2GHRoutes(t))
 	stdinLog := filepath.Join(t.TempDir(), "j3.stdin")

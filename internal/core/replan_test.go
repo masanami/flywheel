@@ -25,7 +25,7 @@ func (f *delegateFixture) answer(t *testing.T, id, answer string, replan bool) (
 // questionHold は着手中の課題を委譲して問いの保留（成果物〔変更の提案・作業ブランチ〕・費用つき）にする。
 func (f *delegateFixture) questionHold(t *testing.T) string {
 	t.Helper()
-	id := f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) { m["size"] = "S" }))
+	id := f.newInProgress(t, "t", "P1", briefSpec(func(m map[string]any) { m["size"] = "S" }))
 	f.deleg.result = questionsOut("feat/x")
 	f.runDelegation(t, id)
 	if got := f.detail(t, id).Status; got != StatusAwaitingHuman {
@@ -130,7 +130,7 @@ func TestAnswerReplan_J2InputCarriesAnswerAndPlan_DelegationCarriesTheDeliverabl
 	f.agent = newAgentDeclForJ1Test(t, f.s, "POSITION")
 	var j2In JudgmentLaunchInput
 	j2 := succeededInvoker(j2PlanOutput(func(m map[string]any) {
-		m["repo"], m["operation"], m["size"] = "main-repo", "impl", "S"
+		m["repo"], m["operation"], m["size"] = "main-brief", "brief", "S"
 		m["budget_impl_usd"], m["budget_review_usd"] = 6, 1
 	}))
 	j2.onInvoke = func(in JudgmentLaunchInput) { j2In = in }

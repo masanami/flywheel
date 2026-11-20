@@ -290,21 +290,64 @@ func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, erro
 	return &r, nil
 }
 
-// fillContractArgs は契約のコマンドの引数の差し込みを埋める。閉集合は invocation と同じ 4 つ
-// （{issue_number}・{issue_url}・{external_key}・{challenge_id}）と、status・resume・cancel の {run_id}
-// （start が返した契約の実行 ID）、resume の {answer}・{choice}・{note}（保留への答え）だけを埋める。
-// cliCommandPlaceholders の表が許す {task_file}・{task_id}・{uses_integration}・{approved_ref} は、まだ埋めない（後のタスクが埋める）。引数の要素の数は変えない。
+// contractFill は契約のコマンドの引数の差し込みの値。値の無い差し込みは空の文字列で埋める。
+type contractFill struct {
+	ChallengeID string
+	// Source は取り込み元（無ければ nil）。EmptySource が真のとき、nil の取り込み元の差し込みを空の文字列で埋める
+	// （偽のときは ErrValidation）。
+	Source      *sourceBinding
+	EmptySource bool
+	// RunID は status・resume・cancel の契約の実行 ID。
+	RunID  string
+	Answer contractAnswer
+	// TaskFile・TaskID・UsesIntegration は start の差し込み。{approved_ref} は反映の段だけが値を入れる（ここでは常に空）。
+	TaskFile, TaskID string
+	UsesIntegration  bool
+}
+
+// fillContractArgs は契約のコマンドの引数の差し込みを、取り込み元が無いときに空の文字列で埋めない形で埋める
+// （fillContractArgsWith の、{task_file}・{task_id}・{uses_integration} が空・EmptySource が偽の呼び出し）。
 func fillContractArgs(args []string, challengeID string, sb *sourceBinding, externalRunID string, answer contractAnswer) ([]string, error) {
+	return fillContractArgsWith(args, contractFill{ChallengeID: challengeID, Source: sb, RunID: externalRunID, Answer: answer})
+}
+
+// fillCommandArgs は接続ツール connector の宣言のコマンドの引数を埋める。commands.start に {task_file} を書いた宣言では、
+// 取り込み元の無いタスクの取り込み元の差し込みを空の文字列で埋める。
+func fillCommandArgs(connector *Connector, args []string, challengeID string, sb *sourceBinding, externalRunID string, answer contractAnswer) ([]string, error) {
+	return fillContractArgsWith(args, contractFill{ChallengeID: challengeID, Source: sb, EmptySource: startTakesTaskFile(connector), RunID: externalRunID, Answer: answer})
+}
+
+// startTakesTaskFile は、接続ツールの commands.start が {task_file} を書いているか（取り込み元の無いタスクも起動する宣言）。
+func startTakesTaskFile(c *Connector) bool {
+	if c == nil || c.Commands == nil {
+		return false
+	}
+	for _, a := range c.Commands.Start {
+		if strings.Contains(a, "{task_file}") {
+			return true
+		}
+	}
+	return false
+}
+
+// fillContractArgsWith は契約のコマンドの引数の差し込みを埋める。取り込み元の 3 つ（{issue_number}・{issue_url}・{external_key}）と
+// {challenge_id}、status・resume・cancel の {run_id}、resume の {answer}・{choice}・{note}、start の {task_file}・{task_id}・
+// {uses_integration}、resume の {approved_ref}（常に空）。引数の要素の数は変えない。
+func fillContractArgsWith(args []string, f contractFill) ([]string, error) {
 	out := make([]string, len(args))
+	usesIntegration := "false"
+	if f.UsesIntegration {
+		usesIntegration = "true"
+	}
 	for i, a := range args {
-		v, err := fillInvocation(a, challengeID, sb)
+		v, err := fillInvocationWith(a, f.ChallengeID, f.Source, f.EmptySource)
 		if err != nil {
 			return nil, err
 		}
-		v = strings.ReplaceAll(v, "{run_id}", externalRunID)
-		// 答えは最後に差し込む（答えの中の波括弧を、他の差し込みとして読まない）。
-		// 1 回の置き換えにまとめる（差し込んだ値の中の波括弧を、後の差し込みとして読まない）。
-		out[i] = strings.NewReplacer("{choice}", answer.Choice, "{note}", answer.Note, "{answer}", answer.text()).Replace(v)
+		v = strings.ReplaceAll(v, "{run_id}", f.RunID)
+		// 答えとタスクの値は最後に、1 回の置き換えにまとめて差し込む（差し込んだ値の中の波括弧を、他の差し込みとして読まない）。
+		out[i] = strings.NewReplacer("{choice}", f.Answer.Choice, "{note}", f.Answer.Note, "{answer}", f.Answer.text(),
+			"{task_file}", f.TaskFile, "{task_id}", f.TaskID, "{uses_integration}", usesIntegration, "{approved_ref}", "").Replace(v)
 	}
 	return out, nil
 }
@@ -498,8 +541,31 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	}); classifyReadWriteErr(err) != nil {
 		return nil, classifyReadWriteErr(err)
 	}
-	command, err := fillContractArgs(connector.Commands.Start, in.ChallengeID, taskSource, "", contractAnswer{})
-	if err != nil {
+	// タスクの文面と {uses_integration}。起動の実行の ID を知る前に、差し込みを埋められることだけを確かめる。
+	var taskText string
+	var usesIntegration bool
+	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		// 文面を使うのは、commands.start に {task_file} を書いた宣言だけ（書いていない宣言は、文面の組み立てで止めない）。
+		if startTakesTaskFile(connector) {
+			doc, err := loadTaskDocument(ctx, tx, cid, plan, task)
+			if err != nil {
+				return err
+			}
+			taskText = doc
+		}
+		u, err := challengeUsesIntegration(ctx, tx, cid)
+		if u != nil {
+			usesIntegration = *u
+		}
+		return err
+	}); classifyReadWriteErr(err) != nil {
+		return nil, classifyReadWriteErr(err)
+	}
+	startFill := contractFill{
+		ChallengeID: in.ChallengeID, Source: taskSource, EmptySource: startTakesTaskFile(connector),
+		TaskFile: "", TaskID: task.ID, UsesIntegration: usesIntegration,
+	}
+	if _, err := fillContractArgsWith(connector.Commands.Start, startFill); err != nil {
 		return nil, err
 	}
 	workDir, ok, err := s.contractRepoWorkDir(ctx, in.AgentDecl, in.ConnDecl, cid, in.WorkDir, task.Repo)
@@ -525,7 +591,23 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if in.OnRunInserted != nil {
 		in.OnRunInserted()
 	}
+	// タスクの文面を、起動の実行の記録の置き場へ書き、その絶対パスを {task_file} に渡す（書けなければ起動せず、
+	// 起動できなかった run として記録する）。ファイルは消さない。
+	runDir := runDirPath(s.workspace, formatRunID(runIDInt))
+	var taskFile string
+	var writeErr error
+	if startTakesTaskFile(connector) {
+		taskFile, writeErr = writeTaskFile(runDir, taskText)
+	}
+	startFill.TaskFile = taskFile
+	command, err := fillContractArgsWith(connector.Commands.Start, startFill)
+	if err != nil {
+		return nil, err
+	}
 	call := func(ctx context.Context, li ContractLaunchInput) (ContractLaunchOutput, error) {
+		if writeErr != nil {
+			return ContractLaunchOutput{Result: RunResultLaunchFailed, ErrorSummary: fmt.Sprintf("write task file: %v", writeErr)}, nil
+		}
 		return in.Client.Start(ctx, li)
 	}
 	rep, err := s.finishContractCall(ctx, contractCall{
