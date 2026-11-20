@@ -321,7 +321,7 @@ S3a（反映を委譲先に任せる）で入れた要件。S3b は、統合先�
 - [x] 始める前に、同時に走らせる数（`max_parallel_runs`。数え方は委譲の段と同じで、走っている反映の依頼も数える）と、サイクルの費用の上限を確かめる。同時に走らせる数が上限に達している（実行の記録を作る書き込みの中でも確かめ直し、読みの後に埋まっていれば何も書かない） → 開いた試行を残さずに終え（下の「試行を残さない終わり方」）、始めなかった理由 `slot_unavailable` を返す。サイクルの費用の上限を超える → 同じく、開いた試行を残さずに終え、始めなかった理由 `cycle_budget` を返す。どちらも、承認は保つ。同時に走らせる数の確かめは、作業ディレクトリを決める処理より先に行う。作業ディレクトリを決める段で、作業用のクローンが使用中で空きが無いだけ → 始めなかった理由 `slot_unavailable`（開いた試行を残さずに終え、承認を保ち、次の反映の段でやり直す）。宣言に無い・決めようが無い → 結果 `unsupported`（取り消す結果。試行の記録の詳細に、決められなかった理由を残す）。
 - [x] 始められた（実行 ID が返った）→ 結果 `reflect_started`。
 - [x] `commands.reflect` が失敗した（時間切れ・不正な出力を含む）→ 結果 `reflect_failed`。契約の実行は、終わっていない行を残さない（失敗・時間切れ・不正な出力では、行を作らない）。委譲先の側に実行が残っているかもしれないので、自動では始め直さない（取り消す結果にする）。
-- [x] `commands.reflect` の応答が、すでに終わった状態（`failed`・`cancelled`・`succeeded`）だった → 結果 `reflect_failed`。終わった契約の実行の行は残る（終わっていない実行が残らないので、次の反映の段が始め直しを繰り返さないように、始められなかった扱いにする）。
+- [x] `commands.reflect` が失敗したときのうち、応答が、すでに終わった状態（`failed`・`cancelled`・`succeeded`）だった → 結果 `reflect_failed`。終わった契約の実行の行は残る（終わっていない実行が残らないので、次の反映の段が始め直しを繰り返さないように、始められなかった扱いにする）。
 - [x] 反映の依頼を始める書き込み（実行の記録を作る書き込み）の中で、反映の操作が承認済みのままで、試行を開いたときから変わっていないことを確かめ直す。変わっていれば、何も書かず、`commands.reflect` を呼ばない（始めない）。
 - [x] 反映の依頼の `status`・`resume`・`cancel` の引数の、取り込み元の差し込みは、空の文字列で渡す。
 - [x] 反映の依頼の費用は、タスクの実行と同じに、読むたびの差分を実行の記録に残す（課題の費用と、サイクルの費用に入る）。予算の上限での中止は、反映の依頼には行わない（契約の実行の記録の上限額には、エージェントの宣言の、実行 1 回の上限額を入れる）。
@@ -454,7 +454,26 @@ S3b は、画面を作り替えない（完了の承認の画面・タスクの�
 | 12 完了と反映を、対話で承認する | 「完了と反映の承認の後、反映の段は、上げる依頼へ `commands.resume` を `land` で呼ぶ」 |
 | 13 予算の上限を超える問いを受ける | なし（計画の後にタスクを足して上限を超える場面は S4。S3b は、タスクの実行が自分の枠を超えたときの保留だけ） |
 
-`flywheel show <課題の ID> --json` と `GET /api/v1/workspaces/{name}/challenges/{id}` に足すキー（ほかは変えない）:
+前の区切りで足した形のうち、試験がこの文書の記述を正本として読むもの（S3a では変えない）:
+
+- `flywheel show <課題の ID> --json` と `GET /api/v1/workspaces/{name}/challenges/{id}`: 根に `tasks`（配列。要素は `id`〔`T-<番号>`〕・`title`・`body`・`done_criteria`・`non_goals`・`depends_on`〔タスクの ID の配列〕・`repo`・`operation`・`status`・`plan_version`）。`challenge` に `uses_integration`（真・偽・null）。`runs[]` と `holds[]` の要素に `task_id`（タスクの ID か null）。
+
+`flywheel op exec --json`（と、サイクルの反映の段）の `items[]` の形:
+
+```json
+{
+  "approved_head": "<承認した中身。無ければ null>",
+  "challenge_id": "C-<番号>",
+  "consecutive_failures": 0,
+  "merge_commit": "<入れた後の中身。無ければ null>",
+  "observed_head": "<見た中身。無ければ null>",
+  "operation_id": "OP-<番号>",
+  "result": "<試行の結果>",
+  "route": "waiting_run | reflect_request | outside | null"
+}
+```
+
+S3b で、`flywheel show <課題の ID> --json` と `GET /api/v1/workspaces/{name}/challenges/{id}` に足すキー（ほかは変えない）:
 
 - `tasks[]` の要素: `budget_impl_usd`・`budget_review_usd`（数。タスクの枠。増額を含む）・`spent_usd`（数。そのタスクが使った額）。
 - `challenge`: `integration_ref`（文字列か null）。
