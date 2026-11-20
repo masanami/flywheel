@@ -268,6 +268,8 @@ type Operation struct {
 	ExecutedAt          *string `json:"executed_at"`
 	ID                  string  `json:"id"`
 	Kind                string  `json:"kind"`
+	// LastExecutionDetail は最後の試行の記録の詳細（land_refused のときの委譲先の summary など）。試行が無い・詳細が空なら null。
+	LastExecutionDetail *string `json:"last_execution_detail"`
 	LastExecutionResult *string `json:"last_execution_result"`
 	MergeCommit         *string `json:"merge_commit"`
 	Ref                 *string `json:"ref"`
@@ -302,6 +304,7 @@ func FromOperation(op core.IrreversibleOperation) Operation {
 		ExecutedAt:          optionalTimestamp(op.ExecutedAt),
 		ID:                  op.ID,
 		Kind:                string(op.Kind),
+		LastExecutionDetail: op.LastExecutionDetail,
 		LastExecutionResult: last,
 		MergeCommit:         op.MergeCommit,
 		Ref:                 op.Ref,

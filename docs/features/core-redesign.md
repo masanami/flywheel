@@ -301,6 +301,8 @@ S3a で起動するのは、S2 までと同じく、統合先を使わない、�
 
 S3a は、画面を作り替えない（完了の承認の画面は S3c。画面のボタンの完了の承認が反映を保留にする決まりは、見直し前のまま）。端末の出力と API は、反映の段の結果の値と、`route` のキーが変わる。
 
+S2a で足した形（変えない）: `flywheel show <課題の ID> --json` と `GET /api/v1/workspaces/{name}/challenges/{id}` は、根に `tasks`（配列。要素は `id`〔`T-<番号>`〕・`title`・`body`・`done_criteria`・`non_goals`・`depends_on`〔タスクの ID の配列〕・`repo`・`operation`・`status`・`plan_version`）。`challenge` に `uses_integration`（真・偽・null）。`runs[]` と `holds[]` の要素に `task_id`（タスクの ID か null）。
+
 `ux.md` のシナリオのうち、S3a の受入基準に対応するものは次のとおり。ほかのシナリオは、対応する受入基準が無い（複数のタスクと統合先は S3b、画面は S3c、対話の欄とスーパーバイザーは S4）。
 
 | シナリオ | 対応する受入基準（先頭の部分） |

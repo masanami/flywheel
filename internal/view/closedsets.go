@@ -12,7 +12,7 @@ type ClosedSet struct {
 // 生成物（web/src/api/types.gen.ts）へ書き出すための一覧。順序は core の定義の順。
 // 例外として CONDITIONS_AFTER_RELEASE_HEADINGS は view が持つ承認の見出しで、添字は ConditionsOutlook の値。
 func ClosedSets() []ClosedSet {
-	var actions, modifiers, states, kinds, holdKinds, phases []string
+	var actions, modifiers, states, kinds, holdKinds, phases, execResults []string
 	for _, v := range core.CardActionValues() {
 		actions = append(actions, string(v))
 	}
@@ -31,6 +31,9 @@ func ClosedSets() []ClosedSet {
 	for _, v := range core.TaskPhaseValues() {
 		phases = append(phases, string(v))
 	}
+	for _, v := range core.ExecutionResultValues() {
+		execResults = append(execResults, string(v))
+	}
 	// 完了の承認の要約の見出し。添字は ConditionsOutlook の値（OutlookNotReleasing, OutlookReleasing, OutlookApprovedRelease の順）。
 	headings := make([]string, 0, 3)
 	for _, o := range []ConditionsOutlook{OutlookNotReleasing, OutlookReleasing, OutlookApprovedRelease} {
@@ -43,6 +46,42 @@ func ClosedSets() []ClosedSet {
 		{Name: "DISCREPANCY_KIND_CODES", Codes: kinds},
 		{Name: "HOLD_KIND_CODES", Codes: holdKinds},
 		{Name: "TASK_PHASE_CODES", Codes: phases},
+		{Name: "EXECUTION_RESULT_CODES", Codes: execResults},
 		{Name: "CONDITIONS_AFTER_RELEASE_HEADINGS", Codes: headings},
 	}
+}
+
+// executionResultLabels は反映の試行の結果の語（端末の文の語。画面の表 web/src/labels.ts の EXECUTION_RESULT_LABELS と同じ文）。
+var executionResultLabels = map[core.ExecutionResult]string{
+	core.ExecutionResultMerged:           "反映先へ入れた",
+	core.ExecutionResultAlreadyMerged:    "すでに反映先へ入っていた",
+	core.ExecutionResultWaitingChecks:    "チェックの完了待ち",
+	core.ExecutionResultUpstreamFailed:   "上流のチェックが失敗している",
+	core.ExecutionResultChecksFailed:     "チェックが失敗した",
+	core.ExecutionResultNotMergeable:     "反映先へ入れられない",
+	core.ExecutionResultMergeFailed:      "反映先へ入れるのに失敗した",
+	core.ExecutionResultMergeUnconfirmed: "反映先へ入ったか分からない",
+	core.ExecutionResultHeadChanged:      "承認した後に中身が変わった",
+	core.ExecutionResultClosed:           "依頼が閉じられた",
+	core.ExecutionResultBaseChanged:      "反映先が変わった",
+	core.ExecutionResultNoApprovedHead:   "承認した中身が無い",
+	core.ExecutionResultUnsupported:      "対応していない",
+	core.ExecutionResultMergedUnapproved: "承認なしで反映された",
+	core.ExecutionResultLimitReached:     "失敗の連続が上限に達した",
+	core.ExecutionResultInterrupted:      "実行が途中で終わった",
+	core.ExecutionResultLanded:           "委譲先が反映先へ入れた",
+	core.ExecutionResultLandSent:         "委譲先へ「入れてよい」を返した",
+	core.ExecutionResultLandUnconfirmed:  "「入れてよい」が届いたか分からない",
+	core.ExecutionResultLandRefused:      "委譲先が入れられなかった",
+	core.ExecutionResultContentMismatch:  "委譲先の中身と、上流の中身が食い違っている",
+	core.ExecutionResultReflectStarted:   "反映の依頼を始めた",
+	core.ExecutionResultReflectFailed:    "反映の依頼を始められなかった",
+	core.ExecutionResultWaitingDelegate:  "委譲先が進めている",
+	core.ExecutionResultWaitingOutside:   "flywheel の外での反映を待っている",
+	core.ExecutionResultDelegateEnded:    "委譲先の実行が、入れずに終わった",
+}
+
+// ExecutionResultLabel は反映の試行の結果の語を返す。閉集合の外には空文字。
+func ExecutionResultLabel(r core.ExecutionResult) string {
+	return executionResultLabels[r]
 }

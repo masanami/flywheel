@@ -1,6 +1,7 @@
 // core が返す閉集合のコードを表示の文言に写す対応表。状態は UI で導かず、文言だけをここで持つ。
 
 import { HOLD_KIND_CODES } from "./api/types.gen.ts";
+import type { EXECUTION_RESULT_CODES } from "./api/types.gen.ts";
 import type { CycleWorkStages } from "./api/types.gen.ts";
 
 export const CARD_STATES = [
@@ -90,6 +91,39 @@ export const DISCREPANCY_LABELS: Record<DiscrepancyKind, string> = {
   upstream_updated: "上流が更新された",
   merged_unapproved: "承認なしで反映された",
   dependency_cycle: "依存が循環している",
+};
+
+type ExecutionResultCode = (typeof EXECUTION_RESULT_CODES)[number];
+
+// 反映の試行の結果（Operation.last_execution_result。core の閉集合 EXECUTION_RESULT_CODES）の語。
+// 端末の文の語（internal/view の ExecutionResultLabel）と同じ文。
+export const EXECUTION_RESULT_LABELS: Record<ExecutionResultCode, string> = {
+  merged: "反映先へ入れた",
+  already_merged: "すでに反映先へ入っていた",
+  waiting_checks: "チェックの完了待ち",
+  upstream_failed: "上流のチェックが失敗している",
+  checks_failed: "チェックが失敗した",
+  not_mergeable: "反映先へ入れられない",
+  merge_failed: "反映先へ入れるのに失敗した",
+  merge_unconfirmed: "反映先へ入ったか分からない",
+  head_changed: "承認した後に中身が変わった",
+  closed: "依頼が閉じられた",
+  base_changed: "反映先が変わった",
+  no_approved_head: "承認した中身が無い",
+  unsupported: "対応していない",
+  merged_unapproved: "承認なしで反映された",
+  limit_reached: "失敗の連続が上限に達した",
+  interrupted: "実行が途中で終わった",
+  landed: "委譲先が反映先へ入れた",
+  land_sent: "委譲先へ「入れてよい」を返した",
+  land_unconfirmed: "「入れてよい」が届いたか分からない",
+  land_refused: "委譲先が入れられなかった",
+  content_mismatch: "委譲先の中身と、上流の中身が食い違っている",
+  reflect_started: "反映の依頼を始めた",
+  reflect_failed: "反映の依頼を始められなかった",
+  waiting_delegate: "委譲先が進めている",
+  waiting_outside: "flywheel の外での反映を待っている",
+  delegate_ended: "委譲先の実行が、入れずに終わった",
 };
 
 // カードの面に出す区分の印（M4H23）。API の値から UI が導く（marks.ts は S2c の仕上げで外した。値の表だけ残してある）。

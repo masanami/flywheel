@@ -244,9 +244,9 @@ func TestNotStartedReasonValues_AreTheEighteenAndACopy(t *testing.T) {
 	}
 }
 
-// --- ExecutionResult（release の実行の試行の結果。16 値と分類） ---
+// --- ExecutionResult（release の実行の試行の結果。26 値と分類） ---
 
-func TestExecutionResult_ClosedSetHas16ValuesWithClasses(t *testing.T) {
+func TestExecutionResult_ClosedSetHas26ValuesWithClasses(t *testing.T) {
 	t.Parallel()
 	want := map[ExecutionResult]struct {
 		class  ExecutionClass
@@ -260,10 +260,16 @@ func TestExecutionResult_ClosedSetHas16ValuesWithClasses(t *testing.T) {
 		"no_approved_head": {ExecutionClassCancel, false}, "unsupported": {ExecutionClassCancel, false},
 		"merged_unapproved": {ExecutionClassCancel, false}, "limit_reached": {ExecutionClassCancel, false},
 		"interrupted": {ExecutionClassInterrupted, false},
+		// S3a: 反映を委譲先へ移した後の値。
+		"landed": {ExecutionClassExecuted, false}, "land_sent": {ExecutionClassWait, false},
+		"land_unconfirmed": {ExecutionClassWait, true}, "land_refused": {ExecutionClassCancel, false},
+		"content_mismatch": {ExecutionClassWait, true}, "reflect_started": {ExecutionClassWait, false},
+		"reflect_failed": {ExecutionClassCancel, false}, "waiting_delegate": {ExecutionClassWait, false},
+		"waiting_outside": {ExecutionClassWait, false}, "delegate_ended": {ExecutionClassCancel, false},
 	}
 	values := ExecutionResultValues()
-	if len(values) != 16 || len(want) != 16 {
-		t.Fatalf("len(ExecutionResultValues()) = %d, want 16", len(values))
+	if len(values) != 26 || len(want) != 26 {
+		t.Fatalf("len(ExecutionResultValues()) = %d, want 26", len(values))
 	}
 	seen := map[ExecutionResult]bool{}
 	for _, v := range values {

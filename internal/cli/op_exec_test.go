@@ -138,8 +138,11 @@ func TestOpExec_MergesApprovedReleaseAndShowsTheMergeCommit(t *testing.T) {
 		t.Fatalf("items = %v, not_started = %v, want one item", items, notStarted)
 	}
 	it := items[0].(map[string]any)
-	if len(it) != 7 {
-		t.Errorf("item keys = %v, want the 7 documented keys", it)
+	if len(it) != 8 {
+		t.Errorf("item keys = %v, want the 8 documented keys", it)
+	}
+	if v, ok := it["route"]; !ok || v != nil {
+		t.Errorf("item[route] = %v (present=%v), want null until a route exists", v, ok)
 	}
 	want := map[string]any{"operation_id": op, "challenge_id": cid, "result": "merged", "approved_head": execHead,
 		"observed_head": execHead, "merge_commit": execMerged, "consecutive_failures": float64(0)}

@@ -3,6 +3,7 @@ import {
   CARD_ACTION_CODES,
   CARD_MODIFIER_CODES,
   DISCREPANCY_KIND_CODES,
+  EXECUTION_RESULT_CODES,
   HOLD_KIND_CODES,
   STATUS_CODES,
   TASK_PHASE_CODES,
@@ -18,6 +19,7 @@ import {
   CYCLE_WORK_STAGE_LABELS,
   DISCREPANCY_KINDS,
   DISCREPANCY_LABELS,
+  EXECUTION_RESULT_LABELS,
   HOLD_KIND_HUMAN,
   HOLD_KIND_PARENT_DIRECT,
   MARK_KINDS,
@@ -49,6 +51,20 @@ it("AC-102: 閉集合のすべてのコードに文言があり、core の定義
       expect((table as Record<string, string>)[c], c).toBeTruthy();
     }
   }
+});
+
+it("反映の試行の結果のすべての値に語があり、S3a の語は親の文のとおり", () => {
+  expect(Object.keys(EXECUTION_RESULT_LABELS).sort()).toEqual(
+    [...EXECUTION_RESULT_CODES].sort(),
+  );
+  for (const c of EXECUTION_RESULT_CODES) {
+    expect(EXECUTION_RESULT_LABELS[c], c).toBeTruthy();
+  }
+  expect(EXECUTION_RESULT_LABELS.landed).toBe("委譲先が反映先へ入れた");
+  expect(EXECUTION_RESULT_LABELS.land_refused).toBe("委譲先が入れられなかった");
+  expect(EXECUTION_RESULT_LABELS.delegate_ended).toBe(
+    "委譲先の実行が、入れずに終わった",
+  );
 });
 
 it("区分の印の 6 種すべてに文言がある", () => {

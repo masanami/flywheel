@@ -369,7 +369,8 @@ const ActivityActionBackup = "backup"
 // ExecutionResult は release の実行の試行の結果（operation_execution.result）の閉集合。
 type ExecutionResult string
 
-// ExecutionResult の16値。
+// ExecutionResult の26値。merged・not_mergeable・merge_failed・merge_unconfirmed は見直し前の記録の行を読むために残す
+// （新しく書く経路は反映を委譲先へ移した後の値を使う）。
 const (
 	ExecutionResultMerged           ExecutionResult = "merged"
 	ExecutionResultAlreadyMerged    ExecutionResult = "already_merged"
@@ -387,6 +388,16 @@ const (
 	ExecutionResultMergedUnapproved ExecutionResult = "merged_unapproved"
 	ExecutionResultLimitReached     ExecutionResult = "limit_reached"
 	ExecutionResultInterrupted      ExecutionResult = "interrupted"
+	ExecutionResultLanded           ExecutionResult = "landed"
+	ExecutionResultLandSent         ExecutionResult = "land_sent"
+	ExecutionResultLandUnconfirmed  ExecutionResult = "land_unconfirmed"
+	ExecutionResultLandRefused      ExecutionResult = "land_refused"
+	ExecutionResultContentMismatch  ExecutionResult = "content_mismatch"
+	ExecutionResultReflectStarted   ExecutionResult = "reflect_started"
+	ExecutionResultReflectFailed    ExecutionResult = "reflect_failed"
+	ExecutionResultWaitingDelegate  ExecutionResult = "waiting_delegate"
+	ExecutionResultWaitingOutside   ExecutionResult = "waiting_outside"
+	ExecutionResultDelegateEnded    ExecutionResult = "delegate_ended"
 )
 
 // ExecutionClass は試行の結果の分類。
@@ -426,6 +437,16 @@ var executionResultSpecs = []struct {
 	{ExecutionResultMergedUnapproved, ExecutionClassCancel, false},
 	{ExecutionResultLimitReached, ExecutionClassCancel, false},
 	{ExecutionResultInterrupted, ExecutionClassInterrupted, false},
+	{ExecutionResultLanded, ExecutionClassExecuted, false},
+	{ExecutionResultLandSent, ExecutionClassWait, false},
+	{ExecutionResultLandUnconfirmed, ExecutionClassWait, true},
+	{ExecutionResultLandRefused, ExecutionClassCancel, false},
+	{ExecutionResultContentMismatch, ExecutionClassWait, true},
+	{ExecutionResultReflectStarted, ExecutionClassWait, false},
+	{ExecutionResultReflectFailed, ExecutionClassCancel, false},
+	{ExecutionResultWaitingDelegate, ExecutionClassWait, false},
+	{ExecutionResultWaitingOutside, ExecutionClassWait, false},
+	{ExecutionResultDelegateEnded, ExecutionClassCancel, false},
 }
 
 // ExecutionResultValues は閉集合の全値を表の順に返す。
@@ -458,7 +479,7 @@ func (r ExecutionResult) Class() (ExecutionClass, bool) {
 	return "", false
 }
 
-// Counts は r が連続の回数に数えられる結果（checks_failed・not_mergeable・merge_failed）か。
+// Counts は r が連続の回数に数えられる結果（checks_failed・not_mergeable・merge_failed・land_unconfirmed・content_mismatch）か。
 func (r ExecutionResult) Counts() bool {
 	for _, sp := range executionResultSpecs {
 		if sp.result == r {

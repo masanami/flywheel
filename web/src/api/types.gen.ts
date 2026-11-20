@@ -56,6 +56,7 @@ export interface Operation {
   executed_at: string | null;
   id: string;
   kind: string;
+  last_execution_detail: string | null;
   last_execution_result: string | null;
   merge_commit: string | null;
   ref: string | null;
@@ -750,6 +751,35 @@ export const TASK_PHASE_CODES = [
   "blocked",
   "done",
   "cancelled",
+] as const;
+
+export const EXECUTION_RESULT_CODES = [
+  "merged",
+  "already_merged",
+  "waiting_checks",
+  "upstream_failed",
+  "checks_failed",
+  "not_mergeable",
+  "merge_failed",
+  "merge_unconfirmed",
+  "head_changed",
+  "closed",
+  "base_changed",
+  "no_approved_head",
+  "unsupported",
+  "merged_unapproved",
+  "limit_reached",
+  "interrupted",
+  "landed",
+  "land_sent",
+  "land_unconfirmed",
+  "land_refused",
+  "content_mismatch",
+  "reflect_started",
+  "reflect_failed",
+  "waiting_delegate",
+  "waiting_outside",
+  "delegate_ended",
 ] as const;
 
 export const CONDITIONS_AFTER_RELEASE_HEADINGS = [

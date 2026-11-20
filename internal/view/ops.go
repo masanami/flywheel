@@ -129,6 +129,8 @@ type ReleaseItem struct {
 	OperationID    string  `json:"operation_id"`
 	ReopenReason   *string `json:"reopen_reason,omitempty"`
 	Result         string  `json:"result"`
+	// Route は反映の依頼の経路（waiting_run | reflect_request | outside）。値を作る経路ができるまでは常に null。
+	Route *string `json:"route"`
 }
 
 // ReleaseTidied は release の段の、承認待ちの release の片付け 1 件。action は closed（PR がマージ済み、またはマージされずに閉じられていて closed にした。

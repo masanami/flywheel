@@ -122,7 +122,7 @@ func overviewText(ov *core.Overview) string {
 	if other > 0 {
 		fmt.Fprintf(&b, "そのほかの、あなたの操作を待っているもの:\n")
 		for _, op := range ov.NeedsHumanOperations {
-			fmt.Fprintf(&b, "  %s\t%s\t%s\t%s\n", op.ID, op.ChallengeID, op.Kind, op.Summary)
+			fmt.Fprintf(&b, "  %s\t%s\t%s\t%s%s\n", op.ID, op.ChallengeID, op.Kind, op.Summary, lastAttemptWord(op))
 		}
 		for _, tr := range ov.NeedsHumanTriage {
 			fmt.Fprintf(&b, "  %s\t仕分け\t%s\t%s\n", tr.ChallengeID, tr.RunID, tr.Reason)
@@ -188,9 +188,17 @@ func overviewText(ov *core.Overview) string {
 		fmt.Fprintf(&b, "  (なし)\n")
 	}
 	for _, op := range ov.ApprovedOperations {
-		fmt.Fprintf(&b, "  %s\t%s\t%s\t%s\n", op.ID, op.ChallengeID, op.Kind, op.Summary)
+		fmt.Fprintf(&b, "  %s\t%s\t%s\t%s%s\n", op.ID, op.ChallengeID, op.Kind, op.Summary, lastAttemptWord(op))
 	}
 
 	fmt.Fprintf(&b, "未のフォローアップ: %d 件\n", ov.FollowupsOpen)
 	return b.String()
+}
+
+// lastAttemptWord は反映の操作の最後の試行の結果の語を、状況の行の末尾へ足す文字列（試行が無ければ空）にする。
+func lastAttemptWord(op core.IrreversibleOperation) string {
+	if op.Kind != core.OperationKindRelease || op.LastExecutionResult == nil {
+		return ""
+	}
+	return fmt.Sprintf("\t最後の試行: %s（%s）", *op.LastExecutionResult, view.ExecutionResultLabel(*op.LastExecutionResult))
 }

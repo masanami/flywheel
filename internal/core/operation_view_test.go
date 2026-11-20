@@ -276,3 +276,32 @@ func TestExecuteOperationApproval_ResponseCarriesApprovedHead(t *testing.T) {
 		t.Errorf("ApprovedHead = %v, want abc123", op.ApprovedHead)
 	}
 }
+
+// S3a: 試行の行を直に置き、S3a の結果の語と詳細が status・show の要素へ出る（land_sent は待つ・land_refused は取り消す）。
+func TestOperationView_S3aResultsAndDetailAreShownInStatusAndShow(t *testing.T) {
+	t.Parallel()
+	s, cid, opID := releaseFixtureForTest(t)
+	coretest.InsertOperationExecution(t, s.workspace, opID, coretest.ExecutionAttempt{
+		StartedAt: execTS(10), EndedAt: execTS(11), Result: string(ExecutionResultLandSent), ApprovedHead: "a1b2c3",
+	})
+	for name, op := range map[string]IrreversibleOperation{"status": approvedOpOf(t, s, opID), "show": showOpOf(t, s, cid, opID)} {
+		if op.LastExecutionResult == nil || *op.LastExecutionResult != ExecutionResultLandSent {
+			t.Errorf("%s: LastExecutionResult = %v, want land_sent", name, op.LastExecutionResult)
+		}
+		if op.LastExecutionDetail != nil {
+			t.Errorf("%s: LastExecutionDetail = %q, want nil when the attempt has no detail", name, *op.LastExecutionDetail)
+		}
+	}
+	coretest.InsertOperationExecution(t, s.workspace, opID, coretest.ExecutionAttempt{
+		StartedAt: execTS(20), EndedAt: execTS(21), Result: string(ExecutionResultLandRefused), ApprovedHead: "a1b2c3",
+		Detail: "委譲先の summary: 衝突があり入れられなかった",
+	})
+	setOpState(t, s, opID, OperationStatePending)
+	op := showOpOf(t, s, cid, opID)
+	if op.LastExecutionResult == nil || *op.LastExecutionResult != ExecutionResultLandRefused {
+		t.Fatalf("LastExecutionResult = %v, want land_refused", op.LastExecutionResult)
+	}
+	if op.LastExecutionDetail == nil || *op.LastExecutionDetail != "委譲先の summary: 衝突があり入れられなかった" {
+		t.Errorf("LastExecutionDetail = %v, want the delegate's summary", op.LastExecutionDetail)
+	}
+}
