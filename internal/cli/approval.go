@@ -200,6 +200,7 @@ func runApproveChallenge(a Args, verifier core.Verifier, id string, holdRelease 
 		ReleaseHeads:       coreReleaseHeads(rds),
 		ExcludedReleaseIDs: excludedIDs(rds),
 		HeadSources:        headSources(a),
+		Agent:              agentDeclForApproval(a),
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -879,4 +880,14 @@ func reopenContractSources(a Args) core.ReopenContractSources {
 		return core.ReopenContractSources{}
 	}
 	return core.ReopenContractSources{Contract: invoker.NewLauncherWithLookPath(a.LookPath), Agent: decl, Connectors: conn}
+}
+
+// agentDeclForApproval は計画の承認で、枠のキーを持たない 1 個のタスクの枠をサイズごとの既定で決めるための宣言
+// （読めなければ nil。そのタスクの枠は空のまま残り、読むときに見直し前の決め方の値になる）。
+func agentDeclForApproval(a Args) *core.AgentDeclaration {
+	decl, err := core.LoadAgentDeclaration(a.Store.Workspace())
+	if err != nil {
+		return nil
+	}
+	return decl
 }

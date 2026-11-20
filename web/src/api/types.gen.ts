@@ -126,6 +126,7 @@ export interface BudgetExhausted {
   impl_remaining_usd: number;
   plan_version: number;
   review_remaining_usd: number;
+  task_id: string | null;
 }
 
 export interface Challenge {

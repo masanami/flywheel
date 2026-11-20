@@ -450,6 +450,9 @@ func insertPlanTasks(tx *sql.Tx, challengeID, version int, spec string) error {
 			Repo         string   `json:"repo"`
 			Operation    string   `json:"operation"`
 			Source       string   `json:"source"`
+			// 枠のキーを持つタスクは、承認と同じく枠をタスクの記録へ入れる（USD の 100 万分の 1 の単位）。
+			BudgetImplUSD   *float64 `json:"budget_impl_usd"`
+			BudgetReviewUSD *float64 `json:"budget_review_usd"`
 		} `json:"tasks"`
 	}
 	if err := json.Unmarshal([]byte(spec), &out); err != nil {
@@ -466,9 +469,16 @@ func insertPlanTasks(tx *sql.Tx, challengeID, version int, spec string) error {
 		if tk.Source != "" {
 			sourceKey = tk.Source
 		}
-		res, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
-			challengeID, version, tk.Key, tk.Title, tk.Body, tk.DoneCriteria, string(nonGoals), tk.Repo, tk.Operation, sourceKey, at, at)
+		micros := func(usd *float64) any {
+			if usd == nil {
+				return nil
+			}
+			return int64(*usd*1e6 + 0.5)
+		}
+		res, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+			challengeID, version, tk.Key, tk.Title, tk.Body, tk.DoneCriteria, string(nonGoals), tk.Repo, tk.Operation, sourceKey, at, at,
+			micros(tk.BudgetImplUSD), micros(tk.BudgetReviewUSD))
 		if err != nil {
 			return err
 		}

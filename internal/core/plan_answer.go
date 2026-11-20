@@ -33,6 +33,15 @@ type planSpecView struct {
 	UsesIntegration *bool
 }
 
+// taskBudgetMicros は計画の出力のタスクの枠（USD）を、タスクの記録の値（USD の 100 万分の 1）にする（無ければ nil）。
+func taskBudgetMicros(usd *float64) *int64 {
+	if usd == nil {
+		return nil
+	}
+	v := usdToMicros(*usd)
+	return &v
+}
+
 // parsePlanSpec は spec（task_plan.spec。NULL は nil）を読む。構造化した出力を持たない計画（nil・空・JSON でない）は
 // 空の view を返す。
 func parsePlanSpec(spec *string) planSpecView {
@@ -55,6 +64,7 @@ func parsePlanSpec(spec *string) planSpecView {
 		v.Tasks = append(v.Tasks, TaskInput{
 			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria, NonGoals: t.NonGoals,
 			Repo: t.Repo, Operation: t.Operation, DependsOn: t.DependsOn, SourceKey: t.Source,
+			BudgetImplMicros: taskBudgetMicros(t.BudgetImplUSD), BudgetReviewMicros: taskBudgetMicros(t.BudgetReviewUSD),
 		})
 	}
 	v.UsesIntegration = raw.UsesIntegration
@@ -344,9 +354,12 @@ func (s *Store) ExecutePlanAnswer(ctx context.Context, req PlanAnswerRequest, at
 // recommended は 1。すでに答えのある問いには足さない）。② 同じ課題のほかの版のタスクのうち済みでも取りやめでも
 // ないものを取りやめにする。③ 承認した版のタスクの行と前提の行を作る（状態は pending）。④ 統合先を使うかを課題へ
 // 記録する。構造化した出力を持たない計画（spec が NULL か、タスクを持たない過去の形）は、その部分を行わない。
-func onPlanApproved(ctx context.Context, tc *transitionCtx, att Attestation, planVersion int64) error {
+func onPlanApproved(ctx context.Context, tc *transitionCtx, att Attestation, planVersion int64, agent *AgentDeclaration) error {
 	view, err := loadPlanSpec(ctx, tc.tx, tc.id, planVersion)
 	if err != nil {
+		return err
+	}
+	if err := fillSoleTaskBudgets(ctx, tc.tx, tc.id, planVersion, view.Tasks, agent); err != nil {
 		return err
 	}
 	if len(view.Questions) > 0 {

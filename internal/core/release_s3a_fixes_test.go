@@ -541,12 +541,12 @@ func TestS3aFix_A_TheImplStopIsReadFromTheLastDelegationRunNotAReleaseStageRun(t
 			op = opID
 		}
 		writeForTest(t, s, func(tx *sql.Tx) error {
-			const ins = `INSERT INTO run (challenge_id, kind, challenge_version, plan_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket, operation_id)
-				VALUES (?, 'contract', 1, 1, 's', 1, 'h', 'x', ?, ?, ?, 1000000, 'impl', ?)`
-			if _, err := tx.Exec(ins, cid, "2026-11-01T00:00:00.000Z", "2026-11-01T00:00:01.000Z", "budget_exhausted", nil); err != nil {
+			const ins = `INSERT INTO run (challenge_id, kind, challenge_version, plan_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket, operation_id, reflect)
+				VALUES (?, 'contract', 1, 1, 's', 1, 'h', 'x', ?, ?, ?, 1000000, 'impl', ?, ?)`
+			if _, err := tx.Exec(ins, cid, "2026-11-01T00:00:00.000Z", "2026-11-01T00:00:01.000Z", "budget_exhausted", nil, 0); err != nil {
 				return err
 			}
-			_, err := tx.Exec(ins, cid, "2026-11-01T00:00:02.000Z", "2026-11-01T00:00:03.000Z", "succeeded", op)
+			_, err := tx.Exec(ins, cid, "2026-11-01T00:00:02.000Z", "2026-11-01T00:00:03.000Z", "succeeded", op, boolToInt(marked))
 			return err
 		})
 		var sp bucketSpend

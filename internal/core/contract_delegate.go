@@ -1080,8 +1080,19 @@ func (s *Store) holdContractWithReason(ctx context.Context, runID, challengeID, 
 			if tc.current.Status != StatusInProgress {
 				return errReconcileNotEligible
 			}
-			// 起動できるタスクがちょうど 1 個なら、保留をそのタスクに結び付ける（start の失敗では契約の run がまだ無い）。
-			if tasks, err := loadLaunchableTasks(ctx, tc.tx, tc.id); err != nil {
+			// 保留は、止まった契約の run が結び付くタスクに結び付ける（同じ課題のほかのタスクの run では、そのタスクではない）。
+			// run がタスクに結び付かないとき（start の失敗では契約の run がまだ無い）は、起動できるタスクがちょうど 1 個なら
+			// そのタスクに結び付ける。
+			var runTask sql.NullInt64
+			if n, ok := parseRunID(runID); ok {
+				if err := tc.tx.QueryRowContext(ctx, `SELECT task_id FROM run WHERE id = ?`, n).Scan(&runTask); err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+			}
+			if runTask.Valid {
+				id := runTask.Int64
+				tc.taskID = &id
+			} else if tasks, err := loadLaunchableTasks(ctx, tc.tx, tc.id); err != nil {
 				return err
 			} else if len(tasks) == 1 {
 				tc.taskID = taskIDPtr(&tasks[0])

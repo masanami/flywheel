@@ -125,6 +125,7 @@ func approveAndRead(ctx context.Context, st *core.Store, id string, version int,
 		ExpectedVersion: version,
 		Decision:        core.ApprovalDecisionApproved,
 		HoldRelease:     preview.Kind == core.ApprovalKindCompletion,
+		Agent:           agentDeclOrNil(st),
 	}, att)
 	if err != nil {
 		return nil, nil, nil, nil, err

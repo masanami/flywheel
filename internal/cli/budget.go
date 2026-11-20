@@ -38,7 +38,7 @@ func runBudget(a Args) (any, error) {
 	if derr != nil {
 		decl = nil
 	}
-	preview, err := a.Store.PrepareBudget(context.Background(), id, decl, impl, review)
+	preview, err := a.Store.PrepareBudgetForTask(context.Background(), id, a.Values["task"], decl, impl, review)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -52,6 +52,7 @@ func runBudget(a Args) (any, error) {
 		ChallengeID:     id,
 		ExpectedVersion: preview.Version,
 		PlanVersion:     preview.PlanVersion,
+		TaskID:          preview.TaskID,
 		ImplUSD:         impl,
 		ReviewUSD:       review,
 	}, att)
@@ -83,6 +84,9 @@ func budgetSummaryText(p *core.BudgetPreview) string {
 	fmt.Fprintf(&b, "課題 ID:     %s\n", p.ChallengeID)
 	fmt.Fprintf(&b, "タイトル:    %s\n", p.Title)
 	fmt.Fprintf(&b, "承認の種類:  予算（budget）\n")
+	if p.TaskID != "" {
+		fmt.Fprintf(&b, "タスク:      %s\n", p.TaskID)
+	}
 	fmt.Fprintf(&b, "計画の版:    v%d\n", p.PlanVersion)
 	if p.CurrentKnown {
 		fmt.Fprintf(&b, "現在の実装枠:        %s（残り %s）\n", usd(p.CurrentImplUSD), usd(p.ImplRemainingUSD))
