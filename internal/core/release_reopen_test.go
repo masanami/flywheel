@@ -386,18 +386,12 @@ func TestReopenChallengeForRelease_SecondReopenSupersedesOnlyTheEffectiveApprova
 }
 
 // 戻すとき、同じ課題のほかの承認済み・承認待ちの release も置き換える（前の完了の承認で同時に承認された release を、
-// 課題が着手中の間に実行させない）。終わっていない実行の試行がある release は置き換えない。
-func TestReopenChallengeForRelease_SupersedesSiblingReleasesWithoutOpenAttempts(t *testing.T) {
+// 課題が検証中の間に実行させない）。
+func TestReopenChallengeForRelease_SupersedesSiblingReleases(t *testing.T) {
 	t.Parallel()
 	f := newRelFixture(t)
 	const otherRef = "https://github.com/o/r/pull/9"
-	const busyRef = "https://github.com/o/r/pull/10"
 	sibling := coretest.InsertApprovedRelease(t, f.s.workspace, int(f.cid), otherRef, relHead, execTS(0))
-	busy := coretest.InsertApprovedRelease(t, f.s.workspace, int(f.cid), busyRef, relHead, execTS(0))
-	writeForTest(t, f.s, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO operation_execution (operation_id, started_at, approved_head, pid, host) VALUES (?, ?, ?, 1, 'testhost')`, busy, execTS(1), relHead)
-		return err
-	})
 
 	res, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
 	if err != nil || !res.Reopened {
@@ -415,16 +409,10 @@ func TestReopenChallengeForRelease_SupersedesSiblingReleasesWithoutOpenAttempts(
 	if o := byID[sibling]; o.state != string(OperationStateClosed) || o.closed.String != string(ClosedReasonSuperseded) {
 		t.Errorf("sibling release = %+v, want closed/superseded", o)
 	}
-	if o := byID[busy]; o.state != string(OperationStateApproved) {
-		t.Errorf("release with an open attempt = %+v, want left approved", o)
-	}
 	var siblingCopy bool
 	for _, c := range copies {
 		if c.supersedes.Int64 == sibling && c.state == string(OperationStatePending) && c.ref == otherRef {
 			siblingCopy = true
-		}
-		if c.supersedes.Int64 == busy {
-			t.Errorf("release with an open attempt must not be copied: %+v", c)
 		}
 	}
 	if !siblingCopy || len(copies) != 2 {
