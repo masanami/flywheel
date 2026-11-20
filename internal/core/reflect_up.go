@@ -67,10 +67,20 @@ func integrationRefMissingQuestion() string {
 // closeReflectOperation は、上げる依頼（課題 cid の、外部の実行 ID が externalRunID の契約の実行）が結び付いた、承認待ち・承認済みの
 // 反映の操作を、遷移 tc と同じトランザクションで閉じる（無ければ何もしない）。
 func closeReflectOperation(ctx context.Context, tc *transitionCtx, cid int64, externalRunID string) error {
+	return closeReflectOperations(ctx, tc, cid, externalRunID, "統合先から反映先へ上げる依頼が、反映先へ入れる前に終わったため、反映の操作を閉じた")
+}
+
+// closeReflectOperations は closeReflectOperation の、対象の上げる依頼（externalRunID が空なら、課題の上げる依頼のすべて）と、作業ログへ書く理由 why を
+// 指定する版。
+func closeReflectOperations(ctx context.Context, tc *transitionCtx, cid int64, externalRunID, why string) error {
+	// externalRunID が空のときは、上げる依頼との結び付きによらず、課題の待っている反映の操作のすべて（完了から戻した後に置き換えて作った操作を含む）。
 	rows, err := tc.tx.QueryContext(ctx,
-		`SELECT o.id, o.version, o.state FROM operation o JOIN contract_run k ON k.operation_id = o.id
-		 WHERE k.challenge_id = ? AND k.external_run_id = ? AND o.kind = ? AND o.state IN (?, ?) ORDER BY o.id`,
-		cid, externalRunID, string(OperationKindRelease), string(OperationStatePending), string(OperationStateApproved))
+		`SELECT o.id, o.version, o.state FROM operation o
+		 WHERE o.challenge_id = ? AND o.kind = ? AND o.state IN (?, ?)
+		   AND (? = '' OR o.id IN (SELECT k.operation_id FROM contract_run k WHERE k.challenge_id = ? AND k.external_run_id = ? AND k.kind = ?))
+		 ORDER BY o.id`,
+		cid, string(OperationKindRelease), string(OperationStatePending), string(OperationStateApproved),
+		externalRunID, cid, externalRunID, contractRunKindReflect)
 	if err != nil {
 		return err
 	}
@@ -110,7 +120,7 @@ func closeReflectOperation(ctx context.Context, tc *transitionCtx, cid int64, ex
 		if err := tc.rec.record("operation", t.id, ActivityActionOpClose,
 			map[string]any{"state": t.state},
 			map[string]any{"state": string(OperationStateClosed), "version": t.version + 1, "closed_reason": string(ClosedReasonSuperseded),
-				"reason": "統合先から反映先へ上げる依頼が、反映先へ入れる前に終わったため、反映の操作を閉じた"}); err != nil {
+				"reason": why}); err != nil {
 			return err
 		}
 	}
@@ -468,4 +478,32 @@ func (s *Store) challengeStatusIs(ctx context.Context, cid int64, want Status) (
 		return err
 	})
 	return ok, classifyReadWriteErr(err)
+}
+
+// reflectRunOperationClosed は、上げる依頼（kind が reflect）の契約の実行 row が結び付いた反映の操作が、閉じているか
+// （課題の単位の確かめが満たしていない・完了の差し戻しで閉じた。閉じた操作の上げる依頼は、取り消すと決まっている）。
+func (s *Store) reflectRunOperationClosed(ctx context.Context, row *contractRunRow) (bool, error) {
+	if row.Kind != contractRunKindReflect {
+		return false, nil
+	}
+	var n int
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM contract_run k JOIN operation o ON o.id = k.operation_id WHERE k.id = ? AND o.state = ? AND o.closed_reason IN (?, ?)`,
+			row.ID, string(OperationStateClosed), string(ClosedReasonSuperseded), string(ClosedReasonChallengeRejected)).Scan(&n)
+	})
+	return n > 0, classifyReadWriteErr(err)
+}
+
+// cancelClosedReflectRun は、反映の操作を閉じた上げる依頼を、宣言の commands.cancel で取り消す。終わりの状態が返れば、契約の実行を終わった記録にする
+// （課題の状態は変えない）。取り消せなかった（コマンドの失敗・終わりの状態でない）ときは、終わっていない記録のまま残し、保留にもしない
+// （次の状態の確認が取り消し直す。残っている間、新しい上げる依頼は始まらない）。
+func (s *Store) cancelClosedReflectRun(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64) (*ContractRunReport, error) {
+	challengeID := formatChallengeID(row.ChallengeID)
+	command, err := fillRowCommandArgs(connector, row, connector.Commands.Cancel, challengeID, binding, contractAnswer{})
+	if err != nil {
+		return nil, err
+	}
+	note := "反映の操作を閉じたため（課題の単位の確かめが満たしていない、または完了の差し戻し）、統合先から反映先へ上げる依頼の中止を依頼した。"
+	return s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, existingContractWorkDir(row, in.WorkDir), row, "cancel", command, planVersion, cycleID, note)
 }

@@ -364,6 +364,8 @@ type j5Context struct {
 	Facts map[string]string
 	// TaskScope は、統合先を使う課題のタスク 1 個の検証（タスクの単位の J5）のときの、検証の対象（無ければ nil）。
 	TaskScope *j5TaskScope
+	// ChallengeScope は、統合先を使う、検証中の課題の課題の単位の確かめのときの、確かめの入力（無ければ nil）。
+	ChallengeScope *j5ChallengeScope
 	// ArtifactDescriptionRead は、成果物の説明文（PR の本文）を 1 件でも取得できたか（form: cli の委譲の報告の出どころを決める）。
 	ArtifactDescriptionRead bool
 }
@@ -415,10 +417,20 @@ func (s *Store) loadJ5ContextFor(ctx context.Context, ch Challenge, taskID *int6
 				return nil
 			}
 			vc.TaskScope, vc.Task = scope, &scope.Task
-		} else if vc.Task, err = loadVerifyingTask(ctx, tx, cid); err != nil {
-			return err
+		} else {
+			if vc.Task, err = loadVerifyingTask(ctx, tx, cid); err != nil {
+				return err
+			}
+			if ch.Status == StatusVerifying {
+				if vc.ChallengeScope, err = loadJ5ChallengeScope(ctx, tx, cid); err != nil {
+					return err
+				}
+			}
 		}
-		if vc.Facts, err = loadTaskContractFacts(ctx, tx, cid, vc.Task); err != nil {
+		if vc.ChallengeScope != nil {
+			// 課題の単位の確かめは、タスクごとの検証をやり直さず、上げる依頼の facts を読む。
+			vc.Task, vc.Facts = nil, vc.ChallengeScope.Facts
+		} else if vc.Facts, err = loadTaskContractFacts(ctx, tx, cid, vc.Task); err != nil {
 			return err
 		}
 		var lastID int64
@@ -428,6 +440,12 @@ func (s *Store) loadJ5ContextFor(ctx context.Context, ch Challenge, taskID *int6
 			lastQ = `SELECT id FROM run WHERE challenge_id = ? AND task_id = ? AND kind IN (?, ?) AND operation_id IS NULL
 				ORDER BY EXISTS (SELECT 1 FROM run_artifact a WHERE a.run_id = run.id) DESC, id DESC LIMIT 1`
 			lastArgs = []any{cid, *taskID, string(runKindDelegate), string(runKindContract)}
+		}
+		if vc.ChallengeScope != nil {
+			// 課題の単位の確かめでは、上げる依頼が用意した実物（反映の操作の成果物）を読む: 上げる依頼の実行（run.reflect の印）のうち、PR の成果物を取り込んだ最後のもの
+			// （上げる依頼が取り消された後〔完了から戻した後〕も、取り込んだ成果物は残る）。
+			lastQ = `SELECT id FROM run WHERE challenge_id = ? AND reflect = 1 AND EXISTS (SELECT 1 FROM run_artifact a WHERE a.run_id = run.id AND a.kind = ?) ORDER BY id DESC LIMIT 1`
+			lastArgs = []any{cid, string(artifactKindPR)}
 		}
 		qerr := tx.QueryRowContext(ctx, lastQ, lastArgs...).Scan(&lastID)
 		if errors.Is(qerr, sql.ErrNoRows) {
@@ -494,6 +512,9 @@ func formatReconciliationSection(vc *j5Context) string {
 }
 
 func formatDelegationReportSection(vc *j5Context) string {
+	if vc.ChallengeScope != nil {
+		return j5ChallengeCheckDelegationReport
+	}
 	if vc.LastDelegate == nil {
 		return "直前の委譲の報告は無い。"
 	}
@@ -570,6 +591,10 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 	}
 	if vc.TaskScope != nil {
 		sections[1].Content += "\n\nこの確認はタスクの検証である。この条件のうち、このタスクの範囲の条件だけを確かめる。"
+	}
+	if vc.ChallengeScope != nil {
+		sections[1].Content += "\n\n" + j5ChallengeCheckNote
+		sections = append(sections, challengeCheckSections(vc)...)
 	}
 	if vc.Task != nil {
 		sections = append(sections, JudgmentDataSection{Label: labelTaskSection, Content: formatTaskSection(*vc.Task)})
@@ -1271,6 +1296,8 @@ func (s *Store) verifyTarget(ctx context.Context, in J5AutoInput, jc *JudgmentCy
 		var finalResult RunResult
 		if vc.TaskScope != nil {
 			outcome, status, finalResult, err = s.finalizeJ5TaskOutput(ctx, res.RunID, res.ChallengeID, structured, vc.TaskScope, vh)
+		} else if vc.ChallengeScope != nil {
+			outcome, status, finalResult, err = s.finalizeJ5ChallengeOutput(ctx, res.RunID, res.ChallengeID, structured, vh)
 		} else {
 			outcome, status, finalResult, err = s.finalizeJ5Output(ctx, res.RunID, res.ChallengeID, structured, vh)
 		}
