@@ -108,8 +108,8 @@ func TestGetPullRequestChecks_MergeableState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPullRequestChecks: %v", err)
 	}
-	if got.MergeableState != core.UpstreamMergeStateBehind {
-		t.Errorf("MergeableState = %q, want %q", got.MergeableState, core.UpstreamMergeStateBehind)
+	if got.MergeableState != "behind" {
+		t.Errorf("MergeableState = %q, want %q", got.MergeableState, "behind")
 	}
 }
 

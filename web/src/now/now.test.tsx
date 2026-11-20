@@ -372,6 +372,7 @@ describe("あなたを待っている", () => {
     executed_at: null,
     id: "OP-1",
     kind: "release",
+    last_execution_detail: null,
     last_execution_result: null,
     merge_commit: null,
     ref: null,

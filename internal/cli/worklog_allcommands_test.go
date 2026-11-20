@@ -565,13 +565,13 @@ var worklogCases = []worklogCase{
 		name: "op exec", command: "op exec",
 		setup: func(t *testing.T, ws string) []string {
 			prepareExecWorkspace(t, ws)
-			newReleaseGH(t, execHead)
+			newReleaseGH(t, execHead).mergeOutside(t)
 			return []string{"op", "exec"}
 		},
 		want: func(string) []wantActivity {
 			return []wantActivity{{"operation", "OP-1", "op_execute",
 				map[string]any{"state": "approved"},
-				map[string]any{"result": "merged", "state": "executed", "version": 3.0, "trigger": "op exec",
+				map[string]any{"result": "already_merged", "state": "executed", "version": 3.0, "trigger": "op exec",
 					"approved_head": execHead, "observed_head": execHead, "merge_commit": execMerged}}}
 		},
 	},

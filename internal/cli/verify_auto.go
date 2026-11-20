@@ -71,8 +71,8 @@ func runVerifyAuto(a Args) (any, error) {
 		Connectors:   conn,
 		CycleID:      cyc.ID,
 
-		MergeableRetries:  core.ReleaseMergeableRetries,
-		MergeableInterval: core.ReleaseMergeableInterval,
+		MergeableRetries:  core.J5MergeableRetries,
+		MergeableInterval: core.J5MergeableInterval,
 	})
 
 	endResult := core.CycleResultCompleted

@@ -87,8 +87,6 @@ type CycleRunInput struct {
 	Descriptions UpstreamDescriptionSource
 	// HeadGit は J5 が PR の head を読む一時の worktree の口。ConnDecl が非 nil のとき必須。
 	HeadGit HeadWorktreeGit
-	// Merger は release の段のマージの依頼の書き込み（取り込みの依頼も実装していれば BEHIND に使う）。ConnDecl が非 nil のとき必須。
-	Merger UpstreamPullRequestMerger
 	// Compare は release の段が、完了の課題の承認待ちの release の PR に検証の後の変更が入ったかを判定する比較の取得
 	// （GET だけ）。nil なら、その判定をしない。
 	Compare UpstreamCompareSource
@@ -174,7 +172,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	if in.Trigger == "" || in.AgentDecl == nil || in.Invoker == nil || in.WorkspaceGit == nil {
 		return nil, ErrValidation
 	}
-	if in.ConnDecl != nil && (in.Upstream == nil || in.Delegate == nil || in.Git == nil || in.Reconcile == nil || in.Checks == nil || in.Diffs == nil || in.HeadGit == nil || in.Merger == nil) {
+	if in.ConnDecl != nil && (in.Upstream == nil || in.Delegate == nil || in.Git == nil || in.Reconcile == nil || in.Checks == nil || in.Diffs == nil || in.HeadGit == nil) {
 		return nil, ErrValidation
 	}
 	if in.Ingest != nil && (in.Ingest.Upstream == nil || in.Ingest.Channel == "") {
@@ -260,15 +258,12 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 	if in.ConnDecl != nil {
 		res, err := s.ExecuteReleases(ctx, nil, ReleaseExecOptions{
 			Checks:     in.Checks,
-			Merger:     in.Merger,
 			Compare:    in.Compare,
 			Connectors: in.ConnDecl,
 			Agent:      in.AgentDecl,
+			Contract:   in.Contract,
 			Trigger:    ReleaseExecTriggerCycle,
 			CycleID:    cycleID,
-
-			MergeableRetries:  ReleaseMergeableRetries,
-			MergeableInterval: ReleaseMergeableInterval,
 		})
 		if err != nil {
 			if res != nil && len(res.Items) > 0 {
@@ -363,8 +358,8 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			CycleID:      cycleID,
 			Cycle:        jc,
 
-			MergeableRetries:  ReleaseMergeableRetries,
-			MergeableInterval: ReleaseMergeableInterval,
+			MergeableRetries:  J5MergeableRetries,
+			MergeableInterval: J5MergeableInterval,
 		})
 		if err != nil {
 			return nil, err

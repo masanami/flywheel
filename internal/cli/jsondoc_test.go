@@ -332,8 +332,8 @@ func addM45ReleaseShape(t *testing.T, doc *documentedJSON) {
 			break
 		}
 	}
-	if len(itemKeys) != 7 {
-		t.Fatalf("m4.5 spec's `op exec` line does not list the 7 item keys: %v", itemKeys)
+	if len(itemKeys) != 8 {
+		t.Fatalf("m4.5 spec's `op exec` line does not list the 8 item keys: %v", itemKeys)
 	}
 	doc.topLevel["op exec"] = []map[string]bool{{"phase": true}}
 	doc.entity["release_phase"] = map[string]bool{"phase": true, "skipped": true, "items": true, "not_started": true, "tidied": true}
@@ -552,17 +552,9 @@ func assertDocumentedReleasePhase(t *testing.T, doc documentedJSON, where string
 	for j, it := range items {
 		im, _ := it.(map[string]any)
 		got := keysOf(im)
-		// 省略できるキー（mutually: 課題を戻したときの new_operation_id・reopen_reason は一緒に出る）。
-		_, hasNew := got["new_operation_id"]
-		_, hasReason := got["reopen_reason"]
-		if hasNew != hasReason {
-			t.Errorf("%s.items[%d] has new_operation_id=%v reopen_reason=%v, want both or neither", where, j, hasNew, hasReason)
-		}
-		delete(got, "new_operation_id")
-		delete(got, "reopen_reason")
-		delete(got, "detail")
+		// 省略できるキーは無い（new_operation_id・reopen_reason は items では出さない）。
 		if !reflect.DeepEqual(got, doc.entity["release_item"]) {
-			t.Errorf("%s.items[%d] keys = %v, documented = %v (+ optional detail, new_operation_id, reopen_reason)", where, j, sortedKeys(got), sortedKeys(doc.entity["release_item"]))
+			t.Errorf("%s.items[%d] keys = %v, documented = %v", where, j, sortedKeys(got), sortedKeys(doc.entity["release_item"]))
 		}
 	}
 	tidied, ok := pm["tidied"].([]any)
@@ -572,11 +564,11 @@ func assertDocumentedReleasePhase(t *testing.T, doc documentedJSON, where string
 	for j, td := range tidied {
 		tm, _ := td.(map[string]any)
 		got := keysOf(tm)
-		for _, optional := range []string{"closed_reason", "new_operation_id", "reopen_reason"} {
+		for _, optional := range []string{"closed_reason", "new_operation_id", "reopen_reason", "wait_reason", "cancel_note"} {
 			delete(got, optional)
 		}
 		if want := map[string]bool{"action": true, "challenge_id": true, "operation_id": true}; !reflect.DeepEqual(got, want) {
-			t.Errorf("%s.tidied[%d] keys = %v, documented = %v (+ optional closed_reason, new_operation_id, reopen_reason)", where, j, sortedKeys(got), sortedKeys(want))
+			t.Errorf("%s.tidied[%d] keys = %v, documented = %v (+ optional closed_reason, new_operation_id, reopen_reason, wait_reason, cancel_note)", where, j, sortedKeys(got), sortedKeys(want))
 		}
 		action, _ := tm["action"].(string)
 		switch action {
@@ -588,8 +580,12 @@ func assertDocumentedReleasePhase(t *testing.T, doc documentedJSON, where string
 			if _, has := tm["reopen_reason"]; !has {
 				t.Errorf("%s.tidied[%d] is reopened without reopen_reason", where, j)
 			}
+		case "needs_human", "skipped":
+			if _, has := tm["wait_reason"]; !has {
+				t.Errorf("%s.tidied[%d] is %s without wait_reason", where, j, action)
+			}
 		default:
-			t.Errorf("%s.tidied[%d].action = %q, want closed or reopened", where, j, action)
+			t.Errorf("%s.tidied[%d].action = %q, want closed, reopened, needs_human or skipped", where, j, action)
 		}
 	}
 	ns, ok := pm["not_started"].([]any)
@@ -1287,8 +1283,8 @@ func addM4StageShape(t *testing.T, doc *documentedJSON) {
 }
 
 // m45OperationKeys は M4.5 S1 が不可逆操作の要素（show の operations・status の
-// needs_human.operations・approved.operations）に足す 6 つのキー。
-var m45OperationKeys = []string{"approved_head", "executed_at", "merge_commit", "last_execution_result", "consecutive_failures", "waiting_since", "closed_reason", "closed_at", "supersedes", "superseded_by"}
+// needs_human.operations・approved.operations）に足したキー（#485・S3a の分を含む）。
+var m45OperationKeys = []string{"approved_head", "executed_at", "merge_commit", "last_execution_detail", "last_execution_result", "consecutive_failures", "waiting_since", "closed_reason", "closed_at", "supersedes", "superseded_by"}
 
 // addM45OperationShape は M4.5 S1 と #485 が不可逆操作の要素に足したキーを doc へ合成する。
 // m4.5 の機能仕様がそれらのキーをすべて書いていることを確かめた上で足す（第 2 の正本を持たず、

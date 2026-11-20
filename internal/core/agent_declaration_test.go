@@ -102,7 +102,6 @@ const allKeysAgentJSON = `{
 	"max_parallel_runs": 2,
 	"rework_limit": 3,
 	"failure_limit": 2,
-	"behind_update_limit": 3,
 	"improve_threshold": 10,
 	"memory_dir": "memory",
 	"memory_write_limit": {"files": 5, "bytes": 8192}
@@ -280,23 +279,6 @@ func TestLoadAgentDeclaration_ReworkLimitMustBePositiveInteger(t *testing.T) {
 	}
 }
 
-func TestLoadAgentDeclaration_BehindUpdateLimitDefaultAndValidation(t *testing.T) {
-	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{}`))
-	if err != nil || decl.BehindUpdateLimit != 3 {
-		t.Fatalf("default = %v, %v; want 3", decl, err)
-	}
-	decl, err = LoadAgentDeclaration(writeAgentJSON(t, `{"behind_update_limit": 5}`))
-	if err != nil || decl.BehindUpdateLimit != 5 {
-		t.Fatalf("declared = %v, %v; want 5", decl, err)
-	}
-	for _, v := range []string{"0", "-1", "1.1"} {
-		_, err := LoadAgentDeclaration(writeAgentJSON(t, fmt.Sprintf(`{"behind_update_limit": %s}`, v)))
-		if !errors.Is(err, ErrConfigInvalid) {
-			t.Fatalf("%s: error = %v, want ErrConfigInvalid", v, err)
-		}
-	}
-}
-
 func TestLoadAgentDeclaration_FailureLimitMustBePositiveInteger(t *testing.T) {
 	t.Parallel()
 	for _, v := range []string{"0", "-1", "1.1"} {
@@ -465,6 +447,7 @@ func TestLoadAgentDeclaration_RemovedKeysAreRejectedWithRemovedWord(t *testing.T
 	cases := map[string]struct{ json, key string }{
 		"conflict_prediction_budget_usd":   {`{"conflict_prediction_budget_usd": 1}`, "conflict_prediction_budget_usd"},
 		"serial_judgment_cycle_budget_usd": {`{"serial_judgment_cycle_budget_usd": 3}`, "serial_judgment_cycle_budget_usd"},
+		"behind_update_limit":              {`{"behind_update_limit": 3}`, "behind_update_limit"},
 		"judgment_budget_usd.J9":           {`{"judgment_budget_usd": {"J9": 0.5}}`, "J9"},
 	}
 	for name, c := range cases {

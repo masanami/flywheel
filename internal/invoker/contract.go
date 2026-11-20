@@ -28,8 +28,12 @@ type rawContractStatus struct {
 	Artifacts       []struct {
 		Kind string `json:"kind"`
 		Ref  string `json:"ref"`
+		// role は任意（文字列）。在って文字列でない（null を含む）と型が合わない（malformed）。
+		Role json.RawMessage `json:"role"`
 	} `json:"artifacts"`
 	CostUSD json.RawMessage `json:"cost_usd"`
+	// facts は任意（名前から文字列への対応）。形が合わなければ無いものとして扱い、出力の全体は malformed にしない。
+	Facts json.RawMessage `json:"facts"`
 }
 
 // decodeContractStatus は標準出力を core.ContractStatus へ正規化する。単一の JSON オブジェクトとして
@@ -64,7 +68,17 @@ func decodeContractStatus(stdout []byte) (*core.ContractStatus, bool) {
 			ResolvableBy: decodeResolvableBy(ra.ResolvableBy)}
 	}
 	for _, a := range raw.Artifacts {
-		st.Artifacts = append(st.Artifacts, core.ContractArtifact{Kind: a.Kind, Ref: a.Ref})
+		art := core.ContractArtifact{Kind: a.Kind, Ref: a.Ref}
+		if a.Role != nil {
+			// キーが在る。null は Go の復号では「無い」と区別できないので、生の値を文字列として読み直す。
+			if isJSONNull(a.Role) || json.Unmarshal(a.Role, &art.Role) != nil {
+				return nil, false
+			}
+		}
+		st.Artifacts = append(st.Artifacts, art)
+	}
+	if !isJSONNull(raw.Facts) {
+		st.Facts = decodeFacts(raw.Facts)
 	}
 	if !isJSONNull(raw.CostUSD) {
 		v, ok := decodeNumber(raw.CostUSD)
@@ -174,4 +188,22 @@ func decodeNumber(raw json.RawMessage) (float64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+// decodeFacts は facts を名前から文字列への対応として読む。対応でない・値に文字列でないもの（null を含む）が
+// 1 つでもあれば nil（無いものとして扱う）。
+func decodeFacts(raw json.RawMessage) map[string]string {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		var s string
+		if isJSONNull(v) || json.Unmarshal(v, &s) != nil {
+			return nil
+		}
+		out[k] = s
+	}
+	return out
 }

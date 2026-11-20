@@ -30,7 +30,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
             （--replan＝範囲・方針・達成条件が変わる回答の印。委譲を再開せず、計画を作り直して計画の承認待ちへ戻す。着手中・検証中の保留だけ）
   approve <ID> [--hold-release | --reopen] [--relayed --session <s> --quote <q>]
             （--reopen＝OP-ID だけ。検証の後に動いた head が取り込みだけとも中身の変更とも確かめられず人間待ちの release について、
-              承認せず課題を完了から着手中へ戻して検証し直す）
+              承認せず課題を完了から検証中へ戻して検証し直す）
   reject <ID> --reason <r> [--field <issues|expected|non_goals|figure>]... [--relayed --session <s> --quote <q>]
   withdraw <C-ID> --reason <r> [--relayed --session <s> --quote <q>]
   budget <C-ID> --impl-usd <額> [--review-usd <額>] [--relayed --session <s> --quote <q>]

@@ -10,8 +10,8 @@ func TestT18_ReopenForReleaseIsARestrictedRow(t *testing.T) {
 	if !ok {
 		t.Fatalf("LookupRestricted(done, reopen_for_release) not found")
 	}
-	if tr.ID != "T18" || tr.Target.Fixed != StatusInProgress || tr.RequiresVerification || !tr.Restricted {
-		t.Errorf("T18 = %+v, want restricted done -> in_progress without verification", tr)
+	if tr.ID != "T18" || tr.Target.Fixed != StatusVerifying || tr.RequiresVerification || !tr.Restricted {
+		t.Errorf("T18 = %+v, want restricted done -> verifying without verification", tr)
 	}
 	if _, ok := Lookup(StatusDone, OpReopenForRelease); ok {
 		t.Errorf("Lookup(done, reopen_for_release) found the restricted row, want only LookupRestricted to return it")

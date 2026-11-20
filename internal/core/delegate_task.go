@@ -7,8 +7,11 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -170,4 +173,170 @@ func formatTaskSection(t Task) string {
 		nonGoals = "\n" + strings.Join(lines, "\n")
 	}
 	return fmt.Sprintf("題名: %s\n\n何をするか:\n%s\n\n完了条件:\n%s\n\nやらないこと: %s", t.Title, t.Body, t.DoneCriteria, nonGoals)
+}
+
+// taskDocPlan は、タスクの文面の「背景」に入れる、承認済みの計画の中身。
+type taskDocPlan struct {
+	Summary  string
+	Topics   []taskDocTopic
+	Expected []StageExpected
+	NonGoals []string
+}
+
+// taskDocTopic は論点 1 つ（題名・どう決めたか・問いと記録した答え）。
+type taskDocTopic struct {
+	Title     string
+	Decision  string
+	Questions []taskDocQuestion
+}
+
+// taskDocQuestion は問い 1 つと、記録した答え（答えの記録が無いときは Answer が空）。
+type taskDocQuestion struct {
+	Number   int64
+	Text     string
+	Answer   string
+	Answered bool
+}
+
+// formatTaskDocument は起動するタスクの文面（UTF-8 の Markdown）を組み立てる。LLM も判断の呼び出しの口も使わない。
+// 上から、背景（承認済みの計画の、方針・論点ごとの問いと答え・完了したら見えるもの・やらないこと）、このタスク
+// （題名・何をするか・完了条件・やらないこと）、ほかのタスク（題名の一覧と、範囲外の明記）の順。ほかのタスクの
+// 「何をするか」は入れない。others は呼び出し側が取りやめを除いて渡す。
+func formatTaskDocument(plan taskDocPlan, task Task, others []Task) string {
+	var b strings.Builder
+	b.WriteString("# 背景\n\n## 方針\n\n")
+	b.WriteString(blankOr(plan.Summary, "（なし）"))
+	b.WriteString("\n\n## 論点と決定\n\n")
+	if len(plan.Topics) == 0 {
+		b.WriteString("（なし）\n\n")
+	}
+	for _, t := range plan.Topics {
+		fmt.Fprintf(&b, "### %s\n\n決定: %s\n\n", t.Title, blankOr(t.Decision, "（なし）"))
+		for _, q := range t.Questions {
+			ans := "（答えの記録なし）"
+			if q.Answered {
+				ans = q.Answer
+			}
+			fmt.Fprintf(&b, "- 問い: %s\n  答え: %s\n", q.Text, ans)
+		}
+		if len(t.Questions) > 0 {
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("## 完了したら見えるもの\n\n")
+	if len(plan.Expected) == 0 {
+		b.WriteString("（なし）\n")
+	}
+	for _, e := range plan.Expected {
+		fmt.Fprintf(&b, "- [%s] %s\n  前: %s\n  後: %s\n", e.Kind, e.Scene, e.Before, e.After)
+	}
+	b.WriteString("\n## やらないこと\n\n")
+	b.WriteString(bulletList(plan.NonGoals))
+	b.WriteString("\n# このタスク\n\n")
+	fmt.Fprintf(&b, "題名: %s\n\n## 何をするか\n\n%s\n\n## 完了条件\n\n%s\n\n## やらないこと\n\n%s\n", task.Title, task.Body, task.DoneCriteria, bulletList(task.NonGoals))
+	b.WriteString("\n# ほかのタスク\n\n")
+	if len(others) == 0 {
+		b.WriteString("同じ課題のほかのタスクは無い。\n")
+		return b.String()
+	}
+	b.WriteString("ほかのタスクは範囲外である。このタスクの範囲だけを行う。\n\n")
+	for _, o := range others {
+		fmt.Fprintf(&b, "- %s\n", o.Title)
+	}
+	return b.String()
+}
+
+func blankOr(s, alt string) string {
+	if strings.TrimSpace(s) == "" {
+		return alt
+	}
+	return s
+}
+
+func bulletList(items []string) string {
+	if len(items) == 0 {
+		return "（なし）\n"
+	}
+	var b strings.Builder
+	for _, it := range items {
+		b.WriteString("- " + it + "\n")
+	}
+	return b.String()
+}
+
+// loadTaskDocument は課題 cid の、承認済みの計画 plan とタスク task から、タスクの文面を組み立てる（読むだけ）。
+// 問いの答えは plan_answer のその問いの最後の行（選択肢の答えは選択肢の文、文の答えはその文）。ほかのタスクは、
+// 最新の計画の版のタスクのうち、このタスク以外で取りやめでないもの。
+func loadTaskDocument(ctx context.Context, tx *sql.Tx, cid int64, plan approvedPlan, task Task) (string, error) {
+	var raw j2RawOutput
+	if plan.HasSpec {
+		if err := json.Unmarshal([]byte(plan.Spec), &raw); err != nil {
+			return "", fmt.Errorf("%w: the approved plan spec is malformed", ErrValidation)
+		}
+	}
+	answers, err := listPlanAnswers(ctx, tx, cid, int64(plan.Version))
+	if err != nil {
+		return "", err
+	}
+	byQuestion := make(map[int64]PlanAnswer, len(answers))
+	for _, a := range answers {
+		byQuestion[a.QuestionNumber] = a
+	}
+	doc := taskDocPlan{Expected: raw.Expected, NonGoals: raw.NonGoals}
+	if raw.Summary != nil {
+		doc.Summary = *raw.Summary
+	}
+	var n int64
+	for _, t := range raw.Topics {
+		topic := taskDocTopic{Title: t.Title, Decision: t.Decision}
+		for _, q := range t.Questions {
+			n++
+			tq := taskDocQuestion{Number: n, Text: q.Question}
+			if a, ok := byQuestion[n]; ok {
+				switch {
+				case a.Choice != nil && *a.Choice >= 1 && int(*a.Choice) <= len(q.Options):
+					tq.Answer, tq.Answered = q.Options[*a.Choice-1].Label, true
+				case a.Text != nil:
+					tq.Answer, tq.Answered = *a.Text, true
+				}
+			}
+			topic.Questions = append(topic.Questions, tq)
+		}
+		doc.Topics = append(doc.Topics, topic)
+	}
+	var others []Task
+	if latest, ok, err := latestPlanVersion(ctx, tx, cid); err != nil {
+		return "", err
+	} else if ok {
+		all, err := listTasks(ctx, tx, cid)
+		if err != nil {
+			return "", err
+		}
+		for _, t := range all {
+			if t.PlanVersion == latest && t.ID != task.ID && t.Status != TaskStatusCancelled {
+				others = append(others, t)
+			}
+		}
+	}
+	return formatTaskDocument(doc, task, others), nil
+}
+
+// taskFileName は、起動の実行の記録の置き場へ書くタスクの文面のファイル名。
+const taskFileName = "task.md"
+
+// writeTaskFile は文面 text を、起動の実行の記録の置き場 runDir の下の task.md へ UTF-8 で書き、その絶対パスを返す。
+// 契約の実行が終わった後も消さない。
+func writeTaskFile(runDir, text string) (string, error) {
+	abs, err := filepath.Abs(runDir)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(abs, taskFileName)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }

@@ -697,43 +697,14 @@ func TestLoadConnectorsDeclaration_Slots_Invalid(t *testing.T) {
 	}
 }
 
-// --- merge_method（AC-41） ---
+// --- repos の宣言の読み込み ---
 
-func loadRepoWithMergeMethod(t *testing.T, field string) (*ConnectorsDeclaration, error) {
+func loadRepoWithField(t *testing.T, field string) (*ConnectorsDeclaration, error) {
 	t.Helper()
 	dir := writeConnectorsJSON(t, `{"version": 1, "connectors": [
 		{"id": "a", "form": "brief", "permission_mode": "auto", "operations": [{"id": "op"}]}
 	], "repos": [{"name": "r", "remote": "o/r", "default_branch": "main", "connector": "a"`+field+`}]}`)
 	return LoadConnectorsDeclaration(dir)
-}
-
-func TestLoadConnectorsDeclaration_MergeMethodDefaultsToSquash(t *testing.T) {
-	t.Parallel()
-	decl, err := loadRepoWithMergeMethod(t, "")
-	if err != nil {
-		t.Fatalf("error = %v", err)
-	}
-	if got := decl.Repos[0].MergeMethod; got != MergeMethodSquash {
-		t.Errorf("MergeMethod = %q, want squash", got)
-	}
-}
-
-func TestLoadConnectorsDeclaration_MergeMethodClosedSet(t *testing.T) {
-	t.Parallel()
-	for _, m := range []string{"squash", "merge", "rebase"} {
-		decl, err := loadRepoWithMergeMethod(t, `, "merge_method": "`+m+`"`)
-		if err != nil {
-			t.Fatalf("%s: error = %v", m, err)
-		}
-		if got := decl.Repos[0].MergeMethod; got != m {
-			t.Errorf("MergeMethod = %q, want %q", got, m)
-		}
-	}
-	for _, bad := range []string{`"fast-forward"`, `""`, `"Squash"`, `null`, `1`, `true`} {
-		if _, err := loadRepoWithMergeMethod(t, `, "merge_method": `+bad); !errors.Is(err, ErrConfigInvalid) {
-			t.Errorf("merge_method %s: error = %v, want ErrConfigInvalid", bad, err)
-		}
-	}
 }
 
 // --- 無くした項目（removed）が残っている宣言は config_invalid で止める ---
@@ -755,8 +726,11 @@ func TestLoadConnectorsDeclaration_RemovedRepoKeysAreRejected(t *testing.T) {
 		{"serial_judgment", `, "serial_judgment": true`},
 		{"serial_judgment", `, "serial_judgment": false`},
 		{"conflict_exclude_paths", `, "conflict_exclude_paths": ["docs/**"]`},
+		{"merge_method", `, "merge_method": "squash"`},
+		{"merge_method", `, "merge_method": "rebase"`},
+		{"merge_method", `, "merge_method": null`},
 	} {
-		_, err := loadRepoWithMergeMethod(t, c.field)
+		_, err := loadRepoWithField(t, c.field)
 		assertRemovedKeyRejected(t, err, c.key)
 	}
 }
@@ -772,7 +746,7 @@ func TestLoadConnectorsDeclaration_RemovedConflictPredictionIsRejected(t *testin
 
 func TestLoadConnectorsDeclaration_UnknownKeyKeepsItsOwnMessage(t *testing.T) {
 	t.Parallel()
-	_, err := loadRepoWithMergeMethod(t, `, "no_such_key": 1`)
+	_, err := loadRepoWithField(t, `, "no_such_key": 1`)
 	if !errors.Is(err, ErrConfigInvalid) || !strings.Contains(err.Error(), "unknown key") {
 		t.Fatalf("error = %v, want ErrConfigInvalid with unknown key", err)
 	}

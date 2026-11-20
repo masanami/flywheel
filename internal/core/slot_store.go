@@ -210,22 +210,25 @@ type runArtifactRow struct {
 	State      artifactState
 	Base       string
 	VerifiedAt *time.Time
+	// Role は成果物の役割（"" が NULL）。
+	Role string
 }
 
-const runArtifactSelectColumns = `SELECT id, run_id, kind, ref, state, base, verified_at FROM run_artifact`
+const runArtifactSelectColumns = `SELECT id, run_id, kind, ref, state, base, verified_at, role FROM run_artifact`
 
 func scanRunArtifactRow(row interface{ Scan(dest ...any) error }) (*runArtifactRow, error) {
 	var (
 		id, runID       int64
 		kind, ref       string
 		state, base, at sql.NullString
+		role            sql.NullString
 	)
-	if err := row.Scan(&id, &runID, &kind, &ref, &state, &base, &at); err != nil {
+	if err := row.Scan(&id, &runID, &kind, &ref, &state, &base, &at, &role); err != nil {
 		return nil, err
 	}
 	r := &runArtifactRow{
 		ID: id, RunID: formatRunID(runID), Kind: artifactKind(kind), Ref: ref,
-		State: artifactState(state.String), Base: base.String,
+		State: artifactState(state.String), Base: base.String, Role: role.String,
 	}
 	if at.Valid {
 		t, err := parseTimestamp(at.String)
@@ -245,6 +248,7 @@ type insertRunArtifactInput struct {
 	State      artifactState
 	Base       string
 	VerifiedAt *time.Time
+	Role       string
 }
 
 func (in insertRunArtifactInput) valid() bool {
@@ -268,8 +272,8 @@ func insertRunArtifact(ctx context.Context, tx *sql.Tx, runID int64, in insertRu
 		verified = formatTimestamp(*in.VerifiedAt)
 	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO run_artifact (run_id, kind, ref, state, base, verified_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		runID, string(in.Kind), in.Ref, nullableTextColumn(string(in.State)), nullableTextColumn(in.Base), verified)
+		`INSERT INTO run_artifact (run_id, kind, ref, state, base, verified_at, role) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		runID, string(in.Kind), in.Ref, nullableTextColumn(string(in.State)), nullableTextColumn(in.Base), verified, nullableTextColumn(in.Role))
 	if err != nil {
 		return nil, err
 	}

@@ -1,13 +1,14 @@
 package core
 
-// このファイルは、完了の承認まで済んだ課題の release が本番反映でマージできなくなったとき、課題を完了から
-// 着手中へ戻して検証を通って立て直す書き込み（docs/features/m4.5-learning-and-self-improvement.md
+// このファイルは、完了の承認まで済んだ課題の release の PR の中身が、検証の後に取り込みだけではない形で変わったとき、課題を完了から
+// 検証中へ戻して検証を通って立て直す書き込み（docs/features/m4.5-learning-and-self-improvement.md
 // §本番反映の立て直し。遷移表の T18）を持つ。
 //
 // 呼べるのは ReopenChallengeForRelease（と同じ処理を本番反映の書き込みのトランザクションの中で呼ぶ
 // reopenForReleaseInTx）だけ。完了した課題をほかの理由で戻す口にはしない:
-// 戻す理由は ReopenReason の 4 値（マージできない・連続の上限・検証の後の中身の変更・取り込みだけとも中身の変更とも
-// 確かめられず人が戻す方を選んだ）に限る。公開の入口は、core が自分で比較して確かめられる後ろの 2 値だけを受ける。
+// 戻す理由は、いま使う 2 値（検証の後の中身の変更・取り込みだけとも中身の変更とも確かめられず人が戻す方を選んだ）に限る。
+// ReopenReason の not_mergeable・limit_reached は、過去の記録を読むためだけに残した値で（区切り S3a で、反映先へ入れられないことを
+// 理由に戻す場面は外した）、書き込みは受けない。公開の入口は、core が自分で比較して確かめられる 2 値を受ける。
 
 import (
 	"context"
@@ -24,16 +25,138 @@ type ReopenForReleaseInput struct {
 	// Reason は戻す理由。公開の入口が受けるのは、core が自分で比較して確かめられる 2 値だけ:
 	// content_changed（取り込み以外の変更が入った・履歴が書き換わったと確かに言える）と
 	// undeterminable（取り込みだけとも中身の変更とも確かめられず、人が戻す方を選んだ）。
-	// not_mergeable・limit_reached は本番反映の段の試行の結果から core 自身が戻すので、この入口では ErrValidation。
+	// not_mergeable・limit_reached は過去の記録を読むためだけに残した値なので、この入口では ErrValidation。
 	// 閉集合外も ErrValidation。
 	Reason ReopenReason
 	// Sources は core が自分で比較し直すための取得の口。口が無い・比較できないときは、戻す対象なら ErrConflict。
 	Sources ReleaseHeadSources
+	// ContractSources は、戻す前にその課題の終わっていない反映の依頼を commands.cancel で取り消し、終わっていないタスクの契約の実行を commands.status で読むための口。
+	// 終わっていないタスクの実行が無ければ使わない（nil でよい）。あるのに無ければ、読めないので戻さない（ErrConflict）。
+	ContractSources ReopenContractSources
+}
+
+// ReopenContractSources は、課題を完了から戻す前の、反映の依頼の取り消し（commands.cancel）とタスクの契約の実行の状態の読み（commands.status）の入力。
+type ReopenContractSources struct {
+	Contract   ContractClient
+	Agent      *AgentDeclaration
+	Connectors *ConnectorsDeclaration
+}
+
+// errReopenBlockedByRun は、課題の終わっていないタスクの契約の実行が running か読めない、または終わっていない反映の依頼を
+// 取り消せないため、完了から戻さなかったことを表す（ErrConflict の一種）。課題は完了のまま。
+var errReopenBlockedByRun = fmt.Errorf("%w: the challenge has an unfinished contract run that is running, could not be read, could not be cancelled, or received a land answer while the reopen was being prepared", ErrConflict)
+
+// readTaskRunBeforeReopen は opID の課題の、終わっていない反映の依頼を commands.cancel で取り消し、終わっていないタスクの契約の実行を
+// commands.status で読む（課題に終わっていない契約の実行は高々 1 本）。
+// running（委譲先が反映先へ入れている途中かもしれない）か読めなければ errReopenBlockedByRun。待ち（レビュー待ちを含む）なら戻してよい。
+// 終わっていれば、status の読みが契約の実行を終わった記録にする。終わっていないタスクの実行が無ければ何も呼ばない。
+// 返す印は、読む前に記録にあったタスクの実行の「入れてよい」の状態（無ければ nil）。戻す書き込みが、読みから書き込みまでの間に
+// 別のプロセスの反映の段が「入れてよい」を返していないことを確かめるのに使う（taskRunUnchangedInTx）。
+func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs ReopenContractSources) (*taskRunMark, error) {
+	var run *releaseRun
+	var lastAttempt int64
+	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		row, err := loadOperationRow(ctx, tx, opID)
+		if err != nil {
+			return err
+		}
+		// 終わっていない試行（反映の段が「入れてよい」を返す途中かもしれない）があれば、読まずに戻さない。戻す書き込みも同じ条件で
+		// 止めるが、ここで止めないと、その試行が読みの後に閉じたとき、控えた最後の試行の ID が変わらず、見分けられない。
+		var open int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operation_execution WHERE ended_at IS NULL AND operation_id IN (SELECT id FROM operation WHERE challenge_id = ? AND kind = ?)`,
+			row.ChallengeID, string(OperationKindRelease)).Scan(&open); err != nil {
+			return err
+		}
+		if open > 0 {
+			return errReopenBlockedByRun
+		}
+		if lastAttempt, err = lastReleaseAttemptID(ctx, tx, row.ChallengeID); err != nil {
+			return err
+		}
+		run, err = loadOpenRunInTx(ctx, tx, row.ChallengeID)
+		if run != nil {
+			run.opID = opID
+		}
+		return err
+	}); err != nil {
+		return nil, classifyReadWriteErr(err)
+	}
+	if run == nil {
+		return nil, nil
+	}
+	if run.row.Kind == contractRunKindReflect {
+		// 終わっていない反映の依頼は commands.cancel で取り消す（取り消せなければ戻さない）。
+		return nil, s.cancelOpenReflectRunBeforeReopen(ctx, run, cs)
+	}
+	if cs.Contract == nil || cs.Connectors == nil {
+		return nil, errReopenBlockedByRun
+	}
+	mark := &taskRunMark{id: run.row.ID, landRef: run.row.LandRef, landDelivered: run.row.LandDelivered, lastAttempt: lastAttempt}
+	opts := ReleaseExecOptions{Contract: cs.Contract, Agent: cs.Agent, Connectors: cs.Connectors}
+	rep, why, err := s.releaseContractCommand(ctx, opts, run, "status", contractFill{}, false)
+	if errors.Is(err, errReleaseContractBusy) {
+		return nil, errReopenBlockedByRun
+	}
+	if err != nil {
+		return nil, err
+	}
+	if why != "" || rep.Result != RunResultSucceeded || rep.State == ContractStateRunning {
+		return nil, errReopenBlockedByRun
+	}
+	return mark, nil
+}
+
+// taskRunMark は、完了から戻す前の読み（readTaskRunBeforeReopen）が commands.status を呼ぶ前に記録にあった、課題の終わっていない
+// タスクの契約の実行の ID と「入れてよい」の状態（land_ref・land_delivered）、その課題の反映の操作の試行のうち最後のものの ID
+// （無ければ 0）。
+type taskRunMark struct {
+	id            int64
+	landRef       string
+	landDelivered bool
+	lastAttempt   int64
+}
+
+// lastReleaseAttemptID は、課題 cid の、種類が反映の操作の試行のうち、最後のものの ID を返す（無ければ 0）。
+func lastReleaseAttemptID(ctx context.Context, tx *sql.Tx, cid int64) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(id), 0) FROM operation_execution WHERE operation_id IN (SELECT id FROM operation WHERE challenge_id = ? AND kind = ?)`,
+		cid, string(OperationKindRelease)).Scan(&id)
+	return id, err
+}
+
+// taskRunUnchangedInTx は、戻す書き込みの中で、課題 cid の終わっていないタスクの契約の実行が、戻す前の読みの時点（mark）から
+// 「入れてよい」を受けていないことを確かめる。読みから書き込みまでの間に、別のプロセスの反映の段が「入れてよい」を返して
+// 試行まで閉じていると、終わっていない試行も実行の記録も残らないので、ここで見分ける。次のどれかなら errReopenBlockedByRun
+// （何も書かない）: 記録した状態が running（委譲先が反映先へ入れている途中かもしれない）・読みの時点に無かった実行がある・
+// land_ref か land_delivered が読みの時点と違う・読みの後に、その課題の反映の操作の試行が増えている（「入れてよい」が届いたか
+// 分からないまま閉じた試行は、land_ref・land_delivered を読みの時点と同じ値に戻すので、値の比較だけでは見分けられない）。
+// 終わっていないタスクの実行が無ければ（無かった・読みが終わった記録にした）通す。
+func taskRunUnchangedInTx(ctx context.Context, tx *sql.Tx, cid int64, mark *taskRunMark) error {
+	cr, err := scanContractRun(tx.QueryRowContext(ctx,
+		contractRunSelect+` WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, cid, contractRunKindTask))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if mark == nil || cr.ID != mark.id || cr.State == ContractStateRunning || cr.LandRef != mark.landRef || cr.LandDelivered != mark.landDelivered {
+		return errReopenBlockedByRun
+	}
+	last, err := lastReleaseAttemptID(ctx, tx, cid)
+	if err != nil {
+		return err
+	}
+	if last != mark.lastAttempt {
+		return errReopenBlockedByRun
+	}
+	return nil
 }
 
 // ReopenForReleaseResult は ReopenChallengeForRelease の結果。
 type ReopenForReleaseResult struct {
-	// Reopened は課題を完了から着手中へ戻し、release を置き換えたかどうか。戻さなかった（課題が完了でない・
+	// Reopened は課題を完了から検証中へ戻し、release を置き換えたかどうか。戻さなかった（課題が完了でない・
 	// 操作が承認待ちか承認済みの release でない）ときは false で、何も書かない。
 	Reopened    bool
 	ChallengeID string
@@ -43,7 +166,7 @@ type ReopenForReleaseResult struct {
 }
 
 // ReopenChallengeForRelease は opID の release の課題が完了なら、同じトランザクションで次を行う（T18）:
-// 課題を着手中へ戻し（版 +1）、有効な前の完了の承認に「置き換えられた」日時と理由を記録し、古い release を
+// 課題を検証中へ戻し（版 +1）、有効な前の完了の承認に「置き換えられた」日時と理由を記録し、古い release を
 // closed（理由 superseded）にし、同じ種類・要約・参照の未承認の release を 1 件作って古い操作と結び、
 // 戻した記録（challenge_reopen）と作業ログを残す。
 //
@@ -66,12 +189,12 @@ func (s *Store) ReopenChallengeForRelease(ctx context.Context, ch Channel, in Re
 	if err != nil {
 		return nil, err
 	}
-	return s.reopenChallengeForRelease(ctx, ch, in.OperationID, in.Reason, as)
+	return s.reopenChallengeForRelease(ctx, ch, in.OperationID, in.Reason, as, in.ContractSources)
 }
 
 // reopenChallengeForRelease は as（core の評価）が reason に合うことを確かめて戻す。as が戻す対象でない
 // （Eligible が偽）ときは書かずに Reopened=false。評価の検証の head が書き込みの時点の最新と異なれば ErrConflict。
-func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDText string, reason ReopenReason, as *ReleaseReopenAssessment) (*ReopenForReleaseResult, error) {
+func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDText string, reason ReopenReason, as *ReleaseReopenAssessment, cs ReopenContractSources) (*ReopenForReleaseResult, error) {
 	opID, ok := parseOperationID(opIDText)
 	if !ok {
 		return nil, ErrNotFound
@@ -88,6 +211,16 @@ func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDT
 	actor, err := s.resolveActor()
 	if err != nil {
 		return nil, err
+	}
+	// 戻す前に、終わっていないタスクの契約の実行を読む（running か読めなければ戻さない）。
+	var mark *taskRunMark
+	if as.Eligible {
+		if mark, err = s.readTaskRunBeforeReopen(ctx, opID, cs); err != nil {
+			return nil, err
+		}
+	}
+	if s.reopenReadDone != nil {
+		s.reopenReadDone()
 	}
 	var res *ReopenForReleaseResult
 	err = s.mutateAs(ctx, actor, ch, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
@@ -106,6 +239,10 @@ func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDT
 			}
 			if verified == nil || *verified != as.Assessment.VerifiedHead {
 				return ErrConflict
+			}
+			// 読みからこの書き込みまでの間に、タスクの実行が「入れてよい」を受けていたら、戻さない。
+			if err := taskRunUnchangedInTx(ctx, tx, row.ChallengeID, mark); err != nil {
+				return err
 			}
 		}
 		if !as.Eligible {
@@ -128,7 +265,7 @@ func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDT
 }
 
 // reopenForReleaseInTx は ReopenChallengeForRelease の本体。呼び出し元のトランザクションの中で動く
-// （本番反映の段は、試行を閉じる書き込みと同じトランザクションで呼ぶ）。
+// （呼ぶのは ReopenChallengeForRelease だけ）。
 // extra は課題の作業ログの after に足す項目（本番反映の段が試行の結果・契機を載せる。nil 可）。
 func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, opID int64, reason ReopenReason, extra map[string]any) (*ReopenForReleaseResult, error) {
 	row, err := loadOperationRow(ctx, tx, opID)
@@ -148,11 +285,36 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		return res, nil
 	}
 
+	// 読み（readTaskRunBeforeReopen）からこの書き込みまでの間に、別のプロセスの反映の段が反映の依頼を始めたかもしれない。
+	// 取り消されていない反映の依頼を残したまま課題を検証中へ戻さないよう、この書き込みの中で確かめ直す（在れば何も書かない）。
+	var openReflect int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL`,
+		row.ChallengeID, contractRunKindReflect).Scan(&openReflect); err != nil {
+		return nil, err
+	}
+	if openReflect > 0 {
+		return nil, errReopenBlockedByRun
+	}
+	// 反映の依頼を始めている最中（contract_run の行がまだ無く、run の行だけがある）と、「入れてよい」を送っている最中（この課題の反映の操作のどれかに
+	// 終わっていない試行がある）も、同じく何も書かず戻さない。
+	var openRuns, openAttempts int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run WHERE challenge_id = ? AND kind = 'contract' AND result IS NULL`, row.ChallengeID).Scan(&openRuns); err != nil {
+		return nil, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operation_execution WHERE ended_at IS NULL AND operation_id IN (SELECT id FROM operation WHERE challenge_id = ? AND kind = ?)`,
+		row.ChallengeID, string(OperationKindRelease)).Scan(&openAttempts); err != nil {
+		return nil, err
+	}
+	if openRuns > 0 || openAttempts > 0 {
+		return nil, errReopenBlockedByRun
+	}
+
 	nowStr := formatTimestamp(rec.at)
 
 	// 同じ課題のほかの承認待ち・承認済みの release も置き換える（前の完了の承認が置き換えられるので、
-	// その承認で同時に承認された release を、課題が着手中の間に実行させない）。実行の試行が終わっていない
-	// release は、その試行の書き込みと衝突させないために置き換えない。新しい操作を作る前に選ぶ。
+	// その承認で同時に承認された release を、課題が検証中・着手中の間に実行させない）。実行の試行が終わっている
+	// release だけがここへ来る（終わっていない試行が課題のどれかにあれば、上で何も書かず競合で終えている）。新しい操作を作る前に選ぶ。
 	siblings, err := siblingReleasesToSupersede(ctx, tx, row.ChallengeID, opID)
 	if err != nil {
 		return nil, err
@@ -198,7 +360,7 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		return nil, err
 	}
 
-	// 課題を着手中へ戻す。
+	// 課題を検証中へ戻す。
 	newVersion := current.Version + 1
 	upd, err := tx.ExecContext(ctx,
 		`UPDATE challenge SET status = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND status = ?`,
@@ -212,8 +374,12 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		return nil, fmt.Errorf("core: reopen for release: expected to reopen challenge %s, updated %d rows", res.ChallengeID, n)
 	}
 
-	// 課題が着手中へ戻るので、承認済みの計画の版の done のタスクを in_progress にする。
-	if err := reopenDoneTasks(ctx, tx, rec, row.ChallengeID); err != nil {
+	// 課題が検証中へ戻るので、承認済みの計画の版の done のタスクを verifying にする。
+	if err := reverifyDoneTasks(ctx, tx, rec, row.ChallengeID); err != nil {
+		return nil, err
+	}
+	// 承認し直した後に、もう一度「入れてよい」を返せるよう、対応する契約の実行の通した中身の記録を消す。
+	if err := clearLandRefs(ctx, tx, row.ChallengeID); err != nil {
 		return nil, err
 	}
 
@@ -337,7 +503,7 @@ func linkSupersededApprovals(ctx context.Context, tx *sql.Tx, challengeID, newAp
 // labelReopenReason は委譲のブリーフを書く判断点（J3）の入力で、完了から戻した理由を渡すデータの区画の名前。
 const labelReopenReason = "本番反映のやり直し"
 
-// reopenNote は、課題を完了から着手中へ戻した記録のうち、その課題の最後の委譲より新しいもの。
+// reopenNote は、課題を完了から戻した記録のうち、その課題の最後の委譲より新しいもの。
 type reopenNote struct {
 	Reason ReopenReason
 	// Ref は立て直す release の参照（PR の URL。参照が無い release は空）。
@@ -354,7 +520,7 @@ func loadReopenNote(ctx context.Context, tx *sql.Tx, challengeID int64) (*reopen
 // 「記録が最後の run より新しいか」の比べ方の共通部（T15・T18 の配達済みの判定）。runKinds は定数だけを渡す。
 func runStartedOnOrAfter(ctx context.Context, tx *sql.Tx, challengeID int64, runKinds, at string) (bool, error) {
 	var lastRun sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind IN (`+runKinds+`)`, challengeID).Scan(&lastRun); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND operation_id IS NULL AND kind IN (`+runKinds+`)`, challengeID).Scan(&lastRun); err != nil {
 		return false, err
 	}
 	return lastRun.Valid && lastRun.String >= at, nil
@@ -382,25 +548,25 @@ func loadReopenNoteAfterRuns(ctx context.Context, tx *sql.Tx, challengeID int64,
 }
 
 // formatReopenSection は J3 の入力の区画「本番反映のやり直し」の本文。課題が完了の承認を受けた後に本番反映の段で
-// 着手中へ戻されたこと、戻した理由と PR、委譲先にやらせること（既定ブランチへ追従し、検査を通し、同じ PR へ
-// 反映する。新しい PR を作らない）を書く。
+// 完了から戻され、検証の後に着手中へ戻ったこと、戻した理由と PR、委譲先にやらせること（検証の後に入った変更を含めた中身を、達成条件を
+// 満たすよう直し、検査を通し、同じ PR へ反映する。新しい PR を作らない）を書く。
 func formatReopenSection(n *reopenNote, defaultBranch string) string {
 	pr := "この課題の PR"
 	if n.Ref != "" {
 		pr = "PR " + n.Ref
 	}
 	var b strings.Builder
-	b.WriteString("この課題は完了の承認を受けたが、本番反映の段で着手中へ戻された。\n")
+	b.WriteString("この課題は完了の承認を受けたが、本番反映の段で完了から戻され、完了の検証で達成条件を満たさないと判定されて着手中へ戻った。\n")
 	switch n.Reason {
 	case ReopenReasonContentChanged:
-		fmt.Fprintf(&b, "理由: 検証の後に、%s へ既定ブランチ（%s）の取り込み以外の変更が入った。入った変更を含めた中身を、もう一度検証する。\n", pr, defaultBranch)
+		fmt.Fprintf(&b, "理由: 検証の後に、%s へ既定ブランチ（%s）の取り込み以外の変更が入った。入った変更を含めた中身が検証で満たされなかった。\n", pr, defaultBranch)
 	case ReopenReasonUndeterminable:
-		fmt.Fprintf(&b, "理由: 検証の後に、%s の head が動き、既定ブランチ（%s）の取り込みだけとは確かめられなかった（人が着手中へ戻した）。動いた中身を含めて、もう一度検証する。\n", pr, defaultBranch)
+		fmt.Fprintf(&b, "理由: 検証の後に、%s の head が動き、既定ブランチ（%s）の取り込みだけとは確かめられなかった（人が完了から戻した）。動いた中身が検証で満たされなかった。\n", pr, defaultBranch)
 	case ReopenReasonLimitReached:
 		fmt.Fprintf(&b, "理由: 本番反映の段で、%s が既定ブランチ（%s）へマージできない状態が連続の上限に達した。\n", pr, defaultBranch)
 	default:
 		fmt.Fprintf(&b, "理由: 本番反映の段で、%s が既定ブランチ（%s）へマージできなくなった。\n", pr, defaultBranch)
 	}
-	fmt.Fprintf(&b, "やること: 作業ブランチを既定ブランチ（%s）へ追従させ、衝突があれば解消し、リポジトリの検査（テスト等）を通して、同じ PR へ反映する。新しい PR を作らない。", defaultBranch)
+	b.WriteString("やること: 検証の後に入った変更を含めた中身が、承認済みの計画の達成条件を満たすよう直し、リポジトリの検査（テスト等）を通して、同じ PR へ反映する。新しい PR を作らない。")
 	return b.String()
 }

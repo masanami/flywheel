@@ -40,7 +40,6 @@ const cycleFullAgentJSON = `{
   "max_parallel_runs": 2,
   "rework_limit": 3,
   "failure_limit": 2,
-  "behind_update_limit": 3,
   "improve_threshold": 10,
   "memory_dir": "memory",
   "memory_write_limit": {"files": 5, "bytes": 8192}
@@ -870,4 +869,25 @@ func TestCycle_NothingToAdvance_InvalidDeclarationIsStillConfigInvalid(t *testin
 	putRoutedFakeClaudeOnPATH(t, nil, "")
 
 	requireJSONErrorEnvelope(t, []string{"cycle", "--workspace", ws}, 2, CodeConfigInvalid)
+}
+
+// 周の最初の段 release は、反映の依頼の口があるリポジトリの承認済みの反映の操作の反映の依頼を始める（周の費用に入る）。
+func TestCycle_ReleasePhaseStartsAReflectRequest(t *testing.T) {
+	parallelTools(t, false)
+	ws, _, op, toolLog := reflectWorkspace(t)
+	newReleaseGH(t, execHead)
+	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
+
+	rel := cyclePhase(t, cycleDoc(t, ws), "release")
+	items := rel["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("release phase = %v, want one item", rel)
+	}
+	it := items[0].(map[string]any)
+	if it["operation_id"] != op || it["result"] != "reflect_started" || it["route"] != "reflect_request" {
+		t.Errorf("item = %v, want reflect_started for %s on the reflect_request route", it, op)
+	}
+	if calls := toolLog(); len(calls) != 1 || !strings.HasPrefix(calls[0], "reflect ") {
+		t.Errorf("tool calls = %q, want one reflect call", calls)
+	}
 }

@@ -1065,8 +1065,12 @@ func FillAllTables(t *testing.T, workspace string) {
 			  VALUES (1, 'src', 'o/r#9', 'o/r#1', 'https://github.com/o/r/issues/9', 't', 'b', 'open', ?, ?)`, []any{at, at}},
 			{`UPDATE task SET source_key = 'o/r#9' WHERE id = 1`, nil},
 			{`UPDATE run SET task_id = 1 WHERE id = 1`, nil},
+			{`UPDATE run SET operation_id = 1 WHERE id = 2`, nil},
 			{`UPDATE contract_run SET task_id = 1 WHERE id = 1`, nil},
-			{`UPDATE hold SET task_id = 2 WHERE id = 1`, nil},
+			{`UPDATE contract_run SET kind = 'reflect', operation_id = 1, requested_options = '["ready","respond"]', content_ref = 'abc123',
+			  facts = '{"k":"v"}', facts_unmet_count = 2, land_ref = 'o/r#3', land_delivered = 1 WHERE id = 1`, nil},
+			{`UPDATE run_artifact SET role = 'integration' WHERE id = 1`, nil},
+			{`UPDATE hold SET task_id = 2, reason = 'facts_unmet' WHERE id = 1`, nil},
 			{`UPDATE challenge SET uses_integration = 1 WHERE id = 1`, nil},
 			{`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after, run_id)
 			  VALUES (?, 'tester', 'cli', 'none', 'challenge', 1, 'create', NULL, '{"title":"c1"}', 1)`, []any{at}},
@@ -1197,4 +1201,41 @@ func InsertFollowup(t *testing.T, workspace string, r FollowupRow) int64 {
 		t.Fatalf("coretest: InsertFollowup: %v", err)
 	}
 	return id
+}
+
+// InsertContractRun は終わっていないタスクの契約の実行（contract_run）を 1 件挿入する（開始の run を終わった run として添える）。
+// 契約のコマンドを呼ぶ口（完了から戻す前の読みなど）の CLI のテストが、接続ツールの実行を持つ課題を作るために使う。
+func InsertContractRun(t *testing.T, workspace string, challengeID int, connectorID, externalRunID, state string) {
+	t.Helper()
+	runID := InsertRun(t, workspace, InsertRunInput{
+		ChallengeID: challengeID, Kind: "contract", ChallengeVersion: 1, SessionID: "s-" + externalRunID, PID: 1, Host: "h",
+		HeartbeatAt: "2026-10-22T00:00:00.000Z", StartedAt: "2026-10-22T00:00:00.000Z", EndedAt: "2026-10-22T00:00:01.000Z",
+		Result: "succeeded", BudgetBucket: "delegate",
+	})
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, max_budget_usd, started_at, observed_at)
+			 VALUES (?, ?, ?, ?, ?, 's', 1000000, '2026-10-22T00:00:00.000Z', '2026-10-22T00:00:00.000Z')`,
+			challengeID, connectorID, externalRunID, runID, state)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertContractRun: %v", err)
+	}
+}
+
+// InsertReflectContractRun は終わっていない反映の依頼（kind が reflect の contract_run。task_id は NULL）を、反映の操作 opID（内部整数 ID）に
+// 結び付けて 1 件挿入する。反映の依頼を取り消す口（完了から戻す前の取り消しなど）の CLI のテストが使う。
+func InsertReflectContractRun(t *testing.T, workspace string, challengeID int, opID int64, connectorID, externalRunID, state string) {
+	t.Helper()
+	InsertContractRun(t, workspace, challengeID, connectorID, externalRunID, state)
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE contract_run SET kind = 'reflect', operation_id = ?, task_id = NULL WHERE external_run_id = ?`, opID, externalRunID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertReflectContractRun: %v", err)
+	}
 }

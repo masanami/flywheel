@@ -65,7 +65,7 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 		view.RunsResponse{}, view.Discrepancy{}, view.Triage{}, view.BudgetExhausted{}, view.WaitingExternal{},
 		view.Slot{}, view.StatusNeedsHuman{}, view.StatusActionable{}, view.StatusApproved{},
 		view.StatusWaitingExternal{}, view.StatusResponse{}, view.IngestItem{}, view.IngestRepo{},
-		view.IngestSource{}, view.IngestResponse{}, view.IngestedItem{}, view.IngestedResponse{}, view.PhaseItem{}, view.PhaseNotStarted{}, view.ReleaseNotStarted{}, view.ReleaseItem{}, view.ReleasePhase{},
+		view.IngestSource{}, view.IngestResponse{}, view.IngestedItem{}, view.IngestedResponse{}, view.PhaseItem{}, view.PhaseNotStarted{}, view.ReleaseNotStarted{}, view.ReleaseItem{}, view.ReleaseTidied{}, view.ReleasePhase{},
 		view.JudgmentPhase{}, view.DelegationPhase{}, view.IngestPhase{}, view.PhaseResponse{}, view.Cycle{},
 		view.CycleResponse{}, view.CycleStarted{}, view.CycleStatus{}, view.SlotCleared{}, view.SlotResponse{}, view.InitResponse{},
 		view.MarkReadResponse{}, view.BudgetResponse{}, view.ExportBody{}, view.ExportResponse{}, view.ImportBody{}, view.ImportResponse{},
@@ -528,5 +528,112 @@ func TestApprovalSummaryCarriesMergeabilityUnconfirmed(t *testing.T) {
 	p.MergeabilityUnconfirmed = false
 	if got := view.FromApprovalPreview(p, nil).Approval.MergeabilityNote; got != "" {
 		t.Errorf("確認できているのに MergeabilityNote = %q", got)
+	}
+}
+
+func TestFromOperation_LastExecutionDetailKey(t *testing.T) {
+	res, detail := core.ExecutionResultLandRefused, "委譲先が書いた理由"
+	got := marshal(t, view.FromOperation(core.IrreversibleOperation{ID: "OP-1", LastExecutionResult: &res, LastExecutionDetail: &detail}))
+	if !strings.Contains(got, `"last_execution_detail":"委譲先が書いた理由"`) || !strings.Contains(got, `"last_execution_result":"land_refused"`) {
+		t.Errorf("%s lacks last_execution_detail/result", got)
+	}
+	if zero := marshal(t, view.FromOperation(core.IrreversibleOperation{ID: "OP-1"})); !strings.Contains(zero, `"last_execution_detail":null`) {
+		t.Errorf("%s: last_execution_detail must be null without an attempt record", zero)
+	}
+}
+
+func TestFromReleasePhase_ItemRouteIsNullUntilARouteExists(t *testing.T) {
+	got := marshal(t, view.FromReleasePhase(false, []core.ReleaseExecItem{{OperationID: "OP-1", ChallengeID: "C-1", Result: core.ExecutionResultLandSent}}, nil, nil))
+	if !strings.Contains(got, `"result":"land_sent","route":null`) {
+		t.Errorf("%s: item must carry route:null after result", got)
+	}
+	for _, key := range []string{`"items"`, `"not_started"`, `"tidied"`} {
+		if !strings.Contains(got, key) {
+			t.Errorf("%s lost the root key %s", got, key)
+		}
+	}
+}
+
+func TestExecutionResults_ClosedSetAndLabelsCoverEveryCoreValue(t *testing.T) {
+	var codes []string
+	for _, cs := range view.ClosedSets() {
+		if cs.Name == "EXECUTION_RESULT_CODES" {
+			codes = cs.Codes
+		}
+	}
+	values := core.ExecutionResultValues()
+	if len(codes) != len(values) {
+		t.Fatalf("EXECUTION_RESULT_CODES = %v, want the %d core values", codes, len(values))
+	}
+	for i, v := range values {
+		if codes[i] != string(v) {
+			t.Errorf("code[%d] = %q, want %q", i, codes[i], v)
+		}
+		if view.ExecutionResultLabel(v) == "" {
+			t.Errorf("no label for %q", v)
+		}
+	}
+}
+
+func TestExecutionResultLabel_S3aWordsAreVerbatim(t *testing.T) {
+	want := map[core.ExecutionResult]string{
+		core.ExecutionResultLanded:          "委譲先が反映先へ入れた",
+		core.ExecutionResultLandSent:        "委譲先へ「入れてよい」を返した",
+		core.ExecutionResultLandUnconfirmed: "「入れてよい」が届いたか分からない",
+		core.ExecutionResultLandRefused:     "委譲先が入れられなかった",
+		core.ExecutionResultContentMismatch: "委譲先の中身と、上流の中身が食い違っている",
+		core.ExecutionResultReflectStarted:  "反映の依頼を始めた",
+		core.ExecutionResultReflectFailed:   "反映の依頼を始められなかった",
+		core.ExecutionResultWaitingDelegate: "委譲先が進めている",
+		core.ExecutionResultWaitingOutside:  "flywheel の外での反映を待っている",
+		core.ExecutionResultDelegateEnded:   "委譲先の実行が、入れずに終わった",
+	}
+	for r, w := range want {
+		if got := view.ExecutionResultLabel(r); got != w {
+			t.Errorf("label(%s) = %q, want %q", r, got, w)
+		}
+	}
+}
+
+// 見直し前からある値の語は、コードでの使われ方（release_exec.go ほか）に合わせる（flywheel#856 の差し戻し）。
+func TestExecutionResultLabel_EarlierValuesSayWhatHappened(t *testing.T) {
+	want := map[core.ExecutionResult]string{
+		core.ExecutionResultUpstreamFailed:   "上流を読めなかった",
+		core.ExecutionResultClosed:           "成果物が、入らずに閉じられた",
+		core.ExecutionResultInterrupted:      "試行が途中で止まった",
+		core.ExecutionResultUnsupported:      "flywheel が扱えない形だった",
+		core.ExecutionResultNoApprovedHead:   "承認した中身の記録が無い",
+		core.ExecutionResultMergedUnapproved: "承認なしで反映された",
+	}
+	for r, w := range want {
+		if got := view.ExecutionResultLabel(r); got != w {
+			t.Errorf("label(%s) = %q, want %q", r, got, w)
+		}
+	}
+}
+
+// 画面の文言の表が読む EXECUTION_RESULT_WORDS は、EXECUTION_RESULT_CODES と同じ添字で端末の語を持つ。
+func TestClosedSets_ExecutionResultWordsAlignWithCodes(t *testing.T) {
+	var codes, words []string
+	for _, cs := range view.ClosedSets() {
+		switch cs.Name {
+		case "EXECUTION_RESULT_CODES":
+			codes = cs.Codes
+		case "EXECUTION_RESULT_WORDS":
+			words = cs.Codes
+		}
+	}
+	if len(codes) == 0 || len(words) != len(codes) {
+		t.Fatalf("codes = %d, words = %d", len(codes), len(words))
+	}
+	seen := map[string]string{}
+	for i, c := range codes {
+		if want := view.ExecutionResultLabel(core.ExecutionResult(c)); words[i] != want || want == "" {
+			t.Errorf("words[%d] = %q, want the label of %s (%q)", i, words[i], c, want)
+		}
+		if prev, dup := seen[words[i]]; dup {
+			t.Errorf("%s と %s が同じ語 %q", prev, c, words[i])
+		}
+		seen[words[i]] = c
 	}
 }

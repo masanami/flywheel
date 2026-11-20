@@ -107,6 +107,8 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	spec = withoutStrings(spec, "serialized", "prediction_limit")
 	// タスクを単位にする委譲（docs/features/core-redesign.md の区切り S2a）が足した理由。M3 の仕様の行には無い。
 	spec = append(spec, "integration_unavailable", "no_tasks")
+	// 反映の段（S3a）が足した理由。直前の試行が waiting_outside の反映の操作を、試行の行を増やさず飛ばす。
+	spec = append(spec, "waiting_outside")
 	sort.Strings(spec)
 
 	var impl []string
@@ -135,6 +137,7 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"dependency":              "TestDependency_IDOmittedRun_UnmetDependencyNotStartedWithSortedDetail (internal/core/delegate_dependency_test.go)",
 		"integration_unavailable": "TestDelegateTask_AC117_TwoTasksReasonIsIntegrationUnavailable (internal/core/delegate_task_test.go)",
 		"no_tasks":                "TestDelegateTask_AC121_NoTasksForAnOldShapePlan (internal/core/delegate_task_test.go)",
+		"waiting_outside":         "TestReleaseOutside_SecondTimeReturnsNotStartedWaitingOutside (internal/core/release_exec_outside_test.go)",
 	}
 	observed := map[string]bool{}
 	for r, ref := range coreObservedReasons {
@@ -352,6 +355,8 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedUpstreamMissing"
 	case "out_of_policy":
 		return "NotStartedOutOfPolicy"
+	case "waiting_outside":
+		return "NotStartedWaitingOutside"
 	}
 	return "?"
 }

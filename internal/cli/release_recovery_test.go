@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 
 // #485: 完了の承認まで済んだ PR が本番反映でマージできなくなったときの立て直し。
 // D＝検証の後に head が動いても、既定ブランチの取り込みだけで CI が通っていれば承認し直せる。
-// A＝それ以外の変更が入った・マージできない場合は、課題を完了から着手中へ戻して検証し直す。
+// A＝それ以外の変更が入った・マージできない場合は、課題を完了から検証中へ戻して検証し直す。
 // 偽の gh（PATH の先頭）の応答だけで動かし、本物の GitHub は読まない。
 
 const (
@@ -331,11 +332,11 @@ func TestMergeIn_SingleApprovalOfAContentChangeOnADoneChallengeReopensTheChallen
 	if code != 1 || !strings.Contains(stderr, `"upstream_unavailable"`) {
 		t.Fatalf("exit=%d stderr=%s, want exit 1 with upstream_unavailable", code, stderr)
 	}
-	if !strings.Contains(stderr, "着手中へ戻し") {
-		t.Errorf("stderr = %s, want it to say the challenge was moved back to in_progress", stderr)
+	if !strings.Contains(stderr, "検証中へ戻し") {
+		t.Errorf("stderr = %s, want it to say the challenge was moved back to verifying", stderr)
 	}
-	if got := f.challengeStatus(t); got != "in_progress" {
-		t.Errorf("challenge status = %s, want in_progress", got)
+	if got := f.challengeStatus(t); got != "verifying" {
+		t.Errorf("challenge status = %s, want verifying", got)
 	}
 	show := runJSON(t, f.ws, "show", f.id)
 	old := findOperation(t, show, f.ops[0])
@@ -402,34 +403,21 @@ func execOpsJSON(t *testing.T, ws string, args ...string) map[string]any {
 	return runJSON(t, ws, append([]string{"op", "exec"}, args...)...)
 }
 
-func TestOpExec_NotMergeableOnADoneChallengeMovesItBackToInProgress(t *testing.T) {
+// op exec の items は、見直し前の「入れられずに戻した」ときのキー new_operation_id・reopen_reason を出さない。
+func TestOpExec_ItemsHaveNoReopenKeys(t *testing.T) {
 	parallelTools(t, false)
-	ws, cid, op := execWorkspace(t)
-	routes := []fakeGHRoute{
-		{match: "repos/o/r/commits/" + execHead + "/check-runs?page=1&per_page=100", stdout: `{"total_count":0,"check_runs":[]}`},
-		{match: "repos/o/r/commits/" + execHead + "/status?page=1&per_page=100", stdout: `{"state":"success","total_count":0,"statuses":[]}`},
-		{match: "repos/o/r/pulls/1", stdout: fmt.Sprintf(`{"html_url":%q,"title":"PR","state":"open","merged_at":null,"base":{"ref":"main"},"head":{"sha":%q},"mergeable":false}`, releasePRURL(1), execHead)},
-	}
-	withFakeGHRoutesOnPATH(t, routes)
+	ws, _, _ := execWorkspace(t)
+	newReleaseGH(t, execHead)
 
-	doc := execOpsJSON(t, ws)
-	_, items, _ := execItems(t, doc)
+	_, items, _ := execItems(t, execOpsJSON(t, ws))
 	if len(items) != 1 {
 		t.Fatalf("items = %v", items)
 	}
 	it := items[0].(map[string]any)
-	if it["result"] != "not_mergeable" || it["reopen_reason"] != "not_mergeable" || it["new_operation_id"] == nil {
-		t.Fatalf("item = %v, want not_mergeable with the challenge reopened", it)
-	}
-	if got := statusOfChallenge(t, ws, cid); got != "in_progress" {
-		t.Errorf("challenge status = %s, want in_progress", got)
-	}
-	show := runJSON(t, ws, "show", cid)
-	if o := findOperation(t, show, op); o["state"] != "closed" || o["closed_reason"] != "superseded" || o["superseded_by"] != it["new_operation_id"] {
-		t.Errorf("old release = %v", o)
-	}
-	if o := findOperation(t, show, it["new_operation_id"].(string)); o["state"] != "pending" || o["supersedes"] != op {
-		t.Errorf("new release = %v", o)
+	for _, k := range []string{"new_operation_id", "reopen_reason"} {
+		if _, ok := it[k]; ok {
+			t.Errorf("item has the removed key %s: %v", k, it)
+		}
 	}
 }
 
@@ -533,8 +521,8 @@ func TestUndeterminable_HumanCanReopenTheChallengeInstead(t *testing.T) {
 	if doc["reason"] != "undeterminable" || doc["closed_operation_id"] != f.ops[0] || doc["new_operation_id"] == "" {
 		t.Fatalf("doc = %v", doc)
 	}
-	if got := f.challengeStatus(t); got != "in_progress" {
-		t.Errorf("challenge status = %s, want in_progress", got)
+	if got := f.challengeStatus(t); got != "verifying" {
+		t.Errorf("challenge status = %s, want verifying", got)
 	}
 }
 
@@ -559,5 +547,101 @@ func TestUndeterminable_ReopenFlagIsOnlyForOperationIDs(t *testing.T) {
 	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.id, "--reopen")...)
 	if code == 0 || !strings.Contains(stderr, "usage_error") {
 		t.Fatalf("exit=%d stderr=%s, want usage_error", code, stderr)
+	}
+}
+
+// reopenToolConnectorsFixture は、完了から戻す前の読み（commands.status）を呼ぶ接続ツール tool の宣言。
+const reopenToolConnectorsFixture = `{
+  "version": 1,
+  "connectors": [
+    {"id": "tool", "form": "cli", "permission_mode": "default",
+     "commands": {
+       "start": ["tool", "start", "--challenge", "{challenge_id}"],
+       "status": ["tool", "status", "{run_id}"],
+       "resume": ["tool", "resume", "{run_id}", "--answer", "{answer}"],
+       "cancel": ["tool", "cancel", "{run_id}"]
+     },
+     "contract_version": 1,
+     "operations": [{"id": "impl", "interactive": false, "child_may_decide": true, "artifacts": "pr"}]}
+  ],
+  "repos": [
+    {"name": "r-repo", "remote": "o/r", "default_branch": "main", "connector": "tool", "slots": {"provider": "clone", "paths": ["slot-a"]}}
+  ]
+}`
+
+// putFakeStatusToolOnPATH は status が常に state を返す偽の接続ツール tool を PATH の先頭に置く。
+func putFakeStatusToolOnPATH(t *testing.T, state string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"status) printf '{\"contract_version\":1,\"run_id\":\"%s\",\"state\":\"" + state + "\",\"summary\":\"s\"}\\n' \"$2\";;\n" +
+		"*) exit 1;;\n" +
+		"esac\n"
+	dir := t.TempDir()
+	if err := writeExecutable(filepath.Join(dir, "tool"), []byte(script)); err != nil {
+		t.Fatalf("write fake tool: %v", err)
+	}
+	addToolDir(t, dir)
+}
+
+// AC-317: approve <OP-ID> --reopen で、タスクの契約の実行を commands.status で読んだ状態が running のとき、conflict で終わり、課題は done のまま。
+func TestReopenOperation_ARunningTaskRunMakesTheReopenConflict(t *testing.T) {
+	parallelTools(t, false)
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
+	writeConnectorsJSONForTest(t, f.ws, reopenToolConnectorsFixture)
+	cid := challengeIDToInternalID(t, f.id)
+	coretest.SetChallengeStatus(t, f.ws, cid, "done")
+	coretest.InsertContractRun(t, f.ws, cid, "tool", "ext-1", "waiting")
+	putFakeStatusToolOnPATH(t, "running")
+	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.ops[0], "--reopen")...)
+	if code == 0 || !strings.Contains(stderr, "conflict") {
+		t.Fatalf("exit=%d stderr=%s, want a conflict", code, stderr)
+	}
+	if got := f.challengeStatus(t); got != "done" {
+		t.Errorf("challenge status = %s, want done", got)
+	}
+}
+
+// 待ち（レビュー待ち）の実行は、読んだ上で戻す。
+func TestReopenOperation_AWaitingTaskRunIsReadAndTheChallengeIsReopened(t *testing.T) {
+	parallelTools(t, false)
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
+	writeConnectorsJSONForTest(t, f.ws, reopenToolConnectorsFixture)
+	cid := challengeIDToInternalID(t, f.id)
+	coretest.SetChallengeStatus(t, f.ws, cid, "done")
+	coretest.InsertContractRun(t, f.ws, cid, "tool", "ext-1", "waiting")
+	putFakeStatusToolOnPATH(t, "waiting")
+	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.ops[0], "--reopen")...)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr)
+	}
+	if got := f.challengeStatus(t); got != "verifying" {
+		t.Errorf("challenge status = %s, want verifying", got)
+	}
+}
+
+// AC-313: approve <OP-ID> --reopen で、終わっていない反映の依頼の commands.cancel が失敗したとき、conflict で終わり、課題は done のまま
+// （取り消せない依頼を残したまま検証中へ戻さない）。
+func TestReopenOperation_AFailedCancelOfAReflectRequestMakesTheReopenConflict(t *testing.T) {
+	parallelTools(t, false)
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
+	writeConnectorsJSONForTest(t, f.ws, reopenToolConnectorsFixture)
+	cid := challengeIDToInternalID(t, f.id)
+	var opID int64
+	if _, err := fmt.Sscanf(f.ops[0], "OP-%d", &opID); err != nil {
+		t.Fatal(err)
+	}
+	coretest.SetChallengeStatus(t, f.ws, cid, "done")
+	coretest.InsertReflectContractRun(t, f.ws, cid, opID, "tool", "ext-1", "running")
+	putFakeStatusToolOnPATH(t, "running") // cancel は失敗する（この偽の tool は status だけに応える）
+	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.ops[0], "--reopen")...)
+	if code == 0 || !strings.Contains(stderr, "conflict") {
+		t.Fatalf("exit=%d stderr=%s, want a conflict", code, stderr)
+	}
+	if got := f.challengeStatus(t); got != "done" {
+		t.Errorf("challenge status = %s, want done", got)
 	}
 }

@@ -173,7 +173,7 @@ func TestFormatCompletionRejectionsSection_PinsTheText(t *testing.T) {
 func TestRunDelegation_J3InputHasTheRejectionSectionWithDatesAndReasons(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
-	id := f.newInProgress(t, "t", "P1", planSpec(nil))
+	id := f.newInProgress(t, "t", "P1", briefSpec(nil))
 	f.rejectCompletionForTest(t, id, "REASON-FIRST", rejDay(2026, 11, 4), ttyAtt)
 	f.rejectCompletionForTest(t, id, "REASON-SECOND", rejDay(2026, 11, 6), relayedAtt)
 	f.runDelegation(t, id)
@@ -191,7 +191,7 @@ func TestRunDelegation_J3InputHasTheRejectionSectionWithDatesAndReasons(t *testi
 func TestRunDelegation_J3InputHasNoRejectionSectionWithoutARejection(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
-	id := f.newInProgress(t, "t", "P1", planSpec(nil))
+	id := f.newInProgress(t, "t", "P1", briefSpec(nil))
 	f.runDelegation(t, id)
 	if _, ok := sectionByLabel(f.j3Inputs[0].Sections, "人間の差し戻し"); ok {
 		t.Fatalf("J3 input has a 人間の差し戻し section for a challenge without a rejection:\n%s", sectionsText(f.j3Inputs[0].Sections))
@@ -205,7 +205,7 @@ func TestRunDelegation_J3InputHasNoRejectionSectionWithoutARejection(t *testing.
 func TestRunDelegation_NewSessionAfterARejectionCarriesTheRejectionText(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
-	id := f.newInProgress(t, "t", "P1", planSpec(nil))
+	id := f.newInProgress(t, "t", "P1", briefSpec(nil))
 	f.rejectCompletionForTest(t, id, "REASON-FIRST", rejDay(2026, 11, 4), ttyAtt)
 	f.rejectCompletionForTest(t, id, "REASON-SECOND", rejDay(2026, 11, 6), relayedAtt)
 	f.runDelegation(t, id)
@@ -339,7 +339,7 @@ func TestVerifyAutoJ5_InputHasNoRejectionSectionWithoutARejection(t *testing.T) 
 // 次の委譲（再開）に渡る（J5 の出力はスタブ）。
 func TestRejectionReasonsReachJ3J5AndTheReworkResumeInOrder_AndANotMetFeedbackReachesTheNextDelegation(t *testing.T) {
 	t.Parallel()
-	f := newJ5Fixture(t, "impl")
+	f := newJ5Fixture(t, "brief")
 	f.delegateAndVerifyMet(t, "C-1")
 	f.rejectAndRedelegate(t, "C-1", "REASON-FIRST", rejDay(2026, 11, 4), ttyAtt)
 	f.verifyMet(t, "C-1")

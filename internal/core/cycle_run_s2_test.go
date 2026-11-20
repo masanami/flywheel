@@ -27,7 +27,7 @@ func cycleS2Invoker(verdict string, calls *[]JudgmentPoint) JudgmentInvoker {
 func (f *j5Fixture) cycleInput(inv JudgmentInvoker) CycleRunInput {
 	return CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream,
-		Delegate: f.deleg, Git: f.git, Reconcile: f.branches, Checks: f.checks, Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{}, Merger: &fakeRelease{},
+		Delegate: f.deleg, Git: f.git, Reconcile: f.branches, Checks: f.checks, Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{},
 		WorkspaceGit: &fakeWorkspaceGit{},
 	}
 }
@@ -36,7 +36,7 @@ func (f *j5Fixture) cycleInput(inv JudgmentInvoker) CycleRunInput {
 // その周の委譲の run がすべて終わってからである（run の started_at と ended_at で検証する）。
 func TestRunCycle_DelegatesThenVerifiesInTheSameCycle(t *testing.T) {
 	t.Parallel()
-	f := newJ5Fixture(t, "impl")
+	f := newJ5Fixture(t, "brief")
 	f.branches.branches["feat/x"] = true
 	f.branches.prs["feat/x"] = []UpstreamPullRequest{mkPR(1, "open", "develop")}
 	f.checks.prs["o/r#1"] = prChecks("open", checkDone)
@@ -78,7 +78,7 @@ func TestRunCycle_DelegatesThenVerifiesInTheSameCycle(t *testing.T) {
 // PR のチェックが完了していなければ、検証の段は J5 を起動せず、not_started に waiting_external で示す。
 func TestRunCycle_VerifyPhase_PendingChecksAreWaitingExternal(t *testing.T) {
 	t.Parallel()
-	f := newJ5Fixture(t, "impl")
+	f := newJ5Fixture(t, "brief")
 	f.branches.branches["feat/x"] = true
 	f.branches.prs["feat/x"] = []UpstreamPullRequest{mkPR(1, "open", "develop")}
 	f.checks.prs["o/r#1"] = prChecks("open", checkDone, checkRunning)

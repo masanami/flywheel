@@ -1,6 +1,10 @@
 // core が返す閉集合のコードを表示の文言に写す対応表。状態は UI で導かず、文言だけをここで持つ。
 
-import { HOLD_KIND_CODES } from "./api/types.gen.ts";
+import {
+  EXECUTION_RESULT_CODES,
+  EXECUTION_RESULT_WORDS,
+  HOLD_KIND_CODES,
+} from "./api/types.gen.ts";
 import type { CycleWorkStages } from "./api/types.gen.ts";
 
 export const CARD_STATES = [
@@ -91,6 +95,15 @@ export const DISCREPANCY_LABELS: Record<DiscrepancyKind, string> = {
   merged_unapproved: "承認なしで反映された",
   dependency_cycle: "依存が循環している",
 };
+
+type ExecutionResultCode = (typeof EXECUTION_RESULT_CODES)[number];
+
+// 反映の試行の結果（Operation.last_execution_result。core の閉集合 EXECUTION_RESULT_CODES）の語。
+// 語の正本は Go の表（internal/view の ExecutionResultLabel）で、生成物の EXECUTION_RESULT_WORDS を読む
+// （添字は EXECUTION_RESULT_CODES と同じ）。ここに語を直書きしない。
+export const EXECUTION_RESULT_LABELS = Object.fromEntries(
+  EXECUTION_RESULT_CODES.map((code, i) => [code, EXECUTION_RESULT_WORDS[i]]),
+) as Record<ExecutionResultCode, string>;
 
 // カードの面に出す区分の印（M4H23）。API の値から UI が導く（marks.ts は S2c の仕上げで外した。値の表だけ残してある）。
 export const MARK_KINDS = [
@@ -296,7 +309,7 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
   op_approve: "不可逆操作を承認した",
   op_reject: "不可逆操作を差し戻した",
   complete_direct: "オーケストレーターが直接行った作業を、完了として記録した",
-  reopen_for_release: "反映をやり直すため、完了から着手中へ戻した",
+  reopen_for_release: "反映をやり直すため、完了から戻した",
   ingest_create: "取り込み元から課題を作った",
   ingest_update: "取り込み元の変更を取り込んだ",
   bind: "取り込み元と対応付けた",

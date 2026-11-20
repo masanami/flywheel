@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 )
 
 // --- .flywheel/connectors.json（宣言）§IF / API ---
@@ -131,6 +132,9 @@ type CLICommands struct {
 	Status []string
 	Resume []string
 	Cancel []string
+	// Reflect は反映の依頼を始めるコマンド。任意（nil は「無い」。空配列は読み込みが拒否する）。
+	// 状態の確認・答え・取り消しは Status・Resume・Cancel を共有する。
+	Reflect []string
 }
 
 // ConnectorOperation は接続ツールの操作の1要素。
@@ -151,6 +155,9 @@ type Connector struct {
 	Operations      []ConnectorOperation
 	Commands        *CLICommands // form: cli 以外は通常 nil
 	ContractVersion *int         // form: cli 以外は通常 nil
+	// RequiredFacts は form: cli の委譲先の任意のキー。レビュー待ちを受け入れる事実の名前から、
+	// 受け入れる値の配列への対応（nil は「無い」）。form: cli 以外では書けない。
+	RequiredFacts map[string][]string
 }
 
 // ConnectorRepoSlots は repos[].slots。Paths は provider が clone のとき、
@@ -169,9 +176,9 @@ type ConnectorRepo struct {
 	DefaultBranch string
 	Connector     string
 	Slots         ConnectorRepoSlots
-	// MergeMethod は承認済みの release のマージの方式（squash | merge | rebase）。
-	// キーを省略したときは読み込みが squash を入れる。
-	MergeMethod string
+	// ReflectConnector は反映の依頼の口にする委譲先の ID（任意。"" は「無い」）。
+	// 指せるのは、form: cli で commands.reflect を持つ委譲先だけ。
+	ReflectConnector string
 }
 
 // ConnectorsDeclaration は .flywheel/connectors.json の中身
@@ -226,16 +233,16 @@ var connectorsTopLevelKeys = map[string]bool{
 var humanQuestionKindKeys = map[string]bool{"id": true, "label": true}
 var connectorKeys = map[string]bool{
 	"id": true, "form": true, "permission_mode": true, "operations": true,
-	"commands": true, "contract_version": true,
+	"commands": true, "contract_version": true, "required_facts": true,
 }
 var operationKeys = map[string]bool{
 	"id": true, "invocation": true, "interactive": true, "counterpart": true,
 	"child_may_decide": true, "artifacts": true,
 }
-var cliCommandsKeys = map[string]bool{"start": true, "status": true, "resume": true, "cancel": true}
+var cliCommandsKeys = map[string]bool{"start": true, "status": true, "resume": true, "cancel": true, "reflect": true}
 var connectorRepoKeys = map[string]bool{
 	"name": true, "remote": true, "default_branch": true, "connector": true, "slots": true,
-	"merge_method": true,
+	"reflect_connector": true,
 }
 var connectorRepoSlotsKeys = map[string]bool{"provider": true, "paths": true, "base": true, "count": true}
 
@@ -387,6 +394,24 @@ func parseConnectors(raw json.RawMessage) ([]Connector, bool, error) {
 			}
 			c.Commands = cmds
 		}
+		if v, ok := rc["required_facts"]; ok {
+			if isJSONNull(v) {
+				return nil, false, fmt.Errorf("[%d].required_facts: must not be null", i)
+			}
+			var rawRF map[string][]*string
+			if err := json.Unmarshal(v, &rawRF); err != nil {
+				return nil, false, fmt.Errorf("[%d].required_facts: %w", i, err)
+			}
+			rf := make(map[string][]string, len(rawRF))
+			for name, vals := range rawRF {
+				ss, err := derefStrings(vals)
+				if err != nil {
+					return nil, false, fmt.Errorf("[%d].required_facts[%q]: %w", i, name, err)
+				}
+				rf[name] = ss
+			}
+			c.RequiredFacts = rf
+		}
 		if v, ok := rc["contract_version"]; ok {
 			cv, err := decodeIntLiteral(v)
 			if err != nil {
@@ -501,6 +526,20 @@ func parseCLICommands(raw json.RawMessage) (*CLICommands, error) {
 	}{
 		{"start", &cmds.Start}, {"status", &cmds.Status}, {"resume", &cmds.Resume}, {"cancel", &cmds.Cancel},
 	}
+	if v, ok := m["reflect"]; ok {
+		if isJSONNull(v) {
+			return nil, fmt.Errorf("reflect: must not be null")
+		}
+		var rawSS []*string
+		if err := json.Unmarshal(v, &rawSS); err != nil {
+			return nil, fmt.Errorf("reflect: %w", err)
+		}
+		ss, err := derefStrings(rawSS)
+		if err != nil {
+			return nil, fmt.Errorf("reflect: %w", err)
+		}
+		cmds.Reflect = ss
+	}
 	for _, f := range fields {
 		v, ok := m[f.key]
 		if !ok {
@@ -515,6 +554,19 @@ func parseCLICommands(raw json.RawMessage) (*CLICommands, error) {
 	return cmds, nil
 }
 
+// derefStrings は JSON の配列を文字列の配列へ直す。null の要素は文字列でないので拒否する
+// （encoding/json は null を空文字として読むため、[]string のまま読むと素通りする）。空の配列は非 nil の空で返す。
+func derefStrings(in []*string) ([]string, error) {
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		if p == nil {
+			return nil, fmt.Errorf("element must be a string, got null")
+		}
+		out = append(out, *p)
+	}
+	return out, nil
+}
+
 func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 	var rawList []map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawList); err != nil {
@@ -522,7 +574,7 @@ func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 	}
 	repos := make([]ConnectorRepo, 0, len(rawList))
 	for i, rr := range rawList {
-		if err := rejectRemovedKeys(rr, []string{"serial_judgment", "conflict_exclude_paths"}, fmt.Sprintf("[%d]", i)); err != nil {
+		if err := rejectRemovedKeys(rr, []string{"serial_judgment", "conflict_exclude_paths", "merge_method"}, fmt.Sprintf("[%d]", i)); err != nil {
 			return nil, err
 		}
 		if err := rejectUnknownKeys(rr, connectorRepoKeys, fmt.Sprintf("[%d]", i)); err != nil {
@@ -549,13 +601,15 @@ func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 				return nil, fmt.Errorf("[%d].connector: %w", i, err)
 			}
 		}
-		r.MergeMethod = MergeMethodSquash
-		if v, ok := rr["merge_method"]; ok {
+		if v, ok := rr["reflect_connector"]; ok {
 			if isJSONNull(v) {
-				return nil, fmt.Errorf("[%d].merge_method: must not be null", i)
+				return nil, fmt.Errorf("[%d].reflect_connector: must not be null", i)
 			}
-			if err := json.Unmarshal(v, &r.MergeMethod); err != nil {
-				return nil, fmt.Errorf("[%d].merge_method: %w", i, err)
+			if err := json.Unmarshal(v, &r.ReflectConnector); err != nil {
+				return nil, fmt.Errorf("[%d].reflect_connector: %w", i, err)
+			}
+			if r.ReflectConnector == "" {
+				return nil, fmt.Errorf("[%d].reflect_connector: must not be empty", i)
 			}
 		}
 		if v, ok := rr["slots"]; ok {
@@ -671,6 +725,9 @@ func (d *ConnectorsDeclaration) validate() error {
 		if err := validateConnectorRepo(r, repoNames, connectorIDs); err != nil {
 			return err
 		}
+		if err := d.validateReflectConnector(r); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -731,11 +788,6 @@ func validateConnectorRepo(r ConnectorRepo, repoNames map[string]bool, connector
 	if r.DefaultBranch == "" {
 		return fmt.Errorf("%w: repo %q has no default_branch", ErrConfigInvalid, r.Name)
 	}
-	switch r.MergeMethod {
-	case MergeMethodSquash, MergeMethodMerge, MergeMethodRebase:
-	default:
-		return fmt.Errorf("%w: repo %q has invalid merge_method %q (want squash, merge or rebase)", ErrConfigInvalid, r.Name, r.MergeMethod)
-	}
 	if r.Slots.Provider != "" && !slotsProviderValues[r.Slots.Provider] {
 		return fmt.Errorf("%w: repo %q has invalid slots.provider %q", ErrConfigInvalid, r.Name, r.Slots.Provider)
 	}
@@ -777,7 +829,80 @@ func validateConnector(c Connector, connectorIDs map[string]bool) error {
 			return err
 		}
 	}
+	return validateRequiredFacts(c)
+}
 
+// validateRequiredFacts は required_facts を検査する。form: cli の委譲先だけが持て、対応は空でなく、
+// 値は 1 つ以上の要素を持つ（名前・値の型は読み込みの型の検査で済んでいる）。
+func validateRequiredFacts(c Connector) error {
+	if c.RequiredFacts == nil {
+		return nil
+	}
+	if c.Form != ConnectorFormCLI {
+		return fmt.Errorf("%w: connector %q (form %s) must not have required_facts (only form cli)", ErrConfigInvalid, c.ID, c.Form)
+	}
+	if len(c.RequiredFacts) == 0 {
+		return fmt.Errorf("%w: connector %q required_facts must not be empty", ErrConfigInvalid, c.ID)
+	}
+	names := make([]string, 0, len(c.RequiredFacts))
+	for name := range c.RequiredFacts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		values := c.RequiredFacts[name]
+		if name == "" {
+			return fmt.Errorf("%w: connector %q required_facts has an empty name", ErrConfigInvalid, c.ID)
+		}
+		if len(values) == 0 {
+			return fmt.Errorf("%w: connector %q required_facts[%q] must not be an empty array", ErrConfigInvalid, c.ID, name)
+		}
+	}
+	return nil
+}
+
+// hasReflectCommand は c が反映の依頼を始められる（form: cli で commands.reflect を持つ）か。
+func hasReflectCommand(c *Connector) bool {
+	return c != nil && c.Form == ConnectorFormCLI && c.Commands != nil && c.Commands.Reflect != nil
+}
+
+func (d *ConnectorsDeclaration) connectorByID(id string) *Connector {
+	for i := range d.Connectors {
+		if d.Connectors[i].ID == id {
+			return &d.Connectors[i]
+		}
+	}
+	return nil
+}
+
+// validateReflectConnector は repos[].reflect_connector が、宣言にある form: cli で commands.reflect を持つ
+// 委譲先を指すか検査する。口の無いリポジトリ（reflect_connector が無く、connector も commands.reflect を持たない）は拒否しない。
+func (d *ConnectorsDeclaration) validateReflectConnector(r ConnectorRepo) error {
+	if r.ReflectConnector == "" {
+		return nil
+	}
+	c := d.connectorByID(r.ReflectConnector)
+	switch {
+	case c == nil:
+		return fmt.Errorf("%w: repo %q reflect_connector refers to unknown connector %q", ErrConfigInvalid, r.Name, r.ReflectConnector)
+	case c.Form != ConnectorFormCLI:
+		return fmt.Errorf("%w: repo %q reflect_connector %q must be a form cli connector", ErrConfigInvalid, r.Name, r.ReflectConnector)
+	case !hasReflectCommand(c):
+		return fmt.Errorf("%w: repo %q reflect_connector %q has no commands.reflect", ErrConfigInvalid, r.Name, r.ReflectConnector)
+	}
+	return nil
+}
+
+// ReflectConnectorFor は repo の反映の依頼の口になる委譲先を返す。順は
+// ① reflect_connector があればその委譲先、② 無くて repo の connector が form: cli で commands.reflect を持てばその委譲先、
+// ③ どちらでもなければ nil（口は無い。flywheel の外での反映を待つ扱い）。
+func (d *ConnectorsDeclaration) ReflectConnectorFor(repo ConnectorRepo) *Connector {
+	if repo.ReflectConnector != "" {
+		return d.connectorByID(repo.ReflectConnector)
+	}
+	if c := d.connectorByID(repo.Connector); hasReflectCommand(c) {
+		return c
+	}
 	return nil
 }
 
@@ -813,17 +938,8 @@ func validateOperation(c Connector, op ConnectorOperation, opIDs map[string]bool
 	return nil
 }
 
-// validateCLICommands は c.Commands（start・status・resume・cancel の4つ）を
-// 検査する。各コマンドはキーとして「無い」（nil）ことを拒否するだけでなく、
-// self-review 指摘（コマンドの引数が0個では何も起動できない）を踏まえ、
-// 空配列も拒否する。round 2 の self-review 指摘: 当初は各引数を
-// operations[].invocation と同じ差し込みの閉集合で検査していたが、start が
-// 返す run_id を status・resume・cancel に渡す宣言（例: "{run_id}"）を
-// 拒否してしまい、仕様（§クリティカル設計決定3）はこの4コマンドの引数に
-// 使える差し込みの閉集合を invocation のものと同一と定めていないため、
-// 過剰な制約だった。よって引数の中身は検証しない（S1 は commands・
-// contract_version の存在を検証する範囲。閉集合の確定は cli 形態の委譲を
-// 実装する S4 に委ねる仮定を置く）。
+// validateCLICommands は c.Commands を検査する。start・status・resume・cancel はキーが無い（nil）ことも空配列も拒否し、
+// 任意の reflect は空配列だけを拒否する。引数の差し込みは checkCLICommandPlaceholders の表（コマンドごとの閉集合）で検査する。
 func validateCLICommands(c Connector) error {
 	if c.Commands == nil {
 		return fmt.Errorf("%w: connector %q (form cli) has no commands", ErrConfigInvalid, c.ID)
@@ -842,18 +958,12 @@ func validateCLICommands(c Connector) error {
 		if len(g.args) == 0 {
 			return fmt.Errorf("%w: connector %q (form cli) commands.%s must not be empty", ErrConfigInvalid, c.ID, g.name)
 		}
-		// self-review 指摘（round 2）: 当初 operations[].invocation と同じ
-		// 差し込みの閉集合（{issue_number} 等）を commands の各引数にも
-		// 適用していたが、仕様はこの4つのコマンドの引数に対する差し込みの
-		// 閉集合を別途定めていない（§クリティカル設計決定3は「差し込みは
-		// 閉集合」と述べるのみで、その閉集合の内容は invocation のものと同一
-		// と決めていない）。start が返す run_id を status・resume・cancel に
-		// 渡す手段（例: "{run_id}"）を invocation の閉集合が持たないため、
-		// invocation の閉集合をそのまま流用すると正当な宣言を拒否しうる。
-		// S1 は commands・contract_version の存在検証だけを行う範囲
-		// （cli 形態の委譲の実行は S4）なので、ここでは構造的な検証
-		// （空でないこと）だけに留め、閉集合の確定は S4 の設計判断に委ねる
-		// 仮定を置く（返却の「仕様への指摘」に明記）。
+	}
+	if c.Commands.Reflect != nil && len(c.Commands.Reflect) == 0 {
+		return fmt.Errorf("%w: connector %q (form cli) commands.reflect must not be empty", ErrConfigInvalid, c.ID)
+	}
+	if err := checkCLICommandPlaceholders(&c); err != nil {
+		return fmt.Errorf("%w: %w", ErrConfigInvalid, err)
 	}
 	if c.ContractVersion == nil {
 		return fmt.Errorf("%w: connector %q (form cli) has no contract_version", ErrConfigInvalid, c.ID)

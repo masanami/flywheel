@@ -215,16 +215,16 @@ func TestRunResultValues_MatchWhatTheStoreAccepts(t *testing.T) {
 	}
 }
 
-// NotStartedReasonValues は 仕様の 18 値（M4.5 の in_progress・not_executable・dependency・not_learnable と、
+// NotStartedReasonValues は 仕様の 19 値（M4.5 の in_progress・not_executable・dependency・not_learnable と、
 // #440 の upstream_closed・upstream_missing・out_of_policy と、タスクを単位にする委譲の
-// integration_unavailable・no_tasks を含む）で、写しを返す（呼び出し側が書き換えても本体は変わらない）。
-func TestNotStartedReasonValues_AreTheEighteenAndACopy(t *testing.T) {
+// integration_unavailable・no_tasks と、反映の段の waiting_outside を含む）で、写しを返す（呼び出し側が書き換えても本体は変わらない）。
+func TestNotStartedReasonValues_AreTheNineteenAndACopy(t *testing.T) {
 	t.Parallel()
 	got := NotStartedReasonValues()
 	want := []NotStartedReason{NotStartedCycleBudget, NotStartedRateLimited, NotStartedRunBudget, NotStartedSlotUnavailable,
 		NotStartedFailureLimit, NotStartedReworkLimit, NotStartedUpstreamFetchFailed, NotStartedWaitingExternal, NotStartedPlanUnavailable,
 		NotStartedInProgress, NotStartedNotExecutable, NotStartedDependency, NotStartedNotLearnable,
-		NotStartedUpstreamClosed, NotStartedUpstreamMissing, NotStartedOutOfPolicy, NotStartedIntegrationUnavailable, NotStartedNoTasks}
+		NotStartedUpstreamClosed, NotStartedUpstreamMissing, NotStartedOutOfPolicy, NotStartedIntegrationUnavailable, NotStartedNoTasks, NotStartedWaitingOutside}
 	if len(got) != len(want) {
 		t.Fatalf("NotStartedReasonValues() = %v, want %v", got, want)
 	}
@@ -244,9 +244,9 @@ func TestNotStartedReasonValues_AreTheEighteenAndACopy(t *testing.T) {
 	}
 }
 
-// --- ExecutionResult（release の実行の試行の結果。16 値と分類） ---
+// --- ExecutionResult（release の実行の試行の結果。26 値と分類） ---
 
-func TestExecutionResult_ClosedSetHas16ValuesWithClasses(t *testing.T) {
+func TestExecutionResult_ClosedSetHas26ValuesWithClasses(t *testing.T) {
 	t.Parallel()
 	want := map[ExecutionResult]struct {
 		class  ExecutionClass
@@ -260,10 +260,16 @@ func TestExecutionResult_ClosedSetHas16ValuesWithClasses(t *testing.T) {
 		"no_approved_head": {ExecutionClassCancel, false}, "unsupported": {ExecutionClassCancel, false},
 		"merged_unapproved": {ExecutionClassCancel, false}, "limit_reached": {ExecutionClassCancel, false},
 		"interrupted": {ExecutionClassInterrupted, false},
+		// S3a: 反映を委譲先へ移した後の値。
+		"landed": {ExecutionClassExecuted, false}, "land_sent": {ExecutionClassWait, false},
+		"land_unconfirmed": {ExecutionClassWait, true}, "land_refused": {ExecutionClassCancel, false},
+		"content_mismatch": {ExecutionClassWait, true}, "reflect_started": {ExecutionClassWait, false},
+		"reflect_failed": {ExecutionClassCancel, false}, "waiting_delegate": {ExecutionClassWait, false},
+		"waiting_outside": {ExecutionClassWait, false}, "delegate_ended": {ExecutionClassCancel, false},
 	}
 	values := ExecutionResultValues()
-	if len(values) != 16 || len(want) != 16 {
-		t.Fatalf("len(ExecutionResultValues()) = %d, want 16", len(values))
+	if len(values) != 26 || len(want) != 26 {
+		t.Fatalf("len(ExecutionResultValues()) = %d, want 26", len(values))
 	}
 	seen := map[ExecutionResult]bool{}
 	for _, v := range values {

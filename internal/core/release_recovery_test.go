@@ -25,7 +25,8 @@ func (f *relFixture) setVerifiedHead(t *testing.T, head string) {
 	t.Helper()
 	runID := coretest.InsertRun(t, f.s.workspace, coretest.InsertRunInput{
 		ChallengeID: int(f.cid), Kind: "delegate", ChallengeVersion: 1, SessionID: "22222222-2222-4222-8222-222222222222",
-		PID: 1, Host: "h", HeartbeatAt: execTS(0), StartedAt: execTS(0), MaxBudgetUSD: 1_000_000, BudgetBucket: "impl",
+		PID: 1, Host: "h", HeartbeatAt: execTS(0), StartedAt: execTS(0), EndedAt: execTS(0), Result: "succeeded",
+		MaxBudgetUSD: 1_000_000, BudgetBucket: "impl",
 	})
 	coretest.InsertRunArtifact(t, f.s.workspace, runID, "pr", relRef, "open", "main")
 	coretest.SetRunArtifactVerifiedHead(t, f.s.workspace, runID, relRef, head)
@@ -60,85 +61,6 @@ func (f *relFixture) challengeStatus(t *testing.T) (Status, int) {
 	t.Helper()
 	snap := snapshotReopen(t, f.s, f.cid)
 	return Status(snap.chStatus), snap.chVersion
-}
-
-// (i) 完了の課題の release が not_mergeable になったら、試行を not_mergeable で閉じ、課題を着手中へ戻す。
-func TestRelease_NotMergeableOnADoneChallengeReopensItAndReplacesTheRelease(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	prior := insertCompletionApprovalForTest(t, f.s, f.cid)
-	no := false
-	f.fake.pr.Mergeable = &no
-
-	item := f.run(t)
-	if item.Result != ExecutionResultNotMergeable || !item.Reopened || item.ReopenReason != ReopenReasonNotMergeable || item.NewOperationID == "" {
-		t.Fatalf("item = %+v, want not_mergeable with the challenge reopened", item)
-	}
-	if len(f.fake.mergeArgs) != 0 {
-		t.Errorf("merge calls = %d, want none", len(f.fake.mergeArgs))
-	}
-	at := f.attempts(t)
-	if len(at) != 1 || at[0].Result != ExecutionResultNotMergeable {
-		t.Fatalf("attempts = %+v, want one not_mergeable attempt", at)
-	}
-	snap := snapshotReopen(t, f.s, f.cid)
-	if snap.chStatus != string(StatusInProgress) || snap.ops[0].state != string(OperationStateClosed) || snap.ops[0].closed.String != string(ClosedReasonSuperseded) ||
-		snap.ops[1].state != string(OperationStatePending) || formatOperationID(snap.ops[1].id) != item.NewOperationID {
-		t.Fatalf("snapshot = %+v", snap)
-	}
-	if len(snap.reopens) != 1 || snap.reopens[0].reason != string(ReopenReasonNotMergeable) || snap.reopens[0].approvalID.Int64 != prior {
-		t.Errorf("reopens = %+v", snap.reopens)
-	}
-	// 取り消しと同じく、release_withdrawn の発生を残す（学習が見る）。
-	f.wantSingleOccurrence(t, "release_withdrawn")
-	// 次の周は、もう承認済みの release が無いので何も実行しない。
-	if res := f.runAll(t, nil); len(res.Items) != 0 {
-		t.Errorf("second run items = %+v, want none", res.Items)
-	}
-}
-
-// 連続の上限に達した not_mergeable でも、完了の課題なら戻す。戻した理由は limit_reached。
-func TestRelease_NotMergeableAtTheFailureLimitReopensWithReasonLimitReached(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.limit = 2
-	f.fake.pr.Checks = []UpstreamCheck{{Status: "completed", Conclusion: "failure"}}
-	if item := f.run(t); item.Result != ExecutionResultChecksFailed || item.Reopened {
-		t.Fatalf("first = %+v, want checks_failed counted without reopening", item)
-	}
-	no := false
-	f.fake.pr.Checks = nil
-	f.fake.pr.Mergeable = &no
-	item := f.run(t)
-	if item.Result != ExecutionResultNotMergeable || !item.Reopened || item.ReopenReason != ReopenReasonLimitReached {
-		t.Fatalf("second = %+v, want not_mergeable reopened with limit_reached", item)
-	}
-	if snap := snapshotReopen(t, f.s, f.cid); len(snap.reopens) != 1 || snap.reopens[0].reason != string(ReopenReasonLimitReached) {
-		t.Errorf("reopens = %+v", snap.reopens)
-	}
-}
-
-// 課題が完了でなければ、今までどおり数える待ちで、上限で取り消して pending へ戻す。
-func TestRelease_NotMergeableOnAChallengeThatIsNotDoneKeepsTheWaitAndLimitBehavior(t *testing.T) {
-	t.Parallel()
-	f := newRelFixtureAt(t, StatusInProgress)
-	f.limit = 2
-	no := false
-	f.fake.pr.Mergeable = &no
-	item := f.run(t)
-	if item.Result != ExecutionResultNotMergeable || item.Reopened || item.ConsecutiveFailures != 1 {
-		t.Fatalf("first = %+v, want a counted wait", item)
-	}
-	if st := f.state(t); st.opState != "approved" {
-		t.Errorf("state = %s, want approved", st.opState)
-	}
-	item = f.run(t)
-	if item.Result != ExecutionResultLimitReached || item.Reopened {
-		t.Fatalf("second = %+v, want limit_reached without reopening", item)
-	}
-	if st := f.state(t); st.opState != "pending" || st.chStatus != string(StatusInProgress) {
-		t.Errorf("state = %+v, want the release pending and the challenge untouched", st)
-	}
 }
 
 // (e) 承認していない head でマージ済みになった release は、pending へ戻さず closed（merged_unapproved）にする。
@@ -369,7 +291,7 @@ func TestRelease_SweepReopensADoneChallengeWhenTheVerifiedPRContentChanged(t *te
 		t.Fatalf("tidied = %+v, want reopened with content_changed", res.Tidied)
 	}
 	snap := snapshotReopen(t, f.s, f.cid)
-	if snap.chStatus != string(StatusInProgress) || snap.ops[0].state != string(OperationStateClosed) || len(snap.ops) != 2 {
+	if snap.chStatus != string(StatusVerifying) || snap.ops[0].state != string(OperationStateClosed) || len(snap.ops) != 2 {
 		t.Errorf("snapshot = %+v", snap)
 	}
 }

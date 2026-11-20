@@ -315,6 +315,13 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 				reason = escapeControl(*op.LastExecutionDetail)
 			}
 			fmt.Fprintf(&b, "    直前の試行: %s（%s）\n", *op.LastExecutionResult, reason)
+			fmt.Fprintf(&b, "      意味: %s\n", view.ExecutionResultLabel(*op.LastExecutionResult))
+		} else if op.Kind == core.OperationKindRelease && op.LastExecutionResult != nil {
+			// 反映の操作の最後の試行の記録（結果の語と詳細）。取り消さずに待っている結果も、何を待っているかを読めるように出す。
+			fmt.Fprintf(&b, "    最後の試行: %s（%s）\n", *op.LastExecutionResult, view.ExecutionResultLabel(*op.LastExecutionResult))
+			if op.LastExecutionDetail != nil {
+				fmt.Fprintf(&b, "      詳細: %s\n", escapeControl(*op.LastExecutionDetail))
+			}
 		}
 	}
 	// GitHub Issue との対応（#56）も JSON と同じ項目を出す（m2 仕様 §食い違いの

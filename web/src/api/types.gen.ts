@@ -56,6 +56,7 @@ export interface Operation {
   executed_at: string | null;
   id: string;
   kind: string;
+  last_execution_detail: string | null;
   last_execution_result: string | null;
   merge_commit: string | null;
   ref: string | null;
@@ -750,6 +751,64 @@ export const TASK_PHASE_CODES = [
   "blocked",
   "done",
   "cancelled",
+] as const;
+
+export const EXECUTION_RESULT_CODES = [
+  "merged",
+  "already_merged",
+  "waiting_checks",
+  "upstream_failed",
+  "checks_failed",
+  "not_mergeable",
+  "merge_failed",
+  "merge_unconfirmed",
+  "head_changed",
+  "closed",
+  "base_changed",
+  "no_approved_head",
+  "unsupported",
+  "merged_unapproved",
+  "limit_reached",
+  "interrupted",
+  "landed",
+  "land_sent",
+  "land_unconfirmed",
+  "land_refused",
+  "content_mismatch",
+  "reflect_started",
+  "reflect_failed",
+  "waiting_delegate",
+  "waiting_outside",
+  "delegate_ended",
+] as const;
+
+export const EXECUTION_RESULT_WORDS = [
+  "反映先へ入れた",
+  "すでに反映先へ入っていた",
+  "チェックの完了を待っている",
+  "上流を読めなかった",
+  "チェックが失敗した",
+  "反映先へ入れられない",
+  "反映先へ入れるのに失敗した",
+  "反映先へ入ったか分からない",
+  "承認した後に中身が変わった",
+  "成果物が、入らずに閉じられた",
+  "成果物の宛先が、宣言の反映先でない",
+  "承認した中身の記録が無い",
+  "flywheel が扱えない形だった",
+  "承認なしで反映された",
+  "失敗が連続の回数の上限に達した",
+  "試行が途中で止まった",
+  "委譲先が反映先へ入れた",
+  "委譲先へ「入れてよい」を返した",
+  "「入れてよい」が届いたか分からない",
+  "委譲先が入れられなかった",
+  "委譲先の中身と、上流の中身が食い違っている",
+  "反映の依頼を始めた",
+  "反映の依頼を始められなかった",
+  "委譲先が進めている",
+  "flywheel の外での反映を待っている",
+  "委譲先の実行が、入れずに終わった",
 ] as const;
 
 export const CONDITIONS_AFTER_RELEASE_HEADINGS = [

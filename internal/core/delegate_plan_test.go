@@ -410,9 +410,9 @@ func TestPlan_CycleBudgetAndRunBudget_AfterWaiting(t *testing.T) {
 	f.holdForWaiter = 1 // 1 件目は、2 件目が枠待ちに入るまで終わらない
 	f.candidate(t, "multi", "P1", 11)
 	b := f.candidate(t, "multi", "P1", 12)
-	// 最初の起動（J3 の 3 ＋ 実装枠 50 ＋ レビュー対応枠 30）だけが入る周の上限。2 件目は、1 件目の費用
-	// （J3 の 3 ＋ 委譲の 2.5）が数えられた後では入らない。
-	res, err := f.s.RunDelegation(context.Background(), f.in(f.cycle(t, 88), nil))
+	// 最初の起動（実装枠 50 ＋ レビュー対応枠 30。form: plugin は J3 を呼ばない）だけが入る周の上限。2 件目は、
+	// 1 件目の費用（委譲の 2.5）が数えられた後では入らない。
+	res, err := f.s.RunDelegation(context.Background(), f.in(f.cycle(t, 81), nil))
 	if err != nil {
 		t.Fatal(err)
 	}

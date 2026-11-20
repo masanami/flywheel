@@ -199,7 +199,7 @@ func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
 		"session_id", "session_id_mismatch", "resumed_from_run_id", "pid", "host", "heartbeat_at",
 		"started_at", "ended_at", "result", "rate_limited", "max_budget_usd", "budget_bucket",
 		"cost_usd", "cost_source", "reported_total_cost_usd", "output", "error",
-		"slot_id", "decider", "decider_row", "repo", "flywheel_version", "task_id",
+		"slot_id", "decider", "decider_row", "repo", "flywheel_version", "task_id", "operation_id",
 	}
 	if got := pragmaTableInfoColumnsForTest(t, s, "run"); !stringSlicesEqual(got, wantRun) {
 		t.Fatalf("run columns = %v, want %v", got, wantRun)
@@ -208,7 +208,7 @@ func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
 	if got := pragmaTableInfoColumnsForTest(t, s, "slot"); !stringSlicesEqual(got, wantSlot) {
 		t.Fatalf("slot columns = %v, want %v", got, wantSlot)
 	}
-	wantArtifact := []string{"id", "run_id", "kind", "ref", "state", "base", "verified_at", "verified_head_sha"}
+	wantArtifact := []string{"id", "run_id", "kind", "ref", "state", "base", "verified_at", "verified_head_sha", "role"}
 	if got := pragmaTableInfoColumnsForTest(t, s, "run_artifact"); !stringSlicesEqual(got, wantArtifact) {
 		t.Fatalf("run_artifact columns = %v, want %v", got, wantArtifact)
 	}

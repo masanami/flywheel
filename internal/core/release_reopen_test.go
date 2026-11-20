@@ -125,8 +125,8 @@ func TestReopenChallengeForRelease_MovesTheDoneChallengeBackAndReplacesTheReleas
 	}
 
 	after := snapshotReopen(t, f.s, f.cid)
-	if after.chStatus != string(StatusInProgress) || after.chVersion != before.chVersion+1 {
-		t.Errorf("challenge = %s v%d, want in_progress v%d", after.chStatus, after.chVersion, before.chVersion+1)
+	if after.chStatus != string(StatusVerifying) || after.chVersion != before.chVersion+1 {
+		t.Errorf("challenge = %s v%d, want verifying v%d", after.chStatus, after.chVersion, before.chVersion+1)
 	}
 	if len(after.ops) != 2 {
 		t.Fatalf("operations = %+v, want the old (closed) and a new one", after.ops)
@@ -199,7 +199,7 @@ func TestReopenChallengeForRelease_PendingReleaseIsReplacedToo(t *testing.T) {
 		t.Fatalf("res = %+v, err = %v, want reopened", res, err)
 	}
 	snap := snapshotReopen(t, f.s, f.cid)
-	if snap.ops[0].state != string(OperationStateClosed) || snap.ops[1].state != string(OperationStatePending) || snap.chStatus != string(StatusInProgress) {
+	if snap.ops[0].state != string(OperationStateClosed) || snap.ops[1].state != string(OperationStatePending) || snap.chStatus != string(StatusVerifying) {
 		t.Errorf("snapshot = %+v", snap)
 	}
 	if len(snap.approvals) > 0 && snap.approvals[0].supAt.Valid && snap.approvals[0].kind == string(ApprovalKindRelease) {
@@ -386,18 +386,12 @@ func TestReopenChallengeForRelease_SecondReopenSupersedesOnlyTheEffectiveApprova
 }
 
 // 戻すとき、同じ課題のほかの承認済み・承認待ちの release も置き換える（前の完了の承認で同時に承認された release を、
-// 課題が着手中の間に実行させない）。終わっていない実行の試行がある release は置き換えない。
-func TestReopenChallengeForRelease_SupersedesSiblingReleasesWithoutOpenAttempts(t *testing.T) {
+// 課題が検証中の間に実行させない）。
+func TestReopenChallengeForRelease_SupersedesSiblingReleases(t *testing.T) {
 	t.Parallel()
 	f := newRelFixture(t)
 	const otherRef = "https://github.com/o/r/pull/9"
-	const busyRef = "https://github.com/o/r/pull/10"
 	sibling := coretest.InsertApprovedRelease(t, f.s.workspace, int(f.cid), otherRef, relHead, execTS(0))
-	busy := coretest.InsertApprovedRelease(t, f.s.workspace, int(f.cid), busyRef, relHead, execTS(0))
-	writeForTest(t, f.s, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO operation_execution (operation_id, started_at, approved_head, pid, host) VALUES (?, ?, ?, 1, 'testhost')`, busy, execTS(1), relHead)
-		return err
-	})
 
 	res, err := reopenExecPath(context.Background(), f.s, ChannelCLI, ReopenForReleaseInput{OperationID: formatOperationID(f.opID), Reason: ReopenReasonNotMergeable})
 	if err != nil || !res.Reopened {
@@ -415,19 +409,69 @@ func TestReopenChallengeForRelease_SupersedesSiblingReleasesWithoutOpenAttempts(
 	if o := byID[sibling]; o.state != string(OperationStateClosed) || o.closed.String != string(ClosedReasonSuperseded) {
 		t.Errorf("sibling release = %+v, want closed/superseded", o)
 	}
-	if o := byID[busy]; o.state != string(OperationStateApproved) {
-		t.Errorf("release with an open attempt = %+v, want left approved", o)
-	}
 	var siblingCopy bool
 	for _, c := range copies {
 		if c.supersedes.Int64 == sibling && c.state == string(OperationStatePending) && c.ref == otherRef {
 			siblingCopy = true
 		}
-		if c.supersedes.Int64 == busy {
-			t.Errorf("release with an open attempt must not be copied: %+v", c)
-		}
 	}
 	if !siblingCopy || len(copies) != 2 {
 		t.Errorf("copies = %+v, want a pending copy of the primary and of the sibling", copies)
+	}
+}
+
+// 完了から戻す前に、終わっていない反映の依頼を取り消す（取り消した後に課題を検証中へ戻し、終わった記録の依頼は残らない）。
+func TestReopenChallengeForRelease_CancelsAnUnfinishedReflectRequestBeforeMovingBack(t *testing.T) {
+	t.Parallel()
+	f := newReflectReopenFixture(t)
+	f.cancelsWith()
+	res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, f.reopenInput(f.contentChangedCompare()))
+	if err != nil || !res.Reopened {
+		t.Fatalf("reopen = %+v err %v, want reopened", res, err)
+	}
+	if got := f.status(t, f.cid); got != StatusVerifying {
+		t.Errorf("status = %s, want verifying", got)
+	}
+	if !f.runEnded(t) {
+		t.Error("the reflect request is still open after it was cancelled")
+	}
+}
+
+// 読み（取り消し）から戻す書き込みまでの間に、終わっていない反映の依頼が在る状態になったら、何も書かずに競合で終える
+// （取り消されていない反映の依頼を残したまま、課題を検証中へ戻さない）。
+func TestReopenForReleaseInTx_AnUnfinishedReflectRequestAtWriteTimeWritesNothing(t *testing.T) {
+	t.Parallel()
+	f := newReflectReopenFixture(t)
+	ctx := context.Background()
+	actor, err := f.s.resolveActor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := func(q string) (n int) {
+		readForTest(t, f.s, func(tx *sql.Tx) error { return tx.QueryRow(q).Scan(&n) })
+		return n
+	}
+	ops, reopens, logs := count(`SELECT COUNT(*) FROM operation`), count(`SELECT COUNT(*) FROM challenge_reopen`), count(`SELECT COUNT(*) FROM activity`)
+	if count(`SELECT COUNT(*) FROM contract_run WHERE kind = 'reflect' AND ended_at IS NULL`) != 1 {
+		t.Fatal("the fixture should have one unfinished reflect request")
+	}
+	err = f.s.mutateAs(ctx, actor, ChannelCLI, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
+		_, err := reopenForReleaseInTx(ctx, tx, rec, 1, ReopenReasonContentChanged, nil)
+		return err
+	})
+	if !errors.Is(err, errReopenBlockedByRun) || !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v, want errReopenBlockedByRun (ErrConflict)", err)
+	}
+	if got := f.status(t, f.cid); got != StatusDone {
+		t.Fatalf("status = %s, want done", got)
+	}
+	if n := count(`SELECT COUNT(*) FROM operation`); n != ops {
+		t.Errorf("operations = %d, want %d", n, ops)
+	}
+	if n := count(`SELECT COUNT(*) FROM challenge_reopen`); n != reopens {
+		t.Errorf("challenge_reopen = %d, want %d", n, reopens)
+	}
+	if n := count(`SELECT COUNT(*) FROM activity`); n != logs {
+		t.Errorf("activity rows = %d, want %d", n, logs)
 	}
 }

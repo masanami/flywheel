@@ -123,7 +123,7 @@ func loadPreviousDeliverable(ctx context.Context, tx *sql.Tx, challengeID, planV
 	}
 	var n int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM run WHERE challenge_id = ? AND kind IN ('delegate', 'contract') AND plan_version = ?`,
+		`SELECT COUNT(*) FROM run WHERE challenge_id = ? AND kind IN ('delegate', 'contract') AND operation_id IS NULL AND plan_version = ?`,
 		challengeID, planVersion).Scan(&n); err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func loadPreviousDeliverable(ctx context.Context, tx *sql.Tx, challengeID, planV
 	}
 	rows, err := tx.QueryContext(ctx,
 		`SELECT a.kind, a.ref FROM run_artifact a JOIN run r ON r.id = a.run_id
-		 WHERE r.challenge_id = ? AND r.kind IN ('delegate', 'contract') AND r.plan_version < ? AND a.kind IN (?, ?)
+		 WHERE r.challenge_id = ? AND r.kind IN ('delegate', 'contract') AND r.operation_id IS NULL AND r.plan_version < ? AND a.kind IN (?, ?)
 		 ORDER BY a.id ASC`, challengeID, planVersion, string(artifactKindPR), string(artifactKindBranch))
 	if err != nil {
 		return nil, err
