@@ -47,8 +47,8 @@ func (f *contractFixture) releases(t *testing.T) []releaseRow {
 
 func reviewWaitOutFor(url string) ContractLaunchOutput {
 	return contractOut(ContractStateWaiting, nil, func(st *ContractStatus) {
-		st.RequestedAction = &ContractRequestedAction{Kind: "review", Decider: "any", Text: "レビュー待ち", Options: []string{"respond", "ready"}}
-		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: url}}
+		st.RequestedAction = &ContractRequestedAction{Kind: "review", Decider: "any", Text: "レビュー待ち", Options: []string{"respond", "ready", "land"}}
+		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: url}, reviewContentArtifact}
 	})
 }
 
@@ -272,7 +272,7 @@ func TestPollContractRuns_SucceededCreatesReleaseAndStillVerifiesWhenTheLookupFa
 			t.Fatal(err)
 		}
 		f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, func(st *ContractStatus) {
-			st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}}
+			st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}, reviewContentArtifact}
 		})}
 		f.poll(t)
 		if got := f.status(t, f.cid); got != StatusVerifying {
@@ -286,10 +286,11 @@ func TestPollContractRuns_SucceededCreatesReleaseAndStillVerifiesWhenTheLookupFa
 
 func reviewWaitOutForAll(urls ...string) ContractLaunchOutput {
 	return contractOut(ContractStateWaiting, nil, func(st *ContractStatus) {
-		st.RequestedAction = &ContractRequestedAction{Kind: "review", Decider: "any", Text: "レビュー待ち", Options: []string{"respond", "ready"}}
+		st.RequestedAction = &ContractRequestedAction{Kind: "review", Decider: "any", Text: "レビュー待ち", Options: []string{"respond", "ready", "land"}}
 		for _, u := range urls {
 			st.Artifacts = append(st.Artifacts, ContractArtifact{Kind: "pr", Ref: u})
 		}
+		st.Artifacts = append(st.Artifacts, reviewContentArtifact)
 	})
 }
 
@@ -335,23 +336,22 @@ func TestPollContractRuns_ReviewWaitWithTheSamePRListedTwiceCreatesOneRelease(t 
 	}
 }
 
-// 1 回のレビュー待ちに PR が複数あるとき、既定ブランチ（main）宛の PR ごとに 1 件ずつ作り、main 宛でない PR には作らない。
-func TestPollContractRuns_ReviewWaitWithSeveralPRsCreatesOneReleasePerDefaultBranchPR(t *testing.T) {
+// 1 回のレビュー待ちに PR が複数あっても、既定ブランチ（main）宛の PR が 1 つなら release をその 1 件だけ作り、main 宛でない PR には作らない。
+func TestPollContractRuns_ReviewWaitWithOneDefaultBranchPRAmongSeveralCreatesOneRelease(t *testing.T) {
 	t.Parallel()
 	const reviewPRURL3 = "https://github.com/o/r/pull/3"
 	f := newReviewFlowFixture(t)
 	f.setPR(1, reviewPRURL, "open", "main")
-	f.setPR(2, reviewPRURL2, "open", "main")
 	f.setPR(3, reviewPRURL3, "open", "develop")
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
 	}
-	f.client.queue = []ContractLaunchOutput{reviewWaitOutForAll(reviewPRURL, reviewPRURL2, reviewPRURL3)}
+	f.client.queue = []ContractLaunchOutput{reviewWaitOutForAll(reviewPRURL, reviewPRURL3)}
 	f.poll(t)
 	if got := f.status(t, f.cid); got != StatusVerifying {
 		t.Fatalf("status = %s, want verifying", got)
 	}
-	want := []releaseRow{{ref: reviewPRURL, state: "pending"}, {ref: reviewPRURL2, state: "pending"}}
+	want := []releaseRow{{ref: reviewPRURL, state: "pending"}}
 	if got := f.releases(t); !reflect.DeepEqual(got, want) {
 		t.Fatalf("releases = %+v, want %+v（main 宛でない PR 3 には作らない）", got, want)
 	}

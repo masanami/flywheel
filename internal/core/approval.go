@@ -974,6 +974,12 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		holdOut.AnsweredChannel, holdOut.AnsweredVerification = &ch, &ver
 		holdOut.RelaySession, holdOut.RelayQuote = att.relayPtrs()
 		holdOut.Replan = req.Replan
+		// 理由 facts_unmet の保留への回答は、満たさなかった回数を 0 に戻す（次に読んだレビュー待ちから数え直す）。
+		if strings.HasPrefix(holdOut.Question, holdReasonLine(holdReasonFactsUnmet)) {
+			if _, err := tc.tx.ExecContext(ctx, `UPDATE contract_run SET facts_unmet_count = 0 WHERE challenge_id = ?`, tc.id); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 

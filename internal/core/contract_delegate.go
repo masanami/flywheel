@@ -245,6 +245,16 @@ type ContractRunReport struct {
 	// Held は、この呼び出しで課題を保留（人間対応待ち）にしたとき真。waiting の写し・resume の失敗・予算の中止の失敗・契約の run が failed・cancelled で
 	// 終わった、または start の最中に flywheel の run が回収されたときで、自動では委譲し直さない。
 	Held bool
+	// Facts は読んだ状態の facts（無い・形が合わないときは nil）。
+	Facts map[string]string
+	// FactsCounted は、この読みで満たさなかった回数（contract_run.facts_unmet_count）を数えたとき真（状態の確認で、課題が
+	// 着手中のレビュー待ちが中身の確認を通ったとき）。FactsUnmetCount は数えた後の回数。
+	FactsCounted    bool
+	FactsUnmetCount int
+	// FactsPrevCount は数える前の回数（反映先宛ての成果物の数の確認で保留にしたとき、元に戻す）。
+	FactsPrevCount int
+	// PendingRespond は、このレビュー待ちが required_facts を満たさず、同じ契約の run へ返す respond（呼び出し元が resume で返す）。
+	PendingRespond *contractAnswer
 	// CostDeltaUSD は今回この run に記録した費用（累計の増分。何度読んでも同じ累計なら 0）。CostTotalUSD は累計。
 	CostDeltaUSD float64
 	CostTotalUSD float64
@@ -253,6 +263,8 @@ type ContractRunReport struct {
 
 // contractRunRow は contract_run の 1 行。
 type contractRunRow struct {
+	// reqFacts は宣言の required_facts（DB の列ではない。呼び出し元が状態の確認の前に置く）。
+	reqFacts      map[string][]string
 	ID            int64
 	ChallengeID   int64
 	ConnectorID   string
@@ -724,6 +736,10 @@ type contractCall struct {
 	Existing       *contractRunRow
 	// TaskIDInt は contract_run を新しく作るときに書く task_id（nil は NULL。既存の行の task_id は変えない）。
 	TaskIDInt *int64
+	// FactsRequired は宣言の required_facts（無ければ nil）。CountFacts は、この呼び出しで満たさなかった回数を数えるとき真
+	// （状態の確認だけ。resume の応答は数えない）。
+	FactsRequired map[string][]string
+	CountFacts    bool
 	// StopNote は、中止の理由（予算の超過）。契約が cancelled・failed を返して保留にするときの問いの先頭に付く。
 	StopNote string
 }
@@ -1013,7 +1029,8 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	if st.State.Terminal() {
 		endedAt = now
 	}
-	if err := s.writeContractRunRecord(ctx, tx, c, st, rk, rd, rt, rb, totalMicros, now, endedAt); err != nil {
+	report.Facts = st.Facts
+	if err := s.writeContractRunRecord(ctx, tx, c, st, rk, rd, rt, rb, totalMicros, now, endedAt, report); err != nil {
 		return err
 	}
 	if st.State != ContractStateSucceeded {
@@ -1024,7 +1041,7 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 
 // writeContractRunRecord は読めた状態で contract_run の行を作る・更新する。あわせて、出力の facts・待ちの options・
 // レビュー待ちの中身の識別を、読むたびに置き換えて残す（記録するだけで、扱いは変えない）。
-func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contractCall, st *ContractStatus, rk, rd, rt, rb any, totalMicros int64, now string, endedAt any) error {
+func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contractCall, st *ContractStatus, rk, rd, rt, rb any, totalMicros int64, now string, endedAt any, report *ContractRunReport) error {
 	var rowID int64
 	if c.Existing == nil {
 		res, err := tx.ExecContext(ctx,
@@ -1064,7 +1081,10 @@ func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contra
 	_, err = tx.ExecContext(ctx,
 		`UPDATE contract_run SET facts = ?, requested_options = ?, content_ref = ? WHERE id = ?`,
 		facts, opts, nullableTextColumn(reviewContentRef(st.Artifacts)), rowID)
-	return err
+	if err != nil {
+		return err
+	}
+	return countUnmetFacts(ctx, tx, c, st, rowID, report)
 }
 
 // encodeContractFacts は facts を JSON の文字列にする（nil は NULL）。
@@ -1082,18 +1102,22 @@ func encodeContractFacts(f map[string]string) (any, error) {
 // reviewContentRef はレビュー待ちの中身の識別を返す。成果物のうち kind が commit で role の無い要素の ref が
 // ちょうど 1 つのときだけ。role が付いた commit（integration など）は数えない。0 件・2 件以上は空。
 func reviewContentRef(arts []ContractArtifact) string {
-	var ref string
-	n := 0
+	ref, n := reviewContentRefs(arts)
+	if n != 1 {
+		return ""
+	}
+	return ref
+}
+
+// reviewContentRefs は中身の識別の候補（kind が commit で role の無い成果物）の数と、最後に見つけた ref を返す。
+func reviewContentRefs(arts []ContractArtifact) (ref string, n int) {
 	for _, a := range arts {
 		if a.Kind == "commit" && a.Role == "" {
 			ref = a.Ref
 			n++
 		}
 	}
-	if n != 1 {
-		return ""
-	}
-	return ref
+	return ref, n
 }
 
 // afterContractSucceeded は succeeded を読んだときの記録（保留の間に読んだ印と成果物の取り込み）。

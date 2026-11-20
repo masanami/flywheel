@@ -142,7 +142,7 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 		}
 		switch dest {
 		case contractWaitReview:
-			return s.submitContractReview(ctx, rep, rs)
+			return s.receiveContractReview(ctx, rep, connector, rs)
 		case contractWaitOwnerHold:
 		default:
 			return nil
@@ -268,6 +268,7 @@ func (s *Store) holdContractWait(ctx context.Context, rep *ContractRunReport, qu
 // 読んだ後に状態の写しと予算の確認を行う。
 func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64) (*ContractRunReport, error) {
 	challengeID := formatChallengeID(row.ChallengeID)
+	row.reqFacts = connector.RequiredFacts
 	var answer contractAnswer
 	var resume bool
 	if row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindReview {
@@ -343,6 +344,9 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		if err := s.cancelOverBudget(ctx, in, row, connector, binding, planVersion, cycleID, rep); err != nil {
 			return nil, err
 		}
+	}
+	if !resume && rep.PendingRespond != nil && !rep.Held && !rep.State.Terminal() {
+		return s.respondToReview(ctx, in, row, connector, binding, planVersion, cycleID, rep)
 	}
 	if !resume && in.Judgment != nil && rep.Result == RunResultSucceeded && !rep.Held && rep.State == ContractStateWaiting &&
 		contractWaitDestination(rep.RequestedAction, rep.Artifacts) == contractWaitParent {
@@ -445,6 +449,7 @@ func (s *Store) runExistingContractCommand(ctx context.Context, client ContractC
 			return client.Status(ctx, li)
 		},
 		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote,
+		FactsRequired: row.reqFacts, CountFacts: name == "status",
 	})
 }
 

@@ -328,6 +328,12 @@ const (
 	// holdReasonContractStopped は契約の run が failed・cancelled で終わった、または start の最中に
 	// flywheel の run が回収された保留。発生は作らない。
 	holdReasonContractStopped holdReason = "contract_stopped"
+	// 成果物つきのレビュー待ちを受け取れない保留（発生は作らない）。land_unavailable は選択肢に land が無い、
+	// content_ref_invalid は中身の識別がちょうど 1 つでない・反映先宛ての成果物が 2 つ以上ある、
+	// facts_unmet は宣言の required_facts を満たさないレビュー待ちが 2 回続いた。
+	holdReasonLandUnavailable   holdReason = "land_unavailable"
+	holdReasonContentRefInvalid holdReason = "content_ref_invalid"
+	holdReasonFactsUnmet        holdReason = "facts_unmet"
 )
 
 // occurrenceKind は保留の理由に対応する発生の種類。発生を作らない理由は false。

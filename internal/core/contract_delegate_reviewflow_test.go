@@ -15,14 +15,17 @@ import (
 
 const reviewPRURL = "https://github.com/o/r/pull/1"
 
+// reviewContentArtifact はレビュー待ちの中身の識別（kind が commit で role の無い成果物）。
+var reviewContentArtifact = ContractArtifact{Kind: "commit", Ref: "c0ffee1"}
+
 // reviewConnectorsJSON は resume に選択肢と添え書きを別の差し込みで渡す宣言。
 var reviewConnectorsJSON = strings.Replace(contractConnectorsJSON,
 	`"--answer", "{answer}"`, `"--choice", "{choice}", "--note", "{note}"`, 1)
 
 func reviewWaitOut() ContractLaunchOutput {
 	return contractOut(ContractStateWaiting, nil, func(st *ContractStatus) {
-		st.RequestedAction = &ContractRequestedAction{Kind: "review", Decider: "any", Text: "レビュー待ち", Options: []string{"respond", "ready"}}
-		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}}
+		st.RequestedAction = &ContractRequestedAction{Kind: "review", Decider: "any", Text: "レビュー待ち", Options: []string{"respond", "ready", "land"}}
+		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}, reviewContentArtifact}
 	})
 }
 
@@ -189,7 +192,7 @@ func TestPollContractRuns_AfterTheReleaseIsExecutedReadyIsReturnedAndTheRunEnds(
 		t.Fatal(err)
 	}
 	f.client.resumeOut = contractOut(ContractStateSucceeded, nil, func(st *ContractStatus) {
-		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}}
+		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}, reviewContentArtifact}
 	})
 	f.poll(t)
 	want := []string{"tool", "resume", "ext-1", "--choice", "ready", "--note", ""}

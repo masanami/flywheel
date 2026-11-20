@@ -171,7 +171,7 @@ func TestJ5Prompt_TaskSectionRequiresBothTheChallengeAndTheTaskDoneCriteria(t *t
 //
 // self-review 指摘（round1, code-reviewer CONFIRMED）: 当初は J1（4096バイト）
 // の境界だけを検証しており、judgmentPromptLimit の J2〜J5 の値
-// （当時 8192・8192・4096・6144。J2 は #462 で 12288、#749 で 12482、J5 は #466 で 8192、#565 で 9216、#563 で 9728、#654 で 10752、#629 で 11354）を緩めても検出するテストが無かった。5ファイル
+// （当時 8192・8192・4096・6144。J2 は #462 で 12288、#749 で 12482、J5 は #466 で 8192、#565 で 9216、#563 で 9728、#654 で 10752、#629 で 11354、S3a で 11717）を緩めても検出するテストが無かった。5ファイル
 // 分をテーブル駆動で回す形に直した。
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
@@ -179,7 +179,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j2.md": 13312,
 		"j3.md": 8192,
 		"j4.md": 4096,
-		"j5.md": 11354,
+		"j5.md": 11717,
 		"j6.md": 6144,
 		"j8.md": 8192,
 	}
@@ -829,6 +829,23 @@ func TestInstructions_J5DescribesTheUnreviewedReportRule(t *testing.T) {
 		"その回答の後に来た最初の検証（同じ委譲の報告・同じ PR の head）だけで、差し戻しの後の新しい差分には効かせない",
 		"判断できないの理由が複数あるときは、問いは 1 つのまま、すべての理由をその 1 つの問いに並べる",
 		"満たしていないになるときはそちらを選び、差し戻しの指摘にレビューの実施を含める",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Instructions(J5) lacks %q", want)
+		}
+	}
+}
+
+// AC-124: j5.md は、区画「委譲先が値で返したこと」の self_review が complete のときは、自己レビューの未実施・不明を理由に
+// 判断できないを選ばないことを書く。
+func TestInstructions_J5DescribesTheDelegateFactsSection(t *testing.T) {
+	got, err := Instructions(core.JudgmentJ5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"「委譲先が値で返したこと」",
+		"`self_review` が `complete` のときは、自己レビューの未実施・不明を理由に判断できないを選ばない",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Instructions(J5) lacks %q", want)
