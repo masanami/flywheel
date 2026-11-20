@@ -920,14 +920,17 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		}
 		holdID = id
 		if req.Replan {
-			// 契約の run（form: cli）が終わっていない・保留の間の成功が未処理のときは、前の計画の run が
-			// 回答で再開されたり検証中へ進んだりして、作り直した計画が使われない。印は成立させない。
-			var open int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND (ended_at IS NULL OR held_success = 1)`, cid).Scan(&open); err != nil {
+			// 作業している契約の実行（最後に読んだ状態が running のタスクの実行。「入れてよい」を返して終わりを読んでいないもの、
+			// 保留の間の成功が未処理のものを含む）があるときは、動いている作業が作り直す前の計画のまま進む・検証中へ進むので、印は成立させない。
+			// レビュー待ち・問い待ちのタスクの実行と、上げる依頼は、作り直した計画の承認の後に取り消すので、あっても受ける。
+			var working int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND kind = ? AND (
+				(ended_at IS NULL AND (state = ? OR COALESCE(land_ref, '') <> '')) OR held_success = 1)`,
+				cid, contractRunKindTask, string(ContractStateRunning)).Scan(&working); err != nil {
 				return "", err
 			}
-			if open > 0 {
-				return "", fmt.Errorf("%w: replan is not allowed while a contract run is open", ErrValidation)
+			if working > 0 {
+				return "", fmt.Errorf("%w: replan is not allowed while a contract run is working", ErrValidation)
 			}
 		}
 		var runID sql.NullInt64

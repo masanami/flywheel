@@ -43,6 +43,8 @@ type replanNote struct {
 	// Question・Answer は、印の付いた最後の回答の保留の問いと回答。
 	Question string
 	Answer   string
+	// Reason は、その保留の理由（holdReason の値。無ければ空）。
+	Reason string
 	// PlanVersion・PlanBody は、課題の最新の計画の版と本文（前の計画）。
 	PlanVersion int
 	PlanBody    string
@@ -59,8 +61,8 @@ func loadReplanNote(ctx context.Context, tx *sql.Tx, challengeID int64) (*replan
 	var n replanNote
 	var answeredAt string
 	err := tx.QueryRowContext(ctx,
-		`SELECT question, answer, answered_at FROM hold WHERE challenge_id = ? AND replan = 1 AND answer IS NOT NULL ORDER BY id DESC LIMIT 1`,
-		challengeID).Scan(&n.Question, &n.Answer, &answeredAt)
+		`SELECT question, answer, answered_at, COALESCE(reason, '') FROM hold WHERE challenge_id = ? AND replan = 1 AND answer IS NOT NULL ORDER BY id DESC LIMIT 1`,
+		challengeID).Scan(&n.Question, &n.Answer, &answeredAt, &n.Reason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -83,6 +85,32 @@ func loadReplanNote(ctx context.Context, tx *sql.Tx, challengeID int64) (*replan
 		return nil, err
 	}
 	return &n, nil
+}
+
+// ChallengeCheckFindingsSectionLabel は、課題の単位の確かめ（J5）が満たしていないとした保留への、計画を作り直す回答の後の J2 の入力で、
+// その確かめの指摘を渡すデータの区画の名前（J2 の指示文がこの名前で区画を指す）。
+const ChallengeCheckFindingsSectionLabel = "課題の単位の確かめの指摘"
+
+// DoneTasksSectionLabel は、統合先へ入った済みのタスクを J2 の入力へ渡すデータの区画の名前（J2 の指示文がこの名前で区画を指す）。
+const DoneTasksSectionLabel = "済みのタスク"
+
+// formatChallengeCheckFindingsSection は、課題の単位の確かめが満たしていないとした保留の問い（J5 の理由と指摘を含む）の、J2 の入力の区画の本文。
+func formatChallengeCheckFindingsSection(n *replanNote) string {
+	return "課題の単位の確かめ（統合先に集めた全体を、課題の完了条件で確かめた結果）が満たしていないとし、人間が計画を作り直す回答をした。" +
+		"次の計画は、この指摘を直すタスクを、足りない分として出す。\n\n" + strings.TrimSpace(n.Question)
+}
+
+// formatDoneTasksSection は J2 の入力の区画「済みのタスク」の本文（題名と完了条件。済みのタスクが無ければ空）。
+func formatDoneTasksSection(done []Task) string {
+	if len(done) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("統合先へ入った済みのタスク。やり直さず、新しい計画には入れない（足りない分のタスクだけを出す）。新しい計画の統合先を使うかは、真にする。\n")
+	for i, t := range done {
+		fmt.Fprintf(&b, "\n%d. %s\n   完了条件: %s", i+1, oneLine(t.Title), oneLine(t.DoneCriteria))
+	}
+	return b.String()
 }
 
 // formatReplanSection は J2 の入力の区画「計画の作り直し」の本文。

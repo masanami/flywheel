@@ -94,7 +94,13 @@ func (f *fakeContractClient) Resume(_ context.Context, in ContractLaunchInput) (
 func (f *fakeContractClient) Cancel(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
 	f.cancels = append(f.cancels, in.Command)
 	f.recordWorkDir("cancel", in.WorkDir)
-	return f.cancelOut, nil
+	out := f.cancelOut
+	if f.uniqueRunIDs && out.Status != nil && len(in.Command) > 0 { // 取り消す実行の ID を返す（複数のタスクの実行を取り消す試験）
+		st := *out.Status
+		st.RunID = in.Command[len(in.Command)-1]
+		out.Status = &st
+	}
+	return out, nil
 }
 
 func contractOut(state ContractState, cost *float64, mut func(st *ContractStatus)) ContractLaunchOutput {

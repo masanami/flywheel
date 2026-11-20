@@ -8,7 +8,7 @@ package core
 //   - 実行の記録の task_id は NULL（タスクに結び付かない実行）。
 //   - 結果: 満たした・判断できないは、見直し前と同じ（applyJ5）。満たしていない（applyJ5ChallengeNotMet）は、課題を着手中へ戻して保留にし
 //     （1 つの遷移。保留の理由は challenge_check_not_met・回答で戻る先は着手中）、作った反映の操作を閉じる。上げる依頼は、次の状態の確認が
-//     commands.cancel で取り消す（PollContractRuns の cancelClosedReflectRun）。
+//     commands.cancel で取り消す（PollContractRuns の cancelObsoleteContractRun）。
 
 import (
 	"context"

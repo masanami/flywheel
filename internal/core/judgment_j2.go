@@ -174,6 +174,8 @@ type j2ValidationContext struct {
 	// 持つ計画は、どちらでも不正。
 	CheckSource   bool
 	OpenChildKeys []string
+	// HasDoneTasks は課題に済み（done）のタスクがあるか。あるとき、統合先を使わない計画は不正（済みのタスクは統合先へ入っている）。
+	HasDoneTasks bool
 }
 
 // j2OutputSchema は J2 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -480,6 +482,10 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 	}
 	// 2 件以上のタスクは統合先へ入れる（1 件ならどちらでもよい）。
 	if len(tasks) >= 2 && !*raw.UsesIntegration {
+		return nil, false
+	}
+	// 済みのタスクがあれば、タスクの件数に関わらず統合先を使う（済みのタスクの成果は統合先に集まっている）。
+	if vc.HasDoneTasks && !*raw.UsesIntegration {
 		return nil, false
 	}
 	topics, ok := validateJ2Topics(raw.Topics)
@@ -851,6 +857,8 @@ type j2Prepared struct {
 	HasSource bool
 	// OpenChildKeys は課題の、上流で開いている取り込み元の子の external_key（記録した順。出力の検査に使う）。
 	OpenChildKeys []string
+	// HasDoneTasks は課題に済み（done）のタスクがあるか（出力の検査に使う）。
+	HasDoneTasks bool
 	// Read が非 nil のときだけ、計画を登録した後に読んだ記録を付けてよい
 	// （取り込み元の対応があり、最新のコメントをすべて入力へ含めた場合）。値は
 	// J2 の直前の取得で得たコメント数と更新日時（ストアの観測値ではない）。
@@ -887,7 +895,22 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	var planRejections []CompletionRejection
 	var completionRejections []CompletionRejection
 	var planAnswersText string
+	var doneTasks []Task
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		all, err := listTasks(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		// 済みのタスクは、統合先を使う課題のものだけを扱う（統合先を使わない課題の動きは変えない）。
+		if integ, err := challengeUsesIntegration(ctx, tx, cid); err != nil {
+			return err
+		} else if integ != nil && *integ {
+			for _, t := range all {
+				if t.Status == TaskStatusDone {
+					doneTasks = append(doneTasks, t)
+				}
+			}
+		}
 		pa, err := loadPlanAnswersSection(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -918,11 +941,11 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 			return err
 		}
 		sb = b
-		all, err := loadSourceChildren(ctx, tx, cid)
+		allChildren, err := loadSourceChildren(ctx, tx, cid)
 		if err != nil {
 			return err
 		}
-		for _, c := range all {
+		for _, c := range allChildren {
 			if c.UpstreamState == string(upstreamStateOpen) {
 				children = append(children, c)
 			}
@@ -938,7 +961,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		return nil, nil, fmt.Errorf("%w: read position_file %q: %w", ErrConfigInvalid, in.AgentDecl.PositionFile, err)
 	}
 
-	prepared := &j2Prepared{HasSource: sb != nil}
+	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0}
 
 	var upstream *j2UpstreamInput
 	if sb != nil {
@@ -989,6 +1012,12 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	}
 	if replan != nil {
 		sections = append(sections, JudgmentDataSection{Label: ReplanSectionLabel, Content: formatReplanSection(replan)})
+	}
+	if replan != nil && replan.Reason == string(holdReasonChallengeCheckNotMet) {
+		sections = append(sections, JudgmentDataSection{Label: ChallengeCheckFindingsSectionLabel, Content: formatChallengeCheckFindingsSection(replan)})
+	}
+	if t := formatDoneTasksSection(doneTasks); t != "" {
+		sections = append(sections, JudgmentDataSection{Label: DoneTasksSectionLabel, Content: t})
 	}
 	if stagesText := formatJ2StagesSection(ch); stagesText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "いまの予想・やらないこと・図", Content: stagesText})
@@ -1654,7 +1683,7 @@ func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
 		fin, err := s.finalizeJ2Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, j2Finalize{
-			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, OpenChildKeys: prepared.OpenChildKeys},
+			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks},
 			Read:       prepared.Read,
 		})
 		if err != nil {

@@ -202,7 +202,7 @@ func TestJ5Prompt_TaskVerification(t *testing.T) {
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
 		"j1.md": 4096,
-		"j2.md": 13599,
+		"j2.md": 14178,
 		"j3.md": 8192,
 		"j4.md": 4096,
 		"j5.md": 13038,
@@ -1000,6 +1000,22 @@ func TestJ2Prompt_ReadsTheRejectionOfTheProductAndDoesNotRedoDoneTasks(t *testin
 		t.Fatalf("Instructions(J2): %v", err)
 	}
 	for _, want := range []string{"「" + core.CompletionRejectionsForReplanSectionLabel + "」", "済みのタスクをやり直す計画にせず、足りない分のタスクだけを出す"} {
+		if !strings.Contains(ins, want) {
+			t.Errorf("j2.md lacks %q", want)
+		}
+	}
+}
+
+// AC-211: J2 の指示文が、区画「済みのタスク」「課題の単位の確かめの指摘」を名前で指し、済みのタスクをやり直さず、足りない分のタスクだけを出す旨を述べる。
+func TestJ2Prompt_AC211_ReadsTheDoneTasksAndTheFindingsAndDoesNotRedoDoneTasks(t *testing.T) {
+	ins, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatalf("Instructions(J2): %v", err)
+	}
+	for _, want := range []string{
+		"「" + core.DoneTasksSectionLabel + "」", "「" + core.ChallengeCheckFindingsSectionLabel + "」",
+		"済みのタスクをやり直す計画にせず、足りない分のタスクだけを出す",
+	} {
 		if !strings.Contains(ins, want) {
 			t.Errorf("j2.md lacks %q", want)
 		}
