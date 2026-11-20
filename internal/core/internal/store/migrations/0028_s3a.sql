@@ -1,10 +1,13 @@
 -- 0028_s3a: スキーマ版 28。
--- 契約の実行（contract_run）と成果物（run_artifact）に、反映を委譲先に任せる区切り（S3a）で使う列を足す。
+-- 契約の実行（contract_run）・成果物（run_artifact）・保留（hold）に、反映を委譲先に任せる区切り（S3a）で使う列を足す。
 -- 後のタスクが使う列もここですべて足し、後のタスクはマイグレーションを足さない。
 -- 過去の行は書き換えない（版 27 の行は kind が既定の task、facts_unmet_count と land_delivered が 0、他は NULL になる）。
 -- 索引と一意の制約は変えない。operation_execution は変えない。列を足すだけで、読み書きは各タスクが持つ。
 
 ALTER TABLE run_artifact ADD COLUMN role TEXT;
+
+-- 保留の理由。land_unavailable・content_ref_invalid・facts_unmet の保留だけが値を持ち、ほかの保留と過去の行は NULL。
+ALTER TABLE hold ADD COLUMN reason TEXT;
 
 ALTER TABLE contract_run ADD COLUMN kind TEXT NOT NULL DEFAULT 'task';
 ALTER TABLE contract_run ADD COLUMN operation_id INTEGER REFERENCES operation(id);

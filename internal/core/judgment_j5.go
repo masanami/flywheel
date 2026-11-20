@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -359,6 +360,8 @@ type j5Context struct {
 	Artifacts    []runArtifactRow
 	// Task は完了の検証の対象のタスク（課題のタスクのうち verifying のものがちょうど 1 個のとき。それ以外は nil）。
 	Task *Task
+	// Facts は検証するタスクの契約の実行（最後の 1 件）の facts の記録（無ければ nil）。
+	Facts map[string]string
 	// ArtifactDescriptionRead は、成果物の説明文（PR の本文）を 1 件でも取得できたか（form: cli の委譲の報告の出どころを決める）。
 	ArtifactDescriptionRead bool
 }
@@ -394,6 +397,9 @@ func (s *Store) loadJ5Context(ctx context.Context, ch Challenge) (*j5Context, er
 			return err
 		}
 		if vc.Task, err = loadVerifyingTask(ctx, tx, cid); err != nil {
+			return err
+		}
+		if vc.Facts, err = loadTaskContractFacts(ctx, tx, cid, vc.Task); err != nil {
 			return err
 		}
 		var lastID int64
@@ -536,6 +542,9 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 	}
 	if vc.Task != nil {
 		sections = append(sections, JudgmentDataSection{Label: labelTaskSection, Content: formatTaskSection(*vc.Task)})
+	}
+	if t := formatFactsSection(vc.Facts); t != "" {
+		sections = append(sections, JudgmentDataSection{Label: labelDelegateFactsSection, Content: t})
 	}
 	if t := formatCompletionRejectionsSection(vc.Rejections); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: CompletionRejectionsSectionLabel, Content: t})
@@ -1247,4 +1256,51 @@ func ResolveWaitingExternal(ctx context.Context, cands []WaitingExternalCandidat
 		}
 	}
 	return out
+}
+
+// labelDelegateFactsSection は、委譲先が値で返したこと（契約の出力の facts）の区画のラベル（指示文はこの名前で区画を指す）。
+const labelDelegateFactsSection = "委譲先が値で返したこと"
+
+// loadTaskContractFacts は、検証するタスク t の契約の実行（最後の 1 件）の facts の記録を返す（記録が無ければ nil）。
+func loadTaskContractFacts(ctx context.Context, tx *sql.Tx, cid int64, t *Task) (map[string]string, error) {
+	if t == nil {
+		return nil, nil
+	}
+	id := taskIDPtr(t)
+	if id == nil {
+		return nil, nil
+	}
+	var raw sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT facts FROM contract_run WHERE challenge_id = ? AND task_id = ? AND kind = 'task' ORDER BY id DESC LIMIT 1`, cid, *id).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !raw.Valid) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(raw.String), &m); err != nil {
+		return nil, nil // 記録は core が書く形のはずだが、読めないときは区画を出さない
+	}
+	return m, nil
+}
+
+// formatFactsSection は facts の名前と値を、名前の辞書順に 1 行ずつ並べる（記録が無ければ空）。
+func formatFactsSection(f map[string]string) string {
+	if f == nil {
+		return ""
+	}
+	names := make([]string, 0, len(f))
+	for n := range f {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for _, n := range names {
+		fmt.Fprintf(&b, "- %s: %s\n", n, f[n])
+	}
+	if b.Len() == 0 {
+		return "（値なし）"
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

@@ -34,6 +34,12 @@ func TestS3aMigration(t *testing.T) {
 			t.Errorf("run_artifact.role: present=%v notnull=%v; want present and nullable", ok, nn)
 		}
 	})
+	t.Run("hold_has_a_nullable_reason", func(t *testing.T) {
+		db := openFresh(t)
+		if nn, ok := tableColumnInfo(t, db, "hold")["reason"]; !ok || nn {
+			t.Errorf("hold.reason: present=%v notnull=%v; want present and nullable", ok, nn)
+		}
+	})
 	t.Run("contract_run_has_the_eight_columns_with_the_decided_nullability", func(t *testing.T) {
 		db := openFresh(t)
 		cr := tableColumnInfo(t, db, "contract_run")
@@ -87,6 +93,9 @@ func TestS3aMigration(t *testing.T) {
 			if _, err := tx.Exec(`INSERT INTO run_artifact (run_id, kind, ref) VALUES (1, 'commit', 'abc')`); err != nil {
 				return err
 			}
+			if _, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (1, 'q', 'in_progress', '2026-11-01T00:00:00.000Z')`); err != nil {
+				return err
+			}
 			_, err := tx.Exec(`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, cost_usd, max_budget_usd, started_at, observed_at)
 				VALUES (1, 'tool', 'ext-1', 1, 'running', '実行中', 1500000, 5000000, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`)
 			return err
@@ -121,6 +130,13 @@ func TestS3aMigration(t *testing.T) {
 			}
 			if !roleNull {
 				t.Error("run_artifact.role of an old row is not NULL")
+			}
+			var reasonNull bool
+			if err := tx.QueryRow(`SELECT reason IS NULL FROM hold WHERE question = 'q'`).Scan(&reasonNull); err != nil {
+				return err
+			}
+			if !reasonNull {
+				t.Error("hold.reason of an old row is not NULL")
 			}
 			return nil
 		}); err != nil {

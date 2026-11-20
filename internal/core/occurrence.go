@@ -328,7 +328,19 @@ const (
 	// holdReasonContractStopped は契約の run が failed・cancelled で終わった、または start の最中に
 	// flywheel の run が回収された保留。発生は作らない。
 	holdReasonContractStopped holdReason = "contract_stopped"
+	// 成果物つきのレビュー待ちを受け取れない保留（発生は作らない）。land_unavailable は選択肢に land が無い、
+	// content_ref_invalid は中身の識別がちょうど 1 つでない・反映先宛ての成果物が 2 つ以上ある、
+	// facts_unmet は宣言の required_facts を満たさないレビュー待ちが 2 回続いた。
+	holdReasonLandUnavailable   holdReason = "land_unavailable"
+	holdReasonContentRefInvalid holdReason = "content_ref_invalid"
+	holdReasonFactsUnmet        holdReason = "facts_unmet"
 )
+
+// persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない 3 つの理由だけが書く
+// （ほかの保留の hold.reason は NULL）。
+func (r holdReason) persisted() bool {
+	return r == holdReasonLandUnavailable || r == holdReasonContentRefInvalid || r == holdReasonFactsUnmet
+}
 
 // occurrenceKind は保留の理由に対応する発生の種類。発生を作らない理由は false。
 func (r holdReason) occurrenceKind() (OccurrenceKind, bool) {
@@ -368,6 +380,11 @@ func (s *Store) insertHoldWithOccurrenceID(ctx context.Context, tc *transitionCt
 	holdID, err := insertHoldID(ctx, tc, question)
 	if err != nil {
 		return 0, err
+	}
+	if reason.persisted() {
+		if _, err := tc.tx.ExecContext(ctx, `UPDATE hold SET reason = ? WHERE id = ?`, string(reason), holdID); err != nil {
+			return 0, err
+		}
 	}
 	kind, ok := reason.occurrenceKind()
 	if !ok {
