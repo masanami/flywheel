@@ -180,3 +180,30 @@ func TestReplanJ2_AChallengeWithoutTheIntegrationKeepsTheOldBehavior(t *testing.
 		t.Fatalf("items = %+v, want the plan without the integration registered", res.Items)
 	}
 }
+
+// 仕上げ 3 項目 3: 済みのタスクがある課題の作り直しの計画は、済みのタスクと別のリポジトリのタスクを持つと不正になる
+// （統合先を使う課題のタスクは、1 つのリポジトリにそろえる）。同じリポジトリなら登録される。
+func TestReplanJ2_APlanInAnotherRepositoryThanTheDoneTasksIsInvalid(t *testing.T) {
+	t.Parallel()
+	f := newReplanJ2Fixture(t, nil)
+	sibling := j2OutputFor(false, func(m map[string]any) {
+		m["size"] = "M"
+		m["budget_impl_usd"] = 41.5
+		m["topics"] = []any{j2TestTopic("TOPIC-A", j2TestQuestion("QTEXT-1", 3, 2), j2TestQuestion("QTEXT-2", 2, 1))}
+		tasks := j2TasksOf("a")
+		tm := tasks[0].(map[string]any)
+		tm["repo"], tm["operation"] = "flywheel-sibling", "define"
+		m["tasks"] = tasks
+		m["uses_integration"] = true
+	})
+	_, res := f.j2Input(t, sibling)
+	if len(res.Items) != 1 || res.Items[0].Outcome == "plan" {
+		t.Fatalf("items = %+v, want the plan rejected as invalid", res.Items)
+	}
+	if got := f.detail(t, f.id).Status; got != StatusClassified {
+		t.Errorf("status = %s, want classified (nothing was registered)", got)
+	}
+	if _, res = f.j2Input(t, paPlanOut(1, true)); len(res.Items) != 1 || res.Items[0].Outcome != "plan" {
+		t.Fatalf("items = %+v, want the plan in the done tasks' repository registered", res.Items)
+	}
+}

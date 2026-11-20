@@ -176,6 +176,8 @@ type j2ValidationContext struct {
 	OpenChildKeys []string
 	// HasDoneTasks は課題に済み（done）のタスクがあるか。あるとき、統合先を使わない計画は不正（済みのタスクは統合先へ入っている）。
 	HasDoneTasks bool
+	// DoneRepos は課題の済みのタスクのリポジトリ（重複なし）。統合先を使う計画のタスクのリポジトリは、これと合わせて 1 つでなければ不正。
+	DoneRepos []string
 }
 
 // j2OutputSchema は J2 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -488,6 +490,20 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 	if vc.HasDoneTasks && !*raw.UsesIntegration {
 		return nil, false
 	}
+	// 統合先を使う計画のタスクは、リポジトリが 1 つ（済みのタスクがあれば、済みのタスクのリポジトリと同じ）。
+	// 上げる依頼が、済みのタスクのリポジトリが 1 つのときだけ始まるのと同じ基準。
+	if *raw.UsesIntegration {
+		repos := map[string]bool{}
+		for _, r := range vc.DoneRepos {
+			repos[r] = true
+		}
+		for _, t := range tasks {
+			repos[t.Repo] = true
+		}
+		if len(repos) > 1 {
+			return nil, false
+		}
+	}
 	topics, ok := validateJ2Topics(raw.Topics)
 	if !ok {
 		return nil, false
@@ -737,14 +753,15 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 	b.WriteString("## サイズと予算\n\n")
 	b.WriteString("- サイズ: " + string(v.Size) + "\n")
 	if allTasksHaveBudgets(v.Tasks) {
-		// タスクが枠を持つ計画の課題の上限は、タスクの枠の合計（計画の値ではない）。
+		// タスクが枠を持つ計画の枠は、この計画のタスクの枠の合計（計画の値ではない）。本文は登録のときに決まる文なので、済みのタスクの枠は足さない
+		// （課題の上限は、承認の要約が別に出す）。
 		var impl, review int64
 		for _, t := range v.Tasks {
 			impl += usdToMicros(*t.BudgetImplUSD)
 			review += usdToMicros(*t.BudgetReviewUSD)
 		}
-		b.WriteString("- 実装枠（タスクの枠の合計）: " + formatUSDAmount(microsToUSD(impl)) + " USD\n")
-		b.WriteString("- レビュー対応枠（タスクの枠の合計）: " + formatUSDAmount(microsToUSD(review)) + " USD\n")
+		b.WriteString("- 実装枠（この計画のタスクの枠の合計）: " + formatUSDAmount(microsToUSD(impl)) + " USD\n")
+		b.WriteString("- レビュー対応枠（この計画のタスクの枠の合計）: " + formatUSDAmount(microsToUSD(review)) + " USD\n")
 	} else {
 		b.WriteString("- 実装枠: " + formatUSDAmount(v.ResolvedImplUSD) + " USD\n")
 		b.WriteString("- レビュー対応枠: " + formatUSDAmount(v.ResolvedReviewUSD) + " USD\n")
@@ -887,6 +904,8 @@ type j2Prepared struct {
 	OpenChildKeys []string
 	// HasDoneTasks は課題に済み（done）のタスクがあるか（出力の検査に使う）。
 	HasDoneTasks bool
+	// DoneRepos は課題の済みのタスクのリポジトリ（重複なし。出力の検査に使う）。
+	DoneRepos []string
 	// Read が非 nil のときだけ、計画を登録した後に読んだ記録を付けてよい
 	// （取り込み元の対応があり、最新のコメントをすべて入力へ含めた場合）。値は
 	// J2 の直前の取得で得たコメント数と更新日時（ストアの観測値ではない）。
@@ -990,6 +1009,13 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	}
 
 	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0}
+	seenDoneRepo := map[string]bool{}
+	for _, t := range doneTasks {
+		if !seenDoneRepo[t.Repo] {
+			seenDoneRepo[t.Repo] = true
+			prepared.DoneRepos = append(prepared.DoneRepos, t.Repo)
+		}
+	}
 
 	var upstream *j2UpstreamInput
 	if sb != nil {
@@ -1711,7 +1737,7 @@ func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
 		fin, err := s.finalizeJ2Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, j2Finalize{
-			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks},
+			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos},
 			Read:       prepared.Read,
 		})
 		if err != nil {

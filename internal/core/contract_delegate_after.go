@@ -181,8 +181,54 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 			return err
 		}
 		// 課題が保留の間に読んだ成功の印（held_success）は、読んだ記録と同じトランザクションで付けてある（recordContractStatus）。
+	case ContractStateFailed, ContractStateCancelled:
+		// 「入れてよい」を返し済みの実行の失敗・取り消しは、統合先へ入ったかを確かめて扱う（返し済みでなければ、読んだ記録の書き込みが扱い済み）。
+		return s.finishStoppedLanding(ctx, rep, rs)
 	}
 	return nil
+}
+
+// finishStoppedLanding は、統合先を使う課題のタスクの実行が、「入れてよい」を返し済み（land_ref がある）のまま失敗・取り消しで終わったとき、
+// 成果物が統合先へ入ったかを確かめて扱う（finishIntegrationLanding）。返し済みでなければ何もしない。
+func (s *Store) finishStoppedLanding(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource) error {
+	cid, ok := parseChallengeID(rep.ChallengeID)
+	if !ok {
+		return nil
+	}
+	integ, landRef, recorded, err := s.loadIntegrationTaskEnd(ctx, cid, rep.ExternalRunID)
+	if err != nil || !integ || landRef == "" {
+		return err
+	}
+	return s.finishIntegrationLanding(ctx, rep, rs, cid, landRef, recorded)
+}
+
+// loadIntegrationTaskEnd は、統合先を使う課題のタスクの契約の実行（externalRunID）の終わりを扱うための読み。integ は、統合先を使う課題の
+// タスクの実行か（上げる依頼・統合先を使わない課題は偽）。landRef は通す中身（返し済みでなければ空）、recorded は課題の統合先の記録。
+func (s *Store) loadIntegrationTaskEnd(ctx context.Context, cid int64, externalRunID string) (integ bool, landRef, recorded string, err error) {
+	err = s.db.Read(ctx, func(tx *sql.Tx) error {
+		u, err := challengeUsesIntegration(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		integ = u != nil && *u
+		if !integ {
+			return nil
+		}
+		var kind, lr, ir sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT kind, land_ref FROM contract_run WHERE challenge_id = ? AND external_run_id = ?`, cid, externalRunID).Scan(&kind, &lr); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if kind.String == contractRunKindReflect {
+			integ = false
+			return nil
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT integration_ref FROM challenge WHERE id = ?`, cid).Scan(&ir); err != nil {
+			return err
+		}
+		landRef, recorded = lr.String, ir.String
+		return nil
+	})
+	return integ, landRef, recorded, classifyReadWriteErr(err)
 }
 
 // holdIntegrationSucceeded は、統合先を使う課題のタスクの実行が、レビュー待ちを経ずに succeeded になったとき（land_ref が無い）、
@@ -194,37 +240,8 @@ func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunRe
 	if !ok {
 		return false, nil
 	}
-	var integ bool
-	var landRef, recorded string
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		u, err := challengeUsesIntegration(ctx, tx, cid)
-		if err != nil {
-			return err
-		}
-		integ = u != nil && *u
-		if !integ {
-			return nil
-		}
-		// タスクの実行の成功だけを扱う（反映の依頼〔上げる依頼〕の成功は、タスクの実行の成功ではない）。
-		var kind sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT kind FROM contract_run WHERE challenge_id = ? AND external_run_id = ?`, cid, rep.ExternalRunID).Scan(&kind); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if kind.String == contractRunKindReflect {
-			integ = false
-			return nil
-		}
-		var lr, ir sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT land_ref FROM contract_run WHERE challenge_id = ? AND external_run_id = ?`, cid, rep.ExternalRunID).Scan(&lr); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT integration_ref FROM challenge WHERE id = ?`, cid).Scan(&ir); err != nil {
-			return err
-		}
-		landRef, recorded = lr.String, ir.String
-		return nil
-	})
-	if err = classifyReadWriteErr(err); err != nil || !integ {
+	integ, landRef, recorded, err := s.loadIntegrationTaskEnd(ctx, cid, rep.ExternalRunID)
+	if err != nil || !integ {
 		return false, err
 	}
 	if landRef != "" {
@@ -540,6 +557,14 @@ func (s *Store) challengeInProgress(ctx context.Context, cid int64) (bool, error
 	return inProgress, classifyReadWriteErr(err)
 }
 
+// recordedTerminalStatus は、記録した状態が終わりの契約の実行（row）の状態の確認を、記録から作った読みにしたもの。
+// 費用は持たない。成果物は、取り込み済みのもの（arts）を持つ。
+func recordedTerminalStatus(row *contractRunRow, arts []ContractArtifact) ContractLaunchOutput {
+	return ContractLaunchOutput{Result: RunResultSucceeded, Status: &ContractStatus{
+		ContractVersion: contractVersion, RunID: row.ExternalRunID, State: row.State, Summary: row.Summary, Artifacts: arts,
+	}}
+}
+
 // runExistingContractCommand は既存の契約の run に対するコマンド（status・resume・cancel）を 1 回呼んで記録する。
 func (s *Store) runExistingContractCommand(ctx context.Context, client ContractClient, agent *AgentDeclaration, workDir string, row *contractRunRow, name string, command []string, planVersion, cycleID *int64, stopNote string) (*ContractRunReport, error) {
 	return s.runExistingContractCommandWith(ctx, client, agent, workDir, row, name, command, planVersion, cycleID, stopNote, nil, false)
@@ -553,6 +578,13 @@ func (s *Store) runExistingContractCommandWith(ctx context.Context, client Contr
 	sessionID, err := newLowercaseUUIDv4()
 	if err != nil {
 		return nil, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err)
+	}
+	var recordedArts []ContractArtifact
+	if name == "status" && releaseOp == nil && row.State.Terminal() {
+		var err error
+		if recordedArts, err = s.landingArtifacts(ctx, &ContractRunReport{ExternalRunID: row.ExternalRunID}, row.ChallengeID); err != nil {
+			return nil, err
+		}
 	}
 	// コマンド 1 回ごとの run の行も、契約の run が結び付くタスクに結び付ける（過去の行は nil のまま）。
 	runIDInt, err := s.beginContractRunMarked(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false, row.TaskID, releaseOp, row.Kind == contractRunKindReflect)
@@ -571,6 +603,10 @@ func (s *Store) runExistingContractCommandWith(ctx context.Context, client Contr
 				return client.Resume(ctx, li)
 			case "cancel":
 				return client.Cancel(ctx, li)
+			}
+			if name == "status" && releaseOp == nil && row.State.Terminal() {
+				// 記録した状態が終わりの行は、委譲先を呼ばず、記録から読んだことにする（委譲先の失敗で、後の処理が止まらない）。
+				return recordedTerminalStatus(row, recordedArts), nil
 			}
 			return client.Status(ctx, li)
 		},

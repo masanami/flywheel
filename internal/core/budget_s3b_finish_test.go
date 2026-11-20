@@ -85,7 +85,7 @@ func TestPlanWithTaskFrames_RegistersAndShowsTheSumOfTheTaskFrames(t *testing.T)
 		t.Fatalf("status = %s, want awaiting_plan_approval (the plan was rejected as an invalid output)", d.Status)
 	}
 	body := d.Plans[len(d.Plans)-1].Body
-	for _, want := range []string{"実装枠（タスクの枠の合計）: 20 USD", "レビュー対応枠（タスクの枠の合計）: 5 USD", "枠: 実装 10 USD・レビュー対応 2 USD", "枠: 実装 10 USD・レビュー対応 3 USD"} {
+	for _, want := range []string{"実装枠（この計画のタスクの枠の合計）: 20 USD", "レビュー対応枠（この計画のタスクの枠の合計）: 5 USD", "枠: 実装 10 USD・レビュー対応 2 USD", "枠: 実装 10 USD・レビュー対応 3 USD"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the plan body lacks %q:\n%s", want, body)
 		}
@@ -214,5 +214,51 @@ func TestTaskRemaining_ReplannedSoleTaskWithoutIntegrationStillAccumulates(t *te
 	nt := seedPlanTasks(t, f.s, cid, 2)
 	if tb := f.taskBudgetOf(t, id, nt[0].ID); tb.ImplRemainingUSD != 10 {
 		t.Errorf("remaining = %v, want 30 - 20 (the spend accumulates across the replan)", tb.ImplRemainingUSD)
+	}
+}
+
+// 仕上げ 3 項目 5: 統合先を使う課題で済みのタスクがあるとき、枠を書かない 1 個のタスクの計画の上限は、規模の既定で引いた枠と、済みのタスクの枠の合計
+// （承認の後の課題の上限と同じ額）。
+func TestPlanView_SoleTaskWithoutFramesAddsTheDoneTasksFrames(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	id := f.newInProgress(t, "two", "P2", twoTaskSpec(3, 2, 4, 5))
+	cid, _ := parseChallengeID(id)
+	old := taskRows(t, f.s, cid)
+	setBudgetTaskStatus(t, f.s, mustTaskID(t, old[0].ID), "done") // 済みのタスクの枠は 3 + 2
+	noFrames := planSpec(func(m map[string]any) {
+		tasks := j2TasksOf("a")
+		tm := tasks[0].(map[string]any)
+		tm["repo"], tm["operation"] = "main-repo", "impl"
+		m["tasks"] = tasks
+		m["uses_integration"] = true
+	})
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (?, 2, 'v2', '2026-09-26T00:00:00.000Z', ?)`, cid, noFrames)
+		return err
+	})
+	impl, review, ok := resolveSpecBudgets(noFrames, f.agent)
+	if !ok {
+		t.Fatal("the size default cannot be resolved")
+	}
+	want := 3.0 + 2.0 + impl + review
+	pv, err := f.s.GetPlanView(context.Background(), id, f.agent) // 承認の前の新しい版
+	if err != nil || pv.BudgetUSD == nil || *pv.BudgetUSD != want {
+		t.Fatalf("limit before approving = %v (%v), want %v (the size default plus the done task's frame)", pv.BudgetUSD, err, want)
+	}
+	// 承認の後（fillSoleTaskBudgets が規模の既定をタスクの枠へ入れる）の課題の上限と同じ額。
+	seedPlanTasks(t, f.s, cid, 2)
+	setBudgetTaskStatus(t, f.s, mustTaskID(t, old[0].ID), "done")
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE task SET budget_impl_micros = ?, budget_review_micros = ? WHERE challenge_id = ? AND plan_version = 2`, usdToMicros(impl), usdToMicros(review), cid)
+		return err
+	})
+	var bs []taskBudget
+	readForTest(t, f.s, func(tx *sql.Tx) (err error) {
+		bs, err = loadTaskBudgets(context.Background(), tx, cid, f.agent)
+		return err
+	})
+	if sum, ok := sumTaskBudgets(bs); !ok || microsToUSD(sum.Impl+sum.Review) != want {
+		t.Errorf("limit after approving = %+v, want %v", sum, want)
 	}
 }

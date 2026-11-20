@@ -114,7 +114,7 @@ func blockedPendingTasks(all []Task, byID map[string]Task) map[string]bool {
 //
 // 統合先を使わない課題は、起動できるタスクがちょうど 1 個のときだけ起動する（0 個は no_tasks、2 個以上は
 // integration_unavailable）。統合先を使う課題は、タスクが 1 個でも 2 個以上でも起動する（タスクの単位で見る）:
-//   - 取りやめでないタスク（未着手・作業中・検証中・済み）のリポジトリが 2 つ以上 → 起動しない（integration_unavailable）
+//   - 取りやめでないタスク（未着手・作業中・検証中・済み）のリポジトリが 2 つ以上 → 進めようが無いので、保留にする（tasks_blocked）
 //   - 起動できるタスク（isLaunchableTask）で、終わっていない実行を持たず、対応する子が起動を妨げず（taskUpstreamExclusion）、
 //     委譲先が form: cli のものを起動する。form が cli でない委譲先のタスクは integration_unavailable
 //   - 起動するタスクが無く、進めようが無い（blockedByCancelledTask）なら、保留にする
@@ -186,8 +186,10 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 		}
 	}
 	if len(repoList) >= 2 {
-		ns(NotStartedIntegrationUnavailable, fmt.Sprintf(
-			"統合先を使う課題のタスクは、1 つのリポジトリにそろえる必要がある。いまは複数のリポジトリにまたがっているので起動しない（取りやめたタスクは数えない。済み・未完のタスクのリポジトリ: %s）", strings.Join(repoList, "・")))
+		// 進めようが無い（計画の検査が通すはずの無い計画。手で登録した計画・過去の計画）。毎周起動しないだけでオーナーに見えないので、保留にする。
+		sel.Blocked = fmt.Sprintf("統合先を使う課題のタスクは、1 つのリポジトリにそろえる必要があるが、この課題のタスクは 2 つ以上のリポジトリにまたがっている"+
+			"（取りやめたタスクは数えない。済み・未完のタスクのリポジトリ: %s）。このままでは進められない。"+
+			"計画を作り直す回答（タスクのリポジトリを 1 つにそろえる）をするか、課題を取り下げて進めてください。", strings.Join(repoList, "・"))
 		return sel, nil
 	}
 	taskLessBusy, err := taskLessHasActiveRun(ctx, tx, cid)

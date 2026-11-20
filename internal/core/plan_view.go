@@ -159,7 +159,13 @@ func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclar
 			return nil, err
 		}
 		b := applyBudgetOverride(implUSD, reviewUSD, override)
-		sum := microsToUSD(b.Impl + b.Review)
+		total := b.Impl + b.Review
+		// 統合先を使う課題で済みのタスクがあるとき、枠を書かないタスク（1 個の計画）の枠は、起動のときと同じ規則（規模の既定。
+		// fillSoleTaskBudgets）で引いたこの額で、承認の後の課題の上限は、これに前の版の済みのタスクの枠を足した合計になる。
+		if raw.UsesIntegration != nil && *raw.UsesIntegration {
+			total += doneTaskFramesOfOtherVersions(version, allBudgets)
+		}
+		sum := microsToUSD(total)
 		pv.BudgetUSD = &sum
 	}
 
@@ -226,6 +232,18 @@ func planAnswerView(a PlanAnswer, options []StageOption) *PlanQuestionAnswerView
 		v.Label = &label
 	}
 	return v
+}
+
+// doneTaskFramesOfOtherVersions は、計画の版 version 以外の版の、済み（done）のタスクの枠の合計（実装の枠とレビュー対応の枠。
+// 枠を決められないタスクは数えない）。前の版の未完のタスクは、この版の承認で取りやめになるので数えない。
+func doneTaskFramesOfOtherVersions(version int64, bs []taskBudget) int64 {
+	var sum int64
+	for _, b := range bs {
+		if b.PlanVersion != version && b.Status == TaskStatusDone && b.Known {
+			sum += b.Impl + b.Review
+		}
+	}
+	return sum
 }
 
 // planTaskFrameSum は、計画のタスクが全部枠（実装・レビュー対応の両方）を書いているとき、課題の上限（USD）を返す。
