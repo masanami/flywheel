@@ -59,6 +59,16 @@ func reflectFailedQuestion(detail string) string {
 	return "統合先から反映先へ上げる依頼を始められなかった。" + detail + "\n委譲先を確かめてから回答するか、課題を取り下げる。回答すると、次の委譲の段が上げる依頼を始め直す。"
 }
 
+// reflectNoReleaseOperationQuestion は、上げる依頼の成果物（ref）の、承認できる反映の操作を作れなかったときの問い。
+// 回答の後に取れる道（取り下げる・手で反映の操作を足す）を書く。何もせずに回答しても、同じ成果物で作れないのでもう一度保留になる。
+func reflectNoReleaseOperationQuestion(challengeID, ref string) string {
+	return fmt.Sprintf("統合先から反映先へ上げる依頼の成果物（%s）について、承認して反映先へ入れる操作（反映の操作）を作れなかった。"+
+		"同じ成果物の反映の操作が、置き換え・差し戻し以外の理由で閉じているため、自動では作り直さない。\n", ref) +
+		fmt.Sprintf("次のどちらかで進める。①課題を取り下げる（`flywheel withdraw %s --reason <理由>`）。"+
+			"②手で反映の操作を足す（`flywheel op add %s --kind release --ref %s --summary <要約>`）。", challengeID, challengeID, ref) +
+		"足してから回答すると、次の委譲の段が、足した反映の操作を成果物に結び付けて、課題を検証中へ進める。足さずに回答すると、同じ理由でもう一度保留にする。"
+}
+
 func integrationRefMissingQuestion() string {
 	return "統合先から反映先へ上げる依頼を始められない。この課題に統合先の識別が記録されていない。" +
 		"統合先を確かめてから回答するか、課題を取り下げる。回答すると、次の委譲の段が上げる依頼を始め直す（記録が無いままなら、もう一度保留にする）。"
@@ -246,8 +256,7 @@ func (s *Store) submitReflectReview(ctx context.Context, rep *ContractRunReport,
 	}
 	if noRelease {
 		// 毎回の状態の確認で黙って取りやめ続けないよう、オーナーへ見せる。
-		return s.holdChallengeForReflect(ctx, rep.ChallengeID, reflectFailedQuestion(
-			reflectNoReleaseOperationDetail), holdReasonReflectFailed)
+		return s.holdChallengeForReflect(ctx, rep.ChallengeID, reflectNoReleaseOperationQuestion(rep.ChallengeID, pr.URL), holdReasonReflectFailed)
 	}
 	return nil
 }
@@ -630,6 +639,3 @@ func reflectNotStartedDetail(rep *ContractRunReport) string {
 	}
 	return fmt.Sprintf("commands.reflect が、終わっていない契約の実行を始めなかった（%s・%s）。%s", runResultWord(rep.Result), contractStateWord(rep.State), rep.Error)
 }
-
-// reflectNoReleaseOperationDetail は、上げる依頼の成果物の承認できる反映の操作を作れなかったときの理由の文。
-const reflectNoReleaseOperationDetail = "この成果物の承認できる反映の操作を作れなかった（同じ成果物の反映の操作が、置き換え・差し戻し以外の理由で閉じている）。"

@@ -80,6 +80,10 @@ func TestStuckPaths_ADoneTaskAndAnotherRepositoryTaskAreNotStarted(t *testing.T)
 	if len(f.client.starts) != 0 {
 		t.Errorf("starts = %v, want none", f.client.starts)
 	}
+	// #906 項目 9: 理由の文は、何をそろえればよいかが読める言い方で、複数のリポジトリを示す。
+	if d := got[0].Detail; !strings.Contains(d, "1 つのリポジトリにそろえる") || !strings.Contains(d, "other-repo") {
+		t.Errorf("detail = %q, want the way to fix it and the repositories", d)
+	}
 }
 
 // 項目 8: 保留を作り損ねた停止の掃引は、タスクの単位で見る。ほかのタスクの後の保留が、このタスクの保留の作り損ねを隠さない。
@@ -185,5 +189,35 @@ func TestStuckPaths_UpRequestWithoutAnApprovableReleaseIsHeldNotVerified(t *test
 	}
 	if got := f.lastReason(t, id); got != string(holdReasonReflectFailed) {
 		t.Fatalf("reason = %q", got)
+	}
+}
+
+// #906 項目 8: 承認できる反映の操作を作れなかったときの問いは、回答の後に取れる道（取り下げる・手で反映の操作を足す）を書く。
+// 書いた道が通ることも確かめる（手で足した反映の操作を結び付けて、検証中へ進む）。
+func TestStuckPaths_NoReleaseOperationQuestionNamesTheWaysAndTheManualOperationWorks(t *testing.T) {
+	t.Parallel()
+	f, id := newUpFixture(t, upConnectorsJSON())
+	cid, _ := parseChallengeID(id)
+	f.setUpPR("main")
+	f.sqlExec(t, `INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at, closed_reason, closed_at)
+		VALUES (?, 'release', 's', ?, 'closed', 2, '2026-01-01T00:00:00.000Z', 'pr_closed', '2026-01-01T00:00:01.000Z')`, cid, upPRURL)
+	f.startUp(t)
+	out := upReviewOut([]string{"respond", "land"}, upArtsOK...)
+	f.readWith(t, out)
+	q := f.holdQuestionsOf(t, id)
+	for _, want := range []string{"flywheel withdraw " + id, "flywheel op add " + id + " --kind release --ref " + upPRURL, upPRURL} {
+		if !strings.Contains(q, want) {
+			t.Errorf("the question lacks %q:\n%s", want, q)
+		}
+	}
+	// 書いた道: 手で反映の操作を足し、回答で着手中へ戻った後の読みが、検証中へ進める。
+	ref := upPRURL
+	if _, err := f.s.CreateOperation(context.Background(), ChannelCLI, OperationInput{ChallengeID: id, Kind: "release", Summary: "手で足した", Ref: &ref}); err != nil {
+		t.Fatalf("op add: %v", err)
+	}
+	f.sqlExec(t, `UPDATE challenge SET status = 'in_progress' WHERE id = ?`, cid)
+	f.readWith(t, out)
+	if got := f.statusOf(t, id); got != StatusVerifying {
+		t.Fatalf("status after adding the operation by hand = %s, want verifying", got)
 	}
 }

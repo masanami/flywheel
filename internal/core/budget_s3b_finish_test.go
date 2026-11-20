@@ -147,7 +147,7 @@ func TestS3bQuestions_UseGlossaryWordsAndNoInternalValues(t *testing.T) {
 		{"reflectFailed/not started", reflectFailedQuestion(reflectNotStartedDetail(&ContractRunReport{Result: RunResultErrored, State: ContractStateFailed, Error: "エラーです"}))},
 		{"reflectFailed/timed out", reflectFailedQuestion(reflectNotStartedDetail(&ContractRunReport{Result: RunResultTimedOut, State: ContractStateRunning}))},
 		{"reflectFailed/ended", reflectFailedQuestion(reflectNotStartedDetail(&ContractRunReport{Result: RunResultSucceeded, State: ContractStateSucceeded, Summary: summary}))},
-		{"reflectFailed/no release op", reflectFailedQuestion(reflectNoReleaseOperationDetail)},
+		{"reflectFailed/no release op", reflectNoReleaseOperationQuestion("C-3", "https://github.com/o/r/pull/12")},
 	}
 	banned := []string{"接続ツール", "run", "PR", "既定ブランチ", "結果:", "状態:", "failed", "succeeded", "cancelled", "running", "errored", "timed_out", "launch_failed", "invalid_output", "budget_exhausted", "interrupted", "malformed"}
 	for _, c := range cases {

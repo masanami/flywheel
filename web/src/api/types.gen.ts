@@ -648,6 +648,8 @@ export interface ApprovalPlan {
 }
 
 export interface ApprovalPlanTask {
+  budget_impl_usd: number | null;
+  budget_review_usd: number | null;
   depends_on: string[];
   key: string;
   phase: string;

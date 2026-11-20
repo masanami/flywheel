@@ -87,14 +87,16 @@ func FromPlanTopics(ts []core.PlanTopicView) []PlanTopic {
 }
 
 // PlanTask は `show --plan --json` のタスク 1 件。id・status は承認の後だけ（承認の前は null）。depends_on は、
-// 承認の前は前提のタスクの key、承認の後は前提のタスクの ID。source は対応する取り込み元の子の external_key（対応しなければ null）。
+// 承認の前は前提のタスクの key、承認の後は前提のタスクの ID。budget_impl_usd・budget_review_usd はタスクの枠（計画が書いたときだけ。承認の後は増額を含む実効値。書いていなければ null）。source は対応する取り込み元の子の external_key（対応しなければ null）。
 type PlanTask struct {
-	DependsOn []string `json:"depends_on"`
-	ID        *string  `json:"id"`
-	Key       string   `json:"key"`
-	Source    *string  `json:"source"`
-	Status    *string  `json:"status"`
-	Title     string   `json:"title"`
+	BudgetImplUSD   *float64 `json:"budget_impl_usd"`
+	BudgetReviewUSD *float64 `json:"budget_review_usd"`
+	DependsOn       []string `json:"depends_on"`
+	ID              *string  `json:"id"`
+	Key             string   `json:"key"`
+	Source          *string  `json:"source"`
+	Status          *string  `json:"status"`
+	Title           string   `json:"title"`
 }
 
 // PlanOverview は `show --plan --json` の plan。budget_usd は実装の枠とレビュー対応の枠の合計（タスクが全部枠を持つ計画では、取りやめでないタスクの枠の合計〔済みのタスクを含む。承認の後は増額を含む実効値〕。それ以外は、計画が書いた額で、書いていない枠は宣言のサイズごとの既定。その版の予算の増額があれば置き換えた額。決められないとき null）。
@@ -122,7 +124,7 @@ type PlanOverviewResponse struct {
 func FromPlanView(p *core.PlanView) PlanOverviewResponse {
 	tasks := make([]PlanTask, 0, len(p.Tasks))
 	for _, t := range p.Tasks {
-		pt := PlanTask{DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Source: strOrNil(t.Source), Title: t.Title}
+		pt := PlanTask{BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD, DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Source: strOrNil(t.Source), Title: t.Title}
 		if t.ID != "" {
 			id, st := t.ID, string(t.Status)
 			pt.ID, pt.Status = &id, &st
