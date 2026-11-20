@@ -691,8 +691,8 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 	return s.beginContractRunForTask(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, nil, nil)
 }
 
-// beginContractRunForTask は契約のコマンド 1 回ぶんの run を記録する。start のときは周の上限を評価し、課題に
-// 終わっていない契約の run・run があれば ErrRunInProgress にする。
+// beginContractRunForTask は契約のコマンド 1 回ぶんの run を記録する。start のときは周の上限を評価し、そのタスク（タスクが
+// 無ければ課題）に終わっていない契約の run・run があれば ErrRunInProgress にする。
 //
 // taskID が非 nil（start のときは起動するタスク、status・resume・cancel のときは契約の run が結び付くタスク）なら、
 // run の行（kind=contract）の task_id と repo（タスクの対象リポジトリ）へ記録する。start のときは、pending のタスクを
@@ -716,8 +716,26 @@ func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID,
 			if cur.Status != StatusInProgress {
 				return errDelegationNotEligible
 			}
-			// 終わっていない契約の run のほか、保留に写し切れていない回収・失敗・中止も実行中として数える。
-			active, err := challengeHasActiveRun(ctx, tx, cid)
+			// 終わっていない契約の run のほか、保留に写し切れていない回収・失敗・中止も実行中として数える。起動するタスクが
+			// 決まっているときは、そのタスクの単位で見る（同じ課題の別のタスクの実行は妨げない。タスクに結び付かない実行との
+			// 重なりは insertRun が止める）。
+			var active bool
+			var err error
+			if taskID != nil {
+				active, err = taskHasActiveRun(ctx, tx, cid, *taskID)
+				if err == nil && !active {
+					active, err = taskLessHasActiveRun(ctx, tx, cid)
+				}
+				// レビュー待ちの契約の実行は「実行中」に数えないが、終わっていない契約の実行が残るタスクを、もう一度 start しない
+				// （外部の実行を二重に作らず、記録が一意の索引に当たって外部の実行だけが残るのを防ぐ）。
+				if err == nil && !active {
+					var open int
+					err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND task_id = ? AND ended_at IS NULL`, cid, *taskID).Scan(&open)
+					active = open > 0
+				}
+			} else {
+				active, err = challengeHasActiveRun(ctx, tx, cid)
+			}
 			if err != nil {
 				return err
 			}
@@ -1299,6 +1317,16 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	}
 	var reports []ContractRunReport
 	for _, row := range rows {
+		// 同じタスク（タスクに結び付かない実行どうしを含む）に、終わっていない実行の記録（タスクの検証の実行など）が開いている間は、
+		// 何も呼ばずにこの 1 件を飛ばす（次の機会にやり直す）。同じ課題の別のタスクの実行は飛ばさない。
+		busy, err := s.sameTaskRunOpen(ctx, row)
+		if err != nil {
+			firstErr = firstErrOr(firstErr, err)
+			continue
+		}
+		if busy {
+			continue
+		}
 		connector, err := findCLIConnector(in.ConnDecl, row.ConnectorID)
 		var rep *ContractRunReport
 		if err == nil {
@@ -1321,6 +1349,24 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	return reports, firstErr
 }
 
+// sameTaskRunOpen は、契約の実行 row と同じタスク（row がタスクに結び付かなければ、課題のタスクに結び付かない実行）に、
+// 終わっていない実行の記録（run）があるか（insertRun が止める重なりと同じ条件）。
+func (s *Store) sameTaskRunOpen(ctx context.Context, row *contractRunRow) (bool, error) {
+	var n int
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		// insertRun が止める重なりと同じ条件にする（タスクに結び付く行は、同じタスクとタスクに結び付かない実行。タスクに結び付かない行は、
+		// 課題のどの終わっていない実行とも）。
+		q := `SELECT COUNT(*) FROM run WHERE challenge_id = ? AND result IS NULL`
+		args := []any{row.ChallengeID}
+		if row.TaskID != nil {
+			q += ` AND (task_id = ? OR task_id IS NULL)`
+			args = append(args, *row.TaskID)
+		}
+		return tx.QueryRowContext(ctx, q, args...).Scan(&n)
+	})
+	return n > 0, classifyReadWriteErr(err)
+}
+
 // reclaimedContractStartWhere は、回収された（interrupted）か回収以外で失敗した契約の start の run で、まだ保留に
 // 写していないものを選ぶ条件（run を r、課題を c と別名にした副問い合わせの本体）。start の run は、契約の run（contract_run）を
 // 作る前に回収されると contract_run を持たない。status の run との区別は「その課題の、先に始まった契約の run が
@@ -1329,7 +1375,7 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 // 終わらせない。この条件は成功以外の run だけを選ぶから。課題が着手中でなくなっていれば（保留・取り下げ・完了）選ばない。
 const reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND c.status = 'in_progress'
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.start_run_id = r.id)
-	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND k.start_run_id < r.id
+	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND COALESCE(k.task_id, 0) = COALESCE(r.task_id, 0) AND k.start_run_id < r.id
 		AND (k.ended_at IS NULL OR k.ended_at > r.started_at))
 	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.run_id = r.id)`
 

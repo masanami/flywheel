@@ -134,7 +134,7 @@ func lastReleaseAttemptID(ctx context.Context, tx *sql.Tx, cid int64) (int64, er
 // 終わっていないタスクの実行が無ければ（無かった・読みが終わった記録にした）通す。
 func taskRunUnchangedInTx(ctx context.Context, tx *sql.Tx, cid int64, mark *taskRunMark) error {
 	cr, err := scanContractRun(tx.QueryRowContext(ctx,
-		contractRunSelect+` WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, cid, contractRunKindTask))
+		contractRunSelect+` WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL AND `+releaseStageRunWhere+` ORDER BY id LIMIT 1`, cid, contractRunKindTask))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}

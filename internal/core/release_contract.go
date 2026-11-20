@@ -52,10 +52,14 @@ func (r *releaseRun) route() string {
 	return ReleaseRouteWaitingRun
 }
 
+// releaseStageRunWhere は、反映の段が扱う契約の実行（contract_run）の条件。反映の依頼（kind が reflect）と、統合先を使わない
+// 課題のタスクの実行。統合先を使う課題のタスクの実行は、委譲の段の先頭の状態の確認が進めるので、反映の段は扱わない。
+const releaseStageRunWhere = `(kind = 'reflect' OR NOT EXISTS (SELECT 1 FROM challenge ch WHERE ch.id = contract_run.challenge_id AND ch.uses_integration = 1))`
+
 // loadOpenRunInTx は課題 cid の、終わっていない契約の実行（課題ごとに高々 1 本。無ければ nil）を、取り込み元の結び付き・
 // 承認済みの計画の版つきで読む。対応するかは決めない（corresponds は偽）。
 func loadOpenRunInTx(ctx context.Context, tx *sql.Tx, cid int64) (*releaseRun, error) {
-	cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, cid))
+	cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL AND `+releaseStageRunWhere+` ORDER BY id LIMIT 1`, cid))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -131,7 +135,7 @@ func taskRunImportedRef(ctx context.Context, tx *sql.Tx, cr *contractRunRow, ref
 func (s *Store) closeHeldEndWithoutOwner(ctx context.Context, challengeID int64) (bool, error) {
 	closed := false
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
-		cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, challengeID))
+		cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL AND `+releaseStageRunWhere+` ORDER BY id LIMIT 1`, challengeID))
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

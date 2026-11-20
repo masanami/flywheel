@@ -42,7 +42,7 @@ func TestPollContractRuns_ObserveWaitIsNotResumedWhileTheOwnerHold(t *testing.T)
 	}
 }
 
-// 2・6(a): 検証中・完了の間も、開いたレビュー待ちの run は実行中の数え・同時委譲数に入らない（着手中は入る）。
+// 2・6(a)・AC-30: 開いたレビュー待ちの run は、課題の状態によらず、実行中の数え・同時委譲数に入らない（着手中でも入らない）。
 func TestContractReviewWait_IsNotCountedAsActiveWhileVerifyingOrDone(t *testing.T) {
 	t.Parallel()
 	f := newReviewFlowFixture(t)
@@ -53,7 +53,7 @@ func TestContractReviewWait_IsNotCountedAsActiveWhileVerifyingOrDone(t *testing.
 		st     Status
 		active bool
 	}{
-		{StatusVerifying, false}, {StatusAwaitingCompletionApproval, false}, {StatusDone, false}, {StatusInProgress, true},
+		{StatusVerifying, false}, {StatusAwaitingCompletionApproval, false}, {StatusDone, false}, {StatusInProgress, false},
 	} {
 		f.setStatus(t, tc.st)
 		var got bool
