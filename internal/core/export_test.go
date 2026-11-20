@@ -612,3 +612,28 @@ func TestImport_TaskTablesRowsSurviveTheRoundTrip(t *testing.T) {
 		}
 	})
 }
+
+// 版 28 で足した列（run_artifact.role・contract_run の 8 列）の値は、書き出し→空のストアへの再構築で同じになる。
+func TestImport_S3aColumnsSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	src, _ := filledStore(t)
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+		t.Fatal(err)
+	}
+	q := []string{
+		`SELECT kind || '|' || COALESCE(operation_id, 'NULL') || '|' || requested_options || '|' || content_ref || '|' || facts || '|' ||
+			facts_unmet_count || '|' || land_ref || '|' || land_delivered FROM contract_run WHERE id = 1`,
+		`SELECT role FROM run_artifact WHERE id = 1`,
+	}
+	want := []string{`reflect|1|["ready","respond"]|abc123|{"k":"v"}|2|o/r#3|1`, `integration`}
+	for i, query := range q {
+		var got string
+		if err := dst.db.Read(context.Background(), func(tx *sql.Tx) error { return tx.QueryRow(query).Scan(&got) }); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		if got != want[i] {
+			t.Errorf("%s = %q, want %q", query, got, want[i])
+		}
+	}
+}
