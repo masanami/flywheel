@@ -590,6 +590,9 @@ func (s *Store) VerifyChallenge(ctx context.Context, ch Channel, id string, in V
 	}
 
 	return s.transition(ctx, ch, id, op, func(ctx context.Context, tc *transitionCtx) error {
+		if err := rejectHandVerificationForIntegration(ctx, tc); err != nil {
+			return err
+		}
 		// 検証中のタスクがちょうど 1 個なら、完了の検証の判断点（J5）と同じ結果にする（保留の結び付けは、保留を作る前に決める）。
 		if err := verifyTaskByHandInTransition(ctx, tc, result); err != nil {
 			return err

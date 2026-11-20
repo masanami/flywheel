@@ -334,12 +334,14 @@ const (
 	holdReasonLandUnavailable   holdReason = "land_unavailable"
 	holdReasonContentRefInvalid holdReason = "content_ref_invalid"
 	holdReasonFactsUnmet        holdReason = "facts_unmet"
+	// holdReasonTasksBlocked は、統合先を使う課題が、前提のタスクの取りやめで進めようが無い保留（発生は作らない）。
+	holdReasonTasksBlocked holdReason = "tasks_blocked"
 )
 
-// persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない 3 つの理由だけが書く
+// persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない 3 つの理由と、進めようが無い理由だけが書く
 // （ほかの保留の hold.reason は NULL）。
 func (r holdReason) persisted() bool {
-	return r == holdReasonLandUnavailable || r == holdReasonContentRefInvalid || r == holdReasonFactsUnmet
+	return r == holdReasonLandUnavailable || r == holdReasonContentRefInvalid || r == holdReasonFactsUnmet || r == holdReasonTasksBlocked
 }
 
 // occurrenceKind は保留の理由に対応する発生の種類。発生を作らない理由は false。

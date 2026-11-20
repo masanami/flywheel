@@ -73,6 +73,7 @@ func TestManualTask_AC194_SubmitLeavesTwoTasksUntouched(t *testing.T) {
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "two", "P1", twoTaskPlanSpec())
 	cid, _ := parseChallengeID(id)
+	setUsesIntegrationForTest(t, f.s, cid, false) // 統合先を使う課題は、手の submit を断る
 	before := taskStatusMap(t, f.s, cid)
 	if len(before) != 2 {
 		t.Fatalf("tasks = %v, want two", before)
@@ -175,6 +176,7 @@ func TestManualTask_TwoVerifyingTasksAreLeftUntouchedAndTheHoldIsUntied(t *testi
 		f := newDelegateFixture(t)
 		id := f.newInProgress(t, "two", "P1", twoTaskPlanSpec())
 		cid, _ := parseChallengeID(id)
+		setUsesIntegrationForTest(t, f.s, cid, false) // 統合先を使う課題は、手の submit・verify を断る
 		submitByHand(t, f.s, id)
 		for key := range taskStatusMap(t, f.s, cid) {
 			setTaskStatusRaw(t, f.s, cid, key, TaskStatusVerifying)
@@ -276,4 +278,14 @@ func coretestRows(t *testing.T, s *Store, q string, args ...any) [][]any {
 		t.Fatalf("%s: %v", q, err)
 	}
 	return out
+}
+
+// setUsesIntegrationForTest は課題 cid の uses_integration を v にする。
+func setUsesIntegrationForTest(t *testing.T, s *Store, cid int64, v bool) {
+	t.Helper()
+	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		return setChallengeUsesIntegration(context.Background(), tx, cid, &v)
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

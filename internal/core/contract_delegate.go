@@ -196,6 +196,8 @@ type ContractStartInput struct {
 	// Judgment は J4 の起動の実行者。非 nil なら、start の直後に親の答えを待っていても保留にせず、次の状態の読みで J4 へ回す
 	// （nil ならオーナーの保留へ写す）。
 	Judgment JudgmentInvoker
+	// TaskID は起動するタスクの内部整数 ID。0 なら、起動できるタスクがちょうど 1 個の課題として、そのタスクを起動する。
+	TaskID int64
 	// OnRunInserted は start の run をストアに記録した直後に呼ぶ（nil なら呼ばない。同時委譲数の数えの二重計上を避けるため）。
 	OnRunInserted func()
 }
@@ -573,17 +575,15 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 			planVersion = &v
 			plan = p
 		}
-		tasks, err = loadLaunchableTasks(ctx, tx, cid)
-		if err != nil {
-			return err
-		}
-		return nil
+		tasks, err = loadTasksToLaunch(ctx, tx, cid, in.TaskID)
+		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
 	// 起動の前に、J2 と同じ関数で承認済みの計画の操作を検査する（J2 の後に宣言が変わっても、検査していない引数で起動しない）。
-	// 委譲は起動できるタスクがちょうど 1 個の課題だけを起動する。対象のリポジトリと操作はタスクの行のもの。
+	// 起動するタスクはちょうど 1 個（in.TaskID が 0 なら、起動できるタスクがちょうど 1 個の課題）。対象のリポジトリと操作は
+	// タスクの行のもの。
 	if len(tasks) != 1 {
 		return nil, fmt.Errorf("%w: the challenge does not have exactly one launchable task", ErrValidation)
 	}

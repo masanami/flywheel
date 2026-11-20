@@ -272,65 +272,127 @@ func loadApprovedPlan(ctx context.Context, tx *sql.Tx, challengeID int64) (appro
 // 計画の承認が済んでいるのに計画を引けない（承認に計画の版が無い・版の計画が無い・構造化した
 // 出力が無い）課題は、黙って除外せず skipped に理由つきで返す。
 func selectDelegationTargets(ctx context.Context, tx *sql.Tx) (out []int64, skipped []NotStarted, err error) {
+	t, err := selectDelegationTargetsFor(ctx, tx, nil)
+	return t.Targets, t.Skipped, err
+}
+
+// delegationTargets は selectDelegationTargetsFor の結果。
+type delegationTargets struct {
+	// Targets は委譲の対象の課題の内部整数 ID（優先度→ID の昇順）。
+	Targets []int64
+	// Skipped は対象から外した課題・タスクの、起動しなかった理由。
+	Skipped []NotStarted
+	// Blocked は進めようが無く、保留にする課題（課題の ID と保留の問い）。
+	Blocked []blockedChallenge
+}
+
+// blockedChallenge は tasks_blocked の保留にする課題。
+type blockedChallenge struct {
+	ChallengeID string
+	Question    string
+}
+
+// selectDelegationTargetsFor は selectDelegationTargets の、委譲先の宣言 conn（nil なら、委譲先の形による判定をしない）を
+// 受け取り、進めようが無い課題も返す版。統合先を使う課題は、終わっていない実行をタスクの単位で見る（課題の単位では見ない）。
+func selectDelegationTargetsFor(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclaration) (out delegationTargets, err error) {
 	challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusInProgress)
 	if err != nil {
-		return nil, nil, err
+		return out, err
 	}
 	deps, err := evaluateDependencies(ctx, tx)
 	if err != nil {
-		return nil, nil, err
+		return out, err
 	}
 	for _, ch := range challenges {
 		cid, ok := parseChallengeID(ch.ID)
 		if !ok {
 			continue
 		}
-		active, err := challengeHasActiveRun(ctx, tx, cid)
+		integ, err := challengeUsesIntegration(ctx, tx, cid)
 		if err != nil {
-			return nil, nil, err
+			return out, err
 		}
-		if active {
-			continue
+		if integ == nil || !*integ {
+			active, err := challengeHasActiveRun(ctx, tx, cid)
+			if err != nil {
+				return out, err
+			}
+			if active {
+				continue
+			}
 		}
 		ex, err := challengeAutoExclusion(ctx, tx, cid)
 		if err != nil {
-			return nil, nil, err
+			return out, err
 		}
 		if ex != nil {
-			skipped = append(skipped, *ex)
+			out.Skipped = append(out.Skipped, *ex)
 			continue
 		}
 		p, gap, detail, err := lookupApprovedPlan(ctx, tx, cid)
 		if err != nil {
-			return nil, nil, err
+			return out, err
 		}
 		switch {
 		case gap == planGapNoApproval:
 			continue
 		case gap != planGapNone:
-			skipped = append(skipped, NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable, Detail: detail})
+			out.Skipped = append(out.Skipped, NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable, Detail: detail})
 			continue
 		case !p.HasSpec:
-			skipped = append(skipped, NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable,
+			out.Skipped = append(out.Skipped, NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable,
 				Detail: "承認済みの計画に構造化した出力が無い（人が登録した計画は委譲できない）"})
 			continue
 		}
 		if ns := dependencyNotStarted(deps, ch.ID, cid); ns != nil {
-			skipped = append(skipped, *ns)
+			out.Skipped = append(out.Skipped, *ns)
 			continue
 		}
-		// 起動できるタスクの数と統合先の使用（計画の検査より先。計画の構造化した出力ではなくタスクの行で数える）。
-		_, ns, err := launchGate(ctx, tx, ch.ID, cid)
+		// 起動できるタスクと統合先の使用（計画の検査より先。計画の構造化した出力ではなくタスクの行で決める）。
+		sel, err := selectLaunchTasks(ctx, tx, conn, ch.ID, cid)
 		if err != nil {
-			return nil, nil, err
+			return out, err
 		}
-		if ns != nil {
-			skipped = append(skipped, *ns)
+		out.Skipped = append(out.Skipped, sel.NotStarted...)
+		if sel.Blocked != "" {
+			out.Blocked = append(out.Blocked, blockedChallenge{ChallengeID: ch.ID, Question: sel.Blocked})
+			out.Skipped = append(out.Skipped, tasksBlockedNotStarted(ch.ID))
 			continue
 		}
-		out = append(out, cid)
+		if len(sel.Tasks) > 0 {
+			out.Targets = append(out.Targets, cid)
+		}
 	}
-	return out, skipped, nil
+	return out, nil
+}
+
+// tasksBlockedNotStarted は、進めようが無く保留にした課題の、起動しなかった理由。
+func tasksBlockedNotStarted(challengeID string) NotStarted {
+	return NotStarted{ChallengeID: challengeID, Reason: NotStartedNoTasks, Detail: "進めるタスクが無いので、課題を保留にした"}
+}
+
+// holdTasksBlocked は課題が着手中なら、進めようが無いことを理由（tasks_blocked）に、保留にする（原因の run は無い。
+// 保留はどのタスクにも結び付けない）。着手中でなければ何もしない（偽）。
+func (s *Store) holdTasksBlocked(ctx context.Context, challengeID, question string) (bool, error) {
+	actor, err := s.resolveActor()
+	if err != nil {
+		return false, err
+	}
+	_, err = s.runTransition(ctx, runTransitionParams{
+		actor: actor, channel: ChannelInvoker, verification: VerificationNone, id: challengeID, op: OpHold, preceding: NoStatus,
+	}, func(ctx context.Context, tc *transitionCtx) error {
+		if tc.current.Status != StatusInProgress {
+			return errReconcileNotEligible
+		}
+		return s.insertHoldWithOccurrence(ctx, tc, question, holdReasonTasksBlocked, "")
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // fillInvocation は操作の invocation の差し込み（閉集合の 4 つ）を埋める。
@@ -363,6 +425,13 @@ func fillInvocationWith(invocation string, challengeID string, sb *sourceBinding
 // loadDelegationContext は ch の委譲の前提を読む。承認済みの計画に構造化した出力が無い・
 // 宣言と突き合わせて不正なら ErrValidation（人が登録した計画は委譲できない）。
 func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch Challenge) (*delegationContext, error) {
+	return s.loadDelegationContextForTask(ctx, in, ch, 0)
+}
+
+// loadDelegationContextForTask は loadDelegationContext の、起動するタスク（内部整数 ID）を決める版。taskID が 0 なら、
+// 起動できるタスクがちょうど 1 個の課題として、そのタスクを起動する。0 でなければ、そのタスクを起動する
+// （課題のタスクで、起動できる状態〔pending・in_progress〕でなければ ErrValidation）。
+func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInput, ch Challenge, taskID int64) (*delegationContext, error) {
 	cid, ok := parseChallengeID(ch.ID)
 	if !ok {
 		return nil, ErrNotFound
@@ -389,7 +458,7 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		if !ok {
 			return nil
 		}
-		if tasks, err = loadLaunchableTasks(ctx, tx, cid); err != nil {
+		if tasks, err = loadTasksToLaunch(ctx, tx, cid, taskID); err != nil {
 			return err
 		}
 		if dc.Holds, err = loadHolds(ctx, tx, cid); err != nil {
@@ -452,7 +521,7 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	if !ok || validated.Verdict != J2VerdictPlan {
 		return nil, fmt.Errorf("%w: the approved plan does not match the current declarations", ErrValidation)
 	}
-	// 委譲は起動できるタスクがちょうど 1 個の課題だけを起動する（複数のタスクの実行は後の区切りで入れる）。
+	// 起動するタスクはちょうど 1 個（タスクを決めない呼び出しは、起動できるタスクがちょうど 1 個の課題）。
 	// 対象のリポジトリと操作はタスクの行のもの。
 	if len(tasks) != 1 {
 		return nil, fmt.Errorf("%w: the challenge does not have exactly one launchable task", ErrValidation)
@@ -628,6 +697,10 @@ func (s *Store) runDelegationAfterPoll(ctx context.Context, in DelegateInput) (*
 		cid, _ := parseChallengeID(ch.ID)
 		var active bool
 		err = s.db.Read(ctx, func(tx *sql.Tx) error {
+			// 統合先を使う課題は、終わっていない実行をタスクの単位で見る（起動できるタスクを選ぶ所で見る）。
+			if integ, err := challengeUsesIntegration(ctx, tx, cid); err != nil || (integ != nil && *integ) {
+				return err
+			}
 			a, err := challengeHasActiveRun(ctx, tx, cid)
 			active = a
 			return err
@@ -655,15 +728,20 @@ func (s *Store) runDelegationAfterPoll(ctx context.Context, in DelegateInput) (*
 		return s.runSingleDelegation(ctx, in, *ch)
 	}
 
-	var targetIDs []int64
-	var skipped []NotStarted
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		ids, sk, err := selectDelegationTargets(ctx, tx)
-		targetIDs, skipped = ids, sk
+	var selected delegationTargets
+	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		selected, err = selectDelegationTargetsFor(ctx, tx, in.ConnDecl)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
+	}
+	targetIDs, skipped := selected.Targets, selected.Skipped
+	// 進めようが無い課題は、保留にする（理由 tasks_blocked）。
+	for _, b := range selected.Blocked {
+		if _, err := s.holdTasksBlocked(ctx, b.ChallengeID, b.Question); err != nil {
+			return nil, err
+		}
 	}
 	// 完了の照合が取得の失敗で終わった課題は、委譲の対象から外し、子を起動せず照合だけをやり直す
 	// （#487。優先度→ID の順）。
@@ -740,7 +818,7 @@ func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *Judgment
 	if jc != nil && jc.RateLimited() {
 		return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedRateLimited}, nil
 	}
-	dc, err := s.loadDelegationContext(ctx, in, ch)
+	dc, err := s.loadDelegationContextForTask(ctx, in, ch, run.task())
 	if err != nil {
 		return nil, nil, err
 	}

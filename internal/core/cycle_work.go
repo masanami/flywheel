@@ -47,7 +47,7 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 	}
 
 	var runTargets []int64
-	var contractRuns int
+	var contractRuns, blockedRuns int
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		ids, _, err := selectJ1AutoTargets(ctx, tx)
 		if err != nil {
@@ -84,9 +84,11 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		st.Verify = len(verify)
-		if runTargets, _, err = selectDelegationTargets(ctx, tx); err != nil {
+		picked, err := selectDelegationTargetsFor(ctx, tx, conn)
+		if err != nil {
 			return err
 		}
+		runTargets, blockedRuns = picked.Targets, len(picked.Blocked)
 		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE ended_at IS NULL`).Scan(&contractRuns)
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -102,7 +104,7 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 		if err != nil {
 			return nil, err
 		}
-		st.Run = n + contractRuns
+		st.Run = n + contractRuns + blockedRuns
 	}
 	return &CycleWork{Total: st.sum(), Stages: st}, nil
 }
@@ -144,8 +146,8 @@ func (s *Store) countImprove(ctx context.Context, tx *sql.Tx, agent *AgentDeclar
 // 何も進まないと LLM を呼ばずに決まるもの（plan_unavailable・run_budget）を除いた件数。
 // 完了の照合のやり直し（子を起動しない）は進むものとして数える。連続の失敗の上限・やり直しの上限に達した課題も
 // 数える（委譲の段が、その課題を人間対応待ちにしてオーナーへ見せる。数えから外すと、ほかに進むものが無いときに
-// サイクルが始まらず、課題が着手中のまま、どこにも出ずに止まる）。判定は委譲の段と同じ関数（loadPlanCandidate・
-// loadDelegationContext・implBudgetExhausted）で行い、書き込みをしない。
+// サイクルが始まらず、課題が着手中のまま、どこにも出ずに止まる）。判定は委譲の段と同じ関数（loadPlanCandidates〔起動するタスクごとに数える〕・
+// loadDelegationContextForTask・implBudgetExhausted）で行い、書き込みをしない。
 func (s *Store) countRunnableDelegations(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, targets []int64) (int, error) {
 	in := DelegateInput{AgentDecl: agent, ConnDecl: conn}
 	retries, rest, err := s.splitReconcileRetries(ctx, targets)
@@ -154,7 +156,7 @@ func (s *Store) countRunnableDelegations(ctx context.Context, agent *AgentDeclar
 	}
 	n := len(retries)
 	for _, cid := range rest {
-		_, ok, _, err := s.loadPlanCandidate(ctx, in, cid)
+		ones, ok, _, err := s.loadPlanCandidates(ctx, in, cid)
 		if err != nil {
 			return 0, err
 		}
@@ -165,18 +167,21 @@ func (s *Store) countRunnableDelegations(ctx context.Context, agent *AgentDeclar
 		if err != nil {
 			return 0, err
 		}
-		dc, err := s.loadDelegationContext(ctx, in, *ch)
-		if err != nil {
-			if errors.Is(err, ErrStoreError) {
-				return 0, err
+		// 起動するタスクごとに数える。
+		for _, one := range ones {
+			dc, err := s.loadDelegationContextForTask(ctx, in, *ch, one.cand.TaskSeq)
+			if err != nil {
+				if errors.Is(err, ErrStoreError) {
+					return 0, err
+				}
+				n++ // 読み切れない理由は多めに数える
+				continue
 			}
-			n++ // 読み切れない理由は多めに数える
-			continue
+			if !dc.advancesWhenTheStageRuns() {
+				continue // run_budget（状況の「予算切れ」に出る。サイクルを回しても変わらない）
+			}
+			n++
 		}
-		if !dc.advancesWhenTheStageRuns() {
-			continue // run_budget（状況の「予算切れ」に出る。サイクルを回しても変わらない）
-		}
-		n++
 	}
 	return n, nil
 }
