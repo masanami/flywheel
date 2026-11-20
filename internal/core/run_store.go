@@ -577,6 +577,20 @@ func loadActiveRunByChallengeID(ctx context.Context, tx *sql.Tx, challengeID int
 	return r, nil
 }
 
+// loadActiveRunByChallengeTask は、課題 challengeID のタスク taskID の終わっていない run か、タスクに結び付かない
+// 終わっていない run（task_id が空）を返す。無ければ nil。別のタスクの run は見ない。
+func loadActiveRunByChallengeTask(ctx context.Context, tx *sql.Tx, challengeID, taskID int64) (*runRow, error) {
+	row := tx.QueryRowContext(ctx, runSelectColumns+" WHERE challenge_id = ? AND result IS NULL AND (task_id IS NULL OR task_id = ?) LIMIT 1", challengeID, taskID)
+	r, err := scanRunRow(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
 // updateRunEndInput は updateRunEnd の入力。Result は必須（run を終了させる
 // 呼び出しであり、閉集合の値でなければならない）。CostUSD・
 // ReportedTotalCostUSD は nil なら NULL のまま。CostSource・Output・Error は

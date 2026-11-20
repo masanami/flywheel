@@ -464,3 +464,107 @@ func TestJ5Task_AC226_NonIntegrationChallengeKeepsS3aBehavior(t *testing.T) {
 		t.Fatalf("task = %s, want done", got)
 	}
 }
+
+// openRunFor は、タスク taskID（nil なら記録の無い実行）の、終わっていない契約のコマンドの実行を 1 本足す。
+func (f *reviewFlowFixture) openRunFor(t *testing.T, taskID *int64) {
+	t.Helper()
+	cidInt, _ := parseChallengeID(f.cid)
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		now := time.Now()
+		_, err := insertRun(context.Background(), tx, cidInt, insertRunInput{Kind: runKindContract, ChallengeVersion: 1, TaskID: taskID,
+			SessionID: "55555555-5555-4555-8555-555555555555", PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now, MaxBudgetUSD: 1, BudgetBucket: budgetBucketImpl})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 終わっていない実行（同じタスクの契約のコマンド・タスクの記録の無い実行）があるあいだ、そのタスクは対象にしない。
+// 同じ課題のほかのタスクの終わっていない実行は、このタスクの対象を妨げない。
+func TestJ5TaskTarget_UnfinishedRunKeepsTheTaskOutOfTargets(t *testing.T) {
+	t.Parallel()
+	for name, taskScoped := range map[string]bool{"same task": true, "run without a task": false} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newTaskVerifyFixture(t)
+			f.setVerdict("met")
+			var tid *int64
+			if taskScoped {
+				v := f.count(t, `SELECT id FROM task`)
+				tid = &v
+			}
+			f.openRunFor(t, tid)
+			res, err := f.verifyTasks(t, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Items) != 0 || len(f.j5.j5Runs(t)) != 0 {
+				t.Fatalf("items = %v, J5 runs = %d, want none while a run is unfinished", res.Items, len(f.j5.j5Runs(t)))
+			}
+		})
+	}
+	t.Run("another task's run does not block", func(t *testing.T) {
+		t.Parallel()
+		f := newTaskVerifyFixture(t)
+		f.addSecondVerifyingTask(t, "")
+		f.setVerdict("met")
+		other := f.count(t, `SELECT id FROM task WHERE key = 'second'`)
+		f.openRunFor(t, &other)
+		res, err := f.verifyTasks(t, nil)
+		if err != nil || len(res.Items) != 1 {
+			t.Fatalf("items = %v err = %v, want only the first task verified", res, err)
+		}
+		if ids := f.j5RunTaskIDs(t); len(ids) != 1 || ids[0].Int64 == other {
+			t.Fatalf("J5 run task_ids = %v, want the task without an unfinished run", ids)
+		}
+	})
+}
+
+// 検証中でないタスク（着手中）は、契約の実行があっても対象にしない。
+func TestJ5TaskTarget_TaskNotVerifyingIsNotTargeted(t *testing.T) {
+	t.Parallel()
+	f := newTaskVerifyFixture(t)
+	f.sql(t, `UPDATE task SET status = 'in_progress'`)
+	f.setVerdict("met")
+	res, err := f.verifyTasks(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 0 || len(f.j5.j5Runs(t)) != 0 {
+		t.Fatalf("items = %v, J5 runs = %d, want none", res.Items, len(f.j5.j5Runs(t)))
+	}
+}
+
+// 書く直前に、タスクの最後の契約の実行が別の行になっていたら（中身の識別が同じでも）、結果を捨てる。
+func TestJ5TaskResult_IsDiscardedWhenTheLatestContractRunIsAnotherRow(t *testing.T) {
+	t.Parallel()
+	for _, verdict := range []string{"met", "not_met", "uncertain"} {
+		t.Run(verdict, func(t *testing.T) {
+			t.Parallel()
+			f := newTaskVerifyFixture(t)
+			f.setVerdict(verdict)
+			f.j5.j5.onInvoke = func(_ JudgmentLaunchInput) {
+				f.sql(t, `UPDATE contract_run SET ended_at = observed_at`) // 終わっていない実行は 1 本だけ（一意の索引）
+				f.sql(t, `INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, cost_usd, max_budget_usd,
+					started_at, observed_at, task_id, requested_kind, requested_decider, content_ref, kind)
+					SELECT challenge_id, connector_id, 'ext-new', start_run_id, 'waiting', 'new', 0, max_budget_usd, started_at, observed_at, task_id, requested_kind, requested_decider, content_ref, kind
+					FROM contract_run ORDER BY id DESC LIMIT 1`)
+			}
+			res, err := f.verifyTasks(t, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, v := range f.verifiedRefs(t) {
+				if v != "<null>" {
+					t.Fatalf("verified_ref = %v, want nothing written", f.verifiedRefs(t))
+				}
+			}
+			if n := f.count(t, `SELECT COUNT(*) FROM hold`); n != 0 {
+				t.Fatalf("holds = %d, want 0", n)
+			}
+			if len(res.Items) != 1 || res.Items[0].Status != nil {
+				t.Fatalf("items = %+v, want one item without a written status", res.Items)
+			}
+		})
+	}
+}

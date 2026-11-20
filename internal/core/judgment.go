@@ -372,12 +372,24 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 			// 終了していない run を持つ課題は、予算の評価より先に
 			// ErrRunInProgress にする（予算の不足と取り違えない）。
 			if !noChallenge {
-				active, err := loadActiveRunByChallengeID(ctx, tx, cid)
-				if err != nil {
-					return err
-				}
-				if active != nil {
-					return errActiveRunExists
+				if in.TaskID != nil {
+					// タスクの単位の実行（タスクの検証）は、そのタスクの終わっていない実行と、タスクに結び付かない実行とだけ重ならない
+					// （別のタスクの実行とは重ならない。同じ課題・タスクの組の一意の索引が、書き込みの時点で最後の砦になる）。
+					a, err := loadActiveRunByChallengeTask(ctx, tx, cid, *in.TaskID)
+					if err != nil {
+						return err
+					}
+					if a != nil {
+						return errActiveRunExists
+					}
+				} else {
+					active, err := loadActiveRunByChallengeID(ctx, tx, cid)
+					if err != nil {
+						return err
+					}
+					if active != nil {
+						return errActiveRunExists
+					}
 				}
 			}
 			cyid, ok := parseCycleID(*in.CycleID)
