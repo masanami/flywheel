@@ -187,7 +187,7 @@ func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int
 		w := releaseOutcomeWrite{
 			opID: opID, challengeID: row.ChallengeID, attemptID: attempt.ID, version: row.Version,
 			result: j.result, approvedHead: approvedHead, observedHead: j.observedHead,
-			mergeCommit: j.mergeCommit, detail: j.detail, trigger: opts.Trigger, at: rec.at, cycleID: cycleID,
+			mergeCommit: j.mergeCommit, detail: appendDetail(j.detail, j.cancelNote), trigger: opts.Trigger, at: rec.at, cycleID: cycleID,
 		}
 		// 状態が変わっていれば（別の経路で取り消された等）、楽観ロックで失敗させる。
 		cur, err := loadOperationRow(ctx, tx, opID)
@@ -204,7 +204,7 @@ func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int
 			}
 			if prior+1 >= limit {
 				w.result = ExecutionResultLimitReached
-				w.detail = string(j.result)
+				w.detail = appendDetail(string(j.result), j.cancelNote)
 				class = ExecutionClassCancel
 			}
 		}

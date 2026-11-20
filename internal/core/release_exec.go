@@ -284,6 +284,10 @@ type releaseJudgment struct {
 	route string
 	// landDeliveredRunID が 0 でないとき、結果を書く書き込みで、その契約の実行の「入れてよい」が届いた記録（land_delivered）を真にする。
 	landDeliveredRunID int64
+	// run は反映の操作の課題の終わっていない契約の実行（judgeRelease が入れる。無ければ nil）。cancelNote は、連続の回数の上限で取り消すとき、
+	// 対応する反映の依頼を取り消した結果の文（試行の記録の詳細に足す）。
+	run        *releaseRun
+	cancelNote string
 }
 
 func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExecOptions) (*ReleaseExecItem, *NotStarted, error) {
@@ -371,6 +375,14 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 	}
 
 	j, err := s.judgeRelease(ctx, row, approvedRow, opts)
+	var notStartedErr *releaseNotStartedError
+	if errors.As(err, &notStartedErr) {
+		// 同時に走らせる数・サイクルの費用の上限で、反映の依頼を始めなかった。開いた試行の行を消して（試行の行を増やさない）、承認を保つ。
+		if derr := s.db.Write(ctx, func(tx *sql.Tx) error { return deleteOpenOperationExecution(ctx, tx, attempt.ID) }); classifyReadWriteErr(derr) != nil {
+			s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
+		}
+		return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID), Reason: notStartedErr.reason}, nil
+	}
 	if errors.Is(err, errReleaseContractBusy) {
 		// 契約のコマンドを呼ぶための実行の記録を作れない。開いた試行の行を消して（試行の行を増やさない）、次の反映の段でやり直す。
 		detail := ""
@@ -419,6 +431,10 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID), Reason: NotStartedWaitingOutside}, nil
 	}
 
+	if j, err = s.cancelReflectRunOnLimit(ctx, opts, opID, j); err != nil {
+		s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
+		return nil, nil, err
+	}
 	item, err := s.finishReleaseAttempt(ctx, actor, opID, row, attempt, approvedRow, j, opts, opts.cycleID, now)
 	if err != nil {
 		// 試行を終えられなかった。終了していない行が残ると次の口が 15 分待つことになるので、
@@ -567,10 +583,15 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 		}
 		if early != nil {
 			early.route = run.route()
+			early.run = run
 			return *early, nil
 		}
 		// 「入れてよい」が届いた後に、同じ中身のレビュー待ちが戻った: 委譲先が入れられなかった。
 		if refused := landRefusal(run, rep); refused != nil {
+			refused.run = run
+			if cancelsCorrespondingRun(run, refused.result) {
+				refused.detail = appendDetail(refused.detail, s.cancelReleaseRunNote(ctx, opts, run, rep))
+			}
 			return *refused, nil
 		}
 	}
@@ -581,9 +602,9 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 	if j.route == "" && j.result != ExecutionResultWaitingOutside {
 		j.route = run.route()
 	}
+	j.run = run
 	// 委譲先の succeeded を読む以外の道で終わるとき、終わっていない対応する実行を取り消す（開いたまま残さない）。
-	switch j.result {
-	case ExecutionResultAlreadyMerged, ExecutionResultMergedUnapproved, ExecutionResultClosed:
+	if cancelsCorrespondingRun(run, j.result) {
 		j.detail = appendDetail(j.detail, s.cancelReleaseRunNote(ctx, opts, run, rep))
 	}
 	return j, nil

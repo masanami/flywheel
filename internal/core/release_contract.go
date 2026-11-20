@@ -6,7 +6,7 @@ package core
 //   - 対応する契約の実行の決め方（loadReleaseRun）: 反映の依頼なら記録した operation_id が反映の操作のもの、タスクの実行なら
 //     取り込んだ成果物の参照に反映の操作の参照と同じものがあるもの。
 //   - 先に commands.status で読む（readReleaseRun）。成果物は課題の成果物の記録へ取り込まず、予算の上限での中止もしない。
-//   - 道「タスクの実行へ返す」（landToTaskRun）: 「入れてよい」を、通す中身（{approved_ref}）を付けて commands.resume で返す。
+//   - 道「タスクの実行へ返す」（landToRun。反映の依頼へも返す）: 「入れてよい」を、通す中身（{approved_ref}）を付けて commands.resume で返す。
 //
 // 反映先へ入れるのは委譲先で、flywheel は入れない。「入れてよい」を返してよいかの判定（承認済み・通す中身・チェック）は core が持つ。
 
@@ -193,7 +193,7 @@ func (s *Store) readReleaseRun(ctx context.Context, opts ReleaseExecOptions, run
 // 間の試行の結果（waiting_delegate・upstream_failed ほか）には、よらない。求めの文が同じでも、中身の識別で見分ける。
 func landRefusal(run *releaseRun, rep *ContractRunReport) *releaseJudgment {
 	ra := rep.RequestedAction
-	if run.row.Kind != contractRunKindTask || run.row.LandRef == "" || !run.row.LandDelivered ||
+	if run.row.LandRef == "" || !run.row.LandDelivered ||
 		rep.State != ContractStateWaiting || ra == nil || ra.Kind != contractRequestedKindReview {
 		return nil
 	}
@@ -204,10 +204,10 @@ func landRefusal(run *releaseRun, rep *ContractRunReport) *releaseJudgment {
 		detail: fmt.Sprintf("the delegate did not land %s: summary: %s; requested_action.text: %s", run.row.LandRef, rep.Summary, ra.Text)}
 }
 
-// cancelReleaseRunNote は、反映の操作が委譲先の succeeded を読む以外の道で終わるとき、対応するタスクの実行が終わっていなければ
-// commands.cancel で取り消す。rep が nil なら先に commands.status で読む（片付け）。失敗は返す文に残す（結果は変えない。成功・不要は空）。
+// cancelReleaseRunNote は、反映の操作が委譲先の succeeded を読む以外の道で終わるとき、対応する契約の実行（タスクの実行・反映の依頼）が
+// 終わっていなければ commands.cancel で取り消す（どの結果で取り消すかは cancelsCorrespondingRun）。rep が nil なら先に commands.status で読む（片付け）。失敗は返す文に残す（結果は変えない。成功・不要は空）。
 func (s *Store) cancelReleaseRunNote(ctx context.Context, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport) string {
-	if run == nil || !run.corresponds || run.row.Kind != contractRunKindTask {
+	if run == nil || !run.corresponds {
 		return ""
 	}
 	if rep == nil {
@@ -249,9 +249,9 @@ func appendDetail(base, note string) string {
 // chooseReleasePath は成果物の確認とチェックを通った反映の操作の道を選ぶ。passRef は通す中身、observed は見た中身。
 // run は課題の終わっていない契約の実行（無ければ nil）、rep はそれを先に読んだ状態（対応しない実行は nil）。
 func (s *Store) chooseReleasePath(ctx context.Context, row *operationRow, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport, passRef, observed string) (releaseJudgment, error) {
-	outside := releaseJudgment{result: ExecutionResultWaitingOutside, observedHead: observed, route: ReleaseRouteOutside}
 	if run == nil {
-		return outside, nil
+		// 課題に終わっていない契約の実行が無い: 口があれば反映の依頼を始め、無ければ flywheel の外での反映を待つ。
+		return s.startReflectRequest(ctx, row, opts, observed)
 	}
 	if !run.corresponds {
 		// 別の成果物の実行・別の反映の操作の反映の依頼。何も呼ばない。
@@ -270,11 +270,11 @@ func (s *Store) chooseReleasePath(ctx context.Context, row *operationRow, opts R
 		return releaseJudgment{result: ExecutionResultUnsupported, observedHead: observed, route: run.route(),
 			detail: fmt.Sprintf("contract run %s waits for %q without the %q option", run.row.ExternalRunID, ra.Kind, contractChoiceLand)}, nil
 	}
-	if run.row.Kind != contractRunKindTask {
+	if _, n := reviewContentRefs(rep.Artifacts); run.row.Kind == contractRunKindReflect && n != 1 {
 		return releaseJudgment{result: ExecutionResultUnsupported, observedHead: observed, route: run.route(),
-			detail: "returning the land answer to a reflect request is not supported"}, nil
+			detail: fmt.Sprintf("contract run %s waits for review with %d content identifiers (exactly 1 is needed to return the land answer)", run.row.ExternalRunID, n)}, nil
 	}
-	return s.landToTaskRun(ctx, row, opts, run, rep, passRef, observed)
+	return s.landToRun(ctx, row, opts, run, rep, passRef, observed)
 }
 
 func hasOption(options []string, want string) bool {
@@ -286,10 +286,10 @@ func hasOption(options []string, want string) bool {
 	return false
 }
 
-// landToTaskRun は対応するタスクの実行へ、「入れてよい」を commands.resume で返す。委譲先の言う中身が、通す中身と同じときだけ返す。
+// landToRun は対応する契約の実行（タスクの実行・反映の依頼）へ、「入れてよい」を commands.resume で返す。委譲先の言う中身が、通す中身と同じときだけ返す。
 // 呼ぶ前に、契約の実行の記録へ通す中身（land_ref）を書く。届いた記録（land_delivered）は、結果 land_sent と同じ書き込みで真にする。
-func (s *Store) landToTaskRun(ctx context.Context, row *operationRow, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport, passRef, observed string) (releaseJudgment, error) {
-	j := releaseJudgment{observedHead: observed, route: ReleaseRouteWaitingRun}
+func (s *Store) landToRun(ctx context.Context, row *operationRow, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport, passRef, observed string) (releaseJudgment, error) {
+	j := releaseJudgment{observedHead: observed, route: run.route()}
 	if got, n := reviewContentRefs(rep.Artifacts); n != 1 || got != passRef {
 		j.result = ExecutionResultContentMismatch
 		j.detail = fmt.Sprintf("the contract run says %q (%d candidates); upstream has %q", got, n, passRef)

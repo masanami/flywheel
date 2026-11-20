@@ -1223,3 +1223,18 @@ func InsertContractRun(t *testing.T, workspace string, challengeID int, connecto
 		t.Fatalf("coretest: InsertContractRun: %v", err)
 	}
 }
+
+// InsertReflectContractRun は終わっていない反映の依頼（kind が reflect の contract_run。task_id は NULL）を、反映の操作 opID（内部整数 ID）に
+// 結び付けて 1 件挿入する。反映の依頼を取り消す口（完了から戻す前の取り消しなど）の CLI のテストが使う。
+func InsertReflectContractRun(t *testing.T, workspace string, challengeID int, opID int64, connectorID, externalRunID, state string) {
+	t.Helper()
+	InsertContractRun(t, workspace, challengeID, connectorID, externalRunID, state)
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE contract_run SET kind = 'reflect', operation_id = ?, task_id = NULL WHERE external_run_id = ?`, opID, externalRunID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertReflectContractRun: %v", err)
+	}
+}

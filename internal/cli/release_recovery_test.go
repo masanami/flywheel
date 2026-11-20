@@ -621,3 +621,27 @@ func TestReopenOperation_AWaitingTaskRunIsReadAndTheChallengeIsReopened(t *testi
 		t.Errorf("challenge status = %s, want verifying", got)
 	}
 }
+
+// AC-313: approve <OP-ID> --reopen で、終わっていない反映の依頼の commands.cancel が失敗したとき、conflict で終わり、課題は done のまま
+// （取り消せない依頼を残したまま検証中へ戻さない）。
+func TestReopenOperation_AFailedCancelOfAReflectRequestMakesTheReopenConflict(t *testing.T) {
+	parallelTools(t, false)
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
+	writeConnectorsJSONForTest(t, f.ws, reopenToolConnectorsFixture)
+	cid := challengeIDToInternalID(t, f.id)
+	var opID int64
+	if _, err := fmt.Sscanf(f.ops[0], "OP-%d", &opID); err != nil {
+		t.Fatal(err)
+	}
+	coretest.SetChallengeStatus(t, f.ws, cid, "done")
+	coretest.InsertReflectContractRun(t, f.ws, cid, opID, "tool", "ext-1", "running")
+	putFakeStatusToolOnPATH(t, "running") // cancel は失敗する（この偽の tool は status だけに応える）
+	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.ops[0], "--reopen")...)
+	if code == 0 || !strings.Contains(stderr, "conflict") {
+		t.Fatalf("exit=%d stderr=%s, want a conflict", code, stderr)
+	}
+	if got := f.challengeStatus(t); got != "done" {
+		t.Errorf("challenge status = %s, want done", got)
+	}
+}
