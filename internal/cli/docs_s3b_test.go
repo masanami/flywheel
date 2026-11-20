@@ -117,3 +117,9 @@ func TestSpec_S3b_M1T15RowAndNoteHaveTheIntegrationReturnTarget(t *testing.T) {
 	// 説明（差し戻しの戻り先の節）にも、統合先を使う課題の戻り先がある。
 	docLineWith(t, doc, "差し戻し（T15）の戻り先", "通常の完了", "区切り S3b から", "統合先を使うなら分類済へ戻し")
 }
+
+// m1-core.md の作業ログの action の一覧に、区切り S3b の #905 で足した integration_ref_set と、その意味（entity・after の形）がある。
+func TestSpec_S3b_M1ActivityActionListHasIntegrationRefSet(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "features", "m1-core.md")
+	docLineWith(t, doc, "| `action` | string |", "`task_status`\\|`integration_ref_set`\\|`backup`", "`integration_ref_set` は区切り S3b の #905 で追加した", "`entity=challenge` のときだけ")
+}
