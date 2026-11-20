@@ -300,8 +300,6 @@ type contractRunRow struct {
 	VerifiedRef string
 	// holdSuccessEnd は DB の列ではない。真なら、succeeded を読んでも ended_at を入れない（統合先へ入ったかを上流で確かめるまで開けておく）。
 	holdSuccessEnd bool
-	// movedFrom は DB の列ではない。取り込みだけで動いた中身を受けたとき、改める前の検証した中身。
-	movedFrom string
 }
 
 // contractKindOrTask は契約の実行の種類 kind（空は task）を返す。

@@ -122,19 +122,16 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 		rep.Held = held
 		return rep, err
 	}
-	previous := ""
 	if got != cur.VerifiedRef {
 		moved, err := s.settleMovedContent(ctx, rs, cur, rep, got)
 		if err != nil || !moved {
 			return rep, err
 		}
-		previous = cur.VerifiedRef
-		cur.VerifiedRef = got
-		cur.movedFrom = previous
+		cur.VerifiedRef, cur.LandRef, cur.LandDelivered = got, "", false
 	} else if cur.LandDelivered && cur.LandRef == got {
 		return hold(landRefusedQuestion(cur.ExternalRunID, got, rep.Summary, ra.Text), holdReasonLandRefused)
 	}
-	verdict, err := s.checkVerifiedContent(ctx, rs, cur, previous)
+	verdict, err := s.checkVerifiedContent(ctx, rs, cur)
 	if err != nil {
 		return nil, err
 	}
@@ -148,8 +145,9 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 }
 
 // settleMovedContent は、レビュー待ちの中身 got が検証した中身と違うとき、上流の比較の口で見分ける。取り込みだけ（衝突の解消が無い）なら
-// 検証した中身を got に改める前提で真を返す（検証し直さない。書くのは「入れてよい」を返すとき）。そうでなければ、検証した中身と land_ref を消し、land_delivered を偽にする（偽。
-// タスクは検証中のままで、次の J5 が検証し直す）。取り込み元のブランチは成果物の宛先（統合先）。
+// 検証した中身を got に改め（land_ref を消し、land_delivered を偽にする）、真を返す（検証し直さない。J5 の対象選びが、同じ周の後の段で
+// 中身の識別と検証した中身の違いを見つけないよう、チェックを待つ間も、その場で改める）。そうでなければ、検証した中身と land_ref を消し、
+// land_delivered を偽にする（偽。タスクは検証中のままで、次の J5 が検証し直す）。取り込み元のブランチは成果物の宛先（統合先）。
 func (s *Store) settleMovedContent(ctx context.Context, rs *contractReleaseSource, cur *contractRunRow, rep *ContractRunReport, got string) (bool, error) {
 	repo, err := s.taskRemoteRepo(ctx, cur.TaskID, rs.Decl)
 	if err != nil {
@@ -166,14 +164,20 @@ func (s *Store) settleMovedContent(ctx context.Context, rs *contractReleaseSourc
 	if repo != "" && dest != "" && rs.Compare != nil {
 		mergeInOnly = classifyContentMove(ClassifyHeadChange(context.WithoutCancel(ctx), rs.Compare, repo, dest, cur.VerifiedRef, got)) == contentMoveMergeInOnly
 	}
-	if mergeInOnly {
-		return true, nil // 検証した中身の改めは、チェックを通って「入れてよい」を返すときに書く（待つ間は前の中身を残す）
-	}
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
+		if mergeInOnly {
+			res, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = ?, land_ref = NULL, land_delivered = 0 WHERE id = ? AND verified_ref = ?`, got, cur.ID, cur.VerifiedRef)
+			if err != nil {
+				return err
+			}
+			n, err := res.RowsAffected()
+			mergeInOnly = n == 1 // 別の書き込みが先に変えていたら、この読みでは進めない
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = NULL, land_ref = NULL, land_delivered = 0 WHERE id = ? AND verified_ref = ?`, cur.ID, cur.VerifiedRef)
 		return err
 	})
-	return false, classifyReadWriteErr(err)
+	return mergeInOnly, classifyReadWriteErr(err)
 }
 
 // checkVerdict は検証した中身のチェックの確かめの結果。
@@ -187,8 +191,9 @@ const (
 )
 
 // checkVerifiedContent は検証した中身（cur.VerifiedRef）のチェックを、上流の口で確かめる。チェックが 0 件のときの扱いは、反映の操作の
-// 実行と同じ（previous が空でなければ、取り込みで動いた後の中身なので、前の中身にもチェックが 0 件だったと確かめられたときだけ通す）。
-func (s *Store) checkVerifiedContent(ctx context.Context, rs *contractReleaseSource, cur *contractRunRow, previous string) (checkVerdict, error) {
+// 実行と同じ（取り込みだけで動いた後の中身なら、前の中身にもチェックが 0 件だったと確かめられたときだけ通す。前の中身は、列を足さずに、
+// このタスクの契約の読みが残した成果物の履歴から引く）。
+func (s *Store) checkVerifiedContent(ctx context.Context, rs *contractReleaseSource, cur *contractRunRow) (checkVerdict, error) {
 	cs, ok := rs.Checks.(UpstreamCommitChecksSource)
 	if !ok {
 		return checkVerdictWait, nil
@@ -208,13 +213,62 @@ func (s *Store) checkVerifiedContent(ctx context.Context, rs *contractReleaseSou
 	case pending:
 		return checkVerdictWait, nil
 	}
-	if len(checks) == 0 && previous != "" {
-		approved := &approvedHeadChecks{}
-		if none, _ := approved.noChecks(context.WithoutCancel(ctx), rs.Checks, repo, previous); !none {
+	if len(checks) == 0 {
+		blocked, err := s.earlierContentHadChecks(ctx, rs, cur, repo)
+		if err != nil {
+			return checkVerdictWait, err
+		}
+		if blocked {
 			return checkVerdictWait, nil
 		}
 	}
 	return checkVerdictPass, nil
+}
+
+// earlierContentHadChecks は、検証した中身（cur.VerifiedRef。チェックが 0 件）が、前の中身から取り込みだけで動いた中身で、前の中身に
+// チェックが 1 件以上あった（か、あったか確かめられない）か。チェックがまだ始まっていないだけかもしれないので、真なら待つ。
+// 前の中身は、このタスクの契約の読みが成果物に残した、役割の無い commit（中身の識別）のうち、検証した中身と違うもの。
+func (s *Store) earlierContentHadChecks(ctx context.Context, rs *contractReleaseSource, cur *contractRunRow, repo string) (bool, error) {
+	var earlier []string
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT a.ref FROM run_artifact a JOIN run r ON r.id = a.run_id
+			WHERE r.challenge_id = ? AND r.kind = 'contract' AND COALESCE(r.task_id, 0) = COALESCE(?, 0)
+			AND a.kind = 'commit' AND COALESCE(a.role, '') = '' AND a.ref <> ?
+			GROUP BY a.ref ORDER BY MAX(a.id) DESC`, cur.ChallengeID, cur.TaskID, cur.VerifiedRef)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var ref string
+			if err := rows.Scan(&ref); err != nil {
+				return err
+			}
+			earlier = append(earlier, ref)
+		}
+		return rows.Err()
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return false, err
+	}
+	if rs.Compare == nil {
+		return false, nil
+	}
+	dest, err := s.challengeIntegrationRef(ctx, cur.ChallengeID)
+	if err != nil || dest == "" {
+		return false, err
+	}
+	wctx := context.WithoutCancel(ctx)
+	approved := &approvedHeadChecks{}
+	for _, p := range earlier {
+		if classifyContentMove(ClassifyHeadChange(wctx, rs.Compare, repo, dest, p, cur.VerifiedRef)) != contentMoveMergeInOnly {
+			continue // 取り込みだけで動いた前の中身ではない（検証し直した別の中身など）
+		}
+		if none, _ := approved.noChecks(wctx, rs.Checks, repo, p); !none {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // sendLand は「入れてよい」を commands.resume で返す。呼ぶ前に通す中身（land_ref）を書き、届いた記録（land_delivered）は resume が
@@ -228,14 +282,10 @@ func (s *Store) sendLand(ctx context.Context, in ContractPollInput, cur *contrac
 		return nil, err
 	}
 	// 読んだ後で課題が保留になった・検証した中身が変わったときは、返さない。
-	from := cur.VerifiedRef
-	if cur.movedFrom != "" {
-		from = cur.movedFrom
-	}
 	ready := false
 	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = ?, land_ref = ?, land_delivered = 0 WHERE id = ? AND verified_ref = ?
-			AND EXISTS (SELECT 1 FROM challenge WHERE id = challenge_id AND status = 'in_progress')`, cur.VerifiedRef, cur.VerifiedRef, cur.ID, from)
+			AND EXISTS (SELECT 1 FROM challenge WHERE id = challenge_id AND status = 'in_progress')`, cur.VerifiedRef, cur.VerifiedRef, cur.ID, cur.VerifiedRef)
 		if err != nil {
 			return err
 		}
@@ -341,13 +391,15 @@ func (s *Store) finishIntegrationLanding(ctx context.Context, rep *ContractRunRe
 	return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, true), holdReasonMergedUnverified)
 }
 
+// holdLandedEnd は保留を立て、契約の実行を終わった記録にする（同じトランザクション。終わりの記録だけが残らず、開いたまま課題が保留になることが無い）。
 func (s *Store) holdLandedEnd(ctx context.Context, rep *ContractRunReport, cid int64, question string, reason holdReason) error {
-	held, err := s.holdContractReview(ctx, rep, question, reason)
-	rep.Held = held
-	if err != nil || !held {
+	held, err := s.holdContractReviewWith(ctx, rep, question, reason, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`,
+			formatTimestamp(s.currentTime()), cid, rep.ExternalRunID)
 		return err
-	}
-	return s.closeContractRunRow(ctx, cid, rep.ExternalRunID)
+	})
+	rep.Held = held
+	return err
 }
 
 // closeContractRunRow は課題 cid の契約の実行 externalRunID を、終わった記録にする。

@@ -217,6 +217,11 @@ func factsUnmetQuestion(runID string, us []unmetFact) string {
 // holdContractReview は課題が着手中なら、レビュー待ちを受け取れない保留を理由 reason で立てる（契約の run が結び付くタスクに結び付ける）。
 // 保留への回答は委譲先へ返さないので、契約の run には結び付けない（wait_hold_id を使わない）。着手中でなければ何もしない（偽）。
 func (s *Store) holdContractReview(ctx context.Context, rep *ContractRunReport, question string, reason holdReason) (bool, error) {
+	return s.holdContractReviewWith(ctx, rep, question, reason, nil)
+}
+
+// holdContractReviewWith は holdContractReview に、保留を立てる同じトランザクションで行う書き込み extra（nil なら無し）を足したもの。
+func (s *Store) holdContractReviewWith(ctx context.Context, rep *ContractRunReport, question string, reason holdReason, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
 			if tc.current.Status != StatusInProgress {
@@ -227,7 +232,13 @@ func (s *Store) holdContractReview(ctx context.Context, rep *ContractRunReport, 
 				return err
 			}
 			tc.taskID = taskID
-			return s.insertHoldWithOccurrence(ctx, tc, question, reason, "")
+			if err := s.insertHoldWithOccurrence(ctx, tc, question, reason, ""); err != nil {
+				return err
+			}
+			if extra != nil {
+				return extra(ctx, tc.tx)
+			}
+			return nil
 		})
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {

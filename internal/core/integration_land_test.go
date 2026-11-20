@@ -14,11 +14,13 @@ import (
 
 // igLandChecks は UpstreamCheckSource と UpstreamCommitChecksSource の偽の実装。
 type igLandChecks struct {
-	mu      sync.Mutex
-	commits map[string][]UpstreamCheck
-	prs     map[string]UpstreamPullRequestChecks
-	err     error
-	calls   []string
+	// onCommitChecks は、コミットのチェックを読む呼び出しの間（読みの後・land を書く前）に差し込む処理。
+	onCommitChecks func()
+	mu             sync.Mutex
+	commits        map[string][]UpstreamCheck
+	prs            map[string]UpstreamPullRequestChecks
+	err            error
+	calls          []string
 }
 
 func newIgLandChecks() *igLandChecks {
@@ -26,6 +28,9 @@ func newIgLandChecks() *igLandChecks {
 }
 
 func (l *igLandChecks) GetCommitChecks(_ context.Context, _, sha string) ([]UpstreamCheck, error) {
+	if l.onCommitChecks != nil {
+		l.onCommitChecks()
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.calls = append(l.calls, sha)
@@ -77,6 +82,21 @@ type igLandFixture struct {
 	*reviewFlowFixture
 	checks  *igLandChecks
 	compare *fakeCompare
+	// onStatus は、状態の確認（commands.status）の呼び出しの間（読みの前）に差し込む処理。
+	onStatus func()
+}
+
+// igHookClient は ContractClient の status の前に処理を差し込む。
+type igHookClient struct {
+	ContractClient
+	before func()
+}
+
+func (c igHookClient) Status(ctx context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
+	if c.before != nil {
+		c.before()
+	}
+	return c.ContractClient.Status(ctx, in)
 }
 
 // newIgLandFixture は、統合先を使う課題で、タスクが検証中、契約の実行が waiting（検証した中身は landContent）の状態を作る。
@@ -97,7 +117,7 @@ func newIgLandFixture(t *testing.T) *igLandFixture {
 func (f *igLandFixture) pollLand(t *testing.T) {
 	t.Helper()
 	if _, err := f.s.PollContractRuns(context.Background(), ContractPollInput{
-		AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client, CycleID: f.cycle(t, 300), Reconcile: f.branches,
+		AgentDecl: f.agent, ConnDecl: f.conn, Client: igHookClient{ContractClient: f.client, before: f.onStatus}, CycleID: f.cycle(t, 300), Reconcile: f.branches,
 		Checks: f.checks, Compare: f.compare,
 	}); err != nil {
 		t.Fatalf("PollContractRuns: %v", err)
@@ -121,6 +141,14 @@ func (f *igLandFixture) taskStatus(t *testing.T) string {
 }
 
 func (f *igLandFixture) j5Calls() int { return len(f.j5.j5Inputs) }
+
+// verifyAll は同じサイクルの後の段（検証の段）と同じに、J5 の対象を自動で選んで回す。
+func (f *igLandFixture) verifyAll(t *testing.T) {
+	t.Helper()
+	if _, err := f.s.VerifyAutoJ5(context.Background(), f.j5.input(f.cycle(t, 300), nil)); err != nil {
+		t.Fatalf("VerifyAutoJ5: %v", err)
+	}
+}
 
 var igPassingChecks = []UpstreamCheck{checkDone}
 
@@ -329,16 +357,83 @@ func TestLandVerified_MergeInOnlyUpdatesVerifiedRefAndLands(t *testing.T) {
 	}
 }
 
-// 取り込みだけでも、取り込んだ後の中身のチェックが 0 件で、前の中身にチェックがあったなら、待つ。
-func TestLandVerified_MergeInOnlyWithNoChecksOnNewContentWaits(t *testing.T) {
+// AC-120・AC-121（待つ間）: 取り込みだけでも、新しい中身のチェックが終わっていない間は land を返さない。それでも検証した中身は
+// その場で新しい中身になり、同じ周の後の検証の段（J5 の対象選び）が、検証し直さない（J5 を呼ばない）。チェックが通れば、次の読みで land を返す。
+func TestLandVerified_MergeInOnlyWhileChecksPendingKeepsJ5OutAndLandsLater(t *testing.T) {
+	t.Parallel()
+	f := newIgLandFixture(t)
+	f.setMergeInOnly()
+	f.checks.commits[newContent] = []UpstreamCheck{checkRunning}
+	before := f.j5Calls()
+	f.read(t, intakeOut(integOptsWithLd, movedArts, nil))
+	if len(f.client.resumes) != 0 {
+		t.Fatalf("resumes = %d, want 0 while the checks are pending", len(f.client.resumes))
+	}
+	if got := f.ref(t, "verified_ref"); got != newContent {
+		t.Fatalf("verified_ref = %q, want the new content", got)
+	}
+	if f.ref(t, "land_ref") != "" || f.count(t, `SELECT land_delivered FROM contract_run`) != 0 {
+		t.Fatal("land_ref or land_delivered is still set")
+	}
+	f.verifyAll(t)
+	if f.j5Calls() != before {
+		t.Fatalf("J5 was called %d times for a merge-in-only move", f.j5Calls()-before)
+	}
+	f.checks.commits[newContent] = igPassingChecks
+	f.read(t, intakeOut(integOptsWithLd, movedArts, nil))
+	if len(f.client.resumes) != 1 || !strings.Contains(strings.Join(f.lastResume(t), " "), "--approved "+newContent) {
+		t.Fatalf("resumes = %v", f.client.resumes)
+	}
+	if f.ref(t, "land_ref") != newContent {
+		t.Fatalf("land_ref = %q", f.ref(t, "land_ref"))
+	}
+}
+
+// 取り込みだけで、新しい中身のチェックが 0 件のときは、前の中身（成果物の履歴から引く）にチェックがあった間は待ち、J5 も呼ばない。
+// 新しい中身にチェックが付いて通れば、land を返す。
+func TestLandVerified_MergeInOnlyWithNoChecksWaitsAcrossReadsWithoutJ5(t *testing.T) {
 	t.Parallel()
 	f := newIgLandFixture(t)
 	f.setMergeInOnly()
 	f.checks.commits[landContent] = igPassingChecks
+	before := f.j5Calls()
+	for i := 0; i < 2; i++ {
+		f.read(t, intakeOut(integOptsWithLd, movedArts, nil))
+		f.verifyAll(t)
+	}
+	if len(f.client.resumes) != 0 || f.j5Calls() != before {
+		t.Fatalf("resumes = %d, J5 calls = %d", len(f.client.resumes), f.j5Calls()-before)
+	}
+	if got := f.ref(t, "verified_ref"); got != newContent {
+		t.Fatalf("verified_ref = %q", got)
+	}
+	f.checks.commits[newContent] = igPassingChecks
 	f.read(t, intakeOut(integOptsWithLd, movedArts, nil))
-	f.read(t, intakeOut(integOptsWithLd, movedArts, nil)) // 2 回目の読みでも、前の中身を基準に待ち続ける
-	if len(f.client.resumes) != 0 {
-		t.Fatalf("resumes = %d, want 0", len(f.client.resumes))
+	if len(f.client.resumes) != 1 {
+		t.Fatalf("resumes = %d, want 1", len(f.client.resumes))
+	}
+}
+
+// 前の中身にもチェックが 0 件だったなら（チェックの無いリポジトリ）、取り込みだけの新しい中身は、チェックが 0 件でも通る。
+func TestLandVerified_MergeInOnlyWithNoChecksOnEitherContentLands(t *testing.T) {
+	t.Parallel()
+	f := newIgLandFixture(t)
+	f.setMergeInOnly()
+	f.read(t, intakeOut(integOptsWithLd, movedArts, nil))
+	if len(f.client.resumes) != 1 {
+		t.Fatalf("resumes = %d, want 1", len(f.client.resumes))
+	}
+}
+
+// 検証した中身のレビュー待ちで、land が届いた記録の中身が検証した中身と違うとき（記録だけが残った）は、拒否と読まず、もう一度 land を返す。
+func TestLandVerified_DeliveredRecordOfAnotherContentIsNotARefusal(t *testing.T) {
+	t.Parallel()
+	f := newIgLandFixture(t)
+	f.checks.commits[landContent] = igPassingChecks
+	f.sql(t, `UPDATE contract_run SET land_ref = 'other', land_delivered = 1`)
+	f.read(t, intakeOut(integOptsWithLd, landReviewArts, nil))
+	if f.count(t, `SELECT COUNT(*) FROM hold`) != 0 || len(f.client.resumes) != 1 {
+		t.Fatalf("holds = %d, resumes = %d", f.count(t, `SELECT COUNT(*) FROM hold`), len(f.client.resumes))
 	}
 }
 
@@ -382,7 +477,7 @@ func TestLandVerified_OtherMovesClearVerifiedAndLandRef(t *testing.T) {
 	}
 }
 
-// 保留中の課題の、検証した中身があるレビュー待ちの実行へは、resume を呼ばない（AC-26）。
+// AC-26: 保留中の課題の、検証した中身があるレビュー待ちの実行へは、resume を呼ばない（状態の確認の前から保留）。
 func TestLandVerified_HeldChallengeDoesNotResume(t *testing.T) {
 	t.Parallel()
 	f := newIgLandFixture(t)
@@ -391,6 +486,41 @@ func TestLandVerified_HeldChallengeDoesNotResume(t *testing.T) {
 	f.read(t, intakeOut(integOptsWithLd, landReviewArts, nil))
 	if len(f.client.resumes) != 0 {
 		t.Fatalf("resumes = %d, want 0", len(f.client.resumes))
+	}
+}
+
+// landVerifiedReview・sendLand の確かめ（着手中・検証中・検証した中身の一致）を、読みの途中の変化で通す。
+// 状態の確認の呼び出しの間（読みの前に判断の入口を通った後）か、チェックを読む間（land を書く直前）に、状態を変える。
+func TestLandVerified_GuardsAfterTheReadDoNotReturnLand(t *testing.T) {
+	t.Parallel()
+	const held = `UPDATE challenge SET status = 'awaiting_human'`
+	cases := map[string]struct{ onStatus, onChecks string }{
+		// 状態の確認の間に保留になる（受け取りは着手中でなければ何もせず、入れる側の着手中の確かめが止める）。
+		"AC-26 held between the status read and the land step": {onStatus: held},
+		"AC-26 held right before land is written":              {onChecks: held},
+		"the task is not verifying":                            {onStatus: `UPDATE task SET status = 'cancelled'`},
+		"the verified content changed right before land":       {onChecks: `UPDATE contract_run SET verified_ref = 'zzzzzzzz'`},
+	}
+	for name, c := range cases {
+		c := c
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newIgLandFixture(t)
+			f.checks.commits[landContent] = igPassingChecks
+			if c.onStatus != "" {
+				f.onStatus = func() { f.sql(t, c.onStatus) }
+			}
+			if c.onChecks != "" {
+				f.checks.onCommitChecks = func() { f.sql(t, c.onChecks) }
+			}
+			f.read(t, intakeOut(integOptsWithLd, landReviewArts, nil))
+			if len(f.client.resumes) != 0 {
+				t.Fatalf("resumes = %d, want 0", len(f.client.resumes))
+			}
+			if got := f.ref(t, "land_ref"); got != "" {
+				t.Fatalf("land_ref = %q, want empty", got)
+			}
+		})
 	}
 }
 
@@ -495,6 +625,34 @@ func TestLandSucceeded_UnreadableUpstreamRetriesNextRead(t *testing.T) {
 	f.succeed(t)
 	if f.taskStatus(t) != "done" { // AC-135
 		t.Fatalf("task = %s", f.taskStatus(t))
+	}
+}
+
+// 入っていない・入った中身が違うときの保留と、契約の実行の終わった記録は、同じトランザクションで書く（終わりの記録だけが失敗して、
+// 実行が開いたまま課題が保留になることが無い）。終わりの記録の書き込みを失敗させると、保留も残らず、次の読みでやり直せる。
+func TestLandSucceeded_HoldAndEndedRecordAreWrittenTogether(t *testing.T) {
+	t.Parallel()
+	f := newIgLandFixture(t)
+	f.landed(t)
+	f.setPR(7, landPRURL, "open", integBranch)
+	f.sql(t, `CREATE TRIGGER fail_end BEFORE UPDATE OF ended_at ON contract_run BEGIN SELECT RAISE(ABORT, 'boom'); END`)
+	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, func(st *ContractStatus) { st.Artifacts = landedArts })}
+	_, _ = f.s.PollContractRuns(context.Background(), ContractPollInput{
+		AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client, CycleID: f.cycle(t, 300), Reconcile: f.branches, Checks: f.checks, Compare: f.compare,
+	})
+	if n := f.count(t, `SELECT COUNT(*) FROM hold`); n != 0 {
+		t.Fatalf("holds = %d, want 0 (the ended record failed, so the hold must not remain)", n)
+	}
+	if f.status(t, f.cid) != StatusInProgress {
+		t.Fatalf("status = %s", f.status(t, f.cid))
+	}
+	f.sql(t, `DROP TRIGGER fail_end`)
+	f.succeed(t)
+	if got := f.lastHoldReason(t); got != string(holdReasonDelegateEnded) {
+		t.Fatalf("reason = %q", got)
+	}
+	if f.text(t, `SELECT COALESCE(ended_at, '') FROM contract_run`) == "" {
+		t.Fatal("the contract run is not ended")
 	}
 }
 
@@ -628,5 +786,29 @@ func TestReleaseStage_DoesNotLoadIntegrationTaskRuns(t *testing.T) {
 	f.sql(t, `UPDATE challenge SET uses_integration = 0`)
 	if run := load(); run == nil {
 		t.Fatal("the release stage does not load the task run of a challenge without an integration branch")
+	}
+}
+
+// AC-139・AC-227: 反映の段（ExecuteReleases）は、統合先を使う課題のタスクの実行を読まない（commands.status も resume も呼ばない）。
+// 使わない課題では、同じ操作が S3a と同じにタスクの実行を読んで land を返す（TestReleaseLand_ReviewWaitWithLandOptionIsAnsweredWithLandAndTheApprovedRef）。
+func TestReleaseStage_ExecuteReleasesDoesNotCallStatusForIntegrationTaskRuns(t *testing.T) {
+	t.Parallel()
+	for name, integ := range map[string]int{"without an integration branch": 0, "with an integration branch": 1} {
+		integ := integ
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newLandFixture(t)
+			f.sql(t, `UPDATE challenge SET uses_integration = ?`, integ)
+			f.queueReview()
+			statusesBefore := len(f.client.statuses)
+			f.release(t)
+			calls := len(f.client.statuses) - statusesBefore + len(f.client.resumes)
+			if integ == 1 && calls != 0 {
+				t.Fatalf("the release stage called the contract %d times for an integration task run", calls)
+			}
+			if integ == 0 && (len(f.client.statuses)-statusesBefore != 1 || len(f.client.resumes) != 1) {
+				t.Fatalf("status calls = %d, resumes = %d, want 1 and 1 (S3a)", len(f.client.statuses)-statusesBefore, len(f.client.resumes))
+			}
+		})
 	}
 }
