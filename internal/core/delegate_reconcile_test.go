@@ -117,7 +117,12 @@ func mkPR(n int, state, base string) UpstreamPullRequest {
 func newReconFixture(t *testing.T, operation string) *delegateFixture {
 	t.Helper()
 	f := newDelegateFixture(t)
-	f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) { m["operation"] = operation }))
+	if operation == "impl" {
+		// form: brief の操作（J3 の run を持つ。run の番号の並びは J3 の run が先）。
+		f.newInProgress(t, "t", "P1", briefSpec(nil))
+	} else {
+		f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) { m["operation"] = operation }))
+	}
 	return f
 }
 
@@ -393,7 +398,7 @@ func TestReconcile_ArtifactCheckMapping(t *testing.T) {
 				if c.wantQ == "成果物が見つからない" && !strings.Contains(d.Holds[0].Question, "照合の結果") {
 					t.Errorf("question lacks the check results: %q", d.Holds[0].Question)
 				}
-				if rid := f.queryString(t, `SELECT run_id FROM hold WHERE challenge_id = 1`); rid != "2" {
+				if rid := f.queryString(t, `SELECT run_id FROM hold WHERE challenge_id = 1`); rid != f.queryString(t, `SELECT id FROM run WHERE kind = 'delegate' ORDER BY id LIMIT 1`) {
 					t.Errorf("hold.run_id = %q, want the delegation run", rid)
 				}
 			} else if len(d.Holds) != 0 {

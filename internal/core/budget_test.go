@@ -11,7 +11,7 @@ import (
 // 予算の 2 枠・評価額と予約額・`flywheel budget`（M3 S2 #105。AC-218・263・264・336〜346・352・364）。
 
 func budgetSpec(impl, review any) string {
-	return planSpec(func(m map[string]any) {
+	return briefSpec(func(m map[string]any) {
 		m["budget_impl_usd"] = impl
 		m["budget_review_usd"] = review
 	})

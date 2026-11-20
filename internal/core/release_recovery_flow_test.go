@@ -11,7 +11,7 @@ import (
 func TestRecovery_NotMergeableToMergedRoundTrip(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newJ5Fixture(t, "impl")
+	f := newJ5Fixture(t, "brief")
 	f.delegateToVerifying(t, "C-1")
 	f.setPRHead("head-1")
 	ref := j5PRURL

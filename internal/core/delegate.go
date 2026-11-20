@@ -335,10 +335,19 @@ func selectDelegationTargets(ctx context.Context, tx *sql.Tx) (out []int64, skip
 
 // fillInvocation は操作の invocation の差し込み（閉集合の 4 つ）を埋める。
 func fillInvocation(invocation string, challengeID string, sb *sourceBinding) (string, error) {
+	return fillInvocationWith(invocation, challengeID, sb, false)
+}
+
+// fillInvocationWith は fillInvocation の、取り込み元が無いときに取り込み元の差し込みを空の文字列で埋める道（emptySource）を
+// 持つ版。取り込み元があるときは emptySource に関わらず、その値を差し込む。
+func fillInvocationWith(invocation string, challengeID string, sb *sourceBinding, emptySource bool) (string, error) {
 	out := strings.ReplaceAll(invocation, "{challenge_id}", challengeID)
 	if invocationNeedsSource(out) {
 		if sb == nil {
-			return "", fmt.Errorf("%w: the operation needs the source issue but the challenge has none", ErrValidation)
+			if !emptySource {
+				return "", fmt.Errorf("%w: the operation needs the source issue but the challenge has none", ErrValidation)
+			}
+			return strings.NewReplacer("{issue_number}", "", "{issue_url}", "", "{external_key}", "").Replace(out), nil
 		}
 		_, number, ok := parseExternalKey(sb.ExternalKey)
 		if !ok {
@@ -759,8 +768,10 @@ func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *Judgment
 	// J3 と実装枠の両方が周の上限に入らないなら、J3 の費用を払う前に起動しない
 	// （最終の評価は、スロットの割り当てと同じトランザクションの中で行う）。
 	// `--resume` の再開は J3 を呼ばない（子は前の文脈を持つ）。
+	// form: plugin は J3 を呼ばず、タスクの文面をそのまま J3 の出力の区画へ入れる（J3 の費用は掛からない）。
 	j3Budget := in.AgentDecl.JudgmentBudgetFor(JudgmentJ3)
-	if dc.Resume != nil {
+	isPlugin := dc.Connector.Form == ConnectorFormPlugin
+	if dc.Resume != nil || isPlugin {
 		j3Budget = 0
 	}
 	if err := s.checkCycleBudget(ctx, in.CycleID, j3Budget+microsToUSD(dc.estimateMicros())); err != nil {
@@ -771,6 +782,13 @@ func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *Judgment
 	}
 	if dc.Resume != nil {
 		return s.launchDelegation(ctx, in, jc, dc, "", adm)
+	}
+	if isPlugin {
+		text, err := s.taskDocumentFor(ctx, dc)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.launchDelegation(ctx, in, jc, dc, text, adm)
 	}
 	sections, notStarted, err := s.prepareJ3(ctx, in, dc)
 	if err != nil || notStarted != nil {
@@ -1095,4 +1113,15 @@ func dependencyNotStarted(eval *dependencyEvaluation, challengeID string, cid in
 // 委譲の段（delegateOnce）と、サイクルを回すと進むものの数え（countRunnableDelegations）が、同じ判定を使う。
 func (dc *delegationContext) implBudgetExhausted() bool {
 	return dc.ImplBudgetMicros < minImplLaunchMicros
+}
+
+// taskDocumentFor は委譲の前提 dc の、起動するタスクの文面を読んで組み立てる。
+func (s *Store) taskDocumentFor(ctx context.Context, dc *delegationContext) (string, error) {
+	cid, _ := parseChallengeID(dc.Challenge.ID)
+	var text string
+	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		text, err = loadTaskDocument(ctx, tx, cid, dc.Plan, dc.Task)
+		return err
+	})
+	return text, classifyReadWriteErr(err)
 }

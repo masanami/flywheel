@@ -285,7 +285,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 				State: row.State, Summary: row.Summary, Held: held}, err
 		default:
 			// 引数を埋められないまま答えを失わないよう、返すと決める前に確かめる。
-			if _, err := fillContractArgs(connector.Commands.Resume, challengeID, binding, row.ExternalRunID, *rr.Answer); err != nil {
+			if _, err := fillCommandArgs(connector, connector.Commands.Resume, challengeID, binding, row.ExternalRunID, *rr.Answer); err != nil {
 				return nil, err
 			}
 			answer, resume = *rr.Answer, true
@@ -295,7 +295,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		a, ok, err := s.loadContractAnswer(ctx, row, func(answer string) error {
 			// 答えを返すと決める（結び付きを外す）前に、resume の引数を埋められることを確かめる（埋められないまま答えを失わない）。
 			// 答えが無い状態の確認（status）では resume の引数を確かめない（取り込み元を要するのが resume だけの宣言でも状態を読める）。
-			_, err := fillContractArgs(connector.Commands.Resume, challengeID, binding, row.ExternalRunID, contractAnswer{Choice: answer})
+			_, err := fillCommandArgs(connector, connector.Commands.Resume, challengeID, binding, row.ExternalRunID, contractAnswer{Choice: answer})
 			return err
 		})
 		if err != nil {
@@ -307,7 +307,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	if resume {
 		args, name = connector.Commands.Resume, "resume"
 	}
-	command, err := fillContractArgs(args, challengeID, binding, row.ExternalRunID, answer)
+	command, err := fillCommandArgs(connector, args, challengeID, binding, row.ExternalRunID, answer)
 	if err != nil {
 		return nil, err
 	}
@@ -370,7 +370,7 @@ func stillObserving(rep *ContractRunReport) bool {
 // 引数を埋められない・resume が失敗したときは課題を保留にせず、状態の確認の読み（statusRep）を返す
 // （次の周の読み直しで再び呼ぶだけで、追加のやり直しはしない）。成功したら、返った状態を status と同じに読んで写す。
 func (s *Store) resumeObservation(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, statusRep *ContractRunReport) (*ContractRunReport, error) {
-	command, err := fillContractArgs(connector.Commands.Resume, statusRep.ChallengeID, binding, row.ExternalRunID, contractAnswer{})
+	command, err := fillCommandArgs(connector, connector.Commands.Resume, statusRep.ChallengeID, binding, row.ExternalRunID, contractAnswer{})
 	if err != nil {
 		return statusRep, nil
 	}
@@ -503,7 +503,7 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 	if inProgress, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !inProgress {
 		return err
 	}
-	command, err := fillContractArgs(connector.Commands.Cancel, rep.ChallengeID, binding, row.ExternalRunID, contractAnswer{})
+	command, err := fillCommandArgs(connector, connector.Commands.Cancel, rep.ChallengeID, binding, row.ExternalRunID, contractAnswer{})
 	if err != nil {
 		return err
 	}
@@ -607,7 +607,7 @@ func (s *Store) answerParentWait(ctx context.Context, in ContractPollInput, row 
 			answer.Note = strings.TrimSpace(*d.Answer)
 		}
 	}
-	command, err := fillContractArgs(connector.Commands.Resume, rep.ChallengeID, binding, row.ExternalRunID, answer)
+	command, err := fillCommandArgs(connector, connector.Commands.Resume, rep.ChallengeID, binding, row.ExternalRunID, answer)
 	if err != nil {
 		return holdOwner("親が答えたが、接続ツールへ答えを返す宣言の resume の引数を埋められなかった（" + err.Error() + "）。")
 	}

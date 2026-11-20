@@ -75,7 +75,12 @@ type j5Fixture struct {
 func newJ5Fixture(t *testing.T, operation string) *j5Fixture {
 	t.Helper()
 	f := &j5Fixture{delegateFixture: newDelegateFixture(t), checks: newFakeChecks()}
-	f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) { m["operation"] = operation }))
+	if operation == "brief" {
+		// form: brief（J3 を呼ぶ形態）の操作。J3 の入力・呼び出しを確かめる試験が使う。
+		f.newInProgress(t, "t", "P1", briefSpec(nil))
+	} else {
+		f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) { m["operation"] = operation }))
+	}
 	f.j5 = &fakeJudgmentInvoker{result: j5Out("met", nil, nil)}
 	f.j5.onInvoke = func(in JudgmentLaunchInput) { f.j5Inputs = append(f.j5Inputs, in) }
 	return f
@@ -723,7 +728,7 @@ func (f *j5Fixture) notMetRound(t *testing.T, id string) {
 
 func TestRework_NotMetResumesThePreviousDelegationSessionWithTheFeedback(t *testing.T) {
 	t.Parallel()
-	f := newJ5Fixture(t, "impl")
+	f := newJ5Fixture(t, "brief")
 	f.delegateToVerifying(t, "C-1")
 	first := f.delegateRuns(t)[0]
 	f.notMetRound(t, "C-1")

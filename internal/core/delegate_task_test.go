@@ -306,7 +306,7 @@ func TestDelegateTask_AC110_AdoneTaskOfAnEarlierPlanVersionDoesNotBlockTheNewVer
 func TestDelegateTask_AC111_J3RunHasTheTaskID(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
-	id := f.newInProgress(t, "t", "P1", planSpec(nil))
+	id := f.newInProgress(t, "t", "P1", briefSpec(nil))
 	taskID := firstTaskID(t, f.s, id)
 	f.mustRun(t, nil)
 	var got sql.NullString
@@ -327,8 +327,8 @@ func TestDelegateTask_AC111_J3RunHasTheTaskID(t *testing.T) {
 func TestDelegateTask_AC112_AC113_J3InputHasTheTaskSectionWithTheDoneCriteria(t *testing.T) {
 	t.Parallel()
 	f := newDelegateFixture(t)
-	f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) {
-		task := j2TestTask("t1", "main-repo", "impl")
+	f.newInProgress(t, "t", "P1", briefSpec(func(m map[string]any) {
+		task := j2TestTask("t1", "main-brief", "brief")
 		task["non_goals"] = []string{"NON-GOAL-X"}
 		m["tasks"] = []any{task}
 	}))
