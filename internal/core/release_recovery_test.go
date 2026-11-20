@@ -82,7 +82,7 @@ func TestRelease_NotMergeableOnADoneChallengeReopensItAndReplacesTheRelease(t *t
 		t.Fatalf("attempts = %+v, want one not_mergeable attempt", at)
 	}
 	snap := snapshotReopen(t, f.s, f.cid)
-	if snap.chStatus != string(StatusInProgress) || snap.ops[0].state != string(OperationStateClosed) || snap.ops[0].closed.String != string(ClosedReasonSuperseded) ||
+	if snap.chStatus != string(StatusVerifying) || snap.ops[0].state != string(OperationStateClosed) || snap.ops[0].closed.String != string(ClosedReasonSuperseded) ||
 		snap.ops[1].state != string(OperationStatePending) || formatOperationID(snap.ops[1].id) != item.NewOperationID {
 		t.Fatalf("snapshot = %+v", snap)
 	}
@@ -369,7 +369,7 @@ func TestRelease_SweepReopensADoneChallengeWhenTheVerifiedPRContentChanged(t *te
 		t.Fatalf("tidied = %+v, want reopened with content_changed", res.Tidied)
 	}
 	snap := snapshotReopen(t, f.s, f.cid)
-	if snap.chStatus != string(StatusInProgress) || snap.ops[0].state != string(OperationStateClosed) || len(snap.ops) != 2 {
+	if snap.chStatus != string(StatusVerifying) || snap.ops[0].state != string(OperationStateClosed) || len(snap.ops) != 2 {
 		t.Errorf("snapshot = %+v", snap)
 	}
 }

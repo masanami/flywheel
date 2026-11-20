@@ -58,7 +58,7 @@ func runApprove(a Args) (any, error) {
 }
 
 // runReopenOperation は `flywheel approve <OP-ID> --reopen` の実装。検証の後に動いた head が取り込みだけとも中身の変更とも
-// 確かめられず（人間待ち）、課題が完了の release について、人が承認せず着手中へ戻す方を選ぶ。人間待ちかどうかは core が
+// 確かめられず（人間待ち）、課題が完了の release について、人が承認せず検証中へ戻す方を選ぶ。人間待ちかどうかは core が
 // 自分で比較して確かめ（AssessReleaseReopen）、そうでなければ戻さない。
 func runReopenOperation(a Args, verifier core.Verifier, id string) (any, error) {
 	src := headSources(a)
@@ -69,7 +69,7 @@ func runReopenOperation(a Args, verifier core.Verifier, id string) (any, error) 
 	if as.Verdict != core.ReleaseReopenNeedsHuman {
 		return nil, NewError(CodeValidationFailed, id+" は人間待ち（取り込みだけとも中身の変更とも確かめられない）ではないため、--reopen で戻せません")
 	}
-	summary := fmt.Sprintf("%s の課題を完了から着手中へ戻し、本番反映を置き換えます。\n理由: 検証の後に PR の head が動き、取り込みだけとも中身の変更とも確かめられませんでした（%s）\n",
+	summary := fmt.Sprintf("%s の課題を完了から検証中へ戻し、本番反映を置き換えます。\n理由: 検証の後に PR の head が動き、取り込みだけとも中身の変更とも確かめられませんでした（%s）\n",
 		id, escapeControl(as.Detail))
 	if _, err := core.Verify(core.ChannelCLI, verifier, summary, id); err != nil {
 		return nil, mapCoreErr(err)
@@ -79,11 +79,11 @@ func runReopenOperation(a Args, verifier core.Verifier, id string) (any, error) 
 		return nil, mapCoreErr(err)
 	}
 	if !res.Reopened {
-		return nil, NewError(CodeValidationFailed, id+" は課題を着手中へ戻せませんでした")
+		return nil, NewError(CodeValidationFailed, id+" は課題を検証中へ戻せませんでした")
 	}
 	return textOutput{
 		json: view.OperationReopenResponse{ChallengeID: res.ChallengeID, ClosedOperationID: res.ClosedOperationID, NewOperationID: res.NewOperationID, Reason: string(core.ReopenReasonUndeterminable)},
-		text: fmt.Sprintf("%s\t課題 %s を着手中へ戻し、本番反映を %s に置き換えた\n", id, res.ChallengeID, res.NewOperationID),
+		text: fmt.Sprintf("%s\t課題 %s を検証中へ戻し、本番反映を %s に置き換えた\n", id, res.ChallengeID, res.NewOperationID),
 	}, nil
 }
 

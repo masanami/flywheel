@@ -393,11 +393,7 @@ const ADDED_WORDS: [string, string, string][] = [
     "complete_direct",
     "オーケストレーターが直接行った作業を、完了として記録した",
   ],
-  [
-    "challenge",
-    "reopen_for_release",
-    "反映をやり直すため、完了から着手中へ戻した",
-  ],
+  ["challenge", "reopen_for_release", "反映をやり直すため、完了から戻した"],
   ["challenge", "ingest_create", "取り込み元から課題を作った"],
   ["challenge", "ingest_update", "取り込み元の変更を取り込んだ"],
   ["challenge", "bind", "取り込み元と対応付けた"],

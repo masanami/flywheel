@@ -376,7 +376,7 @@ func TestRelease_HumanWaitCanBeResolvedByReopening(t *testing.T) {
 	if err != nil || !res.Reopened {
 		t.Fatalf("res = %+v, err = %v", res, err)
 	}
-	if snap := snapshotReopen(t, f.s, f.cid); snap.chStatus != string(StatusInProgress) || len(snap.ops) != 2 {
+	if snap := snapshotReopen(t, f.s, f.cid); snap.chStatus != string(StatusVerifying) || len(snap.ops) != 2 {
 		t.Errorf("snapshot = %+v", snap)
 	}
 }
@@ -429,7 +429,7 @@ func TestRelease_HeadlessHumanWaitCanBeResolvedByReopening(t *testing.T) {
 			if err != nil || !res.Reopened {
 				t.Fatalf("res = %+v, err = %v", res, err)
 			}
-			if snap := snapshotReopen(t, f.s, f.cid); snap.chStatus != string(StatusInProgress) || len(snap.ops) != 2 {
+			if snap := snapshotReopen(t, f.s, f.cid); snap.chStatus != string(StatusVerifying) || len(snap.ops) != 2 {
 				t.Errorf("snapshot = %+v", snap)
 			}
 		})

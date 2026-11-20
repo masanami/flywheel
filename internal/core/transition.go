@@ -34,7 +34,7 @@ const (
 	OpWithdraw           Operation = "withdraw"
 	// OpCompleteDirect は、親が直接行った作業を完了として記録する操作（T17）。
 	OpCompleteDirect Operation = "complete_direct"
-	// OpReopenForRelease は、完了の課題を着手中へ戻す操作（T18）。本番反映でマージできなくなった場合に限る
+	// OpReopenForRelease は、完了の課題を検証中へ戻す操作（T18）。本番反映のやり直し（マージできない・検証の後に中身が変わった）の場合に限る
 	// 専用の書き込み（ReopenChallengeForRelease）だけが使う。CLI の操作には対応しない。
 	OpReopenForRelease Operation = "reopen_for_release"
 )
@@ -168,10 +168,10 @@ var Table = []Transition{
 	// 「成果物の参照が 1 件以上」は CompleteDirect が検査する（T12 の戻り先の検査と同じ位置づけ）。
 	// 完了の承認は T13・T14 のとおり本人確認つきで、この行は本人確認を要さない（submit・hold と同じ、エージェントの記録）。
 	{ID: "T17", From: StatusAwaitingHuman, Op: OpCompleteDirect, Target: TransitionTarget{Fixed: StatusAwaitingCompletionApproval}},
-	// T18: 本番反映でマージできなくなった完了の課題を着手中へ戻す（#485）。本番反映のやり直し（ReopenChallengeForRelease）
+	// T18: 本番反映のやり直しで完了の課題を検証中へ戻す（マージできない・検証の後に中身が取り込みだけでは済まない形で変わった）（#485。戻り先は core の見直し S3a で着手中から改めた）。本番反映のやり直し（ReopenChallengeForRelease）
 	// だけが使う制限つきの行で、通常の操作の対象にならない。本人確認は要さない（エージェントの記録。戻す理由は
 	// 本番反映の結果か、検証の後の中身の変更で、人の承認はやり直しの完了の承認で受ける）。
-	{ID: "T18", From: StatusDone, Op: OpReopenForRelease, Target: TransitionTarget{Fixed: StatusInProgress}, Restricted: true},
+	{ID: "T18", From: StatusDone, Op: OpReopenForRelease, Target: TransitionTarget{Fixed: StatusVerifying}, Restricted: true},
 	// T19: 計画の問いへの、推奨と違う（か文の）答え。計画の承認待ちから分類済へ戻して計画を作り直させる
 	// （差し戻し T6 と同じ経路）。本人確認つき。
 	{ID: "T19", From: StatusAwaitingPlanApproval, Op: OpAnswerPlan, Target: TransitionTarget{Fixed: StatusClassified}, RequiresVerification: true},

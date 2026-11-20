@@ -2,8 +2,6 @@ package core
 
 import (
 	"context"
-	"database/sql"
-	"strings"
 	"testing"
 )
 
@@ -58,8 +56,8 @@ func TestRecovery_NotMergeableToMergedRoundTrip(t *testing.T) {
 		t.Fatalf("release stage = %+v err = %v, want not_mergeable with the challenge reopened", res, err)
 	}
 	newOp := res.Items[0].NewOperationID
-	if got := f.status(t); got != StatusInProgress {
-		t.Fatalf("status after the reopen = %s, want in_progress", got)
+	if got := f.status(t); got != StatusVerifying {
+		t.Fatalf("status after the reopen = %s, want verifying", got)
 	}
 	d := f.detail(t, "C-1")
 	var oldOp, nw *IrreversibleOperation
@@ -85,25 +83,6 @@ func TestRecovery_NotMergeableToMergedRoundTrip(t *testing.T) {
 		t.Fatalf("previous completion approval = %+v, want superseded and not yet linked", priorApproval)
 	}
 
-	// 追従の委譲: J3 の入力に、戻した理由の区画が入る。
-	before := len(f.j3Inputs)
-	f.runDelegation(t, "C-1")
-	if len(f.j3Inputs) != before+1 {
-		t.Fatalf("J3 calls = %d, want %d", len(f.j3Inputs), before+1)
-	}
-	sec, ok := sectionByLabel(f.j3Inputs[before].Sections, "本番反映のやり直し")
-	if !ok {
-		t.Fatalf("J3 input lacks the reopen section:\n%s", sectionsText(f.j3Inputs[before].Sections))
-	}
-	for _, want := range []string{j5PRURL, "マージできなくなった", "main", "新しい PR を作らない"} {
-		if !strings.Contains(sec.Content, want) {
-			t.Errorf("reopen section lacks %q:\n%s", want, sec.Content)
-		}
-	}
-	if got := f.status(t); got != StatusVerifying {
-		t.Fatalf("status after the follow-up delegation = %s, want verifying", got)
-	}
-
 	// J5 は新しい head を検証し、検証の head の記録は新しい head になる。
 	f.setPRHead("head-2")
 	if _, err := f.verify(t, nil); err != nil {
@@ -115,12 +94,8 @@ func TestRecovery_NotMergeableToMergedRoundTrip(t *testing.T) {
 	if got := f.queryString(t, `SELECT verified_head_sha FROM run_artifact WHERE verified_head_sha IS NOT NULL ORDER BY id DESC LIMIT 1`); got != "head-2" {
 		t.Errorf("latest verified head = %q, want head-2", got)
 	}
-	if got := f.queryString(t, `SELECT COUNT(*) FROM run_artifact WHERE verified_head_sha IS NOT NULL`); got != "2" {
-		t.Errorf("verified heads recorded = %s, want 2 (one per verification)", got)
-	}
-	// 戻した記録は、最後の委譲より古くなったので、次の委譲の入力には入らない。
-	if note := f.reopenNoteForTest(t, "C-1"); note != nil {
-		t.Errorf("reopen note after the follow-up delegation = %+v, want none", note)
+	if got := f.queryString(t, `SELECT COUNT(*) FROM run_artifact WHERE verified_head_sha IS NOT NULL`); got != "1" {
+		t.Errorf("verified heads recorded = %s, want 1 (the same artifact row carries the head of the latest verification)", got)
 	}
 	// 古い head を承認の入力にすると断る（検証の head は新しい head になっている）。
 	prev, err := f.s.PrepareApproval(ctx, "C-1")
@@ -168,16 +143,4 @@ func TestRecovery_NotMergeableToMergedRoundTrip(t *testing.T) {
 	if d.Status != StatusDone {
 		t.Errorf("status = %s, want done", d.Status)
 	}
-}
-
-func (f *j5Fixture) reopenNoteForTest(t *testing.T, id string) *reopenNote {
-	t.Helper()
-	cid, _ := parseChallengeID(id)
-	var note *reopenNote
-	readForTest(t, f.s, func(tx *sql.Tx) error {
-		var err error
-		note, err = loadReopenNote(context.Background(), tx, cid)
-		return err
-	})
-	return note
 }

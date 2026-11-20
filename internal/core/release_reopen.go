@@ -1,7 +1,7 @@
 package core
 
 // このファイルは、完了の承認まで済んだ課題の release が本番反映でマージできなくなったとき、課題を完了から
-// 着手中へ戻して検証を通って立て直す書き込み（docs/features/m4.5-learning-and-self-improvement.md
+// 検証中へ戻して検証を通って立て直す書き込み（docs/features/m4.5-learning-and-self-improvement.md
 // §本番反映の立て直し。遷移表の T18）を持つ。
 //
 // 呼べるのは ReopenChallengeForRelease（と同じ処理を本番反映の書き込みのトランザクションの中で呼ぶ
@@ -33,7 +33,7 @@ type ReopenForReleaseInput struct {
 
 // ReopenForReleaseResult は ReopenChallengeForRelease の結果。
 type ReopenForReleaseResult struct {
-	// Reopened は課題を完了から着手中へ戻し、release を置き換えたかどうか。戻さなかった（課題が完了でない・
+	// Reopened は課題を完了から検証中へ戻し、release を置き換えたかどうか。戻さなかった（課題が完了でない・
 	// 操作が承認待ちか承認済みの release でない）ときは false で、何も書かない。
 	Reopened    bool
 	ChallengeID string
@@ -43,7 +43,7 @@ type ReopenForReleaseResult struct {
 }
 
 // ReopenChallengeForRelease は opID の release の課題が完了なら、同じトランザクションで次を行う（T18）:
-// 課題を着手中へ戻し（版 +1）、有効な前の完了の承認に「置き換えられた」日時と理由を記録し、古い release を
+// 課題を検証中へ戻し（版 +1）、有効な前の完了の承認に「置き換えられた」日時と理由を記録し、古い release を
 // closed（理由 superseded）にし、同じ種類・要約・参照の未承認の release を 1 件作って古い操作と結び、
 // 戻した記録（challenge_reopen）と作業ログを残す。
 //
@@ -198,7 +198,7 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		return nil, err
 	}
 
-	// 課題を着手中へ戻す。
+	// 課題を検証中へ戻す。
 	newVersion := current.Version + 1
 	upd, err := tx.ExecContext(ctx,
 		`UPDATE challenge SET status = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND status = ?`,
@@ -212,8 +212,8 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		return nil, fmt.Errorf("core: reopen for release: expected to reopen challenge %s, updated %d rows", res.ChallengeID, n)
 	}
 
-	// 課題が着手中へ戻るので、承認済みの計画の版の done のタスクを in_progress にする。
-	if err := reopenDoneTasks(ctx, tx, rec, row.ChallengeID); err != nil {
+	// 課題が検証中へ戻るので、承認済みの計画の版の done のタスクを verifying にする。
+	if err := reverifyDoneTasks(ctx, tx, rec, row.ChallengeID); err != nil {
 		return nil, err
 	}
 
@@ -337,7 +337,7 @@ func linkSupersededApprovals(ctx context.Context, tx *sql.Tx, challengeID, newAp
 // labelReopenReason は委譲のブリーフを書く判断点（J3）の入力で、完了から戻した理由を渡すデータの区画の名前。
 const labelReopenReason = "本番反映のやり直し"
 
-// reopenNote は、課題を完了から着手中へ戻した記録のうち、その課題の最後の委譲より新しいもの。
+// reopenNote は、課題を完了から戻した記録のうち、その課題の最後の委譲より新しいもの。
 type reopenNote struct {
 	Reason ReopenReason
 	// Ref は立て直す release の参照（PR の URL。参照が無い release は空）。
@@ -382,7 +382,7 @@ func loadReopenNoteAfterRuns(ctx context.Context, tx *sql.Tx, challengeID int64,
 }
 
 // formatReopenSection は J3 の入力の区画「本番反映のやり直し」の本文。課題が完了の承認を受けた後に本番反映の段で
-// 着手中へ戻されたこと、戻した理由と PR、委譲先にやらせること（既定ブランチへ追従し、検査を通し、同じ PR へ
+// 完了から戻され、検証の後に着手中へ戻ったこと、戻した理由と PR、委譲先にやらせること（既定ブランチへ追従し、検査を通し、同じ PR へ
 // 反映する。新しい PR を作らない）を書く。
 func formatReopenSection(n *reopenNote, defaultBranch string) string {
 	pr := "この課題の PR"
@@ -390,12 +390,12 @@ func formatReopenSection(n *reopenNote, defaultBranch string) string {
 		pr = "PR " + n.Ref
 	}
 	var b strings.Builder
-	b.WriteString("この課題は完了の承認を受けたが、本番反映の段で着手中へ戻された。\n")
+	b.WriteString("この課題は完了の承認を受けたが、本番反映の段で完了から戻され、完了の検証で達成条件を満たさないと判定されて着手中へ戻った。\n")
 	switch n.Reason {
 	case ReopenReasonContentChanged:
-		fmt.Fprintf(&b, "理由: 検証の後に、%s へ既定ブランチ（%s）の取り込み以外の変更が入った。入った変更を含めた中身を、もう一度検証する。\n", pr, defaultBranch)
+		fmt.Fprintf(&b, "理由: 検証の後に、%s へ既定ブランチ（%s）の取り込み以外の変更が入った。入った変更を含めた中身が検証で満たされなかった。\n", pr, defaultBranch)
 	case ReopenReasonUndeterminable:
-		fmt.Fprintf(&b, "理由: 検証の後に、%s の head が動き、既定ブランチ（%s）の取り込みだけとは確かめられなかった（人が着手中へ戻した）。動いた中身を含めて、もう一度検証する。\n", pr, defaultBranch)
+		fmt.Fprintf(&b, "理由: 検証の後に、%s の head が動き、既定ブランチ（%s）の取り込みだけとは確かめられなかった（人が完了から戻した）。動いた中身が検証で満たされなかった。\n", pr, defaultBranch)
 	case ReopenReasonLimitReached:
 		fmt.Fprintf(&b, "理由: 本番反映の段で、%s が既定ブランチ（%s）へマージできない状態が連続の上限に達した。\n", pr, defaultBranch)
 	default:

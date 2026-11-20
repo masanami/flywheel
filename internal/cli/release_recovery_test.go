@@ -12,7 +12,7 @@ import (
 
 // #485: 完了の承認まで済んだ PR が本番反映でマージできなくなったときの立て直し。
 // D＝検証の後に head が動いても、既定ブランチの取り込みだけで CI が通っていれば承認し直せる。
-// A＝それ以外の変更が入った・マージできない場合は、課題を完了から着手中へ戻して検証し直す。
+// A＝それ以外の変更が入った・マージできない場合は、課題を完了から検証中へ戻して検証し直す。
 // 偽の gh（PATH の先頭）の応答だけで動かし、本物の GitHub は読まない。
 
 const (
@@ -331,11 +331,11 @@ func TestMergeIn_SingleApprovalOfAContentChangeOnADoneChallengeReopensTheChallen
 	if code != 1 || !strings.Contains(stderr, `"upstream_unavailable"`) {
 		t.Fatalf("exit=%d stderr=%s, want exit 1 with upstream_unavailable", code, stderr)
 	}
-	if !strings.Contains(stderr, "着手中へ戻し") {
-		t.Errorf("stderr = %s, want it to say the challenge was moved back to in_progress", stderr)
+	if !strings.Contains(stderr, "検証中へ戻し") {
+		t.Errorf("stderr = %s, want it to say the challenge was moved back to verifying", stderr)
 	}
-	if got := f.challengeStatus(t); got != "in_progress" {
-		t.Errorf("challenge status = %s, want in_progress", got)
+	if got := f.challengeStatus(t); got != "verifying" {
+		t.Errorf("challenge status = %s, want verifying", got)
 	}
 	show := runJSON(t, f.ws, "show", f.id)
 	old := findOperation(t, show, f.ops[0])
@@ -421,8 +421,8 @@ func TestOpExec_NotMergeableOnADoneChallengeMovesItBackToInProgress(t *testing.T
 	if it["result"] != "not_mergeable" || it["reopen_reason"] != "not_mergeable" || it["new_operation_id"] == nil {
 		t.Fatalf("item = %v, want not_mergeable with the challenge reopened", it)
 	}
-	if got := statusOfChallenge(t, ws, cid); got != "in_progress" {
-		t.Errorf("challenge status = %s, want in_progress", got)
+	if got := statusOfChallenge(t, ws, cid); got != "verifying" {
+		t.Errorf("challenge status = %s, want verifying", got)
 	}
 	show := runJSON(t, ws, "show", cid)
 	if o := findOperation(t, show, op); o["state"] != "closed" || o["closed_reason"] != "superseded" || o["superseded_by"] != it["new_operation_id"] {
@@ -533,8 +533,8 @@ func TestUndeterminable_HumanCanReopenTheChallengeInstead(t *testing.T) {
 	if doc["reason"] != "undeterminable" || doc["closed_operation_id"] != f.ops[0] || doc["new_operation_id"] == "" {
 		t.Fatalf("doc = %v", doc)
 	}
-	if got := f.challengeStatus(t); got != "in_progress" {
-		t.Errorf("challenge status = %s, want in_progress", got)
+	if got := f.challengeStatus(t); got != "verifying" {
+		t.Errorf("challenge status = %s, want verifying", got)
 	}
 }
 

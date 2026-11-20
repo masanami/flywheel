@@ -211,7 +211,7 @@ func ParseClosedReason(s string) (ClosedReason, bool) {
 	return "", false
 }
 
-// ReopenReason は、完了の課題を着手中へ戻した理由（challenge_reopen.reason・approval.superseded_reason）。
+// ReopenReason は、完了の課題を検証中へ戻した理由（challenge_reopen.reason・approval.superseded_reason）。
 type ReopenReason string
 
 // ReopenReason の4値。本番反映でマージできなくなった場合に限る。
@@ -223,7 +223,7 @@ const (
 	// ReopenReasonContentChanged は、検証の後に取り込み以外の変更が PR に入った。
 	ReopenReasonContentChanged ReopenReason = "content_changed"
 	// ReopenReasonUndeterminable は、検証の後に動いた head が取り込みだけとも中身の変更とも確かめられず（比較の打ち切り・
-	// head 無し等）、人が着手中へ戻す方を選んだ。
+	// head 無し等）、人が検証中へ戻す方を選んだ。
 	ReopenReasonUndeterminable ReopenReason = "undeterminable"
 )
 

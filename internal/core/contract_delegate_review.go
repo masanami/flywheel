@@ -92,7 +92,6 @@ type reviewReply struct {
 //   - 本番反映が済んでいる（その課題の release が executed）: ready を返して接続ツールの run を終わらせる。
 //   - 課題が着手中で、最後の J5 が not_met で、その後に契約のコマンドを呼んでいない: respond と差し戻しの理由を返す。
 //     差し戻しの上限（agent.ReworkLimit。J5 の not_met の数。保留への回答の後から数え直す）に達していれば、返さず保留にする。
-//   - 課題が着手中で、T18（本番反映でマージできず着手中へ戻した）の記録が最後の契約のコマンドより新しい: respond と理由（既定ブランチへ追従して衝突を解消する）を返す。
 //   - 課題が着手中で、T15（人が完了の承認を差し戻した）の記録が最後の契約のコマンドより新しい: respond と差し戻しの理由（approval.reason）を返す。
 //   - 課題が検証中: 何も呼ばない（Skip）。J5 は「直前の契約の run」の成果物を読むので、新しい読みで押し流さない。
 //
@@ -161,16 +160,6 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 			}
 		}
 		if note == "" {
-			// 本番反映でマージできず着手中へ戻された（T18）。戻した記録が最後の契約のコマンドより新しければ、理由を返す。
-			rn, err := loadReopenNoteAfterContract(ctx, tx, row.ChallengeID)
-			if err != nil {
-				return err
-			}
-			if rn != nil {
-				note = formatContractReopenNote(rn)
-			}
-		}
-		if note == "" {
 			// 人が完了の承認を差し戻した（T15）。最後の契約のコマンドより新しい差し戻しがあれば、すべての理由を古い順にまとめて返す。
 			reason, err := loadCompletionRejectionAfterContract(ctx, tx, row.ChallengeID)
 			if err != nil || reason == "" {
@@ -182,12 +171,6 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 		return nil
 	})
 	return out, classifyReadWriteErr(err)
-}
-
-// loadReopenNoteAfterContract は、課題の最後の戻した記録（T18）が、その課題の最後の契約のコマンドの開始より新しいときだけ
-// その記録を返す。契約のコマンドを呼んだ後は返さないので、同じ戻しを二重に配達しない。
-func loadReopenNoteAfterContract(ctx context.Context, tx *sql.Tx, challengeID int64) (*reopenNote, error) {
-	return loadReopenNoteAfterRuns(ctx, tx, challengeID, "'contract'")
 }
 
 // loadCompletionRejectionAfterContract は、課題の完了確認での差し戻し（T15。理由が空でないもの）のうち、その課題の最後の
@@ -212,22 +195,4 @@ func loadCompletionRejectionAfterContract(ctx context.Context, tx *sql.Tx, chall
 		undelivered = append(undelivered, r)
 	}
 	return formatCompletionRejectionsSection(undelivered), nil
-}
-
-// formatContractReopenNote は、T18 の後に契約の run へ返す添え書き（理由と、やること）。
-func formatContractReopenNote(n *reopenNote) string {
-	pr := "この課題の PR"
-	if n.Ref != "" {
-		pr = "PR " + n.Ref
-	}
-	reason := fmt.Sprintf("本番反映の段で、%s が既定ブランチへマージできなくなった。", pr)
-	switch n.Reason {
-	case ReopenReasonLimitReached:
-		reason = fmt.Sprintf("本番反映の段で、%s が既定ブランチへマージできない状態が連続の上限に達した。", pr)
-	case ReopenReasonContentChanged:
-		reason = fmt.Sprintf("検証の後に、%s へ既定ブランチの取り込み以外の変更が入った。", pr)
-	case ReopenReasonUndeterminable:
-		reason = fmt.Sprintf("検証の後に、%s の head が動き、既定ブランチの取り込みだけとは確かめられなかった（人が着手中へ戻した）。", pr)
-	}
-	return reason + "作業ブランチを既定ブランチへ追従させ、衝突があれば解消し、検査を通して、同じ PR へ反映すること。新しい PR を作らない。"
 }
