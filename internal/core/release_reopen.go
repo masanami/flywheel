@@ -60,6 +60,16 @@ func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs Reop
 		if err != nil {
 			return err
 		}
+		// 終わっていない試行（反映の段が「入れてよい」を返す途中かもしれない）があれば、読まずに戻さない。戻す書き込みも同じ条件で
+		// 止めるが、ここで止めないと、その試行が読みの後に閉じたとき、控えた最後の試行の ID が変わらず、見分けられない。
+		var open int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operation_execution WHERE ended_at IS NULL AND operation_id IN (SELECT id FROM operation WHERE challenge_id = ? AND kind = ?)`,
+			row.ChallengeID, string(OperationKindRelease)).Scan(&open); err != nil {
+			return err
+		}
+		if open > 0 {
+			return errReopenBlockedByRun
+		}
 		if lastAttempt, err = lastReleaseAttemptID(ctx, tx, row.ChallengeID); err != nil {
 			return err
 		}
