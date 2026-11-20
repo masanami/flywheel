@@ -275,7 +275,7 @@ func (s *Store) undeliveredFactsUnmetAnswer(ctx context.Context, cid int64, curr
 		}
 		var later int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM run WHERE challenge_id = ? AND kind = 'contract' AND id <> ? AND started_at >= ?`, cid, cur, at.String).Scan(&later); err != nil {
+			`SELECT COUNT(*) FROM run WHERE challenge_id = ? AND kind = 'contract' AND operation_id IS NULL AND id <> ? AND started_at >= ?`, cid, cur, at.String).Scan(&later); err != nil {
 			return err
 		}
 		if later == 0 {

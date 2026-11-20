@@ -37,6 +37,8 @@ type releaseRun struct {
 	corresponds bool
 	planVersion *int64
 	binding     *sourceBinding
+	// opID は、この実行を読む・取り消す反映の操作の内部整数 ID（契約のコマンドの run に印として付ける）。
+	opID int64
 }
 
 // route は対応する実行の種類を route の値にしたもの（対応しない実行は空）。
@@ -81,6 +83,7 @@ func (s *Store) loadReleaseRun(ctx context.Context, row *operationRow) (*release
 		if out, err = loadOpenRunInTx(ctx, tx, row.ChallengeID); err != nil || out == nil {
 			return err
 		}
+		out.opID = row.ID
 		cr := out.row
 		if cr.Kind == contractRunKindReflect {
 			out.corresponds = cr.OperationID != nil && *cr.OperationID == row.ID
@@ -95,11 +98,12 @@ func (s *Store) loadReleaseRun(ctx context.Context, row *operationRow) (*release
 	return out, nil
 }
 
-// taskRunImportedRef は、タスクの実行 cr が取り込んだ成果物（PR）の参照に、ref と同じものがあるか。
+// taskRunImportedRef は、タスクの実行 cr が取り込んだ成果物（PR）の参照に、ref と同じものがあるか。見るのは、その契約の実行が
+// 始まってから（start_run_id 以降）の契約のコマンドの実行が取り込んだ成果物だけで、終わった前の契約の実行の成果物は見ない。
 func taskRunImportedRef(ctx context.Context, tx *sql.Tx, cr *contractRunRow, ref string) (bool, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT a.ref FROM run_artifact a JOIN run r ON r.id = a.run_id
-		 WHERE r.challenge_id = ? AND r.kind = 'contract' AND r.task_id IS ? AND a.kind = 'pr'`, cr.ChallengeID, int64PtrColumn(cr.TaskID))
+		 WHERE r.challenge_id = ? AND r.kind = 'contract' AND r.id >= ? AND r.task_id IS ? AND a.kind = 'pr'`, cr.ChallengeID, cr.StartRunID, int64PtrColumn(cr.TaskID))
 	if err != nil {
 		return false, err
 	}
@@ -122,7 +126,9 @@ func taskRunImportedRef(ctx context.Context, tx *sql.Tx, cr *contractRunRow, ref
 
 // releaseContractCommand は反映の段が、既存の契約の実行へ契約のコマンド（status・resume・cancel）を 1 回呼んで記録する。
 // 契約の実行の記録を作れなかった（課題に終わっていない実行の記録がある）ときは errReleaseContractBusy を返す。
-func (s *Store) releaseContractCommand(ctx context.Context, opts ReleaseExecOptions, run *releaseRun, name string, fill contractFill) (*ContractRunReport, string, error) {
+// holdEnd が真なら、終わりを読んでも契約の実行を終わった記録にしない（反映の試行の結果を書く書き込みが終わった記録にする。
+// 反映の段の status と「入れてよい」の resume だけが真。完了から戻す前の読み・片付け・cancel は、その場で終わった記録にする）。
+func (s *Store) releaseContractCommand(ctx context.Context, opts ReleaseExecOptions, run *releaseRun, name string, fill contractFill, holdEnd bool) (*ContractRunReport, string, error) {
 	if opts.Contract == nil {
 		return nil, "the contract client is not available", nil
 	}
@@ -159,7 +165,8 @@ func (s *Store) releaseContractCommand(ctx context.Context, opts ReleaseExecOpti
 	}); classifyReadWriteErr(err) != nil {
 		return nil, "", classifyReadWriteErr(err)
 	}
-	rep, err := s.runExistingContractCommandWith(ctx, opts.Contract, agent, existingContractWorkDir(latest, ""), latest, name, command, run.planVersion, opts.cycleID, "", true)
+	opID := run.opID
+	rep, err := s.runExistingContractCommandWith(ctx, opts.Contract, agent, existingContractWorkDir(latest, ""), latest, name, command, run.planVersion, opts.cycleID, "", &opID, holdEnd)
 	if errors.Is(err, ErrRunInProgress) {
 		return nil, "", errReleaseContractBusy
 	}
@@ -171,8 +178,8 @@ func (s *Store) releaseContractCommand(ctx context.Context, opts ReleaseExecOpti
 
 // readReleaseRun は対応する契約の実行を、先に commands.status で読む。読めなかったとき、または実行が running のとき、反映の
 // 試行の結果（waiting_delegate・upstream_failed）を返す。それ以外は nil の判定と読んだ状態を返す（上流の確認へ進む）。
-func (s *Store) readReleaseRun(ctx context.Context, opts ReleaseExecOptions, run *releaseRun) (*ContractRunReport, *releaseJudgment, error) {
-	rep, why, err := s.releaseContractCommand(ctx, opts, run, "status", contractFill{})
+func (s *Store) readReleaseRun(ctx context.Context, opts ReleaseExecOptions, run *releaseRun, holdEnd bool) (*ContractRunReport, *releaseJudgment, error) {
+	rep, why, err := s.releaseContractCommand(ctx, opts, run, "status", contractFill{}, holdEnd)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -213,7 +220,7 @@ func (s *Store) cancelReleaseRunNote(ctx context.Context, opts ReleaseExecOption
 	if rep == nil {
 		var early *releaseJudgment
 		var err error
-		if rep, early, err = s.readReleaseRun(ctx, opts, run); err != nil {
+		if rep, early, err = s.readReleaseRun(ctx, opts, run, false); err != nil {
 			return "could not read the contract run to cancel it: " + err.Error()
 		}
 		if early != nil && early.result == ExecutionResultUpstreamFailed {
@@ -223,7 +230,7 @@ func (s *Store) cancelReleaseRunNote(ctx context.Context, opts ReleaseExecOption
 	if rep.State.Terminal() {
 		return ""
 	}
-	out, why, err := s.releaseContractCommand(ctx, opts, run, "cancel", contractFill{})
+	out, why, err := s.releaseContractCommand(ctx, opts, run, "cancel", contractFill{}, false)
 	switch {
 	case err != nil:
 		return "could not cancel the contract run: " + err.Error()
@@ -255,7 +262,8 @@ func (s *Store) chooseReleasePath(ctx context.Context, row *operationRow, opts R
 	}
 	if !run.corresponds {
 		// 別の成果物の実行・別の反映の操作の反映の依頼。何も呼ばない。
-		if run.row.State == ContractStateRunning {
+		// 別の反映の操作が終わりを読んで、結果を書くまで開けている実行（終わりの状態で、まだ終わった記録でない）も、その操作が閉じるまで待つ。
+		if run.row.State == ContractStateRunning || run.row.State.Terminal() {
 			return releaseJudgment{result: ExecutionResultWaitingDelegate, observedHead: observed}, nil
 		}
 		return releaseJudgment{result: ExecutionResultUnsupported, observedHead: observed,
@@ -324,7 +332,7 @@ func (s *Store) landToRun(ctx context.Context, row *operationRow, opts ReleaseEx
 // releaseLand は commands.resume で「入れてよい」を返す。返せた（resume が成功した）ときの理由は空。
 func (s *Store) releaseLand(ctx context.Context, opts ReleaseExecOptions, run *releaseRun, passRef string) (*ContractRunReport, string, error) {
 	rep, why, err := s.releaseContractCommand(ctx, opts, run, "resume",
-		contractFill{Answer: contractAnswer{Choice: contractChoiceLand}, ApprovedRef: passRef})
+		contractFill{Answer: contractAnswer{Choice: contractChoiceLand}, ApprovedRef: passRef}, true)
 	if err != nil {
 		return nil, "", err
 	}

@@ -625,8 +625,9 @@ func TestImport_S3aColumnsSurviveTheRoundTrip(t *testing.T) {
 		`SELECT kind || '|' || COALESCE(operation_id, 'NULL') || '|' || requested_options || '|' || content_ref || '|' || facts || '|' ||
 			facts_unmet_count || '|' || land_ref || '|' || land_delivered FROM contract_run WHERE id = 1`,
 		`SELECT role FROM run_artifact WHERE id = 1`,
+		`SELECT COALESCE(operation_id, 'NULL') || '|' || (SELECT COALESCE(operation_id, 'NULL') FROM run WHERE id = 1) FROM run WHERE id = 2`,
 	}
-	want := []string{`reflect|1|["ready","respond"]|abc123|{"k":"v"}|2|o/r#3|1`, `integration`}
+	want := []string{`reflect|1|["ready","respond"]|abc123|{"k":"v"}|2|o/r#3|1`, `integration`, `1|NULL`}
 	for i, query := range q {
 		var got string
 		if err := dst.db.Read(context.Background(), func(tx *sql.Tx) error { return tx.QueryRow(query).Scan(&got) }); err != nil {

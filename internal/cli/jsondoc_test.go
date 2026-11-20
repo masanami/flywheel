@@ -564,11 +564,11 @@ func assertDocumentedReleasePhase(t *testing.T, doc documentedJSON, where string
 	for j, td := range tidied {
 		tm, _ := td.(map[string]any)
 		got := keysOf(tm)
-		for _, optional := range []string{"closed_reason", "new_operation_id", "reopen_reason"} {
+		for _, optional := range []string{"closed_reason", "new_operation_id", "reopen_reason", "wait_reason", "cancel_note"} {
 			delete(got, optional)
 		}
 		if want := map[string]bool{"action": true, "challenge_id": true, "operation_id": true}; !reflect.DeepEqual(got, want) {
-			t.Errorf("%s.tidied[%d] keys = %v, documented = %v (+ optional closed_reason, new_operation_id, reopen_reason)", where, j, sortedKeys(got), sortedKeys(want))
+			t.Errorf("%s.tidied[%d] keys = %v, documented = %v (+ optional closed_reason, new_operation_id, reopen_reason, wait_reason, cancel_note)", where, j, sortedKeys(got), sortedKeys(want))
 		}
 		action, _ := tm["action"].(string)
 		switch action {
@@ -580,8 +580,12 @@ func assertDocumentedReleasePhase(t *testing.T, doc documentedJSON, where string
 			if _, has := tm["reopen_reason"]; !has {
 				t.Errorf("%s.tidied[%d] is reopened without reopen_reason", where, j)
 			}
+		case "needs_human", "skipped":
+			if _, has := tm["wait_reason"]; !has {
+				t.Errorf("%s.tidied[%d] is %s without wait_reason", where, j, action)
+			}
 		default:
-			t.Errorf("%s.tidied[%d].action = %q, want closed or reopened", where, j, action)
+			t.Errorf("%s.tidied[%d].action = %q, want closed, reopened, needs_human or skipped", where, j, action)
 		}
 	}
 	ns, ok := pm["not_started"].([]any)

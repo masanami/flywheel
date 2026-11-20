@@ -59,7 +59,7 @@ func ClosedSets() []ClosedSet {
 var executionResultLabels = map[core.ExecutionResult]string{
 	core.ExecutionResultMerged:           "反映先へ入れた",
 	core.ExecutionResultAlreadyMerged:    "すでに反映先へ入っていた",
-	core.ExecutionResultWaitingChecks:    "チェックの完了か、入れられるかの判定を待っている",
+	core.ExecutionResultWaitingChecks:    "チェックの完了を待っている",
 	core.ExecutionResultUpstreamFailed:   "上流を読めなかった",
 	core.ExecutionResultChecksFailed:     "チェックが失敗した",
 	core.ExecutionResultNotMergeable:     "反映先へ入れられない",
@@ -71,7 +71,7 @@ var executionResultLabels = map[core.ExecutionResult]string{
 	core.ExecutionResultNoApprovedHead:   "承認した中身の記録が無い",
 	core.ExecutionResultUnsupported:      "flywheel が扱えない形だった",
 	core.ExecutionResultMergedUnapproved: "承認なしで反映された",
-	core.ExecutionResultLimitReached:     "失敗か、反映先の取り込みの繰り返しが上限に達した",
+	core.ExecutionResultLimitReached:     "失敗が連続の回数の上限に達した",
 	core.ExecutionResultInterrupted:      "試行が途中で止まった",
 	core.ExecutionResultLanded:           "委譲先が反映先へ入れた",
 	core.ExecutionResultLandSent:         "委譲先へ「入れてよい」を返した",

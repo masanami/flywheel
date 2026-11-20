@@ -134,7 +134,8 @@ func TestReleaseAfterLand_SucceededAndMergedWithAnUnrelatedChangeIsMergedUnappro
 	}
 }
 
-// AC-196・197: succeeded で上流を読めなければ upstream_failed（反映の操作は approved のまま）。次の反映の段で読めて入っていれば executed。
+// AC-196・197: succeeded で上流を読めなければ upstream_failed（反映の操作は approved のまま）。終わりを読んだ契約の実行は、結果を書くまで
+// 終わった記録にしないので、次の反映の段で読めて入っていれば landed（委譲先が succeeded）で executed。
 func TestReleaseAfterLand_SucceededWithAnUnreadableUpstreamIsUpstreamFailedAndTheNextStageExecutes(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
@@ -149,11 +150,17 @@ func TestReleaseAfterLand_SucceededWithAnUnreadableUpstreamIsUpstreamFailedAndTh
 	}
 	f.fake.getErr = nil
 	f.merged(f.head)
-	if item := f.release(t); item.Result != ExecutionResultAlreadyMerged {
-		t.Fatalf("item = %+v, want already_merged (the run was already read as ended)", item)
+	if f.runEnded(t) {
+		t.Fatal("the contract run was recorded as ended before the result was written")
+	}
+	if item := f.release(t); item.Result != ExecutionResultLanded {
+		t.Fatalf("item = %+v, want landed (the delegate succeeded and the approved content is in)", item)
 	}
 	if got := f.opState(t); got != "executed" {
 		t.Fatalf("operation = %s, want executed", got)
+	}
+	if !f.runEnded(t) {
+		t.Error("the contract run is not recorded as ended after the result was written")
 	}
 }
 

@@ -131,7 +131,8 @@ type ReleaseItem struct {
 
 // ReleaseTidied は release の段の、承認待ちの release の片付け 1 件。action は closed（PR がマージ済み、またはマージされずに閉じられていて closed にした。
 // closed_reason は merged_outside | merged_unapproved | pr_closed）か reopened（検証の後に中身が変わった PR の release を置き換え、
-// 完了の課題を検証中へ戻した。reopen_reason は content_changed、new_operation_id は新しい release）。
+// 完了の課題を検証中へ戻した。reopen_reason は content_changed、new_operation_id は新しい release）か needs_human（取り込みだけとも
+// 中身の変更とも確かめられず、人間待ちにした）か skipped（検証中へ戻す前の読みで戻せず、飛ばした）。needs_human・skipped は wait_reason を持つ。
 type ReleaseTidied struct {
 	Action string `json:"action"`
 	// CancelNote は action が closed のとき、対応する契約の実行を取り消せなかった理由（取り消せたか不要なら出さない）。
