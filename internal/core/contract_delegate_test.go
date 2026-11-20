@@ -564,3 +564,128 @@ func TestContractCommands_UseTheWorkDirRecordedAtStart(t *testing.T) {
 		})
 	}
 }
+
+func (f *contractFixture) queryString(t *testing.T, q string) sql.NullString {
+	t.Helper()
+	var v sql.NullString
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error { return tx.QueryRow(q).Scan(&v) }); err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+	return v
+}
+
+// 成果物の role は run_artifact.role に残り、role の無い成果物は NULL になる。
+func TestPollContractRuns_ArtifactRoleIsRecorded(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, func(st *ContractStatus) {
+		st.Artifacts = []ContractArtifact{{Kind: "commit", Ref: "a1"}, {Kind: "commit", Ref: "b2", Role: "integration"}}
+	})}
+	f.poll(t)
+	if v := f.queryString(t, `SELECT role FROM run_artifact WHERE ref = 'b2'`); !v.Valid || v.String != "integration" {
+		t.Errorf("role of b2 = %v, want integration", v)
+	}
+	if v := f.queryString(t, `SELECT role FROM run_artifact WHERE ref = 'a1'`); v.Valid {
+		t.Errorf("role of a1 = %v, want NULL", v)
+	}
+}
+
+// 出力を読むたびに contract_run.facts は出力の facts で置き換わり、facts の無い出力では NULL に戻る。
+func TestPollContractRuns_FactsAreReplacedOnEveryRead(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	f.client.queue = []ContractLaunchOutput{
+		contractOut(ContractStateRunning, nil, func(st *ContractStatus) { st.Facts = map[string]string{"tests": "pass"} }),
+		contractOut(ContractStateRunning, nil, func(st *ContractStatus) { st.Facts = map[string]string{"lint": "ok"} }),
+		contractOut(ContractStateRunning, nil, nil),
+	}
+	f.poll(t)
+	if v := f.queryString(t, `SELECT facts FROM contract_run`); v.String != `{"tests":"pass"}` {
+		t.Errorf("facts after read 1 = %v", v)
+	}
+	f.poll(t)
+	if v := f.queryString(t, `SELECT facts FROM contract_run`); v.String != `{"lint":"ok"}` {
+		t.Errorf("facts after read 2 = %v, want replaced", v)
+	}
+	f.poll(t)
+	if v := f.queryString(t, `SELECT facts FROM contract_run`); v.Valid {
+		t.Errorf("facts after read 3 = %v, want NULL", v)
+	}
+}
+
+// 待ちの options は contract_run.requested_options に残り、読むたびに置き換わり、options の無い待ちでは NULL になる。
+func TestPollContractRuns_RequestedOptionsAreReplacedOnEveryRead(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	wait := func(opts []string) ContractLaunchOutput {
+		return contractOut(ContractStateWaiting, nil, func(st *ContractStatus) {
+			st.RequestedAction = &ContractRequestedAction{Kind: "observe", Decider: "any", Text: "t", Options: opts}
+		})
+	}
+	f.client.queue = []ContractLaunchOutput{wait([]string{"a", "b"}), wait([]string{"c"}), wait(nil)}
+	f.poll(t)
+	if v := f.queryString(t, `SELECT requested_options FROM contract_run`); v.String != `["a","b"]` {
+		t.Errorf("requested_options after read 1 = %v", v)
+	}
+	f.poll(t)
+	if v := f.queryString(t, `SELECT requested_options FROM contract_run`); v.String != `["c"]` {
+		t.Errorf("requested_options after read 2 = %v, want replaced", v)
+	}
+	f.poll(t)
+	if v := f.queryString(t, `SELECT requested_options FROM contract_run`); v.Valid {
+		t.Errorf("requested_options after read 3 = %v, want NULL", v)
+	}
+}
+
+// 中身の識別は、kind が commit で role の無い成果物がちょうど 1 つのときだけ、その ref を content_ref に残す。
+func TestPollContractRuns_ContentRefIsTheOnlyRolelessCommit(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		arts []ContractArtifact
+		want string // "" は NULL
+	}{
+		"one_commit":                 {[]ContractArtifact{{Kind: "commit", Ref: "a1"}}, "a1"},
+		"integration_not_counted":    {[]ContractArtifact{{Kind: "commit", Ref: "a1"}, {Kind: "commit", Ref: "b2", Role: "integration"}}, "a1"},
+		"two_roleless_commits":       {[]ContractArtifact{{Kind: "commit", Ref: "a1"}, {Kind: "commit", Ref: "b2"}}, ""},
+		"no_commit":                  {[]ContractArtifact{{Kind: "pr", Ref: "https://github.com/o/r/pull/1"}}, ""},
+		"only_integration_commit":    {[]ContractArtifact{{Kind: "commit", Ref: "b2", Role: "integration"}}, ""},
+		"other_kind_with_same_shape": {[]ContractArtifact{{Kind: "branch", Ref: "x"}, {Kind: "commit", Ref: "a1"}}, "a1"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newContractFixture(t)
+			if _, err := f.start(t); err != nil {
+				t.Fatal(err)
+			}
+			f.client.queue = []ContractLaunchOutput{contractOut(ContractStateRunning, nil, func(st *ContractStatus) { st.Artifacts = c.arts })}
+			f.poll(t)
+			v := f.queryString(t, `SELECT content_ref FROM contract_run`)
+			if c.want == "" && v.Valid || c.want != "" && v.String != c.want {
+				t.Errorf("content_ref = %v, want %q", v, c.want)
+			}
+		})
+	}
+}
+
+// 新しい列の既定値: タスクの実行（kind=task）で、反映の列は初期値のまま。
+func TestStartContractDelegation_NewColumnsKeepTheirDefaults(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM contract_run WHERE kind = 'task' AND operation_id IS NULL AND facts_unmet_count = 0
+		AND land_ref IS NULL AND land_delivered = 0`); n != 1 {
+		t.Fatalf("contract_run with default new columns = %d, want 1", n)
+	}
+}

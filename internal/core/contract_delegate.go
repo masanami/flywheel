@@ -82,6 +82,8 @@ func resolvableByTerminal(resolvableBy string) bool {
 type ContractArtifact struct {
 	Kind string
 	Ref  string
+	// Role は成果物の役割（任意。無ければ空。run_artifact.role に残す。例: integration）。
+	Role string
 }
 
 // ContractStatus は契約の標準出力 JSON（契約の版 1）を正規化した形。invoker が JSON から写し、
@@ -95,6 +97,8 @@ type ContractStatus struct {
 	Artifacts       []ContractArtifact
 	// CostUSD は孫を含む累計（null・無しは nil）。
 	CostUSD *float64
+	// Facts は出力の facts（名前から文字列への対応。無い・形が合わないときは nil）。
+	Facts map[string]string
 }
 
 // ContractLaunchInput は ContractClient へ渡す、契約のコマンド 1 回ぶんの情報。差し込みは core が
@@ -926,8 +930,21 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	if st.State.Terminal() {
 		endedAt = now
 	}
+	if err := s.writeContractRunRecord(ctx, tx, c, st, rk, rd, rt, rb, totalMicros, now, endedAt); err != nil {
+		return err
+	}
+	if st.State != ContractStateSucceeded {
+		return nil
+	}
+	return s.afterContractSucceeded(ctx, tx, c, st, report)
+}
+
+// writeContractRunRecord は読めた状態で contract_run の行を作る・更新する。あわせて、出力の facts・待ちの options・
+// レビュー待ちの中身の識別を、読むたびに置き換えて残す（記録するだけで、扱いは変えない）。
+func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contractCall, st *ContractStatus, rk, rd, rt, rb any, totalMicros int64, now string, endedAt any) error {
+	var rowID int64
 	if c.Existing == nil {
-		_, err := tx.ExecContext(ctx,
+		res, err := tx.ExecContext(ctx,
 			`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary,
 				requested_kind, requested_decider, requested_text, requested_resolvable_by, cost_usd, max_budget_usd, started_at, observed_at, ended_at, work_dir, task_id)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -936,7 +953,11 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 		if err != nil {
 			return err
 		}
+		if rowID, err = res.LastInsertId(); err != nil {
+			return err
+		}
 	} else {
+		rowID = c.Existing.ID
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE contract_run SET state = ?, summary = ?, requested_kind = ?, requested_decider = ?, requested_text = ?,
 				requested_resolvable_by = ?, cost_usd = ?, observed_at = ?, ended_at = ?,
@@ -945,9 +966,55 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 			return err
 		}
 	}
-	if st.State != ContractStateSucceeded {
-		return nil
+	facts, err := encodeContractFacts(st.Facts)
+	if err != nil {
+		return err
 	}
+	var opts any
+	if ra := st.RequestedAction; ra != nil && len(ra.Options) > 0 {
+		b, err := json.Marshal(ra.Options)
+		if err != nil {
+			return err
+		}
+		opts = string(b)
+	}
+	_, err = tx.ExecContext(ctx,
+		`UPDATE contract_run SET facts = ?, requested_options = ?, content_ref = ? WHERE id = ?`,
+		facts, opts, nullableTextColumn(reviewContentRef(st.Artifacts)), rowID)
+	return err
+}
+
+// encodeContractFacts は facts を JSON の文字列にする（nil は NULL）。
+func encodeContractFacts(f map[string]string) (any, error) {
+	if f == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(f)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
+}
+
+// reviewContentRef はレビュー待ちの中身の識別を返す。成果物のうち kind が commit で role の無い要素の ref が
+// ちょうど 1 つのときだけ。role が付いた commit（integration など）は数えない。0 件・2 件以上は空。
+func reviewContentRef(arts []ContractArtifact) string {
+	var ref string
+	n := 0
+	for _, a := range arts {
+		if a.Kind == "commit" && a.Role == "" {
+			ref = a.Ref
+			n++
+		}
+	}
+	if n != 1 {
+		return ""
+	}
+	return ref
+}
+
+// afterContractSucceeded は succeeded を読んだときの記録（保留の間に読んだ印と成果物の取り込み）。
+func (s *Store) afterContractSucceeded(ctx context.Context, tx *sql.Tx, c contractCall, st *ContractStatus, report *ContractRunReport) error {
 	// 課題が保留（awaiting_human）の間に succeeded を読んだ印。答えの後の周で、start も resume も呼ばずに検証中へ進める。
 	if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 1 WHERE challenge_id = ? AND external_run_id = ?
 		AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND status = 'awaiting_human')`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
@@ -974,7 +1041,7 @@ func importContractArtifacts(ctx context.Context, tx *sql.Tx, runInt int64, arts
 		default:
 			continue
 		}
-		if _, err := insertRunArtifact(ctx, tx, runInt, insertRunArtifactInput{Kind: kind, Ref: a.Ref, VerifiedAt: &verifiedAt}); err != nil {
+		if _, err := insertRunArtifact(ctx, tx, runInt, insertRunArtifactInput{Kind: kind, Ref: a.Ref, Role: a.Role, VerifiedAt: &verifiedAt}); err != nil {
 			return nil, err
 		}
 		if kind == artifactKindPR {

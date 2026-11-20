@@ -208,7 +208,7 @@ func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
 	if got := pragmaTableInfoColumnsForTest(t, s, "slot"); !stringSlicesEqual(got, wantSlot) {
 		t.Fatalf("slot columns = %v, want %v", got, wantSlot)
 	}
-	wantArtifact := []string{"id", "run_id", "kind", "ref", "state", "base", "verified_at", "verified_head_sha"}
+	wantArtifact := []string{"id", "run_id", "kind", "ref", "state", "base", "verified_at", "verified_head_sha", "role"}
 	if got := pragmaTableInfoColumnsForTest(t, s, "run_artifact"); !stringSlicesEqual(got, wantArtifact) {
 		t.Fatalf("run_artifact columns = %v, want %v", got, wantArtifact)
 	}

@@ -195,3 +195,56 @@ func sameDir(t *testing.T, a, b string) bool {
 	rb, err2 := filepath.EvalSymlinks(b)
 	return err1 == nil && err2 == nil && ra == rb
 }
+
+// artifacts の role は任意の文字列。無ければ空、あれば値を写す。
+func TestContractCommand_ArtifactRoleIsNormalized(t *testing.T) {
+	in, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"contract_version": 1, "run_id": "r-1", "state": "succeeded", "summary": "s",
+	  "requested_action": null, "artifacts": [{"kind": "commit", "ref": "a1"}, {"kind": "commit", "ref": "b2", "role": "integration"}], "cost_usd": null}`})
+	out, err := NewLauncher().Status(context.Background(), in)
+	if err != nil || out.Status == nil {
+		t.Fatalf("out = %+v err = %v", out, err)
+	}
+	want := []core.ContractArtifact{{Kind: "commit", Ref: "a1"}, {Kind: "commit", Ref: "b2", Role: "integration"}}
+	if !reflect.DeepEqual(out.Status.Artifacts, want) {
+		t.Fatalf("artifacts = %+v, want %+v", out.Status.Artifacts, want)
+	}
+}
+
+// 成果物の role が文字列でなければ、契約の出力の誤り（malformed）にし、状態を返さない。
+func TestContractCommand_NonStringArtifactRoleIsMalformed(t *testing.T) {
+	in, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"contract_version": 1, "run_id": "r-1", "state": "succeeded", "summary": "s",
+	  "requested_action": null, "artifacts": [{"kind": "commit", "ref": "a1", "role": 3}], "cost_usd": null}`})
+	out, err := NewLauncher().Status(context.Background(), in)
+	if err != nil || out.Result != core.RunResultMalformed || out.Status != nil {
+		t.Fatalf("out = %+v err = %v, want malformed without a status", out, err)
+	}
+}
+
+// facts は名前から文字列への対応のときだけ読む。形が合わない facts は無いものとして扱い、出力の全体は malformed にしない。
+func TestContractCommand_FactsAreReadOnlyWhenTheShapeFits(t *testing.T) {
+	cases := map[string]struct {
+		facts string
+		want  map[string]string
+	}{
+		"map":        {`"facts": {"tests": "pass"},`, map[string]string{"tests": "pass"}},
+		"absent":     {``, nil},
+		"null":       {`"facts": null,`, nil},
+		"not_a_map":  {`"facts": ["a"],`, nil},
+		"non_string": {`"facts": {"a": "x", "b": 1},`, nil},
+		"null_value": {`"facts": {"a": "x", "b": null},`, nil},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			facts := c.facts
+			in, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"contract_version": 1, "run_id": "r-1", "state": "running", "summary": "s",` + facts + `
+			  "requested_action": null, "artifacts": [], "cost_usd": null}`})
+			out, err := NewLauncher().Status(context.Background(), in)
+			if err != nil || out.Result == core.RunResultMalformed || out.Status == nil {
+				t.Fatalf("out = %+v err = %v, want a status", out, err)
+			}
+			if !reflect.DeepEqual(out.Status.Facts, c.want) {
+				t.Fatalf("facts = %v, want %v", out.Status.Facts, c.want)
+			}
+		})
+	}
+}
