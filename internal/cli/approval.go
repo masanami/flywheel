@@ -74,7 +74,7 @@ func runReopenOperation(a Args, verifier core.Verifier, id string) (any, error) 
 	if _, err := core.Verify(core.ChannelCLI, verifier, summary, id); err != nil {
 		return nil, mapCoreErr(err)
 	}
-	res, err := a.Store.ReopenChallengeForRelease(context.Background(), core.ChannelCLI, core.ReopenForReleaseInput{OperationID: id, Reason: core.ReopenReasonUndeterminable, Sources: src})
+	res, err := a.Store.ReopenChallengeForRelease(context.Background(), core.ChannelCLI, core.ReopenForReleaseInput{OperationID: id, Reason: core.ReopenReasonUndeterminable, Sources: src, ContractSources: reopenContractSources(a)})
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -864,4 +864,19 @@ func withoutOperations(ops []core.IrreversibleOperation, ids []string) []core.Ir
 		}
 	}
 	return out
+}
+
+// reopenContractSources は、課題を完了から戻す前にタスクの契約の実行を読む口（宣言と契約のコマンドの起動）。
+// 宣言を読めなければ口を渡さない（core は、終わっていないタスクの実行があるのに口が無ければ戻さない）。
+func reopenContractSources(a Args) core.ReopenContractSources {
+	ws := a.Store.Workspace()
+	decl, err := core.LoadAgentDeclaration(ws)
+	if err != nil {
+		return core.ReopenContractSources{}
+	}
+	conn, err := core.LoadConnectorsDeclaration(ws)
+	if err != nil {
+		return core.ReopenContractSources{}
+	}
+	return core.ReopenContractSources{Contract: invoker.NewLauncherWithLookPath(a.LookPath), Agent: decl, Connectors: conn}
 }

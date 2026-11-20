@@ -133,14 +133,16 @@ type ReleaseItem struct {
 // closed_reason は merged_outside | merged_unapproved | pr_closed）か reopened（検証の後に中身が変わった PR の release を置き換え、
 // 完了の課題を検証中へ戻した。reopen_reason は content_changed、new_operation_id は新しい release）。
 type ReleaseTidied struct {
-	Action         string  `json:"action"`
+	Action string `json:"action"`
+	// CancelNote は action が closed のとき、対応する契約の実行を取り消せなかった理由（取り消せたか不要なら出さない）。
+	CancelNote     *string `json:"cancel_note,omitempty"`
 	ChallengeID    string  `json:"challenge_id"`
 	ClosedReason   *string `json:"closed_reason,omitempty"`
 	NewOperationID *string `json:"new_operation_id,omitempty"`
 	OperationID    string  `json:"operation_id"`
 	ReopenReason   *string `json:"reopen_reason,omitempty"`
 	// WaitReason は action が needs_human（検証の後に動いた head が取り込みだけとも中身の変更とも確かめられず、人間待ちにした。
-	// 人が承認するか検証中へ戻すかを選ぶ）のときの、判定できなかった理由。
+	// 人が承認するか検証中へ戻すかを選ぶ）か skipped（完了の課題を検証中へ戻す前の、タスクの契約の実行の読みで戻せず、飛ばした）のときの、理由。
 	WaitReason *string `json:"wait_reason,omitempty"`
 }
 
@@ -297,6 +299,7 @@ func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []c
 			OperationID:    t.OperationID,
 			ReopenReason:   strOrNil(string(t.ReopenReason)),
 			WaitReason:     strOrNil(t.WaitReason),
+			CancelNote:     strOrNil(t.CancelNote),
 		})
 	}
 	outNS := make([]ReleaseNotStarted, 0, len(notStarted))

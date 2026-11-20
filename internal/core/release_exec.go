@@ -104,6 +104,9 @@ const (
 	// ReleaseTidyNeedsHuman は、完了の課題の release の PR の head が検証の後に動いたが、取り込みだけとも中身の変更とも
 	// 確かめられず（比較の打ち切り・head 無し等）、人間待ちにしたこと。何も書かない。人が承認するか検証中へ戻すかを選ぶ。
 	ReleaseTidyNeedsHuman ReleaseTidyAction = "needs_human"
+	// ReleaseTidySkipped は、完了の課題を検証中へ戻す前の読みで、終わっていないタスクの契約の実行が running か読めなかったため、
+	// その課題を飛ばしたこと（課題は完了のまま。次の反映の段でやり直す）。
+	ReleaseTidySkipped ReleaseTidyAction = "skipped"
 )
 
 // ReleaseTidyItem は承認待ちの release の片付け 1 件の結果。
@@ -116,8 +119,10 @@ type ReleaseTidyItem struct {
 	// ReopenReason・NewOperationID は Action が reopened のときの戻した理由と新しい release。
 	ReopenReason   ReopenReason
 	NewOperationID string
-	// WaitReason は Action が needs_human のときの、判定できなかった理由。
+	// WaitReason は Action が needs_human のとき・skipped のときの、判定できなかった理由。
 	WaitReason string
+	// CancelNote は Action が closed のとき、対応する契約の実行を取り消せなかった（読めなかった）理由（取り消せたか不要なら空）。
+	CancelNote string
 }
 
 // PartialReleaseError は release の段が途中でエラーになったとき、それまでに実行済みの結果（マージ済みの
@@ -564,6 +569,10 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 			early.route = run.route()
 			return *early, nil
 		}
+		// 「入れてよい」が届いた後に、同じ中身のレビュー待ちが戻った: 委譲先が入れられなかった。
+		if refused := landRefusal(run, rep); refused != nil {
+			return *refused, nil
+		}
 	}
 	j, err := s.judgeReleaseUpstream(ctx, row, approvedHead, opts, run, rep)
 	if err != nil {
@@ -571,6 +580,11 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 	}
 	if j.route == "" && j.result != ExecutionResultWaitingOutside {
 		j.route = run.route()
+	}
+	// 委譲先の succeeded を読む以外の道で終わるとき、終わっていない対応する実行を取り消す（開いたまま残さない）。
+	switch j.result {
+	case ExecutionResultAlreadyMerged, ExecutionResultMergedUnapproved, ExecutionResultClosed:
+		j.detail = appendDetail(j.detail, s.cancelReleaseRunNote(ctx, opts, run, rep))
 	}
 	return j, nil
 }
@@ -611,9 +625,19 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 					detail = noChecksMergeDetail
 				}
 			}
-			return releaseJudgment{result: ExecutionResultAlreadyMerged, observedHead: observed, mergeCommit: pr.MergeCommitSHA, detail: detail}, nil
+			// 委譲先が succeeded で終わって入っていれば landed、failed・cancelled で終わった（または終わりを読んでいない）なら already_merged。
+			result := ExecutionResultAlreadyMerged
+			if rep != nil && rep.State == ContractStateSucceeded {
+				result = ExecutionResultLanded
+			}
+			return releaseJudgment{result: result, observedHead: observed, mergeCommit: pr.MergeCommitSHA, detail: detail}, nil
 		}
 		return releaseJudgment{result: ExecutionResultMergedUnapproved, observedHead: observed}, nil
+	}
+	// 委譲先が終わりの状態で、成果物が反映先へ入っていない（succeeded を返したときを含む）。取り消して、承認し直しを待つ。
+	if rep != nil && rep.State.Terminal() {
+		return releaseJudgment{result: ExecutionResultDelegateEnded, observedHead: observed,
+			detail: fmt.Sprintf("the contract run %s ended as %s without landing the artifact", run.row.ExternalRunID, rep.State)}, nil
 	}
 	// 5
 	if pr.State == string(artifactStateClosed) {

@@ -278,7 +278,7 @@ func operationReleaseDecision(ctx context.Context, a Args, p *core.OperationAppr
 				return nil, mapCoreErr(err)
 			}
 			if as.Verdict == core.ReleaseReopenRequired {
-				res, err := a.Store.ReopenChallengeForRelease(ctx, core.ChannelCLI, core.ReopenForReleaseInput{OperationID: p.OperationID, Reason: core.ReopenReasonContentChanged, Sources: src})
+				res, err := a.Store.ReopenChallengeForRelease(ctx, core.ChannelCLI, core.ReopenForReleaseInput{OperationID: p.OperationID, Reason: core.ReopenReasonContentChanged, Sources: src, ContractSources: reopenContractSources(a)})
 				if err != nil {
 					return nil, mapCoreErr(err)
 				}

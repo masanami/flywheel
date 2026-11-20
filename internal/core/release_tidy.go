@@ -22,6 +22,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -164,6 +165,10 @@ func (s *Store) closePendingRelease(ctx context.Context, actor string, p pending
 	if err != nil {
 		return nil, err
 	}
+	if item != nil {
+		// 閉じたので、対応する契約の実行が終わっていなければ status で読んで取り消す（開いたまま残さない。失敗は結果に残す）。
+		item.CancelNote = s.cancelTidiedReleaseRun(ctx, p, opts)
+	}
 	return item, nil
 }
 
@@ -183,7 +188,13 @@ func (s *Store) reopenIfVerifiedContentChanged(ctx context.Context, p pendingRel
 			OperationID: opText, ChallengeID: formatChallengeID(p.challengeID), Action: ReleaseTidyNeedsHuman, WaitReason: as.Detail,
 		}, nil
 	case ReleaseReopenRequired:
-		res, err := s.reopenChallengeForRelease(ctx, ChannelCLI, opText, ReopenReasonContentChanged, as)
+		res, err := s.reopenChallengeForRelease(ctx, ChannelCLI, opText, ReopenReasonContentChanged, as,
+			ReopenContractSources{Contract: opts.Contract, Agent: opts.Agent, Connectors: opts.Connectors})
+		if errors.Is(err, errReopenBlockedByRun) {
+			// その課題を飛ばして結果に残す。課題は完了のまま。次の反映の段でやり直す。
+			return &ReleaseTidyItem{OperationID: opText, ChallengeID: formatChallengeID(p.challengeID), Action: ReleaseTidySkipped,
+				WaitReason: "the task contract run is running or could not be read"}, nil
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -196,4 +207,20 @@ func (s *Store) reopenIfVerifiedContentChanged(ctx context.Context, p pendingRel
 		}, nil
 	}
 	return nil, nil
+}
+
+// cancelTidiedReleaseRun は、片付けで閉じた反映の操作 p に対応するタスクの実行を、終わっていなければ取り消す。失敗は文で返す。
+func (s *Store) cancelTidiedReleaseRun(ctx context.Context, p pendingReleaseRef, opts ReleaseExecOptions) string {
+	var row *operationRow
+	if err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		row, err = loadOperationRow(ctx, tx, p.opID)
+		return err
+	}); err != nil {
+		return "could not read the operation to cancel its contract run: " + err.Error()
+	}
+	run, err := s.loadReleaseRun(ctx, row)
+	if err != nil {
+		return "could not read the contract run: " + err.Error()
+	}
+	return s.cancelReleaseRunNote(ctx, opts, run, nil)
 }
