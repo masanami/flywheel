@@ -399,6 +399,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 	}
 	if errors.Is(err, ErrConflict) {
 		s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
+		s.closeHeldEndAfterConflict(ctx, row.ChallengeID)
 		return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
 			Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
 	}
@@ -423,6 +424,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		if derr = classifyReadWriteErr(derr); derr != nil {
 			s.abandonReleaseAttempt(ctx, attempt.ID, now(), derr)
 			if errors.Is(derr, ErrConflict) {
+				s.closeHeldEndAfterConflict(ctx, row.ChallengeID)
 				return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
 					Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
 			}
@@ -441,6 +443,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		// 可能なら interrupted で閉じる（失敗しても元のエラーを返す）。
 		s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
 		if errors.Is(err, ErrConflict) || errors.Is(err, errExecutionNotOpen) {
+			s.closeHeldEndAfterConflict(ctx, row.ChallengeID)
 			// 実行の途中で別の呼び出しが同じ操作・試行を変えた。自分の試行の ID を詳細に入れて飛ばす。
 			return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
 				Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
@@ -448,6 +451,13 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		return nil, nil, err
 	}
 	return item, nil, nil
+}
+
+// closeHeldEndAfterConflict は、試行が競合で閉じた（結果を書けなかった）後に、終わりを開けている契約の実行を、対応する承認済みの
+// 反映の操作がもう無ければ終わった記録にする（closeHeldEndWithoutOwner）。操作が承認済みのままなら開けたままにし、次の反映の段が
+// 終わりを使う。閉じられなくても元の結果は変えない（別の反映の操作の反映の段・片付け・完了から戻す前の読みが閉じる）。
+func (s *Store) closeHeldEndAfterConflict(ctx context.Context, challengeID int64) {
+	_, _ = s.closeHeldEndWithoutOwner(context.WithoutCancel(ctx), challengeID)
 }
 
 // abandonReleaseAttempt は、終えられなかった試行を interrupted で閉じる（閉じられなくても何もしない）。

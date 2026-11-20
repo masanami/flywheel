@@ -124,6 +124,75 @@ func taskRunImportedRef(ctx context.Context, tx *sql.Tx, cr *contractRunRow, ref
 	return false, rows.Err()
 }
 
+// closeHeldEndWithoutOwner は、課題 challengeID の「終わりを読んだが、結果を書くまで開けている契約の実行」（state が終わりで
+// ended_at が空。反映の段の status・resume だけが作る）を、それに対応する承認済みの反映の操作が 1 つも無いときに、終わった記録に
+// する（閉じたら真）。結果を書く前に操作が承認済みでなくなった（試行が競合で閉じた）とき、閉じる者がいなくなるのを防ぐ。
+// 対応する承認済みの操作があれば何もしない（その操作の次の反映の段が、終わりを使って結果を書く）。委譲先のコマンドは呼ばない。
+func (s *Store) closeHeldEndWithoutOwner(ctx context.Context, challengeID int64) (bool, error) {
+	closed := false
+	err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, challengeID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !cr.State.Terminal() {
+			return nil
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT id, ref FROM operation WHERE challenge_id = ? AND kind = ? AND state = ? ORDER BY id`,
+			challengeID, string(OperationKindRelease), string(OperationStateApproved))
+		if err != nil {
+			return err
+		}
+		type approved struct {
+			id  int64
+			ref sql.NullString
+		}
+		var ops []approved
+		for rows.Next() {
+			var o approved
+			if err := rows.Scan(&o.id, &o.ref); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			ops = append(ops, o)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, o := range ops {
+			owns := false
+			if cr.Kind == contractRunKindReflect {
+				owns = cr.OperationID != nil && *cr.OperationID == o.id
+			} else if o.ref.Valid {
+				if owns, err = taskRunImportedRef(ctx, tx, cr, o.ref.String); err != nil {
+					return err
+				}
+			}
+			if owns {
+				return nil
+			}
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE id = ? AND ended_at IS NULL AND state IN ('succeeded', 'failed', 'cancelled')`,
+			formatTimestamp(s.currentTime()), cr.ID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		closed = n == 1
+		return err
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return false, err
+	}
+	return closed, nil
+}
+
 // releaseContractCommand は反映の段が、既存の契約の実行へ契約のコマンド（status・resume・cancel）を 1 回呼んで記録する。
 // 契約の実行の記録を作れなかった（課題に終わっていない実行の記録がある）ときは errReleaseContractBusy を返す。
 // holdEnd が真なら、終わりを読んでも契約の実行を終わった記録にしない（反映の試行の結果を書く書き込みが終わった記録にする。
@@ -263,6 +332,16 @@ func (s *Store) chooseReleasePath(ctx context.Context, row *operationRow, opts R
 	if !run.corresponds {
 		// 別の成果物の実行・別の反映の操作の反映の依頼。何も呼ばない。
 		// 別の反映の操作が終わりを読んで、結果を書くまで開けている実行（終わりの状態で、まだ終わった記録でない）も、その操作が閉じるまで待つ。
+		if run.row.State.Terminal() {
+			// 開けている操作が承認済みでなくなっていれば（結果を書く者がいない）、ここで閉じて、実行が無いときの道へ進む。上限なしに待たない。
+			closed, err := s.closeHeldEndWithoutOwner(ctx, row.ChallengeID)
+			if err != nil {
+				return releaseJudgment{}, err
+			}
+			if closed {
+				return s.startReflectRequest(ctx, row, opts, observed)
+			}
+		}
 		if run.row.State == ContractStateRunning || run.row.State.Terminal() {
 			return releaseJudgment{result: ExecutionResultWaitingDelegate, observedHead: observed}, nil
 		}
