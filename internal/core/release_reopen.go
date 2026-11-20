@@ -50,7 +50,9 @@ var errReopenBlockedByRun = fmt.Errorf("%w: the challenge has an unfinished cont
 // commands.status で読む（課題に終わっていない契約の実行は高々 1 本）。
 // running（委譲先が反映先へ入れている途中かもしれない）か読めなければ errReopenBlockedByRun。待ち（レビュー待ちを含む）なら戻してよい。
 // 終わっていれば、status の読みが契約の実行を終わった記録にする。終わっていないタスクの実行が無ければ何も呼ばない。
-func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs ReopenContractSources) error {
+// 返す印は、読む前に記録にあったタスクの実行の「入れてよい」の状態（無ければ nil）。戻す書き込みが、読みから書き込みまでの間に
+// 別のプロセスの反映の段が「入れてよい」を返していないことを確かめるのに使う（taskRunUnchangedInTx）。
+func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs ReopenContractSources) (*taskRunMark, error) {
 	var run *releaseRun
 	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		row, err := loadOperationRow(ctx, tx, opID)
@@ -63,27 +65,63 @@ func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs Reop
 		}
 		return err
 	}); err != nil {
-		return classifyReadWriteErr(err)
+		return nil, classifyReadWriteErr(err)
 	}
 	if run == nil {
-		return nil
+		return nil, nil
 	}
 	if run.row.Kind == contractRunKindReflect {
 		// 終わっていない反映の依頼は commands.cancel で取り消す（取り消せなければ戻さない）。
-		return s.cancelOpenReflectRunBeforeReopen(ctx, run, cs)
+		return nil, s.cancelOpenReflectRunBeforeReopen(ctx, run, cs)
 	}
 	if cs.Contract == nil || cs.Connectors == nil {
-		return errReopenBlockedByRun
+		return nil, errReopenBlockedByRun
 	}
+	mark := &taskRunMark{id: run.row.ID, landRef: run.row.LandRef, landDelivered: run.row.LandDelivered}
 	opts := ReleaseExecOptions{Contract: cs.Contract, Agent: cs.Agent, Connectors: cs.Connectors}
 	rep, why, err := s.releaseContractCommand(ctx, opts, run, "status", contractFill{}, false)
 	if errors.Is(err, errReleaseContractBusy) {
-		return errReopenBlockedByRun
+		return nil, errReopenBlockedByRun
+	}
+	if err != nil {
+		return nil, err
+	}
+	if why != "" || rep.Result != RunResultSucceeded || rep.State == ContractStateRunning {
+		return nil, errReopenBlockedByRun
+	}
+	return mark, nil
+}
+
+// taskRunMark は、完了から戻す前の読み（readTaskRunBeforeReopen）が commands.status を呼ぶ前に記録にあった、課題の終わっていない
+// タスクの契約の実行の ID と「入れてよい」の状態（land_ref・land_delivered）。
+type taskRunMark struct {
+	id            int64
+	landRef       string
+	landDelivered bool
+}
+
+// taskRunUnchangedInTx は、戻す書き込みの中で、課題 cid の終わっていないタスクの契約の実行が、戻す前の読みの時点（mark）から
+// 「入れてよい」を受けていないことを確かめる。読みから書き込みまでの間に、別のプロセスの反映の段が「入れてよい」を返して
+// 試行まで閉じていると、終わっていない試行も実行の記録も残らないので、ここで見分ける。次のどれかなら errReopenBlockedByRun
+// （何も書かない）: 記録した状態が running（委譲先が反映先へ入れている途中かもしれない）・読みの時点に無かった実行がある・
+// land_ref か land_delivered が読みの時点と違う。終わっていないタスクの実行が無ければ（無かった・読みが終わった記録にした）通す。
+func taskRunUnchangedInTx(ctx context.Context, tx *sql.Tx, cid int64, mark *taskRunMark) error {
+	var (
+		id        int64
+		state     string
+		landRef   sql.NullString
+		delivered bool
+	)
+	err := tx.QueryRowContext(ctx,
+		`SELECT id, state, land_ref, land_delivered FROM contract_run WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL ORDER BY id LIMIT 1`,
+		cid, contractRunKindTask).Scan(&id, &state, &landRef, &delivered)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if why != "" || rep.Result != RunResultSucceeded || rep.State == ContractStateRunning {
+	if mark == nil || id != mark.id || ContractState(state) == ContractStateRunning || landRef.String != mark.landRef || delivered != mark.landDelivered {
 		return errReopenBlockedByRun
 	}
 	return nil
@@ -148,8 +186,9 @@ func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDT
 		return nil, err
 	}
 	// 戻す前に、終わっていないタスクの契約の実行を読む（running か読めなければ戻さない）。
+	var mark *taskRunMark
 	if as.Eligible {
-		if err := s.readTaskRunBeforeReopen(ctx, opID, cs); err != nil {
+		if mark, err = s.readTaskRunBeforeReopen(ctx, opID, cs); err != nil {
 			return nil, err
 		}
 	}
@@ -170,6 +209,10 @@ func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDT
 			}
 			if verified == nil || *verified != as.Assessment.VerifiedHead {
 				return ErrConflict
+			}
+			// 読みからこの書き込みまでの間に、タスクの実行が「入れてよい」を受けていたら、戻さない。
+			if err := taskRunUnchangedInTx(ctx, tx, row.ChallengeID, mark); err != nil {
+				return err
 			}
 		}
 		if !as.Eligible {
