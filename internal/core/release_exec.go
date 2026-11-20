@@ -8,8 +8,9 @@ package core
 //
 //	① 操作を読む（release で approved でなければ not_executable）
 //	② 止まった試行を interrupted で閉じ、新しい試行を始める（終了していない試行が生きていれば in_progress）
-//	③ ストアの外で、判定の順 1〜11 を最初に当たった条件まで評価する（GitHub の読み取りとマージの依頼）
-//	④ 結果に応じて試行を閉じる（実行済み・取り消しは release_exec_write.go の 1 トランザクションの関数）
+//	③ 成果物を上流から読んで確かめ、道を選ぶ（GitHub の読み取りだけ。flywheel は反映先へ入れない）
+//	④ 結果に応じて試行を閉じる（実行済み・取り消しは release_exec_write.go の 1 トランザクションの関数）。
+//	   2 回目からの waiting_outside は、開いた試行の行を消して始めなかった理由で返す
 
 import (
 	"context"
@@ -36,6 +37,10 @@ const NotStartedInProgress NotStartedReason = "in_progress"
 // 飛ばしたことを表す（詳細は `kind=<種類> state=<状態>`）。
 const NotStartedNotExecutable NotStartedReason = "not_executable"
 
+// NotStartedWaitingOutside は、直前の試行の結果が waiting_outside の反映の操作が、もう一度
+// flywheel の外での反映を待つことになり、試行の行を増やさず飛ばしたことを表す。
+const NotStartedWaitingOutside NotStartedReason = "waiting_outside"
+
 // NotStartedDependency は、依存先に満たされていないものがあり委譲を起動しなかったことを表す
 // （S2。Detail は満たされていない依存先の ID を昇順に "," で連ねた文字列）。
 const NotStartedDependency NotStartedReason = "dependency"
@@ -44,25 +49,17 @@ const NotStartedDependency NotStartedReason = "dependency"
 // ちょうどこの時間は止まったに含めない。
 const releaseAttemptStaleAfter = 15 * time.Minute
 
-// 本番の呼び出し（`op exec`・周の release の段）が ReleaseExecOptions.MergeableRetries・MergeableInterval に渡す値。
-const (
-	ReleaseMergeableRetries  = 2
-	ReleaseMergeableInterval = 3 * time.Second
-)
-
-// ReleaseExecOptions は ExecuteReleases の入力。Checks・Merger・Connectors は必須
+// ReleaseExecOptions は ExecuteReleases の入力。Checks・Connectors は必須
 // （どれかが nil なら ErrValidation）。
 type ReleaseExecOptions struct {
 	// Checks は PR の状態・チェックの読み取り（GET だけ）。UpstreamCommitChecksSource も実装していれば、承認した head のチェックの有無の確認に使う（ラップする値はこれも通すこと）。
 	Checks UpstreamCheckSource
-	// Merger はマージの依頼の書き込み。UpstreamPullRequestBranchUpdater も実装していれば、BEHIND の取り込みの依頼にも使う。
-	Merger UpstreamPullRequestMerger
 	// Compare は、PR の head が承認の head から動いたとき、動いた中身が既定ブランチの取り込みだけかを判定するための比較の取得
 	// （GET だけ）。nil なら、その判定をしない（承認待ちの release の片付けのうち、マージ済みを閉じる処理は動く）。
 	Compare UpstreamCompareSource
-	// Connectors は PR のリポジトリ・既定ブランチ・マージの方式を引く宣言。
+	// Connectors は PR のリポジトリ・既定ブランチを引く宣言。
 	Connectors *ConnectorsDeclaration
-	// Agent は failure_limit・behind_update_limit の出どころ。nil なら既定値。
+	// Agent は failure_limit の出どころ。nil なら既定値。
 	Agent *AgentDeclaration
 	// CycleID は発生に持たせる周の ID（"Y-<n>"）。空なら周を持たない（NULL）。形式不正は ErrValidation。
 	CycleID string
@@ -75,11 +72,6 @@ type ReleaseExecOptions struct {
 	// PID・Host は試行に記録する値。0・空ならこのプロセスの値。
 	PID  int64
 	Host string
-	// MergeableRetries・MergeableInterval は、mergeable が null（GitHub が計算中）のとき、待ちとして返す前に
-	// 読み直す回数と間隔。既定ブランチが進んだ直後（同じ呼び出しで先の PR をマージした後）に 1 周に 1 本ずつ
-	// しか進まなくなるのを和らげる。0 なら読み直さない。
-	MergeableRetries  int
-	MergeableInterval time.Duration
 }
 
 // ReleaseExecItem は実行を試みた release 1 件の結果。
@@ -91,14 +83,12 @@ type ReleaseExecItem struct {
 	ObservedHead        string
 	MergeCommit         string
 	ConsecutiveFailures int
-	// Detail は結果が merge_unconfirmed で、マージの依頼の後に試行の記録を書けなかったときだけ入る。
-	Detail string
-	// Reopened は、結果が not_mergeable で課題が完了だったため、課題を着手中へ戻して release を置き換えたこと
-	// （#485）。NewOperationID は作った新しい release、ReopenReason は戻した理由。
-	Reopened       bool
-	NewOperationID string
-	ReopenReason   ReopenReason
+	// Route は反映の依頼の経路。結果が waiting_outside のとき ReleaseRouteOutside（それ以外は空）。
+	Route string
 }
+
+// ReleaseRouteOutside は、flywheel の外で反映先へ入るのを待っている反映の経路（route の値）。
+const ReleaseRouteOutside = "outside"
 
 // ReleaseTidyAction は承認待ちの release の片付けで行ったこと。
 type ReleaseTidyAction string
@@ -106,10 +96,10 @@ type ReleaseTidyAction string
 const (
 	// ReleaseTidyClosed は、PR がマージ済みの承認待ちの release を closed にしたこと。
 	ReleaseTidyClosed ReleaseTidyAction = "closed"
-	// ReleaseTidyReopened は、検証の後に中身が変わった PR の release を置き換え、完了の課題を着手中へ戻したこと。
+	// ReleaseTidyReopened は、検証の後に中身が変わった PR の release を置き換え、完了の課題を検証中へ戻したこと。
 	ReleaseTidyReopened ReleaseTidyAction = "reopened"
 	// ReleaseTidyNeedsHuman は、完了の課題の release の PR の head が検証の後に動いたが、取り込みだけとも中身の変更とも
-	// 確かめられず（比較の打ち切り・head 無し等）、人間待ちにしたこと。何も書かない。人が承認するか着手中へ戻すかを選ぶ。
+	// 確かめられず（比較の打ち切り・head 無し等）、人間待ちにしたこと。何も書かない。人が承認するか検証中へ戻すかを選ぶ。
 	ReleaseTidyNeedsHuman ReleaseTidyAction = "needs_human"
 )
 
@@ -173,7 +163,7 @@ func (s *Store) ListExecutableReleases(ctx context.Context) ([]string, error) {
 // ExecuteReleases は ids の操作を ID の昇順に実行する。ids が空なら承認済みで未実行の release
 // すべて。存在しない ID（形式不正を含む）は何も実行せず ErrNotFound。実行は課題の状態を変えない。
 func (s *Store) ExecuteReleases(ctx context.Context, ids []string, opts ReleaseExecOptions) (*ReleaseExecResult, error) {
-	if opts.Checks == nil || opts.Merger == nil || opts.Connectors == nil {
+	if opts.Checks == nil || opts.Connectors == nil {
 		return nil, ErrValidation
 	}
 	if opts.Trigger == "" {
@@ -276,14 +266,12 @@ func (s *Store) ExecuteReleases(ctx context.Context, ids []string, opts ReleaseE
 	return res, nil
 }
 
-// releaseJudgment は判定の順の評価の結果。
+// releaseJudgment は成果物の確認と道の選択の結果。
 type releaseJudgment struct {
 	result       ExecutionResult
 	observedHead string
 	mergeCommit  string
 	detail       string
-	// mergeRequested はマージの依頼（gh pr merge）が成功した後の判定であること。
-	mergeRequested bool
 }
 
 func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExecOptions) (*ReleaseExecItem, *NotStarted, error) {
@@ -304,7 +292,6 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		pid = int64(os.Getpid())
 	}
 
-	// 外部への書き込み（マージの依頼）より前に、作業ログの actor を解決しておく。
 	actor, err := s.resolveActor()
 	if err != nil {
 		return nil, nil, err
@@ -315,6 +302,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		attempt     *operationExecutionRow
 		notStarted  *NotStarted
 		approvedRow string
+		prevResult  ExecutionResult
 	)
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
 		r, err := loadOperationRow(ctx, tx, opID)
@@ -346,6 +334,10 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 			return err
 		}
 		approvedRow = head
+		prevResult, err = lastDecidedExecutionResult(ctx, tx, opID)
+		if err != nil {
+			return err
+		}
 		attempt, err = beginOperationExecution(ctx, tx, opID, beginOperationExecutionInput{StartedAt: at, ApprovedHead: head, PID: pid, Host: host})
 		if errors.Is(err, errActiveExecutionExists) {
 			// 別のプロセスが先に試行を始めた。
@@ -366,49 +358,42 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		return nil, notStarted, nil
 	}
 
-	j := s.judgeRelease(ctx, row, approvedRow, opts)
-
-	cycleID := opts.cycleID
-	item, err := s.finishReleaseAttempt(ctx, actor, opID, row, attempt, approvedRow, j, opts, cycleID, now)
+	j, err := s.judgeRelease(ctx, row, approvedRow, opts)
 	if err != nil {
-		conflict := errors.Is(err, ErrConflict) || errors.Is(err, errExecutionNotOpen)
-		// 記録が衝突した原因が、release が別の経路で pending へ取り消されたことで、PR がマージ済みなら、
-		// 依頼した試行そのものを merged_unapproved で閉じる（承認の取り消し後にマージされた事象）。
-		var recordErr error
-		if conflict && j.mergeRequested {
-			var it *ReleaseExecItem
-			it, recordErr = s.recordMergeAfterWithdrawal(ctx, actor, opID, row, attempt, approvedRow, j, opts, cycleID, now, host, pid)
-			if it != nil {
-				return it, nil, nil
+		s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
+		return nil, nil, err
+	}
+
+	// 待っている間は試行の行を増やさない: 直前の試行も flywheel の外での反映を待っていたなら、開いた行を消して返す。
+	if j.result == ExecutionResultWaitingOutside && prevResult == ExecutionResultWaitingOutside {
+		derr := s.db.Write(ctx, func(tx *sql.Tx) error {
+			// 判定の間に別の経路が操作を変えていたら、待っているとは返さない（試行の終わり方と同じ楽観ロック）。
+			cur, err := loadOperationRow(ctx, tx, opID)
+			if err != nil {
+				return err
 			}
+			if cur.Version != row.Version || cur.State != OperationStateApproved {
+				return ErrConflict
+			}
+			return deleteOpenOperationExecution(ctx, tx, attempt.ID)
+		})
+		if derr = classifyReadWriteErr(derr); derr != nil {
+			s.abandonReleaseAttempt(ctx, attempt.ID, now(), derr)
+			if errors.Is(derr, ErrConflict) {
+				return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
+					Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
+			}
+			return nil, nil, derr
 		}
+		return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID), Reason: NotStartedWaitingOutside}, nil
+	}
+
+	item, err := s.finishReleaseAttempt(ctx, actor, opID, row, attempt, approvedRow, j, opts, opts.cycleID, now)
+	if err != nil {
 		// 試行を終えられなかった。終了していない行が残ると次の口が 15 分待つことになるので、
 		// 可能なら interrupted で閉じる（失敗しても元のエラーを返す）。
-		_ = s.db.Write(ctx, func(tx *sql.Tx) error {
-			return closeOperationExecution(ctx, tx, attempt.ID, closeOperationExecutionInput{EndedAt: now(), Result: ExecutionResultInterrupted, Detail: err.Error()})
-		})
-		if conflict {
-			if j.mergeRequested {
-				// マージは依頼済みで、結果は未確認として扱う。release が approved のまま残っていれば、
-				// 次の実行の口の先頭の読み取りで already_merged かを確かめる。
-				n := 0
-				_ = s.db.Read(ctx, func(tx *sql.Tx) error {
-					c, e := consecutiveFailures(ctx, tx, opID)
-					if e == nil {
-						n = c
-					}
-					return nil
-				})
-				return &ReleaseExecItem{
-					ConsecutiveFailures: n,
-					OperationID:         formatOperationID(opID),
-					ChallengeID:         formatChallengeID(row.ChallengeID),
-					Result:              ExecutionResultMergeUnconfirmed,
-					ApprovedHead:        approvedRow,
-					ObservedHead:        j.observedHead,
-					Detail:              mergeUnconfirmedDetail(err, recordErr),
-				}, nil, nil
-			}
+		s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
+		if errors.Is(err, ErrConflict) || errors.Is(err, errExecutionNotOpen) {
 			// 実行の途中で別の呼び出しが同じ操作・試行を変えた。自分の試行の ID を詳細に入れて飛ばす。
 			return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
 				Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
@@ -416,6 +401,13 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		return nil, nil, err
 	}
 	return item, nil, nil
+}
+
+// abandonReleaseAttempt は、終えられなかった試行を interrupted で閉じる（閉じられなくても何もしない）。
+func (s *Store) abandonReleaseAttempt(ctx context.Context, attemptID int64, at time.Time, cause error) {
+	_ = s.db.Write(ctx, func(tx *sql.Tx) error {
+		return closeOperationExecution(ctx, tx, attemptID, closeOperationExecutionInput{EndedAt: at, Result: ExecutionResultInterrupted, Detail: cause.Error()})
+	})
 }
 
 // releaseAttemptStale は終了していない試行が止まっているかを返す: 同じホストで pid のプロセスが
@@ -484,26 +476,7 @@ func movedByMergeInOnly(ctx context.Context, src UpstreamCompareSource, repo, pr
 	return true
 }
 
-// mergeableNullDetail は、mergeable が null で待つときの detail。
-const mergeableNullDetail = "mergeable is null"
-
-// judgeRelease は judgeReleaseOnce を、mergeable が null で待つ結果のとき、設定の回数まで読み直して返す。
-func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions) releaseJudgment {
-	approved := &approvedHeadChecks{}
-	for n := 0; ; n++ {
-		j := s.judgeReleaseOnce(ctx, row, approvedHead, opts, approved)
-		if j.result != ExecutionResultWaitingChecks || j.detail != mergeableNullDetail || n >= opts.MergeableRetries {
-			return j
-		}
-		select {
-		case <-ctx.Done():
-			return j
-		case <-time.After(opts.MergeableInterval):
-		}
-	}
-}
-
-// 承認した head にもチェックが無かったマージの detail と、取り込み後の head にチェックが無くて待つ 3 つの理由の detail。
+// 承認した head にもチェックが無かった反映の detail と、取り込み後の head にチェックが無くて待つ 3 つの理由の detail。
 const (
 	noChecksMergeDetail                 = "merged with no checks on the updated head (the approved head had none either)"
 	waitDetailNoChecksYet               = "no checks on the updated head yet"
@@ -511,7 +484,7 @@ const (
 	waitDetailApprovedChecksUnreadable  = "cannot read the checks of the approved head: "
 )
 
-// approvedHeadChecks は、承認した head のチェックの取得結果を 1 回の判定（mergeable の読み直しを含む）の中で使い回す入れ物。
+// approvedHeadChecks は、承認した head のチェックの取得結果を 1 回の判定の中で使い回す入れ物。
 type approvedHeadChecks struct {
 	done        bool
 	none        bool
@@ -540,20 +513,32 @@ func (a *approvedHeadChecks) noChecks(ctx context.Context, src UpstreamCheckSour
 	return a.none, nil
 }
 
-// judgeReleaseOnce は判定の順 1〜11 を評価し、最初に当たった条件の結果を返す。
+// unfinishedContractRuns は課題の終わっていない契約の実行の数を返す。
+func (s *Store) unfinishedContractRuns(ctx context.Context, challengeID int64) (int, error) {
+	var n int
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, challengeID).Scan(&n)
+	})
+	return n, classifyReadWriteErr(err)
+}
+
+// judgeRelease は成果物を上流から読んで確かめ（承認した中身・宛先・入っているか・閉じているか・取り込みだけの変わり方・
+// チェック）、道を選んで結果を返す。読み取りだけで、反映先へは何も書かない。
 //
-// 7 で head が承認の head から動いていても、動いた中身が既定ブランチの取り込みだけ（ClassifyHeadChange）なら
-// 外さず、8〜10 で取り込んだ後の head のすべてのチェック（必須でないものを含む。1 件以上）が成功していることを
-// 確かめてから、その head をマージする（承認し直さない）。ただし承認した head にもチェックが 0 件だったと確かめられたときは、0 件のままでも進む。10 の後で PR が BEHIND（衝突なし）なら、マージを試さず
-// 既定ブランチを取り込む依頼（UpstreamPullRequestBranchUpdater）をして待つ。CI の結果は次の試行が読む。
-func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions, approved *approvedHeadChecks) releaseJudgment {
+// head が承認の head から動いていても、動いた中身が既定ブランチの取り込みだけ（ClassifyHeadChange）なら外さず、
+// 取り込んだ後の head のすべてのチェック（必須でないものを含む。1 件以上）が成功していることを確かめてから進む
+// （承認し直さない）。ただし承認した head にもチェックが 0 件だったと確かめられたときは、0 件のままでも進む。
+//
+// この区切りで選べる道は、終わっていない契約の実行がある（waiting_delegate）か、無い（waiting_outside）かだけ。
+// 返すエラーは、ストアを読めなかったときだけ。
+func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions) (releaseJudgment, error) {
+	approved := &approvedHeadChecks{}
 	// 1
 	if approvedHead == "" {
-		return releaseJudgment{result: ExecutionResultNoApprovedHead}
+		return releaseJudgment{result: ExecutionResultNoApprovedHead}, nil
 	}
 	// 2
-	ref := row.Ref.String
-	repo, number, ok := parseReleasePullRequestRef(ref)
+	repo, number, ok := parseReleasePullRequestRef(row.Ref.String)
 	var decl *ConnectorRepo
 	if ok {
 		for i := range opts.Connectors.Repos {
@@ -564,43 +549,39 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 		}
 	}
 	if !row.Ref.Valid || !ok || decl == nil {
-		return releaseJudgment{result: ExecutionResultUnsupported}
+		return releaseJudgment{result: ExecutionResultUnsupported}, nil
 	}
 	// 3
 	pr, err := opts.Checks.GetPullRequestChecks(ctx, repo, number)
 	if err != nil {
-		return releaseJudgment{result: ExecutionResultUpstreamFailed, detail: err.Error()}
+		return releaseJudgment{result: ExecutionResultUpstreamFailed, detail: err.Error()}, nil
 	}
 	observed := pr.HeadSHA
 	// 4
 	if pr.State == string(artifactStateMerged) {
-		// 取り込みだけで動いた head（flywheel が取り込んでマージを依頼し、結果を読めなかった場合）も、承認した中身のマージ。
 		if pr.HeadSHA == approvedHead || movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) {
 			detail := ""
-			// マージの結果を読めず次の試行で閉じる経路でも、チェック 0 件のマージの detail を付ける（マージの判定は変えない）。
 			if pr.HeadSHA != approvedHead && len(pr.Checks) == 0 {
 				if none, _ := approved.noChecks(ctx, opts.Checks, repo, approvedHead); none {
 					detail = noChecksMergeDetail
 				}
 			}
-			return releaseJudgment{result: ExecutionResultAlreadyMerged, observedHead: observed, mergeCommit: pr.MergeCommitSHA, detail: detail}
+			return releaseJudgment{result: ExecutionResultAlreadyMerged, observedHead: observed, mergeCommit: pr.MergeCommitSHA, detail: detail}, nil
 		}
-		return releaseJudgment{result: ExecutionResultMergedUnapproved, observedHead: observed}
+		return releaseJudgment{result: ExecutionResultMergedUnapproved, observedHead: observed}, nil
 	}
 	// 5
 	if pr.State == string(artifactStateClosed) {
-		return releaseJudgment{result: ExecutionResultClosed, observedHead: observed}
+		return releaseJudgment{result: ExecutionResultClosed, observedHead: observed}, nil
 	}
 	// 6
 	if pr.Base != decl.DefaultBranch {
-		return releaseJudgment{result: ExecutionResultBaseChanged, observedHead: observed, detail: pr.Base}
+		return releaseJudgment{result: ExecutionResultBaseChanged, observedHead: observed, detail: pr.Base}, nil
 	}
 	// 7
 	moved := pr.HeadSHA != approvedHead
-	if moved {
-		if !movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) {
-			return releaseJudgment{result: ExecutionResultHeadChanged, observedHead: observed}
-		}
+	if moved && !movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) {
+		return releaseJudgment{result: ExecutionResultHeadChanged, observedHead: observed}, nil
 	}
 	// 8・9
 	failed, pending := false, false
@@ -613,137 +594,44 @@ func (s *Store) judgeReleaseOnce(ctx context.Context, row *operationRow, approve
 		}
 	}
 	if failed {
-		return releaseJudgment{result: ExecutionResultChecksFailed, observedHead: observed}
+		return releaseJudgment{result: ExecutionResultChecksFailed, observedHead: observed}, nil
 	}
 	if pending {
-		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed}
+		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed}, nil
 	}
 	// 取り込んだ後の head は、チェックが 1 件も付いていない間は何も見ていないので待つ。
 	// 承認した head にもチェックが 0 件だった（読めない場合は 0 件と見なさない）なら、何も見ていないのは承認の時点から同じなので待たない。
-	noChecksMerge := false
 	if moved && len(pr.Checks) == 0 {
 		none, _ := approved.noChecks(ctx, opts.Checks, repo, approvedHead)
 		switch {
 		case approved.err != nil:
-			// 取得に失敗した（キャッシュしたエラーを文言に使う）。
-			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailApprovedChecksUnreadable + approved.err.Error()}
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailApprovedChecksUnreadable + approved.err.Error()}, nil
 		case approved.unsupported:
-			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailApprovedChecksUnsupported}
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailApprovedChecksUnsupported}, nil
 		case !none:
-			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailNoChecksYet}
-		}
-		noChecksMerge = true
-	}
-	// 10
-	if pr.Mergeable == nil {
-		return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: mergeableNullDetail}
-	}
-	if !*pr.Mergeable {
-		return releaseJudgment{result: ExecutionResultNotMergeable, observedHead: observed}
-	}
-	if pr.MergeableState == UpstreamMergeStateBehind {
-		if u, ok := opts.Merger.(UpstreamPullRequestBranchUpdater); ok {
-			// 取り込みの累計が上限に達していれば、これ以上取り込まず取り消す（limit_reached。人の判断待ち）。
-			var done int
-			if err := s.db.Read(ctx, func(tx *sql.Tx) error {
-				var err error
-				done, err = behindUpdateCount(ctx, tx, row.ID)
-				return err
-			}); err != nil {
-				return releaseJudgment{result: ExecutionResultUpstreamFailed, observedHead: observed, detail: "count branch updates: " + err.Error()}
-			}
-			if limit := behindUpdateLimit(opts.Agent); done >= limit {
-				return releaseJudgment{result: ExecutionResultLimitReached, observedHead: observed,
-					detail: fmt.Sprintf("既定ブランチが速く進み、取り込みが %d 回続いたため止めました", done)}
-			}
-			if err := u.UpdatePullRequestBranch(ctx, repo, number, pr.HeadSHA); err != nil {
-				// 取り込みで衝突が出た（読み直した PR が mergeable=false）なら、衝突の立て直し（not_mergeable）へ回す。
-				if again, gerr := opts.Checks.GetPullRequestChecks(ctx, repo, number); gerr == nil && again.Mergeable != nil && !*again.Mergeable {
-					return releaseJudgment{result: ExecutionResultNotMergeable, observedHead: observed, detail: "update branch: " + err.Error()}
-				}
-				return releaseJudgment{result: ExecutionResultMergeFailed, observedHead: observed, detail: "update branch: " + err.Error()}
-			}
-			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: branchUpdatedDetailPrefix + " the pull request was behind " + decl.DefaultBranch}
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailNoChecksYet}, nil
 		}
 	}
-	// 11
-	method := decl.MergeMethod
-	if method == "" {
-		method = MergeMethodSquash
-	}
-	prURL := fmt.Sprintf("https://github.com/%s/pull/%d", repo, number)
-	if err := opts.Merger.MergePullRequest(ctx, prURL, method, pr.HeadSHA); err != nil {
-		return releaseJudgment{result: ExecutionResultMergeFailed, observedHead: observed, detail: err.Error()}
-	}
-	after, err := opts.Checks.GetPullRequestChecks(ctx, repo, number)
+	// 道: 終わっていない契約の実行があれば、委譲先を何も呼ばずに待つ（その先の道はこの区切りでは持たない）。
+	// 無ければ、flywheel の外で反映先へ入るのを待つ。入ったことは次の判定の 4 が読む。
+	unfinished, err := s.unfinishedContractRuns(ctx, row.ChallengeID)
 	if err != nil {
-		// 依頼は成功したが結果を読めない。マージされたかは次の試行の先頭の読み取りで確かめる。
-		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergeUnconfirmed, observedHead: observed, detail: err.Error()}
+		return releaseJudgment{}, err
 	}
-	if after.State != string(artifactStateMerged) {
-		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergeUnconfirmed, observedHead: after.HeadSHA}
+	if unfinished > 0 {
+		return releaseJudgment{result: ExecutionResultWaitingDelegate, observedHead: observed}, nil
 	}
-	if after.HeadSHA != pr.HeadSHA {
-		return releaseJudgment{mergeRequested: true, result: ExecutionResultMergedUnapproved, observedHead: after.HeadSHA}
-	}
-	detail := ""
-	if noChecksMerge {
-		detail = noChecksMergeDetail
-	}
-	return releaseJudgment{mergeRequested: true, result: ExecutionResultMerged, observedHead: after.HeadSHA, mergeCommit: after.MergeCommitSHA, detail: detail}
+	return releaseJudgment{result: ExecutionResultWaitingOutside, observedHead: observed}, nil
 }
 
-func mergeUnconfirmedDetail(err, recordErr error) string {
-	d := "merge requested; recording the attempt failed: " + err.Error()
-	if recordErr != nil {
-		d += "; recording the merge after withdrawal failed: " + recordErr.Error()
+// lastDecidedExecutionResult は opID の、閉じた試行のうち最後のもの（interrupted を除く）の結果を返す（無ければ空）。
+func lastDecidedExecutionResult(ctx context.Context, tx *sql.Tx, opID int64) (ExecutionResult, error) {
+	var r sql.NullString
+	err := tx.QueryRowContext(ctx,
+		`SELECT result FROM operation_execution WHERE operation_id = ? AND result IS NOT NULL AND result != ? ORDER BY id DESC LIMIT 1`,
+		opID, string(ExecutionResultInterrupted)).Scan(&r)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
 	}
-	return d
-}
-
-// recordMergeAfterWithdrawal は、マージを依頼した後に試行の記録が衝突した release が pending に
-// 取り消されていて、PR がマージ済みだったときに、依頼した試行を結果 merged_unapproved で閉じて返す
-// （別の呼び出しが先に閉じていれば新しい試行を足す。直前の試行がすでに merged_unapproved なら足さない）。
-// status の食い違い・承認し直しの禁止は、直前の試行のこの結果で働く。
-// 取り消されていない・マージ済みと確かめられないときは (nil, nil)、確かめた後に書けなかったときは
-// (nil, エラー) を返し、呼び出し側が merge_unconfirmed を返す。確かめるのは j の結果、なければ PR の読み取り 1 回。
-func (s *Store) recordMergeAfterWithdrawal(ctx context.Context, actor string, opID int64, row *operationRow, attempt *operationExecutionRow, approvedHead string, j releaseJudgment, opts ReleaseExecOptions, cycleID *int64, now func() time.Time, host string, pid int64) (*ReleaseExecItem, error) {
-	merged := j.result == ExecutionResultMerged || j.result == ExecutionResultMergedUnapproved
-	observed := j.observedHead
-	if !merged {
-		repo, number, ok := parseReleasePullRequestRef(row.Ref.String)
-		if !ok {
-			return nil, nil
-		}
-		pr, err := opts.Checks.GetPullRequestChecks(ctx, repo, number)
-		if err != nil || pr.State != string(artifactStateMerged) {
-			return nil, nil
-		}
-		observed = pr.HeadSHA
-	}
-	const detail = "merged after the approval was withdrawn (release is pending)"
-	var outcome mergedAfterWithdrawalOutcome
-	err := s.mutateAs(ctx, actor, ChannelCLI, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
-		rec.at = now()
-		var err error
-		outcome, err = s.recordMergedAfterWithdrawalInTx(ctx, tx, rec, releaseOutcomeWrite{
-			opID: opID, challengeID: row.ChallengeID, attemptID: attempt.ID,
-			result: ExecutionResultMergedUnapproved, approvedHead: approvedHead, observedHead: observed,
-			mergeCommit: j.mergeCommit, detail: detail, trigger: opts.Trigger, at: rec.at, cycleID: cycleID,
-		}, pid, host)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	if outcome == mergedAfterWithdrawalNotPending {
-		return nil, nil
-	}
-	return &ReleaseExecItem{
-		OperationID:  formatOperationID(opID),
-		ChallengeID:  formatChallengeID(row.ChallengeID),
-		Result:       ExecutionResultMergedUnapproved,
-		ApprovedHead: approvedHead,
-		ObservedHead: observed,
-	}, nil
+	return ExecutionResult(r.String), err
 }

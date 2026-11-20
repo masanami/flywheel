@@ -120,22 +120,18 @@ type ReleaseItem struct {
 	ApprovedHead        *string `json:"approved_head"`
 	ChallengeID         string  `json:"challenge_id"`
 	ConsecutiveFailures int     `json:"consecutive_failures"`
-	Detail              string  `json:"detail,omitempty"`
 	MergeCommit         *string `json:"merge_commit"`
-	// NewOperationID・ReopenReason は、結果が not_mergeable で課題が完了だったため、課題を着手中へ戻して release を
-	// 置き換えたときだけ出す（新しい release の ID と、戻した理由 not_mergeable | limit_reached）。
-	NewOperationID *string `json:"new_operation_id,omitempty"`
-	ObservedHead   *string `json:"observed_head"`
-	OperationID    string  `json:"operation_id"`
-	ReopenReason   *string `json:"reopen_reason,omitempty"`
-	Result         string  `json:"result"`
-	// Route は反映の依頼の経路（waiting_run | reflect_request | outside）。値を作る経路ができるまでは常に null。
+	ObservedHead        *string `json:"observed_head"`
+	OperationID         string  `json:"operation_id"`
+	Result              string  `json:"result"`
+	// Route は反映の依頼の経路（waiting_run | reflect_request | outside）。いま値を持つのは結果が waiting_outside の
+	// outside だけで、それ以外は null。
 	Route *string `json:"route"`
 }
 
 // ReleaseTidied は release の段の、承認待ちの release の片付け 1 件。action は closed（PR がマージ済み、またはマージされずに閉じられていて closed にした。
 // closed_reason は merged_outside | merged_unapproved | pr_closed）か reopened（検証の後に中身が変わった PR の release を置き換え、
-// 完了の課題を着手中へ戻した。reopen_reason は content_changed、new_operation_id は新しい release）。
+// 完了の課題を検証中へ戻した。reopen_reason は content_changed、new_operation_id は新しい release）。
 type ReleaseTidied struct {
 	Action         string  `json:"action"`
 	ChallengeID    string  `json:"challenge_id"`
@@ -144,7 +140,7 @@ type ReleaseTidied struct {
 	OperationID    string  `json:"operation_id"`
 	ReopenReason   *string `json:"reopen_reason,omitempty"`
 	// WaitReason は action が needs_human（検証の後に動いた head が取り込みだけとも中身の変更とも確かめられず、人間待ちにした。
-	// 人が承認するか着手中へ戻すかを選ぶ）のときの、判定できなかった理由。
+	// 人が承認するか検証中へ戻すかを選ぶ）のときの、判定できなかった理由。
 	WaitReason *string `json:"wait_reason,omitempty"`
 }
 
@@ -283,15 +279,11 @@ func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []c
 			ApprovedHead:        strOrNil(it.ApprovedHead),
 			ChallengeID:         it.ChallengeID,
 			ConsecutiveFailures: it.ConsecutiveFailures,
-			Detail:              it.Detail,
 			MergeCommit:         strOrNil(it.MergeCommit),
 			ObservedHead:        strOrNil(it.ObservedHead),
 			OperationID:         it.OperationID,
 			Result:              string(it.Result),
-		}
-		if it.Reopened {
-			ri.NewOperationID = strOrNil(it.NewOperationID)
-			ri.ReopenReason = strOrNil(string(it.ReopenReason))
+			Route:               strOrNil(it.Route),
 		}
 		outItems = append(outItems, ri)
 	}

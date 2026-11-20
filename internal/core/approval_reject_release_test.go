@@ -58,8 +58,8 @@ func TestRejectCompletion_ApprovedRelease_IsClosedAndNeverMerged(t *testing.T) {
 	if len(res.Items) != 0 || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedNotExecutable {
 		t.Fatalf("res = %+v, want only not_executable", res)
 	}
-	if len(f.fake.mergeArgs) != 0 {
-		t.Errorf("merge was requested: %v", f.fake.mergeArgs)
+	if f.fake.getCalls != 0 {
+		t.Errorf("upstream was read: %d calls", f.fake.getCalls)
 	}
 	var n int
 	readForTest(t, f.s, func(tx *sql.Tx) error {
@@ -105,7 +105,7 @@ func TestRejectCompletion_RunningRelease_IsNotStopped(t *testing.T) {
 func TestRejectCompletion_ReapprovalExecutesNewRelease(t *testing.T) {
 	t.Parallel()
 	f := newRelFixture(t)
-	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m3rg3"}
+	f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m3rg3"}
 	rejectCompletionForTest(t, f)
 
 	cid := formatChallengeID(f.cid)
@@ -139,11 +139,8 @@ func TestRejectCompletion_ReapprovalExecutesNewRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteReleases() error = %v", err)
 	}
-	if len(res.Items) != 1 || res.Items[0].OperationID != op.ID || res.Items[0].Result != ExecutionResultMerged {
-		t.Fatalf("res = %+v, want the new release merged", res)
-	}
-	if len(f.fake.mergeArgs) != 1 {
-		t.Errorf("merge calls = %d, want 1", len(f.fake.mergeArgs))
+	if len(res.Items) != 1 || res.Items[0].OperationID != op.ID || res.Items[0].Result != ExecutionResultAlreadyMerged {
+		t.Fatalf("res = %+v, want the new release executed", res)
 	}
 	if st, r := opStateReason(t, f.s, f.opID); st != "closed" || r.String != string(ClosedReasonChallengeRejected) {
 		t.Errorf("old release = %s/%s, want closed kept as history", st, r.String)

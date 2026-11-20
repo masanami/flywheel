@@ -21,7 +21,8 @@ const (
 	execMerged = "deadbeef00000000000000000000000000000000"
 )
 
-// releaseGH は PR o/r#1 を扱う、状態を持つ偽の gh。`gh pr merge` が成功すると PR は merged になる。
+// releaseGH は PR o/r#1 を扱う、状態を持つ偽の gh。flywheel は反映先へ入れないので `gh pr merge` の経路は持たない
+// （呼ばれたら失敗する）。flywheel の外で入った状態は mergeOutside で作る。
 type releaseGH struct{ dir string }
 
 func newReleaseGH(t *testing.T, head string) *releaseGH {
@@ -34,10 +35,6 @@ func newReleaseGH(t *testing.T, head string) *releaseGH {
 D=%s
 printf 'CALL %%s\n' "$*" >> "$D/calls.log"
 case "$*" in
-*"pr merge "*)
-  if [ -f "$D/merge_fail" ]; then echo "merge refused" >&2; exit 1; fi
-  : > "$D/merged"
-  exit 0;;
 *repos/o/r/pulls/1)
   HEAD=$(cat "$D/head")
   BASE=$(cat "$D/base")
@@ -66,14 +63,18 @@ func (g *releaseGH) write(t *testing.T, name, content string) {
 	}
 }
 
+// mergeOutside は PR が flywheel の外で反映先へ入った状態にする。
+func (g *releaseGH) mergeOutside(t *testing.T) { t.Helper(); g.write(t, "merged", "1") }
+
 func (g *releaseGH) calls(t *testing.T) []string {
 	return readFakeGHCallLog(t, filepath.Join(g.dir, "calls.log"))
 }
 
-func (g *releaseGH) mergeCalls(t *testing.T) []string {
+// writeCalls は反映先へ書き込む gh の呼び出し（pr merge・update-branch）。flywheel は呼ばない。
+func (g *releaseGH) writeCalls(t *testing.T) []string {
 	var out []string
 	for _, c := range g.calls(t) {
-		if strings.Contains(c, "pr merge") {
+		if strings.Contains(c, "pr merge") || strings.Contains(c, "update-branch") {
 			out = append(out, c)
 		}
 	}
@@ -116,12 +117,13 @@ func opExecEnvelope(t *testing.T, ws string, wantExit int, wantCode ErrorCode, a
 	requireJSONErrorEnvelope(t, append(append([]string{"op", "exec"}, args...), "--workspace", ws), wantExit, wantCode)
 }
 
-// AC-38・AC-46・AC-123: 承認した head と一致する open の PR は gh pr merge を 1 回呼んでマージされ、show にマージの
-// コミットが出る。出力は {"phase": {…}} の形で、items は 7 つのキーを持つ。claude は起動しない。
-func TestOpExec_MergesApprovedReleaseAndShowsTheMergeCommit(t *testing.T) {
+// 承認した head のまま flywheel の外で反映先へ入った PR は already_merged で実行済みになり、show にマージの
+// コミットが出る。出力は {"phase": {…}} の形で、items は 8 つのキーを持つ。gh は書き込まず、claude は起動しない。
+func TestOpExec_ApprovedReleaseEnteredOutsideIsExecutedAndShowsTheMergeCommit(t *testing.T) {
 	parallelTools(t, false)
 	ws, cid, op := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
+	gh.mergeOutside(t)
 	// 生きている別の保持者が排他ロックを持っていても、op exec は取らないので実行できる。
 	holder := coretest.InsertCycle(t, ws, "other-cycle", 300_000_000, nowStamp())
 	coretest.InsertLock(t, ws, holder, int64(os.Getpid()), currentHost(t), nowStamp(), nowStamp())
@@ -144,19 +146,15 @@ func TestOpExec_MergesApprovedReleaseAndShowsTheMergeCommit(t *testing.T) {
 	if v, ok := it["route"]; !ok || v != nil {
 		t.Errorf("item[route] = %v (present=%v), want null until a route exists", v, ok)
 	}
-	want := map[string]any{"operation_id": op, "challenge_id": cid, "result": "merged", "approved_head": execHead,
+	want := map[string]any{"operation_id": op, "challenge_id": cid, "result": "already_merged", "approved_head": execHead,
 		"observed_head": execHead, "merge_commit": execMerged, "consecutive_failures": float64(0)}
 	for k, v := range want {
 		if it[k] != v {
 			t.Errorf("item[%s] = %v, want %v", k, it[k], v)
 		}
 	}
-	merges := gh.mergeCalls(t)
-	if len(merges) != 1 || !strings.Contains(merges[0], "--squash") || !strings.HasSuffix(merges[0], "--match-head-commit "+execHead) {
-		t.Errorf("gh pr merge calls = %v, want one squash call with --match-head-commit %s", merges, execHead)
-	}
-	if strings.Contains(strings.Join(merges, "\n"), "--admin") || strings.Contains(strings.Join(merges, "\n"), "--auto") {
-		t.Errorf("gh pr merge must not carry --admin/--auto: %v", merges)
+	if w := gh.writeCalls(t); len(w) != 0 {
+		t.Errorf("gh was asked to write to the upstream: %v", w)
 	}
 
 	shown := runJSON(t, ws, "show", cid)["operations"].([]any)[0].(map[string]any)
@@ -177,14 +175,12 @@ func TestOpExec_RunsUnderClaudeCodeWithPipedStdin(t *testing.T) {
 	parallelTools(t, false)
 	ws, _, _ := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
+	gh.mergeOutside(t)
 
 	code, stdout, stderr := runPiped(t, []string{"op", "exec", "--workspace", ws, "--json"}, claudeCodeEnvVar+"=1")
 
-	if code != 0 || !strings.Contains(stdout, `"result":"merged"`) {
-		t.Fatalf("exit = %d, stdout = %s, stderr = %s, want a merge", code, stdout, stderr)
-	}
-	if len(gh.mergeCalls(t)) != 1 {
-		t.Errorf("merge calls = %v, want 1", gh.mergeCalls(t))
+	if code != 0 || !strings.Contains(stdout, `"result":"already_merged"`) {
+		t.Fatalf("exit = %d, stdout = %s, stderr = %s, want already_merged", code, stdout, stderr)
 	}
 }
 
@@ -211,8 +207,8 @@ func TestOpExec_DelegatedEnvIsRejectedBeforeAnythingRuns(t *testing.T) {
 	}
 }
 
-// AC-42・AC-63: connectors.json が無ければ config_not_found、merge_method が閉集合の外なら外部を呼ばず config_invalid。
-func TestOpExec_ConnectorsMissingOrMergeMethodInvalid(t *testing.T) {
+// connectors.json が無ければ config_not_found、無くした項目 merge_method が残っていれば外部を呼ばず config_invalid（removed）。
+func TestOpExec_ConnectorsMissingOrMergeMethodRemoved(t *testing.T) {
 	parallelTools(t, false)
 	t.Run("config_not_found", func(t *testing.T) {
 		ws := setupWorkspaceWithPosition(t)
@@ -225,9 +221,12 @@ func TestOpExec_ConnectorsMissingOrMergeMethodInvalid(t *testing.T) {
 	t.Run("config_invalid", func(t *testing.T) {
 		ws, _, _ := execWorkspace(t)
 		writeConnectorsJSONForTest(t, ws, strings.Replace(releaseConnectorsFixture,
-			`"default_branch": "main",`, `"default_branch": "main", "merge_method": "fast-forward",`, 1))
+			`"default_branch": "main",`, `"default_branch": "main", "merge_method": "squash",`, 1))
 		gh := newReleaseGH(t, execHead)
-		opExecEnvelope(t, ws, 2, CodeConfigInvalid)
+		code, _, stderr := runPiped(t, []string{"op", "exec", "--workspace", ws, "--json"})
+		if code != 2 || !strings.Contains(stderr, "merge_method") || !strings.Contains(stderr, "removed") {
+			t.Errorf("stderr = %s, want the removed key merge_method named with the word removed", stderr)
+		}
 		if len(gh.calls(t)) != 0 {
 			t.Errorf("gh was called: %v", gh.calls(t))
 		}
@@ -243,8 +242,8 @@ func TestOpExec_UnknownOperationIsNotFound(t *testing.T) {
 	ws, _, _ := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
 	opExecEnvelope(t, ws, 1, CodeNotFound, "OP-99")
-	if len(gh.mergeCalls(t)) != 0 {
-		t.Errorf("gh pr merge was called: %v", gh.mergeCalls(t))
+	if len(gh.writeCalls(t)) != 0 {
+		t.Errorf("gh pr merge was called: %v", gh.writeCalls(t))
 	}
 }
 
@@ -309,8 +308,8 @@ func TestOpExec_OpenLiveAttemptIsInProgress(t *testing.T) {
 	if n["reason"] != "in_progress" || n["operation_id"] != op || n["detail"] != fmt.Sprintf("%d", attempt) {
 		t.Errorf("not_started[0] = %v, want in_progress with the attempt ID %d", n, attempt)
 	}
-	if len(gh.mergeCalls(t)) != 0 {
-		t.Errorf("merge calls = %v", gh.mergeCalls(t))
+	if len(gh.writeCalls(t)) != 0 {
+		t.Errorf("merge calls = %v", gh.writeCalls(t))
 	}
 }
 
@@ -319,7 +318,7 @@ func TestOpExec_WithoutIDTriesEveryApprovedReleaseInIDOrder(t *testing.T) {
 	parallelTools(t, false)
 	ws, cid, op1 := execWorkspace(t)
 	op2 := fmt.Sprintf("OP-%d", coretest.InsertApprovedRelease(t, ws, challengeIDToInternalID(t, cid), releasePRURL(1), execHead, "2026-10-22T00:00:01.000Z"))
-	newReleaseGH(t, execHead)
+	newReleaseGH(t, execHead).mergeOutside(t)
 
 	doc := runJSON(t, ws, "op", "exec")
 
@@ -327,32 +326,52 @@ func TestOpExec_WithoutIDTriesEveryApprovedReleaseInIDOrder(t *testing.T) {
 	if len(items) != 2 || items[0].(map[string]any)["operation_id"] != op1 || items[1].(map[string]any)["operation_id"] != op2 {
 		t.Fatalf("items = %v, want %s then %s", items, op1, op2)
 	}
-	// 1 件目でマージされ、2 件目は PR が承認した head でマージ済みなので already_merged。
-	if items[0].(map[string]any)["result"] != "merged" || items[1].(map[string]any)["result"] != "already_merged" {
+	// どちらも PR が承認した head で反映先へ入っているので already_merged。
+	if items[0].(map[string]any)["result"] != "already_merged" || items[1].(map[string]any)["result"] != "already_merged" {
 		t.Errorf("results = %v, %v", items[0].(map[string]any)["result"], items[1].(map[string]any)["result"])
 	}
 }
 
-// 待つ・失敗の結果（merge_failed）だけで終わった op exec も終了コード 0 で、release は approved のまま残る。
-func TestOpExec_MergeFailureStillExitsZero(t *testing.T) {
+// 待つ結果（waiting_outside）だけで終わった op exec も終了コード 0 で、release は approved のまま残る。
+// 経路は outside で、gh は読み取りしか呼ばない。2 回目からは試行の行を増やさず、始めなかった理由 waiting_outside で返る。
+func TestOpExec_WaitingOutsideExitsZeroAndAddsNoRowTheSecondTime(t *testing.T) {
 	parallelTools(t, false)
-	ws, cid, _ := execWorkspace(t)
+	ws, cid, op := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
-	gh.write(t, "merge_fail", "1")
 
 	doc := runJSON(t, ws, "op", "exec")
 
-	_, items, _ := execItems(t, doc)
-	if len(items) != 1 || items[0].(map[string]any)["result"] != "merge_failed" || items[0].(map[string]any)["consecutive_failures"] != float64(1) {
-		t.Fatalf("items = %v, want one merge_failed with consecutive_failures 1", items)
+	_, items, notStarted := execItems(t, doc)
+	if len(items) != 1 || len(notStarted) != 0 {
+		t.Fatalf("items = %v, not_started = %v, want one item", items, notStarted)
+	}
+	it := items[0].(map[string]any)
+	if it["result"] != "waiting_outside" || it["route"] != "outside" || it["consecutive_failures"] != float64(0) {
+		t.Fatalf("item = %v, want waiting_outside on the outside route", it)
 	}
 	if got := runJSON(t, ws, "show", cid)["operations"].([]any)[0].(map[string]any)["state"]; got != "approved" {
-		t.Errorf("operation state = %v, want approved (retry later)", got)
+		t.Errorf("operation state = %v, want approved", got)
+	}
+
+	doc = runJSON(t, ws, "op", "exec", op)
+	_, items, notStarted = execItems(t, doc)
+	if len(items) != 0 || len(notStarted) != 1 {
+		t.Fatalf("2nd run: items = %v, not_started = %v, want only a not_started", items, notStarted)
+	}
+	ns := notStarted[0].(map[string]any)
+	if ns["reason"] != "waiting_outside" || ns["operation_id"] != op {
+		t.Errorf("not_started[0] = %v, want waiting_outside for %s", ns, op)
+	}
+	if n := coretest.CountOperationExecutions(t, ws); n != 1 {
+		t.Errorf("operation_execution rows = %d, want 1", n)
+	}
+	if w := gh.writeCalls(t); len(w) != 0 {
+		t.Errorf("gh was asked to write to the upstream: %v", w)
 	}
 }
 
-// AC-79: 承認の後に push された release は、マージせずに取り消され（status に承認待ちで出る）、承認し直すと
-// 次の op exec で実行の対象になる。承認し直しの head は GitHub が返す新しい head で、--match-head-commit にもそれを渡す。
+// AC-79: 承認の後に push された release は、取り消され（status に承認待ちで出る）、承認し直すと
+// 次の op exec で実行の対象になる。承認し直しの head は GitHub が返す新しい head。
 func TestOpExec_CancelledReleaseReapprovedIsExecutedByTheNextRun(t *testing.T) {
 	parallelTools(t, false)
 	ws, _, op := execWorkspace(t)
@@ -364,8 +383,8 @@ func TestOpExec_CancelledReleaseReapprovedIsExecutedByTheNextRun(t *testing.T) {
 	if len(items) != 1 || items[0].(map[string]any)["result"] != "head_changed" || items[0].(map[string]any)["observed_head"] != execHead2 {
 		t.Fatalf("items = %v, want one head_changed observing %s", items, execHead2)
 	}
-	if len(gh.mergeCalls(t)) != 0 {
-		t.Fatalf("gh pr merge was called for a changed head: %v", gh.mergeCalls(t))
+	if w := gh.writeCalls(t); len(w) != 0 {
+		t.Fatalf("gh was asked to write for a changed head: %v", w)
 	}
 	st := runJSON(t, ws, "status")
 	if !strings.Contains(fmt.Sprint(st["needs_human"]), op) {
@@ -382,22 +401,20 @@ func TestOpExec_CancelledReleaseReapprovedIsExecutedByTheNextRun(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("re-approve: exit = %d, stderr = %s", code, stderr)
 	}
+	gh.mergeOutside(t)
 	doc = runJSON(t, ws, "op", "exec")
 	_, items, _ = execItems(t, doc)
-	if len(items) != 1 || items[0].(map[string]any)["result"] != "merged" || items[0].(map[string]any)["approved_head"] != execHead2 {
-		t.Fatalf("items = %v, want merged with approved_head %s", items, execHead2)
-	}
-	merges := gh.mergeCalls(t)
-	if len(merges) != 1 || !strings.HasSuffix(merges[0], "--match-head-commit "+execHead2) {
-		t.Errorf("merge calls = %v, want one with --match-head-commit %s", merges, execHead2)
+	if len(items) != 1 || items[0].(map[string]any)["result"] != "already_merged" || items[0].(map[string]any)["approved_head"] != execHead2 {
+		t.Fatalf("items = %v, want already_merged with approved_head %s", items, execHead2)
 	}
 }
 
 // cycle の最初の段は release で、取り込みより前。接続ツールの宣言が無ければ skipped。
-func TestCycle_ReleasePhaseIsFirstAndMergesInsideTheCycle(t *testing.T) {
+func TestCycle_ReleasePhaseIsFirstAndExecutesInsideTheCycle(t *testing.T) {
 	parallelTools(t, false)
 	ws, _, op := execWorkspace(t)
 	gh := newReleaseGH(t, execHead)
+	gh.mergeOutside(t)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 
 	doc := cycleDoc(t, ws)
@@ -408,11 +425,11 @@ func TestCycle_ReleasePhaseIsFirstAndMergesInsideTheCycle(t *testing.T) {
 	}
 	rel := phases[0].(map[string]any)
 	items := rel["items"].([]any)
-	if rel["skipped"] != false || len(items) != 1 || items[0].(map[string]any)["operation_id"] != op || items[0].(map[string]any)["result"] != "merged" {
+	if rel["skipped"] != false || len(items) != 1 || items[0].(map[string]any)["operation_id"] != op || items[0].(map[string]any)["result"] != "already_merged" {
 		t.Errorf("release phase = %v", rel)
 	}
-	if len(gh.mergeCalls(t)) != 1 {
-		t.Errorf("merge calls = %v, want 1", gh.mergeCalls(t))
+	if w := gh.writeCalls(t); len(w) != 0 {
+		t.Errorf("gh was asked to write to the upstream: %v", w)
 	}
 	if triggers, _ := coretest.CycleTriggers(t, ws); len(triggers) != 1 || triggers[0] != "manual" {
 		t.Errorf("cycle triggers = %v", triggers)
@@ -456,12 +473,12 @@ func TestCycle_ReleasePhaseIsSkippedWithoutConnectors(t *testing.T) {
 	}
 }
 
-// merge_method が閉集合の外なら cycle は周を始める前に config_invalid で終わる（周の行も gh の呼び出しも無い）。
+// 無くした項目 merge_method が残っていれば cycle は周を始める前に config_invalid で終わる（周の行も gh の呼び出しも無い）。
 func TestCycle_InvalidMergeMethodFailsBeforeTheCycleStarts(t *testing.T) {
 	parallelTools(t, false)
 	ws, _, _ := execWorkspace(t)
 	writeConnectorsJSONForTest(t, ws, strings.Replace(releaseConnectorsFixture,
-		`"default_branch": "main",`, `"default_branch": "main", "merge_method": "bogus",`, 1))
+		`"default_branch": "main",`, `"default_branch": "main", "merge_method": "squash",`, 1))
 	gh := newReleaseGH(t, execHead)
 	requireJSONErrorEnvelope(t, []string{"cycle", "--workspace", ws}, 2, CodeConfigInvalid)
 	if len(gh.calls(t)) != 0 {

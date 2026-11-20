@@ -2,8 +2,7 @@ package core
 
 // このファイルは release の実行の試行の終わり方ごとの書き込みを持つ。実行済みと取り消しは
 // それぞれ 1 つのトランザクションの関数（executeReleaseInTx・cancelReleaseInTx）にまとめる。
-// 発生（occurrence）は取り消しの書き込み（cancelReleaseInTx・recordMergedAfterWithdrawalInTx）の
-// 中で同じトランザクションに乗せて作る。実行済みと待つ結果では作らない。
+// 発生（occurrence）は取り消しの書き込み（cancelReleaseInTx）の中で同じトランザクションに乗せて作る。実行済みと待つ結果では作らない。
 //
 // release が approved から pending へ戻る経路は cancelReleaseInTx だけである。連続の回数の導出
 // （consecutiveFailures）は、この前提で「最後の取り消しの試行より後」を最新の承認より後とみなす。
@@ -11,7 +10,6 @@ package core
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -167,115 +165,6 @@ func (s *Store) insertReleaseOccurrence(tx *sql.Tx, w releaseOutcomeWrite, kind 
 	})
 }
 
-// mergedAfterWithdrawalOutcome は recordMergedAfterWithdrawalInTx が何をしたか。
-type mergedAfterWithdrawalOutcome int
-
-const (
-	// mergedAfterWithdrawalNotPending は release が pending でなく、何も書かなかった。
-	mergedAfterWithdrawalNotPending mergedAfterWithdrawalOutcome = iota
-	// mergedAfterWithdrawalAlreadyRecorded は別の呼び出しが同じマージを記録済みで、何も書かなかった。
-	mergedAfterWithdrawalAlreadyRecorded
-	// mergedAfterWithdrawalRecorded は試行を merged_unapproved で閉じて書いた。
-	mergedAfterWithdrawalRecorded
-)
-
-// recordMergedAfterWithdrawalInTx は、取り消されて pending の release に merged_unapproved の試行を足す
-// （AC-52a）書き込み: 依頼した試行を閉じる（すでに閉じていれば新しい試行を足して閉じる）、状態は pending の
-// まま不可逆操作と課題の版をそれぞれ 1 上げ、entity=operation と entity=challenge の op_execute と
-// unapproved_merge の発生（参照はその試行）を同じトランザクションで残す。試行を実際に閉じたときだけ書く。
-func (s *Store) recordMergedAfterWithdrawalInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, w releaseOutcomeWrite, pid int64, host string) (mergedAfterWithdrawalOutcome, error) {
-	cur, err := loadOperationRow(ctx, tx, w.opID)
-	if err != nil {
-		return mergedAfterWithdrawalNotPending, err
-	}
-	if cur.State != OperationStatePending {
-		return mergedAfterWithdrawalNotPending, nil
-	}
-	if last, err := latestOperationExecution(ctx, tx, w.opID); err != nil {
-		return mergedAfterWithdrawalNotPending, err
-	} else if last != nil && !last.open() && last.ID != w.attemptID && last.Result == ExecutionResultMergedUnapproved {
-		return mergedAfterWithdrawalAlreadyRecorded, nil // 別の呼び出しが同じマージを記録済み。
-	}
-	nowStr := formatTimestamp(w.at)
-	in := closeOperationExecutionInput{EndedAt: w.at, Result: ExecutionResultMergedUnapproved, ObservedHead: w.observedHead, Detail: w.detail}
-	err = closeOperationExecution(ctx, tx, w.attemptID, in)
-	if errors.Is(err, errExecutionNotOpen) {
-		a, berr := beginOperationExecution(ctx, tx, w.opID, beginOperationExecutionInput{StartedAt: w.at, ApprovedHead: w.approvedHead, PID: pid, Host: host})
-		if berr != nil {
-			return mergedAfterWithdrawalNotPending, berr
-		}
-		w.attemptID = a.ID
-		err = closeOperationExecution(ctx, tx, a.ID, in)
-	}
-	if err != nil {
-		return mergedAfterWithdrawalNotPending, err
-	}
-	res, err := tx.ExecContext(ctx,
-		`UPDATE operation SET version = ? WHERE id = ? AND version = ? AND state = ?`,
-		cur.Version+1, w.opID, cur.Version, string(OperationStatePending))
-	if err != nil {
-		return mergedAfterWithdrawalNotPending, err
-	}
-	if n, err := res.RowsAffected(); err != nil {
-		return mergedAfterWithdrawalNotPending, err
-	} else if n != 1 {
-		return mergedAfterWithdrawalNotPending, fmt.Errorf("core: op_execute operation %s: expected to update 1 row, updated %d", formatOperationID(w.opID), n)
-	}
-	newChallengeVersion, err := bumpChallengeVersionQuietly(ctx, tx, w.challengeID, nowStr)
-	if err != nil {
-		return mergedAfterWithdrawalNotPending, err
-	}
-	if err := rec.record("operation", w.opID, ActivityActionOpExecute,
-		map[string]any{"state": string(OperationStatePending)},
-		w.after(map[string]any{"state": string(OperationStatePending), "version": cur.Version + 1})); err != nil {
-		return mergedAfterWithdrawalNotPending, err
-	}
-	if err := rec.record("challenge", w.challengeID, ActivityActionOpExecute, nil, map[string]any{
-		"version":      newChallengeVersion,
-		"operation_id": formatOperationID(w.opID),
-		"result":       string(w.result),
-	}); err != nil {
-		return mergedAfterWithdrawalNotPending, err
-	}
-	if err := s.insertReleaseOccurrence(tx, w, OccurrenceKindUnapprovedMerge); err != nil {
-		return mergedAfterWithdrawalNotPending, err
-	}
-	return mergedAfterWithdrawalRecorded, nil
-}
-
-// reopenAfterNotMergeable は、完了の課題の release が not_mergeable になった試行を閉じ、課題を着手中へ戻して
-// release を置き換える（reopenForReleaseInTx）。取り消しと同じく release_withdrawn の発生を試行を参照にして残す。
-func (s *Store) reopenAfterNotMergeable(ctx context.Context, tx *sql.Tx, rec *activityRecorder, w releaseOutcomeWrite, reason ReopenReason, item *ReleaseExecItem) error {
-	if err := closeOperationExecution(ctx, tx, w.attemptID, closeOperationExecutionInput{
-		EndedAt: w.at, Result: w.result, ObservedHead: w.observedHead, Detail: w.detail}); err != nil {
-		return err
-	}
-	res, err := reopenForReleaseInTx(ctx, tx, rec, w.opID, reason, map[string]any{
-		"attempt_result": string(w.result), "approved_head": nullableTextColumn(w.approvedHead),
-		"observed_head": nullableTextColumn(w.observedHead), "trigger": w.trigger,
-	})
-	if err != nil {
-		return err
-	}
-	if !res.Reopened {
-		return fmt.Errorf("core: reopen for release %s: the challenge is done and the release is approved but nothing was reopened", formatOperationID(w.opID))
-	}
-	if err := s.insertReleaseOccurrence(tx, w, OccurrenceKindReleaseWithdrawn); err != nil {
-		return err
-	}
-	item.Result = w.result
-	item.ObservedHead = w.observedHead
-	item.Reopened = true
-	item.NewOperationID = res.NewOperationID
-	item.ReopenReason = reason
-	n, err := consecutiveFailures(ctx, tx, w.opID)
-	if err != nil {
-		return err
-	}
-	item.ConsecutiveFailures = n
-	return nil
-}
-
 // finishReleaseAttempt は判定 j の結果で試行を閉じる。待つ結果は試行の行だけを書き（作業ログなし）、
 // 数える結果で連続の回数が failure_limit に達したときは limit_reached として取り消す。
 func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int64, row *operationRow, attempt *operationExecutionRow, approvedHead string, j releaseJudgment, opts ReleaseExecOptions, cycleID *int64, now func() time.Time) (*ReleaseExecItem, error) {
@@ -303,25 +192,6 @@ func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int
 		}
 		if cur.Version != row.Version || cur.State != OperationStateApproved {
 			return ErrConflict
-		}
-		// マージできない（not_mergeable）release の課題が完了なら、試行を not_mergeable で閉じ、課題を着手中へ戻して
-		// release を置き換える（連続の回数・上限より先に判定する。#485）。
-		if j.result == ExecutionResultNotMergeable {
-			chal, err := loadChallenge(ctx, tx, row.ChallengeID)
-			if err != nil {
-				return err
-			}
-			if chal.Status == StatusDone {
-				prior, err := consecutiveFailures(ctx, tx, opID)
-				if err != nil {
-					return err
-				}
-				reason := ReopenReasonNotMergeable
-				if prior+1 >= limit {
-					reason = ReopenReasonLimitReached
-				}
-				return s.reopenAfterNotMergeable(ctx, tx, rec, w, reason, item)
-			}
 		}
 		if j.result.Counts() {
 			prior, err := consecutiveFailures(ctx, tx, opID)
@@ -351,6 +221,9 @@ func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int
 		}
 		item.Result = w.result
 		item.ObservedHead = w.observedHead
+		if w.result == ExecutionResultWaitingOutside {
+			item.Route = ReleaseRouteOutside
+		}
 		if class == ExecutionClassExecuted {
 			item.MergeCommit = w.mergeCommit
 		}

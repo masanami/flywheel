@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,22 +19,16 @@ const (
 	relHead = "a1b2c3"
 )
 
-// fakeRelease は UpstreamCheckSource と UpstreamPullRequestMerger の偽の実装（gh は起動しない）。
+// fakeRelease は UpstreamCheckSource の偽の実装（gh は起動しない）。
 type fakeRelease struct {
-	mu        sync.Mutex
-	pr        UpstreamPullRequestChecks
-	afterPR   *UpstreamPullRequestChecks // MergePullRequest の後の読み取り。nil なら pr のまま
-	getErr    error
-	mergeErr  error
-	merged    bool
-	getCalls  int
-	mergeArgs [][]string
-	// onMerge が非 nil なら、MergePullRequest の呼び出しの時点で（記録の前に）呼ぶ。
-	onMerge func()
+	mu       sync.Mutex
+	pr       UpstreamPullRequestChecks
+	getErr   error
+	getCalls int
 	// onGet が非 nil なら、GetPullRequestChecks の呼び出しの時点で呼ぶ。
 	onGet func()
 	// prSeq が空でなければ、GetPullRequestChecks の n 回目の呼び出しに prSeq[n-1] を返す
-	// （呼び出しが prSeq より多ければ最後の要素）。pr・afterPR より優先する。
+	// （呼び出しが prSeq より多ければ最後の要素）。pr より優先する。
 	prSeq []UpstreamPullRequestChecks
 }
 
@@ -58,28 +51,11 @@ func (f *fakeRelease) GetPullRequestChecks(_ context.Context, _ string, _ int) (
 	if len(f.prSeq) > 0 {
 		return f.prSeq[min(f.getCalls, len(f.prSeq))-1], nil
 	}
-	if f.merged && f.afterPR != nil {
-		return *f.afterPR, nil
-	}
 	return f.pr, nil
 }
 
-func (f *fakeRelease) MergePullRequest(_ context.Context, prURL, method, head string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.mergeArgs = append(f.mergeArgs, []string{prURL, method, head})
-	if f.onMerge != nil {
-		f.onMerge()
-	}
-	if f.mergeErr != nil {
-		return f.mergeErr
-	}
-	f.merged = true
-	return nil
-}
-
-func relConnectors(method string) *ConnectorsDeclaration {
-	return &ConnectorsDeclaration{Repos: []ConnectorRepo{{Name: "r", Remote: "o/r", DefaultBranch: "main", MergeMethod: method}}}
+func relConnectors() *ConnectorsDeclaration {
+	return &ConnectorsDeclaration{Repos: []ConnectorRepo{{Name: "r", Remote: "o/r", DefaultBranch: "main"}}}
 }
 
 type relFixture struct {
@@ -107,7 +83,7 @@ func newRelFixtureAt(t *testing.T, status Status) *relFixture {
 
 func (f *relFixture) opts() ReleaseExecOptions {
 	return ReleaseExecOptions{
-		Checks: f.fake, Merger: f.fake, Connectors: relConnectors(""),
+		Checks: f.fake, Connectors: relConnectors(),
 		Agent: &AgentDeclaration{FailureLimit: f.limit}, Trigger: ReleaseExecTriggerOpExec,
 		Now: func() time.Time { return f.now },
 	}
@@ -185,20 +161,17 @@ func relAfter(t *testing.T, a Activity) map[string]any {
 
 // --- 実行済み ---
 
-func TestExecuteReleases_AllConditionsPass_MergesOnceAndMarksExecuted(t *testing.T) {
+func TestExecuteReleases_AlreadyMergedWithApprovedHead_MarksExecuted(t *testing.T) {
 	t.Parallel()
 	f := newRelFixture(t)
-	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m3rg3"}
+	f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "x", HeadSHA: relHead, MergeCommitSHA: "mc"}
 	before := f.state(t)
 	item := f.run(t)
-	if item.Result != ExecutionResultMerged || item.MergeCommit != "m3rg3" || item.ObservedHead != relHead || item.ApprovedHead != relHead {
+	if item.Result != ExecutionResultAlreadyMerged || item.MergeCommit != "mc" || item.ObservedHead != relHead || item.ApprovedHead != relHead {
 		t.Fatalf("item = %+v", item)
 	}
-	if len(f.fake.mergeArgs) != 1 || strings.Join(f.fake.mergeArgs[0], " ") != relRef+" squash "+relHead {
-		t.Fatalf("merge args = %v, want [url squash head] once", f.fake.mergeArgs)
-	}
 	st := f.state(t)
-	if st.opState != "executed" || !st.executedAt.Valid || st.mergeCommit.String != "m3rg3" {
+	if st.opState != "executed" || !st.executedAt.Valid || st.mergeCommit.String != "mc" {
 		t.Errorf("state = %+v", st)
 	}
 	if st.opVersion != before.opVersion+1 || st.chVersion != before.chVersion+1 {
@@ -212,82 +185,26 @@ func TestExecuteReleases_AllConditionsPass_MergesOnceAndMarksExecuted(t *testing
 		t.Fatalf("logs = %+v", logs)
 	}
 	a := relAfter(t, logs[0])
-	if a["result"] != "merged" || a["approved_head"] != relHead || a["observed_head"] != relHead || a["merge_commit"] != "m3rg3" || a["trigger"] != "op exec" {
+	if a["result"] != "already_merged" || a["approved_head"] != relHead || a["observed_head"] != relHead || a["merge_commit"] != "mc" || a["trigger"] != "op exec" {
 		t.Errorf("after = %v", a)
 	}
 	at := f.attempts(t)
-	if len(at) != 1 || at[0].Result != ExecutionResultMerged || at[0].open() {
+	if len(at) != 1 || at[0].Result != ExecutionResultAlreadyMerged || at[0].open() {
 		t.Errorf("attempts = %+v", at)
 	}
 }
 
-func TestExecuteReleases_MergeMethodFlagFollowsDeclaration(t *testing.T) {
-	t.Parallel()
-	for _, m := range []string{"squash", "merge", "rebase"} {
-		f := newRelFixture(t)
-		o := f.opts()
-		o.Connectors = relConnectors(m)
-		if _, err := f.s.ExecuteReleases(context.Background(), nil, o); err != nil {
-			t.Fatal(err)
-		}
-		if len(f.fake.mergeArgs) != 1 || f.fake.mergeArgs[0][1] != m {
-			t.Errorf("method %s: args = %v", m, f.fake.mergeArgs)
-		}
-	}
-}
-
-func TestExecuteReleases_MergeNotReflected_Unconfirmed_NotCounted(t *testing.T) {
+func TestExecuteReleases_MergedWithOtherHead_MergedUnapprovedClosesTheOperation(t *testing.T) {
 	t.Parallel()
 	f := newRelFixture(t)
-	item := f.run(t) // 依頼の後の読み取りも open のまま
-	if item.Result != ExecutionResultMergeUnconfirmed || item.ConsecutiveFailures != 0 {
-		t.Fatalf("item = %+v", item)
-	}
-	if st := f.state(t); st.opState != "approved" {
-		t.Errorf("state = %s, want approved", st.opState)
-	}
-	if len(f.opExecuteLogs(t)) != 0 {
-		t.Error("unconfirmed must not write op_execute")
-	}
-}
-
-func TestExecuteReleases_MergedWithOtherHeadAfterRequest_MergedUnapproved(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: "zzz", MergeCommitSHA: "m"}
+	f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: "zzz", MergeCommitSHA: "m"}
 	item := f.run(t)
 	if item.Result != ExecutionResultMergedUnapproved || item.ObservedHead != "zzz" {
 		t.Fatalf("item = %+v", item)
 	}
-	// 承認していない head でマージ済みになった release は、承認し直せないので pending へ戻さず closed にする（#485）。
+	// 承認していない head でマージ済みになった release は、承認し直せないので pending へ戻さず closed にする。
 	if st := f.state(t); st.opState != "closed" {
 		t.Errorf("state = %s", st.opState)
-	}
-}
-
-func TestExecuteReleases_MergeRequestFails_MergeFailedCounted(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.fake.mergeErr = errors.New("boom")
-	item := f.run(t)
-	if item.Result != ExecutionResultMergeFailed || item.ConsecutiveFailures != 1 {
-		t.Fatalf("item = %+v", item)
-	}
-	if st := f.state(t); st.opState != "approved" {
-		t.Errorf("state = %s", st.opState)
-	}
-}
-
-func TestExecuteReleases_AlreadyMergedWithApprovedHead_NoMergeCall(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "x", HeadSHA: relHead, MergeCommitSHA: "mc"}
-	item := f.run(t)
-	if item.Result != ExecutionResultAlreadyMerged || item.MergeCommit != "mc" || len(f.fake.mergeArgs) != 0 {
-		t.Fatalf("item = %+v args=%v", item, f.fake.mergeArgs)
-	}
-	if st := f.state(t); st.opState != "executed" || st.mergeCommit.String != "mc" {
-		t.Errorf("state = %+v", st)
 	}
 }
 
@@ -298,29 +215,29 @@ func TestJudgmentOrder(t *testing.T) {
 	failedCheck := []UpstreamCheck{{Name: "ci", Status: "completed", Conclusion: "failure"}}
 	pendingCheck := []UpstreamCheck{{Name: "ci", Status: "in_progress"}}
 	cases := []struct {
-		name   string
-		mod    func(*relFixture)
-		want   ExecutionResult
-		state  string
-		merges int
+		name  string
+		mod   func(*relFixture)
+		want  ExecutionResult
+		state string
 	}{
-		{"closed", func(f *relFixture) { f.fake.pr.State = "closed" }, ExecutionResultClosed, "pending", 0},
+		{"closed", func(f *relFixture) { f.fake.pr.State = "closed" }, ExecutionResultClosed, "pending"},
 		{"merged other head beats closed/head", func(f *relFixture) {
 			f.fake.pr = UpstreamPullRequestChecks{State: "merged", Base: "x", HeadSHA: "zzz", Checks: failedCheck}
-		}, ExecutionResultMergedUnapproved, "closed", 0},
-		{"closed beats head_changed", func(f *relFixture) { f.fake.pr.State = "closed"; f.fake.pr.HeadSHA = "zzz" }, ExecutionResultClosed, "pending", 0},
-		{"base_changed", func(f *relFixture) { f.fake.pr.Base = "dev" }, ExecutionResultBaseChanged, "pending", 0},
-		{"base_changed beats head_changed", func(f *relFixture) { f.fake.pr.Base = "dev"; f.fake.pr.HeadSHA = "z" }, ExecutionResultBaseChanged, "pending", 0},
-		{"head_changed beats failed check", func(f *relFixture) { f.fake.pr.HeadSHA = "zzz"; f.fake.pr.Checks = failedCheck }, ExecutionResultHeadChanged, "pending", 0},
+		}, ExecutionResultMergedUnapproved, "closed"},
+		{"closed beats head_changed", func(f *relFixture) { f.fake.pr.State = "closed"; f.fake.pr.HeadSHA = "zzz" }, ExecutionResultClosed, "pending"},
+		{"base_changed", func(f *relFixture) { f.fake.pr.Base = "dev" }, ExecutionResultBaseChanged, "pending"},
+		{"base_changed beats head_changed", func(f *relFixture) { f.fake.pr.Base = "dev"; f.fake.pr.HeadSHA = "z" }, ExecutionResultBaseChanged, "pending"},
+		{"head_changed beats failed check", func(f *relFixture) { f.fake.pr.HeadSHA = "zzz"; f.fake.pr.Checks = failedCheck }, ExecutionResultHeadChanged, "pending"},
 		{"checks_failed beats pending", func(f *relFixture) {
 			f.fake.pr.Checks = append(append([]UpstreamCheck{}, pendingCheck...), failedCheck...)
-		}, ExecutionResultChecksFailed, "approved", 0},
-		{"waiting_checks", func(f *relFixture) { f.fake.pr.Checks = pendingCheck }, ExecutionResultWaitingChecks, "approved", 0},
-		{"mergeable null", func(f *relFixture) { f.fake.pr.Mergeable = nil }, ExecutionResultWaitingChecks, "approved", 0},
-		// 完了の課題の not_mergeable は、課題を着手中へ戻して release を置き換える（古い release は closed。#485）。
-		{"mergeable false", func(f *relFixture) { v := false; f.fake.pr.Mergeable = &v }, ExecutionResultNotMergeable, "closed", 0},
-		{"read failure", func(f *relFixture) { f.fake.getErr = errors.New("gh down") }, ExecutionResultUpstreamFailed, "approved", 0},
-		{"no checks passes", func(f *relFixture) { f.fake.pr.Checks = nil }, ExecutionResultMergeUnconfirmed, "approved", 1},
+		}, ExecutionResultChecksFailed, "approved"},
+		{"waiting_checks", func(f *relFixture) { f.fake.pr.Checks = pendingCheck }, ExecutionResultWaitingChecks, "approved"},
+		{"mergeable is not read", func(f *relFixture) { f.fake.pr.Mergeable = nil }, ExecutionResultWaitingOutside, "approved"},
+		{"read failure", func(f *relFixture) { f.fake.getErr = errors.New("gh down") }, ExecutionResultUpstreamFailed, "approved"},
+		{"no checks, no contract run", func(f *relFixture) { f.fake.pr.Checks = nil }, ExecutionResultWaitingOutside, "approved"},
+		{"checks pass, no contract run", func(f *relFixture) {
+			f.fake.pr.Checks = []UpstreamCheck{{Name: "ci", Status: "completed", Conclusion: "success"}}
+		}, ExecutionResultWaitingOutside, "approved"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -332,9 +249,6 @@ func TestJudgmentOrder(t *testing.T) {
 			}
 			if st := f.state(t); st.opState != c.state {
 				t.Errorf("state = %s, want %s", st.opState, c.state)
-			}
-			if len(f.fake.mergeArgs) != c.merges {
-				t.Errorf("merge calls = %d, want %d", len(f.fake.mergeArgs), c.merges)
 			}
 		})
 	}
@@ -378,7 +292,7 @@ func TestNoApprovedHead_And_Unsupported_CancelWithoutExternalCall(t *testing.T) 
 	cid := mustParseChallengeID(t, c.ID)
 	opID := coretest.InsertApprovedRelease(t, s.workspace, int(cid), relRef, "", execTS(0))
 	fake := &fakeRelease{pr: openPR()}
-	res, err := s.ExecuteReleases(context.Background(), nil, ReleaseExecOptions{Checks: fake, Merger: fake, Connectors: relConnectors(""), Now: func() time.Time { return execTime(5) }})
+	res, err := s.ExecuteReleases(context.Background(), nil, ReleaseExecOptions{Checks: fake, Connectors: relConnectors(), Now: func() time.Time { return execTime(5) }})
 	if err != nil || len(res.Items) != 1 || res.Items[0].Result != ExecutionResultNoApprovedHead || fake.getCalls != 0 {
 		t.Fatalf("res = %+v err = %v calls = %d", res, err, fake.getCalls)
 	}
@@ -499,14 +413,13 @@ func TestFailureLimit_ReachedCancelsWithLimitReached(t *testing.T) {
 	if len(f.opExecuteLogs(t)) != 0 {
 		t.Error("counted wait must not log")
 	}
-	f.fake.pr.Checks = nil
-	f.fake.mergeErr = errors.New("rejected") // 種類が違っても連続
+	f.fake.pr.Checks = []UpstreamCheck{{Status: "completed", Conclusion: "failure"}}
 	item := f.run(t)
 	if item.Result != ExecutionResultLimitReached || item.ConsecutiveFailures != 0 {
 		t.Fatalf("2nd = %+v", item)
 	}
 	at := f.attempts(t)
-	if at[1].Detail != string(ExecutionResultMergeFailed) {
+	if at[1].Detail != string(ExecutionResultChecksFailed) {
 		t.Errorf("detail = %q, want original result", at[1].Detail)
 	}
 	if st := f.state(t); st.opState != "pending" {
@@ -528,11 +441,9 @@ func TestConsecutiveFailures_WaitingInBetweenAndInterruptedDoNotBreakOrCount(t *
 	// interrupted の試行（回収で閉じる）
 	coretest.InsertOperationExecution(t, f.s.workspace, f.opID, coretest.ExecutionAttempt{StartedAt: formatTimestamp(f.now), Host: "other", PID: 9})
 	f.now = f.now.Add(16 * time.Minute)
-	f.fake.pr.Checks = nil
-	v := false
-	f.fake.pr.Mergeable = &v
-	item := f.run(t) // interrupted を閉じてから not_mergeable
-	if item.Result != ExecutionResultNotMergeable || item.ConsecutiveFailures != 2 {
+	f.fake.pr.Checks = []UpstreamCheck{{Status: "completed", Conclusion: "failure"}}
+	item := f.run(t) // interrupted を閉じてから checks_failed
+	if item.Result != ExecutionResultChecksFailed || item.ConsecutiveFailures != 2 {
 		t.Fatalf("item = %+v", item)
 	}
 }
@@ -583,7 +494,7 @@ func TestNotExecutable_NotReleaseOrNotApproved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Items) != 0 || len(res.NotStarted) != 4 || f.fake.getCalls != 0 || len(f.fake.mergeArgs) != 0 {
+	if len(res.Items) != 0 || len(res.NotStarted) != 4 || f.fake.getCalls != 0 {
 		t.Fatalf("res = %+v calls = %d", res, f.fake.getCalls)
 	}
 	want := []string{"kind=release state=pending", "kind=release state=executed", "kind=release state=rejected", "kind=delete state=approved"}
@@ -629,8 +540,8 @@ func TestNotExecutable_ApprovedNonReleaseKindsAreLeftUntouched(t *testing.T) {
 			t.Errorf("%s: state/version = %s/%d, want approved/2 (unchanged)", kind, state, version)
 		}
 	}
-	if f.fake.getCalls != 0 || len(f.fake.mergeArgs) != 0 {
-		t.Errorf("external calls: get %d merge %v", f.fake.getCalls, f.fake.mergeArgs)
+	if f.fake.getCalls != 0 {
+		t.Errorf("external calls: get %d", f.fake.getCalls)
 	}
 }
 
@@ -666,7 +577,7 @@ func TestExecuteReleases_RequiresDependencies(t *testing.T) {
 	t.Parallel()
 	f := newRelFixture(t)
 	o := f.opts()
-	o.Merger = nil
+	o.Checks = nil
 	if _, err := f.s.ExecuteReleases(context.Background(), nil, o); !errors.Is(err, ErrValidation) {
 		t.Errorf("err = %v", err)
 	}
@@ -796,9 +707,7 @@ func countAction(as []Activity, action string) int {
 func TestExecuteReleases_ChangedAfterAttemptStartedReportsTheAttemptID(t *testing.T) {
 	t.Parallel()
 	f := newRelFixture(t)
-	// マージの依頼が失敗した（依頼していない）場合は、従来どおり not_started になる（M45H18）。
-	f.fake.mergeErr = errors.New("merge refused")
-	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
+	f.fake.onGet = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
 	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
 	if err != nil {
 		t.Fatalf("ExecuteReleases() error = %v", err)
@@ -819,231 +728,22 @@ func TestExecuteReleases_ChangedAfterAttemptStartedReportsTheAttemptID(t *testin
 	}
 }
 
-// M45H18: マージを依頼した後に試行の記録が衝突しても、release は merge_unconfirmed として出力に残る。
-func TestExecuteReleases_ConflictAfterMergeRequestIsMergeUnconfirmed(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
-	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "rejected") }
-	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
-	if err != nil {
-		t.Fatalf("ExecuteReleases() error = %v", err)
-	}
-	if len(res.NotStarted) != 0 || len(res.Items) != 1 {
-		t.Fatalf("Items = %+v, NotStarted = %+v, want 1 item and no not_started", res.Items, res.NotStarted)
-	}
-	it := res.Items[0]
-	if it.Result != ExecutionResultMergeUnconfirmed || it.OperationID != formatOperationID(f.opID) || it.Detail == "" {
-		t.Errorf("item = %+v, want merge_unconfirmed with a detail", it)
-	}
-}
-
-// #344: マージの依頼の後に release が pending へ取り消されていてマージ済みなら、merged_unapproved として
-// 記録し、status の食い違いに出し、承認し直しを拒む。
-func TestExecuteReleases_WithdrawnThenMerged_RecordsMergedUnapproved(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
-	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
-	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
-	if err != nil {
-		t.Fatalf("ExecuteReleases() error = %v", err)
-	}
-	if len(res.NotStarted) != 0 || len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMergedUnapproved {
-		t.Fatalf("Items = %+v, NotStarted = %+v, want 1 merged_unapproved item", res.Items, res.NotStarted)
-	}
-	at := f.attempts(t)
-	if last := at[len(at)-1]; last.Result != ExecutionResultMergedUnapproved || last.open() {
-		t.Fatalf("last attempt = %+v, want closed merged_unapproved", last)
-	}
-	ov, err := f.s.GetOverview(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, d := range ov.Discrepancies {
-		if d.OperationID == formatOperationID(f.opID) {
-			for _, k := range d.Kinds {
-				found = found || k == DiscrepancyKindMergedUnapproved
-			}
-		}
-	}
-	if !found {
-		t.Errorf("discrepancies = %+v, want merged_unapproved for the release", ov.Discrepancies)
-	}
-	forbidden := false
-	readForTest(t, f.s, func(tx *sql.Tx) error {
-		var e error
-		forbidden, e = reapprovalForbidden(context.Background(), tx, f.opID)
-		return e
-	})
-	if !forbidden {
-		t.Error("reapproval must be forbidden")
-	}
-}
-
-// #344: 依頼の後の読み取りが失敗しても、取り消された後の読み取りでマージ済みと分かれば merged_unapproved。
-// 依頼した試行そのものを閉じ、試行は 1 行のまま。
-func TestExecuteReleases_WithdrawnThenMergedSeenOnSecondRead(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.fake.onMerge = func() {
-		coretest.SetOperationState(t, f.s.workspace, f.opID, "pending")
-		f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
-	}
-	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
-	if err != nil {
-		t.Fatalf("ExecuteReleases() error = %v", err)
-	}
-	if len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMergedUnapproved {
-		t.Fatalf("Items = %+v, want merged_unapproved", res.Items)
-	}
-	at := f.attempts(t)
-	if len(at) != 1 || at[0].Result != ExecutionResultMergedUnapproved {
-		t.Errorf("attempts = %+v, want the single attempt closed as merged_unapproved", at)
-	}
-}
-
-// #344: 取り消された後で、マージ済みと確かめられないなら記録を足さず merge_unconfirmed のまま。
-func TestExecuteReleases_WithdrawnAndNotMerged_StaysMergeUnconfirmed(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
-	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
-	if err != nil {
-		t.Fatalf("ExecuteReleases() error = %v", err)
-	}
-	if len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMergeUnconfirmed {
-		t.Fatalf("Items = %+v, want merge_unconfirmed", res.Items)
-	}
-	for _, a := range f.attempts(t) {
-		if a.Result == ExecutionResultMergedUnapproved {
-			t.Errorf("attempt %+v must not be merged_unapproved", a)
-		}
-	}
-}
-
-// #344: 依頼の後の読み取りではマージ済みと見えず（merge_unconfirmed）、取り消された後の追加の読み取り
-// 1 回でマージ済みと分かれば、merged_unapproved の試行が 1 行書かれる。
-func TestExecuteReleases_WithdrawnThenMergedSeenOnlyByAdditionalRead(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	merged := UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
-	f.fake.prSeq = []UpstreamPullRequestChecks{openPR(), openPR(), merged}
-	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
-	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
-	if err != nil {
-		t.Fatalf("ExecuteReleases() error = %v", err)
-	}
-	if f.fake.getCalls != 3 {
-		t.Errorf("GetPullRequestChecks calls = %d, want 3 (head check, after merge, additional read)", f.fake.getCalls)
-	}
-	if len(res.NotStarted) != 0 || len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMergedUnapproved {
-		t.Fatalf("Items = %+v, NotStarted = %+v, want 1 merged_unapproved item", res.Items, res.NotStarted)
-	}
-	n := 0
-	for _, a := range f.attempts(t) {
-		if a.Result == ExecutionResultMergedUnapproved {
-			n++
-			if a.open() || a.ObservedHead != relHead {
-				t.Errorf("attempt %+v, want closed with observed head %s", a, relHead)
-			}
-		}
-	}
-	if n != 1 {
-		t.Errorf("merged_unapproved attempts = %d, want 1", n)
-	}
-}
-
-// #344: 取り消された後の追加の読み取りでもマージ済みと分からなければ、記録を足さず merge_unconfirmed のまま。
-func TestExecuteReleases_WithdrawnAndAdditionalReadNotMerged_StaysMergeUnconfirmed(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.fake.prSeq = []UpstreamPullRequestChecks{openPR()}
-	f.fake.onMerge = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
-	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
-	if err != nil {
-		t.Fatalf("ExecuteReleases() error = %v", err)
-	}
-	if f.fake.getCalls != 3 {
-		t.Errorf("GetPullRequestChecks calls = %d, want 3 (head check, after merge, additional read)", f.fake.getCalls)
-	}
-	if len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMergeUnconfirmed {
-		t.Fatalf("Items = %+v, want merge_unconfirmed", res.Items)
-	}
-	for _, a := range f.attempts(t) {
-		if a.Result == ExecutionResultMergedUnapproved {
-			t.Errorf("attempt %+v must not be merged_unapproved", a)
-		}
-	}
-}
-
-// M45H18: 別の実行の口が試行を閉じ、release は approved のまま残る衝突では、items に merge_unconfirmed で
-// 載り、release は approved のまま、merged_unapproved は足されない。
-func TestExecuteReleases_AttemptClosedByOtherExecutorStaysApprovedMergeUnconfirmed(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
-	f.fake.onMerge = func() {
-		writeForTest(t, f.s, func(tx *sql.Tx) error {
-			last, err := latestOperationExecution(context.Background(), tx, f.opID)
-			if err != nil {
-				return err
-			}
-			return closeOperationExecution(context.Background(), tx, last.ID, closeOperationExecutionInput{EndedAt: f.now, Result: ExecutionResultInterrupted, Detail: "closed by another executor"})
-		})
-	}
-	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
-	if err != nil {
-		t.Fatalf("ExecuteReleases() error = %v", err)
-	}
-	if len(res.NotStarted) != 0 || len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMergeUnconfirmed {
-		t.Fatalf("Items = %+v, NotStarted = %+v, want 1 merge_unconfirmed item", res.Items, res.NotStarted)
-	}
-	if st := f.state(t); st.opState != string(OperationStateApproved) {
-		t.Errorf("operation state = %q, want approved", st.opState)
-	}
-	for _, a := range f.attempts(t) {
-		if a.Result == ExecutionResultMergedUnapproved {
-			t.Errorf("attempt %+v must not be merged_unapproved", a)
-		}
-	}
-}
-
-// M45H18: マージの依頼の前（先頭の読み取りで merged_unapproved）の衝突は not_started のまま。
-func TestExecuteReleases_ConflictBeforeMergeRequestStaysNotStarted(t *testing.T) {
-	t.Parallel()
-	f := newRelFixture(t)
-	f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: "other", MergeCommitSHA: "m1"}
-	f.fake.onGet = func() { coretest.SetOperationState(t, f.s.workspace, f.opID, "pending") }
-	res, err := f.s.ExecuteReleases(context.Background(), []string{formatOperationID(f.opID)}, f.opts())
-	if err != nil {
-		t.Fatalf("ExecuteReleases() error = %v", err)
-	}
-	if len(res.Items) != 0 || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedInProgress {
-		t.Fatalf("Items = %+v, NotStarted = %+v, want 1 in_progress not_started", res.Items, res.NotStarted)
-	}
-	if len(f.fake.mergeArgs) != 0 {
-		t.Errorf("merge must not be requested: %v", f.fake.mergeArgs)
-	}
-}
-
 // 2 件目でエラーになっても、1 件目の実行済みの結果は ExecuteReleases の戻り値に残る（op exec が出力に残す）。
 func TestExecuteReleases_ErrorOnALaterReleaseKeepsThePartialResult(t *testing.T) {
 	t.Parallel()
 	f := newRelFixture(t)
-	f.fake.afterPR = &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
+	f.fake.pr = UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "m1"}
 	c2 := createAndAdvance(t, f.s, StatusDone)
 	coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c2.ID)), relRef, relHead, execTS(0))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	o := f.opts()
-	o.Checks = &cancelOnGet{fakeRelease: f.fake, at: 3, cancel: cancel}
+	o.Checks = &cancelOnGet{fakeRelease: f.fake, at: 2, cancel: cancel}
 	res, err := f.s.ExecuteReleases(ctx, nil, o)
 	if err == nil {
 		t.Fatalf("ExecuteReleases() error = nil, want an error from the cancelled context (res %+v)", res)
 	}
-	if res == nil || len(res.Items) != 1 || res.Items[0].Result != ExecutionResultMerged {
+	if res == nil || len(res.Items) != 1 || res.Items[0].Result != ExecutionResultAlreadyMerged {
 		t.Errorf("partial result = %+v, want the first release merged", res)
 	}
 }

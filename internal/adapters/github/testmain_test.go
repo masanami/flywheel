@@ -134,14 +134,6 @@ func runFakeGH(argv []string) int {
 	case "compare_fail":
 		fmt.Fprintln(os.Stderr, "gh: Server Error (HTTP 500)")
 		return 1
-	case "merge_ok", "update_branch_ok":
-		return 0
-	case "update_branch_fail":
-		fmt.Fprintln(os.Stderr, "gh: merge conflict between base and head (HTTP 422)")
-		return 1
-	case "merge_fail":
-		fmt.Fprintln(os.Stderr, "gh: Head branch was modified")
-		return 1
 	case "pulls_fail":
 		fmt.Fprintln(os.Stderr, "gh: connection refused")
 		return 1
