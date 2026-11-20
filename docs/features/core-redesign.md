@@ -713,7 +713,7 @@ S3b で、`flywheel show <課題の ID> --json` と `GET /api/v1/workspaces/{nam
 - **採用案**: マイグレーションを 1 本足す（スキーマの版は 28 になる）。
   - `run_artifact.role`（文字列。無ければ NULL）。
   - `run.operation_id`（反映の操作のために呼んだ契約のコマンドの実行〔反映の段・完了から戻す前の読み・片付けが作る実行〕の印。NULL は委譲の段の実行と過去の行。印の付いた実行は成果物を持たず、課題の最後の委譲の実行・最後の契約のコマンドを読む所〔完了の検証の入力・回収された start の保留・指摘を届けたかの判定〕から外す）。
-  - `hold.reason`（保留の理由。NULL 可。値は `land_unavailable`・`content_ref_invalid`・`facts_unmet`。ほかの保留と過去の行は NULL。保留の理由の見分けと、`facts_unmet` の保留への回答で回数を戻す対象の絞り込みは、問いの文でなくこの列で行う。状況や課題の詳細の出力には、S3a では出さない）。
+  - `hold.reason`（保留の理由。NULL 可。値は `land_unavailable`・`content_ref_invalid`・`facts_unmet`、S3b で足す `integration_ref_invalid`・`delegate_ended`・`merged_unverified` など。ほかの保留と過去の行は NULL。保留の理由の見分けと、`facts_unmet` の保留への回答で回数を戻す対象の絞り込みは、問いの文でなくこの列で行う。状況や課題の詳細の出力には、S3a では出さない）。
   - `contract_run.kind`（必須。`task` か `reflect`。既定は `task`）・`operation_id`（反映の依頼が対象にする反映の操作。タスクの実行では NULL）・`requested_options`（JSON の配列。無ければ NULL）・`content_ref`（レビュー待ちの中身の識別。無ければ NULL）・`facts`（JSON の対応。無ければ NULL）・`facts_unmet_count`（必須。既定 0）・`land_ref`（最後に返した「入れてよい」の中身。返していなければ NULL）・`land_delivered`（必須。既定 0。`land_ref` の「入れてよい」を、委譲先が受け取ったと分かっているか）。
   - 過去の行は書き換えない（`kind` は既定の `task` になる）。索引と一意の制約は変えない（「終わっていない契約の実行は課題ごとに 1 本」のまま。タスクの単位に改めるのは S3b）。反映の依頼は、完了の課題に対して始めるので、同じ課題のタスクの実行とは重ならない（待っている実行があれば、反映の依頼は始めない）。
   - `land_ref` は、「入れてよい」を返す前に書き、取り消す結果になったときと、完了から戻すときに消す（NULL は、いまの承認では、まだ返していないことを表す）。

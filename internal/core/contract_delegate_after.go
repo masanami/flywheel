@@ -125,7 +125,7 @@ func sameRequestedAction(row *contractRunRow, ra *ContractRequestedAction) bool 
 }
 
 // afterContractRead は読めた状態に応じた課題への写しを行う: waiting は求められた操作に従って保留へ写し、
-// succeeded は課題を着手中から検証中へ進める。読みが成功していない（Result が succeeded でない）・既に保留にした
+// succeeded は課題を着手中から検証中へ進める（統合先を使う課題は進めず、holdIntegrationSucceeded が保留にする）。読みが成功していない（Result が succeeded でない）・既に保留にした
 // ときは何もしない。
 func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, connector *Connector, rs *contractReleaseSource) error {
 	if rep.Result != RunResultSucceeded || rep.Held {
@@ -151,6 +151,9 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 		rep.Held = held
 		return err
 	case ContractStateSucceeded:
+		if handled, err := s.holdIntegrationSucceeded(ctx, rep, rs); err != nil || handled {
+			return err
+		}
 		// succeeded の run は読んだ時点で終わりとして記録済みで、次の周に読み直されない。release を作れなくても検証中へ進める
 		// （進めないと課題が着手中のまま取り残される）。release が無いときは人が op add で補う。
 		_ = s.registerContractReleases(ctx, rs, rep)
@@ -173,10 +176,75 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 	return nil
 }
 
+// holdIntegrationSucceeded は、統合先を使う課題のタスクの実行が、レビュー待ちを経ずに succeeded になったとき（land_ref が無い）、
+// 検証へ進めず、課題が着手中なら保留にする（上流の成果物が統合先へ入っていれば merged_unverified、入っていなければ delegate_ended）。
+// 統合先を使う課題では、succeeded を課題の検証中への移り変わりに使わないので、処理した（真）。land_ref があるときの succeeded は、
+// 反映の段の読みが扱う（ここでは何もしない）。統合先を使わない課題では何もしない（偽）。
+func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource) (bool, error) {
+	cid, ok := parseChallengeID(rep.ChallengeID)
+	if !ok {
+		return false, nil
+	}
+	var integ bool
+	var landRef, recorded string
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		u, err := challengeUsesIntegration(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		integ = u != nil && *u
+		if !integ {
+			return nil
+		}
+		var lr, ir sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT land_ref FROM contract_run WHERE challenge_id = ? AND external_run_id = ?`, cid, rep.ExternalRunID).Scan(&lr); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT integration_ref FROM challenge WHERE id = ?`, cid).Scan(&ir); err != nil {
+			return err
+		}
+		landRef, recorded = lr.String, ir.String
+		return nil
+	})
+	if err = classifyReadWriteErr(err); err != nil || !integ {
+		return false, err
+	}
+	if landRef != "" {
+		return true, nil
+	}
+	if inProgress, err := s.challengeInProgress(ctx, cid); err != nil || !inProgress {
+		return true, err
+	}
+	if sc, err := s.loadReviewIntakeScope(ctx, cid, rep.ExternalRunID); err != nil || (sc.TaskID != nil && sc.TaskStatus == TaskStatusCancelled) {
+		return true, err // 取りやめのタスクの実行の終わりでは保留にしない
+	}
+	if recorded == "" {
+		if branches, _ := integrationArtifactRefs(rep.Artifacts); len(branches) == 1 {
+			recorded = branches[0]
+		}
+	}
+	merged, unreadable := false, true // 確かめられなかったときは、入っているとは言えず、入っていないとも言い切れない
+	if rs != nil && rs.Reconcile != nil && recorded != "" {
+		unreadable = false
+		m, err := rs.mergedIntoBranch(context.WithoutCancel(ctx), rep.Artifacts, recorded)
+		if err != nil {
+			unreadable = true
+		}
+		merged = m
+	}
+	reason := holdReasonDelegateEnded
+	if merged {
+		reason = holdReasonMergedUnverified
+	}
+	held, err := s.holdContractReview(ctx, rep, integrationSucceededQuestion(rep.ExternalRunID, merged, unreadable), reason)
+	rep.Held = held
+	return true, err
+}
+
 // SubmitHeldContractSuccesses は、課題が保留の間に契約の run が succeeded まで進み（held_success）、オーナーが答えて課題が
 // 着手中へ戻ったものを、start も resume も呼ばずに検証中へ進める。成果物は succeeded を読んだときに取り込み済み。
 // 答えは保留に残り、完了の検証（J5）の材料に入る。オーナーが答える前（課題がまだ保留）は何も変えない。
-// 検証中へ進めた課題の数を返す。only が非 nil ならその課題だけを対象にする。
+// 検証中へ進めた課題の数を返す。only が非 nil ならその課題だけを対象にする。統合先を使う課題は対象にしない。
 func (s *Store) SubmitHeldContractSuccesses(ctx context.Context, only *int64) (int, error) {
 	type target struct {
 		id          int64
@@ -186,7 +254,7 @@ func (s *Store) SubmitHeldContractSuccesses(ctx context.Context, only *int64) (i
 	var targets []target
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		q := `SELECT k.challenge_id, k.start_run_id, k.external_run_id FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.held_success = 1 AND c.status = 'in_progress'`
+			WHERE k.held_success = 1 AND c.status = 'in_progress' AND COALESCE(c.uses_integration, 0) = 0`
 		args := []any{}
 		if only != nil {
 			q += ` AND k.challenge_id = ?`

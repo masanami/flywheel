@@ -25,6 +25,42 @@ type contractReleaseSource struct {
 	J4 bool
 }
 
+// lookupArtifactPR は pr の成果物 a の ref から、宣言のリポジトリの PR を上流から 1 件読む。pr でない・ref が PR の URL でない・
+// 宣言にないリポジトリ・見つからない（404）・取得した PR が求めたものと違うときは ok が偽（数えない）。
+// それ以外の取得の失敗はエラー。
+func (rs *contractReleaseSource) lookupArtifactPR(ctx context.Context, a ContractArtifact) (pr UpstreamPullRequest, ok bool, err error) {
+	if a.Kind != "pr" {
+		return pr, false, nil
+	}
+	repoName, number, parsed := parseReleasePullRequestRef(strings.TrimSpace(a.Ref))
+	if !parsed {
+		return pr, false, nil
+	}
+	var decl *ConnectorRepo
+	if rs.Decl != nil {
+		for i := range rs.Decl.Repos {
+			if strings.EqualFold(rs.Decl.Repos[i].Remote, repoName) {
+				decl = &rs.Decl.Repos[i]
+				break
+			}
+		}
+	}
+	if decl == nil {
+		return pr, false, nil
+	}
+	got, err := rs.Reconcile.GetPullRequest(ctx, decl.Remote, number)
+	if err != nil {
+		if errors.Is(err, ErrUpstreamPullRequestNotFound) {
+			return pr, false, nil
+		}
+		return pr, false, fmt.Errorf("looking up the pull request %s#%d failed: %w", decl.Remote, number, err)
+	}
+	if gotRepo, gotNumber, ok := parseReleasePullRequestRef(got.URL); !ok || gotNumber != number || !strings.EqualFold(gotRepo, decl.Remote) {
+		return pr, false, nil
+	}
+	return got, true, nil
+}
+
 // defaultBranchPRs は arts の pr のうち、宣言のリポジトリで base が既定ブランチの open の PR を返す（重複は 1 件）。
 // 見つからない（404）・取得した PR が求めたものと違う PR は数えない。それ以外の取得の失敗はエラー。
 func (rs *contractReleaseSource) defaultBranchPRs(ctx context.Context, arts []ContractArtifact) ([]UpstreamPullRequest, error) {
@@ -34,42 +70,62 @@ func (rs *contractReleaseSource) defaultBranchPRs(ctx context.Context, arts []Co
 		if a.Kind != "pr" {
 			continue
 		}
-		repoName, number, ok := parseReleasePullRequestRef(strings.TrimSpace(a.Ref))
+		if key := prArtifactKey(a); key != "" && seen[key] {
+			continue
+		} else if key != "" {
+			seen[key] = true
+		}
+		pr, ok, err := rs.lookupArtifactPR(ctx, a)
+		if err != nil {
+			return nil, err
+		}
 		if !ok {
 			continue
 		}
-		key := fmt.Sprintf("%s#%d", strings.ToLower(repoName), number)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		var decl *ConnectorRepo
-		if rs.Decl != nil {
-			for i := range rs.Decl.Repos {
-				if strings.EqualFold(rs.Decl.Repos[i].Remote, repoName) {
-					decl = &rs.Decl.Repos[i]
-					break
-				}
-			}
-		}
-		if decl == nil {
-			continue
-		}
-		pr, err := rs.Reconcile.GetPullRequest(ctx, decl.Remote, number)
-		if err != nil {
-			if errors.Is(err, ErrUpstreamPullRequestNotFound) {
-				continue
-			}
-			return nil, fmt.Errorf("looking up the pull request %s#%d failed: %w", decl.Remote, number, err)
-		}
-		if gotRepo, gotNumber, ok := parseReleasePullRequestRef(pr.URL); !ok || gotNumber != number || !strings.EqualFold(gotRepo, decl.Remote) {
-			continue
-		}
-		if pr.State == string(artifactStateOpen) && pr.Base == decl.DefaultBranch {
+		decl := rs.declFor(pr.URL)
+		if decl != nil && pr.State == string(artifactStateOpen) && pr.Base == decl.DefaultBranch {
 			out = append(out, pr)
 		}
 	}
 	return out, nil
+}
+
+// prArtifactKey は pr の成果物の重複判定の鍵（小文字のリポジトリ#番号）。PR の URL でなければ空。
+func prArtifactKey(a ContractArtifact) string {
+	repoName, number, ok := parseReleasePullRequestRef(strings.TrimSpace(a.Ref))
+	if !ok {
+		return ""
+	}
+	return prKey(repoName, number)
+}
+
+// declFor は PR の URL のリポジトリの宣言（無ければ nil）。
+func (rs *contractReleaseSource) declFor(prURL string) *ConnectorRepo {
+	repoName, _, ok := parseReleasePullRequestRef(prURL)
+	if !ok || rs.Decl == nil {
+		return nil
+	}
+	for i := range rs.Decl.Repos {
+		if strings.EqualFold(rs.Decl.Repos[i].Remote, repoName) {
+			return &rs.Decl.Repos[i]
+		}
+	}
+	return nil
+}
+
+// mergedIntoBranch は arts の pr のうち、宣言のリポジトリで、branch へマージ済み（base が branch で state が merged）の PR が
+// 1 件でもあるか。branch が空なら base は問わない。取得の失敗はエラー。
+func (rs *contractReleaseSource) mergedIntoBranch(ctx context.Context, arts []ContractArtifact, branch string) (bool, error) {
+	for _, a := range arts {
+		pr, ok, err := rs.lookupArtifactPR(ctx, a)
+		if err != nil {
+			return false, err
+		}
+		if ok && pr.State == string(artifactStateMerged) && (branch == "" || pr.Base == branch) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // createReleaseForPR は PR 1 件の release を、同じ課題に同じ PR の release が無ければ登録する（plugin 形態の照合と共通）。
