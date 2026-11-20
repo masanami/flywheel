@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,6 +77,9 @@ type j2RawTask struct {
 	DependsOn    []string `json:"depends_on"`
 	Repo         string   `json:"repo"`
 	Operation    string   `json:"operation"`
+	// BudgetImplUSD・BudgetReviewUSD はタスクの実装の枠・レビュー対応の枠（任意。タスクが 2 個以上の計画では両方が必須）。
+	BudgetImplUSD   *float64 `json:"budget_impl_usd"`
+	BudgetReviewUSD *float64 `json:"budget_review_usd"`
 	// Source は対応する取り込み元の子の external_key（任意。無い・null・空は子に対応しない）。
 	Source string `json:"source"`
 }
@@ -99,6 +103,9 @@ type j2Task struct {
 	Operation    string
 	// Source は対応する取り込み元の子の external_key（"" は対応しない）。
 	Source string
+	// BudgetImplUSD・BudgetReviewUSD はタスクの枠の出力の値そのもの（無ければ nil）。
+	BudgetImplUSD   *float64
+	BudgetReviewUSD *float64
 }
 
 // j2ValidatedOutput は core の閉集合・必須の組・宣言との突き合わせを通った J2 の
@@ -221,6 +228,7 @@ func j2OutputSchema() []byte {
 			"additionalProperties": false,
 		},
 	}
+	nullableNumber := map[string]any{"type": []string{"number", "null"}}
 	tasksSchema := map[string]any{
 		"type":     "array",
 		"maxItems": MaxPlanTasks,
@@ -236,6 +244,9 @@ func j2OutputSchema() []byte {
 				"repo":          map[string]any{"type": "string"},
 				"operation":     map[string]any{"type": "string"},
 				"source":        nullableString,
+
+				"budget_impl_usd":   nullableNumber,
+				"budget_review_usd": nullableNumber,
 			},
 			"required":             []string{"key", "title", "body", "done_criteria", "non_goals", "depends_on", "repo", "operation"},
 			"additionalProperties": false,
@@ -261,8 +272,6 @@ func j2OutputSchema() []byte {
 		"maxItems": MaxNonGoals,
 		"items":    map[string]any{"type": "string"},
 	}
-	nullableNumber := map[string]any{"type": []string{"number", "null"}}
-
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -623,9 +632,22 @@ func validateJ2Tasks(in []j2RawTask, vc j2ValidationContext) ([]j2Task, bool) {
 		if err != nil {
 			return nil, false
 		}
+		// タスクの枠は、書いたら正で、実装の枠は 1 回の実行の上限額以下。タスクが 2 個以上の計画では、両方を必ず書く。
+		for _, b := range []*float64{t.BudgetImplUSD, t.BudgetReviewUSD} {
+			if b != nil && (!(*b > 0) || math.IsInf(*b, 0)) {
+				return nil, false
+			}
+		}
+		if t.BudgetImplUSD != nil && vc.Agent != nil && *t.BudgetImplUSD > vc.Agent.MaxRunBudgetUSD {
+			return nil, false
+		}
+		if len(in) >= 2 && (t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil) {
+			return nil, false
+		}
 		out = append(out, j2Task{
 			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria,
 			NonGoals: nonGoals, DependsOn: t.DependsOn, Repo: t.Repo, Operation: t.Operation, Source: t.Source,
+			BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD,
 		})
 	}
 	return out, true

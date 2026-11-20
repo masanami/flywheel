@@ -518,14 +518,15 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 		`INSERT INTO run (cycle_id, kind, judgment, challenge_id, challenge_version, plan_version,
 			session_id, session_id_mismatch, resumed_from_run_id, pid, host, heartbeat_at, started_at,
 			ended_at, result, rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source,
-			reported_total_cost_usd, output, error, slot_id, decider, decider_row, repo, flywheel_version, task_id, operation_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+			reported_total_cost_usd, output, error, slot_id, decider, decider_row, repo, flywheel_version, task_id, operation_id, reflect)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		int64PtrColumn(in.CycleID), string(in.Kind), nullableTextColumn(string(in.Judgment)), challengeIDCol,
 		challengeVersionCol, int64PtrColumn(in.PlanVersion), sessionIDCol, int64PtrColumn(in.ResumedFromRunID),
 		in.PID, in.Host, formatTimestamp(in.HeartbeatAt), formatTimestamp(in.StartedAt),
 		in.MaxBudgetUSD, string(in.BudgetBucket),
 		int64PtrColumn(in.SlotID), nullableTextColumn(string(in.Decider)), int64PtrColumn(in.DeciderRow),
 		nullableTextColumn(in.Repo), nullableTextColumn(flywheelVersion()), int64PtrColumn(in.TaskID), int64PtrColumn(in.OperationID),
+		boolToInt(in.OperationID != nil),
 	)
 	if store.IsUniqueViolation(err) {
 		// 部分一意索引のどちらに当たったかは、スロットを指定していて、その

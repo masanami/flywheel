@@ -159,3 +159,41 @@ func TestBudget_NonPositiveAmountIsRejectedBeforeAskingForConfirmation(t *testin
 	}
 	assertBudgetUnchanged(t, ws, id)
 }
+
+// 未完のタスクが 2 個ある課題の枠は、`--task` で改めるタスクを指定する（core の見直し S3b。AC-54・55・57・59）。
+func createTwoTaskTargetForCase(t *testing.T, ws string) (id string) {
+	t.Helper()
+	id = createForCase(t, ws)
+	spec := `{"verdict":"plan","size":"M","uses_integration":true,"tasks":[` +
+		`{"key":"a","title":"A","body":"b","done_criteria":"d","non_goals":[],"depends_on":[],"repo":"r","operation":"impl","budget_impl_usd":3,"budget_review_usd":2},` +
+		`{"key":"b","title":"B","body":"b","done_criteria":"d","non_goals":[],"depends_on":["a"],"repo":"r","operation":"impl","budget_impl_usd":4,"budget_review_usd":5}]}`
+	coretest.InsertApprovedPlan(t, ws, challengeIDToInternalID(t, id), "PLAN-BODY", spec)
+	return id
+}
+
+func TestBudget_WithoutTaskForTwoUnfinishedTasksIsAUsageError_AC57(t *testing.T) {
+	t.Parallel()
+	ws := initializedWorkspace(t)
+	id := createTwoTaskTargetForCase(t, ws)
+	code, _, stdout, stderr := runConfirmedChild(t, []string{"budget", id, "--impl-usd", "80", "--workspace", ws, "--json"}, id)
+	if code != 2 || !strings.Contains(stdout+stderr, "usage_error") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want exit code 2 and usage_error", code, stdout, stderr)
+	}
+}
+
+func TestBudget_TaskFlagRaisesThatTasksFrameAndRecordsTheTask_AC54_AC55(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id := createTwoTaskTargetForCase(t, ws)
+	code, pty, stdout, stderr := runConfirmedChild(t, []string{"budget", id, "--task", "T-1", "--impl-usd", "80", "--workspace", ws, "--json"}, id)
+	if code != 0 {
+		t.Fatalf("exit=%d (stdout=%q stderr=%q pty=%q)", code, stdout, stderr, pty)
+	}
+	if !strings.Contains(pty, "T-1") {
+		t.Errorf("the confirmation summary must name the task:\n%s", pty)
+	}
+	// 存在しない（この課題のタスクでない）ID は失敗する。
+	code, _, stdout, stderr = runConfirmedChild(t, []string{"budget", id, "--task", "T-99", "--impl-usd", "80", "--workspace", ws, "--json"}, id)
+	if code == 0 {
+		t.Fatalf("a task of another challenge must fail (stdout=%q stderr=%q)", stdout, stderr)
+	}
+}

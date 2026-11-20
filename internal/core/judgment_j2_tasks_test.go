@@ -32,7 +32,12 @@ func j2TestTopic(title string, questions ...any) map[string]any {
 func j2TasksOf(keys ...string) []any {
 	out := make([]any, 0, len(keys))
 	for _, k := range keys {
-		out = append(out, j2TestTask(k, "flywheel", "impl"))
+		task := j2TestTask(k, "flywheel", "impl")
+		// タスクが 2 個以上の計画は、全部のタスクが枠を持つ（持たない計画は不正）。
+		if len(keys) >= 2 {
+			task["budget_impl_usd"], task["budget_review_usd"] = 3.0, 2.0
+		}
+		out = append(out, task)
 	}
 	return out
 }

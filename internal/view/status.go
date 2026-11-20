@@ -27,6 +27,8 @@ type BudgetExhausted struct {
 	ImplRemainingUSD   float64 `json:"impl_remaining_usd"`
 	PlanVersion        int     `json:"plan_version"`
 	ReviewRemainingUSD float64 `json:"review_remaining_usd"`
+	// TaskID は実装の枠が尽きたタスク（タスクを持たない過去の課題は null）。
+	TaskID *string `json:"task_id"`
 }
 
 // WaitingExternal は status.waiting_external.challenges の要素。
@@ -207,11 +209,17 @@ func FromOverview(ov *core.Overview) StatusResponse {
 	}
 	budget := make([]BudgetExhausted, 0, len(ov.NeedsHumanBudgetExhausted))
 	for _, it := range ov.NeedsHumanBudgetExhausted {
+		var taskID *string
+		if it.TaskID != "" {
+			id := it.TaskID
+			taskID = &id
+		}
 		budget = append(budget, BudgetExhausted{
 			ChallengeID:        it.ChallengeID,
 			ImplRemainingUSD:   it.ImplRemainingUSD,
 			PlanVersion:        it.PlanVersion,
 			ReviewRemainingUSD: it.ReviewRemainingUSD,
+			TaskID:             taskID,
 		})
 	}
 	slots := make([]Slot, 0, len(ov.NeedsHumanSlots))

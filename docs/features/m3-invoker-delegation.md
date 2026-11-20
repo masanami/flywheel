@@ -857,7 +857,7 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 #### `status`・`show`・`runs` の拡張
 
 - `status.needs_human.triage`（S1）: `[{"challenge_id", "run_id", "reason"}]`。`challenge_id` の昇順。
-- `status.needs_human.budget_exhausted`（S2）: `[{"challenge_id", "plan_version", "impl_remaining_usd", "review_remaining_usd"}]`。
+- `status.needs_human.budget_exhausted`（S2）: `[{"challenge_id", "plan_version", "impl_remaining_usd", "review_remaining_usd", "task_id"}]`。`task_id` は実装の枠が尽きたタスクの ID（core の見直し S3b。タスクを持たない過去の課題は `null`）。
 - `status.needs_human.slots`（S2）: `[{"slot_id", "repo", "path", "run_id"}]`。
 - `slot clear`（S2）: `{"slot": {"slot_id", "repo", "path", "state"}}`（戻した後のスロット）【仮定: 形】。
 - `status.waiting_external`（S2。最上位の 4 つ目のキー）: `{"challenges": [{"challenge_id", "pr_url", "checks": "pending"}]}`。

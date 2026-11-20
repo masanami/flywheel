@@ -474,6 +474,9 @@ type ApprovalRequest struct {
 	// HeadSources は、承認する組の head が検証の head と異なるとき、core が自分で比較して「既定ブランチの取り込みだけで
 	// CI が通っている」ことを確かめるための取得の口。CLI の判定の申告は使わない。口が無い・確かめられない組は ErrConflict。
 	HeadSources ReleaseHeadSources
+	// Agent は、計画の承認で、枠のキーを持たない 1 個のタスクの枠を見直し前の決め方（サイズごとの既定）で決めるための宣言
+	// （nil 可。nil のときそのタスクの枠は空のまま残り、読むときに見直し前の決め方の値になる）。計画の承認以外では使わない。
+	Agent *AgentDeclaration
 }
 
 // ExecuteApproval は approve（T5・T13・T14）・reject（T6・T15）の②（書き込み）。
@@ -599,7 +602,7 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		}
 		// 計画の承認は、答えの無い問いへの推奨の記録・タスクの行の作成・統合先を使うかの記録を、同じトランザクションで行う。
 		if kind == ApprovalKindPlan && req.Decision == ApprovalDecisionApproved && planVersionOut != nil {
-			if err := onPlanApproved(ctx, tc, att, int64(*planVersionOut)); err != nil {
+			if err := onPlanApproved(ctx, tc, att, int64(*planVersionOut), req.Agent); err != nil {
 				return err
 			}
 		}

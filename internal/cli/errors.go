@@ -205,7 +205,7 @@ func mapCoreErr(err error) *Error {
 		return NewError(CodeSlotUnavailable, err.Error())
 	case errors.Is(err, core.ErrDependencyCycle):
 		return NewError(CodeDependencyCycle, err.Error())
-	case errors.Is(err, core.ErrSelfDependency), errors.Is(err, core.ErrIngestUsage):
+	case errors.Is(err, core.ErrSelfDependency), errors.Is(err, core.ErrIngestUsage), errors.Is(err, core.ErrBudgetTaskRequired):
 		return NewError(CodeUsageError, err.Error())
 	case errors.Is(err, core.ErrUpstreamFetchFailed):
 		return NewError(CodeUpstreamUnavailable, err.Error())

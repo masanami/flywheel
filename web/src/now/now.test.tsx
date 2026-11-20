@@ -431,6 +431,7 @@ describe("あなたを待っている", () => {
     impl_remaining_usd: 0,
     plan_version: 1,
     review_remaining_usd: 0,
+    task_id: null,
   };
   it("AC-137 #805: 予算を使い切った課題は、種類「予算の増額」の行が出る", async () => {
     await openNow({ nh: { budget_exhausted: [budget] } as NH });

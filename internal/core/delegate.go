@@ -374,6 +374,8 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 	var planOK bool
 	var unavailable error
 	var tasks []Task
+	var taskRem bucketRemaining
+	var taskRemOK, taskRemSole bool
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		p, gap, detail, err := lookupApprovedPlan(ctx, tx, cid)
 		if err != nil {
@@ -416,6 +418,23 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		if spend, err = loadBucketSpend(ctx, tx, cid, int64(p.Version)); err != nil {
 			return err
 		}
+		// 起動するタスクの枠の残りは、そのタスクの枠と、そのタスクが使った額で決める（同じ課題のほかのタスクが使った額は引かない）。
+		if len(tasks) == 1 {
+			if tid, ok := parseTaskID(tasks[0].ID); ok {
+				bs, err := loadTaskBudgets(ctx, tx, cid, in.AgentDecl)
+				if err != nil {
+					return err
+				}
+				for _, tb := range bs {
+					if tb.TaskID == tid && tb.Known {
+						if taskRem, err = taskRemaining(ctx, tx, cid, tb, bs); err != nil {
+							return err
+						}
+						taskRemOK, taskRemSole = true, planVersionTaskCount(bs, tb.PlanVersion) == 1
+					}
+				}
+			}
+		}
 		history, err = loadLaunchHistory(ctx, tx, cid)
 		return err
 	})
@@ -452,13 +471,19 @@ func (s *Store) loadDelegationContext(ctx context.Context, in DelegateInput, ch 
 		}
 	}
 	rem := computeBucketRemaining(applyBudgetOverride(validated.ResolvedImplUSD, validated.ResolvedReviewUSD, override), spend)
+	if taskRemOK {
+		rem = taskRem
+	}
 	dc.ImplBudgetMicros, dc.ReviewBudgetMicros = rem.Impl, rem.Review
 	dc.Decider, dc.DeciderRow = DecideDecider(dc.Operation, task.Repo, validated.CrossRepo, validated.RelatedRepos)
 	decision := history.decideLaunchFull(dc.Plan.Version, in.AgentDecl)
 	dc.Resume, dc.LimitHit, dc.ReworkHit = decision.Resume, decision.LimitHit, decision.ReworkHit
 	// 費用が取れない失敗の後の再開に限り、失敗前の実装枠の残りを上限に 1 回だけ起動を許す。
 	// 人間が flywheel budget で枠を置き直して 1 USD 以上が残っているときは、その額に従う。
-	dc.ImplBudgetMicros = history.effectiveImplBudget(dc.Plan.Version, decision, dc.ImplBudgetMicros)
+	// 履歴は課題の単位なので、再開の許可は、同じ計画の版にタスクが 1 個だけの課題に限って適用する（status の予算切れと同じ規則）。
+	if !taskRemOK || taskRemSole {
+		dc.ImplBudgetMicros = history.effectiveImplBudget(dc.Plan.Version, decision, dc.ImplBudgetMicros)
+	}
 	if dc.Resume != nil {
 		err := s.db.Read(ctx, func(tx *sql.Tx) error {
 			b, err := loadRunBranch(ctx, tx, dc.Resume.Target, in.ConnDecl.HumanQuestionKinds, dc.Repo.DefaultBranch)
