@@ -785,3 +785,44 @@ func TestReflect_UnsupportedBeforeStartingHasNoRoute(t *testing.T) {
 		t.Fatalf("item = %+v, want unsupported with a null route", item)
 	}
 }
+
+// 読みと起動の間に承認が取り消されたら、反映の依頼を始めない: commands.reflect は呼ばれず、契約の実行の行も run の行も増えない。
+func TestReflect_ApprovalRevokedBetweenTheReadAndTheStartIsConflictAndNothingIsStarted(t *testing.T) {
+	t.Parallel()
+	f := newReflFixture(t)
+	var runsBefore int
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM run`).Scan(&runsBefore)
+	})
+	revoked := false
+	f.fake.onGet = func() {
+		if revoked {
+			return
+		}
+		revoked = true
+		// 上流の読みの最中に、別の経路が承認を取り消す（版も進む）。
+		writeForTest(t, f.s, func(tx *sql.Tx) error {
+			_, err := tx.Exec(`UPDATE operation SET state = 'pending', version = version + 1 WHERE id = ?`, f.opID)
+			return err
+		})
+	}
+	res := f.exec(t)
+	if !revoked {
+		t.Fatal("the upstream read hook did not run")
+	}
+	f.wantNotStarted(t, res, NotStartedInProgress)
+	if len(f.client.starts) != 0 {
+		t.Fatalf("starts = %v, want commands.reflect not called", f.client.starts)
+	}
+	if rows := f.rows(t); len(rows) != 0 {
+		t.Fatalf("contract_run rows = %+v, want none", rows)
+	}
+	var runsAfter int
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM run`).Scan(&runsAfter)
+	})
+	if runsAfter != runsBefore {
+		t.Fatalf("run rows = %d, want %d (nothing written)", runsAfter, runsBefore)
+	}
+	f.wantOpState(t, "pending")
+}

@@ -208,6 +208,18 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		return res, nil
 	}
 
+	// 読み（readTaskRunBeforeReopen）からこの書き込みまでの間に、別のプロセスの反映の段が反映の依頼を始めたかもしれない。
+	// 取り消されていない反映の依頼を残したまま課題を検証中へ戻さないよう、この書き込みの中で確かめ直す（在れば何も書かない）。
+	var openReflect int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL`,
+		row.ChallengeID, contractRunKindReflect).Scan(&openReflect); err != nil {
+		return nil, err
+	}
+	if openReflect > 0 {
+		return nil, errReopenBlockedByRun
+	}
+
 	nowStr := formatTimestamp(rec.at)
 
 	// 同じ課題のほかの承認待ち・承認済みの release も置き換える（前の完了の承認が置き換えられるので、

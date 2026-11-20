@@ -100,7 +100,7 @@ func (s *Store) startReflectRequest(ctx context.Context, row *operationRow, opts
 	}
 	// サイクルの費用の上限は、flywheel の run を記録するのと同じ書き込みで評価する（超えるなら何も残らない）。
 	maxMicros := usdToMicros(agent.MaxRunBudgetUSD)
-	runIDInt, err := s.beginReflectRun(ctx, cid, opts.cycleID, maxMicros)
+	runIDInt, err := s.beginReflectRun(ctx, row, opts.cycleID, maxMicros)
 	switch {
 	case errors.Is(err, ErrBudgetExceeded):
 		return releaseJudgment{}, &releaseNotStartedError{reason: NotStartedCycleBudget}
@@ -141,7 +141,11 @@ func (s *Store) startReflectRequest(ctx context.Context, row *operationRow, opts
 
 // beginReflectRun は反映の依頼の start の flywheel の run を記録する（タスクには結び付けない。課題の状態は問わない）。
 // 課題に終わっていない run があれば ErrRunInProgress、サイクルの費用の上限を超えるなら ErrBudgetExceeded（何も書かない）。
-func (s *Store) beginReflectRun(ctx context.Context, cid int64, cycleID *int64, maxMicros int64) (int64, error) {
+// 読みと起動の間に承認が取り消されたときも「反映の依頼を始めるのは承認済みの反映の操作だけ」を守るため、書き込みの中で反映の操作が
+// 承認済み（approved）のままで、試行を開いた時の版（row.Version。試行を開く書き込みは反映の操作の版を進めない）から変わっていないことを
+// 確かめ直す。変わっていれば何も書かず ErrConflict（commands.reflect は呼ばれない）。
+func (s *Store) beginReflectRun(ctx context.Context, row *operationRow, cycleID *int64, maxMicros int64) (int64, error) {
+	cid := row.ChallengeID
 	sessionID, err := newLowercaseUUIDv4()
 	if err != nil {
 		return 0, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err)
@@ -150,6 +154,13 @@ func (s *Store) beginReflectRun(ctx context.Context, cid int64, cycleID *int64, 
 	now := s.currentTime()
 	var runIDInt int64
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
+		op, err := loadOperationRow(ctx, tx, row.ID)
+		if err != nil {
+			return err
+		}
+		if op.Version != row.Version || op.State != OperationStateApproved {
+			return ErrConflict
+		}
 		cur, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -181,7 +192,7 @@ func (s *Store) beginReflectRun(ctx context.Context, cid int64, cycleID *int64, 
 			v := int64(p.Version)
 			planVersion = &v
 		}
-		row, err := insertRun(ctx, tx, cid, insertRunInput{
+		runRow, err := insertRun(ctx, tx, cid, insertRunInput{
 			CycleID: cycleID, Kind: runKindContract, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
 			SessionID: sessionID, PID: int64(os.Getpid()), Host: host, HeartbeatAt: now, StartedAt: now,
 			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl,
@@ -189,9 +200,9 @@ func (s *Store) beginReflectRun(ctx context.Context, cid int64, cycleID *int64, 
 		if err != nil {
 			return err
 		}
-		n, ok := parseRunID(row.ID)
+		n, ok := parseRunID(runRow.ID)
 		if !ok {
-			return fmt.Errorf("core: malformed run id %q", row.ID)
+			return fmt.Errorf("core: malformed run id %q", runRow.ID)
 		}
 		runIDInt = n
 		return nil

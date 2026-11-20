@@ -448,3 +448,42 @@ func TestReopenChallengeForRelease_CancelsAnUnfinishedReflectRequestBeforeMoving
 		t.Error("the reflect request is still open after it was cancelled")
 	}
 }
+
+// 読み（取り消し）から戻す書き込みまでの間に、終わっていない反映の依頼が在る状態になったら、何も書かずに競合で終える
+// （取り消されていない反映の依頼を残したまま、課題を検証中へ戻さない）。
+func TestReopenForReleaseInTx_AnUnfinishedReflectRequestAtWriteTimeWritesNothing(t *testing.T) {
+	t.Parallel()
+	f := newReflectReopenFixture(t)
+	ctx := context.Background()
+	actor, err := f.s.resolveActor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := func(q string) (n int) {
+		readForTest(t, f.s, func(tx *sql.Tx) error { return tx.QueryRow(q).Scan(&n) })
+		return n
+	}
+	ops, reopens, logs := count(`SELECT COUNT(*) FROM operation`), count(`SELECT COUNT(*) FROM challenge_reopen`), count(`SELECT COUNT(*) FROM activity`)
+	if count(`SELECT COUNT(*) FROM contract_run WHERE kind = 'reflect' AND ended_at IS NULL`) != 1 {
+		t.Fatal("the fixture should have one unfinished reflect request")
+	}
+	err = f.s.mutateAs(ctx, actor, ChannelCLI, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
+		_, err := reopenForReleaseInTx(ctx, tx, rec, 1, ReopenReasonContentChanged, nil)
+		return err
+	})
+	if !errors.Is(err, errReopenBlockedByRun) || !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v, want errReopenBlockedByRun (ErrConflict)", err)
+	}
+	if got := f.status(t, f.cid); got != StatusDone {
+		t.Fatalf("status = %s, want done", got)
+	}
+	if n := count(`SELECT COUNT(*) FROM operation`); n != ops {
+		t.Errorf("operations = %d, want %d", n, ops)
+	}
+	if n := count(`SELECT COUNT(*) FROM challenge_reopen`); n != reopens {
+		t.Errorf("challenge_reopen = %d, want %d", n, reopens)
+	}
+	if n := count(`SELECT COUNT(*) FROM activity`); n != logs {
+		t.Errorf("activity rows = %d, want %d", n, logs)
+	}
+}
