@@ -11,6 +11,8 @@ export const RICH_PLANS: Record<string, Omit<ApprovalPlan, "version">> = {
     uses_integration: true,
     tasks: [
       {
+        budget_impl_usd: null,
+        budget_review_usd: null,
         depends_on: [],
         key: "a",
         phase: "next",
@@ -18,6 +20,8 @@ export const RICH_PLANS: Record<string, Omit<ApprovalPlan, "version">> = {
         title: "誤りの種類を洗う",
       },
       {
+        budget_impl_usd: null,
+        budget_review_usd: null,
         depends_on: ["a"],
         key: "b",
         phase: "blocked",
@@ -25,6 +29,8 @@ export const RICH_PLANS: Record<string, Omit<ApprovalPlan, "version">> = {
         title: "知らせ方を決める",
       },
       {
+        budget_impl_usd: null,
+        budget_review_usd: null,
         depends_on: ["b"],
         key: "c",
         phase: "blocked",
@@ -32,6 +38,8 @@ export const RICH_PLANS: Record<string, Omit<ApprovalPlan, "version">> = {
         title: "実装",
       },
       {
+        budget_impl_usd: null,
+        budget_review_usd: null,
         depends_on: ["c"],
         key: "d",
         phase: "blocked",

@@ -10,10 +10,12 @@ import (
 	"github.com/masanami/flywheel/internal/view"
 )
 
-// runBudget は `flywheel budget <C-ID> --impl-usd <額> [--review-usd <額>]` の実装
+// runBudget は `flywheel budget <C-ID> --impl-usd <額> [--review-usd <額>] [--task <T-ID>]` の実装
 // （docs/features/m3-invoker-delegation.md §予算ガード。決定 M3H3）。承認と同じ本人確認つきの
-// 2 段階（core.PrepareBudget → core.Verify → core.ExecuteBudget）で、課題の承認済みの計画の版の
-// 枠を置き換える。枠の置き換えの規則・承認の記録・作業ログは core が持つ。
+// 2 段階（core.PrepareBudgetForTask → core.Verify → core.ExecuteBudget）で、枠を置き換える（足し合わせない）。
+// 置き換える枠は、そのタスクの記録の枠（実装・レビュー対応）で（ほかのタスクの枠は変えない。`--task` で指定する。
+// 省略できるのは、未完のタスクがちょうど 1 個のときだけで、2 個以上のときは指定が要る。タスクを持たない過去の課題は、承認済みの
+// 計画の版の枠を置き換える）。枠の置き換えの規則・承認の記録・作業ログは core が持つ。
 func runBudget(a Args) (any, error) {
 	id := a.Positional[0]
 	verifier, err := verifierFor(a)

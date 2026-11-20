@@ -443,6 +443,7 @@ func planViewText(p *core.PlanView) string {
 		if len(t.DependsOn) > 0 {
 			line += "（前提: " + strings.Join(t.DependsOn, "・") + "）"
 		}
+		line += taskFrameText(t)
 		b.WriteString(line + "\n")
 	}
 	return b.String()

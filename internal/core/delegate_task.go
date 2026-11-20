@@ -187,7 +187,7 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 	}
 	if len(repoList) >= 2 {
 		ns(NotStartedIntegrationUnavailable, fmt.Sprintf(
-			"統合先を使う課題は、取りやめでないタスクのリポジトリが 1 つのときだけ起動する（済み・未完を含むタスクのリポジトリ: %s）", strings.Join(repoList, "・")))
+			"統合先を使う課題のタスクは、1 つのリポジトリにそろえる必要がある。いまは複数のリポジトリにまたがっているので起動しない（取りやめたタスクは数えない。済み・未完のタスクのリポジトリ: %s）", strings.Join(repoList, "・")))
 		return sel, nil
 	}
 	taskLessBusy, err := taskLessHasActiveRun(ctx, tx, cid)

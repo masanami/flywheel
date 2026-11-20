@@ -182,30 +182,30 @@ func tooManyLandablePRsQuestion(runID string, n int) string {
 }
 
 func integrationLandablePRQuestion(runID string, n int) string {
-	return fmt.Sprintf("接続ツールの run（%s）のレビュー待ちに、反映先（既定ブランチ）宛ての成果物（PR）が %d 個ある。統合先を使うタスクの成果は反映先ではなく統合先へ入れるものなので、検証へ進めなかった。", runID, n) +
+	return fmt.Sprintf("委譲先の実行（%s）のレビュー待ちに、反映先宛ての成果物が %d 個ある。統合先を使うタスクの成果は反映先ではなく統合先へ入れるものなので、検証へ進めなかった。", runID, n) +
 		"委譲先の出力を直してから回答するか、課題を取り下げる。回答しても、回答の文は委譲先へ返さない。次に読んだレビュー待ちも同じなら、もう一度保留にする。"
 }
 
 func integrationIdentityCountQuestion(runID string, branches, commits int) string {
-	return fmt.Sprintf("接続ツールの run（%s）のレビュー待ちに、統合先の識別（役割が統合先の、種類が branch の成果物の ref）が %d 個、統合先の中身の識別（役割が統合先の、種類が commit の成果物の ref）が %d 個見つかった。", runID, branches, commits) +
+	return fmt.Sprintf("委譲先の実行（%s）のレビュー待ちに、統合先の識別（役割が統合先の、種類が branch の成果物の ref）が %d 個、統合先の中身の識別（役割が統合先の、種類が commit の成果物の ref）が %d 個見つかった。", runID, branches, commits) +
 		"どちらもちょうど 1 つが要るので、検証へ進めなかった。委譲先の出力を直してから回答するか、課題を取り下げる。回答しても、回答の文は委譲先へ返さない。次に読んだレビュー待ちも同じなら、もう一度保留にする。"
 }
 
 func integrationRefMismatchQuestion(runID, got, recorded string) string {
-	return fmt.Sprintf("接続ツールの run（%s）のレビュー待ちの統合先の識別（%s）が、この課題に記録した統合先（%s）と違う。1 つの課題の統合先は 1 つなので、検証へ進めなかった。", runID, got, recorded) +
+	return fmt.Sprintf("委譲先の実行（%s）のレビュー待ちの統合先の識別（%s）が、この課題に記録した統合先（%s）と違う。1 つの課題の統合先は 1 つなので、検証へ進めなかった。", runID, got, recorded) +
 		"委譲先の出力を直してから回答するか、課題を取り下げる。回答しても、回答の文は委譲先へ返さない。次に読んだレビュー待ちも同じなら、もう一度保留にする。"
 }
 
 func integrationSucceededQuestion(runID string, merged, unreadable bool) string {
 	if merged {
-		return fmt.Sprintf("接続ツールの run（%s）が、レビュー待ちを経ずに終わった（成功）。成果物は、検証を経ないまま統合先へ入っている。検証へ進めなかった。", runID) +
+		return fmt.Sprintf("委譲先の実行（%s）が、レビュー待ちを経ずに終わった（成功）。成果物は、検証を経ないまま統合先へ入っている。検証へ進めなかった。", runID) +
 			"入った中身を確かめてから回答するか、課題を取り下げる。"
 	}
 	note := ""
 	if unreadable {
 		note = "上流の成果物を読めなかったので、入っていないものとして扱った。"
 	}
-	return fmt.Sprintf("接続ツールの run（%s）が、レビュー待ちを経ずに終わった（成功）。成果物は統合先へ入っていない。%s検証へ進めなかった。", runID, note) +
+	return fmt.Sprintf("委譲先の実行（%s）が、レビュー待ちを経ずに終わった（成功）。成果物は統合先へ入っていない。%s検証へ進めなかった。", runID, note) +
 		"回答すると、このタスクを着手中へ戻して委譲し直す。課題を取り下げることもできる。"
 }
 

@@ -660,9 +660,31 @@ func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
 			if len(t.DependsOn) > 0 {
 				line += "（前提: " + strings.Join(t.DependsOn, "・") + "）"
 			}
+			line += taskFrameText(t)
 			b.WriteString(line + "\n")
 		}
+		if p.PlanBudgetUSD != nil && taskFramesPresent(p.PlanTasks) {
+			fmt.Fprintf(b, "課題の上限（タスクの枠の合計）: %s USD\n", strconv.FormatFloat(*p.PlanBudgetUSD, 'f', -1, 64))
+		}
 	}
+}
+
+// taskFramesPresent は、計画のタスクが全部枠を持つか。
+func taskFramesPresent(tasks []core.PlanTaskView) bool {
+	for _, t := range tasks {
+		if t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil {
+			return false
+		}
+	}
+	return len(tasks) > 0
+}
+
+// taskFrameText はタスクの枠（実装・レビュー対応）の表示。枠を持たないタスクは空。
+func taskFrameText(t core.PlanTaskView) string {
+	if t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil {
+		return ""
+	}
+	return "（枠: 実装 " + strconv.FormatFloat(*t.BudgetImplUSD, 'f', -1, 64) + " USD・レビュー対応 " + strconv.FormatFloat(*t.BudgetReviewUSD, 'f', -1, 64) + " USD）"
 }
 
 // writeCompletionStageSummary は完了の承認の要約へ、予想と実物の変更後の対を書く

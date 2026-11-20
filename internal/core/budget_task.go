@@ -251,12 +251,17 @@ func loadTaskBucketSpend(ctx context.Context, tx *sql.Tx, taskID, planVersion in
 }
 
 // taskRemaining はタスク tb の、枠ごとの残りを返す。同じ計画の版にタスクが 1 個だけなら、見直し前と同じ数え方
-// （計画の版で数え、計画の作り直しをまたいで積み上げる）。2 個以上なら、そのタスクの run だけを数える
+// （計画の版で数え、計画の作り直しをまたいで積み上げる）。統合先を使う課題、または 2 個以上なら、そのタスクの run だけを数える
 // （同じ課題のほかのタスクが使った額は引かない）。
 func taskRemaining(ctx context.Context, tx *sql.Tx, cid int64, tb taskBudget, bs []taskBudget) (bucketRemaining, error) {
 	var sp bucketSpend
-	var err error
-	if planVersionTaskCount(bs, tb.PlanVersion) == 1 {
+	usesIntegration, err := challengeUsesIntegration(ctx, tx, cid)
+	if err != nil {
+		return bucketRemaining{}, err
+	}
+	// 統合先を使う課題は、タスクが 1 個の版でも、そのタスクの run だけを数える（取りやめ・済みの前の版のタスクが
+	// 使った額を、新しい版のタスクの枠から引かない）。
+	if (usesIntegration == nil || !*usesIntegration) && planVersionTaskCount(bs, tb.PlanVersion) == 1 {
 		sp, err = loadBucketSpend(ctx, tx, cid, tb.PlanVersion)
 	} else {
 		sp, err = loadTaskBucketSpend(ctx, tx, tb.TaskID, tb.PlanVersion)

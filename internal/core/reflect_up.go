@@ -41,22 +41,32 @@ func (s *Store) isReflectRun(ctx context.Context, rep *ContractRunReport) (bool,
 }
 
 func reflectEndedQuestion(runID string, state ContractState, summary string) string {
-	return fmt.Sprintf("接続ツールの run（%s）の、統合先から反映先へ上げる依頼が、反映先へ入れる前に終わった（状態: %s）。委譲先の要約: %s\n", runID, state, summary) +
+	return fmt.Sprintf("委譲先の実行（%s）の、統合先から反映先へ上げる依頼が、反映先へ入れる前に終わった（%s）。委譲先の要約: %s\n", runID, contractStateWord(state), summary) +
 		"課題を着手中へ戻して保留にした。委譲先を確かめてから回答するか、課題を取り下げる。回答すると、次の委譲の段が上げる依頼を始め直す。"
 }
 
 func reflectNoLandablePRQuestion(runID string) string {
-	return fmt.Sprintf("接続ツールの run（%s）のレビュー待ちに、反映先（既定ブランチ）宛ての成果物（PR）が見つからない。統合先から反映先へ上げる依頼は、反映先宛ての成果物がちょうど 1 つ要るので、検証中へ進めなかった。", runID) +
+	return fmt.Sprintf("委譲先の実行（%s）のレビュー待ちに、反映先宛ての成果物が見つからない。統合先から反映先へ上げる依頼は、反映先宛ての成果物がちょうど 1 つ要るので、検証中へ進めなかった。", runID) +
 		"委譲先の出力を直してから回答するか、課題を取り下げる。回答しても、回答の文は委譲先へ返さない。次に読んだレビュー待ちも同じなら、もう一度保留にする。"
 }
 
 func reflectUnavailableQuestion(challengeRepo string) string {
-	return fmt.Sprintf("統合先から反映先へ上げる依頼を始められない。リポジトリ（%s）の接続ツールに、反映の依頼の口（commands.reflect）が宣言されていない。", challengeRepo) +
+	return fmt.Sprintf("統合先から反映先へ上げる依頼を始められない。リポジトリ（%s）の委譲先に、反映の依頼の口（commands.reflect）が宣言されていない。", challengeRepo) +
 		"口を宣言に足してから回答するか、課題を取り下げる。回答すると、次の委譲の段が上げる依頼を始め直す。"
 }
 
 func reflectFailedQuestion(detail string) string {
 	return "統合先から反映先へ上げる依頼を始められなかった。" + detail + "\n委譲先を確かめてから回答するか、課題を取り下げる。回答すると、次の委譲の段が上げる依頼を始め直す。"
+}
+
+// reflectNoReleaseOperationQuestion は、上げる依頼の成果物（ref）の、承認できる反映の操作を作れなかったときの問い。
+// 回答の後に取れる道（取り下げる・手で反映の操作を足す）を書く。何もせずに回答しても、同じ成果物で作れないのでもう一度保留になる。
+func reflectNoReleaseOperationQuestion(challengeID, ref string) string {
+	return fmt.Sprintf("統合先から反映先へ上げる依頼の成果物（%s）について、承認して反映先へ入れる操作（反映の操作）を作れなかった。"+
+		"同じ成果物の反映の操作が、置き換え・差し戻し以外の理由で閉じているため、自動では作り直さない。\n", ref) +
+		fmt.Sprintf("次のどちらかで進める。①課題を取り下げる（`flywheel withdraw %s --reason <理由>`）。"+
+			"②手で反映の操作を足す（`flywheel op add %s --kind release --ref %s --summary <要約>`）。", challengeID, challengeID, ref) +
+		"足してから回答すると、次の委譲の段が、足した反映の操作を成果物に結び付けて、課題を検証中へ進める。足さずに回答すると、同じ理由でもう一度保留にする。"
 }
 
 func integrationRefMissingQuestion() string {
@@ -246,8 +256,7 @@ func (s *Store) submitReflectReview(ctx context.Context, rep *ContractRunReport,
 	}
 	if noRelease {
 		// 毎回の状態の確認で黙って取りやめ続けないよう、オーナーへ見せる。
-		return s.holdChallengeForReflect(ctx, rep.ChallengeID, reflectFailedQuestion(
-			"この PR の承認できる反映の操作を作れなかった（同じ PR の反映の操作が、置き換え・差し戻し以外の理由で閉じている）。"), holdReasonReflectFailed)
+		return s.holdChallengeForReflect(ctx, rep.ChallengeID, reflectNoReleaseOperationQuestion(rep.ChallengeID, pr.URL), holdReasonReflectFailed)
 	}
 	return nil
 }
@@ -477,10 +486,7 @@ func (s *Store) startIntegrationReflect(ctx context.Context, in DelegateInput, c
 		return nil, nil, err
 	}
 	if created == 0 {
-		detail := fmt.Sprintf("commands.reflect が、終わっていない契約の実行を始めなかった（結果: %s。状態: %s）。%s", rep.Result, rep.State, rep.Error)
-		if rep.Result == RunResultSucceeded {
-			detail = fmt.Sprintf("commands.reflect が、終わった状態（%s）を返した。委譲先の要約: %s", rep.State, rep.Summary)
-		}
+		detail := reflectNotStartedDetail(rep)
 		_, err := s.holdContractWithReason(ctx, rep.RunID, challengeID, reflectFailedQuestion(detail), holdReasonReflectFailed)
 		return nil, nil, err
 	}
@@ -583,4 +589,53 @@ func (s *Store) cancelObsoleteContractRun(ctx context.Context, in ContractPollIn
 	}
 	row.discard = true
 	return s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, existingContractWorkDir(row, in.WorkDir), row, "cancel", command, planVersion, cycleID, note)
+}
+
+// contractStateWord は契約の状態を、問いの文に出す言葉にする（内部の値をそのまま出さない）。
+func contractStateWord(s ContractState) string {
+	switch s {
+	case ContractStateRunning:
+		return "実行中"
+	case ContractStateWaiting:
+		return "待ち"
+	case ContractStateSucceeded:
+		return "成功で終了"
+	case ContractStateFailed:
+		return "失敗で終了"
+	case ContractStateCancelled:
+		return "中止で終了"
+	}
+	return "状態が不明"
+}
+
+// runResultWord は実行の結果を、問いの文に出す言葉にする（内部の値をそのまま出さない）。
+func runResultWord(r RunResult) string {
+	switch r {
+	case RunResultLaunchFailed:
+		return "起動に失敗"
+	case RunResultTimedOut:
+		return "時間切れ"
+	case RunResultMalformed:
+		return "応答の形が不正"
+	case RunResultBudgetExhausted:
+		return "予算切れ"
+	case RunResultErrored:
+		return "失敗"
+	case RunResultInvalidOutput:
+		return "出力が不正"
+	case RunResultSucceeded:
+		return "成功"
+	case RunResultInterrupted:
+		return "中断"
+	}
+	return "結果が不明"
+}
+
+// reflectNotStartedDetail は、上げる依頼の commands.reflect が、終わっていない契約の実行を始めなかったときの理由の文。
+// 結果・状態は内部の値ではなく言葉で書く。委譲先が返した文字列（要約・エラー）はそのまま添える。
+func reflectNotStartedDetail(rep *ContractRunReport) string {
+	if rep.Result == RunResultSucceeded {
+		return fmt.Sprintf("commands.reflect が、終わった状態（%s）を返した。委譲先の要約: %s", contractStateWord(rep.State), rep.Summary)
+	}
+	return fmt.Sprintf("commands.reflect が、終わっていない契約の実行を始めなかった（%s・%s）。%s", runResultWord(rep.Result), contractStateWord(rep.State), rep.Error)
 }

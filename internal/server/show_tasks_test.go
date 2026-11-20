@@ -127,13 +127,13 @@ func TestApprovalSummary_PlanCarriesTopicsTasksAndUsesIntegration(t *testing.T) 
 	if len(tasks) != 3 {
 		t.Fatalf("tasks = %v", tasks)
 	}
-	// 承認の前はタスクの ID が無いので、key・題名・前提の key・source（子に対応しなければ null）で出す。要素のキーはこの 4 つに、表示の区分（phase）を足した 5 つだけ（#802）。
+	// 承認の前はタスクの ID が無いので、key・題名・前提の key・source（子に対応しなければ null）で出す。要素のキーはこの 4 つに、表示の区分（phase）と、タスクの枠（budget_impl_usd・budget_review_usd。計画が書かなければ null。#906）を足した 7 つだけ（#802）。
 	for i, want := range []struct {
 		key, title string
 		deps       []any
 	}{{"a", "TA", []any{}}, {"b", "TB", []any{"a"}}, {"c", "TC", []any{"b"}}} {
 		got := tasks[i]
-		if len(got) != 5 || got["phase"] == nil || got["source"] != nil || got["key"] != want.key || got["title"] != want.title || !reflect.DeepEqual(got["depends_on"], want.deps) {
+		if len(got) != 7 || got["phase"] == nil || got["budget_impl_usd"] != nil || got["budget_review_usd"] != nil || got["source"] != nil || got["key"] != want.key || got["title"] != want.title || !reflect.DeepEqual(got["depends_on"], want.deps) {
 			t.Errorf("tasks[%d] = %v, want key %s title %s depends_on %v", i, got, want.key, want.title, want.deps)
 		}
 	}

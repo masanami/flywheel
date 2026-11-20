@@ -48,13 +48,23 @@ const plan = (over: Partial<ApprovalPlan> = {}): ApprovalPlan => ({
   budget_usd: 30,
   summary: "方針の本文",
   tasks: [
-    { key: "a", title: "調べる", depends_on: [], phase: "next", source: null },
+    {
+      key: "a",
+      title: "調べる",
+      depends_on: [],
+      phase: "next",
+      source: null,
+      budget_impl_usd: null,
+      budget_review_usd: null,
+    },
     {
       key: "b",
       title: "作る",
       depends_on: ["a"],
       phase: "blocked",
       source: null,
+      budget_impl_usd: null,
+      budget_review_usd: null,
     },
   ],
   topics: [],
@@ -297,6 +307,8 @@ const five = Array.from({ length: 5 }, (_, i) => ({
   depends_on: i === 0 ? [] : [`k${i - 1}`],
   phase: i === 0 ? "next" : "blocked",
   source: null,
+  budget_impl_usd: null,
+  budget_review_usd: null,
 }));
 
 it("AC-320 #811: tasks が 5 件のとき、ツリーに箱が 5 つ出る", async () => {
