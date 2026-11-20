@@ -44,17 +44,23 @@ type ReopenContractSources struct {
 
 // errReopenBlockedByRun は、課題の終わっていないタスクの契約の実行が running か読めない、または終わっていない反映の依頼を
 // 取り消せないため、完了から戻さなかったことを表す（ErrConflict の一種）。課題は完了のまま。
-var errReopenBlockedByRun = fmt.Errorf("%w: the challenge has an unfinished contract run that is running, could not be read, or could not be cancelled", ErrConflict)
+var errReopenBlockedByRun = fmt.Errorf("%w: the challenge has an unfinished contract run that is running, could not be read, could not be cancelled, or received a land answer while the reopen was being prepared", ErrConflict)
 
 // readTaskRunBeforeReopen は opID の課題の、終わっていない反映の依頼を commands.cancel で取り消し、終わっていないタスクの契約の実行を
 // commands.status で読む（課題に終わっていない契約の実行は高々 1 本）。
 // running（委譲先が反映先へ入れている途中かもしれない）か読めなければ errReopenBlockedByRun。待ち（レビュー待ちを含む）なら戻してよい。
 // 終わっていれば、status の読みが契約の実行を終わった記録にする。終わっていないタスクの実行が無ければ何も呼ばない。
-func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs ReopenContractSources) error {
+// 返す印は、読む前に記録にあったタスクの実行の「入れてよい」の状態（無ければ nil）。戻す書き込みが、読みから書き込みまでの間に
+// 別のプロセスの反映の段が「入れてよい」を返していないことを確かめるのに使う（taskRunUnchangedInTx）。
+func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs ReopenContractSources) (*taskRunMark, error) {
 	var run *releaseRun
+	var lastAttempt int64
 	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		row, err := loadOperationRow(ctx, tx, opID)
 		if err != nil {
+			return err
+		}
+		if lastAttempt, err = lastReleaseAttemptID(ctx, tx, row.ChallengeID); err != nil {
 			return err
 		}
 		run, err = loadOpenRunInTx(ctx, tx, row.ChallengeID)
@@ -63,27 +69,76 @@ func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs Reop
 		}
 		return err
 	}); err != nil {
-		return classifyReadWriteErr(err)
+		return nil, classifyReadWriteErr(err)
 	}
 	if run == nil {
-		return nil
+		return nil, nil
 	}
 	if run.row.Kind == contractRunKindReflect {
 		// 終わっていない反映の依頼は commands.cancel で取り消す（取り消せなければ戻さない）。
-		return s.cancelOpenReflectRunBeforeReopen(ctx, run, cs)
+		return nil, s.cancelOpenReflectRunBeforeReopen(ctx, run, cs)
 	}
 	if cs.Contract == nil || cs.Connectors == nil {
-		return errReopenBlockedByRun
+		return nil, errReopenBlockedByRun
 	}
+	mark := &taskRunMark{id: run.row.ID, landRef: run.row.LandRef, landDelivered: run.row.LandDelivered, lastAttempt: lastAttempt}
 	opts := ReleaseExecOptions{Contract: cs.Contract, Agent: cs.Agent, Connectors: cs.Connectors}
 	rep, why, err := s.releaseContractCommand(ctx, opts, run, "status", contractFill{}, false)
 	if errors.Is(err, errReleaseContractBusy) {
-		return errReopenBlockedByRun
+		return nil, errReopenBlockedByRun
+	}
+	if err != nil {
+		return nil, err
+	}
+	if why != "" || rep.Result != RunResultSucceeded || rep.State == ContractStateRunning {
+		return nil, errReopenBlockedByRun
+	}
+	return mark, nil
+}
+
+// taskRunMark は、完了から戻す前の読み（readTaskRunBeforeReopen）が commands.status を呼ぶ前に記録にあった、課題の終わっていない
+// タスクの契約の実行の ID と「入れてよい」の状態（land_ref・land_delivered）、その課題の反映の操作の試行のうち最後のものの ID
+// （無ければ 0）。
+type taskRunMark struct {
+	id            int64
+	landRef       string
+	landDelivered bool
+	lastAttempt   int64
+}
+
+// lastReleaseAttemptID は、課題 cid の、種類が反映の操作の試行のうち、最後のものの ID を返す（無ければ 0）。
+func lastReleaseAttemptID(ctx context.Context, tx *sql.Tx, cid int64) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(id), 0) FROM operation_execution WHERE operation_id IN (SELECT id FROM operation WHERE challenge_id = ? AND kind = ?)`,
+		cid, string(OperationKindRelease)).Scan(&id)
+	return id, err
+}
+
+// taskRunUnchangedInTx は、戻す書き込みの中で、課題 cid の終わっていないタスクの契約の実行が、戻す前の読みの時点（mark）から
+// 「入れてよい」を受けていないことを確かめる。読みから書き込みまでの間に、別のプロセスの反映の段が「入れてよい」を返して
+// 試行まで閉じていると、終わっていない試行も実行の記録も残らないので、ここで見分ける。次のどれかなら errReopenBlockedByRun
+// （何も書かない）: 記録した状態が running（委譲先が反映先へ入れている途中かもしれない）・読みの時点に無かった実行がある・
+// land_ref か land_delivered が読みの時点と違う・読みの後に、その課題の反映の操作の試行が増えている（「入れてよい」が届いたか
+// 分からないまま閉じた試行は、land_ref・land_delivered を読みの時点と同じ値に戻すので、値の比較だけでは見分けられない）。
+// 終わっていないタスクの実行が無ければ（無かった・読みが終わった記録にした）通す。
+func taskRunUnchangedInTx(ctx context.Context, tx *sql.Tx, cid int64, mark *taskRunMark) error {
+	cr, err := scanContractRun(tx.QueryRowContext(ctx,
+		contractRunSelect+` WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, cid, contractRunKindTask))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if why != "" || rep.Result != RunResultSucceeded || rep.State == ContractStateRunning {
+	if mark == nil || cr.ID != mark.id || cr.State == ContractStateRunning || cr.LandRef != mark.landRef || cr.LandDelivered != mark.landDelivered {
+		return errReopenBlockedByRun
+	}
+	last, err := lastReleaseAttemptID(ctx, tx, cid)
+	if err != nil {
+		return err
+	}
+	if last != mark.lastAttempt {
 		return errReopenBlockedByRun
 	}
 	return nil
@@ -148,10 +203,14 @@ func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDT
 		return nil, err
 	}
 	// 戻す前に、終わっていないタスクの契約の実行を読む（running か読めなければ戻さない）。
+	var mark *taskRunMark
 	if as.Eligible {
-		if err := s.readTaskRunBeforeReopen(ctx, opID, cs); err != nil {
+		if mark, err = s.readTaskRunBeforeReopen(ctx, opID, cs); err != nil {
 			return nil, err
 		}
+	}
+	if s.reopenReadDone != nil {
+		s.reopenReadDone()
 	}
 	var res *ReopenForReleaseResult
 	err = s.mutateAs(ctx, actor, ch, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
@@ -170,6 +229,10 @@ func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDT
 			}
 			if verified == nil || *verified != as.Assessment.VerifiedHead {
 				return ErrConflict
+			}
+			// 読みからこの書き込みまでの間に、タスクの実行が「入れてよい」を受けていたら、戻さない。
+			if err := taskRunUnchangedInTx(ctx, tx, row.ChallengeID, mark); err != nil {
+				return err
 			}
 		}
 		if !as.Eligible {

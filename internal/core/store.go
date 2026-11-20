@@ -52,6 +52,10 @@ type Store struct {
 	// 「別の候補が枠待ちに入ったこと」で待ち合わせるために使う。
 	delegationWaited func()
 
+	// reopenReadDone は、完了から戻す操作（T18）の、戻す前の読みが終わり、戻す書き込みを始める直前に呼ぶテスト用の欄
+	// （読みと書き込みの間に別のプロセスの反映の段が動く並びを作る）。nil なら何もしない。
+	reopenReadDone func()
+
 	// insertActivity はテストが作業ログへの書き込みを失敗させるためのフック。
 	// nil なら defaultInsertActivity を使う（#9 §A-3 の失敗注入。本番 API には
 	// 注入口を露出しない）。
