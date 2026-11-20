@@ -1319,7 +1319,8 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 		// 読むのはタスクの実行と、着手中・検証中の課題の上げる依頼（kind が reflect）で、課題が完了でないものだけ（完了の課題の実行と
 		// 反映の依頼は反映の段が読む）。
 		q := contractRunSelect + ` WHERE ended_at IS NULL AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'done')
-			AND (kind = 'task' OR (kind = 'reflect' AND challenge_id IN (SELECT id FROM challenge WHERE status IN ('in_progress', 'verifying'))))`
+			AND (kind = 'task' OR (kind = 'reflect' AND (challenge_id IN (SELECT id FROM challenge WHERE status IN ('in_progress', 'verifying'))
+				OR operation_id IN (SELECT id FROM operation WHERE state = 'closed' AND closed_reason IN ('superseded', 'challenge_rejected')))))`
 		args := []any{}
 		if only != nil {
 			q += ` AND challenge_id = ?`
@@ -1375,7 +1376,14 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 		connector, err := findCLIConnector(in.ConnDecl, row.ConnectorID)
 		var rep *ContractRunReport
 		if err == nil {
-			rep, err = s.pollOne(ctx, in, row, connector, bindings[row], planVersions[row.ChallengeID], cycleIDInt)
+			// 反映の操作を閉じた上げる依頼（課題の単位の確かめが満たしていない・完了の差し戻し）は、状態を読まずに取り消す（保留中の課題でも取り消す）。
+			if closed, cerr := s.reflectRunOperationClosed(ctx, row); cerr != nil {
+				err = cerr
+			} else if closed {
+				rep, err = s.cancelClosedReflectRun(ctx, in, row, connector, bindings[row], planVersions[row.ChallengeID], cycleIDInt)
+			} else {
+				rep, err = s.pollOne(ctx, in, row, connector, bindings[row], planVersions[row.ChallengeID], cycleIDInt)
+			}
 			if err == nil && rep == nil {
 				continue // 検証中のレビュー待ちは読まない（pendingReviewReply）
 			}

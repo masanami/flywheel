@@ -202,10 +202,10 @@ func TestJ5Prompt_TaskVerification(t *testing.T) {
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
 		"j1.md": 4096,
-		"j2.md": 13312,
+		"j2.md": 13599,
 		"j3.md": 8192,
 		"j4.md": 4096,
-		"j5.md": 12346,
+		"j5.md": 13038,
 		"j6.md": 6144,
 		"j8.md": 8192,
 	}
@@ -973,4 +973,35 @@ func TestPrompts_J9IsGone(t *testing.T) {
 			t.Errorf("judgmentPromptLimit has j9.md = %d, want no entry", limit)
 		}
 	})
+}
+
+// AC-177: j5.md は、課題の単位の確かめでは、課題の達成条件で全体を確かめ、タスクごとの検証をやり直さない旨と、確かめの入力の区画を読む旨を述べる。
+func TestJ5Prompt_ChallengeCheckVerifiesTheWholeAgainstTheChallengeCriteria(t *testing.T) {
+	ins, err := Instructions(core.JudgmentJ5)
+	if err != nil {
+		t.Fatalf("Instructions(J5): %v", err)
+	}
+	for _, want := range []string{
+		"課題の単位の確かめ",
+		"課題の達成条件で、反映先へ上げる実物（成果物の PR）の全体を確かめる",
+		"タスクごとの検証は済んでいるので、やり直さない",
+		"「全部のタスク」", "「計画の背景」", "「上げる依頼が値で返したこと」", "「確かめの指摘への回答」",
+	} {
+		if !strings.Contains(ins, want) {
+			t.Errorf("j5.md lacks %q", want)
+		}
+	}
+}
+
+// 完了の差し戻しで計画を作り直す J2 の入力の区画を、j2.md が名前で指し、済みのタスクをやり直さない旨を述べる。
+func TestJ2Prompt_ReadsTheRejectionOfTheProductAndDoesNotRedoDoneTasks(t *testing.T) {
+	ins, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatalf("Instructions(J2): %v", err)
+	}
+	for _, want := range []string{"「" + core.CompletionRejectionsForReplanSectionLabel + "」", "済みのタスクをやり直す計画にせず、足りない分のタスクだけを出す"} {
+		if !strings.Contains(ins, want) {
+			t.Errorf("j2.md lacks %q", want)
+		}
+	}
 }

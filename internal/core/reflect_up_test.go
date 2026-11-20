@@ -716,8 +716,8 @@ func TestUpRequest_TheStartingConditionsAreSelectedByTheCandidates(t *testing.T)
 	}
 }
 
-// 委譲の段の状態の確認が読む上げる依頼は、着手中・検証中の課題のものだけ。保留中・完了の承認待ちの課題のものは読まない
-// （保留中でも取り消す処理は課題の単位の確かめの Issue〔#888〕が足す。それまでの、読まない動きを確かめる）。
+// 委譲の段の状態の確認が読む上げる依頼は、着手中・検証中の課題のものだけ。保留中・完了の承認待ちの課題のものは、状態を読まない。
+// ただし、反映の操作を閉じた上げる依頼は、課題の状態によらず（保留中でも）取り消す（その動きは judgment_j5_challenge_test.go の AC-183・AC-184・AC-206 の試験）。
 func TestUpRequest_TheStatusReadCoversOnlyInProgressAndVerifyingChallenges(t *testing.T) {
 	t.Parallel()
 	for _, st := range []string{"awaiting_human", "awaiting_completion_approval"} {

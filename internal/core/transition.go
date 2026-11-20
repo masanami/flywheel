@@ -54,6 +54,9 @@ type TransitionTarget struct {
 	// 値は遷移のたびに runTransition が書き（T17 で真・ほかで偽）、Resolve は読まない（既存の呼び出し元が見る遷移先は
 	// Fixed のまま）。真偽を渡して引くのは ResolveForCompletionDirect。
 	IfCompletionDirect Status
+	// IfUsesIntegration は、課題が統合先を使う（challenge.uses_integration）ときの遷移先。ゼロ値なら無い。T15（完了の差し戻し）だけが持ち、
+	// 統合先を使う課題を、着手中ではなく計画を作り直す道（分類済）へ送る（済みのタスクは残る）。
+	IfUsesIntegration Status
 	// IfReplan は、回答に「範囲が変わる」印が付いたとき（runTransitionParams.replan）の遷移先。ゼロ値なら無い。
 	// T12（answer）だけが持ち、保留に入る直前の状態へ戻さず、計画を作り直す分類済へ戻す。印の付いた回答は
 	// 保留の直前の状態が着手中・検証中（承認済みの計画に基づく作業の途中）のときだけ成立する（ResolveForReplan）。
@@ -153,7 +156,7 @@ var Table = []Transition{
 	// （challenge.completion_direct が真）なら、着手中ではなく人間対応待ちへ戻し、同じトランザクションで種類が
 	// 親が直接行うの保留を新しく立てる（ExecuteApproval。#481）。戻り先が 2 つあるが遷移表の行は 1 つで、
 	// 後者は IfCompletionDirect で表す。
-	{ID: "T15", From: StatusAwaitingCompletionApproval, Op: OpReject, Target: TransitionTarget{Fixed: StatusInProgress, IfCompletionDirect: StatusAwaitingHuman}, RequiresVerification: true},
+	{ID: "T15", From: StatusAwaitingCompletionApproval, Op: OpReject, Target: TransitionTarget{Fixed: StatusInProgress, IfCompletionDirect: StatusAwaitingHuman, IfUsesIntegration: StatusClassified}, RequiresVerification: true},
 	// T16: 取り下げ（docs/features/m4.5-learning-and-self-improvement.md S4。M45H13・M45H28）。
 	// 完了以外の 7 状態から取り下げへ。取り下げから出る行は持たない（終端）。
 	{ID: "T16", From: StatusUnclassified, Op: OpWithdraw, Target: TransitionTarget{Fixed: StatusWithdrawn}, RequiresVerification: true},

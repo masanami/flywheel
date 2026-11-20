@@ -657,6 +657,7 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		if kind == ApprovalKindCompletion && req.Decision == ApprovalDecisionRejected {
 			// 課題が着手中へ戻るとき、承認済みの計画の版の done のタスクを in_progress にする。
 			// オーケストレーターの直接の完了の差し戻し（保留へ戻る）ではタスクの状態を変えない。
+			// 統合先を使う課題は、計画を作り直す道へ送られ（分類済へ戻る）、タスクを済みのまま残す。
 			if tc.target == StatusInProgress {
 				if err := reopenDoneTasks(ctx, tc.tx, tc.rec, tc.id); err != nil {
 					return err
