@@ -171,6 +171,7 @@ const op = (
   executed_at: null,
   id,
   kind,
+  last_execution_detail: null,
   last_execution_result: null,
   merge_commit: null,
   ref: null,

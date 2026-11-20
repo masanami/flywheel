@@ -197,7 +197,7 @@ func executionResultsWhere(match func(ExecutionResult) bool) (string, []any) {
 // （列は持たない。実行・表示が共有する唯一の関数）。
 //
 // その release の最新の承認の記録より後の試行について、数える結果
-// （ExecutionResult.Counts。checks_failed・not_mergeable・merge_failed）を足す。
+// （ExecutionResult.Counts。checks_failed・not_mergeable・merge_failed・land_unconfirmed・content_mismatch）を足す。
 // 数えない結果と interrupted、終了していない試行は足さず、連続も切らない。
 // 数える結果どうしは種類が違っても連続とみなす。
 //

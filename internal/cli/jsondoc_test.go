@@ -332,8 +332,8 @@ func addM45ReleaseShape(t *testing.T, doc *documentedJSON) {
 			break
 		}
 	}
-	if len(itemKeys) != 7 {
-		t.Fatalf("m4.5 spec's `op exec` line does not list the 7 item keys: %v", itemKeys)
+	if len(itemKeys) != 8 {
+		t.Fatalf("m4.5 spec's `op exec` line does not list the 8 item keys: %v", itemKeys)
 	}
 	doc.topLevel["op exec"] = []map[string]bool{{"phase": true}}
 	doc.entity["release_phase"] = map[string]bool{"phase": true, "skipped": true, "items": true, "not_started": true, "tidied": true}
@@ -1287,8 +1287,8 @@ func addM4StageShape(t *testing.T, doc *documentedJSON) {
 }
 
 // m45OperationKeys は M4.5 S1 が不可逆操作の要素（show の operations・status の
-// needs_human.operations・approved.operations）に足す 6 つのキー。
-var m45OperationKeys = []string{"approved_head", "executed_at", "merge_commit", "last_execution_result", "consecutive_failures", "waiting_since", "closed_reason", "closed_at", "supersedes", "superseded_by"}
+// needs_human.operations・approved.operations）に足したキー（#485・S3a の分を含む）。
+var m45OperationKeys = []string{"approved_head", "executed_at", "merge_commit", "last_execution_detail", "last_execution_result", "consecutive_failures", "waiting_since", "closed_reason", "closed_at", "supersedes", "superseded_by"}
 
 // addM45OperationShape は M4.5 S1 と #485 が不可逆操作の要素に足したキーを doc へ合成する。
 // m4.5 の機能仕様がそれらのキーをすべて書いていることを確かめた上で足す（第 2 の正本を持たず、
