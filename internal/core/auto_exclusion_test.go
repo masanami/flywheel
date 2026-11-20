@@ -286,8 +286,8 @@ func TestRunCycle_Y10_ReleaseClosesTheSourceAndVerifyStillRunsInTheSameCycle(t *
 	}
 	opID := coretest.InsertApprovedRelease(t, f.s.workspace, 1, relRef, relHead, execTS(0))
 
-	// release の段のマージで PR は merged になる（J5 の前の PR のチェックの取得も同じ偽物が答える）。
-	rel := &fakeRelease{pr: openPR(), afterPR: &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "mc1"}}
+	// PR は反映先へ入っている（release の段が already_merged で実行済みにする）（J5 の前の PR のチェックの取得も同じ偽物が答える）。
+	rel := &fakeRelease{pr: UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "mc1"}}
 	// 取り込みの段: o/r#42 は open の一覧に現れず、個別の取得で closed（`Closes #42` で閉じた）。
 	up := &fakeUpstream{
 		issues:   map[string][]UpstreamIssue{"o/r": {}},
@@ -295,7 +295,7 @@ func TestRunCycle_Y10_ReleaseClosesTheSourceAndVerifyStillRunsInTheSameCycle(t *
 	}
 	var calls []JudgmentPoint
 	in := f.cycleInput(cycleS2Invoker("met", &calls))
-	in.Checks, in.Merger = rel, rel
+	in.Checks = rel
 	in.Ingest = &CycleIngestInput{Sources: []SourceEntry{excludeOthersSource("s", []string{"o/r"}, []string{"masanami"})}, Upstream: up, Channel: ChannelCLI}
 	res, err := f.s.RunCycle(context.Background(), in)
 	if err != nil {
@@ -303,8 +303,8 @@ func TestRunCycle_Y10_ReleaseClosesTheSourceAndVerifyStillRunsInTheSameCycle(t *
 	}
 
 	relPhase := phaseOfResult(t, res, CyclePhaseRelease)
-	if len(relPhase.ReleaseItems) != 1 || relPhase.ReleaseItems[0].OperationID != formatOperationID(opID) || relPhase.ReleaseItems[0].Result != ExecutionResultMerged {
-		t.Fatalf("release phase = %+v, want OP merged", relPhase)
+	if len(relPhase.ReleaseItems) != 1 || relPhase.ReleaseItems[0].OperationID != formatOperationID(opID) || relPhase.ReleaseItems[0].Result != ExecutionResultAlreadyMerged {
+		t.Fatalf("release phase = %+v, want OP already merged", relPhase)
 	}
 	if sb := f.detail(t, "C-1").SourceBinding; sb == nil || sb.UpstreamState != "closed" {
 		t.Fatalf("source binding = %+v, want upstream closed by the ingest phase of the same cycle", sb)

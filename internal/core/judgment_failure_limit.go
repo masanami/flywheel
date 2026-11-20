@@ -24,14 +24,6 @@ func judgmentFailureLimit(decl *AgentDeclaration) int {
 	return decl.FailureLimit
 }
 
-// behindUpdateLimit は、本番反映の間に BEHIND の取り込みを依頼してよい累計の回数。宣言が無い・不正なら既定値。
-func behindUpdateLimit(decl *AgentDeclaration) int {
-	if decl == nil || decl.BehindUpdateLimit <= 0 {
-		return defaultBehindUpdateLimit
-	}
-	return decl.BehindUpdateLimit
-}
-
 // loadJudgmentLimitHit は、課題の判断点 j の run を、課題の現在の版（version）に限り、最後の
 // 回答済みの保留より後のものだけ数えて、連続失敗の数が limit に達していれば検出を返す。
 // 枠超過の run は数えず連続も切らない（J3 の decideLaunch と同じ規則）。

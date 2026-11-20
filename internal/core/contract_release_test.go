@@ -177,10 +177,10 @@ func TestPollContractRuns_ApprovalMergeAndReadyRunWithoutManualRelease(t *testin
 	merged := open
 	merged.State = "merged"
 	merged.MergeCommitSHA = "merge-sha"
-	fake := &fakeRelease{pr: open, afterPR: &merged}
-	res, err := f.s.ExecuteReleases(ctx, nil, ReleaseExecOptions{Checks: fake, Merger: fake, Connectors: f.conn, Agent: &AgentDeclaration{FailureLimit: 3}, Trigger: ReleaseExecTriggerOpExec})
-	if err != nil || len(fake.mergeArgs) != 1 {
-		t.Fatalf("ExecuteReleases = %+v err %v merges %v, want one merge", res, err, fake.mergeArgs)
+	fake := &fakeRelease{pr: merged}
+	res, err := f.s.ExecuteReleases(ctx, nil, ReleaseExecOptions{Checks: fake, Connectors: f.conn, Agent: &AgentDeclaration{FailureLimit: 3}, Trigger: ReleaseExecTriggerOpExec})
+	if err != nil || len(res.Items) != 1 || res.Items[0].Result != ExecutionResultAlreadyMerged {
+		t.Fatalf("ExecuteReleases = %+v err %v, want one already_merged item", res, err)
 	}
 	f.client.resumeOut = contractOut(ContractStateSucceeded, nil, nil)
 	f.poll(t)

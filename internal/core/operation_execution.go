@@ -225,24 +225,19 @@ func consecutiveFailures(ctx context.Context, tx *sql.Tx, opID int64) (int, erro
 	return n, err
 }
 
-// branchUpdatedDetailPrefix は、BEHIND の取り込みを依頼して待った試行（waiting_checks）の detail の先頭。
-// 取り込みの累計の回数は、この先頭を持つ試行を数える。
-const branchUpdatedDetailPrefix = "branch updated:"
-
-// behindUpdateCount は、不可逆操作の、最後の取り消しの試行より後（＝最新の承認より後）の
-// 取り込みの依頼の累計の回数。head が動いても戻さない。
-func behindUpdateCount(ctx context.Context, tx *sql.Tx, opID int64) (int, error) {
-	cancelPH, cancelArgs := executionResultsWhere(func(r ExecutionResult) bool {
-		c, _ := r.Class()
-		return c == ExecutionClassCancel
-	})
-	args := []any{opID, string(ExecutionResultWaitingChecks), branchUpdatedDetailPrefix + "%", opID}
-	args = append(args, cancelArgs...)
-	var n int
-	err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM operation_execution
-		 WHERE operation_id = ? AND result = ? AND detail LIKE ?
-		   AND id > COALESCE((SELECT MAX(id) FROM operation_execution WHERE operation_id = ? AND result IN (`+cancelPH+`)), 0)`,
-		args...).Scan(&n)
-	return n, err
+// deleteOpenOperationExecution は id の終了していない試行の行を、結果を書かずに消す（試行を残さない終わり方）。
+// 試行が無い、または既に閉じていれば errExecutionNotOpen。
+func deleteOpenOperationExecution(ctx context.Context, tx *sql.Tx, id int64) error {
+	res, err := tx.ExecContext(ctx, `DELETE FROM operation_execution WHERE id = ? AND ended_at IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errExecutionNotOpen
+	}
+	return nil
 }

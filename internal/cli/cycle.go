@@ -133,7 +133,6 @@ func runCycle(a Args) (any, error) {
 	// 型つき nil を core へ渡さないよう、宣言が無いときは nil のインターフェース値のままにする。
 	var (
 		delegate  core.DelegationInvoker
-		merger    core.UpstreamPullRequestMerger
 		slotGit   core.SlotGit
 		reconcile core.UpstreamBranchSource
 		checks    core.UpstreamCheckSource
@@ -145,7 +144,7 @@ func runCycle(a Args) (any, error) {
 	)
 	if hasConnectors {
 		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(a.lookPath()), newCheckSource(a.lookPath())
-		merger, diffs, headGit = newPullRequestMerger(a.lookPath()), newDiffSource(a.lookPath()), git.New()
+		diffs, headGit = newDiffSource(a.lookPath()), git.New()
 		compare, bodies = newCompareSource(a.lookPath()), newDescriptionSource(a.lookPath())
 		contract = launcher
 	}
@@ -175,7 +174,6 @@ func runCycle(a Args) (any, error) {
 		Diffs:        diffs,
 		Descriptions: bodies,
 		HeadGit:      headGit,
-		Merger:       merger,
 		Compare:      compare,
 		// backup の段の口。connectors.json の有無にかかわらず組み立てる。
 		WorkspaceGit: git.NewWorkspace(),

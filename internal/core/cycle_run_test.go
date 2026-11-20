@@ -139,7 +139,7 @@ func (f *cycleFixture) classified(t *testing.T, title, priority string) *Challen
 func (f *cycleFixture) input(inv JudgmentInvoker) CycleRunInput {
 	return CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream,
-		Delegate: &fakeDelegator{}, Git: newFakeSlotGit(), Reconcile: newFakeBranchSource(), Checks: newFakeChecks(), Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{}, Merger: &fakeRelease{},
+		Delegate: &fakeDelegator{}, Git: newFakeSlotGit(), Reconcile: newFakeBranchSource(), Checks: newFakeChecks(), Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{},
 		WorkspaceGit: &fakeWorkspaceGit{},
 	}
 }
@@ -739,7 +739,7 @@ func TestRunCycle_ReleasePhaseIsSkippedWithoutConnectors(t *testing.T) {
 	t.Parallel()
 	f := newCycleFixture(t)
 	in := f.input(mineThenPlanInvoker(t))
-	in.ConnDecl, in.Upstream, in.Delegate, in.Git, in.Reconcile, in.Checks, in.Merger = nil, nil, nil, nil, nil, nil, nil
+	in.ConnDecl, in.Upstream, in.Delegate, in.Git, in.Reconcile, in.Checks = nil, nil, nil, nil, nil, nil
 	res := f.run(t, in)
 	rel := phaseOfResult(t, res, CyclePhaseRelease)
 	if !rel.Skipped || len(rel.ReleaseItems) != 0 || len(rel.NotStarted) != 0 || phaseNames(res)[0] != CyclePhaseRelease {
@@ -747,33 +747,30 @@ func TestRunCycle_ReleasePhaseIsSkippedWithoutConnectors(t *testing.T) {
 	}
 }
 
-// ある周では、承認済みの release をその周の中で実行する（マージの依頼は 1 回。契機は cycle）。
-func TestRunCycle_ReleasePhaseMergesAnApprovedReleaseInsideTheCycle(t *testing.T) {
+// ある周では、反映先へ入った承認済みの release をその周の中で実行済みにする（契機は cycle）。
+func TestRunCycle_ReleasePhaseExecutesAnApprovedReleaseInsideTheCycle(t *testing.T) {
 	t.Parallel()
 	f := newCycleFixture(t)
 	c := createAndAdvance(t, f.s, StatusDone)
 	opID := coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c.ID)), relRef, relHead, execTS(0))
-	fake := &fakeRelease{pr: openPR(), afterPR: &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "mc1"}}
+	fake := &fakeRelease{pr: UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "mc1"}}
 	in := f.input(mineThenPlanInvoker(t))
 	conn := j2TestConnectors(t)
 	conn.Repos[0].Remote = "o/r"
 	in.ConnDecl = conn
-	in.Checks, in.Merger = fake, fake
-	// マージの依頼の時点で、サイクルの排他ロックがこの周に保持されていること（M3 の AC-146）。
+	in.Checks = fake
+	// 上流の読み取りの時点で、サイクルの排他ロックがこの周に保持されていること（M3 の AC-146）。
 	var holderAtMerge int64
 	var heldAtMerge bool
-	fake.onMerge = func() { holderAtMerge, heldAtMerge = coretest.CycleLockHolder(t, f.s.workspace) }
+	fake.onGet = func() { holderAtMerge, heldAtMerge = coretest.CycleLockHolder(t, f.s.workspace) }
 
 	res := f.run(t, in)
 	rel := phaseOfResult(t, res, CyclePhaseRelease)
-	if rel.Skipped || len(rel.ReleaseItems) != 1 || rel.ReleaseItems[0].OperationID != formatOperationID(opID) || rel.ReleaseItems[0].Result != ExecutionResultMerged {
+	if rel.Skipped || len(rel.ReleaseItems) != 1 || rel.ReleaseItems[0].OperationID != formatOperationID(opID) || rel.ReleaseItems[0].Result != ExecutionResultAlreadyMerged {
 		t.Errorf("release phase = %+v", rel)
 	}
-	if len(fake.mergeArgs) != 1 {
-		t.Errorf("merge requests = %v, want 1", fake.mergeArgs)
-	}
 	if !heldAtMerge || formatCycleID(holderAtMerge) != res.Cycle.ID {
-		t.Errorf("lock holder at merge = %d (held=%v), want this cycle %s", holderAtMerge, heldAtMerge, res.Cycle.ID)
+		t.Errorf("lock holder at the upstream read = %d (held=%v), want this cycle %s", holderAtMerge, heldAtMerge, res.Cycle.ID)
 	}
 	// AC-47・AC-48: cycle の段から実行した作業ログは、契機が cycle・経路が cli。
 	all, err := f.s.ListActivities(context.Background(), nil)
@@ -798,7 +795,7 @@ func TestRunCycle_LaterPhaseErrorKeepsTheExecutedReleases(t *testing.T) {
 	f := newCycleFixture(t)
 	c := createAndAdvance(t, f.s, StatusDone)
 	opID := coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c.ID)), relRef, relHead, execTS(0))
-	fake := &fakeRelease{pr: openPR(), afterPR: &UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "mc1"}}
+	fake := &fakeRelease{pr: UpstreamPullRequestChecks{URL: relRef, State: "merged", Base: "main", HeadSHA: relHead, MergeCommitSHA: "mc1"}}
 	f.create(t, "unclassified") // 分類の段（J1）で判断の呼び出しが起きるようにする
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -810,13 +807,13 @@ func TestRunCycle_LaterPhaseErrorKeepsTheExecutedReleases(t *testing.T) {
 	conn := j2TestConnectors(t)
 	conn.Repos[0].Remote = "o/r"
 	in.ConnDecl = conn
-	in.Checks, in.Merger = fake, fake
+	in.Checks = fake
 	_, err := f.s.RunCycle(ctx, in)
 	if err == nil {
 		t.Fatal("RunCycle() error = nil, want a failure in a later phase")
 	}
 	var pe *PartialReleaseError
-	if !errors.As(err, &pe) || len(pe.Items) != 1 || pe.Items[0].OperationID != formatOperationID(opID) || pe.Items[0].Result != ExecutionResultMerged {
+	if !errors.As(err, &pe) || len(pe.Items) != 1 || pe.Items[0].OperationID != formatOperationID(opID) || pe.Items[0].Result != ExecutionResultAlreadyMerged {
 		t.Errorf("error = %#v, want PartialReleaseError with the merged release", err)
 	}
 }
@@ -834,7 +831,7 @@ func TestRunCycle_ReleasePhaseOccurrenceCarriesTheCycleID(t *testing.T) {
 	conn := j2TestConnectors(t)
 	conn.Repos[0].Remote = "o/r"
 	in.ConnDecl = conn
-	in.Checks, in.Merger = fake, fake
+	in.Checks = fake
 
 	res := f.run(t, in)
 	ids := coretest.OccurrenceCycleIDs(t, f.s.workspace)
