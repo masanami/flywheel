@@ -3,10 +3,12 @@ package server
 import (
 	"encoding/json"
 	"reflect"
+	"sort"
 	"strconv"
 	"testing"
 
 	"github.com/masanami/flywheel/internal/core/coretest"
+	"github.com/masanami/flywheel/internal/view"
 )
 
 // このファイルは docs/features/core-redesign.md の受入基準のうち、課題の詳細の API の `tasks`（AC-153）と、承認の要約の API の
@@ -188,5 +190,73 @@ func TestApprovalSummary_PlanQuestionsCarryTheDocumentedKeys(t *testing.T) {
 	}
 	if string(qs[1]["answer"]) != "null" {
 		t.Errorf("answer of the unanswered question = %s, want null", qs[1]["answer"])
+	}
+}
+
+// AC-233: 課題の詳細の API の応答の challenge と tasks[] の要素は、`flywheel show --json` と同じ型（internal/view）のキーを持つ。
+// タスクの枠・使った額と統合先の識別は、記録のとおりの値で出る。
+func TestChallengeDetailAPI_ChallengeAndTasksCarryTheSameKeysAsShowJSON(t *testing.T) {
+	ws := initWorkspace(t)
+	approvalFixture(t, ws, "awaiting_plan_approval")
+	port := approvalServer(t, ws)
+	coretest.SetPlanSpec(t, ws, 1, 1, approvalPlanSpec)
+	v := currentVersion(t, port)
+	if code, body := apiPost(t, port, approvePath, `{"version":`+strconv.Itoa(v)+`}`); code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	coretest.Exec(t, ws, `UPDATE task SET budget_impl_micros = 30000000, budget_review_micros = 12500000 WHERE id = 1`)
+	coretest.Exec(t, ws, `INSERT INTO run (challenge_id, kind, challenge_version, plan_version, session_id, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket, cost_usd, task_id, reflect)
+		VALUES (1, 'delegate', 1, 1, 's', 1, 'h', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:01.000Z', 'succeeded', 1000000, 'impl', 2000000, 1, 0)`)
+	coretest.Exec(t, ws, `UPDATE challenge SET integration_ref = 'flywheel/integration/c-1' WHERE id = 1`)
+
+	code, body := apiGet(t, port, challengePath)
+	if code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	var doc struct {
+		Challenge map[string]any   `json:"challenge"`
+		Tasks     []map[string]any `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	keysOfType := func(v any) []string {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		out := make([]string, 0, len(m))
+		for k := range m {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	sortedKeys := func(m map[string]any) []string {
+		out := make([]string, 0, len(m))
+		for k := range m {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	if got, want := sortedKeys(doc.Challenge), keysOfType(view.ShowChallenge{}); !reflect.DeepEqual(got, want) {
+		t.Errorf("challenge keys = %v, want the show --json keys %v", got, want)
+	}
+	if len(doc.Tasks) == 0 {
+		t.Fatal("no tasks")
+	}
+	if got, want := sortedKeys(doc.Tasks[0]), keysOfType(view.Task{}); !reflect.DeepEqual(got, want) {
+		t.Errorf("tasks[0] keys = %v, want the show --json keys %v", got, want)
+	}
+	if doc.Tasks[0]["budget_impl_usd"] != float64(30) || doc.Tasks[0]["budget_review_usd"] != 12.5 || doc.Tasks[0]["spent_usd"] != float64(2) {
+		t.Errorf("tasks[0] = %v, want frames 30 / 12.5 and spent 2", doc.Tasks[0])
+	}
+	if doc.Challenge["integration_ref"] != "flywheel/integration/c-1" {
+		t.Errorf("challenge.integration_ref = %v", doc.Challenge["integration_ref"])
 	}
 }

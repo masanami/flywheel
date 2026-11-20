@@ -233,6 +233,7 @@ export interface ShowChallenge {
   headline: string | null;
   id: string;
   improvement: ImprovementKey | null;
+  integration_ref: string | null;
   priority: string | null;
   reporter: string;
   status: string;
@@ -417,6 +418,8 @@ export interface StageOption {
 
 export interface Task {
   body: string;
+  budget_impl_usd: number;
+  budget_review_usd: number;
   depends_on: string[];
   done_criteria: string;
   id: string;
@@ -425,6 +428,7 @@ export interface Task {
   plan_version: number;
   repo: string;
   source_key: string | null;
+  spent_usd: number;
   status: string;
   title: string;
 }

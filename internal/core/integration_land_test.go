@@ -272,6 +272,9 @@ func TestLandVerified_SameContentAfterDeliveredIsRefused(t *testing.T) {
 	if got := f.lastHoldReason(t); got != string(holdReasonLandRefused) {
 		t.Fatalf("reason = %q", got)
 	}
+	if strings.Contains(f.lastHoldQuestion(t), string(holdReasonLandRefused)) { // AC-237: 問いの文に理由の値の語は出ない
+		t.Fatalf("question names the reason value: %q", f.lastHoldQuestion(t))
+	}
 	if !strings.Contains(f.lastHoldQuestion(t), "s-waiting") { // AC-118（偽の委譲先の summary）
 		t.Fatalf("question lacks the summary: %q", f.lastHoldQuestion(t))
 	}
@@ -634,6 +637,9 @@ func TestLandSucceeded_OtherContentHoldsMergedUnverified(t *testing.T) {
 	f.succeed(t)
 	if got := f.lastHoldReason(t); got != string(holdReasonMergedUnverified) {
 		t.Fatalf("reason = %q", got)
+	}
+	if strings.Contains(f.lastHoldQuestion(t), string(holdReasonMergedUnverified)) { // AC-237
+		t.Fatalf("question names the reason value: %q", f.lastHoldQuestion(t))
 	}
 	if f.taskStatus(t) == "done" {
 		t.Fatal("the task is done")

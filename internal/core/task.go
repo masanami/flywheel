@@ -79,6 +79,11 @@ type Task struct {
 	SourceKey string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// BudgetImplUSD・BudgetReviewUSD・SpentUSD はタスクの実装の枠・レビュー対応の枠（増額を含む実効値）と、そのタスクの実行の費用の合計（USD）。
+	// 課題の詳細（GetChallenge）だけが埋める。枠を決められないタスク（記録が空で、見直し前の決め方の値も引けない）は 0。
+	BudgetImplUSD   float64
+	BudgetReviewUSD float64
+	SpentUSD        float64
 }
 
 func (in TaskInput) valid() bool {

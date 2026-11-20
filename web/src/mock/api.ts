@@ -126,6 +126,7 @@ export function createMockApi(
         dependents: extra.dependents ?? [],
         followup_of: null,
         improvement: null,
+        integration_ref: null,
       },
       direct_completions: m.directCompletions,
       followups: extra.followups ?? [],

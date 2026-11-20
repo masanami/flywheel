@@ -412,3 +412,33 @@ func resolveBudgetTask(ctx context.Context, tx *sql.Tx, cid int64, taskID string
 	}
 	return nil, ErrBudgetTaskRequired
 }
+
+// fillTaskBudgets は課題の詳細のために、タスクの枠（増額を含む実効値）と、そのタスクの実行の費用の合計を tasks へ入れる。
+// agent は枠の記録が空の過去のタスクの、見直し前の決め方の値を引くための宣言（nil 可。引けなければ 0）。
+func fillTaskBudgets(ctx context.Context, tx *sql.Tx, cid int64, tasks []Task, agent *AgentDeclaration) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+	bs, err := loadTaskBudgets(ctx, tx, cid, agent)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]taskBudget, len(bs))
+	for _, b := range bs {
+		byID[formatTaskID(b.TaskID)] = b
+	}
+	for i := range tasks {
+		b, ok := byID[tasks[i].ID]
+		if !ok {
+			continue
+		}
+		sp, err := loadTaskBucketSpend(ctx, tx, b.TaskID, b.PlanVersion)
+		if err != nil {
+			return err
+		}
+		tasks[i].SpentUSD = microsToUSD(sp.Impl + sp.Review)
+		// 決められない枠は 0 のまま（記録した片方の枠は、もう片方が決められなくても出す）。
+		tasks[i].BudgetImplUSD, tasks[i].BudgetReviewUSD = microsToUSD(b.Impl), microsToUSD(b.Review)
+	}
+	return nil
+}

@@ -367,6 +367,9 @@ func TestIntegrationSucceededWithoutIdentifiableBranchIsDelegateEnded(t *testing
 	if got := f.lastHoldReason(t); got != string(holdReasonDelegateEnded) {
 		t.Fatalf("reason = %q", got)
 	}
+	if strings.Contains(f.lastHoldQuestion(t), string(holdReasonDelegateEnded)) { // AC-237
+		t.Fatalf("question names the reason value: %q", f.lastHoldQuestion(t))
+	}
 	if strings.Contains(f.lastHoldQuestion(t), "成果物は統合先へ入っていない。検証") {
 		t.Fatalf("question asserts what was not checked: %q", f.lastHoldQuestion(t))
 	}

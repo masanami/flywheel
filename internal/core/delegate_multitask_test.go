@@ -641,6 +641,9 @@ func TestMultiTask_AC33_BlockedByCancelledPrerequisiteHoldsTheChallenge(t *testi
 		t.Errorf("hold reasons = %v, want [tasks_blocked]", got)
 	}
 	q := f.delegateFixture.queryString(t, `SELECT question FROM hold WHERE challenge_id = ?`, cid)
+	if strings.Contains(q, "tasks_blocked") { // AC-237: 問いの文に理由の値の語は出ない
+		t.Errorf("question names the reason value: %q", q)
+	}
 	for _, want := range []string{"タスク b", "タスク c", "取りやめ"} {
 		if !strings.Contains(q, want) {
 			t.Errorf("question = %q, want it to contain %q (blocked tasks and the reason)", q, want)

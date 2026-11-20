@@ -323,6 +323,9 @@ func TestUpRequest_AC162_AC163_AFailedReflectHoldsWithoutAnOpenRun(t *testing.T)
 		if got := f.lastReason(t, id); got != string(holdReasonReflectFailed) { // AC-162
 			t.Errorf("%s: reason = %q, want reflect_failed", name, got)
 		}
+		if q := f.holdQuestionsOf(t, id); strings.Contains(q, string(holdReasonReflectFailed)) { // AC-237
+			t.Errorf("%s: question names the reason value: %q", name, q)
+		}
 		if got := f.statusOf(t, id); got != StatusAwaitingHuman {
 			t.Errorf("%s: status = %s", name, got)
 		}

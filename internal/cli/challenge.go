@@ -222,9 +222,13 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	fmt.Fprintf(&b, "依存先:        %s\n", textOrDash(joinOrNil(deps)))
 	fmt.Fprintf(&b, "依存元:        %s\n", textOrDash(joinOrNil(d.Dependents)))
 	fmt.Fprintf(&b, "統合先:        %s\n", usesIntegrationText(d.UsesIntegration))
+	if d.IntegrationRef != nil {
+		fmt.Fprintf(&b, "統合先の識別:  %s\n", escapeControl(*d.IntegrationRef))
+	}
 	fmt.Fprintf(&b, "タスク:        %d 件\n", len(d.Tasks))
 	for _, t := range d.Tasks {
-		fmt.Fprintf(&b, "  %s %s [%s (%s)]\n", t.ID, escapeControl(t.Title), t.Status.Label(), t.Status)
+		fmt.Fprintf(&b, "  %s %s [%s (%s)] 枠: 実装 %s USD・レビュー対応 %s USD / 使った額: %s USD\n", t.ID, escapeControl(t.Title), t.Status.Label(), t.Status,
+			formatUSD(t.BudgetImplUSD), formatUSD(t.BudgetReviewUSD), formatUSD(t.SpentUSD))
 	}
 	fmt.Fprintf(&b, "計画:          %d 版\n", len(d.Plans))
 	// 計画は全版の本文まで出す（受入基準 17・35 の「show で読める」をテキスト
@@ -479,3 +483,6 @@ func writePlanTopics(b *strings.Builder, topics []core.PlanTopicView) {
 		}
 	}
 }
+
+// formatUSD は USD の額を、末尾の 0 を付けずに文にする。
+func formatUSD(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }

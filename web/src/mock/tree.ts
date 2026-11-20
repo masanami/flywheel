@@ -243,6 +243,8 @@ export function alphaDetailExtras(id: string): Extras {
     tasks: Array.from({ length: 8 }, (_, i): Task => {
       const tid = `T-${40 + i}`;
       return {
+        budget_impl_usd: 0,
+        budget_review_usd: 0,
         body:
           i === 3
             ? "旧基盤の集計クエリを、新基盤の表へ書き出す形に直す。\n\n- 書き出し先の表を決める\n- 列の名前を旧基盤とそろえる"
@@ -259,6 +261,7 @@ export function alphaDetailExtras(id: string): Extras {
         plan_version: 1,
         repo: "",
         source_key: i === 0 ? "example/billing#29" : null,
+        spent_usd: 0,
         status: i < 3 ? "done" : i < 5 ? "in_progress" : "pending",
         title: `手順 ${i + 1} を進める`,
       };
