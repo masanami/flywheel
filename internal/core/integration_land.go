@@ -81,6 +81,12 @@ func landRefusedQuestion(runID, ref, summary, text string) string {
 	return q + "\n原因を直してから回答すると、もう一度「入れてよい」を返す。課題を取り下げることもできる。"
 }
 
+// landedStoppedQuestion は、「入れてよい」を返し済みの実行が失敗・取り消しで終わったが、統合先へ入った中身が検証した中身（ref）と違うときの問い。
+func landedStoppedQuestion(runID string, state ContractState, ref string) string {
+	return fmt.Sprintf("委譲先の実行（%s）が「入れてよい」を受け取った後に、%sした。統合先へ入っているが、入った中身が、検証した中身（%s）と違う。", runID, contractStateWord(state), ref) +
+		"入った中身を確かめてから回答すると、このタスクを着手中へ戻して委譲し直す。課題を取り下げることもできる。"
+}
+
 func landedEndedQuestion(runID, ref string, otherContent bool) string {
 	if otherContent {
 		return fmt.Sprintf("委譲先の実行（%s）が「入れてよい」を受け取って終わった（成功）。統合先へ入っているが、入った中身が、検証した中身（%s）と違う。", runID, ref) +
@@ -392,9 +398,48 @@ func (s *Store) finishIntegrationLanding(ctx context.Context, rep *ContractRunRe
 	case landedSameContent:
 		return s.completeIntegrationLanding(ctx, rep, cid, scope)
 	case landedNotIn:
+		if rep.State != ContractStateSucceeded {
+			return s.stopLandingNotLanded(ctx, rep, cid)
+		}
 		return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, false), holdReasonDelegateEnded)
 	}
+	if rep.State != ContractStateSucceeded {
+		return s.holdLandedEnd(ctx, rep, cid, landedStoppedQuestion(rep.ExternalRunID, rep.State, landRef), holdReasonMergedUnverified)
+	}
 	return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, true), holdReasonMergedUnverified)
+}
+
+// stopLandingNotLanded は、「入れてよい」を返し済みの実行が失敗・取り消しで終わり、成果物が統合先へ入っていないとき、いまの失敗の扱い
+// （検証した中身と通す中身を無効にし、検証中のタスクを着手中へ戻し、契約の実行を終わった記録にして、課題が着手中なら保留にする）を
+// 1 つの書き込みで行う。課題が保留中なら、何も書かず行を開けたまま残す（回答の後の状態の確認が同じ終わりを読み直す）。
+func (s *Store) stopLandingNotLanded(ctx context.Context, rep *ContractRunReport, cid int64) error {
+	runInt, ok := parseRunID(rep.RunID)
+	if !ok {
+		return nil
+	}
+	// withHold が真なら、同じトランザクションで立てた保留の時刻を終わりの時刻にする（保留の時刻が終わりの時刻より前になると、
+	// 保留にし損ねた停止の掃引が、保留を立てた後の回答の後に、二重の保留を立てる）。
+	end := func(ctx context.Context, tx *sql.Tx, withHold bool) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = NULL, land_ref = NULL, land_delivered = 0
+			WHERE challenge_id = ? AND external_run_id = ?`, cid, rep.ExternalRunID); err != nil {
+			return err
+		}
+		if err := s.reopenVerifyingTaskOfStoppedRun(ctx, tx, contractCall{ChallengeIDInt: cid, RunIDInt: runInt}, rep.ExternalRunID); err != nil {
+			return err
+		}
+		return s.endRunAtHold(ctx, tx, cid, rep.ExternalRunID, withHold)
+	}
+	held, err := s.holdContractReviewWith(ctx, rep, contractStopQuestion(rep.State, rep.ExternalRunID, rep.Summary), holdReasonContractStopped,
+		func(ctx context.Context, tx *sql.Tx) error { return end(ctx, tx, true) })
+	rep.Held = held
+	if err != nil || held {
+		return err
+	}
+	if awaiting, err := s.challengeStatusIs(ctx, cid, StatusAwaitingHuman); err != nil || awaiting {
+		return err
+	}
+	// 保留を立てられない課題（取り下げなど）は、読み直しても同じなので、保留なしで終わった記録にする。
+	return classifyReadWriteErr(s.db.Write(context.WithoutCancel(ctx), func(tx *sql.Tx) error { return end(context.WithoutCancel(ctx), tx, false) }))
 }
 
 // landingArtifacts は、終わりの確かめに使う成果物。読んだ status の成果物に PR があればそれを使い、無ければ、この契約の実行を始めた
@@ -430,11 +475,26 @@ func (s *Store) landingArtifacts(ctx context.Context, rep *ContractRunReport, ci
 // holdLandedEnd は保留を立て、契約の実行を終わった記録にする（同じトランザクション。終わりの記録だけが残らず、開いたまま課題が保留になることが無い）。
 func (s *Store) holdLandedEnd(ctx context.Context, rep *ContractRunReport, cid int64, question string, reason holdReason) error {
 	held, err := s.holdContractReviewWith(ctx, rep, question, reason, func(ctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`,
-			formatTimestamp(s.currentTime()), cid, rep.ExternalRunID)
-		return err
+		return s.endRunAtHold(ctx, tx, cid, rep.ExternalRunID, true)
 	})
 	rep.Held = held
+	return err
+}
+
+// endRunAtHold は契約の実行を終わった記録にする。withHold が真なら、同じトランザクションで立てた課題の最後の保留の時刻
+// （それより遅くならない）を終わりの時刻にする。
+func (s *Store) endRunAtHold(ctx context.Context, tx *sql.Tx, cid int64, externalRunID string, withHold bool) error {
+	now := formatTimestamp(s.currentTime())
+	if withHold {
+		var raised sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT raised_at FROM hold WHERE challenge_id = ? ORDER BY id DESC LIMIT 1`, cid).Scan(&raised); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if raised.Valid && raised.String < now {
+			now = raised.String
+		}
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`, now, cid, externalRunID)
 	return err
 }
 
@@ -506,7 +566,7 @@ func resumeIntegrationTaskAfterAnswer(ctx context.Context, tc *transitionCtx, re
 		return nil
 	}
 	if _, err := tc.tx.ExecContext(ctx, `UPDATE contract_run SET land_ref = NULL, land_delivered = 0
-		WHERE challenge_id = ? AND task_id = ? AND kind = 'task' AND ended_at IS NULL`, tc.id, taskID); err != nil {
+		WHERE challenge_id = ? AND task_id = ? AND kind = 'task' AND ended_at IS NULL AND state NOT IN ('failed', 'cancelled')`, tc.id, taskID); err != nil {
 		return err
 	}
 	if reason != holdReasonDelegateEnded && reason != holdReasonMergedUnverified {

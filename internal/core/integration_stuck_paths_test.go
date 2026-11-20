@@ -191,7 +191,7 @@ func TestStuckPaths_SucceededReadOfAWithdrawnChallengeEndsTheRun(t *testing.T) {
 }
 
 // 保留中に読んで開けたまま残した succeeded の実行は、そのタスクが取りやめになったとき、取りやめのタスクの実行の取り消し（obsoleteContractRun）が
-// 取り消して終わった記録にする。保留は増えない。
+// 委譲先の中止を呼ばずに終わった記録にする（記録した状態が終わりの行は、委譲先では終わっている）。保留は増えない。
 func TestStuckPaths_OpenSucceededRunWhileHeldIsCancelledWhenItsTaskIsCancelled(t *testing.T) {
 	t.Parallel()
 	f := newIgLandFixture(t)
@@ -200,8 +200,8 @@ func TestStuckPaths_OpenSucceededRunWhileHeldIsCancelledWhenItsTaskIsCancelled(t
 	f.sql(t, `UPDATE task SET status = 'cancelled'`)
 	f.client.cancelOut = contractOut(ContractStateCancelled, nil, nil)
 	f.pollLand(t)
-	if len(f.client.cancels) != 1 {
-		t.Fatalf("cancels = %d, want 1", len(f.client.cancels))
+	if len(f.client.cancels) != 0 {
+		t.Fatalf("cancels = %d, want 0 (the recorded state is already an end)", len(f.client.cancels))
 	}
 	if f.text(t, `SELECT COALESCE(ended_at, '') FROM contract_run`) == "" {
 		t.Fatal("the contract run of the cancelled task is still open")

@@ -73,16 +73,22 @@ func TestStuckPaths_ADoneTaskAndAnotherRepositoryTaskAreNotStarted(t *testing.T)
 	}
 	setTaskStatusRaw(t, f.s, cid, "a", TaskStatusDone)
 	res := f.runDelegationStage(t, nil)
-	got := notStartedByReason(res, NotStartedIntegrationUnavailable)
-	if len(got) != 1 || got[0].ChallengeID != id {
-		t.Fatalf("not_started = %+v, want one integration_unavailable for %s", res.NotStarted, id)
+	if len(res.NotStarted) != 1 || res.NotStarted[0].ChallengeID != id {
+		t.Fatalf("not_started = %+v, want one entry for %s", res.NotStarted, id)
 	}
 	if len(f.client.starts) != 0 {
 		t.Errorf("starts = %v, want none", f.client.starts)
 	}
-	// #906 項目 9: 理由の文は、何をそろえればよいかが読める言い方で、複数のリポジトリを示す。
-	if d := got[0].Detail; !strings.Contains(d, "1 つのリポジトリにそろえる") || !strings.Contains(d, "other-repo") {
-		t.Errorf("detail = %q, want the way to fix it and the repositories", d)
+	// 仕上げ 3 項目 3: 保留にする（進めようが無い）。問いは、何をそろえればよいか・複数のリポジトリ・計画を作り直す回答で直せることを書く。
+	var q string
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT question FROM hold WHERE challenge_id = ? ORDER BY id DESC LIMIT 1`, cid).Scan(&q)
+	})
+	if !strings.Contains(q, "1 つのリポジトリにそろえる") || !strings.Contains(q, "other-repo") || !strings.Contains(q, "2 つ以上のリポジトリ") || !strings.Contains(q, "計画を作り直す回答") {
+		t.Errorf("question = %q, want the way to fix it and the repositories", q)
+	}
+	if got := f.status(t, id); got != StatusAwaitingHuman {
+		t.Errorf("status = %s, want awaiting_human", got)
 	}
 }
 

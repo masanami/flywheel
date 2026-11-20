@@ -583,6 +583,13 @@ func (s *Store) obsoleteContractRun(ctx context.Context, row *contractRunRow) (s
 // 保留にもしない（次の状態の確認が取り消し直す。残っている間、新しい上げる依頼は始まらない）。
 func (s *Store) cancelObsoleteContractRun(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, note string) (*ContractRunReport, error) {
 	challengeID := formatChallengeID(row.ChallengeID)
+	if row.State.Terminal() {
+		// 記録した状態が終わりの行は、委譲先では終わっている。中止を呼ばず、終わった記録にする（課題の状態は変えず、保留にもしない）。
+		if err := s.endRecordedTerminalRun(ctx, row); err != nil {
+			return nil, err
+		}
+		return &ContractRunReport{ChallengeID: challengeID, ExternalRunID: row.ExternalRunID, Result: RunResultSucceeded, State: row.State, Summary: row.Summary}, nil
+	}
 	command, err := fillRowCommandArgs(connector, row, connector.Commands.Cancel, challengeID, binding, contractAnswer{})
 	if err != nil {
 		return nil, err

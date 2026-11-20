@@ -331,14 +331,18 @@ func (sch *delegationScheduler) capacity(ctx context.Context, repo ConnectorRepo
 // （保留の課題へ新しい委譲を起動させないため）。
 const ownerWaitContractRunWhere = `(k.state = 'waiting' AND c.status = 'awaiting_human')`
 
+// endRecordedContractRunWhere は、契約の run（k）の記録した状態が終わり（成功・失敗・中止）の条件。こうした行は、課題が保留の間などに
+// 読み直しのために開けたまま残してあるだけで、委譲先では動いていない。同時に走らせる数には数えない。
+const endRecordedContractRunWhere = `k.state IN ('succeeded', 'failed', 'cancelled')`
+
 // activeDelegationCount は終わっていない委譲の run と、終わっていない契約の run（form: cli）を持つタスクの数
 // （課題とタスクの組ごとに 1 と数える。タスクに結び付かない契約の run は、課題ごとに 1）。
-// レビュー待ち（contractRunReviewWaitWhere）とオーナーの回答待ち（ownerWaitContractRunWhere）の契約の run は数えない。
+// レビュー待ち（contractRunReviewWaitWhere）・オーナーの回答待ち（ownerWaitContractRunWhere）・記録した状態が終わり（endRecordedContractRunWhere）の契約の run は数えない。
 func activeDelegationCount(ctx context.Context, tx *sql.Tx) (int, error) {
 	var n int
 	err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM run WHERE kind = 'delegate' AND result IS NULL)
 		+ (SELECT COUNT(*) FROM (SELECT k.challenge_id, COALESCE(k.task_id, 0) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere+` AND NOT `+ownerWaitContractRunWhere+`
+			WHERE k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere+` AND NOT `+ownerWaitContractRunWhere+` AND NOT `+endRecordedContractRunWhere+`
 			UNION SELECT challenge_id, COALESCE(task_id, 0) FROM run WHERE kind = 'contract' AND result IS NULL))`).Scan(&n)
 	return n, err
 }

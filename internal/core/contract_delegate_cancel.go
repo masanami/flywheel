@@ -89,6 +89,10 @@ func (s *Store) CancelOpenContractRuns(ctx context.Context, in ContractCancelInp
 
 // cancelOneOpenContractRun は終わっていない契約の実行 1 本を commands.cancel で取り消す。止められなければ ErrConflict を含むエラー。
 func (s *Store) cancelOneOpenContractRun(ctx context.Context, in ContractCancelInput, row *contractRunRow, binding *sourceBinding) error {
+	if row.State.Terminal() {
+		// 記録した状態が終わりの行（読み直しのために開けたまま残した行）は、委譲先では終わっている。中止を呼ばず、終わった記録にする。
+		return s.endRecordedTerminalRun(ctx, row)
+	}
 	connector, err := findCLIConnector(in.ConnDecl, row.ConnectorID)
 	if err != nil {
 		return err
@@ -111,6 +115,16 @@ func (s *Store) cancelOneOpenContractRun(ctx context.Context, in ContractCancelI
 	// 取り下げのために止めた run の成果物は、提出し直さない。印を外さないと、計画の作り直しの検査（held_success = 1）が拒み続ける。
 	return classifyReadWriteErr(s.db.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 0 WHERE id = ?`, row.ID)
+		return err
+	}))
+}
+
+// endRecordedTerminalRun は、記録した状態が終わり（成功・失敗・中止）の契約の実行（row）を、委譲先の中止を呼ばずに終わった記録にする。
+// 保留の間の成功の印（held_success）も外す（取り下げのために止める実行の成果物は、提出し直さない）。
+func (s *Store) endRecordedTerminalRun(ctx context.Context, row *contractRunRow) error {
+	wctx := context.WithoutCancel(ctx)
+	return classifyReadWriteErr(s.db.Write(wctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(wctx, `UPDATE contract_run SET ended_at = COALESCE(ended_at, ?), held_success = 0 WHERE id = ?`, formatTimestamp(s.currentTime()), row.ID)
 		return err
 	}))
 }

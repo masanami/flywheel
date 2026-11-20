@@ -263,8 +263,8 @@ func TestMultiTask_AC7_NonIntegrationTwoTasksAreNotStarted(t *testing.T) {
 	}
 }
 
-// AC-8・AC-236: 統合先を使う課題で、未完のタスクのリポジトリが 2 つあるものは、起動されない（理由 integration_unavailable）。
-// 詳細の文に、語「リポジトリ」がある。
+// AC-8・AC-236: 統合先を使う課題で、未完のタスクのリポジトリが 2 つあるものは、起動されず、保留になる（仕上げ 3 項目 3）。
+// 問いの文に、語「リポジトリ」がある。
 func TestMultiTask_AC8_AC236_TwoRepositoriesAreNotStarted(t *testing.T) {
 	t.Parallel()
 	f := newMultiFixture(t, 2)
@@ -273,15 +273,12 @@ func TestMultiTask_AC8_AC236_TwoRepositoriesAreNotStarted(t *testing.T) {
 	if err := f.delegateFixture.exec(`UPDATE task SET repo = 'other-repo' WHERE challenge_id = ? AND key = 'b'`, cid); err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []*string{nil, &id} {
-		res := f.runDelegationStage(t, target)
-		got := notStartedByReason(res, NotStartedIntegrationUnavailable)
-		if len(got) != 1 || got[0].ChallengeID != id {
-			t.Fatalf("not_started = %+v, want one integration_unavailable for %s", res.NotStarted, id)
-		}
-		if !strings.Contains(got[0].Detail, "リポジトリ") {
-			t.Errorf("detail = %q, want it to contain 「リポジトリ」", got[0].Detail)
-		}
+	res := f.runDelegationStage(t, nil)
+	if len(res.NotStarted) != 1 || res.NotStarted[0].ChallengeID != id {
+		t.Fatalf("not_started = %+v, want one entry for %s", res.NotStarted, id)
+	}
+	if f.status(t, id) != StatusAwaitingHuman || !strings.Contains(f.lastHoldQuestionOf(t, cid), "リポジトリ") {
+		t.Errorf("status = %s, question = %q, want a hold that names the repositories", f.status(t, id), f.lastHoldQuestionOf(t, cid))
 	}
 	if len(f.client.starts) != 0 {
 		t.Errorf("starts = %v, want none", f.client.starts)

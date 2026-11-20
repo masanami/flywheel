@@ -841,8 +841,19 @@ type contractCall struct {
 	ReleaseStage bool
 	// HoldEnd は、終わりを読んでも contract_run の ended_at を入れないとき真（反映の段の status・resume。結果を書く書き込みが入れる）。
 	HoldEnd bool
-	// HoldSuccessEnd は、succeeded だけは ended_at を入れないとき真（failed・cancelled は終わった記録にする）。
+	// HoldSuccessEnd は、succeeded だけは ended_at を入れないとき真（failed・cancelled は、「入れてよい」を返し済みの実行〔landedStop〕以外は終わった記録にする）。
 	HoldSuccessEnd bool
+}
+
+// landedStop は、状態 st が失敗・中止で、「入れてよい」を返し済み（land_ref がある）の統合先を使う課題のタスクの実行か。
+// こうした実行は、統合先へ入ったかを上流で確かめるまで、終わった記録にせず、通す中身もタスクも変えない。
+func (c contractCall) landedStop(st ContractState) bool {
+	return c.HoldSuccessEnd && (st == ContractStateFailed || st == ContractStateCancelled) && c.Existing != nil && c.Existing.LandRef != ""
+}
+
+// keepsOpenOn は、終わりの状態 st を読んでも、契約の実行（contract_run）を終わった記録（ended_at）にしないか。
+func (c contractCall) keepsOpenOn(st ContractState) bool {
+	return c.HoldEnd || (c.HoldSuccessEnd && st == ContractStateSucceeded) || c.landedStop(st)
 }
 
 // finishContractCall はコマンドを起動し、結果を run と contract_run へ 1 つのトランザクションで記録する。
@@ -941,7 +952,7 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 				status = nil
 				costFrom(latest.CostMicros)
 				// 反映の段が読んだ終わりを、結果を書くまで開けていた実行（HoldEnd）は、その場で終わる呼び出し（完了から戻す前の読み・片付け）が閉じる。
-				if !c.HoldEnd && (!c.HoldSuccessEnd || latest.State != ContractStateSucceeded) {
+				if !c.keepsOpenOn(latest.State) {
 					if _, err := tx.ExecContext(recordCtx, `UPDATE contract_run SET ended_at = ? WHERE id = ? AND ended_at IS NULL`,
 						formatTimestamp(s.currentTime()), latest.ID); err != nil {
 						return err
@@ -981,7 +992,8 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 	if status == nil && c.Existing != nil {
 		report.State, report.Summary = c.Existing.State, c.Existing.Summary
 	}
-	if question := contractHoldQuestion(c, status, out.Status, reclaimed, result, errSummary); question != "" && !c.ReleaseStage {
+	if question := contractHoldQuestion(c, status, out.Status, reclaimed, result, errSummary); question != "" && !c.ReleaseStage &&
+		(status == nil || !c.landedStop(status.State)) {
 		held, herr := s.holdForContract(ctx, c, question)
 		if herr != nil {
 			return nil, herr
@@ -1145,14 +1157,16 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 		}
 	}
 	var endedAt any
-	if st.State.Terminal() && !c.HoldEnd && (!c.HoldSuccessEnd || st.State != ContractStateSucceeded) {
+	if st.State.Terminal() && !c.keepsOpenOn(st.State) {
 		endedAt = now
 	}
 	report.Facts = st.Facts
 	if err := s.writeContractRunRecord(ctx, tx, c, st, rk, rd, rt, rb, totalMicros, now, endedAt, report); err != nil {
 		return err
 	}
-	if st.State == ContractStateFailed || st.State == ContractStateCancelled {
+	// 「入れてよい」を返し済みの実行の失敗・取り消しは、統合先へ入ったかを上流で確かめるまで、通す中身もタスクも変えない
+	// （確かめの結果で、済み・保留・着手中へ戻すのどれかを 1 つの書き込みで決める。afterContractRead が扱う）。
+	if (st.State == ContractStateFailed || st.State == ContractStateCancelled) && !c.landedStop(st.State) {
 		// 統合先を使う課題のタスクの実行が失敗・取り消しで終わったら、検証した中身と通す中身は無効にする（次の委譲の後に検証し直す）。
 		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = NULL, land_ref = NULL, land_delivered = 0
 			WHERE challenge_id = ? AND external_run_id = ? AND kind = 'task' AND (verified_ref IS NOT NULL OR land_ref IS NOT NULL)
@@ -1164,6 +1178,11 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 		if err := s.reopenVerifyingTaskOfStoppedRun(ctx, tx, c, st.RunID); err != nil {
 			return err
 		}
+	}
+	if c.landedStop(st.State) {
+		// 統合先へ入ったかの確かめが読めなかったときに、次の確認が記録から確かめ直せるよう、成果物を取り込んでおく。
+		_, err := importContractArtifacts(ctx, tx, c.RunIDInt, st.Artifacts, s.currentTime())
+		return err
 	}
 	if st.State != ContractStateSucceeded {
 		return nil
@@ -1469,9 +1488,10 @@ const reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS N
 // 後の保留は、そのタスクに結び付くもの（か、タスクに結び付かないもの）だけを数える（ほかのタスクの保留は、このタスクの作り損ねを隠さない）。
 // 取りやめにしたタスクの実行は、flywheel が取り消した（計画の作り直し・取り下げ）ので、保留にし損ねたものと数えない。
 const unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'cancelled') AND c.status = 'in_progress'
+	AND NOT (k.ended_at IS NULL AND COALESCE(k.land_ref, '') <> '')
 	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at
 		AND (h.task_id IS NULL OR k.task_id IS NULL OR h.task_id = k.task_id))
-	AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status = 'cancelled')`
+	AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status IN ('cancelled', 'done'))`
 
 // HoldUnrecordedContractStops は、保留にし損ねた課題を保留にする。次の 2 つ（どちらも課題が着手中のときだけ）。
 //   - 契約の start の最中に flywheel の run が回収された（呼んだプロセスが止まって別のプロセスが回収した場合など）のに、
