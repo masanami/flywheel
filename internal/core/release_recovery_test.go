@@ -25,7 +25,8 @@ func (f *relFixture) setVerifiedHead(t *testing.T, head string) {
 	t.Helper()
 	runID := coretest.InsertRun(t, f.s.workspace, coretest.InsertRunInput{
 		ChallengeID: int(f.cid), Kind: "delegate", ChallengeVersion: 1, SessionID: "22222222-2222-4222-8222-222222222222",
-		PID: 1, Host: "h", HeartbeatAt: execTS(0), StartedAt: execTS(0), MaxBudgetUSD: 1_000_000, BudgetBucket: "impl",
+		PID: 1, Host: "h", HeartbeatAt: execTS(0), StartedAt: execTS(0), EndedAt: execTS(0), Result: "succeeded",
+		MaxBudgetUSD: 1_000_000, BudgetBucket: "impl",
 	})
 	coretest.InsertRunArtifact(t, f.s.workspace, runID, "pr", relRef, "open", "main")
 	coretest.SetRunArtifactVerifiedHead(t, f.s.workspace, runID, relRef, head)

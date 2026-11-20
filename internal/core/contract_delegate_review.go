@@ -131,7 +131,7 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 			return nil
 		}
 		var lastContract int64
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM run WHERE challenge_id = ? AND kind = 'contract'`, row.ChallengeID).Scan(&lastContract); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM run WHERE challenge_id = ? AND kind = 'contract' AND operation_id IS NULL`, row.ChallengeID).Scan(&lastContract); err != nil {
 			return err
 		}
 		var note string
@@ -171,7 +171,7 @@ func loadCompletionRejectionAfterContract(ctx context.Context, tx *sql.Tx, chall
 		return "", err
 	}
 	var lastRun sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind = 'contract'`, challengeID).Scan(&lastRun); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind = 'contract' AND operation_id IS NULL`, challengeID).Scan(&lastRun); err != nil {
 		return "", err
 	}
 	var undelivered []CompletionRejection

@@ -55,7 +55,7 @@ type ReleaseExecOptions struct {
 	// Checks は PR の状態・チェックの読み取り（GET だけ）。UpstreamCommitChecksSource も実装していれば、承認した head のチェックの有無の確認に使う（ラップする値はこれも通すこと）。
 	Checks UpstreamCheckSource
 	// Compare は、PR の head が承認の head から動いたとき、動いた中身が既定ブランチの取り込みだけかを判定するための比較の取得
-	// （GET だけ）。nil なら、その判定をしない（承認待ちの release の片付けのうち、マージ済みを閉じる処理は動く）。
+	// （GET だけ）。nil なら、その判定をしない（承認待ちの release の片付けのうち、反映先へ入っていた〔マージ済み〕ものを閉じる処理は動く）。
 	Compare UpstreamCompareSource
 	// Connectors は PR のリポジトリ・既定ブランチを引く宣言。
 	Connectors *ConnectorsDeclaration
@@ -208,7 +208,7 @@ func (s *Store) ExecuteReleases(ctx context.Context, ids []string, opts ReleaseE
 	}
 	sort.Slice(opIDs, func(i, j int) bool { return opIDs[i] < opIDs[j] })
 	// 存在の確認は、何も実行する前に済ませる（周の ID も。無いと発生の挿入が外部キーで失敗し、
-	// マージの依頼の後に取り消しの記録だけが残らなくなる）。
+	// 反映の依頼や「入れてよい」を返した後に取り消しの記録だけが残らなくなる）。
 	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		if opts.cycleID != nil {
 			var n int
@@ -399,6 +399,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 	}
 	if errors.Is(err, ErrConflict) {
 		s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
+		s.closeHeldEndAfterConflict(ctx, row.ChallengeID)
 		return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
 			Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
 	}
@@ -423,6 +424,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		if derr = classifyReadWriteErr(derr); derr != nil {
 			s.abandonReleaseAttempt(ctx, attempt.ID, now(), derr)
 			if errors.Is(derr, ErrConflict) {
+				s.closeHeldEndAfterConflict(ctx, row.ChallengeID)
 				return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
 					Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
 			}
@@ -441,6 +443,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		// 可能なら interrupted で閉じる（失敗しても元のエラーを返す）。
 		s.abandonReleaseAttempt(ctx, attempt.ID, now(), err)
 		if errors.Is(err, ErrConflict) || errors.Is(err, errExecutionNotOpen) {
+			s.closeHeldEndAfterConflict(ctx, row.ChallengeID)
 			// 実行の途中で別の呼び出しが同じ操作・試行を変えた。自分の試行の ID を詳細に入れて飛ばす。
 			return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID),
 				Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
@@ -448,6 +451,13 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		return nil, nil, err
 	}
 	return item, nil, nil
+}
+
+// closeHeldEndAfterConflict は、試行が競合で閉じた（結果を書けなかった）後に、終わりを開けている契約の実行を、対応する承認済みの
+// 反映の操作がもう無ければ終わった記録にする（closeHeldEndWithoutOwner）。操作が承認済みのままなら開けたままにし、次の反映の段が
+// 終わりを使う。閉じられなくても元の結果は変えない（別の反映の操作の反映の段・片付け・完了から戻す前の読みが閉じる）。
+func (s *Store) closeHeldEndAfterConflict(ctx context.Context, challengeID int64) {
+	_, _ = s.closeHeldEndWithoutOwner(context.WithoutCancel(ctx), challengeID)
 }
 
 // abandonReleaseAttempt は、終えられなかった試行を interrupted で閉じる（閉じられなくても何もしない）。
@@ -508,8 +518,8 @@ func classifyCheck(c UpstreamCheck) checkOutcome {
 }
 
 // movedByMergeInOnly は、head の動きが既定ブランチの取り込みだけで、取り込みに紛れた変更（衝突の解消の差分）が
-// 無いかを返す。差分を人が見ない道なので、直したファイルがある取り込みは含めない（GitHub の update-branch は
-// 衝突があれば失敗するので、取り込みの依頼の結果はこれに当たる）。
+// 無いかを返す。差分を人が見ない道なので、衝突を解消するために直したファイルがある取り込みは含めない
+// （衝突の解消を承認し直さずに通す形は、区切り S3b）。
 func movedByMergeInOnly(ctx context.Context, src UpstreamCompareSource, repo, prBase, approvedHead, head string) bool {
 	ch := ClassifyHeadChange(ctx, src, repo, prBase, approvedHead, head)
 	if ch.Kind != HeadChangeMergeInOnly {
@@ -578,7 +588,7 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 	var rep *ContractRunReport
 	if run != nil && run.corresponds {
 		var early *releaseJudgment
-		if rep, early, err = s.readReleaseRun(ctx, opts, run); err != nil {
+		if rep, early, err = s.readReleaseRun(ctx, opts, run, true); err != nil {
 			return releaseJudgment{}, err
 		}
 		if early != nil {

@@ -70,24 +70,11 @@ func (s *Store) startReflectRequest(ctx context.Context, row *operationRow, opts
 		j.result, j.detail = ExecutionResultUnsupported, "could not fill the reflect command: "+err.Error()
 		return j, nil
 	}
-	workDir, ok, err := s.repoIdleWorkDir(ctx, *decl)
-	if err != nil && errors.Is(err, ErrStoreError) {
-		return releaseJudgment{}, err
-	}
-	if err != nil || !ok {
-		why := "no idle working directory for repository " + decl.Name
-		if err != nil {
-			why = err.Error()
-		}
-		j.result, j.detail = ExecutionResultUnsupported, "could not decide the working directory of the reflect request: "+why
-		return j, nil
-	}
-
 	agent := opts.Agent
 	if agent == nil {
 		agent = defaultAgentDeclaration()
 	}
-	// 同時に走らせる数（走っている反映の依頼も数える。数え方は委譲の段と同じ）。
+	// 同時に走らせる数（走っている反映の依頼も数える。数え方は委譲の段と同じ）。作業ディレクトリを決める処理より先に確かめる。
 	var active int
 	if err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
 		active, err = activeDelegationCount(ctx, tx)
@@ -97,6 +84,22 @@ func (s *Store) startReflectRequest(ctx context.Context, row *operationRow, opts
 	}
 	if active >= agent.MaxParallelRuns {
 		return releaseJudgment{}, &releaseNotStartedError{reason: NotStartedSlotUnavailable}
+	}
+	workDir, ok, err := s.repoIdleWorkDir(ctx, *decl)
+	if err != nil && errors.Is(err, ErrStoreError) {
+		return releaseJudgment{}, err
+	}
+	if err != nil {
+		j.result, j.detail = ExecutionResultUnsupported, "could not decide the working directory of the reflect request: "+err.Error()
+		return j, nil
+	}
+	if !ok {
+		if slotProvider(decl.Slots.Provider) == slotProviderClone && len(decl.Slots.Paths) > 0 {
+			// 作業用のクローンが使用中で空きが無いだけ。承認は保ち、次の反映の段でやり直す。
+			return releaseJudgment{}, &releaseNotStartedError{reason: NotStartedSlotUnavailable}
+		}
+		j.result, j.detail = ExecutionResultUnsupported, "could not decide the working directory of the reflect request: no working directory is declared for repository "+decl.Name
+		return j, nil
 	}
 	// サイクルの費用の上限は、flywheel の run を記録するのと同じ書き込みで評価する（超えるなら何も残らない）。
 	maxMicros := usdToMicros(agent.MaxRunBudgetUSD)
@@ -195,7 +198,7 @@ func (s *Store) beginReflectRun(ctx context.Context, row *operationRow, cycleID 
 		runRow, err := insertRun(ctx, tx, cid, insertRunInput{
 			CycleID: cycleID, Kind: runKindContract, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
 			SessionID: sessionID, PID: int64(os.Getpid()), Host: host, HeartbeatAt: now, StartedAt: now,
-			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl,
+			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, OperationID: &row.ID,
 		})
 		if err != nil {
 			return err
@@ -261,7 +264,7 @@ func (s *Store) cancelOpenReflectRunBeforeReopen(ctx context.Context, run *relea
 		return errReopenBlockedByRun
 	}
 	opts := ReleaseExecOptions{Contract: cs.Contract, Agent: cs.Agent, Connectors: cs.Connectors}
-	out, why, err := s.releaseContractCommand(ctx, opts, run, "cancel", contractFill{})
+	out, why, err := s.releaseContractCommand(ctx, opts, run, "cancel", contractFill{}, false)
 	if errors.Is(err, errReleaseContractBusy) {
 		return errReopenBlockedByRun
 	}

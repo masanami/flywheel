@@ -358,8 +358,8 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			CycleID:      cycleID,
 			Cycle:        jc,
 
-			MergeableRetries:  ReleaseMergeableRetries,
-			MergeableInterval: ReleaseMergeableInterval,
+			MergeableRetries:  J5MergeableRetries,
+			MergeableInterval: J5MergeableInterval,
 		})
 		if err != nil {
 			return nil, err

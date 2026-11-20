@@ -288,6 +288,8 @@ type contractRunRow struct {
 	// LandDelivered は、その「入れてよい」を委譲先が受け取ったと分かっているか。
 	LandRef       string
 	LandDelivered bool
+	// StartRunID は、この契約の実行を始めた契約のコマンド（start）の flywheel の run の内部整数 ID。
+	StartRunID int64
 }
 
 // contractKindOrTask は契約の実行の種類 kind（空は task）を返す。
@@ -306,7 +308,7 @@ const (
 
 const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
 	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, ''), task_id,
-	kind, operation_id, COALESCE(land_ref, ''), land_delivered FROM contract_run`
+	kind, operation_id, COALESCE(land_ref, ''), land_delivered, start_run_id FROM contract_run`
 
 func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, error) {
 	var r contractRunRow
@@ -314,7 +316,7 @@ func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, erro
 	var taskID, opID sql.NullInt64
 	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget,
 		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.RequestedResolvableBy, &r.WorkDir, &taskID,
-		&r.Kind, &opID, &r.LandRef, &r.LandDelivered); err != nil {
+		&r.Kind, &opID, &r.LandRef, &r.LandDelivered, &r.StartRunID); err != nil {
 		return nil, err
 	}
 	if opID.Valid {
@@ -383,15 +385,27 @@ func fillContractArgsWith(args []string, f contractFill) ([]string, error) {
 		usesIntegration = "true"
 	}
 	for i, a := range args {
-		v, err := fillInvocationWith(a, f.ChallengeID, f.Source, f.EmptySource)
-		if err != nil {
-			return nil, err
+		// すべての差し込みを 1 回の置き換えにまとめる（差し込んだ値の中の波括弧を、他の差し込みとして読まない）。
+		pairs := []string{"{challenge_id}", f.ChallengeID}
+		if invocationNeedsSource(a) {
+			switch {
+			case f.Source != nil:
+				_, number, ok := parseExternalKey(f.Source.ExternalKey)
+				if !ok {
+					return nil, fmt.Errorf("%w: malformed external_key %q", ErrValidation, f.Source.ExternalKey)
+				}
+				pairs = append(pairs, "{issue_number}", fmt.Sprintf("%d", number), "{issue_url}", f.Source.URL, "{external_key}", f.Source.ExternalKey)
+			case f.EmptySource:
+				pairs = append(pairs, "{issue_number}", "", "{issue_url}", "", "{external_key}", "")
+			default:
+				return nil, fmt.Errorf("%w: the operation needs the source issue but the challenge has none", ErrValidation)
+			}
 		}
-		v = strings.ReplaceAll(v, "{run_id}", f.RunID)
-		// 答えとタスクの値は最後に、1 回の置き換えにまとめて差し込む（差し込んだ値の中の波括弧を、他の差し込みとして読まない）。
-		out[i] = strings.NewReplacer("{choice}", f.Answer.Choice, "{note}", f.Answer.Note, "{answer}", f.Answer.text(),
+		pairs = append(pairs, "{run_id}", f.RunID,
+			"{choice}", f.Answer.Choice, "{note}", f.Answer.Note, "{answer}", f.Answer.text(),
 			"{task_file}", f.TaskFile, "{task_id}", f.TaskID, "{uses_integration}", usesIntegration, "{approved_ref}", f.ApprovedRef,
-			"{artifact_ref}", f.ArtifactRef).Replace(v)
+			"{artifact_ref}", f.ArtifactRef)
+		out[i] = strings.NewReplacer(pairs...).Replace(a)
 	}
 	return out, nil
 }
@@ -628,7 +642,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if n, ok := parseCycleID(in.CycleID); ok {
 		cycleIDInt = &n
 	}
-	runIDInt, err := s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID)
+	runIDInt, err := s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +688,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 // beginContractRun は beginContractRunForTask を、タスクに結び付けずに呼ぶ（テストの足場が使う。本体は、タスクの ID
 // 〔過去の行では nil〕を渡して beginContractRunForTask を直に呼ぶ）。
 func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool) (int64, error) {
-	return s.beginContractRunForTask(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, nil)
+	return s.beginContractRunForTask(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, nil, nil)
 }
 
 // beginContractRunForTask は契約のコマンド 1 回ぶんの run を記録する。start のときは周の上限を評価し、課題に
@@ -683,7 +697,10 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 // taskID が非 nil（start のときは起動するタスク、status・resume・cancel のときは契約の run が結び付くタスク）なら、
 // run の行（kind=contract）の task_id と repo（タスクの対象リポジトリ）へ記録する。start のときは、pending のタスクを
 // in_progress にする（run の記録と同じトランザクション。すでに in_progress のタスクでは変えない）。
-func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID *int64) (int64, error) {
+//
+// operationID が非 nil なら、反映の操作のために呼んだ run として印を付ける（run.operation_id。反映の段・完了から戻す前の読み・
+// 片付けだけが渡す。印の付いた run は、課題の最後の委譲の run・最後の契約のコマンドを読む所から外れる）。
+func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64) (int64, error) {
 	host, _ := os.Hostname()
 	now := s.currentTime()
 	var runIDInt int64
@@ -731,7 +748,7 @@ func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID,
 		row, err := insertRun(ctx, tx, cid, insertRunInput{
 			CycleID: cycleID, Kind: runKindContract, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
 			SessionID: sessionID, PID: int64(os.Getpid()), Host: host, HeartbeatAt: now, StartedAt: now,
-			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: runTask, Repo: taskRepo,
+			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: runTask, Repo: taskRepo, OperationID: operationID,
 		})
 		if err != nil {
 			return err
@@ -781,6 +798,8 @@ type contractCall struct {
 	// ReleaseStage は、反映の段が呼ぶ契約のコマンド（完了の課題の実行）のとき真。成果物を課題の成果物の記録（run_artifact）へ取り込まず、
 	// 課題を保留にしない（契約の実行の記録だけを読んだ値で更新する）。
 	ReleaseStage bool
+	// HoldEnd は、終わりを読んでも contract_run の ended_at を入れないとき真（反映の段の status・resume。結果を書く書き込みが入れる）。
+	HoldEnd bool
 }
 
 // finishContractCall はコマンドを起動し、結果を run と contract_run へ 1 つのトランザクションで記録する。
@@ -878,6 +897,13 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 				// 別のプロセスが先に終えた契約の run は更新しない（成果物の二重の取り込み・再び開くことを防ぐ）。
 				status = nil
 				costFrom(latest.CostMicros)
+				// 反映の段が読んだ終わりを、結果を書くまで開けていた実行（HoldEnd）は、その場で終わる呼び出し（完了から戻す前の読み・片付け）が閉じる。
+				if !c.HoldEnd {
+					if _, err := tx.ExecContext(recordCtx, `UPDATE contract_run SET ended_at = ? WHERE id = ? AND ended_at IS NULL`,
+						formatTimestamp(s.currentTime()), latest.ID); err != nil {
+						return err
+					}
+				}
 			}
 		}
 		now := s.currentTime()
@@ -1065,7 +1091,7 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 		}
 	}
 	var endedAt any
-	if st.State.Terminal() {
+	if st.State.Terminal() && !c.HoldEnd {
 		endedAt = now
 	}
 	report.Facts = st.Facts
@@ -1301,7 +1327,7 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 // その run の開始時点で終わっていなかった」ことで行う。終わりと同じ時刻（ミリ秒）の run は start の run として扱う:
 // 契約の run を終わらせるのは成功した契約のコマンドの run（start・status・resume・cancel）で、成功以外の run は
 // 終わらせない。この条件は成功以外の run だけを選ぶから。課題が着手中でなくなっていれば（保留・取り下げ・完了）選ばない。
-const reclaimedContractStartWhere = `r.kind = 'contract' AND r.result IS NOT NULL AND r.result <> 'succeeded' AND c.status = 'in_progress'
+const reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND c.status = 'in_progress'
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.start_run_id = r.id)
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND k.start_run_id < r.id
 		AND (k.ended_at IS NULL OR k.ended_at > r.started_at))

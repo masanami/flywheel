@@ -1065,6 +1065,7 @@ func FillAllTables(t *testing.T, workspace string) {
 			  VALUES (1, 'src', 'o/r#9', 'o/r#1', 'https://github.com/o/r/issues/9', 't', 'b', 'open', ?, ?)`, []any{at, at}},
 			{`UPDATE task SET source_key = 'o/r#9' WHERE id = 1`, nil},
 			{`UPDATE run SET task_id = 1 WHERE id = 1`, nil},
+			{`UPDATE run SET operation_id = 1 WHERE id = 2`, nil},
 			{`UPDATE contract_run SET task_id = 1 WHERE id = 1`, nil},
 			{`UPDATE contract_run SET kind = 'reflect', operation_id = 1, requested_options = '["ready","respond"]', content_ref = 'abc123',
 			  facts = '{"k":"v"}', facts_unmet_count = 2, land_ref = 'o/r#3', land_delivered = 1 WHERE id = 1`, nil},

@@ -266,7 +266,7 @@ func TestReleaseOutside_DoesNotReadMergeability(t *testing.T) {
 	f := newRelFixture(t)
 	no := false
 	f.fake.pr.Mergeable = &no
-	f.fake.pr.MergeableState = UpstreamMergeStateBehind
+	f.fake.pr.MergeableState = "behind"
 	if item := f.run(t); item.Result != ExecutionResultWaitingOutside {
 		t.Fatalf("result = %s, want waiting_outside regardless of mergeable", item.Result)
 	}

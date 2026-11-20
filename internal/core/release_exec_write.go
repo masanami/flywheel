@@ -223,6 +223,13 @@ func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int
 				return err
 			}
 		}
+		if j.run != nil && j.run.corresponds && (class == ExecutionClassExecuted || class == ExecutionClassCancel) {
+			// 反映の段が読んだ終わり（succeeded・failed・cancelled）は、待つ以外の結果を書くこの書き込みで、契約の実行の終わった記録にする。
+			if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE id = ? AND ended_at IS NULL AND state IN ('succeeded', 'failed', 'cancelled')`,
+				formatTimestamp(w.at), j.run.row.ID); err != nil {
+				return err
+			}
+		}
 		if j.landDeliveredRunID != 0 && j.result == ExecutionResultLandSent && w.result == j.result {
 			// 「入れてよい」が届いた記録は、結果 land_sent と同じ書き込みで真にする。
 			if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET land_delivered = 1 WHERE id = ?`, j.landDeliveredRunID); err != nil {

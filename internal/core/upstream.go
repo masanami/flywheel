@@ -205,10 +205,6 @@ type UpstreamPullRequestChecks struct {
 	Checks         []UpstreamCheck
 }
 
-// UpstreamMergeStateBehind は、PR の head が base のブランチに遅れているだけ（衝突は無い）ことを表す
-// UpstreamPullRequestChecks.MergeableState の値。
-const UpstreamMergeStateBehind = "behind"
-
 // UpstreamCheckSource は J5 の起動の前に core が呼ぶ、PR のチェックの取得 IF。実装は
 // internal/adapters/github が `gh api` の GET だけで行い、取得と正規化だけを担う。
 type UpstreamCheckSource interface {

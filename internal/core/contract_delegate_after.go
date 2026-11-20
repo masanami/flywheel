@@ -412,18 +412,20 @@ func (s *Store) challengeInProgress(ctx context.Context, cid int64) (bool, error
 
 // runExistingContractCommand は既存の契約の run に対するコマンド（status・resume・cancel）を 1 回呼んで記録する。
 func (s *Store) runExistingContractCommand(ctx context.Context, client ContractClient, agent *AgentDeclaration, workDir string, row *contractRunRow, name string, command []string, planVersion, cycleID *int64, stopNote string) (*ContractRunReport, error) {
-	return s.runExistingContractCommandWith(ctx, client, agent, workDir, row, name, command, planVersion, cycleID, stopNote, false)
+	return s.runExistingContractCommandWith(ctx, client, agent, workDir, row, name, command, planVersion, cycleID, stopNote, nil, false)
 }
 
-// runExistingContractCommandWith は runExistingContractCommand に、反映の段が呼ぶとき（releaseStage）の違い（成果物を取り込まない・
-// 保留にしない・facts の回数を数えない）を足したもの。
-func (s *Store) runExistingContractCommandWith(ctx context.Context, client ContractClient, agent *AgentDeclaration, workDir string, row *contractRunRow, name string, command []string, planVersion, cycleID *int64, stopNote string, releaseStage bool) (*ContractRunReport, error) {
+// runExistingContractCommandWith は runExistingContractCommand に、反映の操作のために呼ぶとき（releaseOp が非 nil。反映の操作の
+// 内部整数 ID）の違い（成果物を取り込まない・保留にしない・facts の回数を数えない・run の行に反映の操作の印を付ける）を足したもの。
+// holdEnd が真なら、終わり（succeeded・failed・cancelled）を読んでも契約の実行（contract_run）を終わった記録（ended_at）にしない
+// （反映の試行の結果を書く書き込みが終わった記録にする。それまでは次の反映の段が同じ終わりを読み直せる）。
+func (s *Store) runExistingContractCommandWith(ctx context.Context, client ContractClient, agent *AgentDeclaration, workDir string, row *contractRunRow, name string, command []string, planVersion, cycleID *int64, stopNote string, releaseOp *int64, holdEnd bool) (*ContractRunReport, error) {
 	sessionID, err := newLowercaseUUIDv4()
 	if err != nil {
 		return nil, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err)
 	}
 	// コマンド 1 回ごとの run の行も、契約の run が結び付くタスクに結び付ける（過去の行は nil のまま）。
-	runIDInt, err := s.beginContractRunForTask(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false, row.TaskID)
+	runIDInt, err := s.beginContractRunForTask(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false, row.TaskID, releaseOp)
 	if err != nil {
 		return nil, err
 	}
@@ -442,8 +444,8 @@ func (s *Store) runExistingContractCommandWith(ctx context.Context, client Contr
 			}
 			return client.Status(ctx, li)
 		},
-		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseStage,
-		FactsRequired: row.reqFacts, CountFacts: name == "status" && !releaseStage,
+		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseOp != nil, HoldEnd: holdEnd,
+		FactsRequired: row.reqFacts, CountFacts: name == "status" && releaseOp == nil,
 	})
 }
 
