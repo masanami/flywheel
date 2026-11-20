@@ -1072,6 +1072,11 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`UPDATE run_artifact SET role = 'integration' WHERE id = 1`, nil},
 			{`UPDATE hold SET task_id = 2, reason = 'facts_unmet' WHERE id = 1`, nil},
 			{`UPDATE challenge SET uses_integration = 1 WHERE id = 1`, nil},
+			{`UPDATE task SET budget_impl_micros = 3000000, budget_review_micros = 1500000 WHERE id = 1`, nil},
+			{`UPDATE challenge SET integration_ref = 'feat/issue-1' WHERE id = 1`, nil},
+			{`UPDATE contract_run SET verified_ref = 'deadbeef' WHERE id = 1`, nil},
+			{`UPDATE approval SET task_id = 1 WHERE id = 1`, nil},
+			{`UPDATE run SET reflect = 1 WHERE id = 2`, nil},
 			{`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after, run_id)
 			  VALUES (?, 'tester', 'cli', 'none', 'challenge', 1, 'create', NULL, '{"title":"c1"}', 1)`, []any{at}},
 			{`INSERT INTO occurrence (challenge_id, activity_id, kind, outcome, source, created_at) VALUES (1, 1, 'completion_rejected', 'bad', 'core', ?)`, []any{at}},

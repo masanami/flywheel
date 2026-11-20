@@ -29,7 +29,7 @@ import (
 
 var (
 	// errActiveRunExists は、課題に既に終了していない run があることを表す
-	// （AC-168。部分一意索引 idx_run_active_challenge の違反を翻訳する）。
+	// （AC-168。部分一意索引 idx_run_active_challenge の違反と、タスクに結び付く run と結び付かない run の同時の未終了の確かめを翻訳する）。
 	errActiveRunExists = errors.New("core: challenge already has an active run")
 
 	// errActiveSlotRunExists は、スロットに既に終了していない run があることを
@@ -475,7 +475,8 @@ func (in insertRunInput) valid() bool {
 //
 //   - 入力が閉集合の外・必須値の欠落なら ErrValidation
 //   - 課題に既に終了していない run があれば errActiveRunExists
-//     （部分一意索引 idx_run_active_challenge の違反を翻訳する。AC-168）
+//     （部分一意索引 idx_run_active_challenge〔課題とタスクの組ごとに 1 本〕の違反と、タスク付きの run と課題の単位の run の
+//     同時の未終了を翻訳する。AC-168）
 //
 // J8 の run は課題に結び付かないため challengeID は 0 を渡す（NULL で
 // 挿入する）。それ以外の run に 0 以下を渡すと ErrValidation。
@@ -495,6 +496,22 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 		challengeIDCol, challengeVersionCol, sessionIDCol = challengeID, in.ChallengeVersion, in.SessionID
 	} else if in.Kind == runKindJudgment {
 		sessionIDCol = in.SessionID
+	}
+
+	if !noChallenge {
+		// 一意の索引は課題とタスクの組ごと（版 29）なので、タスクに結び付く run とタスクに結び付かない run（課題の単位）が
+		// 同時に終わっていない状態は索引では止まらない。見直し前と同じに、同じ書き込みの中でここで止める。
+		q := `SELECT COUNT(*) FROM run WHERE challenge_id = ? AND result IS NULL`
+		if in.TaskID != nil {
+			q += ` AND task_id IS NULL`
+		}
+		var n int
+		if err := tx.QueryRowContext(ctx, q, challengeID).Scan(&n); err != nil {
+			return nil, err
+		}
+		if n > 0 {
+			return nil, errActiveRunExists
+		}
 	}
 
 	res, err := tx.ExecContext(ctx,
