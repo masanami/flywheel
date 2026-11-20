@@ -69,12 +69,12 @@ func (s *Store) loadContractRunRow(ctx context.Context, id int64) (*contractRunR
 }
 
 func checksFailedQuestion(runID, ref string) string {
-	return fmt.Sprintf("接続ツールの run（%s）の、検証した中身（%s）のチェックに失敗がある。統合先へ入れずに止めた。", runID, ref) +
+	return fmt.Sprintf("委譲先の実行（%s）の、検証した中身（%s）のチェックに失敗がある。統合先へ入れずに止めた。", runID, ref) +
 		"チェックを直してから回答すると、もう一度チェックを確かめて、通っていれば委譲先へ「入れてよい」を返す。課題を取り下げることもできる。"
 }
 
 func landRefusedQuestion(runID, ref, summary, text string) string {
-	q := fmt.Sprintf("接続ツールの run（%s）へ「入れてよい」を返したが、同じ中身（%s）のレビュー待ちが戻った。委譲先は、検証した中身を統合先へ入れなかった。\n接続ツールの要約: %s", runID, ref, summary)
+	q := fmt.Sprintf("委譲先の実行（%s）へ「入れてよい」を返したが、同じ中身（%s）のレビュー待ちが戻った。委譲先は、検証した中身を統合先へ入れなかった。\n委譲先の要約: %s", runID, ref, summary)
 	if t := strings.TrimSpace(text); t != "" {
 		q += "\n求められた操作: " + t
 	}
@@ -83,10 +83,10 @@ func landRefusedQuestion(runID, ref, summary, text string) string {
 
 func landedEndedQuestion(runID, ref string, otherContent bool) string {
 	if otherContent {
-		return fmt.Sprintf("接続ツールの run（%s）が「入れてよい」を受け取って終わった（成功）。統合先へ入っているが、入った中身が、検証した中身（%s）と違う。", runID, ref) +
+		return fmt.Sprintf("委譲先の実行（%s）が「入れてよい」を受け取って終わった（成功）。統合先へ入っているが、入った中身が、検証した中身（%s）と違う。", runID, ref) +
 			"入った中身を確かめてから回答すると、このタスクを着手中へ戻して委譲し直す。課題を取り下げることもできる。"
 	}
-	return fmt.Sprintf("接続ツールの run（%s）が「入れてよい」を受け取って終わった（成功）が、成果物は統合先へ入っていない。", runID) +
+	return fmt.Sprintf("委譲先の実行（%s）が「入れてよい」を受け取って終わった（成功）が、成果物は統合先へ入っていない。", runID) +
 		"回答すると、このタスクを着手中へ戻して委譲し直す。課題を取り下げることもできる。"
 }
 

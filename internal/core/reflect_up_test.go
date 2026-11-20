@@ -450,8 +450,8 @@ func TestUpRequest_AC196_AC197_AC198_AC199_AFailedRequestEndsTheRecordClosesTheO
 	if from != string(StatusInProgress) {
 		t.Errorf("hold.from_status = %q, want in_progress", from)
 	}
-	if q := f.holdQuestionsOf(t, id); !strings.Contains(q, "failed") || !strings.Contains(q, "委譲先の失敗の要約") {
-		t.Errorf("question = %q, want the read state and the summary", q)
+	if q := f.holdQuestionsOf(t, id); !strings.Contains(q, "失敗で終了") || strings.Contains(q, "failed") || !strings.Contains(q, "委譲先の失敗の要約") {
+		t.Errorf("question = %q, want the read state in words (not the internal value) and the summary", q)
 	}
 	rels := f.releases(t)
 	if len(rels) != 1 || rels[0].state != "closed" { // AC-198

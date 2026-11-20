@@ -512,7 +512,8 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		}
 		review = *raw.BudgetReviewUSD
 	}
-	if impl > vc.Agent.MaxRunBudgetUSD {
+	// タスクが全部枠を持つ計画では、計画の値（規模の既定）は読まない。1 回の実行の上限額との比べはタスクの枠だけにする。
+	if !allTasksHaveBudgets(tasks) && impl > vc.Agent.MaxRunBudgetUSD {
 		return nil, false
 	}
 
@@ -709,6 +710,19 @@ func untaskedChildKeys(v *j2ValidatedOutput) []string {
 	return out
 }
 
+// allTasksHaveBudgets は、タスクが 1 個以上あり、全部が実装の枠・レビュー対応の枠の両方を書いているか。
+func allTasksHaveBudgets(tasks []j2Task) bool {
+	if len(tasks) == 0 {
+		return false
+	}
+	for _, t := range tasks {
+		if t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil {
+			return false
+		}
+	}
+	return true
+}
+
 // formatJ2PlanBody は検査済みの plan の出力を、計画の本文（Markdown）へ決定的に
 // 整形する（§J2「出力を計画の本文へ決定的に整形し」）。サイズ・実装枠・レビュー対応枠の額・
 // 統合先を使うか・論点（題名・どう決めたか）・問い（番号・文・選択肢のラベル・推奨の印）・
@@ -722,8 +736,19 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 	// 承認する事実が先に読めるようにするため。
 	b.WriteString("## サイズと予算\n\n")
 	b.WriteString("- サイズ: " + string(v.Size) + "\n")
-	b.WriteString("- 実装枠: " + formatUSDAmount(v.ResolvedImplUSD) + " USD\n")
-	b.WriteString("- レビュー対応枠: " + formatUSDAmount(v.ResolvedReviewUSD) + " USD\n")
+	if allTasksHaveBudgets(v.Tasks) {
+		// タスクが枠を持つ計画の課題の上限は、タスクの枠の合計（計画の値ではない）。
+		var impl, review int64
+		for _, t := range v.Tasks {
+			impl += usdToMicros(*t.BudgetImplUSD)
+			review += usdToMicros(*t.BudgetReviewUSD)
+		}
+		b.WriteString("- 実装枠（タスクの枠の合計）: " + formatUSDAmount(microsToUSD(impl)) + " USD\n")
+		b.WriteString("- レビュー対応枠（タスクの枠の合計）: " + formatUSDAmount(microsToUSD(review)) + " USD\n")
+	} else {
+		b.WriteString("- 実装枠: " + formatUSDAmount(v.ResolvedImplUSD) + " USD\n")
+		b.WriteString("- レビュー対応枠: " + formatUSDAmount(v.ResolvedReviewUSD) + " USD\n")
+	}
 	b.WriteString("- 統合先を使う: " + yesNo(v.UsesIntegration) + "\n")
 	b.WriteString("- 複数リポジトリにまたがる: " + yesNo(v.CrossRepo) + "\n")
 	if len(v.RelatedRepos) > 0 {
@@ -734,6 +759,9 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, oneLine(t.Title))
 		b.WriteString("   - 対象リポジトリ: " + t.Repo + "\n")
 		b.WriteString("   - 操作: " + t.Operation + "\n")
+		if t.BudgetImplUSD != nil && t.BudgetReviewUSD != nil {
+			b.WriteString("   - 枠: 実装 " + formatUSDAmount(*t.BudgetImplUSD) + " USD・レビュー対応 " + formatUSDAmount(*t.BudgetReviewUSD) + " USD\n")
+		}
 		if t.Source != "" {
 			b.WriteString("   - 取り込み元の子: " + oneLine(t.Source) + "\n")
 		}

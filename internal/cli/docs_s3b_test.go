@@ -104,3 +104,16 @@ func TestSpec_S3b_KeepsShippedCoreRedesignSections(t *testing.T) {
 		t.Error("core-redesign.md lost the section of earlier shapes that tests read as the source of truth")
 	}
 }
+
+// m1-core.md の遷移表の T15 の行と説明に、区切り S3b からの戻り先（統合先を使う課題の完了の差し戻しは分類済へ送る）がある。
+func TestSpec_S3b_M1T15RowAndNoteHaveTheIntegrationReturnTarget(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "features", "m1-core.md")
+	row := docTableRow(t, doc, "| T15 |")
+	for _, want := range []string{"区切り S3b から", "`challenge.uses_integration`", "分類済", "着手中"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("the T15 row lacks %q: %q", want, row)
+		}
+	}
+	// 説明（差し戻しの戻り先の節）にも、統合先を使う課題の戻り先がある。
+	docLineWith(t, doc, "差し戻し（T15）の戻り先", "通常の完了", "区切り S3b から", "統合先を使うなら分類済へ戻し")
+}

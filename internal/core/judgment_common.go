@@ -87,8 +87,9 @@ func challengeHasActiveRun(ctx context.Context, tx *sql.Tx, challengeID int64) (
 
 // taskHasActiveRun は challengeID の課題のタスク taskID が実行中かを返す。そのタスクに、終わっていない実行の記録があるか、
 // 作業している契約の実行（終わっていなくて、最後に読んだ状態が、レビュー待ち・オーナーへの問いの待ちでないもの）があること。
-// 起動の判定（beginContractRunForTask）が見るタスクの単位の述語。J5 の対象の選び方・保留の間の成功の扱い（held_success）を
-// この述語へ移すのは、後の区切りで行う（今は課題の単位の challengeHasActiveRun のまま）。
+// 起動の判定（beginContractRunForTask）と、統合先を使う課題の J5 のタスクの単位の対象の選び方・検証の起動
+// （selectJ5TaskTargetsOf・verifyTarget）が見るタスクの単位の述語。統合先を使わない課題の J5・J1・J2・J6 の対象の選び方は、
+// 課題の単位の challengeHasActiveRun のまま。保留の間の成功の扱い（held_success）も、統合先を使わない課題だけが持つので課題の単位のまま。
 // 課題の単位の述語は、オーナーへの問いの待ちを引き続き数える（保留の課題を、課題の単位の判断点の対象にしないため）。
 func taskHasActiveRun(ctx context.Context, tx *sql.Tx, challengeID, taskID int64) (bool, error) {
 	return activeRunScoped(ctx, tx, challengeID, &taskID)
