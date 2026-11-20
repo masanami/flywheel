@@ -362,17 +362,26 @@ type j5Context struct {
 	Task *Task
 	// Facts は検証するタスクの契約の実行（最後の 1 件）の facts の記録（無ければ nil）。
 	Facts map[string]string
+	// TaskScope は、統合先を使う課題のタスク 1 個の検証（タスクの単位の J5）のときの、検証の対象（無ければ nil）。
+	TaskScope *j5TaskScope
 	// ArtifactDescriptionRead は、成果物の説明文（PR の本文）を 1 件でも取得できたか（form: cli の委譲の報告の出どころを決める）。
 	ArtifactDescriptionRead bool
 }
 
 func (s *Store) loadJ5Context(ctx context.Context, ch Challenge) (*j5Context, error) {
+	return s.loadJ5ContextFor(ctx, ch, nil)
+}
+
+// loadJ5ContextFor は loadJ5Context の、検証するタスクを指定する版。taskID が非 nil なら、そのタスクの単位の検証の文脈
+// （そのタスクの最後の委譲の実行とその成果物。ほかのタスクのものは入れない）を読む。そのタスクが検証の対象でなくなっていれば
+// ErrInvalidTransition。
+func (s *Store) loadJ5ContextFor(ctx context.Context, ch Challenge, taskID *int64) (*j5Context, error) {
 	cid, ok := parseChallengeID(ch.ID)
 	if !ok {
 		return nil, ErrNotFound
 	}
 	vc := &j5Context{Challenge: ch}
-	var planOK bool
+	var planOK, notEligible bool
 	var unavailable error
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		p, gap, detail, err := lookupApprovedPlan(ctx, tx, cid)
@@ -396,15 +405,31 @@ func (s *Store) loadJ5Context(ctx context.Context, ch Challenge) (*j5Context, er
 		if vc.Binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
 			return err
 		}
-		if vc.Task, err = loadVerifyingTask(ctx, tx, cid); err != nil {
+		if taskID != nil {
+			scope, err := loadJ5TaskScope(ctx, tx, cid, *taskID)
+			if err != nil {
+				return err
+			}
+			if scope == nil {
+				notEligible = true
+				return nil
+			}
+			vc.TaskScope, vc.Task = scope, &scope.Task
+		} else if vc.Task, err = loadVerifyingTask(ctx, tx, cid); err != nil {
 			return err
 		}
 		if vc.Facts, err = loadTaskContractFacts(ctx, tx, cid, vc.Task); err != nil {
 			return err
 		}
 		var lastID int64
-		qerr := tx.QueryRowContext(ctx,
-			`SELECT id FROM run WHERE challenge_id = ? AND kind IN (?, ?) AND operation_id IS NULL ORDER BY id DESC LIMIT 1`, cid, string(runKindDelegate), string(runKindContract)).Scan(&lastID)
+		lastQ, lastArgs := `SELECT id FROM run WHERE challenge_id = ? AND kind IN (?, ?) AND operation_id IS NULL ORDER BY id DESC LIMIT 1`, []any{cid, string(runKindDelegate), string(runKindContract)}
+		if taskID != nil {
+			// タスクの単位では、そのタスクの最後の委譲の実行のうち成果物を持つもの（取り込みの読み。後の読みは成果物を取り込み直さない）。
+			lastQ = `SELECT id FROM run WHERE challenge_id = ? AND task_id = ? AND kind IN (?, ?) AND operation_id IS NULL
+				ORDER BY EXISTS (SELECT 1 FROM run_artifact a WHERE a.run_id = run.id) DESC, id DESC LIMIT 1`
+			lastArgs = []any{cid, *taskID, string(runKindDelegate), string(runKindContract)}
+		}
+		qerr := tx.QueryRowContext(ctx, lastQ, lastArgs...).Scan(&lastID)
 		if errors.Is(qerr, sql.ErrNoRows) {
 			return nil
 		}
@@ -425,6 +450,9 @@ func (s *Store) loadJ5Context(ctx context.Context, ch Challenge) (*j5Context, er
 			return nil, unavailable
 		}
 		return nil, fmt.Errorf("%w: the challenge has no approved plan", ErrValidation)
+	}
+	if notEligible {
+		return nil, ErrInvalidTransition
 	}
 	return vc, nil
 }
@@ -540,8 +568,14 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 			ch.Title, ch.Description, urgency, priority, ch.Reporter)},
 		{Label: "達成条件", Content: criteria + "\n\n（出所: " + origin + "）"},
 	}
+	if vc.TaskScope != nil {
+		sections[1].Content += "\n\nこの確認はタスクの検証である。この条件のうち、このタスクの範囲の条件だけを確かめる。"
+	}
 	if vc.Task != nil {
 		sections = append(sections, JudgmentDataSection{Label: labelTaskSection, Content: formatTaskSection(*vc.Task)})
+	}
+	if vc.TaskScope != nil && vc.TaskScope.Source != nil {
+		sections = append(sections, JudgmentDataSection{Label: labelTaskSourceSection, Content: formatTaskSourceSection(*vc.TaskScope.Source)})
 	}
 	if t := formatFactsSection(vc.Facts); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: labelDelegateFactsSection, Content: t})
@@ -575,7 +609,8 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 	if t := formatSourceBindingSection(vc.Binding); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: "取り込み元の対応", Content: t})
 	}
-	if vc.Binding != nil {
+	// タスクの検証は、取り込みのときに記録した値で確かめる（上流を読み直さない）。
+	if vc.Binding != nil && vc.TaskScope == nil {
 		repo, number, ok := parseExternalKey(vc.Binding.ExternalKey)
 		if !ok {
 			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedUpstreamFetchFailed,
@@ -994,6 +1029,33 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		if err != nil {
 			return nil, err
 		}
+		if ch.Status == StatusInProgress {
+			// 統合先を使う着手中の課題は、検証中のタスクを 1 個ずつ検証する（対象が無ければ ErrInvalidTransition）。
+			var targets []j5TaskTarget
+			if err := classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
+				var err error
+				targets, err = selectJ5TaskTargetsOf(ctx, tx, *ch)
+				return err
+			})); err != nil {
+				return nil, err
+			}
+			if len(targets) == 0 {
+				return nil, ErrInvalidTransition
+			}
+			for _, tg := range targets {
+				taskID := tg.TaskID
+				item, notStarted, err := s.verifyTarget(ctx, in, nil, *ch, &taskID)
+				if err != nil {
+					// 先のタスクの結果を書いた後に、課題が保留になった等で後のタスクが対象でなくなっても、書いた結果を失わない。
+					if (errors.Is(err, ErrRunInProgress) || errors.Is(err, ErrInvalidTransition)) && len(result.Items) > 0 {
+						continue
+					}
+					return nil, err
+				}
+				appendDelegateOutcome(result, item, notStarted)
+			}
+			return result, nil
+		}
 		if ch.Status != StatusVerifying {
 			return nil, ErrInvalidTransition
 		}
@@ -1006,10 +1068,15 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 	}
 
 	var targetIDs []int64
+	var taskTargets []j5TaskTarget
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		ids, ex, err := selectJ5AutoTargets(ctx, tx)
 		targetIDs = ids
 		result.NotStarted = append(result.NotStarted, ex...)
+		if err != nil {
+			return err
+		}
+		taskTargets, err = selectJ5TaskTargets(ctx, tx)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -1054,6 +1121,30 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		}
 		appendDelegateOutcome(result, item, notStarted)
 	}
+	// 統合先を使う着手中の課題の、検証中のタスク（課題とタスクの組ごと）。
+	for _, tg := range taskTargets {
+		ch, err := s.loadChallengeForAuto(ctx, formatChallengeID(tg.ChallengeID))
+		if err != nil {
+			return nil, err
+		}
+		if ch.Status != StatusInProgress {
+			continue // 対象を選んだ後に状態が変わった（保留など）
+		}
+		taskID := tg.TaskID
+		item, notStarted, err := s.verifyTarget(ctx, in, jc, *ch, &taskID)
+		if err != nil {
+			if errors.Is(err, ErrRunInProgress) || errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrValidation) {
+				continue
+			}
+			var pu *planUnavailableError
+			if errors.As(err, &pu) {
+				appendDelegateOutcome(result, nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable, Detail: pu.Detail})
+				continue
+			}
+			return nil, err
+		}
+		appendDelegateOutcome(result, item, notStarted)
+	}
 	return result, nil
 }
 
@@ -1061,12 +1152,28 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 // 返し、nil（ID を指定した個別の操作）ならエラーで返す。item と notStarted はどちらか一方だけが非 nil
 // （エラー時は両方 nil）。
 func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle, ch Challenge) (*JudgmentAutoItem, *NotStarted, error) {
+	return s.verifyTarget(ctx, in, jc, ch, nil)
+}
+
+// verifyTarget は verifyOne の本体。taskID が非 nil なら、統合先を使う着手中の課題のタスク 1 個の検証（タスクの単位の J5。
+// 結果は課題の遷移を使わずに書く）。nil なら課題の検証（検証中の課題）。
+func (s *Store) verifyTarget(ctx context.Context, in J5AutoInput, jc *JudgmentCycle, ch Challenge, taskID *int64) (*JudgmentAutoItem, *NotStarted, error) {
 	if jc != nil && jc.RateLimited() {
 		return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedRateLimited}, nil
 	}
 	cid, _ := parseChallengeID(ch.ID)
 	var active bool
 	if err := classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
+		if taskID != nil {
+			// タスクの単位では、そのタスクの実行と、タスクに結び付かない実行だけを見る（別のタスクの実行とは重ならない）。
+			a, err := taskHasActiveRun(ctx, tx, cid, *taskID)
+			if err != nil || a {
+				active = a
+				return err
+			}
+			active, err = taskLessHasActiveRun(ctx, tx, cid)
+			return err
+		}
 		a, err := challengeHasActiveRun(ctx, tx, cid)
 		active = a
 		return err
@@ -1076,7 +1183,7 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 	if active {
 		return nil, nil, ErrRunInProgress // CI の取得や予算の評価より先に（取り違えない）
 	}
-	vc, err := s.loadJ5Context(ctx, ch)
+	vc, err := s.loadJ5ContextFor(ctx, ch, taskID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1159,7 +1266,14 @@ func (s *Store) verifyOne(ctx context.Context, in J5AutoInput, jc *JudgmentCycle
 		if overridden != nil {
 			structured = overridden
 		}
-		outcome, status, finalResult, err := s.finalizeJ5Output(ctx, res.RunID, res.ChallengeID, structured, vh)
+		var outcome string
+		var status *string
+		var finalResult RunResult
+		if vc.TaskScope != nil {
+			outcome, status, finalResult, err = s.finalizeJ5TaskOutput(ctx, res.RunID, res.ChallengeID, structured, vc.TaskScope, vh)
+		} else {
+			outcome, status, finalResult, err = s.finalizeJ5Output(ctx, res.RunID, res.ChallengeID, structured, vh)
+		}
 		if err != nil {
 			return nil, nil, err
 		}
