@@ -8,7 +8,7 @@ package core
 //     契約の実行は kind が reflect、task_id と operation_id が NULL。
 //   - レビュー待ちを受け取る（checkReflectPRs・submitReflectReview）: 反映先宛ての PR がちょうど 1 つなら、その PR の反映の操作を作って
 //     契約の実行へ結び付け、課題を検証中へ進める（タスクは済みのまま）。
-//   - 終わりの状態を読んだ（holdReflectEnded）: 課題を着手中へ戻して、理由 reflect_failed で保留にする。
+//   - 終わりの状態を読んだ（holdReflectEnded）: 反映の操作を閉じ、契約の実行を終わった記録にし、理由 reflect_failed で保留にする（1 つの遷移）。
 
 import (
 	"context"
@@ -118,62 +118,48 @@ func closeReflectOperation(ctx context.Context, tc *transitionCtx, cid int64, ex
 }
 
 // holdReflectEnded は、完了でない課題の上げる依頼が終わりの状態を返したとき（契約の実行は、読んだ記録と同じ書き込みで終わった記録になっている）、
-// 作っていた反映の操作を閉じ、課題を着手中へ戻して、理由 reflect_failed で保留にする。課題が着手中・検証中のときだけ行う（保留中などは何もしない）。
+// 作っていた反映の操作を閉じ、理由 reflect_failed で保留にする（保留への遷移 1 つ・トランザクション 1 つ。回答で戻る先は着手中）。
+// 課題が着手中・検証中のときだけ行う（保留中などは何もしない）。
 func (s *Store) holdReflectEnded(ctx context.Context, rep *ContractRunReport) error {
 	cid, ok := parseChallengeID(rep.ChallengeID)
 	if !ok {
 		return nil
 	}
-	var status Status
-	if err := classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
-		ch, err := loadChallenge(ctx, tx, cid)
-		if err != nil || ch == nil {
-			return err
-		}
-		status = ch.Status
-		return nil
-	})); err != nil {
-		return err
-	}
 	ctx = context.WithoutCancel(ctx)
-	tolerated := func(err error) bool {
-		return errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible)
-	}
-	switch status {
-	case StatusVerifying:
-		_, err := s.transitionAsInvoker(ctx, rep.RunID, rep.ChallengeID, OpVerifyNotMet,
-			func(ctx context.Context, tc *transitionCtx) error {
-				return closeReflectOperation(ctx, tc, cid, rep.ExternalRunID)
-			})
-		if err != nil {
-			if tolerated(err) {
-				return nil
-			}
-			return err
-		}
-	case StatusInProgress:
-	default:
-		return nil
-	}
 	question := reflectEndedQuestion(rep.ExternalRunID, rep.State, rep.Summary)
+	// 1 つの遷移（保留 T11。検証中からも着手中からも入れる）・1 つのトランザクションで、反映の操作を閉じて保留を立てる。
+	// 検証中から入るときも、保留に入る前の状態（回答で戻る先）は着手中にする（上げる依頼は終わったので、
+	// 検証中へ戻すと待つものが無くなる。着手中へ戻れば、回答の後に次の委譲の段が上げる依頼を始め直す）。
 	_, err := s.transitionAsInvoker(ctx, rep.RunID, rep.ChallengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
-			if tc.current.Status != StatusInProgress {
+			if tc.current.Status != StatusInProgress && tc.current.Status != StatusVerifying {
 				return errReconcileNotEligible
 			}
 			if err := closeReflectOperation(ctx, tc, cid, rep.ExternalRunID); err != nil {
 				return err
 			}
-			return s.insertHoldWithOccurrence(ctx, tc, question, holdReasonReflectFailed, "")
+			if err := endReflectRunRecord(ctx, tc.tx, cid, rep.ExternalRunID, tc.nowStr); err != nil {
+				return err
+			}
+			return s.insertHoldWithOccurrenceFrom(ctx, tc, question, holdReasonReflectFailed, "", StatusInProgress)
 		})
 	if err != nil {
-		if tolerated(err) {
-			return nil
+		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
+			// 保留を立てられない課題（保留中・取り下げなど）は、読み直しても同じなので、契約の実行を終わった記録にする。
+			return classifyReadWriteErr(s.db.Write(ctx, func(tx *sql.Tx) error {
+				return endReflectRunRecord(ctx, tx, cid, rep.ExternalRunID, formatTimestamp(s.currentTime()))
+			}))
 		}
 		return err
 	}
 	rep.Held = true
 	return nil
+}
+
+// endReflectRunRecord は上げる依頼の契約の実行を、終わった記録にする（終わっていなければ）。
+func endReflectRunRecord(ctx context.Context, tx *sql.Tx, cid int64, externalRunID, at string) error {
+	_, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`, at, cid, externalRunID)
+	return err
 }
 
 // checkReflectPRs は、上げる依頼のレビュー待ちの成果物の、反映先宛ての PR がちょうど 1 つであることを確かめる。当たれば PR を返す。

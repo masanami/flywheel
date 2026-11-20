@@ -356,6 +356,9 @@ func (s *Store) holdContractWait(ctx context.Context, rep *ContractRunReport, qu
 func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64) (*ContractRunReport, error) {
 	challengeID := formatChallengeID(row.ChallengeID)
 	row.reqFacts = connector.RequiredFacts
+	if row.Kind == contractRunKindReflect {
+		row.reqFacts = nil // 上げる依頼のレビュー待ちには required_facts を掛けない（満たさなかった回数も数えない）
+	}
 	var answer contractAnswer
 	var resume bool
 	// 上げる依頼（kind が reflect）のレビュー待ちには、差し戻しの返しをしない。課題が検証中の間は、レビュー待ちを読み直さない
@@ -414,7 +417,9 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		return nil, err
 	}
 	workDir := existingContractWorkDir(row, in.WorkDir)
-	rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, row, name, command, planVersion, cycleID, "")
+	// 上げる依頼（kind が reflect）は、終わりを読んでも終わった記録にしない（保留を立てる書き込み〔holdReflectEnded〕が終わった記録にする。
+	// 書き込みが途中で失敗したら、次の状態の確認が同じ終わりを読み直してやり直す）。
+	rep, err := s.runExistingContractCommandWith(ctx, in.Client, in.AgentDecl, workDir, row, name, command, planVersion, cycleID, "", nil, row.Kind == contractRunKindReflect)
 	if err != nil {
 		return nil, err
 	}

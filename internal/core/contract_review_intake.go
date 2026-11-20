@@ -335,7 +335,9 @@ func (s *Store) receiveContractReview(ctx context.Context, rep *ContractRunRepor
 			return hold(tooManyLandablePRsQuestion(rep.ExternalRunID, len(prs)), holdReasonContentRefInvalid)
 		}
 	}
-	if connector != nil && len(connector.RequiredFacts) > 0 {
+	// 宣言の required_facts は、タスクの実行のレビュー待ちに掛ける。上げる依頼（反映の依頼）のレビュー待ちには掛けない
+	// （委譲先の上げる依頼のレビュー待ちは facts を返さない。S3a の反映の段も required_facts を掛けない）。
+	if connector != nil && len(connector.RequiredFacts) > 0 && !scope.Reflect {
 		if unmet := unmetRequiredFacts(connector.RequiredFacts, rep.Facts); len(unmet) > 0 {
 			if !rep.FactsCounted {
 				return nil // 状態の確認の読みではない（resume・start の応答）。次の状態の確認で数える

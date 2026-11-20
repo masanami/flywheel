@@ -505,3 +505,149 @@ func TestUpRequest_RunsOfTheRequestAreMarkedAsReflect(t *testing.T) {
 		t.Fatalf("contract runs with the reflect mark = %d, want 2 (start and status)", n)
 	}
 }
+
+// 終わりの状態を読んだときの書き込みが途中で失敗したら、課題は検証中のまま残る（着手中へ戻らない）。書き込みを直せば、次の読みでやり直せる。
+func TestUpRequest_AFailedWriteWhileHoldingLeavesTheChallengeVerifyingAndIsRetried(t *testing.T) {
+	t.Parallel()
+	for name, trigger := range map[string]string{
+		"closing the operation": `CREATE TRIGGER fail_close BEFORE UPDATE ON operation WHEN NEW.state = 'closed' BEGIN SELECT RAISE(ABORT, 'boom'); END`,
+		"raising the hold":      `CREATE TRIGGER fail_hold BEFORE INSERT ON hold BEGIN SELECT RAISE(ABORT, 'boom'); END`,
+	} {
+		f, id := newUpFixture(t, upConnectorsJSON())
+		f.setUpPR("main")
+		f.startUp(t)
+		f.readWith(t, upReviewOut([]string{"respond", "land"}, upArtsOK...))
+		if got := f.statusOf(t, id); got != StatusVerifying {
+			t.Fatalf("%s: precondition: status = %s, want verifying", name, got)
+		}
+		f.sqlExec(t, `UPDATE contract_run SET state = 'running', requested_kind = NULL WHERE kind = 'reflect'`)
+		f.sqlExec(t, trigger)
+		f.client.last = contractOut(ContractStateFailed, nil, nil)
+		_, err := f.s.RunDelegation(context.Background(), f.runInput(t, nil))
+		t.Logf("%s: first read err = %v", name, err)
+		if got := f.statusOf(t, id); got != StatusVerifying {
+			t.Errorf("%s: status after the failed write = %s, want verifying", name, got)
+		}
+		if rels := f.releases(t); len(rels) != 1 || rels[0].state != "pending" {
+			t.Errorf("%s: releases = %+v, want the pending release to stay", name, rels)
+		}
+		if rs := f.holdReasons(t, id); len(rs) != 0 {
+			t.Errorf("%s: holds = %v, want none", name, rs)
+		}
+		f.sqlExec(t, `DROP TRIGGER IF EXISTS fail_close`)
+		f.sqlExec(t, `DROP TRIGGER IF EXISTS fail_hold`)
+		f.runDelegationStage(t, nil)
+		if got := f.statusOf(t, id); got != StatusAwaitingHuman {
+			t.Errorf("%s: status after the retry = %s, want awaiting_human", name, got)
+		}
+		if got := f.lastReason(t, id); got != string(holdReasonReflectFailed) {
+			t.Errorf("%s: reason = %q, want reflect_failed", name, got)
+		}
+		if rels := f.releases(t); len(rels) != 1 || rels[0].state != "closed" {
+			t.Errorf("%s: releases after the retry = %+v, want closed", name, rels)
+		}
+		if n := len(f.reflectStarts()); n != 1 {
+			t.Errorf("%s: reflect starts = %d, want 1 (the request is not started again before the hold)", name, n)
+		}
+	}
+}
+
+// 上げる依頼のレビュー待ちには、宣言の required_facts を掛けない（facts が無くても受け取り、respond を返さず、満たさなかった回数も数えない）。
+func TestUpRequest_RequiredFactsAreNotAppliedToTheReview(t *testing.T) {
+	t.Parallel()
+	json := strings.Replace(upConnectorsJSON(), `"contract_version": 1,`,
+		`"contract_version": 1, "required_facts": {"self_review": ["complete"], "gate": ["pass"]},`, 1)
+	f, id := newUpFixture(t, json)
+	f.setUpPR("main")
+	f.startUp(t)
+	f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
+	f.readWith(t, upReviewOut([]string{"respond", "land"}, upArtsOK...)) // facts は無い
+	if got := f.statusOf(t, id); got != StatusVerifying {
+		t.Fatalf("status = %s, want verifying", got)
+	}
+	if len(f.client.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no respond", f.client.resumes)
+	}
+	if n := countRows(t, f.s, `SELECT COUNT(*) FROM contract_run WHERE kind = 'reflect' AND facts_unmet_count <> 0`); n != 0 {
+		t.Fatalf("a reflect run counted unmet facts")
+	}
+	if got := f.releases(t); len(got) != 1 {
+		t.Fatalf("releases = %+v, want 1", got)
+	}
+}
+
+// 予算: 上げる依頼の実行の費用は、タスクの枠・課題の枠・課題の使った額のどれにも数えない（run.reflect の印）。
+func TestUpRequest_TheCostIsNotCountedInTheTaskOrChallengeBudget(t *testing.T) {
+	t.Parallel()
+	f, id := newUpFixture(t, upConnectorsJSON())
+	cost := 3.0
+	f.client.startOut = contractOut(ContractStateRunning, &cost, nil)
+	f.runDelegationStage(t, nil)
+	if n := countRows(t, f.s, `SELECT COUNT(*) FROM run WHERE kind = 'contract' AND reflect = 1 AND cost_usd > 0`); n != 1 {
+		t.Fatalf("reflect runs with a cost = %d, want 1 (the fixture must really spend)", n)
+	}
+	cid, _ := parseChallengeID(id)
+	var taskID int64
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		if err := tx.QueryRow(`SELECT id FROM task WHERE challenge_id = ? LIMIT 1`, cid).Scan(&taskID); err != nil {
+			return err
+		}
+		spent, err := loadChallengeSpent(context.Background(), tx, cid)
+		if err != nil || spent.Impl != 0 || spent.Review != 0 {
+			t.Errorf("challenge spent = %+v err %v, want 0", spent, err)
+		}
+		var pv int64
+		if err := tx.QueryRow(`SELECT COALESCE(MAX(version), 1) FROM task_plan WHERE challenge_id = ?`, cid).Scan(&pv); err != nil {
+			return err
+		}
+		bs, err := loadBucketSpend(context.Background(), tx, cid, pv)
+		if err != nil || bs.Impl != 0 || bs.Review != 0 {
+			t.Errorf("bucket spend = %+v err %v, want 0", bs, err)
+		}
+		ts, err := loadTaskBucketSpend(context.Background(), tx, taskID, pv)
+		if err != nil || ts.Impl != 0 || ts.Review != 0 {
+			t.Errorf("task bucket spend = %+v err %v, want 0", ts, err)
+		}
+		return nil
+	})
+}
+
+// 上げる依頼のレビュー待ちは、反映先宛ての PR がちょうど 1 つ・中身の識別がちょうど 1 つでなければ受け取らない（content_ref_invalid）。
+// 反映の操作は作らず、課題は検証中へ進まない。
+func TestUpRequest_ReviewWithoutExactlyOnePRAndOneContentRefIsHeld(t *testing.T) {
+	t.Parallel()
+	const pr2 = "https://github.com/o/r/pull/8"
+	cases := map[string]func(f *contractFixture) []ContractArtifact{
+		"two pull requests to the default branch": func(f *contractFixture) []ContractArtifact {
+			f.setUpPR("main")
+			f.branches.pulls["o/r#8"] = UpstreamPullRequest{URL: pr2, Title: "もう 1 つ", State: "open", Base: "main"}
+			return []ContractArtifact{{Kind: "pr", Ref: upPRURL}, {Kind: "pr", Ref: pr2}, reviewContentArtifact}
+		},
+		"no content ref": func(f *contractFixture) []ContractArtifact {
+			f.setUpPR("main")
+			return []ContractArtifact{{Kind: "pr", Ref: upPRURL}}
+		},
+		"two content refs": func(f *contractFixture) []ContractArtifact {
+			f.setUpPR("main")
+			return []ContractArtifact{{Kind: "pr", Ref: upPRURL}, reviewContentArtifact, {Kind: "commit", Ref: "deadbee"}}
+		},
+	}
+	for name, setup := range cases {
+		f, id := newUpFixture(t, upConnectorsJSON())
+		arts := setup(f)
+		f.startUp(t)
+		f.readWith(t, upReviewOut([]string{"respond", "land"}, arts...))
+		if got := f.lastReason(t, id); got != string(holdReasonContentRefInvalid) {
+			t.Errorf("%s: reason = %q, want content_ref_invalid", name, got)
+		}
+		if got := f.releases(t); len(got) != 0 {
+			t.Errorf("%s: releases = %+v, want none", name, got)
+		}
+		if _, _, opID, _ := f.reflectRow(t); opID.Valid {
+			t.Errorf("%s: operation_id = %+v, want NULL", name, opID)
+		}
+		if got := f.statusOf(t, id); got != StatusAwaitingHuman {
+			t.Errorf("%s: status = %s", name, got)
+		}
+	}
+}
