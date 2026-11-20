@@ -1254,3 +1254,24 @@ func InsertReflectContractRun(t *testing.T, workspace string, challengeID int, o
 		t.Fatalf("coretest: InsertReflectContractRun: %v", err)
 	}
 }
+
+// InsertTaskContractRun は終わっていないタスクの契約の実行を、課題 challengeID のタスク taskKey に結び付けて 1 件挿入する
+// （統合先を使う課題の、タスクごとの実行。同じ課題でもタスクが違えば、終わっていない実行を複数持てる）。
+func InsertTaskContractRun(t *testing.T, workspace string, challengeID int, taskKey, connectorID, externalRunID, state string) {
+	t.Helper()
+	InsertContractRun(t, workspace, challengeID, connectorID, externalRunID, state)
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`UPDATE contract_run SET task_id = (SELECT id FROM task WHERE challenge_id = ? AND key = ?) WHERE external_run_id = ?`, challengeID, taskKey, externalRunID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return fmt.Errorf("no contract run %s", externalRunID)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("coretest: InsertTaskContractRun: %v", err)
+	}
+}
