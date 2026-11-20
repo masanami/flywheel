@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 // loadVerifyingTask は課題 cid のタスクのうち状態が verifying のものを返す。ちょうど 1 個のときだけ返し、
@@ -120,6 +121,9 @@ func cancelUnfinishedTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorde
 // タスク（pending・in_progress）がちょうど 1 個のときだけ、そのタスクを verifying にする（委譲の結果で課題が検証中へ
 // 進むときと同じ結果にする）。0 個・2 個以上のときは、どのタスクも動かさない。
 func submitTaskInTransition(ctx context.Context, tc *transitionCtx) error {
+	if err := rejectHandVerificationForIntegration(ctx, tc); err != nil {
+		return err
+	}
 	tasks, err := loadLaunchableTasks(ctx, tc.tx, tc.id)
 	if err != nil || len(tasks) != 1 {
 		return err
@@ -146,4 +150,18 @@ func verifyTaskByHandInTransition(ctx context.Context, tc *transitionCtx, result
 		tc.taskID = taskID
 		return nil
 	}
+}
+
+// rejectHandVerificationForIntegration は、統合先を使う課題への手の `flywheel submit`・`flywheel verify --result` を
+// ErrValidation で断る（課題の遷移ごと取り消され、ストアは変わらない）。統合先を使う課題は、タスクごとの検証で統合先へ
+// 入れ、課題の検証は、全部入った後に課題の単位で行うため、手で課題の状態だけを進めると統合先と食い違う。
+func rejectHandVerificationForIntegration(ctx context.Context, tc *transitionCtx) error {
+	integ, err := challengeUsesIntegration(ctx, tc.tx, tc.id)
+	if err != nil {
+		return err
+	}
+	if integ != nil && *integ {
+		return fmt.Errorf("%w: the challenge uses an integration target; submit and verify by hand are not available", ErrValidation)
+	}
+	return nil
 }

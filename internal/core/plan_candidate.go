@@ -10,13 +10,18 @@ type planCandidate struct {
 	ID   string
 	Rank int
 	Seq  int64
+	// TaskSeq は起動するタスクの内部整数 ID（0 はタスクを決めない候補）。同じ課題の候補は、タスクの ID の昇順に並ぶ。
+	TaskSeq int64
 }
 
 func (c planCandidate) before(o planCandidate) bool {
 	if c.Rank != o.Rank {
 		return c.Rank < o.Rank
 	}
-	return c.Seq < o.Seq
+	if c.Seq != o.Seq {
+		return c.Seq < o.Seq
+	}
+	return c.TaskSeq < o.TaskSeq
 }
 
 func sortCandidates(cs []planCandidate) {

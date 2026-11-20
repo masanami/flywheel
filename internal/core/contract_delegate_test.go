@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -46,6 +47,10 @@ type fakeContractClient struct {
 	last     ContractLaunchOutput
 	// workDirs は呼び出しごとに受け取った WorkDir（コマンド名: start・status・resume・cancel）。
 	workDirs map[string][]string
+	// uniqueRunIDs なら、start のたびに実行 ID を ext-<n> に変える（同じ課題の複数のタスクを起動する試験が使う）。
+	uniqueRunIDs bool
+	// echoRunning なら、status は、読む実行 ID の running を返す（キューも last も使わない）。
+	echoRunning bool
 }
 
 func (f *fakeContractClient) recordWorkDir(name, dir string) {
@@ -58,12 +63,21 @@ func (f *fakeContractClient) recordWorkDir(name, dir string) {
 func (f *fakeContractClient) Start(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
 	f.starts = append(f.starts, in.Command)
 	f.recordWorkDir("start", in.WorkDir)
-	return f.startOut, nil
+	out := f.startOut
+	if f.uniqueRunIDs && out.Status != nil {
+		st := *out.Status
+		st.RunID = "ext-" + strconv.Itoa(len(f.starts))
+		out.Status = &st
+	}
+	return out, nil
 }
 
 func (f *fakeContractClient) Status(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
 	f.statuses = append(f.statuses, in.Command)
 	f.recordWorkDir("status", in.WorkDir)
+	if f.echoRunning {
+		return contractOut(ContractStateRunning, nil, func(st *ContractStatus) { st.RunID = in.Command[2] }), nil
+	}
 	if len(f.queue) > 0 {
 		f.last = f.queue[0]
 		f.queue = f.queue[1:]
