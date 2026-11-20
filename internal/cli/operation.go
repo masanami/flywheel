@@ -139,8 +139,14 @@ func releasePhaseText(res *core.ReleaseExecResult) string {
 			fmt.Fprintf(&b, "%s\t%s\t(立て直し)\t課題を完了から検証中へ戻し、%s に置き換えた（%s）\n", t.OperationID, t.ChallengeID, t.NewOperationID, t.ReopenReason)
 		case core.ReleaseTidyNeedsHuman:
 			fmt.Fprintf(&b, "%s\t%s\t(人間待ち)\t取り込みだけとも中身の変更とも確かめられません（%s）。承認するか、approve %s --reopen で検証中へ戻すかを選んでください\n", t.OperationID, t.ChallengeID, escapeControl(t.WaitReason), t.OperationID)
+		case core.ReleaseTidySkipped:
+			fmt.Fprintf(&b, "%s\t%s\t(飛ばした)\t課題を検証中へ戻せませんでした（%s）。次の反映の段でやり直します\n", t.OperationID, t.ChallengeID, escapeControl(t.WaitReason))
 		default:
-			fmt.Fprintf(&b, "%s\t%s\t(閉じた)\t%s\n", t.OperationID, t.ChallengeID, t.ClosedReason)
+			fmt.Fprintf(&b, "%s\t%s\t(閉じた)\t%s", t.OperationID, t.ChallengeID, t.ClosedReason)
+			if t.CancelNote != "" {
+				fmt.Fprintf(&b, "（委譲先の実行を取り消せませんでした: %s）", escapeControl(t.CancelNote))
+			}
+			b.WriteString("\n")
 		}
 	}
 	for _, it := range res.Items {

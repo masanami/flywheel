@@ -50,36 +50,44 @@ func (r *releaseRun) route() string {
 	return ReleaseRouteWaitingRun
 }
 
+// loadOpenRunInTx は課題 cid の、終わっていない契約の実行（課題ごとに高々 1 本。無ければ nil）を、取り込み元の結び付き・
+// 承認済みの計画の版つきで読む。対応するかは決めない（corresponds は偽）。
+func loadOpenRunInTx(ctx context.Context, tx *sql.Tx, cid int64) (*releaseRun, error) {
+	cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, cid))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := &releaseRun{row: cr}
+	if out.binding, err = loadTaskSourceBinding(ctx, tx, cr.ChallengeID, cr.TaskID); err != nil {
+		return nil, err
+	}
+	if p, found, err := loadApprovedPlanAnySpec(ctx, tx, cr.ChallengeID); err != nil {
+		return nil, err
+	} else if found {
+		v := int64(p.Version)
+		out.planVersion = &v
+	}
+	return out, nil
+}
+
 // loadReleaseRun は反映の操作 row の課題の、終わっていない契約の実行を読む（無ければ nil）。
 func (s *Store) loadReleaseRun(ctx context.Context, row *operationRow) (*releaseRun, error) {
 	var out *releaseRun
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, row.ChallengeID))
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
+		var err error
+		if out, err = loadOpenRunInTx(ctx, tx, row.ChallengeID); err != nil || out == nil {
 			return err
 		}
-		out = &releaseRun{row: cr}
+		cr := out.row
 		if cr.Kind == contractRunKindReflect {
 			out.corresponds = cr.OperationID != nil && *cr.OperationID == row.ID
 		} else if row.Ref.Valid {
 			out.corresponds, err = taskRunImportedRef(ctx, tx, cr, row.Ref.String)
-			if err != nil {
-				return err
-			}
 		}
-		if out.binding, err = loadTaskSourceBinding(ctx, tx, cr.ChallengeID, cr.TaskID); err != nil {
-			return err
-		}
-		if p, found, err := loadApprovedPlanAnySpec(ctx, tx, cr.ChallengeID); err != nil {
-			return err
-		} else if found {
-			v := int64(p.Version)
-			out.planVersion = &v
-		}
-		return nil
+		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
@@ -112,7 +120,7 @@ func taskRunImportedRef(ctx context.Context, tx *sql.Tx, cr *contractRunRow, ref
 	return false, rows.Err()
 }
 
-// releaseContractCommand は反映の段が、既存の契約の実行へ契約のコマンド（status・resume）を 1 回呼んで記録する。
+// releaseContractCommand は反映の段が、既存の契約の実行へ契約のコマンド（status・resume・cancel）を 1 回呼んで記録する。
 // 契約の実行の記録を作れなかった（課題に終わっていない実行の記録がある）ときは errReleaseContractBusy を返す。
 func (s *Store) releaseContractCommand(ctx context.Context, opts ReleaseExecOptions, run *releaseRun, name string, fill contractFill) (*ContractRunReport, string, error) {
 	if opts.Contract == nil {
@@ -123,8 +131,11 @@ func (s *Store) releaseContractCommand(ctx context.Context, opts ReleaseExecOpti
 		return nil, err.Error(), nil
 	}
 	args := connector.Commands.Status
-	if name == "resume" {
+	switch name {
+	case "resume":
 		args = connector.Commands.Resume
+	case "cancel":
+		args = connector.Commands.Cancel
 	}
 	fill.ChallengeID = formatChallengeID(run.row.ChallengeID)
 	fill.Source = run.binding
@@ -177,11 +188,69 @@ func (s *Store) readReleaseRun(ctx context.Context, opts ReleaseExecOptions, run
 	return rep, nil, nil
 }
 
+// landRefusal は、「入れてよい」が届いた後（land_delivered が真）に、中身の識別が land_ref と同じレビュー待ちが戻ったとき、
+// 結果 land_refused の判定を返す（委譲先が、宛先が動いた以外の理由で入れられなかった）。それ以外は nil。
+// 間の試行の結果（waiting_delegate・upstream_failed ほか）には、よらない。求めの文が同じでも、中身の識別で見分ける。
+func landRefusal(run *releaseRun, rep *ContractRunReport) *releaseJudgment {
+	ra := rep.RequestedAction
+	if run.row.Kind != contractRunKindTask || run.row.LandRef == "" || !run.row.LandDelivered ||
+		rep.State != ContractStateWaiting || ra == nil || ra.Kind != contractRequestedKindReview {
+		return nil
+	}
+	if got, n := reviewContentRefs(rep.Artifacts); n != 1 || got != run.row.LandRef {
+		return nil
+	}
+	return &releaseJudgment{result: ExecutionResultLandRefused, route: run.route(),
+		detail: fmt.Sprintf("the delegate did not land %s: summary: %s; requested_action.text: %s", run.row.LandRef, rep.Summary, ra.Text)}
+}
+
+// cancelReleaseRunNote は、反映の操作が委譲先の succeeded を読む以外の道で終わるとき、対応するタスクの実行が終わっていなければ
+// commands.cancel で取り消す。rep が nil なら先に commands.status で読む（片付け）。失敗は返す文に残す（結果は変えない。成功・不要は空）。
+func (s *Store) cancelReleaseRunNote(ctx context.Context, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport) string {
+	if run == nil || !run.corresponds || run.row.Kind != contractRunKindTask {
+		return ""
+	}
+	if rep == nil {
+		var early *releaseJudgment
+		var err error
+		if rep, early, err = s.readReleaseRun(ctx, opts, run); err != nil {
+			return "could not read the contract run to cancel it: " + err.Error()
+		}
+		if early != nil && early.result == ExecutionResultUpstreamFailed {
+			return "could not cancel the contract run: " + early.detail
+		}
+	}
+	if rep.State.Terminal() {
+		return ""
+	}
+	out, why, err := s.releaseContractCommand(ctx, opts, run, "cancel", contractFill{})
+	switch {
+	case err != nil:
+		return "could not cancel the contract run: " + err.Error()
+	case why != "":
+		return "could not cancel the contract run: " + why
+	case out.Result != RunResultSucceeded || !out.State.Terminal():
+		return fmt.Sprintf("could not cancel the contract run %s (result: %s, state: %s)", run.row.ExternalRunID, out.Result, out.State)
+	}
+	return ""
+}
+
+// appendDetail は試行の記録の詳細 base へ note を足す（どちらかが空ならもう一方）。
+func appendDetail(base, note string) string {
+	switch {
+	case note == "":
+		return base
+	case base == "":
+		return note
+	}
+	return base + "; " + note
+}
+
 // chooseReleasePath は成果物の確認とチェックを通った反映の操作の道を選ぶ。passRef は通す中身、observed は見た中身。
 // run は課題の終わっていない契約の実行（無ければ nil）、rep はそれを先に読んだ状態（対応しない実行は nil）。
 func (s *Store) chooseReleasePath(ctx context.Context, row *operationRow, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport, passRef, observed string) (releaseJudgment, error) {
 	outside := releaseJudgment{result: ExecutionResultWaitingOutside, observedHead: observed, route: ReleaseRouteOutside}
-	if run == nil || (rep != nil && rep.State.Terminal()) {
+	if run == nil {
 		return outside, nil
 	}
 	if !run.corresponds {

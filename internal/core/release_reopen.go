@@ -29,6 +29,55 @@ type ReopenForReleaseInput struct {
 	Reason ReopenReason
 	// Sources は core が自分で比較し直すための取得の口。口が無い・比較できないときは、戻す対象なら ErrConflict。
 	Sources ReleaseHeadSources
+	// ContractSources は、戻す前にその課題の終わっていないタスクの契約の実行を commands.status で読むための口。
+	// 終わっていないタスクの実行が無ければ使わない（nil でよい）。あるのに無ければ、読めないので戻さない（ErrConflict）。
+	ContractSources ReopenContractSources
+}
+
+// ReopenContractSources は、課題を完了から戻す前の、タスクの契約の実行の状態の読み（commands.status）の入力。
+type ReopenContractSources struct {
+	Contract   ContractClient
+	Agent      *AgentDeclaration
+	Connectors *ConnectorsDeclaration
+}
+
+// errReopenBlockedByRun は、課題の終わっていないタスクの契約の実行が running か読めないため、完了から戻さなかったことを表す
+// （ErrConflict の一種）。課題は完了のまま。
+var errReopenBlockedByRun = fmt.Errorf("%w: the challenge has an unfinished task contract run that is running or could not be read", ErrConflict)
+
+// readTaskRunBeforeReopen は opID の課題の、終わっていないタスクの契約の実行を commands.status で読む。
+// running（委譲先が反映先へ入れている途中かもしれない）か読めなければ errReopenBlockedByRun。待ち（レビュー待ちを含む）なら戻してよい。
+// 終わっていれば、status の読みが契約の実行を終わった記録にする。終わっていないタスクの実行が無ければ何も呼ばない。
+func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs ReopenContractSources) error {
+	var run *releaseRun
+	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		row, err := loadOperationRow(ctx, tx, opID)
+		if err != nil {
+			return err
+		}
+		run, err = loadOpenRunInTx(ctx, tx, row.ChallengeID)
+		return err
+	}); err != nil {
+		return classifyReadWriteErr(err)
+	}
+	if run == nil || run.row.Kind != contractRunKindTask {
+		return nil
+	}
+	if cs.Contract == nil || cs.Connectors == nil {
+		return errReopenBlockedByRun
+	}
+	opts := ReleaseExecOptions{Contract: cs.Contract, Agent: cs.Agent, Connectors: cs.Connectors}
+	rep, why, err := s.releaseContractCommand(ctx, opts, run, "status", contractFill{})
+	if errors.Is(err, errReleaseContractBusy) {
+		return errReopenBlockedByRun
+	}
+	if err != nil {
+		return err
+	}
+	if why != "" || rep.Result != RunResultSucceeded || rep.State == ContractStateRunning {
+		return errReopenBlockedByRun
+	}
+	return nil
 }
 
 // ReopenForReleaseResult は ReopenChallengeForRelease の結果。
@@ -66,12 +115,12 @@ func (s *Store) ReopenChallengeForRelease(ctx context.Context, ch Channel, in Re
 	if err != nil {
 		return nil, err
 	}
-	return s.reopenChallengeForRelease(ctx, ch, in.OperationID, in.Reason, as)
+	return s.reopenChallengeForRelease(ctx, ch, in.OperationID, in.Reason, as, in.ContractSources)
 }
 
 // reopenChallengeForRelease は as（core の評価）が reason に合うことを確かめて戻す。as が戻す対象でない
 // （Eligible が偽）ときは書かずに Reopened=false。評価の検証の head が書き込みの時点の最新と異なれば ErrConflict。
-func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDText string, reason ReopenReason, as *ReleaseReopenAssessment) (*ReopenForReleaseResult, error) {
+func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDText string, reason ReopenReason, as *ReleaseReopenAssessment, cs ReopenContractSources) (*ReopenForReleaseResult, error) {
 	opID, ok := parseOperationID(opIDText)
 	if !ok {
 		return nil, ErrNotFound
@@ -88,6 +137,12 @@ func (s *Store) reopenChallengeForRelease(ctx context.Context, ch Channel, opIDT
 	actor, err := s.resolveActor()
 	if err != nil {
 		return nil, err
+	}
+	// 戻す前に、終わっていないタスクの契約の実行を読む（running か読めなければ戻さない）。
+	if as.Eligible {
+		if err := s.readTaskRunBeforeReopen(ctx, opID, cs); err != nil {
+			return nil, err
+		}
 	}
 	var res *ReopenForReleaseResult
 	err = s.mutateAs(ctx, actor, ch, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {

@@ -1201,3 +1201,25 @@ func InsertFollowup(t *testing.T, workspace string, r FollowupRow) int64 {
 	}
 	return id
 }
+
+// InsertContractRun は終わっていないタスクの契約の実行（contract_run）を 1 件挿入する（開始の run を終わった run として添える）。
+// 契約のコマンドを呼ぶ口（完了から戻す前の読みなど）の CLI のテストが、接続ツールの実行を持つ課題を作るために使う。
+func InsertContractRun(t *testing.T, workspace string, challengeID int, connectorID, externalRunID, state string) {
+	t.Helper()
+	runID := InsertRun(t, workspace, InsertRunInput{
+		ChallengeID: challengeID, Kind: "contract", ChallengeVersion: 1, SessionID: "s-" + externalRunID, PID: 1, Host: "h",
+		HeartbeatAt: "2026-10-22T00:00:00.000Z", StartedAt: "2026-10-22T00:00:00.000Z", EndedAt: "2026-10-22T00:00:01.000Z",
+		Result: "succeeded", BudgetBucket: "delegate",
+	})
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, max_budget_usd, started_at, observed_at)
+			 VALUES (?, ?, ?, ?, ?, 's', 1000000, '2026-10-22T00:00:00.000Z', '2026-10-22T00:00:00.000Z')`,
+			challengeID, connectorID, externalRunID, runID, state)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertContractRun: %v", err)
+	}
+}

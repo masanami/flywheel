@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -546,5 +547,77 @@ func TestUndeterminable_ReopenFlagIsOnlyForOperationIDs(t *testing.T) {
 	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.id, "--reopen")...)
 	if code == 0 || !strings.Contains(stderr, "usage_error") {
 		t.Fatalf("exit=%d stderr=%s, want usage_error", code, stderr)
+	}
+}
+
+// reopenToolConnectorsFixture は、完了から戻す前の読み（commands.status）を呼ぶ接続ツール tool の宣言。
+const reopenToolConnectorsFixture = `{
+  "version": 1,
+  "connectors": [
+    {"id": "tool", "form": "cli", "permission_mode": "default",
+     "commands": {
+       "start": ["tool", "start", "--challenge", "{challenge_id}"],
+       "status": ["tool", "status", "{run_id}"],
+       "resume": ["tool", "resume", "{run_id}", "--answer", "{answer}"],
+       "cancel": ["tool", "cancel", "{run_id}"]
+     },
+     "contract_version": 1,
+     "operations": [{"id": "impl", "interactive": false, "child_may_decide": true, "artifacts": "pr"}]}
+  ],
+  "repos": [
+    {"name": "r-repo", "remote": "o/r", "default_branch": "main", "connector": "tool", "slots": {"provider": "clone", "paths": ["slot-a"]}}
+  ]
+}`
+
+// putFakeStatusToolOnPATH は status が常に state を返す偽の接続ツール tool を PATH の先頭に置く。
+func putFakeStatusToolOnPATH(t *testing.T, state string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"status) printf '{\"contract_version\":1,\"run_id\":\"%s\",\"state\":\"" + state + "\",\"summary\":\"s\"}\\n' \"$2\";;\n" +
+		"*) exit 1;;\n" +
+		"esac\n"
+	dir := t.TempDir()
+	if err := writeExecutable(filepath.Join(dir, "tool"), []byte(script)); err != nil {
+		t.Fatalf("write fake tool: %v", err)
+	}
+	addToolDir(t, dir)
+}
+
+// AC-317: approve <OP-ID> --reopen で、タスクの契約の実行を commands.status で読んだ状態が running のとき、conflict で終わり、課題は done のまま。
+func TestReopenOperation_ARunningTaskRunMakesTheReopenConflict(t *testing.T) {
+	parallelTools(t, false)
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
+	writeConnectorsJSONForTest(t, f.ws, reopenToolConnectorsFixture)
+	cid := challengeIDToInternalID(t, f.id)
+	coretest.SetChallengeStatus(t, f.ws, cid, "done")
+	coretest.InsertContractRun(t, f.ws, cid, "tool", "ext-1", "waiting")
+	putFakeStatusToolOnPATH(t, "running")
+	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.ops[0], "--reopen")...)
+	if code == 0 || !strings.Contains(stderr, "conflict") {
+		t.Fatalf("exit=%d stderr=%s, want a conflict", code, stderr)
+	}
+	if got := f.challengeStatus(t); got != "done" {
+		t.Errorf("challenge status = %s, want done", got)
+	}
+}
+
+// 待ち（レビュー待ち）の実行は、読んだ上で戻す。
+func TestReopenOperation_AWaitingTaskRunIsReadAndTheChallengeIsReopened(t *testing.T) {
+	parallelTools(t, false)
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
+	writeConnectorsJSONForTest(t, f.ws, reopenToolConnectorsFixture)
+	cid := challengeIDToInternalID(t, f.id)
+	coretest.SetChallengeStatus(t, f.ws, cid, "done")
+	coretest.InsertContractRun(t, f.ws, cid, "tool", "ext-1", "waiting")
+	putFakeStatusToolOnPATH(t, "waiting")
+	code, _, stderr := runCLIRaw(t, relayedArgs(f.ws, "approve", f.ops[0], "--reopen")...)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr)
+	}
+	if got := f.challengeStatus(t); got != "verifying" {
+		t.Errorf("challenge status = %s, want verifying", got)
 	}
 }

@@ -263,7 +263,9 @@ func TestReleaseLand_ACancellingResultClearsTheLandRefWithoutCancellingTheRun(t 
 	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateRunning, nil, nil)}
 	// 委譲先が running のうちは待つだけ。レビュー待ちへ戻って中身が食い違えば head_changed になる。
 	f.release(t)
+	// 委譲先が反映先の最新を取り込んだ別の中身で、レビュー待ちへ戻った（同じ中身なら land_refused になる）。
 	f.client.queue = []ContractLaunchOutput{reviewWaitOutFor(reviewPRURL)}
+	f.client.queue[0].Status.Artifacts[1].Ref = "unrelated-change"
 	item := f.release(t)
 	if item.Result != ExecutionResultHeadChanged {
 		t.Fatalf("item = %+v, want head_changed", item)
@@ -415,8 +417,10 @@ func TestReleaseLand_ReopeningTheChallengeClearsTheLandRef(t *testing.T) {
 	cmp := newFakeCompare()
 	cmp.set(f.head, "hc", ahead(commit("hc", "add feature", f.head)))
 	cmp.set("main", "hc", ahead(commit(f.head, "fix", "p0"), commit("hc", "add feature", f.head)))
+	f.client.queue = []ContractLaunchOutput{reviewWaitOutFor(reviewPRURL)} // 戻す前の読み: 待ちなら戻す
 	res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, ReopenForReleaseInput{
 		OperationID: "OP-1", Reason: ReopenReasonContentChanged, Sources: ReleaseHeadSources{Checks: f.fake, Compare: cmp},
+		ContractSources: ReopenContractSources{Contract: f.client, Agent: &AgentDeclaration{FailureLimit: 3}, Connectors: f.conn},
 	})
 	if err != nil || !res.Reopened {
 		t.Fatalf("ReopenChallengeForRelease = %+v err %v, want reopened", res, err)
