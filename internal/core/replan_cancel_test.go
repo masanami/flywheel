@@ -389,6 +389,60 @@ func TestAnswerReplan_ARunningReflectRequestDoesNotRefuseTheReplanAnswer(t *test
 	}
 }
 
+// 上げる依頼は、終わっていないタスクがあるとき（計画の版が同じでも）、状態の確認が取り消す（新しい版のタスクが集めるまで、上げる依頼を残さない）。
+func TestObsoleteReflect_AnUnfinishedTaskMakesTheOpenReflectRequestObsolete(t *testing.T) {
+	t.Parallel()
+	f, id := newUpFixture(t, upConnectorsJSON())
+	f.openReflectRun(t)
+	var reflectRun string
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT external_run_id FROM contract_run WHERE kind = 'reflect' AND ended_at IS NULL`).Scan(&reflectRun)
+	})
+	cid, _ := parseChallengeID(id)
+	f.sqlExec(t, `UPDATE task SET status = 'pending' WHERE challenge_id = ?`, cid)
+	f.client.cancelOut = contractOut(ContractStateCancelled, nil, nil)
+	f.runDelegationStage(t, nil)
+	if !containsAll(f.cancelledRunIDs(), reflectRun) {
+		t.Fatalf("cancels = %v, want the reflect request %s", f.client.cancels, reflectRun)
+	}
+}
+
+// 上げる依頼は、始めた後に計画が承認し直されたとき、新しい版のタスクが全部済んでいても、取り消す（古い計画のときに集めた中身を上げ続けない）。
+func TestObsoleteReflect_ANewerPlanMakesTheOpenReflectRequestObsoleteEvenWhenAllTasksAreDone(t *testing.T) {
+	t.Parallel()
+	f, id := newUpFixture(t, upConnectorsJSON())
+	cid, _ := parseChallengeID(id)
+	f.openReflectRun(t)
+	var reflectRun string
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT external_run_id FROM contract_run WHERE kind = 'reflect' AND ended_at IS NULL`).Scan(&reflectRun)
+	})
+	if err := f.replanTo(t, id, multiTask{key: "c"}); err != nil {
+		t.Fatalf("replan answer: %v", err)
+	}
+	f.sqlExec(t, `UPDATE task SET status = 'done' WHERE challenge_id = ? AND status IN ('pending', 'in_progress', 'verifying')`, cid)
+	f.client.cancelOut = contractOut(ContractStateCancelled, nil, nil)
+	f.runDelegationStage(t, nil)
+	if !containsAll(f.cancelledRunIDs(), reflectRun) {
+		t.Fatalf("cancels = %v, want the reflect request %s", f.client.cancels, reflectRun)
+	}
+}
+
+// 取りやめになったタスクの、保留の間の成功の印（held_success）は、検証中へ進めない（取り消すだけの実行の成果物を取り込まない）。
+func TestSubmitHeldContractSuccesses_SkipsTheRunOfACancelledTask(t *testing.T) {
+	t.Parallel()
+	f := newIntakeFixture(t, reviewConnectorsJSON)
+	f.sql(t, `UPDATE contract_run SET held_success = 1`)
+	f.sql(t, `UPDATE task SET status = 'cancelled'`)
+	n, err := f.s.SubmitHeldContractSuccesses(context.Background(), nil)
+	if err != nil || n != 0 {
+		t.Fatalf("n = %d, err = %v, want 0", n, err)
+	}
+	if got := f.status(t, f.cid); got != StatusInProgress {
+		t.Fatalf("status = %s, want in_progress", got)
+	}
+}
+
 // AC-218: 上げる依頼が走っている課題を取り下げると、上げる依頼に commands.cancel が呼ばれる。
 func TestWithdraw_AC218_TheReflectRequestIsCancelled(t *testing.T) {
 	t.Parallel()
@@ -437,5 +491,23 @@ func TestWithdraw_AC217_BothTaskRunsAreCancelled(t *testing.T) {
 	}
 	if open := f.openContractRunIDs(t, id); len(open) != 0 {
 		t.Errorf("open runs = %v, want none", open)
+	}
+}
+
+// 取り下げのために取り消した実行は、課題を保留にしない（取り消すだけで、成果物も取り込まない）。
+func TestWithdraw_TheCancelledRunsDoNotHoldTheChallenge(t *testing.T) {
+	t.Parallel()
+	f := newMultiFixture(t, 3)
+	id := f.newMulti(t, "two", "P1", true, multiTask{key: "a"}, multiTask{key: "b"})
+	f.runDelegationStage(t, nil)
+	f.client.cancelOut = contractOut(ContractStateCancelled, nil, nil)
+	if _, err := f.s.CancelOpenContractRuns(context.Background(), ContractCancelInput{ChallengeID: id, AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.statusOf(t, id); got != StatusInProgress {
+		t.Errorf("status = %s, want in_progress (cancelling for the withdraw does not hold)", got)
+	}
+	if held := f.holdReasons(t, id); len(held) != 0 {
+		t.Errorf("holds = %v, want none", held)
 	}
 }
