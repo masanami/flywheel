@@ -168,8 +168,8 @@ func TestPollContractRuns_NotMetAtTheReworkLimitHoldsInsteadOfResuming(t *testin
 	}
 }
 
-// (3) 本番反映（release が executed）の後に ready を返し、接続ツールの run が succeeded で終わる。
-func TestPollContractRuns_AfterTheReleaseIsExecutedReadyIsReturnedAndTheRunEnds(t *testing.T) {
+// 本番反映（release が executed）の後も、課題が完了ならレビュー待ちの run は委譲の段が読まず、ready も返さない。
+func TestPollContractRuns_ADoneChallengesRunIsNotReadAndReadyIsNeverReturned(t *testing.T) {
 	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.toVerifying(t)
@@ -191,20 +191,13 @@ func TestPollContractRuns_AfterTheReleaseIsExecutedReadyIsReturnedAndTheRunEnds(
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f.client.resumeOut = contractOut(ContractStateSucceeded, nil, func(st *ContractStatus) {
-		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}, reviewContentArtifact}
-	})
+	before := len(f.client.statuses)
 	f.poll(t)
-	want := []string{"tool", "resume", "ext-1", "--choice", "ready", "--note", ""}
-	if len(f.client.resumes) != 1 || !reflect.DeepEqual(f.client.resumes[0], want) {
-		t.Fatalf("resumes = %v, want %v", f.client.resumes, want)
+	if len(f.client.resumes) != 0 || len(f.client.statuses) != before {
+		t.Fatalf("resumes=%d statuses=%d (was %d) for a done challenge, want no contract command", len(f.client.resumes), len(f.client.statuses), before)
 	}
-	if state, _, _, ended := f.contractRow(t); state != "succeeded" || !ended {
-		t.Fatalf("contract_run state=%s ended=%v, want succeeded and ended", state, ended)
-	}
-	f.poll(t)
-	if len(f.client.resumes) != 1 || len(f.client.statuses) != 1 {
-		t.Fatalf("resumes=%d statuses=%d after the run ended, want no more calls", len(f.client.resumes), len(f.client.statuses))
+	if state, _, _, ended := f.contractRow(t); state != "waiting" || ended {
+		t.Fatalf("contract_run state=%s ended=%v, want the recorded waiting state kept", state, ended)
 	}
 }
 

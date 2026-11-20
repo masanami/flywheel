@@ -353,9 +353,8 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		return s.answerParentWait(ctx, in, row, connector, binding, planVersion, cycleID, rep)
 	}
 	if !resume && row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindObserve && stillObserving(rep) {
-		// オーナーの保留（人間対応待ち）の間は、接続ツールの run を進める resume を呼ばない。課題が完了（本番反映の後に ready を
-		// 返した後の観測の待ち。例: human-merge）でも、run が終わるまで読み進めるために呼ぶ。
-		if ok, err := s.challengeObservable(ctx, row.ChallengeID); err != nil || !ok {
+		// オーナーの保留（人間対応待ち）の間は、接続ツールの run を進める resume を呼ばない。
+		if ok, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !ok {
 			return rep, err
 		}
 		return s.resumeObservation(ctx, in, row, connector, binding, planVersion, cycleID, rep)
@@ -411,19 +410,14 @@ func (s *Store) challengeInProgress(ctx context.Context, cid int64) (bool, error
 	return inProgress, classifyReadWriteErr(err)
 }
 
-// challengeObservable は、観測の待ちに答え無しの resume を呼んでよい課題か（着手中か完了）。
-func (s *Store) challengeObservable(ctx context.Context, cid int64) (bool, error) {
-	var ok bool
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		ch, err := loadChallenge(ctx, tx, cid)
-		ok = err == nil && ch != nil && (ch.Status == StatusInProgress || ch.Status == StatusDone)
-		return err
-	})
-	return ok, classifyReadWriteErr(err)
-}
-
 // runExistingContractCommand は既存の契約の run に対するコマンド（status・resume・cancel）を 1 回呼んで記録する。
 func (s *Store) runExistingContractCommand(ctx context.Context, client ContractClient, agent *AgentDeclaration, workDir string, row *contractRunRow, name string, command []string, planVersion, cycleID *int64, stopNote string) (*ContractRunReport, error) {
+	return s.runExistingContractCommandWith(ctx, client, agent, workDir, row, name, command, planVersion, cycleID, stopNote, false)
+}
+
+// runExistingContractCommandWith は runExistingContractCommand に、反映の段が呼ぶとき（releaseStage）の違い（成果物を取り込まない・
+// 保留にしない・facts の回数を数えない）を足したもの。
+func (s *Store) runExistingContractCommandWith(ctx context.Context, client ContractClient, agent *AgentDeclaration, workDir string, row *contractRunRow, name string, command []string, planVersion, cycleID *int64, stopNote string, releaseStage bool) (*ContractRunReport, error) {
 	sessionID, err := newLowercaseUUIDv4()
 	if err != nil {
 		return nil, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err)
@@ -448,8 +442,8 @@ func (s *Store) runExistingContractCommand(ctx context.Context, client ContractC
 			}
 			return client.Status(ctx, li)
 		},
-		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote,
-		FactsRequired: row.reqFacts, CountFacts: name == "status",
+		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseStage,
+		FactsRequired: row.reqFacts, CountFacts: name == "status" && !releaseStage,
 	})
 }
 

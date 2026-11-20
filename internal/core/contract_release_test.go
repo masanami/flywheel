@@ -150,8 +150,8 @@ func TestPollContractRuns_AStaleReleaseLeftFromBeforeIsReplacedOnTheNextRead(t *
 	}
 }
 
-// (3) 完了の承認から本番反映のマージ、ready を返すまでが手の補い無しに通る。
-func TestPollContractRuns_ApprovalMergeAndReadyRunWithoutManualRelease(t *testing.T) {
+// (3) 完了の承認から、反映の段が入ったことを読んで実行済みにするまでが手の補い無しに通る（ready は返さない）。
+func TestPollContractRuns_ApprovalThenTheReleasePhaseReadsTheLandedPRWithoutReady(t *testing.T) {
 	t.Parallel()
 	f := newReviewFlowFixture(t)
 	ctx := context.Background()
@@ -178,55 +178,15 @@ func TestPollContractRuns_ApprovalMergeAndReadyRunWithoutManualRelease(t *testin
 	merged.State = "merged"
 	merged.MergeCommitSHA = "merge-sha"
 	fake := &fakeRelease{pr: merged}
-	res, err := f.s.ExecuteReleases(ctx, nil, ReleaseExecOptions{Checks: fake, Connectors: f.conn, Agent: &AgentDeclaration{FailureLimit: 3}, Trigger: ReleaseExecTriggerOpExec})
+	// 反映の段は、対応するタスクの実行を先に status で読む（まだレビュー待ち）。入ったことは上流から読む。
+	f.client.queue = []ContractLaunchOutput{reviewWaitOutFor(reviewPRURL)}
+	res, err := f.s.ExecuteReleases(ctx, nil, ReleaseExecOptions{Checks: fake, Connectors: f.conn, Agent: &AgentDeclaration{FailureLimit: 3}, Contract: f.client, Trigger: ReleaseExecTriggerOpExec})
 	if err != nil || len(res.Items) != 1 || res.Items[0].Result != ExecutionResultAlreadyMerged {
 		t.Fatalf("ExecuteReleases = %+v err %v, want one already_merged item", res, err)
 	}
-	f.client.resumeOut = contractOut(ContractStateSucceeded, nil, nil)
 	f.poll(t)
-	want := []string{"tool", "resume", "ext-1", "--choice", "ready", "--note", ""}
-	if len(f.client.resumes) != 1 || !reflect.DeepEqual(f.client.resumes[0], want) {
-		t.Fatalf("resumes = %v, want %v", f.client.resumes, want)
-	}
-	if state, _, _, ended := f.contractRow(t); state != "succeeded" || !ended {
-		t.Fatalf("contract_run state=%s ended=%v, want succeeded and ended", state, ended)
-	}
-}
-
-// (4) ready の後に観測の待ち（human-merge など）を返す接続ツールでも、課題が完了のまま、答え無しの resume で読み進めて run が succeeded になる。
-func TestPollContractRuns_ObserveAfterReadyOnADoneChallengeIsResumedUntilSucceeded(t *testing.T) {
-	t.Parallel()
-	f := newReviewFlowFixture(t)
-	f.setPR(1, reviewPRURL, "open", "main")
-	f.toVerifying(t)
-	insertReleaseForTest(t, f.s, f.cid, reviewPRURL, OperationStateExecuted, "merge-sha")
-	n, _ := parseChallengeID(f.cid)
-	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE challenge SET status = ? WHERE id = ?`, string(StatusDone), n)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	observe := contractOut(ContractStateWaiting, nil, func(st *ContractStatus) {
-		st.RequestedAction = &ContractRequestedAction{Kind: "observe", Decider: "any", Text: "マージを見ている"}
-	})
-	f.client.resumeOut = observe
-	f.poll(t) // ready を返す。接続ツールは観測の待ちを返す。
-	if len(f.client.resumes) != 1 {
-		t.Fatalf("resumes = %v, want the ready only", f.client.resumes)
-	}
-	// 次の周: 状態を読み直し、まだ観測の待ちなら答え無しの resume を呼ぶ（課題は完了のまま）。
-	f.client.queue = []ContractLaunchOutput{observe}
-	f.client.resumeOut = contractOut(ContractStateSucceeded, nil, nil)
-	f.poll(t)
-	if len(f.client.resumes) != 2 || !reflect.DeepEqual(f.client.resumes[1], []string{"tool", "resume", "ext-1", "--choice", "", "--note", ""}) {
-		t.Fatalf("resumes = %v, want an answerless resume after the ready", f.client.resumes)
-	}
-	if state, _, _, ended := f.contractRow(t); state != "succeeded" || !ended {
-		t.Fatalf("contract_run state=%s ended=%v, want succeeded and ended", state, ended)
-	}
-	if got := f.status(t, f.cid); got != StatusDone {
-		t.Fatalf("status = %s, want done", got)
+	if len(f.client.resumes) != 0 {
+		t.Fatalf("resumes = %v, want none (ready is never returned)", f.client.resumes)
 	}
 }
 

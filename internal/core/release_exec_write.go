@@ -149,6 +149,10 @@ func (s *Store) cancelReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activity
 	}); err != nil {
 		return err
 	}
+	// 承認し直した後に、もう一度「入れてよい」を返せるよう、対応する契約の実行の通した中身の記録を消す。
+	if err := clearLandRefsForOperation(ctx, tx, w.challengeID, w.opID); err != nil {
+		return err
+	}
 	kind := OccurrenceKindReleaseWithdrawn
 	if w.result == ExecutionResultMergedUnapproved {
 		kind = OccurrenceKindUnapprovedMerge
@@ -219,11 +223,15 @@ func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int
 				return err
 			}
 		}
+		if j.landDeliveredRunID != 0 && j.result == ExecutionResultLandSent && w.result == j.result {
+			// 「入れてよい」が届いた記録は、結果 land_sent と同じ書き込みで真にする。
+			if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET land_delivered = 1 WHERE id = ?`, j.landDeliveredRunID); err != nil {
+				return err
+			}
+		}
 		item.Result = w.result
 		item.ObservedHead = w.observedHead
-		if w.result == ExecutionResultWaitingOutside {
-			item.Route = ReleaseRouteOutside
-		}
+		item.Route = j.route
 		if class == ExecutionClassExecuted {
 			item.MergeCommit = w.mergeCommit
 		}

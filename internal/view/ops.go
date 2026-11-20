@@ -124,8 +124,8 @@ type ReleaseItem struct {
 	ObservedHead        *string `json:"observed_head"`
 	OperationID         string  `json:"operation_id"`
 	Result              string  `json:"result"`
-	// Route は反映の依頼の経路（waiting_run | reflect_request | outside）。いま値を持つのは結果が waiting_outside の
-	// outside だけで、それ以外は null。
+	// Route は反映の依頼の経路（waiting_run | reflect_request | outside）。対応する契約の実行が無い・対応しない
+	// 実行を待つときは null。
 	Route *string `json:"route"`
 }
 

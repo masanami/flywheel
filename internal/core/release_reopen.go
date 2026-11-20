@@ -216,6 +216,10 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 	if err := reverifyDoneTasks(ctx, tx, rec, row.ChallengeID); err != nil {
 		return nil, err
 	}
+	// 承認し直した後に、もう一度「入れてよい」を返せるよう、対応する契約の実行の通した中身の記録を消す。
+	if err := clearLandRefs(ctx, tx, row.ChallengeID); err != nil {
+		return nil, err
+	}
 
 	newOpID := formatOperationID(newID)
 	challengeAfter := map[string]any{

@@ -281,18 +281,37 @@ type contractRunRow struct {
 	WorkDir string
 	// TaskID は結び付くタスクの内部整数 ID（0026。nil は NULL）。
 	TaskID *int64
+	// Kind は契約の実行の種類（task | reflect）。OperationID は反映の依頼が結び付く反映の操作（task は nil）。
+	Kind        string
+	OperationID *int64
+	// LandRef は「入れてよい」を返す前に書いた通す中身（NULL・空は、いまの承認ではまだ返していないこと）。
+	// LandDelivered は、その「入れてよい」を委譲先が受け取ったと分かっているか。
+	LandRef       string
+	LandDelivered bool
 }
 
+// 契約の実行の種類（contract_run.kind）。
+const (
+	contractRunKindTask    = "task"
+	contractRunKindReflect = "reflect"
+)
+
 const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
-	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, ''), task_id FROM contract_run`
+	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, ''), task_id,
+	kind, operation_id, COALESCE(land_ref, ''), land_delivered FROM contract_run`
 
 func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, error) {
 	var r contractRunRow
 	var state string
-	var taskID sql.NullInt64
+	var taskID, opID sql.NullInt64
 	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget,
-		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.RequestedResolvableBy, &r.WorkDir, &taskID); err != nil {
+		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.RequestedResolvableBy, &r.WorkDir, &taskID,
+		&r.Kind, &opID, &r.LandRef, &r.LandDelivered); err != nil {
 		return nil, err
+	}
+	if opID.Valid {
+		v := opID.Int64
+		r.OperationID = &v
 	}
 	if taskID.Valid {
 		v := taskID.Int64
@@ -312,9 +331,11 @@ type contractFill struct {
 	// RunID は status・resume・cancel の契約の実行 ID。
 	RunID  string
 	Answer contractAnswer
-	// TaskFile・TaskID・UsesIntegration は start の差し込み。{approved_ref} は反映の段だけが値を入れる（ここでは常に空）。
+	// TaskFile・TaskID・UsesIntegration は start の差し込み。
 	TaskFile, TaskID string
 	UsesIntegration  bool
+	// ApprovedRef は resume の {approved_ref}。「入れてよい」を返す反映の段だけが通す中身を入れる（それ以外は空）。
+	ApprovedRef string
 }
 
 // fillContractArgs は契約のコマンドの引数の差し込みを、取り込み元が無いときに空の文字列で埋めない形で埋める
@@ -344,7 +365,7 @@ func startTakesTaskFile(c *Connector) bool {
 
 // fillContractArgsWith は契約のコマンドの引数の差し込みを埋める。取り込み元の 3 つ（{issue_number}・{issue_url}・{external_key}）と
 // {challenge_id}、status・resume・cancel の {run_id}、resume の {answer}・{choice}・{note}、start の {task_file}・{task_id}・
-// {uses_integration}、resume の {approved_ref}（常に空）。引数の要素の数は変えない。
+// {uses_integration}、resume の {approved_ref}（反映の段が「入れてよい」を返すときだけ値が入り、それ以外は空）。引数の要素の数は変えない。
 func fillContractArgsWith(args []string, f contractFill) ([]string, error) {
 	out := make([]string, len(args))
 	usesIntegration := "false"
@@ -359,15 +380,15 @@ func fillContractArgsWith(args []string, f contractFill) ([]string, error) {
 		v = strings.ReplaceAll(v, "{run_id}", f.RunID)
 		// 答えとタスクの値は最後に、1 回の置き換えにまとめて差し込む（差し込んだ値の中の波括弧を、他の差し込みとして読まない）。
 		out[i] = strings.NewReplacer("{choice}", f.Answer.Choice, "{note}", f.Answer.Note, "{answer}", f.Answer.text(),
-			"{task_file}", f.TaskFile, "{task_id}", f.TaskID, "{uses_integration}", usesIntegration, "{approved_ref}", "").Replace(v)
+			"{task_file}", f.TaskFile, "{task_id}", f.TaskID, "{uses_integration}", usesIntegration, "{approved_ref}", f.ApprovedRef).Replace(v)
 	}
 	return out, nil
 }
 
 // 契約の review の待ちへ flywheel が返す答えの選択肢の値（契約の汎用の値。接続ツールは自分の選択肢へ写す）。
 const (
-	// contractChoiceReady は、成果物が本番反映（マージ）まで済んだことを知らせて run を終わらせる答え。
-	contractChoiceReady = "ready"
+	// contractChoiceLand は、検証と承認を通った中身を宛先へ入れてよいことを知らせる答え。反映の段だけが、通す中身（{approved_ref}）を付けて返す。
+	contractChoiceLand = "land"
 	// contractChoiceRespond は、完了の検証（J5）の差し戻しの理由を添えて、同じ run で直させる答え。
 	contractChoiceRespond = "respond"
 )
@@ -742,6 +763,9 @@ type contractCall struct {
 	CountFacts    bool
 	// StopNote は、中止の理由（予算の超過）。契約が cancelled・failed を返して保留にするときの問いの先頭に付く。
 	StopNote string
+	// ReleaseStage は、反映の段が呼ぶ契約のコマンド（完了の課題の実行）のとき真。成果物を課題の成果物の記録（run_artifact）へ取り込まず、
+	// 課題を保留にしない（契約の実行の記録だけを読んだ値で更新する）。
+	ReleaseStage bool
 }
 
 // finishContractCall はコマンドを起動し、結果を run と contract_run へ 1 つのトランザクションで記録する。
@@ -873,7 +897,7 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 	if status == nil && c.Existing != nil {
 		report.State, report.Summary = c.Existing.State, c.Existing.Summary
 	}
-	if question := contractHoldQuestion(c, status, out.Status, reclaimed, result, errSummary); question != "" {
+	if question := contractHoldQuestion(c, status, out.Status, reclaimed, result, errSummary); question != "" && !c.ReleaseStage {
 		held, herr := s.holdForContract(ctx, c, question)
 		if herr != nil {
 			return nil, herr
@@ -1122,6 +1146,9 @@ func reviewContentRefs(arts []ContractArtifact) (ref string, n int) {
 
 // afterContractSucceeded は succeeded を読んだときの記録（保留の間に読んだ印と成果物の取り込み）。
 func (s *Store) afterContractSucceeded(ctx context.Context, tx *sql.Tx, c contractCall, st *ContractStatus, report *ContractRunReport) error {
+	if c.ReleaseStage {
+		return nil // 反映の段が読んだ成果物は、課題の成果物の記録へ取り込まない（完了の検証が読む直前の委譲の実行の成果物を変えない）
+	}
 	// 課題が保留（awaiting_human）の間に succeeded を読んだ印。答えの後の周で、start も resume も呼ばずに検証中へ進める。
 	if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 1 WHERE challenge_id = ? AND external_run_id = ?
 		AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND status = 'awaiting_human')`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
@@ -1186,7 +1213,8 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	bindings := map[*contractRunRow]*sourceBinding{}
 	planVersions := map[int64]*int64{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		q := contractRunSelect + ` WHERE ended_at IS NULL`
+		// 読むのはタスクの実行で、課題が完了でないものだけ（完了の課題の実行と反映の依頼は反映の段が読む）。
+		q := contractRunSelect + ` WHERE ended_at IS NULL AND kind = 'task' AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'done')`
 		args := []any{}
 		if only != nil {
 			q += ` AND challenge_id = ?`

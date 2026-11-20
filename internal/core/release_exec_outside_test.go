@@ -305,6 +305,14 @@ func TestSource_CoreHasNoMergeRequestInterfaces(t *testing.T) {
 	}
 }
 
+// 契約の実行へ返す答えの値 ready の定義（contractChoiceReady）は、core のソースに無い。
+func TestSource_CoreHasNoReadyAnswerDefinition(t *testing.T) {
+	t.Parallel()
+	if src := readGoSources(t, ".", false); strings.Contains(src, "contractChoiceReady") {
+		t.Error("internal/core still mentions contractChoiceReady")
+	}
+}
+
 func TestSource_GitHubAdapterHasNoMergeOrUpdateBranchCall(t *testing.T) {
 	t.Parallel()
 	src := readGoSources(t, filepath.Join("..", "adapters", "github"), false)
