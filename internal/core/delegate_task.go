@@ -139,12 +139,26 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 	}
 	if integ == nil || !*integ {
 		var cands []Task
+		var waiting []string
 		for _, t := range all {
-			if isLaunchableTask(t, byID) {
-				cands = append(cands, t)
+			if !isLaunchableTask(t, byID) {
+				continue
 			}
+			if tid := taskIntID(&t); tid > 0 {
+				open, err := taskHasOpenContractRun(ctx, tx, cid, tid)
+				if err != nil {
+					return nil, err
+				}
+				if open {
+					waiting = append(waiting, t.ID)
+					continue
+				}
+			}
+			cands = append(cands, t)
 		}
 		switch {
+		case len(cands) == 0 && len(waiting) > 0:
+			ns(NotStartedNoTasks, waitingTasksDetail(waiting))
 		case len(cands) == 0:
 			ns(NotStartedNoTasks, "起動できるタスクが無い")
 		case len(cands) >= 2:
@@ -182,6 +196,7 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 	sel.Busy = taskLessBusy
 	blocked := blockedPendingTasks(all, byID)
 	var notCLI []string
+	var waiting []string // 終わっていない契約の実行（レビュー待ち・オーナー待ち）だけを持つタスク（起動せず、待つ）
 	for _, t := range all {
 		if taskLessBusy || !isLaunchableTask(t, byID) {
 			continue
@@ -193,6 +208,14 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 			}
 			if busy {
 				sel.Busy = true
+				continue
+			}
+			open, err := taskHasOpenContractRun(ctx, tx, cid, tid)
+			if err != nil {
+				return nil, err
+			}
+			if open {
+				waiting = append(waiting, t.ID)
 				continue
 			}
 		}
@@ -223,9 +246,22 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 		return sel, nil
 	}
 	if len(sel.NotStarted) == 0 {
-		ns(NotStartedNoTasks, "起動できるタスクが無い（前提のタスクが済むのを待っている）")
+		if len(waiting) > 0 {
+			ns(NotStartedNoTasks, waitingTasksDetail(waiting))
+		} else {
+			ns(NotStartedNoTasks, "起動できるタスクが無い（前提のタスクが済むのを待っている）")
+		}
 	}
 	return sel, nil
+}
+
+// taskHasOpenContractRun は、課題 cid のタスク taskID に、終わっていない契約の実行（レビュー待ち・オーナー待ちを含む。
+// ended_at IS NULL）があるかを返す。beginContractRunForTask が start の前に断る条件と同じ。taskHasActiveRun はレビュー待ち・
+// オーナー待ちを数えないので、起動できるタスクの候補は、この確かめでも外す（外さないと、委譲の準備まで進んでから断られる）。
+func taskHasOpenContractRun(ctx context.Context, tx *sql.Tx, cid, taskID int64) (bool, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND task_id = ? AND ended_at IS NULL`, cid, taskID).Scan(&n)
+	return n > 0, err
 }
 
 // blockedByCancelledTask は、統合先を使う課題が進めようが無いとき、保留の問いを返す（そうでなければ空）。実行中のタスク
@@ -571,4 +607,9 @@ func writeTaskFile(runDir, text string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// waitingTasksDetail は、終わっていない契約の実行（レビュー待ち・オーナー待ち）を持つタスクしか残っていないときの、起動しない理由の詳細。
+func waitingTasksDetail(ids []string) string {
+	return "起動できるタスクが無い（終わっていない契約の実行を持つタスクが、レビュー・回答を待っている: " + strings.Join(ids, "・") + "）"
 }

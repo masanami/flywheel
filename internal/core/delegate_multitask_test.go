@@ -345,6 +345,114 @@ func TestMultiTask_AC10_ReviewWaitingContractRunsAreNotCounted(t *testing.T) {
 	}
 }
 
+// レビュー待ちの契約の実行（終わっていない）だけを持つ着手中のタスクは、起動できるタスクの候補に入らない（beginContractRunForTask が
+// ErrRunInProgress で断る経路へ進まない）。課題を保留にもしない（レビュー待ちは成果物の受け取りが扱う）。ほかの起動できる
+// タスクは、そのまま起動される。
+func TestMultiTask_ReviewWaitingContractRunTaskIsNotALaunchCandidate(t *testing.T) {
+	t.Parallel()
+	f := newMultiFixture(t, 3)
+	id := f.newMulti(t, "two", "P1", true, multiTask{key: "a"}, multiTask{key: "b"})
+	cid, _ := parseChallengeID(id)
+	setTaskStatusRaw(t, f.s, cid, "b", TaskStatusVerifying) // 先に a だけを起動する
+	f.runDelegationStage(t, nil)
+	setTaskStatusRaw(t, f.s, cid, "b", TaskStatusPending)
+	taskA, taskB := f.taskID(t, id, "a"), f.taskID(t, id, "b")
+	if err := f.delegateFixture.exec(`UPDATE contract_run SET state = 'waiting', requested_kind = 'review' WHERE task_id = ?`, mustTaskInt(taskA)); err != nil {
+		t.Fatal(err)
+	}
+	var sel *launchSelection
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
+		sel, err = selectLaunchTasks(context.Background(), tx, f.conn, id, cid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var cands []string
+	for _, tk := range sel.Tasks {
+		cands = append(cands, tk.ID)
+	}
+	if !equalStrings(cands, []string{taskB}) {
+		t.Fatalf("launch candidates = %v, want only %s (task %s has a review-waiting contract run)", cands, taskB, taskA)
+	}
+	if sel.Blocked != "" {
+		t.Errorf("Blocked = %q, want none (a review wait is not a block)", sel.Blocked)
+	}
+	// 委譲の段は、a の起動を試みず（ErrRunInProgress にならず）、b を起動する。
+	f.runDelegationStage(t, nil)
+	if got := f.startedTasks(t); !equalStrings(got, []string{taskA, taskB}) {
+		t.Fatalf("started tasks = %v, want a once and b once", got)
+	}
+	if got := f.holdReasons(t, id); len(got) != 0 {
+		t.Errorf("holds = %v, want none", got)
+	}
+}
+
+// レビュー待ちの契約の実行のタスクしか残っていない課題は、起動するタスクが無い（待つ）。保留にしない。
+func TestMultiTask_OnlyReviewWaitingContractRunTaskRemainsWaitsWithoutHold(t *testing.T) {
+	t.Parallel()
+	f := newMultiFixture(t, 2)
+	id := f.newMulti(t, "one", "P1", true, multiTask{key: "a"})
+	cid, _ := parseChallengeID(id)
+	f.runDelegationStage(t, nil)
+	if err := f.delegateFixture.exec(`UPDATE contract_run SET state = 'waiting', requested_kind = 'review' WHERE task_id = ?`, mustTaskInt(f.taskID(t, id, "a"))); err != nil {
+		t.Fatal(err)
+	}
+	var sel *launchSelection
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
+		sel, err = selectLaunchTasks(context.Background(), tx, f.conn, id, cid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sel.Tasks) != 0 || sel.Blocked != "" || sel.Busy {
+		t.Fatalf("selection = %+v, want no tasks, not blocked, not busy", sel)
+	}
+	res := f.runDelegationStage(t, nil)
+	if len(f.client.starts) != 1 {
+		t.Errorf("starts = %d, want still 1 (no second start of the review-waiting task)", len(f.client.starts))
+	}
+	for _, n := range res.NotStarted {
+		if n.Reason == NotStartedInProgress {
+			t.Errorf("not_started = %+v, want no in_progress refusal", res.NotStarted)
+		}
+	}
+	if got := f.holdReasons(t, id); len(got) != 0 {
+		t.Errorf("holds = %v, want none", got)
+	}
+}
+
+// 1 つの委譲の段で 2 個のタスクを起動するとき、契約の実行の上限額は、それぞれのタスクの枠の残り（実装の枠 + レビュー対応の枠。
+// 同じ課題のほかのタスクの枠・使った額は混ぜない）になる。
+func TestMultiTask_TwoTasksInOneStageEachGetTheirOwnBudgetRemainingAsTheCap(t *testing.T) {
+	t.Parallel()
+	f := newMultiFixture(t, 2)
+	spec := planSpec(func(m map[string]any) {
+		tasks := j2TasksOf("a", "b")
+		for i, tk := range tasks {
+			tm := tk.(map[string]any)
+			tm["repo"], tm["operation"] = "main-repo", "impl"
+			vals := [][2]float64{{10, 4}, {20, 6}}[i]
+			tm["budget_impl_usd"], tm["budget_review_usd"] = vals[0], vals[1]
+		}
+		m["tasks"] = tasks
+		m["uses_integration"] = true
+		m["budget_impl_usd"] = 99.0
+		m["budget_review_usd"] = 88.0
+	})
+	id := f.newInProgress(t, "two", "P1", spec)
+	f.runDelegationStage(t, nil)
+	want := []string{f.taskID(t, id, "a"), f.taskID(t, id, "b")}
+	if got := f.startedTasks(t); !equalStrings(got, want) {
+		t.Fatalf("started tasks = %v, want %v", got, want)
+	}
+	for taskKey, usd := range map[string]float64{"a": 14, "b": 26} {
+		got := microsOf(t, f.s, `SELECT max_budget_usd FROM contract_run WHERE task_id = ?`, mustTaskInt(f.taskID(t, id, taskKey)))
+		if got.Int64 != usdToMicros(usd) {
+			t.Errorf("task %s: contract_run.max_budget_usd = %d, want %v USD (its own impl + review frame)", taskKey, got.Int64, usd)
+		}
+	}
+}
+
 // AC-11: 委譲の計画の候補は、課題の優先度、課題の ID、タスクの ID の順に並ぶ。
 func TestMultiTask_AC11_CandidatesAreOrderedByPriorityChallengeThenTask(t *testing.T) {
 	t.Parallel()

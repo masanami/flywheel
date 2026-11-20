@@ -729,9 +729,7 @@ func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID,
 				// レビュー待ちの契約の実行は「実行中」に数えないが、終わっていない契約の実行が残るタスクを、もう一度 start しない
 				// （外部の実行を二重に作らず、記録が一意の索引に当たって外部の実行だけが残るのを防ぐ）。
 				if err == nil && !active {
-					var open int
-					err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND task_id = ? AND ended_at IS NULL`, cid, *taskID).Scan(&open)
-					active = open > 0
+					active, err = taskHasOpenContractRun(ctx, tx, cid, *taskID)
 				}
 			} else {
 				active, err = challengeHasActiveRun(ctx, tx, cid)
