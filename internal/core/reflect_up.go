@@ -129,7 +129,7 @@ func closeReflectOperations(ctx context.Context, tc *transitionCtx, cid int64, e
 
 // holdReflectEnded は、完了でない課題の上げる依頼が終わりの状態を返したとき（契約の実行は、読んだ記録と同じ書き込みで終わった記録になっている）、
 // 作っていた反映の操作を閉じ、理由 reflect_failed で保留にする（保留への遷移 1 つ・トランザクション 1 つ。回答で戻る先は着手中）。
-// 課題が着手中・検証中のときだけ行う（保留中などは何もしない）。
+// 課題が着手中・検証中のときだけ行う。保留中の課題は、契約の実行を開けたまま残し（回答の後の状態の確認が同じ終わりを読み直す）、取り下げなどは終わった記録にするだけ。
 func (s *Store) holdReflectEnded(ctx context.Context, rep *ContractRunReport) error {
 	cid, ok := parseChallengeID(rep.ChallengeID)
 	if !ok {
@@ -155,7 +155,12 @@ func (s *Store) holdReflectEnded(ctx context.Context, rep *ContractRunReport) er
 		})
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
-			// 保留を立てられない課題（保留中・取り下げなど）は、読み直しても同じなので、契約の実行を終わった記録にする。
+			// 保留中の課題は、終わりを記録するだけで、行を開けたまま残す（回答で着手中・検証中へ戻った後の状態の確認が、同じ終わりを読み直して、
+			// 反映の操作を閉じ、保留を立てる）。
+			if held, herr := s.challengeStatusIs(ctx, cid, StatusAwaitingHuman); herr != nil || held {
+				return herr
+			}
+			// 保留を立てられない課題（取り下げなど）は、読み直しても同じなので、契約の実行を終わった記録にする。
 			return classifyReadWriteErr(s.db.Write(ctx, func(tx *sql.Tx) error {
 				return endReflectRunRecord(ctx, tx, cid, rep.ExternalRunID, formatTimestamp(s.currentTime()))
 			}))
@@ -208,6 +213,7 @@ func (s *Store) submitReflectReview(ctx context.Context, rep *ContractRunReport,
 	if !ok || !cok {
 		return nil
 	}
+	noRelease := false
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpSubmit,
 		func(ctx context.Context, tc *transitionCtx) error {
 			if tc.current.Status != StatusInProgress {
@@ -218,14 +224,30 @@ func (s *Store) submitReflectReview(ctx context.Context, rep *ContractRunReport,
 			if err != nil {
 				return err
 			}
-			_, err = tc.tx.ExecContext(ctx,
+			res, err := tc.tx.ExecContext(ctx,
 				`UPDATE contract_run SET operation_id = (SELECT id FROM operation WHERE challenge_id = ? AND kind = ? AND ref = ? AND state IN (?, ?) ORDER BY id DESC LIMIT 1)
-				 WHERE challenge_id = ? AND external_run_id = ?`,
-				cid, string(OperationKindRelease), pr.URL, string(OperationStatePending), string(OperationStateApproved), cid, rep.ExternalRunID)
-			return err
+				 WHERE challenge_id = ? AND external_run_id = ?
+				 AND EXISTS (SELECT 1 FROM operation WHERE challenge_id = ? AND kind = ? AND ref = ? AND state IN (?, ?))`,
+				cid, string(OperationKindRelease), pr.URL, string(OperationStatePending), string(OperationStateApproved), cid, rep.ExternalRunID,
+				cid, string(OperationKindRelease), pr.URL, string(OperationStatePending), string(OperationStateApproved))
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n != 1 {
+				// 承認できる反映の操作が無い。反映の操作の無い検証中を作らない（遷移ごと取りやめ、下で保留にする）。
+				noRelease = true
+				rep.PRs = rep.PRs[:len(rep.PRs)-len(prs)] // 遷移ごと巻き戻る取り込みは、報告にも載せない
+				return errReconcileNotEligible
+			}
+			return nil
 		})
 	if err != nil && !errors.Is(err, ErrInvalidTransition) && !errors.Is(err, ErrTerminalState) && !errors.Is(err, errReconcileNotEligible) {
 		return err
+	}
+	if noRelease {
+		// 毎回の状態の確認で黙って取りやめ続けないよう、オーナーへ見せる。
+		return s.holdChallengeForReflect(ctx, rep.ChallengeID, reflectFailedQuestion(
+			"この PR の承認できる反映の操作を作れなかった（同じ PR の反映の操作が、置き換え・差し戻し以外の理由で閉じている）。"), holdReasonReflectFailed)
 	}
 	return nil
 }

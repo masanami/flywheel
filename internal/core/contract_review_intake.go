@@ -346,7 +346,7 @@ func (s *Store) receiveContractReview(ctx context.Context, rep *ContractRunRepor
 				return hold(factsUnmetQuestion(rep.ExternalRunID, unmet), holdReasonFactsUnmet)
 			}
 			note := factsUnmetNote(unmet)
-			owner, err := s.undeliveredFactsUnmetAnswer(ctx, cid, rep.RunID)
+			owner, err := s.undeliveredFactsUnmetAnswer(ctx, cid, scope.TaskID, rep.RunID)
 			if err != nil {
 				return err
 			}
@@ -436,8 +436,16 @@ func (s *Store) importIntegrationReview(ctx context.Context, rep *ContractRunRep
 		if ch == nil || ch.Status != StatusInProgress {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE challenge SET integration_ref = ? WHERE id = ? AND integration_ref IS NULL`, integrationRef, cid); err != nil {
+		res, err := tx.ExecContext(ctx, `UPDATE challenge SET integration_ref = ? WHERE id = ? AND integration_ref IS NULL`, integrationRef, cid)
+		if err != nil {
 			return err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			// 統合先の識別を課題に記録した（初めて）。作業ログに残す（変えた値と、原因の run）。
+			if err := rec.record("challenge", cid, ActivityActionIntegrationRef, map[string]any{"integration_ref": nil},
+				map[string]any{"integration_ref": integrationRef}); err != nil {
+				return err
+			}
 		}
 		verifying := false
 		if scope.TaskID != nil {
@@ -519,14 +527,15 @@ func sameArtifactsAsPreviousRead(ctx context.Context, tx *sql.Tx, cid int64, tas
 
 // undeliveredFactsUnmetAnswer は、理由 facts_unmet の保留への最後の回答のうち、まだ委譲先へ返していないもの
 // （回答より後に始まった契約の run が、いま読んだ run〔currentRunID〕だけ）を返す。無ければ空文字列。
-func (s *Store) undeliveredFactsUnmetAnswer(ctx context.Context, cid int64, currentRunID string) (string, error) {
+// 保留・契約の run とも、タスクの単位（taskID が同じもの。タスクに結び付かなければ、タスクに結び付かないもの）で絞る。
+func (s *Store) undeliveredFactsUnmetAnswer(ctx context.Context, cid int64, taskID *int64, currentRunID string) (string, error) {
 	cur, _ := parseRunID(currentRunID)
 	var answer string
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		var a, at sql.NullString
 		qerr := tx.QueryRowContext(ctx,
-			`SELECT answer, answered_at FROM hold WHERE challenge_id = ? AND answered_at IS NOT NULL AND reason = ? ORDER BY id DESC LIMIT 1`,
-			cid, string(holdReasonFactsUnmet)).Scan(&a, &at)
+			`SELECT answer, answered_at FROM hold WHERE challenge_id = ? AND COALESCE(task_id, 0) = COALESCE(?, 0) AND answered_at IS NOT NULL AND reason = ? ORDER BY id DESC LIMIT 1`,
+			cid, taskID, string(holdReasonFactsUnmet)).Scan(&a, &at)
 		if errors.Is(qerr, sql.ErrNoRows) {
 			return nil
 		}
@@ -535,7 +544,7 @@ func (s *Store) undeliveredFactsUnmetAnswer(ctx context.Context, cid int64, curr
 		}
 		var later int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM run WHERE challenge_id = ? AND kind = 'contract' AND operation_id IS NULL AND id <> ? AND started_at >= ?`, cid, cur, at.String).Scan(&later); err != nil {
+			`SELECT COUNT(*) FROM run WHERE challenge_id = ? AND COALESCE(task_id, 0) = COALESCE(?, 0) AND kind = 'contract' AND operation_id IS NULL AND id <> ? AND started_at >= ?`, cid, taskID, cur, at.String).Scan(&later); err != nil {
 			return err
 		}
 		if later == 0 {

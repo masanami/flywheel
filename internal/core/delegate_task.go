@@ -114,7 +114,7 @@ func blockedPendingTasks(all []Task, byID map[string]Task) map[string]bool {
 //
 // 統合先を使わない課題は、起動できるタスクがちょうど 1 個のときだけ起動する（0 個は no_tasks、2 個以上は
 // integration_unavailable）。統合先を使う課題は、タスクが 1 個でも 2 個以上でも起動する（タスクの単位で見る）:
-//   - 未完のタスク（未着手・作業中・検証中）のリポジトリが 2 つ以上 → 起動しない（integration_unavailable）
+//   - 取りやめでないタスク（未着手・作業中・検証中・済み）のリポジトリが 2 つ以上 → 起動しない（integration_unavailable）
 //   - 起動できるタスク（isLaunchableTask）で、終わっていない実行を持たず、対応する子が起動を妨げず（taskUpstreamExclusion）、
 //     委譲先が form: cli のものを起動する。form が cli でない委譲先のタスクは integration_unavailable
 //   - 起動するタスクが無く、進めようが無い（blockedByCancelledTask）なら、保留にする
@@ -175,18 +175,19 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 		return sel, nil
 	}
 
-	// 統合先を使う課題は、リポジトリを 1 つに限る。
+	// 統合先を使う課題は、リポジトリを 1 つに限る。済みのタスクも数える（上げる依頼が、済みのタスクのリポジトリが 1 つのときだけ始まるのと
+	// 同じ基準。数えないと、別のリポジトリのタスクを足した計画が、走って費用を使った後で、上げる依頼が毎回始まらない）。
 	repos := map[string]bool{}
 	var repoList []string
 	for _, t := range all {
-		if (t.Status == TaskStatusPending || t.Status == TaskStatusInProgress || t.Status == TaskStatusVerifying) && !repos[t.Repo] {
+		if t.Status != TaskStatusCancelled && !repos[t.Repo] {
 			repos[t.Repo] = true
 			repoList = append(repoList, t.Repo)
 		}
 	}
 	if len(repoList) >= 2 {
 		ns(NotStartedIntegrationUnavailable, fmt.Sprintf(
-			"統合先を使う課題は、未完のタスクのリポジトリが 1 つのときだけ起動する（未完のタスクのリポジトリ: %s）", strings.Join(repoList, "・")))
+			"統合先を使う課題は、取りやめでないタスクのリポジトリが 1 つのときだけ起動する（済み・未完を含むタスクのリポジトリ: %s）", strings.Join(repoList, "・")))
 		return sel, nil
 	}
 	taskLessBusy, err := taskLessHasActiveRun(ctx, tx, cid)

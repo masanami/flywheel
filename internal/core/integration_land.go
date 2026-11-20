@@ -375,12 +375,18 @@ func (s *Store) finishIntegrationLanding(ctx context.Context, rep *ContractRunRe
 	if scope.TaskID == nil || scope.TaskStatus == TaskStatusCancelled {
 		return s.closeContractRunRow(ctx, cid, rep.ExternalRunID) // 取りやめのタスクの実行の終わりでは保留にしない
 	}
+	// 記録済みの状態が終わりのとき、読み直した status は成果物を持たないことがある。取り込み済みの成果物で補う
+	// （空の一覧で「入っていない」と判定しない）。
+	arts, err := s.landingArtifacts(ctx, rep, cid)
+	if err != nil {
+		return err
+	}
 	if recorded == "" {
-		if branches, _ := integrationArtifactRefs(rep.Artifacts); len(branches) == 1 {
+		if branches, _ := integrationArtifactRefs(arts); len(branches) == 1 {
 			recorded = branches[0]
 		}
 	}
-	switch rs.landedContent(context.WithoutCancel(ctx), rep.Artifacts, recorded, landRef) {
+	switch rs.landedContent(context.WithoutCancel(ctx), arts, recorded, landRef) {
 	case landedUnreadable:
 		return nil
 	case landedSameContent:
@@ -389,6 +395,36 @@ func (s *Store) finishIntegrationLanding(ctx context.Context, rep *ContractRunRe
 		return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, false), holdReasonDelegateEnded)
 	}
 	return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, true), holdReasonMergedUnverified)
+}
+
+// landingArtifacts は、終わりの確かめに使う成果物。読んだ status の成果物に PR があればそれを使い、無ければ、この契約の実行を始めた
+// 後の、同じタスクの契約の読みが取り込み済みの成果物（pr・branch・commit）を引く。
+func (s *Store) landingArtifacts(ctx context.Context, rep *ContractRunReport, cid int64) ([]ContractArtifact, error) {
+	for _, a := range rep.Artifacts {
+		if a.Kind == "pr" {
+			return rep.Artifacts, nil
+		}
+	}
+	arts := append([]ContractArtifact(nil), rep.Artifacts...)
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT a.kind, a.ref, COALESCE(a.role, '') FROM run_artifact a JOIN run r ON r.id = a.run_id
+			JOIN contract_run k ON k.challenge_id = r.challenge_id AND COALESCE(k.task_id, 0) = COALESCE(r.task_id, 0)
+			WHERE k.challenge_id = ? AND k.external_run_id = ? AND r.kind = 'contract' AND r.id >= k.start_run_id
+			AND a.kind IN ('pr', 'branch', 'commit') GROUP BY a.kind, a.ref, COALESCE(a.role, '') ORDER BY MIN(a.id)`, cid, rep.ExternalRunID)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var a ContractArtifact
+			if err := rows.Scan(&a.Kind, &a.Ref, &a.Role); err != nil {
+				return err
+			}
+			arts = append(arts, a)
+		}
+		return rows.Err()
+	})
+	return arts, classifyReadWriteErr(err)
 }
 
 // holdLandedEnd は保留を立て、契約の実行を終わった記録にする（同じトランザクション。終わりの記録だけが残らず、開いたまま課題が保留になることが無い）。

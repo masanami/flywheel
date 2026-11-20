@@ -231,21 +231,34 @@ func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunRe
 		// 「入れてよい」を返し済み。成果物が統合先へ入ったかを上流で確かめ、入っていればタスクを済みにする（課題の状態によらない）。
 		return true, s.finishIntegrationLanding(ctx, rep, rs, cid, landRef, recorded)
 	}
+	// 保留にしない場合（課題が着手中でない・取りやめのタスク）は、契約の実行を終わった記録にするだけ。保留にする場合は、保留と終わりの記録を
+	// 1 つの書き込みにする（間でプロセスが止まっても、保留の無い終わった記録だけが残らない。開いたままなら次の状態の確認が読み直す）。
 	if inProgress, err := s.challengeInProgress(ctx, cid); err != nil || !inProgress {
-		return true, err
+		if err != nil {
+			return true, err
+		}
+		return true, s.closeContractRunRow(ctx, cid, rep.ExternalRunID)
 	}
 	if sc, err := s.loadReviewIntakeScope(ctx, cid, rep.ExternalRunID); err != nil || (sc.TaskID != nil && sc.TaskStatus == TaskStatusCancelled) {
-		return true, err // 取りやめのタスクの実行の終わりでは保留にしない
+		if err != nil {
+			return true, err
+		}
+		return true, s.closeContractRunRow(ctx, cid, rep.ExternalRunID) // 取りやめのタスクの実行の終わりでは保留にしない
+	}
+	// 記録済みの状態が終わりのとき（保留の書き込みのやり直し）、読み直した status は成果物を持たない。取り込み済みの成果物で補う。
+	arts, err := s.landingArtifacts(ctx, rep, cid)
+	if err != nil {
+		return true, err
 	}
 	if recorded == "" {
-		if branches, _ := integrationArtifactRefs(rep.Artifacts); len(branches) == 1 {
+		if branches, _ := integrationArtifactRefs(arts); len(branches) == 1 {
 			recorded = branches[0]
 		}
 	}
 	merged, unreadable := false, true // 確かめられなかったときは、入っているとは言えず、入っていないとも言い切れない
 	if rs != nil && rs.Reconcile != nil && recorded != "" {
 		unreadable = false
-		m, err := rs.mergedIntoBranch(context.WithoutCancel(ctx), rep.Artifacts, recorded)
+		m, err := rs.mergedIntoBranch(context.WithoutCancel(ctx), arts, recorded)
 		if err != nil {
 			unreadable = true
 		}
@@ -255,9 +268,7 @@ func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunRe
 	if merged {
 		reason = holdReasonMergedUnverified
 	}
-	held, err := s.holdContractReview(ctx, rep, integrationSucceededQuestion(rep.ExternalRunID, merged, unreadable), reason)
-	rep.Held = held
-	return true, err
+	return true, s.holdLandedEnd(ctx, rep, cid, integrationSucceededQuestion(rep.ExternalRunID, merged, unreadable), reason)
 }
 
 // SubmitHeldContractSuccesses は、課題が保留の間に契約の run が succeeded まで進み（held_success）、オーナーが答えて課題が
@@ -407,8 +418,9 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	if err != nil {
 		return nil, err
 	}
-	// 「入れてよい」を返し済みの実行の succeeded は、統合先へ入ったかを上流で確かめるまで、終わった記録にしない。
-	row.holdSuccessEnd = integ && row.LandRef != ""
+	// 統合先を使う課題のタスクの実行の succeeded は、統合先へ入ったかの確かめと、保留・タスクを済みにする書き込みが済むまで、終わった記録にしない
+	// （その書き込みが、同じトランザクションで終わった記録にする）。
+	row.holdSuccessEnd = integ
 	args, name := connector.Commands.Status, "status"
 	if resume {
 		args, name = connector.Commands.Resume, "resume"
