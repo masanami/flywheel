@@ -431,3 +431,20 @@ func TestReopenChallengeForRelease_SupersedesSiblingReleasesWithoutOpenAttempts(
 		t.Errorf("copies = %+v, want a pending copy of the primary and of the sibling", copies)
 	}
 }
+
+// 完了から戻す前に、終わっていない反映の依頼を取り消す（取り消した後に課題を検証中へ戻し、終わった記録の依頼は残らない）。
+func TestReopenChallengeForRelease_CancelsAnUnfinishedReflectRequestBeforeMovingBack(t *testing.T) {
+	t.Parallel()
+	f := newReflectReopenFixture(t)
+	f.cancelsWith()
+	res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, f.reopenInput(f.contentChangedCompare()))
+	if err != nil || !res.Reopened {
+		t.Fatalf("reopen = %+v err %v, want reopened", res, err)
+	}
+	if got := f.status(t, f.cid); got != StatusVerifying {
+		t.Errorf("status = %s, want verifying", got)
+	}
+	if !f.runEnded(t) {
+		t.Error("the reflect request is still open after it was cancelled")
+	}
+}

@@ -562,3 +562,88 @@ func TestOpExec_CancelOccurrenceCarriesTheCycleID(t *testing.T) {
 		t.Fatalf("occurrence cycle ids = %v, want the 'op exec' cycle %v", ids, cycles)
 	}
 }
+
+// reflectToolConnectorsFixture は、成果物のリポジトリ o/r に反映の依頼の口（commands.reflect）を持つ委譲先 tool を宣言する。
+const reflectToolConnectorsFixture = `{
+  "version": 1,
+  "connectors": [
+    {"id": "tool", "form": "cli", "permission_mode": "default",
+     "commands": {
+       "start": ["tool", "start", "--challenge", "{challenge_id}"],
+       "status": ["tool", "status", "{run_id}"],
+       "resume": ["tool", "resume", "{run_id}", "--choice", "{choice}", "--note", "{note}", "--approved-ref", "{approved_ref}"],
+       "cancel": ["tool", "cancel", "{run_id}"],
+       "reflect": ["tool", "reflect", "--artifact", "{artifact_ref}", "--challenge", "{challenge_id}"]
+     },
+     "contract_version": 1,
+     "operations": [{"id": "impl", "interactive": false, "child_may_decide": true, "artifacts": "pr"}]}
+  ],
+  "repos": [
+    {"name": "r-repo", "remote": "o/r", "default_branch": "main", "connector": "tool", "slots": {"provider": "worktree", "base": "wt", "count": 1}}
+  ]
+}`
+
+// putFakeReflectToolOnPATH は reflect で実行 ID ext-r1 の running を返し、status で running、cancel で cancelled を返す偽の委譲先 tool を
+// PATH の先頭に置く。呼び出しは log へ 1 行ずつ残す。
+func putFakeReflectToolOnPATH(t *testing.T, log string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> " + shellSingleQuote(log) + "\n" +
+		"case \"$1\" in\n" +
+		"reflect) printf '{\"contract_version\":1,\"run_id\":\"ext-r1\",\"state\":\"running\",\"summary\":\"s\"}\\n';;\n" +
+		"status) printf '{\"contract_version\":1,\"run_id\":\"%s\",\"state\":\"running\",\"summary\":\"s\"}\\n' \"$2\";;\n" +
+		"cancel) printf '{\"contract_version\":1,\"run_id\":\"%s\",\"state\":\"cancelled\",\"summary\":\"s\"}\\n' \"$2\";;\n" +
+		"*) exit 1;;\n" +
+		"esac\n"
+	dir := t.TempDir()
+	if err := writeExecutable(filepath.Join(dir, "tool"), []byte(script)); err != nil {
+		t.Fatalf("write fake tool: %v", err)
+	}
+	addToolDir(t, dir)
+}
+
+// reflectWorkspace は execWorkspace に、反映の依頼の口を持つ宣言と偽の tool を足す。
+func reflectWorkspace(t *testing.T) (ws, cid, op string, toolLog func() []string) {
+	t.Helper()
+	ws, cid, op = execWorkspace(t)
+	writeConnectorsJSONForTest(t, ws, reflectToolConnectorsFixture)
+	if err := os.MkdirAll(filepath.Join(ws, "wt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(t.TempDir(), "tool.log")
+	putFakeReflectToolOnPATH(t, log)
+	return ws, cid, op, func() []string { return readOrderLog(t, log) }
+}
+
+// 反映の依頼の口があるリポジトリの承認済みの反映の操作は、op exec で commands.reflect を呼んで反映の依頼を始め（reflect_started・
+// route が reflect_request・承認は保つ）、次の op exec は依頼の状態を読んで待つ。flywheel は反映先へ書かない。
+func TestOpExec_AnEntranceStartsAReflectRequestAndTheNextRunReadsIt(t *testing.T) {
+	parallelTools(t, false)
+	ws, cid, op, toolLog := reflectWorkspace(t)
+	gh := newReleaseGH(t, execHead)
+
+	_, items, _ := execItems(t, runJSON(t, ws, "op", "exec"))
+	if len(items) != 1 {
+		t.Fatalf("items = %v, want one", items)
+	}
+	it := items[0].(map[string]any)
+	if it["result"] != "reflect_started" || it["route"] != "reflect_request" || it["consecutive_failures"] != float64(0) {
+		t.Fatalf("item = %v, want reflect_started on the reflect_request route", it)
+	}
+	if got := runJSON(t, ws, "show", cid)["operations"].([]any)[0].(map[string]any)["state"]; got != "approved" {
+		t.Errorf("operation state = %v, want approved", got)
+	}
+
+	_, items, _ = execItems(t, runJSON(t, ws, "op", "exec", op))
+	it = items[0].(map[string]any)
+	if it["result"] != "waiting_delegate" || it["route"] != "reflect_request" {
+		t.Fatalf("2nd run item = %v, want waiting_delegate on the reflect_request route", it)
+	}
+	calls := toolLog()
+	if len(calls) != 2 || !strings.HasPrefix(calls[0], "reflect --artifact "+releasePRURL(1)+" --challenge "+cid) || calls[1] != "status ext-r1" {
+		t.Errorf("tool calls = %q, want one reflect for the PR and then a status read", calls)
+	}
+	if w := gh.writeCalls(t); len(w) != 0 {
+		t.Errorf("gh was asked to write to the upstream: %v", w)
+	}
+}

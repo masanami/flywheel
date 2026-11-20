@@ -839,3 +839,37 @@ func TestRunCycle_ReleasePhaseOccurrenceCarriesTheCycleID(t *testing.T) {
 		t.Fatalf("occurrence cycle ids = %v, want one for %s", ids, res.Cycle.ID)
 	}
 }
+
+// ある周では、反映の依頼の口があるリポジトリの承認済みの反映の操作の反映の依頼を、その周の中で始める（契機は cycle。承認は保つ）。
+func TestRunCycle_ReleasePhaseStartsAReflectRequestInsideTheCycle(t *testing.T) {
+	t.Parallel()
+	f := newCycleFixture(t)
+	c := createAndAdvance(t, f.s, StatusDone)
+	opID := coretest.InsertApprovedRelease(t, f.s.workspace, int(mustParseChallengeID(t, c.ID)), relRef, relHead, execTS(0))
+	conn, err := parseConnectorsDeclaration([]byte(reflectConnectorsJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeContractClient{startOut: contractOut(ContractStateRunning, nil, nil), last: contractOut(ContractStateRunning, nil, nil)}
+	in := f.input(mineThenPlanInvoker(t))
+	in.ConnDecl = conn
+	in.Checks = &fakeRelease{pr: openPR()}
+	in.Contract = client
+
+	res := f.run(t, in)
+	rel := phaseOfResult(t, res, CyclePhaseRelease)
+	if rel.Skipped || len(rel.ReleaseItems) != 1 || rel.ReleaseItems[0].OperationID != formatOperationID(opID) ||
+		rel.ReleaseItems[0].Result != ExecutionResultReflectStarted || rel.ReleaseItems[0].Route != ReleaseRouteReflectRequest {
+		t.Fatalf("release phase = %+v, want reflect_started on the reflect_request route", rel)
+	}
+	if len(client.starts) != 1 || client.starts[0][1] != "reflect" {
+		t.Errorf("starts = %v, want one commands.reflect call", client.starts)
+	}
+	var state string
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT state FROM operation WHERE id = ?`, opID).Scan(&state)
+	})
+	if state != "approved" {
+		t.Errorf("operation state = %s, want approved", state)
+	}
+}

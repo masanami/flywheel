@@ -29,23 +29,24 @@ type ReopenForReleaseInput struct {
 	Reason ReopenReason
 	// Sources は core が自分で比較し直すための取得の口。口が無い・比較できないときは、戻す対象なら ErrConflict。
 	Sources ReleaseHeadSources
-	// ContractSources は、戻す前にその課題の終わっていないタスクの契約の実行を commands.status で読むための口。
+	// ContractSources は、戻す前にその課題の終わっていない反映の依頼を commands.cancel で取り消し、終わっていないタスクの契約の実行を commands.status で読むための口。
 	// 終わっていないタスクの実行が無ければ使わない（nil でよい）。あるのに無ければ、読めないので戻さない（ErrConflict）。
 	ContractSources ReopenContractSources
 }
 
-// ReopenContractSources は、課題を完了から戻す前の、タスクの契約の実行の状態の読み（commands.status）の入力。
+// ReopenContractSources は、課題を完了から戻す前の、反映の依頼の取り消し（commands.cancel）とタスクの契約の実行の状態の読み（commands.status）の入力。
 type ReopenContractSources struct {
 	Contract   ContractClient
 	Agent      *AgentDeclaration
 	Connectors *ConnectorsDeclaration
 }
 
-// errReopenBlockedByRun は、課題の終わっていないタスクの契約の実行が running か読めないため、完了から戻さなかったことを表す
-// （ErrConflict の一種）。課題は完了のまま。
-var errReopenBlockedByRun = fmt.Errorf("%w: the challenge has an unfinished task contract run that is running or could not be read", ErrConflict)
+// errReopenBlockedByRun は、課題の終わっていないタスクの契約の実行が running か読めない、または終わっていない反映の依頼を
+// 取り消せないため、完了から戻さなかったことを表す（ErrConflict の一種）。課題は完了のまま。
+var errReopenBlockedByRun = fmt.Errorf("%w: the challenge has an unfinished contract run that is running, could not be read, or could not be cancelled", ErrConflict)
 
-// readTaskRunBeforeReopen は opID の課題の、終わっていないタスクの契約の実行を commands.status で読む。
+// readTaskRunBeforeReopen は opID の課題の、終わっていない反映の依頼を commands.cancel で取り消し、終わっていないタスクの契約の実行を
+// commands.status で読む（課題に終わっていない契約の実行は高々 1 本）。
 // running（委譲先が反映先へ入れている途中かもしれない）か読めなければ errReopenBlockedByRun。待ち（レビュー待ちを含む）なら戻してよい。
 // 終わっていれば、status の読みが契約の実行を終わった記録にする。終わっていないタスクの実行が無ければ何も呼ばない。
 func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs ReopenContractSources) error {
@@ -60,8 +61,12 @@ func (s *Store) readTaskRunBeforeReopen(ctx context.Context, opID int64, cs Reop
 	}); err != nil {
 		return classifyReadWriteErr(err)
 	}
-	if run == nil || run.row.Kind != contractRunKindTask {
+	if run == nil {
 		return nil
+	}
+	if run.row.Kind == contractRunKindReflect {
+		// 終わっていない反映の依頼は commands.cancel で取り消す（取り消せなければ戻さない）。
+		return s.cancelOpenReflectRunBeforeReopen(ctx, run, cs)
 	}
 	if cs.Contract == nil || cs.Connectors == nil {
 		return errReopenBlockedByRun

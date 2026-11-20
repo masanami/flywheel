@@ -193,7 +193,7 @@ func (s *Store) reopenIfVerifiedContentChanged(ctx context.Context, p pendingRel
 		if errors.Is(err, errReopenBlockedByRun) {
 			// その課題を飛ばして結果に残す。課題は完了のまま。次の反映の段でやり直す。
 			return &ReleaseTidyItem{OperationID: opText, ChallengeID: formatChallengeID(p.challengeID), Action: ReleaseTidySkipped,
-				WaitReason: "the task contract run is running or could not be read"}, nil
+				WaitReason: "the contract run is running, could not be read, or could not be cancelled"}, nil
 		}
 		if err != nil {
 			return nil, err

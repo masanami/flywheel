@@ -290,6 +290,14 @@ type contractRunRow struct {
 	LandDelivered bool
 }
 
+// contractKindOrTask は契約の実行の種類 kind（空は task）を返す。
+func contractKindOrTask(kind string) string {
+	if kind == "" {
+		return contractRunKindTask
+	}
+	return kind
+}
+
 // 契約の実行の種類（contract_run.kind）。
 const (
 	contractRunKindTask    = "task"
@@ -336,6 +344,8 @@ type contractFill struct {
 	UsesIntegration  bool
 	// ApprovedRef は resume の {approved_ref}。「入れてよい」を返す反映の段だけが通す中身を入れる（それ以外は空）。
 	ApprovedRef string
+	// ArtifactRef は reflect の {artifact_ref}（反映の操作の参照）。反映の依頼を始める反映の段だけが入れる（それ以外は空）。
+	ArtifactRef string
 }
 
 // fillContractArgs は契約のコマンドの引数の差し込みを、取り込み元が無いときに空の文字列で埋めない形で埋める
@@ -380,7 +390,8 @@ func fillContractArgsWith(args []string, f contractFill) ([]string, error) {
 		v = strings.ReplaceAll(v, "{run_id}", f.RunID)
 		// 答えとタスクの値は最後に、1 回の置き換えにまとめて差し込む（差し込んだ値の中の波括弧を、他の差し込みとして読まない）。
 		out[i] = strings.NewReplacer("{choice}", f.Answer.Choice, "{note}", f.Answer.Note, "{answer}", f.Answer.text(),
-			"{task_file}", f.TaskFile, "{task_id}", f.TaskID, "{uses_integration}", usesIntegration, "{approved_ref}", f.ApprovedRef).Replace(v)
+			"{task_file}", f.TaskFile, "{task_id}", f.TaskID, "{uses_integration}", usesIntegration, "{approved_ref}", f.ApprovedRef,
+			"{artifact_ref}", f.ArtifactRef).Replace(v)
 	}
 	return out, nil
 }
@@ -757,6 +768,10 @@ type contractCall struct {
 	Existing       *contractRunRow
 	// TaskIDInt は contract_run を新しく作るときに書く task_id（nil は NULL。既存の行の task_id は変えない）。
 	TaskIDInt *int64
+	// Kind・OperationIDInt は contract_run を新しく作るときに書く kind と operation_id（反映の依頼の start だけが指定する。
+	// 空の Kind は task、nil の OperationIDInt は NULL。既存の行は変えない）。
+	Kind           string
+	OperationIDInt *int64
 	// FactsRequired は宣言の required_facts（無ければ nil）。CountFacts は、この呼び出しで満たさなかった回数を数えるとき真
 	// （状態の確認だけ。resume の応答は数えない）。
 	FactsRequired map[string][]string
@@ -1070,10 +1085,11 @@ func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contra
 	if c.Existing == nil {
 		res, err := tx.ExecContext(ctx,
 			`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary,
-				requested_kind, requested_decider, requested_text, requested_resolvable_by, cost_usd, max_budget_usd, started_at, observed_at, ended_at, work_dir, task_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				requested_kind, requested_decider, requested_text, requested_resolvable_by, cost_usd, max_budget_usd, started_at, observed_at, ended_at, work_dir, task_id, kind, operation_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ChallengeIDInt, c.Connector, st.RunID, c.RunIDInt, string(st.State), st.Summary, rk, rd, rt, rb,
-			totalMicros, c.MaxMicros, now, now, endedAt, c.Launch.WorkDir, int64PtrColumn(c.TaskIDInt))
+			totalMicros, c.MaxMicros, now, now, endedAt, c.Launch.WorkDir, int64PtrColumn(c.TaskIDInt),
+			contractKindOrTask(c.Kind), int64PtrColumn(c.OperationIDInt))
 		if err != nil {
 			return err
 		}
@@ -1293,7 +1309,7 @@ const reclaimedContractStartWhere = `r.kind = 'contract' AND r.result IS NOT NUL
 
 // unheldContractStopWhere は、契約の run（k）が failed・cancelled で終わったのに、その後に保留を作れていない
 // （記録と保留が別のトランザクションなので、間でプロセスが止まると起こる）課題を選ぶ条件。
-const unheldContractStopWhere = `k.state IN ('failed', 'cancelled') AND c.status = 'in_progress'
+const unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'cancelled') AND c.status = 'in_progress'
 	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at)`
 
 // HoldUnrecordedContractStops は、保留にし損ねた課題を保留にする。次の 2 つ（どちらも課題が着手中のときだけ）。
