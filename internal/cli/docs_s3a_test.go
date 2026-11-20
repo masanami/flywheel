@@ -179,3 +179,57 @@ func TestSpec_AC382_ClaudeMDInvokerRowNoJ3ForPlugin(t *testing.T) {
 		t.Error("AC-382: the internal/invoker row does not say that J3 is not called for form: plugin delegation")
 	}
 }
+
+// 以下は、レビューでの追加の直し（#853）。core-redesign.md の記述を、S3a の実装（flywheel#864・#865）に合わせた行があることを確かめる。
+
+// docLineWith は、文書の行のうち、all の語をすべて含む最初の行を返す。
+func docLineWith(t *testing.T, doc string, all ...string) string {
+	t.Helper()
+	for _, l := range strings.Split(doc, "\n") {
+		ok := true
+		for _, w := range all {
+			if !strings.Contains(l, w) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return l
+		}
+	}
+	t.Fatalf("no line contains all of %q", all)
+	return ""
+}
+
+// 片付けの結果（tidied[]）の記述に、action の値 skipped（理由は wait_reason）と cancel_note がある（flywheel#864）。
+func TestSpec_S3a_CoreRedesignTidiedHasSkippedAndCancelNote(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "features", "core-redesign.md")
+	docLineWith(t, doc, "`tidied[]`", "`action`", "`skipped`")
+	docLineWith(t, doc, "- `skipped`:", "`wait_reason`")
+	docLineWith(t, doc, "- `cancel_note`:", "`closed`", "出さない")
+}
+
+// 反映の依頼の起動の受入基準が、応答がすでに終わった状態のときに、終わった契約の実行の行が残る形になっている。
+func TestSpec_S3a_CoreRedesignReflectFailedKeepsEndedRun(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "features", "core-redesign.md")
+	if strings.Contains(doc, "契約の実行の記録は作られない。") || strings.Contains(doc, "契約の実行は作らない。") {
+		t.Error("core-redesign.md still says that no contract run is recorded when commands.reflect fails")
+	}
+	docLineWith(t, doc, "`commands.reflect` が失敗したとき", "`reflect_failed`", "`failed`・`cancelled`・`succeeded`", "終わった契約の実行の行は残る")
+}
+
+// flywheel#865 で足した 2 つの確かめ（始める書き込み・完了から戻す書き込みの中の確かめ直し）と、起動の前に分かる結果の route の読みがある。
+func TestSpec_S3a_CoreRedesignHasRechecksAndNullRoute(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "features", "core-redesign.md")
+	docLineWith(t, doc, "反映の依頼を始める書き込み", "承認済みのまま", "確かめ直す")
+	docLineWith(t, doc, "T18 で戻す書き込みの中で", "終わっていない反映の依頼が無いこと", "確かめ直す", "`conflict`")
+	docLineWith(t, doc, "起動する前に分かる `unsupported`・`upstream_failed`", "`route` は null")
+}
+
+// 前の区切りで足した形のうち、試験が正本として読む節は、消していない。
+func TestSpec_S3a_CoreRedesignKeepsEarlierShapesSection(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "features", "core-redesign.md")
+	if !strings.Contains(doc, "前の区切りで足した形のうち、試験がこの文書の記述を正本として読むもの（S3a では変えない）:") {
+		t.Error("core-redesign.md lost the section of earlier shapes that tests read as the source of truth")
+	}
+}
