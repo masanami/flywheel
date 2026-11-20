@@ -312,19 +312,31 @@ func TestS3aFix_F_APlaceholderInsideASubstitutedValueIsNotSubstitutedAgain(t *te
 	}
 }
 
-// 別の反映の操作が終わりを読み、結果を書くまで開けている実行（終わりの状態で ended_at が無い）を、対応しない反映の操作は、
-// unsupported（承認を取り消す結果）にせず、待つ。
+// 別の反映の操作が終わりを読み、結果を書くまで開けている実行（終わりの状態で ended_at が無い）を、持ち主の操作が承認済みなら、
+// 対応しない反映の操作は、unsupported（承認を取り消す結果）にせず、待つ。契約の実行の行と持ち主の操作はストアにある。
 func TestS3aFix_AHeldEndedRunOfASiblingReleaseIsWaitedFor(t *testing.T) {
 	t.Parallel()
-	f := newRelFixture(t)
-	row := &operationRow{ID: f.opID, ChallengeID: f.cid}
-	run := &releaseRun{row: &contractRunRow{ExternalRunID: "ext-1", State: ContractStateSucceeded}, corresponds: false}
+	f := newReflFixture(t)
+	f.holdEnd(t) // 持ち主（f.opID。承認済み）の反映の依頼が、終わり（succeeded）で ended_at が空のまま残る
+	siblingID := coretest.InsertApprovedRelease(t, f.s.workspace, int(f.cid), "o/other#9", relHead, execTS(0))
+	var row *operationRow
+	readForTest(t, f.s, func(tx *sql.Tx) (err error) {
+		row, err = loadOperationRow(context.Background(), tx, siblingID)
+		return err
+	})
+	run, err := f.s.loadReleaseRun(context.Background(), row)
+	if err != nil || run == nil || run.corresponds || !run.row.State.Terminal() {
+		t.Fatalf("loadReleaseRun() = %+v, %v, want a held ended run that does not correspond to the sibling", run, err)
+	}
 	j, err := f.s.chooseReleasePath(context.Background(), row, f.opts(), run, nil, "p", "o")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if j.result != ExecutionResultWaitingDelegate {
 		t.Errorf("result = %s, want waiting_delegate", j.result)
+	}
+	if r := f.only(t); r.ended {
+		t.Errorf("contract run = %+v, want it still held open for its owner", r)
 	}
 }
 

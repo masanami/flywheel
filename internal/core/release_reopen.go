@@ -223,13 +223,14 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 	if openReflect > 0 {
 		return nil, errReopenBlockedByRun
 	}
-	// 反映の依頼を始めている最中（contract_run の行がまだ無く、run の行だけがある）と、「入れてよい」を送っている最中（この反映の操作に
+	// 反映の依頼を始めている最中（contract_run の行がまだ無く、run の行だけがある）と、「入れてよい」を送っている最中（この課題の反映の操作のどれかに
 	// 終わっていない試行がある）も、同じく何も書かず戻さない。
 	var openRuns, openAttempts int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run WHERE challenge_id = ? AND kind = 'contract' AND result IS NULL`, row.ChallengeID).Scan(&openRuns); err != nil {
 		return nil, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operation_execution WHERE operation_id = ? AND ended_at IS NULL`, opID).Scan(&openAttempts); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operation_execution WHERE ended_at IS NULL AND operation_id IN (SELECT id FROM operation WHERE challenge_id = ? AND kind = ?)`,
+		row.ChallengeID, string(OperationKindRelease)).Scan(&openAttempts); err != nil {
 		return nil, err
 	}
 	if openRuns > 0 || openAttempts > 0 {
@@ -239,8 +240,8 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 	nowStr := formatTimestamp(rec.at)
 
 	// 同じ課題のほかの承認待ち・承認済みの release も置き換える（前の完了の承認が置き換えられるので、
-	// その承認で同時に承認された release を、課題が検証中・着手中の間に実行させない）。実行の試行が終わっていない
-	// release は、その試行の書き込みと衝突させないために置き換えない。新しい操作を作る前に選ぶ。
+	// その承認で同時に承認された release を、課題が検証中・着手中の間に実行させない）。実行の試行が終わっている
+	// release だけがここへ来る（終わっていない試行が課題のどれかにあれば、上で何も書かず競合で終えている）。新しい操作を作る前に選ぶ。
 	siblings, err := siblingReleasesToSupersede(ctx, tx, row.ChallengeID, opID)
 	if err != nil {
 		return nil, err

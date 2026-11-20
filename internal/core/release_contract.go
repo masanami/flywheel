@@ -286,6 +286,13 @@ func (s *Store) cancelReleaseRunNote(ctx context.Context, opts ReleaseExecOption
 	if run == nil || !run.corresponds {
 		return ""
 	}
+	if rep == nil && run.row.State.Terminal() {
+		// 終わりを記録済み。委譲先は呼ばない。結果を書く書き込みが終わった記録にするが、持ち主の承認済みの操作が無ければ（片付け）ここで閉じる。
+		if _, err := s.closeHeldEndWithoutOwner(ctx, run.row.ChallengeID); err != nil {
+			return "could not close the ended contract run: " + err.Error()
+		}
+		return ""
+	}
 	if rep == nil {
 		var early *releaseJudgment
 		var err error

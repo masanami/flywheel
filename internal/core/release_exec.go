@@ -585,10 +585,14 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 		return releaseJudgment{}, err
 	}
 	// 対応する契約の実行があれば、先に commands.status で読む（「入れてよい」を返したか・最後に読んだ状態が何かによらない）。
+	// ただし終わりを持ち越している実行（state が終わりで ended_at が空）は status を呼ばず、記録した状態・要約から判定する。
 	var rep *ContractRunReport
 	if run != nil && run.corresponds {
 		var early *releaseJudgment
-		if rep, early, err = s.readReleaseRun(ctx, opts, run, true); err != nil {
+		if run.row.State.Terminal() {
+			// 終わりを読んで持ち越している実行（ended_at が空）は、委譲先を呼ばず、記録した状態・要約から判定へ進む。
+			rep = &ContractRunReport{Result: RunResultSucceeded, State: run.row.State, Summary: run.row.Summary, ExternalRunID: run.row.ExternalRunID}
+		} else if rep, early, err = s.readReleaseRun(ctx, opts, run, true); err != nil {
 			return releaseJudgment{}, err
 		}
 		if early != nil {
