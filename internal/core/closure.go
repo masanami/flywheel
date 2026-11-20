@@ -68,6 +68,10 @@ func UnreachableFromCreate(table []Transition, vocab []StatusVocabEntry) []Statu
 			if tr.Target.ReturnToPrecedingHoldStatus {
 				continue
 			}
+			// 制限つきの行（T18）は、専用の書き込みだけが使う道で、通常の操作の経路ではない。
+			if tr.Restricted {
+				continue
+			}
 			// T1（From=NoStatus）は無条件に起点として辿れる。それ以外は
 			// From がすでに到達済みでなければまだ辿れない。
 			if tr.From != NoStatus && !reached[tr.From] {

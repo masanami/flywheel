@@ -309,7 +309,7 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
   op_approve: "不可逆操作を承認した",
   op_reject: "不可逆操作を差し戻した",
   complete_direct: "オーケストレーターが直接行った作業を、完了として記録した",
-  reopen_for_release: "反映をやり直すため、完了から着手中へ戻した",
+  reopen_for_release: "反映をやり直すため、完了から戻した",
   ingest_create: "取り込み元から課題を作った",
   ingest_update: "取り込み元の変更を取り込んだ",
   bind: "取り込み元と対応付けた",

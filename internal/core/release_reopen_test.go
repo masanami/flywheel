@@ -125,8 +125,8 @@ func TestReopenChallengeForRelease_MovesTheDoneChallengeBackAndReplacesTheReleas
 	}
 
 	after := snapshotReopen(t, f.s, f.cid)
-	if after.chStatus != string(StatusInProgress) || after.chVersion != before.chVersion+1 {
-		t.Errorf("challenge = %s v%d, want in_progress v%d", after.chStatus, after.chVersion, before.chVersion+1)
+	if after.chStatus != string(StatusVerifying) || after.chVersion != before.chVersion+1 {
+		t.Errorf("challenge = %s v%d, want verifying v%d", after.chStatus, after.chVersion, before.chVersion+1)
 	}
 	if len(after.ops) != 2 {
 		t.Fatalf("operations = %+v, want the old (closed) and a new one", after.ops)
@@ -199,7 +199,7 @@ func TestReopenChallengeForRelease_PendingReleaseIsReplacedToo(t *testing.T) {
 		t.Fatalf("res = %+v, err = %v, want reopened", res, err)
 	}
 	snap := snapshotReopen(t, f.s, f.cid)
-	if snap.ops[0].state != string(OperationStateClosed) || snap.ops[1].state != string(OperationStatePending) || snap.chStatus != string(StatusInProgress) {
+	if snap.ops[0].state != string(OperationStateClosed) || snap.ops[1].state != string(OperationStatePending) || snap.chStatus != string(StatusVerifying) {
 		t.Errorf("snapshot = %+v", snap)
 	}
 	if len(snap.approvals) > 0 && snap.approvals[0].supAt.Valid && snap.approvals[0].kind == string(ApprovalKindRelease) {

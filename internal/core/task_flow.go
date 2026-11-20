@@ -85,7 +85,7 @@ func approvedPlanVersionOf(ctx context.Context, tx *sql.Tx, cid int64) (version 
 }
 
 // reopenDoneTasks は課題 cid の、承認済みの計画の版のタスクのうち done のものを in_progress にする
-// （完了の差し戻し・反映のやり直しで課題が着手中へ戻るとき）。前の版の計画の done のタスクは動かさない。
+// （完了の差し戻しで課題が着手中へ戻るとき）。前の版の計画の done のタスクは動かさない。
 func reopenDoneTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64) error {
 	v, ok, err := approvedPlanVersionOf(ctx, tx, cid)
 	if err != nil || !ok {
@@ -93,6 +93,18 @@ func reopenDoneTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid
 	}
 	_, err = setTasksStatus(ctx, tx, rec, cid,
 		taskFilter{PlanVersion: &v, Statuses: []TaskStatus{TaskStatusDone}}, TaskStatusInProgress)
+	return err
+}
+
+// reverifyDoneTasks は課題 cid の、承認済みの計画の版のタスクのうち done のものを verifying にする
+// （反映のやり直し〔T18〕で課題が完了から検証中へ戻るとき）。前の版の計画の done のタスクは動かさない。
+func reverifyDoneTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64) error {
+	v, ok, err := approvedPlanVersionOf(ctx, tx, cid)
+	if err != nil || !ok {
+		return err
+	}
+	_, err = setTasksStatus(ctx, tx, rec, cid,
+		taskFilter{PlanVersion: &v, Statuses: []TaskStatus{TaskStatusDone}}, TaskStatusVerifying)
 	return err
 }
 

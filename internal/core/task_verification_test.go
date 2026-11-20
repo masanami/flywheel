@@ -353,9 +353,9 @@ func TestJ5Task_AC137_ReopenForReleaseReopensTheDoneTaskOfTheApprovedPlan(t *tes
 	if err != nil || !res.Reopened {
 		t.Fatalf("res = %+v, err = %v, want reopened", res, err)
 	}
-	assertTaskStatuses(t, f.s, f.cid, map[string]TaskStatus{"done": TaskStatusInProgress, "old": TaskStatusDone, "cancelled": TaskStatusCancelled})
-	if got := f.state(t).chStatus; got != string(StatusInProgress) {
-		t.Errorf("challenge status = %s, want in_progress", got)
+	assertTaskStatuses(t, f.s, f.cid, map[string]TaskStatus{"done": TaskStatusVerifying, "old": TaskStatusDone, "cancelled": TaskStatusCancelled})
+	if got := f.state(t).chStatus; got != string(StatusVerifying) {
+		t.Errorf("challenge status = %s, want verifying", got)
 	}
 }
 
