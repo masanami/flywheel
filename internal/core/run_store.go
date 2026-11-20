@@ -390,6 +390,8 @@ func (n *nullString) Scan(src any) error {
 // 同じ形）。ended_at・result・cost 系・output・error は NULL のまま挿入する
 // （終了時にしか決まらない列。updateRunEnd が後で埋める）。
 type insertRunInput struct {
+	// Reflect は、反映の操作を持たない反映の依頼（上げる依頼）の run にも run.reflect の印を付けるとき真（反映の操作を持つ run は常に付く）。
+	Reflect          bool
 	CycleID          *int64
 	Kind             runKind
 	Judgment         judgmentPoint
@@ -526,7 +528,7 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 		in.MaxBudgetUSD, string(in.BudgetBucket),
 		int64PtrColumn(in.SlotID), nullableTextColumn(string(in.Decider)), int64PtrColumn(in.DeciderRow),
 		nullableTextColumn(in.Repo), nullableTextColumn(flywheelVersion()), int64PtrColumn(in.TaskID), int64PtrColumn(in.OperationID),
-		boolToInt(in.OperationID != nil),
+		boolToInt(in.OperationID != nil || in.Reflect),
 	)
 	if store.IsUniqueViolation(err) {
 		// 部分一意索引のどちらに当たったかは、スロットを指定していて、その

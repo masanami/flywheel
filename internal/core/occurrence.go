@@ -346,6 +346,10 @@ const (
 	// land_refused は「入れてよい」が届いたのに、同じ中身のレビュー待ちが戻った。
 	holdReasonChecksFailed holdReason = "checks_failed"
 	holdReasonLandRefused  holdReason = "land_refused"
+	// 統合先を使う課題の、上げる依頼（反映先へ上げる反映の依頼）の保留（発生は作らない）。reflect_unavailable はリポジトリに反映の依頼の口が無い、
+	// reflect_failed は上げる依頼を始められなかった・完了でない課題の上げる依頼が終わりの状態を返した。
+	holdReasonReflectUnavailable holdReason = "reflect_unavailable"
+	holdReasonReflectFailed      holdReason = "reflect_failed"
 )
 
 // persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない理由（統合先を使う課題のものを含む）と、進めようが無い理由だけが書く
@@ -353,7 +357,8 @@ const (
 func (r holdReason) persisted() bool {
 	switch r {
 	case holdReasonLandUnavailable, holdReasonContentRefInvalid, holdReasonFactsUnmet, holdReasonTasksBlocked,
-		holdReasonIntegrationRefInvalid, holdReasonDelegateEnded, holdReasonMergedUnverified, holdReasonChecksFailed, holdReasonLandRefused:
+		holdReasonIntegrationRefInvalid, holdReasonDelegateEnded, holdReasonMergedUnverified, holdReasonChecksFailed, holdReasonLandRefused,
+		holdReasonReflectUnavailable, holdReasonReflectFailed:
 		return true
 	}
 	return false

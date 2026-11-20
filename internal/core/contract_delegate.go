@@ -372,6 +372,15 @@ func fillCommandArgs(connector *Connector, args []string, challengeID string, sb
 	return fillContractArgsWith(args, contractFill{ChallengeID: challengeID, Source: sb, EmptySource: startTakesTaskFile(connector), RunID: externalRunID, Answer: answer})
 }
 
+// fillRowCommandArgs は契約の実行 row のコマンドの引数を埋める。反映の依頼（上げる依頼を含む）は取り込み元を持たないので、
+// 取り込み元の差し込みを空の文字列で埋める。それ以外は fillCommandArgs と同じ。
+func fillRowCommandArgs(connector *Connector, row *contractRunRow, args []string, challengeID string, sb *sourceBinding, answer contractAnswer) ([]string, error) {
+	if row.Kind == contractRunKindReflect {
+		return fillContractArgsWith(args, contractFill{ChallengeID: challengeID, EmptySource: true, RunID: row.ExternalRunID, Answer: answer})
+	}
+	return fillCommandArgs(connector, args, challengeID, sb, row.ExternalRunID, answer)
+}
+
 // startTakesTaskFile は、接続ツールの commands.start が {task_file} を書いているか（取り込み元の無いタスクも起動する宣言）。
 func startTakesTaskFile(c *Connector) bool {
 	if c == nil || c.Commands == nil {
@@ -709,6 +718,12 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 // operationID が非 nil なら、反映の操作のために呼んだ run として印を付ける（run.operation_id。反映の段・完了から戻す前の読み・
 // 片付けだけが渡す。印の付いた run は、課題の最後の委譲の run・最後の契約のコマンドを読む所から外れる）。
 func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64) (int64, error) {
+	return s.beginContractRunMarked(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, taskID, operationID, false)
+}
+
+// beginContractRunMarked は beginContractRunForTask に、反映の依頼の印（run.reflect）を足したもの。reflect が真なら、反映の操作が無い
+// 反映の依頼（上げる依頼）の run にも印を付ける（課題の使った額・最後の委譲の実行の読みから外すため）。
+func (s *Store) beginContractRunMarked(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64, reflect bool) (int64, error) {
 	host, _ := os.Hostname()
 	now := s.currentTime()
 	var runIDInt int64
@@ -772,7 +787,7 @@ func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID,
 		row, err := insertRun(ctx, tx, cid, insertRunInput{
 			CycleID: cycleID, Kind: runKindContract, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
 			SessionID: sessionID, PID: int64(os.Getpid()), Host: host, HeartbeatAt: now, StartedAt: now,
-			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: runTask, Repo: taskRepo, OperationID: operationID,
+			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: runTask, Repo: taskRepo, OperationID: operationID, Reflect: reflect,
 		})
 		if err != nil {
 			return err
@@ -1301,8 +1316,10 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	bindings := map[*contractRunRow]*sourceBinding{}
 	planVersions := map[int64]*int64{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		// 読むのはタスクの実行で、課題が完了でないものだけ（完了の課題の実行と反映の依頼は反映の段が読む）。
-		q := contractRunSelect + ` WHERE ended_at IS NULL AND kind = 'task' AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'done')`
+		// 読むのはタスクの実行と、着手中・検証中の課題の上げる依頼（kind が reflect）で、課題が完了でないものだけ（完了の課題の実行と
+		// 反映の依頼は反映の段が読む）。
+		q := contractRunSelect + ` WHERE ended_at IS NULL AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'done')
+			AND (kind = 'task' OR (kind = 'reflect' AND challenge_id IN (SELECT id FROM challenge WHERE status IN ('in_progress', 'verifying'))))`
 		args := []any{}
 		if only != nil {
 			q += ` AND challenge_id = ?`

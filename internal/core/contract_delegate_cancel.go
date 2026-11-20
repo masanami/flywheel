@@ -79,7 +79,7 @@ func (s *Store) CancelOpenContractRuns(ctx context.Context, in ContractCancelInp
 		if err != nil {
 			return n, err
 		}
-		command, err := fillCommandArgs(connector, connector.Commands.Cancel, in.ChallengeID, bindings[row], row.ExternalRunID, contractAnswer{})
+		command, err := fillRowCommandArgs(connector, row, connector.Commands.Cancel, in.ChallengeID, bindings[row], contractAnswer{})
 		if err != nil {
 			return n, err
 		}

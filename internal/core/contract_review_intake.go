@@ -252,8 +252,10 @@ func (s *Store) holdContractReviewWith(ctx context.Context, rep *ContractRunRepo
 // reviewIntakeScope は、レビュー待ちを受け取る課題とタスクの読み（課題が統合先を使うか・契約の run が結び付くタスクとその状態）。
 type reviewIntakeScope struct {
 	Integration bool
-	TaskID      *int64
-	TaskStatus  TaskStatus
+	// Reflect は、契約の実行が反映の依頼（上げる依頼）であること。
+	Reflect    bool
+	TaskID     *int64
+	TaskStatus TaskStatus
 }
 
 func (s *Store) loadReviewIntakeScope(ctx context.Context, cid int64, externalRunID string) (reviewIntakeScope, error) {
@@ -264,6 +266,11 @@ func (s *Store) loadReviewIntakeScope(ctx context.Context, cid int64, externalRu
 			return err
 		}
 		sc.Integration = integ != nil && *integ
+		var kind sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT kind FROM contract_run WHERE challenge_id = ? AND external_run_id = ?`, cid, externalRunID).Scan(&kind); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		sc.Reflect = kind.String == contractRunKindReflect
 		sc.TaskID, err = contractRunTaskID(ctx, tx, cid, externalRunID)
 		if err != nil || sc.TaskID == nil {
 			return err
@@ -307,7 +314,13 @@ func (s *Store) receiveContractReview(ctx context.Context, rep *ContractRunRepor
 	if _, n := reviewContentRefs(rep.Artifacts); n != 1 {
 		return hold(contentRefInvalidQuestion(rep.ExternalRunID, n), holdReasonContentRefInvalid)
 	}
-	if !scope.Integration && rs != nil && rs.Reconcile != nil {
+	// 上げる依頼（反映先へ上げる反映の依頼）のレビュー待ちは、反映先宛ての成果物（PR）がちょうど 1 つでなければ受け取らない。
+	var reflectPR *UpstreamPullRequest
+	if scope.Reflect {
+		if reflectPR, err = s.checkReflectPRs(ctx, rep, rs, hold); err != nil || reflectPR == nil {
+			return err
+		}
+	} else if !scope.Integration && rs != nil && rs.Reconcile != nil {
 		prs, err := rs.defaultBranchPRs(context.WithoutCancel(ctx), rep.Artifacts)
 		if err != nil {
 			if rerr := s.restoreFactsCount(ctx, rep); rerr != nil {
@@ -341,6 +354,9 @@ func (s *Store) receiveContractReview(ctx context.Context, rep *ContractRunRepor
 			rep.PendingRespond = &contractAnswer{Choice: contractChoiceRespond, Note: note}
 			return nil
 		}
+	}
+	if scope.Reflect {
+		return s.submitReflectReview(ctx, rep, rs, *reflectPR)
 	}
 	if scope.Integration {
 		return s.receiveIntegrationReview(ctx, rep, rs, cid, scope, hold)
@@ -530,7 +546,7 @@ func (s *Store) undeliveredFactsUnmetAnswer(ctx context.Context, cid int64, curr
 
 // respondToReview は、required_facts を満たさないレビュー待ちを読んだ同じ状態の確認の中で、同じ契約の run へ respond を返す。
 func (s *Store) respondToReview(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, rep *ContractRunReport) (*ContractRunReport, error) {
-	command, err := fillCommandArgs(connector, connector.Commands.Resume, rep.ChallengeID, binding, row.ExternalRunID, *rep.PendingRespond)
+	command, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, rep.ChallengeID, binding, *rep.PendingRespond)
 	if err != nil {
 		return nil, err
 	}

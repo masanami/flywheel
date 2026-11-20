@@ -64,8 +64,31 @@ func (s *Store) startReflectRequest(ctx context.Context, row *operationRow, opts
 	}
 	cid := row.ChallengeID
 	challengeID := formatChallengeID(cid)
+	// {artifact_ref} は、反映の操作の参照（PR）。統合先を使う課題では、課題に記録した統合先の識別。
+	artifactRef := row.Ref.String
+	var integ bool
+	var integRef sql.NullString
+	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		u, err := challengeUsesIntegration(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if integ = u != nil && *u; integ {
+			return tx.QueryRowContext(ctx, `SELECT integration_ref FROM challenge WHERE id = ?`, cid).Scan(&integRef)
+		}
+		return nil
+	}); classifyReadWriteErr(err) != nil {
+		return releaseJudgment{}, classifyReadWriteErr(err)
+	}
+	if integ {
+		if integRef.String == "" {
+			j.result, j.detail = ExecutionResultUnsupported, "could not start the reflect request: the challenge has no integration ref"
+			return j, nil
+		}
+		artifactRef = integRef.String
+	}
 	command, err := fillContractArgsWith(connector.Commands.Reflect,
-		contractFill{ChallengeID: challengeID, EmptySource: true, ArtifactRef: row.Ref.String})
+		contractFill{ChallengeID: challengeID, EmptySource: true, ArtifactRef: artifactRef})
 	if err != nil {
 		j.result, j.detail = ExecutionResultUnsupported, "could not fill the reflect command: "+err.Error()
 		return j, nil
