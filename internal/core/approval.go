@@ -995,6 +995,9 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 				return err
 			}
 		}
+		if holdTaskID.Valid && !req.Replan {
+			return resumeIntegrationTaskAfterAnswer(ctx, tc, holdReasonValue, holdTaskID.Int64)
+		}
 		return nil
 	}
 

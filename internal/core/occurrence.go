@@ -342,6 +342,10 @@ const (
 	holdReasonIntegrationRefInvalid holdReason = "integration_ref_invalid"
 	holdReasonDelegateEnded         holdReason = "delegate_ended"
 	holdReasonMergedUnverified      holdReason = "merged_unverified"
+	// 検証した中身を持つタスクの実行を統合先へ入れる間の保留（発生は作らない）。checks_failed は検証した中身のチェックに失敗がある、
+	// land_refused は「入れてよい」が届いたのに、同じ中身のレビュー待ちが戻った。
+	holdReasonChecksFailed holdReason = "checks_failed"
+	holdReasonLandRefused  holdReason = "land_refused"
 )
 
 // persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない理由（統合先を使う課題のものを含む）と、進めようが無い理由だけが書く
@@ -349,7 +353,7 @@ const (
 func (r holdReason) persisted() bool {
 	switch r {
 	case holdReasonLandUnavailable, holdReasonContentRefInvalid, holdReasonFactsUnmet, holdReasonTasksBlocked,
-		holdReasonIntegrationRefInvalid, holdReasonDelegateEnded, holdReasonMergedUnverified:
+		holdReasonIntegrationRefInvalid, holdReasonDelegateEnded, holdReasonMergedUnverified, holdReasonChecksFailed, holdReasonLandRefused:
 		return true
 	}
 	return false

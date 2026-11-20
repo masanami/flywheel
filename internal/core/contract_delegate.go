@@ -207,7 +207,7 @@ func (in ContractStartInput) releaseSource() *contractReleaseSource {
 }
 
 func (in ContractPollInput) releaseSource() *contractReleaseSource {
-	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil}
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Checks: in.Checks, Compare: in.Compare}
 }
 
 // ContractPollInput は Store.PollContractRuns の入力。
@@ -220,6 +220,10 @@ type ContractPollInput struct {
 	CycleID     string
 	// Reconcile は成果物の PR の base と状態の取得（GET だけ）。release の作成と置き換えに使う。nil なら release は扱わない。
 	Reconcile UpstreamBranchSource
+	// Checks・Compare は、統合先を使う課題のタスクの実行へ「入れてよい」を返す前の確かめ（中身のチェックの取得・変わり方の比較）と、
+	// 入った中身の確かめに使う上流の取得の口（GET だけ）。nil なら、その確かめができないので「入れてよい」を返さない。
+	Checks  UpstreamCheckSource
+	Compare UpstreamCompareSource
 	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。
 	WorkDir string
 	// Judgment は J4 の起動の実行者。非 nil なら、親の答えを待つ契約の run（decider が parent・kind が answer）を J4 へ回す
@@ -292,6 +296,10 @@ type contractRunRow struct {
 	LandDelivered bool
 	// StartRunID は、この契約の実行を始めた契約のコマンド（start）の flywheel の run の内部整数 ID。
 	StartRunID int64
+	// VerifiedRef は、タスクの検証（J5）が「満たした」とした中身（統合先を使う課題のタスクの実行。無ければ空）。
+	VerifiedRef string
+	// holdSuccessEnd は DB の列ではない。真なら、succeeded を読んでも ended_at を入れない（統合先へ入ったかを上流で確かめるまで開けておく）。
+	holdSuccessEnd bool
 }
 
 // contractKindOrTask は契約の実行の種類 kind（空は task）を返す。
@@ -310,7 +318,7 @@ const (
 
 const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
 	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, ''), task_id,
-	kind, operation_id, COALESCE(land_ref, ''), land_delivered, start_run_id FROM contract_run`
+	kind, operation_id, COALESCE(land_ref, ''), land_delivered, start_run_id, COALESCE(verified_ref, '') FROM contract_run`
 
 func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, error) {
 	var r contractRunRow
@@ -318,7 +326,7 @@ func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, erro
 	var taskID, opID sql.NullInt64
 	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget,
 		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.RequestedResolvableBy, &r.WorkDir, &taskID,
-		&r.Kind, &opID, &r.LandRef, &r.LandDelivered, &r.StartRunID); err != nil {
+		&r.Kind, &opID, &r.LandRef, &r.LandDelivered, &r.StartRunID, &r.VerifiedRef); err != nil {
 		return nil, err
 	}
 	if opID.Valid {
@@ -816,6 +824,8 @@ type contractCall struct {
 	ReleaseStage bool
 	// HoldEnd は、終わりを読んでも contract_run の ended_at を入れないとき真（反映の段の status・resume。結果を書く書き込みが入れる）。
 	HoldEnd bool
+	// HoldSuccessEnd は、succeeded だけは ended_at を入れないとき真（failed・cancelled は終わった記録にする）。
+	HoldSuccessEnd bool
 }
 
 // finishContractCall はコマンドを起動し、結果を run と contract_run へ 1 つのトランザクションで記録する。
@@ -914,7 +924,7 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 				status = nil
 				costFrom(latest.CostMicros)
 				// 反映の段が読んだ終わりを、結果を書くまで開けていた実行（HoldEnd）は、その場で終わる呼び出し（完了から戻す前の読み・片付け）が閉じる。
-				if !c.HoldEnd {
+				if !c.HoldEnd && (!c.HoldSuccessEnd || latest.State != ContractStateSucceeded) {
 					if _, err := tx.ExecContext(recordCtx, `UPDATE contract_run SET ended_at = ? WHERE id = ? AND ended_at IS NULL`,
 						formatTimestamp(s.currentTime()), latest.ID); err != nil {
 						return err
@@ -1118,12 +1128,20 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 		}
 	}
 	var endedAt any
-	if st.State.Terminal() && !c.HoldEnd {
+	if st.State.Terminal() && !c.HoldEnd && (!c.HoldSuccessEnd || st.State != ContractStateSucceeded) {
 		endedAt = now
 	}
 	report.Facts = st.Facts
 	if err := s.writeContractRunRecord(ctx, tx, c, st, rk, rd, rt, rb, totalMicros, now, endedAt, report); err != nil {
 		return err
+	}
+	if st.State == ContractStateFailed || st.State == ContractStateCancelled {
+		// 統合先を使う課題のタスクの実行が失敗・取り消しで終わったら、検証した中身と通す中身は無効にする（次の委譲の後に検証し直す）。
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = NULL, land_ref = NULL, land_delivered = 0
+			WHERE challenge_id = ? AND external_run_id = ? AND kind = 'task' AND (verified_ref IS NOT NULL OR land_ref IS NOT NULL)
+			AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND uses_integration = 1)`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
+			return err
+		}
 	}
 	if st.State != ContractStateSucceeded {
 		return nil

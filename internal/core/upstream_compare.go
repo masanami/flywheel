@@ -373,3 +373,34 @@ func assessReleaseHeadOfPR(ctx context.Context, compare UpstreamCompareSource, r
 	a.Change = ClassifyHeadChange(ctx, compare, repo, pr.Base, verifiedHead, pr.HeadSHA)
 	return a
 }
+
+// contentMove は、検証した中身から今の中身までの動きの見分け（ClassifyHeadChange の結果を、承認し直さずに通してよいかで分けたもの）。
+type contentMove int
+
+const (
+	// contentMoveUndeterminable は、判定できないこと（ゼロ値。未設定のまま通さないよう、通さない側にする）。
+	contentMoveUndeterminable contentMove = iota
+	// contentMoveMergeInOnly は、宛先の最新の取り込みだけで、衝突を解消するために直したファイルが無いこと。
+	contentMoveMergeInOnly
+	// contentMoveConflictFix は、取り込みだけだが、衝突を解消するために直したファイルがあること。
+	contentMoveConflictFix
+	// contentMoveContentChanged は、取り込み以外の変更が入ったこと。
+	contentMoveContentChanged
+)
+
+// classifyContentMove は ch を contentMove に分ける。差分を人が見ない道なので、衝突を解消するために直したファイルがある取り込みは、
+// 取り込みだけには含めない。
+func classifyContentMove(ch HeadChange) contentMove {
+	switch ch.Kind {
+	case HeadChangeMergeInOnly:
+		for _, f := range ch.ConflictFixes {
+			if len(f.Files) > 0 {
+				return contentMoveConflictFix
+			}
+		}
+		return contentMoveMergeInOnly
+	case HeadChangeContentChanged:
+		return contentMoveContentChanged
+	}
+	return contentMoveUndeterminable
+}

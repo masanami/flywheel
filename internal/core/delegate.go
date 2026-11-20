@@ -116,6 +116,9 @@ type DelegateInput struct {
 	// Reconcile は委譲の後の照合が呼ぶ、リモートのブランチと head ブランチの PR の取得
 	// （GET だけ）。
 	Reconcile UpstreamBranchSource
+	// Checks・Compare は、統合先を使う課題のタスクの実行へ「入れてよい」を返す前の確かめに使う上流の取得の口（GET だけ。nil なら確かめられない）。
+	Checks  UpstreamCheckSource
+	Compare UpstreamCompareSource
 	// CycleID はこの操作が属する周（BeginCycle が返した ID）。空は ErrValidation。
 	CycleID string
 	// Cycle が非 nil なら、枠超過の状態をこの JudgmentCycle と共有する。
@@ -663,7 +666,7 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if in.Contract != nil {
 		reports, err := s.PollContractRuns(ctx, ContractPollInput{
 			ChallengeID: in.ChallengeID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl, Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile,
-			Judgment: in.Judgment, Cycle: in.Cycle,
+			Judgment: in.Judgment, Cycle: in.Cycle, Checks: in.Checks, Compare: in.Compare,
 		})
 		if errors.Is(err, ErrStoreError) {
 			return nil, err

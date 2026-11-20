@@ -179,7 +179,7 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 // holdIntegrationSucceeded は、統合先を使う課題のタスクの実行が、レビュー待ちを経ずに succeeded になったとき（land_ref が無い）、
 // 検証へ進めず、課題が着手中なら保留にする（上流の成果物が統合先へ入っていれば merged_unverified、入っていなければ delegate_ended）。
 // 統合先を使う課題では、succeeded を課題の検証中への移り変わりに使わないので、処理した（真）。land_ref があるときの succeeded は、
-// 反映の段の読みが扱う（ここでは何もしない）。統合先を使わない課題では何もしない（偽）。
+// 「入れてよい」を返し済みの実行の終わりの確かめ（finishIntegrationLanding）が扱う。統合先を使わない課題では何もしない（偽）。
 func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource) (bool, error) {
 	cid, ok := parseChallengeID(rep.ChallengeID)
 	if !ok {
@@ -210,7 +210,8 @@ func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunRe
 		return false, err
 	}
 	if landRef != "" {
-		return true, nil
+		// 「入れてよい」を返し済み。成果物が統合先へ入ったかを上流で確かめ、入っていればタスクを済みにする（課題の状態によらない）。
+		return true, s.finishIntegrationLanding(ctx, rep, rs, cid, landRef, recorded)
 	}
 	if inProgress, err := s.challengeInProgress(ctx, cid); err != nil || !inProgress {
 		return true, err
@@ -372,6 +373,12 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		}
 		answer, resume = contractAnswer{Choice: a}, ok
 	}
+	integ, err := s.integrationTaskRun(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	// 「入れてよい」を返し済みの実行の succeeded は、統合先へ入ったかを上流で確かめるまで、終わった記録にしない。
+	row.holdSuccessEnd = integ && row.LandRef != ""
 	args, name := connector.Commands.Status, "status"
 	if resume {
 		args, name = connector.Commands.Resume, "resume"
@@ -412,6 +419,10 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		if err := s.cancelOverBudget(ctx, in, row, connector, binding, planVersion, cycleID, rep); err != nil {
 			return nil, err
 		}
+	}
+	if !resume && integ && rep.Result == RunResultSucceeded && !rep.Held && rep.PendingRespond == nil && rep.State == ContractStateWaiting &&
+		rep.RequestedAction != nil && rep.RequestedAction.Kind == contractRequestedKindReview {
+		return s.landVerifiedReview(ctx, in, row, connector, binding, planVersion, cycleID, rep)
 	}
 	if !resume && rep.PendingRespond != nil && !rep.Held && !rep.State.Terminal() {
 		return s.respondToReview(ctx, in, row, connector, binding, planVersion, cycleID, rep)
@@ -512,7 +523,7 @@ func (s *Store) runExistingContractCommandWith(ctx context.Context, client Contr
 			}
 			return client.Status(ctx, li)
 		},
-		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseOp != nil, HoldEnd: holdEnd,
+		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseOp != nil, HoldEnd: holdEnd, HoldSuccessEnd: row.holdSuccessEnd,
 		FactsRequired: row.reqFacts, CountFacts: name == "status" && releaseOp == nil,
 	})
 }

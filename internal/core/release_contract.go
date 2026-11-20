@@ -482,3 +482,17 @@ func clearLandRefs(ctx context.Context, tx *sql.Tx, challengeID int64) error {
 		`UPDATE contract_run SET land_ref = NULL, land_delivered = 0 WHERE challenge_id = ? AND (land_ref IS NOT NULL OR land_delivered <> 0)`, challengeID)
 	return err
 }
+
+// summarizeChecks は checks のうち、失敗したものがあるか・終わっていないものがあるかを返す（チェックの分類は classifyCheck）。
+// 0 件は、どちらも偽（0 件をどう扱うかは呼び出し元が決める）。反映の操作の実行と、統合先へ入れる確かめが共用する。
+func summarizeChecks(checks []UpstreamCheck) (failed, pending bool) {
+	for _, c := range checks {
+		switch classifyCheck(c) {
+		case checkFail:
+			failed = true
+		case checkPending:
+			pending = true
+		}
+	}
+	return failed, pending
+}
