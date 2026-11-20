@@ -237,6 +237,12 @@ func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunRe
 		if err != nil {
 			return true, err
 		}
+		// 保留中の課題は、契約の実行を開けたまま残す（上げる依頼の終わりと同じ形。回答で着手中へ戻った後の状態の確認が、同じ終わりを読み直して、
+		// 統合先へ入ったかを確かめて保留を立て、終わった記録にする。ここで終わった記録にすると、タスクが検証中・着手中のまま、保留が立たない）。
+		// 開けたままの実行は、タスクの二重の起動を止め、state が succeeded で land_ref が空なので、計画を作り直す回答の「作業している実行」に数えない。
+		if held, err := s.challengeStatusIs(ctx, cid, StatusAwaitingHuman); err != nil || held {
+			return true, err
+		}
 		return true, s.closeContractRunRow(ctx, cid, rep.ExternalRunID)
 	}
 	if sc, err := s.loadReviewIntakeScope(ctx, cid, rep.ExternalRunID); err != nil || (sc.TaskID != nil && sc.TaskStatus == TaskStatusCancelled) {

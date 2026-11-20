@@ -7,7 +7,7 @@ import (
 
 // 項目 6（起動の読み）: 統合先を使う課題のタスクの契約の実行が、起動の応答のうちに succeeded を返しても（land_ref 無し）、終わりの記録は
 // 保留と同じ書き込みにする。保留の書き込みが失敗しても、保留の無い終わった記録だけが残らない（開いたまま次の状態の確認が読み直す）。
-func TestPolish1_StartReturningSucceededDoesNotEndTheRunWithoutAHold(t *testing.T) {
+func TestStuckPaths_StartReturningSucceededDoesNotEndTheRunWithoutAHold(t *testing.T) {
 	t.Parallel()
 	f := newMultiFixture(t, 1)
 	f.newMulti(t, "fast", "P1", true, multiTask{key: "a"})

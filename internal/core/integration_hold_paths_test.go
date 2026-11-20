@@ -9,7 +9,7 @@ import (
 
 // 項目 4: 同じ PR の反映の操作が、置き換え（superseded）と課題の差し戻し（challenge_rejected）の両方で閉じた後、上げる依頼のレビュー待ちを
 // 読んだら、承認できる反映の操作を作り直す。作れなかったときは、反映の操作の無い検証中を作らない。
-func TestPolish1_UpRequestRecreatesTheReleaseClosedBySupersededAndChallengeRejected(t *testing.T) {
+func TestStuckPaths_UpRequestRecreatesTheReleaseClosedBySupersededAndChallengeRejected(t *testing.T) {
 	t.Parallel()
 	f, id := newUpFixture(t, upConnectorsJSON())
 	cid, _ := parseChallengeID(id)
@@ -34,7 +34,7 @@ func TestPolish1_UpRequestRecreatesTheReleaseClosedBySupersededAndChallengeRejec
 }
 
 // 項目 5: 値で返す事実が揃わない保留への回答の届け先は、タスクの単位で絞る。別のタスクの実行が間に入っても、回答は届く。
-func TestPolish1_FactsUnmetAnswerIsDeliveredPerTaskNotPerChallenge(t *testing.T) {
+func TestStuckPaths_FactsUnmetAnswerIsDeliveredPerTaskNotPerChallenge(t *testing.T) {
 	t.Parallel()
 	f := newIntakeFixture(t, requiredSelfReviewJSON)
 	f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
@@ -63,7 +63,7 @@ func TestPolish1_FactsUnmetAnswerIsDeliveredPerTaskNotPerChallenge(t *testing.T)
 
 // 項目 7: 統合先を使う課題のリポジトリを 1 つに限る確かめは、起動でも済みのタスクを含める（上げる依頼と同じ基準）。
 // 済みのタスクと別のリポジトリのタスクを足した計画は、起動せず（費用を使う前に止め）、理由 integration_unavailable にする。
-func TestPolish1_ADoneTaskAndAnotherRepositoryTaskAreNotStarted(t *testing.T) {
+func TestStuckPaths_ADoneTaskAndAnotherRepositoryTaskAreNotStarted(t *testing.T) {
 	t.Parallel()
 	f := newMultiFixture(t, 2)
 	id := f.newMulti(t, "repos2", "P1", true, multiTask{key: "a"}, multiTask{key: "b"})
@@ -83,7 +83,7 @@ func TestPolish1_ADoneTaskAndAnotherRepositoryTaskAreNotStarted(t *testing.T) {
 }
 
 // 項目 8: 保留を作り損ねた停止の掃引は、タスクの単位で見る。ほかのタスクの後の保留が、このタスクの保留の作り損ねを隠さない。
-func TestPolish1_UnheldStopSweepIsPerTask(t *testing.T) {
+func TestStuckPaths_UnheldStopSweepIsPerTask(t *testing.T) {
 	t.Parallel()
 	f := newIgLandFixture(t)
 	other := addTaskRowForTest(t, f.s, f.intID(t), 1, "t2", "main-repo", "impl")
@@ -99,7 +99,7 @@ func TestPolish1_UnheldStopSweepIsPerTask(t *testing.T) {
 }
 
 // 項目 9: 走っている上げる依頼は、保留中の課題でも、状態・費用を読み続ける（レビュー待ちの受け取りはしない）。
-func TestPolish1_RunningUpRequestIsReadWhileTheChallengeIsHeld(t *testing.T) {
+func TestStuckPaths_RunningUpRequestIsReadWhileTheChallengeIsHeld(t *testing.T) {
 	t.Parallel()
 	f, id := newUpFixture(t, upConnectorsJSON())
 	f.setUpPR("main")
@@ -125,7 +125,7 @@ func TestPolish1_RunningUpRequestIsReadWhileTheChallengeIsHeld(t *testing.T) {
 }
 
 // 項目 10: 統合先の識別を課題に初めて記録したとき、作業ログに残す（経路は委譲の読み。原因の run が付く）。
-func TestPolish1_RecordingTheIntegrationRefIsLogged(t *testing.T) {
+func TestStuckPaths_RecordingTheIntegrationRefIsLogged(t *testing.T) {
 	t.Parallel()
 	f := newIntegrationFixture(t)
 	f.readOnce(t, intakeOut(integOptsWithLd, integArtsOK, nil))
@@ -144,7 +144,7 @@ func TestPolish1_RecordingTheIntegrationRefIsLogged(t *testing.T) {
 }
 
 // 項目 9（保留中に終わりを読んだとき）: 契約の実行は開けたまま残し、回答で着手中へ戻った後の状態の確認が、反映の操作を閉じて reflect_failed で保留にする。
-func TestPolish1_UpRequestEndedWhileHeldIsHandledAfterTheAnswer(t *testing.T) {
+func TestStuckPaths_UpRequestEndedWhileHeldIsHandledAfterTheAnswer(t *testing.T) {
 	t.Parallel()
 	f, id := newUpFixture(t, upConnectorsJSON())
 	f.startUp(t)
@@ -171,7 +171,7 @@ func TestPolish1_UpRequestEndedWhileHeldIsHandledAfterTheAnswer(t *testing.T) {
 
 // 項目 4（作れなかったとき）: 承認できる反映の操作を作れない（同じ PR の反映の操作が置き換え・差し戻し以外で閉じている）ときは、
 // 検証中へ進めず、黙って止めずに保留にする。
-func TestPolish1_UpRequestWithoutAnApprovableReleaseIsHeldNotVerified(t *testing.T) {
+func TestStuckPaths_UpRequestWithoutAnApprovableReleaseIsHeldNotVerified(t *testing.T) {
 	t.Parallel()
 	f, id := newUpFixture(t, upConnectorsJSON())
 	cid, _ := parseChallengeID(id)
