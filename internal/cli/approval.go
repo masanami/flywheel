@@ -332,17 +332,7 @@ func runAnswer(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	// 計画を作り直すときは、開いた契約の run を先に止める（止めると課題の版が変わりうるので、版を取り直す）。
-	if replan {
-		if n, err := cancelOpenContractRuns(a, id); err != nil {
-			return nil, err
-		} else if n > 0 {
-			if preview, err = a.Store.PrepareAnswer(context.Background(), id, answer); err != nil {
-				return nil, mapCoreErr(err)
-			}
-		}
-	}
-
+	// 計画を作り直す回答では、契約の実行を止めない。取りやめるタスクの実行と上げる依頼は、作り直した計画の承認の後に、状態の確認が取り消す。
 	c, hold, err := a.Store.ExecuteAnswer(context.Background(), core.AnswerRequest{
 		ChallengeID:     id,
 		ExpectedVersion: preview.Version,

@@ -300,6 +300,8 @@ type contractRunRow struct {
 	VerifiedRef string
 	// holdSuccessEnd は DB の列ではない。真なら、succeeded を読んでも ended_at を入れない（統合先へ入ったかを上流で確かめるまで開けておく）。
 	holdSuccessEnd bool
+	// discard は DB の列ではない。真なら、この実行はもう要らないので取り消すだけで、成果物を取り込まず課題も保留にしない。
+	discard bool
 }
 
 // contractKindOrTask は契約の実行の種類 kind（空は task）を返す。
@@ -1376,11 +1378,12 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 		connector, err := findCLIConnector(in.ConnDecl, row.ConnectorID)
 		var rep *ContractRunReport
 		if err == nil {
-			// 反映の操作を閉じた上げる依頼（課題の単位の確かめが満たしていない・完了の差し戻し）は、状態を読まずに取り消す（保留中の課題でも取り消す）。
-			if closed, cerr := s.reflectRunOperationClosed(ctx, row); cerr != nil {
+			// 要らなくなった実行（反映の操作を閉じた上げる依頼・取りやめにしたタスクの実行・作り直した計画より前の上げる依頼）は、
+			// 状態を読まずに取り消す（保留中の課題でも取り消す）。
+			if why, cerr := s.obsoleteContractRun(ctx, row); cerr != nil {
 				err = cerr
-			} else if closed {
-				rep, err = s.cancelClosedReflectRun(ctx, in, row, connector, bindings[row], planVersions[row.ChallengeID], cycleIDInt)
+			} else if why != "" {
+				rep, err = s.cancelObsoleteContractRun(ctx, in, row, connector, bindings[row], planVersions[row.ChallengeID], cycleIDInt, why)
 			} else {
 				rep, err = s.pollOne(ctx, in, row, connector, bindings[row], planVersions[row.ChallengeID], cycleIDInt)
 			}
@@ -1434,8 +1437,10 @@ const reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS N
 
 // unheldContractStopWhere は、契約の run（k）が failed・cancelled で終わったのに、その後に保留を作れていない
 // （記録と保留が別のトランザクションなので、間でプロセスが止まると起こる）課題を選ぶ条件。
+// 取りやめにしたタスクの実行は、flywheel が取り消した（計画の作り直し・取り下げ）ので、保留にし損ねたものと数えない。
 const unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'cancelled') AND c.status = 'in_progress'
-	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at)`
+	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at)
+	AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status = 'cancelled')`
 
 // HoldUnrecordedContractStops は、保留にし損ねた課題を保留にする。次の 2 つ（どちらも課題が着手中のときだけ）。
 //   - 契約の start の最中に flywheel の run が回収された（呼んだプロセスが止まって別のプロセスが回収した場合など）のに、

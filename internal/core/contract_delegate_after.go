@@ -273,7 +273,8 @@ func (s *Store) SubmitHeldContractSuccesses(ctx context.Context, only *int64) (i
 	var targets []target
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		q := `SELECT k.challenge_id, k.start_run_id, k.external_run_id FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.held_success = 1 AND c.status = 'in_progress' AND COALESCE(c.uses_integration, 0) = 0`
+			WHERE k.held_success = 1 AND c.status = 'in_progress' AND COALESCE(c.uses_integration, 0) = 0
+			AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status = 'cancelled')`
 		args := []any{}
 		if only != nil {
 			q += ` AND k.challenge_id = ?`
@@ -555,7 +556,7 @@ func (s *Store) runExistingContractCommandWith(ctx context.Context, client Contr
 			}
 			return client.Status(ctx, li)
 		},
-		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseOp != nil || row.Kind == contractRunKindReflect, HoldEnd: holdEnd, HoldSuccessEnd: row.holdSuccessEnd,
+		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseOp != nil || row.Kind == contractRunKindReflect || row.discard, HoldEnd: holdEnd, HoldSuccessEnd: row.holdSuccessEnd,
 		FactsRequired: row.reqFacts, CountFacts: name == "status" && releaseOp == nil,
 	})
 }

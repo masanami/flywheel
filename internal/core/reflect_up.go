@@ -495,15 +495,70 @@ func (s *Store) reflectRunOperationClosed(ctx context.Context, row *contractRunR
 	return n > 0, classifyReadWriteErr(err)
 }
 
-// cancelClosedReflectRun は、反映の操作を閉じた上げる依頼を、宣言の commands.cancel で取り消す。終わりの状態が返れば、契約の実行を終わった記録にする
-// （課題の状態は変えない）。取り消せなかった（コマンドの失敗・終わりの状態でない）ときは、終わっていない記録のまま残し、保留にもしない
-// （次の状態の確認が取り消し直す。残っている間、新しい上げる依頼は始まらない）。
-func (s *Store) cancelClosedReflectRun(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64) (*ContractRunReport, error) {
+// obsoleteContractRun は、契約の実行 row がもう要らず、取り消すと決まっているとき、その理由（取り消しの依頼の注記）を返す（要るなら空）。
+//   - 上げる依頼で、結び付いた反映の操作を閉じた（課題の単位の確かめが満たしていない・完了の差し戻し）
+//   - タスクの実行で、結び付いたタスクが取りやめになった（作り直した計画の承認・課題の取り下げ）
+//   - 上げる依頼で、始めた後に計画が承認し直された、または終わっていないタスクがある（作り直した計画の新しい版のタスクが、これから集める）
+func (s *Store) obsoleteContractRun(ctx context.Context, row *contractRunRow) (string, error) {
+	if closed, err := s.reflectRunOperationClosed(ctx, row); err != nil || closed {
+		if err != nil {
+			return "", err
+		}
+		return "反映の操作を閉じたため（課題の単位の確かめが満たしていない、または完了の差し戻し）、統合先から反映先へ上げる依頼の中止を依頼した。", nil
+	}
+	switch row.Kind {
+	case contractRunKindReflect:
+		var stale bool
+		err := s.db.Read(ctx, func(tx *sql.Tx) error {
+			var unfinished int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task WHERE challenge_id = ? AND status IN (?, ?, ?)`, row.ChallengeID,
+				string(TaskStatusPending), string(TaskStatusInProgress), string(TaskStatusVerifying)).Scan(&unfinished); err != nil {
+				return err
+			}
+			if unfinished > 0 {
+				stale = true
+				return nil
+			}
+			var startPlan sql.NullInt64
+			if err := tx.QueryRowContext(ctx, `SELECT plan_version FROM run WHERE id = ?`, row.StartRunID).Scan(&startPlan); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if !startPlan.Valid {
+				return nil
+			}
+			v, ok, err := approvedPlanVersionOf(ctx, tx, row.ChallengeID)
+			stale = err == nil && ok && v > startPlan.Int64
+			return err
+		})
+		if err = classifyReadWriteErr(err); err != nil || !stale {
+			return "", err
+		}
+		return "計画を作り直して承認し直したため、統合先から反映先へ上げる依頼の中止を依頼した（新しい計画のタスクが済んだら、上げる依頼を始め直す）。", nil
+	case contractRunKindTask:
+		if row.TaskID == nil {
+			return "", nil
+		}
+		var n int
+		err := s.db.Read(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task WHERE id = ? AND status = ?`, *row.TaskID, string(TaskStatusCancelled)).Scan(&n)
+		})
+		if err = classifyReadWriteErr(err); err != nil || n == 0 {
+			return "", err
+		}
+		return "タスクを取りやめにしたため（計画の作り直し・課題の取り下げ）、タスクの実行の中止を依頼した。", nil
+	}
+	return "", nil
+}
+
+// cancelObsoleteContractRun は、要らなくなった契約の実行を、宣言の commands.cancel で取り消す。終わりの状態が返れば、契約の実行を終わった記録にする
+// （課題の状態は変えず、保留にもしない。成果物も取り込まない）。取り消せなかった（コマンドの失敗・終わりの状態でない）ときは、終わっていない記録のまま残し、
+// 保留にもしない（次の状態の確認が取り消し直す。残っている間、新しい上げる依頼は始まらない）。
+func (s *Store) cancelObsoleteContractRun(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, note string) (*ContractRunReport, error) {
 	challengeID := formatChallengeID(row.ChallengeID)
 	command, err := fillRowCommandArgs(connector, row, connector.Commands.Cancel, challengeID, binding, contractAnswer{})
 	if err != nil {
 		return nil, err
 	}
-	note := "反映の操作を閉じたため（課題の単位の確かめが満たしていない、または完了の差し戻し）、統合先から反映先へ上げる依頼の中止を依頼した。"
+	row.discard = true
 	return s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, existingContractWorkDir(row, in.WorkDir), row, "cancel", command, planVersion, cycleID, note)
 }
