@@ -594,3 +594,46 @@ func TestExecutionResultLabel_S3aWordsAreVerbatim(t *testing.T) {
 		}
 	}
 }
+
+// 見直し前からある値の語は、コードでの使われ方（release_exec.go ほか）に合わせる（flywheel#856 の差し戻し）。
+func TestExecutionResultLabel_EarlierValuesSayWhatHappened(t *testing.T) {
+	want := map[core.ExecutionResult]string{
+		core.ExecutionResultUpstreamFailed:   "上流を読めなかった",
+		core.ExecutionResultClosed:           "成果物が、入らずに閉じられた",
+		core.ExecutionResultInterrupted:      "試行が途中で止まった",
+		core.ExecutionResultUnsupported:      "flywheel が扱えない形だった",
+		core.ExecutionResultNoApprovedHead:   "承認した中身の記録が無い",
+		core.ExecutionResultMergedUnapproved: "承認なしで反映された",
+	}
+	for r, w := range want {
+		if got := view.ExecutionResultLabel(r); got != w {
+			t.Errorf("label(%s) = %q, want %q", r, got, w)
+		}
+	}
+}
+
+// 画面の文言の表が読む EXECUTION_RESULT_WORDS は、EXECUTION_RESULT_CODES と同じ添字で端末の語を持つ。
+func TestClosedSets_ExecutionResultWordsAlignWithCodes(t *testing.T) {
+	var codes, words []string
+	for _, cs := range view.ClosedSets() {
+		switch cs.Name {
+		case "EXECUTION_RESULT_CODES":
+			codes = cs.Codes
+		case "EXECUTION_RESULT_WORDS":
+			words = cs.Codes
+		}
+	}
+	if len(codes) == 0 || len(words) != len(codes) {
+		t.Fatalf("codes = %d, words = %d", len(codes), len(words))
+	}
+	seen := map[string]string{}
+	for i, c := range codes {
+		if want := view.ExecutionResultLabel(core.ExecutionResult(c)); words[i] != want || want == "" {
+			t.Errorf("words[%d] = %q, want the label of %s (%q)", i, words[i], c, want)
+		}
+		if prev, dup := seen[words[i]]; dup {
+			t.Errorf("%s と %s が同じ語 %q", prev, c, words[i])
+		}
+		seen[words[i]] = c
+	}
+}

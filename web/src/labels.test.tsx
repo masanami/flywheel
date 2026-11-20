@@ -4,6 +4,7 @@ import {
   CARD_MODIFIER_CODES,
   DISCREPANCY_KIND_CODES,
   EXECUTION_RESULT_CODES,
+  EXECUTION_RESULT_WORDS,
   HOLD_KIND_CODES,
   STATUS_CODES,
   TASK_PHASE_CODES,
@@ -60,6 +61,12 @@ it("反映の試行の結果のすべての値に語があり、S3a の語は親
   for (const c of EXECUTION_RESULT_CODES) {
     expect(EXECUTION_RESULT_LABELS[c], c).toBeTruthy();
   }
+  // 語の正本は Go の表（生成物の EXECUTION_RESULT_WORDS）。画面の表は、同じ添字の語をそのまま持つ。
+  expect(EXECUTION_RESULT_WORDS).toHaveLength(EXECUTION_RESULT_CODES.length);
+  EXECUTION_RESULT_CODES.forEach((c, i) => {
+    expect(EXECUTION_RESULT_LABELS[c], c).toBe(EXECUTION_RESULT_WORDS[i]);
+  });
+  expect(EXECUTION_RESULT_LABELS.upstream_failed).toBe("上流を読めなかった");
   expect(EXECUTION_RESULT_LABELS.landed).toBe("委譲先が反映先へ入れた");
   expect(EXECUTION_RESULT_LABELS.land_refused).toBe("委譲先が入れられなかった");
   expect(EXECUTION_RESULT_LABELS.delegate_ended).toBe(
