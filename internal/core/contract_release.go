@@ -205,14 +205,17 @@ func prKey(repo string, number int) string {
 	return fmt.Sprintf("%s#%d", strings.ToLower(repo), number)
 }
 
-// onlySupersededReleaseFor は、課題 cid の ref の release がすべて superseded で閉じたものだけか（1 件以上ある）。
+// onlySupersededReleaseFor は、課題 cid の ref の release（完了の差し戻しで取り消した〔challenge_rejected〕ものを除く）が
+// すべて superseded で閉じたものだけか（1 件以上ある）。
 // 差し戻しで前の PR へ戻ったとき、承認できる release を作り直すための判定。
 func (s *Store) onlySupersededReleaseFor(ctx context.Context, cid int64, ref string) (bool, error) {
 	var total, superseded int
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		return tx.QueryRowContext(ctx,
-			`SELECT COUNT(*), COALESCE(SUM(state = ? AND closed_reason = ?), 0) FROM operation WHERE challenge_id = ? AND kind = ? AND ref = ?`,
-			string(OperationStateClosed), string(ClosedReasonSuperseded), cid, string(OperationKindRelease), ref).Scan(&total, &superseded)
+			`SELECT COUNT(*), COALESCE(SUM(state = ? AND closed_reason = ?), 0) FROM operation WHERE challenge_id = ? AND kind = ? AND ref = ?
+			AND NOT (state = ? AND closed_reason = ?)`,
+			string(OperationStateClosed), string(ClosedReasonSuperseded), cid, string(OperationKindRelease), ref,
+			string(OperationStateClosed), string(ClosedReasonChallengeRejected)).Scan(&total, &superseded)
 	})
 	return total > 0 && total == superseded, classifyReadWriteErr(err)
 }

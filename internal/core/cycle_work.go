@@ -104,7 +104,12 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 		if err != nil {
 			return nil, err
 		}
-		st.Run = n + contractRuns + blockedRuns
+		// 上げる依頼を始められる課題（全部のタスクが済み、開いた契約の実行が無い、統合先を使う着手中の課題）も、委譲の段が進める。
+		reflects, err := s.reflectCandidates(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		st.Run = n + contractRuns + blockedRuns + len(reflects)
 	}
 	return &CycleWork{Total: st.sum(), Stages: st}, nil
 }

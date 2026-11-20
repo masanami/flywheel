@@ -719,17 +719,18 @@ func TestUpRequest_TheStartingConditionsAreSelectedByTheCandidates(t *testing.T)
 	}
 }
 
-// 委譲の段の状態の確認が読む上げる依頼は、着手中・検証中の課題のものだけ。保留中・完了の承認待ちの課題のものは、状態を読まない。
-// ただし、反映の操作を閉じた上げる依頼は、課題の状態によらず（保留中でも）取り消す（その動きは judgment_j5_challenge_test.go の AC-183・AC-184・AC-206 の試験）。
-func TestUpRequest_TheStatusReadCoversOnlyInProgressAndVerifyingChallenges(t *testing.T) {
+// 委譲の段の状態の確認が読む上げる依頼は、着手中・検証中・保留中の課題のもの（保留中も状態・費用を読み続ける）。完了の承認待ちの課題のものは、
+// 状態を読まない。ただし、反映の操作を閉じた上げる依頼は、課題の状態によらず（保留中でも）取り消す（その動きは judgment_j5_challenge_test.go の
+// AC-183・AC-184・AC-206 の試験）。
+func TestUpRequest_TheStatusReadSkipsOnlyChallengesAwaitingCompletionApproval(t *testing.T) {
 	t.Parallel()
-	for _, st := range []string{"awaiting_human", "awaiting_completion_approval"} {
+	for st, wantRead := range map[string]bool{"awaiting_human": true, "awaiting_completion_approval": false} {
 		f, _ := newUpFixture(t, upConnectorsJSON())
 		f.startUp(t)
 		f.sqlExec(t, `UPDATE challenge SET status = ?`, st)
 		f.runDelegationStage(t, nil)
-		if len(f.client.statuses) != 0 {
-			t.Errorf("challenge %s: statuses = %v, want none", st, f.client.statuses)
+		if got := len(f.client.statuses) != 0; got != wantRead {
+			t.Errorf("challenge %s: statuses = %v, want read = %v", st, f.client.statuses, wantRead)
 		}
 	}
 }

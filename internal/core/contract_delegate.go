@@ -693,7 +693,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 			Workspace: s.workspace, WorkDir: s.contractWorkDir(workDir), RunDir: runDirPath(s.workspace, formatRunID(runIDInt)),
 			Command: command, TimeoutSec: in.AgentDecl.TimeoutSec.Delegate,
 		},
-		Invoke: call, MaxMicros: maxMicros, TaskIDInt: taskID,
+		Invoke: call, MaxMicros: maxMicros, TaskIDInt: taskID, HoldSuccessEnd: usesIntegration,
 	})
 	if err != nil {
 		return nil, err
@@ -1159,11 +1159,40 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 			AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND uses_integration = 1)`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
 			return err
 		}
+		// 検証中のタスクは着手中へ戻す（回答の後に、次の委譲の段が委譲し直せる。検証中のままだと、起動・検証・進めようが無い保留の
+		// どれにも当たらず止まる）。タスクの状態の変更は、読んだ記録と同じトランザクションで行う。
+		if err := s.reopenVerifyingTaskOfStoppedRun(ctx, tx, c, st.RunID); err != nil {
+			return err
+		}
 	}
 	if st.State != ContractStateSucceeded {
 		return nil
 	}
 	return s.afterContractSucceeded(ctx, tx, c, st, report)
+}
+
+// reopenVerifyingTaskOfStoppedRun は、統合先を使う課題のタスクの契約の実行（externalRunID）が失敗・取り消しで終わったとき、
+// そのタスクが検証中なら着手中へ戻す。反映の段が読む実行・上げる依頼・タスクに結び付かない実行では何もしない。
+func (s *Store) reopenVerifyingTaskOfStoppedRun(ctx context.Context, tx *sql.Tx, c contractCall, externalRunID string) error {
+	if c.ReleaseStage {
+		return nil
+	}
+	var taskID int64
+	err := tx.QueryRowContext(ctx, `SELECT t.id FROM contract_run k JOIN task t ON t.id = k.task_id JOIN challenge ch ON ch.id = k.challenge_id
+		WHERE k.challenge_id = ? AND k.external_run_id = ? AND k.kind = 'task' AND t.status = 'verifying' AND ch.uses_integration = 1`,
+		c.ChallengeIDInt, externalRunID).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	rec, err := s.newInvokerRecorder(tx, &c.RunIDInt)
+	if err != nil {
+		return err
+	}
+	_, err = setTaskStatus(ctx, tx, rec, taskID, TaskStatusInProgress)
+	return err
 }
 
 // writeContractRunRecord は読めた状態で contract_run の行を作る・更新する。あわせて、出力の facts・待ちの options・
@@ -1318,10 +1347,10 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	bindings := map[*contractRunRow]*sourceBinding{}
 	planVersions := map[int64]*int64{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		// 読むのはタスクの実行と、着手中・検証中の課題の上げる依頼（kind が reflect）で、課題が完了でないものだけ（完了の課題の実行と
+		// 読むのはタスクの実行と、着手中・検証中・保留中の課題の上げる依頼（kind が reflect。保留中も状態・費用を読み続ける。受け取りは保留が解けてから）で、課題が完了でないものだけ（完了の課題の実行と
 		// 反映の依頼は反映の段が読む）。
 		q := contractRunSelect + ` WHERE ended_at IS NULL AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'done')
-			AND (kind = 'task' OR (kind = 'reflect' AND (challenge_id IN (SELECT id FROM challenge WHERE status IN ('in_progress', 'verifying'))
+			AND (kind = 'task' OR (kind = 'reflect' AND (challenge_id IN (SELECT id FROM challenge WHERE status IN ('in_progress', 'verifying', 'awaiting_human'))
 				OR operation_id IN (SELECT id FROM operation WHERE state = 'closed' AND closed_reason IN ('superseded', 'challenge_rejected')))))`
 		args := []any{}
 		if only != nil {
@@ -1437,9 +1466,11 @@ const reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS N
 
 // unheldContractStopWhere は、契約の run（k）が failed・cancelled で終わったのに、その後に保留を作れていない
 // （記録と保留が別のトランザクションなので、間でプロセスが止まると起こる）課題を選ぶ条件。
+// 後の保留は、そのタスクに結び付くもの（か、タスクに結び付かないもの）だけを数える（ほかのタスクの保留は、このタスクの作り損ねを隠さない）。
 // 取りやめにしたタスクの実行は、flywheel が取り消した（計画の作り直し・取り下げ）ので、保留にし損ねたものと数えない。
 const unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'cancelled') AND c.status = 'in_progress'
-	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at)
+	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at
+		AND (h.task_id IS NULL OR k.task_id IS NULL OR h.task_id = k.task_id))
 	AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status = 'cancelled')`
 
 // HoldUnrecordedContractStops は、保留にし損ねた課題を保留にする。次の 2 つ（どちらも課題が着手中のときだけ）。
