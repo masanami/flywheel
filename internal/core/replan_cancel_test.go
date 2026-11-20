@@ -274,6 +274,36 @@ func TestAnswerReplan_AC220_AReviewWaitingTaskRunDoesNotRefuseTheReplanAnswer(t 
 	}
 }
 
+// 保留の間に成功していた（held_success）タスクの実行は、最後に読んだ状態がレビュー待ちでも、まだ取り込んでいない成果物を持つので、断る。
+func TestAnswerReplan_AHeldSuccessTaskRunRefusesTheReplanAnswer(t *testing.T) {
+	t.Parallel()
+	f := newMultiFixture(t, 3)
+	id := f.twoTaskRunsWaitingForReview(t)
+	f.sqlExec(t, `UPDATE contract_run SET held_success = 1 WHERE external_run_id = 'ext-1'`)
+	if _, err := f.s.HoldChallenge(context.Background(), ChannelCLI, id, HoldInput{Question: "範囲"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.answer(t, id, "新しい範囲", true); !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation", err)
+	}
+}
+
+// 終わった（ended_at がある）実行は、記録の状態が running のままでも、作業している実行として数えない。
+func TestAnswerReplan_AnEndedTaskRunDoesNotRefuseTheReplanAnswer(t *testing.T) {
+	t.Parallel()
+	f := newMultiFixture(t, 3)
+	id := f.newMulti(t, "ended", "P1", true, multiTask{key: "a"})
+	f.runDelegationStage(t, nil)
+	f.client.echoRunning = false
+	f.sqlExec(t, `UPDATE contract_run SET state = 'running', ended_at = '2026-09-25T00:00:00.000Z' WHERE external_run_id = 'ext-1'`)
+	if _, err := f.s.HoldChallenge(context.Background(), ChannelCLI, id, HoldInput{Question: "範囲"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.answer(t, id, "新しい範囲", true); err != nil {
+		t.Fatalf("err = %v, want the answer accepted", err)
+	}
+}
+
 // 上げる依頼が開いている（レビュー待ち）課題を作る（統合先を使う課題。タスク a が済み。上げる依頼は検証中で開いている）。
 func (f *contractFixture) openReflectRun(t *testing.T) string {
 	t.Helper()
@@ -339,6 +369,23 @@ func TestReplan_AC219_AC222_AC216_TheOpenReflectRequestIsCancelledAfterTheApprov
 	f.runDelegationStage(t, nil)
 	if n := len(f.reflectStarts()); n != 2 {
 		t.Fatalf("commands.reflect calls = %d, want 2 after the new tasks are done", n)
+	}
+}
+
+// 上げる依頼（タスクの実行ではない）は、最後に読んだ状態が running でも、--replan の回答を断らない（承認の後に取り消す）。
+func TestAnswerReplan_ARunningReflectRequestDoesNotRefuseTheReplanAnswer(t *testing.T) {
+	t.Parallel()
+	f, id := newUpFixture(t, upConnectorsJSON())
+	f.openReflectRun(t)
+	f.sqlExec(t, `UPDATE contract_run SET state = 'running' WHERE kind = 'reflect' AND ended_at IS NULL`)
+	if _, err := f.s.HoldChallenge(context.Background(), ChannelCLI, id, HoldInput{Question: "範囲"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.answer(t, id, "新しい範囲", true); err != nil {
+		t.Fatalf("err = %v, want the answer accepted", err)
+	}
+	if len(f.client.cancels) != 0 {
+		t.Errorf("cancels = %v, want none at the answer", f.client.cancels)
 	}
 }
 

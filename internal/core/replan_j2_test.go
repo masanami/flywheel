@@ -72,8 +72,13 @@ func TestReplanJ2_AC209_TheInputHasTheTitlesOfTheDoneTasks(t *testing.T) {
 	if strings.Contains(sec, "TASK-b") {
 		t.Errorf("the section carries the task that is not done: %q", sec)
 	}
-	if !strings.Contains(sec, "完了条件: ") {
-		t.Errorf("the section lacks the done criteria: %q", sec)
+	var criteria string
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		cid, _ := parseChallengeID(f.id)
+		return tx.QueryRow(`SELECT done_criteria FROM task WHERE challenge_id = ? AND key = 'a'`, cid).Scan(&criteria)
+	})
+	if criteria == "" || !strings.Contains(sec, "完了条件: "+oneLine(criteria)) {
+		t.Errorf("the section lacks the done criteria %q of the done task: %q", criteria, sec)
 	}
 }
 
@@ -144,5 +149,34 @@ func TestReplanJ2_APlanWithoutTheIntegrationStaysValidWhenNoTaskIsDone(t *testin
 	f := newPAFixture(t, 1, false) // 作る側が、計画が登録されたこと（outcome が plan）を確かめる
 	if got := f.detail(t, f.id).Status; got != StatusAwaitingPlanApproval {
 		t.Errorf("status = %s, want awaiting_plan_approval", got)
+	}
+}
+
+// 統合先を使わない課題（タスクが 1 個）は、タスクが済みでも、J2 の入力に区画「済みのタスク」を入れず、uses_integration が偽の計画も有効のまま
+// （区切り S3a の動きは変えない）。
+func TestReplanJ2_AChallengeWithoutTheIntegrationKeepsTheOldBehavior(t *testing.T) {
+	t.Parallel()
+	f := newPAFixture(t, 1, false)
+	if err := f.approve(t, ttyAtt(t, f.id)); err != nil {
+		t.Fatal(err)
+	}
+	cid, _ := parseChallengeID(f.id)
+	setTaskStatusRaw(t, f.s, cid, "a", TaskStatusDone)
+	if _, err := f.s.HoldChallenge(ctx0, ChannelCLI, f.id, HoldInput{Question: "範囲を変えたい"}); err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	pre, err := f.s.PrepareAnswer(ctx0, f.id, "足りない分を足す")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _, err := f.s.ExecuteAnswer(ctx0, AnswerRequest{ChallengeID: f.id, ExpectedVersion: pre.Version, Answer: "足りない分を足す", Replan: true}, relayedAttestation(t, f.id, "s", "q")); err != nil || c.Status != StatusClassified {
+		t.Fatalf("answer --replan: %v %+v", err, c)
+	}
+	in, res := f.j2Input(t, paPlanOut(1, false))
+	if _, ok := j2SectionText(in, DoneTasksSectionLabel); ok {
+		t.Errorf("J2 input has the section %q for a challenge without the integration", DoneTasksSectionLabel)
+	}
+	if len(res.Items) != 1 || res.Items[0].Outcome != "plan" {
+		t.Fatalf("items = %+v, want the plan without the integration registered", res.Items)
 	}
 }
