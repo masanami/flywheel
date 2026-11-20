@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -22,12 +23,22 @@ type chkFixture struct {
 
 func newChkFixture(t *testing.T) *chkFixture {
 	t.Helper()
+	return newChkFixtureFacts(t, nil)
+}
+
+// newChkFixtureFacts は、偽の委譲先が、上げる依頼の状態の読みで facts を返す版（facts が nil なら返さない）。
+func newChkFixtureFacts(t *testing.T, facts map[string]string) *chkFixture {
+	t.Helper()
 	f, id := newUpFixture(t, upConnectorsJSON(), multiTask{key: "a"}, multiTask{key: "b", deps: []string{"a"}})
 	cid, _ := parseChallengeID(id)
 	setTaskStatusRaw(t, f.s, cid, "b", TaskStatusCancelled)
 	f.setUpPR("main")
 	f.startUp(t)
-	f.readWith(t, upReviewOut([]string{"respond", "land"}, upArtsOK...))
+	out := upReviewOut([]string{"respond", "land"}, upArtsOK...)
+	if facts != nil {
+		out.Status.Facts = facts
+	}
+	f.readWith(t, out)
 	if got := f.statusOf(t, id); got != StatusVerifying {
 		t.Fatalf("status = %s, want verifying", got)
 	}
@@ -88,25 +99,47 @@ func (f *chkFixture) count(t *testing.T, q string, args ...any) (n int) {
 // AC-172・AC-173・AC-174・AC-175・AC-176
 func TestChallengeCheck_InputHasTheTasksTheExpectedSceneThePRAndTheFactsAndTheRunHasNoTask(t *testing.T) {
 	t.Parallel()
-	f := newChkFixture(t)
+	// AC-175: 偽の委譲先が、状態の読みで facts を返す（ストアへ記録される経路を通す）。
+	f := newChkFixtureFacts(t, map[string]string{"self_review": "complete", "zeta": "Z", "alpha": "A"})
 	cid, _ := parseChallengeID(f.id)
 	f.sqlExec(t, `UPDATE challenge SET expected = ? WHERE id = ?`, `[{"kind":"ui","scene":"EXPECTED-SCENE","before":"BEFORE-X","after":"AFTER-X"}]`, cid)
-	f.sqlExec(t, `UPDATE contract_run SET facts = ? WHERE kind = 'reflect' AND ended_at IS NULL`, `{"self_review":"complete","zeta":"Z","alpha":"A"}`)
 	f.j5.j5.result = j5Out("not_met", "FEEDBACK-TEXT", nil)
 	f.verify(t)
 	in := f.lastInput(t)
-	for _, want := range []string{
-		"タスク a", "タスク b", // AC-172: 全部のタスクの題名
-		"[済み] タスク a", "[取りやめ] タスク b", "完了条件 a", "完了条件 b", // 済み・取りやめの別と完了条件
-		"EXPECTED-SCENE", "BEFORE-X", "AFTER-X", // AC-173: 完了したら見えるもの
-		upPRURL,                                              // AC-174: 上げる依頼の成果物（PR）の参照
-		"- alpha: A", "- self_review: complete", "- zeta: Z", // AC-175: facts の名前と値（名前の辞書順）
-	} {
-		if !strings.Contains(in, want) {
-			t.Errorf("J5 input lacks %q:\n%s", want, in)
+	secs := f.j5.j5Inputs[0].Sections
+	section := func(label string) string {
+		sec, ok := sectionByLabel(secs, label)
+		if !ok {
+			t.Fatalf("J5 input has no section %q:\n%s", label, in)
+		}
+		return sec.Content
+	}
+	// AC-172: 全部のタスクの題名（済み・取りやめの別と完了条件つき）。区画の中で確かめる。
+	tasks := section(labelAllTasksSection)
+	for _, want := range []string{"- [済み] タスク a\n  完了条件: 完了条件 a", "- [取りやめ] タスク b\n  完了条件: 完了条件 b"} {
+		if !strings.Contains(tasks, want) {
+			t.Errorf("the all-tasks section lacks %q:\n%s", want, tasks)
 		}
 	}
-	if strings.Index(in, "- alpha: A") > strings.Index(in, "- zeta: Z") {
+	// AC-173: 完了したら見えるもの（計画の背景の区画の中）。
+	bg := section(labelPlanBackgroundSection)
+	for _, want := range []string{"EXPECTED-SCENE", "BEFORE-X", "AFTER-X"} {
+		if !strings.Contains(bg, want) {
+			t.Errorf("the plan-background section lacks %q:\n%s", want, bg)
+		}
+	}
+	// AC-174: 上げる依頼の成果物（PR）の参照。
+	if !strings.Contains(in, upPRURL) {
+		t.Errorf("J5 input lacks the PR %q:\n%s", upPRURL, in)
+	}
+	// AC-175: facts の名前と値（名前の辞書順）。
+	facts := section(labelReflectFactsSection)
+	for _, want := range []string{"- alpha: A", "- self_review: complete", "- zeta: Z"} {
+		if !strings.Contains(facts, want) {
+			t.Errorf("the facts section lacks %q:\n%s", want, facts)
+		}
+	}
+	if strings.Index(facts, "- alpha: A") > strings.Index(facts, "- zeta: Z") {
 		t.Error("the facts are not in name order")
 	}
 	if sec, ok := sectionByLabel(f.j5.j5Inputs[0].Sections, "達成条件"); !ok || !strings.Contains(sec.Content, j5ChallengeCheckNote) {
@@ -227,8 +260,8 @@ func TestChallengeCheck_NotMetCancelsTheRequestAtTheNextStatusCheckWhileHeld(t *
 	statuses := len(f.client.statuses)
 	f.client.cancelOut = contractOut(ContractStateCancelled, nil, nil)
 	f.runDelegationStage(t, nil)
-	if len(f.client.cancels) != 1 {
-		t.Fatalf("cancels = %v, want one commands.cancel", f.client.cancels)
+	if len(f.client.cancels) != 1 || !reflect.DeepEqual(f.client.cancels[0], []string{"tool", "cancel", "ext-1"}) {
+		t.Fatalf("cancels = %v, want one commands.cancel for the reflect request ext-1", f.client.cancels)
 	}
 	if len(f.client.statuses) != statuses {
 		t.Errorf("commands.status was called %d times for the cancelled request", len(f.client.statuses)-statuses)
@@ -304,6 +337,13 @@ func TestChallengeCheck_AnAnswerWithoutReplanResumesAndTheCheckReadsTheAnswer(t 
 	// 確かめが済んだ後の確かめには、同じ回答を渡さない。
 	if got := f.statusOf(t, f.id); got != StatusAwaitingCompletionApproval {
 		t.Fatalf("status = %s, want awaiting_completion_approval", got)
+	}
+	cid, _ := parseChallengeID(f.id)
+	f.sqlExec(t, `UPDATE challenge SET status = 'verifying' WHERE id = ?`, cid)
+	f.sqlExec(t, `UPDATE run SET started_at = '2099-01-01T00:00:00.000Z' WHERE judgment = 'J5'`) // 回答より後に始まった確かめ
+	f.verify(t)
+	if _, ok := sectionByLabel(f.j5.j5Inputs[len(f.j5.j5Inputs)-1].Sections, labelChallengeCheckAnswerSection); ok {
+		t.Errorf("the answer was given again to a check after the one that read it:\n%s", f.lastInput(t))
 	}
 }
 
@@ -509,5 +549,120 @@ func TestChallengeRejection_NonIntegrationReturnsTheTaskToInProgress(t *testing.
 	}
 	if got := f.detail(t, "C-1").Status; got != StatusInProgress {
 		t.Errorf("status = %s, want in_progress", got)
+	}
+}
+
+// 課題の単位の確かめが読んだ後に、課題が検証中でなくなっていたら（保留・取り下げなど）、結果は書かない（保留も、反映の操作を閉じることも起きない）。
+func TestChallengeCheck_NotMetIsNotWrittenWhenTheChallengeIsNoLongerVerifying(t *testing.T) {
+	t.Parallel()
+	f := newChkFixture(t)
+	f.j5.j5.result = j5Out("not_met", "FEEDBACK-TEXT", nil)
+	cid, _ := parseChallengeID(f.id)
+	inner := f.j5.j5.onInvoke
+	f.j5.j5.onInvoke = func(in JudgmentLaunchInput) {
+		inner(in)
+		f.sqlExec(t, `UPDATE challenge SET status = 'in_progress' WHERE id = ?`, cid)
+	}
+	res := f.verify(t)
+	if len(res.Items) != 1 || res.Items[0].Outcome != "not_met" || res.Items[0].Status != nil {
+		t.Fatalf("items = %+v, want the verdict recorded but no state written", res.Items)
+	}
+	if got := f.statusOf(t, f.id); got != StatusInProgress {
+		t.Errorf("status = %s, want in_progress (unchanged)", got)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM hold WHERE challenge_id = ?`, cid); n != 0 {
+		t.Errorf("holds = %d, want none", n)
+	}
+	if rels := f.releases(t); len(rels) != 1 || rels[0].state != "pending" {
+		t.Errorf("releases = %+v, want the one release still pending", rels)
+	}
+}
+
+// 返さない facts は、区画ごと出さない。
+func TestChallengeCheck_NoFactsReturnedMeansNoFactsSection(t *testing.T) {
+	t.Parallel()
+	f := newChkFixture(t)
+	f.verify(t)
+	if _, ok := sectionByLabel(f.j5.j5Inputs[0].Sections, labelReflectFactsSection); ok {
+		t.Errorf("the facts section is in the J5 input although the delegate returned no facts:\n%s", f.lastInput(t))
+	}
+}
+
+// 別の理由の保留への回答は、確かめの入力に入らない。
+func TestChallengeCheck_TheAnswerOfAnotherHoldReasonIsNotRead(t *testing.T) {
+	t.Parallel()
+	f := newChkFixture(t)
+	f.sqlExec(t, `INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, reason, replan)
+		VALUES (1, 'Q', 'in_progress', '2026-11-01T00:00:00.000Z', 'OTHER-ANSWER', '2026-11-01T00:00:01.000Z', 'alice', 'reflect_failed', 0)`)
+	f.verify(t)
+	if _, ok := sectionByLabel(f.j5.j5Inputs[0].Sections, labelChallengeCheckAnswerSection); ok {
+		t.Errorf("the answer of another hold reason is in the J5 input:\n%s", f.lastInput(t))
+	}
+}
+
+// AC-202（完了から戻す操作を通す）: 完了から戻した（上げる依頼は戻す前に取り消された）、統合先を使う課題の J5 は課題の単位の確かめで、入力に反映の操作の成果物（PR）の
+// 参照があり、タスクごとの検証はやり直さない（タスクは済みのまま）。そこで「満たしていない」なら、置き換えて作った新しい反映の操作を閉じて保留にする。
+func TestChallengeCheck_AfterARealReopenTheCheckReadsThePRAndNotMetClosesTheNewOperation(t *testing.T) {
+	t.Parallel()
+	f := newReflectReopenFixture(t)
+	f.cancelsWith()
+	cid, _ := parseChallengeID(f.cid)
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`UPDATE challenge SET uses_integration = 1 WHERE id = ?`, cid); err != nil {
+			return err
+		}
+		// 上げる依頼の取り込み済みの成果物（上げる依頼の実行の印）。
+		_, err := tx.Exec(`UPDATE run SET reflect = 1 WHERE id IN (SELECT run_id FROM run_artifact WHERE kind = 'pr')`)
+		return err
+	})
+	res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, f.reopenInput(f.contentChangedCompare()))
+	if err != nil || !res.Reopened {
+		t.Fatalf("reopen = %+v err %v, want reopened", res, err)
+	}
+	if len(f.client.cancels) != 1 {
+		t.Fatalf("cancels = %v, want the reflect request cancelled before reopening", f.client.cancels)
+	}
+	f.j5.j5.onInvoke = func(in JudgmentLaunchInput) { f.j5.j5Inputs = append(f.j5.j5Inputs, in) }
+	f.j5.j5.result = j5Out("not_met", "FEEDBACK-TEXT", nil)
+	if _, err := f.j5.verify(t, &f.cid); err != nil {
+		t.Fatalf("VerifyAutoJ5: %v", err)
+	}
+	if len(f.j5.j5Inputs) != 1 {
+		t.Fatalf("J5 inputs = %d, want 1", len(f.j5.j5Inputs))
+	}
+	in := sectionsText(f.j5.j5Inputs[0].Sections)
+	if !strings.Contains(in, reviewPRURL) || !strings.Contains(in, j5ChallengeCheckNote) {
+		t.Errorf("the check after reopening lacks the PR %q or is not the challenge-level check:\n%s", reviewPRURL, in)
+	}
+	for k, v := range taskStatusMap(t, f.s, cid) {
+		if v != TaskStatusDone {
+			t.Errorf("task %s = %s, want done", k, v)
+		}
+	}
+	if got := f.status(t, f.cid); got != StatusAwaitingHuman {
+		t.Errorf("status = %s, want awaiting_human", got)
+	}
+	var waiting int
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM operation WHERE challenge_id = ? AND state IN ('pending', 'approved')`, cid).Scan(&waiting)
+	})
+	if waiting != 0 {
+		t.Errorf("%d release operations still waiting after the check was not met", waiting)
+	}
+}
+
+// AC-176（確かめの対象がちょうど 1 個の検証中のタスクを持つ場合でも）: 課題の単位の確かめの実行の記録は、どのタスクにも結び付かない。
+func TestChallengeCheck_TheRunHasNoTaskEvenWithASingleVerifyingTask(t *testing.T) {
+	t.Parallel()
+	f := newChkFixture(t)
+	cid, _ := parseChallengeID(f.id)
+	setTaskStatusRaw(t, f.s, cid, "a", TaskStatusVerifying)
+	f.verify(t)
+	ids := f.j5RunTaskIDs(t)
+	if len(ids) != 1 || ids[0].Valid {
+		t.Errorf("J5 run task_ids = %v, want one NULL", ids)
+	}
+	if _, ok := sectionByLabel(f.j5.j5Inputs[0].Sections, labelAllTasksSection); !ok {
+		t.Errorf("the check is not the challenge-level check:\n%s", f.lastInput(t))
 	}
 }
