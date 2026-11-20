@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -108,6 +109,10 @@ func TestFinish3_StoppedAfterLandChecksWhetherTheContentLanded(t *testing.T) {
 			}
 			if f.taskStatus(t) == "done" || f.taskStatus(t) == "in_progress" {
 				t.Fatalf("task = %s, want it left for the answer", f.taskStatus(t))
+			}
+			// 問いは、失敗・中止で終わったことを言う（成功の問いを流用しない）。
+			if q := f.text(t, `SELECT question FROM hold ORDER BY id DESC LIMIT 1`); !strings.Contains(q, contractStateWord(state)) || strings.Contains(q, "（成功）") {
+				t.Fatalf("question = %q", q)
 			}
 		})
 		t.Run(string(state)+"/not landed keeps the current failure handling in one write", func(t *testing.T) {
@@ -241,5 +246,25 @@ func TestFinish3_EndedAtIsNotLaterThanTheHoldRaisedInTheSameWrite(t *testing.T) 
 	f.read(t, contractOut(ContractStateFailed, nil, func(st *ContractStatus) { st.Artifacts = landedArts }))
 	if f.count(t, `SELECT COUNT(*) FROM contract_run WHERE ended_at > (SELECT MAX(raised_at) FROM hold)`) != 0 {
 		t.Fatal("ended_at is later than the hold's raised_at")
+	}
+}
+
+// 項目 2: 課題が保留の間に読んだ、「入れてよい」を返し済みの実行の失敗は、行を開けたまま残す。そのあと別の保留への回答で課題が着手中へ戻っても、
+// 開けたままの失敗の行の通す中身は消さない（消すと、次の状態の確認が、統合先へ入ったかを確かめられない）。
+func TestFinish3_AnswerKeepsTheLandRefOfAnOpenStoppedRun(t *testing.T) {
+	t.Parallel()
+	f := newIgLandFixture(t)
+	f.landed(t)
+	f.sql(t, `INSERT INTO hold (challenge_id, question, reason, from_status, raised_at, task_id) VALUES (?, 'q', 'checks_failed', 'in_progress', '2026-11-20T00:00:00.000Z',
+		(SELECT task_id FROM contract_run))`, f.intID(t))
+	f.sql(t, `UPDATE challenge SET status = 'awaiting_human', version = version + 1`)
+	f.checks.err = errors.New("boom") // 統合先の読みが失敗するので、行は開けたまま残る
+	f.read(t, contractOut(ContractStateFailed, nil, func(st *ContractStatus) { st.Artifacts = landedArts }))
+	if f.text(t, `SELECT COALESCE(ended_at, '') FROM contract_run`) != "" || f.ref(t, "land_ref") == "" {
+		t.Fatalf("ended = %q, land_ref = %q, state = %s, holds = %d", f.text(t, `SELECT COALESCE(ended_at, '') FROM contract_run`), f.ref(t, "land_ref"), f.ref(t, "state"), f.count(t, `SELECT COUNT(*) FROM hold`))
+	}
+	f.answer(t, "確かめた")
+	if f.ref(t, "land_ref") == "" {
+		t.Fatal("the answer cleared the land content of the open stopped run")
 	}
 }
