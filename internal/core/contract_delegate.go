@@ -292,7 +292,8 @@ func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, erro
 
 // fillContractArgs は契約のコマンドの引数の差し込みを埋める。閉集合は invocation と同じ 4 つ
 // （{issue_number}・{issue_url}・{external_key}・{challenge_id}）と、status・resume・cancel の {run_id}
-// （start が返した契約の実行 ID）、resume の {answer}・{choice}・{note}（保留への答え）。引数の要素の数は変えない。
+// （start が返した契約の実行 ID）、resume の {answer}・{choice}・{note}（保留への答え）だけを埋める。
+// cliCommandPlaceholders の表が許す {task_file}・{task_id}・{uses_integration}・{approved_ref} は、まだ埋めない（後のタスクが埋める）。引数の要素の数は変えない。
 func fillContractArgs(args []string, challengeID string, sb *sourceBinding, externalRunID string, answer contractAnswer) ([]string, error) {
 	out := make([]string, len(args))
 	for i, a := range args {

@@ -456,6 +456,42 @@ func TestValidateJ2Output_CLINonStartCommandNeedingSourceIsInvalidWithoutSource(
 	}
 }
 
+// コマンドごとの差し込みの表: start の {task_file}・resume の {approved_ref} は計画の登録でも通り、
+// start の {approved_ref}・status の {task_file} は通らない（宣言の読み込みと同じ表）。
+func TestValidateJ2Output_CLICommandPlaceholderTable(t *testing.T) {
+	t.Parallel()
+	out := j2PlanOutput(func(m map[string]any) { m["repo"] = "cli-repo"; m["operation"] = "cli-op" })
+	for _, tc := range []struct {
+		cmd    string
+		args   []string
+		accept bool
+	}{
+		{"start", []string{"tool", "{task_file}", "{task_id}", "{uses_integration}"}, true},
+		{"start", []string{"tool", "{approved_ref}"}, false},
+		{"resume", []string{"tool", "{run_id}", "{approved_ref}"}, true},
+		{"status", []string{"tool", "{run_id}", "{task_file}"}, false},
+	} {
+		vc := j2TestContext(t, true)
+		for i := range vc.Conn.Connectors {
+			if vc.Conn.Connectors[i].Form != ConnectorFormCLI {
+				continue
+			}
+			c := vc.Conn.Connectors[i].Commands
+			switch tc.cmd {
+			case "start":
+				c.Start = tc.args
+			case "status":
+				c.Status = tc.args
+			case "resume":
+				c.Resume = tc.args
+			}
+		}
+		if _, ok := validateJ2Output(out, vc); ok != tc.accept {
+			t.Errorf("%s %v: accepted=%v, want %v", tc.cmd, tc.args, ok, tc.accept)
+		}
+	}
+}
+
 // 達成条件 (1): 取り込み元のある課題で、status・resume・cancel の差し込みが各コマンドの閉集合の外なら
 // J2 の出力を受け付けず（invalid_output）、閉集合の中なら受け付ける。
 func TestValidateJ2Output_CLINonStartCommandPlaceholdersOutsideClosedSetAreInvalid(t *testing.T) {
