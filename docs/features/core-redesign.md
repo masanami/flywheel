@@ -308,6 +308,10 @@ S3a は、画面を作り替えない（完了の承認の画面は S3c。画面
 | 11 完了を承認する（画面） | 「画面の完了の承認（`POST …/approve`）の後、反映の操作は `pending` のままである」 |
 | 12 完了と反映を、対話で承認する | 「課題に、`options` に `land` を持つレビュー待ちの、終わっていないタスクの契約の実行があるとき、承認済みの反映の操作の試行は、その実行へ `commands.resume` を呼ぶ」 |
 
+前の区切りで足した形のうち、試験がこの文書の記述を正本として読むもの（S3a では変えない）:
+
+- `flywheel show <課題の ID> --json` と `GET /api/v1/workspaces/{name}/challenges/{id}`: 根に `tasks`（配列。要素は `id`〔`T-<番号>`〕・`title`・`body`・`done_criteria`・`non_goals`・`depends_on`〔タスクの ID の配列〕・`repo`・`operation`・`status`・`plan_version`）。`challenge` に `uses_integration`（真・偽・null）。`runs[]` と `holds[]` の要素に `task_id`（タスクの ID か null）。
+
 `flywheel op exec --json`（と、サイクルの反映の段）の `items[]` の形:
 
 ```json
