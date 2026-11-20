@@ -402,34 +402,21 @@ func execOpsJSON(t *testing.T, ws string, args ...string) map[string]any {
 	return runJSON(t, ws, append([]string{"op", "exec"}, args...)...)
 }
 
-func TestOpExec_NotMergeableOnADoneChallengeMovesItBackToInProgress(t *testing.T) {
+// op exec の items は、見直し前の「入れられずに戻した」ときのキー new_operation_id・reopen_reason を出さない。
+func TestOpExec_ItemsHaveNoReopenKeys(t *testing.T) {
 	parallelTools(t, false)
-	ws, cid, op := execWorkspace(t)
-	routes := []fakeGHRoute{
-		{match: "repos/o/r/commits/" + execHead + "/check-runs?page=1&per_page=100", stdout: `{"total_count":0,"check_runs":[]}`},
-		{match: "repos/o/r/commits/" + execHead + "/status?page=1&per_page=100", stdout: `{"state":"success","total_count":0,"statuses":[]}`},
-		{match: "repos/o/r/pulls/1", stdout: fmt.Sprintf(`{"html_url":%q,"title":"PR","state":"open","merged_at":null,"base":{"ref":"main"},"head":{"sha":%q},"mergeable":false}`, releasePRURL(1), execHead)},
-	}
-	withFakeGHRoutesOnPATH(t, routes)
+	ws, _, _ := execWorkspace(t)
+	newReleaseGH(t, execHead)
 
-	doc := execOpsJSON(t, ws)
-	_, items, _ := execItems(t, doc)
+	_, items, _ := execItems(t, execOpsJSON(t, ws))
 	if len(items) != 1 {
 		t.Fatalf("items = %v", items)
 	}
 	it := items[0].(map[string]any)
-	if it["result"] != "not_mergeable" || it["reopen_reason"] != "not_mergeable" || it["new_operation_id"] == nil {
-		t.Fatalf("item = %v, want not_mergeable with the challenge reopened", it)
-	}
-	if got := statusOfChallenge(t, ws, cid); got != "verifying" {
-		t.Errorf("challenge status = %s, want verifying", got)
-	}
-	show := runJSON(t, ws, "show", cid)
-	if o := findOperation(t, show, op); o["state"] != "closed" || o["closed_reason"] != "superseded" || o["superseded_by"] != it["new_operation_id"] {
-		t.Errorf("old release = %v", o)
-	}
-	if o := findOperation(t, show, it["new_operation_id"].(string)); o["state"] != "pending" || o["supersedes"] != op {
-		t.Errorf("new release = %v", o)
+	for _, k := range []string{"new_operation_id", "reopen_reason"} {
+		if _, ok := it[k]; ok {
+			t.Errorf("item has the removed key %s: %v", k, it)
+		}
 	}
 }
 

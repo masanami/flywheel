@@ -552,17 +552,9 @@ func assertDocumentedReleasePhase(t *testing.T, doc documentedJSON, where string
 	for j, it := range items {
 		im, _ := it.(map[string]any)
 		got := keysOf(im)
-		// 省略できるキー（mutually: 課題を戻したときの new_operation_id・reopen_reason は一緒に出る）。
-		_, hasNew := got["new_operation_id"]
-		_, hasReason := got["reopen_reason"]
-		if hasNew != hasReason {
-			t.Errorf("%s.items[%d] has new_operation_id=%v reopen_reason=%v, want both or neither", where, j, hasNew, hasReason)
-		}
-		delete(got, "new_operation_id")
-		delete(got, "reopen_reason")
-		delete(got, "detail")
+		// 省略できるキーは無い（new_operation_id・reopen_reason は items では出さない）。
 		if !reflect.DeepEqual(got, doc.entity["release_item"]) {
-			t.Errorf("%s.items[%d] keys = %v, documented = %v (+ optional detail, new_operation_id, reopen_reason)", where, j, sortedKeys(got), sortedKeys(doc.entity["release_item"]))
+			t.Errorf("%s.items[%d] keys = %v, documented = %v", where, j, sortedKeys(got), sortedKeys(doc.entity["release_item"]))
 		}
 	}
 	tidied, ok := pm["tidied"].([]any)

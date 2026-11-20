@@ -120,16 +120,12 @@ type ReleaseItem struct {
 	ApprovedHead        *string `json:"approved_head"`
 	ChallengeID         string  `json:"challenge_id"`
 	ConsecutiveFailures int     `json:"consecutive_failures"`
-	Detail              string  `json:"detail,omitempty"`
 	MergeCommit         *string `json:"merge_commit"`
-	// NewOperationID・ReopenReason は、結果が not_mergeable で課題が完了だったため、課題を着手中へ戻して release を
-	// 置き換えたときだけ出す（新しい release の ID と、戻した理由 not_mergeable | limit_reached）。
-	NewOperationID *string `json:"new_operation_id,omitempty"`
-	ObservedHead   *string `json:"observed_head"`
-	OperationID    string  `json:"operation_id"`
-	ReopenReason   *string `json:"reopen_reason,omitempty"`
-	Result         string  `json:"result"`
-	// Route は反映の依頼の経路（waiting_run | reflect_request | outside）。値を作る経路ができるまでは常に null。
+	ObservedHead        *string `json:"observed_head"`
+	OperationID         string  `json:"operation_id"`
+	Result              string  `json:"result"`
+	// Route は反映の依頼の経路（waiting_run | reflect_request | outside）。いま値を持つのは結果が waiting_outside の
+	// outside だけで、それ以外は null。
 	Route *string `json:"route"`
 }
 
@@ -283,15 +279,11 @@ func FromReleasePhase(skipped bool, items []core.ReleaseExecItem, notStarted []c
 			ApprovedHead:        strOrNil(it.ApprovedHead),
 			ChallengeID:         it.ChallengeID,
 			ConsecutiveFailures: it.ConsecutiveFailures,
-			Detail:              it.Detail,
 			MergeCommit:         strOrNil(it.MergeCommit),
 			ObservedHead:        strOrNil(it.ObservedHead),
 			OperationID:         it.OperationID,
 			Result:              string(it.Result),
-		}
-		if it.Reopened {
-			ri.NewOperationID = strOrNil(it.NewOperationID)
-			ri.ReopenReason = strOrNil(string(it.ReopenReason))
+			Route:               strOrNil(it.Route),
 		}
 		outItems = append(outItems, ri)
 	}

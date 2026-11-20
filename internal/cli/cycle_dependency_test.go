@@ -99,6 +99,7 @@ func TestCycle_ReleaseExecutedInTheSameCycleUnblocksTheRunPhase(t *testing.T) {
 	coretest.InsertApprovedRelease(t, ws, challengeIDToInternalID(t, dep), releasePRURL(1), execHead, "2026-10-22T00:00:00.000Z")
 	runJSON(t, ws, "dep", "add", id, dep)
 	gh := newReleaseGH(t, execHead)
+	gh.mergeOutside(t)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j3Route("BRIEF-DEP"), delegateRoute("completed")}, "")
 
 	// release の段より前は、依存先の release が承認済みで未実行なので、依存元は止まっている（M45H12）。
@@ -115,11 +116,11 @@ func TestCycle_ReleaseExecutedInTheSameCycleUnblocksTheRunPhase(t *testing.T) {
 
 	rel := cyclePhase(t, doc, "release")
 	ritems := phaseItems(t, rel)
-	if len(ritems) != 1 || ritems[0]["challenge_id"] != dep || ritems[0]["result"] != "merged" {
-		t.Fatalf("release items = %v, want the dependency's release merged", ritems)
+	if len(ritems) != 1 || ritems[0]["challenge_id"] != dep || ritems[0]["result"] != "already_merged" {
+		t.Fatalf("release items = %v, want the dependency's release executed", ritems)
 	}
-	if len(gh.mergeCalls(t)) != 1 {
-		t.Errorf("merge calls = %v, want 1", gh.mergeCalls(t))
+	if len(gh.writeCalls(t)) != 0 {
+		t.Errorf("gh write calls = %v, want none", gh.writeCalls(t))
 	}
 	run := cyclePhase(t, doc, "run")
 	if ns := phaseNotStarted(t, run); len(ns) != 0 {

@@ -176,9 +176,6 @@ type ConnectorRepo struct {
 	DefaultBranch string
 	Connector     string
 	Slots         ConnectorRepoSlots
-	// MergeMethod は承認済みの release のマージの方式（squash | merge | rebase）。
-	// キーを省略したときは読み込みが squash を入れる。
-	MergeMethod string
 	// ReflectConnector は反映の依頼の口にする委譲先の ID（任意。"" は「無い」）。
 	// 指せるのは、form: cli で commands.reflect を持つ委譲先だけ。
 	ReflectConnector string
@@ -245,7 +242,7 @@ var operationKeys = map[string]bool{
 var cliCommandsKeys = map[string]bool{"start": true, "status": true, "resume": true, "cancel": true, "reflect": true}
 var connectorRepoKeys = map[string]bool{
 	"name": true, "remote": true, "default_branch": true, "connector": true, "slots": true,
-	"merge_method": true, "reflect_connector": true,
+	"reflect_connector": true,
 }
 var connectorRepoSlotsKeys = map[string]bool{"provider": true, "paths": true, "base": true, "count": true}
 
@@ -577,7 +574,7 @@ func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 	}
 	repos := make([]ConnectorRepo, 0, len(rawList))
 	for i, rr := range rawList {
-		if err := rejectRemovedKeys(rr, []string{"serial_judgment", "conflict_exclude_paths"}, fmt.Sprintf("[%d]", i)); err != nil {
+		if err := rejectRemovedKeys(rr, []string{"serial_judgment", "conflict_exclude_paths", "merge_method"}, fmt.Sprintf("[%d]", i)); err != nil {
 			return nil, err
 		}
 		if err := rejectUnknownKeys(rr, connectorRepoKeys, fmt.Sprintf("[%d]", i)); err != nil {
@@ -613,15 +610,6 @@ func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 			}
 			if r.ReflectConnector == "" {
 				return nil, fmt.Errorf("[%d].reflect_connector: must not be empty", i)
-			}
-		}
-		r.MergeMethod = MergeMethodSquash
-		if v, ok := rr["merge_method"]; ok {
-			if isJSONNull(v) {
-				return nil, fmt.Errorf("[%d].merge_method: must not be null", i)
-			}
-			if err := json.Unmarshal(v, &r.MergeMethod); err != nil {
-				return nil, fmt.Errorf("[%d].merge_method: %w", i, err)
 			}
 		}
 		if v, ok := rr["slots"]; ok {
@@ -799,11 +787,6 @@ func validateConnectorRepo(r ConnectorRepo, repoNames map[string]bool, connector
 	}
 	if r.DefaultBranch == "" {
 		return fmt.Errorf("%w: repo %q has no default_branch", ErrConfigInvalid, r.Name)
-	}
-	switch r.MergeMethod {
-	case MergeMethodSquash, MergeMethodMerge, MergeMethodRebase:
-	default:
-		return fmt.Errorf("%w: repo %q has invalid merge_method %q (want squash, merge or rebase)", ErrConfigInvalid, r.Name, r.MergeMethod)
 	}
 	if r.Slots.Provider != "" && !slotsProviderValues[r.Slots.Provider] {
 		return fmt.Errorf("%w: repo %q has invalid slots.provider %q", ErrConfigInvalid, r.Name, r.Slots.Provider)

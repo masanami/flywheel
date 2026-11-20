@@ -22,6 +22,12 @@ import (
 	"time"
 )
 
+// 完了の検証（J5）を起動する口（`verify --auto`・周の検証の段）が、mergeable が null のときの読み直しの回数と間隔として渡す値。
+const (
+	ReleaseMergeableRetries  = 2
+	ReleaseMergeableInterval = 3 * time.Second
+)
+
 // J5 の区画「PR のマージ可否」のラベル。
 const labelPullRequestMergeability = "PR のマージ可否"
 

@@ -195,12 +195,12 @@ type UpstreamPullRequestChecks struct {
 	BaseSHA string
 	HeadSHA string
 	// Mergeable は REST の `mergeable`。nil は null（GitHub が計算中）、false はマージ不可、
-	// true はマージ可。`mergeable_state` は MergeableState に入れる。core は `behind` を BEHIND の判定に、mergeable=false を J5 の衝突の判定（judgment_j5_mergeability.go）に使い、J5 の区画へ両方を書く。
+	// true はマージ可。`mergeable_state` は MergeableState に入れる。core は mergeable=false を J5 の衝突の判定（judgment_j5_mergeability.go）に使い、J5 の区画へ両方を書く。
 	Mergeable *bool
 	// MergeCommitSHA は REST の `merge_commit_sha`（マージ済みの PR のマージのコミット。無ければ空）。
 	MergeCommitSHA string
 	// MergeableState は REST の `mergeable_state`（小文字。`behind`＝main に遅れているだけ、`dirty`＝衝突 等）。
-	// 取得できなければ空。BEHIND かどうかの判定は core が持つ（UpstreamMergeStateBehind）。
+	// 取得できなければ空。J5 の区画に表示するだけで、判定には使わない。
 	MergeableState string
 	Checks         []UpstreamCheck
 }
@@ -221,36 +221,6 @@ type UpstreamCheckSource interface {
 // 併せて実装していれば使われる）。release の実行が、承認した head にチェックが付いていたかを読むために呼ぶ。
 type UpstreamCommitChecksSource interface {
 	GetCommitChecks(ctx context.Context, repo, sha string) ([]UpstreamCheck, error)
-}
-
-// MergeMethod は PR のマージの方式（connectors.json の repos[].merge_method の閉集合）。
-const (
-	MergeMethodSquash = "squash"
-	MergeMethodMerge  = "merge"
-	MergeMethodRebase = "rebase"
-)
-
-// UpstreamPullRequestMerger は承認済みの release の実行の口（core）だけが呼ぶ、PR のマージの依頼の
-// 書き込み IF。読み取りの IF とは分ける。実装は internal/adapters/github が
-// `gh pr merge <URL> --<方式> --match-head-commit <head>` だけで行う
-// （--admin・--auto・--delete-branch は付けない）。
-type UpstreamPullRequestMerger interface {
-	// MergePullRequest は prURL の PR のマージを method（MergeMethod*）で依頼する。
-	// matchHeadSHA はマージする head（承認した head、または取り込みだけで動いた後の head）で、GitHub 側でも head の一致を比べさせる。
-	// 依頼が成功しても merged になったことは保証しない（呼び出し側が読み取りで確かめる）。
-	// 終了コードが 0 でないときは失敗を返す。
-	MergePullRequest(ctx context.Context, prURL, method, matchHeadSHA string) error
-}
-
-// UpstreamPullRequestBranchUpdater は、PR の head のブランチへ base の最新を取り込む依頼（GitHub の
-// update-branch）の書き込み IF。承認済みの release の実行の口（core）だけが、PR が BEHIND のときに呼ぶ。
-// マージの依頼（UpstreamPullRequestMerger）を実装する値が併せて実装していれば使われ、実装していなければ
-// BEHIND でも従来どおりマージを試す。
-type UpstreamPullRequestBranchUpdater interface {
-	// UpdatePullRequestBranch は repo の number 番の PR のブランチへ base を取り込む。expectedHeadSHA は
-	// 取り込みの前の head で、GitHub 側でも一致を比べさせる。依頼が受け付けられたら nil
-	// （取り込みの完了は保証しない。読み取りで確かめる）。
-	UpdatePullRequestBranch(ctx context.Context, repo string, number int, expectedHeadSHA string) error
 }
 
 // ErrUpstreamDiffUnavailable は、上流がその差分を返さない（大きすぎる・コミットが見つからない）ことを
