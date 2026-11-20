@@ -6,18 +6,22 @@ import "github.com/masanami/flywheel/internal/core"
 
 // Task は show の tasks の要素。DependsOn は前提のタスクの ID（"T-<n>"）。NonGoals・DependsOn は無ければ `[]`。
 // source_key は対応する取り込み元の子の external_key（対応しなければ null）。
+// budget_impl_usd・budget_review_usd はタスクの枠（増額を含む）、spent_usd はそのタスクの実行の費用の合計。
 type Task struct {
-	Body         string   `json:"body"`
-	DependsOn    []string `json:"depends_on"`
-	DoneCriteria string   `json:"done_criteria"`
-	ID           string   `json:"id"`
-	NonGoals     []string `json:"non_goals"`
-	Operation    string   `json:"operation"`
-	PlanVersion  int64    `json:"plan_version"`
-	Repo         string   `json:"repo"`
-	SourceKey    *string  `json:"source_key"`
-	Status       string   `json:"status"`
-	Title        string   `json:"title"`
+	Body            string   `json:"body"`
+	BudgetImplUSD   float64  `json:"budget_impl_usd"`
+	BudgetReviewUSD float64  `json:"budget_review_usd"`
+	DependsOn       []string `json:"depends_on"`
+	DoneCriteria    string   `json:"done_criteria"`
+	ID              string   `json:"id"`
+	NonGoals        []string `json:"non_goals"`
+	Operation       string   `json:"operation"`
+	PlanVersion     int64    `json:"plan_version"`
+	Repo            string   `json:"repo"`
+	SourceKey       *string  `json:"source_key"`
+	SpentUSD        float64  `json:"spent_usd"`
+	Status          string   `json:"status"`
+	Title           string   `json:"title"`
 }
 
 // FromTasks はタスクの一覧を変換する（空でも `[]`）。
@@ -29,6 +33,7 @@ func FromTasks(ts []core.Task) []Task {
 			Body:      t.Body, DependsOn: append([]string{}, t.DependsOn...), DoneCriteria: t.DoneCriteria, ID: t.ID,
 			NonGoals: append([]string{}, t.NonGoals...), Operation: t.Operation, PlanVersion: t.PlanVersion,
 			Repo: t.Repo, Status: string(t.Status), Title: t.Title,
+			BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD, SpentUSD: t.SpentUSD,
 		})
 	}
 	return out

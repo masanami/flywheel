@@ -36,6 +36,7 @@ export function show(over: Over = {}): ShowCardResponse {
       headline: null,
       id: "C-1",
       improvement: null,
+      integration_ref: null,
       priority: null,
       reporter: "me",
       status: "in_progress",

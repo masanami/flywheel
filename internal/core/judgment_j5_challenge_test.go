@@ -204,6 +204,9 @@ func TestChallengeCheck_NotMetHoldsAsChallengeCheckNotMetFromInProgressAndCloses
 	if taskID.Valid {
 		t.Errorf("hold task_id = %v, want NULL", taskID)
 	}
+	if strings.Contains(question, "challenge_check_not_met") { // AC-237: 問いの文に理由の値の語は出ない
+		t.Errorf("the question names the reason value: %q", question)
+	}
 	if !strings.Contains(question, "FEEDBACK-TEXT") { // AC-181
 		t.Errorf("the question lacks the J5 feedback: %q", question)
 	}

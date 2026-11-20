@@ -38,13 +38,15 @@ type ShowChallenge struct {
 	Headline     *string         `json:"headline"`
 	ID           string          `json:"id"`
 	Improvement  *ImprovementKey `json:"improvement"`
-	Priority     *string         `json:"priority"`
-	Reporter     string          `json:"reporter"`
-	Status       string          `json:"status"`
-	StatusLabel  string          `json:"status_label"`
-	Title        string          `json:"title"`
-	UpdatedAt    string          `json:"updated_at"`
-	Urgency      *string         `json:"urgency"`
+	// IntegrationRef は課題に記録した統合先の識別。記録が無ければ null。
+	IntegrationRef *string `json:"integration_ref"`
+	Priority       *string `json:"priority"`
+	Reporter       string  `json:"reporter"`
+	Status         string  `json:"status"`
+	StatusLabel    string  `json:"status_label"`
+	Title          string  `json:"title"`
+	UpdatedAt      string  `json:"updated_at"`
+	Urgency        *string `json:"urgency"`
 	// UsesIntegration は課題が統合先を使うか（計画の承認で決まる）。未決か過去の課題は null。
 	UsesIntegration *bool `json:"uses_integration"`
 	Version         int   `json:"version"`
@@ -103,7 +105,7 @@ func FromShowChallenge(d *core.ChallengeDetail) ShowChallenge {
 	}
 	return ShowChallenge{
 		Context: c.Context, CreatedAt: c.CreatedAt, Dependencies: FromDependencies(d.Dependencies), Dependents: dependents,
-		Description: c.Description, DoneCriteria: c.DoneCriteria, FollowupOf: d.FollowupOf, Headline: c.Headline, ID: c.ID, Improvement: imp, Priority: c.Priority,
+		Description: c.Description, DoneCriteria: c.DoneCriteria, FollowupOf: d.FollowupOf, Headline: c.Headline, ID: c.ID, Improvement: imp, IntegrationRef: d.IntegrationRef, Priority: c.Priority,
 		Reporter: c.Reporter, Status: c.Status, StatusLabel: c.StatusLabel, Title: c.Title, UpdatedAt: c.UpdatedAt,
 		Urgency: c.Urgency, UsesIntegration: d.UsesIntegration, Version: c.Version,
 	}
