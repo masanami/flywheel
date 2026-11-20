@@ -336,6 +336,12 @@ const (
 	holdReasonFactsUnmet        holdReason = "facts_unmet"
 )
 
+// persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない 3 つの理由だけが書く
+// （ほかの保留の hold.reason は NULL）。
+func (r holdReason) persisted() bool {
+	return r == holdReasonLandUnavailable || r == holdReasonContentRefInvalid || r == holdReasonFactsUnmet
+}
+
 // occurrenceKind は保留の理由に対応する発生の種類。発生を作らない理由は false。
 func (r holdReason) occurrenceKind() (OccurrenceKind, bool) {
 	switch r {
@@ -374,6 +380,11 @@ func (s *Store) insertHoldWithOccurrenceID(ctx context.Context, tc *transitionCt
 	holdID, err := insertHoldID(ctx, tc, question)
 	if err != nil {
 		return 0, err
+	}
+	if reason.persisted() {
+		if _, err := tc.tx.ExecContext(ctx, `UPDATE hold SET reason = ? WHERE id = ?`, string(reason), holdID); err != nil {
+			return 0, err
+		}
 	}
 	kind, ok := reason.occurrenceKind()
 	if !ok {

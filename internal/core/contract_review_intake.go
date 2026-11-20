@@ -24,11 +24,6 @@ const contractOptionLand = "land"
 // factsUnmetLimit は、required_facts を満たさないレビュー待ちが続いたとき、respond を返さず保留にする回数。
 const factsUnmetLimit = 2
 
-// holdReasonLine は保留の問いの先頭に置く、保留の理由の行。
-func holdReasonLine(r holdReason) string {
-	return "保留の理由: " + string(r) + "\n"
-}
-
 // unmetFact は required_facts を満たしていない名前 1 つ。
 type unmetFact struct {
 	Name     string
@@ -158,27 +153,23 @@ func (s *Store) restoreFactsCount(ctx context.Context, rep *ContractRunReport) e
 }
 
 func landUnavailableQuestion(runID string) string {
-	return holdReasonLine(holdReasonLandUnavailable) +
-		fmt.Sprintf("接続ツールの run（%s）のレビュー待ちの選択肢に %s が無い。委譲先が「入れてよい」の答えを受けられないので、検証中へ進めなかった。", runID, contractOptionLand) +
+	return fmt.Sprintf("接続ツールの run（%s）のレビュー待ちの選択肢に %s が無い。委譲先が「入れてよい」の答えを受けられないので、検証中へ進めなかった。", runID, contractOptionLand) +
 		"flywheel は自分では反映しない。委譲先を「入れてよい」の答えを受けられる版に上げてから回答するか、課題を取り下げる。" +
 		"回答しても、回答の文は委譲先へ返さない。次に読んだレビュー待ちにも選択肢 land が無ければ、もう一度保留にする。"
 }
 
 func contentRefInvalidQuestion(runID string, n int) string {
-	return holdReasonLine(holdReasonContentRefInvalid) +
-		fmt.Sprintf("接続ツールの run（%s）のレビュー待ちの中身の識別（種類が commit で role の無い成果物の ref）が %d 個見つかった。ちょうど 1 つが要るので、検証中へ進めなかった。", runID, n) +
+	return fmt.Sprintf("接続ツールの run（%s）のレビュー待ちの中身の識別（種類が commit で role の無い成果物の ref）が %d 個見つかった。ちょうど 1 つが要るので、検証中へ進めなかった。", runID, n) +
 		"委譲先の出力を直してから回答するか、課題を取り下げる。回答しても、回答の文は委譲先へ返さない。次に読んだレビュー待ちも同じなら、もう一度保留にする。"
 }
 
 func tooManyLandablePRsQuestion(runID string, n int) string {
-	return holdReasonLine(holdReasonContentRefInvalid) +
-		fmt.Sprintf("接続ツールの run（%s）のレビュー待ちに、反映先（既定ブランチ）宛ての成果物（PR）が %d 個ある。1 つの実行が反映先へ入れる成果物は 1 つに限るので、検証中へ進めなかった。", runID, n) +
+	return fmt.Sprintf("接続ツールの run（%s）のレビュー待ちに、反映先（既定ブランチ）宛ての成果物（PR）が %d 個ある。1 つの実行が反映先へ入れる成果物は 1 つに限るので、検証中へ進めなかった。", runID, n) +
 		"委譲先の出力を直してから回答するか、課題を取り下げる。回答しても、回答の文は委譲先へ返さない。次に読んだレビュー待ちも同じなら、もう一度保留にする。"
 }
 
 func factsUnmetQuestion(runID string, us []unmetFact) string {
-	return holdReasonLine(holdReasonFactsUnmet) +
-		fmt.Sprintf("接続ツールの run（%s）のレビュー待ちが、宣言の required_facts を満たさないまま %d 回続いたので、もう差し戻さず保留にした。満たしていない名前:\n", runID, factsUnmetLimit) +
+	return fmt.Sprintf("接続ツールの run（%s）のレビュー待ちが、宣言の required_facts を満たさないまま %d 回続いたので、もう差し戻さず保留にした。満たしていない名前:\n", runID, factsUnmetLimit) +
 		describeUnmetFacts(us) + "\n回答すると、回答の文を添えて、もう一度委譲先へ差し戻す。"
 }
 
@@ -274,8 +265,8 @@ func (s *Store) undeliveredFactsUnmetAnswer(ctx context.Context, cid int64, curr
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		var a, at sql.NullString
 		qerr := tx.QueryRowContext(ctx,
-			`SELECT answer, answered_at FROM hold WHERE challenge_id = ? AND answered_at IS NOT NULL AND question LIKE ? ORDER BY id DESC LIMIT 1`,
-			cid, holdReasonLine(holdReasonFactsUnmet)+"%").Scan(&a, &at)
+			`SELECT answer, answered_at FROM hold WHERE challenge_id = ? AND answered_at IS NOT NULL AND reason = ? ORDER BY id DESC LIMIT 1`,
+			cid, string(holdReasonFactsUnmet)).Scan(&a, &at)
 		if errors.Is(qerr, sql.ErrNoRows) {
 			return nil
 		}

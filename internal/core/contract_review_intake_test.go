@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"reflect"
 	"strings"
 	"testing"
@@ -58,6 +59,18 @@ func (f *reviewFlowFixture) lastHoldQuestion(t *testing.T) string {
 	return qs[len(qs)-1]
 }
 
+// lastHoldReason は最後の保留の理由（hold.reason）。値が無い（NULL）ときは空文字列。
+func (f *reviewFlowFixture) lastHoldReason(t *testing.T) string {
+	t.Helper()
+	var r sql.NullString
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT reason FROM hold ORDER BY id DESC LIMIT 1`).Scan(&r)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return r.String
+}
+
 func (f *reviewFlowFixture) artifactRows(t *testing.T) int64 {
 	t.Helper()
 	return f.count(t, `SELECT COUNT(*) FROM run_artifact`)
@@ -111,7 +124,12 @@ func TestReceiveReview_WithoutLandHoldsAsLandUnavailable(t *testing.T) {
 		}
 	})
 	t.Run("AC-82 reason", func(t *testing.T) {
-		if !strings.HasPrefix(q, holdReasonLine(holdReasonLandUnavailable)) {
+		if f.lastHoldReason(t) != string(holdReasonLandUnavailable) {
+			t.Fatalf("question = %q", q)
+		}
+	})
+	t.Run("the question does not show the internal reason value", func(t *testing.T) {
+		if strings.Contains(q, "保留の理由") || strings.Contains(q, string(holdReasonLandUnavailable)) {
 			t.Fatalf("question = %q", q)
 		}
 	})
@@ -157,7 +175,7 @@ func TestReceiveReview_ContentRefNotExactlyOneHolds(t *testing.T) {
 				t.Fatalf("status = %s", got)
 			}
 			q := f.lastHoldQuestion(t)
-			if !strings.HasPrefix(q, holdReasonLine(holdReasonContentRefInvalid)) {
+			if f.lastHoldReason(t) != string(holdReasonContentRefInvalid) {
 				t.Fatalf("question = %q", q)
 			}
 			if !strings.Contains(q, tc.n) {
@@ -175,7 +193,7 @@ func TestReceiveReview_RoledCommitIsNotAContentRef(t *testing.T) {
 	t.Parallel()
 	f := newIntakeFixture(t, reviewConnectorsJSON)
 	f.readOnce(t, intakeOut(intakeOptsWithLand, []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}, {Kind: "commit", Ref: "a1", Role: "integration"}}, nil))
-	if q := f.lastHoldQuestion(t); !strings.HasPrefix(q, holdReasonLine(holdReasonContentRefInvalid)) {
+	if q := f.lastHoldQuestion(t); f.lastHoldReason(t) != string(holdReasonContentRefInvalid) {
 		t.Fatalf("question = %q", q)
 	}
 }
@@ -185,7 +203,7 @@ func TestReceiveReview_NoLandAndNoContentRefIsLandUnavailable(t *testing.T) {
 	t.Parallel()
 	f := newIntakeFixture(t, reviewConnectorsJSON)
 	f.readOnce(t, intakeOut([]string{"respond"}, []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}}, nil))
-	if q := f.lastHoldQuestion(t); !strings.HasPrefix(q, holdReasonLine(holdReasonLandUnavailable)) {
+	if q := f.lastHoldQuestion(t); f.lastHoldReason(t) != string(holdReasonLandUnavailable) {
 		t.Fatalf("question = %q", q)
 	}
 }
@@ -200,7 +218,7 @@ func TestReceiveReview_TwoDefaultBranchPRsHold(t *testing.T) {
 		t.Fatalf("AC-119 status = %s", got)
 	}
 	q := f.lastHoldQuestion(t)
-	if !strings.HasPrefix(q, holdReasonLine(holdReasonContentRefInvalid)) || !strings.Contains(q, "2 個") {
+	if f.lastHoldReason(t) != string(holdReasonContentRefInvalid) || !strings.Contains(q, "2 個") {
 		t.Fatalf("AC-119 question = %q", q)
 	}
 	if n := f.openOperations(t); n != 0 {
@@ -316,7 +334,7 @@ func TestReceiveReview_TwoUnmetReadsInARowHold(t *testing.T) {
 		t.Fatalf("AC-104 status = %s", got)
 	}
 	q := f.lastHoldQuestion(t)
-	if !strings.HasPrefix(q, holdReasonLine(holdReasonFactsUnmet)) {
+	if f.lastHoldReason(t) != string(holdReasonFactsUnmet) {
 		t.Fatalf("AC-105 question = %q", q)
 	}
 	if !strings.Contains(q, "self_review") {
@@ -393,7 +411,7 @@ func TestReceiveReview_AnsweredLandUnavailableAndContentRefInvalidHoldAgain(t *t
 			if got := f.status(t, f.cid); got != StatusAwaitingHuman {
 				t.Fatalf("status = %s", got)
 			}
-			if q := f.lastHoldQuestion(t); !strings.HasPrefix(q, holdReasonLine(tc.reason)) {
+			if q := f.lastHoldQuestion(t); f.lastHoldReason(t) != string(tc.reason) {
 				t.Fatalf("question = %q", q)
 			}
 			if len(f.client.resumes) != 0 {
@@ -436,7 +454,7 @@ func TestReceiveReview_AnsweredFactsUnmetRespondsWithTheOwnerAnswerThenHoldsAgai
 	if got := f.status(t, f.cid); got != StatusAwaitingHuman {
 		t.Fatalf("AC-117 status = %s", got)
 	}
-	if q := f.lastHoldQuestion(t); !strings.HasPrefix(q, holdReasonLine(holdReasonFactsUnmet)) {
+	if q := f.lastHoldQuestion(t); f.lastHoldReason(t) != string(holdReasonFactsUnmet) {
 		t.Fatalf("AC-117 question = %q", q)
 	}
 }
@@ -512,5 +530,35 @@ func TestReceiveReview_MetReadInAResumeResponseResetsTheCount(t *testing.T) {
 	f.readOnce(t, intakeOut(intakeOptsWithLand, intakeArtsOK, map[string]string{"self_review": "incomplete", "gate": "pass"}))
 	if n := f.count(t, `SELECT facts_unmet_count FROM contract_run`); n != 0 {
 		t.Fatalf("facts_unmet_count = %d, want 0", n)
+	}
+}
+
+// facts_unmet の保留への回答で回数を 0 に戻すのは、保留が結び付く契約の実行だけ（ほかの契約の実行の回数は触らない）。
+func TestReceiveReview_AnswerResetsOnlyTheHeldContractRunCount(t *testing.T) {
+	t.Parallel()
+	f := newIntakeFixture(t, requiredSelfReviewJSON)
+	unmet := intakeOut(intakeOptsWithLand, intakeArtsOK, map[string]string{"self_review": "incomplete", "gate": "pass"})
+	f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
+	f.readOnce(t, unmet)
+	f.readOnce(t, unmet)
+	if got := f.lastHoldReason(t); got != string(holdReasonFactsUnmet) {
+		t.Fatalf("hold.reason = %q", got)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM hold WHERE task_id IS NOT NULL`); n != 1 {
+		t.Fatalf("holds with a task = %d, want 1", n)
+	}
+	if _, err := f.exec(`INSERT INTO contract_run (challenge_id, connector_id, external_run_id, start_run_id, state, summary, cost_usd, max_budget_usd, started_at, observed_at, ended_at, facts_unmet_count)
+		SELECT challenge_id, connector_id, 'other-run', start_run_id, 'succeeded', 's', 0, 1, started_at, observed_at, observed_at, 1 FROM contract_run`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.s.ExecuteAnswer(context.Background(), AnswerRequest{ChallengeID: f.cid, ExpectedVersion: f.version(t, f.cid), Answer: "回答"},
+		verifiedAttestationForTest(t, f.cid)); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.count(t, `SELECT facts_unmet_count FROM contract_run WHERE external_run_id <> 'other-run'`); n != 0 {
+		t.Fatalf("held run count = %d, want 0", n)
+	}
+	if n := f.count(t, `SELECT facts_unmet_count FROM contract_run WHERE external_run_id = 'other-run'`); n != 1 {
+		t.Fatalf("other run count = %d, want 1 (untouched)", n)
 	}
 }

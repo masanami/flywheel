@@ -903,6 +903,8 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 
 	var holdOut Hold
 	var holdID int64
+	var holdReasonValue holdReason
+	var holdTaskID sql.NullInt64
 
 	resolvePreceding := func(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge) (Status, error) {
 		id, question, fromStatus, raisedAt, err := loadUnansweredHold(ctx, tx, cid)
@@ -926,9 +928,11 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		}
 		var runID sql.NullInt64
 		var kind string
-		if err := tx.QueryRowContext(ctx, `SELECT run_id, kind FROM hold WHERE id = ?`, id).Scan(&runID, &kind); err != nil {
+		var reason sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT run_id, kind, reason, task_id FROM hold WHERE id = ?`, id).Scan(&runID, &kind, &reason, &holdTaskID); err != nil {
 			return "", err
 		}
+		holdReasonValue = holdReason(reason.String)
 		holdOut = Hold{Kind: HoldKind(kind), Question: question, FromStatus: fromStatus, RaisedAt: raisedAt}
 		if runID.Valid {
 			v := formatRunID(runID.Int64)
@@ -975,8 +979,16 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		holdOut.RelaySession, holdOut.RelayQuote = att.relayPtrs()
 		holdOut.Replan = req.Replan
 		// 理由 facts_unmet の保留への回答は、満たさなかった回数を 0 に戻す（次に読んだレビュー待ちから数え直す）。
-		if strings.HasPrefix(holdOut.Question, holdReasonLine(holdReasonFactsUnmet)) {
-			if _, err := tc.tx.ExecContext(ctx, `UPDATE contract_run SET facts_unmet_count = 0 WHERE challenge_id = ?`, tc.id); err != nil {
+		// 戻す対象は、保留が結び付くタスクの契約の実行。保留がタスクに結び付かないときは、その課題の終わっていないタスクの契約の実行。
+		if holdReasonValue == holdReasonFactsUnmet {
+			var err error
+			if holdTaskID.Valid {
+				_, err = tc.tx.ExecContext(ctx, `UPDATE contract_run SET facts_unmet_count = 0 WHERE challenge_id = ? AND task_id = ?`, tc.id, holdTaskID.Int64)
+			} else {
+				_, err = tc.tx.ExecContext(ctx, `UPDATE contract_run SET facts_unmet_count = 0 WHERE challenge_id = ?
+					AND task_id IN (SELECT id FROM task WHERE challenge_id = ? AND status NOT IN ('done', 'cancelled'))`, tc.id, tc.id)
+			}
+			if err != nil {
 				return err
 			}
 		}
