@@ -507,6 +507,74 @@ it("AC-26: 版の食い違いのとき、要約を読み直し、承認の要求
   ).toEqual(['{"version":3}', '{"version":4}']);
 });
 
+it("版の食い違いのとき、読み直しが終わるまでボタンは押せず、通知は読み直しの後に 1 つだけ出る", async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  let reads = 0;
+  const { requests } = setup();
+  const s = showBody();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      requests.push({
+        url: String(input),
+        method,
+        headers: {},
+        body: typeof init?.body === "string" ? init.body : null,
+      });
+      if (String(input) === APPROVAL) {
+        reads++;
+        if (reads === 2) await gate;
+        return json(
+          200,
+          summary({
+            version: reads === 1 ? 3 : 4,
+            done_criteria: reads === 1 ? "古い条件" : "新しい条件",
+          }),
+        );
+      }
+      if (method === "POST") {
+        return json(409, { error: { code: "conflict", message: "版が違う" } });
+      }
+      const f = fixtures() as Record<string, unknown>;
+      f[`${BASE}/challenges`] = {
+        challenges: [{ ...s.challenge, card: s.card }],
+      };
+      f[`${BASE}/challenges/C-1`] = s.body;
+      const b = f[String(input)];
+      return b === undefined ? json(404, {}) : json(200, b);
+    }),
+  );
+  const m = await open();
+  fireEvent.click(await button(m));
+  // 読み直しが終わるまで: ボタンは押せず、どの通知も出ない
+  await waitFor(() => expect(reads).toBe(2));
+  const b = await button(m);
+  expect((b as HTMLButtonElement).disabled).toBe(true);
+  expect(within(m).queryByText(/最新の要約を読み直しました/)).toBeNull();
+  expect(within(m).queryByText(/承認の対象が更新されました/)).toBeNull();
+  release();
+  // 読み直しが終わったら: 食い違いの通知だけが出て、ボタンは押せる
+  await within(m).findByText("新しい条件");
+  await within(m).findByText(/最新の要約を読み直しました/);
+  expect((await button(m)) as HTMLButtonElement).toHaveProperty(
+    "disabled",
+    false,
+  );
+  expect(within(m).queryByText(/承認の対象が更新されました/)).toBeNull();
+});
+
+it("確定ボタンは、効くセレクタのある .approval-control で包まれている", async () => {
+  setup();
+  const m = await open();
+  const b = await button(m);
+  expect(b.parentElement?.classList.contains("approval-control")).toBe(true);
+  expect(b.classList.contains("approval-control-confirm")).toBe(true);
+});
+
 it.each([
   ["403 forbidden_origin", 403, "forbidden_origin"],
   ["403 だけ", 403, "something"],

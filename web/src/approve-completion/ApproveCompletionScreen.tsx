@@ -169,7 +169,18 @@ function CompletionView({
   // 開いたあとの読み直しで版が変わったら知らせる（押すまで出したままにする）。
   const [seen, setSeen] = useState(approval.version);
   const updated = approval.version !== seen;
+  // 版の食い違いの後、読み直しが終わるまでの間（ボタンは押せないままにする）。
+  const [awaitingReload, setAwaitingReload] = useState(false);
   const alive = useRef(true);
+  // 読み直しの結果（新しい応答）が届いたら、その版を「見た版」として扱い、食い違いの通知だけを出す。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 合図は新しい応答の到着だけ
+  useEffect(() => {
+    if (!awaitingReload) return;
+    setAwaitingReload(false);
+    setSeen(approval.version);
+    setNotice(COMPLETION_CONFLICT_TEXT);
+    setBusy(false);
+  }, [approval]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -182,13 +193,16 @@ function CompletionView({
     setBusy(true);
     setNotice(null);
     setSeen(approval.version);
+    let reloading = false;
     try {
       await api.approve(agentName, id, approval.version);
       onApproved(approval.title);
     } catch (e) {
       if (!alive.current) return;
       if (e instanceof ApiError && e.code === "conflict") {
-        setNotice(COMPLETION_CONFLICT_TEXT);
+        // 読み直しが終わるまでボタンを押せないままにし、通知は読み直しの後に出す。
+        reloading = true;
+        setAwaitingReload(true);
         reload();
       } else if (
         e instanceof ApiError &&
@@ -199,7 +213,7 @@ function CompletionView({
         setNotice(e instanceof Error ? e.message : String(e));
       }
     } finally {
-      if (alive.current) setBusy(false);
+      if (alive.current && !reloading) setBusy(false);
     }
   };
 
@@ -366,14 +380,16 @@ function CompletionView({
         <div className="plan-side" data-testid="completion-side">
           <section aria-label="承認の操作">
             <h3>承認の操作</h3>
-            <button
-              type="button"
-              className="approval-control-confirm"
-              disabled={busy}
-              onClick={approve}
-            >
-              {APPROVE_BUTTON_TEXT}
-            </button>
+            <div className="approval-control">
+              <button
+                type="button"
+                className="approval-control-confirm"
+                disabled={busy}
+                onClick={approve}
+              >
+                {APPROVE_BUTTON_TEXT}
+              </button>
+            </div>
             <p data-testid="completion-button-note">{COMPLETION_BUTTON_NOTE}</p>
             {updated && <p role="alert">{COMPLETION_UPDATED_TEXT}</p>}
             {notice && (
