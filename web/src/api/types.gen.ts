@@ -188,6 +188,7 @@ export interface ListResponse {
 export interface ShowResponse {
   approvals: Approval[];
   challenge: ShowChallenge;
+  conflict_fixes: PassedConflictFix[];
   direct_completions: DirectCompletion[];
   followups: Followup[];
   holds: Hold[];
@@ -195,7 +196,7 @@ export interface ShowResponse {
   pairs: StagePair[];
   plans: PlanDetail[];
   release_head_changes?: ReleaseHeadChange[];
-  runs: Run[];
+  runs: ShowRun[];
   source_binding: SourceBinding | null;
   source_children: SourceChild[];
   stages: Stages;
@@ -256,6 +257,17 @@ export interface Dependency {
 export interface ImprovementKey {
   layer: string;
   target: string;
+}
+
+export interface PassedConflictFix {
+  at: string;
+  files: string[];
+  from_ref: string;
+  operation_id: string | null;
+  run_id: string;
+  target: string;
+  task_id: string | null;
+  to_ref: string;
 }
 
 export interface DirectCompletion {
@@ -353,7 +365,7 @@ export interface ConflictFixFile {
   patch_unavailable: boolean;
 }
 
-export interface Run {
+export interface ShowRun {
   challenge_id: string | null;
   cost_source: string | null;
   cost_usd: number | null;
@@ -361,6 +373,7 @@ export interface Run {
   cycle_id: string | null;
   ended_at: string | null;
   error: string | null;
+  fix_pending_ref: string | null;
   flywheel_version: string | null;
   id: string;
   judgment: string | null;
@@ -453,6 +466,26 @@ export interface RunsResponse {
   runs: Run[];
 }
 
+export interface Run {
+  challenge_id: string | null;
+  cost_source: string | null;
+  cost_usd: number | null;
+  cycle_budget_usd: number | null;
+  cycle_id: string | null;
+  ended_at: string | null;
+  error: string | null;
+  flywheel_version: string | null;
+  id: string;
+  judgment: string | null;
+  kind: string;
+  max_budget_usd: number;
+  rate_limited: boolean;
+  result: string | null;
+  session_id: string | null;
+  started_at: string;
+  task_id: string | null;
+}
+
 export interface WorkspaceList {
   workspaces: Workspace[];
 }
@@ -504,13 +537,14 @@ export interface ShowCardResponse {
   approvals: Approval[];
   card: Card;
   challenge: ShowChallenge;
+  conflict_fixes: PassedConflictFix[];
   direct_completions: DirectCompletion[];
   followups: Followup[];
   holds: Hold[];
   operations: Operation[];
   pairs: StagePair[];
   plans: PlanDetail[];
-  runs: Run[];
+  runs: ShowRun[];
   source_binding: SourceBinding | null;
   source_children: SourceChild[];
   stages: Stages;

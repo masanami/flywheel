@@ -909,6 +909,10 @@ func assertDocumentedEntities(t *testing.T, doc documentedJSON, where string, v 
 			// status の actionable.challenges[] は共有の課題の形に unmet_dependencies を足した形（M4.5 S2）。
 			entity, known = "actionable_challenge", true
 		}
+		if k == "runs" && where == "show" {
+			// show の runs[] は run の形に fix_pending_ref を足した形（S3c）。
+			entity, known = "show_run", true
+		}
 		if k == "followups" && where == "status" {
 			// status.followups は未の件数 {"open"}（show・followup list の followups〔一覧〕ではない）。
 			known = false
@@ -1614,6 +1618,26 @@ func addCoreRedesignS2aShowShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["hold"]["task_id"] = true
 	doc.entity["show_challenge"]["uses_integration"] = true
 	addCoreRedesignS3bShowShape(t, doc, string(data))
+	addCoreRedesignS3cShowShape(t, doc, string(data))
+}
+
+// addCoreRedesignS3cShowShape は区切り S3c が show --json に足したキー（根の `conflict_fixes`・`runs[]` の要素の `fix_pending_ref`）を
+// doc へ合成する。runs[] の要素の形は、`runs` コマンドの run の形に fix_pending_ref を足した show_run として持つ
+// （`runs` コマンドの形は変えない）。conflict_fixes[] の要素の形は、出力の側の照合に入れず、文書の行が書いていることだけを確かめる
+// （出力の側は show_conflict_fixes_test.go が見る）。
+func addCoreRedesignS3cShowShape(t *testing.T, doc *documentedJSON, spec string) {
+	t.Helper()
+	if !strings.Contains(spec, "- 根に `conflict_fixes`（配列。要素は `at`・`target`") || !strings.Contains(spec, "- `runs[]` の要素: `fix_pending_ref`（文字列か null）。") {
+		t.Fatal("core-redesign spec does not document the S3c keys of show --json (conflict_fixes / runs[].fix_pending_ref)")
+	}
+	for _, shape := range doc.topLevel["show"] {
+		shape["conflict_fixes"] = true
+	}
+	showRun := map[string]bool{"fix_pending_ref": true}
+	for k := range doc.entity["run"] {
+		showRun[k] = true
+	}
+	doc.entity["show_run"] = showRun
 }
 
 // addCoreRedesignS3bShowShape は区切り S3b が show --json の challenge に足した `integration_ref` を doc へ合成する

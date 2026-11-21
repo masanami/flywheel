@@ -221,6 +221,8 @@ type ChallengeDetail struct {
 	IntegrationRef *string
 	// Followups は課題にぶら下がるフォローアップ（状態を問わず全部。ID の昇順）。無ければ空のスライス（nil でない）。
 	Followups []Followup
+	// ConflictFixes は通した衝突の解消（古い順。無ければ空のスライス。nil でない）。作業ログの conflict_fix_passed から読む。
+	ConflictFixes []ConflictFixPassed
 }
 
 // ImprovementKey は改修課題の鍵（challenge.improvement_layer・improvement_target。マイグレーション 0012）。
@@ -880,6 +882,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			v := integRef.String
 			detail.IntegrationRef = &v
 		}
+		if detail.ConflictFixes, err = loadConflictFixes(ctx, tx, cid); err != nil {
+			return err
+		}
 		if detail.Followups, err = listFollowups(ctx, tx, FollowupFilter{ChallengeID: id}); err != nil {
 			return err
 		}
@@ -908,6 +913,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 	runs, err := list(ctx, RunListOptions{ChallengeID: &id, Limit: showRunsLimit})
 	if err != nil {
 		return nil, err
+	}
+	if err := s.db.Read(ctx, func(tx *sql.Tx) error { return fillRunFixPending(ctx, tx, cid, runs) }); err != nil {
+		return nil, classifyReadWriteErr(err)
 	}
 	detail.Runs = runs
 	return &detail, nil
