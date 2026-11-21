@@ -64,3 +64,22 @@ test("#930: 幅 360px で、完了承認画面は、ページ全体が横にス�
   );
   expect(overflows).toBe(false);
 });
+
+test("#970: 完了承認画面は承認の要約 1 つだけを読み、課題の詳細は読まない。要約が返したタスク・通した衝突の解消が出て、「課題が更新されました」の画面は出ない", async ({
+  page,
+}) => {
+  const requests: string[] = [];
+  page.on("request", (r) => requests.push(new URL(r.url()).pathname));
+  await page.goto("/#/a/alpha/challenges/C-7/approve-completion");
+  await expect(page.getByTestId("approve-completion")).toBeVisible();
+  await expect(page.getByTestId("completion-tasks")).toBeVisible();
+  await expect(page.getByTestId("completion-followups")).toBeVisible();
+  await expect(page.getByTestId("conflict-fixes")).toBeVisible();
+  await expect(page.getByText("課題が更新されました")).toHaveCount(0);
+  await expect(page.getByTestId("completion-incoherent")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "完了を承認する" }),
+  ).toBeEnabled();
+  // mock モードはブラウザ内の偽の応答なので、ネットワークの要求の検査は、要求が出ていないことだけを確かめる。
+  expect(requests.filter((p) => p.endsWith("/challenges/C-7"))).toHaveLength(0);
+});
