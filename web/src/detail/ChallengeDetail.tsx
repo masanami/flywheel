@@ -33,7 +33,7 @@ export function ChallengeDetail({
   id: string;
   view: ChallengeView;
 }) {
-  const { result, reload } = useScreenData(
+  const { result } = useScreenData(
     live,
     agentName,
     () => api.challenge(agentName, id),
@@ -66,7 +66,6 @@ export function ChallengeDetail({
         show={show}
         agentName={agentName}
         workspacePath={workspacePath}
-        onApproved={reload}
       />
       <nav aria-label="課題の詳細の切り替え" className="detail-switch">
         {CHALLENGE_VIEWS.map((v) => (

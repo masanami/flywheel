@@ -305,13 +305,13 @@ describe("あなたを待っている", () => {
     expect(within(row).getByText("完了の承認")).toBeInTheDocument();
     expect(within(row).getByText("完了の題名")).toBeInTheDocument();
   });
-  it("AC-127 #805: 完了の承認の行のリンクは、その課題の詳細を指す", async () => {
+  it("AC-127 #805: 完了の承認の行のリンクは、その課題の完了承認画面を指す", async () => {
     await openNow({ nh: completion });
     expect(
       within(rowOf("completion_approval"))
         .getByRole("link")
         .getAttribute("href"),
-    ).toBe("#/a/alpha/challenges/C-2");
+    ).toBe("#/a/alpha/challenges/C-2/approve-completion");
   });
 
   const human: NH = { challenges: [ch("C-3", "awaiting_human", "回答の題名")] };
