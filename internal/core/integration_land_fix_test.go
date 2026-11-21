@@ -264,19 +264,21 @@ func TestConflictFixCheck_FailureLimitClearsBoth(t *testing.T) {
 // AC-29・AC-30・AC-32: 結果を書く直前に、中身の識別が確かめ待ちの中身と違う・課題が保留中なら、結果を捨てる（検証した中身も確かめ待ちの中身も変わらない）。
 func TestConflictFixCheck_DiscardedResultLeavesBothRefs(t *testing.T) {
 	t.Parallel()
-	cases := map[string]string{
-		"AC-29 content moved on": `UPDATE contract_run SET content_ref = 'newer01'`,
-		"AC-30 challenge held":   `UPDATE challenge SET status = 'awaiting_human'`,
+	cases := map[string]func(*testing.T, *igLandFixture){
+		"AC-29 content moved on": func(t *testing.T, f *igLandFixture) {
+			f.sql(t, `UPDATE contract_run SET content_ref = 'newer01'`)
+		},
+		"AC-30 challenge held": func(t *testing.T, f *igLandFixture) { f.holdByTheRealPath(t) }, // 保留への遷移は本物の経路（HoldChallenge）で行う
 	}
-	for name, q := range cases {
-		q := q
+	for name, move := range cases {
+		move := move
 		for _, verdict := range []string{"met", "not_met", "uncertain"} {
 			verdict := verdict
 			t.Run(name+"/"+verdict, func(t *testing.T) {
 				t.Parallel()
 				f := newConflictFixed(t)
 				f.setVerdict(verdict)
-				f.j5.j5.onInvoke = func(JudgmentLaunchInput) { f.sql(t, q) }
+				f.j5.j5.onInvoke = func(JudgmentLaunchInput) { move(t, f) }
 				f.verifyFix(t)
 				if f.ref(t, "verified_ref") != landContent || f.ref(t, "fix_pending_ref") != newContent {
 					t.Fatalf("verified = %q, pending = %q", f.ref(t, "verified_ref"), f.ref(t, "fix_pending_ref"))
@@ -303,11 +305,14 @@ func TestConflictFixPending_ClearedWhenTheRunFails(t *testing.T) {
 func TestConflictFixPending_ClearedWhenTheTaskReturnsToInProgress(t *testing.T) {
 	t.Parallel()
 	f := newConflictFixed(t)
-	f.sql(t, `UPDATE challenge SET status = 'awaiting_human'`)
+	f.holdByTheRealPath(t)
 	if f.ref(t, "fix_pending_ref") != newContent { // AC-32
 		t.Fatalf("pending = %q after the hold", f.ref(t, "fix_pending_ref"))
 	}
-	f.sql(t, `UPDATE challenge SET status = 'in_progress'`)
+	f.answerByTheRealPath(t) // 保留からの戻りも本物の経路（回答）で行う
+	if f.ref(t, "fix_pending_ref") != newContent {
+		t.Fatalf("pending = %q after the answer, want kept until the task returns to in_progress", f.ref(t, "fix_pending_ref"))
+	}
 	tid := f.count(t, `SELECT id FROM task`)
 	if err := taskTx(t, f.s, func(tx *sql.Tx, rec *activityRecorder) error {
 		_, err := setTaskStatus(context.Background(), tx, rec, tid, TaskStatusInProgress)

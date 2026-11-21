@@ -180,7 +180,7 @@ func TestJ5Fix_PendingTaskIsFixTargetNotTaskVerificationTarget(t *testing.T) {
 func TestJ5Fix_HeldChallengeIsNotTargeted(t *testing.T) {
 	t.Parallel()
 	f := newFixIntegrationFixture(t)
-	f.sql(t, `UPDATE challenge SET status = 'awaiting_human'`)
+	f.holdByTheRealPath(t)
 	if got := f.fixTargets(t); len(got) != 0 {
 		t.Fatalf("fix targets = %+v, want none", got)
 	}
@@ -478,19 +478,22 @@ func TestJ5Fix_BothTheVerifyingTaskAndThePendingTaskAreProcessed(t *testing.T) {
 // 課題が保留中になっていたときも捨てる。
 func TestJ5Fix_ResultIsDiscardedWhenTheTargetMovedMeanwhile(t *testing.T) {
 	t.Parallel()
-	cases := map[string]string{
-		"content moved on":    `UPDATE contract_run SET content_ref = 'newer01'`,
-		"pending ref changed": `UPDATE contract_run SET fix_pending_ref = 'newer01'`,
-		"challenge held":      `UPDATE challenge SET status = 'awaiting_human'`,
-		"run ended":           `UPDATE contract_run SET ended_at = '2026-09-25T00:00:00.000Z'`,
+	sqlMove := func(q string) func(*testing.T, *fixFixture) {
+		return func(t *testing.T, f *fixFixture) { f.sql(t, q) }
 	}
-	for name, q := range cases {
-		q := q
+	cases := map[string]func(*testing.T, *fixFixture){
+		"content moved on":    sqlMove(`UPDATE contract_run SET content_ref = 'newer01'`),
+		"pending ref changed": sqlMove(`UPDATE contract_run SET fix_pending_ref = 'newer01'`),
+		"challenge held":      func(t *testing.T, f *fixFixture) { f.holdByTheRealPath(t) }, // 保留への遷移は本物の経路で行う
+		"run ended":           sqlMove(`UPDATE contract_run SET ended_at = '2026-09-25T00:00:00.000Z'`),
+	}
+	for name, move := range cases {
+		move := move
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			f := newFixIntegrationFixture(t)
 			f.setVerdict("met")
-			f.j5.j5.onInvoke = func(JudgmentLaunchInput) { f.sql(t, q) } // J5 の呼び出しの間に動く
+			f.j5.j5.onInvoke = func(JudgmentLaunchInput) { move(t, f) } // J5 の呼び出しの間に動く
 			res := f.verify(t)
 			if n := f.j5RunCount(t); n != 1 {
 				t.Fatalf("J5 runs = %d, want 1", n)
