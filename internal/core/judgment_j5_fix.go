@@ -1,12 +1,12 @@
 package core
 
-// このファイルは、衝突の解消の確かめ（J5 の 3 つ目の動き方）の、対象選び・入力・実行の記録・結果の振り分けの口を持つ
-// （docs/features/core-redesign.md §衝突の解消の確かめ（J5 の動き方））。
+// このファイルは、コンフリクトの解消の確かめ（J5 の 3 つ目の動き方）の、対象選び・入力・実行の記録・結果の振り分けの口を持つ
+// （docs/features/core-redesign.md §コンフリクトの解消の確かめ（J5 の動き方））。
 //
 //   - 対象: 確かめ待ちの中身（contract_run.fix_pending_ref）を持ち、終わっていない契約の実行。統合先宛ては着手中の課題の、検証中のタスクの実行。
 //     反映先宛ては完了の課題の、終わっていない反映の操作に対応する実行。保留中の課題の実行は選ばない。見直し前の対象（検証中の課題・検証中のタスク・
 //     課題の単位の確かめ）の後に処理する。
-//   - 入力: 通した中身から確かめ待ちの中身への変わり方を、上流の比較の口で読み直し、衝突の解消ありのときだけ組み立てる（そうでなければ run を作らない）。
+//   - 入力: 通した中身から確かめ待ちの中身への変わり方を、上流の比較の口で読み直し、コンフリクトの解消ありのときだけ組み立てる（そうでなければ run を作らない）。
 //     作業ディレクトリは確かめ待ちの中身を取り出した一時の作業ツリー。
 //   - 実行の記録: 統合先宛てはそのタスクの実行（task_id あり）、反映先宛ては課題の実行（task_id なし）。同じ単位に終わっていない実行があれば始めない。
 //     費用は判断点の費用で、タスクの使った額には数えない。
@@ -22,20 +22,20 @@ import (
 	"strings"
 )
 
-// 衝突の解消の確かめの入力の区画のラベル（J5 の指示文はこの名前で区画を指す）。
+// コンフリクトの解消の確かめの入力の区画のラベル（J5 の指示文はこの名前で区画を指す）。
 const (
-	labelFixModeSection    = "衝突の解消の確かめ"
+	labelFixModeSection    = "コンフリクトの解消の確かめ"
 	labelFixPassedSection  = "通した中身"
 	labelFixPendingSection = "確かめ待ちの中身"
-	labelFixDiffSection    = "衝突の解消の差分"
+	labelFixDiffSection    = "コンフリクトの解消の差分"
 	labelFixCheckoutNotice = "作業ディレクトリの注記"
 )
 
-// j5FixModeNote は区画「衝突の解消の確かめ」の本文。
-const j5FixModeNote = "この確認は衝突の解消の確かめである。通した中身（すでに完了条件に照らして確かめた中身）から、確かめ待ちの中身へ変わるときに、" +
+// j5FixModeNote は区画「コンフリクトの解消の確かめ」の本文。
+const j5FixModeNote = "この確認はコンフリクトの解消の確かめである。通した中身（すでに完了条件に照らして確かめた中身）から、確かめ待ちの中身へ変わるときに、" +
 	"宛先の最新を取り込むマージで直された差分だけを確かめる。全体を検証し直さない。"
 
-// j5FixDest は衝突の解消の確かめの宛先。
+// j5FixDest はコンフリクトの解消の確かめの宛先。
 type j5FixDest string
 
 const (
@@ -45,7 +45,7 @@ const (
 	j5FixDestReflect j5FixDest = "reflect"
 )
 
-// j5FixTarget は衝突の解消の確かめの対象（契約の実行 1 件）。
+// j5FixTarget はコンフリクトの解消の確かめの対象（契約の実行 1 件）。
 type j5FixTarget struct {
 	ChallengeID int64
 	// RunRowID は契約の実行（contract_run）の行の ID。
@@ -69,7 +69,7 @@ type j5FixScope struct {
 	// Repo は比較の口へ渡すリポジトリ（"<owner>/<name>"）、Base は宛先のブランチ（統合先、または反映先の既定ブランチ）。
 	Repo, Base string
 	Change     HeadChange
-	// DiffTruncated は、確かめの入力の「衝突の解消の差分」が上限（maxPullRequestDiffBytes）で切られたとき真。判断点は、確かめ待ちの中身の作業ツリーしか読めず、
+	// DiffTruncated は、確かめの入力の「コンフリクトの解消の差分」が上限（maxPullRequestDiffBytes）で切られたとき真。判断点は、確かめ待ちの中身の作業ツリーしか読めず、
 	// 落ちた分の差分を作り直せないので、真のときは「満たした」を通さない（finalizeJ5FixOutput）。
 	DiffTruncated bool
 	// UnreadableFiles は、確かめの入力に差分が入らなかったファイル（上流が差分を返さなかったもの。ConflictFixFile.PatchUnavailable が真）の名前（現れた順・重複なし）。判断点は、確かめ待ちの中身の
@@ -85,7 +85,7 @@ func (sc *j5FixScope) inputGaps() []fixInputGap {
 	var gaps []fixInputGap
 	if sc.DiffTruncated {
 		gaps = append(gaps, fixInputGap{"diff_truncated_overridden_from",
-			fmt.Sprintf("衝突の解消の差分が上限（%d バイト）を超えて切られ、入力に入らなかった分がある", maxPullRequestDiffBytes)})
+			fmt.Sprintf("コンフリクトの解消の差分が上限（%d バイト）を超えて切られ、入力に入らなかった分がある", maxPullRequestDiffBytes)})
 	}
 	if n := len(sc.UnreadableFiles); n > 0 {
 		names := sc.UnreadableFiles
@@ -264,7 +264,7 @@ func j5FixHasActiveRun(ctx context.Context, tx *sql.Tx, tg j5FixTarget) (bool, e
 	return taskLessHasActiveRun(ctx, tx, tg.ChallengeID)
 }
 
-// selectJ5FixTargets は衝突の解消の確かめの対象を、課題の ID の昇順（課題の中では契約の実行の行の ID の昇順）で返す。only が非 nil なら、
+// selectJ5FixTargets はコンフリクトの解消の確かめの対象を、課題の ID の昇順（課題の中では契約の実行の行の ID の昇順）で返す。only が非 nil なら、
 // その課題（内部整数 ID）だけ。終わっていない実行を持つ単位は今は選ばない。取り込み元の食い違いで自動の対象から外す課題は、
 // excluded に理由つきで返す（見直し前の J5 と同じ。only を指定した個別の操作では外さない）。
 func selectJ5FixTargets(ctx context.Context, tx *sql.Tx, only *int64) (out []j5FixTarget, excluded []NotStarted, err error) {
@@ -464,7 +464,7 @@ func formatExpectedScenes(ch Challenge, plan approvedPlan) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// formatConflictFixes は区画「衝突の解消の差分」の本文。取り込みのマージのコミットごとに、両方の親と違う形になったファイルの名前と、通した中身の側の
+// formatConflictFixes は区画「コンフリクトの解消の差分」の本文。取り込みのマージのコミットごとに、両方の親と違う形になったファイルの名前と、通した中身の側の
 // 親からの差分を書く。差分を上流が返さなかったファイルは、名前と、差分を読めなかった旨を書く。上限を超えた分は切り、切ったことを書き、truncated を真にして返す。
 func formatConflictFixes(fixes []ConflictFix) (content string, truncated bool) {
 	var blocks []string
@@ -490,7 +490,7 @@ func formatConflictFixes(fixes []ConflictFix) (content string, truncated bool) {
 	return content, omitted > 0
 }
 
-// fixCheckSections は確かめの入力（データの区画）を組み立てる。diff は区画「衝突の解消の差分」の本文（formatConflictFixes）。checkoutNote は作業ディレクトリの注記。
+// fixCheckSections は確かめの入力（データの区画）を組み立てる。diff は区画「コンフリクトの解消の差分」の本文（formatConflictFixes）。checkoutNote は作業ディレクトリの注記。
 func fixCheckSections(sc *j5FixScope, diff, checkoutNote string, memoryIndex []JudgmentDataSection) []JudgmentDataSection {
 	ch := sc.Challenge
 	urgency, priority := "", ""
@@ -529,8 +529,8 @@ func fixCheckSections(sc *j5FixScope, diff, checkoutNote string, memoryIndex []J
 	return append(sections, memoryIndex...)
 }
 
-// verifyFixTarget は衝突の解消の確かめ 1 件を実行する。対象でなくなっていれば ErrInvalidTransition、同じ単位に終わっていない実行があれば
-// ErrRunInProgress、承認済みの計画が無ければ ErrValidation（または *planUnavailableError）を返す。変わり方が衝突の解消ありでない（比較の口が
+// verifyFixTarget はコンフリクトの解消の確かめ 1 件を実行する。対象でなくなっていれば ErrInvalidTransition、同じ単位に終わっていない実行があれば
+// ErrRunInProgress、承認済みの計画が無ければ ErrValidation（または *planUnavailableError）を返す。変わり方がコンフリクトの解消ありでない（比較の口が
 // 無い・判定できない・取り込みだけ・関係のない変更あり）ときは、run を作らず、列も変えずに (nil, nil, nil)。
 func (s *Store) verifyFixTarget(ctx context.Context, in J5AutoInput, jc *JudgmentCycle, tg j5FixTarget) (*JudgmentAutoItem, *NotStarted, error) {
 	chID := formatChallengeID(tg.ChallengeID)

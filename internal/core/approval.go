@@ -138,7 +138,7 @@ type ApprovalPreview struct {
 	CompletionTasks []CompletionTask
 	// OpenFollowups は課題にぶら下がる未（open）のフォローアップ。
 	OpenFollowups []Followup
-	// ConflictFixes は通した衝突の解消（古い順）。
+	// ConflictFixes は通したコンフリクトの解消（古い順）。
 	ConflictFixes []ConflictFixPassed
 	// UsesIntegration・IntegrationRef は課題が統合先を使うかと、記録した統合先の識別。
 	UsesIntegration *bool

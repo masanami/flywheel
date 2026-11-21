@@ -70,7 +70,7 @@ func TestClassifyHeadChange_MergeInOnly(t *testing.T) {
 	f.set("v", "h1", ahead(commit("m1", "main change", "m0"), commit("h1", "Merge branch 'main'", "v", "m1")))
 	// P: main..h1 は PR 側のコミットとマージ。m1 は既定ブランチ側なので入らない。
 	f.set("main", "h1", ahead(commit("p0", "feat", "m0"), commit("v", "fix", "p0"), commit("h1", "Merge branch 'main'", "v", "m1")))
-	// 衝突を直した差分: h1 は v とも m1 とも異なるファイル a.go を持つ。b.go は m1 のとりこみで増えただけ。
+	// コンフリクトを直した差分: h1 は v とも m1 とも異なるファイル a.go を持つ。b.go は m1 のとりこみで増えただけ。
 	f.set("v", "h1", withFiles(f.results[[2]string{"v", "h1"}], UpstreamFile{Filename: "a.go", Patch: "@@ a"}, UpstreamFile{Filename: "b.go", Patch: "@@ b"}))
 	f.set("m1", "h1", UpstreamComparison{Status: UpstreamCompareAhead, TotalCommits: 2, Commits: []UpstreamCommit{commit("v", "fix", "p0")}, Files: []UpstreamFile{{Filename: "a.go", Patch: "@@ a2"}, {Filename: "c.go", Patch: "@@ c"}}})
 

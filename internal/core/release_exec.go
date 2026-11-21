@@ -289,9 +289,9 @@ type releaseJudgment struct {
 	run        *releaseRun
 	cancelNote string
 	// fixPendingRef が空でないとき、結果（waiting_fix_check）を書く書き込みで、対応する契約の実行（run）の確かめ待ちの中身をこの値にする
-	// （衝突の解消の確かめ。承認は取り消さない）。clearFixRejected が真のとき、同じ書き込みで、その実行の確かめが通らなかった中身を消す
+	// （コンフリクトの解消の確かめ。承認は取り消さない）。clearFixRejected が真のとき、同じ書き込みで、その実行の確かめが通らなかった中身を消す
 	// （いまの中身が通らなかった中身と違うので、起点から見分け直した）。
-	// clearFixPending が真のとき（見分けの結果が衝突の解消ありでないのに確かめ待ちの中身が残っている）、同じ書き込みで確かめ待ちの中身を消す。
+	// clearFixPending が真のとき（見分けの結果がコンフリクトの解消ありでないのに確かめ待ちの中身が残っている）、同じ書き込みで確かめ待ちの中身を消す。
 	fixPendingRef    string
 	clearFixRejected bool
 	clearFixPending  bool
@@ -421,7 +421,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		j.clearFixPending = false
 	}
 	// 待っている間は試行の行を増やさない: 直前の試行も flywheel の外での反映を待っていたなら、開いた行を消して返す。
-	// 衝突の解消の確かめを待つ間も同じ: 直前の試行が waiting_fix_check で同じ中身を見ていて、確かめ待ちの中身もすでにその中身なら増やさない。
+	// コンフリクトの解消の確かめを待つ間も同じ: 直前の試行が waiting_fix_check で同じ中身を見ていて、確かめ待ちの中身もすでにその中身なら増やさない。
 	sameFixWait := j.result == ExecutionResultWaitingFixCheck && prevResult == ExecutionResultWaitingFixCheck && prevObserved == j.observedHead &&
 		j.run != nil && j.run.row.FixPendingRef == j.fixPendingRef && !j.clearFixRejected
 	if (j.result == ExecutionResultWaitingOutside && prevResult == ExecutionResultWaitingOutside) || sameFixWait {
@@ -537,9 +537,9 @@ func classifyCheck(c UpstreamCheck) checkOutcome {
 	return checkFail
 }
 
-// movedByMergeInOnly は、head の動きが既定ブランチの取り込みだけで、取り込みに紛れた変更（衝突の解消の差分）が
-// 無いかを返す。差分を人が見ない道なので、衝突を解消するために直したファイルがある取り込みは含めない
-// （衝突の解消を承認し直さずに通す形は、区切り S3b）。
+// movedByMergeInOnly は、head の動きが既定ブランチの取り込みだけで、取り込みに紛れた変更（コンフリクトの解消の差分）が
+// 無いかを返す。差分を人が見ない道なので、コンフリクトを解消するために直したファイルがある取り込みは含めない
+// （コンフリクトの解消を承認し直さずに通す形は、区切り S3b）。
 func movedByMergeInOnly(ctx context.Context, src UpstreamCompareSource, repo, prBase, approvedHead, head string) bool {
 	return classifyContentMove(ClassifyHeadChange(ctx, src, repo, prBase, approvedHead, head)) == contentMoveMergeInOnly
 }
@@ -641,7 +641,7 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 
 // judgeReleaseUpstream は judgeRelease の、成果物を上流から読んで確かめ、道を選ぶ部分。
 func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport) (out releaseJudgment, _ error) {
-	// 見分けの結果が衝突の解消ありでない（起点と同じ・取り込みだけ）のに確かめ待ちの中身が残っていれば、この試行の結果を書く書き込みで消す。
+	// 見分けの結果がコンフリクトの解消ありでない（起点と同じ・取り込みだけ）のに確かめ待ちの中身が残っていれば、この試行の結果を書く書き込みで消す。
 	staleFixPending := false
 	defer func() { out.clearFixPending = out.clearFixPending || staleFixPending }()
 	approved := &approvedHeadChecks{}
@@ -705,7 +705,7 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 	moved := pr.HeadSHA != approvedHead
 	var fix releaseFixMove
 	if run != nil && run.fixEligible {
-		// 対応する契約の実行があり、衝突の解消の確かめの道に入ってよい（fixEligible）: 見分けの起点は、通した中身（あれば）か承認した中身。衝突の解消ありは、承認を取り消さず確かめを待つ。
+		// 対応する契約の実行があり、コンフリクトの解消の確かめの道に入ってよい（fixEligible）: 見分けの起点は、通した中身（あれば）か承認した中身。コンフリクトの解消ありは、承認を取り消さず確かめを待つ。
 		fix = s.classifyFixMove(ctx, opts, run, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA)
 		switch fix.outcome {
 		case fixMoveRejected:

@@ -44,7 +44,7 @@ type j5RawOutput struct {
 	Question           *string                   `json:"question"`
 	Actual             *[]StageActual            `json:"actual"`
 	DeferredConditions *[]j5RawDeferredCondition `json:"deferred_conditions"`
-	// ConflictOverriddenFrom は core が衝突の PR のために判定を not_met へ置き換えたときだけ付く、J5 の元の判定
+	// ConflictOverriddenFrom は core がコンフリクトの PR のために判定を not_met へ置き換えたときだけ付く、J5 の元の判定
 	// （met・uncertain・not_met）。J5 自身の出力には無い（schema に無い）。
 	ConflictOverriddenFrom *string `json:"conflict_overridden_from"`
 }
@@ -88,7 +88,7 @@ type j5ValidatedOutput struct {
 	// Deferred は区分を付けた条件（無い・0 個は nil）。判定（Verdict）はこれを除いた残りの条件で
 	// 決まっている。区分の無い旧い出力では nil で、今までどおりに扱う。
 	Deferred []J5DeferredCondition
-	// ConflictOverriddenFrom は core が衝突の PR のために not_met へ置き換えた出力のときだけ、J5 の元の判定。
+	// ConflictOverriddenFrom は core がコンフリクトの PR のために not_met へ置き換えた出力のときだけ、J5 の元の判定。
 	// 空でなければ、差し戻しの上限（decideRework）にも発生（verification_not_met）にも数えない。
 	ConflictOverriddenFrom string
 }
@@ -840,7 +840,7 @@ func (s *Store) applyJ5Route(ctx context.Context, runIDDisplay, challengeIDDispl
 		}
 		if v.Verdict == J5VerdictNotMet {
 			if v.ConflictOverriddenFrom != "" {
-				// 衝突の PR のための core の置き換え: 達成条件の未達ではないので、発生（verification_not_met）に
+				// コンフリクトの PR のための core の置き換え: 達成条件の未達ではないので、発生（verification_not_met）に
 				// 数えない（完了の承認の良し悪し〔completionApprovedIsGood〕を下げない）。
 				return moveVerifyingTask(ctx, tc, verifyTask, TaskStatusInProgress)
 			}
@@ -1019,7 +1019,7 @@ type J5AutoInput struct {
 	Descriptions UpstreamDescriptionSource
 	// HeadGit は PR の head を取り出す一時の worktree の口。
 	HeadGit HeadWorktreeGit
-	// Compare は衝突の解消の確かめが、通した中身から確かめ待ちの中身への変わり方を読み直す、2 つのコミットの比較の取得
+	// Compare はコンフリクトの解消の確かめが、通した中身から確かめ待ちの中身への変わり方を読み直す、2 つのコミットの比較の取得
 	// （nil なら読み直せないので、確かめを始めない）。
 	Compare UpstreamCompareSource
 	// Connectors は PR のリポジトリの元のクローンを引く宣言。nil なら PR の head を取り出さない
@@ -1039,8 +1039,8 @@ type J5AutoInput struct {
 // 出力の写像は core が持ち、呼び出し元（internal/cli）は宣言の読み込み・invoker と取得の組み立て・
 // 周の開始と終了だけを行う。
 //
-//   - in.ChallengeID が非 nil: 対象は、検証中の課題・着手中の課題（検証中のタスクと、統合先宛ての衝突の解消の確かめ）・完了の課題（反映先宛ての
-//     衝突の解消の確かめ）。対象が無ければ ErrInvalidTransition（終わっていない実行のある単位は対象選びで外れるので、確かめでは
+//   - in.ChallengeID が非 nil: 対象は、検証中の課題・着手中の課題（検証中のタスクと、統合先宛てのコンフリクトの解消の確かめ）・完了の課題（反映先宛ての
+//     コンフリクトの解消の確かめ）。対象が無ければ ErrInvalidTransition（終わっていない実行のある単位は対象選びで外れるので、確かめでは
 //     ErrRunInProgress でなくこちらになる）。検証中の課題で、終了していない run があれば
 //     ErrRunInProgress、周の上限で起動できなければ ErrBudgetExceeded を返す。CI の待ち・上流の取得の
 //     失敗は、課題を変えずに結果の NotStarted へ入れる。
@@ -1088,14 +1088,14 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 				}
 				appendDelegateOutcome(result, item, notStarted)
 			}
-			// 見直し前の対象の後に、衝突の解消の確かめの対象を処理する。
+			// 見直し前の対象の後に、コンフリクトの解消の確かめの対象を処理する。
 			if err := s.verifyFixTargets(ctx, in, nil, result, fixTargets); err != nil {
 				return nil, err
 			}
 			return result, nil
 		}
 		if ch.Status == StatusDone {
-			// 完了の課題は、反映先宛ての衝突の解消の確かめだけが対象。
+			// 完了の課題は、反映先宛てのコンフリクトの解消の確かめだけが対象。
 			fixTargets, err := s.selectFixTargetsOf(ctx, challengeIntID(ch))
 			if err != nil {
 				return nil, err
@@ -1132,7 +1132,7 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		if taskTargets, err = selectJ5TaskTargets(ctx, tx); err != nil {
 			return err
 		}
-		// 衝突の解消の確かめの対象の選び方は、見直し前の対象の選び方と別（同じ課題に検証中のタスクと確かめ待ちの別のタスクがあれば、両方が対象）。
+		// コンフリクトの解消の確かめの対象の選び方は、見直し前の対象の選び方と別（同じ課題に検証中のタスクと確かめ待ちの別のタスクがあれば、両方が対象）。
 		fixTargets, ex, err = selectJ5FixTargets(ctx, tx, nil)
 		result.NotStarted = append(result.NotStarted, ex...)
 		return err
@@ -1203,7 +1203,7 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		}
 		appendDelegateOutcome(result, item, notStarted)
 	}
-	// 見直し前の対象（検証中の課題・検証中のタスク）の後に、衝突の解消の確かめの対象。
+	// 見直し前の対象（検証中の課題・検証中のタスク）の後に、コンフリクトの解消の確かめの対象。
 	if err := s.verifyFixTargets(ctx, in, jc, result, fixTargets); err != nil {
 		return nil, err
 	}
@@ -1216,7 +1216,7 @@ func challengeIntID(ch *Challenge) int64 {
 	return id
 }
 
-// selectFixTargetsOf は課題 cid（内部整数 ID）の、衝突の解消の確かめの対象を選ぶ（ID を指定した個別の操作。取り込み元の食い違いでは外さない）。
+// selectFixTargetsOf は課題 cid（内部整数 ID）の、コンフリクトの解消の確かめの対象を選ぶ（ID を指定した個別の操作。取り込み元の食い違いでは外さない）。
 func (s *Store) selectFixTargetsOf(ctx context.Context, cid int64) ([]j5FixTarget, error) {
 	var out []j5FixTarget
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
@@ -1227,7 +1227,7 @@ func (s *Store) selectFixTargetsOf(ctx context.Context, cid int64) ([]j5FixTarge
 	return out, classifyReadWriteErr(err)
 }
 
-// verifyFixTargets は衝突の解消の確かめの対象を順に処理して、結果を result へ足す。1 件の対象の問題（対象でなくなった・終わっていない実行・
+// verifyFixTargets はコンフリクトの解消の確かめの対象を順に処理して、結果を result へ足す。1 件の対象の問題（対象でなくなった・終わっていない実行・
 // 承認済みの計画が無い）で、ほかの対象を止めない。
 func (s *Store) verifyFixTargets(ctx context.Context, in J5AutoInput, jc *JudgmentCycle, result *JudgmentAutoResult, targets []j5FixTarget) error {
 	for _, tg := range targets {
@@ -1361,7 +1361,7 @@ func (s *Store) verifyTarget(ctx context.Context, in J5AutoInput, jc *JudgmentCy
 			}
 		}
 		structured := res.StructuredOutput
-		// 衝突の PR があれば、J5 の判定に関わらず core が衝突による差し戻しの not_met に置き換える（課題は承認待ちにも
+		// コンフリクトの PR があれば、J5 の判定に関わらず core がコンフリクトによる差し戻しの not_met に置き換える（課題は承認待ちにも
 		// 人への保留にも進まず、着手中へ戻る。差し戻しの上限と発生には数えない）。
 		overridden, err := s.overrideForConflict(ctx, res.RunID, structured, prs)
 		if err != nil {

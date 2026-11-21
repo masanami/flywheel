@@ -601,7 +601,7 @@ func FromShowRuns(rs []core.Run) []ShowRun {
 	return out
 }
 
-// PassedConflictFix は通した衝突の解消 1 件（show の conflict_fixes[] の要素）。承認の要約の ConflictFix（取り込みのマージごとの、
+// PassedConflictFix は通したコンフリクトの解消 1 件（show の conflict_fixes[] の要素）。承認の要約の ConflictFix（取り込みのマージごとの、
 // 直したファイル）とは別の型。
 type PassedConflictFix struct {
 	// At は作業ログの記録の時刻。
@@ -619,7 +619,7 @@ type PassedConflictFix struct {
 	ToRef  string  `json:"to_ref"`
 }
 
-// FromConflictFixes は通した衝突の解消の一覧を変換する（空でも `[]`）。
+// FromConflictFixes は通したコンフリクトの解消の一覧を変換する（空でも `[]`）。
 func FromConflictFixes(fs []core.ConflictFixPassed) []PassedConflictFix {
 	out := make([]PassedConflictFix, 0, len(fs))
 	for _, f := range fs {
@@ -636,7 +636,7 @@ func FromConflictFixes(fs []core.ConflictFixPassed) []PassedConflictFix {
 type ShowResponse struct {
 	Approvals []Approval    `json:"approvals"`
 	Challenge ShowChallenge `json:"challenge"`
-	// ConflictFixes は通した衝突の解消（古い順。無ければ []）。
+	// ConflictFixes は通したコンフリクトの解消（古い順。無ければ []）。
 	ConflictFixes []PassedConflictFix `json:"conflict_fixes"`
 	// DirectCompletions は親が直接行った完了の記録（古い順。無ければ []）。1 件以上あることが「親が直接行った」印。
 	DirectCompletions []DirectCompletion `json:"direct_completions"`

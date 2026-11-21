@@ -380,15 +380,15 @@ type contentMove int
 const (
 	// contentMoveUndeterminable は、判定できないこと（ゼロ値。未設定のまま通さないよう、通さない側にする）。
 	contentMoveUndeterminable contentMove = iota
-	// contentMoveMergeInOnly は、宛先の最新の取り込みだけで、衝突を解消するために直したファイルが無いこと。
+	// contentMoveMergeInOnly は、宛先の最新の取り込みだけで、コンフリクトを解消するために直したファイルが無いこと。
 	contentMoveMergeInOnly
-	// contentMoveConflictFix は、取り込みだけだが、衝突を解消するために直したファイルがあること。
+	// contentMoveConflictFix は、取り込みだけだが、コンフリクトを解消するために直したファイルがあること。
 	contentMoveConflictFix
 	// contentMoveContentChanged は、取り込み以外の変更が入ったこと。
 	contentMoveContentChanged
 )
 
-// classifyContentMove は ch を contentMove に分ける。差分を人が見ない道なので、衝突を解消するために直したファイルがある取り込みは、
+// classifyContentMove は ch を contentMove に分ける。差分を人が見ない道なので、コンフリクトを解消するために直したファイルがある取り込みは、
 // 取り込みだけには含めない。
 func classifyContentMove(ch HeadChange) contentMove {
 	switch ch.Kind {

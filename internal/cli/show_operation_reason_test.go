@@ -30,7 +30,7 @@ func TestChallengeDetailText_ShowsReasonOfCancelledOperation(t *testing.T) {
 
 // S3a: land_refused は取り消す結果なので「直前の試行」に委譲先の理由が出る。land_sent（待つ）は「最後の試行」に語が出る。
 func TestChallengeDetailText_ShowsLastAttemptOfDelegatedRelease(t *testing.T) {
-	refused, why := core.ExecutionResultLandRefused, "衝突があり入れられなかった"
+	refused, why := core.ExecutionResultLandRefused, "コンフリクトがあり入れられなかった"
 	d := &core.ChallengeDetail{Operations: []core.IrreversibleOperation{{
 		ID: "OP-1", Kind: core.OperationKindRelease, Summary: "反映", State: core.OperationStatePending,
 		LastExecutionResult: &refused, LastExecutionDetail: &why,

@@ -391,7 +391,7 @@ func TestNoOtherWriteEndpoints(t *testing.T) {
 	}
 }
 
-// 完了承認画面の値（タスク・フォローアップ・通した衝突の解消・統合先）は、要約と同じ 1 回の応答に入る。
+// 完了承認画面の値（タスク・フォローアップ・通したコンフリクトの解消・統合先）は、要約と同じ 1 回の応答に入る。
 // フォローアップを済みにしても課題の版は進まないが、次の要約には済みにした結果が載る。
 func TestApprovalSummaryForCompletionCarriesScreenValues(t *testing.T) {
 	ws := initWorkspace(t)

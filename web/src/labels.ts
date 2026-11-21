@@ -442,7 +442,7 @@ export const RUN_KIND_LABELS: Record<string, string> = {
   judgment: "判断点",
   delegate: "委譲",
   contract: "委譲",
-  predict: "衝突の予測",
+  predict: "コンフリクトの予測",
 };
 export const RUN_RESULT_LABELS: Record<string, string> = {
   succeeded: "成功",
@@ -455,7 +455,7 @@ export const RUN_RESULT_LABELS: Record<string, string> = {
   interrupted: "中断",
 };
 export const RUN_RUNNING_LABEL = "実行中";
-// 通した衝突の解消の宛先。`integration`＝統合先、`release`＝反映先。
+// 通したコンフリクトの解消の宛先。`integration`＝統合先、`release`＝反映先。
 export const CONFLICT_FIX_TARGET_LABELS: Record<ConflictFixTarget, string> = {
   integration: "統合先",
   release: "反映先",
@@ -466,8 +466,9 @@ export const EXPECTED_KIND_LABELS: Record<ExpectedKind, string> = {
   cli: "コマンド",
   behavior: "振る舞い",
 };
-export const CONFLICT_FIX_HEADING = "通した衝突の解消";
-export const CONFLICT_FIX_PENDING_TEXT = "衝突の解消の確かめを待っています。";
+export const CONFLICT_FIX_HEADING = "通したコンフリクトの解消";
+export const CONFLICT_FIX_PENDING_TEXT =
+  "コンフリクトの解消の確かめを待っています。";
 // 実行の記録に費用の値が無い（null）とき。0 とは違う。
 export const NO_COST_LABEL = "費用の記録なし";
 

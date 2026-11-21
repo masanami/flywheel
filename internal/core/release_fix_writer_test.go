@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// 反映先宛ての衝突の解消の確かめ（J5）の結果の書き込み（writeReflectFix。AC-47〜AC-49・AC-60〜AC-63・AC-70・AC-71・AC-77・AC-78・AC-101）を、
+// 反映先宛てのコンフリクトの解消の確かめ（J5）の結果の書き込み（writeReflectFix。AC-47〜AC-49・AC-60〜AC-63・AC-70・AC-71・AC-77・AC-78・AC-101）を、
 // 実ストア・本番の書き込みの口で固定する。
 
 func newReflectWriterFixture(t *testing.T) *fixFixture {
@@ -112,7 +112,7 @@ func TestReflectFixWriter_MetReplacesAnExistingVerifiedRef(t *testing.T) {
 	t.Parallel()
 	f := newReflectWriterFixture(t)
 	f.sql(t, `UPDATE contract_run SET fix_verified_ref = 'h1'`)
-	// 見分けの起点は通した中身 h1。h1 から確かめ待ちの中身へ、宛先の最新の取り込みで動き、衝突の解消がある。
+	// 見分けの起点は通した中身 h1。h1 から確かめ待ちの中身へ、宛先の最新の取り込みで動き、コンフリクトの解消がある。
 	files := []UpstreamFile{{Filename: "a.go", Patch: "@@ -1 +1 @@\n-old\n+RESOLVED-LINE"}}
 	f.cmp.set("h1", fixPending, withFiles(ahead(commit("m1", "main change", "m0"), commit(fixPending, "Merge branch 'main'", "h1", "m1")), files...))
 	f.cmp.set("m1", fixPending, UpstreamComparison{Status: UpstreamCompareAhead, TotalCommits: 1, Commits: []UpstreamCommit{commit("h1", "fix", "p0")}, Files: files})

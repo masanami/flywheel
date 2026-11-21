@@ -81,11 +81,11 @@ func TestSpec_AC267_GlossaryTaskSinceS3b(t *testing.T) {
 	}
 }
 
-// AC-268: 用語集の「反映」の行に、衝突の解消を承認し直さずに通す形は S3c のものである旨がある。
+// AC-268: 用語集の「反映」の行に、コンフリクトの解消を承認し直さずに通す形は S3c のものである旨がある。
 // 区切り S3c で入った（AC-141）ので、「S3c から」の予定の言い方は「S3c で入った」へ改まった。
 func TestSpec_AC268_GlossaryReflectConflictFromS3c(t *testing.T) {
 	cols := glossaryRow(t, "反映")
-	if !strings.Contains(strings.Join(cols, " | "), "衝突の解消を承認し直さずに通す形は、S3c で入った") {
+	if !strings.Contains(strings.Join(cols, " | "), "コンフリクトの解消を承認し直さずに通す形は、S3c で入った") {
 		t.Errorf("AC-268: the 反映 row does not say the no-reapproval conflict resolution form is from S3c: %q", cols)
 	}
 }

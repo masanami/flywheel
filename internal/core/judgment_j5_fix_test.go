@@ -1,6 +1,6 @@
 package core
 
-// このファイルは、衝突の解消の確かめ（J5 の 3 つ目の動き方。区切り S3c）の、対象選び・入力・実行の記録・結果の振り分けの口を、実ストア・
+// このファイルは、コンフリクトの解消の確かめ（J5 の 3 つ目の動き方。区切り S3c）の、対象選び・入力・実行の記録・結果の振り分けの口を、実ストア・
 // 偽の判断の呼び出し・偽の比較の口で固定する。受入基準ごとに、基準の文が述べる条件・結果・値を確かめる。結果の書き込み（列の更新・作業ログ・
 // 承認の取り消し）は別のタスクが足すので、ここでは「結果を書く直前の読み直しを通ったときだけ、宛先ごとの口へ、結果が届く」ことまでを確かめる。
 
@@ -49,7 +49,7 @@ func (l *fixWriterLog) writer(d j5FixDest) j5FixWriter {
 	}
 }
 
-// setConflictFixHistory は、通した中身 fixPassed から確かめ待ちの中身 fixPending へ、宛先 base の最新を取り込むマージ（衝突の解消あり）で動いた履歴を置く。
+// setConflictFixHistory は、通した中身 fixPassed から確かめ待ちの中身 fixPending へ、宛先 base の最新を取り込むマージ（コンフリクトの解消あり）で動いた履歴を置く。
 // 直したファイルは a.go・b.go（どちらも差分あり。差分を上流が返さないファイルがあると「満たした」は通らないので、通る足場は読めるファイルだけにする）。
 func setConflictFixHistory(cmp *fakeCompare, base string) {
 	cmp.set(fixPassed, fixPending, ahead(commit("m1", "main change", "m0"), commit(fixPending, "Merge branch 'main'", fixPassed, "m1")))
@@ -144,7 +144,7 @@ func (f *fixFixture) sectionsOf(t *testing.T) map[string]string {
 	return out
 }
 
-// AC-7・AC-8: 確かめ待ちの中身を持つタスクは、タスクの検証の対象にならず、衝突の解消の確かめの対象になる。確かめ待ちの中身が無くなれば、逆になる。
+// AC-7・AC-8: 確かめ待ちの中身を持つタスクは、タスクの検証の対象にならず、コンフリクトの解消の確かめの対象になる。確かめ待ちの中身が無くなれば、逆になる。
 func TestJ5Fix_PendingTaskIsFixTargetNotTaskVerificationTarget(t *testing.T) {
 	t.Parallel()
 	f := newFixIntegrationFixture(t)
@@ -368,7 +368,7 @@ func TestJ5Fix_EveryVerdictLeavesOneRunAndReachesTheDestinationWriter(t *testing
 	}
 }
 
-// AC-33: 入力を組み立てるときに読み直した変わり方が、衝突の解消ありでない（比較の口が無い・取り込みだけ・関係のない変更あり・判定できない）→ 実行の記録は作られない。
+// AC-33: 入力を組み立てるときに読み直した変わり方が、コンフリクトの解消ありでない（比較の口が無い・取り込みだけ・関係のない変更あり・判定できない）→ 実行の記録は作られない。
 func TestJ5Fix_NoConflictFixMeansNoRun(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(f *fixFixture, in *J5AutoInput){

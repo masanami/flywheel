@@ -289,7 +289,7 @@ it("#963: 成果物の種類の語（プルリクエスト・ブランチ・コ�
   expect(artifactKindLabel("constructor")).toBe("成果物（constructor）");
 });
 
-it("#964: 委譲先が求めていること・衝突の解消の宛先・予想の種類の全部の値に語がある（core の閉集合から生成した値の一覧で漏れを検出する）", () => {
+it("#964: 委譲先が求めていること・コンフリクトの解消の宛先・予想の種類の全部の値に語がある（core の閉集合から生成した値の一覧で漏れを検出する）", () => {
   coversAll(REQUESTED_KIND_LABELS, REQUESTED_KIND_CODES);
   coversAll(CONFLICT_FIX_TARGET_LABELS, CONFLICT_FIX_TARGET_CODES);
   coversAll(ARTIFACT_KIND_LABELS, ARTIFACT_KIND_CODES);

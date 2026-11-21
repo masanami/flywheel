@@ -11,7 +11,7 @@ import (
 )
 
 // 統合先宛て（entity=task）の conflict_fix_passed は、課題の作業ログの区画（entity=challenge・operation）に入らない。
-// J6 の入力は、通した衝突の解消を専用の区画で渡す。
+// J6 の入力は、通したコンフリクトの解消を専用の区画で渡す。
 func TestLoadJ6Context_CarriesIntegrationConflictFixPassed(t *testing.T) {
 	t.Parallel()
 	f := newJ6Fixture(t)
@@ -62,7 +62,7 @@ func TestPrepareJ6_ReleaseConflictFixShowsTargetAndOperationID(t *testing.T) {
 	}
 }
 
-// 通した衝突の解消が無い課題には、区画を載せない。
+// 通したコンフリクトの解消が無い課題には、区画を載せない。
 func TestPrepareJ6_NoConflictFixes_NoSection(t *testing.T) {
 	t.Parallel()
 	for _, sec := range prepareJ6(&j6Context{}, "") {

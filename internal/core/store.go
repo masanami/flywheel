@@ -43,7 +43,7 @@ type Store struct {
 	// t.Parallel にできる。本番 API には注入口を露出しない。
 	actor *actorSourceFuncs
 
-	// fixWriters は衝突の解消の確かめ（J5）の結果を書く、宛先ごとの口（judgment_j5_fix.go）。nil の口は何も書かない（統合先宛ては writeIntegrationFix を既定にする。反映先宛ては別の実装が足す）。
+	// fixWriters はコンフリクトの解消の確かめ（J5）の結果を書く、宛先ごとの口（judgment_j5_fix.go）。nil の口は何も書かない（統合先宛ては writeIntegrationFix を既定にする。反映先宛ては別の実装が足す）。
 	fixWriters j5FixWriters
 
 	// delegationWait は委譲の枠待ちの再評価の間隔のテスト用の差し替え。0 なら

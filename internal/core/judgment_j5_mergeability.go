@@ -4,13 +4,13 @@ package core
 //
 //   - 取得した PR の mergeable・mergeable_state を J5 の区画「PR のマージ可否」へ書く
 //   - mergeable が null（GitHub が計算中）の PR は、J5 の起動の前に設定の回数だけ取り直す
-//   - 衝突（mergeable=false）の open な PR があれば、J5 の判定（met・uncertain・not_met）に関わらず core が
-//     衝突による差し戻しの not_met に置き換える（課題は着手中へ戻り、ブランチの更新が差し戻しの指摘つきの追従の委譲になる。人には問わない）。
+//   - コンフリクト（mergeable=false）の open な PR があれば、J5 の判定（met・uncertain・not_met）に関わらず core が
+//     コンフリクトによる差し戻しの not_met に置き換える（課題は着手中へ戻り、ブランチの更新が差し戻しの指摘つきの追従の委譲になる。人には問わない）。
 //     置き換えた出力には元の判定（conflict_overridden_from）と J5 の元の出力（j5_output）を残し、差し戻しの
 //     上限と発生（verification_not_met）には数えない
 //   - なお不明（null）のまま met になった課題は、承認の要約に「マージ可否は未確認」を出す
 //
-// BEHIND（base に遅れているだけ）は衝突として扱わない。取得と正規化は adapter が担い、判定は core が持つ。
+// BEHIND（base に遅れているだけ）はコンフリクトとして扱わない。取得と正規化は adapter が担い、判定は core が持つ。
 
 import (
 	"context"
@@ -59,7 +59,7 @@ func mergeabilityLabels(pr UpstreamPullRequestChecks) (mergeable, state string) 
 // isOpenPR は pr が open か（マージ可否を気にするのは open の PR だけ）。
 func isOpenPR(pr UpstreamPullRequestChecks) bool { return pr.State == string(artifactStateOpen) }
 
-// conflictingPullRequests は prs のうち、base と衝突している（mergeable=false）open な PR。
+// conflictingPullRequests は prs のうち、base とコンフリクトしている（mergeable=false）open な PR。
 func conflictingPullRequests(prs []UpstreamPullRequestChecks) []UpstreamPullRequestChecks {
 	var out []UpstreamPullRequestChecks
 	for _, pr := range prs {
@@ -123,10 +123,10 @@ func refreshUnknownMergeability(ctx context.Context, src UpstreamCheckSource, pr
 	return prs
 }
 
-// conflictFeedback は衝突の PR のために core が書く差し戻しの指摘。
+// conflictFeedback はコンフリクトの PR のために core が書く差し戻しの指摘。
 func conflictFeedback(conflicts []UpstreamPullRequestChecks) string {
 	var b strings.Builder
-	b.WriteString("PR が base のブランチと衝突していてマージできない。base の最新を取り込み、衝突を解消して同じブランチへ push すること（達成条件のほかの点は変えない）。")
+	b.WriteString("PR が base のブランチとコンフリクトしていてマージできない。base の最新を取り込み、コンフリクトを解消して同じブランチへ push すること（達成条件のほかの点は変えない）。")
 	for _, pr := range conflicts {
 		m, st := mergeabilityLabels(pr)
 		fmt.Fprintf(&b, "\n- %s（base: %s、mergeable=%s / mergeStateStatus=%s）", pr.URL, pr.Base, m, st)
@@ -134,11 +134,11 @@ func conflictFeedback(conflicts []UpstreamPullRequestChecks) string {
 	return b.String()
 }
 
-// overrideForConflict は取得した PR に衝突があるとき、J5 の出力を not_met（差し戻しの指摘は conflictFeedback）へ
+// overrideForConflict は取得した PR にコンフリクトがあるとき、J5 の出力を not_met（差し戻しの指摘は conflictFeedback）へ
 // 置き換えて返し、run の保存済みの出力も同じ内容に書き換える（差し戻しの追従の委譲が、最新の J5 の run の出力から
-// 指摘を読むため）。J5 の判定が met・uncertain・not_met のどれでも置き換える。J5 が j5.md の規則に従って衝突を理由に
-// 自分で not_met を返す主な経路でも、衝突による差し戻しの印を付けて、差し戻しの上限と発生に数えないため。J5 が
-// not_met で指摘を書いていれば、衝突の指摘の後ろにその指摘も残す。置き換えた出力には、J5 の元の判定
+// 指摘を読むため）。J5 の判定が met・uncertain・not_met のどれでも置き換える。J5 が j5.md の規則に従ってコンフリクトを理由に
+// 自分で not_met を返す主な経路でも、コンフリクトによる差し戻しの印を付けて、差し戻しの上限と発生に数えないため。J5 が
+// not_met で指摘を書いていれば、コンフリクトの指摘の後ろにその指摘も残す。置き換えた出力には、J5 の元の判定
 // （conflict_overridden_from）と元の出力そのもの（j5_output）を残す。置き換えなければ nil。
 func (s *Store) overrideForConflict(ctx context.Context, runIDDisplay string, structured []byte, prs []UpstreamPullRequestChecks) ([]byte, error) {
 	conflicts := conflictingPullRequests(prs)
@@ -159,7 +159,7 @@ func (s *Store) overrideForConflict(ctx context.Context, runIDDisplay string, st
 	}
 	out, err := json.Marshal(map[string]any{
 		"verdict":                  string(J5VerdictNotMet),
-		"reason":                   "PR が base のブランチと衝突しているため、達成条件を満たさない（" + v.Reason + "）",
+		"reason":                   "PR が base のブランチとコンフリクトしているため、達成条件を満たさない（" + v.Reason + "）",
 		"feedback":                 feedback,
 		"conflict_overridden_from": string(v.Verdict),
 		"j5_output":                json.RawMessage(structured),

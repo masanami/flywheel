@@ -303,7 +303,7 @@ type contractRunRow struct {
 	StartRunID int64
 	// VerifiedRef は、タスクの検証（J5）が「満たした」とした中身（統合先を使う課題のタスクの実行。無ければ空）。
 	VerifiedRef string
-	// FixPendingRef・FixVerifiedRef・FixRejectedRef は、衝突の解消の確かめ（S3c）の列（無ければ空）。意味と使い方は contract_fix_refs.go。
+	// FixPendingRef・FixVerifiedRef・FixRejectedRef は、コンフリクトの解消の確かめ（S3c）の列（無ければ空）。意味と使い方は contract_fix_refs.go。
 	FixPendingRef, FixVerifiedRef, FixRejectedRef string
 	// holdSuccessEnd は DB の列ではない。真なら、succeeded を読んでも ended_at を入れない（統合先へ入ったかを上流で確かめるまで開けておく）。
 	holdSuccessEnd bool

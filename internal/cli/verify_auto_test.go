@@ -410,7 +410,7 @@ func TestVerifyAuto_ConflictingPR_ReachesJ5StdinAndTheChallengeDoesNotAwaitAppro
 	id := newVerifyingForCase(t, ws, true)
 	withFakeGHRoutesOnPATH(t, withPRMergeability(ghChecksRoutes("open", checkRunsComplete), "false", "dirty"))
 	stdinLog := t.TempDir() + "/j5-stdin.log"
-	route := j5Route("met", nil, nil) // J5 が衝突を見落として met を返しても
+	route := j5Route("met", nil, nil) // J5 がコンフリクトを見落として met を返しても
 	route.StdinLogPath = stdinLog
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{route}, "")
 

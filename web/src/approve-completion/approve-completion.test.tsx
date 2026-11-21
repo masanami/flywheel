@@ -948,7 +948,7 @@ const fix = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-it("AC-126: 反映するものの下に、通した衝突の解消の件数と、宛先・直したファイルの名前が出る", async () => {
+it("AC-126: 反映するものの下に、通したコンフリクトの解消の件数と、宛先・直したファイルの名前が出る", async () => {
   setup({
     tasks: [task("T-1")],
     conflictFixes: [
@@ -975,7 +975,7 @@ it("AC-126: 反映するものの下に、通した衝突の解消の件数と�
   expect(rows[1]?.querySelector("b")).toBeNull();
 });
 
-it("AC-128: 通した衝突の解消が 0 件なら、完了承認画面に区画を出さない", async () => {
+it("AC-128: 通したコンフリクトの解消が 0 件なら、完了承認画面に区画を出さない", async () => {
   setup();
   const m = await open();
   expect(within(m).queryByTestId("conflict-fixes")).toBeNull();

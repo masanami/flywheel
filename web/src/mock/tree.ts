@@ -184,7 +184,7 @@ export function alphaTree(): TreeResponse {
 // 前提にされている課題を持つ（幅 360px の画面で折り返しや横の溢れを確かめるため、長い題名・長い URL も含む）。
 type Extras = {
   conflict_fixes?: PassedConflictFix[];
-  // 衝突の解消の確かめ待ちの中身（fix_pending_ref）を持つ実行の ID（タスクの詳細に「確かめを待っている」旨が出る）。
+  // コンフリクトの解消の確かめ待ちの中身（fix_pending_ref）を持つ実行の ID（タスクの詳細に「確かめを待っている」旨が出る）。
   fix_pending_runs?: string[];
   dependents?: string[];
   followups?: Followup[];
@@ -208,7 +208,7 @@ const followup = (id: string, status: string, title: string): Followup => ({
 });
 
 export function alphaDetailExtras(id: string): Extras {
-  // C-7（完了の承認待ち）は、反映先宛ての通した衝突の解消を 1 件持つ（完了承認画面の区画の確認用）。
+  // C-7（完了の承認待ち）は、反映先宛ての通したコンフリクトの解消を 1 件持つ（完了承認画面の区画の確認用）。
   if (id === "C-7") {
     return {
       conflict_fixes: [
@@ -228,7 +228,7 @@ export function alphaDetailExtras(id: string): Extras {
   if (id !== "C-28") return {};
   return {
     fix_pending_runs: ["R-16"],
-    // 通した衝突の解消: 統合先宛て（タスクの題名を添える）と反映先宛て（操作の ID）の 2 件。
+    // 通したコンフリクトの解消: 統合先宛て（タスクの題名を添える）と反映先宛て（操作の ID）の 2 件。
     conflict_fixes: [
       {
         at: "2026-11-02T01:00:00.000Z",

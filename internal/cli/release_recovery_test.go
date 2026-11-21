@@ -76,7 +76,7 @@ func miRoutes(n int, head, ci string, mergeable string) []fakeGHRoute {
 }
 
 // miMergeInRoutes は「検証の head V に既定ブランチを取り込んだマージ H が入った」履歴の compare の応答。
-// a.go は衝突を直したファイル（両方の親と異なる）、b.go は取り込みで増えただけ（PR 側の親とだけ異なる）。
+// a.go はコンフリクトを直したファイル（両方の親と異なる）、b.go は取り込みで増えただけ（PR 側の親とだけ異なる）。
 func miMergeInRoutes(v, h string) []fakeGHRoute {
 	merge := miCommit{h, []string{v, miMain}, "Merge branch 'main' into feat"}
 	mainSide := miCommit{miMain, []string{"0000000000000000000000000000000000000000"}, "main: change a.go"}

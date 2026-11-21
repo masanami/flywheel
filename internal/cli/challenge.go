@@ -231,7 +231,7 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 			formatUSD(t.BudgetImplUSD), formatUSD(t.BudgetReviewUSD), formatUSD(t.SpentUSD))
 	}
 	if len(d.ConflictFixes) > 0 {
-		fmt.Fprintf(&b, "通した衝突の解消: %d 件\n", len(d.ConflictFixes))
+		fmt.Fprintf(&b, "通したコンフリクトの解消: %d 件\n", len(d.ConflictFixes))
 		for _, f := range d.ConflictFixes {
 			dest, id := "統合先", ""
 			if f.TaskID != nil {

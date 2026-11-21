@@ -105,7 +105,7 @@ type j6Context struct {
 	DirectCompletions []DirectCompletion
 	Activities        []j6ActivityRow
 	ActivityCut       int
-	// ConflictFixes は衝突の解消の確かめが通した記録（古い順）。統合先宛ては entity=task の作業ログに載るので、
+	// ConflictFixes はコンフリクトの解消の確かめが通した記録（古い順）。統合先宛ては entity=task の作業ログに載るので、
 	// 課題の作業ログの区画（entity=challenge・operation）には入らず、この区画だけで渡す。反映先宛ては
 	// entity=operation の作業ログに載るので、作業ログの区画とこの区画の両方に出る。
 	ConflictFixes []ConflictFixPassed
@@ -378,8 +378,8 @@ const j6MemoryIndexLabel = "記憶の索引のパス"
 // j6DirectCompletionLabel は親が直接行った完了の記録の区画のラベル（記録がある課題にだけ載せる）。
 const j6DirectCompletionLabel = "親が直接行った記録"
 
-// j6ConflictFixesLabel は、衝突の解消の確かめが通した記録の区画のラベル（記録がある課題にだけ載せる）。
-const j6ConflictFixesLabel = "通した衝突の解消"
+// j6ConflictFixesLabel は、コンフリクトの解消の確かめが通した記録の区画のラベル（記録がある課題にだけ載せる）。
+const j6ConflictFixesLabel = "通したコンフリクトの解消"
 
 // j6FollowupsLabel はこの課題から起票済みのフォローアップの区画のラベル。
 const j6FollowupsLabel = "起票済みのフォローアップ"
@@ -458,7 +458,7 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 
 	if len(jc.ConflictFixes) > 0 {
 		b.Reset()
-		b.WriteString("flywheel が差分で確かめ、「満たした」として通した衝突の解消の記録（古い順）。各行は、その時点の中身（→ の後の中身）を確かめて通した記録である。" +
+		b.WriteString("flywheel が差分で確かめ、「満たした」として通したコンフリクトの解消の記録（古い順）。各行は、その時点の中身（→ の後の中身）を確かめて通した記録である。" +
 			"通らなかった確かめ（差し戻し・判断できない）はこの区画に載らない。通した後に中身が変わりうるので、最終的に入った中身と同じとは限らない:\n")
 		for _, f := range jc.ConflictFixes {
 			target, id := "統合先", ""

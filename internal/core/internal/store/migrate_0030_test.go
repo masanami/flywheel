@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// 区切り S3c のスキーマ（版 30）。contract_run に衝突の解消の確かめの 3 列を足す。
+// 区切り S3c のスキーマ（版 30）。contract_run にコンフリクトの解消の確かめの 3 列を足す。
 
 const migrationS3cVersion = 30
 

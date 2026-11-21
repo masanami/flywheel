@@ -205,11 +205,11 @@ func TestReleaseLand_AMergeInOnlyMoveLandsTheCurrentHeadAndKeepsBothHeadsInTheAt
 	f := newLandFixture(t)
 	f.fake.pr.HeadSHA = "h1"
 	f.fake.pr.Checks = []UpstreamCheck{{Status: "completed", Conclusion: "success"}}
-	// 承認した中身から h1 への変わり方は、反映先の最新の取り込みだけ（衝突の解消の差分が無い取り込み）。
+	// 承認した中身から h1 への変わり方は、反映先の最新の取り込みだけ（コンフリクトの解消の差分が無い取り込み）。
 	cmp := newFakeCompare()
 	cmp.set(f.head, "h1", withFiles(ahead(commit("m1", "main", "m0"), commit("h1", "Merge", f.head, "m1")), UpstreamFile{Filename: "a", Patch: "p"}))
 	cmp.set("main", "h1", ahead(commit(f.head, "fix", "p0"), commit("h1", "Merge", f.head, "m1")))
-	cmp.set("m1", "h1", ahead(commit(f.head, "fix", "p0"))) // 衝突の解消の差分は無い
+	cmp.set("m1", "h1", ahead(commit(f.head, "fix", "p0"))) // コンフリクトの解消の差分は無い
 	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateWaiting, nil, func(st *ContractStatus) {
 		st.RequestedAction = &ContractRequestedAction{Kind: "review", Decider: "any", Text: "t", Options: []string{"respond", "land"}}
 		st.Artifacts = []ContractArtifact{{Kind: "pr", Ref: reviewPRURL}, {Kind: "commit", Ref: "h1"}}

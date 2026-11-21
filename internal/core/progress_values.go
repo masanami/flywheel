@@ -82,7 +82,7 @@ func ArtifactKindValues() []string {
 	return out
 }
 
-// ConflictFixTargetValues は、通した衝突の解消の宛先（ConflictFixPassed.Target）の閉集合の写しを返す。
+// ConflictFixTargetValues は、通したコンフリクトの解消の宛先（ConflictFixPassed.Target）の閉集合の写しを返す。
 func ConflictFixTargetValues() []string {
 	return append([]string(nil), conflictFixTargetValues...)
 }
