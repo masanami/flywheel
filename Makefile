@@ -105,6 +105,7 @@ test:
 ## flywheel の作業ツリーは .git がファイルで、Go の VCS の刻印は外側のリポジトリのコミットを拾う。
 ## そのため、この作業ディレクトリの git からコミット・時刻・未コミットの変更の有無を取り、-ldflags -X で刻む
 ## （internal/core/version.go の stampRevision 等。刻印があればそちらが優先される）。git が使えなければ刻まない。
+## Go の VCS の刻印は -buildvcs=false で外す（刻印できない場所で、外側のリポジトリのコミットが入らないように。commit は unknown になる）。
 CORE_PKG := github.com/masanami/flywheel/internal/core
 # git のリポジトリの root がこの作業ディレクトリのときだけ刻む（配布物の展開先が別のリポジトリの下でも、外側のコミットを刻まない）。
 STAMP_REV = $(if $(filter $(shell git rev-parse --show-toplevel 2>/dev/null),$(shell pwd -P)),$(shell git rev-parse HEAD 2>/dev/null))
@@ -113,7 +114,7 @@ STAMP_MOD = $(if $(shell git status --porcelain 2>/dev/null),true,false)
 build:
 	@echo "==> CGO_ENABLED=0 go build ./cmd/flywheel"
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 go build -ldflags "$(if $(STAMP_REV),-X $(CORE_PKG).stampRevision=$(STAMP_REV) -X $(CORE_PKG).stampTime=$(STAMP_TIME) -X $(CORE_PKG).stampModified=$(STAMP_MOD))" -o $(BINARY) ./cmd/flywheel
+	CGO_ENABLED=0 go build -buildvcs=false -ldflags "$(if $(STAMP_REV),-X $(CORE_PKG).stampRevision=$(STAMP_REV) -X $(CORE_PKG).stampTime=$(STAMP_TIME) -X $(CORE_PKG).stampModified=$(STAMP_MOD))" -o $(BINARY) ./cmd/flywheel
 
 ## print-golangci-lint-version: CI がインストールする版を読み取るための出力。
 print-golangci-lint-version:
