@@ -57,7 +57,8 @@ func TestChallengeTree_TaskProgress_AC85to91_929(t *testing.T) {
 		{"AC-86 verifying without verified_ref is verifying", true, "verifying", "", false, "verifying", TaskPhaseRunning},
 		{"AC-86 verifying with a run lacking verified_ref", true, "verifying", "-", false, "verifying", TaskPhaseRunning},
 		{"AC-87 verifying in a challenge without integration is verifying", false, "verifying", "sha", false, "verifying", TaskPhaseRunning},
-		{"AC-88 verifying with verified_ref is landing", true, "verifying", "sha", false, "landing", TaskPhaseRunning},
+		{"#964 verifying with only verified_ref is verified（詳細の verified と同じ）", true, "verifying", "sha", false, "verified", TaskPhaseRunning},
+		{"AC-88 #964 verifying with verified_ref and land_ref is landing（詳細の sent と同じ）", true, "verifying", "sha+land", false, "landing", TaskPhaseRunning},
 		{"AC-89 waiting task is null", true, "in_progress", "", true, "", TaskPhaseWaiting},
 		{"AC-90 done task is null", true, "done", "sha", false, "", TaskPhaseDone},
 		{"cancelled task is null", true, "cancelled", "", false, "", TaskPhaseCancelled},
@@ -69,11 +70,17 @@ func TestChallengeTree_TaskProgress_AC85to91_929(t *testing.T) {
 			ids := f.plan(cid, 1, treeSpec(treeBool(c.uses), "S", one(c.st)), one(c.st))
 			f.setUses(cid, c.uses)
 			if c.run != "" {
-				v := c.run
+				v, land := c.run, false
 				if v == "-" {
 					v = ""
 				}
+				if v == "sha+land" {
+					v, land = "sha", true
+				}
 				f.taskRun(cid, "x", "e1", v)
+				if land {
+					coretest.Exec(t, f.ws, `UPDATE contract_run SET land_ref = 'ref' WHERE external_run_id = 'e1'`)
+				}
 			}
 			if c.hold {
 				coretest.Exec(t, f.ws, `INSERT INTO hold (challenge_id, question, from_status, raised_at, kind, task_id) VALUES (?, 'q', 'in_progress', '2026-11-02T00:00:00.000Z', 'human', ?)`, cid, ids["x"])
@@ -150,4 +157,16 @@ func TestChallengeTree_ChallengeProgress_AC92to95_929(t *testing.T) {
 			}
 		})
 	}
+}
+
+// 終わった契約の実行の verified_ref・land_ref は進みに使わない（タスクの詳細が統合先へ入れる進みを出さないのと同じ）。
+func TestChallengeTree_TaskProgress_EndedRunIsVerifying_964(t *testing.T) {
+	f := newTreeFx(t)
+	cid := f.challenge("c", "in_progress")
+	tk := []treeTK{{"x", nil, "verifying"}}
+	f.plan(cid, 1, treeSpec(treeBool(true), "S", tk), tk)
+	f.setUses(cid, true)
+	f.taskRun(cid, "x", "e1", "sha")
+	coretest.Exec(t, f.ws, `UPDATE contract_run SET land_ref = 'ref', ended_at = '2026-11-03T00:00:00.000Z' WHERE external_run_id = 'e1'`)
+	wantTaskProgress(t, taskProgressOf(f.node(cid), "x"), "verifying")
 }

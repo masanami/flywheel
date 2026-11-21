@@ -824,6 +824,7 @@ export const TASK_PHASE_CODES = [
 export const TASK_PROGRESS_CODES = [
   "working",
   "verifying",
+  "verified",
   "landing",
 ] as const;
 
