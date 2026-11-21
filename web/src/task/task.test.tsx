@@ -679,7 +679,7 @@ it("AC-84 #931: 要約の Markdown の記法は整えず文字のまま出る", 
   expect(el.querySelector("a, h1, strong")).toBeNull();
 });
 
-it("AC-67 AC-68 AC-69 AC-70 AC-80 #931: 成果物の種類・状態（記録のまま）・http(s) だけのリンク・統合先の語", async () => {
+it("AC-67 AC-68 AC-69 AC-70 AC-80 #931: 成果物の種類（語に直す）・状態（記録のまま）・http(s) だけのリンク・統合先の語", async () => {
   const { root } = await open(
     show({
       tasks: [
@@ -692,7 +692,7 @@ it("AC-67 AC-68 AC-69 AC-70 AC-80 #931: 成果物の種類・状態（記録の�
               state: "Merged_x",
             },
             {
-              kind: "branch",
+              kind: "pr",
               ref: "javascript:alert(1)",
               role: null,
               state: "open",
@@ -705,7 +705,7 @@ it("AC-67 AC-68 AC-69 AC-70 AC-80 #931: 成果物の種類・状態（記録の�
   const items = within(root).getAllByTestId("task-artifact");
   expect(
     within(items[0] as HTMLElement).getByTestId("artifact-kind").textContent,
-  ).toBe("pull_request");
+  ).toBe("成果物（pull_request）");
   expect(
     within(items[1] as HTMLElement).getByTestId("artifact-state").textContent,
   ).toBe("open");
@@ -720,6 +720,9 @@ it("AC-67 AC-68 AC-69 AC-70 AC-80 #931: 成果物の種類・状態（記録の�
   expect(
     within(items[0] as HTMLElement).getByTestId("artifact-role").textContent,
   ).toBe("統合先");
+  expect(
+    within(items[1] as HTMLElement).getByTestId("artifact-kind").textContent,
+  ).toBe("プルリクエスト");
   expect(within(items[1] as HTMLElement).queryByRole("link")).toBeNull();
   expect(
     within(items[1] as HTMLElement).getByTestId("artifact-ref").textContent,
@@ -819,8 +822,8 @@ it("成果物の状態が空文字のとき、区切りと状態を出さない"
   expect(
     within(items[0] as HTMLElement).queryByTestId("artifact-state"),
   ).toBeNull();
-  expect(items[0]?.textContent).toBe("branch ・ feat/x");
-  expect(items[1]?.textContent).toBe("branch ・ feat/y ・ open");
+  expect(items[0]?.textContent).toBe("ブランチ ・ feat/x");
+  expect(items[1]?.textContent).toBe("ブランチ ・ feat/y ・ open");
 });
 
 it("AC-129: 実行に確かめ待ちの中身（fix_pending_ref）があるタスクの詳細に、衝突の解消の確かめを待っている旨が出る", async () => {

@@ -73,6 +73,15 @@ func ContractRequestedKindValues() []string {
 	return append([]string(nil), contractRequestedKindValues...)
 }
 
+// ArtifactKindValues は、成果物の種類（run_artifact.kind）の閉集合の写しを返す。
+func ArtifactKindValues() []string {
+	out := make([]string, 0, len(artifactKindValues))
+	for _, k := range artifactKindValues {
+		out = append(out, string(k))
+	}
+	return out
+}
+
 // ConflictFixTargetValues は、通した衝突の解消の宛先（ConflictFixPassed.Target）の閉集合の写しを返す。
 func ConflictFixTargetValues() []string {
 	return append([]string(nil), conflictFixTargetValues...)
