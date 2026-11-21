@@ -72,6 +72,49 @@ type j5FixScope struct {
 	// DiffTruncated は、確かめの入力の「衝突の解消の差分」が上限（maxPullRequestDiffBytes）で切られたとき真。判断点は、確かめ待ちの中身の作業ツリーしか読めず、
 	// 落ちた分の差分を作り直せないので、真のときは「満たした」を通さない（finalizeJ5FixOutput）。
 	DiffTruncated bool
+	// UnreadableFiles は、確かめの入力に差分が入らなかったファイル（上流が差分を返さなかったもの。ConflictFixFile.PatchUnavailable が真）の名前（現れた順・重複なし）。判断点は、確かめ待ちの中身の
+	// 作業ツリーに落ちた差分を作り直せないので、1 つでもあれば「満たした」を通さない（finalizeJ5FixOutput）。
+	UnreadableFiles []string
+}
+
+// fixInputGap は、確かめの入力に差分が入りきらなかった理由 1 つ。Key は、読み替えたことを残す実行の記録の保存した出力のキー。
+type fixInputGap struct{ Key, Reason string }
+
+// inputGaps は、確かめの入力に差分が入りきらなかった理由（切られた・読めなかったファイルがある）を返す。空でなければ、判断点の「満たした」は通さない。
+func (sc *j5FixScope) inputGaps() []fixInputGap {
+	var gaps []fixInputGap
+	if sc.DiffTruncated {
+		gaps = append(gaps, fixInputGap{"diff_truncated_overridden_from",
+			fmt.Sprintf("衝突の解消の差分が上限（%d バイト）を超えて切られ、入力に入らなかった分がある", maxPullRequestDiffBytes)})
+	}
+	if n := len(sc.UnreadableFiles); n > 0 {
+		names := sc.UnreadableFiles
+		more := ""
+		if n > unreadableFileNamesShown {
+			names, more = names[:unreadableFileNamesShown], fmt.Sprintf(" ほか %d 件", n-unreadableFileNamesShown)
+		}
+		gaps = append(gaps, fixInputGap{"patch_unavailable_overridden_from",
+			fmt.Sprintf("差分を読めなかったファイルがある（%s%s）", strings.Join(names, "、"), more)})
+	}
+	return gaps
+}
+
+// unreadableFileNamesShown は、読み替えの理由に名前を書く、読めなかったファイルの数の上限（残りは件数だけ書く）。
+const unreadableFileNamesShown = 3
+
+// unreadableConflictFiles は、差分を上流が返さなかったファイルの名前を、現れた順に重複なく返す。
+func unreadableConflictFiles(fixes []ConflictFix) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, fx := range fixes {
+		for _, f := range fx.Files {
+			if f.PatchUnavailable && !seen[f.Filename] {
+				seen[f.Filename] = true
+				out = append(out, f.Filename)
+			}
+		}
+	}
+	return out
 }
 
 // j5FixResult は確かめの結果。宛先ごとの書き込みの口（j5FixWriters）が受け取る。
@@ -564,6 +607,7 @@ func (s *Store) verifyFixTarget(ctx context.Context, in J5AutoInput, jc *Judgmen
 
 	diff, truncated := formatConflictFixes(scope.Change.ConflictFixes)
 	scope.DiffTruncated = truncated
+	scope.UnreadableFiles = unreadableConflictFiles(scope.Change.ConflictFixes)
 
 	planVersion := int64(scope.Plan.Version)
 	runIn := RunJudgmentInput{
@@ -618,12 +662,18 @@ func (s *Store) finalizeJ5FixOutput(ctx context.Context, runIDDisplay string, sc
 	if v.Question != nil {
 		r.Question = *v.Question
 	}
-	if scope.DiffTruncated && r.Verdict == J5VerdictMet {
-		// 入力の差分が上限で切られた。判断点は、落ちた分の差分を作り直せないので、「満たした」を通さず、判断できないと同じに扱う。
+	if gaps := scope.inputGaps(); len(gaps) > 0 && r.Verdict == J5VerdictMet {
+		// 入力に、差分が入りきらなかった分がある（上限で切られた・上流が差分を返さなかったファイルがある）。判断点は、確かめ待ちの中身の作業ツリーに、
+		// 落ちた分の差分を作り直せないので、「満たした」を通さず、判断できないと同じに扱う。
+		reasons := make([]string, len(gaps))
+		for i, g := range gaps {
+			reasons[i] = g.Reason
+		}
+		joined := strings.Join(reasons, "。また、")
 		r.Verdict = J5VerdictUncertain
-		r.Reason = fmt.Sprintf("衝突の解消の差分が上限（%d バイト）を超えて切られ、入力に入らなかった分があるので、判断点が「満たした」と答えたが通さなかった（%s）", maxPullRequestDiffBytes, v.Reason)
-		r.Question = "衝突の解消の差分が上限を超えて切られ、判断点が全体を確かめられなかった。検証か承認をやり直すか。"
-		if err := s.recordTruncatedOverride(ctx, runIDDisplay, structured, r); err != nil {
+		r.Reason = fmt.Sprintf("%s。そのため、判断点が「満たした」と答えたが通さなかった（%s）", joined, v.Reason)
+		r.Question = fmt.Sprintf("%s。判断点が全体を確かめられなかった。検証か承認をやり直すか。", joined)
+		if err := s.recordFixOverride(ctx, runIDDisplay, structured, r, gaps); err != nil {
 			return "", nil, "", err
 		}
 	}
@@ -639,20 +689,23 @@ func (s *Store) finalizeJ5FixOutput(ctx context.Context, runIDDisplay string, sc
 	return outcome, &st, RunResultSucceeded, nil
 }
 
-// recordTruncatedOverride は、差分が切られたので「満たした」を判断できないへ読み替えたことを、run の保存済みの出力へ残す（読み替えた理由と、判断点の元の判定・
-// 元の出力そのもの。run の履歴を読む人が、満たしたのに通っていない形を見ないため）。
-func (s *Store) recordTruncatedOverride(ctx context.Context, runIDDisplay string, structured []byte, r *j5FixResult) error {
+// recordFixOverride は、差分が入りきらなかったので「満たした」を判断できないへ読み替えたことを、run の保存済みの出力へ残す（読み替えた理由と、当たった理由ごとの
+// キーに判断点の元の判定、元の出力そのもの。run の履歴を読む人が、満たしたのに通っていない形を見ないため。両方が当たれば両方のキーを残す）。
+func (s *Store) recordFixOverride(ctx context.Context, runIDDisplay string, structured []byte, r *j5FixResult, gaps []fixInputGap) error {
 	rid, ok := parseRunID(runIDDisplay)
 	if !ok {
 		return ErrValidation
 	}
-	out, err := json.Marshal(map[string]any{
-		"verdict":                        string(r.Verdict),
-		"reason":                         r.Reason,
-		"question":                       r.Question,
-		"diff_truncated_overridden_from": string(J5VerdictMet),
-		"j5_output":                      json.RawMessage(structured),
-	})
+	m := map[string]any{
+		"verdict":   string(r.Verdict),
+		"reason":    r.Reason,
+		"question":  r.Question,
+		"j5_output": json.RawMessage(structured),
+	}
+	for _, g := range gaps {
+		m[g.Key] = string(J5VerdictMet)
+	}
+	out, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}

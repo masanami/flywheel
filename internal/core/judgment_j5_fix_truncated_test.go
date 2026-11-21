@@ -85,27 +85,7 @@ func TestJ5Fix_TruncatedDiffMetDoesNotAdvanceThePassedContent(t *testing.T) {
 			setConflictFixFiles(f.cmp, bigPatchFiles(maxPullRequestDiffBytes))
 			f.setVerdict("met")
 			f.verify(t)
-			if n := f.count(t, `SELECT COUNT(*) FROM activity WHERE action = 'conflict_fix_passed'`); n != 0 {
-				t.Fatalf("conflict_fix_passed = %d, want none", n)
-			}
-			if got := f.pendingRef(t); got != "" {
-				t.Errorf("fix_pending_ref = %q, want cleared", got)
-			}
-			if c.dest == j5FixDestIntegration {
-				if got := f.text(t, `SELECT verified_ref FROM contract_run`); got != "" {
-					t.Errorf("verified_ref = %q, want cleared as for uncertain", got)
-				}
-				if got := f.text(t, `SELECT status FROM task`); got != "verifying" {
-					t.Errorf("task = %s, want verifying", got)
-				}
-				return
-			}
-			if got := f.refsOf(t); got != (contractFixRefs{Rejected: fixPending}) {
-				t.Errorf("fix refs = %+v, want rejected %s only", got, fixPending)
-			}
-			if f.challengeStatusOf(t) != "done" || f.opStateOf(t) != "approved" {
-				t.Errorf("challenge = %s operation = %s", f.challengeStatusOf(t), f.opStateOf(t))
-			}
+			assertNothingPassed(t, f, c.dest)
 		})
 	}
 }
@@ -205,5 +185,32 @@ func TestFormatConflictFixes_TruncationBoundary(t *testing.T) {
 	}
 	if _, cut := formatConflictFixes(mk(atLimit + 1)); !cut {
 		t.Error("a diff one byte over the limit was not reported as cut")
+	}
+}
+
+// assertNothingPassed は、「満たした」を通さなかったときの後始末（判断できないのときと同じ）を確かめる。通した記録が残らず、確かめ待ちの中身が消え、
+// 統合先宛てなら検証した中身が消えてタスクは検証中のまま、反映先宛てなら通らなかった中身が記録されて、承認と課題の状態は変わらない。
+func assertNothingPassed(t *testing.T, f *fixFixture, dest j5FixDest) {
+	t.Helper()
+	if n := f.count(t, `SELECT COUNT(*) FROM activity WHERE action = 'conflict_fix_passed'`); n != 0 {
+		t.Fatalf("conflict_fix_passed = %d, want none", n)
+	}
+	if got := f.pendingRef(t); got != "" {
+		t.Errorf("fix_pending_ref = %q, want cleared", got)
+	}
+	if dest == j5FixDestIntegration {
+		if got := f.text(t, `SELECT verified_ref FROM contract_run`); got != "" {
+			t.Errorf("verified_ref = %q, want cleared as for uncertain", got)
+		}
+		if got := f.text(t, `SELECT status FROM task`); got != "verifying" {
+			t.Errorf("task = %s, want verifying", got)
+		}
+		return
+	}
+	if got := f.refsOf(t); got != (contractFixRefs{Rejected: fixPending}) {
+		t.Errorf("fix refs = %+v, want rejected %s only", got, fixPending)
+	}
+	if f.challengeStatusOf(t) != "done" || f.opStateOf(t) != "approved" {
+		t.Errorf("challenge = %s operation = %s", f.challengeStatusOf(t), f.opStateOf(t))
 	}
 }

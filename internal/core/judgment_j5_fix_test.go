@@ -50,11 +50,11 @@ func (l *fixWriterLog) writer(d j5FixDest) j5FixWriter {
 }
 
 // setConflictFixHistory は、通した中身 fixPassed から確かめ待ちの中身 fixPending へ、宛先 base の最新を取り込むマージ（衝突の解消あり）で動いた履歴を置く。
-// 直したファイルは a.go（差分あり）と big.bin（差分を上流が返さない）。
+// 直したファイルは a.go・b.go（どちらも差分あり。差分を上流が返さないファイルがあると「満たした」は通らないので、通る足場は読めるファイルだけにする）。
 func setConflictFixHistory(cmp *fakeCompare, base string) {
 	cmp.set(fixPassed, fixPending, ahead(commit("m1", "main change", "m0"), commit(fixPending, "Merge branch 'main'", fixPassed, "m1")))
 	cmp.set(base, fixPending, ahead(commit("p0", "feat", "m0"), commit(fixPassed, "fix", "p0"), commit(fixPending, "Merge branch 'main'", fixPassed, "m1")))
-	files := []UpstreamFile{{Filename: "a.go", Patch: "@@ -1 +1 @@\n-old\n+RESOLVED-LINE"}, {Filename: "big.bin"}}
+	files := []UpstreamFile{{Filename: "a.go", Patch: "@@ -1 +1 @@\n-old\n+RESOLVED-LINE"}, {Filename: "b.go", Patch: "@@ -2 +2 @@\n-old2\n+RESOLVED-B"}}
 	cmp.set(fixPassed, fixPending, withFiles(cmp.results[[2]string{fixPassed, fixPending}], files...))
 	cmp.set("m1", fixPending, UpstreamComparison{Status: UpstreamCompareAhead, TotalCommits: 1,
 		Commits: []UpstreamCommit{commit(fixPassed, "fix", "p0")}, Files: files})
@@ -205,7 +205,7 @@ func TestJ5Fix_UpstreamMismatchExcludesFromAutoTargets(t *testing.T) {
 	}
 }
 
-// AC-10・AC-82〜AC-88・AC-90・AC-94・AC-95・AC-108・AC-109: 統合先宛ての確かめ。
+// AC-10・AC-82〜AC-85・AC-87・AC-88・AC-90・AC-94・AC-95・AC-108・AC-109: 統合先宛ての確かめ。
 func TestJ5Fix_IntegrationRunInputAndRecords(t *testing.T) {
 	t.Parallel()
 	f := newFixIntegrationFixture(t)
@@ -236,7 +236,7 @@ func TestJ5Fix_IntegrationRunInputAndRecords(t *testing.T) {
 	}
 	diff := sec[labelFixDiffSection]
 	for name, want := range map[string]string{
-		"AC-84 merge commit": fixPending, "AC-84 file name": "a.go", "AC-85 patch": "+RESOLVED-LINE", "AC-86 name": "big.bin", "AC-86 note": "読めなかった",
+		"AC-84 merge commit": fixPending, "AC-84 file name": "a.go", "AC-85 patch": "+RESOLVED-LINE", "AC-85 second file": "+RESOLVED-B",
 	} {
 		if !strings.Contains(diff, want) {
 			t.Errorf("%s: diff section lacks %q:\n%s", name, want, diff)
