@@ -9,6 +9,7 @@ import type {
   TreeTask,
 } from "../api/types.gen.ts";
 import {
+  CONFLICT_FIX_PENDING_TEXT,
   DELEGATE_STATE_LABELS,
   HOLD_KIND_PARENT_DIRECT,
   LANDING_LABELS,
@@ -296,6 +297,9 @@ function TaskView({
           verification={task.verification}
           landing={task.landing}
         />
+      ) : null}
+      {runs.some((r) => r.fix_pending_ref !== null) ? (
+        <p data-testid="task-fix-pending">{CONFLICT_FIX_PENDING_TEXT}</p>
       ) : null}
       {holds.length > 0 ? <Holds holds={holds} /> : null}
       <RunsView

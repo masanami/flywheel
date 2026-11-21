@@ -129,6 +129,7 @@ interface Over {
   tasks?: ReturnType<typeof task>[];
   followups?: ReturnType<typeof followup>[];
   challenge?: Record<string, unknown>;
+  conflictFixes?: Record<string, unknown>[];
 }
 
 function showBody(o: Over = {}) {
@@ -170,6 +171,7 @@ function showBody(o: Over = {}) {
       approvals: [],
       card,
       challenge,
+      conflict_fixes: o.conflictFixes ?? [],
       direct_completions: [],
       followups: o.followups ?? [],
       holds: [],
@@ -758,4 +760,49 @@ it("開いた後の読み直しで版が変わると、更新された旨が出�
     }),
   );
   await within(m).findByText(/承認の対象が更新されました/);
+});
+
+const fix = (over: Record<string, unknown> = {}) => ({
+  at: "2026-11-20T14:12:00Z",
+  files: ["runtime/internal/cli/ticket.go"],
+  from_ref: "a",
+  operation_id: null,
+  run_id: "R-1",
+  target: "integration",
+  task_id: "T-1",
+  to_ref: "b",
+  ...over,
+});
+
+it("AC-126: 反映するものの下に、通した衝突の解消の件数と、宛先・直したファイルの名前が出る", async () => {
+  setup({
+    tasks: [task("T-1")],
+    conflictFixes: [
+      fix(),
+      fix({
+        run_id: "R-2",
+        target: "release",
+        task_id: null,
+        operation_id: "O-1",
+        files: ["a.go", "<b>.go"],
+      }),
+    ],
+  });
+  const m = await open();
+  const reflect = within(m).getByTestId("completion-reflect");
+  const box = within(reflect).getByTestId("conflict-fixes");
+  expect(within(box).getByTestId("conflict-fixes-count").textContent).toBe("2");
+  const rows = within(box).getAllByTestId("conflict-fix");
+  expect(rows[0]?.textContent).toContain("統合先（タスク T-1）");
+  expect(rows[0]?.textContent).toContain("runtime/internal/cli/ticket.go");
+  expect(rows[1]?.textContent).toContain("反映先");
+  // 文字として出す（HTML として解釈しない）
+  expect(rows[1]?.textContent).toContain("<b>.go");
+  expect(rows[1]?.querySelector("b")).toBeNull();
+});
+
+it("AC-128: 通した衝突の解消が 0 件なら、完了承認画面に区画を出さない", async () => {
+  setup();
+  const m = await open();
+  expect(within(m).queryByTestId("conflict-fixes")).toBeNull();
 });

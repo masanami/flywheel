@@ -970,3 +970,37 @@ it("AC-107 #932: 課題の詳細のツリーの箱に、タスクの progress �
   ).toHaveTextContent("検証待ち");
   expect(q(boxes[1] as HTMLElement).queryByTestId("task-progress")).toBeNull();
 });
+
+const passedFix = (over: Record<string, unknown> = {}) => ({
+  at: "2026-11-20T14:12:00Z",
+  files: ["runtime/internal/cli/ticket.go"],
+  from_ref: "a",
+  operation_id: null,
+  run_id: "R-1",
+  target: "integration",
+  task_id: null,
+  to_ref: "b",
+  ...over,
+});
+
+it("AC-127: 課題の詳細に、通した衝突の解消の件数・宛先・直したファイルの名前が出る", async () => {
+  const { root } = await open(
+    show({
+      conflict_fixes: [
+        passedFix({ task_id: "T-9" }),
+        passedFix({ run_id: "R-2", target: "release", operation_id: "O-1" }),
+      ],
+    }),
+  );
+  const box = q(root).getByTestId("conflict-fixes");
+  expect(q(box).getByTestId("conflict-fixes-count").textContent).toBe("2");
+  const rows = q(box).getAllByTestId("conflict-fix");
+  expect(rows[0]?.textContent).toContain("統合先（T-9）");
+  expect(rows[0]?.textContent).toContain("runtime/internal/cli/ticket.go");
+  expect(rows[1]?.textContent).toContain("反映先");
+});
+
+it("AC-128: 通した衝突の解消が 0 件なら、課題の詳細に区画を出さない", async () => {
+  const { root } = await open(show());
+  expect(q(root).queryByTestId("conflict-fixes")).toBeNull();
+});

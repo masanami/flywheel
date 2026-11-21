@@ -16,6 +16,7 @@ import {
   label,
 } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
+import { ConflictFixesView } from "../parts/ConflictFixesView.tsx";
 import { DirectCompletionView } from "../parts/DirectCompletionView.tsx";
 import { PairsView } from "../parts/StagesDetail.tsx";
 import { safeHref } from "../safeHref.ts";
@@ -309,6 +310,11 @@ function CompletionView({
                 })}
               </ul>
             )}
+            <ConflictFixesView
+              fixes={show.conflict_fixes}
+              titleOfTask={(tid) => show.tasks.find((t) => t.id === tid)?.title}
+              showAt={false}
+            />
             <h4>同時には承認されない不可逆操作</h4>
             {approval.other_pending_operations.length === 0 ? (
               <p>なし</p>

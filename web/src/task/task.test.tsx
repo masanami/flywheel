@@ -790,3 +790,19 @@ it("AC-82 AC-83 #931: 「費用」に枠（実装とレビュー対応）と使�
   );
   expect(within(root).getByTestId("task-cost").textContent).toBe("1.25");
 });
+
+it("AC-129: 実行に確かめ待ちの中身（fix_pending_ref）があるタスクの詳細に、衝突の解消の確かめを待っている旨が出る", async () => {
+  const { root } = await open(
+    show({ runs: [run("R-1", { fix_pending_ref: "abc123" })] }),
+  );
+  expect(within(root).getByTestId("task-fix-pending")).toHaveTextContent(
+    "衝突の解消の確かめを待っています",
+  );
+  // 区分の語は変えない
+  expect(within(root).getByTestId("task-phase")).toHaveTextContent("実行中");
+});
+
+it("AC-129: 確かめ待ちの中身が無ければ、その旨は出さない", async () => {
+  const { root } = await open(show({ runs: [run("R-1")] }));
+  expect(within(root).queryByTestId("task-fix-pending")).toBeNull();
+});
