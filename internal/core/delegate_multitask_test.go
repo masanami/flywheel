@@ -263,7 +263,7 @@ func TestMultiTask_AC7_NonIntegrationTwoTasksAreNotStarted(t *testing.T) {
 	}
 }
 
-// AC-8・AC-236: 統合先を使う課題で、未完のタスクのリポジトリが 2 つあるものは、起動されず、保留になる（仕上げ 3 項目 3）。
+// AC-8・AC-236: 統合先を使う課題で、取りやめでないタスク（済みを含む）のリポジトリが 2 つあるものは、起動されず、保留になる（仕上げ 3 項目 3）。
 // 問いの文に、語「リポジトリ」がある。
 func TestMultiTask_AC8_AC236_TwoRepositoriesAreNotStarted(t *testing.T) {
 	t.Parallel()
@@ -480,6 +480,56 @@ func TestMultiTask_AC11_CandidatesAreOrderedByPriorityChallengeThenTask(t *testi
 	if !equalStrings(got, want) {
 		t.Errorf("candidates = %v, want %v", got, want)
 	}
+}
+
+// AC-11（優先度が同じ課題）: 優先度が同じ 2 つの課題は、課題の ID の小さい方のタスクが先に並ぶ。タスクの ID の大小が課題の ID の大小と逆でも、
+// 課題の ID が先に効く（タスクの ID は、同じ課題の中だけの並びを決める）。
+func TestMultiTask_AC11_SamePriorityChallengeIDBeatsTaskID(t *testing.T) {
+	t.Parallel()
+	f := newMultiFixture(t, 4)
+	first := f.newMulti(t, "first", "P1", true, multiTask{key: "a"}, multiTask{key: "b"})
+	second := f.newMulti(t, "second", "P1", true, multiTask{key: "a"}, multiTask{key: "b"})
+	firstCID, _ := parseChallengeID(first)
+	// first（課題の ID が小さい）のタスクの ID を、second のタスクの ID より大きくする。
+	if err := f.delegateFixture.exec(`UPDATE task SET id = id + 1000 WHERE challenge_id = ?`, firstCID); err != nil {
+		t.Fatal(err)
+	}
+	secondCID, _ := parseChallengeID(second)
+	if firstCID >= secondCID {
+		t.Fatalf("challenge ids = %d, %d, want first < second", firstCID, secondCID)
+	}
+	if f.taskIDInt(t, first, "a") <= f.taskIDInt(t, second, "b") {
+		t.Fatalf("setup: first's task ids must be larger than second's")
+	}
+	in := f.input(f.cycle(t, 300), nil)
+	var picked delegationTargets
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
+		picked, err = selectDelegationTargetsFor(context.Background(), tx, f.conn)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := f.s.planDelegation(context.Background(), in, picked.Targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, want []string
+	for _, pc := range plan.candidates {
+		got = append(got, pc.Cand.ID+"/"+formatTaskID(pc.Cand.TaskSeq))
+	}
+	for _, id := range []string{first, second} {
+		for _, k := range []string{"a", "b"} {
+			want = append(want, id+"/"+f.taskID(t, id, k))
+		}
+	}
+	if !equalStrings(got, want) {
+		t.Errorf("candidates = %v, want %v (the smaller challenge id first although its task ids are larger)", got, want)
+	}
+}
+
+func (f *contractFixture) taskIDInt(t *testing.T, id, key string) int64 {
+	t.Helper()
+	return mustTaskInt(f.taskID(t, id, key))
 }
 
 // AC-12: 同じ課題の 2 個のタスクのうち、1 個が、対応する子が上流で閉じているために起動されないとき、もう 1 個は起動される。
