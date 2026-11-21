@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -34,6 +35,9 @@ const contractConnectorsJSON = `{
 }`
 
 type fakeContractClient struct {
+	// mu は、委譲の段が同じ段の中で候補を並行に始める（delegate_plan.go の goroutine）ため、呼び出しの記録を守る。
+	// 試験は、段が戻った後に starts 等を直接読む。
+	mu       sync.Mutex
 	starts   [][]string
 	statuses [][]string
 	resumes  [][]string
@@ -61,6 +65,8 @@ func (f *fakeContractClient) recordWorkDir(name, dir string) {
 }
 
 func (f *fakeContractClient) Start(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.starts = append(f.starts, in.Command)
 	f.recordWorkDir("start", in.WorkDir)
 	out := f.startOut
@@ -73,6 +79,8 @@ func (f *fakeContractClient) Start(_ context.Context, in ContractLaunchInput) (C
 }
 
 func (f *fakeContractClient) Status(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.statuses = append(f.statuses, in.Command)
 	f.recordWorkDir("status", in.WorkDir)
 	if f.echoRunning {
@@ -86,12 +94,16 @@ func (f *fakeContractClient) Status(_ context.Context, in ContractLaunchInput) (
 }
 
 func (f *fakeContractClient) Resume(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.resumes = append(f.resumes, in.Command)
 	f.recordWorkDir("resume", in.WorkDir)
 	return f.resumeOut, nil
 }
 
 func (f *fakeContractClient) Cancel(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.cancels = append(f.cancels, in.Command)
 	f.recordWorkDir("cancel", in.WorkDir)
 	out := f.cancelOut

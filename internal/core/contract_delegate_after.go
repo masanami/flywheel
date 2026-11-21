@@ -712,7 +712,7 @@ func (s *Store) delegateViaContract(ctx context.Context, in DelegateInput, jc *J
 	}
 	rep, err := s.StartContractDelegation(ctx, ContractStartInput{
 		ChallengeID: dc.Challenge.ID, ConnectorID: dc.Connector.ID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl,
-		Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile, MaxBudgetUSD: microsToUSD(dc.ImplBudgetMicros + dc.ReviewBudgetMicros), Judgment: in.Judgment, OnRunInserted: adm.markInserted,
+		Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile, MaxBudgetUSD: microsToUSD(dc.ImplBudgetMicros + dc.ReviewBudgetMicros), Judgment: in.Judgment, InsertRun: adm.insertRun,
 		TaskID: taskIntID(&dc.Task),
 	})
 	if err != nil {

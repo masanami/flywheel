@@ -870,3 +870,23 @@ func TestTaskDocument_PluginLaunchCarriesTheChildInTheTaskDocument(t *testing.T)
 		t.Errorf("Brief = %q, want the task document with the source child", l.Brief)
 	}
 }
+
+// 同じ課題の多数のタスクの契約の実行を、1 回の委譲の段で同時に起動しても、上限の範囲内の数だけ、取りこぼさずに起動される。
+// 起動を許可する数え（run の記録の前後の二重計上）が、並行に始めた別のタスクの許可を誤って断らないことを、
+// 繰り返して確かめる。
+func TestMultiTask_ConcurrentLaunchesAreNotRefusedByDoubleCounting(t *testing.T) {
+	t.Parallel()
+	const n = 6
+	for i := 0; i < 20; i++ {
+		f := newMultiFixture(t, n)
+		var tasks []multiTask
+		for j := 0; j < n; j++ {
+			tasks = append(tasks, multiTask{key: "t" + strconv.Itoa(j)})
+		}
+		f.newMulti(t, "many", "P1", true, tasks...)
+		res := f.runDelegationStage(t, nil)
+		if len(f.client.starts) != n {
+			t.Fatalf("iteration %d: starts = %d, want %d (not_started = %+v)", i, len(f.client.starts), n, res.NotStarted)
+		}
+	}
+}

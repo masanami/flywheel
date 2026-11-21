@@ -200,8 +200,10 @@ type ContractStartInput struct {
 	Judgment JudgmentInvoker
 	// TaskID は起動するタスクの内部整数 ID。0 なら、起動できるタスクがちょうど 1 個の課題として、そのタスクを起動する。
 	TaskID int64
-	// OnRunInserted は start の run をストアに記録した直後に呼ぶ（nil なら呼ばない。同時委譲数の数えの二重計上を避けるため）。
-	OnRunInserted func()
+	// InsertRun は start の run をストアに記録する関数 insert を実行する（nil なら insert をそのまま実行する）。
+	// 同時委譲数の許可の数えは、ストアの run の数と、記録前の許可の数の和なので、記録の確定から許可の数の解放までの間に
+	// 別のタスクの許可が数えると、同じ run を 2 回数えて断る。insert と許可の数の解放を、許可の数えと同時に起きない 1 つの区間にする。
+	InsertRun func(insert func() (int64, error)) (int64, error)
 }
 
 func (in ContractStartInput) releaseSource() *contractReleaseSource {
@@ -666,12 +668,17 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if n, ok := parseCycleID(in.CycleID); ok {
 		cycleIDInt = &n
 	}
-	runIDInt, err := s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID, nil)
+	insert := func() (int64, error) {
+		return s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID, nil)
+	}
+	var runIDInt int64
+	if in.InsertRun != nil {
+		runIDInt, err = in.InsertRun(insert)
+	} else {
+		runIDInt, err = insert()
+	}
 	if err != nil {
 		return nil, err
-	}
-	if in.OnRunInserted != nil {
-		in.OnRunInserted()
 	}
 	// タスクの文面を、起動の実行の記録の置き場へ書き、その絶対パスを {task_file} に渡す（書けなければ起動せず、
 	// 起動できなかった run として記録する）。ファイルは消さない。
