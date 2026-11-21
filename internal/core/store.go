@@ -43,7 +43,7 @@ type Store struct {
 	// t.Parallel にできる。本番 API には注入口を露出しない。
 	actor *actorSourceFuncs
 
-	// fixWriters は衝突の解消の確かめ（J5）の結果を書く、宛先ごとの口（judgment_j5_fix.go）。nil の口は何も書かない。
+	// fixWriters は衝突の解消の確かめ（J5）の結果を書く、宛先ごとの口（judgment_j5_fix.go）。nil の口は何も書かない（統合先宛ては writeIntegrationFix を既定にする。反映先宛ては別の実装が足す）。
 	fixWriters j5FixWriters
 
 	// delegationWait は委譲の枠待ちの再評価の間隔のテスト用の差し替え。0 なら
@@ -179,7 +179,7 @@ func openExistingAt(dir string) (*Store, error) {
 	if err != nil {
 		return nil, wrapStoreErr(err)
 	}
-	return &Store{db: db, workspace: dir, file: info}, nil
+	return &Store{db: db, workspace: dir, file: info, fixWriters: j5FixWriters{Integration: writeIntegrationFix}}, nil
 }
 
 // OpenWorkspace は init 以外のコマンドが使うワークスペースの決定規則で
@@ -283,7 +283,7 @@ func openAtForInit(dir string) (*Store, bool, error) {
 	if err != nil {
 		return nil, false, wrapStoreErr(err)
 	}
-	return &Store{db: db, workspace: dir}, db.WasCreated(), nil
+	return &Store{db: db, workspace: dir, fixWriters: j5FixWriters{Integration: writeIntegrationFix}}, db.WasCreated(), nil
 }
 
 // EnsureWorkspaceGitignore は workspace/.flywheel/.gitignore が無ければ、

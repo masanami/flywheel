@@ -1171,8 +1171,8 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	// （確かめの結果で、済み・保留・着手中へ戻すのどれかを 1 つの書き込みで決める。afterContractRead が扱う）。
 	if (st.State == ContractStateFailed || st.State == ContractStateCancelled) && !c.landedStop(st.State) {
 		// 統合先を使う課題のタスクの実行が失敗・取り消しで終わったら、検証した中身と通す中身は無効にする（次の委譲の後に検証し直す）。
-		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = NULL, land_ref = NULL, land_delivered = 0
-			WHERE challenge_id = ? AND external_run_id = ? AND kind = 'task' AND (verified_ref IS NOT NULL OR land_ref IS NOT NULL)
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = NULL, fix_pending_ref = NULL, land_ref = NULL, land_delivered = 0
+			WHERE challenge_id = ? AND external_run_id = ? AND kind = 'task' AND (verified_ref IS NOT NULL OR land_ref IS NOT NULL OR fix_pending_ref IS NOT NULL)
 			AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND uses_integration = 1)`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
 			return err
 		}
@@ -1243,6 +1243,12 @@ func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contra
 				wait_hold_id = CASE WHEN ? = 'waiting' AND requested_kind IS ? AND requested_decider IS ? AND requested_text IS ? AND requested_resolvable_by IS ? THEN wait_hold_id ELSE NULL END WHERE id = ?`,
 			string(st.State), st.Summary, rk, rd, rt, rb, totalMicros, now, endedAt, string(st.State), rk, rd, rt, rb, c.Existing.ID); err != nil {
 			return err
+		}
+		if endedAt != nil {
+			// 契約の実行が終わったら、確かめ待ちの中身は要らない（確かめの対象は終わっていない実行だけ）。
+			if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET fix_pending_ref = NULL WHERE id = ? AND fix_pending_ref IS NOT NULL`, c.Existing.ID); err != nil {
+				return err
+			}
 		}
 	}
 	facts, err := encodeContractFacts(st.Facts)
