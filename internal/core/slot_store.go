@@ -183,8 +183,16 @@ const (
 	artifactKindCommit artifactKind = "commit"
 )
 
+// artifactKindValues は artifactKind の閉集合（画面へ出す順）。valid と ArtifactKindValues の正本。
+var artifactKindValues = []artifactKind{artifactKindPR, artifactKindBranch, artifactKindCommit}
+
 func (k artifactKind) valid() bool {
-	return k == artifactKindBranch || k == artifactKindPR || k == artifactKindCommit
+	for _, v := range artifactKindValues {
+		if k == v {
+			return true
+		}
+	}
+	return false
 }
 
 // artifactState は run_artifact.state（PR のときだけ持つ）。

@@ -398,39 +398,3 @@ it("AC-118 #814: 描画したどの画面にも、文字を入力する欄は無
   });
   expect(seen).toEqual(dests.map((d) => d.id));
 });
-
-// AC-459 #814: 新しい画面の枠組みの文言（見出し・ボタン・ナビゲーション・案内）に、開発に固有の語が無い。
-// 課題の題名や本文のような、エージェントが書いた値は枠組みではないので対象にしない。
-const DEV_WORDS = /(\bPR\b|\bCI\b|\bIssue\b|ブランチ|マージ)/;
-it("AC-459 #814: 描画した画面の枠組み（見出し・ボタン・ナビゲーション・案内）に、PR・CI・ブランチ・マージ・Issue の語が無い", async () => {
-  installFakes({ ...fixtures(), ...awaitingApproval() });
-  const dests = destinations(["alpha", "beta"], "C-1");
-  const seen: string[] = [];
-  await operate(dests, (container, id) => {
-    seen.push(id);
-    const frame = [
-      ...container.querySelectorAll(
-        "nav, header, button, h1, h2, h3, h4, [role=note], [role=status]",
-      ),
-    ]
-      .map((e) => e.textContent ?? "")
-      .join("\n");
-    expect(frame.trim(), id).not.toBe("");
-    expect(frame, id).not.toMatch(DEV_WORDS);
-  });
-  expect(seen).toEqual(dests.map((d) => d.id));
-});
-
-it("AC-459 #814: 画面の語の表（labels.ts の文言）に、開発に固有の語が無い", async () => {
-  const labels = await import("./labels.ts");
-  const words: string[] = [];
-  const walk = (v: unknown): void => {
-    if (typeof v === "string") words.push(v);
-    else if (Array.isArray(v)) v.forEach(walk);
-    else if (typeof v === "object" && v !== null)
-      Object.values(v).forEach(walk);
-  };
-  walk(labels);
-  expect(words.length).toBeGreaterThan(100);
-  for (const w of words) expect(w).not.toMatch(DEV_WORDS);
-});

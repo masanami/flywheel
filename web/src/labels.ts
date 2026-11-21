@@ -1,6 +1,7 @@
 // core が返す閉集合のコードを表示の文言に写す対応表。状態は UI で導かず、文言だけをここで持つ。
 
 import {
+  type ARTIFACT_KIND_CODES,
   type CHALLENGE_PROGRESS_CODES,
   type CONFLICT_FIX_TARGET_CODES,
   type DELEGATE_STATE_CODES,
@@ -113,6 +114,7 @@ type Verdict = (typeof VERDICT_CODES)[number];
 type DelegateState = (typeof DELEGATE_STATE_CODES)[number];
 type OperationKind = (typeof OPERATION_KIND_CODES)[number];
 type RequestedKind = (typeof REQUESTED_KIND_CODES)[number];
+type ArtifactKind = (typeof ARTIFACT_KIND_CODES)[number];
 type ExpectedKind = (typeof EXPECTED_KIND_CODES)[number];
 type ConflictFixTarget = (typeof CONFLICT_FIX_TARGET_CODES)[number];
 type OperationState = (typeof OPERATION_STATE_CODES)[number];
@@ -230,6 +232,19 @@ export const REQUESTED_KIND_LABELS: Record<RequestedKind, string> = {
   review: "レビュー",
   observe: "経過の確認",
 };
+
+// 成果物の種類（tasks[].artifacts[].kind）。知らない値は artifactKindLabel() が「成果物（値そのまま）」と出す。
+export const ARTIFACT_KIND_LABELS: Record<ArtifactKind, string> = {
+  pr: "プルリクエスト",
+  branch: "ブランチ",
+  commit: "コミット",
+};
+
+export function artifactKindLabel(kind: string): string {
+  return Object.hasOwn(ARTIFACT_KIND_LABELS, kind)
+    ? ARTIFACT_KIND_LABELS[kind as ArtifactKind]
+    : `成果物（${kind}）`;
+}
 
 // 不可逆操作の種類（operations[].kind）と状態（operations[].state）。
 export const OPERATION_KIND_LABELS: Record<OperationKind, string> = {

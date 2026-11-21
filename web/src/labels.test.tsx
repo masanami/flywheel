@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import {
+  ARTIFACT_KIND_CODES,
   CARD_ACTION_CODES,
   CARD_MODIFIER_CODES,
   CHALLENGE_PROGRESS_CODES,
@@ -21,6 +22,7 @@ import {
 } from "./api/types.gen.ts";
 import {
   ACTION_LABELS,
+  ARTIFACT_KIND_LABELS,
   CARD_ACTIONS,
   CARD_MODIFIERS,
   CARD_STATES,
@@ -53,6 +55,7 @@ import {
   TASK_PROGRESS_LABELS,
   VERDICT_LABELS,
   WHO_ME_TTY,
+  artifactKindLabel,
   label,
 } from "./labels.ts";
 import { emptyStatus } from "./testing/fakes.ts";
@@ -275,9 +278,21 @@ it("AC-106 #927: 語の表の語に「端末」は無い", () => {
   expect(all).not.toContain("端末");
 });
 
+it("#963: 成果物の種類の語（プルリクエスト・ブランチ・コミット）と、知らない値の出し方", () => {
+  expect(ARTIFACT_KIND_LABELS).toEqual({
+    pr: "プルリクエスト",
+    branch: "ブランチ",
+    commit: "コミット",
+  });
+  expect(artifactKindLabel("pr")).toBe("プルリクエスト");
+  expect(artifactKindLabel("zzz")).toBe("成果物（zzz）");
+  expect(artifactKindLabel("constructor")).toBe("成果物（constructor）");
+});
+
 it("#964: 委譲先が求めていること・衝突の解消の宛先・予想の種類の全部の値に語がある（core の閉集合から生成した値の一覧で漏れを検出する）", () => {
   coversAll(REQUESTED_KIND_LABELS, REQUESTED_KIND_CODES);
   coversAll(CONFLICT_FIX_TARGET_LABELS, CONFLICT_FIX_TARGET_CODES);
+  coversAll(ARTIFACT_KIND_LABELS, ARTIFACT_KIND_CODES);
   coversAll(EXPECTED_KIND_LABELS, EXPECTED_KIND_CODES);
   expect(EXPECTED_KIND_LABELS).toEqual({
     ui: "画面",
