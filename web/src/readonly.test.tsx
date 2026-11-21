@@ -219,6 +219,7 @@ function awaitingApproval(): Record<string, unknown> {
       approvals: [],
       card,
       challenge,
+      conflict_fixes: [],
       direct_completions: [],
       followups: [],
       holds: [],

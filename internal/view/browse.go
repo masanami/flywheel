@@ -64,22 +64,23 @@ type ListCardResponse struct {
 
 // ShowCardResponse は `GET …/challenges/{id}` の本文。ShowResponse の最上位に card を足した形。
 type ShowCardResponse struct {
-	Approvals         []Approval         `json:"approvals"`
-	Card              Card               `json:"card"`
-	Challenge         ShowChallenge      `json:"challenge"`
-	DirectCompletions []DirectCompletion `json:"direct_completions"`
-	Followups         []Followup         `json:"followups"`
-	Holds             []Hold             `json:"holds"`
-	Operations        []Operation        `json:"operations"`
-	Pairs             []StagePair        `json:"pairs"`
-	Plans             []PlanDetail       `json:"plans"`
-	Runs              []Run              `json:"runs"`
-	SourceBinding     *SourceBinding     `json:"source_binding"`
-	SourceChildren    []SourceChild      `json:"source_children"`
-	Stages            Stages             `json:"stages"`
-	Tasks             []Task             `json:"tasks"`
-	Tree              TreeChallenge      `json:"tree"`
-	Waiting           Waiting            `json:"waiting"`
+	Approvals         []Approval          `json:"approvals"`
+	Card              Card                `json:"card"`
+	Challenge         ShowChallenge       `json:"challenge"`
+	ConflictFixes     []PassedConflictFix `json:"conflict_fixes"`
+	DirectCompletions []DirectCompletion  `json:"direct_completions"`
+	Followups         []Followup          `json:"followups"`
+	Holds             []Hold              `json:"holds"`
+	Operations        []Operation         `json:"operations"`
+	Pairs             []StagePair         `json:"pairs"`
+	Plans             []PlanDetail        `json:"plans"`
+	Runs              []ShowRun           `json:"runs"`
+	SourceBinding     *SourceBinding      `json:"source_binding"`
+	SourceChildren    []SourceChild       `json:"source_children"`
+	Stages            Stages              `json:"stages"`
+	Tasks             []Task              `json:"tasks"`
+	Tree              TreeChallenge       `json:"tree"`
+	Waiting           Waiting             `json:"waiting"`
 }
 
 // WaitingChallenge は待っている相手の課題 1 件（status は課題の状態の値）。
@@ -107,7 +108,7 @@ func fromWaitingChallenges(ws []core.WaitingChallenge) []WaitingChallenge {
 func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card, tree core.TreeChallenge) ShowCardResponse {
 	s := FromChallengeDetail(d)
 	return ShowCardResponse{
-		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: s.Holds,
+		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, ConflictFixes: s.ConflictFixes, DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: s.Holds,
 		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
 		Tasks:   s.Tasks,
 		Tree:    FromTreeChallenge(tree),

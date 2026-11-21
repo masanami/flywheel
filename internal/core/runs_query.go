@@ -39,6 +39,9 @@ type Run struct {
 	Error string
 	// TaskID は run が結び付くタスクの ID（"T-<n>"）。課題の単位の実行と過去の run は nil。
 	TaskID *string
+	// FixPendingRef は、この run が始めた契約の実行が持つ確かめ待ちの中身（衝突の解消の確かめを待っている中身の識別）。
+	// 課題の詳細（show）だけが埋める。無ければ nil。
+	FixPendingRef *string
 }
 
 // RunListOptions は ListRuns の絞り込み条件。
