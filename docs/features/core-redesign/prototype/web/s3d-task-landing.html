@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>タスクの詳細（統合先へ入れている）（S3d の試作）</title>
+<link rel="stylesheet" href="proto.css">
+<style>.chg{outline:2px dashed #c77700;outline-offset:3px}.chgnote{background:#fff4dd;border-left:4px solid #c77700;padding:6px 10px;margin:8px 0;font-size:13px}.kv td{padding:3px 10px 3px 0;vertical-align:top}.old{color:#888;text-decoration:line-through}</style>
+</head>
+<body class="chat-off">
+<div class="proto-note">区切り S3d の試作です。データは見本で、ボタンは画面の行き来だけをします。<b>橙の点線の枠</b>が、いまの画面から変わる所です。<a href="s3d-index.html">場面の一覧へ</a></div>
+<div class="shell">
+<nav class="rail"><a class="agent on" href="s3d-now.html" title="Tom">T<span class="badge">1</span><small>Tom</small></a></nav>
+<div class="shell-main">
+<div class="top"><span class="ws">Tom</span><nav><a href="s3d-now.html" class="">いま進められること</a><a href="s3d-issues.html" class="on">課題</a><a href="#" class="">フォローアップ</a><a href="#" class="">サイクル</a></nav><span class="cycle"><span class="dot idle"></span>サイクル: 止まっている</span></div>
+<div class="layout"><main>
+
+<div class="crumb"><a href="s3d-issues.html">課題</a> › <a href="s3d-detail.html">設定の読み込みの誤りを、起動のときに知らせる</a> ›</div>
+<h1>③ 作業場所の片付け</h1>
+<div class="meta"><span>状態 <span class="pill run">実行中</span> <span class="chg">統合中</span></span><span>前提 <b>① 仕様と設計</b>（済み）</span><span class="chg">費用 <b>5.6 USD</b> ／ 枠 実装 <b>8 USD</b>・レビュー対応 <b>3 USD</b></span></div>
+<div class="cols"><div><div class="box"><h3>このタスクでやること</h3>委譲先の開発のフローに、前の成果物を任意の入力として足す。入力があれば、新しく作らずにそこで作業を続ける。
+<h3>完了条件</h3><ul><li>入力があるとき、同じ成果物に変更が積まれる</li><li>入力が無いとき、いままでどおり新しく始まる</li></ul>
+<h3>やらないこと</h3>いまの呼び出し方を変えない。</div>
+<div class="box"><h3>実行の記録</h3><table><tr><th>種類</th><th>結果</th><th>費用</th><th>始まり</th></tr><tr><td>委譲</td><td>—</td><td>4.1 USD</td><td>10:02</td></tr></table></div></div><div>
+<div class="box chg"><h3>委譲先の実行</h3><table class="kv"><tr><td>状態</td><td><span class="pill wait">待機中</span></td></tr><tr><td>求めていること</td><td>レビュー</td></tr><tr><td>委譲先の要約</td><td>古い作業場所を片付けてから始める処理を足した。品質の検査は通った。</td></tr></table></div>
+<div class="box chg"><h3>成果物</h3><table><tr><th>種類</th><th>成果物</th><th>状態</th></tr><tr><td>変更の依頼</td><td><a href="#">https://example.com/changes/745</a></td><td>open</td></tr><tr><td>統合先</td><td><code>integration/c-701</code> <span class="pill">統合先</span></td><td>—</td></tr></table></div>
+<div class="box chg"><h3>委譲先が値で返したこと</h3><table class="kv"><tr><td>自己レビュー</td><td>実行した</td></tr></table></div>
+<div class="box chg"><h3>検証</h3><table class="kv"><tr><td>判定</td><td><span class="pill done">満たした</span>（11:40）</td></tr><tr><td>理由</td><td>完了条件の 2 つとも、成果物の差分と試験で確かめられた。</td></tr><tr><td>統合先へ入れる進み</td><td>統合中</td></tr></table>
+<div class="hint">進みの語は 3 つ: 検証済み → 統合中 → 統合済み</div></div>
+</div></div>
+
+</main></div></div></div>
+</body></html>

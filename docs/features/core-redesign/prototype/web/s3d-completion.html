@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>完了承認画面（S3d の試作）</title>
+<link rel="stylesheet" href="proto.css">
+<style>.chg{outline:2px dashed #c77700;outline-offset:3px}.chgnote{background:#fff4dd;border-left:4px solid #c77700;padding:6px 10px;margin:8px 0;font-size:13px}.kv td{padding:3px 10px 3px 0;vertical-align:top}.old{color:#888;text-decoration:line-through}</style>
+</head>
+<body class="chat-off">
+<div class="proto-note">区切り S3d の試作です。データは見本で、ボタンは画面の行き来だけをします。<b>橙の点線の枠</b>が、いまの画面から変わる所です。<a href="s3d-index.html">場面の一覧へ</a></div>
+<div class="shell">
+<nav class="rail"><a class="agent on" href="s3d-now.html" title="Tom">T<span class="badge">1</span><small>Tom</small></a></nav>
+<div class="shell-main">
+<div class="top"><span class="ws">Tom</span><nav><a href="s3d-now.html" class="">いま進められること</a><a href="s3d-issues.html" class="on">課題</a><a href="#" class="">フォローアップ</a><a href="#" class="">サイクル</a></nav><span class="cycle"><span class="dot idle"></span>サイクル: 止まっている</span></div>
+<div class="layout"><main>
+
+<div class="crumb"><a href="s3d-issues.html">課題</a> › <a href="s3d-detail.html">差し戻しの後も、同じ成果物で作業を続けられるようにする</a> ›</div>
+<h1>完了の承認: 差し戻しの後も、同じ成果物で作業を続けられるようにする</h1>
+<div class="meta"><span>タスク <b>3 / 3 済み</b></span><span>統合先 <b>使う</b></span><span>費用 <b>15.5 / 24 USD</b></span></div>
+<div class="chgnote">新しい画面です。いまは、課題の詳細の中の小さな区画（要約とボタン）で承認しています。</div>
+<div class="cols"><div>
+<div class="box"><h3>確かめの結果 <span class="hint">（統合先の全体を、完了の検証の判断点が確かめました）</span></h3>
+<table><tr><th>完了したら見えるもの</th><th>確かめた結果（実物）</th></tr>
+<tr><td>差し戻した後の作業が、前と同じ成果物に積まれる</td><td>統合先で、差し戻しを 1 回通した。2 回目の変更が、同じ成果物に積まれた</td></tr>
+<tr><td>残った作業場所で、次の作業が止まらない</td><td>古い作業場所を残したまま始めて、委譲先が片付けてから進んだ</td></tr></table>
+<h3>反映の後に確かめる条件</h3><ul><li>反映の後に、実際の差し戻しで同じ成果物が続くかを 1 回確かめる</li></ul></div>
+<div class="box"><h3>反映するもの</h3>
+<table class="kv"><tr><td>反映の操作</td><td>統合先の全体を、反映先へ上げる（<a href="#">成果物を開く</a>）</td></tr>
+<tr><td>いまの中身</td><td><code>a3f9c21</code></td></tr>
+<tr><td>統合先</td><td><code>integration/c-702</code></td></tr></table>
+<h3>通した衝突の解消（1 件）</h3>
+<table><tr><th>宛先</th><th>直したファイル</th></tr><tr><td>統合先（③ 入力を受ける）</td><td><code>runtime/internal/cli/ticket.go</code></td></tr></table>
+<div class="hint">委譲先が衝突を直した差分を、完了の検証の判断点が確かめて、検証し直さずに通したものです（区切り S3c の値。通したものが無ければ、この区画は出ません）。</div></div>
+<div class="box"><h3>タスク <span class="pill done">3 / 3 済み</span></h3>
+<table><tr><th>タスク</th><th>状態</th><th>使った額 / 枠</th></tr>
+<tr><td><a href="s3d-task-landing.html">① 仕様と設計</a></td><td>済み・統合済み</td><td>3.2 / 6 USD</td></tr>
+<tr><td><a href="s3d-task-landing.html">② 入力を受ける</a></td><td>済み・統合済み</td><td>7.9 / 10 USD</td></tr>
+<tr><td><a href="s3d-task-landing.html">③ 結合の確かめ</a></td><td>済み・統合済み</td><td>4.4 / 8 USD</td></tr></table></div>
+</div><div>
+<div class="box wait"><h3>承認</h3>
+<div class="actions" style="margin-top:0"><a class="btn primary" href="s3d-completion-approved.html">完了を承認する</a></div>
+<div class="hint">このボタンは、完了だけを記録します。反映先へ入れる承認は、対話で行います。</div>
+<h3>反映まで承認するとき</h3>
+<div class="hint">対話で、オーケストレーターに「完了を承認します。反映先へ入れてよいです」と伝える</div>
+<h3>差し戻すとき</h3>
+<div class="hint">対話で、オーケストレーターに、直してほしい点を伝える</div></div>
+<div class="box"><h3>フォローアップ <span class="pill">未 2</span></h3>
+<ul><li>入力の名前をそろえる</li><li>文言を見直す</li></ul>
+<div class="hint">未のフォローアップが残っていても、完了にできます。後で一覧から整理します。</div></div>
+</div></div>
+
+</main></div></div></div>
+</body></html>

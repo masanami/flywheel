@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>課題（S3d の試作）</title>
+<link rel="stylesheet" href="proto.css">
+<style>.chg{outline:2px dashed #c77700;outline-offset:3px}.chgnote{background:#fff4dd;border-left:4px solid #c77700;padding:6px 10px;margin:8px 0;font-size:13px}.kv td{padding:3px 10px 3px 0;vertical-align:top}.old{color:#888;text-decoration:line-through}</style>
+</head>
+<body class="chat-off">
+<div class="proto-note">区切り S3d の試作です。データは見本で、ボタンは画面の行き来だけをします。<b>橙の点線の枠</b>が、いまの画面から変わる所です。<a href="s3d-index.html">場面の一覧へ</a></div>
+<div class="shell">
+<nav class="rail"><a class="agent on" href="s3d-now.html" title="Tom">T<span class="badge">1</span><small>Tom</small></a></nav>
+<div class="shell-main">
+<div class="top"><span class="ws">Tom</span><nav><a href="s3d-now.html" class="">いま進められること</a><a href="s3d-issues.html" class="on">課題</a><a href="#" class="">フォローアップ</a><a href="#" class="">サイクル</a></nav><span class="cycle"><span class="dot idle"></span>サイクル: 止まっている</span></div>
+<div class="layout"><main>
+
+<h1>課題</h1><div class="legend"><span class="pill run chg">実行中</span><span class="pill wait chg">あなた待ち</span><span class="pill next chg">次に実行</span><span class="pill pre chg">前提待ち</span><span class="pill done">済み</span></div>
+<div class="chgnote">変わる所: ①札の語を、動詞の形から名詞の形に改めます（走っている→実行中、あなたを待っている→あなた待ち、次に走る→次に実行、前提を待っている→前提待ち）。②「実行中」の箱に、細かい進み（作業中／検証待ち／統合中）を添えます。③全部のタスクが済んだ後の課題の見出しに、「反映中」「全体の確認中」を出します（いまは、何も動いていないように見えます）。</div>
+<div class="box"><h3><a href="s3d-detail.html">設定の読み込みの誤りを、起動のときに知らせる</a> <span class="pill run">実行中 2</span></h3><div class="meta"><span>タスク <b>1 / 4</b></span><span>費用 <b>8.4 / 30 USD</b></span><span>統合先 <b>使う</b></span></div><div class="tree"><div style="position:relative;width:722px;height:146px"><svg class="edges" width="722" height="146"><path d="M202,73 C234,73 234,39 266,39" /><path d="M202,73 C234,73 234,107 266,107" /><path d="M456,39 C488,39 488,73 520,73" /><path d="M456,107 C488,107 488,73 520,73" /></svg><a class="task done" href="#" style="position:absolute;left:12px;top:46px;width:190px;height:54px">① 仕様と設計<small>済み</small></a><a class="task run chg" href="s3d-task-running.html" style="position:absolute;left:266px;top:12px;width:190px;height:54px">② 入力を受ける<small>実行中・作業中</small></a><a class="task run chg" href="s3d-task-landing.html" style="position:absolute;left:266px;top:80px;width:190px;height:54px">③ 作業場所の片付け<small>実行中・統合中</small></a><a class="task pre" href="#" style="position:absolute;left:520px;top:46px;width:190px;height:54px">④ 結合の確かめ<small>前提待ち</small></a></div></div></div>
+<div class="box"><h3><a href="#">記録の表示に、失敗の理由を添える</a> <span class="pill run">実行中 1</span></h3><div class="meta"><span>タスク <b>1 / 2</b></span><span>費用 <b>4.0 / 8 USD</b></span><span>統合先 <b>使う</b></span></div><div class="tree"><div style="position:relative;width:468px;height:78px"><svg class="edges" width="468" height="78"><path d="M202,39 C234,39 234,39 266,39" /></svg><a class="task done" href="#" style="position:absolute;left:12px;top:12px;width:190px;height:54px">① 理由の形を決める<small>済み</small></a><a class="task run chg" href="#" style="position:absolute;left:266px;top:12px;width:190px;height:54px">② 表示に出す<small>実行中・検証待ち</small></a></div></div></div>
+<div class="box"><h3><a href="#">検証の差分に、説明の文を添える</a> <span class="pill run chg">反映中</span></h3><div class="meta"><span>タスク <b>2 / 2</b></span><span>費用 <b>6.3 / 8 USD</b></span><span>統合先 <b>使う</b></span></div><div class="tree"><div style="position:relative;width:468px;height:78px"><svg class="edges" width="468" height="78"><path d="M202,39 C234,39 234,39 266,39" /></svg><a class="task done" href="#" style="position:absolute;left:12px;top:12px;width:190px;height:54px">① 文の形を決める<small>済み</small></a><a class="task done" href="#" style="position:absolute;left:266px;top:12px;width:190px;height:54px">② 差分に添える<small>済み</small></a></div></div></div>
+<div class="box"><h3><a href="s3d-detail.html">差し戻しの後も、同じ成果物で作業を続けられるようにする</a> <span class="pill run chg">全体の確認中</span></h3><div class="meta"><span>タスク <b>3 / 3</b></span><span>費用 <b>15.5 / 24 USD</b></span><span>統合先 <b>使う</b></span></div><div class="tree"><div style="position:relative;width:722px;height:78px"><svg class="edges" width="722" height="78"><path d="M202,39 C234,39 234,39 266,39" /><path d="M456,39 C488,39 488,39 520,39" /></svg><a class="task done" href="#" style="position:absolute;left:12px;top:12px;width:190px;height:54px">① 仕様と設計<small>済み</small></a><a class="task done" href="#" style="position:absolute;left:266px;top:12px;width:190px;height:54px">② 入力を受ける<small>済み</small></a><a class="task done" href="#" style="position:absolute;left:520px;top:12px;width:190px;height:54px">③ 結合の確かめ<small>済み</small></a></div></div></div>
+
+</main></div></div></div>
+</body></html>
