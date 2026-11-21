@@ -189,6 +189,7 @@ export const PHASE_LABELS: Record<TaskPhase, string> = {
 export const TASK_PROGRESS_LABELS: Record<TaskProgress, string> = {
   working: "作業中",
   verifying: "検証待ち",
+  verified: "検証済み",
   landing: "統合中",
 };
 

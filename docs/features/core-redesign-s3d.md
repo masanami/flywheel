@@ -6,7 +6,7 @@ core の見直し（`docs/features/core-redesign.md`）の区切り S3d。区切
 
 - 完了承認画面を作る（課題の単位の確かめの結果・反映するもの・タスク・フォローアップを 1 画面で見る）。
 - タスクの詳細に、委譲先の実行の状態・成果物・委譲先が値で返したこと・タスクの検証の結果・枠と使った額を出す。
-- タスクのツリーに、タスクと課題の、細かい進み（作業中・検証待ち・統合中／反映中・全体の確認中）を出す。
+- タスクのツリーに、タスクと課題の、細かい進み（作業中・検証待ち・検証済み・統合中／反映中・全体の確認中）を出す。
 - 区切り S2c の画面で、仕様に残した 5 点（flywheel#840）を決めて直す。
 
 この文書は、S3c（`core-redesign.md` の実装対象）と並べて進めるために、別の文書にしてある（オーナーの決定 2026-11-21）。S3d を main に入れるときに、`core-redesign.md` へ畳む。
@@ -66,10 +66,10 @@ S3b で、計画がタスクを分けた課題が進むようになった。画�
 
 ### タスクのツリー
 
-- [ ] ツリーの API の `tasks[]` の要素に、`progress` を足す。表示の区分（`phase`）が `running` のタスクの、細かい進み。タスクの状態が着手中なら `working`（語は「作業中」）。タスクの状態が検証中で、最後の契約の実行に `verified_ref` が無ければ `verifying`（語は「検証待ち」。統合先を使わない課題の、検証中のタスクも、これ）。検証中で、`verified_ref` があれば `landing`（検証を通って、統合先へ入れている。語は「統合中」）。`phase` が `running` でないタスク（あなたを待っているタスクを含む）は `null`。`phase` の値の集合は変えない。
+- [ ] ツリーの API の `tasks[]` の要素に、`progress` を足す。表示の区分（`phase`）が `running` のタスクの、細かい進み。タスクの状態が着手中なら `working`（語は「作業中」）。タスクの状態が検証中で、最後の契約の実行に `verified_ref` が無ければ `verifying`（語は「検証待ち」。統合先を使わない課題の、検証中のタスクも、これ）。統合先を使う課題で、検証中で、最後の契約の実行が終わっておらず `verified_ref` があり `land_ref` が無ければ `verified`（検証を通っただけで、統合先へ入れる依頼はまだ。語は「検証済み」。タスクの詳細の `landing` の `verified` と同じ）。同じ条件で `land_ref` があれば `landing`（統合先へ入れる依頼を出している。語は「統合中」。詳細の `landing` の `sent` と同じ）。ツリーの `progress` の `verified`・`landing` は、詳細の `landing` と同じ決め方・同じ語にする（決定 2026-11-21 #964: 検証を通っただけのタスクが、ツリーでは「統合中」、詳細では「検証済み」と出ていた食い違いを、詳細の側に寄せて解く）。`phase` が `running` でないタスク（あなたを待っているタスクを含む）は `null`。`phase` の値の集合は変えない。
 - [ ] ツリーの API の課題の要素に、`progress` を足す。統合先を使う課題だけに出す。課題の状態が検証中なら `checking`（課題の単位の確かめを待っている。統合先を使う課題が検証中になるのは、この確かめのときだけ）。課題の状態が着手中で、取りやめを除く全部のタスクが済みで、上げる依頼（`contract_run` の `kind` が `reflect`）の、終わっていない行があれば `reflecting`。それ以外は `null`。統合先を使わない課題は、タスクが 1 個で、タスクの `progress` で足りるので、常に `null`。
 - [ ] 値は core が決める（画面は、状態から導かない。S2c の「表示の区分と件数を core が決める」と同じ）。値の集合は、`internal/view` の閉集合に足し、画面の語の表（`labels.ts`）に、対応する語を足す。
-- [ ] ツリーの箱に、`progress` の語を出す（「作業中」「検証待ち」「統合中」）。課題の枠の見出しに、課題の `progress` の語を出す（`reflecting` は「反映中」、`checking` は「全体の確認中」）。
+- [ ] ツリーの箱に、`progress` の語を出す（「作業中」「検証待ち」「検証済み」「統合中」）。課題の枠の見出しに、課題の `progress` の語を出す（`reflecting` は「反映中」、`checking` は「全体の確認中」）。
 - [ ] 課題の詳細のツリーにも、同じ語を出す。
 
 ### S3c の値を画面に出す
@@ -143,7 +143,7 @@ S3c が、課題の詳細の API に足す値（根の `conflict_fixes`〔通し
 }
 ```
 
-ツリーの API（`GET /api/v1/workspaces/{name}/tree`）に足すキー: `tasks[]` の要素に `progress`（`working`・`verifying`・`landing`・`null`）。課題の要素に `progress`（`reflecting`・`checking`・`null`）。
+ツリーの API（`GET /api/v1/workspaces/{name}/tree`）に足すキー: `tasks[]` の要素に `progress`（`working`・`verifying`・`verified`・`landing`・`null`）。課題の要素に `progress`（`reflecting`・`checking`・`null`）。
 
 ## クリティカル設計決定
 
@@ -309,7 +309,8 @@ S3c が、課題の詳細の API に足す値（根の `conflict_fixes`〔通し
 - [ ] 着手中で、委譲先が進めているタスクの `progress` は `working` である。
 - [ ] 検証中で、最後の契約の実行に `verified_ref` が無いタスクの `progress` は `verifying` である。
 - [ ] 統合先を使わない課題の、検証中のタスクの `progress` は `verifying` である。
-- [ ] 検証中で、最後の契約の実行に `verified_ref` があるタスクの `progress` は `landing` である。
+- [ ] 統合先を使う課題の、検証中で、最後の契約の実行が終わっておらず `verified_ref` があり `land_ref` が無いタスクの `progress` は `verified` である。
+- [ ] 同じ条件で `land_ref` があるタスクの `progress` は `landing` である。最後の契約の実行が終わっているタスクの `progress` は `verifying` である。
 - [ ] 答えていないオーナー宛ての保留があるタスク（`phase` が `waiting`）の `progress` は `null` である。
 - [ ] 済みのタスクの `progress` は `null` である。
 - [ ] `progress` を足しても、タスクの `phase` の値は、S3b と同じである（検証中のタスクは `running`）。
@@ -319,6 +320,7 @@ S3c が、課題の詳細の API に足す値（根の `conflict_fixes`〔通し
 - [ ] 統合先を使わない課題が検証中のとき、課題の `progress` は `null` である。
 - [ ] 課題の画面のツリーで、`progress` が `working` の箱に、「作業中」が出る。
 - [ ] `progress` が `verifying` の箱に、「検証待ち」が出る。
+- [ ] `progress` が `verified` の箱に、「検証済み」が出る。
 - [ ] `progress` が `landing` の箱に、「統合中」が出る。
 - [ ] 課題の `progress` が `reflecting` のとき、課題の枠の見出しに、「反映中」が出る。
 - [ ] 課題の `progress` が `checking` のとき、課題の枠の見出しに、「全体の確認中」が出る。
@@ -329,7 +331,7 @@ S3c が、課題の詳細の API に足す値（根の `conflict_fixes`〔通し
 - [ ] 画面の語の表に、「走っている」の語は無い。
 - [ ] 画面の文と案内の文に、「端末」の語は無い。
 - [ ] 課題の詳細のツリーの箱にも、`progress` の語が出る。
-- [ ] 語の表に、`progress` の値の全部（タスクの 3 つ・課題の 2 つ）の語がある。
+- [ ] 語の表に、`progress` の値の全部（タスクの 4 つ・課題の 2 つ）の語がある。
 
 ### S2c の画面で仕様に残した点
 
