@@ -7,7 +7,7 @@ import type { TreeTask } from "../api/types.gen.ts";
 export type TreeNode = Pick<
   TreeTask,
   "key" | "title" | "depends_on" | "phase"
-> & { id?: string | null };
+> & { id?: string | null; progress?: string | null };
 
 export const BOX_W = 190;
 export const BOX_H = 54;
