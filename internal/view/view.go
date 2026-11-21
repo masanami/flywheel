@@ -562,10 +562,82 @@ type ListResponse struct {
 	Challenges []Challenge `json:"challenges"`
 }
 
+// ShowRun は show（UI の詳細の API を含む）の runs[] の要素。Run の各キーに fix_pending_ref を足した形
+// （`runs` コマンドと run の一覧の API の形は変えない）。
+type ShowRun struct {
+	ChallengeID    *string  `json:"challenge_id"`
+	CostSource     *string  `json:"cost_source"`
+	CostUSD        *float64 `json:"cost_usd"`
+	CycleBudgetUSD *float64 `json:"cycle_budget_usd"`
+	CycleID        *string  `json:"cycle_id"`
+	EndedAt        *string  `json:"ended_at"`
+	Error          *string  `json:"error"`
+	// FixPendingRef は、この run が始めた契約の実行が持つ確かめ待ちの中身。無ければ null。
+	FixPendingRef   *string `json:"fix_pending_ref"`
+	FlywheelVersion *string `json:"flywheel_version"`
+	ID              string  `json:"id"`
+	Judgment        *string `json:"judgment"`
+	Kind            string  `json:"kind"`
+	MaxBudgetUSD    float64 `json:"max_budget_usd"`
+	RateLimited     bool    `json:"rate_limited"`
+	Result          *string `json:"result"`
+	SessionID       *string `json:"session_id"`
+	StartedAt       string  `json:"started_at"`
+	TaskID          *string `json:"task_id"`
+}
+
+// FromShowRuns は課題の詳細の run の一覧を変換する（空でも `[]`）。
+func FromShowRuns(rs []core.Run) []ShowRun {
+	out := make([]ShowRun, 0, len(rs))
+	for _, r := range rs {
+		v := FromRun(r)
+		out = append(out, ShowRun{
+			ChallengeID: v.ChallengeID, CostSource: v.CostSource, CostUSD: v.CostUSD, CycleBudgetUSD: v.CycleBudgetUSD, CycleID: v.CycleID,
+			EndedAt: v.EndedAt, Error: v.Error, FixPendingRef: r.FixPendingRef, FlywheelVersion: v.FlywheelVersion, ID: v.ID, Judgment: v.Judgment,
+			Kind: v.Kind, MaxBudgetUSD: v.MaxBudgetUSD, RateLimited: v.RateLimited, Result: v.Result, SessionID: v.SessionID,
+			StartedAt: v.StartedAt, TaskID: v.TaskID,
+		})
+	}
+	return out
+}
+
+// PassedConflictFix は通した衝突の解消 1 件（show の conflict_fixes[] の要素）。承認の要約の ConflictFix（取り込みのマージごとの、
+// 直したファイル）とは別の型。
+type PassedConflictFix struct {
+	// At は作業ログの記録の時刻。
+	At string `json:"at"`
+	// Files は直したファイルの名前の配列。
+	Files   []string `json:"files"`
+	FromRef string   `json:"from_ref"`
+	// OperationID は反映先宛てのとき反映の操作の ID。統合先宛てのとき null。
+	OperationID *string `json:"operation_id"`
+	RunID       string  `json:"run_id"`
+	// Target は `integration`（統合先宛て）か `release`（反映先宛て）。
+	Target string `json:"target"`
+	// TaskID は統合先宛てのときタスクの ID。反映先宛てのとき null。
+	TaskID *string `json:"task_id"`
+	ToRef  string  `json:"to_ref"`
+}
+
+// FromConflictFixes は通した衝突の解消の一覧を変換する（空でも `[]`）。
+func FromConflictFixes(fs []core.ConflictFixPassed) []PassedConflictFix {
+	out := make([]PassedConflictFix, 0, len(fs))
+	for _, f := range fs {
+		files := append([]string{}, f.Files...)
+		out = append(out, PassedConflictFix{
+			At: FormatTimestamp(f.At), Files: files, FromRef: f.FromRef, OperationID: f.OperationID, RunID: f.RunID,
+			Target: f.Target, TaskID: f.TaskID, ToRef: f.ToRef,
+		})
+	}
+	return out
+}
+
 // ShowResponse は `show` の成功の形。
 type ShowResponse struct {
 	Approvals []Approval    `json:"approvals"`
 	Challenge ShowChallenge `json:"challenge"`
+	// ConflictFixes は通した衝突の解消（古い順。無ければ []）。
+	ConflictFixes []PassedConflictFix `json:"conflict_fixes"`
 	// DirectCompletions は親が直接行った完了の記録（古い順。無ければ []）。1 件以上あることが「親が直接行った」印。
 	DirectCompletions []DirectCompletion `json:"direct_completions"`
 	// Followups は課題のフォローアップ（状態を問わず全部。無ければ []）。
@@ -577,7 +649,7 @@ type ShowResponse struct {
 	// ReleaseHeadChanges は承認待ちの release のうち、PR の head が J5 の検証の head から動いたものの評価
 	// （CLI の show だけが足す。GitHub を読めなかった release・head が動いていない release は載せない。無ければ出さない）。
 	ReleaseHeadChanges []ReleaseHeadChange `json:"release_head_changes,omitempty"`
-	Runs               []Run               `json:"runs"`
+	Runs               []ShowRun           `json:"runs"`
 	SourceBinding      *SourceBinding      `json:"source_binding"`
 	SourceChildren     []SourceChild       `json:"source_children"`
 	Stages             Stages              `json:"stages"`
@@ -590,13 +662,14 @@ func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 	return ShowResponse{
 		Approvals:         FromApprovals(d.Approvals),
 		Challenge:         FromShowChallenge(d),
+		ConflictFixes:     FromConflictFixes(d.ConflictFixes),
 		DirectCompletions: FromDirectCompletions(d.DirectCompletions),
 		Followups:         FromFollowups(d.Followups),
 		Holds:             FromHolds(d.Holds),
 		Operations:        FromOperations(d.Operations),
 		Pairs:             FromPairs(core.Pairs(d.Expected, d.Actual)),
 		Plans:             FromPlans(d.Plans),
-		Runs:              FromRuns(d.Runs),
+		Runs:              FromShowRuns(d.Runs),
 		SourceBinding:     FromSourceBinding(d.SourceBinding),
 		SourceChildren:    FromSourceChildren(d.SourceChildren),
 		Stages:            FromStages(d.StageFields, d.IssuesAnswer),
