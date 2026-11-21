@@ -106,7 +106,8 @@ type j6Context struct {
 	Activities        []j6ActivityRow
 	ActivityCut       int
 	// ConflictFixes は衝突の解消の確かめが通した記録（古い順）。統合先宛ては entity=task の作業ログに載るので、
-	// 課題の作業ログの区画（entity=challenge・operation）には入らない。
+	// 課題の作業ログの区画（entity=challenge・operation）には入らず、この区画だけで渡す。反映先宛ては
+	// entity=operation の作業ログに載るので、作業ログの区画とこの区画の両方に出る。
 	ConflictFixes []ConflictFixPassed
 	Runs          []runRow
 	// Followups はこの課題にぶら下がる followup の行（状態を問わない）。ID の昇順。
@@ -457,7 +458,8 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 
 	if len(jc.ConflictFixes) > 0 {
 		b.Reset()
-		b.WriteString("flywheel が差分で確かめ、「満たした」として通した衝突の解消（古い順）。ここにあるものは検証済みである:\n")
+		b.WriteString("flywheel が差分で確かめ、「満たした」として通した衝突の解消の記録（古い順）。各行は、その時点の中身（→ の後の中身）を確かめて通した記録である。" +
+			"通らなかった確かめ（差し戻し・判断できない）はこの区画に載らない。通した後に中身が変わりうるので、最終的に入った中身と同じとは限らない:\n")
 		for _, f := range jc.ConflictFixes {
 			target, id := "統合先", ""
 			if f.TaskID != nil {

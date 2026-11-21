@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,27 @@ func TestLoadJ6Context_CarriesIntegrationConflictFixPassed(t *testing.T) {
 			got = sec.Content
 		}
 	}
-	for _, want := range []string{"統合先", "aaa111", "bbb222", "go.sum", "R-5"} {
+	for _, want := range []string{"統合先", "T-" + strconv.FormatInt(tid, 10), "aaa111", "bbb222", "go.sum", "R-5", "通らなかった確かめ"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("section lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+// 反映先宛て（entity=operation）の記録は、区画に「反映先」と操作の ID で出る。
+func TestPrepareJ6_ReleaseConflictFixShowsTargetAndOperationID(t *testing.T) {
+	t.Parallel()
+	opID, taskID := "O-7", "T-3"
+	got := ""
+	for _, sec := range prepareJ6(&j6Context{ConflictFixes: []ConflictFixPassed{
+		{At: time.Now(), Target: ConflictFixTargetRelease, OperationID: &opID, FromRef: "aaa", ToRef: "bbb", Files: []string{"go.mod"}},
+		{At: time.Now(), Target: ConflictFixTargetIntegration, TaskID: &taskID, FromRef: "ccc", ToRef: "ddd", Files: []string{"go.sum"}},
+	}}, "") {
+		if sec.Label == j6ConflictFixesLabel {
+			got = sec.Content
+		}
+	}
+	for _, want := range []string{"反映先 / O-7 / aaa → bbb", "統合先 / T-3 / ccc → ddd"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("section lacks %q:\n%s", want, got)
 		}
@@ -51,7 +72,10 @@ func TestPrepareJ6_NoConflictFixes_NoSection(t *testing.T) {
 	}
 }
 
-// memory の confidence は 1 語（空白を含まない）。指示文と schema の両方で伝え、core の検査と同じ形にそろえる。
+// memory の confidence の型は、空白を含む値を先に弾く（空は許す）。追記の項目は core が確度を見ないので、空は型で
+// 拒否しない。空の新規作成を拒否するのは書き込み器（memory_write.go）で、この型ではない。
+// ここで確かめるのは、型の pattern を Go の正規表現で解釈した結果だけである。claude が --json-schema の pattern を
+// 守らせるかは確かめていない。
 func TestJ6OutputSchema_ConfidencePatternIsSingleWord(t *testing.T) {
 	t.Parallel()
 	var sch map[string]any
@@ -65,7 +89,7 @@ func TestJ6OutputSchema_ConfidencePatternIsSingleWord(t *testing.T) {
 		t.Fatalf("confidence has no pattern: %+v", conf)
 	}
 	re := regexp.MustCompile(pat)
-	for s, want := range map[string]bool{"high": true, "medium": true, "low": true, "high (実測)": false, "": false, "a b": false, "a\tb": false} {
+	for s, want := range map[string]bool{"high": true, "medium": true, "low": true, "high (実測)": false, "": true, "a b": false, "a\tb": false} {
 		if re.MatchString(s) != want {
 			t.Errorf("pattern(%q) = %v", s, !want)
 		}
