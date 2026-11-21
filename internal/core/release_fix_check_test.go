@@ -464,24 +464,47 @@ func TestReleaseFixCheck_EndingTheContractRunClearsTheRefs(t *testing.T) {
 	}
 }
 
-// 確かめを通した中身で反映先へ入った後は、merged_unapproved ではなく landed になる。通した中身が承認した中身へ戻ったときも、承認を取り消さない。
-func TestReleaseFixCheck_LandedWithTheVerifiedContentIsLandedAndTheApprovedHeadStillProceeds(t *testing.T) {
+// 確かめを通した中身は、オーナーが承認した中身ではなく、判断点の確かめだけで通したもの。flywheel が「入れてよい」を返す前に（チェックを確かめる前に）
+// その中身（や、そこから取り込みだけで動いた中身）で成果物が入っていたら、承認した反映として記録せず merged_unapproved にする。
+// 通した中身が承認した中身へ戻ったときは、承認を取り消さず、これまでどおり「入れてよい」を返す。
+func TestReleaseFixCheck_LandedWithTheVerifiedContentBeforeLandIsReturnedIsUnapproved(t *testing.T) {
 	t.Parallel()
-	f := newFixCheckFixture(t)
-	f.setRefs(t, "", "h1", "")
-	f.conflictFixMove(f.head, "h1")
-	f.fake.pr.State = "merged"
-	f.fake.pr.HeadSHA = "h1"
-	f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, nil)}
-	if item := f.one(t); item.Result != ExecutionResultLanded {
-		t.Fatalf("item = %+v, want landed", item)
-	}
-	g := newFixCheckFixture(t)
-	g.setRefs(t, "", "h1", "")
-	g.moveHeadTo(g.head)
-	if item := g.one(t); item.Result != ExecutionResultLandSent {
-		t.Fatalf("item = %+v, want land_sent", item)
-	}
+	t.Run("the verified content itself", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "", "h1", "")
+		f.conflictFixMove(f.head, "h1")
+		f.fake.pr.State = "merged"
+		f.fake.pr.HeadSHA = "h1"
+		f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, nil)}
+		if item := f.one(t); item.Result != ExecutionResultMergedUnapproved {
+			t.Fatalf("item = %+v, want merged_unapproved", item)
+		}
+		if f.opState(t) == "executed" {
+			t.Fatalf("operation = executed, want it not recorded as an approved landing")
+		}
+	})
+	t.Run("moved from the verified content by merging in only, no land_ref", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "", "h1", "")
+		f.mergeInMove("h1", "h2")
+		f.fake.pr.State = "merged"
+		f.fake.pr.HeadSHA = "h2"
+		f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, nil)}
+		if item := f.one(t); item.Result != ExecutionResultMergedUnapproved {
+			t.Fatalf("item = %+v, want merged_unapproved", item)
+		}
+	})
+	t.Run("the approved head again still proceeds to land", func(t *testing.T) {
+		t.Parallel()
+		g := newFixCheckFixture(t)
+		g.setRefs(t, "", "h1", "")
+		g.moveHeadTo(g.head)
+		if item := g.one(t); item.Result != ExecutionResultLandSent {
+			t.Fatalf("item = %+v, want land_sent", item)
+		}
+	})
 }
 
 // 1 本のタスクの実行が反映先宛ての成果物を 2 つ取り込んでいる（対応する終わっていない反映の操作が 2 つ）とき、衝突の解消の確かめの道に入らない

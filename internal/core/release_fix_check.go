@@ -129,21 +129,13 @@ func (s *Store) writeReflectFix(ctx context.Context, tx *sql.Tx, rec *activityRe
 	return fmt.Errorf("%w: unknown verdict %q", ErrValidation, r.Verdict)
 }
 
-// movedFromVerified は、成果物がすでに入っているとき（手順 4）の、いまの中身 head が、通した中身（fix_verified_ref。あれば）と同じか、
-// そこから取り込みだけで動いたものか。確かめを通した中身で入れた後に、承認した中身からの動きだけで merged_unapproved にしないための口。
-func movedFromVerified(ctx context.Context, opts ReleaseExecOptions, run *releaseRun, repo, base, head string) bool {
-	if run == nil || !run.fixEligible || run.row.FixVerifiedRef == "" {
-		return false
-	}
-	v := run.row.FixVerifiedRef
-	return head == v || movedByMergeInOnly(ctx, opts.Compare, repo, base, v, head)
-}
-
 // returnedLandRef は、成果物がすでに入っているとき（手順 4）の、いまの中身 head が、対応する契約の実行へ「入れてよい」を付けて返した中身
 // （land_ref。届いた記録 land_delivered が真）と同じか。flywheel がチェックと見分けを確かめて許した中身で入ったものは、承認していない中身が
 // 入ったとは言わない。委譲先が取り込み後の中身をマージのコミットで入れると、その中身は反映先の祖先になり、比較の口は取り込みだけと言えなくなるため、
 // 比べる相手は land_ref にする。land_ref は 1 本の実行に 1 つで、どの操作のために返したかを持たないので、衝突の解消の確かめの道に入ってよい実行
 // （fixEligible。反映の依頼か、対応する操作がちょうど 1 つのタスクの実行）に限る。
+// 通した中身（fix_verified_ref）は比べる相手にしない。判断点の確かめだけで通したもので、オーナーが承認した中身でも、flywheel がチェックを確かめて
+// 「入れてよい」を返した中身でもないため、「入れてよい」を返す前に入っていれば、通した中身（やそこから取り込みだけで動いた中身）でも merged_unapproved になる。
 func returnedLandRef(run *releaseRun, head string) bool {
 	return run != nil && run.fixEligible && run.row.LandDelivered && run.row.LandRef != "" && head == run.row.LandRef
 }

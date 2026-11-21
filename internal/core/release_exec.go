@@ -672,7 +672,7 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 	// 4
 	if pr.State == string(artifactStateMerged) {
 		if pr.HeadSHA == approvedHead || movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) ||
-			movedFromVerified(ctx, opts, run, repo, decl.DefaultBranch, pr.HeadSHA) || returnedLandRef(run, pr.HeadSHA) {
+			returnedLandRef(run, pr.HeadSHA) {
 			detail := ""
 			if pr.HeadSHA != approvedHead && len(pr.Checks) == 0 {
 				if none, _ := approved.noChecks(ctx, opts.Checks, repo, approvedHead); none {
