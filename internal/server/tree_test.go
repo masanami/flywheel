@@ -327,3 +327,43 @@ func TestQuestionsAPI_TaskID_AC70_AC71_802(t *testing.T) {
 		t.Errorf("AC-71: task_id = %v, want null", got)
 	}
 }
+
+// #929: ツリーの API は、core が決めた progress（タスクと課題）をそのまま返す。phase の値は変えない。
+func TestTreeAPI_ProgressIsCoreValue_929(t *testing.T) {
+	ws := initWorkspace(t)
+	approvalFixture(t, ws, "in_progress")
+	coretest.InsertApprovedPlan(t, ws, 1, "PLAN", approvalPlanSpec)
+	coretest.Exec(t, ws, `UPDATE task SET status = 'in_progress'`)
+	port := approvalServer(t, ws)
+	d := getTree(t, port)
+	if len(d.Challenges) != 1 {
+		t.Fatalf("challenges = %v", d.Challenges)
+	}
+	tasks := d.Challenges[0]["tasks"].([]any)
+	if len(tasks) != 3 {
+		t.Fatalf("tasks = %v, want 3", tasks)
+	}
+	if d.Challenges[0]["progress"] != nil {
+		t.Errorf("challenge progress = %v, want null", d.Challenges[0]["progress"])
+	}
+	for _, e := range tasks {
+		m := e.(map[string]any)
+		if m["progress"] != "working" || m["phase"] != "running" {
+			t.Errorf("task = %v, want progress working / phase running", m)
+		}
+	}
+}
+
+// #929: 統合先を使う課題が検証中のとき、課題の progress は checking で返る。
+func TestTreeAPI_ChallengeProgressChecking_929(t *testing.T) {
+	ws := initWorkspace(t)
+	approvalFixture(t, ws, "verifying")
+	coretest.InsertApprovedPlan(t, ws, 1, "PLAN", approvalPlanSpec)
+	coretest.Exec(t, ws, `UPDATE challenge SET uses_integration = 1 WHERE id = 1`)
+	coretest.SetChallengeStatus(t, ws, 1, "verifying")
+	port := approvalServer(t, ws)
+	d := getTree(t, port)
+	if len(d.Challenges) != 1 || d.Challenges[0]["progress"] != "checking" {
+		t.Errorf("challenges = %v, want progress checking", d.Challenges)
+	}
+}
