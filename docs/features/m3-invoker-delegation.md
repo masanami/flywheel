@@ -435,7 +435,7 @@ J4 に回す範囲は 2 つで、同じ指示文（`internal/invoker/prompts/j4.
 - [ ] `status` の `needs_human` に `triage`（J1 が `not_mine` と判定して自動の対象から外れている課題）を足す [S1]
 - [ ] `status` の `needs_human` に `budget_exhausted`（実装枠の残りが 1 USD 未満の着手中の課題）と `slots`（`needs_attention` のスロット）を足す [S2]
 - [ ] `status` に `waiting_external`（CI の完了を待っている検証中の課題）を足す [S2]（#523: ボードのカードの「CI 待ち」の印は外す方針で、委譲先が CI を待つ間は委譲が「実行中」として見える。コードの変更は #547 の後に別の PR で行う）
-- [ ] `show` は、課題の run の一覧（新しい順・最大 20 件）と、計画の構造化した出力を示す
+- [ ] `show` は、課題の run の一覧（新しい順・最大 100 件。区切り S3d で 20 件から上げた）と、計画の構造化した出力を示す
 
 ### 外部への書き戻し（Q4）【決定 2026-09-28 オーナー M3H1】
 
@@ -864,7 +864,7 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 - `status.needs_human.slots`（S2）: `[{"slot_id", "repo", "path", "run_id"}]`。
 - `slot clear`（S2）: `{"slot": {"slot_id", "repo", "path", "state"}}`（戻した後のスロット）【仮定: 形】。
 - `status.waiting_external`（S2。最上位の 4 つ目のキー）: `{"challenges": [{"challenge_id", "pr_url", "checks": "pending"}]}`。
-- `show`: 最上位に `runs`（新しい順・最大 20 件。要素は `runs` の要素と同じ形で、周の上限額 `cycle_budget_usd` を含む。`--auto` の個別の操作が既定の周の上限額で評価したことは、この値で観測する【決定 2026-09-28 親】（#83））を足し、`plans` の要素に `spec`（J2 の構造化した出力。無ければ `null`）を足す。
+- `show`: 最上位に `runs`（新しい順・最大 100 件（区切り S3d で 20 件から上げた）。要素は `runs` の要素と同じ形で、周の上限額 `cycle_budget_usd` を含む。`--auto` の個別の操作が既定の周の上限額で評価したことは、この値で観測する【決定 2026-09-28 親】（#83））を足し、`plans` の要素に `spec`（J2 の構造化した出力。無ければ `null`）を足す。
 - `runs`: `{"runs": [{"id", "kind", "judgment", "challenge_id", "cycle_id", "cycle_budget_usd", "session_id", "result", "rate_limited", "cost_usd", "cost_source", "max_budget_usd", "started_at", "ended_at", "error"}]}`。`cycle_budget_usd` は `cycle_id` が `null`（周の外で記録された run）なら `null`、そうでなければその周の上限額（USD）【決定 2026-09-28 親】（#83）。 `error` は run の失敗の要約（`run.error`）で、無ければ `null`。`show` の runs の要素も同じ形。テキストの `runs` は、失敗した run にだけ `error` の 1 行目（長ければ切る）を添える。
 - M1 の `internal/cli/jsondoc_test.go` に、新しいコマンドと上の拡張を足す。
 
@@ -1143,7 +1143,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - [ ] `flywheel runs --json` は、run を新しい順に出力する（§IF / API の形。`jsondoc_test.go` に足して検証する）
 - [ ] `flywheel runs <C-ID> --json` は、その課題の run だけを出力する
 - [ ] `flywheel runs --open --json` は、終了していない run だけを出力する
-- [ ] `show --json` の `runs` は、その課題の run を新しい順に最大 20 件出力する
+- [ ] `show --json` の `runs` は、その課題の run を新しい順に最大 100 件（区切り S3d で 20 件から上げた）出力する
 - [ ] `status --json` の `needs_human.triage` の無いワークスペースでは `[]` である
 
 ### CLI 共通
@@ -1554,7 +1554,7 @@ S1 の分解案（最終の分解は `/create-ticket` で行う）。
 - 金額は USD の 100 万分の 1 を単位とする整数で持ち、JSON では USD の数値で出す。
 - 子の出力の保存先は `.flywheel/runs/<run の ID>/`。
 - core の IF の名前（`Judge`・`Delegate` など）、出力スキーマ・JSON のフィールド名のうち本文で固定していないもの、偽の `claude` の作り方は実装で決めてよい。
-- `show` の `runs` は最大 20 件。
+- `show` の `runs` は最大 100 件（区切り S3d で 20 件から上げた）。
 - `worktree` のスロットは使い回し、払い出しは初回の割り当てのときだけ。`slot` の行は、委譲の段（または `run`）の開始時に宣言の `count` に足りない分を `idle`（未払い出し）として作る。払い出しに失敗した行は `needs_attention`。`count` を減らしても、使用中・払い出し済みの行は消さない。作業ツリーの置き場は `.flywheel/worktrees/<リポジトリ名>/<SL-ID>`（Git で追跡させない）とし、変えるなら実装で決めてよい。
 - 衝突の予測は、同じリポジトリの予測できる候補が 2 件以上のときだけ問う。
 - 予測の口の時間の上限は `timeout_sec.judgment`。予測は手元の HEAD に対するもの（fetch しない）。
