@@ -705,6 +705,9 @@ it("AC-67 AC-68 AC-69 AC-70 AC-80 #931: 成果物の種類・状態（記録の�
     within(items[0] as HTMLElement).getByTestId("artifact-kind").textContent,
   ).toBe("pull_request");
   expect(
+    within(items[1] as HTMLElement).getByTestId("artifact-state").textContent,
+  ).toBe("open");
+  expect(
     within(items[0] as HTMLElement).getByTestId("artifact-state").textContent,
   ).toBe("Merged_x");
   expect(
@@ -754,6 +757,9 @@ it("AC-73 AC-74 AC-75 #931: 検証の判定の語・理由・時刻が出る", a
   expect(sec.getByTestId("verification-verdict").textContent).toBe("満たした");
   expect(sec.getByTestId("verification-reason").textContent).toBe(
     "条件を確かめた",
+  );
+  expect(sec.getByTestId("verification-at").textContent).toMatch(
+    /^\d{2}\/\d{2} \d{2}:\d{2}$/,
   );
   expect(sec.getByTestId("verification-at").getAttribute("datetime")).toBe(
     "2026-11-01T10:00:00Z",
