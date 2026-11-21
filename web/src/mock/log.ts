@@ -63,9 +63,8 @@ export function alphaLogExtras(id: string): Activity[] {
     }),
     act({
       at: T(90),
-      action: "approve",
-      entity: "operation",
-      entity_id: "O-1",
+      action: "op_approve",
+      after: { operation_id: "O-1" },
       channel: "cli",
       verification: "tty_confirm",
     }),

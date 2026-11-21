@@ -14,6 +14,7 @@ import type {
   ApprovalSummary,
   PlanTopic,
 } from "../api/types.gen.ts";
+import { COMPLETION_REJECT_NOTE } from "../guidance.ts";
 import {
   FakeEventSource,
   emptyStatus,
@@ -664,12 +665,12 @@ it("AC-346 #811: 差し戻しのボタンは無い", async () => {
   ]);
 });
 
-it("AC-347 #811: 差し戻しのターミナルのコマンド（flywheel reject）の案内が出る", async () => {
+it("AC-347 #811: 差し戻しの案内は、コマンドの例を出さず、対話で伝える方法だけを出す", async () => {
   await opened();
-  expect(
-    screen.getByTestId("plan-approval").querySelector("[data-guide='reject']")
-      ?.textContent,
-  ).toContain("flywheel reject C-1");
+  const root = screen.getByTestId("plan-approval");
+  expect(root.querySelector("[data-guide='reject']")).toBeNull();
+  expect(root.textContent).not.toContain("flywheel reject");
+  expect(root.textContent).toContain(COMPLETION_REJECT_NOTE);
 });
 
 it("AC-348 #811: kind が plan でない課題では、承認待ちでない旨と課題の詳細へのリンクが出る", async () => {

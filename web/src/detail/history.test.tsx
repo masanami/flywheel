@@ -239,9 +239,8 @@ const MIXED: Activity[] = [
   act1({ action: "approve_hold_release", at: "2026-11-01T06:00:00Z" }),
   act1({ action: "reject", at: "2026-11-01T07:00:00Z" }),
   act1({
-    action: "approve",
-    entity: "operation",
-    entity_id: "O-1",
+    action: "op_approve",
+    after: { operation_id: "O-1" },
     at: "2026-11-01T08:00:00Z",
   }),
   act1({ action: "submit", at: "2026-11-01T09:00:00Z" }),
@@ -260,7 +259,7 @@ it("AC-265 #809: 「問いと回答」は hold・answer・answer_plan の行だ�
   );
 });
 
-it("AC-266 #809: 「計画と承認」は plan・approve・approve_hold_release・reject の行を出す", async () => {
+it("AC-266 #809: 「計画と承認」は plan・approve・approve_hold_release・reject・op_approve の行を出す", async () => {
   const { root } = await open(
     MIXED.filter((a) => a.entity === "challenge"),
     { runs: [run()] },
@@ -273,19 +272,140 @@ it("AC-266 #809: 「計画と承認」は plan・approve・approve_hold_release�
       "承認した",
       "完了を承認した（反映は保留のまま）",
       "差し戻した",
+      "不可逆操作を承認した",
     ].sort(),
   );
 });
 
-it("AC-267 #809: 「計画と承認」は、entity が operation の approve の行も出す", async () => {
+it("AC-267 #809: 「計画と承認」は、課題の側の op_approve の行も出す", async () => {
   const operationOnly = [
-    act1({ action: "approve", entity: "operation", entity_id: "O-1" }),
+    act1({ action: "op_approve", after: { operation_id: "O-1" } }),
     act1({ action: "hold", at: "2026-11-01T11:00:00Z" }),
   ];
   const { root } = await open(operationOnly);
   await firstRow(root);
   pick(root, "計画と承認");
   expect(whatOf(root)).toEqual(["不可逆操作を承認した"]);
+});
+
+const opOf = (id: string, kind: string) => ({
+  approved_head: null,
+  challenge_id: "C-1",
+  closed_at: null,
+  closed_reason: null,
+  consecutive_failures: 0,
+  created_at: "",
+  executed_at: null,
+  id,
+  kind,
+  last_execution_detail: null,
+  last_execution_result: null,
+  merge_commit: null,
+  ref: null,
+  state: "approved",
+  summary: "",
+  superseded_by: null,
+  supersedes: null,
+  version: 1,
+  waiting_since: null,
+});
+
+it("#933: 不可逆操作の側の承認・差し戻しの行は出さず、課題の側の行に操作の種類の語を添える", async () => {
+  const { root } = await open(
+    [
+      act1({
+        action: "approve",
+        entity: "operation",
+        entity_id: "O-1",
+        at: "2026-11-01T01:00:00Z",
+      }),
+      act1({
+        action: "op_approve",
+        after: { operation_id: "O-1" },
+        at: "2026-11-01T01:00:00Z",
+      }),
+      act1({
+        action: "reject",
+        entity: "operation",
+        entity_id: "O-2",
+        at: "2026-11-01T02:00:00Z",
+      }),
+      act1({
+        action: "op_reject",
+        after: { operation_id: "O-2" },
+        at: "2026-11-01T02:00:00Z",
+      }),
+    ],
+    { operations: [opOf("O-1", "release"), opOf("O-2", "delete")] },
+  );
+  await firstRow(root);
+  expect(whatOf(root).sort()).toEqual([
+    "不可逆操作を差し戻した（削除）",
+    "不可逆操作を承認した（反映）",
+  ]);
+});
+
+it("#933: 対になる課題の側の行が無い不可逆操作の側の承認・差し戻しの行は、消えずに出る（種類の語つき）", async () => {
+  const { root } = await open(
+    [
+      act1({
+        action: "approve",
+        entity: "operation",
+        entity_id: "O-1",
+        at: "2026-11-01T01:00:00Z",
+      }),
+      act1({
+        action: "reject",
+        entity: "operation",
+        entity_id: "O-2",
+        at: "2026-11-01T02:00:00Z",
+      }),
+      // 別の操作の課題の側の行は、O-1・O-2 の対にならない。
+      act1({
+        action: "op_approve",
+        after: { operation_id: "O-3" },
+        at: "2026-11-01T03:00:00Z",
+      }),
+    ],
+    {
+      operations: [
+        opOf("O-1", "release"),
+        opOf("O-2", "delete"),
+        opOf("O-3", "release"),
+      ],
+    },
+  );
+  await firstRow(root);
+  expect(whatOf(root).sort()).toEqual(
+    [
+      "不可逆操作を承認した（反映）",
+      "不可逆操作を差し戻した（削除）",
+      "不可逆操作を承認した（反映）",
+    ].sort(),
+  );
+});
+
+it("#933: 突き合わせて見つからない operation_id の行は、種類の語なしで出る。不可逆操作の登録の行は変わらない", async () => {
+  const { root } = await open(
+    [
+      act1({
+        action: "op_approve",
+        after: { operation_id: "O-9" },
+        at: "2026-11-01T01:00:00Z",
+      }),
+      act1({
+        action: "op_add",
+        entity: "operation",
+        entity_id: "O-9",
+        at: "2026-11-01T02:00:00Z",
+      }),
+    ],
+    { operations: [opOf("O-1", "release")] },
+  );
+  await firstRow(root);
+  expect(whatOf(root).sort()).toEqual(
+    ["不可逆操作を足した", "不可逆操作を承認した"].sort(),
+  );
 });
 
 it("AC-268 #809: 「完了の検証」は submit・verify_met・verify_not_met・verify_uncertain の行だけを出す", async () => {
@@ -391,8 +511,6 @@ it("#809: 作業ログの読み込みに失敗したら、エラーを出す", a
 // #814 掃除 8: ストアに実際にある記録の語。足した語ごとに、その語が出ることを確かめる。
 const ADDED_WORDS: [string, string, string][] = [
   ["challenge", "hold", "保留にして、問いを上げた"],
-  ["operation", "approve", "不可逆操作を承認した"],
-  ["operation", "reject", "不可逆操作を差し戻した"],
   ["operation", "op_add", "不可逆操作を足した"],
   ["challenge", "op_approve", "不可逆操作を承認した"],
   ["challenge", "op_reject", "不可逆操作を差し戻した"],
