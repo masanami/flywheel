@@ -276,10 +276,27 @@ func TestReleaseFixCheck_MovingAgainWhilePendingRewritesThePending(t *testing.T)
 // 確かめ待ちの中身を消す（もう確かめる中身ではない。J5 が古い中身を確かめない）。通した中身は変えない。
 func TestReleaseFixCheck_StalePendingIsClearedWhenTheMoveIsNotAConflictFix(t *testing.T) {
 	t.Parallel()
+	// waiting は from から to への衝突の解消ありで、この操作の試行が確かめ待ちの中身 to を書いた状態にする。
+	waiting := func(t *testing.T, verified, from, to string) *fixCheckFixture {
+		t.Helper()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "", verified, "")
+		f.conflictFixMove(from, to)
+		f.moveHeadTo(to)
+		if item := f.one(t); item.Result != ExecutionResultWaitingFixCheck {
+			t.Fatalf("item = %+v, want waiting_fix_check", item)
+		}
+		if got := f.refs(t); got.Pending != to {
+			t.Fatalf("fix refs = %+v, want pending %s", got, to)
+		}
+		return f
+	}
 	t.Run("same as the approved content", func(t *testing.T) {
 		t.Parallel()
 		f := newFixCheckFixture(t)
-		f.setRefs(t, "h1", "", "")
+		head := f.head
+		f = waiting(t, "", head, "h1")
+		f.moveHeadTo(f.head)
 		if item := f.one(t); item.Result != ExecutionResultLandSent {
 			t.Fatalf("item = %+v, want land_sent", item)
 		}
@@ -289,8 +306,7 @@ func TestReleaseFixCheck_StalePendingIsClearedWhenTheMoveIsNotAConflictFix(t *te
 	})
 	t.Run("same as the verified content", func(t *testing.T) {
 		t.Parallel()
-		f := newFixCheckFixture(t)
-		f.setRefs(t, "h2", "h1", "")
+		f := waiting(t, "h1", "h1", "h2")
 		f.moveHeadTo("h1")
 		if item := f.one(t); item.Result != ExecutionResultLandSent {
 			t.Fatalf("item = %+v, want land_sent", item)
@@ -302,7 +318,7 @@ func TestReleaseFixCheck_StalePendingIsClearedWhenTheMoveIsNotAConflictFix(t *te
 	t.Run("merge-in only", func(t *testing.T) {
 		t.Parallel()
 		f := newFixCheckFixture(t)
-		f.setRefs(t, "h1", "", "")
+		f = waiting(t, "", f.head, "h1")
 		f.mergeInMove(f.head, "h2")
 		f.moveHeadTo("h2")
 		if item := f.one(t); item.Result != ExecutionResultLandSent {
@@ -315,7 +331,7 @@ func TestReleaseFixCheck_StalePendingIsClearedWhenTheMoveIsNotAConflictFix(t *te
 	t.Run("merge-in only while the checks are pending", func(t *testing.T) {
 		t.Parallel()
 		f := newFixCheckFixture(t)
-		f.setRefs(t, "h1", "", "")
+		f = waiting(t, "", f.head, "h1")
 		f.mergeInMove(f.head, "h2")
 		f.moveHeadTo("h2")
 		f.fake.pr.Checks = []UpstreamCheck{{Status: "in_progress"}}
@@ -324,6 +340,18 @@ func TestReleaseFixCheck_StalePendingIsClearedWhenTheMoveIsNotAConflictFix(t *te
 		}
 		if got := f.refs(t); got.Pending != "" {
 			t.Fatalf("fix refs = %+v, want no pending", got)
+		}
+	})
+	// この操作の試行が書いたのでない確かめ待ちの中身（1 本の実行に対応する別の反映の操作が書いたもの）は消さない。
+	t.Run("a pending content this operation did not write is kept", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "other1", "", "")
+		if item := f.one(t); item.Result != ExecutionResultLandSent {
+			t.Fatalf("item = %+v, want land_sent", item)
+		}
+		if got := f.refs(t); got.Pending != "other1" {
+			t.Fatalf("fix refs = %+v, want pending other1 kept", got)
 		}
 	})
 }

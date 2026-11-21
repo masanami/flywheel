@@ -134,4 +134,11 @@ func TestRunFixPending_FallsBackToTheNewestListedRunOfTheContractRun(t *testing.
 	if got := pendingRuns(t, f.s, f.cid); len(got) != 1 || got[0] != formatRunID(newest-1)+"=p1" {
 		t.Fatalf("runs with fix_pending_ref = %v, want %s=p1", got, formatRunID(newest-1))
 	}
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE run SET kind = 'delegate' WHERE id = ?`, newest-1)
+		return err
+	})
+	if got := pendingRuns(t, f.s, f.cid); len(got) != 1 || got[0] != formatRunID(newest-2)+"=p1" {
+		t.Fatalf("runs with fix_pending_ref = %v, want %s=p1", got, formatRunID(newest-2))
+	}
 }

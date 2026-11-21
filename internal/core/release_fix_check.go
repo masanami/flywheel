@@ -78,8 +78,16 @@ func applyReleaseFixWrites(ctx context.Context, tx *sql.Tx, j releaseJudgment, w
 	}
 	if j.clearFixPending {
 		// 見分けの結果が衝突の解消ありでない（起点と同じ・取り込みだけ）のに残っている確かめ待ちの中身は、もう確かめる中身ではないので消す。
-		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET fix_pending_ref = NULL WHERE id = ? AND ended_at IS NULL`, id); err != nil {
+		// 消すのは判定のときに読んだ値のままのときだけ。判定の間に J5 がその中身を通した中身に書いていたら、判定のときの通した中身へ戻す
+		// （この判定は、その起点で見分けた）。
+		stale, verified := j.run.row.FixPendingRef, j.run.row.FixVerifiedRef
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET fix_pending_ref = NULL WHERE id = ? AND ended_at IS NULL AND fix_pending_ref = ?`, id, stale); err != nil {
 			return err
+		}
+		if stale != verified {
+			if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET fix_verified_ref = NULLIF(?, '') WHERE id = ? AND ended_at IS NULL AND fix_verified_ref = ?`, verified, id, stale); err != nil {
+				return err
+			}
 		}
 	}
 	if j.fixPendingRef != "" && written == ExecutionResultWaitingFixCheck {

@@ -415,6 +415,11 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		return nil, nil, err
 	}
 
+	// 残っている確かめ待ちの中身を消すのは、この操作が書いたもの（直前の閉じた試行が waiting_fix_check で、その中身を見ていた）だけ。
+	// 1 本のタスクの実行に反映の操作が複数対応するとき、別の操作の確かめ待ちの中身を消さない。
+	if j.clearFixPending && (prevResult != ExecutionResultWaitingFixCheck || j.run == nil || prevObserved != j.run.row.FixPendingRef) {
+		j.clearFixPending = false
+	}
 	// 待っている間は試行の行を増やさない: 直前の試行も flywheel の外での反映を待っていたなら、開いた行を消して返す。
 	// 衝突の解消の確かめを待つ間も同じ: 直前の試行が waiting_fix_check で同じ中身を見ていて、確かめ待ちの中身もすでにその中身なら増やさない。
 	sameFixWait := j.result == ExecutionResultWaitingFixCheck && prevResult == ExecutionResultWaitingFixCheck && prevObserved == j.observedHead &&
