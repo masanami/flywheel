@@ -169,9 +169,9 @@ func resolveJ5FixTarget(ctx context.Context, tx *sql.Tx, c j5FixCandidate) (*j5F
 // j5FixReflectOperation は、完了の課題の契約の実行 c に対応する、終わっていない（承認待ち・承認済みの）反映の操作の内部整数 ID を返す
 // （無ければ 0）。対応の決め方は反映の段（loadReleaseRun）と同じ: 上げる依頼と、委譲先のフローを通らない成果物の反映の依頼は、実行に
 // 結び付く操作（operation_id）。統合先を使わない課題のタスクの実行は、その実行が取り込んだ成果物の参照と同じ参照を持つ、終わっていない
-// 反映の操作（taskRunImportedRef。その実行が取り込んでいない成果物の操作は選ばない）。同じ参照の操作が複数あれば、承認済みのもの
-// （反映の段が扱うもの）を先に、その中では新しいものを選ぶ。確かめ待ちの中身の列は契約の実行ごとに 1 つで、どの操作が書いたかは
-// 持たないので、1 本の実行が複数の成果物（PR）を取り込んでいるときは、書いた操作を選べるとは限らない。
+// 反映の操作（taskRunImportedRef。その実行が取り込んでいない成果物の操作は選ばない）。対応する操作がちょうど 1 つのときだけ
+// 対象にする（openReleaseOpsOfTaskRun。反映の段の fixEligible と同じ数え方）。確かめ待ちの中身の列は契約の実行ごとに 1 つで、どの操作の
+// 中身かを持たないので、2 つ以上の操作が対応するとき（1 本の実行が複数の成果物を取り込んでいるとき）は対象にしない。
 func j5FixReflectOperation(ctx context.Context, tx *sql.Tx, c j5FixCandidate) (int64, error) {
 	open := func(op *operationRow) bool {
 		return op.Kind == string(OperationKindRelease) && (op.State == OperationStatePending || op.State == OperationStateApproved)
@@ -198,40 +198,11 @@ func j5FixReflectOperation(ctx context.Context, tx *sql.Tx, c j5FixCandidate) (i
 		if err != nil {
 			return 0, err
 		}
-		rows, err := tx.QueryContext(ctx,
-			`SELECT id, COALESCE(ref, '') FROM operation WHERE challenge_id = ? AND kind = ? AND state IN (?, ?) ORDER BY (state = 'approved') DESC, id DESC`,
-			c.ChallengeID, string(OperationKindRelease), string(OperationStatePending), string(OperationStateApproved))
-		if err != nil {
+		ops, err := openReleaseOpsOfTaskRun(ctx, tx, cr)
+		if err != nil || len(ops) != 1 {
 			return 0, err
 		}
-		type openOp struct {
-			id  int64
-			ref string
-		}
-		var ops []openOp
-		for rows.Next() {
-			var o openOp
-			if err := rows.Scan(&o.id, &o.ref); err != nil {
-				_ = rows.Close()
-				return 0, err
-			}
-			ops = append(ops, o)
-		}
-		if err := rows.Close(); err != nil {
-			return 0, err
-		}
-		if err := rows.Err(); err != nil {
-			return 0, err
-		}
-		for _, o := range ops {
-			if o.ref == "" {
-				continue
-			}
-			if ok, err := taskRunImportedRef(ctx, tx, cr, o.ref); err != nil || ok {
-				return o.id, err
-			}
-		}
-		return 0, nil
+		return ops[0], nil
 	}
 	return 0, nil
 }
@@ -573,17 +544,20 @@ func (s *Store) verifyFixTarget(ctx context.Context, in J5AutoInput, jc *Judgmen
 		return nil, nil, err
 	}
 
-	// 作業ディレクトリは、確かめ待ちの中身を取り出した一時の作業ツリー。
+	// 作業ディレクトリは、確かめ待ちの中身を取り出した一時の作業ツリー。取り出せなければ確かめを始めない。
 	co, reason, err := s.checkoutJ5Commit(ctx, in, scope.Repo, scope.PendingRef)
 	if err != nil {
 		return nil, &NotStarted{ChallengeID: chID, Reason: NotStartedUpstreamFetchFailed, Detail: err.Error()}, nil
 	}
+	if reason != "" {
+		// 取り出せなかったときは、J5 を呼ばない（ワークスペースを作業ディレクトリにして続けると、関係のない中身を見て満たしたと答えうる）。
+		// run も作らず列も変えない。次のサイクルで、もう一度試す。
+		return nil, &NotStarted{ChallengeID: chID, Reason: NotStartedUpstreamFetchFailed,
+			Detail: fmt.Sprintf("確かめ待ちの中身（%s）を取り出せなかった（%s）", scope.PendingRef, reason)}, nil
+	}
 	head := &j5Head{git: in.HeadGit, WorkDir: co.WorkDir, clone: co.clone, ref: co.ref}
 	defer head.remove(ctx)
 	note := fmt.Sprintf("作業ディレクトリは、確かめ待ちの中身（%s）を取り出した作業ツリーである。", scope.PendingRef)
-	if reason != "" {
-		note = fmt.Sprintf("確かめ待ちの中身（%s）を取り出せなかった（%s）。作業ディレクトリはワークスペースで、中身は差分の区画でしか読めない。", scope.PendingRef, reason)
-	}
 
 	planVersion := int64(scope.Plan.Version)
 	runIn := RunJudgmentInput{

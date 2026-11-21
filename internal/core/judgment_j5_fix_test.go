@@ -572,3 +572,55 @@ func TestJ5Fix_ChallengeIDPathProcessesTargetsAndReportsNone(t *testing.T) {
 		})
 	}
 }
+
+// 1 本のタスクの実行に対応する終わっていない反映の操作が 2 つ（取り込んだ成果物が 2 つ）あるとき、反映先宛ての対象にしない（3 列はどの操作の中身かを
+// 持たない）。J5 は呼ばず、確かめ待ちの中身は変わらない。1 つのときは対象になる。
+func TestJ5Fix_ReflectTargetNeedsExactlyOneCorrespondingOperation(t *testing.T) {
+	t.Parallel()
+	f := newFixReflectFixture(t)
+	if got := f.fixTargets(t); len(got) != 1 {
+		t.Fatalf("one operation: fix targets = %+v, want one", got)
+	}
+	cid, _ := parseChallengeID(f.cid)
+	f.sql(t, `INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at) VALUES (?, 'release', 's2', 'https://github.com/o/r/pull/2', 'pending', 1, '2026-09-25T00:00:00.000Z')`, cid)
+	f.sql(t, `INSERT INTO run_artifact (run_id, kind, ref, state, base) SELECT start_run_id, 'pr', 'https://github.com/o/r/pull/2', 'open', 'main' FROM contract_run`)
+	if got := f.fixTargets(t); len(got) != 0 {
+		t.Fatalf("two operations: fix targets = %+v, want none", got)
+	}
+	res := f.verify(t)
+	if n := f.j5RunCount(t); n != 0 || len(res.Items) != 0 {
+		t.Fatalf("J5 runs = %d, items = %+v, want none", n, res.Items)
+	}
+	if got := f.pendingRef(t); got != fixPending {
+		t.Fatalf("fix_pending_ref = %q, want unchanged", got)
+	}
+}
+
+// 確かめ待ちの中身を取り出せなかったとき、J5 を呼ばず、実行の記録も作らず、列も変えず、始めなかったもの（upstream_fetch_failed。詳細に取り出せなかった
+// 理由）として返す（ワークスペースを作業ディレクトリにして続けない）。
+func TestJ5Fix_NoCheckWhenThePendingContentCannotBeCheckedOut(t *testing.T) {
+	t.Parallel()
+	for name, mk := range map[string]func(*testing.T) *fixFixture{"integration": newFixIntegrationFixture, "reflect": newFixReflectFixture} {
+		mk := mk
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := mk(t)
+			in := f.input(t, nil)
+			git := &noHeadGit{}
+			in.HeadGit = git
+			res, err := f.s.VerifyAutoJ5(context.Background(), in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := f.j5RunCount(t); n != 0 || len(res.Items) != 0 || len(f.log.results) != 0 || git.added != 0 {
+				t.Fatalf("J5 runs = %d, items = %+v, writer calls = %d, worktrees = %d, want none", n, res.Items, len(f.log.results), git.added)
+			}
+			if len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedUpstreamFetchFailed || !strings.Contains(res.NotStarted[0].Detail, fixPending) {
+				t.Fatalf("not started = %+v, want one upstream_fetch_failed naming %s", res.NotStarted, fixPending)
+			}
+			if got := f.pendingRef(t); got != fixPending {
+				t.Fatalf("fix_pending_ref = %q, want unchanged", got)
+			}
+		})
+	}
+}

@@ -483,3 +483,62 @@ func TestReleaseFixCheck_LandedWithTheVerifiedContentIsLandedAndTheApprovedHeadS
 		t.Fatalf("item = %+v, want land_sent", item)
 	}
 }
+
+// 1 本のタスクの実行が反映先宛ての成果物を 2 つ取り込んでいる（対応する終わっていない反映の操作が 2 つ）とき、衝突の解消の確かめの道に入らない
+// （3 列は契約の実行ごとに 1 つで、どの操作の中身かを持たない）。衝突の解消ありで動いても、確かめ待ちの中身は書かず、その操作の承認だけを取り消す
+// （S3a のまま）。取り込んだ成果物が 1 つのときは、これまでどおり確かめ待ちになる。
+func TestReleaseFixCheck_TwoCorrespondingOperationsDoNotEnterTheFixCheck(t *testing.T) {
+	t.Parallel()
+	addSecondOperation := func(t *testing.T, f *fixCheckFixture) {
+		t.Helper()
+		f.sql(t, `INSERT INTO operation (challenge_id, kind, summary, ref, state, version, created_at)
+			SELECT challenge_id, 'release', 's2', 'https://github.com/o/r/pull/2', 'pending', 1, '2026-09-25T00:00:00.000Z' FROM operation WHERE id = 1`)
+		f.sql(t, `INSERT INTO run_artifact (run_id, kind, ref, state, base) SELECT start_run_id, 'pr', 'https://github.com/o/r/pull/2', 'open', 'main' FROM contract_run`)
+	}
+	t.Run("two operations", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		addSecondOperation(t, f)
+		f.conflictFixMove(f.head, "h1")
+		f.moveHeadTo("h1")
+		item := f.one(t)
+		if item.Result != ExecutionResultHeadChanged {
+			t.Fatalf("item = %+v, want head_changed", item)
+		}
+		if got := f.refs(t); got != (contractFixRefs{}) {
+			t.Fatalf("fix refs = %+v, want none written", got)
+		}
+		if got := f.opState(t); got != "pending" { // 承認だけが取り消される
+			t.Fatalf("operation = %s, want pending", got)
+		}
+		if n := f.count(t, `SELECT COUNT(*) FROM operation_execution WHERE result = 'waiting_fix_check'`); n != 0 {
+			t.Fatalf("waiting_fix_check attempts = %d", n)
+		}
+		if len(f.client.resumes) != 0 {
+			t.Fatalf("resumes = %v", f.client.resumes)
+		}
+	})
+	t.Run("an old verified content of the run is not used as the origin", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		addSecondOperation(t, f)
+		f.setRefs(t, "", "h1", "")
+		f.mergeInMove("h1", "h2") // 通した中身 h1 からは取り込みだけ。でも 2 つの操作が対応するので承認した中身との比較（h2 は別の中身）になる
+		f.moveHeadTo("h2")
+		if item := f.one(t); item.Result != ExecutionResultHeadChanged {
+			t.Fatalf("item = %+v, want head_changed", item)
+		}
+	})
+	t.Run("one operation", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.conflictFixMove(f.head, "h1")
+		f.moveHeadTo("h1")
+		if item := f.one(t); item.Result != ExecutionResultWaitingFixCheck {
+			t.Fatalf("item = %+v, want waiting_fix_check", item)
+		}
+		if got := f.refs(t); got.Pending != "h1" {
+			t.Fatalf("fix refs = %+v", got)
+		}
+	})
+}
