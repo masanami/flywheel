@@ -82,6 +82,10 @@ func FromTreeChallenge(c core.TreeChallenge) TreeChallenge {
 			s := string(*t.Status)
 			tt.Status = &s
 		}
+		if t.Progress != nil {
+			pr := string(*t.Progress)
+			tt.Progress = &pr
+		}
 		tasks = append(tasks, tt)
 	}
 	deps := make([]TreeDependency, 0, len(c.Dependencies))
@@ -90,6 +94,11 @@ func FromTreeChallenge(c core.TreeChallenge) TreeChallenge {
 	}
 	rel := func(r core.TreeRelative) TreeRelative {
 		return TreeRelative{ChallengeID: r.ChallengeID, Status: string(r.Status), StatusLabel: statusLabel(r.Status), Title: r.Title}
+	}
+	var progress *string
+	if c.Progress != nil {
+		pr := string(*c.Progress)
+		progress = &pr
 	}
 	var parent *TreeRelative
 	if c.Parent != nil {
@@ -102,7 +111,7 @@ func FromTreeChallenge(c core.TreeChallenge) TreeChallenge {
 	}
 	return TreeChallenge{
 		BudgetUSD: c.BudgetUSD, Children: kids, CostUSD: c.CostUSD, Dependencies: deps, FollowupsOpen: c.FollowupsOpen, ID: c.ID,
-		NextHumanActions: acts, Parent: parent, Status: string(c.Status), StatusLabel: statusLabel(c.Status), Tasks: tasks,
+		NextHumanActions: acts, Parent: parent, Progress: progress, Status: string(c.Status), StatusLabel: statusLabel(c.Status), Tasks: tasks,
 		TasksDone: c.TasksDone, TasksTotal: c.TasksTotal, Title: c.Title, UpdatedAt: FormatTimestamp(c.UpdatedAt), UsesIntegration: c.UsesIntegration,
 	}
 }
