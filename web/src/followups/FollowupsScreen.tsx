@@ -47,7 +47,7 @@ export function groupByChallenge(
 }
 
 // フォローアップの画面。一覧の API を status=all で 1 回だけ読み、未・済み・捨てたの切り替えは画面の側で行う。
-// 書き込みのボタンは置かない（済みにする・捨てる・課題へ上げるは、端末のコマンドの案内だけを出す）。
+// 書き込みのボタンは置かない（済みにする・捨てる・課題へ上げるは、ターミナルのコマンドの案内だけを出す）。
 export function FollowupsScreen({
   live,
   agentName,
@@ -185,7 +185,7 @@ export function FollowupsScreen({
           {status === "open" && guides.length > 0 ? (
             <div className="followup-guide" data-testid="followup-guide">
               <p>
-                この画面からは、済みにする・捨てる・課題へ上げるは行えません。端末で、次のコマンドを実行します。
+                この画面からは、済みにする・捨てる・課題へ上げるは行えません。ターミナルで、次のコマンドを実行します。
               </p>
               <ul>
                 {guides.map((g) => (

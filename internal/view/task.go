@@ -7,21 +7,53 @@ import "github.com/masanami/flywheel/internal/core"
 // Task は show の tasks の要素。DependsOn は前提のタスクの ID（"T-<n>"）。NonGoals・DependsOn は無ければ `[]`。
 // source_key は対応する取り込み元の子の external_key（対応しなければ null）。
 // budget_impl_usd・budget_review_usd はタスクの枠（増額を含む）、spent_usd はそのタスクの実行の費用の合計。
+//
+// artifacts・delegate・facts・landing・verification は委譲先の実行・成果物・作業ログから core が組み立てる値の口で、
+// 値が無いときは artifacts が `[]`、delegate・landing・verification が null、facts が `{}`。
 type Task struct {
-	Body            string   `json:"body"`
-	BudgetImplUSD   float64  `json:"budget_impl_usd"`
-	BudgetReviewUSD float64  `json:"budget_review_usd"`
-	DependsOn       []string `json:"depends_on"`
-	DoneCriteria    string   `json:"done_criteria"`
-	ID              string   `json:"id"`
-	NonGoals        []string `json:"non_goals"`
-	Operation       string   `json:"operation"`
-	PlanVersion     int64    `json:"plan_version"`
-	Repo            string   `json:"repo"`
-	SourceKey       *string  `json:"source_key"`
-	SpentUSD        float64  `json:"spent_usd"`
-	Status          string   `json:"status"`
-	Title           string   `json:"title"`
+	Artifacts       []TaskArtifact    `json:"artifacts"`
+	Body            string            `json:"body"`
+	BudgetImplUSD   float64           `json:"budget_impl_usd"`
+	BudgetReviewUSD float64           `json:"budget_review_usd"`
+	Delegate        *TaskDelegate     `json:"delegate"`
+	DependsOn       []string          `json:"depends_on"`
+	DoneCriteria    string            `json:"done_criteria"`
+	Facts           map[string]string `json:"facts"`
+	ID              string            `json:"id"`
+	Landing         *string           `json:"landing"`
+	NonGoals        []string          `json:"non_goals"`
+	Operation       string            `json:"operation"`
+	PlanVersion     int64             `json:"plan_version"`
+	Repo            string            `json:"repo"`
+	SourceKey       *string           `json:"source_key"`
+	SpentUSD        float64           `json:"spent_usd"`
+	Status          string            `json:"status"`
+	Title           string            `json:"title"`
+	Verification    *TaskVerification `json:"verification"`
+}
+
+// TaskDelegate はタスクの最後の契約の実行。state は ContractState の値（記録のまま）、summary は委譲先が返した要約、
+// requested_kind は委譲先が求めていること（無ければ null）、run_id はその実行の ID。
+type TaskDelegate struct {
+	RequestedKind *string `json:"requested_kind"`
+	RunID         string  `json:"run_id"`
+	State         string  `json:"state"`
+	Summary       string  `json:"summary"`
+}
+
+// TaskArtifact はタスクの実行の成果物 1 件。kind・ref・state は記録のまま、role は統合先の印（`integration`）か null。
+type TaskArtifact struct {
+	Kind  string  `json:"kind"`
+	Ref   string  `json:"ref"`
+	Role  *string `json:"role"`
+	State string  `json:"state"`
+}
+
+// TaskVerification はタスクの検証の最後の記録。verdict は VerifyResult の値（記録のまま）、at は記録の時刻。
+type TaskVerification struct {
+	At      string `json:"at"`
+	Reason  string `json:"reason"`
+	Verdict string `json:"verdict"`
 }
 
 // FromTasks はタスクの一覧を変換する（空でも `[]`）。
@@ -29,6 +61,7 @@ func FromTasks(ts []core.Task) []Task {
 	out := make([]Task, 0, len(ts))
 	for _, t := range ts {
 		out = append(out, Task{
+			Artifacts: []TaskArtifact{}, Facts: map[string]string{},
 			SourceKey: strOrNil(t.SourceKey),
 			Body:      t.Body, DependsOn: append([]string{}, t.DependsOn...), DoneCriteria: t.DoneCriteria, ID: t.ID,
 			NonGoals: append([]string{}, t.NonGoals...), Operation: t.Operation, PlanVersion: t.PlanVersion,

@@ -19,7 +19,7 @@ const waitingLabel = (a: string): string => {
 
 // あなたを待っているもの。next_human_actions ごとに出す。
 // 画面のボタンで受けるのは、完了の承認（反映は保留のまま）だけ。計画の承認は承認の画面へのリンク、
-// 回答・予算の増額などは端末のコマンドの案内を出す（答える欄は置かない）。
+// 回答・予算の増額などはターミナルのコマンドの案内を出す（答える欄は置かない）。
 export function Waiting({
   show,
   agentName,

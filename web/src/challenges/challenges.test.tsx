@@ -29,6 +29,7 @@ const task = (key: string, p: Partial<TreeTask> = {}): TreeTask => ({
   id: `T-${key}`,
   key,
   phase: "next",
+  progress: null,
   status: null,
   title: `タスク ${key}`,
   ...p,
@@ -46,6 +47,7 @@ const challenge = (
   id,
   next_human_actions: [],
   parent: null,
+  progress: null,
   status: "in_progress",
   status_label: "着手中",
   tasks: [],
@@ -330,10 +332,10 @@ it("AC-204 #807: 凡例の 5 つの語と、線の説明が出る", async () => 
   await open({ challenges: [] });
   const legend = await screen.findByTestId("legend");
   for (const w of [
-    "走っている",
-    "あなたを待っている",
-    "次に走る（前提は済み）",
-    "前提を待っている",
+    "実行中",
+    "あなた待ち",
+    "次に実行（前提は済み）",
+    "前提待ち",
     "済み",
     "線は前提です（左が終わると、右が走れます）。",
   ]) {

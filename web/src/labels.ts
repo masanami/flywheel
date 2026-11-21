@@ -1,9 +1,16 @@
 // core が返す閉集合のコードを表示の文言に写す対応表。状態は UI で導かず、文言だけをここで持つ。
 
 import {
+  type CHALLENGE_PROGRESS_CODES,
+  type DELEGATE_STATE_CODES,
   EXECUTION_RESULT_CODES,
   EXECUTION_RESULT_WORDS,
   HOLD_KIND_CODES,
+  type OPERATION_KIND_CODES,
+  type OPERATION_STATE_CODES,
+  type TASK_LANDING_CODES,
+  type TASK_PROGRESS_CODES,
+  type VERDICT_CODES,
 } from "./api/types.gen.ts";
 import type { CycleWorkStages } from "./api/types.gen.ts";
 
@@ -96,6 +103,13 @@ export const DISCREPANCY_LABELS: Record<DiscrepancyKind, string> = {
   dependency_cycle: "依存が循環している",
 };
 
+type TaskProgress = (typeof TASK_PROGRESS_CODES)[number];
+type ChallengeProgress = (typeof CHALLENGE_PROGRESS_CODES)[number];
+type TaskLanding = (typeof TASK_LANDING_CODES)[number];
+type Verdict = (typeof VERDICT_CODES)[number];
+type DelegateState = (typeof DELEGATE_STATE_CODES)[number];
+type OperationKind = (typeof OPERATION_KIND_CODES)[number];
+type OperationState = (typeof OPERATION_STATE_CODES)[number];
 type ExecutionResultCode = (typeof EXECUTION_RESULT_CODES)[number];
 
 // 反映の試行の結果（Operation.last_execution_result。core の閉集合 EXECUTION_RESULT_CODES）の語。
@@ -156,12 +170,73 @@ export const TASK_PHASES = [
 export type TaskPhase = (typeof TASK_PHASES)[number];
 
 export const PHASE_LABELS: Record<TaskPhase, string> = {
-  running: "走っている",
-  waiting: "あなたを待っている",
-  next: "次に走る",
-  blocked: "前提を待っている",
+  running: "実行中",
+  waiting: "あなた待ち",
+  next: "次に実行",
+  blocked: "前提待ち",
   done: "済み",
   cancelled: "取りやめ",
+};
+
+// タスクの細かい進み（ツリーのタスクの progress。phase が running のタスクだけ。値は core が決め、ここは語だけを持つ）。
+export const TASK_PROGRESS_LABELS: Record<TaskProgress, string> = {
+  working: "作業中",
+  verifying: "検証待ち",
+  landing: "統合中",
+};
+
+// 課題の細かい進み（ツリーの課題の progress。統合先を使う課題だけ）。
+export const CHALLENGE_PROGRESS_LABELS: Record<ChallengeProgress, string> = {
+  reflecting: "反映中",
+  checking: "全体の確認中",
+};
+
+// タスクの検証の判定（tasks[].verification.verdict）。
+export const VERDICT_LABELS: Record<Verdict, string> = {
+  met: "満たした",
+  not_met: "満たしていない",
+  uncertain: "判断できなかった",
+};
+
+// 統合先へ入れる進み（tasks[].landing）。
+export const LANDING_LABELS: Record<TaskLanding, string> = {
+  verified: "検証済み",
+  sent: "統合中",
+  landed: "統合済み",
+};
+
+// 委譲先の実行の状態（tasks[].delegate.state）。
+export const DELEGATE_STATE_LABELS: Record<DelegateState, string> = {
+  running: "実行中",
+  waiting: "待機中",
+  succeeded: "成功",
+  failed: "失敗",
+  cancelled: "中止",
+};
+
+// 委譲先が求めていること（tasks[].delegate.requested_kind）。語だけを出す（括弧の補足は付けない）。
+// 対応の無い値は label() が生のコードで出す。
+export const REQUESTED_KIND_LABELS: Record<string, string> = {
+  answer: "回答",
+  approve: "承認",
+  review: "レビュー",
+  observe: "経過の確認",
+};
+
+// 不可逆操作の種類（operations[].kind）と状態（operations[].state）。
+export const OPERATION_KIND_LABELS: Record<OperationKind, string> = {
+  release: "反映",
+  delete: "削除",
+  external_send: "外部送信",
+  other: "その他",
+};
+
+export const OPERATION_STATE_LABELS: Record<OperationState, string> = {
+  pending: "承認待ち",
+  approved: "承認済み",
+  rejected: "差し戻し",
+  executed: "実行済み",
+  closed: "終了",
 };
 
 // サイクルの状態（サイクルの API の state）。値は core が決め、ここは上の帯に出す語だけを持つ。
@@ -169,7 +244,7 @@ export const CYCLE_STATES = ["running", "idle", "stale"] as const;
 export type CycleState = (typeof CYCLE_STATES)[number];
 
 export const CYCLE_STATE_LABELS: Record<CycleState, string> = {
-  running: "サイクル: 走っている",
+  running: "サイクル: 実行中",
   idle: "サイクル: 走っていない",
   stale: "サイクル: 止まっているかもしれない",
 };
@@ -183,7 +258,7 @@ export const RELOAD_TEXT =
 
 // サイクルの画面・「すべて」の区分に出す、状態だけの語（上の帯の語から「サイクル: 」を除いたもの）。
 export const CYCLE_STATE_SHORT_LABELS: Record<CycleState, string> = {
-  running: "走っている",
+  running: "実行中",
   idle: "走っていない",
   stale: "止まっているかもしれない",
 };
@@ -229,7 +304,7 @@ export const CYCLE_WORK_STAGE_LABELS: Record<keyof CycleWorkStages, string> = {
   cleanup: "片付け",
 };
 
-// 課題の画面の凡例。区分の語は PHASE_LABELS と同じで、「次に走る」だけ括弧の補足を添える。
+// 課題の画面の凡例。区分の語は PHASE_LABELS と同じで、「次に実行」だけ括弧の補足を添える。
 export const PHASE_LEGEND_ORDER = [
   "running",
   "waiting",
@@ -244,7 +319,7 @@ export const PHASE_LEGEND_LABELS: Record<
 > = {
   running: PHASE_LABELS.running,
   waiting: PHASE_LABELS.waiting,
-  next: "次に走る（前提は済み）",
+  next: "次に実行（前提は済み）",
   blocked: PHASE_LABELS.blocked,
   done: PHASE_LABELS.done,
 };
@@ -358,5 +433,5 @@ export const NO_COST_LABEL = "費用の記録なし";
 // 経緯の「誰が」
 export const WHO_ME_RELAYED = "あなた（対話）";
 export const WHO_ME_UI = "あなた（画面）";
-export const WHO_ME_TTY = "あなた（端末）";
+export const WHO_ME_TTY = "あなた（ターミナル）";
 export const WHO_AGENT_RUN = "エージェント";

@@ -46,7 +46,7 @@ test("AC-157 #805: 偽のデータで「読み直す」を押すと「読んで�
   await page.getByRole("button", { name: "読み直す" }).click();
   await expect(page.getByTestId("ingestable-list")).toBeVisible();
   await expect(
-    page.getByText("取り込みは、端末か対話で行います。"),
+    page.getByText("取り込みは、ターミナルか対話で行います。"),
   ).toBeVisible();
 });
 

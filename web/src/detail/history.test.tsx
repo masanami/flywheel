@@ -65,6 +65,11 @@ const task = (
   body: "",
   budget_impl_usd: 0,
   budget_review_usd: 0,
+  artifacts: [],
+  delegate: null,
+  facts: {},
+  landing: null,
+  verification: null,
   depends_on: [],
   done_criteria: "",
   id,
@@ -209,13 +214,13 @@ it("AC-262 #809: 本人確認の方式が relayed の行に「あなた（対話
   );
 });
 
-it("AC-263 #809: 経路が cli で方式が tty_confirm の行に「あなた（端末）」が出る", async () => {
+it("AC-263 #809: 経路が cli で方式が tty_confirm の行に「あなた（ターミナル）」が出る", async () => {
   const { root } = await open([
     act1({ action: "approve", channel: "cli", verification: "tty_confirm" }),
   ]);
   const r = await firstRow(root);
   expect(within(r).getByTestId("history-who")).toHaveTextContent(
-    "あなた（端末）",
+    "あなた（ターミナル）",
   );
 });
 

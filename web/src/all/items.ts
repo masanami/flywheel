@@ -33,7 +33,7 @@ export function waitingItems(
           kind: r.kind,
           title: `${r.title}（${r.hint ?? ""}）`,
           href: null,
-          note: "片付けは端末で行います。",
+          note: "片付けはターミナルで行います。",
         }
       : r.kind === "operation"
         ? {

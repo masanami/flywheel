@@ -51,6 +51,7 @@ function emptyTree(
     id,
     next_human_actions: [],
     parent: null,
+    progress: null,
     status,
     status_label: statusLabel,
     tasks: [],

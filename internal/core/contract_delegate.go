@@ -37,10 +37,14 @@ const (
 	ContractStateCancelled ContractState = "cancelled"
 )
 
+// contractStateValues は ContractState の閉集合（valid と ContractStateValues の正本）。
+var contractStateValues = []ContractState{ContractStateRunning, ContractStateWaiting, ContractStateSucceeded, ContractStateFailed, ContractStateCancelled}
+
 func (s ContractState) valid() bool {
-	switch s {
-	case ContractStateRunning, ContractStateWaiting, ContractStateSucceeded, ContractStateFailed, ContractStateCancelled:
-		return true
+	for _, v := range contractStateValues {
+		if s == v {
+			return true
+		}
 	}
 	return false
 }

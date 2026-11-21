@@ -39,6 +39,11 @@ const T = (id: string, p: Partial<Task> = {}): Task => ({
   body: "",
   budget_impl_usd: 0,
   budget_review_usd: 0,
+  artifacts: [],
+  delegate: null,
+  facts: {},
+  landing: null,
+  verification: null,
   depends_on: [],
   done_criteria: "",
   id,
@@ -59,6 +64,7 @@ const N = (id: string, p: Partial<TreeTask> = {}): TreeTask => ({
   id,
   key: `k-${id}`,
   phase: "running",
+  progress: null,
   status: null,
   title: `題名 ${id}`,
   ...p,
@@ -174,6 +180,7 @@ function show(o: Over = {}): ShowCardResponse {
       id: "C-1",
       next_human_actions: [],
       parent: null,
+      progress: null,
       status: "in_progress",
       status_label: "着手中",
       tasks: o.nodes ?? [N("T-2")],
@@ -260,7 +267,7 @@ it("AC-286 #810: タスクの題名と、表示の区分の語が出る", async 
   expect(
     within(root).getByRole("heading", { name: "集計を書き直す" }),
   ).toBeTruthy();
-  expect(within(root).getByTestId("task-phase").textContent).toBe("次に走る");
+  expect(within(root).getByTestId("task-phase").textContent).toBe("次に実行");
 });
 
 it("AC-287 #810: 前提のタスクの題名が、そのタスクの詳細へのリンクとして出る", async () => {
@@ -345,7 +352,7 @@ const waitingShow = () =>
     holds: [hold({ question: "表が既にあるときは作り直しますか" })],
   });
 
-it("AC-293 #810: phase が waiting のタスクの詳細に、保留の問いの文と、端末のコマンドの案内（flywheel answer）が出る", async () => {
+it("AC-293 #810: phase が waiting のタスクの詳細に、保留の問いの文と、ターミナルのコマンドの案内（flywheel answer）が出る", async () => {
   const { root } = await open(waitingShow());
   const w = within(within(root).getByTestId("task-waiting"));
   expect(w.getByText("表が既にあるときは作り直しますか")).toBeTruthy();
@@ -604,7 +611,7 @@ it("#810: 前提・この後のリンクの横に、そのタスクの表示の�
 it.each([
   ["cli", "relayed", "あなた（対話）"],
   ["ui", "none", "あなた（画面）"],
-  ["cli", "tty_confirm", "あなた（端末）"],
+  ["cli", "tty_confirm", "あなた（ターミナル）"],
   ["invoker", "none", "invoker"],
 ])(
   "#810: 回答の行に、誰が答えたかが出る（経路 %s・方式 %s）",

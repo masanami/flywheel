@@ -5,7 +5,7 @@ import "github.com/masanami/flywheel/internal/core"
 // このファイルは課題のツリー（`GET /api/v1/workspaces/{name}/tree` と、課題の詳細の API の根の tree）の応答の型を持つ。
 // API 専用で、CLI の --json には出さない。表示の区分（phase）・タスクの進み・費用・予算・未のフォローアップの件数は core が決めた値。
 
-// TreeTask は課題のツリーのタスク 1 件。id・status は計画の承認の後だけ（承認の前は null）。depends_on は、承認の後でも
+// TreeTask は課題のツリーのタスク 1 件。progress は表示の区分（phase）が running のタスクの細かい進み（TaskProgress の値。ほかは null）。id・status は計画の承認の後だけ（承認の前は null）。depends_on は、承認の後でも
 // 前提のタスクの計画の中の識別子（key）。
 type TreeTask struct {
 	CostUSD   float64  `json:"cost_usd"`
@@ -13,6 +13,7 @@ type TreeTask struct {
 	ID        *string  `json:"id"`
 	Key       string   `json:"key"`
 	Phase     string   `json:"phase"`
+	Progress  *string  `json:"progress"`
 	Status    *string  `json:"status"`
 	Title     string   `json:"title"`
 }
@@ -35,6 +36,7 @@ type TreeRelative struct {
 }
 
 // TreeChallenge は課題のツリーの課題 1 件。next_human_actions は課題の一覧の card.next_human_actions と同じ値。
+// progress は統合先を使う課題の細かい進み（ChallengeProgress の値。ほかは null）。
 // budget_usd は `show --plan --json` の plan.budget_usd と同じ規則の値（決められないとき・計画が無いとき null）。
 type TreeChallenge struct {
 	BudgetUSD        *float64         `json:"budget_usd"`
@@ -45,6 +47,7 @@ type TreeChallenge struct {
 	ID               string           `json:"id"`
 	NextHumanActions []string         `json:"next_human_actions"`
 	Parent           *TreeRelative    `json:"parent"`
+	Progress         *string          `json:"progress"`
 	Status           string           `json:"status"`
 	StatusLabel      string           `json:"status_label"`
 	Tasks            []TreeTask       `json:"tasks"`

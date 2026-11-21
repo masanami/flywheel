@@ -34,7 +34,7 @@ import { whoOf } from "../who.ts";
 const DELEGATION_KINDS = ["delegate", "contract"];
 
 // タスクの詳細の画面。課題の詳細の API の応答を、タスクの ID で結んで作る（tasks = 本文、tree.tasks = 区分・費用）。
-// 区分と費用は core が返した値をそのまま出す。画面のボタンは置かず、回答は端末のコマンドの案内で示す。
+// 区分と費用は core が返した値をそのまま出す。画面のボタンは置かず、回答はターミナルのコマンドの案内で示す。
 export function TaskDetail({
   live,
   agentName,

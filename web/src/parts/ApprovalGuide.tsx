@@ -5,7 +5,7 @@ import {
   showsConversationNote,
 } from "../guidance.ts";
 
-// 詳細の操作の案内。ボタンで承認できない操作には端末のコマンドを示し、
+// 詳細の操作の案内。ボタンで承認できない操作にはターミナルのコマンドを示し、
 // 対話で伝えれば LLM が記録できる操作にはその旨を添える。
 export function ApprovalGuide({
   challengeId,

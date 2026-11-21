@@ -354,7 +354,7 @@ function PlanView({
               <>
                 <p>{RECOMMEND_OK_TEXT}</p>
                 <p>
-                  推奨と違う答えにしたいときは、端末で次のコマンドを実行します。
+                  推奨と違う答えにしたいときは、ターミナルで次のコマンドを実行します。
                 </p>
                 {answer && (
                   <pre data-guide={answer.id}>
@@ -392,7 +392,7 @@ function PlanView({
           </p>
         )}
         <p className="approval-control-question">
-          差し戻すときは、端末で次のコマンドを実行します。
+          差し戻すときは、ターミナルで次のコマンドを実行します。
         </p>
         {reject && (
           <pre data-guide={reject.id}>

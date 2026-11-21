@@ -82,7 +82,7 @@ it("#806: まだ走ったことがなければ、始まり・終わり・結果�
   }
 });
 
-it("#806: 状態（走っている・走っていない・止まっているかもしれない）が出る", async () => {
+it("#806: 状態（実行中・走っていない・止まっているかもしれない）が出る", async () => {
   await openAgents(
     [{ name: "alpha", cycle: { state: "stale" } }],
     "#/a/alpha/cycle",
@@ -168,7 +168,7 @@ it("#806: 進められるものが 0 件のとき、始めない旨が出て、�
   ).toBeDisabled();
 });
 
-it("#806: 止まっているかもしれないときは、端末のコマンドの案内が出て、「サイクルを回す」は押せない", async () => {
+it("#806: 止まっているかもしれないときは、ターミナルのコマンドの案内が出て、「サイクルを回す」は押せない", async () => {
   await openAgents(
     [{ ...agent, cycle: { ...agent.cycle, state: "stale" } }],
     "#/a/alpha/cycle",
@@ -202,7 +202,7 @@ it("#798: エージェントを切り替えても、前のエージェントの�
   expect(screen.queryByText("サイクルを始めました。")).toBeNull();
 });
 
-it("#798: 止まっているかもしれないときの案内は、端末で flywheel cycle を実行すると、止まったサイクルを片付けてから始める旨を伝える", async () => {
+it("#798: 止まっているかもしれないときの案内は、ターミナルで flywheel cycle を実行すると、止まったサイクルを片付けてから始める旨を伝える", async () => {
   await openAgents(
     [{ ...agent, cycle: { ...agent.cycle, state: "stale" } }],
     "#/a/alpha/cycle",
@@ -213,6 +213,6 @@ it("#798: 止まっているかもしれないときの案内は、端末で fly
   );
   const note = code.closest("p");
   expect(note).toHaveTextContent("止まったサイクルを片付けてから始めます");
-  expect(note).toHaveTextContent("端末で");
+  expect(note).toHaveTextContent("ターミナルで");
   expect(note).toHaveTextContent("この画面からは始められません");
 });

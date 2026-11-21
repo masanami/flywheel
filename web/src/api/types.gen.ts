@@ -417,12 +417,16 @@ export interface StageOption {
 }
 
 export interface Task {
+  artifacts: TaskArtifact[];
   body: string;
   budget_impl_usd: number;
   budget_review_usd: number;
+  delegate: TaskDelegate | null;
   depends_on: string[];
   done_criteria: string;
+  facts: Record<string, string>;
   id: string;
+  landing: string | null;
   non_goals: string[];
   operation: string;
   plan_version: number;
@@ -431,6 +435,27 @@ export interface Task {
   spent_usd: number;
   status: string;
   title: string;
+  verification: TaskVerification | null;
+}
+
+export interface TaskArtifact {
+  kind: string;
+  ref: string;
+  role: string | null;
+  state: string;
+}
+
+export interface TaskDelegate {
+  requested_kind: string | null;
+  run_id: string;
+  state: string;
+  summary: string;
+}
+
+export interface TaskVerification {
+  at: string;
+  reason: string;
+  verdict: string;
 }
 
 export interface LogResponse {
@@ -528,6 +553,7 @@ export interface TreeChallenge {
   id: string;
   next_human_actions: string[];
   parent: TreeRelative | null;
+  progress: string | null;
   status: string;
   status_label: string;
   tasks: TreeTask[];
@@ -559,6 +585,7 @@ export interface TreeTask {
   id: string | null;
   key: string;
   phase: string;
+  progress: string | null;
   status: string | null;
   title: string;
 }
@@ -758,6 +785,52 @@ export const TASK_PHASE_CODES = [
   "blocked",
   "done",
   "cancelled",
+] as const;
+
+export const TASK_PROGRESS_CODES = [
+  "working",
+  "verifying",
+  "landing",
+] as const;
+
+export const CHALLENGE_PROGRESS_CODES = [
+  "reflecting",
+  "checking",
+] as const;
+
+export const TASK_LANDING_CODES = [
+  "verified",
+  "sent",
+  "landed",
+] as const;
+
+export const VERDICT_CODES = [
+  "met",
+  "not_met",
+  "uncertain",
+] as const;
+
+export const DELEGATE_STATE_CODES = [
+  "running",
+  "waiting",
+  "succeeded",
+  "failed",
+  "cancelled",
+] as const;
+
+export const OPERATION_KIND_CODES = [
+  "release",
+  "delete",
+  "external_send",
+  "other",
+] as const;
+
+export const OPERATION_STATE_CODES = [
+  "pending",
+  "approved",
+  "rejected",
+  "executed",
+  "closed",
 ] as const;
 
 export const EXECUTION_RESULT_CODES = [
