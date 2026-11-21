@@ -39,14 +39,16 @@ type j5TaskScope struct {
 }
 
 // latestTaskContract はタスクの契約の実行（kind が task の最後の 1 件）の、行の ID・中身の識別・検証した中身。無ければ ok=false。
+// 確かめ待ちの中身（fix_pending_ref）を持つ実行は、タスクの検証の対象にしない（衝突の解消の確かめが扱う）ので、ok を偽にする。
 func latestTaskContract(ctx context.Context, tx *sql.Tx, cid, taskID int64) (rowID int64, contentRef, verifiedRef sql.NullString, ok bool, err error) {
+	var pending string
 	err = tx.QueryRowContext(ctx,
-		`SELECT id, content_ref, verified_ref FROM contract_run WHERE challenge_id = ? AND task_id = ? AND kind = 'task' ORDER BY id DESC LIMIT 1`,
-		cid, taskID).Scan(&rowID, &contentRef, &verifiedRef)
+		`SELECT id, content_ref, verified_ref, COALESCE(fix_pending_ref, '') FROM contract_run WHERE challenge_id = ? AND task_id = ? AND kind = 'task' ORDER BY id DESC LIMIT 1`,
+		cid, taskID).Scan(&rowID, &contentRef, &verifiedRef, &pending)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, contentRef, verifiedRef, false, nil
 	}
-	return rowID, contentRef, verifiedRef, err == nil, err
+	return rowID, contentRef, verifiedRef, err == nil && pending == "", err
 }
 
 // needsTaskVerification は、タスクの契約の実行の中身の識別が、検証した中身と違う（か、検証した中身が無い）か。

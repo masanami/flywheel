@@ -267,6 +267,46 @@ func (s *Store) addJ5HeadWorktree(ctx context.Context, git HeadWorktreeGit, clon
 	return path, nil
 }
 
+// j5Checkout は checkoutJ5Commit が取り出した一時の worktree と、fetch した一時の ref（fetch していなければ空）。
+type j5Checkout struct {
+	WorkDir, clone, ref string
+}
+
+// checkoutJ5Commit は repo（"<owner>/<name>"）の sha のコミットを、一時の worktree へ取り出す。手元のクローンに無ければ、
+// その 1 コミットだけを一時の ref へ fetch する（J5 が中身を読むためだけの例外）。取り出せない理由が、読み手に伝えて続けてよいもの
+// （接続の宣言にリポジトリが無い・fetch ができない）なら reason に入れ、err は nil（呼び出し元は作業ディレクトリをワークスペースのままにして、
+// 取り出せなかったことを注記する）。git の起動や worktree の作成の失敗は err。
+func (s *Store) checkoutJ5Commit(ctx context.Context, in J5AutoInput, repo, sha string) (co j5Checkout, reason string, err error) {
+	clone, repoName, reason := s.headClone(in.Connectors, repo)
+	if reason != "" {
+		return co, reason, nil
+	}
+	sweepJ5HeadRefs(ctx, in.HeadGit, clone)
+	has, err := in.HeadGit.HasCommit(ctx, clone, sha)
+	if err != nil {
+		return co, "", err
+	}
+	var ref string
+	if !has {
+		ref = fmt.Sprintf("%s%d-%s-%s", j5HeadRefPrefix, os.Getpid(), j5HeadHostTag(), sha)
+		fctx, cancel := context.WithTimeout(ctx, j5HeadFetchTimeout)
+		err := in.HeadGit.FetchHead(fctx, clone, sha, ref)
+		cancel()
+		if err != nil {
+			removeJ5HeadRef(ctx, in.HeadGit, clone, ref)
+			return co, fmt.Sprintf("手元のクローンに head のコミットが無く、fetch もできなかった（%v）", err), nil
+		}
+	}
+	path, err := s.addJ5HeadWorktree(ctx, in.HeadGit, clone, repoName, sha)
+	if err != nil {
+		if ref != "" {
+			removeJ5HeadRef(ctx, in.HeadGit, clone, ref)
+		}
+		return co, "", err
+	}
+	return j5Checkout{WorkDir: path, clone: clone, ref: ref}, "", nil
+}
+
 // prepareJ5Head は prs の head（J5 の入力にしたチェックの取得で得た値。ここで取り直さない）の
 // 差分の区画と一時の worktree を用意する。PR が無ければ何もしない。差分の取得・worktree の作成に
 // 失敗したら NotStarted（upstream_fetch_failed）を返し、run を作らない。呼び出し元は、NotStarted で
@@ -291,38 +331,15 @@ func (s *Store) prepareJ5Head(ctx context.Context, in J5AutoInput, challengeID s
 	if !ok {
 		return failed(fmt.Errorf("core: malformed pull request url %q", pick.URL))
 	}
-	clone, repoName, reason := s.headClone(in.Connectors, repo)
-	var ref string
-	if reason == "" {
-		sweepJ5HeadRefs(ctx, in.HeadGit, clone)
-		has, err := in.HeadGit.HasCommit(ctx, clone, pick.HeadSHA)
-		if err != nil {
-			return failed(err)
-		}
-		if !has {
-			ref = fmt.Sprintf("%s%d-%s-%s", j5HeadRefPrefix, os.Getpid(), j5HeadHostTag(), pick.HeadSHA)
-			fctx, cancel := context.WithTimeout(ctx, j5HeadFetchTimeout)
-			err := in.HeadGit.FetchHead(fctx, clone, pick.HeadSHA, ref)
-			cancel()
-			if err != nil {
-				removeJ5HeadRef(ctx, in.HeadGit, clone, ref)
-				ref = ""
-				reason = fmt.Sprintf("手元のクローンに head のコミットが無く、fetch もできなかった（%v）", err)
-			}
-		}
+	co, reason, err := s.checkoutJ5Commit(ctx, in, repo, pick.HeadSHA)
+	if err != nil {
+		return failed(err)
 	}
 	var checkout []string
 	if reason != "" {
 		checkout = append(checkout, fmt.Sprintf("%s の head（%s）を取り出せなかった（%s）。作業ディレクトリはワークスペースで、PR の中身は差分の区画でしか読めない。", pick.URL, pick.HeadSHA, reason))
 	} else {
-		path, err := s.addJ5HeadWorktree(ctx, in.HeadGit, clone, repoName, pick.HeadSHA)
-		if err != nil {
-			if ref != "" {
-				removeJ5HeadRef(ctx, in.HeadGit, clone, ref)
-			}
-			return failed(err)
-		}
-		head.WorkDir, head.clone, head.ref = path, clone, ref
+		head.WorkDir, head.clone, head.ref = co.WorkDir, co.clone, co.ref
 		checkout = append(checkout, fmt.Sprintf("作業ディレクトリは %s の head（%s）を取り出した作業ツリーである。", pick.URL, pick.HeadSHA))
 		for _, pr := range targets {
 			if pr.URL != pick.URL {

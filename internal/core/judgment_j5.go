@@ -1019,6 +1019,9 @@ type J5AutoInput struct {
 	Descriptions UpstreamDescriptionSource
 	// HeadGit は PR の head を取り出す一時の worktree の口。
 	HeadGit HeadWorktreeGit
+	// Compare は衝突の解消の確かめが、通した中身から確かめ待ちの中身への変わり方を読み直す、2 つのコミットの比較の取得
+	// （nil なら読み直せないので、確かめを始めない）。
+	Compare UpstreamCompareSource
 	// Connectors は PR のリポジトリの元のクローンを引く宣言。nil なら PR の head を取り出さない
 	// （差分だけを渡す）。
 	Connectors *ConnectorsDeclaration
@@ -1064,7 +1067,11 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 			})); err != nil {
 				return nil, err
 			}
-			if len(targets) == 0 {
+			fixTargets, err := s.selectFixTargetsOf(ctx, challengeIntID(ch))
+			if err != nil {
+				return nil, err
+			}
+			if len(targets) == 0 && len(fixTargets) == 0 {
 				return nil, ErrInvalidTransition
 			}
 			for _, tg := range targets {
@@ -1078,6 +1085,24 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 					return nil, err
 				}
 				appendDelegateOutcome(result, item, notStarted)
+			}
+			// 見直し前の対象の後に、衝突の解消の確かめの対象を処理する。
+			if err := s.verifyFixTargets(ctx, in, nil, result, fixTargets); err != nil {
+				return nil, err
+			}
+			return result, nil
+		}
+		if ch.Status == StatusDone {
+			// 完了の課題は、反映先宛ての衝突の解消の確かめだけが対象。
+			fixTargets, err := s.selectFixTargetsOf(ctx, challengeIntID(ch))
+			if err != nil {
+				return nil, err
+			}
+			if len(fixTargets) == 0 {
+				return nil, ErrInvalidTransition
+			}
+			if err := s.verifyFixTargets(ctx, in, nil, result, fixTargets); err != nil {
+				return nil, err
 			}
 			return result, nil
 		}
@@ -1094,6 +1119,7 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 
 	var targetIDs []int64
 	var taskTargets []j5TaskTarget
+	var fixTargets []j5FixTarget
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		ids, ex, err := selectJ5AutoTargets(ctx, tx)
 		targetIDs = ids
@@ -1101,7 +1127,12 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		if err != nil {
 			return err
 		}
-		taskTargets, err = selectJ5TaskTargets(ctx, tx)
+		if taskTargets, err = selectJ5TaskTargets(ctx, tx); err != nil {
+			return err
+		}
+		// 衝突の解消の確かめの対象の選び方は、見直し前の対象の選び方と別（同じ課題に検証中のタスクと確かめ待ちの別のタスクがあれば、両方が対象）。
+		fixTargets, ex, err = selectJ5FixTargets(ctx, tx, nil)
+		result.NotStarted = append(result.NotStarted, ex...)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -1170,7 +1201,53 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		}
 		appendDelegateOutcome(result, item, notStarted)
 	}
+	// 見直し前の対象（検証中の課題・検証中のタスク）の後に、衝突の解消の確かめの対象。
+	if err := s.verifyFixTargets(ctx, in, jc, result, fixTargets); err != nil {
+		return nil, err
+	}
 	return result, nil
+}
+
+// challengeIntID は課題 ch の内部整数 ID（ID は読み込み済みの課題のもので、必ず解釈できる）。
+func challengeIntID(ch *Challenge) int64 {
+	id, _ := parseChallengeID(ch.ID)
+	return id
+}
+
+// selectFixTargetsOf は課題 cid（内部整数 ID）の、衝突の解消の確かめの対象を選ぶ（ID を指定した個別の操作。取り込み元の食い違いでは外さない）。
+func (s *Store) selectFixTargetsOf(ctx context.Context, cid int64) ([]j5FixTarget, error) {
+	var out []j5FixTarget
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, _, err = selectJ5FixTargets(ctx, tx, &cid)
+		return err
+	})
+	return out, classifyReadWriteErr(err)
+}
+
+// verifyFixTargets は衝突の解消の確かめの対象を順に処理して、結果を result へ足す。1 件の対象の問題（対象でなくなった・終わっていない実行・
+// 承認済みの計画が無い）で、ほかの対象を止めない。
+func (s *Store) verifyFixTargets(ctx context.Context, in J5AutoInput, jc *JudgmentCycle, result *JudgmentAutoResult, targets []j5FixTarget) error {
+	for _, tg := range targets {
+		item, notStarted, err := s.verifyFixTarget(ctx, in, jc, tg)
+		if err != nil {
+			var pu *planUnavailableError
+			if errors.As(err, &pu) {
+				appendDelegateOutcome(result, nil, &NotStarted{ChallengeID: formatChallengeID(tg.ChallengeID), Reason: NotStartedPlanUnavailable, Detail: pu.Detail})
+				continue
+			}
+			if errors.Is(err, ErrRunInProgress) || errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrValidation) {
+				// ID を指定した操作（jc が nil）は、何も処理できていなければ、始められなかった理由をエラーで返す（先の結果を失わない）。
+				if jc == nil && len(result.Items) == 0 && len(result.NotStarted) == 0 {
+					return err
+				}
+				continue
+			}
+			return err
+		}
+		appendDelegateOutcome(result, item, notStarted)
+	}
+	return nil
 }
 
 // verifyOne は課題 1 件の CI の確認と J5 を実行する。jc が非 nil なら枠超過・周の上限を NotStarted で
