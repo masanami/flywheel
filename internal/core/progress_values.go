@@ -6,16 +6,17 @@ package core
 // TaskProgress はツリーのタスクの細かい進み（表示の区分 phase が running のタスクだけ。ほかは null）。
 type TaskProgress string
 
-// TaskProgress の 3 値。
+// TaskProgress の 4 値。verified は検証を通っただけ（統合先へ入れる依頼はまだ）、landing は統合先へ入れる依頼を出している。
 const (
 	TaskProgressWorking   TaskProgress = "working"
 	TaskProgressVerifying TaskProgress = "verifying"
+	TaskProgressVerified  TaskProgress = "verified"
 	TaskProgressLanding   TaskProgress = "landing"
 )
 
 // TaskProgressValues は TaskProgress の閉集合の写しを返す。
 func TaskProgressValues() []TaskProgress {
-	return []TaskProgress{TaskProgressWorking, TaskProgressVerifying, TaskProgressLanding}
+	return []TaskProgress{TaskProgressWorking, TaskProgressVerifying, TaskProgressVerified, TaskProgressLanding}
 }
 
 // ChallengeProgress はツリーの課題の細かい進み（統合先を使う課題だけ。ほかは null）。

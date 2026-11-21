@@ -565,6 +565,7 @@ it("タスクの箱に progress の語を出し、無ければ出さない（AC-
       task("a", { progress: "working", phase: "running" }),
       task("b", { progress: "verifying", phase: "running" }),
       task("c", { progress: "landing", phase: "running" }),
+      task("e", { progress: "verified", phase: "running" }),
       task("d"),
     ],
   });
@@ -573,7 +574,7 @@ it("タスクの箱に progress の語を出し、無ければ出さない（AC-
   const words = boxes.map(
     (b) => within(b).queryByTestId("task-progress")?.textContent ?? null,
   );
-  expect(words).toEqual(["作業中", "検証待ち", "統合中", null]);
+  expect(words).toEqual(["作業中", "検証待ち", "統合中", "検証済み", null]);
 });
 
 it("課題の枠の見出しに progress の語を出す（AC-99・AC-100）", async () => {
