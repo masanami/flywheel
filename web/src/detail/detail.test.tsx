@@ -914,3 +914,26 @@ it("#808: 課題の詳細を開いても fetch は GET だけで、form 要素�
   expect(requests.every((r) => r.method === "GET")).toBe(true);
   expect(root.querySelector("form, input, textarea")).toBeNull();
 });
+
+it("AC-107 #932: 課題の詳細のツリーの箱に、タスクの progress の語が出る", async () => {
+  const { root } = await open(
+    show({
+      tree: {
+        tasks: [
+          task({
+            key: "a",
+            id: "T-1",
+            phase: "running",
+            progress: "verifying",
+          }),
+          task({ key: "b", id: "T-2" }),
+        ],
+      },
+    }),
+  );
+  const boxes = q(root).getAllByTestId("task-box");
+  expect(
+    q(boxes[0] as HTMLElement).getByTestId("task-progress"),
+  ).toHaveTextContent("検証待ち");
+  expect(q(boxes[1] as HTMLElement).queryByTestId("task-progress")).toBeNull();
+});
