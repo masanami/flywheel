@@ -142,7 +142,10 @@ function Body({
   if (result.state === "loading") return <p>{LOADING_TEXT}</p>;
   if (result.state === "error") {
     const e = result.error;
-    if (e instanceof ApiError && e.code === "invalid_transition") {
+    if (
+      e instanceof ApiError &&
+      (e.code === "invalid_transition" || e.code === "terminal_state")
+    ) {
       return <NotAwaiting href={challengeHref} />;
     }
     return <p role="alert">{e instanceof Error ? e.message : String(e)}</p>;
@@ -156,6 +159,7 @@ function Body({
       agentName={agentName}
       id={id}
       workspacePath={workspacePath}
+      challengeHref={challengeHref}
       updated={updated}
       onApproveStart={onApproveStart}
       onApproved={onApproved}
@@ -169,6 +173,7 @@ function PlanView({
   agentName,
   id,
   workspacePath,
+  challengeHref,
   updated,
   onApproveStart,
   onApproved,
@@ -178,6 +183,7 @@ function PlanView({
   agentName: string;
   id: string;
   workspacePath: string;
+  challengeHref: string;
   updated: boolean;
   onApproveStart: () => void;
   onApproved: (title: string) => void;
@@ -186,6 +192,8 @@ function PlanView({
   const { expected, non_goals, figure } = summary.stages;
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // 押した結果が「終わりの状態」だったとき、承認待ちでない旨の案内に切り替える。
+  const [gone, setGone] = useState(false);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -205,7 +213,9 @@ function PlanView({
       onApproved(summary.title);
     } catch (e) {
       if (!alive.current) return;
-      if (e instanceof ApiError && e.code === "conflict") {
+      if (e instanceof ApiError && e.code === "terminal_state") {
+        setGone(true);
+      } else if (e instanceof ApiError && e.code === "conflict") {
         setNotice(CONFLICT_TEXT);
         reload();
       } else if (
@@ -220,6 +230,8 @@ function PlanView({
       if (alive.current) setBusy(false);
     }
   };
+
+  if (gone) return <NotAwaiting href={challengeHref} />;
 
   const legacy =
     plan !== null && plan.tasks.length === 0 && plan.summary === null;

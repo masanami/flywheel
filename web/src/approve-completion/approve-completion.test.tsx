@@ -637,6 +637,47 @@ it("要約の API が invalid_transition を返したときも、完了の承認
   );
 });
 
+it("要約の API が terminal_state を返したとき（完了した課題）も、完了の承認待ちでない旨を出し、内部の英語の文は出ない", async () => {
+  setup(
+    { status: "done", actions: [] },
+    {
+      [APPROVAL]: () =>
+        json(409, {
+          error: {
+            code: "terminal_state",
+            message: "core: challenge is in a terminal state",
+          },
+        }),
+    },
+  );
+  const m = await openNot();
+  expect(within(m).queryByRole("button")).toBeNull();
+  await waitFor(() =>
+    expect(m.textContent).toContain(NOT_AWAITING_COMPLETION_TEXT),
+  );
+  expect(document.body.textContent).not.toContain("terminal state");
+});
+
+it("承認の口が terminal_state を返したとき、完了の承認待ちでない旨を出し、内部の英語の文は出ない", async () => {
+  setup(
+    {},
+    {
+      [APPROVE]: () =>
+        json(409, {
+          error: {
+            code: "terminal_state",
+            message: "core: challenge is in a terminal state",
+          },
+        }),
+    },
+  );
+  const m = await open();
+  fireEvent.click(await button(m));
+  const n = await screen.findByTestId("completion-not-awaiting");
+  expect(n.textContent).toContain(NOT_AWAITING_COMPLETION_TEXT);
+  expect(document.body.textContent).not.toContain("terminal state");
+});
+
 it("AC-2: 「いま進められること」の完了の承認待ちの行は、完了承認画面へのリンク", async () => {
   const { buildWaitingRows } = await import("../shell/waitingRows.ts");
   const rows = buildWaitingRows(
