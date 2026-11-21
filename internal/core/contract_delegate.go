@@ -1486,9 +1486,10 @@ const reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS N
 // unheldContractStopWhere は、契約の run（k）が failed・cancelled で終わったのに、その後に保留を作れていない
 // （記録と保留が別のトランザクションなので、間でプロセスが止まると起こる）課題を選ぶ条件。
 // 後の保留は、そのタスクに結び付くもの（か、タスクに結び付かないもの）だけを数える（ほかのタスクの保留は、このタスクの作り損ねを隠さない）。
+// 開いたまま（ended_at が NULL）の行は選ばない（状態の確認が終わった記録にした後で拾う。NULL との比較は成り立たず、毎回選んでしまう）。
 // 取りやめにしたタスクの実行は、flywheel が取り消した（計画の作り直し・取り下げ）ので、保留にし損ねたものと数えない。
 const unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'cancelled') AND c.status = 'in_progress'
-	AND NOT (k.ended_at IS NULL AND COALESCE(k.land_ref, '') <> '')
+	AND k.ended_at IS NOT NULL
 	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at
 		AND (h.task_id IS NULL OR k.task_id IS NULL OR h.task_id = k.task_id))
 	AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status IN ('cancelled', 'done'))`

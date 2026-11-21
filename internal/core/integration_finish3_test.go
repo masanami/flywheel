@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // 仕上げ 3 項目 1: 終わりを記録済みで開けたまま残した契約の実行（記録した状態は終わり・ended_at は NULL）の扱い。
@@ -242,10 +244,17 @@ func TestFinish3_EndedAtIsNotLaterThanTheHoldRaisedInTheSameWrite(t *testing.T) 
 	t.Parallel()
 	f := newIgLandFixture(t)
 	f.landed(t)
+	// 呼ぶたびに進む時計。保留の時刻と終わりの時刻を別々に取ると、終わりの時刻が必ず後になる（そろえる処理を外すと必ず落ちる）。
+	var ticks int64
+	base := time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)
+	f.s.now = func() time.Time { return base.Add(time.Duration(atomic.AddInt64(&ticks, 1)) * time.Second) }
 	f.setPR(7, landPRURL, "open", integBranch)
 	f.read(t, contractOut(ContractStateFailed, nil, func(st *ContractStatus) { st.Artifacts = landedArts }))
-	if f.count(t, `SELECT COUNT(*) FROM contract_run WHERE ended_at > (SELECT MAX(raised_at) FROM hold)`) != 0 {
-		t.Fatal("ended_at is later than the hold's raised_at")
+	if f.count(t, `SELECT COUNT(*) FROM hold`) == 0 || f.count(t, `SELECT COUNT(*) FROM contract_run WHERE ended_at IS NULL`) != 0 {
+		t.Fatal("precondition: a hold was raised and the run is ended")
+	}
+	if f.count(t, `SELECT COUNT(*) FROM contract_run WHERE ended_at = (SELECT MAX(raised_at) FROM hold)`) != 1 {
+		t.Fatalf("ended_at = %q, hold raised_at = %q, want equal", f.text(t, `SELECT ended_at FROM contract_run`), f.text(t, `SELECT MAX(raised_at) FROM hold`))
 	}
 }
 
