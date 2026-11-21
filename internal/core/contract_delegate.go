@@ -956,7 +956,7 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 				costFrom(latest.CostMicros)
 				// 反映の段が読んだ終わりを、結果を書くまで開けていた実行（HoldEnd）は、その場で終わる呼び出し（完了から戻す前の読み・片付け）が閉じる。
 				if !c.keepsOpenOn(latest.State) {
-					if _, err := tx.ExecContext(recordCtx, `UPDATE contract_run SET ended_at = ? WHERE id = ? AND ended_at IS NULL`,
+					if _, err := tx.ExecContext(recordCtx, `UPDATE contract_run SET ended_at = ?, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE id = ? AND ended_at IS NULL`,
 						formatTimestamp(s.currentTime()), latest.ID); err != nil {
 						return err
 					}
@@ -1246,7 +1246,7 @@ func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contra
 		}
 		if endedAt != nil {
 			// 契約の実行が終わったら、確かめ待ちの中身は要らない（確かめの対象は終わっていない実行だけ）。
-			if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET fix_pending_ref = NULL WHERE id = ? AND fix_pending_ref IS NOT NULL`, c.Existing.ID); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE id = ?`, c.Existing.ID); err != nil {
 				return err
 			}
 		}

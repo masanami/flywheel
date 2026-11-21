@@ -547,14 +547,14 @@ func (s *Store) endRunAtHold(ctx context.Context, tx *sql.Tx, cid int64, externa
 			now = raised.String
 		}
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`, now, cid, externalRunID)
+	_, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ?, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`, now, cid, externalRunID)
 	return err
 }
 
 // closeContractRunRow は課題 cid の契約の実行 externalRunID を、終わった記録にする。
 func (s *Store) closeContractRunRow(ctx context.Context, cid int64, externalRunID string) error {
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`,
+		_, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ?, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`,
 			formatTimestamp(s.currentTime()), cid, externalRunID)
 		return err
 	})
@@ -575,7 +575,7 @@ func (s *Store) completeIntegrationLanding(ctx context.Context, rep *ContractRun
 	wctx := context.WithoutCancel(ctx)
 	return s.mutateAsRun(wctx, actor, ChannelInvoker, VerificationNone, &runInt, func(tx *sql.Tx, rec *activityRecorder) error {
 		ctx := wctx
-		res, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`,
+		res, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ?, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`,
 			formatTimestamp(s.currentTime()), cid, rep.ExternalRunID)
 		if err != nil {
 			return err

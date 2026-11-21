@@ -89,31 +89,59 @@ func loadConflictFixes(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Co
 	return out, rows.Err()
 }
 
-// fillRunFixPending は runs のうち、確かめ待ちの中身を持つ契約の実行を始めた run（contract_run.start_run_id）の FixPendingRef を埋める。
-// 確かめ待ちの中身が無い run は nil のまま。
+// fillRunFixPending は runs（課題の実行の一覧。新しい順）のうち、確かめ待ちの中身を持つ契約の実行に対応する run の FixPendingRef を埋める。
+// 載せる先は、その契約の実行を始めた run（contract_run.start_run_id）。一覧は件数を限るので、始めた run が一覧に無いとき（反映の段・
+// 状態の確認が契約のコマンドを呼ぶたびに run が増える）は、一覧にある、その契約の実行の契約のコマンドの run（kind が contract・同じタスク・
+// 始めた run より後）のうち最も新しいものへ載せる。どちらも一覧に無ければ載せない。確かめ待ちの中身が無い run は nil のまま。
 func fillRunFixPending(ctx context.Context, tx *sql.Tx, challengeID int64, runs []Run) error {
-	rows, err := tx.QueryContext(ctx, `SELECT start_run_id, fix_pending_ref FROM contract_run
-		WHERE challenge_id = ? AND fix_pending_ref IS NOT NULL AND fix_pending_ref <> ''`, challengeID)
+	rows, err := tx.QueryContext(ctx, `SELECT start_run_id, task_id, fix_pending_ref FROM contract_run
+		WHERE challenge_id = ? AND fix_pending_ref IS NOT NULL AND fix_pending_ref <> '' ORDER BY id`, challengeID)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
-	pending := map[string]string{}
+	type pendingRun struct {
+		startRun int64
+		taskID   string
+		ref      string
+	}
+	var pending []pendingRun
 	for rows.Next() {
-		var startRun int64
-		var ref string
-		if err := rows.Scan(&startRun, &ref); err != nil {
+		var p pendingRun
+		var taskID sql.NullInt64
+		if err := rows.Scan(&p.startRun, &taskID, &p.ref); err != nil {
 			return err
 		}
-		pending[formatRunID(startRun)] = ref
+		if taskID.Valid {
+			p.taskID = formatTaskID(taskID.Int64)
+		}
+		pending = append(pending, p)
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	for i := range runs {
-		if ref, ok := pending[runs[i].ID]; ok {
-			v := ref
-			runs[i].FixPendingRef = &v
+	for _, p := range pending {
+		target := -1
+		for i := range runs {
+			id, ok := parseRunID(runs[i].ID)
+			if !ok || id < p.startRun {
+				continue
+			}
+			if id == p.startRun {
+				target = i
+				break
+			}
+			taskID := ""
+			if runs[i].TaskID != nil {
+				taskID = *runs[i].TaskID
+			}
+			if target < 0 && runs[i].Kind == RunKindContract && taskID == p.taskID {
+				target = i // 一覧は新しい順なので、最初に当たったものが最も新しい
+			}
+		}
+		if target >= 0 {
+			v := p.ref
+			runs[target].FixPendingRef = &v
 		}
 	}
 	return nil

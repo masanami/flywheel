@@ -288,6 +288,13 @@ type releaseJudgment struct {
 	// 対応する反映の依頼を取り消した結果の文（試行の記録の詳細に足す）。
 	run        *releaseRun
 	cancelNote string
+	// fixPendingRef が空でないとき、結果（waiting_fix_check）を書く書き込みで、対応する契約の実行（run）の確かめ待ちの中身をこの値にする
+	// （衝突の解消の確かめ。承認は取り消さない）。clearFixRejected が真のとき、同じ書き込みで、その実行の確かめが通らなかった中身を消す
+	// （いまの中身が通らなかった中身と違うので、起点から見分け直した）。
+	// clearFixPending が真のとき（見分けの結果が衝突の解消ありでないのに確かめ待ちの中身が残っている）、同じ書き込みで確かめ待ちの中身を消す。
+	fixPendingRef    string
+	clearFixRejected bool
+	clearFixPending  bool
 }
 
 func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExecOptions) (*ReleaseExecItem, *NotStarted, error) {
@@ -314,11 +321,12 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 	}
 
 	var (
-		row         *operationRow
-		attempt     *operationExecutionRow
-		notStarted  *NotStarted
-		approvedRow string
-		prevResult  ExecutionResult
+		row          *operationRow
+		attempt      *operationExecutionRow
+		notStarted   *NotStarted
+		approvedRow  string
+		prevResult   ExecutionResult
+		prevObserved string
 	)
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
 		r, err := loadOperationRow(ctx, tx, opID)
@@ -350,8 +358,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 			return err
 		}
 		approvedRow = head
-		prevResult, err = lastDecidedExecutionResult(ctx, tx, opID)
-		if err != nil {
+		if prevResult, prevObserved, err = lastDecidedExecution(ctx, tx, opID); err != nil {
 			return err
 		}
 		attempt, err = beginOperationExecution(ctx, tx, opID, beginOperationExecutionInput{StartedAt: at, ApprovedHead: head, PID: pid, Host: host})
@@ -408,8 +415,16 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		return nil, nil, err
 	}
 
+	// 残っている確かめ待ちの中身を消すのは、この操作が書いたもの（直前の閉じた試行が waiting_fix_check で、その中身を見ていた）だけ。
+	// 1 本のタスクの実行に反映の操作が複数対応するとき、別の操作の確かめ待ちの中身を消さない。
+	if j.clearFixPending && (prevResult != ExecutionResultWaitingFixCheck || j.run == nil || prevObserved != j.run.row.FixPendingRef) {
+		j.clearFixPending = false
+	}
 	// 待っている間は試行の行を増やさない: 直前の試行も flywheel の外での反映を待っていたなら、開いた行を消して返す。
-	if j.result == ExecutionResultWaitingOutside && prevResult == ExecutionResultWaitingOutside {
+	// 衝突の解消の確かめを待つ間も同じ: 直前の試行が waiting_fix_check で同じ中身を見ていて、確かめ待ちの中身もすでにその中身なら増やさない。
+	sameFixWait := j.result == ExecutionResultWaitingFixCheck && prevResult == ExecutionResultWaitingFixCheck && prevObserved == j.observedHead &&
+		j.run != nil && j.run.row.FixPendingRef == j.fixPendingRef && !j.clearFixRejected
+	if (j.result == ExecutionResultWaitingOutside && prevResult == ExecutionResultWaitingOutside) || sameFixWait {
 		derr := s.db.Write(ctx, func(tx *sql.Tx) error {
 			// 判定の間に別の経路が操作を変えていたら、待っているとは返さない（試行の終わり方と同じ楽観ロック）。
 			cur, err := loadOperationRow(ctx, tx, opID)
@@ -429,6 +444,11 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 					Reason: NotStartedInProgress, Detail: fmt.Sprintf("%d", attempt.ID)}, nil
 			}
 			return nil, nil, derr
+		}
+		if sameFixWait {
+			// 閉集合の理由に待つ専用の値は無いので、in_progress に待っている結果を詳細で添える。
+			return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID), Reason: NotStartedInProgress,
+				Detail: string(ExecutionResultWaitingFixCheck)}, nil
 		}
 		return nil, &NotStarted{ChallengeID: formatChallengeID(row.ChallengeID), OperationID: formatOperationID(opID), Reason: NotStartedWaitingOutside}, nil
 	}
@@ -608,6 +628,10 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 		j.route = run.route()
 	}
 	j.run = run
+	// 通らなかった中身と違う中身を見たら、同じ書き込みで通らなかった中身を消す（起点から見分け直した）。
+	if run != nil && run.corresponds && run.row.FixRejectedRef != "" && j.observedHead != "" && j.observedHead != run.row.FixRejectedRef {
+		j.clearFixRejected = true
+	}
 	// 委譲先の succeeded を読む以外の道で終わるとき、終わっていない対応する実行を取り消す（開いたまま残さない）。
 	if cancelsCorrespondingRun(run, j.result) {
 		j.detail = appendDetail(j.detail, s.cancelReleaseRunNote(ctx, opts, run, rep))
@@ -616,7 +640,10 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 }
 
 // judgeReleaseUpstream は judgeRelease の、成果物を上流から読んで確かめ、道を選ぶ部分。
-func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport) (releaseJudgment, error) {
+func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport) (out releaseJudgment, _ error) {
+	// 見分けの結果が衝突の解消ありでない（起点と同じ・取り込みだけ）のに確かめ待ちの中身が残っていれば、この試行の結果を書く書き込みで消す。
+	staleFixPending := false
+	defer func() { out.clearFixPending = out.clearFixPending || staleFixPending }()
 	approved := &approvedHeadChecks{}
 	// 1
 	if approvedHead == "" {
@@ -644,7 +671,8 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 	observed := pr.HeadSHA
 	// 4
 	if pr.State == string(artifactStateMerged) {
-		if pr.HeadSHA == approvedHead || movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) {
+		if pr.HeadSHA == approvedHead || movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) ||
+			movedFromVerified(ctx, opts, run, repo, decl.DefaultBranch, pr.HeadSHA) {
 			detail := ""
 			if pr.HeadSHA != approvedHead && len(pr.Checks) == 0 {
 				if none, _ := approved.noChecks(ctx, opts.Checks, repo, approvedHead); none {
@@ -675,7 +703,21 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 	}
 	// 7
 	moved := pr.HeadSHA != approvedHead
-	if moved && !movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) {
+	var fix releaseFixMove
+	if run != nil && run.corresponds {
+		// 対応する契約の実行がある: 見分けの起点は、通した中身（あれば）か承認した中身。衝突の解消ありは、承認を取り消さず確かめを待つ。
+		fix = s.classifyFixMove(ctx, opts, run, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA)
+		switch fix.outcome {
+		case fixMoveRejected:
+			return releaseJudgment{result: ExecutionResultHeadChanged, observedHead: observed, detail: fixRejectedDetail(pr.HeadSHA)}, nil
+		case fixMoveContentChanged:
+			return releaseJudgment{result: ExecutionResultHeadChanged, observedHead: observed}, nil
+		case fixMoveConflictFix:
+			return releaseJudgment{result: ExecutionResultWaitingFixCheck, observedHead: observed, route: run.route(),
+				fixPendingRef: pr.HeadSHA}, nil
+		}
+		staleFixPending = run.row.FixPendingRef != ""
+	} else if moved && !movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) {
 		return releaseJudgment{result: ExecutionResultHeadChanged, observedHead: observed}, nil
 	}
 	// 8・9
@@ -703,14 +745,14 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 	return s.chooseReleasePath(ctx, row, opts, run, rep, pr.HeadSHA, observed)
 }
 
-// lastDecidedExecutionResult は opID の、閉じた試行のうち最後のもの（interrupted を除く）の結果を返す（無ければ空）。
-func lastDecidedExecutionResult(ctx context.Context, tx *sql.Tx, opID int64) (ExecutionResult, error) {
-	var r sql.NullString
+// lastDecidedExecution は opID の、閉じた試行のうち最後のもの（interrupted を除く）の結果と見た中身を返す（無ければどちらも空）。
+func lastDecidedExecution(ctx context.Context, tx *sql.Tx, opID int64) (ExecutionResult, string, error) {
+	var r, h sql.NullString
 	err := tx.QueryRowContext(ctx,
-		`SELECT result FROM operation_execution WHERE operation_id = ? AND result IS NOT NULL AND result != ? ORDER BY id DESC LIMIT 1`,
-		opID, string(ExecutionResultInterrupted)).Scan(&r)
+		`SELECT result, observed_head FROM operation_execution WHERE operation_id = ? AND result IS NOT NULL AND result != ? ORDER BY id DESC LIMIT 1`,
+		opID, string(ExecutionResultInterrupted)).Scan(&r, &h)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+		return "", "", nil
 	}
-	return ExecutionResult(r.String), err
+	return ExecutionResult(r.String), h.String, err
 }

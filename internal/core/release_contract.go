@@ -184,7 +184,7 @@ func (s *Store) closeHeldEndWithoutOwner(ctx context.Context, challengeID int64)
 				return nil
 			}
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE id = ? AND ended_at IS NULL AND state IN ('succeeded', 'failed', 'cancelled')`,
+		res, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ?, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE id = ? AND ended_at IS NULL AND state IN ('succeeded', 'failed', 'cancelled')`,
 			formatTimestamp(s.currentTime()), cr.ID)
 		if err != nil {
 			return err
@@ -438,14 +438,15 @@ func (s *Store) releaseLand(ctx context.Context, opts ReleaseExecOptions, run *r
 }
 
 // clearLandRefsForOperation は反映の操作 opID を取り消すとき、その操作に対応する契約の実行（反映の依頼なら operation_id が
-// opID、タスクの実行なら取り込んだ成果物の参照が操作の参照と同じもの）だけの land_ref を消し、land_delivered を偽にする
+// opID、タスクの実行なら取り込んだ成果物の参照が操作の参照と同じもの）だけの land_ref を消し、land_delivered を偽にし、衝突の解消の確かめの 3 列
+// （fix_pending_ref・fix_verified_ref・fix_rejected_ref）も消す
 // （承認し直した後は、もう一度「入れてよい」を返す）。契約のコマンドは呼ばない。
 func clearLandRefsForOperation(ctx context.Context, tx *sql.Tx, challengeID, opID int64) error {
 	var ref sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT ref FROM operation WHERE id = ?`, opID).Scan(&ref); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND (land_ref IS NOT NULL OR land_delivered <> 0)`, challengeID)
+	rows, err := tx.QueryContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND (land_ref IS NOT NULL OR land_delivered <> 0 OR fix_pending_ref IS NOT NULL OR fix_verified_ref IS NOT NULL OR fix_rejected_ref IS NOT NULL)`, challengeID)
 	if err != nil {
 		return err
 	}
@@ -471,17 +472,18 @@ func clearLandRefsForOperation(ctx context.Context, tx *sql.Tx, challengeID, opI
 		if !match {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET land_ref = NULL, land_delivered = 0 WHERE id = ?`, r.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET land_ref = NULL, land_delivered = 0, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE id = ?`, r.ID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// clearLandRefs は課題の契約の実行すべての land_ref を消す（完了から検証中へ戻すとき。T18）。
+// clearLandRefs は課題の契約の実行すべての land_ref と衝突の解消の確かめの 3 列を消す（完了から検証中へ戻すとき。T18）。
 func clearLandRefs(ctx context.Context, tx *sql.Tx, challengeID int64) error {
 	_, err := tx.ExecContext(ctx,
-		`UPDATE contract_run SET land_ref = NULL, land_delivered = 0 WHERE challenge_id = ? AND (land_ref IS NOT NULL OR land_delivered <> 0)`, challengeID)
+		`UPDATE contract_run SET land_ref = NULL, land_delivered = 0, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL
+		WHERE challenge_id = ? AND (land_ref IS NOT NULL OR land_delivered <> 0 OR fix_pending_ref IS NOT NULL OR fix_verified_ref IS NOT NULL OR fix_rejected_ref IS NOT NULL)`, challengeID)
 	return err
 }
 
