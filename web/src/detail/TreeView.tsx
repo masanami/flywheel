@@ -1,7 +1,7 @@
 import type { ShowCardResponse, TreeRelative } from "../api/types.gen.ts";
 import {
   DEPENDENCY_SATISFIED_LABEL,
-  DEPENDENCY_UNRESOLVED_LABEL,
+  DEPENDENCY_UNMET_LABEL,
   FOLLOWUP_SOURCE_LABELS,
   FOLLOWUP_STATUS_LABELS,
   OPERATION_KIND_LABELS,
@@ -172,7 +172,7 @@ function Related({
                 <span className={d.satisfied ? undefined : "dep-unmet"}>
                   {d.satisfied
                     ? DEPENDENCY_SATISFIED_LABEL
-                    : DEPENDENCY_UNRESOLVED_LABEL}
+                    : DEPENDENCY_UNMET_LABEL}
                 </span>
               </li>
             ))}

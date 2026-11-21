@@ -345,6 +345,46 @@ it("#933: 不可逆操作の側の承認・差し戻しの行は出さず、課�
   ]);
 });
 
+it("#933: 対になる課題の側の行が無い不可逆操作の側の承認・差し戻しの行は、消えずに出る（種類の語つき）", async () => {
+  const { root } = await open(
+    [
+      act1({
+        action: "approve",
+        entity: "operation",
+        entity_id: "O-1",
+        at: "2026-11-01T01:00:00Z",
+      }),
+      act1({
+        action: "reject",
+        entity: "operation",
+        entity_id: "O-2",
+        at: "2026-11-01T02:00:00Z",
+      }),
+      // 別の操作の課題の側の行は、O-1・O-2 の対にならない。
+      act1({
+        action: "op_approve",
+        after: { operation_id: "O-3" },
+        at: "2026-11-01T03:00:00Z",
+      }),
+    ],
+    {
+      operations: [
+        opOf("O-1", "release"),
+        opOf("O-2", "delete"),
+        opOf("O-3", "release"),
+      ],
+    },
+  );
+  await firstRow(root);
+  expect(whatOf(root).sort()).toEqual(
+    [
+      "不可逆操作を承認した（反映）",
+      "不可逆操作を差し戻した（削除）",
+      "不可逆操作を承認した（反映）",
+    ].sort(),
+  );
+});
+
 it("#933: 突き合わせて見つからない operation_id の行は、種類の語なしで出る。不可逆操作の登録の行は変わらない", async () => {
   const { root } = await open(
     [

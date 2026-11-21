@@ -55,27 +55,51 @@ function kindOf(a: Activity): Kind {
   );
 }
 
-// 不可逆操作の側の承認・差し戻しの記録。仕様（Issue #933）で画面に出さない行。課題の側の記録（op_approve・op_reject）と対になるのは単独の承認・差し戻しの経路だけで、完了承認の一括承認と取り下げの差し戻しには課題の側の対が無い（仕様への指摘として PR に記載）。
-function isOperationSideDecision(a: Activity): boolean {
-  return (
-    a.entity === "operation" &&
-    (a.action === "approve" || a.action === "reject")
-  );
+// 課題の側の承認・差し戻しの記録（op_approve・op_reject）の action と、対になる不可逆操作の側の action。
+const OPERATION_DECISION_PAIRS: Record<string, string> = {
+  op_approve: "approve",
+  op_reject: "reject",
+};
+
+function operationIdOf(a: Activity): string | null {
+  if (typeof a.after !== "object" || a.after === null) return null;
+  const oid = (a.after as Record<string, unknown>).operation_id;
+  return typeof oid === "string" ? oid : null;
 }
 
-const OPERATION_DECISION_ACTIONS = ["op_approve", "op_reject"];
-
-// 課題の側の記録の operation_id を、課題の詳細の operations[] と突き合わせて、操作の種類の語を返す。見つからなければ null。
-function operationKindWord(a: Activity, show: ShowCardResponse): string | null {
-  if (
-    a.entity !== "challenge" ||
-    !OPERATION_DECISION_ACTIONS.includes(a.action) ||
-    typeof a.after !== "object" ||
-    a.after === null
-  ) {
-    return null;
+// 1 つの出来事が 2 行にならないよう、課題の側の記録と対になる不可逆操作の側の承認・差し戻しの行だけを隠す鍵（action と operation_id）の集合。
+// 対になる課題の側の行が無い経路（完了承認と同時の反映の承認・取り下げによる差し戻し）では、不可逆操作の側の行を出す。
+function pairedOperationSideKeys(activities: Activity[]): Set<string> {
+  const keys = new Set<string>();
+  for (const a of activities) {
+    if (a.entity !== "challenge") continue;
+    const side = OPERATION_DECISION_PAIRS[a.action];
+    const oid = operationIdOf(a);
+    if (side !== undefined && oid !== null) keys.add(`${side}:${oid}`);
   }
-  const oid = (a.after as Record<string, unknown>).operation_id;
+  return keys;
+}
+
+function isPairedOperationSideDecision(
+  a: Activity,
+  paired: Set<string>,
+): boolean {
+  return a.entity === "operation" && paired.has(`${a.action}:${a.entity_id}`);
+}
+
+// 操作の ID を、課題の詳細の operations[] と突き合わせて、操作の種類の語を返す。見つからなければ null。
+// 課題の側の行（after.operation_id）と、不可逆操作の側の承認・差し戻しの行（entity_id）に付ける。
+function operationKindWord(a: Activity, show: ShowCardResponse): string | null {
+  let oid: string | null = null;
+  if (a.entity === "challenge" && a.action in OPERATION_DECISION_PAIRS) {
+    oid = operationIdOf(a);
+  } else if (
+    a.entity === "operation" &&
+    (a.action === "approve" || a.action === "reject")
+  ) {
+    oid = a.entity_id;
+  }
+  if (oid === null) return null;
   const op = show.operations.find((o) => o.id === oid);
   return op === undefined ? null : label(OPERATION_KIND_LABELS, op.kind);
 }
@@ -183,9 +207,10 @@ export function History({
   }
   const titles = new Map(show.tasks.map((t) => [t.id, t.title]));
   const taskTitle = (tid: string) => titles.get(tid) ?? tid;
+  const paired = pairedOperationSideKeys(result.data.activities);
   const rows: Row[] = [
     ...result.data.activities
-      .filter((a) => !isOperationSideDecision(a))
+      .filter((a) => !isPairedOperationSideDecision(a, paired))
       .map((a, i) => activityRow(a, i, taskTitle, show)),
     ...show.runs.map((r) => runRow(r, taskTitle)),
   ].sort((x, y) => time(y.at) - time(x.at));

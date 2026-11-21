@@ -227,20 +227,20 @@ it("AC-195 #807: dependencies がある枠に前提の課題の status_label が
   expect(within(d).getByText("進行だよ")).toBeInTheDocument();
 });
 
-it("AC-196 #807: satisfied が偽の前提には「未完了」が添えて出る", async () => {
+it("AC-196 #807: satisfied が偽の前提には「未解消」が添えて出る", async () => {
   await open({
     challenges: [challenge("C-1", { dependencies: [dep("C-7", false)] })],
   });
   const d = await screen.findByTestId("dependencies");
-  expect(within(d).getByText("未完了")).toBeInTheDocument();
+  expect(within(d).getByText("未解消")).toBeInTheDocument();
 });
 
-it("AC-197 #807: satisfied が真の前提には「未完了」は出ない", async () => {
+it("AC-197 #807: satisfied が真の前提には「未解消」は出ない", async () => {
   await open({
     challenges: [challenge("C-1", { dependencies: [dep("C-7", true)] })],
   });
   const d = await screen.findByTestId("dependencies");
-  expect(within(d).queryByText("未完了")).toBeNull();
+  expect(within(d).queryByText("未解消")).toBeNull();
 });
 
 it("AC-198 #807: tasks が空の課題の枠に「タスクはまだありません。」が出る", async () => {
