@@ -622,9 +622,8 @@ func TestJ5TaskInput_TwoRunsWithArtifactsTheLaterRunWins(t *testing.T) {
 	}
 }
 
-// 現状の動きの固定（基準文との食い違い）: 基準文は「そのタスクの、最後の委譲の実行の成果物」だが、実装は成果物のある実行を優先して選ぶ
-// （run_artifact を持つ実行 → ID の大きい実行の順）。成果物を持たない実行が最後にあっても、その前の、成果物のある実行の成果物が入る。
-// 実装は変えない（S3b の仕上げ 4。PR の説明で報告する）。
+// タスクの検証の入力の成果物は、成果物を持つ最後の実行のもの（run_artifact を持つ実行 → ID の大きい実行の順で選ぶ）。
+// 成果物を持たない実行が最後にあっても、その前の、成果物のある実行の成果物が入る。
 func TestJ5TaskInput_LaterRunWithoutArtifactsStillGetsTheEarlierRunsArtifacts(t *testing.T) {
 	t.Parallel()
 	f := newTaskVerifyFixture(t)
