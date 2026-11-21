@@ -69,6 +69,9 @@ type j5FixScope struct {
 	// Repo は比較の口へ渡すリポジトリ（"<owner>/<name>"）、Base は宛先のブランチ（統合先、または反映先の既定ブランチ）。
 	Repo, Base string
 	Change     HeadChange
+	// DiffTruncated は、確かめの入力の「衝突の解消の差分」が上限（maxPullRequestDiffBytes）で切られたとき真。判断点は、確かめ待ちの中身の作業ツリーしか読めず、
+	// 落ちた分の差分を作り直せないので、真のときは「満たした」を通さない（finalizeJ5FixOutput）。
+	DiffTruncated bool
 }
 
 // j5FixResult は確かめの結果。宛先ごとの書き込みの口（j5FixWriters）が受け取る。
@@ -419,8 +422,8 @@ func formatExpectedScenes(ch Challenge, plan approvedPlan) string {
 }
 
 // formatConflictFixes は区画「衝突の解消の差分」の本文。取り込みのマージのコミットごとに、両方の親と違う形になったファイルの名前と、通した中身の側の
-// 親からの差分を書く。差分を上流が返さなかったファイルは、名前と、差分を読めなかった旨を書く。上限を超えた分は切り、切ったことを書く。
-func formatConflictFixes(fixes []ConflictFix) string {
+// 親からの差分を書く。差分を上流が返さなかったファイルは、名前と、差分を読めなかった旨を書く。上限を超えた分は切り、切ったことを書き、truncated を真にして返す。
+func formatConflictFixes(fixes []ConflictFix) (content string, truncated bool) {
 	var blocks []string
 	for _, fx := range fixes {
 		if len(fx.Files) == 0 {
@@ -441,11 +444,11 @@ func formatConflictFixes(fixes []ConflictFix) string {
 	if omitted > 0 {
 		content += fmt.Sprintf("\n\n（差分は合計 %d バイトあり、先頭の %d バイトまでを入れて残りを省略した）", omitted, maxPullRequestDiffBytes)
 	}
-	return content
+	return content, omitted > 0
 }
 
-// fixCheckSections は確かめの入力（データの区画）を組み立てる。checkoutNote は作業ディレクトリの注記。
-func fixCheckSections(sc *j5FixScope, checkoutNote string, memoryIndex []JudgmentDataSection) []JudgmentDataSection {
+// fixCheckSections は確かめの入力（データの区画）を組み立てる。diff は区画「衝突の解消の差分」の本文（formatConflictFixes）。checkoutNote は作業ディレクトリの注記。
+func fixCheckSections(sc *j5FixScope, diff, checkoutNote string, memoryIndex []JudgmentDataSection) []JudgmentDataSection {
 	ch := sc.Challenge
 	urgency, priority := "", ""
 	if ch.Urgency != nil {
@@ -475,7 +478,7 @@ func fixCheckSections(sc *j5FixScope, checkoutNote string, memoryIndex []Judgmen
 	sections = append(sections,
 		JudgmentDataSection{Label: labelFixPassedSection, Content: sc.PassedRef},
 		JudgmentDataSection{Label: labelFixPendingSection, Content: sc.PendingRef},
-		JudgmentDataSection{Label: labelFixDiffSection, Content: formatConflictFixes(sc.Change.ConflictFixes)},
+		JudgmentDataSection{Label: labelFixDiffSection, Content: diff},
 	)
 	if checkoutNote != "" {
 		sections = append(sections, JudgmentDataSection{Label: labelFixCheckoutNotice, Content: checkoutNote})
@@ -559,13 +562,16 @@ func (s *Store) verifyFixTarget(ctx context.Context, in J5AutoInput, jc *Judgmen
 	defer head.remove(ctx)
 	note := fmt.Sprintf("作業ディレクトリは、確かめ待ちの中身（%s）を取り出した作業ツリーである。", scope.PendingRef)
 
+	diff, truncated := formatConflictFixes(scope.Change.ConflictFixes)
+	scope.DiffTruncated = truncated
+
 	planVersion := int64(scope.Plan.Version)
 	runIn := RunJudgmentInput{
 		ChallengeID:  chID,
 		Judgment:     JudgmentJ5,
 		MaxBudgetUSD: j5Budget,
 		TimeoutSec:   in.AgentDecl.TimeoutSec.Judgment,
-		Sections:     fixCheckSections(scope, note, memoryIndexSections(s.workspace, in.AgentDecl)),
+		Sections:     fixCheckSections(scope, diff, note, memoryIndexSections(s.workspace, in.AgentDecl)),
 		OutputSchema: j5OutputSchema(),
 		Invoker:      in.Invoker,
 		PlanVersion:  &planVersion,
@@ -612,16 +618,48 @@ func (s *Store) finalizeJ5FixOutput(ctx context.Context, runIDDisplay string, sc
 	if v.Question != nil {
 		r.Question = *v.Question
 	}
+	if scope.DiffTruncated && r.Verdict == J5VerdictMet {
+		// 入力の差分が上限で切られた。判断点は、落ちた分の差分を作り直せないので、「満たした」を通さず、判断できないと同じに扱う。
+		r.Verdict = J5VerdictUncertain
+		r.Reason = fmt.Sprintf("衝突の解消の差分が上限（%d バイト）を超えて切られ、入力に入らなかった分があるので、判断点が「満たした」と答えたが通さなかった（%s）", maxPullRequestDiffBytes, v.Reason)
+		r.Question = "衝突の解消の差分が上限を超えて切られ、判断点が全体を確かめられなかった。検証か承認をやり直すか。"
+		if err := s.recordTruncatedOverride(ctx, runIDDisplay, structured, r); err != nil {
+			return "", nil, "", err
+		}
+	}
 	mapped, err := s.applyJ5Fix(ctx, runIDDisplay, scope, r)
 	if err != nil {
 		return "", nil, "", err
 	}
-	outcome = string(v.Verdict)
+	outcome = string(r.Verdict)
 	if !mapped {
 		return outcome, nil, RunResultSucceeded, nil
 	}
 	st := string(scope.Challenge.Status)
 	return outcome, &st, RunResultSucceeded, nil
+}
+
+// recordTruncatedOverride は、差分が切られたので「満たした」を判断できないへ読み替えたことを、run の保存済みの出力へ残す（読み替えた理由と、判断点の元の判定・
+// 元の出力そのもの。run の履歴を読む人が、満たしたのに通っていない形を見ないため）。
+func (s *Store) recordTruncatedOverride(ctx context.Context, runIDDisplay string, structured []byte, r *j5FixResult) error {
+	rid, ok := parseRunID(runIDDisplay)
+	if !ok {
+		return ErrValidation
+	}
+	out, err := json.Marshal(map[string]any{
+		"verdict":                        string(r.Verdict),
+		"reason":                         r.Reason,
+		"question":                       r.Question,
+		"diff_truncated_overridden_from": string(J5VerdictMet),
+		"j5_output":                      json.RawMessage(structured),
+	})
+	if err != nil {
+		return err
+	}
+	return classifyReadWriteErr(s.db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE run SET output = ? WHERE id = ?`, string(out), rid)
+		return err
+	}))
 }
 
 // applyJ5Fix は確かめの結果 r を、書く直前の読み直し（j5FixStillCurrent）を通したときだけ、宛先ごとの書き込みの口へ振り分ける。
