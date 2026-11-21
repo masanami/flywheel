@@ -73,45 +73,84 @@ func stableSortChallengesByPriority(out []Challenge) {
 	})
 }
 
-// contractRunReviewWaitWhere は、契約の run（k）が成果物のレビュー待ち（waiting・review）で、課題（c）が検証中・完了の承認待ち・
-// 完了の条件。成果物を取り込んで検証中へ進めた後、本番反映で ready を返す（完了になる）まで、さらに ready を返して run が終わるまで
-// 契約の run は開いたままだが、課題の実行中としては数えない。
-const contractRunReviewWaitWhere = `(k.state = 'waiting' AND k.requested_kind = 'review' AND c.status IN ('verifying', 'awaiting_completion_approval', 'done'))`
+// contractRunReviewWaitWhere は、契約の run（k）が成果物のレビュー待ち（waiting・review）である条件。課題の状態は問わない。
+// 成果物を取り込んで検証中へ進める前も、検証中・完了の承認待ち・本番反映の間も、ready を返して run が終わるまで、契約の run は
+// 開いたままだが、実行中としては数えない（同じ課題の別のタスクの起動・検証・反映を妨げない）。
+const contractRunReviewWaitWhere = `(k.state = 'waiting' AND k.requested_kind = 'review')`
 
-// challengeHasActiveRun は challengeID（内部整数 ID）の課題が終了していない
-// run を持つかを返す（§判断点の共通の規則「判断の呼び出しの対象にするのは…
-// 終了していない run を持たない課題に限る」）。
+// challengeHasActiveRun は challengeID（内部整数 ID）の課題が実行中かを返す（§判断点の共通の規則「判断の呼び出しの対象に
+// するのは…終了していない run を持たない課題に限る」）。課題の単位の判断点（分類・計画・学び）が見る述語で、その課題の
+// どれかのタスクが実行中か、タスクに結び付かない、終わっていない実行の記録か、作業している契約の実行があること。
 func challengeHasActiveRun(ctx context.Context, tx *sql.Tx, challengeID int64) (bool, error) {
-	row, err := loadActiveRunByChallengeID(ctx, tx, challengeID)
-	if err != nil {
-		return false, err
+	return activeRunScoped(ctx, tx, challengeID, nil)
+}
+
+// taskHasActiveRun は challengeID の課題のタスク taskID が実行中かを返す。そのタスクに、終わっていない実行の記録があるか、
+// 作業している契約の実行（終わっていなくて、最後に読んだ状態が、レビュー待ち・オーナーへの問いの待ちでないもの）があること。
+// 起動の判定（beginContractRunForTask）と、統合先を使う課題の J5 のタスクの単位の対象の選び方・検証の起動
+// （selectJ5TaskTargetsOf・verifyTarget）が見るタスクの単位の述語。統合先を使わない課題の J5・J1・J2・J6 の対象の選び方は、
+// 課題の単位の challengeHasActiveRun のまま。保留の間の成功の扱い（held_success）も、統合先を使わない課題だけが持つので課題の単位のまま。
+// 課題の単位の述語は、オーナーへの問いの待ちを引き続き数える（保留の課題を、課題の単位の判断点の対象にしないため）。
+func taskHasActiveRun(ctx context.Context, tx *sql.Tx, challengeID, taskID int64) (bool, error) {
+	return activeRunScoped(ctx, tx, challengeID, &taskID)
+}
+
+// taskLessHasActiveRun は challengeID の課題の、タスクに結び付かない実行（task_id が空の run・契約の run）が実行中かを返す。
+// タスクの起動は、自分のタスクの実行に加えて、タスクに結び付かない実行とも重ならない。
+func taskLessHasActiveRun(ctx context.Context, tx *sql.Tx, challengeID int64) (bool, error) {
+	none := int64(0)
+	return activeRunScoped(ctx, tx, challengeID, &none)
+}
+
+// activeRunScoped は challengeHasActiveRun（taskID が nil）と taskHasActiveRun（非 nil）の本体。taskID が指す値が 0 のときは、
+// タスクに結び付かない実行だけを見る（taskLessHasActiveRun）。
+func activeRunScoped(ctx context.Context, tx *sql.Tx, challengeID int64, taskID *int64) (bool, error) {
+	// task は、タスクの単位で絞るときの条件の足し方（列の別名 col の task_id がそのタスクであること）と引数。
+	taskClause := func(col string) string {
+		switch {
+		case taskID == nil:
+			return ""
+		case *taskID == 0:
+			return " AND " + col + ".task_id IS NULL"
+		}
+		return " AND " + col + ".task_id = ?"
 	}
-	if row != nil {
-		return true, nil
-	}
-	// 周をまたいで続く契約の run（form: cli）も、課題の実行中として数える。
-	var n int
-	// ただし、成果物を出して検証中・完了でレビューを待っている契約の run（contractRunReviewWaitWhere）は数えない
-	// （検証・完了の承認・本番反映の間、J5 などの対象から外さないため）。
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-		WHERE k.challenge_id = ? AND k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere, challengeID).Scan(&n)
-	if err != nil || n > 0 {
+	count := func(q string, col string) (bool, error) {
+		args := []any{challengeID}
+		if taskID != nil && *taskID != 0 {
+			args = append(args, *taskID)
+		}
+		var n int
+		err := tx.QueryRowContext(ctx, q+taskClause(col), args...).Scan(&n)
 		return n > 0, err
+	}
+	// 終わっていない run。
+	if ok, err := count(`SELECT COUNT(*) FROM run r WHERE r.challenge_id = ? AND r.result IS NULL`, "r"); err != nil || ok {
+		return ok, err
+	}
+	// 周をまたいで続く契約の run（form: cli）も、実行中として数える。ただし、レビュー待ち（contractRunReviewWaitWhere）は数えない
+	// （検証・完了の承認・本番反映の間、J5 などの対象から外さないため）。タスクの単位では、オーナーへの問いの待ちも数えない。
+	q := `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
+		WHERE k.challenge_id = ? AND k.ended_at IS NULL AND NOT ` + contractRunReviewWaitWhere
+	if taskID != nil {
+		q += ` AND NOT ` + ownerWaitContractRunWhere
+	}
+	if ok, err := count(q, "k"); err != nil || ok {
+		return ok, err
 	}
 	// 保留の間に契約の run が成功し、まだ検証中へ進めていない課題（二つ目の委譲を起動させない）も同じ。
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-		WHERE k.challenge_id = ? AND k.held_success = 1 AND c.status = 'in_progress'`, challengeID).Scan(&n); err != nil || n > 0 {
-		return n > 0, err
+	if ok, err := count(`SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
+		WHERE k.challenge_id = ? AND k.held_success = 1 AND c.status = 'in_progress'`, "k"); err != nil || ok {
+		return ok, err
 	}
 	// 契約の start の最中に回収され、まだ保留に写していない課題（外部の run が残っているかもしれない）も、実行中として数える。
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run r JOIN challenge c ON c.id = r.challenge_id
-		WHERE r.challenge_id = ? AND `+reclaimedContractStartWhere, challengeID).Scan(&n); err != nil || n > 0 {
-		return n > 0, err
+	if ok, err := count(`SELECT COUNT(*) FROM run r JOIN challenge c ON c.id = r.challenge_id
+		WHERE r.challenge_id = ? AND `+reclaimedContractStartWhere, "r"); err != nil || ok {
+		return ok, err
 	}
 	// 契約の run が failed・cancelled で終わったのに保留を作れていない課題も同じ。
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-		WHERE k.challenge_id = ? AND `+unheldContractStopWhere, challengeID).Scan(&n)
-	return n > 0, err
+	return count(`SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
+		WHERE k.challenge_id = ? AND `+unheldContractStopWhere, "k")
 }
 
 // challengeAutoExclusion は challengeID が §判断点の共通の規則「周の中で自動で選ぶ対象からは、

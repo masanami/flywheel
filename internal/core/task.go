@@ -55,6 +55,9 @@ type TaskInput struct {
 	DependsOn    []string
 	// SourceKey は対応する取り込み元の子の external_key（"" は NULL＝子に対応しないタスク）。
 	SourceKey string
+	// BudgetImplMicros・BudgetReviewMicros はタスクの実装の枠・レビュー対応の枠（USD の 100 万分の 1。nil は NULL）。
+	BudgetImplMicros   *int64
+	BudgetReviewMicros *int64
 }
 
 // Task はタスク 1 件（前提のタスクの ID つき）。ID・DependsOn の要素は表示形（"T-<n>"）、ChallengeID は "C-<n>"。
@@ -76,6 +79,11 @@ type Task struct {
 	SourceKey string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// BudgetImplUSD・BudgetReviewUSD・SpentUSD はタスクの実装の枠・レビュー対応の枠（増額を含む実効値）と、そのタスクの実行の費用の合計（USD）。
+	// 課題の詳細（GetChallenge）だけが埋める。枠を決められないタスク（記録が空で、見直し前の決め方の値も引けない）は 0。
+	BudgetImplUSD   float64
+	BudgetReviewUSD float64
+	SpentUSD        float64
 }
 
 func (in TaskInput) valid() bool {
@@ -138,10 +146,11 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 			nonGoals = string(b)
 		}
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			challengeID, planVersion, nullableTextColumn(t.Key), t.Title, t.Body, t.DoneCriteria, nonGoals, t.Repo, t.Operation,
-			string(TaskStatusPending), nullableTextColumn(t.SourceKey), nowStr, nowStr)
+			string(TaskStatusPending), nullableTextColumn(t.SourceKey), nowStr, nowStr,
+			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros))
 		if store.IsUniqueViolation(err) {
 			return nil, errDuplicateTaskKey
 		}

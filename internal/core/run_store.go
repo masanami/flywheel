@@ -29,7 +29,7 @@ import (
 
 var (
 	// errActiveRunExists は、課題に既に終了していない run があることを表す
-	// （AC-168。部分一意索引 idx_run_active_challenge の違反を翻訳する）。
+	// （AC-168。部分一意索引 idx_run_active_challenge の違反と、タスクに結び付く run と結び付かない run の同時の未終了の確かめを翻訳する）。
 	errActiveRunExists = errors.New("core: challenge already has an active run")
 
 	// errActiveSlotRunExists は、スロットに既に終了していない run があることを
@@ -390,6 +390,8 @@ func (n *nullString) Scan(src any) error {
 // 同じ形）。ended_at・result・cost 系・output・error は NULL のまま挿入する
 // （終了時にしか決まらない列。updateRunEnd が後で埋める）。
 type insertRunInput struct {
+	// Reflect は、反映の操作を持たない反映の依頼（上げる依頼）の run にも run.reflect の印を付けるとき真（反映の操作を持つ run は常に付く）。
+	Reflect          bool
 	CycleID          *int64
 	Kind             runKind
 	Judgment         judgmentPoint
@@ -475,7 +477,8 @@ func (in insertRunInput) valid() bool {
 //
 //   - 入力が閉集合の外・必須値の欠落なら ErrValidation
 //   - 課題に既に終了していない run があれば errActiveRunExists
-//     （部分一意索引 idx_run_active_challenge の違反を翻訳する。AC-168）
+//     （部分一意索引 idx_run_active_challenge〔課題とタスクの組ごとに 1 本〕の違反と、タスク付きの run と課題の単位の run の
+//     同時の未終了を翻訳する。AC-168）
 //
 // J8 の run は課題に結び付かないため challengeID は 0 を渡す（NULL で
 // 挿入する）。それ以外の run に 0 以下を渡すと ErrValidation。
@@ -497,18 +500,35 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 		sessionIDCol = in.SessionID
 	}
 
+	if !noChallenge {
+		// 一意の索引は課題とタスクの組ごと（版 29）なので、タスクに結び付く run とタスクに結び付かない run（課題の単位）が
+		// 同時に終わっていない状態は索引では止まらない。見直し前と同じに、同じ書き込みの中でここで止める。
+		q := `SELECT COUNT(*) FROM run WHERE challenge_id = ? AND result IS NULL`
+		if in.TaskID != nil {
+			q += ` AND task_id IS NULL`
+		}
+		var n int
+		if err := tx.QueryRowContext(ctx, q, challengeID).Scan(&n); err != nil {
+			return nil, err
+		}
+		if n > 0 {
+			return nil, errActiveRunExists
+		}
+	}
+
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO run (cycle_id, kind, judgment, challenge_id, challenge_version, plan_version,
 			session_id, session_id_mismatch, resumed_from_run_id, pid, host, heartbeat_at, started_at,
 			ended_at, result, rate_limited, max_budget_usd, budget_bucket, cost_usd, cost_source,
-			reported_total_cost_usd, output, error, slot_id, decider, decider_row, repo, flywheel_version, task_id, operation_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+			reported_total_cost_usd, output, error, slot_id, decider, decider_row, repo, flywheel_version, task_id, operation_id, reflect)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		int64PtrColumn(in.CycleID), string(in.Kind), nullableTextColumn(string(in.Judgment)), challengeIDCol,
 		challengeVersionCol, int64PtrColumn(in.PlanVersion), sessionIDCol, int64PtrColumn(in.ResumedFromRunID),
 		in.PID, in.Host, formatTimestamp(in.HeartbeatAt), formatTimestamp(in.StartedAt),
 		in.MaxBudgetUSD, string(in.BudgetBucket),
 		int64PtrColumn(in.SlotID), nullableTextColumn(string(in.Decider)), int64PtrColumn(in.DeciderRow),
 		nullableTextColumn(in.Repo), nullableTextColumn(flywheelVersion()), int64PtrColumn(in.TaskID), int64PtrColumn(in.OperationID),
+		boolToInt(in.OperationID != nil || in.Reflect),
 	)
 	if store.IsUniqueViolation(err) {
 		// 部分一意索引のどちらに当たったかは、スロットを指定していて、その
@@ -549,6 +569,20 @@ func loadRunByID(ctx context.Context, tx *sql.Tx, id int64) (*runRow, error) {
 // （result IS NULL）を tx から読む。無ければ (nil, nil)。
 func loadActiveRunByChallengeID(ctx context.Context, tx *sql.Tx, challengeID int64) (*runRow, error) {
 	row := tx.QueryRowContext(ctx, runSelectColumns+" WHERE challenge_id = ? AND result IS NULL", challengeID)
+	r, err := scanRunRow(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// loadActiveRunByChallengeTask は、課題 challengeID のタスク taskID の終わっていない run か、タスクに結び付かない
+// 終わっていない run（task_id が空）を返す。無ければ nil。別のタスクの run は見ない。
+func loadActiveRunByChallengeTask(ctx context.Context, tx *sql.Tx, challengeID, taskID int64) (*runRow, error) {
+	row := tx.QueryRowContext(ctx, runSelectColumns+" WHERE challenge_id = ? AND result IS NULL AND (task_id IS NULL OR task_id = ?) LIMIT 1", challengeID, taskID)
 	r, err := scanRunRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

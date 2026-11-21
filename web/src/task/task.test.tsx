@@ -37,6 +37,8 @@ const BASE = "/api/v1/workspaces/alpha";
 
 const T = (id: string, p: Partial<Task> = {}): Task => ({
   body: "",
+  budget_impl_usd: 0,
+  budget_review_usd: 0,
   depends_on: [],
   done_criteria: "",
   id,
@@ -45,6 +47,7 @@ const T = (id: string, p: Partial<Task> = {}): Task => ({
   plan_version: 1,
   repo: "",
   source_key: null,
+  spent_usd: 0,
   status: "in_progress",
   title: `題名 ${id}`,
   ...p,
@@ -132,6 +135,7 @@ function show(o: Over = {}): ShowCardResponse {
       headline: null,
       id: "C-1",
       improvement: null,
+      integration_ref: null,
       priority: null,
       reporter: "me",
       status: "in_progress",

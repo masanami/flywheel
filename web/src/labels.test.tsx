@@ -21,6 +21,7 @@ import {
   DISCREPANCY_KINDS,
   DISCREPANCY_LABELS,
   EXECUTION_RESULT_LABELS,
+  HISTORY_ACTION_LABELS,
   HOLD_KIND_HUMAN,
   HOLD_KIND_PARENT_DIRECT,
   MARK_KINDS,
@@ -136,4 +137,9 @@ it("#814: label() は、constructor・toString・__proto__ のような名前の
   for (const code of ["constructor", "toString", "hasOwnProperty", "__proto__"])
     expect(label(table, code), code).toBe(code);
   expect(label(table, "未知")).toBe("未知");
+});
+
+// #906: 統合先の識別を初めて記録した作業ログの action（integration_ref_set）に、経緯の文言がある。
+it("#906: 経緯の action integration_ref_set に文言がある", () => {
+  expect(HISTORY_ACTION_LABELS.integration_ref_set).toBe("統合先を記録した");
 });

@@ -52,10 +52,16 @@ func (r *releaseRun) route() string {
 	return ReleaseRouteWaitingRun
 }
 
+// releaseStageRunWhere は、反映の段が扱う契約の実行（contract_run）の条件。完了の課題の反映の依頼（kind が reflect）と、統合先を使わない
+// 課題のタスクの実行。統合先を使う課題のタスクの実行と、完了でない課題の反映の依頼（上げる依頼）は、委譲の段の先頭の状態の確認が
+// 進めるので、反映の段は扱わない。
+const releaseStageRunWhere = `((kind = 'reflect' AND EXISTS (SELECT 1 FROM challenge ch WHERE ch.id = contract_run.challenge_id AND ch.status = 'done'))
+	OR (kind <> 'reflect' AND NOT EXISTS (SELECT 1 FROM challenge ch WHERE ch.id = contract_run.challenge_id AND ch.uses_integration = 1)))`
+
 // loadOpenRunInTx は課題 cid の、終わっていない契約の実行（課題ごとに高々 1 本。無ければ nil）を、取り込み元の結び付き・
 // 承認済みの計画の版つきで読む。対応するかは決めない（corresponds は偽）。
 func loadOpenRunInTx(ctx context.Context, tx *sql.Tx, cid int64) (*releaseRun, error) {
-	cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, cid))
+	cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL AND `+releaseStageRunWhere+` ORDER BY id LIMIT 1`, cid))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -131,7 +137,7 @@ func taskRunImportedRef(ctx context.Context, tx *sql.Tx, cr *contractRunRow, ref
 func (s *Store) closeHeldEndWithoutOwner(ctx context.Context, challengeID int64) (bool, error) {
 	closed := false
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
-		cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, challengeID))
+		cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND ended_at IS NULL AND `+releaseStageRunWhere+` ORDER BY id LIMIT 1`, challengeID))
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -477,4 +483,18 @@ func clearLandRefs(ctx context.Context, tx *sql.Tx, challengeID int64) error {
 	_, err := tx.ExecContext(ctx,
 		`UPDATE contract_run SET land_ref = NULL, land_delivered = 0 WHERE challenge_id = ? AND (land_ref IS NOT NULL OR land_delivered <> 0)`, challengeID)
 	return err
+}
+
+// summarizeChecks は checks のうち、失敗したものがあるか・終わっていないものがあるかを返す（チェックの分類は classifyCheck）。
+// 0 件は、どちらも偽（0 件をどう扱うかは呼び出し元が決める）。反映の操作の実行と、統合先へ入れる確かめが共用する。
+func summarizeChecks(checks []UpstreamCheck) (failed, pending bool) {
+	for _, c := range checks {
+		switch classifyCheck(c) {
+		case checkFail:
+			failed = true
+		case checkPending:
+			pending = true
+		}
+	}
+	return failed, pending
 }

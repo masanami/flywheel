@@ -196,6 +196,8 @@ type ContractStartInput struct {
 	// Judgment は J4 の起動の実行者。非 nil なら、start の直後に親の答えを待っていても保留にせず、次の状態の読みで J4 へ回す
 	// （nil ならオーナーの保留へ写す）。
 	Judgment JudgmentInvoker
+	// TaskID は起動するタスクの内部整数 ID。0 なら、起動できるタスクがちょうど 1 個の課題として、そのタスクを起動する。
+	TaskID int64
 	// OnRunInserted は start の run をストアに記録した直後に呼ぶ（nil なら呼ばない。同時委譲数の数えの二重計上を避けるため）。
 	OnRunInserted func()
 }
@@ -205,7 +207,7 @@ func (in ContractStartInput) releaseSource() *contractReleaseSource {
 }
 
 func (in ContractPollInput) releaseSource() *contractReleaseSource {
-	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil}
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Checks: in.Checks, Compare: in.Compare}
 }
 
 // ContractPollInput は Store.PollContractRuns の入力。
@@ -218,6 +220,10 @@ type ContractPollInput struct {
 	CycleID     string
 	// Reconcile は成果物の PR の base と状態の取得（GET だけ）。release の作成と置き換えに使う。nil なら release は扱わない。
 	Reconcile UpstreamBranchSource
+	// Checks・Compare は、統合先を使う課題のタスクの実行へ「入れてよい」を返す前の確かめ（中身のチェックの取得・変わり方の比較）と、
+	// 入った中身の確かめに使う上流の取得の口（GET だけ）。nil なら、その確かめができないので「入れてよい」を返さない。
+	Checks  UpstreamCheckSource
+	Compare UpstreamCompareSource
 	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。
 	WorkDir string
 	// Judgment は J4 の起動の実行者。非 nil なら、親の答えを待つ契約の run（decider が parent・kind が answer）を J4 へ回す
@@ -290,6 +296,12 @@ type contractRunRow struct {
 	LandDelivered bool
 	// StartRunID は、この契約の実行を始めた契約のコマンド（start）の flywheel の run の内部整数 ID。
 	StartRunID int64
+	// VerifiedRef は、タスクの検証（J5）が「満たした」とした中身（統合先を使う課題のタスクの実行。無ければ空）。
+	VerifiedRef string
+	// holdSuccessEnd は DB の列ではない。真なら、succeeded を読んでも ended_at を入れない（統合先へ入ったかを上流で確かめるまで開けておく）。
+	holdSuccessEnd bool
+	// discard は DB の列ではない。真なら、この実行はもう要らないので取り消すだけで、成果物を取り込まず課題も保留にしない。
+	discard bool
 }
 
 // contractKindOrTask は契約の実行の種類 kind（空は task）を返す。
@@ -308,7 +320,7 @@ const (
 
 const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
 	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, ''), task_id,
-	kind, operation_id, COALESCE(land_ref, ''), land_delivered, start_run_id FROM contract_run`
+	kind, operation_id, COALESCE(land_ref, ''), land_delivered, start_run_id, COALESCE(verified_ref, '') FROM contract_run`
 
 func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, error) {
 	var r contractRunRow
@@ -316,7 +328,7 @@ func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, erro
 	var taskID, opID sql.NullInt64
 	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget,
 		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.RequestedResolvableBy, &r.WorkDir, &taskID,
-		&r.Kind, &opID, &r.LandRef, &r.LandDelivered, &r.StartRunID); err != nil {
+		&r.Kind, &opID, &r.LandRef, &r.LandDelivered, &r.StartRunID, &r.VerifiedRef); err != nil {
 		return nil, err
 	}
 	if opID.Valid {
@@ -360,6 +372,15 @@ func fillContractArgs(args []string, challengeID string, sb *sourceBinding, exte
 // 取り込み元の無いタスクの取り込み元の差し込みを空の文字列で埋める。
 func fillCommandArgs(connector *Connector, args []string, challengeID string, sb *sourceBinding, externalRunID string, answer contractAnswer) ([]string, error) {
 	return fillContractArgsWith(args, contractFill{ChallengeID: challengeID, Source: sb, EmptySource: startTakesTaskFile(connector), RunID: externalRunID, Answer: answer})
+}
+
+// fillRowCommandArgs は契約の実行 row のコマンドの引数を埋める。反映の依頼（上げる依頼を含む）は取り込み元を持たないので、
+// 取り込み元の差し込みを空の文字列で埋める。それ以外は fillCommandArgs と同じ。
+func fillRowCommandArgs(connector *Connector, row *contractRunRow, args []string, challengeID string, sb *sourceBinding, answer contractAnswer) ([]string, error) {
+	if row.Kind == contractRunKindReflect {
+		return fillContractArgsWith(args, contractFill{ChallengeID: challengeID, EmptySource: true, RunID: row.ExternalRunID, Answer: answer})
+	}
+	return fillCommandArgs(connector, args, challengeID, sb, row.ExternalRunID, answer)
 }
 
 // startTakesTaskFile は、接続ツールの commands.start が {task_file} を書いているか（取り込み元の無いタスクも起動する宣言）。
@@ -573,17 +594,15 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 			planVersion = &v
 			plan = p
 		}
-		tasks, err = loadLaunchableTasks(ctx, tx, cid)
-		if err != nil {
-			return err
-		}
-		return nil
+		tasks, err = loadTasksToLaunch(ctx, tx, cid, in.TaskID)
+		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
 	// 起動の前に、J2 と同じ関数で承認済みの計画の操作を検査する（J2 の後に宣言が変わっても、検査していない引数で起動しない）。
-	// 委譲は起動できるタスクがちょうど 1 個の課題だけを起動する。対象のリポジトリと操作はタスクの行のもの。
+	// 起動するタスクはちょうど 1 個（in.TaskID が 0 なら、起動できるタスクがちょうど 1 個の課題）。対象のリポジトリと操作は
+	// タスクの行のもの。
 	if len(tasks) != 1 {
 		return nil, fmt.Errorf("%w: the challenge does not have exactly one launchable task", ErrValidation)
 	}
@@ -674,7 +693,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 			Workspace: s.workspace, WorkDir: s.contractWorkDir(workDir), RunDir: runDirPath(s.workspace, formatRunID(runIDInt)),
 			Command: command, TimeoutSec: in.AgentDecl.TimeoutSec.Delegate,
 		},
-		Invoke: call, MaxMicros: maxMicros, TaskIDInt: taskID,
+		Invoke: call, MaxMicros: maxMicros, TaskIDInt: taskID, HoldSuccessEnd: usesIntegration,
 	})
 	if err != nil {
 		return nil, err
@@ -691,8 +710,8 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 	return s.beginContractRunForTask(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, nil, nil)
 }
 
-// beginContractRunForTask は契約のコマンド 1 回ぶんの run を記録する。start のときは周の上限を評価し、課題に
-// 終わっていない契約の run・run があれば ErrRunInProgress にする。
+// beginContractRunForTask は契約のコマンド 1 回ぶんの run を記録する。start のときは周の上限を評価し、そのタスク（タスクが
+// 無ければ課題）に終わっていない契約の run・run があれば ErrRunInProgress にする。
 //
 // taskID が非 nil（start のときは起動するタスク、status・resume・cancel のときは契約の run が結び付くタスク）なら、
 // run の行（kind=contract）の task_id と repo（タスクの対象リポジトリ）へ記録する。start のときは、pending のタスクを
@@ -701,6 +720,12 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 // operationID が非 nil なら、反映の操作のために呼んだ run として印を付ける（run.operation_id。反映の段・完了から戻す前の読み・
 // 片付けだけが渡す。印の付いた run は、課題の最後の委譲の run・最後の契約のコマンドを読む所から外れる）。
 func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64) (int64, error) {
+	return s.beginContractRunMarked(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, taskID, operationID, false)
+}
+
+// beginContractRunMarked は beginContractRunForTask に、反映の依頼の印（run.reflect）を足したもの。reflect が真なら、反映の操作が無い
+// 反映の依頼（上げる依頼）の run にも印を付ける（課題の使った額・最後の委譲の実行の読みから外すため）。
+func (s *Store) beginContractRunMarked(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64, reflect bool) (int64, error) {
 	host, _ := os.Hostname()
 	now := s.currentTime()
 	var runIDInt int64
@@ -716,8 +741,24 @@ func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID,
 			if cur.Status != StatusInProgress {
 				return errDelegationNotEligible
 			}
-			// 終わっていない契約の run のほか、保留に写し切れていない回収・失敗・中止も実行中として数える。
-			active, err := challengeHasActiveRun(ctx, tx, cid)
+			// 終わっていない契約の run のほか、保留に写し切れていない回収・失敗・中止も実行中として数える。起動するタスクが
+			// 決まっているときは、そのタスクの単位で見る（同じ課題の別のタスクの実行は妨げない。タスクに結び付かない実行との
+			// 重なりは insertRun が止める）。
+			var active bool
+			var err error
+			if taskID != nil {
+				active, err = taskHasActiveRun(ctx, tx, cid, *taskID)
+				if err == nil && !active {
+					active, err = taskLessHasActiveRun(ctx, tx, cid)
+				}
+				// レビュー待ちの契約の実行は「実行中」に数えないが、終わっていない契約の実行が残るタスクを、もう一度 start しない
+				// （外部の実行を二重に作らず、記録が一意の索引に当たって外部の実行だけが残るのを防ぐ）。
+				if err == nil && !active {
+					active, err = taskHasOpenContractRun(ctx, tx, cid, *taskID)
+				}
+			} else {
+				active, err = challengeHasActiveRun(ctx, tx, cid)
+			}
 			if err != nil {
 				return err
 			}
@@ -748,7 +789,7 @@ func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID,
 		row, err := insertRun(ctx, tx, cid, insertRunInput{
 			CycleID: cycleID, Kind: runKindContract, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
 			SessionID: sessionID, PID: int64(os.Getpid()), Host: host, HeartbeatAt: now, StartedAt: now,
-			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: runTask, Repo: taskRepo, OperationID: operationID,
+			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: runTask, Repo: taskRepo, OperationID: operationID, Reflect: reflect,
 		})
 		if err != nil {
 			return err
@@ -800,6 +841,19 @@ type contractCall struct {
 	ReleaseStage bool
 	// HoldEnd は、終わりを読んでも contract_run の ended_at を入れないとき真（反映の段の status・resume。結果を書く書き込みが入れる）。
 	HoldEnd bool
+	// HoldSuccessEnd は、succeeded だけは ended_at を入れないとき真（failed・cancelled は、「入れてよい」を返し済みの実行〔landedStop〕以外は終わった記録にする）。
+	HoldSuccessEnd bool
+}
+
+// landedStop は、状態 st が失敗・中止で、「入れてよい」を返し済み（land_ref がある）の統合先を使う課題のタスクの実行か。
+// こうした実行は、統合先へ入ったかを上流で確かめるまで、終わった記録にせず、通す中身もタスクも変えない。
+func (c contractCall) landedStop(st ContractState) bool {
+	return c.HoldSuccessEnd && (st == ContractStateFailed || st == ContractStateCancelled) && c.Existing != nil && c.Existing.LandRef != ""
+}
+
+// keepsOpenOn は、終わりの状態 st を読んでも、契約の実行（contract_run）を終わった記録（ended_at）にしないか。
+func (c contractCall) keepsOpenOn(st ContractState) bool {
+	return c.HoldEnd || (c.HoldSuccessEnd && st == ContractStateSucceeded) || c.landedStop(st)
 }
 
 // finishContractCall はコマンドを起動し、結果を run と contract_run へ 1 つのトランザクションで記録する。
@@ -898,7 +952,7 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 				status = nil
 				costFrom(latest.CostMicros)
 				// 反映の段が読んだ終わりを、結果を書くまで開けていた実行（HoldEnd）は、その場で終わる呼び出し（完了から戻す前の読み・片付け）が閉じる。
-				if !c.HoldEnd {
+				if !c.keepsOpenOn(latest.State) {
 					if _, err := tx.ExecContext(recordCtx, `UPDATE contract_run SET ended_at = ? WHERE id = ? AND ended_at IS NULL`,
 						formatTimestamp(s.currentTime()), latest.ID); err != nil {
 						return err
@@ -938,7 +992,8 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 	if status == nil && c.Existing != nil {
 		report.State, report.Summary = c.Existing.State, c.Existing.Summary
 	}
-	if question := contractHoldQuestion(c, status, out.Status, reclaimed, result, errSummary); question != "" && !c.ReleaseStage {
+	if question := contractHoldQuestion(c, status, out.Status, reclaimed, result, errSummary); question != "" && !c.ReleaseStage &&
+		(status == nil || !c.landedStop(status.State)) {
 		held, herr := s.holdForContract(ctx, c, question)
 		if herr != nil {
 			return nil, herr
@@ -1062,8 +1117,19 @@ func (s *Store) holdContractWithReason(ctx context.Context, runID, challengeID, 
 			if tc.current.Status != StatusInProgress {
 				return errReconcileNotEligible
 			}
-			// 起動できるタスクがちょうど 1 個なら、保留をそのタスクに結び付ける（start の失敗では契約の run がまだ無い）。
-			if tasks, err := loadLaunchableTasks(ctx, tc.tx, tc.id); err != nil {
+			// 保留は、止まった契約の run が結び付くタスクに結び付ける（同じ課題のほかのタスクの run では、そのタスクではない）。
+			// run がタスクに結び付かないとき（start の失敗では契約の run がまだ無い）は、起動できるタスクがちょうど 1 個なら
+			// そのタスクに結び付ける。
+			var runTask sql.NullInt64
+			if n, ok := parseRunID(runID); ok {
+				if err := tc.tx.QueryRowContext(ctx, `SELECT task_id FROM run WHERE id = ?`, n).Scan(&runTask); err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+			}
+			if runTask.Valid {
+				id := runTask.Int64
+				tc.taskID = &id
+			} else if tasks, err := loadLaunchableTasks(ctx, tc.tx, tc.id); err != nil {
 				return err
 			} else if len(tasks) == 1 {
 				tc.taskID = taskIDPtr(&tasks[0])
@@ -1091,17 +1157,61 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 		}
 	}
 	var endedAt any
-	if st.State.Terminal() && !c.HoldEnd {
+	if st.State.Terminal() && !c.keepsOpenOn(st.State) {
 		endedAt = now
 	}
 	report.Facts = st.Facts
 	if err := s.writeContractRunRecord(ctx, tx, c, st, rk, rd, rt, rb, totalMicros, now, endedAt, report); err != nil {
 		return err
 	}
+	// 「入れてよい」を返し済みの実行の失敗・取り消しは、統合先へ入ったかを上流で確かめるまで、通す中身もタスクも変えない
+	// （確かめの結果で、済み・保留・着手中へ戻すのどれかを 1 つの書き込みで決める。afterContractRead が扱う）。
+	if (st.State == ContractStateFailed || st.State == ContractStateCancelled) && !c.landedStop(st.State) {
+		// 統合先を使う課題のタスクの実行が失敗・取り消しで終わったら、検証した中身と通す中身は無効にする（次の委譲の後に検証し直す）。
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = NULL, land_ref = NULL, land_delivered = 0
+			WHERE challenge_id = ? AND external_run_id = ? AND kind = 'task' AND (verified_ref IS NOT NULL OR land_ref IS NOT NULL)
+			AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND uses_integration = 1)`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
+			return err
+		}
+		// 検証中のタスクは着手中へ戻す（回答の後に、次の委譲の段が委譲し直せる。検証中のままだと、起動・検証・進めようが無い保留の
+		// どれにも当たらず止まる）。タスクの状態の変更は、読んだ記録と同じトランザクションで行う。
+		if err := s.reopenVerifyingTaskOfStoppedRun(ctx, tx, c, st.RunID); err != nil {
+			return err
+		}
+	}
+	if c.landedStop(st.State) {
+		// 統合先へ入ったかの確かめが読めなかったときに、次の確認が記録から確かめ直せるよう、成果物を取り込んでおく。
+		_, err := importContractArtifacts(ctx, tx, c.RunIDInt, st.Artifacts, s.currentTime())
+		return err
+	}
 	if st.State != ContractStateSucceeded {
 		return nil
 	}
 	return s.afterContractSucceeded(ctx, tx, c, st, report)
+}
+
+// reopenVerifyingTaskOfStoppedRun は、統合先を使う課題のタスクの契約の実行（externalRunID）が失敗・取り消しで終わったとき、
+// そのタスクが検証中なら着手中へ戻す。反映の段が読む実行・上げる依頼・タスクに結び付かない実行では何もしない。
+func (s *Store) reopenVerifyingTaskOfStoppedRun(ctx context.Context, tx *sql.Tx, c contractCall, externalRunID string) error {
+	if c.ReleaseStage {
+		return nil
+	}
+	var taskID int64
+	err := tx.QueryRowContext(ctx, `SELECT t.id FROM contract_run k JOIN task t ON t.id = k.task_id JOIN challenge ch ON ch.id = k.challenge_id
+		WHERE k.challenge_id = ? AND k.external_run_id = ? AND k.kind = 'task' AND t.status = 'verifying' AND ch.uses_integration = 1`,
+		c.ChallengeIDInt, externalRunID).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	rec, err := s.newInvokerRecorder(tx, &c.RunIDInt)
+	if err != nil {
+		return err
+	}
+	_, err = setTaskStatus(ctx, tx, rec, taskID, TaskStatusInProgress)
+	return err
 }
 
 // writeContractRunRecord は読めた状態で contract_run の行を作る・更新する。あわせて、出力の facts・待ちの options・
@@ -1192,8 +1302,9 @@ func (s *Store) afterContractSucceeded(ctx context.Context, tx *sql.Tx, c contra
 		return nil // 反映の段が読んだ成果物は、課題の成果物の記録へ取り込まない（完了の検証が読む直前の委譲の実行の成果物を変えない）
 	}
 	// 課題が保留（awaiting_human）の間に succeeded を読んだ印。答えの後の周で、start も resume も呼ばずに検証中へ進める。
+	// 統合先を使う課題には付けない（SubmitHeldContractSuccesses が扱わず、印が残ると実行中と数え続けて止まるため。終わった実行のタスクは委譲の段が委譲し直す）。
 	if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET held_success = 1 WHERE challenge_id = ? AND external_run_id = ?
-		AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND status = 'awaiting_human')`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
+		AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND status = 'awaiting_human' AND COALESCE(uses_integration, 0) = 0)`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
 		return err
 	}
 	prs, err := importContractArtifacts(ctx, tx, c.RunIDInt, st.Artifacts, s.currentTime())
@@ -1255,8 +1366,11 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	bindings := map[*contractRunRow]*sourceBinding{}
 	planVersions := map[int64]*int64{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		// 読むのはタスクの実行で、課題が完了でないものだけ（完了の課題の実行と反映の依頼は反映の段が読む）。
-		q := contractRunSelect + ` WHERE ended_at IS NULL AND kind = 'task' AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'done')`
+		// 読むのはタスクの実行と、着手中・検証中・保留中の課題の上げる依頼（kind が reflect。保留中も状態・費用を読み続ける。受け取りは保留が解けてから）で、課題が完了でないものだけ（完了の課題の実行と
+		// 反映の依頼は反映の段が読む）。
+		q := contractRunSelect + ` WHERE ended_at IS NULL AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'done')
+			AND (kind = 'task' OR (kind = 'reflect' AND (challenge_id IN (SELECT id FROM challenge WHERE status IN ('in_progress', 'verifying', 'awaiting_human'))
+				OR operation_id IN (SELECT id FROM operation WHERE state = 'closed' AND closed_reason IN ('superseded', 'challenge_rejected')))))`
 		args := []any{}
 		if only != nil {
 			q += ` AND challenge_id = ?`
@@ -1299,10 +1413,28 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	}
 	var reports []ContractRunReport
 	for _, row := range rows {
+		// 同じタスク（タスクに結び付かない実行どうしを含む）に、終わっていない実行の記録（タスクの検証の実行など）が開いている間は、
+		// 何も呼ばずにこの 1 件を飛ばす（次の機会にやり直す）。同じ課題の別のタスクの実行は飛ばさない。
+		busy, err := s.sameTaskRunOpen(ctx, row)
+		if err != nil {
+			firstErr = firstErrOr(firstErr, err)
+			continue
+		}
+		if busy {
+			continue
+		}
 		connector, err := findCLIConnector(in.ConnDecl, row.ConnectorID)
 		var rep *ContractRunReport
 		if err == nil {
-			rep, err = s.pollOne(ctx, in, row, connector, bindings[row], planVersions[row.ChallengeID], cycleIDInt)
+			// 要らなくなった実行（反映の操作を閉じた上げる依頼・取りやめにしたタスクの実行・作り直した計画より前の上げる依頼）は、
+			// 状態を読まずに取り消す（保留中の課題でも取り消す）。
+			if why, cerr := s.obsoleteContractRun(ctx, row); cerr != nil {
+				err = cerr
+			} else if why != "" {
+				rep, err = s.cancelObsoleteContractRun(ctx, in, row, connector, bindings[row], planVersions[row.ChallengeID], cycleIDInt, why)
+			} else {
+				rep, err = s.pollOne(ctx, in, row, connector, bindings[row], planVersions[row.ChallengeID], cycleIDInt)
+			}
 			if err == nil && rep == nil {
 				continue // 検証中のレビュー待ちは読まない（pendingReviewReply）
 			}
@@ -1321,6 +1453,24 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	return reports, firstErr
 }
 
+// sameTaskRunOpen は、契約の実行 row と同じタスク（row がタスクに結び付かなければ、課題のタスクに結び付かない実行）に、
+// 終わっていない実行の記録（run）があるか（insertRun が止める重なりと同じ条件）。
+func (s *Store) sameTaskRunOpen(ctx context.Context, row *contractRunRow) (bool, error) {
+	var n int
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		// insertRun が止める重なりと同じ条件にする（タスクに結び付く行は、同じタスクとタスクに結び付かない実行。タスクに結び付かない行は、
+		// 課題のどの終わっていない実行とも）。
+		q := `SELECT COUNT(*) FROM run WHERE challenge_id = ? AND result IS NULL`
+		args := []any{row.ChallengeID}
+		if row.TaskID != nil {
+			q += ` AND (task_id = ? OR task_id IS NULL)`
+			args = append(args, *row.TaskID)
+		}
+		return tx.QueryRowContext(ctx, q, args...).Scan(&n)
+	})
+	return n > 0, classifyReadWriteErr(err)
+}
+
 // reclaimedContractStartWhere は、回収された（interrupted）か回収以外で失敗した契約の start の run で、まだ保留に
 // 写していないものを選ぶ条件（run を r、課題を c と別名にした副問い合わせの本体）。start の run は、契約の run（contract_run）を
 // 作る前に回収されると contract_run を持たない。status の run との区別は「その課題の、先に始まった契約の run が
@@ -1329,14 +1479,20 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 // 終わらせない。この条件は成功以外の run だけを選ぶから。課題が着手中でなくなっていれば（保留・取り下げ・完了）選ばない。
 const reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND c.status = 'in_progress'
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.start_run_id = r.id)
-	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND k.start_run_id < r.id
+	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND COALESCE(k.task_id, 0) = COALESCE(r.task_id, 0) AND k.start_run_id < r.id
 		AND (k.ended_at IS NULL OR k.ended_at > r.started_at))
 	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.run_id = r.id)`
 
 // unheldContractStopWhere は、契約の run（k）が failed・cancelled で終わったのに、その後に保留を作れていない
 // （記録と保留が別のトランザクションなので、間でプロセスが止まると起こる）課題を選ぶ条件。
+// 後の保留は、そのタスクに結び付くもの（か、タスクに結び付かないもの）だけを数える（ほかのタスクの保留は、このタスクの作り損ねを隠さない）。
+// 開いたまま（ended_at が NULL）の行は選ばない（状態の確認が終わった記録にした後で拾う。NULL との比較は成り立たず、毎回選んでしまう）。
+// 取りやめにしたタスクの実行は、flywheel が取り消した（計画の作り直し・取り下げ）ので、保留にし損ねたものと数えない。
 const unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'cancelled') AND c.status = 'in_progress'
-	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at)`
+	AND k.ended_at IS NOT NULL
+	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at
+		AND (h.task_id IS NULL OR k.task_id IS NULL OR h.task_id = k.task_id))
+	AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status IN ('cancelled', 'done'))`
 
 // HoldUnrecordedContractStops は、保留にし損ねた課題を保留にする。次の 2 つ（どちらも課題が着手中のときだけ）。
 //   - 契約の start の最中に flywheel の run が回収された（呼んだプロセスが止まって別のプロセスが回収した場合など）のに、

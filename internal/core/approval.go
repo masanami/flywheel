@@ -474,6 +474,9 @@ type ApprovalRequest struct {
 	// HeadSources は、承認する組の head が検証の head と異なるとき、core が自分で比較して「既定ブランチの取り込みだけで
 	// CI が通っている」ことを確かめるための取得の口。CLI の判定の申告は使わない。口が無い・確かめられない組は ErrConflict。
 	HeadSources ReleaseHeadSources
+	// Agent は、計画の承認で、枠のキーを持たない 1 個のタスクの枠を見直し前の決め方（サイズごとの既定）で決めるための宣言
+	// （nil 可。nil のときそのタスクの枠は空のまま残り、読むときに見直し前の決め方の値になる）。計画の承認以外では使わない。
+	Agent *AgentDeclaration
 }
 
 // ExecuteApproval は approve（T5・T13・T14）・reject（T6・T15）の②（書き込み）。
@@ -599,7 +602,7 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		}
 		// 計画の承認は、答えの無い問いへの推奨の記録・タスクの行の作成・統合先を使うかの記録を、同じトランザクションで行う。
 		if kind == ApprovalKindPlan && req.Decision == ApprovalDecisionApproved && planVersionOut != nil {
-			if err := onPlanApproved(ctx, tc, att, int64(*planVersionOut)); err != nil {
+			if err := onPlanApproved(ctx, tc, att, int64(*planVersionOut), req.Agent); err != nil {
 				return err
 			}
 		}
@@ -654,6 +657,7 @@ func (s *Store) ExecuteApproval(ctx context.Context, req ApprovalRequest, att At
 		if kind == ApprovalKindCompletion && req.Decision == ApprovalDecisionRejected {
 			// 課題が着手中へ戻るとき、承認済みの計画の版の done のタスクを in_progress にする。
 			// オーケストレーターの直接の完了の差し戻し（保留へ戻る）ではタスクの状態を変えない。
+			// 統合先を使う課題は、計画を作り直す道へ送られ（分類済へ戻る）、タスクを済みのまま残す。
 			if tc.target == StatusInProgress {
 				if err := reopenDoneTasks(ctx, tc.tx, tc.rec, tc.id); err != nil {
 					return err
@@ -916,14 +920,22 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		}
 		holdID = id
 		if req.Replan {
-			// 契約の run（form: cli）が終わっていない・保留の間の成功が未処理のときは、前の計画の run が
-			// 回答で再開されたり検証中へ進んだりして、作り直した計画が使われない。印は成立させない。
-			var open int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND (ended_at IS NULL OR held_success = 1)`, cid).Scan(&open); err != nil {
+			// 作業している契約の実行（開いていて、最後に読んだ状態が running のタスクの実行。「入れてよい」を返して委譲先が受け取った実行は、終わるか
+			// レビュー待ちへ戻るまで running を返すので含まれる。保留の間の成功が未処理のものも含む）と、「入れてよい」を返そうとして届いたか分からない実行
+			// （通す中身があり、届いた記録が無く、最後に読んだ状態が終わりでない。委譲先が入れている最中かもしれない。次の状態の確認で決まれば解ける）があるときは、
+			// 動いている作業が作り直す前の計画のまま進む・検証中へ進むので、印は成立させない。
+			// 届いた記録のあるレビュー待ち（land_refused）・問い待ちのタスクの実行、終わりを読んだ実行と、上げる依頼は、作り直した計画の承認の後に取り消すので、あっても受ける。
+			var working int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND kind = ? AND (
+				(ended_at IS NULL AND state = ?)
+				OR (ended_at IS NULL AND COALESCE(land_ref, '') <> '' AND land_delivered = 0 AND state NOT IN (?, ?, ?))
+				OR held_success = 1)`,
+				cid, contractRunKindTask, string(ContractStateRunning),
+				string(ContractStateSucceeded), string(ContractStateFailed), string(ContractStateCancelled)).Scan(&working); err != nil {
 				return "", err
 			}
-			if open > 0 {
-				return "", fmt.Errorf("%w: replan is not allowed while a contract run is open", ErrValidation)
+			if working > 0 {
+				return "", fmt.Errorf("%w: replan is not allowed while a contract run is working", ErrValidation)
 			}
 		}
 		var runID sql.NullInt64
@@ -991,6 +1003,9 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			if err != nil {
 				return err
 			}
+		}
+		if holdTaskID.Valid && !req.Replan {
+			return resumeIntegrationTaskAfterAnswer(ctx, tc, holdReasonValue, holdTaskID.Int64)
 		}
 		return nil
 	}

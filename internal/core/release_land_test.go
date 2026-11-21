@@ -431,13 +431,17 @@ func TestReleaseLand_ReopeningTheChallengeClearsTheLandRef(t *testing.T) {
 }
 
 // 委譲の段の先頭の状態の確認は、反映の依頼（kind が reflect）の実行を読まない。
-func TestPollContractRuns_AReflectRequestIsNotReadByTheDelegationStage(t *testing.T) {
+func TestPollContractRuns_AReflectRequestOfADoneChallengeIsNotReadByTheDelegationStage(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.exec(`UPDATE contract_run SET kind = 'reflect'`); err != nil {
+		t.Fatal(err)
+	}
+	// 完了の課題の反映の依頼は反映の段が読む（完了でない課題の反映の依頼〔上げる依頼〕は委譲の段が読む）。
+	if _, err := f.exec(`UPDATE challenge SET status = 'done'`); err != nil {
 		t.Fatal(err)
 	}
 	f.poll(t)

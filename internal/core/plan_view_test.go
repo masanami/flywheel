@@ -11,8 +11,8 @@ import (
 // （masanami/flywheel#755）を、実ストアで確かめる。端末・API の形は internal/cli・internal/server のテストが持つ。
 
 // 承認の前は、タスクの ID が無く、前提は計画の中の key。問いは通し番号つきで、答えの無い問いの answer は nil。
-// 予算の上限は、委譲と同じ規則で決める: 計画は実装の枠（41.5）だけを書いているので、レビュー対応の枠は宣言のサイズ M の
-// 既定（30）を使い、合計は 71.5。
+// 予算の上限は、タスクが全部枠を持つ計画では、タスクの枠の合計（3 個 × 実装 3・レビュー対応 2 = 15）。計画の値（実装の枠 41.5・
+// サイズの既定）は読まない。宣言が無くても決められる。
 func TestGetPlanView_BeforeApprovalUsesKeysAndHasNoTaskIDs(t *testing.T) {
 	f := newPAFixture(t, 3, true)
 	agent := &AgentDeclaration{SizeBudgetsUSD: SizeBudgetsUSD{S: SizeBudgetPair{30, 25}, M: SizeBudgetPair{50, 30}, L: SizeBudgetPair{100, 40}}}
@@ -23,16 +23,15 @@ func TestGetPlanView_BeforeApprovalUsesKeysAndHasNoTaskIDs(t *testing.T) {
 	if !pv.Structured || pv.Version != 1 || pv.Status != StatusAwaitingPlanApproval {
 		t.Fatalf("plan view = %+v", pv)
 	}
-	if pv.BudgetUSD == nil || *pv.BudgetUSD != 71.5 {
-		t.Errorf("BudgetUSD = %v, want 71.5 (41.5 written + 30 from the size default)", pv.BudgetUSD)
+	if pv.BudgetUSD == nil || *pv.BudgetUSD != 15 {
+		t.Errorf("BudgetUSD = %v, want 15 (the sum of the task frames, not the plan's 41.5 + size default)", pv.BudgetUSD)
 	}
-	// 宣言が無く、既定が要るときは、決められないものとして nil（書かれた額だけを上限として見せない）。
 	noDecl, err := f.s.GetPlanView(context.Background(), f.id, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if noDecl.BudgetUSD != nil {
-		t.Errorf("BudgetUSD without a declaration = %v, want nil", *noDecl.BudgetUSD)
+	if noDecl.BudgetUSD == nil || *noDecl.BudgetUSD != 15 {
+		t.Errorf("BudgetUSD without a declaration = %v, want 15 (task frames need no size default)", noDecl.BudgetUSD)
 	}
 	if pv.UsesIntegration == nil || !*pv.UsesIntegration {
 		t.Errorf("UsesIntegration = %v, want true", pv.UsesIntegration)

@@ -104,6 +104,7 @@ it("#803: 件数の数え方 — 循環だけの食い違いは数えず、食�
           impl_remaining_usd: 0,
           plan_version: 1,
           review_remaining_usd: 0,
+          task_id: null,
         },
       ],
       triage: [{ challenge_id: "C-4", reason: "r", run_id: "R-1" }],

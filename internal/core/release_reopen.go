@@ -134,7 +134,7 @@ func lastReleaseAttemptID(ctx context.Context, tx *sql.Tx, cid int64) (int64, er
 // 終わっていないタスクの実行が無ければ（無かった・読みが終わった記録にした）通す。
 func taskRunUnchangedInTx(ctx context.Context, tx *sql.Tx, cid int64, mark *taskRunMark) error {
 	cr, err := scanContractRun(tx.QueryRowContext(ctx,
-		contractRunSelect+` WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL ORDER BY id LIMIT 1`, cid, contractRunKindTask))
+		contractRunSelect+` WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL AND `+releaseStageRunWhere+` ORDER BY id LIMIT 1`, cid, contractRunKindTask))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -374,9 +374,14 @@ func reopenForReleaseInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 		return nil, fmt.Errorf("core: reopen for release: expected to reopen challenge %s, updated %d rows", res.ChallengeID, n)
 	}
 
-	// 課題が検証中へ戻るので、承認済みの計画の版の done のタスクを verifying にする。
-	if err := reverifyDoneTasks(ctx, tx, rec, row.ChallengeID); err != nil {
+	// 課題が検証中へ戻るので、承認済みの計画の版の done のタスクを verifying にする。統合先を使う課題は、タスクを済みのままにする
+	// （戻した後の J5 は、課題の単位の確かめで、反映の操作の成果物を読む。タスクごとの検証はやり直さない）。
+	if usesIntegration, err := challengeUsesIntegration(ctx, tx, row.ChallengeID); err != nil {
 		return nil, err
+	} else if usesIntegration == nil || !*usesIntegration {
+		if err := reverifyDoneTasks(ctx, tx, rec, row.ChallengeID); err != nil {
+			return nil, err
+		}
 	}
 	// 承認し直した後に、もう一度「入れてよい」を返せるよう、対応する契約の実行の通した中身の記録を消す。
 	if err := clearLandRefs(ctx, tx, row.ChallengeID); err != nil {

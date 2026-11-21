@@ -32,7 +32,12 @@ func j2TestTopic(title string, questions ...any) map[string]any {
 func j2TasksOf(keys ...string) []any {
 	out := make([]any, 0, len(keys))
 	for _, k := range keys {
-		out = append(out, j2TestTask(k, "flywheel", "impl"))
+		task := j2TestTask(k, "flywheel", "impl")
+		// タスクが 2 個以上の計画は、全部のタスクが枠を持つ（持たない計画は不正）。
+		if len(keys) >= 2 {
+			task["budget_impl_usd"], task["budget_review_usd"] = 3.0, 2.0
+		}
+		out = append(out, task)
 	}
 	return out
 }
@@ -218,6 +223,7 @@ func TestValidateJ2Output_ValidatedTasksCarryTheOutput(t *testing.T) {
 	out := j2PlanOutput(func(m map[string]any) {
 		tasks := j2TasksOf("a", "b")
 		tasks[1].(map[string]any)["depends_on"] = []string{"a"}
+		tasks[0].(map[string]any)["repo"] = "flywheel-sibling"
 		tasks[1].(map[string]any)["repo"], tasks[1].(map[string]any)["operation"] = "flywheel-sibling", "define"
 		m["tasks"] = tasks
 		m["uses_integration"] = true
@@ -330,7 +336,8 @@ func TestPlanAutoJ2_PlanBodyCarriesTopicsQuestionsTasksAndBudget(t *testing.T) {
 		{"AC-47 task title", "TASK-B-題名"},
 		{"AC-48 task repo", "harness-repo"},
 		{"AC-49 task operation", "brief"},
-		{"AC-50 impl budget", "実装枠: 41.5 USD"},
+		{"AC-50 impl budget (sum of the task frames)", "実装枠（この計画のタスクの枠の合計）: 6 USD"},
+		{"AC-50 per-task frame", "枠: 実装 3 USD・レビュー対応 2 USD"},
 		{"uses_integration", "統合先を使う: はい"},
 		{"question numbers", "Q1."},
 		{"question numbers", "Q2."},
@@ -454,5 +461,33 @@ func TestPlanAutoJ2_SizeMWithoutExpectedStillHolds(t *testing.T) {
 	d := f.detail(t, ch.ID)
 	if d.Status != StatusAwaitingHuman || len(d.Plans) != 0 || len(d.Holds) != 1 {
 		t.Errorf("status=%s plans=%d holds=%d, want a hold and no plan", d.Status, len(d.Plans), len(d.Holds))
+	}
+}
+
+// 仕上げ 3 項目 3: 統合先を使う計画のタスクのリポジトリは 1 つ。2 つ以上は不正（統合先を使わない計画の検査は変えない）。
+func TestValidateJ2Output_IntegrationPlanTasksMustShareOneRepository(t *testing.T) {
+	t.Parallel()
+	two := func(m map[string]any) {
+		tasks := j2TasksOf("a", "b")
+		tasks[1].(map[string]any)["repo"] = "flywheel-sibling"
+		m["tasks"] = tasks
+		m["uses_integration"] = true
+	}
+	if _, ok := validateJ2Output(j2PlanOutput(two), j2TestContext(t, true)); ok {
+		t.Error("an integration plan across two repositories must be invalid")
+	}
+	same := func(m map[string]any) { m["tasks"] = j2TasksOf("a", "b"); m["uses_integration"] = true }
+	if _, ok := validateJ2Output(j2PlanOutput(same), j2TestContext(t, true)); !ok {
+		t.Error("an integration plan in one repository must be valid")
+	}
+	// 済みのタスクがあれば、済みのタスクのリポジトリと同じでなければならない。
+	vc := j2TestContext(t, true)
+	vc.HasDoneTasks, vc.DoneRepos = true, []string{"flywheel-sibling"}
+	if _, ok := validateJ2Output(j2PlanOutput(same), vc); ok {
+		t.Error("a plan in a repository other than the done tasks' repository must be invalid")
+	}
+	vc.DoneRepos = []string{"flywheel"}
+	if _, ok := validateJ2Output(j2PlanOutput(same), vc); !ok {
+		t.Error("a plan in the done tasks' repository must be valid")
 	}
 }

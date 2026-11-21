@@ -9,6 +9,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -80,4 +81,44 @@ func formatRejectionsWithHeader(header string, rs []CompletionRejection) string 
 		fmt.Fprintf(&b, "\n\n%d. %s\n%s", i+1, r.DecidedAt.UTC().Format("2006-01-02"), r.Reason)
 	}
 	return b.String()
+}
+
+// loadCompletionRejectionsForReplan は、統合先を使う課題の、最新の計画の承認より後の完了の差し戻し（古い順）を返す（J2 の入力へ渡す）。
+// 完了の差し戻しは、統合先を使う課題を、計画を作り直す道（分類済）へ送る。統合先を使わない課題・最新の計画より前の差し戻しは、返さない。
+func loadCompletionRejectionsForReplan(ctx context.Context, tx *sql.Tx, challengeID int64) ([]CompletionRejection, error) {
+	integ, err := challengeUsesIntegration(ctx, tx, challengeID)
+	if err != nil || integ == nil || !*integ {
+		return nil, err
+	}
+	rs, err := loadCompletionRejections(ctx, tx, challengeID)
+	if err != nil || len(rs) == 0 {
+		return nil, err
+	}
+	var planAt sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(decided_at) FROM approval WHERE challenge_id = ? AND kind = ? AND decision = ?`, challengeID, string(ApprovalKindPlan), string(ApprovalDecisionApproved)).Scan(&planAt); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if !planAt.Valid {
+		return rs, nil
+	}
+	at, err := parseTimestamp(planAt.String)
+	if err != nil {
+		return nil, err
+	}
+	var out []CompletionRejection
+	for _, r := range rs {
+		if r.DecidedAt.After(at) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// CompletionRejectionsForReplanSectionLabel は、完了の差し戻しの理由を J2 の入力へ入れるときの区画の名前（J2 の指示文がこの名前で区画を指す）。
+const CompletionRejectionsForReplanSectionLabel = "人間の成果物の差し戻し"
+
+// formatCompletionRejectionsForReplanSection は、計画を作り直す J2 の入力の、完了の差し戻しの理由の区画の本文（差し戻しが無ければ空）。
+func formatCompletionRejectionsForReplanSection(rs []CompletionRejection) string {
+	return formatRejectionsWithHeader("人間が完了の承認で差し戻した理由。次の計画が満たすべき条件である。済みのタスクはやり直さず、足りない分のタスクだけを出す。古い順に並べている。"+
+		"後の差し戻しが前の差し戻しの方針を置き換えているときは、後のものに従う。", rs)
 }

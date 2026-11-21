@@ -86,7 +86,7 @@ func loadBucketSpend(ctx context.Context, tx *sql.Tx, challengeID, planVersion i
 	var sp bucketSpend
 	rows, err := tx.QueryContext(ctx,
 		`SELECT budget_bucket, COALESCE(SUM(cost_usd), 0) FROM run
-		 WHERE challenge_id = ? AND budget_bucket IN (?, ?)
+		 WHERE challenge_id = ? AND budget_bucket IN (?, ?) AND reflect = 0
 		   AND (plan_version = ? OR (plan_version < ? AND EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = run.challenge_id AND h.replan = 1 AND h.answer IS NOT NULL)))
 		 GROUP BY budget_bucket`,
 		challengeID, string(budgetBucketImpl), string(budgetBucketReview), planVersion, planVersion)
@@ -115,7 +115,7 @@ func loadBucketSpend(ctx context.Context, tx *sql.Tx, challengeID, planVersion i
 	var result, endedAtText sql.NullString
 	err = tx.QueryRowContext(ctx,
 		`SELECT result, ended_at FROM run
-		 WHERE challenge_id = ? AND plan_version = ? AND budget_bucket = ? AND ended_at IS NOT NULL AND operation_id IS NULL
+		 WHERE challenge_id = ? AND plan_version = ? AND budget_bucket = ? AND ended_at IS NOT NULL AND reflect = 0
 		 ORDER BY id DESC LIMIT 1`,
 		challengeID, planVersion, string(budgetBucketImpl)).Scan(&result, &endedAtText)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -189,7 +189,9 @@ func resolveSpecBudgets(spec string, agent *AgentDeclaration) (implUSD, reviewUS
 // BudgetExhausted は status.needs_human.budget_exhausted の 1 件（実装枠の残りが 1 USD 未満の
 // 着手中の課題）。
 type BudgetExhausted struct {
-	ChallengeID        string
+	ChallengeID string
+	// TaskID は実装の枠が尽きたタスク（タスクを持たない過去の課題は空）。
+	TaskID             string
 	PlanVersion        int
 	ImplRemainingUSD   float64
 	ReviewRemainingUSD float64
@@ -215,6 +217,52 @@ func listBudgetExhausted(ctx context.Context, tx *sql.Tx, agent *AgentDeclaratio
 		if !ok {
 			continue
 		}
+		bs, err := loadTaskBudgets(ctx, tx, cid, agent)
+		if err != nil {
+			return nil, err
+		}
+		var history *launchHistory
+		if agent != nil {
+			if history, err = loadLaunchHistory(ctx, tx, cid); err != nil {
+				return nil, err
+			}
+		}
+		found := false
+		for _, tb := range bs {
+			if int(tb.PlanVersion) == plan.Version {
+				found = true // タスクの行を持つ計画の版は、未完のタスクが無くても課題の単位の判定へ落とさない
+			}
+			// 承認済みの計画の版の、未完のタスクだけを見る（取りやめ・済みのタスクの枠は、起動に関わらない）。
+			if int(tb.PlanVersion) != plan.Version || !tb.Known {
+				continue
+			}
+			switch tb.Status {
+			case TaskStatusPending, TaskStatusInProgress, TaskStatusVerifying:
+			default:
+				continue
+			}
+			rem, err := taskRemaining(ctx, tx, cid, tb, bs)
+			if err != nil {
+				return nil, err
+			}
+			implRem := rem.Impl
+			// 費用が取れない失敗の後の再開が許される間は、人間の増額を待たない（履歴はこのタスクの単位に絞る）。
+			if history != nil {
+				th := history.forTask(formatTaskID(tb.TaskID))
+				implRem = th.effectiveImplBudget(plan.Version, th.decideLaunchFull(plan.Version, agent), implRem)
+			}
+			if implRem >= minImplLaunchMicros {
+				continue
+			}
+			out = append(out, BudgetExhausted{
+				ChallengeID: ch.ID, TaskID: formatTaskID(tb.TaskID), PlanVersion: plan.Version,
+				ImplRemainingUSD: microsToUSD(rem.Impl), ReviewRemainingUSD: microsToUSD(rem.Review),
+			})
+		}
+		if found {
+			continue
+		}
+		// タスクの行を持たない過去の課題は、見直し前の決め方で課題の単位に判定する。
 		implUSD, reviewUSD, ok := resolveSpecBudgets(plan.Spec, agent)
 		if !ok {
 			continue
@@ -258,6 +306,8 @@ type BudgetPreview struct {
 	Version int
 	// PlanVersion は枠を置き換える承認済みの計画の版（BudgetRequest.PlanVersion に渡す）。
 	PlanVersion int
+	// TaskID は枠を改めるタスク（BudgetRequest.TaskID に渡す。タスクを持たない過去の課題は空）。
+	TaskID string
 	// CurrentKnown が true のとき、現在の枠の額と残り（USD）が有効（サイズの既定を引く宣言が
 	// 無い・不正なときは false）。
 	CurrentKnown       bool
@@ -303,6 +353,12 @@ func loadBudgetTarget(ctx context.Context, tx *sql.Tx, cid int64) (*Challenge, a
 // PrepareBudget は flywheel budget の①（読み取り）。額が正の有限値でなければ、端末を開く前に
 // ErrValidation で拒否する。agent は現在の額の表示にだけ使う（nil 可）。
 func (s *Store) PrepareBudget(ctx context.Context, id string, agent *AgentDeclaration, implUSD float64, reviewUSD *float64) (*BudgetPreview, error) {
+	return s.PrepareBudgetForTask(ctx, id, "", agent, implUSD, reviewUSD)
+}
+
+// PrepareBudgetForTask は PrepareBudget の、枠を改めるタスク taskID を指定する形。taskID が空のとき、未完のタスクが
+// ちょうど 1 個ならそのタスク、2 個以上なら ErrBudgetTaskRequired。その課題のタスクでない ID は失敗する（ストアは変えない）。
+func (s *Store) PrepareBudgetForTask(ctx context.Context, id, taskID string, agent *AgentDeclaration, implUSD float64, reviewUSD *float64) (*BudgetPreview, error) {
 	if !validBudgetAmount(implUSD) || (reviewUSD != nil && !validBudgetAmount(*reviewUSD)) {
 		return nil, ErrValidation
 	}
@@ -316,20 +372,46 @@ func (s *Store) PrepareBudget(ctx context.Context, id string, agent *AgentDeclar
 		if err != nil {
 			return err
 		}
+		task, err := resolveBudgetTask(ctx, tx, cid, taskID)
+		if err != nil {
+			return err
+		}
 		p = BudgetPreview{ChallengeID: current.ID, Title: current.Title, Version: current.Version,
 			PlanVersion: plan.Version, NewImplUSD: implUSD, ReviewUnchanged: reviewUSD == nil}
+		if task != nil {
+			p.TaskID = formatTaskID(task.TaskID)
+			p.PlanVersion = int(task.PlanVersion)
+		}
 		override, err := loadPlanBudgetOverride(ctx, tx, cid, int64(plan.Version))
 		if err != nil {
 			return err
 		}
 		iu, ru, known := resolveSpecBudgets(plan.Spec, agent)
-		if known {
-			b := applyBudgetOverride(iu, ru, override)
+		var b planBudgets
+		var rem bucketRemaining
+		if task != nil {
+			bs, err := loadTaskBudgets(ctx, tx, cid, agent)
+			if err != nil {
+				return err
+			}
+			known = false
+			for _, tb := range bs {
+				if tb.TaskID == task.TaskID && tb.Known {
+					known, b = true, planBudgets{Impl: tb.Impl, Review: tb.Review}
+					if rem, err = taskRemaining(ctx, tx, cid, tb, bs); err != nil {
+						return err
+					}
+				}
+			}
+		} else if known {
+			b = applyBudgetOverride(iu, ru, override)
 			sp, err := loadBucketSpend(ctx, tx, cid, int64(plan.Version))
 			if err != nil {
 				return err
 			}
-			rem := computeBucketRemaining(b, sp)
+			rem = computeBucketRemaining(b, sp)
+		}
+		if known {
 			p.CurrentKnown = true
 			p.CurrentImplUSD, p.CurrentReviewUSD = microsToUSD(b.Impl), microsToUSD(b.Review)
 			p.ImplRemainingUSD, p.ReviewRemainingUSD = microsToUSD(rem.Impl), microsToUSD(rem.Review)
@@ -354,7 +436,9 @@ type BudgetRequest struct {
 	ExpectedVersion int
 	// PlanVersion は①が見せた承認済みの計画の版（その版の枠を置き換える）。
 	PlanVersion int
-	ImplUSD     float64
+	// TaskID は枠を改めるタスク（①が見せたもの。空なら①と同じ規則で決める）。
+	TaskID  string
+	ImplUSD float64
 	// ReviewUSD が nil ならレビュー対応枠は変えない。
 	ReviewUSD *float64
 }
@@ -381,7 +465,15 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 		if err != nil {
 			return err
 		}
-		if current.Version != req.ExpectedVersion || plan.Version != req.PlanVersion {
+		task, err := resolveBudgetTask(ctx, tx, cid, req.TaskID)
+		if err != nil {
+			return err
+		}
+		approvedVersion := plan.Version
+		if task != nil {
+			approvedVersion = int(task.PlanVersion)
+		}
+		if current.Version != req.ExpectedVersion || approvedVersion != req.PlanVersion {
 			return ErrConflict
 		}
 		prev, err := loadPlanBudgetOverride(ctx, tx, cid, int64(plan.Version))
@@ -400,12 +492,38 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 		if impl <= 0 || (next.ReviewBudgetUSD != nil && *next.ReviewBudgetUSD <= 0) {
 			return ErrValidation
 		}
-		updated, err := setPlanBudgetOverride(ctx, tx, cid, int64(plan.Version), next)
-		if err != nil {
-			return err
+		// タスクの枠は、タスクの記録の値を指定した額で置き換える（増額は上乗せではなく置き換え。ほかのタスクの枠は変えない）。
+		// 同じ計画の版にタスクが 1 個だけの課題は、見直し前と同じく計画の版の上書きも書く（計画の表示が読む）。
+		var taskBefore map[string]any
+		writePlanOverride := true
+		if task != nil {
+			bs, err := loadTaskBudgets(ctx, tx, cid, nil)
+			if err != nil {
+				return err
+			}
+			writePlanOverride = planVersionTaskCount(bs, task.PlanVersion) == 1
+			var beforeImpl, beforeReview sql.NullInt64
+			if err := tx.QueryRowContext(ctx, `SELECT budget_impl_micros, budget_review_micros FROM task WHERE id = ?`, task.TaskID).Scan(&beforeImpl, &beforeReview); err != nil {
+				return err
+			}
+			taskBefore = map[string]any{"task_id": formatTaskID(task.TaskID), "budget_impl_usd": nullMicrosUSD(beforeImpl), "budget_review_usd": nullMicrosUSD(beforeReview)}
+			if _, err := tx.ExecContext(ctx, `UPDATE task SET budget_impl_micros = ?, updated_at = ? WHERE id = ?`, impl, formatTimestamp(rec.at), task.TaskID); err != nil {
+				return err
+			}
+			if req.ReviewUSD != nil {
+				if _, err := tx.ExecContext(ctx, `UPDATE task SET budget_review_micros = ? WHERE id = ?`, *next.ReviewBudgetUSD, task.TaskID); err != nil {
+					return err
+				}
+			}
 		}
-		if !updated {
-			return fmt.Errorf("core: budget: plan %d of %s not found", plan.Version, current.ID)
+		if writePlanOverride {
+			updated, err := setPlanBudgetOverride(ctx, tx, cid, int64(plan.Version), next)
+			if err != nil {
+				return err
+			}
+			if !updated {
+				return fmt.Errorf("core: budget: plan %d of %s not found", plan.Version, current.ID)
+			}
 		}
 		nowStr := formatTimestamp(rec.at)
 		now, err := parseTimestamp(nowStr)
@@ -416,24 +534,28 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 		// （計画の承認は target_version に課題の版を持ち、plan_version に計画の版を持つ）。
 		relaySession, relayQuote := att.relayColumns()
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote)
-			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
-			cid, string(ApprovalKindBudget), string(ApprovalDecisionApproved), plan.Version,
-			att.Actor(), string(att.Channel()), string(att.Verification()), nowStr, relaySession, relayQuote); err != nil {
+			`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, task_id)
+			 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+			cid, string(ApprovalKindBudget), string(ApprovalDecisionApproved), approvedVersion,
+			att.Actor(), string(att.Channel()), string(att.Verification()), nowStr, relaySession, relayQuote, taskIDColumn(task)); err != nil {
 			return err
 		}
 		before := map[string]any{"impl_budget_usd": overrideUSD(prev.ImplBudgetUSD), "review_budget_usd": overrideUSD(prev.ReviewBudgetUSD)}
 		after := map[string]any{
 			"approval_kind": string(ApprovalKindBudget), "decision": string(ApprovalDecisionApproved),
-			"target_version":    plan.Version,
+			"target_version":    approvedVersion,
 			"impl_budget_usd":   overrideUSD(next.ImplBudgetUSD),
 			"review_budget_usd": overrideUSD(next.ReviewBudgetUSD),
+		}
+		if taskBefore != nil {
+			before["task"] = taskBefore
+			after["task_id"] = formatTaskID(task.TaskID)
 		}
 		att.addRelayTo(after)
 		if err := rec.record("challenge", cid, string(OpApprove), before, after); err != nil {
 			return err
 		}
-		out = Approval{Kind: ApprovalKindBudget, Decision: ApprovalDecisionApproved, TargetVersion: plan.Version,
+		out = Approval{Kind: ApprovalKindBudget, Decision: ApprovalDecisionApproved, TargetVersion: approvedVersion,
 			Actor: att.Actor(), Channel: string(att.Channel()), Verification: string(att.Verification()), DecidedAt: now}
 		out.RelaySession, out.RelayQuote = att.relayPtrs()
 		return nil
@@ -442,6 +564,21 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 		return nil, err
 	}
 	return &out, nil
+}
+
+// taskIDColumn は承認の記録の task_id（タスクを指さない承認は NULL）。
+func taskIDColumn(t *taskBudget) any {
+	if t == nil {
+		return nil
+	}
+	return t.TaskID
+}
+
+func nullMicrosUSD(v sql.NullInt64) any {
+	if !v.Valid {
+		return nil
+	}
+	return microsToUSD(v.Int64)
 }
 
 func overrideUSD(p *int64) any {

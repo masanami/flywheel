@@ -521,16 +521,7 @@ func classifyCheck(c UpstreamCheck) checkOutcome {
 // 無いかを返す。差分を人が見ない道なので、衝突を解消するために直したファイルがある取り込みは含めない
 // （衝突の解消を承認し直さずに通す形は、区切り S3b）。
 func movedByMergeInOnly(ctx context.Context, src UpstreamCompareSource, repo, prBase, approvedHead, head string) bool {
-	ch := ClassifyHeadChange(ctx, src, repo, prBase, approvedHead, head)
-	if ch.Kind != HeadChangeMergeInOnly {
-		return false
-	}
-	for _, f := range ch.ConflictFixes {
-		if len(f.Files) > 0 {
-			return false
-		}
-	}
-	return true
+	return classifyContentMove(ClassifyHeadChange(ctx, src, repo, prBase, approvedHead, head)) == contentMoveMergeInOnly
 }
 
 // 承認した head にもチェックが無かった反映の detail と、取り込み後の head にチェックが無くて待つ 3 つの理由の detail。
@@ -688,15 +679,7 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 		return releaseJudgment{result: ExecutionResultHeadChanged, observedHead: observed}, nil
 	}
 	// 8・9
-	failed, pending := false, false
-	for _, c := range pr.Checks {
-		switch classifyCheck(c) {
-		case checkFail:
-			failed = true
-		case checkPending:
-			pending = true
-		}
-	}
+	failed, pending := summarizeChecks(pr.Checks)
 	if failed {
 		return releaseJudgment{result: ExecutionResultChecksFailed, observedHead: observed}, nil
 	}

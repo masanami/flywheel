@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,6 +77,9 @@ type j2RawTask struct {
 	DependsOn    []string `json:"depends_on"`
 	Repo         string   `json:"repo"`
 	Operation    string   `json:"operation"`
+	// BudgetImplUSD・BudgetReviewUSD はタスクの実装の枠・レビュー対応の枠（任意。タスクが 2 個以上の計画では両方が必須）。
+	BudgetImplUSD   *float64 `json:"budget_impl_usd"`
+	BudgetReviewUSD *float64 `json:"budget_review_usd"`
 	// Source は対応する取り込み元の子の external_key（任意。無い・null・空は子に対応しない）。
 	Source string `json:"source"`
 }
@@ -99,6 +103,9 @@ type j2Task struct {
 	Operation    string
 	// Source は対応する取り込み元の子の external_key（"" は対応しない）。
 	Source string
+	// BudgetImplUSD・BudgetReviewUSD はタスクの枠の出力の値そのもの（無ければ nil）。
+	BudgetImplUSD   *float64
+	BudgetReviewUSD *float64
 }
 
 // j2ValidatedOutput は core の閉集合・必須の組・宣言との突き合わせを通った J2 の
@@ -167,6 +174,10 @@ type j2ValidationContext struct {
 	// 持つ計画は、どちらでも不正。
 	CheckSource   bool
 	OpenChildKeys []string
+	// HasDoneTasks は課題に済み（done）のタスクがあるか。あるとき、統合先を使わない計画は不正（済みのタスクは統合先へ入っている）。
+	HasDoneTasks bool
+	// DoneRepos は課題の済みのタスクのリポジトリ（重複なし）。統合先を使う計画のタスクのリポジトリは、これと合わせて 1 つでなければ不正。
+	DoneRepos []string
 }
 
 // j2OutputSchema は J2 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -221,6 +232,7 @@ func j2OutputSchema() []byte {
 			"additionalProperties": false,
 		},
 	}
+	nullableNumber := map[string]any{"type": []string{"number", "null"}}
 	tasksSchema := map[string]any{
 		"type":     "array",
 		"maxItems": MaxPlanTasks,
@@ -236,6 +248,9 @@ func j2OutputSchema() []byte {
 				"repo":          map[string]any{"type": "string"},
 				"operation":     map[string]any{"type": "string"},
 				"source":        nullableString,
+
+				"budget_impl_usd":   nullableNumber,
+				"budget_review_usd": nullableNumber,
 			},
 			"required":             []string{"key", "title", "body", "done_criteria", "non_goals", "depends_on", "repo", "operation"},
 			"additionalProperties": false,
@@ -261,8 +276,6 @@ func j2OutputSchema() []byte {
 		"maxItems": MaxNonGoals,
 		"items":    map[string]any{"type": "string"},
 	}
-	nullableNumber := map[string]any{"type": []string{"number", "null"}}
-
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -473,6 +486,24 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 	if len(tasks) >= 2 && !*raw.UsesIntegration {
 		return nil, false
 	}
+	// 済みのタスクがあれば、タスクの件数に関わらず統合先を使う（済みのタスクの成果は統合先に集まっている）。
+	if vc.HasDoneTasks && !*raw.UsesIntegration {
+		return nil, false
+	}
+	// 統合先を使う計画のタスクは、リポジトリが 1 つ（済みのタスクがあれば、済みのタスクのリポジトリと同じ）。
+	// 上げる依頼が、済みのタスクのリポジトリが 1 つのときだけ始まるのと同じ基準。
+	if *raw.UsesIntegration {
+		repos := map[string]bool{}
+		for _, r := range vc.DoneRepos {
+			repos[r] = true
+		}
+		for _, t := range tasks {
+			repos[t.Repo] = true
+		}
+		if len(repos) > 1 {
+			return nil, false
+		}
+	}
 	topics, ok := validateJ2Topics(raw.Topics)
 	if !ok {
 		return nil, false
@@ -497,7 +528,8 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		}
 		review = *raw.BudgetReviewUSD
 	}
-	if impl > vc.Agent.MaxRunBudgetUSD {
+	// タスクが全部枠を持つ計画では、計画の値（規模の既定）は読まない。1 回の実行の上限額との比べはタスクの枠だけにする。
+	if !allTasksHaveBudgets(tasks) && impl > vc.Agent.MaxRunBudgetUSD {
 		return nil, false
 	}
 
@@ -623,9 +655,22 @@ func validateJ2Tasks(in []j2RawTask, vc j2ValidationContext) ([]j2Task, bool) {
 		if err != nil {
 			return nil, false
 		}
+		// タスクの枠は、書いたら正で、実装の枠は 1 回の実行の上限額以下。タスクが 2 個以上の計画では、両方を必ず書く。
+		for _, b := range []*float64{t.BudgetImplUSD, t.BudgetReviewUSD} {
+			if b != nil && (!(*b > 0) || math.IsInf(*b, 0)) {
+				return nil, false
+			}
+		}
+		if t.BudgetImplUSD != nil && vc.Agent != nil && *t.BudgetImplUSD > vc.Agent.MaxRunBudgetUSD {
+			return nil, false
+		}
+		if len(in) >= 2 && (t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil) {
+			return nil, false
+		}
 		out = append(out, j2Task{
 			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria,
 			NonGoals: nonGoals, DependsOn: t.DependsOn, Repo: t.Repo, Operation: t.Operation, Source: t.Source,
+			BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD,
 		})
 	}
 	return out, true
@@ -681,6 +726,19 @@ func untaskedChildKeys(v *j2ValidatedOutput) []string {
 	return out
 }
 
+// allTasksHaveBudgets は、タスクが 1 個以上あり、全部が実装の枠・レビュー対応の枠の両方を書いているか。
+func allTasksHaveBudgets(tasks []j2Task) bool {
+	if len(tasks) == 0 {
+		return false
+	}
+	for _, t := range tasks {
+		if t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil {
+			return false
+		}
+	}
+	return true
+}
+
 // formatJ2PlanBody は検査済みの plan の出力を、計画の本文（Markdown）へ決定的に
 // 整形する（§J2「出力を計画の本文へ決定的に整形し」）。サイズ・実装枠・レビュー対応枠の額・
 // 統合先を使うか・論点（題名・どう決めたか）・問い（番号・文・選択肢のラベル・推奨の印）・
@@ -694,8 +752,20 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 	// 承認する事実が先に読めるようにするため。
 	b.WriteString("## サイズと予算\n\n")
 	b.WriteString("- サイズ: " + string(v.Size) + "\n")
-	b.WriteString("- 実装枠: " + formatUSDAmount(v.ResolvedImplUSD) + " USD\n")
-	b.WriteString("- レビュー対応枠: " + formatUSDAmount(v.ResolvedReviewUSD) + " USD\n")
+	if allTasksHaveBudgets(v.Tasks) {
+		// タスクが枠を持つ計画の枠は、この計画のタスクの枠の合計（計画の値ではない）。本文は登録のときに決まる文なので、済みのタスクの枠は足さない
+		// （課題の上限は、承認の要約が別に出す）。
+		var impl, review int64
+		for _, t := range v.Tasks {
+			impl += usdToMicros(*t.BudgetImplUSD)
+			review += usdToMicros(*t.BudgetReviewUSD)
+		}
+		b.WriteString("- 実装枠（この計画のタスクの枠の合計）: " + formatUSDAmount(microsToUSD(impl)) + " USD\n")
+		b.WriteString("- レビュー対応枠（この計画のタスクの枠の合計）: " + formatUSDAmount(microsToUSD(review)) + " USD\n")
+	} else {
+		b.WriteString("- 実装枠: " + formatUSDAmount(v.ResolvedImplUSD) + " USD\n")
+		b.WriteString("- レビュー対応枠: " + formatUSDAmount(v.ResolvedReviewUSD) + " USD\n")
+	}
 	b.WriteString("- 統合先を使う: " + yesNo(v.UsesIntegration) + "\n")
 	b.WriteString("- 複数リポジトリにまたがる: " + yesNo(v.CrossRepo) + "\n")
 	if len(v.RelatedRepos) > 0 {
@@ -706,6 +776,9 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, oneLine(t.Title))
 		b.WriteString("   - 対象リポジトリ: " + t.Repo + "\n")
 		b.WriteString("   - 操作: " + t.Operation + "\n")
+		if t.BudgetImplUSD != nil && t.BudgetReviewUSD != nil {
+			b.WriteString("   - 枠: 実装 " + formatUSDAmount(*t.BudgetImplUSD) + " USD・レビュー対応 " + formatUSDAmount(*t.BudgetReviewUSD) + " USD\n")
+		}
 		if t.Source != "" {
 			b.WriteString("   - 取り込み元の子: " + oneLine(t.Source) + "\n")
 		}
@@ -829,6 +902,10 @@ type j2Prepared struct {
 	HasSource bool
 	// OpenChildKeys は課題の、上流で開いている取り込み元の子の external_key（記録した順。出力の検査に使う）。
 	OpenChildKeys []string
+	// HasDoneTasks は課題に済み（done）のタスクがあるか（出力の検査に使う）。
+	HasDoneTasks bool
+	// DoneRepos は課題の済みのタスクのリポジトリ（重複なし。出力の検査に使う）。
+	DoneRepos []string
 	// Read が非 nil のときだけ、計画を登録した後に読んだ記録を付けてよい
 	// （取り込み元の対応があり、最新のコメントをすべて入力へ含めた場合）。値は
 	// J2 の直前の取得で得たコメント数と更新日時（ストアの観測値ではない）。
@@ -863,8 +940,24 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	var children []SourceChild
 	var replan *replanNote
 	var planRejections []CompletionRejection
+	var completionRejections []CompletionRejection
 	var planAnswersText string
+	var doneTasks []Task
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		all, err := listTasks(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		// 済みのタスクは、統合先を使う課題のものだけを扱う（統合先を使わない課題の動きは変えない）。
+		if integ, err := challengeUsesIntegration(ctx, tx, cid); err != nil {
+			return err
+		} else if integ != nil && *integ {
+			for _, t := range all {
+				if t.Status == TaskStatusDone {
+					doneTasks = append(doneTasks, t)
+				}
+			}
+		}
 		pa, err := loadPlanAnswersSection(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -875,6 +968,9 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 			return err
 		}
 		planRejections = prs
+		if completionRejections, err = loadCompletionRejectionsForReplan(ctx, tx, cid); err != nil {
+			return err
+		}
 		hs, err := loadHolds(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -892,11 +988,11 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 			return err
 		}
 		sb = b
-		all, err := loadSourceChildren(ctx, tx, cid)
+		allChildren, err := loadSourceChildren(ctx, tx, cid)
 		if err != nil {
 			return err
 		}
-		for _, c := range all {
+		for _, c := range allChildren {
 			if c.UpstreamState == string(upstreamStateOpen) {
 				children = append(children, c)
 			}
@@ -912,7 +1008,14 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		return nil, nil, fmt.Errorf("%w: read position_file %q: %w", ErrConfigInvalid, in.AgentDecl.PositionFile, err)
 	}
 
-	prepared := &j2Prepared{HasSource: sb != nil}
+	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0}
+	seenDoneRepo := map[string]bool{}
+	for _, t := range doneTasks {
+		if !seenDoneRepo[t.Repo] {
+			seenDoneRepo[t.Repo] = true
+			prepared.DoneRepos = append(prepared.DoneRepos, t.Repo)
+		}
+	}
 
 	var upstream *j2UpstreamInput
 	if sb != nil {
@@ -955,11 +1058,20 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	if t := formatPlanRejectionsSection(planRejections); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: PlanRejectionsSectionLabel, Content: t})
 	}
+	if t := formatCompletionRejectionsForReplanSection(completionRejections); t != "" {
+		sections = append(sections, JudgmentDataSection{Label: CompletionRejectionsForReplanSectionLabel, Content: t})
+	}
 	if planAnswersText != "" {
 		sections = append(sections, JudgmentDataSection{Label: PlanAnswersSectionLabel, Content: planAnswersText})
 	}
 	if replan != nil {
 		sections = append(sections, JudgmentDataSection{Label: ReplanSectionLabel, Content: formatReplanSection(replan)})
+	}
+	if replan != nil && replan.Reason == string(holdReasonChallengeCheckNotMet) {
+		sections = append(sections, JudgmentDataSection{Label: ChallengeCheckFindingsSectionLabel, Content: formatChallengeCheckFindingsSection(replan)})
+	}
+	if t := formatDoneTasksSection(doneTasks); t != "" {
+		sections = append(sections, JudgmentDataSection{Label: DoneTasksSectionLabel, Content: t})
 	}
 	if stagesText := formatJ2StagesSection(ch); stagesText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "いまの予想・やらないこと・図", Content: stagesText})
@@ -1625,7 +1737,7 @@ func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
 		fin, err := s.finalizeJ2Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, j2Finalize{
-			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, OpenChildKeys: prepared.OpenChildKeys},
+			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos},
 			Read:       prepared.Read,
 		})
 		if err != nil {

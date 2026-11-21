@@ -450,6 +450,9 @@ func insertPlanTasks(tx *sql.Tx, challengeID, version int, spec string) error {
 			Repo         string   `json:"repo"`
 			Operation    string   `json:"operation"`
 			Source       string   `json:"source"`
+			// 枠のキーを持つタスクは、承認と同じく枠をタスクの記録へ入れる（USD の 100 万分の 1 の単位）。
+			BudgetImplUSD   *float64 `json:"budget_impl_usd"`
+			BudgetReviewUSD *float64 `json:"budget_review_usd"`
 		} `json:"tasks"`
 	}
 	if err := json.Unmarshal([]byte(spec), &out); err != nil {
@@ -466,9 +469,16 @@ func insertPlanTasks(tx *sql.Tx, challengeID, version int, spec string) error {
 		if tk.Source != "" {
 			sourceKey = tk.Source
 		}
-		res, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
-			challengeID, version, tk.Key, tk.Title, tk.Body, tk.DoneCriteria, string(nonGoals), tk.Repo, tk.Operation, sourceKey, at, at)
+		micros := func(usd *float64) any {
+			if usd == nil {
+				return nil
+			}
+			return int64(*usd*1e6 + 0.5)
+		}
+		res, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+			challengeID, version, tk.Key, tk.Title, tk.Body, tk.DoneCriteria, string(nonGoals), tk.Repo, tk.Operation, sourceKey, at, at,
+			micros(tk.BudgetImplUSD), micros(tk.BudgetReviewUSD))
 		if err != nil {
 			return err
 		}
@@ -1072,6 +1082,11 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`UPDATE run_artifact SET role = 'integration' WHERE id = 1`, nil},
 			{`UPDATE hold SET task_id = 2, reason = 'facts_unmet' WHERE id = 1`, nil},
 			{`UPDATE challenge SET uses_integration = 1 WHERE id = 1`, nil},
+			{`UPDATE task SET budget_impl_micros = 3000000, budget_review_micros = 1500000 WHERE id = 1`, nil},
+			{`UPDATE challenge SET integration_ref = 'feat/issue-1' WHERE id = 1`, nil},
+			{`UPDATE contract_run SET verified_ref = 'deadbeef' WHERE id = 1`, nil},
+			{`UPDATE approval SET task_id = 1 WHERE id = 1`, nil},
+			{`UPDATE run SET reflect = 1 WHERE id = 2`, nil},
 			{`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after, run_id)
 			  VALUES (?, 'tester', 'cli', 'none', 'challenge', 1, 'create', NULL, '{"title":"c1"}', 1)`, []any{at}},
 			{`INSERT INTO occurrence (challenge_id, activity_id, kind, outcome, source, created_at) VALUES (1, 1, 'completion_rejected', 'bad', 'core', ?)`, []any{at}},
@@ -1237,5 +1252,26 @@ func InsertReflectContractRun(t *testing.T, workspace string, challengeID int, o
 		return err
 	}); err != nil {
 		t.Fatalf("coretest: InsertReflectContractRun: %v", err)
+	}
+}
+
+// InsertTaskContractRun は終わっていないタスクの契約の実行を、課題 challengeID のタスク taskKey に結び付けて 1 件挿入する
+// （統合先を使う課題の、タスクごとの実行。同じ課題でもタスクが違えば、終わっていない実行を複数持てる）。
+func InsertTaskContractRun(t *testing.T, workspace string, challengeID int, taskKey, connectorID, externalRunID, state string) {
+	t.Helper()
+	InsertContractRun(t, workspace, challengeID, connectorID, externalRunID, state)
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`UPDATE contract_run SET task_id = (SELECT id FROM task WHERE challenge_id = ? AND key = ?) WHERE external_run_id = ?`, challengeID, taskKey, externalRunID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return fmt.Errorf("no contract run %s", externalRunID)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("coretest: InsertTaskContractRun: %v", err)
 	}
 }

@@ -217,6 +217,8 @@ type ChallengeDetail struct {
 	Tasks []Task
 	// UsesIntegration は課題が統合先を使うか（challenge.uses_integration）。未決か過去の課題は nil。
 	UsesIntegration *bool
+	// IntegrationRef は課題に記録した統合先の識別（challenge.integration_ref）。記録が無ければ nil。
+	IntegrationRef *string
 	// Followups は課題にぶら下がるフォローアップ（状態を問わず全部。ID の昇順）。無ければ空のスライス（nil でない）。
 	Followups []Followup
 }
@@ -792,6 +794,8 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 	}
 
 	var detail ChallengeDetail
+	// 宣言を読めなくても動かす（枠の記録が空の過去のタスクの枠だけが引けなくなる）。
+	agent, _ := LoadAgentDeclaration(s.Workspace())
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		c, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
@@ -862,8 +866,19 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 		if detail.Tasks, err = listTasks(ctx, tx, cid); err != nil {
 			return err
 		}
+		if err := fillTaskBudgets(ctx, tx, cid, detail.Tasks, agent); err != nil {
+			return err
+		}
 		if detail.UsesIntegration, err = challengeUsesIntegration(ctx, tx, cid); err != nil {
 			return err
+		}
+		var integRef sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT integration_ref FROM challenge WHERE id = ?`, cid).Scan(&integRef); err != nil {
+			return err
+		}
+		if integRef.Valid && integRef.String != "" {
+			v := integRef.String
+			detail.IntegrationRef = &v
 		}
 		if detail.Followups, err = listFollowups(ctx, tx, FollowupFilter{ChallengeID: id}); err != nil {
 			return err

@@ -292,6 +292,8 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
   "task:create": "タスクを足した",
   "followup:create": "フォローアップを足した",
   task_status: "タスクの状態が変わった",
+  task_verify: "タスクを検証した",
+  integration_ref_set: "統合先を記録した",
   classify: "分類した",
   withdraw: "取り下げた",
   dep_add: "前提を足した",

@@ -338,7 +338,7 @@ func TestShowAndActionableChallengeCarryEveryChallengeKey(t *testing.T) {
 		got   map[string]bool
 		added []string
 	}{
-		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"dependencies", "dependents", "followup_of", "improvement", "uses_integration"}},
+		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"dependencies", "dependents", "followup_of", "improvement", "integration_ref", "uses_integration"}},
 		"ActionableChallenge": {tags(view.ActionableChallenge{}), []string{"unmet_dependencies"}},
 	} {
 		want := map[string]bool{}
@@ -635,5 +635,22 @@ func TestClosedSets_ExecutionResultWordsAlignWithCodes(t *testing.T) {
 			t.Errorf("%s と %s が同じ語 %q", prev, c, words[i])
 		}
 		seen[words[i]] = c
+	}
+}
+
+// #906: 計画のタスクの枠（実装・レビュー対応）が、`show --plan --json` と承認の要約の JSON に出る。書いていないタスクは null。
+func TestPlanTaskFramesAreInTheJSON(t *testing.T) {
+	impl, review := 10.0, 5.0
+	pv := &core.PlanView{Tasks: []core.PlanTaskView{
+		{Key: "a", Title: "A", BudgetImplUSD: &impl, BudgetReviewUSD: &review},
+		{Key: "b", Title: "B"},
+	}}
+	got := marshal(t, view.FromPlanView(pv))
+	if !strings.Contains(got, `"budget_impl_usd":10,"budget_review_usd":5,"depends_on"`) || !strings.Contains(got, `"budget_impl_usd":null,"budget_review_usd":null,"depends_on"`) {
+		t.Errorf("plan json lacks the task frames: %s", got)
+	}
+	ap := marshal(t, view.FromApprovalPreview(&core.ApprovalPreview{Kind: core.ApprovalKindPlan, PlanTasks: pv.Tasks}, nil))
+	if !strings.Contains(ap, `"budget_impl_usd":10,"budget_review_usd":5,`) {
+		t.Errorf("approval json lacks the task frames: %s", ap)
 	}
 }

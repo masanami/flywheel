@@ -528,6 +528,8 @@ const withChildren = () =>
     tasks: [
       {
         body: "",
+        budget_impl_usd: 0,
+        budget_review_usd: 0,
         depends_on: [],
         done_criteria: "",
         id: "T-1",
@@ -536,6 +538,7 @@ const withChildren = () =>
         plan_version: 1,
         repo: "",
         source_key: "c1",
+        spent_usd: 0,
         status: "running",
         title: "子 1 を実装するタスク",
       },

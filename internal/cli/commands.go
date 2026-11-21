@@ -305,6 +305,7 @@ func defaultCommands() []Command {
 			Flags: append([]flagDef{
 				{Name: "impl-usd", HasValue: true, Required: true},
 				{Name: "review-usd", HasValue: true},
+				{Name: "task", HasValue: true},
 			}, relayedFlags()...),
 			Run: runBudget,
 		},

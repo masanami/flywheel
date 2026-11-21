@@ -42,7 +42,7 @@ func TestPollContractRuns_ObserveWaitIsNotResumedWhileTheOwnerHold(t *testing.T)
 	}
 }
 
-// 2・6(a): 検証中・完了の間も、開いたレビュー待ちの run は実行中の数え・同時委譲数に入らない（着手中は入る）。
+// 2・6(a)・AC-30: 開いたレビュー待ちの run は、課題の状態によらず、実行中の数え・同時委譲数に入らない（着手中でも入らない）。
 func TestContractReviewWait_IsNotCountedAsActiveWhileVerifyingOrDone(t *testing.T) {
 	t.Parallel()
 	f := newReviewFlowFixture(t)
@@ -53,7 +53,7 @@ func TestContractReviewWait_IsNotCountedAsActiveWhileVerifyingOrDone(t *testing.
 		st     Status
 		active bool
 	}{
-		{StatusVerifying, false}, {StatusAwaitingCompletionApproval, false}, {StatusDone, false}, {StatusInProgress, true},
+		{StatusVerifying, false}, {StatusAwaitingCompletionApproval, false}, {StatusDone, false}, {StatusInProgress, false},
 	} {
 		f.setStatus(t, tc.st)
 		var got bool
@@ -177,8 +177,8 @@ func TestCancelOpenContractRuns_NothingOpenIsANoOp(t *testing.T) {
 	}
 }
 
-// 3: 計画の作り直し（--replan）は、開いた契約の run を止めてから進める。止めないままだと拒む。
-func TestAnswerReplan_StopsTheOpenContractRunWithCancelFirst(t *testing.T) {
+// AC-220: レビュー待ちのタスクの実行だけが開いている課題の保留への --replan の回答は、受け付けられる（取り消しは、作り直した計画の承認の後の状態の確認が行う）。
+func TestAnswerReplan_AcceptsWhileOnlyAReviewWaitingTaskRunIsOpen(t *testing.T) {
 	t.Parallel()
 	f := newReviewFlowFixture(t)
 	f.agent.ReworkLimit = 1
@@ -190,26 +190,21 @@ func TestAnswerReplan_StopsTheOpenContractRunWithCancelFirst(t *testing.T) {
 	if got := f.status(t, f.cid); got != StatusAwaitingHuman {
 		t.Fatalf("status = %s, want awaiting_human", got)
 	}
-	replan := func() (*Challenge, error) {
-		p, err := f.s.PrepareAnswer(context.Background(), f.cid, "NEW-SCOPE")
-		if err != nil {
-			t.Fatal(err)
-		}
-		c, _, err := f.s.ExecuteAnswer(context.Background(), AnswerRequest{
-			ChallengeID: f.cid, ExpectedVersion: p.Version, Answer: "NEW-SCOPE", Replan: true,
-		}, verifiedAttestationForTest(t, f.cid))
-		return c, err
+	if state, _, _, ended := f.contractRow(t); state != "waiting" || ended {
+		t.Fatalf("contract_run state=%s ended=%v, want an open waiting (review) run", state, ended)
 	}
-	if _, err := replan(); !errors.Is(err, ErrValidation) {
-		t.Fatalf("replan with an open contract run: err = %v, want ErrValidation", err)
-	}
-	f.client.cancelOut = contractOut(ContractStateCancelled, nil, nil)
-	if _, err := f.cancelOpen(t); err != nil {
+	p, err := f.s.PrepareAnswer(context.Background(), f.cid, "NEW-SCOPE")
+	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := replan()
+	c, _, err := f.s.ExecuteAnswer(context.Background(), AnswerRequest{
+		ChallengeID: f.cid, ExpectedVersion: p.Version, Answer: "NEW-SCOPE", Replan: true,
+	}, verifiedAttestationForTest(t, f.cid))
 	if err != nil || c.Status != StatusClassified {
-		t.Fatalf("replan after cancel: %+v err %v, want classified", c, err)
+		t.Fatalf("replan with a review-waiting run: %+v err %v, want classified", c, err)
+	}
+	if len(f.client.cancels) != 0 {
+		t.Fatalf("cancels = %v, want none at the answer (the cancel follows the plan approval)", f.client.cancels)
 	}
 }
 

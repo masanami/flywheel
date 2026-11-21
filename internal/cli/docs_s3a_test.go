@@ -146,11 +146,11 @@ func TestSpec_AC378_GlossaryReflectSinceS3a(t *testing.T) {
 	}
 }
 
-// AC-379 #853: 用語集の「反映」の行に、衝突の解消を承認し直さずに通す形は S3b から、の旨がある。
-func TestSpec_AC379_GlossaryReflectConflictFromS3b(t *testing.T) {
+// AC-379 #853: 用語集の「反映」の行に、衝突の解消を承認し直さずに通す形は先の区切りから、の旨がある（S3b〔#891〕で、S3b から S3c からへ改めた）。
+func TestSpec_AC379_GlossaryReflectConflictFromLaterSlice(t *testing.T) {
 	cols := glossaryRow(t, "反映")
-	if !strings.Contains(strings.Join(cols, " | "), "衝突の解消を承認し直さずに通す形は、S3b から") {
-		t.Errorf("AC-379: the 反映 row does not say the no-reapproval conflict resolution form comes from S3b: %q", cols)
+	if !strings.Contains(strings.Join(cols, " | "), "衝突の解消を承認し直さずに通す形は、S3c から") {
+		t.Errorf("AC-379: the 反映 row does not say the no-reapproval conflict resolution form comes from S3c: %q", cols)
 	}
 }
 

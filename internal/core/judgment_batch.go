@@ -50,8 +50,10 @@ const (
 // `cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
 const NotStartedNoTasks NotStartedReason = "no_tasks"
 
-// NotStartedIntegrationUnavailable は、課題が統合先を使う（challenge.uses_integration が 1）、または起動できる
-// タスクが 2 個以上あり、統合先の入る後の区切りまで委譲を起動しないことを表す。
+// NotStartedIntegrationUnavailable は、課題の構成が、いまの委譲の起動の条件に合わず、委譲を起動しないことを表す。
+// 当たる理由は、統合先を使わない課題で起動できるタスクが 2 個以上ある・統合先を使う課題で未完のタスクのリポジトリが
+// 2 つ以上にまたがる・統合先を使う課題のタスクの委譲先が契約の形（form: cli）でない、の 3 つ（統合先から反映先へ上げる依頼が
+// 済みのタスクのリポジトリが 1 つでないときも同じ理由）。詳細に、当たった理由の文を付ける。
 // `cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
 const NotStartedIntegrationUnavailable NotStartedReason = "integration_unavailable"
 

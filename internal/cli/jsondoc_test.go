@@ -1613,4 +1613,29 @@ func addCoreRedesignS2aShowShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["run"]["task_id"] = true
 	doc.entity["hold"]["task_id"] = true
 	doc.entity["show_challenge"]["uses_integration"] = true
+	addCoreRedesignS3bShowShape(t, doc, string(data))
+}
+
+// addCoreRedesignS3bShowShape は区切り S3b が show --json の challenge に足した `integration_ref` を doc へ合成する
+// （core-redesign.md の「表示」と「画面・API設計」が書いていることを確かめた上で足す）。
+func addCoreRedesignS3bShowShape(t *testing.T, doc *documentedJSON, spec string) {
+	t.Helper()
+	if !strings.Contains(spec, "`challenge` に、`integration_ref`") || !strings.Contains(spec, "- `challenge`: `integration_ref`") {
+		t.Fatal("core-redesign spec does not document the S3b key of show --json (challenge.integration_ref)")
+	}
+	doc.entity["show_challenge"]["integration_ref"] = true
+	// tasks[] の要素は、出力の側の照合（jsonEntityOf）に入っていない。S3b が足した 3 つのキーは、文書の「画面・API設計」の
+	// 該当の行が書いていることだけを、ここで確かめる（出力の側は show_api_parity_test.go・show_budget_display_test.go が見る）。
+	var tasksLine string
+	for _, line := range strings.Split(spec, "\n") {
+		if strings.HasPrefix(line, "- `tasks[]` の要素:") {
+			tasksLine = line
+			break
+		}
+	}
+	for _, k := range []string{"`budget_impl_usd`", "`budget_review_usd`", "`spent_usd`"} {
+		if !strings.Contains(tasksLine, k) {
+			t.Fatalf("core-redesign spec's \"- `tasks[]` の要素:\" line does not document %s (line = %q)", k, tasksLine)
+		}
+	}
 }

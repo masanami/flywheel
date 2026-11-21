@@ -63,6 +63,8 @@ const task = (
   title: string,
 ): ShowCardResponse["tasks"][number] => ({
   body: "",
+  budget_impl_usd: 0,
+  budget_review_usd: 0,
   depends_on: [],
   done_criteria: "",
   id,
@@ -71,6 +73,7 @@ const task = (
   plan_version: 1,
   repo: "",
   source_key: null,
+  spent_usd: 0,
   status: "running",
   title,
 });

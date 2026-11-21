@@ -199,7 +199,7 @@ func TestOpenWorkspace_Version5ColumnSetIsFixed(t *testing.T) {
 		"session_id", "session_id_mismatch", "resumed_from_run_id", "pid", "host", "heartbeat_at",
 		"started_at", "ended_at", "result", "rate_limited", "max_budget_usd", "budget_bucket",
 		"cost_usd", "cost_source", "reported_total_cost_usd", "output", "error",
-		"slot_id", "decider", "decider_row", "repo", "flywheel_version", "task_id", "operation_id",
+		"slot_id", "decider", "decider_row", "repo", "flywheel_version", "task_id", "operation_id", "reflect",
 	}
 	if got := pragmaTableInfoColumnsForTest(t, s, "run"); !stringSlicesEqual(got, wantRun) {
 		t.Fatalf("run columns = %v, want %v", got, wantRun)

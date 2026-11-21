@@ -125,7 +125,7 @@ func sameRequestedAction(row *contractRunRow, ra *ContractRequestedAction) bool 
 }
 
 // afterContractRead は読めた状態に応じた課題への写しを行う: waiting は求められた操作に従って保留へ写し、
-// succeeded は課題を着手中から検証中へ進める。読みが成功していない（Result が succeeded でない）・既に保留にした
+// succeeded は課題を着手中から検証中へ進める（統合先を使う課題は進めず、holdIntegrationSucceeded が保留にする）。読みが成功していない（Result が succeeded でない）・既に保留にした
 // ときは何もしない。
 func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, connector *Connector, rs *contractReleaseSource) error {
 	if rep.Result != RunResultSucceeded || rep.Held {
@@ -150,7 +150,19 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 		held, err := s.holdContractWait(ctx, rep, contractWaitingQuestion(rep.ExternalRunID, rep.Summary, rep.RequestedAction, resumeCarriesAnswer(connector)))
 		rep.Held = held
 		return err
+	}
+	if isReflect, err := s.isReflectRun(ctx, rep); err != nil || isReflect {
+		if err != nil || !rep.State.Terminal() {
+			return err
+		}
+		// 完了でない課題の上げる依頼が、終わりの状態を返した（flywheel が取り消した応答は、この関数へ来ない）。
+		return s.holdReflectEnded(ctx, rep)
+	}
+	switch rep.State {
 	case ContractStateSucceeded:
+		if handled, err := s.holdIntegrationSucceeded(ctx, rep, rs); err != nil || handled {
+			return err
+		}
 		// succeeded の run は読んだ時点で終わりとして記録済みで、次の周に読み直されない。release を作れなくても検証中へ進める
 		// （進めないと課題が着手中のまま取り残される）。release が無いときは人が op add で補う。
 		_ = s.registerContractReleases(ctx, rs, rep)
@@ -169,14 +181,123 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 			return err
 		}
 		// 課題が保留の間に読んだ成功の印（held_success）は、読んだ記録と同じトランザクションで付けてある（recordContractStatus）。
+	case ContractStateFailed, ContractStateCancelled:
+		// 「入れてよい」を返し済みの実行の失敗・取り消しは、統合先へ入ったかを確かめて扱う（返し済みでなければ、読んだ記録の書き込みが扱い済み）。
+		return s.finishStoppedLanding(ctx, rep, rs)
 	}
 	return nil
+}
+
+// finishStoppedLanding は、統合先を使う課題のタスクの実行が、「入れてよい」を返し済み（land_ref がある）のまま失敗・取り消しで終わったとき、
+// 成果物が統合先へ入ったかを確かめて扱う（finishIntegrationLanding）。返し済みでなければ何もしない。
+func (s *Store) finishStoppedLanding(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource) error {
+	cid, ok := parseChallengeID(rep.ChallengeID)
+	if !ok {
+		return nil
+	}
+	integ, landRef, recorded, err := s.loadIntegrationTaskEnd(ctx, cid, rep.ExternalRunID)
+	if err != nil || !integ || landRef == "" {
+		return err
+	}
+	return s.finishIntegrationLanding(ctx, rep, rs, cid, landRef, recorded)
+}
+
+// loadIntegrationTaskEnd は、統合先を使う課題のタスクの契約の実行（externalRunID）の終わりを扱うための読み。integ は、統合先を使う課題の
+// タスクの実行か（上げる依頼・統合先を使わない課題は偽）。landRef は通す中身（返し済みでなければ空）、recorded は課題の統合先の記録。
+func (s *Store) loadIntegrationTaskEnd(ctx context.Context, cid int64, externalRunID string) (integ bool, landRef, recorded string, err error) {
+	err = s.db.Read(ctx, func(tx *sql.Tx) error {
+		u, err := challengeUsesIntegration(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		integ = u != nil && *u
+		if !integ {
+			return nil
+		}
+		var kind, lr, ir sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT kind, land_ref FROM contract_run WHERE challenge_id = ? AND external_run_id = ?`, cid, externalRunID).Scan(&kind, &lr); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if kind.String == contractRunKindReflect {
+			integ = false
+			return nil
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT integration_ref FROM challenge WHERE id = ?`, cid).Scan(&ir); err != nil {
+			return err
+		}
+		landRef, recorded = lr.String, ir.String
+		return nil
+	})
+	return integ, landRef, recorded, classifyReadWriteErr(err)
+}
+
+// holdIntegrationSucceeded は、統合先を使う課題のタスクの実行が、レビュー待ちを経ずに succeeded になったとき（land_ref が無い）、
+// 検証へ進めず、課題が着手中なら保留にする（上流の成果物が統合先へ入っていれば merged_unverified、入っていなければ delegate_ended）。
+// 統合先を使う課題では、succeeded を課題の検証中への移り変わりに使わないので、処理した（真）。land_ref があるときの succeeded は、
+// 「入れてよい」を返し済みの実行の終わりの確かめ（finishIntegrationLanding）が扱う。統合先を使わない課題では何もしない（偽）。
+func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource) (bool, error) {
+	cid, ok := parseChallengeID(rep.ChallengeID)
+	if !ok {
+		return false, nil
+	}
+	integ, landRef, recorded, err := s.loadIntegrationTaskEnd(ctx, cid, rep.ExternalRunID)
+	if err != nil || !integ {
+		return false, err
+	}
+	if landRef != "" {
+		// 「入れてよい」を返し済み。成果物が統合先へ入ったかを上流で確かめ、入っていればタスクを済みにする（課題の状態によらない）。
+		return true, s.finishIntegrationLanding(ctx, rep, rs, cid, landRef, recorded)
+	}
+	// 保留にしない場合（課題が着手中でない・取りやめのタスク）は、契約の実行を終わった記録にするだけ。保留にする場合は、保留と終わりの記録を
+	// 1 つの書き込みにする（間でプロセスが止まっても、保留の無い終わった記録だけが残らない。開いたままなら次の状態の確認が読み直す）。
+	if inProgress, err := s.challengeInProgress(ctx, cid); err != nil || !inProgress {
+		if err != nil {
+			return true, err
+		}
+		// 保留中の課題は、契約の実行を開けたまま残す（上げる依頼の終わりと同じ形。回答で着手中へ戻った後の状態の確認が、同じ終わりを読み直して、
+		// 統合先へ入ったかを確かめて保留を立て、終わった記録にする。ここで終わった記録にすると、タスクが検証中・着手中のまま、保留が立たない）。
+		// 開けたままの実行は、タスクの二重の起動を止め、state が succeeded で land_ref が空なので、計画を作り直す回答の「作業している実行」に数えない。
+		if held, err := s.challengeStatusIs(ctx, cid, StatusAwaitingHuman); err != nil || held {
+			return true, err
+		}
+		return true, s.closeContractRunRow(ctx, cid, rep.ExternalRunID)
+	}
+	if sc, err := s.loadReviewIntakeScope(ctx, cid, rep.ExternalRunID); err != nil || (sc.TaskID != nil && sc.TaskStatus == TaskStatusCancelled) {
+		if err != nil {
+			return true, err
+		}
+		return true, s.closeContractRunRow(ctx, cid, rep.ExternalRunID) // 取りやめのタスクの実行の終わりでは保留にしない
+	}
+	// 記録済みの状態が終わりのとき（保留の書き込みのやり直し）、読み直した status は成果物を持たない。取り込み済みの成果物で補う。
+	arts, err := s.landingArtifacts(ctx, rep, cid)
+	if err != nil {
+		return true, err
+	}
+	if recorded == "" {
+		if branches, _ := integrationArtifactRefs(arts); len(branches) == 1 {
+			recorded = branches[0]
+		}
+	}
+	merged, unreadable := false, true // 確かめられなかったときは、入っているとは言えず、入っていないとも言い切れない
+	if rs != nil && rs.Reconcile != nil && recorded != "" {
+		unreadable = false
+		m, err := rs.mergedIntoBranch(context.WithoutCancel(ctx), arts, recorded)
+		if err != nil {
+			unreadable = true
+		}
+		merged = m
+	}
+	reason := holdReasonDelegateEnded
+	if merged {
+		reason = holdReasonMergedUnverified
+	}
+	return true, s.holdLandedEnd(ctx, rep, cid, integrationSucceededQuestion(rep.ExternalRunID, merged, unreadable), reason)
 }
 
 // SubmitHeldContractSuccesses は、課題が保留の間に契約の run が succeeded まで進み（held_success）、オーナーが答えて課題が
 // 着手中へ戻ったものを、start も resume も呼ばずに検証中へ進める。成果物は succeeded を読んだときに取り込み済み。
 // 答えは保留に残り、完了の検証（J5）の材料に入る。オーナーが答える前（課題がまだ保留）は何も変えない。
-// 検証中へ進めた課題の数を返す。only が非 nil ならその課題だけを対象にする。
+// 検証中へ進めた課題の数を返す。only が非 nil ならその課題だけを対象にする。統合先を使う課題は対象にしない。
 func (s *Store) SubmitHeldContractSuccesses(ctx context.Context, only *int64) (int, error) {
 	type target struct {
 		id          int64
@@ -186,7 +307,8 @@ func (s *Store) SubmitHeldContractSuccesses(ctx context.Context, only *int64) (i
 	var targets []target
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		q := `SELECT k.challenge_id, k.start_run_id, k.external_run_id FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.held_success = 1 AND c.status = 'in_progress'`
+			WHERE k.held_success = 1 AND c.status = 'in_progress' AND COALESCE(c.uses_integration, 0) = 0
+			AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status = 'cancelled')`
 		args := []any{}
 		if only != nil {
 			q += ` AND k.challenge_id = ?`
@@ -269,9 +391,20 @@ func (s *Store) holdContractWait(ctx context.Context, rep *ContractRunReport, qu
 func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64) (*ContractRunReport, error) {
 	challengeID := formatChallengeID(row.ChallengeID)
 	row.reqFacts = connector.RequiredFacts
+	if row.Kind == contractRunKindReflect {
+		row.reqFacts = nil // 上げる依頼のレビュー待ちには required_facts を掛けない（満たさなかった回数も数えない）
+	}
 	var answer contractAnswer
 	var resume bool
-	if row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindReview {
+	// 上げる依頼（kind が reflect）のレビュー待ちには、差し戻しの返しをしない。課題が検証中の間は、レビュー待ちを読み直さない
+	// （読むたびに作る run が、課題の単位の確かめが読む最後の委譲の実行になり、取り込んだ成果物を隠すため）。
+	if row.Kind == contractRunKindReflect && row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindReview {
+		verifying, err := s.challengeStatusIs(ctx, row.ChallengeID, StatusVerifying)
+		if err != nil || verifying {
+			return nil, err
+		}
+	}
+	if row.Kind != contractRunKindReflect && row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindReview {
 		rr, err := s.pendingReviewReply(ctx, row, planVersion, in.AgentDecl)
 		if err != nil {
 			return nil, err
@@ -286,7 +419,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 				State: row.State, Summary: row.Summary, Held: held}, err
 		default:
 			// 引数を埋められないまま答えを失わないよう、返すと決める前に確かめる。
-			if _, err := fillCommandArgs(connector, connector.Commands.Resume, challengeID, binding, row.ExternalRunID, *rr.Answer); err != nil {
+			if _, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, challengeID, binding, *rr.Answer); err != nil {
 				return nil, err
 			}
 			answer, resume = *rr.Answer, true
@@ -296,7 +429,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		a, ok, err := s.loadContractAnswer(ctx, row, func(answer string) error {
 			// 答えを返すと決める（結び付きを外す）前に、resume の引数を埋められることを確かめる（埋められないまま答えを失わない）。
 			// 答えが無い状態の確認（status）では resume の引数を確かめない（取り込み元を要するのが resume だけの宣言でも状態を読める）。
-			_, err := fillCommandArgs(connector, connector.Commands.Resume, challengeID, binding, row.ExternalRunID, contractAnswer{Choice: answer})
+			_, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, challengeID, binding, contractAnswer{Choice: answer})
 			return err
 		})
 		if err != nil {
@@ -304,16 +437,25 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		}
 		answer, resume = contractAnswer{Choice: a}, ok
 	}
+	integ, err := s.integrationTaskRun(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	// 統合先を使う課題のタスクの実行の succeeded は、統合先へ入ったかの確かめと、保留・タスクを済みにする書き込みが済むまで、終わった記録にしない
+	// （その書き込みが、同じトランザクションで終わった記録にする）。
+	row.holdSuccessEnd = integ
 	args, name := connector.Commands.Status, "status"
 	if resume {
 		args, name = connector.Commands.Resume, "resume"
 	}
-	command, err := fillCommandArgs(connector, args, challengeID, binding, row.ExternalRunID, answer)
+	command, err := fillRowCommandArgs(connector, row, args, challengeID, binding, answer)
 	if err != nil {
 		return nil, err
 	}
 	workDir := existingContractWorkDir(row, in.WorkDir)
-	rep, err := s.runExistingContractCommand(ctx, in.Client, in.AgentDecl, workDir, row, name, command, planVersion, cycleID, "")
+	// 上げる依頼（kind が reflect）は、終わりを読んでも終わった記録にしない（保留を立てる書き込み〔holdReflectEnded〕が終わった記録にする。
+	// 書き込みが途中で失敗したら、次の状態の確認が同じ終わりを読み直してやり直す）。
+	rep, err := s.runExistingContractCommandWith(ctx, in.Client, in.AgentDecl, workDir, row, name, command, planVersion, cycleID, "", nil, row.Kind == contractRunKindReflect)
 	if err != nil {
 		return nil, err
 	}
@@ -340,10 +482,15 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 			return nil, err
 		}
 	}
-	if rep.Result == RunResultSucceeded && !rep.State.Terminal() && !rep.Held {
+	// 上げる依頼は、予算の上限での中止をしない。
+	if row.Kind != contractRunKindReflect && rep.Result == RunResultSucceeded && !rep.State.Terminal() && !rep.Held {
 		if err := s.cancelOverBudget(ctx, in, row, connector, binding, planVersion, cycleID, rep); err != nil {
 			return nil, err
 		}
+	}
+	if !resume && integ && rep.Result == RunResultSucceeded && !rep.Held && rep.PendingRespond == nil && rep.State == ContractStateWaiting &&
+		rep.RequestedAction != nil && rep.RequestedAction.Kind == contractRequestedKindReview {
+		return s.landVerifiedReview(ctx, in, row, connector, binding, planVersion, cycleID, rep)
 	}
 	if !resume && rep.PendingRespond != nil && !rep.Held && !rep.State.Terminal() {
 		return s.respondToReview(ctx, in, row, connector, binding, planVersion, cycleID, rep)
@@ -373,7 +520,7 @@ func stillObserving(rep *ContractRunReport) bool {
 // 引数を埋められない・resume が失敗したときは課題を保留にせず、状態の確認の読み（statusRep）を返す
 // （次の周の読み直しで再び呼ぶだけで、追加のやり直しはしない）。成功したら、返った状態を status と同じに読んで写す。
 func (s *Store) resumeObservation(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, statusRep *ContractRunReport) (*ContractRunReport, error) {
-	command, err := fillCommandArgs(connector, connector.Commands.Resume, statusRep.ChallengeID, binding, row.ExternalRunID, contractAnswer{})
+	command, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, statusRep.ChallengeID, binding, contractAnswer{})
 	if err != nil {
 		return statusRep, nil
 	}
@@ -410,6 +557,14 @@ func (s *Store) challengeInProgress(ctx context.Context, cid int64) (bool, error
 	return inProgress, classifyReadWriteErr(err)
 }
 
+// recordedTerminalStatus は、記録した状態が終わりの契約の実行（row）の状態の確認を、記録から作った読みにしたもの。
+// 費用は持たない。成果物は、取り込み済みのもの（arts）を持つ。
+func recordedTerminalStatus(row *contractRunRow, arts []ContractArtifact) ContractLaunchOutput {
+	return ContractLaunchOutput{Result: RunResultSucceeded, Status: &ContractStatus{
+		ContractVersion: contractVersion, RunID: row.ExternalRunID, State: row.State, Summary: row.Summary, Artifacts: arts,
+	}}
+}
+
 // runExistingContractCommand は既存の契約の run に対するコマンド（status・resume・cancel）を 1 回呼んで記録する。
 func (s *Store) runExistingContractCommand(ctx context.Context, client ContractClient, agent *AgentDeclaration, workDir string, row *contractRunRow, name string, command []string, planVersion, cycleID *int64, stopNote string) (*ContractRunReport, error) {
 	return s.runExistingContractCommandWith(ctx, client, agent, workDir, row, name, command, planVersion, cycleID, stopNote, nil, false)
@@ -424,8 +579,15 @@ func (s *Store) runExistingContractCommandWith(ctx context.Context, client Contr
 	if err != nil {
 		return nil, fmt.Errorf("%w: generate session id: %w", ErrStoreError, err)
 	}
+	var recordedArts []ContractArtifact
+	if name == "status" && releaseOp == nil && row.State.Terminal() {
+		var err error
+		if recordedArts, err = s.landingArtifacts(ctx, &ContractRunReport{ExternalRunID: row.ExternalRunID}, row.ChallengeID); err != nil {
+			return nil, err
+		}
+	}
 	// コマンド 1 回ごとの run の行も、契約の run が結び付くタスクに結び付ける（過去の行は nil のまま）。
-	runIDInt, err := s.beginContractRunForTask(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false, row.TaskID, releaseOp)
+	runIDInt, err := s.beginContractRunMarked(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false, row.TaskID, releaseOp, row.Kind == contractRunKindReflect)
 	if err != nil {
 		return nil, err
 	}
@@ -442,9 +604,13 @@ func (s *Store) runExistingContractCommandWith(ctx context.Context, client Contr
 			case "cancel":
 				return client.Cancel(ctx, li)
 			}
+			if name == "status" && releaseOp == nil && row.State.Terminal() {
+				// 記録した状態が終わりの行は、委譲先を呼ばず、記録から読んだことにする（委譲先の失敗で、後の処理が止まらない）。
+				return recordedTerminalStatus(row, recordedArts), nil
+			}
 			return client.Status(ctx, li)
 		},
-		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseOp != nil, HoldEnd: holdEnd,
+		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseOp != nil || row.Kind == contractRunKindReflect || row.discard, HoldEnd: holdEnd, HoldSuccessEnd: row.holdSuccessEnd,
 		FactsRequired: row.reqFacts, CountFacts: name == "status" && releaseOp == nil,
 	})
 }
@@ -504,7 +670,7 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 	if inProgress, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !inProgress {
 		return err
 	}
-	command, err := fillCommandArgs(connector, connector.Commands.Cancel, rep.ChallengeID, binding, row.ExternalRunID, contractAnswer{})
+	command, err := fillRowCommandArgs(connector, row, connector.Commands.Cancel, rep.ChallengeID, binding, contractAnswer{})
 	if err != nil {
 		return err
 	}
@@ -547,6 +713,7 @@ func (s *Store) delegateViaContract(ctx context.Context, in DelegateInput, jc *J
 	rep, err := s.StartContractDelegation(ctx, ContractStartInput{
 		ChallengeID: dc.Challenge.ID, ConnectorID: dc.Connector.ID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl,
 		Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile, MaxBudgetUSD: microsToUSD(dc.ImplBudgetMicros + dc.ReviewBudgetMicros), Judgment: in.Judgment, OnRunInserted: adm.markInserted,
+		TaskID: taskIntID(&dc.Task),
 	})
 	if err != nil {
 		if jc != nil && errors.Is(err, ErrBudgetExceeded) {
@@ -608,7 +775,7 @@ func (s *Store) answerParentWait(ctx context.Context, in ContractPollInput, row 
 			answer.Note = strings.TrimSpace(*d.Answer)
 		}
 	}
-	command, err := fillCommandArgs(connector, connector.Commands.Resume, rep.ChallengeID, binding, row.ExternalRunID, answer)
+	command, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, rep.ChallengeID, binding, answer)
 	if err != nil {
 		return holdOwner("親が答えたが、接続ツールへ答えを返す宣言の resume の引数を埋められなかった（" + err.Error() + "）。")
 	}

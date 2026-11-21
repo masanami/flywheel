@@ -334,12 +334,36 @@ const (
 	holdReasonLandUnavailable   holdReason = "land_unavailable"
 	holdReasonContentRefInvalid holdReason = "content_ref_invalid"
 	holdReasonFactsUnmet        holdReason = "facts_unmet"
+	// holdReasonTasksBlocked は、統合先を使う課題が、前提のタスクの取りやめで進めようが無い保留（発生は作らない）。
+	holdReasonTasksBlocked holdReason = "tasks_blocked"
+	// 統合先を使う課題のタスクの実行を受け取れない保留（発生は作らない）。integration_ref_invalid は反映先宛ての成果物がある・
+	// 統合先の識別が足りない・課題に記録した統合先と違う、delegate_ended は成果物が統合先へ入らないまま実行が終わった、
+	// merged_unverified は検証を経ずに成果物が統合先へ入っていた。
+	holdReasonIntegrationRefInvalid holdReason = "integration_ref_invalid"
+	holdReasonDelegateEnded         holdReason = "delegate_ended"
+	holdReasonMergedUnverified      holdReason = "merged_unverified"
+	// 検証した中身を持つタスクの実行を統合先へ入れる間の保留（発生は作らない）。checks_failed は検証した中身のチェックに失敗がある、
+	// land_refused は「入れてよい」が届いたのに、同じ中身のレビュー待ちが戻った。
+	holdReasonChecksFailed holdReason = "checks_failed"
+	holdReasonLandRefused  holdReason = "land_refused"
+	// 統合先を使う課題の、上げる依頼（反映先へ上げる反映の依頼）の保留（発生は作らない）。reflect_unavailable はリポジトリに反映の依頼の口が無い、
+	// reflect_failed は上げる依頼を始められなかった・完了でない課題の上げる依頼が終わりの状態を返した。
+	holdReasonReflectUnavailable holdReason = "reflect_unavailable"
+	holdReasonReflectFailed      holdReason = "reflect_failed"
+	// holdReasonChallengeCheckNotMet は、統合先を使う課題の、課題の単位の確かめ（J5）が「満たしていない」だった保留（発生は、確かめの失敗として J5 の run が作る）。
+	holdReasonChallengeCheckNotMet holdReason = "challenge_check_not_met"
 )
 
-// persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない 3 つの理由だけが書く
+// persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない理由（統合先を使う課題のものを含む）と、進めようが無い理由だけが書く
 // （ほかの保留の hold.reason は NULL）。
 func (r holdReason) persisted() bool {
-	return r == holdReasonLandUnavailable || r == holdReasonContentRefInvalid || r == holdReasonFactsUnmet
+	switch r {
+	case holdReasonLandUnavailable, holdReasonContentRefInvalid, holdReasonFactsUnmet, holdReasonTasksBlocked,
+		holdReasonIntegrationRefInvalid, holdReasonDelegateEnded, holdReasonMergedUnverified, holdReasonChecksFailed, holdReasonLandRefused,
+		holdReasonReflectUnavailable, holdReasonReflectFailed, holdReasonChallengeCheckNotMet:
+		return true
+	}
+	return false
 }
 
 // occurrenceKind は保留の理由に対応する発生の種類。発生を作らない理由は false。
@@ -377,7 +401,23 @@ func (s *Store) insertHoldWithOccurrence(ctx context.Context, tc *transitionCtx,
 
 // insertHoldWithOccurrenceID は insertHoldWithOccurrence の、作った保留の ID を返す版。
 func (s *Store) insertHoldWithOccurrenceID(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string) (int64, error) {
-	holdID, err := insertHoldID(ctx, tc, question)
+	return s.insertHoldWithOccurrenceIDFrom(ctx, tc, question, reason, cycleID, tc.current.Status)
+}
+
+// insertHoldWithOccurrenceFrom は insertHoldWithOccurrence の、回答で戻る先（hold.from_status）を指定する版。
+func (s *Store) insertHoldWithOccurrenceFrom(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string, from Status) error {
+	_, err := s.insertHoldWithOccurrenceIDFrom(ctx, tc, question, reason, cycleID, from)
+	return err
+}
+
+func (s *Store) insertHoldWithOccurrenceIDFrom(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string, from Status) (int64, error) {
+	var holdID int64
+	var err error
+	if from == tc.current.Status {
+		holdID, err = insertHoldID(ctx, tc, question)
+	} else {
+		holdID, err = insertHoldKindFrom(ctx, tc, question, HoldKindHuman, from)
+	}
 	if err != nil {
 		return 0, err
 	}

@@ -329,6 +329,14 @@ const (
 	ActivityActionDepRm  = "dep_rm"
 )
 
+// ActivityActionIntegrationRef は作業ログ（entity=challenge）の action。統合先を使う課題の、統合先の識別（challenge.integration_ref）を
+// 初めて記録したときに残し、before・after に integration_ref を持つ。課題の版は上げない。
+const ActivityActionIntegrationRef = "integration_ref_set"
+
+// ActivityActionTaskVerify は作業ログ（entity=task）の action。タスクの検証（J5）の結果を書いたときに残し、after に判定・
+// 検証した中身の識別を持つ。
+const ActivityActionTaskVerify = "task_verify"
+
 // 作業ログ（entity=challenge）の action。親子（challenge_parent）を付けた（付け替えを含む。
 // before に前の親）・外したときに残す。課題の版は上げない。
 const (

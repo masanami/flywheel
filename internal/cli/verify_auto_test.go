@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
@@ -436,5 +437,18 @@ func TestVerifyAuto_ConflictingPR_ReachesJ5StdinAndTheChallengeDoesNotAwaitAppro
 		if !bytes.Contains(in, []byte(want)) {
 			t.Errorf("J5 stdin lacks %q", want)
 		}
+	}
+}
+
+// 統合先へ入れる確かめ（コミットのチェック・2 つのコミットの比較）の口は、本物の上流の口（gh のアダプタ）が実装する。
+// flywheel run と cycle が組み立てる値でも、型の確かめ（UpstreamCommitChecksSource）が通る。
+func TestNewCheckAndCompareSourcesServeTheIntegrationLandChecks(t *testing.T) {
+	t.Parallel()
+	lp := func(string) (string, error) { return "/usr/bin/gh", nil }
+	if _, ok := newCheckSource(lp).(core.UpstreamCommitChecksSource); !ok {
+		t.Fatal("newCheckSource does not implement core.UpstreamCommitChecksSource")
+	}
+	if newCompareSource(lp) == nil {
+		t.Fatal("newCompareSource returned nil")
 	}
 }

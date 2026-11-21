@@ -164,6 +164,32 @@ func TestJ5Prompt_TaskSectionRequiresBothTheChallengeAndTheTaskDoneCriteria(t *t
 	}
 }
 
+// TestJ5Prompt_TaskVerification は、j5.md が、区画「対応する取り込み元」の本文にある満たす条件（完了条件）でも確かめる旨（AC-74）と、
+// タスクの検証ではほかのタスクの範囲が済んでいないことを理由に満たしていないを選ばない旨（AC-108）を述べることを確かめる。
+func TestJ5Prompt_TaskVerification(t *testing.T) {
+	ins, err := Instructions(core.JudgmentJ5)
+	if err != nil {
+		t.Fatalf("Instructions(J5): %v", err)
+	}
+	var source string
+	for _, l := range strings.Split(ins, "\n") {
+		if strings.HasPrefix(l, "- 「対応する取り込み元」:") {
+			source = l
+		}
+	}
+	if source == "" {
+		t.Fatalf("j5.md has no bullet for the 「対応する取り込み元」 section")
+	}
+	for _, want := range []string{"本文にある満たす条件", "タスクの満たす条件", "満たしていないを選び"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("the 「対応する取り込み元」 bullet lacks %q:\n%s", want, source)
+		}
+	}
+	if want := "ほかのタスクの範囲が済んでいないことを理由に満たしていないを選ばない"; !strings.Contains(ins, want) {
+		t.Errorf("j5.md lacks %q", want)
+	}
+}
+
 // TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails は AC「上限を1バイト
 // 超えるフィクスチャで失敗することも検証する」を、J1〜J5 の5ファイルすべての
 // 上限で固定する（三角測量: ちょうど上限は通り、+1バイトで落ちることの両方を
@@ -176,10 +202,10 @@ func TestJ5Prompt_TaskSectionRequiresBothTheChallengeAndTheTaskDoneCriteria(t *t
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
 		"j1.md": 4096,
-		"j2.md": 13312,
+		"j2.md": 14397,
 		"j3.md": 8192,
 		"j4.md": 4096,
-		"j5.md": 11717,
+		"j5.md": 13038,
 		"j6.md": 6144,
 		"j8.md": 8192,
 	}
@@ -947,4 +973,51 @@ func TestPrompts_J9IsGone(t *testing.T) {
 			t.Errorf("judgmentPromptLimit has j9.md = %d, want no entry", limit)
 		}
 	})
+}
+
+// AC-177: j5.md は、課題の単位の確かめでは、課題の達成条件で全体を確かめ、タスクごとの検証をやり直さない旨と、確かめの入力の区画を読む旨を述べる。
+func TestJ5Prompt_ChallengeCheckVerifiesTheWholeAgainstTheChallengeCriteria(t *testing.T) {
+	ins, err := Instructions(core.JudgmentJ5)
+	if err != nil {
+		t.Fatalf("Instructions(J5): %v", err)
+	}
+	for _, want := range []string{
+		"課題の単位の確かめ",
+		"課題の達成条件で、反映先へ上げる実物（成果物の PR）の全体を確かめる",
+		"タスクごとの検証は済んでいるので、やり直さない",
+		"「全部のタスク」", "「計画の背景」", "「上げる依頼が値で返したこと」", "「確かめの指摘への回答」",
+	} {
+		if !strings.Contains(ins, want) {
+			t.Errorf("j5.md lacks %q", want)
+		}
+	}
+}
+
+// 完了の差し戻しで計画を作り直す J2 の入力の区画を、j2.md が名前で指し、済みのタスクをやり直さない旨を述べる。
+func TestJ2Prompt_ReadsTheRejectionOfTheProductAndDoesNotRedoDoneTasks(t *testing.T) {
+	ins, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatalf("Instructions(J2): %v", err)
+	}
+	for _, want := range []string{"「" + core.CompletionRejectionsForReplanSectionLabel + "」", "済みのタスクをやり直す計画にせず、足りない分のタスクだけを出す"} {
+		if !strings.Contains(ins, want) {
+			t.Errorf("j2.md lacks %q", want)
+		}
+	}
+}
+
+// AC-211: J2 の指示文が、区画「済みのタスク」「課題の単位の確かめの指摘」を名前で指し、済みのタスクをやり直さず、足りない分のタスクだけを出す旨を述べる。
+func TestJ2Prompt_AC211_ReadsTheDoneTasksAndTheFindingsAndDoesNotRedoDoneTasks(t *testing.T) {
+	ins, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatalf("Instructions(J2): %v", err)
+	}
+	for _, want := range []string{
+		"「" + core.DoneTasksSectionLabel + "」", "「" + core.ChallengeCheckFindingsSectionLabel + "」",
+		"済みのタスクをやり直す計画にせず、足りない分のタスクだけを出す",
+	} {
+		if !strings.Contains(ins, want) {
+			t.Errorf("j2.md lacks %q", want)
+		}
+	}
 }

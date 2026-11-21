@@ -34,14 +34,15 @@ type delegationPlan struct {
 	notStarted []NotStarted
 }
 
-// candidateOf は課題 id の候補を返す。
-func (p *delegationPlan) candidateOf(id string) (plannedCandidate, bool) {
+// candidatesOf は課題 id の候補（起動するタスクごとに 1 件。起動の順）を返す。
+func (p *delegationPlan) candidatesOf(id string) []plannedCandidate {
+	var out []plannedCandidate
 	for _, c := range p.candidates {
 		if c.Cand.ID == id {
-			return c, true
+			out = append(out, c)
 		}
 	}
-	return plannedCandidate{}, false
+	return out
 }
 
 // planOne は planDelegation が候補 1 件について読む事実。
@@ -50,14 +51,15 @@ type planOne struct {
 	repo string
 }
 
-// loadPlanCandidate は課題 cid を委譲の候補として計画に載せるための事実を読む。承認済みの計画が
-// 今の宣言と合わない（委譲できない）課題は ok=false で、reason に人が読む理由を返す。
-func (s *Store) loadPlanCandidate(ctx context.Context, in DelegateInput, cid int64) (one planOne, ok bool, reason string, err error) {
+// loadPlanCandidates は課題 cid を委譲の候補として計画に載せるための事実を読む。候補は起動するタスクごとに 1 件
+// （selectLaunchTasks が決める）。承認済みの計画が今の宣言と合わない（委譲できない）課題は ok=false で、reason に人が読む
+// 理由を返す。
+func (s *Store) loadPlanCandidates(ctx context.Context, in DelegateInput, cid int64) (ones []planOne, ok bool, reason string, err error) {
 	var ch *Challenge
 	var plan approvedPlan
 	var planOK bool
 	var binding *sourceBinding
-	var tasks []Task
+	var sel *launchSelection
 	err = s.db.Read(ctx, func(tx *sql.Tx) error {
 		var err error
 		if ch, err = loadChallenge(ctx, tx, cid); err != nil {
@@ -66,35 +68,38 @@ func (s *Store) loadPlanCandidate(ctx context.Context, in DelegateInput, cid int
 		if plan, planOK, err = loadApprovedPlan(ctx, tx, cid); err != nil || !planOK {
 			return err
 		}
-		if tasks, err = loadLaunchableTasks(ctx, tx, cid); err != nil {
+		if sel, err = selectLaunchTasks(ctx, tx, in.ConnDecl, formatChallengeID(cid), cid); err != nil {
 			return err
 		}
 		binding, err = loadSourceBindingByChallengeID(ctx, tx, cid)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
-		return planOne{}, false, "", err
+		return nil, false, "", err
 	}
 	if ch == nil || !planOK {
-		return planOne{}, false, "承認済みの計画を引けない", nil
+		return nil, false, "承認済みの計画を引けない", nil
 	}
 	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: binding != nil})
 	if !vok {
-		return planOne{}, false, "承認済みの計画の構造化した出力が今の宣言と合わない", nil
+		return nil, false, "承認済みの計画の構造化した出力が今の宣言と合わない", nil
 	}
 	if validated.Verdict != J2VerdictPlan {
-		return planOne{}, false, "承認済みの計画の verdict が plan でない", nil
+		return nil, false, "承認済みの計画の verdict が plan でない", nil
 	}
-	// 委譲は起動できるタスクがちょうど 1 個の課題だけを起動する。対象のリポジトリはタスクの行のもの。
-	if len(tasks) != 1 {
-		return planOne{}, false, "起動できるタスクが 1 個でない", nil
+	// 起動するタスクごとに候補を作る。対象のリポジトリはタスクの行のもの。
+	if len(sel.Tasks) == 0 {
+		return nil, false, "起動できるタスクが無い", nil
 	}
-	repo, _ := in.ConnDecl.findConnectorRepo(tasks[0].Repo)
-	if repo == nil {
-		return planOne{}, false, "起動するタスクのリポジトリが今の宣言に無い", nil
+	for i := range sel.Tasks {
+		repo, _ := in.ConnDecl.findConnectorRepo(sel.Tasks[i].Repo)
+		if repo == nil {
+			return nil, false, "起動するタスクのリポジトリが今の宣言に無い", nil
+		}
+		c := planCandidate{ID: ch.ID, Rank: priorityRank(ch.Priority), Seq: cid, TaskSeq: taskIntID(&sel.Tasks[i])}
+		ones = append(ones, planOne{cand: c, repo: repo.Name})
 	}
-	c := planCandidate{ID: ch.ID, Rank: priorityRank(ch.Priority), Seq: cid}
-	return planOne{cand: c, repo: repo.Name}, true, "", nil
+	return ones, true, "", nil
 }
 
 // repoIdleWorkDir は契約のコマンドの作業ディレクトリ（リポジトリ単位）を返す。worktree は元のクローン、clone は
@@ -135,12 +140,14 @@ func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []
 	byRepo := map[string][]planCandidate{}
 	var notStarted []NotStarted
 	for _, cid := range targets {
-		one, ok, reason, err := s.loadPlanCandidate(ctx, in, cid)
+		ones, ok, reason, err := s.loadPlanCandidates(ctx, in, cid)
 		if err != nil {
 			return nil, err
 		}
 		if ok {
-			byRepo[one.repo] = append(byRepo[one.repo], one.cand)
+			for _, one := range ones {
+				byRepo[one.repo] = append(byRepo[one.repo], one.cand)
+			}
 		} else {
 			notStarted = append(notStarted, NotStarted{ChallengeID: formatChallengeID(cid), Reason: NotStartedPlanUnavailable, Detail: reason})
 		}
@@ -188,10 +195,12 @@ func (s *Store) planDelegation(ctx context.Context, in DelegateInput, targets []
 
 // schedWaiter は枠を待つ候補 1 件。
 type schedWaiter struct {
-	repo   ConnectorRepo
-	rank   int
-	seq    int64
-	queued bool
+	repo ConnectorRepo
+	rank int
+	seq  int64
+	// taskSeq は起動するタスクの内部整数 ID（同じ課題の候補の順）。
+	taskSeq int64
+	queued  bool
 	// contract は form: cli の接続ツールの課題（スロットを使わず、全体の同時委譲数だけで許可される）。
 	contract bool
 }
@@ -226,7 +235,7 @@ func newDelegationScheduler(s *Store, in DelegateInput) *delegationScheduler {
 }
 
 func (sch *delegationScheduler) newWaiter(repo ConnectorRepo, c planCandidate) *schedWaiter {
-	w := &schedWaiter{repo: repo, rank: c.Rank, seq: c.Seq}
+	w := &schedWaiter{repo: repo, rank: c.Rank, seq: c.Seq, taskSeq: c.TaskSeq}
 	if sch.conn != nil {
 		if _, conn := sch.conn.findConnectorRepo(repo.Name); conn != nil && conn.Form == ConnectorFormCLI {
 			w.contract = true
@@ -249,7 +258,13 @@ func (sch *delegationScheduler) enqueueLocked(w *schedWaiter) {
 	w.queued = true
 	i := sort.Search(len(sch.waiters), func(i int) bool {
 		x := sch.waiters[i]
-		return x.rank > w.rank || (x.rank == w.rank && x.seq > w.seq)
+		if x.rank != w.rank {
+			return x.rank > w.rank
+		}
+		if x.seq != w.seq {
+			return x.seq > w.seq
+		}
+		return x.taskSeq > w.taskSeq
 	})
 	sch.waiters = append(sch.waiters, nil)
 	copy(sch.waiters[i+1:], sch.waiters[i:])
@@ -316,14 +331,19 @@ func (sch *delegationScheduler) capacity(ctx context.Context, repo ConnectorRepo
 // （保留の課題へ新しい委譲を起動させないため）。
 const ownerWaitContractRunWhere = `(k.state = 'waiting' AND c.status = 'awaiting_human')`
 
-// activeDelegationCount は終わっていない委譲の run と、終わっていない契約の run（form: cli）を持つ課題の数。
-// レビュー待ち（contractRunReviewWaitWhere）とオーナーの回答待ち（ownerWaitContractRunWhere）の契約の run は数えない。
+// endRecordedContractRunWhere は、契約の run（k）の記録した状態が終わり（成功・失敗・中止）の条件。こうした行は、課題が保留の間などに
+// 読み直しのために開けたまま残してあるだけで、委譲先では動いていない。同時に走らせる数には数えない。
+const endRecordedContractRunWhere = `k.state IN ('succeeded', 'failed', 'cancelled')`
+
+// activeDelegationCount は終わっていない委譲の run と、終わっていない契約の run（form: cli）を持つタスクの数
+// （課題とタスクの組ごとに 1 と数える。タスクに結び付かない契約の run は、課題ごとに 1）。
+// レビュー待ち（contractRunReviewWaitWhere）・オーナーの回答待ち（ownerWaitContractRunWhere）・記録した状態が終わり（endRecordedContractRunWhere）の契約の run は数えない。
 func activeDelegationCount(ctx context.Context, tx *sql.Tx) (int, error) {
 	var n int
 	err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM run WHERE kind = 'delegate' AND result IS NULL)
-		+ (SELECT COUNT(*) FROM (SELECT k.challenge_id FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere+` AND NOT `+ownerWaitContractRunWhere+`
-			UNION SELECT challenge_id FROM run WHERE kind = 'contract' AND result IS NULL))`).Scan(&n)
+		+ (SELECT COUNT(*) FROM (SELECT k.challenge_id, COALESCE(k.task_id, 0) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
+			WHERE k.ended_at IS NULL AND NOT `+contractRunReviewWaitWhere+` AND NOT `+ownerWaitContractRunWhere+` AND NOT `+endRecordedContractRunWhere+`
+			UNION SELECT challenge_id, COALESCE(task_id, 0) FROM run WHERE kind = 'contract' AND result IS NULL))`).Scan(&n)
 	return n, err
 }
 
@@ -457,6 +477,16 @@ type delegateRun struct {
 	w   *schedWaiter
 	// waitCtx は枠待ちを打ち切る ctx（nil なら呼び出しの ctx）。
 	waitCtx context.Context
+	// taskID は起動するタスクの内部整数 ID（0 なら、起動できるタスクがちょうど 1 個の課題として決める）。
+	taskID int64
+}
+
+// task は起動するタスクの内部整数 ID（nil の run は 0）。
+func (r *delegateRun) task() int64 {
+	if r == nil {
+		return 0
+	}
+	return r.taskID
 }
 
 // admit は枠の許可を得る。jc が nil（ID を指定した個別の操作）なら待たない。
@@ -512,10 +542,11 @@ func (r *delegateRun) admitContract(ctx context.Context) (*admission, error) {
 }
 
 type delegateOutcome struct {
-	rank int
-	seq  int64
-	item *JudgmentAutoItem
-	ns   *NotStarted
+	rank    int
+	seq     int64
+	taskSeq int64
+	item    *JudgmentAutoItem
+	ns      *NotStarted
 }
 
 // executePlan は plan の候補を、候補ごとに並行に実行する。枠の許可は優先度・ID の昇順。
@@ -576,7 +607,7 @@ func (s *Store) executePlan(ctx context.Context, in DelegateInput, jc *JudgmentC
 			if ch.Status != StatusInProgress {
 				return
 			}
-			item, ns, err := s.delegateOne(ctx, in, jc, *ch, &delegateRun{sch: sch, w: w, waitCtx: waitCtx})
+			item, ns, err := s.delegateOne(ctx, in, jc, *ch, &delegateRun{sch: sch, w: w, waitCtx: waitCtx, taskID: c.TaskSeq})
 			if err != nil {
 				// 1 件の課題の問題（承認済みの計画が今の宣言と合わない等）で、他の課題の委譲を
 				// 止めない。ストアの障害など、それ以外のエラーだけが全体を打ち切る。
@@ -586,7 +617,7 @@ func (s *Store) executePlan(ctx context.Context, in DelegateInput, jc *JudgmentC
 				fail(err)
 				return
 			}
-			record(delegateOutcome{rank: c.Rank, seq: c.Seq, item: item, ns: ns})
+			record(delegateOutcome{rank: c.Rank, seq: c.Seq, taskSeq: c.TaskSeq, item: item, ns: ns})
 		}()
 	}
 	wg.Wait()
@@ -597,7 +628,10 @@ func (s *Store) executePlan(ctx context.Context, in DelegateInput, jc *JudgmentC
 		if outcomes[i].rank != outcomes[j].rank {
 			return outcomes[i].rank < outcomes[j].rank
 		}
-		return outcomes[i].seq < outcomes[j].seq
+		if outcomes[i].seq != outcomes[j].seq {
+			return outcomes[i].seq < outcomes[j].seq
+		}
+		return outcomes[i].taskSeq < outcomes[j].taskSeq
 	})
 	result := &DelegateResult{}
 	for _, o := range outcomes {
@@ -630,26 +664,40 @@ func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Ch
 	if depNS != nil {
 		return &DelegateResult{NotStarted: []NotStarted{*depNS}}, nil
 	}
-	// 起動できるタスクの数と統合先の使用。計画の検査より前で、記録した前提の後（ID を省いた段と同じ順）。
-	var taskNS *NotStarted
-	err = s.db.Read(ctx, func(tx *sql.Tx) error {
-		_, ns, err := launchGate(ctx, tx, ch.ID, cid)
-		taskNS = ns
+	// 起動できるタスクと統合先の使用。計画の検査より前で、記録した前提の後（ID を省いた段と同じ順）。
+	var sel *launchSelection
+	err = s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		sel, err = selectLaunchTasks(ctx, tx, in.ConnDecl, ch.ID, cid)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
-	if taskNS != nil {
-		return &DelegateResult{NotStarted: []NotStarted{*taskNS}}, nil
+	if sel.Blocked != "" {
+		held, err := s.holdTasksBlocked(ctx, ch.ID, sel.Blocked)
+		if err != nil {
+			return nil, err
+		}
+		if held {
+			return &DelegateResult{NotStarted: []NotStarted{tasksBlockedNotStarted(ch.ID)}}, nil
+		}
+	}
+	if len(sel.Tasks) == 0 {
+		if len(sel.NotStarted) == 0 {
+			if sel.Busy {
+				return nil, ErrRunInProgress
+			}
+			sel.NotStarted = []NotStarted{{ChallengeID: ch.ID, Reason: NotStartedNoTasks, Detail: "起動できるタスクが無い"}}
+		}
+		return &DelegateResult{NotStarted: sel.NotStarted}, nil
 	}
 	plan, err := s.planDelegation(ctx, in, []int64{cid})
 	if err != nil {
 		return nil, err
 	}
-	result := &DelegateResult{}
-	pc, found := plan.candidateOf(ch.ID)
-	if !found {
+	result := &DelegateResult{NotStarted: sel.NotStarted}
+	pcs := plan.candidatesOf(ch.ID)
+	if len(pcs) == 0 {
 		// 委譲できない課題（承認済みの計画が宣言と合わない等）。従来どおりの検査でエラーにする。
 		item, ns, err := s.delegateOne(ctx, in, nil, ch, nil)
 		if err != nil {
@@ -658,13 +706,28 @@ func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Ch
 		appendDelegateOutcome(result, item, ns)
 		return result, nil
 	}
-	repo, _ := in.ConnDecl.findConnectorRepo(pc.Repo)
 	sch := newDelegationScheduler(s, in)
-	item, ns, err := s.delegateOne(ctx, in, nil, ch, &delegateRun{sch: sch, w: sch.newWaiter(*repo, pc.Cand)})
-	if err != nil {
-		return nil, err
+	for _, pc := range pcs {
+		repo, _ := in.ConnDecl.findConnectorRepo(pc.Repo)
+		item, ns, err := s.delegateOne(ctx, in, nil, ch, &delegateRun{sch: sch, w: sch.newWaiter(*repo, pc.Cand), taskID: pc.Cand.TaskSeq})
+		if err != nil {
+			// 先のタスクをもう起動したなら、後のタスクの枠・予算・状態の不足で全体を失敗にせず、起動できなかった理由として返す。
+			if len(result.Items) > 0 && (errors.Is(err, ErrSlotUnavailable) || errors.Is(err, ErrBudgetExceeded) ||
+				errors.Is(err, ErrRunInProgress) || errors.Is(err, ErrInvalidTransition)) {
+				reason := NotStartedSlotUnavailable
+				if errors.Is(err, ErrBudgetExceeded) {
+					reason = NotStartedCycleBudget
+				} else if !errors.Is(err, ErrSlotUnavailable) {
+					reason = NotStartedInProgress
+				}
+				result.NotStarted = append(result.NotStarted, NotStarted{ChallengeID: ch.ID, Reason: reason,
+					Detail: fmt.Sprintf("タスク %s は起動できなかった", formatTaskID(pc.Cand.TaskSeq))})
+				continue
+			}
+			return nil, err
+		}
+		appendDelegateOutcome(result, item, ns)
 	}
-	appendDelegateOutcome(result, item, ns)
 	return result, nil
 }
 

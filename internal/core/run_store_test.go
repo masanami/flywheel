@@ -766,3 +766,49 @@ func TestInsertRun_J8HasNoChallengeButOtherJudgmentsDo(t *testing.T) {
 		t.Error("J7 must not be valid")
 	}
 }
+
+// 一意の索引は課題とタスクの組ごと（版 29）。タスクの異なる run は並べられるが、タスクに結び付かない run（課題の単位）と
+// タスクに結び付く run は、見直し前と同じに同時には終わっていない状態にならない。
+func TestInsertRun_TaskScopedExclusion(t *testing.T) {
+	t.Parallel()
+	s := newStoreForTest(t)
+	cid := mustCreateChallengeInternalID(t, s, "task scoped")
+	for _, k := range []string{"a", "b"} {
+		if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+			_, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, repo, operation, status, created_at, updated_at)
+				VALUES (?, 1, ?, 't', 'b', 'd', 'o/r', 'pull_request', 'pending', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`, cid, k)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	withTask := func(id int64) insertRunInput { in := validInsertRunInput(); in.TaskID = int64Ptr(id); return in }
+	if _, err := insertRunForTest(t, s, cid, withTask(1)); err != nil {
+		t.Fatalf("first task run: %v", err)
+	}
+	if _, err := insertRunForTest(t, s, cid, withTask(2)); err != nil {
+		t.Fatalf("a run of another task of the same challenge was rejected: %v", err)
+	}
+	if _, err := insertRunForTest(t, s, cid, withTask(1)); !errors.Is(err, errActiveRunExists) {
+		t.Fatalf("second run of the same task: %v, want errActiveRunExists", err)
+	}
+	if _, err := insertRunForTest(t, s, cid, validInsertRunInput()); !errors.Is(err, errActiveRunExists) {
+		t.Fatalf("a challenge-level run while task runs are unfinished: %v, want errActiveRunExists", err)
+	}
+	// 課題の単位の run があるときは、タスクの run を作らない。
+	s2 := newStoreForTest(t)
+	cid2 := mustCreateChallengeInternalID(t, s2, "challenge level first")
+	if err := s2.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, repo, operation, status, created_at, updated_at)
+			VALUES (?, 1, 'a', 't', 'b', 'd', 'o/r', 'pull_request', 'pending', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`, cid2)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := insertRunForTest(t, s2, cid2, validInsertRunInput()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := insertRunForTest(t, s2, cid2, withTask(1)); !errors.Is(err, errActiveRunExists) {
+		t.Fatalf("a task run while a challenge-level run is unfinished: %v, want errActiveRunExists", err)
+	}
+}

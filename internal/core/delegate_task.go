@@ -39,35 +39,312 @@ func loadLaunchableTasks(ctx context.Context, tx *sql.Tx, cid int64) ([]Task, er
 	return out, nil
 }
 
-// launchGate は、起動できるタスクの数と課題の統合先の使用から、委譲を起動できるかを決める。
+// loadTasksToLaunch は課題 cid の起動するタスクの行を返す。taskID が 0 なら起動できるタスク（loadLaunchableTasks）、0 でなければ
+// そのタスク 1 個（課題のタスクで、状態が起動できるもの〔pending・in_progress〕でなければ ErrValidation）。
+func loadTasksToLaunch(ctx context.Context, tx *sql.Tx, cid, taskID int64) ([]Task, error) {
+	if taskID == 0 {
+		return loadLaunchableTasks(ctx, tx, cid)
+	}
+	t, err := loadTask(ctx, tx, taskID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("%w: task %s does not exist", ErrValidation, formatTaskID(taskID))
+		}
+		return nil, err
+	}
+	if t.ChallengeID != formatChallengeID(cid) || !isLaunchableTaskStatus(t.Status) {
+		return nil, fmt.Errorf("%w: task %s is not launchable", ErrValidation, t.ID)
+	}
+	return []Task{*t}, nil
+}
+
+// launchSelection は課題 1 件について、委譲の段が起動するタスクと、起動しなかった理由。
+type launchSelection struct {
+	// Tasks は起動するタスク（タスクの ID の昇順）。
+	Tasks []Task
+	// NotStarted は起動しなかった理由（課題の単位の理由と、タスクの単位の理由。ChallengeID は課題の ID）。
+	NotStarted []NotStarted
+	// Busy は、終わっていない実行を持つタスクがあること（起動できるタスクが無くても、理由を出さずに待つ根拠）。
+	Busy bool
+	// Blocked が空でなければ、進めようが無いので保留にする（tasks_blocked）。値は保留の問い。
+	Blocked string
+}
+
+// isLaunchableTask は、タスク t が起動できるか（状態だけで決まる部分）: 作業中（in_progress。再開・やり直し）か、未着手で
+// 前提のタスクがすべて済み（done）のもの。
+func isLaunchableTask(t Task, byID map[string]Task) bool {
+	switch t.Status {
+	case TaskStatusInProgress:
+		return true
+	case TaskStatusPending:
+		for _, d := range t.DependsOn {
+			if byID[d].Status != TaskStatusDone {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// blockedPendingTasks は、前提に取りやめ（cancelled）のタスクを持つ、または、そのようなタスクを前提に持つ未着手のタスクの
+// ID の集合（前提をたどって決める。取りやめのタスクを前提に持つ限り、起動できる日が来ない）。
+func blockedPendingTasks(all []Task, byID map[string]Task) map[string]bool {
+	blocked := map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for _, t := range all {
+			if t.Status != TaskStatusPending || blocked[t.ID] {
+				continue
+			}
+			for _, d := range t.DependsOn {
+				if byID[d].Status == TaskStatusCancelled || blocked[d] {
+					blocked[t.ID] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	return blocked
+}
+
+// selectLaunchTasks は課題 cid（表示の ID は challengeID）の委譲の段が起動するタスクを決める。conn が nil なら、委譲先の
+// 形による判定をしない。
 //
-//   - 起動できるタスクが 0 個 → no_tasks
-//   - 課題が統合先を使う（uses_integration が 1）、または起動できるタスクが 2 個以上 → integration_unavailable
-//   - ちょうど 1 個で、そのタスクが対応する子が起動を妨げる（taskUpstreamExclusion）→ upstream_closed・upstream_missing
-//   - ちょうど 1 個 → 起動できる（task を返す。NotStarted は nil）
+// 統合先を使わない課題は、起動できるタスクがちょうど 1 個のときだけ起動する（0 個は no_tasks、2 個以上は
+// integration_unavailable）。統合先を使う課題は、タスクが 1 個でも 2 個以上でも起動する（タスクの単位で見る）:
+//   - 取りやめでないタスク（未着手・作業中・検証中・済み）のリポジトリが 2 つ以上 → 進めようが無いので、保留にする（tasks_blocked）
+//   - 起動できるタスク（isLaunchableTask）で、終わっていない実行を持たず、対応する子が起動を妨げず（taskUpstreamExclusion）、
+//     委譲先が form: cli のものを起動する。form が cli でない委譲先のタスクは integration_unavailable
+//   - 起動するタスクが無く、進めようが無い（blockedByCancelledTask）なら、保留にする
 //
 // 計画の検査（validateJ2Output）はここで掛けない（呼び出し側が、起動できるときだけ後で行う）。
-func launchGate(ctx context.Context, tx *sql.Tx, challengeID string, cid int64) (*Task, *NotStarted, error) {
-	tasks, err := loadLaunchableTasks(ctx, tx, cid)
+func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclaration, challengeID string, cid int64) (*launchSelection, error) {
+	all, err := listTasks(ctx, tx, cid)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if len(tasks) == 0 {
-		return nil, &NotStarted{ChallengeID: challengeID, Reason: NotStartedNoTasks, Detail: "起動できるタスクが無い"}, nil
+	byID := make(map[string]Task, len(all))
+	for _, t := range all {
+		byID[t.ID] = t
 	}
 	integ, err := challengeUsesIntegration(ctx, tx, cid)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if len(tasks) >= 2 || (integ != nil && *integ) {
-		return nil, &NotStarted{ChallengeID: challengeID, Reason: NotStartedIntegrationUnavailable,
-			Detail: "統合先を使う課題と、起動できるタスクが 2 個以上の課題は、後の区切りまで起動しない"}, nil
+	sel := &launchSelection{}
+	ns := func(r NotStartedReason, detail string) {
+		sel.NotStarted = append(sel.NotStarted, NotStarted{ChallengeID: challengeID, Reason: r, Detail: detail})
 	}
-	// タスクが対応する子の上流の状態（記録が無い・閉じた・無い）で起動しない。
-	if ns, err := taskUpstreamExclusion(ctx, tx, challengeID, cid, &tasks[0]); err != nil || ns != nil {
-		return nil, ns, err
+	if integ == nil || !*integ {
+		var cands []Task
+		var waiting []string
+		for _, t := range all {
+			if !isLaunchableTask(t, byID) {
+				continue
+			}
+			if tid := taskIntID(&t); tid > 0 {
+				open, err := taskHasOpenContractRun(ctx, tx, cid, tid)
+				if err != nil {
+					return nil, err
+				}
+				if open {
+					waiting = append(waiting, t.ID)
+					continue
+				}
+			}
+			cands = append(cands, t)
+		}
+		switch {
+		case len(cands) == 0 && len(waiting) > 0:
+			ns(NotStartedNoTasks, waitingTasksDetail(waiting))
+		case len(cands) == 0:
+			ns(NotStartedNoTasks, "起動できるタスクが無い")
+		case len(cands) >= 2:
+			ns(NotStartedIntegrationUnavailable, "統合先を使わない課題は、起動できるタスクが 2 個以上あるとき起動しない")
+		default:
+			if n, err := taskUpstreamExclusion(ctx, tx, challengeID, cid, &cands[0]); err != nil {
+				return nil, err
+			} else if n != nil {
+				sel.NotStarted = append(sel.NotStarted, *n)
+			} else {
+				sel.Tasks = cands
+			}
+		}
+		return sel, nil
 	}
-	return &tasks[0], nil, nil
+
+	// 統合先を使う課題は、リポジトリを 1 つに限る。済みのタスクも数える（上げる依頼が、済みのタスクのリポジトリが 1 つのときだけ始まるのと
+	// 同じ基準。数えないと、別のリポジトリのタスクを足した計画が、走って費用を使った後で、上げる依頼が毎回始まらない）。
+	repos := map[string]bool{}
+	var repoList []string
+	for _, t := range all {
+		if t.Status != TaskStatusCancelled && !repos[t.Repo] {
+			repos[t.Repo] = true
+			repoList = append(repoList, t.Repo)
+		}
+	}
+	if len(repoList) >= 2 {
+		// 進めようが無い（計画の検査が通すはずの無い計画。手で登録した計画・過去の計画）。毎周起動しないだけでオーナーに見えないので、保留にする。
+		// ただし、作業している実行・検証中のタスクがある間は、ほかの「進めようが無い」と同じく、起動しないだけで待つ（保留にすると、動いている
+		// 作業の結果を受け取る前に課題を止める）。保留は、起動するタスクが無く、実行中でもなくなってから立てる。
+		busy, err := taskLessHasActiveRun(ctx, tx, cid)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range all {
+			if busy {
+				break
+			}
+			if t.Status == TaskStatusVerifying {
+				busy = true
+			} else if tid := taskIntID(&t); tid > 0 && t.Status != TaskStatusCancelled {
+				if busy, err = taskHasActiveRun(ctx, tx, cid, tid); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if busy {
+			sel.Busy = true
+			return sel, nil
+		}
+		sel.Blocked = fmt.Sprintf("統合先を使う課題のタスクは、1 つのリポジトリにそろえる必要があるが、この課題のタスクは 2 つ以上のリポジトリにまたがっている"+
+			"（取りやめたタスクは数えない。済み・未完のタスクのリポジトリ: %s）。このままでは進められない。"+
+			"計画を作り直す回答（タスクのリポジトリを 1 つにそろえる）をするか、課題を取り下げて進めてください。", strings.Join(repoList, "・"))
+		return sel, nil
+	}
+	taskLessBusy, err := taskLessHasActiveRun(ctx, tx, cid)
+	if err != nil {
+		return nil, err
+	}
+	sel.Busy = taskLessBusy
+	blocked := blockedPendingTasks(all, byID)
+	var notCLI []string
+	var waiting []string // 終わっていない契約の実行（レビュー待ち・オーナー待ち）だけを持つタスク（起動せず、待つ）
+	for _, t := range all {
+		if taskLessBusy || !isLaunchableTask(t, byID) {
+			continue
+		}
+		if tid := taskIntID(&t); tid > 0 {
+			busy, err := taskHasActiveRun(ctx, tx, cid, tid)
+			if err != nil {
+				return nil, err
+			}
+			if busy {
+				sel.Busy = true
+				continue
+			}
+			open, err := taskHasOpenContractRun(ctx, tx, cid, tid)
+			if err != nil {
+				return nil, err
+			}
+			if open {
+				waiting = append(waiting, t.ID)
+				continue
+			}
+		}
+		if n, err := taskUpstreamExclusion(ctx, tx, challengeID, cid, &t); err != nil {
+			return nil, err
+		} else if n != nil {
+			sel.NotStarted = append(sel.NotStarted, *n)
+			continue
+		}
+		if conn != nil {
+			if _, c := conn.findConnectorRepo(t.Repo); c != nil && c.Form != ConnectorFormCLI {
+				notCLI = append(notCLI, fmt.Sprintf("%s（委譲先 %s・形 %s）", t.ID, c.ID, c.Form))
+				continue
+			}
+		}
+		sel.Tasks = append(sel.Tasks, t)
+	}
+	if len(notCLI) > 0 {
+		ns(NotStartedIntegrationUnavailable, "統合先を使う課題のタスクは、委譲の形が契約の形（form: cli）でない委譲先へは起動しない: "+strings.Join(notCLI, "・"))
+	}
+	if len(sel.Tasks) > 0 || sel.Busy {
+		return sel, nil
+	}
+	if q, err := blockedByCancelledTask(ctx, tx, cid, all, blocked); err != nil {
+		return nil, err
+	} else if q != "" {
+		sel.Blocked = q
+		return sel, nil
+	}
+	if len(sel.NotStarted) == 0 {
+		if len(waiting) > 0 {
+			ns(NotStartedNoTasks, waitingTasksDetail(waiting))
+		} else {
+			ns(NotStartedNoTasks, "起動できるタスクが無い（前提のタスクが済むのを待っている）")
+		}
+	}
+	return sel, nil
+}
+
+// taskHasOpenContractRun は、課題 cid のタスク taskID に、終わっていない契約の実行（レビュー待ち・オーナー待ちを含む。
+// ended_at IS NULL）があるかを返す。beginContractRunForTask が start の前に断る条件と同じ。taskHasActiveRun はレビュー待ち・
+// オーナー待ちを数えないので、起動できるタスクの候補は、この確かめでも外す（外さないと、委譲の準備まで進んでから断られる）。
+func taskHasOpenContractRun(ctx context.Context, tx *sql.Tx, cid, taskID int64) (bool, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND task_id = ? AND ended_at IS NULL`, cid, taskID).Scan(&n)
+	return n > 0, err
+}
+
+// blockedByCancelledTask は、統合先を使う課題が進めようが無いとき、保留の問いを返す（そうでなければ空）。実行中のタスク
+// （in_progress）も、検証中のタスクも、終わっていない実行・契約の実行も無く、かつ、未着手のタスクがどれも前提に取りやめの
+// タスクがあるために起動できない（blocked）か、未完のタスクも済みのタスクも無い（全部が取りやめ）とき。
+func blockedByCancelledTask(ctx context.Context, tx *sql.Tx, cid int64, all []Task, blocked map[string]bool) (string, error) {
+	var pending []Task
+	done := 0
+	for _, t := range all {
+		switch t.Status {
+		case TaskStatusInProgress, TaskStatusVerifying:
+			return "", nil
+		case TaskStatusPending:
+			pending = append(pending, t)
+		case TaskStatusDone:
+			done++
+		}
+	}
+	allCancelled := len(all) > 0 && len(pending) == 0 && done == 0
+	if len(pending) == 0 && !allCancelled {
+		return "", nil
+	}
+	for _, t := range pending {
+		if !blocked[t.ID] {
+			return "", nil
+		}
+	}
+	var open int
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM run WHERE challenge_id = ? AND result IS NULL)
+		+ (SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL)`, cid, cid).Scan(&open); err != nil {
+		return "", err
+	}
+	if open > 0 {
+		return "", nil
+	}
+	if allCancelled {
+		return "この課題のタスクは、全部が取りやめになっていて、進めるタスクが無い。計画を作り直す回答をするか、課題を取り下げて進めてください。", nil
+	}
+	lines := make([]string, 0, len(pending))
+	for _, t := range pending {
+		var causes []string
+		for _, d := range t.DependsOn {
+			if dep := byIDOf(all, d); dep.Status == TaskStatusCancelled || blocked[d] {
+				causes = append(causes, fmt.Sprintf("%s（%s）", d, dep.Title))
+			}
+		}
+		lines = append(lines, fmt.Sprintf("- %s（%s）: 前提のタスク %s が取りやめ、または、取りやめのタスクを前提に持つため起動できない", t.ID, t.Title, strings.Join(causes, "・")))
+	}
+	return "次のタスクは、前提のタスクが取りやめになったため起動できず、ほかに進めるタスクも無い。計画を作り直す回答をするか、課題を取り下げて進めてください。\n" + strings.Join(lines, "\n"), nil
+}
+
+func byIDOf(all []Task, id string) Task {
+	for _, t := range all {
+		if t.ID == id {
+			return t
+		}
+	}
+	return Task{}
 }
 
 // taskIntID はタスクの内部整数 ID。
@@ -200,9 +477,10 @@ type taskDocQuestion struct {
 
 // formatTaskDocument は起動するタスクの文面（UTF-8 の Markdown）を組み立てる。LLM も判断の呼び出しの口も使わない。
 // 上から、背景（承認済みの計画の、方針・論点ごとの問いと答え・完了したら見えるもの・やらないこと）、このタスク
-// （題名・何をするか・完了条件・やらないこと）、ほかのタスク（題名の一覧と、範囲外の明記）の順。ほかのタスクの
+// （題名・何をするか・完了条件・やらないこと・対応する取り込み元〔タスクが子に対応するときだけ。取り込みのときに記録した
+// 子の題名・URL・本文。上流は読み直さない〕）、ほかのタスク（題名の一覧と、範囲外の明記）の順。ほかのタスクの
 // 「何をするか」は入れない。others は呼び出し側が取りやめを除いて渡す。
-func formatTaskDocument(plan taskDocPlan, task Task, others []Task) string {
+func formatTaskDocument(plan taskDocPlan, task Task, source *SourceChild, others []Task) string {
 	var b strings.Builder
 	b.WriteString("# 背景\n\n## 方針\n\n")
 	b.WriteString(blankOr(plan.Summary, "（なし）"))
@@ -234,6 +512,9 @@ func formatTaskDocument(plan taskDocPlan, task Task, others []Task) string {
 	b.WriteString(bulletList(plan.NonGoals))
 	b.WriteString("\n# このタスク\n\n")
 	fmt.Fprintf(&b, "題名: %s\n\n## 何をするか\n\n%s\n\n## 完了条件\n\n%s\n\n## やらないこと\n\n%s\n", task.Title, task.Body, task.DoneCriteria, bulletList(task.NonGoals))
+	if source != nil {
+		fmt.Fprintf(&b, "\n## 対応する取り込み元\n\n題名: %s\n\nURL: %s\n\n本文:\n\n%s\n", source.Title, source.URL, source.Body)
+	}
 	b.WriteString("\n# ほかのタスク\n\n")
 	if len(others) == 0 {
 		b.WriteString("同じ課題のほかのタスクは無い。\n")
@@ -318,7 +599,19 @@ func loadTaskDocument(ctx context.Context, tx *sql.Tx, cid int64, plan approvedP
 			}
 		}
 	}
-	return formatTaskDocument(doc, task, others), nil
+	var source *SourceChild
+	if task.SourceKey != "" {
+		children, err := loadSourceChildren(ctx, tx, cid)
+		if err != nil {
+			return "", err
+		}
+		for i := range children {
+			if children[i].ExternalKey == task.SourceKey {
+				source = &children[i]
+			}
+		}
+	}
+	return formatTaskDocument(doc, task, source, others), nil
 }
 
 // taskFileName は、起動の実行の記録の置き場へ書くタスクの文面のファイル名。
@@ -339,4 +632,9 @@ func writeTaskFile(runDir, text string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// waitingTasksDetail は、終わっていない契約の実行（レビュー待ち・オーナー待ち）を持つタスクしか残っていないときの、起動しない理由の詳細。
+func waitingTasksDetail(ids []string) string {
+	return "起動できるタスクが無い（終わっていない契約の実行を持つタスクが、レビュー・回答を待っている: " + strings.Join(ids, "・") + "）"
 }

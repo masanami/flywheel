@@ -200,6 +200,7 @@ func runApproveChallenge(a Args, verifier core.Verifier, id string, holdRelease 
 		ReleaseHeads:       coreReleaseHeads(rds),
 		ExcludedReleaseIDs: excludedIDs(rds),
 		HeadSources:        headSources(a),
+		Agent:              agentDeclForApproval(a),
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -331,17 +332,7 @@ func runAnswer(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	// 計画を作り直すときは、開いた契約の run を先に止める（止めると課題の版が変わりうるので、版を取り直す）。
-	if replan {
-		if n, err := cancelOpenContractRuns(a, id); err != nil {
-			return nil, err
-		} else if n > 0 {
-			if preview, err = a.Store.PrepareAnswer(context.Background(), id, answer); err != nil {
-				return nil, mapCoreErr(err)
-			}
-		}
-	}
-
+	// 計画を作り直す回答では、契約の実行を止めない。取りやめるタスクの実行と上げる依頼は、作り直した計画の承認の後に、状態の確認が取り消す。
 	c, hold, err := a.Store.ExecuteAnswer(context.Background(), core.AnswerRequest{
 		ChallengeID:     id,
 		ExpectedVersion: preview.Version,
@@ -669,9 +660,31 @@ func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
 			if len(t.DependsOn) > 0 {
 				line += "（前提: " + strings.Join(t.DependsOn, "・") + "）"
 			}
+			line += taskFrameText(t)
 			b.WriteString(line + "\n")
 		}
+		if p.PlanBudgetUSD != nil && taskFramesPresent(p.PlanTasks) {
+			fmt.Fprintf(b, "課題の上限（タスクの枠の合計）: %s USD\n", strconv.FormatFloat(*p.PlanBudgetUSD, 'f', -1, 64))
+		}
 	}
+}
+
+// taskFramesPresent は、計画のタスクが全部枠を持つか。
+func taskFramesPresent(tasks []core.PlanTaskView) bool {
+	for _, t := range tasks {
+		if t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil {
+			return false
+		}
+	}
+	return len(tasks) > 0
+}
+
+// taskFrameText はタスクの枠（実装・レビュー対応）の表示。枠を持たないタスクは空。
+func taskFrameText(t core.PlanTaskView) string {
+	if t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil {
+		return ""
+	}
+	return "（枠: 実装 " + strconv.FormatFloat(*t.BudgetImplUSD, 'f', -1, 64) + " USD・レビュー対応 " + strconv.FormatFloat(*t.BudgetReviewUSD, 'f', -1, 64) + " USD）"
 }
 
 // writeCompletionStageSummary は完了の承認の要約へ、予想と実物の変更後の対を書く
@@ -879,4 +892,14 @@ func reopenContractSources(a Args) core.ReopenContractSources {
 		return core.ReopenContractSources{}
 	}
 	return core.ReopenContractSources{Contract: invoker.NewLauncherWithLookPath(a.LookPath), Agent: decl, Connectors: conn}
+}
+
+// agentDeclForApproval は計画の承認で、枠のキーを持たない 1 個のタスクの枠をサイズごとの既定で決めるための宣言
+// （読めなければ nil。そのタスクの枠は空のまま残り、読むときに見直し前の決め方の値になる）。
+func agentDeclForApproval(a Args) *core.AgentDeclaration {
+	decl, err := core.LoadAgentDeclaration(a.Store.Workspace())
+	if err != nil {
+		return nil
+	}
+	return decl
 }
