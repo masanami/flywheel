@@ -130,8 +130,8 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 	}
 	if got != cur.VerifiedRef {
 		moved, err := s.settleMovedContent(ctx, rs, cur, rep, got)
-		if err != nil || !moved {
-			return rep, err
+		if err != nil || moved != movedMergeIn {
+			return rep, err // 衝突の解消あり・検証し直しは、「入れてよい」を返さない
 		}
 		cur.VerifiedRef, cur.LandRef, cur.LandDelivered = got, "", false
 	} else if cur.LandDelivered && cur.LandRef == got {
@@ -150,40 +150,80 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 	return s.sendLand(ctx, in, cur, connector, binding, planVersion, cycleID, rep)
 }
 
-// settleMovedContent は、レビュー待ちの中身 got が検証した中身と違うとき、上流の比較の口で見分ける。取り込みだけ（衝突の解消が無い）なら
-// 検証した中身を got に改め（land_ref を消し、land_delivered を偽にする）、真を返す（検証し直さない。J5 の対象選びが、同じ周の後の段で
-// 中身の識別と検証した中身の違いを見つけないよう、チェックを待つ間も、その場で改める）。そうでなければ、検証した中身と land_ref を消し、
-// land_delivered を偽にする（偽。タスクは検証中のままで、次の J5 が検証し直す）。取り込み元のブランチは成果物の宛先（統合先）。
-func (s *Store) settleMovedContent(ctx context.Context, rs *contractReleaseSource, cur *contractRunRow, rep *ContractRunReport, got string) (bool, error) {
+// movedOutcome は settleMovedContent が、中身が動いたことをどう記録したか。
+type movedOutcome int
+
+const (
+	// movedRecheck は、検証した中身を消した（関係のない変更あり・判定できない。次の J5 が検証し直す）。
+	movedRecheck movedOutcome = iota
+	// movedMergeIn は、取り込みだけとして検証した中身を改めた（検証し直さない）。
+	movedMergeIn
+	// movedConflictFix は、衝突の解消ありとして、いまの中身を確かめ待ちの中身に記録した（検証した中身は残す）。
+	movedConflictFix
+)
+
+// settleMovedContent は、レビュー待ちの中身 got が検証した中身と違うとき、上流の比較の口で見分けて記録する。取り込みのほかにコミットが
+// 足されていれば衝突の解消の道に入らない（委譲先の申告は使わない）。
+//   - 取り込みだけ: 検証した中身を got に改め（land_ref を消し、land_delivered を偽にする。確かめ待ちの中身も消す）、movedMergeIn を返す
+//     （検証し直さない。J5 の対象選びが、同じ周の後の段で中身の識別と検証した中身の違いを見つけないよう、チェックを待つ間も、その場で改める）。
+//   - 衝突の解消あり: 検証した中身は消さず、got を確かめ待ちの中身に記録し（あれば改める）、land_ref を消し、land_delivered を偽にする。
+//     タスクは検証中のまま。movedConflictFix を返す（resume は呼ばない。確かめは J5 が行う）。
+//   - 関係のない変更あり・判定できない: 検証した中身と確かめ待ちの中身の両方を消す（land_ref も消し、land_delivered を偽にする）。
+//     タスクは検証中のままで、次の J5 が検証し直す。
+//
+// 確かめ待ちの中身がある間にさらに動いたときも、常に検証した中身からの変わり方で判定し直す。取り込み元のブランチは成果物の宛先（統合先）。
+func (s *Store) settleMovedContent(ctx context.Context, rs *contractReleaseSource, cur *contractRunRow, rep *ContractRunReport, got string) (movedOutcome, error) {
 	repo, err := s.taskRemoteRepo(ctx, cur.TaskID, rs.Decl)
 	if err != nil {
-		return false, err
+		return movedRecheck, err
 	}
 	dest, err := s.challengeIntegrationRef(ctx, cur.ChallengeID)
 	if err != nil {
-		return false, err
+		return movedRecheck, err
 	}
 	if branches, _ := integrationArtifactRefs(rep.Artifacts); dest == "" && len(branches) == 1 {
 		dest = branches[0]
 	}
-	mergeInOnly := false
+	move := contentMoveUndeterminable
 	if repo != "" && dest != "" && rs.Compare != nil {
-		mergeInOnly = classifyContentMove(ClassifyHeadChange(context.WithoutCancel(ctx), rs.Compare, repo, dest, cur.VerifiedRef, got)) == contentMoveMergeInOnly
+		move = classifyContentMove(ClassifyHeadChange(context.WithoutCancel(ctx), rs.Compare, repo, dest, cur.VerifiedRef, got))
 	}
+	if move == contentMoveConflictFix && cur.FixPendingRef == got && cur.LandRef == "" && !cur.LandDelivered {
+		return movedConflictFix, nil // 確かめ待ちの中身がいまの中身と同じ。列は変えない（無駄な書き込みをしない）
+	}
+	outcome := movedRecheck
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
-		if mergeInOnly {
-			res, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = ?, land_ref = NULL, land_delivered = 0 WHERE id = ? AND verified_ref = ?`, got, cur.ID, cur.VerifiedRef)
-			if err != nil {
-				return err
-			}
-			n, err := res.RowsAffected()
-			mergeInOnly = n == 1 // 別の書き込みが先に変えていたら、この読みでは進めない
+		outcome = movedRecheck
+		var q string
+		var args []any
+		switch move {
+		case contentMoveMergeInOnly:
+			q, args = `UPDATE contract_run SET verified_ref = ?, fix_pending_ref = NULL, land_ref = NULL, land_delivered = 0 WHERE id = ? AND verified_ref = ?`, []any{got, cur.ID, cur.VerifiedRef}
+		case contentMoveConflictFix:
+			q, args = `UPDATE contract_run SET fix_pending_ref = ?, land_ref = NULL, land_delivered = 0 WHERE id = ? AND verified_ref = ?`, []any{got, cur.ID, cur.VerifiedRef}
+		default:
+			q, args = `UPDATE contract_run SET verified_ref = NULL, fix_pending_ref = NULL, land_ref = NULL, land_delivered = 0 WHERE id = ? AND verified_ref = ?`, []any{cur.ID, cur.VerifiedRef}
+		}
+		res, err := tx.ExecContext(ctx, q, args...)
+		if err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = NULL, land_ref = NULL, land_delivered = 0 WHERE id = ? AND verified_ref = ?`, cur.ID, cur.VerifiedRef)
-		return err
+		n, err := res.RowsAffected()
+		if err != nil || n != 1 {
+			return err // 別の書き込みが先に変えていたら、この読みでは進めない（検証し直しの扱いのまま）
+		}
+		switch move {
+		case contentMoveMergeInOnly:
+			outcome = movedMergeIn
+		case contentMoveConflictFix:
+			outcome = movedConflictFix
+		}
+		return nil
 	})
-	return mergeInOnly, classifyReadWriteErr(err)
+	if err = classifyReadWriteErr(err); err != nil {
+		return movedRecheck, err
+	}
+	return outcome, nil
 }
 
 // checkVerdict は検証した中身のチェックの確かめの結果。
