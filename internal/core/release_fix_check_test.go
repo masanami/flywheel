@@ -489,11 +489,17 @@ func TestReleaseFixCheck_LandedWithTheVerifiedContentBeforeLandIsReturnedIsUnapp
 		f := newFixCheckFixture(t)
 		f.setRefs(t, "", "h1", "")
 		f.mergeInMove("h1", "h2")
+		// 承認した中身からは、衝突の解消を含む動き（取り込みだけとは言えない）。通した中身からだけが取り込みだけ。
+		f.cmp.set(f.head, "h2", withFiles(ahead(commit("m-h2", "main", "m0"), commit("h2", "Merge", f.head, "m-h2")), UpstreamFile{Filename: "a.go", Patch: "RESOLVED"}))
+		f.cmp.set("m-h2", "h2", withFiles(ahead(commit(f.head, "fix", "p0")), UpstreamFile{Filename: "a.go", Patch: "RESOLVED"}))
 		f.fake.pr.State = "merged"
 		f.fake.pr.HeadSHA = "h2"
 		f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, nil)}
 		if item := f.one(t); item.Result != ExecutionResultMergedUnapproved {
 			t.Fatalf("item = %+v, want merged_unapproved", item)
+		}
+		if f.opState(t) == "executed" {
+			t.Fatalf("operation = executed, want it not recorded as an approved landing")
 		}
 	})
 	t.Run("the approved head again still proceeds to land", func(t *testing.T) {
@@ -613,12 +619,34 @@ func TestReleaseFixCheck_LandedWithTheContentReturnedToTheDelegateIsNotUnapprove
 			t.Fatalf("item = %+v, want merged_unapproved", item)
 		}
 	})
-	t.Run("a land_ref that was not delivered is not used", func(t *testing.T) {
+	t.Run("a land_ref whose delivery is not recorded is still the content flywheel decided to allow", func(t *testing.T) {
 		t.Parallel()
 		f := newFixCheckFixture(t)
 		f.setRefs(t, "", "h1", "")
 		landReturned(t, f, "h1")
+		// resume が失敗と返したが実は届いていた・届いた記録を書く前に止まった、のどちらでも land_delivered は偽のまま。
 		f.sql(t, `UPDATE contract_run SET land_delivered = 0`)
+		if item := f.one(t); item.Result != ExecutionResultLanded {
+			t.Fatalf("item = %+v, want landed", item)
+		}
+	})
+	t.Run("no land_ref is not used", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "", "h1", "")
+		landReturned(t, f, "h1")
+		f.sql(t, `UPDATE contract_run SET land_ref = NULL, land_delivered = 0`)
+		if item := f.one(t); item.Result != ExecutionResultMergedUnapproved {
+			t.Fatalf("item = %+v, want merged_unapproved", item)
+		}
+	})
+	t.Run("a content moved from the returned one by merging in only is not the returned one", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "", "h1", "")
+		landReturned(t, f, "h1")
+		f.mergeInMove("h2", "h3") // 返した中身 h2 からは取り込みだけ。でも land_ref と違う中身
+		f.fake.pr.HeadSHA = "h3"
 		if item := f.one(t); item.Result != ExecutionResultMergedUnapproved {
 			t.Fatalf("item = %+v, want merged_unapproved", item)
 		}
