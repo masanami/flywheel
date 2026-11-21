@@ -841,6 +841,9 @@ it("AC-279 #808: 予想（stages.expected）がある課題の「計画の本文
     .querySelector('[data-field="expected"]');
   expect(expected).toHaveTextContent("決済の画面");
   expect(expected).toHaveTextContent("予想の見え方");
+  // #964: 種類は英語のコードのまま出さず、語で出す
+  expect(expected).toHaveTextContent("予想（画面・決済の画面）");
+  expect(expected).not.toHaveTextContent("予想（ui");
 });
 
 it("AC-280 #808: 実物（stages.actual）がある課題の「計画の本文」に、実物の場面が出る", async () => {

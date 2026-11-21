@@ -14,9 +14,9 @@ import {
   CONDITIONS_AFTER_RELEASE_HEADINGS,
 } from "../api/types.gen.ts";
 import {
+  APPROVAL_REJECT_NOTE,
   COMPLETION_APPROVED_NOTE,
   COMPLETION_BUTTON_NOTE,
-  COMPLETION_REJECT_NOTE,
   COMPLETION_RELEASE_NOTE,
 } from "../guidance.ts";
 import {
@@ -494,7 +494,7 @@ it("AC-18・AC-19・AC-22・AC-23・AC-31・AC-32: ボタンの文言・完了�
     COMPLETION_RELEASE_NOTE,
   );
   expect(within(m).getByTestId("completion-reject-note").textContent).toBe(
-    COMPLETION_REJECT_NOTE,
+    APPROVAL_REJECT_NOTE,
   );
   expect(m.textContent).not.toMatch(/flywheel /);
   expect(m.querySelector("pre, code[data-guide]")).toBeNull();

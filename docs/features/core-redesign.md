@@ -575,7 +575,7 @@ S3d で、完了承認画面を足す（行き先 `approve_completion`。一覧�
 - `landing`: `verified | sent | landed | null`。
 - `verification`（タスクの検証の記録が無ければ null）: `{at, reason, verdict: "met | not_met | uncertain"}`。
 
-ツリーの API（`GET /api/v1/workspaces/{name}/tree`）には、細かい進み `progress` が増える。`tasks[]` の要素の `progress` は `working`・`verifying`・`landing`・`null`、課題の要素の `progress` は `reflecting`・`checking`・`null`。タスクの表示の区分（`phase`。6 値）と状態（`status`）は変えない。
+ツリーの API（`GET /api/v1/workspaces/{name}/tree`）には、細かい進み `progress` が増える。`tasks[]` の要素の `progress` は `working`・`verifying`・`verified`・`landing`・`null`、課題の要素の `progress` は `reflecting`・`checking`・`null`。タスクの表示の区分（`phase`。6 値）と状態（`status`）は変えない。
 
 S3c は、画面を作り替えない（通した衝突の解消の見せ方は S3d）。`flywheel show` と課題の詳細の API に、下のキーが増える。`ux.md` のシナリオのうち、S3c の受入基準に対応するものは無い（承認の後に反映先が動く場面は、`ux.md` に無い）。
 
@@ -779,7 +779,7 @@ S3c で、同じ 2 つの口に足すキー（ほかは変えない）:
 
 ### 表示の区分と件数を core が決める（S2c）
 
-- **採用案**: タスクの表示の区分（走っている・あなたを待っている・次に走る・前提を待っている・済み・取りやめ）、課題のタスクの進み、費用の合計、未のフォローアップの件数は、core が決めて、課題のツリーの API が返す。画面は、返ってきた値を出すだけにする。計画の承認の画面のツリーの区分も、承認の要約の API が返す。
+- **採用案**: タスクの表示の区分（実行中・あなた待ち・次に実行・前提待ち・済み・取りやめ）、課題のタスクの進み、費用の合計、未のフォローアップの件数は、core が決めて、課題のツリーの API が返す。画面は、返ってきた値を出すだけにする。計画の承認の画面のツリーの区分も、承認の要約の API が返す。
 - **理由**: 表示の区分は、タスクの状態・前提・保留の 3 つから決まる。画面の側で決めると、同じ決まりを、端末の表示（S4 で作る `flywheel cycle status` など）と二重に持つことになり、食い違う。件数も同じ（未のフォローアップの数え方は、状況の `followups.open` と同じ決まりを使う）。課題の画面は、開いている課題の全部のツリーを 1 回で出すので、課題ごとに詳細を読むと、課題の数だけ呼び出しが増える。
 - **代替案**:
   - 画面が、課題ごとに課題の詳細の API を読んで、区分と件数を導く。呼び出しが課題の数だけ増え、決まりが画面に入るので採らない。

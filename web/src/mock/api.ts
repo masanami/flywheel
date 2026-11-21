@@ -129,7 +129,7 @@ export function createMockApi(
         improvement: null,
         integration_ref: null,
       },
-      conflict_fixes: [],
+      conflict_fixes: extra.conflict_fixes ?? [],
       direct_completions: m.directCompletions,
       followups: extra.followups ?? [],
       holds: m.holds,

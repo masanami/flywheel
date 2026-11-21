@@ -2,12 +2,15 @@
 
 import {
   type CHALLENGE_PROGRESS_CODES,
+  type CONFLICT_FIX_TARGET_CODES,
   type DELEGATE_STATE_CODES,
   EXECUTION_RESULT_CODES,
   EXECUTION_RESULT_WORDS,
+  type EXPECTED_KIND_CODES,
   HOLD_KIND_CODES,
   type OPERATION_KIND_CODES,
   type OPERATION_STATE_CODES,
+  type REQUESTED_KIND_CODES,
   type TASK_LANDING_CODES,
   type TASK_PROGRESS_CODES,
   type VERDICT_CODES,
@@ -109,6 +112,9 @@ type TaskLanding = (typeof TASK_LANDING_CODES)[number];
 type Verdict = (typeof VERDICT_CODES)[number];
 type DelegateState = (typeof DELEGATE_STATE_CODES)[number];
 type OperationKind = (typeof OPERATION_KIND_CODES)[number];
+type RequestedKind = (typeof REQUESTED_KIND_CODES)[number];
+type ExpectedKind = (typeof EXPECTED_KIND_CODES)[number];
+type ConflictFixTarget = (typeof CONFLICT_FIX_TARGET_CODES)[number];
 type OperationState = (typeof OPERATION_STATE_CODES)[number];
 type ExecutionResultCode = (typeof EXECUTION_RESULT_CODES)[number];
 
@@ -183,6 +189,7 @@ export const PHASE_LABELS: Record<TaskPhase, string> = {
 export const TASK_PROGRESS_LABELS: Record<TaskProgress, string> = {
   working: "作業中",
   verifying: "検証待ち",
+  verified: "検証済み",
   landing: "統合中",
 };
 
@@ -217,7 +224,7 @@ export const DELEGATE_STATE_LABELS: Record<DelegateState, string> = {
 
 // 委譲先が求めていること（tasks[].delegate.requested_kind）。語だけを出す（括弧の補足は付けない）。
 // 対応の無い値は label() が生のコードで出す。
-export const REQUESTED_KIND_LABELS: Record<string, string> = {
+export const REQUESTED_KIND_LABELS: Record<RequestedKind, string> = {
   answer: "回答",
   approve: "承認",
   review: "レビュー",
@@ -439,9 +446,15 @@ export const RUN_RESULT_LABELS: Record<string, string> = {
 };
 export const RUN_RUNNING_LABEL = "実行中";
 // 通した衝突の解消の宛先。`integration`＝統合先、`release`＝反映先。
-export const CONFLICT_FIX_TARGET_LABELS: Record<string, string> = {
+export const CONFLICT_FIX_TARGET_LABELS: Record<ConflictFixTarget, string> = {
   integration: "統合先",
   release: "反映先",
+};
+// 予想の例の種別（stages の expected[].kind）。完了の確かめの対の見出しに出す。
+export const EXPECTED_KIND_LABELS: Record<ExpectedKind, string> = {
+  ui: "画面",
+  cli: "コマンド",
+  behavior: "振る舞い",
 };
 export const CONFLICT_FIX_HEADING = "通した衝突の解消";
 export const CONFLICT_FIX_PENDING_TEXT = "衝突の解消の確かめを待っています。";

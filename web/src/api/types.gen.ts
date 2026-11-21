@@ -824,6 +824,7 @@ export const TASK_PHASE_CODES = [
 export const TASK_PROGRESS_CODES = [
   "working",
   "verifying",
+  "verified",
   "landing",
 ] as const;
 
@@ -865,6 +866,24 @@ export const OPERATION_STATE_CODES = [
   "rejected",
   "executed",
   "closed",
+] as const;
+
+export const REQUESTED_KIND_CODES = [
+  "answer",
+  "approve",
+  "observe",
+  "review",
+] as const;
+
+export const CONFLICT_FIX_TARGET_CODES = [
+  "integration",
+  "release",
+] as const;
+
+export const EXPECTED_KIND_CODES = [
+  "ui",
+  "cli",
+  "behavior",
 ] as const;
 
 export const EXECUTION_RESULT_CODES = [

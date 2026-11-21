@@ -6,16 +6,17 @@ package core
 // TaskProgress はツリーのタスクの細かい進み（表示の区分 phase が running のタスクだけ。ほかは null）。
 type TaskProgress string
 
-// TaskProgress の 3 値。
+// TaskProgress の 4 値。verified は検証を通っただけ（統合先へ入れる依頼はまだ）、landing は統合先へ入れる依頼を出している。
 const (
 	TaskProgressWorking   TaskProgress = "working"
 	TaskProgressVerifying TaskProgress = "verifying"
+	TaskProgressVerified  TaskProgress = "verified"
 	TaskProgressLanding   TaskProgress = "landing"
 )
 
 // TaskProgressValues は TaskProgress の閉集合の写しを返す。
 func TaskProgressValues() []TaskProgress {
-	return []TaskProgress{TaskProgressWorking, TaskProgressVerifying, TaskProgressLanding}
+	return []TaskProgress{TaskProgressWorking, TaskProgressVerifying, TaskProgressVerified, TaskProgressLanding}
 }
 
 // ChallengeProgress はツリーの課題の細かい進み（統合先を使う課題だけ。ほかは null）。
@@ -65,4 +66,19 @@ func OperationKindValues() []OperationKind {
 // OperationStateValues は OperationState（不可逆操作の状態）の閉集合の写しを返す。
 func OperationStateValues() []OperationState {
 	return append([]OperationState(nil), operationStateValues...)
+}
+
+// ContractRequestedKindValues は、委譲先が求めること（requested_action.kind）の閉集合の写しを返す。
+func ContractRequestedKindValues() []string {
+	return []string{contractRequestedKindAnswer, contractRequestedKindApprove, contractRequestedKindObserve, contractRequestedKindReview}
+}
+
+// ConflictFixTargetValues は、通した衝突の解消の宛先（ConflictFixPassed.Target）の閉集合の写しを返す。
+func ConflictFixTargetValues() []string {
+	return []string{ConflictFixTargetIntegration, ConflictFixTargetRelease}
+}
+
+// ExpectedKindValues は ExpectedKind（予想の例の種別）の閉集合の写しを返す。
+func ExpectedKindValues() []ExpectedKind {
+	return []ExpectedKind{ExpectedKindUI, ExpectedKindCLI, ExpectedKindBehavior}
 }

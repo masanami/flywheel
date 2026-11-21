@@ -75,3 +75,27 @@ test("AC-436 #808: 幅 360px で、課題の詳細の「計画の本文」（表
     .evaluate((el) => el.scrollWidth <= el.clientWidth);
   expect(body).toBe(true);
 });
+
+test("AC-126〜129 #964: 課題の詳細の画面に、通した衝突の解消が、宛先の語・直したファイルとともに出る", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/challenges/C-28");
+  const box = page.getByTestId("conflict-fixes");
+  await expect(box).toBeVisible();
+  await expect(box.getByTestId("conflict-fixes-count")).toHaveText("2");
+  const rows = box.getByTestId("conflict-fix");
+  await expect(rows).toHaveCount(2);
+  // 統合先宛てはタスクの題名を添え、反映先宛てはタスクを添えない
+  await expect(rows.nth(0).getByTestId("conflict-fix-target")).toHaveText(
+    "統合先（手順 4 を進める）",
+  );
+  await expect(rows.nth(0).getByTestId("conflict-fix-files")).toContainText(
+    "billing/nightly.sql",
+  );
+  await expect(rows.nth(1).getByTestId("conflict-fix-target")).toHaveText(
+    "反映先",
+  );
+  await expect(rows.nth(1).getByTestId("conflict-fix-files")).toContainText(
+    "docs/billing.md",
+  );
+});

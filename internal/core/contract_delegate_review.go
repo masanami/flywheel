@@ -24,8 +24,9 @@ const contractRequestedKindObserve = "observe"
 
 // contractRequestedKindAnswer は回答を求める待ち。contractDeciderParent は親が答える相手（J4）。
 const (
-	contractRequestedKindAnswer = "answer"
-	contractDeciderParent       = "parent"
+	contractRequestedKindAnswer  = "answer"
+	contractRequestedKindApprove = "approve"
+	contractDeciderParent        = "parent"
 )
 
 // hasReviewableArtifact は artifacts に、検証中へ進めるときに取り込む種類（pr・branch・commit）が 1 件でもあるか。
