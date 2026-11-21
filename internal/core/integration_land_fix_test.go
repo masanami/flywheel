@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// このファイルは、統合先宛ての衝突の解消の確かめ（区切り S3c）のうち、中身が動いたときの記録（settleMovedContent）・確かめ結果の書き込み
+// このファイルは、統合先宛てのコンフリクトの解消の確かめ（区切り S3c）のうち、中身が動いたときの記録（settleMovedContent）・確かめ結果の書き込み
 // （writeIntegrationFix）・確かめ待ちの中身の後始末を、実ストア・偽の ContractClient・偽の上流で固定する。
 
 const (
@@ -23,7 +23,7 @@ func artsOf(ref string) []ContractArtifact {
 }
 
 // setMovesTo は、検証した中身（landContent）から ref へ、宛先の最新（取り込みのコミット m）を取り込むマージで動いた履歴を置く。
-// withFixes が真なら、衝突を解消するために直したファイル a.go がある。
+// withFixes が真なら、コンフリクトを解消するために直したファイル a.go がある。
 func (f *igLandFixture) setMovesTo(ref, m string, withFixes bool) {
 	f.compare.set(landContent, ref, ahead(commit(m, "main change", "m0"), commit(ref, "Merge branch 'feat/integration-1'", landContent, m)))
 	f.compare.set(integBranch, ref, ahead(commit("p0", "feat", "m0"), commit(landContent, "fix", "p0"), commit(ref, "Merge branch 'feat/integration-1'", landContent, m)))
@@ -62,7 +62,7 @@ func (f *igLandFixture) conflictFixCount(t *testing.T) int64 {
 	return f.count(t, `SELECT COUNT(*) FROM activity WHERE action = 'conflict_fix_passed'`)
 }
 
-// newConflictFixed は、検証した中身（landContent）から衝突の解消ありで newContent へ動いたレビュー待ちを読み、確かめ待ちの状態にした足場。
+// newConflictFixed は、検証した中身（landContent）からコンフリクトの解消ありで newContent へ動いたレビュー待ちを読み、確かめ待ちの状態にした足場。
 func newConflictFixed(t *testing.T) *igLandFixture {
 	t.Helper()
 	f := newIgLandFixture(t)
@@ -73,7 +73,7 @@ func newConflictFixed(t *testing.T) *igLandFixture {
 	return f
 }
 
-// AC-1〜AC-6: 変わり方が衝突の解消あり → 確かめ待ちの中身がいまの中身になり、検証した中身は残る。通す中身と届いた記録は消え、resume は呼ばれず、タスクは検証中のまま。
+// AC-1〜AC-6: 変わり方がコンフリクトの解消あり → 確かめ待ちの中身がいまの中身になり、検証した中身は残る。通す中身と届いた記録は消え、resume は呼ばれず、タスクは検証中のまま。
 func TestSettleMovedContent_ConflictFixRecordsPendingAndKeepsVerified(t *testing.T) {
 	t.Parallel()
 	f := newConflictFixed(t)                                   // チェックが通っていても、resume は呼ばない
@@ -97,7 +97,7 @@ func TestSettleMovedContent_ConflictFixRecordsPendingAndKeepsVerified(t *testing
 	}
 }
 
-// AC-27: 確かめ待ちの中身がある間にさらに動き、検証した中身からの変わり方が衝突の解消あり → 確かめ待ちの中身はいまの中身に改まる（検証した中身は残る）。
+// AC-27: 確かめ待ちの中身がある間にさらに動き、検証した中身からの変わり方がコンフリクトの解消あり → 確かめ待ちの中身はいまの中身に改まる（検証した中身は残る）。
 func TestSettleMovedContent_ConflictFixAgainRewritesPending(t *testing.T) {
 	t.Parallel()
 	f := newConflictFixed(t)
@@ -325,7 +325,7 @@ func TestConflictFixPending_ClearedWhenTheTaskReturnsToInProgress(t *testing.T) 
 	}
 }
 
-// 確かめ待ちの中身のままの読みでも、毎回、検証した中身からの変わり方を見分け直す。結果が衝突の解消ありのままなら、列は変えない。
+// 確かめ待ちの中身のままの読みでも、毎回、検証した中身からの変わり方を見分け直す。結果がコンフリクトの解消ありのままなら、列は変えない。
 func TestSettleMovedContent_SamePendingContentComparesAgainAndKeepsColumns(t *testing.T) {
 	t.Parallel()
 	f := newConflictFixed(t)

@@ -83,7 +83,7 @@ const (
 	// 同じく課題・セッションに結び付くが、委譲の履歴の規則（連続失敗の数え・--resume の対象選び・
 	// delegation_failed の発生）には入れない。セッション ID は run の一意のために採る偽の値。
 	runKindContract runKind = "contract"
-	// runKindPredict は衝突の予測（flywheel の predict）の実行。新しく作る経路は無く、
+	// runKindPredict はコンフリクトの予測（flywheel の predict）の実行。新しく作る経路は無く、
 	// 過去の行を読む（費用の集計・runs の表示）ためと、終わっていない行を終わらせる更新のために残す。
 	runKindPredict runKind = "predict"
 )

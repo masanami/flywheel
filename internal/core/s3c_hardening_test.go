@@ -1,6 +1,6 @@
 package core
 
-// 区切り S3c（衝突の解消の確かめ）の試験の補強（#962）。本物の経路を通す形で、次を固定する。
+// 区切り S3c（コンフリクトの解消の確かめ）の試験の補強（#962）。本物の経路を通す形で、次を固定する。
 // 保留への遷移・保留からの戻り（SQL で状態を書き換えない）／反映の承認の記録そのもの／中身の比較の口が失敗を返すとき。
 
 import (
@@ -153,11 +153,11 @@ func TestJ5Fix_AFailingComparisonNeverPassesTheContent(t *testing.T) {
 	}
 }
 
-// 確かめ（J5）の入力のデータの区画の名前は「衝突の解消の差分」で、本文に直したファイルの差分が入る。この名前を固定するのはこの試験だけ。invoker の試験
+// 確かめ（J5）の入力のデータの区画の名前は「コンフリクトの解消の差分」で、本文に直したファイルの差分が入る。この名前を固定するのはこの試験だけ。invoker の試験
 // （TestLauncher_InvokeJudgment_J5FixCheckStdinCarriesTheDiffInsideItsDataSection）は、渡された区画の本文が実際の起動の標準入力の区画の内側に入ることを見る。
 func TestJ5Fix_InputCarriesTheConflictFixDiffSection(t *testing.T) {
 	t.Parallel()
-	if labelFixDiffSection != "衝突の解消の差分" {
+	if labelFixDiffSection != "コンフリクトの解消の差分" {
 		t.Fatalf("labelFixDiffSection = %q", labelFixDiffSection)
 	}
 	f := newFixIntegrationFixture(t)

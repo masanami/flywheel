@@ -294,14 +294,14 @@ func TestOperationView_S3aResultsAndDetailAreShownInStatusAndShow(t *testing.T) 
 	}
 	coretest.InsertOperationExecution(t, s.workspace, opID, coretest.ExecutionAttempt{
 		StartedAt: execTS(20), EndedAt: execTS(21), Result: string(ExecutionResultLandRefused), ApprovedHead: "a1b2c3",
-		Detail: "委譲先の summary: 衝突があり入れられなかった",
+		Detail: "委譲先の summary: コンフリクトがあり入れられなかった",
 	})
 	setOpState(t, s, opID, OperationStatePending)
 	op := showOpOf(t, s, cid, opID)
 	if op.LastExecutionResult == nil || *op.LastExecutionResult != ExecutionResultLandRefused {
 		t.Fatalf("LastExecutionResult = %v, want land_refused", op.LastExecutionResult)
 	}
-	if op.LastExecutionDetail == nil || *op.LastExecutionDetail != "委譲先の summary: 衝突があり入れられなかった" {
+	if op.LastExecutionDetail == nil || *op.LastExecutionDetail != "委譲先の summary: コンフリクトがあり入れられなかった" {
 		t.Errorf("LastExecutionDetail = %v, want the delegate's summary", op.LastExecutionDetail)
 	}
 }

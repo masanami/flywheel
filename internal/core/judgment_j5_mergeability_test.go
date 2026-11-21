@@ -10,7 +10,7 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
-// conflictingPR は衝突している（mergeable=false・dirty）open な PR。
+// conflictingPR はコンフリクトしている（mergeable=false・dirty）open な PR。
 func conflictingPR() UpstreamPullRequestChecks {
 	pr := prChecks("open", checkDone)
 	pr.Mergeable, pr.MergeableState = boolPtr(false), "dirty"
@@ -42,10 +42,10 @@ func TestVerifyAutoJ5_ConflictingPR_SectionIsWrittenAndMetIsOverriddenAndTheChal
 	if got := f.holdCount(t); got != "0" {
 		t.Errorf("holds = %s, want none (no question to a human)", got)
 	}
-	// 追従の委譲が読む最新の J5 の出力は not_met で、指摘に衝突の解消が書かれている。
+	// 追従の委譲が読む最新の J5 の出力は not_met で、指摘にコンフリクトの解消が書かれている。
 	runs := f.j5Runs(t)
 	v, ok := validateJ5Output([]byte(runs[len(runs)-1].Output))
-	if !ok || v.Verdict != J5VerdictNotMet || v.Feedback == nil || !strings.Contains(*v.Feedback, "衝突を解消") || !strings.Contains(*v.Feedback, j5PRURL) {
+	if !ok || v.Verdict != J5VerdictNotMet || v.Feedback == nil || !strings.Contains(*v.Feedback, "コンフリクトを解消") || !strings.Contains(*v.Feedback, j5PRURL) {
 		t.Errorf("stored J5 output = %q", runs[len(runs)-1].Output)
 	}
 	// 置き換えには印（元の判定）と J5 の元の出力を残し、達成条件の未達の発生には数えない。
@@ -57,7 +57,7 @@ func TestVerifyAutoJ5_ConflictingPR_SectionIsWrittenAndMetIsOverriddenAndTheChal
 	}
 }
 
-// 衝突の PR に J5 が uncertain を返しても、人への保留にせず着手中へ戻す（決定 2「人には聞かない」）。
+// コンフリクトの PR に J5 が uncertain を返しても、人への保留にせず着手中へ戻す（決定 2「人には聞かない」）。
 func TestVerifyAutoJ5_ConflictingPR_UncertainIsAlsoOverriddenWithoutAHold(t *testing.T) {
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
@@ -83,8 +83,8 @@ func TestVerifyAutoJ5_ConflictingPR_UncertainIsAlsoOverriddenWithoutAHold(t *tes
 	}
 }
 
-// 衝突による置き換えは差し戻しの上限に数えない: 本物の not_met が 2 回あった後に衝突が来ても、上限 3 で
-// 人への保留にならず、衝突の指摘つきで委譲を再開する。
+// コンフリクトによる置き換えは差し戻しの上限に数えない: 本物の not_met が 2 回あった後にコンフリクトが来ても、上限 3 で
+// 人への保留にならず、コンフリクトの指摘つきで委譲を再開する。
 func TestRework_ConflictOverrideIsNotCountedTowardTheLimit(t *testing.T) {
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
@@ -104,13 +104,13 @@ func TestRework_ConflictOverrideIsNotCountedTowardTheLimit(t *testing.T) {
 	if len(res.NotStarted) != 0 || len(res.Items) != 1 {
 		t.Fatalf("result = %+v, want a launch (the conflict must not hit the rework limit)", res)
 	}
-	if got := f.lastLaunch(t); got.ResumeKind != ResumeKindRework || !strings.Contains(got.ResumeFeedback, "衝突を解消") {
+	if got := f.lastLaunch(t); got.ResumeKind != ResumeKindRework || !strings.Contains(got.ResumeFeedback, "コンフリクトを解消") {
 		t.Errorf("launch = kind %q feedback %q, want a rework resume with the conflict feedback", got.ResumeKind, got.ResumeFeedback)
 	}
 }
 
-// J5 が j5.md の規則に従って衝突を理由に自分で not_met を返す主な経路でも、衝突による差し戻しの印を付ける:
-// 本物の not_met が 2 回あった後でも、上限 3 で人への保留にならず、衝突の指摘（と J5 の指摘）つきで委譲を再開し、
+// J5 が j5.md の規則に従ってコンフリクトを理由に自分で not_met を返す主な経路でも、コンフリクトによる差し戻しの印を付ける:
+// 本物の not_met が 2 回あった後でも、上限 3 で人への保留にならず、コンフリクトの指摘（と J5 の指摘）つきで委譲を再開し、
 // 発生（verification_not_met）も増えない。
 func TestRework_ConflictWithJ5sOwnNotMetIsMarkedAndNotCountedTowardTheLimit(t *testing.T) {
 	f := newJ5Fixture(t, "impl")
@@ -130,7 +130,7 @@ func TestRework_ConflictWithJ5sOwnNotMetIsMarkedAndNotCountedTowardTheLimit(t *t
 	runs := f.j5Runs(t)
 	v, ok := validateJ5Output([]byte(runs[len(runs)-1].Output))
 	if !ok || v.Verdict != J5VerdictNotMet || v.ConflictOverriddenFrom != string(J5VerdictNotMet) || v.Feedback == nil ||
-		!strings.Contains(*v.Feedback, "衝突を解消") || !strings.Contains(*v.Feedback, "J5-CONFLICT-FEEDBACK") {
+		!strings.Contains(*v.Feedback, "コンフリクトを解消") || !strings.Contains(*v.Feedback, "J5-CONFLICT-FEEDBACK") {
 		t.Fatalf("stored J5 output = %q, want a conflict-marked not_met", runs[len(runs)-1].Output)
 	}
 	if got := f.queryString(t, `SELECT COUNT(*) FROM occurrence WHERE challenge_id = 1 AND kind = 'verification_not_met'`); got != "2" {
@@ -143,7 +143,7 @@ func TestRework_ConflictWithJ5sOwnNotMetIsMarkedAndNotCountedTowardTheLimit(t *t
 	if got := f.holdCount(t); got != "0" {
 		t.Errorf("holds = %s, want none", got)
 	}
-	if got := f.lastLaunch(t); got.ResumeKind != ResumeKindRework || !strings.Contains(got.ResumeFeedback, "衝突を解消") {
+	if got := f.lastLaunch(t); got.ResumeKind != ResumeKindRework || !strings.Contains(got.ResumeFeedback, "コンフリクトを解消") {
 		t.Errorf("launch = kind %q feedback %q, want a rework resume with the conflict feedback", got.ResumeKind, got.ResumeFeedback)
 	}
 }
@@ -170,7 +170,7 @@ func TestVerifyAutoJ5_RefreshedPRWithPendingChecks_WaitsForCI(t *testing.T) {
 	}
 }
 
-// BEHIND（衝突ではなく base に遅れているだけ）は止めない。
+// BEHIND（コンフリクトではなく base に遅れているだけ）は止めない。
 func TestVerifyAutoJ5_BehindPR_IsNotTreatedAsConflict(t *testing.T) {
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")
@@ -215,7 +215,7 @@ func (c *seqChecks) GetPullRequestChecks(context.Context, string, int) (Upstream
 	return pr, nil
 }
 
-// UNKNOWN（計算中）は取り直し、確定した結果（衝突）で判定する。
+// UNKNOWN（計算中）は取り直し、確定した結果（コンフリクト）で判定する。
 func TestVerifyAutoJ5_UnknownMergeabilityIsRetriedAndTheSettledConflictBlocksApproval(t *testing.T) {
 	f := newJ5Fixture(t, "impl")
 	f.delegateToVerifying(t, "C-1")

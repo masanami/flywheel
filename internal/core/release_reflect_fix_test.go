@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// 委譲先のフローを通らない成果物の反映の依頼でも、衝突の解消あり（反映の段。AC-43・AC-44）は確かめ待ちになる。
+// 委譲先のフローを通らない成果物の反映の依頼でも、コンフリクトの解消あり（反映の段。AC-43・AC-44）は確かめ待ちになる。
 // 足場は反映の依頼（reflFixture。反映の依頼を始めた状態）。
 
 func (f *reflFixture) fixRefs(t *testing.T) contractFixRefs {
@@ -21,7 +21,7 @@ func (f *reflFixture) fixRefs(t *testing.T) contractFixRefs {
 	return r
 }
 
-// conflictFixMovedTo は PR の head を h にし、承認した中身から h への変わり方が、衝突の解消あり（取り込みのマージで、直したファイルがある）になるよう比較を用意する。
+// conflictFixMovedTo は PR の head を h にし、承認した中身から h への変わり方が、コンフリクトの解消あり（取り込みのマージで、直したファイルがある）になるよう比較を用意する。
 func (f *reflFixture) conflictFixMovedTo(h string) {
 	f.fake.pr.HeadSHA = h
 	f.cmp.set(relHead, h, withFiles(ahead(commit("m-"+h, "main", "m0"), commit(h, "Merge", relHead, "m-"+h)), UpstreamFile{Filename: "a.go", Patch: "RESOLVED"}))
@@ -29,7 +29,7 @@ func (f *reflFixture) conflictFixMovedTo(h string) {
 	f.cmp.set("m-"+h, h, withFiles(ahead(commit(relHead, "fix", "p0")), UpstreamFile{Filename: "a.go", Patch: "RESOLVED"}))
 }
 
-// AC-43: 反映の依頼で、変わり方が衝突の解消あり → 結果は waiting_fix_check で、契約の実行の fix_pending_ref はいまの中身になる。
+// AC-43: 反映の依頼で、変わり方がコンフリクトの解消あり → 結果は waiting_fix_check で、契約の実行の fix_pending_ref はいまの中身になる。
 // AC-44: 反映の操作は approved のまま（承認は取り消されない）で、resume は呼ばれない。
 func TestReflectFixCheck_AC43_AC44_ConflictFixRecordsPendingAndKeepsTheApproval(t *testing.T) {
 	t.Parallel()

@@ -45,7 +45,7 @@ func TestClosedValues_SingleSource_964(t *testing.T) {
 			t.Errorf("J2 の出力の型の expected.kind の enum = %v, want %v", got, enum)
 		}
 	})
-	t.Run("衝突の解消の宛先: 一覧は統合先・反映先の定数と同じ", func(t *testing.T) {
+	t.Run("コンフリクトの解消の宛先: 一覧は統合先・反映先の定数と同じ", func(t *testing.T) {
 		if got, want := ConflictFixTargetValues(), []string{ConflictFixTargetIntegration, ConflictFixTargetRelease}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("ConflictFixTargetValues = %v, want %v", got, want)
 		}

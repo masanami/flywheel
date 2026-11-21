@@ -248,7 +248,7 @@ func TestWorkspace_InterruptedState(t *testing.T) {
 			t.Errorf("InterruptedState = %q, %v; want detached HEAD", got, err)
 		}
 	})
-	// want の理由は、衝突で止めた操作ごとの途中の状態。
+	// want の理由は、コンフリクトで止めた操作ごとの途中の状態。
 	for _, c := range []struct {
 		name string
 		args []string
@@ -281,7 +281,7 @@ func TestWorkspace_InterruptedState(t *testing.T) {
 	})
 }
 
-// gitStop は dir で git を実行し、衝突で止まる（非 0 で終わる）ことを確かめる。
+// gitStop は dir で git を実行し、コンフリクトで止まる（非 0 で終わる）ことを確かめる。
 func gitStop(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(realGit(t), args...)

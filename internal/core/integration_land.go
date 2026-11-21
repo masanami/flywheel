@@ -131,7 +131,7 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 	if got != cur.VerifiedRef {
 		moved, err := s.settleMovedContent(ctx, rs, cur, rep, got)
 		if err != nil || moved != movedMergeIn {
-			return rep, err // 衝突の解消あり・検証し直しは、「入れてよい」を返さない
+			return rep, err // コンフリクトの解消あり・検証し直しは、「入れてよい」を返さない
 		}
 		cur.VerifiedRef, cur.LandRef, cur.LandDelivered = got, "", false
 	} else if cur.LandDelivered && cur.LandRef == got {
@@ -158,15 +158,15 @@ const (
 	movedRecheck movedOutcome = iota
 	// movedMergeIn は、取り込みだけとして検証した中身を改めた（検証し直さない）。
 	movedMergeIn
-	// movedConflictFix は、衝突の解消ありとして、いまの中身を確かめ待ちの中身に記録した（検証した中身は残す）。
+	// movedConflictFix は、コンフリクトの解消ありとして、いまの中身を確かめ待ちの中身に記録した（検証した中身は残す）。
 	movedConflictFix
 )
 
 // settleMovedContent は、レビュー待ちの中身 got が検証した中身と違うとき、上流の比較の口で見分けて記録する。取り込みのほかにコミットが
-// 足されていれば衝突の解消の道に入らない（委譲先の申告は使わない）。
+// 足されていればコンフリクトの解消の道に入らない（委譲先の申告は使わない）。
 //   - 取り込みだけ: 検証した中身を got に改め（land_ref を消し、land_delivered を偽にする。確かめ待ちの中身も消す）、movedMergeIn を返す
 //     （検証し直さない。J5 の対象選びが、同じ周の後の段で中身の識別と検証した中身の違いを見つけないよう、チェックを待つ間も、その場で改める）。
-//   - 衝突の解消あり: 検証した中身は消さず、got を確かめ待ちの中身に記録し（あれば改める）、land_ref を消し、land_delivered を偽にする。
+//   - コンフリクトの解消あり: 検証した中身は消さず、got を確かめ待ちの中身に記録し（あれば改める）、land_ref を消し、land_delivered を偽にする。
 //     タスクは検証中のまま。movedConflictFix を返す（resume は呼ばない。確かめは J5 が行う）。
 //   - 関係のない変更あり・判定できない: 検証した中身と確かめ待ちの中身の両方を消す（land_ref も消し、land_delivered を偽にする）。
 //     タスクは検証中のままで、次の J5 が検証し直す。

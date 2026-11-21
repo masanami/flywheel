@@ -433,10 +433,10 @@ func TestInstructions_J6ForbidsDuplicateFollowups(t *testing.T) {
 	}
 }
 
-// j6.md は通した衝突の解消の区画を説明する。ラベルは internal/core/judgment_j6.go の j6ConflictFixesLabel と
+// j6.md は通したコンフリクトの解消の区画を説明する。ラベルは internal/core/judgment_j6.go の j6ConflictFixesLabel と
 // 同じ文字列（core の非公開の定数のため写す）。片方だけ変わると、J6 が区画を読めなくなる。
 func TestInstructions_J6DescribesConflictFixesSection(t *testing.T) {
-	label := "「通した衝突の解消」"
+	label := "「通したコンフリクトの解消」"
 	got, err := Instructions(core.JudgmentJ6)
 	if err != nil {
 		t.Fatal(err)

@@ -350,10 +350,10 @@ func writeHeadChangeLines(b *strings.Builder, indent string, a *core.ReleaseHead
 	}
 	for _, fix := range a.Change.ConflictFixes {
 		if len(fix.Files) == 0 {
-			fmt.Fprintf(b, "%s取り込みのマージ %s: 検証した版と既定ブランチ側の両方と異なるファイルはありません（衝突を直した差分なし）\n", indent, shortHead(fix.MergeCommit))
+			fmt.Fprintf(b, "%s取り込みのマージ %s: 検証した版と既定ブランチ側の両方と異なるファイルはありません（コンフリクトを直した差分なし）\n", indent, shortHead(fix.MergeCommit))
 			continue
 		}
-		fmt.Fprintf(b, "%s取り込みのマージ %s が、検証した版と既定ブランチ側の両方と異なる形にしたファイル（衝突を直した差分。検証した版からの差分）:\n", indent, shortHead(fix.MergeCommit))
+		fmt.Fprintf(b, "%s取り込みのマージ %s が、検証した版と既定ブランチ側の両方と異なる形にしたファイル（コンフリクトを直した差分。検証した版からの差分）:\n", indent, shortHead(fix.MergeCommit))
 		for _, f := range fix.Files {
 			fmt.Fprintf(b, "%s  ファイル: %s\n", indent, escapeControl(f.Filename))
 			if f.PatchUnavailable {

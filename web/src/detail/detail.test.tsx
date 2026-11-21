@@ -1002,7 +1002,7 @@ const passedFix = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-it("AC-127: 課題の詳細に、通した衝突の解消の件数・宛先・直したファイルの名前が出る", async () => {
+it("AC-127: 課題の詳細に、通したコンフリクトの解消の件数・宛先・直したファイルの名前が出る", async () => {
   const { root } = await open(
     show({
       conflict_fixes: [
@@ -1019,7 +1019,7 @@ it("AC-127: 課題の詳細に、通した衝突の解消の件数・宛先・�
   expect(rows[1]?.textContent).toContain("反映先");
 });
 
-it("AC-128: 通した衝突の解消が 0 件なら、課題の詳細に区画を出さない", async () => {
+it("AC-128: 通したコンフリクトの解消が 0 件なら、課題の詳細に区画を出さない", async () => {
   const { root } = await open(show());
   expect(q(root).queryByTestId("conflict-fixes")).toBeNull();
 });

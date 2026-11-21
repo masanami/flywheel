@@ -220,7 +220,7 @@ func (s *Store) applyJ5ChallengeNotMet(ctx context.Context, runIDDisplay, challe
 			return err
 		}
 		if v.ConflictOverriddenFrom != "" {
-			return nil // 衝突の PR のための置き換えは、達成条件の未達ではないので発生に数えない
+			return nil // コンフリクトの PR のための置き換えは、達成条件の未達ではないので発生に数えない
 		}
 		return s.insertJ5Occurrence(ctx, tc, OccurrenceKindVerificationNotMet)
 	})

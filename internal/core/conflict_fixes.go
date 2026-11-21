@@ -8,16 +8,16 @@ import (
 	"time"
 )
 
-// 通した衝突の解消の宛先（ConflictFixPassed.Target）。
+// 通したコンフリクトの解消の宛先（ConflictFixPassed.Target）。
 const (
 	ConflictFixTargetIntegration = "integration"
 	ConflictFixTargetRelease     = "release"
 )
 
-// conflictFixTargetValues は通した衝突の解消の宛先の閉集合（ConflictFixTargetValues の正本）。
+// conflictFixTargetValues は通したコンフリクトの解消の宛先の閉集合（ConflictFixTargetValues の正本）。
 var conflictFixTargetValues = []string{ConflictFixTargetIntegration, ConflictFixTargetRelease}
 
-// ConflictFixPassed は、衝突の解消の確かめが「満たした」として通した記録 1 件（作業ログの action = conflict_fix_passed から読む）。
+// ConflictFixPassed は、コンフリクトの解消の確かめが「満たした」として通した記録 1 件（作業ログの action = conflict_fix_passed から読む）。
 // 統合先宛てなら TaskID を持ち OperationID は nil、反映先宛てなら OperationID を持ち TaskID は nil。
 type ConflictFixPassed struct {
 	// At は作業ログの記録の時刻。
@@ -30,7 +30,7 @@ type ConflictFixPassed struct {
 	RunID          string
 }
 
-// loadConflictFixes は課題の通した衝突の解消を、古い順（作業ログの id 昇順）で返す。無ければ空のスライス（nil でない）。
+// loadConflictFixes は課題の通したコンフリクトの解消を、古い順（作業ログの id 昇順）で返す。無ければ空のスライス（nil でない）。
 // 課題のタスク（entity=task）と、課題の反映の操作（entity=operation）の記録だけを読む。
 func loadConflictFixes(ctx context.Context, tx *sql.Tx, challengeID int64) ([]ConflictFixPassed, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT a.at, a.entity, a.entity_id, a.before, a.after FROM activity a

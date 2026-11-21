@@ -7,7 +7,7 @@ import {
 } from "../labels.ts";
 import { shortTime } from "../when.ts";
 
-// 通した衝突の解消の一覧。0 件なら区画ごと出さない。直したファイルの名前は解釈せず、文字のまま出す。
+// 通したコンフリクトの解消の一覧。0 件なら区画ごと出さない。直したファイルの名前は解釈せず、文字のまま出す。
 // 統合先宛てはタスクの題名を添える（titleOfTask が題名を返せなければ、タスクの ID を出す）。
 export function ConflictFixesView({
   fixes,

@@ -39,7 +39,7 @@ type j5TaskScope struct {
 }
 
 // latestTaskContract はタスクの契約の実行（kind が task の最後の 1 件）の、行の ID・中身の識別・検証した中身。無ければ ok=false。
-// 確かめ待ちの中身（fix_pending_ref）を持つ実行は、タスクの検証の対象にしない（衝突の解消の確かめが扱う）ので、ok を偽にする。
+// 確かめ待ちの中身（fix_pending_ref）を持つ実行は、タスクの検証の対象にしない（コンフリクトの解消の確かめが扱う）ので、ok を偽にする。
 func latestTaskContract(ctx context.Context, tx *sql.Tx, cid, taskID int64) (rowID int64, contentRef, verifiedRef sql.NullString, ok bool, err error) {
 	var pending string
 	err = tx.QueryRowContext(ctx,
@@ -298,7 +298,7 @@ func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDispla
 				return err
 			}
 			if v.ConflictOverriddenFrom != "" {
-				return nil // 衝突の PR のための置き換えは、達成条件の未達ではないので発生に数えない
+				return nil // コンフリクトの PR のための置き換えは、達成条件の未達ではないので発生に数えない
 			}
 			return s.insertRunOccurrence(ctx, tx, runInt, OccurrenceKindVerificationNotMet, OccurrenceOutcomeBad, rec.at)
 		}

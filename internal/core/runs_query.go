@@ -39,7 +39,7 @@ type Run struct {
 	Error string
 	// TaskID は run が結び付くタスクの ID（"T-<n>"）。課題の単位の実行と過去の run は nil。
 	TaskID *string
-	// FixPendingRef は、この run が始めた契約の実行が持つ確かめ待ちの中身（衝突の解消の確かめを待っている中身の識別）。
+	// FixPendingRef は、この run が始めた契約の実行が持つ確かめ待ちの中身（コンフリクトの解消の確かめを待っている中身の識別）。
 	// 課題の詳細（show）だけが埋める。無ければ nil。始めた run が詳細の一覧（件数を限る）に無いときは、一覧にある、その契約の実行の
 	// 契約のコマンドの run のうち最も新しいものに載る（fillRunFixPending）。
 	FixPendingRef *string

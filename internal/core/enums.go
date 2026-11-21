@@ -337,7 +337,7 @@ const ActivityActionIntegrationRef = "integration_ref_set"
 // 検証した中身の識別を持つ。
 const ActivityActionTaskVerify = "task_verify"
 
-// ActivityActionConflictFixPassed は作業ログ（entity=task または entity=operation）の action。衝突の解消の確かめが「満たした」とした
+// ActivityActionConflictFixPassed は作業ログ（entity=task または entity=operation）の action。コンフリクトの解消の確かめが「満たした」とした
 // ときに残す。before は {"ref": 通す前の中身}、after は {"ref", "files", "run_id"}。
 const ActivityActionConflictFixPassed = "conflict_fix_passed"
 
@@ -410,7 +410,7 @@ const (
 	ExecutionResultWaitingDelegate  ExecutionResult = "waiting_delegate"
 	ExecutionResultWaitingOutside   ExecutionResult = "waiting_outside"
 	ExecutionResultDelegateEnded    ExecutionResult = "delegate_ended"
-	// ExecutionResultWaitingFixCheck は、衝突の解消の確かめの結果を待っている（承認は取り消さない）。waiting_delegate（委譲先の実行を待つ）とは別。
+	// ExecutionResultWaitingFixCheck は、コンフリクトの解消の確かめの結果を待っている（承認は取り消さない）。waiting_delegate（委譲先の実行を待つ）とは別。
 	ExecutionResultWaitingFixCheck ExecutionResult = "waiting_fix_check"
 )
 

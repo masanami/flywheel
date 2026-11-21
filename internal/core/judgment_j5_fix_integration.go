@@ -1,7 +1,7 @@
 package core
 
-// このファイルは、衝突の解消の確かめ（J5）の結果を、統合先宛て（着手中の課題の、検証中のタスクの実行）へ書く口を持つ
-// （docs/features/core-redesign.md §衝突の解消の確かめ）。書く直前の読み直し（j5FixStillCurrent）を通った後の、同じトランザクションの中で呼ばれる。
+// このファイルは、コンフリクトの解消の確かめ（J5）の結果を、統合先宛て（着手中の課題の、検証中のタスクの実行）へ書く口を持つ
+// （docs/features/core-redesign.md §コンフリクトの解消の確かめ）。書く直前の読み直し（j5FixStillCurrent）を通った後の、同じトランザクションの中で呼ばれる。
 //
 //   - 満たしたまま: 検証した中身（verified_ref）を確かめ待ちだった中身に改め、確かめ待ちの中身を消す。統合先宛てでは fix_verified_ref を使わない。
 //     作業ログに conflict_fix_passed を 1 件残す。次の状態の確認で、チェックが通っていれば、確かめを通した中身を付けた「入れてよい」が返る。
@@ -62,7 +62,7 @@ func clearIntegrationFixRefs(ctx context.Context, tx *sql.Tx, rowID int64) error
 	return err
 }
 
-// conflictFixFileNames は衝突を解消するために直したファイルの名前を、現れた順に重複なく返す（無ければ空のスライス。nil でない）。
+// conflictFixFileNames はコンフリクトを解消するために直したファイルの名前を、現れた順に重複なく返す（無ければ空のスライス。nil でない）。
 func conflictFixFileNames(fixes []ConflictFix) []string {
 	out := []string{}
 	seen := map[string]bool{}
@@ -77,7 +77,7 @@ func conflictFixFileNames(fixes []ConflictFix) []string {
 	return out
 }
 
-// defaultFixWriters は本番の Store が持つ、衝突の解消の確かめ（J5）の書き込みの口。ここだけで組み立てる（開く道が複数でも口がそろう）。
+// defaultFixWriters は本番の Store が持つ、コンフリクトの解消の確かめ（J5）の書き込みの口。ここだけで組み立てる（開く道が複数でも口がそろう）。
 // 反映先宛ての口は release_fix_check.go の writeReflectFix。
 func (s *Store) defaultFixWriters() j5FixWriters {
 	return j5FixWriters{Integration: s.writeIntegrationFix, Reflect: s.writeReflectFix}

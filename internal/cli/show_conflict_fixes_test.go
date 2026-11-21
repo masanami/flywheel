@@ -14,7 +14,7 @@ import (
 	"github.com/masanami/flywheel/internal/server"
 )
 
-// このファイルは docs/features/core-redesign.md の S3c の受入基準のうち、通した衝突の解消の表示（AC-110〜AC-128）を確かめる。
+// このファイルは docs/features/core-redesign.md の S3c の受入基準のうち、通したコンフリクトの解消の表示（AC-110〜AC-128）を確かめる。
 // 作業ログと contract_run の列は試験が直接用意する（J5 側の実装を待たない）。
 
 const fixAt = "2026-11-20T01:02:03.000Z"
@@ -44,7 +44,7 @@ func TestShow_NoPassedConflictFixes(t *testing.T) {
 	if arr, ok := doc["conflict_fixes"].([]any); !ok || len(arr) != 0 {
 		t.Errorf("conflict_fixes = %#v, want []", doc["conflict_fixes"])
 	}
-	if text := runText(t, ws, "show", id); strings.Contains(text, "衝突の解消") {
+	if text := runText(t, ws, "show", id); strings.Contains(text, "コンフリクトの解消") {
 		t.Errorf("text output has the conflict fix section without any record:\n%s", text)
 	}
 }
@@ -178,7 +178,7 @@ func TestChallengeDetailAPI_ConflictFixesAndFixPendingRefMatchShowJSON(t *testin
 	}
 }
 
-// AC-128: 通した衝突の解消がある課題があっても、status --json のキーの集合は変わらない。
+// AC-128: 通したコンフリクトの解消がある課題があっても、status --json のキーの集合は変わらない。
 func TestStatusJSON_KeysUnchangedByPassedConflictFixes(t *testing.T) {
 	t.Parallel()
 	ws, _ := approvedTasksWorkspace(t)

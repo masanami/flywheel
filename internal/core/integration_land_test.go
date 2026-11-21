@@ -440,7 +440,7 @@ func TestLandVerified_DeliveredRecordOfAnotherContentIsNotARefusal(t *testing.T)
 	}
 }
 
-// AC-124・AC-125・AC-144（AC-25・AC-26）: 中身の変更がある・判定できないときは、検証した中身と land_ref を消す（確かめ待ちの中身は NULL のまま）。衝突の解消ありは integration_land_fix_test.go。
+// AC-124・AC-125・AC-144（AC-25・AC-26）: 中身の変更がある・判定できないときは、検証した中身と land_ref を消す（確かめ待ちの中身は NULL のまま）。コンフリクトの解消ありは integration_land_fix_test.go。
 func TestLandVerified_OtherMovesClearVerifiedAndLandRef(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(f *igLandFixture){

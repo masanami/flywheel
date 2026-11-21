@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// 反映の段の、衝突の解消の確かめ（区切り S3c。AC-34〜AC-44・AC-47〜AC-81・AC-101）を、実ストア・偽の契約のコマンド・偽の上流で固定する。
+// 反映の段の、コンフリクトの解消の確かめ（区切り S3c。AC-34〜AC-44・AC-47〜AC-81・AC-101）を、実ストア・偽の契約のコマンド・偽の上流で固定する。
 // 足場は、統合先を使わない完了の課題の、レビュー待ちのタスクの実行に対応する承認済みの反映の操作（landFixture）。
 
 type fixCheckFixture struct {
@@ -22,7 +22,7 @@ func newFixCheckFixture(t *testing.T) *fixCheckFixture {
 	return f
 }
 
-// conflictFixMove は from から to へ、反映先（main）の最新の取り込みのマージで動き、衝突を解消するために直したファイルがある履歴を置く。
+// conflictFixMove は from から to へ、反映先（main）の最新の取り込みのマージで動き、コンフリクトを解消するために直したファイルがある履歴を置く。
 func (f *fixCheckFixture) conflictFixMove(from, to string) {
 	f.cmp.set(from, to, withFiles(ahead(commit("m-"+to, "main", "m0"), commit(to, "Merge", from, "m-"+to)), UpstreamFile{Filename: "a.go", Patch: "RESOLVED"}))
 	f.cmp.set("main", to, ahead(commit(from, "fix", "p0"), commit(to, "Merge", from, "m-"+to)))
@@ -116,7 +116,7 @@ func (f *fixCheckFixture) challengeStatus(t *testing.T) string {
 	return s
 }
 
-// AC-34〜AC-38・AC-41・AC-42: 衝突の解消あり → 確かめ待ちの中身はいまの中身になり、承認は取り消されず、課題は完了のまま、resume は呼ばれず、
+// AC-34〜AC-38・AC-41・AC-42: コンフリクトの解消あり → 確かめ待ちの中身はいまの中身になり、承認は取り消されず、課題は完了のまま、resume は呼ばれず、
 // 反映の試行の記録が 1 件増えて結果は waiting_fix_check。
 func TestReleaseFixCheck_ConflictFixRecordsPendingWithoutCancellingTheApproval(t *testing.T) {
 	t.Parallel()
@@ -224,7 +224,7 @@ func TestReleaseFixCheck_MergeInOnlyAfterVerifiedLandsAndKeepsVerified(t *testin
 	}
 }
 
-// AC-56: 通した中身からさらに動き、衝突の解消あり → 確かめ待ちの中身はいまの中身になる（通した中身は残る）。
+// AC-56: 通した中身からさらに動き、コンフリクトの解消あり → 確かめ待ちの中身はいまの中身になる（通した中身は残る）。
 func TestReleaseFixCheck_ConflictFixAfterVerifiedRecordsPendingAndKeepsVerified(t *testing.T) {
 	t.Parallel()
 	f := newFixCheckFixture(t)
@@ -257,7 +257,7 @@ func TestReleaseFixCheck_ContentChangeAfterVerifiedCancelsTheApprovalAndClearsTh
 	}
 }
 
-// AC-59: 確かめ待ちの中身がある間にさらに動き、承認した中身からの変わり方が衝突の解消あり → 確かめ待ちの中身はいまの中身になる。
+// AC-59: 確かめ待ちの中身がある間にさらに動き、承認した中身からの変わり方がコンフリクトの解消あり → 確かめ待ちの中身はいまの中身になる。
 func TestReleaseFixCheck_MovingAgainWhilePendingRewritesThePending(t *testing.T) {
 	t.Parallel()
 	f := newFixCheckFixture(t)
@@ -272,11 +272,11 @@ func TestReleaseFixCheck_MovingAgainWhilePendingRewritesThePending(t *testing.T)
 	}
 }
 
-// 見分けの結果が衝突の解消ありでない（起点と同じ・取り込みだけ）のに、確かめ待ちの中身が残っているときは、その試行の結果を書く書き込みで
+// 見分けの結果がコンフリクトの解消ありでない（起点と同じ・取り込みだけ）のに、確かめ待ちの中身が残っているときは、その試行の結果を書く書き込みで
 // 確かめ待ちの中身を消す（もう確かめる中身ではない。J5 が古い中身を確かめない）。通した中身は変えない。
 func TestReleaseFixCheck_StalePendingIsClearedWhenTheMoveIsNotAConflictFix(t *testing.T) {
 	t.Parallel()
-	// waiting は from から to への衝突の解消ありで、この操作の試行が確かめ待ちの中身 to を書いた状態にする。
+	// waiting は from から to へのコンフリクトの解消ありで、この操作の試行が確かめ待ちの中身 to を書いた状態にする。
 	waiting := func(t *testing.T, verified, from, to string) *fixCheckFixture {
 		t.Helper()
 		f := newFixCheckFixture(t)
@@ -528,7 +528,7 @@ func TestReleaseFixCheck_LandedWithTheVerifiedContentBeforeLandIsReturnedIsUnapp
 		f := newFixCheckFixture(t)
 		f.setRefs(t, "", "h1", "")
 		f.mergeInMove("h1", "h2")
-		// 承認した中身からは、衝突の解消を含む動き（取り込みだけとは言えない）。通した中身からだけが取り込みだけ。
+		// 承認した中身からは、コンフリクトの解消を含む動き（取り込みだけとは言えない）。通した中身からだけが取り込みだけ。
 		f.cmp.set(f.head, "h2", withFiles(ahead(commit("m-h2", "main", "m0"), commit("h2", "Merge", f.head, "m-h2")), UpstreamFile{Filename: "a.go", Patch: "RESOLVED"}))
 		f.cmp.set("m-h2", "h2", withFiles(ahead(commit(f.head, "fix", "p0")), UpstreamFile{Filename: "a.go", Patch: "RESOLVED"}))
 		f.fake.pr.State = "merged"
@@ -552,8 +552,8 @@ func TestReleaseFixCheck_LandedWithTheVerifiedContentBeforeLandIsReturnedIsUnapp
 	})
 }
 
-// 1 本のタスクの実行が反映先宛ての成果物を 2 つ取り込んでいる（対応する終わっていない反映の操作が 2 つ）とき、衝突の解消の確かめの道に入らない
-// （3 列は契約の実行ごとに 1 つで、どの操作の中身かを持たない）。衝突の解消ありで動いても、確かめ待ちの中身は書かず、その操作の承認だけを取り消す
+// 1 本のタスクの実行が反映先宛ての成果物を 2 つ取り込んでいる（対応する終わっていない反映の操作が 2 つ）とき、コンフリクトの解消の確かめの道に入らない
+// （3 列は契約の実行ごとに 1 つで、どの操作の中身かを持たない）。コンフリクトの解消ありで動いても、確かめ待ちの中身は書かず、その操作の承認だけを取り消す
 // （S3a のまま）。取り込んだ成果物が 1 つのときは、これまでどおり確かめ待ちになる。
 func TestReleaseFixCheck_TwoCorrespondingOperationsDoNotEnterTheFixCheck(t *testing.T) {
 	t.Parallel()

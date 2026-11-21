@@ -221,7 +221,7 @@ type ChallengeDetail struct {
 	IntegrationRef *string
 	// Followups は課題にぶら下がるフォローアップ（状態を問わず全部。ID の昇順）。無ければ空のスライス（nil でない）。
 	Followups []Followup
-	// ConflictFixes は通した衝突の解消（古い順。無ければ空のスライス。nil でない）。作業ログの conflict_fix_passed から読む。
+	// ConflictFixes は通したコンフリクトの解消（古い順。無ければ空のスライス。nil でない）。作業ログの conflict_fix_passed から読む。
 	ConflictFixes []ConflictFixPassed
 }
 

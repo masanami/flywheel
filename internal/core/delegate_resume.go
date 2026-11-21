@@ -532,7 +532,7 @@ func (h *launchHistory) effectiveImplBudget(planVersion int, d launchDecision, i
 }
 
 // decideRework は J5 の差し戻しに関する 2 つを返す。同じ計画の版の、最後の回答済みの保留より後の
-// J5 の not_met（衝突の PR のための core の置き換えを除く）の数が上限に達していれば limit（委譲を起動せず人間対応待ちにする。回数は保留への
+// J5 の not_met（コンフリクトの PR のための core の置き換えを除く）の数が上限に達していれば limit（委譲を起動せず人間対応待ちにする。回数は保留への
 // 回答の後の J5 から数え直す）。そうでなく、最後の J5 が not_met で、その後に委譲の run も回答済みの
 // 保留も無ければ、直前の委譲のセッションを J5 の指摘つきで再開する resume。
 func (h *launchHistory) decideRework(planVersion, reworkLimit int) (resume *resumePlan, limit *reworkLimitHit) {
@@ -558,7 +558,7 @@ func (h *launchHistory) decideRework(planVersion, reworkLimit int) (resume *resu
 	var last *runRow
 	for _, r := range verdicts {
 		if parsed[r.ID].Verdict != J5VerdictNotMet || parsed[r.ID].ConflictOverriddenFrom != "" {
-			continue // 衝突の PR のための core の置き換え（決定 2: 人には聞かない）は上限に数えない
+			continue // コンフリクトの PR のための core の置き換え（決定 2: 人には聞かない）は上限に数えない
 		}
 		if lastHold != nil && holdIsAfterRun(*lastHold, r) {
 			continue

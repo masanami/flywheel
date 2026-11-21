@@ -826,12 +826,12 @@ it("成果物の状態が空文字のとき、区切りと状態を出さない"
   expect(items[1]?.textContent).toBe("ブランチ ・ feat/y ・ open");
 });
 
-it("AC-129: 実行に確かめ待ちの中身（fix_pending_ref）があるタスクの詳細に、衝突の解消の確かめを待っている旨が出る", async () => {
+it("AC-129: 実行に確かめ待ちの中身（fix_pending_ref）があるタスクの詳細に、コンフリクトの解消の確かめを待っている旨が出る", async () => {
   const { root } = await open(
     show({ runs: [run("R-1", { fix_pending_ref: "abc123" })] }),
   );
   expect(within(root).getByTestId("task-fix-pending")).toHaveTextContent(
-    "衝突の解消の確かめを待っています",
+    "コンフリクトの解消の確かめを待っています",
   );
   // 区分の語は変えない
   expect(within(root).getByTestId("task-phase")).toHaveTextContent("実行中");

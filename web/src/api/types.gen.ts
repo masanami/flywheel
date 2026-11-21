@@ -963,7 +963,7 @@ export const EXECUTION_RESULT_WORDS = [
   "委譲先が進めている",
   "flywheel の外での反映を待っている",
   "委譲先の実行が、入れずに終わった",
-  "衝突の解消の確かめを待っている",
+  "コンフリクトの解消の確かめを待っている",
 ] as const;
 
 export const CONDITIONS_AFTER_RELEASE_HEADINGS = [

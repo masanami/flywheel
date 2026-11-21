@@ -1,11 +1,11 @@
 package core
 
-// このファイルは反映の段（release_exec.go）の、衝突の解消の確かめ（S3c）の道を持つ
-// （docs/features/core-redesign.md §反映の段・§衝突の解消の確かめ）。
+// このファイルは反映の段（release_exec.go）の、コンフリクトの解消の確かめ（S3c）の道を持つ
+// （docs/features/core-redesign.md §反映の段・§コンフリクトの解消の確かめ）。
 //
 //   - 見分け（classifyFixMove）: 見分けの起点（通した中身 fix_verified_ref があればそれ、無ければ承認した中身）からいまの中身への変わり方を、
-//     上流の比較の口で core が自分で読んで見分ける（委譲先の申告は使わない。取り込みのほかにコミットが 1 つでも足されていれば衝突の解消の道に入らない）。
-//   - 衝突の解消あり: 承認は取り消さず、いまの中身を確かめ待ちの中身（fix_pending_ref）に記録し、反映の試行の結果 waiting_fix_check を残す。
+//     上流の比較の口で core が自分で読んで見分ける（委譲先の申告は使わない。取り込みのほかにコミットが 1 つでも足されていればコンフリクトの解消の道に入らない）。
+//   - コンフリクトの解消あり: 承認は取り消さず、いまの中身を確かめ待ちの中身（fix_pending_ref）に記録し、反映の試行の結果 waiting_fix_check を残す。
 //     課題は完了のまま、commands.resume は呼ばない。確かめ（J5）は別の口が行う。
 //   - 確かめが通らなかった中身（fix_rejected_ref）と同じ中身なら、結果 head_changed の道（承認を取り消す）。
 //   - J5 の結果の書き込みの口（反映先宛て。writeReflectFix）。
@@ -23,7 +23,7 @@ type fixMoveOutcome int
 const (
 	// fixMoveProceed は、起点と同じ・取り込みだけ（S3a のまま。チェックを確かめて進む）。
 	fixMoveProceed fixMoveOutcome = iota
-	// fixMoveConflictFix は、衝突の解消あり。
+	// fixMoveConflictFix は、コンフリクトの解消あり。
 	fixMoveConflictFix
 	// fixMoveContentChanged は、関係のない変更あり・判定できない（S3a のまま。承認を取り消す）。
 	fixMoveContentChanged
@@ -65,7 +65,7 @@ func (s *Store) classifyFixMove(ctx context.Context, opts ReleaseExecOptions, ru
 }
 
 // applyReleaseFixWrites は結果を書く書き込み（finishReleaseAttempt）の中で、確かめ待ちの中身の記録（すでにあれば、いまの中身に改める）・
-// 衝突の解消ありでなくなったときの確かめ待ちの中身の消去・通らなかった中身の消去を行う。
+// コンフリクトの解消ありでなくなったときの確かめ待ちの中身の消去・通らなかった中身の消去を行う。
 func applyReleaseFixWrites(ctx context.Context, tx *sql.Tx, j releaseJudgment, written ExecutionResult) error {
 	if j.run == nil || !j.run.fixEligible {
 		return nil
@@ -77,7 +77,7 @@ func applyReleaseFixWrites(ctx context.Context, tx *sql.Tx, j releaseJudgment, w
 		}
 	}
 	if j.clearFixPending {
-		// 見分けの結果が衝突の解消ありでない（起点と同じ・取り込みだけ）のに残っている確かめ待ちの中身は、もう確かめる中身ではないので消す。
+		// 見分けの結果がコンフリクトの解消ありでない（起点と同じ・取り込みだけ）のに残っている確かめ待ちの中身は、もう確かめる中身ではないので消す。
 		// 消すのは判定のときに読んだ値のままのときだけ。判定の間に J5 がその中身を通した中身に書いていたら、判定のときの通した中身へ戻す
 		// （この判定は、その起点で見分けた）。
 		stale, verified := j.run.row.FixPendingRef, j.run.row.FixVerifiedRef
@@ -134,7 +134,7 @@ func (s *Store) writeReflectFix(ctx context.Context, tx *sql.Tx, rec *activityRe
 // （land_delivered）は見ない。resume が失敗と返したが届いていた・届いた記録を書く前に止まった場合も、委譲先がその中身で入れたなら、flywheel が許した中身である
 // （承認した中身で入れたときと同じ扱いにそろえる）。
 // 委譲先が取り込み後の中身をマージのコミットで入れると、その中身は反映先の祖先になり、比較の口は取り込みだけと言えなくなるため、
-// 比べる相手は land_ref にする。land_ref は 1 本の実行に 1 つで、どの操作のために返したかを持たないので、衝突の解消の確かめの道に入ってよい実行
+// 比べる相手は land_ref にする。land_ref は 1 本の実行に 1 つで、どの操作のために返したかを持たないので、コンフリクトの解消の確かめの道に入ってよい実行
 // （fixEligible。反映の依頼か、対応する操作がちょうど 1 つのタスクの実行）に限る。
 // 通した中身（fix_verified_ref）は比べる相手にしない。判断点の確かめだけで通したもので、オーナーが承認した中身でも、そこから取り込みだけで動いた中身でも、
 // flywheel が「入れてよい」を返すと決めた中身でもないため、返す前に入っていれば、通した中身（やそこから取り込みだけで動いた中身）でも merged_unapproved になる。
