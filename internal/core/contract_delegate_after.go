@@ -50,7 +50,7 @@ func contractWaitDestination(ra *ContractRequestedAction, artifacts []ContractAr
 func contractWaitingQuestion(runID, summary string, ra *ContractRequestedAction, carriesAnswer bool) string {
 	what := "回答"
 	switch ra.Kind {
-	case "approve":
+	case contractRequestedKindApprove:
 		what = "承認"
 	case contractRequestedKindReview:
 		what = "レビュー"

@@ -66,3 +66,18 @@ func OperationKindValues() []OperationKind {
 func OperationStateValues() []OperationState {
 	return append([]OperationState(nil), operationStateValues...)
 }
+
+// ContractRequestedKindValues は、委譲先が求めること（requested_action.kind）の閉集合の写しを返す。
+func ContractRequestedKindValues() []string {
+	return append([]string(nil), contractRequestedKindValues...)
+}
+
+// ConflictFixTargetValues は、通した衝突の解消の宛先（ConflictFixPassed.Target）の閉集合の写しを返す。
+func ConflictFixTargetValues() []string {
+	return append([]string(nil), conflictFixTargetValues...)
+}
+
+// ExpectedKindValues は ExpectedKind（予想の例の種別）の閉集合の写しを返す。
+func ExpectedKindValues() []ExpectedKind {
+	return append([]ExpectedKind(nil), expectedKindValues...)
+}

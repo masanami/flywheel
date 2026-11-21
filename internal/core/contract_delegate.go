@@ -153,9 +153,7 @@ func validateContractStatus(st *ContractStatus, wantRunID string) string {
 		return fmt.Sprintf("unknown state %q", st.State)
 	}
 	if ra := st.RequestedAction; ra != nil {
-		switch ra.Kind {
-		case "answer", "approve", "observe", "review":
-		default:
+		if !validContractRequestedKind(ra.Kind) {
 			return fmt.Sprintf("unknown requested_action.kind %q", ra.Kind)
 		}
 		switch ra.Decider {

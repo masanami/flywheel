@@ -4,6 +4,7 @@ import type {
   StagePair,
   Stages,
 } from "../api/types.gen.ts";
+import { EXPECTED_KIND_LABELS, label } from "../labels.ts";
 import { ClampedText } from "./ClampedText.tsx";
 import { ACTUAL_MISSING_MARK, EXPECTED_MISSING_MARK } from "./stage-marks.ts";
 
@@ -53,7 +54,7 @@ export function IssuesAnswerView({ answer }: { answer: string }) {
 function ExpectedBody({ e }: { e: StageExpected }) {
   return (
     <>
-      予想（{e.kind}・{e.scene}）:
+      予想（{label(EXPECTED_KIND_LABELS, e.kind)}・{e.scene}）:
       <div data-field="before">
         変更前: <ClampedText text={e.before} />
       </div>

@@ -261,7 +261,7 @@ func j2OutputSchema() []byte {
 		"items": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"kind":   map[string]any{"type": "string", "enum": []string{string(ExpectedKindUI), string(ExpectedKindCLI), string(ExpectedKindBehavior)}},
+				"kind":   map[string]any{"type": "string", "enum": expectedKindStrings()},
 				"scene":  map[string]any{"type": "string"},
 				"before": map[string]any{"type": "string"},
 				"after":  map[string]any{"type": "string"},
