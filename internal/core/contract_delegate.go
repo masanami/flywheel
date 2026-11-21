@@ -298,6 +298,8 @@ type contractRunRow struct {
 	StartRunID int64
 	// VerifiedRef は、タスクの検証（J5）が「満たした」とした中身（統合先を使う課題のタスクの実行。無ければ空）。
 	VerifiedRef string
+	// FixPendingRef・FixVerifiedRef・FixRejectedRef は、衝突の解消の確かめ（S3c）の列（無ければ空）。意味と使い方は contract_fix_refs.go。
+	FixPendingRef, FixVerifiedRef, FixRejectedRef string
 	// holdSuccessEnd は DB の列ではない。真なら、succeeded を読んでも ended_at を入れない（統合先へ入ったかを上流で確かめるまで開けておく）。
 	holdSuccessEnd bool
 	// discard は DB の列ではない。真なら、この実行はもう要らないので取り消すだけで、成果物を取り込まず課題も保留にしない。
@@ -320,7 +322,8 @@ const (
 
 const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
 	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, ''), task_id,
-	kind, operation_id, COALESCE(land_ref, ''), land_delivered, start_run_id, COALESCE(verified_ref, '') FROM contract_run`
+	kind, operation_id, COALESCE(land_ref, ''), land_delivered, start_run_id, COALESCE(verified_ref, ''),
+	COALESCE(fix_pending_ref, ''), COALESCE(fix_verified_ref, ''), COALESCE(fix_rejected_ref, '') FROM contract_run`
 
 func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, error) {
 	var r contractRunRow
@@ -328,7 +331,7 @@ func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, erro
 	var taskID, opID sql.NullInt64
 	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget,
 		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.RequestedResolvableBy, &r.WorkDir, &taskID,
-		&r.Kind, &opID, &r.LandRef, &r.LandDelivered, &r.StartRunID, &r.VerifiedRef); err != nil {
+		&r.Kind, &opID, &r.LandRef, &r.LandDelivered, &r.StartRunID, &r.VerifiedRef, &r.FixPendingRef, &r.FixVerifiedRef, &r.FixRejectedRef); err != nil {
 		return nil, err
 	}
 	if opID.Valid {
