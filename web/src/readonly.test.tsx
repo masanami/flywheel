@@ -96,10 +96,6 @@ function destinations(agents: string[], challengeId?: string): Destination[] {
   return out;
 }
 
-// 全画面を順に描く試験（operate を使うもの）の時間切れ。単独では約 0.4 秒だが、全試験を並列に流す負荷では
-// 既定の 5 秒を超えて 1 回落ちたことがある（原因が負荷だけかは確かめていない）。この試験だけ明示して長くする。
-const OPERATE_TIMEOUT_MS = 30_000;
-
 // いまある行き先を全部たどり、行き先ごとに check を呼ぶ（課題の詳細の中身は detail.test.tsx の T12 が検査する）。
 async function operate(
   dests: Destination[],
@@ -293,155 +289,137 @@ function awaitingApproval(): Record<string, unknown> {
   };
 }
 
-it(
-  "AC-221: 全画面を操作しても fetch は GET と POST …/approve・POST …/cycle だけ、EventSource は events の購読だけ",
-  async () => {
-    document.head.innerHTML = '<meta name="flywheel-csrf" content="tok">';
-    const mermaid: MermaidLike = {
-      initialize: vi.fn(),
-      render: vi.fn(async () => ({ svg: "<svg></svg>" })),
-    };
-    setMermaidLoader(vi.fn(async () => mermaid));
-    const { requests } = installFakes({
-      ...fixtures(),
-      ...awaitingApproval(),
-      "POST /api/v1/workspaces/alpha/cycle": { started: true },
-      "POST /api/v1/workspaces/beta/cycle": { started: true },
-    });
-    // 行き先を全部たどり、「サイクルを回す」のボタンがある行き先（いま進められること・サイクル）では押す。
-    await operate(destinations(["alpha", "beta"], "C-1"), () => {
-      for (const b of screen.queryAllByRole("button", {
-        name: "サイクルを回す",
-      })) {
-        fireEvent.click(b);
-      }
-    });
-    const m = await screen.findByTestId("challenge-detail");
-    // 「計画の本文」の切り替えで段階の欄・図が出る
-    fireEvent.click(within(m).getByRole("link", { name: "計画の本文" }));
-    await within(m).findByTestId("stages-detail");
-    await within(m).findByTestId("figure-svg");
-    // 計画の承認は、計画の承認の画面のボタンで行う
-    window.location.hash = "#/a/alpha/challenges/C-1/approve-plan";
-    fireEvent.click(
-      await screen.findByRole("button", { name: "この計画を承認する" }),
-    );
-    await screen.findByText("承認しました。", {}, { timeout: 2000 });
-    act(() =>
-      FakeEventSource.latest.send({
-        type: "workspace_changed",
-        workspace: "alpha",
-      }),
-    );
-    await waitFor(() => expect(requests.length).toBeGreaterThan(5));
-    const posts = () => requests.filter((r) => r.method === "POST");
-    // 承認が 1 回と、サイクルを回すのが 2 つのエージェント × 2 つの画面（いま進められること・サイクル）。
-    await waitFor(() => expect(posts()).toHaveLength(5));
-    // 承認の操作で記録した要求に POST …/approve が実際に現れる
-    expect(
-      posts().filter(
-        (r) => r.url === "/api/v1/workspaces/alpha/challenges/C-1/approve",
-      ),
-    ).toHaveLength(1);
-    expect(
-      posts()
-        .filter((r) => /\/cycle$/.test(r.url))
-        .map((r) => r.url),
-    ).toEqual([
-      "/api/v1/workspaces/alpha/cycle",
-      "/api/v1/workspaces/alpha/cycle",
-      "/api/v1/workspaces/beta/cycle",
-      "/api/v1/workspaces/beta/cycle",
-    ]);
-    const allowed = [
-      /^\/api\/v1\/workspaces\/[^/]+\/challenges\/[^/]+\/approve$/,
-      /^\/api\/v1\/workspaces\/[^/]+\/cycle$/,
-    ];
-    for (const r of requests) {
-      if (r.method === "GET") continue;
-      expect(r.method).toBe("POST");
-      expect(
-        allowed.some((re) => re.test(r.url)),
-        r.url,
-      ).toBe(true);
-      // AC-222: POST はすべて CSRF の値を要求ヘッダに持つ
-      expect(r.headers["X-Flywheel-CSRF"]).toBe("tok");
+it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POST …/cycle だけ、EventSource は events の購読だけ", async () => {
+  document.head.innerHTML = '<meta name="flywheel-csrf" content="tok">';
+  const mermaid: MermaidLike = {
+    initialize: vi.fn(),
+    render: vi.fn(async () => ({ svg: "<svg></svg>" })),
+  };
+  setMermaidLoader(vi.fn(async () => mermaid));
+  const { requests } = installFakes({
+    ...fixtures(),
+    ...awaitingApproval(),
+    "POST /api/v1/workspaces/alpha/cycle": { started: true },
+    "POST /api/v1/workspaces/beta/cycle": { started: true },
+  });
+  // 行き先を全部たどり、「サイクルを回す」のボタンがある行き先（いま進められること・サイクル）では押す。
+  await operate(destinations(["alpha", "beta"], "C-1"), () => {
+    for (const b of screen.queryAllByRole("button", {
+      name: "サイクルを回す",
+    })) {
+      fireEvent.click(b);
     }
+  });
+  const m = await screen.findByTestId("challenge-detail");
+  // 「計画の本文」の切り替えで段階の欄・図が出る
+  fireEvent.click(within(m).getByRole("link", { name: "計画の本文" }));
+  await within(m).findByTestId("stages-detail");
+  await within(m).findByTestId("figure-svg");
+  // 計画の承認は、計画の承認の画面のボタンで行う
+  window.location.hash = "#/a/alpha/challenges/C-1/approve-plan";
+  fireEvent.click(
+    await screen.findByRole("button", { name: "この計画を承認する" }),
+  );
+  await screen.findByText("承認しました。", {}, { timeout: 2000 });
+  act(() =>
+    FakeEventSource.latest.send({
+      type: "workspace_changed",
+      workspace: "alpha",
+    }),
+  );
+  await waitFor(() => expect(requests.length).toBeGreaterThan(5));
+  const posts = () => requests.filter((r) => r.method === "POST");
+  // 承認が 1 回と、サイクルを回すのが 2 つのエージェント × 2 つの画面（いま進められること・サイクル）。
+  await waitFor(() => expect(posts()).toHaveLength(5));
+  // 承認の操作で記録した要求に POST …/approve が実際に現れる
+  expect(
+    posts().filter(
+      (r) => r.url === "/api/v1/workspaces/alpha/challenges/C-1/approve",
+    ),
+  ).toHaveLength(1);
+  expect(
+    posts()
+      .filter((r) => /\/cycle$/.test(r.url))
+      .map((r) => r.url),
+  ).toEqual([
+    "/api/v1/workspaces/alpha/cycle",
+    "/api/v1/workspaces/alpha/cycle",
+    "/api/v1/workspaces/beta/cycle",
+    "/api/v1/workspaces/beta/cycle",
+  ]);
+  const allowed = [
+    /^\/api\/v1\/workspaces\/[^/]+\/challenges\/[^/]+\/approve$/,
+    /^\/api\/v1\/workspaces\/[^/]+\/cycle$/,
+  ];
+  for (const r of requests) {
+    if (r.method === "GET") continue;
+    expect(r.method).toBe("POST");
     expect(
-      FakeEventSource.instances.every((e) => e.url === "/api/v1/events"),
+      allowed.some((re) => re.test(r.url)),
+      r.url,
     ).toBe(true);
-    document.head.innerHTML = "";
-  },
-  OPERATE_TIMEOUT_MS,
-);
+    // AC-222: POST はすべて CSRF の値を要求ヘッダに持つ
+    expect(r.headers["X-Flywheel-CSRF"]).toBe("tok");
+  }
+  expect(
+    FakeEventSource.instances.every((e) => e.url === "/api/v1/events"),
+  ).toBe(true);
+  document.head.innerHTML = "";
+});
 
-it(
-  "AC-124: 描画した画面の DOM に form 要素が無い",
-  async () => {
-    installFakes({ ...fixtures(), ...awaitingApproval() });
-    const dests = destinations(["alpha", "beta"], "C-1");
-    const seen: string[] = [];
-    await operate(dests, (container, id) => {
-      seen.push(id);
-      expect(container.querySelector("form"), id).toBeNull();
-    });
-    expect(seen).toEqual(dests.map((d) => d.id));
-    expect(within(document.body).queryAllByRole("form")).toHaveLength(0);
-  },
-  OPERATE_TIMEOUT_MS,
-);
+it("AC-124: 描画した画面の DOM に form 要素が無い", async () => {
+  installFakes({ ...fixtures(), ...awaitingApproval() });
+  const dests = destinations(["alpha", "beta"], "C-1");
+  const seen: string[] = [];
+  await operate(dests, (container, id) => {
+    seen.push(id);
+    expect(container.querySelector("form"), id).toBeNull();
+  });
+  expect(seen).toEqual(dests.map((d) => d.id));
+  expect(within(document.body).queryAllByRole("form")).toHaveLength(0);
+});
 
 // AC-118 #814: どの画面にも、文字を入力する欄は無い（input・textarea・select・編集できる要素）。
 // input は種類を問わず 0 件（チェックの入力も含む。足すときはこの規則を決め直す）。
-it(
-  "AC-118 #814: 描画したどの画面にも、文字を入力する欄は無い",
-  async () => {
-    installFakes({ ...fixtures(), ...awaitingApproval() });
-    const dests = destinations(["alpha", "beta"], "C-1");
-    const seen: string[] = [];
-    await operate(dests, (container, id) => {
-      seen.push(id);
-      expect(
-        container.querySelectorAll("input, textarea, select"),
-        id,
-      ).toHaveLength(0);
-      expect(container.querySelectorAll("[contenteditable]"), id).toHaveLength(
-        0,
-      );
-      expect(within(container).queryAllByRole("textbox"), id).toHaveLength(0);
-      expect(within(container).queryAllByRole("searchbox"), id).toHaveLength(0);
-      expect(within(container).queryAllByRole("combobox"), id).toHaveLength(0);
-    });
-    expect(seen).toEqual(dests.map((d) => d.id));
-  },
-  OPERATE_TIMEOUT_MS,
-);
+it("AC-118 #814: 描画したどの画面にも、文字を入力する欄は無い", async () => {
+  installFakes({ ...fixtures(), ...awaitingApproval() });
+  const dests = destinations(["alpha", "beta"], "C-1");
+  const seen: string[] = [];
+  await operate(dests, (container, id) => {
+    seen.push(id);
+    expect(
+      container.querySelectorAll("input, textarea, select"),
+      id,
+    ).toHaveLength(0);
+    expect(container.querySelectorAll("[contenteditable]"), id).toHaveLength(0);
+    expect(within(container).queryAllByRole("textbox"), id).toHaveLength(0);
+    expect(within(container).queryAllByRole("searchbox"), id).toHaveLength(0);
+    expect(within(container).queryAllByRole("combobox"), id).toHaveLength(0);
+  });
+  expect(seen).toEqual(dests.map((d) => d.id));
+});
 
 // AC-459 #814: 新しい画面の枠組みの文言（見出し・ボタン・ナビゲーション・案内）に、開発に固有の語が無い。
 // 課題の題名や本文のような、エージェントが書いた値は枠組みではないので対象にしない。
 const DEV_WORDS = /(\bPR\b|\bCI\b|\bIssue\b|ブランチ|マージ)/;
-it(
-  "AC-459 #814: 描画した画面の枠組み（見出し・ボタン・ナビゲーション・案内）に、PR・CI・ブランチ・マージ・Issue の語が無い",
-  async () => {
-    installFakes({ ...fixtures(), ...awaitingApproval() });
-    const dests = destinations(["alpha", "beta"], "C-1");
-    const seen: string[] = [];
-    await operate(dests, (container, id) => {
-      seen.push(id);
-      const frame = [
-        ...container.querySelectorAll(
-          "nav, header, button, h1, h2, h3, h4, [role=note], [role=status]",
-        ),
-      ]
-        .map((e) => e.textContent ?? "")
-        .join("\n");
-      expect(frame.trim(), id).not.toBe("");
-      expect(frame, id).not.toMatch(DEV_WORDS);
-    });
-    expect(seen).toEqual(dests.map((d) => d.id));
-  },
-  OPERATE_TIMEOUT_MS,
-);
+it("AC-459 #814: 描画した画面の枠組み（見出し・ボタン・ナビゲーション・案内）に、PR・CI・ブランチ・マージ・Issue の語が無い", async () => {
+  installFakes({ ...fixtures(), ...awaitingApproval() });
+  const dests = destinations(["alpha", "beta"], "C-1");
+  const seen: string[] = [];
+  await operate(dests, (container, id) => {
+    seen.push(id);
+    const frame = [
+      ...container.querySelectorAll(
+        "nav, header, button, h1, h2, h3, h4, [role=note], [role=status]",
+      ),
+    ]
+      .map((e) => e.textContent ?? "")
+      .join("\n");
+    expect(frame.trim(), id).not.toBe("");
+    expect(frame, id).not.toMatch(DEV_WORDS);
+  });
+  expect(seen).toEqual(dests.map((d) => d.id));
+});
 
 it("AC-459 #814: 画面の語の表（labels.ts の文言）に、開発に固有の語が無い", async () => {
   const labels = await import("./labels.ts");
