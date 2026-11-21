@@ -83,7 +83,7 @@ func TestContractWaitingQuestion_TerminalLeadsWithTextAndDoesNotPromiseResume(t 
 	}
 }
 
-// 保留の問いは画面にそのまま出るので、画面の文では「端末」と書かず「ターミナル」と書く（仕様 core-redesign-s3d の語の見直し）。
+// 保留の問いは画面にそのまま出るので、画面の文では「端末」と書かず「ターミナル」と書く（docs/features/core-redesign.md「S3d で入れた要件（出荷済み）」の「画面の語の見直し」）。
 func TestContractWaitingQuestion_TerminalSaysTerminalNotTanmatsu(t *testing.T) {
 	for _, rb := range []string{"terminal", "other"} {
 		q := contractWaitingQuestion("ext-1", "要約", &ContractRequestedAction{Kind: "approve", Decider: "human", Text: "T", ResolvableBy: rb}, true)

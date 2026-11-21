@@ -197,7 +197,7 @@ type ChallengeDetail struct {
 	// SourceChildren は課題の取り込み元の子（記録した順。無ければ空のスライス）。
 	SourceChildren []SourceChild
 	// Runs は課題の run の一覧（新しい順・最大 100 件。上限は S3d で 20 から上げた。
-	// docs/features/core-redesign-s3d.md「タスクの詳細」）。
+	// docs/features/core-redesign.md「S3d で入れた要件（出荷済み）」の「タスクの詳細」）。
 	// 無ければ空スライス（nil でない）。
 	Runs []Run
 	// IssuesAnswer は IssuesHoldID の保留の回答。論点が無い・未回答なら nil。

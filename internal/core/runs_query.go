@@ -58,7 +58,7 @@ type RunListOptions struct {
 }
 
 // showRunsLimit は `show` の runs の最大件数（S3d で 20 から 100 に上げた。
-// docs/features/core-redesign-s3d.md「タスクの詳細」）。
+// docs/features/core-redesign.md「S3d で入れた要件（出荷済み）」の「タスクの詳細」）。
 const showRunsLimit = 100
 
 // ListRuns は run を新しい順（id 降順）で返す（§観測「flywheel runs」）。
