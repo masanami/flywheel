@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>場面の一覧（S3d の試作）</title>
+<link rel="stylesheet" href="proto.css">
+<style>.chg{outline:2px dashed #c77700;outline-offset:3px}.chgnote{background:#fff4dd;border-left:4px solid #c77700;padding:6px 10px;margin:8px 0;font-size:13px}.kv td{padding:3px 10px 3px 0;vertical-align:top}.old{color:#888;text-decoration:line-through}</style>
+</head>
+<body class="chat-off">
+<div class="proto-note">区切り S3d の試作です。データは見本で、ボタンは画面の行き来だけをします。<b>橙の点線の枠</b>が、いまの画面から変わる所です。<a href="s3d-index.html">場面の一覧へ</a></div>
+<div class="shell">
+<nav class="rail"><a class="agent on" href="s3d-now.html" title="Tom">T<span class="badge">1</span><small>Tom</small></a></nav>
+<div class="shell-main">
+<div class="top"><span class="ws">Tom</span><nav><a href="s3d-now.html" class="">いま進められること</a><a href="s3d-issues.html" class="">課題</a><a href="#" class="">フォローアップ</a><a href="#" class="">サイクル</a></nav><span class="cycle"><span class="dot idle"></span>サイクル: 止まっている</span></div>
+<div class="layout"><main>
+
+<h1>区切り S3d の試作（画面の変更点）</h1>
+<p>いまの画面（区切り S2c）から変わる所だけを作っています。対話の欄・スーパーバイザーの表示は区切り S4 なので、ここにはありません。</p>
+<table><tr><th>場面</th><th>いまの画面から変わること</th></tr>
+<tr><td><a href="s3d-now.html">1. いま進められること</a></td><td>完了の承認待ちの行が、課題の詳細ではなく、完了承認画面へ行く</td></tr>
+<tr><td><a href="s3d-completion.html">2. 完了承認画面</a>（新しい画面）</td><td>確かめの結果・反映するもの・タスク・フォローアップを 1 画面で見て、承認する</td></tr>
+<tr><td><a href="s3d-completion-approved.html">3. 完了承認画面（承認した後）</a></td><td>承認を記録した旨と、反映先へ入れる承認の案内</td></tr>
+<tr><td><a href="s3d-issues.html">4. 課題（タスクのツリー）</a></td><td>札の語が名詞の形になる。実行中の箱と、課題の見出しに、細かい進みの語が付く</td></tr>
+<tr><td><a href="s3d-task-running.html">5. タスクの詳細（委譲先が進めている）</a></td><td>委譲先の実行・成果物・値で返したこと・検証・費用の区画が増える</td></tr>
+<tr><td><a href="s3d-task-landing.html">6. タスクの詳細（検証を通って、統合先へ入れている）</a></td><td>同上（検証の結果と、統合先へ入れる進み）</td></tr>
+<tr><td><a href="s3d-detail.html">7. 課題の詳細</a></td><td>完了の承認の区画がリンクになる／経緯が 1 行／前提の語（未解消）／不可逆操作の語／通した衝突の解消</td></tr>
+<tr><td><a href="s3d-plan-reject.html">8. 計画の承認の画面の、差し戻しの案内</a></td><td>コマンドの例を外し、対話で伝える方法だけにする</td></tr>
+</table>
+
+</main></div></div></div>
+</body></html>

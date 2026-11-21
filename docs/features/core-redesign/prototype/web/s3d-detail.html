@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>課題の詳細（S3d の試作）</title>
+<link rel="stylesheet" href="proto.css">
+<style>.chg{outline:2px dashed #c77700;outline-offset:3px}.chgnote{background:#fff4dd;border-left:4px solid #c77700;padding:6px 10px;margin:8px 0;font-size:13px}.kv td{padding:3px 10px 3px 0;vertical-align:top}.old{color:#888;text-decoration:line-through}</style>
+</head>
+<body class="chat-off">
+<div class="proto-note">区切り S3d の試作です。データは見本で、ボタンは画面の行き来だけをします。<b>橙の点線の枠</b>が、いまの画面から変わる所です。<a href="s3d-index.html">場面の一覧へ</a></div>
+<div class="shell">
+<nav class="rail"><a class="agent on" href="s3d-now.html" title="Tom">T<span class="badge">1</span><small>Tom</small></a></nav>
+<div class="shell-main">
+<div class="top"><span class="ws">Tom</span><nav><a href="s3d-now.html" class="">いま進められること</a><a href="s3d-issues.html" class="on">課題</a><a href="#" class="">フォローアップ</a><a href="#" class="">サイクル</a></nav><span class="cycle"><span class="dot idle"></span>サイクル: 止まっている</span></div>
+<div class="layout"><main>
+
+<div class="crumb"><a href="s3d-issues.html">課題</a> ›</div>
+<h1>差し戻しの後も、同じ成果物で作業を続けられるようにする</h1>
+<div class="meta"><span>状態 <b>完了の承認待ち</b></span><span>タスク <b>3 / 3</b></span><span>統合先 <b>使う</b></span><span>費用 <b>15.5 / 24 USD</b></span></div>
+<div class="box wait chg"><h3>あなたを待っているもの</h3>完了の承認を待っています。 <a class="btn sm primary" href="s3d-completion.html">完了承認画面を開く</a>
+<div class="chgnote">変わる所: いまは、ここに要約と承認のボタンがあります。S3d では、完了承認画面へのリンクだけになります。</div></div>
+<h2>タスクのツリー</h2><div class="tree"><div style="position:relative;width:722px;height:78px"><svg class="edges" width="722" height="78"><path d="M202,39 C234,39 234,39 266,39" /><path d="M456,39 C488,39 488,39 520,39" /></svg><a class="task done" href="#" style="position:absolute;left:12px;top:12px;width:190px;height:54px">① 仕様と設計<small>済み</small></a><a class="task done" href="#" style="position:absolute;left:266px;top:12px;width:190px;height:54px">② 入力を受ける<small>済み</small></a><a class="task done" href="#" style="position:absolute;left:520px;top:12px;width:190px;height:54px">③ 結合の確かめ<small>済み</small></a></div></div>
+<div class="cols"><div>
+<div class="box chg"><h3>通した衝突の解消（1 件）</h3><table><tr><th>いつ</th><th>宛先</th><th>直したファイル</th></tr><tr><td>11/20 14:12</td><td>統合先（② 入力を受ける）</td><td><code>runtime/internal/cli/ticket.go</code></td></tr></table><div class="hint">区切り S3c の値。無ければ、この区画は出ません。</div></div>
+<div class="box"><h3>関係する課題</h3><table><tr><th>前提の課題</th><th>状態</th><th></th></tr>
+<tr><td>反映の依頼の口を足す</td><td>完了</td><td class="chg"><span class="old">未完了</span> 未解消</td></tr></table>
+<div class="chgnote">変わる所: 前提の課題が「完了」でも、反映がまだのときは、前提は満たされていません。いまは「完了」と「未完了」が同じ行に並びます。語を「未解消」に改めます。</div></div>
+<div class="box"><h3>不可逆操作</h3><table><tr><th>操作</th><th>種類 / 状態</th></tr>
+<tr><td>統合先の全体を、反映先へ上げる</td><td class="chg"><span class="old">release / pending</span> 反映 / 承認待ち</td></tr>
+<tr><td>（前の版の操作）</td><td class="chg"><span class="old">release / closed</span> 反映 / 終了</td></tr></table></div>
+</div><div>
+<div class="box"><h3>経緯</h3><table><tr><th>いつ</th><th>何が起きたか</th></tr>
+<tr><td>11/20 09:10</td><td>計画を承認した（あなた・対話）</td></tr>
+<tr><td>11/20 14:12</td><td>タスクを検証した（② 入力を受ける）</td></tr>
+<tr class="chg"><td>11/19 18:20</td><td>不可逆操作を承認した（反映）<div class="hint"><span class="old">不可逆操作を承認した</span> ← いまは、同じ出来事が 2 行並びます。1 行にまとめ、操作の種類を添えます。</div></td></tr></table></div>
+</div></div>
+
+</main></div></div></div>
+</body></html>
