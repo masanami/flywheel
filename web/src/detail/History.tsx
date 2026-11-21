@@ -47,11 +47,21 @@ const CHALLENGE_KINDS: Record<string, Kind> = {
   verify_uncertain: "verify",
 };
 
+// 不可逆操作の側の承認・差し戻しの記録（対になる課題の側の行が無い経路で、経緯に残る）。
+const OPERATION_KINDS: Record<string, Kind> = {
+  approve: "plan",
+  reject: "plan",
+};
+
 function kindOf(a: Activity): Kind {
+  const table =
+    a.entity === "challenge"
+      ? CHALLENGE_KINDS
+      : a.entity === "operation"
+        ? OPERATION_KINDS
+        : null;
   return (
-    (a.entity === "challenge" && Object.hasOwn(CHALLENGE_KINDS, a.action)
-      ? CHALLENGE_KINDS[a.action]
-      : null) ?? null
+    (table && Object.hasOwn(table, a.action) ? table[a.action] : null) ?? null
   );
 }
 

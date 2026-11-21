@@ -20,6 +20,7 @@ import {
   RUN_KIND_LABELS,
   RUN_RESULT_LABELS,
   RUN_RUNNING_LABEL,
+  TASK_SPENT_LABEL,
   UPSTREAM_STATE_LABELS,
   VERDICT_LABELS,
   label,
@@ -209,7 +210,8 @@ function TaskView({
         <div data-testid="task-budget">
           <dt>枠</dt>
           <dd>
-            実装{" "}
+            {TASK_SPENT_LABEL}{" "}
+            <b data-testid="task-spent">{usd(task.spent_usd)}</b> USD ／ 実装{" "}
             <b data-testid="task-budget-impl">{usd(task.budget_impl_usd)}</b>{" "}
             USD ・ レビュー対応{" "}
             <b data-testid="task-budget-review">
@@ -363,8 +365,12 @@ function ArtifactsSection({ artifacts }: { artifacts: Task["artifacts"] }) {
               ) : (
                 <span data-testid="artifact-ref">{a.ref}</span>
               )}
-              {" ・ "}
-              <span data-testid="artifact-state">{a.state}</span>
+              {a.state === "" ? null : (
+                <>
+                  {" ・ "}
+                  <span data-testid="artifact-state">{a.state}</span>
+                </>
+              )}
               {a.role === "integration" ? (
                 <>
                   {" ・ "}

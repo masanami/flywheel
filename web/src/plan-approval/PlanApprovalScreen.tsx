@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.ts";
-import { ApiError } from "../api/error.ts";
+import { ApiError, isNotAwaitingError } from "../api/error.ts";
 import type {
   ApprovalSummary,
   PlanQuestion,
@@ -142,10 +142,7 @@ function Body({
   if (result.state === "loading") return <p>{LOADING_TEXT}</p>;
   if (result.state === "error") {
     const e = result.error;
-    if (
-      e instanceof ApiError &&
-      (e.code === "invalid_transition" || e.code === "terminal_state")
-    ) {
+    if (isNotAwaitingError(e)) {
       return <NotAwaiting href={challengeHref} />;
     }
     return <p role="alert">{e instanceof Error ? e.message : String(e)}</p>;
@@ -213,7 +210,7 @@ function PlanView({
       onApproved(summary.title);
     } catch (e) {
       if (!alive.current) return;
-      if (e instanceof ApiError && e.code === "terminal_state") {
+      if (isNotAwaitingError(e)) {
         setGone(true);
       } else if (e instanceof ApiError && e.code === "conflict") {
         setNotice(CONFLICT_TEXT);

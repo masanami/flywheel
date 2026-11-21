@@ -19,6 +19,7 @@ import {
   COMPLETION_REJECT_NOTE,
   COMPLETION_RELEASE_NOTE,
 } from "../guidance.ts";
+import { RELEASE_HEAD_MISSING_TEXT } from "../labels.ts";
 import {
   FakeEventSource,
   type FakeResponder,
@@ -127,6 +128,8 @@ interface Over {
   status?: string;
   actions?: string[];
   tasks?: ReturnType<typeof task>[];
+  // 木（最新の版）に載せるタスクの ID。省略すると tasks の全部。
+  treeTaskIds?: string[];
   followups?: ReturnType<typeof followup>[];
   challenge?: Record<string, unknown>;
   conflictFixes?: Record<string, unknown>[];
@@ -194,18 +197,22 @@ function showBody(o: Over = {}) {
         parent: null,
         status: "in_progress",
         status_label: "着手中",
-        tasks: tasks.map((t) => ({
-          cost_usd: 0,
-          depends_on: [],
-          id: t.id,
-          key: t.id,
-          phase: "done",
-          progress: null,
-          status: "done",
-          title: t.title,
-        })),
+        tasks: tasks
+          .filter((t) => (o.treeTaskIds ?? [t.id]).includes(t.id))
+          .map((t) => ({
+            cost_usd: 0,
+            depends_on: [],
+            id: t.id,
+            key: t.id,
+            phase: "done",
+            progress: null,
+            status: "done",
+            title: t.title,
+          })),
         tasks_done: 0,
-        tasks_total: tasks.length,
+        tasks_total: tasks.filter((t) =>
+          (o.treeTaskIds ?? [t.id]).includes(t.id),
+        ).length,
         title: "題名",
         updated_at: "2026-11-01T00:00:00.000Z",
         uses_integration: null,
@@ -327,6 +334,27 @@ it("AC-7: 反映の操作ごとに要約と成果物へのリンクが出る（h
   expect(within(r3).queryByRole("link")).toBeNull();
 });
 
+it("反映の操作の head（head_sha）が null のときは「取得できませんでした」が出て、あるときは出ない", async () => {
+  setup(
+    {},
+    {
+      [APPROVAL]: summary({
+        releases: [
+          { head_sha: "abc123", id: "O-1", ref: null, summary: "あり" },
+          { head_sha: null, id: "O-3", ref: null, summary: "なし" },
+        ],
+      }),
+    },
+  );
+  const m = await open();
+  const r1 = m.querySelector('[data-release="O-1"]') as HTMLElement;
+  const r3 = m.querySelector('[data-release="O-3"]') as HTMLElement;
+  expect(r1.textContent).toContain("abc123");
+  expect(r1.textContent).not.toContain(RELEASE_HEAD_MISSING_TEXT);
+  expect(r3.textContent).toContain(RELEASE_HEAD_MISSING_TEXT);
+  expect(r3.textContent).toContain("取得できませんでした");
+});
+
 it("AC-8: 統合先を使う課題では統合先の識別が出る", async () => {
   setup({
     challenge: { uses_integration: true, integration_ref: "feat/int-1" },
@@ -380,6 +408,46 @@ it("AC-12〜AC-14: タスクごとに題名・状態の語・使った額と枠�
     "12",
   );
   expect(m.querySelectorAll("[data-task]")).toHaveLength(2);
+});
+
+it("計画を作り直した課題では、最新の版の木に無い前の版の未完・取りやめのタスクは、タスクの一覧に出ない", async () => {
+  setup({
+    tasks: [
+      task("T-1", { plan_version: 1, status: "cancelled" }),
+      task("T-3", { plan_version: 1, status: "in_progress" }),
+      task("T-2", { plan_version: 2, title: "新しいタスク" }),
+    ],
+    treeTaskIds: ["T-2"],
+  });
+  const m = await open();
+  const box = within(m).getByTestId("completion-tasks");
+  expect(box.querySelectorAll("[data-task]")).toHaveLength(1);
+  expect(box.querySelector('[data-task="T-1"]')).toBeNull();
+  expect(box.querySelector('[data-task="T-3"]')).toBeNull();
+  expect(within(box).getByRole("link", { name: "新しいタスク" })).toBeTruthy();
+  expect(box.textContent).not.toContain("—");
+});
+
+it("計画を作り直しても残る前の版の済みのタスクは、一覧に「済み」と使った額・枠つきで出る（詳細は開けないのでリンクにしない）", async () => {
+  setup({
+    tasks: [
+      task("T-1", { plan_version: 1, status: "done", title: "前の版の済み" }),
+      task("T-2", { plan_version: 2, title: "新しいタスク" }),
+    ],
+    treeTaskIds: ["T-2"],
+  });
+  const m = await open();
+  const box = within(m).getByTestId("completion-tasks");
+  const old = box.querySelector('[data-task="T-1"]') as HTMLElement;
+  expect(old.textContent).toContain("前の版の済み");
+  expect(within(old).queryByRole("link")).toBeNull();
+  expect(within(old).getByTestId("completion-task-state").textContent).toBe(
+    "済み",
+  );
+  expect(within(old).getByTestId("completion-task-cost").textContent).toContain(
+    "3.5",
+  );
+  expect(box.textContent).not.toContain("—");
 });
 
 it("AC-15・AC-17: 未のフォローアップの件数と題名が出て、あってもボタンは出る", async () => {
@@ -676,6 +744,26 @@ it("承認の口が terminal_state を返したとき、完了の承認待ちで
   const n = await screen.findByTestId("completion-not-awaiting");
   expect(n.textContent).toContain(NOT_AWAITING_COMPLETION_TEXT);
   expect(document.body.textContent).not.toContain("terminal state");
+});
+
+it("承認の口が invalid_transition を返したとき、完了の承認待ちでない旨を出し、内部の英語の文は出ない", async () => {
+  setup(
+    {},
+    {
+      [APPROVE]: () =>
+        json(409, {
+          error: {
+            code: "invalid_transition",
+            message: "core: invalid transition",
+          },
+        }),
+    },
+  );
+  const m = await open();
+  fireEvent.click(await button(m));
+  const n = await screen.findByTestId("completion-not-awaiting");
+  expect(n.textContent).toContain(NOT_AWAITING_COMPLETION_TEXT);
+  expect(document.body.textContent).not.toContain("invalid transition");
 });
 
 it("AC-2: 「いま進められること」の完了の承認待ちの行は、完了承認画面へのリンク", async () => {

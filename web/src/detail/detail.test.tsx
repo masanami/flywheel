@@ -971,6 +971,22 @@ it("AC-107 #932: 課題の詳細のツリーの箱に、タスクの progress �
   expect(q(boxes[1] as HTMLElement).queryByTestId("task-progress")).toBeNull();
 });
 
+it.each([
+  ["reflecting", "反映中"],
+  ["checking", "全体の確認中"],
+])(
+  "課題の詳細のタスクのツリーの見出しに、課題の progress（%s）の語「%s」が出る",
+  async (progress, word) => {
+    const { root } = await open(show({ tree: { progress } }));
+    expect(q(root).getByTestId("challenge-progress")).toHaveTextContent(word);
+  },
+);
+
+it("課題の progress が null の課題の詳細に、課題の progress の札は出ない", async () => {
+  const { root } = await open(show({ tree: { progress: null } }));
+  expect(q(root).queryByTestId("challenge-progress")).toBeNull();
+});
+
 const passedFix = (over: Record<string, unknown> = {}) => ({
   at: "2026-11-20T14:12:00Z",
   files: ["runtime/internal/cli/ticket.go"],

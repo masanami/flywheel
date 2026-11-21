@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.ts";
-import { ApiError } from "../api/error.ts";
+import { ApiError, isNotAwaitingError } from "../api/error.ts";
 import type { ApprovalSummary, ShowCardResponse } from "../api/types.gen.ts";
 import {
   COMPLETION_APPROVED_NOTE,
@@ -12,7 +12,9 @@ import {
   LOADING_TEXT,
   OPERATION_KIND_LABELS,
   PHASE_LABELS,
+  RELEASE_HEAD_MISSING_TEXT,
   RELOAD_TEXT,
+  TASK_SPENT_LABEL,
   label,
 } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
@@ -111,15 +113,6 @@ function NotAwaiting({ href }: { href: string }) {
   );
 }
 
-// 承認待ちでなくなった課題（遷移できない状態・完了などの終わりの状態）への読み書きの失敗。
-// 内部の英語の文は出さず、承認待ちでない旨の案内を出す。
-function isNotAwaitingError(e: unknown): boolean {
-  return (
-    e instanceof ApiError &&
-    (e.code === "invalid_transition" || e.code === "terminal_state")
-  );
-}
-
 function Body({
   result,
   reload,
@@ -214,7 +207,7 @@ function CompletionView({
       onApproved(approval.title);
     } catch (e) {
       if (!alive.current) return;
-      if (e instanceof ApiError && e.code === "terminal_state") {
+      if (isNotAwaitingError(e)) {
         setGone(true);
       } else if (e instanceof ApiError && e.code === "conflict") {
         // 読み直しが終わるまでボタンを押せないままにし、通知は読み直しの後に出す。
@@ -240,8 +233,18 @@ function CompletionView({
   const showIntegration =
     ch.uses_integration === true || ch.integration_ref !== null;
   const openFollowups = show.followups.filter((f) => f.status === "open");
-  const phaseOf = (taskId: string): string | undefined =>
-    show.tree.tasks.find((n) => n.id === taskId)?.phase;
+  // 計画を作り直した課題では、前の版のタスクも show.tasks に入る。最新の版（木）にあるものに加えて、
+  // 前の版の済みのタスクは残る（課題の上限の枠に数え、反映するものの一部）ので並べる。前の版の未完・取りやめのタスクは並べない。
+  // 木に無いタスクは、状態を木でなくタスク自身から引き（済み）、詳細の画面が開けないのでリンクにしない。
+  const listedTasks = show.tasks.flatMap((t) => {
+    const node = show.tree.tasks.find((n) => n.id === t.id);
+    if (node !== undefined) {
+      return [{ task: t, phase: node.phase, inTree: true }];
+    }
+    return t.status === "done"
+      ? [{ task: t, phase: "done", inTree: false }]
+      : [];
+  });
 
   return (
     <section
@@ -316,13 +319,15 @@ function CompletionView({
                             <span>{r.ref}</span>
                           )}
                         </>
-                      )}
-                      {r.head_sha !== null && (
-                        <>
-                          {" "}
+                      )}{" "}
+                      <span data-testid="release-head">
+                        head:{" "}
+                        {r.head_sha !== null ? (
                           <code>{r.head_sha}</code>
-                        </>
-                      )}
+                        ) : (
+                          RELEASE_HEAD_MISSING_TEXT
+                        )}
+                      </span>
                     </li>
                   );
                 })}
@@ -349,29 +354,32 @@ function CompletionView({
 
           <section aria-label="タスク" data-testid="completion-tasks">
             <h3>タスク</h3>
-            {show.tasks.length === 0 ? (
+            {listedTasks.length === 0 ? (
               <p>タスクはありません</p>
             ) : (
               <ul>
-                {show.tasks.map((t) => {
-                  const phase = phaseOf(t.id);
+                {listedTasks.map(({ task: t, phase, inTree }) => {
                   return (
                     <li key={t.id} data-task={t.id}>
-                      <a
-                        href={hrefOf({
-                          kind: "task",
-                          name: agentName,
-                          id,
-                          taskId: t.id,
-                        })}
-                      >
-                        {t.title}
-                      </a>{" "}
+                      {inTree ? (
+                        <a
+                          href={hrefOf({
+                            kind: "task",
+                            name: agentName,
+                            id,
+                            taskId: t.id,
+                          })}
+                        >
+                          {t.title}
+                        </a>
+                      ) : (
+                        <span>{t.title}</span>
+                      )}{" "}
                       <span data-testid="completion-task-state">
-                        {phase !== undefined ? label(PHASE_LABELS, phase) : "—"}
+                        {label(PHASE_LABELS, phase)}
                       </span>{" "}
                       <span data-testid="completion-task-cost">
-                        使った額 {usd(t.spent_usd)} USD / 枠{" "}
+                        {TASK_SPENT_LABEL} {usd(t.spent_usd)} USD / 枠{" "}
                         {usd(t.budget_impl_usd + t.budget_review_usd)} USD
                       </span>
                     </li>
