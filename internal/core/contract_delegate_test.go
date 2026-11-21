@@ -721,3 +721,44 @@ func TestStartContractDelegation_NewColumnsKeepTheirDefaults(t *testing.T) {
 		t.Fatalf("contract_run with default new columns = %d, want 1", n)
 	}
 }
+
+// InsertRun は呼び出し側のコールバックなので、渡した insert を 1 回だけ呼び、その結果をそのまま返すことを検査する。
+// 呼ばない・2 回呼ぶ・別の ID を返す形では、エラーを返し、委譲先を起動せず、run を余分に作らない（ストアに無い run の ID で進まない）。
+func TestStartContractDelegation_InsertRunMisuseIsAnErrorAndCreatesNoExtraRun(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		insert   func(insert func() (int64, error)) (int64, error)
+		wantRuns int64
+	}{
+		{"insert を呼ばない", func(func() (int64, error)) (int64, error) { return 1, nil }, 0},
+		{"insert を 2 回呼ぶ", func(insert func() (int64, error)) (int64, error) {
+			id, err := insert()
+			_, _ = insert()
+			return id, err
+		}, 1},
+		{"別の ID を返す", func(insert func() (int64, error)) (int64, error) {
+			id, err := insert()
+			return id + 1000, err
+		}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newContractFixture(t)
+			_, err := f.s.StartContractDelegation(context.Background(), ContractStartInput{
+				ChallengeID: f.cid, ConnectorID: "tool", AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client,
+				CycleID: f.cycle(t, 300), MaxBudgetUSD: 5, Reconcile: f.branches, InsertRun: tc.insert,
+			})
+			if !errors.Is(err, ErrStoreError) {
+				t.Fatalf("err = %v, want ErrStoreError（内部の誤り）", err)
+			}
+			if len(f.client.starts) != 0 {
+				t.Fatalf("starts = %v, want none（後続へ進まない）", f.client.starts)
+			}
+			if n := f.count(t, `SELECT COUNT(*) FROM run WHERE kind = 'contract'`); n != tc.wantRuns {
+				t.Fatalf("contract runs = %d, want %d（余分に作らない）", n, tc.wantRuns)
+			}
+		})
+	}
+}

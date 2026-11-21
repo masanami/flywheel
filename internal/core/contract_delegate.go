@@ -668,12 +668,30 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if n, ok := parseCycleID(in.CycleID); ok {
 		cycleIDInt = &n
 	}
+	// InsertRun は呼び出し側のコールバックなので、渡した insert の呼び方を確かめる（呼ばない・複数回呼ぶ・別の ID を返すと、
+	// ストアに無い run の ID で後続が進む）。2 回目以降の呼び出しは、書き込まずにエラーを返す。
+	var insertCalls int
+	var insertID int64
+	var insertErr error
 	insert := func() (int64, error) {
-		return s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID, nil)
+		insertCalls++
+		if insertCalls > 1 {
+			return 0, fmt.Errorf("%w: contract start: insert called more than once", ErrStoreError)
+		}
+		insertID, insertErr = s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID, nil)
+		return insertID, insertErr
 	}
 	var runIDInt int64
 	if in.InsertRun != nil {
 		runIDInt, err = in.InsertRun(insert)
+		// 不一致は内部の誤りとして、後続（heartbeat・読み直し・終わりの記録）へ進まない。insert が run を作っていた場合の後始末は、
+		// 起動前の他の失敗（引数の組み立て失敗など）と同じく、run を閉じずにエラーを返す。
+		if insertCalls != 1 {
+			return nil, fmt.Errorf("%w: contract start: InsertRun called insert %d times, want exactly once", ErrStoreError, insertCalls)
+		}
+		if runIDInt != insertID || !errors.Is(err, insertErr) {
+			return nil, fmt.Errorf("%w: contract start: InsertRun returned id %d (error: %t), insert returned id %d (error: %t)", ErrStoreError, runIDInt, err != nil, insertID, insertErr != nil)
+		}
 	} else {
 		runIDInt, err = insert()
 	}
