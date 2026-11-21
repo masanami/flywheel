@@ -35,6 +35,10 @@ type releaseRun struct {
 	row *contractRunRow
 	// corresponds は、この反映の操作に対応する実行か。
 	corresponds bool
+	// fixEligible は、衝突の解消の確かめ（確かめ待ちの中身などの 3 列）の道に入ってよい実行か。対応する実行で、反映の依頼（operation_id で
+	// 1 対 1 に結び付く）か、タスクの実行で対応する終わっていない反映の操作がちょうど 1 つのとき真。3 列は契約の実行ごとに 1 つで、
+	// どの操作の中身かを持たないので、2 つ以上の操作が対応するときは入らない（反映の段は S3a のまま扱い、J5 も対象にしない）。
+	fixEligible bool
 	planVersion *int64
 	binding     *sourceBinding
 	// opID は、この実行を読む・取り消す反映の操作の内部整数 ID（契約のコマンドの run に印として付ける）。
@@ -96,7 +100,18 @@ func (s *Store) loadReleaseRun(ctx context.Context, row *operationRow) (*release
 		} else if row.Ref.Valid {
 			out.corresponds, err = taskRunImportedRef(ctx, tx, cr, row.Ref.String)
 		}
-		return err
+		if err != nil || !out.corresponds {
+			return err
+		}
+		out.fixEligible = true
+		if cr.Kind != contractRunKindReflect {
+			ops, err := openReleaseOpsOfTaskRun(ctx, tx, cr)
+			if err != nil {
+				return err
+			}
+			out.fixEligible = len(ops) == 1
+		}
+		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
@@ -128,6 +143,51 @@ func taskRunImportedRef(ctx context.Context, tx *sql.Tx, cr *contractRunRow, ref
 		}
 	}
 	return false, rows.Err()
+}
+
+// openReleaseOpsOfTaskRun は、タスクの実行 cr に対応する、終わっていない（承認待ち・承認済みの）反映の操作の内部整数 ID を返す
+// （承認済みを先に、その中では新しい順）。対応は、その実行が取り込んだ成果物の参照と同じ参照を持つこと（taskRunImportedRef）。
+// 衝突の解消の確かめの道に入ってよいのは、これがちょうど 1 つのときだけ（反映の段と J5 の側で同じ数え方を使う）。
+func openReleaseOpsOfTaskRun(ctx context.Context, tx *sql.Tx, cr *contractRunRow) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, COALESCE(ref, '') FROM operation WHERE challenge_id = ? AND kind = ? AND state IN (?, ?) ORDER BY (state = 'approved') DESC, id DESC`,
+		cr.ChallengeID, string(OperationKindRelease), string(OperationStatePending), string(OperationStateApproved))
+	if err != nil {
+		return nil, err
+	}
+	type openOp struct {
+		id  int64
+		ref string
+	}
+	var ops []openOp
+	for rows.Next() {
+		var o openOp
+		if err := rows.Scan(&o.id, &o.ref); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ops = append(ops, o)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []int64
+	for _, o := range ops {
+		if o.ref == "" {
+			continue
+		}
+		ok, err := taskRunImportedRef(ctx, tx, cr, o.ref)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, o.id)
+		}
+	}
+	return out, nil
 }
 
 // closeHeldEndWithoutOwner は、課題 challengeID の「終わりを読んだが、結果を書くまで開けている契約の実行」（state が終わりで
@@ -184,7 +244,7 @@ func (s *Store) closeHeldEndWithoutOwner(ctx context.Context, challengeID int64)
 				return nil
 			}
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE id = ? AND ended_at IS NULL AND state IN ('succeeded', 'failed', 'cancelled')`,
+		res, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ?, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE id = ? AND ended_at IS NULL AND state IN ('succeeded', 'failed', 'cancelled')`,
 			formatTimestamp(s.currentTime()), cr.ID)
 		if err != nil {
 			return err
@@ -438,14 +498,15 @@ func (s *Store) releaseLand(ctx context.Context, opts ReleaseExecOptions, run *r
 }
 
 // clearLandRefsForOperation は反映の操作 opID を取り消すとき、その操作に対応する契約の実行（反映の依頼なら operation_id が
-// opID、タスクの実行なら取り込んだ成果物の参照が操作の参照と同じもの）だけの land_ref を消し、land_delivered を偽にする
+// opID、タスクの実行なら取り込んだ成果物の参照が操作の参照と同じもの）だけの land_ref を消し、land_delivered を偽にし、衝突の解消の確かめの 3 列
+// （fix_pending_ref・fix_verified_ref・fix_rejected_ref）も消す
 // （承認し直した後は、もう一度「入れてよい」を返す）。契約のコマンドは呼ばない。
 func clearLandRefsForOperation(ctx context.Context, tx *sql.Tx, challengeID, opID int64) error {
 	var ref sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT ref FROM operation WHERE id = ?`, opID).Scan(&ref); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND (land_ref IS NOT NULL OR land_delivered <> 0)`, challengeID)
+	rows, err := tx.QueryContext(ctx, contractRunSelect+` WHERE challenge_id = ? AND (land_ref IS NOT NULL OR land_delivered <> 0 OR fix_pending_ref IS NOT NULL OR fix_verified_ref IS NOT NULL OR fix_rejected_ref IS NOT NULL)`, challengeID)
 	if err != nil {
 		return err
 	}
@@ -471,17 +532,18 @@ func clearLandRefsForOperation(ctx context.Context, tx *sql.Tx, challengeID, opI
 		if !match {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET land_ref = NULL, land_delivered = 0 WHERE id = ?`, r.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET land_ref = NULL, land_delivered = 0, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE id = ?`, r.ID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// clearLandRefs は課題の契約の実行すべての land_ref を消す（完了から検証中へ戻すとき。T18）。
+// clearLandRefs は課題の契約の実行すべての land_ref と衝突の解消の確かめの 3 列を消す（完了から検証中へ戻すとき。T18）。
 func clearLandRefs(ctx context.Context, tx *sql.Tx, challengeID int64) error {
 	_, err := tx.ExecContext(ctx,
-		`UPDATE contract_run SET land_ref = NULL, land_delivered = 0 WHERE challenge_id = ? AND (land_ref IS NOT NULL OR land_delivered <> 0)`, challengeID)
+		`UPDATE contract_run SET land_ref = NULL, land_delivered = 0, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL
+		WHERE challenge_id = ? AND (land_ref IS NOT NULL OR land_delivered <> 0 OR fix_pending_ref IS NOT NULL OR fix_verified_ref IS NOT NULL OR fix_rejected_ref IS NOT NULL)`, challengeID)
 	return err
 }
 

@@ -298,6 +298,8 @@ type contractRunRow struct {
 	StartRunID int64
 	// VerifiedRef は、タスクの検証（J5）が「満たした」とした中身（統合先を使う課題のタスクの実行。無ければ空）。
 	VerifiedRef string
+	// FixPendingRef・FixVerifiedRef・FixRejectedRef は、衝突の解消の確かめ（S3c）の列（無ければ空）。意味と使い方は contract_fix_refs.go。
+	FixPendingRef, FixVerifiedRef, FixRejectedRef string
 	// holdSuccessEnd は DB の列ではない。真なら、succeeded を読んでも ended_at を入れない（統合先へ入ったかを上流で確かめるまで開けておく）。
 	holdSuccessEnd bool
 	// discard は DB の列ではない。真なら、この実行はもう要らないので取り消すだけで、成果物を取り込まず課題も保留にしない。
@@ -320,7 +322,8 @@ const (
 
 const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
 	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, ''), task_id,
-	kind, operation_id, COALESCE(land_ref, ''), land_delivered, start_run_id, COALESCE(verified_ref, '') FROM contract_run`
+	kind, operation_id, COALESCE(land_ref, ''), land_delivered, start_run_id, COALESCE(verified_ref, ''),
+	COALESCE(fix_pending_ref, ''), COALESCE(fix_verified_ref, ''), COALESCE(fix_rejected_ref, '') FROM contract_run`
 
 func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, error) {
 	var r contractRunRow
@@ -328,7 +331,7 @@ func scanContractRun(row interface{ Scan(...any) error }) (*contractRunRow, erro
 	var taskID, opID sql.NullInt64
 	if err := row.Scan(&r.ID, &r.ChallengeID, &r.ConnectorID, &r.ExternalRunID, &state, &r.Summary, &r.CostMicros, &r.MaxBudget,
 		&r.RequestedKind, &r.RequestedDecider, &r.RequestedText, &r.RequestedResolvableBy, &r.WorkDir, &taskID,
-		&r.Kind, &opID, &r.LandRef, &r.LandDelivered, &r.StartRunID, &r.VerifiedRef); err != nil {
+		&r.Kind, &opID, &r.LandRef, &r.LandDelivered, &r.StartRunID, &r.VerifiedRef, &r.FixPendingRef, &r.FixVerifiedRef, &r.FixRejectedRef); err != nil {
 		return nil, err
 	}
 	if opID.Valid {
@@ -953,7 +956,7 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 				costFrom(latest.CostMicros)
 				// 反映の段が読んだ終わりを、結果を書くまで開けていた実行（HoldEnd）は、その場で終わる呼び出し（完了から戻す前の読み・片付け）が閉じる。
 				if !c.keepsOpenOn(latest.State) {
-					if _, err := tx.ExecContext(recordCtx, `UPDATE contract_run SET ended_at = ? WHERE id = ? AND ended_at IS NULL`,
+					if _, err := tx.ExecContext(recordCtx, `UPDATE contract_run SET ended_at = ?, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE id = ? AND ended_at IS NULL`,
 						formatTimestamp(s.currentTime()), latest.ID); err != nil {
 						return err
 					}
@@ -1168,8 +1171,8 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	// （確かめの結果で、済み・保留・着手中へ戻すのどれかを 1 つの書き込みで決める。afterContractRead が扱う）。
 	if (st.State == ContractStateFailed || st.State == ContractStateCancelled) && !c.landedStop(st.State) {
 		// 統合先を使う課題のタスクの実行が失敗・取り消しで終わったら、検証した中身と通す中身は無効にする（次の委譲の後に検証し直す）。
-		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = NULL, land_ref = NULL, land_delivered = 0
-			WHERE challenge_id = ? AND external_run_id = ? AND kind = 'task' AND (verified_ref IS NOT NULL OR land_ref IS NOT NULL)
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = NULL, fix_pending_ref = NULL, land_ref = NULL, land_delivered = 0
+			WHERE challenge_id = ? AND external_run_id = ? AND kind = 'task' AND (verified_ref IS NOT NULL OR land_ref IS NOT NULL OR fix_pending_ref IS NOT NULL)
 			AND EXISTS (SELECT 1 FROM challenge WHERE id = ? AND uses_integration = 1)`, c.ChallengeIDInt, st.RunID, c.ChallengeIDInt); err != nil {
 			return err
 		}
@@ -1240,6 +1243,12 @@ func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contra
 				wait_hold_id = CASE WHEN ? = 'waiting' AND requested_kind IS ? AND requested_decider IS ? AND requested_text IS ? AND requested_resolvable_by IS ? THEN wait_hold_id ELSE NULL END WHERE id = ?`,
 			string(st.State), st.Summary, rk, rd, rt, rb, totalMicros, now, endedAt, string(st.State), rk, rd, rt, rb, c.Existing.ID); err != nil {
 			return err
+		}
+		if endedAt != nil {
+			// 契約の実行が終わったら、確かめ待ちの中身は要らない（確かめの対象は終わっていない実行だけ）。
+			if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE id = ?`, c.Existing.ID); err != nil {
+				return err
+			}
 		}
 	}
 	facts, err := encodeContractFacts(st.Facts)

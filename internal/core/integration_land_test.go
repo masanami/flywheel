@@ -440,15 +440,10 @@ func TestLandVerified_DeliveredRecordOfAnotherContentIsNotARefusal(t *testing.T)
 	}
 }
 
-// AC-123〜AC-125・AC-144: 衝突の解消がある・中身の変更がある・判定できないときは、検証した中身と land_ref を消す。
+// AC-124・AC-125・AC-144（AC-25・AC-26）: 中身の変更がある・判定できないときは、検証した中身と land_ref を消す（確かめ待ちの中身は NULL のまま）。衝突の解消ありは integration_land_fix_test.go。
 func TestLandVerified_OtherMovesClearVerifiedAndLandRef(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(f *igLandFixture){
-		"AC-123 conflict fix": func(f *igLandFixture) {
-			f.setMergeInOnly()
-			f.compare.set(landContent, newContent, withFiles(f.compare.results[[2]string{landContent, newContent}], UpstreamFile{Filename: "a.go", Patch: "@@"}))
-			f.compare.set("m1", newContent, UpstreamComparison{Status: UpstreamCompareAhead, TotalCommits: 1, Commits: []UpstreamCommit{commit(landContent, "fix", "p0")}, Files: []UpstreamFile{{Filename: "a.go", Patch: "@@ x"}}})
-		},
 		"AC-124 content changed": func(f *igLandFixture) {
 			f.compare.set(landContent, newContent, ahead(commit(newContent, "new work", landContent)))
 			f.compare.set(integBranch, newContent, ahead(commit(landContent, "fix", "p0"), commit(newContent, "new work", landContent)))
@@ -466,6 +461,9 @@ func TestLandVerified_OtherMovesClearVerifiedAndLandRef(t *testing.T) {
 			f.read(t, intakeOut(integOptsWithLd, movedArts, nil))
 			if got := f.ref(t, "verified_ref"); got != "" {
 				t.Fatalf("verified_ref = %q", got)
+			}
+			if got := f.ref(t, "fix_pending_ref"); got != "" { // AC-25・AC-26
+				t.Fatalf("fix_pending_ref = %q", got)
 			}
 			if got := f.ref(t, "land_ref"); got != "" { // AC-144
 				t.Fatalf("land_ref = %q", got)

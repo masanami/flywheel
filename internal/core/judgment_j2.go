@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -517,13 +516,13 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 
 	impl, review := pair.Impl, pair.Review
 	if raw.BudgetImplUSD != nil {
-		if *raw.BudgetImplUSD <= 0 {
+		if !validBudgetAmount(*raw.BudgetImplUSD) {
 			return nil, false
 		}
 		impl = *raw.BudgetImplUSD
 	}
 	if raw.BudgetReviewUSD != nil {
-		if *raw.BudgetReviewUSD <= 0 {
+		if !validBudgetAmount(*raw.BudgetReviewUSD) {
 			return nil, false
 		}
 		review = *raw.BudgetReviewUSD
@@ -657,7 +656,7 @@ func validateJ2Tasks(in []j2RawTask, vc j2ValidationContext) ([]j2Task, bool) {
 		}
 		// タスクの枠は、書いたら正で、実装の枠は 1 回の実行の上限額以下。タスクが 2 個以上の計画では、両方を必ず書く。
 		for _, b := range []*float64{t.BudgetImplUSD, t.BudgetReviewUSD} {
-			if b != nil && (!(*b > 0) || math.IsInf(*b, 0)) {
+			if b != nil && !validBudgetAmount(*b) {
 				return nil, false
 			}
 		}

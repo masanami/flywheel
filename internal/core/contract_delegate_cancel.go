@@ -124,7 +124,7 @@ func (s *Store) cancelOneOpenContractRun(ctx context.Context, in ContractCancelI
 func (s *Store) endRecordedTerminalRun(ctx context.Context, row *contractRunRow) error {
 	wctx := context.WithoutCancel(ctx)
 	return classifyReadWriteErr(s.db.Write(wctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(wctx, `UPDATE contract_run SET ended_at = COALESCE(ended_at, ?), held_success = 0 WHERE id = ?`, formatTimestamp(s.currentTime()), row.ID)
+		_, err := tx.ExecContext(wctx, `UPDATE contract_run SET ended_at = COALESCE(ended_at, ?), held_success = 0, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE id = ?`, formatTimestamp(s.currentTime()), row.ID)
 		return err
 	}))
 }
