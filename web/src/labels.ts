@@ -428,6 +428,13 @@ export const RUN_RESULT_LABELS: Record<string, string> = {
   interrupted: "中断",
 };
 export const RUN_RUNNING_LABEL = "実行中";
+// 通した衝突の解消の宛先。`integration`＝統合先、`release`＝反映先。
+export const CONFLICT_FIX_TARGET_LABELS: Record<string, string> = {
+  integration: "統合先",
+  release: "反映先",
+};
+export const CONFLICT_FIX_HEADING = "通した衝突の解消";
+export const CONFLICT_FIX_PENDING_TEXT = "衝突の解消の確かめを待っています。";
 // 実行の記録に費用の値が無い（null）とき。0 とは違う。
 export const NO_COST_LABEL = "費用の記録なし";
 
