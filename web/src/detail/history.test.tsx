@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
-import type { Activity, Run, ShowCardResponse } from "../api/types.gen.ts";
+import type { Activity, ShowCardResponse, ShowRun } from "../api/types.gen.ts";
 import { bodies, show } from "../testing/detailFixture.ts";
 import { FakeEventSource, installFakes } from "../testing/fakes.ts";
 
@@ -37,7 +37,7 @@ const act1 = (p: Partial<Activity> = {}): Activity => ({
   ...p,
 });
 
-const run = (p: Partial<Run> = {}): Run => ({
+const run = (p: Partial<ShowRun> = {}): ShowRun => ({
   challenge_id: "C-1",
   cost_source: "claude",
   cost_usd: 1.5,
@@ -45,6 +45,7 @@ const run = (p: Partial<Run> = {}): Run => ({
   cycle_id: "Y-1",
   ended_at: "2026-11-01T10:30:00Z",
   error: null,
+  fix_pending_ref: null,
   flywheel_version: null,
   id: "R-1",
   judgment: null,

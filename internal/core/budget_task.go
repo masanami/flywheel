@@ -65,15 +65,22 @@ func fillSoleTaskBudgets(ctx context.Context, tx *sql.Tx, cid, planVersion int64
 	if err != nil || !ok {
 		return err
 	}
-	if tasks[0].BudgetImplMicros == nil {
-		v := b.Impl
-		tasks[0].BudgetImplMicros = &v
-	}
-	if tasks[0].BudgetReviewMicros == nil {
-		v := b.Review
-		tasks[0].BudgetReviewMicros = &v
-	}
+	impl, review := soleTaskFrames(tasks[0].BudgetImplMicros, tasks[0].BudgetReviewMicros, b)
+	tasks[0].BudgetImplMicros, tasks[0].BudgetReviewMicros = &impl, &review
 	return nil
+}
+
+// soleTaskFrames は、タスクが 1 個の計画の枠を、タスクが書いた枠はそのまま、書かなかった側だけ既定 def で埋めて返す
+// （承認でタスクへ記録する値と、承認の前の要約が出す値の、共通の決め方）。
+func soleTaskFrames(impl, review *int64, def planBudgets) (int64, int64) {
+	i, r := def.Impl, def.Review
+	if impl != nil {
+		i = *impl
+	}
+	if review != nil {
+		r = *review
+	}
+	return i, r
 }
 
 // loadTaskBudgets は課題のタスク全部（取りやめを含む）の枠の実効値を ID の昇順で返す。

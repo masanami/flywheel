@@ -48,6 +48,7 @@ export function show(over: Over = {}): ShowCardResponse {
       version: 3,
       ...challenge,
     },
+    conflict_fixes: [],
     direct_completions: [],
     followups: [],
     holds: [],

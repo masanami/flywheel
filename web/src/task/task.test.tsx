@@ -10,8 +10,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
 import type {
   Hold,
-  Run,
   ShowCardResponse,
+  ShowRun,
   Task,
   TreeTask,
 } from "../api/types.gen.ts";
@@ -90,7 +90,7 @@ const hold = (p: Partial<Hold> = {}): Hold => ({
   ...p,
 });
 
-const run = (id: string, p: Partial<Run> = {}): Run => ({
+const run = (id: string, p: Partial<ShowRun> = {}): ShowRun => ({
   challenge_id: "C-1",
   cost_source: "reported",
   cost_usd: 1.5,
@@ -98,6 +98,7 @@ const run = (id: string, p: Partial<Run> = {}): Run => ({
   cycle_id: null,
   ended_at: null,
   error: null,
+  fix_pending_ref: null,
   flywheel_version: null,
   id,
   judgment: null,
@@ -115,7 +116,7 @@ interface Over {
   tasks?: Task[];
   nodes?: TreeTask[];
   holds?: Hold[];
-  runs?: Run[];
+  runs?: ShowRun[];
   source_children?: ShowCardResponse["source_children"];
 }
 
@@ -152,6 +153,7 @@ function show(o: Over = {}): ShowCardResponse {
       uses_integration: null,
       version: 3,
     },
+    conflict_fixes: [],
     direct_completions: [],
     followups: [],
     holds: o.holds ?? [],

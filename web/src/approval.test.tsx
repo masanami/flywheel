@@ -108,6 +108,7 @@ function setup(
     approvals: [],
     card: c,
     challenge: challenge(state),
+    conflict_fixes: [],
     direct_completions: [],
     followups: [],
     holds: [],

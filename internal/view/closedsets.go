@@ -112,6 +112,7 @@ var executionResultLabels = map[core.ExecutionResult]string{
 	core.ExecutionResultWaitingDelegate:  "委譲先が進めている",
 	core.ExecutionResultWaitingOutside:   "flywheel の外での反映を待っている",
 	core.ExecutionResultDelegateEnded:    "委譲先の実行が、入れずに終わった",
+	core.ExecutionResultWaitingFixCheck:  "衝突の解消の確かめを待っている",
 }
 
 // ExecutionResultLabel は反映の試行の結果の語を返す。閉集合の外には空文字。

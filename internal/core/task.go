@@ -312,6 +312,13 @@ func setTaskStatus(ctx context.Context, tx *sql.Tx, rec *activityRecorder, id in
 	if _, err := tx.ExecContext(ctx, `UPDATE task SET status = ?, updated_at = ? WHERE id = ?`, string(to), formatTimestamp(rec.at), id); err != nil {
 		return false, err
 	}
+	if to == TaskStatusInProgress {
+		// 着手中へ戻ったタスクの契約の実行は、確かめ待ちの中身を持たない（戻した後の中身は、検証し直す）。
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET fix_pending_ref = NULL WHERE task_id = ? AND fix_pending_ref IS NOT NULL
+			AND EXISTS (SELECT 1 FROM challenge WHERE id = contract_run.challenge_id AND uses_integration = 1)`, id); err != nil {
+			return false, err
+		}
+	}
 	if err := rec.record("task", id, "task_status", map[string]any{"status": from}, map[string]any{"status": string(to)}); err != nil {
 		return false, err
 	}
