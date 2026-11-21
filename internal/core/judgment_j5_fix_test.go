@@ -240,7 +240,7 @@ func TestJ5Fix_IntegrationRunInputAndRecords(t *testing.T) {
 			t.Errorf("%s: diff section lacks %q:\n%s", name, want, diff)
 		}
 	}
-	if !strings.Contains(sec["達成条件"], "SOME-DONE") && !strings.Contains(sec["達成条件"], f.text(t, `SELECT done_criteria FROM task`)) { // AC-87
+	if !strings.Contains(sec["達成条件"], f.text(t, `SELECT done_criteria FROM task`)) { // AC-87
 		t.Errorf("criteria section = %q, want the task's done criteria", sec["達成条件"])
 	}
 	if !strings.Contains(sec[labelTaskSourceSection], "CHILD-ONLY-BODY") { // AC-88
@@ -544,5 +544,29 @@ func TestJ5Fix_NotMetDoesNotCapTheNumberOfChecks(t *testing.T) {
 	}
 	if n, want := f.j5RunCount(t), int64(judgmentFailureLimit(f.j5.agent)+2); n != want {
 		t.Fatalf("J5 runs = %d, want %d（確かめに回数の上限は無い）", n, want)
+	}
+}
+
+// ID を指定した操作でも、着手中の課題の確かめと、完了の課題の確かめが処理される。対象が無ければ、握りつぶさずに ErrInvalidTransition を返す。
+func TestJ5Fix_ChallengeIDPathProcessesTargetsAndReportsNone(t *testing.T) {
+	t.Parallel()
+	for name, mk := range map[string]func(*testing.T) *fixFixture{"integration": newFixIntegrationFixture, "reflect": newFixReflectFixture} {
+		mk := mk
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := mk(t)
+			f.setVerdict("met")
+			id := f.cid
+			res, err := f.s.VerifyAutoJ5(context.Background(), f.input(t, &id))
+			if err != nil || len(res.Items) != 1 || f.j5RunCount(t) != 1 {
+				t.Fatalf("items = %+v, err = %v, J5 runs = %d, want one check", res, err, f.j5RunCount(t))
+			}
+			f.sql(t, `UPDATE contract_run SET fix_pending_ref = NULL`)
+			_, err = f.s.VerifyAutoJ5(context.Background(), f.input(t, &id))
+			// 統合先宛ては、確かめ待ちが無くなればタスクの検証の対象に戻る。反映先宛ては対象が無く、握りつぶさずにエラーを返す。
+			if wantErr := name == "reflect"; (err != nil) != wantErr {
+				t.Fatalf("err = %v, want error: %v", err, wantErr)
+			}
+		})
 	}
 }

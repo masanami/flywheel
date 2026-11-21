@@ -1039,7 +1039,9 @@ type J5AutoInput struct {
 // 出力の写像は core が持ち、呼び出し元（internal/cli）は宣言の読み込み・invoker と取得の組み立て・
 // 周の開始と終了だけを行う。
 //
-//   - in.ChallengeID が非 nil: 検証中でなければ ErrInvalidTransition、終了していない run があれば
+//   - in.ChallengeID が非 nil: 対象は、検証中の課題・着手中の課題（検証中のタスクと、統合先宛ての衝突の解消の確かめ）・完了の課題（反映先宛ての
+//     衝突の解消の確かめ）。対象が無ければ ErrInvalidTransition（終わっていない実行のある単位は対象選びで外れるので、確かめでは
+//     ErrRunInProgress でなくこちらになる）。検証中の課題で、終了していない run があれば
 //     ErrRunInProgress、周の上限で起動できなければ ErrBudgetExceeded を返す。CI の待ち・上流の取得の
 //     失敗は、課題を変えずに結果の NotStarted へ入れる。
 //   - in.ChallengeID が nil: 対象を順に処理し、起動しなかった課題を NotStarted へ入れる。
