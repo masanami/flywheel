@@ -68,6 +68,7 @@ func runVerifyAuto(a Args) (any, error) {
 		Diffs:        newDiffSource(a.lookPath()),
 		Descriptions: newDescriptionSource(a.lookPath()),
 		HeadGit:      git.New(),
+		Compare:      newCompareSource(a.lookPath()),
 		Connectors:   conn,
 		CycleID:      cyc.ID,
 

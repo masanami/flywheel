@@ -356,6 +356,7 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			Diffs:        in.Diffs,
 			Descriptions: in.Descriptions,
 			HeadGit:      in.HeadGit,
+			Compare:      in.Compare,
 			Connectors:   in.ConnDecl,
 			CycleID:      cycleID,
 			Cycle:        jc,
