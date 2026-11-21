@@ -375,6 +375,8 @@ T18 は**制限つきの行**で、通常の操作（`Lookup`・`OutgoingFrom`�
 
 ビルド情報が無いとき（`runtime/debug.ReadBuildInfo` が失敗する・vcs の設定が無い）の `commit`・`time` は文字列 `"unknown"`（`modified` は `false`）。
 
+版の出どころ（2026-11-21 に改めた。#961）: `make build` は、flywheel 自身のリポジトリのコミット・時刻・未コミットの変更の有無をバイナリに刻み（`-ldflags -X`）、Go が自動で入れる VCS の情報は切る（`-buildvcs=false`）。刻印があればそれを使い、無いビルド（`make build` を通さない `go build`・`go install`）は `runtime/debug.ReadBuildInfo` の VCS の情報を使う。理由: 別のリポジトリの下に置いた作業ツリー（`.git` がファイル）では、Go の自動の VCS の情報が外側のリポジトリのコミットになる。`make build` が flywheel 自身のリポジトリの root で動いていないとき（展開した配布物など）は刻まず、`commit`・`time` は `"unknown"` になる。
+
 | フィールド | 型 | 内容 |
 |---|---|---|
 | `commit` | string | ビルドのコミット。無ければ `"unknown"` |
@@ -554,7 +556,7 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `flywheel followup drop <F-ID>... --reason <理由> [--relayed --session <s> --quote <q>]` | フォローアップを捨てる。本人確認は 1 回で、要約に全部の ID と題名を出す。打ち込む対象は ID を番号の小さい順にカンマでつないだもの（`F-<a>,F-<b>`）。違えば `confirmation_mismatch`。端末も `--relayed` も無ければ `tty_required`。検査は `done` と同じ | 要 |
 | `flywheel followup promote <F-ID> [--relayed --session <s> --quote <q>]` | 未のフォローアップを新しい課題（未分類）に上げる（1 回に 1 件。2 つ並べたら `usage_error`）。`--json` の根は `followup`（上げたもの）と `challenge`（作った課題）。上げてあるものは、上げた先の課題が取り下げのときだけ上げ直せる（それ以外は `validation_failed`） | 要 |
 | `flywheel status` | 見出し「いま進められること」の下に、あなたの承認を待っているもの・あなたの回答を待っているもの・そのほかの、あなたの操作を待っているもの（あるときだけ）・取り込めるもの・サイクルを回すと進むもの・オーケストレーターの番・外を待っているもの・承認済みの不可逆操作・未のフォローアップの件数を出す。あなたを待っているもの・取り込めるもの・サイクルを回すと進むものが無いときは、その旨を出す。テキスト表示の先頭に、動いているバイナリのコミットを 1 行出す（`--json` では `binary_commit`） | — |
-| `flywheel version` | 動いているバイナリのビルドのコミット（`vcs.revision`・`vcs.time`・`vcs.modified`）と、そのバイナリが扱うストアのスキーマの版。読み取りだけで、ストアを開かず（`store_too_new` でも動く）、ネットワークにも Git にも触れない。未コミットの変更つきのビルドは commit の表示に `+dirty` を付ける | — |
+| `flywheel version` | 動いているバイナリのビルドのコミット（`make build` の刻印。無ければ `vcs.revision`・`vcs.time`・`vcs.modified`）と、そのバイナリが扱うストアのスキーマの版。読み取りだけで、ストアを開かず（`store_too_new` でも動く）、ネットワークにも Git にも触れない。未コミットの変更つきのビルドは commit の表示に `+dirty` を付ける | — |
 | `flywheel log [<C-ID>]` | 作業ログ | — |
 | `flywheel ingest [<指定>...] [--source <id>]` | 取り込み元の宣言の検証・`--source` の絞り込み（#54）・`gh` による取得・上流の close の検出（#59）。引数なしは取り込み済みの追従だけ（新しい課題は作らない）、`<指定>...`（`<owner>/<repo>#<番号>` か番号）は選んだ Issue だけを課題にする（S2b） | — |
 | `flywheel mark-read <C-ID>` | 上流を読んだ記録を付ける（読んだ時点の値を現在の観測値で上書きする。上流は取り直さない。docs/features/m2-github-issue-ingest.md §上流の更新の観測と既読） | — |
