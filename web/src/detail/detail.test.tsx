@@ -47,6 +47,7 @@ const task = (p: Partial<TreeTask> & { key: string }): TreeTask => ({
   depends_on: [],
   id: null,
   phase: "next",
+  progress: null,
   status: null,
   title: p.key,
   ...p,
@@ -430,7 +431,7 @@ it("AC-237 #808: 保留がタスクに付いているとき、そのタスクの
   );
 });
 
-it("AC-238 #808: 回答を待っている課題の詳細に、端末のコマンドの案内（flywheel answer）が出る。答える欄は置かない", async () => {
+it("AC-238 #808: 回答を待っている課題の詳細に、ターミナルのコマンドの案内（flywheel answer）が出る。答える欄は置かない", async () => {
   const { root } = await open(
     show({ actions: ["answer_question"], holds: [hold()] }),
   );
@@ -441,7 +442,7 @@ it("AC-238 #808: 回答を待っている課題の詳細に、端末のコマン
   expect(root.querySelector("textarea, input, form")).toBeNull();
 });
 
-it("AC-239 #808: increase_budget がある課題の詳細に、端末のコマンドの案内（flywheel budget）が出る", async () => {
+it("AC-239 #808: increase_budget がある課題の詳細に、ターミナルのコマンドの案内（flywheel budget）が出る", async () => {
   const { root } = await open(show({ actions: ["increase_budget"] }));
   expect(
     q(root).getByRole("region", { name: "承認方法の案内" }),
@@ -530,6 +531,11 @@ const withChildren = () =>
         body: "",
         budget_impl_usd: 0,
         budget_review_usd: 0,
+        artifacts: [],
+        delegate: null,
+        facts: {},
+        landing: null,
+        verification: null,
         depends_on: [],
         done_criteria: "",
         id: "T-1",

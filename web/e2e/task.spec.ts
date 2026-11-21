@@ -41,7 +41,7 @@ test("AC-432 #810: 幅 360px で、タスクの詳細の画面は、ページ全
     await expect(page.getByTestId("task-runs")).toBeVisible();
     expect(await pageOverflows(page)).toBe(false);
   }
-  // 答え待ちのタスクには、問いと端末のコマンドの案内が出て、ボタンは無い
+  // 答え待ちのタスクには、問いとターミナルのコマンドの案内が出て、ボタンは無い
   await expect(page.getByTestId("task-waiting")).toBeVisible();
   await expect(page.getByTestId("task-detail").getByRole("button")).toHaveCount(
     0,

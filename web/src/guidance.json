@@ -1,6 +1,10 @@
 {
-  "outside_note": "本人確認が要る操作です。Claude Code の外の端末で実行してください（この画面からは行えません）。",
-  "conversation_note": "Claude Code との対話で伝えれば、LLM が記録します（端末のコマンドの代わりに使えます）。",
+  "outside_note": "本人確認が要る操作です。Claude Code の外のターミナルで実行してください（この画面からは行えません）。",
+  "conversation_note": "Claude Code との対話で伝えれば、LLM が記録します（ターミナルのコマンドの代わりに使えます）。",
+  "completion_button_note": "このボタンは、完了を記録するだけです。反映先へ入れる承認は、対話で行います。",
+  "completion_release_note": "反映先へ入れるところまで承認するときは、Claude Code との対話で、この課題の反映まで承認すると伝えてください。",
+  "completion_reject_note": "差し戻すときは、Claude Code との対話で、差し戻す旨と理由を伝えてください。",
+  "completion_approved_note": "完了の承認を記録しました。反映先へ入れる承認は、Claude Code との対話で行います。",
   "conversation_actions": [
     "approve_plan",
     "approve_completion",

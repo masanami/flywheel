@@ -14,7 +14,7 @@ import { type WaitingRow, buildWaitingRows } from "../shell/waitingRows.ts";
 import { useIngestable } from "./useIngestable.ts";
 
 export const INGEST_LOADING_TEXT = "読んでいます";
-export const INGEST_TERMINAL_NOTE = "取り込みは、端末か対話で行います。";
+export const INGEST_TERMINAL_NOTE = "取り込みは、ターミナルか対話で行います。";
 export const NOTHING_TO_DO_TEXT = "いま進められるものはありません。";
 
 const guideOf = (context: string, path: string): Guide | undefined =>
@@ -22,7 +22,7 @@ const guideOf = (context: string, path: string): Guide | undefined =>
 
 // 「いま進められること」: あなたを待っているもの・取り込めるもの・サイクルを回すと進むもの・未のフォローアップ。
 // 件数と区分は core の値（状況の API）で、画面は並べるだけ。画面のボタンで受ける書き込みは
-// 「サイクルを回す」だけ（取り込み・回答は端末のコマンドの案内を出す）。
+// 「サイクルを回す」だけ（取り込み・回答はターミナルのコマンドの案内を出す）。
 export function NowScreen({
   live,
   agentName,

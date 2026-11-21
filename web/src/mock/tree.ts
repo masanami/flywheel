@@ -26,6 +26,7 @@ const base = (
   id,
   next_human_actions: [],
   parent: null,
+  progress: null,
   status,
   status_label: statusLabel,
   tasks: [],
@@ -50,6 +51,7 @@ const task = (
   id,
   key,
   phase,
+  progress: null,
   status: null,
   title,
 });
@@ -245,6 +247,11 @@ export function alphaDetailExtras(id: string): Extras {
       return {
         budget_impl_usd: 0,
         budget_review_usd: 0,
+        artifacts: [],
+        delegate: null,
+        facts: {},
+        landing: null,
+        verification: null,
         body:
           i === 3
             ? "旧基盤の集計クエリを、新基盤の表へ書き出す形に直す。\n\n- 書き出し先の表を決める\n- 列の名前を旧基盤とそろえる"

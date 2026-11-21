@@ -17,7 +17,7 @@ export interface WaitingRow {
   href: string | null;
   // 補足（課題の題名・操作の要約・理由など）
   hint?: string;
-  // スロットの片付けの行だけ持つ。端末のコマンドの案内の差し込み口を埋める値。
+  // スロットの片付けの行だけ持つ。ターミナルのコマンドの案内の差し込み口を埋める値。
   slotId?: string;
 }
 

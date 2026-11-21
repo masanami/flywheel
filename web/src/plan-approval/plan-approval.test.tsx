@@ -324,20 +324,20 @@ it("AC-321 #811: tasks が 5 件のとき、ツリーの見出しに件数の 5 
   expect(screen.getByTestId("plan-task-count")).toHaveTextContent("5");
 });
 
-it("AC-322 #811: phase が next のタスクの箱に「次に走る」が出る", async () => {
+it("AC-322 #811: phase が next のタスクの箱に「次に実行」が出る", async () => {
   await opened();
   const box = screen
     .getAllByTestId("task-box")
     .find((b) => b.getAttribute("data-phase") === "next");
-  expect(box).toHaveTextContent("次に走る");
+  expect(box).toHaveTextContent("次に実行");
 });
 
-it("AC-323 #811: phase が blocked のタスクの箱に「前提を待っている」が出る", async () => {
+it("AC-323 #811: phase が blocked のタスクの箱に「前提待ち」が出る", async () => {
   await opened();
   const box = screen
     .getAllByTestId("task-box")
     .find((b) => b.getAttribute("data-phase") === "blocked");
-  expect(box).toHaveTextContent("前提を待っている");
+  expect(box).toHaveTextContent("前提待ち");
 });
 
 it("AC-324 #811: ツリーの箱は、リンクでない", async () => {
@@ -664,7 +664,7 @@ it("AC-346 #811: 差し戻しのボタンは無い", async () => {
   ]);
 });
 
-it("AC-347 #811: 差し戻しの端末のコマンド（flywheel reject）の案内が出る", async () => {
+it("AC-347 #811: 差し戻しのターミナルのコマンド（flywheel reject）の案内が出る", async () => {
   await opened();
   expect(
     screen.getByTestId("plan-approval").querySelector("[data-guide='reject']")

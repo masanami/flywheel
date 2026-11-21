@@ -417,7 +417,7 @@ const guideText = async (m: HTMLElement) =>
     })
   ).textContent ?? "";
 
-it("AC-214: approve_plan には reject の端末のコマンドと対話の案内", async () => {
+it("AC-214: approve_plan には reject のターミナルのコマンドと対話の案内", async () => {
   setup("awaiting_plan_approval", ["approve_plan"]);
   const t = await guideText(await open());
   expect(t).toContain(

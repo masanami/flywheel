@@ -16,7 +16,7 @@ import (
 
 const (
 	treePath     = "/api/v1/workspaces/w/tree"
-	treeElemKeys = "budget_usd children cost_usd dependencies followups_open id next_human_actions parent status status_label tasks tasks_done tasks_total title updated_at uses_integration"
+	treeElemKeys = "budget_usd children cost_usd dependencies followups_open id next_human_actions parent progress status status_label tasks tasks_done tasks_total title updated_at uses_integration"
 )
 
 type treeDoc struct {

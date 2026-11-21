@@ -8,7 +8,7 @@ export const NO_CYCLE_WORK_TEXT =
 
 // サイクルを回すと進むもの（合計と段ごとの件数）と「サイクルを回す」のボタン。
 // 「いま進められること」とサイクルの画面が、同じこの部品を使う。件数は API の値をそのまま出す。
-// 止まっているかもしれないときは、画面からは始められないので、端末のコマンドの案内を出す。
+// 止まっているかもしれないときは、画面からは始められないので、ターミナルのコマンドの案内を出す。
 export function CycleWorkPart({
   workspace,
   workspacePath,
@@ -52,7 +52,7 @@ export function CycleWorkPart({
       />
       {cycleState === "stale" && cycleGuide ? (
         <p className="now-hint">
-          サイクルが止まっているかもしれないので、この画面からは始められません。端末で次のコマンドを実行すると、止まったサイクルを片付けてから始めます:{" "}
+          サイクルが止まっているかもしれないので、この画面からは始められません。ターミナルで次のコマンドを実行すると、止まったサイクルを片付けてから始めます:{" "}
           <code className="now-command">{cycleGuide.command}</code>
         </p>
       ) : null}

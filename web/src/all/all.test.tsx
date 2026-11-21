@@ -99,7 +99,7 @@ it("AC-385 #806: 「エージェント」の区分に、エージェントごと
   );
   const [a, b] = screen.getAllByTestId("all-agent-row");
   expect(a).toHaveTextContent("alpha");
-  expect(a).toHaveTextContent("サイクル: 走っている");
+  expect(a).toHaveTextContent("サイクル: 実行中");
   expect(a).toHaveTextContent("あなたを待っている 3 件");
   expect(b).toHaveTextContent("beta");
   expect(b).toHaveTextContent("サイクル: 走っていない");
