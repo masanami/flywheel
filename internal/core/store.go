@@ -179,7 +179,9 @@ func openExistingAt(dir string) (*Store, error) {
 	if err != nil {
 		return nil, wrapStoreErr(err)
 	}
-	return &Store{db: db, workspace: dir, file: info, fixWriters: j5FixWriters{Integration: writeIntegrationFix}}, nil
+	s := &Store{db: db, workspace: dir, file: info}
+	s.fixWriters = s.defaultFixWriters()
+	return s, nil
 }
 
 // OpenWorkspace は init 以外のコマンドが使うワークスペースの決定規則で
@@ -283,7 +285,9 @@ func openAtForInit(dir string) (*Store, bool, error) {
 	if err != nil {
 		return nil, false, wrapStoreErr(err)
 	}
-	return &Store{db: db, workspace: dir, fixWriters: j5FixWriters{Integration: writeIntegrationFix}}, db.WasCreated(), nil
+	s := &Store{db: db, workspace: dir}
+	s.fixWriters = s.defaultFixWriters()
+	return s, db.WasCreated(), nil
 }
 
 // EnsureWorkspaceGitignore は workspace/.flywheel/.gitignore が無ければ、

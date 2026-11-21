@@ -17,7 +17,7 @@ import (
 )
 
 // writeIntegrationFix は統合先宛ての書き込みの口（j5FixWriter）。
-func writeIntegrationFix(ctx context.Context, tx *sql.Tx, rec *activityRecorder, r *j5FixResult) error {
+func (s *Store) writeIntegrationFix(ctx context.Context, tx *sql.Tx, rec *activityRecorder, r *j5FixResult) error {
 	sc := r.Scope
 	rowID := sc.Target.RunRowID
 	switch r.Verdict {
@@ -34,8 +34,22 @@ func writeIntegrationFix(ctx context.Context, tx *sql.Tx, rec *activityRecorder,
 		if err := clearIntegrationFixRefs(ctx, tx, rowID); err != nil {
 			return err
 		}
-		_, err := setTaskStatus(ctx, tx, rec, *sc.Target.TaskID, TaskStatusInProgress)
-		return err
+		tid := *sc.Target.TaskID
+		if _, err := setTaskStatus(ctx, tx, rec, tid, TaskStatusInProgress); err != nil {
+			return err
+		}
+		// S3b のタスクの検証の「満たしていない」と同じ記録（作業ログ task_verify と発生 verification_not_met）。
+		// J5 の指摘（r.Feedback）は、確かめの run の出力に残り、次の状態の確認が読んで respond で委譲先へ返す（contract_delegate_review.go）。
+		if err := rec.record("task", tid, ActivityActionTaskVerify, nil, map[string]any{
+			"verdict": string(r.Verdict), "reason": r.Reason, "challenge": formatChallengeID(sc.Target.ChallengeID), "content_ref": sc.PendingRef,
+		}); err != nil {
+			return err
+		}
+		runInt, ok := parseRunID(r.RunID)
+		if !ok {
+			return ErrValidation
+		}
+		return s.insertRunOccurrence(ctx, tx, runInt, OccurrenceKindVerificationNotMet, OccurrenceOutcomeBad, rec.at)
 	case J5VerdictUncertain:
 		return clearIntegrationFixRefs(ctx, tx, rowID)
 	}
@@ -61,4 +75,10 @@ func conflictFixFileNames(fixes []ConflictFix) []string {
 		}
 	}
 	return out
+}
+
+// defaultFixWriters は本番の Store が持つ、衝突の解消の確かめ（J5）の書き込みの口。ここだけで組み立てる（開く道が複数でも口がそろう）。
+// 反映先宛ての口は、その実装が Reflect にここで足す。
+func (s *Store) defaultFixWriters() j5FixWriters {
+	return j5FixWriters{Integration: s.writeIntegrationFix}
 }

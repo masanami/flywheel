@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -202,6 +205,11 @@ func TestConflictFixCheck_NotMetReturnsTaskAndRespondsWithFeedback(t *testing.T)
 	if f.conflictFixCount(t) != 0 { // AC-106
 		t.Fatal("conflict_fix_passed was recorded")
 	}
+	// タスクの検証の「満たしていない」と同じ記録（作業ログ task_verify と発生 verification_not_met）。
+	if f.count(t, `SELECT COUNT(*) FROM activity WHERE action = 'task_verify'`) != 1 ||
+		f.count(t, `SELECT COUNT(*) FROM occurrence WHERE kind = 'verification_not_met'`) != 1 {
+		t.Fatal("task_verify / verification_not_met was not recorded once")
+	}
 	f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
 	f.read(t, intakeOut(integOptsWithLd, artsOf(newContent), nil))
 	if cmd := strings.Join(f.lastResume(t), " "); !strings.Contains(cmd, "respond") || !strings.Contains(cmd, "FEEDBACK-TEXT") { // AC-17
@@ -312,13 +320,63 @@ func TestConflictFixPending_ClearedWhenTheTaskReturnsToInProgress(t *testing.T) 
 	}
 }
 
-// 確かめ待ちの中身のままの読みでは、比較の口を呼び直さない（比較が一時的に失敗しても、検証した中身と確かめ待ちの中身を消さない）。
-func TestSettleMovedContent_SamePendingContentDoesNotCompareAgain(t *testing.T) {
+// 確かめ待ちの中身のままの読みでも、毎回、検証した中身からの変わり方を見分け直す。結果が衝突の解消ありのままなら、列は変えない。
+func TestSettleMovedContent_SamePendingContentComparesAgainAndKeepsColumns(t *testing.T) {
 	t.Parallel()
 	f := newConflictFixed(t)
 	calls := len(f.compare.calls)
 	f.read(t, intakeOut(integOptsWithLd, artsOf(newContent), nil))
-	if len(f.compare.calls) != calls || f.ref(t, "verified_ref") != landContent || f.ref(t, "fix_pending_ref") != newContent {
-		t.Fatalf("compare calls %d -> %d, verified = %q, pending = %q", calls, len(f.compare.calls), f.ref(t, "verified_ref"), f.ref(t, "fix_pending_ref"))
+	if len(f.compare.calls) == calls {
+		t.Fatal("the comparison was not made again")
+	}
+	if f.ref(t, "verified_ref") != landContent || f.ref(t, "fix_pending_ref") != newContent || len(f.client.resumes) != 0 {
+		t.Fatalf("verified = %q, pending = %q, resumes = %d", f.ref(t, "verified_ref"), f.ref(t, "fix_pending_ref"), len(f.client.resumes))
+	}
+}
+
+// 確かめ待ちの中身のままの読みで、比較の結果が関係のない変更ありに変わったら、両方を消し、タスクの検証の対象に戻る（J5 の対象選びが拾う）。
+func TestSettleMovedContent_SamePendingContentNowChangedClearsBoth(t *testing.T) {
+	t.Parallel()
+	f := newConflictFixed(t)
+	f.setContentChangedTo(newContent)
+	f.read(t, intakeOut(integOptsWithLd, artsOf(newContent), nil))
+	if f.ref(t, "verified_ref") != "" || f.ref(t, "fix_pending_ref") != "" || f.taskStatus(t) != "verifying" || len(f.client.resumes) != 0 {
+		t.Fatalf("verified = %q, pending = %q, task = %s", f.ref(t, "verified_ref"), f.ref(t, "fix_pending_ref"), f.taskStatus(t))
+	}
+}
+
+// 確かめ待ちの中身のままの読みで、比較が判定できなくなったら、両方を消す（検証し直しになるだけ）。
+func TestSettleMovedContent_SamePendingContentNowUndeterminableClearsBoth(t *testing.T) {
+	t.Parallel()
+	f := newConflictFixed(t)
+	f.compare.errs[[2]string{landContent, newContent}] = errors.New("temporary failure")
+	f.read(t, intakeOut(integOptsWithLd, artsOf(newContent), nil))
+	if f.ref(t, "verified_ref") != "" || f.ref(t, "fix_pending_ref") != "" || f.taskStatus(t) != "verifying" || len(f.client.resumes) != 0 {
+		t.Fatalf("verified = %q, pending = %q, task = %s", f.ref(t, "verified_ref"), f.ref(t, "fix_pending_ref"), f.taskStatus(t))
+	}
+}
+
+// 本番の Store の組み立て（作って開く道・既存を開く道）が、統合先宛ての確かめ結果の口を必ず持つ（nil のままにならない）。
+func TestProductionStoreHasTheIntegrationFixWriter(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".flywheel"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	created, _, err := openAtForInit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.fixWriters.Integration == nil {
+		t.Error("openAtForInit: the integration writer is nil")
+	}
+	_ = created.Close()
+	opened, err := OpenWorkspace(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = opened.Close() }()
+	if opened.fixWriters.Integration == nil {
+		t.Error("OpenWorkspace: the integration writer is nil")
 	}
 }

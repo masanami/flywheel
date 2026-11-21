@@ -128,9 +128,6 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 		rep.Held = held
 		return rep, err
 	}
-	if cur.FixPendingRef != "" && got == cur.FixPendingRef && got != cur.VerifiedRef {
-		return rep, nil // 衝突の解消の確かめを待っている中身のまま。比べ直さない（比較の一時的な失敗で、検証した中身を消さない）
-	}
 	if got != cur.VerifiedRef {
 		moved, err := s.settleMovedContent(ctx, rs, cur, rep, got)
 		if err != nil || moved != movedMergeIn {
@@ -190,6 +187,9 @@ func (s *Store) settleMovedContent(ctx context.Context, rs *contractReleaseSourc
 	move := contentMoveUndeterminable
 	if repo != "" && dest != "" && rs.Compare != nil {
 		move = classifyContentMove(ClassifyHeadChange(context.WithoutCancel(ctx), rs.Compare, repo, dest, cur.VerifiedRef, got))
+	}
+	if move == contentMoveConflictFix && cur.FixPendingRef == got && cur.LandRef == "" && !cur.LandDelivered {
+		return movedConflictFix, nil // 確かめ待ちの中身がいまの中身と同じ。列は変えない（無駄な書き込みをしない）
 	}
 	outcome := movedRecheck
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
