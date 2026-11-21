@@ -665,6 +665,40 @@ it("AC-254 #808: 不可逆操作がある課題の詳細に、その種類と状
   expect(o).toHaveTextContent("本番へ反映する");
 });
 
+it("#933: 不可逆操作の状態 closed は「終了」と出て、closed は出ない", async () => {
+  const { root } = await open(
+    show({
+      operations: [
+        {
+          approved_head: null,
+          challenge_id: "C-1",
+          closed_at: null,
+          closed_reason: null,
+          consecutive_failures: 0,
+          created_at: "",
+          executed_at: null,
+          id: "O-2",
+          kind: "delete",
+          last_execution_detail: null,
+          last_execution_result: null,
+          merge_commit: null,
+          ref: null,
+          state: "closed",
+          summary: "古い資料を消す",
+          superseded_by: null,
+          supersedes: null,
+          version: 1,
+          waiting_since: null,
+        },
+      ],
+    }),
+  );
+  const o = q(root).getByTestId("detail-operations");
+  expect(o).toHaveTextContent("削除 / 終了");
+  expect(o).not.toHaveTextContent("closed");
+  expect(o).toHaveTextContent("古い資料を消す");
+});
+
 it("#798: 不可逆操作の行に、参照（ref）があるときは文字で添える（リンクにしない）。無いときは出さない", async () => {
   const op = {
     approved_head: null,

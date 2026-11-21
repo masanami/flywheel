@@ -346,19 +346,22 @@ it("#933: 不可逆操作の側の承認・差し戻しの行は出さず、課�
 });
 
 it("#933: 突き合わせて見つからない operation_id の行は、種類の語なしで出る。不可逆操作の登録の行は変わらない", async () => {
-  const { root } = await open([
-    act1({
-      action: "op_approve",
-      after: { operation_id: "O-9" },
-      at: "2026-11-01T01:00:00Z",
-    }),
-    act1({
-      action: "op_add",
-      entity: "operation",
-      entity_id: "O-9",
-      at: "2026-11-01T02:00:00Z",
-    }),
-  ]);
+  const { root } = await open(
+    [
+      act1({
+        action: "op_approve",
+        after: { operation_id: "O-9" },
+        at: "2026-11-01T01:00:00Z",
+      }),
+      act1({
+        action: "op_add",
+        entity: "operation",
+        entity_id: "O-9",
+        at: "2026-11-01T02:00:00Z",
+      }),
+    ],
+    { operations: [opOf("O-1", "release")] },
+  );
   await firstRow(root);
   expect(whatOf(root).sort()).toEqual(
     ["不可逆操作を足した", "不可逆操作を承認した"].sort(),
