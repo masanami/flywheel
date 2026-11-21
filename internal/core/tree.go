@@ -64,6 +64,52 @@ func taskPhase(status *TaskStatus, waiting bool, deps []string, depStatus map[st
 	return TaskPhaseNext
 }
 
+// taskProgress は表示の区分が running のタスクの細かい進みを決める（それ以外は nil）。着手中は working。検証中は、
+// 統合先を使う課題で最後の契約の実行に verified_ref があれば landing、それ以外（統合先を使わない課題を含む）は verifying。
+func taskProgress(phase TaskPhase, status *TaskStatus, usesIntegration *bool, verified bool) *TaskProgress {
+	if phase != TaskPhaseRunning || status == nil {
+		return nil
+	}
+	var p TaskProgress
+	switch {
+	case *status == TaskStatusInProgress:
+		p = TaskProgressWorking
+	case *status == TaskStatusVerifying && usesIntegration != nil && *usesIntegration && verified:
+		p = TaskProgressLanding
+	case *status == TaskStatusVerifying:
+		p = TaskProgressVerifying
+	default:
+		return nil
+	}
+	return &p
+}
+
+// challengeProgress は統合先を使う課題の細かい進みを決める（統合先を使わない課題・どれにも当たらないときは nil）。
+// 検証中は checking。着手中で、取りやめを除く全部のタスクが済みで、上げる依頼の終わっていない契約の実行があれば reflecting。
+func challengeProgress(status Status, usesIntegration *bool, tasks []TreeTask, reflecting bool) *ChallengeProgress {
+	if usesIntegration == nil || !*usesIntegration {
+		return nil
+	}
+	var p ChallengeProgress
+	switch status {
+	case StatusVerifying:
+		p = ChallengeProgressChecking
+	case StatusInProgress:
+		if !reflecting {
+			return nil
+		}
+		for _, t := range tasks {
+			if t.Phase != TaskPhaseDone && t.Phase != TaskPhaseCancelled {
+				return nil
+			}
+		}
+		p = ChallengeProgressReflecting
+	default:
+		return nil
+	}
+	return &p
+}
+
 // planTaskPhases は計画承認待ちの要約のタスク（前提は計画の中の key。状態は無い）の表示の区分を、tasks と同じ順で返す。
 func planTaskPhases(tasks []PlanTaskView) []TaskPhase {
 	out := make([]TaskPhase, 0, len(tasks))
@@ -86,7 +132,9 @@ type TreeTask struct {
 	DependsOn []string
 	Status    *TaskStatus
 	Phase     TaskPhase
-	CostUSD   float64
+	// Progress は Phase が running のタスクの細かい進み（それ以外は nil）。
+	Progress *TaskProgress
+	CostUSD  float64
 }
 
 // TreeDependency は課題の前提の課題 1 件。
@@ -115,7 +163,9 @@ type TreeChallenge struct {
 	// UsesIntegration は、計画の承認の前は最新の計画の値、承認の後は課題に記録した値（計画が無いか過去の形なら nil）。
 	UsesIntegration *bool
 	// Tasks は最新の計画のタスク。前の版の計画のタスクは入れない。無ければ空で nil ではない。
-	Tasks      []TreeTask
+	Tasks []TreeTask
+	// Progress は統合先を使う課題の細かい進み（それ以外は nil）。
+	Progress   *ChallengeProgress
 	TasksTotal int
 	TasksDone  int
 	// CostUSD は課題の実行の記録（判断点と委譲。前の版の計画のタスクに付いた実行も含む）の費用の合計。
@@ -201,6 +251,10 @@ type treeShared struct {
 	costByTask  map[int64]int64
 	followups   map[int64]int
 	waiting     map[int64]bool // 答えていないオーナー宛ての保留があるタスクの内部 ID
+	// taskVerified は、タスクの最後の契約の実行（kind が task）に verified_ref があるタスクの内部 ID。
+	taskVerified map[int64]bool
+	// reflecting は、上げる依頼（kind が reflect）の終わっていない契約の実行がある課題の内部 ID。
+	reflecting map[int64]bool
 }
 
 func (s *Store) buildTreeNodes(ctx context.Context, all, picked []Challenge, agent *AgentDeclaration, now time.Time) ([]TreeChallenge, error) {
@@ -277,7 +331,7 @@ func (s *Store) buildTreeNodes(ctx context.Context, all, picked []Challenge, age
 }
 
 func loadTreeShared(ctx context.Context, tx *sql.Tx) (*treeShared, error) {
-	sh := &treeShared{costByChall: map[int64]int64{}, costByTask: map[int64]int64{}, followups: map[int64]int{}, waiting: map[int64]bool{}}
+	sh := &treeShared{costByChall: map[int64]int64{}, costByTask: map[int64]int64{}, followups: map[int64]int{}, waiting: map[int64]bool{}, taskVerified: map[int64]bool{}, reflecting: map[int64]bool{}}
 	var err error
 	if sh.parents, err = loadParentMap(ctx, tx); err != nil {
 		return nil, err
@@ -301,6 +355,15 @@ func loadTreeShared(ctx context.Context, tx *sql.Tx) (*treeShared, error) {
 		func(k, _ int64) { sh.waiting[k] = true }); err != nil {
 		return nil, err
 	}
+	if err := scanPairs(ctx, tx, `SELECT task_id, 1 FROM contract_run WHERE kind = 'task' AND task_id IS NOT NULL AND verified_ref IS NOT NULL AND verified_ref <> ''
+		AND id = (SELECT MAX(r.id) FROM contract_run r WHERE r.task_id = contract_run.task_id AND r.kind = 'task')`,
+		func(k, _ int64) { sh.taskVerified[k] = true }); err != nil {
+		return nil, err
+	}
+	if err := scanPairs(ctx, tx, `SELECT DISTINCT challenge_id, 1 FROM contract_run WHERE kind = 'reflect' AND ended_at IS NULL`,
+		func(k, _ int64) { sh.reflecting[k] = true }); err != nil {
+		return nil, err
+	}
 	return sh, nil
 }
 
@@ -320,7 +383,7 @@ func scanPairs(ctx context.Context, tx *sql.Tx, query string, put func(k, v int6
 	return rows.Err()
 }
 
-// fillTreeTasks は課題 cid の最新の計画から、tasks・tasks_total・tasks_done・budget_usd・uses_integration を n へ入れる。
+// fillTreeTasks は課題 cid の最新の計画から、tasks（progress を含む）・tasks_total・tasks_done・課題の progress・budget_usd・uses_integration を n へ入れる。
 func fillTreeTasks(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclaration, sh *treeShared, n *TreeChallenge) error {
 	pv, err := loadPlanView(ctx, tx, cid, agent)
 	if err != nil {
@@ -372,8 +435,10 @@ func fillTreeTasks(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDecla
 		if tt.Phase == TaskPhaseDone {
 			n.TasksDone++
 		}
+		tt.Progress = taskProgress(tt.Phase, tt.Status, n.UsesIntegration, tid != 0 && sh.taskVerified[tid])
 		n.Tasks = append(n.Tasks, tt)
 	}
 	n.TasksTotal = len(n.Tasks)
+	n.Progress = challengeProgress(n.Status, n.UsesIntegration, n.Tasks, sh.reflecting[cid])
 	return nil
 }
