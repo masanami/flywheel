@@ -665,3 +665,24 @@ func TestImport_S3bColumnsSurviveTheRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// 版 30 で足した列（contract_run の確かめ待ち・通した・通らなかった中身）の値は、書き出し→空のストアへの再構築で同じになる。
+func TestImport_S3cColumnsSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	src, _ := filledStore(t)
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+		t.Fatal(err)
+	}
+	for col, want := range map[string]string{"fix_pending_ref": "pending01", "fix_verified_ref": "verified02", "fix_rejected_ref": "rejected03"} {
+		var got string
+		if err := dst.db.Read(context.Background(), func(tx *sql.Tx) error {
+			return tx.QueryRow(`SELECT ` + col + ` FROM contract_run WHERE id = 1`).Scan(&got)
+		}); err != nil {
+			t.Fatalf("%s: %v", col, err)
+		}
+		if got != want {
+			t.Errorf("%s = %q, want %q", col, got, want)
+		}
+	}
+}

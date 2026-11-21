@@ -230,6 +230,22 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 		fmt.Fprintf(&b, "  %s %s [%s (%s)] 枠: 実装 %s USD・レビュー対応 %s USD / 使った額: %s USD\n", t.ID, escapeControl(t.Title), t.Status.Label(), t.Status,
 			formatUSD(t.BudgetImplUSD), formatUSD(t.BudgetReviewUSD), formatUSD(t.SpentUSD))
 	}
+	if len(d.ConflictFixes) > 0 {
+		fmt.Fprintf(&b, "通した衝突の解消: %d 件\n", len(d.ConflictFixes))
+		for _, f := range d.ConflictFixes {
+			dest, id := "統合先", ""
+			if f.TaskID != nil {
+				id = *f.TaskID
+			}
+			if f.Target == core.ConflictFixTargetRelease {
+				dest = "反映先"
+				if f.OperationID != nil {
+					id = *f.OperationID
+				}
+			}
+			fmt.Fprintf(&b, "  %s %s %s 直したファイル: %d 件\n", FormatTimestamp(f.At), dest, id, len(f.Files))
+		}
+	}
 	fmt.Fprintf(&b, "計画:          %d 版\n", len(d.Plans))
 	// 計画は全版の本文まで出す（受入基準 17・35 の「show で読める」をテキスト
 	// 出力にも適用する【決定 2026-09-23（オーナー）】）。
