@@ -258,6 +258,11 @@ export const RELEASE_HEAD_MISSING_TEXT = "取得できませんでした";
 // 枠に数える使った額（tasks[].spent_usd）の見出し（タスクの詳細の「枠」の欄・完了承認画面のタスクの一覧）。
 export const TASK_SPENT_LABEL = "使った額";
 
+// 完了承認画面で、承認の要約と課題の詳細の版が、読み直してもそろわなかったときの案内と、読み直しのボタンの語。
+export const CHALLENGE_UPDATED_TEXT =
+  "課題が更新されました。読み直してください";
+export const RELOAD_BUTTON_TEXT = "読み直す";
+
 // 書き込みの口が 403・forbidden_origin で拒否されたときの案内（計画の承認と「サイクルを回す」で同じ文）。
 export const RELOAD_TEXT =
   "操作を受け付けられませんでした。ページを再読み込みしてからやり直してください（自動では再送しません）。";
