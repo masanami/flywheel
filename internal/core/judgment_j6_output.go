@@ -42,8 +42,9 @@ var OccurrenceLayerValues = []OccurrenceLayer{
 	OccurrenceLayerKnowledge, OccurrenceLayerNone,
 }
 
-// j6ConfidencePattern は memory の確度（confidence）の形。記憶の書き込み器（memory_write.go）の検査と同じく、
-// 空白を含まない 1 語だけを通す。
+// j6ConfidencePattern は memory の確度（confidence）の形。空白を含まない 1 語だけを通す。
+// 記憶の書き込み器（memory_write.go）の検査は ContainsAny による空白の検出で、こちらはそれより厳しい側に立つ
+// （\s は全角空白なども含む）。書き込み器が拒否する値は、ここで先に弾く。書き込み器の検査は変えない。
 const j6ConfidencePattern = `^\S+$`
 
 type j6RawClassification struct {
