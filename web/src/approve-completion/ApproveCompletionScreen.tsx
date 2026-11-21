@@ -321,7 +321,7 @@ function CompletionView({
                         </>
                       )}{" "}
                       <span data-testid="release-head">
-                        head:{" "}
+                        中身の識別:{" "}
                         {r.head_sha !== null ? (
                           <code>{r.head_sha}</code>
                         ) : (
