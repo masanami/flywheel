@@ -1127,6 +1127,11 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 
 	// 子を起動して費用が発生しうる以上、結果の記録とスロットの解放は ctx の取り消しに
 	// 関わらず必ず行う（RunJudgment の③と同じ理由）。
+	// 枠超過は、記録の書き込みより前に周へ知らせる。書き込みが終わると（run が終了し、スロットが空くと）待っている別の候補が
+	// すぐ許可され、起動の直前に jc.RateLimited() を読むので、後に知らせると、枠超過を記録した周で別の候補が起動してしまう。
+	if output.RateLimited && jc != nil {
+		jc.rateLimited.Store(true)
+	}
 	var reaped *runRow
 	err = s.mutateSlots(recordCtx, func(tx *sql.Tx) error {
 		// 起動の最中に回収（interrupted）された run は上書きせず、割り当て直されたかもしれない
@@ -1190,10 +1195,6 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, nil, err
 	}
-	if output.RateLimited && jc != nil {
-		jc.rateLimited.Store(true)
-	}
-
 	if reaped != nil {
 		// 起動の最中に回収された run は、ストアの記録（interrupted）を結果にする。
 		return &JudgmentAutoItem{ChallengeID: ch.ID, RunID: assignment.RunID, Result: reaped.Result}, nil, nil

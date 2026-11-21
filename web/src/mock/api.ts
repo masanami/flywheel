@@ -129,13 +129,18 @@ export function createMockApi(
         improvement: null,
         integration_ref: null,
       },
-      conflict_fixes: [],
+      conflict_fixes: extra.conflict_fixes ?? [],
       direct_completions: m.directCompletions,
       followups: extra.followups ?? [],
       holds: m.holds,
       operations: m.operations,
       plans: m.plans,
-      runs: m.runs.map((r) => ({ ...r, fix_pending_ref: null })),
+      runs: m.runs.map((r) => ({
+        ...r,
+        fix_pending_ref: extra.fix_pending_runs?.includes(r.id)
+          ? "abc1234"
+          : null,
+      })),
       pairs: pairsOf(m.stages),
       source_binding: extra.source_binding ?? null,
       source_children: extra.source_children ?? [],

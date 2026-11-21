@@ -1,9 +1,9 @@
 import { expect, it } from "vitest";
 import guidance from "./guidance.json";
 import {
+  APPROVAL_REJECT_NOTE,
   COMPLETION_APPROVED_NOTE,
   COMPLETION_BUTTON_NOTE,
-  COMPLETION_REJECT_NOTE,
   COMPLETION_RELEASE_NOTE,
   CONVERSATION_NOTE,
   OUTSIDE_NOTE,
@@ -82,14 +82,14 @@ it("#927: 完了承認画面の案内は、ターミナルのコマンドの例�
   for (const note of [
     COMPLETION_BUTTON_NOTE,
     COMPLETION_RELEASE_NOTE,
-    COMPLETION_REJECT_NOTE,
+    APPROVAL_REJECT_NOTE,
     COMPLETION_APPROVED_NOTE,
   ]) {
     expect(note.length).toBeGreaterThan(0);
     expect(note).not.toContain("flywheel");
   }
   expect(COMPLETION_RELEASE_NOTE).toContain("対話");
-  expect(COMPLETION_REJECT_NOTE).toContain("対話");
+  expect(APPROVAL_REJECT_NOTE).toContain("対話");
   expect(COMPLETION_BUTTON_NOTE).toContain("完了を記録するだけ");
   expect(COMPLETION_APPROVED_NOTE).toContain("記録しました");
 });

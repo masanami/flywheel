@@ -24,9 +24,22 @@ const contractRequestedKindObserve = "observe"
 
 // contractRequestedKindAnswer は回答を求める待ち。contractDeciderParent は親が答える相手（J4）。
 const (
-	contractRequestedKindAnswer = "answer"
-	contractDeciderParent       = "parent"
+	contractRequestedKindAnswer  = "answer"
+	contractRequestedKindApprove = "approve"
+	contractDeciderParent        = "parent"
 )
+
+// contractRequestedKindValues は requested_action.kind の閉集合（入力の検査と ContractRequestedKindValues の正本）。
+var contractRequestedKindValues = []string{contractRequestedKindAnswer, contractRequestedKindApprove, contractRequestedKindObserve, contractRequestedKindReview}
+
+func validContractRequestedKind(k string) bool {
+	for _, v := range contractRequestedKindValues {
+		if k == v {
+			return true
+		}
+	}
+	return false
+}
 
 // hasReviewableArtifact は artifacts に、検証中へ進めるときに取り込む種類（pr・branch・commit）が 1 件でもあるか。
 func hasReviewableArtifact(arts []ContractArtifact) bool {
