@@ -200,8 +200,11 @@ type ContractStartInput struct {
 	Judgment JudgmentInvoker
 	// TaskID は起動するタスクの内部整数 ID。0 なら、起動できるタスクがちょうど 1 個の課題として、そのタスクを起動する。
 	TaskID int64
-	// OnRunInserted は start の run をストアに記録した直後に呼ぶ（nil なら呼ばない。同時委譲数の数えの二重計上を避けるため）。
-	OnRunInserted func()
+	// RunRecording は start の run をストアに記録する区間。非 nil なら、StartContractDelegation が区間に入り、run の記録を
+	// ちょうど 1 回行い、成功したら確定を知らせてから区間を出る（nil なら区間なしで記録する）。
+	// 同時委譲数の許可の数えは、ストアの run の数と、記録前の許可の数の和なので、記録の確定から許可の数の解放までの間に
+	// 別のタスクの許可が数えると、同じ run を 2 回数えて断る。記録と許可の数の解放を、許可の数えと同時に起きない 1 つの区間にする。
+	RunRecording runRecordingSection
 }
 
 func (in ContractStartInput) releaseSource() *contractReleaseSource {
@@ -666,12 +669,11 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if n, ok := parseCycleID(in.CycleID); ok {
 		cycleIDInt = &n
 	}
-	runIDInt, err := s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID, nil)
+	runIDInt, err := s.recordContractStartRun(in.RunRecording, func() (int64, error) {
+		return s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID, nil)
+	})
 	if err != nil {
 		return nil, err
-	}
-	if in.OnRunInserted != nil {
-		in.OnRunInserted()
 	}
 	// タスクの文面を、起動の実行の記録の置き場へ書き、その絶対パスを {task_file} に渡す（書けなければ起動せず、
 	// 起動できなかった run として記録する）。ファイルは消さない。
@@ -1588,4 +1590,27 @@ func firstErrOr(cur, next error) error {
 		return cur
 	}
 	return next
+}
+
+// runRecordingSection は run の記録と許可の数の解放を、許可の数えと同時に起きない 1 つの区間にする（実装は admission）。
+// 区間の中で行う記録は StartContractDelegation 自身がちょうど 1 回だけ行う。
+type runRecordingSection interface {
+	Lock()
+	Unlock()
+	// MarkInsertedLocked は、区間の中で run の記録が確定したことを知らせる（許可の数を解放する）。
+	MarkInsertedLocked()
+}
+
+// recordContractStartRun は sec の区間（nil なら区間なし）の中で insert を 1 回呼び、成功したら確定を知らせる。
+func (s *Store) recordContractStartRun(sec runRecordingSection, insert func() (int64, error)) (int64, error) {
+	if sec == nil {
+		return insert()
+	}
+	sec.Lock()
+	defer sec.Unlock()
+	id, err := insert()
+	if err == nil {
+		sec.MarkInsertedLocked()
+	}
+	return id, err
 }

@@ -4,7 +4,9 @@ import { defineConfig, devices } from "@playwright/test";
 // make check には入れず、`make e2e`（または `npm run e2e`）で流す。初回は `npx playwright install chromium` が要る。
 // 本物の `flywheel serve` と種のストアに向けた E2E は、別の設定（playwright.real.config.ts）と
 // 別の置き場（e2e-real/）にあり、この設定（testDir: e2e）では流れない（`make e2e-real`。flywheel#463）。
-const PORT = 5199;
+// ポートは FLYWHEEL_E2E_PORT で変えられる。`npm run e2e` は空いているポートを選んで渡す（scripts/run-e2e.mjs）ので、
+// 2 つの作業ツリーで同時に流しても衝突しない。環境変数が無いとき（`npx playwright test` を直接流したとき）は 5199。
+const PORT = Number(process.env.FLYWHEEL_E2E_PORT) || 5199;
 
 export default defineConfig({
   testDir: "e2e",
