@@ -88,6 +88,24 @@ func TestFinish4_ReplanAnswerIsRefusedWhileARunToldToLandIsRunning(t *testing.T)
 	}
 }
 
+// 「入れてよい」を返そうとして、届いたか分からない実行（通す中身があり、届いた記録が無く、最後に読んだ状態が終わりでない。resume が失敗した等）は、
+// 委譲先が入れている最中かもしれないので断る。終わりを読んだ行と、届いた記録のあるレビュー待ち（land_refused の保留）は断らない（上の 2 試験）。
+func TestFinish4_ReplanAnswerIsRefusedForARunWhoseLandDeliveryIsUnknown(t *testing.T) {
+	t.Parallel()
+	for _, state := range []string{"waiting", "running"} {
+		state := state
+		t.Run(state, func(t *testing.T) {
+			t.Parallel()
+			f := newIgLandFixture(t)
+			f.heldWithTaskRun(t, "in_progress")
+			f.sql(t, `UPDATE contract_run SET state = ?, land_ref = ?, land_delivered = 0`, state, landContent)
+			if _, err := f.replanAnswer(t); !errors.Is(err, ErrValidation) {
+				t.Fatalf("err = %v, want ErrValidation", err)
+			}
+		})
+	}
+}
+
 // 仕上げ 4 項目 2: 記録から作った読み（成果物に PR が無く、取り込み済みの成果物で補う）の成果物を、もう一度 landingArtifacts に通しても、
 // 統合先の識別が二重に数えられない。
 func TestFinish4_LandingArtifactsDoNotDoubleTheIntegrationRefsOfARecordedRead(t *testing.T) {
