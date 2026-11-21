@@ -183,7 +183,7 @@ func (s *Store) holdReflectEnded(ctx context.Context, rep *ContractRunReport) er
 
 // endReflectRunRecord は上げる依頼の契約の実行を、終わった記録にする（終わっていなければ）。
 func endReflectRunRecord(ctx context.Context, tx *sql.Tx, cid int64, externalRunID, at string) error {
-	_, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ? WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`, at, cid, externalRunID)
+	_, err := tx.ExecContext(ctx, `UPDATE contract_run SET ended_at = ?, fix_pending_ref = NULL, fix_verified_ref = NULL, fix_rejected_ref = NULL WHERE challenge_id = ? AND external_run_id = ? AND ended_at IS NULL`, at, cid, externalRunID)
 	return err
 }
 

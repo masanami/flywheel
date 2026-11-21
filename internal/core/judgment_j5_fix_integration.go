@@ -78,7 +78,7 @@ func conflictFixFileNames(fixes []ConflictFix) []string {
 }
 
 // defaultFixWriters は本番の Store が持つ、衝突の解消の確かめ（J5）の書き込みの口。ここだけで組み立てる（開く道が複数でも口がそろう）。
-// 反映先宛ての口は、その実装が Reflect にここで足す。
+// 反映先宛ての口は release_fix_check.go の writeReflectFix。
 func (s *Store) defaultFixWriters() j5FixWriters {
-	return j5FixWriters{Integration: s.writeIntegrationFix}
+	return j5FixWriters{Integration: s.writeIntegrationFix, Reflect: s.writeReflectFix}
 }
