@@ -142,7 +142,7 @@ func TestAnswerReplan_J2InputCarriesAnswerAndPlan_DelegationCarriesTheDeliverabl
 	text := allSectionsText(j2In.Sections)
 	// 前の計画の版までに使った費用（問いの run の 2 USD）と、新しい予算はこの額を含む上限として書く旨が入る。
 	for _, want := range []string{ReplanSectionLabel, "NEW-DIRECTION-ANSWER", "PLAN-BODY-t",
-		"前の計画の版までに使った費用（新しい計画の枠から引かれる積み上げの額）: 実装枠 2 USD", "この額を含む上限として書く"} {
+		"前の計画の版までに使った費用（新しい計画の枠から引かれる積み上げの額）: 実装枠 2 USD", "使った額を含む上限として書く", "使った費用の合計は課題の上限に含める", "そのタスクで使う分だけを書き"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("J2 input lacks %q:\n%s", want, text)
 		}

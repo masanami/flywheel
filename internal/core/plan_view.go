@@ -151,6 +151,7 @@ func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclar
 	if err != nil {
 		return nil, err
 	}
+	var soleFrame *planBudgets // タスクが 1 個で枠を省いた計画に、core が当てる既定の枠（承認の後の fillSoleTaskBudgets と同じ値）
 	if taskSum, taskSumOK := planTaskFrameSum(version, raw.Tasks, allBudgets); taskSumOK {
 		pv.BudgetUSD = &taskSum
 	} else if implUSD, reviewUSD, ok := resolveSpecBudgets(spec.String, agent); ok {
@@ -159,6 +160,7 @@ func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclar
 			return nil, err
 		}
 		b := applyBudgetOverride(implUSD, reviewUSD, override)
+		soleFrame = &b
 		total := b.Impl + b.Review
 		// 統合先を使う課題で済みのタスクがあるとき、枠を書かないタスク（1 個の計画）の枠は、起動のときと同じ規則（規模の既定。
 		// fillSoleTaskBudgets）で引いたこの額で、承認の後の課題の上限は、これに前の版の済みのタスクの枠を足した合計になる。
@@ -219,6 +221,17 @@ func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclar
 				impl, review := microsToUSD(eb.Impl), microsToUSD(eb.Review)
 				tv.BudgetImplUSD, tv.BudgetReviewUSD = &impl, &review
 			}
+		}
+		if len(raw.Tasks) == 1 && tv.BudgetImplUSD == nil && soleFrame != nil {
+			// 承認の fillSoleTaskBudgets と同じに、タスクが書いた枠はそのまま、書かなかった枠だけ既定で埋める。
+			impl, review := microsToUSD(soleFrame.Impl), microsToUSD(soleFrame.Review)
+			if t.BudgetImplUSD != nil {
+				impl = *t.BudgetImplUSD
+			}
+			if t.BudgetReviewUSD != nil {
+				review = *t.BudgetReviewUSD
+			}
+			tv.BudgetImplUSD, tv.BudgetReviewUSD = &impl, &review
 		}
 		pv.Tasks = append(pv.Tasks, tv)
 	}

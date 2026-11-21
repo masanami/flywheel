@@ -262,3 +262,33 @@ func TestPlanView_SoleTaskWithoutFramesAddsTheDoneTasksFrames(t *testing.T) {
 		t.Errorf("limit after approving = %+v, want %v", sum, want)
 	}
 }
+
+// タスクが 1 個で枠を省いた計画の承認の要約（承認の前）は、core が当てる既定の枠をタスクの枠として出す。
+func TestPlanView_SoleTaskWithoutFramesShowsTheDefaultFrame(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	id := f.newInProgress(t, "two", "P2", twoTaskSpec(3, 2, 4, 5))
+	cid, _ := parseChallengeID(id)
+	noFrames := planSpec(func(m map[string]any) {
+		tasks := j2TasksOf("a")
+		tm := tasks[0].(map[string]any)
+		tm["repo"], tm["operation"] = "main-repo", "impl"
+		m["tasks"] = tasks
+	})
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (?, 2, 'v2', '2026-09-26T00:00:00.000Z', ?)`, cid, noFrames)
+		return err
+	})
+	impl, review, ok := resolveSpecBudgets(noFrames, f.agent)
+	if !ok {
+		t.Fatal("the size default cannot be resolved")
+	}
+	pv, err := f.s.GetPlanView(context.Background(), id, f.agent)
+	if err != nil || len(pv.Tasks) != 1 {
+		t.Fatalf("GetPlanView: %v tasks=%d", err, len(pv.Tasks))
+	}
+	tv := pv.Tasks[0]
+	if tv.BudgetImplUSD == nil || tv.BudgetReviewUSD == nil || *tv.BudgetImplUSD != impl || *tv.BudgetReviewUSD != review {
+		t.Errorf("task frame = %v/%v, want the size default %v/%v", tv.BudgetImplUSD, tv.BudgetReviewUSD, impl, review)
+	}
+}

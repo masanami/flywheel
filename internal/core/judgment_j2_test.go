@@ -536,3 +536,37 @@ func TestValidateJ2Output_CLINonStartCommandPlaceholdersOutsideClosedSetAreInval
 		}
 	}
 }
+
+// 計画の検査は、人の増額（flywheel budget）と同じ上限（maxBudgetAmountUSD）をすべての枠に当てる。
+// 超える額はマイクロドルへの変換が桁あふれするので、検査で断る。
+func TestValidateJ2Output_EveryFrameIsCappedAtTheHumanBudgetLimit(t *testing.T) {
+	t.Parallel()
+	over := maxBudgetAmountUSD * 2
+	vc := j2TestContext(t, true)
+	vc.Agent.MaxRunBudgetUSD = over * 2 // 1 回の上限額の比べで先に断られないようにする
+	cases := map[string]func(m map[string]any){
+		"plan impl":   func(m map[string]any) { m["budget_impl_usd"] = over },
+		"plan review": func(m map[string]any) { m["budget_review_usd"] = over },
+		"task impl": func(m map[string]any) {
+			tasks := j2TasksOf("a", "b")
+			tasks[0].(map[string]any)["budget_impl_usd"] = over
+			m["tasks"] = tasks
+		},
+		"task review": func(m map[string]any) {
+			tasks := j2TasksOf("a", "b")
+			tasks[1].(map[string]any)["budget_review_usd"] = over
+			m["tasks"] = tasks
+		},
+	}
+	for name, mut := range cases {
+		if _, ok := validateJ2Output(j2PlanOutput(mut), vc); ok {
+			t.Errorf("%s above maxBudgetAmountUSD must be rejected", name)
+		}
+	}
+	// 上限ちょうどは受ける。
+	if _, ok := validateJ2Output(j2PlanOutput(func(m map[string]any) {
+		m["budget_review_usd"] = maxBudgetAmountUSD
+	}), vc); !ok {
+		t.Error("review budget equal to maxBudgetAmountUSD must be accepted")
+	}
+}
