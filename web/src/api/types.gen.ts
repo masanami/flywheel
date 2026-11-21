@@ -678,8 +678,11 @@ export interface ApprovalSummary {
   challenge_id: string;
   conditions_after_release: string[];
   conditions_after_release_heading: string;
+  conflict_fixes: PassedConflictFix[];
   direct_completion: DirectCompletion | null;
   done_criteria: string | null;
+  followups: Followup[];
+  integration_ref: string | null;
   kind: string;
   mergeability_note: string;
   other_pending_operations: ApprovalOtherOperation[];
@@ -688,7 +691,9 @@ export interface ApprovalSummary {
   release_held: boolean;
   releases: ApprovalRelease[];
   stages: Stages;
+  tasks: ApprovalCompletionTask[];
   title: string;
+  uses_integration: boolean | null;
   version: number;
 }
 
@@ -744,6 +749,15 @@ export interface ApprovalRelease {
   id: string;
   ref: string | null;
   summary: string;
+}
+
+export interface ApprovalCompletionTask {
+  budget_usd: number;
+  id: string;
+  in_tree: boolean;
+  phase: string;
+  spent_usd: number;
+  title: string;
 }
 
 export interface CycleStatus {

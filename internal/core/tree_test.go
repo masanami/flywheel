@@ -748,3 +748,38 @@ func TestTaskPhaseValues_AC74_802(t *testing.T) {
 		t.Errorf("TaskPhaseValues = %v, want %v", got, want)
 	}
 }
+
+// 完了の承認の要約（PrepareApprovalFor）は、完了承認画面に並べるタスクを同じ読み取りで返す。
+// 最新の版（木）のタスクは木の区分で、木に無い前の版は済みのものだけ並べる。端末の要約（PrepareApproval）は読まない。
+func TestPrepareApprovalFor_CompletionTasksListsTreeAndPriorDone(t *testing.T) {
+	f := newTreeFx(t)
+	cid := f.challenge("c", "awaiting_completion_approval")
+	f.plan(cid, 1, treeSpec(nil, "S", []treeTK{{"old-done", nil, "done"}, {"old-open", nil, "in_progress"}}), []treeTK{{"old-done", nil, "done"}, {"old-open", nil, "in_progress"}})
+	nw := []treeTK{{"new", nil, "done"}}
+	ids := f.plan(cid, 2, treeSpec(nil, "S", nw), nw)
+	coretest.Exec(t, f.ws, `UPDATE challenge SET integration_ref = 'integ/x', uses_integration = 1 WHERE id = ?`, cid)
+	id := formatChallengeID(int64(cid))
+	p, err := f.s.PrepareApprovalFor(context.Background(), id, f.decl())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.CompletionTasks) != 2 {
+		t.Fatalf("tasks = %+v, want old-done and new only", p.CompletionTasks)
+	}
+	for _, ct := range p.CompletionTasks {
+		wantInTree := ct.ID == formatTaskID(ids["new"])
+		if ct.Phase != TaskPhaseDone || ct.InTree != wantInTree {
+			t.Errorf("task %+v: want phase done, in_tree=%v", ct, wantInTree)
+		}
+	}
+	if p.IntegrationRef == nil || *p.IntegrationRef != "integ/x" || p.UsesIntegration == nil || !*p.UsesIntegration {
+		t.Errorf("integration = %v / %v, want integ/x / true", p.IntegrationRef, p.UsesIntegration)
+	}
+	plain, err := f.s.PrepareApproval(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.CompletionTasks != nil || plain.OpenFollowups != nil {
+		t.Errorf("PrepareApproval must not load screen values: %+v", plain)
+	}
+}

@@ -19,11 +19,7 @@ import {
   COMPLETION_BUTTON_NOTE,
   COMPLETION_RELEASE_NOTE,
 } from "../guidance.ts";
-import {
-  CHALLENGE_UPDATED_TEXT,
-  RELEASE_HEAD_MISSING_TEXT,
-  RELOAD_BUTTON_TEXT,
-} from "../labels.ts";
+import { RELEASE_HEAD_MISSING_TEXT } from "../labels.ts";
 import {
   FakeEventSource,
   type FakeResponder,
@@ -71,8 +67,11 @@ function summary(over: Partial<ApprovalSummary> = {}): {
       challenge_id: "C-1",
       conditions_after_release: [],
       conditions_after_release_heading: "",
+      conflict_fixes: [],
       direct_completion: null,
       done_criteria: "完了条件の本文",
+      followups: [],
+      integration_ref: null,
       kind: "completion",
       mergeability_note: "",
       other_pending_operations: [],
@@ -81,7 +80,9 @@ function summary(over: Partial<ApprovalSummary> = {}): {
       release_held: true,
       releases: [],
       stages: STAGES,
+      tasks: [],
       title: "題名",
+      uses_integration: null,
       version: 3,
       ...over,
     },
@@ -227,6 +228,36 @@ function showBody(o: Over = {}) {
   };
 }
 
+// Over の値を、要約の応答に入る形（完了承認画面の値は要約 1 つで返る）へ写す。
+// 木（最新の版）にあるタスクは木の状態、木に無い前の版の済みのタスクだけを並べる（core.CompletionTask と同じ規則）。
+function approvalFromOver(o: Over): Partial<ApprovalSummary> {
+  const inTree = (id: string) =>
+    (o.treeTaskIds ?? (o.tasks ?? []).map((t) => t.id)).includes(id);
+  return {
+    conflict_fixes: (o.conflictFixes ??
+      []) as unknown as ApprovalSummary["conflict_fixes"],
+    followups: (o.followups ?? []).filter((f) => f.status === "open"),
+    integration_ref:
+      (o.challenge?.integration_ref as string | null | undefined) ?? null,
+    tasks: (o.tasks ?? []).flatMap((t) =>
+      inTree(t.id) || t.status === "done"
+        ? [
+            {
+              budget_usd: t.budget_impl_usd + t.budget_review_usd,
+              id: t.id,
+              in_tree: inTree(t.id),
+              phase: "done",
+              spent_usd: t.spent_usd,
+              title: t.title,
+            },
+          ]
+        : [],
+    ),
+    uses_integration:
+      (o.challenge?.uses_integration as boolean | null | undefined) ?? null,
+  };
+}
+
 function setup(o: Over = {}, extra: Record<string, unknown> = {}) {
   const f = fixtures();
   const s = showBody(o);
@@ -235,7 +266,11 @@ function setup(o: Over = {}, extra: Record<string, unknown> = {}) {
   };
   f[`${BASE}/challenges/C-1`] = s.body;
   f[`${BASE}/log?challenge=C-1`] = { activities: [] };
-  return installFakes({ ...f, [APPROVAL]: summary(), ...extra });
+  return installFakes({
+    ...f,
+    [APPROVAL]: summary(approvalFromOver(o)),
+    ...extra,
+  });
 }
 
 async function open(): Promise<HTMLElement> {
@@ -561,10 +596,6 @@ it("AC-26: 版の食い違いのとき、要約を読み直し、承認の要求
       f[`${BASE}/challenges`] = {
         challenges: [{ ...s.challenge, card: s.card }],
       };
-      // 課題の詳細の版は、要約の版にそろえる（そろわないと画面は内容を出さない）。
-      f[`${BASE}/challenges/C-1`] = showBody({
-        challenge: { version: reads <= 1 ? 3 : 4 },
-      }).body;
       const b = f[rec.url];
       return b === undefined ? json(404, {}) : json(200, b);
     }),
@@ -621,9 +652,6 @@ it("版の食い違いのとき、読み直しが終わるまでボタンは押�
       f[`${BASE}/challenges`] = {
         challenges: [{ ...s.challenge, card: s.card }],
       };
-      f[`${BASE}/challenges/C-1`] = showBody({
-        challenge: { version: reads <= 1 ? 3 : 4 },
-      }).body;
       const b = f[String(input)];
       return b === undefined ? json(404, {}) : json(200, b);
     }),
@@ -821,11 +849,17 @@ it("AC-3・AC-4: 課題の詳細の「あなたを待っているもの」には
   expect(requests.some((r) => r.url === APPROVAL)).toBe(false);
 });
 
-it("完了承認画面は、承認の要約と課題の詳細の 2 つを読む", async () => {
-  const { requests } = setup();
-  await open();
-  expect(requests.some((r) => r.url === APPROVAL)).toBe(true);
-  expect(requests.some((r) => r.url === `${BASE}/challenges/C-1`)).toBe(true);
+it("完了承認画面は、承認の要約 1 つだけを読む（課題の詳細は読まない）", async () => {
+  const { requests } = setup({
+    tasks: [task("T-1")],
+    followups: [followup("F-1", "open")],
+  });
+  const m = await open();
+  expect(requests.filter((r) => r.url === APPROVAL)).toHaveLength(1);
+  expect(requests.some((r) => r.url === `${BASE}/challenges/C-1`)).toBe(false);
+  // タスクとフォローアップは、同じ要約の応答から出る。
+  expect(within(m).getByText("タスク T-1")).toBeTruthy();
+  expect(within(m).getByText("フォローアップ F-1")).toBeTruthy();
 });
 
 it("親が直接行った完了: 成果物は http・https だけがリンクで、完了の検証を通っていない旨が出る。通常の完了では欄を出さない", async () => {
@@ -888,16 +922,9 @@ it("反映の後に確かめる条件の見出しは、サーバが返す見出�
 });
 
 it("開いた後の読み直しで版が変わると、更新された旨が出る", async () => {
-  // 口ごとに読んだ回数を数え、n 回目の読み取りの版は、どちらの口も n + 2 にする（呼び出しの順に頼らない）。
-  const n = { approval: 0, challenge: 0 };
-  setup(
-    {},
-    {
-      [APPROVAL]: () => json(200, summary({ version: 2 + ++n.approval })),
-      [`${BASE}/challenges/C-1`]: () =>
-        json(200, showBody({ challenge: { version: 2 + ++n.challenge } }).body),
-    },
-  );
+  // n 回目の読み取りの版は n + 2 にする（呼び出しの順に頼らない）。
+  let n = 0;
+  setup({}, { [APPROVAL]: () => json(200, summary({ version: 2 + ++n })) });
   const m = await open();
   await button(m);
   act(() =>
@@ -954,150 +981,10 @@ it("AC-128: 通した衝突の解消が 0 件なら、完了承認画面に区�
   expect(within(m).queryByTestId("conflict-fixes")).toBeNull();
 });
 
-// 承認の要約と課題の詳細の版が食い違う応答を返す偽の口。読んだ回数を数え、版の列を順に返す（最後の値は繰り返す）。
-function versionedReads(
-  approvalVersions: number[],
-  challengeVersions: number[],
-  over: Over = {},
-) {
-  const counts = { approval: 0, challenge: 0 };
-  const at = (xs: number[], i: number) => xs[Math.min(i, xs.length - 1)];
-  const { requests } = setup(over, {
-    [APPROVAL]: () =>
-      json(
-        200,
-        summary({
-          version: at(approvalVersions, counts.approval++),
-          done_criteria: `要約の条件 ${counts.approval}`,
-        }),
-      ),
-    [`${BASE}/challenges/C-1`]: () =>
-      json(
-        200,
-        showBody({
-          ...over,
-          challenge: {
-            ...over.challenge,
-            version: at(challengeVersions, counts.challenge++),
-          },
-        }).body,
-      ),
-  });
-  return { counts, requests };
-}
-
-it("版の食い違い: 要約と課題の詳細の版が違う応答のとき、両方を読み直し、そろえば画面が出る", async () => {
-  const { counts } = versionedReads([3, 4], [4, 4], {
-    tasks: [task("T-1")],
-  });
-  const m = await open();
-  expect(counts).toEqual({ approval: 2, challenge: 2 });
-  expect(within(m).getByText("要約の条件 2")).toBeTruthy();
-  expect(within(m).getByText("タスク T-1")).toBeTruthy();
-  expect(within(m).queryByText(CHALLENGE_UPDATED_TEXT)).toBeNull();
-  expect(await button(m)).toBeTruthy();
-});
-
-it("版の食い違い: 2 回読み直してもそろわなければ、内容もボタンも出ず、読み直しの案内と手段が出る", async () => {
-  const { counts, requests } = versionedReads([3], [4], {
-    tasks: [task("T-1")],
-  });
-  window.location.hash = "#/a/alpha/challenges/C-1/approve-completion";
-  render(<App />);
-  act(() => FakeEventSource.latest.open());
-  const notice = await screen.findByText(CHALLENGE_UPDATED_TEXT);
-  expect(counts).toEqual({ approval: 3, challenge: 3 });
-  expect(screen.queryByTestId("approve-completion")).toBeNull();
-  expect(screen.queryByText("要約の条件 3")).toBeNull();
-  expect(screen.queryByText("タスク T-1")).toBeNull();
-  expect(screen.queryByRole("button", { name: "完了を承認する" })).toBeNull();
-  expect(notice.closest("[role=alert]")).not.toBeNull();
-  expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
-  expect(CHALLENGE_UPDATED_TEXT).toBe(
-    "課題が更新されました。読み直してください",
-  );
-});
-
-it("版の食い違い: 案内の「読み直す」を押して、そろった応答が読めれば画面が出る", async () => {
-  // 最初の 3 回は食い違い、その後はそろう。
-  const { counts } = versionedReads([3, 3, 3, 5], [4, 4, 4, 5]);
-  window.location.hash = "#/a/alpha/challenges/C-1/approve-completion";
-  render(<App />);
-  act(() => FakeEventSource.latest.open());
-  await screen.findByText(CHALLENGE_UPDATED_TEXT);
-  fireEvent.click(screen.getByRole("button", { name: RELOAD_BUTTON_TEXT }));
-  const m = await screen.findByTestId("approve-completion");
-  expect(counts.approval).toBe(4);
-  expect(screen.queryByText(CHALLENGE_UPDATED_TEXT)).toBeNull();
-  // 中身を一度も見ていないので、更新された旨は出さない。
-  expect(screen.queryByText(COMPLETION_UPDATED_TEXT)).toBeNull();
-  expect(await button(m)).toBeTruthy();
-});
-
-it("版の食い違い: 開いた後の読み直し（変化の合図）で食い違った応答が来たときも、内容とボタンを外して案内を出す", async () => {
-  let skewed = false;
-  const v = 3;
-  setup(
-    {},
-    {
-      [APPROVAL]: () => json(200, summary({ version: v })),
-      [`${BASE}/challenges/C-1`]: () =>
-        json(
-          200,
-          showBody({ challenge: { version: skewed ? v + 1 : v } }).body,
-        ),
-    },
-  );
-  const m = await open();
-  await button(m);
-  skewed = true;
-  act(() =>
-    FakeEventSource.latest.send({
-      type: "workspace_changed",
-      workspace: "alpha",
-    }),
-  );
-  await screen.findByText(CHALLENGE_UPDATED_TEXT);
-  expect(screen.queryByTestId("approve-completion")).toBeNull();
-  expect(screen.queryByRole("button", { name: "完了を承認する" })).toBeNull();
-});
-
-it("版の食い違い: そろわない画面を挟んで版が進んでそろったときも、更新された旨が出る（見た版を失わない）", async () => {
-  let approvalVersion = 3;
-  let challengeVersion = 3;
-  setup(
-    {},
-    {
-      [APPROVAL]: () => json(200, summary({ version: approvalVersion })),
-      [`${BASE}/challenges/C-1`]: () =>
-        json(200, showBody({ challenge: { version: challengeVersion } }).body),
-    },
-  );
-  const m = await open();
-  await button(m);
-  const changed = () =>
-    act(() =>
-      FakeEventSource.latest.send({
-        type: "workspace_changed",
-        workspace: "alpha",
-      }),
-    );
-  approvalVersion = 4;
-  challengeVersion = 6;
-  changed();
-  await screen.findByText(CHALLENGE_UPDATED_TEXT);
-  expect(screen.queryByText(COMPLETION_UPDATED_TEXT)).toBeNull();
-  approvalVersion = 6;
-  changed();
-  await screen.findByText(COMPLETION_UPDATED_TEXT);
-  expect(screen.queryByText(CHALLENGE_UPDATED_TEXT)).toBeNull();
-  expect(await button(m)).toBeTruthy();
-});
-
-it("版の食い違い: 完了の承認待ちでない要約は、版が違っても読み直さず、承認待ちでない旨を出す", async () => {
+it("完了の承認待ちでない要約は、読み直さず、承認待ちでない旨を出す", async () => {
   let reads = 0;
   setup(
-    { challenge: { version: 4 } },
+    {},
     {
       [APPROVAL]: () => {
         reads++;
