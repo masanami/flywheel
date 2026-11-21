@@ -542,3 +542,62 @@ func TestReleaseFixCheck_TwoCorrespondingOperationsDoNotEnterTheFixCheck(t *test
 		}
 	})
 }
+
+// 「入れてよい」を返した中身（land_ref。届いた記録が真）と同じ中身で成果物が入っていれば、その中身は flywheel が確かめて許したものなので、
+// 承認していない中身が入った（merged_unapproved）にしない。委譲先が取り込み後の中身をマージのコミットで入れると、その中身は反映先の祖先になり、
+// 比較の口は取り込みだけと言えなくなる（比較の口の記録を捨てて、その形にする）。
+func TestReleaseFixCheck_LandedWithTheContentReturnedToTheDelegateIsNotUnapproved(t *testing.T) {
+	t.Parallel()
+	// landReturned は、from を起点に取り込みだけで動いた h2 を付けて「入れてよい」を返し、その後 h2 で入り（比較の口は何も言えない）、succeeded を読む形にする。
+	landReturned := func(t *testing.T, f *fixCheckFixture, from string) {
+		t.Helper()
+		f.mergeInMove(from, "h2")
+		f.moveHeadTo("h2")
+		if item := f.one(t); item.Result != ExecutionResultLandSent {
+			t.Fatalf("first attempt = %+v, want land_sent", item)
+		}
+		f.cmp = newFakeCompare()
+		f.fake.pr.State = "merged"
+		f.client.queue = []ContractLaunchOutput{contractOut(ContractStateSucceeded, nil, nil)}
+	}
+	t.Run("after a verified content", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "", "h1", "")
+		landReturned(t, f, "h1")
+		if item := f.one(t); item.Result != ExecutionResultLanded {
+			t.Fatalf("item = %+v, want landed", item)
+		}
+		if f.opState(t) != "executed" {
+			t.Fatalf("operation = %s, want executed", f.opState(t))
+		}
+	})
+	t.Run("after the approved content only (no verified content)", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		landReturned(t, f, f.head)
+		if item := f.one(t); item.Result != ExecutionResultLanded {
+			t.Fatalf("item = %+v, want landed", item)
+		}
+	})
+	t.Run("a different content than the returned one is still unapproved", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "", "h1", "")
+		landReturned(t, f, "h1")
+		f.fake.pr.HeadSHA = "h3"
+		if item := f.one(t); item.Result != ExecutionResultMergedUnapproved {
+			t.Fatalf("item = %+v, want merged_unapproved", item)
+		}
+	})
+	t.Run("a land_ref that was not delivered is not used", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "", "h1", "")
+		landReturned(t, f, "h1")
+		f.sql(t, `UPDATE contract_run SET land_delivered = 0`)
+		if item := f.one(t); item.Result != ExecutionResultMergedUnapproved {
+			t.Fatalf("item = %+v, want merged_unapproved", item)
+		}
+	})
+}

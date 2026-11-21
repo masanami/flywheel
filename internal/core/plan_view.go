@@ -217,20 +217,16 @@ func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclar
 		if row, ok := byKey[t.Key]; ok {
 			tv.ID, tv.Status = row.ID, row.Status
 			tv.DependsOn = append([]string{}, row.DependsOn...)
-			if eb, ok := effective[row.ID]; ok && eb.Known && tv.BudgetImplUSD != nil {
+			if eb, ok := effective[row.ID]; ok && eb.Known {
+				// 承認の後は、タスクの記録の値（`flywheel budget --task` の置き換えを含む）。計画が片方しか書かなかった枠も、記録の値で出す。
 				impl, review := microsToUSD(eb.Impl), microsToUSD(eb.Review)
 				tv.BudgetImplUSD, tv.BudgetReviewUSD = &impl, &review
 			}
 		}
 		if len(raw.Tasks) == 1 && tv.BudgetImplUSD == nil && soleFrame != nil {
-			// 承認の fillSoleTaskBudgets と同じに、タスクが書いた枠はそのまま、書かなかった枠だけ既定で埋める。
-			impl, review := microsToUSD(soleFrame.Impl), microsToUSD(soleFrame.Review)
-			if t.BudgetImplUSD != nil {
-				impl = *t.BudgetImplUSD
-			}
-			if t.BudgetReviewUSD != nil {
-				review = *t.BudgetReviewUSD
-			}
+			// 承認の前の要約は、承認でタスクへ記録される枠（fillSoleTaskBudgets）と同じに、書いた枠はそのまま、書かなかった側だけ既定で埋める。
+			implM, reviewM := soleTaskFrames(taskBudgetMicros(t.BudgetImplUSD), taskBudgetMicros(t.BudgetReviewUSD), *soleFrame)
+			impl, review := microsToUSD(implM), microsToUSD(reviewM)
 			tv.BudgetImplUSD, tv.BudgetReviewUSD = &impl, &review
 		}
 		pv.Tasks = append(pv.Tasks, tv)
