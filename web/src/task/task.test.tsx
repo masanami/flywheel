@@ -632,3 +632,159 @@ it.each([
     );
   },
 );
+
+// ---- 委譲先の実行・成果物・値・検証・費用の枠（#931。AC-63〜80・82〜84）----
+const D = (p: Partial<NonNullable<Task["delegate"]>> = {}) => ({
+  requested_kind: null,
+  run_id: "R-1",
+  state: "succeeded",
+  summary: "要約",
+  ...p,
+});
+
+it("AC-63 AC-64 AC-65 AC-79 #931: 委譲先の実行の状態の語・要約・求めていることが出る", async () => {
+  const { root } = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          delegate: D({
+            state: "waiting",
+            summary: "待っています",
+            requested_kind: "answer",
+          }),
+        }),
+      ],
+    }),
+  );
+  const sec = within(within(root).getByTestId("task-delegate"));
+  expect(sec.getByTestId("delegate-state").textContent).toBe("待機中");
+  expect(sec.getByTestId("delegate-summary").textContent).toBe("待っています");
+  expect(sec.getByTestId("delegate-requested").textContent).toBe("回答");
+});
+
+it("AC-66 #931: delegate が null なら「委譲先の実行」の区画は出ない", async () => {
+  const { root } = await open(show());
+  expect(within(root).queryByTestId("task-delegate")).toBeNull();
+});
+
+it("AC-84 #931: 要約の Markdown の記法は整えず文字のまま出る", async () => {
+  const text = "# 見出し\n**太字** [x](http://e.com)";
+  const { root } = await open(
+    show({ tasks: [T("T-2", { delegate: D({ summary: text }) })] }),
+  );
+  const el = within(root).getByTestId("delegate-summary");
+  expect(el.textContent).toBe(text);
+  expect(el.querySelector("a, h1, strong")).toBeNull();
+});
+
+it("AC-67 AC-68 AC-69 AC-70 AC-80 #931: 成果物の種類・状態（記録のまま）・http(s) だけのリンク・統合先の語", async () => {
+  const { root } = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          artifacts: [
+            {
+              kind: "pull_request",
+              ref: "https://example.com/pr/1",
+              role: "integration",
+              state: "Merged_x",
+            },
+            {
+              kind: "branch",
+              ref: "javascript:alert(1)",
+              role: null,
+              state: "open",
+            },
+          ],
+        }),
+      ],
+    }),
+  );
+  const items = within(root).getAllByTestId("task-artifact");
+  expect(
+    within(items[0] as HTMLElement).getByTestId("artifact-kind").textContent,
+  ).toBe("pull_request");
+  expect(
+    within(items[1] as HTMLElement).getByTestId("artifact-state").textContent,
+  ).toBe("open");
+  expect(
+    within(items[0] as HTMLElement).getByTestId("artifact-state").textContent,
+  ).toBe("Merged_x");
+  expect(
+    within(items[0] as HTMLElement)
+      .getByRole("link")
+      .getAttribute("href"),
+  ).toBe("https://example.com/pr/1");
+  expect(
+    within(items[0] as HTMLElement).getByTestId("artifact-role").textContent,
+  ).toBe("統合先");
+  expect(within(items[1] as HTMLElement).queryByRole("link")).toBeNull();
+  expect(
+    within(items[1] as HTMLElement).getByTestId("artifact-ref").textContent,
+  ).toBe("javascript:alert(1)");
+  expect(
+    within(items[1] as HTMLElement).queryByTestId("artifact-role"),
+  ).toBeNull();
+});
+
+it("AC-71 AC-72 #931: facts の名前と値が出る。空なら区画は出ない", async () => {
+  const a = await open(
+    show({ tasks: [T("T-2", { facts: { self_review: "complete" } })] }),
+  );
+  const f = within(a.root).getByTestId("task-fact");
+  expect(f.textContent).toContain("self_review");
+  expect(f.textContent).toContain("complete");
+  cleanup();
+  const b = await open(show());
+  expect(within(b.root).queryByTestId("task-facts")).toBeNull();
+});
+
+it("AC-73 AC-74 AC-75 #931: 検証の判定の語・理由・時刻が出る", async () => {
+  const { root } = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          verification: {
+            at: "2026-11-01T10:00:00Z",
+            reason: "条件を確かめた",
+            verdict: "met",
+          },
+        }),
+      ],
+    }),
+  );
+  const sec = within(within(root).getByTestId("task-verification"));
+  expect(sec.getByTestId("verification-verdict").textContent).toBe("満たした");
+  expect(sec.getByTestId("verification-reason").textContent).toBe(
+    "条件を確かめた",
+  );
+  expect(sec.getByTestId("verification-at").textContent).toMatch(
+    /^\d{2}\/\d{2} \d{2}:\d{2}$/,
+  );
+  expect(sec.getByTestId("verification-at").getAttribute("datetime")).toBe(
+    "2026-11-01T10:00:00Z",
+  );
+});
+
+it.each([
+  ["AC-76", "verified", "検証済み"],
+  ["AC-77", "sent", "統合中"],
+  ["AC-78", "landed", "統合済み"],
+])("%s #931: landing が %s のとき「%s」が出る", async (_ac, landing, word) => {
+  const { root } = await open(show({ tasks: [T("T-2", { landing })] }));
+  expect(within(root).getByTestId("task-landing").textContent).toBe(word);
+});
+
+it("AC-82 AC-83 #931: 「費用」に枠（実装とレビュー対応）と使った額が出る", async () => {
+  const { root } = await open(
+    show({
+      tasks: [T("T-2", { budget_impl_usd: 4, budget_review_usd: 2.5 })],
+      nodes: [N("T-2", { cost_usd: 1.25 })],
+    }),
+  );
+  expect(within(root).getByTestId("task-budget-impl").textContent).toBe("4");
+  expect(within(root).getByTestId("task-budget-review").textContent).toBe(
+    "2.5",
+  );
+  expect(within(root).getByTestId("task-cost").textContent).toBe("1.25");
+});
