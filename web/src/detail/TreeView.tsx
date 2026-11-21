@@ -1,5 +1,6 @@
 import type { ShowCardResponse, TreeRelative } from "../api/types.gen.ts";
 import {
+  CHALLENGE_PROGRESS_LABELS,
   DEPENDENCY_SATISFIED_LABEL,
   DEPENDENCY_UNMET_LABEL,
   FOLLOWUP_SOURCE_LABELS,
@@ -33,7 +34,17 @@ export function TreeView({
   return (
     <div className="detail-tree" data-testid="detail-tree-view">
       <section aria-label="タスクのツリー">
-        <h3>タスクのツリー</h3>
+        <h3>
+          タスクのツリー
+          {show.tree.progress != null ? (
+            <>
+              {" "}
+              <span className="progress-pill" data-testid="challenge-progress">
+                {label(CHALLENGE_PROGRESS_LABELS, show.tree.progress)}
+              </span>
+            </>
+          ) : null}
+        </h3>
         <TaskTree
           tasks={show.tree.tasks}
           taskHref={(taskId) =>

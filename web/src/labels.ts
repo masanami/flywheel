@@ -253,6 +253,11 @@ export const CYCLE_STATE_LABELS: Record<CycleState, string> = {
 // 読み込みの最中に出す文（枠と各画面で同じ）。
 export const LOADING_TEXT = "読み込んでいます";
 
+// 完了承認画面の反映の操作で、PR の head（head_sha）が null のとき。
+export const RELEASE_HEAD_MISSING_TEXT = "取得できませんでした";
+// 枠に数える使った額（tasks[].spent_usd）の見出し（タスクの詳細の「枠」の欄・完了承認画面のタスクの一覧）。
+export const TASK_SPENT_LABEL = "使った額";
+
 // 書き込みの口が 403・forbidden_origin で拒否されたときの案内（計画の承認と「サイクルを回す」で同じ文）。
 export const RELOAD_TEXT =
   "操作を受け付けられませんでした。ページを再読み込みしてからやり直してください（自動では再送しません）。";

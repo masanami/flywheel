@@ -780,7 +780,13 @@ it.each([
 it("AC-82 AC-83 #931: 「費用」に枠（実装とレビュー対応）と使った額が出る", async () => {
   const { root } = await open(
     show({
-      tasks: [T("T-2", { budget_impl_usd: 4, budget_review_usd: 2.5 })],
+      tasks: [
+        T("T-2", {
+          budget_impl_usd: 4,
+          budget_review_usd: 2.5,
+          spent_usd: 0.9,
+        }),
+      ],
       nodes: [N("T-2", { cost_usd: 1.25 })],
     }),
   );
@@ -789,6 +795,32 @@ it("AC-82 AC-83 #931: 「費用」に枠（実装とレビュー対応）と使�
     "2.5",
   );
   expect(within(root).getByTestId("task-cost").textContent).toBe("1.25");
+  // 枠に数える使った額（spent_usd）は、実行の全費用（cost_usd）とは別に、枠の欄へ並べて出す。
+  expect(within(root).getByTestId("task-spent").textContent).toBe("0.9");
+  expect(within(root).getByTestId("task-budget").textContent).toBe(
+    "枠使った額 0.9 USD ／ 実装 4 USD ・ レビュー対応 2.5 USD",
+  );
+});
+
+it("成果物の状態が空文字のとき、区切りと状態を出さない", async () => {
+  const { root } = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          artifacts: [
+            { kind: "branch", ref: "feat/x", role: null, state: "" },
+            { kind: "branch", ref: "feat/y", role: null, state: "open" },
+          ],
+        }),
+      ],
+    }),
+  );
+  const items = within(root).getAllByTestId("task-artifact");
+  expect(
+    within(items[0] as HTMLElement).queryByTestId("artifact-state"),
+  ).toBeNull();
+  expect(items[0]?.textContent).toBe("branch ・ feat/x");
+  expect(items[1]?.textContent).toBe("branch ・ feat/y ・ open");
 });
 
 it("AC-129: 実行に確かめ待ちの中身（fix_pending_ref）があるタスクの詳細に、衝突の解消の確かめを待っている旨が出る", async () => {

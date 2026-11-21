@@ -729,6 +729,23 @@ it("承認の口が terminal_state を返すと、承認待ちでない旨が出
   ).toBeNull();
 });
 
+it("承認の口が invalid_transition を返すと、承認待ちでない旨が出て、内部の英語の文は出ない", async () => {
+  await opened(summary(), {
+    extra: {
+      [APPROVE]: () =>
+        json(409, {
+          error: {
+            code: "invalid_transition",
+            message: "core: invalid transition",
+          },
+        }),
+    },
+  });
+  fireEvent.click(await approveBtn());
+  await screen.findByText("この課題は、計画の承認待ちではありません。");
+  expect(document.body.textContent).not.toContain("invalid transition");
+});
+
 const legacy = () =>
   summary({
     plan: plan({
