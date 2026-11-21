@@ -559,6 +559,16 @@ S3a（反映を委譲先に任せる）で入れた要件。S3b は、統合先�
 - UX の決定: `docs/features/core-redesign/ux.md`（決定 28 件・シナリオ 19 件）
 - 試作: `docs/features/core-redesign/prototype/`（`web/`・`cli/`・`chat/`）
 
+S3d で、完了承認画面を足す（行き先 `approve_completion`。一覧は [m4-ui-server.md](m4-ui-server.md) の「画面の一覧（S3d 時点）」）。`flywheel show <課題の ID> --json` と `GET /api/v1/workspaces/{name}/challenges/{id}` の `tasks[]` の要素に、次の 5 つのキーが増える（ほかは変えない。テキストの出力は変えない）。値は core が記録したものをそのまま返し、画面は文字として出す（Markdown として整えない。リンクにするのは成果物の識別のうち http か https のものだけ。S2c の安全なリンクの決まり）。
+
+- `artifacts`（無ければ `[]`）: `[{kind, ref, role: "integration | null", state}]`。
+- `delegate`（契約の実行が無ければ null）: `{requested_kind: "<求めていること> | null", run_id: "R-<番号>", state: "running | waiting | succeeded | failed | cancelled", summary}`。
+- `facts`（無ければ `{}`）: `{"<名前>": "<値>"}`。
+- `landing`: `verified | sent | landed | null`。
+- `verification`（タスクの検証の記録が無ければ null）: `{at, reason, verdict: "met | not_met | uncertain"}`。
+
+ツリーの API（`GET /api/v1/workspaces/{name}/tree`）には、細かい進み `progress` が増える。`tasks[]` の要素の `progress` は `working`・`verifying`・`landing`・`null`、課題の要素の `progress` は `reflecting`・`checking`・`null`。タスクの表示の区分（`phase`。6 値）と状態（`status`）は変えない。
+
 S3c は、画面を作り替えない（通した衝突の解消の見せ方は S3d）。`flywheel show` と課題の詳細の API に、下のキーが増える。`ux.md` のシナリオのうち、S3c の受入基準に対応するものは無い（承認の後に反映先が動く場面は、`ux.md` に無い）。
 
 S3b は、画面を作り替えない（完了の承認の画面・タスクの詳細は S3d）。端末の出力と API は、タスクの要素と課題の要素にキーが増え、`flywheel budget` に `--task` が増える。
