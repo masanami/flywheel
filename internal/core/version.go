@@ -24,8 +24,56 @@ type VersionInfo struct {
 // ReadVersion は動いているバイナリの版を返す。debug.ReadBuildInfo が失敗しても、vcs の設定が
 // 無くても、Commit・Time は UnknownBuildValue になるだけでエラーにしない。
 func ReadVersion() (VersionInfo, error) {
-	info, ok := debug.ReadBuildInfo()
+	info, ok := readBuildInfo()
 	return versionFromBuildInfo(info, ok)
+}
+
+// stampRevision・stampTime・stampModified は、ビルドの手順（Makefile の -ldflags -X）が刻む flywheel 自身の
+// コミット・時刻・未コミットの変更の有無。Go の VCS の刻印は、作業ツリー（.git がファイル）では外側の
+// リポジトリを拾うため、刻印があればそちらを優先する。刻印が無いビルド（go install 等）は Go の VCS の刻印のまま。
+var (
+	stampRevision string
+	stampTime     string
+	stampModified string
+)
+
+// readBuildInfo は debug.ReadBuildInfo に刻印を重ねたビルド情報を返す。版の読み方（ReadVersion と
+// run の flywheel_version）はどちらもここを通る。
+func readBuildInfo() (*debug.BuildInfo, bool) {
+	info, ok := debug.ReadBuildInfo()
+	if stampRevision == "" {
+		return info, ok
+	}
+	out := &debug.BuildInfo{}
+	if ok && info != nil {
+		cp := *info
+		out = &cp
+	}
+	out.Settings = overlayStamp(out.Settings, stampRevision, stampTime, stampModified)
+	return out, true
+}
+
+// overlayStamp は settings の vcs.revision・vcs.time・vcs.modified を刻印の値で置き換えた新しい
+// スライスを返す。revision が空なら settings をそのまま返す。
+// 刻印がある場合、元の vcs.* は外側のリポジトリの値でありうるため、time・modified が空でも元の値を残さない
+// （time は無し、modified は false 扱い）。
+func overlayStamp(settings []debug.BuildSetting, revision, time, modified string) []debug.BuildSetting {
+	if revision == "" {
+		return settings
+	}
+	out := make([]debug.BuildSetting, 0, len(settings)+3)
+	for _, s := range settings {
+		switch s.Key {
+		case "vcs.revision", "vcs.time", "vcs.modified":
+			continue
+		}
+		out = append(out, s)
+	}
+	out = append(out, debug.BuildSetting{Key: "vcs.revision", Value: revision})
+	if time != "" {
+		out = append(out, debug.BuildSetting{Key: "vcs.time", Value: time})
+	}
+	return append(out, debug.BuildSetting{Key: "vcs.modified", Value: modified})
 }
 
 func versionFromBuildInfo(info *debug.BuildInfo, ok bool) (VersionInfo, error) {
