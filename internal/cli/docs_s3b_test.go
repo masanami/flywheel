@@ -56,7 +56,7 @@ func TestSpec_AC263_ArchSection21NoteHasS3b(t *testing.T) {
 // AC-264: architecture.md の §21.3 に、統合先を使う課題のリポジトリを 1 つに限る旨の注記がある。
 func TestSpec_AC264_ArchSection213OneRepoForIntegration(t *testing.T) {
 	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection213)
-	docLineWith(t, body, "区切り S3b", "統合先を使う課題", "リポジトリを 1 つに限る", "`integration_unavailable`")
+	docLineWith(t, body, "区切り S3b", "統合先を使う課題", "リポジトリを 1 つに限る", "`tasks_blocked`")
 }
 
 // AC-265: architecture.md の §21.2 に、課題の単位の確かめが満たしていないときは保留にする旨の注記がある。
