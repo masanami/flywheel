@@ -93,10 +93,14 @@ func TestSpec_AC141_GlossaryReflectConflictEnteredInS3c(t *testing.T) {
 }
 
 // 出荷済みの節（前の区切りで足した形の節）と、S3a・S3b の受入基準の試験の正本は消していない。
+// S3c・S3d の要件も、実装対象が次の区切り（S4a）へ移った後、出荷済みの節として残っている。
 func TestSpec_S3c_KeepsShippedSections(t *testing.T) {
 	doc := readRepoDoc(t, "docs", "features", "core-redesign.md")
 	for _, want := range []string{
 		"前の区切りで足した形のうち、試験がこの文書の記述を正本として読むもの",
+		"### S3c で入れた要件（出荷済み）",
+		"#### コンフリクトの解消の確かめ（J5 の動き方）",
+		"### S3d で入れた要件（出荷済み）",
 		"### S3b で入れた要件（出荷済み）",
 		"### S3a で入れた要件（出荷済み）",
 	} {
