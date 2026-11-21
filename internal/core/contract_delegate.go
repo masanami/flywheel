@@ -200,10 +200,11 @@ type ContractStartInput struct {
 	Judgment JudgmentInvoker
 	// TaskID は起動するタスクの内部整数 ID。0 なら、起動できるタスクがちょうど 1 個の課題として、そのタスクを起動する。
 	TaskID int64
-	// InsertRun は start の run をストアに記録する関数 insert を実行する（nil なら insert をそのまま実行する）。
+	// RunRecording は start の run をストアに記録する区間。非 nil なら、StartContractDelegation が区間に入り、run の記録を
+	// ちょうど 1 回行い、成功したら確定を知らせてから区間を出る（nil なら区間なしで記録する）。
 	// 同時委譲数の許可の数えは、ストアの run の数と、記録前の許可の数の和なので、記録の確定から許可の数の解放までの間に
-	// 別のタスクの許可が数えると、同じ run を 2 回数えて断る。insert と許可の数の解放を、許可の数えと同時に起きない 1 つの区間にする。
-	InsertRun func(insert func() (int64, error)) (int64, error)
+	// 別のタスクの許可が数えると、同じ run を 2 回数えて断る。記録と許可の数の解放を、許可の数えと同時に起きない 1 つの区間にする。
+	RunRecording runRecordingSection
 }
 
 func (in ContractStartInput) releaseSource() *contractReleaseSource {
@@ -668,33 +669,9 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if n, ok := parseCycleID(in.CycleID); ok {
 		cycleIDInt = &n
 	}
-	// InsertRun は呼び出し側のコールバックなので、渡した insert の呼び方を確かめる（呼ばない・複数回呼ぶ・別の ID を返すと、
-	// ストアに無い run の ID で後続が進む）。2 回目以降の呼び出しは、書き込まずにエラーを返す。
-	var insertCalls int
-	var insertID int64
-	var insertErr error
-	insert := func() (int64, error) {
-		insertCalls++
-		if insertCalls > 1 {
-			return 0, fmt.Errorf("%w: contract start: insert called more than once", ErrStoreError)
-		}
-		insertID, insertErr = s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID, nil)
-		return insertID, insertErr
-	}
-	var runIDInt int64
-	if in.InsertRun != nil {
-		runIDInt, err = in.InsertRun(insert)
-		// 不一致は内部の誤りとして、後続（heartbeat・読み直し・終わりの記録）へ進まない。insert が run を作っていた場合の後始末は、
-		// 起動前の他の失敗（引数の組み立て失敗など）と同じく、run を閉じずにエラーを返す。
-		if insertCalls != 1 {
-			return nil, fmt.Errorf("%w: contract start: InsertRun called insert %d times, want exactly once", ErrStoreError, insertCalls)
-		}
-		if runIDInt != insertID || !errors.Is(err, insertErr) {
-			return nil, fmt.Errorf("%w: contract start: InsertRun returned id %d (error: %t), insert returned id %d (error: %t)", ErrStoreError, runIDInt, err != nil, insertID, insertErr != nil)
-		}
-	} else {
-		runIDInt, err = insert()
-	}
+	runIDInt, err := s.recordContractStartRun(in.RunRecording, func() (int64, error) {
+		return s.beginContractRunForTask(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, taskID, nil)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1613,4 +1590,27 @@ func firstErrOr(cur, next error) error {
 		return cur
 	}
 	return next
+}
+
+// runRecordingSection は run の記録と許可の数の解放を、許可の数えと同時に起きない 1 つの区間にする（実装は admission）。
+// 区間の中で行う記録は StartContractDelegation 自身がちょうど 1 回だけ行う。
+type runRecordingSection interface {
+	Lock()
+	Unlock()
+	// MarkInsertedLocked は、区間の中で run の記録が確定したことを知らせる（許可の数を解放する）。
+	MarkInsertedLocked()
+}
+
+// recordContractStartRun は sec の区間（nil なら区間なし）の中で insert を 1 回呼び、成功したら確定を知らせる。
+func (s *Store) recordContractStartRun(sec runRecordingSection, insert func() (int64, error)) (int64, error) {
+	if sec == nil {
+		return insert()
+	}
+	sec.Lock()
+	defer sec.Unlock()
+	id, err := insert()
+	if err == nil {
+		sec.MarkInsertedLocked()
+	}
+	return id, err
 }

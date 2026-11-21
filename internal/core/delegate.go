@@ -1026,7 +1026,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		return n, nil
 	}
 	assignment, err := s.acquireDelegationSlot(ctx, in, dc, bind)
-	// 注: 契約の経路（StartContractDelegation の InsertRun）と違い、この経路は run の記録の確定から markInserted までの間に
+	// 注: 契約の経路（StartContractDelegation の RunRecording）と違い、この経路は run の記録の確定から markInserted までの間に
 	// 別の許可の数えが入ると、確定した run を 2 回数えうる（admit は待って再試行するので遅れるだけ。admitContract は待たない）。
 	adm.markInserted() // run が記録された（または割り当てに失敗した）。以後は DB の数に入る。
 	switch {

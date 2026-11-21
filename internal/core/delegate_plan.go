@@ -406,21 +406,14 @@ func (a *admission) markInsertedLocked() {
 	}
 }
 
-// insertRun は run をストアに記録する insert を、許可の数え（admitContract・admit）と同時に起きない区間で実行し、
-// 記録が確定したら許可の数（pre）を解放する。記録の確定と解放の間に別の許可が数えると、確定した run を DB の数と
-// pre で 2 回数えて、空いている枠を断る。insert が失敗したときは解放しない（finish が解放する）。
-func (a *admission) insertRun(insert func() (int64, error)) (int64, error) {
-	if a == nil {
-		return insert()
-	}
-	a.sch.mu.Lock()
-	defer a.sch.mu.Unlock()
-	id, err := insert()
-	if err == nil {
-		a.markInsertedLocked()
-	}
-	return id, err
-}
+// Lock・Unlock・MarkInsertedLocked は、run の記録と許可の数（pre）の解放を、許可の数え（admitContract・admit）と同時に起きない
+// 1 つの区間にする（runRecordingSection）。区間は Lock から Unlock までで、その中で run を記録し、確定したら MarkInsertedLocked で
+// pre を解放する。記録の確定と解放の間に別の許可が数えると、確定した run を DB の数と pre で 2 回数えて、空いている枠を断る。
+func (a *admission) Lock() { a.sch.mu.Lock() }
+
+func (a *admission) Unlock() { a.sch.mu.Unlock() }
+
+func (a *admission) MarkInsertedLocked() { a.markInsertedLocked() }
 
 // finish は起動を終えた（run が終わった、または起動しなかった）ことを知らせる。
 func (a *admission) finish() {

@@ -610,3 +610,58 @@ func TestPlan_ExplicitID_LaunchesWhileSameRepoHasARunningDelegation(t *testing.T
 		t.Fatalf("result = items %+v, not started %+v; want %s launched", res.Items, res.NotStarted, other)
 	}
 }
+
+// run の記録の区間（runRecordingSection）は、記録の確定と許可の数（pre）の解放を、別の許可の数え（admitContract）と同時に
+// 起こさない。区間の中（記録が確定した後・解放の前）に別の候補の許可の数えが入ると、確定した run を DB の数と pre で 2 回数えて、
+// 上限に空きがあるのに断る。区間を出た後なら、同じ run を 1 回だけ数えて許可される。順序はチャネルで固定する
+// （「区間の中では進まない」の確認だけは、進まなかったことを短い待ちで見る。進んでしまう実装では、待ちの間に必ず進んで落ちる）。
+func TestRunRecordingSection_AdmitCountWaitsForTheSectionAndDoesNotCountTheRunTwice(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	cid, ok := parseChallengeID(f.cid)
+	if !ok {
+		t.Fatalf("challenge id %q", f.cid)
+	}
+	sch := newDelegationScheduler(f.s, DelegateInput{AgentDecl: &AgentDeclaration{MaxParallelRuns: 2}, ConnDecl: f.conn})
+	first, err := (&delegateRun{sch: sch}).admitContract(context.Background())
+	if err != nil {
+		t.Fatalf("1 件目の許可: %v", err)
+	}
+	sessionID, err := newLowercaseUUIDv4()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inserted := make(chan struct{})
+	release := make(chan struct{})
+	recorded := make(chan error, 1)
+	go func() {
+		_, err := f.s.recordContractStartRun(first, func() (int64, error) {
+			id, err := f.s.beginContractRunForTask(context.Background(), cid, nil, nil, sessionID, 5_000_000, true, nil, nil)
+			close(inserted) // 記録は確定した。解放（pre--）はまだ（区間の中）
+			<-release
+			return id, err
+		})
+		recorded <- err
+	}()
+	<-inserted
+	admitted := make(chan error, 1)
+	go func() {
+		_, err := (&delegateRun{sch: sch}).admitContract(context.Background())
+		admitted <- err
+	}()
+	select {
+	case err := <-admitted:
+		t.Fatalf("区間の中で許可の数えが進んだ（err = %v）。確定した run を DB の数と pre で 2 回数えうる", err)
+	case <-time.After(200 * time.Millisecond): // 進まなかったことの確認だけは待ちに頼る
+	}
+	close(release)
+	if err := <-recorded; err != nil {
+		t.Fatalf("記録: %v", err)
+	}
+	if err := <-admitted; err != nil {
+		t.Fatalf("区間を出た後の 2 件目の許可 = %v, want 許可（上限 2・記録済み 1 件・同じ run を 2 回数えない）", err)
+	}
+	if sch.pre != 1 {
+		t.Fatalf("pre = %d, want 1（1 件目は解放済み・2 件目は許可済みで未記録）", sch.pre)
+	}
+}
