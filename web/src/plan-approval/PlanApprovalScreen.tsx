@@ -6,7 +6,7 @@ import type {
   PlanQuestion,
   PlanTopic,
 } from "../api/types.gen.ts";
-import { COMPLETION_REJECT_NOTE, guidesForContext } from "../guidance.ts";
+import { APPROVAL_REJECT_NOTE, guidesForContext } from "../guidance.ts";
 import { LOADING_TEXT, RELOAD_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
@@ -397,7 +397,7 @@ function PlanView({
             {notice}
           </p>
         )}
-        <p className="approval-control-question">{COMPLETION_REJECT_NOTE}</p>
+        <p className="approval-control-question">{APPROVAL_REJECT_NOTE}</p>
       </div>
     </section>
   );

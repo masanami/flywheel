@@ -14,6 +14,9 @@ const (
 	ConflictFixTargetRelease     = "release"
 )
 
+// conflictFixTargetValues は通した衝突の解消の宛先の閉集合（ConflictFixTargetValues の正本）。
+var conflictFixTargetValues = []string{ConflictFixTargetIntegration, ConflictFixTargetRelease}
+
 // ConflictFixPassed は、衝突の解消の確かめが「満たした」として通した記録 1 件（作業ログの action = conflict_fix_passed から読む）。
 // 統合先宛てなら TaskID を持ち OperationID は nil、反映先宛てなら OperationID を持ち TaskID は nil。
 type ConflictFixPassed struct {

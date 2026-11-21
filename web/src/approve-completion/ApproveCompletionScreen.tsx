@@ -3,9 +3,9 @@ import { api } from "../api/client.ts";
 import { ApiError, isNotAwaitingError } from "../api/error.ts";
 import type { ApprovalSummary, ShowCardResponse } from "../api/types.gen.ts";
 import {
+  APPROVAL_REJECT_NOTE,
   COMPLETION_APPROVED_NOTE,
   COMPLETION_BUTTON_NOTE,
-  COMPLETION_REJECT_NOTE,
   COMPLETION_RELEASE_NOTE,
 } from "../guidance.ts";
 import {
@@ -482,7 +482,7 @@ function CompletionView({
             <p data-testid="completion-release-note">
               {COMPLETION_RELEASE_NOTE}
             </p>
-            <p data-testid="completion-reject-note">{COMPLETION_REJECT_NOTE}</p>
+            <p data-testid="completion-reject-note">{APPROVAL_REJECT_NOTE}</p>
           </section>
         </div>
       </div>

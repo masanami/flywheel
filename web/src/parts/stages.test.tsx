@@ -145,7 +145,7 @@ it("実物がどの行にも無い間は「実物なし」の印を出さず、�
   expect(container.textContent).not.toContain(ACTUAL_MISSING_MARK);
   expect(container.querySelector('[data-mark="actual-missing"]')).toBeNull();
   const p0 = container.querySelector('[data-pair="0"]');
-  expect(p0?.textContent).toContain("ui");
+  expect(p0?.textContent).toContain("画面");
   expect(p0?.textContent).toContain("s1");
   expect(p0?.querySelector('[data-field="before"]')?.textContent).toContain(
     "前1",

@@ -867,6 +867,24 @@ export const OPERATION_STATE_CODES = [
   "closed",
 ] as const;
 
+export const REQUESTED_KIND_CODES = [
+  "answer",
+  "approve",
+  "observe",
+  "review",
+] as const;
+
+export const CONFLICT_FIX_TARGET_CODES = [
+  "integration",
+  "release",
+] as const;
+
+export const EXPECTED_KIND_CODES = [
+  "ui",
+  "cli",
+  "behavior",
+] as const;
+
 export const EXECUTION_RESULT_CODES = [
   "merged",
   "already_merged",
