@@ -105,7 +105,10 @@ type j6Context struct {
 	DirectCompletions []DirectCompletion
 	Activities        []j6ActivityRow
 	ActivityCut       int
-	Runs              []runRow
+	// ConflictFixes は衝突の解消の確かめが通した記録（古い順）。統合先宛ては entity=task の作業ログに載るので、
+	// 課題の作業ログの区画（entity=challenge・operation）には入らない。
+	ConflictFixes []ConflictFixPassed
+	Runs          []runRow
 	// Followups はこの課題にぶら下がる followup の行（状態を問わない）。ID の昇順。
 	Followups []j6Followup
 	// PastFollowups はこの課題を followup_of に持つ課題。過去の形（学びの判断点が課題として起票したもの）と、
@@ -352,6 +355,9 @@ func (s *Store) loadJ6Context(ctx context.Context, cid int64) (*j6Context, error
 		if jc.Activities, jc.ActivityCut, err = loadJ6Activities(ctx, tx, cid); err != nil {
 			return err
 		}
+		if jc.ConflictFixes, err = loadConflictFixes(ctx, tx, cid); err != nil {
+			return err
+		}
 		if jc.Runs, err = loadJ6Runs(ctx, tx, cid); err != nil {
 			return err
 		}
@@ -370,6 +376,9 @@ const j6MemoryIndexLabel = "記憶の索引のパス"
 
 // j6DirectCompletionLabel は親が直接行った完了の記録の区画のラベル（記録がある課題にだけ載せる）。
 const j6DirectCompletionLabel = "親が直接行った記録"
+
+// j6ConflictFixesLabel は、衝突の解消の確かめが通した記録の区画のラベル（記録がある課題にだけ載せる）。
+const j6ConflictFixesLabel = "通した衝突の解消"
 
 // j6FollowupsLabel はこの課題から起票済みのフォローアップの区画のラベル。
 const j6FollowupsLabel = "起票済みのフォローアップ"
@@ -445,6 +454,30 @@ func prepareJ6(jc *j6Context, memoryIndex string) []JudgmentDataSection {
 		b.WriteString("run は無い。")
 	}
 	sections = append(sections, JudgmentDataSection{Label: "実行の一覧と委譲の報告", Content: strings.TrimRight(b.String(), "\n")})
+
+	if len(jc.ConflictFixes) > 0 {
+		b.Reset()
+		b.WriteString("flywheel が差分で確かめ、「満たした」として通した衝突の解消（古い順）。ここにあるものは検証済みである:\n")
+		for _, f := range jc.ConflictFixes {
+			target, id := "統合先", ""
+			if f.TaskID != nil {
+				id = *f.TaskID
+			}
+			if f.Target == ConflictFixTargetRelease {
+				target = "反映先"
+				if f.OperationID != nil {
+					id = *f.OperationID
+				}
+			}
+			fmt.Fprintf(&b, "- %s / %s / %s / %s → %s / 直したファイル: %s", formatTimestamp(f.At), target, id,
+				oneLine(f.FromRef), oneLine(f.ToRef), oneLine(strings.Join(f.Files, ", ")))
+			if f.RunID != "" {
+				fmt.Fprintf(&b, " / 確かめた run: %s", oneLine(f.RunID))
+			}
+			b.WriteString("\n")
+		}
+		sections = append(sections, JudgmentDataSection{Label: j6ConflictFixesLabel, Content: strings.TrimRight(b.String(), "\n")})
+	}
 
 	if len(jc.DirectCompletions) > 0 {
 		// この課題は対話のセッションの親が直接行った（委譲の run は無く、完了の検証も通っていない）。

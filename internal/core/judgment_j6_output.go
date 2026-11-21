@@ -42,6 +42,10 @@ var OccurrenceLayerValues = []OccurrenceLayer{
 	OccurrenceLayerKnowledge, OccurrenceLayerNone,
 }
 
+// j6ConfidencePattern は memory の確度（confidence）の形。記憶の書き込み器（memory_write.go）の検査と同じく、
+// 空白を含まない 1 語だけを通す。
+const j6ConfidencePattern = `^\S+$`
+
 type j6RawClassification struct {
 	OccurrenceID *string `json:"occurrence_id"`
 	Cause        *string `json:"cause"`
@@ -152,7 +156,7 @@ func j6OutputSchema() []byte {
 			"type":        enum(J6MemoryTypeValues),
 			"slug":        str,
 			"description": str,
-			"confidence":  str,
+			"confidence":  map[string]any{"type": "string", "pattern": j6ConfidencePattern},
 			"sources":     map[string]any{"type": "array", "items": str},
 			"outcome":     str,
 			"target":      str,
