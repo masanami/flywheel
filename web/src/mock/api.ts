@@ -300,9 +300,30 @@ export function createMockApi(
       const hasApprovedRelease = m.operations.some(
         (o) => o.kind === "release" && o.state === "approved",
       );
+      // 完了承認画面の値は、本物と同じく要約と 1 回で返す（課題の詳細の偽の応答から、完了確認待ちのときだけ引く）。
+      const show = kind === "completion" ? showOf(name, id, m) : null;
+      const tasks = (show?.tasks ?? []).flatMap((t) => {
+        const node = show?.tree.tasks.find((n) => n.id === t.id);
+        if (node !== undefined) {
+          return [{ t, phase: node.phase, inTree: true }];
+        }
+        return t.status === "done" ? [{ t, phase: "done", inTree: false }] : [];
+      });
       return {
         approval: {
           challenge_id: id,
+          conflict_fixes: show?.conflict_fixes ?? [],
+          followups: (show?.followups ?? []).filter((f) => f.status === "open"),
+          integration_ref: show?.challenge.integration_ref ?? null,
+          tasks: tasks.map(({ t, phase, inTree }) => ({
+            budget_usd: t.budget_impl_usd + t.budget_review_usd,
+            id: t.id,
+            in_tree: inTree,
+            phase,
+            spent_usd: t.spent_usd,
+            title: t.title,
+          })),
+          uses_integration: show?.challenge.uses_integration ?? null,
           conditions_after_release:
             kind === "completion" ? m.conditionsAfterRelease : [],
           conditions_after_release_heading: hasApprovedRelease

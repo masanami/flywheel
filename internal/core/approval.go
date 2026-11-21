@@ -131,6 +131,87 @@ type ApprovalPreview struct {
 	// （マージされうる）。判定は差し戻しの書き込みと同じ releaseOnCompletionRejection。差し戻しの要約が使う。
 	ReleasesToWithdraw []string
 	RunningReleases    []string
+
+	// 以下は完了の承認の要約を PrepareApprovalFor で読んだときだけ埋める、完了承認画面の値（要約と同じ
+	// 読み取りで読む）。端末の要約（PrepareApproval）は埋めない。
+	// CompletionTasks は課題のタスク（最新の版のタスクと、前の版の済みのタスク）。
+	CompletionTasks []CompletionTask
+	// OpenFollowups は課題にぶら下がる未（open）のフォローアップ。
+	OpenFollowups []Followup
+	// ConflictFixes は通した衝突の解消（古い順）。
+	ConflictFixes []ConflictFixPassed
+	// UsesIntegration・IntegrationRef は課題が統合先を使うかと、記録した統合先の識別。
+	UsesIntegration *bool
+	IntegrationRef  *string
+}
+
+// CompletionTask は完了承認画面に並べるタスク 1 件。計画を作り直した課題では、前の版のタスクも課題のタスクに入るので、
+// 最新の版（木）にあるものに加えて、前の版の済みのタスク（課題の上限の枠に数え、反映するものの一部）だけを並べる。
+// 前の版の未完・取りやめのタスクは並べない。木に無いタスクは InTree=false（詳細の画面が開けない）。
+type CompletionTask struct {
+	ID              string
+	Title           string
+	Phase           TaskPhase
+	InTree          bool
+	SpentUSD        float64
+	BudgetImplUSD   float64
+	BudgetReviewUSD float64
+}
+
+func loadCompletionScreen(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclaration, p *ApprovalPreview) error {
+	tasks, err := listTasks(ctx, tx, cid)
+	if err != nil {
+		return err
+	}
+	if err := fillTaskBudgets(ctx, tx, cid, tasks, agent); err != nil {
+		return err
+	}
+	sh, err := loadTreeShared(ctx, tx)
+	if err != nil {
+		return err
+	}
+	var n TreeChallenge
+	if err := fillTreeTasks(ctx, tx, cid, agent, sh, &n); err != nil {
+		return err
+	}
+	phaseByID := map[string]TaskPhase{}
+	for _, tt := range n.Tasks {
+		if tt.ID != nil {
+			phaseByID[*tt.ID] = tt.Phase
+		}
+	}
+	p.CompletionTasks = []CompletionTask{}
+	for _, t := range tasks {
+		ct := CompletionTask{ID: t.ID, Title: t.Title, SpentUSD: t.SpentUSD, BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD}
+		if ph, ok := phaseByID[t.ID]; ok {
+			ct.Phase, ct.InTree = ph, true
+		} else if t.Status == TaskStatusDone {
+			ct.Phase = TaskPhaseDone
+		} else {
+			continue
+		}
+		p.CompletionTasks = append(p.CompletionTasks, ct)
+	}
+	fs, err := listFollowups(ctx, tx, FollowupFilter{Status: string(FollowupStatusOpen), ChallengeID: formatChallengeID(cid)})
+	if err != nil {
+		return err
+	}
+	p.OpenFollowups = fs
+	if p.ConflictFixes, err = loadConflictFixes(ctx, tx, cid); err != nil {
+		return err
+	}
+	if p.UsesIntegration, err = challengeUsesIntegration(ctx, tx, cid); err != nil {
+		return err
+	}
+	var ref sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT integration_ref FROM challenge WHERE id = ?`, cid).Scan(&ref); err != nil {
+		return err
+	}
+	if ref.Valid && ref.String != "" {
+		v := ref.String
+		p.IntegrationRef = &v
+	}
+	return nil
 }
 
 // approvesPendingReleases は D12 の規則の正本: 「その操作が、対象の課題の
@@ -172,7 +253,7 @@ func (p *ApprovalPreview) ReleaseEffect(decision ApprovalDecision, holdRelease b
 // ErrTerminalState、計画承認待ち・完了確認待ちのいずれでもなければ
 // ErrInvalidTransition（Lookup(current.Status, OpApprove/OpReject) の定義域と
 // 一致する。T5・T6・T13・T15 以外の（状態, 操作）の組は遷移表に無い）。
-func (s *Store) prepareApproval(ctx context.Context, id string, agent *AgentDeclaration) (*ApprovalPreview, error) {
+func (s *Store) prepareApproval(ctx context.Context, id string, agent *AgentDeclaration, withScreen bool) (*ApprovalPreview, error) {
 	cid, ok := parseChallengeID(id)
 	if !ok {
 		return nil, ErrNotFound
@@ -241,6 +322,13 @@ func (s *Store) prepareApproval(ctx context.Context, id string, agent *AgentDecl
 		}
 
 		if kind == ApprovalKindCompletion {
+			if withScreen {
+				// 完了承認画面が使う値は、要約と同じ読み取り（同じトランザクション）で読む。
+				// 別の読み取りにすると、間に課題が動いたとき要約と食い違う。
+				if err := loadCompletionScreen(ctx, tx, cid, agent, &preview); err != nil {
+					return err
+				}
+			}
 			dc, err := loadCurrentDirectCompletion(ctx, tx, cid)
 			if err != nil {
 				return err
@@ -359,13 +447,13 @@ func loadConditionsAfterRelease(ctx context.Context, tx *sql.Tx, cid int64) ([]s
 
 // PrepareApproval は approve の①（読み取り）。
 func (s *Store) PrepareApproval(ctx context.Context, id string) (*ApprovalPreview, error) {
-	return s.prepareApproval(ctx, id, nil)
+	return s.prepareApproval(ctx, id, nil, false)
 }
 
 // PrepareApprovalFor は PrepareApproval に、計画の予算の上限をサイズごとの既定から決めるための宣言を渡す版
-// （API の承認の要約が使う。nil なら PrepareApproval と同じ）。
+// （API の承認の要約が使う。完了確認待ちなら、完了承認画面の値も同じ読み取りで読む。agent が nil でも読む）。
 func (s *Store) PrepareApprovalFor(ctx context.Context, id string, agent *AgentDeclaration) (*ApprovalPreview, error) {
-	return s.prepareApproval(ctx, id, agent)
+	return s.prepareApproval(ctx, id, agent, true)
 }
 
 // PrepareRejection は reject の①（読み取り）。reason が
@@ -383,7 +471,7 @@ func (s *Store) PrepareRejection(ctx context.Context, id string, reason string) 
 	if strings.TrimSpace(reason) == "" {
 		return nil, ErrValidation
 	}
-	return s.prepareApproval(ctx, id, nil)
+	return s.prepareApproval(ctx, id, nil, false)
 }
 
 // AnswerPreview は PrepareAnswer が返す、answer の①（読み取り）の結果。

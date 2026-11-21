@@ -92,14 +92,21 @@ type ApprovalOtherOperation struct {
 // （無い・完了確認待ち以外は空配列）。ConditionsAfterReleaseHeading はその見出しで、UI の承認は本番反映を
 // 承認しない（ReleaseHeld）ので、承認済みで未実行の release が無ければ CLI の --hold-release と同じ
 // 「満たされないまま残る」側、あれば「承認済みの本番反映が走れば満たされる」側の文言。
+//
+// ConflictFixes・Followups・IntegrationRef・Tasks・UsesIntegration は完了承認画面が使う値で、完了確認待ちのときだけ中身が入る
+// （それ以外は空配列か null）。要約と同じ読み取りで返すので、画面は課題の詳細を別に読んで版を見比べなくてよい。
+// Followups は課題にぶら下がる未（open）のものだけ。
 type ApprovalSummary struct {
-	ChallengeID                   string   `json:"challenge_id"`
-	ConditionsAfterRelease        []string `json:"conditions_after_release"`
-	ConditionsAfterReleaseHeading string   `json:"conditions_after_release_heading"`
+	ChallengeID                   string              `json:"challenge_id"`
+	ConditionsAfterRelease        []string            `json:"conditions_after_release"`
+	ConditionsAfterReleaseHeading string              `json:"conditions_after_release_heading"`
+	ConflictFixes                 []PassedConflictFix `json:"conflict_fixes"`
 	// DirectCompletion は、この完了確認待ちが親が直接行った完了の記録によるときだけ非 null（成果物の参照を
 	// 完了条件と並べて見せる。完了の検証は通っていない）。
 	DirectCompletion *DirectCompletion `json:"direct_completion"`
 	DoneCriteria     *string           `json:"done_criteria"`
+	Followups        []Followup        `json:"followups"`
+	IntegrationRef   *string           `json:"integration_ref"`
 	Kind             string            `json:"kind"`
 	// MergeabilityNote は、検証が PR のマージ可否を確かめられないまま完了確認待ちへ進めたときだけ
 	// core.MergeabilityUnconfirmedNote（「マージ可否は未確認」）。それ以外は ""。CLI の要約の「PR のマージ可否」の行と同じ。
@@ -110,8 +117,21 @@ type ApprovalSummary struct {
 	ReleaseHeld            bool                     `json:"release_held"`
 	Releases               []ApprovalRelease        `json:"releases"`
 	Stages                 Stages                   `json:"stages"`
+	Tasks                  []ApprovalCompletionTask `json:"tasks"`
 	Title                  string                   `json:"title"`
+	UsesIntegration        *bool                    `json:"uses_integration"`
 	Version                int                      `json:"version"`
+}
+
+// ApprovalCompletionTask は完了承認画面に並べるタスク 1 件（core.CompletionTask）。Phase はタスクの表示の区分（ツリーと同じ値）。
+// InTree が false のタスク（計画を作り直す前の版の済みのタスク）は詳細の画面が開けない。
+type ApprovalCompletionTask struct {
+	BudgetUSD float64 `json:"budget_usd"` // 実装の枠とレビュー対応の枠の合計
+	ID        string  `json:"id"`
+	InTree    bool    `json:"in_tree"`
+	Phase     string  `json:"phase"`
+	SpentUSD  float64 `json:"spent_usd"`
+	Title     string  `json:"title"`
 }
 
 // ApprovalSummaryResponse は `GET …/challenges/{id}/approval` の本文。
@@ -131,8 +151,16 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 		ReleaseHeld:            true,
 		Releases:               make([]ApprovalRelease, 0, len(heads)),
 		Stages:                 FromStages(p.StageFields, p.IssuesAnswer),
+		Tasks:                  make([]ApprovalCompletionTask, 0, len(p.CompletionTasks)),
 		Title:                  p.Title,
 		Version:                p.Version,
+		ConflictFixes:          FromConflictFixes(p.ConflictFixes),
+		Followups:              FromFollowups(p.OpenFollowups),
+		IntegrationRef:         p.IntegrationRef,
+		UsesIntegration:        p.UsesIntegration,
+	}
+	for _, t := range p.CompletionTasks {
+		s.Tasks = append(s.Tasks, ApprovalCompletionTask{BudgetUSD: t.BudgetImplUSD + t.BudgetReviewUSD, ID: t.ID, InTree: t.InTree, Phase: string(t.Phase), SpentUSD: t.SpentUSD, Title: t.Title})
 	}
 	// ReleaseHeld は常に true なので、この操作では本番反映が承認されない。承認済みで未実行の release が
 	// あるときだけ、それが走れば満たされる側の見出し。

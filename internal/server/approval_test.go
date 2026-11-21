@@ -114,6 +114,7 @@ func TestApprovalSummaryForPlan(t *testing.T) {
 		"plan": `{"body":"PLAN","budget_usd":null,"summary":null,"tasks":[],"topics":[],"uses_integration":null,"version":1}`, "releases": `[]`, "other_pending_operations": `[]`, "release_held": `true`, "mergeability_note": `""`,
 		"conditions_after_release": `[]`, "conditions_after_release_heading": `"本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"`,
 		"pairs": `[]`, "stages": `{"actual":null,"expected":null,"figure":null,"issues":null,"issues_answer":null,"non_goals":null}`,
+		"conflict_fixes": `[]`, "followups": `[]`, "tasks": `[]`, "integration_ref": `null`, "uses_integration": `null`,
 	}
 	for k, w := range want {
 		if got[k] != w {
@@ -387,5 +388,94 @@ func TestNoOtherWriteEndpoints(t *testing.T) {
 	d := showApprovals(t, ws)
 	if len(d.Approvals) != 0 || d.Operations[0].State != core.OperationStatePending {
 		t.Errorf("store changed: %+v", d)
+	}
+}
+
+// 完了承認画面の値（タスク・フォローアップ・通した衝突の解消・統合先）は、要約と同じ 1 回の応答に入る。
+// フォローアップを済みにしても課題の版は進まないが、次の要約には済みにした結果が載る。
+func TestApprovalSummaryForCompletionCarriesScreenValues(t *testing.T) {
+	ws := initWorkspace(t)
+	approvalFixture(t, ws, "awaiting_completion_approval")
+	st, err := core.OpenWorkspace(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var ids []string
+	for _, title := range []string{"残り1", "残り2"} {
+		f, err := st.CreateFollowup(ctx, core.ChannelCLI, core.FollowupInput{ChallengeID: "C-1", Title: title, Source: core.FollowupSourceLearn})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, f.ID)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	port := approvalServer(t, ws)
+
+	type summary struct {
+		Approval struct {
+			Version   int                      `json:"version"`
+			Followups []struct{ Title string } `json:"followups"`
+			Tasks     []any                    `json:"tasks"`
+			Fixes     []any                    `json:"conflict_fixes"`
+			Ref       *string                  `json:"integration_ref"`
+			Uses      *bool                    `json:"uses_integration"`
+		} `json:"approval"`
+	}
+	read := func() summary {
+		code, body := apiGet(t, port, approvalPath)
+		if code != 200 {
+			t.Fatalf("%d %s", code, body)
+		}
+		var s summary
+		if err := json.Unmarshal([]byte(body), &s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	before := read()
+	if len(before.Approval.Followups) != 2 {
+		t.Fatalf("followups = %+v, want 2", before.Approval.Followups)
+	}
+	if before.Approval.Tasks == nil || before.Approval.Fixes == nil {
+		t.Errorf("tasks / conflict_fixes must be [] (not null): %+v", before.Approval)
+	}
+
+	st, err = core.OpenWorkspace(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CompleteFollowups(ctx, core.ChannelCLI, ids[:1], "済み"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	after := read()
+	if len(after.Approval.Followups) != 1 || after.Approval.Followups[0].Title != "残り2" {
+		t.Errorf("followups after complete = %+v, want only 残り2", after.Approval.Followups)
+	}
+	if after.Approval.Version != before.Approval.Version {
+		t.Errorf("version changed %d -> %d; completing a followup must not bump it", before.Approval.Version, after.Approval.Version)
+	}
+}
+
+// 計画承認待ちの要約には、完了承認画面の値は入らない（空配列）。
+func TestApprovalSummaryForPlanHasNoScreenValues(t *testing.T) {
+	ws := initWorkspace(t)
+	approvalFixture(t, ws, "awaiting_plan_approval")
+	port := approvalServer(t, ws)
+	code, body := apiGet(t, port, approvalPath)
+	if code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	a := decodeMap(t, body)["approval"].(map[string]any)
+	for _, k := range []string{"followups", "tasks", "conflict_fixes"} {
+		v, ok := a[k].([]any)
+		if !ok || len(v) != 0 {
+			t.Errorf("%s = %#v, want []", k, a[k])
+		}
 	}
 }
