@@ -167,8 +167,9 @@ func resolveJ5FixTarget(ctx context.Context, tx *sql.Tx, c j5FixCandidate) (*j5F
 }
 
 // j5FixReflectOperation は、完了の課題の契約の実行 c に対応する、終わっていない（承認待ち・承認済みの）反映の操作の内部整数 ID を返す
-// （無ければ 0）。上げる依頼と、委譲先のフローを通らない成果物の反映の依頼は、実行に結び付く操作。統合先を使わない課題のタスクの実行は、
-// 課題の、最後の終わっていない反映の操作。
+// （無ければ 0）。対応の決め方は反映の段（loadReleaseRun）と同じ: 上げる依頼と、委譲先のフローを通らない成果物の反映の依頼は、実行に
+// 結び付く操作（operation_id）。統合先を使わない課題のタスクの実行は、その実行が取り込んだ成果物の参照と同じ参照を持つ、終わっていない
+// 反映の操作（taskRunImportedRef。課題に反映の操作が複数あっても、確かめ待ちの中身を書いた操作を起点にする）。
 func j5FixReflectOperation(ctx context.Context, tx *sql.Tx, c j5FixCandidate) (int64, error) {
 	open := func(op *operationRow) bool {
 		return op.Kind == string(OperationKindRelease) && (op.State == OperationStatePending || op.State == OperationStateApproved)
@@ -191,14 +192,44 @@ func j5FixReflectOperation(ctx context.Context, tx *sql.Tx, c j5FixCandidate) (i
 		if err != nil || (integ != nil && *integ) {
 			return 0, err
 		}
-		var id int64
-		err = tx.QueryRowContext(ctx,
-			`SELECT id FROM operation WHERE challenge_id = ? AND kind = ? AND state IN (?, ?) ORDER BY id DESC LIMIT 1`,
-			c.ChallengeID, string(OperationKindRelease), string(OperationStatePending), string(OperationStateApproved)).Scan(&id)
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, nil
+		cr, err := scanContractRun(tx.QueryRowContext(ctx, contractRunSelect+` WHERE id = ?`, c.ID))
+		if err != nil {
+			return 0, err
 		}
-		return id, err
+		rows, err := tx.QueryContext(ctx,
+			`SELECT id, COALESCE(ref, '') FROM operation WHERE challenge_id = ? AND kind = ? AND state IN (?, ?) ORDER BY id DESC`,
+			c.ChallengeID, string(OperationKindRelease), string(OperationStatePending), string(OperationStateApproved))
+		if err != nil {
+			return 0, err
+		}
+		type openOp struct {
+			id  int64
+			ref string
+		}
+		var ops []openOp
+		for rows.Next() {
+			var o openOp
+			if err := rows.Scan(&o.id, &o.ref); err != nil {
+				_ = rows.Close()
+				return 0, err
+			}
+			ops = append(ops, o)
+		}
+		if err := rows.Close(); err != nil {
+			return 0, err
+		}
+		if err := rows.Err(); err != nil {
+			return 0, err
+		}
+		for _, o := range ops {
+			if o.ref == "" {
+				continue
+			}
+			if ok, err := taskRunImportedRef(ctx, tx, cr, o.ref); err != nil || ok {
+				return o.id, err
+			}
+		}
+		return 0, nil
 	}
 	return 0, nil
 }
@@ -360,9 +391,10 @@ func loadJ5FixScope(ctx context.Context, tx *sql.Tx, in J5AutoInput, tg j5FixTar
 	return sc, nil
 }
 
-// j5FixStillCurrent は、確かめの結果を書く直前の読み直し（書き込みのトランザクションの中）。契約の実行がまだ終わっておらず、中身の識別
-// （content_ref）と確かめ待ちの中身が、確かめを始めたときの確かめ待ちの中身と同じで、課題がまだ対象の状態（統合先宛ては着手中・反映先宛ては
-// 完了。保留中ではない）なら真。違えば結果を捨てる。
+// j5FixStillCurrent は、確かめの結果を書く直前の読み直し（書き込みのトランザクションの中）。契約の実行がまだ終わっておらず、確かめ待ちの
+// 中身が確かめを始めたときと同じで、課題がまだ対象の状態（統合先宛ては着手中・反映先宛ては完了。保留中ではない）で、反映先宛てなら対応する
+// 反映の操作も同じなら真。違えば結果を捨てる。統合先宛ては、中身の識別（content_ref）も確かめ待ちの中身と同じことを確かめる。反映先宛ての
+// 確かめ待ちの中身は、反映の段が上流から読んだ中身で、委譲先が言う中身の識別（content_ref）とは別に動くので、content_ref は条件にしない。
 func j5FixStillCurrent(ctx context.Context, tx *sql.Tx, sc *j5FixScope) (bool, error) {
 	var contentRef, pending sql.NullString
 	err := tx.QueryRowContext(ctx, `SELECT content_ref, fix_pending_ref FROM contract_run WHERE id = ? AND ended_at IS NULL`,
@@ -373,7 +405,10 @@ func j5FixStillCurrent(ctx context.Context, tx *sql.Tx, sc *j5FixScope) (bool, e
 	if err != nil {
 		return false, err
 	}
-	if !pending.Valid || pending.String != sc.PendingRef || !contentRef.Valid || contentRef.String != sc.PendingRef {
+	if !pending.Valid || pending.String != sc.PendingRef {
+		return false, nil
+	}
+	if sc.Target.Dest == j5FixDestIntegration && (!contentRef.Valid || contentRef.String != sc.PendingRef) {
 		return false, nil
 	}
 	cands, err := scanJ5FixCandidates(ctx, tx, ` AND k.id = ?`, sc.Target.RunRowID)

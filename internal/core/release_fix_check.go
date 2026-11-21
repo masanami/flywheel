@@ -64,7 +64,8 @@ func (s *Store) classifyFixMove(ctx context.Context, opts ReleaseExecOptions, ru
 	return releaseFixMove{outcome: fixMoveContentChanged}
 }
 
-// applyReleaseFixWrites は結果を書く書き込み（finishReleaseAttempt）の中で、確かめ待ちの中身の記録と、通らなかった中身の消去を行う。
+// applyReleaseFixWrites は結果を書く書き込み（finishReleaseAttempt）の中で、確かめ待ちの中身の記録（すでにあれば、いまの中身に改める）・
+// 衝突の解消ありでなくなったときの確かめ待ちの中身の消去・通らなかった中身の消去を行う。
 func applyReleaseFixWrites(ctx context.Context, tx *sql.Tx, j releaseJudgment, written ExecutionResult) error {
 	if j.run == nil || !j.run.corresponds {
 		return nil
@@ -72,6 +73,12 @@ func applyReleaseFixWrites(ctx context.Context, tx *sql.Tx, j releaseJudgment, w
 	id := j.run.row.ID
 	if j.clearFixRejected {
 		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET fix_rejected_ref = NULL WHERE id = ? AND ended_at IS NULL`, id); err != nil {
+			return err
+		}
+	}
+	if j.clearFixPending {
+		// 見分けの結果が衝突の解消ありでない（起点と同じ・取り込みだけ）のに残っている確かめ待ちの中身は、もう確かめる中身ではないので消す。
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET fix_pending_ref = NULL WHERE id = ? AND ended_at IS NULL`, id); err != nil {
 			return err
 		}
 	}
@@ -85,18 +92,6 @@ func applyReleaseFixWrites(ctx context.Context, tx *sql.Tx, j releaseJudgment, w
 		}
 	}
 	return nil
-}
-
-// lastDecidedExecutionObservedHead は opID の、閉じた試行のうち最後のもの（interrupted を除く）の見た中身を返す（無ければ空）。
-func lastDecidedExecutionObservedHead(ctx context.Context, tx *sql.Tx, opID int64) (string, error) {
-	var h sql.NullString
-	err := tx.QueryRowContext(ctx,
-		`SELECT observed_head FROM operation_execution WHERE operation_id = ? AND result IS NOT NULL AND result != ? ORDER BY id DESC LIMIT 1`,
-		opID, string(ExecutionResultInterrupted)).Scan(&h)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	return h.String, err
 }
 
 // writeReflectFix は反映先宛て（完了の課題の、終わっていない反映の操作に対応する契約の実行）の J5 の確かめの結果の書き込みの口（j5FixWriter）。

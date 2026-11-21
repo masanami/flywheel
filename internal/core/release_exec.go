@@ -291,8 +291,10 @@ type releaseJudgment struct {
 	// fixPendingRef が空でないとき、結果（waiting_fix_check）を書く書き込みで、対応する契約の実行（run）の確かめ待ちの中身をこの値にする
 	// （衝突の解消の確かめ。承認は取り消さない）。clearFixRejected が真のとき、同じ書き込みで、その実行の確かめが通らなかった中身を消す
 	// （いまの中身が通らなかった中身と違うので、起点から見分け直した）。
+	// clearFixPending が真のとき（見分けの結果が衝突の解消ありでないのに確かめ待ちの中身が残っている）、同じ書き込みで確かめ待ちの中身を消す。
 	fixPendingRef    string
 	clearFixRejected bool
+	clearFixPending  bool
 }
 
 func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExecOptions) (*ReleaseExecItem, *NotStarted, error) {
@@ -356,11 +358,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 			return err
 		}
 		approvedRow = head
-		prevResult, err = lastDecidedExecutionResult(ctx, tx, opID)
-		if err != nil {
-			return err
-		}
-		if prevObserved, err = lastDecidedExecutionObservedHead(ctx, tx, opID); err != nil {
+		if prevResult, prevObserved, err = lastDecidedExecution(ctx, tx, opID); err != nil {
 			return err
 		}
 		attempt, err = beginOperationExecution(ctx, tx, opID, beginOperationExecutionInput{StartedAt: at, ApprovedHead: head, PID: pid, Host: host})
@@ -637,7 +635,10 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 }
 
 // judgeReleaseUpstream は judgeRelease の、成果物を上流から読んで確かめ、道を選ぶ部分。
-func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport) (releaseJudgment, error) {
+func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, approvedHead string, opts ReleaseExecOptions, run *releaseRun, rep *ContractRunReport) (out releaseJudgment, _ error) {
+	// 見分けの結果が衝突の解消ありでない（起点と同じ・取り込みだけ）のに確かめ待ちの中身が残っていれば、この試行の結果を書く書き込みで消す。
+	staleFixPending := false
+	defer func() { out.clearFixPending = out.clearFixPending || staleFixPending }()
 	approved := &approvedHeadChecks{}
 	// 1
 	if approvedHead == "" {
@@ -710,6 +711,7 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 			return releaseJudgment{result: ExecutionResultWaitingFixCheck, observedHead: observed, route: run.route(),
 				fixPendingRef: pr.HeadSHA}, nil
 		}
+		staleFixPending = run.row.FixPendingRef != ""
 	} else if moved && !movedByMergeInOnly(ctx, opts.Compare, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA) {
 		return releaseJudgment{result: ExecutionResultHeadChanged, observedHead: observed}, nil
 	}
@@ -738,14 +740,14 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 	return s.chooseReleasePath(ctx, row, opts, run, rep, pr.HeadSHA, observed)
 }
 
-// lastDecidedExecutionResult は opID の、閉じた試行のうち最後のもの（interrupted を除く）の結果を返す（無ければ空）。
-func lastDecidedExecutionResult(ctx context.Context, tx *sql.Tx, opID int64) (ExecutionResult, error) {
-	var r sql.NullString
+// lastDecidedExecution は opID の、閉じた試行のうち最後のもの（interrupted を除く）の結果と見た中身を返す（無ければどちらも空）。
+func lastDecidedExecution(ctx context.Context, tx *sql.Tx, opID int64) (ExecutionResult, string, error) {
+	var r, h sql.NullString
 	err := tx.QueryRowContext(ctx,
-		`SELECT result FROM operation_execution WHERE operation_id = ? AND result IS NOT NULL AND result != ? ORDER BY id DESC LIMIT 1`,
-		opID, string(ExecutionResultInterrupted)).Scan(&r)
+		`SELECT result, observed_head FROM operation_execution WHERE operation_id = ? AND result IS NOT NULL AND result != ? ORDER BY id DESC LIMIT 1`,
+		opID, string(ExecutionResultInterrupted)).Scan(&r, &h)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+		return "", "", nil
 	}
-	return ExecutionResult(r.String), err
+	return ExecutionResult(r.String), h.String, err
 }

@@ -87,6 +87,8 @@ func newFixReflectFixture(t *testing.T) *fixFixture {
 	f.sql(t, `INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, head_sha, decided_at)
 		SELECT ?, id, 'release', 'approved', 1, 'alice', 'cli', 'tty_confirm', ?, '2026-09-25T00:00:00.000Z' FROM operation`, cid, fixPassed)
 	f.sql(t, `UPDATE contract_run SET fix_pending_ref = ?`, fixPending)
+	// 統合先を使わない課題のタスクの実行は、取り込んだ成果物（PR）の参照で反映の操作に対応する（反映の段と同じ決め方）。
+	f.sql(t, `INSERT INTO run_artifact (run_id, kind, ref, state, base) SELECT start_run_id, 'pr', ?, 'open', 'main' FROM contract_run`, reviewPRURL)
 	setConflictFixHistory(f.cmp, "main")
 	f.s.fixWriters = j5FixWriters{Integration: f.log.writer(j5FixDestIntegration), Reflect: f.log.writer(j5FixDestReflect)}
 	return f

@@ -272,6 +272,62 @@ func TestReleaseFixCheck_MovingAgainWhilePendingRewritesThePending(t *testing.T)
 	}
 }
 
+// 見分けの結果が衝突の解消ありでない（起点と同じ・取り込みだけ）のに、確かめ待ちの中身が残っているときは、その試行の結果を書く書き込みで
+// 確かめ待ちの中身を消す（もう確かめる中身ではない。J5 が古い中身を確かめない）。通した中身は変えない。
+func TestReleaseFixCheck_StalePendingIsClearedWhenTheMoveIsNotAConflictFix(t *testing.T) {
+	t.Parallel()
+	t.Run("same as the approved content", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "h1", "", "")
+		if item := f.one(t); item.Result != ExecutionResultLandSent {
+			t.Fatalf("item = %+v, want land_sent", item)
+		}
+		if got := f.refs(t); got.Pending != "" {
+			t.Fatalf("fix refs = %+v, want no pending", got)
+		}
+	})
+	t.Run("same as the verified content", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "h2", "h1", "")
+		f.moveHeadTo("h1")
+		if item := f.one(t); item.Result != ExecutionResultLandSent {
+			t.Fatalf("item = %+v, want land_sent", item)
+		}
+		if got := f.refs(t); got.Pending != "" || got.Verified != "h1" {
+			t.Fatalf("fix refs = %+v, want no pending and verified h1", got)
+		}
+	})
+	t.Run("merge-in only", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "h1", "", "")
+		f.mergeInMove(f.head, "h2")
+		f.moveHeadTo("h2")
+		if item := f.one(t); item.Result != ExecutionResultLandSent {
+			t.Fatalf("item = %+v, want land_sent", item)
+		}
+		if got := f.refs(t); got.Pending != "" {
+			t.Fatalf("fix refs = %+v, want no pending", got)
+		}
+	})
+	t.Run("merge-in only while the checks are pending", func(t *testing.T) {
+		t.Parallel()
+		f := newFixCheckFixture(t)
+		f.setRefs(t, "h1", "", "")
+		f.mergeInMove(f.head, "h2")
+		f.moveHeadTo("h2")
+		f.fake.pr.Checks = []UpstreamCheck{{Status: "in_progress"}}
+		if item := f.one(t); item.Result != ExecutionResultWaitingChecks {
+			t.Fatalf("item = %+v, want waiting_checks", item)
+		}
+		if got := f.refs(t); got.Pending != "" {
+			t.Fatalf("fix refs = %+v, want no pending", got)
+		}
+	})
+}
+
 // AC-64〜AC-68: いまの中身が通らなかった中身と同じ → head_changed、承認が取り消され、resume は呼ばれず、詳細に確かめが通らなかった旨があり、
 // 通らなかった中身と通した中身は NULL になる。
 func TestReleaseFixCheck_RejectedContentTakesTheHeadChangedPath(t *testing.T) {
