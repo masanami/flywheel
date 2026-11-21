@@ -81,11 +81,12 @@ func TestSpec_AC267_GlossaryTaskSinceS3b(t *testing.T) {
 	}
 }
 
-// AC-268: 用語集の「反映」の行に、衝突の解消を承認し直さずに通す形は S3c から、の旨がある。
+// AC-268: 用語集の「反映」の行に、衝突の解消を承認し直さずに通す形は S3c のものである旨がある。
+// 区切り S3c で入った（AC-141）ので、「S3c から」の予定の言い方は「S3c で入った」へ改まった。
 func TestSpec_AC268_GlossaryReflectConflictFromS3c(t *testing.T) {
 	cols := glossaryRow(t, "反映")
-	if !strings.Contains(strings.Join(cols, " | "), "衝突の解消を承認し直さずに通す形は、S3c から") {
-		t.Errorf("AC-268: the 反映 row does not say the no-reapproval conflict resolution form comes from S3c: %q", cols)
+	if !strings.Contains(strings.Join(cols, " | "), "衝突の解消を承認し直さずに通す形は、S3c で入った") {
+		t.Errorf("AC-268: the 反映 row does not say the no-reapproval conflict resolution form is from S3c: %q", cols)
 	}
 }
 
@@ -121,5 +122,5 @@ func TestSpec_S3b_M1T15RowAndNoteHaveTheIntegrationReturnTarget(t *testing.T) {
 // m1-core.md の作業ログの action の一覧に、区切り S3b の #905 で足した integration_ref_set と、その意味（entity・after の形）がある。
 func TestSpec_S3b_M1ActivityActionListHasIntegrationRefSet(t *testing.T) {
 	doc := readRepoDoc(t, "docs", "features", "m1-core.md")
-	docLineWith(t, doc, "| `action` | string |", "`task_status`\\|`integration_ref_set`\\|`backup`", "`integration_ref_set` は区切り S3b の #905 で追加した", "`entity=challenge` のときだけ")
+	docLineWith(t, doc, "| `action` | string |", "`task_status`\\|`integration_ref_set`\\|`conflict_fix_passed`\\|`backup`", "`integration_ref_set` は区切り S3b の #905 で追加した", "`entity=challenge` のときだけ")
 }
