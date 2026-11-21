@@ -23,6 +23,7 @@ import {
   TASK_SPENT_LABEL,
   UPSTREAM_STATE_LABELS,
   VERDICT_LABELS,
+  artifactKindLabel,
   label,
 } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
@@ -351,7 +352,9 @@ function ArtifactsSection({ artifacts }: { artifacts: Task["artifacts"] }) {
           return (
             // biome-ignore lint/suspicious/noArrayIndexKey: 同じ識別が並びうる
             <li key={i} data-testid="task-artifact">
-              <span data-testid="artifact-kind">{a.kind}</span>
+              <span data-testid="artifact-kind">
+                {artifactKindLabel(a.kind)}
+              </span>
               {" ・ "}
               {href !== null ? (
                 <a

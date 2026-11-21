@@ -889,6 +889,12 @@ export const REQUESTED_KIND_CODES = [
   "review",
 ] as const;
 
+export const ARTIFACT_KIND_CODES = [
+  "pr",
+  "branch",
+  "commit",
+] as const;
+
 export const CONFLICT_FIX_TARGET_CODES = [
   "integration",
   "release",
