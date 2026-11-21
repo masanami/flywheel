@@ -40,6 +40,8 @@ const (
 	defaultFailureLimit       = 2
 	// defaultImproveThreshold は improve_threshold の既定（改修の提案を作る発生の件数のしきい値）。
 	defaultImproveThreshold = 10
+	// defaultCyclePollIntervalSec は cycle_poll_interval_sec の既定（秒）。
+	defaultCyclePollIntervalSec = 30
 
 	// defaultMemoryDir は memory_dir の既定（ワークスペースからの相対パス）。
 	defaultMemoryDir = "memory"
@@ -105,6 +107,10 @@ type AgentDeclaration struct {
 	FailureLimit      int
 	// ImproveThreshold は improve_threshold（正の整数。既定 10）。
 	ImproveThreshold int
+	// CyclePollIntervalSec は cycle_poll_interval_sec（1 以上の整数〔秒〕。既定 30）。
+	CyclePollIntervalSec int
+	// AutoCycle は auto_cycle（自動でサイクルを始めるか。既定は真）。
+	AutoCycle bool
 
 	// MemoryDir は memory_dir（記憶の置き場。ワークスペースからの相対パスで、
 	// filepath.Clean 済み。絶対パスとワークスペースの外へ出る値は読み込みで
@@ -126,16 +132,18 @@ type AgentDeclaration struct {
 // AgentDeclaration を返す（PositionFile は既定を持たないため空文字列）。
 func defaultAgentDeclaration() *AgentDeclaration {
 	return &AgentDeclaration{
-		Version:           1,
-		CycleBudgetUSD:    defaultCycleBudgetUSD,
-		SizeBudgetsUSD:    defaultSizeBudgetsUSD,
-		MaxRunBudgetUSD:   defaultMaxRunBudgetUSD,
-		JudgmentBudgetUSD: defaultJudgmentBudgetUSD,
-		TimeoutSec:        AgentTimeoutSec{Judgment: defaultTimeoutJudgmentSec, Delegate: defaultTimeoutDelegateSec},
-		MaxParallelRuns:   defaultMaxParallelRuns,
-		ReworkLimit:       defaultReworkLimit,
-		FailureLimit:      defaultFailureLimit,
-		ImproveThreshold:  defaultImproveThreshold,
+		Version:              1,
+		CycleBudgetUSD:       defaultCycleBudgetUSD,
+		SizeBudgetsUSD:       defaultSizeBudgetsUSD,
+		MaxRunBudgetUSD:      defaultMaxRunBudgetUSD,
+		JudgmentBudgetUSD:    defaultJudgmentBudgetUSD,
+		TimeoutSec:           AgentTimeoutSec{Judgment: defaultTimeoutJudgmentSec, Delegate: defaultTimeoutDelegateSec},
+		MaxParallelRuns:      defaultMaxParallelRuns,
+		ReworkLimit:          defaultReworkLimit,
+		FailureLimit:         defaultFailureLimit,
+		ImproveThreshold:     defaultImproveThreshold,
+		CyclePollIntervalSec: defaultCyclePollIntervalSec,
+		AutoCycle:            true,
 
 		MemoryDir:        defaultMemoryDir,
 		MemoryWriteLimit: MemoryWriteLimit{Files: defaultMemoryWriteFiles, Bytes: defaultMemoryWriteBytes},
@@ -237,6 +245,7 @@ var agentTopLevelKeys = map[string]bool{
 	"version": true, "position_file": true, "cycle_budget_usd": true,
 	"size_budgets_usd": true, "max_run_budget_usd": true, "judgment_budget_usd": true,
 	"timeout_sec": true, "max_parallel_runs": true, "rework_limit": true, "failure_limit": true, "improve_threshold": true,
+	"cycle_poll_interval_sec": true, "auto_cycle": true,
 	"memory_dir": true, "memory_write_limit": true,
 }
 
@@ -354,6 +363,28 @@ func parseAgentDeclaration(data []byte) (*AgentDeclaration, error) {
 		decl.ImproveThreshold = i
 	} else {
 		decl.ImproveThreshold = defaultImproveThreshold
+		usedDefault = true
+	}
+
+	if v, ok := raw["cycle_poll_interval_sec"]; ok {
+		i, err := decodeIntLiteral(v)
+		if err != nil {
+			return nil, fmt.Errorf("cycle_poll_interval_sec: %w", err)
+		}
+		decl.CyclePollIntervalSec = i
+	} else {
+		decl.CyclePollIntervalSec = defaultCyclePollIntervalSec
+		usedDefault = true
+	}
+
+	if v, ok := raw["auto_cycle"]; ok {
+		var b bool
+		if isJSONNull(v) || json.Unmarshal(v, &b) != nil {
+			return nil, fmt.Errorf("auto_cycle: must be a boolean")
+		}
+		decl.AutoCycle = b
+	} else {
+		decl.AutoCycle = true
 		usedDefault = true
 	}
 
@@ -736,6 +767,9 @@ func (d *AgentDeclaration) validate() error {
 	}
 	if d.ImproveThreshold <= 0 {
 		return fmt.Errorf("%w: improve_threshold must be a positive integer, got %d", ErrConfigInvalid, d.ImproveThreshold)
+	}
+	if d.CyclePollIntervalSec <= 0 {
+		return fmt.Errorf("%w: cycle_poll_interval_sec must be a positive integer, got %d", ErrConfigInvalid, d.CyclePollIntervalSec)
 	}
 	if d.MemoryWriteLimit.Files <= 0 {
 		return fmt.Errorf("%w: memory_write_limit.files must be a positive integer, got %d", ErrConfigInvalid, d.MemoryWriteLimit.Files)

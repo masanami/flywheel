@@ -21,7 +21,7 @@ func TestAgentDeclarationKeys_ContainsAllTopLevelAndNestedKeys(t *testing.T) {
 		"version", "position_file", "cycle_budget_usd",
 		"size_budgets_usd", "max_run_budget_usd", "judgment_budget_usd",
 		"timeout_sec", "max_parallel_runs", "rework_limit", "failure_limit",
-		"improve_threshold",
+		"improve_threshold", "cycle_poll_interval_sec", "auto_cycle",
 		// ネスト: size_budgets_usd の段（S/M/L）
 		"S", "M", "L",
 		// ネスト: size pair（impl/review）

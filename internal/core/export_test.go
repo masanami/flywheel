@@ -686,3 +686,42 @@ func TestImport_S3cColumnsSurviveTheRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// 版 31 で足した列（cycle の end_reason・rounds・stop_requested_at）の値は、書き出し→空のストアへの再構築で同じになる（AC-188・AC-189）。
+func TestImport_S4aCycleColumnsSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	src, _ := filledStore(t)
+	if err := src.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE cycle SET end_reason = 'idle', rounds = 3, stop_requested_at = '2026-11-02T03:04:05.000Z' WHERE id = (SELECT MIN(id) FROM cycle)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(mustExport(t, src), &doc); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := doc["tables"].(map[string]any)["cycle"].([]any)
+	if len(rows) == 0 {
+		t.Fatal("export has no cycle rows")
+	}
+	for _, col := range []string{"end_reason", "rounds", "stop_requested_at"} {
+		if _, ok := rows[0].(map[string]any)[col]; !ok {
+			t.Errorf("exported cycle row lacks %q", col)
+		}
+	}
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+		t.Fatal(err)
+	}
+	var reason, stop string
+	var rounds int
+	if err := dst.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT end_reason, rounds, stop_requested_at FROM cycle WHERE id = (SELECT MIN(id) FROM cycle)`).Scan(&reason, &rounds, &stop)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if reason != "idle" || rounds != 3 || stop != "2026-11-02T03:04:05.000Z" {
+		t.Errorf("imported cycle = (%q, %d, %q), want (idle, 3, 2026-11-02T03:04:05.000Z)", reason, rounds, stop)
+	}
+}
