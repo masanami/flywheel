@@ -465,11 +465,24 @@ func (s *Store) landingArtifacts(ctx context.Context, rep *ContractRunReport, ci
 			if err := rows.Scan(&a.Kind, &a.Ref, &a.Role); err != nil {
 				return err
 			}
-			arts = append(arts, a)
+			// 読んだ status の成果物が、記録から作った読み（取り込み済みの成果物）をすでに持つとき、同じものを足さない
+			// （足すと、統合先の識別が二重に数えられ、統合先へ入ったかを読めない）。
+			if !containsArtifact(arts, a) {
+				arts = append(arts, a)
+			}
 		}
 		return rows.Err()
 	})
 	return arts, classifyReadWriteErr(err)
+}
+
+func containsArtifact(arts []ContractArtifact, a ContractArtifact) bool {
+	for _, x := range arts {
+		if x.Kind == a.Kind && x.Ref == a.Ref && x.Role == a.Role {
+			return true
+		}
+	}
+	return false
 }
 
 // holdLandedEnd は保留を立て、契約の実行を終わった記録にする（同じトランザクション。終わりの記録だけが残らず、開いたまま課題が保留になることが無い）。

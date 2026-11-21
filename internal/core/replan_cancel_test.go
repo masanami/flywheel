@@ -239,14 +239,15 @@ func TestAnswerReplan_AC221_ARunningTaskRunRefusesTheReplanAnswer(t *testing.T) 
 	}
 }
 
-// 「入れてよい」を返して終わりを読んでいないタスクの実行は、最後に読んだ状態がレビュー待ちでも、作業している実行として断る。
+// 「入れてよい」を返して委譲先が受け取ったタスクの実行は、終わるかレビュー待ちへ戻るまで running を返すので、作業している実行として断る
+// （通す中身があるだけでは断らない。最後に読んだ状態がレビュー待ちへ戻った実行は受ける）。
 func TestAnswerReplan_AC221_ARunAlreadyToldToLandRefusesTheReplanAnswer(t *testing.T) {
 	t.Parallel()
 	f := newMultiFixture(t, 3)
 	id := f.newMulti(t, "land", "P1", true, multiTask{key: "a"})
 	f.runDelegationStage(t, nil)
 	f.client.echoRunning = false
-	f.sqlExec(t, `UPDATE contract_run SET state = 'waiting', requested_kind = 'review', requested_decider = 'any', land_ref = 'feat/x@abc' WHERE external_run_id = 'ext-1'`)
+	f.sqlExec(t, `UPDATE contract_run SET land_ref = 'feat/x@abc', land_delivered = 1 WHERE external_run_id = 'ext-1'`)
 	if _, err := f.s.HoldChallenge(context.Background(), ChannelCLI, id, HoldInput{Question: "範囲"}); err != nil {
 		t.Fatal(err)
 	}

@@ -920,12 +920,12 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		}
 		holdID = id
 		if req.Replan {
-			// 作業している契約の実行（最後に読んだ状態が running のタスクの実行。「入れてよい」を返して終わりを読んでいないもの、
-			// 保留の間の成功が未処理のものを含む）があるときは、動いている作業が作り直す前の計画のまま進む・検証中へ進むので、印は成立させない。
+			// 作業している契約の実行（最後に読んだ状態が running のタスクの実行。「入れてよい」を返して委譲先が受け取った実行は、終わるかレビュー待ちへ
+			// 戻るまで running を返すので含まれる。通す中身が残っているだけでは数えない。保留の間の成功が未処理のものも含む）があるときは、動いている作業が作り直す前の計画のまま進む・検証中へ進むので、印は成立させない。
 			// レビュー待ち・問い待ちのタスクの実行と、上げる依頼は、作り直した計画の承認の後に取り消すので、あっても受ける。
 			var working int
 			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND kind = ? AND (
-				(ended_at IS NULL AND (state = ? OR COALESCE(land_ref, '') <> '')) OR held_success = 1)`,
+				(ended_at IS NULL AND state = ?) OR held_success = 1)`,
 				cid, contractRunKindTask, string(ContractStateRunning)).Scan(&working); err != nil {
 				return "", err
 			}

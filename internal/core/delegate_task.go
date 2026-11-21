@@ -187,6 +187,28 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 	}
 	if len(repoList) >= 2 {
 		// 進めようが無い（計画の検査が通すはずの無い計画。手で登録した計画・過去の計画）。毎周起動しないだけでオーナーに見えないので、保留にする。
+		// ただし、作業している実行・検証中のタスクがある間は、ほかの「進めようが無い」と同じく、起動しないだけで待つ（保留にすると、動いている
+		// 作業の結果を受け取る前に課題を止める）。保留は、起動するタスクが無く、実行中でもなくなってから立てる。
+		busy, err := taskLessHasActiveRun(ctx, tx, cid)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range all {
+			if busy {
+				break
+			}
+			if t.Status == TaskStatusVerifying {
+				busy = true
+			} else if tid := taskIntID(&t); tid > 0 && t.Status != TaskStatusCancelled {
+				if busy, err = taskHasActiveRun(ctx, tx, cid, tid); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if busy {
+			sel.Busy = true
+			return sel, nil
+		}
 		sel.Blocked = fmt.Sprintf("統合先を使う課題のタスクは、1 つのリポジトリにそろえる必要があるが、この課題のタスクは 2 つ以上のリポジトリにまたがっている"+
 			"（取りやめたタスクは数えない。済み・未完のタスクのリポジトリ: %s）。このままでは進められない。"+
 			"計画を作り直す回答（タスクのリポジトリを 1 つにそろえる）をするか、課題を取り下げて進めてください。", strings.Join(repoList, "・"))
