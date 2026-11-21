@@ -292,3 +292,76 @@ func TestPlanView_SoleTaskWithoutFramesShowsTheDefaultFrame(t *testing.T) {
 		t.Errorf("task frame = %v/%v, want the size default %v/%v", tv.BudgetImplUSD, tv.BudgetReviewUSD, impl, review)
 	}
 }
+
+// タスクが 1 個の計画の承認の要約（承認の前）は、枠を片方だけ書いた計画でも、承認でタスクへ記録される枠（fillSoleTaskBudgets）と同じ額を出す
+// （書いた枠はそのまま、省いた枠だけ既定で埋める）。
+func TestPlanView_SoleTaskShowsTheFramesRecordedAtApproval(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		impl, review *float64
+	}{
+		{"only the impl frame is written", ptrFloat(7), nil},
+		{"only the review frame is written", nil, ptrFloat(2.5)},
+		{"neither frame is written", nil, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := newContractFixture(t)
+			id := f.newInProgress(t, "two", "P2", twoTaskSpec(3, 2, 4, 5))
+			cid, _ := parseChallengeID(id)
+			spec := planSpec(func(m map[string]any) {
+				tasks := j2TasksOf("a")
+				tm := tasks[0].(map[string]any)
+				tm["repo"], tm["operation"] = "main-repo", "impl"
+				if c.impl != nil {
+					tm["budget_impl_usd"] = *c.impl
+				}
+				if c.review != nil {
+					tm["budget_review_usd"] = *c.review
+				}
+				m["tasks"] = tasks
+			})
+			writeForTest(t, f.s, func(tx *sql.Tx) error {
+				_, err := tx.Exec(`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (?, 2, 'v2', '2026-09-26T00:00:00.000Z', ?)`, cid, spec)
+				return err
+			})
+			// 承認でタスクへ記録される枠。
+			tasks := parsePlanSpec(&spec).Tasks
+			readForTest(t, f.s, func(tx *sql.Tx) error {
+				return fillSoleTaskBudgets(context.Background(), tx, cid, 2, tasks, f.agent)
+			})
+			if tasks[0].BudgetImplMicros == nil || tasks[0].BudgetReviewMicros == nil {
+				t.Fatalf("fillSoleTaskBudgets left a frame empty: %+v", tasks[0])
+			}
+			pv, err := f.s.GetPlanView(context.Background(), id, f.agent)
+			if err != nil || len(pv.Tasks) != 1 {
+				t.Fatalf("GetPlanView: %v tasks=%d", err, len(pv.Tasks))
+			}
+			tv := pv.Tasks[0]
+			if tv.BudgetImplUSD == nil || tv.BudgetReviewUSD == nil {
+				t.Fatalf("task frame = %v/%v, want both frames", tv.BudgetImplUSD, tv.BudgetReviewUSD)
+			}
+			if usdToMicros(*tv.BudgetImplUSD) != *tasks[0].BudgetImplMicros || usdToMicros(*tv.BudgetReviewUSD) != *tasks[0].BudgetReviewMicros {
+				t.Errorf("view frame = %v/%v USD, recorded at approval = %d/%d micros", *tv.BudgetImplUSD, *tv.BudgetReviewUSD, *tasks[0].BudgetImplMicros, *tasks[0].BudgetReviewMicros)
+			}
+			// 承認の後は、タスクの記録の値（`flywheel budget --task` で置き換えた額を含む）を出す。
+			seedPlanTasks(t, f.s, cid, 2)
+			wantImpl, wantReview := *tasks[0].BudgetImplMicros+usdToMicros(1), *tasks[0].BudgetReviewMicros+usdToMicros(1)
+			writeForTest(t, f.s, func(tx *sql.Tx) error {
+				_, err := tx.Exec(`UPDATE task SET budget_impl_micros = ?, budget_review_micros = ? WHERE challenge_id = ? AND plan_version = 2`, wantImpl, wantReview, cid)
+				return err
+			})
+			pv, err = f.s.GetPlanView(context.Background(), id, f.agent)
+			if err != nil || len(pv.Tasks) != 1 || pv.Tasks[0].BudgetImplUSD == nil || pv.Tasks[0].BudgetReviewUSD == nil {
+				t.Fatalf("GetPlanView after approval: %v %+v", err, pv.Tasks)
+			}
+			if usdToMicros(*pv.Tasks[0].BudgetImplUSD) != wantImpl || usdToMicros(*pv.Tasks[0].BudgetReviewUSD) != wantReview {
+				t.Errorf("view frame after approval = %v/%v USD, recorded = %d/%d micros", *pv.Tasks[0].BudgetImplUSD, *pv.Tasks[0].BudgetReviewUSD, wantImpl, wantReview)
+			}
+		})
+	}
+}
+
+func ptrFloat(v float64) *float64 { return &v }
