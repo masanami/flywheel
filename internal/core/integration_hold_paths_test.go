@@ -62,7 +62,7 @@ func TestStuckPaths_FactsUnmetAnswerIsDeliveredPerTaskNotPerChallenge(t *testing
 }
 
 // 項目 7: 統合先を使う課題のリポジトリを 1 つに限る確かめは、起動でも済みのタスクを含める（上げる依頼と同じ基準）。
-// 済みのタスクと別のリポジトリのタスクを足した計画は、起動せず（費用を使う前に止め）、理由 integration_unavailable にする。
+// 済みのタスクと別のリポジトリのタスクを足した計画は、起動せず（費用を使う前に止め）、保留の理由 tasks_blocked で保留にする。
 func TestStuckPaths_ADoneTaskAndAnotherRepositoryTaskAreNotStarted(t *testing.T) {
 	t.Parallel()
 	f := newMultiFixture(t, 2)

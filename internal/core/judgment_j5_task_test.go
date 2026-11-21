@@ -568,3 +568,75 @@ func TestJ5TaskResult_IsDiscardedWhenTheLatestContractRunIsAnotherRow(t *testing
 		})
 	}
 }
+
+// addLaterTaskRun は、最初のタスクに、いまの最後の run より後の契約の run（終わり済み）を足す。ref が空でなければ、その commit を成果物に持つ。
+func (f *reviewFlowFixture) addLaterTaskRun(t *testing.T, ref string) {
+	t.Helper()
+	cidInt, _ := parseChallengeID(f.cid)
+	task1 := f.count(t, `SELECT id FROM task ORDER BY id LIMIT 1`)
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		now := time.Now()
+		r, err := insertRun(context.Background(), tx, cidInt, insertRunInput{Kind: runKindContract, ChallengeVersion: 1, TaskID: &task1,
+			SessionID: "55555555-5555-4555-8555-555555555555", PID: 1, Host: "h", HeartbeatAt: now, StartedAt: now, MaxBudgetUSD: 1, BudgetBucket: budgetBucketImpl})
+		if err != nil {
+			return err
+		}
+		n, _ := parseRunID(r.ID)
+		if _, err := tx.Exec(`UPDATE run SET result = 'succeeded', ended_at = ? WHERE id = ?`, formatTimestamp(now), n); err != nil {
+			return err
+		}
+		if ref != "" {
+			_, err = tx.Exec(`INSERT INTO run_artifact (run_id, kind, ref) VALUES (?, 'commit', ?)`, n, ref)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func j5InputText(in JudgmentLaunchInput) string {
+	var b strings.Builder
+	for _, s := range in.Sections {
+		b.WriteString("## " + s.Label + "\n" + s.Content + "\n")
+	}
+	return b.String()
+}
+
+// 同じタスクに成果物を持つ実行が 2 回あるとき、タスクの検証の入力の成果物は後の実行のもの（前の実行の成果物は入らない）。
+func TestJ5TaskInput_TwoRunsWithArtifactsTheLaterRunWins(t *testing.T) {
+	t.Parallel()
+	f := newTaskVerifyFixture(t)
+	f.addLaterTaskRun(t, "dddd111")
+	f.addSecondVerifyingTask(t, "")                                                                // ほかのタスクの成果物（beef000。より後の run）は入らない
+	f.sql(t, `UPDATE contract_run SET verified_ref = content_ref WHERE external_run_id = 'ext-2'`) // 2 個目は検証済み（対象外）
+	f.setVerdict("met")
+	if _, err := f.verifyTasks(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.j5.j5Inputs) != 1 {
+		t.Fatalf("J5 inputs = %d, want 1", len(f.j5.j5Inputs))
+	}
+	text := j5InputText(f.j5.j5Inputs[0])
+	if !strings.Contains(text, "dddd111") || strings.Contains(text, "c0ffee1") || strings.Contains(text, "beef000") {
+		t.Fatalf("the input must hold only the later run's artifacts (dddd111):\n%s", text)
+	}
+}
+
+// 現状の動きの固定（基準文との食い違い）: 基準文は「そのタスクの、最後の委譲の実行の成果物」だが、実装は成果物のある実行を優先して選ぶ
+// （run_artifact を持つ実行 → ID の大きい実行の順）。成果物を持たない実行が最後にあっても、その前の、成果物のある実行の成果物が入る。
+// 実装は変えない（S3b の仕上げ 4。PR の説明で報告する）。
+func TestJ5TaskInput_LaterRunWithoutArtifactsStillGetsTheEarlierRunsArtifacts(t *testing.T) {
+	t.Parallel()
+	f := newTaskVerifyFixture(t)
+	f.addLaterTaskRun(t, "")
+	f.setVerdict("met")
+	if _, err := f.verifyTasks(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.j5.j5Inputs) != 1 {
+		t.Fatalf("J5 inputs = %d, want 1", len(f.j5.j5Inputs))
+	}
+	if text := j5InputText(f.j5.j5Inputs[0]); !strings.Contains(text, "c0ffee1") {
+		t.Fatalf("current behaviour: the run with artifacts is preferred over the later run without them (c0ffee1 expected):\n%s", text)
+	}
+}
