@@ -10,7 +10,7 @@ import (
 var flywheelVersion = buildFlywheelVersion
 
 func buildFlywheelVersion() string {
-	info, ok := debug.ReadBuildInfo()
+	info, ok := readBuildInfo()
 	if !ok {
 		return ""
 	}
