@@ -437,6 +437,45 @@ func TestReleaseFixCheck_ReopeningTheChallengeClearsTheThreeColumns(t *testing.T
 	}
 }
 
+// AC-79: 課題を完了から戻す本体（ReopenChallengeForRelease）を通して、契約の実行の 3 列は NULL になる（承認し直した後に古い中身を引き継がない）。
+func TestReleaseFixCheck_ReopenChallengeForReleaseClearsTheThreeColumns(t *testing.T) {
+	t.Parallel()
+	f := newFixCheckFixture(t)
+	f.setRefs(t, "a", "b", "c")
+	f.client.queue = []ContractLaunchOutput{f.refusedReview()}
+	res, err := f.s.ReopenChallengeForRelease(context.Background(), ChannelCLI, f.reopenInput(f.contentChangedCompare()))
+	if err != nil || !res.Reopened {
+		t.Fatalf("ReopenChallengeForRelease = %+v err %v, want reopened", res, err)
+	}
+	if got := f.refs(t); got != (contractFixRefs{}) {
+		t.Fatalf("fix refs = %+v, want all NULL", got)
+	}
+}
+
+// AC-81（反映先宛て）: 通した中身（fix_verified_ref）を持つ契約の実行が failed で終わると、確かめ待ちの中身と通した中身の両方が NULL になる。
+func TestReleaseFixCheck_AFailedRunWithAVerifiedContentClearsPendingAndVerified(t *testing.T) {
+	t.Parallel()
+	cases := map[string][3]string{
+		"verified only":        {"", "h1", ""},
+		"verified and pending": {"h2", "h1", ""},
+	}
+	for name, refs := range cases {
+		refs := refs
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixCheckFixture(t)
+			f.setRefs(t, refs[0], refs[1], refs[2])
+			f.client.queue = []ContractLaunchOutput{contractOut(ContractStateFailed, nil, nil)}
+			if item := f.one(t); item.Result != ExecutionResultDelegateEnded {
+				t.Fatalf("item = %+v, want delegate_ended", item)
+			}
+			if got := f.refs(t); got.Pending != "" || got.Verified != "" {
+				t.Fatalf("fix refs = %+v, want pending and verified NULL", got)
+			}
+		})
+	}
+}
+
 // AC-80・AC-81: 契約の実行が終わったとき（反映先へ入った・委譲先が失敗で終わった）、確かめ待ちの中身と通した中身は NULL になる。
 func TestReleaseFixCheck_EndingTheContractRunClearsTheRefs(t *testing.T) {
 	t.Parallel()
