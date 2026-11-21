@@ -596,7 +596,8 @@ it("AC-249 #808: 前提の課題がある課題の詳細の、関係する課題
   const link = within(r).getByRole("link", { name: "ビルドの高速化" });
   expect(link).toHaveAttribute("href", "#/a/alpha/challenges/C-5");
   expect(within(r).getByText("着手中")).toBeInTheDocument();
-  expect(within(r).getByText("未完了")).toBeInTheDocument();
+  expect(within(r).getByText("未解消")).toBeInTheDocument();
+  expect(within(r).queryByText("未完了")).toBeNull();
 });
 
 it("AC-250 #808: この課題を前提にしている課題があるとき、関係する課題の区画に、その課題が出る", async () => {
@@ -658,7 +659,9 @@ it("AC-254 #808: 不可逆操作がある課題の詳細に、その種類と状
   };
   const { root } = await open(show({ operations: [op] }));
   const o = q(root).getByTestId("detail-operations");
-  expect(o).toHaveTextContent("release / pending");
+  expect(o).toHaveTextContent("反映 / 承認待ち");
+  expect(o).not.toHaveTextContent("release");
+  expect(o).not.toHaveTextContent("pending");
   expect(o).toHaveTextContent("本番へ反映する");
 });
 

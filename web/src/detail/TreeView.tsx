@@ -1,9 +1,11 @@
 import type { ShowCardResponse, TreeRelative } from "../api/types.gen.ts";
 import {
   DEPENDENCY_SATISFIED_LABEL,
-  DEPENDENCY_UNMET_LABEL,
+  DEPENDENCY_UNRESOLVED_LABEL,
   FOLLOWUP_SOURCE_LABELS,
   FOLLOWUP_STATUS_LABELS,
+  OPERATION_KIND_LABELS,
+  OPERATION_STATE_LABELS,
   UPSTREAM_STATE_LABELS,
   label,
 } from "../labels.ts";
@@ -170,7 +172,7 @@ function Related({
                 <span className={d.satisfied ? undefined : "dep-unmet"}>
                   {d.satisfied
                     ? DEPENDENCY_SATISFIED_LABEL
-                    : DEPENDENCY_UNMET_LABEL}
+                    : DEPENDENCY_UNRESOLVED_LABEL}
                 </span>
               </li>
             ))}
@@ -213,7 +215,9 @@ function Operations({ show }: { show: ShowCardResponse }) {
       <ul>
         {show.operations.map((o) => (
           <li key={o.id}>
-            {o.kind} / {o.state}: <ClampedText text={o.summary} />
+            {label(OPERATION_KIND_LABELS, o.kind)} /{" "}
+            {label(OPERATION_STATE_LABELS, o.state)}:{" "}
+            <ClampedText text={o.summary} />
             {o.ref ? (
               <span
                 className="detail-operation-ref"

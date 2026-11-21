@@ -6,7 +6,7 @@ import type {
   PlanQuestion,
   PlanTopic,
 } from "../api/types.gen.ts";
-import { guidesFor, guidesForContext } from "../guidance.ts";
+import { COMPLETION_REJECT_NOTE, guidesForContext } from "../guidance.ts";
 import { LOADING_TEXT, RELOAD_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
@@ -225,9 +225,6 @@ function PlanView({
     plan !== null && plan.tasks.length === 0 && plan.summary === null;
   const questionCount =
     plan?.topics.reduce((n, t) => n + t.questions.length, 0) ?? 0;
-  const reject = guidesFor(id, workspacePath, ["approve_plan"]).find(
-    (g) => g.id === "reject",
-  );
   const answer = guidesForContext("plan_approval", workspacePath).find(
     (g) => g.id === "answer-choice",
   );
@@ -391,14 +388,7 @@ function PlanView({
             {notice}
           </p>
         )}
-        <p className="approval-control-question">
-          差し戻すときは、ターミナルで次のコマンドを実行します。
-        </p>
-        {reject && (
-          <pre data-guide={reject.id}>
-            <code>{reject.command}</code>
-          </pre>
-        )}
+        <p className="approval-control-question">{COMPLETION_REJECT_NOTE}</p>
       </div>
     </section>
   );

@@ -17,7 +17,7 @@ export interface Template {
 export const OUTSIDE_NOTE: string = guidance.outside_note;
 export const CONVERSATION_NOTE: string = guidance.conversation_note;
 
-// 完了承認画面の案内。対話で伝える方法だけを出す（コマンドの例は出さない）。
+// 完了承認画面の案内（COMPLETION_REJECT_NOTE は計画の承認の画面の差し戻しの案内にも使う）。対話で伝える方法だけを出す（コマンドの例は出さない）。
 export const COMPLETION_BUTTON_NOTE: string = guidance.completion_button_note;
 export const COMPLETION_RELEASE_NOTE: string = guidance.completion_release_note;
 export const COMPLETION_REJECT_NOTE: string = guidance.completion_reject_note;
