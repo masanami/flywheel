@@ -335,33 +335,29 @@ const summary = {
   },
 };
 
-it("AC-234 #808: approve_completion がある課題の詳細に、完了の承認の要約（承認の要約の API の応答）が出る", async () => {
-  const { root } = await open(show({ actions: ["approve_completion"] }), {
-    extra: { [`${BASE}/challenges/C-1/approval`]: summary },
-  });
-  const s = await q(root).findByTestId("approval-summary");
-  expect(s).toHaveTextContent("要約の完了条件");
-  expect(s).toHaveTextContent("版 7");
-});
-
-it("AC-235 #808: 完了の承認のボタンを押すと、承認の口（POST …/approve）が、要約の版を本文にして 1 回呼ばれる", async () => {
+it("AC-234 #808: approve_completion がある課題の詳細に、完了承認画面へのリンクが出て、要約は出ない（S3d）", async () => {
   const { root, requests } = await open(
     show({ actions: ["approve_completion"] }),
     {
-      extra: {
-        [`${BASE}/challenges/C-1/approval`]: summary,
-        [`POST ${BASE}/challenges/C-1/approve`]: {},
-      },
+      extra: { [`${BASE}/challenges/C-1/approval`]: summary },
     },
   );
-  fireEvent.click(
-    await q(root).findByRole("button", { name: /完了を承認する/ }),
-  );
-  await q(root).findByText("承認しました。");
-  const posts = requests.filter((r) => r.method === "POST");
-  expect(posts).toHaveLength(1);
-  expect(posts[0]?.url).toBe(`${BASE}/challenges/C-1/approve`);
-  expect(posts[0]?.body).toBe('{"version":7}');
+  const w = q(root).getByTestId("detail-waiting");
+  expect(
+    within(w).getByRole("link", { name: "完了の承認の画面を開く" }),
+  ).toHaveAttribute("href", "#/a/alpha/challenges/C-1/approve-completion");
+  expect(q(root).queryByTestId("approval-summary")).toBeNull();
+  expect(requests.some((r) => r.url.endsWith("/approval"))).toBe(false);
+});
+
+it("AC-235 #808: approve_completion がある課題の詳細に、承認のボタンは無い（S3d）", async () => {
+  const { root } = await open(show({ actions: ["approve_completion"] }), {
+    extra: { [`${BASE}/challenges/C-1/approval`]: summary },
+  });
+  await q(root).findByTestId("detail-waiting");
+  expect(
+    q(root).queryByRole("button", { name: /承認/, hidden: true }),
+  ).toBeNull();
 });
 
 it("AC-236 #808: answer_question がある課題の詳細に、その保留の問いの文が出る", async () => {
@@ -950,4 +946,27 @@ it("#808: 課題の詳細を開いても fetch は GET だけで、form 要素�
   );
   expect(requests.every((r) => r.method === "GET")).toBe(true);
   expect(root.querySelector("form, input, textarea")).toBeNull();
+});
+
+it("AC-107 #932: 課題の詳細のツリーの箱に、タスクの progress の語が出る", async () => {
+  const { root } = await open(
+    show({
+      tree: {
+        tasks: [
+          task({
+            key: "a",
+            id: "T-1",
+            phase: "running",
+            progress: "verifying",
+          }),
+          task({ key: "b", id: "T-2" }),
+        ],
+      },
+    }),
+  );
+  const boxes = q(root).getAllByTestId("task-box");
+  expect(
+    q(boxes[0] as HTMLElement).getByTestId("task-progress"),
+  ).toHaveTextContent("検証待ち");
+  expect(q(boxes[1] as HTMLElement).queryByTestId("task-progress")).toBeNull();
 });

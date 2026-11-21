@@ -557,3 +557,36 @@ it("#807: approve_plan 以外の待ちの種類も、「いま進められるこ
   expect(within(f).getByText("回答")).toBeInTheDocument();
   expect(within(f).getByText("予算の増額")).toBeInTheDocument();
 });
+
+// タスクの箱・課題の枠の見出しに、core が返す progress の語を出す（AC-96〜100・AC-107）。
+it("タスクの箱に progress の語を出し、無ければ出さない（AC-96〜98）", async () => {
+  const c = challenge("C-1", {
+    tasks: [
+      task("a", { progress: "working", phase: "running" }),
+      task("b", { progress: "verifying", phase: "running" }),
+      task("c", { progress: "landing", phase: "running" }),
+      task("d"),
+    ],
+  });
+  await open({ challenges: [c] });
+  const boxes = await screen.findAllByTestId("task-box");
+  const words = boxes.map(
+    (b) => within(b).queryByTestId("task-progress")?.textContent ?? null,
+  );
+  expect(words).toEqual(["作業中", "検証待ち", "統合中", null]);
+});
+
+it("課題の枠の見出しに progress の語を出す（AC-99・AC-100）", async () => {
+  await open({
+    challenges: [
+      challenge("C-1", { progress: "reflecting" }),
+      challenge("C-2", { progress: "checking" }),
+      challenge("C-3"),
+    ],
+  });
+  await waitFor(() => expect(frames()).toHaveLength(3));
+  const words = frames().map(
+    (f) => within(f).queryByTestId("challenge-progress")?.textContent ?? null,
+  );
+  expect(words).toEqual(["反映中", "全体の確認中", null]);
+});

@@ -1,4 +1,4 @@
-import { PHASE_LABELS, label } from "../labels.ts";
+import { PHASE_LABELS, TASK_PROGRESS_LABELS, label } from "../labels.ts";
 import {
   BOX_H,
   BOX_W,
@@ -68,7 +68,17 @@ function TaskBox({ box, href }: { box: PlacedTask; href: string | null }) {
   const inner = (
     <>
       <span className="task-title">{task.title}</span>
-      <small className="task-phase">{label(PHASE_LABELS, task.phase)}</small>
+      <small className="task-phase">
+        {label(PHASE_LABELS, task.phase)}
+        {task.progress != null ? (
+          <>
+            {" ・ "}
+            <span className="task-progress" data-testid="task-progress">
+              {label(TASK_PROGRESS_LABELS, task.progress)}
+            </span>
+          </>
+        ) : null}
+      </small>
     </>
   );
   return href !== null ? (
