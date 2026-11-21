@@ -74,7 +74,7 @@ func contractWaitingQuestion(runID, summary string, ra *ContractRequestedAction,
 		}
 	}
 	if terminal {
-		b.WriteString("この求めは接続ツールの外の端末で人が解く必要があり、resume では解けない。解いてから回答する。回答しても resume は送らず、次の周で接続ツールの run の状態を読み直す。")
+		b.WriteString("この求めは接続ツールの外のターミナルで人が解く必要があり、resume では解けない。解いてから回答する。回答しても resume は送らず、次の周で接続ツールの run の状態を読み直す。")
 	} else if carriesAnswer {
 		b.WriteString("回答すると、その文を接続ツールへ返して続ける。")
 	} else {

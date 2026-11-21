@@ -111,6 +111,15 @@ function NotAwaiting({ href }: { href: string }) {
   );
 }
 
+// 承認待ちでなくなった課題（遷移できない状態・完了などの終わりの状態）への読み書きの失敗。
+// 内部の英語の文は出さず、承認待ちでない旨の案内を出す。
+function isNotAwaitingError(e: unknown): boolean {
+  return (
+    e instanceof ApiError &&
+    (e.code === "invalid_transition" || e.code === "terminal_state")
+  );
+}
+
 function Body({
   result,
   reload,
@@ -129,7 +138,7 @@ function Body({
   if (result.state === "loading") return <p>{LOADING_TEXT}</p>;
   if (result.state === "error") {
     const e = result.error;
-    if (e instanceof ApiError && e.code === "invalid_transition") {
+    if (isNotAwaitingError(e)) {
       return <NotAwaiting href={challengeHref} />;
     }
     return <p role="alert">{e instanceof Error ? e.message : String(e)}</p>;
@@ -145,6 +154,7 @@ function Body({
       reload={reload}
       agentName={agentName}
       id={id}
+      challengeHref={challengeHref}
       onApproved={onApproved}
     />
   );
@@ -156,6 +166,7 @@ function CompletionView({
   reload,
   agentName,
   id,
+  challengeHref,
   onApproved,
 }: {
   approval: ApprovalSummary;
@@ -163,10 +174,13 @@ function CompletionView({
   reload: () => void;
   agentName: string;
   id: string;
+  challengeHref: string;
   onApproved: (title: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // 押した結果が「終わりの状態」だったとき、承認待ちでない旨の案内に切り替える。
+  const [gone, setGone] = useState(false);
   // 開いたあとの読み直しで版が変わったら知らせる（押すまで出したままにする）。
   const [seen, setSeen] = useState(approval.version);
   const updated = approval.version !== seen;
@@ -200,7 +214,9 @@ function CompletionView({
       onApproved(approval.title);
     } catch (e) {
       if (!alive.current) return;
-      if (e instanceof ApiError && e.code === "conflict") {
+      if (e instanceof ApiError && e.code === "terminal_state") {
+        setGone(true);
+      } else if (e instanceof ApiError && e.code === "conflict") {
         // 読み直しが終わるまでボタンを押せないままにし、通知は読み直しの後に出す。
         reloading = true;
         setAwaitingReload(true);
@@ -217,6 +233,8 @@ function CompletionView({
       if (alive.current && !reloading) setBusy(false);
     }
   };
+
+  if (gone) return <NotAwaiting href={challengeHref} />;
 
   const ch = show.challenge;
   const showIntegration =

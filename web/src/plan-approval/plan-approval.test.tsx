@@ -693,6 +693,42 @@ it("AC-349 #811: 要約の API が invalid_transition を返すと、承認待�
   await screen.findByText("この課題は、計画の承認待ちではありません。");
 });
 
+it("要約の API が terminal_state を返すと（完了した課題）、承認待ちでない旨が出て、内部の英語の文は出ない", async () => {
+  await open(() =>
+    json(409, {
+      error: {
+        code: "terminal_state",
+        message: "core: challenge is in a terminal state",
+      },
+    }),
+  );
+  await screen.findByText("この課題は、計画の承認待ちではありません。");
+  expect(
+    screen.getByRole("link", { name: "課題の詳細を開く" }),
+  ).toHaveAttribute("href", "#/a/alpha/challenges/C-1");
+  expect(document.body.textContent).not.toContain("terminal state");
+});
+
+it("承認の口が terminal_state を返すと、承認待ちでない旨が出て、内部の英語の文は出ない", async () => {
+  await opened(summary(), {
+    extra: {
+      [APPROVE]: () =>
+        json(409, {
+          error: {
+            code: "terminal_state",
+            message: "core: challenge is in a terminal state",
+          },
+        }),
+    },
+  });
+  fireEvent.click(await approveBtn());
+  await screen.findByText("この課題は、計画の承認待ちではありません。");
+  expect(document.body.textContent).not.toContain("terminal state");
+  expect(
+    screen.queryByRole("button", { name: "この計画を承認する" }),
+  ).toBeNull();
+});
+
 const legacy = () =>
   summary({
     plan: plan({
