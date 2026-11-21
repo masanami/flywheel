@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AllScreen } from "../all/AllScreen.tsx";
+import { ApproveCompletionScreen } from "../approve-completion/ApproveCompletionScreen.tsx";
 import { ChallengesScreen } from "../challenges/ChallengesScreen.tsx";
 import { CycleScreen } from "../cycle/CycleScreen.tsx";
 import { ChallengeDetail } from "../detail/ChallengeDetail.tsx";
@@ -146,6 +147,17 @@ function AgentBody({
             workspacePath={
               live.workspaces.find((w) => w.name === agentName)?.path ?? ""
             }
+          />
+        </ChallengeGate>
+      );
+    case "approve_completion":
+      return (
+        <ChallengeGate live={live} agentName={agentName} id={route.id}>
+          <ApproveCompletionScreen
+            key={`${agentName}/${route.id}`}
+            live={live}
+            agentName={agentName}
+            id={route.id}
           />
         </ChallengeGate>
       );

@@ -83,7 +83,7 @@ it("AC-384 #806: 行のリンクは、そのエージェントの画面（#/a/<�
     "#/a/alpha/challenges/C-1/approve-plan",
     "#/a/alpha/challenges/C-9",
     "#/a/alpha/challenges/C-2",
-    "#/a/beta/challenges/C-3",
+    "#/a/beta/challenges/C-3/approve-completion",
   ]);
   for (const h of hrefs) expect(h).toMatch(/^#\/a\/(alpha|beta)\//);
 });
