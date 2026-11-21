@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,6 +68,58 @@ func TestReflectFixWriter_MetRecordsVerifiedAndLogsOnTheOperation(t *testing.T) 
 	}
 	if n := f.count(t, `SELECT COUNT(*) FROM activity WHERE action = 'conflict_fix_passed'`); n != 1 {
 		t.Fatalf("conflict_fix_passed = %d", n)
+	}
+}
+
+// AC-102〜AC-105（反映先宛て）: 作業ログ conflict_fix_passed の before.ref は通す前の中身（承認した中身）、after.ref は確かめ待ちだった中身、
+// after.files は直したファイル名、after.run_id は確かめの run（"R-<n>"）。
+func TestReflectFixWriter_MetLogsTheRefsFilesAndRunOnTheOperation(t *testing.T) {
+	t.Parallel()
+	f := newReflectWriterFixture(t)
+	f.setVerdict("met")
+	f.verify(t)
+	var entity string
+	var entityID int64
+	var before, after string
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT entity, entity_id, before, after FROM activity WHERE action = 'conflict_fix_passed'`).Scan(&entity, &entityID, &before, &after)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if entity != "operation" || entityID != f.count(t, `SELECT id FROM operation`) {
+		t.Fatalf("entity = %s/%d", entity, entityID)
+	}
+	var b struct{ Ref string }
+	var a struct {
+		Ref   string
+		Files []string
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(before), &b); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(after), &a); err != nil {
+		t.Fatal(err)
+	}
+	lastJ5 := f.text(t, `SELECT 'R-' || MAX(id) FROM run WHERE judgment = 'J5'`)
+	if b.Ref != fixPassed || a.Ref != fixPending || len(a.Files) != 2 || a.Files[0] != "a.go" || a.Files[1] != "big.bin" || a.RunID != lastJ5 {
+		t.Fatalf("before = %s, after = %s (J5 run %s)", before, after, lastJ5)
+	}
+}
+
+// AC-57: 通した中身（fix_verified_ref）が h1 のところへ、確かめ待ちの中身 h2 に「満たした」を書くと、fix_verified_ref は h2 に改まり、fix_pending_ref は空になる。
+func TestReflectFixWriter_MetReplacesAnExistingVerifiedRef(t *testing.T) {
+	t.Parallel()
+	f := newReflectWriterFixture(t)
+	f.sql(t, `UPDATE contract_run SET fix_verified_ref = 'h1'`)
+	// 見分けの起点は通した中身 h1。h1 から確かめ待ちの中身へ、宛先の最新の取り込みで動き、衝突の解消がある。
+	files := []UpstreamFile{{Filename: "a.go", Patch: "@@ -1 +1 @@\n-old\n+RESOLVED-LINE"}}
+	f.cmp.set("h1", fixPending, withFiles(ahead(commit("m1", "main change", "m0"), commit(fixPending, "Merge branch 'main'", "h1", "m1")), files...))
+	f.cmp.set("m1", fixPending, UpstreamComparison{Status: UpstreamCompareAhead, TotalCommits: 1, Commits: []UpstreamCommit{commit("h1", "fix", "p0")}, Files: files})
+	f.setVerdict("met")
+	f.verify(t)
+	if got := f.refsOf(t); got != (contractFixRefs{Verified: fixPending}) {
+		t.Fatalf("fix refs = %+v, want verified %s only", got, fixPending)
 	}
 }
 
