@@ -65,10 +65,8 @@ func taskPhase(status *TaskStatus, waiting bool, deps []string, depStatus map[st
 }
 
 // taskProgress は表示の区分が running のタスクの細かい進みを決める（それ以外は nil）。着手中は working。検証中は、
-// 統合先を使う課題で、終わっていない最後の契約の実行が、統合先へ入れる依頼を出していれば（land_ref がある）landing、
-// 検証を通っただけ（verified_ref だけがある）なら verified、それ以外（統合先を使わない課題を含む）は verifying。
-// landing と verified の決め方は、タスクの詳細の統合先へ入れる進み（sent・verified）と同じ。
-func taskProgress(phase TaskPhase, status *TaskStatus, usesIntegration *bool, verified, sent bool) *TaskProgress {
+// 統合先を使う課題で最後の契約の実行に verified_ref があれば landing、それ以外（統合先を使わない課題を含む）は verifying。
+func taskProgress(phase TaskPhase, status *TaskStatus, usesIntegration *bool, verified bool) *TaskProgress {
 	if phase != TaskPhaseRunning || status == nil {
 		return nil
 	}
@@ -76,10 +74,8 @@ func taskProgress(phase TaskPhase, status *TaskStatus, usesIntegration *bool, ve
 	switch {
 	case *status == TaskStatusInProgress:
 		p = TaskProgressWorking
-	case *status == TaskStatusVerifying && usesIntegration != nil && *usesIntegration && sent:
-		p = TaskProgressLanding
 	case *status == TaskStatusVerifying && usesIntegration != nil && *usesIntegration && verified:
-		p = TaskProgressVerified
+		p = TaskProgressLanding
 	case *status == TaskStatusVerifying:
 		p = TaskProgressVerifying
 	default:
@@ -255,10 +251,8 @@ type treeShared struct {
 	costByTask  map[int64]int64
 	followups   map[int64]int
 	waiting     map[int64]bool // 答えていないオーナー宛ての保留があるタスクの内部 ID
-	// taskVerified は、タスクの最後の契約の実行（kind が task。終わっていないもの）に verified_ref があるタスクの内部 ID。
-	// taskSent は同じ実行に land_ref（統合先へ入れる依頼）もあるタスクの内部 ID。
+	// taskVerified は、タスクの最後の契約の実行（kind が task）に verified_ref があるタスクの内部 ID。
 	taskVerified map[int64]bool
-	taskSent     map[int64]bool
 	// reflecting は、上げる依頼（kind が reflect）の終わっていない契約の実行がある課題の内部 ID。
 	reflecting map[int64]bool
 }
@@ -337,7 +331,7 @@ func (s *Store) buildTreeNodes(ctx context.Context, all, picked []Challenge, age
 }
 
 func loadTreeShared(ctx context.Context, tx *sql.Tx) (*treeShared, error) {
-	sh := &treeShared{costByChall: map[int64]int64{}, costByTask: map[int64]int64{}, followups: map[int64]int{}, waiting: map[int64]bool{}, taskVerified: map[int64]bool{}, taskSent: map[int64]bool{}, reflecting: map[int64]bool{}}
+	sh := &treeShared{costByChall: map[int64]int64{}, costByTask: map[int64]int64{}, followups: map[int64]int{}, waiting: map[int64]bool{}, taskVerified: map[int64]bool{}, reflecting: map[int64]bool{}}
 	var err error
 	if sh.parents, err = loadParentMap(ctx, tx); err != nil {
 		return nil, err
@@ -361,15 +355,9 @@ func loadTreeShared(ctx context.Context, tx *sql.Tx) (*treeShared, error) {
 		func(k, _ int64) { sh.waiting[k] = true }); err != nil {
 		return nil, err
 	}
-	if err := scanPairs(ctx, tx, `SELECT task_id, CASE WHEN land_ref IS NOT NULL AND land_ref <> '' THEN 2 ELSE 1 END FROM contract_run
-		WHERE kind = 'task' AND task_id IS NOT NULL AND ended_at IS NULL AND verified_ref IS NOT NULL AND verified_ref <> ''
+	if err := scanPairs(ctx, tx, `SELECT task_id, 1 FROM contract_run WHERE kind = 'task' AND task_id IS NOT NULL AND verified_ref IS NOT NULL AND verified_ref <> ''
 		AND id = (SELECT MAX(r.id) FROM contract_run r WHERE r.task_id = contract_run.task_id AND r.kind = 'task')`,
-		func(k, v int64) {
-			sh.taskVerified[k] = true
-			if v == 2 {
-				sh.taskSent[k] = true
-			}
-		}); err != nil {
+		func(k, _ int64) { sh.taskVerified[k] = true }); err != nil {
 		return nil, err
 	}
 	if err := scanPairs(ctx, tx, `SELECT DISTINCT challenge_id, 1 FROM contract_run WHERE kind = 'reflect' AND ended_at IS NULL`,
@@ -447,7 +435,7 @@ func fillTreeTasks(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDecla
 		if tt.Phase == TaskPhaseDone {
 			n.TasksDone++
 		}
-		tt.Progress = taskProgress(tt.Phase, tt.Status, n.UsesIntegration, tid != 0 && sh.taskVerified[tid], tid != 0 && sh.taskSent[tid])
+		tt.Progress = taskProgress(tt.Phase, tt.Status, n.UsesIntegration, tid != 0 && sh.taskVerified[tid])
 		n.Tasks = append(n.Tasks, tt)
 	}
 	n.TasksTotal = len(n.Tasks)

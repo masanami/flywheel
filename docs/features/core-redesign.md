@@ -575,7 +575,7 @@ S3d で、完了承認画面を足す（行き先 `approve_completion`。一覧�
 - `landing`: `verified | sent | landed | null`。
 - `verification`（タスクの検証の記録が無ければ null）: `{at, reason, verdict: "met | not_met | uncertain"}`。
 
-ツリーの API（`GET /api/v1/workspaces/{name}/tree`）には、細かい進み `progress` が増える。`tasks[]` の要素の `progress` は `working`・`verifying`・`verified`・`landing`・`null`、課題の要素の `progress` は `reflecting`・`checking`・`null`。タスクの表示の区分（`phase`。6 値）と状態（`status`）は変えない。
+ツリーの API（`GET /api/v1/workspaces/{name}/tree`）には、細かい進み `progress` が増える。`tasks[]` の要素の `progress` は `working`・`verifying`・`landing`・`null`、課題の要素の `progress` は `reflecting`・`checking`・`null`。タスクの表示の区分（`phase`。6 値）と状態（`status`）は変えない。
 
 S3c は、画面を作り替えない（通した衝突の解消の見せ方は S3d）。`flywheel show` と課題の詳細の API に、下のキーが増える。`ux.md` のシナリオのうち、S3c の受入基準に対応するものは無い（承認の後に反映先が動く場面は、`ux.md` に無い）。
 

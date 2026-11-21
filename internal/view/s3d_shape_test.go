@@ -62,7 +62,7 @@ func TestFromChallengeTree_ProgressDefaultsNull_927(t *testing.T) {
 // 画面と共有する値の集合に、細かい進み・統合先へ入れる進み・検証の判定・委譲先の実行の状態・不可逆操作の種類と状態がある。
 func TestClosedSets_S3d_927(t *testing.T) {
 	want := map[string][]string{
-		"TASK_PROGRESS_CODES":      {"working", "verifying", "verified", "landing"},
+		"TASK_PROGRESS_CODES":      {"working", "verifying", "landing"},
 		"CHALLENGE_PROGRESS_CODES": {"reflecting", "checking"},
 		"TASK_LANDING_CODES":       {"verified", "sent", "landed"},
 		"VERDICT_CODES":            {"met", "not_met", "uncertain"},

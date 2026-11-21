@@ -216,13 +216,12 @@ it("AC-105 #927: 語の表のどこにも「走っている」の語は無い", 
   }
 });
 
-it("AC-108 #927: progress の全部の値（タスクの 4 つ・課題の 2 つ）の語がある", () => {
+it("AC-108 #927: progress の全部の値（タスクの 3 つ・課題の 2 つ）の語がある", () => {
   coversAll(TASK_PROGRESS_LABELS, TASK_PROGRESS_CODES);
   coversAll(CHALLENGE_PROGRESS_LABELS, CHALLENGE_PROGRESS_CODES);
   expect(TASK_PROGRESS_LABELS).toEqual({
     working: "作業中",
     verifying: "検証待ち",
-    verified: "検証済み",
     landing: "統合中",
   });
   expect(CHALLENGE_PROGRESS_LABELS).toEqual({

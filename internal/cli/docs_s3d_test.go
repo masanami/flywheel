@@ -28,5 +28,5 @@ func TestSpec_AC131_CoreRedesignScreenAPIHasFiveTaskKeys(t *testing.T) {
 // AC-132: 同じ節に、ツリーの progress がある。
 func TestSpec_AC132_CoreRedesignScreenAPIHasTreeProgress(t *testing.T) {
 	body := sectionBody(t, readRepoDoc(t, "docs", "features", "core-redesign.md"), "## 画面・API設計")
-	docLineWith(t, body, "ツリーの API", "`progress`", "`working`", "`verifying`", "`verified`", "`landing`", "`reflecting`", "`checking`")
+	docLineWith(t, body, "ツリーの API", "`progress`", "`working`", "`verifying`", "`landing`", "`reflecting`", "`checking`")
 }
