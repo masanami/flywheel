@@ -42,6 +42,13 @@ var OccurrenceLayerValues = []OccurrenceLayer{
 	OccurrenceLayerKnowledge, OccurrenceLayerNone,
 }
 
+// j6ConfidencePattern は memory の確度（confidence）の形。空白を含む値を型で先に弾くための、空を許す形である。
+// 追記の項目は core が確度を見ない（記憶の書き込み器 memory_write.go の検査は新規作成の分岐だけ）ので、空の
+// 確度は型では拒否しない。新規作成で確度が空なら、これまでどおり書き込み器が理由つきで拒否する。
+// 型を解釈する側（claude の --json-schema）がこの pattern を守らせるかは確かめていない。守らせなくても、
+// 空白を含む確度は書き込み器が拒否する。
+const j6ConfidencePattern = `^\S*$`
+
 type j6RawClassification struct {
 	OccurrenceID *string `json:"occurrence_id"`
 	Cause        *string `json:"cause"`
@@ -152,7 +159,7 @@ func j6OutputSchema() []byte {
 			"type":        enum(J6MemoryTypeValues),
 			"slug":        str,
 			"description": str,
-			"confidence":  str,
+			"confidence":  map[string]any{"type": "string", "pattern": j6ConfidencePattern},
 			"sources":     map[string]any{"type": "array", "items": str},
 			"outcome":     str,
 			"target":      str,
