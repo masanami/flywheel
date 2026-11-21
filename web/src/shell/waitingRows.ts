@@ -45,7 +45,7 @@ export function buildWaitingRows(
       kind: "completion_approval",
       key: `completion:${c.id}`,
       title: c.title,
-      href: challengeHref(name, c.id),
+      href: hrefOf({ kind: "approve_completion", name, id: c.id }),
     })),
     operation: nh.operations.map((o) => ({
       kind: "operation",

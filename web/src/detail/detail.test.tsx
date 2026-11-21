@@ -335,33 +335,29 @@ const summary = {
   },
 };
 
-it("AC-234 #808: approve_completion がある課題の詳細に、完了の承認の要約（承認の要約の API の応答）が出る", async () => {
-  const { root } = await open(show({ actions: ["approve_completion"] }), {
-    extra: { [`${BASE}/challenges/C-1/approval`]: summary },
-  });
-  const s = await q(root).findByTestId("approval-summary");
-  expect(s).toHaveTextContent("要約の完了条件");
-  expect(s).toHaveTextContent("版 7");
-});
-
-it("AC-235 #808: 完了の承認のボタンを押すと、承認の口（POST …/approve）が、要約の版を本文にして 1 回呼ばれる", async () => {
+it("AC-234 #808: approve_completion がある課題の詳細に、完了承認画面へのリンクが出て、要約は出ない（S3d）", async () => {
   const { root, requests } = await open(
     show({ actions: ["approve_completion"] }),
     {
-      extra: {
-        [`${BASE}/challenges/C-1/approval`]: summary,
-        [`POST ${BASE}/challenges/C-1/approve`]: {},
-      },
+      extra: { [`${BASE}/challenges/C-1/approval`]: summary },
     },
   );
-  fireEvent.click(
-    await q(root).findByRole("button", { name: /完了を承認する/ }),
-  );
-  await q(root).findByText("承認しました。");
-  const posts = requests.filter((r) => r.method === "POST");
-  expect(posts).toHaveLength(1);
-  expect(posts[0]?.url).toBe(`${BASE}/challenges/C-1/approve`);
-  expect(posts[0]?.body).toBe('{"version":7}');
+  const w = q(root).getByTestId("detail-waiting");
+  expect(
+    within(w).getByRole("link", { name: "完了の承認の画面を開く" }),
+  ).toHaveAttribute("href", "#/a/alpha/challenges/C-1/approve-completion");
+  expect(q(root).queryByTestId("approval-summary")).toBeNull();
+  expect(requests.some((r) => r.url.endsWith("/approval"))).toBe(false);
+});
+
+it("AC-235 #808: approve_completion がある課題の詳細に、承認のボタンは無い（S3d）", async () => {
+  const { root } = await open(show({ actions: ["approve_completion"] }), {
+    extra: { [`${BASE}/challenges/C-1/approval`]: summary },
+  });
+  await q(root).findByTestId("detail-waiting");
+  expect(
+    q(root).queryByRole("button", { name: /承認/, hidden: true }),
+  ).toBeNull();
 });
 
 it("AC-236 #808: answer_question がある課題の詳細に、その保留の問いの文が出る", async () => {
@@ -596,7 +592,8 @@ it("AC-249 #808: 前提の課題がある課題の詳細の、関係する課題
   const link = within(r).getByRole("link", { name: "ビルドの高速化" });
   expect(link).toHaveAttribute("href", "#/a/alpha/challenges/C-5");
   expect(within(r).getByText("着手中")).toBeInTheDocument();
-  expect(within(r).getByText("未完了")).toBeInTheDocument();
+  expect(within(r).getByText("未解消")).toBeInTheDocument();
+  expect(within(r).queryByText("未完了")).toBeNull();
 });
 
 it("AC-250 #808: この課題を前提にしている課題があるとき、関係する課題の区画に、その課題が出る", async () => {
@@ -658,8 +655,44 @@ it("AC-254 #808: 不可逆操作がある課題の詳細に、その種類と状
   };
   const { root } = await open(show({ operations: [op] }));
   const o = q(root).getByTestId("detail-operations");
-  expect(o).toHaveTextContent("release / pending");
+  expect(o).toHaveTextContent("反映 / 承認待ち");
+  expect(o).not.toHaveTextContent("release");
+  expect(o).not.toHaveTextContent("pending");
   expect(o).toHaveTextContent("本番へ反映する");
+});
+
+it("#933: 不可逆操作の状態 closed は「終了」と出て、closed は出ない", async () => {
+  const { root } = await open(
+    show({
+      operations: [
+        {
+          approved_head: null,
+          challenge_id: "C-1",
+          closed_at: null,
+          closed_reason: null,
+          consecutive_failures: 0,
+          created_at: "",
+          executed_at: null,
+          id: "O-2",
+          kind: "delete",
+          last_execution_detail: null,
+          last_execution_result: null,
+          merge_commit: null,
+          ref: null,
+          state: "closed",
+          summary: "古い資料を消す",
+          superseded_by: null,
+          supersedes: null,
+          version: 1,
+          waiting_since: null,
+        },
+      ],
+    }),
+  );
+  const o = q(root).getByTestId("detail-operations");
+  expect(o).toHaveTextContent("削除 / 終了");
+  expect(o).not.toHaveTextContent("closed");
+  expect(o).toHaveTextContent("古い資料を消す");
 });
 
 it("#798: 不可逆操作の行に、参照（ref）があるときは文字で添える（リンクにしない）。無いときは出さない", async () => {
@@ -913,4 +946,27 @@ it("#808: 課題の詳細を開いても fetch は GET だけで、form 要素�
   );
   expect(requests.every((r) => r.method === "GET")).toBe(true);
   expect(root.querySelector("form, input, textarea")).toBeNull();
+});
+
+it("AC-107 #932: 課題の詳細のツリーの箱に、タスクの progress の語が出る", async () => {
+  const { root } = await open(
+    show({
+      tree: {
+        tasks: [
+          task({
+            key: "a",
+            id: "T-1",
+            phase: "running",
+            progress: "verifying",
+          }),
+          task({ key: "b", id: "T-2" }),
+        ],
+      },
+    }),
+  );
+  const boxes = q(root).getAllByTestId("task-box");
+  expect(
+    q(boxes[0] as HTMLElement).getByTestId("task-progress"),
+  ).toHaveTextContent("検証待ち");
+  expect(q(boxes[1] as HTMLElement).queryByTestId("task-progress")).toBeNull();
 });
