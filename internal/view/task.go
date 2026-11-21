@@ -61,7 +61,8 @@ func FromTasks(ts []core.Task) []Task {
 	out := make([]Task, 0, len(ts))
 	for _, t := range ts {
 		out = append(out, Task{
-			Artifacts: []TaskArtifact{}, Facts: map[string]string{},
+			Artifacts: fromTaskArtifacts(t.Detail.Artifacts), Delegate: fromTaskDelegate(t.Detail.Delegate),
+			Facts: fromTaskFacts(t.Detail.Facts), Landing: fromTaskLanding(t.Detail.Landing), Verification: fromTaskVerification(t.Detail.Verification),
 			SourceKey: strOrNil(t.SourceKey),
 			Body:      t.Body, DependsOn: append([]string{}, t.DependsOn...), DoneCriteria: t.DoneCriteria, ID: t.ID,
 			NonGoals: append([]string{}, t.NonGoals...), Operation: t.Operation, PlanVersion: t.PlanVersion,
@@ -70,6 +71,44 @@ func FromTasks(ts []core.Task) []Task {
 		})
 	}
 	return out
+}
+
+func fromTaskArtifacts(as []core.TaskArtifactView) []TaskArtifact {
+	out := make([]TaskArtifact, 0, len(as))
+	for _, a := range as {
+		out = append(out, TaskArtifact{Kind: a.Kind, Ref: a.Ref, Role: a.Role, State: a.State})
+	}
+	return out
+}
+
+func fromTaskDelegate(d *core.TaskDelegate) *TaskDelegate {
+	if d == nil {
+		return nil
+	}
+	return &TaskDelegate{RequestedKind: d.RequestedKind, RunID: d.RunID, State: string(d.State), Summary: d.Summary}
+}
+
+func fromTaskFacts(f map[string]string) map[string]string {
+	out := make(map[string]string, len(f))
+	for k, v := range f {
+		out[k] = v
+	}
+	return out
+}
+
+func fromTaskLanding(l *core.TaskLanding) *string {
+	if l == nil {
+		return nil
+	}
+	s := string(*l)
+	return &s
+}
+
+func fromTaskVerification(v *core.TaskVerificationView) *TaskVerification {
+	if v == nil {
+		return nil
+	}
+	return &TaskVerification{At: FormatTimestamp(v.At), Reason: v.Reason, Verdict: v.Verdict}
 }
 
 // PlanAnswer は計画の問いへの答え。choice・label は選択肢の答え（label は選ばれた選択肢のラベル）、text は文の答え。

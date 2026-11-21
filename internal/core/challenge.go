@@ -196,8 +196,8 @@ type ChallengeDetail struct {
 	SourceBinding *SourceBinding
 	// SourceChildren は課題の取り込み元の子（記録した順。無ければ空のスライス）。
 	SourceChildren []SourceChild
-	// Runs は課題の run の一覧（新しい順・最大 20 件。#86。docs/features/
-	// m3-invoker-delegation.md §観測「show は、課題の run の一覧…を示す」）。
+	// Runs は課題の run の一覧（新しい順・最大 100 件。上限は S3d で 20 から上げた。
+	// docs/features/core-redesign-s3d.md「タスクの詳細」）。
 	// 無ければ空スライス（nil でない）。
 	Runs []Run
 	// IssuesAnswer は IssuesHoldID の保留の回答。論点が無い・未回答なら nil。
@@ -770,7 +770,7 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 }
 
 // GetChallenge は課題の全体像（人間記入欄・状態・計画の全版・承認と差し戻しの
-// 記録・保留の記録・不可逆操作・GitHub Issue との対応・run の一覧〈新しい順・最大 20 件〉）を返す。
+// 記録・保留の記録・不可逆操作・GitHub Issue との対応・run の一覧〈新しい順・最大 100 件〉）を返す。
 // id の形式が不正、または存在しなければ ErrNotFound。
 //
 // run の一覧は ListRuns と同じく、先に中断した run を interrupted で閉じる（書き込みを
@@ -870,6 +870,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		if detail.UsesIntegration, err = challengeUsesIntegration(ctx, tx, cid); err != nil {
+			return err
+		}
+		if err := fillTaskDetails(ctx, tx, cid, detail.Tasks, detail.UsesIntegration); err != nil {
 			return err
 		}
 		var integRef sql.NullString

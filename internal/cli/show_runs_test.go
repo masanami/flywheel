@@ -8,7 +8,7 @@ import (
 )
 
 // このファイルは #86（docs/features/m3-invoker-delegation.md §観測「show は、課題の run の
-// 一覧（新しい順・最大 20 件）…を示す」・§IF / API「show: 最上位に runs」）の `show --json` の
+// 一覧（新しい順・最大 100 件）…を示す」・§IF / API「show: 最上位に runs」）の `show --json` の
 // runs を検証する。
 
 // insertEndedRuns は課題 id に、終了した run を n 件入れる（終了した run は課題ごとの
@@ -27,27 +27,27 @@ func insertEndedRuns(t *testing.T, ws, id string, n int) {
 	}
 }
 
-// AC-154: show --json の runs は、その課題の run を新しい順に最大 20 件出力する。他の課題の
+// AC-154: show --json の runs は、その課題の run を新しい順に最大 100 件出力する。他の課題の
 // run は含まない。要素の形は runs コマンドと同じ（文書の形と照合する）。
-func TestShow_RunsAreNewestFirstAtMost20AndOnlyThisChallenges(t *testing.T) {
+func TestShow_RunsAreNewestFirstAtMost100AndOnlyThisChallenges(t *testing.T) {
 	t.Parallel()
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	other := createForCase(t, ws)
-	insertEndedRuns(t, ws, id, 22) // R-1〜R-22
+	insertEndedRuns(t, ws, id, 102) // R-1〜R-102
 	insertEndedRuns(t, ws, other, 1)
 
 	doc := runJSON(t, ws, "show", id)
 
 	runs, ok := doc["runs"].([]any)
-	if !ok || len(runs) != 20 {
-		t.Fatalf("runs = %#v, want an array of exactly 20 (capped)", doc["runs"])
+	if !ok || len(runs) != 100 {
+		t.Fatalf("runs = %#v, want an array of exactly 100 (capped)", doc["runs"])
 	}
-	if first := runs[0].(map[string]any); first["id"] != "R-22" {
-		t.Errorf("runs[0].id = %v, want R-22 (newest first)", first["id"])
+	if first := runs[0].(map[string]any); first["id"] != "R-102" {
+		t.Errorf("runs[0].id = %v, want R-102 (newest first)", first["id"])
 	}
-	if last := runs[19].(map[string]any); last["id"] != "R-3" {
-		t.Errorf("runs[19].id = %v, want R-3 (R-1 and R-2 are beyond the 20 newest)", last["id"])
+	if last := runs[99].(map[string]any); last["id"] != "R-3" {
+		t.Errorf("runs[99].id = %v, want R-3 (R-1 and R-2 are beyond the 100 newest)", last["id"])
 	}
 	for i, r := range runs {
 		if got := r.(map[string]any)["challenge_id"]; got != id {
