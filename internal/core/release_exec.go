@@ -629,7 +629,7 @@ func (s *Store) judgeRelease(ctx context.Context, row *operationRow, approvedHea
 	}
 	j.run = run
 	// 通らなかった中身と違う中身を見たら、同じ書き込みで通らなかった中身を消す（起点から見分け直した）。
-	if run != nil && run.corresponds && run.row.FixRejectedRef != "" && j.observedHead != "" && j.observedHead != run.row.FixRejectedRef {
+	if run != nil && run.fixEligible && run.row.FixRejectedRef != "" && j.observedHead != "" && j.observedHead != run.row.FixRejectedRef {
 		j.clearFixRejected = true
 	}
 	// 委譲先の succeeded を読む以外の道で終わるとき、終わっていない対応する実行を取り消す（開いたまま残さない）。
@@ -704,8 +704,8 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 	// 7
 	moved := pr.HeadSHA != approvedHead
 	var fix releaseFixMove
-	if run != nil && run.corresponds {
-		// 対応する契約の実行がある: 見分けの起点は、通した中身（あれば）か承認した中身。衝突の解消ありは、承認を取り消さず確かめを待つ。
+	if run != nil && run.fixEligible {
+		// 対応する契約の実行があり、衝突の解消の確かめの道に入ってよい（fixEligible）: 見分けの起点は、通した中身（あれば）か承認した中身。衝突の解消ありは、承認を取り消さず確かめを待つ。
 		fix = s.classifyFixMove(ctx, opts, run, repo, decl.DefaultBranch, approvedHead, pr.HeadSHA)
 		switch fix.outcome {
 		case fixMoveRejected:

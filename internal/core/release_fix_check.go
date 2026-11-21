@@ -67,7 +67,7 @@ func (s *Store) classifyFixMove(ctx context.Context, opts ReleaseExecOptions, ru
 // applyReleaseFixWrites は結果を書く書き込み（finishReleaseAttempt）の中で、確かめ待ちの中身の記録（すでにあれば、いまの中身に改める）・
 // 衝突の解消ありでなくなったときの確かめ待ちの中身の消去・通らなかった中身の消去を行う。
 func applyReleaseFixWrites(ctx context.Context, tx *sql.Tx, j releaseJudgment, written ExecutionResult) error {
-	if j.run == nil || !j.run.corresponds {
+	if j.run == nil || !j.run.fixEligible {
 		return nil
 	}
 	id := j.run.row.ID
@@ -132,7 +132,7 @@ func (s *Store) writeReflectFix(ctx context.Context, tx *sql.Tx, rec *activityRe
 // movedFromVerified は、成果物がすでに入っているとき（手順 4）の、いまの中身 head が、通した中身（fix_verified_ref。あれば）と同じか、
 // そこから取り込みだけで動いたものか。確かめを通した中身で入れた後に、承認した中身からの動きだけで merged_unapproved にしないための口。
 func movedFromVerified(ctx context.Context, opts ReleaseExecOptions, run *releaseRun, repo, base, head string) bool {
-	if run == nil || !run.corresponds || run.row.FixVerifiedRef == "" {
+	if run == nil || !run.fixEligible || run.row.FixVerifiedRef == "" {
 		return false
 	}
 	v := run.row.FixVerifiedRef
