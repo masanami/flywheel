@@ -9,10 +9,12 @@ import {
   COMPLETION_RELEASE_NOTE,
 } from "../guidance.ts";
 import {
+  CHALLENGE_UPDATED_TEXT,
   LOADING_TEXT,
   OPERATION_KIND_LABELS,
   PHASE_LABELS,
   RELEASE_HEAD_MISSING_TEXT,
+  RELOAD_BUTTON_TEXT,
   RELOAD_TEXT,
   TASK_SPENT_LABEL,
   label,
@@ -38,6 +40,29 @@ export const APPROVE_BUTTON_TEXT = "完了を承認する";
 interface Loaded {
   approval: ApprovalSummary;
   show: ShowCardResponse;
+  // 承認の要約の版と課題の詳細の課題の版がそろっているか。そろっていないものは、内容もボタンも出さない。
+  coherent: boolean;
+}
+
+// 2 つの読み取りの間に課題が動くと版が食い違う。そのときは両方を読み直す回数の上限。
+const MAX_COHERENCE_RELOADS = 2;
+
+// 承認の要約と課題の詳細を、同じ版のものとして読む。食い違ったら読み直し、上限までにそろわなければ
+// coherent: false で返す（開いた後の読み直し・変化の合図の読み直しも、この関数を通る）。
+// 完了の承認待ちでない要約には、内容もボタンも出さないので、そろえない。
+async function loadCoherent(agentName: string, id: string): Promise<Loaded> {
+  for (let attempt = 0; ; attempt++) {
+    const [a, show] = await Promise.all([
+      api.approvalSummary(agentName, id),
+      api.challenge(agentName, id),
+    ]);
+    const coherent =
+      a.approval.kind !== "completion" ||
+      a.approval.version === show.challenge.version;
+    if (coherent || attempt >= MAX_COHERENCE_RELOADS) {
+      return { approval: a.approval, show, coherent };
+    }
+  }
 }
 
 // 完了の承認の画面。承認の要約と課題の詳細の 2 つを読み、左の列に確かめの結果・反映するもの・タスク・
@@ -55,13 +80,7 @@ export function ApproveCompletionScreen({
   const { result, reload } = useScreenData<Loaded>(
     live,
     agentName,
-    async () => {
-      const [a, show] = await Promise.all([
-        api.approvalSummary(agentName, id),
-        api.challenge(agentName, id),
-      ]);
-      return { approval: a.approval, show };
-    },
+    () => loadCoherent(agentName, id),
     [id],
   );
   // 承認が通った後は課題の状態が進んで要約が読めなくなるので、承認した時点の題名で出す。
@@ -136,7 +155,7 @@ function Body({
     }
     return <p role="alert">{e instanceof Error ? e.message : String(e)}</p>;
   }
-  const { approval, show } = result.data;
+  const { approval, show, coherent } = result.data;
   if (approval.kind !== "completion") {
     return <NotAwaiting href={challengeHref} />;
   }
@@ -144,6 +163,7 @@ function Body({
     <CompletionView
       approval={approval}
       show={show}
+      coherent={coherent}
       reload={reload}
       agentName={agentName}
       id={id}
@@ -156,6 +176,7 @@ function Body({
 function CompletionView({
   approval,
   show,
+  coherent,
   reload,
   agentName,
   id,
@@ -164,6 +185,9 @@ function CompletionView({
 }: {
   approval: ApprovalSummary;
   show: ShowCardResponse;
+  // 版がそろっていないときは、内容もボタンも出さない。ただし見た版などの状態は、そろわない間も保つ
+  // （そろって戻ったときに、更新された旨を出すため）ので、この部品は外さない。
+  coherent: boolean;
   reload: () => void;
   agentName: string;
   id: string;
@@ -189,6 +213,13 @@ function CompletionView({
     setNotice(COMPLETION_CONFLICT_TEXT);
     setBusy(false);
   }, [approval]);
+  // 中身（そろった応答）を一度も出していない間は、見た版を追わせる（初めて出す中身に「更新された」とは言わない）。
+  const shownOnce = useRef(coherent);
+  useEffect(() => {
+    if (shownOnce.current) return;
+    setSeen(approval.version);
+    if (coherent) shownOnce.current = true;
+  }, [approval, coherent]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -228,6 +259,22 @@ function CompletionView({
   };
 
   if (gone) return <NotAwaiting href={challengeHref} />;
+  if (!coherent) {
+    return (
+      <section
+        aria-labelledby="screen-title"
+        data-testid="completion-incoherent"
+      >
+        <h2 id="screen-title">完了の承認</h2>
+        <p role="alert">{CHALLENGE_UPDATED_TEXT}</p>
+        <p>
+          <button type="button" onClick={reload}>
+            {RELOAD_BUTTON_TEXT}
+          </button>
+        </p>
+      </section>
+    );
+  }
 
   const ch = show.challenge;
   const showIntegration =
