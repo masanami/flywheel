@@ -53,6 +53,27 @@ const (
 	ExpectedKindBehavior ExpectedKind = "behavior"
 )
 
+// expectedKindValues は ExpectedKind の閉集合（入力の検査・J2 の出力の型・ExpectedKindValues の正本）。
+var expectedKindValues = []ExpectedKind{ExpectedKindUI, ExpectedKindCLI, ExpectedKindBehavior}
+
+// expectedKindStrings は expectedKindValues を文字列にして返す（J2 の出力の型の enum 用）。
+func expectedKindStrings() []string {
+	out := make([]string, len(expectedKindValues))
+	for i, v := range expectedKindValues {
+		out[i] = string(v)
+	}
+	return out
+}
+
+func (k ExpectedKind) valid() bool {
+	for _, v := range expectedKindValues {
+		if k == v {
+			return true
+		}
+	}
+	return false
+}
+
 // StageOption は論点の選択肢。
 type StageOption struct {
 	Label   string  `json:"label"`
@@ -161,9 +182,7 @@ func NormalizeExpected(in []StageExpected) ([]StageExpected, error) {
 		return nil, errStageShape("expected must have %d-%d items", MinExpected, MaxExpected)
 	}
 	for _, e := range in {
-		switch e.Kind {
-		case ExpectedKindUI, ExpectedKindCLI, ExpectedKindBehavior:
-		default:
+		if !e.Kind.valid() {
 			return nil, errStageShape("expected.kind must be ui, cli or behavior")
 		}
 		for name, v := range map[string]string{"expected.scene": e.Scene, "expected.before": e.Before, "expected.after": e.After} {

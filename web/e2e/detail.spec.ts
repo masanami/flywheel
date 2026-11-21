@@ -76,7 +76,7 @@ test("AC-436 #808: 幅 360px で、課題の詳細の「計画の本文」（表
   expect(body).toBe(true);
 });
 
-test("AC-126〜129 #964: 課題の詳細の画面に、通した衝突の解消が、宛先の語・直したファイルとともに出る", async ({
+test("AC-127 #964: 課題の詳細の画面に、通した衝突の解消が、宛先の語・直したファイルとともに出る", async ({
   page,
 }) => {
   await page.goto("/#/a/alpha/challenges/C-28");
@@ -98,4 +98,43 @@ test("AC-126〜129 #964: 課題の詳細の画面に、通した衝突の解消�
   await expect(rows.nth(1).getByTestId("conflict-fix-files")).toContainText(
     "docs/billing.md",
   );
+});
+
+test("AC-126 #964: 完了承認画面に、通した衝突の解消の件数と、宛先の語・直したファイルが出る", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/challenges/C-7/approve-completion");
+  await expect(page.getByTestId("approve-completion")).toBeVisible();
+  const box = page.getByTestId("conflict-fixes");
+  await expect(box).toBeVisible();
+  await expect(box.getByTestId("conflict-fixes-count")).toHaveText("1");
+  await expect(box.getByTestId("conflict-fix-target")).toHaveText("反映先");
+  await expect(box.getByTestId("conflict-fix-files")).toContainText(
+    "pricing/table.csv",
+  );
+});
+
+test("AC-128 #964: 通した衝突の解消が 0 件の課題では、完了承認画面にも課題の詳細にも、その区画が出ない", async ({
+  page,
+}) => {
+  // beta の C-3 は完了の承認待ちで、通した衝突の解消を持たない
+  await page.goto("/#/a/beta/challenges/C-3/approve-completion");
+  await expect(page.getByTestId("approve-completion")).toBeVisible();
+  await expect(page.getByTestId("conflict-fixes")).toHaveCount(0);
+  await page.goto("/#/a/alpha/challenges/C-5");
+  await expect(page.getByTestId("challenge-detail")).toBeVisible();
+  await expect(page.getByTestId("conflict-fixes")).toHaveCount(0);
+});
+
+test("AC-129 #964: 確かめ待ちの中身がある実行を持つタスクの詳細に、衝突の解消の確かめを待っている旨が出て、持たないタスクには出ない", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/challenges/C-28/tasks/T-43");
+  await expect(page.getByTestId("task-detail")).toBeVisible();
+  await expect(page.getByTestId("task-fix-pending")).toHaveText(
+    "衝突の解消の確かめを待っています。",
+  );
+  await page.goto("/#/a/alpha/challenges/C-28/tasks/T-44");
+  await expect(page.getByTestId("task-detail")).toBeVisible();
+  await expect(page.getByTestId("task-fix-pending")).toHaveCount(0);
 });
