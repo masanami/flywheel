@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 //   #/a/<名前>/challenges/<課題>           課題の詳細
 //   #/a/<名前>/challenges/<課題>/history|plan  課題の詳細（経緯・計画の本文）
 //   #/a/<名前>/challenges/<課題>/approve-plan  計画の承認
+//   #/a/<名前>/challenges/<課題>/approve-completion  完了の承認
 //   #/a/<名前>/challenges/<課題>/tasks/<タスクの ID>  タスクの詳細
 // `#` の後ろは最初の `?` で道と問い合わせに分ける（フォローアップの ?status=・?challenge=）。
 export const AGENT_SCREENS = [
@@ -26,6 +27,7 @@ export type Route =
   | { kind: "agent"; name: string; screen: AgentScreen; query?: Query }
   | { kind: "challenge"; name: string; id: string; view: ChallengeView }
   | { kind: "approve_plan"; name: string; id: string }
+  | { kind: "approve_completion"; name: string; id: string }
   | { kind: "task"; name: string; id: string; taskId: string }
   | { kind: "unknown" };
 
@@ -73,6 +75,9 @@ export function parseHash(hash: string): Route | null {
     if (parts.length === 5 && parts[4] === "approve-plan") {
       return { kind: "approve_plan", name, id };
     }
+    if (parts.length === 5 && parts[4] === "approve-completion") {
+      return { kind: "approve_completion", name, id };
+    }
     const taskId = parts[5];
     if (
       parts.length === 6 &&
@@ -98,6 +103,8 @@ export function hrefOf(r: Route): string {
       return `#/a/${enc(r.name)}/challenges/${enc(r.id)}${r.view === "tree" ? "" : `/${r.view}`}`;
     case "approve_plan":
       return `#/a/${enc(r.name)}/challenges/${enc(r.id)}/approve-plan`;
+    case "approve_completion":
+      return `#/a/${enc(r.name)}/challenges/${enc(r.id)}/approve-completion`;
     case "task":
       return `#/a/${enc(r.name)}/challenges/${enc(r.id)}/tasks/${enc(r.taskId)}`;
     case "unknown":

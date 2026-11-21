@@ -77,6 +77,7 @@ export function show(over: Over = {}): ShowCardResponse {
       id: "C-1",
       next_human_actions: acts,
       parent: null,
+      progress: null,
       status: "in_progress",
       status_label: "着手中",
       tasks: [],

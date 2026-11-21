@@ -1,9 +1,12 @@
 import type { ShowCardResponse, TreeRelative } from "../api/types.gen.ts";
 import {
+  CHALLENGE_PROGRESS_LABELS,
   DEPENDENCY_SATISFIED_LABEL,
   DEPENDENCY_UNMET_LABEL,
   FOLLOWUP_SOURCE_LABELS,
   FOLLOWUP_STATUS_LABELS,
+  OPERATION_KIND_LABELS,
+  OPERATION_STATE_LABELS,
   UPSTREAM_STATE_LABELS,
   label,
 } from "../labels.ts";
@@ -31,7 +34,17 @@ export function TreeView({
   return (
     <div className="detail-tree" data-testid="detail-tree-view">
       <section aria-label="タスクのツリー">
-        <h3>タスクのツリー</h3>
+        <h3>
+          タスクのツリー
+          {show.tree.progress != null ? (
+            <>
+              {" "}
+              <span className="progress-pill" data-testid="challenge-progress">
+                {label(CHALLENGE_PROGRESS_LABELS, show.tree.progress)}
+              </span>
+            </>
+          ) : null}
+        </h3>
         <TaskTree
           tasks={show.tree.tasks}
           taskHref={(taskId) =>
@@ -213,7 +226,9 @@ function Operations({ show }: { show: ShowCardResponse }) {
       <ul>
         {show.operations.map((o) => (
           <li key={o.id}>
-            {o.kind} / {o.state}: <ClampedText text={o.summary} />
+            {label(OPERATION_KIND_LABELS, o.kind)} /{" "}
+            {label(OPERATION_STATE_LABELS, o.state)}:{" "}
+            <ClampedText text={o.summary} />
             {o.ref ? (
               <span
                 className="detail-operation-ref"

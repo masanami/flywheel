@@ -84,6 +84,8 @@ type Task struct {
 	BudgetImplUSD   float64
 	BudgetReviewUSD float64
 	SpentUSD        float64
+	// Detail は委譲先の実行・成果物・値・検証・統合先へ入れる進み。課題の詳細（GetChallenge）だけが埋める。
+	Detail TaskDetail
 }
 
 func (in TaskInput) valid() bool {

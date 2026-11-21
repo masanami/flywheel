@@ -1,6 +1,6 @@
 import type { Activity } from "../api/types.gen.ts";
 
-// 作業ログの偽の記録（課題の ID つきの `GET …/log`）。C-28 は、経緯の各種の行（対話・画面・端末・実行の経路、
+// 作業ログの偽の記録（課題の ID つきの `GET …/log`）。C-28 は、経緯の各種の行（対話・画面・ターミナル・実行の経路、
 // 知らない action、長い題名・長い発言の要旨）を持つ。ほかの課題は、課題を作った 1 件だけ。
 const act = (
   p: Partial<Activity> & Pick<Activity, "at" | "action">,
@@ -63,9 +63,8 @@ export function alphaLogExtras(id: string): Activity[] {
     }),
     act({
       at: T(90),
-      action: "approve",
-      entity: "operation",
-      entity_id: "O-1",
+      action: "op_approve",
+      after: { operation_id: "O-1" },
       channel: "cli",
       verification: "tty_confirm",
     }),

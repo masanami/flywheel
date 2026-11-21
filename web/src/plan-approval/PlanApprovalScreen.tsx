@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.ts";
-import { ApiError } from "../api/error.ts";
+import { ApiError, isNotAwaitingError } from "../api/error.ts";
 import type {
   ApprovalSummary,
   PlanQuestion,
   PlanTopic,
 } from "../api/types.gen.ts";
-import { guidesFor, guidesForContext } from "../guidance.ts";
+import { COMPLETION_REJECT_NOTE, guidesForContext } from "../guidance.ts";
 import { LOADING_TEXT, RELOAD_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
@@ -142,7 +142,7 @@ function Body({
   if (result.state === "loading") return <p>{LOADING_TEXT}</p>;
   if (result.state === "error") {
     const e = result.error;
-    if (e instanceof ApiError && e.code === "invalid_transition") {
+    if (isNotAwaitingError(e)) {
       return <NotAwaiting href={challengeHref} />;
     }
     return <p role="alert">{e instanceof Error ? e.message : String(e)}</p>;
@@ -156,6 +156,7 @@ function Body({
       agentName={agentName}
       id={id}
       workspacePath={workspacePath}
+      challengeHref={challengeHref}
       updated={updated}
       onApproveStart={onApproveStart}
       onApproved={onApproved}
@@ -169,6 +170,7 @@ function PlanView({
   agentName,
   id,
   workspacePath,
+  challengeHref,
   updated,
   onApproveStart,
   onApproved,
@@ -178,6 +180,7 @@ function PlanView({
   agentName: string;
   id: string;
   workspacePath: string;
+  challengeHref: string;
   updated: boolean;
   onApproveStart: () => void;
   onApproved: (title: string) => void;
@@ -186,6 +189,8 @@ function PlanView({
   const { expected, non_goals, figure } = summary.stages;
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // 押した結果が「終わりの状態」だったとき、承認待ちでない旨の案内に切り替える。
+  const [gone, setGone] = useState(false);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -205,7 +210,9 @@ function PlanView({
       onApproved(summary.title);
     } catch (e) {
       if (!alive.current) return;
-      if (e instanceof ApiError && e.code === "conflict") {
+      if (isNotAwaitingError(e)) {
+        setGone(true);
+      } else if (e instanceof ApiError && e.code === "conflict") {
         setNotice(CONFLICT_TEXT);
         reload();
       } else if (
@@ -221,13 +228,12 @@ function PlanView({
     }
   };
 
+  if (gone) return <NotAwaiting href={challengeHref} />;
+
   const legacy =
     plan !== null && plan.tasks.length === 0 && plan.summary === null;
   const questionCount =
     plan?.topics.reduce((n, t) => n + t.questions.length, 0) ?? 0;
-  const reject = guidesFor(id, workspacePath, ["approve_plan"]).find(
-    (g) => g.id === "reject",
-  );
   const answer = guidesForContext("plan_approval", workspacePath).find(
     (g) => g.id === "answer-choice",
   );
@@ -354,7 +360,7 @@ function PlanView({
               <>
                 <p>{RECOMMEND_OK_TEXT}</p>
                 <p>
-                  推奨と違う答えにしたいときは、端末で次のコマンドを実行します。
+                  推奨と違う答えにしたいときは、ターミナルで次のコマンドを実行します。
                 </p>
                 {answer && (
                   <pre data-guide={answer.id}>
@@ -391,14 +397,7 @@ function PlanView({
             {notice}
           </p>
         )}
-        <p className="approval-control-question">
-          差し戻すときは、端末で次のコマンドを実行します。
-        </p>
-        {reject && (
-          <pre data-guide={reject.id}>
-            <code>{reject.command}</code>
-          </pre>
-        )}
+        <p className="approval-control-question">{COMPLETION_REJECT_NOTE}</p>
       </div>
     </section>
   );

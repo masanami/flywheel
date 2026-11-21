@@ -491,3 +491,23 @@ func TestValidateJ2Output_IntegrationPlanTasksMustShareOneRepository(t *testing.
 		t.Error("a plan in the done tasks' repository must be valid")
 	}
 }
+
+// AC-118（masanami/flywheel#929）: タスクの前提に、同じ計画に無いタスクの key が書かれた計画は、出力の検査が断る。
+// 計画の中の key を前提にしたものは通る（境界）。
+func TestValidateJ2Output_DependsOnKeyOutsideThePlanIsInvalid_AC118_929(t *testing.T) {
+	t.Parallel()
+	mk := func(dep string) []byte {
+		return j2PlanOutput(func(m map[string]any) {
+			tasks := j2TasksOf("a", "b")
+			tasks[1].(map[string]any)["depends_on"] = []string{dep}
+			m["tasks"] = tasks
+			m["uses_integration"] = true
+		})
+	}
+	if _, ok := validateJ2Output(mk("not-in-this-plan"), j2TestContext(t, true)); ok {
+		t.Error("同じ計画に無いタスクの key を前提にした計画が通った")
+	}
+	if _, ok := validateJ2Output(mk("a"), j2TestContext(t, true)); !ok {
+		t.Error("同じ計画の key を前提にした計画が断られた")
+	}
+}

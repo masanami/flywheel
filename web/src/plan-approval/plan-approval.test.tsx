@@ -14,6 +14,7 @@ import type {
   ApprovalSummary,
   PlanTopic,
 } from "../api/types.gen.ts";
+import { COMPLETION_REJECT_NOTE } from "../guidance.ts";
 import {
   FakeEventSource,
   emptyStatus,
@@ -324,20 +325,20 @@ it("AC-321 #811: tasks が 5 件のとき、ツリーの見出しに件数の 5 
   expect(screen.getByTestId("plan-task-count")).toHaveTextContent("5");
 });
 
-it("AC-322 #811: phase が next のタスクの箱に「次に走る」が出る", async () => {
+it("AC-322 #811: phase が next のタスクの箱に「次に実行」が出る", async () => {
   await opened();
   const box = screen
     .getAllByTestId("task-box")
     .find((b) => b.getAttribute("data-phase") === "next");
-  expect(box).toHaveTextContent("次に走る");
+  expect(box).toHaveTextContent("次に実行");
 });
 
-it("AC-323 #811: phase が blocked のタスクの箱に「前提を待っている」が出る", async () => {
+it("AC-323 #811: phase が blocked のタスクの箱に「前提待ち」が出る", async () => {
   await opened();
   const box = screen
     .getAllByTestId("task-box")
     .find((b) => b.getAttribute("data-phase") === "blocked");
-  expect(box).toHaveTextContent("前提を待っている");
+  expect(box).toHaveTextContent("前提待ち");
 });
 
 it("AC-324 #811: ツリーの箱は、リンクでない", async () => {
@@ -664,12 +665,12 @@ it("AC-346 #811: 差し戻しのボタンは無い", async () => {
   ]);
 });
 
-it("AC-347 #811: 差し戻しの端末のコマンド（flywheel reject）の案内が出る", async () => {
+it("AC-347 #811: 差し戻しの案内は、コマンドの例を出さず、対話で伝える方法だけを出す", async () => {
   await opened();
-  expect(
-    screen.getByTestId("plan-approval").querySelector("[data-guide='reject']")
-      ?.textContent,
-  ).toContain("flywheel reject C-1");
+  const root = screen.getByTestId("plan-approval");
+  expect(root.querySelector("[data-guide='reject']")).toBeNull();
+  expect(root.textContent).not.toContain("flywheel reject");
+  expect(root.textContent).toContain(COMPLETION_REJECT_NOTE);
 });
 
 it("AC-348 #811: kind が plan でない課題では、承認待ちでない旨と課題の詳細へのリンクが出る", async () => {
@@ -690,6 +691,59 @@ it("AC-349 #811: 要約の API が invalid_transition を返すと、承認待�
     }),
   );
   await screen.findByText("この課題は、計画の承認待ちではありません。");
+});
+
+it("要約の API が terminal_state を返すと（完了した課題）、承認待ちでない旨が出て、内部の英語の文は出ない", async () => {
+  await open(() =>
+    json(409, {
+      error: {
+        code: "terminal_state",
+        message: "core: challenge is in a terminal state",
+      },
+    }),
+  );
+  await screen.findByText("この課題は、計画の承認待ちではありません。");
+  expect(
+    screen.getByRole("link", { name: "課題の詳細を開く" }),
+  ).toHaveAttribute("href", "#/a/alpha/challenges/C-1");
+  expect(document.body.textContent).not.toContain("terminal state");
+});
+
+it("承認の口が terminal_state を返すと、承認待ちでない旨が出て、内部の英語の文は出ない", async () => {
+  await opened(summary(), {
+    extra: {
+      [APPROVE]: () =>
+        json(409, {
+          error: {
+            code: "terminal_state",
+            message: "core: challenge is in a terminal state",
+          },
+        }),
+    },
+  });
+  fireEvent.click(await approveBtn());
+  await screen.findByText("この課題は、計画の承認待ちではありません。");
+  expect(document.body.textContent).not.toContain("terminal state");
+  expect(
+    screen.queryByRole("button", { name: "この計画を承認する" }),
+  ).toBeNull();
+});
+
+it("承認の口が invalid_transition を返すと、承認待ちでない旨が出て、内部の英語の文は出ない", async () => {
+  await opened(summary(), {
+    extra: {
+      [APPROVE]: () =>
+        json(409, {
+          error: {
+            code: "invalid_transition",
+            message: "core: invalid transition",
+          },
+        }),
+    },
+  });
+  fireEvent.click(await approveBtn());
+  await screen.findByText("この課題は、計画の承認待ちではありません。");
+  expect(document.body.textContent).not.toContain("invalid transition");
 });
 
 const legacy = () =>

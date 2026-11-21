@@ -62,6 +62,12 @@ function destinations(agents: string[], challengeId?: string): Destination[] {
         wait: title("計画の承認: 題名"),
       },
       {
+        id: `${first}/approve-completion`,
+        hash: `${c}/approve-completion`,
+        wait: () =>
+          screen.findByRole("heading", { level: 2, name: /^完了の承認/ }),
+      },
+      {
         id: `${first}/task`,
         hash: `${c}/tasks/T-1`,
         wait: () =>
@@ -395,9 +401,6 @@ it("AC-118 #814: 描画したどの画面にも、文字を入力する欄は無
 
 // AC-459 #814: 新しい画面の枠組みの文言（見出し・ボタン・ナビゲーション・案内）に、開発に固有の語が無い。
 // 課題の題名や本文のような、エージェントが書いた値は枠組みではないので対象にしない。
-// 見直し前から残す区画（完了の承認の要約）の中の語は、区切り S3 で作り替えるまで、いまのままでよい
-// （docs/features/core-redesign.md の S2c の機能要件）ので、その区画の中は対象から外す。
-const KEPT_SECTION = '[data-testid="approval-panel"]';
 const DEV_WORDS = /(\bPR\b|\bCI\b|\bIssue\b|ブランチ|マージ)/;
 it("AC-459 #814: 描画した画面の枠組み（見出し・ボタン・ナビゲーション・案内）に、PR・CI・ブランチ・マージ・Issue の語が無い", async () => {
   installFakes({ ...fixtures(), ...awaitingApproval() });
@@ -410,7 +413,6 @@ it("AC-459 #814: 描画した画面の枠組み（見出し・ボタン・ナビ
         "nav, header, button, h1, h2, h3, h4, [role=note], [role=status]",
       ),
     ]
-      .filter((e) => e.closest(KEPT_SECTION) === null)
       .map((e) => e.textContent ?? "")
       .join("\n");
     expect(frame.trim(), id).not.toBe("");

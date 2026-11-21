@@ -49,7 +49,7 @@ export function IssuesAnswerView({ answer }: { answer: string }) {
   );
 }
 
-// 予想の例 1 つ。種類・場面・変更前・変更後を出す（仕様の表の各例と同じ。端末の要約も変更前を出す）。
+// 予想の例 1 つ。種類・場面・変更前・変更後を出す（仕様の表の各例と同じ。ターミナルの要約も変更前を出す）。
 function ExpectedBody({ e }: { e: StageExpected }) {
   return (
     <>

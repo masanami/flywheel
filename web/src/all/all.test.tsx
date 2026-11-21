@@ -83,7 +83,7 @@ it("AC-384 #806: 行のリンクは、そのエージェントの画面（#/a/<�
     "#/a/alpha/challenges/C-1/approve-plan",
     "#/a/alpha/challenges/C-9",
     "#/a/alpha/challenges/C-2",
-    "#/a/beta/challenges/C-3",
+    "#/a/beta/challenges/C-3/approve-completion",
   ]);
   for (const h of hrefs) expect(h).toMatch(/^#\/a\/(alpha|beta)\//);
 });
@@ -99,7 +99,7 @@ it("AC-385 #806: 「エージェント」の区分に、エージェントごと
   );
   const [a, b] = screen.getAllByTestId("all-agent-row");
   expect(a).toHaveTextContent("alpha");
-  expect(a).toHaveTextContent("サイクル: 走っている");
+  expect(a).toHaveTextContent("サイクル: 実行中");
   expect(a).toHaveTextContent("あなたを待っている 3 件");
   expect(b).toHaveTextContent("beta");
   expect(b).toHaveTextContent("サイクル: 走っていない");

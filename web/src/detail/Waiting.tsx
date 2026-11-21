@@ -2,7 +2,6 @@ import type { ShowCardResponse } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT, PARENT_DIRECT_HOLD_NOTE } from "../labels.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { ApprovalGuide } from "../parts/ApprovalGuide.tsx";
-import { ApprovalPanel } from "../parts/ApprovalPanel.tsx";
 import { ClampedText } from "../parts/ClampedText.tsx";
 import { hrefOf } from "../shell/route.ts";
 import {
@@ -18,18 +17,15 @@ const waitingLabel = (a: string): string => {
 };
 
 // あなたを待っているもの。next_human_actions ごとに出す。
-// 画面のボタンで受けるのは、完了の承認（反映は保留のまま）だけ。計画の承認は承認の画面へのリンク、
-// 回答・予算の増額などは端末のコマンドの案内を出す（答える欄は置かない）。
+// 計画の承認・完了の承認は、それぞれの承認の画面へのリンク（ボタンは承認の画面にある）。回答・予算の増額などはターミナルのコマンドの案内を出す（答える欄は置かない）。
 export function Waiting({
   show,
   agentName,
   workspacePath,
-  onApproved,
 }: {
   show: ShowCardResponse;
   agentName: string;
   workspacePath: string;
-  onApproved: () => void;
 }) {
   const id = show.challenge.id;
   const actions = show.card.next_human_actions;
@@ -72,11 +68,19 @@ export function Waiting({
               </>
             ) : null}
             {a === "approve_completion" ? (
-              <ApprovalPanel
-                workspace={agentName}
-                challengeId={id}
-                onApproved={onApproved}
-              />
+              <>
+                {" "}
+                <a
+                  href={hrefOf({
+                    kind: "approve_completion",
+                    name: agentName,
+                    id,
+                  })}
+                  data-testid="completion-approval-link"
+                >
+                  完了の承認の画面を開く
+                </a>
+              </>
             ) : null}
             {a === "answer_question"
               ? questions.map((h) => (

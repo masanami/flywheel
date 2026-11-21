@@ -39,6 +39,11 @@ const T = (id: string, p: Partial<Task> = {}): Task => ({
   body: "",
   budget_impl_usd: 0,
   budget_review_usd: 0,
+  artifacts: [],
+  delegate: null,
+  facts: {},
+  landing: null,
+  verification: null,
   depends_on: [],
   done_criteria: "",
   id,
@@ -59,6 +64,7 @@ const N = (id: string, p: Partial<TreeTask> = {}): TreeTask => ({
   id,
   key: `k-${id}`,
   phase: "running",
+  progress: null,
   status: null,
   title: `題名 ${id}`,
   ...p,
@@ -176,6 +182,7 @@ function show(o: Over = {}): ShowCardResponse {
       id: "C-1",
       next_human_actions: [],
       parent: null,
+      progress: null,
       status: "in_progress",
       status_label: "着手中",
       tasks: o.nodes ?? [N("T-2")],
@@ -262,7 +269,7 @@ it("AC-286 #810: タスクの題名と、表示の区分の語が出る", async 
   expect(
     within(root).getByRole("heading", { name: "集計を書き直す" }),
   ).toBeTruthy();
-  expect(within(root).getByTestId("task-phase").textContent).toBe("次に走る");
+  expect(within(root).getByTestId("task-phase").textContent).toBe("次に実行");
 });
 
 it("AC-287 #810: 前提のタスクの題名が、そのタスクの詳細へのリンクとして出る", async () => {
@@ -347,7 +354,7 @@ const waitingShow = () =>
     holds: [hold({ question: "表が既にあるときは作り直しますか" })],
   });
 
-it("AC-293 #810: phase が waiting のタスクの詳細に、保留の問いの文と、端末のコマンドの案内（flywheel answer）が出る", async () => {
+it("AC-293 #810: phase が waiting のタスクの詳細に、保留の問いの文と、ターミナルのコマンドの案内（flywheel answer）が出る", async () => {
   const { root } = await open(waitingShow());
   const w = within(within(root).getByTestId("task-waiting"));
   expect(w.getByText("表が既にあるときは作り直しますか")).toBeTruthy();
@@ -606,7 +613,7 @@ it("#810: 前提・この後のリンクの横に、そのタスクの表示の�
 it.each([
   ["cli", "relayed", "あなた（対話）"],
   ["ui", "none", "あなた（画面）"],
-  ["cli", "tty_confirm", "あなた（端末）"],
+  ["cli", "tty_confirm", "あなた（ターミナル）"],
   ["invoker", "none", "invoker"],
 ])(
   "#810: 回答の行に、誰が答えたかが出る（経路 %s・方式 %s）",
@@ -627,3 +634,207 @@ it.each([
     );
   },
 );
+
+// ---- 委譲先の実行・成果物・値・検証・費用の枠（#931。AC-63〜80・82〜84）----
+const D = (p: Partial<NonNullable<Task["delegate"]>> = {}) => ({
+  requested_kind: null,
+  run_id: "R-1",
+  state: "succeeded",
+  summary: "要約",
+  ...p,
+});
+
+it("AC-63 AC-64 AC-65 AC-79 #931: 委譲先の実行の状態の語・要約・求めていることが出る", async () => {
+  const { root } = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          delegate: D({
+            state: "waiting",
+            summary: "待っています",
+            requested_kind: "answer",
+          }),
+        }),
+      ],
+    }),
+  );
+  const sec = within(within(root).getByTestId("task-delegate"));
+  expect(sec.getByTestId("delegate-state").textContent).toBe("待機中");
+  expect(sec.getByTestId("delegate-summary").textContent).toBe("待っています");
+  expect(sec.getByTestId("delegate-requested").textContent).toBe("回答");
+});
+
+it("AC-66 #931: delegate が null なら「委譲先の実行」の区画は出ない", async () => {
+  const { root } = await open(show());
+  expect(within(root).queryByTestId("task-delegate")).toBeNull();
+});
+
+it("AC-84 #931: 要約の Markdown の記法は整えず文字のまま出る", async () => {
+  const text = "# 見出し\n**太字** [x](http://e.com)";
+  const { root } = await open(
+    show({ tasks: [T("T-2", { delegate: D({ summary: text }) })] }),
+  );
+  const el = within(root).getByTestId("delegate-summary");
+  expect(el.textContent).toBe(text);
+  expect(el.querySelector("a, h1, strong")).toBeNull();
+});
+
+it("AC-67 AC-68 AC-69 AC-70 AC-80 #931: 成果物の種類・状態（記録のまま）・http(s) だけのリンク・統合先の語", async () => {
+  const { root } = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          artifacts: [
+            {
+              kind: "pull_request",
+              ref: "https://example.com/pr/1",
+              role: "integration",
+              state: "Merged_x",
+            },
+            {
+              kind: "branch",
+              ref: "javascript:alert(1)",
+              role: null,
+              state: "open",
+            },
+          ],
+        }),
+      ],
+    }),
+  );
+  const items = within(root).getAllByTestId("task-artifact");
+  expect(
+    within(items[0] as HTMLElement).getByTestId("artifact-kind").textContent,
+  ).toBe("pull_request");
+  expect(
+    within(items[1] as HTMLElement).getByTestId("artifact-state").textContent,
+  ).toBe("open");
+  expect(
+    within(items[0] as HTMLElement).getByTestId("artifact-state").textContent,
+  ).toBe("Merged_x");
+  expect(
+    within(items[0] as HTMLElement)
+      .getByRole("link")
+      .getAttribute("href"),
+  ).toBe("https://example.com/pr/1");
+  expect(
+    within(items[0] as HTMLElement).getByTestId("artifact-role").textContent,
+  ).toBe("統合先");
+  expect(within(items[1] as HTMLElement).queryByRole("link")).toBeNull();
+  expect(
+    within(items[1] as HTMLElement).getByTestId("artifact-ref").textContent,
+  ).toBe("javascript:alert(1)");
+  expect(
+    within(items[1] as HTMLElement).queryByTestId("artifact-role"),
+  ).toBeNull();
+});
+
+it("AC-71 AC-72 #931: facts の名前と値が出る。空なら区画は出ない", async () => {
+  const a = await open(
+    show({ tasks: [T("T-2", { facts: { self_review: "complete" } })] }),
+  );
+  const f = within(a.root).getByTestId("task-fact");
+  expect(f.textContent).toContain("self_review");
+  expect(f.textContent).toContain("complete");
+  cleanup();
+  const b = await open(show());
+  expect(within(b.root).queryByTestId("task-facts")).toBeNull();
+});
+
+it("AC-73 AC-74 AC-75 #931: 検証の判定の語・理由・時刻が出る", async () => {
+  const { root } = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          verification: {
+            at: "2026-11-01T10:00:00Z",
+            reason: "条件を確かめた",
+            verdict: "met",
+          },
+        }),
+      ],
+    }),
+  );
+  const sec = within(within(root).getByTestId("task-verification"));
+  expect(sec.getByTestId("verification-verdict").textContent).toBe("満たした");
+  expect(sec.getByTestId("verification-reason").textContent).toBe(
+    "条件を確かめた",
+  );
+  expect(sec.getByTestId("verification-at").textContent).toMatch(
+    /^\d{2}\/\d{2} \d{2}:\d{2}$/,
+  );
+  expect(sec.getByTestId("verification-at").getAttribute("datetime")).toBe(
+    "2026-11-01T10:00:00Z",
+  );
+});
+
+it.each([
+  ["AC-76", "verified", "検証済み"],
+  ["AC-77", "sent", "統合中"],
+  ["AC-78", "landed", "統合済み"],
+])("%s #931: landing が %s のとき「%s」が出る", async (_ac, landing, word) => {
+  const { root } = await open(show({ tasks: [T("T-2", { landing })] }));
+  expect(within(root).getByTestId("task-landing").textContent).toBe(word);
+});
+
+it("AC-82 AC-83 #931: 「費用」に枠（実装とレビュー対応）と使った額が出る", async () => {
+  const { root } = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          budget_impl_usd: 4,
+          budget_review_usd: 2.5,
+          spent_usd: 0.9,
+        }),
+      ],
+      nodes: [N("T-2", { cost_usd: 1.25 })],
+    }),
+  );
+  expect(within(root).getByTestId("task-budget-impl").textContent).toBe("4");
+  expect(within(root).getByTestId("task-budget-review").textContent).toBe(
+    "2.5",
+  );
+  expect(within(root).getByTestId("task-cost").textContent).toBe("1.25");
+  // 枠に数える使った額（spent_usd）は、実行の全費用（cost_usd）とは別に、枠の欄へ並べて出す。
+  expect(within(root).getByTestId("task-spent").textContent).toBe("0.9");
+  expect(within(root).getByTestId("task-budget").textContent).toBe(
+    "枠使った額 0.9 USD ／ 実装 4 USD ・ レビュー対応 2.5 USD",
+  );
+});
+
+it("成果物の状態が空文字のとき、区切りと状態を出さない", async () => {
+  const { root } = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          artifacts: [
+            { kind: "branch", ref: "feat/x", role: null, state: "" },
+            { kind: "branch", ref: "feat/y", role: null, state: "open" },
+          ],
+        }),
+      ],
+    }),
+  );
+  const items = within(root).getAllByTestId("task-artifact");
+  expect(
+    within(items[0] as HTMLElement).queryByTestId("artifact-state"),
+  ).toBeNull();
+  expect(items[0]?.textContent).toBe("branch ・ feat/x");
+  expect(items[1]?.textContent).toBe("branch ・ feat/y ・ open");
+});
+
+it("AC-129: 実行に確かめ待ちの中身（fix_pending_ref）があるタスクの詳細に、衝突の解消の確かめを待っている旨が出る", async () => {
+  const { root } = await open(
+    show({ runs: [run("R-1", { fix_pending_ref: "abc123" })] }),
+  );
+  expect(within(root).getByTestId("task-fix-pending")).toHaveTextContent(
+    "衝突の解消の確かめを待っています",
+  );
+  // 区分の語は変えない
+  expect(within(root).getByTestId("task-phase")).toHaveTextContent("実行中");
+});
+
+it("AC-129: 確かめ待ちの中身が無ければ、その旨は出さない", async () => {
+  const { root } = await open(show({ runs: [run("R-1")] }));
+  expect(within(root).queryByTestId("task-fix-pending")).toBeNull();
+});

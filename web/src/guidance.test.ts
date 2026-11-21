@@ -1,5 +1,12 @@
 import { expect, it } from "vitest";
+import guidance from "./guidance.json";
 import {
+  COMPLETION_APPROVED_NOTE,
+  COMPLETION_BUTTON_NOTE,
+  COMPLETION_REJECT_NOTE,
+  COMPLETION_RELEASE_NOTE,
+  CONVERSATION_NOTE,
+  OUTSIDE_NOTE,
   type Template,
   guidesFor,
   guidesForContext,
@@ -68,4 +75,29 @@ it("AC-445 #814: guidance.json の S2c で足した案内に「本番反映」�
   for (const t of s2c) {
     expect(JSON.stringify(t), t.id).not.toContain("本番反映");
   }
+});
+
+// #927: 完了承認画面の案内は、対話で伝える方法だけを出す（コマンドの例は出さない）。
+it("#927: 完了承認画面の案内は、ターミナルのコマンドの例（flywheel）を含まず、対話で伝える方法を示す", () => {
+  for (const note of [
+    COMPLETION_BUTTON_NOTE,
+    COMPLETION_RELEASE_NOTE,
+    COMPLETION_REJECT_NOTE,
+    COMPLETION_APPROVED_NOTE,
+  ]) {
+    expect(note.length).toBeGreaterThan(0);
+    expect(note).not.toContain("flywheel");
+  }
+  expect(COMPLETION_RELEASE_NOTE).toContain("対話");
+  expect(COMPLETION_REJECT_NOTE).toContain("対話");
+  expect(COMPLETION_BUTTON_NOTE).toContain("完了を記録するだけ");
+  expect(COMPLETION_APPROVED_NOTE).toContain("記録しました");
+});
+
+// #927 AC-106: 案内の文に「端末」の語は無い（ターミナルと書く）。
+it("#927 AC-106: 案内の文（OUTSIDE_NOTE・CONVERSATION_NOTE・guidance.json の全文）に「端末」は無い", () => {
+  expect(OUTSIDE_NOTE).not.toContain("端末");
+  expect(CONVERSATION_NOTE).not.toContain("端末");
+  expect(JSON.stringify(guidance)).not.toContain("端末");
+  expect(OUTSIDE_NOTE).toContain("ターミナル");
 });

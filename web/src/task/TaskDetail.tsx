@@ -9,14 +9,20 @@ import type {
   TreeTask,
 } from "../api/types.gen.ts";
 import {
+  CONFLICT_FIX_PENDING_TEXT,
+  DELEGATE_STATE_LABELS,
   HOLD_KIND_PARENT_DIRECT,
+  LANDING_LABELS,
   LOADING_TEXT,
   NO_COST_LABEL,
   PHASE_LABELS,
+  REQUESTED_KIND_LABELS,
   RUN_KIND_LABELS,
   RUN_RESULT_LABELS,
   RUN_RUNNING_LABEL,
+  TASK_SPENT_LABEL,
   UPSTREAM_STATE_LABELS,
+  VERDICT_LABELS,
   label,
 } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
@@ -34,7 +40,7 @@ import { whoOf } from "../who.ts";
 const DELEGATION_KINDS = ["delegate", "contract"];
 
 // タスクの詳細の画面。課題の詳細の API の応答を、タスクの ID で結んで作る（tasks = 本文、tree.tasks = 区分・費用）。
-// 区分と費用は core が返した値をそのまま出す。画面のボタンは置かず、回答は端末のコマンドの案内で示す。
+// 区分と費用は core が返した値をそのまま出す。画面のボタンは置かず、回答はターミナルのコマンドの案内で示す。
 export function TaskDetail({
   live,
   agentName,
@@ -201,6 +207,19 @@ function TaskView({
             <b data-testid="task-cost">{usd(node.cost_usd)}</b> USD
           </dd>
         </div>
+        <div data-testid="task-budget">
+          <dt>枠</dt>
+          <dd>
+            {TASK_SPENT_LABEL}{" "}
+            <b data-testid="task-spent">{usd(task.spent_usd)}</b> USD ／ 実装{" "}
+            <b data-testid="task-budget-impl">{usd(task.budget_impl_usd)}</b>{" "}
+            USD ・ レビュー対応{" "}
+            <b data-testid="task-budget-review">
+              {usd(task.budget_review_usd)}
+            </b>{" "}
+            USD
+          </dd>
+        </div>
         {task.source_key !== null ? (
           <div data-testid="task-source">
             <dt>取り込み元の子</dt>
@@ -268,6 +287,22 @@ function TaskView({
           </ul>
         </section>
       ) : null}
+      {task.delegate !== null ? <DelegateSection d={task.delegate} /> : null}
+      {task.artifacts.length > 0 ? (
+        <ArtifactsSection artifacts={task.artifacts} />
+      ) : null}
+      {Object.keys(task.facts).length > 0 ? (
+        <FactsSection facts={task.facts} />
+      ) : null}
+      {task.verification !== null || task.landing !== null ? (
+        <VerificationSection
+          verification={task.verification}
+          landing={task.landing}
+        />
+      ) : null}
+      {runs.some((r) => r.fix_pending_ref !== null) ? (
+        <p data-testid="task-fix-pending">{CONFLICT_FIX_PENDING_TEXT}</p>
+      ) : null}
       {holds.length > 0 ? <Holds holds={holds} /> : null}
       <RunsView
         agentName={agentName}
@@ -276,6 +311,134 @@ function TaskView({
         latestEndedAt={latestDelegation?.ended_at ?? null}
       />
     </article>
+  );
+}
+
+// 委譲先が返した値（要約・値・成果物の識別）は flywheel の外で作られた文字。Markdown として整えず、そのまま文字で出す
+// （white-space: pre-wrap で改行だけ保つ）。リンクにするのは、成果物の識別のうち safeHref が通る http か https のものだけ。
+function DelegateSection({ d }: { d: NonNullable<Task["delegate"]> }) {
+  return (
+    <section aria-label="委譲先の実行" data-testid="task-delegate">
+      <h3>委譲先の実行</h3>
+      <p>
+        状態:{" "}
+        <b data-testid="delegate-state">
+          {label(DELEGATE_STATE_LABELS, d.state)}
+        </b>
+      </p>
+      <p data-testid="delegate-summary" style={{ whiteSpace: "pre-wrap" }}>
+        {d.summary}
+      </p>
+      {d.requested_kind !== null ? (
+        <p>
+          求めていること:{" "}
+          <span data-testid="delegate-requested">
+            {label(REQUESTED_KIND_LABELS, d.requested_kind)}
+          </span>
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function ArtifactsSection({ artifacts }: { artifacts: Task["artifacts"] }) {
+  return (
+    <section aria-label="成果物" data-testid="task-artifacts">
+      <h3>成果物</h3>
+      <ul>
+        {artifacts.map((a, i) => {
+          const href = safeHref(a.ref);
+          return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 同じ識別が並びうる
+            <li key={i} data-testid="task-artifact">
+              <span data-testid="artifact-kind">{a.kind}</span>
+              {" ・ "}
+              {href !== null ? (
+                <a
+                  data-testid="artifact-ref"
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {a.ref}
+                </a>
+              ) : (
+                <span data-testid="artifact-ref">{a.ref}</span>
+              )}
+              {a.state === "" ? null : (
+                <>
+                  {" ・ "}
+                  <span data-testid="artifact-state">{a.state}</span>
+                </>
+              )}
+              {a.role === "integration" ? (
+                <>
+                  {" ・ "}
+                  <span className="status-pill" data-testid="artifact-role">
+                    統合先
+                  </span>
+                </>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function FactsSection({ facts }: { facts: Task["facts"] }) {
+  return (
+    <section aria-label="委譲先が値で返したこと" data-testid="task-facts">
+      <h3>委譲先が値で返したこと</h3>
+      <dl className="detail-items">
+        {Object.entries(facts).map(([k, v]) => (
+          <div key={k} data-testid="task-fact">
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function VerificationSection({
+  verification,
+  landing,
+}: {
+  verification: Task["verification"];
+  landing: Task["landing"];
+}) {
+  return (
+    <section aria-label="検証" data-testid="task-verification">
+      <h3>検証</h3>
+      {verification !== null ? (
+        <>
+          <p>
+            判定:{" "}
+            <b data-testid="verification-verdict">
+              {label(VERDICT_LABELS, verification.verdict)}
+            </b>
+          </p>
+          <p data-testid="verification-reason">{verification.reason}</p>
+          <p>
+            判定した時刻:{" "}
+            <time data-testid="verification-at" dateTime={verification.at}>
+              {shortTime(verification.at)}
+            </time>
+          </p>
+        </>
+      ) : null}
+      {landing !== null ? (
+        <p>
+          統合先へ入れる進み:{" "}
+          <span data-testid="task-landing">
+            {label(LANDING_LABELS, landing)}
+          </span>
+        </p>
+      ) : null}
+    </section>
   );
 }
 

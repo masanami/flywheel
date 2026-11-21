@@ -29,6 +29,7 @@ const task = (key: string, p: Partial<TreeTask> = {}): TreeTask => ({
   id: `T-${key}`,
   key,
   phase: "next",
+  progress: null,
   status: null,
   title: `タスク ${key}`,
   ...p,
@@ -46,6 +47,7 @@ const challenge = (
   id,
   next_human_actions: [],
   parent: null,
+  progress: null,
   status: "in_progress",
   status_label: "着手中",
   tasks: [],
@@ -225,20 +227,20 @@ it("AC-195 #807: dependencies がある枠に前提の課題の status_label が
   expect(within(d).getByText("進行だよ")).toBeInTheDocument();
 });
 
-it("AC-196 #807: satisfied が偽の前提には「未完了」が添えて出る", async () => {
+it("AC-196 #807: satisfied が偽の前提には「未解消」が添えて出る", async () => {
   await open({
     challenges: [challenge("C-1", { dependencies: [dep("C-7", false)] })],
   });
   const d = await screen.findByTestId("dependencies");
-  expect(within(d).getByText("未完了")).toBeInTheDocument();
+  expect(within(d).getByText("未解消")).toBeInTheDocument();
 });
 
-it("AC-197 #807: satisfied が真の前提には「未完了」は出ない", async () => {
+it("AC-197 #807: satisfied が真の前提には「未解消」は出ない", async () => {
   await open({
     challenges: [challenge("C-1", { dependencies: [dep("C-7", true)] })],
   });
   const d = await screen.findByTestId("dependencies");
-  expect(within(d).queryByText("未完了")).toBeNull();
+  expect(within(d).queryByText("未解消")).toBeNull();
 });
 
 it("AC-198 #807: tasks が空の課題の枠に「タスクはまだありません。」が出る", async () => {
@@ -330,10 +332,10 @@ it("AC-204 #807: 凡例の 5 つの語と、線の説明が出る", async () => 
   await open({ challenges: [] });
   const legend = await screen.findByTestId("legend");
   for (const w of [
-    "走っている",
-    "あなたを待っている",
-    "次に走る（前提は済み）",
-    "前提を待っている",
+    "実行中",
+    "あなた待ち",
+    "次に実行（前提は済み）",
+    "前提待ち",
     "済み",
     "線は前提です（左が終わると、右が走れます）。",
   ]) {
@@ -554,4 +556,37 @@ it("#807: approve_plan 以外の待ちの種類も、「いま進められるこ
   const f = (await screen.findAllByTestId("challenge-frame"))[0] as HTMLElement;
   expect(within(f).getByText("回答")).toBeInTheDocument();
   expect(within(f).getByText("予算の増額")).toBeInTheDocument();
+});
+
+// タスクの箱・課題の枠の見出しに、core が返す progress の語を出す（AC-96〜100・AC-107）。
+it("タスクの箱に progress の語を出し、無ければ出さない（AC-96〜98）", async () => {
+  const c = challenge("C-1", {
+    tasks: [
+      task("a", { progress: "working", phase: "running" }),
+      task("b", { progress: "verifying", phase: "running" }),
+      task("c", { progress: "landing", phase: "running" }),
+      task("d"),
+    ],
+  });
+  await open({ challenges: [c] });
+  const boxes = await screen.findAllByTestId("task-box");
+  const words = boxes.map(
+    (b) => within(b).queryByTestId("task-progress")?.textContent ?? null,
+  );
+  expect(words).toEqual(["作業中", "検証待ち", "統合中", null]);
+});
+
+it("課題の枠の見出しに progress の語を出す（AC-99・AC-100）", async () => {
+  await open({
+    challenges: [
+      challenge("C-1", { progress: "reflecting" }),
+      challenge("C-2", { progress: "checking" }),
+      challenge("C-3"),
+    ],
+  });
+  await waitFor(() => expect(frames()).toHaveLength(3));
+  const words = frames().map(
+    (f) => within(f).queryByTestId("challenge-progress")?.textContent ?? null,
+  );
+  expect(words).toEqual(["反映中", "全体の確認中", null]);
 });

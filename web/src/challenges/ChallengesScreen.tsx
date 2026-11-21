@@ -2,11 +2,13 @@ import { useState } from "react";
 import { api } from "../api/client.ts";
 import type { TreeChallenge } from "../api/types.gen.ts";
 import {
+  CHALLENGE_PROGRESS_LABELS,
   DEPENDENCY_UNMET_LABEL,
   LEGEND_EDGE_HINT,
   LOADING_TEXT,
   PHASE_LEGEND_LABELS,
   PHASE_LEGEND_ORDER,
+  label,
 } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { hrefOf } from "../shell/route.ts";
@@ -104,6 +106,14 @@ function ChallengeFrame({
       <h3>
         <a href={detail}>{c.title}</a>{" "}
         <span className="status-pill">{c.status_label}</span>
+        {c.progress != null ? (
+          <>
+            {" "}
+            <span className="progress-pill" data-testid="challenge-progress">
+              {label(CHALLENGE_PROGRESS_LABELS, c.progress)}
+            </span>
+          </>
+        ) : null}
         {waitingKindsOfActions(c.next_human_actions).map((k) => (
           <span key={k}>
             {" "}

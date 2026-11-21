@@ -1,23 +1,9 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { ApprovalSummary } from "./api/types.gen.ts";
 import { CONVERSATION_NOTE } from "./guidance.ts";
-import {
-  FakeEventSource,
-  type FakeResponder,
-  type Recorded,
-  fixtures,
-  installFakes,
-} from "./testing/fakes.ts";
+import { FakeEventSource, fixtures, installFakes } from "./testing/fakes.ts";
 
 const meta = () => {
   const m = document.createElement("meta");
@@ -35,7 +21,6 @@ afterEach(() => {
 });
 
 const APPROVAL = "/api/v1/workspaces/alpha/challenges/C-1/approval";
-const APPROVE = "POST /api/v1/workspaces/alpha/challenges/C-1/approve";
 
 function card(state: string, actions: string[], modifiers: string[] = []) {
   return {
@@ -173,11 +158,6 @@ async function open() {
   return await screen.findByTestId("challenge-detail");
 }
 
-const btn = (m: HTMLElement, name: string | RegExp) =>
-  within(m).findByRole("button", { name, hidden: true });
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status });
-
 it("AC-207: approve_plan を持つ課題の詳細には、承認のボタンではなく計画の承認の画面へのリンクが出る（#811）", async () => {
   const { requests } = setup("awaiting_plan_approval", ["approve_plan"]);
   const m = await open();
@@ -193,224 +173,6 @@ it("AC-207: approve_plan を持つ課題の詳細には、承認のボタンで�
   expect(requests.some((r) => r.url === APPROVAL)).toBe(false);
 });
 
-it("AC-208: approve_completion を持つ課題の詳細に完了の承認のボタンが出る", async () => {
-  setup("awaiting_completion_approval", ["approve_completion"], {
-    [APPROVAL]: summary(),
-  });
-  const m = await open();
-  await btn(m, /完了を承認する/);
-});
-
-it("AC-209: 状態の文字列が承認待ちでも next_human_actions に承認のコードが無ければボタンも ① も無い", async () => {
-  const { requests } = setup("awaiting_plan_approval", ["triage"]);
-  const m = await open();
-  await within(m).findByTestId("detail-waiting");
-  expect(
-    within(m).queryByRole("button", { name: /承認/, hidden: true }),
-  ).toBeNull();
-  expect(requests.some((r) => r.url.endsWith("/approval"))).toBe(false);
-});
-
-it("AC-209: 承認のコードがあれば状態の文字列が何でもボタンが出る", async () => {
-  setup("in_progress", ["approve_completion"], {
-    [APPROVAL]: summary(),
-  });
-  const m = await open();
-  await btn(m, /完了を承認する/);
-});
-
-it("AC-210/213: 完了の要約に完了条件・同時には承認されない不可逆操作・release の head（取れなければその旨）・保留のままを示す", async () => {
-  setup("awaiting_completion_approval", ["approve_completion"], {
-    [APPROVAL]: summary(),
-  });
-  const m = await open();
-  await btn(m, /完了を承認する/);
-  const s = within(m).getByTestId("approval-summary");
-  expect(s.textContent).toContain("完了条件の本文");
-  expect(s.textContent).toContain("O-2 / delete: 古いデータの削除");
-  expect(s.querySelector('[data-release="O-1"]')?.textContent).toContain(
-    "abc123def456",
-  );
-  expect(s.querySelector('[data-release="O-3"]')?.textContent).toContain(
-    "取得できませんでした",
-  );
-  expect(within(m).getByTestId("release-held").textContent).toContain(
-    "保留のまま残ります",
-  );
-  // 保留を外す選択は無い
-  expect(within(m).queryByRole("checkbox", { hidden: true })).toBeNull();
-});
-
-it("AC-211: ボタンは開いたときの版を CSRF つきで ② に送り、承認後は承認済みを示す", async () => {
-  const { requests } = setup(
-    "awaiting_completion_approval",
-    ["approve_completion"],
-    {
-      [APPROVAL]: summary({ version: 7 }),
-      [APPROVE]: () => json(200, {}),
-    },
-  );
-  const m = await open();
-  fireEvent.click(await btn(m, /完了を承認する/));
-  await within(m).findByText("承認しました。", {}, { timeout: 2000 });
-  const posts = requests.filter((r) => r.method === "POST");
-  expect(posts).toHaveLength(1);
-  expect(posts[0]?.url).toBe("/api/v1/workspaces/alpha/challenges/C-1/approve");
-  expect(posts[0]?.body).toBe('{"version":7}');
-  expect(posts[0]?.headers["X-Flywheel-CSRF"]).toBe("tok-123");
-});
-
-it("AC-212: conflict なら ① を読み直して最新の要約を示し、自動で再送せず、押し直すと新しい版を送る", async () => {
-  let call = 0;
-  const responder: FakeResponder = () => {
-    call++;
-    return call === 1
-      ? json(409, { error: { code: "conflict", message: "版が違う" } })
-      : json(200, {});
-  };
-  let reads = 0;
-  const summaryResponder: FakeResponder = () => {
-    reads++;
-    return json(
-      200,
-      summary({
-        version: reads === 1 ? 3 : 4,
-        done_criteria: reads === 1 ? "古い条件" : "新しい条件",
-      }),
-    );
-  };
-  const { requests } = setup("awaiting_completion_approval", [
-    "approve_completion",
-  ]);
-  // setup の後から応答を差し込む（GET の応答も関数で返す）
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: string, init?: RequestInit) => {
-      const method = (init?.method ?? "GET").toUpperCase();
-      const rec: Recorded = {
-        url: String(input),
-        method,
-        headers: {},
-        body: typeof init?.body === "string" ? init.body : null,
-      };
-      requests.push(rec);
-      if (rec.url === APPROVAL) return summaryResponder(rec);
-      if (method === "POST") return responder(rec);
-      const b = (fixturesFor() as Record<string, unknown>)[rec.url];
-      return b === undefined ? json(404, {}) : json(200, b);
-    }),
-  );
-  const m = await open();
-  fireEvent.click(await btn(m, /完了を承認する/));
-  await within(m).findByText(
-    /最新の要約を読み直しました/,
-    {},
-    { timeout: 2000 },
-  );
-  await within(m).findByText("新しい条件");
-  expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
-  fireEvent.click(await btn(m, /完了を承認する/));
-  await within(m).findByText("承認しました。");
-  const posts = requests.filter((r) => r.method === "POST");
-  expect(posts.map((p) => p.body)).toEqual(['{"version":3}', '{"version":4}']);
-});
-
-// conflict のテストが GET の本文を引き直すための固定の本文。
-function fixturesFor(): Record<string, unknown> {
-  const f = fixtures();
-  const c = card("awaiting_completion_approval", ["approve_completion"]);
-  f["/api/v1/workspaces/alpha/challenges"] = {
-    challenges: [{ ...challenge("awaiting_completion_approval"), card: c }],
-  };
-  f["/api/v1/workspaces/alpha/challenges/C-1"] = {
-    approvals: [],
-    card: c,
-    challenge: challenge("awaiting_completion_approval"),
-    conflict_fixes: [],
-    direct_completions: [],
-    followups: [],
-    holds: [],
-    operations: [],
-    plans: [],
-    runs: [],
-    pairs: [],
-    source_binding: null,
-    source_children: [],
-    stages: {
-      actual: null,
-      expected: null,
-      figure: null,
-      issues: null,
-      issues_answer: null,
-      non_goals: null,
-    },
-    waiting: { prerequisites: [] },
-    tree: {
-      budget_usd: null,
-      children: [],
-      cost_usd: 0,
-      dependencies: [],
-      followups_open: 0,
-      id: "C-1",
-      next_human_actions: [],
-      parent: null,
-      status: "in_progress",
-      status_label: "着手中",
-      tasks: [],
-      tasks_done: 0,
-      tasks_total: 0,
-      title: "t",
-      updated_at: "2026-11-01T00:00:00.000Z",
-      uses_integration: null,
-    },
-  };
-  f["/api/v1/workspaces/alpha/log?challenge=C-1"] = { activities: [] };
-  return f;
-}
-
-it.each([
-  ["403 forbidden_origin", 403, "forbidden_origin"],
-  ["403 だけ", 403, "something"],
-  ["forbidden_origin だけ", 400, "forbidden_origin"],
-])(
-  "403・forbidden_origin（%s）では再読み込みを促し、再送しない",
-  async (_n, status, code) => {
-    const { requests } = setup(
-      "awaiting_completion_approval",
-      ["approve_completion"],
-      {
-        [APPROVAL]: summary(),
-        [APPROVE]: () => json(status, { error: { code, message: "拒否" } }),
-      },
-    );
-    const m = await open();
-    fireEvent.click(await btn(m, /完了を承認する/));
-    await within(m).findByText(/ページを再読み込みして/, {}, { timeout: 2000 });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
-  },
-);
-
-it("UI が送る要求は GET と …/approve の POST だけ", async () => {
-  const { requests } = setup(
-    "awaiting_completion_approval",
-    ["approve_completion"],
-    {
-      [APPROVAL]: summary(),
-      [APPROVE]: () => json(200, {}),
-    },
-  );
-  const m = await open();
-  fireEvent.click(await btn(m, /完了を承認する/));
-  await within(m).findByText("承認しました。");
-  await waitFor(() => expect(requests.length).toBeGreaterThan(0));
-  for (const r of requests) {
-    if (r.method === "GET") continue;
-    expect(r.method).toBe("POST");
-    expect(r.url).toMatch(/\/challenges\/C-1\/approve$/);
-  }
-});
-
 const guideText = async (m: HTMLElement) =>
   (
     await within(m).findByRole("region", {
@@ -419,7 +181,7 @@ const guideText = async (m: HTMLElement) =>
     })
   ).textContent ?? "";
 
-it("AC-214: approve_plan には reject の端末のコマンドと対話の案内", async () => {
+it("AC-214: approve_plan には reject のターミナルのコマンドと対話の案内", async () => {
   setup("awaiting_plan_approval", ["approve_plan"]);
   const t = await guideText(await open());
   expect(t).toContain(
@@ -494,14 +256,3 @@ it.each(["triage", "review_discrepancy", "clear_slot"])(
     expect(within(m).queryByTestId("conversation-note")).toBeNull();
   },
 );
-
-it("#811: 完了の承認のパネルは、要約が plan を返したら承認のボタンを出さない", async () => {
-  setup("awaiting_completion_approval", ["approve_completion"], {
-    [APPROVAL]: summary({ kind: "plan" }),
-  });
-  const m = await open();
-  await within(m).findByText(/完了の承認待ちではありません/);
-  expect(
-    within(m).queryByRole("button", { name: /承認する/, hidden: true }),
-  ).toBeNull();
-});

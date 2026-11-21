@@ -2,6 +2,7 @@ import { api } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
 import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
+import { ConflictFixesView } from "../parts/ConflictFixesView.tsx";
 import { NotFound } from "../shell/NotFound.tsx";
 import { CHALLENGE_VIEWS, type ChallengeView, hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
@@ -33,7 +34,7 @@ export function ChallengeDetail({
   id: string;
   view: ChallengeView;
 }) {
-  const { result, reload } = useScreenData(
+  const { result } = useScreenData(
     live,
     agentName,
     () => api.challenge(agentName, id),
@@ -66,7 +67,11 @@ export function ChallengeDetail({
         show={show}
         agentName={agentName}
         workspacePath={workspacePath}
-        onApproved={reload}
+      />
+      <ConflictFixesView
+        fixes={show.conflict_fixes}
+        titleOfTask={(tid) => show.tasks.find((t) => t.id === tid)?.title}
+        showAt
       />
       <nav aria-label="課題の詳細の切り替え" className="detail-switch">
         {CHALLENGE_VIEWS.map((v) => (

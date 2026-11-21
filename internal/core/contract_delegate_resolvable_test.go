@@ -83,6 +83,19 @@ func TestContractWaitingQuestion_TerminalLeadsWithTextAndDoesNotPromiseResume(t 
 	}
 }
 
+// 保留の問いは画面にそのまま出るので、画面の文では「端末」と書かず「ターミナル」と書く（仕様 core-redesign-s3d の語の見直し）。
+func TestContractWaitingQuestion_TerminalSaysTerminalNotTanmatsu(t *testing.T) {
+	for _, rb := range []string{"terminal", "other"} {
+		q := contractWaitingQuestion("ext-1", "要約", &ContractRequestedAction{Kind: "approve", Decider: "human", Text: "T", ResolvableBy: rb}, true)
+		if !strings.Contains(q, "この求めは接続ツールの外のターミナルで人が解く必要があり、") {
+			t.Errorf("resolvable_by=%q: question = %q, want ターミナル", rb, q)
+		}
+		if strings.Contains(q, "端末") {
+			t.Errorf("resolvable_by=%q: question = %q, must not contain 端末", rb, q)
+		}
+	}
+}
+
 // terminal の待ちへの回答では resume を呼ばず、次の周で status を読み直す。同じ答えで周ごとに読み直さない。
 func TestPollContractRuns_TerminalAnswerDoesNotResumeAndRereadsStatus(t *testing.T) {
 	for _, rb := range []string{"terminal", "other"} {

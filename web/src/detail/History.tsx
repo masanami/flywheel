@@ -6,6 +6,7 @@ import {
   JUDGMENT_LABELS,
   LOADING_TEXT,
   NO_COST_LABEL,
+  OPERATION_KIND_LABELS,
   RUN_KIND_LABELS,
   RUN_RESULT_LABELS,
   RUN_RUNNING_LABEL,
@@ -35,6 +36,8 @@ const CHALLENGE_KINDS: Record<string, Kind> = {
   approve: "plan",
   approve_hold_release: "plan",
   reject: "plan",
+  op_approve: "plan",
+  op_reject: "plan",
   hold: "question",
   answer: "question",
   answer_plan: "question",
@@ -43,6 +46,8 @@ const CHALLENGE_KINDS: Record<string, Kind> = {
   verify_not_met: "verify",
   verify_uncertain: "verify",
 };
+
+// 不可逆操作の側の承認・差し戻しの記録（対になる課題の側の行が無い経路で、経緯に残る）。
 const OPERATION_KINDS: Record<string, Kind> = {
   approve: "plan",
   reject: "plan",
@@ -58,6 +63,55 @@ function kindOf(a: Activity): Kind {
   return (
     (table && Object.hasOwn(table, a.action) ? table[a.action] : null) ?? null
   );
+}
+
+// 課題の側の承認・差し戻しの記録（op_approve・op_reject）の action と、対になる不可逆操作の側の action。
+const OPERATION_DECISION_PAIRS: Record<string, string> = {
+  op_approve: "approve",
+  op_reject: "reject",
+};
+
+function operationIdOf(a: Activity): string | null {
+  if (typeof a.after !== "object" || a.after === null) return null;
+  const oid = (a.after as Record<string, unknown>).operation_id;
+  return typeof oid === "string" ? oid : null;
+}
+
+// 1 つの出来事が 2 行にならないよう、課題の側の記録と対になる不可逆操作の側の承認・差し戻しの行だけを隠す鍵（action と operation_id）の集合。
+// 対になる課題の側の行が無い経路（完了承認と同時の反映の承認・取り下げによる差し戻し）では、不可逆操作の側の行を出す。
+function pairedOperationSideKeys(activities: Activity[]): Set<string> {
+  const keys = new Set<string>();
+  for (const a of activities) {
+    if (a.entity !== "challenge") continue;
+    const side = OPERATION_DECISION_PAIRS[a.action];
+    const oid = operationIdOf(a);
+    if (side !== undefined && oid !== null) keys.add(`${side}:${oid}`);
+  }
+  return keys;
+}
+
+function isPairedOperationSideDecision(
+  a: Activity,
+  paired: Set<string>,
+): boolean {
+  return a.entity === "operation" && paired.has(`${a.action}:${a.entity_id}`);
+}
+
+// 操作の ID を、課題の詳細の operations[] と突き合わせて、操作の種類の語を返す。見つからなければ null。
+// 課題の側の行（after.operation_id）と、不可逆操作の側の承認・差し戻しの行（entity_id）に付ける。
+function operationKindWord(a: Activity, show: ShowCardResponse): string | null {
+  let oid: string | null = null;
+  if (a.entity === "challenge" && a.action in OPERATION_DECISION_PAIRS) {
+    oid = operationIdOf(a);
+  } else if (
+    a.entity === "operation" &&
+    (a.action === "approve" || a.action === "reject")
+  ) {
+    oid = a.entity_id;
+  }
+  if (oid === null) return null;
+  const op = show.operations.find((o) => o.id === oid);
+  return op === undefined ? null : label(OPERATION_KIND_LABELS, op.kind);
 }
 
 interface Row {
@@ -89,8 +143,10 @@ function activityRow(
   a: Activity,
   i: number,
   taskTitle: (id: string) => string,
+  show: ShowCardResponse,
 ): Row {
   const { who, quote } = whoOf(a);
+  const kindWord = operationKindWord(a, show);
   return {
     key: `a${i}`,
     at: a.at,
@@ -98,12 +154,13 @@ function activityRow(
     task: a.entity === "task" ? taskTitle(a.entity_id) : null,
     who,
     quote,
-    what: label(
-      HISTORY_ACTION_LABELS,
-      Object.hasOwn(HISTORY_ACTION_LABELS, `${a.entity}:${a.action}`)
-        ? `${a.entity}:${a.action}`
-        : a.action,
-    ),
+    what:
+      label(
+        HISTORY_ACTION_LABELS,
+        Object.hasOwn(HISTORY_ACTION_LABELS, `${a.entity}:${a.action}`)
+          ? `${a.entity}:${a.action}`
+          : a.action,
+      ) + (kindWord === null ? "" : `（${kindWord}）`),
     detail: null,
   };
 }
@@ -160,8 +217,11 @@ export function History({
   }
   const titles = new Map(show.tasks.map((t) => [t.id, t.title]));
   const taskTitle = (tid: string) => titles.get(tid) ?? tid;
+  const paired = pairedOperationSideKeys(result.data.activities);
   const rows: Row[] = [
-    ...result.data.activities.map((a, i) => activityRow(a, i, taskTitle)),
+    ...result.data.activities
+      .filter((a) => !isPairedOperationSideDecision(a, paired))
+      .map((a, i) => activityRow(a, i, taskTitle, show)),
     ...show.runs.map((r) => runRow(r, taskTitle)),
   ].sort((x, y) => time(y.at) - time(x.at));
   const shown = filter === "all" ? rows : rows.filter((r) => r.kind === filter);

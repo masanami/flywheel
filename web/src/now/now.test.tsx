@@ -154,7 +154,7 @@ afterEach(() => {
 describe("取り込めるものを読むとき", () => {
   it("AC-115 #805: 変化の合図を受けても、ingestable=true の状況の API は呼ばれない", async () => {
     const { requests } = await openNow();
-    await screen.findByText("取り込みは、端末か対話で行います。");
+    await screen.findByText("取り込みは、ターミナルか対話で行います。");
     expect(ingestCalls(requests)).toHaveLength(1);
     await act(async () => {
       FakeEventSource.latest.send({
@@ -173,7 +173,7 @@ describe("取り込めるものを読むとき", () => {
   it("AC-116 #805: 60 秒ごとの読み直しでも、ingestable=true の状況の API は呼ばれない", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { requests } = await openNow();
-    await screen.findByText("取り込みは、端末か対話で行います。");
+    await screen.findByText("取り込みは、ターミナルか対話で行います。");
     const before = requests.filter((r) => r.url === `${P}/cycle`).length;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(POLL_MS + 100);
@@ -186,7 +186,7 @@ describe("取り込めるものを読むとき", () => {
 
   it("AC-156 #805: 画面を開くと、ingestable=true の状況の API が 1 回呼ばれる", async () => {
     const { requests } = await openNow();
-    await screen.findByText("取り込みは、端末か対話で行います。");
+    await screen.findByText("取り込みは、ターミナルか対話で行います。");
     expect(ingestCalls(requests)).toHaveLength(1);
   });
 
@@ -305,13 +305,13 @@ describe("あなたを待っている", () => {
     expect(within(row).getByText("完了の承認")).toBeInTheDocument();
     expect(within(row).getByText("完了の題名")).toBeInTheDocument();
   });
-  it("AC-127 #805: 完了の承認の行のリンクは、その課題の詳細を指す", async () => {
+  it("AC-127 #805: 完了の承認の行のリンクは、その課題の完了承認画面を指す", async () => {
     await openNow({ nh: completion });
     expect(
       within(rowOf("completion_approval"))
         .getByRole("link")
         .getAttribute("href"),
-    ).toBe("#/a/alpha/challenges/C-2");
+    ).toBe("#/a/alpha/challenges/C-2/approve-completion");
   });
 
   const human: NH = { challenges: [ch("C-3", "awaiting_human", "回答の題名")] };
@@ -463,7 +463,7 @@ describe("あなたを待っている", () => {
     expect(within(row).getByText("スロットの片付け")).toBeInTheDocument();
     expect(within(row).getByText("S-1")).toBeInTheDocument();
   });
-  it("AC-142 #805: スロットの片付けの行に、端末のコマンドの案内が出る", async () => {
+  it("AC-142 #805: スロットの片付けの行に、ターミナルのコマンドの案内が出る", async () => {
     await openNow({ nh: { slots: [slot] } as NH });
     expect(
       within(rowOf("slot")).getByText(
@@ -651,13 +651,13 @@ describe("取り込めるもの", () => {
     expect(await screen.findByText("一部が読めません")).toBeInTheDocument();
     expect(screen.getByText("取り込み元 1")).toBeInTheDocument();
   });
-  it("AC-161 #805: 取り込めるものの区分に、「取り込みは、端末か対話で行います。」が出る", async () => {
+  it("AC-161 #805: 取り込めるものの区分に、「取り込みは、ターミナルか対話で行います。」が出る", async () => {
     await openNow();
     const block = screen
       .getByRole("heading", { name: /^取り込めるもの/ })
       .closest("section") as HTMLElement;
     expect(
-      within(block).getByText("取り込みは、端末か対話で行います。"),
+      within(block).getByText("取り込みは、ターミナルか対話で行います。"),
     ).toBeInTheDocument();
   });
   it("AC-162 #805: 取り込めるものの区分に、ボタンとチェックの欄は無い（「読み直す」を除く）", async () => {
@@ -755,7 +755,7 @@ describe("サイクルを回すと進むもの", () => {
       screen.getByRole("button", { name: "サイクルを回す" }),
     ).toBeDisabled();
   });
-  it("AC-172 #805: state が stale のとき、端末のコマンド flywheel cycle の案内が出る", async () => {
+  it("AC-172 #805: state が stale のとき、ターミナルのコマンド flywheel cycle の案内が出る", async () => {
     await openNow({ stages: { plan: 1 }, cycle: "stale" });
     expect(
       screen.getByText("flywheel cycle --workspace '/w/alpha'"),

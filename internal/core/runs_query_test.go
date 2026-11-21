@@ -129,8 +129,8 @@ func TestListRuns_OpenOnlyExcludesEndedRuns(t *testing.T) {
 }
 
 // AC-154（core 側）: GetChallenge（show の元）の Runs は、その課題の run を新しい順に
-// 最大 20 件返す。他の課題の run は含めない。
-func TestGetChallenge_RunsAreNewestFirstAndCappedAt20(t *testing.T) {
+// 最大 100 件返す。他の課題の run は含めない。
+func TestGetChallenge_RunsAreNewestFirstAndCappedAt100(t *testing.T) {
 	t.Parallel()
 	s := newStoreForTest(t)
 	id := createChallengeForJudgmentTest(t, s)
@@ -165,14 +165,14 @@ func TestGetChallenge_RunsAreNewestFirstAndCappedAt20(t *testing.T) {
 		n, _ := parseRunID(r.ID)
 		return n
 	}
-	const total = 23
+	const total = 103
 	var wantNewest []string
 	for i := 0; i < total; i++ {
 		rid := insert(cid, i)
 		endRun(rid, base.Add(time.Hour))
 		wantNewest = append([]string{formatRunID(rid)}, wantNewest...)
 		if i == 5 { // 他の課題の run が混ざっても、この課題の一覧には出ない
-			endRun(insert(ocid, 100+i), base.Add(time.Hour))
+			endRun(insert(ocid, 1000+i), base.Add(time.Hour))
 		}
 	}
 
@@ -180,8 +180,8 @@ func TestGetChallenge_RunsAreNewestFirstAndCappedAt20(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChallenge: %v", err)
 	}
-	if len(detail.Runs) != 20 {
-		t.Fatalf("len(Runs) = %d, want 20 (capped)", len(detail.Runs))
+	if len(detail.Runs) != 100 {
+		t.Fatalf("len(Runs) = %d, want 100 (capped)", len(detail.Runs))
 	}
 	for i, r := range detail.Runs {
 		if r.ID != wantNewest[i] {

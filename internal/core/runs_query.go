@@ -52,14 +52,14 @@ type RunListOptions struct {
 	ChallengeID *string
 	// OpenOnly が true なら、終了していない run だけに絞る。
 	OpenOnly bool
-	// Limit が正なら、新しい方から最大その件数だけ返す（`show` の runs は 20 件。
+	// Limit が正なら、新しい方から最大その件数だけ返す（`show` の runs は 100 件。
 	// 0 以下は件数を絞らない）。
 	Limit int
 }
 
-// showRunsLimit は `show` の runs の最大件数（§観測「show は、課題の run の一覧
-// （新しい順・最大 20 件）…を示す」）。
-const showRunsLimit = 20
+// showRunsLimit は `show` の runs の最大件数（S3d で 20 から 100 に上げた。
+// docs/features/core-redesign-s3d.md「タスクの詳細」）。
+const showRunsLimit = 100
 
 // ListRuns は run を新しい順（id 降順）で返す（§観測「flywheel runs」）。
 // 呼び出しのたびに ReapInterruptedRuns を先に行う（§invoker の共通の規則
