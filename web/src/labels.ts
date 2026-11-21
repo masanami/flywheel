@@ -141,7 +141,8 @@ export const MARK_LABELS: Record<MarkKind, string> = {
 
 // 前提の課題の充足の表示。値は API の satisfied をそのまま写す（画面では導かない）。
 export const DEPENDENCY_SATISFIED_LABEL = "満たされている";
-export const DEPENDENCY_UNMET_LABEL = "未完了";
+// 満たされていない前提に添える語（課題の画面・課題の詳細で同じ語）。
+export const DEPENDENCY_UNMET_LABEL = "未解消";
 
 export const NO_ACTION_LABEL = "なし（エージェントが進める）";
 export const NO_PRIORITY_LABEL = "優先度なし";

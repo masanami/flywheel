@@ -592,7 +592,8 @@ it("AC-249 #808: 前提の課題がある課題の詳細の、関係する課題
   const link = within(r).getByRole("link", { name: "ビルドの高速化" });
   expect(link).toHaveAttribute("href", "#/a/alpha/challenges/C-5");
   expect(within(r).getByText("着手中")).toBeInTheDocument();
-  expect(within(r).getByText("未完了")).toBeInTheDocument();
+  expect(within(r).getByText("未解消")).toBeInTheDocument();
+  expect(within(r).queryByText("未完了")).toBeNull();
 });
 
 it("AC-250 #808: この課題を前提にしている課題があるとき、関係する課題の区画に、その課題が出る", async () => {
@@ -654,8 +655,44 @@ it("AC-254 #808: 不可逆操作がある課題の詳細に、その種類と状
   };
   const { root } = await open(show({ operations: [op] }));
   const o = q(root).getByTestId("detail-operations");
-  expect(o).toHaveTextContent("release / pending");
+  expect(o).toHaveTextContent("反映 / 承認待ち");
+  expect(o).not.toHaveTextContent("release");
+  expect(o).not.toHaveTextContent("pending");
   expect(o).toHaveTextContent("本番へ反映する");
+});
+
+it("#933: 不可逆操作の状態 closed は「終了」と出て、closed は出ない", async () => {
+  const { root } = await open(
+    show({
+      operations: [
+        {
+          approved_head: null,
+          challenge_id: "C-1",
+          closed_at: null,
+          closed_reason: null,
+          consecutive_failures: 0,
+          created_at: "",
+          executed_at: null,
+          id: "O-2",
+          kind: "delete",
+          last_execution_detail: null,
+          last_execution_result: null,
+          merge_commit: null,
+          ref: null,
+          state: "closed",
+          summary: "古い資料を消す",
+          superseded_by: null,
+          supersedes: null,
+          version: 1,
+          waiting_since: null,
+        },
+      ],
+    }),
+  );
+  const o = q(root).getByTestId("detail-operations");
+  expect(o).toHaveTextContent("削除 / 終了");
+  expect(o).not.toHaveTextContent("closed");
+  expect(o).toHaveTextContent("古い資料を消す");
 });
 
 it("#798: 不可逆操作の行に、参照（ref）があるときは文字で添える（リンクにしない）。無いときは出さない", async () => {
