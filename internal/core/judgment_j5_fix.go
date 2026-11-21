@@ -69,6 +69,52 @@ type j5FixScope struct {
 	// Repo は比較の口へ渡すリポジトリ（"<owner>/<name>"）、Base は宛先のブランチ（統合先、または反映先の既定ブランチ）。
 	Repo, Base string
 	Change     HeadChange
+	// DiffTruncated は、確かめの入力の「衝突の解消の差分」が上限（maxPullRequestDiffBytes）で切られたとき真。判断点は、確かめ待ちの中身の作業ツリーしか読めず、
+	// 落ちた分の差分を作り直せないので、真のときは「満たした」を通さない（finalizeJ5FixOutput）。
+	DiffTruncated bool
+	// UnreadableFiles は、確かめの入力に差分が入らなかったファイル（上流が差分を返さなかったもの。ConflictFixFile.PatchUnavailable が真）の名前（現れた順・重複なし）。判断点は、確かめ待ちの中身の
+	// 作業ツリーに落ちた差分を作り直せないので、1 つでもあれば「満たした」を通さない（finalizeJ5FixOutput）。
+	UnreadableFiles []string
+}
+
+// fixInputGap は、確かめの入力に差分が入りきらなかった理由 1 つ。Key は、読み替えたことを残す実行の記録の保存した出力のキー。
+type fixInputGap struct{ Key, Reason string }
+
+// inputGaps は、確かめの入力に差分が入りきらなかった理由（切られた・読めなかったファイルがある）を返す。空でなければ、判断点の「満たした」は通さない。
+func (sc *j5FixScope) inputGaps() []fixInputGap {
+	var gaps []fixInputGap
+	if sc.DiffTruncated {
+		gaps = append(gaps, fixInputGap{"diff_truncated_overridden_from",
+			fmt.Sprintf("衝突の解消の差分が上限（%d バイト）を超えて切られ、入力に入らなかった分がある", maxPullRequestDiffBytes)})
+	}
+	if n := len(sc.UnreadableFiles); n > 0 {
+		names := sc.UnreadableFiles
+		more := ""
+		if n > unreadableFileNamesShown {
+			names, more = names[:unreadableFileNamesShown], fmt.Sprintf(" ほか %d 件", n-unreadableFileNamesShown)
+		}
+		gaps = append(gaps, fixInputGap{"patch_unavailable_overridden_from",
+			fmt.Sprintf("差分を読めなかったファイルがある（%s%s）", strings.Join(names, "、"), more)})
+	}
+	return gaps
+}
+
+// unreadableFileNamesShown は、読み替えの理由に名前を書く、読めなかったファイルの数の上限（残りは件数だけ書く）。
+const unreadableFileNamesShown = 3
+
+// unreadableConflictFiles は、差分を上流が返さなかったファイルの名前を、現れた順に重複なく返す。
+func unreadableConflictFiles(fixes []ConflictFix) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, fx := range fixes {
+		for _, f := range fx.Files {
+			if f.PatchUnavailable && !seen[f.Filename] {
+				seen[f.Filename] = true
+				out = append(out, f.Filename)
+			}
+		}
+	}
+	return out
 }
 
 // j5FixResult は確かめの結果。宛先ごとの書き込みの口（j5FixWriters）が受け取る。
@@ -419,8 +465,8 @@ func formatExpectedScenes(ch Challenge, plan approvedPlan) string {
 }
 
 // formatConflictFixes は区画「衝突の解消の差分」の本文。取り込みのマージのコミットごとに、両方の親と違う形になったファイルの名前と、通した中身の側の
-// 親からの差分を書く。差分を上流が返さなかったファイルは、名前と、差分を読めなかった旨を書く。上限を超えた分は切り、切ったことを書く。
-func formatConflictFixes(fixes []ConflictFix) string {
+// 親からの差分を書く。差分を上流が返さなかったファイルは、名前と、差分を読めなかった旨を書く。上限を超えた分は切り、切ったことを書き、truncated を真にして返す。
+func formatConflictFixes(fixes []ConflictFix) (content string, truncated bool) {
 	var blocks []string
 	for _, fx := range fixes {
 		if len(fx.Files) == 0 {
@@ -441,11 +487,11 @@ func formatConflictFixes(fixes []ConflictFix) string {
 	if omitted > 0 {
 		content += fmt.Sprintf("\n\n（差分は合計 %d バイトあり、先頭の %d バイトまでを入れて残りを省略した）", omitted, maxPullRequestDiffBytes)
 	}
-	return content
+	return content, omitted > 0
 }
 
-// fixCheckSections は確かめの入力（データの区画）を組み立てる。checkoutNote は作業ディレクトリの注記。
-func fixCheckSections(sc *j5FixScope, checkoutNote string, memoryIndex []JudgmentDataSection) []JudgmentDataSection {
+// fixCheckSections は確かめの入力（データの区画）を組み立てる。diff は区画「衝突の解消の差分」の本文（formatConflictFixes）。checkoutNote は作業ディレクトリの注記。
+func fixCheckSections(sc *j5FixScope, diff, checkoutNote string, memoryIndex []JudgmentDataSection) []JudgmentDataSection {
 	ch := sc.Challenge
 	urgency, priority := "", ""
 	if ch.Urgency != nil {
@@ -475,7 +521,7 @@ func fixCheckSections(sc *j5FixScope, checkoutNote string, memoryIndex []Judgmen
 	sections = append(sections,
 		JudgmentDataSection{Label: labelFixPassedSection, Content: sc.PassedRef},
 		JudgmentDataSection{Label: labelFixPendingSection, Content: sc.PendingRef},
-		JudgmentDataSection{Label: labelFixDiffSection, Content: formatConflictFixes(sc.Change.ConflictFixes)},
+		JudgmentDataSection{Label: labelFixDiffSection, Content: diff},
 	)
 	if checkoutNote != "" {
 		sections = append(sections, JudgmentDataSection{Label: labelFixCheckoutNotice, Content: checkoutNote})
@@ -559,13 +605,17 @@ func (s *Store) verifyFixTarget(ctx context.Context, in J5AutoInput, jc *Judgmen
 	defer head.remove(ctx)
 	note := fmt.Sprintf("作業ディレクトリは、確かめ待ちの中身（%s）を取り出した作業ツリーである。", scope.PendingRef)
 
+	diff, truncated := formatConflictFixes(scope.Change.ConflictFixes)
+	scope.DiffTruncated = truncated
+	scope.UnreadableFiles = unreadableConflictFiles(scope.Change.ConflictFixes)
+
 	planVersion := int64(scope.Plan.Version)
 	runIn := RunJudgmentInput{
 		ChallengeID:  chID,
 		Judgment:     JudgmentJ5,
 		MaxBudgetUSD: j5Budget,
 		TimeoutSec:   in.AgentDecl.TimeoutSec.Judgment,
-		Sections:     fixCheckSections(scope, note, memoryIndexSections(s.workspace, in.AgentDecl)),
+		Sections:     fixCheckSections(scope, diff, note, memoryIndexSections(s.workspace, in.AgentDecl)),
 		OutputSchema: j5OutputSchema(),
 		Invoker:      in.Invoker,
 		PlanVersion:  &planVersion,
@@ -612,16 +662,57 @@ func (s *Store) finalizeJ5FixOutput(ctx context.Context, runIDDisplay string, sc
 	if v.Question != nil {
 		r.Question = *v.Question
 	}
+	if gaps := scope.inputGaps(); len(gaps) > 0 && r.Verdict == J5VerdictMet {
+		// 入力に、差分が入りきらなかった分がある（上限で切られた・上流が差分を返さなかったファイルがある）。判断点は、確かめ待ちの中身の作業ツリーに、
+		// 落ちた分の差分を作り直せないので、「満たした」を通さず、判断できないと同じに扱う。
+		reasons := make([]string, len(gaps))
+		for i, g := range gaps {
+			reasons[i] = g.Reason
+		}
+		joined := strings.Join(reasons, "。また、")
+		r.Verdict = J5VerdictUncertain
+		r.Reason = fmt.Sprintf("%s。そのため、判断点が「満たした」と答えたが通さなかった（%s）", joined, v.Reason)
+		r.Question = fmt.Sprintf("%s。判断点が全体を確かめられなかった。検証か承認をやり直すか。", joined)
+		if err := s.recordFixOverride(ctx, runIDDisplay, structured, r, gaps); err != nil {
+			return "", nil, "", err
+		}
+	}
 	mapped, err := s.applyJ5Fix(ctx, runIDDisplay, scope, r)
 	if err != nil {
 		return "", nil, "", err
 	}
-	outcome = string(v.Verdict)
+	outcome = string(r.Verdict)
 	if !mapped {
 		return outcome, nil, RunResultSucceeded, nil
 	}
 	st := string(scope.Challenge.Status)
 	return outcome, &st, RunResultSucceeded, nil
+}
+
+// recordFixOverride は、差分が入りきらなかったので「満たした」を判断できないへ読み替えたことを、run の保存済みの出力へ残す（読み替えた理由と、当たった理由ごとの
+// キーに判断点の元の判定、元の出力そのもの。run の履歴を読む人が、満たしたのに通っていない形を見ないため。両方が当たれば両方のキーを残す）。
+func (s *Store) recordFixOverride(ctx context.Context, runIDDisplay string, structured []byte, r *j5FixResult, gaps []fixInputGap) error {
+	rid, ok := parseRunID(runIDDisplay)
+	if !ok {
+		return ErrValidation
+	}
+	m := map[string]any{
+		"verdict":   string(r.Verdict),
+		"reason":    r.Reason,
+		"question":  r.Question,
+		"j5_output": json.RawMessage(structured),
+	}
+	for _, g := range gaps {
+		m[g.Key] = string(J5VerdictMet)
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return classifyReadWriteErr(s.db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE run SET output = ? WHERE id = ?`, string(out), rid)
+		return err
+	}))
 }
 
 // applyJ5Fix は確かめの結果 r を、書く直前の読み直し（j5FixStillCurrent）を通したときだけ、宛先ごとの書き込みの口へ振り分ける。

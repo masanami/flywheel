@@ -102,7 +102,7 @@ func TestReflectFixWriter_MetLogsTheRefsFilesAndRunOnTheOperation(t *testing.T) 
 		t.Fatal(err)
 	}
 	lastJ5 := f.text(t, `SELECT 'R-' || MAX(id) FROM run WHERE judgment = 'J5'`)
-	if b.Ref != fixPassed || a.Ref != fixPending || len(a.Files) != 2 || a.Files[0] != "a.go" || a.Files[1] != "big.bin" || a.RunID != lastJ5 {
+	if b.Ref != fixPassed || a.Ref != fixPending || len(a.Files) != 2 || a.Files[0] != "a.go" || a.Files[1] != "b.go" || a.RunID != lastJ5 {
 		t.Fatalf("before = %s, after = %s (J5 run %s)", before, after, lastJ5)
 	}
 }
