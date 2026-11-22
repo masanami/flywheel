@@ -196,6 +196,25 @@ func selectExpandAdditionCandidates(ctx context.Context, tx *sql.Tx, agent *Agen
 	return out, nil
 }
 
+// expandAdditionStillCandidate は、課題 cid のタスク tid が、いまも足す依頼を作る対象か（selectExpandAdditionCandidates が選ぶ条件と
+// 同じ。条件の正本は unaddedExpandTasks と expandAddable の 2 つ）を返す。作る書き込みのトランザクションの中で確かめ直すのに使う。
+func expandAdditionStillCandidate(ctx context.Context, tx *sql.Tx, cid, tid int64, agent *AgentDeclaration) (bool, error) {
+	pairs, err := unaddedExpandTasks(ctx, tx, &cid)
+	if err != nil {
+		return false, err
+	}
+	found := false
+	for _, p := range pairs {
+		if p.tid == tid {
+			found = true
+		}
+	}
+	if !found {
+		return false, nil
+	}
+	return expandAddable(ctx, tx, cid, agent)
+}
+
 // createExpandAdditions は、済みの expand_after のタスクについて、足す依頼（expand・pending）を、まだ無いものにだけ 1 件ずつ作る。
 // 返り値は作った足す依頼の数。保留中の課題にも作る（判断点の呼び出しはしない）。
 func (s *Store) createExpandAdditions(ctx context.Context, agent *AgentDeclaration) (int, error) {
@@ -208,16 +227,36 @@ func (s *Store) createExpandAdditions(ctx context.Context, agent *AgentDeclarati
 	if err = classifyReadWriteErr(err); err != nil {
 		return 0, err
 	}
+	return s.createExpandAdditionsFrom(ctx, agent, cands)
+}
+
+// createExpandAdditionsFrom は選んだ候補 cands に足す依頼を作る。1 件ごとに、作る書き込みの中で候補の条件を確かめ直す。
+func (s *Store) createExpandAdditionsFrom(ctx context.Context, agent *AgentDeclaration, cands []expandAdditionCandidate) (int, error) {
 	n := 0
 	for _, c := range cands {
-		_, err := s.CreateTaskAddition(ctx, ChannelInvoker, c.ChallengeID, TaskAdditionInput{Origin: TaskAdditionOriginExpand, OriginTaskID: c.TaskID})
+		cid, _ := parseChallengeID(c.ChallengeID)
+		tid, _ := parseTaskID(c.TaskID)
+		created := false
+		err := s.mutate(ctx, ChannelInvoker, func(tx *sql.Tx, rec *activityRecorder) error {
+			// 候補を選んだ後に状態が変わっていたら作らない（選ぶ条件を、作る書き込みの中で確かめ直す）。
+			if ok, err := expandAdditionStillCandidate(ctx, tx, cid, tid, agent); err != nil || !ok {
+				return err
+			}
+			if _, err := createTaskAdditionTx(ctx, tx, rec, cid, TaskAdditionInput{Origin: TaskAdditionOriginExpand, OriginTaskID: c.TaskID}); err != nil {
+				return err
+			}
+			created = true
+			return nil
+		})
 		if err != nil {
 			if errors.Is(err, ErrValidation) {
 				continue // 並行して作られた（同じ出どころの expand は 1 つ）
 			}
 			return n, err
 		}
-		n++
+		if created {
+			n++
+		}
 	}
 	return n, nil
 }
@@ -305,6 +344,7 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 		limitR   *int64
 		hasSrc   bool
 		approved int64
+		qaText   string
 	)
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -338,7 +378,10 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 		if bs, err = loadTaskBudgets(ctx, tx, cid, in.AgentDecl); err != nil {
 			return err
 		}
-		limitR, _, err = challengeBudgetLimit(ctx, tx, cid)
+		if limitR, _, err = challengeBudgetLimit(ctx, tx, cid); err != nil {
+			return err
+		}
+		qaText, err = expandQuestionAnswerText(ctx, tx, tg.Addition)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -366,6 +409,9 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 	if origin != "" {
 		sections = append(sections, JudgmentDataSection{Label: labelExpandOrigin, Content: origin})
 	}
+	if qaText != "" {
+		sections = append(sections, JudgmentDataSection{Label: labelHoldRecord, Content: qaText})
+	}
 	if t := formatExpandDoneResultsSection(tasks); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: labelExpandDoneResults, Content: t})
 	}
@@ -374,6 +420,37 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 		formatUSDAmount(microsToUSD(limit)), formatUSDAmount(microsToUSD(limit-estimate)), formatUSDAmount(microsToUSD(estimate)))})
 	sections = append(sections, JudgmentDataSection{Label: "対象リポジトリと操作の宣言", Content: formatJ2DeclarationSection(in.ConnDecl, hasSrc, in.AgentDecl)})
 	return sections, true, nil
+}
+
+// expandQuestionAnswerText は、足す依頼 aid の保留（理由 task_add_question）が回答済みのとき、その問いと回答（問いを重ねたときはすべて）を
+// 計画の形の「保留の記録」と同じ書式（formatHoldsSection）で返す。選択肢の識別で答えたときの回答の文は、選んだ選択肢の見出しを含む。
+// 該当しなければ空文字列。
+func expandQuestionAnswerText(ctx context.Context, tx *sql.Tx, aid int64) (string, error) {
+	if aid == 0 {
+		return "", nil
+	}
+	// 同じ足す依頼で問いを重ねたときは hold_id が新しい保留へ上書きされるので、この足す依頼の作成以後に立てた、回答済みの
+	// task_add_question の保留を古い順にすべて渡す（hold_id まで。ほかの足す依頼がいま指している保留は除く）。
+	rows, err := tx.QueryContext(ctx, `SELECT h.question, h.answer FROM task_addition a JOIN hold h ON h.challenge_id = a.challenge_id
+		WHERE a.id = ? AND a.hold_id IS NOT NULL AND h.id <= a.hold_id AND h.reason = ? AND h.answer IS NOT NULL AND h.raised_at >= a.created_at
+		  AND h.id NOT IN (SELECT hold_id FROM task_addition WHERE id <> a.id AND hold_id IS NOT NULL)
+		ORDER BY h.id`, aid, string(holdReasonTaskAddQuestion))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	var holds []Hold
+	for rows.Next() {
+		var q, ans string
+		if err := rows.Scan(&q, &ans); err != nil {
+			return "", err
+		}
+		holds = append(holds, Hold{Question: q, Answer: &ans})
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return formatHoldsSection(holds), nil
 }
 
 // taskLabel はタスクを指す名前（鍵。鍵の無いタスクは ID）。

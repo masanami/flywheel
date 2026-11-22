@@ -678,3 +678,19 @@ func TestFromHoldCarriesOptionsAndAnswerOption(t *testing.T) {
 		}
 	}
 }
+
+func TestFromTaskAdditions_UnjudgedValuesAreNull(t *testing.T) {
+	total, limit := 15.0, 14.0
+	out := view.FromTaskAdditions([]core.TaskAddition{
+		{ID: "TA-1", State: core.TaskAdditionPending},
+		{ID: "TA-2", State: core.TaskAdditionAwaitingOwner, TotalAfterUSD: &total, LimitUSD: &limit},
+	})
+	b, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"limit_usd":null`) || !strings.Contains(s, `"total_after_usd":null`) || !strings.Contains(s, `"total_after_usd":15`) || !strings.Contains(s, `"limit_usd":14`) {
+		t.Errorf("json = %s, want null for the unjudged one and amounts for the judged one", s)
+	}
+}

@@ -1358,7 +1358,7 @@ func InsertTaskAddition(t *testing.T, workspace string, r TaskAdditionRow) int64
 	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
 		res, err := tx.Exec(`INSERT INTO task_addition (challenge_id, origin, origin_task_id, state, spec, total_after_micros, limit_micros, hold_id, created_at, decided_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			r.ChallengeID, r.Origin, nullInt(int64(r.OriginTaskID)), r.State, nullStr(r.Spec), r.TotalAfterMicros, nullInt(r.LimitMicros), nullInt(r.HoldID), at, nullStr(r.DecidedAt))
+			r.ChallengeID, r.Origin, nullInt(int64(r.OriginTaskID)), r.State, nullStr(r.Spec), nullInt(r.TotalAfterMicros), nullInt(r.LimitMicros), nullInt(r.HoldID), at, nullStr(r.DecidedAt))
 		if err != nil {
 			return err
 		}

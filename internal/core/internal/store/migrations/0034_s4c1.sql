@@ -6,7 +6,7 @@
 
 -- 足す依頼。出どころは S4c-1 では expand（続きを決めるタスクが済んだ）だけ。
 -- state: pending（仕様待ち）・awaiting_owner（オーナー待ち）・applied（足した）・none（足さない）・declined（見送り）・superseded（取り替え）。
--- total_after_micros・limit_micros は最後に判定したときの値（記録のため。判定には使わない）。
+-- total_after_micros・limit_micros は最後に判定したときの値（記録のため。判定には使わない。判定していない足す依頼は NULL）。
 CREATE TABLE task_addition (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     challenge_id       INTEGER NOT NULL REFERENCES challenge(id),
@@ -14,7 +14,7 @@ CREATE TABLE task_addition (
     origin_task_id     INTEGER REFERENCES task(id),
     state              TEXT NOT NULL CHECK (state IN ('pending', 'awaiting_owner', 'applied', 'none', 'declined', 'superseded')),
     spec               TEXT,
-    total_after_micros INTEGER NOT NULL DEFAULT 0,
+    total_after_micros INTEGER,
     limit_micros       INTEGER,
     hold_id            INTEGER REFERENCES hold(id),
     created_at         TEXT NOT NULL,

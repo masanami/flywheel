@@ -51,7 +51,7 @@ func fromTaskAdded(a *core.TaskAdded) *TaskAdded {
 
 // TaskAddition は課題の詳細の additions の要素（足す依頼 1 件。閉じたものも含む）。state は `pending`・`awaiting_owner`・`applied`・
 // `none`・`declined`・`superseded`。task_ids はその足す依頼で足したタスクの ID。total_after_usd・limit_usd は、最後に判定したときの
-// 足した後の見込みと上限（記録した値。未判定の limit_usd は null）。
+// 足した後の見込みと上限（記録した値。判定していない足す依頼は、どちらも null）。
 type TaskAddition struct {
 	CreatedAt     string   `json:"created_at"`
 	DecidedAt     *string  `json:"decided_at"`
@@ -61,7 +61,7 @@ type TaskAddition struct {
 	OriginTaskID  *string  `json:"origin_task_id"`
 	State         string   `json:"state"`
 	TaskIDs       []string `json:"task_ids"`
-	TotalAfterUSD float64  `json:"total_after_usd"`
+	TotalAfterUSD *float64 `json:"total_after_usd"`
 }
 
 // FromTaskAdditions は足す依頼の一覧を変換する（空でも `[]`）。
