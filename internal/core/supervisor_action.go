@@ -476,3 +476,17 @@ func countExecutedSupervisorHands(ctx context.Context, tx *sql.Tx, challengeID i
 	}
 	return out, rows.Err()
 }
+
+// executedSupervisorQuestions は課題で、スーパーバイザーが答えた子の問い（結果が executed の対処の記録の questions）を古い順に返す。
+// 完了の承認のときにオーナーへ見せる（無ければ空のスライス）。
+func executedSupervisorQuestions(ctx context.Context, tx *sql.Tx, challengeID int64) ([]SupervisorQuestion, error) {
+	actions, err := querySupervisorActions(ctx, tx, `WHERE challenge_id = ? AND result = ? AND questions IS NOT NULL`, challengeID, string(ActionExecuted))
+	if err != nil {
+		return nil, err
+	}
+	out := []SupervisorQuestion{}
+	for _, a := range actions {
+		out = append(out, a.Questions...)
+	}
+	return out, nil
+}
