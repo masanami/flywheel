@@ -41,6 +41,9 @@ func TestSupervisorResolve_HasNoCommandAndNoRoute(t *testing.T) {
 			if s := string(b); strings.Contains(s, "OpSupervisorResolve") || strings.Contains(s, "supervisor_resolve") {
 				t.Errorf("%s refers to supervisor_resolve; the CLI and the server must not start it", f)
 			}
+			if strings.Contains(string(b), "ecordSupervisorAction") {
+				t.Errorf("%s refers to the supervisor action recorder; only the supervisor stage may write the record", f)
+			}
 		}
 	}
 }

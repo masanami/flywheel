@@ -221,9 +221,9 @@ func TestSupervisorAction_RecordListAndCount(t *testing.T) {
 		if in.CycleID == "" {
 			in.CycleID = "Y-1"
 		}
-		a, err := s.RecordSupervisorAction(ctx, in)
+		a, err := s.recordSupervisorAction(ctx, in)
 		if err != nil {
-			t.Fatalf("RecordSupervisorAction(%+v): %v", in, err)
+			t.Fatalf("recordSupervisorAction(%+v): %v", in, err)
 		}
 		return a
 	}
@@ -338,12 +338,12 @@ func TestSupervisorAction_RejectsMalformedInput(t *testing.T) {
 	for name, mut := range cases {
 		in := ok
 		mut(&in)
-		if _, err := s.RecordSupervisorAction(context.Background(), in); !errors.Is(err, ErrValidation) {
+		if _, err := s.recordSupervisorAction(context.Background(), in); !errors.Is(err, ErrValidation) {
 			t.Errorf("%s: err = %v, want ErrValidation", name, err)
 		}
 	}
 	before, _ := s.ListSupervisorActionsByChallenge(context.Background(), "C-1")
-	if _, err := s.RecordSupervisorAction(context.Background(), ok); err != nil {
+	if _, err := s.recordSupervisorAction(context.Background(), ok); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := s.ListSupervisorActionsByChallenge(context.Background(), "C-1")
