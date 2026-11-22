@@ -37,7 +37,8 @@ func (r *expandRecorder) count() int {
 	return len(r.calls)
 }
 
-const expandNoneOutput = `{"verdict":"none","tasks":null,"question":null}`
+// expandAskOutput は足す依頼を仕様待ちのまま残す出力（ask は、保留の処理が後続のため、何も書かない）。
+const expandAskOutput = `{"verdict":"ask","tasks":null,"question":"続きは何か"}`
 
 // newExpandFixture は、2 個のタスク（a は続きを決める印つき・b。枠は 3+2 USD ずつ）で承認済みの、着手中の課題を作る。
 func newExpandFixture(t *testing.T) *paFixture {
@@ -128,7 +129,7 @@ func TestExpand_DoneMarkedTaskCreatesOnePendingAdditionAndCallsJ2OnceInTheExpand
 	t.Parallel()
 	f := newExpandFixture(t)
 	f.setTaskStatus(t, "a", TaskStatusDone)
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	res := f.expand(t, inv)
 
 	adds := f.additions(t)
@@ -138,7 +139,7 @@ func TestExpand_DoneMarkedTaskCreatesOnePendingAdditionAndCallsJ2OnceInTheExpand
 	if inv.count() != 1 {
 		t.Fatalf("J2 calls = %d, want 1", inv.count())
 	}
-	if len(res.Items) != 1 || res.Items[0].Result != RunResultSucceeded || res.Items[0].Outcome != "none" {
+	if len(res.Items) != 1 || res.Items[0].Result != RunResultSucceeded || res.Items[0].Outcome != "ask" {
 		t.Errorf("items = %+v", res.Items)
 	}
 	if st := f.detail(t, f.id).Status; st != StatusInProgress {
@@ -172,7 +173,7 @@ func TestExpand_ExpandInputCarriesTheCallShapeFirstAndTheDesignedSections(t *tes
 	}); err != nil {
 		t.Fatalf("record verification: %v", err)
 	}
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	f.expand(t, inv)
 	if inv.count() != 1 {
 		t.Fatalf("calls = %d", inv.count())
@@ -213,7 +214,7 @@ func TestExpand_NoAdditionWithoutADoneMarkedTask(t *testing.T) {
 	t.Parallel()
 	t.Run("印の付いたタスクが済みでない", func(t *testing.T) {
 		f := newExpandFixture(t)
-		inv := &expandRecorder{out: []byte(expandNoneOutput)}
+		inv := &expandRecorder{out: []byte(expandAskOutput)}
 		f.expand(t, inv)
 		if len(f.additions(t)) != 0 || inv.count() != 0 {
 			t.Errorf("additions=%d calls=%d, want none", len(f.additions(t)), inv.count())
@@ -222,7 +223,7 @@ func TestExpand_NoAdditionWithoutADoneMarkedTask(t *testing.T) {
 	t.Run("印の無いタスクだけが済み", func(t *testing.T) {
 		f := newExpandFixture(t)
 		f.setTaskStatus(t, "b", TaskStatusDone)
-		inv := &expandRecorder{out: []byte(expandNoneOutput)}
+		inv := &expandRecorder{out: []byte(expandAskOutput)}
 		f.expand(t, inv)
 		if len(f.additions(t)) != 0 || inv.count() != 0 {
 			t.Errorf("additions=%d calls=%d, want none", len(f.additions(t)), inv.count())
@@ -235,7 +236,7 @@ func TestExpand_NoAdditionWithoutADoneMarkedTask(t *testing.T) {
 			_, err := tx.Exec(`UPDATE challenge SET uses_integration = 0 WHERE id = ?`, f.cid())
 			return err
 		})
-		inv := &expandRecorder{out: []byte(expandNoneOutput)}
+		inv := &expandRecorder{out: []byte(expandAskOutput)}
 		f.expand(t, inv)
 		if len(f.additions(t)) != 0 || inv.count() != 0 {
 			t.Errorf("additions=%d calls=%d, want none", len(f.additions(t)), inv.count())
@@ -245,7 +246,7 @@ func TestExpand_NoAdditionWithoutADoneMarkedTask(t *testing.T) {
 		f := newExpandFixture(t)
 		f.setTaskStatus(t, "a", TaskStatusDone)
 		f.makeEstimateUnknown(t)
-		inv := &expandRecorder{out: []byte(expandNoneOutput)}
+		inv := &expandRecorder{out: []byte(expandAskOutput)}
 		f.expand(t, inv)
 		if len(f.additions(t)) != 0 || inv.count() != 0 {
 			t.Errorf("additions=%d calls=%d, want none", len(f.additions(t)), inv.count())
@@ -255,7 +256,7 @@ func TestExpand_NoAdditionWithoutADoneMarkedTask(t *testing.T) {
 		f := newExpandFixture(t)
 		f.setTaskStatus(t, "a", TaskStatusDone)
 		f.setChallengeStatus(t, StatusVerifying)
-		inv := &expandRecorder{out: []byte(expandNoneOutput)}
+		inv := &expandRecorder{out: []byte(expandAskOutput)}
 		f.expand(t, inv)
 		if len(f.additions(t)) != 0 || inv.count() != 0 {
 			t.Errorf("additions=%d calls=%d, want none", len(f.additions(t)), inv.count())
@@ -279,7 +280,7 @@ func TestExpand_AdditionIsNotDuplicatedAcrossRounds(t *testing.T) {
 	t.Parallel()
 	f := newExpandFixture(t)
 	f.setTaskStatus(t, "a", TaskStatusDone)
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	f.expand(t, inv)
 	f.expand(t, inv)
 	if adds := f.additions(t); len(adds) != 1 {
@@ -292,7 +293,7 @@ func TestExpand_HeldChallengeGetsAnAdditionButNoJudgmentUntilResumed(t *testing.
 	f := newExpandFixture(t)
 	f.setTaskStatus(t, "a", TaskStatusDone)
 	f.raiseHold(t, StatusInProgress)
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	f.expand(t, inv)
 	if adds := f.additions(t); len(adds) != 1 || adds[0].State != TaskAdditionPending {
 		t.Fatalf("additions = %+v, want one pending", adds)
@@ -315,7 +316,7 @@ func TestExpand_UnknownEstimateAfterTheAdditionWaits(t *testing.T) {
 	t.Parallel()
 	f := newExpandFixture(t)
 	f.setTaskStatus(t, "a", TaskStatusDone)
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	f.expand(t, inv)
 	f.makeEstimateUnknown(t)
 	f.expand(t, inv)
@@ -332,7 +333,7 @@ func TestExpand_AnotherTasksRunDoesNotBlockButATaskLessRunDoes(t *testing.T) {
 	f := newExpandFixture(t)
 	f.setTaskStatus(t, "a", TaskStatusDone)
 	f.addActiveRun(t, "b")
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	f.expand(t, inv)
 	if inv.count() != 1 {
 		t.Fatalf("J2 calls with another task's run = %d, want 1", inv.count())
@@ -341,7 +342,7 @@ func TestExpand_AnotherTasksRunDoesNotBlockButATaskLessRunDoes(t *testing.T) {
 	g := newExpandFixture(t)
 	g.setTaskStatus(t, "a", TaskStatusDone)
 	g.addActiveRun(t, "")
-	inv2 := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv2 := &expandRecorder{out: []byte(expandAskOutput)}
 	g.expand(t, inv2)
 	if inv2.count() != 0 {
 		t.Errorf("J2 calls with a task-less run = %d, want 0", inv2.count())
@@ -362,7 +363,7 @@ func TestExpand_OnlyTheOldestPendingAdditionIsCalledPerRound(t *testing.T) {
 			t.Fatalf("CreateTaskAddition: %v", err)
 		}
 	}
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	f.expand(t, inv)
 	if inv.count() != 1 {
 		t.Errorf("J2 calls = %d, want 1 for two pending additions", inv.count())
@@ -375,7 +376,7 @@ func TestExpand_JudgmentCostIsNotPartOfTheEstimate(t *testing.T) {
 	f.setTaskStatus(t, "a", TaskStatusDone)
 	before := f.detail(t, f.id).Budget
 	cost := 0.5
-	f.expand(t, &expandRecorder{out: []byte(expandNoneOutput), cost: &cost})
+	f.expand(t, &expandRecorder{out: []byte(expandAskOutput), cost: &cost})
 	after := f.detail(t, f.id).Budget
 	if before.EstimateUSD == nil || after.EstimateUSD == nil || *before.EstimateUSD != *after.EstimateUSD {
 		t.Errorf("estimate before=%v after=%v, want unchanged", before.EstimateUSD, after.EstimateUSD)
@@ -409,8 +410,12 @@ func TestExpandOutput_SchemaAndReceiver(t *testing.T) {
 		`{"verdict":"plan"}`:               "",
 		`not json`:                         "",
 	} {
-		if got := receiveJ2ExpandOutput([]byte(in)); got != want {
-			t.Errorf("receive(%s) = %q, want %q", in, got, want)
+		got := ""
+		if out, ok := parseJ2ExpandOutput([]byte(in)); ok {
+			got = out.Verdict
+		}
+		if got != want {
+			t.Errorf("parse(%s) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -449,7 +454,7 @@ func TestRunJudgment_TaskLess_BlockedByATaskLessRunAndRejectsATaskID(t *testing.
 	f := newExpandFixture(t)
 	f.addActiveRun(t, "")
 	cyc := f.beginCycle(t, 300)
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	in := RunJudgmentInput{ChallengeID: f.id, Judgment: JudgmentJ2, MaxBudgetUSD: 1, Sections: []JudgmentDataSection{{Label: "x", Content: "y"}}, OutputSchema: j2ExpandOutputSchema(), Invoker: inv, CycleID: &cyc, TaskLess: true}
 	if _, err := f.s.RunJudgment(context.Background(), in); !errors.Is(err, ErrRunInProgress) {
 		t.Errorf("err = %v, want ErrRunInProgress with a task-less run active", err)
@@ -469,7 +474,7 @@ func TestExpand_HoldFromAnotherStateGetsNoAddition(t *testing.T) {
 	f := newExpandFixture(t)
 	f.setTaskStatus(t, "a", TaskStatusDone)
 	f.raiseHold(t, StatusVerifying)
-	f.expand(t, &expandRecorder{out: []byte(expandNoneOutput)})
+	f.expand(t, &expandRecorder{out: []byte(expandAskOutput)})
 	if adds := f.additions(t); len(adds) != 0 {
 		t.Errorf("additions = %+v, want none for a hold raised from another state", adds)
 	}
@@ -487,7 +492,7 @@ func TestExpand_OldestAdditionsOriginTaskIsInTheInput(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	f.expand(t, inv)
 	if inv.count() != 1 || !strings.Contains(sectionsText(inv.calls[0].Sections), "続きを決めるタスク）: b（") {
 		t.Errorf("calls=%d; the input must name the oldest addition's origin task b", inv.count())
@@ -498,7 +503,7 @@ func TestExpand_RunCycleCreatesTheAdditionAndCallsJ2InThePlanPhase(t *testing.T)
 	t.Parallel()
 	f := newExpandFixture(t)
 	f.setTaskStatus(t, "a", TaskStatusDone)
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	cin := CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream,
 		Delegate: &fakeDelegator{}, Git: newFakeSlotGit(), Reconcile: newFakeBranchSource(), Checks: newFakeChecks(), Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{},
@@ -524,7 +529,7 @@ func TestExpand_RunCycleCreatesTheAdditionAndCallsJ2InThePlanPhase(t *testing.T)
 	for _, p := range res.Phases {
 		if p.Phase == CyclePhasePlan {
 			for _, it := range p.Items {
-				found = found || it.Outcome == "none"
+				found = found || it.Outcome == "ask"
 			}
 		}
 	}
@@ -542,7 +547,7 @@ func TestExpand_ClosedUpstreamChallengeIsNotCalledAndShownAsNotStarted(t *testin
 	if _, err := createSourceBindingForTest(f.s, f.id, time.Now(), in); err != nil {
 		t.Fatal(err)
 	}
-	inv := &expandRecorder{out: []byte(expandNoneOutput)}
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
 	res := f.expand(t, inv)
 	if inv.count() != 0 || len(res.NotStarted) != 1 || res.NotStarted[0].Reason != NotStartedUpstreamClosed {
 		t.Errorf("calls=%d notStarted=%+v, want none called and upstream_closed", inv.count(), res.NotStarted)
@@ -557,7 +562,7 @@ func TestExpand_OnlyTasksOfTheApprovedPlanVersionGetAnAddition(t *testing.T) {
 		_, err := tx.Exec(`UPDATE approval SET plan_version = plan_version + 1 WHERE challenge_id = ? AND kind = 'plan'`, f.cid())
 		return err
 	})
-	f.expand(t, &expandRecorder{out: []byte(expandNoneOutput)})
+	f.expand(t, &expandRecorder{out: []byte(expandAskOutput)})
 	if adds := f.additions(t); len(adds) != 0 {
 		t.Errorf("additions = %+v, want none for a task outside the approved version", adds)
 	}
@@ -566,7 +571,7 @@ func TestExpand_OnlyTasksOfTheApprovedPlanVersionGetAnAddition(t *testing.T) {
 func TestExpand_MismatchedCycleIDIsRejected(t *testing.T) {
 	t.Parallel()
 	f := newExpandFixture(t)
-	in := f.input(&expandRecorder{out: []byte(expandNoneOutput)}, f.beginCycle(t, 300), nil)
+	in := f.input(&expandRecorder{out: []byte(expandAskOutput)}, f.beginCycle(t, 300), nil)
 	in.Cycle = NewJudgmentCycle("Y-9999")
 	if _, err := f.s.expandAutoJ2(context.Background(), in); !errors.Is(err, ErrValidation) {
 		t.Errorf("err = %v, want ErrValidation", err)
