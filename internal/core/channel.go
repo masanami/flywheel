@@ -42,3 +42,8 @@ const VerificationTTYConfirm Verification = "tty_confirm"
 // (cli, relayed) の 1 組で、受けられる操作は (cli, tty_confirm) と同じ（M4H28）。
 // 会話の手がかり（RelayEvidence）が空では成立しない。
 const VerificationRelayed Verification = "relayed"
+
+// ChannelChat は画面の対話の欄から起動された flywheel のコマンドが core へ変更を要求したことを表す経路
+// （docs/features/core-redesign-s4d.md §欄から受ける承認・回答）。登録簿では (chat, relayed) の組だけを持ち、
+// すべての操作を受ける。不可逆操作の種類の絞りは登録簿の外の core の検査（chat_approval.go）で行う。
+const ChannelChat Channel = "chat"
