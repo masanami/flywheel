@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -171,25 +172,33 @@ func numberedLines(text string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// supervisorRunRecords はタスクの契約の実行の記録を、新しいほうから最大 supervisorRunRecordLimit 件、
-// 状態・要約・委譲先が返した値・成果物の識別つきで書く。
+// supervisorDelegateOutputRunes は、契約でない委譲の実行の出力（委譲先が返した値）を入力へ入れるときの文字数の上限。
+const supervisorDelegateOutputRunes = 1000
+
+// supervisorRunRecords はタスクの実行の記録（契約の実行と、契約でない委譲の実行〔run の kind が delegate〕）を、
+// 新しいほうから最大 supervisorRunRecordLimit 件、状態・要約・委譲先が返した値・成果物の識別つきで書く。
+// 新しさは、実行の開始の時刻で比べる。
 func supervisorRunRecords(ctx context.Context, tx *sql.Tx, cid, tid int64) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id, state, summary, COALESCE(facts, ''), start_run_id FROM contract_run
+	type rec struct {
+		startRun              int64  // 成果物の持ち主の run の ID
+		startedAt             string // 新しさの比べ方（時刻の文字列は辞書順で時刻順）
+		seq                   int64  // 同じ時刻のときの比べ方（種類ごとの行の ID）
+		label                 string
+		state, summary, facts string
+	}
+	var recs []rec
+	rows, err := tx.QueryContext(ctx, `SELECT id, state, summary, COALESCE(facts, ''), start_run_id, started_at FROM contract_run
 		WHERE challenge_id = ? AND task_id = ? AND kind = ? ORDER BY id DESC LIMIT ?`, cid, tid, contractRunKindTask, supervisorRunRecordLimit)
 	if err != nil {
 		return "", err
 	}
-	type rec struct {
-		id, startRun          int64
-		state, summary, facts string
-	}
-	var recs []rec
 	for rows.Next() {
 		var r rec
-		if err := rows.Scan(&r.id, &r.state, &r.summary, &r.facts, &r.startRun); err != nil {
+		if err := rows.Scan(&r.seq, &r.state, &r.summary, &r.facts, &r.startRun, &r.startedAt); err != nil {
 			_ = rows.Close()
 			return "", err
 		}
+		r.label = strconv.FormatInt(r.seq, 10)
 		recs = append(recs, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -197,9 +206,51 @@ func supervisorRunRecords(ctx context.Context, tx *sql.Tx, cid, tid int64) (stri
 		return "", err
 	}
 	_ = rows.Close()
+	drows, err := tx.QueryContext(ctx, `SELECT id, started_at, COALESCE(result, ''), COALESCE(error, ''), COALESCE(output, '') FROM run
+		WHERE challenge_id = ? AND task_id = ? AND kind = ? ORDER BY id DESC LIMIT ?`, cid, tid, string(runKindDelegate), supervisorRunRecordLimit)
+	if err != nil {
+		return "", err
+	}
+	for drows.Next() {
+		var r rec
+		var result, errText, output string
+		if err := drows.Scan(&r.seq, &r.startedAt, &result, &errText, &output); err != nil {
+			_ = drows.Close()
+			return "", err
+		}
+		r.label = formatRunID(r.seq)
+		r.startRun = r.seq
+		r.state = result
+		if r.state == "" {
+			r.state = "実行中"
+		}
+		r.summary = errText
+		if r.summary == "" {
+			r.summary = "(なし)"
+		}
+		if o := []rune(output); len(o) > supervisorDelegateOutputRunes {
+			output = string(o[:supervisorDelegateOutputRunes]) + "…"
+		}
+		r.facts = output
+		recs = append(recs, r)
+	}
+	if err := drows.Err(); err != nil {
+		_ = drows.Close()
+		return "", err
+	}
+	_ = drows.Close()
+	sort.SliceStable(recs, func(i, j int) bool {
+		if recs[i].startedAt != recs[j].startedAt {
+			return recs[i].startedAt > recs[j].startedAt
+		}
+		return recs[i].seq > recs[j].seq
+	})
+	if len(recs) > supervisorRunRecordLimit {
+		recs = recs[:supervisorRunRecordLimit]
+	}
 	var b strings.Builder
 	for _, r := range recs {
-		fmt.Fprintf(&b, "- 実行 %d: 状態 %s\n  要約: %s\n", r.id, r.state, r.summary)
+		fmt.Fprintf(&b, "- 実行 %s: 状態 %s\n  要約: %s\n", r.label, r.state, r.summary)
 		if r.facts != "" {
 			fmt.Fprintf(&b, "  委譲先が返した値: %s\n", r.facts)
 		}

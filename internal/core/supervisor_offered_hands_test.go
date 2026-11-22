@@ -72,7 +72,7 @@ func (f *offeredFixture) record(t *testing.T, tg supervisorTarget, hand Supervis
 	if tg.TaskID != nil {
 		in.TaskID = formatTaskID(*tg.TaskID)
 	}
-	if _, err := f.s.RecordSupervisorAction(context.Background(), in); err != nil {
+	if _, err := f.s.recordSupervisorAction(context.Background(), in); err != nil {
 		t.Fatal(err)
 	}
 }
