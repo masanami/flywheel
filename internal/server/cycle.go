@@ -151,10 +151,26 @@ func defaultExecutable() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+		exe = resolved // 欄の返事ごとの一時のシンボリックリンクを、サイクルの子（長く走り、次のサイクルも起動する）の実行ファイルにしない。
+	}
 	if strings.HasSuffix(filepath.Base(exe), ".test") {
 		return "", fmt.Errorf("テストのバイナリ（%s）はサイクルの子として起動できない", exe)
 	}
 	return exe, nil
+}
+
+// envWithoutChatMark は環境から対話の欄の印を除く。承認などを欄から実行した後に始めるサイクルの子は、欄の返事の一部ではなく、
+// 印を引き継ぐと、子の `cycle` が欄の一覧の検査で断られて始まらない。印の検査は、親のコマンドが済ませている。
+func envWithoutChatMark(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, core.ChatEnvSession+"=") || strings.HasPrefix(kv, core.ChatEnvMessage+"=") || strings.HasPrefix(kv, core.ChatEnvTools+"=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 func launchCycle(executable func() (string, error), signalWait time.Duration, workspacePath, trigger string) (CycleLaunch, error) {
@@ -164,6 +180,7 @@ func launchCycle(executable func() (string, error), signalWait time.Duration, wo
 	}
 	cmd := exec.Command(exe, "cycle", "--trigger", trigger, "--workspace", workspacePath)
 	cmd.Dir = workspacePath
+	cmd.Env = envWithoutChatMark(os.Environ())
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	out := &signalWriter{signal: make(chan struct{})}
 	errTail := &tailWriter{limit: cycleStderrTail}
