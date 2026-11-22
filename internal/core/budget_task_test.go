@@ -85,7 +85,7 @@ func (f *delegateFixture) raise(t *testing.T, id, taskID string, impl float64, r
 		return nil, err
 	}
 	return f.s.ExecuteBudget(ctx, BudgetRequest{ChallengeID: id, ExpectedVersion: prev.Version, PlanVersion: prev.PlanVersion,
-		TaskID: prev.TaskID, ImplUSD: impl, ReviewUSD: review}, f.budgetAttestation(t, id))
+		TaskID: prev.TaskID, ImplUSD: impl, ReviewUSD: review, Agent: f.agent}, f.budgetAttestation(t, id))
 }
 
 // --- 計画の検査（AC-37〜41） ---
