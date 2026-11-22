@@ -34,10 +34,11 @@ type Task struct {
 	Verification    *TaskVerification `json:"verification"`
 }
 
-// TaskAdded は足されたタスクの印。origin は足す依頼の出どころ（`expand`）、origin_task_id は出どころのタスクの ID（無ければ null）、
+// TaskAdded は足されたタスクの印。origin は足す依頼の出どころ（`expand`・`followup`）、followup_id は出どころが followup のとき元のフォローアップの ID（それ以外は null）、origin_task_id は出どころのタスクの ID（無ければ null）、
 // added_at は足した日時。
 type TaskAdded struct {
 	AddedAt      string  `json:"added_at"`
+	FollowupID   *string `json:"followup_id"`
 	Origin       string  `json:"origin"`
 	OriginTaskID *string `json:"origin_task_id"`
 }
@@ -46,7 +47,7 @@ func fromTaskAdded(a *core.TaskAdded) *TaskAdded {
 	if a == nil {
 		return nil
 	}
-	return &TaskAdded{AddedAt: FormatTimestamp(a.AddedAt), Origin: string(a.Origin), OriginTaskID: a.OriginTaskID}
+	return &TaskAdded{AddedAt: FormatTimestamp(a.AddedAt), FollowupID: a.FollowupID, Origin: string(a.Origin), OriginTaskID: a.OriginTaskID}
 }
 
 // TaskAddition は課題の詳細の additions の要素（足す依頼 1 件。閉じたものも含む）。state は `pending`・`awaiting_owner`・`applied`・
@@ -55,6 +56,7 @@ func fromTaskAdded(a *core.TaskAdded) *TaskAdded {
 type TaskAddition struct {
 	CreatedAt     string   `json:"created_at"`
 	DecidedAt     *string  `json:"decided_at"`
+	FollowupID    *string  `json:"followup_id"`
 	ID            string   `json:"id"`
 	LimitUSD      *float64 `json:"limit_usd"`
 	Origin        string   `json:"origin"`
@@ -69,7 +71,7 @@ func FromTaskAdditions(as []core.TaskAddition) []TaskAddition {
 	out := make([]TaskAddition, 0, len(as))
 	for _, a := range as {
 		out = append(out, TaskAddition{
-			CreatedAt: FormatTimestamp(a.CreatedAt), DecidedAt: ts(a.DecidedAt), ID: a.ID, LimitUSD: a.LimitUSD, Origin: string(a.Origin),
+			CreatedAt: FormatTimestamp(a.CreatedAt), DecidedAt: ts(a.DecidedAt), FollowupID: a.FollowupID, ID: a.ID, LimitUSD: a.LimitUSD, Origin: string(a.Origin),
 			OriginTaskID: a.OriginTaskID, State: string(a.State), TaskIDs: append([]string{}, a.TaskIDs...), TotalAfterUSD: a.TotalAfterUSD,
 		})
 	}

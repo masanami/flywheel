@@ -15,6 +15,7 @@ const fu = (id: string, p: Partial<Followup> = {}): Followup => ({
   id,
   note: null,
   promoted_challenge_id: null,
+  promoted_task_id: null,
   reason: null,
   source: "サイクルの振り返り",
   status: "open",
@@ -58,6 +59,7 @@ const DEFAULT: Followup[] = [
     status: "done",
     note: "確かめた: 5",
     promoted_challenge_id: "C-2",
+    promoted_task_id: null,
   }),
   fu("F-6", { status: "dropped", reason: "理由 6", detail: "説明 6" }),
 ];

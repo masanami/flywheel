@@ -5,7 +5,7 @@ import "github.com/masanami/flywheel/internal/core"
 // このファイルはフォローアップ（課題にぶら下がる 1 行の項目）の JSON の形を持つ。
 // `followup list --json`・フォローアップの一覧の API・課題の詳細の followups が同じ型を共有する。
 
-// Followup はフォローアップ 1 件。challenge_id は課題に属さなければ null、note・reason・promoted_challenge_id は無ければ null。
+// Followup はフォローアップ 1 件。challenge_id は課題に属さなければ null、note・reason・promoted_challenge_id・promoted_task_id は無ければ null（上げた先は、promoted_task_id があればそちら、無ければ promoted_challenge_id）。
 type Followup struct {
 	ChallengeID         *string `json:"challenge_id"`
 	CreatedAt           string  `json:"created_at"`
@@ -13,6 +13,7 @@ type Followup struct {
 	ID                  string  `json:"id"`
 	Note                *string `json:"note"`
 	PromotedChallengeID *string `json:"promoted_challenge_id"`
+	PromotedTaskID      *string `json:"promoted_task_id"`
 	Reason              *string `json:"reason"`
 	Source              string  `json:"source"`
 	Status              string  `json:"status"`
@@ -31,7 +32,7 @@ func FromFollowups(fs []core.Followup) []Followup {
 	for _, f := range fs {
 		out = append(out, Followup{
 			ChallengeID: f.ChallengeID, CreatedAt: FormatTimestamp(f.CreatedAt), Detail: f.Detail, ID: f.ID,
-			Note: f.Note, PromotedChallengeID: f.PromotedChallengeID, Reason: f.Reason, Source: string(f.Source),
+			Note: f.Note, PromotedChallengeID: f.PromotedChallengeID, PromotedTaskID: f.PromotedTaskID, Reason: f.Reason, Source: string(f.Source),
 			Status: string(f.Status), Title: f.Title, UpdatedAt: FormatTimestamp(f.UpdatedAt),
 		})
 	}
