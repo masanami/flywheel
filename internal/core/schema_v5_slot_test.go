@@ -753,7 +753,7 @@ func TestOpenWorkspace_Version5KeepsCycleAndLockColumns(t *testing.T) {
 	t.Parallel()
 	s := newStoreForTest(t)
 	if got := pragmaTableInfoColumnsForTest(t, s, "cycle"); !stringSlicesEqual(got,
-		[]string{"id", "trigger", "started_at", "ended_at", "result", "budget_usd", "spent_usd"}) {
+		[]string{"id", "trigger", "started_at", "ended_at", "result", "budget_usd", "spent_usd", "end_reason", "rounds", "stop_requested_at"}) {
 		t.Fatalf("cycle columns = %v", got)
 	}
 	if got := pragmaTableInfoColumnsForTest(t, s, "lock"); !stringSlicesEqual(got,

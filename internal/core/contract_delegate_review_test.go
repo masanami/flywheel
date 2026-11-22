@@ -379,7 +379,13 @@ func TestRunCycle_PollsUnfinishedContractRuns(t *testing.T) {
 	client := &fakeContractClient{last: contractOut(ContractStateRunning, nil, nil)}
 	in := f.input(mineThenPlanInvoker(t))
 	in.ConnDecl, in.Contract = conn, client
-	f.run(t, in)
+	// 委譲先が作業中のままなので、サイクルは回りの間の待ちに入る。最初の待ちで取り消して、1 回目の回りだけを見る。
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	in.Wait = func(ctx context.Context, _ time.Duration) error { cancel(); return ctx.Err() }
+	if _, err := f.s.RunCycle(ctx, in); err == nil {
+		t.Fatal("RunCycle err = nil, want the cancellation during the wait")
+	}
 	if len(client.statuses) != 1 {
 		t.Fatalf("statuses = %d, want 1（周が契約の run の状態を読む）", len(client.statuses))
 	}

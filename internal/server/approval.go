@@ -74,8 +74,8 @@ func decodeApproveBody(r *http.Request) (int, bool) {
 }
 
 // approveHandler は POST …/challenges/{id}/approve。計画承認待ちなら計画の承認、完了確認待ちなら
-// HoldRelease=true の完了の承認を行う。
-func approveHandler(fleet *Fleet, checks *checkCache, now func() time.Time) http.HandlerFunc {
+// HoldRelease=true の完了の承認を行う。成立した後に、CLI の承認と同じ決まりでサイクルを始め（きっかけは approve）、応答に cycle を足す。
+func approveHandler(fleet *Fleet, checks *checkCache, now func() time.Time, start CycleStarter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusNotFound, CodeNotFound, "not found")
@@ -93,18 +93,29 @@ func approveHandler(fleet *Fleet, checks *checkCache, now func() time.Time) http
 			runs *core.CardRuns
 			tree *core.TreeChallenge
 			read *cardRead
+			cyc  core.CycleStartReason
+			path string
 		)
 		err := readForCards(ctx, fleet, r.PathValue("name"), func(st *core.Store) error {
 			var err error
 			d, runs, tree, read, err = approveAndRead(ctx, st, id, version, now())
-			return err
+			if err != nil {
+				return err
+			}
+			// 承認が成立した後（本人確認と版の検査を通った後）にだけ、CLI と同じ決まりでサイクルを始める。
+			cyc, path = decideCycleStart(ctx, st, false), st.Workspace()
+			return nil
 		})
 		if err != nil {
 			writeLookupOrCoreError(w, err)
 			return
 		}
+		// 子の起動と合図の待ちは、ワークスペースの借りを返した後に行う（借りを持ったまま待たない）。
+		if cyc == core.CycleStartStarted {
+			cyc = startDecidedCycle(path, core.CycleTriggerApprove, start)
+		}
 		ov := read.resolve(ctx, checks)
-		writeJSON(w, http.StatusOK, view.FromChallengeDetailCard(d, runs.Derive(d.Challenge, ov, now()), *tree))
+		writeJSON(w, http.StatusOK, view.WithCycle{Body: view.FromChallengeDetailCard(d, runs.Derive(d.Challenge, ov, now()), *tree), Cycle: view.FromCycleStartReason(cyc)})
 	}
 }
 

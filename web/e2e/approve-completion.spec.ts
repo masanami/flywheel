@@ -20,6 +20,10 @@ test("AC-34 #930: 「いま進められること」の完了の承認の行か�
   await expect(page.getByRole("status")).toContainText(
     "完了の承認を記録しました。反映先へ入れる承認は、Claude Code との対話で行います。",
   );
+  // AC-180 #995: 承認の応答の cycle.reason に応じた 1 行が、計画の承認の画面と同じ部品で出る
+  await expect(page.getByTestId("cycle-start-line")).toHaveText(
+    "サイクルを始めました。",
+  );
 });
 
 test("AC-27・AC-29・AC-30 #930: 計画の承認待ちの課題の完了承認画面には、ボタンが出ず、完了の承認待ちでない旨と課題の詳細へのリンクが出る", async ({

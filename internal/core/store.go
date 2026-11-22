@@ -8,6 +8,7 @@
 package core
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -99,6 +100,10 @@ type Store struct {
 	// 既定でも独立したフィールドとして持つ。
 	lockHeartbeatInterval time.Duration
 	lockStaleAfter        time.Duration
+
+	// roundWait はサイクルの回りの間の待ち（CycleRunInput.Wait が nil のときの既定）。nil なら実時間の待ち。
+	// 試験だけが差し替える。
+	roundWait func(ctx context.Context, d time.Duration) error
 }
 
 // currentTime は now が設定されていればそれを、なければ time.Now() を返す。
