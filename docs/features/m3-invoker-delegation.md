@@ -731,6 +731,11 @@ J4 に回す範囲は 2 つで、同じ指示文（`internal/invoker/prompts/j4.
 - `conflict_prediction_budget_usd` は S2 で足す（【決定 2026-10-01 親 M3P29】。金額なので 0 以下は `config_invalid`）。
 - `judgment_budget_usd.J9`（1 組の判断の上限額。既定 0.5）と `serial_judgment_cycle_budget_usd`（1 周の J9 の費用の上限。既定 3）は §同時に進めてよいかの判断（J9）で足す（【決定 2026-11-14 オーナー Q1】。金額なので 0 以下は `config_invalid`）。
 - `behind_update_limit`（本番反映の間に BEHIND の取り込みを依頼してよい累計の回数）は、core の見直しの区切り S3a で外した。flywheel は反映先の最新の取り込みを依頼せず（委譲先が取り込んで解く）、この回数の上限を持たない。残っている宣言は `config_invalid`（項目の名前 `behind_update_limit` と、語 `removed`）で止まる。
+- `chat_tools`・`chat_max_turns`・`chat_timeout_sec`・`chat_approvable_operations` は、画面の対話の欄の宣言の項目（core の見直しの区切り S4d）。省略した項目は既定を使う。
+  - `chat_tools`: 欄の実行エンジンに許す道具の範囲。`restricted`（読み取り・検索・flywheel のコマンドだけ。既定）か `full`（すべて許す）。これ以外は `config_invalid`。
+  - `chat_max_turns`: 1 回の返事のターン数の上限。正の整数（既定 30）。
+  - `chat_timeout_sec`: 1 回の返事の時間の上限（秒）。正の整数（既定 600）。
+  - `chat_approvable_operations`: 欄から承認できる不可逆操作の種類。`release`・`delete`・`external_send`・`other` の部分集合（既定は `release` だけ。空の一覧なら、どの種類の不可逆操作の承認も、反映の承認を含む完了の承認も欄から断られる。反映を保留した完了の承認は通る）。これ以外の値は `config_invalid`。
 - すべてのキーは省略でき、省略したキーは上の値を既定とする。`position_file` だけは既定を持たない（省略したら J1・J2 を起動しない＝`config_invalid`）。
 
 #### `.flywheel/connectors.json`【決定 2026-09-28 オーナー M3H2／親 M3P1】
