@@ -105,7 +105,7 @@ func runOpExec(a Args) (any, error) {
 
 	return textOutput{
 		json: view.PhaseResponse{Phase: view.FromReleasePhase(false, res.Items, res.NotStarted, res.Tidied)},
-		text: releasePhaseText(res),
+		text: releasePhaseText(res, a.Chat != nil),
 	}, nil
 }
 
@@ -128,7 +128,7 @@ func withExecutedReleases(e *Error, items []core.ReleaseExecItem) *Error {
 }
 
 // releasePhaseText は --json 無しの `op exec` の表示（形式の安定は保証しない）。
-func releasePhaseText(res *core.ReleaseExecResult) string {
+func releasePhaseText(res *core.ReleaseExecResult, chat bool) string {
 	if len(res.Items) == 0 && len(res.NotStarted) == 0 && len(res.Tidied) == 0 {
 		return "実行の対象はありませんでした\n"
 	}
@@ -138,7 +138,11 @@ func releasePhaseText(res *core.ReleaseExecResult) string {
 		case core.ReleaseTidyReopened:
 			fmt.Fprintf(&b, "%s\t%s\t(立て直し)\t課題を完了から検証中へ戻し、%s に置き換えた（%s）\n", t.OperationID, t.ChallengeID, t.NewOperationID, t.ReopenReason)
 		case core.ReleaseTidyNeedsHuman:
-			fmt.Fprintf(&b, "%s\t%s\t(人間待ち)\t取り込みだけとも中身の変更とも確かめられません（%s）。承認するか、approve %s --reopen で検証中へ戻すかを選んでください\n", t.OperationID, t.ChallengeID, escapeControl(t.WaitReason), t.OperationID)
+			if chat {
+				fmt.Fprintf(&b, "%s\t%s\t(人間待ち)\t取り込みだけとも中身の変更とも確かめられません（%s）。承認するか、検証中へ戻すか（戻すのはターミナルで行ってください。対話の欄からは戻せません）を選んでください\n", t.OperationID, t.ChallengeID, escapeControl(t.WaitReason))
+			} else {
+				fmt.Fprintf(&b, "%s\t%s\t(人間待ち)\t取り込みだけとも中身の変更とも確かめられません（%s）。承認するか、approve %s --reopen で検証中へ戻すかを選んでください\n", t.OperationID, t.ChallengeID, escapeControl(t.WaitReason), t.OperationID)
+			}
 		case core.ReleaseTidySkipped:
 			fmt.Fprintf(&b, "%s\t%s\t(飛ばした)\t課題を検証中へ戻せませんでした（%s）。次の反映の段でやり直します\n", t.OperationID, t.ChallengeID, escapeControl(t.WaitReason))
 		default:

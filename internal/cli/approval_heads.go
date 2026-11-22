@@ -308,7 +308,7 @@ func headSources(a Args) core.ReleaseHeadSources {
 	return core.ReleaseHeadSources{Checks: newCheckSource(a.lookPath()), Compare: newCompareSource(a.lookPath())}
 }
 
-func operationHeadLines(d *releaseDecision) string {
+func operationHeadLines(d *releaseDecision, chat bool) string {
 	if d == nil {
 		return ""
 	}
@@ -324,7 +324,11 @@ func operationHeadLines(d *releaseDecision) string {
 	}
 	if d.Undeterminable != nil {
 		writeHeadChangeLines(&b, "              ", d.Undeterminable)
-		fmt.Fprintf(&b, "              ※承認すると、取り込みだけと確かめないまま、この head を承認します。承認せず課題を検証中へ戻して検証し直すなら、この確認を中止して approve %s --reopen を実行してください\n", d.Op.ID)
+		if chat {
+			b.WriteString("              ※承認すると、取り込みだけと確かめないまま、この head を承認します。承認せず課題を検証中へ戻して検証し直すなら、この確認を中止して、ターミナルで行ってください（対話の欄からは戻せません）\n")
+		} else {
+			fmt.Fprintf(&b, "              ※承認すると、取り込みだけと確かめないまま、この head を承認します。承認せず課題を検証中へ戻して検証し直すなら、この確認を中止して approve %s --reopen を実行してください\n", d.Op.ID)
+		}
 	}
 	return b.String()
 }

@@ -51,7 +51,7 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 
 	// 対話の欄の印がある環境からは、道具の範囲が full でなければ、欄から受けるコマンドの一覧にあるコマンドだけを受ける
 	// （委譲の子の印の検査の後。名前の照合は全体のフラグを除いた後）。
-	chat := chatMarkFromEnv()
+	chat := chatMarkFromEnv(rawArgs)
 	needChatMark, chatKnd, gateErr := chatGate(chat, rawArgs)
 	if gateErr != nil {
 		return failErr(stderr, jsonMode, gateErr)
@@ -71,6 +71,16 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 	parsed.Stdout = stdout
 	parsed.LookPath = lookPath
 	parsed.Chat = chat
+	// 道具の範囲は、解析が決めたワークスペース（コマンドが実際に開くもの）の宣言で決め直し、一覧の検査をかけ直す
+	// （事前の走査と解析で読み方が食い違っても、restricted の宣言の検査を外せないようにする）。
+	if chat != nil {
+		chat.Tools = chatToolsForWorkspace(parsed.Values["workspace"])
+		need, kind, regateErr := chatGate(chat, rawArgs)
+		if regateErr != nil {
+			return failErr(stderr, jsonMode, regateErr)
+		}
+		needChatMark, chatKnd = need, kind
+	}
 
 	// 解析が成功した後は解析結果を正とする（事前走査はフラグの値としての
 	// "--json" も拾うため、解析に失敗したときの出力形式の判定にだけ使う）。

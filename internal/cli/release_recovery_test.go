@@ -654,8 +654,8 @@ func TestUndeterminable_ReopenFromTheChatPanelIsRefused(t *testing.T) {
 	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
 	openChat(t, f.ws).set(t, "restricted")
 	code, _, stderr := runCLIRaw(t, []string{"approve", f.ops[0], "--reopen", "--workspace", f.ws, "--json"}...)
-	if code == 0 || !strings.Contains(stderr, "対話の欄からは行えません") {
-		t.Fatalf("exit=%d stderr=%s, want refused", code, stderr)
+	if code == 0 || !strings.Contains(stderr, "対話の欄からは行えません") || !strings.Contains(stderr, "verification_rejected") {
+		t.Fatalf("exit=%d stderr=%s, want refused with verification_rejected", code, stderr)
 	}
 	if got := f.challengeStatus(t); got != "done" {
 		t.Errorf("challenge status = %s, want done", got)

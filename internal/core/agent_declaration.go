@@ -64,13 +64,31 @@ const (
 	ChatToolsFull ChatTools = "full"
 )
 
-// ChatToolsFromEnv は環境変数 FLYWHEEL_CHAT_TOOLS の値を道具の範囲として解釈する。full だけを full とし、
-// 値が無い・決まった値でないときは restricted として扱う（広げる側へは倒さない）。
-func ChatToolsFromEnv(v string) ChatTools {
-	if ChatTools(v) == ChatToolsFull {
-		return ChatToolsFull
+// ChatToolsFromWorkspace はワークスペースの宣言（chat_tools）から道具の範囲を読む。workspaceFlag が空なら
+// FLYWHEEL_WORKSPACE、それも無ければカレントディレクトリから親へ遡って見つかったワークスペースを使う（ストアを
+// 開くコマンドと同じ決め方）。ワークスペースが見つからない・宣言を読めない・宣言が full でないときは restricted
+// （fail-closed）。環境変数の値は読まない（印を付けた側が書き換えられるため）。
+func ChatToolsFromWorkspace(workspaceFlag string) ChatTools {
+	base, explicit, err := resolveBaseDirExplicit(workspaceFlag)
+	if err != nil {
+		return ChatToolsRestricted
 	}
-	return ChatToolsRestricted
+	if explicit {
+		if !storeExistsAt(base) {
+			return ChatToolsRestricted
+		}
+	} else {
+		dir, ok := findWorkspace(base)
+		if !ok {
+			return ChatToolsRestricted
+		}
+		base = dir
+	}
+	decl, err := LoadAgentDeclaration(base)
+	if err != nil || decl.ChatTools != ChatToolsFull {
+		return ChatToolsRestricted
+	}
+	return ChatToolsFull
 }
 
 // ChatToolsValues は chat_tools の閉集合（restricted・full）を返す。

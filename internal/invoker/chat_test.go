@@ -177,6 +177,9 @@ func TestInvokeChat_RestrictedArgs(t *testing.T) {
 	if got := argsAfter(argv, "--permission-mode"); !slices.Equal(got, []string{"default"}) {
 		t.Errorf("--permission-mode = %q", got)
 	}
+	if got := argsAfter(argv, "--setting-sources"); !slices.Equal(got, []string{""}) {
+		t.Errorf("--setting-sources = %q, want one empty value", got)
+	}
 	for _, bad := range []string{"--dangerously-skip-permissions", "bypassPermissions"} {
 		if slices.Contains(argv, bad) {
 			t.Errorf("argv has %s", bad)
@@ -205,6 +208,9 @@ func TestInvokeChat_FullArgs(t *testing.T) {
 		if slices.Contains(argv, f) {
 			t.Errorf("argv has %s", f)
 		}
+	}
+	if slices.Contains(argv, "--setting-sources") {
+		t.Error("full argv has --setting-sources")
 	}
 	if got := argsAfter(argv, "--permission-mode"); !slices.Equal(got, []string{"bypassPermissions"}) {
 		t.Errorf("--permission-mode = %q", got)
