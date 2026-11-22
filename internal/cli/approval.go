@@ -61,6 +61,10 @@ func runApprove(a Args) (any, error) {
 // 確かめられず（人間待ち）、課題が完了の release について、人が承認せず検証中へ戻す方を選ぶ。人間待ちかどうかは core が
 // 自分で比較して確かめ（AssessReleaseReopen）、そうでなければ戻さない。
 func runReopenOperation(a Args, verifier core.Verifier, id string) (any, error) {
+	// 検証中へ戻す書き込みは、core が欄の印の検査と発言の記録を持たない。欄からは戻さない（ターミナルで行う）。
+	if a.Chat != nil {
+		return nil, NewError(CodeValidationFailed, id+" を検証中へ戻す操作は、対話の欄からは行えません。ターミナルで行ってください")
+	}
 	src := headSources(a)
 	as, err := a.Store.AssessReleaseReopen(context.Background(), id, src)
 	if err != nil {
