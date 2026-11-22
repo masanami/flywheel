@@ -1,6 +1,11 @@
 package view
 
-import "github.com/masanami/flywheel/internal/core"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/masanami/flywheel/internal/core"
+)
 
 // IngestItem は ingest の items の要素。対応の情報を積まない失敗の要素では
 // challenge_id・upstream_state・policy_state・comments_count・upstream_updated_at が null。
@@ -464,6 +469,46 @@ type BudgetResponse struct {
 // started が false のときは、サイクルを回すと進むものが無く、周を始めなかった。
 type CycleStarted struct {
 	Started bool `json:"started"`
+}
+
+// CycleStart は、操作（承認・回答など）が成立した後にサイクルを始めたかの結果（操作の出力のキー `cycle`）。
+// reason は started・already_running・no_work・disabled・unavailable（CYCLE_START_REASON_CODES）。
+type CycleStart struct {
+	Reason  string `json:"reason"`
+	Started bool   `json:"started"`
+}
+
+// FromCycleStartReason は理由から CycleStart を作る（started は理由が started のときだけ真）。
+func FromCycleStartReason(r core.CycleStartReason) CycleStart {
+	return CycleStart{Reason: string(r), Started: r == core.CycleStartStarted}
+}
+
+// WithCycle は、操作の出力（最上位がオブジェクトの Body）に、キー `cycle` を足した形。
+type WithCycle struct {
+	Body  any
+	Cycle CycleStart
+}
+
+// MarshalJSON は Body のオブジェクトの末尾に "cycle" を足す（Body が空のオブジェクトなら cycle だけ）。
+func (w WithCycle) MarshalJSON() ([]byte, error) {
+	body, err := json.Marshal(w.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' {
+		return nil, fmt.Errorf("view: WithCycle の Body はオブジェクトでなければならない: %T", w.Body)
+	}
+	cyc, err := json.Marshal(w.Cycle)
+	if err != nil {
+		return nil, err
+	}
+	out := append([]byte{}, body[:len(body)-1]...)
+	if len(body) > 2 {
+		out = append(out, ',')
+	}
+	out = append(out, `"cycle":`...)
+	out = append(out, cyc...)
+	return append(out, '}'), nil
 }
 
 // CycleWatching は running.watching[] の要素（サイクルが見ている、終わっていない実行 1 件）。

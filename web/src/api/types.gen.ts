@@ -945,6 +945,26 @@ export const WATCH_STATE_CODES = [
   "waiting_owner",
 ] as const;
 
+export const CYCLE_TRIGGER_CODES = [
+  "manual",
+  "ui",
+  "approve",
+  "reject",
+  "answer",
+  "budget",
+  "ingest",
+  "followup_promote",
+  "continue",
+] as const;
+
+export const CYCLE_START_REASON_CODES = [
+  "started",
+  "already_running",
+  "no_work",
+  "disabled",
+  "unavailable",
+] as const;
+
 export const EXECUTION_RESULT_CODES = [
   "merged",
   "already_merged",

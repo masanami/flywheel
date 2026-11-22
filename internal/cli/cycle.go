@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,7 +18,7 @@ import (
 
 // defaultCycleTrigger は `--trigger` を省略したときの周の契機
 // （docs/features/m3-invoker-delegation.md §一括の操作（サイクル）「省略時は manual」）。
-const defaultCycleTrigger = "manual"
+const defaultCycleTrigger = core.CycleTriggerManual
 
 // runCycle は `flywheel cycle [--trigger <t>]` の実装（#86。同 §一括の操作（サイクル））。
 // 宣言の読み込み・invoker と上流の取得の組み立てだけを行い、段の順・排他・周の開始と終了・
@@ -43,6 +44,10 @@ func runCycle(a Args) (any, error) {
 	trigger := defaultCycleTrigger
 	if v, ok := a.Values["trigger"]; ok {
 		trigger = v
+	}
+
+	if a.Bools["detach"] {
+		return runCycleDetach(a, trigger)
 	}
 
 	agent, err := core.LoadAgentDeclaration(ws)
@@ -159,6 +164,15 @@ func runCycle(a Args) (any, error) {
 		onBegin = func(id string) { _, _ = fmt.Fprintf(a.Stdout, "周 %s を開始した\n", id) }
 	}
 
+	// 終わった理由が settled のサイクルは、排他を放した後に数え直して、いま始められるものがあれば次のサイクルを切り離して始める。
+	var cont func(context.Context) error
+	if a.CycleStart != nil {
+		cont = func(context.Context) error {
+			_, err := a.CycleStart(ws, core.CycleTriggerContinue)
+			return err
+		}
+	}
+
 	res, err := a.Store.RunCycle(ctx, core.CycleRunInput{
 		Trigger:      trigger,
 		AgentDecl:    agent,
@@ -178,6 +192,7 @@ func runCycle(a Args) (any, error) {
 		// backup の段の口。connectors.json の有無にかかわらず組み立てる。
 		WorkspaceGit: git.NewWorkspace(),
 		OnBegin:      onBegin,
+		Continue:     cont,
 	})
 	if err != nil {
 		var partial *core.PartialReleaseError
@@ -229,4 +244,70 @@ func cycleResultText(res *core.CycleRunResult) string {
 		b.WriteString("  枠超過を記録したため、以降の判断の呼び出しは起動しませんでした\n")
 	}
 	return b.String()
+}
+
+// cycleStartText は、操作の後にサイクルを始めたかの表示（1 行）。画面の承認の後の表示と同じ文。
+func cycleStartText(c view.CycleStart) string {
+	switch core.CycleStartReason(c.Reason) {
+	case core.CycleStartStarted:
+		return "サイクルを始めました。\n"
+	case core.CycleStartAlreadyRunning:
+		return "走っているサイクルが、続きを進めます。\n"
+	case core.CycleStartNoWork:
+		return "いま進められるものが無いので、サイクルは始めていません。\n"
+	case core.CycleStartDisabled:
+		return "サイクルを自動で始めない設定です。\n"
+	default:
+		return "サイクルを始められませんでした。`flywheel cycle` で始められます。\n"
+	}
+}
+
+// withCycleOutput は、操作の出力に、サイクルを始めたかの結果（JSON のキー cycle・テキストの 1 行）を足す。
+func withCycleOutput(data any, c view.CycleStart) any {
+	to, ok := data.(textOutput)
+	if !ok {
+		text := "ok\n"
+		if data != nil {
+			text = fmt.Sprintf("%v\n", data)
+		}
+		to = textOutput{json: data, text: text}
+	}
+	body := to.json
+	if body == nil {
+		body = struct{}{}
+	}
+	text := to.text
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	return textOutput{json: view.WithCycle{Body: body, Cycle: c}, text: text + cycleStartText(c)}
+}
+
+// ingestStartsCycle は、取り込み元（位置引数）を指定した ingest だけサイクルを始める。引数の無い取り込み（追従だけ）は始めない。
+func ingestStartsCycle(a Args) string {
+	if len(a.Positional) == 0 {
+		return ""
+	}
+	return core.CycleTriggerIngest
+}
+
+// runCycleDetach は `flywheel cycle --detach` の実装。サイクルを始める処理を 1 回呼び、周の開始の合図が見えたらすぐ戻る
+// （サイクルの終わりは待たない）。始められなかったときはエラーにする（操作の後の自動の開始と違い、始めることが依頼そのもの）。
+func runCycleDetach(a Args, trigger string) (any, error) {
+	if a.CycleStart == nil {
+		return nil, NewError(CodeInternalError, "サイクルを切り離して始める処理が無い")
+	}
+	l, err := a.CycleStart(a.Store.Workspace(), trigger)
+	if err != nil {
+		return nil, NewError(CodeInternalError, err.Error())
+	}
+	reason := core.CycleStartStarted
+	switch {
+	case l.AlreadyRunning:
+		reason = core.CycleStartAlreadyRunning
+	case !l.Started:
+		reason = core.CycleStartNoWork
+	}
+	c := view.FromCycleStartReason(reason)
+	return textOutput{json: view.WithCycle{Body: struct{}{}, Cycle: c}, text: cycleStartText(c)}, nil
 }
