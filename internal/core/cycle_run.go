@@ -441,6 +441,20 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 		}
 		plan.Items = j2.Items
 		plan.NotStarted = j2.NotStarted
+		// 足す依頼を作り、判断点を「足す」の形で呼ぶ（計画の後にタスクを足す）。
+		exp, err := s.expandAutoJ2(ctx, J2AutoInput{
+			AgentDecl: in.AgentDecl,
+			ConnDecl:  in.ConnDecl,
+			Invoker:   in.Invoker,
+			Upstream:  in.Upstream,
+			CycleID:   cycleID,
+			Cycle:     jc,
+		})
+		if err != nil {
+			return nil, err
+		}
+		plan.Items = append(plan.Items, exp.Items...)
+		plan.NotStarted = append(plan.NotStarted, exp.NotStarted...)
 	}
 	phases = append(phases, plan)
 

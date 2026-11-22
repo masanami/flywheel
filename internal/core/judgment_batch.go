@@ -106,7 +106,7 @@ type JudgmentAutoItem struct {
 	ChallengeID string
 	RunID       string
 	Result      RunResult
-	// Outcome は判断点の判定（J1: mine/not_mine/uncertain、J2: plan/uncertain/parent_direct）。
+	// Outcome は判断点の判定（J1: mine/not_mine/uncertain、J2: plan/uncertain/parent_direct、「足す」の形は none/add/ask）。
 	// run が succeeded でなかった・core の再検査に落ちた（invalid_output）場合は
 	// 空文字列。
 	Outcome string
