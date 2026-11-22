@@ -279,7 +279,7 @@ func TestSupervisorReplan_RejectedWhenAContractRunIsWorking(t *testing.T) {
 	f.wantStateChangedEscalated(t, tg, out)
 }
 
-// AC-147・150・151: replan は計画を作り直す回答と同じ印で保留を閉じ、課題は分類済になる。承認の記録は作らない。
+// AC-107・147・150・151: replan は計画を作り直す回答と同じ印で保留を閉じ、課題は分類済になる。承認の記録は作らない。
 func TestSupervisorReplan_ClosesTheHoldWithTheReplanMarkWithoutAnApproval(t *testing.T) {
 	t.Parallel()
 	f := newSBFixture(t)
@@ -297,6 +297,10 @@ func TestSupervisorReplan_ClosesTheHoldWithTheReplanMarkWithoutAnApproval(t *tes
 	}
 	if got := f.str(t, `SELECT answered_by FROM hold WHERE id = ?`, tg.HoldID); got != "supervisor" {
 		t.Errorf("answered_by = %q, want supervisor", got)
+	}
+	// AC-107: replan で閉じた保留も、ほかの閉じる手と同じに supervisor_state は handled になる。
+	if got := f.str(t, `SELECT supervisor_state FROM hold WHERE id = ?`, tg.HoldID); got != "handled" {
+		t.Errorf("hold state = %q, want handled", got)
 	}
 	if got := f.status(t, f.cid); got != StatusClassified {
 		t.Errorf("status = %v, want classified (the same place as the answer with the replan mark)", got)
