@@ -81,11 +81,11 @@ func startCycleServer(t *testing.T, exe, ws string) int {
 // startCycleServerWait は、合図を待つ時間を渡して server を立てる。
 func startCycleServerWait(t *testing.T, exe, ws string, signalWait time.Duration) int {
 	t.Helper()
-	return startCycleServerWith(t, ws, execLauncherWait(func() (string, error) { return exe, nil }, signalWait))
+	return startCycleServerWith(t, ws, NewCycleStarterWait(func() (string, error) { return exe, nil }, signalWait))
 }
 
 // startCycleServerWith は、起動の口を渡して server を立てる。
-func startCycleServerWith(t *testing.T, ws string, launch cycleLauncher) int {
+func startCycleServerWith(t *testing.T, ws string, launch CycleStarter) int {
 	t.Helper()
 	ln, err := Listen(0)
 	if err != nil {
@@ -110,7 +110,10 @@ func countingServer(t *testing.T, ws string) (port int, calls *int32) {
 	}
 	calls = new(int32)
 	s := newServerWithLauncher(ln, []core.FleetWorkspace{{Name: "w", Path: ws}}, eventsConfig{},
-		func(string) (bool, error) { atomic.AddInt32(calls, 1); return true, nil })
+		func(string, string) (CycleLaunch, error) {
+			atomic.AddInt32(calls, 1)
+			return CycleLaunch{Started: true}, nil
+		})
 	errc := make(chan error, 1)
 	go func() { errc <- s.Serve() }()
 	t.Cleanup(func() {
@@ -384,7 +387,7 @@ func TestCyclePostExitCode1StderrCases(t *testing.T) {
 func TestCyclePostNoSignalNorExitReturnsStartedAfterThreeSeconds(t *testing.T) {
 	ws := initWorkspaceWithWork(t)
 	exe := scriptExecutable(t, "exec sleep 60\n")
-	port := startCycleServerWith(t, ws, execLauncher(func() (string, error) { return exe, nil }))
+	port := startCycleServerWith(t, ws, NewCycleStarter(func() (string, error) { return exe, nil }))
 	start := time.Now()
 	code, body := apiPost(t, port, cyclePath, "")
 	if code != 200 || strings.TrimSpace(body) != `{"started":true}` {
@@ -396,7 +399,7 @@ func TestCyclePostNoSignalNorExitReturnsStartedAfterThreeSeconds(t *testing.T) {
 	}
 }
 
-// 待ち時間を渡す口（execLauncherWait）は、渡した待ち時間のとおりに待つ。本番の 3 秒より長い値を渡して、
+// 待ち時間を渡す口（NewCycleStarterWait）は、渡した待ち時間のとおりに待つ。本番の 3 秒より長い値を渡して、
 // それより前に返らないことを確かめる（引数を見ずに 3 秒で返ると落ちる。下限だけなので、遅いときも落ちない）。
 func TestCyclePostNoSignalNorExitHonorsThePassedWait(t *testing.T) {
 	const wait = cycleSignalWait + 1500*time.Millisecond
