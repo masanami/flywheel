@@ -475,6 +475,19 @@ func defaultCommands() []Command {
 			Run:           runCycle,
 		},
 		{
+			// docs/features/core-redesign.md §走っているサイクルを見る・止める（S4a）。読み取りだけ。本人確認は求めない。
+			Path:          []string{"cycle", "status"},
+			RequiresStore: true,
+			Run:           runCycleStatus,
+		},
+		{
+			// 同上。走っているサイクルの記録に止める指示（stop_requested_at）を書く。本人確認は求めない
+			// （止めても、取り消せない操作は起きない）。
+			Path:          []string{"cycle", "stop"},
+			RequiresStore: true,
+			Run:           runCycleStop,
+		},
+		{
 			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2。#102）。
 			// `<C-ID>` は省略できる（着手中で承認済みの計画を持つ課題すべて）。
 			Path:          []string{"run"},

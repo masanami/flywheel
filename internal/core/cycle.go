@@ -87,6 +87,11 @@ const (
 	CycleEndInterrupted CycleEndReason = "interrupted"
 )
 
+// CycleEndReasonValues は CycleEndReason の閉集合の全値を、定義の順に返す。
+func CycleEndReasonValues() []CycleEndReason {
+	return []CycleEndReason{CycleEndSettled, CycleEndBudget, CycleEndStopped, CycleEndRateLimited, CycleEndStalled, CycleEndError, CycleEndInterrupted}
+}
+
 // CycleResult は cycle.result の閉集合の公開エイリアス（run_store.go の
 // cycleResult をそのまま再輸出する。judgment.go の RunResult と同じ形）。
 type CycleResult = cycleResult

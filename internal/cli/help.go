@@ -54,6 +54,8 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   runs [<C-ID>] [--open]
   metrics [--since <YYYY-MM-DD>] [--until <YYYY-MM-DD>] [--compare <C-ID>]
   cycle [--trigger <t>]
+  cycle status   （走っているサイクルの様子。走っていなければ最後のサイクルの終わり方）
+  cycle stop   （走っているサイクルに止める指示を残す。本人確認は要らない。委譲先の実行は取り消さない）
   run [<C-ID>]
   slot clear <SL-ID>
   export --out <path>

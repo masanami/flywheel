@@ -260,6 +260,12 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1"), j2RoutePlan(t)}, "")
 		return []string{"cycle", "--trigger", "cron"}
 	}},
+	"cycle status": {setup: func(_ *testing.T, _ string) []string {
+		return []string{"cycle", "status"}
+	}},
+	"cycle stop": {setup: func(_ *testing.T, _ string) []string {
+		return []string{"cycle", "stop"}
+	}},
 	"run": {setup: func(t *testing.T, ws string) []string {
 		// run --json の出力の形（{"phase": {…}} と phase の要素）が文書と照合されるよう、委譲の対象の
 		// 課題を 1 件置き、偽の claude が J3 と委譲に応答する。
