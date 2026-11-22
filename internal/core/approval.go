@@ -97,9 +97,15 @@ type ApprovalPreview struct {
 	// 端末の approve の要約と --json はどちらも使わない。
 	PlanSummary   *string
 	PlanBudgetUSD *float64
+	// PlanBudgetLimitUSD・PlanBudgetLimitReason は、承認を待っている版の計画の上限（計画が上限を書かなければ見込み PlanBudgetUSD と同じ額。
+	// 見込みが決められなければ nil）と、上限が見込みより大きいときだけの上限の理由（同じ額なら nil）。
+	PlanBudgetLimitUSD    *float64
+	PlanBudgetLimitReason *string
 
 	// Kind == ApprovalKindCompletion のときだけ有効。
 	DoneCriteria string
+	// AddedTasks は、計画の後に足されたタスク（ID の昇順。完了の承認の要約に出す。PrepareApproval でも埋める。計画の承認では空）。
+	AddedTasks []AddedTask
 	// DirectCompletion は、この完了確認待ちが親が直接行った完了の記録（T17）によるときだけ非 nil。
 	// 成果物の参照を完了条件と並べて見せる（完了の検証〈J5〉は通っていない）。
 	DirectCompletion *DirectCompletion
@@ -306,6 +312,10 @@ func (s *Store) prepareApproval(ctx context.Context, id string, agent *AgentDecl
 				if pv != nil {
 					preview.PlanTopics, preview.PlanTasks, preview.PlanUsesIntegration = pv.Topics, pv.Tasks, pv.UsesIntegration
 					preview.PlanTaskPhases, preview.PlanSummary, preview.PlanBudgetUSD = planTaskPhases(pv.Tasks), pv.Summary, pv.BudgetUSD
+					if pv.BudgetUSD != nil {
+						_, lim, reason := planBudgetLimit(pv)
+						preview.PlanBudgetLimitUSD, preview.PlanBudgetLimitReason = &lim, reason
+					}
 				}
 			case errors.Is(err, sql.ErrNoRows):
 				// 計画承認待ちなのに計画行が無い状態は本来到達しない
@@ -322,6 +332,9 @@ func (s *Store) prepareApproval(ctx context.Context, id string, agent *AgentDecl
 		}
 
 		if kind == ApprovalKindCompletion {
+			if preview.AddedTasks, err = listAddedTasks(ctx, tx, cid, ""); err != nil {
+				return err
+			}
 			if withScreen {
 				// 完了承認画面が使う値は、要約と同じ読み取り（同じトランザクション）で読む。
 				// 別の読み取りにすると、間に課題が動いたとき要約と食い違う。
