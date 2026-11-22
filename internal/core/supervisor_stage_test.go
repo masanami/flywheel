@@ -244,16 +244,25 @@ func TestSuperviseStage_HandOutsideTheOfferedList_FailsAndEscalates(t *testing.T
 	}
 }
 
-// まだ実装の無い手は、実行できなかったとして、対処の記録を failed にして上げる（書き込みは巻き戻る）。
-func TestSuperviseStage_HandNotImplementedYet_FailsAndEscalates(t *testing.T) {
+// 止まり方で実行できない手（artifact_missing への send_back）は、手の関数が実行できなかったとして、対処の記録を failed にして上げる（書き込みは巻き戻る）。
+func TestApplySupervisorHand_HandNotExecutableForTheStopKind_FailsAndEscalates(t *testing.T) {
 	t.Parallel()
 	f := newSVFixture(t)
-	id := f.pendingHold(t, StopKindDelegateStopped)
-	f.inv.result = svResult(map[string]any{"hand": "replan", "note": "調べた結果"})
-	f.stage(t)
+	id := f.pendingHold(t, StopKindArtifactMissing)
+	cid, _ := parseChallengeID(id)
+	out, err := f.s.applySupervisorHand(context.Background(), supervisorHandRequest{
+		CycleID: f.cycle, Target: supervisorTarget{HoldID: holdIDOf(t, f, cid), ChallengeID: cid, StopKind: StopKindArtifactMissing},
+		Output: SVOutput{Hand: HandSendBack, Findings: "調べた", Note: "調べた結果"}, Decl: f.agent,
+	})
+	if err != nil || out.Result != ActionFailed {
+		t.Fatalf("outcome = %+v (%v), want failed", out, err)
+	}
 	as := f.actions(t, id)
-	if len(as) != 1 || as[0].Result != ActionFailed || as[0].Hand == nil || *as[0].Hand != HandReplan {
-		t.Fatalf("actions = %+v, want one failed replan action (the executed row is rolled back)", as)
+	if len(as) != 1 || as[0].Result != ActionFailed || as[0].Hand == nil || *as[0].Hand != HandSendBack {
+		t.Fatalf("actions = %+v, want one failed send_back action (the executed row is rolled back)", as)
+	}
+	if !strings.Contains(as[0].Findings, "send_back is not offered") {
+		t.Errorf("findings = %q, want the reason that the hand is not offered", as[0].Findings)
 	}
 	if f.holdRow(t, id).state.String != "escalated" {
 		t.Error("the hold must be escalated")

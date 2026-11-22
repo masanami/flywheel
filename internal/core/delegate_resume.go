@@ -87,9 +87,18 @@ type holdRef struct {
 	RaisedAt   time.Time
 	// TaskID は保留が結び付くタスクの表示形（"T-<n>"。nil が NULL＝課題の単位の保留と過去の行）。
 	TaskID *string
+	// SupervisorAnswered は、回答がスーパーバイザーの手で閉じたもの（オーナーの回答ではない）。差し戻しの数え直しの境にしない。
+	SupervisorAnswered bool
 	// RetriedFailureLimit は、委譲の連続失敗の上限（止まり方 delegate_stopped で、原因の run が委譲の run）の保留を、スーパーバイザーの retry が閉じたか。
 	// 真なら、その後の連続失敗の数えは上限 − 1 から始まる（次の 1 回の失敗で、同じ上限の保留になる）。
 	RetriedFailureLimit bool
+}
+
+// sendBackRef は、スーパーバイザーの手 send_back の、結果が executed の対処の記録 1 件（差し戻しの回数に数える）。
+type sendBackRef struct {
+	// TaskID は対処したタスクの表示形（"T-<n>"。タスクを指さない記録は nil）。
+	TaskID *string
+	At     time.Time
 }
 
 // retriedFailureLimitSQL は hold の行について、連続失敗の上限の保留を、スーパーバイザーの retry（結果 executed）が閉じたかを返す SQL の式。
@@ -105,6 +114,8 @@ type launchHistory struct {
 	Verifications []runRow
 	// J4Runs は課題の J4 の run（id 昇順。全部の計画の版）。
 	J4Runs []runRow
+	// SendBacks は、スーパーバイザーの send_back の、結果が executed の対処の記録（古い順）。
+	SendBacks []sendBackRef
 }
 
 // forTask は履歴を、タスク taskID（"T-<n>"）の単位に絞った写しを返す。あるタスクの失敗・差し戻し・保留が、
@@ -132,6 +143,11 @@ func (h *launchHistory) forTask(taskID string) *launchHistory {
 		return o
 	}
 	out.Runs, out.Verifications, out.J4Runs = filter(h.Runs), filter(h.Verifications), filter(h.J4Runs)
+	for _, sb := range h.SendBacks {
+		if sb.TaskID == nil || *sb.TaskID == taskID {
+			out.SendBacks = append(out.SendBacks, sb)
+		}
+	}
 	for _, hd := range h.Holds {
 		if hd.TaskID != nil {
 			if *hd.TaskID != taskID {
@@ -217,8 +233,12 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 		}
 	}
 
+	if h.SendBacks, err = loadSendBackRefs(ctx, tx, challengeID); err != nil {
+		return nil, err
+	}
+
 	hrows, err := tx.QueryContext(ctx,
-		`SELECT id, question, run_id, answer, answered_at, raised_at, task_id, `+retriedFailureLimitSQL+` FROM hold WHERE challenge_id = ? ORDER BY id ASC`,
+		`SELECT id, question, run_id, answer, answered_at, raised_at, task_id, answered_by, answered_channel, answered_verification, `+retriedFailureLimitSQL+` FROM hold WHERE challenge_id = ? ORDER BY id ASC`,
 		string(StopKindDelegateStopped), challengeID)
 	if err != nil {
 		return nil, err
@@ -231,10 +251,12 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 			answer, answeredAtText sql.NullString
 			raisedAtText           string
 			holdTask               sql.NullInt64
+			by, channel, verif     sql.NullString
 		)
-		if err := hrows.Scan(&ref.ID, &ref.Question, &runID, &answer, &answeredAtText, &raisedAtText, &holdTask, &ref.RetriedFailureLimit); err != nil {
+		if err := hrows.Scan(&ref.ID, &ref.Question, &runID, &answer, &answeredAtText, &raisedAtText, &holdTask, &by, &channel, &verif, &ref.RetriedFailureLimit); err != nil {
 			return nil, err
 		}
+		ref.SupervisorAnswered = answer.Valid && isSupervisorAnswerColumns(by.String, channel.String, verif.String)
 		if holdTask.Valid {
 			v := formatTaskID(holdTask.Int64)
 			ref.TaskID = &v
@@ -260,6 +282,35 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 		h.Holds = append(h.Holds, ref)
 	}
 	return h, hrows.Err()
+}
+
+// loadSendBackRefs は課題の、結果が executed の send_back の対処の記録を古い順に返す。
+func loadSendBackRefs(ctx context.Context, tx *sql.Tx, challengeID int64) ([]sendBackRef, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT task_id, created_at FROM supervisor_action WHERE challenge_id = ? AND hand = ? AND result = ? ORDER BY id ASC`,
+		challengeID, string(HandSendBack), string(ActionExecuted))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []sendBackRef
+	for rows.Next() {
+		var task sql.NullInt64
+		var at string
+		if err := rows.Scan(&task, &at); err != nil {
+			return nil, err
+		}
+		ref := sendBackRef{}
+		if task.Valid {
+			v := formatTaskID(task.Int64)
+			ref.TaskID = &v
+		}
+		if ref.At, err = parseTimestamp(at); err != nil {
+			return nil, err
+		}
+		out = append(out, ref)
+	}
+	return out, rows.Err()
 }
 
 // judgmentRunIDs は課題の判断点 judgment の run の ID を昇順で返す。
@@ -545,7 +596,9 @@ func (h *launchHistory) effectiveImplBudget(planVersion int, d launchDecision, i
 	return implRemaining
 }
 
-// decideRework は J5 の差し戻しに関する 2 つを返す。同じ計画の版の、最後の回答済みの保留より後の
+// decideRework は J5 の差し戻しに関する 2 つを返す。回数は、スーパーバイザーが閉じたものを除く最後の回答済みの保留より後の、
+// 同じ計画の版の J5 の not_met と、スーパーバイザーの send_back の数（send_back の後は、次の not_met が来るまで上限にしない）。
+// 同じ計画の版の、最後の回答済みの保留より後の
 // J5 の not_met（コンフリクトの PR のための core の置き換えを除く）の数が上限に達していれば limit（委譲を起動せず人間対応待ちにする。回数は保留への
 // 回答の後の J5 から数え直す）。そうでなく、最後の J5 が not_met で、その後に委譲の run も回答済みの
 // 保留も無ければ、直前の委譲のセッションを J5 の指摘つきで再開する resume。
@@ -553,6 +606,14 @@ func (h *launchHistory) decideRework(planVersion, reworkLimit int) (resume *resu
 	var lastHold *holdRef
 	if n := len(h.Holds); n > 0 && h.Holds[n-1].Answer != nil {
 		lastHold = &h.Holds[n-1]
+	}
+	// 数え直しの境は、最後に回答済みの保留のうち、スーパーバイザーが閉じたものを除いたもの（スーパーバイザーの回答では数え直さない）。
+	var boundary *holdRef
+	for i := len(h.Holds) - 1; i >= 0; i-- {
+		if h.Holds[i].Answer != nil && !h.Holds[i].SupervisorAnswered {
+			boundary = &h.Holds[i]
+			break
+		}
 	}
 	var verdicts []runRow // 同じ計画の版の、検査を通った J5 の run
 	parsed := map[string]*j5ValidatedOutput{}
@@ -574,14 +635,29 @@ func (h *launchHistory) decideRework(planVersion, reworkLimit int) (resume *resu
 		if parsed[r.ID].Verdict != J5VerdictNotMet || parsed[r.ID].ConflictOverriddenFrom != "" {
 			continue // コンフリクトの PR のための core の置き換え（決定 2: 人には聞かない）は上限に数えない
 		}
-		if lastHold != nil && holdIsAfterRun(*lastHold, r) {
+		if boundary != nil && holdIsAfterRun(*boundary, r) {
 			continue
 		}
 		count++
 		rr := r
 		last = &rr
 	}
-	if last != nil && count >= reworkLimit {
+	// スーパーバイザーの send_back は、差し戻しの回数に数える（境より後のもの。タスクの検証の連続の数えとは別）。
+	// 数えるのは、この計画の版の最初の J5 より後のもの（計画の版をまたいで持ち越さない）。
+	sendBackAfterLast := false
+	for _, sb := range h.SendBacks {
+		if len(verdicts) > 0 && sb.At.Before(verdicts[0].StartedAt) {
+			continue
+		}
+		if boundary == nil || boundary.AnsweredAt == nil || !sb.At.Before(*boundary.AnsweredAt) {
+			count++
+			if last != nil && sb.At.After(last.StartedAt) {
+				sendBackAfterLast = true
+			}
+		}
+	}
+	// 差し戻しを返した後は、次の「満たしていない」が来るまで、上限の保留にしない（返した修正を確かめてから）。
+	if last != nil && count >= reworkLimit && !sendBackAfterLast {
 		return nil, &reworkLimitHit{Count: count, Limit: reworkLimit, Last: *last}
 	}
 
