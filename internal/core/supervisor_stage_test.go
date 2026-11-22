@@ -204,7 +204,7 @@ func TestSuperviseStage_AnsweredHoldIsNotCalled(t *testing.T) {
 	}
 }
 
-// 判断の間にオーナーが回答していたら、手を実行せず（escalate の書き込みは待ちの保留だけを書き換える）、対処の記録は rejected（state_changed）。保留はオーナーの回答のまま。
+// 判断の間にオーナーが回答していたら、手を実行せず（escalate の書き込みは待ちの保留だけを書き換える）、対処の記録は rejected（owner_answered）。保留はオーナーの回答のまま。
 func TestSuperviseStage_OwnerAnswersDuringTheJudgment_IsRejected(t *testing.T) {
 	t.Parallel()
 	f := newSVFixture(t)
@@ -216,8 +216,8 @@ func TestSuperviseStage_OwnerAnswersDuringTheJudgment_IsRejected(t *testing.T) {
 	}
 	res := f.stage(t)
 	as := f.actions(t, id)
-	if len(as) != 1 || as[0].Result != ActionRejected || as[0].RejectReason == nil || *as[0].RejectReason != RejectStateChanged {
-		t.Fatalf("actions = %+v, want one rejected(state_changed)", as)
+	if len(as) != 1 || as[0].Result != ActionRejected || as[0].RejectReason == nil || *as[0].RejectReason != RejectOwnerAnswered {
+		t.Fatalf("actions = %+v, want one rejected(owner_answered)", as)
 	}
 	if res.SuperviseHands[HandEscalate] != 0 || f.holdRow(t, id).state.String != "pending" {
 		t.Errorf("hands = %v, state = %q, want no executed hand and the hold untouched", res.SuperviseHands, f.holdRow(t, id).state.String)
