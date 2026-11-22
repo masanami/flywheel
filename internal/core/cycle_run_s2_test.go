@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // このファイルは #108（親要件チケット #98 §一括の操作（サイクル）の S2）の、cycle の委譲（run）と
@@ -84,14 +85,32 @@ func TestRunCycle_VerifyPhase_PendingChecksAreWaitingExternal(t *testing.T) {
 	f.checks.prs["o/r#1"] = prChecks("open", checkDone, checkRunning)
 	var calls []JudgmentPoint
 
-	res, err := f.s.RunCycle(context.Background(), f.cycleInput(cycleS2Invoker("met", &calls)))
+	// チェックが終わらない間は、作業中の実行と同じ扱いで回りを繰り返す。止める指示（2 回目の待ちで入れる）で終える。
+	in := f.cycleInput(cycleS2Invoker("met", &calls))
+	waits := 0
+	in.Wait = func(ctx context.Context, _ time.Duration) error {
+		if waits++; waits == 2 {
+			mexec(t, f.s, `UPDATE cycle SET stop_requested_at = '2026-11-22T00:00:00.000Z' WHERE ended_at IS NULL`)
+		}
+		return ctx.Err()
+	}
+	res, err := f.s.RunCycle(context.Background(), in)
 	if err != nil {
 		t.Fatalf("RunCycle: %v", err)
 	}
+	if res.Cycle.EndReason != CycleEndStopped {
+		t.Errorf("end_reason = %q, want stopped (pending checks must not end the cycle as stalled or settled)", res.Cycle.EndReason)
+	}
 
 	verify := phaseOfResult(t, res, CyclePhaseVerify)
-	if len(verify.Items) != 0 || len(verify.NotStarted) != 1 || verify.NotStarted[0].Reason != NotStartedWaitingExternal {
+	// チェックが終わらない間は、回りを重ねても waiting_external だけ（回りごとに 1 件。回りをまたいで連結される）。
+	if len(verify.Items) != 0 || len(verify.NotStarted) < 1 {
 		t.Fatalf("verify phase = %+v, want waiting_external only", verify)
+	}
+	for _, ns := range verify.NotStarted {
+		if ns.Reason != NotStartedWaitingExternal {
+			t.Fatalf("verify phase = %+v, want waiting_external only", verify)
+		}
 	}
 	if got := fmt.Sprint(calls); got != "[J3]" {
 		t.Errorf("judgment calls = %s, want [J3] (J5 must not start while checks are pending)", got)

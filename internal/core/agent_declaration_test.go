@@ -103,6 +103,8 @@ const allKeysAgentJSON = `{
 	"rework_limit": 3,
 	"failure_limit": 2,
 	"improve_threshold": 10,
+	"cycle_poll_interval_sec": 30,
+	"auto_cycle": true,
 	"memory_dir": "memory",
 	"memory_write_limit": {"files": 5, "bytes": 8192}
 }`
@@ -574,5 +576,55 @@ func TestLoadAgentDeclaration_J8Budget(t *testing.T) {
 	}
 	if _, err := LoadAgentDeclaration(writeAgentJSON(t, `{"judgment_budget_usd": {"J7": 1}}`)); !errors.Is(err, ErrConfigInvalid) {
 		t.Errorf("J7 key: error = %v, want ErrConfigInvalid", err)
+	}
+}
+
+// AC-32・AC-88: cycle_poll_interval_sec と auto_cycle が無ければ、間隔は 30 秒・auto_cycle は真になる。
+func TestLoadAgentDeclaration_CycleKeysOmitted_UseDefaults(t *testing.T) {
+	t.Parallel()
+	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decl.CyclePollIntervalSec != 30 || !decl.AutoCycle {
+		t.Errorf("CyclePollIntervalSec=%d AutoCycle=%v, want 30, true", decl.CyclePollIntervalSec, decl.AutoCycle)
+	}
+	if !decl.DefaultsUsed {
+		t.Errorf("DefaultsUsed = false, want true")
+	}
+}
+
+func TestLoadAgentDeclaration_CycleKeysExplicit(t *testing.T) {
+	t.Parallel()
+	decl, err := LoadAgentDeclaration(writeAgentJSON(t, `{"cycle_poll_interval_sec": 1, "auto_cycle": false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decl.CyclePollIntervalSec != 1 || decl.AutoCycle {
+		t.Errorf("CyclePollIntervalSec=%d AutoCycle=%v, want 1, false", decl.CyclePollIntervalSec, decl.AutoCycle)
+	}
+}
+
+// AC-33・AC-34・AC-35: 0・負の数・整数でない値は読み込みエラー。
+func TestLoadAgentDeclaration_CyclePollIntervalSec_Invalid(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{"0", "-1", "1.5", `"30"`, "null"} {
+		t.Run(v, func(t *testing.T) {
+			t.Parallel()
+			_, err := LoadAgentDeclaration(writeAgentJSON(t, fmt.Sprintf(`{"cycle_poll_interval_sec": %s}`, v)))
+			if !errors.Is(err, ErrConfigInvalid) {
+				t.Fatalf("error = %v, want ErrConfigInvalid", err)
+			}
+		})
+	}
+}
+
+func TestLoadAgentDeclaration_AutoCycle_NonBooleanIsInvalid(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{`"true"`, "1", "null"} {
+		_, err := LoadAgentDeclaration(writeAgentJSON(t, fmt.Sprintf(`{"auto_cycle": %s}`, v)))
+		if !errors.Is(err, ErrConfigInvalid) {
+			t.Errorf("auto_cycle=%s: error = %v, want ErrConfigInvalid", v, err)
+		}
 	}
 }

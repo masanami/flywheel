@@ -58,19 +58,19 @@ type Server struct {
 // 作る。許可する Host と Origin は、ln が実際に bind したポートから導く。ストアは
 // 要求ごとに開く・判定し直す（開けないワークスペースがあっても作れる）。
 func New(ln net.Listener, workspaces []core.FleetWorkspace) *Server {
-	return newServerWithLauncher(ln, workspaces, eventsConfig{}, defaultLauncher)
+	return newServerWithLauncher(ln, workspaces, eventsConfig{}, StartCycle)
 }
 
 // newServer は SSE の時間の設定を渡せる版（テストが間隔を短くする）。サイクルの起動は常に失敗させ、
 // テストが自分のバイナリを別プロセスとして起動しないようにする。
 func newServer(ln net.Listener, workspaces []core.FleetWorkspace, cfg eventsConfig) *Server {
-	return newServerWithLauncher(ln, workspaces, cfg, func(string) (bool, error) {
-		return false, errors.New("サイクルの起動はこの server では無効")
+	return newServerWithLauncher(ln, workspaces, cfg, func(string, string) (CycleLaunch, error) {
+		return CycleLaunch{}, errors.New("サイクルの起動はこの server では無効")
 	})
 }
 
 // newServerWithLauncher はサイクルの起動の仕方を渡せる版（テストが偽の実行ファイルを使う）。
-func newServerWithLauncher(ln net.Listener, workspaces []core.FleetWorkspace, cfg eventsConfig, launch cycleLauncher) *Server {
+func newServerWithLauncher(ln net.Listener, workspaces []core.FleetWorkspace, cfg eventsConfig, launch CycleStarter) *Server {
 	cfg = cfg.withDefaults()
 	s := &Server{ln: ln, fleet: NewFleet(workspaces), checks: newCheckCache(defaultCheckTTL), done: make(chan struct{}), cfg: cfg, hub: newEventHub(workspaces)}
 	port := ln.Addr().(*net.TCPAddr).Port
@@ -113,7 +113,7 @@ func (s *Server) Shutdown() error {
 	return err
 }
 
-func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done <-chan struct{}, cfg eventsConfig, launch cycleLauncher) http.Handler {
+func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done <-chan struct{}, cfg eventsConfig, launch CycleStarter) http.Handler {
 	token, err := newCSRF(port)
 	if err != nil {
 		panic(err) // crypto/rand が読めない環境では安全な値を作れない
@@ -132,7 +132,7 @@ func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done 
 	mux.HandleFunc("/api/v1/workspaces/{name}/tree", treeHandler(fleet, cfg.now))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}", challengeHandler(fleet, checks, cfg.now))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/approval", approvalSummaryHandler(fleet, newGitHubSource))
-	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/approve", approveHandler(fleet, checks, cfg.now))
+	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/approve", approveHandler(fleet, checks, cfg.now, launch))
 	mux.HandleFunc("/api/v1/workspaces/{name}/followups", followupsHandler(fleet))
 	mux.HandleFunc("/api/v1/workspaces/{name}/cycle", cycleHandler(fleet, launch))
 	mux.HandleFunc("/api/v1/workspaces/{name}/log", logHandler(fleet))

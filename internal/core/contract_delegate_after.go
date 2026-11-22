@@ -294,6 +294,10 @@ func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunRe
 	return true, s.holdLandedEnd(ctx, rep, cid, integrationSucceededQuestion(rep.ExternalRunID, merged, unreadable), reason)
 }
 
+// heldSuccessWhere は、保留の間に成功していた契約の実行（k）を、検証中へ進める番の条件（SubmitHeldContractSuccesses と、回りの終わりの数え〔CountRoundWork〕が共有する）。
+const heldSuccessWhere = `k.held_success = 1 AND c.status = 'in_progress' AND COALESCE(c.uses_integration, 0) = 0
+			AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status = 'cancelled')`
+
 // SubmitHeldContractSuccesses は、課題が保留の間に契約の run が succeeded まで進み（held_success）、オーナーが答えて課題が
 // 着手中へ戻ったものを、start も resume も呼ばずに検証中へ進める。成果物は succeeded を読んだときに取り込み済み。
 // 答えは保留に残り、完了の検証（J5）の材料に入る。オーナーが答える前（課題がまだ保留）は何も変えない。
@@ -307,8 +311,7 @@ func (s *Store) SubmitHeldContractSuccesses(ctx context.Context, only *int64) (i
 	var targets []target
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		q := `SELECT k.challenge_id, k.start_run_id, k.external_run_id FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.held_success = 1 AND c.status = 'in_progress' AND COALESCE(c.uses_integration, 0) = 0
-			AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status = 'cancelled')`
+			WHERE ` + heldSuccessWhere
 		args := []any{}
 		if only != nil {
 			q += ` AND k.challenge_id = ?`

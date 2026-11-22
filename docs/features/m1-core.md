@@ -576,6 +576,8 @@ CLI のコマンド（引数名は【仮定】。コマンドの集合と遷移�
 | `operation` | id, challenge_id, kind（release / delete / external_send / other）, summary, ref, state（pending / approved / rejected。M4.5 が executed、#485 が closed を足した）, version, created_at | **新設**（H2）。実行の記録（executed など）は S2。#485 が closed_reason・closed_at・supersedes_operation_id を足した |
 | `activity` | id, at, actor, channel, verification, entity, entity_id, action, before, after | 足す: `verification`。`before`・`after` は変わった項目だけの JSON（H7） |
 
+> **サイクルの記録（M3 で足し、core の見直しの区切り S4a で変えた）**: `cycle` の表は、終わった理由 `end_reason`（`settled`・`budget`・`stopped`・`rate_limited`・`stalled`・`error`・`interrupted` のいずれか。NULL 可。過去の行は NULL のまま。結果 `result` の 3 値では費用の上限と落ち着いたのを分けられないので足した）・通した回りの数 `rounds`（整数。既定 0）・止める指示の時刻 `stop_requested_at`（NULL 可）を持つ。きっかけ `trigger` の決まった値は `manual`・`ui`・`approve`・`reject`・`answer`・`budget`・`ingest`・`followup_promote`・`continue`（`flywheel cycle --trigger` は自由な文字列のまま）。M1 の範囲には含まない。
+
 M1 で作らないもの: `challenge_dependency`・`challenge_link`（S2）、`source_binding`（M2）、`cycle`・`run`・`slot`・`lock`（M3）。
 
 ### 実装計画（チケット分解の見通し）

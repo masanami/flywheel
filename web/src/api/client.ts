@@ -1,6 +1,7 @@
 import { ApiError } from "./error.ts";
 import type {
   ApprovalSummaryResponse,
+  CycleStart,
   CycleStarted,
   CycleStatus,
   FollowupListResponse,
@@ -91,10 +92,13 @@ export interface ReadApi {
   questions(): Promise<QuestionsResponse>;
 }
 
+// 承認の応答は、承認後の課題（ShowCardResponse）に、サイクルを始めたかの結果 cycle を足した形。
+export type ApproveResponse = ShowCardResponse & { cycle: CycleStart };
+
 // 承認（計画の承認・完了の承認。2 段階）。① 要約と版を得る → ② 版を添えて承認する。
 export interface ApprovalApi {
   approvalSummary(name: string, id: string): Promise<ApprovalSummaryResponse>;
-  approve(name: string, id: string, version: number): Promise<ShowCardResponse>;
+  approve(name: string, id: string, version: number): Promise<ApproveResponse>;
 }
 
 // 「サイクルを回す」のボタンが呼ぶサイクルの起動。成功は {"started": true}。
@@ -134,7 +138,7 @@ const approvalApi: ApprovalApi = {
       `${ws(name)}/challenges/${encodeURIComponent(id)}/approval`,
     ),
   approve: (name, id, version) =>
-    post<ShowCardResponse>(
+    post<ApproveResponse>(
       `${ws(name)}/challenges/${encodeURIComponent(id)}/approve`,
       { version },
     ),
