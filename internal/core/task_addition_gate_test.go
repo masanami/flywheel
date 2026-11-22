@@ -31,9 +31,32 @@ func (f *contractFixture) addExpandAddition(t *testing.T, challengeID string, ti
 	if to == TaskAdditionPending {
 		return
 	}
+	if to == TaskAdditionAwaitingOwner {
+		f.setAdditionAwaitingOwner(t, ta.ID)
+		return
+	}
 	if _, err := f.s.SetTaskAdditionState(context.Background(), ChannelInvoker, ta.ID, to, TaskAdditionUpdate{}); err != nil {
 		t.Fatalf("SetTaskAdditionState(%s): %v", to, err)
 	}
+}
+
+// setAdditionAwaitingOwner は足す依頼 id の状態を、オーナー待ちに直接置く。オーナー待ちは同じ課題の保留を指す決まり
+// （setTaskAdditionStateTx の検査）だが、ここの試験は状態だけを見るので、保留を作らずに行を書く。
+func (f *contractFixture) setAdditionAwaitingOwner(t *testing.T, id string) {
+	t.Helper()
+	placeAdditionAwaitingOwner(t, f.s, id)
+}
+
+func placeAdditionAwaitingOwner(t *testing.T, s *Store, id string) {
+	t.Helper()
+	aid, ok := parseTaskAdditionID(id)
+	if !ok {
+		t.Fatalf("task addition id %q", id)
+	}
+	writeForTest(t, s, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE task_addition SET state = ? WHERE id = ?`, string(TaskAdditionAwaitingOwner), aid)
+		return err
+	})
 }
 
 func (f *contractFixture) reflectIDs(t *testing.T) []int64 {
@@ -207,9 +230,7 @@ func TestOpenAdditions_AC214_AwaitingOwnerAdditionIsNotStartable(t *testing.T) {
 	if len(adds) != 1 {
 		t.Fatalf("additions = %+v", adds)
 	}
-	if _, err := f.s.SetTaskAdditionState(context.Background(), ChannelInvoker, adds[0].ID, TaskAdditionAwaitingOwner, TaskAdditionUpdate{}); err != nil {
-		t.Fatal(err)
-	}
+	placeAdditionAwaitingOwner(t, f.s, adds[0].ID)
 	if w := f.roundWork(t); w.Stages.Plan != 0 || w.Startable != 0 {
 		t.Fatalf("awaiting_owner: plan = %d, startable = %d, want 0", w.Stages.Plan, w.Startable)
 	}

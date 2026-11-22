@@ -296,7 +296,7 @@ func applyJ2ExpandAdd(ctx context.Context, tx *sql.Tx, rec *activityRecorder, ci
 	total := after.Impl + after.Review
 	if total > limit {
 		totalUSD, limitUSD := microsToUSD(total), microsToUSD(limit)
-		holdID, err := hold(overLimitQuestion(v.Tasks, totalUSD, limitUSD), holdReasonTaskAddOverLimit, overLimitHoldOptions(totalUSD))
+		holdID, err := hold(overLimitQuestion(v.Tasks, totalUSD, limitUSD, microsToUSD(total-limit)), holdReasonTaskAddOverLimit, overLimitHoldOptions(totalUSD))
 		if err != nil {
 			return "", err
 		}
@@ -338,7 +338,8 @@ const (
 )
 
 // overLimitQuestion は task_add_over_limit の保留の問い。足すタスクの題名と枠・足した後の見込み・上限・超える額・計画の作り直しの制約を書く。
-func overLimitQuestion(tasks []j2Task, totalUSD, limitUSD float64) string {
+// 超える額 overUSD は、呼び出し側が整数（USD の 100 万分の 1）の引き算から作って渡す（浮動小数の引き算の誤差を文に出さない）。
+func overLimitQuestion(tasks []j2Task, totalUSD, limitUSD, overUSD float64) string {
 	var b strings.Builder
 	b.WriteString("足すと上限を超えるので、足してよいかを決めてください。\n足すタスク:\n")
 	for _, t := range tasks {
@@ -351,7 +352,7 @@ func overLimitQuestion(tasks []j2Task, totalUSD, limitUSD float64) string {
 		}
 		fmt.Fprintf(&b, "- %s（枠: 実装 $%s・レビュー対応 $%s）\n", t.Title, formatUSDAmount(impl), formatUSDAmount(review))
 	}
-	fmt.Fprintf(&b, "足した後の見込み: $%s\n上限: $%s\n超える額: $%s\n", formatUSDAmount(totalUSD), formatUSDAmount(limitUSD), formatUSDAmount(totalUSD-limitUSD))
+	fmt.Fprintf(&b, "足した後の見込み: $%s\n上限: $%s\n超える額: $%s\n", formatUSDAmount(totalUSD), formatUSDAmount(limitUSD), formatUSDAmount(overUSD))
 	b.WriteString("動いている作業が終わるまで、計画の作り直しは選べない。")
 	return b.String()
 }
