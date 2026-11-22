@@ -135,11 +135,28 @@ func j4AllAnswered(ds []j4Decision) bool {
 	return len(ds) > 0
 }
 
-// j4StoredAllAnswered は、保存した run の出力が、全問 answer の J4 の出力か（問いの数は保存時に検査済み）。
-// 全問 answer なら判定を返す。
+// j4StoredAllAnswered は、保存した run の出力が、全問に答えた出力か（問いの数は保存時に検査済み）。J4 の出力（全問 answer）と、
+// スーパーバイザーの出力（手が answer。区切り S4b-3）を読む。全問に答えていれば判定を返す。
 func j4StoredAllAnswered(output string) ([]j4Decision, bool) {
-	var raw j4RawOutput
-	if err := json.Unmarshal([]byte(output), &raw); err != nil || len(raw.Decisions) == 0 {
+	var raw struct {
+		j4RawOutput
+		Hand    string `json:"hand"`
+		Answers []struct {
+			Answer string `json:"answer"`
+		} `json:"answers"`
+	}
+	if err := json.Unmarshal([]byte(output), &raw); err != nil {
+		return nil, false
+	}
+	if SupervisorHand(raw.Hand) == HandAnswer && len(raw.Answers) > 0 {
+		out := make([]j4Decision, len(raw.Answers))
+		for i, a := range raw.Answers {
+			answer := a.Answer
+			out[i] = j4Decision{QuestionIndex: i + 1, Decision: J4DecisionAnswer, Answer: &answer}
+		}
+		return out, true
+	}
+	if len(raw.Decisions) == 0 {
 		return nil, false
 	}
 	out := make([]j4Decision, 0, len(raw.Decisions))
@@ -398,54 +415,4 @@ func j4StoredQuestions(output string) []DelegationQuestion {
 		out = append(out, DelegationQuestion{Kind: q.Kind, Text: q.Text, Options: q.Options, Recommendation: q.Recommendation})
 	}
 	return out
-}
-
-// delegationJ4Questions は報告の問いを J4 の入力の形にする。
-func delegationJ4Questions(qs []DelegationQuestion) []j4Question {
-	out := make([]j4Question, 0, len(qs))
-	for _, q := range qs {
-		out = append(out, j4Question(q))
-	}
-	return out
-}
-
-// j4Env は、委譲の照合が結末 questions を J4 へ回すための口。Answered は、J4 が全問に答えて保留を作らなかったとき真になる。
-type j4Env struct {
-	In       DelegateInput
-	Cycle    *JudgmentCycle
-	Answered bool
-	// Ctx は取り消しの効く文脈（照合の記録は取り消されても行うが、J4 の起動は周の中断で止める）。
-	Ctx context.Context
-}
-
-// routeQuestionsToJ4 は結末 questions の報告を J4 へ回すか決める。人間へ上げる規則（問いの種類・意思決定者が human）に
-// 当たれば J4 を呼ばず（answered=false・reason=""）、それ以外は runJ4 を呼ぶ。answered=false のとき reason は保留の問いの冒頭に書く。
-func (s *Store) routeQuestionsToJ4(ctx context.Context, dc *delegationContext, report *DelegationReport, env *j4Env) (answered bool, reason string, err error) {
-	if dc.Decider == DeciderHuman || j4RuleEscalates(report.Questions, env.In.ConnDecl.HumanQuestionKinds) {
-		return false, "", nil
-	}
-	req := j4Request{
-		ChallengeID: dc.Challenge.ID, Questions: delegationJ4Questions(report.Questions),
-		AgentDecl: env.In.AgentDecl, CycleID: env.In.CycleID, Invoker: env.In.Judgment, Cycle: env.Cycle,
-	}
-	if sm := strings.TrimSpace(report.Summary); sm != "" {
-		req.Extra = []JudgmentDataSection{{Label: "子の報告の要約", Content: sm}}
-	}
-	jctx := env.Ctx
-	if jctx == nil {
-		jctx = ctx
-	}
-	if inProgress, err := s.challengeInProgress(jctx, j4ChallengeInt(dc.Challenge.ID)); err != nil || !inProgress {
-		return false, "", err
-	}
-	res, err := s.runJ4(jctx, req)
-	if err != nil {
-		return false, "", err
-	}
-	return res.Answered, res.Reason, nil
-}
-
-func j4ChallengeInt(id string) int64 {
-	n, _ := parseChallengeID(id)
-	return n
 }

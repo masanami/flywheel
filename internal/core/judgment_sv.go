@@ -32,16 +32,22 @@ func (s *Store) callSupervisorJudgment(ctx context.Context, in CycleRunInput, cy
 	if err != nil {
 		return svCall{}, err
 	}
-	budget := in.AgentDecl.JudgmentBudgetFor(JudgmentSV)
+	return s.invokeSupervisorJudgment(ctx, in.AgentDecl, in.Invoker, cycleID, jc, t.ChallengeID, t.TaskID, sections, offered)
+}
+
+// invokeSupervisorJudgment は組み立てた入力で判断点 SV を 1 回呼ぶ（費用は課題とサイクルの両方に入る）。保留のある呼び出し（callSupervisorJudgment）と、
+// 保留を作る前の子の問いの呼び出し（callChildQuestionJudgment）が共有する。
+func (s *Store) invokeSupervisorJudgment(ctx context.Context, decl *AgentDeclaration, invoker JudgmentInvoker, cycleID string, jc *JudgmentCycle,
+	challengeID int64, taskID *int64, sections []JudgmentDataSection, offered []SupervisorHand) (svCall, error) {
 	runIn := RunJudgmentInput{
-		ChallengeID:  formatChallengeID(t.ChallengeID),
+		ChallengeID:  formatChallengeID(challengeID),
 		Judgment:     JudgmentSV,
-		MaxBudgetUSD: budget,
-		TimeoutSec:   in.AgentDecl.TimeoutSec.Judgment,
+		MaxBudgetUSD: decl.JudgmentBudgetFor(JudgmentSV),
+		TimeoutSec:   decl.TimeoutSec.Judgment,
 		Sections:     sections,
 		OutputSchema: svOutputSchema(),
-		Invoker:      in.Invoker,
-		TaskID:       t.TaskID,
+		Invoker:      invoker,
+		TaskID:       taskID,
 	}
 	if jc != nil {
 		res, ns, err := jc.RunJudgment(ctx, s, runIn)

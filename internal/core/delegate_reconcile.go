@@ -371,7 +371,7 @@ var errReconcileNotEligible = errors.New("core: the challenge is no longer in pr
 // 検出（成果物の確認より優先）→ 成果物の確認（結果が succeeded で結末が completed の
 // ときだけ）の順。写す直前に読み直した課題が着手中でなければ、写さない。
 func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, runIDDisplay string,
-	rec *reconciliation, result RunResult, report *DelegationReport, cycleID string, j4 *j4Env) (status *string, note string, err error) {
+	rec *reconciliation, result RunResult, report *DelegationReport, cycleID string, j4 *childQuestionEnv) (status *string, note string, err error) {
 	runIDInt, _ := parseRunID(runIDDisplay)
 
 	// release の登録。委譲先のリポジトリの PR は、base が宣言の既定ブランチの PR（状態を問わない）
@@ -426,21 +426,23 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 		switch report.Outcome {
 		case DelegationOutcomeQuestions:
 			question := formatQuestionsHold(report)
+			// 止まり方は child_question。保留の印は、スーパーバイザーが上げたとき（escalated）だけ付き、判断点を呼ばなかったときは付かない。
+			opts := questionsHoldOptions(report)
+			opts.StopKind, opts.SupervisorEnabled = StopKindChildQuestion, supervisorEnabled(dc.Agent)
 			if j4 != nil {
-				answered, reason, err := s.routeQuestionsToJ4(ctx, dc, report, j4)
+				route, err := s.routeQuestionsToSupervisor(ctx, dc, report, j4)
 				if err != nil {
 					return nil, "", err
 				}
-				if answered {
-					// 回答は保留に入れない。課題は着手中のまま、次の起動が J4 の回答を渡して子を再開する。
+				if route.Answered {
+					// 答えは保留に入れない。課題は着手中のまま、次の起動が答えを渡して子を再開する。
 					j4.Answered = true
-					return nil, "J4 answered the child's questions; the child is resumed with the answers", nil
+					return nil, "the supervisor answered the child's questions; the child is resumed with the answers", nil
 				}
-				if reason != "" {
-					question = reason + "\n\n" + question
-				}
+				opts.Escalation = route.Escalation
+				question = formatChildQuestionHoldReason(route.Reason, question)
 			}
-			return s.mapReconciliationOptions(ctx, dc, runIDDisplay, OpHold, question, holdReasonQuestions, cycleID, false, questionsHoldOptions(report))
+			return s.mapReconciliationOptions(ctx, dc, runIDDisplay, OpHold, question, holdReasonQuestions, cycleID, false, opts)
 		case DelegationOutcomeBlocked:
 			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatBlockedHold(report), holdReasonBlocked, cycleID, false)
 		}
