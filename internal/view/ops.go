@@ -466,12 +466,40 @@ type CycleStarted struct {
 	Started bool `json:"started"`
 }
 
-// CycleStatus は `GET /api/v1/workspaces/{name}/cycle` の形。state は idle・running・stale。
+// CycleWatching は running.watching[] の要素（サイクルが見ている、終わっていない実行 1 件）。
+// state は working・verifying・waiting_owner。task_id・title は、タスクに結び付かない実行では課題の値。
+type CycleWatching struct {
+	ChallengeID  string  `json:"challenge_id"`
+	RunStartedAt string  `json:"run_started_at"`
+	SpentUSD     float64 `json:"spent_usd"`
+	State        string  `json:"state"`
+	TaskID       *string `json:"task_id"`
+	Title        string  `json:"title"`
+}
+
+// CycleRunning は走っているサイクルの様子（`running`）。
+type CycleRunning struct {
+	ActiveRuns      int             `json:"active_runs"`
+	BudgetUSD       float64         `json:"budget_usd"`
+	MaxParallelRuns int             `json:"max_parallel_runs"`
+	Rounds          int             `json:"rounds"`
+	SpentUSD        float64         `json:"spent_usd"`
+	StartedAt       string          `json:"started_at"`
+	StopRequested   bool            `json:"stop_requested"`
+	Trigger         string          `json:"trigger"`
+	Watching        []CycleWatching `json:"watching"`
+}
+
+// CycleStatus は `GET /api/v1/workspaces/{name}/cycle` と `flywheel cycle status --json` の形。
+// state は idle・running・stale。running は走っているサイクルの様子（走っていなければ null）、
+// last_end_reason は最後に終わったサイクルの終わった理由（無ければ null）。
 type CycleStatus struct {
-	LastEndedAt   *string `json:"last_ended_at"`
-	LastResult    *string `json:"last_result"`
-	LastStartedAt *string `json:"last_started_at"`
-	State         string  `json:"state"`
+	LastEndReason *string       `json:"last_end_reason"`
+	LastEndedAt   *string       `json:"last_ended_at"`
+	LastResult    *string       `json:"last_result"`
+	LastStartedAt *string       `json:"last_started_at"`
+	Running       *CycleRunning `json:"running"`
+	State         string        `json:"state"`
 }
 
 // FromCycleStatus は core.CycleStatus を CycleStatus へ変換する。
@@ -481,7 +509,36 @@ func FromCycleStatus(s *core.CycleStatus) CycleStatus {
 		r := string(*s.LastResult)
 		out.LastResult = &r
 	}
+	if s.LastEndReason != nil {
+		r := string(*s.LastEndReason)
+		out.LastEndReason = &r
+	}
+	if r := s.Running; r != nil {
+		run := &CycleRunning{
+			ActiveRuns: r.ActiveRuns, BudgetUSD: r.BudgetUSD, MaxParallelRuns: r.MaxParallelRuns, Rounds: r.Rounds,
+			SpentUSD: r.SpentUSD, StartedAt: FormatTimestamp(r.StartedAt), StopRequested: r.StopRequested, Trigger: r.Trigger,
+			Watching: []CycleWatching{},
+		}
+		for _, w := range r.Watching {
+			run.Watching = append(run.Watching, CycleWatching{
+				ChallengeID: w.ChallengeID, RunStartedAt: FormatTimestamp(w.RunStartedAt), SpentUSD: w.SpentUSD,
+				State: string(w.State), TaskID: strOrNil(w.TaskID), Title: w.Title,
+			})
+		}
+		out.Running = run
+	}
 	return out
+}
+
+// CycleStop は `flywheel cycle stop --json` の形。requested は止める指示を書いたか（走っているサイクルが無ければ false）。
+type CycleStop struct {
+	CycleID   *string `json:"cycle_id"`
+	Requested bool    `json:"requested"`
+}
+
+// FromCycleStopResult は core.CycleStopResult を CycleStop へ変換する。
+func FromCycleStopResult(r *core.CycleStopResult) CycleStop {
+	return CycleStop{CycleID: strOrNil(r.CycleID), Requested: r.Requested}
 }
 
 // ExportBody は `export` の成功の形の中身（書き出したファイルの絶対パスとスキーマの版）。

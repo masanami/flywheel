@@ -456,3 +456,59 @@ func TestCyclePostOnlyTheSignalLineShapeCountsAsStarted(t *testing.T) {
 		t.Fatalf("POST = %d %s", code, body)
 	}
 }
+
+// AC-149・AC-150: GET …/cycle は running と last_end_reason を返し、いまあるキーは変えない。走っているサイクルの
+// running は、止める指示の後に stop_requested が真になる。終わった後の last_end_reason は最後の周の終わった理由。
+func TestCycleGetRunningAndLastEndReason(t *testing.T) {
+	ws := initWorkspace(t)
+	exe, _ := fakeExecutable(t)
+	port := startCycleServer(t, exe, ws)
+	get := func() map[string]any {
+		code, body := getPath(t, port, cyclePath, "", "")
+		if code != 200 {
+			t.Fatalf("GET = %d %s", code, body)
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(body), &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	m := get()
+	for _, k := range []string{"state", "last_started_at", "last_ended_at", "last_result", "running", "last_end_reason"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("key %q missing: %v", k, m)
+		}
+	}
+	if m["running"] != nil || m["last_end_reason"] != nil {
+		t.Errorf("idle: running=%v last_end_reason=%v, want null", m["running"], m["last_end_reason"])
+	}
+
+	st, err := core.OpenWorkspace(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	cyc, err := st.BeginCycle(context.Background(), core.BeginCycleInput{Trigger: "cron", BudgetUSD: 10, Exclusive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := get()["running"].(map[string]any)
+	if !ok || r["trigger"] != "cron" || r["budget_usd"] != 10.0 || r["stop_requested"] != false || r["max_parallel_runs"] != float64(2) {
+		t.Fatalf("running = %v", r)
+	}
+	if res, err := st.RequestCycleStop(context.Background()); err != nil || !res.Requested {
+		t.Fatalf("RequestCycleStop = %+v, %v", res, err)
+	}
+	if r, _ := get()["running"].(map[string]any); r == nil || r["stop_requested"] != true {
+		t.Errorf("running after stop = %v", r)
+	}
+
+	if _, err := st.EndCycleWithReason(context.Background(), cyc.ID, core.CycleResultCompleted, core.CycleEndStopped); err != nil {
+		t.Fatal(err)
+	}
+	m = get()
+	if m["running"] != nil || m["last_end_reason"] != "stopped" {
+		t.Errorf("ended: running=%v last_end_reason=%v", m["running"], m["last_end_reason"])
+	}
+}
