@@ -181,12 +181,13 @@ func TestSuperviseStage_CallsOldestFirstWithTheStopKindAndOfferedHands(t *testin
 	if !strings.Contains(first, "止まり方: rework_limit") || !strings.Contains(second, "止まり方: upstream_unreadable") {
 		t.Errorf("order: first=%q second=%q, want rework_limit then upstream_unreadable", first, second)
 	}
-	for _, h := range []string{"send_back", "replan", "escalate"} {
+	// 保留の直前の状態が検証中なので、表の send_back は事前に外れる（replan・escalate は残る）。
+	for _, h := range []string{"replan", "escalate"} {
 		if !strings.Contains(first, "- "+h+":") {
 			t.Errorf("the offered hands lack %s: %s", h, first)
 		}
 	}
-	if strings.Contains(first, "- defer:") || f.inputs[0].Judgment != JudgmentSV {
+	if strings.Contains(first, "- defer:") || strings.Contains(first, "- send_back:") || f.inputs[0].Judgment != JudgmentSV {
 		t.Errorf("the offered hands must be the table's list only (no defer for rework_limit); judgment = %s", f.inputs[0].Judgment)
 	}
 }
