@@ -50,7 +50,7 @@ type SupervisorAction struct {
 	CreatedAt    time.Time
 }
 
-// SupervisorActionInput は RecordSupervisorAction の入力。ID の文字列は、課題 "C-<n>"・タスク "T-<n>"・run "R-<n>"。
+// SupervisorActionInput は recordSupervisorAction の入力。ID の文字列は、課題 "C-<n>"・タスク "T-<n>"・run "R-<n>"。
 type SupervisorActionInput struct {
 	CycleID     string
 	ChallengeID string
@@ -191,8 +191,9 @@ func insertSupervisorAction(ctx context.Context, tx *sql.Tx, at time.Time, in Su
 	return res.LastInsertId()
 }
 
-// RecordSupervisorAction は対処の記録を 1 件書く（1 つの書き込みのトランザクション）。入力の誤りは ErrValidation。
-func (s *Store) RecordSupervisorAction(ctx context.Context, in SupervisorActionInput) (*SupervisorAction, error) {
+// recordSupervisorAction は対処の記録を 1 件書く（1 つの書き込みのトランザクション）。入力の誤りは ErrValidation。
+// 非公開: 結果が executed の記録は回数の上限の数えに入るので、スーパーバイザーの段の外（CLI・サーバー）から書かせない。試験だけが呼ぶ。
+func (s *Store) recordSupervisorAction(ctx context.Context, in SupervisorActionInput) (*SupervisorAction, error) {
 	var id int64
 	err := classifyReadWriteErr(s.db.Write(ctx, func(tx *sql.Tx) error {
 		var err error

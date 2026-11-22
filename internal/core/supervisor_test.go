@@ -221,9 +221,9 @@ func TestSupervisorAction_RecordListAndCount(t *testing.T) {
 		if in.CycleID == "" {
 			in.CycleID = "Y-1"
 		}
-		a, err := s.RecordSupervisorAction(ctx, in)
+		a, err := s.recordSupervisorAction(ctx, in)
 		if err != nil {
-			t.Fatalf("RecordSupervisorAction(%+v): %v", in, err)
+			t.Fatalf("recordSupervisorAction(%+v): %v", in, err)
 		}
 		return a
 	}
@@ -338,12 +338,12 @@ func TestSupervisorAction_RejectsMalformedInput(t *testing.T) {
 	for name, mut := range cases {
 		in := ok
 		mut(&in)
-		if _, err := s.RecordSupervisorAction(context.Background(), in); !errors.Is(err, ErrValidation) {
+		if _, err := s.recordSupervisorAction(context.Background(), in); !errors.Is(err, ErrValidation) {
 			t.Errorf("%s: err = %v, want ErrValidation", name, err)
 		}
 	}
 	before, _ := s.ListSupervisorActionsByChallenge(context.Background(), "C-1")
-	if _, err := s.RecordSupervisorAction(context.Background(), ok); err != nil {
+	if _, err := s.recordSupervisorAction(context.Background(), ok); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := s.ListSupervisorActionsByChallenge(context.Background(), "C-1")
@@ -480,8 +480,8 @@ func TestExecuteSupervisorHand_NotYetImplementedHandsAreScaffolds(t *testing.T) 
 	t.Parallel()
 	s, _ := newWorkspaceStore(t)
 	for _, h := range SupervisorHandValues() {
-		if h == HandEscalate || h == HandDefer || h == HandReverify || h == HandRetry {
-			continue // 実装済み（defer は supervisor_defer_test.go、reverify・retry は supervisor_hand_reconcile_retry_test.go と supervisor_resolve_test.go が検証する）
+		if h == HandEscalate || h == HandDefer || h == HandReverify || h == HandRetry || h == HandSplitFollowup {
+			continue // 実装済み（defer は supervisor_defer_test.go、reverify・retry は supervisor_hand_reconcile_retry_test.go と supervisor_resolve_test.go、split_followup は supervisor_split_followup_test.go が検証する）
 		}
 		_, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{StopKind: StopKindArtifactMissing, Output: SVOutput{Hand: h}})
 		if !errors.Is(err, ErrSupervisorHandNotImplemented) {

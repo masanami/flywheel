@@ -72,7 +72,7 @@ func (f *offeredFixture) record(t *testing.T, tg supervisorTarget, hand Supervis
 	if tg.TaskID != nil {
 		in.TaskID = formatTaskID(*tg.TaskID)
 	}
-	if _, err := f.s.RecordSupervisorAction(context.Background(), in); err != nil {
+	if _, err := f.s.recordSupervisorAction(context.Background(), in); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -92,7 +92,7 @@ func TestOfferedHands_EachStopKindInAStateWithNothingToRemove(t *testing.T) {
 		run  string // 契約の実行の状態を決める set 句
 		want []SupervisorHand
 	}{
-		{StopKindVerifyUncertain, "", []SupervisorHand{HandReverify, HandSendBack, HandSplitFollowup, HandReplan, HandDefer, HandEscalate}},
+		{StopKindVerifyUncertain, "", []SupervisorHand{HandReverify, HandSendBack, HandReplan, HandDefer, HandEscalate}},
 		{StopKindArtifactMissing, "", []SupervisorHand{HandReverify, HandRetry, HandDefer, HandEscalate}},
 		{StopKindDelegateStopped, "state = 'failed', ended_at = '2026-11-22T00:00:00.000Z'", []SupervisorHand{HandRetry, HandReplan, HandDefer, HandEscalate}},
 		{StopKindFactsUnmet, "", []SupervisorHand{HandSendBack, HandEscalate}},
@@ -228,7 +228,7 @@ func TestOfferedHands_ReworkLimitSendBackIsAllowedOncePerTaskAfterTheLastOwnerAn
 	vu := f.hold(t, StatusInProgress, StopKindVerifyUncertain, true)
 	f.record(t, vu, HandSendBack, ActionExecuted)
 	f.record(t, vu, HandSendBack, ActionExecuted)
-	wantOffered(t, "verify_uncertain は回数の制限なし", f.offered(t, vu), HandReverify, HandSendBack, HandSplitFollowup, HandReplan, HandDefer, HandEscalate)
+	wantOffered(t, "verify_uncertain は回数の制限なし", f.offered(t, vu), HandReverify, HandSendBack, HandReplan, HandDefer, HandEscalate)
 
 	f.record(t, tg, HandSendBack, ActionFailed)
 	wantOffered(t, "failed の記録", f.offered(t, tg), HandSendBack, HandReplan, HandEscalate)

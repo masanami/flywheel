@@ -1,7 +1,7 @@
 package core
 
 // このファイルは、回数の上限（保留を作る入口。AC-38〜AC-51・AC-197）と、タスクの検証の連続の数え（AC-211〜AC-214）を
-// 実ストアで確かめる。対処の記録は、土台の API（RecordSupervisorAction）で置く（スーパーバイザーの段を待たない）。
+// 実ストアで確かめる。対処の記録は、土台の API（recordSupervisorAction）で置く（スーパーバイザーの段を待たない）。
 
 import (
 	"context"
@@ -28,7 +28,7 @@ func newLimitCase(t *testing.T) *limitCase {
 func (c *limitCase) act(t *testing.T, kind StopKind, hand SupervisorHand, result SupervisorActionResult, reason SupervisorRejectReason, task string) {
 	t.Helper()
 	in := SupervisorActionInput{CycleID: c.cycID, ChallengeID: c.cid, TaskID: task, StopKind: kind, Hand: hand, Findings: "f", Result: result, RejectReason: reason}
-	if _, err := c.s.RecordSupervisorAction(context.Background(), in); err != nil {
+	if _, err := c.s.recordSupervisorAction(context.Background(), in); err != nil {
 		t.Fatal(err)
 	}
 }
