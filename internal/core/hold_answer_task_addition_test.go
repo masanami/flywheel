@@ -219,3 +219,129 @@ func TestHoldAnswerTaskAddition_AddWithUnreadableDeclarationsIsRefusedWithoutPan
 		t.Errorf("addition = %s, want unchanged", adds[0].State)
 	}
 }
+
+// 区切り S4c-1 の 9: 「足す」の回答を受けたときの見込みの計算し直しと、問いの出し直し。
+
+// raiseExistingEstimate は、保留の間のタスクの枠の増額（足した後の見込みが 1 USD 増える）を作る。
+func (f *paFixture) raiseExistingEstimate(t *testing.T) {
+	t.Helper()
+	coretest.Exec(t, f.s.Workspace(), `UPDATE task SET budget_impl_micros = budget_impl_micros + 1000000 WHERE challenge_id = ? AND key = 'b'`, f.cid())
+}
+
+func (f *paFixture) answerHoldFull(t *testing.T, version int, req AnswerRequest) (*Challenge, *Hold, error) {
+	t.Helper()
+	req.ChallengeID, req.ExpectedVersion, req.Agent, req.Conn = f.id, version, f.agent, f.conn
+	return f.s.ExecuteAnswer(context.Background(), req, relayedAttestation(t, f.id, "sess", "quote"))
+}
+
+func TestHoldAnswerTaskAddition_AddAfterTheEstimateGrewReissuesTheQuestionAndChangesNothingElse(t *testing.T) {
+	t.Parallel()
+	f := overLimitHeld(t)
+	before := f.detail(t, f.id).Version
+	f.raiseExistingEstimate(t)
+	approvals := f.budgetApprovals(t)
+	c, hold, err := f.answerHoldFull(t, before, AnswerRequest{Option: taskAddOptionAdd})
+	if err != nil {
+		t.Fatalf("err = %v, want a successful write that reissues the question", err)
+	}
+	if !hold.Reissued || hold.Answer != nil {
+		t.Errorf("hold = %+v, want Reissued and unanswered", hold)
+	}
+	if c.Version != before+1 || c.Status != StatusAwaitingHuman {
+		t.Errorf("version=%d status=%s, want %d awaiting_human", c.Version, c.Status, before+1)
+	}
+	h, reason := f.lastHold(t)
+	if !h.Open() || reason != string(holdReasonTaskAddOverLimit) {
+		t.Errorf("hold = %+v reason=%s, want open task_add_over_limit", h, reason)
+	}
+	if !strings.Contains(h.Question, "足した後の見込み: $16") || strings.Contains(h.Question, "足した後の見込み: $15\n") {
+		t.Errorf("question = %q, want the recomputed estimate $16", h.Question)
+	}
+	if d := addOptionDescription(h.Options); !strings.Contains(d, "$16") {
+		t.Errorf("add description = %q, want $16", d)
+	}
+	if !strings.Contains(hold.Question, "$16") || !strings.Contains(addOptionDescription(hold.Options), "$16") {
+		t.Errorf("returned hold = %+v, want the new amount", hold)
+	}
+	if f.limitMicros(t) != 14_000_000 || f.taskByKey(t, "c") != nil || f.budgetApprovals(t) != approvals {
+		t.Errorf("limit=%d task=%v approvals=%d, want unchanged", f.limitMicros(t), f.taskByKey(t, "c"), f.budgetApprovals(t))
+	}
+	if adds := f.additions(t); adds[0].State != TaskAdditionAwaitingOwner {
+		t.Errorf("addition = %s, want awaiting_owner", adds[0].State)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM activity WHERE entity = 'challenge' AND entity_id = ? AND action = ?`, f.cid(), ActivityActionHoldEdit); n != 1 {
+		t.Errorf("hold_edit activities = %d, want 1", n)
+	}
+	// 古い版を持った再送は、版の不一致で断られる。
+	if _, _, err := f.answerHoldFull(t, before, AnswerRequest{Option: taskAddOptionAdd}); !errors.Is(err, ErrConflict) {
+		t.Errorf("stale resend err = %v, want ErrConflict", err)
+	}
+}
+
+func TestHoldAnswerTaskAddition_AnsweringAddAgainAfterTheReissueAddsTheTasks(t *testing.T) {
+	t.Parallel()
+	f := overLimitHeld(t)
+	f.raiseExistingEstimate(t)
+	c, _, err := f.answerHoldFull(t, f.detail(t, f.id).Version, AnswerRequest{Option: taskAddOptionAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, hold, err := f.answerHoldFull(t, c.Version, AnswerRequest{Option: taskAddOptionAdd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hold.Reissued || c.Status != StatusInProgress || f.taskByKey(t, "c") == nil {
+		t.Errorf("reissued=%v status=%s task=%v, want the tasks added", hold.Reissued, c.Status, f.taskByKey(t, "c"))
+	}
+	if got := f.limitMicros(t); got != 16_000_000 {
+		t.Errorf("limit = %d, want 16000000 (the amount the reissued option showed)", got)
+	}
+}
+
+func TestHoldAnswerTaskAddition_RefusalsChangeNothing(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		req  AnswerRequest
+		want error
+		text string
+	}{
+		{"sentence only", AnswerRequest{Answer: "足してください"}, ErrValidation, "add (足す)"},
+		{"replan flag only", AnswerRequest{Replan: true}, ErrValidation, "add (足す)"},
+		{"replan flag with a sentence", AnswerRequest{Answer: "x", Replan: true}, ErrValidation, "skip (足さずに進める)"},
+		{"unknown option", AnswerRequest{Option: "yes"}, ErrValidation, "replan (計画を作り直す)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := overLimitHeld(t)
+			_, _, err := f.answerHoldFull(t, f.detail(t, f.id).Version, tc.req)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			if tc.text != "" && !strings.Contains(err.Error(), tc.text) {
+				t.Errorf("err = %q, want it to list the options (%s)", err, tc.text)
+			}
+			if h, _ := f.lastHold(t); !h.Open() {
+				t.Errorf("hold was closed")
+			}
+			if adds := f.additions(t); adds[0].State != TaskAdditionAwaitingOwner || f.limitMicros(t) != 14_000_000 || f.detail(t, f.id).Status != StatusAwaitingHuman {
+				t.Errorf("addition = %s limit = %d, want unchanged", adds[0].State, f.limitMicros(t))
+			}
+		})
+	}
+}
+
+func TestHoldAnswerTaskAddition_AddWithoutAVerifiedAttestationIsRefusedAndKeepsTheLimit(t *testing.T) {
+	t.Parallel()
+	f := overLimitHeld(t)
+	f.raiseExistingEstimate(t)
+	v := f.detail(t, f.id).Version
+	_, _, err := f.s.ExecuteAnswer(context.Background(), AnswerRequest{ChallengeID: f.id, ExpectedVersion: v, Option: taskAddOptionAdd, Agent: f.agent, Conn: f.conn}, Attestation{})
+	if !errors.Is(err, ErrVerificationRejected) {
+		t.Fatalf("err = %v, want ErrVerificationRejected", err)
+	}
+	if f.limitMicros(t) != 14_000_000 || f.detail(t, f.id).Version != v {
+		t.Errorf("limit = %d version = %d, want unchanged (no reissue either)", f.limitMicros(t), f.detail(t, f.id).Version)
+	}
+}
