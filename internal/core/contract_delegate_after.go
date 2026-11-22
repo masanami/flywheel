@@ -144,7 +144,11 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 			if rs != nil && rs.ToSupervisor {
 				return nil // スーパーバイザーへ回す（pollOne の answerSupervisorWait）。保留にしない
 			}
-			dest = contractWaitOwnerHold
+			// スーパーバイザーへ回せない（宣言の supervisor が偽・判断の呼び出しが無い）。判断点を呼ばずにオーナーへ上げる。
+			// 委譲先からの問いなので、止まり方は委譲の報告の問いと同じ child_question（印は付けない。オーナーの決定 2026-11-23）。
+			held, err := s.holdContractWaitEscalated(ctx, rep, contractWaitingQuestion(rep.ExternalRunID, rep.Summary, rep.RequestedAction, resumeCarriesAnswer(connector)), nil)
+			rep.Held = held
+			return err
 		}
 		switch dest {
 		case contractWaitReview:
