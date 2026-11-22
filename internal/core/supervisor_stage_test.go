@@ -247,12 +247,12 @@ func TestSuperviseStage_HandOutsideTheOfferedList_FailsAndEscalates(t *testing.T
 func TestSuperviseStage_HandNotImplementedYet_FailsAndEscalates(t *testing.T) {
 	t.Parallel()
 	f := newSVFixture(t)
-	id := f.pendingHold(t, StopKindVerifyUncertain)
-	f.inv.result = svResult(map[string]any{"hand": "reverify", "note": "調べた結果"})
+	id := f.pendingHold(t, StopKindDelegateStopped)
+	f.inv.result = svResult(map[string]any{"hand": "retry", "note": "調べた結果"})
 	f.stage(t)
 	as := f.actions(t, id)
-	if len(as) != 1 || as[0].Result != ActionFailed || as[0].Hand == nil || *as[0].Hand != HandReverify {
-		t.Fatalf("actions = %+v, want one failed reverify action (the executed row is rolled back)", as)
+	if len(as) != 1 || as[0].Result != ActionFailed || as[0].Hand == nil || *as[0].Hand != HandRetry {
+		t.Fatalf("actions = %+v, want one failed retry action (the executed row is rolled back)", as)
 	}
 	if f.holdRow(t, id).state.String != "escalated" {
 		t.Error("the hold must be escalated")
