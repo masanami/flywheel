@@ -222,6 +222,15 @@ func (s *Store) holdContractReview(ctx context.Context, rep *ContractRunReport, 
 
 // holdContractReviewWith は holdContractReview に、保留を立てる同じトランザクションで行う書き込み extra（nil なら無し）を足したもの。
 func (s *Store) holdContractReviewWith(ctx context.Context, rep *ContractRunReport, question string, reason holdReason, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
+	return s.holdContractReviewWithOptionsReason(ctx, rep, question, reason, HoldOptionsInput{}, extra)
+}
+
+// holdContractReviewWithOptions は、理由を持たず止まり方を渡す保留（上流を読めない回りの上限）を、holdContractReviewWith と同じ形で立てる。
+func (s *Store) holdContractReviewWithOptions(ctx context.Context, rep *ContractRunReport, question string, opts HoldOptionsInput, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
+	return s.holdContractReviewWithOptionsReason(ctx, rep, question, "", opts, extra)
+}
+
+func (s *Store) holdContractReviewWithOptionsReason(ctx context.Context, rep *ContractRunReport, question string, reason holdReason, opts HoldOptionsInput, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
 			if tc.current.Status != StatusInProgress {
@@ -232,7 +241,7 @@ func (s *Store) holdContractReviewWith(ctx context.Context, rep *ContractRunRepo
 				return err
 			}
 			tc.taskID = taskID
-			if err := s.insertHoldWithOccurrence(ctx, tc, question, reason, ""); err != nil {
+			if _, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", opts); err != nil {
 				return err
 			}
 			if extra != nil {
