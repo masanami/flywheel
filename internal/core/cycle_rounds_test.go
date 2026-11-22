@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -76,7 +77,10 @@ func (f *roundsFixture) invoker(t *testing.T) *cycleFakeInvoker {
 }
 
 func (f *roundsFixture) input(inv JudgmentInvoker) CycleRunInput {
-	f.j5.checks.prs["o/r#1"] = prChecks("open", checkDone)
+	pr := prChecks("open", checkDone)
+	mergeable := true // 「計算中」のままだと、J5 がマージ可否を実時間で待ち直す（3 秒 × 2）
+	pr.Mergeable = &mergeable
+	f.j5.checks.prs["o/r#1"] = pr
 	return CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream, Delegate: f.deleg, Git: f.git,
 		Reconcile: f.branches, Checks: f.j5.checks, Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{}, Contract: f.client,
@@ -445,6 +449,57 @@ func TestRunCycle_Rounds_AC36_LockHeartbeatAdvancesDuringTheWait(t *testing.T) {
 	}
 	if after.Before(during) {
 		t.Errorf("heartbeat after the wait = %v, before = %v, want it not to go back", after, during)
+	}
+}
+
+// AC-36（待ちの前後の更新）: 周期のゴルーチンが打たない（周期が 1 時間）状態でも、間隔の待ちの後の次の回りの前に、ロックの heartbeat は更新されている。
+// 待ちの中で時計を進める。待ちの後の更新が無ければ、次の待ちの頭で読む時刻は、最初の時刻のまま。
+func TestRunCycle_Rounds_AC36_LockHeartbeatIsUpdatedAfterTheWaitEvenWithoutThePeriodicTick(t *testing.T) {
+	t.Parallel()
+	f := newRoundsFixture(t)
+	f.startOut(contractOut(ContractStateRunning, nil, nil))
+	f.reads(contractOut(ContractStateRunning, nil, nil), reviewWaitOut())
+	base := time.Now()
+	var offset atomic.Int64
+	f.s.now = func() time.Time { return base.Add(time.Duration(offset.Load())) }
+	f.s.lockHeartbeatInterval = time.Hour // 周期の更新は、この試験の間に打たれない
+	var first, afterWait time.Time
+	f.onWait = func(ctx context.Context, n int) error {
+		switch n {
+		case 1:
+			first = lockHeartbeatNoFatal(t, f.s)
+			offset.Add(int64(10 * time.Minute))
+		case 2:
+			afterWait = lockHeartbeatNoFatal(t, f.s)
+		}
+		return ctx.Err()
+	}
+	f.runCycle(t, f.input(f.invoker(t)))
+
+	if !afterWait.After(first.Add(5 * time.Minute)) {
+		t.Errorf("heartbeat after the first wait = %v, first = %v, want it updated by the round loop after the wait", afterWait, first)
+	}
+}
+
+// 間隔の待ちの間に、ロックの保持者が自分でなくなった（別のサイクルが回収した）→ 回りの繰り返しを続けず、ErrLockLost で終える。
+func TestRunCycle_Rounds_LockLostDuringTheWaitEndsTheCycleWithAnError(t *testing.T) {
+	t.Parallel()
+	f := newRoundsFixture(t)
+	f.startOut(contractOut(ContractStateRunning, nil, nil))
+	f.reads(contractOut(ContractStateRunning, nil, nil), contractOut(ContractStateRunning, nil, nil), reviewWaitOut())
+	f.s.lockHeartbeatInterval = time.Hour
+	f.onWait = func(ctx context.Context, n int) error {
+		if n == 1 {
+			f.sqlExec(t, `DELETE FROM lock WHERE name = 'cycle'`)
+		}
+		return ctx.Err()
+	}
+	_, err := f.s.RunCycle(context.Background(), f.input(f.invoker(t)))
+	if !errors.Is(err, ErrLockLost) {
+		t.Fatalf("RunCycle err = %v, want ErrLockLost", err)
+	}
+	if got := len(f.waited()); got != 1 {
+		t.Errorf("waits = %d, want 1 (no round after the lock was lost)", got)
 	}
 }
 

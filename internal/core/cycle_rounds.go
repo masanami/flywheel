@@ -14,6 +14,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -140,12 +141,17 @@ func (g *roundGovernor) decide(progressed bool, w *RoundWork) roundAction {
 	return roundWait
 }
 
-// waitBetweenRounds は間隔の待ちを 1 回置く。待ちの前後でロックの heartbeat を更新する。
+// waitBetweenRounds は間隔の待ちを 1 回置く。待ちの前後でロックの heartbeat を更新する。ロックを失っていた（別のサイクルが回収した）ときは、
+// 回りの繰り返しを続けず、ErrLockLost で終える（失ったまま段を重ねると、回収した側のサイクルと並んで動く）。
 func (s *Store) waitBetweenRounds(ctx context.Context, cycleID string, wait func(context.Context, time.Duration) error, d time.Duration) error {
-	_ = s.HeartbeatCycleLock(ctx, cycleID)
+	if err := s.HeartbeatCycleLock(ctx, cycleID); errors.Is(err, ErrLockLost) {
+		return err
+	}
 	err := wait(ctx, d)
 	// 待ちの間に ctx が取り消されても、周を閉じる側がロックを扱う。更新は取り消しに依存させない。
-	_ = s.HeartbeatCycleLock(context.WithoutCancel(ctx), cycleID)
+	if hbErr := s.HeartbeatCycleLock(context.WithoutCancel(ctx), cycleID); errors.Is(hbErr, ErrLockLost) {
+		return hbErr
+	}
 	return err
 }
 
@@ -192,7 +198,7 @@ func (s *Store) progressFingerprint(ctx context.Context) (string, error) {
 		queries := []string{
 			`SELECT 'c', id, status FROM challenge ORDER BY id`,
 			`SELECT 't', id, status FROM task ORDER BY id`,
-			`SELECT 'k', id, state || '|' || COALESCE(ended_at, '') || '|' || land_delivered || '|' || COALESCE(requested_kind, '') || '|' || COALESCE(wait_hold_id, '') || '|' || COALESCE(verified_ref, '') || '|' || COALESCE(fix_verified_ref, '') || '|' || COALESCE(fix_pending_ref, '') || '|' || held_success FROM contract_run ORDER BY id`,
+			`SELECT 'k', id, state || '|' || COALESCE(ended_at, '') || '|' || land_delivered || '|' || COALESCE(land_ref, '') || '|' || COALESCE(requested_kind, '') || '|' || COALESCE(wait_hold_id, '') || '|' || COALESCE(verified_ref, '') || '|' || COALESCE(fix_verified_ref, '') || '|' || COALESCE(fix_pending_ref, '') || '|' || held_success FROM contract_run ORDER BY id`,
 			`SELECT 'o', id, state FROM operation ORDER BY id`,
 			`SELECT 'h', id, COALESCE(answered_at, '') || '|' || COALESCE(closed_at, '') FROM hold ORDER BY id`,
 		}

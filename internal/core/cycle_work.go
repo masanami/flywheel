@@ -299,9 +299,7 @@ func (s *Store) CountRoundWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		// 保留の間に成功していた実行（検証中へ進める番）と、保留にし損ねた停止（保留にする番）。
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.held_success = 1 AND c.status = 'in_progress' AND COALESCE(c.uses_integration, 0) = 0
-			AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status = 'cancelled')`).Scan(&heldSuccess); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id WHERE `+heldSuccessWhere).Scan(&heldSuccess); err != nil {
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id WHERE `+unheldContractStopWhere).Scan(&unheldStops); err != nil {
