@@ -87,6 +87,15 @@ const (
 	CycleEndInterrupted CycleEndReason = "interrupted"
 )
 
+// validOrEmpty は r が終わった理由の 7 値のいずれか、または空（理由を持たない周）か。
+func (r CycleEndReason) validOrEmpty() bool {
+	switch r {
+	case "", CycleEndSettled, CycleEndBudget, CycleEndStopped, CycleEndRateLimited, CycleEndStalled, CycleEndError, CycleEndInterrupted:
+		return true
+	}
+	return false
+}
+
 // CycleResult は cycle.result の閉集合の公開エイリアス（run_store.go の
 // cycleResult をそのまま再輸出する。judgment.go の RunResult と同じ形）。
 type CycleResult = cycleResult
@@ -326,7 +335,7 @@ func (s *Store) EndCycleWithReason(ctx context.Context, cycleID string, result C
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if !result.valid() {
+	if !result.valid() || !reason.validOrEmpty() {
 		return nil, ErrValidation
 	}
 	now := s.currentTime()

@@ -157,7 +157,9 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"dependency":              "TestDependency_IDOmittedRun_UnmetDependencyNotStartedWithSortedDetail (internal/core/delegate_dependency_test.go)",
 		"integration_unavailable": "TestDelegateTask_AC117_TwoTasksReasonIsIntegrationUnavailable (internal/core/delegate_task_test.go)",
 		"no_tasks":                "TestDelegateTask_AC121_NoTasksForAnOldShapePlan (internal/core/delegate_task_test.go)",
-		"waiting_outside":         "TestReleaseOutside_SecondTimeReturnsNotStartedWaitingOutside (internal/core/release_exec_outside_test.go)",
+		// チェック待ちは作業中の実行と同じ扱い（止める指示まで回りを繰り返す）なので、cycle --json では終わりまで観測できない。core のテストが観測する。
+		"waiting_external": "TestRunCycle_VerifyPhase_PendingChecksAreWaitingExternal (internal/core/cycle_run_s2_test.go)",
+		"waiting_outside":  "TestReleaseOutside_SecondTimeReturnsNotStartedWaitingOutside (internal/core/release_exec_outside_test.go)",
 	}
 	observed := map[string]bool{}
 	for r, ref := range coreObservedReasons {
@@ -243,13 +245,6 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		for _, n := range phaseNotStarted(t, pm) {
 			observed[n["reason"].(string)] = true
 		}
-	})
-	t.Run("waiting_external", func(t *testing.T) {
-		ws := setupRunWorkspace(t)
-		newVerifyingForCase(t, ws, true)
-		withFakeGHRoutesOnPATH(t, ghChecksRoutes("open", checkRunsPending))
-		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j5Route("met", nil, nil)}, "")
-		observe(cycleDoc(t, ws))
 	})
 
 	var got []string
@@ -376,6 +371,8 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedRunBudget"
 	case "integration_unavailable":
 		return "NotStartedIntegrationUnavailable"
+	case "waiting_external":
+		return "NotStartedWaitingExternal"
 	case "no_tasks":
 		return "NotStartedNoTasks"
 	case "upstream_closed":
