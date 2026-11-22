@@ -29,7 +29,8 @@ func (c *statusProbeClient) Status(ctx context.Context, in ContractLaunchInput) 
 
 // #988 AC-43: サイクルの記録の rounds は、通した回りの数とちょうど等しい（下限ではなく厳密な一致）。
 // 回りの数が決まる設定で比べる: 落ち着いて終わるサイクルは、最後の回りを除く各回りの後に待ちが 1 回あるので、回りの数は待ちの数 + 1。
-// 進みの無い回りが 3 回続いて stalled で終わるサイクルは、ちょうど 3 回。何も無いサイクルは 1 回。
+// 何も無いサイクルは 1 回。stalled で終わるサイクル（進みのあった回り + 進みの無い回り 3 回）の数は、
+// TestRunCycle_Rounds_UnreadableApprovedChecksStall が固定する。
 func TestRunCycle_AC43_RoundsEqualsTheNumberOfRoundsRun(t *testing.T) {
 	t.Parallel()
 	t.Run("settled: rounds = waits + 1, in the result and in the stored record", func(t *testing.T) {
