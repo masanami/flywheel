@@ -18,6 +18,41 @@ test("AC-435 #809: 幅 360px で、課題の詳細の「経緯」は、ページ
       document.documentElement.clientWidth,
   );
   expect(overflows).toBe(false);
+  // 一時の測定（#1062）: .shell-body からはみ出している要素を出す。原因の特定の後で消す。
+  console.log(
+    "DIAG1062 " +
+      JSON.stringify(
+        await page.locator(".shell-body").evaluate((el) => {
+          const lim = el.getBoundingClientRect().right;
+          const out: unknown[] = [];
+          for (const n of Array.from(el.querySelectorAll("*"))) {
+            const r = n.getBoundingClientRect();
+            if (r.right > lim + 0.5 && r.width > 0)
+              out.push({
+                tag: n.tagName,
+                cls: (n as HTMLElement).className,
+                tid: n.getAttribute("data-testid"),
+                right: Math.round(r.right),
+                width: Math.round(r.width),
+                text: (n.textContent ?? "").slice(0, 40),
+              });
+          }
+          const cs = getComputedStyle(el);
+          return {
+            scroll: el.scrollWidth,
+            client: el.clientWidth,
+            offset: (el as HTMLElement).offsetWidth,
+            lim: Math.round(lim),
+            overflowX: cs.overflowX,
+            overflowY: cs.overflowY,
+            scrollH: el.scrollHeight,
+            clientH: el.clientHeight,
+            font: cs.fontFamily,
+            out: out.slice(0, 40),
+          };
+        }),
+      ),
+  );
   const body = await page
     .locator(".shell-body")
     .evaluate((el) => el.scrollWidth <= el.clientWidth);
