@@ -696,6 +696,20 @@ func TestVerifyAutoJ5_Uncertain_HoldsWithTheQuestionAndTheCauseRun(t *testing.T)
 	if got := f.queryString(t, `SELECT run_id FROM hold WHERE challenge_id = 1`); got != strings.TrimPrefix(runs[0].ID, "R-") {
 		t.Errorf("hold.run_id = %q, want the J5 run %s", got, runs[0].ID)
 	}
+	wantLastHoldStop(t, f.s, "verify_uncertain/pending") // AC-1
+}
+
+// AC-32: 宣言の supervisor が偽のとき、完了の検証の「判断できない」の保留は、止まり方は残るが、スーパーバイザー待ちにならない。
+func TestVerifyAutoJ5_Uncertain_WithSupervisorOffIsNotPending(t *testing.T) {
+	t.Parallel()
+	f := newJ5Fixture(t, "impl")
+	f.agent.Supervisor = false
+	f.delegateToVerifying(t, "C-1")
+	f.j5.result = j5Out("uncertain", nil, "QUESTION-FOR-HUMAN")
+	if _, err := f.verify(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	wantLastHoldStop(t, f.s, "verify_uncertain/<null>")
 }
 
 func TestVerifyAutoJ5_StatusChangedWhileJ5Ran_IsNotMapped(t *testing.T) {
@@ -789,6 +803,7 @@ func TestRework_LimitIsDetectedInTheNextCycle_TwoStillLaunch(t *testing.T) {
 	if got := f.queryString(t, `SELECT run_id FROM hold WHERE challenge_id = 1 ORDER BY id DESC LIMIT 1`); got != strings.TrimPrefix(j5[len(j5)-1].ID, "R-") {
 		t.Errorf("hold.run_id = %q, want the last J5 run", got)
 	}
+	wantLastHoldStop(t, f.s, "rework_limit/pending") // AC-8: 委譲の差し戻しの上限
 }
 
 func TestRework_AnswerAfterTheLimitStartsCountingAgain(t *testing.T) {
@@ -1078,6 +1093,7 @@ func TestVerifyAutoJ5_Actual_CountMismatchHoldsAndDoesNotWrite(t *testing.T) {
 			if q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`); !strings.HasPrefix(q, ActualMismatchHoldPreamble) {
 				t.Errorf("question = %q", q)
 			}
+			wantLastHoldStop(t, f.s, stopNone) // AC-15: 実物の食い違いの保留は対象にしない
 		})
 	}
 	// 実物なしの met も同じ（予想が非 NULL）。

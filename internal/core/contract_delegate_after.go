@@ -291,7 +291,7 @@ func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunRe
 	if merged {
 		reason = holdReasonMergedUnverified
 	}
-	return true, s.holdLandedEnd(ctx, rep, cid, integrationSucceededQuestion(rep.ExternalRunID, merged, unreadable), reason)
+	return true, s.holdLandedEnd(ctx, rep, cid, integrationSucceededQuestion(rep.ExternalRunID, merged, unreadable), reason, stopHoldOptions(StopKindIntakeUnverified, rs.agent()))
 }
 
 // heldSuccessWhere は、保留の間に成功していた契約の実行（k）を、検証中へ進める番の条件（SubmitHeldContractSuccesses と、回りの終わりの数え〔CountRoundWork〕が共有する）。
@@ -428,7 +428,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		case rr.Skip:
 			return nil, nil
 		case rr.HoldQuestion != "":
-			held, err := s.holdContractWithReason(ctx, rr.HoldRunID, challengeID, rr.HoldQuestion, holdReasonReworkLimit)
+			held, err := s.holdContractWithStop(ctx, rr.HoldRunID, challengeID, rr.HoldQuestion, holdReasonReworkLimit, stopHoldOptions(StopKindReworkLimit, in.AgentDecl))
 			return &ContractRunReport{ChallengeID: challengeID, ExternalRunID: row.ExternalRunID, Result: RunResultSucceeded,
 				State: row.State, Summary: row.Summary, Held: held}, err
 		default:
@@ -477,7 +477,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	if resume {
 		if rep.Result != RunResultSucceeded {
 			// 答えを返したか分からない。自動ではやり直さず、保留にする（答えは返し済みとして記録してある）。
-			held, err := s.holdReclaimedContractStart(ctx, rep.RunID, rep.ChallengeID, contractResumeFailedQuestion(row.ExternalRunID, rep.Result, rep.Error))
+			held, err := s.holdReclaimedContractStart(ctx, rep.RunID, rep.ChallengeID, contractResumeFailedQuestion(row.ExternalRunID, rep.Result, rep.Error), in.AgentDecl)
 			rep.Held = held
 			return rep, err
 		}
@@ -487,7 +487,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	} else if rep.Result == RunResultMalformed && !rep.Held {
 		// 状態の確認の出力の型が合わない（例: requested_action.options に文字列でない要素がある）。契約の状態は更新しておらず、
 		// 読み直しても同じ出力が返りうるので、自動では読み直し続けず保留にする。
-		held, err := s.holdReclaimedContractStart(ctx, rep.RunID, rep.ChallengeID, contractStatusMalformedQuestion(row.ExternalRunID, connector.ID, rep.Error))
+		held, err := s.holdReclaimedContractStart(ctx, rep.RunID, rep.ChallengeID, contractStatusMalformedQuestion(row.ExternalRunID, connector.ID, rep.Error), in.AgentDecl)
 		rep.Held = held
 		return rep, err
 	}
@@ -624,7 +624,7 @@ func (s *Store) runExistingContractCommandWith(ctx context.Context, client Contr
 			}
 			return client.Status(ctx, li)
 		},
-		MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseOp != nil || row.Kind == contractRunKindReflect || row.discard, HoldEnd: holdEnd, HoldSuccessEnd: row.holdSuccessEnd,
+		Agent: agent, MaxMicros: row.MaxBudget, Existing: row, StopNote: stopNote, ReleaseStage: releaseOp != nil || row.Kind == contractRunKindReflect || row.discard, HoldEnd: holdEnd, HoldSuccessEnd: row.holdSuccessEnd,
 		FactsRequired: row.reqFacts, CountFacts: name == "status" && releaseOp == nil,
 	})
 }
@@ -713,7 +713,8 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 		detail = fmt.Sprintf("中止を依頼したが、接続ツールの run の状態が %s のまま終わらなかった", crep.State)
 	}
 	q := note + "\n" + detail + "。接続ツールの側で run が動き続け、費用が増え続けうる。接続ツール側の run を確かめて止めてから回答する。自動では中止をやり直さない。"
-	held, err := s.holdReclaimedContractStart(ctx, crep.RunID, rep.ChallengeID, q)
+	// 予算の上限を超えた保留は、止まり方を渡さない（スーパーバイザー待ちにしない）。
+	held, err := s.holdContractWithReason(ctx, crep.RunID, rep.ChallengeID, q, holdReasonContractStopped)
 	rep.Held = held
 	return err
 }
@@ -807,7 +808,7 @@ func (s *Store) answerParentWait(ctx context.Context, in ContractPollInput, row 
 		return nil, err
 	}
 	if rrep.Result != RunResultSucceeded {
-		held, err := s.holdReclaimedContractStart(ctx, rrep.RunID, rrep.ChallengeID, contractResumeFailedQuestion(row.ExternalRunID, rrep.Result, rrep.Error))
+		held, err := s.holdReclaimedContractStart(ctx, rrep.RunID, rrep.ChallengeID, contractResumeFailedQuestion(row.ExternalRunID, rrep.Result, rrep.Error), in.AgentDecl)
 		rrep.Held = held
 		return rrep, err
 	}

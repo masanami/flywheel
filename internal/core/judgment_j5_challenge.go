@@ -182,10 +182,10 @@ func challengeCheckNotMetQuestion(v *j5ValidatedOutput) string {
 
 // finalizeJ5ChallengeOutput は課題の単位の確かめの出力を書く。満たした・判断できない・不正な出力は見直し前と同じ（finalizeJ5Output）。満たしていないは
 // applyJ5ChallengeNotMet。
-func (s *Store) finalizeJ5ChallengeOutput(ctx context.Context, runIDDisplay, challengeIDDisplay string, structured []byte, vh *j5VerifiedHeads) (outcome string, status *string, result RunResult, err error) {
+func (s *Store) finalizeJ5ChallengeOutput(ctx context.Context, runIDDisplay, challengeIDDisplay string, structured []byte, vh *j5VerifiedHeads, agent *AgentDeclaration) (outcome string, status *string, result RunResult, err error) {
 	v, ok := validateJ5Output(structured)
 	if !ok || v.Verdict != J5VerdictNotMet {
-		return s.finalizeJ5Output(ctx, runIDDisplay, challengeIDDisplay, structured, vh)
+		return s.finalizeJ5Output(ctx, runIDDisplay, challengeIDDisplay, structured, vh, agent)
 	}
 	mapped, err := s.applyJ5ChallengeNotMet(ctx, runIDDisplay, challengeIDDisplay, v, vh)
 	if err != nil {

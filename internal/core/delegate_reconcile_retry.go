@@ -104,7 +104,7 @@ func (s *Store) retryReconciliation(ctx context.Context, in DelegateInput, ch Ch
 		// 着手中のまま残さず人間対応待ちにする（回数は戻さない）。
 		q := "照合の取得の失敗の後、照合をやり直せない: 委譲の run " + p.Run.ID + " の報告が現在の宣言の検査を通らない（" + reason + "）。\n" +
 			"子は完了を報告したが、成果物の有無を確かめられていない（宣言の成果物の種類: " + dc.Operation.Artifacts + "）。"
-		status, note, err := s.mapReconciliation(ctx, dc, p.Run.ID, OpHold, q, holdReasonArtifactMissing, in.CycleID, false)
+		status, note, err := s.mapReconciliationStop(ctx, dc, p.Run.ID, q, holdReasonArtifactMissing, in.CycleID, false, StopKindArtifactMissing)
 		if err != nil {
 			return nil, nil, err
 		}
