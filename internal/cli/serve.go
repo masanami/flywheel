@@ -37,11 +37,8 @@ func runServe(a Args) (any, error) {
 		return nil, NewError(CodeListenFailed, fmt.Sprintf("127.0.0.1:%d で待ち受けられない: %v", port, err))
 	}
 	srv := server.New(ln, workspaces)
-	// 対話の欄の実行エンジン。invoker の起動器が core.ChatInvoker を満たすときだけ渡す（満たさない間は、
-	// 文を送る口が 503 を返す）。
-	if ci, ok := any(invoker.NewLauncherWithLookPath(a.LookPath)).(core.ChatInvoker); ok {
-		srv.SetChatInvoker(ci)
-	}
+	// 対話の欄の実行エンジン。起動器が core.ChatInvoker を満たすことは、SetChatInvoker の引数の型でコンパイル時に確かめる（実装側にも var _ がある）。
+	srv.SetChatInvoker(invoker.NewLauncherWithLookPath(a.LookPath))
 
 	// シグナルは待ち受けを始める前に登録する（登録前に届いた SIGTERM で既定の動作に
 	// なり、終了コード 0 にならないのを避ける）。

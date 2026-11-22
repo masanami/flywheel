@@ -645,3 +645,46 @@ func TestReopenOperation_AFailedCancelOfAReflectRequestMakesTheReopenConflict(t 
 		t.Errorf("challenge status = %s, want done", got)
 	}
 }
+
+// 欄からは検証中へ戻す操作を行わない（core が欄の印の検査と発言の記録を持たないため）。戻らず、記録も増えない。
+func TestUndeterminable_ReopenFromTheChatPanelIsRefused(t *testing.T) {
+	parallelTools(t, true)
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
+	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
+	openChat(t, f.ws).set(t, "restricted")
+	code, _, stderr := runCLIRaw(t, []string{"approve", f.ops[0], "--reopen", "--workspace", f.ws, "--json"}...)
+	if code == 0 || !strings.Contains(stderr, "対話の欄からは行えません") {
+		t.Fatalf("exit=%d stderr=%s, want refused", code, stderr)
+	}
+	if got := f.challengeStatus(t); got != "done" {
+		t.Errorf("challenge status = %s, want done", got)
+	}
+	if rows := coretest.QueryRows(t, f.ws, `SELECT 1 FROM activity WHERE action = 'reopen_for_release'`); len(rows) != 0 {
+		t.Errorf("reopen_for_release rows = %d, want 0", len(rows))
+	}
+}
+
+// 欄からの完了の承認の中で、検証の後に中身が変わった release を見つけても、課題を検証中へ戻さない（欄は戻す書き込みを持たない）。
+func TestMergeIn_ContentChangeFromTheChatPanelDoesNotReopenTheChallenge(t *testing.T) {
+	parallelTools(t, true)
+	v, h := releaseHead(1, 0), releaseHead(1, 1)
+	routes := concatRoutes(miRoutes(1, h, "", "true"), []fakeGHRoute{
+		miCompareRoute(v, h, miCompare(2, []miCommit{{miLast, []string{v}, "add feature"}, {h, []string{miLast, miMain}, "Merge"}})),
+		miCompareRoute("main", h, miCompare(3, []miCommit{{v, []string{miBase}, "feat"}, {miLast, []string{v}, "add feature"}, {h, []string{miLast, miMain}, "Merge"}})),
+	})
+	f, _, _ := newMergeInFixture(t, routes)
+	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
+	openChat(t, f.ws).set(t, "restricted")
+
+	code, _, stderr := runCLIRaw(t, []string{"approve", f.ops[0], "--workspace", f.ws, "--json"}...)
+	if code == 0 || !strings.Contains(stderr, "ターミナルで同じ承認を実行してください") {
+		t.Fatalf("exit=%d stderr=%s, want refused with a pointer to the terminal", code, stderr)
+	}
+	if got := f.challengeStatus(t); got != "done" {
+		t.Errorf("challenge status = %s, want done", got)
+	}
+	if rows := coretest.QueryRows(t, f.ws, `SELECT 1 FROM activity WHERE action = 'reopen_for_release'`); len(rows) != 0 {
+		t.Errorf("reopen_for_release rows = %d, want 0", len(rows))
+	}
+}
