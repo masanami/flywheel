@@ -487,8 +487,10 @@ func insertHoldKindFromTask(ctx context.Context, tc *transitionCtx, question str
 // （承認の待ち先が人のままで、人の対応を待つ保留は意味を持たない。保留を書く入口すべてが通るここで検査する）。
 //
 // 止まり方（opts.StopKind）が渡され、opts.SupervisorEnabled（宣言の supervisor。呼び出し元が渡す）が真のとき、行を作るのと同じ書き込みの中で
-// supervisor_state を pending にする。止まり方を渡さない呼び出しは stop_kind も supervisor_state も NULL のまま。回数の上限の判定は
-// ここに無い（別のタスク）。
+// supervisor_state を pending にする。止まり方を渡さない呼び出しは stop_kind も supervisor_state も NULL のまま。
+//
+// 止まり方が渡されたときは、行を作る前に、同じ書き込みの中で回数の上限（supervisor_limit.go）を判定する。当たったときは
+// supervisor_state を NULL のまま（stop_kind は残す）にし、問いの先頭に固定の 1 行を足してオーナーへ上げる。
 func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question string, kind HoldKind, from Status, taskID *int64, opts HoldOptionsInput) (int64, error) {
 	if tc.current.Status == StatusAwaitingPlanApproval && kind != HoldKindParentDirect {
 		return 0, ErrInvalidTransition
@@ -513,7 +515,13 @@ func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question stri
 	var stopKindColumn, supervisorStateColumn any
 	if opts.StopKind != "" {
 		stopKindColumn = string(opts.StopKind)
-		if opts.SupervisorEnabled {
+		limitHands, err := supervisorLimitHit(ctx, tc.tx, tc.id, taskID, opts.StopKind)
+		if err != nil {
+			return 0, err
+		}
+		if limitHands != nil {
+			question = supervisorLimitNotice(limitHands) + "\n" + question
+		} else if opts.SupervisorEnabled {
 			supervisorStateColumn = string(SupervisorStatePending)
 		}
 	}
