@@ -480,8 +480,8 @@ func TestExecuteSupervisorHand_NotYetImplementedHandsAreScaffolds(t *testing.T) 
 	t.Parallel()
 	s, _ := newWorkspaceStore(t)
 	for _, h := range SupervisorHandValues() {
-		if h == HandEscalate || h == HandReverify || h == HandRetry {
-			continue // 実装済み（reverify・retry は supervisor_hand_reconcile_retry_test.go と supervisor_resolve_test.go で検証する）
+		if h == HandEscalate || h == HandDefer || h == HandReverify || h == HandRetry {
+			continue // 実装済み（defer は supervisor_defer_test.go、reverify・retry は supervisor_hand_reconcile_retry_test.go と supervisor_resolve_test.go が検証する）
 		}
 		_, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{StopKind: StopKindArtifactMissing, Output: SVOutput{Hand: h}})
 		if !errors.Is(err, ErrSupervisorHandNotImplemented) {

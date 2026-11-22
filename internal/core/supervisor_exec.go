@@ -121,12 +121,19 @@ func (s *Store) writeSupervisorAction(ctx context.Context, tx *sql.Tx, req super
 // applySupervisorHand は手を実行する。対処の記録（executed）・作業ログ・手の書き込みを、1 つのトランザクションで行う。
 // 手が断った（rejected）とき・手がまだ無い／入力が不正で実行できなかった（failed）ときは、手の書き込みを巻き戻し、
 // その結果の対処の記録を別の書き込みで残す（failed は、保留をオーナーへ上げる）。ストアのエラーは、記録せずに返す（保留は待ちのまま）。
-// オーナーの回答の直前の確かめ（owner_answered）は別のタスクが足す。この関数の手の書き込みは、待ちでない保留を書き換えない
-// （手の書き込みが、対象の保留がスーパーバイザー待ちであることを条件にする）。
+// 手の実行の直前に、同じトランザクションの中で、オーナーが保留へ回答していないかを確かめる（回答済みなら rejected・owner_answered）。
+// 手の書き込みは、待ちでない保留を書き換えない（手の書き込みが、対象の保留がスーパーバイザー待ちであることを条件にする）。
 func (s *Store) applySupervisorHand(ctx context.Context, req supervisorHandRequest) (supervisorHandOutcome, error) {
 	var outcome supervisorHandOutcome
 	var handErr error
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		if owner, err := supervisorHoldAnsweredByOwner(ctx, tx, req.Target.HoldID); err != nil {
+			return err
+		} else if owner {
+			// 判断の間にオーナーが回答した。結果を捨てる（手は実行しない・保留と課題は触らない）。
+			outcome = supervisorHandOutcome{Result: ActionRejected, Reject: RejectOwnerAnswered}
+			return errSupervisorNotExecuted
+		}
 		o := req.Output
 		actionID, err := s.writeSupervisorAction(ctx, tx, req, req.actionInput(o.Hand, o.Findings, o.Note, o.Basis, ActionExecuted, ""))
 		if err != nil {
@@ -198,7 +205,7 @@ func (s *Store) recordSupervisorFailure(ctx context.Context, req supervisorHandR
 			return err
 		}
 		err = escalateSupervisorHold(ctx, tx, req.Target.HoldID, supervisorEscalation{
-			Findings: reason, Recommendation: "スーパーバイザーでは対処できなかった。オーナーが判断してください。", ActionID: id,
+			Findings: reason, Recommendation: "スーパーバイザーでは対処できなかった。オーナーが判断してください。", ActionID: id, FailedQuestion: true,
 		})
 		if errors.Is(err, errSupervisorHoldNotPending) {
 			return errSupervisorNotExecuted

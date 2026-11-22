@@ -193,6 +193,42 @@ type ImprovePhase struct {
 	Skipped    bool              `json:"skipped"`
 }
 
+// SuperviseHands は supervise の段の、手ごとの件数（そのサイクルで結果が executed の対処の記録。手の閉集合の 7 つを常に出す）。
+type SuperviseHands struct {
+	Defer         int `json:"defer"`
+	Escalate      int `json:"escalate"`
+	Replan        int `json:"replan"`
+	Retry         int `json:"retry"`
+	Reverify      int `json:"reverify"`
+	SendBack      int `json:"send_back"`
+	SplitFollowup int `json:"split_followup"`
+}
+
+// SupervisePhase は supervise の段の形（cycle の phases の要素）。Processed は、スーパーバイザーの判断点を 1 回呼んだ保留・子の問いの数
+// （結果が failed・rejected のものを含み、判断点を呼ばずに上げたものは含まない）。
+type SupervisePhase struct {
+	Hands      SuperviseHands    `json:"hands"`
+	NotStarted []PhaseNotStarted `json:"not_started"`
+	Phase      string            `json:"phase"`
+	Processed  int               `json:"processed"`
+	Skipped    bool              `json:"skipped"`
+}
+
+// FromSupervisePhase は supervise の段の結果を変換する。
+func FromSupervisePhase(p core.CyclePhaseResult) SupervisePhase {
+	h := p.SuperviseHands
+	return SupervisePhase{
+		Hands: SuperviseHands{
+			Defer: h[core.HandDefer], Escalate: h[core.HandEscalate], Replan: h[core.HandReplan], Retry: h[core.HandRetry],
+			Reverify: h[core.HandReverify], SendBack: h[core.HandSendBack], SplitFollowup: h[core.HandSplitFollowup],
+		},
+		NotStarted: phaseNotStarted(p.NotStarted),
+		Phase:      string(core.CyclePhaseSupervise),
+		Processed:  p.SuperviseProcessed,
+		Skipped:    p.Skipped,
+	}
+}
+
 // BackupResult は backup の段の result（outcome は committed|unchanged|not_git|ignored|failed）。
 type BackupResult struct {
 	Commit  *string `json:"commit"`
@@ -322,6 +358,9 @@ func FromCyclePhase(p core.CyclePhaseResult) any {
 	}
 	if p.Phase == core.CyclePhaseBackup && p.Backup != nil {
 		return FromBackupPhase(*p.Backup)
+	}
+	if p.Phase == core.CyclePhaseSupervise {
+		return FromSupervisePhase(p)
 	}
 	if p.Phase == core.CyclePhaseImprove {
 		return FromImprovePhase(p.ImproveItems, p.NotStarted)

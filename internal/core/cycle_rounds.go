@@ -87,7 +87,7 @@ func (s *Store) runRounds(ctx context.Context, in CycleRunInput, cycleID string,
 		if reason, ended := roundEndReason(stop, jc.RateLimited(), roundHitCycleBudget(res)); ended {
 			return reason, nil
 		}
-		work, err := s.CountRoundWork(ctx, in.AgentDecl, in.ConnDecl)
+		work, err := s.countRoundWork(ctx, in.AgentDecl, in.ConnDecl, cycleDBIDOf(cycleID))
 		if err != nil {
 			return "", err
 		}

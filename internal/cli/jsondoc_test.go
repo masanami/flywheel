@@ -738,6 +738,13 @@ func assertDocumentedCycle(t *testing.T, doc documentedJSON, out map[string]any)
 			assertDocumentedBackupPhase(t, where, pm)
 			continue
 		}
+		if name == "supervise" {
+			// supervise の段は items を持たず、処理した件数 processed と手ごとの件数 hands を持つ（docs/features/m3-invoker-delegation.md）。
+			if got := sortedKeys(keysOf(pm)); !reflect.DeepEqual(got, []string{"hands", "not_started", "phase", "processed", "skipped"}) {
+				t.Errorf("%s keys = %v, documented = [hands not_started phase processed skipped]", where, got)
+			}
+			continue
+		}
 		if name == "ingest" {
 			if got := keysOf(pm); !reflect.DeepEqual(got, doc.entity["cycle_phase_ingest"]) {
 				t.Errorf("%s keys = %v, documented = %v", where, sortedKeys(got), sortedKeys(doc.entity["cycle_phase_ingest"]))
