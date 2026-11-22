@@ -282,15 +282,9 @@ func applyJ2ExpandAdd(ctx context.Context, tx *sql.Tx, rec *activityRecorder, ci
 		return "見込みが不明のため足さない", nil
 	}
 	bs := append([]taskBudget(nil), st.Budgets...)
-	inputs := make([]TaskInput, 0, len(v.Tasks))
-	for _, t := range v.Tasks {
-		impl, review := taskBudgetMicros(t.BudgetImplUSD), taskBudgetMicros(t.BudgetReviewUSD)
-		bs = append(bs, taskBudget{PlanVersion: st.Version, Status: TaskStatusPending, Impl: *impl, Review: *review, Known: true})
-		inputs = append(inputs, TaskInput{
-			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria, NonGoals: t.NonGoals,
-			Repo: t.Repo, Operation: t.Operation, DependsOn: t.DependsOn,
-			BudgetImplMicros: impl, BudgetReviewMicros: review, ExpandAfter: t.ExpandAfter,
-		})
+	inputs := j2ExpandTaskInputs(v.Tasks)
+	for _, in := range inputs {
+		bs = append(bs, taskBudget{PlanVersion: st.Version, Status: TaskStatusPending, Impl: *in.BudgetImplMicros, Review: *in.BudgetReviewMicros, Known: true})
 	}
 	after, _ := sumTaskBudgets(bs)
 	total := after.Impl + after.Review
@@ -306,11 +300,30 @@ func applyJ2ExpandAdd(ctx context.Context, tx *sql.Tx, rec *activityRecorder, ci
 		}
 		return fmt.Sprintf("足した後の見込みが上限を超えるため保留にした: H-%d", holdID), nil
 	}
+	totalUSD, limitUSD := microsToUSD(total), microsToUSD(limit)
+	return createExpandedTasks(ctx, tx, rec, cid, additionID, st, v, inputs, totalUSD, limitUSD)
+}
+
+// j2ExpandTaskInputs は検査済みの足すタスクを、タスクの行を作る入力にする（枠は検査済みで、必ずある）。
+func j2ExpandTaskInputs(tasks []j2Task) []TaskInput {
+	inputs := make([]TaskInput, 0, len(tasks))
+	for _, t := range tasks {
+		inputs = append(inputs, TaskInput{
+			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria, NonGoals: t.NonGoals,
+			Repo: t.Repo, Operation: t.Operation, DependsOn: t.DependsOn,
+			BudgetImplMicros: taskBudgetMicros(t.BudgetImplUSD), BudgetReviewMicros: taskBudgetMicros(t.BudgetReviewUSD), ExpandAfter: t.ExpandAfter,
+		})
+	}
+	return inputs
+}
+
+// createExpandedTasks は検査済みの足すタスクの行を作り（承認済みの版・未着手・足す依頼を指す）、足す依頼を「足した」で閉じ、作業ログへ残す。
+// 上限以下で足す処理と、保留への回答（足す）が共有する。totalUSD・limitUSD は足す依頼に記録する足した後の見込みと上限。足したタスクの ID の文を返す。
+func createExpandedTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid, additionID int64, st j2ExpandState, v *j2ExpandValidated, inputs []TaskInput, totalUSD, limitUSD float64) (string, error) {
 	created, err := createTasksWith(ctx, tx, rec, cid, st.Version, inputs, createTasksOptions{Existing: st.DepIDs, AdditionID: &additionID})
 	if err != nil {
 		return "", err
 	}
-	totalUSD, limitUSD := microsToUSD(total), microsToUSD(limit)
 	if _, err := setTaskAdditionStateTx(ctx, tx, rec, additionID, TaskAdditionApplied, TaskAdditionUpdate{Spec: &v.Spec, TotalAfterUSD: &totalUSD, LimitUSD: &limitUSD}); err != nil {
 		return "", err
 	}
