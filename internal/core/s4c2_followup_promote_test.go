@@ -191,10 +191,10 @@ func TestFollowupTask_CancelledTaskCanBeRepromotedAndClearsTaskColumn_AC59_AC68(
 	s, id, tasks := additionFixture(t)
 	f := s4c2PromotedFollowup(t, s, id, tasks[0], TaskStatusCancelled)
 	ctx := context.Background()
-	if _, err := s.PrepareFollowupPromote(ctx, f); err != nil {
+	if _, err := s.PrepareFollowupPromote(ctx, f, FollowupPromoteOptions{}, nil); err != nil {
 		t.Fatalf("prepare (AC-68): %v", err)
 	}
-	c, got, err := s.PromoteFollowup(ctx, f, fuAtt(t, f))
+	c, got, err := promoteViaPlan(ctx, s, f, fuAtt(t, f))
 	if err != nil {
 		t.Fatalf("re-promote (AC-68): %v", err)
 	}
@@ -219,7 +219,7 @@ func TestFollowupTask_DeclinedOrSupersededAdditionCanBeRepromoted_AC69_AC70(t *t
 			s, id, _ := additionFixture(t)
 			f := s4c2OpenFollowup(t, s, id)
 			s4c2AddAddition(t, s, id, f, st)
-			if _, _, err := s.PromoteFollowup(context.Background(), f, fuAtt(t, f)); err != nil {
+			if _, _, err := promoteViaPlan(context.Background(), s, f, fuAtt(t, f)); err != nil {
 				t.Errorf("promote after %s: %v", st, err)
 			}
 		})
@@ -233,10 +233,10 @@ func TestFollowupTask_PendingAdditionRejectsPromote_AC71(t *testing.T) {
 		s, id, _ := additionFixture(t)
 		f := s4c2OpenFollowup(t, s, id)
 		s4c2AddAddition(t, s, id, f, st)
-		if _, _, err := s.PromoteFollowup(context.Background(), f, fuAtt(t, f)); !errors.Is(err, ErrValidation) {
+		if _, _, err := promoteViaPlan(context.Background(), s, f, fuAtt(t, f)); !errors.Is(err, ErrValidation) {
 			t.Errorf("%s: err = %v, want ErrValidation", st, err)
 		}
-		if _, err := s.PrepareFollowupPromote(context.Background(), f); !errors.Is(err, ErrValidation) {
+		if _, err := s.PrepareFollowupPromote(context.Background(), f, FollowupPromoteOptions{}, nil); !errors.Is(err, ErrValidation) {
 			t.Errorf("%s prepare: err = %v, want ErrValidation", st, err)
 		}
 	}
@@ -248,7 +248,7 @@ func TestFollowupTask_LiveTaskRejectsPromote_AC72_AC73_AC74(t *testing.T) {
 	for _, st := range []TaskStatus{TaskStatusPending, TaskStatusInProgress, TaskStatusVerifying} {
 		s, id, tasks := additionFixture(t)
 		f := s4c2PromotedFollowup(t, s, id, tasks[0], st)
-		if _, _, err := s.PromoteFollowup(context.Background(), f, fuAtt(t, f)); !errors.Is(err, ErrValidation) {
+		if _, _, err := promoteViaPlan(context.Background(), s, f, fuAtt(t, f)); !errors.Is(err, ErrValidation) {
 			t.Errorf("task %s: err = %v, want ErrValidation", st, err)
 		}
 		if got := s4c2Followup(t, s, f); got.PromotedTaskID == nil {
@@ -263,7 +263,7 @@ func TestFollowupTask_DoneTaskFollowupCannotBePromoted_AC75(t *testing.T) {
 	s, id, tasks := additionFixture(t)
 	f := s4c2PromotedFollowup(t, s, id, tasks[0], TaskStatusVerifying)
 	s4c2SetTask(t, s, tasks[0], TaskStatusDone)
-	if _, _, err := s.PromoteFollowup(context.Background(), f, fuAtt(t, f)); !errors.Is(err, ErrValidation) {
+	if _, _, err := promoteViaPlan(context.Background(), s, f, fuAtt(t, f)); !errors.Is(err, ErrValidation) {
 		t.Errorf("err = %v, want ErrValidation", err)
 	}
 }
@@ -283,7 +283,7 @@ func TestFollowupTask_OpenFollowupWithDoneTaskRejectsPromote_AC75(t *testing.T) 
 	t.Parallel()
 	s, id, tasks := additionFixture(t)
 	f := s4c2PromotedFollowup(t, s, id, tasks[0], TaskStatusDone)
-	if _, _, err := s.PromoteFollowup(context.Background(), f, fuAtt(t, f)); !errors.Is(err, ErrValidation) {
+	if _, _, err := promoteViaPlan(context.Background(), s, f, fuAtt(t, f)); !errors.Is(err, ErrValidation) {
 		t.Errorf("err = %v, want ErrValidation", err)
 	}
 }
@@ -304,7 +304,7 @@ func TestFollowupTask_BothColumnsReadTheTask(t *testing.T) {
 	if n := s4c2Triage(t, s); n != 0 {
 		t.Errorf("triage count = %d, want 0", n)
 	}
-	if _, _, err := s.PromoteFollowup(context.Background(), f, fuAtt(t, f)); !errors.Is(err, ErrValidation) {
+	if _, _, err := promoteViaPlan(context.Background(), s, f, fuAtt(t, f)); !errors.Is(err, ErrValidation) {
 		t.Errorf("err = %v, want ErrValidation", err)
 	}
 }

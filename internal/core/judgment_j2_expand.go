@@ -101,9 +101,15 @@ type expandAdditionCandidate struct {
 
 // expandAddable は課題 cid が足せる状態か（統合先を使い、着手中か保留中で、見込みが分かる）を返す。
 func expandAddable(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclaration) (bool, error) {
+	ok, _, err := expandAddableReason(ctx, tx, cid, agent)
+	return ok, err
+}
+
+// expandAddableReason は expandAddable と同じ判定で、足せないときの理由（利用者向けの 1 文）も返す。
+func expandAddableReason(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclaration) (bool, string, error) {
 	ch, err := loadChallenge(ctx, tx, cid)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	switch ch.Status {
 	case StatusInProgress:
@@ -113,30 +119,35 @@ func expandAddable(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDecla
 		err := tx.QueryRowContext(ctx,
 			`SELECT from_status FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL ORDER BY id DESC LIMIT 1`, cid).Scan(&from)
 		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
+			return false, "元の課題の保留が、着手中から置かれたものではない", nil
 		}
 		if err != nil {
-			return false, err
+			return false, "", err
 		}
 		if Status(from) != StatusInProgress {
-			return false, nil
+			return false, "元の課題の保留が、着手中から置かれたものではない", nil
 		}
+	case StatusVerifying:
+		return false, "元の課題が検証中のため、タスクを足せない", nil
 	default:
-		return false, nil
+		return false, "元の課題が着手中でも保留中でもないため、タスクを足せない（状態: " + string(ch.Status) + "）", nil
 	}
 	integ, err := challengeUsesIntegration(ctx, tx, cid)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	if integ == nil || !*integ {
-		return false, nil
+		return false, "元の課題が統合先を使わない（タスクが 1 個の課題）ため、タスクを足せない", nil
 	}
 	bs, err := loadTaskBudgets(ctx, tx, cid, agent)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	_, known := sumTaskBudgets(bs)
-	return known, nil
+	if !known {
+		return false, "枠を決められないタスクがある（見込みが不明）ため、タスクを足せない", nil
+	}
+	return true, "", nil
 }
 
 // unaddedExpandTasks は、済みの expand_after のタスクで、足す依頼（出どころ expand）がまだ無いものを、課題の ID の昇順・

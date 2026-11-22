@@ -669,29 +669,6 @@ func (s *Store) DropFollowups(ctx context.Context, ids []string, reason string, 
 	return out, nil
 }
 
-// PromoteFollowup は未のフォローアップを新しい課題に上げる（1 回に 1 件。本人確認の対象は id）。
-func (s *Store) PromoteFollowup(ctx context.Context, id string, att Attestation) (*Challenge, *Followup, error) {
-	if !attestationPermits(att, id, actionFollowupPromote) {
-		return nil, nil, ErrVerificationRejected
-	}
-	var (
-		ch *Challenge
-		fu *Followup
-	)
-	err := s.mutateAs(ctx, att.actor, att.channel, att.verification, func(tx *sql.Tx, rec *activityRecorder) error {
-		if err := s.chatGate(ctx, tx, att, actionFollowupPromote, ""); err != nil {
-			return err
-		}
-		var err error
-		ch, fu, err = promoteFollowup(ctx, tx, rec, att, id)
-		return err
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return ch, fu, nil
-}
-
 // checkPromotable は f を課題に上げてよいかを検査する（それ以外は ErrValidation）。
 // 未であること。フォローアップを指す、閉じていない足す依頼（仕様待ち・オーナー待ち）が無いこと。
 // 上げてあるなら、上げた先（タスクの列があればタスク、無ければ課題）が、取りやめのタスク・取り下げの課題であること。
@@ -762,31 +739,6 @@ func (s *Store) PrepareFollowupDrop(ctx context.Context, ids []string, reason st
 		for _, f := range fs {
 			out = append(out, *f)
 		}
-		return nil
-	})
-	if err = classifyReadWriteErr(err); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// PrepareFollowupPromote は課題に上げる前の本人確認の要約のために、id のフォローアップを返す（読み取りだけ）。
-// PromoteFollowup と同じ規則（存在しなければ ErrNotFound、上げてよくなければ ErrValidation）で検査する。
-func (s *Store) PrepareFollowupPromote(ctx context.Context, id string) (*Followup, error) {
-	n, ok := parseFollowupID(id)
-	if !ok {
-		return nil, ErrNotFound
-	}
-	var out *Followup
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		f, err := loadFollowup(ctx, tx, n)
-		if err != nil {
-			return err
-		}
-		if err := checkPromotable(ctx, tx, f); err != nil {
-			return err
-		}
-		out = f
 		return nil
 	})
 	if err = classifyReadWriteErr(err); err != nil {

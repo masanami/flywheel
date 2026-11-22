@@ -177,7 +177,7 @@ func TestTaskAdditionClosedSets(t *testing.T) {
 			t.Errorf("%s.IsOpen() = %v, want %v", s, s.IsOpen(), open)
 		}
 	}
-	if got := TaskAdditionOriginValues(); len(got) != 1 || got[0] != TaskAdditionOriginExpand {
-		t.Errorf("origins = %v, want [expand] only in S4c-1", got)
+	if got := TaskAdditionOriginValues(); len(got) != 2 || got[0] != TaskAdditionOriginExpand || got[1] != TaskAdditionOriginFollowup {
+		t.Errorf("origins = %v, want [expand followup]", got)
 	}
 }
