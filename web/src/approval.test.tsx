@@ -72,6 +72,7 @@ function summary(over: Partial<ApprovalSummary> = {}): {
       pairs: [],
       plan: null,
       release_held: true,
+      supervisor_hands_taken: {},
       stages: {
         actual: null,
         expected: null,
@@ -123,6 +124,8 @@ function setup(
     pairs: [],
     source_binding: null,
     source_children: [],
+    supervisor_actions: [],
+    supervisor_hands_taken: {},
     stages: {
       actual: null,
       expected: null,

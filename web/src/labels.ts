@@ -318,6 +318,7 @@ export const CYCLE_WORK_STAGES = [
   "learn",
   "improve",
   "cleanup",
+  "supervise",
 ] as const satisfies readonly (keyof CycleWorkStages)[];
 export type CycleWorkStage = (typeof CYCLE_WORK_STAGES)[number];
 
@@ -330,6 +331,7 @@ export const CYCLE_WORK_STAGE_LABELS: Record<keyof CycleWorkStages, string> = {
   learn: "学び",
   improve: "改修の提案",
   cleanup: "片付け",
+  supervise: "スーパーバイザー待ち",
 };
 
 // 課題の画面の凡例。区分の語は PHASE_LABELS と同じで、「次に実行」だけ括弧の補足を添える。

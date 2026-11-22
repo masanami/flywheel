@@ -24,6 +24,8 @@ type CycleWorkStages struct {
 	Learn    int
 	Improve  int
 	Cleanup  int
+	// Supervise はサイクルが走っていない間に残る、スーパーバイザー待ちの保留（前のサイクルで見送ったもの・起動できなかったもの）の数。
+	Supervise int
 }
 
 // CycleWork はサイクルを回すと進むものの数え。Total は Stages の合計。
@@ -34,7 +36,7 @@ type CycleWork struct {
 
 // sum は段の件数の合計を返す。
 func (st CycleWorkStages) sum() int {
-	return st.Release + st.Classify + st.Plan + st.Run + st.Verify + st.Learn + st.Improve + st.Cleanup
+	return st.Release + st.Classify + st.Plan + st.Run + st.Verify + st.Learn + st.Improve + st.Cleanup + st.Supervise
 }
 
 // CountCycleWork はサイクルを回すと進むものを数える（読み取りだけ。ストアを書かない）。
@@ -70,6 +72,10 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		st.Cleanup = len(stale)
+
+		if st.Supervise, err = countSupervisorPendingHolds(ctx, tx); err != nil {
+			return err
+		}
 
 		if conn == nil {
 			return nil
@@ -382,4 +388,15 @@ func (s *Store) CountRoundWork(ctx context.Context, agent *AgentDeclaration, con
 	w.Stages = st
 	w.Startable = st.sum()
 	return w, nil
+}
+
+// countSupervisorPendingHolds は、開いたままのスーパーバイザー待ち（supervisor_state が pending）の保留の数
+// （人間対応待ちの課題のもの）。サイクルが走っていない間に残るものを、次のサイクルで処理できるものとして数える。
+func countSupervisorPendingHolds(ctx context.Context, tx *sql.Tx) (int, error) {
+	var n int
+	err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM hold h JOIN challenge c ON c.id = h.challenge_id
+		 WHERE c.status = ? AND h.answer IS NULL AND h.closed_at IS NULL AND h.supervisor_state = ?`,
+		string(StatusAwaitingHuman), string(SupervisorStatePending)).Scan(&n)
+	return n, err
 }

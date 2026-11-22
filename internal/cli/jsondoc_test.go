@@ -1626,6 +1626,7 @@ func addCoreRedesignS2aShowShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["show_challenge"]["uses_integration"] = true
 	addCoreRedesignS3bShowShape(t, doc, string(data))
 	addCoreRedesignS3cShowShape(t, doc, string(data))
+	addCoreRedesignS4bShowShape(t, doc)
 }
 
 // addCoreRedesignS3cShowShape は区切り S3c が show --json に足したキー（根の `conflict_fixes`・`runs[]` の要素の `fix_pending_ref`）を
@@ -1677,4 +1678,27 @@ func addCoreRedesignS3bShowShape(t *testing.T, doc *documentedJSON, spec string)
 func addS4aCycleShapes(doc *documentedJSON) {
 	doc.topLevel["cycle status"] = []map[string]bool{{"state": true, "last_started_at": true, "last_ended_at": true, "last_result": true, "last_end_reason": true, "running": true}}
 	doc.topLevel["cycle stop"] = []map[string]bool{{"requested": true, "cycle_id": true}}
+}
+
+// addCoreRedesignS4bShowShape は区切り S4b-2 が足したキー（show --json の根の `supervisor_actions`・`supervisor_hands_taken`、
+// status の最上位の `supervisor_checking`）を doc へ合成する。仕様（core-redesign-s4b.md「記録と表示」）が書いていることを確かめた上で足す。
+func addCoreRedesignS4bShowShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "core-redesign-s4b.md"))
+	if err != nil {
+		t.Fatalf("read core-redesign-s4b spec: %v", err)
+	}
+	spec := string(data)
+	for _, want := range []string{"根に `supervisor_actions`（配列。", "`supervisor_hands_taken`（手 → 件数の写像。", "`status` の最上位に `supervisor_checking`"} {
+		if !strings.Contains(spec, want) {
+			t.Fatalf("core-redesign-s4b spec does not document %q", want)
+		}
+	}
+	for _, shape := range doc.topLevel["show"] {
+		shape["supervisor_actions"] = true
+		shape["supervisor_hands_taken"] = true
+	}
+	for _, shape := range doc.topLevel["status"] {
+		shape["supervisor_checking"] = true
+	}
 }

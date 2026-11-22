@@ -79,6 +79,7 @@ function summary(over: Partial<ApprovalSummary> = {}): {
       plan: null,
       release_held: true,
       releases: [],
+      supervisor_hands_taken: {},
       stages: STAGES,
       tasks: [],
       title: "題名",
@@ -190,6 +191,8 @@ function showBody(o: Over = {}) {
       runs: [],
       source_binding: null,
       source_children: [],
+      supervisor_actions: [],
+      supervisor_hands_taken: {},
       stages: STAGES,
       tasks,
       tree: {

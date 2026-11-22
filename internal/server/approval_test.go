@@ -115,6 +115,7 @@ func TestApprovalSummaryForPlan(t *testing.T) {
 		"conditions_after_release": `[]`, "conditions_after_release_heading": `"本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"`,
 		"pairs": `[]`, "stages": `{"actual":null,"expected":null,"figure":null,"issues":null,"issues_answer":null,"non_goals":null}`,
 		"conflict_fixes": `[]`, "followups": `[]`, "tasks": `[]`, "integration_ref": `null`, "uses_integration": `null`,
+		"supervisor_hands_taken": `{}`,
 	}
 	for k, w := range want {
 		if got[k] != w {

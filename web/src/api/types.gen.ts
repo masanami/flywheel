@@ -10,6 +10,7 @@ export interface StatusResponse {
   ingestable: Ingestable | null;
   needs_human: StatusNeedsHuman;
   parent_agent: StatusParentAgent;
+  supervisor_checking: StatusSupervisorChecking;
   waiting_external: StatusWaitingExternal;
 }
 
@@ -81,6 +82,7 @@ export interface CycleWorkStages {
   plan: number;
   release: number;
   run: number;
+  supervise: number;
   verify: number;
 }
 
@@ -171,6 +173,11 @@ export interface StatusParentAgent {
   challenges: Challenge[];
 }
 
+export interface StatusSupervisorChecking {
+  challenges: Challenge[];
+  count: number;
+}
+
 export interface StatusWaitingExternal {
   challenges: WaitingExternal[];
 }
@@ -200,6 +207,8 @@ export interface ShowResponse {
   source_binding: SourceBinding | null;
   source_children: SourceChild[];
   stages: Stages;
+  supervisor_actions: SupervisorAction[];
+  supervisor_hands_taken: Record<string, number>;
   tasks: Task[];
 }
 
@@ -441,6 +450,34 @@ export interface StageOption {
   label: string;
 }
 
+export interface SupervisorAction {
+  basis: SupervisorBasis[];
+  challenge_id: string;
+  conditions: SupervisorCondition[];
+  created_at: string;
+  cycle_id: string;
+  findings: string;
+  hand: string | null;
+  hold_id: number | null;
+  id: number;
+  note: string;
+  reject_reason: string | null;
+  result: string;
+  run_id: string | null;
+  stop_kind: string;
+  task_id: string | null;
+}
+
+export interface SupervisorBasis {
+  locator: string;
+  path: string;
+}
+
+export interface SupervisorCondition {
+  number: number;
+  text: string;
+}
+
 export interface Task {
   artifacts: TaskArtifact[];
   body: string;
@@ -585,6 +622,8 @@ export interface ShowCardResponse {
   source_binding: SourceBinding | null;
   source_children: SourceChild[];
   stages: Stages;
+  supervisor_actions: SupervisorAction[];
+  supervisor_hands_taken: Record<string, number>;
   tasks: Task[];
   tree: TreeChallenge;
   waiting: Waiting;
@@ -703,6 +742,7 @@ export interface ApprovalSummary {
   release_held: boolean;
   releases: ApprovalRelease[];
   stages: Stages;
+  supervisor_hands_taken: Record<string, number>;
   tasks: ApprovalCompletionTask[];
   title: string;
   uses_integration: boolean | null;
@@ -863,34 +903,6 @@ export interface ChatPostViewing {
 
 export interface ChatPostResponse {
   id: number;
-}
-
-export interface SupervisorAction {
-  basis: SupervisorBasis[];
-  challenge_id: string;
-  conditions: SupervisorCondition[];
-  created_at: string;
-  cycle_id: string;
-  findings: string;
-  hand: string | null;
-  hold_id: number | null;
-  id: number;
-  note: string;
-  reject_reason: string | null;
-  result: string;
-  run_id: string | null;
-  stop_kind: string;
-  task_id: string | null;
-}
-
-export interface SupervisorBasis {
-  locator: string;
-  path: string;
-}
-
-export interface SupervisorCondition {
-  number: number;
-  text: string;
 }
 
 export const CARD_ACTION_CODES = [

@@ -1320,3 +1320,47 @@ func InsertTaskContractRun(t *testing.T, workspace string, challengeID int, task
 		t.Fatalf("coretest: InsertTaskContractRun: %v", err)
 	}
 }
+
+func nullIfEmpty(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
+// InsertSupervisorHold はテスト専用のフィクスチャとして、止まり方（stopKind）とスーパーバイザーの状態（state）を持つ
+// 未回答の保留を 1 件挿入する。stopKind・state・findings・recommendation は、空なら NULL（止まり方を渡さずに作った保留）。
+// 作った保留の ID（hold.id）を返す。
+func InsertSupervisorHold(t *testing.T, workspace string, challengeID int, question, fromStatus, raisedAt, stopKind, state, findings, recommendation string) int64 {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var id int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, stop_kind, supervisor_state, supervisor_findings, supervisor_recommendation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			challengeID, question, fromStatus, raisedAt, nullIfEmpty(stopKind), nullIfEmpty(state), nullIfEmpty(findings), nullIfEmpty(recommendation))
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertSupervisorHold: %v", err)
+	}
+	return id
+}
+
+// InsertSupervisorAction はテスト専用のフィクスチャとして、対処の記録を 1 件挿入する（cycleID は InsertCycle が返した内部整数 ID。
+// hand が空なら NULL〔判断できなかった〕）。根拠は空の配列。
+func InsertSupervisorAction(t *testing.T, workspace string, cycleID int64, challengeID int, stopKind, hand, result, findings, createdAt string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO supervisor_action (cycle_id, challenge_id, stop_kind, hand, findings, note, basis, result, created_at) VALUES (?, ?, ?, ?, ?, '', '[]', ?, ?)`,
+			cycleID, challengeID, stopKind, nullIfEmpty(hand), findings, result, createdAt)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertSupervisorAction: %v", err)
+	}
+}

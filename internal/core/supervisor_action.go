@@ -381,3 +381,25 @@ func (s *Store) CountSupervisorActions(ctx context.Context, q SupervisorActionCo
 	}))
 	return n, err
 }
+
+// countExecutedSupervisorHands は課題の、結果が executed の対処の記録を、手ごとに数えた値を返す（打った手の件数）。
+// failed・rejected の記録と、手が NULL の記録は入れない。無ければ空の写像（nil でない）。
+func countExecutedSupervisorHands(ctx context.Context, tx *sql.Tx, challengeID int64) (map[SupervisorHand]int, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT hand, COUNT(*) FROM supervisor_action WHERE challenge_id = ? AND result = ? AND hand IS NOT NULL GROUP BY hand`,
+		challengeID, string(ActionExecuted))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[SupervisorHand]int{}
+	for rows.Next() {
+		var hand string
+		var n int
+		if err := rows.Scan(&hand, &n); err != nil {
+			return nil, err
+		}
+		out[SupervisorHand(hand)] = n
+	}
+	return out, rows.Err()
+}
