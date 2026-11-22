@@ -401,3 +401,41 @@ func (s *Store) ListTaskAdditions(ctx context.Context, challengeID string) ([]Ta
 	}
 	return out, nil
 }
+
+// supersedeOpenTaskAdditions は課題 cid の閉じていない足す依頼（pending・awaiting_owner）を、取り替え（superseded）で閉じる
+// （decided_at を記録し、作業ログに残す）。計画の承認の書き込みの中で呼ぶ。立てた保留は、ここでは触れない。
+func supersedeOpenTaskAdditions(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, state FROM task_addition WHERE challenge_id = ? AND state IN (?, ?) ORDER BY id`,
+		cid, string(TaskAdditionPending), string(TaskAdditionAwaitingOwner))
+	if err != nil {
+		return err
+	}
+	type open struct {
+		id    int64
+		state string
+	}
+	var opens []open
+	for rows.Next() {
+		var o open
+		if err := rows.Scan(&o.id, &o.state); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		opens = append(opens, o)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	for _, o := range opens {
+		if _, err := tx.ExecContext(ctx, `UPDATE task_addition SET state = ?, decided_at = ? WHERE id = ?`,
+			string(TaskAdditionSuperseded), formatTimestamp(rec.at), o.id); err != nil {
+			return err
+		}
+		if err := rec.record("task_addition", o.id, "state", map[string]any{"state": o.state}, map[string]any{"state": string(TaskAdditionSuperseded)}); err != nil {
+			return err
+		}
+	}
+	return nil
+}

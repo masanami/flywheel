@@ -83,6 +83,10 @@ type PlanView struct {
 	Tasks           []PlanTaskView
 	BudgetUSD       *float64 // 実装の枠とレビュー対応の枠の合計（タスクが枠を持つ計画ではタスクの枠の合計）
 	UsesIntegration *bool
+	// BudgetLimitUSD・BudgetLimitReason は、計画が書いた上限（実装の枠とレビュー対応の枠を足した 1 つの額）と理由。承認を待っている版の値で、
+	// 計画が上限を省いたとき nil（上限は見込みと同じ額）。
+	BudgetLimitUSD    *float64
+	BudgetLimitReason *string
 }
 
 // GetPlanView は課題の最新の計画を読む。課題が無ければ ErrNotFound、計画が無ければ ErrValidation。
@@ -166,6 +170,10 @@ func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclar
 	if est, ok := sumTaskBudgets(planVersionBudgets(version, frames, def, allBudgets)); ok {
 		sum := microsToUSD(est.Impl + est.Review)
 		pv.BudgetUSD = &sum
+	}
+	if lim := parsePlanSpec(&spec.String); lim.BudgetLimitMicros != nil {
+		v := microsToUSD(*lim.BudgetLimitMicros)
+		pv.BudgetLimitUSD, pv.BudgetLimitReason = &v, lim.BudgetLimitReason
 	}
 	soleFrame := def
 

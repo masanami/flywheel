@@ -31,6 +31,9 @@ type planSpecView struct {
 	Questions       []planQuestion
 	Tasks           []TaskInput
 	UsesIntegration *bool
+	// BudgetLimitMicros・BudgetLimitReason は計画が書いた上限（USD の 100 万分の 1）と理由。省いたら nil（検査を通った計画の理由は空白を除いた値）。
+	BudgetLimitMicros *int64
+	BudgetLimitReason *string
 }
 
 // taskBudgetMicros は計画の出力のタスクの枠（USD）を、タスクの記録の値（USD の 100 万分の 1）にする（無ければ nil）。
@@ -65,9 +68,18 @@ func parsePlanSpec(spec *string) planSpecView {
 			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria, NonGoals: t.NonGoals,
 			Repo: t.Repo, Operation: t.Operation, DependsOn: t.DependsOn, SourceKey: t.Source,
 			BudgetImplMicros: taskBudgetMicros(t.BudgetImplUSD), BudgetReviewMicros: taskBudgetMicros(t.BudgetReviewUSD),
+			ExpandAfter: t.ExpandAfter != nil && *t.ExpandAfter,
 		})
 	}
 	v.UsesIntegration = raw.UsesIntegration
+	if raw.BudgetLimitUSD != nil {
+		v.BudgetLimitMicros = taskBudgetMicros(raw.BudgetLimitUSD)
+		if raw.BudgetLimitReason != nil {
+			if r := strings.TrimSpace(*raw.BudgetLimitReason); r != "" {
+				v.BudgetLimitReason = &r
+			}
+		}
+	}
 	return v
 }
 
@@ -402,7 +414,12 @@ func onPlanApproved(ctx context.Context, tc *transitionCtx, att Attestation, pla
 			return err
 		}
 	}
-	return nil
+	// 上限は承認した版の値で置き換える（省いたら NULL。前の版の上限を残さない）。計画の表には持たず、承認した値だけを課題が持つ。
+	if err := setChallengeBudgetLimit(ctx, tc.tx, tc.id, view.BudgetLimitMicros, view.BudgetLimitReason); err != nil {
+		return err
+	}
+	// 作り直しの承認では、前の版の見込みに対する足す依頼は意味を失う。閉じていないものを取り替えで閉じる。
+	return supersedeOpenTaskAdditions(ctx, tc.tx, tc.rec, tc.id)
 }
 
 // loadPlanAnswersSection は J2 の入力の区画「問いと回答」の本文を返す。課題のこれまでの版の計画の問い（文・選択肢）と、

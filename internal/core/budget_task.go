@@ -524,6 +524,9 @@ func loadChallengeDetailBudget(ctx context.Context, tx *sql.Tx, cid int64, statu
 		}
 		if pv != nil && pv.BudgetUSD != nil {
 			est, lim := *pv.BudgetUSD, *pv.BudgetUSD
+			if pv.BudgetLimitUSD != nil {
+				lim, out.LimitReason = *pv.BudgetLimitUSD, pv.BudgetLimitReason
+			}
 			out.EstimateUSD, out.LimitUSD = &est, &lim
 		}
 		return out, nil

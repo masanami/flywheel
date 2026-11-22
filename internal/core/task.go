@@ -58,6 +58,8 @@ type TaskInput struct {
 	// BudgetImplMicros・BudgetReviewMicros はタスクの実装の枠・レビュー対応の枠（USD の 100 万分の 1。nil は NULL）。
 	BudgetImplMicros   *int64
 	BudgetReviewMicros *int64
+	// ExpandAfter は、このタスクの後に続きのタスクを足すかを決めるタスクか（task.expand_after）。
+	ExpandAfter bool
 }
 
 // Task はタスク 1 件（前提のタスクの ID つき）。ID・DependsOn の要素は表示形（"T-<n>"）、ChallengeID は "C-<n>"。
@@ -77,8 +79,10 @@ type Task struct {
 	DependsOn    []string
 	// SourceKey は対応する取り込み元の子の external_key（"" は NULL）。
 	SourceKey string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// ExpandAfter は、このタスクの後に続きのタスクを足すかを決めるタスクか（task.expand_after）。
+	ExpandAfter bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 	// BudgetImplUSD・BudgetReviewUSD・SpentUSD はタスクの実装の枠・レビュー対応の枠（増額を含む実効値）と、そのタスクの実行の費用の合計（USD）。
 	// 課題の詳細（GetChallenge）だけが埋める。枠を決められないタスク（記録が空で、見直し前の決め方の値も引けない）は 0。
 	BudgetImplUSD   float64
@@ -148,11 +152,11 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 			nonGoals = string(b)
 		}
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			challengeID, planVersion, nullableTextColumn(t.Key), t.Title, t.Body, t.DoneCriteria, nonGoals, t.Repo, t.Operation,
 			string(TaskStatusPending), nullableTextColumn(t.SourceKey), nowStr, nowStr,
-			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros))
+			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros), t.ExpandAfter)
 		if store.IsUniqueViolation(err) {
 			return nil, errDuplicateTaskKey
 		}
@@ -185,21 +189,23 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 	return out, nil
 }
 
-const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at FROM task`
+const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, expand_after, created_at, updated_at FROM task`
 
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var (
 		id, challengeID, planVersion int64
 		key, nonGoals, sourceKey     sql.NullString
 		status, createdAt, updatedAt string
+		expandAfter                  int64
 		t                            Task
 	)
 	if err := row.Scan(&id, &challengeID, &planVersion, &key, &t.Title, &t.Body, &t.DoneCriteria, &nonGoals, &t.Repo, &t.Operation,
-		&status, &sourceKey, &createdAt, &updatedAt); err != nil {
+		&status, &sourceKey, &expandAfter, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	t.ID, t.ChallengeID, t.PlanVersion, t.Key, t.Status = formatTaskID(id), formatChallengeID(challengeID), planVersion, key.String, TaskStatus(status)
 	t.SourceKey = sourceKey.String
+	t.ExpandAfter = expandAfter != 0
 	if nonGoals.Valid {
 		if err := json.Unmarshal([]byte(nonGoals.String), &t.NonGoals); err != nil {
 			return nil, fmt.Errorf("task %s non_goals: %w", t.ID, err)
