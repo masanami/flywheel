@@ -18,6 +18,26 @@ type SupervisorCondition struct {
 	Text   string `json:"text"`
 }
 
+// SupervisorQuestion はスーパーバイザーが答えた子の問い 1 件（問い・答え・根拠）。
+type SupervisorQuestion struct {
+	Answer   string            `json:"answer"`
+	Basis    []SupervisorBasis `json:"basis"`
+	Question string            `json:"question"`
+}
+
+// FromSupervisorQuestions は答えた子の問いの一覧を変換する（空でも `[]`。根拠も空なら `[]`）。
+func FromSupervisorQuestions(qs []core.SupervisorQuestion) []SupervisorQuestion {
+	out := make([]SupervisorQuestion, 0, len(qs))
+	for _, q := range qs {
+		b := make([]SupervisorBasis, 0, len(q.Basis))
+		for _, x := range q.Basis {
+			b = append(b, SupervisorBasis{Locator: x.Locator, Path: x.Path})
+		}
+		out = append(out, SupervisorQuestion{Answer: q.Answer, Basis: b, Question: q.Question})
+	}
+	return out
+}
+
 // SupervisorAction は対処の記録 1 件（スーパーバイザーの判断 1 回と、core がその手を実行した結果）。
 type SupervisorAction struct {
 	Basis       []SupervisorBasis `json:"basis"`
@@ -33,6 +53,8 @@ type SupervisorAction struct {
 	HoldID *int64 `json:"hold_id"`
 	ID     int64  `json:"id"`
 	Note   string `json:"note"`
+	// Questions は答えた子の問いと答え（手が answer のときだけ。無ければ []）。
+	Questions []SupervisorQuestion `json:"questions"`
 	// RejectReason は断りの理由（SUPERVISOR_REJECT_REASON_CODES の値）。結果が rejected でなければ null。
 	RejectReason *string `json:"reject_reason"`
 	// Result は対処の結果（SUPERVISOR_RESULT_CODES の値）。
@@ -50,7 +72,7 @@ func FromSupervisorAction(a core.SupervisorAction) SupervisorAction {
 		Basis: make([]SupervisorBasis, 0, len(a.Basis)), ChallengeID: a.ChallengeID,
 		Conditions: make([]SupervisorCondition, 0, len(a.Conditions)), CreatedAt: FormatTimestamp(a.CreatedAt),
 		CycleID: a.CycleID, Findings: a.Findings, HoldID: a.HoldID, ID: a.ID, Note: a.Note, Result: string(a.Result),
-		RunID: a.RunID, StopKind: string(a.StopKind), TaskID: a.TaskID,
+		Questions: FromSupervisorQuestions(a.Questions), RunID: a.RunID, StopKind: string(a.StopKind), TaskID: a.TaskID,
 	}
 	for _, b := range a.Basis {
 		out.Basis = append(out.Basis, SupervisorBasis{Locator: b.Locator, Path: b.Path})

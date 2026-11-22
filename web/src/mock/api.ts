@@ -434,6 +434,7 @@ export function createMockApi(
                 }))
               : [],
           supervisor_hands_taken: {},
+          supervisor_questions: [],
           stages: m.stages,
           title: m.c.title,
           version: m.c.version,

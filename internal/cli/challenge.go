@@ -338,6 +338,7 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	if line := supervisorHandsTakenText(d.SupervisorHandsTaken); line != "" {
 		b.WriteString(line)
 	}
+	b.WriteString(supervisorQuestionsText(d.SupervisorQuestions))
 	if len(d.DirectCompletions) > 0 {
 		fmt.Fprintf(&b, "親が直接行った記録: %d 件\n", len(d.DirectCompletions))
 		for _, dc := range d.DirectCompletions {
@@ -592,4 +593,26 @@ func supervisorHandsTakenText(m map[core.SupervisorHand]int) string {
 		return ""
 	}
 	return "スーパーバイザーが打った手: " + strings.Join(parts, "・") + "\n"
+}
+
+// supervisorQuestionsText は、スーパーバイザーが答えた子の問い（core が結果 executed の対処の記録から集めたもの）を、
+// 問い・答え・根拠の順に並べる。完了の承認のときにオーナーが中身を確かめるための表示。無ければ空。
+func supervisorQuestionsText(qs []core.SupervisorQuestion) string {
+	if len(qs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("スーパーバイザーが答えた子の問い:\n")
+	for _, q := range qs {
+		b.WriteString(indentLines("問い: "+escapeControl(q.Question), "  "))
+		b.WriteString(indentLines("答え: "+escapeControl(q.Answer), "  "))
+		for _, bs := range q.Basis {
+			if bs.Locator == "" {
+				fmt.Fprintf(&b, "    根拠: %s\n", escapeControl(bs.Path))
+				continue
+			}
+			fmt.Fprintf(&b, "    根拠: %s（%s）\n", escapeControl(bs.Path), escapeControl(bs.Locator))
+		}
+	}
+	return b.String()
 }

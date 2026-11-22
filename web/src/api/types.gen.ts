@@ -481,6 +481,7 @@ export interface SupervisorAction {
   hold_id: number | null;
   id: number;
   note: string;
+  questions: SupervisorQuestion[];
   reject_reason: string | null;
   result: string;
   run_id: string | null;
@@ -496,6 +497,12 @@ export interface SupervisorBasis {
 export interface SupervisorCondition {
   number: number;
   text: string;
+}
+
+export interface SupervisorQuestion {
+  answer: string;
+  basis: SupervisorBasis[];
+  question: string;
 }
 
 export interface Task {
@@ -773,6 +780,7 @@ export interface ApprovalSummary {
   releases: ApprovalRelease[];
   stages: Stages;
   supervisor_hands_taken: Record<string, number>;
+  supervisor_questions: SupervisorQuestion[];
   tasks: ApprovalCompletionTask[];
   title: string;
   uses_integration: boolean | null;

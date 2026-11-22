@@ -148,6 +148,9 @@ type ApprovalPreview struct {
 	ConflictFixes []ConflictFixPassed
 	// SupervisorHandsTaken は打った手の件数（結果が executed の対処の記録を、手ごとに数えた値。無ければ空の写像）。
 	SupervisorHandsTaken map[SupervisorHand]int
+	// SupervisorQuestions はスーパーバイザーが答えた子の問い（問い・答え・根拠。古い順。無ければ空のスライス）。
+	// 中身が合っているかは core が確かめられないので、完了の承認のときにオーナーへ見せる。
+	SupervisorQuestions []SupervisorQuestion
 	// UsesIntegration・IntegrationRef は課題が統合先を使うかと、記録した統合先の識別。
 	UsesIntegration *bool
 	IntegrationRef  *string
@@ -209,6 +212,9 @@ func loadCompletionScreen(ctx context.Context, tx *sql.Tx, cid int64, agent *Age
 		return err
 	}
 	if p.SupervisorHandsTaken, err = countExecutedSupervisorHands(ctx, tx, cid); err != nil {
+		return err
+	}
+	if p.SupervisorQuestions, err = executedSupervisorQuestions(ctx, tx, cid); err != nil {
 		return err
 	}
 	if p.UsesIntegration, err = challengeUsesIntegration(ctx, tx, cid); err != nil {

@@ -1482,6 +1482,21 @@ func InsertSupervisorHold(t *testing.T, workspace string, challengeID int, quest
 	return id
 }
 
+// InsertSupervisorActionWithQuestions は InsertSupervisorAction と同じ行に、答えた子の問い（questions の列。JSON）を持たせて挿入する
+// （子の問いに答えた手 answer の記録。basis は問いごとの根拠ではなく対処の記録の根拠の列で、空の配列）。
+func InsertSupervisorActionWithQuestions(t *testing.T, workspace string, cycleID int64, challengeID int, result, questionsJSON, createdAt string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO supervisor_action (cycle_id, challenge_id, stop_kind, hand, findings, note, basis, result, created_at, questions) VALUES (?, ?, 'child_question', 'answer', '', '', '[]', ?, ?, ?)`,
+			cycleID, challengeID, result, createdAt, questionsJSON)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertSupervisorActionWithQuestions: %v", err)
+	}
+}
+
 // InsertSupervisorAction はテスト専用のフィクスチャとして、対処の記録を 1 件挿入する（cycleID は InsertCycle が返した内部整数 ID。
 // hand が空なら NULL〔判断できなかった〕）。根拠は空の配列。
 func InsertSupervisorAction(t *testing.T, workspace string, cycleID int64, challengeID int, stopKind, hand, result, findings, createdAt string) {
