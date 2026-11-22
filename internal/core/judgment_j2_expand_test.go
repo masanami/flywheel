@@ -142,8 +142,9 @@ func TestExpand_DoneMarkedTaskCreatesOnePendingAdditionAndCallsJ2OnceInTheExpand
 	if len(res.Items) != 1 || res.Items[0].Result != RunResultSucceeded || res.Items[0].Outcome != "ask" {
 		t.Errorf("items = %+v", res.Items)
 	}
-	if st := f.detail(t, f.id).Status; st != StatusInProgress {
-		t.Errorf("status = %s, want in_progress", st)
+	// ask は課題を保留にする（足す依頼は仕様待ちのまま。保留の中身は judgment_j2_expand_holds_test.go）。
+	if st := f.detail(t, f.id).Status; st != StatusAwaitingHuman {
+		t.Errorf("status = %s, want awaiting_human", st)
 	}
 	// 実行の記録は課題単位の J2 で、タスクの指定を持たない。
 	runs, err := f.s.ListRuns(context.Background(), RunListOptions{ChallengeID: &f.id})

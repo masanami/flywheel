@@ -342,6 +342,24 @@ func setTaskAdditionStateTx(ctx context.Context, tx *sql.Tx, rec *activityRecord
 	if !cur.State.IsOpen() {
 		return nil, ErrInvalidTransition
 	}
+	// オーナー待ちの足す依頼は、同じ課題の保留を指す（hold_id）。指す保留が無い・別の課題の保留のオーナー待ちは書かない。
+	if to == TaskAdditionAwaitingOwner {
+		holdID := cur.HoldID
+		if upd.HoldID != nil {
+			holdID = upd.HoldID
+		}
+		if holdID == nil {
+			return nil, fmt.Errorf("%w: an awaiting_owner task addition needs its hold", ErrValidation)
+		}
+		cid, _ := parseChallengeID(cur.ChallengeID)
+		var owner int64
+		if err := tx.QueryRowContext(ctx, `SELECT challenge_id FROM hold WHERE id = ?`, *holdID).Scan(&owner); err != nil || owner != cid {
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: the hold of an awaiting_owner task addition must be a hold of its challenge", ErrValidation)
+		}
+	}
 	set := []string{"state = ?"}
 	args := []any{string(to)}
 	if upd.Spec != nil {
