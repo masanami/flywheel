@@ -234,6 +234,10 @@ type ChallengeDetail struct {
 	Followups []Followup
 	// ConflictFixes は通したコンフリクトの解消（古い順。無ければ空のスライス。nil でない）。作業ログの conflict_fix_passed から読む。
 	ConflictFixes []ConflictFixPassed
+	// SupervisorActions は課題の対処の記録（古い順。無ければ空のスライス。nil でない）。
+	SupervisorActions []SupervisorAction
+	// SupervisorHandsTaken は打った手の件数（結果が executed の対処の記録を、手ごとに数えた値。failed・rejected は入れない。無ければ空の写像）。
+	SupervisorHandsTaken map[SupervisorHand]int
 }
 
 // ImprovementKey は改修課題の鍵（challenge.improvement_layer・improvement_target。マイグレーション 0012）。
@@ -918,6 +922,12 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			detail.IntegrationRef = &v
 		}
 		if detail.ConflictFixes, err = loadConflictFixes(ctx, tx, cid); err != nil {
+			return err
+		}
+		if detail.SupervisorActions, err = querySupervisorActions(ctx, tx, `WHERE challenge_id = ?`, cid); err != nil {
+			return err
+		}
+		if detail.SupervisorHandsTaken, err = countExecutedSupervisorHands(ctx, tx, cid); err != nil {
 			return err
 		}
 		if detail.Followups, err = listFollowups(ctx, tx, FollowupFilter{ChallengeID: id}); err != nil {

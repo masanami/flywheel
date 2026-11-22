@@ -80,6 +80,14 @@ type StatusParentAgent struct {
 	Challenges []Challenge `json:"challenges"`
 }
 
+// StatusSupervisorChecking は status.supervisor_checking（スーパーバイザーが確認中の課題。オーナー待ちに入れない）。
+// 状態は人間対応待ちのままで、いま開いている保留がすべてスーパーバイザー待ち（supervisor_state が pending）の課題。
+type StatusSupervisorChecking struct {
+	Challenges []Challenge `json:"challenges"`
+	// Count はスーパーバイザーが確認中の課題の件数（challenges の長さ）。
+	Count int `json:"count"`
+}
+
 // StatusActionable は status.actionable。
 type StatusActionable struct {
 	Challenges []ActionableChallenge `json:"challenges"`
@@ -104,7 +112,9 @@ type CycleWorkStages struct {
 	Plan     int `json:"plan"`
 	Release  int `json:"release"`
 	Run      int `json:"run"`
-	Verify   int `json:"verify"`
+	// Supervise はスーパーバイザー待ちの保留の数（サイクルが走っていない間に残るもの）。
+	Supervise int `json:"supervise"`
+	Verify    int `json:"verify"`
 }
 
 // CycleWork は status.cycle_work。total は stages の値の合計。
@@ -122,7 +132,7 @@ func FromCycleWork(w *core.CycleWork) CycleWork {
 	return CycleWork{
 		Stages: CycleWorkStages{
 			Classify: st.Classify, Cleanup: st.Cleanup, Improve: st.Improve, Learn: st.Learn,
-			Plan: st.Plan, Release: st.Release, Run: st.Run, Verify: st.Verify,
+			Plan: st.Plan, Release: st.Release, Run: st.Run, Supervise: st.Supervise, Verify: st.Verify,
 		},
 		Total: w.Total,
 	}
@@ -195,10 +205,11 @@ type StatusResponse struct {
 	CycleWork    CycleWork       `json:"cycle_work"`
 	Followups    StatusFollowups `json:"followups"`
 	// Ingestable は取り込めるもの。状況の API は問い合わせに ingestable=true が付いたときだけ読み、無いときは null。
-	Ingestable      *Ingestable           `json:"ingestable"`
-	NeedsHuman      StatusNeedsHuman      `json:"needs_human"`
-	ParentAgent     StatusParentAgent     `json:"parent_agent"`
-	WaitingExternal StatusWaitingExternal `json:"waiting_external"`
+	Ingestable         *Ingestable              `json:"ingestable"`
+	NeedsHuman         StatusNeedsHuman         `json:"needs_human"`
+	ParentAgent        StatusParentAgent        `json:"parent_agent"`
+	SupervisorChecking StatusSupervisorChecking `json:"supervisor_checking"`
+	WaitingExternal    StatusWaitingExternal    `json:"waiting_external"`
 }
 
 // FromOverview は core.Overview を StatusResponse へ変換する。
@@ -249,7 +260,8 @@ func FromOverview(ov *core.Overview) StatusResponse {
 			Slots:           slots,
 			Triage:          triage,
 		},
-		ParentAgent:     StatusParentAgent{Challenges: FromChallenges(ov.ParentAgentChallenges)},
-		WaitingExternal: StatusWaitingExternal{Challenges: waiting},
+		ParentAgent:        StatusParentAgent{Challenges: FromChallenges(ov.ParentAgentChallenges)},
+		SupervisorChecking: StatusSupervisorChecking{Challenges: FromChallenges(ov.SupervisorCheckingChallenges), Count: len(ov.SupervisorCheckingChallenges)},
+		WaitingExternal:    StatusWaitingExternal{Challenges: waiting},
 	}
 }

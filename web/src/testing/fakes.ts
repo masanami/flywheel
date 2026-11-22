@@ -43,6 +43,7 @@ export const emptyStatus = {
       plan: 0,
       release: 0,
       run: 0,
+      supervise: 0,
       verify: 0,
     },
     total: 0,
@@ -57,6 +58,7 @@ export const emptyStatus = {
     slots: [],
     triage: [],
   },
+  supervisor_checking: { challenges: [], count: 0 },
   waiting_external: { challenges: [] },
 };
 

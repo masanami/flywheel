@@ -138,7 +138,7 @@ it("#803: サイクルの状態（state）の全部の値に文言がある（�
   });
 });
 
-it("#805: サイクルを回すと進むものの 8 つの段すべてに語があり、状況の API の段のキーと一致する", () => {
+it("#805: サイクルを回すと進むものの 9 つの段すべてに語があり、状況の API の段のキーと一致する", () => {
   const keys = Object.keys(emptyStatus.cycle_work.stages).sort();
   expect([...CYCLE_WORK_STAGES].sort()).toEqual(keys);
   for (const s of CYCLE_WORK_STAGES) {
@@ -153,6 +153,7 @@ it("#805: サイクルを回すと進むものの 8 つの段すべてに語が�
     "学び",
     "改修の提案",
     "片付け",
+    "スーパーバイザー待ち",
   ]);
 });
 

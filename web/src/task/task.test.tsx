@@ -169,6 +169,8 @@ function show(o: Over = {}): ShowCardResponse {
     runs: o.runs ?? [],
     source_binding: null,
     source_children: o.source_children ?? [],
+    supervisor_actions: [],
+    supervisor_hands_taken: {},
     stages: {
       actual: null,
       expected: null,

@@ -69,6 +69,15 @@ func FromSupervisorAction(a core.SupervisorAction) SupervisorAction {
 	return out
 }
 
+// FromSupervisorHandsTaken は打った手の件数（手 → 結果が executed の対処の記録の数）を変換する（無ければ `{}`）。
+func FromSupervisorHandsTaken(m map[core.SupervisorHand]int) map[string]int {
+	out := make(map[string]int, len(m))
+	for h, n := range m {
+		out[string(h)] = n
+	}
+	return out
+}
+
 // FromSupervisorActions は対処の記録の一覧を変換する（空でも `[]`）。
 func FromSupervisorActions(as []core.SupervisorAction) []SupervisorAction {
 	out := make([]SupervisorAction, 0, len(as))

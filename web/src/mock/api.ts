@@ -146,6 +146,8 @@ export function createMockApi(
       pairs: pairsOf(m.stages),
       source_binding: extra.source_binding ?? null,
       source_children: extra.source_children ?? [],
+      supervisor_actions: [],
+      supervisor_hands_taken: {},
       stages: m.stages,
       tasks: extra.tasks ?? [],
       tree: t ?? emptyTree(m.c.id, m.c.title, m.c.status, m.c.status_label),
@@ -426,6 +428,7 @@ export function createMockApi(
                   summary: o.summary,
                 }))
               : [],
+          supervisor_hands_taken: {},
           stages: m.stages,
           title: m.c.title,
           version: m.c.version,
