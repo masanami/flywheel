@@ -475,13 +475,13 @@ func TestParseSVOutput(t *testing.T) {
 	}
 }
 
-// 手の実行の入口: 振り分けは 1 か所の switch。escalate 以外の手は、まだ無い（雛形）。未知の手は検証の誤り。
-func TestExecuteSupervisorHand_OnlyEscalateIsImplementedYet(t *testing.T) {
+// 手の実行の入口: 振り分けは 1 か所の switch。まだ無い手（雛形）は ErrSupervisorHandNotImplemented。未知の手は検証の誤り。
+func TestExecuteSupervisorHand_NotYetImplementedHandsAreScaffolds(t *testing.T) {
 	t.Parallel()
 	s, _ := newWorkspaceStore(t)
 	for _, h := range SupervisorHandValues() {
-		if h == HandEscalate || h == HandDefer { // defer は supervisor_defer_test.go が検証する
-			continue
+		if h == HandEscalate || h == HandDefer || h == HandReverify || h == HandRetry {
+			continue // 実装済み（defer は supervisor_defer_test.go、reverify・retry は supervisor_hand_reconcile_retry_test.go と supervisor_resolve_test.go が検証する）
 		}
 		_, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{StopKind: StopKindArtifactMissing, Output: SVOutput{Hand: h}})
 		if !errors.Is(err, ErrSupervisorHandNotImplemented) {
