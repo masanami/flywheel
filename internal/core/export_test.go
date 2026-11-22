@@ -686,3 +686,28 @@ func TestImport_S3cColumnsSurviveTheRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestImport_HoldOptionsColumnsSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	src, _ := filledStore(t)
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+		t.Fatal(err)
+	}
+	read := func(s *Store) (opts, ans string, req int) {
+		if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+			return tx.QueryRow(`SELECT options, answer_option, option_required FROM hold WHERE id = 1`).Scan(&opts, &ans, &req)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	so, sa, sr := read(src)
+	do, da, dr := read(dst)
+	if so == "" || sa != "add" || sr != 1 {
+		t.Fatalf("fixture did not fill the columns: %q %q %d", so, sa, sr)
+	}
+	if so != do || sa != da || sr != dr {
+		t.Errorf("after import: %q %q %d, want %q %q %d", do, da, dr, so, sa, sr)
+	}
+}

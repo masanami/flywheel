@@ -976,6 +976,8 @@ type AnswerRequest struct {
 	// Replan は回答に付ける「範囲が変わる」印。真なら、委譲を再開せず、課題を計画の作り直し（分類済）へ戻す。
 	// 保留の直前の状態が着手中・検証中でなければ ErrValidation（何も書かない）。
 	Replan bool
+	// Option は回答で選ぶ選択肢の識別。S4b-1 の 1 は型だけを足す（確かめ・解決・記録は S4b-1 の 2）。
+	Option string
 }
 
 // ExecuteAnswer は answer（T12）の②（書き込み）。「保留に入る直前の状態」は
