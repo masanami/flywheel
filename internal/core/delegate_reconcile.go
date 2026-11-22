@@ -440,7 +440,7 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 					question = reason + "\n\n" + question
 				}
 			}
-			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, question, holdReasonQuestions, cycleID, false)
+			return s.mapReconciliationOptions(ctx, dc, runIDDisplay, OpHold, question, holdReasonQuestions, cycleID, false, questionsHoldOptions(report))
 		case DelegationOutcomeBlocked:
 			return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, formatBlockedHold(report), holdReasonBlocked, cycleID, false)
 		}
@@ -567,6 +567,11 @@ func (s *Store) releaseApproved(ctx context.Context, challengeID int64, prURL st
 // resetFetchFailures が真なら、同じトランザクションで照合の取得の失敗の連続回数を 0 に戻す
 // （「成果物あり」「見つからない」の判定のとき。#487）。
 func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, runIDDisplay string, op Operation, question string, reason holdReason, cycleID string, resetFetchFailures bool) (*string, string, error) {
+	return s.mapReconciliationOptions(ctx, dc, runIDDisplay, op, question, reason, cycleID, resetFetchFailures, HoldOptionsInput{})
+}
+
+// mapReconciliationOptions は mapReconciliation の、保留に選択肢を持たせる版（op が OpHold のときだけ効く）。
+func (s *Store) mapReconciliationOptions(ctx context.Context, dc *delegationContext, runIDDisplay string, op Operation, question string, reason holdReason, cycleID string, resetFetchFailures bool, opts HoldOptionsInput) (*string, string, error) {
 	_, err := s.transitionAsInvoker(ctx, runIDDisplay, dc.Challenge.ID, op, func(ctx context.Context, tc *transitionCtx) error {
 		if tc.current.Status != StatusInProgress {
 			return errReconcileNotEligible
@@ -580,7 +585,8 @@ func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, ru
 		if op == OpHold {
 			// 委譲の子の問い・停止で作る保留は、起動したタスクに結び付ける。
 			tc.taskID = taskID
-			return s.insertHoldWithOccurrence(ctx, tc, question, reason, cycleID)
+			_, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, cycleID, opts)
+			return err
 		}
 		// 委譲の結果で課題が検証中へ進むとき、タスクも検証中にする（課題の遷移と同じトランザクション）。
 		return verifyTaskInTransition(ctx, tc, taskID)
