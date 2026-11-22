@@ -728,6 +728,7 @@ J4 に回す範囲は 2 つで、同じ指示文（`internal/invoker/prompts/j4.
 }
 ```
 
+- `cycle_poll_interval_sec`（サイクルの回りの間隔。秒。既定 30）と `auto_cycle`（承認・回答などの成立後にサイクルを自動で始めるか。既定は真）は core の見直しの区切り S4a で足す。`cycle_poll_interval_sec` は 1 以上の整数だけを受け、それ以外は `config_invalid`。`auto_cycle` が偽なら、操作はサイクルを始めず（コマンドの `--no-cycle` は、付けたコマンドだけが始めない）、`settled` で終えた後の次のサイクルも始めない（こちらは `--no-cycle` に関わらず宣言の `auto_cycle` だけで決まる）。
 - `conflict_prediction_budget_usd` は S2 で足す（【決定 2026-10-01 親 M3P29】。金額なので 0 以下は `config_invalid`）。
 - `judgment_budget_usd.J9`（1 組の判断の上限額。既定 0.5）と `serial_judgment_cycle_budget_usd`（1 周の J9 の費用の上限。既定 3）は §同時に進めてよいかの判断（J9）で足す（【決定 2026-11-14 オーナー Q1】。金額なので 0 以下は `config_invalid`）。
 - `behind_update_limit`（本番反映の間に BEHIND の取り込みを依頼してよい累計の回数）は、core の見直しの区切り S3a で外した。flywheel は反映先の最新の取り込みを依頼せず（委譲先が取り込んで解く）、この回数の上限を持たない。残っている宣言は `config_invalid`（項目の名前 `behind_update_limit` と、語 `removed`）で止まる。
