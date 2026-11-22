@@ -834,7 +834,7 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 
 ```json
 {
-  "cycle": {"id": "Y-3", "trigger": "cron", "started_at": "…", "ended_at": "…", "result": "completed", "budget_usd": 300, "spent_usd": 7.42},
+  "cycle": {"id": "Y-3", "trigger": "cron", "started_at": "…", "ended_at": "…", "result": "completed", "budget_usd": 300, "spent_usd": 7.42, "end_reason": "settled", "rounds": 3},
   "config_defaults_used": ["agent.json"],
   "not_started_reason": null,
   "phases": [
@@ -848,6 +848,8 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 ```
 
 - 周を始めたときは `started` が `true`・`not_started_reason` が `null`。サイクルを回すと進むものが無いときは、周の記録を作らず、どの段も実行せず、バックアップも行わず、終了コード 0 で `started` が `false`・`not_started_reason` が `"nothing_to_advance"`・`cycle` が `null`・`phases` が `[]` になる（`config_defaults_used`・`rate_limited` は同じ形のまま。`rate_limited` は `false`）。進むものの数えは `status --json` の `cycle_work` と同じ（LLM を呼ばず、上流を読まない。宣言の不備は件数に関わらず `config_invalid`）。テキスト表示は始めなかった旨と理由を出し、開始の合図の行（`周 <ID> を開始した`）の形にしない。
+
+- **core の見直し（区切り S4a）で足した値**: `cycle` に `end_reason`（終わった理由。周が終わるまでは出ない。`settled | budget | stopped | rate_limited | stalled | error | interrupted` のいずれか。理由を持たない周は `null`）と `rounds`（通した回りの数）を足す。サイクルは回り（進める段 `release`・`ingest`・`classify`・`plan`・`run`・`verify` を 1 回ずつ通すこと）を繰り返すので、`phases` の `items`・`not_started`・`release_items` などは回りをまたいで連結し、`phases` の要素は段ごとに 1 つのまま変えない。定義は [core の見直し](core-redesign.md) を正とする。
 
 - `phase` は `ingest | classify | plan | run | verify` の閉集合（S1 は前の 3 つ）。`ingest` の `result` は M2 の `ingest --json` と同じ形（`.flywheel/sources.json` が無ければ `skipped: true`・`result: null`）。`plan`・`run`・`verify` の段は `.flywheel/connectors.json` が無ければ `skipped: true`・`items: []`・`not_started: []`。どの段も `skipped` を持つ。
 - `items[].outcome` は判断点の判定（J1・J2・J5）か委譲の結末。`items[].status` は写した後の課題の状態（写さなかったら `null`）。

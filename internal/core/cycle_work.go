@@ -154,41 +154,63 @@ func (s *Store) countImprove(ctx context.Context, tx *sql.Tx, agent *AgentDeclar
 // サイクルが始まらず、課題が着手中のまま、どこにも出ずに止まる）。判定は委譲の段と同じ関数（loadPlanCandidates〔起動するタスクごとに数える〕・
 // loadDelegationContextForTask・implBudgetExhausted）で行い、書き込みをしない。
 func (s *Store) countRunnableDelegations(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, targets []int64) (int, error) {
-	in := DelegateInput{AgentDecl: agent, ConnDecl: conn}
-	retries, rest, err := s.splitReconcileRetries(ctx, targets)
+	p, err := s.runnableDelegationParts(ctx, agent, conn, targets)
 	if err != nil {
 		return 0, err
 	}
-	n := len(retries)
+	return p.retries + p.holds + p.launches, nil
+}
+
+// delegationParts は委譲の対象の課題の、委譲の段が進めるものの内訳（runnableDelegationParts の結果）。
+type delegationParts struct {
+	// retries は完了の照合のやり直し（子を起動しない）。holds は連続の失敗・やり直しの上限に達していて、段が人間対応待ちにするもの。
+	retries, holds int
+	// launches は起動できるタスク（課題の枠で起動できないものを除く）。同時に走らせる数の上限は見ていない。
+	launches int
+}
+
+// runnableDelegationParts は countRunnableDelegations の数え方（判定は委譲の段と同じ関数で行う）を、内訳つきで返す。
+func (s *Store) runnableDelegationParts(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, targets []int64) (delegationParts, error) {
+	in := DelegateInput{AgentDecl: agent, ConnDecl: conn}
+	var p delegationParts
+	retries, rest, err := s.splitReconcileRetries(ctx, targets)
+	if err != nil {
+		return p, err
+	}
+	p.retries = len(retries)
 	for _, cid := range rest {
 		ones, ok, _, err := s.loadPlanCandidates(ctx, in, cid)
 		if err != nil {
-			return 0, err
+			return p, err
 		}
 		if !ok {
 			continue // plan_unavailable
 		}
 		ch, err := s.loadChallengeForAuto(ctx, formatChallengeID(cid))
 		if err != nil {
-			return 0, err
+			return p, err
 		}
 		// 起動するタスクごとに数える。
 		for _, one := range ones {
 			dc, err := s.loadDelegationContextForTask(ctx, in, *ch, one.cand.TaskSeq)
 			if err != nil {
 				if errors.Is(err, ErrStoreError) {
-					return 0, err
+					return p, err
 				}
-				n++ // 読み切れない理由は多めに数える
+				p.launches++ // 読み切れない理由は多めに数える
 				continue
 			}
-			if !dc.advancesWhenTheStageRuns() {
+			if dc.LimitHit != nil || dc.ReworkHit != nil {
+				p.holds++
+				continue
+			}
+			if dc.implBudgetExhausted() {
 				continue // run_budget（状況の「予算切れ」に出る。サイクルを回しても変わらない）
 			}
-			n++
+			p.launches++
 		}
 	}
-	return n, nil
+	return p, nil
 }
 
 // advancesWhenTheStageRuns は、委譲の段がこの課題に着くと何かが進むか（delegateOnce と同じ順で見る）。
@@ -200,4 +222,166 @@ func (dc *delegationContext) advancesWhenTheStageRuns() bool {
 		return true
 	}
 	return !dc.implBudgetExhausted()
+}
+
+// RoundWork は回りの終わりの数え（CountRoundWork の結果）。LLM を呼ばず、上流を読まず、状態を変えない。
+// CountCycleWork（サイクルを始めるかの数え。多めに数える）とは別物で、サイクルを続けるか・待つか・終えるかを決める。
+type RoundWork struct {
+	// Startable は、いま始められるもの（次の回りで進めうるもの）の件数。Stages はその段ごとの内訳
+	// （Learn・Improve・Cleanup は常に 0。終わりの段の対象は数えない）。
+	Startable int
+	Stages    CycleWorkStages
+	// Active は作業中の実行の件数（委譲先が作業している実行。同時に走らせる数に数える実行と同じ決まり〔activeDelegationCount〕）。
+	// オーナーへの問いを返して待っているだけの実行・完了の承認を待っているだけの課題の実行は数えない。
+	Active int
+}
+
+// CountRoundWork は、回りの終わりに「いま始められるもの」と「作業中の実行」を数える（読み取りだけ。ストアを書かない）。
+//
+// いま始められるものに数えるもの: 実行できる反映・分類・計画・完了の検証（課題の単位・タスクの単位・コンフリクトの解消の確かめを含む）の対象・
+// 起動できるタスク・上げる依頼を始められる課題・flywheel が返事か再開を返す番の実行（回答が記録された保留・差し戻しを返せる実行）。
+// 数えないもの: オーナーの承認・回答を待っているだけのもの・前提が終わっていないタスク・同時に走らせる数の上限で待つタスク・
+// 課題の枠（run_budget）で起動できないタスク・学び・改修の提案・書き出し・片付けの対象・委譲先が作業している実行。
+//
+// agent が nil なら全て 0。conn が nil（connectors.json が無い）なら、反映・計画・委譲・完了の検証は飛ぶので 0。
+// 排他を放した後の「いま始められるもの」の数えも、この関数を使う。
+func (s *Store) CountRoundWork(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration) (*RoundWork, error) {
+	w := &RoundWork{}
+	if agent == nil {
+		return w, nil
+	}
+	var st CycleWorkStages
+	var runTargets []int64
+	var answered, heldSuccess, unheldStops, landable int
+	var reviewRuns []*contractRunRow
+	planVersions := map[int64]*int64{}
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		ids, _, err := selectJ1AutoTargets(ctx, tx)
+		if err != nil {
+			return err
+		}
+		st.Classify = len(ids)
+		active, err := activeDelegationCount(ctx, tx)
+		if err != nil {
+			return err
+		}
+		w.Active = active
+		if conn == nil {
+			return nil
+		}
+		plan, _, err := selectJ2AutoTargets(ctx, tx)
+		if err != nil {
+			return err
+		}
+		st.Plan = len(plan)
+		verify, _, err := selectJ5AutoTargets(ctx, tx)
+		if err != nil {
+			return err
+		}
+		tasks, err := selectJ5TaskTargets(ctx, tx)
+		if err != nil {
+			return err
+		}
+		fixes, _, err := selectJ5FixTargets(ctx, tx, nil)
+		if err != nil {
+			return err
+		}
+		st.Verify = len(verify) + len(tasks) + len(fixes)
+		picked, err := selectDelegationTargetsFor(ctx, tx, conn)
+		if err != nil {
+			return err
+		}
+		runTargets = picked.Targets
+		st.Run = len(picked.Blocked) // 進めようが無い課題は、委譲の段が保留にする
+		// 回答が記録された保留を持つ実行（resume で答えを返す番）。
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN hold h ON h.id = k.wait_hold_id JOIN challenge c ON c.id = k.challenge_id
+			WHERE k.ended_at IS NULL AND k.state = 'waiting' AND c.status = 'in_progress' AND h.answered_at IS NOT NULL`).Scan(&answered); err != nil {
+			return err
+		}
+		// 保留の間に成功していた実行（検証中へ進める番）と、保留にし損ねた停止（保留にする番）。
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id
+			WHERE k.held_success = 1 AND c.status = 'in_progress' AND COALESCE(c.uses_integration, 0) = 0
+			AND NOT EXISTS (SELECT 1 FROM task t WHERE t.id = k.task_id AND t.status = 'cancelled')`).Scan(&heldSuccess); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id WHERE `+unheldContractStopWhere).Scan(&unheldStops); err != nil {
+			return err
+		}
+		// 検証した中身を持つ、統合先を使う課題のタスクの実行（レビュー待ち）。「入れてよい」を返す番（まだ返していない中身）。チェックが通っているかは、
+		// 上流を読まない数えでは見ない（多めに数える。チェックが終わっていなければ、次の状態の確認は何も返さず、進み無しの回りになる）。
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id JOIN task t ON t.id = k.task_id
+			WHERE k.ended_at IS NULL AND k.state = 'waiting' AND k.requested_kind = 'review' AND COALESCE(k.verified_ref, '') <> ''
+			AND NOT (k.land_delivered = 1 AND k.land_ref = k.verified_ref)
+			AND c.status = 'in_progress' AND COALESCE(c.uses_integration, 0) = 1 AND t.status = 'verifying'`).Scan(&landable); err != nil {
+			return err
+		}
+		// 着手中の課題の、レビュー待ちの実行（差し戻しを返す番かは、下で決める）。
+		rs, err := tx.QueryContext(ctx, contractRunSelect+` WHERE ended_at IS NULL AND kind = 'task' AND state = 'waiting' AND requested_kind = 'review'
+			AND challenge_id IN (SELECT id FROM challenge WHERE status = 'in_progress') ORDER BY id`)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rs.Close() }()
+		for rs.Next() {
+			r, err := scanContractRun(rs)
+			if err != nil {
+				return err
+			}
+			reviewRuns = append(reviewRuns, r)
+		}
+		if err := rs.Err(); err != nil {
+			return err
+		}
+		for _, r := range reviewRuns {
+			if p, found, err := loadApprovedPlanAnySpec(ctx, tx, r.ChallengeID); err != nil {
+				return err
+			} else if found {
+				v := int64(p.Version)
+				planVersions[r.ChallengeID] = &v
+			}
+		}
+		return nil
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return nil, err
+	}
+	if conn != nil {
+		releases, err := s.ListExecutableReleases(ctx)
+		if err != nil {
+			return nil, err
+		}
+		st.Release = len(releases)
+		parts, err := s.runnableDelegationParts(ctx, agent, conn, runTargets)
+		if err != nil {
+			return nil, err
+		}
+		// 同時に走らせる数の上限で待つタスクは数えない（作業中の実行が上限に達していれば起動できない）。
+		room := agent.MaxParallelRuns - w.Active
+		if room < 0 {
+			room = 0
+		}
+		launches := parts.launches
+		if launches > room {
+			launches = room
+		}
+		replies := 0
+		for _, r := range reviewRuns {
+			rr, err := s.pendingReviewReply(ctx, r, planVersions[r.ChallengeID], agent)
+			if err != nil {
+				return nil, err
+			}
+			if rr != nil && !rr.Skip {
+				replies++
+			}
+		}
+		// 上げる依頼を始められる課題も、委譲の段が進める。
+		reflects, err := s.reflectCandidates(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		st.Run += parts.retries + parts.holds + launches + answered + heldSuccess + unheldStops + landable + replies + len(reflects)
+	}
+	w.Stages = st
+	w.Startable = st.sum()
+	return w, nil
 }

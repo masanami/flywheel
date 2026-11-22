@@ -685,6 +685,9 @@ func updateRunHeartbeat(ctx context.Context, tx *sql.Tx, id int64, at time.Time)
 // USD の 100 万分の 1 を単位とする整数。Result は "" が NULL（終了していない
 // 周）を表す。
 type cycleRow struct {
+	// EndReason は終わった理由（終わっていない周・過去の行は空）。Rounds は通した回りの数。
+	EndReason string
+	Rounds    int
 	ID        string
 	Trigger   string
 	StartedAt time.Time
@@ -694,16 +697,18 @@ type cycleRow struct {
 	SpentUSD  int64
 }
 
-const cycleSelectColumns = `SELECT id, trigger, started_at, ended_at, result, budget_usd, spent_usd FROM cycle`
+const cycleSelectColumns = `SELECT id, trigger, started_at, ended_at, result, budget_usd, spent_usd, end_reason, rounds FROM cycle`
 
 func scanCycleRow(row interface{ Scan(dest ...any) error }) (*cycleRow, error) {
 	var (
 		id                    int64
 		trigger, startedAtStr string
 		endedAtStr, result    sql.NullString
+		endReason             sql.NullString
 		budgetUSD, spentUSD   int64
+		rounds                int64
 	)
-	if err := row.Scan(&id, &trigger, &startedAtStr, &endedAtStr, &result, &budgetUSD, &spentUSD); err != nil {
+	if err := row.Scan(&id, &trigger, &startedAtStr, &endedAtStr, &result, &budgetUSD, &spentUSD, &endReason, &rounds); err != nil {
 		return nil, err
 	}
 	startedAt, err := parseTimestamp(startedAtStr)
@@ -717,6 +722,8 @@ func scanCycleRow(row interface{ Scan(dest ...any) error }) (*cycleRow, error) {
 		Result:    cycleResult(result.String),
 		BudgetUSD: budgetUSD,
 		SpentUSD:  spentUSD,
+		EndReason: endReason.String,
+		Rounds:    int(rounds),
 	}
 	if endedAtStr.Valid {
 		t, err := parseTimestamp(endedAtStr.String)
@@ -777,6 +784,8 @@ func loadCycleByID(ctx context.Context, tx *sql.Tx, id int64) (*cycleRow, error)
 type updateCycleEndInput struct {
 	EndedAt time.Time
 	Result  cycleResult
+	// EndReason が空でなければ、終わった理由（end_reason）も書く。空なら列に触れない。
+	EndReason CycleEndReason
 }
 
 func (in updateCycleEndInput) valid() bool {
@@ -789,8 +798,11 @@ func updateCycleEnd(ctx context.Context, tx *sql.Tx, id int64, in updateCycleEnd
 	if !in.valid() {
 		return nil, ErrValidation
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE cycle SET ended_at = ?, result = ? WHERE id = ?`,
-		formatTimestamp(in.EndedAt), string(in.Result), id)
+	q, args := `UPDATE cycle SET ended_at = ?, result = ? WHERE id = ?`, []any{formatTimestamp(in.EndedAt), string(in.Result), id}
+	if in.EndReason != "" {
+		q, args = `UPDATE cycle SET ended_at = ?, result = ?, end_reason = ? WHERE id = ?`, []any{formatTimestamp(in.EndedAt), string(in.Result), string(in.EndReason), id}
+	}
+	res, err := tx.ExecContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

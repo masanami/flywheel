@@ -13,6 +13,7 @@ package core
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // CyclePhase は `cycle` の段の名前（§IF / API「cycle の JSON 出力」の phase の閉集合の
@@ -94,6 +95,9 @@ type CycleRunInput struct {
 	Contract ContractClient
 	// WorkspaceGit は backup の段が使うワークスペースの Git の口（必須。nil は ErrValidation）。
 	WorkspaceGit WorkspaceGit
+	// Wait は回りの間に置く待ち（nil なら実時間の待ち）。引数は宣言の cycle_poll_interval_sec の長さ。試験が差し替えて、
+	// 待った回数と長さを確かめる。待ちの前後でロックの heartbeat を更新する（待ちの間は、別の goroutine も更新し続ける）。
+	Wait func(ctx context.Context, d time.Duration) error
 	// OnBegin が非 nil なら、周の開始（BeginCycle の成功）の直後、段を始める前に周の ID で呼ぶ。
 	OnBegin func(cycleID string)
 }
@@ -154,6 +158,9 @@ type CycleRunResult struct {
 	RateLimited bool
 }
 
+// cycleStalledRounds は、作業中の実行が無いまま進みの無い回りがこの回数続いたら、回りの繰り返しを終える（stalled）。
+const cycleStalledRounds = 3
+
 // RunCycle は `flywheel cycle` の本体（§一括の操作（サイクル））。
 //
 //  1. サイクルの排他を取って周を開始する（生きている保持者がいれば ErrLocked。
@@ -197,8 +204,15 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 		in.OnBegin(cyc.ID)
 	}
 
+	// 費用の集計（周の ID で束ねる）と利用上限の印は、サイクルを通して 1 つの JudgmentCycle で持つ。
 	jc := NewJudgmentCycle(cyc.ID)
-	phases, runErr := s.runCyclePhases(ctx, in, cyc.ID, jc)
+	phases, endReason, runErr := s.runCyclePhases(ctx, in, cyc.ID, jc)
+	if runErr != nil {
+		endReason = CycleEndError
+		if ctx.Err() != nil {
+			endReason = CycleEndInterrupted
+		}
+	}
 
 	// 周は段の途中で失敗しても、ctx が取り消されていても、必ず終えて排他を解放する
 	// （開始した周と排他を残さない）。backup も同じで、ほかの段の成否にかかわらず周を閉じる前に実行する。
@@ -219,7 +233,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	if runErr != nil {
 		endResult = CycleResultAborted
 	}
-	ended, endErr := s.EndCycle(endCtx, cyc.ID, endResult)
+	ended, endErr := s.EndCycleWithReason(endCtx, cyc.ID, endResult, endReason)
 	if err := errors.Join(runErr, endErr); err != nil {
 		if runErr != nil {
 			// PartialReleaseError など runErr の型を保つ。
@@ -240,10 +254,11 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	}, nil
 }
 
-// runCyclePhases は取り込み・分類・計画・委譲・検証の順に段を実行する。どの段の結果も、途中で
-// エラーになるまでの分は返さない（呼び出し元は runErr を返す）。ただし release の段で実行済みの結果は PartialReleaseError で運ぶ。
-func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle) (_ []CyclePhaseResult, retErr error) {
-	var phases []CyclePhaseResult
+// runCyclePhases は回りを、進められるものが無くなるまで繰り返し（進める段 = 反映・取り込み・分類・計画・委譲・完了の検証）、
+// 最後に終わりの段（学び・改修の提案）を 1 回だけ通す。段ごとの結果は、回りをまたいで足し合わせる（対象の一覧と起動しなかった
+// ものの一覧は連結し、1 つだけの値は最後の回りのもの）。終わった理由（settled・stalled・rate_limited・budget）も返す。
+// どの段の結果も、途中でエラーになるまでの分は返さない（呼び出し元は runErr を返す）。ただし release の段で実行済みの結果は PartialReleaseError で運ぶ。
+func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle) (_ []CyclePhaseResult, _ CycleEndReason, retErr error) {
 	// release の段で実行済みのものがあれば、後続の段のエラーでも失わないよう PartialReleaseError で運ぶ。
 	var executed []ReleaseExecItem
 	defer func() {
@@ -252,6 +267,47 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 			retErr = &PartialReleaseError{Err: retErr, Items: executed}
 		}
 	}()
+
+	var phases []CyclePhaseResult
+	reason, err := s.runRounds(ctx, in, cycleID, jc, &phases, &executed)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// 学習（learn と同じ処理。J6 は接続ツールの宣言を使わないので常に実行する）。
+	j6, err := s.LearnJ6(ctx, J6AutoInput{
+		AgentDecl: in.AgentDecl,
+		Invoker:   in.Invoker,
+		CycleID:   cycleID,
+		Cycle:     jc,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseLearn, Items: j6.Items, NotStarted: j6.NotStarted})
+
+	// 改修提案（improve と同じ処理。J8 は接続ツールの宣言が無くても呼ぶ。起動の件数がしきい値に
+	// 達したときだけ呼び、J8 の連続失敗が上限に達していれば呼ばない）。
+	j8, err := s.ImproveJ8(ctx, ImproveJ8Input{
+		AgentDecl: in.AgentDecl,
+		ConnDecl:  in.ConnDecl,
+		Invoker:   in.Invoker,
+		SlotGit:   in.Git,
+		CycleID:   cycleID,
+		Cycle:     jc,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseImprove, ImproveItems: j8.ImproveItems(), NotStarted: j8.NotStarted})
+
+	return phases, reason, nil
+}
+
+// runAdvancePhases は進める段（反映・取り込み・分類・計画・委譲・完了の検証）を、この順に 1 回ずつ通す（1 つの回り）。
+// 段の中身は、S3d までの 1 回のサイクルと同じ。executed には、release の段で実行済みの項目を足していく。
+func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle, executed *[]ReleaseExecItem) ([]CyclePhaseResult, error) {
+	var phases []CyclePhaseResult
 
 	// 承認済みの release の実行（op exec と同じ core の処理。最初の段。接続ツールの宣言が無ければ skipped）。
 	release := CyclePhaseResult{Phase: CyclePhaseRelease, Skipped: in.ConnDecl == nil, ReleaseItems: []ReleaseExecItem{}}
@@ -267,7 +323,7 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 		})
 		if err != nil {
 			if res != nil && len(res.Items) > 0 {
-				return nil, &PartialReleaseError{Err: err, Items: res.Items}
+				return nil, &PartialReleaseError{Err: err, Items: append(append([]ReleaseExecItem{}, *executed...), res.Items...)}
 			}
 			return nil, err
 		}
@@ -275,7 +331,7 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 		release.ReleaseTidied = res.Tidied
 		release.NotStarted = res.NotStarted
 	}
-	executed = release.ReleaseItems
+	*executed = append(*executed, release.ReleaseItems...)
 	phases = append(phases, release)
 
 	// 取り込み（M2 の ingest と同じ core の処理。経路は呼び出し元が渡す）。
@@ -371,33 +427,6 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 		verify.NotStarted = res.NotStarted
 	}
 	phases = append(phases, verify)
-
-	// 学習（learn と同じ処理。J6 は接続ツールの宣言を使わないので常に実行する）。
-	j6, err := s.LearnJ6(ctx, J6AutoInput{
-		AgentDecl: in.AgentDecl,
-		Invoker:   in.Invoker,
-		CycleID:   cycleID,
-		Cycle:     jc,
-	})
-	if err != nil {
-		return nil, err
-	}
-	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseLearn, Items: j6.Items, NotStarted: j6.NotStarted})
-
-	// 改修提案（improve と同じ処理。J8 は接続ツールの宣言が無くても呼ぶ。起動の件数がしきい値に
-	// 達したときだけ呼び、J8 の連続失敗が上限に達していれば呼ばない）。
-	j8, err := s.ImproveJ8(ctx, ImproveJ8Input{
-		AgentDecl: in.AgentDecl,
-		ConnDecl:  in.ConnDecl,
-		Invoker:   in.Invoker,
-		SlotGit:   in.Git,
-		CycleID:   cycleID,
-		Cycle:     jc,
-	})
-	if err != nil {
-		return nil, err
-	}
-	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseImprove, ImproveItems: j8.ImproveItems(), NotStarted: j8.NotStarted})
 
 	return phases, nil
 }

@@ -194,6 +194,9 @@ func cycleResultText(res *core.CycleRunResult) string {
 	var b strings.Builder
 	c := res.Cycle
 	fmt.Fprintf(&b, "周 %s（契機: %s）: %s（消費 %.4f / 上限 %.2f USD）\n", c.ID, c.Trigger, c.Result, c.SpentUSD, c.BudgetUSD)
+	if c.EndReason != "" {
+		fmt.Fprintf(&b, "  回り %d 回・終わった理由: %s\n", c.Rounds, c.EndReason)
+	}
 	for _, p := range res.Phases {
 		switch {
 		case p.Skipped:

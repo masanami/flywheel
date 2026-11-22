@@ -339,9 +339,13 @@ func FromCyclePhase(p core.CyclePhaseResult) any {
 // Cycle は cycle の周の記録。
 type Cycle struct {
 	BudgetUSD float64 `json:"budget_usd"`
+	// EndReason は終わった理由（`settled`・`budget`・`stopped`・`rate_limited`・`stalled`・`error`・`interrupted`）。理由を持たない周は null。
+	EndReason *string `json:"end_reason"`
 	EndedAt   *string `json:"ended_at"`
 	ID        string  `json:"id"`
 	Result    string  `json:"result"`
+	// Rounds は通した回りの数。
+	Rounds    int     `json:"rounds"`
 	SpentUSD  float64 `json:"spent_usd"`
 	StartedAt string  `json:"started_at"`
 	Trigger   string  `json:"trigger"`
@@ -382,9 +386,11 @@ func FromCycleRunResult(res *core.CycleRunResult) CycleResponse {
 		Started:            true,
 		Cycle: &Cycle{
 			BudgetUSD: c.BudgetUSD,
+			EndReason: endReasonPtr(c.EndReason),
 			EndedAt:   ts(c.EndedAt),
 			ID:        c.ID,
 			Result:    string(c.Result),
+			Rounds:    c.Rounds,
 			SpentUSD:  c.SpentUSD,
 			StartedAt: FormatTimestamp(c.StartedAt),
 			Trigger:   c.Trigger,
@@ -392,6 +398,15 @@ func FromCycleRunResult(res *core.CycleRunResult) CycleResponse {
 		Phases:      phases,
 		RateLimited: res.RateLimited,
 	}
+}
+
+// endReasonPtr は終わった理由を JSON の値へ写す（空は null）。
+func endReasonPtr(r core.CycleEndReason) *string {
+	if r == "" {
+		return nil
+	}
+	v := string(r)
+	return &v
 }
 
 // SlotCleared は slot clear の slot オブジェクト。

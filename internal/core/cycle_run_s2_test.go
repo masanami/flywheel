@@ -90,8 +90,14 @@ func TestRunCycle_VerifyPhase_PendingChecksAreWaitingExternal(t *testing.T) {
 	}
 
 	verify := phaseOfResult(t, res, CyclePhaseVerify)
-	if len(verify.Items) != 0 || len(verify.NotStarted) != 1 || verify.NotStarted[0].Reason != NotStartedWaitingExternal {
+	// チェックが終わらない間は、回りを重ねても waiting_external だけ（回りごとに 1 件。回りをまたいで連結される）。
+	if len(verify.Items) != 0 || len(verify.NotStarted) < 1 {
 		t.Fatalf("verify phase = %+v, want waiting_external only", verify)
+	}
+	for _, ns := range verify.NotStarted {
+		if ns.Reason != NotStartedWaitingExternal {
+			t.Fatalf("verify phase = %+v, want waiting_external only", verify)
+		}
 	}
 	if got := fmt.Sprint(calls); got != "[J3]" {
 		t.Errorf("judgment calls = %s, want [J3] (J5 must not start while checks are pending)", got)

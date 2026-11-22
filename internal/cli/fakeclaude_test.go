@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -118,8 +119,20 @@ func writePositionFileForTest(t *testing.T, ws, content string) string {
 }
 
 // writeAgentJSONForTest はワークスペース ws に .flywheel/agent.json を書く。
+//
+// 回りの間の待ち（cycle_poll_interval_sec）は、書かれていなければ 1 秒にする（既定の 30 秒だと、回りを重ねる試験が遅くなる）。
+// content が JSON の連想配列でなければ、そのまま書く（宣言の不備を確かめる試験のため）。
 func writeAgentJSONForTest(t *testing.T, ws, content string) {
 	t.Helper()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(content), &raw); err == nil && raw != nil {
+		if _, ok := raw["cycle_poll_interval_sec"]; !ok {
+			raw["cycle_poll_interval_sec"] = json.RawMessage("1")
+			if b, err := json.Marshal(raw); err == nil {
+				content = string(b)
+			}
+		}
+	}
 	if err := os.WriteFile(filepath.Join(ws, ".flywheel", "agent.json"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write agent.json: %v", err)
 	}
