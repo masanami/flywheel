@@ -578,8 +578,9 @@ func TestRunCycle_CancelledContextStillEndsTheCycleAndReleasesTheLock(t *testing
 	if lerr != nil || row == nil {
 		t.Fatalf("loadCycleForTest(1) = %v, %v", row, lerr)
 	}
-	if row.EndedAt == nil || row.Result != cycleResultAborted {
-		t.Errorf("cycle Y-1 result = %q ended=%v, want aborted and ended", row.Result, row.EndedAt != nil)
+	// 実行の取り消し（ctx）で止まった周は interrupted（end_reason も interrupted。AC-70・AC-71）。
+	if row.EndedAt == nil || row.Result != cycleResultInterrupted {
+		t.Errorf("cycle Y-1 result = %q ended=%v, want interrupted and ended", row.Result, row.EndedAt != nil)
 	}
 	if _, err := f.s.RunCycle(context.Background(), in); err != nil {
 		t.Errorf("the next RunCycle err = %v, want nil (the lock must not linger)", err)

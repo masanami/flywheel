@@ -233,6 +233,9 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	endResult := CycleResultCompleted
 	if runErr != nil {
 		endResult = CycleResultAborted
+		if endReason == CycleEndInterrupted {
+			endResult = CycleResultInterrupted
+		}
 	}
 	ended, endErr := s.EndCycleWithReason(endCtx, cyc.ID, endResult, endReason)
 	if err := errors.Join(runErr, endErr); err != nil {
@@ -257,7 +260,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 
 // runCyclePhases は回りを、進められるものが無くなるまで繰り返し（進める段 = 反映・取り込み・分類・計画・委譲・完了の検証）、
 // 最後に終わりの段（学び・改修の提案）を 1 回だけ通す。段ごとの結果は、回りをまたいで足し合わせる（対象の一覧と起動しなかった
-// ものの一覧は連結し、1 つだけの値は最後の回りのもの）。終わった理由（settled・stalled・rate_limited・budget）も返す。
+// ものの一覧は連結し、1 つだけの値は最後の回りのもの）。終わった理由（settled・stalled・rate_limited・budget・stopped）も返す。終わりの段（学び・改修の提案）は settled・budget・stalled のときだけ通す（rate_limited・stopped は通さない）。
 // どの段の結果も、途中でエラーになるまでの分は返さない（呼び出し元は runErr を返す）。ただし release の段で実行済みの結果は PartialReleaseError で運ぶ。
 func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle) (_ []CyclePhaseResult, _ CycleEndReason, retErr error) {
 	// release の段で実行済みのものがあれば、後続の段のエラーでも失わないよう PartialReleaseError で運ぶ。
@@ -273,6 +276,12 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 	reason, err := s.runRounds(ctx, in, cycleID, jc, &phases, &executed)
 	if err != nil {
 		return nil, "", err
+	}
+
+	// 終わりの段は、settled・budget・stalled だけが通す。rate_limited（同じ利用上限に当たるため判断点を呼ばない）と
+	// stopped は書き出しだけを通す。
+	if reason == CycleEndRateLimited || reason == CycleEndStopped {
+		return phases, reason, nil
 	}
 
 	// 学習（learn と同じ処理。J6 は接続ツールの宣言を使わないので常に実行する）。
@@ -309,9 +318,23 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 // 段の中身は、S3d までの 1 回のサイクルと同じ。executed には、release の段で実行済みの項目を足していく。
 func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle, executed *[]ReleaseExecItem) ([]CyclePhaseResult, error) {
 	var phases []CyclePhaseResult
+	// boundary は段の切れ目で止める指示を読み、読んだら errCycleStopRequested を返す。
+	boundary := func() error {
+		if stop, err := s.cycleStopRequested(ctx, cycleID); err != nil {
+			return err
+		} else if stop {
+			return errCycleStopRequested
+		}
+		return nil
+	}
+
+	// 段の切れ目で止める指示を読む（段の途中では読まない）。読んだら、通した段までの結果を返して新しい段へ進まない。
+	if err := boundary(); err != nil {
+		return phases, err
+	}
 
 	// 承認済みの release の実行（op exec と同じ core の処理。最初の段。接続ツールの宣言が無ければ skipped）。
-	release := CyclePhaseResult{Phase: CyclePhaseRelease, Skipped: in.ConnDecl == nil, ReleaseItems: []ReleaseExecItem{}}
+	release := CyclePhaseResult{Phase: CyclePhaseRelease, Skipped: advancePhaseSkipped(in, CyclePhaseRelease), ReleaseItems: []ReleaseExecItem{}}
 	if in.ConnDecl != nil {
 		res, err := s.ExecuteReleases(ctx, nil, ReleaseExecOptions{
 			Checks:     in.Checks,
@@ -335,8 +358,12 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 	*executed = append(*executed, release.ReleaseItems...)
 	phases = append(phases, release)
 
+	if err := boundary(); err != nil {
+		return phases, err
+	}
+
 	// 取り込み（M2 の ingest と同じ core の処理。経路は呼び出し元が渡す）。
-	ingest := CyclePhaseResult{Phase: CyclePhaseIngest, Skipped: in.Ingest == nil}
+	ingest := CyclePhaseResult{Phase: CyclePhaseIngest, Skipped: advancePhaseSkipped(in, CyclePhaseIngest)}
 	if in.Ingest != nil {
 		res, err := s.Ingest(ctx, in.Ingest.Channel, IngestInput{Sources: in.Ingest.Sources, Upstream: in.Ingest.Upstream})
 		if err != nil {
@@ -345,6 +372,10 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 		ingest.Ingest = res
 	}
 	phases = append(phases, ingest)
+
+	if err := boundary(); err != nil {
+		return phases, err
+	}
 
 	// 分類（J1。classify --auto と同じ処理）。
 	j1, err := s.ClassifyAutoJ1(ctx, J1AutoInput{
@@ -358,8 +389,12 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 	}
 	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseClassify, Items: j1.Items, NotStarted: j1.NotStarted})
 
+	if err := boundary(); err != nil {
+		return phases, err
+	}
+
 	// 計画（J2。plan --auto と同じ処理。接続ツールの宣言が無ければ skipped）。
-	plan := CyclePhaseResult{Phase: CyclePhasePlan, Skipped: in.ConnDecl == nil}
+	plan := CyclePhaseResult{Phase: CyclePhasePlan, Skipped: advancePhaseSkipped(in, CyclePhasePlan)}
 	if in.ConnDecl != nil {
 		j2, err := s.PlanAutoJ2(ctx, J2AutoInput{
 			AgentDecl: in.AgentDecl,
@@ -377,8 +412,12 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 	}
 	phases = append(phases, plan)
 
+	if err := boundary(); err != nil {
+		return phases, err
+	}
+
 	// 委譲（flywheel run と同じ処理。着手中で承認済みの計画を持つ課題が対象）。
-	run := CyclePhaseResult{Phase: CyclePhaseRun, Skipped: in.ConnDecl == nil}
+	run := CyclePhaseResult{Phase: CyclePhaseRun, Skipped: advancePhaseSkipped(in, CyclePhaseRun)}
 	if in.ConnDecl != nil {
 		res, err := s.RunDelegation(ctx, DelegateInput{
 			AgentDecl: in.AgentDecl,
@@ -402,8 +441,12 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 	}
 	phases = append(phases, run)
 
+	if err := boundary(); err != nil {
+		return phases, err
+	}
+
 	// 検証（verify --auto と同じ処理。委譲の段で検証中になった課題も対象になる）。
-	verify := CyclePhaseResult{Phase: CyclePhaseVerify, Skipped: in.ConnDecl == nil}
+	verify := CyclePhaseResult{Phase: CyclePhaseVerify, Skipped: advancePhaseSkipped(in, CyclePhaseVerify)}
 	if in.ConnDecl != nil {
 		res, err := s.VerifyAutoJ5(ctx, J5AutoInput{
 			AgentDecl:    in.AgentDecl,
@@ -430,4 +473,16 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 	phases = append(phases, verify)
 
 	return phases, nil
+}
+
+// advancePhaseSkipped は、進める段 p が宣言が無いために skipped になるか（取り込みは sources.json、release・計画・委譲・検証は
+// connectors.json。分類は常に実行する）。runAdvancePhases と、止めて通さなかった段を埋める padAdvancePhases が共有する。
+func advancePhaseSkipped(in CycleRunInput, p CyclePhase) bool {
+	switch p {
+	case CyclePhaseIngest:
+		return in.Ingest == nil
+	case CyclePhaseClassify:
+		return false
+	}
+	return in.ConnDecl == nil
 }
