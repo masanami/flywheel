@@ -905,6 +905,30 @@ export interface ChatPostResponse {
   id: number;
 }
 
+export interface SupervisePhase {
+  hands: SuperviseHands;
+  not_started: PhaseNotStarted[];
+  phase: string;
+  processed: number;
+  skipped: boolean;
+}
+
+export interface SuperviseHands {
+  defer: number;
+  escalate: number;
+  replan: number;
+  retry: number;
+  reverify: number;
+  send_back: number;
+  split_followup: number;
+}
+
+export interface PhaseNotStarted {
+  challenge_id?: string;
+  detail?: string;
+  reason: string;
+}
+
 export const CARD_ACTION_CODES = [
   "approve_plan",
   "approve_completion",

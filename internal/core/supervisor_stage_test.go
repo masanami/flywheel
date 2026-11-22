@@ -205,7 +205,7 @@ func TestSuperviseStage_AnsweredHoldIsNotCalled(t *testing.T) {
 	}
 }
 
-// 判断の間にオーナーが回答していたら、手を実行せず（escalate の書き込みは待ちの保留だけを書き換える）、対処の記録は rejected（state_changed）。保留はオーナーの回答のまま。
+// 判断の間にオーナーが回答していたら、手を実行せず（escalate の書き込みは待ちの保留だけを書き換える）、対処の記録は rejected（owner_answered）。保留はオーナーの回答のまま。
 func TestSuperviseStage_OwnerAnswersDuringTheJudgment_IsRejected(t *testing.T) {
 	t.Parallel()
 	f := newSVFixture(t)
@@ -217,8 +217,8 @@ func TestSuperviseStage_OwnerAnswersDuringTheJudgment_IsRejected(t *testing.T) {
 	}
 	res := f.stage(t)
 	as := f.actions(t, id)
-	if len(as) != 1 || as[0].Result != ActionRejected || as[0].RejectReason == nil || *as[0].RejectReason != RejectStateChanged {
-		t.Fatalf("actions = %+v, want one rejected(state_changed)", as)
+	if len(as) != 1 || as[0].Result != ActionRejected || as[0].RejectReason == nil || *as[0].RejectReason != RejectOwnerAnswered {
+		t.Fatalf("actions = %+v, want one rejected(owner_answered)", as)
 	}
 	if res.SuperviseHands[HandEscalate] != 0 || f.holdRow(t, id).state.String != "pending" {
 		t.Errorf("hands = %v, state = %q, want no executed hand and the hold untouched", res.SuperviseHands, f.holdRow(t, id).state.String)
@@ -249,11 +249,11 @@ func TestSuperviseStage_HandNotImplementedYet_FailsAndEscalates(t *testing.T) {
 	t.Parallel()
 	f := newSVFixture(t)
 	id := f.pendingHold(t, StopKindDelegateStopped)
-	f.inv.result = svResult(map[string]any{"hand": "retry", "note": "調べた結果"})
+	f.inv.result = svResult(map[string]any{"hand": "replan", "note": "調べた結果"})
 	f.stage(t)
 	as := f.actions(t, id)
-	if len(as) != 1 || as[0].Result != ActionFailed || as[0].Hand == nil || *as[0].Hand != HandRetry {
-		t.Fatalf("actions = %+v, want one failed retry action (the executed row is rolled back)", as)
+	if len(as) != 1 || as[0].Result != ActionFailed || as[0].Hand == nil || *as[0].Hand != HandReplan {
+		t.Fatalf("actions = %+v, want one failed replan action (the executed row is rolled back)", as)
 	}
 	if f.holdRow(t, id).state.String != "escalated" {
 		t.Error("the hold must be escalated")

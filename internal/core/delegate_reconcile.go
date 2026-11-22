@@ -518,7 +518,7 @@ func (s *Store) recordReconcileFetchFailure(ctx context.Context, dc *delegationC
 		// 連続の回数は同じ run の照合の失敗だけを数える（別の run の照合の失敗は 1 から数える）。
 		return tx.QueryRowContext(ctx,
 			`UPDATE challenge SET reconcile_fetch_failures = CASE WHEN reconcile_fetch_run_id = ? THEN reconcile_fetch_failures + 1 ELSE 1 END,
-				reconcile_fetch_run_id = ?, reconcile_fetch_branch = ? WHERE id = ? RETURNING reconcile_fetch_failures`,
+				reconcile_fetch_run_id = ?, reconcile_fetch_branch = ?, reconcile_supervisor_action_id = NULL WHERE id = ? RETURNING reconcile_fetch_failures`,
 			runIDInt, runIDInt, branch, cid).Scan(&count)
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -580,6 +580,9 @@ func (s *Store) mapReconciliationOptions(ctx context.Context, dc *delegationCont
 	_, err := s.transitionAsInvoker(ctx, runIDDisplay, dc.Challenge.ID, op, func(ctx context.Context, tc *transitionCtx) error {
 		if tc.current.Status != StatusInProgress {
 			return errReconcileNotEligible
+		}
+		if err := clearReconcileSupervisorMark(ctx, tc.tx, tc.id); err != nil {
+			return err
 		}
 		if resetFetchFailures {
 			if err := resetReconcileFetchFailures(ctx, tc.tx, tc.id); err != nil {

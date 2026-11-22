@@ -89,6 +89,9 @@ type holdRef struct {
 	TaskID *string
 	// SupervisorAnswered は、回答がスーパーバイザーの手で閉じたもの（オーナーの回答ではない）。差し戻しの数え直しの境にしない。
 	SupervisorAnswered bool
+	// RetriedFailureLimit は、委譲の連続失敗の上限（止まり方 delegate_stopped で、原因の run が委譲の run）の保留を、スーパーバイザーの retry が閉じたか。
+	// 真なら、その後の連続失敗の数えは上限 − 1 から始まる（次の 1 回の失敗で、同じ上限の保留になる）。
+	RetriedFailureLimit bool
 }
 
 // sendBackRef は、スーパーバイザーの手 send_back の、結果が executed の対処の記録 1 件（差し戻しの回数に数える）。
@@ -97,6 +100,11 @@ type sendBackRef struct {
 	TaskID *string
 	At     time.Time
 }
+
+// retriedFailureLimitSQL は hold の行について、連続失敗の上限の保留を、スーパーバイザーの retry（結果 executed）が閉じたかを返す SQL の式。
+// stopKind は保留の止まり方。
+const retriedFailureLimitSQL = `COALESCE(stop_kind = ? AND run_id IN (SELECT id FROM run WHERE kind = 'delegate') AND supervisor_action_id IN
+	(SELECT id FROM supervisor_action WHERE hand = 'retry' AND result = 'executed'), 0)`
 
 // launchHistory は課題の委譲の run（id 昇順。全部の計画の版）と保留（id 昇順）。
 type launchHistory struct {
@@ -230,7 +238,8 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 	}
 
 	hrows, err := tx.QueryContext(ctx,
-		`SELECT id, question, run_id, answer, answered_at, raised_at, task_id, answered_by, answered_channel, answered_verification FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
+		`SELECT id, question, run_id, answer, answered_at, raised_at, task_id, answered_by, answered_channel, answered_verification, `+retriedFailureLimitSQL+` FROM hold WHERE challenge_id = ? ORDER BY id ASC`,
+		string(StopKindDelegateStopped), challengeID)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +253,7 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 			holdTask               sql.NullInt64
 			by, channel, verif     sql.NullString
 		)
-		if err := hrows.Scan(&ref.ID, &ref.Question, &runID, &answer, &answeredAtText, &raisedAtText, &holdTask, &by, &channel, &verif); err != nil {
+		if err := hrows.Scan(&ref.ID, &ref.Question, &runID, &answer, &answeredAtText, &raisedAtText, &holdTask, &by, &channel, &verif, &ref.RetriedFailureLimit); err != nil {
 			return nil, err
 		}
 		ref.SupervisorAnswered = answer.Valid && isSupervisorAnswerColumns(by.String, channel.String, verif.String)
@@ -455,6 +464,7 @@ func (h *launchHistory) decideLaunch(planVersion, failureLimit int) (resume *res
 
 	// 連続失敗の数（枠超過の run は数えず、連続も切らない）。
 	count := 0
+	reachedHold := true // 連続が、最後の回答済みの保留まで切れていないか
 	var last *runRow
 	for i := len(since) - 1; i >= 0; i-- {
 		r := since[i]
@@ -462,6 +472,7 @@ func (h *launchHistory) decideLaunch(planVersion, failureLimit int) (resume *res
 			continue
 		}
 		if !isCountedFailure(r.Result) {
+			reachedHold = false
 			break
 		}
 		count++
@@ -469,6 +480,9 @@ func (h *launchHistory) decideLaunch(planVersion, failureLimit int) (resume *res
 			rr := r
 			last = &rr
 		}
+	}
+	if last != nil && reachedHold && lastHold != nil && lastHold.RetriedFailureLimit {
+		count += failureLimit - 1 // スーパーバイザーの retry で閉じた上限の保留: 数えは上限 − 1 から
 	}
 	if last != nil && count >= failureLimit {
 		return nil, &failureLimitHit{Count: count, Limit: failureLimit, Last: *last}
