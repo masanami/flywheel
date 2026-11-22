@@ -1128,6 +1128,9 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`UPDATE run SET reflect = 1 WHERE id = 2`, nil},
 			{`INSERT INTO supervisor_action (cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at)
 			  VALUES (1, 1, 1, 1, 1, 'verify_uncertain', 'split_followup', '調べたこと "quoted"', '添え書き', '[{"path":"docs/a.md","locator":"節"}]', '[{"number":1,"text":"条件"}]', 'executed', NULL, ?)`, []any{at}},
+			{`INSERT INTO supervisor_action (cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at, questions)
+			  VALUES (1, 1, NULL, NULL, NULL, 'child_question', 'answer', '調べたこと', '', '[{"path":"docs/a.md","locator":"節"}]', NULL, 'executed', NULL, ?,
+			  '[{"question":"どちらか \"q\"","answer":"A","basis":[{"path":"docs/a.md","locator":"節"}]}]')`, []any{at}},
 			{`INSERT INTO supervisor_action (cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at)
 			  VALUES (1, 2, NULL, NULL, NULL, 'rework_limit', NULL, '', '', '[]', NULL, 'rejected', 'state_changed', ?)`, []any{at}},
 			{`UPDATE hold SET stop_kind = 'verify_uncertain', supervisor_state = 'handled', supervisor_findings = '調べたこと', supervisor_recommendation = '推奨', supervisor_action_id = 1,

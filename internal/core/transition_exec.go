@@ -549,23 +549,46 @@ func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question stri
 	if opts.Required {
 		required = 1
 	}
-	var stopKindColumn, supervisorStateColumn any
+	if opts.Escalation != nil && opts.StopKind != StopKindChildQuestion {
+		return 0, fmt.Errorf("%w: an escalation is only for child_question", ErrValidation)
+	}
+	var stopKindColumn, supervisorStateColumn, findingsColumn, recommendationColumn, actionColumn any
 	if opts.StopKind != "" {
 		stopKindColumn = string(opts.StopKind)
-		limitHands, err := supervisorLimitHit(ctx, tc.tx, tc.id, taskID, opts.StopKind)
-		if err != nil {
-			return 0, err
-		}
-		if limitHands != nil {
-			question = supervisorLimitNotice(limitHands) + "\n" + question
-		} else if opts.SupervisorEnabled {
-			supervisorStateColumn = string(SupervisorStatePending)
+		if opts.StopKind == StopKindChildQuestion {
+			// 子の問い: 答えによる再開の上限に達していれば、判断点を呼ばずに上げる（印は NULL）。達していなければ、
+			// スーパーバイザーが上げた保留（escalated）か、判断点を呼ばずに上げた保留（NULL）。スーパーバイザー待ちにはしない。
+			reached, err := supervisorAnswerLimitReached(ctx, tc.tx, tc.id)
+			if err != nil {
+				return 0, err
+			}
+			if reached {
+				question = prefixSupervisorAnswerLimitQuestion(question)
+			} else if e := opts.Escalation; e != nil {
+				supervisorStateColumn = string(SupervisorStateEscalated)
+				findingsColumn, recommendationColumn, actionColumn = e.Findings, e.Recommendation, e.ActionID
+				if e.FailedQuestion {
+					question = prefixSupervisorFailedQuestion(question)
+				}
+			}
+		} else {
+			limitHands, err := supervisorLimitHit(ctx, tc.tx, tc.id, taskID, opts.StopKind)
+			if err != nil {
+				return 0, err
+			}
+			if limitHands != nil {
+				question = supervisorLimitNotice(limitHands) + "\n" + question
+			} else if opts.SupervisorEnabled {
+				supervisorStateColumn = string(SupervisorStatePending)
+			}
 		}
 	}
 	res, err := tc.tx.ExecContext(ctx,
-		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind, task_id, options, option_required, stop_kind, supervisor_state)
-		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind, task_id, options, option_required, stop_kind, supervisor_state,
+		   supervisor_findings, supervisor_recommendation, supervisor_action_id)
+		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind), int64PtrColumn(taskID), optionsColumn, required, stopKindColumn, supervisorStateColumn,
+		findingsColumn, recommendationColumn, actionColumn,
 	)
 	if err != nil {
 		return 0, err

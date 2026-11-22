@@ -24,8 +24,8 @@ func closedSet(t *testing.T, name string) []string {
 // AC-251: internal/view の閉じた一覧に、止まり方・手・対処の結果・supervisor_state の値がある（断りの理由・フォローアップの出どころも）。
 func TestClosedSets_Supervisor_AC251(t *testing.T) {
 	for name, want := range map[string][]string{
-		"STOP_KIND_CODES":                {"verify_uncertain", "artifact_missing", "delegate_stopped", "facts_unmet", "rework_limit", "checks_failed", "judgment_failed", "intake_unverified", "upstream_unreadable"},
-		"SUPERVISOR_HAND_CODES":          {"reverify", "send_back", "retry", "split_followup", "replan", "defer", "escalate"},
+		"STOP_KIND_CODES":                {"verify_uncertain", "artifact_missing", "delegate_stopped", "facts_unmet", "rework_limit", "checks_failed", "judgment_failed", "intake_unverified", "upstream_unreadable", "child_question"},
+		"SUPERVISOR_HAND_CODES":          {"reverify", "send_back", "retry", "split_followup", "replan", "defer", "escalate", "answer"},
 		"SUPERVISOR_RESULT_CODES":        {"executed", "failed", "rejected"},
 		"SUPERVISOR_REJECT_REASON_CODES": {"state_changed", "owner_answered"},
 		"SUPERVISOR_STATE_CODES":         {"pending", "handled", "escalated"},
@@ -33,17 +33,6 @@ func TestClosedSets_Supervisor_AC251(t *testing.T) {
 	} {
 		if got := closedSet(t, name); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s = %v, want %v", name, got, want)
-		}
-	}
-	// 子の問い（止まり方）と手 answer は S4b-3 の範囲で、まだ無い。
-	for _, c := range closedSet(t, "STOP_KIND_CODES") {
-		if c == "child_question" {
-			t.Error("child_question is S4b-3")
-		}
-	}
-	for _, c := range closedSet(t, "SUPERVISOR_HAND_CODES") {
-		if c == "answer" {
-			t.Error("answer is S4b-3")
 		}
 	}
 }

@@ -838,8 +838,8 @@ func TestImport_SupervisorActionAndHoldStateSurviveTheRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(doc.Tables["supervisor_action"]); got != 2 {
-		t.Errorf("export has %d supervisor_action rows, want 2", got)
+	if got := len(doc.Tables["supervisor_action"]); got != 3 {
+		t.Errorf("export has %d supervisor_action rows, want 3", got)
 	}
 	dst, _ := newWorkspaceStore(t)
 	if _, err := dst.Import(context.Background(), data); err != nil {
@@ -847,6 +847,13 @@ func TestImport_SupervisorActionAndHoldStateSurviveTheRoundTrip(t *testing.T) {
 	}
 	read := func(s *Store) (n int, state, kind, findings string, deferred int, streak, rounds int) {
 		if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+			var q sql.NullString
+			if err := tx.QueryRow(`SELECT questions FROM supervisor_action WHERE id = 2`).Scan(&q); err != nil || !strings.Contains(q.String, `"answer":"A"`) {
+				t.Errorf("supervisor_action.questions of row 2 = %q, %v; want the questions JSON to survive the round trip", q.String, err)
+			}
+			if err := tx.QueryRow(`SELECT questions FROM supervisor_action WHERE id = 1`).Scan(&q); err != nil || q.Valid {
+				t.Errorf("supervisor_action.questions of row 1 = %v, %v; want NULL", q, err)
+			}
 			if err := tx.QueryRow(`SELECT COUNT(*) FROM supervisor_action`).Scan(&n); err != nil {
 				return err
 			}
@@ -864,7 +871,7 @@ func TestImport_SupervisorActionAndHoldStateSurviveTheRoundTrip(t *testing.T) {
 	}
 	sn, ss, sk, sf, sd, st, sr := read(src)
 	dn, ds, dk, df, dd, dt, dr := read(dst)
-	if sn != 2 || ss != "handled" {
+	if sn != 3 || ss != "handled" {
 		t.Fatalf("fixture did not fill the columns: %d %q", sn, ss)
 	}
 	if sn != dn || ss != ds || sk != dk || sf != df || sd != dd || st != dt || sr != dr {

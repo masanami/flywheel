@@ -14,26 +14,23 @@ import (
 func TestSupervisorKinds_ClosedSetsAndTheHandTable(t *testing.T) {
 	t.Parallel()
 	kinds := StopKindValues()
-	if len(kinds) != 9 {
-		t.Fatalf("stop kinds = %v, want 9", kinds)
+	if len(kinds) != 10 {
+		t.Fatalf("stop kinds = %v, want 10", kinds)
 	}
 	for _, k := range kinds {
-		if k == "child_question" {
-			t.Error("child_question is S4b-3")
-		}
 		if got, ok := ParseStopKind(string(k)); !ok || got != k {
 			t.Errorf("ParseStopKind(%q) = %q, %v", k, got, ok)
 		}
 	}
-	if _, ok := ParseStopKind("child_question"); ok {
-		t.Error("ParseStopKind accepted child_question")
+	if _, ok := ParseStopKind("child_question"); !ok {
+		t.Error("ParseStopKind rejected child_question (S4b-3)")
 	}
 	hands := SupervisorHandValues()
-	if len(hands) != 7 {
-		t.Fatalf("hands = %v, want 7", hands)
+	if len(hands) != 8 {
+		t.Fatalf("hands = %v, want 8", hands)
 	}
-	if _, ok := ParseSupervisorHand("answer"); ok {
-		t.Error("ParseSupervisorHand accepted answer (S4b-3)")
+	if _, ok := ParseSupervisorHand("answer"); !ok {
+		t.Error("ParseSupervisorHand rejected answer (S4b-3)")
 	}
 	if !reflect.DeepEqual(SupervisorActionResultValues(), []SupervisorActionResult{"executed", "failed", "rejected"}) ||
 		!reflect.DeepEqual(SupervisorRejectReasonValues(), []SupervisorRejectReason{"state_changed", "owner_answered"}) ||
@@ -51,6 +48,7 @@ func TestSupervisorKinds_ClosedSetsAndTheHandTable(t *testing.T) {
 		"judgment_failed":     {"retry", "escalate"},
 		"intake_unverified":   {"reverify", "defer", "escalate"},
 		"upstream_unreadable": {"defer", "escalate"},
+		"child_question":      {"answer", "escalate"},
 	}
 	for _, k := range kinds {
 		got := SupervisorHandsFor(k)
@@ -171,7 +169,7 @@ func TestHoldEntrance_TheOccurrenceEntranceReachesTheSameEntrance(t *testing.T) 
 func TestHoldEntrance_UnknownStopKindIsRejectedAndWritesNothing(t *testing.T) {
 	t.Parallel()
 	s, _ := newWorkspaceStore(t)
-	id, err := holdViaEntrance(t, s, StatusInProgress, HoldKindHuman, HoldOptionsInput{StopKind: "child_question", SupervisorEnabled: true})
+	id, err := holdViaEntrance(t, s, StatusInProgress, HoldKindHuman, HoldOptionsInput{StopKind: "nope", SupervisorEnabled: true})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("err = %v, want ErrValidation", err)
 	}
@@ -252,8 +250,8 @@ func TestSupervisorAction_RecordListAndCount(t *testing.T) {
 		t.Fatalf("ListSupervisorActionsByTask(T-1) = %d actions, %v; want 7 (6 recorded here and 1 of the fixture)", len(byTask), err)
 	}
 	byChallenge, err := s.ListSupervisorActionsByChallenge(ctx, "C-1")
-	if err != nil || len(byChallenge) != 9 {
-		t.Fatalf("ListSupervisorActionsByChallenge(C-1) = %d actions, %v; want 9", len(byChallenge), err)
+	if err != nil || len(byChallenge) != 10 {
+		t.Fatalf("ListSupervisorActionsByChallenge(C-1) = %d actions, %v; want 10", len(byChallenge), err)
 	}
 	for i := 1; i < len(byChallenge); i++ {
 		if byChallenge[i-1].ID >= byChallenge[i].ID {
@@ -348,8 +346,8 @@ func TestSupervisorAction_RejectsMalformedInput(t *testing.T) {
 	s, _ := filledStore(t)
 	ok := SupervisorActionInput{CycleID: "Y-1", ChallengeID: "C-1", StopKind: StopKindFactsUnmet, Findings: "f", Result: ActionExecuted, Hand: HandSendBack}
 	cases := map[string]func(in *SupervisorActionInput){
-		"unknown stop kind":          func(in *SupervisorActionInput) { in.StopKind = "child_question" },
-		"unknown hand":               func(in *SupervisorActionInput) { in.Hand = "answer" },
+		"unknown stop kind":          func(in *SupervisorActionInput) { in.StopKind = "nope" },
+		"unknown hand":               func(in *SupervisorActionInput) { in.Hand = "nope" },
 		"unknown result":             func(in *SupervisorActionInput) { in.Result = "done" },
 		"rejected without a reason":  func(in *SupervisorActionInput) { in.Result = ActionRejected },
 		"a reason without rejection": func(in *SupervisorActionInput) { in.RejectReason = RejectStateChanged },
@@ -463,7 +461,7 @@ func TestParseSVOutput(t *testing.T) {
 		}
 	}
 	bad := map[string]string{
-		"unknown hand":                      `{"hand":"answer","findings":"f","note":"n","basis":[],"recommendation":"","options":[],"conditions":[]}`,
+		"unknown hand":                      `{"hand":"nope","findings":"f","note":"n","basis":[],"recommendation":"","options":[],"conditions":[]}`,
 		"empty findings":                    `{"hand":"retry","findings":" ","note":"","basis":[],"recommendation":"","options":[],"conditions":[]}`,
 		"reverify without a note":           `{"hand":"reverify","findings":"f","note":"","basis":[],"recommendation":"","options":[],"conditions":[]}`,
 		"escalate without a recommendation": `{"hand":"escalate","findings":"f","note":"","basis":[],"recommendation":"","options":[],"conditions":[]}`,
@@ -472,7 +470,7 @@ func TestParseSVOutput(t *testing.T) {
 		"split with zero":                   `{"hand":"split_followup","findings":"f","note":"n","basis":[],"recommendation":"","options":[],"conditions":[0]}`,
 		"options on a non-escalate":         `{"hand":"reverify","findings":"f","note":"n","basis":[],"recommendation":"","options":[{"id":"a","label":"x","description":""}],"conditions":[]}`,
 		"a bad option":                      `{"hand":"escalate","findings":"f","note":"","basis":[],"recommendation":"r","options":[{"id":"a","label":"","description":""}],"conditions":[]}`,
-		"an unknown key":                    `{"hand":"retry","findings":"f","note":"","basis":[],"recommendation":"","options":[],"conditions":[],"answers":[]}`,
+		"an unknown key":                    `{"hand":"retry","findings":"f","note":"","basis":[],"recommendation":"","options":[],"conditions":[],"extra":[]}`,
 		"not JSON":                          `nope`,
 		"trailing data":                     `{"hand":"retry","findings":"f"} {}`,
 	}
@@ -495,9 +493,6 @@ func TestParseSVOutput(t *testing.T) {
 			t.Errorf("the output schema lacks the hand %q", h)
 		}
 	}
-	if strings.Contains(schema, `"answer"`) {
-		t.Error("the output schema must not offer answer (S4b-3)")
-	}
 }
 
 // 手の実行の入口: 振り分けは 1 か所の switch。まだ無い手（雛形）は ErrSupervisorHandNotImplemented。未知の手は検証の誤り。
@@ -505,7 +500,7 @@ func TestExecuteSupervisorHand_NotYetImplementedHandsAreScaffolds(t *testing.T) 
 	t.Parallel()
 	s, _ := newWorkspaceStore(t)
 	for _, h := range SupervisorHandValues() {
-		if h == HandEscalate || h == HandDefer || h == HandReverify || h == HandRetry || h == HandSplitFollowup {
+		if h == HandEscalate || h == HandDefer || h == HandReverify || h == HandRetry || h == HandSplitFollowup || h == HandAnswer {
 			continue // 実装済み（defer は supervisor_defer_test.go、reverify・retry は supervisor_hand_reconcile_retry_test.go と supervisor_resolve_test.go、split_followup は supervisor_split_followup_test.go が検証する）
 		}
 		_, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{StopKind: StopKindArtifactMissing, Output: SVOutput{Hand: h}})
@@ -513,7 +508,10 @@ func TestExecuteSupervisorHand_NotYetImplementedHandsAreScaffolds(t *testing.T) 
 			t.Errorf("hand %s: err = %v, want ErrSupervisorHandNotImplemented", h, err)
 		}
 	}
-	if _, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{Output: SVOutput{Hand: "answer"}}); !errors.Is(err, ErrValidation) {
+	if _, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{Output: SVOutput{Hand: HandAnswer}}); !errors.Is(err, ErrValidation) {
+		t.Errorf("answer against a hold: err = %v, want ErrValidation", err)
+	}
+	if _, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{Output: SVOutput{Hand: "nope"}}); !errors.Is(err, ErrValidation) {
 		t.Errorf("an unknown hand: err = %v, want ErrValidation", err)
 	}
 }

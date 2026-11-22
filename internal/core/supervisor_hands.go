@@ -118,6 +118,8 @@ func supervisorHandDescription(h SupervisorHand) string {
 		return "このサイクルでは見送る"
 	case HandEscalate:
 		return "調べた内容と推奨を付けて、オーナーへ上げる"
+	case HandAnswer:
+		return "根拠（ワークスペースの中のファイル）を示して、委譲先の問い全部に答える"
 	}
 	return ""
 }
