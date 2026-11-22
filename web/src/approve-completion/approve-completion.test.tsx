@@ -64,6 +64,7 @@ function summary(over: Partial<ApprovalSummary> = {}): {
 } {
   return {
     approval: {
+      added_tasks: [],
       challenge_id: "C-1",
       conditions_after_release: [],
       conditions_after_release_heading: "",

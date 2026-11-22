@@ -1636,8 +1636,15 @@ func addCoreRedesignS4cShowShape(t *testing.T, doc *documentedJSON) {
 	if !strings.Contains(string(data), "予算（`budget`: `estimate_usd`・`limit_usd`・`limit_reason`）を足す") {
 		t.Fatal("core-redesign-s4c spec does not document the S4c-1 key of show --json (budget)")
 	}
+	if !strings.Contains(string(data), "課題の詳細に、足す依頼の一覧（`additions[]`:") || !strings.Contains(string(data), "`flywheel cycle` の出力に、その回に足したタスクを出す") {
+		t.Fatal("core-redesign-s4c spec does not document the S4c-1 keys of show --json (additions) and cycle --json (added tasks)")
+	}
 	for _, shape := range doc.topLevel["show"] {
 		shape["budget"] = true
+		shape["additions"] = true
+	}
+	for _, shape := range doc.topLevel["cycle"] {
+		shape["added_tasks"] = true
 	}
 }
 

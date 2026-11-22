@@ -670,9 +670,11 @@ func FromChallengeDetailBudget(b core.ChallengeDetailBudget) Budget {
 
 // ShowResponse は `show` の成功の形。
 type ShowResponse struct {
-	Approvals []Approval    `json:"approvals"`
-	Budget    Budget        `json:"budget"`
-	Challenge ShowChallenge `json:"challenge"`
+	// Additions は課題の足す依頼（閉じたものも含む。無ければ []）。
+	Additions []TaskAddition `json:"additions"`
+	Approvals []Approval     `json:"approvals"`
+	Budget    Budget         `json:"budget"`
+	Challenge ShowChallenge  `json:"challenge"`
 	// ConflictFixes は通したコンフリクトの解消（古い順。無ければ []）。
 	ConflictFixes []PassedConflictFix `json:"conflict_fixes"`
 	// DirectCompletions は親が直接行った完了の記録（古い順。無ければ []）。1 件以上あることが「親が直接行った」印。
@@ -697,6 +699,7 @@ type ShowResponse struct {
 // FromChallengeDetail は core.ChallengeDetail を ShowResponse へ変換する。
 func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 	return ShowResponse{
+		Additions:         FromTaskAdditions(d.Additions),
 		Approvals:         FromApprovals(d.Approvals),
 		Budget:            FromChallengeDetailBudget(d.Budget),
 		Challenge:         FromShowChallenge(d),

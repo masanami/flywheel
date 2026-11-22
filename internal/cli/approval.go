@@ -561,6 +561,7 @@ func buildApprovalSummary(p *core.ApprovalPreview, decision core.ApprovalDecisio
 	} else {
 		fmt.Fprintf(&b, "完了条件:    %s\n", escapeControl(p.DoneCriteria))
 		writeDirectCompletionSummary(&b, p)
+		writeAddedTasks(&b, p.AddedTasks)
 		writeCompletionStageSummary(&b, p)
 	}
 	if p.Kind == core.ApprovalKindCompletion {

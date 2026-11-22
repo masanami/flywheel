@@ -5,6 +5,8 @@ import type { ApprovalPlan } from "../api/types.gen.ts";
 export const RICH_PLANS: Record<string, Omit<ApprovalPlan, "version">> = {
   "alpha/C-3": {
     body: "1. 送信に冪等キーを足す\n2. キューの再試行で同じキーを使う",
+    budget_limit_reason: null,
+    budget_limit_usd: 12,
     budget_usd: 12,
     summary:
       "再送のたびに**同じ通知が重ならない**ようにする。まず誤りの種類を洗い、知らせ方を決めてから実装する。",

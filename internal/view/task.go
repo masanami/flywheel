@@ -11,6 +11,8 @@ import "github.com/masanami/flywheel/internal/core"
 // artifacts・delegate・facts・landing・verification は委譲先の実行・成果物・作業ログから core が組み立てる値の口で、
 // 値が無いときは artifacts が `[]`、delegate・landing・verification が null、facts が `{}`。
 type Task struct {
+	// Added は計画の後に足されたタスクの印。計画の承認で作ったタスクは null。
+	Added           *TaskAdded        `json:"added"`
 	Artifacts       []TaskArtifact    `json:"artifacts"`
 	Body            string            `json:"body"`
 	BudgetImplUSD   float64           `json:"budget_impl_usd"`
@@ -30,6 +32,48 @@ type Task struct {
 	Status          string            `json:"status"`
 	Title           string            `json:"title"`
 	Verification    *TaskVerification `json:"verification"`
+}
+
+// TaskAdded は足されたタスクの印。origin は足す依頼の出どころ（`expand`）、origin_task_id は出どころのタスクの ID（無ければ null）、
+// added_at は足した日時。
+type TaskAdded struct {
+	AddedAt      string  `json:"added_at"`
+	Origin       string  `json:"origin"`
+	OriginTaskID *string `json:"origin_task_id"`
+}
+
+func fromTaskAdded(a *core.TaskAdded) *TaskAdded {
+	if a == nil {
+		return nil
+	}
+	return &TaskAdded{AddedAt: FormatTimestamp(a.AddedAt), Origin: string(a.Origin), OriginTaskID: a.OriginTaskID}
+}
+
+// TaskAddition は課題の詳細の additions の要素（足す依頼 1 件。閉じたものも含む）。state は `pending`・`awaiting_owner`・`applied`・
+// `none`・`declined`・`superseded`。task_ids はその足す依頼で足したタスクの ID。total_after_usd・limit_usd は、最後に判定したときの
+// 足した後の見込みと上限（記録した値。未判定の limit_usd は null）。
+type TaskAddition struct {
+	CreatedAt     string   `json:"created_at"`
+	DecidedAt     *string  `json:"decided_at"`
+	ID            string   `json:"id"`
+	LimitUSD      *float64 `json:"limit_usd"`
+	Origin        string   `json:"origin"`
+	OriginTaskID  *string  `json:"origin_task_id"`
+	State         string   `json:"state"`
+	TaskIDs       []string `json:"task_ids"`
+	TotalAfterUSD float64  `json:"total_after_usd"`
+}
+
+// FromTaskAdditions は足す依頼の一覧を変換する（空でも `[]`）。
+func FromTaskAdditions(as []core.TaskAddition) []TaskAddition {
+	out := make([]TaskAddition, 0, len(as))
+	for _, a := range as {
+		out = append(out, TaskAddition{
+			CreatedAt: FormatTimestamp(a.CreatedAt), DecidedAt: ts(a.DecidedAt), ID: a.ID, LimitUSD: a.LimitUSD, Origin: string(a.Origin),
+			OriginTaskID: a.OriginTaskID, State: string(a.State), TaskIDs: append([]string{}, a.TaskIDs...), TotalAfterUSD: a.TotalAfterUSD,
+		})
+	}
+	return out
 }
 
 // TaskDelegate はタスクの最後の契約の実行。state は ContractState の値（記録のまま）、summary は委譲先が返した要約、
@@ -61,7 +105,7 @@ func FromTasks(ts []core.Task) []Task {
 	out := make([]Task, 0, len(ts))
 	for _, t := range ts {
 		out = append(out, Task{
-			Artifacts: fromTaskArtifacts(t.Detail.Artifacts), Delegate: fromTaskDelegate(t.Detail.Delegate),
+			Added: fromTaskAdded(t.Added), Artifacts: fromTaskArtifacts(t.Detail.Artifacts), Delegate: fromTaskDelegate(t.Detail.Delegate),
 			Facts: fromTaskFacts(t.Detail.Facts), Landing: fromTaskLanding(t.Detail.Landing), Verification: fromTaskVerification(t.Detail.Verification),
 			SourceKey: strOrNil(t.SourceKey),
 			Body:      t.Body, DependsOn: append([]string{}, t.DependsOn...), DoneCriteria: t.DoneCriteria, ID: t.ID,

@@ -186,6 +186,7 @@ export interface ListResponse {
 }
 
 export interface ShowResponse {
+  additions: TaskAddition[];
   approvals: Approval[];
   budget: Budget;
   challenge: ShowChallenge;
@@ -202,6 +203,18 @@ export interface ShowResponse {
   source_children: SourceChild[];
   stages: Stages;
   tasks: Task[];
+}
+
+export interface TaskAddition {
+  created_at: string;
+  decided_at: string | null;
+  id: string;
+  limit_usd: number | null;
+  origin: string;
+  origin_task_id: string | null;
+  state: string;
+  task_ids: string[];
+  total_after_usd: number;
 }
 
 export interface Approval {
@@ -445,6 +458,7 @@ export interface StageOption {
 }
 
 export interface Task {
+  added: TaskAdded | null;
   artifacts: TaskArtifact[];
   body: string;
   budget_impl_usd: number;
@@ -464,6 +478,12 @@ export interface Task {
   status: string;
   title: string;
   verification: TaskVerification | null;
+}
+
+export interface TaskAdded {
+  added_at: string;
+  origin: string;
+  origin_task_id: string | null;
 }
 
 export interface TaskArtifact {
@@ -574,6 +594,7 @@ export interface Card {
 }
 
 export interface ShowCardResponse {
+  additions: TaskAddition[];
   approvals: Approval[];
   budget: Budget;
   card: Card;
@@ -691,6 +712,7 @@ export interface ApprovalSummaryResponse {
 }
 
 export interface ApprovalSummary {
+  added_tasks: AddedTask[];
   challenge_id: string;
   conditions_after_release: string[];
   conditions_after_release_heading: string;
@@ -713,6 +735,13 @@ export interface ApprovalSummary {
   version: number;
 }
 
+export interface AddedTask {
+  challenge_id: string;
+  origin: string;
+  task_id: string;
+  title: string;
+}
+
 export interface ApprovalOtherOperation {
   id: string;
   kind: string;
@@ -721,6 +750,8 @@ export interface ApprovalOtherOperation {
 
 export interface ApprovalPlan {
   body: string;
+  budget_limit_reason: string | null;
+  budget_limit_usd: number | null;
   budget_usd: number | null;
   summary: string | null;
   tasks: ApprovalPlanTask[];

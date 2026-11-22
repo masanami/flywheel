@@ -90,6 +90,17 @@ type Task struct {
 	SpentUSD        float64
 	// Detail は委譲先の実行・成果物・値・検証・統合先へ入れる進み。課題の詳細（GetChallenge）だけが埋める。
 	Detail TaskDetail
+	// Added は、計画の後に足されたタスクの印（task.addition_id が指す足す依頼から作る）。計画の承認で作ったタスクは nil。
+	// 課題の詳細（GetChallenge）だけが埋める。
+	Added *TaskAdded
+}
+
+// TaskAdded は足されたタスクの印。Origin は足す依頼の出どころ、OriginTaskID は出どころのタスクの ID（"T-<n>"。無ければ nil）、
+// AddedAt はタスクを足した日時（タスクの作成日時）。
+type TaskAdded struct {
+	Origin       TaskAdditionOrigin
+	OriginTaskID *string
+	AddedAt      time.Time
 }
 
 func (in TaskInput) valid() bool {

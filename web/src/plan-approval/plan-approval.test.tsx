@@ -46,6 +46,8 @@ afterEach(() => {
 
 const plan = (over: Partial<ApprovalPlan> = {}): ApprovalPlan => ({
   body: "過去の形の本文",
+  budget_limit_reason: null,
+  budget_limit_usd: 30,
   budget_usd: 30,
   summary: "方針の本文",
   tasks: [
@@ -199,6 +201,45 @@ it("AC-313 #811: budget_usd が 30 のとき、予算の上限の 30 が出る",
 it("AC-314 #811: budget_usd が null のとき、予算の上限に「未設定」が出る", async () => {
   await opened(summary({ plan: plan({ budget_usd: null }) }));
   expect(screen.getByTestId("plan-budget")).toHaveTextContent("未設定");
+});
+
+it("AC-189 #1046: 見込みの額が出る", async () => {
+  await opened(
+    summary({ plan: plan({ budget_usd: 30, budget_limit_usd: 40 }) }),
+  );
+  expect(screen.getByText("見込み")).toBeInTheDocument();
+  expect(screen.getByTestId("plan-budget")).toHaveTextContent("30");
+});
+
+it("AC-190 #1046: 上限の額が出る", async () => {
+  await opened(
+    summary({ plan: plan({ budget_usd: 30, budget_limit_usd: 40 }) }),
+  );
+  expect(screen.getByText("上限")).toBeInTheDocument();
+  expect(screen.getByTestId("plan-budget-limit")).toHaveTextContent("40");
+});
+
+it("AC-191 #1046: 上限が見込みより大きいとき、上限の理由が出る", async () => {
+  await opened(
+    summary({
+      plan: plan({
+        budget_usd: 30,
+        budget_limit_usd: 40,
+        budget_limit_reason: "調査の結果で足すタスクの分",
+      }),
+    }),
+  );
+  expect(screen.getByTestId("plan-budget-limit-reason")).toHaveTextContent(
+    "調査の結果で足すタスクの分",
+  );
+});
+
+it("AC-192 #1046: 上限が見込みと同じとき、上限の理由の行は出ない", async () => {
+  await opened(
+    summary({ plan: plan({ budget_usd: 30, budget_limit_usd: 30 }) }),
+  );
+  expect(screen.queryByText("上限の理由")).toBeNull();
+  expect(screen.queryByTestId("plan-budget-limit-reason")).toBeNull();
 });
 
 it("AC-315 #811: uses_integration が真のとき、統合先の「使う」が出る", async () => {
