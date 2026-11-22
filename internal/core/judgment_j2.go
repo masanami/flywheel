@@ -666,48 +666,58 @@ func validateJ2Tasks(in []j2RawTask, vc j2ValidationContext) ([]j2Task, bool) {
 	}
 	out := make([]j2Task, 0, len(in))
 	for _, t := range in {
-		repo, connector := vc.Conn.findConnectorRepo(t.Repo)
-		if repo == nil || connector == nil {
+		jt, ok := validateJ2TaskFields(t, vc, len(in) >= 2)
+		if !ok {
 			return nil, false
 		}
-		var op *ConnectorOperation
-		for i := range connector.Operations {
-			if connector.Operations[i].ID == t.Operation {
-				op = &connector.Operations[i]
-				break
-			}
-		}
-		if op == nil {
-			return nil, false
-		}
-		// 起動できる操作だけを選べる。委譲の起動（StartContractDelegation）も同じ関数で検査する。
-		if checkOperationLaunchable(connector, op, vc.HasSource) != nil {
-			return nil, false
-		}
-		nonGoals, err := NormalizeNonGoals(t.NonGoals)
-		if err != nil {
-			return nil, false
-		}
-		// タスクの枠は、書いたら正で、実装の枠は 1 回の実行の上限額以下。タスクが 2 個以上の計画では、両方を必ず書く。
-		for _, b := range []*float64{t.BudgetImplUSD, t.BudgetReviewUSD} {
-			if b != nil && !validBudgetAmount(*b) {
-				return nil, false
-			}
-		}
-		if t.BudgetImplUSD != nil && vc.Agent != nil && *t.BudgetImplUSD > vc.Agent.MaxRunBudgetUSD {
-			return nil, false
-		}
-		if len(in) >= 2 && (t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil) {
-			return nil, false
-		}
-		out = append(out, j2Task{
-			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria,
-			NonGoals: nonGoals, DependsOn: t.DependsOn, Repo: t.Repo, Operation: t.Operation, Source: t.Source,
-			BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD,
-			ExpandAfter: t.ExpandAfter != nil && *t.ExpandAfter,
-		})
+		out = append(out, jt)
 	}
 	return out, true
+}
+
+// validateJ2TaskFields はタスク 1 件の、対象リポジトリ・操作・取りやめでない文字列・枠の検査を行う（計画のタスクと、足すタスクで共通）。
+// requireBudgets が真のとき、実装の枠とレビュー対応の枠の両方を必ず書く。
+func validateJ2TaskFields(t j2RawTask, vc j2ValidationContext, requireBudgets bool) (j2Task, bool) {
+	repo, connector := vc.Conn.findConnectorRepo(t.Repo)
+	if repo == nil || connector == nil {
+		return j2Task{}, false
+	}
+	var op *ConnectorOperation
+	for i := range connector.Operations {
+		if connector.Operations[i].ID == t.Operation {
+			op = &connector.Operations[i]
+			break
+		}
+	}
+	if op == nil {
+		return j2Task{}, false
+	}
+	// 起動できる操作だけを選べる。委譲の起動（StartContractDelegation）も同じ関数で検査する。
+	if checkOperationLaunchable(connector, op, vc.HasSource) != nil {
+		return j2Task{}, false
+	}
+	nonGoals, err := NormalizeNonGoals(t.NonGoals)
+	if err != nil {
+		return j2Task{}, false
+	}
+	// タスクの枠は、書いたら正で、実装の枠は 1 回の実行の上限額以下。タスクが 2 個以上の計画では、両方を必ず書く。
+	for _, b := range []*float64{t.BudgetImplUSD, t.BudgetReviewUSD} {
+		if b != nil && !validBudgetAmount(*b) {
+			return j2Task{}, false
+		}
+	}
+	if t.BudgetImplUSD != nil && vc.Agent != nil && *t.BudgetImplUSD > vc.Agent.MaxRunBudgetUSD {
+		return j2Task{}, false
+	}
+	if requireBudgets && (t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil) {
+		return j2Task{}, false
+	}
+	return j2Task{
+		Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria,
+		NonGoals: nonGoals, DependsOn: t.DependsOn, Repo: t.Repo, Operation: t.Operation, Source: t.Source,
+		BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD,
+		ExpandAfter: t.ExpandAfter != nil && *t.ExpandAfter,
+	}, true
 }
 
 // validateJ2BudgetLimit は計画の上限（budget_limit_usd）と理由（budget_limit_reason）を検査する。省いた上限は nil（見込みと同じ額）。

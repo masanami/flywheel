@@ -117,6 +117,21 @@ func (in TaskInput) valid() bool {
 // 同じ Key が重なれば errDuplicateTaskKey（ErrValidation）、課題が無ければ ErrNotFound。
 // 作ったタスクを入力の順で返す。
 func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challengeID, planVersion int64, in []TaskInput) ([]Task, error) {
+	return createTasksWith(ctx, tx, rec, challengeID, planVersion, in, createTasksOptions{})
+}
+
+// createTasksOptions は、計画の後にタスクを足すときの createTasks の追加の入力。
+type createTasksOptions struct {
+	// Existing は、前提に指せるいまあるタスクの鍵 → ID（承認済みの版の、取りやめでないタスク。前の版のタスクの鍵は入れない。
+	// 一意の索引が（課題・計画の版・鍵）なので、版をまたぐ鍵は対応に入れない）。鍵が in の鍵と重なれば不正。
+	Existing map[string]int64
+	// AdditionID は足したタスクの印（task.addition_id。足す依頼の内部整数 ID）。nil は計画の承認で作るタスク。
+	AdditionID *int64
+}
+
+// createTasksWith は createTasks に、いまあるタスクへの前提（opts.Existing）と足す依頼の印（opts.AdditionID）を足した形。
+// 前提の辺は、いまあるタスクがこの呼び出しのタスクを指すことは無いので、輪はこの呼び出しのタスクどうしの辺だけで決まる。
+func createTasksWith(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challengeID, planVersion int64, in []TaskInput, opts createTasksOptions) ([]Task, error) {
 	if planVersion < 1 {
 		return nil, ErrValidation
 	}
@@ -131,11 +146,17 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 		if _, dup := byKey[t.Key]; dup {
 			return nil, errDuplicateTaskKey
 		}
+		if _, dup := opts.Existing[t.Key]; dup {
+			return nil, errDuplicateTaskKey
+		}
 		byKey[t.Key] = i
 	}
 	for _, t := range in {
 		for _, k := range t.DependsOn {
-			if _, ok := byKey[k]; !ok || k == t.Key {
+			if _, ok := byKey[k]; ok && k != t.Key {
+				continue
+			}
+			if _, ok := opts.Existing[k]; !ok || k == t.Key {
 				return nil, ErrValidation
 			}
 		}
@@ -163,11 +184,11 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 			nonGoals = string(b)
 		}
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after, addition_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			challengeID, planVersion, nullableTextColumn(t.Key), t.Title, t.Body, t.DoneCriteria, nonGoals, t.Repo, t.Operation,
 			string(TaskStatusPending), nullableTextColumn(t.SourceKey), nowStr, nowStr,
-			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros), t.ExpandAfter)
+			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros), t.ExpandAfter, int64PtrColumn(opts.AdditionID))
 		if store.IsUniqueViolation(err) {
 			return nil, errDuplicateTaskKey
 		}
@@ -183,8 +204,12 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 	}
 	for i, t := range in {
 		for _, k := range t.DependsOn {
+			dep := opts.Existing[k]
+			if j, ok := byKey[k]; ok {
+				dep = ids[j]
+			}
 			if _, err := tx.ExecContext(ctx,
-				`INSERT OR IGNORE INTO task_dependency (task_id, depends_on_id) VALUES (?, ?)`, ids[i], ids[byKey[k]]); err != nil {
+				`INSERT OR IGNORE INTO task_dependency (task_id, depends_on_id) VALUES (?, ?)`, ids[i], dep); err != nil {
 				return nil, err
 			}
 		}
@@ -593,7 +618,10 @@ func hasDependencyCycle(in []TaskInput, byKey map[string]int) bool {
 	visit = func(i int) bool {
 		state[i] = visiting
 		for _, k := range in[i].DependsOn {
-			j := byKey[k]
+			j, ok := byKey[k]
+			if !ok {
+				continue // いまあるタスクへの辺。いまあるタスクはこの呼び出しのタスクを指さないので、輪を作らない
+			}
 			if state[j] == visiting || (state[j] == unvisited && visit(j)) {
 				return true
 			}

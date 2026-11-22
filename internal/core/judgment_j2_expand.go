@@ -6,7 +6,7 @@ package core
 //     出どころ expand・状態 pending の足す依頼を 1 件だけ作る（同じ出どころの expand の行は 1 つ）。
 //   - 判断点（J2）を「足す」の形で呼ぶ: 着手中の課題ごとに、pending の足す依頼の古いほうの 1 件だけ。
 //     計画の形（selectJ2AutoTargets・prepareJ2・j2OutputSchema・validateJ2Output）とは、対象の選び方・入力の区画・出力の形を別に持つ。
-//   - 出力は受け口だけ（receiveJ2ExpandOutput）。出力の検査・足す処理（上限の判定・保留・選択肢での回答・タスクの行）は持たない。
+//   - 出力の検査と足す処理は judgment_j2_expand_apply.go（finalizeJ2ExpandOutput）。
 //
 // 「足す」の形の run は、タスクの指定を持たない課題単位の実行で、課題の状態を変えない。費用は judgment_budget_usd.J2 で数え、
 // 課題の見込みに入れない。
@@ -86,15 +86,6 @@ func parseJ2ExpandOutput(data []byte) (*j2ExpandRawOutput, bool) {
 		return &out, true
 	}
 	return nil, false
-}
-
-// receiveJ2ExpandOutput は「足す」の形の出力の受け口。判断値を読むだけで、課題・足す依頼・タスクを変えない
-// （出力の検査と足す処理は後続の区切りが持つ）。読めたときだけ判断値を返す。
-func receiveJ2ExpandOutput(structuredOutput []byte) string {
-	if out, ok := parseJ2ExpandOutput(structuredOutput); ok {
-		return out.Verdict
-	}
-	return ""
 }
 
 // --- 足す依頼を作る ---
@@ -471,8 +462,8 @@ func formatExpandDoneResultsSection(tasks []Task) string {
 }
 
 // expandAutoJ2 は計画の段の「足す」の処理（足す依頼を作る→判断点を「足す」の形で呼ぶ）。PlanAutoJ2 の後に呼ぶ。
-// 保留中の課題・見込みが不明の課題・タスクに結び付かない実行が着手中の課題では判断点を呼ばない。出力は受け口で受けるだけで、
-// 課題・足す依頼・タスクを変えない。
+// 保留中の課題・見込みが不明の課題・タスクに結び付かない実行が着手中の課題では判断点を呼ばない。出力は検査して足す依頼に写す
+// （finalizeJ2ExpandOutput）。課題の状態は変えない。
 func (s *Store) expandAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, error) {
 	if in.AgentDecl == nil || in.ConnDecl == nil || in.Invoker == nil || in.CycleID == "" {
 		return nil, ErrValidation
@@ -505,6 +496,18 @@ func (s *Store) expandAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult
 			return nil, err
 		}
 		if ch.Status != StatusInProgress {
+			continue
+		}
+		// 判断点の連続失敗の上限に達していれば、いまある連続失敗の保留にする（課題が着手中であることを前提に呼ぶ）。
+		held, skip, err := s.holdForJudgmentFailureLimit(ctx, *ch, JudgmentJ2, StatusInProgress, in.AgentDecl, in.CycleID)
+		if err != nil {
+			return nil, err
+		}
+		if held != nil {
+			result.NotStarted = append(result.NotStarted, *held)
+			continue
+		}
+		if skip {
 			continue
 		}
 		item, ns, err := s.runJ2ExpandOnce(ctx, in, jc, *ch, tg)
@@ -559,7 +562,11 @@ func (s *Store) runJ2ExpandOnce(ctx context.Context, in J2AutoInput, jc *Judgmen
 	}
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
-		item.Outcome = receiveJ2ExpandOutput(res.StructuredOutput)
+		fin, err := s.finalizeJ2ExpandOutput(ctx, in, res.RunID, tg.Addition, res.StructuredOutput)
+		if err != nil {
+			return nil, nil, err
+		}
+		item.Outcome, item.Result, item.Note = fin.Outcome, fin.Result, fin.Note
 	}
 	return &item, nil, nil
 }
