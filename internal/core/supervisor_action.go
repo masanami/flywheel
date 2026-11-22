@@ -80,14 +80,14 @@ type SupervisorActionCountQuery struct {
 	// ExecutedOnly が真なら、結果が executed の記録だけを数える。
 	ExecutedOnly bool
 	// AfterLastOwnerAnswer が真なら、その課題の最後のオーナーの回答（回答した者が supervisor でない回答済みの保留の、最大の回答時刻）
-	// より後の記録だけを数える。オーナーの回答が無ければ制限しない。
+	// 以後の記録だけを数える（時刻が等しい記録は数える）。オーナーの回答が無ければ制限しない。
 	AfterLastOwnerAnswer bool
 }
 
 // supervisorCountedHandsExcluded は、回数の上限（2 回）の数えから外す手。保留を閉じない手（defer・escalate）。子の問いに答える手（answer）は S4b-3 で足す。
 var supervisorCountedHandsExcluded = []SupervisorHand{HandDefer, HandEscalate}
 
-// SupervisorHandledCountQuery は「回数の上限」の数え（同じタスク〔無ければ同じ課題〕の同じ止まり方への、最後のオーナーの回答より後の、
+// SupervisorHandledCountQuery は「回数の上限」の数え（同じタスク〔無ければ同じ課題〕の同じ止まり方への、最後のオーナーの回答以後（時刻が等しいものを含む）の、
 // 手が見送り・上げる・答えるでなく、結果が executed の対処の記録）の条件を返す。
 func SupervisorHandledCountQuery(challengeID, taskID string, kind StopKind) SupervisorActionCountQuery {
 	return SupervisorActionCountQuery{
@@ -363,7 +363,8 @@ func supervisorActionWhere(ctx context.Context, tx *sql.Tx, q SupervisorActionCo
 			return "", nil, err
 		}
 		if at != "" {
-			conds = append(conds, "created_at > ?")
+			// 時刻が等しいときは順序が決まらないので、数える側に倒す（少なく数えて自動の対処が 1 回余分に通るより、多く数えてオーナーへ上げるほうが安全）。
+			conds = append(conds, "created_at >= ?")
 			args = append(args, at)
 		}
 	}
