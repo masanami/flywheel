@@ -134,6 +134,7 @@ func TestResume_BlockedHoldsWithTheSummary(t *testing.T) {
 	if q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`); !strings.Contains(q, "BLOCKED-SUMMARY") {
 		t.Errorf("hold question = %q", q)
 	}
+	wantLastHoldStop(t, f.s, stopNone) // AC-26: blocked は対象にしない
 }
 
 // AC-282: questions の後にスロットが idle に戻り、同じ周の別の課題に割り当てられる。
@@ -533,6 +534,8 @@ func TestFailureLimit_ReachedHoldsWithKindAndCountAndReportsNotStarted(t *testin
 			if !strings.Contains(q, "連続失敗") || !strings.Contains(q, "回数: 2") || !strings.Contains(q, "上限: 2") {
 				t.Errorf("hold question = %q", q)
 			}
+			// AC-5: 委譲の連続の失敗の上限の保留の止まり方は delegate_stopped（スーパーバイザー待ち）。AC-6 の judgment_failed とは別。
+			wantLastHoldStop(t, f.s, "delegate_stopped/pending")
 		})
 	}
 }

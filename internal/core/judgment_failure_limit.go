@@ -145,7 +145,8 @@ func (s *Store) holdForJudgmentFailureLimit(ctx context.Context, ch Challenge, j
 		if tc.current.Status != want || tc.current.Version != ch.Version {
 			return errReconcileNotEligible
 		}
-		return s.insertHoldWithOccurrence(ctx, tc, judgmentLimitQuestion(hit), holdReasonFailureLimit, cycleID)
+		_, err := s.insertHoldWithOccurrenceOptions(ctx, tc, judgmentLimitQuestion(hit), holdReasonFailureLimit, cycleID, stopHoldOptions(StopKindJudgmentFailed, decl))
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {

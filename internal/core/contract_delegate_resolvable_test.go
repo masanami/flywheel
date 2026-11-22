@@ -149,6 +149,7 @@ func TestPollContractRuns_TerminalStillWaitingAsksAgain(t *testing.T) {
 	if n := f.count(t, `SELECT COUNT(*) FROM hold`); n != 2 {
 		t.Fatalf("holds = %d, want 2", n)
 	}
+	wantLastHoldStop(t, f.s, stopNone) // AC-28: ターミナルで人が解く待ちの保留は対象にしない
 }
 
 // resolvable_by の値は契約の run へ保存され、次の周でも読める。

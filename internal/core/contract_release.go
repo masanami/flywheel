@@ -26,6 +26,16 @@ type contractReleaseSource struct {
 	// Checks・Compare は、統合先へ入れる確かめ（チェック・取り込みだけかの比較・入った中身）の取得の口。nil なら確かめられない。
 	Checks  UpstreamCheckSource
 	Compare UpstreamCompareSource
+	// Agent は宣言の agent（保留を作るときに宣言の supervisor を見るため。nil は宣言の既定と同じ扱い）。
+	Agent *AgentDeclaration
+}
+
+// agent は宣言の agent（rs が nil なら nil）。
+func (rs *contractReleaseSource) agent() *AgentDeclaration {
+	if rs == nil {
+		return nil
+	}
+	return rs.Agent
 }
 
 // lookupArtifactPR は pr の成果物 a の ref から、宣言のリポジトリの PR を上流から 1 件読む。pr でない・ref が PR の URL でない・

@@ -294,6 +294,7 @@ func TestUpRequest_AC161_WithoutTheReflectCommandTheChallengeIsHeld(t *testing.T
 	if got := f.lastReason(t, id); got != string(holdReasonReflectUnavailable) {
 		t.Fatalf("reason = %q, want reflect_unavailable", got)
 	}
+	wantLastHoldStop(t, f.s, stopNone) // AC-23: reflect_unavailable は対象にしない
 	q := f.holdQuestionsOf(t, id)
 	if strings.Contains(q, string(holdReasonReflectUnavailable)) || !strings.Contains(q, "commands.reflect") {
 		t.Fatalf("question = %q, want a plain-language question that names the missing command", q)
@@ -323,6 +324,7 @@ func TestUpRequest_AC162_AC163_AFailedReflectHoldsWithoutAnOpenRun(t *testing.T)
 		if got := f.lastReason(t, id); got != string(holdReasonReflectFailed) { // AC-162
 			t.Errorf("%s: reason = %q, want reflect_failed", name, got)
 		}
+		wantLastHoldStop(t, f.s, stopNone)                                                       // AC-24: reflect_failed は対象にしない
 		if q := f.holdQuestionsOf(t, id); strings.Contains(q, string(holdReasonReflectFailed)) { // AC-237
 			t.Errorf("%s: question names the reason value: %q", name, q)
 		}

@@ -204,7 +204,7 @@ func j5TaskStillCurrent(ctx context.Context, tx *sql.Tx, cid int64, scope *j5Tas
 // finalizeJ5TaskOutput は run が succeeded のときに、タスクの検証の出力を検査し直して書く。検査に落ちたら run の結果を
 // invalid_output にし、何も書かない。書かなかった（直前の読み直しで対象が変わっていた）ときは status が nil。
 // status は書いた後の課題の状態（満たした・満たしていないは着手中のまま、判断できないは保留）。
-func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challengeIDDisplay string, structured []byte, scope *j5TaskScope, vh *j5VerifiedHeads) (outcome string, status *string, result RunResult, err error) {
+func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challengeIDDisplay string, structured []byte, scope *j5TaskScope, vh *j5VerifiedHeads, agent *AgentDeclaration) (outcome string, status *string, result RunResult, err error) {
 	v, ok := validateJ5Output(structured)
 	if !ok {
 		if err := s.invalidateRunOutput(ctx, runIDDisplay); err != nil {
@@ -212,7 +212,7 @@ func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challeng
 		}
 		return "", nil, RunResultInvalidOutput, nil
 	}
-	mapped, err := s.applyJ5Task(ctx, runIDDisplay, challengeIDDisplay, v, scope, vh)
+	mapped, err := s.applyJ5Task(ctx, runIDDisplay, challengeIDDisplay, v, scope, vh, agent)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -229,7 +229,7 @@ func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challeng
 
 // applyJ5Task はタスクの検証の判定を、課題の遷移（T8〜T10）を使わずに書く。書く直前に j5TaskStillCurrent で読み直し、
 // 違えば何も書かずに mapped=false を返す。
-func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, scope *j5TaskScope, vh *j5VerifiedHeads) (mapped bool, err error) {
+func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, scope *j5TaskScope, vh *j5VerifiedHeads, agent *AgentDeclaration) (mapped bool, err error) {
 	runInt, ok := parseRunID(runIDDisplay)
 	cid, cok := parseChallengeID(challengeIDDisplay)
 	if !ok || !cok {
@@ -255,7 +255,7 @@ func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDispla
 			}
 			mapped = true
 			tc.taskID = &tid
-			if err := insertHold(ctx, tc, *v.Question); err != nil {
+			if err := insertHoldStop(ctx, tc, *v.Question, stopHoldOptions(StopKindVerifyUncertain, agent)); err != nil {
 				return err
 			}
 			if err := tc.rec.record("task", tid, ActivityActionTaskVerify, nil, after); err != nil {

@@ -123,8 +123,13 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 	}
 	cur.reqFacts, cur.holdSuccessEnd = connector.RequiredFacts, true
 	rs := in.releaseSource()
-	hold := func(q string, reason holdReason) (*ContractRunReport, error) {
-		held, err := s.holdContractReview(ctx, rep, q, reason)
+	// hold は止まり方 kind を渡して保留を立てる（kind が空なら渡さない）。止まり方は理由から導かず、呼び出し元が渡す。
+	hold := func(q string, reason holdReason, kind StopKind) (*ContractRunReport, error) {
+		var opts HoldOptionsInput
+		if kind != "" {
+			opts = stopHoldOptions(kind, rs.agent())
+		}
+		held, err := s.holdContractReviewWith(ctx, rep, q, reason, opts, nil)
 		rep.Held = held
 		return rep, err
 	}
@@ -135,7 +140,7 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 		}
 		cur.VerifiedRef, cur.LandRef, cur.LandDelivered = got, "", false
 	} else if cur.LandDelivered && cur.LandRef == got {
-		return hold(landRefusedQuestion(cur.ExternalRunID, got, rep.Summary, ra.Text), holdReasonLandRefused)
+		return hold(landRefusedQuestion(cur.ExternalRunID, got, rep.Summary, ra.Text), holdReasonLandRefused, "")
 	}
 	verdict, err := s.checkVerifiedContent(ctx, rs, cur)
 	if err != nil {
@@ -143,7 +148,7 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 	}
 	switch verdict {
 	case checkVerdictFailed:
-		return hold(checksFailedQuestion(cur.ExternalRunID, cur.VerifiedRef), holdReasonChecksFailed)
+		return hold(checksFailedQuestion(cur.ExternalRunID, cur.VerifiedRef), holdReasonChecksFailed, StopKindChecksFailed)
 	case checkVerdictWait:
 		return rep, nil
 	}
@@ -441,12 +446,12 @@ func (s *Store) finishIntegrationLanding(ctx context.Context, rep *ContractRunRe
 		if rep.State != ContractStateSucceeded {
 			return s.stopLandingNotLanded(ctx, rep, cid)
 		}
-		return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, false), holdReasonDelegateEnded)
+		return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, false), holdReasonDelegateEnded, HoldOptionsInput{})
 	}
 	if rep.State != ContractStateSucceeded {
-		return s.holdLandedEnd(ctx, rep, cid, landedStoppedQuestion(rep.ExternalRunID, rep.State, landRef), holdReasonMergedUnverified)
+		return s.holdLandedEnd(ctx, rep, cid, landedStoppedQuestion(rep.ExternalRunID, rep.State, landRef), holdReasonMergedUnverified, HoldOptionsInput{})
 	}
-	return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, true), holdReasonMergedUnverified)
+	return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, true), holdReasonMergedUnverified, HoldOptionsInput{})
 }
 
 // stopLandingNotLanded は、「入れてよい」を返し済みの実行が失敗・取り消しで終わり、成果物が統合先へ入っていないとき、いまの失敗の扱い
@@ -469,7 +474,7 @@ func (s *Store) stopLandingNotLanded(ctx context.Context, rep *ContractRunReport
 		}
 		return s.endRunAtHold(ctx, tx, cid, rep.ExternalRunID, withHold)
 	}
-	held, err := s.holdContractReviewWith(ctx, rep, contractStopQuestion(rep.State, rep.ExternalRunID, rep.Summary), holdReasonContractStopped,
+	held, err := s.holdContractReviewWith(ctx, rep, contractStopQuestion(rep.State, rep.ExternalRunID, rep.Summary), holdReasonContractStopped, HoldOptionsInput{},
 		func(ctx context.Context, tx *sql.Tx) error { return end(ctx, tx, true) })
 	rep.Held = held
 	if err != nil || held {
@@ -525,9 +530,9 @@ func containsArtifact(arts []ContractArtifact, a ContractArtifact) bool {
 	return false
 }
 
-// holdLandedEnd は保留を立て、契約の実行を終わった記録にする（同じトランザクション。終わりの記録だけが残らず、開いたまま課題が保留になることが無い）。
-func (s *Store) holdLandedEnd(ctx context.Context, rep *ContractRunReport, cid int64, question string, reason holdReason) error {
-	held, err := s.holdContractReviewWith(ctx, rep, question, reason, func(ctx context.Context, tx *sql.Tx) error {
+// holdLandedEnd は保留を立て（止まり方は opts で呼び出し元が渡す。「入れてよい」を返した後の終わりは渡さない）、契約の実行を終わった記録にする（同じトランザクション。終わりの記録だけが残らず、開いたまま課題が保留になることが無い）。
+func (s *Store) holdLandedEnd(ctx context.Context, rep *ContractRunReport, cid int64, question string, reason holdReason, opts HoldOptionsInput) error {
+	held, err := s.holdContractReviewWith(ctx, rep, question, reason, opts, func(ctx context.Context, tx *sql.Tx) error {
 		return s.endRunAtHold(ctx, tx, cid, rep.ExternalRunID, true)
 	})
 	rep.Held = held

@@ -71,6 +71,12 @@ func TestHoldChallenge_KindDefaultsToHumanAndAcceptsParentDirect(t *testing.T) {
 	if len(db.Holds) != 1 || db.Holds[0].Kind != HoldKindParentDirect {
 		t.Errorf("parent_direct hold kind = %+v, want parent_direct", db.Holds)
 	}
+	// AC-29（オーナーが flywheel hold で作った保留）・AC-30（対話のセッションが引き取る保留 parent_direct）: どちらも対象にしない。
+	for name, h := range map[string]Hold{"owner hold": da.Holds[0], "parent_direct": db.Holds[0]} {
+		if h.StopKind != "" || h.SupervisorState != "" {
+			t.Errorf("%s: stop_kind/supervisor_state = %q/%q, want empty", name, h.StopKind, h.SupervisorState)
+		}
+	}
 }
 
 func TestHoldChallenge_UnknownKindIsValidationErrorAndChangesNothing(t *testing.T) {

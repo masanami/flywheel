@@ -208,11 +208,11 @@ type ContractStartInput struct {
 }
 
 func (in ContractStartInput) releaseSource() *contractReleaseSource {
-	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil}
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Agent: in.AgentDecl}
 }
 
 func (in ContractPollInput) releaseSource() *contractReleaseSource {
-	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Checks: in.Checks, Compare: in.Compare}
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Checks: in.Checks, Compare: in.Compare, Agent: in.AgentDecl}
 }
 
 // ContractPollInput は Store.PollContractRuns の入力。
@@ -700,7 +700,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 			Workspace: s.workspace, WorkDir: s.contractWorkDir(workDir), RunDir: runDirPath(s.workspace, formatRunID(runIDInt)),
 			Command: command, TimeoutSec: in.AgentDecl.TimeoutSec.Delegate,
 		},
-		Invoke: call, MaxMicros: maxMicros, TaskIDInt: taskID, HoldSuccessEnd: usesIntegration,
+		Invoke: call, MaxMicros: maxMicros, TaskIDInt: taskID, HoldSuccessEnd: usesIntegration, Agent: in.AgentDecl,
 	})
 	if err != nil {
 		return nil, err
@@ -846,6 +846,8 @@ type contractCall struct {
 	// ReleaseStage は、反映の段が呼ぶ契約のコマンド（完了の課題の実行）のとき真。成果物を課題の成果物の記録（run_artifact）へ取り込まず、
 	// 課題を保留にしない（契約の実行の記録だけを読んだ値で更新する）。
 	ReleaseStage bool
+	// Agent は宣言の agent（保留を作るときに宣言の supervisor を見るため。nil は宣言の既定と同じ扱い）。
+	Agent *AgentDeclaration
 	// HoldEnd は、終わりを読んでも contract_run の ended_at を入れないとき真（反映の段の status・resume。結果を書く書き込みが入れる）。
 	HoldEnd bool
 	// HoldSuccessEnd は、succeeded だけは ended_at を入れないとき真（failed・cancelled は、「入れてよい」を返し済みの実行〔landedStop〕以外は終わった記録にする）。
@@ -1109,16 +1111,27 @@ func contractStartFailedQuestion(result RunResult, errSummary, externalRunID, co
 // holdForContract は課題が着手中なら、契約の run の結果に基づいて課題を保留にする。課題が着手中でなくなって
 // いれば何もしない（held は偽）。契約の run の記録とは別のトランザクションで行う。
 func (s *Store) holdForContract(ctx context.Context, c contractCall, question string) (bool, error) {
-	return s.holdReclaimedContractStart(ctx, formatRunID(c.RunIDInt), c.ChallengeID, question)
+	if c.StopNote != "" {
+		// 中止の理由（予算の超過・課題の取り下げ）を添えた保留は、止まり方を渡さない（スーパーバイザー待ちにしない）。
+		return s.holdContractWithReason(ctx, formatRunID(c.RunIDInt), c.ChallengeID, question, holdReasonContractStopped)
+	}
+	return s.holdReclaimedContractStart(ctx, formatRunID(c.RunIDInt), c.ChallengeID, question, c.Agent)
 }
 
 // holdReclaimedContractStart は runID を原因の run として、課題が着手中なら保留にする（着手中でなければ偽）。
-func (s *Store) holdReclaimedContractStart(ctx context.Context, runID, challengeID, question string) (bool, error) {
-	return s.holdContractWithReason(ctx, runID, challengeID, question, holdReasonContractStopped)
+//
+// 契約の実行の終わり・回収の保留で、止まり方は delegate_stopped（agent は宣言の supervisor を見るために渡す。nil は宣言の既定と同じ扱い）。
+func (s *Store) holdReclaimedContractStart(ctx context.Context, runID, challengeID, question string, agent *AgentDeclaration) (bool, error) {
+	return s.holdContractWithStop(ctx, runID, challengeID, question, holdReasonContractStopped, stopHoldOptions(StopKindDelegateStopped, agent))
 }
 
-// holdContractWithReason は holdReclaimedContractStart と同じ保留を、理由 reason で立てる。
+// holdContractWithReason は holdReclaimedContractStart と同じ保留を、理由 reason で、止まり方を渡さずに立てる。
 func (s *Store) holdContractWithReason(ctx context.Context, runID, challengeID, question string, reason holdReason) (bool, error) {
+	return s.holdContractWithStop(ctx, runID, challengeID, question, reason, HoldOptionsInput{})
+}
+
+// holdContractWithStop は holdContractWithReason の、止まり方（opts.StopKind）を渡す版。
+func (s *Store) holdContractWithStop(ctx context.Context, runID, challengeID, question string, reason holdReason, opts HoldOptionsInput) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), runID, challengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
 			if tc.current.Status != StatusInProgress {
@@ -1141,7 +1154,8 @@ func (s *Store) holdContractWithReason(ctx context.Context, runID, challengeID, 
 			} else if len(tasks) == 1 {
 				tc.taskID = taskIDPtr(&tasks[0])
 			}
-			return s.insertHoldWithOccurrence(ctx, tc, question, reason, "")
+			_, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", opts)
+			return err
 		})
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
@@ -1368,7 +1382,7 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	}
 	// 保留にし損ねた課題の掃引が失敗しても、その失敗を記録して状態の読みを続ける（1 件の失敗で読み全体を止めない）。
 	var firstErr error
-	if _, err := s.HoldUnrecordedContractStops(ctx); err != nil {
+	if _, err := s.holdUnrecordedContractStops(ctx, in.AgentDecl); err != nil {
 		firstErr = err
 	}
 	// 保留の間に成功していた課題（オーナーが答えて着手中へ戻ったもの）を、start も resume も呼ばずに検証中へ進める。
@@ -1514,7 +1528,13 @@ const unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'canc
 //
 // 回収は run を interrupted で閉じるだけなので、PollContractRuns の先頭と、周から呼ぶ側が呼ぶ。
 // 保留にした課題の数を返す。
+// 宣言を受け取らないので、止まり方の保留は宣言の既定（supervisor 真）で作る。サイクルの経路は PollContractRuns（宣言を渡す）を使う。
 func (s *Store) HoldUnrecordedContractStops(ctx context.Context) (int, error) {
+	return s.holdUnrecordedContractStops(ctx, nil)
+}
+
+// holdUnrecordedContractStops は HoldUnrecordedContractStops の、宣言の agent（保留の止まり方と宣言の supervisor。nil は宣言の既定と同じ扱い）を渡す版。
+func (s *Store) holdUnrecordedContractStops(ctx context.Context, agent *AgentDeclaration) (int, error) {
 	type target struct {
 		runID, challengeID int64
 		question           string
@@ -1573,7 +1593,7 @@ func (s *Store) HoldUnrecordedContractStops(ctx context.Context) (int, error) {
 	held := 0
 	var firstErr error
 	for _, t := range targets {
-		ok, err := s.holdReclaimedContractStart(ctx, formatRunID(t.runID), formatChallengeID(t.challengeID), t.question)
+		ok, err := s.holdReclaimedContractStart(ctx, formatRunID(t.runID), formatChallengeID(t.challengeID), t.question, agent)
 		if err != nil {
 			firstErr = firstErrOr(firstErr, err)
 			continue
