@@ -43,6 +43,10 @@ type Store struct {
 	// t.Parallel にできる。本番 API には注入口を露出しない。
 	actor *actorSourceFuncs
 
+	// answerOptionUse は、選択肢で答える回答の書き込みの中で選ばれた識別を読む core の中の使う側（answerOptionUse）。nil なら何もしない。
+	// 呼び手は試験だけ（本番の使う側は S4c-1 が足す）。
+	answerOptionUse answerOptionUse
+
 	// fixWriters はコンフリクトの解消の確かめ（J5）の結果を書く、宛先ごとの口（judgment_j5_fix.go）。nil の口は何も書かない（統合先宛ては writeIntegrationFix を既定にする。反映先宛ては別の実装が足す）。
 	fixWriters j5FixWriters
 
