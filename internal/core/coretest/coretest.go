@@ -573,6 +573,33 @@ func InsertHold(t *testing.T, workspace string, challengeID int, question, fromS
 	}
 }
 
+// InsertHoldWithOptions は InsertHold に、選択肢の列（options。JSON の配列の文字列）と、選んだ識別
+// （answerOption。空なら NULL で未回答。空でなければ回答済みの保留で、回答の文は answerOption）を足したテスト専用のフィクスチャ。
+// optionsJSON が空なら options は NULL。
+func InsertHoldWithOptions(t *testing.T, workspace string, challengeID int, question, fromStatus, raisedAt, optionsJSON, answerOption string) {
+	t.Helper()
+	nullable := func(v string) any {
+		if v == "" {
+			return nil
+		}
+		return v
+	}
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		if answerOption == "" {
+			_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, options) VALUES (?, ?, ?, ?, ?)`,
+				challengeID, question, fromStatus, raisedAt, nullable(optionsJSON))
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, options, answer, answer_option, answered_at, answered_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'tester')`,
+			challengeID, question, fromStatus, raisedAt, nullable(optionsJSON), answerOption, answerOption, raisedAt)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertHoldWithOptions: %v", err)
+	}
+}
+
 // DumpTables はテスト専用に、tables の全行を ROWID 順の文字列にして返す
 // （閲覧だけの経路がストアの行を変えないことの検査に使う）。
 func DumpTables(t *testing.T, workspace string, tables ...string) string {

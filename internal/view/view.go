@@ -178,9 +178,27 @@ func FromApprovals(as []core.Approval) []Approval {
 	return out
 }
 
+// HoldOption は保留の選択肢 1 つの形。説明が無い選択肢の description は空文字。
+type HoldOption struct {
+	Description string `json:"description"`
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+}
+
+// FromHoldOptions は保留の選択肢の並びを変換する。選択肢が無い（nil）ときは、null ではなく空の配列にする。
+func FromHoldOptions(opts []core.HoldOption) []HoldOption {
+	out := make([]HoldOption, 0, len(opts))
+	for _, o := range opts {
+		out = append(out, HoldOption{Description: o.Description, ID: o.ID, Label: o.Label})
+	}
+	return out
+}
+
 // Hold は保留の形。
 type Hold struct {
-	Answer               *string `json:"answer"`
+	Answer *string `json:"answer"`
+	// AnswerOption は回答で選んだ選択肢の識別。選択肢で答えていない保留は null。
+	AnswerOption         *string `json:"answer_option"`
 	AnsweredAt           *string `json:"answered_at"`
 	AnsweredBy           *string `json:"answered_by"`
 	AnsweredChannel      *string `json:"answered_channel"`
@@ -189,11 +207,13 @@ type Hold struct {
 	FromStatus           string  `json:"from_status"`
 	FromStatusLabel      string  `json:"from_status_label"`
 	// Kind は保留の種類（human＝人の対応を待つ・parent_direct＝親が直接行う）。
-	Kind         string  `json:"kind"`
-	Question     string  `json:"question"`
-	RaisedAt     string  `json:"raised_at"`
-	RelayQuote   *string `json:"relay_quote"`
-	RelaySession *string `json:"relay_session"`
+	Kind string `json:"kind"`
+	// Options は保留の選択肢の並び。選択肢が無い保留は空の配列。
+	Options      []HoldOption `json:"options"`
+	Question     string       `json:"question"`
+	RaisedAt     string       `json:"raised_at"`
+	RelayQuote   *string      `json:"relay_quote"`
+	RelaySession *string      `json:"relay_session"`
 	// Replan は回答に付いた「範囲が変わる」印。真なら、その回答で課題は計画の作り直しへ戻った。
 	Replan bool    `json:"replan"`
 	RunID  *string `json:"run_id"`
@@ -206,6 +226,7 @@ func FromHold(h core.Hold) Hold {
 	label, _ := h.FromStatus.Label()
 	return Hold{
 		Answer:               h.Answer,
+		AnswerOption:         h.AnswerOption,
 		AnsweredAt:           ts(h.AnsweredAt),
 		AnsweredBy:           h.AnsweredBy,
 		AnsweredChannel:      h.AnsweredChannel,
@@ -214,6 +235,7 @@ func FromHold(h core.Hold) Hold {
 		FromStatus:           string(h.FromStatus),
 		FromStatusLabel:      label,
 		Kind:                 string(h.Kind),
+		Options:              FromHoldOptions(h.Options),
 		Question:             h.Question,
 		RaisedAt:             FormatTimestamp(h.RaisedAt),
 		RelayQuote:           h.RelayQuote,

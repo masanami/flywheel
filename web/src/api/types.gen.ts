@@ -292,6 +292,7 @@ export interface Followup {
 
 export interface Hold {
   answer: string | null;
+  answer_option: string | null;
   answered_at: string | null;
   answered_by: string | null;
   answered_channel: string | null;
@@ -300,6 +301,7 @@ export interface Hold {
   from_status: string;
   from_status_label: string;
   kind: string;
+  options: HoldOption[];
   question: string;
   raised_at: string;
   relay_quote: string | null;
@@ -307,6 +309,12 @@ export interface Hold {
   replan: boolean;
   run_id: string | null;
   task_id: string | null;
+}
+
+export interface HoldOption {
+  description: string;
+  id: string;
+  label: string;
 }
 
 export interface StagePair {
