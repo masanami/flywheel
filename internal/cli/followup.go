@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
@@ -174,27 +175,82 @@ func runFollowupDrop(a Args) (any, error) {
 	return textOutput{json: view.FromFollowupList(fs), text: followupIDsText(fs)}, nil
 }
 
-// runFollowupPromote は `flywheel followup promote <ID> [--relayed …]` の実装（1 回に 1 件）。
+// runFollowupPromote は `flywheel followup promote <ID> [--new-challenge] [--budget-impl-usd <額>] [--budget-review-usd <額>] [--relayed …]` の実装
+// （1 回に 1 件）。上げる先（新しい課題か元の課題のタスクか）は core が決める。
 func runFollowupPromote(a Args) (any, error) {
 	id := a.Positional[0]
 	verifier, err := verifierFor(a)
 	if err != nil {
 		return nil, err
 	}
-	f, err := a.Store.PrepareFollowupPromote(context.Background(), id)
+	opts := core.FollowupPromoteOptions{NewChallenge: a.Bools["new-challenge"]}
+	if v, ok := a.Values["budget-impl-usd"]; ok {
+		x, err := parseBudgetFlag("budget-impl-usd", v)
+		if err != nil {
+			return nil, err
+		}
+		opts.BudgetImplUSD = &x
+	}
+	if v, ok := a.Values["budget-review-usd"]; ok {
+		x, err := parseBudgetFlag("budget-review-usd", v)
+		if err != nil {
+			return nil, err
+		}
+		opts.BudgetReviewUSD = &x
+	}
+	decl, derr := core.LoadAgentDeclaration(a.Store.Workspace())
+	if derr != nil {
+		return nil, mapCoreErr(derr)
+	}
+	plan, err := a.Store.PrepareFollowupPromote(context.Background(), id, opts, decl)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	summary := fmt.Sprintf("次のフォローアップを新しい課題（未分類）に上げます。\n  %s\t%s\n", f.ID, escapeControl(f.Title))
-	att, err := core.Verify(channelFor(a), verifier, summary, id)
+	if plan.OverLimit() {
+		// 上限を超えるタスクは、本人確認を求める前に断る（上限の引き上げは別の操作）。
+		return nil, NewError(CodeValidationFailed, fmt.Sprintf("足した後の見込み %s USD が上限 %s USD を超えます。--new-challenge で新しい課題に上げるか、枠を小さくしてください",
+			strconv.FormatFloat(plan.EstimateAfterUSD, 'f', -1, 64), strconv.FormatFloat(plan.LimitUSD, 'f', -1, 64)))
+	}
+	att, err := core.Verify(channelFor(a), verifier, followupPromoteSummary(plan), id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	c, fu, err := a.Store.PromoteFollowup(context.Background(), id, att)
+	res, err := a.Store.PromoteFollowup(context.Background(), plan, att, decl)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	return textOutput{json: view.FromFollowupPromote(*c, *fu), text: c.ID + "\n"}, nil
+	return textOutput{json: view.FromFollowupPromote(*res), text: followupPromoteText(res)}, nil
+}
+
+// followupPromoteSummary は上げる前の本人確認の要約（上げるフォローアップ・上げる先・足すタスクの枠と足した後の見込み・上限）。
+func followupPromoteSummary(p *core.FollowupPromotePlan) string {
+	usd := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) + " USD" }
+	var b strings.Builder
+	if p.Dest == core.FollowupPromoteToTask {
+		fmt.Fprintf(&b, "次のフォローアップを、課題 %s のタスクとして上げます（足す依頼を作る）。\n", p.TargetChallengeID)
+	} else {
+		fmt.Fprintf(&b, "次のフォローアップを新しい課題（未分類）に上げます。\n")
+	}
+	fmt.Fprintf(&b, "  %s\t%s\n", p.Followup.ID, escapeControl(p.Followup.Title))
+	if p.Dest == core.FollowupPromoteToTask {
+		fmt.Fprintf(&b, "足すタスクの枠:   実装 %s・レビュー対応 %s\n", usd(p.BudgetImplUSD), usd(p.BudgetReviewUSD))
+		fmt.Fprintf(&b, "足した後の見込み: %s（上限 %s）\n", usd(p.EstimateAfterUSD), usd(p.LimitUSD))
+	} else if p.NewChallengeReason != "" {
+		fmt.Fprintf(&b, "タスクにしなかった理由: %s\n", escapeControl(p.NewChallengeReason))
+	}
+	return b.String()
+}
+
+// followupPromoteText は上げた結果のテキスト出力（1 行目は新しい課題の ID か足す依頼の ID。タスクにしなかった理由があれば続けて出す）。
+func followupPromoteText(r *core.FollowupPromoteResult) string {
+	if r.Addition != nil {
+		return r.Addition.ID + "\n"
+	}
+	out := r.Challenge.ID + "\n"
+	if r.NewChallengeReason != "" {
+		out += "タスクにしなかった理由: " + escapeControl(r.NewChallengeReason) + "\n"
+	}
+	return out
 }
 
 // followupIDsText は変えたフォローアップの ID を 1 行ずつ出す。

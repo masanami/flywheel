@@ -26,14 +26,15 @@ import (
 // TaskAdditionOrigin は足す依頼の出どころの閉集合。
 type TaskAdditionOrigin string
 
-// 足す依頼の出どころ。followup（フォローアップを上げた）は S4c-2 から。
+// 足す依頼の出どころ。followup はフォローアップをタスクとして上げた（S4c-2）。
 const (
-	TaskAdditionOriginExpand TaskAdditionOrigin = "expand"
+	TaskAdditionOriginExpand   TaskAdditionOrigin = "expand"
+	TaskAdditionOriginFollowup TaskAdditionOrigin = "followup"
 )
 
 // TaskAdditionOriginValues は TaskAdditionOrigin の閉集合の写しを返す。
 func TaskAdditionOriginValues() []TaskAdditionOrigin {
-	return []TaskAdditionOrigin{TaskAdditionOriginExpand}
+	return []TaskAdditionOrigin{TaskAdditionOriginExpand, TaskAdditionOriginFollowup}
 }
 
 // TaskAdditionState は足す依頼の状態の閉集合。

@@ -44,13 +44,31 @@ func FromFollowupList(fs []core.Followup) FollowupListResponse {
 	return FollowupListResponse{Followups: FromFollowups(fs)}
 }
 
-// FollowupPromoteResponse は `followup promote` の成功の形。followup は上げたフォローアップ、challenge は作った課題。
+// FollowupPromoteResponse は `followup promote` の成功の形。followup は上げたフォローアップ。destination は上げた先の種類（"challenge" か "task"）。
+// 新しい課題に上げたとき challenge が作った課題、new_challenge_reason がタスクにしなかった理由（task_addition_id は null）。
+// タスクとして上げたとき task_addition_id が足す依頼の ID（challenge・new_challenge_reason は null）。
 type FollowupPromoteResponse struct {
-	Challenge Challenge `json:"challenge"`
-	Followup  Followup  `json:"followup"`
+	Challenge          *Challenge `json:"challenge"`
+	Destination        string     `json:"destination"`
+	Followup           Followup   `json:"followup"`
+	NewChallengeReason *string    `json:"new_challenge_reason"`
+	TaskAdditionID     *string    `json:"task_addition_id"`
 }
 
-// FromFollowupPromote は上げたフォローアップと作った課題を FollowupPromoteResponse へ変換する。
-func FromFollowupPromote(c core.Challenge, f core.Followup) FollowupPromoteResponse {
-	return FollowupPromoteResponse{Challenge: FromChallenge(c), Followup: FromFollowups([]core.Followup{f})[0]}
+// FromFollowupPromote は上げた結果を FollowupPromoteResponse へ変換する。
+func FromFollowupPromote(r core.FollowupPromoteResult) FollowupPromoteResponse {
+	out := FollowupPromoteResponse{Destination: string(r.Dest), Followup: FromFollowups([]core.Followup{*r.Followup})[0]}
+	if r.Challenge != nil {
+		c := FromChallenge(*r.Challenge)
+		out.Challenge = &c
+	}
+	if r.NewChallengeReason != "" {
+		reason := r.NewChallengeReason
+		out.NewChallengeReason = &reason
+	}
+	if r.Addition != nil {
+		id := r.Addition.ID
+		out.TaskAdditionID = &id
+	}
+	return out
 }
