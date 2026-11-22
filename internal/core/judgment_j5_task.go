@@ -203,7 +203,7 @@ func j5TaskStillCurrent(ctx context.Context, tx *sql.Tx, cid int64, scope *j5Tas
 
 // finalizeJ5TaskOutput は run が succeeded のときに、タスクの検証の出力を検査し直して書く。検査に落ちたら run の結果を
 // invalid_output にし、何も書かない。書かなかった（直前の読み直しで対象が変わっていた）ときは status が nil。
-// status は書いた後の課題の状態（満たした・満たしていないは着手中のまま、判断できないは保留）。
+// status は書いた後の課題の状態（満たした・満たしていないは着手中のまま。判断できない・差し戻しの上限に達したは保留）。
 func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challengeIDDisplay string, structured []byte, scope *j5TaskScope, vh *j5VerifiedHeads, agent *AgentDeclaration) (outcome string, status *string, result RunResult, err error) {
 	v, ok := validateJ5Output(structured)
 	if !ok {
@@ -212,7 +212,7 @@ func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challeng
 		}
 		return "", nil, RunResultInvalidOutput, nil
 	}
-	mapped, err := s.applyJ5Task(ctx, runIDDisplay, challengeIDDisplay, v, scope, vh, agent)
+	mapped, held, err := s.applyJ5Task(ctx, runIDDisplay, challengeIDDisplay, v, scope, vh, agent)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -221,7 +221,7 @@ func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challeng
 		return outcome, nil, RunResultSucceeded, nil
 	}
 	st := string(StatusInProgress)
-	if v.Verdict == J5VerdictUncertain {
+	if v.Verdict == J5VerdictUncertain || held {
 		st = string(StatusAwaitingHuman)
 	}
 	return outcome, &st, RunResultSucceeded, nil
@@ -229,11 +229,11 @@ func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challeng
 
 // applyJ5Task はタスクの検証の判定を、課題の遷移（T8〜T10）を使わずに書く。書く直前に j5TaskStillCurrent で読み直し、
 // 違えば何も書かずに mapped=false を返す。
-func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, scope *j5TaskScope, vh *j5VerifiedHeads, agent *AgentDeclaration) (mapped bool, err error) {
+func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDisplay string, v *j5ValidatedOutput, scope *j5TaskScope, vh *j5VerifiedHeads, agent *AgentDeclaration) (mapped, held bool, err error) {
 	runInt, ok := parseRunID(runIDDisplay)
 	cid, cok := parseChallengeID(challengeIDDisplay)
 	if !ok || !cok {
-		return false, ErrValidation
+		return false, false, ErrValidation
 	}
 	tid := taskIntID(&scope.Task)
 	after := map[string]any{"verdict": string(v.Verdict), "reason": v.Reason, "challenge": challengeIDDisplay}
@@ -265,16 +265,29 @@ func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDispla
 		})
 		if err != nil {
 			if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
-				return false, nil
+				return false, false, nil
 			}
-			return false, err
+			return false, false, err
 		}
-		return mapped, nil
+		return mapped, false, nil
+	}
+
+	if v.Verdict == J5VerdictNotMet && v.ConflictOverriddenFrom == "" && agent != nil {
+		// 連続の「満たしていない」がこの判定で差し戻しの上限に達するなら、委譲先へ差し戻さず、同じ書き込みで保留にする。
+		var streak int
+		if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `SELECT verify_not_met_streak FROM task WHERE id = ?`, tid).Scan(&streak)
+		}); err != nil {
+			return false, false, classifyReadWriteErr(err)
+		}
+		if streak+1 >= agent.ReworkLimit {
+			return s.holdForTaskVerifyLimit(ctx, runIDDisplay, challengeIDDisplay, runInt, cid, tid, streak+1, agent, scope, after)
+		}
 	}
 
 	actor, err := s.resolveActor()
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	err = s.mutateAsRun(context.WithoutCancel(ctx), actor, ChannelInvoker, VerificationNone, &runInt, func(tx *sql.Tx, rec *activityRecorder) error {
 		cur, err := j5TaskStillCurrent(ctx, tx, cid, scope)
@@ -289,6 +302,10 @@ func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDispla
 				return err
 			}
 			after["verified_ref"] = scope.ContentRef
+			// 「満たした」で、連続の「満たしていない」の数えを 0 に戻す。
+			if _, err := tx.ExecContext(ctx, `UPDATE task SET verify_not_met_streak = 0 WHERE id = ?`, tid); err != nil {
+				return err
+			}
 			return rec.record("task", tid, ActivityActionTaskVerify, nil, after)
 		default: // not_met
 			if _, err := setTaskStatus(ctx, tx, rec, tid, TaskStatusInProgress); err != nil {
@@ -298,13 +315,57 @@ func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDispla
 				return err
 			}
 			if v.ConflictOverriddenFrom != "" {
-				return nil // コンフリクトの PR のための置き換えは、達成条件の未達ではないので発生に数えない
+				return nil // コンフリクトの PR のための置き換えは、達成条件の未達ではないので、連続の数えにも発生にも数えない
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE task SET verify_not_met_streak = verify_not_met_streak + 1 WHERE id = ?`, tid); err != nil {
+				return err
 			}
 			return s.insertRunOccurrence(ctx, tx, runInt, OccurrenceKindVerificationNotMet, OccurrenceOutcomeBad, rec.at)
 		}
 	})
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	return mapped, nil
+	return mapped, false, nil
+}
+
+// holdForTaskVerifyLimit は、タスクの検証の連続の「満たしていない」が差し戻しの上限（宣言の rework_limit）に達した判定を書く。
+// 委譲先へ差し戻さず、止まり方 rework_limit の保留（宣言の supervisor が真ならスーパーバイザー待ち）を、判定の記録と同じ書き込みで作る。
+// 保留ができた後に数え直すため、連続の数えは 0 へ戻す（そうしないと、保留への回答の後の次の判定がすぐ上限になる）。
+// いまある委譲の差し戻しの回数（decideRework）とは別の数えで、そちらには数えない。
+func (s *Store) holdForTaskVerifyLimit(ctx context.Context, runIDDisplay, challengeIDDisplay string, runInt, cid, tid int64, streak int, agent *AgentDeclaration, scope *j5TaskScope, after map[string]any) (mapped, held bool, err error) {
+	_, err = s.transitionAsInvoker(context.WithoutCancel(ctx), runIDDisplay, challengeIDDisplay, OpHold, func(ctx context.Context, tc *transitionCtx) error {
+		cur, err := j5TaskStillCurrent(ctx, tc.tx, cid, scope)
+		if err != nil {
+			return err
+		}
+		if !cur {
+			return errReconcileNotEligible
+		}
+		mapped = true
+		tc.taskID = &tid
+		if _, err := setTaskStatus(ctx, tc.tx, tc.rec, tid, TaskStatusInProgress); err != nil {
+			return err
+		}
+		if _, err := tc.tx.ExecContext(ctx, `UPDATE task SET verify_not_met_streak = 0 WHERE id = ?`, tid); err != nil {
+			return err
+		}
+		if err := tc.rec.record("task", tid, ActivityActionTaskVerify, nil, after); err != nil {
+			return err
+		}
+		if err := s.insertRunOccurrence(ctx, tc.tx, runInt, OccurrenceKindVerificationNotMet, OccurrenceOutcomeBad, tc.now); err != nil {
+			return err
+		}
+		question := fmt.Sprintf("タスクの検証が連続して「満たしていない」と判定され、差し戻しの上限に達したため、委譲先へ差し戻さず止めた（上限の種類: 差し戻し、回数: %d、上限: %d）。\n"+
+			"直近の検証: %s。回答すると、連続の数えを 0 から数え直して続ける。", streak, agent.ReworkLimit, runIDDisplay)
+		_, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonReworkLimit, "", HoldOptionsInput{StopKind: StopKindReworkLimit, SupervisorEnabled: agent.Supervisor})
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	return mapped, mapped, nil
 }

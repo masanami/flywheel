@@ -216,6 +216,15 @@ func factsUnmetQuestion(runID string, us []unmetFact) string {
 
 // holdContractReviewWith は課題が着手中なら、レビュー待ちを受け取れない保留を理由 reason で立てる（契約の run が結び付くタスクに結び付ける。回答は委譲先へ返さないので wait_hold_id は使わない）。止まり方の指定 opts（空なら渡さない）と、保留を立てる同じトランザクションで行う書き込み extra（nil なら無し）を足したもの。
 func (s *Store) holdContractReviewWith(ctx context.Context, rep *ContractRunReport, question string, reason holdReason, opts HoldOptionsInput, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
+	return s.holdContractReviewWithOptionsReason(ctx, rep, question, reason, opts, extra)
+}
+
+// holdContractReviewWithOptions は、理由を持たず止まり方を渡す保留（上流を読めない回りの上限）を、holdContractReviewWith と同じ形で立てる。
+func (s *Store) holdContractReviewWithOptions(ctx context.Context, rep *ContractRunReport, question string, opts HoldOptionsInput, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
+	return s.holdContractReviewWithOptionsReason(ctx, rep, question, "", opts, extra)
+}
+
+func (s *Store) holdContractReviewWithOptionsReason(ctx context.Context, rep *ContractRunReport, question string, reason holdReason, opts HoldOptionsInput, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
 			if tc.current.Status != StatusInProgress {

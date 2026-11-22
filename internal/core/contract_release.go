@@ -26,6 +26,8 @@ type contractReleaseSource struct {
 	// Checks・Compare は、統合先へ入れる確かめ（チェック・取り込みだけかの比較・入った中身）の取得の口。nil なら確かめられない。
 	Checks  UpstreamCheckSource
 	Compare UpstreamCompareSource
+	// Supervisor は宣言の supervisor の値（止まり方を渡す保留をスーパーバイザー待ちにするか）。
+	Supervisor bool
 	// Agent は宣言の agent（保留を作るときに宣言の supervisor を見るため。nil は宣言の既定と同じ扱い）。
 	Agent *AgentDeclaration
 }

@@ -212,7 +212,7 @@ func (in ContractStartInput) releaseSource() *contractReleaseSource {
 }
 
 func (in ContractPollInput) releaseSource() *contractReleaseSource {
-	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Checks: in.Checks, Compare: in.Compare, Agent: in.AgentDecl}
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Checks: in.Checks, Compare: in.Compare, Supervisor: in.AgentDecl != nil && in.AgentDecl.Supervisor, Agent: in.AgentDecl}
 }
 
 // ContractPollInput は Store.PollContractRuns の入力。
