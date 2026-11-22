@@ -157,3 +157,19 @@ func resolveChatMark(ctx context.Context, tx *sql.Tx, m *chatMark) (RelayEvidenc
 	}
 	return RelayEvidence{Session: engine, Quote: msg}, nil
 }
+
+// CheckChatMark は印（会話の識別・発言の識別）の検査だけを行う（何も書かない）。本人確認を通らないコマンド
+// （followup done・create・指定つきの ingest）が、経路を渡さずに印の検査だけをかけるための口。検査の内容は
+// 本人確認を通る操作の検査と同じ（resolveChatMark）。満たさなければ ErrChatMarkInvalid
+// （errors.Is(err, ErrVerificationRejected) も真）。
+func (s *Store) CheckChatMark(ctx context.Context, session, message string) error {
+	m := &chatMark{session: session, message: message}
+	if !m.complete() {
+		return chatMarkError{reason: "印が空です"}
+	}
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		_, err := resolveChatMark(ctx, tx, m)
+		return err
+	})
+	return classifyReadWriteErr(err)
+}
