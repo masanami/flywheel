@@ -555,6 +555,9 @@ func (s *Store) DropFollowups(ctx context.Context, ids []string, reason string, 
 	}
 	var out []Followup
 	err := s.mutateAs(ctx, att.actor, att.channel, att.verification, func(tx *sql.Tx, rec *activityRecorder) error {
+		if err := s.chatGate(ctx, tx, att, actionFollowupDrop, ""); err != nil {
+			return err
+		}
 		var err error
 		out, err = dropFollowups(ctx, tx, rec, att, ids, reason)
 		return err
@@ -575,6 +578,9 @@ func (s *Store) PromoteFollowup(ctx context.Context, id string, att Attestation)
 		fu *Followup
 	)
 	err := s.mutateAs(ctx, att.actor, att.channel, att.verification, func(tx *sql.Tx, rec *activityRecorder) error {
+		if err := s.chatGate(ctx, tx, att, actionFollowupPromote, ""); err != nil {
+			return err
+		}
 		var err error
 		ch, fu, err = promoteFollowup(ctx, tx, rec, att, id)
 		return err

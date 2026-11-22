@@ -377,6 +377,9 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 		if err != nil {
 			return err
 		}
+		if err := s.chatGate(ctx, tx, att, act, OperationKind(row.Kind)); err != nil {
+			return err
+		}
 		if row.State != OperationStatePending {
 			return ErrInvalidTransition
 		}
