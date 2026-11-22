@@ -111,10 +111,10 @@ func TestApprovalSummaryForPlan(t *testing.T) {
 	}
 	want := map[string]string{
 		"challenge_id": `"C-1"`, "title": `"title"`, "kind": `"plan"`, "done_criteria": `null`, "direct_completion": `null`,
-		"plan": `{"body":"PLAN","budget_usd":null,"summary":null,"tasks":[],"topics":[],"uses_integration":null,"version":1}`, "releases": `[]`, "other_pending_operations": `[]`, "release_held": `true`, "mergeability_note": `""`,
+		"plan": `{"body":"PLAN","budget_limit_reason":null,"budget_limit_usd":null,"budget_usd":null,"summary":null,"tasks":[],"topics":[],"uses_integration":null,"version":1}`, "releases": `[]`, "other_pending_operations": `[]`, "release_held": `true`, "mergeability_note": `""`,
 		"conditions_after_release": `[]`, "conditions_after_release_heading": `"本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"`,
 		"pairs": `[]`, "stages": `{"actual":null,"expected":null,"figure":null,"issues":null,"issues_answer":null,"non_goals":null}`,
-		"conflict_fixes": `[]`, "followups": `[]`, "tasks": `[]`, "integration_ref": `null`, "uses_integration": `null`,
+		"added_tasks": `[]`, "conflict_fixes": `[]`, "followups": `[]`, "tasks": `[]`, "integration_ref": `null`, "uses_integration": `null`,
 	}
 	for k, w := range want {
 		if got[k] != w {

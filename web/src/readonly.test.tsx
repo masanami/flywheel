@@ -267,6 +267,8 @@ function awaitingApproval(): Record<string, unknown> {
         pairs: S4_PAIRS,
         plan: {
           body: "承認する計画",
+          budget_limit_reason: null,
+          budget_limit_usd: null,
           budget_usd: null,
           summary: "方針の本文",
           tasks: [],

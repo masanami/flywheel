@@ -12,6 +12,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 )
@@ -160,6 +161,8 @@ type CycleRunResult struct {
 	Phases []CyclePhaseResult
 	// RateLimited はこの周で枠超過を記録した run があったか。
 	RateLimited bool
+	// AddedTasks はこの周で足したタスク（課題・題名・出どころ。ID の昇順。無ければ空のスライス）。周の開始以後に足したもの。
+	AddedTasks []AddedTask
 	// Continued は、次のサイクルを始める処理（CycleRunInput.Continue）を呼んだか。ContinueErr はその処理のエラー（周の成否は変えない）。
 	Continued   bool
 	ContinueErr error
@@ -244,6 +247,15 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 			endResult = CycleResultInterrupted
 		}
 	}
+	// この周で足したタスク（周の開始以後に足したもの）は、周を閉じる前に読む。読めなくても周の結果は失わず、空の一覧にする。
+	added := []AddedTask{}
+	if rerr := s.db.Read(endCtx, func(tx *sql.Tx) error {
+		var aerr error
+		added, aerr = listAddedTasks(endCtx, tx, 0, formatTimestamp(cyc.StartedAt))
+		return aerr
+	}); rerr != nil {
+		added = []AddedTask{}
+	}
 	ended, endErr := s.EndCycleWithReason(endCtx, cyc.ID, endResult, endReason)
 	if err := errors.Join(runErr, endErr); err != nil {
 		if runErr != nil {
@@ -263,6 +275,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 		Phases:             phases,
 		RateLimited:        jc.RateLimited(),
 	}
+	res.AddedTasks = added
 	// 終わりの段を通し、排他を放した後に、いま始められるものを数え直す（settled のときだけ）。
 	if in.Continue != nil && endReason == CycleEndSettled && in.AgentDecl.AutoCycle {
 		work, werr := s.CountRoundWork(endCtx, in.AgentDecl, in.ConnDecl)

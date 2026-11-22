@@ -120,6 +120,7 @@ export function createMockApi(
         : undefined;
     const extra = name === "alpha" ? alphaDetailExtras(id) : {};
     return {
+      additions: [],
       approvals: m.approvals,
       budget: { estimate_usd: null, limit_reason: null, limit_usd: null },
       card: cardOf(m),
@@ -374,6 +375,7 @@ export function createMockApi(
       });
       return {
         approval: {
+          added_tasks: [],
           challenge_id: id,
           conflict_fixes: show?.conflict_fixes ?? [],
           followups: (show?.followups ?? []).filter((f) => f.status === "open"),
@@ -408,6 +410,8 @@ export function createMockApi(
             kind === "plan" && plan
               ? {
                   body: plan.body,
+                  budget_limit_reason: null,
+                  budget_limit_usd: null,
                   budget_usd: null,
                   summary: null,
                   tasks: [],

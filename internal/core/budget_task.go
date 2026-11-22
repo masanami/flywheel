@@ -523,11 +523,8 @@ func loadChallengeDetailBudget(ctx context.Context, tx *sql.Tx, cid int64, statu
 			return out, err
 		}
 		if pv != nil && pv.BudgetUSD != nil {
-			est, lim := *pv.BudgetUSD, *pv.BudgetUSD
-			if pv.BudgetLimitUSD != nil {
-				lim, out.LimitReason = *pv.BudgetLimitUSD, pv.BudgetLimitReason
-			}
-			out.EstimateUSD, out.LimitUSD = &est, &lim
+			est, lim, reason := planBudgetLimit(pv)
+			out.EstimateUSD, out.LimitUSD, out.LimitReason = &est, &lim, reason
 		}
 		return out, nil
 	}
@@ -550,6 +547,20 @@ func loadChallengeDetailBudget(ctx context.Context, tx *sql.Tx, cid int64, statu
 		out.LimitReason = reason
 	}
 	return out, nil
+}
+
+// planBudgetLimit は承認を待っている版の計画 pv（BudgetUSD が非 nil）の見込み・上限・上限の理由を返す。上限は、計画が書かなければ見込みと同じ額。
+// 理由は、上限が見込みより大きいときだけ返す（同じ額なら nil）。計画の承認の要約と課題の詳細が同じ規則を使うための 1 か所。
+func planBudgetLimit(pv *PlanView) (est, lim float64, reason *string) {
+	est = *pv.BudgetUSD
+	lim = est
+	if pv.BudgetLimitUSD != nil {
+		lim = *pv.BudgetLimitUSD
+	}
+	if lim > est {
+		reason = pv.BudgetLimitReason
+	}
+	return est, lim, reason
 }
 
 // ActivityActionBudgetLimit は作業ログ（entity=challenge）の action。課題の上限を書いたときに残す（前の額・後の額）。

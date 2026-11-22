@@ -439,3 +439,78 @@ func supersedeOpenTaskAdditions(ctx context.Context, tx *sql.Tx, rec *activityRe
 	}
 	return nil
 }
+
+// fillTaskAdded は課題 cid のタスク tasks の Added を、task.addition_id が指す足す依頼から埋める（計画の承認で作ったタスクは nil のまま）。
+func fillTaskAdded(ctx context.Context, tx *sql.Tx, cid int64, tasks []Task) error {
+	rows, err := tx.QueryContext(ctx, `SELECT t.id, a.origin, a.origin_task_id FROM task t JOIN task_addition a ON a.id = t.addition_id WHERE t.challenge_id = ?`, cid)
+	if err != nil {
+		return err
+	}
+	added := map[string]*TaskAdded{}
+	for rows.Next() {
+		var id int64
+		var origin string
+		var originTask sql.NullInt64
+		if err := rows.Scan(&id, &origin, &originTask); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		a := &TaskAdded{Origin: TaskAdditionOrigin(origin)}
+		if originTask.Valid {
+			v := formatTaskID(originTask.Int64)
+			a.OriginTaskID = &v
+		}
+		added[formatTaskID(id)] = a
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for i := range tasks {
+		if a, ok := added[tasks[i].ID]; ok {
+			a.AddedAt = tasks[i].CreatedAt
+			tasks[i].Added = a
+		}
+	}
+	return nil
+}
+
+// AddedTask は計画の後に足されたタスク 1 件（課題・題名・出どころ）。完了の承認の要約と cycle の出力が使う。
+type AddedTask struct {
+	ChallengeID string
+	TaskID      string
+	Title       string
+	Origin      TaskAdditionOrigin
+}
+
+// listAddedTasks は課題 cid（0 なら全課題）の、足されたタスクを ID の昇順で返す。since が空でなければ、その時刻以後に足したものだけ。
+func listAddedTasks(ctx context.Context, tx *sql.Tx, cid int64, since string) ([]AddedTask, error) {
+	q := `SELECT t.id, t.challenge_id, t.title, a.origin FROM task t JOIN task_addition a ON a.id = t.addition_id WHERE 1 = 1`
+	var args []any
+	if cid != 0 {
+		q += ` AND t.challenge_id = ?`
+		args = append(args, cid)
+	}
+	if since != "" {
+		q += ` AND t.created_at >= ?`
+		args = append(args, since)
+	}
+	rows, err := tx.QueryContext(ctx, q+` ORDER BY t.id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []AddedTask{}
+	for rows.Next() {
+		var id, ch int64
+		var title, origin string
+		if err := rows.Scan(&id, &ch, &title, &origin); err != nil {
+			return nil, err
+		}
+		out = append(out, AddedTask{ChallengeID: formatChallengeID(ch), TaskID: formatTaskID(id), Title: title, Origin: TaskAdditionOrigin(origin)})
+	}
+	return out, rows.Err()
+}

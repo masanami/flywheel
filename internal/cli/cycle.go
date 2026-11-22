@@ -240,6 +240,12 @@ func cycleResultText(res *core.CycleRunResult) string {
 			fmt.Fprintf(&b, "  %s: 処理 %d 件・未起動 %d 件\n", p.Phase, len(p.Items), len(p.NotStarted))
 		}
 	}
+	if len(res.AddedTasks) > 0 {
+		fmt.Fprintf(&b, "  足したタスク: %d 件\n", len(res.AddedTasks))
+		for _, t := range res.AddedTasks {
+			fmt.Fprintf(&b, "    %s %s %s（出どころ: %s）\n", t.ChallengeID, t.TaskID, escapeControl(t.Title), t.Origin)
+		}
+	}
 	if res.RateLimited {
 		b.WriteString("  枠超過を記録したため、以降の判断の呼び出しは起動しませんでした\n")
 	}

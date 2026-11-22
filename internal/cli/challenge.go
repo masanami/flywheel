@@ -231,6 +231,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 		fmt.Fprintf(&b, "  %s %s [%s (%s)] 枠: 実装 %s USD・レビュー対応 %s USD / 使った額: %s USD\n", t.ID, escapeControl(t.Title), t.Status.Label(), t.Status,
 			formatUSD(t.BudgetImplUSD), formatUSD(t.BudgetReviewUSD), formatUSD(t.SpentUSD))
 	}
+	if c.Status == core.StatusAwaitingCompletionApproval {
+		writeAddedTasks(&b, d.AddedTasks)
+	}
 	if len(d.ConflictFixes) > 0 {
 		fmt.Fprintf(&b, "通したコンフリクトの解消: %d 件\n", len(d.ConflictFixes))
 		for _, f := range d.ConflictFixes {
@@ -417,6 +420,17 @@ func usesIntegrationText(v *bool) string {
 		return "使う"
 	}
 	return "使わない"
+}
+
+// writeAddedTasks は完了の承認の要約へ、計画の後に足したタスクの一覧（題名・出どころ）を書く。無ければ何も書かない。
+func writeAddedTasks(b *strings.Builder, ts []core.AddedTask) {
+	if len(ts) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "計画の後に足したタスク: %d 件\n", len(ts))
+	for _, t := range ts {
+		fmt.Fprintf(b, "  %s %s（出どころ: %s）\n", t.TaskID, escapeControl(t.Title), t.Origin)
+	}
 }
 
 // budgetDetailText は `show` の予算の行の値（見込みと上限。上限の理由があれば添える）。見込みが不明なら「不明」。

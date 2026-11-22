@@ -222,6 +222,10 @@ type ChallengeDetail struct {
 	Tasks []Task
 	// UsesIntegration は課題が統合先を使うか（challenge.uses_integration）。未決か過去の課題は nil。
 	UsesIntegration *bool
+	// Additions は課題の足す依頼（ID の昇順。閉じたものも含む。無ければ空のスライス。nil でない）。
+	Additions []TaskAddition
+	// AddedTasks は計画の後に足されたタスク（ID の昇順。無ければ空のスライス。nil でない）。
+	AddedTasks []AddedTask
 	// Budget は課題の予算（見込み・上限・上限の理由）。計画の承認待ちの課題は、承認を待っている版の計画の値。
 	Budget ChallengeDetailBudget
 	// IntegrationRef は課題に記録した統合先の識別（challenge.integration_ref）。記録が無ければ nil。
@@ -898,6 +902,15 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		if err := fillTaskBudgets(ctx, tx, cid, detail.Tasks, agent); err != nil {
+			return err
+		}
+		if err := fillTaskAdded(ctx, tx, cid, detail.Tasks); err != nil {
+			return err
+		}
+		if detail.Additions, err = listTaskAdditions(ctx, tx, cid); err != nil {
+			return err
+		}
+		if detail.AddedTasks, err = listAddedTasks(ctx, tx, cid, ""); err != nil {
 			return err
 		}
 		if detail.UsesIntegration, err = challengeUsesIntegration(ctx, tx, cid); err != nil {
