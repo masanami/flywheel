@@ -46,14 +46,15 @@ func resolveAnswerOption(opts []HoldOption, required bool, option, answer string
 	return "", nil, fmt.Errorf("%w: option %q is not one of this hold's options: %s", ErrValidation, option, describeHoldOptions(opts))
 }
 
-// describeHoldOptions は選択肢の識別と見出しの一覧（`識別 (見出し)` を `, ` 区切り）。選択肢が無ければ `(none)`。
+// describeHoldOptions は選択肢の識別と見出しの一覧（`識別 (見出し)` を `, ` 区切り）。選択肢が無ければ `(none)`。誤りの文は端末へ出るので、識別・見出しの
+// 制御文字は見える形に直す（表示のときだけ。保存した値と回答の文は変えない）。
 func describeHoldOptions(opts []HoldOption) string {
 	if len(opts) == 0 {
 		return "(none)"
 	}
 	parts := make([]string, len(opts))
 	for i, o := range opts {
-		parts[i] = fmt.Sprintf("%s (%s)", o.ID, o.Label)
+		parts[i] = fmt.Sprintf("%s (%s)", EscapeControl(o.ID, false), EscapeControl(o.Label, false))
 	}
 	return strings.Join(parts, ", ")
 }

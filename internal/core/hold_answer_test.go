@@ -99,6 +99,9 @@ func TestAnswerOption_InvalidIsRefusedWithoutWritingAndHoldStaysOpen(t *testing.
 	}{
 		{"unknown id", answerOptsFixture, "", "nope", false},
 		{"hold without options", HoldOptionsInput{}, "x", "add", false},
+		{"option with replan on a hold that has the option", answerOptsFixture, "", "add", true},
+		{"option with replan and annotation", answerOptsFixture, "理由", "skip", true},
+		{"option with replan on a hold without options", HoldOptionsInput{}, "", "add", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -109,10 +112,16 @@ func TestAnswerOption_InvalidIsRefusedWithoutWritingAndHoldStaysOpen(t *testing.
 			if _, err := s.PrepareAnswerOption(context.Background(), id, tc.answer, tc.option, tc.replan); !errors.Is(err, ErrValidation) {
 				t.Errorf("Prepare err = %v, want ErrValidation", err)
 			}
+			if tc.replan {
+				// 作り直しの指定との組が理由で断られる（選択肢が無い・識別が無いからではない）。
+				if _, err := s.PrepareAnswerOption(context.Background(), id, tc.answer, tc.option, true); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+					t.Errorf("Prepare err = %v, want the --option/--replan refusal", err)
+				}
+			}
 			_, _, err := s.ExecuteAnswer(context.Background(), AnswerRequest{ChallengeID: id, ExpectedVersion: before.Version, Answer: tc.answer, Option: tc.option, Replan: tc.replan},
 				relayedAttestation(t, id, "sess", "quote"))
-			if !errors.Is(err, ErrValidation) {
-				t.Errorf("Execute err = %v, want ErrValidation", err)
+			if !errors.Is(err, ErrValidation) || (tc.replan && !strings.Contains(err.Error(), "cannot be combined")) {
+				t.Errorf("Execute err = %v, want ErrValidation (the --option/--replan refusal when replan)", err)
 			}
 			after, _ := s.GetChallenge(context.Background(), id)
 			if after.Version != before.Version || after.Status != StatusAwaitingHuman || !after.Holds[0].Open() {
@@ -269,4 +278,48 @@ func TestEditHoldText_CalledInsideTheAnswerWriteRewritesTheOpenHoldAndAdvancesVe
 	if h.Question != "書き換えた問い" || !reflect.DeepEqual(h.Options, want) || *h.Answer != "足す" {
 		t.Errorf("hold = %q %+v %v", h.Question, h.Options, *h.Answer)
 	}
+}
+
+// 見出しの制御文字は、誤りの文では見える形に直す。保存した見出しと回答の文は変えない。
+func TestAnswerOption_ErrorEscapesControlCharsInOptionListButKeepsStoredLabel(t *testing.T) {
+	t.Parallel()
+	const label = "足す\x1b[31m\t赤\u202e"
+	const shown = `足す\x1b[31m\t赤\u202e`
+	in := HoldOptionsInput{Options: []HoldOption{{ID: "add", Label: label}, {ID: "skip", Label: "足さない"}}}
+	check := func(t *testing.T, err error) {
+		t.Helper()
+		if !errors.Is(err, ErrValidation) {
+			t.Fatalf("err = %v, want ErrValidation", err)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "add ("+shown+")") {
+			t.Errorf("message = %q, want escaped label %q", msg, shown)
+		}
+		if strings.ContainsAny(msg, "\x1b\t\u202e") {
+			t.Errorf("message = %q still has control characters", msg)
+		}
+	}
+	t.Run("unknown id", func(t *testing.T) {
+		t.Parallel()
+		s, id := optionHoldFixture(t, in)
+		_, _, err := answerWith(t, s, id, "", "nope", false)
+		check(t, err)
+		d, _ := s.GetChallenge(context.Background(), id)
+		if !d.Holds[0].Open() || d.Holds[0].Options[0].Label != label {
+			t.Errorf("hold = %+v", d.Holds[0])
+		}
+	})
+	t.Run("required hold without option", func(t *testing.T) {
+		t.Parallel()
+		req := in
+		req.Required = true
+		s, id := optionHoldFixture(t, req)
+		_, _, err := answerWith(t, s, id, "自由な回答", "", false)
+		check(t, err)
+		// 選べば、回答の文は保存した見出しそのまま。
+		_, h, err := answerWith(t, s, id, "", "add", false)
+		if err != nil || *h.Answer != label {
+			t.Errorf("answer = %v, err = %v, want the stored label unchanged", h, err)
+		}
+	})
 }
