@@ -1034,6 +1034,9 @@ type AnswerRequest struct {
 	// 保留に無い識別・選択肢を持たない保留への識別・Replan との併用・識別の無い回答を断る印のある保留への識別の無い回答は、
 	// ErrValidation（何も書かない）。
 	Option string
+	// Agent・Conn は、足す依頼の保留で「足す」を選んだとき、保存した出力を検査する宣言（nil なら core が作業ディレクトリの宣言を読む）。
+	Agent *AgentDeclaration
+	Conn  *ConnectorsDeclaration
 }
 
 // ExecuteAnswer は answer（T12）の②（書き込み）。「保留に入る直前の状態」は
@@ -1060,6 +1063,8 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	var holdID int64
 	var holdReasonValue holdReason
 	var holdTaskID sql.NullInt64
+	// replan は計画を作り直す回答か（--replan、または足す依頼の保留で選んだ「計画を作り直す」）。
+	replan := req.Replan
 
 	resolvePreceding := func(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge) (Status, error) {
 		id, question, fromStatus, raisedAt, err := loadUnansweredHold(ctx, tx, cid)
@@ -1078,7 +1083,8 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		if err != nil {
 			return "", err
 		}
-		if req.Replan {
+		replan = req.Replan || isTaskAdditionReplanChoice(ctx, tx, id, chosenOption)
+		if replan {
 			// 作業している契約の実行（開いていて、最後に読んだ状態が running のタスクの実行。「入れてよい」を返して委譲先が受け取った実行は、終わるか
 			// レビュー待ちへ戻るまで running を返すので含まれる。保留の間の成功が未処理のものも含む）と、「入れてよい」を返そうとして届いたか分からない実行
 			// （通す中身があり、届いた記録が無く、最後に読んだ状態が終わりでない。委譲先が入れている最中かもしれない。次の状態の確認で決まれば解ける）があるときは、
@@ -1094,7 +1100,7 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 				return "", err
 			}
 			if working > 0 {
-				return "", fmt.Errorf("%w: replan is not allowed while a contract run is working", ErrValidation)
+				return "", fmt.Errorf("%w: replan is not allowed while a contract run is working: %s", ErrValidation, workingTaskNames(ctx, tx, cid))
 			}
 		}
 		var runID sql.NullInt64
@@ -1120,9 +1126,14 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 				return err
 			}
 		}
+		if chosenOption != nil && holdReasonValue == holdReasonTaskAddOverLimit {
+			if err := applyTaskAdditionAnswer(ctx, tc, att, s.answerDecls(req), holdID, *chosenOption); err != nil {
+				return err
+			}
+		}
 		res, err := tc.tx.ExecContext(ctx,
 			`UPDATE hold SET answer = ?, answered_at = ?, answered_by = ?, answered_channel = ?, answered_verification = ?, relay_session = ?, relay_quote = ?, replan = ?, answer_option = ? WHERE id = ? AND answer IS NULL AND closed_at IS NULL`,
-			answerText, tc.nowStr, att.Actor(), string(att.Channel()), string(att.Verification()), relaySession, relayQuote, boolToInt(req.Replan), stringPtrColumn(chosenOption), holdID,
+			answerText, tc.nowStr, att.Actor(), string(att.Channel()), string(att.Verification()), relaySession, relayQuote, boolToInt(replan), stringPtrColumn(chosenOption), holdID,
 		)
 		if err != nil {
 			return err
@@ -1143,7 +1154,7 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		if chosenOption != nil {
 			tc.after["answer_option"] = *chosenOption
 		}
-		if req.Replan {
+		if replan {
 			tc.after["replan"] = true
 		}
 		att.addRelayTo(tc.after)
@@ -1158,7 +1169,7 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		ch, ver := string(att.Channel()), string(att.Verification())
 		holdOut.AnsweredChannel, holdOut.AnsweredVerification = &ch, &ver
 		holdOut.RelaySession, holdOut.RelayQuote = att.relayPtrs()
-		holdOut.Replan = req.Replan
+		holdOut.Replan = replan
 		// 理由 facts_unmet の保留への回答は、満たさなかった回数を 0 に戻す（次に読んだレビュー待ちから数え直す）。
 		// 戻す対象は、保留が結び付くタスクの契約の実行。保留がタスクに結び付かないときは、その課題の終わっていないタスクの契約の実行。
 		if holdReasonValue == holdReasonFactsUnmet {
@@ -1173,13 +1184,13 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 				return err
 			}
 		}
-		if holdTaskID.Valid && !req.Replan {
+		if holdTaskID.Valid && !replan {
 			return resumeIntegrationTaskAfterAnswer(ctx, tc, holdReasonValue, holdTaskID.Int64)
 		}
 		return nil
 	}
 
-	c, err := s.verifiedTransitionReplan(ctx, att, req.ChallengeID, req.ExpectedVersion, OpAnswer, NoStatus, resolvePreceding, req.Replan, apply)
+	c, err := s.verifiedTransitionReplan(ctx, att, req.ChallengeID, req.ExpectedVersion, OpAnswer, NoStatus, resolvePreceding, req.Replan, func() bool { return replan }, apply)
 	if err != nil {
 		return nil, nil, err
 	}

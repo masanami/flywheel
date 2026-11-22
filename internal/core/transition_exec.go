@@ -104,6 +104,8 @@ type runTransitionParams struct {
 	attested bool
 	// replan は回答に「範囲が変わる」印が付いたこと（T12 だけ）。真のとき、遷移先は IfReplan の分類済になる。
 	replan bool
+	// replanResolved は、preceding の解決の後に読む replan（選んだ選択肢が計画の作り直しを表すとき、解決の中で決まる）。nil か偽なら replan だけで決まる。
+	replanResolved func() bool
 	// att は本人確認つきの遷移（attested）の Attestation。経路 chat の印の検査と種類の絞りに使う。
 	att Attestation
 }
@@ -207,7 +209,7 @@ func (s *Store) transitionInTx(ctx context.Context, tx *sql.Tx, rec *activityRec
 		}
 	}
 	var target Status
-	if p.replan {
+	if p.replan || (p.replanResolved != nil && p.replanResolved()) {
 		target, err = tr.Target.ResolveForReplan(Table, preceding)
 		if err != nil {
 			if tr.Target.IfReplan != NoStatus && ReplanAllowedFrom(preceding) {
@@ -414,11 +416,11 @@ func (s *Store) transitionAsInvoker(ctx context.Context, runIDDisplay, id string
 // 必ず渡すため、対象の版が Prepare* の時点から変わっていれば ErrConflict に
 // なる。
 func (s *Store) verifiedTransition(ctx context.Context, att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
-	return s.verifiedTransitionReplan(ctx, att, id, expectedVersion, op, preceding, resolvePreceding, false, apply)
+	return s.verifiedTransitionReplan(ctx, att, id, expectedVersion, op, preceding, resolvePreceding, false, nil, apply)
 }
 
 // verifiedTransitionReplan は verifiedTransition に、回答の「範囲が変わる」印（replan）を足した版。
-func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, replan bool, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, replan bool, replanResolved func() bool, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
 	if !attestationValid(att, id) {
 		return nil, ErrVerificationRejected
 	}
@@ -434,6 +436,7 @@ func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, i
 		resolvePreceding: resolvePreceding,
 		attested:         true,
 		replan:           replan,
+		replanResolved:   replanResolved,
 		att:              att,
 	}, apply)
 }
