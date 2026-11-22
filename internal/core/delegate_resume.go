@@ -726,6 +726,16 @@ func formatQuestionsHold(rep *DelegationReport) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// questionsHoldOptions は結末 questions の報告の問いの保留に持たせる選択肢。問いが 1 件で、その問いに選択肢があるときだけ、
+// その選択肢を（件数によらず、そのまま）持たせる。問いが 2 件以上なら選択肢を持たせない。見出しにできない選択肢
+// （空・複数行）が 1 つでもあれば持たせない（問いの文には残る）。
+func questionsHoldOptions(rep *DelegationReport) HoldOptionsInput {
+	if rep == nil || len(rep.Questions) != 1 {
+		return HoldOptionsInput{}
+	}
+	return holdOptionsFromLabels(rep.Questions[0].Options)
+}
+
 // formatBlockedHold は結末 blocked の報告を、保留の問いにする文にする。
 func formatBlockedHold(rep *DelegationReport) string {
 	return "子は作業を進められないと報告した（blocked）。\n要約: " + strings.TrimSpace(rep.Summary)

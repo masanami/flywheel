@@ -29,6 +29,19 @@ var ErrHoldOptionInvalid = errors.New("core: invalid hold option")
 
 var holdOptionIDPattern = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
 
+// holdOptionsFromLabels は委譲先が返した選択肢の文を、保留の選択肢にする（見出しは文そのまま、識別は core が振る。件数は絞らない）。
+// 見出しにできない文（空・複数行）が 1 つでもあれば選択肢を持たせない（問いの文には残る。保留が作れなくなるよりよい）。
+func holdOptionsFromLabels(labels []string) HoldOptionsInput {
+	var in HoldOptionsInput
+	for _, o := range labels {
+		if strings.TrimSpace(o) == "" || strings.ContainsAny(o, "\r\n") {
+			return HoldOptionsInput{}
+		}
+		in.Options = append(in.Options, HoldOption{Label: o})
+	}
+	return in
+}
+
 // resolveHoldOptions は選択肢の識別を確定し（空の識別へ並びの順に o<位置> を振る）、検査して、options 列へ入れる JSON を返す。
 // 選択肢が 0 件なら nil（NULL）。
 func resolveHoldOptions(in []HoldOption) ([]HoldOption, *string, error) {
