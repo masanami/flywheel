@@ -429,12 +429,10 @@ func expandQuestionAnswerText(ctx context.Context, tx *sql.Tx, aid int64) (strin
 	if aid == 0 {
 		return "", nil
 	}
-	// 同じ足す依頼で問いを重ねたときは hold_id が新しい保留へ上書きされるので、この足す依頼の作成以後に立てた、回答済みの
-	// task_add_question の保留を古い順にすべて渡す（hold_id まで。ほかの足す依頼がいま指している保留は除く）。
-	rows, err := tx.QueryContext(ctx, `SELECT h.question, h.answer FROM task_addition a JOIN hold h ON h.challenge_id = a.challenge_id
-		WHERE a.id = ? AND a.hold_id IS NOT NULL AND h.id <= a.hold_id AND h.reason = ? AND h.answer IS NOT NULL AND h.raised_at >= a.created_at
-		  AND h.id NOT IN (SELECT hold_id FROM task_addition WHERE id <> a.id AND hold_id IS NOT NULL)
-		ORDER BY h.id`, aid, string(holdReasonTaskAddQuestion))
+	// 保留が記録している足す依頼（task_addition_id）で選ぶ。問いを重ねても、この足す依頼の回答済みの問いを古い順にすべて渡す。
+	rows, err := tx.QueryContext(ctx, `SELECT question, answer FROM hold
+		WHERE task_addition_id = ? AND reason = ? AND answer IS NOT NULL
+		ORDER BY id`, aid, string(holdReasonTaskAddQuestion))
 	if err != nil {
 		return "", err
 	}

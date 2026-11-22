@@ -352,7 +352,7 @@ func loadTaskBucketSpend(ctx context.Context, tx *sql.Tx, taskID, planVersion in
 	}
 	var decidedAtText string
 	err = tx.QueryRowContext(ctx,
-		`SELECT decided_at FROM approval WHERE challenge_id = ? AND kind = ? AND decision = ?
+		`SELECT decided_at FROM approval WHERE challenge_id = ? AND kind = ? AND decision = ? AND limit_only = 0
 		   AND (task_id = ? OR (task_id IS NULL AND target_version = ?))
 		 ORDER BY id DESC LIMIT 1`,
 		challengeID, string(ApprovalKindBudget), string(ApprovalDecisionApproved), taskID, planVersion).Scan(&decidedAtText)

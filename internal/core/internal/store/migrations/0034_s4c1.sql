@@ -34,3 +34,11 @@ ALTER TABLE task ADD COLUMN expand_after INTEGER NOT NULL DEFAULT 0;
 -- 課題の上限（実装の枠とレビュー対応の枠を足した 1 つの額）とその理由。記録が無い課題は、見込みと同じ額として読む。
 ALTER TABLE challenge ADD COLUMN budget_limit_micros INTEGER;
 ALTER TABLE challenge ADD COLUMN budget_limit_reason TEXT;
+
+-- 上限だけを変えた承認の印（既定 0）。1 の承認は、枠の使い切り（budget_exhausted）の止まりを解かない。
+-- 枠を増やした承認・過去の承認は 0。
+ALTER TABLE approval ADD COLUMN limit_only INTEGER NOT NULL DEFAULT 0 CHECK (limit_only IN (0, 1));
+
+-- 足す依頼の保留（task_add_question・task_add_over_limit）が、どの足す依頼の問いかを指す。それ以外の保留は NULL。
+ALTER TABLE hold ADD COLUMN task_addition_id INTEGER REFERENCES task_addition(id);
+CREATE INDEX hold_task_addition ON hold (task_addition_id) WHERE task_addition_id IS NOT NULL;
