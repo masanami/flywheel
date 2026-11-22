@@ -27,9 +27,13 @@ func supervisorAnswerText(hand SupervisorHand, findings, note string) string {
 
 // isSupervisorAnswered は、保留がスーパーバイザーの手で閉じられた回答か（オーナーの回答ではないか）を返す。
 func isSupervisorAnswered(h Hold) bool {
-	return h.Answer != nil && h.AnsweredBy != nil && *h.AnsweredBy == supervisorActorName &&
-		h.AnsweredChannel != nil && *h.AnsweredChannel == string(ChannelInvoker) &&
-		h.AnsweredVerification != nil && *h.AnsweredVerification == string(VerificationNone)
+	return h.Answer != nil && h.AnsweredBy != nil && h.AnsweredChannel != nil && h.AnsweredVerification != nil &&
+		isSupervisorAnswerColumns(*h.AnsweredBy, *h.AnsweredChannel, *h.AnsweredVerification)
+}
+
+// isSupervisorAnswerColumns は、回答の列（回答した者・経路・本人確認）が、スーパーバイザーが閉じた保留のものか（判定の正本）。
+func isSupervisorAnswerColumns(by, channel, verification string) bool {
+	return by == supervisorActorName && channel == string(ChannelInvoker) && verification == string(VerificationNone)
 }
 
 // resolveSupervisorHold は in.HoldID の保留を、in.Tx の中で閉じる（手の書き込みは、対処の記録・作業ログと同じトランザクション）。

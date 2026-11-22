@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // このファイルは手の実行の入口の雛形（区切り S4b-2）。手ごとの関数を手ごとの別のファイル
 // （supervisor_hand_<手の名前>.go の 7 つ）に置き、振り分けはここの 1 か所の switch にする。後のタスクは自分の手のファイルだけを書き換える
-// （並行のタスクが同じ行を書き換えないための形）。いまは、escalate 以外の手が ErrSupervisorHandNotImplemented を返すだけ。
+// （並行のタスクが同じ行を書き換えないための形）。手の中身は、手ごとのファイルが持つ（まだ無い手は ErrSupervisorHandNotImplemented を返す）。
 
 // ErrSupervisorHandNotImplemented は、手の実行がまだ無いことを表す（雛形）。
 var ErrSupervisorHandNotImplemented = errors.New("core: supervisor hand is not implemented yet")
@@ -37,6 +38,8 @@ type supervisorHandInput struct {
 type supervisorHandOutcome struct {
 	Result SupervisorActionResult
 	Reject SupervisorRejectReason
+	// EscalateOnReject が真で Result が rejected のとき、断りの記録に続けて、保留（まだスーパーバイザー待ちなら）を、判断の findings 付きでオーナーへ上げる。
+	EscalateOnReject bool
 }
 
 // executeSupervisorHand は in.Output.Hand に応じた手の関数を呼ぶ（振り分けは、ここの 1 か所の switch）。
@@ -166,6 +169,9 @@ func (s *Store) applySupervisorHand(ctx context.Context, req supervisorHandReque
 	switch outcome.Result {
 	case ActionRejected:
 		o := req.Output
+		if outcome.EscalateOnReject {
+			return outcome, s.recordSupervisorRejectedAndEscalate(ctx, req, o.Hand, outcome.Reject)
+		}
 		return outcome, s.recordSupervisorRejected(ctx, req, o.Hand, outcome.Reject)
 	case ActionFailed:
 		if err := s.recordSupervisorFailure(ctx, req, &req.Output.Hand, "手が失敗とした"); err != nil {
@@ -180,6 +186,27 @@ func (s *Store) recordSupervisorRejected(ctx context.Context, req supervisorHand
 	o := req.Output
 	return classifyReadWriteErr(s.db.Write(ctx, func(tx *sql.Tx) error {
 		_, err := s.writeSupervisorAction(ctx, tx, req, req.actionInput(hand, o.Findings, o.Note, o.Basis, ActionRejected, reason))
+		return err
+	}))
+}
+
+// recordSupervisorRejectedAndEscalate は、recordSupervisorRejected の記録に続けて、同じ書き込みで、保留をオーナーへ上げる
+// （supervisor_state を escalated にし、判断の findings・推奨・断りの対処の記録の ID を残す）。保留がすでにスーパーバイザー待ちでなければ、上げない。
+func (s *Store) recordSupervisorRejectedAndEscalate(ctx context.Context, req supervisorHandRequest, hand SupervisorHand, reason SupervisorRejectReason) error {
+	o := req.Output
+	rec := o.Recommendation
+	if strings.TrimSpace(rec) == "" {
+		rec = "判断の間に状態が変わったので、手を実行しなかった。オーナーが判断してください。"
+	}
+	return classifyReadWriteErr(s.db.Write(ctx, func(tx *sql.Tx) error {
+		id, err := s.writeSupervisorAction(ctx, tx, req, req.actionInput(hand, o.Findings, o.Note, o.Basis, ActionRejected, reason))
+		if err != nil {
+			return err
+		}
+		err = escalateSupervisorHold(ctx, tx, req.Target.HoldID, supervisorEscalation{Findings: o.Findings, Recommendation: rec, ActionID: id})
+		if errors.Is(err, errSupervisorHoldNotPending) {
+			return nil
+		}
 		return err
 	}))
 }
