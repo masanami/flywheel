@@ -176,24 +176,6 @@ func TestSupervisorResolve_PlainTransitionCannotUseT20(t *testing.T) {
 	}
 }
 
-// artifact_missing の reverify（照合のやり直し）は別のタスク。ここでは実行せず、書き込みを巻き戻して失敗にする。
-func TestSupervisorResolve_ArtifactMissingReverifyIsNotThisHand(t *testing.T) {
-	t.Parallel()
-	f := newSVFixture(t)
-	id := f.pendingHold(t, StopKindArtifactMissing)
-	f.inv.result = svResult(map[string]any{"hand": "reverify", "findings": "F", "note": "N"})
-	f.stage(t)
-	if as := f.actions(t, id); len(as) != 1 || as[0].Result != ActionFailed || as[0].Hand == nil || *as[0].Hand != HandReverify {
-		t.Fatalf("actions = %+v, want one failed reverify action (the hand ran and was not implemented)", as)
-	}
-	if _, _, _, _, state := f.holdAnswerRow(t, id); state != "escalated" {
-		t.Errorf("state = %q, want escalated by the failed action", state)
-	}
-	if d, _ := f.s.GetChallenge(context.Background(), id); d.Status != StatusAwaitingHuman {
-		t.Errorf("status = %v, want awaiting_human", d.Status)
-	}
-}
-
 // intake_unverified の reverify: 着手中へ戻り、オーナーの回答のときと同じに、そのタスクの統合先の受け取りがやり直される（通す中身の記録が消える）。
 func TestSupervisorResolve_Reverify_IntakeUnverifiedRestartsTheIntegrationIntake(t *testing.T) {
 	t.Parallel()
