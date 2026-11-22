@@ -437,7 +437,16 @@ func TestAllCommands_JSONSuccessWritesSingleDocumentToStdout(t *testing.T) {
 			if stderr != "" {
 				t.Errorf("stderr should be empty on success, got %q", stderr)
 			}
-			assertDocumentedJSON(t, doc, name, requireSingleJSONObject(t, name, stdout))
+			obj := requireSingleJSONObject(t, name, stdout)
+			// サイクルを始める操作は、キー cycle（始めたかの結果。core-redesign.md S4b）を足す。形は cycle_start_test.go が確かめる。
+			// 引数の無い ingest（追従だけ）は始めないので、cycle を持たない（cycle_start_test.go）。
+			if c, ok := registeredCommands()[name]; ok && c.StartsCycle != nil {
+				if _, has := obj["cycle"]; has != (c.StartsCycle(Args{Positional: args[len(strings.Fields(name)) : len(args)-3]}) != "") {
+					t.Errorf("%s: --json の cycle の有無が StartsCycle と合わない: %v", name, obj)
+				}
+				delete(obj, "cycle")
+			}
+			assertDocumentedJSON(t, doc, name, obj)
 		})
 	}
 }

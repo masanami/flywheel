@@ -53,7 +53,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   mark-read <C-ID>
   runs [<C-ID>] [--open]
   metrics [--since <YYYY-MM-DD>] [--until <YYYY-MM-DD>] [--compare <C-ID>]
-  cycle [--trigger <t>]
+  cycle [--trigger <t>] [--detach]   （--detach＝サイクルを切り離して始め、始まったらすぐ戻る）
   cycle status   （走っているサイクルの様子。走っていなければ最後のサイクルの終わり方）
   cycle stop   （走っているサイクルに止める指示を残す。本人確認は要らない。委譲先の実行は取り消さない）
   run [<C-ID>]
@@ -61,6 +61,9 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   export --out <path>
   import --in <path>
   serve [--port <n>] [--fleet <path>]
+
+approve・reject・answer・budget・ingest <指定>・followup promote は、成立した後に、いま始められるものがあればサイクルを 1 回始める
+（--no-cycle か宣言の auto_cycle が偽なら始めない。結果は --json のキー cycle の started と reason）。
 
 --relayed は、人間と会話しているエージェントが会話で受けた操作を記録する口（端末での確認は行わない。
 --session は会話の識別、--quote は発言の要旨で、どちらも必須）。

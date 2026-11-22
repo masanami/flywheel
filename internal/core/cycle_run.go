@@ -100,6 +100,10 @@ type CycleRunInput struct {
 	Wait func(ctx context.Context, d time.Duration) error
 	// OnBegin が非 nil なら、周の開始（BeginCycle の成功）の直後、段を始める前に周の ID で呼ぶ。
 	OnBegin func(cycleID string)
+	// Continue が非 nil なら、終わった理由が settled のサイクルを終えて排他を放した後に、宣言の auto_cycle が真で、いま始められるもの
+	// （CountRoundWork。回りの終わりの数えと同じ）が 1 件以上あるとき、1 回だけ呼ぶ（次のサイクルを切り離して始める処理。trigger は continue）。
+	// settled 以外の終わり方では呼ばない。数えは必ず排他を放した後に行う（放す前に数えると、数えた後・放す前に記録された操作をどちらも拾わない）。
+	Continue func(ctx context.Context) error
 }
 
 // CyclePhaseResult は 1 つの段の結果（§IF / API「cycle の JSON 出力」の phases の
@@ -156,6 +160,9 @@ type CycleRunResult struct {
 	Phases []CyclePhaseResult
 	// RateLimited はこの周で枠超過を記録した run があったか。
 	RateLimited bool
+	// Continued は、次のサイクルを始める処理（CycleRunInput.Continue）を呼んだか。ContinueErr はその処理のエラー（周の成否は変えない）。
+	Continued   bool
+	ContinueErr error
 }
 
 // cycleStalledRounds は、作業中の実行が無いまま進みの無い回りがこの回数続いたら、回りの繰り返しを終える（stalled）。
@@ -250,12 +257,24 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	if in.AgentDecl.DefaultsUsed {
 		defaults = append(defaults, "agent.json")
 	}
-	return &CycleRunResult{
+	res := &CycleRunResult{
 		Cycle:              ended,
 		ConfigDefaultsUsed: defaults,
 		Phases:             phases,
 		RateLimited:        jc.RateLimited(),
-	}, nil
+	}
+	// 終わりの段を通し、排他を放した後に、いま始められるものを数え直す（settled のときだけ）。
+	if in.Continue != nil && endReason == CycleEndSettled && in.AgentDecl.AutoCycle {
+		work, werr := s.CountRoundWork(endCtx, in.AgentDecl, in.ConnDecl)
+		switch {
+		case werr != nil:
+			res.ContinueErr = werr
+		case work.Startable > 0:
+			res.Continued = true
+			res.ContinueErr = in.Continue(endCtx)
+		}
+	}
+	return res, nil
 }
 
 // runCyclePhases は回りを、進められるものが無くなるまで繰り返し（進める段 = 反映・取り込み・分類・計画・委譲・完了の検証）、

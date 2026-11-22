@@ -5,6 +5,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +13,13 @@ import (
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/server"
 )
 
 // Run は cmd/flywheel/main.go から呼ばれる唯一の入口。
 // os.Exit にそのまま渡せる終了コード（0/1/2）を返す。
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	return run(args, stdin, stdout, stderr, defaultCommands())
+	return runWithDeps(args, stdin, stdout, stderr, defaultCommands(), runDeps{CycleStart: server.StartCycle})
 }
 
 // run は Run の内部実装。commands を外から差し込めるようにして、
@@ -30,6 +32,17 @@ func run(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands [
 // runWithLookPath は run に gh・claude の実行ファイルの探し方を渡せる形（nil なら exec.LookPath＝PATH 上）。
 // テストが、プロセス全体の PATH を書き換えずに、テストごとの偽の gh・claude を使うために使う。
 func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands []Command, lookPath lookPathFunc) int {
+	return runWithDeps(rawArgs, stdin, stdout, stderr, commands, runDeps{LookPath: lookPath})
+}
+
+// runDeps は run に外から渡す、環境に触れる口。ゼロ値は、gh・claude を PATH から探し、サイクルを切り離して始められない扱い。
+type runDeps struct {
+	LookPath   lookPathFunc
+	CycleStart server.CycleStarter
+}
+
+func runWithDeps(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands []Command, deps runDeps) int {
+	lookPath := deps.LookPath
 	jsonMode := scanJSONFlag(rawArgs)
 
 	if len(rawArgs) > 0 && isHelpInvocation(rawArgs[0]) {
@@ -62,6 +75,7 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 	parsed.Stderr = stderr
 	parsed.Stdout = stdout
 	parsed.LookPath = lookPath
+	parsed.CycleStart = deps.CycleStart
 
 	// 解析が成功した後は解析結果を正とする（事前走査はフラグの値としての
 	// "--json" も拾うため、解析に失敗したときの出力形式の判定にだけ使う）。
@@ -94,6 +108,14 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 			return failErr(stderr, jsonMode, NewError(CodeInternalError, "command returned a nil *cli.Error"))
 		default:
 			return failErr(stderr, jsonMode, NewError(CodeInternalError, err.Error()))
+		}
+	}
+
+	// 操作が成立した後で、サイクルを始めるかを決めて始める。結果は操作の出力に足すだけで、終了コードは変えない。
+	if cmd.StartsCycle != nil {
+		if trigger := cmd.StartsCycle(parsed); trigger != "" {
+			cyc := server.StartCycleAfterOperation(context.Background(), parsed.Store, trigger, parsed.Bools["no-cycle"], parsed.CycleStart)
+			data = withCycleOutput(data, cyc)
 		}
 	}
 
@@ -147,6 +169,9 @@ func parseArgs(rawArgs []string, cmd Command) (Args, *Error) {
 	}
 	for _, f := range cmd.Flags {
 		allFlags[f.Name] = f
+	}
+	if cmd.StartsCycle != nil {
+		allFlags[noCycleFlag.Name] = noCycleFlag
 	}
 
 	values := map[string]string{}

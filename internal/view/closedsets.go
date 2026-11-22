@@ -62,6 +62,10 @@ func ClosedSets() []ClosedSet {
 	for _, v := range core.CycleEndReasonValues() {
 		endReasons = append(endReasons, string(v))
 	}
+	cycleStartReasons := make([]string, 0, 5)
+	for _, v := range core.CycleStartReasonValues() {
+		cycleStartReasons = append(cycleStartReasons, string(v))
+	}
 	for _, v := range core.WatchStateValues() {
 		watchStates = append(watchStates, string(v))
 	}
@@ -95,6 +99,8 @@ func ClosedSets() []ClosedSet {
 		{Name: "EXPECTED_KIND_CODES", Codes: expectedKinds},
 		{Name: "CYCLE_END_REASON_CODES", Codes: endReasons},
 		{Name: "WATCH_STATE_CODES", Codes: watchStates},
+		{Name: "CYCLE_TRIGGER_CODES", Codes: core.CycleTriggerValues()},
+		{Name: "CYCLE_START_REASON_CODES", Codes: cycleStartReasons},
 		{Name: "EXECUTION_RESULT_CODES", Codes: execResults},
 		{Name: "EXECUTION_RESULT_WORDS", Codes: execLabels},
 		{Name: "CONDITIONS_AFTER_RELEASE_HEADINGS", Codes: headings},
