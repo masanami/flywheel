@@ -205,9 +205,10 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j2.md":   16441,
 		"j3.md":   8192,
 		"j4.md":   4096,
-		"j5.md":   14473,
+		"j5.md":   15048,
 		"j6.md":   6144,
 		"j8.md":   8192,
+		"sv.md":   6144,
 		"chat.md": 4096,
 	}
 
@@ -260,6 +261,7 @@ func TestCheckPromptSizes_BriefTotal_ExactLimitPasses_OneByteOverFails(t *testin
 			"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 			"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 			"j8.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+			"sv.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 			"chat.md":                          &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 			"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
@@ -293,6 +295,7 @@ func TestCheckPromptSizes_MissingJudgmentFileFails(t *testing.T) {
 		// j5.md が無い
 		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j8.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"sv.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"chat.md":                          &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
@@ -320,6 +323,7 @@ func TestCheckPromptSizes_MissingBriefFileFails(t *testing.T) {
 		"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j8.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"sv.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"chat.md":                          &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},
@@ -345,6 +349,7 @@ func TestCheckPromptSizes_UnexpectedFileFails(t *testing.T) {
 		"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j8.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"sv.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"chat.md":                          &fstest.MapFile{Data: repeatBytes(1)},
 		"j7.md":                            &fstest.MapFile{Data: repeatBytes(1)}, // 上限表に無い
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
@@ -373,6 +378,7 @@ func TestCheckPromptSizes_UnexpectedFileInBriefDirFails(t *testing.T) {
 		"j5.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j6.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"j8.md":                            &fstest.MapFile{Data: repeatBytes(1)},
+		"sv.md":                            &fstest.MapFile{Data: repeatBytes(1)},
 		"chat.md":                          &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider.md":                 &fstest.MapFile{Data: repeatBytes(1)},
 		"brief/decider_discipline.md":      &fstest.MapFile{Data: repeatBytes(1)},

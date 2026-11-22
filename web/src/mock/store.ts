@@ -233,6 +233,10 @@ const taskHold = (
   relay_session: null,
   replan: false,
   run_id: null,
+  stop_kind: null,
+  supervisor_findings: null,
+  supervisor_recommendation: null,
+  supervisor_state: null,
   task_id,
   ...p,
 });
@@ -380,6 +384,10 @@ export function seed(): Record<string, MockWorkspace> {
             "旧テーブルの deleted_at が NULL の行を移行対象に含めてよいですか？ 含めると 3 万件増えます。",
           raised_at: iso(90),
           run_id: null,
+          stop_kind: null,
+          supervisor_findings: null,
+          supervisor_recommendation: null,
+          supervisor_state: null,
           task_id: null,
         },
       ],
@@ -707,6 +715,7 @@ export function seed(): Record<string, MockWorkspace> {
           plan: 1,
           release: 0,
           run: 1,
+          supervise: 0,
           verify: 0,
         },
         total: 3,
@@ -733,6 +742,7 @@ export function seed(): Record<string, MockWorkspace> {
           plan: 0,
           release: 1,
           run: 0,
+          supervise: 0,
           verify: 1,
         },
         total: 2,
@@ -906,6 +916,7 @@ function cycleWorkOf(items: MockChallenge[]): CycleWork {
     plan: n("classified"),
     release: 0,
     run: 0,
+    supervise: 0,
     verify: n("verifying"),
   };
   return { stages, total: Object.values(stages).reduce((a, b) => a + b, 0) };
@@ -965,6 +976,7 @@ export function statusOf(w: MockWorkspace): StatusResponse {
       ),
     },
     parent_agent: { challenges: parentAgent.map((m) => m.c) },
+    supervisor_checking: { challenges: [], count: 0 },
     waiting_external: {
       challenges: items.flatMap((m) =>
         m.flags.waitingCi

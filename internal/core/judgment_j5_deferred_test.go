@@ -190,6 +190,7 @@ func TestVerifyAutoJ5_AfterHumanActionLeft_HoldsWithTheConditionsAndDoesNotRelau
 	if strings.Contains(q, condAfterRelease) {
 		t.Errorf("hold question = %q must not list the after-release condition", q)
 	}
+	wantLastHoldStop(t, f.s, stopNone) // AC-16: 人の操作の後でしか満たせない条件の保留は対象にしない
 	runs := f.j5Runs(t)
 	if got := f.queryString(t, `SELECT from_status || '/' || run_id FROM hold WHERE challenge_id = 1`); got != "verifying/"+strings.TrimPrefix(runs[0].ID, "R-") {
 		t.Errorf("hold from_status/run_id = %q", got)
@@ -644,13 +645,13 @@ func TestApplyJ5_ReleaseStateChangesAfterTheFirstRead_IsRereadAndReselected(t *t
 			t.Fatalf("route = %+v", rt)
 		}
 		f.setReleaseState(t, 1, "executed") // 最初の読み取りの後で待っている本番反映が無くなる
-		if _, _, err := f.s.applyJ5Route(ctx, "R-1", "C-1", v, nil, rt); !errors.Is(err, errJ5StaleExpected) {
+		if _, _, err := f.s.applyJ5Route(ctx, "R-1", "C-1", v, nil, rt, nil); !errors.Is(err, errJ5StaleExpected) {
 			t.Fatalf("err = %v, want errJ5StaleExpected", err)
 		}
 		if got := f.detail(t, "C-1").Status; got != StatusVerifying {
 			t.Fatalf("status = %s, want unchanged verifying", got)
 		}
-		mapped, held, err := f.s.applyJ5(ctx, "R-1", "C-1", v, nil)
+		mapped, held, err := f.s.applyJ5(ctx, "R-1", "C-1", v, nil, nil)
 		if err != nil || !mapped || !held {
 			t.Fatalf("applyJ5 = mapped %v, held %v, %v; want mapped and held", mapped, held, err)
 		}
@@ -669,13 +670,13 @@ func TestApplyJ5_ReleaseStateChangesAfterTheFirstRead_IsRereadAndReselected(t *t
 			t.Fatalf("route = %+v, want noRelease", rt)
 		}
 		f.addOperation(t, "release") // 最初の読み取りの後で未承認の release が現れる
-		if _, _, err := f.s.applyJ5Route(ctx, "R-1", "C-1", v, nil, rt); !errors.Is(err, errJ5StaleExpected) {
+		if _, _, err := f.s.applyJ5Route(ctx, "R-1", "C-1", v, nil, rt, nil); !errors.Is(err, errJ5StaleExpected) {
 			t.Fatalf("err = %v, want errJ5StaleExpected", err)
 		}
 		if got := f.detail(t, "C-1").Status; got != StatusVerifying {
 			t.Fatalf("status = %s, want unchanged verifying", got)
 		}
-		mapped, held, err := f.s.applyJ5(ctx, "R-1", "C-1", v, nil)
+		mapped, held, err := f.s.applyJ5(ctx, "R-1", "C-1", v, nil, nil)
 		if err != nil || !mapped || held {
 			t.Fatalf("applyJ5 = mapped %v, held %v, %v; want mapped and not held", mapped, held, err)
 		}

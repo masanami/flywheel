@@ -22,7 +22,7 @@ func marshal(t *testing.T, v any) string {
 
 func TestEmptyListsAreArraysAndNullsStayNull(t *testing.T) {
 	got := marshal(t, view.FromOverview(&core.Overview{}))
-	want := `{"actionable":{"challenges":[]},"approved":{"operations":[]},"binary_commit":"unknown","cycle_work":{"stages":{"classify":0,"cleanup":0,"improve":0,"learn":0,"plan":0,"release":0,"run":0,"verify":0},"total":0},"followups":{"open":0},"ingestable":null,"needs_human":{"budget_exhausted":[],"challenges":[],"discrepancies":[],"operations":[],"slots":[],"triage":[]},"parent_agent":{"challenges":[]},"waiting_external":{"challenges":[]}}`
+	want := `{"actionable":{"challenges":[]},"approved":{"operations":[]},"binary_commit":"unknown","cycle_work":{"stages":{"classify":0,"cleanup":0,"improve":0,"learn":0,"plan":0,"release":0,"run":0,"supervise":0,"verify":0},"total":0},"followups":{"open":0},"ingestable":null,"needs_human":{"budget_exhausted":[],"challenges":[],"discrepancies":[],"operations":[],"slots":[],"triage":[]},"parent_agent":{"challenges":[]},"supervisor_checking":{"challenges":[],"count":0},"waiting_external":{"challenges":[]}}`
 	if got != want {
 		t.Errorf("status:\n got %s\nwant %s", got, want)
 	}
@@ -99,14 +99,14 @@ func TestFromApprovalPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"approval":{"added_tasks":[],"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","conflict_fixes":[],"direct_completion":null,"done_criteria":"d","followups":[],"integration_ref":null,"kind":"completion","mergeability_note":"","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"stages":` + emptyStages + `,"tasks":[],"title":"t","uses_integration":null,"version":4}}`
+	want := `{"approval":{"added_tasks":[],"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","conflict_fixes":[],"direct_completion":null,"done_criteria":"d","followups":[],"integration_ref":null,"kind":"completion","mergeability_note":"","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"stages":` + emptyStages + `,"supervisor_hands_taken":{},"tasks":[],"title":"t","uses_integration":null,"version":4}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
 
 	plan := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, Version: 2, PlanVersion: 3, PlanBody: "B"}
 	b, _ = json.Marshal(view.FromApprovalPreview(plan, nil))
-	want = `{"approval":{"added_tasks":[],"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","conflict_fixes":[],"direct_completion":null,"done_criteria":null,"followups":[],"integration_ref":null,"kind":"plan","mergeability_note":"","other_pending_operations":[],"pairs":[],"plan":{"body":"B","budget_limit_reason":null,"budget_limit_usd":null,"budget_usd":null,"summary":null,"tasks":[],"topics":[],"uses_integration":null,"version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"tasks":[],"title":"t","uses_integration":null,"version":2}}`
+	want = `{"approval":{"added_tasks":[],"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","conflict_fixes":[],"direct_completion":null,"done_criteria":null,"followups":[],"integration_ref":null,"kind":"plan","mergeability_note":"","other_pending_operations":[],"pairs":[],"plan":{"body":"B","budget_limit_reason":null,"budget_limit_usd":null,"budget_usd":null,"summary":null,"tasks":[],"topics":[],"uses_integration":null,"version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"supervisor_hands_taken":{},"tasks":[],"title":"t","uses_integration":null,"version":2}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}

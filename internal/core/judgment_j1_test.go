@@ -545,6 +545,10 @@ func TestClassifyAutoJ1_Uncertain_HoldsWithQuestion(t *testing.T) {
 	if len(after.Holds) != 1 || after.Holds[0].Question != "UNIQUE-Q" {
 		t.Fatalf("Holds = %+v, want 1 hold with question UNIQUE-Q", after.Holds)
 	}
+	// AC-13: 分類の判断点の問いは、止まり方が NULL で、スーパーバイザー待ちにならない。
+	if h := after.Holds[0]; h.StopKind != "" || h.SupervisorState != "" {
+		t.Errorf("stop_kind/supervisor_state = %q/%q, want empty", h.StopKind, h.SupervisorState)
+	}
 }
 
 func TestClassifyAutoJ1_UncertainWithoutQuestion_InvalidOutput(t *testing.T) {

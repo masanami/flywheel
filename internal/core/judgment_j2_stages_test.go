@@ -236,6 +236,10 @@ func TestPlanAutoJ2_Plan_SizeMLWithEmptyExpectedHoldsWithoutPlan(t *testing.T) {
 				if last.Question != ExpectedEmptyHoldPreamble+" QUESTION-MARKER どう見えますか" || last.FromStatus != StatusClassified {
 					t.Errorf("hold = %+v", last)
 				}
+				// AC-14: 計画の判断点の問いは、スーパーバイザー待ちにならない。
+				if last.StopKind != "" || last.SupervisorState != "" {
+					t.Errorf("stop_kind/supervisor_state = %q/%q, want empty", last.StopKind, last.SupervisorState)
+				}
 				// 計画を登録しないので、非空の non_goals・figure も書かない。
 				if d.NonGoals != nil || d.Figure != nil || d.Expected != nil {
 					t.Errorf("stage fields written: %+v", d.StageFields)

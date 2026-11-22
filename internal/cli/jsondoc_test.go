@@ -690,8 +690,8 @@ func addM3CycleShape(t *testing.T, doc *documentedJSON) {
 }
 
 // documentedCyclePhaseNames は cycle の JSON の phase の閉集合（§IF / API「`phase` は
-// `ingest | classify | plan | run | verify` の閉集合」）。M4.5 で release（最初）・learn・improve、M5 S1 で backup（最後）が加わり、cycle は 9 つすべてを出す。
-var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "learn": true, "improve": true, "backup": true}
+// `ingest | classify | plan | run | verify` の閉集合」）。M4.5 で release（最初）・learn・improve、M5 S1 で backup（最後）が加わり、cycle は 10 の段をすべて出す。
+var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "supervise": true, "learn": true, "improve": true, "backup": true}
 
 // assertDocumentedCycle は cycle の成功時の出力 out の内側（周の記録・段・items・not_started・
 // ingest の result）が、文書の例と同じ形であることを検査する（最上位のキーは
@@ -736,6 +736,13 @@ func assertDocumentedCycle(t *testing.T, doc documentedJSON, out map[string]any)
 		}
 		if name == "backup" {
 			assertDocumentedBackupPhase(t, where, pm)
+			continue
+		}
+		if name == "supervise" {
+			// supervise の段は items を持たず、処理した件数 processed と手ごとの件数 hands を持つ（docs/features/m3-invoker-delegation.md）。
+			if got := sortedKeys(keysOf(pm)); !reflect.DeepEqual(got, []string{"hands", "not_started", "phase", "processed", "skipped"}) {
+				t.Errorf("%s keys = %v, documented = [hands not_started phase processed skipped]", where, got)
+			}
 			continue
 		}
 		if name == "ingest" {
@@ -1254,6 +1261,10 @@ func addM4RelayEvidenceShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["hold"]["answered_verification"] = true
 	doc.entity["hold"]["answer_option"] = true
 	doc.entity["hold"]["options"] = true
+	// 区切り S4b-2: 保留の止まり方とスーパーバイザーの処理の状態・調べたこと・推奨（仕様は core-redesign-s4b.md。m4 の JSON の表には書かない）。
+	for _, k := range []string{"stop_kind", "supervisor_state", "supervisor_findings", "supervisor_recommendation"} {
+		doc.entity["hold"][k] = true
+	}
 	// closed_at: 取り下げで回答なしに閉じた保留の日時（M4.5 S4。hold.closed_at は #385 の列。
 	// 仕様の JSON の表にはまだ書かれていない）。
 	doc.entity["hold"]["closed_at"] = true
@@ -1622,6 +1633,7 @@ func addCoreRedesignS2aShowShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["show_challenge"]["uses_integration"] = true
 	addCoreRedesignS3bShowShape(t, doc, string(data))
 	addCoreRedesignS3cShowShape(t, doc, string(data))
+	addCoreRedesignS4bShowShape(t, doc)
 	addCoreRedesignS4cShowShape(t, doc)
 }
 
@@ -1697,4 +1709,27 @@ func addCoreRedesignS3bShowShape(t *testing.T, doc *documentedJSON, spec string)
 func addS4aCycleShapes(doc *documentedJSON) {
 	doc.topLevel["cycle status"] = []map[string]bool{{"state": true, "last_started_at": true, "last_ended_at": true, "last_result": true, "last_end_reason": true, "running": true}}
 	doc.topLevel["cycle stop"] = []map[string]bool{{"requested": true, "cycle_id": true}}
+}
+
+// addCoreRedesignS4bShowShape は区切り S4b-2 が足したキー（show --json の根の `supervisor_actions`・`supervisor_hands_taken`、
+// status の最上位の `supervisor_checking`）を doc へ合成する。仕様（core-redesign-s4b.md「記録と表示」）が書いていることを確かめた上で足す。
+func addCoreRedesignS4bShowShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "core-redesign-s4b.md"))
+	if err != nil {
+		t.Fatalf("read core-redesign-s4b spec: %v", err)
+	}
+	spec := string(data)
+	for _, want := range []string{"根に `supervisor_actions`（配列。", "`supervisor_hands_taken`（手 → 件数の写像。", "`status` の最上位に `supervisor_checking`"} {
+		if !strings.Contains(spec, want) {
+			t.Fatalf("core-redesign-s4b spec does not document %q", want)
+		}
+	}
+	for _, shape := range doc.topLevel["show"] {
+		shape["supervisor_actions"] = true
+		shape["supervisor_hands_taken"] = true
+	}
+	for _, shape := range doc.topLevel["status"] {
+		shape["supervisor_checking"] = true
+	}
 }

@@ -55,6 +55,7 @@ func (f *reviewFlowFixture) assertIntegrationHold(t *testing.T) {
 	if got := f.lastHoldReason(t); got != string(holdReasonIntegrationRefInvalid) {
 		t.Fatalf("reason = %q, question = %q", got, f.lastHoldQuestion(t))
 	}
+	wantLastHoldStop(t, f.s, stopPendingIntake) // AC-12: 統合先の識別が合わない保留は intake_unverified
 	if n := f.count(t, `SELECT COUNT(*) FROM task WHERE status = 'verifying'`); n != 0 {
 		t.Fatalf("verifying tasks = %d", n)
 	}
@@ -242,6 +243,8 @@ func TestIntegrationSucceededWithoutReviewHolds(t *testing.T) {
 			if got := f.lastHoldReason(t); got != string(tc.reason) {
 				t.Fatalf("reason = %q", got)
 			}
+			// AC-10・AC-11・AC-36: 成果物が統合先へ入らないまま終わった・検証を経ずに入っていた保留は intake_unverified
+			wantLastHoldStop(t, f.s, stopPendingIntake)
 			if got := f.status(t, f.cid); got == StatusVerifying { // AC-96
 				t.Fatalf("status = %s", got)
 			}

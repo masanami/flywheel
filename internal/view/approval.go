@@ -123,10 +123,12 @@ type ApprovalSummary struct {
 	ReleaseHeld            bool                     `json:"release_held"`
 	Releases               []ApprovalRelease        `json:"releases"`
 	Stages                 Stages                   `json:"stages"`
-	Tasks                  []ApprovalCompletionTask `json:"tasks"`
-	Title                  string                   `json:"title"`
-	UsesIntegration        *bool                    `json:"uses_integration"`
-	Version                int                      `json:"version"`
+	// SupervisorHandsTaken は打った手の件数（手 → 結果が executed の対処の記録の数。failed は入れない。無ければ {}）。
+	SupervisorHandsTaken map[string]int           `json:"supervisor_hands_taken"`
+	Tasks                []ApprovalCompletionTask `json:"tasks"`
+	Title                string                   `json:"title"`
+	UsesIntegration      *bool                    `json:"uses_integration"`
+	Version              int                      `json:"version"`
 }
 
 // AddedTask は計画の後に足されたタスク 1 件（課題・題名・出どころ）。完了の承認の要約と cycle の出力が使う。
@@ -179,6 +181,7 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 		Title:                  p.Title,
 		Version:                p.Version,
 		ConflictFixes:          FromConflictFixes(p.ConflictFixes),
+		SupervisorHandsTaken:   FromSupervisorHandsTaken(p.SupervisorHandsTaken),
 		Followups:              FromFollowups(p.OpenFollowups),
 		IntegrationRef:         p.IntegrationRef,
 		UsesIntegration:        p.UsesIntegration,

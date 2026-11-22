@@ -22,7 +22,7 @@ import (
 // docs/features/m5-tom-migration-and-switchover.md S1（AC-1〜AC-16）。実ストアで書き出しと再構築を検証する。
 
 var allTablesForExportTest = []string{"activity", "approval", "challenge", "challenge_dependency", "challenge_parent", "challenge_reopen", "chat_message", "chat_session", "contract_run", "cycle", "direct_completion", "direct_completion_artifact", "followup", "hold", "lock",
-	"occurrence", "operation", "operation_execution", "plan_answer", "run", "run_artifact", "slot", "source_binding", "source_child", "task", "task_addition", "task_dependency", "task_plan"}
+	"occurrence", "operation", "operation_execution", "plan_answer", "run", "run_artifact", "slot", "source_binding", "source_child", "supervisor_action", "task", "task_addition", "task_dependency", "task_plan"}
 
 func newWorkspaceStore(t *testing.T) (*Store, string) {
 	t.Helper()
@@ -825,4 +825,49 @@ func (s *Store) SetTaskAdditionState(ctx context.Context, ch Channel, id string,
 		return nil, err
 	}
 	return out, nil
+}
+
+// AC-255・AC-256・AC-257: 書き出しに対処の記録の表が含まれ、再構築したストアで件数と保留の supervisor_state が元と同じになる。
+func TestImport_SupervisorActionAndHoldStateSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	src, _ := filledStore(t)
+	data := mustExport(t, src)
+	var doc struct {
+		Tables map[string][]json.RawMessage `json:"tables"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(doc.Tables["supervisor_action"]); got != 2 {
+		t.Errorf("export has %d supervisor_action rows, want 2", got)
+	}
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), data); err != nil {
+		t.Fatal(err)
+	}
+	read := func(s *Store) (n int, state, kind, findings string, deferred int, streak, rounds int) {
+		if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM supervisor_action`).Scan(&n); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(`SELECT supervisor_state, stop_kind, supervisor_findings, deferred_count FROM hold WHERE id = 1`).Scan(&state, &kind, &findings, &deferred); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(`SELECT verify_not_met_streak FROM task WHERE id = 1`).Scan(&streak); err != nil {
+				return err
+			}
+			return tx.QueryRow(`SELECT upstream_unreadable_rounds FROM contract_run WHERE id = 1`).Scan(&rounds)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	sn, ss, sk, sf, sd, st, sr := read(src)
+	dn, ds, dk, df, dd, dt, dr := read(dst)
+	if sn != 2 || ss != "handled" {
+		t.Fatalf("fixture did not fill the columns: %d %q", sn, ss)
+	}
+	if sn != dn || ss != ds || sk != dk || sf != df || sd != dd || st != dt || sr != dr {
+		t.Errorf("after import: (%d %q %q %q %d %d %d), want (%d %q %q %q %d %d %d)", dn, ds, dk, df, dd, dt, dr, sn, ss, sk, sf, sd, st, sr)
+	}
 }

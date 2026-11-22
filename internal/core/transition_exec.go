@@ -108,6 +108,9 @@ type runTransitionParams struct {
 	replanResolved func() bool
 	// att は本人確認つきの遷移（attested）の Attestation。経路 chat の印の検査と種類の絞りに使う。
 	att Attestation
+	// restricted は、遷移表の制限つきの行を LookupRestricted で引くこと。立てるのは、その行の専用の書き込みだけ
+	// （いまはスーパーバイザーの手の supervisor_resolve〔T20〕だけ。終端から出る T18 は、終端の検査が先に断るのでこの道を通らない）。本人確認の要る行は、これを立てても本人確認つきの呼び出しだけが通る。
+	restricted bool
 }
 
 // runTransition は transition（#10: 本人確認の無い5操作）・verifiedTransition
@@ -157,7 +160,11 @@ func (s *Store) transitionGateInTx(ctx context.Context, tx *sql.Tx, p runTransit
 	if IsTerminal(Table, StatusVocabulary, current.Status) {
 		return nil, Transition{}, ErrTerminalState
 	}
-	tr, ok := Lookup(current.Status, p.op)
+	lookup := Lookup
+	if p.restricted {
+		lookup = LookupRestricted
+	}
+	tr, ok := lookup(current.Status, p.op)
 	if !ok {
 		return nil, Transition{}, ErrInvalidTransition
 	}
@@ -494,13 +501,8 @@ func insertHoldID(ctx context.Context, tc *transitionCtx, question string) (int6
 }
 
 // insertHoldKind は insertHoldID の、保留の種類を指定する版。human 以外のときだけ作業ログの after に種類を載せる
-// （既存の保留の作業ログの形は変えない）。
+// （既存の保留の作業ログの形は変えない）。計画承認待ちから入れる保留の検査は、保留を作る入口（insertHoldWithOptions）にある。
 func insertHoldKind(ctx context.Context, tc *transitionCtx, question string, kind HoldKind) (int64, error) {
-	// 計画承認待ちから入れるのは親が直接行う保留だけ（承認の待ち先が人のままで、人の対応を待つ保留は意味を持たない）。
-	// 保留を書く入口すべてが通るここで検査する。
-	if tc.current.Status == StatusAwaitingPlanApproval && kind != HoldKindParentDirect {
-		return 0, ErrInvalidTransition
-	}
 	return insertHoldKindFrom(ctx, tc, question, kind, tc.current.Status)
 }
 
@@ -515,9 +517,26 @@ func insertHoldKindFromTask(ctx context.Context, tc *transitionCtx, question str
 	return insertHoldWithOptions(ctx, tc, question, kind, from, taskID, HoldOptionsInput{})
 }
 
-// insertHoldWithOptions は保留を作る入口（選択肢の並びと「識別の無い回答を断る」印を受ける）。いまある保留を作る関数は
-// 選択肢なしでここへ委ねる。選択肢の誤りは ErrHoldOptionInvalid で断り、何も書かない。止まり方は受けない（S4b-2）。
+// insertHoldWithOptions は保留を作る入口（選択肢の並び・「識別の無い回答を断る」印・止まり方を受ける）。いまある保留を作る関数は
+// 追加の指定なしでここへ委ねる。選択肢の誤りは ErrHoldOptionInvalid、止まり方が閉集合の外なら ErrValidation で断り、何も書かない。
+//
+// 計画承認待ちの課題へ作れる保留は、対話のセッションが引き取る保留（parent_direct）だけで、それ以外は ErrInvalidTransition で断る
+// （承認の待ち先が人のままで、人の対応を待つ保留は意味を持たない。保留を書く入口すべてが通るここで検査する）。
+//
+// 止まり方（opts.StopKind）が渡され、opts.SupervisorEnabled（宣言の supervisor。呼び出し元が渡す）が真のとき、行を作るのと同じ書き込みの中で
+// supervisor_state を pending にする。止まり方を渡さない呼び出しは stop_kind も supervisor_state も NULL のまま。
+//
+// 止まり方が渡されたときは、行を作る前に、同じ書き込みの中で回数の上限（supervisor_limit.go）を判定する。当たったときは
+// supervisor_state を NULL のまま（stop_kind は残す）にし、問いの先頭に固定の 1 行を足してオーナーへ上げる。
 func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question string, kind HoldKind, from Status, taskID *int64, opts HoldOptionsInput) (int64, error) {
+	if tc.current.Status == StatusAwaitingPlanApproval && kind != HoldKindParentDirect {
+		return 0, ErrInvalidTransition
+	}
+	if opts.StopKind != "" {
+		if _, ok := ParseStopKind(string(opts.StopKind)); !ok {
+			return 0, fmt.Errorf("%w: unknown stop kind %q", ErrValidation, opts.StopKind)
+		}
+	}
 	_, optionsJSON, err := resolveHoldOptions(opts.Options)
 	if err != nil {
 		return 0, err
@@ -530,10 +549,23 @@ func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question stri
 	if opts.Required {
 		required = 1
 	}
+	var stopKindColumn, supervisorStateColumn any
+	if opts.StopKind != "" {
+		stopKindColumn = string(opts.StopKind)
+		limitHands, err := supervisorLimitHit(ctx, tc.tx, tc.id, taskID, opts.StopKind)
+		if err != nil {
+			return 0, err
+		}
+		if limitHands != nil {
+			question = supervisorLimitNotice(limitHands) + "\n" + question
+		} else if opts.SupervisorEnabled {
+			supervisorStateColumn = string(SupervisorStatePending)
+		}
+	}
 	res, err := tc.tx.ExecContext(ctx,
-		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind, task_id, options, option_required)
-		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?)`,
-		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind), int64PtrColumn(taskID), optionsColumn, required,
+		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind, task_id, options, option_required, stop_kind, supervisor_state)
+		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind), int64PtrColumn(taskID), optionsColumn, required, stopKindColumn, supervisorStateColumn,
 	)
 	if err != nil {
 		return 0, err

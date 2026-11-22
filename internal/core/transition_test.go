@@ -181,11 +181,58 @@ func TestLookup_CreateNotAvailableFromExistingStatus(t *testing.T) {
 	}
 }
 
-// TestTable_RowCount は、Table の物理行数が29（T1〜T19、うちT11が5遷移元・T16が7遷移元に展開）であることを検証する。
+// TestTable_RowCount は、Table の物理行数が30（T1〜T20、うちT11が5遷移元・T16が7遷移元に展開）であることを検証する。
 func TestTable_RowCount(t *testing.T) {
 	t.Parallel()
-	if len(Table) != 29 {
-		t.Fatalf("len(Table) = %d, want 29", len(Table))
+	if len(Table) != 30 {
+		t.Fatalf("len(Table) = %d, want 30", len(Table))
+	}
+}
+
+// AC-112: 遷移表に、操作 supervisor_resolve（遷移元は人間対応待ち）の行 T20 があり、本人確認の要らない制限つきの行である。
+// 通常の操作（Lookup）には現れず、保留に入る直前の状態へ戻る（replan の手の先は人の作り直しの回答と同じ分類済）。
+func TestTable_T20SupervisorResolveRow(t *testing.T) {
+	t.Parallel()
+	if string(OpSupervisorResolve) != "supervisor_resolve" {
+		t.Fatalf("OpSupervisorResolve = %q", OpSupervisorResolve)
+	}
+	tr, ok := LookupRestricted(StatusAwaitingHuman, OpSupervisorResolve)
+	if !ok {
+		t.Fatal("T20 (awaiting_human, supervisor_resolve) is not in the table")
+	}
+	if tr.ID != "T20" || tr.RequiresVerification || !tr.Restricted {
+		t.Errorf("T20 = %+v; want ID T20, RequiresVerification=false, Restricted=true", tr)
+	}
+	if !tr.Target.ReturnToPrecedingHoldStatus {
+		t.Error("T20 must return to the status preceding the hold")
+	}
+	if got, err := tr.Target.ResolveForReplan(Table, StatusInProgress); err != nil || got != StatusClassified {
+		t.Errorf("T20 replan target = %q, %v; want classified", got, err)
+	}
+	if _, ok := Lookup(StatusAwaitingHuman, OpSupervisorResolve); ok {
+		t.Error("Lookup must not return the restricted row T20")
+	}
+	rows := 0
+	for _, r := range Table {
+		if r.Op == OpSupervisorResolve {
+			rows++
+		}
+	}
+	if rows != 1 {
+		t.Errorf("rows with supervisor_resolve = %d, want 1", rows)
+	}
+}
+
+// AC-113: 人の回答（answer。T12）の行は、本人確認の要る行のままで、操作の種類の登録簿は T20 を受けない。
+func TestTable_T12StillRequiresVerificationAndT20IsNotAttestable(t *testing.T) {
+	t.Parallel()
+	t12, ok := Lookup(StatusAwaitingHuman, OpAnswer)
+	if !ok || t12.ID != "T12" || !t12.RequiresVerification {
+		t.Fatalf("T12 = %+v, %v; want a row that requires verification", t12, ok)
+	}
+	t20, _ := LookupRestricted(StatusAwaitingHuman, OpSupervisorResolve)
+	if _, attestable := actionForTransition(t20); attestable {
+		t.Error("T20 must not map to an attested action (the verification registry is unchanged)")
 	}
 }
 

@@ -355,6 +355,9 @@ func formatHoldsSection(holds []Hold) string {
 		switch {
 		case h.Answer != nil:
 			b.WriteString(*h.Answer)
+			if isSupervisorAnswered(h) {
+				b.WriteString("\n回答者: スーパーバイザー（オーナーの回答ではない）")
+			}
 		case h.ClosedAt != nil:
 			b.WriteString("(回答なしで閉じた)")
 		default:

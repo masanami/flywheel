@@ -80,9 +80,12 @@ type ShowCardResponse struct {
 	SourceBinding     *SourceBinding      `json:"source_binding"`
 	SourceChildren    []SourceChild       `json:"source_children"`
 	Stages            Stages              `json:"stages"`
-	Tasks             []Task              `json:"tasks"`
-	Tree              TreeChallenge       `json:"tree"`
-	Waiting           Waiting             `json:"waiting"`
+	// SupervisorActions・SupervisorHandsTaken は ShowResponse と同じ値。
+	SupervisorActions    []SupervisorAction `json:"supervisor_actions"`
+	SupervisorHandsTaken map[string]int     `json:"supervisor_hands_taken"`
+	Tasks                []Task             `json:"tasks"`
+	Tree                 TreeChallenge      `json:"tree"`
+	Waiting              Waiting            `json:"waiting"`
 }
 
 // WaitingChallenge は待っている相手の課題 1 件（status は課題の状態の値）。
@@ -112,6 +115,7 @@ func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card, tree core
 	return ShowCardResponse{
 		Additions: s.Additions, Approvals: s.Approvals, Budget: s.Budget, Card: FromCard(card), Challenge: s.Challenge, ConflictFixes: s.ConflictFixes, DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: s.Holds,
 		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
+		SupervisorActions: s.SupervisorActions, SupervisorHandsTaken: s.SupervisorHandsTaken,
 		Tasks:   s.Tasks,
 		Tree:    FromTreeChallenge(tree),
 		Waiting: Waiting{Prerequisites: fromWaitingChallenges(d.Waiting.Prerequisites)},

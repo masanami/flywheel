@@ -58,9 +58,14 @@ func loadJudgmentLimitHit(ctx context.Context, tx *sql.Tx, challengeID int64, ve
 		runID                  sql.NullInt64
 		answer, raisedAtString sql.NullString
 	)
+	// retried は、最後の保留が、この判断点の連続失敗の上限の保留で、スーパーバイザーの retry が閉じたもの（数えは上限 − 1 から始まる）か。
 	err = tx.QueryRowContext(ctx,
-		`SELECT id, run_id, answer, raised_at FROM hold WHERE challenge_id = ? ORDER BY id DESC LIMIT 1`, challengeID).
-		Scan(&ref.ID, &runID, &answer, &raisedAtString)
+		`SELECT id, run_id, answer, raised_at,
+			COALESCE(stop_kind = ? AND supervisor_action_id IN
+				(SELECT id FROM supervisor_action WHERE hand = 'retry' AND result = 'executed')
+			 AND run_id IN (SELECT id FROM run WHERE judgment = ?), 0)
+		 FROM hold WHERE challenge_id = ? ORDER BY id DESC LIMIT 1`, string(StopKindJudgmentFailed), string(j), challengeID).
+		Scan(&ref.ID, &runID, &answer, &raisedAtString, &ref.RetriedFailureLimit)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
@@ -92,6 +97,7 @@ func loadJudgmentLimitHit(ctx context.Context, tx *sql.Tx, challengeID int64, ve
 	}
 
 	count := 0
+	reachedHold := true // 連続が、最後の回答済みの保留まで切れていないか
 	var last *runRow
 	for i := len(since) - 1; i >= 0; i-- {
 		r := since[i]
@@ -99,6 +105,7 @@ func loadJudgmentLimitHit(ctx context.Context, tx *sql.Tx, challengeID int64, ve
 			continue
 		}
 		if !isCountedFailure(r.Result) {
+			reachedHold = false
 			break
 		}
 		count++
@@ -106,6 +113,9 @@ func loadJudgmentLimitHit(ctx context.Context, tx *sql.Tx, challengeID int64, ve
 			rr := r
 			last = &rr
 		}
+	}
+	if last != nil && reachedHold && lastHold != nil && lastHold.RetriedFailureLimit {
+		count += limit - 1 // スーパーバイザーの retry で閉じた上限の保留: 数えは上限 − 1 から
 	}
 	if last == nil || count < limit {
 		return nil, nil
@@ -145,7 +155,8 @@ func (s *Store) holdForJudgmentFailureLimit(ctx context.Context, ch Challenge, j
 		if tc.current.Status != want || tc.current.Version != ch.Version {
 			return errReconcileNotEligible
 		}
-		return s.insertHoldWithOccurrence(ctx, tc, judgmentLimitQuestion(hit), holdReasonFailureLimit, cycleID)
+		_, err := s.insertHoldWithOccurrenceOptions(ctx, tc, judgmentLimitQuestion(hit), holdReasonFailureLimit, cycleID, stopHoldOptions(StopKindJudgmentFailed, decl))
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) || errors.Is(err, errReconcileNotEligible) {

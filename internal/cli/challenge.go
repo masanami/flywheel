@@ -285,7 +285,21 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 		if h.Kind == core.HoldKindParentDirect {
 			b.WriteString("    種類: 親が直接行う\n")
 		}
+		if h.StopKind != "" {
+			fmt.Fprintf(&b, "    止まり方: %s\n", h.StopKind)
+		}
+		if h.SupervisorState != "" {
+			fmt.Fprintf(&b, "    スーパーバイザーの状態: %s\n", h.SupervisorState)
+		}
 		b.WriteString(indentLines("問い: "+h.Question, "    "))
+		if h.SupervisorState == core.SupervisorStateEscalated {
+			if h.SupervisorFindings != "" {
+				b.WriteString(indentLines("調べたこと: "+h.SupervisorFindings, "    "))
+			}
+			if h.SupervisorRecommendation != "" {
+				b.WriteString(indentLines("推奨: "+h.SupervisorRecommendation, "    "))
+			}
+		}
 		writeHoldOptions(&b, h.Options, "    ")
 		if h.Answer == nil {
 			if !h.Open() {
@@ -307,6 +321,22 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 			fmt.Fprintf(&b, "    選んだ選択肢: %s\n", escapeControl(*h.AnswerOption))
 		}
 		fmt.Fprintf(&b, "    回答者: %s (%s)\n", answeredBy, answeredAt)
+	}
+	if len(d.SupervisorActions) > 0 {
+		fmt.Fprintf(&b, "スーパーバイザーの対処: %d 件\n", len(d.SupervisorActions))
+		for _, a := range d.SupervisorActions {
+			hand := "(判断できず)"
+			if a.Hand != nil {
+				hand = string(*a.Hand)
+			}
+			fmt.Fprintf(&b, "  %s %s 止まり方: %s 手: %s 結果: %s\n", FormatTimestamp(a.CreatedAt), a.CycleID, a.StopKind, hand, a.Result)
+			if a.Findings != "" {
+				b.WriteString(indentLines("調べたこと: "+a.Findings, "    "))
+			}
+		}
+	}
+	if line := supervisorHandsTakenText(d.SupervisorHandsTaken); line != "" {
+		b.WriteString(line)
 	}
 	if len(d.DirectCompletions) > 0 {
 		fmt.Fprintf(&b, "親が直接行った記録: %d 件\n", len(d.DirectCompletions))
@@ -548,4 +578,18 @@ func writeHoldOptions(b *strings.Builder, opts []core.HoldOption, indent string)
 			b.WriteString(indentLines(escapeControlKeepLines(o.Description), indent+"    "))
 		}
 	}
+}
+
+// supervisorHandsTakenText は打った手の件数（結果が executed の対処の記録を、手ごとに数えた値）の 1 行。手が無ければ空。
+func supervisorHandsTakenText(m map[core.SupervisorHand]int) string {
+	parts := make([]string, 0, len(m))
+	for _, h := range core.SupervisorHandValues() {
+		if n := m[h]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s: %d", h, n))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "スーパーバイザーが打った手: " + strings.Join(parts, "・") + "\n"
 }

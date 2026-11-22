@@ -32,6 +32,8 @@ const (
 	CyclePhaseRun CyclePhase = "run"
 	// CyclePhaseVerify は検証の段（VerifyAutoJ5 と同じ処理）。
 	CyclePhaseVerify CyclePhase = "verify"
+	// CyclePhaseSupervise はスーパーバイザーの段（区切り S4b-2 で名前だけを置く。段の本体と差し込み位置は後のタスク）。
+	CyclePhaseSupervise CyclePhase = "supervise"
 	// CyclePhaseLearn は学習の段（LearnJ6 と同じ処理。improve の直前の段。接続ツールの宣言を使わないので skipped にならない）。
 	CyclePhaseLearn CyclePhase = "learn"
 	// CyclePhaseImprove は改修提案の段（ImproveJ8 と同じ処理。8 段目で最後の段。接続ツールの宣言を使わないので skipped にならない）。
@@ -125,6 +127,10 @@ type CyclePhaseResult struct {
 	ImproveItems []ImproveItem
 	// Backup は backup の段の結果（他の段は nil）。
 	Backup *BackupResult
+	// SuperviseProcessed は supervise の段が、スーパーバイザーの判断点を 1 回呼んだ保留の数（結果が failed・rejected のものを含む）。
+	// SuperviseHands は、そのうち結果が executed の対処の手ごとの件数。他の段は 0・空。
+	SuperviseProcessed int
+	SuperviseHands     map[SupervisorHand]int
 }
 
 // ImproveItem は improve の段と `flywheel improve` の items の要素（J8 の run 1 回分）。
@@ -278,7 +284,8 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	res.AddedTasks = added
 	// 終わりの段を通し、排他を放した後に、いま始められるものを数え直す（settled のときだけ）。
 	if in.Continue != nil && endReason == CycleEndSettled && in.AgentDecl.AutoCycle {
-		work, werr := s.CountRoundWork(endCtx, in.AgentDecl, in.ConnDecl)
+		// そのサイクルで見送った保留は数えない（見送りだけで次のサイクルを始めない）。
+		work, werr := s.countRoundWork(endCtx, in.AgentDecl, in.ConnDecl, cycleDBIDOf(cyc.ID))
 		switch {
 		case werr != nil:
 			res.ContinueErr = werr
@@ -518,6 +525,17 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 	}
 	phases = append(phases, verify)
 
+	if err := boundary(); err != nil {
+		return phases, err
+	}
+
+	// スーパーバイザー（スーパーバイザー待ちの保留を、古い順に 1 件ずつ判断点 SV へ渡す。待ちが無ければ判断点を呼ばない）。
+	supervise, err := s.superviseStage(ctx, in, cycleID, jc)
+	if err != nil {
+		return nil, err
+	}
+	phases = append(phases, supervise)
+
 	return phases, nil
 }
 
@@ -529,6 +547,9 @@ func advancePhaseSkipped(in CycleRunInput, p CyclePhase) bool {
 		return in.Ingest == nil
 	case CyclePhaseClassify:
 		return false
+	case CyclePhaseSupervise:
+		// 宣言の supervisor が偽（または agent.json が無い）なら、保留をスーパーバイザー待ちにしないので飛ぶ。
+		return in.AgentDecl == nil || !in.AgentDecl.Supervisor
 	}
 	return in.ConnDecl == nil
 }

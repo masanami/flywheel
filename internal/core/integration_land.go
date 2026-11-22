@@ -123,8 +123,13 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 	}
 	cur.reqFacts, cur.holdSuccessEnd = connector.RequiredFacts, true
 	rs := in.releaseSource()
-	hold := func(q string, reason holdReason) (*ContractRunReport, error) {
-		held, err := s.holdContractReview(ctx, rep, q, reason)
+	// hold は止まり方 kind を渡して保留を立てる（kind が空なら渡さない）。止まり方は理由から導かず、呼び出し元が渡す。
+	hold := func(q string, reason holdReason, kind StopKind) (*ContractRunReport, error) {
+		var opts HoldOptionsInput
+		if kind != "" {
+			opts = stopHoldOptions(kind, rs.agent())
+		}
+		held, err := s.holdContractReviewWith(ctx, rep, q, reason, opts, nil)
 		rep.Held = held
 		return rep, err
 	}
@@ -135,7 +140,7 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 		}
 		cur.VerifiedRef, cur.LandRef, cur.LandDelivered = got, "", false
 	} else if cur.LandDelivered && cur.LandRef == got {
-		return hold(landRefusedQuestion(cur.ExternalRunID, got, rep.Summary, ra.Text), holdReasonLandRefused)
+		return hold(landRefusedQuestion(cur.ExternalRunID, got, rep.Summary, ra.Text), holdReasonLandRefused, "")
 	}
 	verdict, err := s.checkVerifiedContent(ctx, rs, cur)
 	if err != nil {
@@ -143,7 +148,7 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 	}
 	switch verdict {
 	case checkVerdictFailed:
-		return hold(checksFailedQuestion(cur.ExternalRunID, cur.VerifiedRef), holdReasonChecksFailed)
+		return hold(checksFailedQuestion(cur.ExternalRunID, cur.VerifiedRef), holdReasonChecksFailed, StopKindChecksFailed)
 	case checkVerdictWait:
 		return rep, nil
 	}
@@ -412,7 +417,7 @@ func (rs *contractReleaseSource) landedContent(ctx context.Context, arts []Contr
 // finishIntegrationLanding は、「入れてよい」を返し済みのタスクの実行（land_ref がある）の succeeded を読んだとき、成果物を上流から読んで確かめる。
 // 入っていて同じ中身ならタスクを済みにし、契約の実行を終わった記録にし、統合先の中身の識別を成果物の記録に残す（課題の状態は変えない）。
 // 入っていなければ delegate_ended、中身が違えば merged_unverified で保留にする（タスクは済みにしない。保留にできたら契約の実行を終わった記録にする）。
-// 上流から読めなければ何も書かない。
+// 上流から読めなければ、成果物の記録は書かず、読めなかった回りを数える（noteLandUnreadable）。
 func (s *Store) finishIntegrationLanding(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource, cid int64, landRef, recorded string) error {
 	scope, err := s.loadReviewIntakeScope(ctx, cid, rep.ExternalRunID)
 	if err != nil {
@@ -432,21 +437,26 @@ func (s *Store) finishIntegrationLanding(ctx context.Context, rep *ContractRunRe
 			recorded = branches[0]
 		}
 	}
-	switch rs.landedContent(context.WithoutCancel(ctx), arts, recorded, landRef) {
-	case landedUnreadable:
-		return nil
+	landed := rs.landedContent(context.WithoutCancel(ctx), arts, recorded, landRef)
+	if landed == landedUnreadable {
+		return s.noteLandUnreadable(ctx, rep, rs, cid)
+	}
+	if err := s.resetUnreadableRounds(ctx, cid, rep.ExternalRunID); err != nil {
+		return err
+	}
+	switch landed {
 	case landedSameContent:
 		return s.completeIntegrationLanding(ctx, rep, cid, scope)
 	case landedNotIn:
 		if rep.State != ContractStateSucceeded {
 			return s.stopLandingNotLanded(ctx, rep, cid)
 		}
-		return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, false), holdReasonDelegateEnded)
+		return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, false), holdReasonDelegateEnded, HoldOptionsInput{})
 	}
 	if rep.State != ContractStateSucceeded {
-		return s.holdLandedEnd(ctx, rep, cid, landedStoppedQuestion(rep.ExternalRunID, rep.State, landRef), holdReasonMergedUnverified)
+		return s.holdLandedEnd(ctx, rep, cid, landedStoppedQuestion(rep.ExternalRunID, rep.State, landRef), holdReasonMergedUnverified, HoldOptionsInput{})
 	}
-	return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, true), holdReasonMergedUnverified)
+	return s.holdLandedEnd(ctx, rep, cid, landedEndedQuestion(rep.ExternalRunID, landRef, true), holdReasonMergedUnverified, HoldOptionsInput{})
 }
 
 // stopLandingNotLanded は、「入れてよい」を返し済みの実行が失敗・取り消しで終わり、成果物が統合先へ入っていないとき、いまの失敗の扱い
@@ -469,7 +479,7 @@ func (s *Store) stopLandingNotLanded(ctx context.Context, rep *ContractRunReport
 		}
 		return s.endRunAtHold(ctx, tx, cid, rep.ExternalRunID, withHold)
 	}
-	held, err := s.holdContractReviewWith(ctx, rep, contractStopQuestion(rep.State, rep.ExternalRunID, rep.Summary), holdReasonContractStopped,
+	held, err := s.holdContractReviewWith(ctx, rep, contractStopQuestion(rep.State, rep.ExternalRunID, rep.Summary), holdReasonContractStopped, HoldOptionsInput{},
 		func(ctx context.Context, tx *sql.Tx) error { return end(ctx, tx, true) })
 	rep.Held = held
 	if err != nil || held {
@@ -525,9 +535,9 @@ func containsArtifact(arts []ContractArtifact, a ContractArtifact) bool {
 	return false
 }
 
-// holdLandedEnd は保留を立て、契約の実行を終わった記録にする（同じトランザクション。終わりの記録だけが残らず、開いたまま課題が保留になることが無い）。
-func (s *Store) holdLandedEnd(ctx context.Context, rep *ContractRunReport, cid int64, question string, reason holdReason) error {
-	held, err := s.holdContractReviewWith(ctx, rep, question, reason, func(ctx context.Context, tx *sql.Tx) error {
+// holdLandedEnd は保留を立て（止まり方は opts で呼び出し元が渡す。「入れてよい」を返した後の終わりは渡さない）、契約の実行を終わった記録にする（同じトランザクション。終わりの記録だけが残らず、開いたまま課題が保留になることが無い）。
+func (s *Store) holdLandedEnd(ctx context.Context, rep *ContractRunReport, cid int64, question string, reason holdReason, opts HoldOptionsInput) error {
+	held, err := s.holdContractReviewWith(ctx, rep, question, reason, opts, func(ctx context.Context, tx *sql.Tx) error {
 		return s.endRunAtHold(ctx, tx, cid, rep.ExternalRunID, true)
 	})
 	rep.Held = held
@@ -639,4 +649,67 @@ func resumeIntegrationTaskAfterAnswer(ctx context.Context, tc *transitionCtx, re
 	}
 	_, err := setTaskStatus(ctx, tc.tx, tc.rec, taskID, TaskStatusInProgress)
 	return err
+}
+
+// upstreamUnreadableLimit は、「入れてよい」を返した実行について、上流を読めない回りが続いたら止める回数。
+const upstreamUnreadableLimit = 3
+
+// resetUnreadableRounds は、上流を読めた回りで、読めなかった回りの数えを 0 に戻す（0 のときは何も書かない）。
+func (s *Store) resetUnreadableRounds(ctx context.Context, cid int64, externalRunID string) error {
+	err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE contract_run SET upstream_unreadable_rounds = 0
+			WHERE challenge_id = ? AND external_run_id = ? AND upstream_unreadable_rounds <> 0`, cid, externalRunID)
+		return err
+	})
+	return classifyReadWriteErr(err)
+}
+
+// noteLandUnreadable は、「入れてよい」を返した実行の、上流を読めなかった回りを数える。3 回続いたら、止まり方 upstream_unreadable の保留
+// （宣言の supervisor が真ならスーパーバイザー待ち）を、数えの書き込みと同じ書き込みで立てる。実行は取り消さず、契約の実行の行も終わりにしない
+// （次の状態の確認が読み直す）。保留ができたら数えを 0 に戻す（保留への回答の後の回りをすぐ上限にしないため）。
+// 課題が着手中でないとき（保留中など）は、数えない。
+func (s *Store) noteLandUnreadable(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource, cid int64) error {
+	bump := func(tx *sql.Tx) (int, error) {
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET upstream_unreadable_rounds = upstream_unreadable_rounds + 1
+			WHERE challenge_id = ? AND external_run_id = ?`, cid, rep.ExternalRunID); err != nil {
+			return 0, err
+		}
+		var n int
+		err := tx.QueryRowContext(ctx, `SELECT upstream_unreadable_rounds FROM contract_run WHERE challenge_id = ? AND external_run_id = ?`, cid, rep.ExternalRunID).Scan(&n)
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return n, err
+	}
+	// 課題が着手中でない間（保留中など）の回りは数えない（保留への回答の後の最初の回りで、すぐ上限にならないため）。
+	var inProgress bool
+	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT status = 'in_progress' FROM challenge WHERE id = ?`, cid).Scan(&inProgress)
+	}); err != nil {
+		return classifyReadWriteErr(err)
+	}
+	if !inProgress {
+		return nil
+	}
+	var rounds int
+	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT upstream_unreadable_rounds FROM contract_run WHERE challenge_id = ? AND external_run_id = ?`, cid, rep.ExternalRunID).Scan(&rounds)
+	}); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return classifyReadWriteErr(err)
+	}
+	if rounds+1 < upstreamUnreadableLimit {
+		return classifyReadWriteErr(s.db.Write(ctx, func(tx *sql.Tx) error { _, err := bump(tx); return err }))
+	}
+	question := fmt.Sprintf("統合先へ入れてよいと返した実行 %s について、上流を読めない回りが %d 回続いた。統合先へ入ったかを確かめられていない（実行は取り消していない）。",
+		rep.ExternalRunID, upstreamUnreadableLimit)
+	held, err := s.holdContractReviewWithOptions(ctx, rep, question, HoldOptionsInput{StopKind: StopKindUpstreamUnreadable, SupervisorEnabled: rs != nil && rs.Supervisor},
+		func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE contract_run SET upstream_unreadable_rounds = 0 WHERE challenge_id = ? AND external_run_id = ?`, cid, rep.ExternalRunID)
+			return err
+		})
+	if err != nil {
+		return err
+	}
+	rep.Held = held
+	return nil
 }

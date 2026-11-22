@@ -483,7 +483,7 @@ func (s *Store) applyReconciliation(ctx context.Context, dc *delegationContext, 
 		return s.recordReconcileFetchFailure(ctx, dc, runIDDisplay, rec, cycleID)
 	}
 	question := "子は完了を報告したが成果物が見つからない（宣言の成果物の種類: " + dc.Operation.Artifacts + "）。\n" + rec.describe()
-	return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, question, holdReasonArtifactMissing, cycleID, true)
+	return s.mapReconciliationStop(ctx, dc, runIDDisplay, question, holdReasonArtifactMissing, cycleID, true, StopKindArtifactMissing)
 }
 
 // recordReconcileFetchFailure は、成果物の種類が pr の完了の照合で、成果物が見つからず取得の失敗が
@@ -518,7 +518,7 @@ func (s *Store) recordReconcileFetchFailure(ctx context.Context, dc *delegationC
 		// 連続の回数は同じ run の照合の失敗だけを数える（別の run の照合の失敗は 1 から数える）。
 		return tx.QueryRowContext(ctx,
 			`UPDATE challenge SET reconcile_fetch_failures = CASE WHEN reconcile_fetch_run_id = ? THEN reconcile_fetch_failures + 1 ELSE 1 END,
-				reconcile_fetch_run_id = ?, reconcile_fetch_branch = ? WHERE id = ? RETURNING reconcile_fetch_failures`,
+				reconcile_fetch_run_id = ?, reconcile_fetch_branch = ?, reconcile_supervisor_action_id = NULL WHERE id = ? RETURNING reconcile_fetch_failures`,
 			runIDInt, runIDInt, branch, cid).Scan(&count)
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -534,7 +534,7 @@ func (s *Store) recordReconcileFetchFailure(ctx context.Context, dc *delegationC
 		fmt.Fprintf(&q, "取得の失敗の連続の回数: %d 回（上限 %d 回）\n", count, reconcileFetchFailureLimit)
 		fmt.Fprintf(&q, "最後のエラーのメッセージ: %s\n", last)
 		q.WriteString(rec.describe())
-		return s.mapReconciliation(ctx, dc, runIDDisplay, OpHold, q.String(), holdReasonArtifactMissing, cycleID, false)
+		return s.mapReconciliationStop(ctx, dc, runIDDisplay, q.String(), holdReasonArtifactMissing, cycleID, false, StopKindArtifactMissing)
 	}
 	return nil, fmt.Sprintf("looking up the artifacts failed (%d of %d consecutive fetch failures); the challenge is unchanged and the reconciliation will be retried in the next cycle: %s",
 		count, reconcileFetchFailureLimit, last), nil
@@ -570,11 +570,19 @@ func (s *Store) mapReconciliation(ctx context.Context, dc *delegationContext, ru
 	return s.mapReconciliationOptions(ctx, dc, runIDDisplay, op, question, reason, cycleID, resetFetchFailures, HoldOptionsInput{})
 }
 
+// mapReconciliationStop は mapReconciliation の OpHold の、保留に止まり方 kind を渡す版（スーパーバイザー待ちになるかは宣言の supervisor で決まる）。
+func (s *Store) mapReconciliationStop(ctx context.Context, dc *delegationContext, runIDDisplay, question string, reason holdReason, cycleID string, resetFetchFailures bool, kind StopKind) (*string, string, error) {
+	return s.mapReconciliationOptions(ctx, dc, runIDDisplay, OpHold, question, reason, cycleID, resetFetchFailures, stopHoldOptions(kind, dc.Agent))
+}
+
 // mapReconciliationOptions は mapReconciliation の、保留に選択肢を持たせる版（op が OpHold のときだけ効く）。
 func (s *Store) mapReconciliationOptions(ctx context.Context, dc *delegationContext, runIDDisplay string, op Operation, question string, reason holdReason, cycleID string, resetFetchFailures bool, opts HoldOptionsInput) (*string, string, error) {
 	_, err := s.transitionAsInvoker(ctx, runIDDisplay, dc.Challenge.ID, op, func(ctx context.Context, tc *transitionCtx) error {
 		if tc.current.Status != StatusInProgress {
 			return errReconcileNotEligible
+		}
+		if err := clearReconcileSupervisorMark(ctx, tc.tx, tc.id); err != nil {
+			return err
 		}
 		if resetFetchFailures {
 			if err := resetReconcileFetchFailures(ctx, tc.tx, tc.id); err != nil {

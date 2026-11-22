@@ -38,6 +38,28 @@ func ReplanAllowedFrom(from Status) bool {
 	return false
 }
 
+// contractRunWorkingTx は、課題に「作業している契約の実行」があるかを、呼び出し側の書き込み（読み取り）のトランザクションの中で返す。
+// 人の作り直しの回答（ExecuteAnswer の replan の検査）・スーパーバイザーの手 replan を事前に外す判定・手の実行の断り（rejected）が共有する。
+//
+// 作業している契約の実行は、開いていて最後に読んだ状態が running のタスクの実行（「入れてよい」を返して委譲先が受け取った実行は、終わるか
+// レビュー待ちへ戻るまで running を返すので含まれる。保留の間の成功が未処理のものも含む）と、「入れてよい」を返そうとして届いたか分からない実行
+// （通す中身があり、届いた記録が無く、最後に読んだ状態が終わりでない。委譲先が入れている最中かもしれない。次の状態の確認で決まれば解ける）。
+// あるときは、動いている作業が作り直す前の計画のまま進む・検証中へ進むので、計画の作り直しは成立させない。
+// 届いた記録のあるレビュー待ち（land_refused）・問い待ちのタスクの実行、終わりを読んだ実行と、上げる依頼は、作り直した計画の承認の後に
+// 取り消すので、あっても受ける。
+func contractRunWorkingTx(ctx context.Context, tx *sql.Tx, challengeID int64) (bool, error) {
+	var working int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND kind = ? AND (
+		(ended_at IS NULL AND state = ?)
+		OR (ended_at IS NULL AND COALESCE(land_ref, '') <> '' AND land_delivered = 0 AND state NOT IN (?, ?, ?))
+		OR held_success = 1)`,
+		challengeID, contractRunKindTask, string(ContractStateRunning),
+		string(ContractStateSucceeded), string(ContractStateFailed), string(ContractStateCancelled)).Scan(&working); err != nil {
+		return false, err
+	}
+	return working > 0, nil
+}
+
 // replanNote は計画の作り直しの材料。
 type replanNote struct {
 	// Question・Answer は、印の付いた最後の回答の保留の問いと回答。

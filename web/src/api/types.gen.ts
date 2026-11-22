@@ -10,6 +10,7 @@ export interface StatusResponse {
   ingestable: Ingestable | null;
   needs_human: StatusNeedsHuman;
   parent_agent: StatusParentAgent;
+  supervisor_checking: StatusSupervisorChecking;
   waiting_external: StatusWaitingExternal;
 }
 
@@ -81,6 +82,7 @@ export interface CycleWorkStages {
   plan: number;
   release: number;
   run: number;
+  supervise: number;
   verify: number;
 }
 
@@ -171,6 +173,11 @@ export interface StatusParentAgent {
   challenges: Challenge[];
 }
 
+export interface StatusSupervisorChecking {
+  challenges: Challenge[];
+  count: number;
+}
+
 export interface StatusWaitingExternal {
   challenges: WaitingExternal[];
 }
@@ -202,6 +209,8 @@ export interface ShowResponse {
   source_binding: SourceBinding | null;
   source_children: SourceChild[];
   stages: Stages;
+  supervisor_actions: SupervisorAction[];
+  supervisor_hands_taken: Record<string, number>;
   tasks: Task[];
 }
 
@@ -328,6 +337,10 @@ export interface Hold {
   relay_session: string | null;
   replan: boolean;
   run_id: string | null;
+  stop_kind: string | null;
+  supervisor_findings: string | null;
+  supervisor_recommendation: string | null;
+  supervisor_state: string | null;
   task_id: string | null;
 }
 
@@ -455,6 +468,34 @@ export interface StageIssue {
 export interface StageOption {
   example: string | null;
   label: string;
+}
+
+export interface SupervisorAction {
+  basis: SupervisorBasis[];
+  challenge_id: string;
+  conditions: SupervisorCondition[];
+  created_at: string;
+  cycle_id: string;
+  findings: string;
+  hand: string | null;
+  hold_id: number | null;
+  id: number;
+  note: string;
+  reject_reason: string | null;
+  result: string;
+  run_id: string | null;
+  stop_kind: string;
+  task_id: string | null;
+}
+
+export interface SupervisorBasis {
+  locator: string;
+  path: string;
+}
+
+export interface SupervisorCondition {
+  number: number;
+  text: string;
 }
 
 export interface Task {
@@ -610,6 +651,8 @@ export interface ShowCardResponse {
   source_binding: SourceBinding | null;
   source_children: SourceChild[];
   stages: Stages;
+  supervisor_actions: SupervisorAction[];
+  supervisor_hands_taken: Record<string, number>;
   tasks: Task[];
   tree: TreeChallenge;
   waiting: Waiting;
@@ -729,6 +772,7 @@ export interface ApprovalSummary {
   release_held: boolean;
   releases: ApprovalRelease[];
   stages: Stages;
+  supervisor_hands_taken: Record<string, number>;
   tasks: ApprovalCompletionTask[];
   title: string;
   uses_integration: boolean | null;
@@ -898,6 +942,30 @@ export interface ChatPostViewing {
 
 export interface ChatPostResponse {
   id: number;
+}
+
+export interface SupervisePhase {
+  hands: SuperviseHands;
+  not_started: PhaseNotStarted[];
+  phase: string;
+  processed: number;
+  skipped: boolean;
+}
+
+export interface SuperviseHands {
+  defer: number;
+  escalate: number;
+  replan: number;
+  retry: number;
+  reverify: number;
+  send_back: number;
+  split_followup: number;
+}
+
+export interface PhaseNotStarted {
+  challenge_id?: string;
+  detail?: string;
+  reason: string;
 }
 
 export const CARD_ACTION_CODES = [
@@ -1151,4 +1219,48 @@ export const CHAT_ROLE_CODES = [
 export const CHAT_PANEL_STATE_CODES = [
   "idle",
   "replying",
+] as const;
+
+export const STOP_KIND_CODES = [
+  "verify_uncertain",
+  "artifact_missing",
+  "delegate_stopped",
+  "facts_unmet",
+  "rework_limit",
+  "checks_failed",
+  "judgment_failed",
+  "intake_unverified",
+  "upstream_unreadable",
+] as const;
+
+export const SUPERVISOR_HAND_CODES = [
+  "reverify",
+  "send_back",
+  "retry",
+  "split_followup",
+  "replan",
+  "defer",
+  "escalate",
+] as const;
+
+export const SUPERVISOR_RESULT_CODES = [
+  "executed",
+  "failed",
+  "rejected",
+] as const;
+
+export const SUPERVISOR_REJECT_REASON_CODES = [
+  "state_changed",
+  "owner_answered",
+] as const;
+
+export const SUPERVISOR_STATE_CODES = [
+  "pending",
+  "handled",
+  "escalated",
+] as const;
+
+export const FOLLOWUP_SOURCE_CODES = [
+  "learn",
+  "supervisor",
 ] as const;

@@ -7,9 +7,11 @@ package core
 // 持つ。そのまま委譲の対象に選ぶと新しい子を起動してしまうため、`run`（ID を省いた経路と ID を
 // 指定した経路の両方）は、委譲の前にやり直しの対象を見分け、子を起動せず照合だけを行う:
 //
-//   - 対象: 照合の取得の失敗の連続回数が 1 以上で、失敗した照合の run（reconcile_fetch_run_id）が
+//   - 対象: 照合の取得の失敗の連続回数が 1 以上、または「照合をやり直す」印（スーパーバイザーの
+//     reverify が付ける reconcile_supervisor_action_id）があり、照合した run（reconcile_fetch_run_id）が
 //     最後の委譲の run で、succeeded で終わっていて、その run より後に保留も J5 の run も無い着手中の
-//     課題（人が提出して J5 が差し戻した・回答で再開した課題は、通常の起動の判定に任せる）
+//     課題（人が提出して J5 が差し戻した・回答で再開した課題は、通常の起動の判定に任せる）。
+//     印のある課題は、その印の対処の記録が閉じた保留を「その run より後の保留」に数えない
 //   - 調べる先: 最後の委譲の run の報告（ブランチ・pr_urls）と、前の照合で調べたブランチ
 //     （challenge.reconcile_fetch_branch。報告にブランチが無くスロットのブランチを調べた場合）
 //   - 記録: 見つかった成果物は、その run の成果物として足す（同じ種類・参照の行が既にあれば足さない）
@@ -32,10 +34,11 @@ type pendingReconcileRetry struct {
 // loadPendingReconcileRetry は課題 cid が照合のやり直しの対象なら、その内容を返す（対象でなければ nil）。
 func loadPendingReconcileRetry(ctx context.Context, tx *sql.Tx, cid int64) (*pendingReconcileRetry, error) {
 	var n int
-	var runID sql.NullInt64
+	var runID, mark sql.NullInt64
 	var branch sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT reconcile_fetch_failures, reconcile_fetch_run_id, reconcile_fetch_branch FROM challenge WHERE id = ?`, cid).Scan(&n, &runID, &branch)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && (n == 0 || !runID.Valid)) {
+	err := tx.QueryRowContext(ctx, `SELECT reconcile_fetch_failures, reconcile_fetch_run_id, reconcile_fetch_branch, reconcile_supervisor_action_id FROM challenge WHERE id = ?`, cid).
+		Scan(&n, &runID, &branch, &mark)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && ((n == 0 && !mark.Valid) || !runID.Valid)) {
 		return nil, nil
 	}
 	if err != nil {
@@ -57,12 +60,48 @@ func loadPendingReconcileRetry(ctx context.Context, tx *sql.Tx, cid int64) (*pen
 			return nil, nil
 		}
 	}
+	closedByMark, err := holdsClosedByAction(ctx, tx, cid, mark)
+	if err != nil {
+		return nil, err
+	}
 	for _, hd := range h.Holds {
+		if closedByMark[hd.ID] {
+			continue
+		}
 		if holdIsAfterRun(hd, last) {
 			return nil, nil
 		}
 	}
 	return &pendingReconcileRetry{ChallengeID: cid, Run: last, Branch: branch.String}, nil
+}
+
+// holdsClosedByAction は課題 cid の保留のうち、対処の記録 action が閉じた（hold.supervisor_action_id が action の）ものの ID の集合を返す。
+// action が無ければ空。
+func holdsClosedByAction(ctx context.Context, tx *sql.Tx, cid int64, action sql.NullInt64) (map[int64]bool, error) {
+	out := map[int64]bool{}
+	if !action.Valid {
+		return out, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM hold WHERE challenge_id = ? AND supervisor_action_id = ?`, cid, action.Int64)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// clearReconcileSupervisorMark は課題の「照合をやり直す」印を NULL に戻す（印が無ければ何もしない）。
+// 照合の結果を写す書き込み（検証中へ進む・保留を作る・取得の失敗を数える）と同じトランザクションで呼ぶ。
+func clearReconcileSupervisorMark(ctx context.Context, tx *sql.Tx, challengeID int64) error {
+	_, err := tx.ExecContext(ctx, `UPDATE challenge SET reconcile_supervisor_action_id = NULL WHERE id = ? AND reconcile_supervisor_action_id IS NOT NULL`, challengeID)
+	return err
 }
 
 // splitReconcileRetries は委譲の対象の課題の ID を、照合のやり直しの対象とそれ以外に分ける
@@ -102,9 +141,9 @@ func (s *Store) retryReconciliation(ctx context.Context, in DelegateInput, ch Ch
 	if reason != "" || report == nil {
 		// 前の照合のときに検査を通った報告が、宣言の変更で通らなくなった。照合をやり直せないので、
 		// 着手中のまま残さず人間対応待ちにする（回数は戻さない）。
-		q := "照合の取得の失敗の後、照合をやり直せない: 委譲の run " + p.Run.ID + " の報告が現在の宣言の検査を通らない（" + reason + "）。\n" +
+		q := "照合をやり直せない（取得の失敗の後、またはスーパーバイザーが照合のやり直しを選んだ後）: 委譲の run " + p.Run.ID + " の報告が現在の宣言の検査を通らない（" + reason + "）。\n" +
 			"子は完了を報告したが、成果物の有無を確かめられていない（宣言の成果物の種類: " + dc.Operation.Artifacts + "）。"
-		status, note, err := s.mapReconciliation(ctx, dc, p.Run.ID, OpHold, q, holdReasonArtifactMissing, in.CycleID, false)
+		status, note, err := s.mapReconciliationStop(ctx, dc, p.Run.ID, q, holdReasonArtifactMissing, in.CycleID, false, StopKindArtifactMissing)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -113,9 +152,15 @@ func (s *Store) retryReconciliation(ctx context.Context, in DelegateInput, ch Ch
 	}
 
 	rec := &reconciliation{}
-	if p.Branch != "" && plausibleBranchName(p.Branch) {
-		rec.Branch, rec.BranchFrom = p.Branch, "slot"
-		if report.Branch != nil && strings.TrimSpace(*report.Branch) == p.Branch {
+	// 調べるブランチは、前の照合で調べたブランチ（reconcile_fetch_branch）。「見つからない」で保留になった照合の後は
+	// この欄が消えているので、最初の照合と同じに、報告のブランチから決め直す（スロットは解放済みで、作業ツリーのブランチは読めない）。
+	branch, from := p.Branch, "slot"
+	if branch == "" && report.Branch != nil {
+		branch, from = strings.TrimSpace(*report.Branch), "report"
+	}
+	if branch != "" && plausibleBranchName(branch) {
+		rec.Branch, rec.BranchFrom = branch, from
+		if report.Branch != nil && strings.TrimSpace(*report.Branch) == branch {
 			rec.BranchFrom = "report"
 		}
 		lookupBranch(ctx, in, dc.Repo.Remote, rec)
@@ -149,6 +194,11 @@ func (s *Store) retryReconciliation(ctx context.Context, in DelegateInput, ch Ch
 	status, note, err := s.applyReconciliation(ctx, dc, p.Run.ID, rec, RunResultSucceeded, report, in.CycleID, nil)
 	if err != nil {
 		return nil, nil, err
+	}
+	// 印は、結果を写す書き込みの中で消える。結果を写さなかった経路（課題が着手中でなくなっていた・
+	// 検証の対象でない報告）でも、同じ印で次の周にやり直し続けないよう、ここで消す。
+	if err := s.db.Write(ctx, func(tx *sql.Tx) error { return clearReconcileSupervisorMark(ctx, tx, p.ChallengeID) }); classifyReadWriteErr(err) != nil {
+		return nil, nil, classifyReadWriteErr(err)
 	}
 	msg := "retried the reconciliation of " + p.Run.ID + " (no delegation was launched)"
 	if note != "" {

@@ -398,6 +398,12 @@ func TestReconcile_ArtifactCheckMapping(t *testing.T) {
 				if c.wantQ == "成果物が見つからない" && !strings.Contains(d.Holds[0].Question, "照合の結果") {
 					t.Errorf("question lacks the check results: %q", d.Holds[0].Question)
 				}
+				// AC-3: 成果物が見つからない保留は artifact_missing（スーパーバイザー待ち）。AC-19: 承認なしの本番反映は対象にしない。
+				if c.wantQ == "成果物が見つからない" {
+					wantLastHoldStop(t, f.s, "artifact_missing/pending")
+				} else {
+					wantLastHoldStop(t, f.s, stopNone)
+				}
 				if rid := f.queryString(t, `SELECT run_id FROM hold WHERE challenge_id = 1`); rid != f.queryString(t, `SELECT id FROM run WHERE kind = 'delegate' ORDER BY id LIMIT 1`) {
 					t.Errorf("hold.run_id = %q, want the delegation run", rid)
 				}
@@ -498,6 +504,7 @@ func TestReconcile_UnapprovedProductionReleaseDetection(t *testing.T) {
 		if d.Status != StatusAwaitingHuman || !strings.Contains(d.Holds[0].Question, "承認なしの本番反映を検出") || !strings.Contains(d.Holds[0].Question, pr.URL) {
 			t.Fatalf("status=%s holds=%+v", d.Status, d.Holds)
 		}
+		wantLastHoldStop(t, f.s, stopNone) // AC-19: unapproved_merge は対象にしない
 	})
 	t.Run("detected even when the result is not succeeded", func(t *testing.T) {
 		f := newReconFixture(t, "impl")

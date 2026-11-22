@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // contractRequestedKindReview は、成果物のレビューを待つ requested_action.kind。
@@ -104,6 +105,8 @@ type reviewReply struct {
 //   - 課題が着手中で、最後の J5 が not_met で、その後に契約のコマンドを呼んでいない: respond と差し戻しの理由を返す。
 //     差し戻しの上限（agent.ReworkLimit。J5 の not_met の数。保留への回答の後から数え直す）に達していれば、返さず保留にする。
 //   - 課題が着手中で、T15（人が完了の承認を差し戻した）の記録が最後の契約のコマンドより新しい: respond と差し戻しの理由（approval.reason）を返す。
+//   - 上の 2 つのどちらでも、スーパーバイザーの send_back の添え書き（最後の契約のコマンドより新しい、結果が executed のもの）があれば、
+//     指摘に添える（3 つ目の出どころ）。添え書きがあるときは、差し戻しの上限に当たっていても、1 回だけ返す。
 //   - 課題が検証中: 何も呼ばない（Skip）。J5 は「直前の契約の run」の成果物を読むので、新しい読みで押し流さない。
 //
 // 上のどれでもなければ nil（通常の状態の確認へ進む）。
@@ -142,10 +145,6 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 		if row.TaskID != nil {
 			h = h.forTask(formatTaskID(*row.TaskID))
 		}
-		if _, hit := h.decideRework(int(*planVersion), agent.ReworkLimit); hit != nil {
-			out = &reviewReply{HoldQuestion: contractReworkLimitQuestion(hit), HoldRunID: hit.Last.ID}
-			return nil
-		}
 		var lastContract int64
 		contractQ, contractArgs := `SELECT COALESCE(MAX(id), 0) FROM run WHERE challenge_id = ? AND kind = 'contract' AND operation_id IS NULL`, []any{row.ChallengeID}
 		if row.TaskID != nil {
@@ -156,6 +155,17 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 		if err := tx.QueryRowContext(ctx, contractQ, contractArgs...).Scan(&lastContract); err != nil {
 			return err
 		}
+		// スーパーバイザーの send_back の添え書き（まだ返していないもの）。あるときは、差し戻しの上限に当たっていても、1 回だけ返す。
+		sendBackNote, err := loadUndeliveredSendBackNote(ctx, tx, row.ChallengeID, row.TaskID)
+		if err != nil {
+			return err
+		}
+		if sendBackNote == "" {
+			if _, hit := h.decideRework(int(*planVersion), agent.ReworkLimit); hit != nil {
+				out = &reviewReply{HoldQuestion: contractReworkLimitQuestion(hit), HoldRunID: hit.Last.ID}
+				return nil
+			}
+		}
 		var note string
 		if n := len(h.Verifications); n > 0 {
 			latest := h.Verifications[n-1]
@@ -163,7 +173,8 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 				if v, ok := validateJ5Output([]byte(latest.Output)); ok && v.Verdict == J5VerdictNotMet && v.Feedback != nil {
 					note = *v.Feedback
 					// 差し戻しの上限の保留に答えた後は、オーナーの回答も添える（保留の間に状態を読まないので、指摘は未配達のまま残る）。
-					if n := len(h.Holds); n > 0 && h.Holds[n-1].Answer != nil && holdIsAfterRun(h.Holds[n-1], latest) {
+					// スーパーバイザーが閉じた保留の回答は、send_back の添え書きとして別に添える（二重に入れない）。
+					if n := len(h.Holds); n > 0 && h.Holds[n-1].Answer != nil && !h.Holds[n-1].SupervisorAnswered && holdIsAfterRun(h.Holds[n-1], latest) {
 						note += "\n\nオーナーの回答: " + *h.Holds[n-1].Answer
 					}
 				}
@@ -172,15 +183,60 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 		if note == "" {
 			// 人が完了の承認を差し戻した（T15）。最後の契約のコマンドより新しい差し戻しがあれば、すべての理由を古い順にまとめて返す。
 			reason, err := loadCompletionRejectionAfterContract(ctx, tx, row.ChallengeID)
-			if err != nil || reason == "" {
+			if err != nil {
 				return err
 			}
 			note = reason
+		}
+		// 指摘の 3 つ目の出どころ: スーパーバイザーの send_back の添え書き（ほかの指摘があれば、その後ろに添える）。
+		switch {
+		case sendBackNote == "":
+		case note == "":
+			note = sendBackNote
+		default:
+			note += "\n\nスーパーバイザーの添え書き: " + sendBackNote
+		}
+		if note == "" {
+			return nil
 		}
 		out = &reviewReply{Answer: &contractAnswer{Choice: contractChoiceRespond, Note: note}}
 		return nil
 	})
 	return out, classifyReadWriteErr(err)
+}
+
+// loadUndeliveredSendBackNote は、そのタスク（taskID が nil なら、タスクを指さない記録）の、結果が executed の send_back の対処の記録のうち、
+// 最後の契約のコマンド（そのタスクの契約の run の開始）より新しい（時刻が等しいものは新しくない側＝未配達に倒す）ものの、最後の 1 件の note を返す。無ければ空文字列。
+// 契約のコマンドを呼んだ後は返さないので、同じ note を 2 回返さない。
+func loadUndeliveredSendBackNote(ctx context.Context, tx *sql.Tx, challengeID int64, taskID *int64) (string, error) {
+	taskCond, args := `task_id IS NULL`, []any{challengeID}
+	runQ, runArgs := `SELECT MAX(started_at) FROM run WHERE challenge_id = ? AND kind = 'contract' AND operation_id IS NULL`, []any{challengeID}
+	if taskID != nil {
+		taskCond = `task_id = ?`
+		args = append(args, *taskID)
+		runQ += ` AND task_id = ?`
+		runArgs = append(runArgs, *taskID)
+	}
+	var lastRun sql.NullString
+	if err := tx.QueryRowContext(ctx, runQ, runArgs...).Scan(&lastRun); err != nil {
+		return "", err
+	}
+	args = append(args, string(HandSendBack), string(ActionExecuted))
+	var note, createdAt string
+	err := tx.QueryRowContext(ctx,
+		`SELECT note, created_at FROM supervisor_action WHERE challenge_id = ? AND `+taskCond+` AND hand = ? AND result = ? ORDER BY id DESC LIMIT 1`,
+		args...).Scan(&note, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	// 時刻が等しいときは順序が決まらないので、まだ届けていない側に倒す（届け漏れより、同じ文をもう 1 回届けるほうが安全）。
+	if lastRun.Valid && lastRun.String > createdAt {
+		return "", nil // 最後の契約のコマンドのほうが新しい（返し済み）
+	}
+	return strings.TrimSpace(note), nil
 }
 
 // loadCompletionRejectionAfterContract は、課題の完了確認での差し戻し（T15。理由が空でないもの）のうち、その課題の最後の
