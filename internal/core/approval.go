@@ -521,8 +521,8 @@ func (s *Store) PrepareAnswerOption(ctx context.Context, id string, answer strin
 	if option != "" && replan {
 		return nil, fmt.Errorf("%w: --option and --replan cannot be combined", ErrValidation)
 	}
-	if option == "" && strings.TrimSpace(answer) == "" {
-		return nil, ErrValidation
+	if option == "" && strings.TrimSpace(answer) == "" && !replan {
+		return nil, ErrValidation // --replan だけの回答は、保留の選択肢を読んでから断る（選択肢の一覧を誤りの文に出す）
 	}
 
 	cid, ok := parseChallengeID(id)
@@ -1046,8 +1046,8 @@ type AnswerRequest struct {
 // いない（保留を増減させる操作は必ず課題の版も進めるため）ので、この
 // 再読み込みは Prepare が見たのと同じ行を指す。
 func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attestation) (*Challenge, *Hold, error) {
-	if req.Option == "" && strings.TrimSpace(req.Answer) == "" {
-		return nil, nil, ErrValidation
+	if req.Option == "" && strings.TrimSpace(req.Answer) == "" && !req.Replan {
+		return nil, nil, ErrValidation // --replan だけの回答は、保留の選択肢を読んでから断る（resolveAnswerOption）
 	}
 	if req.Option != "" && req.Replan {
 		return nil, nil, fmt.Errorf("%w: --option and --replan cannot be combined", ErrValidation)
@@ -1190,7 +1190,33 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		return nil
 	}
 
-	c, err := s.verifiedTransitionReplan(ctx, att, req.ChallengeID, req.ExpectedVersion, OpAnswer, NoStatus, resolvePreceding, req.Replan, func() bool { return replan }, apply)
+	p, err := verifiedTransitionParams(att, req.ChallengeID, req.ExpectedVersion, OpAnswer, NoStatus, resolvePreceding, req.Replan, func() bool { return replan })
+	if err != nil {
+		return nil, nil, err
+	}
+	cid, ok := parseChallengeID(req.ChallengeID)
+	if !ok {
+		return nil, nil, ErrNotFound
+	}
+	var c *Challenge
+	err = s.mutateAsRun(ctx, p.actor, p.channel, p.verification, p.runID, func(tx *sql.Tx, rec *activityRecorder) error {
+		// 足す依頼の保留に「足す」で答えるときは、回答を成立させる前に、足した後の見込みを計算し直す。選択肢の説明の額と違えば、
+		// 回答を成立させず、成功の書き込みとして問いを出し直す（エラーで巻き戻さない）。
+		if req.Option == taskAddOptionAdd {
+			reissued, err := s.reissueOverLimitQuestion(ctx, tx, rec, p, cid, req)
+			if err != nil {
+				return err
+			}
+			if reissued {
+				var err error
+				c, holdOut, err = loadReissuedHold(ctx, tx, cid)
+				return err
+			}
+		}
+		var err error
+		c, err = s.transitionInTx(ctx, tx, rec, p, cid, apply)
+		return err
+	})
 	if err != nil {
 		return nil, nil, err
 	}

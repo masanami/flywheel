@@ -97,34 +97,43 @@ func applyTaskAdditionAnswer(ctx context.Context, tc *transitionCtx, att Attesta
 	return nil
 }
 
-// applyTaskAdditionAdd は applyTaskAdditionAnswer の add。検査・タスクの作り方は、上限以下で足す処理（applyJ2ExpandAdd）と同じものを使う。
-func applyTaskAdditionAdd(ctx context.Context, tc *transitionCtx, att Attestation, decls answerDecls, additionID int64) error {
-	tx, rec, cid := tc.tx, tc.rec, tc.id
+// taskAdditionEval は、足す依頼を「足す」と答えたときの見込みの計算の結果（回答を受けたときに計算し直した値）。
+type taskAdditionEval struct {
+	st     j2ExpandState
+	v      *j2ExpandValidated
+	inputs []TaskInput
+	limit  int64
+	total  int64
+}
+
+// evaluateTaskAddition は足す依頼 additionID の保存した出力を検査し直し、足した後の見込み・いまの上限を計算し直す。
+// 検査・見込みの数え方は、上限以下で足す処理（applyJ2ExpandAdd）と同じものを使う。
+func evaluateTaskAddition(ctx context.Context, tx *sql.Tx, cid, additionID int64, decls answerDecls) (taskAdditionEval, error) {
 	if decls.agent == nil || decls.conn == nil {
-		return fmt.Errorf("%w: the agent or connectors declaration cannot be read; cannot add tasks", ErrValidation)
+		return taskAdditionEval{}, fmt.Errorf("%w: the agent or connectors declaration cannot be read; cannot add tasks", ErrValidation)
 	}
 	add, err := loadTaskAddition(ctx, tx, additionID)
 	if err != nil {
-		return err
+		return taskAdditionEval{}, err
 	}
 	if add.Spec == nil {
-		return fmt.Errorf("%w: the task addition has no saved output", ErrValidation)
+		return taskAdditionEval{}, fmt.Errorf("%w: the task addition has no saved output", ErrValidation)
 	}
 	st, ready, err := loadJ2ExpandValidationContext(ctx, tx, cid, J2AutoInput{AgentDecl: decls.agent, ConnDecl: decls.conn})
 	if err != nil {
-		return err
+		return taskAdditionEval{}, err
 	}
 	if !ready {
-		return fmt.Errorf("%w: the challenge has no approved plan to add tasks to", ErrValidation)
+		return taskAdditionEval{}, fmt.Errorf("%w: the challenge has no approved plan to add tasks to", ErrValidation)
 	}
 	v, ok := validateJ2ExpandOutput([]byte(`{"verdict":"add","tasks":`+*add.Spec+`}`), st.j2ExpandValidationContext)
 	if !ok {
-		return fmt.Errorf("%w: the saved output no longer passes validation; choose skip or replan", ErrValidation)
+		return taskAdditionEval{}, fmt.Errorf("%w: the saved output no longer passes validation; choose skip or replan", ErrValidation)
 	}
 	before, known := sumTaskBudgets(st.Budgets)
 	limit, limitOK := effectiveBudgetLimit(before, known, st.LimitRec)
 	if !known || !limitOK {
-		return fmt.Errorf("%w: the estimate is unknown; cannot add tasks", ErrValidation)
+		return taskAdditionEval{}, fmt.Errorf("%w: the estimate is unknown; cannot add tasks", ErrValidation)
 	}
 	inputs := j2ExpandTaskInputs(v.Tasks)
 	bs := append([]taskBudget(nil), st.Budgets...)
@@ -132,7 +141,105 @@ func applyTaskAdditionAdd(ctx context.Context, tc *transitionCtx, att Attestatio
 		bs = append(bs, taskBudget{PlanVersion: st.Version, Status: TaskStatusPending, Impl: *in.BudgetImplMicros, Review: *in.BudgetReviewMicros, Known: true})
 	}
 	after, _ := sumTaskBudgets(bs)
-	total := after.Impl + after.Review
+	return taskAdditionEval{st: st, v: v, inputs: inputs, limit: limit, total: after.Impl + after.Review}, nil
+}
+
+// addOptionDescription は、保留の選択肢から add の説明を返す（無ければ空）。
+func addOptionDescription(opts []HoldOption) string {
+	for _, o := range opts {
+		if o.ID == taskAddOptionAdd {
+			return o.Description
+		}
+	}
+	return ""
+}
+
+// overLimitReissueEdit は、足す依頼の保留で「足す」の回答を受けたとき、足した後の見込みを計算し直した額が、選択肢 add の説明に書いた額と違うかを調べ、
+// 違えば、問いの文と add の説明を計算し直した額に書き換える内容を返す（同じなら nil）。判定は、いまの説明の文と、計算し直した額で作った説明の文の一致で行う
+// （額の文を読み取らない）。足す依頼の記録の額・上限は判定に使わない。検査に通らないなど見込みを作れないときは nil（足す処理が、同じ誤りで断る）。
+func overLimitReissueEdit(ctx context.Context, tx *sql.Tx, cid, holdID, additionID int64, decls answerDecls) (*HoldTextEdit, error) {
+	ev, err := evaluateTaskAddition(ctx, tx, cid, additionID, decls)
+	if err != nil {
+		if errors.Is(err, ErrValidation) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	opts, _, err := loadHoldOptionsOf(ctx, tx, holdID)
+	if err != nil {
+		return nil, err
+	}
+	totalUSD := microsToUSD(ev.total)
+	want := addOptionDescription(overLimitHoldOptions(totalUSD).Options)
+	if addOptionDescription(opts) == want {
+		return nil, nil
+	}
+	over := ev.total - ev.limit
+	if over < 0 {
+		over = 0
+	}
+	q := overLimitQuestion(ev.v.Tasks, totalUSD, microsToUSD(ev.limit), microsToUSD(over))
+	return &HoldTextEdit{Question: &q, Descriptions: map[string]string{taskAddOptionAdd: want}}, nil
+}
+
+// reissueOverLimitQuestion は、足す依頼の保留に「足す」で答える回答の前に、同じ書き込みの中で呼ぶ。計算し直した額が選択肢 add の説明の額と違えば、
+// 問いの文と add の説明を書き換え、課題の版を 1 つ進めて reissued=true を返す（保留・足す依頼・上限・タスクは変えない。エラーにしない）。
+// 保留が足す依頼の「足す」への回答でない、または額が同じなら何もせず false を返す。版の不一致・状態・本人確認の検査は、遷移（transitionInTx）と同じ順。
+func (s *Store) reissueOverLimitQuestion(ctx context.Context, tx *sql.Tx, rec *activityRecorder, p runTransitionParams, cid int64, req AnswerRequest) (reissued bool, err error) {
+	current, _, err := s.transitionGateInTx(ctx, tx, p, cid)
+	if err != nil {
+		return false, err
+	}
+	holdID, _, _, _, err := loadUnansweredHold(ctx, tx, cid)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	var reason sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT reason FROM hold WHERE id = ?`, holdID).Scan(&reason); err != nil {
+		return false, err
+	}
+	if holdReason(reason.String) != holdReasonTaskAddOverLimit {
+		return false, nil
+	}
+	additionID, ok, err := awaitingAdditionOfHold(ctx, tx, holdID)
+	if err != nil || !ok {
+		return false, err
+	}
+	edit, err := overLimitReissueEdit(ctx, tx, cid, holdID, additionID, s.answerDecls(req))
+	if err != nil || edit == nil {
+		return false, err
+	}
+	extra := map[string]any{"version": current.Version + 1, "reissued_on_answer": true}
+	p.att.addRelayTo(extra)
+	changed, err := editHoldText(ctx, tx, rec, cid, holdID, *edit, extra)
+	if err != nil || !changed {
+		return false, err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE challenge SET version = ?, updated_at = ? WHERE id = ? AND version = ?`,
+		current.Version+1, formatTimestamp(rec.at), cid, current.Version)
+	if err != nil {
+		return false, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return false, err
+	} else if n != 1 {
+		return false, fmt.Errorf("core: reissue the question of %s: expected to update 1 row, updated %d", current.ID, n)
+	}
+	return true, nil
+}
+
+// applyTaskAdditionAdd は applyTaskAdditionAnswer の add。検査・タスクの作り方は、上限以下で足す処理（applyJ2ExpandAdd）と同じものを使う。
+// 回答の前の出し直し（reissueOverLimitQuestion）と同じ書き込みの中なので、ここで額が変わっていることはない。
+func applyTaskAdditionAdd(ctx context.Context, tc *transitionCtx, att Attestation, decls answerDecls, additionID int64) error {
+	tx, rec, cid := tc.tx, tc.rec, tc.id
+	ev, err := evaluateTaskAddition(ctx, tx, cid, additionID, decls)
+	if err != nil {
+		return err
+	}
+	st, v, inputs, limit, total := ev.st, ev.v, ev.inputs, ev.limit, ev.total
 	newLimit := limit
 	if total > limit {
 		newLimit = total
@@ -161,4 +268,31 @@ func applyTaskAdditionAdd(ctx context.Context, tc *transitionCtx, att Attestatio
 	}
 	_, err = createExpandedTasks(ctx, tx, rec, cid, additionID, st, v, inputs, microsToUSD(total), microsToUSD(newLimit))
 	return err
+}
+
+// loadReissuedHold は、問いを出し直した課題 cid と、書き換えた後の開いている保留を返す（出し直したことを表す Reissued つき）。
+func loadReissuedHold(ctx context.Context, tx *sql.Tx, cid int64) (*Challenge, Hold, error) {
+	c, err := loadChallenge(ctx, tx, cid)
+	if err != nil {
+		return nil, Hold{}, err
+	}
+	holdID, question, from, raisedAt, err := loadUnansweredHold(ctx, tx, cid)
+	if err != nil {
+		return nil, Hold{}, err
+	}
+	opts, required, err := loadHoldOptionsOf(ctx, tx, holdID)
+	if err != nil {
+		return nil, Hold{}, err
+	}
+	var kind string
+	var runID sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT kind, run_id FROM hold WHERE id = ?`, holdID).Scan(&kind, &runID); err != nil {
+		return nil, Hold{}, err
+	}
+	h := Hold{Kind: HoldKind(kind), Question: question, FromStatus: from, RaisedAt: raisedAt, Options: opts, OptionRequired: required, Reissued: true}
+	if runID.Valid {
+		v := formatRunID(runID.Int64)
+		h.RunID = &v
+	}
+	return c, h, nil
 }

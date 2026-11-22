@@ -314,7 +314,7 @@ func runAnswer(a Args) (any, error) {
 		}
 		return runPlanAnswer(a, id)
 	}
-	if !hasAnswer && !hasOption {
+	if !hasAnswer && !hasOption && !replan {
 		return nil, NewError(CodeUsageError, "--answer か --option（保留への回答）、または --choice・--text（計画の問いへの答え）のどれかを指定してください")
 	}
 	if hasOption && strings.TrimSpace(option) == "" {
@@ -351,10 +351,27 @@ func runAnswer(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
+	if hold.Reissued {
+		// 足した後の見込みが、選択肢の説明の額と変わっていた。回答は成立せず、問いは新しい額で出し直してある（保留・上限は変わらない）。
+		return nil, NewError(CodeValidationFailed, reissuedAnswerText(c, hold))
+	}
 	return textOutput{
 		json: view.ChallengeHoldResponse{Challenge: view.FromChallenge(*c), Hold: view.FromHold(*hold)},
 		text: challengeText(*c),
 	}, nil
+}
+
+// reissuedAnswerText は、問いを出し直したときの誤りの文（新しい額の問いと選択肢・答え直す版）。
+func reissuedAnswerText(c *core.Challenge, hold *core.Hold) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "足した後の見込みが、選択肢の説明の額と変わっていたため、回答は成立せず、問いを新しい額で出し直しました（保留は開いたまま・上限は変えていません。課題の版: %d）。\n", c.Version)
+	b.WriteString(core.EscapeControl(hold.Question, true))
+	b.WriteString("\n選択肢:")
+	for _, o := range hold.Options {
+		fmt.Fprintf(&b, "\n- %s（%s）: %s", core.EscapeControl(o.ID, false), core.EscapeControl(o.Label, false), core.EscapeControl(o.Description, false))
+	}
+	b.WriteString("\n出し直した問いに、もう一度 --option で答えてください。")
+	return b.String()
 }
 
 // parsePlanAnswerItems は --choice <問い>=<選択肢の番号>・--text <問い>=<文> を答えの一覧へ読む。問いは Q1 でも 1 でも受ける。

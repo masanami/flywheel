@@ -144,22 +144,22 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 	return result, nil
 }
 
-// transitionInTx は runTransition の書き込み本体（呼び出し側の書き込みトランザクションの中で使う）。同じ書き込みの中で、検査・足す処理と
-// 遷移（保留など）を続けて行う呼び出し元が使う。判定順は runTransition と同じ。
-func (s *Store) transitionInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, p runTransitionParams, cid int64, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+// transitionGateInTx は遷移の入口の検査（版の照合→終端→遷移表→本人確認つきかの不変条件→登録簿→経路 chat の絞り）。何も書かない。
+// 遷移（transitionInTx）と、遷移を成立させずに成功の書き込みで終わる回答の出し直し（reissueOverLimitQuestion）が共有する。
+func (s *Store) transitionGateInTx(ctx context.Context, tx *sql.Tx, p runTransitionParams, cid int64) (*Challenge, Transition, error) {
 	current, err := loadChallenge(ctx, tx, cid)
 	if err != nil {
-		return nil, err
+		return nil, Transition{}, err
 	}
 	if p.expectedVersion != nil && current.Version != *p.expectedVersion {
-		return nil, ErrConflict
+		return nil, Transition{}, ErrConflict
 	}
 	if IsTerminal(Table, StatusVocabulary, current.Status) {
-		return nil, ErrTerminalState
+		return nil, Transition{}, ErrTerminalState
 	}
 	tr, ok := Lookup(current.Status, p.op)
 	if !ok {
-		return nil, ErrInvalidTransition
+		return nil, Transition{}, ErrInvalidTransition
 	}
 	// 遷移表の RequiresVerification と、この呼び出しが本人確認つき
 	// （expectedVersion 非 nil）かどうかは常に一致していなければならない
@@ -178,19 +178,30 @@ func (s *Store) transitionInTx(ctx context.Context, tx *sql.Tx, rec *activityRec
 	hasExpectedVersion := p.expectedVersion != nil
 	hasVerification := p.attested
 	if tr.RequiresVerification != hasExpectedVersion || tr.RequiresVerification != hasVerification {
-		return nil, fmt.Errorf("core: operation %q requires_verification=%v but was invoked with expectedVersion set=%v attested=%v (programming error: verified and unverified transition paths must not cross)", p.op, tr.RequiresVerification, hasExpectedVersion, p.attested)
+		return nil, Transition{}, fmt.Errorf("core: operation %q requires_verification=%v but was invoked with expectedVersion set=%v attested=%v (programming error: verified and unverified transition paths must not cross)", p.op, tr.RequiresVerification, hasExpectedVersion, p.attested)
 	}
 	if p.attested {
 		// 登録簿の組が受けられる操作かを、遷移表の行が確定したこの時点で照らす
 		// （何も書く前。拒否は ErrVerificationRejected）。
 		act, ok := actionForTransition(tr)
 		if !ok || !registryPermits(p.channel, p.verification, act) {
-			return nil, ErrVerificationRejected
+			return nil, Transition{}, ErrVerificationRejected
 		}
 		// 経路 chat は、印の検査と手がかりの解決、反映の承認を含む完了の承認の絞りをここで行う。
 		if err := s.chatGate(ctx, tx, p.att, act, ""); err != nil {
-			return nil, err
+			return nil, Transition{}, err
 		}
+	}
+
+	return current, tr, nil
+}
+
+// transitionInTx は runTransition の書き込み本体（呼び出し側の書き込みトランザクションの中で使う）。同じ書き込みの中で、検査・足す処理と
+// 遷移（保留など）を続けて行う呼び出し元が使う。判定順は runTransition と同じ。
+func (s *Store) transitionInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, p runTransitionParams, cid int64, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+	current, tr, err := s.transitionGateInTx(ctx, tx, p, cid)
+	if err != nil {
+		return nil, err
 	}
 
 	preceding := p.preceding
@@ -421,11 +432,20 @@ func (s *Store) verifiedTransition(ctx context.Context, att Attestation, id stri
 
 // verifiedTransitionReplan は verifiedTransition に、回答の「範囲が変わる」印（replan）を足した版。
 func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, replan bool, replanResolved func() bool, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+	p, err := verifiedTransitionParams(att, id, expectedVersion, op, preceding, resolvePreceding, replan, replanResolved)
+	if err != nil {
+		return nil, err
+	}
+	return s.runTransition(ctx, p, apply)
+}
+
+// verifiedTransitionParams は本人確認つきの遷移（verifiedTransitionReplan）の runTransitionParams を作る。本人確認が id に対して成立していなければ ErrVerificationRejected。
+func verifiedTransitionParams(att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, replan bool, replanResolved func() bool) (runTransitionParams, error) {
 	if !attestationValid(att, id) {
-		return nil, ErrVerificationRejected
+		return runTransitionParams{}, ErrVerificationRejected
 	}
 	ev := expectedVersion
-	return s.runTransition(ctx, runTransitionParams{
+	return runTransitionParams{
 		actor:            att.actor,
 		channel:          att.channel,
 		verification:     att.verification,
@@ -438,7 +458,7 @@ func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, i
 		replan:           replan,
 		replanResolved:   replanResolved,
 		att:              att,
-	}, apply)
+	}, nil
 }
 
 // attestationValid は att が Verify を経由した登録簿内の (channel,

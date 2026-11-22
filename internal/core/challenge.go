@@ -130,6 +130,9 @@ type Hold struct {
 	Options        []HoldOption
 	AnswerOption   *string
 	OptionRequired bool
+	// Reissued は、回答の処理（ExecuteAnswer）が回答を成立させず、問いを出し直したことを表す（足す依頼の保留で、計算し直した額が選択肢 add の説明の額と違った）。
+	// 真のとき、保留は開いたままで、Question・Options は新しい額に書き換わっている。保存する値ではない。
+	Reissued bool
 }
 
 // Open は保留がまだ開いている（回答も閉じる操作も無い）かを返す。
