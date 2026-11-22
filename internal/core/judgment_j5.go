@@ -1374,7 +1374,7 @@ func (s *Store) verifyTarget(ctx context.Context, in J5AutoInput, jc *JudgmentCy
 		var status *string
 		var finalResult RunResult
 		if vc.TaskScope != nil {
-			outcome, status, finalResult, err = s.finalizeJ5TaskOutput(ctx, res.RunID, res.ChallengeID, structured, vc.TaskScope, vh)
+			outcome, status, finalResult, err = s.finalizeJ5TaskOutput(ctx, res.RunID, res.ChallengeID, structured, vc.TaskScope, vh, in.AgentDecl)
 		} else if vc.ChallengeScope != nil {
 			outcome, status, finalResult, err = s.finalizeJ5ChallengeOutput(ctx, res.RunID, res.ChallengeID, structured, vh)
 		} else {
