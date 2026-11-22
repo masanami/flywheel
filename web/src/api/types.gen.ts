@@ -217,6 +217,7 @@ export interface ShowResponse {
 export interface TaskAddition {
   created_at: string;
   decided_at: string | null;
+  followup_id: string | null;
   id: string;
   limit_usd: number | null;
   origin: string;
@@ -312,6 +313,7 @@ export interface Followup {
   id: string;
   note: string | null;
   promoted_challenge_id: string | null;
+  promoted_task_id: string | null;
   reason: string | null;
   source: string;
   status: string;
@@ -523,6 +525,7 @@ export interface Task {
 
 export interface TaskAdded {
   added_at: string;
+  followup_id: string | null;
   origin: string;
   origin_task_id: string | null;
 }

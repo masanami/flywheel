@@ -200,6 +200,7 @@ const followup = (id: string, status: string, title: string): Followup => ({
   id,
   note: null,
   promoted_challenge_id: null,
+  promoted_task_id: null,
   reason: null,
   source: "learn",
   status,

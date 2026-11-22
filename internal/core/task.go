@@ -100,7 +100,9 @@ type Task struct {
 type TaskAdded struct {
 	Origin       TaskAdditionOrigin
 	OriginTaskID *string
-	AddedAt      time.Time
+	// FollowupID は出どころが followup のとき、元のフォローアップの ID（"F-<n>"）。無ければ nil。
+	FollowupID *string
+	AddedAt    time.Time
 }
 
 func (in TaskInput) valid() bool {

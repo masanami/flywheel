@@ -65,15 +65,7 @@ func TestS4c1Migration(t *testing.T) {
 				t.Errorf("task_addition.%s: present=%v notnull=%v; want present and nullable", c, ok, nn)
 			}
 		}
-		// S4c-2 で足す列は、ここでは足さない。
-		for _, c := range []string{"followup_id", "budget_impl_micros", "budget_review_micros"} {
-			if _, ok := info[c]; ok {
-				t.Errorf("task_addition.%s exists; it belongs to S4c-2", c)
-			}
-		}
-		if cols := tableColumnInfo(t, db, "followup"); func() bool { _, ok := cols["promoted_task_id"]; return ok }() {
-			t.Error("followup.promoted_task_id exists; it belongs to S4c-2")
-		}
+		// S4c-2 で足す列（followup_id・budget_impl_micros・budget_review_micros・followup.promoted_task_id）は版 36 で足す（migrate_0036_test.go）。
 
 		// AC-220: 既存の課題の上限の列は NULL。AC-221: 既存のタスクの expand_after は 0（addition_id は NULL）。
 		if err := db.Read(context.Background(), func(tx *sql.Tx) error {
@@ -148,7 +140,7 @@ func TestS4c1Migration(t *testing.T) {
 		db := openFresh(t)
 		insertChallenge(t, db, "a")
 		for name, q := range map[string]string{
-			"origin": `INSERT INTO task_addition (challenge_id, origin, state, created_at) VALUES (1, 'followup', 'pending', 'x')`,
+			"origin": `INSERT INTO task_addition (challenge_id, origin, state, created_at) VALUES (1, 'bogus', 'pending', 'x')`,
 			"state":  `INSERT INTO task_addition (challenge_id, origin, state, created_at) VALUES (1, 'expand', 'proposed', 'x')`,
 		} {
 			if err := db.Write(context.Background(), func(tx *sql.Tx) error { _, err := tx.Exec(q); return err }); err == nil {

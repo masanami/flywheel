@@ -10,6 +10,7 @@ const f = (id: string, p: Partial<Followup>): Followup => ({
   id,
   note: null,
   promoted_challenge_id: null,
+  promoted_task_id: null,
   reason: null,
   source: "サイクルの振り返り",
   status: "open",
@@ -45,6 +46,7 @@ export const ALPHA_FOLLOWUPS: Followup[] = [
     title: "長い説明のときの切り詰め方を決める",
     note: "既存の部品で足りると確かめた。",
     promoted_challenge_id: "C-12",
+    promoted_task_id: null,
   }),
   f("F-6", {
     challenge_id: "C-11",

@@ -85,8 +85,11 @@ type Followup struct {
 	Reason *string
 	// PromotedChallengeID は上げた先の課題（"C-<n>"）。上げていなければ nil。
 	PromotedChallengeID *string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	// PromotedTaskID は上げた先のタスク（"T-<n>"。出どころが followup の足す依頼で足したタスク）。上げていなければ nil。
+	// 上げた先は、これがあればこちら、無ければ PromotedChallengeID と読む。
+	PromotedTaskID *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // FollowupInput は createFollowup の入力。
@@ -163,7 +166,7 @@ func createFollowup(ctx context.Context, tx *sql.Tx, rec *activityRecorder, in F
 	return id, nil
 }
 
-const followupColumns = `id, challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, created_at, updated_at`
+const followupColumns = `id, challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, promoted_task_id, created_at, updated_at`
 
 type followupScanner interface{ Scan(dest ...any) error }
 
@@ -171,11 +174,12 @@ func scanFollowup(r followupScanner) (*Followup, error) {
 	var (
 		id                         int64
 		challenge, promoted        sql.NullInt64
+		promotedTask               sql.NullInt64
 		title, source, status      string
 		detail, note, reason       sql.NullString
 		createdAtStr, updatedAtStr string
 	)
-	if err := r.Scan(&id, &challenge, &title, &detail, &source, &status, &note, &reason, &promoted, &createdAtStr, &updatedAtStr); err != nil {
+	if err := r.Scan(&id, &challenge, &title, &detail, &source, &status, &note, &reason, &promoted, &promotedTask, &createdAtStr, &updatedAtStr); err != nil {
 		return nil, err
 	}
 	createdAt, err := parseTimestamp(createdAtStr)
@@ -198,6 +202,10 @@ func scanFollowup(r followupScanner) (*Followup, error) {
 	if promoted.Valid {
 		s := formatChallengeID(promoted.Int64)
 		f.PromotedChallengeID = &s
+	}
+	if promotedTask.Valid {
+		s := formatTaskID(promotedTask.Int64)
+		f.PromotedTaskID = &s
 	}
 	if note.Valid {
 		f.Note = &note.String

@@ -694,3 +694,36 @@ func TestFromTaskAdditions_UnjudgedValuesAreNull(t *testing.T) {
 		t.Errorf("json = %s, want null for the unjudged one and amounts for the judged one", s)
 	}
 }
+
+func TestFollowupTaskKeys_AC84_AC85(t *testing.T) {
+	fid, tid := "F-3", "T-9"
+	var tasks []struct {
+		Added *struct {
+			FollowupID *string `json:"followup_id"`
+		} `json:"added"`
+	}
+	if err := json.Unmarshal([]byte(marshal(t, view.FromTasks([]core.Task{{ID: "T-1", Added: &core.TaskAdded{Origin: "followup", FollowupID: &fid}}, {ID: "T-2"}}))), &tasks); err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 2 || tasks[0].Added == nil || tasks[0].Added.FollowupID == nil || *tasks[0].Added.FollowupID != fid || tasks[1].Added != nil {
+		t.Errorf("AC-84: tasks = %+v, want T-1.added.followup_id = F-3 and T-2.added = null", tasks)
+	}
+	var adds []struct {
+		FollowupID *string `json:"followup_id"`
+	}
+	if err := json.Unmarshal([]byte(marshal(t, view.FromTaskAdditions([]core.TaskAddition{{ID: "TA-1", Origin: "followup", FollowupID: &fid}, {ID: "TA-2"}}))), &adds); err != nil {
+		t.Fatal(err)
+	}
+	if len(adds) != 2 || adds[0].FollowupID == nil || *adds[0].FollowupID != fid || adds[1].FollowupID != nil {
+		t.Errorf("AC-84: additions = %+v, want [F-3, null]", adds)
+	}
+	var fus []struct {
+		PromotedTaskID *string `json:"promoted_task_id"`
+	}
+	if err := json.Unmarshal([]byte(marshal(t, view.FromFollowups([]core.Followup{{ID: "F-3", PromotedTaskID: &tid}, {ID: "F-4"}}))), &fus); err != nil {
+		t.Fatal(err)
+	}
+	if len(fus) != 2 || fus[0].PromotedTaskID == nil || *fus[0].PromotedTaskID != tid || fus[1].PromotedTaskID != nil {
+		t.Errorf("AC-85: followups = %+v, want [T-9, null]", fus)
+	}
+}
