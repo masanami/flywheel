@@ -1251,6 +1251,8 @@ func addM4RelayEvidenceShape(t *testing.T, doc *documentedJSON) {
 	}
 	doc.entity["hold"]["answered_channel"] = true
 	doc.entity["hold"]["answered_verification"] = true
+	doc.entity["hold"]["answer_option"] = true
+	doc.entity["hold"]["options"] = true
 	// closed_at: 取り下げで回答なしに閉じた保留の日時（M4.5 S4。hold.closed_at は #385 の列。
 	// 仕様の JSON の表にはまだ書かれていない）。
 	doc.entity["hold"]["closed_at"] = true
