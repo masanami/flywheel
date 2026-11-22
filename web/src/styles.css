@@ -1200,3 +1200,8 @@ a.task-box:hover {
 .task-holds > li {
   margin-bottom: 0.5rem;
 }
+
+/* 通したコンフリクトの解消の行。直したファイルの名前（空白の無い長い語）が、狭い幅で枠からはみ出さないよう、語の途中でも折り返す。 */
+.conflict-fix {
+  overflow-wrap: anywhere;
+}
