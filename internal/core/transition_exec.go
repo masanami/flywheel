@@ -464,13 +464,8 @@ func insertHoldID(ctx context.Context, tc *transitionCtx, question string) (int6
 }
 
 // insertHoldKind は insertHoldID の、保留の種類を指定する版。human 以外のときだけ作業ログの after に種類を載せる
-// （既存の保留の作業ログの形は変えない）。
+// （既存の保留の作業ログの形は変えない）。計画承認待ちから入れる保留の検査は、保留を作る入口（insertHoldWithOptions）にある。
 func insertHoldKind(ctx context.Context, tc *transitionCtx, question string, kind HoldKind) (int64, error) {
-	// 計画承認待ちから入れるのは親が直接行う保留だけ（承認の待ち先が人のままで、人の対応を待つ保留は意味を持たない）。
-	// 保留を書く入口すべてが通るここで検査する。
-	if tc.current.Status == StatusAwaitingPlanApproval && kind != HoldKindParentDirect {
-		return 0, ErrInvalidTransition
-	}
 	return insertHoldKindFrom(ctx, tc, question, kind, tc.current.Status)
 }
 
@@ -485,9 +480,24 @@ func insertHoldKindFromTask(ctx context.Context, tc *transitionCtx, question str
 	return insertHoldWithOptions(ctx, tc, question, kind, from, taskID, HoldOptionsInput{})
 }
 
-// insertHoldWithOptions は保留を作る入口（選択肢の並びと「識別の無い回答を断る」印を受ける）。いまある保留を作る関数は
-// 選択肢なしでここへ委ねる。選択肢の誤りは ErrHoldOptionInvalid で断り、何も書かない。止まり方は受けない（S4b-2）。
+// insertHoldWithOptions は保留を作る入口（選択肢の並び・「識別の無い回答を断る」印・止まり方を受ける）。いまある保留を作る関数は
+// 追加の指定なしでここへ委ねる。選択肢の誤りは ErrHoldOptionInvalid、止まり方が閉集合の外なら ErrValidation で断り、何も書かない。
+//
+// 計画承認待ちの課題へ作れる保留は、対話のセッションが引き取る保留（parent_direct）だけで、それ以外は ErrInvalidTransition で断る
+// （承認の待ち先が人のままで、人の対応を待つ保留は意味を持たない。保留を書く入口すべてが通るここで検査する）。
+//
+// 止まり方（opts.StopKind）が渡され、opts.SupervisorEnabled（宣言の supervisor。呼び出し元が渡す）が真のとき、行を作るのと同じ書き込みの中で
+// supervisor_state を pending にする。止まり方を渡さない呼び出しは stop_kind も supervisor_state も NULL のまま。回数の上限の判定は
+// ここに無い（別のタスク）。
 func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question string, kind HoldKind, from Status, taskID *int64, opts HoldOptionsInput) (int64, error) {
+	if tc.current.Status == StatusAwaitingPlanApproval && kind != HoldKindParentDirect {
+		return 0, ErrInvalidTransition
+	}
+	if opts.StopKind != "" {
+		if _, ok := ParseStopKind(string(opts.StopKind)); !ok {
+			return 0, fmt.Errorf("%w: unknown stop kind %q", ErrValidation, opts.StopKind)
+		}
+	}
 	_, optionsJSON, err := resolveHoldOptions(opts.Options)
 	if err != nil {
 		return 0, err
@@ -500,10 +510,17 @@ func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question stri
 	if opts.Required {
 		required = 1
 	}
+	var stopKindColumn, supervisorStateColumn any
+	if opts.StopKind != "" {
+		stopKindColumn = string(opts.StopKind)
+		if opts.SupervisorEnabled {
+			supervisorStateColumn = string(SupervisorStatePending)
+		}
+	}
 	res, err := tc.tx.ExecContext(ctx,
-		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind, task_id, options, option_required)
-		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?)`,
-		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind), int64PtrColumn(taskID), optionsColumn, required,
+		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind, task_id, options, option_required, stop_kind, supervisor_state)
+		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind), int64PtrColumn(taskID), optionsColumn, required, stopKindColumn, supervisorStateColumn,
 	)
 	if err != nil {
 		return 0, err

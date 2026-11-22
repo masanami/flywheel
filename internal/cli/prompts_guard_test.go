@@ -68,7 +68,7 @@ func realForbiddenSources() invoker.ForbiddenSources {
 func allEmbeddedPromptContents(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ4, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8, core.JudgmentSV} {
 		body, err := invoker.Instructions(j)
 		if err != nil {
 			t.Fatalf("invoker.Instructions(%s): %v", j, err)
@@ -240,12 +240,13 @@ func TestForbiddenTerms_DetectsJ8ClosedValues(t *testing.T) {
 
 // TestChatPrompt_PassesForbiddenTermsCheck は、対話の欄の指示文（chat.md）が語の検査を通ることを確かめる。
 // 欄の指示文は flywheel のコマンド（answer・create・cycle status・cycle stop）を名指しする役目を持つので、
-// コマンドの名前の語（answer・create・status・cycle・stop）だけは禁止語から外し、残りの禁止語と金額の表記を検査する。
+// コマンドの名前の語（answer・create・status・cycle・stop）と、answer のフラグ（--replan）の語 replan（スーパーバイザーの手の名前と同じ文字）だけは
+// 禁止語から外し、残りの禁止語と金額の表記を検査する。
 func TestChatPrompt_PassesForbiddenTermsCheck(t *testing.T) {
 	t.Parallel()
 	src := realForbiddenSources()
 	terms := slices.DeleteFunc(invoker.ForbiddenTerms(src), func(s string) bool {
-		return s == "answer" || s == "create" || s == "status" || s == "cycle" || s == "stop"
+		return s == "answer" || s == "create" || s == "status" || s == "cycle" || s == "stop" || s == "replan"
 	})
 	if len(terms) == 0 {
 		t.Fatal("no forbidden terms")

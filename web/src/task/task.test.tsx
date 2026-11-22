@@ -88,6 +88,10 @@ const hold = (p: Partial<Hold> = {}): Hold => ({
   relay_session: null,
   replan: false,
   run_id: null,
+  stop_kind: null,
+  supervisor_findings: null,
+  supervisor_recommendation: null,
+  supervisor_state: null,
   task_id: "T-2",
   ...p,
 });

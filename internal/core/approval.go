@@ -1066,21 +1066,12 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return "", err
 		}
 		if req.Replan {
-			// 作業している契約の実行（開いていて、最後に読んだ状態が running のタスクの実行。「入れてよい」を返して委譲先が受け取った実行は、終わるか
-			// レビュー待ちへ戻るまで running を返すので含まれる。保留の間の成功が未処理のものも含む）と、「入れてよい」を返そうとして届いたか分からない実行
-			// （通す中身があり、届いた記録が無く、最後に読んだ状態が終わりでない。委譲先が入れている最中かもしれない。次の状態の確認で決まれば解ける）があるときは、
-			// 動いている作業が作り直す前の計画のまま進む・検証中へ進むので、印は成立させない。
-			// 届いた記録のあるレビュー待ち（land_refused）・問い待ちのタスクの実行、終わりを読んだ実行と、上げる依頼は、作り直した計画の承認の後に取り消すので、あっても受ける。
-			var working int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND kind = ? AND (
-				(ended_at IS NULL AND state = ?)
-				OR (ended_at IS NULL AND COALESCE(land_ref, '') <> '' AND land_delivered = 0 AND state NOT IN (?, ?, ?))
-				OR held_success = 1)`,
-				cid, contractRunKindTask, string(ContractStateRunning),
-				string(ContractStateSucceeded), string(ContractStateFailed), string(ContractStateCancelled)).Scan(&working); err != nil {
+			// 作業している契約の実行があるとき（判定は contractRunWorkingTx）は、印を成立させない。
+			working, err := contractRunWorkingTx(ctx, tx, cid)
+			if err != nil {
 				return "", err
 			}
-			if working > 0 {
+			if working {
 				return "", fmt.Errorf("%w: replan is not allowed while a contract run is working", ErrValidation)
 			}
 		}

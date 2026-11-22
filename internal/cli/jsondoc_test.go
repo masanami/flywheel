@@ -1254,6 +1254,10 @@ func addM4RelayEvidenceShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["hold"]["answered_verification"] = true
 	doc.entity["hold"]["answer_option"] = true
 	doc.entity["hold"]["options"] = true
+	// 区切り S4b-2: 保留の止まり方とスーパーバイザーの処理の状態・調べたこと・推奨（仕様は core-redesign-s4b.md。m4 の JSON の表には書かない）。
+	for _, k := range []string{"stop_kind", "supervisor_state", "supervisor_findings", "supervisor_recommendation"} {
+		doc.entity["hold"][k] = true
+	}
 	// closed_at: 取り下げで回答なしに閉じた保留の日時（M4.5 S4。hold.closed_at は #385 の列。
 	// 仕様の JSON の表にはまだ書かれていない）。
 	doc.entity["hold"]["closed_at"] = true

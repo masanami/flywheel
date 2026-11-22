@@ -31,6 +31,8 @@ const (
 	CyclePhaseRun CyclePhase = "run"
 	// CyclePhaseVerify は検証の段（VerifyAutoJ5 と同じ処理）。
 	CyclePhaseVerify CyclePhase = "verify"
+	// CyclePhaseSupervise はスーパーバイザーの段（区切り S4b-2 で名前だけを置く。段の本体と差し込み位置は後のタスク）。
+	CyclePhaseSupervise CyclePhase = "supervise"
 	// CyclePhaseLearn は学習の段（LearnJ6 と同じ処理。improve の直前の段。接続ツールの宣言を使わないので skipped にならない）。
 	CyclePhaseLearn CyclePhase = "learn"
 	// CyclePhaseImprove は改修提案の段（ImproveJ8 と同じ処理。8 段目で最後の段。接続ツールの宣言を使わないので skipped にならない）。

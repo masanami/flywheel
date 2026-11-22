@@ -1122,6 +1122,16 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`UPDATE contract_run SET fix_pending_ref = 'pending01', fix_verified_ref = 'verified02', fix_rejected_ref = 'rejected03' WHERE id = 1`, nil},
 			{`UPDATE approval SET task_id = 1 WHERE id = 1`, nil},
 			{`UPDATE run SET reflect = 1 WHERE id = 2`, nil},
+			{`INSERT INTO supervisor_action (cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at)
+			  VALUES (1, 1, 1, 1, 1, 'verify_uncertain', 'split_followup', '調べたこと "quoted"', '添え書き', '[{"path":"docs/a.md","locator":"節"}]', '[{"number":1,"text":"条件"}]', 'executed', NULL, ?)`, []any{at}},
+			{`INSERT INTO supervisor_action (cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at)
+			  VALUES (1, 2, NULL, NULL, NULL, 'rework_limit', NULL, '', '', '[]', NULL, 'rejected', 'state_changed', ?)`, []any{at}},
+			{`UPDATE hold SET stop_kind = 'verify_uncertain', supervisor_state = 'handled', supervisor_findings = '調べたこと', supervisor_recommendation = '推奨', supervisor_action_id = 1,
+			  deferred_cycle_id = 1, deferred_count = 2 WHERE id = 1`, nil},
+			{`UPDATE challenge SET reconcile_supervisor_action_id = 1 WHERE id = 1`, nil},
+			{`UPDATE followup SET task_id = 1, source = 'supervisor' WHERE id = 1`, nil},
+			{`UPDATE task SET verify_not_met_streak = 2 WHERE id = 1`, nil},
+			{`UPDATE contract_run SET upstream_unreadable_rounds = 3 WHERE id = 1`, nil},
 			{`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after, run_id)
 			  VALUES (?, 'tester', 'cli', 'none', 'challenge', 1, 'create', NULL, '{"title":"c1"}', 1)`, []any{at}},
 			{`INSERT INTO occurrence (challenge_id, activity_id, kind, outcome, source, created_at) VALUES (1, 1, 'completion_rejected', 'bad', 'core', ?)`, []any{at}},

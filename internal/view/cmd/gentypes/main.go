@@ -40,6 +40,7 @@ var roots = []reflect.Type{
 	reflect.TypeOf(view.ChatResponse{}),
 	reflect.TypeOf(view.ChatPostRequest{}),
 	reflect.TypeOf(view.ChatPostResponse{}),
+	reflect.TypeOf(view.SupervisorAction{}),
 }
 
 const header = "// このファイルは生成物。編集しない。`go generate ./internal/view` で書き出す。\n" +

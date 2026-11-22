@@ -49,7 +49,7 @@ func TestLoadAgentDeclaration_FileNotFoundUsesAllDefaults(t *testing.T) {
 	if decl.SizeBudgetsUSD != wantSize {
 		t.Errorf("SizeBudgetsUSD = %+v, want %+v", decl.SizeBudgetsUSD, wantSize)
 	}
-	wantJudgment := JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5, J6: 2, J8: 5}
+	wantJudgment := JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5, J6: 2, J8: 5, SV: 5}
 	if decl.JudgmentBudgetUSD != wantJudgment {
 		t.Errorf("JudgmentBudgetUSD = %+v, want %+v", decl.JudgmentBudgetUSD, wantJudgment)
 	}
@@ -97,7 +97,7 @@ const allKeysAgentJSON = `{
 	"cycle_budget_usd": 300,
 	"size_budgets_usd": {"S": {"impl": 30, "review": 25}, "M": {"impl": 50, "review": 30}, "L": {"impl": 100, "review": 40}},
 	"max_run_budget_usd": 200,
-	"judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5, "J6": 2, "J8": 5},
+	"judgment_budget_usd": {"J1": 1, "J2": 5, "J3": 3, "J4": 2, "J5": 5, "J6": 2, "J8": 5, "SV": 5},
 	"timeout_sec": {"judgment": 900, "delegate": 14400},
 	"max_parallel_runs": 2,
 	"rework_limit": 3,
@@ -105,6 +105,7 @@ const allKeysAgentJSON = `{
 	"improve_threshold": 10,
 	"cycle_poll_interval_sec": 30,
 	"auto_cycle": true,
+	"supervisor": true,
 	"memory_dir": "memory",
 	"memory_write_limit": {"files": 5, "bytes": 8192},
 	"chat_tools": "restricted",

@@ -21,13 +21,13 @@ func TestAgentDeclarationKeys_ContainsAllTopLevelAndNestedKeys(t *testing.T) {
 		"version", "position_file", "cycle_budget_usd",
 		"size_budgets_usd", "max_run_budget_usd", "judgment_budget_usd",
 		"timeout_sec", "max_parallel_runs", "rework_limit", "failure_limit",
-		"improve_threshold", "cycle_poll_interval_sec", "auto_cycle",
+		"improve_threshold", "cycle_poll_interval_sec", "auto_cycle", "supervisor",
 		// ネスト: size_budgets_usd の段（S/M/L）
 		"S", "M", "L",
 		// ネスト: size pair（impl/review）
 		"impl", "review",
-		// ネスト: judgment_budget_usd（J1〜J6・J8）
-		"J1", "J2", "J3", "J4", "J5", "J6", "J8",
+		// ネスト: judgment_budget_usd（J1〜J6・J8・SV）
+		"J1", "J2", "J3", "J4", "J5", "J6", "J8", "SV",
 		// ネスト: timeout_sec（judgment/delegate）
 		"judgment", "delegate",
 		// M4.5 S3
