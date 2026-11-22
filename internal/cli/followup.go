@@ -183,7 +183,7 @@ func followupPromoteStartsCycle(a Args) string {
 	return core.CycleTriggerFollowupPromote
 }
 
-// runFollowupPromote は `flywheel followup promote <ID> [--preview] [--new-challenge] [--budget-impl-usd <額>] [--budget-review-usd <額>] [--relayed …]` の実装
+// runFollowupPromote は `flywheel followup promote <ID> [--preview] [--new-challenge] [--budget-impl-usd <額>] [--budget-review-usd <額>] [--raise-limit <額>] [--relayed …]` の実装
 // （1 回に 1 件）。上げる先（新しい課題か元の課題のタスクか）は core が決める。
 func runFollowupPromote(a Args) (any, error) {
 	id := a.Positional[0]
@@ -211,6 +211,13 @@ func runFollowupPromote(a Args) (any, error) {
 		}
 		opts.BudgetReviewUSD = &x
 	}
+	if v, ok := a.Values["raise-limit"]; ok {
+		x, err := parseBudgetFlag("raise-limit", v)
+		if err != nil {
+			return nil, err
+		}
+		opts.RaiseLimitUSD = &x
+	}
 	decl, derr := core.LoadAgentDeclaration(a.Store.Workspace())
 	if derr != nil {
 		return nil, mapCoreErr(derr)
@@ -222,10 +229,9 @@ func runFollowupPromote(a Args) (any, error) {
 	if preview {
 		return textOutput{json: view.FromFollowupPromotePlan(plan), text: followupPromoteSummary(plan)}, nil
 	}
-	if plan.OverLimit() {
-		// 上限を超えるタスクは、本人確認を求める前に断る（上限の引き上げは別の操作）。
-		return nil, NewError(CodeValidationFailed, fmt.Sprintf("足した後の見込み %s USD が上限 %s USD を超えます。--new-challenge で新しい課題に上げるか、枠を小さくしてください",
-			strconv.FormatFloat(plan.EstimateAfterUSD, 'f', -1, 64), strconv.FormatFloat(plan.LimitUSD, 'f', -1, 64)))
+	// 上限の引き上げの検査（額の照合・対話で受けた記録での指定の必須）は core が持つ。本人確認を求める前に断る。
+	if err := plan.CheckRaiseLimit(verifier.Method() == core.VerificationRelayed); err != nil {
+		return nil, mapCoreErr(err)
 	}
 	att, err := core.Verify(channelFor(a), verifier, followupPromoteSummary(plan), id)
 	if err != nil {

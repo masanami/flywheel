@@ -29,6 +29,9 @@ type FollowupPromoteOptions struct {
 	NewChallenge bool
 	// BudgetImplUSD・BudgetReviewUSD は足すタスクの枠（nil は宣言のサイズ S の額）。タスクとして上げるときだけ使う。
 	BudgetImplUSD, BudgetReviewUSD *float64
+	// RaiseLimitUSD は --raise-limit の額（上げた後の上限）。足した後の見込みが上限を超えるときだけ意味を持ち、
+	// 足した後の見込みと同じ額でなければ ErrValidation。対話で受けた記録（relayed）では、超えるときに必須。
+	RaiseLimitUSD *float64
 }
 
 // FollowupPromotePlan は上げる前に見せる内容（PrepareFollowupPromote の戻り値）。PromoteFollowup は同じ内容かを書き込みのときに確かめる。
@@ -55,6 +58,30 @@ type FollowupPromotePlan struct {
 // OverLimit は足した後の見込みが上限を超えるか。
 func (p *FollowupPromotePlan) OverLimit() bool {
 	return p.Dest == FollowupPromoteToTask && p.afterMicros > p.limitMicros
+}
+
+// CheckRaiseLimit は --raise-limit の指定を検査する（読み取りだけ。端末を開く前に断るために、CLI からも呼ぶ）。
+// 指定した額は、足した後の見込みが上限を超えるときだけ許し、足した後の見込みと同じ額でなければ ErrValidation。
+// relayed（対話で受けた記録）で上限を超えるときは、額の指定が必須（core は、オーナーが額を見たかを確かめられない）。
+func (p *FollowupPromotePlan) CheckRaiseLimit(relayed bool) error {
+	raise := p.opts.RaiseLimitUSD
+	if raise != nil {
+		if math.IsNaN(*raise) || math.IsInf(*raise, 0) {
+			return fmt.Errorf("%w: --raise-limit must be a number", ErrValidation)
+		}
+		if !p.OverLimit() {
+			return fmt.Errorf("%w: --raise-limit is only meaningful when the estimate after adding exceeds the limit", ErrValidation)
+		}
+		if usdToMicros(*raise) != p.afterMicros {
+			return fmt.Errorf("%w: --raise-limit %v USD differs from the estimate after adding (%v USD)", ErrValidation, *raise, p.EstimateAfterUSD)
+		}
+		return nil
+	}
+	if relayed && p.OverLimit() {
+		return fmt.Errorf("%w: the estimate after adding (%v USD) exceeds the limit (%v USD) by %v USD; with --relayed, pass --raise-limit %v (check the amounts with --preview)",
+			ErrValidation, p.EstimateAfterUSD, p.LimitUSD, p.ExceedsByUSD(), p.LimitAfterUSD())
+	}
+	return nil
 }
 
 // ExceedsByUSD は足した後の見込みが上限を超える額（超えなければ 0）。
@@ -192,12 +219,18 @@ func (s *Store) PrepareFollowupPromote(ctx context.Context, id string, opts Foll
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
+	// 指定した --raise-limit は、要約を作る前（端末を開く前）に検査する。
+	if out.opts.RaiseLimitUSD != nil {
+		if err := out.CheckRaiseLimit(false); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 
 // PromoteFollowup は PrepareFollowupPromote が返した plan のとおりに上げる（1 回に 1 件。本人確認の対象はフォローアップの ID）。
 // 書き込みのトランザクションの中で上げる先を決め直し、plan と違えば（上げる先・課題の版・枠・足した後の見込み・上限）何も書かず ErrConflict。
-// タスクとして上げるときは、足す依頼（出どころ followup・仕様待ち）を作る。足した後の見込みが上限を超えるときは ErrValidation（上限の引き上げは別の操作）。
+// タスクとして上げるときは、足す依頼（出どころ followup・仕様待ち）を作る。足した後の見込みが上限を超えるときは、同じ書き込みで上限を足した後の見込みまで上げる（relayed では --raise-limit の額が要る。CheckRaiseLimit）。
 func (s *Store) PromoteFollowup(ctx context.Context, plan *FollowupPromotePlan, att Attestation, agent *AgentDeclaration) (*FollowupPromoteResult, error) {
 	if plan == nil || plan.Followup == nil {
 		return nil, ErrValidation
@@ -229,6 +262,9 @@ func (s *Store) PromoteFollowup(ctx context.Context, plan *FollowupPromotePlan, 
 		if !plan.sameAs(cur) {
 			return ErrConflict
 		}
+		if err := cur.CheckRaiseLimit(att.verification == VerificationRelayed); err != nil {
+			return err
+		}
 		if cur.Dest == FollowupPromoteToTask {
 			res, err = promoteFollowupToTask(ctx, tx, rec, att, f, cur)
 			return err
@@ -257,10 +293,22 @@ func (p *FollowupPromotePlan) sameAs(cur *FollowupPromotePlan) bool {
 // promoteFollowupToTask は元の課題へ、出どころ followup の足す依頼（仕様待ち）を作る。フォローアップの状態・上げた先の列は変えない
 // （上げた先のタスクの記録は、足したときに行う）。
 func promoteFollowupToTask(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att Attestation, f *Followup, p *FollowupPromotePlan) (*FollowupPromoteResult, error) {
-	if p.OverLimit() {
-		return nil, fmt.Errorf("%w: the estimate after adding (%v USD) exceeds the limit (%v USD)", ErrValidation, p.EstimateAfterUSD, p.LimitUSD)
-	}
 	cid, _ := parseChallengeID(p.TargetChallengeID)
+	if p.OverLimit() {
+		// 上げる指示が、上限の引き上げの承認を兼ねる。上限を足した後の見込みまで上げ、前の額・後の額・本人確認の方式を残す。
+		after := p.afterMicros
+		_, reason, err := challengeBudgetLimit(ctx, tx, cid)
+		if err != nil {
+			return nil, err
+		}
+		if err := setChallengeBudgetLimit(ctx, tx, cid, &after, reason); err != nil {
+			return nil, err
+		}
+		if err := rec.record("challenge", cid, ActivityActionBudgetLimit, map[string]any{"limit_usd": microsToUSD(p.limitMicros)},
+			map[string]any{"limit_usd": microsToUSD(after), "verification": string(att.Verification())}); err != nil {
+			return nil, err
+		}
+	}
 	fid := followupNum(f)
 	var origin any
 	if p.originTaskID != nil {

@@ -437,6 +437,7 @@ func defaultCommands() []Command {
 				{Name: "new-challenge", HasValue: false},
 				{Name: "budget-impl-usd", HasValue: true},
 				{Name: "budget-review-usd", HasValue: true},
+				{Name: "raise-limit", HasValue: true},
 			}, relayedFlags()...),
 			Run: runFollowupPromote,
 		},

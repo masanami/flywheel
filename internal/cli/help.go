@@ -46,7 +46,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   followup list [--status <open|done|dropped|all>] [--challenge <C-ID>]   （フォローアップの一覧。既定は未だけ）
   followup done <F-ID>... --note <確かめた結果>   （済みにする。本人確認は要らない）
   followup drop <F-ID>... --reason <理由> [--relayed --session <s> --quote <q>]   （捨てる）
-  followup promote <F-ID> [--preview] [--new-challenge] [--budget-impl-usd <額>] [--budget-review-usd <額>] [--relayed --session <s> --quote <q>]   （元の課題のタスクか新しい課題に上げる。1 回に 1 件）
+  followup promote <F-ID> [--preview] [--new-challenge] [--budget-impl-usd <額>] [--budget-review-usd <額>] [--raise-limit <額>] [--relayed --session <s> --quote <q>]   （元の課題のタスクか新しい課題に上げる。1 回に 1 件）
   status
   version   （動いているバイナリのコミットとストアのスキーマの版）
   log [<ID>]
