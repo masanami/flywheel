@@ -133,8 +133,13 @@ func (s *Store) routeChildQuestions(ctx context.Context, p childRouteParams) (ch
 				}}, nil
 			}
 		}
-		if _, err := s.recordSupervisorAnswer(ctx, req, p.Questions); err != nil {
+		_, executed, err := s.recordSupervisorAnswer(ctx, req, p.Questions)
+		if err != nil {
 			return childRoute{}, err
+		}
+		if !executed {
+			// 判断の間に課題が着手中でなくなった。答えを返さず、保留も作らない（保留を作る入口が、着手中でない課題には作らない）。
+			return childRoute{}, nil
 		}
 		return childRoute{Answered: true, Answers: out.Answers}, nil
 	}

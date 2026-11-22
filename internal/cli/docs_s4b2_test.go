@@ -172,3 +172,13 @@ func TestSpec_AC61_ArchSection215NotesJ4Removed(t *testing.T) {
 	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection215)
 	docLineWith(t, body, "J4 を外した旨", "`j4.md`")
 }
+
+// AC-60: architecture.md の §21 の実装済みの範囲に、S4b-3 が実装済みとして書かれている（「区切り S4b-3」の語があるだけでは足りない）。
+func TestSpec_AC60_ArchSection21NoteHasS4b3Implemented(t *testing.T) {
+	first := archS21First(t)
+	for _, want := range []string{"区切り S4b-3〔委譲先の問いに答える〕の範囲も実装済み", "区切り S4b-3 で実装した範囲は", "`child_question`", "`answer`"} {
+		if !strings.Contains(first, want) {
+			t.Errorf("AC-60: the opening note of §21 lacks %q", want)
+		}
+	}
+}

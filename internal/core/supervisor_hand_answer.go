@@ -13,10 +13,12 @@ import (
 // recordSupervisorAnswer は、検査を通った答え（req.Output。手は answer）を、問い questions と合わせて、対処の記録（結果 executed）と
 // 作業ログに 1 つのトランザクションで書き、対処の記録の ID を返す。questions と答えの件数が合わなければ ErrValidation（何も書かない）。
 // 記録の basis には、答えごとの根拠をまとめて入れる（問いごとの根拠は questions に入る）。保留は指さない（hold_id は NULL）。
-func (s *Store) recordSupervisorAnswer(ctx context.Context, req supervisorHandRequest, questions []ChildQuestion) (int64, error) {
+// 判断の間に課題が着手中でなくなっていたら（取り下げなど）、答えを実行せず、同じ書き込みで断りの記録（rejected・state_changed）を残して
+// executed を偽で返す（呼び出し元は、委譲先へ答えを返さない）。
+func (s *Store) recordSupervisorAnswer(ctx context.Context, req supervisorHandRequest, questions []ChildQuestion) (id int64, executed bool, err error) {
 	o := req.Output
 	if o.Hand != HandAnswer || len(o.Answers) != len(questions) {
-		return 0, fmt.Errorf("%w: answers do not match the questions", ErrValidation)
+		return 0, false, fmt.Errorf("%w: answers do not match the questions", ErrValidation)
 	}
 	recorded := make([]SupervisorQuestion, len(questions))
 	var basis []SupervisorBasis
@@ -27,13 +29,23 @@ func (s *Store) recordSupervisorAnswer(ctx context.Context, req supervisorHandRe
 	in := req.actionInput(HandAnswer, o.Findings, o.Note, basis, ActionExecuted, "")
 	in.HoldID = nil
 	in.Questions = recorded
-	var id int64
-	err := s.db.Write(ctx, func(tx *sql.Tx) error {
-		var err error
+	err = s.db.Write(ctx, func(tx *sql.Tx) error {
+		ch, err := loadChallenge(ctx, tx, req.Target.ChallengeID)
+		if err != nil {
+			return err
+		}
+		executed = ch.Status == StatusInProgress
+		if !executed {
+			in = req.actionInput(HandAnswer, o.Findings, o.Note, basis, ActionRejected, RejectStateChanged)
+			in.HoldID = nil
+		}
 		id, err = s.writeSupervisorAction(ctx, tx, req, in)
 		return err
 	})
-	return id, classifyReadWriteErr(err)
+	if err != nil {
+		return 0, false, classifyReadWriteErr(err)
+	}
+	return id, executed, nil
 }
 
 // recordSupervisorChildFailure は、子の問いについて、判断できなかった・出力に不備があった（答えの件数・選択肢・根拠を含む）とき、

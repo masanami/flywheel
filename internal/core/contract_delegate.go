@@ -195,8 +195,8 @@ type ContractStartInput struct {
 	WorkDir string
 	// Reconcile は成果物の PR の base と状態の取得（GET だけ）。release の作成に使う。nil なら release は扱わない。
 	Reconcile UpstreamBranchSource
-	// Judgment は J4 の起動の実行者。非 nil なら、start の直後に親の答えを待っていても保留にせず、次の状態の読みで J4 へ回す
-	// （nil ならオーナーの保留へ写す）。
+	// Judgment は判断点の起動の実行者。非 nil で、宣言の supervisor が真なら、start の直後に回答を待っていても保留にせず、
+	// 次の状態の読みでスーパーバイザーへ回す（それ以外はオーナーの保留へ写す）。
 	Judgment JudgmentInvoker
 	// TaskID は起動するタスクの内部整数 ID。0 なら、起動できるタスクがちょうど 1 個の課題として、そのタスクを起動する。
 	TaskID int64
@@ -231,8 +231,8 @@ type ContractPollInput struct {
 	Compare UpstreamCompareSource
 	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。
 	WorkDir string
-	// Judgment は J4 の起動の実行者。非 nil なら、親の答えを待つ契約の run（decider が parent・kind が answer）を J4 へ回す
-	// （nil ならオーナーの保留へ写す）。Cycle は周の枠超過の共有（nil なら共有しない）。
+	// Judgment は判断点の起動の実行者。非 nil で、宣言の supervisor が真なら、回答を待つ契約の run（kind が answer で、ターミナルで解く待ちでない。
+	// 答える者は問わない）をスーパーバイザーへ回す（それ以外はオーナーの保留へ写す）。Cycle は周の枠超過の共有（nil なら共有しない）。
 	Judgment JudgmentInvoker
 	Cycle    *JudgmentCycle
 }

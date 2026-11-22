@@ -597,6 +597,12 @@ func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question stri
 	if err != nil {
 		return 0, err
 	}
+	if actionColumn != nil {
+		// 保留を作る前に書いた対処の記録（子の問いを上げた・判断できなかった）に、できた保留を結び付ける。
+		if _, err := tc.tx.ExecContext(ctx, `UPDATE supervisor_action SET hold_id = ? WHERE id = ? AND hold_id IS NULL`, id, actionColumn); err != nil {
+			return 0, err
+		}
+	}
 	tc.after["question"] = question
 	if kind != HoldKindHuman {
 		tc.after["hold_kind"] = string(kind)

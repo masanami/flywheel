@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
 func svRun(out string) *RunJudgmentResult {
@@ -279,8 +281,9 @@ func TestChildQuestion_FlawedAnswerRecordsFailedAndRaisesOneHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(acts) != 1 || acts[0].Result != ActionFailed || acts[0].HoldID != nil || acts[0].StopKind != StopKindChildQuestion {
-		t.Fatalf("actions = %+v, want one failed child_question action without a hold", acts)
+	// 対処の記録は、できた保留を指す（保留が無いのは、答えて保留を作らなかったときだけ）。
+	if len(acts) != 1 || acts[0].Result != ActionFailed || acts[0].HoldID == nil || acts[0].StopKind != StopKindChildQuestion {
+		t.Fatalf("actions = %+v, want one failed child_question action tied to the hold it produced", acts)
 	}
 	var n int
 	var q, state string
@@ -421,12 +424,12 @@ func TestChildQuestion_AnswerRecordKeepsQuestionsAnswersAndBasis(t *testing.T) {
 		t.Fatalf("flaw = %+v", flaw)
 	}
 	req := supervisorHandRequest{CycleID: c.cycID, Target: supervisorTarget{ChallengeID: 1, StopKind: StopKindChildQuestion}, Output: *out}
-	if _, err := c.s.recordSupervisorAnswer(ctx, req, qs[:1]); err == nil {
+	if _, _, err := c.s.recordSupervisorAnswer(ctx, req, qs[:1]); err == nil {
 		t.Error("a mismatched number of questions must be refused")
 	}
-	id, err := c.s.recordSupervisorAnswer(ctx, req, qs)
-	if err != nil {
-		t.Fatal(err)
+	id, executed, err := c.s.recordSupervisorAnswer(ctx, req, qs)
+	if err != nil || !executed {
+		t.Fatalf("executed = %v, err = %v", executed, err)
 	}
 	acts, err := c.s.ListSupervisorActionsByChallenge(ctx, c.cid)
 	if err != nil || len(acts) != 1 || acts[0].ID != id {
@@ -519,10 +522,60 @@ func TestChildQuestion_AnswerChangesNoApprovalOrBudget(t *testing.T) {
 	}
 	before := guardSnapshot(t, c.s)
 	req := supervisorHandRequest{CycleID: c.cycID, Target: supervisorTarget{ChallengeID: 1, StopKind: StopKindChildQuestion}, Output: *out}
-	if _, err := c.s.recordSupervisorAnswer(context.Background(), req, qs); err != nil {
+	if _, _, err := c.s.recordSupervisorAnswer(context.Background(), req, qs); err != nil {
 		t.Fatal(err)
 	}
 	if after := guardSnapshot(t, c.s); after != before {
 		t.Errorf("approvals, operations or budgets changed:\n--- before\n%s\n--- after\n%s", before, after)
+	}
+}
+
+// 判断の間に課題が着手中でなくなっていたら、答えは実行せず、断りの記録（rejected・state_changed）を残す（委譲先へ答えを返さない）。
+func TestChildQuestion_AnswerIsRejectedWhenTheChallengeLeftProgress(t *testing.T) {
+	t.Parallel()
+	c := newLimitCase(t)
+	ctx := context.Background()
+	root := childWorkspace(t)
+	qs := []ChildQuestion{{Question: "q"}}
+	out, flaw := inspectChildQuestionOutput(svRun(answerJSON("x|docs/a.md")), childOffered, qs, root)
+	if flaw != nil {
+		t.Fatal(flaw)
+	}
+	coretest.Exec(t, c.s.workspace, `UPDATE challenge SET status = 'withdrawn' WHERE id = 1`)
+	req := supervisorHandRequest{CycleID: c.cycID, Target: supervisorTarget{ChallengeID: 1, StopKind: StopKindChildQuestion}, Output: *out}
+	_, executed, err := c.s.recordSupervisorAnswer(ctx, req, qs)
+	if err != nil || executed {
+		t.Fatalf("executed = %v, err = %v; want not executed", executed, err)
+	}
+	acts, err := c.s.ListSupervisorActionsByChallenge(ctx, c.cid)
+	if err != nil || len(acts) != 1 {
+		t.Fatalf("actions = %d, %v", len(acts), err)
+	}
+	if a := acts[0]; a.Result != ActionRejected || a.RejectReason == nil || *a.RejectReason != RejectStateChanged || len(a.Questions) != 0 {
+		t.Errorf("action = %+v; want rejected, state_changed and no recorded answers", a)
+	}
+	if reached, err := c.s.answerLimitReached(ctx, 1); err != nil || reached {
+		t.Errorf("a rejected answer must not count toward the limit: %v, %v", reached, err)
+	}
+}
+
+// AC-59: 過去の J4 の実行の記録がある課題を、課題の詳細（flywheel show が読む値）で読める。J4 の記録は実行の一覧に残る。
+func TestChildQuestion_AC59_ChallengeWithPastJ4RunIsReadable(t *testing.T) {
+	t.Parallel()
+	c := newLimitCase(t)
+	ctx := context.Background()
+	runID := insertJ4Run(t, c)
+	d, err := c.s.GetChallenge(ctx, c.cid)
+	if err != nil {
+		t.Fatalf("GetChallenge with a past J4 run: %v", err)
+	}
+	found := false
+	for _, r := range d.Runs {
+		if r.ID == formatRunID(runID) {
+			found = r.Judgment == "J4"
+		}
+	}
+	if !found {
+		t.Errorf("the past J4 run is not in the challenge detail: %+v", d.Runs)
 	}
 }

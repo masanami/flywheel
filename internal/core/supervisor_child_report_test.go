@@ -239,6 +239,10 @@ func TestChildReport_AC13_to_AC17_EscalateHoldsAllQuestionsOnce(t *testing.T) {
 	if n := f.countRows(t, `SELECT COUNT(*) FROM supervisor_action a JOIN hold h ON h.supervisor_action_id = a.id WHERE a.hand = 'escalate' AND a.result = 'executed'`); n != 1 {
 		t.Errorf("the hold is not tied to an executed escalate action")
 	}
+	// 対処の記録の側も、できた保留を指す（保留が無いのは、答えて保留を作らなかったときだけ）。
+	if n := f.countRows(t, `SELECT COUNT(*) FROM supervisor_action a JOIN hold h ON a.hold_id = h.id WHERE a.hand = 'escalate'`); n != 1 {
+		t.Errorf("the escalate action does not point at the hold it produced")
+	}
 }
 
 // 答えの件数・根拠が検査を通らない出力は、委譲先へ答えを返さず、failed の対処の記録を残して全部の問いを上げる。
