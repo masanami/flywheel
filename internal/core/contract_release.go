@@ -26,6 +26,8 @@ type contractReleaseSource struct {
 	// Checks・Compare は、統合先へ入れる確かめ（チェック・取り込みだけかの比較・入った中身）の取得の口。nil なら確かめられない。
 	Checks  UpstreamCheckSource
 	Compare UpstreamCompareSource
+	// Agent は足す依頼の判定（足せる課題か）が見込みを読むための宣言。nil なら宣言なしで読む。
+	Agent *AgentDeclaration
 }
 
 // lookupArtifactPR は pr の成果物 a の ref から、宣言のリポジトリの PR を上流から 1 件読む。pr でない・ref が PR の URL でない・
