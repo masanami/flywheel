@@ -418,7 +418,7 @@ func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*O
 		for _, c := range parentAgent {
 			inParentAgent[c.ID] = true
 		}
-		checking, err := listSupervisorCheckingIDs(ctx, tx)
+		checking, err := listSupervisorCheckingIDs(ctx, tx, agent)
 		if err != nil {
 			return err
 		}
@@ -535,8 +535,12 @@ func listOpenHoldOptions(ctx context.Context, tx *sql.Tx) (map[string][]HoldOpti
 }
 
 // listSupervisorCheckingIDs は、いま開いている保留がすべてスーパーバイザー待ち（supervisor_state が pending）の、人間対応待ちの課題の ID を返す。
-// pending でない保留（escalated・NULL）が 1 つでも開いている課題は含めない（オーナーの回答を待つ保留があるため）。
-func listSupervisorCheckingIDs(ctx context.Context, tx *sql.Tx) (map[string]bool, error) {
+// 宣言の supervisor が偽なら空。pending でない保留（escalated・NULL）が 1 つでも開いている課題は含めない（オーナーの回答を待つ保留があるため）。
+func listSupervisorCheckingIDs(ctx context.Context, tx *sql.Tx, agent *AgentDeclaration) (map[string]bool, error) {
+	if !supervisorEnabled(agent) {
+		// 宣言の supervisor が偽の間は、待ちの保留が残っていても確認中にせず、ふつうのオーナーの回答待ちとして扱う。
+		return map[string]bool{}, nil
+	}
 	rows, err := tx.QueryContext(ctx,
 		`SELECT c.id FROM challenge c WHERE c.status = ?
 		 AND EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = c.id AND h.answer IS NULL AND h.closed_at IS NULL AND h.supervisor_state = ?)

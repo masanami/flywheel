@@ -73,7 +73,7 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 		}
 		st.Cleanup = len(stale)
 
-		if st.Supervise, err = countSupervisorPendingHolds(ctx, tx); err != nil {
+		if st.Supervise, err = countSupervisorPendingHolds(ctx, tx, agent, 0); err != nil {
 			return err
 		}
 
@@ -278,10 +278,8 @@ func (s *Store) countRoundWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		w.Active = active
-		if agent.Supervisor {
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM hold h JOIN challenge c ON c.id = h.challenge_id WHERE `+supervisorPendingWhere+supervisorNotDeferredIn, cycleDBID, cycleDBID).Scan(&st.Supervise); err != nil {
-				return err
-			}
+		if st.Supervise, err = countSupervisorPendingHolds(ctx, tx, agent, cycleDBID); err != nil {
+			return err
 		}
 		if conn == nil {
 			return nil
@@ -403,11 +401,15 @@ func (s *Store) countRoundWork(ctx context.Context, agent *AgentDeclaration, con
 
 // countSupervisorPendingHolds は、開いたままのスーパーバイザー待ち（supervisor_state が pending）の保留の数
 // （人間対応待ちの課題のもの）。サイクルが走っていない間に残るものを、次のサイクルで処理できるものとして数える。
-func countSupervisorPendingHolds(ctx context.Context, tx *sql.Tx) (int, error) {
+// 宣言の supervisor が偽の間は、残っていてもスーパーバイザー待ちとして扱わないので 0（行は書き換えない）。
+// cycleDBID が 0 でないとき、そのサイクルで見送った保留は数えない。
+func countSupervisorPendingHolds(ctx context.Context, tx *sql.Tx, agent *AgentDeclaration, cycleDBID int64) (int, error) {
+	if !supervisorEnabled(agent) {
+		return 0, nil
+	}
 	var n int
 	err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM hold h JOIN challenge c ON c.id = h.challenge_id
-		 WHERE c.status = ? AND h.answer IS NULL AND h.closed_at IS NULL AND h.supervisor_state = ?`,
-		string(StatusAwaitingHuman), string(SupervisorStatePending)).Scan(&n)
+		`SELECT COUNT(*) FROM hold h JOIN challenge c ON c.id = h.challenge_id WHERE `+supervisorPendingWhere+supervisorNotDeferredIn,
+		cycleDBID, cycleDBID).Scan(&n)
 	return n, err
 }
