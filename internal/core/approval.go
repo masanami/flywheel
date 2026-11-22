@@ -1071,13 +1071,8 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return "", err
 		}
 		if req.Replan {
-			// 作業している契約の実行があるとき（判定は contractRunWorkingTx）は、印を成立させない。
-			working, err := contractRunWorkingTx(ctx, tx, cid)
-			if err != nil {
+			if err := checkReplanAllowed(ctx, tx, cid); err != nil {
 				return "", err
-			}
-			if working {
-				return "", fmt.Errorf("%w: replan is not allowed while a contract run is working", ErrValidation)
 			}
 		}
 		var runID sql.NullInt64
@@ -1103,19 +1098,12 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 				return err
 			}
 		}
-		res, err := tc.tx.ExecContext(ctx,
-			`UPDATE hold SET answer = ?, answered_at = ?, answered_by = ?, answered_channel = ?, answered_verification = ?, relay_session = ?, relay_quote = ?, replan = ?, answer_option = ? WHERE id = ? AND answer IS NULL AND closed_at IS NULL`,
-			answerText, tc.nowStr, att.Actor(), string(att.Channel()), string(att.Verification()), relaySession, relayQuote, boolToInt(req.Replan), stringPtrColumn(chosenOption), holdID,
-		)
-		if err != nil {
+		if err := writeHoldAnswer(ctx, tc, holdAnswerWrite{
+			HoldID: holdID, Answer: answerText, By: att.Actor(), Channel: att.Channel(), Verification: att.Verification(),
+			RelaySession: relaySession, RelayQuote: relayQuote, Replan: req.Replan, Option: chosenOption,
+			Reason: holdReasonValue, TaskID: holdTaskID,
+		}); err != nil {
 			return err
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if affected != 1 {
-			return fmt.Errorf("core: answer hold %d: expected to update 1 row, updated %d", holdID, affected)
 		}
 
 		// S3（Issue #39）: 未設定（保留の answer が無い）から値が入るので、
@@ -1142,23 +1130,6 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		holdOut.AnsweredChannel, holdOut.AnsweredVerification = &ch, &ver
 		holdOut.RelaySession, holdOut.RelayQuote = att.relayPtrs()
 		holdOut.Replan = req.Replan
-		// 理由 facts_unmet の保留への回答は、満たさなかった回数を 0 に戻す（次に読んだレビュー待ちから数え直す）。
-		// 戻す対象は、保留が結び付くタスクの契約の実行。保留がタスクに結び付かないときは、その課題の終わっていないタスクの契約の実行。
-		if holdReasonValue == holdReasonFactsUnmet {
-			var err error
-			if holdTaskID.Valid {
-				_, err = tc.tx.ExecContext(ctx, `UPDATE contract_run SET facts_unmet_count = 0 WHERE challenge_id = ? AND task_id = ?`, tc.id, holdTaskID.Int64)
-			} else {
-				_, err = tc.tx.ExecContext(ctx, `UPDATE contract_run SET facts_unmet_count = 0 WHERE challenge_id = ?
-					AND task_id IN (SELECT id FROM task WHERE challenge_id = ? AND status NOT IN ('done', 'cancelled'))`, tc.id, tc.id)
-			}
-			if err != nil {
-				return err
-			}
-		}
-		if holdTaskID.Valid && !req.Replan {
-			return resumeIntegrationTaskAfterAnswer(ctx, tc, holdReasonValue, holdTaskID.Int64)
-		}
 		return nil
 	}
 

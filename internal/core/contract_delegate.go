@@ -325,6 +325,20 @@ const (
 	contractRunKindReflect = "reflect"
 )
 
+// contractReviewWaitingOpenTx は、課題のタスク taskID の、開いている（終わっていない）契約のレビュー待ちの実行があるかを、
+// 呼び出し側のトランザクション（読み取り・書き込みのどちらも）の中で返す。レビュー待ちは、状態が waiting で、求められた操作の種類が review のもの。
+// 終わっていない契約の実行は課題のタスクごとに高々 1 つ（idx_contract_run_active_challenge）なので、あればそのタスクの最後の契約の実行である。
+// スーパーバイザーの選べる手（send_back を残すか）と、手 send_back の実行の時点の確かめが共有する。
+func contractReviewWaitingOpenTx(ctx context.Context, tx *sql.Tx, challengeID, taskID int64) (bool, error) {
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND task_id = ? AND kind = ?
+		AND ended_at IS NULL AND state = ? AND COALESCE(requested_kind, '') = ?`,
+		challengeID, taskID, contractRunKindTask, string(ContractStateWaiting), contractRequestedKindReview).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 const contractRunSelect = `SELECT id, challenge_id, connector_id, external_run_id, state, summary, cost_usd, max_budget_usd,
 	COALESCE(requested_kind, ''), COALESCE(requested_decider, ''), COALESCE(requested_text, ''), COALESCE(requested_resolvable_by, ''), COALESCE(work_dir, ''), task_id,
 	kind, operation_id, COALESCE(land_ref, ''), land_delivered, start_run_id, COALESCE(verified_ref, ''),

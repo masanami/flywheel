@@ -106,6 +106,9 @@ type runTransitionParams struct {
 	replan bool
 	// att は本人確認つきの遷移（attested）の Attestation。経路 chat の印の検査と種類の絞りに使う。
 	att Attestation
+	// restricted は、遷移表の制限つきの行を LookupRestricted で引くこと。立てるのは、その行の専用の書き込みだけ
+	// （いまはスーパーバイザーの手の supervisor_resolve〔T20〕だけ。終端から出る T18 は、終端の検査が先に断るのでこの道を通らない）。本人確認の要る行は、これを立てても本人確認つきの呼び出しだけが通る。
+	restricted bool
 }
 
 // runTransition は transition（#10: 本人確認の無い5操作）・verifiedTransition
@@ -132,6 +135,21 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 
 	var result *Challenge
 	err := s.mutateAsRun(ctx, p.actor, p.channel, p.verification, p.runID, func(tx *sql.Tx, rec *activityRecorder) error {
+		var err error
+		result, err = s.runTransitionInTx(ctx, tx, rec, cid, p, apply)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// runTransitionInTx は runTransition の本体で、呼び出し元の書き込みトランザクションの中で遷移を行う
+// （判定順序は runTransition の説明のとおり）。スーパーバイザーの手が、対処の記録と同じトランザクションで保留を閉じる遷移（T20）にも使う。
+func (s *Store) runTransitionInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64, p runTransitionParams, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+	var result *Challenge
+	err := func() error {
 		current, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -142,7 +160,11 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 		if IsTerminal(Table, StatusVocabulary, current.Status) {
 			return ErrTerminalState
 		}
-		tr, ok := Lookup(current.Status, p.op)
+		lookup := Lookup
+		if p.restricted {
+			lookup = LookupRestricted
+		}
+		tr, ok := lookup(current.Status, p.op)
 		if !ok {
 			return ErrInvalidTransition
 		}
@@ -303,7 +325,7 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 			StageFields:  tc.stage,
 		}
 		return nil
-	})
+	}()
 	if err != nil {
 		return nil, err
 	}

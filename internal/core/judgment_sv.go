@@ -23,7 +23,10 @@ type svCall struct {
 
 // callSupervisorJudgment は保留 t について入力を組み立て、判断点 SV を 1 回呼ぶ（費用は課題とサイクルの両方に入る）。
 func (s *Store) callSupervisorJudgment(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle, t supervisorTarget) (svCall, error) {
-	offered := offeredSupervisorHands(t.StopKind)
+	offered, err := s.offeredSupervisorHands(ctx, t)
+	if err != nil {
+		return svCall{}, err
+	}
 	sections, err := s.buildSupervisorSections(ctx, in.AgentDecl, t, offered)
 	if err != nil {
 		return svCall{}, err

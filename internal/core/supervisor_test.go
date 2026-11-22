@@ -483,7 +483,7 @@ func TestExecuteSupervisorHand_OnlyEscalateIsImplementedYet(t *testing.T) {
 		if h == HandEscalate || h == HandDefer { // defer は supervisor_defer_test.go が検証する
 			continue
 		}
-		_, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{Output: SVOutput{Hand: h}})
+		_, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{StopKind: StopKindArtifactMissing, Output: SVOutput{Hand: h}})
 		if !errors.Is(err, ErrSupervisorHandNotImplemented) {
 			t.Errorf("hand %s: err = %v, want ErrSupervisorHandNotImplemented", h, err)
 		}
