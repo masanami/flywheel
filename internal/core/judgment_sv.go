@@ -122,6 +122,13 @@ func (s *Store) buildSupervisorSections(ctx context.Context, decl *AgentDeclarat
 		if len(actions) > 0 {
 			sections = append(sections, JudgmentDataSection{Label: "これまでの対処の記録", Content: formatSupervisorActions(actions)})
 		}
+		conds, err := splittableConditions(ctx, tx, t)
+		if err != nil {
+			return err
+		}
+		if len(conds) > 0 {
+			sections = append(sections, JudgmentDataSection{Label: "回せる条件", Content: formatSplittableConditions(conds)})
+		}
 		var hb strings.Builder
 		for _, h := range offered {
 			fmt.Fprintf(&hb, "- %s: %s\n", h, supervisorHandDescription(h))

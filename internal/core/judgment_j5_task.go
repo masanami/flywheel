@@ -17,10 +17,23 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // labelTaskSourceSection は、タスクが対応する取り込み元（子）の区画のラベル（指示文はこの名前で区画を指す）。
 const labelTaskSourceSection = "対応する取り込み元"
+
+// labelSplitConditionsSection は、スーパーバイザーがフォローアップへ回した条件の区画のラベル（指示文はこの名前で区画を指す）。
+const labelSplitConditionsSection = "フォローアップへ回した条件（判定から外す）"
+
+// formatSplitConditionsSection は区画「フォローアップへ回した条件（判定から外す）」の本文（条件の文を 1 行ずつ）。
+func formatSplitConditionsSection(conds []string) string {
+	var b strings.Builder
+	for _, c := range conds {
+		b.WriteString("- " + c + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
 
 // j5TaskTarget はタスクの検証の対象（課題とタスクの組）。
 type j5TaskTarget struct {

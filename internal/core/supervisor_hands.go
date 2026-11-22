@@ -7,7 +7,7 @@ import (
 
 // このファイルは、スーパーバイザーの判断点へ渡す「選べる手の一覧」を作る（区切り S4b-2）。
 // 止まり方ごとの表（supervisorHandsByStopKind。閉じた一覧は 1 か所）から、いまの状態で実行できない手を外して返す。
-// 回せる条件が無いときに split_followup を外す決まりは、条件をフォローアップへ回すタスクが足す（ここでは外さない）。
+// split_followup は、回せる条件（原因のタスクの検証の出力の、区分つきの条件）が 1 件も無いとき外す。
 
 // offeredSupervisorHands は保留 t について、判断点へ渡す選べる手の一覧を表の順で返す。読み取りだけ。
 func (s *Store) offeredSupervisorHands(ctx context.Context, t supervisorTarget) ([]SupervisorHand, error) {
@@ -55,7 +55,12 @@ func supervisorHandOfferable(ctx context.Context, tx *sql.Tx, t supervisorTarget
 	case HandSendBack:
 		return sendBackOfferable(ctx, tx, t, from)
 	case HandSplitFollowup:
-		return t.TaskID != nil, nil // タスクを指さない保留は、どの条件も回せない
+		// タスクを指さない保留・回せる条件（区分つきの条件）が 1 件も無い保留は、どの条件も回せない。
+		if t.TaskID == nil {
+			return false, nil
+		}
+		conds, err := splittableConditions(ctx, tx, t)
+		return len(conds) > 0, err
 	}
 	return true, nil
 }
