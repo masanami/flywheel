@@ -15,7 +15,7 @@ import (
 // このファイルは、サイクルの回りの繰り返し（区切り S4a。Issue #991）を、実ストア・偽の ContractClient・偽の判断の IF・
 // 差し替えた待ちで確かめる。委譲先（偽の ContractClient）は、状態の読み取りのたびに、決めた順に状態を進める。
 
-const roundsPollSec = 7
+const roundsPollSec = 5
 
 // roundsFixture は、form: cli の委譲先を持つ、着手中で承認済みの計画付きの課題 1 件（C-1。統合先を使わない）を持つフィクスチャ。
 type roundsFixture struct {
@@ -506,6 +506,7 @@ func TestRunCycle_Rounds_LockLostDuringTheWaitEndsTheCycleWithAnError(t *testing
 // delegateCycleInput は、委譲の段の偽（delegateFixture）から、サイクルの入力を作る。判断点は何も起動されない（起動されたら失敗を返す）。
 func (f *delegateFixture) delegateCycleInput(c ContractClient, wait func(context.Context, time.Duration) error, checks UpstreamCheckSource) CycleRunInput {
 	inv := &cycleFakeInvoker{handle: func(cycleCall) JudgmentLaunchOutput { return JudgmentLaunchOutput{Result: RunResultErrored} }}
+	f.agent.CyclePollIntervalSec = 5 // 待ちは 5 秒ごとに区切られる。1 回の待ちで 1 つの間隔になるよう、区切りの長さに合わせる
 	return CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: inv, Upstream: f.upstream, Delegate: f.deleg, Git: f.git,
 		Reconcile: f.branches, Checks: checks, Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{}, Contract: c,
