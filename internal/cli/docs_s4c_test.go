@@ -74,3 +74,13 @@ func TestSpec_AC236_J2PromptHasTheAddRules(t *testing.T) {
 	requireAll(t, "j2.md の足す形の呼び出し", sec,
 		"「やらないこと」に触れるタスクは足さない", "方針の外かどうか迷ったら ask にする", "判断や人の作業が要る点が出たら ask にする")
 }
+
+// AC-89: architecture.md の §21 の実装済みの範囲と §21.2 の注記に、S4c-2 で実装した範囲がある。
+func TestSpec_AC89_ArchitectureHasS4c2Range(t *testing.T) {
+	first := archS21First(t)
+	requireAll(t, "architecture §21 の冒頭", first,
+		"区切り S4c-2〔フォローアップを、開いている課題のタスクに上げる〕の範囲も実装済み", "区切り S4c-2 で実装した範囲は",
+		"`followup.promoted_task_id`", "`--raise-limit`", "知らせる口と画面の見せ方は区切り S4d-2")
+	sec := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), "### 21.2 承認の単位（D23）")
+	requireAll(t, "architecture §21.2", sec, "S4c-2 で実装済みなのは", "上限の引き上げの承認として扱う")
+}
