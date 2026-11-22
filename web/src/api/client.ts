@@ -1,6 +1,9 @@
 import { ApiError } from "./error.ts";
 import type {
   ApprovalSummaryResponse,
+  ChatPostRequest,
+  ChatPostResponse,
+  ChatResponse,
   CycleStart,
   CycleStarted,
   CycleStatus,
@@ -33,7 +36,7 @@ async function failure(res: Response, what: string): Promise<ApiError> {
   return new ApiError(code, message, res.status);
 }
 
-// 読み取りは GET（SSE は EventSource）。書き込みは下の post だけで、呼ぶのは計画の承認・完了の承認・「サイクルを回す」の POST に限る。
+// 読み取りは GET（SSE は EventSource）。書き込みは下の post だけで、呼ぶのは計画の承認・完了の承認・「サイクルを回す」・対話の欄の POST に限る。
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path, {
     method: "GET",
@@ -69,6 +72,8 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
   if (!res.ok) {
     throw await failure(res, `POST ${path}`);
   }
+  // 中身の無い成功（204。対話の「止める」「新しい会話」）は読まずに返す。
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
@@ -106,7 +111,15 @@ export interface CycleApi {
   startCycle(name: string): Promise<CycleStarted>;
 }
 
-export type ApiClient = ReadApi & ApprovalApi & CycleApi;
+// 対話の欄。読み取りは GET …/chat、書き込みは文を送る・止める・新しい会話（CSRF つきの POST）。
+export interface ChatApi {
+  chat(name: string): Promise<ChatResponse>;
+  chatSend(name: string, req: ChatPostRequest): Promise<ChatPostResponse>;
+  chatStop(name: string): Promise<unknown>;
+  chatNew(name: string): Promise<unknown>;
+}
+
+export type ApiClient = ReadApi & ApprovalApi & CycleApi & ChatApi;
 
 const readApi: ReadApi = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
@@ -148,10 +161,19 @@ const cycleApi: CycleApi = {
   startCycle: (name) => post<CycleStarted>(`${ws(name)}/cycle`),
 };
 
+const chatApi: ChatApi = {
+  chat: (name) => get<ChatResponse>(`${ws(name)}/chat`),
+  chatSend: (name, req) =>
+    post<ChatPostResponse>(`${ws(name)}/chat/messages`, req),
+  chatStop: (name) => post<unknown>(`${ws(name)}/chat/stop`),
+  chatNew: (name) => post<unknown>(`${ws(name)}/chat/new`),
+};
+
 const realApi: ApiClient = {
   ...readApi,
   ...approvalApi,
   ...cycleApi,
+  ...chatApi,
 };
 
 // 呼び出し口は差し替えられる。開発時の mock モードだけが setApi でブラウザ内の偽の API を入れる。
@@ -180,6 +202,10 @@ export const api: ApiClient = {
   approvalSummary: (n, id) => impl.approvalSummary(n, id),
   approve: (n, id, v) => impl.approve(n, id, v),
   startCycle: (n) => impl.startCycle(n),
+  chat: (n) => impl.chat(n),
+  chatSend: (n, r) => impl.chatSend(n, r),
+  chatStop: (n) => impl.chatStop(n),
+  chatNew: (n) => impl.chatNew(n),
 };
 
 export const eventsPath = "/api/v1/events";

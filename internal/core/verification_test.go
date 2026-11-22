@@ -41,13 +41,19 @@ func TestVerificationRegistry_CLITTYConfirmAllowedAndOthersRejected(t *testing.T
 	}
 }
 
-func TestVerificationRegistry_HasCLITTYConfirmRelayedAndUINone(t *testing.T) {
+func TestVerificationRegistry_HasCLITTYConfirmRelayedChatRelayedAndUINone(t *testing.T) {
 	t.Parallel()
-	if len(verificationRegistry) != 3 {
-		t.Fatalf("len(verificationRegistry) = %d, want 3", len(verificationRegistry))
+	if len(verificationRegistry) != 4 {
+		t.Fatalf("len(verificationRegistry) = %d, want 4", len(verificationRegistry))
 	}
 	if !registryAllows(ChannelUI, VerificationNone) || !registryAllows(ChannelCLI, VerificationRelayed) {
 		t.Fatal("want (ui, none) to be allowed")
+	}
+	if !registryPermits(ChannelChat, VerificationRelayed, actionReject) || !registryPermits(ChannelChat, VerificationRelayed, actionBudget) {
+		t.Fatal("want (chat, relayed) to accept every action")
+	}
+	if registryAllows(ChannelChat, VerificationTTYConfirm) || registryAllows(ChannelChat, VerificationNone) {
+		t.Fatal("want only (chat, relayed) for the chat channel")
 	}
 }
 

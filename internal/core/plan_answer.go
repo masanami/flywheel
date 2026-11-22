@@ -237,7 +237,7 @@ func writePlanAnswers(ctx context.Context, tx *sql.Tx, cid, planVersion int64, l
 		a, err := recordPlanAnswer(ctx, tx, PlanAnswerInput{
 			ChallengeID: cid, PlanVersion: planVersion, QuestionNumber: l.Question, Choice: l.Choice, Text: l.Text,
 			Recommended: l.Recommended, Actor: att.Actor(), Channel: att.Channel(), Verification: att.Verification(),
-			RelaySession: att.evidence.Session, RelayQuote: att.evidence.Quote,
+			RelaySession: att.currentEvidence().Session, RelayQuote: att.currentEvidence().Quote,
 		}, at)
 		if err != nil {
 			return nil, nil, err
@@ -303,6 +303,9 @@ func (s *Store) ExecutePlanAnswer(ctx context.Context, req PlanAnswerRequest, at
 
 	var result *Challenge
 	err := s.mutateAsRun(ctx, att.actor, att.channel, att.verification, nil, func(tx *sql.Tx, rec *activityRecorder) error {
+		if err := s.chatGate(ctx, tx, att, actionAnswerPlan, ""); err != nil {
+			return err
+		}
 		current, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -379,7 +382,7 @@ func onPlanApproved(ctx context.Context, tc *transitionCtx, att Attestation, pla
 			if _, err := recordPlanAnswer(ctx, tc.tx, PlanAnswerInput{
 				ChallengeID: tc.id, PlanVersion: planVersion, QuestionNumber: q.Number, Choice: &rec, Recommended: true,
 				Actor: att.Actor(), Channel: att.Channel(), Verification: att.Verification(),
-				RelaySession: att.evidence.Session, RelayQuote: att.evidence.Quote,
+				RelaySession: att.currentEvidence().Session, RelayQuote: att.currentEvidence().Quote,
 			}, tc.now); err != nil {
 				return err
 			}

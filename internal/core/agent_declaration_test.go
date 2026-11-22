@@ -106,7 +106,11 @@ const allKeysAgentJSON = `{
 	"cycle_poll_interval_sec": 30,
 	"auto_cycle": true,
 	"memory_dir": "memory",
-	"memory_write_limit": {"files": 5, "bytes": 8192}
+	"memory_write_limit": {"files": 5, "bytes": 8192},
+	"chat_tools": "restricted",
+	"chat_max_turns": 30,
+	"chat_timeout_sec": 600,
+	"chat_approvable_operations": ["release"]
 }`
 
 // AC: すべてのキーを明示した agent.json は、DefaultsUsed が偽になる。

@@ -352,6 +352,8 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
   const allowed = [
     /^\/api\/v1\/workspaces\/[^/]+\/challenges\/[^/]+\/approve$/,
     /^\/api\/v1\/workspaces\/[^/]+\/cycle$/,
+    // 対話の欄（#1002）の書き込み
+    /^\/api\/v1\/workspaces\/[^/]+\/chat\/(messages|stop|new)$/,
   ];
   for (const r of requests) {
     if (r.method === "GET") continue;
@@ -369,19 +371,25 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
   document.head.innerHTML = "";
 });
 
-it("AC-124: 描画した画面の DOM に form 要素が無い", async () => {
+// 対話の欄（#1002）は、入力と送る操作を持つ唯一の例外。欄の中の要素は、これらの規則の数えから外す。
+const outsideChat = <T extends Element>(els: Iterable<T>): T[] =>
+  [...els].filter((e) => !e.closest('[data-testid="chat-panel"]'));
+
+it("AC-124: 描画した画面の DOM に form 要素が無い（対話の欄を除く）", async () => {
   installFakes({ ...fixtures(), ...awaitingApproval() });
   const dests = destinations(["alpha", "beta"], "C-1");
   const seen: string[] = [];
   await operate(dests, (container, id) => {
     seen.push(id);
-    expect(container.querySelector("form"), id).toBeNull();
+    expect(outsideChat(container.querySelectorAll("form")), id).toHaveLength(0);
   });
   expect(seen).toEqual(dests.map((d) => d.id));
-  expect(within(document.body).queryAllByRole("form")).toHaveLength(0);
+  expect(
+    outsideChat(within(document.body).queryAllByRole("form")),
+  ).toHaveLength(0);
 });
 
-// AC-118 #814: どの画面にも、文字を入力する欄は無い（input・textarea・select・編集できる要素）。
+// AC-118 #814: どの画面にも、文字を入力する欄は無い（対話の欄を除く。input・textarea・select・編集できる要素）。
 // input は種類を問わず 0 件（チェックの入力も含む。足すときはこの規則を決め直す）。
 it("AC-118 #814: 描画したどの画面にも、文字を入力する欄は無い", async () => {
   installFakes({ ...fixtures(), ...awaitingApproval() });
@@ -390,13 +398,19 @@ it("AC-118 #814: 描画したどの画面にも、文字を入力する欄は無
   await operate(dests, (container, id) => {
     seen.push(id);
     expect(
-      container.querySelectorAll("input, textarea, select"),
+      outsideChat(container.querySelectorAll("input, textarea, select")),
       id,
     ).toHaveLength(0);
-    expect(container.querySelectorAll("[contenteditable]"), id).toHaveLength(0);
-    expect(within(container).queryAllByRole("textbox"), id).toHaveLength(0);
-    expect(within(container).queryAllByRole("searchbox"), id).toHaveLength(0);
-    expect(within(container).queryAllByRole("combobox"), id).toHaveLength(0);
+    expect(
+      outsideChat(container.querySelectorAll("[contenteditable]")),
+      id,
+    ).toHaveLength(0);
+    for (const role of ["textbox", "searchbox", "combobox"]) {
+      expect(
+        outsideChat(within(container).queryAllByRole(role)),
+        id,
+      ).toHaveLength(0);
+    }
   });
   expect(seen).toEqual(dests.map((d) => d.id));
 });

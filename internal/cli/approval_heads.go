@@ -271,7 +271,8 @@ func operationReleaseDecision(ctx context.Context, a Args, p *core.OperationAppr
 		// 課題が完了で、検証の後に取り込み以外の変更が入った（または履歴が書き換わった）release は、承認できないだけでなく、
 		// 課題を検証中へ戻して検証し直す道がある（#485）。戻すかの判定は core が自分で比較して行う（AssessReleaseReopen）。
 		// ここは core に「戻すべきか」を聞いて、戻すと答えられたときに戻す入口を呼ぶだけ。
-		if d.Reason == reasonVerifiedHeadMismatch && p.ChallengeStatus == core.StatusDone {
+		// 欄からは戻さない（戻す書き込みは core が欄の印の検査と発言の記録を持たない）。理由の案内だけを返す。
+		if d.Reason == reasonVerifiedHeadMismatch && p.ChallengeStatus == core.StatusDone && a.Chat == nil {
 			src := headSources(a)
 			as, err := a.Store.AssessReleaseReopen(ctx, p.OperationID, src)
 			if err != nil {
@@ -291,6 +292,9 @@ func operationReleaseDecision(ctx context.Context, a Args, p *core.OperationAppr
 			}
 		}
 		msg := fmt.Sprintf("%s を承認の対象にできません: %s（%s）", p.OperationID, d.Reason, d.Reason.description())
+		if a.Chat != nil && d.Reason == reasonVerifiedHeadMismatch && p.ChallengeStatus == core.StatusDone {
+			msg += "。課題を検証中へ戻す操作は対話の欄からは行えません。ターミナルで同じ承認を実行してください"
+		}
 		if d.Detail != "" {
 			msg += "。根拠: " + d.Detail
 		}
@@ -304,7 +308,7 @@ func headSources(a Args) core.ReleaseHeadSources {
 	return core.ReleaseHeadSources{Checks: newCheckSource(a.lookPath()), Compare: newCompareSource(a.lookPath())}
 }
 
-func operationHeadLines(d *releaseDecision) string {
+func operationHeadLines(d *releaseDecision, chat bool) string {
 	if d == nil {
 		return ""
 	}
@@ -320,7 +324,11 @@ func operationHeadLines(d *releaseDecision) string {
 	}
 	if d.Undeterminable != nil {
 		writeHeadChangeLines(&b, "              ", d.Undeterminable)
-		fmt.Fprintf(&b, "              ※承認すると、取り込みだけと確かめないまま、この head を承認します。承認せず課題を検証中へ戻して検証し直すなら、この確認を中止して approve %s --reopen を実行してください\n", d.Op.ID)
+		if chat {
+			b.WriteString("              ※承認すると、取り込みだけと確かめないまま、この head を承認します。承認せず課題を検証中へ戻して検証し直すなら、この確認を中止して、ターミナルで行ってください（対話の欄からは戻せません）\n")
+		} else {
+			fmt.Fprintf(&b, "              ※承認すると、取り込みだけと確かめないまま、この head を承認します。承認せず課題を検証中へ戻して検証し直すなら、この確認を中止して approve %s --reopen を実行してください\n", d.Op.ID)
+		}
 	}
 	return b.String()
 }

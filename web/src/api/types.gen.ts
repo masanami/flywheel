@@ -808,6 +808,51 @@ export interface FollowupListResponse {
   followups: Followup[];
 }
 
+export interface ChatResponse {
+  cost_usd: number;
+  messages: ChatMessage[];
+  session_id: string | null;
+  started_at: string | null;
+  state: string;
+  tools: string;
+}
+
+export interface ChatMessage {
+  activity: ChatActivity[];
+  body: string;
+  cost_usd: number;
+  created_at: string;
+  id: number;
+  role: string;
+  state: string;
+  viewing: ChatViewing | null;
+}
+
+export interface ChatActivity {
+  command: string;
+  ok: boolean;
+}
+
+export interface ChatViewing {
+  challenge_id: string | null;
+  task_id: string | null;
+  title: string | null;
+}
+
+export interface ChatPostRequest {
+  text: string;
+  viewing?: ChatPostViewing | null;
+}
+
+export interface ChatPostViewing {
+  challenge_id?: string;
+  task_id?: string;
+}
+
+export interface ChatPostResponse {
+  id: number;
+}
+
 export const CARD_ACTION_CODES = [
   "approve_plan",
   "approve_completion",
@@ -1034,4 +1079,29 @@ export const CONDITIONS_AFTER_RELEASE_HEADINGS = [
   "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:",
   "承認で本番反映されると満たされる条件:",
   "承認済みの本番反映が走れば満たされる条件:",
+] as const;
+
+export const CHAT_MESSAGE_STATE_CODES = [
+  "replying",
+  "done",
+  "stopped",
+  "limit",
+  "rate_limited",
+  "session_lost",
+  "failed",
+] as const;
+
+export const CHAT_TOOLS_CODES = [
+  "restricted",
+  "full",
+] as const;
+
+export const CHAT_ROLE_CODES = [
+  "owner",
+  "orchestrator",
+] as const;
+
+export const CHAT_PANEL_STATE_CODES = [
+  "idle",
+  "replying",
 ] as const;

@@ -882,11 +882,12 @@ it("AC-410 #808: 課題の説明の **太字** が、強調の要素になる。
   expect(d.textContent).toContain(XSS);
 });
 
-it("AC-282 #808: 課題の詳細に、「この課題について相談する」の口は無い", async () => {
+// AC-282 #808 は「相談の口は無い」だった。S4d-1（#1002）の AC-7 で口を置くことになったため、反転した。
+it("AC-282 #808 → S4d-1 AC-7: 課題の詳細に、「この課題について相談する」の口がある（欄の開閉は chat の試験）", async () => {
   const { root } = await open(show());
-  expect(q(root).queryByText(/相談/)).toBeNull();
-  fireEvent.click(q(root).getByRole("link", { name: "計画の本文" }));
-  expect(q(root).queryByText(/相談/)).toBeNull();
+  expect(
+    q(root).getByRole("button", { name: "この課題について相談する" }),
+  ).toBeInTheDocument();
 });
 
 it("AC-283 #808: 課題の詳細に、スーパーバイザーの記録の区画は無い", async () => {

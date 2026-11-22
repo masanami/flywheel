@@ -3,7 +3,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import { CYCLE_STATE_LABELS } from "./labels.ts";
 import { POLL_MS, RECONNECT_MS } from "./live/useLive.ts";
-import { FakeEventSource, fixtures, installFakes } from "./testing/fakes.ts";
+import {
+  FakeEventSource,
+  type Recorded,
+  fixtures,
+  installFakes,
+} from "./testing/fakes.ts";
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -23,13 +28,20 @@ async function mounted() {
   // 「いま進められること」は開いたときに ingestable=true の状況を読む（#805）。読み込みの要求の数を測る
   // この試験では、その画面を開かないよう「すべて」を開く。
   window.location.hash = "#/all";
-  const { requests } = installFakes();
+  const { requests: all } = installFakes();
   render(<App />);
   act(() => FakeEventSource.latest.open());
   await waitFor(() =>
     expect(screen.getAllByText(/alpha/).length).toBeGreaterThan(0),
   );
-  return requests;
+  // 対話の欄（#1002）の読み込み（GET …/chat）は、この試験の数えに入れない（欄の試験が別に確かめる）。
+  const rest = (r: Recorded) => !r.url.endsWith("/chat");
+  return new Proxy(all, {
+    get(t, p) {
+      const v: unknown = Reflect.get(t.filter(rest), p);
+      return typeof v === "function" ? v.bind(t.filter(rest)) : v;
+    },
+  });
 }
 
 it("AC-87/204/206: workspace_changed は該当 ws の status/challenges/cycle と fleet の needs-human・questions だけを取り直す（#803 から問いの一覧も読む）", async () => {

@@ -39,7 +39,7 @@ func errorStatus(code string) int {
 		return http.StatusConflict
 	case CodeVerificationRejected, CodeConfirmationMismatch:
 		return http.StatusForbidden
-	case CodeStoreTooNew, CodeStoreBusy, CodeStoreError:
+	case CodeStoreTooNew, CodeStoreBusy, CodeStoreError, CodeEngineUnavailable:
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError

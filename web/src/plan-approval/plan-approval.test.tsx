@@ -695,9 +695,12 @@ it("AC-345 #811: 課題の詳細の「計画の本文」へのリンクが出る
 it("AC-346 #811: 差し戻しのボタンは無い", async () => {
   await opened();
   expect(screen.queryByRole("button", { name: /差し戻/ })).toBeNull();
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
-    "この計画を承認する",
-  ]);
+  // 対話の欄（#1002）のボタンは、この画面の数えに入れない。
+  expect(
+    within(screen.getByTestId("plan-approval"))
+      .getAllByRole("button")
+      .map((b) => b.textContent),
+  ).toEqual(["この計画を承認する"]);
 });
 
 it("AC-347 #811: 差し戻しの案内は、コマンドの例を出さず、対話で伝える方法だけを出す", async () => {

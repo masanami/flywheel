@@ -150,7 +150,7 @@ func runFollowupDrop(a Args) (any, error) {
 		fmt.Fprintf(&b, "  %s\t%s\n", f.ID, escapeControl(f.Title))
 	}
 	fmt.Fprintf(&b, "理由: %s\n", escapeControl(reason))
-	att, err := core.Verify(core.ChannelCLI, verifier, b.String(), target)
+	att, err := core.Verify(channelFor(a), verifier, b.String(), target)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -173,7 +173,7 @@ func runFollowupPromote(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	summary := fmt.Sprintf("次のフォローアップを新しい課題（未分類）に上げます。\n  %s\t%s\n", f.ID, escapeControl(f.Title))
-	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
+	att, err := core.Verify(channelFor(a), verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
