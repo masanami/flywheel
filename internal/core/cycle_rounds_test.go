@@ -307,6 +307,10 @@ func TestRoundWaitsForChecks(t *testing.T) {
 	if !roundWaitsForChecks(rel(ExecutionResultWaitingChecks)) {
 		t.Error("release waiting_checks should count")
 	}
+	notResolving := []CyclePhaseResult{{Phase: CyclePhaseRelease, ReleaseItems: []ReleaseExecItem{{Result: ExecutionResultWaitingChecks, WaitNotResolving: true}}}}
+	if roundWaitsForChecks(notResolving) {
+		t.Error("waiting_checks that waiting cannot resolve (checks unreadable / unsupported) must not count")
+	}
 	if roundWaitsForChecks(rel(ExecutionResultChecksFailed)) {
 		t.Error("checks_failed must not count")
 	}

@@ -257,11 +257,11 @@ func roundHitCycleBudget(round []CyclePhaseResult) bool {
 
 // roundWaitsForChecks は、この回りの段の結果に、チェックが終わっていないための待ちが 1 件でもあるか
 // （release の段の items の waiting_checks、または完了の検証が見送った waiting_external）。回りの終わりの数えの中で上流は読み直さない。
-// チェックの失敗（checks_failed）は含めない。
+// チェックの失敗（checks_failed）と、待っても解けない waiting_checks（WaitNotResolving。承認した head のチェックが読めない・読む手段が無い）は含めない。
 func roundWaitsForChecks(round []CyclePhaseResult) bool {
 	for _, p := range round {
 		for _, it := range p.ReleaseItems {
-			if it.Result == ExecutionResultWaitingChecks {
+			if it.Result == ExecutionResultWaitingChecks && !it.WaitNotResolving {
 				return true
 			}
 		}
