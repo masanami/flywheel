@@ -55,6 +55,7 @@ const task = (p: Partial<TreeTask> & { key: string }): TreeTask => ({
 
 const hold = (p: Partial<Hold> = {}): Hold => ({
   answer: null,
+  answer_option: null,
   answered_at: null,
   answered_by: null,
   answered_channel: null,
@@ -63,6 +64,7 @@ const hold = (p: Partial<Hold> = {}): Hold => ({
   from_status: "in_progress",
   from_status_label: "着手中",
   kind: "human",
+  options: [],
   question: "どちらにしますか",
   raised_at: "2026-11-01T00:00:00Z",
   relay_quote: null,

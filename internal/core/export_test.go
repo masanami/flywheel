@@ -725,3 +725,29 @@ func TestImport_S4aCycleColumnsSurviveTheRoundTrip(t *testing.T) {
 		t.Errorf("imported cycle = (%q, %d, %q), want (settled, 3, 2026-11-02T03:04:05.000Z)", reason, rounds, stop)
 	}
 }
+
+// 版 33 で足した列（hold の options・answer_option・option_required）の値は、書き出し→空のストアへの再構築で同じになる。
+func TestImport_HoldOptionsColumnsSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	src, _ := filledStore(t)
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+		t.Fatal(err)
+	}
+	read := func(s *Store) (opts, ans string, req int) {
+		if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+			return tx.QueryRow(`SELECT options, answer_option, option_required FROM hold WHERE id = 1`).Scan(&opts, &ans, &req)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	so, sa, sr := read(src)
+	do, da, dr := read(dst)
+	if so == "" || sa != "add" || sr != 1 {
+		t.Fatalf("fixture did not fill the columns: %q %q %d", so, sa, sr)
+	}
+	if so != do || sa != da || sr != dr {
+		t.Errorf("after import: %q %q %d, want %q %q %d", do, da, dr, so, sa, sr)
+	}
+}

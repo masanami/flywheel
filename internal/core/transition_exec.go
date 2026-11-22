@@ -482,10 +482,28 @@ func insertHoldKindFrom(ctx context.Context, tc *transitionCtx, question string,
 
 // insertHoldKindFromTask は insertHoldKindFrom の、保留が結び付くタスク（hold.task_id。nil は NULL）を指定する版。
 func insertHoldKindFromTask(ctx context.Context, tc *transitionCtx, question string, kind HoldKind, from Status, taskID *int64) (int64, error) {
+	return insertHoldWithOptions(ctx, tc, question, kind, from, taskID, HoldOptionsInput{})
+}
+
+// insertHoldWithOptions は保留を作る入口（選択肢の並びと「識別の無い回答を断る」印を受ける）。いまある保留を作る関数は
+// 選択肢なしでここへ委ねる。選択肢の誤りは ErrHoldOptionInvalid で断り、何も書かない。止まり方は受けない（S4b-2）。
+func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question string, kind HoldKind, from Status, taskID *int64, opts HoldOptionsInput) (int64, error) {
+	_, optionsJSON, err := resolveHoldOptions(opts.Options)
+	if err != nil {
+		return 0, err
+	}
+	var optionsColumn any
+	if optionsJSON != nil {
+		optionsColumn = *optionsJSON
+	}
+	required := 0
+	if opts.Required {
+		required = 1
+	}
 	res, err := tc.tx.ExecContext(ctx,
-		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind, task_id)
-		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)`,
-		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind), int64PtrColumn(taskID),
+		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind, task_id, options, option_required)
+		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?)`,
+		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind), int64PtrColumn(taskID), optionsColumn, required,
 	)
 	if err != nil {
 		return 0, err

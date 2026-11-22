@@ -306,15 +306,19 @@ func runAnswer(a Args) (any, error) {
 	id := a.Positional[0]
 	_, hasAnswer := a.Values["answer"]
 	replan := a.Bools["replan"]
+	option, hasOption := a.Values["option"]
 	planItems := len(a.Multi["choice"]) + len(a.Multi["text"])
 	if planItems > 0 {
-		if hasAnswer || replan {
-			return nil, NewError(CodeUsageError, "--choice・--text は --answer・--replan と同時に指定できません")
+		if hasAnswer || replan || hasOption {
+			return nil, NewError(CodeUsageError, "--choice・--text は --answer・--replan・--option と同時に指定できません")
 		}
 		return runPlanAnswer(a, id)
 	}
-	if !hasAnswer {
-		return nil, NewError(CodeUsageError, "--answer（保留への回答）か、--choice・--text（計画の問いへの答え）のどれかを指定してください")
+	if !hasAnswer && !hasOption {
+		return nil, NewError(CodeUsageError, "--answer か --option（保留への回答）、または --choice・--text（計画の問いへの答え）のどれかを指定してください")
+	}
+	if hasOption && strings.TrimSpace(option) == "" {
+		return nil, NewError(CodeUsageError, "--option には選択肢の識別を指定してください")
 	}
 	answer := a.Values["answer"]
 
@@ -322,7 +326,7 @@ func runAnswer(a Args) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	preview, err := a.Store.PrepareAnswer(context.Background(), id, answer)
+	preview, err := a.Store.PrepareAnswerOption(context.Background(), id, answer, option, replan)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -342,6 +346,7 @@ func runAnswer(a Args) (any, error) {
 		ExpectedVersion: preview.Version,
 		Answer:          answer,
 		Replan:          replan,
+		Option:          option,
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -756,7 +761,14 @@ func answerSummaryText(p *core.AnswerPreview, replan bool) string {
 	fmt.Fprintf(&b, "課題 ID:  %s\n", p.ChallengeID)
 	fmt.Fprintf(&b, "タイトル: %s\n", escapeControl(p.Title))
 	fmt.Fprintf(&b, "問い:     %s\n", escapeControlKeepLines(p.Question))
-	fmt.Fprintf(&b, "回答:     %s\n", p.Answer)
+	if p.Option != "" {
+		fmt.Fprintf(&b, "選択肢:   %s（%s）\n", escapeControl(p.OptionLabel), escapeControl(p.Option))
+		if p.Answer != "" {
+			fmt.Fprintf(&b, "添え書き: %s\n", p.Answer)
+		}
+	} else {
+		fmt.Fprintf(&b, "回答:     %s\n", p.Answer)
+	}
 	if replan {
 		b.WriteString("範囲が変わる: 委譲を再開せず、計画を作り直して承認待ちへ戻す（既存の PR・ブランチは引き継ぐ）\n")
 	}
@@ -779,39 +791,7 @@ func escapeControlKeepLines(s string) string {
 }
 
 func escapeControlRunes(s string, keepLines bool) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case keepLines && (r == '\n' || r == '\t'):
-			b.WriteRune(r)
-		case r == '\n':
-			b.WriteString(`\n`)
-		case r == '\r':
-			b.WriteString(`\r`)
-		case r == '\t':
-			b.WriteString(`\t`)
-		case r < 0x20 || (r >= 0x7f && r <= 0x9f):
-			fmt.Fprintf(&b, `\x%02x`, r)
-		case r == 0x2028 || r == 0x2029 || isBidiOrZeroWidth(r):
-			fmt.Fprintf(&b, `\u%04x`, r)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-// isBidiOrZeroWidth は、表示の並びを入れ替える双方向制御文字（U+202A〜202E・U+2066〜2069、
-// U+200E・U+200F・U+061C）とゼロ幅文字（U+200B〜200D・U+2060・U+FEFF）かを返す。
-// 見えないまま承認の根拠の読みを変えさせないため、見える形にする。
-func isBidiOrZeroWidth(r rune) bool {
-	switch {
-	case r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
-		return true
-	case r >= 0x200b && r <= 0x200f, r == 0x061c, r == 0x2060, r == 0xfeff:
-		return true
-	}
-	return false
+	return core.EscapeControl(s, keepLines)
 }
 
 // cancelOpenContractRuns は課題の開いた契約の run（form: cli の接続ツールの run）を、宣言の commands.cancel で止める。

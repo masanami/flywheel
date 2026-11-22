@@ -282,6 +282,7 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 			b.WriteString("    種類: 親が直接行う\n")
 		}
 		b.WriteString(indentLines("問い: "+h.Question, "    "))
+		writeHoldOptions(&b, h.Options, "    ")
 		if h.Answer == nil {
 			if !h.Open() {
 				fmt.Fprintf(&b, "    回答: (回答なしで閉じた %s)\n", FormatTimestamp(*h.ClosedAt))
@@ -298,6 +299,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 			answeredAt = FormatTimestamp(*h.AnsweredAt)
 		}
 		b.WriteString(indentLines("回答: "+*h.Answer, "    "))
+		if h.AnswerOption != nil {
+			fmt.Fprintf(&b, "    選んだ選択肢: %s\n", escapeControl(*h.AnswerOption))
+		}
 		fmt.Fprintf(&b, "    回答者: %s (%s)\n", answeredBy, answeredAt)
 	}
 	if len(d.DirectCompletions) > 0 {
@@ -503,3 +507,18 @@ func writePlanTopics(b *strings.Builder, topics []core.PlanTopicView) {
 
 // formatUSD は USD の額を、末尾の 0 を付けずに文にする。
 func formatUSD(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+
+// writeHoldOptions は保留の選択肢（識別と見出し。説明があれば次の行に説明）を indent の字下げで書く。
+// 選択肢が無いときは何も書かない。
+func writeHoldOptions(b *strings.Builder, opts []core.HoldOption, indent string) {
+	if len(opts) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "%s選択肢:\n", indent)
+	for _, o := range opts {
+		fmt.Fprintf(b, "%s  %s: %s\n", indent, escapeControl(o.ID), escapeControl(o.Label))
+		if o.Description != "" {
+			b.WriteString(indentLines(escapeControlKeepLines(o.Description), indent+"    "))
+		}
+	}
+}

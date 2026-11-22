@@ -45,6 +45,9 @@ type Overview struct {
 	// （id 昇順）。人間対応待ちのうち、いま開いている保留の種類が親が直接行うの課題は
 	// ParentAgentChallenges へ分けて、ここには含めない。
 	NeedsHumanChallenges []Challenge
+	// HoldOptions は人間対応待ちの課題（NeedsHumanChallenges の中）のうち、いま開いている保留が選択肢を持つものの、
+	// その選択肢の並び（キーは課題の ID）。選択肢の無い保留の課題は載らない。`status` のテキストの表示だけが使う（JSON・API の状況には出さない）。
+	HoldOptions map[string][]HoldOption
 	// ParentAgentChallenges は「親のエージェントが動く番」の課題（id 昇順）。状態は人間対応待ちのままで、
 	// いま開いている保留の種類が親が直接行う課題だけ（課題 #452。新しい状態は作らない）。
 	ParentAgentChallenges []Challenge
@@ -418,6 +421,12 @@ func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*O
 			}
 		}
 
+		holdOptions, err := listOpenHoldOptions(ctx, tx)
+		if err != nil {
+			return err
+		}
+		result.HoldOptions = holdOptions
+
 		actionable, err := listChallengesInStatuses(ctx, tx, actionableStatuses)
 		if err != nil {
 			return err
@@ -473,4 +482,41 @@ func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*O
 		return nil, err
 	}
 	return &result, nil
+}
+
+// listOpenHoldOptions は人間対応待ちの課題の、いま開いている保留（種類 human。課題の中で新しいもの）の選択肢を、
+// 課題の ID ごとに返す。選択肢の無い保留は含めない。
+func listOpenHoldOptions(ctx context.Context, tx *sql.Tx) (map[string][]HoldOption, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT h.challenge_id, h.kind, h.options FROM hold h JOIN challenge c ON c.id = h.challenge_id
+		 WHERE c.status = ? AND h.answer IS NULL AND h.closed_at IS NULL
+		 ORDER BY h.id ASC`, string(StatusAwaitingHuman))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string][]HoldOption{}
+	for rows.Next() {
+		var (
+			id   int64
+			kind string
+			raw  sql.NullString
+		)
+		if err := rows.Scan(&id, &kind, &raw); err != nil {
+			return nil, err
+		}
+		key := formatChallengeID(id)
+		delete(out, key) // 種類を問わず、新しい開いた保留が古いものを上書きする（既存の判定と同じ）。
+		if kind != string(HoldKindHuman) || !raw.Valid {
+			continue
+		}
+		opts, err := parseHoldOptions(&raw.String)
+		if err != nil {
+			return nil, err
+		}
+		if len(opts) > 0 {
+			out[key] = opts
+		}
+	}
+	return out, rows.Err()
 }

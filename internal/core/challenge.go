@@ -125,6 +125,11 @@ type Hold struct {
 	// Replan は回答に付いた「範囲が変わる」印（T12）。真なら、その回答は委譲を再開せず、課題を計画の
 	// 作り直し（分類済）へ戻した。回答の無い保留・印の無い回答は偽。
 	Replan bool
+	// Options は保留の選択肢の並び（無ければ nil。0 件以上。識別は保留の中で重ならない）。AnswerOption は回答で選んだ
+	// 選択肢の識別（選んでいなければ nil）。OptionRequired は「識別の無い回答を断る」印。
+	Options        []HoldOption
+	AnswerOption   *string
+	OptionRequired bool
 }
 
 // Open は保留がまだ開いている（回答も閉じる操作も無い）かを返す。
@@ -446,7 +451,7 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT question, from_status, raised_at, answer, answered_at, answered_by, run_id,
-		        answered_channel, answered_verification, relay_session, relay_quote, closed_at, kind, replan, task_id
+		        answered_channel, answered_verification, relay_session, relay_quote, closed_at, kind, replan, task_id, options, answer_option, option_required
 		 FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -465,11 +470,25 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			kind                              string
 			replan                            int
 			taskID                            sql.NullInt64
+			optionsJSON, answerOption         sql.NullString
+			optionRequired                    int
 			h                                 Hold
 		)
-		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind, &replan, &taskID); err != nil {
+		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind, &replan, &taskID, &optionsJSON, &answerOption, &optionRequired); err != nil {
 			return nil, err
 		}
+		if optionsJSON.Valid {
+			opts, err := parseHoldOptions(&optionsJSON.String)
+			if err != nil {
+				return nil, err
+			}
+			h.Options = opts
+		}
+		if answerOption.Valid {
+			v := answerOption.String
+			h.AnswerOption = &v
+		}
+		h.OptionRequired = optionRequired == 1
 		if taskID.Valid {
 			v := formatTaskID(taskID.Int64)
 			h.TaskID = &v

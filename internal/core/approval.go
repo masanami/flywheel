@@ -482,6 +482,15 @@ type AnswerPreview struct {
 	Answer      string // 入力された回答をそのまま返す（要約の組み立てに使う）
 	Version     int    // 表示時点の課題の版（ExecuteAnswer の ExpectedVersion にそのまま渡す）
 	FromStatus  Status // 回答が成立したときに戻る状態（保留に入る直前の状態）
+	// Option・OptionLabel は選択肢で答えるときの、選んだ識別と、解決した見出し（選んでいなければ空）。
+	// Answer は入力された回答の文（選択肢で答えるときは添え書き。無ければ空）。
+	Option      string
+	OptionLabel string
+	// AnswerText は解決した回答の文（選択肢で答えるときは見出し、添え書きがあれば「見出し・改行・添え書き」。選ばないときは Answer と同じ）。
+	// Options・OptionRequired はその保留の選択肢の並びと「識別の無い回答を断る」印。
+	AnswerText     string
+	Options        []HoldOption
+	OptionRequired bool
 }
 
 // PrepareAnswer は answer の①（読み取り）。answer が空なら、端末を開く前に
@@ -489,7 +498,17 @@ type AnswerPreview struct {
 // （完了なら ErrTerminalState）。人間対応待ちなのに未回答の保留が無い場合は
 // （状態機械の不変条件が破れているため）fail-closed にエラーを返す。
 func (s *Store) PrepareAnswer(ctx context.Context, id string, answer string) (*AnswerPreview, error) {
-	if strings.TrimSpace(answer) == "" {
+	return s.PrepareAnswerOption(ctx, id, answer, "", false)
+}
+
+// PrepareAnswerOption は PrepareAnswer に、選ぶ選択肢の識別（option。空なら選ばない）を足した版。option が空でないときは answer が空でもよく
+// （見出しが回答の文になる）、返す値の OptionLabel に解決した見出しが入る。保留の選択肢に無い識別・選択肢を持たない保留への識別・
+// 識別の無い回答を断る印のある保留への識別の無い回答・識別と replan の併用は、何も書かず ErrValidation（本人確認の前に断る）。
+func (s *Store) PrepareAnswerOption(ctx context.Context, id string, answer string, option string, replan bool) (*AnswerPreview, error) {
+	if option != "" && replan {
+		return nil, fmt.Errorf("%w: --option and --replan cannot be combined", ErrValidation)
+	}
+	if option == "" && strings.TrimSpace(answer) == "" {
 		return nil, ErrValidation
 	}
 
@@ -511,21 +530,42 @@ func (s *Store) PrepareAnswer(ctx context.Context, id string, answer string) (*A
 			return ErrInvalidTransition
 		}
 
-		_, question, fromStatus, _, err := loadUnansweredHold(ctx, tx, cid)
+		holdID, question, fromStatus, _, err := loadUnansweredHold(ctx, tx, cid)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return errNoUnansweredHold(current.ID)
 			}
 			return err
 		}
+		opts, required, err := loadHoldOptionsOf(ctx, tx, holdID)
+		if err != nil {
+			return err
+		}
+		text, chosen, err := resolveAnswerOption(opts, required, option, answer)
+		if err != nil {
+			return err
+		}
+		label := ""
+		if chosen != nil {
+			for _, o := range opts {
+				if o.ID == *chosen {
+					label = o.Label
+				}
+			}
+		}
 
 		preview = AnswerPreview{
-			ChallengeID: current.ID,
-			Title:       current.Title,
-			Question:    question,
-			Answer:      answer,
-			Version:     current.Version,
-			FromStatus:  fromStatus,
+			Option:         option,
+			OptionLabel:    label,
+			AnswerText:     text,
+			Options:        opts,
+			OptionRequired: required,
+			ChallengeID:    current.ID,
+			Title:          current.Title,
+			Question:       question,
+			Answer:         answer,
+			Version:        current.Version,
+			FromStatus:     fromStatus,
 		}
 		return nil
 	})
@@ -976,6 +1016,11 @@ type AnswerRequest struct {
 	// Replan は回答に付ける「範囲が変わる」印。真なら、委譲を再開せず、課題を計画の作り直し（分類済）へ戻す。
 	// 保留の直前の状態が着手中・検証中でなければ ErrValidation（何も書かない）。
 	Replan bool
+	// Option は回答で選ぶ選択肢の識別（空なら選ばない）。空でなければ Answer は添え書き（空でもよい）で、回答の文は選んだ選択肢の
+	// 見出し（添え書きがあれば「見出し・改行・添え書き」）。保留の選択肢から解決し直して記録する（answer_option）。
+	// 保留に無い識別・選択肢を持たない保留への識別・Replan との併用・識別の無い回答を断る印のある保留への識別の無い回答は、
+	// ErrValidation（何も書かない）。
+	Option string
 }
 
 // ExecuteAnswer は answer（T12）の②（書き込み）。「保留に入る直前の状態」は
@@ -985,14 +1030,19 @@ type AnswerRequest struct {
 // いない（保留を増減させる操作は必ず課題の版も進めるため）ので、この
 // 再読み込みは Prepare が見たのと同じ行を指す。
 func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attestation) (*Challenge, *Hold, error) {
-	if strings.TrimSpace(req.Answer) == "" {
+	if req.Option == "" && strings.TrimSpace(req.Answer) == "" {
 		return nil, nil, ErrValidation
+	}
+	if req.Option != "" && req.Replan {
+		return nil, nil, fmt.Errorf("%w: --option and --replan cannot be combined", ErrValidation)
 	}
 
 	if !attestationPermits(att, req.ChallengeID, actionAnswer) {
 		return nil, nil, ErrVerificationRejected
 	}
 
+	answerText := req.Answer
+	var chosenOption *string
 	var holdOut Hold
 	var holdID int64
 	var holdReasonValue holdReason
@@ -1007,6 +1057,14 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return "", err
 		}
 		holdID = id
+		opts, required, err := loadHoldOptionsOf(ctx, tx, id)
+		if err != nil {
+			return "", err
+		}
+		answerText, chosenOption, err = resolveAnswerOption(opts, required, req.Option, req.Answer)
+		if err != nil {
+			return "", err
+		}
 		if req.Replan {
 			// 作業している契約の実行（開いていて、最後に読んだ状態が running のタスクの実行。「入れてよい」を返して委譲先が受け取った実行は、終わるか
 			// レビュー待ちへ戻るまで running を返すので含まれる。保留の間の成功が未処理のものも含む）と、「入れてよい」を返そうとして届いたか分からない実行
@@ -1033,7 +1091,7 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return "", err
 		}
 		holdReasonValue = holdReason(reason.String)
-		holdOut = Hold{Kind: HoldKind(kind), Question: question, FromStatus: fromStatus, RaisedAt: raisedAt}
+		holdOut = Hold{Kind: HoldKind(kind), Question: question, FromStatus: fromStatus, RaisedAt: raisedAt, Options: opts, OptionRequired: required}
 		if runID.Valid {
 			v := formatRunID(runID.Int64)
 			holdOut.RunID = &v
@@ -1043,9 +1101,15 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 
 	apply := func(ctx context.Context, tc *transitionCtx) error {
 		relaySession, relayQuote := att.relayColumns()
+		// 選ばれた識別を読む使う側は、回答を記録する前（保留がまだ開いている間）に呼ぶ。開いている保留の書き換え（editHoldText）が使える。
+		if chosenOption != nil && s.answerOptionUse != nil {
+			if err := s.answerOptionUse(ctx, tc, holdID, *chosenOption); err != nil {
+				return err
+			}
+		}
 		res, err := tc.tx.ExecContext(ctx,
-			`UPDATE hold SET answer = ?, answered_at = ?, answered_by = ?, answered_channel = ?, answered_verification = ?, relay_session = ?, relay_quote = ?, replan = ? WHERE id = ? AND answer IS NULL AND closed_at IS NULL`,
-			req.Answer, tc.nowStr, att.Actor(), string(att.Channel()), string(att.Verification()), relaySession, relayQuote, boolToInt(req.Replan), holdID,
+			`UPDATE hold SET answer = ?, answered_at = ?, answered_by = ?, answered_channel = ?, answered_verification = ?, relay_session = ?, relay_quote = ?, replan = ?, answer_option = ? WHERE id = ? AND answer IS NULL AND closed_at IS NULL`,
+			answerText, tc.nowStr, att.Actor(), string(att.Channel()), string(att.Verification()), relaySession, relayQuote, boolToInt(req.Replan), stringPtrColumn(chosenOption), holdID,
 		)
 		if err != nil {
 			return err
@@ -1062,13 +1126,17 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		// before にそのキーを null で載せる（plan の plan_version・classify の
 		// priority・edit の urgency とそろえる）。
 		tc.before["answer"] = nil
-		tc.after["answer"] = req.Answer
+		tc.after["answer"] = answerText
+		if chosenOption != nil {
+			tc.after["answer_option"] = *chosenOption
+		}
 		if req.Replan {
 			tc.after["replan"] = true
 		}
 		att.addRelayTo(tc.after)
 
-		answer := req.Answer
+		answer := answerText
+		holdOut.AnswerOption = chosenOption
 		answeredAt := tc.now
 		answeredBy := att.Actor()
 		holdOut.Answer = &answer

@@ -358,9 +358,20 @@ func (s *Store) SubmitHeldContractSuccesses(ctx context.Context, only *int64) (i
 	return n, firstErr
 }
 
+// contractHoldOptions は委譲先が返した選択肢を、保留の選択肢にする。見出しは委譲先の選択肢の文そのまま、識別は core が
+// 並びの順に振る。件数は絞らない（件数の決まりはスーパーバイザーが付ける選択肢だけに当てる）。
+// 見出しにできない選択肢（空・複数行）が 1 つでもあれば選択肢を持たせない（問いの文には番号つきで残る。保留が作れなくなるよりよい）。
+func contractHoldOptions(ra *ContractRequestedAction) HoldOptionsInput {
+	if ra == nil {
+		return HoldOptionsInput{}
+	}
+	return holdOptionsFromLabels(ra.Options)
+}
+
 // holdContractWait は課題が着手中なら、契約の waiting を写した保留を作り、その保留の ID を契約の run に結び付ける
 // （保留への答えを resume で返すとき、この保留の答えだけを返すため）。着手中でなければ何もしない（偽）。
 func (s *Store) holdContractWait(ctx context.Context, rep *ContractRunReport, question string) (bool, error) {
+	opts := contractHoldOptions(rep.RequestedAction)
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
 			if tc.current.Status != StatusInProgress {
@@ -372,7 +383,7 @@ func (s *Store) holdContractWait(ctx context.Context, rep *ContractRunReport, qu
 				return err
 			}
 			tc.taskID = taskID
-			holdID, err := s.insertHoldWithOccurrenceID(ctx, tc, question, holdReasonContractStopped, "")
+			holdID, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonContractStopped, "", opts)
 			if err != nil {
 				return err
 			}

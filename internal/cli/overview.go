@@ -114,6 +114,7 @@ func overviewText(ov *core.Overview) string {
 		for _, c := range cs {
 			label, _ := c.Status.Label()
 			fmt.Fprintf(&b, "  %s\t%s\t%s\n", c.ID, label, c.Title)
+			writeHoldOptions(&b, ov.HoldOptions[c.ID], "    ")
 		}
 	}
 	challengeSection("あなたの承認を待っているもの", approvals)

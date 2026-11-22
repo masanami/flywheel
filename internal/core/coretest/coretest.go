@@ -573,6 +573,33 @@ func InsertHold(t *testing.T, workspace string, challengeID int, question, fromS
 	}
 }
 
+// InsertHoldWithOptions は InsertHold に、選択肢の列（options。JSON の配列の文字列）と、選んだ識別
+// （answerOption。空なら NULL で未回答。空でなければ回答済みの保留で、回答の文は answerOption）を足したテスト専用のフィクスチャ。
+// optionsJSON が空なら options は NULL。
+func InsertHoldWithOptions(t *testing.T, workspace string, challengeID int, question, fromStatus, raisedAt, optionsJSON, answerOption string) {
+	t.Helper()
+	nullable := func(v string) any {
+		if v == "" {
+			return nil
+		}
+		return v
+	}
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		if answerOption == "" {
+			_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, options) VALUES (?, ?, ?, ?, ?)`,
+				challengeID, question, fromStatus, raisedAt, nullable(optionsJSON))
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, options, answer, answer_option, answered_at, answered_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'tester')`,
+			challengeID, question, fromStatus, raisedAt, nullable(optionsJSON), answerOption, answerOption, raisedAt)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertHoldWithOptions: %v", err)
+	}
+}
+
 // DumpTables はテスト専用に、tables の全行を ROWID 順の文字列にして返す
 // （閲覧だけの経路がストアの行を変えないことの検査に使う）。
 func DumpTables(t *testing.T, workspace string, tables ...string) string {
@@ -1031,7 +1058,8 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (1, 1, 'plan', ?, '{"size":"M"}')`, []any{at}},
 			{`INSERT INTO source_binding (challenge_id, source_id, external_key, url, fingerprint, upstream_state, policy_state, created_at, updated_at)
 			  VALUES (1, 'src', 'o/r#1', 'https://example.test/1', 'fp', 'open', 'in_policy', ?, ?)`, []any{at, at}},
-			{`INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (1, 'q', 'verifying', ?)`, []any{at}},
+			{`INSERT INTO hold (challenge_id, question, from_status, raised_at, options, answer_option, option_required)
+			  VALUES (1, 'q', 'verifying', ?, '[{"id":"add","label":"足す","description":"説明"},{"id":"o2","label":"足さない","description":""}]', 'add', 1)`, []any{at}},
 			{`UPDATE challenge SET issues_hold_id = 1 WHERE id = 1`, nil},
 			{`INSERT INTO hold (challenge_id, question, from_status, raised_at, closed_at, kind) VALUES (2, '親が直接行う', 'unclassified', ?, ?, 'parent_direct')`, []any{at, at}},
 			{`INSERT INTO direct_completion (challenge_id, hold_id, note, created_at) VALUES (2, 2, '直接行った', ?)`, []any{at}},

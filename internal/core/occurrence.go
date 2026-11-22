@@ -401,23 +401,26 @@ func (s *Store) insertHoldWithOccurrence(ctx context.Context, tc *transitionCtx,
 
 // insertHoldWithOccurrenceID は insertHoldWithOccurrence の、作った保留の ID を返す版。
 func (s *Store) insertHoldWithOccurrenceID(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string) (int64, error) {
-	return s.insertHoldWithOccurrenceIDFrom(ctx, tc, question, reason, cycleID, tc.current.Status)
+	return s.insertHoldWithOccurrenceIDFrom(ctx, tc, question, reason, cycleID, tc.current.Status, HoldOptionsInput{})
+}
+
+// insertHoldWithOccurrenceOptions は insertHoldWithOccurrenceID の、選択肢を持たせる版（保留の ID を返す）。
+func (s *Store) insertHoldWithOccurrenceOptions(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string, opts HoldOptionsInput) (int64, error) {
+	return s.insertHoldWithOccurrenceIDFrom(ctx, tc, question, reason, cycleID, tc.current.Status, opts)
 }
 
 // insertHoldWithOccurrenceFrom は insertHoldWithOccurrence の、回答で戻る先（hold.from_status）を指定する版。
 func (s *Store) insertHoldWithOccurrenceFrom(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string, from Status) error {
-	_, err := s.insertHoldWithOccurrenceIDFrom(ctx, tc, question, reason, cycleID, from)
+	_, err := s.insertHoldWithOccurrenceIDFrom(ctx, tc, question, reason, cycleID, from, HoldOptionsInput{})
 	return err
 }
 
-func (s *Store) insertHoldWithOccurrenceIDFrom(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string, from Status) (int64, error) {
-	var holdID int64
-	var err error
-	if from == tc.current.Status {
-		holdID, err = insertHoldID(ctx, tc, question)
-	} else {
-		holdID, err = insertHoldKindFrom(ctx, tc, question, HoldKindHuman, from)
+func (s *Store) insertHoldWithOccurrenceIDFrom(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string, from Status, opts HoldOptionsInput) (int64, error) {
+	if from == tc.current.Status && tc.current.Status == StatusAwaitingPlanApproval {
+		// insertHoldKind と同じ検査（計画承認待ちから入れるのは親が直接行う保留だけ）。
+		return 0, ErrInvalidTransition
 	}
+	holdID, err := insertHoldWithOptions(ctx, tc, question, HoldKindHuman, from, tc.taskID, opts)
 	if err != nil {
 		return 0, err
 	}

@@ -654,3 +654,27 @@ func TestPlanTaskFramesAreInTheJSON(t *testing.T) {
 		t.Errorf("approval json lacks the task frames: %s", ap)
 	}
 }
+
+func TestFromHoldCarriesOptionsAndAnswerOption(t *testing.T) {
+	at := time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC)
+	chosen := "add"
+	h := view.FromHold(core.Hold{Question: "q", FromStatus: core.StatusInProgress, RaisedAt: at,
+		Options:      []core.HoldOption{{ID: "add", Label: "足す", Description: "説明"}, {ID: "o2", Label: "足さない"}},
+		AnswerOption: &chosen})
+	got := marshal(t, h)
+	for _, want := range []string{
+		`"answer_option":"add"`,
+		`"options":[{"description":"説明","id":"add","label":"足す"},{"description":"","id":"o2","label":"足さない"}]`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FromHold = %s, want %s", got, want)
+		}
+	}
+	// 選択肢の無い保留（DB の列は NULL → nil）は、null ではなく空の配列。選んでいなければ answer_option は null。
+	got = marshal(t, view.FromHold(core.Hold{Question: "q", FromStatus: core.StatusInProgress, RaisedAt: at}))
+	for _, want := range []string{`"answer_option":null`, `"options":[]`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FromHold(no options) = %s, want %s", got, want)
+		}
+	}
+}
