@@ -126,6 +126,10 @@ type CyclePhaseResult struct {
 	ImproveItems []ImproveItem
 	// Backup は backup の段の結果（他の段は nil）。
 	Backup *BackupResult
+	// SuperviseProcessed は supervise の段が、スーパーバイザーの判断点を 1 回呼んだ保留の数（結果が failed・rejected のものを含む）。
+	// SuperviseHands は、そのうち結果が executed の対処の手ごとの件数。他の段は 0・空。
+	SuperviseProcessed int
+	SuperviseHands     map[SupervisorHand]int
 }
 
 // ImproveItem は improve の段と `flywheel improve` の items の要素（J8 の run 1 回分）。
@@ -493,6 +497,17 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 	}
 	phases = append(phases, verify)
 
+	if err := boundary(); err != nil {
+		return phases, err
+	}
+
+	// スーパーバイザー（スーパーバイザー待ちの保留を、古い順に 1 件ずつ判断点 SV へ渡す。待ちが無ければ判断点を呼ばない）。
+	supervise, err := s.superviseStage(ctx, in, cycleID, jc)
+	if err != nil {
+		return nil, err
+	}
+	phases = append(phases, supervise)
+
 	return phases, nil
 }
 
@@ -504,6 +519,9 @@ func advancePhaseSkipped(in CycleRunInput, p CyclePhase) bool {
 		return in.Ingest == nil
 	case CyclePhaseClassify:
 		return false
+	case CyclePhaseSupervise:
+		// 宣言の supervisor が偽（または agent.json が無い）なら、保留をスーパーバイザー待ちにしないので飛ぶ。
+		return in.AgentDecl == nil || !in.AgentDecl.Supervisor
 	}
 	return in.ConnDecl == nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -37,8 +38,8 @@ func TestRunCycle_End_Settled_RunsEndPhases(t *testing.T) {
 	if f.judgedCount(JudgmentJ6) != 1 || !f.backupRan() {
 		t.Errorf("learn/backup not run: J6=%d backup=%v", f.judgedCount(JudgmentJ6), f.backupRan())
 	}
-	if len(res.Phases) != 9 {
-		t.Errorf("phases = %d, want 9", len(res.Phases))
+	if len(res.Phases) != 10 {
+		t.Errorf("phases = %d, want 10", len(res.Phases))
 	}
 }
 
@@ -174,8 +175,8 @@ func TestRunCycle_End_RateLimitedSkipsLearnAndImprove(t *testing.T) {
 	if f.judgedCount(JudgmentJ6) != 0 || f.judgedCount(JudgmentJ8) != 0 || !f.backupRan() {
 		t.Errorf("judged=%v backup=%v", f.judged, f.backupRan())
 	}
-	if len(res.Phases) != 7 {
-		t.Errorf("phases = %d, want 7 (6 advance + backup)", len(res.Phases))
+	if len(res.Phases) != 8 {
+		t.Errorf("phases = %d, want 8 (7 advance + backup)", len(res.Phases))
 	}
 }
 
@@ -232,8 +233,8 @@ func TestRunCycle_End_PhasesAreOnePerPhaseAcrossRounds(t *testing.T) {
 	for _, p := range res.Phases {
 		seen[p.Phase]++
 	}
-	if len(res.Phases) != 9 {
-		t.Errorf("phases = %d, want 9", len(res.Phases))
+	if len(res.Phases) != 10 {
+		t.Errorf("phases = %d, want 10", len(res.Phases))
 	}
 	for p, n := range seen {
 		if n != 1 {
@@ -285,7 +286,7 @@ func TestRunCycle_End_StopAtAMidRoundBoundaryDoesNotStartTheNextPhase(t *testing
 	if f.judgedCount(JudgmentJ5) != 0 || f.judgedCount(JudgmentJ6) != 0 {
 		t.Errorf("judged = %v, want no verify/learn", f.judged)
 	}
-	if len(res.Phases) != 7 || !f.backupRan() || f.cancels() != 0 {
+	if len(res.Phases) != 8 || !f.backupRan() || f.cancels() != 0 {
 		t.Errorf("phases=%d backup=%v cancels=%d", len(res.Phases), f.backupRan(), f.cancels())
 	}
 }
@@ -300,20 +301,6 @@ func (c stopOnStartClient) Start(ctx context.Context, in ContractLaunchInput) (C
 	out, err := c.ContractClient.Start(ctx, in)
 	c.stop()
 	return out, err
-}
-
-// checksHook は、チェックの取得（完了の検証の段で、判断点の予算の評価より前に呼ばれる）の直前に before を呼ぶ。
-// 回りの途中（段の途中）で止める指示を入れるための、試験の側の口。
-type checksHook struct {
-	UpstreamCheckSource
-	before func()
-}
-
-func (h *checksHook) GetPullRequestChecks(ctx context.Context, repo string, number int) (UpstreamPullRequestChecks, error) {
-	if h.before != nil {
-		h.before()
-	}
-	return h.UpstreamCheckSource.GetPullRequestChecks(ctx, repo, number)
 }
 
 // 優先順の判定（止める指示 → 利用上限 → サイクルの費用の上限）。成り立つ理由を重ねて（同じ回りの終わりで 2 つ以上が成り立つ形）、先のものが採られることを確かめる。
@@ -339,22 +326,29 @@ func TestRoundEndReason_Order(t *testing.T) {
 	}
 }
 
-// 段のエラーと止める指示の両方が同じ回りで成り立つ → error・aborted。完了の検証の段の途中（チェックの取得）で止める指示を入れ、
-// 同じ回りの終わりの進みの指紋の読みがストアのエラーになる（読む表が無い）ようにする。回りの終わりの止める指示の読みより先にエラーが出るので、
+// 段のエラーと止める指示の両方が同じ回りで成り立つ → error・aborted。スーパーバイザーの段の途中（判断点の呼び出しの中）で止める指示を入れ、
+// 同じ段の手の実行の書き込みがストアのエラーになる（読む表が無い）ようにする。回りの終わりの止める指示の読みより先にエラーが出るので、
 // 判定の順を入れ替える・エラーを止める指示の後ろへ置くと通らない。
 func TestRunCycle_End_ErrorAndStopInTheSameRound(t *testing.T) {
 	t.Parallel()
 	f := newRoundsFixture(t)
 	f.startOut(contractOut(ContractStateRunning, nil, nil))
 	f.reads(reviewWaitOut())
-	in := f.input(f.invoker(t))
-	in.Checks = &checksHook{UpstreamCheckSource: f.j5.checks, before: func() {
+	if _, err := holdViaEntrance(t, f.s, StatusVerifying, HoldKindHuman, HoldOptionsInput{StopKind: StopKindVerifyUncertain, SupervisorEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	base := f.invoker(t)
+	in := f.input(&cycleFakeInvoker{handle: func(c cycleCall) JudgmentLaunchOutput {
+		if c.Judgment != JudgmentSV {
+			return base.handle(c)
+		}
 		f.requestStop(t)
 		mexec(t, f.s, `ALTER TABLE hold RENAME TO hold_gone`)
-	}}
+		return svResult(nil)
+	}})
 	_, err := f.s.RunCycle(context.Background(), in)
-	if err == nil {
-		t.Fatal("want the stage error")
+	if err == nil || !strings.Contains(err.Error(), "supervise hold") {
+		t.Fatalf("err = %v, want the supervise stage error", err)
 	}
 	if !f.stopRequested(t) {
 		t.Fatal("the stop request was not recorded in the same round")

@@ -475,11 +475,14 @@ func TestParseSVOutput(t *testing.T) {
 	}
 }
 
-// 手の実行の入口の雛形: 振り分けは 1 か所の switch で、7 つの手のどれも「まだ無い」を返す。未知の手は検証の誤り。
-func TestExecuteSupervisorHand_EveryHandIsAScaffoldThatIsNotImplementedYet(t *testing.T) {
+// 手の実行の入口: 振り分けは 1 か所の switch。escalate 以外の手は、まだ無い（雛形）。未知の手は検証の誤り。
+func TestExecuteSupervisorHand_OnlyEscalateIsImplementedYet(t *testing.T) {
 	t.Parallel()
 	s, _ := newWorkspaceStore(t)
 	for _, h := range SupervisorHandValues() {
+		if h == HandEscalate {
+			continue
+		}
 		_, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{Output: SVOutput{Hand: h}})
 		if !errors.Is(err, ErrSupervisorHandNotImplemented) {
 			t.Errorf("hand %s: err = %v, want ErrSupervisorHandNotImplemented", h, err)
