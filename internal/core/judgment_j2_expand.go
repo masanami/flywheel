@@ -31,6 +31,10 @@ const (
 	labelExpandDoneResults  = "済んだタスクの結果"
 	labelExpandBudget       = "上限と残り"
 	labelExpandOrigin       = "足す依頼の出どころ"
+	// 出どころが followup の足す依頼の入力にだけ入る区画。
+	labelExpandFollowupOrigin = "フォローアップの出どころ"
+	labelExpandFollowupTitle  = "フォローアップの題名"
+	labelExpandFollowupDetail = "フォローアップの説明"
 )
 
 // j2ExpandVerdict は「足す」の形の判断値。
@@ -54,17 +58,25 @@ type j2ExpandRawOutput struct {
 
 // j2ExpandOutputSchema は「足す」の形の出力スキーマ（j2OutputSchema とは別）。タスクの項目は計画のタスクと同じ
 // （j2OutputSchema の tasks の items を使う）。件数は計画のタスクの上限まで。
-func j2ExpandOutputSchema() []byte {
+func j2ExpandOutputSchema() []byte { return j2ExpandOutputSchemaFor(TaskAdditionOriginExpand) }
+
+// j2ExpandOutputSchemaFor は足す依頼の出どころ origin の「足す」の形の出力スキーマ。出どころが followup のときは、判断値を add・ask だけ、
+// タスクを 1 個までにする（検査は、スキーマに頼らず validateJ2ExpandOutput が同じ規則で行う）。
+func j2ExpandOutputSchemaFor(origin TaskAdditionOrigin) []byte {
 	var plan map[string]any
 	if err := json.Unmarshal(j2OutputSchema(), &plan); err != nil {
 		panic(err) // 定数の組み立ての失敗（起きない）
 	}
 	tasks := plan["properties"].(map[string]any)["tasks"].(map[string]any)
+	verdicts, maxTasks := []string{string(j2ExpandNone), string(j2ExpandAdd), string(j2ExpandAsk)}, MaxPlanTasks
+	if origin == TaskAdditionOriginFollowup {
+		verdicts, maxTasks = []string{string(j2ExpandAdd), string(j2ExpandAsk)}, 1
+	}
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"verdict":  map[string]any{"type": "string", "enum": []string{string(j2ExpandNone), string(j2ExpandAdd), string(j2ExpandAsk)}},
-			"tasks":    map[string]any{"type": []string{"array", "null"}, "items": tasks["items"], "maxItems": MaxPlanTasks},
+			"verdict":  map[string]any{"type": "string", "enum": verdicts},
+			"tasks":    map[string]any{"type": []string{"array", "null"}, "items": tasks["items"], "maxItems": maxTasks},
 			"question": map[string]any{"type": []string{"string", "null"}},
 			"options":  map[string]any{"type": []string{"array", "null"}, "items": map[string]any{"type": "string"}},
 		},
@@ -279,6 +291,9 @@ type expandTarget struct {
 	Challenge  int64
 	Addition   int64
 	OriginTask *int64
+	// Origin は足す依頼の出どころ。Followup は出どころが followup のときの、元のフォローアップ（内部整数 ID）。
+	Origin   TaskAdditionOrigin
+	Followup *int64
 }
 
 // expandCallable は着手中の課題 cid について、判断点を「足す」の形で呼べるかを返す（足せる・タスクに結び付かない実行が無い）。
@@ -296,7 +311,7 @@ func expandCallable(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDecl
 }
 
 // selectJ2ExpandTargets は判断点を「足す」の形で呼ぶ対象を、課題の優先度→ID の順で返す。対象は、着手中で、統合先を使い、見込みが
-// 分かり、タスクに結び付かない実行が無く、pending の足す依頼を持つ課題。課題ごとに古いほうの 1 件だけ。保留中・見込みが不明の課題は
+// 分かり、タスクに結び付かない実行が無く、pending の足す依頼（出どころ expand・followup）を持つ課題。課題ごとに古いほうの 1 件だけ。保留中・見込みが不明の課題は
 // 含まない。別のタスクの実行が着手中でも対象になる。
 func selectJ2ExpandTargets(ctx context.Context, tx *sql.Tx, agent *AgentDeclaration) (out []expandTarget, excluded []NotStarted, err error) {
 	challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusInProgress)
@@ -309,10 +324,11 @@ func selectJ2ExpandTargets(ctx context.Context, tx *sql.Tx, agent *AgentDeclarat
 			continue
 		}
 		var aid int64
-		var origin sql.NullInt64
+		var origin, followup sql.NullInt64
+		var kind string
 		err := tx.QueryRowContext(ctx,
-			`SELECT id, origin_task_id FROM task_addition WHERE challenge_id = ? AND origin = ? AND state = ? ORDER BY id LIMIT 1`,
-			cid, string(TaskAdditionOriginExpand), string(TaskAdditionPending)).Scan(&aid, &origin)
+			`SELECT id, origin, origin_task_id, followup_id FROM task_addition WHERE challenge_id = ? AND state = ? AND (origin = ? OR (origin = ? AND followup_id IN (SELECT id FROM followup WHERE status = ?))) ORDER BY id LIMIT 1`,
+			cid, string(TaskAdditionPending), string(TaskAdditionOriginExpand), string(TaskAdditionOriginFollowup), string(FollowupStatusOpen)).Scan(&aid, &kind, &origin, &followup)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -330,10 +346,14 @@ func selectJ2ExpandTargets(ctx context.Context, tx *sql.Tx, agent *AgentDeclarat
 		if !callable {
 			continue
 		}
-		tg := expandTarget{Challenge: cid, Addition: aid}
+		tg := expandTarget{Challenge: cid, Addition: aid, Origin: TaskAdditionOrigin(kind)}
 		if origin.Valid {
 			v := origin.Int64
 			tg.OriginTask = &v
+		}
+		if followup.Valid {
+			v := followup.Int64
+			tg.Followup = &v
 		}
 		out = append(out, tg)
 	}
@@ -356,6 +376,7 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 		hasSrc   bool
 		approved int64
 		qaText   string
+		fu       *Followup
 	)
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -392,6 +413,11 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 		if limitR, _, err = challengeBudgetLimit(ctx, tx, cid); err != nil {
 			return err
 		}
+		if tg.Followup != nil {
+			if fu, err = loadFollowup(ctx, tx, *tg.Followup); err != nil {
+				return err
+			}
+		}
 		qaText, err = expandQuestionAnswerText(ctx, tx, tg.Addition)
 		return err
 	})
@@ -408,7 +434,11 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 	origin := ""
 	for _, t := range tasks {
 		if tg.OriginTask != nil && t.ID == formatTaskID(*tg.OriginTask) {
-			origin = fmt.Sprintf("足す依頼の出どころ（続きを決めるタスク）: %s（%s）", taskLabel(t), oneLine(t.Title))
+			if tg.Origin == TaskAdditionOriginFollowup {
+				origin = fmt.Sprintf("フォローアップを書いたタスク: %s（%s）", taskLabel(t), oneLine(t.Title))
+			} else {
+				origin = fmt.Sprintf("足す依頼の出どころ（続きを決めるタスク）: %s（%s）", taskLabel(t), oneLine(t.Title))
+			}
 		}
 	}
 	sections := []JudgmentDataSection{
@@ -418,7 +448,16 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 		{Label: labelExpandTasks, Content: formatExpandTasksSection(tasks)},
 	}
 	if origin != "" {
-		sections = append(sections, JudgmentDataSection{Label: labelExpandOrigin, Content: origin})
+		label := labelExpandOrigin
+		if tg.Origin == TaskAdditionOriginFollowup {
+			label = labelExpandFollowupOrigin
+		}
+		sections = append(sections, JudgmentDataSection{Label: label, Content: origin})
+	}
+	if fu != nil {
+		sections = append(sections,
+			JudgmentDataSection{Label: labelExpandFollowupTitle, Content: fu.Title},
+			JudgmentDataSection{Label: labelExpandFollowupDetail, Content: fu.Detail})
 	}
 	if qaText != "" {
 		sections = append(sections, JudgmentDataSection{Label: labelHoldRecord, Content: qaText})
@@ -642,7 +681,7 @@ func (s *Store) runJ2ExpandOnce(ctx context.Context, in J2AutoInput, jc *Judgmen
 		MaxBudgetUSD: maxBudget,
 		TimeoutSec:   in.AgentDecl.TimeoutSec.Judgment,
 		Sections:     sections,
-		OutputSchema: j2ExpandOutputSchema(),
+		OutputSchema: j2ExpandOutputSchemaFor(tg.Origin),
 		Invoker:      in.Invoker,
 		TaskLess:     true,
 	})
