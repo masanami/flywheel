@@ -1,0 +1,232 @@
+package core
+
+// このファイルは、サイクルの回り（進める段を 1 回ずつ通すこと）の繰り返しの制御を持つ（区切り S4a）。
+// 回りの中の段は S3d までの 1 回のサイクルと同じ（cycle_run.go の runAdvancePhases）で、ここは、回りの頭の読み直し・
+// 回りの終わりの数え（CountRoundWork）・進みの判定・間隔の待ち・歯止め・終わる条件だけを持つ。
+//
+// 回りごとに作り直すもの: 同じ実行・同じ課題に 1 回だけ触れるための見送り。段の中のそれは、段が呼ばれるたびにストアの状態と
+// 段の関数のローカルの値から作り直される（メモリ上に回りをまたいで持つ印は無い）。
+// サイクルを通して持つもの: 費用の集計（周の ID で束ねた run の費用。サイクルの費用の上限の評価に入る）と、利用上限の印
+// （JudgmentCycle）。
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// defaultCyclePollInterval は、宣言の cycle_poll_interval_sec が読めないとき（0 以下）に使う間隔。
+const defaultCyclePollInterval = time.Duration(defaultCyclePollIntervalSec) * time.Second
+
+// sleepContext は d の間待つ（ctx が取り消されたらその時点で戻り、ctx のエラーを返す）。
+func sleepContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// runRounds は進める段の回りを、終える条件になるまで繰り返す。段ごとの結果を回りをまたいで足し合わせて *phases へ入れる
+// （進める段の 6 つ。skipped の段も含める）。
+func (s *Store) runRounds(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle, phases *[]CyclePhaseResult, executed *[]ReleaseExecItem) (CycleEndReason, error) {
+	wait := in.Wait
+	if wait == nil {
+		wait = s.roundWait
+	}
+	if wait == nil {
+		wait = sleepContext
+	}
+	interval := time.Duration(in.AgentDecl.CyclePollIntervalSec) * time.Second
+	if interval <= 0 {
+		interval = defaultCyclePollInterval
+	}
+	var gov roundGovernor
+	for round := 1; ; round++ {
+		// 回りの頭で、ストアを読み直す（回りの間に記録された承認・回答・差し戻し・予算の増額・取り込みは、この回りの段が読む）。
+		before, err := s.progressFingerprint(ctx)
+		if err != nil {
+			return "", err
+		}
+		res, err := s.runAdvancePhases(ctx, in, cycleID, jc, executed)
+		if err != nil {
+			return "", err
+		}
+		*phases = mergeRoundPhases(*phases, res)
+		if err := s.SetCycleRounds(ctx, cycleID, round); err != nil {
+			return "", err
+		}
+		after, err := s.progressFingerprint(ctx)
+		if err != nil {
+			return "", err
+		}
+		progressed := before != after
+
+		// 終わる条件の判定は、足し合わせる前の、この回りの段の結果で行う。
+		if jc.RateLimited() {
+			return CycleEndRateLimited, nil
+		}
+		if roundHitCycleBudget(res) {
+			return CycleEndBudget, nil
+		}
+		work, err := s.CountRoundWork(ctx, in.AgentDecl, in.ConnDecl)
+		if err != nil {
+			return "", err
+		}
+		switch gov.decide(progressed, work) {
+		case roundSettled:
+			return CycleEndSettled, nil
+		case roundStalled:
+			return CycleEndStalled, nil
+		case roundNext:
+			continue // 待たずに次の回りへ
+		}
+		if err := s.waitBetweenRounds(ctx, cycleID, wait, interval); err != nil {
+			return "", err
+		}
+	}
+}
+
+// roundAction は、回りの終わりの数えと進みから決まる、次の動き。
+type roundAction int
+
+const (
+	// roundSettled は、いま始められるものも作業中の実行も無いので、回りの繰り返しを終える（settled）。
+	roundSettled roundAction = iota
+	// roundStalled は、作業中の実行が無いまま進みの無い回りが続いたので、回りの繰り返しを終える（stalled）。
+	roundStalled
+	// roundNext は、待たずに次の回りへ進む。
+	roundNext
+	// roundWait は、間隔の待ちを 1 回置いてから次の回りへ進む。
+	roundWait
+)
+
+// roundGovernor は、回りの終わりの数えと進みから、次の動きを決める。歯止め（進みの無い回りの連続の数）を持つ。
+type roundGovernor struct {
+	// noProgress は、作業中の実行が無いまま、いま始められるものがあって進みの無かった回りの連続の数。
+	noProgress int
+}
+
+// decide は、回りの終わりの数え w と、その回りに進みがあったか（progressed）から、次の動きを返す。
+//   - いま始められるもの 0・作業中の実行 0 → roundSettled
+//   - いま始められるもの 1 以上・進み有り → roundNext（連続の数は 0 に戻る）
+//   - いま始められるもの 0・作業中の実行 1 以上 → roundWait（作業中の実行を読み直すだけの回り。連続の数は 0 に戻る）
+//   - いま始められるもの 1 以上・進み無し・作業中の実行 1 以上 → roundWait（連続の数は 0 に戻る）
+//   - いま始められるもの 1 以上・進み無し・作業中の実行 0 → 連続の数を 1 足し、3 に達したら roundStalled、達しなければ roundWait
+func (g *roundGovernor) decide(progressed bool, w *RoundWork) roundAction {
+	switch {
+	case w.Startable == 0 && w.Active == 0:
+		return roundSettled
+	case w.Startable > 0 && progressed:
+		g.noProgress = 0
+		return roundNext
+	case w.Startable == 0 || w.Active > 0:
+		g.noProgress = 0
+		return roundWait
+	}
+	g.noProgress++
+	if g.noProgress >= cycleStalledRounds {
+		return roundStalled
+	}
+	return roundWait
+}
+
+// waitBetweenRounds は間隔の待ちを 1 回置く。待ちの前後でロックの heartbeat を更新する。ロックを失っていた（別のサイクルが回収した）ときは、
+// 回りの繰り返しを続けず、ErrLockLost で終える（失ったまま段を重ねると、回収した側のサイクルと並んで動く）。
+func (s *Store) waitBetweenRounds(ctx context.Context, cycleID string, wait func(context.Context, time.Duration) error, d time.Duration) error {
+	if err := s.HeartbeatCycleLock(ctx, cycleID); errors.Is(err, ErrLockLost) {
+		return err
+	}
+	err := wait(ctx, d)
+	// 待ちの間に ctx が取り消されても、周を閉じる側がロックを扱う。更新は取り消しに依存させない。
+	if hbErr := s.HeartbeatCycleLock(context.WithoutCancel(ctx), cycleID); errors.Is(hbErr, ErrLockLost) {
+		return hbErr
+	}
+	return err
+}
+
+// roundHitCycleBudget は、この回りの段の結果に、起動しなかった理由がサイクルの費用の上限（cycle_budget）のものが 1 件でもあるか。
+// 課題の枠（run_budget）は含めない。
+func roundHitCycleBudget(round []CyclePhaseResult) bool {
+	for _, p := range round {
+		for _, ns := range p.NotStarted {
+			if ns.Reason == NotStartedCycleBudget {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mergeRoundPhases は、回りの段の結果を足し合わせる。段ごとに 1 要素のまま（対象の一覧と起動しなかったものの一覧は連結し、
+// 1 つだけの値〔取り込みの結果・書き出しの結果など〕は最後の回りのもの）。
+func mergeRoundPhases(acc, round []CyclePhaseResult) []CyclePhaseResult {
+	if len(acc) == 0 {
+		return append([]CyclePhaseResult{}, round...)
+	}
+	for i := range round {
+		a, r := &acc[i], round[i]
+		a.Skipped = r.Skipped
+		if r.Ingest != nil {
+			a.Ingest = r.Ingest
+		}
+		a.Items = append(a.Items, r.Items...)
+		a.NotStarted = append(a.NotStarted, r.NotStarted...)
+		a.ReleaseItems = append(a.ReleaseItems, r.ReleaseItems...)
+		a.ReleaseTidied = append(a.ReleaseTidied, r.ReleaseTidied...)
+		a.ImproveItems = append(a.ImproveItems, r.ImproveItems...)
+	}
+	return acc
+}
+
+// progressFingerprint は「進み」の判定に使う、ストアの状態の指紋を返す。回りの前と後で指紋が変わったことを、進みとする。
+// 見るのは、課題の状態・タスクの進み・契約の実行の記録した状態（終わったかどうかを含む）と「入れてよい」を返した印・
+// 不可逆操作の状態・保留の開閉。失敗や見送りの記録（実行の記録・作業ログ）は見ない（増えただけの回りは、進みに数えない）。
+func (s *Store) progressFingerprint(ctx context.Context) (string, error) {
+	h := sha256.New()
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		queries := []string{
+			`SELECT 'c', id, status FROM challenge ORDER BY id`,
+			`SELECT 't', id, status FROM task ORDER BY id`,
+			`SELECT 'k', id, state || '|' || COALESCE(ended_at, '') || '|' || land_delivered || '|' || COALESCE(land_ref, '') || '|' || COALESCE(requested_kind, '') || '|' || COALESCE(wait_hold_id, '') || '|' || COALESCE(verified_ref, '') || '|' || COALESCE(fix_verified_ref, '') || '|' || COALESCE(fix_pending_ref, '') || '|' || held_success FROM contract_run ORDER BY id`,
+			`SELECT 'o', id, state FROM operation ORDER BY id`,
+			`SELECT 'h', id, COALESCE(answered_at, '') || '|' || COALESCE(closed_at, '') FROM hold ORDER BY id`,
+		}
+		for _, q := range queries {
+			rs, err := tx.QueryContext(ctx, q)
+			if err != nil {
+				return err
+			}
+			for rs.Next() {
+				var kind string
+				var id int64
+				var v string
+				if err := rs.Scan(&kind, &id, &v); err != nil {
+					_ = rs.Close()
+					return err
+				}
+				_, _ = fmt.Fprintf(h, "%s:%d:%s\n", kind, id, v)
+			}
+			if err := rs.Err(); err != nil {
+				_ = rs.Close()
+				return err
+			}
+			_ = rs.Close()
+		}
+		return nil
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}

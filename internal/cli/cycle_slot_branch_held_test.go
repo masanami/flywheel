@@ -88,13 +88,17 @@ func TestCycle_PreviousBranchHeldOutsidePlacement_NotStartedWithDetail_RealGit(t
 	doc := cycleDoc(t, ws)
 	pm := cyclePhase(t, doc, "run")
 	ns, _ := pm["not_started"].([]any)
-	if len(ns) != 1 {
-		t.Fatalf("not_started = %v, want one", ns)
+	// 進みの無い回りは、回りごとに同じ理由の項目を足す（作業ツリーが空かないので、回りを重ねても同じ）。
+	if len(ns) < 1 {
+		t.Fatalf("not_started = %v, want at least one", ns)
+	}
+	for _, e := range ns {
+		n := e.(map[string]any)
+		if n["challenge_id"] != id || n["reason"] != "slot_unavailable" {
+			t.Fatalf("not_started entry = %v, want %s slot_unavailable", n, id)
+		}
 	}
 	n := ns[0].(map[string]any)
-	if n["challenge_id"] != id || n["reason"] != "slot_unavailable" {
-		t.Fatalf("not_started[0] = %v, want %s slot_unavailable", n, id)
-	}
 	realBase, err := filepath.EvalSymlinks(base)
 	if err != nil {
 		t.Fatal(err)

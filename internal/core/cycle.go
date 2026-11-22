@@ -67,7 +67,25 @@ type Cycle struct {
 	Result    CycleResult
 	BudgetUSD float64
 	SpentUSD  float64
+	// EndReason は終わった理由（終わっていない周・この版より前の周は空）。Rounds は通した回りの数。
+	EndReason CycleEndReason
+	Rounds    int
 }
+
+// CycleEndReason はサイクルが終わった理由（cycle.end_reason の値）。
+type CycleEndReason string
+
+// CycleEndReason の値（このタスクで決めるのは、回りの繰り返しの終わり方の settled・stalled と、
+// 段のエラー・プロセスの停止・利用上限・サイクルの費用の上限の、順に先のものを採る基本の振り分け）。
+const (
+	CycleEndSettled     CycleEndReason = "settled"
+	CycleEndBudget      CycleEndReason = "budget"
+	CycleEndStopped     CycleEndReason = "stopped"
+	CycleEndRateLimited CycleEndReason = "rate_limited"
+	CycleEndStalled     CycleEndReason = "stalled"
+	CycleEndError       CycleEndReason = "error"
+	CycleEndInterrupted CycleEndReason = "interrupted"
+)
 
 // CycleResult は cycle.result の閉集合の公開エイリアス（run_store.go の
 // cycleResult をそのまま再輸出する。judgment.go の RunResult と同じ形）。
@@ -88,6 +106,8 @@ func toPublicCycle(c *cycleRow) *Cycle {
 		Result:    c.Result,
 		BudgetUSD: microsToUSD(c.BudgetUSD),
 		SpentUSD:  microsToUSD(c.SpentUSD),
+		EndReason: CycleEndReason(c.EndReason),
+		Rounds:    c.Rounds,
 	}
 	if c.EndedAt != nil {
 		t := *c.EndedAt
@@ -229,7 +249,7 @@ func (s *Store) reclaimStaleLockOrErrLocked(ctx context.Context, tx *sql.Tx, now
 		if err := s.closeDeadHolderRuns(ctx, tx, holderID, lock.PID, lock.Host, now); err != nil {
 			return err
 		}
-		if err := closeCycleAsEnded(ctx, tx, holderID, now, cycleResultInterrupted); err != nil {
+		if err := closeCycleAsEnded(ctx, tx, holderID, now, cycleResultInterrupted, CycleEndInterrupted); err != nil {
 			return err
 		}
 	}
@@ -296,6 +316,12 @@ func (s *Store) closeDeadHolderRuns(ctx context.Context, tx *sql.Tx, cycleID, pi
 // id が周の ID の形式でない・存在しなければ ErrNotFound。result が閉集合の
 // 外なら ErrValidation。
 func (s *Store) EndCycle(ctx context.Context, cycleID string, result CycleResult) (*Cycle, error) {
+	return s.EndCycleWithReason(ctx, cycleID, result, "")
+}
+
+// EndCycleWithReason は EndCycle に、終わった理由（end_reason）を足したもの。reason が空なら列に触れない
+// （終わった理由を持たない個別の操作の周）。
+func (s *Store) EndCycleWithReason(ctx context.Context, cycleID string, result CycleResult, reason CycleEndReason) (*Cycle, error) {
 	id, ok := parseCycleID(cycleID)
 	if !ok {
 		return nil, ErrNotFound
@@ -314,7 +340,7 @@ func (s *Store) EndCycle(ctx context.Context, cycleID string, result CycleResult
 		if cyc == nil {
 			return ErrNotFound
 		}
-		if err := closeCycleAsEnded(ctx, tx, id, now, result); err != nil {
+		if err := closeCycleAsEnded(ctx, tx, id, now, result, reason); err != nil {
 			return err
 		}
 		updated, err := loadCycleByID(ctx, tx, id)
@@ -332,7 +358,7 @@ func (s *Store) EndCycle(ctx context.Context, cycleID string, result CycleResult
 
 // closeCycleAsEnded は id の周の spent_usd を（その時点で終了している run の
 // cost_usd の合計へ）再計算してから、ended_at・result を記録する。
-func closeCycleAsEnded(ctx context.Context, tx *sql.Tx, id int64, endedAt time.Time, result cycleResult) error {
+func closeCycleAsEnded(ctx context.Context, tx *sql.Tx, id int64, endedAt time.Time, result cycleResult, reason CycleEndReason) error {
 	spent, err := cycleSpentMicros(ctx, tx, id)
 	if err != nil {
 		return err
@@ -340,8 +366,27 @@ func closeCycleAsEnded(ctx context.Context, tx *sql.Tx, id int64, endedAt time.T
 	if _, err := tx.ExecContext(ctx, `UPDATE cycle SET spent_usd = ? WHERE id = ?`, spent, id); err != nil {
 		return err
 	}
-	_, err = updateCycleEnd(ctx, tx, id, updateCycleEndInput{EndedAt: endedAt, Result: result})
+	_, err = updateCycleEnd(ctx, tx, id, updateCycleEndInput{EndedAt: endedAt, Result: result, EndReason: reason})
 	return err
+}
+
+// SetCycleRounds は周 cycleID の通した回りの数（rounds）を記録する（回りが終わるたびに呼ぶ。走っている間の様子に出す）。
+func (s *Store) SetCycleRounds(ctx context.Context, cycleID string, rounds int) error {
+	id, ok := parseCycleID(cycleID)
+	if !ok {
+		return ErrNotFound
+	}
+	err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE cycle SET rounds = ? WHERE id = ?`, rounds, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+	return classifyReadWriteErr(err)
 }
 
 // releaseCycleLockIfHolder は、サイクルの排他ロックの保持者が

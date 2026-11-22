@@ -406,11 +406,18 @@ func TestRunCycle_FailedRunIsAnErroredItemNotAnError(t *testing.T) {
 		t.Fatalf("RunCycle returned an error %v, want the failure shown in the result only (AC-144)", err)
 	}
 	cls := phaseOfResult(t, res, CyclePhaseClassify)
-	if len(cls.Items) != 1 || cls.Items[0].Result != RunResultErrored {
-		t.Fatalf("classify items = %+v, want 1 item with result errored (AC-145)", cls.Items)
+	// 失敗を返し続ける判断点は、回りを重ねても同じ課題の失敗の記録が増えるだけ（進み無し）。失敗はすべて errored の項目で示す。
+	if len(cls.Items) < 1 {
+		t.Fatalf("classify items = %+v, want at least 1 item (AC-145)", cls.Items)
 	}
-	if got := f.status(t, ch.ID); got != StatusUnclassified {
-		t.Errorf("status = %q, want it unchanged (%q)", got, StatusUnclassified)
+	for _, it := range cls.Items {
+		if it.Result != RunResultErrored {
+			t.Fatalf("classify items = %+v, want every item errored (AC-145)", cls.Items)
+		}
+	}
+	// 失敗を返し続ける判断点は、連続の失敗の上限で課題を保留にする（回りを重ねるので、上限に達する）。分類は写らない。
+	if got := f.status(t, ch.ID); got != StatusAwaitingHuman {
+		t.Errorf("status = %q, want %q (held at the failure limit; never classified)", got, StatusAwaitingHuman)
 	}
 	if res.Cycle.Result != CycleResultCompleted {
 		t.Errorf("Cycle.Result = %q, want completed", res.Cycle.Result)
@@ -855,12 +862,19 @@ func TestRunCycle_ReleasePhaseStartsAReflectRequestInsideTheCycle(t *testing.T) 
 	in.ConnDecl = conn
 	in.Checks = &fakeRelease{pr: openPR()}
 	in.Contract = client
-
-	res := f.run(t, in)
-	rel := phaseOfResult(t, res, CyclePhaseRelease)
-	if rel.Skipped || len(rel.ReleaseItems) != 1 || rel.ReleaseItems[0].OperationID != formatOperationID(opID) ||
-		rel.ReleaseItems[0].Result != ExecutionResultReflectStarted || rel.ReleaseItems[0].Route != ReleaseRouteReflectRequest {
-		t.Fatalf("release phase = %+v, want reflect_started on the reflect_request route", rel)
+	// 上げる依頼は作業中のままなので、サイクルは回りの間の待ちに入る。最初の待ちで取り消して、1 回目の回りだけを見る
+	// （取り消された周の結果は返らないので、反映の段が実行した項目は PartialReleaseError で受ける）。
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	in.Wait = func(ctx context.Context, _ time.Duration) error { cancel(); return ctx.Err() }
+	_, runErr := f.s.RunCycle(ctx, in)
+	var partial *PartialReleaseError
+	if !errors.As(runErr, &partial) {
+		t.Fatalf("RunCycle err = %v, want the cancellation carrying the executed releases", runErr)
+	}
+	if len(partial.Items) < 1 || partial.Items[0].OperationID != formatOperationID(opID) ||
+		partial.Items[0].Result != ExecutionResultReflectStarted || partial.Items[0].Route != ReleaseRouteReflectRequest {
+		t.Fatalf("executed releases = %+v, want reflect_started on the reflect_request route", partial.Items)
 	}
 	if len(client.starts) != 1 || client.starts[0][1] != "reflect" {
 		t.Errorf("starts = %v, want one commands.reflect call", client.starts)
