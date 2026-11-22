@@ -88,8 +88,10 @@ type Followup struct {
 	// PromotedTaskID は上げた先のタスク（"T-<n>"。出どころが followup の足す依頼で足したタスク）。上げていなければ nil。
 	// 上げた先は、これがあればこちら、無ければ PromotedChallengeID と読む。
 	PromotedTaskID *string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// PromotedTaskTitle は上げた先のタスクの題名。一覧（ListFollowups）が、PromotedTaskID があるものだけに入れる（CLI の表示用。API の値には出さない）。
+	PromotedTaskTitle *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // FollowupInput は createFollowup の入力。
@@ -268,7 +270,22 @@ func listFollowups(ctx context.Context, tx *sql.Tx, f FollowupFilter) ([]Followu
 		}
 		out = append(out, *fu)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	_ = rows.Close()
+	for i := range out {
+		if out[i].PromotedTaskID == nil {
+			continue
+		}
+		tid, _ := parseTaskID(*out[i].PromotedTaskID)
+		var title string
+		if err := tx.QueryRowContext(ctx, `SELECT title FROM task WHERE id = ?`, tid).Scan(&title); err != nil {
+			return nil, err
+		}
+		out[i].PromotedTaskTitle = &title
+	}
+	return out, nil
 }
 
 // ListFollowups はフォローアップを id の昇順で返す。Status が空なら全部（CLI の既定の open は呼び出し側が渡す）。
@@ -287,10 +304,16 @@ func (s *Store) ListFollowups(ctx context.Context, f FollowupFilter) ([]Followup
 }
 
 // openFollowupToTriageCond は「未で、オーナーがまだ扱いを決めていない」フォローアップの条件（表の別名は f）。
-// 未のうち、上げてあって上げた先の課題が取り下げでないもの（もう扱いを決めて進んでいるもの）を除く。
+// 未のうち、もう扱いを決めて進んでいるものを除く。上げた先は、タスクの列（promoted_task_id）があればそちら、無ければ課題の列。
+// 上げた先のタスクが取りやめでない間、上げた先の課題が取り下げでない間、閉じていない足す依頼（仕様待ち・オーナー待ち）がある間は、除く。
 // 状況（status）の未の件数と、課題のツリーの未のフォローアップの件数が、同じ条件を使う。
-const openFollowupToTriageCond = `f.status = '` + string(FollowupStatusOpen) + `' AND (f.promoted_challenge_id IS NULL
-	OR EXISTS (SELECT 1 FROM challenge c WHERE c.id = f.promoted_challenge_id AND c.status = '` + string(StatusWithdrawn) + `'))`
+const openFollowupToTriageCond = `f.status = '` + string(FollowupStatusOpen) + `' AND (
+	(f.promoted_task_id IS NULL AND (f.promoted_challenge_id IS NULL
+		OR EXISTS (SELECT 1 FROM challenge c WHERE c.id = f.promoted_challenge_id AND c.status = '` + string(StatusWithdrawn) + `')))
+	OR (f.promoted_task_id IS NOT NULL
+		AND EXISTS (SELECT 1 FROM task t WHERE t.id = f.promoted_task_id AND t.status = '` + string(TaskStatusCancelled) + `')))
+	AND NOT EXISTS (SELECT 1 FROM task_addition a WHERE a.followup_id = f.id
+		AND a.state IN ('` + string(TaskAdditionPending) + `', '` + string(TaskAdditionAwaitingOwner) + `'))`
 
 // countOpenFollowupsToTriage は、openFollowupToTriageCond に当たるフォローアップの件数。状況（status）の未の件数が使う。
 func countOpenFollowupsToTriage(ctx context.Context, tx *sql.Tx) (int, error) {
@@ -452,8 +475,8 @@ func reloadFollowups(ctx context.Context, tx *sql.Tx, nums []int64) ([]Followup,
 }
 
 // promoteFollowup は未のフォローアップを新しい課題（未分類）に上げる。フォローアップの状態は未のまま、
-// 上げた先を記録する。すでに上げてあるものは、上げた先の課題が取り下げのときだけ上げ直せる
-// （それ以外は ErrValidation）。作る課題は課題に属すれば出どころ followup（派生元はその課題）、
+// 上げた先を記録する。すでに上げてあるものは、checkPromotable の条件（上げた先の課題が取り下げ・上げた先のタスクが取りやめ・
+// 足す依頼が見送りか取り替えで閉じた）のときだけ上げ直せる（それ以外は ErrValidation）。作る課題は課題に属すれば出どころ followup（派生元はその課題）、
 // 属さなければ manual。
 func promoteFollowup(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att Attestation, id string) (*Challenge, *Followup, error) {
 	n, ok := parseFollowupID(id)
@@ -471,6 +494,8 @@ func promoteFollowup(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att
 	if f.PromotedChallengeID != nil {
 		prevPromoted = *f.PromotedChallengeID
 	}
+	// 新しい課題へ上げ直すと、上げた先は最後に上げたほうの 1 つになる（タスクの列は NULL に戻し、前の値は作業ログに残す）。
+	fbefore := map[string]any{"promoted_challenge_id": prevPromoted}
 	origin, followupOf := ChallengeOriginManual, (*string)(nil)
 	if f.ChallengeID != nil {
 		origin, followupOf = ChallengeOriginFollowup, f.ChallengeID
@@ -487,13 +512,17 @@ func promoteFollowup(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att
 	if err := rec.record("challenge", cid, "create", nil, cafter); err != nil {
 		return nil, nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE followup SET promoted_challenge_id = ?, updated_at = ? WHERE id = ?`,
+	if _, err := tx.ExecContext(ctx, `UPDATE followup SET promoted_challenge_id = ?, promoted_task_id = NULL, updated_at = ? WHERE id = ?`,
 		cid, formatTimestamp(rec.at), n); err != nil {
 		return nil, nil, err
 	}
 	fafter := map[string]any{"promoted_challenge_id": formatChallengeID(cid)}
+	if f.PromotedTaskID != nil {
+		fbefore["promoted_task_id"] = *f.PromotedTaskID
+		fafter["promoted_task_id"] = nil
+	}
 	att.addRelayTo(fafter)
-	if err := rec.record("followup", n, ActivityActionFollowupPromote, map[string]any{"promoted_challenge_id": prevPromoted}, fafter); err != nil {
+	if err := rec.record("followup", n, ActivityActionFollowupPromote, fbefore, fafter); err != nil {
 		return nil, nil, err
 	}
 	updated, err := loadFollowup(ctx, tx, n)
@@ -510,8 +539,9 @@ func promoteFollowup(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att
 // completeFollowupsPromotedTo は、課題 cid が完了（done）になったときに、cid へ上げてある未のフォローアップを
 // 済みにする（確かめた結果に上げた先の課題の ID を書き、followup_done を残す）。すでに済み・捨てたものは変えない。
 // 課題の遷移の実行の共通の所（runTransition）が、遷移先が done のときに同じトランザクションの中で呼ぶ。
+// 上げた先のタスクの列に値があるもの（上げた先はタスク）は対象にしない（タスクの済みの側で済みにする）。
 func completeFollowupsPromotedTo(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64) error {
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM followup WHERE promoted_challenge_id = ? AND status = ? ORDER BY id`, cid, string(FollowupStatusOpen))
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM followup WHERE promoted_challenge_id = ? AND promoted_task_id IS NULL AND status = ? ORDER BY id`, cid, string(FollowupStatusOpen))
 	if err != nil {
 		return err
 	}
@@ -541,6 +571,45 @@ func completeFollowupsPromotedTo(ctx context.Context, tx *sql.Tx, rec *activityR
 		}
 	}
 	return nil
+}
+
+// completeFollowupsPromotedToTask は、タスク tid が済み（done）になったときに、tid へ上げてある未のフォローアップを
+// 済みにする（確かめた結果に上げた先のタスクの ID を書き、followup_done を残す）。すでに済み・捨てたものは変えない。
+// タスクの状態を書く共通の所（setTaskStatus）が、同じトランザクションの中で呼ぶ。
+func completeFollowupsPromotedToTask(ctx context.Context, tx *sql.Tx, rec *activityRecorder, tid int64) error {
+	ids, err := queryInt64s(ctx, tx, `SELECT id FROM followup WHERE promoted_task_id = ? AND status = ? ORDER BY id`, tid, string(FollowupStatusOpen))
+	if err != nil {
+		return err
+	}
+	note := fmt.Sprintf("上げた先のタスク %s が済みになった", formatTaskID(tid))
+	for _, id := range ids {
+		f, err := loadFollowup(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if err := closeFollowup(ctx, tx, rec, nil, f, FollowupStatusDone, ActivityActionFollowupDone, "note", note); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// queryInt64s は 1 列の整数の結果を全部読む。
+func queryInt64s(ctx context.Context, tx *sql.Tx, q string, args ...any) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []int64
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }
 
 // CreateFollowup はフォローアップを 1 件書く（状態は open）。
@@ -623,11 +692,36 @@ func (s *Store) PromoteFollowup(ctx context.Context, id string, att Attestation)
 	return ch, fu, nil
 }
 
-// checkPromotable は f を課題に上げてよいかを検査する。未であること、上げてあるなら上げた先の課題が
-// 取り下げであること（それ以外は ErrValidation）。
+// checkPromotable は f を課題に上げてよいかを検査する（それ以外は ErrValidation）。
+// 未であること。フォローアップを指す、閉じていない足す依頼（仕様待ち・オーナー待ち）が無いこと。
+// 上げてあるなら、上げた先（タスクの列があればタスク、無ければ課題）が、取りやめのタスク・取り下げの課題であること。
+// 足す依頼が見送り・取り替えで閉じたものは、上げた先のタスクが無いので、上げ直せる。
 func checkPromotable(ctx context.Context, tx *sql.Tx, f *Followup) error {
 	if f.Status != FollowupStatusOpen {
 		return ErrValidation
+	}
+	fid, _ := parseFollowupID(f.ID)
+	var openAdditions int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_addition WHERE followup_id = ? AND state IN (?, ?)`,
+		fid, string(TaskAdditionPending), string(TaskAdditionAwaitingOwner)).Scan(&openAdditions); err != nil {
+		return err
+	}
+	if openAdditions > 0 {
+		return ErrValidation
+	}
+	if f.PromotedTaskID != nil {
+		tid, _ := parseTaskID(*f.PromotedTaskID)
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM task WHERE id = ?`, tid).Scan(&status); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if TaskStatus(status) != TaskStatusCancelled {
+			return ErrValidation
+		}
+		return nil
 	}
 	if f.PromotedChallengeID == nil {
 		return nil

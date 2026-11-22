@@ -65,7 +65,13 @@ func followupListText(fs []core.Followup) string {
 
 func writeFollowupLine(b *strings.Builder, f core.Followup) {
 	fmt.Fprintf(b, "  %s\t%s\t%s", f.ID, f.Status, escapeControl(f.Title))
-	if f.PromotedChallengeID != nil {
+	// 上げた先は、タスクの列に値があればタスク、無ければ課題。
+	switch {
+	case f.PromotedTaskID != nil && f.PromotedTaskTitle != nil:
+		fmt.Fprintf(b, "\t（タスク %s「%s」に上げた）", *f.PromotedTaskID, escapeControl(*f.PromotedTaskTitle))
+	case f.PromotedTaskID != nil:
+		fmt.Fprintf(b, "\t（タスク %s に上げた）", *f.PromotedTaskID)
+	case f.PromotedChallengeID != nil:
 		fmt.Fprintf(b, "\t（%s に上げた）", *f.PromotedChallengeID)
 	}
 	b.WriteString("\n")
