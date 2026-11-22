@@ -74,10 +74,11 @@ var judgmentPromptFile = map[core.JudgmentPoint]string{
 // J2 は core の見直し（区切り S2a。flywheel#749）で、12288 に、j2.md へ足した区画「問いと回答」の説明の 194 バイトを足した値へ引き上げた。
 // J2 は S2b の取り込み元の子の区画と source の書き方（j2.md へ 511 バイト）で、13312（13KiB）へ引き上げた。
 // J2 は S4c-1 の「足す」の形の呼び出しで、j2.md へ足した節（825 バイト）に、歯止めの余白 300 バイトを足した 15221 へ引き上げた。
+// J2 は S4c-1 の仕上げで、j2.md へ足した上限と理由・expand_after の書き方・「足す」の形の規律（794 バイト）に、歯止めの余白 300 バイトを足した 16315 へ引き上げた（足した節の分だけ）。
 // 仕様は docs/features/m3-invoker-delegation.md §指示文の歯止め）。
 var judgmentPromptLimit = map[string]int{
 	"j1.md": 4096,
-	"j2.md": 15221,
+	"j2.md": 16315,
 	"j3.md": 8192,
 	"j4.md": 4096,
 	"j5.md": 14473,

@@ -68,6 +68,7 @@ approve・reject・answer・budget・ingest <指定>・followup promote は、�
 
 --relayed は、人間と会話しているエージェントが会話で受けた操作を記録する口（端末での確認は行わない。
 --session は会話の識別、--quote は発言の要旨で、どちらも必須）。
+選択肢つきの問いへの回答（answer --option）は、オーナーの発言を、選択肢の識別に直して記録する。どの選択肢か決められないときは、記録せずに確かめる。
 
 詳細は docs/features/m1-core.md・docs/features/m3-invoker-delegation.md・docs/features/m4.5-learning-and-self-improvement.md を参照。
 `

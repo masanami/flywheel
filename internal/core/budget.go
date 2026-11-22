@@ -708,6 +708,37 @@ func budgetLimitBounds(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentD
 	return est.Impl + est.Review, lim, nil
 }
 
+// raiseBudgetLimit は課題 cid の上限を before から after にし（理由は変えない）、承認の記録（種類 budget・タスクの指定なし。
+// 対象の版は承認済みの計画の版 planVersion）と作業ログ（承認・上限の前後の額）を、呼び出し元のトランザクションの中で書き、
+// 承認の時刻を返す。`--limit`（executeBudgetLimit）と、足す依頼の保留への選択肢 add の回答（applyTaskAdditionAdd）が使う。
+func raiseBudgetLimit(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att Attestation, cid int64, planVersion int, before, after int64) (time.Time, error) {
+	_, reason, err := challengeBudgetLimit(ctx, tx, cid)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if err := setChallengeBudgetLimit(ctx, tx, cid, &after, reason); err != nil {
+		return time.Time{}, err
+	}
+	now, err := insertBudgetApproval(ctx, tx, rec, att, cid, planVersion, nil)
+	if err != nil {
+		return time.Time{}, err
+	}
+	beforeLimit := map[string]any{"limit_usd": microsToUSD(before)}
+	approveAfter := map[string]any{
+		"approval_kind": string(ApprovalKindBudget), "decision": string(ApprovalDecisionApproved),
+		"target_version": planVersion, "limit_usd": microsToUSD(after),
+	}
+	att.addRelayTo(approveAfter)
+	if err := rec.record("challenge", cid, string(OpApprove), beforeLimit, approveAfter); err != nil {
+		return time.Time{}, err
+	}
+	limitAfter := map[string]any{"limit_usd": microsToUSD(after), "verification": string(att.Verification())}
+	if err := rec.record("challenge", cid, ActivityActionBudgetLimit, map[string]any{"limit_usd": microsToUSD(before)}, limitAfter); err != nil {
+		return time.Time{}, err
+	}
+	return now, nil
+}
+
 // executeBudgetLimit は ExecuteBudget の、上限だけを変える形（--limit）。確認が成立し、課題の版と承認済みの計画の版が
 // ①の時点から変わっていないことを条件に、上限を指定した額にし、承認の記録（種類 budget・タスクの指定なし）と作業ログ
 // （承認・上限の前後の額）を 1 つのトランザクションで書く。理由は変えない。課題の状態と版は変えない。
@@ -746,27 +777,8 @@ func (s *Store) executeBudgetLimit(ctx context.Context, req BudgetRequest, att A
 		if limit < est {
 			return fmt.Errorf("%w: budget limit %v is smaller than the estimate %v", ErrValidation, *req.LimitUSD, microsToUSD(est))
 		}
-		_, reason, err := challengeBudgetLimit(ctx, tx, cid)
+		now, err := raiseBudgetLimit(ctx, tx, rec, att, cid, plan.Version, before, limit)
 		if err != nil {
-			return err
-		}
-		if err := setChallengeBudgetLimit(ctx, tx, cid, &limit, reason); err != nil {
-			return err
-		}
-		now, err := insertBudgetApproval(ctx, tx, rec, att, cid, plan.Version, nil)
-		if err != nil {
-			return err
-		}
-		approveAfter := map[string]any{
-			"approval_kind": string(ApprovalKindBudget), "decision": string(ApprovalDecisionApproved),
-			"target_version": plan.Version, "limit_usd": microsToUSD(limit),
-		}
-		att.addRelayTo(approveAfter)
-		if err := rec.record("challenge", cid, string(OpApprove), map[string]any{"limit_usd": microsToUSD(before)}, approveAfter); err != nil {
-			return err
-		}
-		limitAfter := map[string]any{"limit_usd": microsToUSD(limit), "verification": string(att.Verification())}
-		if err := rec.record("challenge", cid, ActivityActionBudgetLimit, map[string]any{"limit_usd": microsToUSD(before)}, limitAfter); err != nil {
 			return err
 		}
 		out = approvalOf(now, plan.Version, att)
