@@ -72,3 +72,39 @@ func FromFollowupPromote(r core.FollowupPromoteResult) FollowupPromoteResponse {
 	}
 	return out
 }
+
+// FollowupPromotePreviewResponse は `followup promote <ID> --preview` の成功の形（本人確認の前に見せる要約と同じ値。何も書かずに返す）。
+// destination は上げる先の種類（"challenge" か "task"）。タスクのとき target_challenge_id・target_challenge_title が上げる先の課題、
+// budget_impl_usd・budget_review_usd が足すタスクの枠、estimate_after_usd が足した後の見込み、limit_usd が上限
+// （超えるとき exceeds_by_usd が超える額、limit_after_usd が上げた後の上限。超えないとき exceeds_by_usd は 0、limit_after_usd は limit_usd と同じ）。
+// 新しい課題のとき、それらは null で、new_challenge_reason がタスクにしなかった理由。
+type FollowupPromotePreviewResponse struct {
+	BudgetImplUSD        *float64 `json:"budget_impl_usd"`
+	BudgetReviewUSD      *float64 `json:"budget_review_usd"`
+	Destination          string   `json:"destination"`
+	EstimateAfterUSD     *float64 `json:"estimate_after_usd"`
+	ExceedsByUSD         *float64 `json:"exceeds_by_usd"`
+	FollowupID           string   `json:"followup_id"`
+	LimitAfterUSD        *float64 `json:"limit_after_usd"`
+	LimitUSD             *float64 `json:"limit_usd"`
+	NewChallengeReason   *string  `json:"new_challenge_reason"`
+	TargetChallengeID    *string  `json:"target_challenge_id"`
+	TargetChallengeTitle *string  `json:"target_challenge_title"`
+}
+
+// FromFollowupPromotePlan は上げる前の内容を FollowupPromotePreviewResponse へ変換する。
+func FromFollowupPromotePlan(p *core.FollowupPromotePlan) FollowupPromotePreviewResponse {
+	out := FollowupPromotePreviewResponse{Destination: string(p.Dest), FollowupID: p.Followup.ID}
+	if p.Dest != core.FollowupPromoteToTask {
+		reason := p.NewChallengeReason
+		out.NewChallengeReason = &reason
+		return out
+	}
+	f := func(v float64) *float64 { return &v }
+	id, title := p.TargetChallengeID, p.TargetChallengeTitle
+	out.TargetChallengeID, out.TargetChallengeTitle = &id, &title
+	out.BudgetImplUSD, out.BudgetReviewUSD = f(p.BudgetImplUSD), f(p.BudgetReviewUSD)
+	out.EstimateAfterUSD, out.LimitUSD = f(p.EstimateAfterUSD), f(p.LimitUSD)
+	out.ExceedsByUSD, out.LimitAfterUSD = f(p.ExceedsByUSD()), f(p.LimitAfterUSD())
+	return out
+}
