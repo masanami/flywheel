@@ -41,6 +41,8 @@ const cycleFullAgentJSON = `{
   "rework_limit": 3,
   "failure_limit": 2,
   "improve_threshold": 10,
+  "cycle_poll_interval_sec": 30,
+  "auto_cycle": true,
   "memory_dir": "memory",
   "memory_write_limit": {"files": 5, "bytes": 8192}
 }`
