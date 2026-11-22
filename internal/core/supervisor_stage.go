@@ -18,16 +18,30 @@ type supervisorTarget struct {
 	TaskID      *int64
 	StopKind    StopKind
 	Question    string
+	// DeferredCount は手 defer を続けて打った回数（見送ったサイクルごとに 1 増える）。
+	DeferredCount int
 }
 
 // supervisorPendingWhere は「スーパーバイザー待ちで、まだ回答も取り下げも無い保留」の条件（hold h と challenge c を結合した上で使う）。
 const supervisorPendingWhere = `h.supervisor_state = 'pending' AND h.answer IS NULL AND h.closed_at IS NULL AND c.status = 'awaiting_human'`
 
-// selectSupervisorTargets は、処理するスーパーバイザー待ちの保留を古い順に返す（見送りの除外は defer の手のタスクが足す）。
-func selectSupervisorTargets(ctx context.Context, tx *sql.Tx) ([]supervisorTarget, error) {
+// supervisorNotDeferredIn は、cycleDBID（0 は条件なし）のサイクルで見送っていない、の条件（? を 2 つ使う）。
+const supervisorNotDeferredIn = ` AND (? = 0 OR h.deferred_cycle_id IS NULL OR h.deferred_cycle_id <> ?)`
+
+// supervisorDeferLimit は、手 defer が続いたら、次のサイクルで判断点を呼ばずにオーナーへ上げる連続の数。
+const supervisorDeferLimit = 3
+
+// cycleDBIDOf は周の ID（"Y-<n>"）の数値。解釈できなければ 0。
+func cycleDBIDOf(cycleID string) int64 {
+	n, _ := parseCycleID(cycleID)
+	return n
+}
+
+// selectSupervisorTargets は、処理するスーパーバイザー待ちの保留を古い順に返す。cycleDBID のサイクルで見送った保留は除く（0 なら除かない）。
+func selectSupervisorTargets(ctx context.Context, tx *sql.Tx, cycleDBID int64) ([]supervisorTarget, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT h.id, h.challenge_id, h.task_id, h.stop_kind, h.question FROM hold h JOIN challenge c ON c.id = h.challenge_id
-		 WHERE `+supervisorPendingWhere+` ORDER BY h.id ASC`)
+		`SELECT h.id, h.challenge_id, h.task_id, h.stop_kind, h.question, h.deferred_count FROM hold h JOIN challenge c ON c.id = h.challenge_id
+		 WHERE `+supervisorPendingWhere+supervisorNotDeferredIn+` ORDER BY h.id ASC`, cycleDBID, cycleDBID)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +61,7 @@ func scanSupervisorTarget(rows interface{ Scan(...any) error }) (*supervisorTarg
 	var t supervisorTarget
 	var taskID sql.NullInt64
 	var kind sql.NullString
-	if err := rows.Scan(&t.HoldID, &t.ChallengeID, &taskID, &kind, &t.Question); err != nil {
+	if err := rows.Scan(&t.HoldID, &t.ChallengeID, &taskID, &kind, &t.Question, &t.DeferredCount); err != nil {
 		return nil, err
 	}
 	if taskID.Valid {
@@ -63,7 +77,7 @@ func (s *Store) reloadSupervisorTarget(ctx context.Context, holdID int64) (*supe
 	var t *supervisorTarget
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		r := tx.QueryRowContext(ctx,
-			`SELECT h.id, h.challenge_id, h.task_id, h.stop_kind, h.question FROM hold h JOIN challenge c ON c.id = h.challenge_id
+			`SELECT h.id, h.challenge_id, h.task_id, h.stop_kind, h.question, h.deferred_count FROM hold h JOIN challenge c ON c.id = h.challenge_id
 			 WHERE h.id = ? AND `+supervisorPendingWhere, holdID)
 		v, err := scanSupervisorTarget(r)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -85,7 +99,7 @@ func (s *Store) superviseStage(ctx context.Context, in CycleRunInput, cycleID st
 	var targets []supervisorTarget
 	if err := classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
 		var err error
-		targets, err = selectSupervisorTargets(ctx, tx)
+		targets, err = selectSupervisorTargets(ctx, tx, cycleDBIDOf(cycleID))
 		return err
 	})); err != nil {
 		return res, err
@@ -97,6 +111,17 @@ func (s *Store) superviseStage(ctx context.Context, in CycleRunInput, cycleID st
 		}
 		if cur == nil {
 			continue // オーナーが先に回答した・取り下げた
+		}
+		if cur.DeferredCount >= supervisorDeferLimit {
+			// 手 defer が続いた。判断点を呼ばず、オーナーへ上げる（処理した件数には入れない）。
+			raised, err := s.escalateDeferExhausted(ctx, cycleID, *cur)
+			if err != nil {
+				return res, fmt.Errorf("escalate hold %d: %w", cur.HoldID, err)
+			}
+			if raised {
+				res.SuperviseHands[HandEscalate]++ // 結果が executed の対処の記録は、手ごとの件数に入る
+			}
+			continue
 		}
 		if jc != nil && jc.RateLimited() {
 			res.NotStarted = append(res.NotStarted, NotStarted{ChallengeID: formatChallengeID(cur.ChallengeID), Reason: NotStartedRateLimited})
@@ -140,6 +165,18 @@ func (s *Store) superviseOne(ctx context.Context, in CycleRunInput, cycleID stri
 	out, bad := s.verifySupervisorResult(ctx, call)
 	req := supervisorHandRequest{CycleID: cycleID, Target: t, RunID: call.Run.RunID, Decl: in.AgentDecl}
 	if bad != "" {
+		// 判断の間にオーナーが回答していたら、失敗として上げずに、結果を捨てる（owner_answered）。
+		var owner bool
+		if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+			var e error
+			owner, e = supervisorHoldAnsweredByOwner(ctx, tx, t.HoldID)
+			return e
+		}); err != nil {
+			return superviseOneResult{}, classifyReadWriteErr(err)
+		}
+		if owner {
+			return superviseOneResult{}, s.recordSupervisorRejected(ctx, req, "", RejectOwnerAnswered)
+		}
 		return superviseOneResult{}, s.recordSupervisorFailure(ctx, req, nil, bad)
 	}
 	req.Output = *out

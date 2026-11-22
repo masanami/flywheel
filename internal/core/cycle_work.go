@@ -252,6 +252,12 @@ type RoundWork struct {
 // agent が nil なら全て 0。conn が nil（connectors.json が無い）なら、反映・計画・委譲・完了の検証は飛ぶので 0。
 // 排他を放した後の「いま始められるもの」の数えも、この関数を使う。
 func (s *Store) CountRoundWork(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration) (*RoundWork, error) {
+	return s.countRoundWork(ctx, agent, conn, 0)
+}
+
+// countRoundWork は CountRoundWork の本体。cycleDBID が 0 でないとき、そのサイクルで見送った（手 defer）スーパーバイザー待ちの保留は数えない
+// （見送りだけで次の回りへ進まない）。
+func (s *Store) countRoundWork(ctx context.Context, agent *AgentDeclaration, conn *ConnectorsDeclaration, cycleDBID int64) (*RoundWork, error) {
 	w := &RoundWork{}
 	if agent == nil {
 		return w, nil
@@ -273,7 +279,7 @@ func (s *Store) CountRoundWork(ctx context.Context, agent *AgentDeclaration, con
 		}
 		w.Active = active
 		if agent.Supervisor {
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM hold h JOIN challenge c ON c.id = h.challenge_id WHERE `+supervisorPendingWhere).Scan(&st.Supervise); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM hold h JOIN challenge c ON c.id = h.challenge_id WHERE `+supervisorPendingWhere+supervisorNotDeferredIn, cycleDBID, cycleDBID).Scan(&st.Supervise); err != nil {
 				return err
 			}
 		}
