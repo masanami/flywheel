@@ -80,22 +80,18 @@ func (s *Store) runRounds(ctx context.Context, in CycleRunInput, cycleID string,
 		// 終わる条件の判定は、足し合わせる前の、この回りの段の結果で行う。
 		// 同じ回りで 2 つ以上成り立つときの優先順は error → interrupted → stopped → rate_limited → budget → stalled → settled
 		// （error・interrupted は段のエラーとして、この関数の外で決まる）。
-		if stop, err := s.cycleStopRequested(ctx, cycleID); err != nil {
+		stop, err := s.cycleStopRequested(ctx, cycleID)
+		if err != nil {
 			return "", err
-		} else if stop {
-			return CycleEndStopped, nil
 		}
-		if jc.RateLimited() {
-			return CycleEndRateLimited, nil
-		}
-		if roundHitCycleBudget(res) {
-			return CycleEndBudget, nil
+		if reason, ended := roundEndReason(stop, jc.RateLimited(), roundHitCycleBudget(res)); ended {
+			return reason, nil
 		}
 		work, err := s.CountRoundWork(ctx, in.AgentDecl, in.ConnDecl)
 		if err != nil {
 			return "", err
 		}
-		switch gov.decide(progressed, work) {
+		switch gov.decide(progressed, work, roundWaitsForChecks(res)) {
 		case roundSettled:
 			return CycleEndSettled, nil
 		case roundStalled:
@@ -111,6 +107,20 @@ func (s *Store) runRounds(ctx context.Context, in CycleRunInput, cycleID string,
 			return CycleEndStopped, nil
 		}
 	}
+}
+
+// roundEndReason は、この回りの終わりで成り立っている理由（止める指示・利用上限・サイクルの費用の上限）から、終える理由を選ぶ。
+// 2 つ以上成り立つときは stopped → rate_limited → budget の順（settled・stalled は、数えの後で決まる）。どれも成り立たなければ ended=false。
+func roundEndReason(stop, rateLimited, budget bool) (reason CycleEndReason, ended bool) {
+	switch {
+	case stop:
+		return CycleEndStopped, true
+	case rateLimited:
+		return CycleEndRateLimited, true
+	case budget:
+		return CycleEndBudget, true
+	}
+	return "", false
 }
 
 // roundAction は、回りの終わりの数えと進みから決まる、次の動き。
@@ -138,15 +148,20 @@ type roundGovernor struct {
 //   - いま始められるもの 1 以上・進み有り → roundNext（連続の数は 0 に戻る）
 //   - いま始められるもの 0・作業中の実行 1 以上 → roundWait（作業中の実行を読み直すだけの回り。連続の数は 0 に戻る）
 //   - いま始められるもの 1 以上・進み無し・作業中の実行 1 以上 → roundWait（連続の数は 0 に戻る）
+//   - 作業中の実行が 0 でも、チェック待ちがあれば、作業中の実行が 1 以上のときと同じ
 //   - いま始められるもの 1 以上・進み無し・作業中の実行 0 → 連続の数を 1 足し、3 に達したら roundStalled、達しなければ roundWait
-func (g *roundGovernor) decide(progressed bool, w *RoundWork) roundAction {
+//
+// checkWait は、この回りの段の結果にチェック待ち（roundWaitsForChecks）があること。チェック待ちは作業中の実行と同じ扱いにする
+// （待ち続け、進みの無い回りの連続の数に数えず、settled にも stalled にもしない）。
+func (g *roundGovernor) decide(progressed bool, w *RoundWork, checkWait bool) roundAction {
+	waiting := w.Active > 0 || checkWait
 	switch {
-	case w.Startable == 0 && w.Active == 0:
+	case w.Startable == 0 && !waiting:
 		return roundSettled
 	case w.Startable > 0 && progressed:
 		g.noProgress = 0
 		return roundNext
-	case w.Startable == 0 || w.Active > 0:
+	case w.Startable == 0 || waiting:
 		g.noProgress = 0
 		return roundWait
 	}
@@ -233,6 +248,25 @@ func roundHitCycleBudget(round []CyclePhaseResult) bool {
 	for _, p := range round {
 		for _, ns := range p.NotStarted {
 			if ns.Reason == NotStartedCycleBudget {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// roundWaitsForChecks は、この回りの段の結果に、チェックが終わっていないための待ちが 1 件でもあるか
+// （release の段の items の waiting_checks、または完了の検証が見送った waiting_external）。回りの終わりの数えの中で上流は読み直さない。
+// チェックの失敗（checks_failed）は含めない。
+func roundWaitsForChecks(round []CyclePhaseResult) bool {
+	for _, p := range round {
+		for _, it := range p.ReleaseItems {
+			if it.Result == ExecutionResultWaitingChecks {
+				return true
+			}
+		}
+		for _, ns := range p.NotStarted {
+			if ns.Reason == NotStartedWaitingExternal {
 				return true
 			}
 		}

@@ -87,6 +87,15 @@ const (
 	CycleEndInterrupted CycleEndReason = "interrupted"
 )
 
+// validOrEmpty は r が終わった理由の 7 値のいずれか、または空（理由を持たない周）か。
+func (r CycleEndReason) validOrEmpty() bool {
+	switch r {
+	case "", CycleEndSettled, CycleEndBudget, CycleEndStopped, CycleEndRateLimited, CycleEndStalled, CycleEndError, CycleEndInterrupted:
+		return true
+	}
+	return false
+}
+
 // CycleEndReasonValues は CycleEndReason の閉集合の全値を、定義の順に返す。
 func CycleEndReasonValues() []CycleEndReason {
 	return []CycleEndReason{CycleEndSettled, CycleEndBudget, CycleEndStopped, CycleEndRateLimited, CycleEndStalled, CycleEndError, CycleEndInterrupted}
@@ -331,7 +340,7 @@ func (s *Store) EndCycleWithReason(ctx context.Context, cycleID string, result C
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if !result.valid() {
+	if !result.valid() || !reason.validOrEmpty() {
 		return nil, ErrValidation
 	}
 	now := s.currentTime()
