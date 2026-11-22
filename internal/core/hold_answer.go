@@ -77,7 +77,7 @@ func loadHoldOptionsOf(ctx context.Context, tx *sql.Tx, holdID int64) ([]HoldOpt
 }
 
 // answerOptionUse は、回答の処理（ExecuteAnswer）の書き込みの中で、選ばれた識別を読む core の中の使う側。選択肢つきの回答のときだけ、
-// 回答の記録の後に同じ書き込みの中で呼ぶ。エラーを返せば回答ごと取り消す。回答の処理（ExecuteAnswer）が呼ぶが、Store.answerOptionUse に使う側を入れるのは試験だけで、本番の Store では nil のため何もしない（本番の使う側は S4c-1 が足す）。
+// 回答を記録する前（保留がまだ開いている間）に同じ書き込みの中で呼ぶ。エラーを返せば回答ごと取り消す。回答の処理（ExecuteAnswer）が呼ぶが、Store.answerOptionUse に使う側を入れるのは試験だけで、本番の Store では nil のため何もしない（本番の使う側は S4c-1 が足す）。
 type answerOptionUse func(ctx context.Context, tc *transitionCtx, holdID int64, optionID string) error
 
 // HoldTextEdit は開いている保留の書き換えの指定。Question が nil なら問いの文は変えない。Descriptions は選択肢の識別→新しい説明

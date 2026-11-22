@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/masanami/flywheel/internal/core/coretest"
@@ -83,10 +84,10 @@ func TestAnswerOption_IdentityFailureCallsNoStarter(t *testing.T) {
 	id := openOptionHold(t, ws)
 	st := &fakeStarter{launch: server.CycleLaunch{Started: true}}
 
-	code, stdout, _ := runWithStarter(t, st, "answer", id, "--option", "add", "--workspace", ws, "--json")
+	code, stdout, stderr := runWithStarter(t, st, "answer", id, "--option", "add", "--workspace", ws, "--json")
 
-	if code == 0 {
-		t.Fatalf("exit=0, want the identity check to fail (stdout=%q)", stdout)
+	if code != 1 || !strings.Contains(stdout+stderr, string(CodeTTYRequired)) {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want exit 1 with %s", code, stdout, stderr, CodeTTYRequired)
 	}
 	if len(st.calls) != 0 {
 		t.Errorf("starter calls = %v, want none", st.calls)
