@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 // このファイルは手 escalate と、保留をオーナーへ上げる共通の関数（失敗・断りで上げるときにも使う）。
@@ -14,6 +15,12 @@ type supervisorEscalation struct {
 	Recommendation string
 	// ActionID は対処の記録の ID（保留の supervisor_action_id に入れる）。
 	ActionID int64
+	// FailedQuestion が真なら、問いの先頭へ固定の 1 行（supervisorFailedQuestionHead）を付ける（判断できなかったとき）。
+	FailedQuestion bool
+	// ReplaceOptions が真なら、保留の選択肢を Options で置き換える。偽なら選択肢に触れない（保留がもともと持つ選択肢を残す）。
+	// 識別は core が並びの順に o1・o2… と振る。
+	ReplaceOptions bool
+	Options        []HoldOption
 }
 
 // errSupervisorHoldNotPending は、上げようとした保留がスーパーバイザー待ちでなくなっていたことを表す。
@@ -22,6 +29,14 @@ var errSupervisorHoldNotPending = errors.New("core: hold is no longer waiting fo
 // escalateSupervisorHold は保留 holdID を tx の中でオーナーへ上げる（supervisor_state を escalated にし、調べたことと推奨と対処の記録の ID を残す）。
 // 保留は閉じず、課題の状態も変えない（遷移を通らない）。スーパーバイザー待ちでなければ errSupervisorHoldNotPending。
 func escalateSupervisorHold(ctx context.Context, tx *sql.Tx, holdID int64, e supervisorEscalation) error {
+	var optionsJSON *string
+	if e.ReplaceOptions {
+		_, raw, err := resolveHoldOptions(e.Options)
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrValidation, err)
+		}
+		optionsJSON = raw
+	}
 	res, err := tx.ExecContext(ctx,
 		`UPDATE hold SET supervisor_state = ?, supervisor_findings = ?, supervisor_recommendation = ?, supervisor_action_id = ?
 		 WHERE id = ? AND supervisor_state = ? AND answer IS NULL AND closed_at IS NULL`,
@@ -34,13 +49,29 @@ func escalateSupervisorHold(ctx context.Context, tx *sql.Tx, holdID int64, e sup
 	} else if n == 0 {
 		return errSupervisorHoldNotPending
 	}
+	if e.FailedQuestion {
+		var q string
+		if err := tx.QueryRowContext(ctx, `SELECT question FROM hold WHERE id = ?`, holdID).Scan(&q); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE hold SET question = ? WHERE id = ?`, prefixSupervisorFailedQuestion(q), holdID); err != nil {
+			return err
+		}
+	}
+	if e.ReplaceOptions {
+		// 選択肢を置き換えた保留は、識別の無い回答を断らない（スーパーバイザーの選択肢は選ぶための見出しで、必須にしない）。
+		if _, err := tx.ExecContext(ctx, `UPDATE hold SET options = ?, option_required = 0 WHERE id = ?`, optionsJSON, holdID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// supervisorHandEscalate は手 escalate の実行。保留をオーナーへ上げる（findings・recommendation を保留に残す。選択肢の付与は別のタスク）。
+// supervisorHandEscalate は手 escalate の実行。保留をオーナーへ上げる（findings・recommendation・選択肢を保留に残す）。
 func (s *Store) supervisorHandEscalate(ctx context.Context, in supervisorHandInput) (supervisorHandOutcome, error) {
 	err := escalateSupervisorHold(ctx, in.Tx, in.HoldID, supervisorEscalation{
 		Findings: in.Output.Findings, Recommendation: in.Output.Recommendation, ActionID: in.ActionID,
+		ReplaceOptions: len(in.Output.Options) > 0, Options: in.Output.HoldOptions(),
 	})
 	if errors.Is(err, errSupervisorHoldNotPending) {
 		return supervisorHandOutcome{Result: ActionRejected, Reject: RejectStateChanged}, nil

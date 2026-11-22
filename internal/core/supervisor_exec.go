@@ -205,7 +205,7 @@ func (s *Store) recordSupervisorFailure(ctx context.Context, req supervisorHandR
 			return err
 		}
 		err = escalateSupervisorHold(ctx, tx, req.Target.HoldID, supervisorEscalation{
-			Findings: reason, Recommendation: "スーパーバイザーでは対処できなかった。オーナーが判断してください。", ActionID: id,
+			Findings: reason, Recommendation: "スーパーバイザーでは対処できなかった。オーナーが判断してください。", ActionID: id, FailedQuestion: true,
 		})
 		if errors.Is(err, errSupervisorHoldNotPending) {
 			return errSupervisorNotExecuted
