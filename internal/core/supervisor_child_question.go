@@ -143,9 +143,13 @@ func (s *Store) routeChildQuestions(ctx context.Context, p childRouteParams) (ch
 		}
 		return childRoute{Answered: true, Answers: out.Answers}, nil
 	}
-	id, err := s.recordSupervisorChildEscalate(ctx, req)
+	id, executed, err := s.recordSupervisorChildEscalate(ctx, req)
 	if err != nil {
 		return childRoute{}, err
+	}
+	if !executed {
+		// 判断の間に課題が着手中でなくなった。保留は作れない（保留を作る入口が、着手中でない課題には作らない）ので、断りの記録だけを残す。
+		return childRoute{}, nil
 	}
 	return childRoute{Escalation: &HoldEscalation{Findings: out.Findings, Recommendation: out.Recommendation, ActionID: id}}, nil
 }

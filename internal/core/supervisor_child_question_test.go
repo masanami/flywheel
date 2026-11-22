@@ -559,6 +559,27 @@ func TestChildQuestion_AnswerIsRejectedWhenTheChallengeLeftProgress(t *testing.T
 	}
 }
 
+// 判断の間に課題が着手中でなくなったら、上げる手も実行済みにしない（保留を作れないので、断りの記録 rejected・state_changed だけを残す）。
+func TestChildQuestion_EscalateIsRejectedWhenTheChallengeLeftProgress(t *testing.T) {
+	t.Parallel()
+	c := newLimitCase(t)
+	ctx := context.Background()
+	coretest.Exec(t, c.s.workspace, `UPDATE challenge SET status = 'withdrawn' WHERE id = 1`)
+	req := supervisorHandRequest{CycleID: c.cycID, Target: supervisorTarget{ChallengeID: 1, StopKind: StopKindChildQuestion},
+		Output: SVOutput{Hand: HandEscalate, Findings: "f", Recommendation: "r"}}
+	_, executed, err := c.s.recordSupervisorChildEscalate(ctx, req)
+	if err != nil || executed {
+		t.Fatalf("executed = %v, err = %v; want not executed", executed, err)
+	}
+	acts, err := c.s.ListSupervisorActionsByChallenge(ctx, c.cid)
+	if err != nil || len(acts) != 1 {
+		t.Fatalf("actions = %d, %v", len(acts), err)
+	}
+	if a := acts[0]; a.Result != ActionRejected || a.RejectReason == nil || *a.RejectReason != RejectStateChanged {
+		t.Errorf("action = %+v; want rejected and state_changed", a)
+	}
+}
+
 // AC-59: 過去の J4 の実行の記録がある課題を、課題の詳細（flywheel show が読む値）で読める。J4 の記録は実行の一覧に残る。
 func TestChildQuestion_AC59_ChallengeWithPastJ4RunIsReadable(t *testing.T) {
 	t.Parallel()

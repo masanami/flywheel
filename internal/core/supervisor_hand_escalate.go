@@ -84,15 +84,26 @@ func (s *Store) supervisorHandEscalate(ctx context.Context, in supervisorHandInp
 
 // recordSupervisorChildEscalate は、子の問い（保留を作る前）にスーパーバイザーが escalate を選んだときの対処の記録（結果 executed）と作業ログを書き、
 // 対処の記録の ID を返す。保留はまだ無いので、hold_id は NULL（呼び出し元が、この ID を保留に結び付ける）。
-func (s *Store) recordSupervisorChildEscalate(ctx context.Context, req supervisorHandRequest) (int64, error) {
+// 判断の間に課題が着手中でなくなっていたら（取り下げなど）、保留を作れないので、同じ書き込みで断りの記録（rejected・state_changed）を残して
+// executed を偽で返す（呼び出し元は、保留を作らない）。
+func (s *Store) recordSupervisorChildEscalate(ctx context.Context, req supervisorHandRequest) (id int64, executed bool, err error) {
 	o := req.Output
-	in := req.actionInput(HandEscalate, o.Findings, o.Note, o.Basis, ActionExecuted, "")
-	in.HoldID = nil
-	var id int64
-	err := s.db.Write(ctx, func(tx *sql.Tx) error {
-		var err error
+	err = s.db.Write(ctx, func(tx *sql.Tx) error {
+		ch, err := loadChallenge(ctx, tx, req.Target.ChallengeID)
+		if err != nil {
+			return err
+		}
+		executed = ch.Status == StatusInProgress
+		in := req.actionInput(HandEscalate, o.Findings, o.Note, o.Basis, ActionExecuted, "")
+		if !executed {
+			in = req.actionInput(HandEscalate, o.Findings, o.Note, o.Basis, ActionRejected, RejectStateChanged)
+		}
+		in.HoldID = nil
 		id, err = s.writeSupervisorAction(ctx, tx, req, in)
 		return err
 	})
-	return id, classifyReadWriteErr(err)
+	if err != nil {
+		return 0, false, classifyReadWriteErr(err)
+	}
+	return id, executed, nil
 }
