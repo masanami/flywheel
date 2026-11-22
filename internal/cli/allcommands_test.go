@@ -547,6 +547,7 @@ var runLevelUsageErrorCases = [][]string{
 	{"answer", "C-1", "--choice", "Qx=1"},                       // 問いの番号が Q1 か 1 の形でない
 	{"answer", "C-1", "--choice", "Q1=1", "--choice", "1=2"},    // 同じ問いの番号を 2 度指定した
 	{"answer", "C-1", "--choice", "Q1=x"},                       // 選択肢の番号が 1 以上の整数でない
+	{"answer", "C-1", "--option", " "},                          // --option の識別が空
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の

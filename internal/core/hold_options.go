@@ -72,3 +72,9 @@ func parseHoldOptions(raw *string) ([]HoldOption, error) {
 	}
 	return opts, nil
 }
+
+// jsonMarshalOptions は選択肢の並びを options 列へ入れる JSON にする。
+func jsonMarshalOptions(opts []HoldOption) (string, error) {
+	b, err := json.Marshal(opts)
+	return string(b), err
+}

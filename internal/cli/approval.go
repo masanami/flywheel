@@ -302,15 +302,19 @@ func runAnswer(a Args) (any, error) {
 	id := a.Positional[0]
 	_, hasAnswer := a.Values["answer"]
 	replan := a.Bools["replan"]
+	option, hasOption := a.Values["option"]
 	planItems := len(a.Multi["choice"]) + len(a.Multi["text"])
 	if planItems > 0 {
-		if hasAnswer || replan {
-			return nil, NewError(CodeUsageError, "--choice・--text は --answer・--replan と同時に指定できません")
+		if hasAnswer || replan || hasOption {
+			return nil, NewError(CodeUsageError, "--choice・--text は --answer・--replan・--option と同時に指定できません")
 		}
 		return runPlanAnswer(a, id)
 	}
-	if !hasAnswer {
-		return nil, NewError(CodeUsageError, "--answer（保留への回答）か、--choice・--text（計画の問いへの答え）のどれかを指定してください")
+	if !hasAnswer && !hasOption {
+		return nil, NewError(CodeUsageError, "--answer か --option（保留への回答）、または --choice・--text（計画の問いへの答え）のどれかを指定してください")
+	}
+	if hasOption && strings.TrimSpace(option) == "" {
+		return nil, NewError(CodeUsageError, "--option には選択肢の識別を指定してください")
 	}
 	answer := a.Values["answer"]
 
@@ -318,7 +322,7 @@ func runAnswer(a Args) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	preview, err := a.Store.PrepareAnswer(context.Background(), id, answer)
+	preview, err := a.Store.PrepareAnswerOption(context.Background(), id, answer, option, replan)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -338,6 +342,7 @@ func runAnswer(a Args) (any, error) {
 		ExpectedVersion: preview.Version,
 		Answer:          answer,
 		Replan:          replan,
+		Option:          option,
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -752,7 +757,14 @@ func answerSummaryText(p *core.AnswerPreview, replan bool) string {
 	fmt.Fprintf(&b, "課題 ID:  %s\n", p.ChallengeID)
 	fmt.Fprintf(&b, "タイトル: %s\n", escapeControl(p.Title))
 	fmt.Fprintf(&b, "問い:     %s\n", escapeControlKeepLines(p.Question))
-	fmt.Fprintf(&b, "回答:     %s\n", p.Answer)
+	if p.Option != "" {
+		fmt.Fprintf(&b, "選択肢:   %s（%s）\n", escapeControl(p.OptionLabel), escapeControl(p.Option))
+		if p.Answer != "" {
+			fmt.Fprintf(&b, "添え書き: %s\n", p.Answer)
+		}
+	} else {
+		fmt.Fprintf(&b, "回答:     %s\n", p.Answer)
+	}
 	if replan {
 		b.WriteString("範囲が変わる: 委譲を再開せず、計画を作り直して承認待ちへ戻す（既存の PR・ブランチは引き継ぐ）\n")
 	}
