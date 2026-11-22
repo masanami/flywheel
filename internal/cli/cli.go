@@ -49,6 +49,14 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 		return failUsage(stderr, jsonMode, "コマンドを指定してください")
 	}
 
+	// 対話の欄の印がある環境からは、道具の範囲が full でなければ、欄から受けるコマンドの一覧にあるコマンドだけを受ける
+	// （委譲の子の印の検査の後。名前の照合は全体のフラグを除いた後）。
+	chat := chatMarkFromEnv()
+	needChatMark, chatKnd, gateErr := chatGate(chat, rawArgs)
+	if gateErr != nil {
+		return failErr(stderr, jsonMode, gateErr)
+	}
+
 	cmd, rest, ok := matchCommand(rawArgs, commands)
 	if !ok {
 		return failUsage(stderr, jsonMode, fmt.Sprintf("未知のコマンド: %s", strings.Join(rawArgs, " ")))
@@ -62,10 +70,26 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 	parsed.Stderr = stderr
 	parsed.Stdout = stdout
 	parsed.LookPath = lookPath
+	parsed.Chat = chat
 
 	// 解析が成功した後は解析結果を正とする（事前走査はフラグの値としての
 	// "--json" も拾うため、解析に失敗したときの出力形式の判定にだけ使う）。
 	jsonMode = parsed.Bools["json"]
+
+	if chat != nil && chatKnd == chatKindCycle {
+		need, cycleErr := chatGateCycle(chat, parsed.Bools["detach"])
+		if cycleErr != nil {
+			return failErr(stderr, jsonMode, cycleErr)
+		}
+		needChatMark = need
+	}
+	if chat != nil && chatKnd == chatKindIngest {
+		need, ingestErr := chatGateIngest(chat, len(parsed.Positional))
+		if ingestErr != nil {
+			return failErr(stderr, jsonMode, ingestErr)
+		}
+		needChatMark = need
+	}
 
 	// RequiresStore なコマンドは、Run を呼ぶ前にワークスペースのストアを開く。
 	// これにより init を含む全コマンドが store_not_found・store_too_new・
@@ -78,6 +102,17 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 		}
 		defer func() { _ = store.Close() }()
 		parsed.Store = store
+		// 記録するコマンドには、印の検査をかける（印の会話が開いている・最後のオーナーの発言・返事が進行中）。
+		// 本人確認を通る操作は、core が操作の中でも同じ検査を行う。
+		if needChatMark {
+			if err := checkChatMark(parsed); err != nil {
+				var asErr *Error
+				if errors.As(err, &asErr) && asErr != nil {
+					return failErr(stderr, jsonMode, asErr)
+				}
+				return failErr(stderr, jsonMode, NewError(CodeInternalError, err.Error()))
+			}
+		}
 	}
 
 	data, err := cmd.Run(parsed)
