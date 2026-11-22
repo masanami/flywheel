@@ -68,6 +68,8 @@ func newOwnerWaitFixture(t *testing.T, maxParallel int) *ownerWaitFixture {
 	t.Helper()
 	cf := newContractFixtureWith(t, ownerWaitConnectorsJSON)
 	cf.agent.MaxParallelRuns = maxParallel
+	// この試験が確かめるのはオーナーの回答待ちの扱い。回答の待ちをスーパーバイザーが先に受けると、判断の呼び出し（f.j3）に数えが混ざるので切る。
+	cf.agent.Supervisor = false
 	return &ownerWaitFixture{contractFixture: cf, pc: newPerRunClient(), first: cf.cid}
 }
 

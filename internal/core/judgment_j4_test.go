@@ -6,34 +6,10 @@ import (
 	"encoding/json"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 )
 
 // J4（子の問いへの応答。docs/features/m3-invoker-delegation.md §J4）の検証。実ストア・偽の委譲の IF・偽の契約の口を使う。
-
-// j4Router は判断点ごとに出力を変える偽の JudgmentInvoker。J4 以外は J3 のブリーフを返す。
-type j4Router struct {
-	mu     sync.Mutex
-	j4Out  []JudgmentLaunchOutput // 呼ぶたびに先頭から返す。尽きたら最後の値を返す
-	j4Seen []JudgmentLaunchInput
-}
-
-func (r *j4Router) Available(context.Context) error { return nil }
-
-func (r *j4Router) InvokeJudgment(_ context.Context, in JudgmentLaunchInput) (JudgmentLaunchOutput, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if in.Judgment != JudgmentJ4 {
-		return JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: briefJSON("BRIEF-MARKER")}, nil
-	}
-	r.j4Seen = append(r.j4Seen, in)
-	out := r.j4Out[len(r.j4Out)-1]
-	if len(r.j4Out) > 1 {
-		r.j4Out = r.j4Out[1:]
-	}
-	return out, nil
-}
 
 func j4Out(decisions ...map[string]any) JudgmentLaunchOutput {
 	b, _ := json.Marshal(map[string]any{"decisions": decisions})
@@ -135,118 +111,6 @@ func TestJ4_PendingAnswerIsResumedByTheNextLaunchDecision(t *testing.T) {
 	}
 }
 
-// --- 契約の判断待ち（decider が parent・kind が answer） ---
-
-func (f *contractFixture) pollWith(t *testing.T, r *j4Router) []ContractRunReport {
-	t.Helper()
-	reps, err := f.s.PollContractRuns(context.Background(), ContractPollInput{AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client,
-		CycleID: f.cycle(t, 300), Reconcile: f.branches, Judgment: r})
-	if err != nil {
-		t.Fatalf("PollContractRuns: %v", err)
-	}
-	return reps
-}
-
-func TestJ4_ContractParentAnswerWaitIsAnsweredByResumeWithTheChosenOption(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	if _, err := f.start(t); err != nil {
-		t.Fatal(err)
-	}
-	f.client.queue = []ContractLaunchOutput{waitingOut(&ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "どちらにするか", Options: []string{"OPT-A", "OPT-B"}}, nil)}
-	f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
-	r := &j4Router{j4Out: []JudgmentLaunchOutput{j4Out(dec(1, "answer", "OPT-B", "NOTE-MARKER"))}}
-	reps := f.pollWith(t, r)
-
-	if len(reps) != 1 || reps[0].Held || reps[0].State != ContractStateRunning {
-		t.Fatalf("reports = %+v, want the resume's running state and no hold", reps)
-	}
-	if len(f.client.resumes) != 1 || f.client.resumes[0][len(f.client.resumes[0])-1] != "OPT-B\nNOTE-MARKER" {
-		t.Fatalf("resumes = %v, want the chosen option (with the note) carried by resume", f.client.resumes)
-	}
-	if n := f.count(t, `SELECT COUNT(*) FROM hold`); n != 0 || f.status(t, f.cid) != StatusInProgress {
-		t.Errorf("holds = %d status = %s, want none and in_progress", n, f.status(t, f.cid))
-	}
-}
-
-func TestJ4_ContractWithoutOptionsIsAnsweredWithText(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	if _, err := f.start(t); err != nil {
-		t.Fatal(err)
-	}
-	f.client.queue = []ContractLaunchOutput{waitingOut(&ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "名前は?"}, nil)}
-	f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
-	r := &j4Router{j4Out: []JudgmentLaunchOutput{j4Out(dec(1, "answer", nil, "TEXT-ANSWER"))}}
-	f.pollWith(t, r)
-	if len(f.client.resumes) != 1 || f.client.resumes[0][len(f.client.resumes[0])-1] != "TEXT-ANSWER" {
-		t.Fatalf("resumes = %v", f.client.resumes)
-	}
-}
-
-func TestJ4_ContractEscalateHoldsAndOtherWaitsDoNotCallJ4(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name   string
-		action ContractRequestedAction
-		out    []JudgmentLaunchOutput
-		j4Call int
-	}{
-		{"escalate", ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "Q"}, []JudgmentLaunchOutput{j4Out(dec(1, "escalate", nil, "WHY"))}, 1},
-		{"approve by parent stays with the owner", ContractRequestedAction{Kind: "approve", Decider: "parent", Text: "Q"}, nil, 0},
-		{"answer by human stays with the owner", ContractRequestedAction{Kind: "answer", Decider: "human", Text: "Q"}, nil, 0},
-		{"answer by any stays with the owner", ContractRequestedAction{Kind: "answer", Decider: "any", Text: "Q"}, nil, 0},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			f := newContractFixture(t)
-			if _, err := f.start(t); err != nil {
-				t.Fatal(err)
-			}
-			a := c.action
-			f.client.queue = []ContractLaunchOutput{waitingOut(&a, nil)}
-			r := &j4Router{j4Out: c.out}
-			reps := f.pollWith(t, r)
-			if len(reps) != 1 || !reps[0].Held || f.status(t, f.cid) != StatusAwaitingHuman {
-				t.Fatalf("reports = %+v status = %s, want an owner hold", reps, f.status(t, f.cid))
-			}
-			if c.j4Call == 1 {
-				var q string
-				if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error { return tx.QueryRow(`SELECT question FROM hold`).Scan(&q) }); err != nil {
-					t.Fatal(err)
-				}
-				if !strings.Contains(q, "WHY") {
-					t.Errorf("hold question lacks the escalation reason: %s", q)
-				}
-			}
-			if len(r.j4Seen) != c.j4Call || len(f.client.resumes) != 0 {
-				t.Errorf("J4 calls = %d resumes = %v", len(r.j4Seen), f.client.resumes)
-			}
-		})
-	}
-}
-
-func TestJ4_ContractResumeIsLimitedToThreeAnswersAndTheFourthGoesToTheOwner(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	if _, err := f.start(t); err != nil {
-		t.Fatal(err)
-	}
-	// 答えるたびに、別の問いでまた待つ。
-	f.client.queue = []ContractLaunchOutput{waitingOut(&ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "Q"}, nil)}
-	f.client.resumeOut = waitingOut(&ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "Q-NEXT"}, nil)
-	r := &j4Router{j4Out: []JudgmentLaunchOutput{j4Out(dec(1, "answer", nil, "A"))}}
-	for i := 0; i < 4; i++ {
-		f.pollWith(t, r)
-	}
-	if len(r.j4Seen) != 3 || len(f.client.resumes) != 3 {
-		t.Fatalf("J4 calls = %d resumes = %d, want 3 and 3", len(r.j4Seen), len(f.client.resumes))
-	}
-	if f.status(t, f.cid) != StatusAwaitingHuman {
-		t.Errorf("status = %s, want awaiting_human after the limit", f.status(t, f.cid))
-	}
-}
-
 func TestJ4_DeclaredHumanKindIsNeverGivenToJ4(t *testing.T) {
 	t.Parallel()
 	qs := []DelegationQuestion{{Kind: "minor", Text: "x"}, {Kind: "my_kind", Text: "y"}}
@@ -255,63 +119,5 @@ func TestJ4_DeclaredHumanKindIsNeverGivenToJ4(t *testing.T) {
 	}
 	if j4RuleEscalates(qs, nil) {
 		t.Error("undeclared minor kinds must not escalate by rule")
-	}
-}
-
-func TestJ4_ContractStartKeepsAParentAnswerWaitForTheNextPollWhenJ4IsAvailable(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	f.client.startOut = waitingOut(&ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "Q"}, nil)
-	_, err := f.s.StartContractDelegation(context.Background(), ContractStartInput{
-		ChallengeID: f.cid, ConnectorID: "tool", AgentDecl: f.agent, ConnDecl: f.conn, Client: f.client,
-		CycleID: f.cycle(t, 300), MaxBudgetUSD: 5, Reconcile: f.branches, Judgment: &j4Router{j4Out: []JudgmentLaunchOutput{answerAll()}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.status(t, f.cid) != StatusInProgress || f.count(t, `SELECT COUNT(*) FROM hold`) != 0 {
-		t.Errorf("status = %s, want in_progress without a hold (J4 handles it at the next poll)", f.status(t, f.cid))
-	}
-}
-
-// J4 の答えを返す resume が失敗したら、保留にして、オーナーが答えて着手中へ戻っても同じ答えを返し直さない。
-func TestJ4_ContractFailedResumeOfTheAnswerHoldsAndIsNotRetried(t *testing.T) {
-	t.Parallel()
-	for _, res := range []RunResult{RunResultTimedOut, RunResultErrored} {
-		t.Run(string(res), func(t *testing.T) {
-			f := newContractFixture(t)
-			if _, err := f.start(t); err != nil {
-				t.Fatal(err)
-			}
-			f.client.queue = []ContractLaunchOutput{waitingOut(&ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "Q"}, nil)}
-			f.client.resumeOut = ContractLaunchOutput{Result: res, ErrorSummary: "RESUME-BOOM"}
-			r := &j4Router{j4Out: []JudgmentLaunchOutput{j4Out(dec(1, "answer", nil, "J4-ANSWER"))}}
-			reps := f.pollWith(t, r)
-
-			if len(r.j4Seen) != 1 || len(f.client.resumes) != 1 {
-				t.Fatalf("J4 calls = %d resumes = %v, want 1 and 1", len(r.j4Seen), f.client.resumes)
-			}
-			if len(reps) != 1 || !reps[0].Held || f.status(t, f.cid) != StatusAwaitingHuman {
-				t.Fatalf("reports = %+v status = %s, want a hold", reps, f.status(t, f.cid))
-			}
-			qs := f.holdQuestions(t)
-			if len(qs) != 1 || !strings.Contains(qs[0], "resume") || !strings.Contains(qs[0], "RESUME-BOOM") || !strings.Contains(qs[0], "返し直さない") {
-				t.Fatalf("questions = %q, want the resume failure and no automatic retry", qs)
-			}
-			// 保留の間の周は、失敗した resume をやり直さず、J4 も呼び直さない。
-			f.pollWith(t, r)
-			f.pollWith(t, r)
-			if len(f.client.resumes) != 1 || len(r.j4Seen) != 1 {
-				t.Fatalf("resumes = %d J4 calls = %d, want 1 and 1 (the failed resume is not retried)", len(f.client.resumes), len(r.j4Seen))
-			}
-			// オーナーが答えて着手中へ戻った後も run がまだ同じ waiting なら、前の答えを返し直すのではなく改めて問う
-			// （仕様 §答えの返し「次の周の状態の確認でまだ waiting なら改めて問う」。J4 の新しい呼び出しで、再開の上限に数える）。
-			f.answerLatestHold(t, f.cid, "確かめた")
-			f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
-			f.pollWith(t, r)
-			if len(r.j4Seen) != 2 || len(f.client.resumes) != 2 {
-				t.Fatalf("J4 calls = %d resumes = %d, want a fresh J4 call and one resume", len(r.j4Seen), len(f.client.resumes))
-			}
-		})
 	}
 }

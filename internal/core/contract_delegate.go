@@ -208,11 +208,11 @@ type ContractStartInput struct {
 }
 
 func (in ContractStartInput) releaseSource() *contractReleaseSource {
-	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Agent: in.AgentDecl}
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, ToSupervisor: canRouteToSupervisor(in.Judgment, in.AgentDecl), Agent: in.AgentDecl}
 }
 
 func (in ContractPollInput) releaseSource() *contractReleaseSource {
-	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Checks: in.Checks, Compare: in.Compare, Supervisor: in.AgentDecl != nil && in.AgentDecl.Supervisor, Agent: in.AgentDecl}
+	return &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, ToSupervisor: canRouteToSupervisor(in.Judgment, in.AgentDecl), Checks: in.Checks, Compare: in.Compare, Supervisor: in.AgentDecl != nil && in.AgentDecl.Supervisor, Agent: in.AgentDecl}
 }
 
 // ContractPollInput は Store.PollContractRuns の入力。
