@@ -205,7 +205,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j2.md":   14397,
 		"j3.md":   8192,
 		"j4.md":   4096,
-		"j5.md":   14473,
+		"j5.md":   15048,
 		"j6.md":   6144,
 		"j8.md":   8192,
 		"sv.md":   6144,
