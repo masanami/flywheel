@@ -43,10 +43,17 @@ type j2ExpandValidationContext struct {
 	DepKeys map[string]bool
 	// Repos は、いまあるタスクのリポジトリ（取りやめでないタスク。重複なし）。足すタスクのリポジトリは、この 1 つと同じでなければならない。
 	Repos []string
+	// Origin は足す依頼の出どころ（空は expand と同じ）。followup のときだけ、判断値 none とタスクが 1 個でない出力を不正にし、
+	// 足すタスクの枠を、足す依頼の額（FrameImpl・FrameReview。USD の 100 万分の 1。空はその枠を足す依頼が持たない）で置き換える。
+	Origin      TaskAdditionOrigin
+	FrameImpl   *int64
+	FrameReview *int64
 }
 
 // validateJ2ExpandOutput は「足す」の形の出力を検査する。次のいずれかで ok=false:
 //   - JSON として解釈できない・判断値が add|none|ask の外・ask で問いが空
+//   - 出どころが followup のとき: 判断値 none・タスクが 1 個でない add も不正。タスクの枠は足す依頼の額に置き換える（枠の検査はかけない。
+//     足す依頼に額が無い枠だけ、出力の値を使い検査にかける）
 //   - add で: タスクが 1〜12 件でない・鍵／題名／本文／完了条件が空・鍵が重なる・鍵がいまあるタスク（取りやめ・済みを含む）の鍵と重なる・
 //     前提が自分自身・足すタスクの鍵でもいまある（取りやめでない）タスクの鍵でもない・足すタスクどうしの前提に輪がある・
 //     リポジトリがいまあるタスクと同じ 1 つでない・宣言に無い／起動できない操作・枠（実装・レビュー対応）が無い・不正
@@ -58,6 +65,9 @@ func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2Expan
 	v := &j2ExpandValidated{Verdict: j2ExpandVerdict(raw.Verdict)}
 	switch v.Verdict {
 	case j2ExpandNone:
+		if vc.Origin == TaskAdditionOriginFollowup {
+			return nil, false // フォローアップを足す依頼は、足さないを選べない（足すか問うか）
+		}
 		return v, true
 	case j2ExpandAsk:
 		if raw.Question == nil || checkText("question", *raw.Question, MaxStageRunes) != nil {
@@ -68,9 +78,24 @@ func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2Expan
 		return v, true
 	}
 	// add
-	in := raw.Tasks
+	in := append([]j2RawTask(nil), raw.Tasks...)
 	if len(in) < MinPlanTasks || len(in) > MaxPlanTasks || len(vc.Repos) != 1 {
 		return nil, false
+	}
+	// 出どころが followup のときは、枠を足す依頼の額で置き換える（出力の枠は読まない）。足す依頼の額は、タスクの枠の検査
+	// （0 超・実装の枠が 1 回の上限以下）にかけない。検査は代わりの値で通し、通した後に足す依頼の額を入れる。
+	followup := vc.Origin == TaskAdditionOriginFollowup
+	if followup {
+		if len(in) != 1 {
+			return nil, false
+		}
+		placeholderImpl, placeholderReview := followupPlaceholderBudgetUSD, followupPlaceholderBudgetUSD
+		if vc.FrameImpl != nil {
+			in[0].BudgetImplUSD = &placeholderImpl
+		}
+		if vc.FrameReview != nil {
+			in[0].BudgetReviewUSD = &placeholderReview
+		}
 	}
 	byKey := make(map[string]int, len(in))
 	inputs := make([]TaskInput, len(in))
@@ -106,6 +131,10 @@ func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2Expan
 		if !ok {
 			return nil, false
 		}
+		if followup {
+			applyFollowupFrames(&jt, vc)
+			in[0].BudgetImplUSD, in[0].BudgetReviewUSD = jt.BudgetImplUSD, jt.BudgetReviewUSD
+		}
 		v.Tasks = append(v.Tasks, jt)
 	}
 	spec, err := json.Marshal(in)
@@ -114,6 +143,21 @@ func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2Expan
 	}
 	v.Spec = string(spec)
 	return v, true
+}
+
+// followupPlaceholderBudgetUSD は、出どころが followup のタスクの枠の検査を通すための代わりの値（検査の後に足す依頼の額へ置き換える）。
+const followupPlaceholderBudgetUSD = 0.000001
+
+// applyFollowupFrames は検査済みのタスク jt の枠を、足す依頼の額で置き換える（足す依頼に額が無い枠は、出力の値のまま）。
+func applyFollowupFrames(jt *j2Task, vc j2ExpandValidationContext) {
+	if vc.FrameImpl != nil {
+		u := microsToUSD(*vc.FrameImpl)
+		jt.BudgetImplUSD = &u
+	}
+	if vc.FrameReview != nil {
+		u := microsToUSD(*vc.FrameReview)
+		jt.BudgetReviewUSD = &u
+	}
 }
 
 // j2ExpandFinalized は finalizeJ2ExpandOutput の結果。
@@ -158,12 +202,23 @@ func (s *Store) finalizeJ2ExpandOutput(ctx context.Context, in J2AutoInput, runI
 		if add.State != TaskAdditionPending || ch.Status != StatusInProgress {
 			return nil
 		}
+		if add.FollowupID != nil { // 捨てた・済みにしたフォローアップは足さない
+			fn, _ := parseFollowupID(*add.FollowupID)
+			if fu, err := loadFollowup(ctx, tx, fn); err != nil {
+				return err
+			} else if fu.Status != FollowupStatusOpen {
+				return nil
+			}
+		}
 		vc, ready, err := loadJ2ExpandValidationContext(ctx, tx, cid, in)
 		if err != nil {
 			return err
 		}
 		if !ready {
 			return nil // 承認済みの計画が無い（足せない）
+		}
+		if err := vc.useAdditionOrigin(ctx, tx, additionID); err != nil {
+			return err
 		}
 		v, ok := validateJ2ExpandOutput(structuredOutput, vc.j2ExpandValidationContext)
 		if !ok {
@@ -222,6 +277,28 @@ type j2ExpandState struct {
 	DepIDs   map[string]int64
 	Budgets  []taskBudget
 	LimitRec *int64
+}
+
+// useAdditionOrigin は検査の事実に、足す依頼 additionID の出どころと、出どころが followup のときの枠を足す。
+func (st *j2ExpandState) useAdditionOrigin(ctx context.Context, tx *sql.Tx, additionID int64) error {
+	var origin string
+	var impl, review sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT origin, budget_impl_micros, budget_review_micros FROM task_addition WHERE id = ?`, additionID).Scan(&origin, &impl, &review); err != nil {
+		return err
+	}
+	st.Origin = TaskAdditionOrigin(origin)
+	if st.Origin != TaskAdditionOriginFollowup {
+		return nil
+	}
+	if impl.Valid {
+		v := impl.Int64
+		st.FrameImpl = &v
+	}
+	if review.Valid {
+		v := review.Int64
+		st.FrameReview = &v
+	}
+	return nil
 }
 
 // loadJ2ExpandValidationContext は課題 cid の、承認済みの版のタスクから、検査の事実を作る。承認済みの版が無ければ ready=false。
@@ -337,7 +414,40 @@ func createExpandedTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder,
 		"total_after_usd":  totalUSD,
 		"limit_usd":        limitUSD,
 	})
-	return fmt.Sprintf("足したタスク: %s", strings.Join(ids, ", ")), err
+	if err != nil {
+		return "", err
+	}
+	if err := recordFollowupPromotedTask(ctx, tx, rec, additionID, created); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("足したタスク: %s", strings.Join(ids, ", ")), nil
+}
+
+// recordFollowupPromotedTask は、出どころが followup の足す依頼 additionID で足したタスク（created の先頭）を、フォローアップの
+// 上げた先のタスク（promoted_task_id）に記録する。上げた先の課題（promoted_challenge_id）は変えない。出どころが followup でなければ何もしない。
+func recordFollowupPromotedTask(ctx context.Context, tx *sql.Tx, rec *activityRecorder, additionID int64, created []Task) error {
+	var fid sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT followup_id FROM task_addition WHERE id = ?`, additionID).Scan(&fid); err != nil {
+		return err
+	}
+	if !fid.Valid || len(created) == 0 {
+		return nil
+	}
+	tid, _ := parseTaskID(created[0].ID)
+	f, err := loadFollowup(ctx, tx, fid.Int64)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE followup SET promoted_task_id = ?, updated_at = ? WHERE id = ?`, tid, formatTimestamp(rec.at), fid.Int64); err != nil {
+		return err
+	}
+	before := map[string]any{"promoted_task_id": nil}
+	if f.PromotedTaskID != nil {
+		before["promoted_task_id"] = *f.PromotedTaskID
+	}
+	return rec.record("followup", fid.Int64, ActivityActionFollowupPromote, before, map[string]any{
+		"promoted_task_id": formatTaskID(tid), "task_addition_id": formatTaskAdditionID(additionID),
+	})
 }
 
 // j2ExpandHolder は、同じ書き込みの中で課題を保留にし（T11）、保留の内部整数 ID を返す口。

@@ -412,6 +412,33 @@ func closeFollowup(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att *
 	if n != 1 {
 		return ErrValidation
 	}
+	// このフォローアップを指す、閉じていない足す依頼は、見送り（declined）で閉じる（判断点も回答も、閉じたフォローアップを足さない）。
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM task_addition WHERE followup_id = ? AND state IN (?, ?) ORDER BY id`,
+		id, string(TaskAdditionPending), string(TaskAdditionAwaitingOwner))
+	if err != nil {
+		return err
+	}
+	var open []int64
+	for rows.Next() {
+		var aid int64
+		if err := rows.Scan(&aid); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		open = append(open, aid)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, aid := range open {
+		if _, err := setTaskAdditionStateTx(ctx, tx, rec, aid, TaskAdditionDeclined, TaskAdditionUpdate{}); err != nil {
+			return err
+		}
+	}
 	after := map[string]any{"status": string(status), noteCol: text}
 	if att != nil {
 		att.addRelayTo(after)
