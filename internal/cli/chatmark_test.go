@@ -62,9 +62,14 @@ func (f *chatEnvFix) close(t *testing.T) {
 	}
 }
 
-// set は印の環境変数を付ける（tools が空なら FLYWHEEL_CHAT_TOOLS は付けない）。
+// set は印の環境変数を付ける（tools が空なら FLYWHEEL_CHAT_TOOLS は付けない）。道具の範囲は宣言から読むので、
+// tools が full のときは宣言（chat_tools: full）も書く（restricted は既定）。
 func (f *chatEnvFix) set(t *testing.T, tools string) {
 	t.Helper()
+	if tools == "full" {
+		writeAgentJSONForTest(t, f.ws, `{"chat_tools": "full"}`)
+		t.Setenv(core.WorkspaceEnvVar, f.ws) // 実行エンジンの作業ディレクトリ相当
+	}
 	t.Setenv(core.ChatEnvSession, f.session)
 	t.Setenv(core.ChatEnvMessage, strconv.FormatInt(f.message, 10))
 	if tools != "" {
@@ -185,20 +190,20 @@ func TestChatList_UnlistedCommandsAreRefused(t *testing.T) {
 	}
 }
 
-// AC-71: 道具の範囲が決まった値でない（空・別の値）環境は restricted として扱い、run を断る。無い環境も同じ。
-func TestChatList_UnknownOrMissingToolsMeansRestricted(t *testing.T) {
+// AC-71: 道具の範囲は宣言から読む。宣言が無い・restricted なら、環境変数が full でも run を断る。
+func TestChatList_DeclarationDecidesTheToolsRange(t *testing.T) {
 	ws := initializedWorkspace(t)
 	createForCase(t, ws)
 	f := openChat(t, ws)
-	for _, tools := range []string{"", "everything", "FULL", " full"} {
+	for _, decl := range []string{"", `{"chat_tools": "restricted"}`, `{"chat_tools": "bogus"}`} {
+		if decl != "" {
+			writeAgentJSONForTest(t, ws, decl)
+		}
 		f.set(t, "")
-		t.Setenv(core.ChatEnvTools, tools)
+		t.Setenv(core.ChatEnvTools, "full") // 環境変数は読まない
 		code, _, stderr := chatRun(t, ws, "run", "C-1")
 		requireRefused(t, code, stderr)
 	}
-	f.set(t, "") // FLYWHEEL_CHAT_TOOLS を付けない
-	code, _, stderr := chatRun(t, ws, "run", "C-1")
-	requireRefused(t, code, stderr)
 }
 
 // AC-68: full では一覧の検査をかけない（run が、一覧の検査で断られない）。
@@ -491,5 +496,70 @@ func unsetEnv(t *testing.T, key string) {
 	t.Setenv(key, "")
 	if err := os.Unsetenv(key); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// 欄の印があるときの承認の要約の案内は、approve --reopen の実行を求めず、ターミナルで行う旨にする。
+func TestOperationHeadLines_UndeterminableGuidanceDependsOnTheChatMark(t *testing.T) {
+	t.Parallel()
+	d := &releaseDecision{Op: core.IrreversibleOperation{ID: "OP-9"}, Head: "abc", Undeterminable: &core.ReleaseHeadAssessment{}}
+	if got := operationHeadLines(d, false); !strings.Contains(got, "approve OP-9 --reopen") {
+		t.Errorf("terminal: %q, want the --reopen guidance", got)
+	}
+	got := operationHeadLines(d, true)
+	if strings.Contains(got, "--reopen") || !strings.Contains(got, "ターミナルで行ってください") {
+		t.Errorf("chat: %q, want the terminal guidance without --reopen", got)
+	}
+}
+
+// 宣言が full なら、環境変数の FLYWHEEL_CHAT_TOOLS が無くても一覧の検査をかけない。
+func TestChatList_FullDeclarationSkipsTheListCheckWithoutTheEnv(t *testing.T) {
+	ws := initializedWorkspace(t)
+	createForCase(t, ws)
+	f := openChat(t, ws)
+	f.set(t, "")
+	writeAgentJSONForTest(t, ws, `{"chat_tools": "full"}`)
+	t.Setenv(core.WorkspaceEnvVar, ws)
+	_, _, stderr := chatRun(t, ws, "run", "C-1")
+	requireNotRefused(t, stderr)
+}
+
+// 実行エンジン自身のワークスペースが restricted なら、full の宣言の別のワークスペースを指しても一覧の検査は外れない。
+func TestChatList_OtherFullWorkspaceDoesNotLiftTheListCheck(t *testing.T) {
+	ws := initializedWorkspace(t)
+	other := initializedWorkspace(t)
+	writeAgentJSONForTest(t, other, `{"chat_tools": "full"}`)
+	createForCase(t, other)
+	openChat(t, other).set(t, "")
+	t.Setenv(core.WorkspaceEnvVar, ws) // 実行エンジン自身は restricted の ws
+	code, _, stderr := chatRun(t, other, "run", "C-1")
+	requireRefused(t, code, stderr)
+}
+
+// 事前の走査と解析で --workspace の読み方が食い違っても、コマンドが開く restricted のワークスペースの検査は外れない。
+func TestChatList_WorkspaceFlagTrickDoesNotLiftTheListCheck(t *testing.T) {
+	ws := initializedWorkspace(t)
+	createForCase(t, ws)
+	other := initializedWorkspace(t)
+	writeAgentJSONForTest(t, other, `{"chat_tools": "full"}`)
+	openChat(t, ws).set(t, "")
+	var out, errb bytes.Buffer
+	code := runWithLookPath([]string{"run", "C-1", "--workspace=" + other, "-workspace=" + ws, "--json"}, strings.NewReader(""), &out, &errb, defaultCommands(), lookPathFor(t))
+	requireRefused(t, code, errb.String())
+	// 値として消費される形（edit は一覧に無い）。
+	errb.Reset()
+	code = runWithLookPath([]string{"edit", "C-1", "--title", "--workspace=" + other, "-workspace=" + ws, "--json"}, strings.NewReader(""), &out, &errb, defaultCommands(), lookPathFor(t))
+	requireRefused(t, code, errb.String())
+}
+
+// op exec の人間待ちの行の案内は、欄の印があるときは --reopen の実行を求めない。
+func TestReleasePhaseText_HumanWaitGuidanceDependsOnTheChatMark(t *testing.T) {
+	t.Parallel()
+	res := &core.ReleaseExecResult{Tidied: []core.ReleaseTidyItem{{OperationID: "OP-9", ChallengeID: "C-1", Action: core.ReleaseTidyNeedsHuman}}}
+	if got := releasePhaseText(res, false); !strings.Contains(got, "approve OP-9 --reopen") {
+		t.Errorf("terminal: %q", got)
+	}
+	if got := releasePhaseText(res, true); strings.Contains(got, "--reopen") || !strings.Contains(got, "ターミナル") {
+		t.Errorf("chat: %q", got)
 	}
 }

@@ -16,7 +16,9 @@ import (
 //   - "--max-turns" にターン数の上限を渡す。
 //   - restricted: 許す道具は Read・Grep・Glob・Bash(flywheel:*) の 4 つだけ、禁じる道具は Edit・Write・
 //     NotebookEdit・WebFetch・WebSearch・Task。許可の扱いは判断の呼び出しと同じ default（尋ねる相手がいないので、
-//     許していない道具は断られる）。flywheel 以外のシェルのコマンドを断るのは、この許可の設定だけが頼り。
+//     許していない道具は断られる）。書き込む・実行するシェルのコマンドを断るのは、この許可の設定だけが頼り
+//     （読み取りだけと見なされるコマンドは、実行エンジンが尋ねずに通す）。"--setting-sources" に空を渡し、利用者の設定の
+//     許可が加わらないようにする。
 //   - full: 許す道具・禁じる道具の指定を付けず、許可の扱いはすべて許す。
 //   - 指示文を "--append-system-prompt" で追加の指示に入れる。
 //
@@ -40,6 +42,8 @@ func buildChatArgs(in core.ChatLaunchInput, instructions string) []string {
 			"--allowedTools", "Read", "Grep", "Glob", "Bash(flywheel:*)",
 			"--disallowedTools", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task",
 			"--permission-mode", "default",
+			// 設定の出どころを空にする。利用者の設定（~/.claude など）の許可が上の許可に加わらないようにする。
+			"--setting-sources", "",
 		)
 	}
 	return append(args, "--append-system-prompt", instructions)

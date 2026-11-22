@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -469,9 +471,6 @@ func TestChat_StatesAreTheSevenValues(t *testing.T) {
 
 func TestChat_MarkEnvUsesTheNamesInOnePlace(t *testing.T) {
 	t.Parallel()
-	if ChatToolsFromEnv("full") != ChatToolsFull || ChatToolsFromEnv("") != ChatToolsRestricted || ChatToolsFromEnv("FULL") != ChatToolsRestricted || ChatToolsFromEnv("restricted") != ChatToolsRestricted {
-		t.Error("ChatToolsFromEnv must return full only for exactly full")
-	}
 	got := ChatMarkEnv("uuid-1", 42, ChatToolsFull)
 	want := []string{"FLYWHEEL_CHAT_SESSION=uuid-1", "FLYWHEEL_CHAT_MESSAGE=42", "FLYWHEEL_CHAT_TOOLS=full"}
 	if !reflect.DeepEqual(got, want) {
@@ -536,5 +535,42 @@ func TestChat_ExportImportRoundTripKeepsTheRows(t *testing.T) {
 	}
 	if !strings.Contains(string(exported), `"chat_session"`) || !strings.Contains(string(exported), `"chat_message"`) {
 		t.Error("the export lacks the chat tables")
+	}
+}
+
+func TestChatToolsFromWorkspace_ReadsTheDeclarationFailClosed(t *testing.T) {
+	t.Parallel()
+	write := func(t *testing.T, content string) string {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".flywheel"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if content == "NOSTORE" {
+			content = `{"chat_tools":"full"}`
+		} else if err := os.WriteFile(filepath.Join(dir, ".flywheel", "flywheel.db"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if content != "" {
+			if err := os.WriteFile(filepath.Join(dir, ".flywheel", "agent.json"), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+	for _, tc := range []struct {
+		name, content string
+		want          ChatTools
+	}{
+		{"full", `{"chat_tools":"full"}`, ChatToolsFull},
+		{"restricted", `{"chat_tools":"restricted"}`, ChatToolsRestricted},
+		{"missing key", `{}`, ChatToolsRestricted},
+		{"no file", "", ChatToolsRestricted},
+		{"no store", "NOSTORE", ChatToolsRestricted},
+		{"invalid", `{"chat_tools":"bogus"}`, ChatToolsRestricted},
+		{"broken json", `{`, ChatToolsRestricted},
+	} {
+		if got := ChatToolsFromWorkspace(write(t, tc.content)); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

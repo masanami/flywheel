@@ -63,7 +63,7 @@ func runApprove(a Args) (any, error) {
 func runReopenOperation(a Args, verifier core.Verifier, id string) (any, error) {
 	// 検証中へ戻す書き込みは、core が欄の印の検査と発言の記録を持たない。欄からは戻さない（ターミナルで行う）。
 	if a.Chat != nil {
-		return nil, NewError(CodeValidationFailed, id+" を検証中へ戻す操作は、対話の欄からは行えません。ターミナルで行ってください")
+		return nil, NewError(CodeVerificationRejected, id+" を検証中へ戻す操作は、対話の欄からは行えません。ターミナルで行ってください")
 	}
 	src := headSources(a)
 	as, err := a.Store.AssessReleaseReopen(context.Background(), id, src)
@@ -119,7 +119,7 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 		headSHA = rd.Head
 	}
 
-	summary := operationApprovalSummaryText(preview, nil) + operationHeadLines(rd)
+	summary := operationApprovalSummaryText(preview, nil) + operationHeadLines(rd, a.Chat != nil)
 	att, err := core.Verify(channelFor(a), verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)

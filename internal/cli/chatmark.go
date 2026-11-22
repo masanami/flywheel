@@ -15,7 +15,7 @@ import (
 // chatCommandRefusal は一覧に無いコマンドを断るときの文言。
 const chatCommandRefusal = "対話の欄からは、このコマンドを受けません"
 
-// chatMark は環境の印。Tools は道具の範囲（決まった値でなければ restricted）。
+// chatMark は環境の印。Tools は道具の範囲（ワークスペースの宣言 chat_tools から読む。環境変数は読まない）。
 type chatMark struct {
 	Session, Message string
 	Tools            core.ChatTools
@@ -23,13 +23,46 @@ type chatMark struct {
 
 // chatMarkFromEnv は環境から印を読む。会話の識別・発言の識別のどちらかが（空文字でも）設定されていれば、印がある
 // ものとして扱う（半端な印も、印の検査で断る側に倒す）。
-func chatMarkFromEnv() *chatMark {
+//
+// 道具の範囲は宣言から読み、restricted の宣言なら環境変数が full でも一覧の検査をかける。
+func chatMarkFromEnv(rawArgs []string) *chatMark {
 	session, hasSession := os.LookupEnv(core.ChatEnvSession)
 	message, hasMessage := os.LookupEnv(core.ChatEnvMessage)
 	if !hasSession && !hasMessage {
 		return nil
 	}
-	return &chatMark{Session: session, Message: message, Tools: core.ChatToolsFromEnv(os.Getenv(core.ChatEnvTools))}
+	return &chatMark{Session: session, Message: message, Tools: chatToolsFor(rawArgs)}
+}
+
+// chatToolsFor は、コマンドが使うワークスペース（--workspace の指定、無ければ環境変数・カレントディレクトリ）の
+// 宣言から道具の範囲を決める。
+func chatToolsFor(rawArgs []string) core.ChatTools {
+	return chatToolsForWorkspace(scanWorkspaceFlag(rawArgs))
+}
+
+// chatToolsForWorkspace は、実行エンジン自身のワークスペース（--workspace なしの解決先。実行エンジンの作業ディレクトリ
+// か FLYWHEEL_WORKSPACE）と、コマンドが開くワークスペース（workspaceFlag）の宣言が、どちらも full のときだけ full とする。
+// full の宣言の別のワークスペースを指して restricted の一覧の検査を外すことを防ぐ。
+func chatToolsForWorkspace(workspaceFlag string) core.ChatTools {
+	if core.ChatToolsFromWorkspace("") != core.ChatToolsFull {
+		return core.ChatToolsRestricted
+	}
+	return core.ChatToolsFromWorkspace(workspaceFlag)
+}
+
+// scanWorkspaceFlag は引数から --workspace の値を事前に読む（無ければ空）。
+func scanWorkspaceFlag(rawArgs []string) string {
+	ws := ""
+	for i := 0; i < len(rawArgs); i++ {
+		switch tok := rawArgs[i]; {
+		case tok == "--workspace" && i+1 < len(rawArgs):
+			i++
+			ws = rawArgs[i]
+		case strings.HasPrefix(tok, "--workspace="):
+			ws = strings.TrimPrefix(tok, "--workspace=")
+		}
+	}
+	return ws
 }
 
 // chatKind は欄から受けるコマンドの分け。
