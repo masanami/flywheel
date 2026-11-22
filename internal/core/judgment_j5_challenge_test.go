@@ -198,6 +198,7 @@ func TestChallengeCheck_NotMetHoldsAsChallengeCheckNotMetFromInProgressAndCloses
 	if reason != "challenge_check_not_met" { // AC-179
 		t.Errorf("hold reason = %q, want challenge_check_not_met", reason)
 	}
+	wantLastHoldStop(t, f.s, stopNone)    // AC-17: 課題の単位の確かめの「満たしていない」は対象にしない
 	if from != string(StatusInProgress) { // AC-180
 		t.Errorf("hold from_status = %q, want in_progress", from)
 	}

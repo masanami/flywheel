@@ -228,8 +228,8 @@ func TestCycle_LearnPhaseIsBeforeImproveAndClassifiesWithoutConnectors(t *testin
 		t.Fatalf("phase before improve = %v, want learn (not skipped)", last)
 	}
 	prev := phases[len(phases)-4].(map[string]any)
-	if prev["phase"] != "verify" {
-		t.Errorf("the phase before learn = %v, want verify", prev["phase"])
+	if prev["phase"] != "supervise" {
+		t.Errorf("the phase before learn = %v, want supervise", prev["phase"])
 	}
 	items := phaseItems(t, last)
 	if len(items) != 1 || items[0]["challenge_id"] != id {

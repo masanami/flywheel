@@ -238,6 +238,7 @@ func TestLandVerified_FailedChecksHold(t *testing.T) {
 	if got := f.lastHoldReason(t); got != string(holdReasonChecksFailed) {
 		t.Fatalf("reason = %q", got)
 	}
+	wantLastHoldStop(t, f.s, "checks_failed/pending") // AC-9
 	if f.count(t, `SELECT COUNT(*) FROM hold WHERE task_id IS NOT NULL`) != 1 {
 		t.Fatal("the hold is not tied to the task")
 	}
@@ -272,6 +273,7 @@ func TestLandVerified_SameContentAfterDeliveredIsRefused(t *testing.T) {
 	if got := f.lastHoldReason(t); got != string(holdReasonLandRefused) {
 		t.Fatalf("reason = %q", got)
 	}
+	wantLastHoldStop(t, f.s, stopNone)                                          // AC-22: land_refused は対象にしない
 	if strings.Contains(f.lastHoldQuestion(t), string(holdReasonLandRefused)) { // AC-237: 問いの文に理由の値の語は出ない
 		t.Fatalf("question names the reason value: %q", f.lastHoldQuestion(t))
 	}
@@ -602,6 +604,7 @@ func TestLandSucceeded_NotLandedHoldsDelegateEnded(t *testing.T) {
 	if got := f.lastHoldReason(t); got != string(holdReasonDelegateEnded) {
 		t.Fatalf("reason = %q", got)
 	}
+	wantLastHoldStop(t, f.s, stopNone) // 「入れてよい」を返した後に終わった保留（holdLandedEnd）は対象にしない
 	if f.taskStatus(t) == "done" {
 		t.Fatal("the task is done")
 	}
@@ -621,6 +624,7 @@ func TestLandSucceeded_MergedIntoAnotherBranchHoldsDelegateEnded(t *testing.T) {
 	if got := f.lastHoldReason(t); got != string(holdReasonDelegateEnded) {
 		t.Fatalf("reason = %q", got)
 	}
+	wantLastHoldStop(t, f.s, stopNone) // 「入れてよい」を返した後に終わった保留（holdLandedEnd）は対象にしない
 	if f.taskStatus(t) == "done" {
 		t.Fatal("the task is done")
 	}
@@ -636,6 +640,7 @@ func TestLandSucceeded_OtherContentHoldsMergedUnverified(t *testing.T) {
 	if got := f.lastHoldReason(t); got != string(holdReasonMergedUnverified) {
 		t.Fatalf("reason = %q", got)
 	}
+	wantLastHoldStop(t, f.s, stopNone)                                               // 「入れてよい」を返した後に終わった保留（holdLandedEnd）は対象にしない
 	if strings.Contains(f.lastHoldQuestion(t), string(holdReasonMergedUnverified)) { // AC-237
 		t.Fatalf("question names the reason value: %q", f.lastHoldQuestion(t))
 	}
@@ -691,6 +696,7 @@ func TestLandSucceeded_HoldAndEndedRecordAreWrittenTogether(t *testing.T) {
 	if got := f.lastHoldReason(t); got != string(holdReasonDelegateEnded) {
 		t.Fatalf("reason = %q", got)
 	}
+	wantLastHoldStop(t, f.s, stopNone) // 「入れてよい」を返した後に終わった保留（holdLandedEnd）は対象にしない
 	if f.text(t, `SELECT COALESCE(ended_at, '') FROM contract_run`) == "" {
 		t.Fatal("the contract run is not ended")
 	}
@@ -760,6 +766,7 @@ func TestLandAnswer_LandRefusedClearsLandRefOfThatTaskOnly(t *testing.T) {
 	if got := f.lastHoldReason(t); got != string(holdReasonLandRefused) {
 		t.Fatalf("reason = %q", got)
 	}
+	wantLastHoldStop(t, f.s, stopNone) // AC-22: land_refused は対象にしない
 	f.answer(t, "直した")
 	if got := f.text(t, `SELECT COALESCE(land_ref, '') FROM contract_run WHERE external_run_id = 'ext-1'`); got != "" { // AC-137
 		t.Fatalf("land_ref = %q", got)

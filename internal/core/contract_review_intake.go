@@ -214,14 +214,17 @@ func factsUnmetQuestion(runID string, us []unmetFact) string {
 		describeUnmetFacts(us) + "\n回答すると、回答の文を添えて、もう一度委譲先へ差し戻す。"
 }
 
-// holdContractReview は課題が着手中なら、レビュー待ちを受け取れない保留を理由 reason で立てる（契約の run が結び付くタスクに結び付ける）。
-// 保留への回答は委譲先へ返さないので、契約の run には結び付けない（wait_hold_id を使わない）。着手中でなければ何もしない（偽）。
-func (s *Store) holdContractReview(ctx context.Context, rep *ContractRunReport, question string, reason holdReason) (bool, error) {
-	return s.holdContractReviewWith(ctx, rep, question, reason, nil)
+// holdContractReviewWith は課題が着手中なら、レビュー待ちを受け取れない保留を理由 reason で立てる（契約の run が結び付くタスクに結び付ける。回答は委譲先へ返さないので wait_hold_id は使わない）。止まり方の指定 opts（空なら渡さない）と、保留を立てる同じトランザクションで行う書き込み extra（nil なら無し）を足したもの。
+func (s *Store) holdContractReviewWith(ctx context.Context, rep *ContractRunReport, question string, reason holdReason, opts HoldOptionsInput, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
+	return s.holdContractReviewWithOptionsReason(ctx, rep, question, reason, opts, extra)
 }
 
-// holdContractReviewWith は holdContractReview に、保留を立てる同じトランザクションで行う書き込み extra（nil なら無し）を足したもの。
-func (s *Store) holdContractReviewWith(ctx context.Context, rep *ContractRunReport, question string, reason holdReason, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
+// holdContractReviewWithOptions は、理由を持たず止まり方を渡す保留（上流を読めない回りの上限）を、holdContractReviewWith と同じ形で立てる。
+func (s *Store) holdContractReviewWithOptions(ctx context.Context, rep *ContractRunReport, question string, opts HoldOptionsInput, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
+	return s.holdContractReviewWithOptionsReason(ctx, rep, question, "", opts, extra)
+}
+
+func (s *Store) holdContractReviewWithOptionsReason(ctx context.Context, rep *ContractRunReport, question string, reason holdReason, opts HoldOptionsInput, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
 			if tc.current.Status != StatusInProgress {
@@ -232,7 +235,7 @@ func (s *Store) holdContractReviewWith(ctx context.Context, rep *ContractRunRepo
 				return err
 			}
 			tc.taskID = taskID
-			if err := s.insertHoldWithOccurrence(ctx, tc, question, reason, ""); err != nil {
+			if _, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", opts); err != nil {
 				return err
 			}
 			if extra != nil {
@@ -302,11 +305,17 @@ func (s *Store) receiveContractReview(ctx context.Context, rep *ContractRunRepor
 	if scope.TaskID != nil && scope.TaskStatus == TaskStatusCancelled {
 		return nil // 取りやめのタスクの実行のレビュー待ちは受け取らない（タスクは取りやめのまま）
 	}
-	hold := func(q string, r holdReason) error {
-		held, err := s.holdContractReview(ctx, rep, q, r)
+	// holdStop は止まり方 kind を渡して保留を立てる（kind が空なら渡さない）。止まり方は理由から導かず、呼び出し元が渡す。
+	holdStop := func(q string, r holdReason, kind StopKind) error {
+		var opts HoldOptionsInput
+		if kind != "" {
+			opts = stopHoldOptions(kind, rs.agent())
+		}
+		held, err := s.holdContractReviewWith(ctx, rep, q, r, opts, nil)
 		rep.Held = held
 		return err
 	}
+	hold := func(q string, r holdReason) error { return holdStop(q, r, "") }
 	ra := rep.RequestedAction
 	if !hasLandOption(ra.Options) {
 		return hold(landUnavailableQuestion(rep.ExternalRunID), holdReasonLandUnavailable)
@@ -343,7 +352,7 @@ func (s *Store) receiveContractReview(ctx context.Context, rep *ContractRunRepor
 				return nil // 状態の確認の読みではない（resume・start の応答）。次の状態の確認で数える
 			}
 			if rep.FactsUnmetCount >= factsUnmetLimit {
-				return hold(factsUnmetQuestion(rep.ExternalRunID, unmet), holdReasonFactsUnmet)
+				return holdStop(factsUnmetQuestion(rep.ExternalRunID, unmet), holdReasonFactsUnmet, StopKindFactsUnmet)
 			}
 			note := factsUnmetNote(unmet)
 			owner, err := s.undeliveredFactsUnmetAnswer(ctx, cid, scope.TaskID, rep.RunID)
@@ -361,7 +370,7 @@ func (s *Store) receiveContractReview(ctx context.Context, rep *ContractRunRepor
 		return s.submitReflectReview(ctx, rep, rs, *reflectPR)
 	}
 	if scope.Integration {
-		return s.receiveIntegrationReview(ctx, rep, rs, cid, scope, hold)
+		return s.receiveIntegrationReview(ctx, rep, rs, cid, scope, holdStop)
 	}
 	return s.submitContractReview(ctx, rep, rs)
 }
@@ -384,26 +393,26 @@ func integrationArtifactRefs(arts []ContractArtifact) (branches, commits []strin
 
 // receiveIntegrationReview は、統合先を使う課題のタスクの実行のレビュー待ち（S3a の確かめを通ったもの）を、上の a〜d で確かめ、
 // 通ったら成果物を取り込んでタスクだけを検証中にする（課題は着手中のまま。反映の操作は作らない）。
-func (s *Store) receiveIntegrationReview(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource, cid int64, scope reviewIntakeScope, hold func(string, holdReason) error) error {
+func (s *Store) receiveIntegrationReview(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource, cid int64, scope reviewIntakeScope, holdStop func(string, holdReason, StopKind) error) error {
 	if rs != nil && rs.Reconcile != nil {
 		prs, err := rs.defaultBranchPRs(context.WithoutCancel(ctx), rep.Artifacts)
 		if err != nil {
 			return err
 		}
 		if len(prs) >= 1 {
-			return hold(integrationLandablePRQuestion(rep.ExternalRunID, len(prs)), holdReasonIntegrationRefInvalid)
+			return holdStop(integrationLandablePRQuestion(rep.ExternalRunID, len(prs)), holdReasonIntegrationRefInvalid, StopKindIntakeUnverified)
 		}
 	}
 	branches, commits := integrationArtifactRefs(rep.Artifacts)
 	if len(branches) != 1 || len(commits) != 1 {
-		return hold(integrationIdentityCountQuestion(rep.ExternalRunID, len(branches), len(commits)), holdReasonIntegrationRefInvalid)
+		return holdStop(integrationIdentityCountQuestion(rep.ExternalRunID, len(branches), len(commits)), holdReasonIntegrationRefInvalid, StopKindIntakeUnverified)
 	}
 	recorded, err := s.challengeIntegrationRef(ctx, cid)
 	if err != nil {
 		return err
 	}
 	if recorded != "" && recorded != branches[0] {
-		return hold(integrationRefMismatchQuestion(rep.ExternalRunID, branches[0], recorded), holdReasonIntegrationRefInvalid)
+		return holdStop(integrationRefMismatchQuestion(rep.ExternalRunID, branches[0], recorded), holdReasonIntegrationRefInvalid, StopKindIntakeUnverified)
 	}
 	return s.importIntegrationReview(ctx, rep, cid, scope, branches[0])
 }
@@ -571,7 +580,7 @@ func (s *Store) respondToReview(ctx context.Context, in ContractPollInput, row *
 		return nil, err
 	}
 	if rrep.Result != RunResultSucceeded {
-		held, err := s.holdReclaimedContractStart(ctx, rrep.RunID, rrep.ChallengeID, contractResumeFailedQuestion(row.ExternalRunID, rrep.Result, rrep.Error))
+		held, err := s.holdReclaimedContractStart(ctx, rrep.RunID, rrep.ChallengeID, contractResumeFailedQuestion(row.ExternalRunID, rrep.Result, rrep.Error), in.AgentDecl)
 		rrep.Held = held
 		return rrep, err
 	}

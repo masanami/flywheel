@@ -146,7 +146,9 @@ type approvedPlan struct {
 // delegationContext は 1 件の委譲の起動の前に読む、課題と承認済みの計画と宣言の事実。
 type delegationContext struct {
 	Challenge Challenge
-	Plan      approvedPlan
+	// Agent は宣言の agent（保留を作るときに宣言の supervisor を見るために持つ。nil は宣言の既定と同じ扱い）。
+	Agent *AgentDeclaration
+	Plan  approvedPlan
 	// Task は起動するタスク（課題の task の行のうち状態が pending か in_progress の、ちょうど 1 個）。
 	// 対象のリポジトリと操作・run と保留の task_id・J3 の区画「タスク」はこのタスクのもの。
 	Task  Task
@@ -439,7 +441,7 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 	if !ok {
 		return nil, ErrNotFound
 	}
-	dc := &delegationContext{Challenge: ch}
+	dc := &delegationContext{Challenge: ch, Agent: in.AgentDecl}
 	var override *planBudgetOverride
 	var spend bucketSpend
 	var history *launchHistory

@@ -226,7 +226,7 @@ func (s *Store) waitBetweenRounds(ctx context.Context, cycleID string, wait func
 	return false, nil
 }
 
-// padAdvancePhases は、回りの途中で止めて通さなかった進める段を、空の結果で埋める（出力の phases は進める段 6 つを常に持つ）。
+// padAdvancePhases は、回りの途中で止めて通さなかった進める段を、空の結果で埋める（出力の phases は進める段 7 つを常に持つ）。
 func padAdvancePhases(in CycleRunInput, acc []CyclePhaseResult) []CyclePhaseResult {
 	for i := len(acc); i < len(advancePhaseOrder); i++ {
 		p := advancePhaseOrder[i]
@@ -240,7 +240,7 @@ func padAdvancePhases(in CycleRunInput, acc []CyclePhaseResult) []CyclePhaseResu
 }
 
 // advancePhaseOrder は進める段の順。
-var advancePhaseOrder = []CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify}
+var advancePhaseOrder = []CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseSupervise}
 
 // roundHitCycleBudget は、この回りの段の結果に、起動しなかった理由がサイクルの費用の上限（cycle_budget）のものが 1 件でもあるか。
 // 課題の枠（run_budget）は含めない。
@@ -291,6 +291,13 @@ func mergeRoundPhases(acc, round []CyclePhaseResult) []CyclePhaseResult {
 		a.ReleaseItems = append(a.ReleaseItems, r.ReleaseItems...)
 		a.ReleaseTidied = append(a.ReleaseTidied, r.ReleaseTidied...)
 		a.ImproveItems = append(a.ImproveItems, r.ImproveItems...)
+		a.SuperviseProcessed += r.SuperviseProcessed
+		for h, n := range r.SuperviseHands {
+			if a.SuperviseHands == nil {
+				a.SuperviseHands = map[SupervisorHand]int{}
+			}
+			a.SuperviseHands[h] += n
+		}
 	}
 	return acc
 }

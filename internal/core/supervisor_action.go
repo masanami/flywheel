@@ -321,11 +321,11 @@ func lastOwnerAnswerAt(ctx context.Context, tx *sql.Tx, challengeID int64) (stri
 	return at.String, nil
 }
 
-// countSupervisorActions は q に当たる対処の記録の件数を返す。
-func countSupervisorActions(ctx context.Context, tx *sql.Tx, q SupervisorActionCountQuery) (int, error) {
+// supervisorActionWhere は q に当たる対処の記録の WHERE 句（WHERE は含まない）と引数を返す。
+func supervisorActionWhere(ctx context.Context, tx *sql.Tx, q SupervisorActionCountQuery) (string, []any, error) {
 	cid, ok := parseChallengeID(q.ChallengeID)
 	if !ok {
-		return 0, ErrNotFound
+		return "", nil, ErrNotFound
 	}
 	conds := []string{"challenge_id = ?", "stop_kind = ?"}
 	args := []any{cid, string(q.StopKind)}
@@ -334,7 +334,7 @@ func countSupervisorActions(ctx context.Context, tx *sql.Tx, q SupervisorActionC
 	} else {
 		id, ok := parseTaskID(q.TaskID)
 		if !ok {
-			return 0, ErrNotFound
+			return "", nil, ErrNotFound
 		}
 		conds = append(conds, "task_id = ?")
 		args = append(args, id)
@@ -359,16 +359,47 @@ func countSupervisorActions(ctx context.Context, tx *sql.Tx, q SupervisorActionC
 	if q.AfterLastOwnerAnswer {
 		at, err := lastOwnerAnswerAt(ctx, tx, cid)
 		if err != nil {
-			return 0, err
+			return "", nil, err
 		}
 		if at != "" {
 			conds = append(conds, "created_at > ?")
 			args = append(args, at)
 		}
 	}
+	return strings.Join(conds, " AND "), args, nil
+}
+
+// countSupervisorActions は q に当たる対処の記録の件数を返す。
+func countSupervisorActions(ctx context.Context, tx *sql.Tx, q SupervisorActionCountQuery) (int, error) {
+	where, args, err := supervisorActionWhere(ctx, tx, q)
+	if err != nil {
+		return 0, err
+	}
 	var n int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM supervisor_action WHERE `+strings.Join(conds, " AND "), args...).Scan(&n)
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM supervisor_action WHERE `+where, args...).Scan(&n)
 	return n, err
+}
+
+// supervisorActionHands は q に当たる対処の記録の手を、実行の順（ID の昇順）に返す（手が無い記録は空の名前。数え countSupervisorActions と同じ条件）。
+func supervisorActionHands(ctx context.Context, tx *sql.Tx, q SupervisorActionCountQuery) ([]SupervisorHand, error) {
+	where, args, err := supervisorActionWhere(ctx, tx, q)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT hand FROM supervisor_action WHERE `+where+` ORDER BY id ASC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []SupervisorHand
+	for rows.Next() {
+		var h sql.NullString
+		if err := rows.Scan(&h); err != nil {
+			return nil, err
+		}
+		out = append(out, SupervisorHand(h.String)) // 手が無い記録（判断できなかった）は空の名前
+	}
+	return out, rows.Err()
 }
 
 // CountSupervisorActions は q に当たる対処の記録の件数を返す（課題・タスクの形式の不正は ErrNotFound）。

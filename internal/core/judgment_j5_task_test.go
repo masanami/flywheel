@@ -363,6 +363,7 @@ func TestJ5TaskUncertain_HoldsTheChallengeWithTheTaskOnTheHold(t *testing.T) {
 	if got := f.text(t, `SELECT status FROM task`); got != string(TaskStatusVerifying) {
 		t.Fatalf("task = %q, want verifying", got)
 	}
+	wantLastHoldStop(t, f.s, "verify_uncertain/pending") // AC-2
 }
 
 // AC-141・AC-142: 結果を書く直前に、課題が保留になっていた・契約の実行の中身の識別が違っていたら、何も書かない（次の J5 がやり直す）。

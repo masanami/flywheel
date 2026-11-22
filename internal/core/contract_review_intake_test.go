@@ -108,6 +108,7 @@ func TestReceiveReview_WithoutLandHoldsAsLandUnavailable(t *testing.T) {
 	before := f.artifactRows(t)
 	f.readOnce(t, intakeOut([]string{"respond", "ready"}, intakeArtsOK, nil))
 	q := f.lastHoldQuestion(t)
+	wantLastHoldStop(t, f.s, stopNone) // AC-20: land_unavailable は対象にしない
 	t.Run("AC-79 awaiting_human", func(t *testing.T) {
 		if got := f.status(t, f.cid); got != StatusAwaitingHuman {
 			t.Fatalf("status = %s", got)
@@ -178,6 +179,7 @@ func TestReceiveReview_ContentRefNotExactlyOneHolds(t *testing.T) {
 			if f.lastHoldReason(t) != string(holdReasonContentRefInvalid) {
 				t.Fatalf("question = %q", q)
 			}
+			wantLastHoldStop(t, f.s, stopNone) // AC-21: content_ref_invalid は対象にしない
 			if !strings.Contains(q, tc.n) {
 				t.Fatalf("question lacks the count %q: %q", tc.n, q)
 			}
@@ -337,6 +339,7 @@ func TestReceiveReview_TwoUnmetReadsInARowHold(t *testing.T) {
 	if f.lastHoldReason(t) != string(holdReasonFactsUnmet) {
 		t.Fatalf("AC-105 question = %q", q)
 	}
+	wantLastHoldStop(t, f.s, "facts_unmet/pending") // AC-7
 	if !strings.Contains(q, "self_review") {
 		t.Fatalf("AC-118 question lacks the name: %q", q)
 	}

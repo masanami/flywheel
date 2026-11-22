@@ -51,6 +51,9 @@ func TestPollContractRuns_WaitingIsMappedByKindAndDecider(t *testing.T) {
 			if n := f.count(t, `SELECT COUNT(*) FROM hold`); n != wantHolds {
 				t.Fatalf("holds = %d, want %d", n, wantHolds)
 			}
+			if c.wantHold {
+				wantLastHoldStop(t, f.s, stopNone) // AC-27: 契約の判断待ち（承認の待ち・答えの待ち）の保留は対象にしない
+			}
 		})
 	}
 }
@@ -145,6 +148,7 @@ func TestPollContractRuns_OverBudgetCancelsAndHolds(t *testing.T) {
 	if !strings.Contains(q, "上回った") {
 		t.Fatalf("question = %q, want it to say the budget was exceeded", q)
 	}
+	wantLastHoldStop(t, f.s, stopNone) // AC-18: 予算の上限を超えた保留は対象にしない
 	if state, _, _, ended := f.contractRow(t); state != "cancelled" || !ended {
 		t.Fatalf("contract_run state=%s ended=%v, want cancelled and ended", state, ended)
 	}
@@ -170,6 +174,7 @@ func TestPollContractRuns_CancelFailureHoldsAndIsNotRetried(t *testing.T) {
 	if !strings.Contains(q, "増え続け") || !strings.Contains(q, "exit 1") {
 		t.Fatalf("question = %q, want the failed cancel and the growing cost", q)
 	}
+	wantLastHoldStop(t, f.s, stopNone) // AC-18: 予算の上限を超えた保留（中止の失敗）も対象にしない
 	f.poll(t)
 	if len(f.client.cancels) != 1 {
 		t.Fatalf("cancels = %d, want 1（自動ではやり直さない）", len(f.client.cancels))

@@ -130,8 +130,8 @@ func TestRunCycle_Rounds_UnreadableApprovedChecksStall(t *testing.T) {
 	if len(rel.ReleaseItems) != wantRounds {
 		t.Errorf("AC-49: release items = %d, want %d (one per round, concatenated)", len(rel.ReleaseItems), wantRounds)
 	}
-	if len(res.Phases) != 9 {
-		t.Errorf("AC-49: phases = %d, want 9 (one element per phase)", len(res.Phases))
+	if len(res.Phases) != 10 {
+		t.Errorf("AC-49: phases = %d, want 10 (one element per phase)", len(res.Phases))
 	}
 	// #988 AC-126: いま始められるものがあっても（stalled の前提）、終わった後に始める処理を呼ばない。
 	work, err := f.s.CountRoundWork(context.Background(), in.AgentDecl, in.ConnDecl)
