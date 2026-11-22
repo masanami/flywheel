@@ -231,36 +231,91 @@ func (f *roundsFixture) pendingChecks(t *testing.T) CycleRunInput {
 	return in
 }
 
-// AC-7・AC-8・AC-12・AC-13・AC-14: いま始められるものがあり、作業中の実行が 0 件のまま進みの無い回りが 3 回続くと、次の回りは始まらず、
-// end_reason は stalled になる。進みの無い回りの後は、待ちが 1 回置かれる（3 回目の後は置かず、終える）。学びの段と書き出しの段を通り、result は completed。
-func TestRunCycle_Rounds_AC7_AC8_AC12_AC13_AC14_StalledAfterThreeRoundsWithoutProgress(t *testing.T) {
+// #1015: チェックが終わらないあいだ（完了の検証が waiting_external で見送る回りが 5 回続いても）、stalled で終えず、回りの間に待ちを置く。
+// チェックが通った後の回りで J5 が呼ばれ、落ち着いて settled で終わる。学びの段と書き出しの段を通り、result は completed。
+func TestRunCycle_Rounds_ChecksWaitingDoesNotStall(t *testing.T) {
 	t.Parallel()
 	f := newRoundsFixture(t)
 	f.startOut(contractOut(ContractStateRunning, nil, nil))
 	f.reads(reviewWaitOut())
 	f.seedLearnAndImprove(t)
 	in := f.pendingChecks(t)
+	f.onWait = func(ctx context.Context, n int) error {
+		if n == 5 { // 5 回待った後で、チェックが通る
+			f.j5.checks.prs["o/r#1"] = prChecks("open", checkDone, checkDone)
+		}
+		return ctx.Err()
+	}
 
 	res := f.runCycle(t, in)
 
-	if res.Cycle.EndReason != CycleEndStalled || res.Cycle.Result != CycleResultCompleted { // AC-8・AC-14
-		t.Fatalf("end_reason = %q result = %q, want stalled/completed", res.Cycle.EndReason, res.Cycle.Result)
+	if res.Cycle.EndReason == CycleEndStalled {
+		t.Fatalf("end_reason = stalled, want the check wait to keep waiting")
 	}
-	// 回り: ① 起動（進みあり・作業中 1 → 待つ）② レビュー待ちを読む（進みあり → 待たずに次へ）③ ④（進み無し → 待つ）⑤（進み無し 3 回目 → 終える）。
-	if res.Cycle.Rounds != 5 {
-		t.Errorf("rounds = %d, want 5", res.Cycle.Rounds)
+	if res.Cycle.EndReason != CycleEndSettled || res.Cycle.Result != CycleResultCompleted {
+		t.Fatalf("end_reason = %q result = %q, want settled/completed", res.Cycle.EndReason, res.Cycle.Result)
 	}
-	if got := len(f.waited()); got != 3 { // AC-7（進み無しの回りの後に待つ）
-		t.Errorf("waits = %d, want 3", got)
+	if got := len(f.waited()); got < 5 {
+		t.Errorf("waits = %d, want at least 5 (a wait between the rounds while the checks run)", got)
 	}
-	if n := f.judgedCount(JudgmentJ5); n != 0 {
-		t.Errorf("J5 calls = %d, want 0 (the checks never finish)", n)
+	if n := f.judgedCount(JudgmentJ5); n < 1 {
+		t.Errorf("J5 calls = %d, want at least 1 (after the checks passed)", n)
 	}
-	if n := f.judgedCount(JudgmentJ6); n != 1 { // AC-12
+	if n := f.judgedCount(JudgmentJ6); n != 1 {
 		t.Errorf("J6 calls = %d, want 1 (the learn phase ran)", n)
 	}
-	if n := countCalls(f.wg.calls, "IsWorkTree"); n != 1 { // AC-13
+	if n := countCalls(f.wg.calls, "IsWorkTree"); n != 1 {
 		t.Errorf("backup phase ran %d times, want once (calls %v)", n, f.wg.calls)
+	}
+}
+
+// チェック待ち（段の結果に waiting_checks・waiting_external がある回り）は、作業中の実行と同じ扱い: settled にも stalled にもしない。
+func TestRoundGovernor_Decide_CheckWaitIsTreatedLikeActive(t *testing.T) {
+	t.Parallel()
+	var g roundGovernor
+	startable := &RoundWork{Startable: 1}
+	for i := 0; i < 6; i++ {
+		if got := g.decide(false, startable, true); got != roundWait {
+			t.Fatalf("round %d: decide = %v, want roundWait", i, got)
+		}
+	}
+	// チェック待ちで連続の数は 0 に戻る: 進みの無い 2 回の後、さらに 3 回目で初めて終える。
+	g = roundGovernor{}
+	g.decide(false, startable, false)
+	g.decide(false, startable, false)
+	g.decide(false, startable, true)
+	for i := 0; i < 2; i++ {
+		if got := g.decide(false, startable, false); got != roundWait {
+			t.Fatalf("after the check wait, round %d: decide = %v, want roundWait (the count was reset)", i, got)
+		}
+	}
+	if got := g.decide(false, startable, false); got != roundStalled {
+		t.Errorf("decide = %v, want roundStalled", got)
+	}
+	// 始められるものが無くてもチェック待ちがあれば settled にしない。
+	if got := (&roundGovernor{}).decide(false, &RoundWork{}, true); got != roundWait {
+		t.Errorf("decide(nothing, check wait) = %v, want roundWait", got)
+	}
+}
+
+// チェック待ちかどうかは、段の結果から取る。チェックの失敗は含めない。
+func TestRoundWaitsForChecks(t *testing.T) {
+	t.Parallel()
+	rel := func(r ExecutionResult) []CyclePhaseResult {
+		return []CyclePhaseResult{{Phase: CyclePhaseRelease, ReleaseItems: []ReleaseExecItem{{Result: r}}}}
+	}
+	if !roundWaitsForChecks(rel(ExecutionResultWaitingChecks)) {
+		t.Error("release waiting_checks should count")
+	}
+	if roundWaitsForChecks(rel(ExecutionResultChecksFailed)) {
+		t.Error("checks_failed must not count")
+	}
+	ver := []CyclePhaseResult{{Phase: CyclePhaseVerify, NotStarted: []NotStarted{{Reason: NotStartedWaitingExternal}}}}
+	if !roundWaitsForChecks(ver) {
+		t.Error("verify waiting_external should count")
+	}
+	if roundWaitsForChecks(nil) {
+		t.Error("empty should not count")
 	}
 }
 
@@ -299,7 +354,7 @@ func TestRoundGovernor_Decide(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var g roundGovernor
 			for i, st := range tc.steps {
-				if got := g.decide(st.progressed, st.work); got != st.want {
+				if got := g.decide(st.progressed, st.work, false); got != st.want {
 					t.Fatalf("step %d: decide(progressed=%v, %+v) = %v, want %v", i, st.progressed, *st.work, got, st.want)
 				}
 			}
