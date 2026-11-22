@@ -283,8 +283,8 @@ func cycleStatusHandler(fleet *Fleet, w http.ResponseWriter, r *http.Request) {
 }
 
 // cycleStartHandler は、生きているロックがあれば起動せず 409 locked。heartbeat が回収の時間を過ぎた古いロックは走っていない扱いで、
-// 起動した CLI の cycle が回収する（承認などの操作の後にサイクルを始める判定と同じ）。いま始められるものの数えも、その判定と同じ
-// （CountRoundWork）。読み取りと子の BeginCycle の間の競合で子が排他で断られたときも 409 locked にする。きっかけは ui のまま。
+// 起動した CLI の cycle が回収する（承認などの操作の後にサイクルを始める判定と同じ）。「進むものが無い」の数えは、人が明示して
+// 始める操作なので、CLI の cycle と同じ CountCycleWorkInWorkspace の Total（学び・改修の提案などだけが残るときも始める）。読み取りと子の BeginCycle の間の競合で子が排他で断られたときも 409 locked にする。きっかけは ui のまま。
 func cycleStartHandler(fleet *Fleet, launch CycleStarter, w http.ResponseWriter, r *http.Request) {
 	st, release, le := fleet.Acquire(r.Context(), r.PathValue("name"))
 	if le != nil {
@@ -298,7 +298,7 @@ func cycleStartHandler(fleet *Fleet, launch CycleStarter, w http.ResponseWriter,
 	nothing := false
 	if err == nil && cs.State != core.CycleStateRunning {
 		if agent, derr := core.CheckDeclarations(path); derr == nil && agent != nil {
-			if work, werr := st.CountRoundWorkInWorkspace(r.Context(), agent); werr == nil && work.Startable == 0 {
+			if work, werr := st.CountCycleWorkInWorkspace(r.Context(), agent); werr == nil && work.Total == 0 {
 				nothing = true
 			}
 		}

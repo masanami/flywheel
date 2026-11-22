@@ -444,6 +444,45 @@ func TestCyclePostNothingToAdvanceReturnsNotStartedWithoutLaunching(t *testing.T
 	}
 }
 
+// 学びの対象だけが残るとき（回りの終わりの数えでは 0 件、サイクルを回すと進むものの数えでは 1 件以上）も、
+// 人が明示して始める「サイクルを回す」は CLI の cycle と同じ数え（Total）で子を起動する。
+func TestCyclePostOnlyLearnWorkStillLaunches(t *testing.T) {
+	ws := initWorkspaceWithWork(t)
+	if err := os.WriteFile(filepath.Join(ws, ".flywheel", "agent.json"), []byte(`{"version":1,"position_file":"position.md"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "position.md"), []byte("p"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 課題 C-1 を完了にし、原因が未分類の発生を 1 件持たせる（学びの対象）。進められる課題はほかに無い。
+	coretest.SetChallengeStatus(t, ws, 1, "done")
+	coretest.Exec(t, ws, `INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action) VALUES ('2026-01-01T00:00:00Z', 'a', 'cli', 'none', 'challenge', 1, 'x')`)
+	coretest.Exec(t, ws, `INSERT INTO occurrence (challenge_id, kind, activity_id, outcome, source, cause, layer, created_at) VALUES (1, 'completion_rejected', (SELECT MAX(id) FROM activity), 'bad', 'core', NULL, NULL, '2026-01-01T00:00:00Z')`)
+	st, err := core.OpenWorkspace(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := core.CheckDeclarations(ws)
+	if err != nil || agent == nil {
+		_ = st.Close()
+		t.Fatalf("agent = %v err=%v", agent, err)
+	}
+	all, aerr := st.CountCycleWorkInWorkspace(context.Background(), agent)
+	round, rerr := st.CountRoundWorkInWorkspace(context.Background(), agent)
+	_ = st.Close()
+	if aerr != nil || rerr != nil || all.Total == 0 || round.Startable != 0 {
+		t.Fatalf("precondition: total=%+v (%v) startable=%+v (%v)", all, aerr, round, rerr)
+	}
+	port, calls := countingServer(t, ws)
+	code, body := apiPost(t, port, cyclePath, "")
+	if code != 200 || strings.TrimSpace(body) != `{"started":true}` {
+		t.Fatalf("POST = %d %s", code, body)
+	}
+	if n := atomic.LoadInt32(calls); n != 1 {
+		t.Errorf("起動が %d 回呼ばれた, want 1", n)
+	}
+}
+
 // 合図の前に終了コード 0 で終わった子は、周を始めなかった（started: false。エラーにしない）。
 func TestCyclePostChildExitsZeroBeforeSignalIsNotStarted(t *testing.T) {
 	port, _ := scriptLauncherServer(t, "echo '進められるものが無いので、サイクルを始めなかった（理由: nothing_to_advance）'\nexit 0\n")
