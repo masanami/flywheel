@@ -15,16 +15,24 @@ import (
 type answerDecls struct {
 	agent *AgentDeclaration
 	conn  *ConnectorsDeclaration
+	// loadErr は、宣言を読めなかった理由（どちらも読めたら nil）。検査に通らないのではなく、宣言を読めないことを案内するために持つ。
+	loadErr error
 }
 
-// answerDecls は req の宣言を返す。req に無ければ core が作業ディレクトリの宣言を読む（読めなければ nil。検査に通らず、足せない）。
+// answerDecls は req の宣言を返す。req に無ければ core が作業ディレクトリの宣言を読む（読めなければ nil で、理由を loadErr に持つ。足せない）。
 func (s *Store) answerDecls(req AnswerRequest) answerDecls {
 	d := answerDecls{agent: req.Agent, conn: req.Conn}
 	if d.agent == nil {
-		d.agent, _ = LoadAgentDeclaration(s.Workspace())
+		var err error
+		if d.agent, err = LoadAgentDeclaration(s.Workspace()); err != nil {
+			d.agent, d.loadErr = nil, fmt.Errorf("agent declaration: %w", err)
+		}
 	}
 	if d.conn == nil {
-		d.conn, _ = LoadConnectorsDeclaration(s.Workspace())
+		var err error
+		if d.conn, err = LoadConnectorsDeclaration(s.Workspace()); err != nil {
+			d.conn, d.loadErr = nil, errors.Join(d.loadErr, fmt.Errorf("connectors declaration: %w", err))
+		}
 	}
 	return d
 }
@@ -110,7 +118,10 @@ type taskAdditionEval struct {
 // 検査・見込みの数え方は、上限以下で足す処理（applyJ2ExpandAdd）と同じものを使う。
 func evaluateTaskAddition(ctx context.Context, tx *sql.Tx, cid, additionID int64, decls answerDecls) (taskAdditionEval, error) {
 	if decls.agent == nil || decls.conn == nil {
-		return taskAdditionEval{}, fmt.Errorf("%w: the agent or connectors declaration cannot be read; cannot add tasks", ErrValidation)
+		if decls.loadErr != nil {
+			return taskAdditionEval{}, fmt.Errorf("%w: the declaration cannot be read; cannot add tasks: %w", ErrValidation, decls.loadErr)
+		}
+		return taskAdditionEval{}, fmt.Errorf("%w: the agent or connectors declaration is missing; cannot add tasks", ErrValidation)
 	}
 	add, err := loadTaskAddition(ctx, tx, additionID)
 	if err != nil {
@@ -243,26 +254,7 @@ func applyTaskAdditionAdd(ctx context.Context, tc *transitionCtx, att Attestatio
 	newLimit := limit
 	if total > limit {
 		newLimit = total
-		_, reason, err := challengeBudgetLimit(ctx, tx, cid)
-		if err != nil {
-			return err
-		}
-		if err := setChallengeBudgetLimit(ctx, tx, cid, &newLimit, reason); err != nil {
-			return err
-		}
-		if _, err := insertBudgetApproval(ctx, tx, rec, att, cid, int(st.Version), nil); err != nil {
-			return err
-		}
-		approveAfter := map[string]any{
-			"approval_kind": string(ApprovalKindBudget), "decision": string(ApprovalDecisionApproved),
-			"target_version": st.Version, "limit_usd": microsToUSD(newLimit),
-		}
-		att.addRelayTo(approveAfter)
-		if err := rec.record("challenge", cid, string(OpApprove), map[string]any{"limit_usd": microsToUSD(limit)}, approveAfter); err != nil {
-			return err
-		}
-		if err := rec.record("challenge", cid, ActivityActionBudgetLimit, map[string]any{"limit_usd": microsToUSD(limit)},
-			map[string]any{"limit_usd": microsToUSD(newLimit), "verification": string(att.Verification())}); err != nil {
+		if _, err := raiseBudgetLimit(ctx, tx, rec, att, cid, int(st.Version), limit, newLimit); err != nil {
 			return err
 		}
 	}
