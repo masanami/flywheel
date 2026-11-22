@@ -322,45 +322,51 @@ func (s *Store) SetTaskAdditionState(ctx context.Context, ch Channel, id string,
 	}
 	var out *TaskAddition
 	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
-		cur, err := loadTaskAddition(ctx, tx, aid)
-		if err != nil {
-			return err
-		}
-		// 開いている足す依頼だけが動ける（同じ状態への書き込みは、仕様・額・保留の値だけを更新する）。
-		if !cur.State.IsOpen() {
-			return ErrInvalidTransition
-		}
-		set := []string{"state = ?"}
-		args := []any{string(to)}
-		if upd.Spec != nil {
-			set, args = append(set, "spec = ?"), append(args, *upd.Spec)
-		}
-		if upd.TotalAfterUSD != nil {
-			set, args = append(set, "total_after_micros = ?"), append(args, usdToMicros(*upd.TotalAfterUSD))
-		}
-		if upd.LimitUSD != nil {
-			set, args = append(set, "limit_micros = ?"), append(args, usdToMicros(*upd.LimitUSD))
-		}
-		if upd.HoldID != nil {
-			set, args = append(set, "hold_id = ?"), append(args, *upd.HoldID)
-		}
-		if !to.IsOpen() {
-			set, args = append(set, "decided_at = ?"), append(args, formatTimestamp(rec.at))
-		}
-		args = append(args, aid)
-		if _, err := tx.ExecContext(ctx, `UPDATE task_addition SET `+strings.Join(set, ", ")+` WHERE id = ?`, args...); err != nil {
-			return err
-		}
-		if err := rec.record("task_addition", aid, "state", map[string]any{"state": string(cur.State)}, map[string]any{"state": string(to)}); err != nil {
-			return err
-		}
-		out, err = loadTaskAddition(ctx, tx, aid)
+		var err error
+		out, err = setTaskAdditionStateTx(ctx, tx, rec, aid, to, upd)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// setTaskAdditionStateTx は SetTaskAdditionState の書き込み本体（呼び出し側の書き込みトランザクションの中で使う）。
+func setTaskAdditionStateTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, aid int64, to TaskAdditionState, upd TaskAdditionUpdate) (*TaskAddition, error) {
+	cur, err := loadTaskAddition(ctx, tx, aid)
+	if err != nil {
+		return nil, err
+	}
+	// 開いている足す依頼だけが動ける（同じ状態への書き込みは、仕様・額・保留の値だけを更新する）。
+	if !cur.State.IsOpen() {
+		return nil, ErrInvalidTransition
+	}
+	set := []string{"state = ?"}
+	args := []any{string(to)}
+	if upd.Spec != nil {
+		set, args = append(set, "spec = ?"), append(args, *upd.Spec)
+	}
+	if upd.TotalAfterUSD != nil {
+		set, args = append(set, "total_after_micros = ?"), append(args, usdToMicros(*upd.TotalAfterUSD))
+	}
+	if upd.LimitUSD != nil {
+		set, args = append(set, "limit_micros = ?"), append(args, usdToMicros(*upd.LimitUSD))
+	}
+	if upd.HoldID != nil {
+		set, args = append(set, "hold_id = ?"), append(args, *upd.HoldID)
+	}
+	if !to.IsOpen() {
+		set, args = append(set, "decided_at = ?"), append(args, formatTimestamp(rec.at))
+	}
+	args = append(args, aid)
+	if _, err := tx.ExecContext(ctx, `UPDATE task_addition SET `+strings.Join(set, ", ")+` WHERE id = ?`, args...); err != nil {
+		return nil, err
+	}
+	if err := rec.record("task_addition", aid, "state", map[string]any{"state": string(cur.State)}, map[string]any{"state": string(to)}); err != nil {
+		return nil, err
+	}
+	return loadTaskAddition(ctx, tx, aid)
 }
 
 // GetTaskAddition は足す依頼 id を返す。無ければ ErrNotFound。
