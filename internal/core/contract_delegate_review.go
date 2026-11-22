@@ -206,7 +206,7 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 }
 
 // loadUndeliveredSendBackNote は、そのタスク（taskID が nil なら、タスクを指さない記録）の、結果が executed の send_back の対処の記録のうち、
-// 最後の契約のコマンド（そのタスクの契約の run の開始）より新しいものの、最後の 1 件の note を返す。無ければ空文字列。
+// 最後の契約のコマンド（そのタスクの契約の run の開始）より新しい（時刻が等しいものは新しくない側＝未配達に倒す）ものの、最後の 1 件の note を返す。無ければ空文字列。
 // 契約のコマンドを呼んだ後は返さないので、同じ note を 2 回返さない。
 func loadUndeliveredSendBackNote(ctx context.Context, tx *sql.Tx, challengeID int64, taskID *int64) (string, error) {
 	taskCond, args := `task_id IS NULL`, []any{challengeID}
@@ -232,7 +232,8 @@ func loadUndeliveredSendBackNote(ctx context.Context, tx *sql.Tx, challengeID in
 	if err != nil {
 		return "", err
 	}
-	if lastRun.Valid && lastRun.String >= createdAt {
+	// 時刻が等しいときは順序が決まらないので、まだ届けていない側に倒す（届け漏れより、同じ文をもう 1 回届けるほうが安全）。
+	if lastRun.Valid && lastRun.String > createdAt {
 		return "", nil // 最後の契約のコマンドのほうが新しい（返し済み）
 	}
 	return strings.TrimSpace(note), nil

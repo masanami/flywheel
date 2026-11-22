@@ -318,6 +318,31 @@ func TestSupervisorAction_RecordListAndCount(t *testing.T) {
 	}
 }
 
+// オーナーの回答と対処の記録が同じ時刻（ミリ秒）のときは、順序が決まらないので、その対処を数える側に倒す
+// （少なく数えて自動の対処が 1 回余分に通るより、多く数えてオーナーへ上げるほうが安全）。
+func TestSupervisorAction_SameTimeAsTheOwnerAnswerIsCounted(t *testing.T) {
+	t.Parallel()
+	s, _ := filledStore(t)
+	ctx := context.Background()
+	const at = "2999-01-01T00:00:00.000Z"
+	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`UPDATE supervisor_action SET created_at = ?`, at); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by) VALUES (1, 'q', 'verifying', ?, 'a', ?, 'alice')`, at, at)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.CountSupervisorActions(ctx, SupervisorHandledCountQuery("C-1", "T-1", StopKindVerifyUncertain))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("handled count at the same time as the owner's answer = %d, want 1 (the fixture's one executed record, counted)", n)
+	}
+}
+
 func TestSupervisorAction_RejectsMalformedInput(t *testing.T) {
 	t.Parallel()
 	s, _ := filledStore(t)

@@ -128,6 +128,22 @@ func TestSupervisorSendBack_ClosesTheHoldAndDeliversTheNoteOnce(t *testing.T) {
 	}
 }
 
+// 契約の実行の開始と send_back の記録が同じ時刻（ミリ秒）のときは、順序が決まらないので「まだ届けていない」側に倒し、文を返す
+// （届け漏れより、同じ文をもう 1 回届けるほうが安全）。
+func TestSupervisorSendBack_SameTimeAsTheContractRunCountsAsUndelivered(t *testing.T) {
+	t.Parallel()
+	f := newSBFixture(t)
+	tg := f.hold(t, StatusInProgress, StopKindVerifyUncertain, true)
+	f.exec2(t, `UPDATE task SET status = 'verifying' WHERE id = ?`, f.taskID)
+	if out := f.apply(t, tg, HandSendBack, "NOTE-SB"); out.Result != ActionExecuted {
+		t.Fatalf("outcome = %+v, want executed", out)
+	}
+	f.exec2(t, `UPDATE supervisor_action SET created_at = ?`, sbActTime)
+	f.exec2(t, `INSERT INTO run (challenge_id, kind, challenge_version, plan_version, pid, host, heartbeat_at, started_at, ended_at, result, max_budget_usd, budget_bucket, cost_usd, task_id)
+		VALUES (?, 'contract', 1, 1, 1, 'h', ?, ?, ?, 'succeeded', 0, 'impl', 0, ?)`, f.cidInt, sbActTime, sbActTime, sbActTime, f.taskID)
+	f.wantRespond(t, "NOTE-SB")
+}
+
 // AC-137・139: rework_limit を send_back で閉じた後も、差し戻しの数えは数え直されない（send_back は 1 回に数える）。
 // 差し戻しを 1 回通した後の次の「満たしていない」は、差し戻さず、また rework_limit の保留になる。
 func TestSupervisorSendBack_ReworkLimitIsNotRecountedAndTheSendBackCounts(t *testing.T) {
