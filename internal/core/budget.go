@@ -461,6 +461,9 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 	}
 	var out Approval
 	err := s.mutateAs(ctx, att.actor, att.channel, att.verification, func(tx *sql.Tx, rec *activityRecorder) error {
+		if err := s.chatGate(ctx, tx, att, actionBudget, ""); err != nil {
+			return err
+		}
 		current, plan, err := loadBudgetTarget(ctx, tx, cid)
 		if err != nil {
 			return err

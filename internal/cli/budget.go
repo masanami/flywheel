@@ -45,7 +45,7 @@ func runBudget(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	att, err := core.Verify(core.ChannelCLI, verifier, budgetSummaryText(preview), id)
+	att, err := core.Verify(channelFor(a), verifier, budgetSummaryText(preview), id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}

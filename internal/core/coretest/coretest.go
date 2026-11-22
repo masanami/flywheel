@@ -1099,6 +1099,12 @@ func FillAllTables(t *testing.T, workspace string) {
 			  VALUES (1, 'f1 "quoted"', 'detail', 'learn', 'open', NULL, NULL, 2, ?, ?)`, []any{at, at}},
 			{`INSERT INTO followup (challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, created_at, updated_at)
 			  VALUES (NULL, 'f2', NULL, 'learn', 'dropped', NULL, '要らない', NULL, ?, ?)`, []any{at, at}},
+			{`INSERT INTO chat_session (engine_session, engine_started, started_at, closed_at) VALUES ('11111111-1111-4111-8111-111111111111', 1, ?, ?)`, []any{at, at}},
+			{`INSERT INTO chat_session (engine_session, engine_started, started_at, closed_at) VALUES ('22222222-2222-4222-8222-222222222222', 0, ?, NULL)`, []any{at}},
+			{`INSERT INTO chat_message (session_id, role, body, state, cost_usd, viewing_challenge_id, viewing_task_id, viewing_title, activity, created_at, ended_at)
+			  VALUES (1, 'owner', '状況を教えて "quoted"', 'done', 0, 'C-1', 'T-1', '見ている題名', '[]', ?, ?)`, []any{at, at}},
+			{`INSERT INTO chat_message (session_id, role, body, state, cost_usd, viewing_challenge_id, viewing_task_id, viewing_title, activity, created_at, ended_at)
+			  VALUES (1, 'orchestrator', '返事', 'done', 1250000, NULL, NULL, NULL, '[{"command":"flywheel status","ok":true}]', ?, ?)`, []any{at, at}},
 			{`INSERT INTO source_child (challenge_id, source_id, external_key, parent_external_key, url, title, body, upstream_state, created_at, updated_at)
 			  VALUES (1, 'src', 'o/r#9', 'o/r#1', 'https://github.com/o/r/issues/9', 't', 'b', 'open', ?, ?)`, []any{at, at}},
 			{`UPDATE task SET source_key = 'o/r#9' WHERE id = 1`, nil},

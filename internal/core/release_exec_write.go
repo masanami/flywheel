@@ -242,6 +242,7 @@ func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int
 		item.Result = w.result
 		item.ObservedHead = w.observedHead
 		item.Route = j.route
+		item.WaitNotResolving = j.waitNotResolving && w.result == ExecutionResultWaitingChecks
 		if class == ExecutionClassExecuted {
 			item.MergeCommit = w.mergeCommit
 		}

@@ -82,6 +82,8 @@ var judgmentPromptLimit = map[string]int{
 	"j5.md": 14473,
 	"j6.md": 6144,
 	"j8.md": 8192,
+	// chat.md は対話の欄の実行エンジンの追加の指示（判断点ではない）。
+	"chat.md": 4096,
 }
 
 // briefFixedSectionsTotalLimit は J3 ブリーフの固定の節の雛形の合計の上限
@@ -148,6 +150,22 @@ func Instructions(j core.JudgmentPoint) (string, error) {
 	b, err := fs.ReadFile(fsys, file)
 	if err != nil {
 		return "", fmt.Errorf("invoker: read instructions for %s: %w", j, err)
+	}
+	return string(b), nil
+}
+
+// chatPromptFile は対話の欄の実行エンジンへ渡す指示文のファイル名。
+const chatPromptFile = "chat.md"
+
+// ChatInstructions は対話の欄の指示文を、embed から読んで返す。
+func ChatInstructions() (string, error) {
+	fsys, err := promptsSubFS()
+	if err != nil {
+		return "", fmt.Errorf("invoker: prompts fs: %w", err)
+	}
+	b, err := fs.ReadFile(fsys, chatPromptFile)
+	if err != nil {
+		return "", fmt.Errorf("invoker: read chat instructions: %w", err)
 	}
 	return string(b), nil
 }

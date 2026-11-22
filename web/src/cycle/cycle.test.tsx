@@ -102,7 +102,7 @@ it("AC-380 #806: サイクルを止めるボタンは無い（ボタンは「サ
   expect(within(body()).queryByText(/止める|止めて|停止/)).toBeNull();
 });
 
-it("AC-381 #806: サイクルを回すと進むものの合計と「サイクルを回す」のボタンが出る", async () => {
+it("AC-181 #995・AC-381 #806: サイクルを回すと進むものの合計と「サイクルを回す」のボタンが出る", async () => {
   await openAgents([agent], "#/a/alpha/cycle");
   const part = await screen.findByTestId("cycle-work");
   await waitFor(() =>

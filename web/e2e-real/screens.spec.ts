@@ -69,6 +69,22 @@ test("AC-442 #813: 本物の serve で、「いま進められること」に、
 });
 
 // 種を書き換える（C-1 が着手中になる）ので、最後に置く
+test("#1055: 本物の serve で、対話の欄の「新しい会話」が 204（本文なし）で成功し、欄にエラーが出ない", async ({
+  page,
+}) => {
+  await page.goto(`/#/a/${AGENT}/challenges`);
+  const panel = page.getByTestId("chat-panel");
+  await expect(panel).toBeVisible();
+  const done = page.waitForResponse(
+    (r) =>
+      r.url().endsWith(`/api/v1/workspaces/${AGENT}/chat/new`) &&
+      r.request().method() === "POST",
+  );
+  await panel.getByRole("button", { name: "新しい会話" }).click();
+  expect((await done).status()).toBe(204);
+  await expect(panel.getByTestId("chat-error")).toHaveCount(0);
+});
+
 test("AC-352 #813: 本物の serve で、計画の承認の画面の「この計画を承認する」を押すと、課題が着手中（in_progress）になる", async ({
   page,
   request,

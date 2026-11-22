@@ -769,13 +769,41 @@ export interface ApprovalCompletionTask {
 }
 
 export interface CycleStatus {
+  last_end_reason: string | null;
   last_ended_at: string | null;
   last_result: string | null;
   last_started_at: string | null;
+  running: CycleRunning | null;
   state: string;
 }
 
+export interface CycleRunning {
+  active_runs: number;
+  budget_usd: number;
+  max_parallel_runs: number;
+  rounds: number;
+  spent_usd: number;
+  started_at: string;
+  stop_requested: boolean;
+  trigger: string;
+  watching: CycleWatching[];
+}
+
+export interface CycleWatching {
+  challenge_id: string;
+  run_started_at: string;
+  spent_usd: number;
+  state: string;
+  task_id: string | null;
+  title: string;
+}
+
 export interface CycleStarted {
+  started: boolean;
+}
+
+export interface CycleStart {
+  reason: string;
   started: boolean;
 }
 
@@ -786,6 +814,51 @@ export interface TreeResponse {
 
 export interface FollowupListResponse {
   followups: Followup[];
+}
+
+export interface ChatResponse {
+  cost_usd: number;
+  messages: ChatMessage[];
+  session_id: string | null;
+  started_at: string | null;
+  state: string;
+  tools: string;
+}
+
+export interface ChatMessage {
+  activity: ChatActivity[];
+  body: string;
+  cost_usd: number;
+  created_at: string;
+  id: number;
+  role: string;
+  state: string;
+  viewing: ChatViewing | null;
+}
+
+export interface ChatActivity {
+  command: string;
+  ok: boolean;
+}
+
+export interface ChatViewing {
+  challenge_id: string | null;
+  task_id: string | null;
+  title: string | null;
+}
+
+export interface ChatPostRequest {
+  text: string;
+  viewing?: ChatPostViewing | null;
+}
+
+export interface ChatPostViewing {
+  challenge_id?: string;
+  task_id?: string;
+}
+
+export interface ChatPostResponse {
+  id: number;
 }
 
 export const CARD_ACTION_CODES = [
@@ -914,6 +987,42 @@ export const EXPECTED_KIND_CODES = [
   "behavior",
 ] as const;
 
+export const CYCLE_END_REASON_CODES = [
+  "settled",
+  "budget",
+  "stopped",
+  "rate_limited",
+  "stalled",
+  "error",
+  "interrupted",
+] as const;
+
+export const WATCH_STATE_CODES = [
+  "working",
+  "verifying",
+  "waiting_owner",
+] as const;
+
+export const CYCLE_TRIGGER_CODES = [
+  "manual",
+  "ui",
+  "approve",
+  "reject",
+  "answer",
+  "budget",
+  "ingest",
+  "followup_promote",
+  "continue",
+] as const;
+
+export const CYCLE_START_REASON_CODES = [
+  "started",
+  "already_running",
+  "no_work",
+  "disabled",
+  "unavailable",
+] as const;
+
 export const EXECUTION_RESULT_CODES = [
   "merged",
   "already_merged",
@@ -978,4 +1087,29 @@ export const CONDITIONS_AFTER_RELEASE_HEADINGS = [
   "本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:",
   "承認で本番反映されると満たされる条件:",
   "承認済みの本番反映が走れば満たされる条件:",
+] as const;
+
+export const CHAT_MESSAGE_STATE_CODES = [
+  "replying",
+  "done",
+  "stopped",
+  "limit",
+  "rate_limited",
+  "session_lost",
+  "failed",
+] as const;
+
+export const CHAT_TOOLS_CODES = [
+  "restricted",
+  "full",
+] as const;
+
+export const CHAT_ROLE_CODES = [
+  "owner",
+  "orchestrator",
+] as const;
+
+export const CHAT_PANEL_STATE_CODES = [
+  "idle",
+  "replying",
 ] as const;

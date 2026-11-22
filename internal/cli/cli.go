@@ -5,6 +5,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +13,13 @@ import (
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/server"
 )
 
 // Run は cmd/flywheel/main.go から呼ばれる唯一の入口。
 // os.Exit にそのまま渡せる終了コード（0/1/2）を返す。
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	return run(args, stdin, stdout, stderr, defaultCommands())
+	return runWithDeps(args, stdin, stdout, stderr, defaultCommands(), runDeps{CycleStart: server.StartCycle})
 }
 
 // run は Run の内部実装。commands を外から差し込めるようにして、
@@ -30,6 +32,17 @@ func run(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands [
 // runWithLookPath は run に gh・claude の実行ファイルの探し方を渡せる形（nil なら exec.LookPath＝PATH 上）。
 // テストが、プロセス全体の PATH を書き換えずに、テストごとの偽の gh・claude を使うために使う。
 func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands []Command, lookPath lookPathFunc) int {
+	return runWithDeps(rawArgs, stdin, stdout, stderr, commands, runDeps{LookPath: lookPath})
+}
+
+// runDeps は run に外から渡す、環境に触れる口。ゼロ値は、gh・claude を PATH から探し、サイクルを切り離して始められない扱い。
+type runDeps struct {
+	LookPath   lookPathFunc
+	CycleStart server.CycleStarter
+}
+
+func runWithDeps(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, commands []Command, deps runDeps) int {
+	lookPath := deps.LookPath
 	jsonMode := scanJSONFlag(rawArgs)
 
 	if len(rawArgs) > 0 && isHelpInvocation(rawArgs[0]) {
@@ -49,6 +62,14 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 		return failUsage(stderr, jsonMode, "コマンドを指定してください")
 	}
 
+	// 対話の欄の印がある環境からは、道具の範囲が full でなければ、欄から受けるコマンドの一覧にあるコマンドだけを受ける
+	// （委譲の子の印の検査の後。名前の照合は全体のフラグを除いた後）。
+	chat := chatMarkFromEnv(rawArgs)
+	needChatMark, chatKnd, gateErr := chatGate(chat, rawArgs)
+	if gateErr != nil {
+		return failErr(stderr, jsonMode, gateErr)
+	}
+
 	cmd, rest, ok := matchCommand(rawArgs, commands)
 	if !ok {
 		return failUsage(stderr, jsonMode, fmt.Sprintf("未知のコマンド: %s", strings.Join(rawArgs, " ")))
@@ -62,10 +83,37 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 	parsed.Stderr = stderr
 	parsed.Stdout = stdout
 	parsed.LookPath = lookPath
+	parsed.Chat = chat
+	// 道具の範囲は、解析が決めたワークスペース（コマンドが実際に開くもの）の宣言で決め直し、一覧の検査をかけ直す
+	// （事前の走査と解析で読み方が食い違っても、restricted の宣言の検査を外せないようにする）。
+	if chat != nil {
+		chat.Tools = chatToolsForWorkspace(parsed.Values["workspace"])
+		need, kind, regateErr := chatGate(chat, rawArgs)
+		if regateErr != nil {
+			return failErr(stderr, jsonMode, regateErr)
+		}
+		needChatMark, chatKnd = need, kind
+	}
+	parsed.CycleStart = deps.CycleStart
 
 	// 解析が成功した後は解析結果を正とする（事前走査はフラグの値としての
 	// "--json" も拾うため、解析に失敗したときの出力形式の判定にだけ使う）。
 	jsonMode = parsed.Bools["json"]
+
+	if chat != nil && chatKnd == chatKindCycle {
+		need, cycleErr := chatGateCycle(chat, parsed.Bools["detach"])
+		if cycleErr != nil {
+			return failErr(stderr, jsonMode, cycleErr)
+		}
+		needChatMark = need
+	}
+	if chat != nil && chatKnd == chatKindIngest {
+		need, ingestErr := chatGateIngest(chat, len(parsed.Positional))
+		if ingestErr != nil {
+			return failErr(stderr, jsonMode, ingestErr)
+		}
+		needChatMark = need
+	}
 
 	// RequiresStore なコマンドは、Run を呼ぶ前にワークスペースのストアを開く。
 	// これにより init を含む全コマンドが store_not_found・store_too_new・
@@ -78,6 +126,17 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 		}
 		defer func() { _ = store.Close() }()
 		parsed.Store = store
+		// 記録するコマンドには、印の検査をかける（印の会話が開いている・最後のオーナーの発言・返事が進行中）。
+		// 本人確認を通る操作は、core が操作の中でも同じ検査を行う。
+		if needChatMark {
+			if err := checkChatMark(parsed); err != nil {
+				var asErr *Error
+				if errors.As(err, &asErr) && asErr != nil {
+					return failErr(stderr, jsonMode, asErr)
+				}
+				return failErr(stderr, jsonMode, NewError(CodeInternalError, err.Error()))
+			}
+		}
 	}
 
 	data, err := cmd.Run(parsed)
@@ -94,6 +153,14 @@ func runWithLookPath(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer
 			return failErr(stderr, jsonMode, NewError(CodeInternalError, "command returned a nil *cli.Error"))
 		default:
 			return failErr(stderr, jsonMode, NewError(CodeInternalError, err.Error()))
+		}
+	}
+
+	// 操作が成立した後で、サイクルを始めるかを決めて始める。結果は操作の出力に足すだけで、終了コードは変えない。
+	if cmd.StartsCycle != nil {
+		if trigger := cmd.StartsCycle(parsed); trigger != "" {
+			cyc := server.StartCycleAfterOperation(context.Background(), parsed.Store, trigger, parsed.Bools["no-cycle"], parsed.CycleStart)
+			data = withCycleOutput(data, cyc)
 		}
 	}
 
@@ -147,6 +214,9 @@ func parseArgs(rawArgs []string, cmd Command) (Args, *Error) {
 	}
 	for _, f := range cmd.Flags {
 		allFlags[f.Name] = f
+	}
+	if cmd.StartsCycle != nil {
+		allFlags[noCycleFlag.Name] = noCycleFlag
 	}
 
 	values := map[string]string{}

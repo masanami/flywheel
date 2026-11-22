@@ -84,6 +84,26 @@ func runResultsOf(t *testing.T, ws string) []string {
 	return out
 }
 
+// distinctJ1RunResults は `runs --json` の J1 の run の result を、重複なく返す（回りを重ねると、失敗した J1 の run が回りごとに増える。
+// 学びの段が起動する J6 など、J1 以外の run は数えない）。
+func distinctJ1RunResults(t *testing.T, ws string) []string {
+	t.Helper()
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range runJSON(t, ws, "runs")["runs"].([]any) {
+		m := r.(map[string]any)
+		if m["judgment"] != "J1" {
+			continue
+		}
+		v, _ := m["result"].(string)
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // AC-163・AC-367・AC-368: cycle --json の not_started[].reason の値は、S2 では cycle_budget |
 // rate_limited | run_budget | slot_unavailable | failure_limit | rework_limit |
 // upstream_fetch_failed | waiting_external | plan_unavailable の閉集合（serialized・prediction_limit は外した）に限られる（仕様・core の定義・実際の
@@ -137,7 +157,9 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"dependency":              "TestDependency_IDOmittedRun_UnmetDependencyNotStartedWithSortedDetail (internal/core/delegate_dependency_test.go)",
 		"integration_unavailable": "TestDelegateTask_AC117_TwoTasksReasonIsIntegrationUnavailable (internal/core/delegate_task_test.go)",
 		"no_tasks":                "TestDelegateTask_AC121_NoTasksForAnOldShapePlan (internal/core/delegate_task_test.go)",
-		"waiting_outside":         "TestReleaseOutside_SecondTimeReturnsNotStartedWaitingOutside (internal/core/release_exec_outside_test.go)",
+		// チェック待ちは作業中の実行と同じ扱い（止める指示まで回りを繰り返す）なので、cycle --json では終わりまで観測できない。core のテストが観測する。
+		"waiting_external": "TestRunCycle_VerifyPhase_PendingChecksAreWaitingExternal (internal/core/cycle_run_s2_test.go)",
+		"waiting_outside":  "TestReleaseOutside_SecondTimeReturnsNotStartedWaitingOutside (internal/core/release_exec_outside_test.go)",
 	}
 	observed := map[string]bool{}
 	for r, ref := range coreObservedReasons {
@@ -224,13 +246,6 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 			observed[n["reason"].(string)] = true
 		}
 	})
-	t.Run("waiting_external", func(t *testing.T) {
-		ws := setupRunWorkspace(t)
-		newVerifyingForCase(t, ws, true)
-		withFakeGHRoutesOnPATH(t, ghChecksRoutes("open", checkRunsPending))
-		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j5Route("met", nil, nil)}, "")
-		observe(cycleDoc(t, ws))
-	})
 
 	var got []string
 	for r := range observed {
@@ -273,11 +288,20 @@ func TestRunResults_AreTheDocumentedClosedSetInBothDirections(t *testing.T) {
 			createTitled(t, ws, "a")
 			putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{{Match: fakeClaudeJ1Match, Tag: "J1", Stdout: stdout, SleepFirstSeconds: sleepFirst}}, "")
 			cycleDoc(t, ws) // 周の中の失敗でも終了コード 0
-			results := runResultsOf(t, ws)
-			if len(results) != 1 || results[0] != name {
-				t.Fatalf("run results = %v, want exactly [%s]", results, name)
+			results := distinctJ1RunResults(t, ws)
+			// 失敗した回りの後の回りでは、同じ課題の J1 が再び起動される（偽の claude が最初の 1 回だけ遅いとき、2 回目は成功する）。
+			seen := false
+			for _, r := range results {
+				if r == name {
+					seen = true
+				} else if name != "timed_out" || r != "succeeded" {
+					t.Fatalf("J1 run results = %v, want only [%s]", results, name)
+				}
 			}
-			observed[results[0]] = true
+			if !seen {
+				t.Fatalf("J1 run results = %v, want [%s]", results, name)
+			}
+			observed[name] = true
 		})
 	}
 	scenario("succeeded", j1MineFixture("P1"), "", 0)
@@ -297,9 +321,9 @@ func TestRunResults_AreTheDocumentedClosedSetInBothDirections(t *testing.T) {
 		}
 		addToolDir(t, dir)
 		cycleDoc(t, ws)
-		results := runResultsOf(t, ws)
+		results := distinctJ1RunResults(t, ws)
 		if len(results) != 1 || results[0] != "launch_failed" {
-			t.Fatalf("run results = %v, want exactly [launch_failed]", results)
+			t.Fatalf("J1 run results = %v, want exactly [launch_failed]", results)
 		}
 		observed["launch_failed"] = true
 	})
@@ -347,6 +371,8 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedRunBudget"
 	case "integration_unavailable":
 		return "NotStartedIntegrationUnavailable"
+	case "waiting_external":
+		return "NotStartedWaitingExternal"
 	case "no_tasks":
 		return "NotStartedNoTasks"
 	case "upstream_closed":

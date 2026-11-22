@@ -62,10 +62,22 @@ type Attestation struct {
 	// （Verify が載せるのは relayed のときだけ）。Execute* は空でないときだけ
 	// approval・hold の relay_* と作業ログの after に書く。
 	evidence RelayEvidence
+	// chat は経路 chat の印（会話の識別・発言の識別）。経路 chat のときだけ非 nil。印の検査と手がかりの
+	// 解決は、操作を行う core の処理がトランザクションの中で行う（chat_approval.go）。
+	chat *chatMark
+}
+
+// currentEvidence は記録へ書く手がかりを返す。経路 chat ではトランザクションの中で解決した値
+// （発言の文面・会話の識別）で、解決前は空。それ以外は Verify が載せた値。
+func (a Attestation) currentEvidence() RelayEvidence {
+	if a.chat != nil {
+		return a.chat.resolved
+	}
+	return a.evidence
 }
 
 // hasEvidence は att が手がかりを持つかを返す。
-func (a Attestation) hasEvidence() bool { return a.evidence.complete() }
+func (a Attestation) hasEvidence() bool { return a.currentEvidence().complete() }
 
 // relayColumns は approval・hold の relay_session・relay_quote 列へ渡す値を返す。
 // 手がかりが無ければ両方 NULL（nil）。
@@ -73,15 +85,17 @@ func (a Attestation) relayColumns() (session any, quote any) {
 	if !a.hasEvidence() {
 		return nil, nil
 	}
-	return a.evidence.Session, a.evidence.Quote
+	e := a.currentEvidence()
+	return e.Session, e.Quote
 }
 
 // addRelayTo は手がかりがあるときだけ、作業ログの after の最上位に
 // relay_session・relay_quote を足す。
 func (a Attestation) addRelayTo(after map[string]any) {
 	if a.hasEvidence() {
-		after["relay_session"] = a.evidence.Session
-		after["relay_quote"] = a.evidence.Quote
+		e := a.currentEvidence()
+		after["relay_session"] = e.Session
+		after["relay_quote"] = e.Quote
 	}
 }
 
@@ -155,6 +169,7 @@ type verificationRegistryEntry struct {
 var verificationRegistry = []verificationRegistryEntry{
 	{Channel: ChannelCLI, Verification: VerificationTTYConfirm, anyAction: true},
 	{Channel: ChannelCLI, Verification: VerificationRelayed, anyAction: true},
+	{Channel: ChannelChat, Verification: VerificationRelayed, anyAction: true},
 	{Channel: ChannelUI, Verification: VerificationNone, actions: []attestedAction{actionApprovePlan, actionApproveCompletionHold}},
 }
 
@@ -199,6 +214,10 @@ func registryPermits(ch Channel, v Verification, act attestedAction) bool {
 //
 // まず (ch, verifier.Method()) が登録簿に無ければ ErrVerificationRejected を
 // 返し、verifier.Confirm を一切呼ばない（状態を変えない・端末にも触れない）。
+// 経路が chat のときは、verifier が NewChatMarkVerifier の返した値でなければ拒否する（逆に、その値は
+// chat 以外の経路では拒否する）。印の 2 値が空でないことだけを見て、印の中身の検査は操作を行う core の処理が
+// トランザクションの中で行う。
+//
 // 登録簿にあれば verifier.Confirm(summary, expectedID) を呼び、エラーは
 // そのまま返す。成立すれば Attestation を返す。
 func Verify(ch Channel, verifier Verifier, summary, expectedID string) (Attestation, error) {
@@ -208,6 +227,9 @@ func Verify(ch Channel, verifier Verifier, summary, expectedID string) (Attestat
 
 	method := verifier.Method()
 	if !registryAllows(ch, method) {
+		return Attestation{}, ErrVerificationRejected
+	}
+	if _, isMark := verifier.(*chatMarkVerifier); isMark != (ch == ChannelChat) {
 		return Attestation{}, ErrVerificationRejected
 	}
 
@@ -220,18 +242,26 @@ func Verify(ch Channel, verifier Verifier, summary, expectedID string) (Attestat
 			return Attestation{}, ErrRelayEvidenceMissing
 		}
 	}
+	var chat *chatMark
+	if ch == ChannelChat {
+		// 経路 chat の Evidence は印（Session＝会話の識別・Quote＝発言の識別）。記録へ書く手がかりは、
+		// 検査の後に core が発言の文面を引いて埋める。
+		chat = &chatMark{session: evidence.Session, message: evidence.Quote}
+		evidence = RelayEvidence{}
+	}
 
 	actor, err := verifier.Confirm(summary, expectedID)
 	if err != nil {
 		return Attestation{}, err
 	}
-	return Attestation{actor: actor, channel: ch, verification: method, target: expectedID, evidence: evidence}, nil
+	return Attestation{actor: actor, channel: ch, verification: method, target: expectedID, evidence: evidence, chat: chat}, nil
 }
 
 // relayPtrs は返す Approval・Hold に載せる会話の手がかり（relayed のときだけ非 nil）。
 func (a Attestation) relayPtrs() (session *string, quote *string) {
 	if a.hasEvidence() {
-		s, q := a.evidence.Session, a.evidence.Quote
+		e := a.currentEvidence()
+		s, q := e.Session, e.Quote
 		return &s, &q
 	}
 	return nil, nil

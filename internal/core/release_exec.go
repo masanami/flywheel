@@ -88,6 +88,9 @@ type ReleaseExecItem struct {
 	// Route は反映の依頼の経路（ReleaseRouteWaitingRun・ReleaseRouteReflectRequest・ReleaseRouteOutside）。対応する契約の実行が無い・
 	// 対応しない実行を待つときは空。
 	Route string
+	// WaitNotResolving は、Result が waiting_checks で、待っても解けない待ち（承認した head のチェックが読めない・読む手段が無い）のとき真。
+	// 回りの終わりの数えはこの待ちをチェック待ちに数えない。出力の形には出さない。
+	WaitNotResolving bool
 }
 
 // ReleaseRouteOutside は、flywheel の外で反映先へ入るのを待っている反映の経路（route の値）。
@@ -280,6 +283,8 @@ type releaseJudgment struct {
 	observedHead string
 	mergeCommit  string
 	detail       string
+	// waitNotResolving は、waiting_checks のうち、待ってもチェックが進んでも解けない待ち（承認した head のチェックが読めない・読む手段が無い）のとき真。
+	waitNotResolving bool
 	// route は試行の route（空は null）。
 	route string
 	// landDeliveredRunID が 0 でないとき、結果を書く書き込みで、その契約の実行の「入れてよい」が届いた記録（land_delivered）を真にする。
@@ -734,9 +739,9 @@ func (s *Store) judgeReleaseUpstream(ctx context.Context, row *operationRow, app
 		none, _ := approved.noChecks(ctx, opts.Checks, repo, approvedHead)
 		switch {
 		case approved.err != nil:
-			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailApprovedChecksUnreadable + approved.err.Error()}, nil
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailApprovedChecksUnreadable + approved.err.Error(), waitNotResolving: true}, nil
 		case approved.unsupported:
-			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailApprovedChecksUnsupported}, nil
+			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailApprovedChecksUnsupported, waitNotResolving: true}, nil
 		case !none:
 			return releaseJudgment{result: ExecutionResultWaitingChecks, observedHead: observed, detail: waitDetailNoChecksYet}, nil
 		}

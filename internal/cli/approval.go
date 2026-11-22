@@ -14,7 +14,7 @@ import (
 // このファイルは本人確認つきの操作（approve・reject・answer）の実コマンドを
 // 持つ（Issue #12・#13）。core の2段階 API（① Prepare*＝読み取り、②
 // Execute*＝書き込み）を、① の結果から人間向けの要約テキストを組み、
-// core.Verify(core.ChannelCLI, verifierFor が選んだ Verifier, summary, 対象ID) で
+// core.Verify(channelFor(a), verifierFor が選んだ Verifier, summary, 対象ID) で
 // 確認を得てから ② を呼ぶ。Verifier は既定が tty_confirm（端末で要約を表示して
 // 対象 ID を入力させる）、--relayed のときは relayed（要約を表示せず、会話の
 // 手がかりを core へ渡すだけ。relayed.go）、という決まった形で使う。遷移の可否・承認の
@@ -61,6 +61,10 @@ func runApprove(a Args) (any, error) {
 // 確かめられず（人間待ち）、課題が完了の release について、人が承認せず検証中へ戻す方を選ぶ。人間待ちかどうかは core が
 // 自分で比較して確かめ（AssessReleaseReopen）、そうでなければ戻さない。
 func runReopenOperation(a Args, verifier core.Verifier, id string) (any, error) {
+	// 検証中へ戻す書き込みは、core が欄の印の検査と発言の記録を持たない。欄からは戻さない（ターミナルで行う）。
+	if a.Chat != nil {
+		return nil, NewError(CodeVerificationRejected, id+" を検証中へ戻す操作は、対話の欄からは行えません。ターミナルで行ってください")
+	}
 	src := headSources(a)
 	as, err := a.Store.AssessReleaseReopen(context.Background(), id, src)
 	if err != nil {
@@ -71,7 +75,7 @@ func runReopenOperation(a Args, verifier core.Verifier, id string) (any, error) 
 	}
 	summary := fmt.Sprintf("%s の課題を完了から検証中へ戻し、本番反映を置き換えます。\n理由: 検証の後に PR の head が動き、取り込みだけとも中身の変更とも確かめられませんでした（%s）\n",
 		id, escapeControl(as.Detail))
-	if _, err := core.Verify(core.ChannelCLI, verifier, summary, id); err != nil {
+	if _, err := core.Verify(channelFor(a), verifier, summary, id); err != nil {
 		return nil, mapCoreErr(err)
 	}
 	res, err := a.Store.ReopenChallengeForRelease(context.Background(), core.ChannelCLI, core.ReopenForReleaseInput{OperationID: id, Reason: core.ReopenReasonUndeterminable, Sources: src, ContractSources: reopenContractSources(a)})
@@ -115,8 +119,8 @@ func runApproveOperation(a Args, verifier core.Verifier, id string, holdRelease 
 		headSHA = rd.Head
 	}
 
-	summary := operationApprovalSummaryText(preview, nil) + operationHeadLines(rd)
-	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
+	summary := operationApprovalSummaryText(preview, nil) + operationHeadLines(rd, a.Chat != nil)
+	att, err := core.Verify(channelFor(a), verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -187,7 +191,7 @@ func runApproveChallenge(a Args, verifier core.Verifier, id string, holdRelease 
 	if rds != nil {
 		summary = approvalSummaryTextWithReleases(preview, rds)
 	}
-	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
+	att, err := core.Verify(channelFor(a), verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -239,7 +243,7 @@ func runRejectOperation(a Args, verifier core.Verifier, id string, reason string
 	}
 
 	summary := operationApprovalSummaryText(preview, &reason)
-	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
+	att, err := core.Verify(channelFor(a), verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -272,7 +276,7 @@ func runRejectChallenge(a Args, verifier core.Verifier, id string, reason string
 	}
 
 	summary := approvalSummaryText(preview, core.ApprovalDecisionRejected, false, &reason)
-	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
+	att, err := core.Verify(channelFor(a), verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -331,7 +335,7 @@ func runAnswer(a Args) (any, error) {
 		return nil, NewError(CodeValidationFailed, "--replan は、保留の直前の状態が着手中・検証中（承認済みの計画に基づく作業の途中）の課題にだけ付けられます")
 	}
 	summary := answerSummaryText(preview, replan)
-	att, err := core.Verify(core.ChannelCLI, verifier, summary, id)
+	att, err := core.Verify(channelFor(a), verifier, summary, id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -412,7 +416,7 @@ func runPlanAnswer(a Args, id string) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
-	att, err := core.Verify(core.ChannelCLI, verifier, planAnswerSummaryText(preview), id)
+	att, err := core.Verify(channelFor(a), verifier, planAnswerSummaryText(preview), id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -470,7 +474,7 @@ func runWithdraw(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
-	att, err := core.Verify(core.ChannelCLI, verifier, withdrawSummaryText(preview), id)
+	att, err := core.Verify(channelFor(a), verifier, withdrawSummaryText(preview), id)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}

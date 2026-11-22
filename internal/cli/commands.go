@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"github.com/masanami/flywheel/internal/core"
+	"github.com/masanami/flywheel/internal/server"
 	"github.com/masanami/flywheel/internal/view"
 )
 
@@ -45,7 +46,10 @@ type Command struct {
 	// ゼロ値は false（ストアを開かない）。テスト専用のアドホックなコマンドは
 	// この既定を利用し、ストアの有無に影響されない。
 	RequiresStore bool
-	Run           func(Args) (any, error)
+	// StartsCycle が非 nil のコマンドは、Run が成功した後に、サイクルを始めるかを決めて始める（フラグ --no-cycle を受ける）。
+	// 返す値はサイクルの記録の trigger で、空なら始めない。Run が失敗したときは呼ばない。
+	StartsCycle func(Args) string
+	Run         func(Args) (any, error)
 }
 
 // Args はコマンドの Run に渡される、解析済みの引数。
@@ -64,9 +68,14 @@ type Args struct {
 	// ワークスペースのストア。Run は Close してはならない（呼び出し元の run が
 	// 責任を持つ）。
 	Store *core.Store
+	// Chat は対話の欄の印（環境変数）。印が無ければ nil。経路と方式は channelFor・verifierFor がここから決める。
+	Chat *chatMark
 	// LookPath は gh・claude の実行ファイルの探し方。nil なら exec.LookPath（PATH 上を探す）。
 	// テストが、プロセス全体の PATH を書き換えずに偽の gh・claude の場所をテストごとに渡すために使う。
 	LookPath func(file string) (string, error)
+	// CycleStart は操作が成立した後にサイクルを切り離して始める処理（nil なら始められない扱い〔unavailable〕。
+	// 本番の入口の Run が server.StartCycle を渡す。テストが偽の処理を渡して、呼ばれた回数と渡された契機を確かめる）。
+	CycleStart server.CycleStarter
 	// ReadVersion は動いているバイナリの版の読み取り。nil なら core.ReadVersion（Issue #593）。
 	// テストが、パッケージ変数を差し替えずに、ビルド情報の有り・無しをテストごとに渡すために使う。
 	ReadVersion func() (core.VersionInfo, error)
@@ -95,6 +104,14 @@ func (a Args) readVersion() (core.VersionInfo, error) {
 var commonFlags = []flagDef{
 	{Name: "workspace", HasValue: true},
 	{Name: "json", HasValue: false},
+}
+
+// noCycleFlag は StartsCycle を持つコマンドが受ける、サイクルを始めないフラグ。
+var noCycleFlag = flagDef{Name: "no-cycle", HasValue: false}
+
+// startsCycle は固定の契機でサイクルを始める StartsCycle。
+func startsCycle(trigger string) func(Args) string {
+	return func(Args) string { return trigger }
 }
 
 // runInit は `flywheel init` の実装。core.Init を呼ぶだけで、遷移や承認の規則は
@@ -268,6 +285,7 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"answer"},
+			StartsCycle:   startsCycle(core.CycleTriggerAnswer),
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
@@ -290,6 +308,7 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"approve"},
+			StartsCycle:   startsCycle(core.CycleTriggerApprove),
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
@@ -299,6 +318,7 @@ func defaultCommands() []Command {
 		{
 			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2）。本人確認つき。
 			Path:          []string{"budget"},
+			StartsCycle:   startsCycle(core.CycleTriggerBudget),
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
@@ -311,6 +331,7 @@ func defaultCommands() []Command {
 		},
 		{
 			Path:          []string{"reject"},
+			StartsCycle:   startsCycle(core.CycleTriggerReject),
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
@@ -406,6 +427,7 @@ func defaultCommands() []Command {
 		{
 			// 課題に上げる（1 回に 1 件）。本人確認つき（端末か --relayed）。
 			Path:          []string{"followup", "promote"},
+			StartsCycle:   startsCycle(core.CycleTriggerFollowupPromote),
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
@@ -431,6 +453,7 @@ func defaultCommands() []Command {
 			// 引数が無ければ取り込み済みの追従だけ（新しい課題は作らない）。
 			// `<指定>...`（`<owner>/<repo>#<番号>` か番号）は選んだ Issue だけを課題にする。
 			Path:          []string{"ingest"},
+			StartsCycle:   ingestStartsCycle,
 			RequiresStore: true,
 			MinPositional: 0,
 			MaxPositional: UnlimitedPositional,
@@ -471,8 +494,21 @@ func defaultCommands() []Command {
 			// 取らない。`--trigger` の省略は manual（runCycle）。
 			Path:          []string{"cycle"},
 			RequiresStore: true,
-			Flags:         []flagDef{{Name: "trigger", HasValue: true}},
+			Flags:         []flagDef{{Name: "trigger", HasValue: true}, {Name: "detach", HasValue: false}},
 			Run:           runCycle,
+		},
+		{
+			// docs/features/core-redesign.md §走っているサイクルを見る・止める（S4a）。読み取りだけ。本人確認は求めない。
+			Path:          []string{"cycle", "status"},
+			RequiresStore: true,
+			Run:           runCycleStatus,
+		},
+		{
+			// 同上。走っているサイクルの記録に止める指示（stop_requested_at）を書く。本人確認は求めない
+			// （止めても、取り消せない操作は起きない）。
+			Path:          []string{"cycle", "stop"},
+			RequiresStore: true,
+			Run:           runCycleStop,
 		},
 		{
 			// docs/features/m3-invoker-delegation.md §IF / API「CLI」（S2。#102）。
