@@ -48,6 +48,8 @@ type j2ExpandRawOutput struct {
 	Verdict  string      `json:"verdict"`
 	Tasks    []j2RawTask `json:"tasks"`
 	Question *string     `json:"question"`
+	// Options は ask のときだけ読む、問いの選択肢の見出し（任意。無い・null・空は選択肢なし）。
+	Options []string `json:"options"`
 }
 
 // j2ExpandOutputSchema は「足す」の形の出力スキーマ（j2OutputSchema とは別）。タスクの項目は計画のタスクと同じ
@@ -64,6 +66,7 @@ func j2ExpandOutputSchema() []byte {
 			"verdict":  map[string]any{"type": "string", "enum": []string{string(j2ExpandNone), string(j2ExpandAdd), string(j2ExpandAsk)}},
 			"tasks":    map[string]any{"type": []string{"array", "null"}, "items": tasks["items"], "maxItems": MaxPlanTasks},
 			"question": map[string]any{"type": []string{"string", "null"}},
+			"options":  map[string]any{"type": []string{"array", "null"}, "items": map[string]any{"type": "string"}},
 		},
 		"required":             []string{"verdict"},
 		"additionalProperties": false,

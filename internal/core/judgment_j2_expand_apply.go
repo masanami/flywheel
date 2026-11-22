@@ -8,7 +8,10 @@ package core
 //     タスクの行を作って「足した」で閉じる（オーナーの承認は求めず、課題は保留にしない）。課題の状態は変えない。
 //   - 検査に通らない出力は invalid_output にする（足す依頼は仕様待ちのまま、タスクの行は増えない）。
 //
-// 上限を超える add の保留・ask の保留は、この処理の範囲外（足す依頼は仕様待ちのまま、何も書かない）。
+// 上限を超える add は、足す依頼を「オーナー待ち」にして課題を保留にする（理由 task_add_over_limit。選択肢 add・skip・replan。タスクの行は作らない）。
+// ask は課題を保留にする（理由 task_add_question。足す依頼は仕様待ちのまま。判断点が選択肢を付けていれば選択肢つき）。
+// どちらも、足す依頼の hold_id にその保留を結び、検査・足す依頼の書き込み・保留の遷移（T11）を 1 つの書き込みで行う。
+// 保留への回答の処理は、この処理の範囲外。
 
 import (
 	"context"
@@ -23,6 +26,8 @@ type j2ExpandValidated struct {
 	Verdict  j2ExpandVerdict
 	Tasks    []j2Task
 	Question string
+	// Options は ask の問いの選択肢（無ければ空）。
+	Options []string
 	// Spec は判断点が返したタスクの一覧（JSON。add のときだけ）。
 	Spec string
 }
@@ -59,6 +64,7 @@ func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2Expan
 			return nil, false
 		}
 		v.Question = *raw.Question
+		v.Options = raw.Options
 		return v, true
 	}
 	// add
@@ -164,16 +170,38 @@ func (s *Store) finalizeJ2ExpandOutput(ctx context.Context, in J2AutoInput, runI
 			invalid = true
 			return nil
 		}
+		hold := func(question string, reason holdReason, opts HoldOptionsInput) (int64, error) {
+			var holdID int64
+			_, err := s.transitionInTx(ctx, tx, rec, runTransitionParams{
+				actor: actor, channel: ChannelInvoker, verification: VerificationNone,
+				id: ch.ID, op: OpHold, preceding: NoStatus, runID: &runInt,
+			}, cid, func(ctx context.Context, tc *transitionCtx) error {
+				var err error
+				holdID, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", opts)
+				return err
+			})
+			return holdID, err
+		}
 		switch v.Verdict {
 		case j2ExpandNone:
 			_, err := setTaskAdditionStateTx(ctx, tx, rec, additionID, TaskAdditionNone, TaskAdditionUpdate{})
 			return err
 		case j2ExpandAdd:
-			note, err := applyJ2ExpandAdd(ctx, tx, rec, cid, additionID, vc, v)
+			note, err := applyJ2ExpandAdd(ctx, tx, rec, cid, additionID, vc, v, hold)
 			res.Note = note
 			return err
+		case j2ExpandAsk:
+			holdID, err := hold(v.Question, holdReasonTaskAddQuestion, holdOptionsFromLabels(v.Options))
+			if err != nil {
+				return err
+			}
+			// 足す依頼は仕様待ちのまま、保留だけを結ぶ。
+			if _, err := setTaskAdditionStateTx(ctx, tx, rec, additionID, TaskAdditionPending, TaskAdditionUpdate{HoldID: &holdID}); err != nil {
+				return err
+			}
+			res.Note = fmt.Sprintf("判断点の問いで保留にした: H-%d", holdID)
 		}
-		return nil // ask: 保留は、この処理の範囲外
+		return nil
 	})
 	if err != nil {
 		return j2ExpandFinalized{}, err
@@ -245,9 +273,9 @@ func loadJ2ExpandValidationContext(ctx context.Context, tx *sql.Tx, cid int64, i
 }
 
 // applyJ2ExpandAdd は検査済みの add を、足した後の見込みと上限で判定して書く。上限以下ならタスクの行を作り、足す依頼を「足した」で閉じ、
-// 作業ログに足す依頼・足したタスク・足した後の見込み・上限を残す。上限を超える・見込みが不明のときは何も書かず、理由を返す
-// （上限を超える add の保留は、この処理の範囲外）。見込みは、課題の見込みと同じ関数（sumTaskBudgets）で数え、上限は課題に記録した 1 つの額で比べる。
-func applyJ2ExpandAdd(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid, additionID int64, st j2ExpandState, v *j2ExpandValidated) (string, error) {
+// 作業ログに足す依頼・足したタスク・足した後の見込み・上限を残す。上限を超えるときは、タスクの行を作らず保留を立てる（hold）。
+// 見込みが不明のときは何も書かず、理由を返す。見込みは、課題の見込みと同じ関数（sumTaskBudgets）で数え、上限は課題に記録した 1 つの額で比べる。
+func applyJ2ExpandAdd(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid, additionID int64, st j2ExpandState, v *j2ExpandValidated, hold j2ExpandHolder) (string, error) {
 	before, known := sumTaskBudgets(st.Budgets)
 	limit, limitOK := effectiveBudgetLimit(before, known, st.LimitRec)
 	if !known || !limitOK {
@@ -267,7 +295,16 @@ func applyJ2ExpandAdd(ctx context.Context, tx *sql.Tx, rec *activityRecorder, ci
 	after, _ := sumTaskBudgets(bs)
 	total := after.Impl + after.Review
 	if total > limit {
-		return "足した後の見込みが上限を超える", nil
+		totalUSD, limitUSD := microsToUSD(total), microsToUSD(limit)
+		holdID, err := hold(overLimitQuestion(v.Tasks, totalUSD, limitUSD, microsToUSD(total-limit)), holdReasonTaskAddOverLimit, overLimitHoldOptions(totalUSD))
+		if err != nil {
+			return "", err
+		}
+		if _, err := setTaskAdditionStateTx(ctx, tx, rec, additionID, TaskAdditionAwaitingOwner,
+			TaskAdditionUpdate{Spec: &v.Spec, TotalAfterUSD: &totalUSD, LimitUSD: &limitUSD, HoldID: &holdID}); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("足した後の見込みが上限を超えるため保留にした: H-%d", holdID), nil
 	}
 	created, err := createTasksWith(ctx, tx, rec, cid, st.Version, inputs, createTasksOptions{Existing: st.DepIDs, AdditionID: &additionID})
 	if err != nil {
@@ -288,4 +325,46 @@ func applyJ2ExpandAdd(ctx context.Context, tx *sql.Tx, rec *activityRecorder, ci
 		"limit_usd":        limitUSD,
 	})
 	return fmt.Sprintf("足したタスク: %s", strings.Join(ids, ", ")), err
+}
+
+// j2ExpandHolder は、同じ書き込みの中で課題を保留にし（T11）、保留の内部整数 ID を返す口。
+type j2ExpandHolder func(question string, reason holdReason, opts HoldOptionsInput) (int64, error)
+
+// 上限を超える足す依頼の保留の、選択肢の識別。回答の処理（後続）が、この識別で読む。
+const (
+	taskAddOptionAdd    = "add"
+	taskAddOptionSkip   = "skip"
+	taskAddOptionReplan = "replan"
+)
+
+// overLimitQuestion は task_add_over_limit の保留の問い。足すタスクの題名と枠・足した後の見込み・上限・超える額・計画の作り直しの制約を書く。
+// 超える額 overUSD は、呼び出し側が整数（USD の 100 万分の 1）の引き算から作って渡す（浮動小数の引き算の誤差を文に出さない）。
+func overLimitQuestion(tasks []j2Task, totalUSD, limitUSD, overUSD float64) string {
+	var b strings.Builder
+	b.WriteString("足すと上限を超えるので、足してよいかを決めてください。\n足すタスク:\n")
+	for _, t := range tasks {
+		impl, review := 0.0, 0.0
+		if t.BudgetImplUSD != nil {
+			impl = *t.BudgetImplUSD
+		}
+		if t.BudgetReviewUSD != nil {
+			review = *t.BudgetReviewUSD
+		}
+		fmt.Fprintf(&b, "- %s（枠: 実装 $%s・レビュー対応 $%s）\n", t.Title, formatUSDAmount(impl), formatUSDAmount(review))
+	}
+	fmt.Fprintf(&b, "足した後の見込み: $%s\n上限: $%s\n超える額: $%s\n", formatUSDAmount(totalUSD), formatUSDAmount(limitUSD), formatUSDAmount(overUSD))
+	b.WriteString("動いている作業が終わるまで、計画の作り直しは選べない。")
+	return b.String()
+}
+
+// overLimitHoldOptions は task_add_over_limit の保留の選択肢（識別の無い回答を断る）。add の説明に、上げた後の上限（足した後の見込み）を書く。
+func overLimitHoldOptions(totalUSD float64) HoldOptionsInput {
+	return HoldOptionsInput{
+		Required: true,
+		Options: []HoldOption{
+			{ID: taskAddOptionAdd, Label: "足す", Description: fmt.Sprintf("上限を $%s（足した後の見込み）に上げて、タスクを足す", formatUSDAmount(totalUSD))},
+			{ID: taskAddOptionSkip, Label: "足さずに進める", Description: "タスクを足さず、いまの計画のまま進める"},
+			{ID: taskAddOptionReplan, Label: "計画を作り直す", Description: "計画を作り直す（動いている作業が終わるまで選べない）"},
+		},
+	}
 }

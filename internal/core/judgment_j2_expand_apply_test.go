@@ -135,20 +135,6 @@ func TestExpandApply_AddExactlyAtTheLimitIsApplied(t *testing.T) {
 	}
 }
 
-func TestExpandApply_AddOverTheLimitWritesNothing(t *testing.T) {
-	t.Parallel()
-	f := expandDoneFixture(t)
-	f.expand(t, &expandRecorder{out: []byte(expandAddOutput(func(ts []map[string]any) {
-		ts[0]["budget_impl_usd"], ts[0]["budget_review_usd"] = 3.0, 2.0 // 10 + 5 = 15 > 14
-	}))})
-	if adds := f.additions(t); len(adds) != 1 || adds[0].State != TaskAdditionPending {
-		t.Errorf("additions = %+v, want the pending one kept (the over-limit hold is a later slice)", adds)
-	}
-	if n := len(taskRows(t, f.s, f.cid())); n != 2 {
-		t.Errorf("tasks = %d, want 2", n)
-	}
-}
-
 // expandTaskMap は検査に通る足すタスク 1 件（項目を mut で直す）。
 func expandTaskMap(key string, mut func(m map[string]any)) map[string]any {
 	m := map[string]any{
