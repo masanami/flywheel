@@ -673,7 +673,7 @@ func writePlanStageSummary(b *strings.Builder, p *core.ApprovalPreview) {
 			b.WriteString(line + "\n")
 		}
 		if p.PlanBudgetUSD != nil && taskFramesPresent(p.PlanTasks) {
-			fmt.Fprintf(b, "課題の上限（タスクの枠の合計）: %s USD\n", strconv.FormatFloat(*p.PlanBudgetUSD, 'f', -1, 64))
+			fmt.Fprintf(b, "計画の見込み（タスクの枠の合計）: %s USD\n", strconv.FormatFloat(*p.PlanBudgetUSD, 'f', -1, 64))
 		}
 	}
 }

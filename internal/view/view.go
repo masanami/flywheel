@@ -654,9 +654,24 @@ func FromConflictFixes(fs []core.ConflictFixPassed) []PassedConflictFix {
 	return out
 }
 
+// Budget は課題の詳細の budget。estimate_usd は見込み（取りやめでないタスクの枠の合計）、limit_usd は上限
+// （実装の枠とレビュー対応の枠を足した 1 つの額。記録が無い課題は見込みと同じ額）、limit_reason は上限の理由（記録が無ければ null）。
+// 見込みが不明の課題（枠を決められないタスクがある）は estimate_usd・limit_usd が null。計画の承認待ちの課題は、承認を待っている版の計画の値。
+type Budget struct {
+	EstimateUSD *float64 `json:"estimate_usd"`
+	LimitReason *string  `json:"limit_reason"`
+	LimitUSD    *float64 `json:"limit_usd"`
+}
+
+// FromChallengeDetailBudget は課題の詳細の予算を Budget へ変換する。
+func FromChallengeDetailBudget(b core.ChallengeDetailBudget) Budget {
+	return Budget{EstimateUSD: b.EstimateUSD, LimitReason: b.LimitReason, LimitUSD: b.LimitUSD}
+}
+
 // ShowResponse は `show` の成功の形。
 type ShowResponse struct {
 	Approvals []Approval    `json:"approvals"`
+	Budget    Budget        `json:"budget"`
 	Challenge ShowChallenge `json:"challenge"`
 	// ConflictFixes は通したコンフリクトの解消（古い順。無ければ []）。
 	ConflictFixes []PassedConflictFix `json:"conflict_fixes"`
@@ -683,6 +698,7 @@ type ShowResponse struct {
 func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 	return ShowResponse{
 		Approvals:         FromApprovals(d.Approvals),
+		Budget:            FromChallengeDetailBudget(d.Budget),
 		Challenge:         FromShowChallenge(d),
 		ConflictFixes:     FromConflictFixes(d.ConflictFixes),
 		DirectCompletions: FromDirectCompletions(d.DirectCompletions),

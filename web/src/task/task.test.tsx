@@ -125,6 +125,7 @@ interface Over {
 function show(o: Over = {}): ShowCardResponse {
   return {
     approvals: [],
+    budget: { estimate_usd: null, limit_reason: null, limit_usd: null },
     card: {
       context: null,
       headline: null,

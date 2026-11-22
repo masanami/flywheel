@@ -234,11 +234,11 @@ func TestChallengeBudget_LimitIsTheSumOfTheTaskBudgets_AC44_AC45(t *testing.T) {
 	f := newDelegateFixture(t)
 	id := f.newInProgress(t, "two", "P2", twoTaskSpec(3, 2, 4, 5))
 	b := f.budgetOf(t, id)
-	if !b.LimitKnown || b.ImplLimitUSD != 7 {
-		t.Errorf("impl limit = %v (known %v), want 3+4 = 7, not the plan's 99", b.ImplLimitUSD, b.LimitKnown)
+	if !b.EstimateKnown || b.ImplEstimateUSD != 7 {
+		t.Errorf("impl estimate = %v (known %v), want 3+4 = 7, not the plan's 99", b.ImplEstimateUSD, b.EstimateKnown)
 	}
-	if b.ReviewLimitUSD != 7 {
-		t.Errorf("review limit = %v, want 2+5 = 7, not the plan's 88", b.ReviewLimitUSD)
+	if b.ReviewEstimateUSD != 7 {
+		t.Errorf("review estimate = %v, want 2+5 = 7, not the plan's 88", b.ReviewEstimateUSD)
 	}
 }
 
@@ -261,11 +261,11 @@ func TestChallengeBudget_AfterReplanDoneTasksAndNewTasksAreSummed_AC46_AC47(t *t
 	seedPlanTasks(t, f.s, cid, 2)
 	b := f.budgetOf(t, id)
 	// 済みの a（3）＋新しい版の 2 個（10・20）。取りやめの b（4）は入らない。
-	if b.ImplLimitUSD != 3+10+20 {
-		t.Errorf("AC-46/47: impl limit = %v, want 3 (done) + 10 + 20 (new version), without the cancelled task's 4", b.ImplLimitUSD)
+	if b.ImplEstimateUSD != 3+10+20 {
+		t.Errorf("AC-46/47: impl estimate = %v, want 3 (done) + 10 + 20 (new version), without the cancelled task's 4", b.ImplEstimateUSD)
 	}
-	if b.ReviewLimitUSD != 2+6+7 {
-		t.Errorf("review limit = %v, want 2 + 6 + 7", b.ReviewLimitUSD)
+	if b.ReviewEstimateUSD != 2+6+7 {
+		t.Errorf("review estimate = %v, want 2 + 6 + 7", b.ReviewEstimateUSD)
 	}
 }
 
@@ -306,8 +306,8 @@ func TestChallengeBudget_CancelledTasksSpendCountsTowardTheChallengeButNotTheNew
 	if b.ImplSpentUSD != 6 || b.ReviewSpentUSD != 1 {
 		t.Errorf("AC-48: challenge spent = %v impl / %v review, want the cancelled task's 6 / 1 included", b.ImplSpentUSD, b.ReviewSpentUSD)
 	}
-	if b.ImplLimitUSD != 70 {
-		t.Errorf("impl limit = %v, want the new version's 30 + 40 only", b.ImplLimitUSD)
+	if b.ImplEstimateUSD != 70 {
+		t.Errorf("impl estimate = %v, want the new version's 30 + 40 only", b.ImplEstimateUSD)
 	}
 	for _, tb := range b.Tasks {
 		if tb.Status == TaskStatusPending && tb.ImplRemainingUSD != tb.ImplUSD {
@@ -444,8 +444,8 @@ func TestBudgetTask_RaisesOnlyThatTasksFrameAndRecordsTheTask_AC54_AC55_AC56_AC2
 	if a.ReviewUSD != 2 {
 		t.Errorf("AC-62: review frame = %v, want unchanged 2 when --review-usd is omitted", a.ReviewUSD)
 	}
-	if got := f.budgetOf(t, id); got.ImplLimitUSD != 34 {
-		t.Errorf("impl limit = %v, want 30 + 4", got.ImplLimitUSD)
+	if got := f.budgetOf(t, id); got.ImplEstimateUSD != 34 {
+		t.Errorf("impl estimate = %v, want 30 + 4", got.ImplEstimateUSD)
 	}
 }
 

@@ -225,6 +225,7 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	if d.IntegrationRef != nil {
 		fmt.Fprintf(&b, "統合先の識別:  %s\n", escapeControl(*d.IntegrationRef))
 	}
+	fmt.Fprintf(&b, "予算:          %s\n", budgetDetailText(d.Budget))
 	fmt.Fprintf(&b, "タスク:        %d 件\n", len(d.Tasks))
 	for _, t := range d.Tasks {
 		fmt.Fprintf(&b, "  %s %s [%s (%s)] 枠: 実装 %s USD・レビュー対応 %s USD / 使った額: %s USD\n", t.ID, escapeControl(t.Title), t.Status.Label(), t.Status,
@@ -418,8 +419,20 @@ func usesIntegrationText(v *bool) string {
 	return "使わない"
 }
 
+// budgetDetailText は `show` の予算の行の値（見込みと上限。上限の理由があれば添える）。見込みが不明なら「不明」。
+func budgetDetailText(b core.ChallengeDetailBudget) string {
+	if b.EstimateUSD == nil || b.LimitUSD == nil {
+		return "不明（枠を決められないタスクがある）"
+	}
+	text := fmt.Sprintf("見込み %s USD・上限 %s USD", formatUSD(*b.EstimateUSD), formatUSD(*b.LimitUSD))
+	if b.LimitReason != nil {
+		text += "（上限の理由: " + escapeControl(*b.LimitReason) + "）"
+	}
+	return text
+}
+
 // planViewText は `show --plan` の表示。最新の計画の方針・完了したら見えるもの・やらないこと・問いと推奨・
-// タスクのツリー・予算の上限・統合先を使うかを文で出す。承認の前はタスクの前提を計画の中の識別子（key）で、
+// タスクのツリー・予算の見込み・統合先を使うかを文で出す。承認の前はタスクの前提を計画の中の識別子（key）で、
 // 承認の後はタスクの ID で出す（core の PlanTaskView が識別子を決める）。構造化した出力を持たない計画は本文だけを出す。
 func planViewText(p *core.PlanView) string {
 	var b strings.Builder
@@ -451,7 +464,7 @@ func planViewText(p *core.PlanView) string {
 	if p.BudgetUSD != nil {
 		budget = strconv.FormatFloat(*p.BudgetUSD, 'f', -1, 64) + " USD"
 	}
-	fmt.Fprintf(&b, "タスクのツリー（%d 件・上限 %s・統合先を使うか: %s）:\n", len(p.Tasks), budget, usesIntegrationText(p.UsesIntegration))
+	fmt.Fprintf(&b, "タスクのツリー（%d 件・見込み %s・統合先を使うか: %s）:\n", len(p.Tasks), budget, usesIntegrationText(p.UsesIntegration))
 	for _, t := range p.Tasks {
 		line := fmt.Sprintf("  %s %s", t.Identifier(), escapeControl(t.Title))
 		if t.ID != "" {
