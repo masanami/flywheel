@@ -1231,6 +1231,7 @@ export const STOP_KIND_CODES = [
   "judgment_failed",
   "intake_unverified",
   "upstream_unreadable",
+  "child_question",
 ] as const;
 
 export const SUPERVISOR_HAND_CODES = [
@@ -1241,6 +1242,7 @@ export const SUPERVISOR_HAND_CODES = [
   "replan",
   "defer",
   "escalate",
+  "answer",
 ] as const;
 
 export const SUPERVISOR_RESULT_CODES = [

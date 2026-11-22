@@ -95,8 +95,9 @@ func TestSupervisorGuard_NoHandMintsAnApprovalOrChangesABudget(t *testing.T) {
 			return f.offeredFixture, f.tg.HoldID, out
 		}},
 	}
-	if len(scenarios) != len(SupervisorHandValues()) {
-		t.Fatalf("scenarios = %d, hands = %d: every hand must be covered", len(scenarios), len(SupervisorHandValues()))
+	// answer は保留を指さない（子の問いに保留を作る前に答える）ので、この表の外。承認・予算に触れないことは supervisor_child_question_test.go の TestChildQuestion_AnswerChangesNoApprovalOrBudget が確かめる。
+	if len(scenarios)+1 != len(SupervisorHandValues()) {
+		t.Fatalf("scenarios = %d, hands = %d: every hand except answer must be covered", len(scenarios), len(SupervisorHandValues()))
 	}
 	for _, sc := range scenarios {
 		sc := sc

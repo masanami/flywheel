@@ -32,6 +32,51 @@ func inspectSupervisorOutput(run *RunJudgmentResult, offered []SupervisorHand) (
 	return parsed, nil
 }
 
+// ChildQuestion は子の問い 1 件（スーパーバイザーが答える対象）。Options は選択肢の見出し（選択肢がある問いだけ。無ければ空）。
+type ChildQuestion struct {
+	Question string
+	Options  []string
+}
+
+// inspectChildQuestionOutput は子の問い（止まり方 child_question）への判断点の実行の結果を検査する。inspectSupervisorOutput の検査に加え、
+// 手が answer のとき、答えの件数が問いの数と合うこと・選択肢がある問いの答えが選択肢の見出しのどれかであること・
+// 問いごとに根拠として数えられる basis が 1 件以上あること（root はワークスペースの根）を確かめる。不備は BadOutput の flaw。
+func inspectChildQuestionOutput(run *RunJudgmentResult, offered []SupervisorHand, questions []ChildQuestion, root string) (*SVOutput, *svOutputFlaw) {
+	out, flaw := inspectSupervisorOutput(run, offered)
+	if flaw != nil || out.Hand != HandAnswer {
+		return out, flaw
+	}
+	if err := checkChildAnswers(out.Answers, questions, root); err != nil {
+		return nil, &svOutputFlaw{Reason: fmt.Sprintf("スーパーバイザーの答えに不備があった（%v）", err), BadOutput: true}
+	}
+	return out, nil
+}
+
+// checkChildAnswers は答え answers が問い questions に対して成り立つかを確かめる。
+func checkChildAnswers(answers []SVAnswer, questions []ChildQuestion, root string) error {
+	if len(answers) != len(questions) {
+		return fmt.Errorf("答えの件数 %d が問いの数 %d と合わない", len(answers), len(questions))
+	}
+	for i, a := range answers {
+		q := questions[i]
+		if len(q.Options) > 0 {
+			found := false
+			for _, o := range q.Options {
+				if o == a.Answer {
+					found = true
+				}
+			}
+			if !found {
+				return fmt.Errorf("問い %d の答え %q が選択肢にない", i+1, a.Answer)
+			}
+		}
+		if countableBasis(root, a.Basis) == 0 {
+			return fmt.Errorf("問い %d に、根拠として数えられる場所（ワークスペースの中の通常のファイル）がない", i+1)
+		}
+	}
+	return nil
+}
+
 // prefixSupervisorFailedQuestion は問いの先頭へ固定の 1 行を付ける（すでに付いていれば付けない）。
 func prefixSupervisorFailedQuestion(question string) string {
 	if strings.HasPrefix(question, supervisorFailedQuestionHead+"\n") {

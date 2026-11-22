@@ -12,7 +12,7 @@ import (
 // このファイルは対処の記録（supervisor_action。スーパーバイザーの判断 1 回と、core がその手を実行した結果）の
 // 書く・引く・数える口を持つ（区切り S4b-2）。書く口は、手の実行の書き込み（呼び出し側のトランザクション）の中で
 // 使える形（insertSupervisorAction・countSupervisorActions）を正本にし、Store のメソッドはそれを 1 つのトランザクションで包む。
-// 子の問いと答え（questions の列）は S4b-3。
+// 子の問いと答え（questions の列）は、手 answer の記録だけが持つ（区切り S4b-3）。
 
 // SupervisorBasis は根拠の場所 1 件（path はワークスペースの根からの相対パス、locator は節や行の手がかり）。
 type SupervisorBasis struct {
@@ -24,6 +24,13 @@ type SupervisorBasis struct {
 type SupervisorCondition struct {
 	Number int    `json:"number"`
 	Text   string `json:"text"`
+}
+
+// SupervisorQuestion は、スーパーバイザーが答えた子の問い 1 件（問い・答え・その答えの根拠）。
+type SupervisorQuestion struct {
+	Question string            `json:"question"`
+	Answer   string            `json:"answer"`
+	Basis    []SupervisorBasis `json:"basis"`
 }
 
 // SupervisorAction は対処の記録 1 件。
@@ -44,7 +51,9 @@ type SupervisorAction struct {
 	Note       string
 	Basis      []SupervisorBasis
 	Conditions []SupervisorCondition // 無ければ nil
-	Result     SupervisorActionResult
+	// Questions は答えた子の問いと答え（手が answer のときだけ。無ければ nil）。
+	Questions []SupervisorQuestion
+	Result    SupervisorActionResult
 	// RejectReason は断りの理由。結果が rejected でなければ nil。
 	RejectReason *SupervisorRejectReason
 	CreatedAt    time.Time
@@ -63,6 +72,7 @@ type SupervisorActionInput struct {
 	Note        string
 	Basis       []SupervisorBasis
 	Conditions  []SupervisorCondition // 空は NULL
+	Questions   []SupervisorQuestion  // 空は NULL
 	Result      SupervisorActionResult
 	// RejectReason は結果が rejected のときだけ必須（それ以外は空でなければならない）。
 	RejectReason SupervisorRejectReason
@@ -72,11 +82,14 @@ type SupervisorActionInput struct {
 type SupervisorActionCountQuery struct {
 	ChallengeID string
 	// TaskID が空なら、タスクを指さない記録（task_id が NULL）だけを数える。
-	TaskID   string
+	TaskID string
+	// StopKind が空なら、止まり方を問わない。
 	StopKind StopKind
 	// Hands が空でなければ、その手の記録だけを数える。ExcludeHands の手の記録は数えない。
 	Hands        []SupervisorHand
 	ExcludeHands []SupervisorHand
+	// AnyTask が真なら、タスクの条件を付けない（課題の全体で数える。TaskID は見ない）。
+	AnyTask bool
 	// ExecutedOnly が真なら、結果が executed の記録だけを数える。
 	ExecutedOnly bool
 	// AfterLastOwnerAnswer が真なら、その課題の最後のオーナーの回答（回答した者が supervisor でない回答済みの保留の、最大の回答時刻）
@@ -84,8 +97,8 @@ type SupervisorActionCountQuery struct {
 	AfterLastOwnerAnswer bool
 }
 
-// supervisorCountedHandsExcluded は、回数の上限（2 回）の数えから外す手。保留を閉じない手（defer・escalate）。子の問いに答える手（answer）は S4b-3 で足す。
-var supervisorCountedHandsExcluded = []SupervisorHand{HandDefer, HandEscalate}
+// supervisorCountedHandsExcluded は、回数の上限（2 回）の数えから外す手。保留を閉じない手（defer・escalate）と、子の問いに答える手（answer。回数は supervisorAnswerLimit が別に数える）。
+var supervisorCountedHandsExcluded = []SupervisorHand{HandDefer, HandEscalate, HandAnswer}
 
 // SupervisorHandledCountQuery は「回数の上限」の数え（同じタスク〔無ければ同じ課題〕の同じ止まり方への、最後のオーナーの回答以後（時刻が等しいものを含む）の、
 // 手が見送り・上げる・答えるでなく、結果が executed の対処の記録）の条件を返す。
@@ -95,6 +108,18 @@ func SupervisorHandledCountQuery(challengeID, taskID string, kind StopKind) Supe
 		ExcludeHands: append([]SupervisorHand(nil), supervisorCountedHandsExcluded...),
 		ExecutedOnly: true, AfterLastOwnerAnswer: true,
 	}
+}
+
+// normalizeQuestions は questions の根拠が nil のものを空の配列にそろえる（JSON に null を残さない）。
+func normalizeQuestions(in []SupervisorQuestion) []SupervisorQuestion {
+	out := make([]SupervisorQuestion, len(in))
+	for i, q := range in {
+		if q.Basis == nil {
+			q.Basis = []SupervisorBasis{}
+		}
+		out[i] = q
+	}
+	return out
 }
 
 func marshalNullable(v any, empty bool) (any, error) {
@@ -176,15 +201,19 @@ func insertSupervisorAction(ctx context.Context, tx *sql.Tx, at time.Time, in Su
 	if err != nil {
 		return 0, err
 	}
+	questions, err := marshalNullable(normalizeQuestions(in.Questions), len(in.Questions) == 0)
+	if err != nil {
+		return 0, err
+	}
 	var holdID any
 	if in.HoldID != nil {
 		holdID = *in.HoldID
 	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO supervisor_action (cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO supervisor_action (cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at, questions)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cycleID, cid, taskID, holdID, runID, string(in.StopKind), emptyAsNull(string(in.Hand)), in.Findings, in.Note, string(basisJSON), conditions,
-		string(in.Result), emptyAsNull(string(in.RejectReason)), formatTimestamp(at))
+		string(in.Result), emptyAsNull(string(in.RejectReason)), formatTimestamp(at), questions)
 	if err != nil {
 		return 0, err
 	}
@@ -218,7 +247,7 @@ func (s *Store) recordSupervisorAction(ctx context.Context, in SupervisorActionI
 	return out, err
 }
 
-const supervisorActionColumns = `id, cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at`
+const supervisorActionColumns = `id, cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at, questions`
 
 func querySupervisorActions(ctx context.Context, tx *sql.Tx, where string, args ...any) ([]SupervisorAction, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT `+supervisorActionColumns+` FROM supervisor_action `+where+` ORDER BY id ASC`, args...)
@@ -229,13 +258,13 @@ func querySupervisorActions(ctx context.Context, tx *sql.Tx, where string, args 
 	out := []SupervisorAction{}
 	for rows.Next() {
 		var (
-			a                           SupervisorAction
-			cid, cycleNum               int64
-			taskID, holdID, runID       sql.NullInt64
-			hand, conditions, rejection sql.NullString
-			kind, basis, result, at     string
+			a                                      SupervisorAction
+			cid, cycleNum                          int64
+			taskID, holdID, runID                  sql.NullInt64
+			hand, conditions, rejection, questions sql.NullString
+			kind, basis, result, at                string
 		)
-		if err := rows.Scan(&a.ID, &cycleNum, &cid, &taskID, &holdID, &runID, &kind, &hand, &a.Findings, &a.Note, &basis, &conditions, &result, &rejection, &at); err != nil {
+		if err := rows.Scan(&a.ID, &cycleNum, &cid, &taskID, &holdID, &runID, &kind, &hand, &a.Findings, &a.Note, &basis, &conditions, &result, &rejection, &at, &questions); err != nil {
 			return nil, err
 		}
 		a.CycleID = formatCycleID(cycleNum)
@@ -263,6 +292,11 @@ func querySupervisorActions(ctx context.Context, tx *sql.Tx, where string, args 
 		if conditions.Valid {
 			if err := json.Unmarshal([]byte(conditions.String), &a.Conditions); err != nil {
 				return nil, fmt.Errorf("supervisor_action.conditions is not valid JSON: %w", err)
+			}
+		}
+		if questions.Valid {
+			if err := json.Unmarshal([]byte(questions.String), &a.Questions); err != nil {
+				return nil, fmt.Errorf("supervisor_action.questions is not valid JSON: %w", err)
 			}
 		}
 		a.Result = SupervisorActionResult(result)
@@ -328,11 +362,17 @@ func supervisorActionWhere(ctx context.Context, tx *sql.Tx, q SupervisorActionCo
 	if !ok {
 		return "", nil, ErrNotFound
 	}
-	conds := []string{"challenge_id = ?", "stop_kind = ?"}
-	args := []any{cid, string(q.StopKind)}
-	if q.TaskID == "" {
+	conds := []string{"challenge_id = ?"}
+	args := []any{cid}
+	if q.StopKind != "" {
+		conds = append(conds, "stop_kind = ?")
+		args = append(args, string(q.StopKind))
+	}
+	switch {
+	case q.AnyTask: // 課題の全体で数える
+	case q.TaskID == "":
 		conds = append(conds, "task_id IS NULL")
-	} else {
+	default:
 		id, ok := parseTaskID(q.TaskID)
 		if !ok {
 			return "", nil, ErrNotFound

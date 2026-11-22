@@ -59,6 +59,9 @@ func (s *Store) executeSupervisorHand(ctx context.Context, in supervisorHandInpu
 		return s.supervisorHandDefer(ctx, in)
 	case HandEscalate:
 		return s.supervisorHandEscalate(ctx, in)
+	case HandAnswer:
+		// 子の問いに答える手は、保留を作る前に呼ばれ、閉じる保留が無い。保留を指す対処の経路では実行しない（記録は recordSupervisorAnswer）。
+		return supervisorHandOutcome{}, fmt.Errorf("%w: answer does not run against a hold", ErrValidation)
 	}
 	return supervisorHandOutcome{}, fmt.Errorf("%w: unknown hand %q", ErrValidation, in.Output.Hand)
 }
