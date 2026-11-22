@@ -1031,7 +1031,8 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (1, 1, 'plan', ?, '{"size":"M"}')`, []any{at}},
 			{`INSERT INTO source_binding (challenge_id, source_id, external_key, url, fingerprint, upstream_state, policy_state, created_at, updated_at)
 			  VALUES (1, 'src', 'o/r#1', 'https://example.test/1', 'fp', 'open', 'in_policy', ?, ?)`, []any{at, at}},
-			{`INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (1, 'q', 'verifying', ?)`, []any{at}},
+			{`INSERT INTO hold (challenge_id, question, from_status, raised_at, options, answer_option, option_required)
+			  VALUES (1, 'q', 'verifying', ?, '[{"id":"add","label":"足す","description":"説明"},{"id":"o2","label":"足さない","description":""}]', 'add', 1)`, []any{at}},
 			{`UPDATE challenge SET issues_hold_id = 1 WHERE id = 1`, nil},
 			{`INSERT INTO hold (challenge_id, question, from_status, raised_at, closed_at, kind) VALUES (2, '親が直接行う', 'unclassified', ?, ?, 'parent_direct')`, []any{at, at}},
 			{`INSERT INTO direct_completion (challenge_id, hold_id, note, created_at) VALUES (2, 2, '直接行った', ?)`, []any{at}},
