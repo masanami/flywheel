@@ -39,7 +39,9 @@ type FollowupPromotePlan struct {
 	NewChallengeReason string
 	// TargetChallengeID・ChallengeVersion は、タスクとして上げるときの元の課題とその版。
 	TargetChallengeID string
-	ChallengeVersion  int
+	// TargetChallengeTitle は元の課題の題名（要約と --preview が上げる先として見せる。照合には使わない）。
+	TargetChallengeTitle string
+	ChallengeVersion     int
 	// 足すタスクの枠・足した後の見込み・上限（USD。タスクとして上げるときだけ）。
 	BudgetImplUSD, BudgetReviewUSD float64
 	EstimateAfterUSD, LimitUSD     float64
@@ -53,6 +55,22 @@ type FollowupPromotePlan struct {
 // OverLimit は足した後の見込みが上限を超えるか。
 func (p *FollowupPromotePlan) OverLimit() bool {
 	return p.Dest == FollowupPromoteToTask && p.afterMicros > p.limitMicros
+}
+
+// ExceedsByUSD は足した後の見込みが上限を超える額（超えなければ 0）。
+func (p *FollowupPromotePlan) ExceedsByUSD() float64 {
+	if !p.OverLimit() {
+		return 0
+	}
+	return microsToUSD(p.afterMicros - p.limitMicros)
+}
+
+// LimitAfterUSD は上げた後の上限（超えるときは足した後の見込み、超えないときは上限のまま）。
+func (p *FollowupPromotePlan) LimitAfterUSD() float64 {
+	if p.OverLimit() {
+		return p.EstimateAfterUSD
+	}
+	return p.LimitUSD
 }
 
 // FollowupPromoteResult は PromoteFollowup の戻り値。Dest が challenge なら Challenge、task なら Addition が入る。
@@ -117,7 +135,7 @@ func computeFollowupPromotePlan(ctx context.Context, tx *sql.Tx, f *Followup, op
 		p.originTaskID = &v
 	}
 	p.Dest = FollowupPromoteToTask
-	p.TargetChallengeID, p.ChallengeVersion = *f.ChallengeID, ch.Version
+	p.TargetChallengeID, p.ChallengeVersion, p.TargetChallengeTitle = *f.ChallengeID, ch.Version, ch.Title
 	p.implMicros, p.reviewMicros = impl, review
 	p.afterMicros = before.Impl + before.Review + impl + review
 	p.limitMicros = limit
@@ -268,6 +286,11 @@ func promoteFollowupToTask(ctx context.Context, tx *sql.Tx, rec *activityRecorde
 	if err := rec.record("task_addition", aid, "create", nil, after); err != nil {
 		return nil, err
 	}
+	// その課題の上げる依頼が開いているときは、作ってあった反映の操作を、足す依頼を作る書き込みと同じ書き込みで閉じる
+	// （開いている上げる依頼の実行は、次の回りの反映の段が、閉じた操作を見て取り消す）。
+	if err := closeReflectOperationsForAddition(ctx, tx, rec, cid); err != nil {
+		return nil, err
+	}
 	fafter := map[string]any{"task_addition_id": formatTaskAdditionID(aid), "challenge_id": p.TargetChallengeID}
 	att.addRelayTo(fafter)
 	if err := rec.record("followup", fid, ActivityActionFollowupPromote, nil, fafter); err != nil {
@@ -282,4 +305,19 @@ func promoteFollowupToTask(ctx context.Context, tx *sql.Tx, rec *activityRecorde
 		return nil, err
 	}
 	return &FollowupPromoteResult{Dest: FollowupPromoteToTask, Addition: ta, Followup: fu}, nil
+}
+
+// closeReflectOperationsForAddition は、課題 cid の上げる依頼（契約の実行の種類 reflect で、終わっていないもの）が開いているとき、
+// 待っている反映の操作（承認待ち・承認済み）を閉じる。上げる依頼が開いていなければ何もしない。
+func closeReflectOperationsForAddition(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64) error {
+	var open int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND kind = ? AND ended_at IS NULL`,
+		cid, contractRunKindReflect).Scan(&open); err != nil {
+		return err
+	}
+	if open == 0 {
+		return nil
+	}
+	tc := &transitionCtx{tx: tx, rec: rec, id: cid, nowStr: formatTimestamp(rec.at)}
+	return closeReflectOperations(ctx, tc, cid, "", "フォローアップをタスクとして上げたため、反映の操作を閉じた")
 }
