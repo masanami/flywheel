@@ -121,6 +121,7 @@ export function createMockApi(
     const extra = name === "alpha" ? alphaDetailExtras(id) : {};
     return {
       approvals: m.approvals,
+      budget: { estimate_usd: null, limit_reason: null, limit_usd: null },
       card: cardOf(m),
       challenge: {
         ...m.c,

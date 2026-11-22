@@ -21,7 +21,7 @@ import (
 // docs/features/m5-tom-migration-and-switchover.md S1（AC-1〜AC-16）。実ストアで書き出しと再構築を検証する。
 
 var allTablesForExportTest = []string{"activity", "approval", "challenge", "challenge_dependency", "challenge_parent", "challenge_reopen", "chat_message", "chat_session", "contract_run", "cycle", "direct_completion", "direct_completion_artifact", "followup", "hold", "lock",
-	"occurrence", "operation", "operation_execution", "plan_answer", "run", "run_artifact", "slot", "source_binding", "source_child", "task", "task_dependency", "task_plan"}
+	"occurrence", "operation", "operation_execution", "plan_answer", "run", "run_artifact", "slot", "source_binding", "source_child", "task", "task_addition", "task_dependency", "task_plan"}
 
 func newWorkspaceStore(t *testing.T) (*Store, string) {
 	t.Helper()
@@ -571,6 +571,7 @@ func TestImport_TaskTablesRowsSurviveTheRoundTrip(t *testing.T) {
 		{"AC-12", "plan_answer", 2},
 		{"S2b followup", "followup", 2},
 		{"S2b source_child", "source_child", 1},
+		{"AC-223", "task_addition", 1},
 	} {
 		t.Run(tc.ac+"_"+tc.table, func(t *testing.T) {
 			t.Parallel()
@@ -611,6 +612,31 @@ func TestImport_TaskTablesRowsSurviveTheRoundTrip(t *testing.T) {
 			}
 		}
 	})
+}
+
+// AC-224・版 34 で足した列: 課題の上限と理由、タスクの addition_id・expand_after は、書き出し→空のストアへの再構築で同じになる。
+func TestImport_S4c1ColumnsSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	src, _ := filledStore(t)
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ query, want string }{
+		{`SELECT budget_limit_micros || '|' || budget_limit_reason FROM challenge WHERE id = 1`, `40000000|続きを足す分を見込む "quoted"`},
+		{`SELECT COALESCE(budget_limit_micros, 'NULL') || '|' || COALESCE(budget_limit_reason, 'NULL') FROM challenge WHERE id = 2`, `NULL|NULL`},
+		{`SELECT addition_id || '|' || expand_after FROM task WHERE id = 2`, `1|1`},
+		{`SELECT origin || '|' || origin_task_id || '|' || state || '|' || spec || '|' || total_after_micros || '|' || limit_micros || '|' || hold_id FROM task_addition WHERE id = 1`,
+			`expand|1|applied|{"tasks":[]}|9000000|40000000|1`},
+	} {
+		var got string
+		if err := dst.db.Read(context.Background(), func(tx *sql.Tx) error { return tx.QueryRow(tc.query).Scan(&got) }); err != nil {
+			t.Fatalf("%s: %v", tc.query, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s = %q, want %q", tc.query, got, tc.want)
+		}
+	}
 }
 
 // 版 28 で足した列（run_artifact.role・contract_run の 8 列）の値は、書き出し→空のストアへの再構築で同じになる。

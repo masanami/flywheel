@@ -187,6 +187,7 @@ export interface ListResponse {
 
 export interface ShowResponse {
   approvals: Approval[];
+  budget: Budget;
   challenge: ShowChallenge;
   conflict_fixes: PassedConflictFix[];
   direct_completions: DirectCompletion[];
@@ -221,6 +222,12 @@ export interface Approval {
   superseded_reason: string | null;
   target_version: number;
   verification: string;
+}
+
+export interface Budget {
+  estimate_usd: number | null;
+  limit_reason: string | null;
+  limit_usd: number | null;
 }
 
 export interface ShowChallenge {
@@ -568,6 +575,7 @@ export interface Card {
 
 export interface ShowCardResponse {
   approvals: Approval[];
+  budget: Budget;
   card: Card;
   challenge: ShowChallenge;
   conflict_fixes: PassedConflictFix[];

@@ -222,12 +222,22 @@ type ChallengeDetail struct {
 	Tasks []Task
 	// UsesIntegration は課題が統合先を使うか（challenge.uses_integration）。未決か過去の課題は nil。
 	UsesIntegration *bool
+	// Budget は課題の予算（見込み・上限・上限の理由）。計画の承認待ちの課題は、承認を待っている版の計画の値。
+	Budget ChallengeDetailBudget
 	// IntegrationRef は課題に記録した統合先の識別（challenge.integration_ref）。記録が無ければ nil。
 	IntegrationRef *string
 	// Followups は課題にぶら下がるフォローアップ（状態を問わず全部。ID の昇順）。無ければ空のスライス（nil でない）。
 	Followups []Followup
 	// ConflictFixes は通したコンフリクトの解消（古い順。無ければ空のスライス。nil でない）。作業ログの conflict_fix_passed から読む。
 	ConflictFixes []ConflictFixPassed
+}
+
+// ChallengeDetailBudget は課題の詳細の予算。EstimateUSD は見込み（取りやめでないタスクの枠の合計）、LimitUSD は上限
+// （記録が無い課題は見込みと同じ額）、LimitReason は計画の承認で記録した上限の理由。見込みが不明の課題は EstimateUSD・LimitUSD が nil。
+type ChallengeDetailBudget struct {
+	EstimateUSD *float64
+	LimitUSD    *float64
+	LimitReason *string
 }
 
 // ImprovementKey は改修課題の鍵（challenge.improvement_layer・improvement_target。マイグレーション 0012）。
@@ -891,6 +901,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		if detail.UsesIntegration, err = challengeUsesIntegration(ctx, tx, cid); err != nil {
+			return err
+		}
+		if detail.Budget, err = loadChallengeDetailBudget(ctx, tx, cid, c.Status, agent); err != nil {
 			return err
 		}
 		if err := fillTaskDetails(ctx, tx, cid, detail.Tasks, detail.UsesIntegration); err != nil {
