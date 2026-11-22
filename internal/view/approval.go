@@ -49,12 +49,16 @@ func ConditionsAfterReleaseHeading(o ConditionsOutlook) string {
 type ApprovalPlan struct {
 	Body string `json:"body"`
 	// BudgetUSD・Summary は `show --plan --json` の plan.budget_usd・plan.summary と同じ値（API だけ。端末の approve の要約と --json には無い）。
-	BudgetUSD       *float64           `json:"budget_usd"`
-	Summary         *string            `json:"summary"`
-	Tasks           []ApprovalPlanTask `json:"tasks"`
-	Topics          []PlanTopic        `json:"topics"`
-	UsesIntegration *bool              `json:"uses_integration"`
-	Version         int                `json:"version"`
+	// BudgetLimitUSD は計画の上限（計画が書かなければ見込みと同じ額。見込みが不明なら null）、BudgetLimitReason は上限が見込みより大きいときだけの
+	// 上限の理由（同じ額なら null）。budget_usd は見込み。
+	BudgetLimitReason *string            `json:"budget_limit_reason"`
+	BudgetLimitUSD    *float64           `json:"budget_limit_usd"`
+	BudgetUSD         *float64           `json:"budget_usd"`
+	Summary           *string            `json:"summary"`
+	Tasks             []ApprovalPlanTask `json:"tasks"`
+	Topics            []PlanTopic        `json:"topics"`
+	UsesIntegration   *bool              `json:"uses_integration"`
+	Version           int                `json:"version"`
 }
 
 // ApprovalPlanTask は計画承認待ちの要約のタスク 1 件。承認の前はタスクの ID が無いので、計画の中の識別子（key）と、
@@ -97,6 +101,8 @@ type ApprovalOtherOperation struct {
 // （それ以外は空配列か null）。要約と同じ読み取りで返すので、画面は課題の詳細を別に読んで版を見比べなくてよい。
 // Followups は課題にぶら下がる未（open）のものだけ。
 type ApprovalSummary struct {
+	// AddedTasks は計画の後に足されたタスク（完了確認待ちのときだけ中身が入る。無ければ空配列）。
+	AddedTasks                    []AddedTask         `json:"added_tasks"`
 	ChallengeID                   string              `json:"challenge_id"`
 	ConditionsAfterRelease        []string            `json:"conditions_after_release"`
 	ConditionsAfterReleaseHeading string              `json:"conditions_after_release_heading"`
@@ -125,6 +131,23 @@ type ApprovalSummary struct {
 	Version              int                      `json:"version"`
 }
 
+// AddedTask は計画の後に足されたタスク 1 件（課題・題名・出どころ）。完了の承認の要約と cycle の出力が使う。
+type AddedTask struct {
+	ChallengeID string `json:"challenge_id"`
+	Origin      string `json:"origin"`
+	TaskID      string `json:"task_id"`
+	Title       string `json:"title"`
+}
+
+// FromAddedTasks は足されたタスクの一覧を変換する（空でも `[]`）。
+func FromAddedTasks(ts []core.AddedTask) []AddedTask {
+	out := make([]AddedTask, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, AddedTask{ChallengeID: t.ChallengeID, Origin: string(t.Origin), TaskID: t.TaskID, Title: t.Title})
+	}
+	return out
+}
+
 // ApprovalCompletionTask は完了承認画面に並べるタスク 1 件（core.CompletionTask）。Phase はタスクの表示の区分（ツリーと同じ値）。
 // InTree が false のタスク（計画を作り直す前の版の済みのタスク）は詳細の画面が開けない。
 type ApprovalCompletionTask struct {
@@ -145,6 +168,7 @@ type ApprovalSummaryResponse struct {
 // p.PendingReleases と同じ順序・件数）を ApprovalSummaryResponse へ変換する。
 func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) ApprovalSummaryResponse {
 	s := ApprovalSummary{
+		AddedTasks:             FromAddedTasks(p.AddedTasks),
 		ChallengeID:            p.ChallengeID,
 		ConditionsAfterRelease: append([]string{}, p.ConditionsAfterRelease...),
 		Kind:                   string(p.Kind),
@@ -178,7 +202,7 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 			}
 			tasks = append(tasks, ApprovalPlanTask{BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD, DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Phase: phase, Source: strOrNil(t.Source), Title: t.Title})
 		}
-		s.Plan = &ApprovalPlan{Body: p.PlanBody, BudgetUSD: p.PlanBudgetUSD, Summary: p.PlanSummary, Tasks: tasks, Topics: FromPlanTopics(p.PlanTopics), UsesIntegration: p.PlanUsesIntegration, Version: p.PlanVersion}
+		s.Plan = &ApprovalPlan{Body: p.PlanBody, BudgetLimitReason: p.PlanBudgetLimitReason, BudgetLimitUSD: p.PlanBudgetLimitUSD, BudgetUSD: p.PlanBudgetUSD, Summary: p.PlanSummary, Tasks: tasks, Topics: FromPlanTopics(p.PlanTopics), UsesIntegration: p.PlanUsesIntegration, Version: p.PlanVersion}
 	case core.ApprovalKindCompletion:
 		dc := p.DoneCriteria
 		s.DoneCriteria = &dc

@@ -530,6 +530,7 @@ const withChildren = () =>
     ],
     tasks: [
       {
+        added: null,
         body: "",
         budget_impl_usd: 0,
         budget_review_usd: 0,

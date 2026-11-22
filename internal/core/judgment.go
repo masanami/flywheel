@@ -274,6 +274,9 @@ type RunJudgmentInput struct {
 	// TaskID が非 nil なら、run の task_id（タスクの内部整数 ID）に記録する（J3 が、起動するタスクを結び付ける。
 	// 他の判断点は nil のまま）。
 	TaskID *int64
+	// TaskLess が真のとき、「終わっていない実行」の検査を、タスクに結び付かない実行（taskLessHasActiveRun）に絞る
+	// （J2 の「足す」の形だけが使う。別のタスクの実行が着手中でも起動する）。TaskID が非 nil のときは使わない。
+	TaskLess bool
 	// WorkDir が空でなければ、ワークスペースの代わりにこのディレクトリで起動する（J5 だけが使う）。
 	WorkDir string
 }
@@ -324,6 +327,10 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 		if !ok {
 			return nil, ErrNotFound
 		}
+	}
+
+	if in.TaskLess && in.TaskID != nil {
+		return nil, ErrValidation
 	}
 
 	// invoker が起動できるか（PATHにclaudeがあるか）を、何も記録・変更する前に
@@ -382,6 +389,14 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 						return err
 					}
 					if a != nil {
+						return errActiveRunExists
+					}
+				} else if in.TaskLess {
+					busy, err := taskLessHasActiveRun(ctx, tx, cid)
+					if err != nil {
+						return err
+					}
+					if busy {
 						return errActiveRunExists
 					}
 				} else {
@@ -454,6 +469,7 @@ func (s *Store) RunJudgment(ctx context.Context, in RunJudgmentInput) (*RunJudgm
 			MaxBudgetUSD:     maxBudgetMicros,
 			BudgetBucket:     budgetBucketJudgment,
 			TaskID:           in.TaskID,
+			TaskLess:         in.TaskLess,
 		})
 		if err != nil {
 			return err

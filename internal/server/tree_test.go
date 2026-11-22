@@ -230,8 +230,8 @@ func TestTreeAPI_BudgetEqualsShowPlan_AC40_AC41_AC42_802(t *testing.T) {
 		t.Fatalf("show --plan = %+v, %v", show, err)
 	}
 	list := getTree(t, port)
-	if got := list.Challenges[0]["budget_usd"]; got == nil || got.(float64) != *show.Plan.BudgetUSD || got.(float64) != 55 {
-		t.Errorf("AC-40・AC-42: budget_usd = %v, want %v (55)", got, *show.Plan.BudgetUSD)
+	if got := list.Challenges[0]["budget_usd"]; got == nil || got.(float64) != *show.Plan.BudgetUSD || got.(float64) != 165 {
+		t.Errorf("AC-40・AC-42: budget_usd = %v, want %v (165: three tasks without frames, each filled with the plan amount 55)", got, *show.Plan.BudgetUSD)
 	}
 	if got := list.Challenges[1]["budget_usd"]; got != nil {
 		t.Errorf("AC-41: budget_usd = %v for a challenge without a plan, want null", got)
@@ -278,9 +278,9 @@ func TestApprovalSummary_PlanSummaryAndBudget_AC63to66_802(t *testing.T) {
 			t.Errorf("budget_usd = %v, want %v", budget, *show.Plan.BudgetUSD)
 		}
 	})
-	t.Run("AC-66 a plan without amounts gets the size default, not null", func(t *testing.T) {
-		if budget == nil || *budget != 55 {
-			t.Errorf("budget_usd = %v, want 55 (size S default)", budget)
+	t.Run("AC-66 a plan without amounts gets the size default per task, not null", func(t *testing.T) {
+		if budget == nil || *budget != 165 {
+			t.Errorf("budget_usd = %v, want 165 (size S default 55 for each of the three tasks without frames)", budget)
 		}
 	})
 	t.Run("AC-65 an old-shape plan has summary null", func(t *testing.T) {

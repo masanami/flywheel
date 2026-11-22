@@ -71,10 +71,10 @@ func (s *Store) resolveSupervisorHold(ctx context.Context, in supervisorHandInpu
 		}
 		return Status(from), nil
 	}
-	_, err = s.runTransitionInTx(ctx, in.Tx, rec, in.ChallengeID, runTransitionParams{
+	_, err = s.transitionInTx(ctx, in.Tx, rec, runTransitionParams{
 		actor: actor, channel: ChannelInvoker, verification: VerificationNone, id: formatChallengeID(in.ChallengeID),
 		op: OpSupervisorResolve, preceding: NoStatus, resolvePreceding: resolvePreceding, runID: in.RunID, replan: replan, restricted: true,
-	}, func(ctx context.Context, tc *transitionCtx) error {
+	}, in.ChallengeID, func(ctx context.Context, tc *transitionCtx) error {
 		if err := writeHoldAnswer(ctx, tc, w); err != nil {
 			return err
 		}

@@ -8,7 +8,7 @@ import (
 )
 
 // このファイルは課題のツリー（画面の「課題とそのタスクの進み」）を、core の記録だけから決定的に作る公開 API
-// （ChallengeTree・ChallengeTreeNode）を持つ。表示の区分（TaskPhase）・タスクの進み・費用の合計・予算の上限・
+// （ChallengeTree・ChallengeTreeNode）を持つ。表示の区分（TaskPhase）・タスクの進み・費用の合計・予算の見込み・
 // 未のフォローアップの件数は、ここで決める（画面の側で決めない・数え直さない）。ストアへ書かず、LLM も上流（GitHub）も
 // 呼ばない。
 
@@ -174,7 +174,7 @@ type TreeChallenge struct {
 	TasksDone  int
 	// CostUSD は課題の実行の記録（判断点と委譲。前の版の計画のタスクに付いた実行も含む）の費用の合計。
 	CostUSD float64
-	// BudgetUSD は GetPlanView の BudgetUSD と同じ規則で決めた予算の上限（決められないとき・計画が無いとき nil）。
+	// BudgetUSD は GetPlanView の BudgetUSD と同じ規則で決めた予算の見込み（決められないとき・計画が無いとき nil）。
 	BudgetUSD     *float64
 	FollowupsOpen int
 	Dependencies  []TreeDependency

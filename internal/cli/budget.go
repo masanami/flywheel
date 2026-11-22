@@ -22,6 +22,18 @@ func runBudget(a Args) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	limitText, hasLimit := a.Values["limit"]
+	_, hasImpl := a.Values["impl-usd"]
+	_, hasReview := a.Values["review-usd"]
+	_, hasTask := a.Values["task"]
+	switch {
+	case hasLimit && (hasImpl || hasReview || hasTask):
+		return nil, NewError(CodeValidationFailed, "--limit は、タスクの枠の指定（--impl-usd・--review-usd・--task）と同時に指定できません")
+	case hasLimit:
+		return runBudgetLimit(a, id, verifier, limitText)
+	case !hasImpl:
+		return nil, NewError(CodeUsageError, "--impl-usd か --limit のどちらかが必要です")
+	}
 	impl, err := parseBudgetFlag("impl-usd", a.Values["impl-usd"])
 	if err != nil {
 		return nil, err
@@ -35,7 +47,7 @@ func runBudget(a Args) (any, error) {
 		review = &r
 	}
 
-	// サイズの既定を引く宣言は、現在の額の表示にだけ使う（読めなくても枠は置き換えられる）。
+	// サイズの既定を引く宣言は、現在の額の表示と見込みの計算に使う（読めなくても枠は置き換えられる。core は渡されなければ自分で読む）。
 	decl, derr := core.LoadAgentDeclaration(a.Store.Workspace())
 	if derr != nil {
 		decl = nil
@@ -57,6 +69,7 @@ func runBudget(a Args) (any, error) {
 		TaskID:          preview.TaskID,
 		ImplUSD:         impl,
 		ReviewUSD:       review,
+		Agent:           decl,
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -68,6 +81,56 @@ func runBudget(a Args) (any, error) {
 		PlanVersion: preview.PlanVersion,
 		ReviewUSD:   review,
 	}, text: id + "\n"}, nil
+}
+
+// runBudgetLimit は `flywheel budget <C-ID> --limit <USD>` の実装。課題の上限だけを変える（枠・課題の状態と版は変えない）。
+// 本人確認は枠の増額と同じ。見込みより小さい額は、端末を開く前に検証の誤りで断る。規則は core が持つ。
+func runBudgetLimit(a Args, id string, verifier core.Verifier, limitText string) (any, error) {
+	limit, err := parseBudgetFlag("limit", limitText)
+	if err != nil {
+		return nil, err
+	}
+	decl, derr := core.LoadAgentDeclaration(a.Store.Workspace())
+	if derr != nil {
+		decl = nil
+	}
+	preview, err := a.Store.PrepareBudgetLimit(context.Background(), id, decl, limit)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	att, err := core.Verify(channelFor(a), verifier, budgetLimitSummaryText(preview), id)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	approval, err := a.Store.ExecuteBudget(context.Background(), core.BudgetRequest{
+		ChallengeID:     id,
+		ExpectedVersion: preview.Version,
+		PlanVersion:     preview.PlanVersion,
+		LimitUSD:        &limit,
+		Agent:           decl,
+	}, att)
+	if err != nil {
+		return nil, mapCoreErr(err)
+	}
+	return textOutput{json: view.BudgetResponse{
+		Approval:    view.FromApproval(*approval),
+		ChallengeID: id,
+		PlanVersion: preview.PlanVersion,
+	}, text: id + "\n"}, nil
+}
+
+// budgetLimitSummaryText は flywheel budget --limit が確認の前に端末へ表示する要約。
+func budgetLimitSummaryText(p *core.BudgetPreview) string {
+	var b strings.Builder
+	usd := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) + " USD" }
+	fmt.Fprintf(&b, "課題 ID:     %s\n", p.ChallengeID)
+	fmt.Fprintf(&b, "タイトル:    %s\n", p.Title)
+	fmt.Fprintf(&b, "承認の種類:  予算（budget）の上限\n")
+	fmt.Fprintf(&b, "計画の版:    v%d\n", p.PlanVersion)
+	fmt.Fprintf(&b, "見込み:      %s\n", usd(p.EstimateUSD))
+	fmt.Fprintf(&b, "現在の上限:  %s\n", usd(p.CurrentLimitUSD))
+	fmt.Fprintf(&b, "変更後の上限: %s\n", usd(p.NewLimitUSD))
+	return b.String()
 }
 
 // parseBudgetFlag は金額のフラグの値を数に変える。数でなければ usage_error。

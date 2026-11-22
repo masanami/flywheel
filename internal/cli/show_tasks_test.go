@@ -245,7 +245,7 @@ func lineContaining(text, needle string) string {
 }
 
 // AC-156〜AC-159・AC-161〜AC-164: show --plan に、方針・問い・推奨の印・タスクの題名・完了したら見えるもの・
-// やらないこと・予算の上限（実装の枠とレビュー対応の枠の合計）・統合先を使うかが出る。
+// やらないこと・予算の見込み（実装の枠とレビュー対応の枠の合計）・統合先を使うかが出る。
 func TestShowPlan_PrintsTheLatestPlanBeforeApproval(t *testing.T) {
 	t.Parallel()
 	ws, id := planViewWorkspace(t)
@@ -260,7 +260,7 @@ func TestShowPlan_PrintsTheLatestPlanBeforeApproval(t *testing.T) {
 		"AC-159 task C":    "TITLE-C",
 		"AC-161 expected":  "EXPECTED-SCENE",
 		"AC-162 non_goals": "NONGOAL-TEXT",
-		"AC-163 budget":    "42.5",
+		"AC-163 budget":    "127.5",
 		"AC-164 uses":      "統合先を使うか: 使う",
 	} {
 		if !strings.Contains(text, want) {
@@ -348,7 +348,7 @@ func TestShowPlanJSON_CarriesThePlanOverview(t *testing.T) {
 	t.Parallel()
 	ws, id := planViewWorkspace(t)
 	plan := runJSON(t, ws, "show", id, "--plan")["plan"].(map[string]any)
-	if plan["summary"] != "SUMMARY-TEXT" || plan["budget_usd"] != 42.5 || plan["uses_integration"] != true || plan["version"] != float64(1) {
+	if plan["summary"] != "SUMMARY-TEXT" || plan["budget_usd"] != 127.5 || plan["uses_integration"] != true || plan["version"] != float64(1) {
 		t.Errorf("plan = %v", plan)
 	}
 	tasks := objectList(t, plan["tasks"], "plan.tasks")
@@ -381,7 +381,7 @@ func TestApprove_PlanSummaryShowsQuestionsAndTaskTitles(t *testing.T) {
 	}
 }
 
-// AC-202: 計画が額を書いていないとき、`show --plan` の予算の上限は、宣言のサイズごとの既定の合計で出る（「未設定」にならない。
+// AC-202: 計画が額を書いていないとき、`show --plan` の予算の見込みは、宣言のサイズごとの既定の合計で出る（「未設定」にならない。
 // 委譲が使う額と同じ規則）。初期の宣言のサイズ S の既定は、実装 30・レビュー対応 25。
 func TestShowPlan_BudgetFallsBackToTheSizeDefaults(t *testing.T) {
 	t.Parallel()
@@ -392,7 +392,7 @@ func TestShowPlan_BudgetFallsBackToTheSizeDefaults(t *testing.T) {
 			`{"key":"t1","title":"TT","body":"B","done_criteria":"D","non_goals":[],"depends_on":[],"repo":"direct-repo","operation":"brief-op"}]}`)
 	text := runText(t, ws, "show", id, "--plan")
 	line := lineContaining(text, "タスクのツリー")
-	if !strings.Contains(line, "上限 55 USD") {
+	if !strings.Contains(line, "見込み 55 USD") {
 		t.Errorf("the plan line = %q, want the size default 55 USD (30 + 25)", line)
 	}
 }

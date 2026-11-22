@@ -58,6 +58,8 @@ type TaskInput struct {
 	// BudgetImplMicros・BudgetReviewMicros はタスクの実装の枠・レビュー対応の枠（USD の 100 万分の 1。nil は NULL）。
 	BudgetImplMicros   *int64
 	BudgetReviewMicros *int64
+	// ExpandAfter は、このタスクの後に続きのタスクを足すかを決めるタスクか（task.expand_after）。
+	ExpandAfter bool
 }
 
 // Task はタスク 1 件（前提のタスクの ID つき）。ID・DependsOn の要素は表示形（"T-<n>"）、ChallengeID は "C-<n>"。
@@ -77,8 +79,10 @@ type Task struct {
 	DependsOn    []string
 	// SourceKey は対応する取り込み元の子の external_key（"" は NULL）。
 	SourceKey string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// ExpandAfter は、このタスクの後に続きのタスクを足すかを決めるタスクか（task.expand_after）。
+	ExpandAfter bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 	// BudgetImplUSD・BudgetReviewUSD・SpentUSD はタスクの実装の枠・レビュー対応の枠（増額を含む実効値）と、そのタスクの実行の費用の合計（USD）。
 	// 課題の詳細（GetChallenge）だけが埋める。枠を決められないタスク（記録が空で、見直し前の決め方の値も引けない）は 0。
 	BudgetImplUSD   float64
@@ -86,6 +90,17 @@ type Task struct {
 	SpentUSD        float64
 	// Detail は委譲先の実行・成果物・値・検証・統合先へ入れる進み。課題の詳細（GetChallenge）だけが埋める。
 	Detail TaskDetail
+	// Added は、計画の後に足されたタスクの印（task.addition_id が指す足す依頼から作る）。計画の承認で作ったタスクは nil。
+	// 課題の詳細（GetChallenge）だけが埋める。
+	Added *TaskAdded
+}
+
+// TaskAdded は足されたタスクの印。Origin は足す依頼の出どころ、OriginTaskID は出どころのタスクの ID（"T-<n>"。無ければ nil）、
+// AddedAt はタスクを足した日時（タスクの作成日時）。
+type TaskAdded struct {
+	Origin       TaskAdditionOrigin
+	OriginTaskID *string
+	AddedAt      time.Time
 }
 
 func (in TaskInput) valid() bool {
@@ -102,6 +117,21 @@ func (in TaskInput) valid() bool {
 // 同じ Key が重なれば errDuplicateTaskKey（ErrValidation）、課題が無ければ ErrNotFound。
 // 作ったタスクを入力の順で返す。
 func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challengeID, planVersion int64, in []TaskInput) ([]Task, error) {
+	return createTasksWith(ctx, tx, rec, challengeID, planVersion, in, createTasksOptions{})
+}
+
+// createTasksOptions は、計画の後にタスクを足すときの createTasks の追加の入力。
+type createTasksOptions struct {
+	// Existing は、前提に指せるいまあるタスクの鍵 → ID（承認済みの版の、取りやめでないタスク。前の版のタスクの鍵は入れない。
+	// 一意の索引が（課題・計画の版・鍵）なので、版をまたぐ鍵は対応に入れない）。鍵が in の鍵と重なれば不正。
+	Existing map[string]int64
+	// AdditionID は足したタスクの印（task.addition_id。足す依頼の内部整数 ID）。nil は計画の承認で作るタスク。
+	AdditionID *int64
+}
+
+// createTasksWith は createTasks に、いまあるタスクへの前提（opts.Existing）と足す依頼の印（opts.AdditionID）を足した形。
+// 前提の辺は、いまあるタスクがこの呼び出しのタスクを指すことは無いので、輪はこの呼び出しのタスクどうしの辺だけで決まる。
+func createTasksWith(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challengeID, planVersion int64, in []TaskInput, opts createTasksOptions) ([]Task, error) {
 	if planVersion < 1 {
 		return nil, ErrValidation
 	}
@@ -116,11 +146,17 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 		if _, dup := byKey[t.Key]; dup {
 			return nil, errDuplicateTaskKey
 		}
+		if _, dup := opts.Existing[t.Key]; dup {
+			return nil, errDuplicateTaskKey
+		}
 		byKey[t.Key] = i
 	}
 	for _, t := range in {
 		for _, k := range t.DependsOn {
-			if _, ok := byKey[k]; !ok || k == t.Key {
+			if _, ok := byKey[k]; ok && k != t.Key {
+				continue
+			}
+			if _, ok := opts.Existing[k]; !ok || k == t.Key {
 				return nil, ErrValidation
 			}
 		}
@@ -148,11 +184,11 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 			nonGoals = string(b)
 		}
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after, addition_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			challengeID, planVersion, nullableTextColumn(t.Key), t.Title, t.Body, t.DoneCriteria, nonGoals, t.Repo, t.Operation,
 			string(TaskStatusPending), nullableTextColumn(t.SourceKey), nowStr, nowStr,
-			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros))
+			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros), t.ExpandAfter, int64PtrColumn(opts.AdditionID))
 		if store.IsUniqueViolation(err) {
 			return nil, errDuplicateTaskKey
 		}
@@ -168,8 +204,12 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 	}
 	for i, t := range in {
 		for _, k := range t.DependsOn {
+			dep := opts.Existing[k]
+			if j, ok := byKey[k]; ok {
+				dep = ids[j]
+			}
 			if _, err := tx.ExecContext(ctx,
-				`INSERT OR IGNORE INTO task_dependency (task_id, depends_on_id) VALUES (?, ?)`, ids[i], ids[byKey[k]]); err != nil {
+				`INSERT OR IGNORE INTO task_dependency (task_id, depends_on_id) VALUES (?, ?)`, ids[i], dep); err != nil {
 				return nil, err
 			}
 		}
@@ -185,21 +225,23 @@ func createTasks(ctx context.Context, tx *sql.Tx, rec *activityRecorder, challen
 	return out, nil
 }
 
-const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at FROM task`
+const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, expand_after, created_at, updated_at FROM task`
 
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var (
 		id, challengeID, planVersion int64
 		key, nonGoals, sourceKey     sql.NullString
 		status, createdAt, updatedAt string
+		expandAfter                  int64
 		t                            Task
 	)
 	if err := row.Scan(&id, &challengeID, &planVersion, &key, &t.Title, &t.Body, &t.DoneCriteria, &nonGoals, &t.Repo, &t.Operation,
-		&status, &sourceKey, &createdAt, &updatedAt); err != nil {
+		&status, &sourceKey, &expandAfter, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	t.ID, t.ChallengeID, t.PlanVersion, t.Key, t.Status = formatTaskID(id), formatChallengeID(challengeID), planVersion, key.String, TaskStatus(status)
 	t.SourceKey = sourceKey.String
+	t.ExpandAfter = expandAfter != 0
 	if nonGoals.Valid {
 		if err := json.Unmarshal([]byte(nonGoals.String), &t.NonGoals); err != nil {
 			return nil, fmt.Errorf("task %s non_goals: %w", t.ID, err)
@@ -576,7 +618,10 @@ func hasDependencyCycle(in []TaskInput, byKey map[string]int) bool {
 	visit = func(i int) bool {
 		state[i] = visiting
 		for _, k := range in[i].DependsOn {
-			j := byKey[k]
+			j, ok := byKey[k]
+			if !ok {
+				continue // いまあるタスクへの辺。いまあるタスクはこの呼び出しのタスクを指さないので、輪を作らない
+			}
 			if state[j] == visiting || (state[j] == unvisited && visit(j)) {
 				return true
 			}

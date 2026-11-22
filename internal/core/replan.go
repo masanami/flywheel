@@ -147,7 +147,7 @@ func formatReplanSection(n *replanNote) string {
 		fmt.Fprintf(&b, "\n前の計画の版までに使った費用（新しい計画の枠から引かれる積み上げの額）: 実装枠 %s USD・レビュー対応枠 %s USD\n",
 			formatUSDAmount(microsToUSD(n.Spent.Impl)), formatUSDAmount(microsToUSD(n.Spent.Review)))
 		b.WriteString("使った費用は計画の版をまたいで積み上がる。タスクが 1 個の計画では、実装枠・レビュー対応枠をそれぞれの使った額を含む上限として書く。\n")
-		b.WriteString("統合先を使う課題（タスクが 2 個以上）では、使った費用の合計は課題の上限に含める。タスクごとの枠には、そのタスクで使う分だけを書き、使った費用の合計を各枠へ重ねて入れない。\n")
+		b.WriteString("統合先を使う課題（タスクが 2 個以上）では、使った費用の合計は課題の見込みに含める。タスクごとの枠には、そのタスクで使う分だけを書き、使った費用の合計を各枠へ重ねて入れない。\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

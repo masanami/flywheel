@@ -10,14 +10,14 @@ import (
 // スーパーバイザーの手が保留を閉じる遷移（supervisor_resolve。T20）の両方が呼ぶ。
 
 // checkReplanAllowed は、作り直しの回答（印 replan）を成立させてよいか、書き込みの中で確かめる。
-// 作業している契約の実行があるとき（判定は contractRunWorkingTx）は、成立させない（ErrValidation）。
+// 作業している契約の実行があるとき（判定は contractRunWorkingTx）は、成立させない（ErrValidation。文面に、作業しているタスクの名前を添える）。
 func checkReplanAllowed(ctx context.Context, tx *sql.Tx, cid int64) error {
 	working, err := contractRunWorkingTx(ctx, tx, cid)
 	if err != nil {
 		return err
 	}
 	if working {
-		return fmt.Errorf("%w: replan is not allowed while a contract run is working", ErrValidation)
+		return fmt.Errorf("%w: replan is not allowed while a contract run is working: %s", ErrValidation, workingTaskNames(ctx, tx, cid))
 	}
 	return nil
 }

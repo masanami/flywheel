@@ -683,7 +683,7 @@ func TestUpRequest_TheStartingConditionsAreSelectedByTheCandidates(t *testing.T)
 	t.Parallel()
 	candidates := func(f *contractFixture) []int64 {
 		t.Helper()
-		ids, err := f.s.reflectCandidates(context.Background(), nil)
+		ids, err := f.s.reflectCandidates(context.Background(), nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

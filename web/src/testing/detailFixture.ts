@@ -16,7 +16,9 @@ export function show(over: Over = {}): ShowCardResponse {
   const { tree, challenge, actions, ...rest } = over;
   const acts = actions ?? [];
   return {
+    additions: [],
     approvals: [],
+    budget: { estimate_usd: null, limit_reason: null, limit_usd: null },
     card: {
       context: null,
       headline: null,

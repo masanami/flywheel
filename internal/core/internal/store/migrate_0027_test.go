@@ -28,7 +28,7 @@ func TestFollowupMigration(t *testing.T) {
 				t.Errorf("followup.%s: present=%v notnull=%v; want notnull=%v", c, ok, nn, notNull)
 			}
 		}
-		// task_id は版 34（区切り S4b-2）で足す。
+		// task_id は版 35（区切り S4b-2）で足す。
 		if _, ok := fu["id"]; !ok || len(fu) != 12 {
 			t.Errorf("followup columns = %v; want 12 including id and task_id", fu)
 		}

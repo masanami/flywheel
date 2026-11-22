@@ -121,3 +121,33 @@ func TestRunAnswer_ValidationErrorEscapesControlCharsInOptionLabels(t *testing.T
 		})
 	}
 }
+
+// S4c-1 の 9: 問いを出し直したとき、CLI は検証の誤りと同じ終了コードで終わり、新しい額と出し直した旨を出す。
+// 出し直しを起こす保留（足す依頼つき）を CLI から作る口は無いので、core が返す値からの文面を確かめ、出し直しの成立は core の試験が持つ。
+func TestReissuedAnswerText_ShowsTheNewAmountAndSaysTheQuestionWasReissued(t *testing.T) {
+	t.Parallel()
+	c := &core.Challenge{ID: "C-1", Version: 7}
+	hold := &core.Hold{
+		Question: "足すと上限を超えるので、足してよいかを決めてください。\n足した後の見込み: $16\n",
+		Options:  []core.HoldOption{{ID: "add", Label: "足す", Description: "上限を $16（足した後の見込み）に上げて、タスクを足す"}},
+		Reissued: true,
+	}
+	got := reissuedAnswerText(c, hold)
+	for _, want := range []string{"出し直しました", "$16", "add（足す）", "課題の版: 7", "もう一度 --option"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("text = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+// 識別の無い --replan だけの回答は、検証の誤りで断る（使い方の誤りではない）。保留は開いたまま。
+func TestRunAnswer_ReplanAloneIsAValidationError(t *testing.T) {
+	t.Parallel()
+	rel := []string{"--relayed", "--session", "s", "--quote", "選ぶ"}
+	ws := initializedWorkspace(t)
+	id := holdWithOptionsChallenge(t, ws, "", "awaiting_human")
+	requireErrorCode(t, append([]string{"answer", id, "--replan", "--workspace", ws}, rel...), 1, CodeValidationFailed)
+	if got := workStatus(t, ws, id); got != "awaiting_human" {
+		t.Errorf("status = %q, want awaiting_human", got)
+	}
+}

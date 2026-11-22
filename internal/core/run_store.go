@@ -418,6 +418,9 @@ type insertRunInput struct {
 	Repo string
 	// OperationID は、反映の操作のために呼んだ契約のコマンドの run の印（反映の操作の内部整数 ID。0028。nil は委譲の段の run）。
 	OperationID *int64
+	// TaskLess が真のとき、タスクに結び付かない run（TaskID が nil）の挿入は、タスクに結び付かない終わっていない run とだけ重ならない
+	// （別のタスクの run とは重ならない。J2 の「足す」の形だけが使う）。
+	TaskLess bool
 }
 
 func (in insertRunInput) valid() bool {
@@ -506,7 +509,9 @@ func insertRun(ctx context.Context, tx *sql.Tx, challengeID int64, in insertRunI
 		// 一意の索引は課題とタスクの組ごと（版 29）なので、タスクに結び付く run とタスクに結び付かない run（課題の単位）が
 		// 同時に終わっていない状態は索引では止まらない。見直し前と同じに、同じ書き込みの中でここで止める。
 		q := `SELECT COUNT(*) FROM run WHERE challenge_id = ? AND result IS NULL`
-		if in.TaskID != nil {
+		// タスクに結び付く run は、タスクに結び付かない終わっていない run とも重ならない（逆向きは TaskLess が開ける。
+		// 「足す」の形の run が回収されずに残ると、そのあいだ他のタスクの run は起動できない）。
+		if in.TaskID != nil || in.TaskLess {
 			q += ` AND task_id IS NULL`
 		}
 		var n int

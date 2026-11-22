@@ -64,7 +64,9 @@ type ListCardResponse struct {
 
 // ShowCardResponse は `GET …/challenges/{id}` の本文。ShowResponse の最上位に card を足した形。
 type ShowCardResponse struct {
+	Additions         []TaskAddition      `json:"additions"`
 	Approvals         []Approval          `json:"approvals"`
+	Budget            Budget              `json:"budget"`
 	Card              Card                `json:"card"`
 	Challenge         ShowChallenge       `json:"challenge"`
 	ConflictFixes     []PassedConflictFix `json:"conflict_fixes"`
@@ -111,7 +113,7 @@ func fromWaitingChallenges(ws []core.WaitingChallenge) []WaitingChallenge {
 func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card, tree core.TreeChallenge) ShowCardResponse {
 	s := FromChallengeDetail(d)
 	return ShowCardResponse{
-		Approvals: s.Approvals, Card: FromCard(card), Challenge: s.Challenge, ConflictFixes: s.ConflictFixes, DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: s.Holds,
+		Additions: s.Additions, Approvals: s.Approvals, Budget: s.Budget, Card: FromCard(card), Challenge: s.Challenge, ConflictFixes: s.ConflictFixes, DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: s.Holds,
 		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
 		SupervisorActions: s.SupervisorActions, SupervisorHandsTaken: s.SupervisorHandsTaken,
 		Tasks:   s.Tasks,

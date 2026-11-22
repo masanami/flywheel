@@ -6,7 +6,10 @@ package core
 //     見直し前の決め方（承認済みの計画の額、無ければサイズごとの既定。`flywheel budget` の上書きを含む）の値として読む。
 //   - `flywheel budget --task` の承認は、そのタスクの記録の値を指定した額で置き換え（足し合わせない）、承認の記録に
 //     task_id を残す。タスクの枠の実効値は、その置き換えを含む記録の値。ほかのタスクの枠は変えない。
-//   - 課題の上限は、取りやめでないタスクの枠の実効値の合計（実装の枠・レビュー対応の枠ごと）。
+//   - 課題の見込みは、取りやめでないタスクの枠の実効値の合計（実装の枠・レビュー対応の枠ごと）。承認の前の計画の見込みも、
+//     同じ関数（sumTaskBudgets）が数える（planVersionBudgets が、計画のタスクを承認の後と同じ決まりでタスクの枠にする）。
+//   - 課題の上限は、見込みとは別の、承認した 1 つの額（challenge.budget_limit_micros。実装の枠とレビュー対応の枠の合計）。
+//     記録の無い課題は、見込みと同じ額として読む。
 //   - 使った額はタスクごと・枠ごとに run.task_id で数える。判断点（枠 judgment）の費用と、反映の依頼の run
 //     （run.reflect = 1）は数えない。タスクが 1 個の計画の版では、見直し前と同じく計画の版で数える
 //     （計画の作り直しをまたいで積み上がる）。
@@ -16,6 +19,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ErrBudgetTaskRequired は、未完のタスクが 2 個以上ある課題への `flywheel budget` が、枠を改めるタスクを指定していない
@@ -155,8 +159,9 @@ func loadTaskBudgets(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDec
 	return out, nil
 }
 
-// sumTaskBudgets は取りやめでないタスクの枠の実効値の合計（課題の上限）を返す。対象のタスクが無い・枠を決められない
-// タスクがあるとき ok=false。
+// sumTaskBudgets は取りやめでないタスクの枠の実効値の合計（課題の見込み）を返す。見込みを計算する唯一の関数で、承認の後
+// （loadTaskBudgets の値）も承認の前（planVersionBudgets の値）もこれで数える。済みのタスクの枠は入れ、取りやめのタスクの枠は
+// 入れない。対象のタスクが無い・枠を決められないタスクがあるとき ok=false（見込みは不明）。
 func sumTaskBudgets(bs []taskBudget) (planBudgets, bool) {
 	var sum planBudgets
 	n := 0
@@ -172,6 +177,115 @@ func sumTaskBudgets(bs []taskBudget) (planBudgets, bool) {
 		n++
 	}
 	return sum, n > 0
+}
+
+// planTaskFrame は計画の出力のタスク 1 件の枠の指定（nil は省いた側）。
+type planTaskFrame struct {
+	Impl, Review *int64
+}
+
+// planVersionBudgets は、承認を待っている（か承認した）計画の版 version の見込みを数えるための、課題のタスクの枠の一覧を返す。
+// bs は loadTaskBudgets の値（課題の全タスク）、tasks は計画の出力のタスク、def は計画の額（resolveSpecBudgets に
+// `flywheel budget` の上書きを当てた値。決められなければ nil）。
+//   - この版の行が、計画のタスクの数だけある（承認の後）ときは、その行の実効値（`flywheel budget --task` の増額を含む）。
+//     行が揃っていない（承認の前）ときは計画のタスク。枠を省いた側は、soleTaskFrames と同じに def で埋め、def が無ければ決められない。
+//     計画がタスクを持たない過去の形は、枠を省いた 1 件として def で埋める。
+//   - ほかの版のタスクは、済み（done）だけを残す（未完のタスクは、この版の承認で取りやめになる）。
+func planVersionBudgets(version int64, tasks []planTaskFrame, def *planBudgets, bs []taskBudget) []taskBudget {
+	var out []taskBudget
+	rows := 0
+	for _, b := range bs {
+		if b.PlanVersion == version {
+			rows++
+		}
+	}
+	if len(tasks) > 0 && rows >= len(tasks) { // 足したタスク（同じ版の行）があれば、行の数は計画のタスクより多い
+		for _, b := range bs {
+			if b.PlanVersion == version {
+				out = append(out, b)
+			}
+		}
+	} else {
+		if len(tasks) == 0 {
+			tasks = []planTaskFrame{{}}
+		}
+		for _, t := range tasks {
+			tb := taskBudget{PlanVersion: version, Status: TaskStatusPending, Known: true}
+			switch {
+			case t.Impl != nil && t.Review != nil:
+				tb.Impl, tb.Review = *t.Impl, *t.Review
+			case def != nil:
+				tb.Impl, tb.Review = soleTaskFrames(t.Impl, t.Review, *def)
+			default:
+				tb.Known = false
+				if t.Impl != nil {
+					tb.Impl = *t.Impl
+				}
+				if t.Review != nil {
+					tb.Review = *t.Review
+				}
+			}
+			out = append(out, tb)
+		}
+	}
+	for _, b := range bs {
+		if b.PlanVersion != version && b.Status == TaskStatusDone {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// challengeBudgetLimit は課題の上限の記録（challenge.budget_limit_micros・budget_limit_reason）を読む。記録が無ければ nil。
+func challengeBudgetLimit(ctx context.Context, tx *sql.Tx, cid int64) (*int64, *string, error) {
+	var limit sql.NullInt64
+	var reason sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT budget_limit_micros, budget_limit_reason FROM challenge WHERE id = ?`, cid).Scan(&limit, &reason); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, err
+	}
+	var l *int64
+	var r *string
+	if limit.Valid {
+		v := limit.Int64
+		l = &v
+	}
+	if reason.Valid {
+		v := reason.String
+		r = &v
+	}
+	return l, r, nil
+}
+
+// effectiveBudgetLimit は課題の上限の額（USD の 100 万分の 1）を返す。記録の無い課題は見込みと同じ額。見込みが不明なら ok=false。
+func effectiveBudgetLimit(estimate planBudgets, estimateKnown bool, recorded *int64) (int64, bool) {
+	if !estimateKnown {
+		return 0, false
+	}
+	if recorded != nil {
+		return *recorded, true
+	}
+	return estimate.Impl + estimate.Review, true
+}
+
+// setChallengeBudgetLimit は課題の上限と理由を書く（nil は NULL に戻す）。課題が無ければ ErrNotFound。
+func setChallengeBudgetLimit(ctx context.Context, tx *sql.Tx, cid int64, limit *int64, reason *string) error {
+	var reasonCol any
+	if reason != nil {
+		reasonCol = *reason
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE challenge SET budget_limit_micros = ?, budget_limit_reason = ? WHERE id = ?`, int64PtrColumn(limit), reasonCol, cid)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // planVersionTaskCount は、課題の計画の版 planVersion のタスクの数（取りやめを含む）。
@@ -238,7 +352,7 @@ func loadTaskBucketSpend(ctx context.Context, tx *sql.Tx, taskID, planVersion in
 	}
 	var decidedAtText string
 	err = tx.QueryRowContext(ctx,
-		`SELECT decided_at FROM approval WHERE challenge_id = ? AND kind = ? AND decision = ?
+		`SELECT decided_at FROM approval WHERE challenge_id = ? AND kind = ? AND decision = ? AND limit_only = 0
 		   AND (task_id = ? OR (task_id IS NULL AND target_version = ?))
 		 ORDER BY id DESC LIMIT 1`,
 		challengeID, string(ApprovalKindBudget), string(ApprovalDecisionApproved), taskID, planVersion).Scan(&decidedAtText)
@@ -318,18 +432,24 @@ type TaskBudget struct {
 	Known bool
 }
 
-// ChallengeBudget は課題の上限（取りやめでないタスクの枠の合計）と、使った額（取りやめのタスクを含む）。
+// ChallengeBudget は課題の見込み（取りやめでないタスクの枠の合計）・承認した上限・使った額（取りやめのタスクを含む）。
 type ChallengeBudget struct {
-	ImplLimitUSD   float64
-	ReviewLimitUSD float64
-	// LimitKnown が false のとき、上限を決められなかった（タスクが無い・枠を決められないタスクがある）。
-	LimitKnown     bool
+	ImplEstimateUSD   float64
+	ReviewEstimateUSD float64
+	// EstimateKnown が false のとき、見込みを決められなかった（タスクが無い・枠を決められないタスクがある）。
+	EstimateKnown bool
+	// LimitUSD は課題の上限（実装の枠とレビュー対応の枠を足した 1 つの額）。記録の無い課題は見込みと同じ額。
+	// LimitKnown が false のとき（見込みが不明のとき）は決められない。
+	LimitUSD   float64
+	LimitKnown bool
+	// LimitReason は上限の理由（計画の承認で記録した値）。記録が無ければ nil。
+	LimitReason    *string
 	ImplSpentUSD   float64
 	ReviewSpentUSD float64
 	Tasks          []TaskBudget
 }
 
-// GetChallengeBudget は課題のタスクごとの枠・使った額と、課題の上限・使った額を返す。agent は枠の記録が空の
+// GetChallengeBudget は課題のタスクごとの枠・使った額と、課題の見込み・上限・使った額を返す。agent は枠の記録が空の
 // 過去のタスクの、見直し前の決め方の値を引くために使う（nil 可）。
 func (s *Store) GetChallengeBudget(ctx context.Context, challengeID string, agent *AgentDeclaration) (*ChallengeBudget, error) {
 	cid, ok := parseChallengeID(challengeID)
@@ -345,9 +465,20 @@ func (s *Store) GetChallengeBudget(ctx context.Context, challengeID string, agen
 		if err != nil {
 			return err
 		}
-		if lim, ok := sumTaskBudgets(bs); ok {
-			out.LimitKnown = true
-			out.ImplLimitUSD, out.ReviewLimitUSD = microsToUSD(lim.Impl), microsToUSD(lim.Review)
+		est, known := sumTaskBudgets(bs)
+		if known {
+			out.EstimateKnown = true
+			out.ImplEstimateUSD, out.ReviewEstimateUSD = microsToUSD(est.Impl), microsToUSD(est.Review)
+		}
+		recorded, reason, err := challengeBudgetLimit(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if lim, ok := effectiveBudgetLimit(est, known, recorded); ok {
+			out.LimitKnown, out.LimitUSD = true, microsToUSD(lim)
+		}
+		if recorded != nil {
+			out.LimitReason = reason
 		}
 		sp, err := loadChallengeSpent(ctx, tx, cid)
 		if err != nil {
@@ -379,6 +510,108 @@ func (s *Store) GetChallengeBudget(ctx context.Context, challengeID string, agen
 		return nil, err
 	}
 	return &out, nil
+}
+
+// loadChallengeDetailBudget は課題の詳細の予算を組み立てる。計画の承認待ちの課題は、承認を待っている版の計画の見込み
+// （loadPlanView の BudgetUSD）で、上限は計画が上限を書くまで見込みと同じ額。それ以外は、タスクの枠の合計（見込み）と、
+// 課題に記録した上限（無ければ見込みと同じ額）。見込みが不明なら、見込みも上限も nil。
+func loadChallengeDetailBudget(ctx context.Context, tx *sql.Tx, cid int64, status Status, agent *AgentDeclaration) (ChallengeDetailBudget, error) {
+	var out ChallengeDetailBudget
+	if status == StatusAwaitingPlanApproval {
+		pv, err := loadPlanView(ctx, tx, cid, agent)
+		if err != nil {
+			return out, err
+		}
+		if pv != nil && pv.BudgetUSD != nil {
+			est, lim, reason := planBudgetLimit(pv)
+			out.EstimateUSD, out.LimitUSD, out.LimitReason = &est, &lim, reason
+		}
+		return out, nil
+	}
+	bs, err := loadTaskBudgets(ctx, tx, cid, agent)
+	if err != nil {
+		return out, err
+	}
+	est, known := sumTaskBudgets(bs)
+	if !known {
+		return out, nil
+	}
+	recorded, reason, err := challengeBudgetLimit(ctx, tx, cid)
+	if err != nil {
+		return out, err
+	}
+	lim, _ := effectiveBudgetLimit(est, known, recorded)
+	e, l := microsToUSD(est.Impl+est.Review), microsToUSD(lim)
+	out.EstimateUSD, out.LimitUSD = &e, &l
+	if recorded != nil {
+		out.LimitReason = reason
+	}
+	return out, nil
+}
+
+// planBudgetLimit は承認を待っている版の計画 pv（BudgetUSD が非 nil）の見込み・上限・上限の理由を返す。上限は、計画が書かなければ見込みと同じ額。
+// 理由は、上限が見込みより大きいときだけ返す（同じ額なら nil）。計画の承認の要約と課題の詳細が同じ規則を使うための 1 か所。
+func planBudgetLimit(pv *PlanView) (est, lim float64, reason *string) {
+	est = *pv.BudgetUSD
+	lim = est
+	if pv.BudgetLimitUSD != nil {
+		lim = *pv.BudgetLimitUSD
+	}
+	if lim > est {
+		reason = pv.BudgetLimitReason
+	}
+	return est, lim, reason
+}
+
+// ActivityActionBudgetLimit は作業ログ（entity=challenge）の action。課題の上限を書いたときに残す（前の額・後の額）。
+const ActivityActionBudgetLimit = "budget_limit"
+
+// setChallengeBudgetLimitChecked は課題 id の上限を limitUSD にし、理由を reason（空は記録しない）にして、作業ログに残す。
+// 上限は見込み以上でなければならない（見込みより小さい額・見込みが不明の課題は ErrValidation）。課題が無ければ ErrNotFound。
+// agent は枠の記録が空の過去のタスクの値を引くための宣言（nil 可）。課題の版・状態は変えない。
+// 本人確認も承認の記録も持たないので公開しない（`--limit` などの承認つきの口が、承認の記録と同じ書き込みで使う）。
+func (s *Store) setChallengeBudgetLimitChecked(ctx context.Context, ch Channel, id string, limitUSD float64, reason string, agent *AgentDeclaration) error {
+	cid, ok := parseChallengeID(id)
+	if !ok {
+		return ErrNotFound
+	}
+	if !(limitUSD > 0) {
+		return fmt.Errorf("%w: budget limit must be greater than 0", ErrValidation)
+	}
+	return s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
+		if _, err := loadChallenge(ctx, tx, cid); err != nil {
+			return err
+		}
+		bs, err := loadTaskBudgets(ctx, tx, cid, agent)
+		if err != nil {
+			return err
+		}
+		est, known := sumTaskBudgets(bs)
+		if !known {
+			return fmt.Errorf("%w: the estimate of %s is unknown; cannot set its budget limit", ErrValidation, id)
+		}
+		limit := usdToMicros(limitUSD)
+		if limit < est.Impl+est.Review {
+			return fmt.Errorf("%w: budget limit %v is smaller than the estimate %v", ErrValidation, limitUSD, microsToUSD(est.Impl+est.Review))
+		}
+		recorded, _, err := challengeBudgetLimit(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		before, _ := effectiveBudgetLimit(est, known, recorded)
+		var reasonPtr *string
+		if strings.TrimSpace(reason) != "" {
+			reasonPtr = &reason
+		}
+		if err := setChallengeBudgetLimit(ctx, tx, cid, &limit, reasonPtr); err != nil {
+			return err
+		}
+		after := map[string]any{"limit_usd": limitUSD}
+		if reasonPtr != nil {
+			after["reason"] = reason
+		}
+		return rec.record("challenge", cid, ActivityActionBudgetLimit, map[string]any{"limit_usd": microsToUSD(before)}, after)
+	})
 }
 
 // resolveBudgetTask は `flywheel budget` が枠を改めるタスクを決める。taskID が空でないときは、その課題の未完のタスクで

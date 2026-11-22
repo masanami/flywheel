@@ -97,9 +97,15 @@ type ApprovalPreview struct {
 	// 端末の approve の要約と --json はどちらも使わない。
 	PlanSummary   *string
 	PlanBudgetUSD *float64
+	// PlanBudgetLimitUSD・PlanBudgetLimitReason は、承認を待っている版の計画の上限（計画が上限を書かなければ見込み PlanBudgetUSD と同じ額。
+	// 見込みが決められなければ nil）と、上限が見込みより大きいときだけの上限の理由（同じ額なら nil）。
+	PlanBudgetLimitUSD    *float64
+	PlanBudgetLimitReason *string
 
 	// Kind == ApprovalKindCompletion のときだけ有効。
 	DoneCriteria string
+	// AddedTasks は、計画の後に足されたタスク（ID の昇順。完了の承認の要約に出す。PrepareApproval でも埋める。計画の承認では空）。
+	AddedTasks []AddedTask
 	// DirectCompletion は、この完了確認待ちが親が直接行った完了の記録（T17）によるときだけ非 nil。
 	// 成果物の参照を完了条件と並べて見せる（完了の検証〈J5〉は通っていない）。
 	DirectCompletion *DirectCompletion
@@ -311,6 +317,10 @@ func (s *Store) prepareApproval(ctx context.Context, id string, agent *AgentDecl
 				if pv != nil {
 					preview.PlanTopics, preview.PlanTasks, preview.PlanUsesIntegration = pv.Topics, pv.Tasks, pv.UsesIntegration
 					preview.PlanTaskPhases, preview.PlanSummary, preview.PlanBudgetUSD = planTaskPhases(pv.Tasks), pv.Summary, pv.BudgetUSD
+					if pv.BudgetUSD != nil {
+						_, lim, reason := planBudgetLimit(pv)
+						preview.PlanBudgetLimitUSD, preview.PlanBudgetLimitReason = &lim, reason
+					}
 				}
 			case errors.Is(err, sql.ErrNoRows):
 				// 計画承認待ちなのに計画行が無い状態は本来到達しない
@@ -327,6 +337,9 @@ func (s *Store) prepareApproval(ctx context.Context, id string, agent *AgentDecl
 		}
 
 		if kind == ApprovalKindCompletion {
+			if preview.AddedTasks, err = listAddedTasks(ctx, tx, cid, ""); err != nil {
+				return err
+			}
 			if withScreen {
 				// 完了承認画面が使う値は、要約と同じ読み取り（同じトランザクション）で読む。
 				// 別の読み取りにすると、間に課題が動いたとき要約と食い違う。
@@ -513,8 +526,8 @@ func (s *Store) PrepareAnswerOption(ctx context.Context, id string, answer strin
 	if option != "" && replan {
 		return nil, fmt.Errorf("%w: --option and --replan cannot be combined", ErrValidation)
 	}
-	if option == "" && strings.TrimSpace(answer) == "" {
-		return nil, ErrValidation
+	if option == "" && strings.TrimSpace(answer) == "" && !replan {
+		return nil, ErrValidation // --replan だけの回答は、保留の選択肢を読んでから断る（選択肢の一覧を誤りの文に出す）
 	}
 
 	cid, ok := parseChallengeID(id)
@@ -1026,6 +1039,9 @@ type AnswerRequest struct {
 	// 保留に無い識別・選択肢を持たない保留への識別・Replan との併用・識別の無い回答を断る印のある保留への識別の無い回答は、
 	// ErrValidation（何も書かない）。
 	Option string
+	// Agent・Conn は、足す依頼の保留で「足す」を選んだとき、保存した出力を検査する宣言（nil なら core が作業ディレクトリの宣言を読む）。
+	Agent *AgentDeclaration
+	Conn  *ConnectorsDeclaration
 }
 
 // ExecuteAnswer は answer（T12）の②（書き込み）。「保留に入る直前の状態」は
@@ -1035,8 +1051,8 @@ type AnswerRequest struct {
 // いない（保留を増減させる操作は必ず課題の版も進めるため）ので、この
 // 再読み込みは Prepare が見たのと同じ行を指す。
 func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attestation) (*Challenge, *Hold, error) {
-	if req.Option == "" && strings.TrimSpace(req.Answer) == "" {
-		return nil, nil, ErrValidation
+	if req.Option == "" && strings.TrimSpace(req.Answer) == "" && !req.Replan {
+		return nil, nil, ErrValidation // --replan だけの回答は、保留の選択肢を読んでから断る（resolveAnswerOption）
 	}
 	if req.Option != "" && req.Replan {
 		return nil, nil, fmt.Errorf("%w: --option and --replan cannot be combined", ErrValidation)
@@ -1052,6 +1068,8 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	var holdID int64
 	var holdReasonValue holdReason
 	var holdTaskID sql.NullInt64
+	// replan は計画を作り直す回答か（--replan、または足す依頼の保留で選んだ「計画を作り直す」）。
+	replan := req.Replan
 
 	resolvePreceding := func(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge) (Status, error) {
 		id, question, fromStatus, raisedAt, err := loadUnansweredHold(ctx, tx, cid)
@@ -1070,7 +1088,8 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		if err != nil {
 			return "", err
 		}
-		if req.Replan {
+		replan = req.Replan || isTaskAdditionReplanChoice(ctx, tx, id, chosenOption)
+		if replan {
 			if err := checkReplanAllowed(ctx, tx, cid); err != nil {
 				return "", err
 			}
@@ -1098,9 +1117,14 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 				return err
 			}
 		}
+		if chosenOption != nil && holdReasonValue == holdReasonTaskAddOverLimit {
+			if err := applyTaskAdditionAnswer(ctx, tc, att, s.answerDecls(req), holdID, *chosenOption); err != nil {
+				return err
+			}
+		}
 		if err := writeHoldAnswer(ctx, tc, holdAnswerWrite{
 			HoldID: holdID, Answer: answerText, By: att.Actor(), Channel: att.Channel(), Verification: att.Verification(),
-			RelaySession: relaySession, RelayQuote: relayQuote, Replan: req.Replan, Option: chosenOption,
+			RelaySession: relaySession, RelayQuote: relayQuote, Replan: replan, Option: chosenOption,
 			Reason: holdReasonValue, TaskID: holdTaskID,
 		}); err != nil {
 			return err
@@ -1114,7 +1138,7 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		if chosenOption != nil {
 			tc.after["answer_option"] = *chosenOption
 		}
-		if req.Replan {
+		if replan {
 			tc.after["replan"] = true
 		}
 		att.addRelayTo(tc.after)
@@ -1129,11 +1153,37 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		ch, ver := string(att.Channel()), string(att.Verification())
 		holdOut.AnsweredChannel, holdOut.AnsweredVerification = &ch, &ver
 		holdOut.RelaySession, holdOut.RelayQuote = att.relayPtrs()
-		holdOut.Replan = req.Replan
+		holdOut.Replan = replan
 		return nil
 	}
 
-	c, err := s.verifiedTransitionReplan(ctx, att, req.ChallengeID, req.ExpectedVersion, OpAnswer, NoStatus, resolvePreceding, req.Replan, apply)
+	p, err := verifiedTransitionParams(att, req.ChallengeID, req.ExpectedVersion, OpAnswer, NoStatus, resolvePreceding, req.Replan, func() bool { return replan })
+	if err != nil {
+		return nil, nil, err
+	}
+	cid, ok := parseChallengeID(req.ChallengeID)
+	if !ok {
+		return nil, nil, ErrNotFound
+	}
+	var c *Challenge
+	err = s.mutateAsRun(ctx, p.actor, p.channel, p.verification, p.runID, func(tx *sql.Tx, rec *activityRecorder) error {
+		// 足す依頼の保留に「足す」で答えるときは、回答を成立させる前に、足した後の見込みを計算し直す。選択肢の説明の額と違えば、
+		// 回答を成立させず、成功の書き込みとして問いを出し直す（エラーで巻き戻さない）。
+		if req.Option == taskAddOptionAdd {
+			reissued, err := s.reissueOverLimitQuestion(ctx, tx, rec, p, cid, req)
+			if err != nil {
+				return err
+			}
+			if reissued {
+				var err error
+				c, holdOut, err = loadReissuedHold(ctx, tx, cid)
+				return err
+			}
+		}
+		var err error
+		c, err = s.transitionInTx(ctx, tx, rec, p, cid, apply)
+		return err
+	})
 	if err != nil {
 		return nil, nil, err
 	}

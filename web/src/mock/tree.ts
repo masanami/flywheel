@@ -290,6 +290,7 @@ export function alphaDetailExtras(id: string): Extras {
     tasks: Array.from({ length: 8 }, (_, i): Task => {
       const tid = `T-${40 + i}`;
       return {
+        added: null,
         budget_impl_usd: 0,
         budget_review_usd: 0,
         artifacts: [],

@@ -63,6 +63,7 @@ const task = (
   id: string,
   title: string,
 ): ShowCardResponse["tasks"][number] => ({
+  added: null,
   body: "",
   budget_impl_usd: 0,
   budget_review_usd: 0,

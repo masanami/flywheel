@@ -28,7 +28,7 @@ type contractReleaseSource struct {
 	Compare UpstreamCompareSource
 	// Supervisor は宣言の supervisor の値（止まり方を渡す保留をスーパーバイザー待ちにするか）。
 	Supervisor bool
-	// Agent は宣言の agent（保留を作るときに宣言の supervisor を見るため。nil は宣言の既定と同じ扱い）。
+	// Agent は宣言の agent（保留を作るときに宣言の supervisor を見るためと、足す依頼の判定〔足せる課題か〕が見込みを読むため。nil は宣言の既定と同じ扱い）。
 	Agent *AgentDeclaration
 }
 
