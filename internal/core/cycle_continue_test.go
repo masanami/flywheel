@@ -37,8 +37,7 @@ func settledFixtureWithLateWork(t *testing.T) *roundsFixture {
 	f.startOut(contractOut(ContractStateRunning, nil, nil))
 	f.reads(contractOut(ContractStateRunning, nil, nil), reviewWaitOut())
 	f.seedLearnAndImprove(t)
-	f.wg.changed = true
-	f.wg.onCommit = func() { mustCreateChallenge(t, f.s, "late-arrival") }
+	f.lateWork(t)
 	return f
 }
 

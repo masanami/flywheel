@@ -84,6 +84,8 @@ func TestRunCycle_Rounds_UnreadableApprovedChecksStall(t *testing.T) {
 	in := f.input(f.invoker(t))
 	in.Checks = &commitChecksFake{fakeRelease: lf.fake, err: errors.New("auth expired")}
 	in.Compare = cmp
+	probe := &continueProbe{}
+	in.Continue = probe.hook(f) // #988 AC-126: stalled で終わったサイクルは、続きを始める処理を呼ばない
 	// 退行したとき（待ちが解けないまま続く）に、タイムアウトまで回り続けず、読みやすい失敗にする。
 	f.onWait = func(ctx context.Context, n int) error {
 		if n > 10 {
@@ -112,5 +114,31 @@ func TestRunCycle_Rounds_UnreadableApprovedChecksStall(t *testing.T) {
 	}
 	if n := countCalls(f.wg.calls, "IsWorkTree"); n != 1 {
 		t.Errorf("backup phase ran %d times, want once", n)
+	}
+
+	// #988 AC-12: end_reason が stalled のサイクルは、学びの段を通っている（学びの段は実行され、対象ごとに J6 を 1 回呼んでいる）。
+	learn := phaseOfResult(t, res, CyclePhaseLearn)
+	if learn.Skipped || len(learn.Items) == 0 || f.judgedCount(JudgmentJ6) != len(learn.Items) {
+		t.Errorf("AC-12: learn phase = %+v, J6 calls = %d, want an executed phase with one J6 call per item", learn, f.judgedCount(JudgmentJ6))
+	}
+	// #988 AC-43: rounds は、通した回りの数とちょうど等しい。進みのあった 1 回目の回り + 進みの無い回り 3 回 = 4（結果にも、ストアの記録にも）。
+	const wantRounds = 1 + cycleStalledRounds
+	if res.Cycle.Rounds != wantRounds || f.lastCycle(t).Rounds != wantRounds {
+		t.Errorf("AC-43: rounds = %d (stored %d), want exactly %d", res.Cycle.Rounds, f.lastCycle(t).Rounds, wantRounds)
+	}
+	// #988 AC-49: 回りをまたいだ release の段の対象の一覧は、回りの数だけの分（回りごとに 1 件）を連結したもので、段ごとに 1 要素のまま。
+	if len(rel.ReleaseItems) != wantRounds {
+		t.Errorf("AC-49: release items = %d, want %d (one per round, concatenated)", len(rel.ReleaseItems), wantRounds)
+	}
+	if len(res.Phases) != 9 {
+		t.Errorf("AC-49: phases = %d, want 9 (one element per phase)", len(res.Phases))
+	}
+	// #988 AC-126: いま始められるものがあっても（stalled の前提）、終わった後に始める処理を呼ばない。
+	work, err := f.s.CountRoundWork(context.Background(), in.AgentDecl, in.ConnDecl)
+	if err != nil || work.Startable < 1 {
+		t.Fatalf("AC-126 premise: startable = %+v err %v, want at least 1", work, err)
+	}
+	if probe.calls != 0 || res.Continued {
+		t.Errorf("AC-126: Continue calls = %d, Continued = %v, want 0/false", probe.calls, res.Continued)
 	}
 }
