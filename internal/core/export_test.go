@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -776,4 +777,52 @@ func TestImport_HoldOptionsColumnsSurviveTheRoundTrip(t *testing.T) {
 	if so != do || sa != da || sr != dr {
 		t.Errorf("after import: %q %q %d, want %q %q %d", do, da, dr, so, sa, sr)
 	}
+}
+
+// 足す依頼の作成・状態の変更の試験用の口（本番の公開 API には置かない。本体は createTaskAdditionTx・setTaskAdditionStateTx）。
+
+// CreateTaskAddition は試験用に、課題 challengeID に、仕様待ち（pending）の足す依頼を 1 件作り、作業ログに残す。
+// 課題が無ければ ErrNotFound。出どころが閉集合の外・出どころのタスクが同じ課題のタスクでない・同じ出どころの expand が既にあるときは
+// ErrValidation。
+func (s *Store) CreateTaskAddition(ctx context.Context, ch Channel, challengeID string, in TaskAdditionInput) (*TaskAddition, error) {
+	cid, ok := parseChallengeID(challengeID)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if in.Origin != TaskAdditionOriginExpand {
+		return nil, fmt.Errorf("%w: unknown task addition origin %q", ErrValidation, in.Origin)
+	}
+	var out *TaskAddition
+	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
+		var err error
+		out, err = createTaskAdditionTx(ctx, tx, rec, cid, in)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetTaskAdditionState は足す依頼 id の状態を to にし、upd の値を同じ書き込みで更新して、作業ログに残す。
+// 閉じる状態（applied・none・declined・superseded）へ動かしたときに decided_at を記録する。
+// 足す依頼が無ければ ErrNotFound、to が閉集合の外なら ErrValidation、閉じた足す依頼の状態を変えようとすれば ErrInvalidTransition。
+func (s *Store) SetTaskAdditionState(ctx context.Context, ch Channel, id string, to TaskAdditionState, upd TaskAdditionUpdate) (*TaskAddition, error) {
+	aid, ok := parseTaskAdditionID(id)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if _, ok := ParseTaskAdditionState(string(to)); !ok {
+		return nil, fmt.Errorf("%w: unknown task addition state %q", ErrValidation, to)
+	}
+	var out *TaskAddition
+	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
+		var err error
+		out, err = setTaskAdditionStateTx(ctx, tx, rec, aid, to, upd)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

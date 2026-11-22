@@ -104,7 +104,7 @@ type TaskAddition struct {
 	TaskIDs []string
 }
 
-// TaskAdditionInput は CreateTaskAddition の入力。状態は仕様待ち（pending）で作る。
+// TaskAdditionInput は createTaskAdditionTx の入力。状態は仕様待ち（pending）で作る。
 type TaskAdditionInput struct {
 	Origin TaskAdditionOrigin
 	// OriginTaskID は出どころのタスク（"T-<n>"。同じ課題のタスク）。
@@ -113,7 +113,7 @@ type TaskAdditionInput struct {
 	Spec *string
 }
 
-// TaskAdditionUpdate は SetTaskAdditionState が、状態と同じ書き込みで更新する値。nil の欄は変えない。
+// TaskAdditionUpdate は setTaskAdditionStateTx が、状態と同じ書き込みで更新する値。nil の欄は変えない。
 type TaskAdditionUpdate struct {
 	Spec          *string
 	TotalAfterUSD *float64
@@ -243,30 +243,7 @@ func listTaskAdditions(ctx context.Context, tx *sql.Tx, cid int64) ([]TaskAdditi
 	return out, nil
 }
 
-// CreateTaskAddition は課題 challengeID に、仕様待ち（pending）の足す依頼を 1 件作り、作業ログに残す。
-// 課題が無ければ ErrNotFound。出どころが閉集合の外・出どころのタスクが同じ課題のタスクでない・同じ出どころの expand が既にあるときは
-// ErrValidation。
-func (s *Store) CreateTaskAddition(ctx context.Context, ch Channel, challengeID string, in TaskAdditionInput) (*TaskAddition, error) {
-	cid, ok := parseChallengeID(challengeID)
-	if !ok {
-		return nil, ErrNotFound
-	}
-	if in.Origin != TaskAdditionOriginExpand {
-		return nil, fmt.Errorf("%w: unknown task addition origin %q", ErrValidation, in.Origin)
-	}
-	var out *TaskAddition
-	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
-		var err error
-		out, err = createTaskAdditionTx(ctx, tx, rec, cid, in)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// createTaskAdditionTx は CreateTaskAddition の書き込み本体（呼び出し側の書き込みトランザクションの中で使う）。
+// createTaskAdditionTx は足す依頼を 1 件作る書き込み本体（呼び出し側の書き込みトランザクションの中で使う）。
 func createTaskAdditionTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64, in TaskAdditionInput) (*TaskAddition, error) {
 	challengeID := formatChallengeID(cid)
 	if _, err := loadChallenge(ctx, tx, cid); err != nil {
@@ -313,30 +290,7 @@ func createTaskAdditionTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder
 	return loadTaskAddition(ctx, tx, id)
 }
 
-// SetTaskAdditionState は足す依頼 id の状態を to にし、upd の値を同じ書き込みで更新して、作業ログに残す。
-// 閉じる状態（applied・none・declined・superseded）へ動かしたときに decided_at を記録する。
-// 足す依頼が無ければ ErrNotFound、to が閉集合の外なら ErrValidation、閉じた足す依頼の状態を変えようとすれば ErrInvalidTransition。
-func (s *Store) SetTaskAdditionState(ctx context.Context, ch Channel, id string, to TaskAdditionState, upd TaskAdditionUpdate) (*TaskAddition, error) {
-	aid, ok := parseTaskAdditionID(id)
-	if !ok {
-		return nil, ErrNotFound
-	}
-	if _, ok := ParseTaskAdditionState(string(to)); !ok {
-		return nil, fmt.Errorf("%w: unknown task addition state %q", ErrValidation, to)
-	}
-	var out *TaskAddition
-	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
-		var err error
-		out, err = setTaskAdditionStateTx(ctx, tx, rec, aid, to, upd)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// setTaskAdditionStateTx は SetTaskAdditionState の書き込み本体（呼び出し側の書き込みトランザクションの中で使う）。
+// setTaskAdditionStateTx は足す依頼の状態を動かす書き込み本体（呼び出し側の書き込みトランザクションの中で使う）。
 func setTaskAdditionStateTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, aid int64, to TaskAdditionState, upd TaskAdditionUpdate) (*TaskAddition, error) {
 	cur, err := loadTaskAddition(ctx, tx, aid)
 	if err != nil {

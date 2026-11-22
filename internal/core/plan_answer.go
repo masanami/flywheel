@@ -414,8 +414,21 @@ func onPlanApproved(ctx context.Context, tc *transitionCtx, att Attestation, pla
 			return err
 		}
 	}
-	// 上限は承認した版の値で置き換える（省いたら NULL。前の版の上限を残さない）。計画の表には持たず、承認した値だけを課題が持つ。
-	if err := setChallengeBudgetLimit(ctx, tc.tx, tc.id, view.BudgetLimitMicros, view.BudgetLimitReason); err != nil {
+	// 上限は承認した版の値で置き換える（省いたら承認の時点の見込み。前の版の上限を残さない）。計画の表には持たず、承認した値だけを課題が持つ。
+	// 計画が上限を省いたら、承認の時点の見込み（課題の詳細と同じ taskBudget の合計）を上限として記録する。理由は無し。
+	// 見込みを決められないとき（枠を決められないタスクがある）は NULL のまま。
+	limit := view.BudgetLimitMicros
+	if limit == nil {
+		bs, err := loadTaskBudgets(ctx, tc.tx, tc.id, agent)
+		if err != nil {
+			return err
+		}
+		if est, known := sumTaskBudgets(bs); known {
+			v := est.Impl + est.Review
+			limit = &v
+		}
+	}
+	if err := setChallengeBudgetLimit(ctx, tc.tx, tc.id, limit, view.BudgetLimitReason); err != nil {
 		return err
 	}
 	// 作り直しの承認では、前の版の見込みに対する足す依頼は意味を失う。閉じていないものを取り替えで閉じる。
