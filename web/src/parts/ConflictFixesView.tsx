@@ -28,7 +28,11 @@ export function ConflictFixesView({
       <ul>
         {fixes.map((f, n) => (
           // run_id が読めない記録は空文字になりうるので、並びの位置を足す
-          <li key={`${n}-${f.run_id}`} data-testid="conflict-fix">
+          <li
+            key={`${n}-${f.run_id}`}
+            className="conflict-fix"
+            data-testid="conflict-fix"
+          >
             {showAt ? (
               <>
                 <time data-testid="conflict-fix-at" dateTime={f.at}>
