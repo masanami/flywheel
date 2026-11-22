@@ -54,6 +54,10 @@ func TestClassifyAutoJ1_HoldsAfterConsecutiveFailuresReachLimit(t *testing.T) {
 	if len(after.Holds) != 1 || !strings.Contains(after.Holds[0].Question, "J1") || !strings.Contains(after.Holds[0].Question, "連続失敗: 2 回") {
 		t.Fatalf("Holds = %+v, want a question naming J1 and the count", after.Holds)
 	}
+	// AC-6: 判断点の連続失敗の上限の保留の止まり方は judgment_failed（スーパーバイザー待ち）。
+	if h := after.Holds[0]; h.StopKind != StopKindJudgmentFailed || h.SupervisorState != SupervisorStatePending {
+		t.Errorf("stop_kind/supervisor_state = %q/%q, want judgment_failed/pending", h.StopKind, h.SupervisorState)
+	}
 }
 
 func TestClassifyAutoJ1_RateLimitedRunsDoNotCountNorBreakStreak(t *testing.T) {

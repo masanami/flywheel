@@ -119,6 +119,11 @@ func overviewText(ov *core.Overview) string {
 	}
 	challengeSection("あなたの承認を待っているもの", approvals)
 	challengeSection("あなたの回答を待っているもの", answers)
+	fmt.Fprintf(&b, "スーパーバイザーが確認中: %d 件\n", len(ov.SupervisorCheckingChallenges))
+	for _, c := range ov.SupervisorCheckingChallenges {
+		label, _ := c.Status.Label()
+		fmt.Fprintf(&b, "  %s\t%s\t%s\n", c.ID, label, c.Title)
+	}
 
 	if other > 0 {
 		fmt.Fprintf(&b, "そのほかの、あなたの操作を待っているもの:\n")

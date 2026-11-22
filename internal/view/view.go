@@ -687,6 +687,10 @@ type ShowResponse struct {
 	SourceBinding      *SourceBinding      `json:"source_binding"`
 	SourceChildren     []SourceChild       `json:"source_children"`
 	Stages             Stages              `json:"stages"`
+	// SupervisorActions は課題の対処の記録（古い順。無ければ []）。
+	SupervisorActions []SupervisorAction `json:"supervisor_actions"`
+	// SupervisorHandsTaken は打った手の件数（手 → 結果が executed の対処の記録の数。failed は入れない。無ければ {}）。
+	SupervisorHandsTaken map[string]int `json:"supervisor_hands_taken"`
 	// Tasks は課題のタスク（ID の昇順。無ければ []）。
 	Tasks []Task `json:"tasks"`
 }
@@ -694,20 +698,22 @@ type ShowResponse struct {
 // FromChallengeDetail は core.ChallengeDetail を ShowResponse へ変換する。
 func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 	return ShowResponse{
-		Approvals:         FromApprovals(d.Approvals),
-		Challenge:         FromShowChallenge(d),
-		ConflictFixes:     FromConflictFixes(d.ConflictFixes),
-		DirectCompletions: FromDirectCompletions(d.DirectCompletions),
-		Followups:         FromFollowups(d.Followups),
-		Holds:             FromHolds(d.Holds),
-		Operations:        FromOperations(d.Operations),
-		Pairs:             FromPairs(core.Pairs(d.Expected, d.Actual)),
-		Plans:             FromPlans(d.Plans),
-		Runs:              FromShowRuns(d.Runs),
-		SourceBinding:     FromSourceBinding(d.SourceBinding),
-		SourceChildren:    FromSourceChildren(d.SourceChildren),
-		Stages:            FromStages(d.StageFields, d.IssuesAnswer),
-		Tasks:             FromTasks(d.Tasks),
+		Approvals:            FromApprovals(d.Approvals),
+		Challenge:            FromShowChallenge(d),
+		ConflictFixes:        FromConflictFixes(d.ConflictFixes),
+		DirectCompletions:    FromDirectCompletions(d.DirectCompletions),
+		Followups:            FromFollowups(d.Followups),
+		Holds:                FromHolds(d.Holds),
+		Operations:           FromOperations(d.Operations),
+		Pairs:                FromPairs(core.Pairs(d.Expected, d.Actual)),
+		Plans:                FromPlans(d.Plans),
+		Runs:                 FromShowRuns(d.Runs),
+		SourceBinding:        FromSourceBinding(d.SourceBinding),
+		SourceChildren:       FromSourceChildren(d.SourceChildren),
+		Stages:               FromStages(d.StageFields, d.IssuesAnswer),
+		SupervisorActions:    FromSupervisorActions(d.SupervisorActions),
+		SupervisorHandsTaken: FromSupervisorHandsTaken(d.SupervisorHandsTaken),
+		Tasks:                FromTasks(d.Tasks),
 	}
 }
 

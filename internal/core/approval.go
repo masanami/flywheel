@@ -140,6 +140,8 @@ type ApprovalPreview struct {
 	OpenFollowups []Followup
 	// ConflictFixes は通したコンフリクトの解消（古い順）。
 	ConflictFixes []ConflictFixPassed
+	// SupervisorHandsTaken は打った手の件数（結果が executed の対処の記録を、手ごとに数えた値。無ければ空の写像）。
+	SupervisorHandsTaken map[SupervisorHand]int
 	// UsesIntegration・IntegrationRef は課題が統合先を使うかと、記録した統合先の識別。
 	UsesIntegration *bool
 	IntegrationRef  *string
@@ -198,6 +200,9 @@ func loadCompletionScreen(ctx context.Context, tx *sql.Tx, cid int64, agent *Age
 	}
 	p.OpenFollowups = fs
 	if p.ConflictFixes, err = loadConflictFixes(ctx, tx, cid); err != nil {
+		return err
+	}
+	if p.SupervisorHandsTaken, err = countExecutedSupervisorHands(ctx, tx, cid); err != nil {
 		return err
 	}
 	if p.UsesIntegration, err = challengeUsesIntegration(ctx, tx, cid); err != nil {

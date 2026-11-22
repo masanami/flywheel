@@ -255,7 +255,7 @@ func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDispla
 			}
 			mapped = true
 			tc.taskID = &tid
-			if err := insertHold(ctx, tc, *v.Question); err != nil {
+			if err := insertHoldStop(ctx, tc, *v.Question, stopHoldOptions(StopKindVerifyUncertain, agent)); err != nil {
 				return err
 			}
 			if err := tc.rec.record("task", tid, ActivityActionTaskVerify, nil, after); err != nil {

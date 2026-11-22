@@ -45,6 +45,10 @@ type Overview struct {
 	// （id 昇順）。人間対応待ちのうち、いま開いている保留の種類が親が直接行うの課題は
 	// ParentAgentChallenges へ分けて、ここには含めない。
 	NeedsHumanChallenges []Challenge
+	// SupervisorCheckingChallenges は、スーパーバイザーが確認中の課題（id 昇順）。人間対応待ちで、いま開いている保留が
+	// すべてスーパーバイザー待ち（supervisor_state が pending）のもの。NeedsHumanChallenges（オーナー待ち）には入れない。
+	// 上げた（escalated）保留・止まり方を渡さずに作った（NULL）保留が 1 つでもある課題は、オーナー待ちのまま。
+	SupervisorCheckingChallenges []Challenge
 	// HoldOptions は人間対応待ちの課題（NeedsHumanChallenges の中）のうち、いま開いている保留が選択肢を持つものの、
 	// その選択肢の並び（キーは課題の ID）。選択肢の無い保留の課題は載らない。`status` のテキストの表示だけが使う（JSON・API の状況には出さない）。
 	HoldOptions map[string][]HoldOption
@@ -414,9 +418,18 @@ func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*O
 		for _, c := range parentAgent {
 			inParentAgent[c.ID] = true
 		}
+		checking, err := listSupervisorCheckingIDs(ctx, tx)
+		if err != nil {
+			return err
+		}
 		result.NeedsHumanChallenges = make([]Challenge, 0, len(humanChallenges))
+		result.SupervisorCheckingChallenges = make([]Challenge, 0)
 		for _, c := range humanChallenges {
-			if !inParentAgent[c.ID] {
+			switch {
+			case inParentAgent[c.ID]:
+			case checking[c.ID]:
+				result.SupervisorCheckingChallenges = append(result.SupervisorCheckingChallenges, c)
+			default:
 				result.NeedsHumanChallenges = append(result.NeedsHumanChallenges, c)
 			}
 		}
@@ -517,6 +530,29 @@ func listOpenHoldOptions(ctx context.Context, tx *sql.Tx) (map[string][]HoldOpti
 		if len(opts) > 0 {
 			out[key] = opts
 		}
+	}
+	return out, rows.Err()
+}
+
+// listSupervisorCheckingIDs は、いま開いている保留がすべてスーパーバイザー待ち（supervisor_state が pending）の、人間対応待ちの課題の ID を返す。
+// pending でない保留（escalated・NULL）が 1 つでも開いている課題は含めない（オーナーの回答を待つ保留があるため）。
+func listSupervisorCheckingIDs(ctx context.Context, tx *sql.Tx) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT c.id FROM challenge c WHERE c.status = ?
+		 AND EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = c.id AND h.answer IS NULL AND h.closed_at IS NULL AND h.supervisor_state = ?)
+		 AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = c.id AND h.answer IS NULL AND h.closed_at IS NULL AND COALESCE(h.supervisor_state, '') <> ?)`,
+		string(StatusAwaitingHuman), string(SupervisorStatePending), string(SupervisorStatePending))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[formatChallengeID(id)] = true
 	}
 	return out, rows.Err()
 }

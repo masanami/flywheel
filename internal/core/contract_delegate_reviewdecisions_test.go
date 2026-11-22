@@ -109,6 +109,7 @@ func TestPollContractRuns_ReworkLimitHoldQuestionAndAnswerIsReturnedByRespond(t 
 	if len(qs) != 1 || !strings.Contains(qs[0], "同じ run へ") || strings.Contains(qs[0], "委譲を起動し直す") {
 		t.Fatalf("hold questions = %q, want the contract run wording", qs)
 	}
+	wantLastHoldStop(t, f.s, "rework_limit/pending") // AC-8: レビュー待ちへの返しの上限
 	f.answerLatestHold(t, f.cid, "OWNER-ANSWER")
 	f.client.resumeOut = contractOut(ContractStateRunning, nil, nil)
 	f.poll(t)

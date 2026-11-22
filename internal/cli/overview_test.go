@@ -18,8 +18,8 @@ func TestRunStatus_EmptyWorkspaceReturnsTheBucketsWithEmptyArrays(t *testing.T) 
 	ws := initializedWorkspace(t)
 
 	doc := runJSON(t, ws, "status")
-	if len(doc) != 9 {
-		t.Errorf("status top-level keys = %d, want 9 (the three M1 buckets, waiting_external, parent_agent, binary_commit, cycle_work, followups and ingestable): %+v", len(doc), doc)
+	if len(doc) != 10 {
+		t.Errorf("status top-level keys = %d, want 10 (the three M1 buckets, waiting_external, parent_agent, supervisor_checking, binary_commit, cycle_work, followups and ingestable): %+v", len(doc), doc)
 	}
 	if pa, ok := doc["parent_agent"].(map[string]any); !ok || len(pa) != 1 {
 		t.Errorf("status[\"parent_agent\"] = %v, want an object with only `challenges`", doc["parent_agent"])
@@ -255,7 +255,7 @@ func TestRunStatus_CycleWorkCountsWhatTheCycleCanAdvance(t *testing.T) {
 		t.Fatal("status has no cycle_work object")
 	}
 	stages, _ := cw["stages"].(map[string]any)
-	if cw["total"] != float64(1) || stages["classify"] != float64(1) || len(stages) != 8 {
-		t.Errorf("cycle_work = %v, want total 1 with classify 1 over 8 stages", cw)
+	if cw["total"] != float64(1) || stages["classify"] != float64(1) || len(stages) != 9 {
+		t.Errorf("cycle_work = %v, want total 1 with classify 1 over 9 stages", cw)
 	}
 }

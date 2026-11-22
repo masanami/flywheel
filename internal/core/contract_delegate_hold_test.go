@@ -94,6 +94,7 @@ func TestPollContractRuns_FailedAndCancelledHoldTheChallengeWithTheSummary(t *te
 			if len(d.Holds) != 1 || !d.Holds[0].Open() || !strings.Contains(d.Holds[0].Question, "要約ABC") {
 				t.Fatalf("holds = %+v, want one open hold quoting the summary", d.Holds)
 			}
+			wantLastHoldStop(t, f.s, "delegate_stopped/pending") // AC-4: 契約の実行が失敗・中止で終わった保留
 			if state, _, _, ended := f.contractRow(t); state != string(st) || !ended {
 				t.Fatalf("contract_run state=%s ended=%v", state, ended)
 			}
@@ -523,6 +524,7 @@ func TestStartContractDelegation_FailureHoldsTheChallengeWithTheFailureKind(t *t
 			if !strings.Contains(q, string(c.want)) || !strings.Contains(q, "追っていない") {
 				t.Fatalf("question = %q, want the failure kind %s and the note about an untracked run", q, c.want)
 			}
+			wantLastHoldStop(t, f.s, "delegate_stopped/pending") // AC-4: 契約の実行の失敗（start）
 			if n := f.count(t, `SELECT COUNT(*) FROM occurrence WHERE kind = 'delegation_failed'`); n != 0 {
 				t.Fatalf("delegation_failed = %d, want 0", n)
 			}
