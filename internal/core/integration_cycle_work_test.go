@@ -11,7 +11,7 @@ func TestStuckPaths_CountCycleWorkCountsAChallengeThatCanStartTheUpRequest(t *te
 	t.Parallel()
 	f, id := newUpFixture(t, upConnectorsJSON())
 	cid, _ := parseChallengeID(id)
-	if ids, err := f.s.reflectCandidates(context.Background(), &cid); err != nil || len(ids) != 1 {
+	if ids, err := f.s.reflectCandidates(context.Background(), &cid, nil); err != nil || len(ids) != 1 {
 		t.Fatalf("precondition: reflect candidates = %v, %v", ids, err)
 	}
 	w, err := f.s.CountCycleWork(context.Background(), f.agent, f.conn)
