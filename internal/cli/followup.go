@@ -175,13 +175,26 @@ func runFollowupDrop(a Args) (any, error) {
 	return textOutput{json: view.FromFollowupList(fs), text: followupIDsText(fs)}, nil
 }
 
-// runFollowupPromote は `flywheel followup promote <ID> [--new-challenge] [--budget-impl-usd <額>] [--budget-review-usd <額>] [--relayed …]` の実装
+// followupPromoteStartsCycle は、上げた後にだけサイクルを始める（--preview は何も書かないので始めない）。
+func followupPromoteStartsCycle(a Args) string {
+	if a.Bools["preview"] {
+		return ""
+	}
+	return core.CycleTriggerFollowupPromote
+}
+
+// runFollowupPromote は `flywheel followup promote <ID> [--preview] [--new-challenge] [--budget-impl-usd <額>] [--budget-review-usd <額>] [--relayed …]` の実装
 // （1 回に 1 件）。上げる先（新しい課題か元の課題のタスクか）は core が決める。
 func runFollowupPromote(a Args) (any, error) {
 	id := a.Positional[0]
-	verifier, err := verifierFor(a)
-	if err != nil {
-		return nil, err
+	preview := a.Bools["preview"]
+	var verifier core.Verifier
+	if !preview { // --preview は本人確認なし（何も書かない）
+		v, err := verifierFor(a)
+		if err != nil {
+			return nil, err
+		}
+		verifier = v
 	}
 	opts := core.FollowupPromoteOptions{NewChallenge: a.Bools["new-challenge"]}
 	if v, ok := a.Values["budget-impl-usd"]; ok {
@@ -206,6 +219,9 @@ func runFollowupPromote(a Args) (any, error) {
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
+	if preview {
+		return textOutput{json: view.FromFollowupPromotePlan(plan), text: followupPromoteSummary(plan)}, nil
+	}
 	if plan.OverLimit() {
 		// 上限を超えるタスクは、本人確認を求める前に断る（上限の引き上げは別の操作）。
 		return nil, NewError(CodeValidationFailed, fmt.Sprintf("足した後の見込み %s USD が上限 %s USD を超えます。--new-challenge で新しい課題に上げるか、枠を小さくしてください",
@@ -227,7 +243,7 @@ func followupPromoteSummary(p *core.FollowupPromotePlan) string {
 	usd := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) + " USD" }
 	var b strings.Builder
 	if p.Dest == core.FollowupPromoteToTask {
-		fmt.Fprintf(&b, "次のフォローアップを、課題 %s のタスクとして上げます（足す依頼を作る）。\n", p.TargetChallengeID)
+		fmt.Fprintf(&b, "次のフォローアップを、課題 %s「%s」のタスクとして上げます（足す依頼を作る）。\n", p.TargetChallengeID, escapeControl(p.TargetChallengeTitle))
 	} else {
 		fmt.Fprintf(&b, "次のフォローアップを新しい課題（未分類）に上げます。\n")
 	}
@@ -235,6 +251,9 @@ func followupPromoteSummary(p *core.FollowupPromotePlan) string {
 	if p.Dest == core.FollowupPromoteToTask {
 		fmt.Fprintf(&b, "足すタスクの枠:   実装 %s・レビュー対応 %s\n", usd(p.BudgetImplUSD), usd(p.BudgetReviewUSD))
 		fmt.Fprintf(&b, "足した後の見込み: %s（上限 %s）\n", usd(p.EstimateAfterUSD), usd(p.LimitUSD))
+		if p.OverLimit() {
+			fmt.Fprintf(&b, "上限を超える額:   %s（上げた後の上限 %s）\n", usd(p.ExceedsByUSD()), usd(p.LimitAfterUSD()))
+		}
 	} else if p.NewChallengeReason != "" {
 		fmt.Fprintf(&b, "タスクにしなかった理由: %s\n", escapeControl(p.NewChallengeReason))
 	}
