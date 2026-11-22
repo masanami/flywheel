@@ -23,14 +23,8 @@ import (
 // 1 周は server の中では走らせず、自分と同じ実行ファイルの `cycle` を別プロセスとして起動する
 // （周の排他・予算・記録は CLI の cycle と同じ経路〔core〕に乗る）。
 
-// cycleLauncher は workspacePath のワークスペースで 1 周を別プロセスとして起動し、周の開始の合図
-// （子の標準出力のうち「を開始した」で終わる行）か子の終了か待ち時間の経過まで待って、周を始めたかを返す。
-// 合図の前に子が終了コード 0 で終わったときは、周を始めていない（false。エラーにしない）。0 以外で終わったとき、
-// または起動できなかったときはエラー（子の終了コードと標準エラーの末尾を含む）。
-type cycleLauncher func(workspacePath string) (started bool, err error)
-
 const (
-	// cycleSignalWait は周の開始の合図を待つ最大の時間（本番の値。execLauncher が使う）。
+	// cycleSignalWait は周の開始の合図を待つ最大の時間（本番の値）。
 	cycleSignalWait = 3 * time.Second
 	// cycleStderrTail はエラーの message に入れる子の標準エラーの末尾の最大バイト数。
 	cycleStderrTail = 2048
@@ -99,23 +93,6 @@ func (w *tailWriter) String() string {
 		b = b[1:]
 	}
 	return string(b)
-}
-
-// execLauncher は executable が返す実行ファイルを `cycle --trigger ui --workspace <path>` で起動する。
-// 子の標準出力・標準エラーは合図か終了までだけ見て、その後は読み捨てる（記録は残さない）。
-// server の終了で子を止めないよう、子は別のセッションにする。合図を待つ時間は cycleSignalWait（本番の口）。
-func execLauncher(executable func() (string, error)) cycleLauncher {
-	return execLauncherWait(executable, cycleSignalWait)
-}
-
-// execLauncherWait は、合図を待つ時間（合図も終了も無いまま「始まった」を返すまでの時間）を渡せる版。
-// 本番は execLauncher を通して cycleSignalWait を使う。合図か子の終了で結果が決まるはずのテストだけが、
-// 時計で結果が決まらないよう、長い値を渡してこの口を直接呼ぶ。
-func execLauncherWait(executable func() (string, error), signalWait time.Duration) cycleLauncher {
-	return func(workspacePath string) (bool, error) {
-		l, err := launchCycle(executable, signalWait, workspacePath, core.CycleTriggerUI)
-		return l.Started, err
-	}
 }
 
 // CycleLaunch は、サイクルを切り離して始める処理の結果。
@@ -236,11 +213,19 @@ func StartCycleAfterOperation(ctx context.Context, st *core.Store, trigger strin
 }
 
 func decideAndStartCycle(ctx context.Context, st *core.Store, trigger string, noCycle bool, start CycleStarter) core.CycleStartReason {
+	reason := decideCycleStart(ctx, st, noCycle)
+	if reason != core.CycleStartStarted {
+		return reason
+	}
+	return startDecidedCycle(st.Workspace(), trigger, start)
+}
+
+// decideCycleStart は、始めるかどうかの判定だけを行う（読み取りだけ。子は起動しない）。始めてよいときは started を返す。
+func decideCycleStart(ctx context.Context, st *core.Store, noCycle bool) core.CycleStartReason {
 	if noCycle {
 		return core.CycleStartDisabled
 	}
-	path := st.Workspace()
-	agent, err := core.CheckDeclarations(path)
+	agent, err := core.CheckDeclarations(st.Workspace())
 	if err != nil {
 		return core.CycleStartUnavailable
 	}
@@ -248,13 +233,15 @@ func decideAndStartCycle(ctx context.Context, st *core.Store, trigger string, no
 	if err != nil {
 		return core.CycleStartUnavailable
 	}
-	if reason != core.CycleStartStarted {
-		return reason
-	}
+	return reason
+}
+
+// startDecidedCycle は、判定が済んだ後に切り離して始める（ストアを使わない。画面の口はワークスペースの借りを返してから呼ぶ）。
+func startDecidedCycle(workspace, trigger string, start CycleStarter) core.CycleStartReason {
 	if start == nil {
 		return core.CycleStartUnavailable
 	}
-	l, err := start(path, trigger)
+	l, err := start(workspace, trigger)
 	switch {
 	case err != nil:
 		return core.CycleStartUnavailable
@@ -266,10 +253,8 @@ func decideAndStartCycle(ctx context.Context, st *core.Store, trigger string, no
 	return core.CycleStartStarted
 }
 
-var defaultLauncher = execLauncher(defaultExecutable)
-
 // cycleHandler は {name} のワークスペースの GET（状態）と POST（1 周の起動）。
-func cycleHandler(fleet *Fleet, launch cycleLauncher) http.HandlerFunc {
+func cycleHandler(fleet *Fleet, launch CycleStarter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -298,9 +283,9 @@ func cycleStatusHandler(fleet *Fleet, w http.ResponseWriter, r *http.Request) {
 }
 
 // cycleStartHandler は、生きているロックがあれば起動せず 409 locked。heartbeat が回収の時間を過ぎた古いロックは走っていない扱いで、
-// 起動した CLI の cycle が回収する。読み取りと子の BeginCycle の間の競合で子が
-// locked で終わることは受け入れる（起動直後の失敗は last_result で見る）。
-func cycleStartHandler(fleet *Fleet, launch cycleLauncher, w http.ResponseWriter, r *http.Request) {
+// 起動した CLI の cycle が回収する（承認などの操作の後にサイクルを始める判定と同じ）。「進むものが無い」の数えは、人が明示して
+// 始める操作なので、CLI の cycle と同じ CountCycleWorkInWorkspace の Total（学び・改修の提案などだけが残るときも始める）。読み取りと子の BeginCycle の間の競合で子が排他で断られたときも 409 locked にする。きっかけは ui のまま。
+func cycleStartHandler(fleet *Fleet, launch CycleStarter, w http.ResponseWriter, r *http.Request) {
 	st, release, le := fleet.Acquire(r.Context(), r.PathValue("name"))
 	if le != nil {
 		writeError(w, le.Status, le.Code, le.Message)
@@ -331,10 +316,14 @@ func cycleStartHandler(fleet *Fleet, launch cycleLauncher, w http.ResponseWriter
 		writeJSON(w, http.StatusOK, view.CycleStarted{Started: false})
 		return
 	}
-	started, err := launch(path)
+	l, err := launch(path, core.CycleTriggerUI)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, CodeInternalError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, view.CycleStarted{Started: started})
+	if l.AlreadyRunning {
+		writeCoreError(w, core.ErrLocked)
+		return
+	}
+	writeJSON(w, http.StatusOK, view.CycleStarted{Started: l.Started})
 }

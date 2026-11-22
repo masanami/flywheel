@@ -81,11 +81,11 @@ func startCycleServer(t *testing.T, exe, ws string) int {
 // startCycleServerWait は、合図を待つ時間を渡して server を立てる。
 func startCycleServerWait(t *testing.T, exe, ws string, signalWait time.Duration) int {
 	t.Helper()
-	return startCycleServerWith(t, ws, execLauncherWait(func() (string, error) { return exe, nil }, signalWait))
+	return startCycleServerWith(t, ws, NewCycleStarterWait(func() (string, error) { return exe, nil }, signalWait))
 }
 
 // startCycleServerWith は、起動の口を渡して server を立てる。
-func startCycleServerWith(t *testing.T, ws string, launch cycleLauncher) int {
+func startCycleServerWith(t *testing.T, ws string, launch CycleStarter) int {
 	t.Helper()
 	ln, err := Listen(0)
 	if err != nil {
@@ -110,7 +110,10 @@ func countingServer(t *testing.T, ws string) (port int, calls *int32) {
 	}
 	calls = new(int32)
 	s := newServerWithLauncher(ln, []core.FleetWorkspace{{Name: "w", Path: ws}}, eventsConfig{},
-		func(string) (bool, error) { atomic.AddInt32(calls, 1); return true, nil })
+		func(string, string) (CycleLaunch, error) {
+			atomic.AddInt32(calls, 1)
+			return CycleLaunch{Started: true}, nil
+		})
 	errc := make(chan error, 1)
 	go func() { errc <- s.Serve() }()
 	t.Cleanup(func() {
@@ -384,7 +387,7 @@ func TestCyclePostExitCode1StderrCases(t *testing.T) {
 func TestCyclePostNoSignalNorExitReturnsStartedAfterThreeSeconds(t *testing.T) {
 	ws := initWorkspaceWithWork(t)
 	exe := scriptExecutable(t, "exec sleep 60\n")
-	port := startCycleServerWith(t, ws, execLauncher(func() (string, error) { return exe, nil }))
+	port := startCycleServerWith(t, ws, NewCycleStarter(func() (string, error) { return exe, nil }))
 	start := time.Now()
 	code, body := apiPost(t, port, cyclePath, "")
 	if code != 200 || strings.TrimSpace(body) != `{"started":true}` {
@@ -396,7 +399,7 @@ func TestCyclePostNoSignalNorExitReturnsStartedAfterThreeSeconds(t *testing.T) {
 	}
 }
 
-// 待ち時間を渡す口（execLauncherWait）は、渡した待ち時間のとおりに待つ。本番の 3 秒より長い値を渡して、
+// 待ち時間を渡す口（NewCycleStarterWait）は、渡した待ち時間のとおりに待つ。本番の 3 秒より長い値を渡して、
 // それより前に返らないことを確かめる（引数を見ずに 3 秒で返ると落ちる。下限だけなので、遅いときも落ちない）。
 func TestCyclePostNoSignalNorExitHonorsThePassedWait(t *testing.T) {
 	const wait = cycleSignalWait + 1500*time.Millisecond
@@ -438,6 +441,45 @@ func TestCyclePostNothingToAdvanceReturnsNotStartedWithoutLaunching(t *testing.T
 	// サイクルの記録は作られない（AC-225）。
 	if n := fmt.Sprint(coretest.QueryRows(t, ws, "SELECT COUNT(*) FROM cycle")[0][0]); n != "0" {
 		t.Errorf("cycle rows = %s, want 0", n)
+	}
+}
+
+// 学びの対象だけが残るとき（回りの終わりの数えでは 0 件、サイクルを回すと進むものの数えでは 1 件以上）も、
+// 人が明示して始める「サイクルを回す」は CLI の cycle と同じ数え（Total）で子を起動する。
+func TestCyclePostOnlyLearnWorkStillLaunches(t *testing.T) {
+	ws := initWorkspaceWithWork(t)
+	if err := os.WriteFile(filepath.Join(ws, ".flywheel", "agent.json"), []byte(`{"version":1,"position_file":"position.md"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "position.md"), []byte("p"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 課題 C-1 を完了にし、原因が未分類の発生を 1 件持たせる（学びの対象）。進められる課題はほかに無い。
+	coretest.SetChallengeStatus(t, ws, 1, "done")
+	coretest.Exec(t, ws, `INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action) VALUES ('2026-01-01T00:00:00Z', 'a', 'cli', 'none', 'challenge', 1, 'x')`)
+	coretest.Exec(t, ws, `INSERT INTO occurrence (challenge_id, kind, activity_id, outcome, source, cause, layer, created_at) VALUES (1, 'completion_rejected', (SELECT MAX(id) FROM activity), 'bad', 'core', NULL, NULL, '2026-01-01T00:00:00Z')`)
+	st, err := core.OpenWorkspace(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := core.CheckDeclarations(ws)
+	if err != nil || agent == nil {
+		_ = st.Close()
+		t.Fatalf("agent = %v err=%v", agent, err)
+	}
+	all, aerr := st.CountCycleWorkInWorkspace(context.Background(), agent)
+	round, rerr := st.CountRoundWorkInWorkspace(context.Background(), agent)
+	_ = st.Close()
+	if aerr != nil || rerr != nil || all.Total == 0 || round.Startable != 0 {
+		t.Fatalf("precondition: total=%+v (%v) startable=%+v (%v)", all, aerr, round, rerr)
+	}
+	port, calls := countingServer(t, ws)
+	code, body := apiPost(t, port, cyclePath, "")
+	if code != 200 || strings.TrimSpace(body) != `{"started":true}` {
+		t.Fatalf("POST = %d %s", code, body)
+	}
+	if n := atomic.LoadInt32(calls); n != 1 {
+		t.Errorf("起動が %d 回呼ばれた, want 1", n)
 	}
 }
 

@@ -794,6 +794,11 @@ export interface CycleStarted {
   started: boolean;
 }
 
+export interface CycleStart {
+  reason: string;
+  started: boolean;
+}
+
 export interface TreeResponse {
   challenges: TreeChallenge[];
   recent_done: TreeChallenge[];
