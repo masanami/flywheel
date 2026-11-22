@@ -171,7 +171,7 @@ export function FollowupsScreen({
                         key={f.id}
                         f={f}
                         promotedLink={
-                          f.promoted_challenge_id
+                          f.promoted_task_id === null && f.promoted_challenge_id
                             ? challengeLink(f.promoted_challenge_id)
                             : null
                         }
@@ -233,6 +233,11 @@ function FollowupRow({
       ) : null}
       {f.status === "dropped" && f.reason ? (
         <p data-testid="followup-reason">理由: {f.reason}</p>
+      ) : null}
+      {f.promoted_task_id ? (
+        <p data-testid="followup-promoted-task">
+          上げた先のタスク: {f.promoted_task_id}
+        </p>
       ) : null}
       {promotedLink ? (
         <p data-testid="followup-promoted">上げた先の課題: {promotedLink}</p>

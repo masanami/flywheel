@@ -366,6 +366,12 @@ func setTaskStatus(ctx context.Context, tx *sql.Tx, rec *activityRecorder, id in
 	if err := rec.record("task", id, "task_status", map[string]any{"status": from}, map[string]any{"status": string(to)}); err != nil {
 		return false, err
 	}
+	if to == TaskStatusDone {
+		// 上げた先がこのタスクのフォローアップは、同じ書き込みで済みにする（タスクの状態を書く共通の所なので、呼び出し元に散らさない）。
+		if err := completeFollowupsPromotedToTask(ctx, tx, rec, id); err != nil {
+			return false, err
+		}
+	}
 	return true, nil
 }
 
