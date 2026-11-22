@@ -16,11 +16,15 @@ type HoldOption struct {
 	Description string `json:"description"`
 }
 
-// HoldOptionsInput は保留を作る入口が受ける選択肢の指定。Options は 0 件以上（件数の決まりは当てない）。
+// HoldOptionsInput は保留を作る入口が受ける、選択肢と止まり方の指定。Options は 0 件以上（件数の決まりは当てない）。
 // ID が空の選択肢には、core が並びの順に o1・o2… を振る。Required は「識別の無い回答を断る」印（S4b の作り手は使わない）。
+// StopKind は止まり方（スーパーバイザーを呼ぶきっかけ。保留を作る呼び出し元が渡す。空は渡さない）、SupervisorEnabled は
+// 宣言の supervisor の値（呼び出し元が渡す）。StopKind があり SupervisorEnabled が真のときだけ、保留はスーパーバイザー待ち（pending）になる。
 type HoldOptionsInput struct {
-	Options  []HoldOption
-	Required bool
+	Options           []HoldOption
+	Required          bool
+	StopKind          StopKind
+	SupervisorEnabled bool
 }
 
 // ErrHoldOptionInvalid は、保留を作る入口が受けた選択肢が誤っている（識別の重なり・形の不正・見出しが空か複数行）ことを示す。

@@ -217,5 +217,8 @@ func AllJudgmentOutputClosedValues() []string {
 	for _, v := range QuestionKindValues {
 		vals = append(vals, string(v))
 	}
+	for _, v := range supervisorHandValues {
+		vals = append(vals, string(v))
+	}
 	return vals
 }

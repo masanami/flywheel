@@ -108,7 +108,7 @@ var defaultSizeBudgetsUSD = SizeBudgetsUSD{
 	L: SizeBudgetPair{Impl: 100, Review: 40},
 }
 
-var defaultJudgmentBudgetUSD = JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5, J6: 2, J8: 5}
+var defaultJudgmentBudgetUSD = JudgmentBudgetUSD{J1: 1, J2: 5, J3: 3, J4: 2, J5: 5, J6: 2, J8: 5, SV: 5}
 
 // SizeBudgetPair はサイズ1段（S・M・L のいずれか）の実装・レビューの予算(USD)。
 type SizeBudgetPair struct {
@@ -123,9 +123,10 @@ type SizeBudgetsUSD struct {
 	L SizeBudgetPair
 }
 
-// JudgmentBudgetUSD は judgment_budget_usd（判断点 J1〜J6・J8 ごとの上限額）。
+// JudgmentBudgetUSD は judgment_budget_usd（判断点 J1〜J6・J8・SV ごとの上限額）。
+// J4 は宣言に書いてあっても読めるが、使わない（子の問いに答える判断点は、S4b-3 でスーパーバイザーの判断点へ移す）。
 type JudgmentBudgetUSD struct {
-	J1, J2, J3, J4, J5, J6, J8 float64
+	J1, J2, J3, J4, J5, J6, J8, SV float64
 }
 
 // AgentTimeoutSec は timeout_sec（判断の呼び出し・委譲の時間の上限、秒）。
@@ -162,6 +163,9 @@ type AgentDeclaration struct {
 	CyclePollIntervalSec int
 	// AutoCycle は auto_cycle（自動でサイクルを始めるか。既定は真）。
 	AutoCycle bool
+	// Supervisor は supervisor（スーパーバイザーの判断点を使うか。既定は真）。偽のとき、保留をスーパーバイザー待ちにしない
+	// （区切り S4a までと同じ動き）。
+	Supervisor bool
 
 	// MemoryDir は memory_dir（記憶の置き場。ワークスペースからの相対パスで、
 	// filepath.Clean 済み。絶対パスとワークスペースの外へ出る値は読み込みで
@@ -205,6 +209,7 @@ func defaultAgentDeclaration() *AgentDeclaration {
 		ImproveThreshold:     defaultImproveThreshold,
 		CyclePollIntervalSec: defaultCyclePollIntervalSec,
 		AutoCycle:            true,
+		Supervisor:           true,
 
 		MemoryDir:        defaultMemoryDir,
 		MemoryWriteLimit: MemoryWriteLimit{Files: defaultMemoryWriteFiles, Bytes: defaultMemoryWriteBytes},
@@ -248,7 +253,7 @@ func LoadAgentDeclaration(base string) (*AgentDeclaration, error) {
 	return decl, nil
 }
 
-// JudgmentBudgetFor は判断点 j（J1〜J6・J8）の1回の呼び出しの上限額
+// JudgmentBudgetFor は判断点 j（J1〜J6・J8・SV）の1回の呼び出しの上限額
 // （judgment_budget_usd.<j>）を返す（#83・§予算ガード「判断の呼び出しの
 // --max-budget-usd は、judgment_budget_usd の値」）。呼び出し元
 // （#84〜#86の判断点の入口）は、この値を RunJudgmentInput.MaxBudgetUSD に
@@ -270,6 +275,8 @@ func (d *AgentDeclaration) JudgmentBudgetFor(j JudgmentPoint) float64 {
 		return d.JudgmentBudgetUSD.J6
 	case JudgmentJ8:
 		return d.JudgmentBudgetUSD.J8
+	case JudgmentSV:
+		return d.JudgmentBudgetUSD.SV
 	default:
 		return 0
 	}
@@ -311,7 +318,7 @@ var agentTopLevelKeys = map[string]bool{
 	"version": true, "position_file": true, "cycle_budget_usd": true,
 	"size_budgets_usd": true, "max_run_budget_usd": true, "judgment_budget_usd": true,
 	"timeout_sec": true, "max_parallel_runs": true, "rework_limit": true, "failure_limit": true, "improve_threshold": true,
-	"cycle_poll_interval_sec": true, "auto_cycle": true,
+	"cycle_poll_interval_sec": true, "auto_cycle": true, "supervisor": true,
 	"memory_dir": true, "memory_write_limit": true,
 	"chat_tools": true, "chat_max_turns": true, "chat_timeout_sec": true, "chat_approvable_operations": true,
 }
@@ -320,7 +327,7 @@ var memoryWriteLimitKeys = map[string]bool{"files": true, "bytes": true}
 
 var sizeBudgetsSizeKeys = map[string]bool{"S": true, "M": true, "L": true}
 var sizeBudgetPairKeys = map[string]bool{"impl": true, "review": true}
-var judgmentBudgetKeys = map[string]bool{"J1": true, "J2": true, "J3": true, "J4": true, "J5": true, "J6": true, "J8": true}
+var judgmentBudgetKeys = map[string]bool{"J1": true, "J2": true, "J3": true, "J4": true, "J5": true, "J6": true, "J8": true, "SV": true}
 var agentTimeoutSecKeys = map[string]bool{"judgment": true, "delegate": true}
 
 // parseAgentDeclaration は data を AgentDeclaration へ変換する。省略された
@@ -452,6 +459,17 @@ func parseAgentDeclaration(data []byte) (*AgentDeclaration, error) {
 		decl.AutoCycle = b
 	} else {
 		decl.AutoCycle = true
+		usedDefault = true
+	}
+
+	if v, ok := raw["supervisor"]; ok {
+		var b bool
+		if isJSONNull(v) || json.Unmarshal(v, &b) != nil {
+			return nil, fmt.Errorf("supervisor: must be a boolean")
+		}
+		decl.Supervisor = b
+	} else {
+		decl.Supervisor = true
 		usedDefault = true
 	}
 
@@ -826,7 +844,7 @@ func parseJudgmentBudgets(raw json.RawMessage) (JudgmentBudgetUSD, bool, error) 
 		key    string
 		target *float64
 	}{
-		{"J1", &result.J1}, {"J2", &result.J2}, {"J3", &result.J3}, {"J4", &result.J4}, {"J5", &result.J5}, {"J6", &result.J6}, {"J8", &result.J8},
+		{"J1", &result.J1}, {"J2", &result.J2}, {"J3", &result.J3}, {"J4", &result.J4}, {"J5", &result.J5}, {"J6", &result.J6}, {"J8", &result.J8}, {"SV", &result.SV},
 	}
 	for _, f := range fields {
 		v, ok := m[f.key]
@@ -912,7 +930,7 @@ func (d *AgentDeclaration) validate() error {
 		val  float64
 	}{
 		{"J1", d.JudgmentBudgetUSD.J1}, {"J2", d.JudgmentBudgetUSD.J2}, {"J3", d.JudgmentBudgetUSD.J3},
-		{"J4", d.JudgmentBudgetUSD.J4}, {"J5", d.JudgmentBudgetUSD.J5}, {"J6", d.JudgmentBudgetUSD.J6}, {"J8", d.JudgmentBudgetUSD.J8},
+		{"J4", d.JudgmentBudgetUSD.J4}, {"J5", d.JudgmentBudgetUSD.J5}, {"J6", d.JudgmentBudgetUSD.J6}, {"J8", d.JudgmentBudgetUSD.J8}, {"SV", d.JudgmentBudgetUSD.SV},
 	}
 	for _, j := range judgments {
 		if j.val <= 0 {

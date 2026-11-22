@@ -28,11 +28,22 @@ const (
 	FollowupStatusDropped FollowupStatus = "dropped"
 )
 
-// FollowupSource はフォローアップの出どころ。S2b で書くのは学び（learn）だけ。
+// FollowupSource はフォローアップの出どころ。
 type FollowupSource string
 
-// FollowupSourceLearn は学びの判断点（J6）が書いたフォローアップ。
-const FollowupSourceLearn FollowupSource = "learn"
+// FollowupSource の値。
+const (
+	// FollowupSourceLearn は学びの判断点（J6）が書いたフォローアップ。
+	FollowupSourceLearn FollowupSource = "learn"
+	// FollowupSourceSupervisor は、スーパーバイザーの手 split_followup が、残った条件から作ったフォローアップ（区切り S4b-2 で値だけを足す。
+	// 書く手は後のタスク）。
+	FollowupSourceSupervisor FollowupSource = "supervisor"
+)
+
+// FollowupSourceValues はフォローアップの出どころの閉集合を定義の順に返す（写し）。
+func FollowupSourceValues() []FollowupSource {
+	return []FollowupSource{FollowupSourceLearn, FollowupSourceSupervisor}
+}
 
 // ParseFollowupStatus は s をフォローアップの状態として解釈する。前後の空白を除いた完全一致のみ受理する。
 func ParseFollowupStatus(s string) (FollowupStatus, bool) {
@@ -86,8 +97,10 @@ type FollowupInput struct {
 	Title string
 	// Detail は説明。空なら NULL で書く。
 	Detail string
-	// Source は出どころ。S2b で受けるのは learn だけ（ほかは ErrValidation）。
+	// Source は出どころ（learn か supervisor。ほかは ErrValidation）。
 	Source FollowupSource
+	// TaskID はぶら下がるタスクの ID（"T-<n>"。followup.task_id）。空は課題にだけぶら下がる（NULL）。形式の不正は ErrValidation。
+	TaskID string
 }
 
 // followupTitleValid は題名が空でなく、1 行であることを返す。
@@ -97,8 +110,16 @@ func followupTitleValid(title string) bool {
 
 // createFollowup は状態 open のフォローアップを 1 行書き、作業ログに create を残す。返すのは内部整数 ID。
 func createFollowup(ctx context.Context, tx *sql.Tx, rec *activityRecorder, in FollowupInput) (int64, error) {
-	if !followupTitleValid(in.Title) || in.Source != FollowupSourceLearn {
+	if !followupTitleValid(in.Title) || (in.Source != FollowupSourceLearn && in.Source != FollowupSourceSupervisor) {
 		return 0, ErrValidation
+	}
+	var taskID any
+	if in.TaskID != "" {
+		id, ok := parseTaskID(in.TaskID)
+		if !ok {
+			return 0, ErrValidation
+		}
+		taskID = id
 	}
 	var challenge any
 	if in.ChallengeID != "" {
@@ -117,8 +138,8 @@ func createFollowup(ctx context.Context, tx *sql.Tx, rec *activityRecorder, in F
 	}
 	nowStr := formatTimestamp(rec.at)
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO followup (challenge_id, title, detail, source, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		challenge, in.Title, detail, string(in.Source), string(FollowupStatusOpen), nowStr, nowStr)
+		`INSERT INTO followup (challenge_id, title, detail, source, status, created_at, updated_at, task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		challenge, in.Title, detail, string(in.Source), string(FollowupStatusOpen), nowStr, nowStr, taskID)
 	if err != nil {
 		return 0, err
 	}
@@ -132,6 +153,9 @@ func createFollowup(ctx context.Context, tx *sql.Tx, rec *activityRecorder, in F
 	}
 	if in.Detail != "" {
 		after["detail"] = in.Detail
+	}
+	if in.TaskID != "" {
+		after["task_id"] = in.TaskID
 	}
 	if err := rec.record("followup", id, "create", nil, after); err != nil {
 		return 0, err

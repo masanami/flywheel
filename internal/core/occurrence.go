@@ -416,10 +416,7 @@ func (s *Store) insertHoldWithOccurrenceFrom(ctx context.Context, tc *transition
 }
 
 func (s *Store) insertHoldWithOccurrenceIDFrom(ctx context.Context, tc *transitionCtx, question string, reason holdReason, cycleID string, from Status, opts HoldOptionsInput) (int64, error) {
-	if from == tc.current.Status && tc.current.Status == StatusAwaitingPlanApproval {
-		// insertHoldKind と同じ検査（計画承認待ちから入れるのは親が直接行う保留だけ）。
-		return 0, ErrInvalidTransition
-	}
+	// 計画承認待ちから入れるのは親が直接行う保留だけ、の検査は、保留を作る入口（insertHoldWithOptions）が行う。
 	holdID, err := insertHoldWithOptions(ctx, tc, question, HoldKindHuman, from, tc.taskID, opts)
 	if err != nil {
 		return 0, err

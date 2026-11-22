@@ -217,6 +217,13 @@ type Hold struct {
 	// Replan は回答に付いた「範囲が変わる」印。真なら、その回答で課題は計画の作り直しへ戻った。
 	Replan bool    `json:"replan"`
 	RunID  *string `json:"run_id"`
+	// StopKind は保留を作る呼び出し元が渡した止まり方（STOP_KIND_CODES の値）。渡されなかった保留と過去の行は null。
+	StopKind *string `json:"stop_kind"`
+	// SupervisorFindings・SupervisorRecommendation は、スーパーバイザーがオーナーへ上げたときに残した、調べたことと推奨。無ければ null。
+	SupervisorFindings       *string `json:"supervisor_findings"`
+	SupervisorRecommendation *string `json:"supervisor_recommendation"`
+	// SupervisorState はスーパーバイザーの処理の状態（SUPERVISOR_STATE_CODES の値）。対象にしない保留と過去の行は null。
+	SupervisorState *string `json:"supervisor_state"`
 	// TaskID は保留が結び付くタスクの ID（"T-<n>"）。課題の単位の保留と過去の行は null。
 	TaskID *string `json:"task_id"`
 }
@@ -243,6 +250,11 @@ func FromHold(h core.Hold) Hold {
 		Replan:               h.Replan,
 		RunID:                h.RunID,
 		TaskID:               h.TaskID,
+
+		StopKind:                 strOrNil(string(h.StopKind)),
+		SupervisorFindings:       strOrNil(h.SupervisorFindings),
+		SupervisorRecommendation: strOrNil(h.SupervisorRecommendation),
+		SupervisorState:          strOrNil(string(h.SupervisorState)),
 	}
 }
 
