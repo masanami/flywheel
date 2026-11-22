@@ -323,9 +323,10 @@ func defaultCommands() []Command {
 			MinPositional: 1,
 			MaxPositional: 1,
 			Flags: append([]flagDef{
-				{Name: "impl-usd", HasValue: true, Required: true},
+				{Name: "impl-usd", HasValue: true},
 				{Name: "review-usd", HasValue: true},
 				{Name: "task", HasValue: true},
+				{Name: "limit", HasValue: true},
 			}, relayedFlags()...),
 			Run: runBudget,
 		},

@@ -48,9 +48,12 @@ type j2RawOutput struct {
 	Size            *string      `json:"size"`
 	BudgetImplUSD   *float64     `json:"budget_impl_usd"`
 	BudgetReviewUSD *float64     `json:"budget_review_usd"`
-	CrossRepo       *bool        `json:"cross_repo"`
-	RelatedRepos    []string     `json:"related_repos"`
-	Question        *string      `json:"question"`
+	// BudgetLimitUSD・BudgetLimitReason は課題の上限（実装の枠とレビュー対応の枠を足した 1 つの額）と、見込みより大きいときの理由（どちらも省ける）。
+	BudgetLimitUSD    *float64 `json:"budget_limit_usd"`
+	BudgetLimitReason *string  `json:"budget_limit_reason"`
+	CrossRepo         *bool    `json:"cross_repo"`
+	RelatedRepos      []string `json:"related_repos"`
+	Question          *string  `json:"question"`
 	// Expected・NonGoals・Figure は段階の欄（無い・null は「書かない」）。
 	Expected []StageExpected `json:"expected"`
 	NonGoals []string        `json:"non_goals"`
@@ -81,6 +84,8 @@ type j2RawTask struct {
 	BudgetReviewUSD *float64 `json:"budget_review_usd"`
 	// Source は対応する取り込み元の子の external_key（任意。無い・null・空は子に対応しない）。
 	Source string `json:"source"`
+	// ExpandAfter は、このタスクの後に、続きのタスクを足すかを決めるか（任意。統合先を使う計画だけ真にできる）。
+	ExpandAfter *bool `json:"expand_after"`
 }
 
 // j2Topic は検査済みの論点 1 つ。
@@ -105,6 +110,8 @@ type j2Task struct {
 	// BudgetImplUSD・BudgetReviewUSD はタスクの枠の出力の値そのもの（無ければ nil）。
 	BudgetImplUSD   *float64
 	BudgetReviewUSD *float64
+	// ExpandAfter は続きのタスクを足すかを決めるタスクか（出力の値。無い・null は偽）。
+	ExpandAfter bool
 }
 
 // j2ValidatedOutput は core の閉集合・必須の組・宣言との突き合わせを通った J2 の
@@ -128,6 +135,9 @@ type j2ValidatedOutput struct {
 	// （§J2・決定 M3P22。人は計画の承認でこの額を承認する）。
 	ResolvedImplUSD   float64
 	ResolvedReviewUSD float64
+	// BudgetLimitUSD・BudgetLimitReason は出力の上限と理由（省いたら nil。理由は空白を除いた値で、無い・空白だけは nil）。
+	BudgetLimitUSD    *float64
+	BudgetLimitReason *string
 	CrossRepo         bool
 	RelatedRepos      []string
 	Question          *string
@@ -177,6 +187,12 @@ type j2ValidationContext struct {
 	HasDoneTasks bool
 	// DoneRepos は課題の済みのタスクのリポジトリ（重複なし）。統合先を使う計画のタスクのリポジトリは、これと合わせて 1 つでなければ不正。
 	DoneRepos []string
+	// KeptBudgets は課題の済み（done）のタスクの枠の実効値（loadTaskBudgets の値のうち済みのもの）。計画の見込みに含まれる
+	// 「残る済みのタスク」で、上限の検査が見込みを数えるのに使う（計画の承認で取りやめにならないのは済みのタスクだけ）。
+	KeptBudgets []taskBudget
+	// CheckLimit が真のとき、上限を見込みと比べる（J2 の出力の確定だけが立てる）。偽のとき（承認済みの計画を委譲の段で読み直すとき）は、
+	// 上限の額と理由の形だけを検査する。見込みは承認の後に動きうる（宣言の既定・済みのタスク）うえ、読み直しは済みのタスクの枠を持たない。
+	CheckLimit bool
 }
 
 // j2OutputSchema は J2 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -250,6 +266,7 @@ func j2OutputSchema() []byte {
 
 				"budget_impl_usd":   nullableNumber,
 				"budget_review_usd": nullableNumber,
+				"expand_after":      map[string]any{"type": []string{"boolean", "null"}},
 			},
 			"required":             []string{"key", "title", "body", "done_criteria", "non_goals", "depends_on", "repo", "operation"},
 			"additionalProperties": false,
@@ -278,22 +295,24 @@ func j2OutputSchema() []byte {
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"verdict":           map[string]any{"type": "string", "enum": verdicts},
-			"summary":           nullableString,
-			"topics":            topicsSchema,
-			"done_criteria":     nullableString,
-			"expected":          expectedSchema,
-			"non_goals":         nonGoalsSchema,
-			"figure":            nullableString,
-			"depends_on":        stringArray,
-			"tasks":             tasksSchema,
-			"uses_integration":  map[string]any{"type": []string{"boolean", "null"}},
-			"size":              map[string]any{"type": []string{"string", "null"}, "enum": sizes},
-			"budget_impl_usd":   nullableNumber,
-			"budget_review_usd": nullableNumber,
-			"cross_repo":        map[string]any{"type": []string{"boolean", "null"}},
-			"related_repos":     stringArray,
-			"question":          nullableString,
+			"verdict":             map[string]any{"type": "string", "enum": verdicts},
+			"summary":             nullableString,
+			"topics":              topicsSchema,
+			"done_criteria":       nullableString,
+			"expected":            expectedSchema,
+			"non_goals":           nonGoalsSchema,
+			"figure":              nullableString,
+			"depends_on":          stringArray,
+			"tasks":               tasksSchema,
+			"uses_integration":    map[string]any{"type": []string{"boolean", "null"}},
+			"size":                map[string]any{"type": []string{"string", "null"}, "enum": sizes},
+			"budget_impl_usd":     nullableNumber,
+			"budget_review_usd":   nullableNumber,
+			"budget_limit_usd":    nullableNumber,
+			"budget_limit_reason": nullableString,
+			"cross_repo":          map[string]any{"type": []string{"boolean", "null"}},
+			"related_repos":       stringArray,
+			"question":            nullableString,
 		},
 		"required":             []string{"verdict"},
 		"additionalProperties": false,
@@ -503,6 +522,14 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 			return nil, false
 		}
 	}
+	// expand_after は統合先を使う計画のタスクだけが真にできる（続きのタスクは統合先へ入る）。
+	if !*raw.UsesIntegration {
+		for _, t := range tasks {
+			if t.ExpandAfter {
+				return nil, false
+			}
+		}
+	}
 	topics, ok := validateJ2Topics(raw.Topics)
 	if !ok {
 		return nil, false
@@ -529,6 +556,11 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 	}
 	// タスクが全部枠を持つ計画では、計画の値（規模の既定）は読まない。1 回の実行の上限額との比べはタスクの枠だけにする。
 	if !allTasksHaveBudgets(tasks) && impl > vc.Agent.MaxRunBudgetUSD {
+		return nil, false
+	}
+
+	limitUSD, limitReason, ok := validateJ2BudgetLimit(raw, tasks, impl, review, vc)
+	if !ok {
 		return nil, false
 	}
 
@@ -569,6 +601,8 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 		BudgetReviewUSD:   raw.BudgetReviewUSD,
 		ResolvedImplUSD:   impl,
 		ResolvedReviewUSD: review,
+		BudgetLimitUSD:    limitUSD,
+		BudgetLimitReason: limitReason,
 		RelatedRepos:      raw.RelatedRepos,
 		Expected:          expected,
 		NonGoals:          nonGoals,
@@ -632,47 +666,98 @@ func validateJ2Tasks(in []j2RawTask, vc j2ValidationContext) ([]j2Task, bool) {
 	}
 	out := make([]j2Task, 0, len(in))
 	for _, t := range in {
-		repo, connector := vc.Conn.findConnectorRepo(t.Repo)
-		if repo == nil || connector == nil {
+		jt, ok := validateJ2TaskFields(t, vc, len(in) >= 2)
+		if !ok {
 			return nil, false
 		}
-		var op *ConnectorOperation
-		for i := range connector.Operations {
-			if connector.Operations[i].ID == t.Operation {
-				op = &connector.Operations[i]
-				break
-			}
-		}
-		if op == nil {
-			return nil, false
-		}
-		// 起動できる操作だけを選べる。委譲の起動（StartContractDelegation）も同じ関数で検査する。
-		if checkOperationLaunchable(connector, op, vc.HasSource) != nil {
-			return nil, false
-		}
-		nonGoals, err := NormalizeNonGoals(t.NonGoals)
-		if err != nil {
-			return nil, false
-		}
-		// タスクの枠は、書いたら正で、実装の枠は 1 回の実行の上限額以下。タスクが 2 個以上の計画では、両方を必ず書く。
-		for _, b := range []*float64{t.BudgetImplUSD, t.BudgetReviewUSD} {
-			if b != nil && !validBudgetAmount(*b) {
-				return nil, false
-			}
-		}
-		if t.BudgetImplUSD != nil && vc.Agent != nil && *t.BudgetImplUSD > vc.Agent.MaxRunBudgetUSD {
-			return nil, false
-		}
-		if len(in) >= 2 && (t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil) {
-			return nil, false
-		}
-		out = append(out, j2Task{
-			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria,
-			NonGoals: nonGoals, DependsOn: t.DependsOn, Repo: t.Repo, Operation: t.Operation, Source: t.Source,
-			BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD,
-		})
+		out = append(out, jt)
 	}
 	return out, true
+}
+
+// validateJ2TaskFields はタスク 1 件の、対象リポジトリ・操作・取りやめでない文字列・枠の検査を行う（計画のタスクと、足すタスクで共通）。
+// requireBudgets が真のとき、実装の枠とレビュー対応の枠の両方を必ず書く。
+func validateJ2TaskFields(t j2RawTask, vc j2ValidationContext, requireBudgets bool) (j2Task, bool) {
+	repo, connector := vc.Conn.findConnectorRepo(t.Repo)
+	if repo == nil || connector == nil {
+		return j2Task{}, false
+	}
+	var op *ConnectorOperation
+	for i := range connector.Operations {
+		if connector.Operations[i].ID == t.Operation {
+			op = &connector.Operations[i]
+			break
+		}
+	}
+	if op == nil {
+		return j2Task{}, false
+	}
+	// 起動できる操作だけを選べる。委譲の起動（StartContractDelegation）も同じ関数で検査する。
+	if checkOperationLaunchable(connector, op, vc.HasSource) != nil {
+		return j2Task{}, false
+	}
+	nonGoals, err := NormalizeNonGoals(t.NonGoals)
+	if err != nil {
+		return j2Task{}, false
+	}
+	// タスクの枠は、書いたら正で、実装の枠は 1 回の実行の上限額以下。タスクが 2 個以上の計画では、両方を必ず書く。
+	for _, b := range []*float64{t.BudgetImplUSD, t.BudgetReviewUSD} {
+		if b != nil && !validBudgetAmount(*b) {
+			return j2Task{}, false
+		}
+	}
+	if t.BudgetImplUSD != nil && vc.Agent != nil && *t.BudgetImplUSD > vc.Agent.MaxRunBudgetUSD {
+		return j2Task{}, false
+	}
+	if requireBudgets && (t.BudgetImplUSD == nil || t.BudgetReviewUSD == nil) {
+		return j2Task{}, false
+	}
+	return j2Task{
+		Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria,
+		NonGoals: nonGoals, DependsOn: t.DependsOn, Repo: t.Repo, Operation: t.Operation, Source: t.Source,
+		BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD,
+		ExpandAfter: t.ExpandAfter != nil && *t.ExpandAfter,
+	}, true
+}
+
+// validateJ2BudgetLimit は計画の上限（budget_limit_usd）と理由（budget_limit_reason）を検査する。省いた上限は nil（見込みと同じ額）。
+// 上限は、見込み以上でなければならず、見込みより大きいときは空白だけでない理由が要る。見込みは、承認の後の課題の見込みと同じ関数
+// （planVersionBudgets・sumTaskBudgets）で数える: この計画のタスクの枠（無い枠は計画の額 impl・review で埋める）に、
+// 残る済みのタスクの枠（vc.KeptBudgets）を足した合計。見込みを決められないときは見込みとの比べをしない。
+// 返す理由は空白を除いた値（上限が無い・理由が空白だけなら nil）。
+func validateJ2BudgetLimit(raw j2RawOutput, tasks []j2Task, impl, review float64, vc j2ValidationContext) (*float64, *string, bool) {
+	if raw.BudgetLimitUSD == nil {
+		return nil, nil, true
+	}
+	if !validBudgetAmount(*raw.BudgetLimitUSD) {
+		return nil, nil, false
+	}
+	var reason *string
+	if raw.BudgetLimitReason != nil {
+		if r := strings.TrimSpace(*raw.BudgetLimitReason); r != "" {
+			if checkText("budget_limit_reason", r, MaxStageRunes) != nil {
+				return nil, nil, false
+			}
+			reason = &r
+		}
+	}
+	if !vc.CheckLimit {
+		return raw.BudgetLimitUSD, reason, true
+	}
+	frames := make([]planTaskFrame, 0, len(tasks))
+	for _, t := range tasks {
+		frames = append(frames, planTaskFrame{Impl: taskBudgetMicros(t.BudgetImplUSD), Review: taskBudgetMicros(t.BudgetReviewUSD)})
+	}
+	// 計画の版はまだ無いので、どの行にも当たらない 0 を渡す（済みのタスクは版が違うものとして残り、計画のタスクが数えられる）。
+	def := planBudgets{Impl: usdToMicros(impl), Review: usdToMicros(review)}
+	if est, known := sumTaskBudgets(planVersionBudgets(0, frames, &def, vc.KeptBudgets)); known {
+		limit := usdToMicros(*raw.BudgetLimitUSD)
+		total := est.Impl + est.Review
+		if limit < total || (limit > total && reason == nil) {
+			return nil, nil, false
+		}
+	}
+	return raw.BudgetLimitUSD, reason, true
 }
 
 // validateJ2Topics は plan の論点を検査する（0〜5 件。題名・どう決めたかは空にできない。問いは
@@ -905,6 +990,8 @@ type j2Prepared struct {
 	HasDoneTasks bool
 	// DoneRepos は課題の済みのタスクのリポジトリ（重複なし。出力の検査に使う）。
 	DoneRepos []string
+	// KeptBudgets は課題の済みのタスクの枠の実効値（上限の検査が見込みを数えるのに使う）。
+	KeptBudgets []taskBudget
 	// Read が非 nil のときだけ、計画を登録した後に読んだ記録を付けてよい
 	// （取り込み元の対応があり、最新のコメントをすべて入力へ含めた場合）。値は
 	// J2 の直前の取得で得たコメント数と更新日時（ストアの観測値ではない）。
@@ -942,10 +1029,20 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	var completionRejections []CompletionRejection
 	var planAnswersText string
 	var doneTasks []Task
+	var keptBudgets []taskBudget
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		all, err := listTasks(ctx, tx, cid)
 		if err != nil {
 			return err
+		}
+		bs, err := loadTaskBudgets(ctx, tx, cid, in.AgentDecl)
+		if err != nil {
+			return err
+		}
+		for _, b := range bs {
+			if b.Status == TaskStatusDone {
+				keptBudgets = append(keptBudgets, b)
+			}
 		}
 		// 済みのタスクは、統合先を使う課題のものだけを扱う（統合先を使わない課題の動きは変えない）。
 		if integ, err := challengeUsesIntegration(ctx, tx, cid); err != nil {
@@ -1007,7 +1104,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		return nil, nil, fmt.Errorf("%w: read position_file %q: %w", ErrConfigInvalid, in.AgentDecl.PositionFile, err)
 	}
 
-	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0}
+	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0, KeptBudgets: keptBudgets}
 	seenDoneRepo := map[string]bool{}
 	for _, t := range doneTasks {
 		if !seenDoneRepo[t.Repo] {
@@ -1736,7 +1833,7 @@ func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
 		fin, err := s.finalizeJ2Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, j2Finalize{
-			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos},
+			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, CheckLimit: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos, KeptBudgets: prepared.KeptBudgets},
 			Read:       prepared.Read,
 		})
 		if err != nil {

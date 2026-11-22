@@ -32,7 +32,7 @@ export const NO_QUESTIONS_TEXT = "問いはありません。";
 export const BUDGET_UNSET_TEXT = "未設定";
 
 // 計画の承認の画面。承認の要約の API の応答から、計画の中身（方針・完了したら見えるもの・やらないこと・
-// ツリー・問いと推奨・予算の上限・統合先）を出す。区分（phase）は応答の値をそのまま出し、画面では導かない。
+// ツリー・問いと推奨・予算の見込みと上限・統合先）を出す。区分（phase）は応答の値をそのまま出し、画面では導かない。
 // 画面のボタンで受けるのは「この計画を承認する」と、承認の後の「サイクルを回す」だけ。
 export function PlanApprovalScreen({
   live,
@@ -250,12 +250,26 @@ function PlanView({
       <h2 id="screen-title">計画の承認: {summary.title}</h2>
       {plan && (
         <dl className="plan-meta">
-          <dt>予算の上限</dt>
+          <dt>見込み</dt>
           <dd data-testid="plan-budget">
             {plan.budget_usd !== null
               ? `${usd(plan.budget_usd)} USD`
               : BUDGET_UNSET_TEXT}
           </dd>
+          <dt>上限</dt>
+          <dd data-testid="plan-budget-limit">
+            {plan.budget_limit_usd !== null
+              ? `${usd(plan.budget_limit_usd)} USD`
+              : BUDGET_UNSET_TEXT}
+          </dd>
+          {plan.budget_limit_reason !== null && (
+            <>
+              <dt>上限の理由</dt>
+              <dd data-testid="plan-budget-limit-reason">
+                {plan.budget_limit_reason}
+              </dd>
+            </>
+          )}
           {plan.uses_integration !== null && (
             <>
               <dt>統合先</dt>

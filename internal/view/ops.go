@@ -359,12 +359,14 @@ type Cycle struct {
 // CycleResponse は `cycle` の成功の形。
 // 周を始めなかったとき（進められるものが無い）は、started が false・not_started_reason が理由・cycle が null・phases が空。
 type CycleResponse struct {
-	ConfigDefaultsUsed []string `json:"config_defaults_used"`
-	Cycle              *Cycle   `json:"cycle"`
-	NotStartedReason   *string  `json:"not_started_reason"`
-	Phases             []any    `json:"phases"`
-	RateLimited        bool     `json:"rate_limited"`
-	Started            bool     `json:"started"`
+	// AddedTasks はこの周で足したタスク（課題・題名・出どころ。無ければ []）。周を始めなかったときも []。
+	AddedTasks         []AddedTask `json:"added_tasks"`
+	ConfigDefaultsUsed []string    `json:"config_defaults_used"`
+	Cycle              *Cycle      `json:"cycle"`
+	NotStartedReason   *string     `json:"not_started_reason"`
+	Phases             []any       `json:"phases"`
+	RateLimited        bool        `json:"rate_limited"`
+	Started            bool        `json:"started"`
 }
 
 // FromCycleNotStarted は、周を始めなかった（サイクルを回すと進むものが無い）ときの CycleResponse。
@@ -373,6 +375,7 @@ func FromCycleNotStarted(defaultsUsed []string, reason string) CycleResponse {
 		defaultsUsed = []string{}
 	}
 	return CycleResponse{
+		AddedTasks:         []AddedTask{},
 		ConfigDefaultsUsed: defaultsUsed,
 		NotStartedReason:   &reason,
 		Phases:             []any{},
@@ -387,6 +390,7 @@ func FromCycleRunResult(res *core.CycleRunResult) CycleResponse {
 		phases = append(phases, FromCyclePhase(p))
 	}
 	return CycleResponse{
+		AddedTasks:         FromAddedTasks(res.AddedTasks),
 		ConfigDefaultsUsed: res.ConfigDefaultsUsed,
 		Started:            true,
 		Cycle: &Cycle{

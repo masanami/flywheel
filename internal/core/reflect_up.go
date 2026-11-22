@@ -5,7 +5,8 @@ package core
 //
 //   - 始める（startIntegrationReflects）: 統合先を使う、着手中の課題で、未着手・着手中・検証中のタスクが無く、済みのタスクが 1 個以上あり、
 //     終わっていない契約の実行が無いとき、commands.reflect を、{artifact_ref} に課題に記録した統合先の識別を入れて呼ぶ。
-//     契約の実行は kind が reflect、task_id と operation_id が NULL。
+//     契約の実行は kind が reflect、task_id と operation_id が NULL。閉じていない足す依頼がある課題、足せる課題の済みの expand_after の
+//     タスクで足す依頼がまだ無いものがある課題は、始めず、検証中へも進めない（challengeAwaitsAddition）。
 //   - レビュー待ちを受け取る（checkReflectPRs・submitReflectReview）: 反映先宛ての PR がちょうど 1 つなら、その PR の反映の操作を作って
 //     契約の実行へ結び付け、課題を検証中へ進める（タスクは済みのまま）。
 //   - 終わりの状態を読んだ（holdReflectEnded）: 反映の操作を閉じ、契約の実行を終わった記録にし、理由 reflect_failed で保留にする（1 つの遷移）。
@@ -215,13 +216,30 @@ func (s *Store) checkReflectPRs(ctx context.Context, rep *ContractRunReport, rs 
 // submitReflectReview は課題が着手中なら、上げる依頼のレビュー待ちの PR の反映の操作を作り（作り方はタスクの実行のレビュー待ちと同じ）、
 // 契約の実行の operation_id へ記録し、成果物を取り込んで課題を検証中へ進める（タスクは済みのまま）。
 func (s *Store) submitReflectReview(ctx context.Context, rep *ContractRunReport, rs *contractReleaseSource, pr UpstreamPullRequest) error {
-	if err := s.registerContractReleases(ctx, rs, rep); err != nil {
-		return err
-	}
 	runInt, ok := parseRunID(rep.RunID)
 	cid, cok := parseChallengeID(rep.ChallengeID)
 	if !ok || !cok {
 		return nil
+	}
+	// 閉じていない足す依頼がある（または足す依頼がまだ無い済みの expand_after のタスクがある）課題は、検証中へ進めない。
+	// 反映の操作も作らず、契約の実行は waiting のまま開けておく（足す依頼が閉じた後の状態の確認が、同じレビュー待ちを読み直して進める）。
+	var agent *AgentDeclaration
+	if rs != nil {
+		agent = rs.Agent
+	}
+	var waits bool
+	if err := classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
+		var err error
+		waits, err = challengeAwaitsAddition(ctx, tx, cid, agent)
+		return err
+	})); err != nil {
+		return err
+	}
+	if waits {
+		return nil
+	}
+	if err := s.registerContractReleases(ctx, rs, rep); err != nil {
+		return err
 	}
 	noRelease := false
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpSubmit,
@@ -283,8 +301,10 @@ func (s *Store) holdChallengeForReflect(ctx context.Context, challengeID, questi
 
 // reflectCandidates は、上げる依頼を始める条件に当たる課題の内部整数 ID（優先度→ID の昇順）。only が非 nil ならその課題だけ。
 // 条件: 統合先を使う・着手中で、未着手・着手中・検証中のタスクが 0 個、済みのタスクが 1 個以上（取りやめは数えない）、終わっていない契約の実行が無い。
+// 閉じていない足す依頼（仕様待ち・オーナー待ち）、または足せる課題の、済みの expand_after のタスクで足す依頼がまだ無いものがあれば、始めない
+// （challengeAwaitsAddition。足す依頼が「足さない」などで閉じていれば始める）。
 // 保留中の課題は着手中でないので、対象にならない。
-func (s *Store) reflectCandidates(ctx context.Context, only *int64) ([]int64, error) {
+func (s *Store) reflectCandidates(ctx context.Context, only *int64, agent *AgentDeclaration) ([]int64, error) {
 	var out []int64
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		chs, err := loadChallengesByStatusSorted(ctx, tx, StatusInProgress)
@@ -319,6 +339,11 @@ func (s *Store) reflectCandidates(ctx context.Context, only *int64) ([]int64, er
 			if unfinished > 0 || done == 0 {
 				continue
 			}
+			if waits, err := challengeAwaitsAddition(ctx, tx, cid, agent); err != nil {
+				return err
+			} else if waits {
+				continue
+			}
 			var open int
 			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, cid).Scan(&open); err != nil {
 				return err
@@ -347,7 +372,7 @@ func (s *Store) startIntegrationReflects(ctx context.Context, in DelegateInput) 
 		}
 		only = &n
 	}
-	ids, err := s.reflectCandidates(ctx, only)
+	ids, err := s.reflectCandidates(ctx, only, in.AgentDecl)
 	if err != nil {
 		return nil, false, err
 	}
@@ -490,7 +515,7 @@ func (s *Store) startIntegrationReflect(ctx context.Context, in DelegateInput, c
 		_, err := s.holdContractWithReason(ctx, rep.RunID, challengeID, reflectFailedQuestion(detail), holdReasonReflectFailed)
 		return nil, nil, err
 	}
-	rs := &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Checks: in.Checks, Compare: in.Compare}
+	rs := &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Checks: in.Checks, Compare: in.Compare, Agent: in.AgentDecl}
 	if err := s.afterContractRead(ctx, rep, connector, rs); err != nil {
 		return nil, nil, err
 	}

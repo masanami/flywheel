@@ -104,6 +104,8 @@ type runTransitionParams struct {
 	attested bool
 	// replan は回答に「範囲が変わる」印が付いたこと（T12 だけ）。真のとき、遷移先は IfReplan の分類済になる。
 	replan bool
+	// replanResolved は、preceding の解決の後に読む replan（選んだ選択肢が計画の作り直しを表すとき、解決の中で決まる）。nil か偽なら replan だけで決まる。
+	replanResolved func() bool
 	// att は本人確認つきの遷移（attested）の Attestation。経路 chat の印の検査と種類の絞りに使う。
 	att Attestation
 }
@@ -132,182 +134,200 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 
 	var result *Challenge
 	err := s.mutateAsRun(ctx, p.actor, p.channel, p.verification, p.runID, func(tx *sql.Tx, rec *activityRecorder) error {
-		current, err := loadChallenge(ctx, tx, cid)
-		if err != nil {
-			return err
-		}
-		if p.expectedVersion != nil && current.Version != *p.expectedVersion {
-			return ErrConflict
-		}
-		if IsTerminal(Table, StatusVocabulary, current.Status) {
-			return ErrTerminalState
-		}
-		tr, ok := Lookup(current.Status, p.op)
-		if !ok {
-			return ErrInvalidTransition
-		}
-		// 遷移表の RequiresVerification と、この呼び出しが本人確認つき
-		// （expectedVersion 非 nil）かどうかは常に一致していなければならない
-		// （self-review 指摘: これが無いと、verifiedTransition を経由せず
-		// transition() から T5・T6・T12・T13・T15 を呼んでも遷移表の検査だけは
-		// 通ってしまい、「承認・差し戻し・保留への回答は本人確認つきの操作
-		// としてだけ成立する」という不変条件がコードで強制されていなかった）。
-		// 到達すれば呼び出し側の実装誤りであり fail-closed に拒否する。
-		//
-		// expectedVersion の有無だけでなく、Verify を通った Attestation を
-		// 経由したか（p.attested。方式 none の (ui, none) も本人確認つき）も
-		// 独立に照合する（self-review 指摘・ラウンド2: どちらか
-		// 一方だけを見る代理検査は、将来 core 内に「expectedVersion は
-		// 渡すが verification は none のまま」のような呼び出し元が増えると
-		// すり抜ける余地を残す）。
-		hasExpectedVersion := p.expectedVersion != nil
-		hasVerification := p.attested
-		if tr.RequiresVerification != hasExpectedVersion || tr.RequiresVerification != hasVerification {
-			return fmt.Errorf("core: operation %q requires_verification=%v but was invoked with expectedVersion set=%v attested=%v (programming error: verified and unverified transition paths must not cross)", p.op, tr.RequiresVerification, hasExpectedVersion, p.attested)
-		}
-		if p.attested {
-			// 登録簿の組が受けられる操作かを、遷移表の行が確定したこの時点で照らす
-			// （何も書く前。拒否は ErrVerificationRejected）。
-			act, ok := actionForTransition(tr)
-			if !ok || !registryPermits(p.channel, p.verification, act) {
-				return ErrVerificationRejected
-			}
-			// 経路 chat は、印の検査と手がかりの解決、反映の承認を含む完了の承認の絞りをここで行う。
-			if err := s.chatGate(ctx, tx, p.att, act, ""); err != nil {
-				return err
-			}
-		}
-
-		preceding := p.preceding
-		if p.resolvePreceding != nil {
-			preceding, err = p.resolvePreceding(ctx, tx, cid, current)
-			if err != nil {
-				return err
-			}
-		}
-		// 遷移先が課題の completion_direct で分かれる行（T15）だけ、値をこのトランザクションの中で読む。
-		completionDirect := false
-		if tr.Target.IfCompletionDirect != NoStatus {
-			completionDirect, err = loadCompletionDirect(ctx, tx, cid)
-			if err != nil {
-				return err
-			}
-		}
-		var target Status
-		if p.replan {
-			target, err = tr.Target.ResolveForReplan(Table, preceding)
-			if err != nil {
-				if tr.Target.IfReplan != NoStatus && ReplanAllowedFrom(preceding) {
-					return err
-				}
-				return fmt.Errorf("%w: %w", ErrValidation, err)
-			}
-		} else {
-			target, err = tr.Target.ResolveForCompletionDirect(Table, preceding, completionDirect)
-			if err != nil {
-				return err
-			}
-		}
-
-		// 統合先を使う課題の完了の差し戻し（T15）は、着手中へ戻さず、計画を作り直す道（分類済）へ送る（済みのタスクは残る）。
-		if tr.Target.IfUsesIntegration != NoStatus && target == tr.Target.Fixed {
-			integ, err := challengeUsesIntegration(ctx, tx, cid)
-			if err != nil {
-				return err
-			}
-			if integ != nil && *integ {
-				target = tr.Target.IfUsesIntegration
-			}
-		}
-
-		nowStr := formatTimestamp(rec.at)
-		now, err := parseTimestamp(nowStr)
-		if err != nil {
-			return err
-		}
-
-		tc := &transitionCtx{
-			tx:       tx,
-			id:       cid,
-			current:  current,
-			before:   map[string]any{},
-			after:    map[string]any{},
-			priority: current.Priority,
-			stage:    current.StageFields,
-			target:   target,
-			nowStr:   nowStr,
-			now:      now,
-			runID:    rec.runID,
-			rec:      rec,
-		}
-		// 状態が変わらない遷移（T4: plan の改訂）では before/after に status を
-		// 含めない（変わっていないため。H7）。
-		if current.Status != target {
-			tc.before["status"] = string(current.Status)
-			tc.after["status"] = string(target)
-		}
-
-		if err := apply(ctx, tc); err != nil {
-			return err
-		}
-
-		newVersion := current.Version + 1
-		stageArgs, err := tc.stage.args()
-		if err != nil {
-			return err
-		}
-		// completion_direct は遷移のたびにここで一元的に書く（T17 で真、ほかのすべての遷移で偽。
-		// 完了確認待ちを出る遷移で消え、T8 で入るときも偽になる）。
-		args := append([]any{string(target), nullablePriority(tc.priority), newVersion, nowStr, completionDirectColumn(p.op)}, stageArgs...)
-		args = append(args, cid, current.Version)
-		res, err := tx.ExecContext(ctx,
-			`UPDATE challenge SET status = ?, priority = ?, version = ?, updated_at = ?, completion_direct = ?, `+stageUpdateSQL+` WHERE id = ? AND version = ?`,
-			args...,
-		)
-		if err != nil {
-			return err
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if affected != 1 {
-			return fmt.Errorf("core: transition challenge %s: expected to update 1 row, updated %d", p.id, affected)
-		}
-
-		// 課題の版（challenge.version）は状態が変わらない遷移でも常に +1 する
-		// （T4 も改訂として版を進める。edit と同じ規約）。
-		tc.after["version"] = newVersion
-		if err := rec.record("challenge", cid, string(p.op), tc.before, tc.after); err != nil {
-			return err
-		}
-		// 完了（T13・T14 の両方）になる課題へ上げてある未のフォローアップを、同じトランザクションで済みにする。
-		if target == StatusDone {
-			if err := completeFollowupsPromotedTo(ctx, tx, rec, cid); err != nil {
-				return err
-			}
-		}
-
-		result = &Challenge{
-			ID:           formatChallengeID(cid),
-			Title:        current.Title,
-			Description:  current.Description,
-			DoneCriteria: current.DoneCriteria,
-			Urgency:      current.Urgency,
-			Priority:     tc.priority,
-			Status:       target,
-			Version:      newVersion,
-			Reporter:     current.Reporter,
-			CreatedAt:    current.CreatedAt,
-			UpdatedAt:    now,
-			StageFields:  tc.stage,
-		}
-		return nil
+		var err error
+		result, err = s.transitionInTx(ctx, tx, rec, p, cid, apply)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+// transitionGateInTx は遷移の入口の検査（版の照合→終端→遷移表→本人確認つきかの不変条件→登録簿→経路 chat の絞り）。何も書かない。
+// 遷移（transitionInTx）と、遷移を成立させずに成功の書き込みで終わる回答の出し直し（reissueOverLimitQuestion）が共有する。
+func (s *Store) transitionGateInTx(ctx context.Context, tx *sql.Tx, p runTransitionParams, cid int64) (*Challenge, Transition, error) {
+	current, err := loadChallenge(ctx, tx, cid)
+	if err != nil {
+		return nil, Transition{}, err
+	}
+	if p.expectedVersion != nil && current.Version != *p.expectedVersion {
+		return nil, Transition{}, ErrConflict
+	}
+	if IsTerminal(Table, StatusVocabulary, current.Status) {
+		return nil, Transition{}, ErrTerminalState
+	}
+	tr, ok := Lookup(current.Status, p.op)
+	if !ok {
+		return nil, Transition{}, ErrInvalidTransition
+	}
+	// 遷移表の RequiresVerification と、この呼び出しが本人確認つき
+	// （expectedVersion 非 nil）かどうかは常に一致していなければならない
+	// （self-review 指摘: これが無いと、verifiedTransition を経由せず
+	// transition() から T5・T6・T12・T13・T15 を呼んでも遷移表の検査だけは
+	// 通ってしまい、「承認・差し戻し・保留への回答は本人確認つきの操作
+	// としてだけ成立する」という不変条件がコードで強制されていなかった）。
+	// 到達すれば呼び出し側の実装誤りであり fail-closed に拒否する。
+	//
+	// expectedVersion の有無だけでなく、Verify を通った Attestation を
+	// 経由したか（p.attested。方式 none の (ui, none) も本人確認つき）も
+	// 独立に照合する（self-review 指摘・ラウンド2: どちらか
+	// 一方だけを見る代理検査は、将来 core 内に「expectedVersion は
+	// 渡すが verification は none のまま」のような呼び出し元が増えると
+	// すり抜ける余地を残す）。
+	hasExpectedVersion := p.expectedVersion != nil
+	hasVerification := p.attested
+	if tr.RequiresVerification != hasExpectedVersion || tr.RequiresVerification != hasVerification {
+		return nil, Transition{}, fmt.Errorf("core: operation %q requires_verification=%v but was invoked with expectedVersion set=%v attested=%v (programming error: verified and unverified transition paths must not cross)", p.op, tr.RequiresVerification, hasExpectedVersion, p.attested)
+	}
+	if p.attested {
+		// 登録簿の組が受けられる操作かを、遷移表の行が確定したこの時点で照らす
+		// （何も書く前。拒否は ErrVerificationRejected）。
+		act, ok := actionForTransition(tr)
+		if !ok || !registryPermits(p.channel, p.verification, act) {
+			return nil, Transition{}, ErrVerificationRejected
+		}
+		// 経路 chat は、印の検査と手がかりの解決、反映の承認を含む完了の承認の絞りをここで行う。
+		if err := s.chatGate(ctx, tx, p.att, act, ""); err != nil {
+			return nil, Transition{}, err
+		}
+	}
+
+	return current, tr, nil
+}
+
+// transitionInTx は runTransition の書き込み本体（呼び出し側の書き込みトランザクションの中で使う）。同じ書き込みの中で、検査・足す処理と
+// 遷移（保留など）を続けて行う呼び出し元が使う。判定順は runTransition と同じ。
+func (s *Store) transitionInTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, p runTransitionParams, cid int64, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+	current, tr, err := s.transitionGateInTx(ctx, tx, p, cid)
+	if err != nil {
+		return nil, err
+	}
+
+	preceding := p.preceding
+	if p.resolvePreceding != nil {
+		preceding, err = p.resolvePreceding(ctx, tx, cid, current)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// 遷移先が課題の completion_direct で分かれる行（T15）だけ、値をこのトランザクションの中で読む。
+	completionDirect := false
+	if tr.Target.IfCompletionDirect != NoStatus {
+		completionDirect, err = loadCompletionDirect(ctx, tx, cid)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var target Status
+	if p.replan || (p.replanResolved != nil && p.replanResolved()) {
+		target, err = tr.Target.ResolveForReplan(Table, preceding)
+		if err != nil {
+			if tr.Target.IfReplan != NoStatus && ReplanAllowedFrom(preceding) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: %w", ErrValidation, err)
+		}
+	} else {
+		target, err = tr.Target.ResolveForCompletionDirect(Table, preceding, completionDirect)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// 統合先を使う課題の完了の差し戻し（T15）は、着手中へ戻さず、計画を作り直す道（分類済）へ送る（済みのタスクは残る）。
+	if tr.Target.IfUsesIntegration != NoStatus && target == tr.Target.Fixed {
+		integ, err := challengeUsesIntegration(ctx, tx, cid)
+		if err != nil {
+			return nil, err
+		}
+		if integ != nil && *integ {
+			target = tr.Target.IfUsesIntegration
+		}
+	}
+
+	nowStr := formatTimestamp(rec.at)
+	now, err := parseTimestamp(nowStr)
+	if err != nil {
+		return nil, err
+	}
+
+	tc := &transitionCtx{
+		tx:       tx,
+		id:       cid,
+		current:  current,
+		before:   map[string]any{},
+		after:    map[string]any{},
+		priority: current.Priority,
+		stage:    current.StageFields,
+		target:   target,
+		nowStr:   nowStr,
+		now:      now,
+		runID:    rec.runID,
+		rec:      rec,
+	}
+	// 状態が変わらない遷移（T4: plan の改訂）では before/after に status を
+	// 含めない（変わっていないため。H7）。
+	if current.Status != target {
+		tc.before["status"] = string(current.Status)
+		tc.after["status"] = string(target)
+	}
+
+	if err := apply(ctx, tc); err != nil {
+		return nil, err
+	}
+
+	newVersion := current.Version + 1
+	stageArgs, err := tc.stage.args()
+	if err != nil {
+		return nil, err
+	}
+	// completion_direct は遷移のたびにここで一元的に書く（T17 で真、ほかのすべての遷移で偽。
+	// 完了確認待ちを出る遷移で消え、T8 で入るときも偽になる）。
+	args := append([]any{string(target), nullablePriority(tc.priority), newVersion, nowStr, completionDirectColumn(p.op)}, stageArgs...)
+	args = append(args, cid, current.Version)
+	res, err := tx.ExecContext(ctx,
+		`UPDATE challenge SET status = ?, priority = ?, version = ?, updated_at = ?, completion_direct = ?, `+stageUpdateSQL+` WHERE id = ? AND version = ?`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected != 1 {
+		return nil, fmt.Errorf("core: transition challenge %s: expected to update 1 row, updated %d", p.id, affected)
+	}
+
+	// 課題の版（challenge.version）は状態が変わらない遷移でも常に +1 する
+	// （T4 も改訂として版を進める。edit と同じ規約）。
+	tc.after["version"] = newVersion
+	if err := rec.record("challenge", cid, string(p.op), tc.before, tc.after); err != nil {
+		return nil, err
+	}
+	// 完了（T13・T14 の両方）になる課題へ上げてある未のフォローアップを、同じトランザクションで済みにする。
+	if target == StatusDone {
+		if err := completeFollowupsPromotedTo(ctx, tx, rec, cid); err != nil {
+			return nil, err
+		}
+	}
+
+	return &Challenge{
+		ID:           formatChallengeID(cid),
+		Title:        current.Title,
+		Description:  current.Description,
+		DoneCriteria: current.DoneCriteria,
+		Urgency:      current.Urgency,
+		Priority:     tc.priority,
+		Status:       target,
+		Version:      newVersion,
+		Reporter:     current.Reporter,
+		CreatedAt:    current.CreatedAt,
+		UpdatedAt:    now,
+		StageFields:  tc.stage,
+	}, nil
 }
 
 // completionDirectColumn は、操作 op の遷移の後の challenge.completion_direct の値。
@@ -407,16 +427,25 @@ func (s *Store) transitionAsInvoker(ctx context.Context, runIDDisplay, id string
 // 必ず渡すため、対象の版が Prepare* の時点から変わっていれば ErrConflict に
 // なる。
 func (s *Store) verifiedTransition(ctx context.Context, att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
-	return s.verifiedTransitionReplan(ctx, att, id, expectedVersion, op, preceding, resolvePreceding, false, apply)
+	return s.verifiedTransitionReplan(ctx, att, id, expectedVersion, op, preceding, resolvePreceding, false, nil, apply)
 }
 
 // verifiedTransitionReplan は verifiedTransition に、回答の「範囲が変わる」印（replan）を足した版。
-func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, replan bool, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, replan bool, replanResolved func() bool, apply func(ctx context.Context, tc *transitionCtx) error) (*Challenge, error) {
+	p, err := verifiedTransitionParams(att, id, expectedVersion, op, preceding, resolvePreceding, replan, replanResolved)
+	if err != nil {
+		return nil, err
+	}
+	return s.runTransition(ctx, p, apply)
+}
+
+// verifiedTransitionParams は本人確認つきの遷移（verifiedTransitionReplan）の runTransitionParams を作る。本人確認が id に対して成立していなければ ErrVerificationRejected。
+func verifiedTransitionParams(att Attestation, id string, expectedVersion int, op Operation, preceding Status, resolvePreceding transitionPrecedingResolver, replan bool, replanResolved func() bool) (runTransitionParams, error) {
 	if !attestationValid(att, id) {
-		return nil, ErrVerificationRejected
+		return runTransitionParams{}, ErrVerificationRejected
 	}
 	ev := expectedVersion
-	return s.runTransition(ctx, runTransitionParams{
+	return runTransitionParams{
 		actor:            att.actor,
 		channel:          att.channel,
 		verification:     att.verification,
@@ -427,8 +456,9 @@ func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, i
 		resolvePreceding: resolvePreceding,
 		attested:         true,
 		replan:           replan,
+		replanResolved:   replanResolved,
 		att:              att,
-	}, apply)
+	}, nil
 }
 
 // attestationValid は att が Verify を経由した登録簿内の (channel,

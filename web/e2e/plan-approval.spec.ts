@@ -58,3 +58,14 @@ test("AC-433 #811: 幅 360px で、計画の承認の画面は、ページ全体
   await expect(page.getByTestId("task-box").first()).toBeVisible();
   expect(await pageOverflows(page)).toBe(false);
 });
+
+test("AC-189・AC-190・AC-192 #1046: 計画の承認に見込みと上限の額が出て、上限が見込みと同じなら上限の理由の行は出ない", async ({
+  page,
+}) => {
+  await openPlan(page);
+  await expect(page.getByText("見込み", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("plan-budget")).toContainText("12");
+  await expect(page.getByText("上限", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("plan-budget-limit")).toContainText("12");
+  await expect(page.getByText("上限の理由")).toHaveCount(0);
+});

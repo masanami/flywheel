@@ -1118,6 +1118,10 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`UPDATE challenge SET uses_integration = 1 WHERE id = 1`, nil},
 			{`UPDATE task SET budget_impl_micros = 3000000, budget_review_micros = 1500000 WHERE id = 1`, nil},
 			{`UPDATE challenge SET integration_ref = 'feat/issue-1' WHERE id = 1`, nil},
+			{`UPDATE challenge SET budget_limit_micros = 40000000, budget_limit_reason = '続きを足す分を見込む "quoted"' WHERE id = 1`, nil},
+			{`INSERT INTO task_addition (challenge_id, origin, origin_task_id, state, spec, total_after_micros, limit_micros, hold_id, created_at, decided_at)
+			  VALUES (1, 'expand', 1, 'applied', '{"tasks":[]}', 9000000, 40000000, 1, ?, ?)`, []any{at, at}},
+			{`UPDATE task SET addition_id = 1, expand_after = 1 WHERE id = 2`, nil},
 			{`UPDATE contract_run SET verified_ref = 'deadbeef' WHERE id = 1`, nil},
 			{`UPDATE contract_run SET fix_pending_ref = 'pending01', fix_verified_ref = 'verified02', fix_rejected_ref = 'rejected03' WHERE id = 1`, nil},
 			{`UPDATE approval SET task_id = 1 WHERE id = 1`, nil},
@@ -1308,5 +1312,130 @@ func InsertTaskContractRun(t *testing.T, workspace string, challengeID int, task
 		return nil
 	}); err != nil {
 		t.Fatalf("coretest: InsertTaskContractRun: %v", err)
+	}
+}
+
+// TaskAdditionRow は InsertTaskAddition の入力（足す依頼 1 行）。0・空の欄は NULL（State は空なら pending、Origin は空なら expand）。
+type TaskAdditionRow struct {
+	ChallengeID      int
+	Origin           string
+	OriginTaskID     int
+	State            string
+	Spec             string
+	TotalAfterMicros int64
+	LimitMicros      int64
+	HoldID           int64
+	// DecidedAt は閉じた日時。空なら NULL。
+	DecidedAt string
+}
+
+// InsertTaskAddition はテスト専用のフィクスチャとして、足す依頼（task_addition）を 1 行直接置き、内部整数 ID を返す
+// （後続のタスクが、前段の成果〔足す依頼を作る処理〕が無くても、足す依頼を置いて確かめるための道具。作業ログは残さない）。
+func InsertTaskAddition(t *testing.T, workspace string, r TaskAdditionRow) int64 {
+	t.Helper()
+	if r.Origin == "" {
+		r.Origin = "expand"
+	}
+	if r.State == "" {
+		r.State = "pending"
+	}
+	nullInt := func(n int64) any {
+		if n == 0 {
+			return nil
+		}
+		return n
+	}
+	nullStr := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	const at = "2026-11-22T00:00:00.000Z"
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var id int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO task_addition (challenge_id, origin, origin_task_id, state, spec, total_after_micros, limit_micros, hold_id, created_at, decided_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.ChallengeID, r.Origin, nullInt(int64(r.OriginTaskID)), r.State, nullStr(r.Spec), nullInt(r.TotalAfterMicros), nullInt(r.LimitMicros), nullInt(r.HoldID), at, nullStr(r.DecidedAt))
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertTaskAddition: %v", err)
+	}
+	return id
+}
+
+// InsertTaskAdditionHold はテスト専用のフィクスチャとして、足す依頼 additionID から立つ未回答の保留（理由 reason。
+// `task_add_over_limit`・`task_add_question` を想定するが、値は検査しない）を 1 件置き、足す依頼の hold_id をその保留に結び付け、
+// 保留の内部整数 ID を返す。optionsJSON が空でなければ選択肢つきの問い（回答に選択肢の識別を要する）にする。
+// 保留の遷移・回答は本番の処理（T11・T12）が行うので、課題の状態は変えない。
+func InsertTaskAdditionHold(t *testing.T, workspace string, additionID int64, reason, question, fromStatus, optionsJSON string) int64 {
+	t.Helper()
+	const at = "2026-11-22T00:00:00.000Z"
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var holdID int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		var cid int64
+		if err := tx.QueryRow(`SELECT challenge_id FROM task_addition WHERE id = ?`, additionID).Scan(&cid); err != nil {
+			return err
+		}
+		var options any
+		required := 0
+		if optionsJSON != "" {
+			options, required = optionsJSON, 1
+		}
+		res, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, reason, options, option_required) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			cid, question, fromStatus, at, reason, options, required)
+		if err != nil {
+			return err
+		}
+		if holdID, err = res.LastInsertId(); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`UPDATE task_addition SET hold_id = ? WHERE id = ?`, holdID, additionID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertTaskAdditionHold: %v", err)
+	}
+	return holdID
+}
+
+// SetChallengeBudgetLimit はテスト専用のフィクスチャとして、課題の上限（USD の 100 万分の 1）と理由を直接書く（理由が空なら NULL）。
+func SetChallengeBudgetLimit(t *testing.T, workspace string, challengeID int, limitMicros int64, reason string) {
+	t.Helper()
+	var reasonCol any
+	if reason != "" {
+		reasonCol = reason
+	}
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE challenge SET budget_limit_micros = ?, budget_limit_reason = ? WHERE id = ?`, limitMicros, reasonCol, challengeID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: SetChallengeBudgetLimit: %v", err)
+	}
+}
+
+// SetTaskExpandAfter はテスト専用のフィクスチャとして、タスクの「続きを決めるタスク」の印（expand_after）を直接書く。
+func SetTaskExpandAfter(t *testing.T, workspace string, taskID int, expandAfter bool) {
+	t.Helper()
+	v := 0
+	if expandAfter {
+		v = 1
+	}
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE task SET expand_after = ? WHERE id = ?`, v, taskID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: SetTaskExpandAfter: %v", err)
 	}
 }

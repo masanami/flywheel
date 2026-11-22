@@ -36,6 +36,7 @@ afterEach(() => {
 const BASE = "/api/v1/workspaces/alpha";
 
 const T = (id: string, p: Partial<Task> = {}): Task => ({
+  added: null,
   body: "",
   budget_impl_usd: 0,
   budget_review_usd: 0,
@@ -124,7 +125,9 @@ interface Over {
 
 function show(o: Over = {}): ShowCardResponse {
   return {
+    additions: [],
     approvals: [],
+    budget: { estimate_usd: null, limit_reason: null, limit_usd: null },
     card: {
       context: null,
       headline: null,

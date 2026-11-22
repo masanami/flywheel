@@ -79,6 +79,12 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		st.Plan = len(plan)
+		// 計画の後に足す処理（足す依頼を作る・判断点を「足す」の形で呼ぶ）も、計画の段が進める。
+		expand, err := countExpandWork(ctx, tx, agent)
+		if err != nil {
+			return err
+		}
+		st.Plan += expand
 		verify, _, err := selectJ5AutoTargets(ctx, tx)
 		if err != nil {
 			return err
@@ -105,7 +111,7 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 			return nil, err
 		}
 		// 上げる依頼を始められる課題（全部のタスクが済み、開いた契約の実行が無い、統合先を使う着手中の課題）も、委譲の段が進める。
-		reflects, err := s.reflectCandidates(ctx, nil)
+		reflects, err := s.reflectCandidates(ctx, nil, agent)
 		if err != nil {
 			return nil, err
 		}
@@ -274,6 +280,12 @@ func (s *Store) CountRoundWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		st.Plan = len(plan)
+		// 計画の後に足す処理（足す依頼を作る・判断点を「足す」の形で呼ぶ）も、計画の段が進める。
+		expand, err := countExpandWork(ctx, tx, agent)
+		if err != nil {
+			return err
+		}
+		st.Plan += expand
 		verify, _, err := selectJ5AutoTargets(ctx, tx)
 		if err != nil {
 			return err
@@ -373,7 +385,7 @@ func (s *Store) CountRoundWork(ctx context.Context, agent *AgentDeclaration, con
 			}
 		}
 		// 上げる依頼を始められる課題も、委譲の段が進める。
-		reflects, err := s.reflectCandidates(ctx, nil)
+		reflects, err := s.reflectCandidates(ctx, nil, agent)
 		if err != nil {
 			return nil, err
 		}

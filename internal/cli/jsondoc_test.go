@@ -1622,6 +1622,30 @@ func addCoreRedesignS2aShowShape(t *testing.T, doc *documentedJSON) {
 	doc.entity["show_challenge"]["uses_integration"] = true
 	addCoreRedesignS3bShowShape(t, doc, string(data))
 	addCoreRedesignS3cShowShape(t, doc, string(data))
+	addCoreRedesignS4cShowShape(t, doc)
+}
+
+// addCoreRedesignS4cShowShape は区切り S4c-1 が show --json の根に足した `budget`（estimate_usd・limit_usd・limit_reason）を doc へ合成する。
+// S4c の機能仕様（core-redesign-s4c.md）の「見せ方」がそのキーを足すと書いていることを確かめた上で足す。
+func addCoreRedesignS4cShowShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "core-redesign-s4c.md"))
+	if err != nil {
+		t.Fatalf("read core-redesign-s4c spec: %v", err)
+	}
+	if !strings.Contains(string(data), "予算（`budget`: `estimate_usd`・`limit_usd`・`limit_reason`）を足す") {
+		t.Fatal("core-redesign-s4c spec does not document the S4c-1 key of show --json (budget)")
+	}
+	if !strings.Contains(string(data), "課題の詳細に、足す依頼の一覧（`additions[]`:") || !strings.Contains(string(data), "`flywheel cycle` の出力に、その回に足したタスクを出す") {
+		t.Fatal("core-redesign-s4c spec does not document the S4c-1 keys of show --json (additions) and cycle --json (added tasks)")
+	}
+	for _, shape := range doc.topLevel["show"] {
+		shape["budget"] = true
+		shape["additions"] = true
+	}
+	for _, shape := range doc.topLevel["cycle"] {
+		shape["added_tasks"] = true
+	}
 }
 
 // addCoreRedesignS3cShowShape は区切り S3c が show --json に足したキー（根の `conflict_fixes`・`runs[]` の要素の `fix_pending_ref`）を

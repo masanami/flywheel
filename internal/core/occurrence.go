@@ -352,6 +352,10 @@ const (
 	holdReasonReflectFailed      holdReason = "reflect_failed"
 	// holdReasonChallengeCheckNotMet は、統合先を使う課題の、課題の単位の確かめ（J5）が「満たしていない」だった保留（発生は、確かめの失敗として J5 の run が作る）。
 	holdReasonChallengeCheckNotMet holdReason = "challenge_check_not_met"
+	// 計画の後にタスクを足す依頼から立つ、オーナーの判断を求める保留（発生は作らない）。task_add_over_limit は足した後の見込みが上限を超える、
+	// task_add_question は「足す」の形の判断点が問いを返した（足す依頼は仕様待ちのまま）。
+	holdReasonTaskAddOverLimit holdReason = "task_add_over_limit"
+	holdReasonTaskAddQuestion  holdReason = "task_add_question"
 )
 
 // persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない理由（統合先を使う課題のものを含む）と、進めようが無い理由だけが書く
@@ -360,7 +364,8 @@ func (r holdReason) persisted() bool {
 	switch r {
 	case holdReasonLandUnavailable, holdReasonContentRefInvalid, holdReasonFactsUnmet, holdReasonTasksBlocked,
 		holdReasonIntegrationRefInvalid, holdReasonDelegateEnded, holdReasonMergedUnverified, holdReasonChecksFailed, holdReasonLandRefused,
-		holdReasonReflectUnavailable, holdReasonReflectFailed, holdReasonChallengeCheckNotMet:
+		holdReasonReflectUnavailable, holdReasonReflectFailed, holdReasonChallengeCheckNotMet,
+		holdReasonTaskAddOverLimit, holdReasonTaskAddQuestion:
 		return true
 	}
 	return false
