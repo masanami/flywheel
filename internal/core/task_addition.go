@@ -6,7 +6,7 @@ package core
 //     （足す中身は足す依頼の行の spec が持つ）。
 //   - 出どころは S4c-1 では expand（続きを決めるタスクが済んだ）だけ。同じ出どころのタスクについて expand の行は 1 つ
 //     （部分一意索引 task_addition_expand_origin）。2 つ目は ErrValidation で断る。
-//   - 足す依頼から立つ保留は、いまある保留の遷移を使う。ここは保留を作らず、立てた保留の ID（hold_id）を記録するだけ。
+//   - 足す依頼から立つ保留は、いまある保留の遷移を使う。ここは保留を作らず、立てた保留の ID（hold_id）と、保留の側へどの足す依頼の問いか（hold.task_addition_id）を記録するだけ。
 //   - 状態: pending（仕様待ち）・awaiting_owner（オーナー待ち）は開いている。applied（足した）・none（足さない）・
 //     declined（見送り）・superseded（取り替え）は閉じていて、閉じた依頼の状態は変えない（ErrInvalidTransition）。
 
@@ -384,6 +384,19 @@ func setTaskAdditionStateTx(ctx context.Context, tx *sql.Tx, rec *activityRecord
 	args = append(args, aid)
 	if _, err := tx.ExecContext(ctx, `UPDATE task_addition SET `+strings.Join(set, ", ")+` WHERE id = ?`, args...); err != nil {
 		return nil, err
+	}
+	// 保留が、どの足す依頼の問いかをストアに記録する（問いを重ねて hold_id が上書きされても、保留の側に残る）。
+	if upd.HoldID != nil {
+		res, err := tx.ExecContext(ctx, `UPDATE hold SET task_addition_id = ? WHERE id = ? AND challenge_id = (SELECT challenge_id FROM task_addition WHERE id = ?)`,
+			aid, *upd.HoldID, aid)
+		if err != nil {
+			return nil, err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return nil, err
+		} else if n != 1 {
+			return nil, fmt.Errorf("%w: the hold of a task addition must be a hold of its challenge", ErrValidation)
+		}
 	}
 	if err := rec.record("task_addition", aid, "state", map[string]any{"state": string(cur.State)}, map[string]any{"state": string(to)}); err != nil {
 		return nil, err

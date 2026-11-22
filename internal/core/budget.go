@@ -134,7 +134,7 @@ func loadBucketSpend(ctx context.Context, tx *sql.Tx, challengeID, planVersion i
 	}
 	var decidedAtText string
 	err = tx.QueryRowContext(ctx,
-		`SELECT decided_at FROM approval WHERE challenge_id = ? AND kind = ? AND decision = ? AND target_version = ?
+		`SELECT decided_at FROM approval WHERE challenge_id = ? AND kind = ? AND decision = ? AND target_version = ? AND limit_only = 0
 		 ORDER BY id DESC LIMIT 1`,
 		challengeID, string(ApprovalKindBudget), string(ApprovalDecisionApproved), planVersion).Scan(&decidedAtText)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -557,7 +557,7 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 				return fmt.Errorf("core: budget: plan %d of %s not found", plan.Version, current.ID)
 			}
 		}
-		now, err := insertBudgetApproval(ctx, tx, rec, att, cid, approvedVersion, taskIDColumn(task))
+		now, err := insertBudgetApproval(ctx, tx, rec, att, cid, approvedVersion, taskIDColumn(task), false)
 		if err != nil {
 			return err
 		}
@@ -603,18 +603,22 @@ func approvalOf(now time.Time, version int, att Attestation) Approval {
 // insertBudgetApproval は承認の種類 budget の承認の記録を書き、その時刻を返す。予算の承認は target_version に
 // 計画の版を持ち、approval.plan_version は NULL のまま（計画の承認は target_version に課題の版を持ち、plan_version に
 // 計画の版を持つ）。taskCol はタスクの指定（タスクを指さない承認は nil）。
-func insertBudgetApproval(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att Attestation, cid int64, version int, taskCol any) (time.Time, error) {
+func insertBudgetApproval(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att Attestation, cid int64, version int, taskCol any, limitOnly bool) (time.Time, error) {
 	nowStr := formatTimestamp(rec.at)
 	now, err := parseTimestamp(nowStr)
 	if err != nil {
 		return time.Time{}, err
 	}
 	relaySession, relayQuote := att.relayColumns()
+	limitOnlyInt := 0
+	if limitOnly {
+		limitOnlyInt = 1
+	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, task_id)
-		 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+		`INSERT INTO approval (challenge_id, operation_id, kind, decision, target_version, actor, channel, verification, reason, decided_at, relay_session, relay_quote, task_id, limit_only)
+		 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
 		cid, string(ApprovalKindBudget), string(ApprovalDecisionApproved), version,
-		att.Actor(), string(att.Channel()), string(att.Verification()), nowStr, relaySession, relayQuote, taskCol); err != nil {
+		att.Actor(), string(att.Channel()), string(att.Verification()), nowStr, relaySession, relayQuote, taskCol, limitOnlyInt); err != nil {
 		return time.Time{}, err
 	}
 	return now, nil
@@ -719,7 +723,7 @@ func raiseBudgetLimit(ctx context.Context, tx *sql.Tx, rec *activityRecorder, at
 	if err := setChallengeBudgetLimit(ctx, tx, cid, &after, reason); err != nil {
 		return time.Time{}, err
 	}
-	now, err := insertBudgetApproval(ctx, tx, rec, att, cid, planVersion, nil)
+	now, err := insertBudgetApproval(ctx, tx, rec, att, cid, planVersion, nil, true)
 	if err != nil {
 		return time.Time{}, err
 	}

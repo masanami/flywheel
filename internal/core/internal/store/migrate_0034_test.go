@@ -8,7 +8,7 @@ import (
 )
 
 // 区切り S4c-1 の 1 のスキーマ（版 34）。task_addition・task.addition_id・task.expand_after・
-// challenge.budget_limit_micros・challenge.budget_limit_reason。
+// challenge.budget_limit_micros・challenge.budget_limit_reason・approval.limit_only・hold.task_addition_id。
 
 const migrationS4c1Version = 34
 
@@ -26,6 +26,16 @@ func TestS4c1Migration(t *testing.T) {
 		if err := old.Write(context.Background(), func(tx *sql.Tx) error {
 			_, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, repo, operation, status, created_at, updated_at)
 				VALUES (1, 1, 'a', 't', 'b', 'd', 'o/r', 'pull_request', 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := old.Write(context.Background(), func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at)
+				VALUES (1, 'budget', 'approved', 1, 'a', 'cli', 'tty_confirm', '2026-01-01T00:00:00Z')`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (1, 'q', 'in_progress', '2026-01-01T00:00:00Z')`)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -82,6 +92,25 @@ func TestS4c1Migration(t *testing.T) {
 			}
 			if expandAfter != 0 || additionID.Valid {
 				t.Errorf("AC-221: expand_after = %d, addition_id = %v, want 0 / NULL", expandAfter, additionID)
+			}
+			// 上限だけを変えた承認の印は、過去の承認では 0。足す依頼を指す保留の列は、過去の保留では NULL（どちらも列がある）。
+			var limitOnly int
+			if err := tx.QueryRow(`SELECT limit_only FROM approval WHERE id = 1`).Scan(&limitOnly); err != nil {
+				return err
+			}
+			if limitOnly != 0 {
+				t.Errorf("approval.limit_only = %d, want 0 for past approvals", limitOnly)
+			}
+			var holdAddition sql.NullInt64
+			if err := tx.QueryRow(`SELECT task_addition_id FROM hold WHERE id = 1`).Scan(&holdAddition); err != nil {
+				return err
+			}
+			if holdAddition.Valid {
+				t.Errorf("hold.task_addition_id = %v, want NULL for past holds", holdAddition)
+			}
+			if _, err := tx.Exec(`INSERT INTO approval (challenge_id, kind, decision, target_version, actor, channel, verification, decided_at, limit_only)
+				VALUES (1, 'budget', 'approved', 1, 'a', 'cli', 'tty_confirm', '2026-01-01T00:00:00Z', 2)`); err == nil {
+				t.Error("limit_only = 2 was accepted, want the CHECK to refuse it")
 			}
 			return nil
 		}); err != nil {
