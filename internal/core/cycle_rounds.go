@@ -59,6 +59,11 @@ func (s *Store) runRounds(ctx context.Context, in CycleRunInput, cycleID string,
 			return "", err
 		}
 		res, err := s.runAdvancePhases(ctx, in, cycleID, jc, executed)
+		if errors.Is(err, errCycleStopRequested) {
+			// 段の切れ目で止める指示を読んだ。新しい段へ進まず、通していない段は空の結果で埋めて終える（委譲先の実行は取り消さない）。
+			*phases = padAdvancePhases(in, mergeRoundPhases(*phases, res))
+			return CycleEndStopped, nil
+		}
 		if err != nil {
 			return "", err
 		}
@@ -73,6 +78,13 @@ func (s *Store) runRounds(ctx context.Context, in CycleRunInput, cycleID string,
 		progressed := before != after
 
 		// 終わる条件の判定は、足し合わせる前の、この回りの段の結果で行う。
+		// 同じ回りで 2 つ以上成り立つときの優先順は error → interrupted → stopped → rate_limited → budget → stalled → settled
+		// （error・interrupted は段のエラーとして、この関数の外で決まる）。
+		if stop, err := s.cycleStopRequested(ctx, cycleID); err != nil {
+			return "", err
+		} else if stop {
+			return CycleEndStopped, nil
+		}
 		if jc.RateLimited() {
 			return CycleEndRateLimited, nil
 		}
@@ -91,8 +103,12 @@ func (s *Store) runRounds(ctx context.Context, in CycleRunInput, cycleID string,
 		case roundNext:
 			continue // 待たずに次の回りへ
 		}
-		if err := s.waitBetweenRounds(ctx, cycleID, wait, interval); err != nil {
+		stopped, err := s.waitBetweenRounds(ctx, cycleID, wait, interval)
+		if err != nil {
 			return "", err
+		}
+		if stopped {
+			return CycleEndStopped, nil
 		}
 	}
 }
@@ -141,19 +157,75 @@ func (g *roundGovernor) decide(progressed bool, w *RoundWork) roundAction {
 	return roundWait
 }
 
-// waitBetweenRounds は間隔の待ちを 1 回置く。待ちの前後でロックの heartbeat を更新する。ロックを失っていた（別のサイクルが回収した）ときは、
-// 回りの繰り返しを続けず、ErrLockLost で終える（失ったまま段を重ねると、回収した側のサイクルと並んで動く）。
-func (s *Store) waitBetweenRounds(ctx context.Context, cycleID string, wait func(context.Context, time.Duration) error, d time.Duration) error {
-	if err := s.HeartbeatCycleLock(ctx, cycleID); errors.Is(err, ErrLockLost) {
-		return err
+// cycleStopPollStep は、間隔の待ちを区切って止める指示を読む長さの上限。
+const cycleStopPollStep = 5 * time.Second
+
+// errCycleStopRequested は、段の切れ目で止める指示を読んだことを runAdvancePhases が呼び出し元へ知らせる内部の印。
+var errCycleStopRequested = errors.New("core: stop requested")
+
+// cycleStopRequested は、サイクルの記録に止める指示（stop_requested_at）が入っているかを読む。
+func (s *Store) cycleStopRequested(ctx context.Context, cycleID string) (bool, error) {
+	id, ok := parseCycleID(cycleID)
+	if !ok {
+		return false, ErrNotFound
 	}
-	err := wait(ctx, d)
-	// 待ちの間に ctx が取り消されても、周を閉じる側がロックを扱う。更新は取り消しに依存させない。
-	if hbErr := s.HeartbeatCycleLock(context.WithoutCancel(ctx), cycleID); errors.Is(hbErr, ErrLockLost) {
-		return hbErr
+	var requested bool
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT stop_requested_at IS NOT NULL FROM cycle WHERE id = ?`, id).Scan(&requested)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
 	}
-	return err
+	if err = classifyReadWriteErr(err); err != nil {
+		return false, err
+	}
+	return requested, nil
 }
+
+// waitBetweenRounds は間隔 d の待ちを置く。待ちは長くても cycleStopPollStep ごとに区切り、区切りごとにロックの heartbeat を更新して
+// 止める指示を読む（読んだら待ちを打ち切り、stopped=true を返す）。ロックを失っていた（別のサイクルが回収した）ときは、
+// 回りの繰り返しを続けず、ErrLockLost で終える（失ったまま段を重ねると、回収した側のサイクルと並んで動く）。
+func (s *Store) waitBetweenRounds(ctx context.Context, cycleID string, wait func(context.Context, time.Duration) error, d time.Duration) (stopped bool, _ error) {
+	if err := s.HeartbeatCycleLock(ctx, cycleID); errors.Is(err, ErrLockLost) {
+		return false, err
+	}
+	for remaining := d; remaining > 0; {
+		step := min(remaining, cycleStopPollStep)
+		err := wait(ctx, step)
+		// 待ちの間に ctx が取り消されても、周を閉じる側がロックを扱う。更新は取り消しに依存させない。
+		if hbErr := s.HeartbeatCycleLock(context.WithoutCancel(ctx), cycleID); errors.Is(hbErr, ErrLockLost) {
+			return false, hbErr
+		}
+		if err != nil {
+			return false, err
+		}
+		remaining -= step
+		stop, err := s.cycleStopRequested(ctx, cycleID)
+		if err != nil {
+			return false, err
+		}
+		if stop {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// padAdvancePhases は、回りの途中で止めて通さなかった進める段を、空の結果で埋める（出力の phases は進める段 6 つを常に持つ）。
+func padAdvancePhases(in CycleRunInput, acc []CyclePhaseResult) []CyclePhaseResult {
+	for i := len(acc); i < len(advancePhaseOrder); i++ {
+		p := advancePhaseOrder[i]
+		r := CyclePhaseResult{Phase: p, Skipped: advancePhaseSkipped(in, p)}
+		if p == CyclePhaseRelease {
+			r.ReleaseItems = []ReleaseExecItem{}
+		}
+		acc = append(acc, r)
+	}
+	return acc
+}
+
+// advancePhaseOrder は進める段の順。
+var advancePhaseOrder = []CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify}
 
 // roundHitCycleBudget は、この回りの段の結果に、起動しなかった理由がサイクルの費用の上限（cycle_budget）のものが 1 件でもあるか。
 // 課題の枠（run_budget）は含めない。
