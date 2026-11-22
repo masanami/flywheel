@@ -34,6 +34,7 @@ var roots = []reflect.Type{
 	reflect.TypeOf(view.ApprovalSummaryResponse{}),
 	reflect.TypeOf(view.CycleStatus{}),
 	reflect.TypeOf(view.CycleStarted{}),
+	reflect.TypeOf(view.CycleStart{}),
 	reflect.TypeOf(view.TreeResponse{}),
 	reflect.TypeOf(view.FollowupListResponse{}),
 	reflect.TypeOf(view.ChatResponse{}),

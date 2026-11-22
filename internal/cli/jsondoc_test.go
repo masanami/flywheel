@@ -153,6 +153,7 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM3CycleShape(t, &doc)
 	addM45ReleaseShape(t, &doc)
 	addM45DependencyShape(t, &doc)
+	addS4aCycleShapes(&doc)
 	addM2BindShape(t, &doc)
 	addM45WithdrawShape(t, &doc)
 	addM45LearnShape(t, &doc)
@@ -1662,4 +1663,12 @@ func addCoreRedesignS3bShowShape(t *testing.T, doc *documentedJSON, spec string)
 			t.Fatalf("core-redesign spec's \"- `tasks[]` の要素:\" line does not document %s (line = %q)", k, tasksLine)
 		}
 	}
+}
+
+// addS4aCycleShapes は `cycle status`・`cycle stop` の成功時の JSON の最上位のキーを doc へ足す
+// （docs/features/core-redesign.md §走っているサイクルを見る・止める。`cycle status` は GET …/cycle と同じ形で、
+// running・watching の中身は cycle_status_test.go と internal/view のテストが検査する）。
+func addS4aCycleShapes(doc *documentedJSON) {
+	doc.topLevel["cycle status"] = []map[string]bool{{"state": true, "last_started_at": true, "last_ended_at": true, "last_result": true, "last_end_reason": true, "running": true}}
+	doc.topLevel["cycle stop"] = []map[string]bool{{"requested": true, "cycle_id": true}}
 }

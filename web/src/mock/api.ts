@@ -1,7 +1,7 @@
 // ブラウザ内の偽の API。ApiClient と同じ形を MockStore の上に実装する（読み取りだけ）。
 // 失敗は本物と同じエラーコード（ApiError）で返し、画面の失敗表示を確かめられるようにする。
 
-import type { ApiClient } from "../api/client.ts";
+import type { ApiClient, ApproveResponse } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
 import { CONDITIONS_AFTER_RELEASE_HEADINGS } from "../api/types.gen.ts";
 import type {
@@ -437,7 +437,7 @@ export function createMockApi(
       return { started: true };
     },
     // ② 版が違えば conflict。通れば状態を進める（ブラウザ内だけの偽の書き込み）。
-    async approve(name, id, version): Promise<ShowCardResponse> {
+    async approve(name, id, version): Promise<ApproveResponse> {
       await wait();
       const m = itemOf(name, id);
       if (m.c.version !== version)
@@ -450,7 +450,10 @@ export function createMockApi(
       m.completionDirect = false;
       m.c.status_label = STATUS_LABEL[m.c.status] ?? m.c.status;
       m.c.version += 1;
-      return showOf(name, id, m);
+      return {
+        ...showOf(name, id, m),
+        cycle: { reason: "started", started: true },
+      };
     },
     async cycle(name) {
       await wait();

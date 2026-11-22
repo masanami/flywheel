@@ -761,13 +761,41 @@ export interface ApprovalCompletionTask {
 }
 
 export interface CycleStatus {
+  last_end_reason: string | null;
   last_ended_at: string | null;
   last_result: string | null;
   last_started_at: string | null;
+  running: CycleRunning | null;
   state: string;
 }
 
+export interface CycleRunning {
+  active_runs: number;
+  budget_usd: number;
+  max_parallel_runs: number;
+  rounds: number;
+  spent_usd: number;
+  started_at: string;
+  stop_requested: boolean;
+  trigger: string;
+  watching: CycleWatching[];
+}
+
+export interface CycleWatching {
+  challenge_id: string;
+  run_started_at: string;
+  spent_usd: number;
+  state: string;
+  task_id: string | null;
+  title: string;
+}
+
 export interface CycleStarted {
+  started: boolean;
+}
+
+export interface CycleStart {
+  reason: string;
   started: boolean;
 }
 
@@ -949,6 +977,42 @@ export const EXPECTED_KIND_CODES = [
   "ui",
   "cli",
   "behavior",
+] as const;
+
+export const CYCLE_END_REASON_CODES = [
+  "settled",
+  "budget",
+  "stopped",
+  "rate_limited",
+  "stalled",
+  "error",
+  "interrupted",
+] as const;
+
+export const WATCH_STATE_CODES = [
+  "working",
+  "verifying",
+  "waiting_owner",
+] as const;
+
+export const CYCLE_TRIGGER_CODES = [
+  "manual",
+  "ui",
+  "approve",
+  "reject",
+  "answer",
+  "budget",
+  "ingest",
+  "followup_promote",
+  "continue",
+] as const;
+
+export const CYCLE_START_REASON_CODES = [
+  "started",
+  "already_running",
+  "no_work",
+  "disabled",
+  "unavailable",
 ] as const;
 
 export const EXECUTION_RESULT_CODES = [

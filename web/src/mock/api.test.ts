@@ -35,13 +35,15 @@ describe("読み取り（types.gen.ts の形）", () => {
     const q = await api.questions();
     expect(q.questions.map((x) => x.challenge_id)).toEqual(["C-8", "C-28"]);
   });
-  it("サイクルの状態は GET …/cycle と同じ形（state・last_*）で返る", async () => {
+  it("サイクルの状態は GET …/cycle と同じ形（state・last_*・running）で返る", async () => {
     const c = await api.cycle("alpha");
     expect(c.state).toBe("running");
     expect(Object.keys(c).sort()).toEqual([
+      "last_end_reason",
       "last_ended_at",
       "last_result",
       "last_started_at",
+      "running",
       "state",
     ]);
     expect((await api.cycle("beta")).state).toBe("idle");

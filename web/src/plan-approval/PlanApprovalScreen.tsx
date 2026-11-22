@@ -14,6 +14,7 @@ import { ClampedText } from "../parts/ClampedText.tsx";
 import { FigureView } from "../parts/FigureView.tsx";
 import { IssuesAnswerView, IssuesView } from "../parts/StagesDetail.tsx";
 import { CycleStartButton } from "../shell/CycleStartButton.tsx";
+import { CycleStartLine } from "../shell/CycleStartLine.tsx";
 import { hrefOf } from "../shell/route.ts";
 import { type ScreenData, useScreenData } from "../shell/useScreenData.ts";
 import { TaskTree } from "../tree/TaskTree.tsx";
@@ -22,7 +23,6 @@ import { usd } from "../usd.ts";
 export const NOT_AWAITING_PLAN_TEXT =
   "この課題は、計画の承認待ちではありません。";
 export const APPROVED_TEXT = "承認しました。";
-export const NEXT_CYCLE_TEXT = "続きは、次のサイクルで進みます。";
 export const CONFLICT_TEXT =
   "計画が変わりました。最新の計画を読み直しました。内容を確かめて、もう一度承認してください。";
 export const PLAN_UPDATED_TEXT =
@@ -52,7 +52,10 @@ export function PlanApprovalScreen({
     [id],
   );
   // 承認が通った後は、課題の状態が進んで要約が読めなくなるので、読み直した結果ではなく、承認した時点の題名で出す。
-  const [approved, setApproved] = useState<{ title: string } | null>(null);
+  const [approved, setApproved] = useState<{
+    title: string;
+    cycle: string;
+  } | null>(null);
   // 開いている間に、読み直しで計画の版が変わったら知らせる。直前に表示していた版（seen）と、読み直した版を比べる。
   // 中身の入れ替えそのものは useScreenData が行い、承認の口へ送る版は表示している応答の版のまま。
   // 知らせは、承認を押すか、画面を開き直す（この部品が作り直される）まで出したままにする。
@@ -79,7 +82,7 @@ export function PlanApprovalScreen({
       <section aria-labelledby="screen-title" data-testid="plan-approved">
         <h2 id="screen-title">計画の承認: {approved.title}</h2>
         <output className="plan-approved-note">{APPROVED_TEXT}</output>
-        <p>{NEXT_CYCLE_TEXT}</p>
+        <CycleStartLine reason={approved.cycle} />
         <p>
           <a href={challengeHref}>課題の詳細を開く</a>
         </p>
@@ -101,7 +104,7 @@ export function PlanApprovalScreen({
       challengeHref={challengeHref}
       updated={updated}
       onApproveStart={() => setUpdated(false)}
-      onApproved={(title) => setApproved({ title })}
+      onApproved={(title, cycle) => setApproved({ title, cycle })}
     />
   );
 }
@@ -137,7 +140,7 @@ function Body({
   challengeHref: string;
   updated: boolean;
   onApproveStart: () => void;
-  onApproved: (title: string) => void;
+  onApproved: (title: string, cycle: string) => void;
 }) {
   if (result.state === "loading") return <p>{LOADING_TEXT}</p>;
   if (result.state === "error") {
@@ -183,7 +186,7 @@ function PlanView({
   challengeHref: string;
   updated: boolean;
   onApproveStart: () => void;
-  onApproved: (title: string) => void;
+  onApproved: (title: string, cycle: string) => void;
 }) {
   const plan = summary.plan;
   const { expected, non_goals, figure } = summary.stages;
@@ -205,9 +208,9 @@ function PlanView({
     setNotice(null);
     onApproveStart();
     try {
-      await api.approve(agentName, id, summary.version);
+      const res = await api.approve(agentName, id, summary.version);
       // 承認が通った後は、要約の読み直しが先に着いてこの部品が外れていても、承認した旨を出す（親が持つ）。
-      onApproved(summary.title);
+      onApproved(summary.title, res.cycle?.reason ?? "unavailable");
     } catch (e) {
       if (!alive.current) return;
       if (isNotAwaitingError(e)) {

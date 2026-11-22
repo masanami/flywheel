@@ -535,10 +535,35 @@ it("AC-18・AC-19・AC-22・AC-23・AC-31・AC-32: ボタンの文言・完了�
   expect(m.querySelector("pre, code[data-guide]")).toBeNull();
 });
 
+it("AC-180 #995: 承認の応答の cycle.reason が no_work → 「いま進められるものが無いので、サイクルは始めていません。」が出る", async () => {
+  setup(
+    { challenge: { version: 7 } },
+    {
+      [APPROVAL]: summary({ version: 7 }),
+      [APPROVE]: () =>
+        json(200, { cycle: { reason: "no_work", started: false } }),
+    },
+  );
+  const m = await open();
+  fireEvent.click(await button(m));
+  const line = await screen.findByTestId(
+    "cycle-start-line",
+    {},
+    { timeout: 2000 },
+  );
+  expect(line.textContent).toBe(
+    "いま進められるものが無いので、サイクルは始めていません。",
+  );
+});
+
 it("AC-20・AC-21・AC-24・AC-25・AC-33: ボタンは読んだ版を CSRF つきで 1 回だけ POST し、成功すると記録した旨と対話で行う旨が出る", async () => {
   const { requests } = setup(
     { challenge: { version: 7 } },
-    { [APPROVAL]: summary({ version: 7 }), [APPROVE]: () => json(200, {}) },
+    {
+      [APPROVAL]: summary({ version: 7 }),
+      [APPROVE]: () =>
+        json(200, { cycle: { reason: "started", started: true } }),
+    },
   );
   const m = await open();
   fireEvent.click(await button(m));
@@ -565,7 +590,7 @@ it("AC-26: 版の食い違いのとき、要約を読み直し、承認の要求
     call++;
     return call === 1
       ? json(409, { error: { code: "conflict", message: "版が違う" } })
-      : json(200, {});
+      : json(200, { cycle: { reason: "started", started: true } });
   };
   let reads = 0;
   const { requests } = setup();

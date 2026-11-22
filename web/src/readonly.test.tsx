@@ -281,7 +281,9 @@ function awaitingApproval(): Record<string, unknown> {
         version: 3,
       },
     },
-    [`POST ${base}/challenges/C-1/approve`]: {},
+    [`POST ${base}/challenges/C-1/approve`]: {
+      cycle: { reason: "started", started: true },
+    },
     "/api/v1/needs-human": {
       unreadable_workspaces: [],
       workspaces: [{ name: "alpha", needs_human: status.needs_human }],

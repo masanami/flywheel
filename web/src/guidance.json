@@ -4,6 +4,13 @@
   "completion_button_note": "このボタンは、完了を記録するだけです。反映先へ入れる承認は、対話で行います。",
   "completion_release_note": "反映先へ入れるところまで承認するときは、Claude Code との対話で、この課題の反映まで承認すると伝えてください。",
   "completion_reject_note": "差し戻すときは、Claude Code との対話で、差し戻す旨と理由を伝えてください。",
+  "cycle_start_notes": {
+    "started": "サイクルを始めました。",
+    "already_running": "走っているサイクルが、続きを進めます。",
+    "no_work": "いま進められるものが無いので、サイクルは始めていません。",
+    "disabled": "サイクルを自動で始めない設定です。",
+    "unavailable": "サイクルを始められませんでした。サイクルの画面の「サイクルを回す」から始められます。"
+  },
   "completion_approved_note": "完了の承認を記録しました。反映先へ入れる承認は、Claude Code との対話で行います。",
   "conversation_actions": [
     "approve_plan",

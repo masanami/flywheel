@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // testStoreActors は t ごとに、newStoreForTest が開いた Store と、fixedActor が固定した actor を覚える。
@@ -22,6 +24,8 @@ var testStoreActors = struct {
 }{stores: map[*testing.T][]*Store{}, actor: map[*testing.T]*actorSourceFuncs{}}
 
 func registerTestStore(t *testing.T, s *Store) {
+	// 回りの間の待ちは、試験では実時間で待たない（待ちを検証する試験は CycleRunInput.Wait で差し替える）。
+	s.roundWait = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 	testStoreActors.mu.Lock()
 	defer testStoreActors.mu.Unlock()
 	if _, ok := testStoreActors.stores[t]; !ok {

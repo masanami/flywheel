@@ -41,6 +41,8 @@ const cycleFullAgentJSON = `{
   "rework_limit": 3,
   "failure_limit": 2,
   "improve_threshold": 10,
+  "cycle_poll_interval_sec": 30,
+  "auto_cycle": true,
   "memory_dir": "memory",
   "memory_write_limit": {"files": 5, "bytes": 8192},
   "chat_tools": "restricted",
@@ -474,15 +476,22 @@ func TestCycle_ErroredRunIsShownInTheResultAndExitCodeIsZero(t *testing.T) {
 
 	doc := cycleDoc(t, ws) // 終了コード 0（AC-144）
 
+	// 失敗を返し続ける判断点は、回りを重ねるたびに同じ課題の失敗の項目を足す（連続の失敗の上限に達するまで）。すべて errored。
 	items := phaseItems(t, cyclePhase(t, doc, "classify"))
-	if len(items) != 1 || items[0]["challenge_id"] != id || items[0]["result"] != "errored" {
+	if len(items) < 1 {
 		t.Fatalf("classify items = %v, want %s with result errored (AC-145)", items, id)
+	}
+	for _, it := range items {
+		if it["challenge_id"] != id || it["result"] != "errored" {
+			t.Fatalf("classify items = %v, want every item %s with result errored (AC-145)", items, id)
+		}
 	}
 	if items[0]["outcome"] != nil || items[0]["status"] != nil {
 		t.Errorf("item = %v, want outcome and status null for a failed run", items[0])
 	}
-	if got := challengeStatusOf(t, ws, id); got != "unclassified" {
-		t.Errorf("status = %q, want unchanged", got)
+	// 分類は写らない。回りを重ねて連続の失敗の上限に達すると、課題は保留になる。
+	if got := challengeStatusOf(t, ws, id); got != "awaiting_human" {
+		t.Errorf("status = %q, want awaiting_human (held at the failure limit; never classified)", got)
 	}
 }
 
@@ -878,20 +887,28 @@ func TestCycle_NothingToAdvance_InvalidDeclarationIsStillConfigInvalid(t *testin
 // 周の最初の段 release は、反映の依頼の口があるリポジトリの承認済みの反映の操作の反映の依頼を始める（周の費用に入る）。
 func TestCycle_ReleasePhaseStartsAReflectRequest(t *testing.T) {
 	parallelTools(t, false)
-	ws, _, op, toolLog := reflectWorkspace(t)
+	// 委譲先が作業している間、サイクルは回りを重ねて待つので、状態の確認で取り消された状態を返す委譲先にして、サイクルが終わるようにする。
+	ws, _, op, toolLog := reflectWorkspaceWithStatus(t, "cancelled")
 	newReleaseGH(t, execHead)
 	putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 
 	rel := cyclePhase(t, cycleDoc(t, ws), "release")
 	items := rel["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("release phase = %v, want one item", rel)
+	// 1 回目の回りが依頼を始める。次の回りが状態を読んで、依頼が終わったことを項目に足す。
+	if len(items) < 1 {
+		t.Fatalf("release phase = %v, want the started item first", rel)
 	}
 	it := items[0].(map[string]any)
 	if it["operation_id"] != op || it["result"] != "reflect_started" || it["route"] != "reflect_request" {
 		t.Errorf("item = %v, want reflect_started for %s on the reflect_request route", it, op)
 	}
-	if calls := toolLog(); len(calls) != 1 || !strings.HasPrefix(calls[0], "reflect ") {
-		t.Errorf("tool calls = %q, want one reflect call", calls)
+	reflects := 0
+	for _, c := range toolLog() {
+		if strings.HasPrefix(c, "reflect ") {
+			reflects++
+		}
+	}
+	if reflects != 1 {
+		t.Errorf("tool calls = %q, want exactly one reflect call", toolLog())
 	}
 }

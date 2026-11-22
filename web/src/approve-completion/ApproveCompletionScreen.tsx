@@ -22,6 +22,7 @@ import { ConflictFixesView } from "../parts/ConflictFixesView.tsx";
 import { DirectCompletionView } from "../parts/DirectCompletionView.tsx";
 import { PairsView } from "../parts/StagesDetail.tsx";
 import { safeHref } from "../safeHref.ts";
+import { CycleStartLine } from "../shell/CycleStartLine.tsx";
 import { hrefOf } from "../shell/route.ts";
 import { type ScreenData, useScreenData } from "../shell/useScreenData.ts";
 import { usd } from "../usd.ts";
@@ -54,7 +55,10 @@ export function ApproveCompletionScreen({
     [id],
   );
   // 承認が通った後は課題の状態が進んで要約が読めなくなるので、承認した時点の題名で出す。
-  const [approved, setApproved] = useState<{ title: string } | null>(null);
+  const [approved, setApproved] = useState<{
+    title: string;
+    cycle: string;
+  } | null>(null);
   const challengeHref = hrefOf({
     kind: "challenge",
     name: agentName,
@@ -69,6 +73,7 @@ export function ApproveCompletionScreen({
         <output className="plan-approved-note">
           {COMPLETION_APPROVED_NOTE}
         </output>
+        <CycleStartLine reason={approved.cycle} />
         <p>
           <a href={challengeHref}>課題の詳細を開く</a>
         </p>
@@ -82,7 +87,7 @@ export function ApproveCompletionScreen({
       agentName={agentName}
       id={id}
       challengeHref={challengeHref}
-      onApproved={(title) => setApproved({ title })}
+      onApproved={(title, cycle) => setApproved({ title, cycle })}
     />
   );
 }
@@ -115,7 +120,7 @@ function Body({
   agentName: string;
   id: string;
   challengeHref: string;
-  onApproved: (title: string) => void;
+  onApproved: (title: string, cycle: string) => void;
 }) {
   if (result.state === "loading") return <p>{LOADING_TEXT}</p>;
   if (result.state === "error") {
@@ -154,7 +159,7 @@ function CompletionView({
   agentName: string;
   id: string;
   challengeHref: string;
-  onApproved: (title: string) => void;
+  onApproved: (title: string, cycle: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -189,8 +194,8 @@ function CompletionView({
     setSeen(approval.version);
     let reloading = false;
     try {
-      await api.approve(agentName, id, approval.version);
-      onApproved(approval.title);
+      const res = await api.approve(agentName, id, approval.version);
+      onApproved(approval.title, res.cycle?.reason ?? "unavailable");
     } catch (e) {
       if (!alive.current) return;
       if (isNotAwaitingError(e)) {

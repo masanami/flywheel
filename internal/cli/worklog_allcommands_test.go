@@ -59,6 +59,8 @@ var worklogReadOnlyCommands = map[string]bool{
 	"metrics": true,
 	// export（M5 S1）はストアを読んでファイルへ書くだけで、ストアを書かない。
 	"export": true,
+	// cycle status（S4a）は読み取りだけ。
+	"cycle status": true,
 }
 
 // worklogNoActivityMutationCommands はストアを変えるが作業ログ（activity）には載せない
@@ -84,6 +86,8 @@ var worklogNoActivityMutationCommands = map[string]bool{
 	// import（M5 S1）は全表の行と採番の状態を書くが、作業ログに自分の行を足さない（足すと往復の後の
 	// 書き出しが元と一致しない＝AC-9）。
 	"import": true,
+	// cycle stop（S4a）は走っているサイクルの記録（cycle 表）に止める指示を書くが、作業ログには載せない。
+	"cycle stop": true,
 }
 
 // worklogIngestRepo は worklogCases の "ingest create" ケースが使う偽の

@@ -142,6 +142,8 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 		{"learn"},
 		{"improve"},
 		{"cycle"},
+		{"cycle", "status"},
+		{"cycle", "stop"},
 		{"run"},
 		{"slot", "clear", "SL-1"},
 		{"budget", "C-1", "--impl-usd", "80"},
