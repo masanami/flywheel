@@ -21,9 +21,11 @@ type CycleWorkStages struct {
 	Plan     int
 	Run      int
 	Verify   int
-	Learn    int
-	Improve  int
-	Cleanup  int
+	// Supervise はスーパーバイザー待ちの保留の数。
+	Supervise int
+	Learn     int
+	Improve   int
+	Cleanup   int
 }
 
 // CycleWork はサイクルを回すと進むものの数え。Total は Stages の合計。
@@ -34,7 +36,7 @@ type CycleWork struct {
 
 // sum は段の件数の合計を返す。
 func (st CycleWorkStages) sum() int {
-	return st.Release + st.Classify + st.Plan + st.Run + st.Verify + st.Learn + st.Improve + st.Cleanup
+	return st.Release + st.Classify + st.Plan + st.Run + st.Verify + st.Supervise + st.Learn + st.Improve + st.Cleanup
 }
 
 // CountCycleWork はサイクルを回すと進むものを数える（読み取りだけ。ストアを書かない）。
@@ -266,6 +268,11 @@ func (s *Store) CountRoundWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		w.Active = active
+		if agent.Supervisor {
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM hold h JOIN challenge c ON c.id = h.challenge_id WHERE `+supervisorPendingWhere).Scan(&st.Supervise); err != nil {
+				return err
+			}
+		}
 		if conn == nil {
 			return nil
 		}

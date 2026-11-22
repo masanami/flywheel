@@ -460,7 +460,7 @@ func TestCycle_PhasesStartWithReleaseThenTheM3Phases(t *testing.T) {
 	for _, p := range cycleDoc(t, ws)["phases"].([]any) {
 		got = append(got, p.(map[string]any)["phase"].(string))
 	}
-	want := []string{"release", "ingest", "classify", "plan", "run", "verify", "learn", "improve", "backup"}
+	want := []string{"release", "ingest", "classify", "plan", "run", "verify", "supervise", "learn", "improve", "backup"}
 	if !equalStringSlices(got, want) {
 		t.Errorf("phases = %v, want %v", got, want)
 	}
