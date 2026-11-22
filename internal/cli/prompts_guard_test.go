@@ -237,3 +237,26 @@ func TestForbiddenTerms_DetectsJ8ClosedValues(t *testing.T) {
 		}
 	}
 }
+
+// TestChatPrompt_PassesForbiddenTermsCheck は、対話の欄の指示文（chat.md）が語の検査を通ることを確かめる。
+// 欄の指示文は flywheel のコマンド（answer・create）を名指しする役目を持つので、この 2 語だけは禁止語から
+// 外し（サブコマンド名・閉集合の値の両方に現れる）、残りの禁止語と金額の表記を検査する。
+func TestChatPrompt_PassesForbiddenTermsCheck(t *testing.T) {
+	t.Parallel()
+	src := realForbiddenSources()
+	terms := slices.DeleteFunc(invoker.ForbiddenTerms(src), func(s string) bool { return s == "answer" || s == "create" })
+	if len(terms) == 0 {
+		t.Fatal("no forbidden terms")
+	}
+	body, err := invoker.ChatInstructions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hits := invoker.FindForbiddenTerms(body, terms); len(hits) != 0 {
+		t.Errorf("chat.md contains forbidden term(s): %v", hits)
+	}
+	// 検査が空回りしていない: 状態の語を足すと検出される。
+	if hits := invoker.FindForbiddenTerms(body+"\n"+string(core.StatusVocabulary[0].Code), terms); len(hits) == 0 {
+		t.Error("the check did not detect an inserted state code")
+	}
+}
