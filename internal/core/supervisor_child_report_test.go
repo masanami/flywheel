@@ -373,3 +373,25 @@ func TestChildReport_ResumeSourceRequiresAnExecutedAnswerRecord(t *testing.T) {
 		t.Fatalf("answer actions with a run = %d, want 1", n)
 	}
 }
+
+// サイクルの出力の supervise の段は、保留を作る前に判断点を呼んだ子の問いも数える（処理した件数と、結果が executed の手）。
+func TestChildReport_SupervisePhaseCountsAnsweredChildQuestions(t *testing.T) {
+	t.Parallel()
+	f := childReportFixture(t)
+	id := f.newInProgress(t, "t", "P1", planSpec(nil))
+	f.deleg.queue = []JudgmentLaunchOutput{minorQuestionsOut(), {Result: RunResultSucceeded, StructuredOutput: reportJSON(nil), ReportedTotalCostUSD: float64Ptr(1)}}
+	r := &svRouter{svOut: []JudgmentLaunchOutput{svJSON(answerJSON("B|docs/a.md", "ANSWER-TWO|docs/a.md"))}}
+	f.runWithSV(t, r, id)
+
+	cyc := formatCycleID(int64(f.countRows(t, `SELECT MAX(cycle_id) FROM supervisor_action`)))
+	phases := []CyclePhaseResult{{Phase: CyclePhaseRun}, {Phase: CyclePhaseSupervise}}
+	if err := f.s.addChildQuestionSuperviseCounts(context.Background(), cyc, phases); err != nil {
+		t.Fatal(err)
+	}
+	if p := phases[1]; p.SuperviseProcessed != 1 || p.SuperviseHands[HandAnswer] != 1 || len(p.SuperviseHands) != 1 {
+		t.Errorf("supervise phase = processed %d hands %v, want 1 and answer:1", p.SuperviseProcessed, p.SuperviseHands)
+	}
+	if phases[0].SuperviseProcessed != 0 {
+		t.Errorf("another phase was changed: %+v", phases[0])
+	}
+}

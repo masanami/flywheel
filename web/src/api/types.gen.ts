@@ -961,6 +961,7 @@ export interface SupervisePhase {
 }
 
 export interface SuperviseHands {
+  answer: number;
   defer: number;
   escalate: number;
   replan: number;
