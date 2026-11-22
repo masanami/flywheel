@@ -9,3 +9,4 @@
   - コマンドの実行: `type: assistant` の `content[]` の `type: tool_use`（`name`・`input.command`・`id`）。その結果は `type: user` の `content[]` の `type: tool_result`（`tool_use_id`・`is_error`）。
   - 終わりの行: `type: result`（`subtype: success`・`is_error`・`num_turns`・`stop_reason`・`terminal_reason`・`total_cost_usd`）。
 - `chat_stream_resume.jsonl`: 2 通目（`--resume`）。続きでも先頭に `system` / `init` の行が出る。
+- `chat_stream_session_lost.jsonl`・`chat_stream_session_lost.stderr.txt`: 存在しない会話の識別を `--resume` したときの出力（終了コード 1）。標準出力は終わりの行 1 行だけ（`subtype: error_during_execution`・`is_error: true`・`errors` に `No conversation found with session ID: <UUID>`）、標準エラーにも同じ文言が出る。
