@@ -23,9 +23,7 @@ test("AC-427 #811: 偽のデータで「この計画を承認する」を押す�
   await openPlan(page);
   await page.getByRole("button", { name: "この計画を承認する" }).click();
   await expect(page.getByText("承認しました。")).toBeVisible();
-  await expect(
-    page.getByText("続きは、次のサイクルで進みます。"),
-  ).toBeVisible();
+  await expect(page.getByText("サイクルを始めました。")).toBeVisible();
 });
 
 test("#798: 広い画面（幅 1280px）では、「問いと推奨」が、方針の右に並ぶ", async ({

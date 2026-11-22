@@ -38,6 +38,11 @@ func (v *relayedVerifier) Confirm(_, _ string) (string, error) {
 // tty_confirm。--session・--quote は --relayed のときだけ指定でき、--relayed の
 // ときは両方必須（空白だけは無いものとみなす）。違反は usage_error。
 func verifierFor(a Args) (core.Verifier, error) {
+	// 対話の欄の印があれば、--relayed・--session・--quote は要らず、付いていても値を使わない。記録の「発言」と
+	// 「会話の識別」は、印から core がストアを引いて入れる（経路は channelFor が chat にする）。
+	if a.Chat != nil {
+		return core.NewChatMarkVerifier(a.Chat.Session, a.Chat.Message), nil
+	}
 	session, hasSession := a.Values["session"]
 	quote, hasQuote := a.Values["quote"]
 	if !a.Bools["relayed"] {

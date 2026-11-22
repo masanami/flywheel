@@ -34,8 +34,12 @@ var roots = []reflect.Type{
 	reflect.TypeOf(view.ApprovalSummaryResponse{}),
 	reflect.TypeOf(view.CycleStatus{}),
 	reflect.TypeOf(view.CycleStarted{}),
+	reflect.TypeOf(view.CycleStart{}),
 	reflect.TypeOf(view.TreeResponse{}),
 	reflect.TypeOf(view.FollowupListResponse{}),
+	reflect.TypeOf(view.ChatResponse{}),
+	reflect.TypeOf(view.ChatPostRequest{}),
+	reflect.TypeOf(view.ChatPostResponse{}),
 }
 
 const header = "// このファイルは生成物。編集しない。`go generate ./internal/view` で書き出す。\n" +

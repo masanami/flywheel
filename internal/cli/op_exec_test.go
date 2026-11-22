@@ -583,15 +583,16 @@ const reflectToolConnectorsFixture = `{
   ]
 }`
 
-// putFakeReflectToolOnPATH は reflect で実行 ID ext-r1 の running を返し、status で running、cancel で cancelled を返す偽の委譲先 tool を
-// PATH の先頭に置く。呼び出しは log へ 1 行ずつ残す。
-func putFakeReflectToolOnPATH(t *testing.T, log string) {
+// putFakeReflectToolWithStatusOnPATH は reflect で実行 ID ext-r1 の running を返し、status で statusState、cancel で cancelled を返す偽の委譲先 tool を
+// PATH の先頭に置く。呼び出しは log へ 1 行ずつ残す（サイクルは、委譲先が作業している間は回りを重ねて待つので、サイクルが終わるまでを試験する試験は、
+// status で終わりの状態を返す）。
+func putFakeReflectToolWithStatusOnPATH(t *testing.T, log, statusState string) {
 	t.Helper()
 	script := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> " + shellSingleQuote(log) + "\n" +
 		"case \"$1\" in\n" +
 		"reflect) printf '{\"contract_version\":1,\"run_id\":\"ext-r1\",\"state\":\"running\",\"summary\":\"s\"}\\n';;\n" +
-		"status) printf '{\"contract_version\":1,\"run_id\":\"%s\",\"state\":\"running\",\"summary\":\"s\"}\\n' \"$2\";;\n" +
+		"status) printf '{\"contract_version\":1,\"run_id\":\"%s\",\"state\":\"" + statusState + "\",\"summary\":\"s\"}\\n' \"$2\";;\n" +
 		"cancel) printf '{\"contract_version\":1,\"run_id\":\"%s\",\"state\":\"cancelled\",\"summary\":\"s\"}\\n' \"$2\";;\n" +
 		"*) exit 1;;\n" +
 		"esac\n"
@@ -605,13 +606,19 @@ func putFakeReflectToolOnPATH(t *testing.T, log string) {
 // reflectWorkspace は execWorkspace に、反映の依頼の口を持つ宣言と偽の tool を足す。
 func reflectWorkspace(t *testing.T) (ws, cid, op string, toolLog func() []string) {
 	t.Helper()
+	return reflectWorkspaceWithStatus(t, "running")
+}
+
+// reflectWorkspaceWithStatus は reflectWorkspace の、偽の tool の status が statusState を返す版。
+func reflectWorkspaceWithStatus(t *testing.T, statusState string) (ws, cid, op string, toolLog func() []string) {
+	t.Helper()
 	ws, cid, op = execWorkspace(t)
 	writeConnectorsJSONForTest(t, ws, reflectToolConnectorsFixture)
 	if err := os.MkdirAll(filepath.Join(ws, "wt"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	log := filepath.Join(t.TempDir(), "tool.log")
-	putFakeReflectToolOnPATH(t, log)
+	putFakeReflectToolWithStatusOnPATH(t, log, statusState)
 	return ws, cid, op, func() []string { return readOrderLog(t, log) }
 }
 

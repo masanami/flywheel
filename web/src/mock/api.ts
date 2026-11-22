@@ -1,11 +1,13 @@
 // ブラウザ内の偽の API。ApiClient と同じ形を MockStore の上に実装する（読み取りだけ）。
 // 失敗は本物と同じエラーコード（ApiError）で返し、画面の失敗表示を確かめられるようにする。
 
-import type { ApiClient } from "../api/client.ts";
+import type { ApiClient, ApproveResponse } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
 import { CONDITIONS_AFTER_RELEASE_HEADINGS } from "../api/types.gen.ts";
 import type {
   ApprovalSummaryResponse,
+  ChatMessage,
+  ChatResponse,
   CycleStarted,
   FollowupListResponse,
   LogResponse,
@@ -151,7 +153,67 @@ export function createMockApi(
     };
   };
 
+  // 対話の欄の偽の会話（エージェントごと。ブラウザ内だけ）。送ると、すぐ返事が終わる。
+  const chats: Record<string, { messages: ChatMessage[]; cost: number }> = {};
+  const chatOf = (name: string) => {
+    wsOf(name);
+    chats[name] ??= { messages: [], cost: 0 };
+    return chats[name];
+  };
+
   const api: ApiClient = {
+    async chat(name): Promise<ChatResponse> {
+      await wait();
+      const c = chatOf(name);
+      return {
+        cost_usd: c.cost,
+        messages: c.messages,
+        session_id: c.messages.length > 0 ? `mock-${name}` : null,
+        started_at: c.messages[0]?.created_at ?? null,
+        state: "idle",
+        tools: "restricted",
+      };
+    },
+    async chatSend(name, req) {
+      await wait();
+      const c = chatOf(name);
+      const now = new Date().toISOString();
+      const id = c.messages.length + 1;
+      c.messages.push(
+        {
+          activity: [],
+          body: req.text,
+          cost_usd: 0,
+          created_at: now,
+          id,
+          role: "owner",
+          state: "done",
+          viewing: null,
+        },
+        {
+          activity: [{ command: "flywheel status", ok: true }],
+          body: "# 確認しました\n\n- 状況を見ました",
+          cost_usd: 0.12,
+          created_at: now,
+          id: id + 1,
+          role: "orchestrator",
+          state: "done",
+          viewing: null,
+        },
+      );
+      c.cost += 0.12;
+      return { id };
+    },
+    async chatStop(name) {
+      await wait();
+      chatOf(name);
+      return {};
+    },
+    async chatNew(name) {
+      await wait();
+      chats[name] = { messages: [], cost: 0 };
+      return {};
+    },
     async workspaces(): Promise<WorkspaceList> {
       await wait();
       return { workspaces: Object.values(store.workspaces).map((w) => w.meta) };
@@ -375,7 +437,7 @@ export function createMockApi(
       return { started: true };
     },
     // ② 版が違えば conflict。通れば状態を進める（ブラウザ内だけの偽の書き込み）。
-    async approve(name, id, version): Promise<ShowCardResponse> {
+    async approve(name, id, version): Promise<ApproveResponse> {
       await wait();
       const m = itemOf(name, id);
       if (m.c.version !== version)
@@ -388,7 +450,10 @@ export function createMockApi(
       m.completionDirect = false;
       m.c.status_label = STATUS_LABEL[m.c.status] ?? m.c.status;
       m.c.version += 1;
-      return showOf(name, id, m);
+      return {
+        ...showOf(name, id, m),
+        cycle: { reason: "started", started: true },
+      };
     },
     async cycle(name) {
       await wait();

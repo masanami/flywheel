@@ -1,5 +1,6 @@
 import { api } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
+import { useChat } from "../chat/context.ts";
 import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { ConflictFixesView } from "../parts/ConflictFixesView.tsx";
@@ -34,6 +35,7 @@ export function ChallengeDetail({
   id: string;
   view: ChallengeView;
 }) {
+  const chat = useChat();
   const { result } = useScreenData(
     live,
     agentName,
@@ -62,6 +64,11 @@ export function ChallengeDetail({
       <h2 id="detail-title" data-testid="detail-title">
         {show.challenge.title}
       </h2>
+      <p>
+        <button type="button" onClick={chat.openAndFocus}>
+          この課題について相談する
+        </button>
+      </p>
       <Items show={show} />
       <Waiting
         show={show}

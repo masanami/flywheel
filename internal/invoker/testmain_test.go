@@ -70,6 +70,14 @@ type fakeClaudeFixture struct {
 	// EnvLogPath が非空なら、委譲の目印の環境変数（FLYWHEEL_DELEGATED_RUN）の有無と値を
 	// 「present=<true|false> value=<値>」の1行でこのファイルへ書く。
 	EnvLogPath string `json:"env_log_path"`
+	// StdoutFile が非空なら、そのファイルの中身を標準出力へ出す（Stdout の代わり）。
+	StdoutFile string `json:"stdout_file"`
+	// EnvDumpPath が非空なら、受け取った環境の全体を 1 行 1 変数でこのファイルへ書く。
+	EnvDumpPath string `json:"env_dump_path"`
+	// PrintBeforeSleep が真なら、標準出力を出してから SleepSeconds だけ居座る。
+	PrintBeforeSleep bool `json:"print_before_sleep"`
+	// ChildPidPath が非空なら、孫のプロセス（sleep）を起動して、その pid をこのファイルへ書く。
+	ChildPidPath string `json:"child_pid_path"`
 }
 
 func runFakeClaude() int {
@@ -100,6 +108,15 @@ func runFakeClaude() int {
 		v, ok := os.LookupEnv("FLYWHEEL_DELEGATED_RUN")
 		_ = os.WriteFile(fx.EnvLogPath, []byte(fmt.Sprintf("present=%t value=%s", ok, v)), 0o644)
 	}
+	if fx.EnvDumpPath != "" {
+		_ = os.WriteFile(fx.EnvDumpPath, []byte(strings.Join(os.Environ(), "\n")), 0o644)
+	}
+	if fx.ChildPidPath != "" {
+		child := exec.Command("/bin/sleep", "60")
+		if err := child.Start(); err == nil {
+			_ = os.WriteFile(fx.ChildPidPath, []byte(fmt.Sprint(child.Process.Pid)), 0o644)
+		}
+	}
 	if fx.StdinLogPath != "" {
 		b, _ := io.ReadAll(os.Stdin)
 		_ = os.WriteFile(fx.StdinLogPath, b, 0o644)
@@ -107,10 +124,18 @@ func runFakeClaude() int {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 	}
 
+	if fx.PrintBeforeSleep {
+		fmt.Print(fx.Stdout)
+		fx.Stdout = ""
+	}
 	if fx.SleepSeconds > 0 {
 		time.Sleep(time.Duration(fx.SleepSeconds) * time.Second)
 	}
 
+	if fx.StdoutFile != "" {
+		b, _ := os.ReadFile(fx.StdoutFile)
+		fmt.Print(string(b))
+	}
 	fmt.Print(fx.Stdout)
 	fmt.Fprint(os.Stderr, fx.Stderr)
 	return fx.ExitCode

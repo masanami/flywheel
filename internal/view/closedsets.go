@@ -8,13 +8,13 @@ type ClosedSet struct {
 	Codes []string
 }
 
-// ClosedSets は core の閉集合（課題カードの操作・修飾・状態・食い違いの種類、保留の種類、タスクの表示の区分、タスクと課題の細かい進み、統合先へ入れる進み、検証の判定、委譲先の実行の状態、不可逆操作の種類と状態、委譲先が求めること、成果物の種類、通したコンフリクトの解消の宛先、予想の例の種別）を
+// ClosedSets は core の閉集合（課題カードの操作・修飾・状態・食い違いの種類、保留の種類、タスクの表示の区分、タスクと課題の細かい進み、統合先へ入れる進み、検証の判定、委譲先の実行の状態、不可逆操作の種類と状態、委譲先が求めること、成果物の種類、通したコンフリクトの解消の宛先、予想の例の種別、サイクルの終わった理由、サイクルが見ている実行の様子、対話の欄の発言の状態と道具の範囲）を
 // 生成物（web/src/api/types.gen.ts）へ書き出すための一覧。順序は core の定義の順。
 // 例外として CONDITIONS_AFTER_RELEASE_HEADINGS は view が持つ承認の見出しで、添字は ConditionsOutlook の値。
 // EXECUTION_RESULT_WORDS も view が持つ語で、添字は EXECUTION_RESULT_CODES と同じ（i 番目の値の語）。
 func ClosedSets() []ClosedSet {
 	var actions, modifiers, states, kinds, holdKinds, phases, execResults, execLabels []string
-	var requestedKinds, conflictTargets, expectedKinds []string
+	var requestedKinds, conflictTargets, expectedKinds, endReasons, watchStates []string
 	var taskProgress, challengeProgress, landings, verdicts, delegateStates, opKinds, opStates []string
 	for _, v := range core.CardActionValues() {
 		actions = append(actions, string(v))
@@ -59,6 +59,16 @@ func ClosedSets() []ClosedSet {
 	for _, v := range core.OperationStateValues() {
 		opStates = append(opStates, string(v))
 	}
+	for _, v := range core.CycleEndReasonValues() {
+		endReasons = append(endReasons, string(v))
+	}
+	cycleStartReasons := make([]string, 0, 5)
+	for _, v := range core.CycleStartReasonValues() {
+		cycleStartReasons = append(cycleStartReasons, string(v))
+	}
+	for _, v := range core.WatchStateValues() {
+		watchStates = append(watchStates, string(v))
+	}
 	requestedKinds = core.ContractRequestedKindValues()
 	conflictTargets = core.ConflictFixTargetValues()
 	for _, v := range core.ExpectedKindValues() {
@@ -68,6 +78,16 @@ func ClosedSets() []ClosedSet {
 	headings := make([]string, 0, 3)
 	for _, o := range []ConditionsOutlook{OutlookNotReleasing, OutlookReleasing, OutlookApprovedRelease} {
 		headings = append(headings, ConditionsAfterReleaseHeading(o))
+	}
+	var chatStates, chatTools, chatRoles []string
+	for _, v := range core.ChatMessageStates() {
+		chatStates = append(chatStates, string(v))
+	}
+	for _, v := range []core.ChatRole{core.ChatRoleOwner, core.ChatRoleOrchestrator} {
+		chatRoles = append(chatRoles, string(v))
+	}
+	for _, v := range core.ChatToolsValues() {
+		chatTools = append(chatTools, string(v))
 	}
 	return []ClosedSet{
 		{Name: "CARD_ACTION_CODES", Codes: actions},
@@ -87,9 +107,17 @@ func ClosedSets() []ClosedSet {
 		{Name: "ARTIFACT_KIND_CODES", Codes: core.ArtifactKindValues()},
 		{Name: "CONFLICT_FIX_TARGET_CODES", Codes: conflictTargets},
 		{Name: "EXPECTED_KIND_CODES", Codes: expectedKinds},
+		{Name: "CYCLE_END_REASON_CODES", Codes: endReasons},
+		{Name: "WATCH_STATE_CODES", Codes: watchStates},
+		{Name: "CYCLE_TRIGGER_CODES", Codes: core.CycleTriggerValues()},
+		{Name: "CYCLE_START_REASON_CODES", Codes: cycleStartReasons},
 		{Name: "EXECUTION_RESULT_CODES", Codes: execResults},
 		{Name: "EXECUTION_RESULT_WORDS", Codes: execLabels},
 		{Name: "CONDITIONS_AFTER_RELEASE_HEADINGS", Codes: headings},
+		{Name: "CHAT_MESSAGE_STATE_CODES", Codes: chatStates},
+		{Name: "CHAT_TOOLS_CODES", Codes: chatTools},
+		{Name: "CHAT_ROLE_CODES", Codes: chatRoles},
+		{Name: "CHAT_PANEL_STATE_CODES", Codes: []string{ChatStateIdle, ChatStateReplying}},
 	}
 }
 

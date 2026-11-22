@@ -24,6 +24,13 @@ export const APPROVAL_REJECT_NOTE: string = guidance.completion_reject_note;
 export const COMPLETION_APPROVED_NOTE: string =
   guidance.completion_approved_note;
 
+// 承認の後に出す、サイクルを始めたかの 1 行。cycle.reason（started・already_running・no_work・disabled・unavailable）から選ぶ。
+// 知らない値は unavailable の文にする（始められたと言い切らない）。
+export function cycleStartNote(reason: string): string {
+  const notes: Record<string, string | undefined> = guidance.cycle_start_notes;
+  return notes[reason] ?? guidance.cycle_start_notes.unavailable;
+}
+
 // 単一引用符で囲み、中の単一引用符は '\'' にする（空白・引用符を含むパスを 1 語として渡すため）。
 export function shellQuote(path: string): string {
   return `'${path.replaceAll("'", "'\\''")}'`;

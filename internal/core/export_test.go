@@ -20,7 +20,7 @@ import (
 
 // docs/features/m5-tom-migration-and-switchover.md S1（AC-1〜AC-16）。実ストアで書き出しと再構築を検証する。
 
-var allTablesForExportTest = []string{"activity", "approval", "challenge", "challenge_dependency", "challenge_parent", "challenge_reopen", "contract_run", "cycle", "direct_completion", "direct_completion_artifact", "followup", "hold", "lock",
+var allTablesForExportTest = []string{"activity", "approval", "challenge", "challenge_dependency", "challenge_parent", "challenge_reopen", "chat_message", "chat_session", "contract_run", "cycle", "direct_completion", "direct_completion_artifact", "followup", "hold", "lock",
 	"occurrence", "operation", "operation_execution", "plan_answer", "run", "run_artifact", "slot", "source_binding", "source_child", "task", "task_dependency", "task_plan"}
 
 func newWorkspaceStore(t *testing.T) (*Store, string) {
@@ -687,6 +687,46 @@ func TestImport_S3cColumnsSurviveTheRoundTrip(t *testing.T) {
 	}
 }
 
+// 版 31 で足した列（cycle の end_reason・rounds・stop_requested_at）の値は、書き出し→空のストアへの再構築で同じになる（AC-188・AC-189）。
+func TestImport_S4aCycleColumnsSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	src, _ := filledStore(t)
+	if err := src.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE cycle SET end_reason = 'settled', rounds = 3, stop_requested_at = '2026-11-02T03:04:05.000Z' WHERE id = (SELECT MIN(id) FROM cycle)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(mustExport(t, src), &doc); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := doc["tables"].(map[string]any)["cycle"].([]any)
+	if len(rows) == 0 {
+		t.Fatal("export has no cycle rows")
+	}
+	for _, col := range []string{"end_reason", "rounds", "stop_requested_at"} {
+		if _, ok := rows[0].(map[string]any)[col]; !ok {
+			t.Errorf("exported cycle row lacks %q", col)
+		}
+	}
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+		t.Fatal(err)
+	}
+	var reason, stop string
+	var rounds int
+	if err := dst.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT end_reason, rounds, stop_requested_at FROM cycle WHERE id = (SELECT MIN(id) FROM cycle)`).Scan(&reason, &rounds, &stop)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if reason != "settled" || rounds != 3 || stop != "2026-11-02T03:04:05.000Z" {
+		t.Errorf("imported cycle = (%q, %d, %q), want (settled, 3, 2026-11-02T03:04:05.000Z)", reason, rounds, stop)
+	}
+}
+
+// 版 33 で足した列（hold の options・answer_option・option_required）の値は、書き出し→空のストアへの再構築で同じになる。
 func TestImport_HoldOptionsColumnsSurviveTheRoundTrip(t *testing.T) {
 	t.Parallel()
 	src, _ := filledStore(t)

@@ -104,6 +104,8 @@ type runTransitionParams struct {
 	attested bool
 	// replan は回答に「範囲が変わる」印が付いたこと（T12 だけ）。真のとき、遷移先は IfReplan の分類済になる。
 	replan bool
+	// att は本人確認つきの遷移（attested）の Attestation。経路 chat の印の検査と種類の絞りに使う。
+	att Attestation
 }
 
 // runTransition は transition（#10: 本人確認の無い5操作）・verifiedTransition
@@ -169,6 +171,10 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 			act, ok := actionForTransition(tr)
 			if !ok || !registryPermits(p.channel, p.verification, act) {
 				return ErrVerificationRejected
+			}
+			// 経路 chat は、印の検査と手がかりの解決、反映の承認を含む完了の承認の絞りをここで行う。
+			if err := s.chatGate(ctx, tx, p.att, act, ""); err != nil {
+				return err
 			}
 		}
 
@@ -421,6 +427,7 @@ func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, i
 		resolvePreceding: resolvePreceding,
 		attested:         true,
 		replan:           replan,
+		att:              att,
 	}, apply)
 }
 
@@ -433,7 +440,12 @@ func (s *Store) verifiedTransitionReplan(ctx context.Context, att Attestation, i
 // （self-review 指摘: 確認の入力は対象の ID の完全一致という設計決定〈H9〉が
 // Verifier の中だけで閉じており、core の API 境界では担保されていなかった）。
 func attestationValid(att Attestation, id string) bool {
-	if att.verification == VerificationRelayed && !att.hasEvidence() {
+	if att.channel == ChannelChat {
+		// 経路 chat の手がかりは、トランザクションの中で印から解決する。ここでは印の 2 値が空でないことだけを見る。
+		if att.chat == nil || !att.chat.complete() {
+			return false
+		}
+	} else if att.verification == VerificationRelayed && !att.hasEvidence() {
 		return false
 	}
 	return att.actor != "" && att.target == id && registryAllows(att.channel, att.verification)

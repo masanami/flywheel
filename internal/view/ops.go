@@ -1,6 +1,11 @@
 package view
 
-import "github.com/masanami/flywheel/internal/core"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/masanami/flywheel/internal/core"
+)
 
 // IngestItem は ingest の items の要素。対応の情報を積まない失敗の要素では
 // challenge_id・upstream_state・policy_state・comments_count・upstream_updated_at が null。
@@ -339,9 +344,13 @@ func FromCyclePhase(p core.CyclePhaseResult) any {
 // Cycle は cycle の周の記録。
 type Cycle struct {
 	BudgetUSD float64 `json:"budget_usd"`
+	// EndReason は終わった理由（`settled`・`budget`・`stopped`・`rate_limited`・`stalled`・`error`・`interrupted`）。理由を持たない周は null。
+	EndReason *string `json:"end_reason"`
 	EndedAt   *string `json:"ended_at"`
 	ID        string  `json:"id"`
 	Result    string  `json:"result"`
+	// Rounds は通した回りの数。
+	Rounds    int     `json:"rounds"`
 	SpentUSD  float64 `json:"spent_usd"`
 	StartedAt string  `json:"started_at"`
 	Trigger   string  `json:"trigger"`
@@ -382,9 +391,11 @@ func FromCycleRunResult(res *core.CycleRunResult) CycleResponse {
 		Started:            true,
 		Cycle: &Cycle{
 			BudgetUSD: c.BudgetUSD,
+			EndReason: endReasonPtr(c.EndReason),
 			EndedAt:   ts(c.EndedAt),
 			ID:        c.ID,
 			Result:    string(c.Result),
+			Rounds:    c.Rounds,
 			SpentUSD:  c.SpentUSD,
 			StartedAt: FormatTimestamp(c.StartedAt),
 			Trigger:   c.Trigger,
@@ -392,6 +403,15 @@ func FromCycleRunResult(res *core.CycleRunResult) CycleResponse {
 		Phases:      phases,
 		RateLimited: res.RateLimited,
 	}
+}
+
+// endReasonPtr は終わった理由を JSON の値へ写す（空は null）。
+func endReasonPtr(r core.CycleEndReason) *string {
+	if r == "" {
+		return nil
+	}
+	v := string(r)
+	return &v
 }
 
 // SlotCleared は slot clear の slot オブジェクト。
@@ -451,12 +471,80 @@ type CycleStarted struct {
 	Started bool `json:"started"`
 }
 
-// CycleStatus は `GET /api/v1/workspaces/{name}/cycle` の形。state は idle・running・stale。
+// CycleStart は、操作（承認・回答など）が成立した後にサイクルを始めたかの結果（操作の出力のキー `cycle`）。
+// reason は started・already_running・no_work・disabled・unavailable（CYCLE_START_REASON_CODES）。
+type CycleStart struct {
+	Reason  string `json:"reason"`
+	Started bool   `json:"started"`
+}
+
+// FromCycleStartReason は理由から CycleStart を作る（started は理由が started のときだけ真）。
+func FromCycleStartReason(r core.CycleStartReason) CycleStart {
+	return CycleStart{Reason: string(r), Started: r == core.CycleStartStarted}
+}
+
+// WithCycle は、操作の出力（最上位がオブジェクトの Body）に、キー `cycle` を足した形。
+type WithCycle struct {
+	Body  any
+	Cycle CycleStart
+}
+
+// MarshalJSON は Body のオブジェクトの末尾に "cycle" を足す（Body が空のオブジェクトなら cycle だけ）。
+func (w WithCycle) MarshalJSON() ([]byte, error) {
+	body, err := json.Marshal(w.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' {
+		return nil, fmt.Errorf("view: WithCycle の Body はオブジェクトでなければならない: %T", w.Body)
+	}
+	cyc, err := json.Marshal(w.Cycle)
+	if err != nil {
+		return nil, err
+	}
+	out := append([]byte{}, body[:len(body)-1]...)
+	if len(body) > 2 {
+		out = append(out, ',')
+	}
+	out = append(out, `"cycle":`...)
+	out = append(out, cyc...)
+	return append(out, '}'), nil
+}
+
+// CycleWatching は running.watching[] の要素（サイクルが見ている、終わっていない実行 1 件）。
+// state は working・verifying・waiting_owner。task_id・title は、タスクに結び付かない実行では課題の値。
+type CycleWatching struct {
+	ChallengeID  string  `json:"challenge_id"`
+	RunStartedAt string  `json:"run_started_at"`
+	SpentUSD     float64 `json:"spent_usd"`
+	State        string  `json:"state"`
+	TaskID       *string `json:"task_id"`
+	Title        string  `json:"title"`
+}
+
+// CycleRunning は走っているサイクルの様子（`running`）。
+type CycleRunning struct {
+	ActiveRuns      int             `json:"active_runs"`
+	BudgetUSD       float64         `json:"budget_usd"`
+	MaxParallelRuns int             `json:"max_parallel_runs"`
+	Rounds          int             `json:"rounds"`
+	SpentUSD        float64         `json:"spent_usd"`
+	StartedAt       string          `json:"started_at"`
+	StopRequested   bool            `json:"stop_requested"`
+	Trigger         string          `json:"trigger"`
+	Watching        []CycleWatching `json:"watching"`
+}
+
+// CycleStatus は `GET /api/v1/workspaces/{name}/cycle` と `flywheel cycle status --json` の形。
+// state は idle・running・stale。running は走っているサイクルの様子（走っていなければ null）、
+// last_end_reason は最後に終わったサイクルの終わった理由（無ければ null）。
 type CycleStatus struct {
-	LastEndedAt   *string `json:"last_ended_at"`
-	LastResult    *string `json:"last_result"`
-	LastStartedAt *string `json:"last_started_at"`
-	State         string  `json:"state"`
+	LastEndReason *string       `json:"last_end_reason"`
+	LastEndedAt   *string       `json:"last_ended_at"`
+	LastResult    *string       `json:"last_result"`
+	LastStartedAt *string       `json:"last_started_at"`
+	Running       *CycleRunning `json:"running"`
+	State         string        `json:"state"`
 }
 
 // FromCycleStatus は core.CycleStatus を CycleStatus へ変換する。
@@ -466,7 +554,36 @@ func FromCycleStatus(s *core.CycleStatus) CycleStatus {
 		r := string(*s.LastResult)
 		out.LastResult = &r
 	}
+	if s.LastEndReason != nil {
+		r := string(*s.LastEndReason)
+		out.LastEndReason = &r
+	}
+	if r := s.Running; r != nil {
+		run := &CycleRunning{
+			ActiveRuns: r.ActiveRuns, BudgetUSD: r.BudgetUSD, MaxParallelRuns: r.MaxParallelRuns, Rounds: r.Rounds,
+			SpentUSD: r.SpentUSD, StartedAt: FormatTimestamp(r.StartedAt), StopRequested: r.StopRequested, Trigger: r.Trigger,
+			Watching: []CycleWatching{},
+		}
+		for _, w := range r.Watching {
+			run.Watching = append(run.Watching, CycleWatching{
+				ChallengeID: w.ChallengeID, RunStartedAt: FormatTimestamp(w.RunStartedAt), SpentUSD: w.SpentUSD,
+				State: string(w.State), TaskID: strOrNil(w.TaskID), Title: w.Title,
+			})
+		}
+		out.Running = run
+	}
 	return out
+}
+
+// CycleStop は `flywheel cycle stop --json` の形。requested は止める指示を書いたか（走っているサイクルが無ければ false）。
+type CycleStop struct {
+	CycleID   *string `json:"cycle_id"`
+	Requested bool    `json:"requested"`
+}
+
+// FromCycleStopResult は core.CycleStopResult を CycleStop へ変換する。
+func FromCycleStopResult(r *core.CycleStopResult) CycleStop {
+	return CycleStop{CycleID: strOrNil(r.CycleID), Requested: r.Requested}
 }
 
 // ExportBody は `export` の成功の形の中身（書き出したファイルの絶対パスとスキーマの版）。

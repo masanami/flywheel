@@ -728,9 +728,15 @@ J4 に回す範囲は 2 つで、同じ指示文（`internal/invoker/prompts/j4.
 }
 ```
 
+- `cycle_poll_interval_sec`（サイクルの回りの間隔。秒。既定 30）と `auto_cycle`（承認・回答などの成立後にサイクルを自動で始めるか。既定は真）は core の見直しの区切り S4a で足す。`cycle_poll_interval_sec` は 1 以上の整数だけを受け、それ以外は `config_invalid`。`auto_cycle` が偽なら、操作はサイクルを始めず（コマンドの `--no-cycle` は、付けたコマンドだけが始めない）、`settled` で終えた後の次のサイクルも始めない（こちらは `--no-cycle` に関わらず宣言の `auto_cycle` だけで決まる）。
 - `conflict_prediction_budget_usd` は S2 で足す（【決定 2026-10-01 親 M3P29】。金額なので 0 以下は `config_invalid`）。
 - `judgment_budget_usd.J9`（1 組の判断の上限額。既定 0.5）と `serial_judgment_cycle_budget_usd`（1 周の J9 の費用の上限。既定 3）は §同時に進めてよいかの判断（J9）で足す（【決定 2026-11-14 オーナー Q1】。金額なので 0 以下は `config_invalid`）。
 - `behind_update_limit`（本番反映の間に BEHIND の取り込みを依頼してよい累計の回数）は、core の見直しの区切り S3a で外した。flywheel は反映先の最新の取り込みを依頼せず（委譲先が取り込んで解く）、この回数の上限を持たない。残っている宣言は `config_invalid`（項目の名前 `behind_update_limit` と、語 `removed`）で止まる。
+- `chat_tools`・`chat_max_turns`・`chat_timeout_sec`・`chat_approvable_operations` は、画面の対話の欄の宣言の項目（core の見直しの区切り S4d）。省略した項目は既定を使う。
+  - `chat_tools`: 欄の実行エンジンに許す道具の範囲。`restricted`（読み取り・検索・flywheel のコマンドと、読み取りだけのシェルのコマンド。書き込む・実行するシェルのコマンドとファイルの編集は断る。既定）か `full`（すべて許す）。これ以外は `config_invalid`。
+  - `chat_max_turns`: 1 回の返事のターン数の上限。正の整数（既定 30）。
+  - `chat_timeout_sec`: 1 回の返事の時間の上限（秒）。正の整数（既定 600）。
+  - `chat_approvable_operations`: 欄から承認できる不可逆操作の種類。`release`・`delete`・`external_send`・`other` の部分集合（既定は `release` だけ。空の一覧なら、どの種類の不可逆操作の承認も、反映の承認を含む完了の承認も欄から断られる。反映を保留した完了の承認は通る）。これ以外の値は `config_invalid`。
 - すべてのキーは省略でき、省略したキーは上の値を既定とする。`position_file` だけは既定を持たない（省略したら J1・J2 を起動しない＝`config_invalid`）。
 
 #### `.flywheel/connectors.json`【決定 2026-09-28 オーナー M3H2／親 M3P1】
@@ -834,7 +840,7 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 
 ```json
 {
-  "cycle": {"id": "Y-3", "trigger": "cron", "started_at": "…", "ended_at": "…", "result": "completed", "budget_usd": 300, "spent_usd": 7.42},
+  "cycle": {"id": "Y-3", "trigger": "cron", "started_at": "…", "ended_at": "…", "result": "completed", "budget_usd": 300, "spent_usd": 7.42, "end_reason": "settled", "rounds": 3},
   "config_defaults_used": ["agent.json"],
   "not_started_reason": null,
   "phases": [
@@ -848,6 +854,8 @@ J5 の `deferred_conditions`（#451・#460 で追加。正本は `internal/core/
 ```
 
 - 周を始めたときは `started` が `true`・`not_started_reason` が `null`。サイクルを回すと進むものが無いときは、周の記録を作らず、どの段も実行せず、バックアップも行わず、終了コード 0 で `started` が `false`・`not_started_reason` が `"nothing_to_advance"`・`cycle` が `null`・`phases` が `[]` になる（`config_defaults_used`・`rate_limited` は同じ形のまま。`rate_limited` は `false`）。進むものの数えは `status --json` の `cycle_work` と同じ（LLM を呼ばず、上流を読まない。宣言の不備は件数に関わらず `config_invalid`）。テキスト表示は始めなかった旨と理由を出し、開始の合図の行（`周 <ID> を開始した`）の形にしない。
+
+- **core の見直し（区切り S4a）で足した値**: `cycle` に `end_reason`（終わった理由。周が終わるまでは出ない。`settled | budget | stopped | rate_limited | stalled | error | interrupted` のいずれか。理由を持たない周は `null`）と `rounds`（通した回りの数）を足す。サイクルは回り（進める段 `release`・`ingest`・`classify`・`plan`・`run`・`verify` を 1 回ずつ通すこと）を繰り返すので、`phases` の `items`・`not_started`・`release_items` などは回りをまたいで連結し、`phases` の要素は段ごとに 1 つのまま変えない。定義は [core の見直し](core-redesign.md) を正とする。
 
 - `phase` は `ingest | classify | plan | run | verify` の閉集合（S1 は前の 3 つ）。`ingest` の `result` は M2 の `ingest --json` と同じ形（`.flywheel/sources.json` が無ければ `skipped: true`・`result: null`）。`plan`・`run`・`verify` の段は `.flywheel/connectors.json` が無ければ `skipped: true`・`items: []`・`not_started: []`。どの段も `skipped` を持つ。
 - `items[].outcome` は判断点の判定（J1・J2・J5）か委譲の結末。`items[].status` は写した後の課題の状態（写さなかったら `null`）。

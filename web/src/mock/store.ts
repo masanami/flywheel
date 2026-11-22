@@ -695,6 +695,8 @@ export function seed(): Record<string, MockWorkspace> {
         last_started_at: iso(12),
         last_ended_at: iso(90),
         last_result: "completed",
+        last_end_reason: null,
+        running: null,
       },
       cycleWork: {
         stages: {
@@ -719,6 +721,8 @@ export function seed(): Record<string, MockWorkspace> {
         last_started_at: iso(2010),
         last_ended_at: iso(2000),
         last_result: "completed",
+        last_end_reason: null,
+        running: null,
       },
       cycleWork: {
         stages: {
@@ -748,6 +752,8 @@ export function seed(): Record<string, MockWorkspace> {
         last_started_at: null,
         last_ended_at: null,
         last_result: null,
+        last_end_reason: null,
+        running: null,
       },
       deps: { deps: [] },
     },
@@ -996,6 +1002,8 @@ export function seedLarge(): Record<string, MockWorkspace> {
       last_started_at: iso(12),
       last_ended_at: iso(90),
       last_result: "completed",
+      last_end_reason: null,
+      running: null,
     },
   };
   return {

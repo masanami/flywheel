@@ -452,7 +452,7 @@ const approveBtn = () =>
 
 it("AC-336 #811: 「この計画を承認する」で、承認の口が approval.version を本文にして 1 回呼ばれる", async () => {
   const { requests } = await opened(summary(), {
-    extra: { [APPROVE]: {} },
+    extra: { [APPROVE]: { cycle: { reason: "started", started: true } } },
   });
   fireEvent.click(await approveBtn());
   await screen.findByText("承認しました。");
@@ -466,7 +466,7 @@ it("AC-336 #811: 「この計画を承認する」で、承認の口が approval
 
 it("#811: 画面が送る要求は、GET と承認の口の POST だけ（見直し前の詳細のテストから移した）", async () => {
   const { requests } = await opened(summary(), {
-    extra: { [APPROVE]: {} },
+    extra: { [APPROVE]: { cycle: { reason: "started", started: true } } },
   });
   fireEvent.click(await approveBtn());
   await screen.findByText("承認しました。");
@@ -503,7 +503,10 @@ it("#811: 一覧の状態の文字列が承認待ちでなくても、要約が�
 });
 
 async function approved(o: Opts = {}) {
-  await opened(summary(), { ...o, extra: { [APPROVE]: {} } });
+  await opened(summary(), {
+    ...o,
+    extra: { [APPROVE]: { cycle: { reason: "started", started: true } } },
+  });
   fireEvent.click(await approveBtn());
   await screen.findByText("承認しました。");
 }
@@ -513,11 +516,39 @@ it("AC-337 #811: 承認が通ると、「承認しました。」が出る", asy
   expect(screen.getByText("承認しました。")).toBeInTheDocument();
 });
 
-it("AC-338 #811: 承認が通ると、「続きは、次のサイクルで進みます。」が出る", async () => {
-  await approved();
-  expect(
-    screen.getByText("続きは、次のサイクルで進みます。"),
-  ).toBeInTheDocument();
+const CYCLE_LINES: Array<[string, string, string]> = [
+  ["AC-175", "started", "サイクルを始めました。"],
+  ["AC-176", "already_running", "走っているサイクルが、続きを進めます。"],
+  [
+    "AC-177",
+    "no_work",
+    "いま進められるものが無いので、サイクルは始めていません。",
+  ],
+  ["AC-178", "disabled", "サイクルを自動で始めない設定です。"],
+];
+
+for (const [ac, reason, text] of CYCLE_LINES) {
+  it(`${ac} #995: 承認の応答の cycle.reason が ${reason} → 「${text}」が出る`, async () => {
+    await opened(summary(), {
+      extra: {
+        [APPROVE]: { cycle: { reason, started: reason === "started" } },
+      },
+    });
+    fireEvent.click(await approveBtn());
+    await screen.findByText("承認しました。");
+    expect(screen.getByTestId("cycle-start-line")).toHaveTextContent(text);
+  });
+}
+
+it("AC-179 #995: cycle.reason が unavailable → 「サイクルを始められませんでした。」で始まる文が出る", async () => {
+  await opened(summary(), {
+    extra: { [APPROVE]: { cycle: { reason: "unavailable", started: false } } },
+  });
+  fireEvent.click(await approveBtn());
+  await screen.findByText("承認しました。");
+  expect(screen.getByTestId("cycle-start-line").textContent).toMatch(
+    /^サイクルを始められませんでした。/,
+  );
 });
 
 it("AC-339 #811: 承認が通ると、課題の詳細へのリンクが出る", async () => {
@@ -552,7 +583,7 @@ it("AC-342/343 #811: conflict で失敗すると、計画が変わった旨が�
           posts++;
           return posts === 1
             ? json(409, { error: { code: "conflict", message: "版が違う" } })
-            : json(200, {});
+            : json(200, { cycle: { reason: "started", started: true } });
         },
       },
     },
@@ -585,7 +616,11 @@ async function openWithVersions(versions: number[], approve?: () => Response) {
       reads++;
       return json(200, summary({ version: v }));
     },
-    { extra: { [APPROVE]: approve ?? {} } },
+    {
+      extra: {
+        [APPROVE]: approve ?? { cycle: { reason: "started", started: true } },
+      },
+    },
   );
   await screen.findByTestId("plan-approval");
   return { ...r, reads: () => reads };
@@ -622,7 +657,7 @@ it("#798: 読み直しても版が変わらなければ、知らせは出ない"
 
 it("#798: 知らせが出た後に押すと、新しい版で承認が送られ、知らせは消える", async () => {
   const { requests, reads } = await openWithVersions([7, 8], () =>
-    json(200, {}),
+    json(200, { cycle: { reason: "started", started: true } }),
   );
   await changed();
   await waitFor(() => expect(reads()).toBe(2));
@@ -660,9 +695,12 @@ it("AC-345 #811: 課題の詳細の「計画の本文」へのリンクが出る
 it("AC-346 #811: 差し戻しのボタンは無い", async () => {
   await opened();
   expect(screen.queryByRole("button", { name: /差し戻/ })).toBeNull();
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
-    "この計画を承認する",
-  ]);
+  // 対話の欄（#1002）のボタンは、この画面の数えに入れない。
+  expect(
+    within(screen.getByTestId("plan-approval"))
+      .getAllByRole("button")
+      .map((b) => b.textContent),
+  ).toEqual(["この計画を承認する"]);
 });
 
 it("AC-347 #811: 差し戻しの案内は、コマンドの例を出さず、対話で伝える方法だけを出す", async () => {
