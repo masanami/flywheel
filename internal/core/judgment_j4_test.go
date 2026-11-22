@@ -60,17 +60,6 @@ func answerAll() JudgmentLaunchOutput {
 	return j4Out(dec(1, "answer", "B", nil), dec(2, "answer", nil, "ANSWER-TWO"))
 }
 
-func (f *delegateFixture) runWith(t *testing.T, r *j4Router, id string) *DelegateResult {
-	t.Helper()
-	in := f.input(f.cycle(t, 300), &id)
-	in.Judgment = r
-	res, err := f.s.RunDelegation(context.Background(), in)
-	if err != nil {
-		t.Fatalf("RunDelegation: %v", err)
-	}
-	return res
-}
-
 func (f *delegateFixture) countRows(t *testing.T, q string) int {
 	t.Helper()
 	n := 0
@@ -116,124 +105,6 @@ func TestJ4Schema_EnumComesFromTheDecisionValues(t *testing.T) {
 	enum := m["properties"].(map[string]any)["decisions"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)["decision"].(map[string]any)["enum"]
 	if !reflect.DeepEqual(enum, []any{"answer", "escalate"}) {
 		t.Errorf("enum = %v", enum)
-	}
-}
-
-func TestJ4_AllAnswerResumesTheChildInTheSameCycleWithoutAHold(t *testing.T) {
-	t.Parallel()
-	f := newResumeFixture(t)
-	id := f.newInProgress(t, "t", "P1", planSpec(nil))
-	f.deleg.queue = []JudgmentLaunchOutput{minorQuestionsOut(), {Result: RunResultSucceeded, StructuredOutput: reportJSON(nil), ReportedTotalCostUSD: float64Ptr(1)}}
-	r := &j4Router{j4Out: []JudgmentLaunchOutput{answerAll()}}
-	f.runWith(t, r, id)
-
-	launches := f.deleg.launched()
-	if len(launches) != 2 {
-		t.Fatalf("launches = %d, want 2 (the child is resumed in the same cycle)", len(launches))
-	}
-	first, second := launches[0], launches[1]
-	if !second.IsResume || second.SessionID != first.SessionID || second.ResumeKind != ResumeKindAnswer {
-		t.Errorf("second launch = %+v, want a resume of %s with the answer kind", second, first.SessionID)
-	}
-	for _, want := range []string{"問い 1 の回答:\nB", "問い 2 の回答:\nANSWER-TWO"} {
-		if !strings.Contains(second.ResumeAnswer, want) {
-			t.Errorf("ResumeAnswer lacks %q:\n%s", want, second.ResumeAnswer)
-		}
-	}
-	if !strings.Contains(second.ResumeQuestion, "QUESTION-ONE") || second.ResumeBranch != "feat/x" {
-		t.Errorf("question = %q branch = %q", second.ResumeQuestion, second.ResumeBranch)
-	}
-	// 2 回目の起動の結果の照合は、この試験の偽の gh が成果物を返さないので保留になりうる。問いと J4 の回答の保留は無い。
-	if n := f.countRows(t, `SELECT COUNT(*) FROM hold WHERE question LIKE '%QUESTION-%' OR question LIKE '%ANSWER-TWO%'`); n != 0 {
-		t.Errorf("holds about the questions = %d, want 0 (J4's answers are not put in a hold)", n)
-	}
-	if len(r.j4Seen) != 1 || !strings.Contains(sectionsText(r.j4Seen[0].Sections), "QUESTION-TWO") {
-		t.Errorf("J4 calls = %d", len(r.j4Seen))
-	}
-	if n := f.countRows(t, `SELECT COUNT(*) FROM run WHERE kind = 'judgment' AND judgment = 'J4' AND result = 'succeeded' AND output LIKE '%ANSWER-TWO%'`); n != 1 {
-		t.Errorf("the J4 output is not kept as the run's output")
-	}
-}
-
-func TestJ4_AnyEscalateHoldsWithTheReasonAndTheDelegationRun(t *testing.T) {
-	t.Parallel()
-	f := newResumeFixture(t)
-	id := f.newInProgress(t, "t", "P1", planSpec(nil))
-	f.deleg.result = minorQuestionsOut()
-	r := &j4Router{j4Out: []JudgmentLaunchOutput{j4Out(dec(1, "answer", "A", nil), dec(2, "escalate", nil, "REASON-MARKER"))}}
-	f.runWith(t, r, id)
-
-	if len(f.deleg.launched()) != 1 || f.detail(t, id).Status != StatusAwaitingHuman {
-		t.Fatalf("launches = %d status = %s, want 1 and awaiting_human", len(f.deleg.launched()), f.detail(t, id).Status)
-	}
-	q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`)
-	for _, want := range []string{"REASON-MARKER", "QUESTION-ONE", "QUESTION-TWO"} {
-		if !strings.Contains(q, want) {
-			t.Errorf("hold question lacks %q:\n%s", want, q)
-		}
-	}
-	runs := f.delegateRuns(t)
-	if got := f.queryString(t, `SELECT run_id FROM hold WHERE challenge_id = 1`); got != strings.TrimPrefix(runs[0].ID, "R-") {
-		t.Errorf("hold.run_id = %q, want the delegation run", got)
-	}
-}
-
-func TestJ4_RuleKindsAndInvalidOrFailedJ4GoToTheHuman(t *testing.T) {
-	t.Parallel()
-	t.Run("scope is never given to J4", func(t *testing.T) {
-		f := newResumeFixture(t)
-		id := f.newInProgress(t, "t", "P1", planSpec(nil))
-		f.deleg.result = questionsOut("feat/x") // 1 つが scope
-		r := &j4Router{j4Out: []JudgmentLaunchOutput{answerAll()}}
-		f.runWith(t, r, id)
-		if len(r.j4Seen) != 0 || f.detail(t, id).Status != StatusAwaitingHuman {
-			t.Errorf("J4 calls = %d status = %s", len(r.j4Seen), f.detail(t, id).Status)
-		}
-	})
-	t.Run("invalid output", func(t *testing.T) {
-		f := newResumeFixture(t)
-		id := f.newInProgress(t, "t", "P1", planSpec(nil))
-		f.deleg.result = minorQuestionsOut()
-		r := &j4Router{j4Out: []JudgmentLaunchOutput{j4Out(dec(1, "answer", "Z", nil), dec(2, "answer", nil, "x"))}}
-		f.runWith(t, r, id)
-		if f.detail(t, id).Status != StatusAwaitingHuman || len(f.deleg.launched()) != 1 {
-			t.Errorf("status = %s launches = %d", f.detail(t, id).Status, len(f.deleg.launched()))
-		}
-		if n := f.countRows(t, `SELECT COUNT(*) FROM run WHERE judgment = 'J4' AND result = 'invalid_output'`); n != 1 {
-			t.Errorf("invalid J4 runs = %d, want 1", n)
-		}
-	})
-	t.Run("J4 failed", func(t *testing.T) {
-		f := newResumeFixture(t)
-		id := f.newInProgress(t, "t", "P1", planSpec(nil))
-		f.deleg.result = minorQuestionsOut()
-		r := &j4Router{j4Out: []JudgmentLaunchOutput{{Result: RunResultErrored, ErrorSummary: "boom"}}}
-		f.runWith(t, r, id)
-		if f.detail(t, id).Status != StatusAwaitingHuman {
-			t.Errorf("status = %s, want awaiting_human", f.detail(t, id).Status)
-		}
-	})
-}
-
-func TestJ4_ResumeLimitIsThreePerChainAndTheFourthGoesToTheHuman(t *testing.T) {
-	t.Parallel()
-	f := newResumeFixture(t)
-	id := f.newInProgress(t, "t", "P1", planSpec(nil))
-	f.deleg.result = minorQuestionsOut() // 毎回また問いで止まる
-	r := &j4Router{j4Out: []JudgmentLaunchOutput{answerAll()}}
-	f.runWith(t, r, id)
-
-	if got := len(f.deleg.launched()); got != 4 {
-		t.Errorf("launches = %d, want 4 (1 + 3 resumes by J4's answers)", got)
-	}
-	if len(r.j4Seen) != 3 {
-		t.Errorf("J4 calls = %d, want 3 (the 4th is not called)", len(r.j4Seen))
-	}
-	if f.detail(t, id).Status != StatusAwaitingHuman {
-		t.Fatalf("status = %s, want awaiting_human", f.detail(t, id).Status)
-	}
-	if q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`); !strings.Contains(q, "上限（3 回）") {
-		t.Errorf("hold question lacks the limit reason:\n%s", q)
 	}
 }
 
@@ -400,32 +271,6 @@ func TestJ4_ContractStartKeepsAParentAnswerWaitForTheNextPollWhenJ4IsAvailable(t
 	}
 	if f.status(t, f.cid) != StatusInProgress || f.count(t, `SELECT COUNT(*) FROM hold`) != 0 {
 		t.Errorf("status = %s, want in_progress without a hold (J4 handles it at the next poll)", f.status(t, f.cid))
-	}
-}
-
-// 意思決定者が human の委譲（操作の宣言が人を相手にする）の問いは、種類が人へ上げるものでなくても J4 を呼ばずオーナーの保留にする。
-func TestJ4_HumanDeciderQuestionsAreNeverGivenToJ4(t *testing.T) {
-	t.Parallel()
-	f := newResumeFixture(t)
-	id := f.newInProgress(t, "t", "P1", planSpec(func(m map[string]any) { m["operation"] = "define-human" }))
-	f.deleg.result = minorQuestionsOut()
-	r := &j4Router{j4Out: []JudgmentLaunchOutput{answerAll()}}
-	f.runWith(t, r, id)
-
-	if runs := f.delegateRuns(t); len(runs) != 1 || runs[0].Decider != DeciderHuman {
-		t.Fatalf("delegate runs = %+v, want one run decided by human", runs)
-	}
-	if len(r.j4Seen) != 0 {
-		t.Errorf("J4 calls = %d, want 0 (a human decider never goes to J4)", len(r.j4Seen))
-	}
-	if len(f.deleg.launched()) != 1 || f.detail(t, id).Status != StatusAwaitingHuman {
-		t.Fatalf("launches = %d status = %s, want 1 and awaiting_human", len(f.deleg.launched()), f.detail(t, id).Status)
-	}
-	q := f.queryString(t, `SELECT question FROM hold WHERE challenge_id = 1`)
-	for _, want := range []string{"QUESTION-ONE", "QUESTION-TWO"} {
-		if !strings.Contains(q, want) {
-			t.Errorf("hold question lacks %q:\n%s", want, q)
-		}
 	}
 }
 

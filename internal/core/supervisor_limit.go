@@ -71,3 +71,14 @@ func prefixSupervisorAnswerLimitQuestion(question string) string {
 	}
 	return supervisorAnswerLimitNotice + "\n" + question
 }
+
+// answerLimitReached は supervisorAnswerLimitReached を、読み取りの 1 つのトランザクションで呼ぶ。
+func (s *Store) answerLimitReached(ctx context.Context, challengeID int64) (bool, error) {
+	var reached bool
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		var err error
+		reached, err = supervisorAnswerLimitReached(ctx, tx, challengeID)
+		return err
+	})
+	return reached, classifyReadWriteErr(err)
+}
