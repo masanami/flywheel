@@ -393,6 +393,41 @@ func TestChat_SpeechCommandsAndCostAreRecordedAsTheyHappen(t *testing.T) {
 	}
 }
 
+// AC-155: 欄の返事に費用があっても、サイクルの記録の使った費用（spent_usd）は変わらない
+// （欄の費用は発言の行に記録して見せるだけで、サイクルの費用に数えない）。
+func TestChat_ReplyCostDoesNotChangeCycleSpentUSD(t *testing.T) {
+	ws, port, inv := chatWorkspace(t)
+	coretest.InsertCycle(t, ws, "ui", 1_000_000, "2026-11-01T00:00:00.000Z")
+	coretest.InsertCycle(t, ws, "cli", 2_000_000, "2026-11-02T00:00:00.000Z")
+	before := coretest.DumpTables(t, ws, "cycle", "run")
+	if strings.Count(before, "\n") < 3 { // 見出し 1 行 + 周の記録 2 行
+		t.Fatalf("fixture has no cycle rows: %q", before)
+	}
+
+	for i, cost := range []float64{0.25, 0.5} {
+		inv.run = func(_ context.Context, _ core.ChatLaunchInput, _ core.ChatEvents) (core.ChatLaunchOutput, error) {
+			return core.ChatLaunchOutput{State: core.ChatStateDone, CostUSD: cost}, nil
+		}
+		if code, body := sendChat(t, port, "費用のある返事"); code != 200 {
+			t.Fatalf("%d %s", code, body)
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			c := getChat(t, port)
+			if c.State == view.ChatStateIdle && len(c.Messages) > 0 && lastReply(c).CostUSD == cost {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("reply %d cost was not recorded on the message: %+v", i, c)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if after := coretest.DumpTables(t, ws, "cycle", "run"); after != before {
+			t.Fatalf("cycle/run tables changed after reply %d:\n%s\n->\n%s", i, before, after)
+		}
+	}
+}
+
 // AC-28・AC-29・AC-58: 返事が進行中の送信と「新しい会話」は 409 で、行を増やさない。
 // AC-31・AC-33・AC-34・AC-156・AC-61: 止めると実行エンジンが終わり、stopped・出し終えた発言は残り、費用は 0。
 // AC-35: 進行中でない stop は何も変えずに成功。
