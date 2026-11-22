@@ -33,6 +33,11 @@ func TestIngestSelect_JSONRootIsIngestedAndOnlyChosenIssuesBecomeChallenges(t *t
 	ws := selectSetup(t)
 
 	got := runJSON(t, ws, "ingest", "OWNER/select-repo#2")
+	// cycle は、操作の後にサイクルを始めたかの結果（取り込み元を指定した ingest だけが持つ）。
+	if _, ok := got["cycle"]; !ok {
+		t.Fatalf("ingest <指定> --json = %v, want the key cycle", got)
+	}
+	delete(got, "cycle")
 	items, ok := got["ingested"].([]any)
 	if !ok || len(items) != 1 || len(got) != 1 {
 		t.Fatalf("ingest --json = %v, want the single root key ingested with 1 element", got)

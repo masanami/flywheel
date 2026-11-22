@@ -870,6 +870,10 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	// TestExportImportCommands_MatchM5IFAPITable が m5 の表と照合する）。
 	wantSet["export"] = true
 	wantSet["import"] = true
+	// core の見直し S4a: 同じ理由で、実装済みの `cycle status`・`cycle stop` を個別に足す
+	// （仕様は docs/features/core-redesign.md §走っているサイクルを見る・止める。値の形は cycle_status_test.go が検査する）。
+	wantSet["cycle status"] = true
+	wantSet["cycle stop"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")
