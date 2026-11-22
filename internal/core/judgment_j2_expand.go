@@ -145,34 +145,45 @@ func expandAddable(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDecla
 	return known, nil
 }
 
-// selectExpandAdditionCandidates は足す依頼を作る対象（課題の ID の昇順・タスクの ID の昇順）を返す。
-func selectExpandAdditionCandidates(ctx context.Context, tx *sql.Tx, agent *AgentDeclaration) ([]expandAdditionCandidate, error) {
-	rows, err := tx.QueryContext(ctx,
-		`SELECT t.challenge_id, t.id FROM task t JOIN challenge c ON c.id = t.challenge_id
+// unaddedExpandTasks は、済みの expand_after のタスクで、足す依頼（出どころ expand）がまだ無いものを、課題の ID の昇順・
+// タスクの ID の昇順で返す（課題が足せるかは見ない）。only が非 nil ならその課題だけ。足す依頼を作る対象の選び方と、
+// 上げる依頼・検証中へ進める条件・「いま始められるもの」の数えが、この 1 つの規則を共有する。
+func unaddedExpandTasks(ctx context.Context, tx *sql.Tx, only *int64) ([]expandPair, error) {
+	q := `SELECT t.challenge_id, t.id FROM task t JOIN challenge c ON c.id = t.challenge_id
 		 WHERE t.expand_after = 1 AND t.status = ? AND c.status IN (?, ?) AND c.uses_integration = 1
 		   AND t.plan_version = (SELECT plan_version FROM approval WHERE challenge_id = t.challenge_id AND kind = ? AND decision = ? ORDER BY id DESC LIMIT 1)
-		   AND NOT EXISTS (SELECT 1 FROM task_addition a WHERE a.origin = ? AND a.origin_task_id = t.id)
-		 ORDER BY t.challenge_id, t.id`,
-		string(TaskStatusDone), string(StatusInProgress), string(StatusAwaitingHuman),
-		string(ApprovalKindPlan), string(ApprovalDecisionApproved), string(TaskAdditionOriginExpand))
+		   AND NOT EXISTS (SELECT 1 FROM task_addition a WHERE a.origin = ? AND a.origin_task_id = t.id)`
+	args := []any{string(TaskStatusDone), string(StatusInProgress), string(StatusAwaitingHuman),
+		string(ApprovalKindPlan), string(ApprovalDecisionApproved), string(TaskAdditionOriginExpand)}
+	if only != nil {
+		q += ` AND t.challenge_id = ?`
+		args = append(args, *only)
+	}
+	rows, err := tx.QueryContext(ctx, q+` ORDER BY t.challenge_id, t.id`, args...)
 	if err != nil {
 		return nil, err
 	}
-	type pair struct{ cid, tid int64 }
-	var pairs []pair
+	defer func() { _ = rows.Close() }()
+	var pairs []expandPair
 	for rows.Next() {
-		var p pair
+		var p expandPair
 		if err := rows.Scan(&p.cid, &p.tid); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, p)
 	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
+	return pairs, rows.Err()
+}
+
+// expandPair は課題と、その課題の済みの expand_after のタスク（内部整数 ID）。
+type expandPair struct{ cid, tid int64 }
+
+// selectExpandAdditionCandidates は足す依頼を作る対象（課題の ID の昇順・タスクの ID の昇順）を返す。
+func selectExpandAdditionCandidates(ctx context.Context, tx *sql.Tx, agent *AgentDeclaration) ([]expandAdditionCandidate, error) {
+	pairs, err := unaddedExpandTasks(ctx, tx, nil)
+	if err != nil {
 		return nil, err
 	}
-	_ = rows.Close()
 	var out []expandAdditionCandidate
 	addable := map[int64]bool{}
 	checked := map[int64]bool{}
@@ -226,6 +237,20 @@ type expandTarget struct {
 	OriginTask *int64
 }
 
+// expandCallable は着手中の課題 cid について、判断点を「足す」の形で呼べるかを返す（足せる・タスクに結び付かない実行が無い）。
+// 周の中で自動で選ぶ対象の共通の規則（取り込み元の食い違い）で外れる課題は、ex に理由を返す。
+// 対象の選び方（selectJ2ExpandTargets）と「いま始められるもの」の数え（countExpandWork）が、この 1 つの判定を使う。
+func expandCallable(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclaration) (callable bool, ex *NotStarted, err error) {
+	if ok, err := expandAddable(ctx, tx, cid, agent); err != nil || !ok {
+		return false, nil, err
+	}
+	if busy, err := taskLessHasActiveRun(ctx, tx, cid); err != nil || busy {
+		return false, nil, err
+	}
+	ex, err = challengeAutoExclusion(ctx, tx, cid)
+	return ex == nil, ex, err
+}
+
 // selectJ2ExpandTargets は判断点を「足す」の形で呼ぶ対象を、課題の優先度→ID の順で返す。対象は、着手中で、統合先を使い、見込みが
 // 分かり、タスクに結び付かない実行が無く、pending の足す依頼を持つ課題。課題ごとに古いほうの 1 件だけ。保留中・見込みが不明の課題は
 // 含まない。別のタスクの実行が着手中でも対象になる。
@@ -250,29 +275,21 @@ func selectJ2ExpandTargets(ctx context.Context, tx *sql.Tx, agent *AgentDeclarat
 		if err != nil {
 			return nil, nil, err
 		}
-		if ok, err := expandAddable(ctx, tx, cid, agent); err != nil {
-			return nil, nil, err
-		} else if !ok {
-			continue
-		}
-		busy, err := taskLessHasActiveRun(ctx, tx, cid)
+		callable, ex, err := expandCallable(ctx, tx, cid, agent)
 		if err != nil {
 			return nil, nil, err
 		}
-		if busy {
+		if ex != nil {
+			excluded = append(excluded, *ex)
+			continue
+		}
+		if !callable {
 			continue
 		}
 		tg := expandTarget{Challenge: cid, Addition: aid}
 		if origin.Valid {
 			v := origin.Int64
 			tg.OriginTask = &v
-		}
-		// 周の中で自動で選ぶ対象の共通の規則（取り込み元の食い違いで外れる課題は、対象にせず理由を示す）。
-		if ex, err := challengeAutoExclusion(ctx, tx, cid); err != nil {
-			return nil, nil, err
-		} else if ex != nil {
-			excluded = append(excluded, *ex)
-			continue
 		}
 		out = append(out, tg)
 	}
