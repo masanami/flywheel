@@ -52,6 +52,7 @@ type Server struct {
 	doneOnce sync.Once
 	hub      *eventHub
 	cfg      eventsConfig
+	chat     *chatRunner
 }
 
 // New は ln（Listen の戻り値）で、workspaces（宣言の順）を束ねて配信する Server を
@@ -73,13 +74,25 @@ func newServer(ln net.Listener, workspaces []core.FleetWorkspace, cfg eventsConf
 func newServerWithLauncher(ln net.Listener, workspaces []core.FleetWorkspace, cfg eventsConfig, launch cycleLauncher) *Server {
 	cfg = cfg.withDefaults()
 	s := &Server{ln: ln, fleet: NewFleet(workspaces), checks: newCheckCache(defaultCheckTTL), done: make(chan struct{}), cfg: cfg, hub: newEventHub(workspaces)}
+	s.chat = newChatRunner(s.fleet)
+	// 前の起動が落ちて進行中のまま残った返事を、止めた状態にする（ストアの無いワークスペースは飛ばす）。
+	// 待ち受けを始める前（要求を受ける前）に済ませる。
+	s.chat.recoverInterrupted(context.Background())
 	port := ln.Addr().(*net.TCPAddr).Port
 	s.http = &http.Server{
-		Handler:           newHandler(port, s.fleet, s.checks, s.hub, s.done, cfg, launch),
+		Handler:           newHandler(port, s.fleet, s.checks, s.hub, s.done, cfg, launch, s.chat),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	s.http.RegisterOnShutdown(func() { s.doneOnce.Do(func() { close(s.done) }) })
 	return s
+}
+
+// SetChatInvoker は対話の欄の実行エンジン（core.ChatInvoker）を渡す。Serve の前に呼ぶ。渡さなければ、
+// 文を送る口は 503 を返す。
+func (s *Server) SetChatInvoker(inv core.ChatInvoker) {
+	s.chat.mu.Lock()
+	s.chat.invoker = inv
+	s.chat.mu.Unlock()
 }
 
 // Addr は待ち受けのアドレス。
@@ -108,12 +121,13 @@ func (s *Server) Shutdown() error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = s.http.Close()
 	}
+	s.chat.stopAll()
 	s.hub.wait()
 	s.fleet.Close()
 	return err
 }
 
-func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done <-chan struct{}, cfg eventsConfig, launch cycleLauncher) http.Handler {
+func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done <-chan struct{}, cfg eventsConfig, launch cycleLauncher, chat *chatRunner) http.Handler {
 	token, err := newCSRF(port)
 	if err != nil {
 		panic(err) // crypto/rand が読めない環境では安全な値を作れない
@@ -133,6 +147,10 @@ func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done 
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}", challengeHandler(fleet, checks, cfg.now))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/approval", approvalSummaryHandler(fleet, newGitHubSource))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/approve", approveHandler(fleet, checks, cfg.now))
+	mux.HandleFunc("/api/v1/workspaces/{name}/chat", chatGetHandler(fleet))
+	mux.HandleFunc("/api/v1/workspaces/{name}/chat/messages", chatMessagesHandler(chat))
+	mux.HandleFunc("/api/v1/workspaces/{name}/chat/stop", chatStopHandler(chat))
+	mux.HandleFunc("/api/v1/workspaces/{name}/chat/new", chatNewHandler(fleet))
 	mux.HandleFunc("/api/v1/workspaces/{name}/followups", followupsHandler(fleet))
 	mux.HandleFunc("/api/v1/workspaces/{name}/cycle", cycleHandler(fleet, launch))
 	mux.HandleFunc("/api/v1/workspaces/{name}/log", logHandler(fleet))
