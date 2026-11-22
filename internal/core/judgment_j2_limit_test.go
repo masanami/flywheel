@@ -188,7 +188,7 @@ func TestPlanApproval_RecordsTheLimitAndExpandAfter(t *testing.T) {
 	}
 }
 
-func TestPlanApproval_OmittedLimitStaysNullAndReadsAsTheEstimate(t *testing.T) {
+func TestPlanApproval_OmittedLimitIsRecordedAsTheEstimate(t *testing.T) {
 	t.Parallel()
 	f := newLimitFixture(t, nil)
 	before := f.detail(t, f.id).Budget
@@ -198,8 +198,8 @@ func TestPlanApproval_OmittedLimitStaysNullAndReadsAsTheEstimate(t *testing.T) {
 	if err := f.approve(t, ttyAtt(t, f.id)); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if l, r := f.limitColumns(t); l.Valid || r.Valid {
-		t.Errorf("limit=%+v reason=%+v, want NULL", l, r)
+	if l, r := f.limitColumns(t); !l.Valid || microsToUSD(l.Int64) != *before.EstimateUSD || r.Valid {
+		t.Errorf("limit=%+v reason=%+v, want the estimate at approval without a reason", l, r)
 	}
 	after := f.detail(t, f.id).Budget
 	if after.LimitUSD == nil || *after.LimitUSD != *before.EstimateUSD {
@@ -223,11 +223,15 @@ func TestPlanApproval_ReplacesThePreviousLimitAndSupersedesOpenAdditions(t *test
 		}
 		return nil
 	})
+	estimateBefore := f.detail(t, f.id).Budget.EstimateUSD
+	if estimateBefore == nil {
+		t.Fatal("estimate before approval is unknown")
+	}
 	if err := f.approve(t, ttyAtt(t, f.id)); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if l, r := f.limitColumns(t); l.Valid || r.Valid {
-		t.Errorf("limit=%+v reason=%+v, want the previous values replaced by NULL", l, r)
+	if l, r := f.limitColumns(t); !l.Valid || microsToUSD(l.Int64) != *estimateBefore || r.Valid {
+		t.Errorf("limit=%+v reason=%+v, want the previous values replaced by the estimate without a reason", l, r)
 	}
 	adds, err := f.s.ListTaskAdditions(context.Background(), f.id)
 	if err != nil || len(adds) != 4 {
