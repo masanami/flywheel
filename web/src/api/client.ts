@@ -72,6 +72,8 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
   if (!res.ok) {
     throw await failure(res, `POST ${path}`);
   }
+  // 中身の無い成功（204。対話の「止める」「新しい会話」）は読まずに返す。
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
