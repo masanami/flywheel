@@ -480,7 +480,7 @@ func TestExecuteSupervisorHand_OnlyEscalateIsImplementedYet(t *testing.T) {
 	t.Parallel()
 	s, _ := newWorkspaceStore(t)
 	for _, h := range SupervisorHandValues() {
-		if h == HandEscalate || h == HandDefer { // defer は supervisor_defer_test.go が検証する
+		if h == HandEscalate || h == HandDefer || h == HandSplitFollowup { // defer・split_followup は、それぞれの試験のファイルが検証する
 			continue
 		}
 		_, err := s.executeSupervisorHand(context.Background(), supervisorHandInput{StopKind: StopKindArtifactMissing, Output: SVOutput{Hand: h}})

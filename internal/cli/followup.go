@@ -81,7 +81,7 @@ func sortChallengeIDs(ids []string) {
 	sort.SliceStable(ids, func(i, j int) bool { return num(ids[i]) < num(ids[j]) })
 }
 
-// followupCountsText は show の文の出力に出す、課題のフォローアップの未・済み・捨てたの件数（状態だけで数える）。
+// followupCountsText は show の文の出力に出す、課題のフォローアップの未・済み・捨てたの件数（状態だけで数える）。あわせて、スーパーバイザーが条件から作ったフォローアップは 1 件ずつ並べる。
 func followupCountsText(fs []core.Followup) string {
 	var open, done, dropped int
 	for _, f := range fs {
@@ -94,7 +94,14 @@ func followupCountsText(fs []core.Followup) string {
 			dropped++
 		}
 	}
-	return fmt.Sprintf("フォローアップ: 未 %d 件・済み %d 件・捨てた %d 件\n", open, done, dropped)
+	var b strings.Builder
+	fmt.Fprintf(&b, "フォローアップ: 未 %d 件・済み %d 件・捨てた %d 件\n", open, done, dropped)
+	for _, f := range fs {
+		if f.Source == core.FollowupSourceSupervisor { // スーパーバイザーが条件から作ったものは、題名も並べる
+			fmt.Fprintf(&b, "  %s\t%s\t%s（出どころ: %s）\n", f.ID, f.Status, escapeControl(f.Title), f.Source)
+		}
+	}
+	return b.String()
 }
 
 // rejectDuplicateFollowupIDs は同じ ID を 2 度並べた指定を usage_error にする（ストアを変える前）。

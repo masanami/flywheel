@@ -364,6 +364,8 @@ type j5Context struct {
 	Facts map[string]string
 	// TaskScope は、統合先を使う課題のタスク 1 個の検証（タスクの単位の J5）のときの、検証の対象（無ければ nil）。
 	TaskScope *j5TaskScope
+	// SplitConditions は、タスクの検証のとき、スーパーバイザーの手 split_followup がフォローアップへ回した条件の文（判定から外す）。無ければ空。
+	SplitConditions []string
 	// ChallengeScope は、統合先を使う、検証中の課題の課題の単位の確かめのときの、確かめの入力（無ければ nil）。
 	ChallengeScope *j5ChallengeScope
 	// ArtifactDescriptionRead は、成果物の説明文（PR の本文）を 1 件でも取得できたか（form: cli の委譲の報告の出どころを決める）。
@@ -417,6 +419,9 @@ func (s *Store) loadJ5ContextFor(ctx context.Context, ch Challenge, taskID *int6
 				return nil
 			}
 			vc.TaskScope, vc.Task = scope, &scope.Task
+			if vc.SplitConditions, err = splitConditionsForTask(ctx, tx, cid, *taskID); err != nil {
+				return err
+			}
 		} else {
 			if vc.Task, err = loadVerifyingTask(ctx, tx, cid); err != nil {
 				return err
@@ -598,6 +603,9 @@ func prepareJ5(ctx context.Context, upstream UpstreamThreadSource, vc *j5Context
 	}
 	if vc.Task != nil {
 		sections = append(sections, JudgmentDataSection{Label: labelTaskSection, Content: formatTaskSection(*vc.Task)})
+	}
+	if len(vc.SplitConditions) > 0 {
+		sections = append(sections, JudgmentDataSection{Label: labelSplitConditionsSection, Content: formatSplitConditionsSection(vc.SplitConditions)})
 	}
 	if vc.TaskScope != nil && vc.TaskScope.Source != nil {
 		sections = append(sections, JudgmentDataSection{Label: labelTaskSourceSection, Content: formatTaskSourceSection(*vc.TaskScope.Source)})
