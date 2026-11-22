@@ -86,7 +86,7 @@ func parseTaskAdditionID(s string) (int64, bool) {
 }
 
 // TaskAddition は足す依頼 1 件。ID は "TA-<n>"、ChallengeID は "C-<n>"、OriginTaskID は "T-<n>"。
-// TotalAfterUSD・LimitUSD は最後に判定したときの、足した後の見込みと上限（記録のため。判定には使わない。LimitUSD は未判定なら nil）。
+// TotalAfterUSD・LimitUSD は最後に判定したときの、足した後の見込みと上限（記録のため。判定には使わない。判定していない足す依頼は nil）。
 type TaskAddition struct {
 	ID            string
 	ChallengeID   string
@@ -94,7 +94,7 @@ type TaskAddition struct {
 	OriginTaskID  *string
 	State         TaskAdditionState
 	Spec          *string
-	TotalAfterUSD float64
+	TotalAfterUSD *float64
 	LimitUSD      *float64
 	// HoldID は足す依頼から立てた保留（task_add_over_limit・task_add_question）の内部整数 ID。無ければ nil。
 	HoldID    *int64
@@ -125,7 +125,8 @@ const taskAdditionSelect = `SELECT id, challenge_id, origin, origin_task_id, sta
 
 func scanTaskAddition(row interface{ Scan(...any) error }) (*TaskAddition, error) {
 	var (
-		id, cid, total    int64
+		id, cid           int64
+		total             sql.NullInt64
 		origin, state     string
 		originTask, limit sql.NullInt64
 		spec, decided     sql.NullString
@@ -145,7 +146,10 @@ func scanTaskAddition(row interface{ Scan(...any) error }) (*TaskAddition, error
 		v := spec.String
 		ta.Spec = &v
 	}
-	ta.TotalAfterUSD = microsToUSD(total)
+	if total.Valid {
+		v := microsToUSD(total.Int64)
+		ta.TotalAfterUSD = &v
+	}
 	if limit.Valid {
 		v := microsToUSD(limit.Int64)
 		ta.LimitUSD = &v
@@ -252,61 +256,61 @@ func (s *Store) CreateTaskAddition(ctx context.Context, ch Channel, challengeID 
 	}
 	var out *TaskAddition
 	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
-		if _, err := loadChallenge(ctx, tx, cid); err != nil {
-			return err
-		}
-		if in.OriginTaskID == "" {
-			return fmt.Errorf("%w: an expand task addition needs its origin task", ErrValidation)
-		}
-		var originTask any
-		{
-			tid, ok := parseTaskID(in.OriginTaskID)
-			if !ok {
-				return fmt.Errorf("%w: malformed task id %q", ErrValidation, in.OriginTaskID)
-			}
-			var owner int64
-			if err := tx.QueryRowContext(ctx, `SELECT challenge_id FROM task WHERE id = ?`, tid).Scan(&owner); err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					return fmt.Errorf("%w: task %s does not exist", ErrValidation, in.OriginTaskID)
-				}
-				return err
-			}
-			if owner != cid {
-				return fmt.Errorf("%w: task %s is not a task of %s", ErrValidation, in.OriginTaskID, challengeID)
-			}
-			originTask = tid
-		}
-		var spec any
-		if in.Spec != nil {
-			spec = *in.Spec
-		}
-		res, err := tx.ExecContext(ctx,
-			`INSERT INTO task_addition (challenge_id, origin, origin_task_id, state, spec, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-			cid, string(in.Origin), originTask, string(TaskAdditionPending), spec, formatTimestamp(rec.at))
-		if store.IsUniqueViolation(err) {
-			return fmt.Errorf("%w: a task addition of origin %q already exists for task %s", ErrValidation, in.Origin, in.OriginTaskID)
-		}
-		if err != nil {
-			return err
-		}
-		id, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		after := map[string]any{"challenge_id": challengeID, "origin": string(in.Origin), "state": string(TaskAdditionPending)}
-		if in.OriginTaskID != "" {
-			after["origin_task_id"] = in.OriginTaskID
-		}
-		if err := rec.record("task_addition", id, "create", nil, after); err != nil {
-			return err
-		}
-		out, err = loadTaskAddition(ctx, tx, id)
+		var err error
+		out, err = createTaskAdditionTx(ctx, tx, rec, cid, in)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// createTaskAdditionTx は CreateTaskAddition の書き込み本体（呼び出し側の書き込みトランザクションの中で使う）。
+func createTaskAdditionTx(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64, in TaskAdditionInput) (*TaskAddition, error) {
+	challengeID := formatChallengeID(cid)
+	if _, err := loadChallenge(ctx, tx, cid); err != nil {
+		return nil, err
+	}
+	if in.OriginTaskID == "" {
+		return nil, fmt.Errorf("%w: an expand task addition needs its origin task", ErrValidation)
+	}
+	tid, ok := parseTaskID(in.OriginTaskID)
+	if !ok {
+		return nil, fmt.Errorf("%w: malformed task id %q", ErrValidation, in.OriginTaskID)
+	}
+	var owner int64
+	if err := tx.QueryRowContext(ctx, `SELECT challenge_id FROM task WHERE id = ?`, tid).Scan(&owner); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: task %s does not exist", ErrValidation, in.OriginTaskID)
+		}
+		return nil, err
+	}
+	if owner != cid {
+		return nil, fmt.Errorf("%w: task %s is not a task of %s", ErrValidation, in.OriginTaskID, challengeID)
+	}
+	var spec any
+	if in.Spec != nil {
+		spec = *in.Spec
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO task_addition (challenge_id, origin, origin_task_id, state, spec, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		cid, string(in.Origin), tid, string(TaskAdditionPending), spec, formatTimestamp(rec.at))
+	if store.IsUniqueViolation(err) {
+		return nil, fmt.Errorf("%w: a task addition of origin %q already exists for task %s", ErrValidation, in.Origin, in.OriginTaskID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	after := map[string]any{"challenge_id": challengeID, "origin": string(in.Origin), "state": string(TaskAdditionPending), "origin_task_id": in.OriginTaskID}
+	if err := rec.record("task_addition", id, "create", nil, after); err != nil {
+		return nil, err
+	}
+	return loadTaskAddition(ctx, tx, id)
 }
 
 // SetTaskAdditionState は足す依頼 id の状態を to にし、upd の値を同じ書き込みで更新して、作業ログに残す。

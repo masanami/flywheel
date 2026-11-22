@@ -214,7 +214,7 @@ export interface TaskAddition {
   origin_task_id: string | null;
   state: string;
   task_ids: string[];
-  total_after_usd: number;
+  total_after_usd: number | null;
 }
 
 export interface Approval {

@@ -119,7 +119,7 @@ func TestTaskAddition_StateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State != TaskAdditionAwaitingOwner || got.TotalAfterUSD != 30 || got.LimitUSD == nil || *got.LimitUSD != 20 || got.HoldID == nil || *got.HoldID != 1 || got.DecidedAt != nil {
+	if got.State != TaskAdditionAwaitingOwner || got.TotalAfterUSD == nil || *got.TotalAfterUSD != 30 || got.LimitUSD == nil || *got.LimitUSD != 20 || got.HoldID == nil || *got.HoldID != 1 || got.DecidedAt != nil {
 		t.Errorf("awaiting_owner = %+v, want the judged values recorded and no decided_at", got)
 	}
 	// 開いている間は、値の更新だけの書き込みもできる（仕様待ちへ戻すことも）。

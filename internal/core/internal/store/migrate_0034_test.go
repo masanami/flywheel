@@ -45,12 +45,12 @@ func TestS4c1Migration(t *testing.T) {
 			t.Fatal("task_addition table not found after the migration")
 		}
 		info := tableColumnInfo(t, db, "task_addition")
-		for _, c := range []string{"id", "challenge_id", "origin", "state", "total_after_micros", "created_at"} {
+		for _, c := range []string{"id", "challenge_id", "origin", "state", "created_at"} {
 			if _, ok := info[c]; !ok {
 				t.Errorf("task_addition.%s missing", c)
 			}
 		}
-		for _, c := range []string{"origin_task_id", "spec", "limit_micros", "hold_id", "decided_at"} {
+		for _, c := range []string{"origin_task_id", "spec", "total_after_micros", "limit_micros", "hold_id", "decided_at"} {
 			if nn, ok := info[c]; !ok || nn {
 				t.Errorf("task_addition.%s: present=%v notnull=%v; want present and nullable", c, ok, nn)
 			}

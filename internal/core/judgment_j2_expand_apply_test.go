@@ -86,7 +86,7 @@ func TestExpandApply_AddUnderTheLimitCreatesPendingTasksAndClosesTheAddition(t *
 	if len(adds) != 1 || adds[0].State != TaskAdditionApplied || len(adds[0].TaskIDs) != 1 || adds[0].TaskIDs[0] != c.ID {
 		t.Fatalf("additions = %+v, want applied with the added task", adds)
 	}
-	if adds[0].TotalAfterUSD != 13 || adds[0].LimitUSD == nil || *adds[0].LimitUSD != 14 {
+	if adds[0].TotalAfterUSD == nil || *adds[0].TotalAfterUSD != 13 || adds[0].LimitUSD == nil || *adds[0].LimitUSD != 14 {
 		t.Errorf("total/limit = %v/%v, want 13/14", adds[0].TotalAfterUSD, adds[0].LimitUSD)
 	}
 	d := f.detail(t, f.id)

@@ -62,7 +62,7 @@ func TestExpandHold_AddOverTheLimitHoldsTheChallengeAndWaitsForTheOwner(t *testi
 	if *adds[0].HoldID != holdInt {
 		t.Errorf("hold_id = %d, want %d", *adds[0].HoldID, holdInt)
 	}
-	if adds[0].TotalAfterUSD != 15 || adds[0].LimitUSD == nil || *adds[0].LimitUSD != 14 {
+	if adds[0].TotalAfterUSD == nil || *adds[0].TotalAfterUSD != 15 || adds[0].LimitUSD == nil || *adds[0].LimitUSD != 14 {
 		t.Errorf("recorded total %v limit %v, want 15 / 14", adds[0].TotalAfterUSD, adds[0].LimitUSD)
 	}
 }
@@ -172,5 +172,126 @@ func TestTaskAddition_AwaitingOwnerNeedsAHoldOfItsOwnChallenge(t *testing.T) {
 	hold := int64(1)
 	if _, err := s.SetTaskAdditionState(ctx, ChannelCLI, ta.ID, TaskAdditionAwaitingOwner, TaskAdditionUpdate{HoldID: &hold}); !errors.Is(err, ErrValidation) {
 		t.Errorf("another challenge's hold: err = %v, want ErrValidation", err)
+	}
+}
+
+// 判定していない足す依頼の「足した後の見込み」「上限」は null（nil）。判定した後は額。
+func TestTaskAddition_UnjudgedValuesAreNilAndJudgedValuesAreAmounts(t *testing.T) {
+	t.Parallel()
+	f := expandDoneFixture(t)
+	f.expand(t, &expandRecorder{out: []byte(`{"verdict":"ask","question":"どちら"}`)})
+	adds := f.additions(t)
+	if len(adds) != 1 || adds[0].State != TaskAdditionPending || adds[0].TotalAfterUSD != nil || adds[0].LimitUSD != nil {
+		t.Fatalf("additions = %+v, want a pending one with nil total/limit", adds)
+	}
+	g := expandDoneFixture(t)
+	g.expand(t, &expandRecorder{out: overLimitOutput()})
+	a := g.additions(t)[0]
+	if a.TotalAfterUSD == nil || *a.TotalAfterUSD != 15 || a.LimitUSD == nil || *a.LimitUSD != 14 {
+		t.Errorf("judged addition = %+v, want 15 / 14", a)
+	}
+}
+
+// answerAsk は、開いている task_add_question の保留へ回答する（option が空なら文で答える）。
+func (f *paFixture) answerAsk(t *testing.T, option, text string) {
+	t.Helper()
+	ctx := context.Background()
+	prev, err := f.s.PrepareAnswerOption(ctx, f.id, text, option, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.s.ExecuteAnswer(ctx, AnswerRequest{ChallengeID: f.id, ExpectedVersion: prev.Version, Answer: text, Option: option, Agent: f.agent, Conn: f.conn},
+		relayedAttestation(t, f.id, "sess", "quote")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func holdRecordSection(t *testing.T, inv *expandRecorder) string {
+	t.Helper()
+	if inv.count() != 1 {
+		t.Fatalf("judgment calls = %d, want 1", inv.count())
+	}
+	c := inv.calls[0]
+	if len(c.Sections) == 0 || c.Sections[0].Label != callShapeSectionLabel || c.Sections[0].Content != callShapeExpand {
+		t.Fatalf("first section = %+v, want the add call shape", c.Sections)
+	}
+	for _, s := range c.Sections {
+		if s.Label == labelHoldRecord {
+			return s.Content
+		}
+	}
+	return ""
+}
+
+func TestExpandHold_AnsweredQuestionIsPassedToTheNextAddCall(t *testing.T) {
+	t.Parallel()
+	f := expandDoneFixture(t)
+	f.expand(t, &expandRecorder{out: []byte(`{"verdict":"ask","question":"どちらの方針で足しますか"}`)})
+	f.answerAsk(t, "", "B 方針で足してください")
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
+	f.expand(t, inv)
+	got := holdRecordSection(t, inv)
+	if !strings.Contains(got, "問い: どちらの方針で足しますか") || !strings.Contains(got, "回答: B 方針で足してください") {
+		t.Errorf("hold record section = %q, want the question and the answer", got)
+	}
+}
+
+func TestExpandHold_ChosenOptionLabelIsPassedToTheNextAddCall(t *testing.T) {
+	t.Parallel()
+	f := expandDoneFixture(t)
+	f.expand(t, &expandRecorder{out: []byte(`{"verdict":"ask","question":"どちら","options":["A案","B案"]}`)})
+	f.answerAsk(t, "o2", "")
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
+	f.expand(t, inv)
+	if got := holdRecordSection(t, inv); !strings.Contains(got, "回答: B案") {
+		t.Errorf("hold record section = %q, want the chosen label B案", got)
+	}
+}
+
+func TestExpandHold_NoHoldRecordSectionWithoutAnAnsweredQuestion(t *testing.T) {
+	t.Parallel()
+	f := expandDoneFixture(t)
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
+	f.expand(t, inv)
+	if got := holdRecordSection(t, inv); got != "" {
+		t.Errorf("hold record section = %q, want none", got)
+	}
+}
+
+// 候補を選んだ後に課題の状態が変わっていたら、足す依頼は作られない（作る書き込みの中で確かめ直す）。
+func TestCreateExpandAdditions_RecheckInTheWriteTransaction(t *testing.T) {
+	t.Parallel()
+	f := expandDoneFixture(t)
+	var cands []expandAdditionCandidate
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		var err error
+		cands, err = selectExpandAdditionCandidates(context.Background(), tx, f.agent)
+		return err
+	})
+	if len(cands) != 1 {
+		t.Fatalf("candidates = %v, want 1", cands)
+	}
+	f.setChallengeStatus(t, StatusVerifying) // 選んだ後に変わる
+	n, err := f.s.createExpandAdditionsFrom(context.Background(), f.agent, cands)
+	if err != nil || n != 0 {
+		t.Fatalf("created = %d err %v, want 0", n, err)
+	}
+	if adds := f.additions(t); len(adds) != 0 {
+		t.Errorf("additions = %+v, want none", adds)
+	}
+}
+
+func TestExpandHold_AllAnsweredQuestionsOfTheAdditionArePassed(t *testing.T) {
+	t.Parallel()
+	f := expandDoneFixture(t)
+	f.expand(t, &expandRecorder{out: []byte(`{"verdict":"ask","question":"最初の問い"}`)})
+	f.answerAsk(t, "", "最初の答え")
+	f.expand(t, &expandRecorder{out: []byte(`{"verdict":"ask","question":"次の問い"}`)})
+	f.answerAsk(t, "", "次の答え")
+	inv := &expandRecorder{out: []byte(expandAskOutput)}
+	f.expand(t, inv)
+	got := holdRecordSection(t, inv)
+	if !strings.Contains(got, "最初の問い") || !strings.Contains(got, "最初の答え") || !strings.Contains(got, "次の問い") || !strings.Contains(got, "回答: 次の答え") {
+		t.Errorf("hold record section = %q, want both rounds", got)
 	}
 }

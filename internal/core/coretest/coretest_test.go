@@ -61,7 +61,7 @@ func TestInsertTaskAdditionAndHold_AreReadableThroughCore(t *testing.T) {
 	}
 	ta := list[0]
 	if ta.ID != "TA-1" || ta.State != core.TaskAdditionAwaitingOwner || ta.Origin != core.TaskAdditionOriginExpand ||
-		ta.TotalAfterUSD != 41 || ta.LimitUSD == nil || *ta.LimitUSD != 30 || ta.HoldID == nil || *ta.HoldID != holdID {
+		ta.TotalAfterUSD == nil || *ta.TotalAfterUSD != 41 || ta.LimitUSD == nil || *ta.LimitUSD != 30 || ta.HoldID == nil || *ta.HoldID != holdID {
 		t.Errorf("addition = %+v, want awaiting_owner expand, total 41, limit 30, hold %d", ta, holdID)
 	}
 	d, err := s.GetChallenge(t.Context(), "C-1")
