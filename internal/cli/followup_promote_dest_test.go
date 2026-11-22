@@ -125,14 +125,101 @@ func TestFollowupPromote_BadBudgetFlagIsUsageError(t *testing.T) {
 	}
 }
 
-// 足した後の見込みが上限を超えるタスクは、本人確認の前に検証の誤り（終了コード 1）で断り、何も書かない。
-func TestFollowupPromote_OverLimitIsRefusedBeforeConfirmation(t *testing.T) {
+func promoteLimit(t *testing.T, ws string) string {
+	t.Helper()
+	return fuCount(t, ws, `SELECT budget_limit_micros FROM challenge WHERE id = 1`)
+}
+
+var overFrames = []string{"--budget-impl-usd", "30", "--budget-review-usd", "25"}
+
+// AC-33〜AC-38: --relayed で上限を超えるのに --raise-limit が無いと、検証の誤り（終了コード 1）で断る。出力に超える額と --preview の旨が出て、何も書かない。
+func TestFollowupPromote_RelayedOverLimitWithoutRaiseLimitIsRefused(t *testing.T) {
 	ws := addableFollowupWorkspace(t)
-	code, _, stderr := promoteRun(t, ws, "F-1", "--budget-impl-usd", "30", "--budget-review-usd", "25")
-	if code != 1 || !strings.Contains(stderr, "validation_failed") || !strings.Contains(stderr, "を超えます") {
+	code, _, stderr := promoteRun(t, ws, "F-1", overFrames...)
+	if code != 1 || !strings.Contains(stderr, "validation_failed") || !strings.Contains(stderr, "51 USD") || !strings.Contains(stderr, "--preview") {
 		t.Errorf("exit=%d stderr=%s", code, stderr)
 	}
 	if got := fuCount(t, ws, `SELECT COUNT(*) FROM task_addition`); got != "0" {
 		t.Errorf("task_addition rows = %s", got)
+	}
+	if got := promoteLimit(t, ws); got != "14000000" {
+		t.Errorf("limit = %s", got)
+	}
+	if fuStatus(t, ws, 1) != "open" {
+		t.Error("followup changed")
+	}
+}
+
+// AC-39・AC-40: --relayed で --raise-limit に足した後の見込みの額を付けると、足す依頼ができて、上限がその額になる。
+func TestFollowupPromote_RelayedOverLimitWithRaiseLimitRaisesTheLimit(t *testing.T) {
+	ws := addableFollowupWorkspace(t)
+	code, stdout, stderr := promoteRun(t, ws, "F-1", append([]string{"--raise-limit", "65"}, overFrames...)...)
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if got := fuCount(t, ws, `SELECT COUNT(*) FROM task_addition`); got != "1" {
+		t.Errorf("task_addition rows = %s", got)
+	}
+	if got := promoteLimit(t, ws); got != "65000000" {
+		t.Errorf("limit = %s", got)
+	}
+}
+
+// AC-41・AC-42: --relayed で違う額の --raise-limit は、検証の誤りで断り、上限は変わらない。
+func TestFollowupPromote_RelayedRaiseLimitWithDifferentAmountIsRefused(t *testing.T) {
+	ws := addableFollowupWorkspace(t)
+	code, _, stderr := promoteRun(t, ws, "F-1", append([]string{"--raise-limit", "60"}, overFrames...)...)
+	if code != 1 || !strings.Contains(stderr, "validation_failed") {
+		t.Errorf("exit=%d stderr=%s", code, stderr)
+	}
+	if got := promoteLimit(t, ws); got != "14000000" {
+		t.Errorf("limit = %s", got)
+	}
+}
+
+// AC-31: 上限以下のときの --raise-limit は、検証の誤りで断る。AC-32: 上げる先が新しい課題のときも同じ。
+func TestFollowupPromote_RaiseLimitWhenNotOverLimitIsRefused(t *testing.T) {
+	ws := addableFollowupWorkspace(t)
+	for _, extra := range [][]string{
+		{"--raise-limit", "12", "--budget-impl-usd", "1", "--budget-review-usd", "1"},
+		{"--raise-limit", "0", "--new-challenge"},
+	} {
+		if code, _, stderr := promoteRun(t, ws, "F-1", extra...); code != 1 || !strings.Contains(stderr, "only meaningful") {
+			t.Errorf("%v: exit=%d stderr=%s", extra, code, stderr)
+		}
+	}
+	if got := fuCount(t, ws, `SELECT COUNT(*) FROM task_addition`); got != "0" {
+		t.Errorf("task_addition rows = %s", got)
+	}
+}
+
+// AC-27〜AC-29: 端末での本人確認では、要約に上限の前の額と後の額が出て、--raise-limit が無くても上げられ、上限が足した後の見込みになる。
+func TestFollowupPromote_TTYOverLimitShowsBeforeAndAfterAndRaisesTheLimit(t *testing.T) {
+	ws := addableFollowupWorkspace(t)
+	args := append([]string{"followup", "promote", "F-1", "--workspace", ws, "--json"}, overFrames...)
+	code, pty, stdout, stderr := runConfirmedChild(t, args, "F-1")
+	if code != 0 {
+		t.Fatalf("exit=%d pty=%q stdout=%s stderr=%s", code, pty, stdout, stderr)
+	}
+	for _, want := range []string{"（上限 14 USD）", "上げた後の上限 65 USD"} { // AC-27
+		if !strings.Contains(pty, want) {
+			t.Errorf("AC-27: summary lacks %q: %q", want, pty)
+		}
+	}
+	if got := promoteLimit(t, ws); got != "65000000" { // AC-28
+		t.Errorf("limit = %s", got)
+	}
+}
+
+// AC-30: 端末でも、足した後の見込みと違う --raise-limit は、本人確認の前に検証の誤りで断る。
+func TestFollowupPromote_TTYRaiseLimitWithDifferentAmountIsRefused(t *testing.T) {
+	ws := addableFollowupWorkspace(t)
+	args := append([]string{"followup", "promote", "F-1", "--raise-limit", "60", "--workspace", ws, "--json"}, overFrames...)
+	code, _, _, stderr := runConfirmedChild(t, args, "F-1")
+	if code != 1 || readErrorCode(t, stderr) != string(CodeValidationFailed) {
+		t.Errorf("exit=%d stderr=%s", code, stderr)
+	}
+	if got := promoteLimit(t, ws); got != "14000000" {
+		t.Errorf("limit = %s", got)
 	}
 }

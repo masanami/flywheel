@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"math"
 	"strings"
@@ -278,20 +279,175 @@ func TestPromoteDest_AdditionCopiesTheFollowupsOriginTask(t *testing.T) {
 	}
 }
 
-// 足した後の見込みが上限を超えるときは、何も書かずに断る（上限の引き上げは別の操作）。
-func TestPromoteDest_OverLimitIsRefusedAndWritesNothing(t *testing.T) {
+// destOver は足した後の見込みが上限を超える枠（実装 30・レビュー対応 25 USD。足した後の見込み 65 USD・上限 14 USD）。
+func destOver(raise *float64) FollowupPromoteOptions {
+	return FollowupPromoteOptions{BudgetImplUSD: destFloat(30), BudgetReviewUSD: destFloat(25), RaiseLimitUSD: raise}
+}
+
+func destLimitMicros(t *testing.T, f *paFixture) int64 {
+	t.Helper()
+	var lim *int64
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		var err error
+		lim, _, err = challengeBudgetLimit(context.Background(), tx, f.cid())
+		return err
+	})
+	if lim == nil {
+		t.Fatal("limit not recorded")
+	}
+	return *lim
+}
+
+// AC-28・AC-29・AC-81〜AC-83: 端末での本人確認では --raise-limit が無くても成立し、上限が足した後の見込みになり、作業ログに前後の額と方式が残る。
+func TestPromoteDest_OverLimitWithTTYRaisesTheLimitAndLogsIt(t *testing.T) {
 	t.Parallel()
 	f := newExpandFixture(t)
 	fid := destFixtureFollowup(t, f)
-	plan, err := f.s.PrepareFollowupPromote(context.Background(), fid, FollowupPromoteOptions{BudgetImplUSD: destFloat(30), BudgetReviewUSD: destFloat(25)}, nil)
+	plan, res, err := destPromote(t, f.s, fid, destOver(nil))
 	if err != nil || !plan.OverLimit() || plan.EstimateAfterUSD != 65 || plan.LimitUSD != 14 {
-		t.Fatalf("plan = %+v err=%v", plan, err)
+		t.Fatalf("plan=%+v err=%v", plan, err)
 	}
-	if _, err := f.s.PromoteFollowup(context.Background(), plan, fuAtt(t, fid), nil); !errors.Is(err, ErrValidation) {
+	if res.Addition == nil || len(f.additions(t)) != 1 {
+		t.Fatalf("result=%+v additions=%+v", res, f.additions(t))
+	}
+	if got := destLimitMicros(t, f); got != 65_000_000 {
+		t.Errorf("limit = %d, want 65000000 (AC-28)", got)
+	}
+	acts := fuActs(t, f.s, "challenge", ActivityActionBudgetLimit)
+	last := acts[len(acts)-1]
+	var before, after map[string]any
+	if err := json.Unmarshal(last.Before, &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(last.After, &after); err != nil {
+		t.Fatal(err)
+	}
+	if before["limit_usd"] != float64(14) || after["limit_usd"] != float64(65) || after["verification"] != string(VerificationTTYConfirm) {
+		t.Errorf("before=%v after=%v (AC-81〜AC-83)", before, after)
+	}
+	if s4c2Followup(t, f.s, fid).Status != FollowupStatusOpen {
+		t.Error("followup status changed")
+	}
+}
+
+// AC-39・AC-40: relayed でも、足した後の見込みと同じ額の --raise-limit があれば成立し、上限がその額になる。
+func TestPromoteDest_OverLimitRelayedWithMatchingRaiseLimit(t *testing.T) {
+	t.Parallel()
+	f := newExpandFixture(t)
+	fid := destFixtureFollowup(t, f)
+	ctx := context.Background()
+	plan, err := f.s.PrepareFollowupPromote(ctx, fid, destOver(destFloat(65)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.CheckRaiseLimit(true); err != nil {
+		t.Fatalf("CheckRaiseLimit: %v", err)
+	}
+	res, err := f.s.PromoteFollowup(ctx, plan, relayedAttestation(t, fid, "sess", "quote"), nil)
+	if err != nil || res.Addition == nil {
+		t.Fatalf("res=%+v err=%v (AC-39)", res, err)
+	}
+	if got := destLimitMicros(t, f); got != 65_000_000 {
+		t.Errorf("limit = %d (AC-40)", got)
+	}
+	acts := fuActs(t, f.s, "challenge", ActivityActionBudgetLimit)
+	if !strings.Contains(string(acts[len(acts)-1].After), string(VerificationRelayed)) {
+		t.Errorf("after = %s, want relayed (AC-83)", acts[len(acts)-1].After)
+	}
+}
+
+// AC-33〜AC-38: relayed で上限を超えるのに --raise-limit が無ければ検証の誤りで断る。何も書かず、メッセージに超える額と --preview が出る。
+func TestPromoteDest_OverLimitRelayedWithoutRaiseLimitIsRefusedAndWritesNothing(t *testing.T) {
+	t.Parallel()
+	f := newExpandFixture(t)
+	fid := destFixtureFollowup(t, f)
+	ctx := context.Background()
+	plan, err := f.s.PrepareFollowupPromote(ctx, fid, destOver(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cerr := plan.CheckRaiseLimit(true)
+	if !errors.Is(cerr, ErrValidation) || !strings.Contains(cerr.Error(), "by 51 USD") || !strings.Contains(cerr.Error(), "--preview") {
+		t.Errorf("CheckRaiseLimit = %v (AC-33・AC-37・AC-38)", cerr)
+	}
+	if _, err := f.s.PromoteFollowup(ctx, plan, relayedAttestation(t, fid, "sess", "quote"), nil); !errors.Is(err, ErrValidation) {
+		t.Errorf("err = %v, want ErrValidation (AC-33)", err)
+	}
+	if len(f.additions(t)) != 0 { // AC-34
+		t.Errorf("additions = %+v, want none", f.additions(t))
+	}
+	if got := destLimitMicros(t, f); got != 14_000_000 { // AC-35
+		t.Errorf("limit = %d, want 14000000", got)
+	}
+	if s4c2Followup(t, f.s, fid).Status != FollowupStatusOpen { // AC-36
+		t.Error("followup changed")
+	}
+}
+
+// AC-30・AC-41・AC-42: 足した後の見込みと違う --raise-limit は、端末でも relayed でも検証の誤りで断る。上限は変わらない。
+func TestPromoteDest_RaiseLimitDifferentFromTheEstimateIsRefused(t *testing.T) {
+	t.Parallel()
+	f := newExpandFixture(t)
+	fid := destFixtureFollowup(t, f)
+	if _, err := f.s.PrepareFollowupPromote(context.Background(), fid, destOver(destFloat(64)), nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("err = %v, want ErrValidation", err)
 	}
-	if len(f.additions(t)) != 0 {
-		t.Errorf("additions = %+v, want none", f.additions(t))
+	if len(f.additions(t)) != 0 || destLimitMicros(t, f) != 14_000_000 {
+		t.Error("something was written")
+	}
+}
+
+// AC-31・AC-32: 足した後の見込みが上限以下、または上げる先が新しい課題のときの --raise-limit は、検証の誤りで断る。
+func TestPromoteDest_RaiseLimitWhenNotOverLimitIsRefused(t *testing.T) {
+	t.Parallel()
+	f := newExpandFixture(t)
+	fid := destFixtureFollowup(t, f)
+	ctx := context.Background()
+	within := destSmall
+	within.RaiseLimitUSD = destFloat(12)                                                                                                                  // 足した後の見込みと同じ額でも、上限以下なら断る
+	if _, err := f.s.PrepareFollowupPromote(ctx, fid, within, nil); !errors.Is(err, ErrValidation) || !strings.Contains(err.Error(), "only meaningful") { // AC-31
+		t.Errorf("within limit: err = %v", err)
+	}
+	nc := FollowupPromoteOptions{NewChallenge: true, RaiseLimitUSD: destFloat(0)}
+	if _, err := f.s.PrepareFollowupPromote(ctx, fid, nc, nil); !errors.Is(err, ErrValidation) || !strings.Contains(err.Error(), "only meaningful") { // AC-32
+		t.Errorf("new challenge: err = %v", err)
+	}
+}
+
+// AC-44〜AC-47: 上限を超えて上げる操作でも、確かめたときと課題の版・足した後の見込みが違えばコンフリクトで断り、足す依頼も上限も変えない。
+func TestPromoteDest_OverLimitChangedAfterPrepareIsAConflictAndKeepsTheLimit(t *testing.T) {
+	t.Parallel()
+	for name, mutate := range map[string]func(t *testing.T, f *paFixture){
+		"version": func(t *testing.T, f *paFixture) {
+			writeForTest(t, f.s, func(tx *sql.Tx) error {
+				_, err := tx.Exec(`UPDATE challenge SET version = version + 1 WHERE id = ?`, f.cid())
+				return err
+			})
+		},
+		"estimate": func(t *testing.T, f *paFixture) {
+			writeForTest(t, f.s, func(tx *sql.Tx) error {
+				_, err := tx.Exec(`UPDATE task SET budget_impl_micros = budget_impl_micros + 1000000 WHERE challenge_id = ? AND id = (SELECT MIN(id) FROM task WHERE challenge_id = ?)`, f.cid(), f.cid())
+				return err
+			})
+		},
+	} {
+		mutate := mutate
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newExpandFixture(t)
+			fid := destFixtureFollowup(t, f)
+			plan, err := f.s.PrepareFollowupPromote(context.Background(), fid, destOver(nil), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutate(t, f)
+			if _, err := f.s.PromoteFollowup(context.Background(), plan, fuAtt(t, fid), nil); !errors.Is(err, ErrConflict) {
+				t.Errorf("err = %v, want ErrConflict", err)
+			}
+			if len(f.additions(t)) != 0 || destLimitMicros(t, f) != 14_000_000 {
+				t.Error("additions or limit changed")
+			}
+		})
 	}
 }
 
