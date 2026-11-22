@@ -76,7 +76,10 @@ test.describe("中身（既定の幅）", () => {
     await expect(
       page.getByRole("button", { name: "サイクルを回す" }),
     ).toBeEnabled();
-    await expect(page.getByRole("button")).toHaveCount(1);
+    // 対話の欄（#1002）のボタンは数えない。
+    await expect(
+      page.locator('button:not([data-testid="chat-panel"] *)'),
+    ).toHaveCount(1);
   });
 
   test("AC-382〜387 #806: 「すべて」に見出し・名前つきの待っているもの・エージェントの区分・読めない理由が出て、名前から「いま進められること」へ移れる", async ({

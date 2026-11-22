@@ -43,7 +43,9 @@ test("AC-18・AC-22・AC-23・AC-31・AC-32 #930: 完了承認画面に、差し
 }) => {
   await page.goto("/#/a/alpha/challenges/C-7/approve-completion");
   await expect(page.getByTestId("approve-completion")).toBeVisible();
-  await expect(page.getByRole("button")).toHaveCount(1);
+  await expect(
+    page.getByTestId("approve-completion").getByRole("button"),
+  ).toHaveCount(1);
   await expect(page.getByTestId("completion-release-note")).toBeVisible();
   await expect(page.getByTestId("completion-reject-note")).toBeVisible();
   await expect(page.getByTestId("approve-completion")).not.toContainText(

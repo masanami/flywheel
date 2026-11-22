@@ -8,6 +8,7 @@ import type {
   Task,
   TreeTask,
 } from "../api/types.gen.ts";
+import { useChat } from "../chat/context.ts";
 import {
   CONFLICT_FIX_PENDING_TEXT,
   DELEGATE_STATE_LABELS,
@@ -55,12 +56,23 @@ export function TaskDetail({
   id: string;
   taskId: string;
 }) {
+  const chat = useChat();
   const { result } = useScreenData(
     live,
     agentName,
     () => api.challenge(agentName, id),
     [id],
   );
+  const taskTitle =
+    result.state === "ready"
+      ? (result.data.tasks.find((t) => t.id === taskId)?.title ?? null)
+      : null;
+  // 欄の「いま見ているもの」へ、開いているタスクの題名を知らせる。離れたら消す。
+  const { reportTask } = chat;
+  useEffect(() => {
+    reportTask(taskId, taskTitle);
+    return () => reportTask(null, null);
+  }, [reportTask, taskId, taskTitle]);
   const home = hrefOf({ kind: "agent", name: agentName, screen: "now" });
   if (result.state === "loading") return <p>{LOADING_TEXT}</p>;
   if (result.state === "error") {

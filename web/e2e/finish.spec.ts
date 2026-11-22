@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// 区切り S2c の仕上げ（#814）。実際のブラウザで、どの画面にも入力欄が無いこと（AC-118）と、
+// 区切り S2c の仕上げ（#814）。実際のブラウザで、どの画面にも（対話の欄を除いて）入力欄が無いこと（AC-118）と、
 // 画面の本文に「ワークスペース」「1 周」の語が出ないこと（AC-443・AC-444）を、偽のデータ（mock モード）の全画面で確かめる。
 const SCREENS = [
   "#/all",
@@ -16,8 +16,16 @@ for (const hash of SCREENS) {
   }) => {
     await page.goto(`/${hash}`);
     await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
-    await expect(page.locator("input, textarea, select")).toHaveCount(0);
-    await expect(page.locator("[contenteditable]")).toHaveCount(0);
+    // 対話の欄（#1002）は、入力欄を持つ唯一の例外。
+    const outsideChat = ':not([data-testid="chat-panel"] *)';
+    await expect(
+      page.locator(
+        `input${outsideChat}, textarea${outsideChat}, select${outsideChat}`,
+      ),
+    ).toHaveCount(0);
+    await expect(page.locator(`[contenteditable]${outsideChat}`)).toHaveCount(
+      0,
+    );
     const text = await page.locator("body").innerText();
     expect(text).not.toContain("ワークスペース");
     expect(text).not.toMatch(/[1１]\s*周/);
