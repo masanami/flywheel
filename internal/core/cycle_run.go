@@ -271,7 +271,8 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	}
 	// 終わりの段を通し、排他を放した後に、いま始められるものを数え直す（settled のときだけ）。
 	if in.Continue != nil && endReason == CycleEndSettled && in.AgentDecl.AutoCycle {
-		work, werr := s.CountRoundWork(endCtx, in.AgentDecl, in.ConnDecl)
+		// そのサイクルで見送った保留は数えない（見送りだけで次のサイクルを始めない）。
+		work, werr := s.countRoundWork(endCtx, in.AgentDecl, in.ConnDecl, cycleDBIDOf(cyc.ID))
 		switch {
 		case werr != nil:
 			res.ContinueErr = werr
