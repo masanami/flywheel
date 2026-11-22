@@ -36,7 +36,7 @@ func runCycleStop(a Args) (any, error) {
 	}
 	text := "走っているサイクルは無いので、何もしませんでした。\n"
 	if res.Requested {
-		text = fmt.Sprintf("周 %s に止める指示を残しました。段の切れ目で読んで終えます（段の途中では効きません。委譲先の実行は取り消しません）。\n", res.CycleID)
+		text = fmt.Sprintf("走っているサイクル（%s）に止める指示を残しました。段の切れ目で読んで終えます（段の途中では効きません。委譲先の実行は取り消しません）。\n", res.CycleID)
 	}
 	return textOutput{json: view.FromCycleStopResult(res), text: text}, nil
 }
