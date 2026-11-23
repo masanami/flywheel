@@ -1226,7 +1226,7 @@ describe("画面: 知らせ（#1184）", () => {
   it("#1184: 「タスクを足した」に出どころが付く", async () => {
     await openNow({ notices: [{ ...added, origin: "followup" }] });
     expect(await (await box()).findByTestId("notice-item")).toHaveTextContent(
-      "件足しました（フォローアップから）。",
+      "件足しました（フォローアップをタスクに上げた）。",
     );
   });
 });

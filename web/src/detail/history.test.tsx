@@ -613,3 +613,51 @@ it("#814: 表に無い記録の値と、constructor のような継承された�
   await firstRow(root);
   expect([...whatOf(root)].sort()).toEqual(["constructor", "toString"]);
 });
+
+// 区切り S4d-2 の T8: 経緯の語。生の値のまま出さない。
+it("AC-168 #1185: スーパーバイザーの手の出来事が、言葉で出る", async () => {
+  const { root } = await open([act1({ action: "supervise" })]);
+  await firstRow(root);
+  expect(whatOf(root)).toEqual(["スーパーバイザーが手を打った"]);
+});
+
+it("AC-169 #1185: 問いの書き換えの出来事が、言葉で出る", async () => {
+  const { root } = await open([act1({ action: "hold_edit" })]);
+  await firstRow(root);
+  expect(whatOf(root)).toEqual(["問いを書き換えた"]);
+});
+
+it("AC-170 #1185: 上限の変更の出来事が、言葉で出る", async () => {
+  const { root } = await open([act1({ action: "budget_limit" })]);
+  await firstRow(root);
+  expect(whatOf(root)).toEqual(["課題の費用の上限を変えた"]);
+});
+
+it("AC-171 #1185: 足す依頼の出来事（作る・タスクを足す・状態の変更）が、言葉で出る", async () => {
+  const { root } = await open([
+    act1({
+      entity: "task_addition",
+      entity_id: "TA-1",
+      action: "create",
+      at: "2026-11-01T10:00:00Z",
+    }),
+    act1({
+      entity: "task_addition",
+      entity_id: "TA-1",
+      action: "add_tasks",
+      at: "2026-11-01T11:00:00Z",
+    }),
+    act1({
+      entity: "task_addition",
+      entity_id: "TA-1",
+      action: "state",
+      at: "2026-11-01T12:00:00Z",
+    }),
+  ]);
+  await firstRow(root);
+  expect(whatOf(root)).toEqual([
+    "タスクを足す依頼の状態が変わった",
+    "計画の後にタスクを足した",
+    "タスクを足す依頼を作った",
+  ]);
+});

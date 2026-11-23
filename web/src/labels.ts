@@ -512,7 +512,34 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
     "取り込み元のコメント数・更新日時の観測が変わった",
   upstream_state_change: "取り込み元の状態が変わった",
   policy_state_change: "取り込みの方針の範囲内か外かが変わった",
+  supervise: "スーパーバイザーが手を打った",
+  hold_edit: "問いを書き換えた",
+  budget_limit: "課題の費用の上限を変えた",
+  "task_addition:create": "タスクを足す依頼を作った",
+  "task_addition:add_tasks": "計画の後にタスクを足した",
+  "task_addition:state": "タスクを足す依頼の状態が変わった",
 };
+
+// 足す依頼の状態（additions[].state）。開いているのは pending・awaiting_owner。知らない値は値のまま出す。
+export const TASK_ADDITION_STATE_LABELS: Record<string, string> = {
+  pending: "仕様を待っている",
+  awaiting_owner: "上限を超えるので問い中",
+  applied: "足した",
+  none: "足さなかった",
+  declined: "足さなかった",
+  superseded: "取り消した",
+};
+
+// 後から足したタスクの出どころ（added.origin）。知らない値は値のまま出す。
+export const TASK_ADDED_ORIGIN_LABELS: Record<string, string> = {
+  expand: "タスクの完了の検証から足した",
+  followup: "フォローアップをタスクに上げた",
+};
+export const TASK_ADDED_ORIGIN_SUPERVISOR_LABEL =
+  "スーパーバイザーのフォローアップをタスクに上げた";
+export const TASK_ADDED_MARK = "後から足したタスク";
+export const TASK_ADDED_TREE_MARK = "後から足した";
+export const WHO_SUPERVISOR = "スーパーバイザー";
 
 // 実行の記録の「何の実行か」。判断点は役割の言葉で呼び、番号は括弧で添える。知らない値は値のまま出す。
 export const JUDGMENT_LABELS: Record<string, string> = {
@@ -562,5 +589,7 @@ export const NO_COST_LABEL = "費用の記録なし";
 // 経緯の「誰が」
 export const WHO_ME_RELAYED = "あなた（対話）";
 export const WHO_ME_UI = "あなた（画面）";
+// 保留への回答を画面のボタンで受けた（経路 ui）ときの「誰が」。
+export const WHO_ME_UI_BUTTON = "あなた（画面のボタン）";
 export const WHO_ME_TTY = "あなた（ターミナル）";
 export const WHO_AGENT_RUN = "エージェント";

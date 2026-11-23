@@ -2,6 +2,7 @@ import type { Notice } from "./api/types.gen.ts";
 import {
   CYCLE_BUDGET_GUIDE_TEXT,
   CYCLE_END_REASON_LABELS,
+  TASK_ADDED_ORIGIN_LABELS,
   label,
 } from "./labels.ts";
 import { hrefOf } from "./shell/route.ts";
@@ -24,12 +25,6 @@ const CYCLE_END_GUIDES: Record<string, string> = {
   error:
     "原因をサイクルの画面で確かめてから、「サイクルを回す」を押してください。",
   interrupted: "「サイクルを回す」を押すと、続きから進みます。",
-};
-
-// タスクを足した出どころ（core の値）。知らない値は言わない。
-const ORIGIN_TEXTS: Record<string, string> = {
-  expand: "計画の拡張",
-  followup: "フォローアップから",
 };
 
 export interface NoticeLine {
@@ -58,8 +53,8 @@ export function noticeLine(n: Notice, agentName: string): NoticeLine {
         key,
         at: n.at,
         text: `「${challengeTitle}」にタスクを ${n.added_count ?? 0} 件足しました${
-          n.origin !== null && ORIGIN_TEXTS[n.origin]
-            ? `（${ORIGIN_TEXTS[n.origin]}）`
+          n.origin !== null && TASK_ADDED_ORIGIN_LABELS[n.origin]
+            ? `（${TASK_ADDED_ORIGIN_LABELS[n.origin]}）`
             : ""
         }。`,
         href: challengeHref,

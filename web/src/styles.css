@@ -789,6 +789,15 @@ body {
   text-decoration: none;
   overflow: hidden;
 }
+/* 後から足したタスクは点線の枠 */
+.task-box[data-added="true"] {
+  border-style: dashed;
+}
+.task-phase {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 a.task-box:hover {
   border-color: var(--board-link);
 }
@@ -1228,4 +1237,36 @@ a.task-box:hover {
 .now-ingest-actions button {
   max-width: 100%;
   white-space: normal;
+}
+
+/* 意思決定の記録・スーパーバイザーの記録・足す依頼の行。狭い幅で語が枠からはみ出さないよう、長い語は折り返す。 */
+.decision-list,
+.sv-records,
+.additions-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+.decision-list li,
+.sv-records li,
+.additions-list li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--board-border);
+  overflow-wrap: anywhere;
+}
+.decision-who,
+.decision-what,
+.decision-reason {
+  margin-left: 0.5rem;
+}
+.task-added {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.sv-hand-findings,
+.sv-hand-note,
+.sv-hand-conditions,
+.sv-hand-questions {
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
 }
