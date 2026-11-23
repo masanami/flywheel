@@ -101,6 +101,10 @@ type Approval struct {
 
 // Hold は保留の 1 件（§データモデル hold）。#9 は書き込まない（読み取りだけ実装する）。
 type Hold struct {
+	// HoldID は保留の表示用の ID（"H-<番号>"。保留の行の番号から作る。閉じた保留・過去の保留も同じ形）。
+	HoldID string
+	// Scope は保留の止める範囲（hold.scope の値。タスクを止める保留は HoldScopeTask、課題を止める保留は空）。表示の語は ScopeLabel。
+	Scope HoldScope
 	// Kind は保留の種類（0014。既存の行は human）。
 	Kind       HoldKind
 	Question   string
@@ -140,6 +144,9 @@ type Hold struct {
 	// 真のとき、保留は開いたままで、Question・Options は新しい額に書き換わっている。保存する値ではない。
 	Reissued bool
 }
+
+// ScopeLabel は止める範囲の表示の語（task か challenge）。
+func (h Hold) ScopeLabel() string { return holdScopeLabel(h.Scope) }
 
 // Open は保留がまだ開いている（回答も閉じる操作も無い）かを返す。
 func (h Hold) Open() bool { return h.Answer == nil && h.ClosedAt == nil }
@@ -479,7 +486,7 @@ func loadApprovals(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Approv
 
 func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT question, from_status, raised_at, answer, answered_at, answered_by, run_id,
+		`SELECT id, scope, question, from_status, raised_at, answer, answered_at, answered_by, run_id,
 		        answered_channel, answered_verification, relay_session, relay_quote, closed_at, kind, replan, task_id, options, answer_option, option_required,
 		        stop_kind, supervisor_state, supervisor_findings, supervisor_recommendation
 		 FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
@@ -505,10 +512,14 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			stopKind, supState                sql.NullString
 			supFindings, supRecommendation    sql.NullString
 			h                                 Hold
+			rowID                             int64
+			scope                             sql.NullString
 		)
-		if err := rows.Scan(&h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind, &replan, &taskID, &optionsJSON, &answerOption, &optionRequired, &stopKind, &supState, &supFindings, &supRecommendation); err != nil {
+		if err := rows.Scan(&rowID, &scope, &h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind, &replan, &taskID, &optionsJSON, &answerOption, &optionRequired, &stopKind, &supState, &supFindings, &supRecommendation); err != nil {
 			return nil, err
 		}
+		h.HoldID = formatHoldID(rowID)
+		h.Scope = HoldScope(scope.String)
 		if optionsJSON.Valid {
 			opts, err := parseHoldOptions(&optionsJSON.String)
 			if err != nil {

@@ -46,6 +46,18 @@ it("#803: 課題の操作の案内は、これまでどおり actions で出て�
   expect(ids).not.toContain("by-context");
 });
 
+it("S4c-3: 回答の案内は、開いている保留が 2 つ以上なら、保留ごとに --hold <H-ID> つきになる（1 つなら --hold なし）", () => {
+  const one = guidesFor("C-1", "/w/a", ["answer_question"], ["H-3"]);
+  expect(one.map((g) => g.command)).toEqual([
+    "flywheel answer C-1 --workspace '/w/a' --answer <回答>",
+  ]);
+  const two = guidesFor("C-1", "/w/a", ["answer_question"], ["H-3", "H-4"]);
+  expect(two.map((g) => g.command)).toEqual([
+    "flywheel answer C-1 --workspace '/w/a' --hold H-3 --answer <回答>",
+    "flywheel answer C-1 --workspace '/w/a' --hold H-4 --answer <回答>",
+  ]);
+});
+
 it("answer・budget の案内は差し込み口 <回答>・<額> のまま、コードで決まる", () => {
   const a = guidesFor("C-1", "/w/a", ["answer_question"]);
   expect(a.map((g) => g.command)).toEqual([

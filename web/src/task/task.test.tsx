@@ -71,7 +71,10 @@ const N = (id: string, p: Partial<TreeTask> = {}): TreeTask => ({
   ...p,
 });
 
+let holdSeq = 0;
 const hold = (p: Partial<Hold> = {}): Hold => ({
+  hold_id: `H-${++holdSeq}`,
+  scope: "challenge",
   answer: null,
   answer_option: null,
   answered_at: null,
@@ -851,4 +854,39 @@ it("AC-129: 実行に確かめ待ちの中身（fix_pending_ref）があるタ�
 it("AC-129: 確かめ待ちの中身が無ければ、その旨は出さない", async () => {
   const { root } = await open(show({ runs: [run("R-1")] }));
   expect(within(root).queryByTestId("task-fix-pending")).toBeNull();
+});
+
+// S4c-3（AC-127）: タスクの詳細に保留の ID が出る。課題の開いている保留が 2 つ以上のとき、案内のコマンドは --hold つきでこのタスクの保留を指す（AC-126）。
+it("AC-127 S4c-3: タスクの詳細の待ちと問いと回答に、保留の ID（H-<番号>）が出る", async () => {
+  const { root } = await open(
+    show({
+      nodes: [N("T-2", { phase: "waiting" })],
+      holds: [hold({ hold_id: "H-7", scope: "task", question: "問い 7" })],
+    }),
+  );
+  const w = within(within(root).getByTestId("task-waiting"));
+  expect(w.getByTestId("task-hold-id").textContent).toContain("H-7");
+  expect(
+    within(within(root).getByTestId("task-holds")).getByText(/H-7/),
+  ).toBeTruthy();
+});
+
+it("AC-126 S4c-3: 開いている保留が 2 つの課題のタスクの詳細は、案内のコマンドに --hold とこのタスクの保留の ID を含む", async () => {
+  const { root } = await open(
+    show({
+      nodes: [N("T-2", { phase: "waiting" })],
+      holds: [
+        hold({ hold_id: "H-7", scope: "task", task_id: "T-2" }),
+        hold({
+          hold_id: "H-8",
+          scope: "task",
+          task_id: "T-3",
+          raised_at: "2026-11-02T00:00:00Z",
+        }),
+      ],
+    }),
+  );
+  const w = within(within(root).getByTestId("task-waiting"));
+  expect(w.getByText(/flywheel answer C-1 .*--hold H-7 /)).toBeTruthy();
+  expect(w.queryByText(/--hold H-8/)).toBeNull();
 });
