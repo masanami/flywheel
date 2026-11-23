@@ -8,6 +8,7 @@ import { hrefOf } from "../shell/route.ts";
 import { shortTime } from "../when.ts";
 
 // 課題の詳細の「スーパーバイザーの記録」。この課題で打った手の数と、手ごとの行（古い順）。
+// 手の数は、成った手だけを数える。行は、断られた手・失敗した手も含めて全部出す。
 // 手が 0 件なら節ごと出さない。タスクにつく手は、行からそのタスクの詳細へ移れる。
 export function SupervisorRecords({
   show,
@@ -26,7 +27,9 @@ export function SupervisorRecords({
   return (
     <section aria-label="スーパーバイザーの記録" data-testid="sv-records">
       <h3>スーパーバイザーの記録</h3>
-      <p data-testid="sv-records-count">手の数: {actions.length}</p>
+      <p data-testid="sv-records-count">
+        手の数: {actions.filter((a) => a.result === "executed").length}
+      </p>
       <ol className="sv-records">
         {actions.map((a) => (
           <li key={a.id} data-testid="sv-record">

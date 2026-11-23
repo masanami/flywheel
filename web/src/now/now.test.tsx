@@ -75,6 +75,7 @@ interface Setup {
   post?: unknown;
   notices?: Partial<Notice>[];
   ingestPost?: unknown;
+  answerPost?: unknown;
   noticesResponder?: FakeResponder;
 }
 
@@ -141,6 +142,8 @@ function setup(s: Setup = {}) {
   };
   if (s.noticesResponder) bodies[`${P}/notices`] = s.noticesResponder;
   if (s.ingestPost !== undefined) bodies[`POST ${P}/ingest`] = s.ingestPost;
+  if (s.answerPost !== undefined)
+    bodies[`POST ${P}/challenges/C-3/holds/H-5/answer`] = s.answerPost;
   const ing = s.ingestable ?? { error: null, items: [] };
   bodies[`${P}/status?ingestable=true`] =
     typeof ing === "function" ? ing : { ...status, ingestable: ing };
@@ -1084,6 +1087,77 @@ describe("画面: あなたを待っているものの内訳（#1184）", () => 
     expect(
       within(row).getByTestId("hold-option-conversation"),
     ).toBeInTheDocument();
+  });
+});
+
+describe("画面: ボタンの回答が通った後（#1206）", () => {
+  const question: Partial<Question> = {
+    challenge_id: "C-3",
+    question: "どちらにしますか",
+    hold_id: "H-5",
+    check: "chk",
+    options: [
+      { id: "a", label: "案 A", description: "", button: true },
+      { id: "b", label: "案 B", description: "", button: true },
+    ],
+  };
+  const answerA = async () => {
+    const row = rowOf("answer");
+    fireEvent.click(
+      within(row).getAllByTestId("hold-option-button")[0] as HTMLElement,
+    );
+    fireEvent.click(within(row).getByTestId("hold-confirm-send"));
+  };
+
+  it("#1206: ボタンの回答が通ると、課題の題名と選んだ選択肢の語つきの知らせが、回答の行の外に出る", async () => {
+    const { requests } = await openNow({
+      nh: { challenges: [ch("C-3", "awaiting_human", "回答の題名")] },
+      questions: [question],
+      answerPost: { cycle: { started: false }, hold: {} },
+    });
+    expect(screen.queryByTestId("now-answered")).toBeNull();
+    await answerA();
+    const done = await screen.findByTestId("now-answered");
+    expect(done).toHaveTextContent(
+      "「回答の題名」の問いに「案 A」で答えました。",
+    );
+    expect(within(done).getByRole("link").getAttribute("href")).toBe(
+      "#/a/alpha/challenges/C-3",
+    );
+    // 回答の行の外にある（行が消えても残る場所）。
+    expect(rowOf("answer")).not.toContainElement(done);
+    expect(posts(requests, "challenges/C-3/holds/H-5/answer")).toHaveLength(1);
+  });
+
+  it("#1206: 問いが変わっていて回答が通らなかったときは、答えた旨の知らせは出ない", async () => {
+    await openNow({
+      nh: { challenges: [ch("C-3", "awaiting_human", "回答の題名")] },
+      questions: [question],
+      answerPost: apiError(409, "hold_changed", "変わっていました"),
+    });
+    await answerA();
+    await screen.findByTestId("hold-changed");
+    expect(screen.queryByTestId("now-answered")).toBeNull();
+  });
+
+  it("#1206: 次の回答を送り始めると、前に通った回答の知らせは消える", async () => {
+    let n = 0;
+    await openNow({
+      nh: { challenges: [ch("C-3", "awaiting_human", "回答の題名")] },
+      questions: [question],
+      answerPost: () =>
+        n++ === 0
+          ? new Response(
+              JSON.stringify({ cycle: { started: false }, hold: {} }),
+              { status: 200 },
+            )
+          : apiError(409, "hold_changed", "変わっていました")(),
+    });
+    await answerA();
+    await screen.findByTestId("now-answered");
+    await answerA();
+    await screen.findByTestId("hold-changed");
+    expect(screen.queryByTestId("now-answered")).toBeNull();
   });
 });
 

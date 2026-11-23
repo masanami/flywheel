@@ -1317,15 +1317,18 @@ it("AC-164 #1185: 「スーパーバイザーの記録」に、手の数と、�
         result: "rejected",
         reject_reason: "state_changed",
       }),
+      svAction({ id: 3, created_at: "2026-11-01T05:00:00Z", result: "failed" }),
       svAction({ id: 1 }),
     ],
   });
   const sec = q(root).getByTestId("sv-records");
-  expect(within(sec).getByTestId("sv-records-count").textContent).toContain(
-    "2",
+  // 手の数は成った手だけ（断られた手・失敗した手は数えない）。行は全部出す。
+  expect(within(sec).getByTestId("sv-records-count").textContent).toBe(
+    "手の数: 1",
   );
   const rows = within(sec).getAllByTestId("sv-record");
-  expect(rows).toHaveLength(2);
+  expect(rows).toHaveLength(3);
+  expect(rows[2]?.textContent).toContain("失敗した");
   expect(rows[0]?.textContent).toContain("もう一度実行する");
   expect(rows[0]?.textContent).toContain("ログを調べた");
   expect(rows[1]?.textContent).toContain("見送る");

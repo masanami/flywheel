@@ -310,7 +310,7 @@ export const CYCLE_RESULTS = ["completed", "aborted", "interrupted"] as const;
 export type CycleResult = (typeof CYCLE_RESULTS)[number];
 
 export const CYCLE_RESULT_LABELS: Record<CycleResult, string> = {
-  completed: "最後まで終わった",
+  completed: "異常なく終わった",
   aborted: "途中でやめた",
   interrupted: "途中で止まった",
 };

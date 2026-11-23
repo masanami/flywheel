@@ -23,11 +23,12 @@ export interface HoldAnswerState {
 }
 
 // 回答の口を呼ぶ。応答が返るまで busy（二度押しを防ぐ）。409 は問いが変わった旨を出して読み直す。
-// 成立しても失敗しても、課題の詳細を読み直す（onChanged）。
+// 成立しても失敗しても、課題の詳細を読み直す（onChanged）。成立したときだけ、選んだ選択肢の識別を onAnswered へ渡す。
 export function useHoldAnswer(
   agentName: string,
   challengeId: string,
   onChanged: () => void,
+  onAnswered?: (holdId: string, option: string) => void,
 ): HoldAnswerState {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -39,6 +40,7 @@ export function useHoldAnswer(
       setError(null);
       try {
         await api.answerHold(agentName, challengeId, holdId, { option, check });
+        onAnswered?.(holdId, option);
       } catch (e) {
         if (e instanceof ApiError && e.status === 409) {
           setNotice(HOLD_CHANGED_NOTE);
@@ -50,7 +52,7 @@ export function useHoldAnswer(
       }
       onChanged();
     },
-    [agentName, challengeId, onChanged],
+    [agentName, challengeId, onChanged, onAnswered],
   );
   return { busy, notice, error, answer };
 }

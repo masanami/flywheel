@@ -49,6 +49,12 @@ function withIdIfUntitled(label: string, id: string): string {
   return label === id ? `課題（${id}）` : label;
 }
 
+interface Answered {
+  challengeId: string;
+  title: string;
+  label: string;
+}
+
 export function NowScreen({
   live,
   agentName,
@@ -65,6 +71,9 @@ export function NowScreen({
   const [fresh, setFresh] = useState<readonly Question[] | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: 全体の値が変わったら、読み直した値は捨てる
   useEffect(() => setFresh(null), [live.questions]);
+  // ボタンの回答が通ると、その行は一覧から消える。押した結果が見えるよう、通った回答を画面に残す。
+  // 次の回答を送り始めたら消す（通らなかった回答の脇に、前の「答えました」を残さない）。題名は押した時点のもの。
+  const [answered, setAnswered] = useState<Answered | null>(null);
   const reloadQuestions = useCallback(() => {
     api.questions().then(
       (r) => setFresh(r.questions),
@@ -156,6 +165,21 @@ export function NowScreen({
 
       <section aria-labelledby="now-waiting-title" className="now-block">
         <h3 id="now-waiting-title">あなたを待っている（{rows.length} 件）</h3>
+        {answered !== null ? (
+          <output className="now-answered" data-testid="now-answered">
+            <a
+              href={hrefOf({
+                kind: "challenge",
+                name: agentName,
+                id: answered.challengeId,
+                view: "tree",
+              })}
+            >
+              「{answered.title}」
+            </a>
+            の問いに「{answered.label}」で答えました。
+          </output>
+        ) : null}
         {rows.length === 0 ? (
           <p>{NO_WAITING_TEXT}</p>
         ) : (
@@ -167,7 +191,20 @@ export function NowScreen({
                 slotGuide={slotGuide}
                 agentName={agentName}
                 questions={questions}
-                onAnswered={reloadQuestions}
+                onChanged={reloadQuestions}
+                onAnswered={(a) =>
+                  setAnswered(
+                    a === null
+                      ? null
+                      : {
+                          ...a,
+                          title: withIdIfUntitled(
+                            titleOf(a.challengeId),
+                            a.challengeId,
+                          ),
+                        },
+                  )
+                }
               />
             ))}
           </ul>
@@ -236,13 +273,15 @@ function WaitingItem({
   slotGuide,
   agentName,
   questions,
+  onChanged,
   onAnswered,
 }: {
   row: WaitingRow;
   slotGuide: Guide | undefined;
   agentName: string;
   questions: readonly Question[];
-  onAnswered: () => void;
+  onChanged: () => void;
+  onAnswered: (a: Omit<Answered, "title"> | null) => void;
 }) {
   const group = waitingKindGroup(row.kind);
   return (
@@ -268,6 +307,7 @@ function WaitingItem({
           questions={questions.filter(
             (q) => q.challenge_id === row.challengeId,
           )}
+          onChanged={onChanged}
           onAnswered={onAnswered}
         />
       ) : null}
@@ -286,15 +326,36 @@ function AnswerButtons({
   agentName,
   challengeId,
   questions,
+  onChanged,
   onAnswered,
 }: {
   agentName: string;
   challengeId: string;
   questions: readonly Question[];
-  onAnswered: () => void;
+  onChanged: () => void;
+  onAnswered: (a: Omit<Answered, "title"> | null) => void;
 }) {
-  const state = useHoldAnswer(agentName, challengeId, onAnswered);
   const answerable = questions.filter((q) => hasOptions(q));
+  // 通った回答の、選択肢の語を親へ渡す（行が消えた後も出すため）。
+  const report = useCallback(
+    (holdId: string, option: string) => {
+      const label =
+        questions
+          .find((q) => q.hold_id === holdId)
+          ?.options.find((o) => o.id === option)?.label ?? option;
+      onAnswered({ challengeId, label });
+    },
+    [questions, challengeId, onAnswered],
+  );
+  const sent = useHoldAnswer(agentName, challengeId, onChanged, report);
+  // 送り始めたら、前に通った回答の知らせを消す。
+  const state = {
+    ...sent,
+    answer: (holdId: string, option: string, check: string) => {
+      onAnswered(null);
+      return sent.answer(holdId, option, check);
+    },
+  };
   return (
     <div data-testid="now-answer">
       {answerable.map((q) => (

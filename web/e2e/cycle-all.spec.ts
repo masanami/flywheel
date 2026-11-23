@@ -82,7 +82,7 @@ test.describe("中身（既定の幅）", () => {
       "まだありません",
     );
     await expect(page.getByTestId("cycle-last-result")).toHaveText(
-      "最後まで終わった",
+      "異常なく終わった",
     );
     await expect(page.getByTestId("cycle-work-total")).toHaveText("2");
     await expect(

@@ -58,7 +58,7 @@ export function addedOriginWord(
 }
 
 // そのタスクに関わる出来事を、古い順に並べる。
-// 計画の承認は課題に 1 つなので、どのタスクの記録にも出す。回答とスーパーバイザーの手は、そのタスクのものだけ。
+// 計画の承認は課題につくものなので、どのタスクの記録にも出す（承認し直した課題では、承認のたびに 1 行）。回答とスーパーバイザーの手は、そのタスクのものだけ。
 export function decisionRows(
   show: ShowCardResponse,
   task: Task,

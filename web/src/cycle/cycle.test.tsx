@@ -66,7 +66,7 @@ it("AC-378 #806: 最後のサイクルの終わった時刻が出る", async () 
 it("AC-379 #806: 最後のサイクルの結果が出る", async () => {
   await openAgents([agent], "#/a/alpha/cycle");
   expect(await screen.findByTestId("cycle-last-result")).toHaveTextContent(
-    "最後まで終わった",
+    "異常なく終わった",
   );
 });
 
