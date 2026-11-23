@@ -587,8 +587,9 @@ func TestPatchStages_CalledTwiceKeepsOriginalBefore(t *testing.T) {
 	cid, _ := parseChallengeID(c.ID)
 	setIssuesForTest(t, s, cid, issuesN(3))
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		// 保留の ID を並べるだけの準備。開いたままの保留は課題ごとに 1 つまでなので、閉じた保留として入れる。
 		for i := 0; i < 9; i++ {
-			if _, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at) VALUES (?, 'q', 'unclassified', '2026-10-19T00:00:00.000Z')`, cid); err != nil {
+			if _, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, closed_at) VALUES (?, 'q', 'unclassified', '2026-10-19T00:00:00.000Z', '2026-10-19T00:00:00.000Z')`, cid); err != nil {
 				return err
 			}
 		}

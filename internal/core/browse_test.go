@@ -173,7 +173,8 @@ func TestListUnansweredHolds(t *testing.T) {
 		n, _ := parseChallengeID(ch.ID)
 		return n
 	}
-	c1, c2, c3 := mk("one"), mk("two"), mk("three")
+	// 開いている保留は課題ごとに 1 つまで。run を持つ保留（q-run）は 4 つ目の課題に置く。
+	c1, c2, c3, c4 := mk("one"), mk("two"), mk("three"), mk("four")
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		for _, q := range []struct {
 			cid      int64
@@ -202,7 +203,7 @@ func TestListUnansweredHolds(t *testing.T) {
 		t.Fatal(err)
 	}
 	// run_id つきの保留（run を 1 件作って参照する）。
-	row, err := insertRunForTest(t, s, c3, insertRunInput{
+	row, err := insertRunForTest(t, s, c4, insertRunInput{
 		Kind: runKindJudgment, Judgment: judgmentJ1, ChallengeVersion: 1,
 		SessionID: "11111111-1111-1111-1111-111111111111", PID: 1, Host: "h",
 		HeartbeatAt: time.Now(), StartedAt: time.Now(), MaxBudgetUSD: 100_000, BudgetBucket: budgetBucketJudgment,
@@ -212,7 +213,7 @@ func TestListUnansweredHolds(t *testing.T) {
 	}
 	rid, _ := parseRunID(row.ID)
 	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, run_id) VALUES (?, 'q-run', 'in_progress', '2026-09-26T00:00:00.000Z', ?)`, c3, rid)
+		_, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, run_id) VALUES (?, 'q-run', 'in_progress', '2026-09-26T00:00:00.000Z', ?)`, c4, rid)
 		return err
 	}); err != nil {
 		t.Fatal(err)

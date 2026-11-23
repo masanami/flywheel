@@ -24,14 +24,12 @@ import (
 	"time"
 )
 
-// loadUnansweredHold は challengeID（内部整数 ID）の「現在の未回答の保留」
-// （最新の1件）を返す。PrepareAnswer（①）と ExecuteAnswer の
-// resolvePreceding（②。同じトランザクション内での再読み込み）が同じ
-// クエリを共有するために切り出した（self-review 指摘: 別々に持つと、
-// 承認対象の同一性を決める不変条件〈①が見せた保留と②が回答を書き込む
-// 保留が同じであること〉が、将来どちらか一方だけクエリが変わっても
-// 検出できない形で壊れうる）。行が無ければ sql.ErrNoRows をそのまま返す
-// （呼び出し側が current.ID を使った文脈つきのエラーメッセージを組み立てる）。
+// loadUnansweredHold は challengeID（内部整数 ID）の開いている保留（回答が無く、閉じていない）のうち
+// 最新の 1 件を返す。使うのは取り下げの本人確認の前の要約（PrepareWithdraw）だけ。
+// 回答の相手の保留は、これではなく selectAnswerHold が決める（PrepareAnswer と ExecuteAnswer の両方が
+// selectAnswerHold を使い、開いている保留が 2 つ以上なら最新を黙って選ばず --hold を求める。確かめた保留と
+// 書き込む保留が同じことは checkAnswerHoldUnchanged が確かめる）。行が無ければ sql.ErrNoRows をそのまま返す
+// （呼び出し側が文脈つきのエラーメッセージを組み立てる）。
 func loadUnansweredHold(ctx context.Context, tx *sql.Tx, cid int64) (holdID int64, question string, fromStatus Status, raisedAt time.Time, err error) {
 	var fs, raisedAtStr string
 	if err = tx.QueryRowContext(ctx,
@@ -46,8 +44,8 @@ func loadUnansweredHold(ctx context.Context, tx *sql.Tx, cid int64) (holdID int6
 	return holdID, question, Status(fs), raisedAt, nil
 }
 
-// errNoUnansweredHold は loadUnansweredHold が sql.ErrNoRows を返したときに
-// PrepareAnswer・ExecuteAnswer の両方が使う、文脈つきのエラーを組み立てる。
+// errNoUnansweredHold は、人間対応待ちの課題に開いている保留が 1 つも無いときの、文脈つきのエラーを組み立てる
+// （回答の相手を決める selectAnswerHold〔PrepareAnswer・ExecuteAnswer の両方が通る〕と、親が直接行う保留の読み〔parent_direct.go〕が使う）。
 func errNoUnansweredHold(challengeID string) error {
 	return fmt.Errorf("core: challenge %s is awaiting_human but has no unanswered hold", challengeID)
 }
@@ -504,8 +502,11 @@ type AnswerPreview struct {
 	Title       string
 	Question    string
 	Answer      string // 入力された回答をそのまま返す（要約の組み立てに使う）
-	Version     int    // 表示時点の課題の版（ExecuteAnswer の ExpectedVersion にそのまま渡す）
-	FromStatus  Status // 回答が成立したときに戻る状態（保留に入る直前の状態）
+	// HoldID・TaskTitle は答える保留の ID（H-<番号>）と、結び付くタスクの題名（結び付かなければ空）。
+	HoldID     string
+	TaskTitle  string
+	Version    int    // 表示時点の課題の版（ExecuteAnswer の ExpectedVersion にそのまま渡す）
+	FromStatus Status // 回答が成立したときに戻る状態（保留に入る直前の状態）
 	// Option・OptionLabel は選択肢で答えるときの、選んだ識別と、解決した見出し（選んでいなければ空）。
 	// Answer は入力された回答の文（選択肢で答えるときは添え書き。無ければ空）。
 	Option      string
@@ -529,6 +530,13 @@ func (s *Store) PrepareAnswer(ctx context.Context, id string, answer string) (*A
 // （見出しが回答の文になる）、返す値の OptionLabel に解決した見出しが入る。保留の選択肢に無い識別・選択肢を持たない保留への識別・
 // 識別の無い回答を断る印のある保留への識別の無い回答・識別と replan の併用は、何も書かず ErrValidation（本人確認の前に断る）。
 func (s *Store) PrepareAnswerOption(ctx context.Context, id string, answer string, option string, replan bool) (*AnswerPreview, error) {
+	return s.PrepareAnswerHold(ctx, id, "", answer, option, replan)
+}
+
+// PrepareAnswerHold は PrepareAnswerOption に、答える保留（hold。H-<番号>。空なら、開いている保留が 1 つのときだけその保留）を足した版。
+// 開いている保留が 2 つ以上で hold が空・hold がその課題の開いている保留でない・H-<番号>の形でないときは、何も書かず ErrValidation
+// （2 つ以上のときの誤りの文に、開いている保留の ID・タスクの題名・問いの先頭を出す）。
+func (s *Store) PrepareAnswerHold(ctx context.Context, id string, hold string, answer string, option string, replan bool) (*AnswerPreview, error) {
 	if option != "" && replan {
 		return nil, fmt.Errorf("%w: --option and --replan cannot be combined", ErrValidation)
 	}
@@ -554,11 +562,8 @@ func (s *Store) PrepareAnswerOption(ctx context.Context, id string, answer strin
 			return ErrInvalidTransition
 		}
 
-		holdID, question, fromStatus, _, err := loadUnansweredHold(ctx, tx, cid)
+		holdID, question, fromStatus, _, taskTitle, err := selectAnswerHold(ctx, tx, cid, current.ID, hold)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return errNoUnansweredHold(current.ID)
-			}
 			return err
 		}
 		opts, required, err := loadHoldOptionsOf(ctx, tx, holdID)
@@ -586,6 +591,8 @@ func (s *Store) PrepareAnswerOption(ctx context.Context, id string, answer strin
 			OptionRequired: required,
 			ChallengeID:    current.ID,
 			Title:          current.Title,
+			HoldID:         formatHoldID(holdID),
+			TaskTitle:      taskTitle,
 			Question:       question,
 			Answer:         answer,
 			Version:        current.Version,
@@ -1045,6 +1052,13 @@ type AnswerRequest struct {
 	// 保留に無い識別・選択肢を持たない保留への識別・Replan との併用・識別の無い回答を断る印のある保留への識別の無い回答は、
 	// ErrValidation（何も書かない）。
 	Option string
+	// HoldID は答える保留（H-<番号>。確かめたときと同じ保留）。HoldQuestion・HoldOptions・HoldOptionRequired は確かめたときの保留の問いと選択肢。
+	// HoldID が空でなければ、課題の版（ExpectedVersion）ではなく保留で照合する（開いたままで、問いと選択肢が同じなら通す。閉じていた・変わっていたら ErrConflict）。
+	// 空のときは、開いている保留が 1 つなら課題の版で照合し、2 つ以上は ErrValidation。
+	HoldID             string
+	HoldQuestion       string
+	HoldOptions        []HoldOption
+	HoldOptionRequired bool
 	// Agent・Conn は、足す依頼の保留で「足す」を選んだとき、保存した出力を検査する宣言（nil なら core が作業ディレクトリの宣言を読む）。
 	Agent *AgentDeclaration
 	Conn  *ConnectorsDeclaration
@@ -1078,11 +1092,8 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	replan := req.Replan
 
 	resolvePreceding := func(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge) (Status, error) {
-		id, question, fromStatus, raisedAt, err := loadUnansweredHold(ctx, tx, cid)
+		id, question, fromStatus, raisedAt, _, err := selectAnswerHold(ctx, tx, cid, current.ID, req.HoldID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return "", errNoUnansweredHold(current.ID)
-			}
 			return "", err
 		}
 		holdID = id
@@ -1102,12 +1113,17 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		}
 		var runID sql.NullInt64
 		var kind string
-		var reason sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT run_id, kind, reason, task_id FROM hold WHERE id = ?`, id).Scan(&runID, &kind, &reason, &holdTaskID); err != nil {
+		var reason, scope sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT run_id, kind, reason, task_id, scope FROM hold WHERE id = ?`, id).Scan(&runID, &kind, &reason, &holdTaskID, &scope); err != nil {
 			return "", err
 		}
 		holdReasonValue = holdReason(reason.String)
-		holdOut = Hold{Kind: HoldKind(kind), Question: question, FromStatus: fromStatus, RaisedAt: raisedAt, Options: opts, OptionRequired: required}
+		// 返す保留には、回答した保留の ID・止める範囲・結び付くタスクを入れる（この 3 つは保留の一覧の読みと同じ値。止まり方・スーパーバイザーの欄は入れない）。
+		holdOut = Hold{HoldID: formatHoldID(id), Scope: HoldScope(scope.String), Kind: HoldKind(kind), Question: question, FromStatus: fromStatus, RaisedAt: raisedAt, Options: opts, OptionRequired: required}
+		if holdTaskID.Valid {
+			v := formatTaskID(holdTaskID.Int64)
+			holdOut.TaskID = &v
+		}
 		if runID.Valid {
 			v := formatRunID(runID.Int64)
 			holdOut.RunID = &v
@@ -1141,6 +1157,7 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		// priority・edit の urgency とそろえる）。
 		tc.before["answer"] = nil
 		tc.after["answer"] = answerText
+		tc.after["hold_id"] = formatHoldID(holdID)
 		if chosenOption != nil {
 			tc.after["answer_option"] = *chosenOption
 		}
@@ -1167,6 +1184,11 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	if err != nil {
 		return nil, nil, err
 	}
+	if req.HoldID != "" {
+		p.holdCheck = func(ctx context.Context, tx *sql.Tx, cid int64) error {
+			return checkAnswerHoldUnchanged(ctx, tx, cid, req.HoldID, req.HoldQuestion, req.HoldOptions, req.HoldOptionRequired)
+		}
+	}
 	cid, ok := parseChallengeID(req.ChallengeID)
 	if !ok {
 		return nil, nil, ErrNotFound
@@ -1176,13 +1198,13 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		// 足す依頼の保留に「足す」で答えるときは、回答を成立させる前に、足した後の見込みを計算し直す。選択肢の説明の額と違えば、
 		// 回答を成立させず、成功の書き込みとして問いを出し直す（エラーで巻き戻さない）。
 		if req.Option == taskAddOptionAdd {
-			reissued, err := s.reissueOverLimitQuestion(ctx, tx, rec, p, cid, req)
+			reissuedHoldID, err := s.reissueOverLimitQuestion(ctx, tx, rec, p, cid, req)
 			if err != nil {
 				return err
 			}
-			if reissued {
+			if reissuedHoldID != 0 {
 				var err error
-				c, holdOut, err = loadReissuedHold(ctx, tx, cid)
+				c, holdOut, err = loadReissuedHold(ctx, tx, cid, reissuedHoldID)
 				return err
 			}
 		}

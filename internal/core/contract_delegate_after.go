@@ -260,11 +260,15 @@ func (s *Store) holdIntegrationSucceeded(ctx context.Context, rep *ContractRunRe
 	}
 	// 保留にしない場合（課題が着手中でない・取りやめのタスク）は、契約の実行を終わった記録にするだけ。保留にする場合は、保留と終わりの記録を
 	// 1 つの書き込みにする（間でプロセスが止まっても、保留の無い終わった記録だけが残らない。開いたままなら次の状態の確認が読み直す）。
-	if inProgress, err := s.challengeInProgress(ctx, cid); err != nil || !inProgress {
+	endTask, err := s.contractRunTaskIDFor(ctx, cid, rep.ExternalRunID)
+	if err != nil {
+		return true, err
+	}
+	if inProgress, err := s.taskMayProceedFor(ctx, cid, endTask); err != nil || !inProgress {
 		if err != nil {
 			return true, err
 		}
-		// 保留中の課題は、契約の実行を開けたまま残す（上げる依頼の終わりと同じ形。回答で着手中へ戻った後の状態の確認が、同じ終わりを読み直して、
+		// 保留中の課題（このタスクを進めてよくない）は、契約の実行を開けたまま残す（上げる依頼の終わりと同じ形。回答で着手中へ戻った後の状態の確認が、同じ終わりを読み直して、
 		// 統合先へ入ったかを確かめて保留を立て、終わった記録にする。ここで終わった記録にすると、タスクが検証中・着手中のまま、保留が立たない）。
 		// 開けたままの実行は、タスクの二重の起動を止め、state が succeeded で land_ref が空なので、計画を作り直す回答の「作業している実行」に数えない。
 		if held, err := s.challengeStatusIs(ctx, cid, StatusAwaitingHuman); err != nil || held {
@@ -397,16 +401,26 @@ func (s *Store) holdContractWaitEscalated(ctx context.Context, rep *ContractRunR
 func (s *Store) holdContractWaitWith(ctx context.Context, rep *ContractRunReport, question string, opts HoldOptionsInput) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
-			if tc.current.Status != StatusInProgress {
-				return errReconcileNotEligible
-			}
 			// 契約の run が結び付くタスクに、保留も結び付ける。
 			taskID, err := contractRunTaskID(ctx, tc.tx, tc.id, rep.ExternalRunID)
 			if err != nil {
 				return err
 			}
+			// 着手中のほか、タスクを止める保留だけが開いている人間対応待ちでも、このタスクに保留が無ければ立てる（重ねる条件は共通の所が確かめる）。
+			if may, err := tcTaskMayProceed(ctx, tc, taskID); err != nil {
+				return err
+			} else if !may {
+				return errReconcileNotEligible
+			}
 			tc.taskID = taskID
-			holdID, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonContractStopped, "", opts)
+			scoped, err := taskStopOptions(ctx, tc, opts)
+			if err != nil {
+				return err
+			}
+			if tc.current.Status == StatusAwaitingHuman && scoped.Scope != HoldScopeTask {
+				return errReconcileNotEligible
+			}
+			holdID, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonContractStopped, "", scoped)
 			if err != nil {
 				return err
 			}
@@ -538,7 +552,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	}
 	if !resume && row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindObserve && stillObserving(rep) {
 		// オーナーの保留（人間対応待ち）の間は、接続ツールの run を進める resume を呼ばない。
-		if ok, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !ok {
+		if ok, err := s.taskMayProceedFor(ctx, row.ChallengeID, row.TaskID); err != nil || !ok {
 			return rep, err
 		}
 		return s.resumeObservation(ctx, in, row, connector, binding, planVersion, cycleID, rep)
@@ -581,17 +595,6 @@ func (s *Store) resumeObservation(ctx context.Context, in ContractPollInput, row
 		}
 	}
 	return rep, nil
-}
-
-// challengeInProgress は課題 cid が着手中か。
-func (s *Store) challengeInProgress(ctx context.Context, cid int64) (bool, error) {
-	var inProgress bool
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		ch, err := loadChallenge(ctx, tx, cid)
-		inProgress = err == nil && ch != nil && ch.Status == StatusInProgress
-		return err
-	})
-	return inProgress, classifyReadWriteErr(err)
 }
 
 // recordedTerminalStatus は、記録した状態が終わりの契約の実行（row）の状態の確認を、記録から作った読みにしたもの。
@@ -664,11 +667,16 @@ func (s *Store) loadContractAnswer(ctx context.Context, row *contractRunRow, che
 	err = s.db.Read(ctx, func(tx *sql.Tx) error {
 		qerr := tx.QueryRowContext(ctx,
 			`SELECT h.id, h.answer FROM contract_run k JOIN hold h ON h.id = k.wait_hold_id JOIN challenge c ON c.id = k.challenge_id
-			 WHERE k.id = ? AND k.state = 'waiting' AND c.status = 'in_progress' AND h.answered_at IS NOT NULL`, row.ID).Scan(&holdID, &a)
+			 WHERE k.id = ? AND k.state = 'waiting' AND c.status IN ('in_progress', 'awaiting_human') AND h.answered_at IS NOT NULL`, row.ID).Scan(&holdID, &a)
 		if errors.Is(qerr, sql.ErrNoRows) {
 			return nil
 		}
-		found = qerr == nil
+		if qerr != nil {
+			return qerr
+		}
+		// 答えを返してよいのは、課題が着手中、または、人間対応待ちでも、このタスクを進めてよいとき（ほかのタスクの保留が開いているだけのとき）。
+		// 課題が着手中へ戻るのを待たない。
+		found, qerr = s.rowMayProceed(ctx, tx, row)
 		return qerr
 	})
 	if err = classifyReadWriteErr(err); err != nil || !found {
@@ -685,7 +693,7 @@ func (s *Store) loadContractAnswer(ctx context.Context, row *contractRunRow, che
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
 		// 読んだ後に別の周が先に結び付きを外した・課題が着手中でなくなったときは 0 件になり、答えは返さない。
 		res, qerr := tx.ExecContext(ctx, `UPDATE contract_run SET wait_hold_id = NULL WHERE id = ? AND wait_hold_id = ? AND state = 'waiting'
-			 AND EXISTS (SELECT 1 FROM challenge WHERE id = challenge_id AND status = 'in_progress')`, row.ID, holdID)
+			 AND EXISTS (SELECT 1 FROM challenge c WHERE c.id = contract_run.challenge_id AND `+taskMayProceedSQL("c", "contract_run.task_id")+`)`, row.ID, holdID)
 		if qerr != nil {
 			return qerr
 		}
@@ -704,7 +712,7 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 	if usdToMicros(rep.CostTotalUSD) <= row.MaxBudget {
 		return nil
 	}
-	if inProgress, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !inProgress {
+	if ok, err := s.taskMayProceedFor(ctx, row.ChallengeID, row.TaskID); err != nil || !ok {
 		return err
 	}
 	command, err := fillRowCommandArgs(connector, row, connector.Commands.Cancel, rep.ChallengeID, binding, contractAnswer{})
@@ -782,9 +790,9 @@ func canRouteToSupervisor(j JudgmentInvoker, decl *AgentDeclaration) bool {
 
 // answerSupervisorWait は、契約の run が回答を待っていて、スーパーバイザーが先に受ける待ち（waitsForSupervisor）のとき、判断点 SV を呼ぶ。
 // 答えたら宣言の resume で答えを返し（選択肢があれば選んだ選択肢、無ければ文）、保留は作らない。
-// 上げる判定・判断点の失敗・答えを返せなかったとき・再開の上限は、オーナーの保留（止まり方 child_question）にする。課題が着手中でなければ何もしない。
+// 上げる判定・判断点の失敗・答えを返せなかったとき・再開の上限は、オーナーの保留（止まり方 child_question）にする。そのタスクを進めてよくなければ（mayProceedOn）何もしない。
 func (s *Store) answerSupervisorWait(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, rep *ContractRunReport) (*ContractRunReport, error) {
-	if inProgress, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !inProgress {
+	if ok, err := s.taskMayProceedFor(ctx, row.ChallengeID, row.TaskID); err != nil || !ok {
 		return rep, err
 	}
 	ra := rep.RequestedAction
@@ -838,4 +846,9 @@ func (s *Store) answerSupervisorWait(ctx context.Context, in ContractPollInput, 
 		return nil, err
 	}
 	return rrep, nil
+}
+
+// rowMayProceed は契約の実行 row が結び付くタスクを進めてよいか（mayProceedOn）。
+func (s *Store) rowMayProceed(ctx context.Context, tx *sql.Tx, row *contractRunRow) (bool, error) {
+	return mayProceedOn(ctx, tx, row.ChallengeID, row.TaskID)
 }

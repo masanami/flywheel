@@ -51,6 +51,21 @@ func TestSpec_AC227_ChatPromptAndHelpSayToRecordTheOptionIdentifier(t *testing.T
 	}
 }
 
+// flywheel の使い方の出力の answer の行は、保留への回答のフラグ（--hold・--option）を載せている（並びはここに固定で書く。コマンドの定義とは照らさない）。
+func TestUsage_AnswerLineListsTheHoldAndOptionFlags(t *testing.T) {
+	var line string
+	for _, l := range strings.Split(usageText, "\n") {
+		if strings.HasPrefix(l, "  answer <ID> ") {
+			line = l
+		}
+	}
+	for _, want := range []string{"--hold <H-ID>", "--option <識別>", "--answer <a>", "--replan", "--choice", "--text"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the answer line of the usage text lacks %q: %q", want, line)
+		}
+	}
+}
+
 // AC-228: 同じ 2 か所に、どの選択肢か決められないときは記録せずに確かめる旨の文がある。
 func TestSpec_AC228_ChatPromptAndHelpSayToAskWhenTheOptionIsUnclear(t *testing.T) {
 	for where, body := range map[string]string{"chat.md": promptText(t, "chat.md"), "usage": usageText} {
@@ -83,4 +98,49 @@ func TestSpec_AC89_ArchitectureHasS4c2Range(t *testing.T) {
 		"`followup.promoted_task_id`", "`--raise-limit`", "知らせる口と画面の見せ方は区切り S4d-2")
 	sec := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), "### 21.2 承認の単位（D23）")
 	requireAll(t, "architecture §21.2", sec, "S4c-2 で実装済みなのは", "上限の引き上げの承認として扱う")
+}
+
+// AC-139: architecture.md の §21 の実装済みの範囲に、区切り S4c-3 と、保留を課題に重ねて持つ旨がある。
+func TestSpec_AC139_ArchitectureHasS4c3Range(t *testing.T) {
+	first := archS21First(t)
+	requireAll(t, "architecture §21 の冒頭", first,
+		"区切り S4c-3〔保留中の課題のほかのタスクを進める〕の範囲も実装済み", "区切り S4c-3 で実装した範囲は", "保留を課題に重ねて持つこと",
+		"`hold.scope`", "スキーマ版 38", "`flywheel answer --hold <H-ID>`")
+}
+
+// AC-140: architecture.md の遷移の説明に、T11 の人間対応待ちからの行がある。
+func TestSpec_AC140_ArchitectureHasTheT11RowFromAwaitingHuman(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "architecture.md")
+	requireAll(t, "architecture の遷移の説明", doc,
+		"遷移 T11 に、人間対応待ちからの行を足した", "開いている保留が、どれもタスクを止める保留で、戻り先が着手中",
+		"回答 T12 と T20 は、ほかの開いている保留が残っていれば、遷移先を人間対応待ちにする")
+}
+
+// AC-141・AC-144・AC-145: 用語集の「保留」が課題か課題の 1 つのタスクが止まっていることに改まり、「タスクを止める保留」「課題を止める保留」が載る。
+func TestSpec_AC141_AC144_AC145_GlossaryHasHoldScopes(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "glossary.md")
+	requireAll(t, "glossary", doc,
+		"| 保留 | 課題か、課題の 1 つのタスクが、", "| タスクを止める保留 |", "| 課題を止める保留 |")
+}
+
+// AC-142: core-redesign.md の保留中の課題の決まり（S3b）の所に、S4c-3 で改めた旨がある。
+func TestSpec_AC142_CoreRedesignS3bHoldRuleNotesS4c3(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "features", "core-redesign.md")
+	requireAll(t, "core-redesign", doc,
+		"保留中の課題では、新しいタスクを起動せず、上げる依頼も始めない。", "S4c-3 で改めた: 「保留中の課題」を、課題を止める保留が開いている課題に限る。")
+}
+
+// AC-143: 案内の文（web/src/guidance.json）の回答のコマンドに、--hold の形が載っている。
+func TestSpec_AC143_GuidanceAnswerCommandHasTheHoldForm(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "web", "src", "guidance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireAll(t, "guidance.json", string(data), `"flywheel answer <C-ID> --workspace <パス> --hold <H-ID> --answer <回答>"`)
+}
+
+// AC-146: 対話の欄の指示文に、開いている保留が 2 つ以上のときは、どの保留への回答かを確かめてから --hold を付けて記録する旨がある。
+func TestSpec_AC146_ChatPromptSaysToConfirmTheHoldBeforeRecording(t *testing.T) {
+	requireAll(t, "chat.md", promptText(t, "chat.md"),
+		"開いている保留が 2 つ以上ある課題への回答は", "どの保留", "オーナーに確かめてから", "`answer --hold <H-ID>` を付けて記録する")
 }

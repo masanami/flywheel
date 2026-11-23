@@ -580,7 +580,14 @@ func (s *Store) mapReconciliationStop(ctx context.Context, dc *delegationContext
 // mapReconciliationOptions は mapReconciliation の、保留に選択肢を持たせる版（op が OpHold のときだけ効く）。
 func (s *Store) mapReconciliationOptions(ctx context.Context, dc *delegationContext, runIDDisplay string, op Operation, question string, reason holdReason, cycleID string, resetFetchFailures bool, opts HoldOptionsInput) (*string, string, error) {
 	_, err := s.transitionAsInvoker(ctx, runIDDisplay, dc.Challenge.ID, op, func(ctx context.Context, tc *transitionCtx) error {
-		if tc.current.Status != StatusInProgress {
+		if op == OpHold {
+			// タスクを止める保留は、課題が着手中のほか、重ねられる人間対応待ちでも通す（重ねる条件は保留を作る共通の所が確かめる）。
+			if may, err := tcTaskMayProceed(ctx, tc, taskIDPtr(&dc.Task)); err != nil {
+				return err
+			} else if !may {
+				return errReconcileNotEligible
+			}
+		} else if tc.current.Status != StatusInProgress {
 			return errReconcileNotEligible
 		}
 		if err := clearReconcileSupervisorMark(ctx, tc.tx, tc.id); err != nil {
@@ -595,7 +602,11 @@ func (s *Store) mapReconciliationOptions(ctx context.Context, dc *delegationCont
 		if op == OpHold {
 			// 委譲の子の問い・停止で作る保留は、起動したタスクに結び付ける。
 			tc.taskID = taskID
-			_, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, cycleID, opts)
+			scoped, err := taskStopOptions(ctx, tc, opts)
+			if err != nil {
+				return err
+			}
+			_, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, cycleID, scoped)
 			return err
 		}
 		// 委譲の結果で課題が検証中へ進むとき、タスクも検証中にする（課題の遷移と同じトランザクション）。

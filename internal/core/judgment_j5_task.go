@@ -1,14 +1,16 @@
 package core
 
-// このファイルは、タスクの検証（統合先を使う着手中の課題の、検証中のタスク 1 個を対象にする J5）を持つ。
+// このファイルは、タスクの検証（統合先を使う課題の、進めてよい検証中のタスク 1 個を対象にする J5）を持つ。
+// 「タスクを進めてよい」は述語 taskMayProceed（課題が着手中、または、タスクを止める保留だけが開いた人間対応待ちで、
+// そのタスクに開いている保留が無い）。
 //
-//   - 対象: 課題が着手中・統合先を使う・タスクが検証中で、タスクの契約の実行（最後の 1 件）の中身の識別（content_ref）が、
-//     検証した中身（verified_ref）と違う（か、verified_ref が無い）もの。課題とタスクの組で選ぶ。保留中の課題のタスクは選ばない。
+//   - 対象: タスクを進めてよい・統合先を使う・タスクが検証中で、タスクの契約の実行（最後の 1 件）の中身の識別（content_ref）が、
+//     検証した中身（verified_ref）と違う（か、verified_ref が無い）もの。課題とタスクの組で選ぶ。課題を止める保留が開いた課題のタスクと、開いている保留が結び付くタスクは選ばない。
 //   - 入力: そのタスクの委譲の実行のうち、成果物を持つ最後の実行の成果物（ほかのタスクの成果物は入れない）と、子に対応するタスクの「対応する取り込み元」
 //     （取り込みのときに記録した子の題名・URL・本文。上流は読み直さない）。
-//   - 結果: 課題の遷移（T8〜T10）を使わずに書く。書く直前に、課題が着手中・タスクが検証中・契約の実行の中身の識別が検証を
+//   - 結果: 課題の遷移（T8〜T10）を使わずに書く。書く直前に、タスクを進めてよい・タスクが検証中・契約の実行の中身の識別が検証を
 //     始めたときと同じことを確かめ、違えば捨てる（何も書かない。次の J5 がやり直す）。
-//     満たした→契約の実行の verified_ref に中身の識別を記録するだけ（タスクは検証中のまま・課題は着手中のまま。承認は求めず、
+//     満たした→契約の実行の verified_ref に中身の識別を記録するだけ（タスクは検証中のまま・課題の状態も変えない。承認は求めず、
 //     反映の操作・課題の実物の記録は作らない）。満たしていない→タスクを着手中へ戻す（次の状態の確認が、契約の実行へ respond を
 //     返す）。判断できない→課題を保留にし、保留をそのタスクに結び付ける。
 
@@ -72,7 +74,7 @@ func needsTaskVerification(contentRef, verifiedRef sql.NullString) bool {
 
 // selectJ5TaskTargets は、検証するタスクの組を、課題の ID の昇順（課題の中ではタスクの ID の昇順）で返す。
 func selectJ5TaskTargets(ctx context.Context, tx *sql.Tx) ([]j5TaskTarget, error) {
-	challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusInProgress)
+	challenges, err := loadChallengesWithProceedableTasks(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -87,11 +89,11 @@ func selectJ5TaskTargets(ctx context.Context, tx *sql.Tx) ([]j5TaskTarget, error
 	return out, nil
 }
 
-// selectJ5TaskTargetsOf は課題 ch（着手中でなければ対象なし）の、検証するタスクの組を返す。統合先を使わない課題は対象にしない。
+// selectJ5TaskTargetsOf は課題 ch（着手中でも人間対応待ちでもなければ対象なし。タスクごとに述語 taskMayProceed で絞る）の、検証するタスクの組を返す。統合先を使わない課題は対象にしない。
 // 終わっていない実行を持つタスク（タスクの検証・契約のコマンドの実行中）は、今は選ばない。
 func selectJ5TaskTargetsOf(ctx context.Context, tx *sql.Tx, ch Challenge) ([]j5TaskTarget, error) {
 	cid, ok := parseChallengeID(ch.ID)
-	if !ok || ch.Status != StatusInProgress {
+	if !ok || (ch.Status != StatusInProgress && ch.Status != StatusAwaitingHuman) {
 		return nil, nil
 	}
 	integ, err := challengeUsesIntegration(ctx, tx, cid)
@@ -111,6 +113,12 @@ func selectJ5TaskTargetsOf(ctx context.Context, tx *sql.Tx, ch Challenge) ([]j5T
 			continue
 		}
 		tid := taskIntID(&tasks[i])
+		// 保留が結び付くタスクは、その保留が閉じるまで検証しない（課題を止める保留が開いている課題は、そもそも対象に入らない）。
+		if may, err := taskMayProceed(ctx, tx, cid, tid); err != nil {
+			return nil, err
+		} else if !may {
+			continue
+		}
 		_, contentRef, verifiedRef, found, err := latestTaskContract(ctx, tx, cid, tid)
 		if err != nil {
 			return nil, err
@@ -135,19 +143,18 @@ func selectJ5TaskTargetsOf(ctx context.Context, tx *sql.Tx, ch Challenge) ([]j5T
 	return out, nil
 }
 
-// loadJ5TaskScope はタスク taskID の検証の対象を読む。課題が着手中・統合先を使う・タスクが検証中・中身の識別が検証した中身と
+// loadJ5TaskScope はタスク taskID の検証の対象を読む。タスクを進めてよい（述語 taskMayProceed）・統合先を使う・タスクが検証中・中身の識別が検証した中身と
 // 違う、のどれかを満たさなければ nil。
 func loadJ5TaskScope(ctx context.Context, tx *sql.Tx, cid, taskID int64) (*j5TaskScope, error) {
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, cid).Scan(&status); err != nil {
-		return nil, err
-	}
 	integ, err := challengeUsesIntegration(ctx, tx, cid)
 	if err != nil {
 		return nil, err
 	}
-	if Status(status) != StatusInProgress || integ == nil || !*integ {
+	if integ == nil || !*integ {
 		return nil, nil
+	}
+	if may, err := taskMayProceed(ctx, tx, cid, taskID); err != nil || !may {
+		return nil, err
 	}
 	task, err := loadTask(ctx, tx, taskID)
 	if err != nil {
@@ -186,17 +193,13 @@ func formatTaskSourceSection(c SourceChild) string {
 	return fmt.Sprintf("題名: %s\n\nURL: %s\n\n本文:\n%s", c.Title, c.URL, c.Body)
 }
 
-// j5TaskStillCurrent は、タスクの検証の結果を書く直前の読み直し（書き込みのトランザクションの中）。課題が着手中・タスクが
+// j5TaskStillCurrent は、タスクの検証の結果を書く直前の読み直し（書き込みのトランザクションの中）。タスクを進めてよい（述語 taskMayProceed）・タスクが
 // 検証中・タスクの契約の実行（最後の 1 件）の行と中身の識別が検証を始めたときと同じなら真。
 func j5TaskStillCurrent(ctx context.Context, tx *sql.Tx, cid int64, scope *j5TaskScope) (bool, error) {
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, cid).Scan(&status); err != nil {
+	tid := taskIntID(&scope.Task)
+	if may, err := taskMayProceed(ctx, tx, cid, tid); err != nil || !may {
 		return false, err
 	}
-	if Status(status) != StatusInProgress {
-		return false, nil
-	}
-	tid := taskIntID(&scope.Task)
 	var tstatus string
 	if err := tx.QueryRowContext(ctx, `SELECT status FROM task WHERE id = ?`, tid).Scan(&tstatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -216,7 +219,7 @@ func j5TaskStillCurrent(ctx context.Context, tx *sql.Tx, cid int64, scope *j5Tas
 
 // finalizeJ5TaskOutput は run が succeeded のときに、タスクの検証の出力を検査し直して書く。検査に落ちたら run の結果を
 // invalid_output にし、何も書かない。書かなかった（直前の読み直しで対象が変わっていた）ときは status が nil。
-// status は書いた後の課題の状態（満たした・満たしていないは着手中のまま。判断できない・差し戻しの上限に達したは保留）。
+// status は書いた後の課題の状態（満たした・満たしていないは、課題が着手中なら着手中のまま、ほかのタスクの保留で人間対応待ちならそのまま。判断できない・差し戻しの上限に達したは保留）。
 func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challengeIDDisplay string, structured []byte, scope *j5TaskScope, vh *j5VerifiedHeads, agent *AgentDeclaration) (outcome string, status *string, result RunResult, err error) {
 	v, ok := validateJ5Output(structured)
 	if !ok {
@@ -236,6 +239,14 @@ func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challeng
 	st := string(StatusInProgress)
 	if v.Verdict == J5VerdictUncertain || held {
 		st = string(StatusAwaitingHuman)
+	} else if cid, ok := parseChallengeID(challengeIDDisplay); ok {
+		// 保留の無いタスクの検証は、ほかのタスクを止める保留が開いている間も行う。課題は人間対応待ちのままなので、書いた後の状態を読む。
+		var cur string
+		if rerr := s.db.Read(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, cid).Scan(&cur)
+		}); rerr == nil && cur != "" {
+			st = cur
+		}
 	}
 	return outcome, &st, RunResultSucceeded, nil
 }
@@ -268,7 +279,11 @@ func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDispla
 			}
 			mapped = true
 			tc.taskID = &tid
-			if err := insertHoldStop(ctx, tc, *v.Question, stopHoldOptions(StopKindVerifyUncertain, agent)); err != nil {
+			scoped, err := taskStopOptions(ctx, tc, stopHoldOptions(StopKindVerifyUncertain, agent))
+			if err != nil {
+				return err
+			}
+			if err := insertHoldStop(ctx, tc, *v.Question, scoped); err != nil {
 				return err
 			}
 			if err := tc.rec.record("task", tid, ActivityActionTaskVerify, nil, after); err != nil {
@@ -371,7 +386,11 @@ func (s *Store) holdForTaskVerifyLimit(ctx context.Context, runIDDisplay, challe
 		}
 		question := fmt.Sprintf("タスクの検証が連続して「満たしていない」と判定され、差し戻しの上限に達したため、委譲先へ差し戻さず止めた（上限の種類: 差し戻し、回数: %d、上限: %d）。\n"+
 			"直近の検証: %s。回答すると、連続の数えを 0 から数え直して続ける。", streak, agent.ReworkLimit, runIDDisplay)
-		_, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonReworkLimit, "", HoldOptionsInput{StopKind: StopKindReworkLimit, SupervisorEnabled: agent.Supervisor})
+		scoped, err := taskStopOptions(ctx, tc, HoldOptionsInput{StopKind: StopKindReworkLimit, SupervisorEnabled: agent.Supervisor})
+		if err != nil {
+			return err
+		}
+		_, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonReworkLimit, "", scoped)
 		return err
 	})
 	if err != nil {

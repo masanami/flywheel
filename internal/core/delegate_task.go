@@ -121,6 +121,42 @@ func blockedPendingTasks(all []Task, byID map[string]Task) map[string]bool {
 //
 // 計画の検査（validateJ2Output）はここで掛けない（呼び出し側が、起動できるときだけ後で行う）。
 func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclaration, challengeID string, cid int64) (*launchSelection, error) {
+	sel, err := selectLaunchTasksOfChallenge(ctx, tx, conn, challengeID, cid)
+	if err != nil {
+		return nil, err
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, cid).Scan(&status); err != nil {
+		return nil, err
+	}
+	if Status(status) != StatusAwaitingHuman {
+		return sel, nil
+	}
+	// 人間対応待ちの課題（タスクを止める保留だけが開いているものだけが、ここへ来る）は、進めてよいタスクだけを選ぶ（述語 taskMayProceed）。
+	// 進めようが無い課題の保留（tasks_blocked）は、課題の状態で決めるので、着手中へ戻ってから行う（Blocked を返さない）。
+	out := &launchSelection{Busy: sel.Busy, NotStarted: sel.NotStarted}
+	held := 0
+	for _, t := range sel.Tasks {
+		ok, err := taskMayProceed(ctx, tx, cid, taskIntID(&t))
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out.Tasks = append(out.Tasks, t)
+		} else {
+			held++
+		}
+	}
+	// 起動できるタスクが保留で外れて残らなかったときも、起動しなかった理由を残す（課題が着手中のときの理由は引き継ぐ）。
+	if len(out.Tasks) == 0 && held > 0 && len(out.NotStarted) == 0 && !out.Busy {
+		out.NotStarted = append(out.NotStarted, NotStarted{ChallengeID: challengeID, Reason: NotStartedNoTasks,
+			Detail: "起動できるタスクは、タスクを止める保留の回答を待っている"})
+	}
+	return out, nil
+}
+
+// selectLaunchTasksOfChallenge は selectLaunchTasks の、課題の状態を見ずに、起動できるタスクを選ぶ部分。
+func selectLaunchTasksOfChallenge(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclaration, challengeID string, cid int64) (*launchSelection, error) {
 	all, err := listTasks(ctx, tx, cid)
 	if err != nil {
 		return nil, err
@@ -175,6 +211,12 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 		return sel, nil
 	}
 
+	// タスクを止める保留が開いているタスクは起動しない（保留が閉じるまで延ばす）。開いている間は、進めようが無い課題の保留
+	// （tasks_blocked）も立てない（課題の状態で決めるまま。人間対応待ちの間は立てない）。
+	heldTasks, err := openTaskHoldTaskIDs(ctx, tx, cid)
+	if err != nil {
+		return nil, err
+	}
 	// 統合先を使う課題は、リポジトリを 1 つに限る。済みのタスクも数える（上げる依頼が、済みのタスクのリポジトリが 1 つのときだけ始まるのと
 	// 同じ基準。数えないと、別のリポジトリのタスクを足した計画が、走って費用を使った後で、上げる依頼が毎回始まらない）。
 	repos := map[string]bool{}
@@ -205,7 +247,7 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 				}
 			}
 		}
-		if busy {
+		if busy || len(heldTasks) > 0 {
 			sel.Busy = true
 			return sel, nil
 		}
@@ -224,6 +266,10 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 	var waiting []string // 終わっていない契約の実行（レビュー待ち・オーナー待ち）だけを持つタスク（起動せず、待つ）
 	for _, t := range all {
 		if taskLessBusy || !isLaunchableTask(t, byID) {
+			continue
+		}
+		if heldTasks[taskIntID(&t)] {
+			sel.Busy = true // 保留の回答を待つタスク（起動せず、待つ）
 			continue
 		}
 		if tid := taskIntID(&t); tid > 0 {
@@ -262,6 +308,9 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 		ns(NotStartedIntegrationUnavailable, "統合先を使う課題のタスクは、委譲の形が契約の形（form: cli）でない委譲先へは起動しない: "+strings.Join(notCLI, "・"))
 	}
 	if len(sel.Tasks) > 0 || sel.Busy {
+		return sel, nil
+	}
+	if len(heldTasks) > 0 {
 		return sel, nil
 	}
 	if q, err := blockedByCancelledTask(ctx, tx, cid, all, blocked); err != nil {

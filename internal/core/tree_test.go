@@ -720,7 +720,7 @@ func TestUnansweredHolds_TaskID_AC70_AC71_802(t *testing.T) {
 	cid := f.challenge("c", "in_progress")
 	one := []treeTK{{"x", nil, "in_progress"}}
 	ids := f.plan(cid, 1, treeSpec(nil, "S", one), one)
-	coretest.Exec(t, f.ws, `INSERT INTO hold (challenge_id, question, from_status, raised_at, kind, task_id) VALUES (?, 'タスクの問い', 'in_progress', '2026-11-02T00:00:00.000Z', 'human', ?)`, cid, ids["x"])
+	coretest.Exec(t, f.ws, `INSERT INTO hold (challenge_id, question, from_status, raised_at, kind, task_id, scope) VALUES (?, 'タスクの問い', 'in_progress', '2026-11-02T00:00:00.000Z', 'human', ?, 'task')`, cid, ids["x"])
 	coretest.Exec(t, f.ws, `INSERT INTO hold (challenge_id, question, from_status, raised_at, kind) VALUES (?, '課題の問い', 'in_progress', '2026-11-03T00:00:00.000Z', 'human')`, cid)
 	hs, err := f.s.ListUnansweredHolds(context.Background())
 	if err != nil || len(hs) != 2 {

@@ -140,13 +140,15 @@ func FromNeedsHuman(ov *core.Overview) StatusNeedsHuman {
 	return FromOverview(ov).NeedsHuman
 }
 
-// Question は `GET /api/v1/questions` の 1 要素（未回答の保留）。task_id は保留が付いているタスクの ID（無ければ null）。
+// Question は `GET /api/v1/questions` の 1 要素（未回答の保留 1 件につき 1 件）。hold_id は保留の ID（H-<番号>）、scope は止める範囲（task か challenge）。task_id は保留が付いているタスクの ID（無ければ null）。
 type Question struct {
 	ChallengeID string  `json:"challenge_id"`
 	FromStatus  string  `json:"from_status"`
+	HoldID      string  `json:"hold_id"`
 	Question    string  `json:"question"`
 	RaisedAt    string  `json:"raised_at"`
 	RunID       *string `json:"run_id"`
+	Scope       string  `json:"scope"`
 	TaskID      *string `json:"task_id"`
 	Title       string  `json:"title"`
 	Workspace   string  `json:"workspace"`
@@ -162,8 +164,8 @@ type QuestionsResponse struct {
 // FromUnansweredHold は未回答の保留を、ワークスペース名つきの Question へ変換する。
 func FromUnansweredHold(workspace string, h core.UnansweredHold) Question {
 	return Question{
-		ChallengeID: h.ChallengeID, FromStatus: string(h.FromStatus), Question: h.Question,
-		RaisedAt: FormatTimestamp(h.RaisedAt), RunID: h.RunID, TaskID: h.TaskID, Title: h.Title, Workspace: workspace,
+		ChallengeID: h.ChallengeID, FromStatus: string(h.FromStatus), HoldID: h.HoldID, Question: h.Question,
+		RaisedAt: FormatTimestamp(h.RaisedAt), RunID: h.RunID, Scope: h.Scope, TaskID: h.TaskID, Title: h.Title, Workspace: workspace,
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 )
@@ -198,13 +199,19 @@ type BudgetExhausted struct {
 	ReviewRemainingUSD float64
 }
 
-// listBudgetExhausted は着手中で承認済みの計画を持ち、実装枠の残りが 1 USD 未満の課題を
+// listBudgetExhausted は着手中（タスクを止める保留だけが開いている人間対応待ちの課題は、進めてよいタスクだけ）で承認済みの計画を持ち、実装枠の残りが 1 USD 未満の課題を
 // ID 昇順で返す。agent が nil のときは、計画の出力が両方の額を明記する課題だけを判定できる。
 func listBudgetExhausted(ctx context.Context, tx *sql.Tx, agent *AgentDeclaration) ([]BudgetExhausted, error) {
-	challenges, err := listChallengesInStatuses(ctx, tx, []Status{StatusInProgress})
+	// タスクを止める保留だけが開いている課題も、保留の無い（進めてよい）タスクの枠を数える。
+	challenges, err := loadChallengesWithProceedableTasks(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
+	sort.SliceStable(challenges, func(i, j int) bool {
+		a, _ := parseChallengeID(challenges[i].ID)
+		b, _ := parseChallengeID(challenges[j].ID)
+		return a < b
+	})
 	out := make([]BudgetExhausted, 0)
 	for _, ch := range challenges {
 		cid, ok := parseChallengeID(ch.ID)
@@ -241,6 +248,13 @@ func listBudgetExhausted(ctx context.Context, tx *sql.Tx, agent *AgentDeclaratio
 			case TaskStatusPending, TaskStatusInProgress, TaskStatusVerifying:
 			default:
 				continue
+			}
+			if ch.Status != StatusInProgress {
+				if may, err := taskMayProceed(ctx, tx, cid, tb.TaskID); err != nil {
+					return nil, err
+				} else if !may {
+					continue
+				}
 			}
 			rem, err := taskRemaining(ctx, tx, cid, tb, bs)
 			if err != nil {

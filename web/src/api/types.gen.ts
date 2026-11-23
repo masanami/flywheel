@@ -331,6 +331,7 @@ export interface Hold {
   closed_at: string | null;
   from_status: string;
   from_status_label: string;
+  hold_id: string;
   kind: string;
   options: HoldOption[];
   question: string;
@@ -339,6 +340,7 @@ export interface Hold {
   relay_session: string | null;
   replan: boolean;
   run_id: string | null;
+  scope: string;
   stop_kind: string | null;
   supervisor_findings: string | null;
   supervisor_recommendation: string | null;
@@ -480,7 +482,7 @@ export interface SupervisorAction {
   cycle_id: string;
   findings: string;
   hand: string | null;
-  hold_id: number | null;
+  hold_id: string | null;
   id: number;
   note: string;
   questions: SupervisorQuestion[];
@@ -742,9 +744,11 @@ export interface QuestionsResponse {
 export interface Question {
   challenge_id: string;
   from_status: string;
+  hold_id: string;
   question: string;
   raised_at: string;
   run_id: string | null;
+  scope: string;
   task_id: string | null;
   title: string;
   workspace: string;

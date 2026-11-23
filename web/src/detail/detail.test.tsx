@@ -53,7 +53,10 @@ const task = (p: Partial<TreeTask> & { key: string }): TreeTask => ({
   ...p,
 });
 
+let holdSeq = 0;
 const hold = (p: Partial<Hold> = {}): Hold => ({
+  hold_id: `H-${++holdSeq}`,
+  scope: "challenge",
   answer: null,
   answer_option: null,
   answered_at: null,
@@ -384,6 +387,37 @@ it("AC-236 #808: answer_question がある課題の詳細に、その保留の�
   const w = q(root).getByTestId("detail-waiting");
   expect(within(w).getByText("どちらにしますか")).toBeInTheDocument();
   expect(within(w).queryByText("答え済みの問い")).toBeNull();
+});
+
+it("AC-125・AC-126 S4c-3: 開いている保留が 2 つの課題の詳細の待ちに、保留ごとの ID と --hold つきの案内が出る", async () => {
+  const { root } = await open(
+    show({
+      actions: ["answer_question"],
+      holds: [
+        hold({ hold_id: "H-3", scope: "task", question: "a への問い" }),
+        hold({
+          hold_id: "H-4",
+          scope: "task",
+          question: "b への問い",
+          raised_at: "2026-11-02T00:00:00Z",
+        }),
+      ],
+    }),
+  );
+  const w = within(q(root).getByTestId("detail-waiting"));
+  const ids = w.getAllByTestId("hold-id").map((e) => e.textContent);
+  expect(ids.join(" ")).toContain("H-3");
+  expect(ids.join(" ")).toContain("H-4");
+  expect(w.getByText(/--hold H-3 /)).toBeInTheDocument();
+  expect(w.getByText(/--hold H-4 /)).toBeInTheDocument();
+});
+
+it("S4c-3: 開いている保留が 1 つの課題の案内は、--hold を含まない", async () => {
+  const { root } = await open(
+    show({ actions: ["answer_question"], holds: [hold()] }),
+  );
+  const w = within(q(root).getByTestId("detail-waiting"));
+  expect(w.queryByText(/--hold/)).toBeNull();
 });
 
 it("#808（旧詳細の移し）: 取り下げで回答なしに閉じた保留は、あなたを待っているものに出ない", async () => {

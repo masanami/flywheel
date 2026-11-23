@@ -85,10 +85,11 @@ export function Waiting({
             {a === "answer_question"
               ? questions.map((h) => (
                   <div
-                    key={h.raised_at}
+                    key={h.hold_id}
                     className="detail-question"
                     data-testid="hold-question"
                   >
+                    <p data-testid="hold-id">保留: {h.hold_id}</p>
                     <ClampedText resetKey={h.question}>
                       <Markdown text={h.question} />
                     </ClampedText>
@@ -117,6 +118,8 @@ export function Waiting({
         challengeId={id}
         actions={actions}
         workspacePath={workspacePath}
+        openHoldIds={questions.map((h) => h.hold_id)}
+        needsHold={openHolds.length >= 2}
       />
     </section>
   );

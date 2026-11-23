@@ -425,8 +425,10 @@ func TestListChallenges_EmptyResultIsNonNilEmptySlice(t *testing.T) {
 func setChallengeStatus(t *testing.T, s *Store, id int64, status Status) {
 	t.Helper()
 	if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE challenge SET status = ? WHERE id = ?`, string(status), id)
-		return err
+		if _, err := tx.Exec(`UPDATE challenge SET status = ? WHERE id = ?`, string(status), id); err != nil {
+			return err
+		}
+		return closeOpenHoldsUnlessHeld(tx, id, string(status))
 	}); err != nil {
 		t.Fatalf("setChallengeStatus: %v", err)
 	}

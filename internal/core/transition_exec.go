@@ -111,6 +111,9 @@ type runTransitionParams struct {
 	// restricted は、遷移表の制限つきの行を LookupRestricted で引くこと。立てるのは、その行の専用の書き込みだけ
 	// （いまはスーパーバイザーの手の supervisor_resolve〔T20〕だけ。終端から出る T18 は、終端の検査が先に断るのでこの道を通らない）。本人確認の要る行は、これを立てても本人確認つきの呼び出しだけが通る。
 	restricted bool
+	// holdCheck が非 nil のとき、版の照合の代わりに呼ぶ（回答だけ。確かめた保留が開いたままで問いと選択肢が同じかを、書き込みの中で確かめる）。
+	// 遷移表の検査より前に呼ぶ（保留が閉じていれば、状態の食い違いではなくコンフリクトで断る）。
+	holdCheck func(ctx context.Context, tx *sql.Tx, cid int64) error
 }
 
 // runTransition は transition（#10: 本人確認の無い5操作）・verifiedTransition
@@ -154,7 +157,11 @@ func (s *Store) transitionGateInTx(ctx context.Context, tx *sql.Tx, p runTransit
 	if err != nil {
 		return nil, Transition{}, err
 	}
-	if p.expectedVersion != nil && current.Version != *p.expectedVersion {
+	if p.holdCheck != nil {
+		if err := p.holdCheck(ctx, tx, cid); err != nil {
+			return nil, Transition{}, err
+		}
+	} else if p.expectedVersion != nil && current.Version != *p.expectedVersion {
 		return nil, Transition{}, ErrConflict
 	}
 	if IsTerminal(Table, StatusVocabulary, current.Status) {
@@ -282,6 +289,25 @@ func (s *Store) transitionInTx(ctx context.Context, tx *sql.Tx, rec *activityRec
 
 	if err := apply(ctx, tc); err != nil {
 		return nil, err
+	}
+	// 保留を閉じる遷移（T12・T20）は、ほかの開いている保留が残っていれば、保留の戻り先ではなく人間対応待ちのまま（版は進める）。
+	// 残りは、閉じる書き込み（apply）の後に、同じ書き込みの中で数える。
+	if tr.Target.ReturnToPrecedingHoldStatus && target != StatusAwaitingHuman {
+		open, err := countOpenHolds(ctx, tx, cid)
+		if err != nil {
+			return nil, err
+		}
+		if open > 0 && target == StatusClassified {
+			// 計画を作り直す回答は、ほかの開いている保留を同じ書き込みで閉じて、分類済へ戻る。
+			if _, err := closeOtherOpenHolds(ctx, tc, 0, "計画を作り直す回答が成立したため"); err != nil {
+				return nil, err
+			}
+		} else if open > 0 {
+			target = StatusAwaitingHuman
+			tc.target = target
+			delete(tc.before, "status")
+			delete(tc.after, "status")
+		}
 	}
 
 	newVersion := current.Version + 1
@@ -532,6 +558,29 @@ func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question stri
 	if tc.current.Status == StatusAwaitingPlanApproval && kind != HoldKindParentDirect {
 		return 0, ErrInvalidTransition
 	}
+	if opts.Scope != "" && (opts.Scope != HoldScopeTask || taskID == nil) {
+		return 0, fmt.Errorf("%w: hold scope %q needs a task-bound hold", ErrValidation, opts.Scope)
+	}
+	if opts.Scope == HoldScopeTask && tc.current.Status != StatusInProgress && tc.current.Status != StatusAwaitingHuman {
+		// タスクを止める保留は、課題が着手中のときか、重ねる条件を満たす人間対応待ちのときだけ立てられる。
+		return 0, ErrInvalidTransition
+	}
+	if tc.current.Status == StatusAwaitingHuman {
+		// 保留を課題に重ねる（T11 の人間対応待ちからの行）。重ねられるのは、開いている保留がどれもタスクを止める保留で、
+		// 新しい保留が、開いている保留の無い別のタスクを止める保留のとき。満たさなければ、いまの「保留にできない」と同じ遷移の誤り。
+		// 課題を止める保留とタスクを止める保留は同時に開かない（索引では防げないので、ここで確かめる）。
+		if opts.Scope != HoldScopeTask {
+			return 0, ErrInvalidTransition
+		}
+		may, err := taskMayProceed(ctx, tc.tx, tc.id, *taskID)
+		if err != nil {
+			return 0, err
+		}
+		if !may {
+			return 0, ErrInvalidTransition
+		}
+		from = StatusInProgress
+	}
 	if opts.StopKind != "" {
 		if _, ok := ParseStopKind(string(opts.StopKind)); !ok {
 			return 0, fmt.Errorf("%w: unknown stop kind %q", ErrValidation, opts.StopKind)
@@ -583,12 +632,16 @@ func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question stri
 			}
 		}
 	}
+	var scopeColumn any
+	if opts.Scope != "" {
+		scopeColumn = string(opts.Scope)
+	}
 	res, err := tc.tx.ExecContext(ctx,
 		`INSERT INTO hold (challenge_id, question, from_status, raised_at, answer, answered_at, answered_by, run_id, kind, task_id, options, option_required, stop_kind, supervisor_state,
-		   supervisor_findings, supervisor_recommendation, supervisor_action_id)
-		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   supervisor_findings, supervisor_recommendation, supervisor_action_id, scope)
+		 VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tc.id, question, string(from), tc.nowStr, int64PtrColumn(tc.runID), string(kind), int64PtrColumn(taskID), optionsColumn, required, stopKindColumn, supervisorStateColumn,
-		findingsColumn, recommendationColumn, actionColumn,
+		findingsColumn, recommendationColumn, actionColumn, scopeColumn,
 	)
 	if err != nil {
 		return 0, err
@@ -604,6 +657,8 @@ func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question stri
 		}
 	}
 	tc.after["question"] = question
+	tc.after["hold_id"] = formatHoldID(id)
+	tc.after["hold_scope"] = holdScopeLabel(opts.Scope)
 	if kind != HoldKindHuman {
 		tc.after["hold_kind"] = string(kind)
 	}

@@ -12,13 +12,25 @@ export function ApprovalGuide({
   actions,
   workspacePath,
   className,
+  openHoldIds,
+  needsHold,
 }: {
   challengeId: string;
   actions: string[];
   workspacePath: string;
   className?: string;
+  // 開いている保留の ID（H-<番号>）。2 つ以上のときは、回答の案内が保留ごとに --hold つきになる。
+  openHoldIds?: string[];
+  // 回答の相手の保留を --hold で指定するか（省略は openHoldIds が 2 つ以上のとき）。
+  needsHold?: boolean;
 }) {
-  const guides = guidesFor(challengeId, workspacePath, actions);
+  const guides = guidesFor(
+    challengeId,
+    workspacePath,
+    actions,
+    openHoldIds,
+    needsHold,
+  );
   const conversation = showsConversationNote(actions);
   if (guides.length === 0 && !conversation) {
     return null;

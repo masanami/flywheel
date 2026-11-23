@@ -80,7 +80,7 @@ func (s *Store) resolveSupervisorHold(ctx context.Context, in supervisorHandInpu
 		}
 		tc.before["answer"] = nil
 		tc.after["answer"] = w.Answer
-		tc.after["hold_id"] = in.HoldID
+		tc.after["hold_id"] = formatHoldID(in.HoldID)
 		tc.after["hand"] = string(in.Output.Hand)
 		tc.after["supervisor_action_id"] = in.ActionID
 		if replan {
