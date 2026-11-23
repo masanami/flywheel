@@ -54,16 +54,27 @@ func fromTaskAdded(a *core.TaskAdded) *TaskAdded {
 // `none`・`declined`・`superseded`。task_ids はその足す依頼で足したタスクの ID。total_after_usd・limit_usd は、最後に判定したときの
 // 足した後の見込みと上限（記録した値。判定していない足す依頼は、どちらも null）。
 type TaskAddition struct {
-	CreatedAt     string   `json:"created_at"`
-	DecidedAt     *string  `json:"decided_at"`
-	FollowupID    *string  `json:"followup_id"`
-	ID            string   `json:"id"`
-	LimitUSD      *float64 `json:"limit_usd"`
-	Origin        string   `json:"origin"`
-	OriginTaskID  *string  `json:"origin_task_id"`
-	State         string   `json:"state"`
-	TaskIDs       []string `json:"task_ids"`
+	CreatedAt    string   `json:"created_at"`
+	DecidedAt    *string  `json:"decided_at"`
+	FollowupID   *string  `json:"followup_id"`
+	ID           string   `json:"id"`
+	LimitUSD     *float64 `json:"limit_usd"`
+	Origin       string   `json:"origin"`
+	OriginTaskID *string  `json:"origin_task_id"`
+	State        string   `json:"state"`
+	TaskIDs      []string `json:"task_ids"`
+	// TaskTitles は足す依頼の中身の、足すタスクの題名（足す前の依頼でも読める）。API だけが入れ、CLI の --json には出さない（FromTaskAdditions は入れない。画面の口は FromTaskAdditionsForScreen を使う）。
+	TaskTitles    []string `json:"task_titles"`
 	TotalAfterUSD *float64 `json:"total_after_usd"`
+}
+
+// FromTaskAdditionsForScreen は FromTaskAdditions に、足すタスクの題名（task_titles）を足す。
+func FromTaskAdditionsForScreen(as []core.TaskAddition) []TaskAddition {
+	out := FromTaskAdditions(as)
+	for i := range out {
+		out[i].TaskTitles = as[i].TaskTitles()
+	}
+	return out
 }
 
 // FromTaskAdditions は足す依頼の一覧を変換する（空でも `[]`）。

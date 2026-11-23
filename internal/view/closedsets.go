@@ -127,6 +127,7 @@ func ClosedSets() []ClosedSet {
 		{Name: "CONFLICT_FIX_TARGET_CODES", Codes: conflictTargets},
 		{Name: "EXPECTED_KIND_CODES", Codes: expectedKinds},
 		{Name: "CYCLE_END_REASON_CODES", Codes: endReasons},
+		{Name: "NOTICE_KIND_CODES", Codes: core.NoticeKindValues()},
 		{Name: "WATCH_STATE_CODES", Codes: watchStates},
 		{Name: "CYCLE_TRIGGER_CODES", Codes: core.CycleTriggerValues()},
 		{Name: "CYCLE_START_REASON_CODES", Codes: cycleStartReasons},

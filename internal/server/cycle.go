@@ -296,7 +296,8 @@ func cycleStatusHandler(fleet *Fleet, w http.ResponseWriter, r *http.Request) {
 		writeCoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, view.FromCycleStatus(cs))
+	// supervisor_actions・costs は、後続の課題が core の読み取りを足して埋める（それまでは空）。
+	writeJSON(w, http.StatusOK, view.NewCycleScreen(view.FromCycleStatus(cs), nil, nil))
 }
 
 // cycleStartHandler は、生きているロックがあれば起動せず 409 locked。heartbeat が回収の時間を過ぎた古いロックは走っていない扱いで、

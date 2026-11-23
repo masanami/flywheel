@@ -727,3 +727,30 @@ func TestFollowupTaskKeys_AC84_AC85(t *testing.T) {
 		t.Errorf("AC-85: followups = %+v, want [T-9, null]", fus)
 	}
 }
+
+// 画面の口は、保留に照合の値と選択肢ごとの button を足す。CLI の --json（FromHold）には出さない。
+func TestFromHoldForScreenAddsCheckAndButtonsButFromHoldDoesNot(t *testing.T) {
+	h := core.Hold{Question: "q", FromStatus: core.StatusInProgress, RaisedAt: time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC),
+		Options:       []core.HoldOption{{ID: "add", Label: "足す"}, {ID: "skip", Label: "足さない"}},
+		OptionButtons: []bool{false, true}, Check: "chk"}
+	plain := marshal(t, view.FromHold(h))
+	if strings.Contains(plain, `"check"`) || strings.Contains(plain, `"button"`) {
+		t.Errorf("FromHold = %s, want no check/button", plain)
+	}
+	got := marshal(t, view.FromHoldForScreen(h))
+	for _, want := range []string{`"check":"chk"`, `"options":[{"button":false,"description":"","id":"add","label":"足す"},{"button":true,"description":"","id":"skip","label":"足さない"}]`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FromHoldForScreen = %s, want %s", got, want)
+		}
+	}
+}
+
+func TestNewCycleScreenKeepsTheStatusAndNeverNullsTheNewLists(t *testing.T) {
+	reason := "settled"
+	got := marshal(t, view.NewCycleScreen(view.CycleStatus{State: "idle", LastEndReason: &reason}, nil, nil))
+	for _, want := range []string{`"state":"idle"`, `"last_end_reason":"settled"`, `"supervisor_actions":[]`, `"costs":[]`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("NewCycleScreen = %s, want %s", got, want)
+		}
+	}
+}

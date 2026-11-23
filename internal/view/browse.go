@@ -113,7 +113,7 @@ func fromWaitingChallenges(ws []core.WaitingChallenge) []WaitingChallenge {
 func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card, tree core.TreeChallenge) ShowCardResponse {
 	s := FromChallengeDetail(d)
 	return ShowCardResponse{
-		Additions: s.Additions, Approvals: s.Approvals, Budget: s.Budget, Card: FromCard(card), Challenge: s.Challenge, ConflictFixes: s.ConflictFixes, DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: s.Holds,
+		Additions: FromTaskAdditionsForScreen(d.Additions), Approvals: s.Approvals, Budget: s.Budget, Card: FromCard(card), Challenge: s.Challenge, ConflictFixes: s.ConflictFixes, DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: FromHoldsForScreen(d.Holds),
 		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
 		SupervisorActions: s.SupervisorActions, SupervisorHandsTaken: s.SupervisorHandsTaken,
 		Tasks:   s.Tasks,
@@ -141,17 +141,25 @@ func FromNeedsHuman(ov *core.Overview) StatusNeedsHuman {
 }
 
 // Question は `GET /api/v1/questions` の 1 要素（未回答の保留 1 件につき 1 件）。hold_id は保留の ID（H-<番号>）、scope は止める範囲（task か challenge）。task_id は保留が付いているタスクの ID（無ければ null）。
+//
+// check・options は、画面のボタンで答えるための値（Hold の同名の欄と同じ。選択肢が無い問いの options は空の配列）。
+// supervisor_findings・supervisor_recommendation は、スーパーバイザーがオーナーへ上げた問いの、調べたことと推奨（無ければ null）。
 type Question struct {
-	ChallengeID string  `json:"challenge_id"`
-	FromStatus  string  `json:"from_status"`
-	HoldID      string  `json:"hold_id"`
-	Question    string  `json:"question"`
-	RaisedAt    string  `json:"raised_at"`
-	RunID       *string `json:"run_id"`
-	Scope       string  `json:"scope"`
-	TaskID      *string `json:"task_id"`
-	Title       string  `json:"title"`
-	Workspace   string  `json:"workspace"`
+	ChallengeID string       `json:"challenge_id"`
+	Check       string       `json:"check"`
+	FromStatus  string       `json:"from_status"`
+	HoldID      string       `json:"hold_id"`
+	Options     []HoldOption `json:"options"`
+	Question    string       `json:"question"`
+	RaisedAt    string       `json:"raised_at"`
+	RunID       *string      `json:"run_id"`
+	Scope       string       `json:"scope"`
+	// SupervisorFindings・SupervisorRecommendation は、スーパーバイザーがオーナーへ上げたときに残した、調べたことと推奨。
+	SupervisorFindings       *string `json:"supervisor_findings"`
+	SupervisorRecommendation *string `json:"supervisor_recommendation"`
+	TaskID                   *string `json:"task_id"`
+	Title                    string  `json:"title"`
+	Workspace                string  `json:"workspace"`
 }
 
 // QuestionsResponse は `GET /api/v1/questions` の本文。
@@ -164,8 +172,10 @@ type QuestionsResponse struct {
 // FromUnansweredHold は未回答の保留を、ワークスペース名つきの Question へ変換する。
 func FromUnansweredHold(workspace string, h core.UnansweredHold) Question {
 	return Question{
-		ChallengeID: h.ChallengeID, FromStatus: string(h.FromStatus), HoldID: h.HoldID, Question: h.Question,
-		RaisedAt: FormatTimestamp(h.RaisedAt), RunID: h.RunID, Scope: h.Scope, TaskID: h.TaskID, Title: h.Title, Workspace: workspace,
+		ChallengeID: h.ChallengeID, Check: h.Check, FromStatus: string(h.FromStatus), HoldID: h.HoldID, Options: FromHoldOptionsForScreen(h.Options, h.OptionButtons), Question: h.Question,
+		RaisedAt: FormatTimestamp(h.RaisedAt), RunID: h.RunID, Scope: h.Scope,
+		SupervisorFindings: strOrNil(h.SupervisorFindings), SupervisorRecommendation: strOrNil(h.SupervisorRecommendation),
+		TaskID: h.TaskID, Title: h.Title, Workspace: workspace,
 	}
 }
 
