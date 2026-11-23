@@ -118,8 +118,8 @@ func (s *Store) landVerifiedReview(ctx context.Context, in ContractPollInput, ro
 	if scope.TaskStatus != TaskStatusVerifying {
 		return rep, nil
 	}
-	if inProgress, err := s.challengeInProgress(ctx, cur.ChallengeID); err != nil || !inProgress {
-		return rep, err // 保留中の課題へは「入れてよい」を返さない
+	if may, err := s.taskMayProceedFor(ctx, cur.ChallengeID, scope.TaskID); err != nil || !may {
+		return rep, err // 課題を止める保留・このタスクを止める保留が開いている間は「入れてよい」を返さない
 	}
 	cur.reqFacts, cur.holdSuccessEnd = connector.RequiredFacts, true
 	rs := in.releaseSource()
@@ -336,7 +336,7 @@ func (s *Store) sendLand(ctx context.Context, in ContractPollInput, cur *contrac
 	ready := false
 	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = ?, land_ref = ?, land_delivered = 0 WHERE id = ? AND verified_ref = ?
-			AND EXISTS (SELECT 1 FROM challenge WHERE id = challenge_id AND status = 'in_progress')`, cur.VerifiedRef, cur.VerifiedRef, cur.ID, cur.VerifiedRef)
+			AND `+taskMayProceedSQL("contract_run")+``, cur.VerifiedRef, cur.VerifiedRef, cur.ID, cur.VerifiedRef)
 		if err != nil {
 			return err
 		}
@@ -682,14 +682,12 @@ func (s *Store) noteLandUnreadable(ctx context.Context, rep *ContractRunReport, 
 		return n, err
 	}
 	// 課題が着手中でない間（保留中など）の回りは数えない（保留への回答の後の最初の回りで、すぐ上限にならないため）。
-	var inProgress bool
-	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT status = 'in_progress' FROM challenge WHERE id = ?`, cid).Scan(&inProgress)
-	}); err != nil {
-		return classifyReadWriteErr(err)
+	runTask, err := s.contractRunTaskIDFor(ctx, cid, rep.ExternalRunID)
+	if err != nil {
+		return err
 	}
-	if !inProgress {
-		return nil
+	if may, err := s.taskMayProceedFor(ctx, cid, runTask); err != nil || !may {
+		return err
 	}
 	var rounds int
 	if err := s.db.Read(ctx, func(tx *sql.Tx) error {

@@ -618,7 +618,19 @@ func (s *Store) executePlan(ctx context.Context, in DelegateInput, jc *JudgmentC
 				return
 			}
 			if ch.Status != StatusInProgress {
-				return
+				// タスクを止める保留だけが開いている課題は、このタスクに保留が無いときだけ進める。
+				var tp *int64
+				if c.TaskSeq > 0 {
+					tp = &c.TaskSeq
+				}
+				may, err := s.taskMayProceedFor(ctx, c.Seq, tp)
+				if err != nil {
+					fail(err)
+					return
+				}
+				if !may {
+					return
+				}
 			}
 			item, ns, err := s.delegateOne(ctx, in, jc, *ch, &delegateRun{sch: sch, w: w, waitCtx: waitCtx, taskID: c.TaskSeq})
 			if err != nil {

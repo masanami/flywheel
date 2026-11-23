@@ -172,7 +172,11 @@ func (s *Store) registerContractReleases(ctx context.Context, rs *contractReleas
 	if !ok || !cok {
 		return nil
 	}
-	if inProgress, err := s.challengeInProgress(ctx, cid); err != nil || !inProgress {
+	relTask, err := s.contractRunTaskIDFor(ctx, cid, rep.ExternalRunID)
+	if err != nil {
+		return err
+	}
+	if may, err := s.taskMayProceedFor(ctx, cid, relTask); err != nil || !may {
 		return err
 	}
 	ctx = context.WithoutCancel(ctx)

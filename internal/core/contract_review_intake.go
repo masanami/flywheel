@@ -123,7 +123,17 @@ func countUnmetFacts(ctx context.Context, tx *sql.Tx, c contractCall, st *Contra
 		return err
 	}
 	if Status(status) != StatusInProgress {
-		return nil
+		// タスクを止める保留だけが開いている課題でも、保留の無いタスクのレビュー待ちは数える。保留が結び付くタスクは数えない。
+		var taskID sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT task_id FROM contract_run WHERE id = ?`, rowID).Scan(&taskID); err != nil {
+			return err
+		}
+		if Status(status) != StatusAwaitingHuman || !taskID.Valid {
+			return nil
+		}
+		if may, err := taskMayProceed(ctx, tx, c.ChallengeIDInt, taskID.Int64); err != nil || !may {
+			return err
+		}
 	}
 	unmet := len(unmetRequiredFacts(c.FactsRequired, st.Facts)) > 0
 	if !c.CountFacts && unmet {
@@ -227,17 +237,23 @@ func (s *Store) holdContractReviewWithOptions(ctx context.Context, rep *Contract
 func (s *Store) holdContractReviewWithOptionsReason(ctx context.Context, rep *ContractRunReport, question string, reason holdReason, opts HoldOptionsInput, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
-			if tc.current.Status != StatusInProgress {
-				return errReconcileNotEligible
-			}
 			taskID, err := contractRunTaskID(ctx, tc.tx, tc.id, rep.ExternalRunID)
 			if err != nil {
 				return err
+			}
+			// 着手中のほか、タスクを止める保留だけが開いている人間対応待ちでも、このタスクに保留が無ければ立てる。
+			if may, err := tcTaskMayProceed(ctx, tc, taskID); err != nil {
+				return err
+			} else if !may {
+				return errReconcileNotEligible
 			}
 			tc.taskID = taskID
 			scoped, err := taskStopOptions(ctx, tc, opts)
 			if err != nil {
 				return err
+			}
+			if tc.current.Status == StatusAwaitingHuman && scoped.Scope != HoldScopeTask {
+				return errReconcileNotEligible
 			}
 			if _, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", scoped); err != nil {
 				return err
@@ -299,11 +315,12 @@ func (s *Store) receiveContractReview(ctx context.Context, rep *ContractRunRepor
 	if !ok {
 		return nil
 	}
-	if inProgress, err := s.challengeInProgress(ctx, cid); err != nil || !inProgress {
-		return err
-	}
 	scope, err := s.loadReviewIntakeScope(ctx, cid, rep.ExternalRunID)
 	if err != nil {
+		return err
+	}
+	// 課題が着手中、または、タスクを止める保留だけが開いていて、このタスクに保留が無いときだけ受け取る。
+	if may, err := s.taskMayProceedFor(ctx, cid, scope.TaskID); err != nil || !may {
 		return err
 	}
 	if scope.TaskID != nil && scope.TaskStatus == TaskStatusCancelled {
@@ -446,8 +463,16 @@ func (s *Store) importIntegrationReview(ctx context.Context, rep *ContractRunRep
 		if err != nil {
 			return err
 		}
-		if ch == nil || ch.Status != StatusInProgress {
+		if ch == nil {
 			return nil
+		}
+		if may := ch.Status == StatusInProgress; !may {
+			if scope.TaskID == nil || ch.Status != StatusAwaitingHuman {
+				return nil
+			}
+			if ok, err := taskMayProceed(ctx, tx, cid, *scope.TaskID); err != nil || !ok {
+				return err
+			}
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE challenge SET integration_ref = ? WHERE id = ? AND integration_ref IS NULL`, integrationRef, cid)
 		if err != nil {

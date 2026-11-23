@@ -126,6 +126,14 @@ func (s *Store) pendingReviewReply(ctx context.Context, row *contractRunRow, pla
 			out = &reviewReply{Skip: true}
 			return nil
 		case StatusAwaitingHuman:
+			// タスクを止める保留だけが開いていて、この run のタスクに保留が無いときは、着手中と同じに進める。
+			if row.TaskID != nil {
+				if may, err := taskMayProceed(ctx, tx, row.ChallengeID, *row.TaskID); err != nil {
+					return err
+				} else if may {
+					break
+				}
+			}
 			// J5 の問いなどで止まっている間も、成果物を取り込んだ読みの run を押し流さない（この待ちを写した保留の答えは別の経路で返す）。
 			if noWaitHold {
 				out = &reviewReply{Skip: true}
