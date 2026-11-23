@@ -193,8 +193,9 @@ type ImprovePhase struct {
 	Skipped    bool              `json:"skipped"`
 }
 
-// SuperviseHands は supervise の段の、手ごとの件数（そのサイクルで結果が executed の対処の記録。手の閉集合の 7 つを常に出す）。
+// SuperviseHands は supervise の段の、手ごとの件数（そのサイクルで結果が executed の対処の記録。手の閉集合の 8 つを常に出す）。
 type SuperviseHands struct {
+	Answer        int `json:"answer"`
 	Defer         int `json:"defer"`
 	Escalate      int `json:"escalate"`
 	Replan        int `json:"replan"`
@@ -219,7 +220,7 @@ func FromSupervisePhase(p core.CyclePhaseResult) SupervisePhase {
 	h := p.SuperviseHands
 	return SupervisePhase{
 		Hands: SuperviseHands{
-			Defer: h[core.HandDefer], Escalate: h[core.HandEscalate], Replan: h[core.HandReplan], Retry: h[core.HandRetry],
+			Answer: h[core.HandAnswer], Defer: h[core.HandDefer], Escalate: h[core.HandEscalate], Replan: h[core.HandReplan], Retry: h[core.HandRetry],
 			Reverify: h[core.HandReverify], SendBack: h[core.HandSendBack], SplitFollowup: h[core.HandSplitFollowup],
 		},
 		NotStarted: phaseNotStarted(p.NotStarted),

@@ -40,18 +40,23 @@ func TestContractWaitDestination_DoesNotReadText(t *testing.T) {
 	}
 }
 
-// decider が parent で kind が answer の待ちでも、terminal（閉集合の外の値を含む）なら J4（resume で答えを返す）へ回さず
-// オーナーの保留へ写す。answer・項目なしは今までどおり J4 へ回す。
-func TestContractWaitDestination_ParentAnswerTerminalGoesToOwnerHold(t *testing.T) {
-	for rb, want := range map[string]contractWaitDest{
-		"":         contractWaitParent,
-		"answer":   contractWaitParent,
-		"terminal": contractWaitOwnerHold,
-		"unknown":  contractWaitOwnerHold,
-	} {
-		got := contractWaitDestination(&ContractRequestedAction{Kind: "answer", Decider: "parent", Text: "x", ResolvableBy: rb}, nil)
-		if got != want {
-			t.Errorf("resolvable_by=%q: dest = %v, want %v", rb, got, want)
+// kind が answer の待ちは、答える者（親・人・どちらでも）によらず、スーパーバイザーが先に受ける。ただし terminal（閉集合の外の値を含む）なら
+// ターミナルで人が解く待ちなので、オーナーの保留へ写す。承認の待ちは、答える者によらずオーナーの保留へ写す。
+func TestContractWaitDestination_AnswerGoesToTheSupervisorUnlessTerminal(t *testing.T) {
+	for _, decider := range []string{"parent", "human", "any"} {
+		for rb, want := range map[string]contractWaitDest{
+			"":         contractWaitSupervisor,
+			"answer":   contractWaitSupervisor,
+			"terminal": contractWaitOwnerHold,
+			"unknown":  contractWaitOwnerHold,
+		} {
+			got := contractWaitDestination(&ContractRequestedAction{Kind: "answer", Decider: decider, Text: "x", ResolvableBy: rb}, nil)
+			if got != want {
+				t.Errorf("decider=%s resolvable_by=%q: dest = %v, want %v", decider, rb, got, want)
+			}
+		}
+		if got := contractWaitDestination(&ContractRequestedAction{Kind: "approve", Decider: decider, Text: "x"}, nil); got != contractWaitOwnerHold {
+			t.Errorf("approve by %s: dest = %v, want owner hold", decider, got)
 		}
 	}
 }

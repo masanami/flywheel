@@ -167,3 +167,30 @@ func TestStatus_PendingMixedWithEscalatedOrNullStaysOwnerWaiting_AC237_AC238(t *
 		t.Errorf("supervisor_checking.challenges = %v, want []", cs)
 	}
 }
+
+func TestShow_AnsweredChildQuestionsAreShownWithAnswerAndBasis_AC55(t *testing.T) {
+	t.Parallel()
+	ws := initializedWorkspace(t)
+	id := createForCase(t, ws)
+	n := challengeIDToInternalID(t, id)
+	coretest.SetChallengeStatus(t, ws, n, "awaiting_completion_approval")
+	cycle := coretest.InsertCycle(t, ws, "manual", 0, svRaisedAt)
+	coretest.InsertSupervisorActionWithQuestions(t, ws, cycle, n, "executed",
+		`[{"question":"どちらの形式か","answer":"JSON","basis":[{"path":"docs/a.md","locator":"節 3"}]}]`, "2026-11-22T00:01:00.000Z")
+
+	// 答えていない（failed）記録の問いは出さない。
+	coretest.InsertSupervisorActionWithQuestions(t, ws, cycle, n, "failed",
+		`[{"question":"出さない問い","answer":"x","basis":[]}]`, "2026-11-22T00:02:00.000Z")
+	if out := runText(t, ws, "show", id); strings.Contains(out, "出さない問い") {
+		t.Errorf("failed の記録の問いが出ている: %q", out)
+	}
+	requireInOrder(t, runText(t, ws, "show", id), "スーパーバイザーが答えた子の問い:", "問い: どちらの形式か", "答え: JSON", "根拠: docs/a.md（節 3）")
+	acts := anySlice(t, runJSON(t, ws, "show", id)["supervisor_actions"], "supervisor_actions")
+	qs := anySlice(t, acts[0].(map[string]any)["questions"], "questions")
+	if q0 := qs[0].(map[string]any); len(qs) != 1 || q0["answer"] != "JSON" || q0["question"] != "どちらの形式か" || len(q0["basis"].([]any)) != 1 {
+		t.Errorf("supervisor_actions[0].questions = %#v, want the answered question", qs)
+	}
+	if out := runText(t, ws, "show", createForCase(t, ws)); strings.Contains(out, "スーパーバイザーが答えた子の問い") {
+		t.Errorf("答えた問いが無い課題に節が出ている: %q", out)
+	}
+}

@@ -18,7 +18,7 @@ func TestFromCyclePhase_Supervise(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"hands":{"defer":2,"escalate":1,"replan":0,"retry":0,"reverify":0,"send_back":0,"split_followup":0},"not_started":[],"phase":"supervise","processed":3,"skipped":false}`
+	want := `{"hands":{"answer":0,"defer":2,"escalate":1,"replan":0,"retry":0,"reverify":0,"send_back":0,"split_followup":0},"not_started":[],"phase":"supervise","processed":3,"skipped":false}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}

@@ -12,6 +12,17 @@ import (
 // 返ってきた手が入力に渡した選べる手の一覧にあること・選択肢の決まり。出力の不備の run は、失敗に数える。
 func (s *Store) verifySupervisorResult(ctx context.Context, call svCall) (out *SVOutput, bad string) {
 	out, flaw := inspectSupervisorOutput(call.Run, call.Offered)
+	return s.finishSupervisorVerify(ctx, call, out, flaw)
+}
+
+// verifyChildQuestionResult は子の問いへの判断点の呼び出しの結果を確かめる（検査は inspectChildQuestionOutput）。
+// 不備（答えの件数・選択肢・根拠を含む）があれば、手を実行せず（委譲先へ答えを返さず）理由を返す。
+func (s *Store) verifyChildQuestionResult(ctx context.Context, call svCall, questions []ChildQuestion) (out *SVOutput, bad string) {
+	out, flaw := inspectChildQuestionOutput(call.Run, call.Offered, questions, s.workspace)
+	return s.finishSupervisorVerify(ctx, call, out, flaw)
+}
+
+func (s *Store) finishSupervisorVerify(ctx context.Context, call svCall, out *SVOutput, flaw *svOutputFlaw) (*SVOutput, string) {
 	if flaw == nil {
 		return out, ""
 	}

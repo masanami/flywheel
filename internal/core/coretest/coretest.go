@@ -1128,6 +1128,9 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`UPDATE run SET reflect = 1 WHERE id = 2`, nil},
 			{`INSERT INTO supervisor_action (cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at)
 			  VALUES (1, 1, 1, 1, 1, 'verify_uncertain', 'split_followup', '調べたこと "quoted"', '添え書き', '[{"path":"docs/a.md","locator":"節"}]', '[{"number":1,"text":"条件"}]', 'executed', NULL, ?)`, []any{at}},
+			{`INSERT INTO supervisor_action (cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at, questions)
+			  VALUES (1, 1, NULL, NULL, NULL, 'child_question', 'answer', '調べたこと', '', '[{"path":"docs/a.md","locator":"節"}]', NULL, 'executed', NULL, ?,
+			  '[{"question":"どちらか \"q\"","answer":"A","basis":[{"path":"docs/a.md","locator":"節"}]}]')`, []any{at}},
 			{`INSERT INTO supervisor_action (cycle_id, challenge_id, task_id, hold_id, run_id, stop_kind, hand, findings, note, basis, conditions, result, reject_reason, created_at)
 			  VALUES (1, 2, NULL, NULL, NULL, 'rework_limit', NULL, '', '', '[]', NULL, 'rejected', 'state_changed', ?)`, []any{at}},
 			{`UPDATE hold SET stop_kind = 'verify_uncertain', supervisor_state = 'handled', supervisor_findings = '調べたこと', supervisor_recommendation = '推奨', supervisor_action_id = 1,
@@ -1477,6 +1480,21 @@ func InsertSupervisorHold(t *testing.T, workspace string, challengeID int, quest
 		t.Fatalf("coretest: InsertSupervisorHold: %v", err)
 	}
 	return id
+}
+
+// InsertSupervisorActionWithQuestions は InsertSupervisorAction と同じ行に、答えた子の問い（questions の列。JSON）を持たせて挿入する
+// （子の問いに答えた手 answer の記録。basis は問いごとの根拠ではなく対処の記録の根拠の列で、空の配列）。
+func InsertSupervisorActionWithQuestions(t *testing.T, workspace string, cycleID int64, challengeID int, result, questionsJSON, createdAt string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO supervisor_action (cycle_id, challenge_id, stop_kind, hand, findings, note, basis, result, created_at, questions) VALUES (?, ?, 'child_question', 'answer', '', '', '[]', ?, ?, ?)`,
+			cycleID, challengeID, result, createdAt, questionsJSON)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertSupervisorActionWithQuestions: %v", err)
+	}
 }
 
 // InsertSupervisorAction はテスト専用のフィクスチャとして、対処の記録を 1 件挿入する（cycleID は InsertCycle が返した内部整数 ID。

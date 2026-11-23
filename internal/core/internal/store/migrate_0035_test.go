@@ -43,9 +43,7 @@ func TestSupervisorMigration(t *testing.T) {
 				t.Errorf("supervisor_action.%s is missing", col)
 			}
 		}
-		if len(action) != 15 {
-			t.Errorf("supervisor_action has %d columns, want 15 (no questions column; that is S4b-3)", len(action))
-		}
+		// questions は版 36（区切り S4b-3）で足す。
 	})
 	t.Run("upgrade_from_34_keeps_rows_with_NULL_state_NULL_task_and_streak_0", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "flywheel.db")

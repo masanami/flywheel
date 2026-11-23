@@ -22,14 +22,15 @@ const (
 	contractWaitOwnerHold
 	// contractWaitReview は成果物のレビュー待ち。保留にせず、成果物を取り込んで課題を検証中へ進める。
 	contractWaitReview
-	// contractWaitParent は親が答える問い（decider が parent・kind が answer）。J4 が答えるか人へ上げる。
-	contractWaitParent
+	// contractWaitSupervisor はスーパーバイザーが先に受ける待ち（kind が answer で、ターミナルで人が解く待ちでない。答える者は問わない）。
+	// スーパーバイザーが答えるか、オーナーへ上げる。
+	contractWaitSupervisor
 )
 
 // contractWaitDestination は求められた操作の写し先を決める 1 か所。
-// kind が observe なら読み直すだけ。decider が parent で kind が answer の待ちは、子の問いを振り分ける判断点（J4）へ回す
-// （contractWaitParent）。それ以外の answer・approve は decider に依らずオーナーの保留へ写す（human はもともとオーナーの承認、
-// any は仕様に写し方が無いので安全側の人の承認、parent でも approve は親が代わりに承認しない）。
+// kind が observe なら読み直すだけ。kind が answer で、ターミナルで人が解く待ちでなければ、答える者（親・人・どちらでも）によらず、
+// スーパーバイザーが先に受ける（contractWaitSupervisor）。契約の求めは問いの種類を持たないので、「人に聞く種類」は照合しない。
+// approve はスーパーバイザーが承認できないので、decider に依らずオーナーの保留へ写す。
 // review は、成果物（pr・branch・commit）があるときだけ検証中へ進める（decider は読まない）。成果物が無ければ、
 // 検証できないので他の求めと同じくオーナーの保留へ写す。
 func contractWaitDestination(ra *ContractRequestedAction, artifacts []ContractArtifact) contractWaitDest {
@@ -39,11 +40,16 @@ func contractWaitDestination(ra *ContractRequestedAction, artifacts []ContractAr
 	if ra.Kind == contractRequestedKindReview && hasReviewableArtifact(artifacts) {
 		return contractWaitReview
 	}
-	// resolvable_by が terminal の待ちは resume では解けないので、J4 の答え（resume で返す）へ回さずオーナーの保留へ写す。
-	if ra.Kind == contractRequestedKindAnswer && ra.Decider == contractDeciderParent && !resolvableByTerminal(ra.ResolvableBy) {
-		return contractWaitParent
+	// resolvable_by が terminal の待ちは resume では解けず、スーパーバイザーはターミナルを操作できないので、オーナーの保留へ写す。
+	if ra.Kind == contractRequestedKindAnswer && !resolvableByTerminal(ra.ResolvableBy) {
+		return contractWaitSupervisor
 	}
 	return contractWaitOwnerHold
+}
+
+// waitsForSupervisor は、契約の待ちをスーパーバイザーが先に受けるか。afterContractRead・pollOne・保留の作成が同じ判定を呼ぶ 1 か所。
+func waitsForSupervisor(ra *ContractRequestedAction, artifacts []ContractArtifact) bool {
+	return contractWaitDestination(ra, artifacts) == contractWaitSupervisor
 }
 
 // contractWaitingQuestion は保留の問い。求められた操作の文と、選択肢があれば選択肢として並べる。
@@ -134,11 +140,15 @@ func (s *Store) afterContractRead(ctx context.Context, rep *ContractRunReport, c
 	switch rep.State {
 	case ContractStateWaiting:
 		dest := contractWaitDestination(rep.RequestedAction, rep.Artifacts)
-		if dest == contractWaitParent {
-			if rs != nil && rs.J4 {
-				return nil // J4 へ回す（pollOne の answerParentWait）。保留にしない
+		if waitsForSupervisor(rep.RequestedAction, rep.Artifacts) {
+			if rs != nil && rs.ToSupervisor {
+				return nil // スーパーバイザーへ回す（pollOne の answerSupervisorWait）。保留にしない
 			}
-			dest = contractWaitOwnerHold
+			// スーパーバイザーへ回せない（宣言の supervisor が偽・判断の呼び出しが無い）。判断点を呼ばずにオーナーへ上げる。
+			// 委譲先からの問いなので、止まり方は委譲の報告の問いと同じ child_question（印は付けない。オーナーの決定 2026-11-23）。
+			held, err := s.holdContractWaitEscalated(ctx, rep, contractWaitingQuestion(rep.ExternalRunID, rep.Summary, rep.RequestedAction, resumeCarriesAnswer(connector)), nil)
+			rep.Held = held
+			return err
 		}
 		switch dest {
 		case contractWaitReview:
@@ -371,7 +381,20 @@ func contractHoldOptions(ra *ContractRequestedAction) HoldOptionsInput {
 // holdContractWait は課題が着手中なら、契約の waiting を写した保留を作り、その保留の ID を契約の run に結び付ける
 // （保留への答えを resume で返すとき、この保留の答えだけを返すため）。着手中でなければ何もしない（偽）。
 func (s *Store) holdContractWait(ctx context.Context, rep *ContractRunReport, question string) (bool, error) {
+	return s.holdContractWaitWith(ctx, rep, question, contractHoldOptions(rep.RequestedAction))
+}
+
+// holdContractWaitEscalated は holdContractWait の、スーパーバイザーの入口（answerSupervisorWait）が上げる保留の版。
+// 止まり方は child_question で、スーパーバイザーが上げたとき（esc があるとき）は印が escalated、判断点を呼ばずに上げたときは NULL。
+// 選択肢は、委譲先が返した選択肢だけを使う（スーパーバイザーの options は使わない）。
+func (s *Store) holdContractWaitEscalated(ctx context.Context, rep *ContractRunReport, question string, esc *HoldEscalation) (bool, error) {
 	opts := contractHoldOptions(rep.RequestedAction)
+	opts.StopKind = StopKindChildQuestion
+	opts.Escalation = esc
+	return s.holdContractWaitWith(ctx, rep, question, opts)
+}
+
+func (s *Store) holdContractWaitWith(ctx context.Context, rep *ContractRunReport, question string, opts HoldOptionsInput) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
 			if tc.current.Status != StatusInProgress {
@@ -509,9 +532,9 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	if !resume && rep.PendingRespond != nil && !rep.Held && !rep.State.Terminal() {
 		return s.respondToReview(ctx, in, row, connector, binding, planVersion, cycleID, rep)
 	}
-	if !resume && in.Judgment != nil && rep.Result == RunResultSucceeded && !rep.Held && rep.State == ContractStateWaiting &&
-		contractWaitDestination(rep.RequestedAction, rep.Artifacts) == contractWaitParent {
-		return s.answerParentWait(ctx, in, row, connector, binding, planVersion, cycleID, rep)
+	if !resume && canRouteToSupervisor(in.Judgment, in.AgentDecl) && rep.Result == RunResultSucceeded && !rep.Held && rep.State == ContractStateWaiting &&
+		waitsForSupervisor(rep.RequestedAction, rep.Artifacts) {
+		return s.answerSupervisorWait(ctx, in, row, connector, binding, planVersion, cycleID, rep)
 	}
 	if !resume && row.State == ContractStateWaiting && row.RequestedKind == contractRequestedKindObserve && stillObserving(rep) {
 		// オーナーの保留（人間対応待ち）の間は、接続ツールの run を進める resume を呼ばない。
@@ -752,10 +775,15 @@ func (s *Store) delegateViaContract(ctx context.Context, in DelegateInput, jc *J
 	return &JudgmentAutoItem{ChallengeID: rep.ChallengeID, RunID: rep.RunID, Result: rep.Result}, nil, nil
 }
 
-// answerParentWait は、契約の run が親の答えを待っている（decider が parent・kind が answer）とき、J4 を呼ぶ。
-// 全問に答えたら宣言の resume で答えを返し（選択肢があれば選んだ選択肢、無ければ文章）、保留は作らない。
-// 人へ上げる判定・J4 の失敗・再開の上限は、オーナーの保留（保留の問いの冒頭に理由）にする。課題が着手中でなければ何もしない。
-func (s *Store) answerParentWait(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, rep *ContractRunReport) (*ContractRunReport, error) {
+// canRouteToSupervisor は、子の問いをスーパーバイザーへ回せるか（判断の呼び出しが渡されていて、宣言の supervisor が真）。偽なら、オーナーの保留へ写す。
+func canRouteToSupervisor(j JudgmentInvoker, decl *AgentDeclaration) bool {
+	return j != nil && decl != nil && decl.Supervisor
+}
+
+// answerSupervisorWait は、契約の run が回答を待っていて、スーパーバイザーが先に受ける待ち（waitsForSupervisor）のとき、判断点 SV を呼ぶ。
+// 答えたら宣言の resume で答えを返し（選択肢があれば選んだ選択肢、無ければ文）、保留は作らない。
+// 上げる判定・判断点の失敗・答えを返せなかったとき・再開の上限は、オーナーの保留（止まり方 child_question）にする。課題が着手中でなければ何もしない。
+func (s *Store) answerSupervisorWait(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, rep *ContractRunReport) (*ContractRunReport, error) {
 	if inProgress, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !inProgress {
 		return rep, err
 	}
@@ -764,40 +792,30 @@ func (s *Store) answerParentWait(ctx context.Context, in ContractPollInput, row 
 	if text == "" {
 		text = strings.TrimSpace(rep.Summary)
 	}
-	req := j4Request{
-		ChallengeID: rep.ChallengeID, Questions: []j4Question{{Text: text, Options: ra.Options}},
-		AgentDecl: in.AgentDecl, CycleID: in.CycleID, Invoker: in.Judgment, Cycle: in.Cycle,
-	}
-	if sm := strings.TrimSpace(rep.Summary); sm != "" {
-		req.Extra = []JudgmentDataSection{{Label: "接続ツールの実行の要約", Content: sm}}
-	}
-	res, err := s.runJ4(ctx, req)
+	waitQuestion := contractWaitingQuestion(rep.ExternalRunID, rep.Summary, ra, resumeCarriesAnswer(connector))
+	var command []string
+	route, err := s.routeChildQuestions(ctx, childRouteParams{
+		Decl: in.AgentDecl, Judgment: in.Judgment, CycleID: in.CycleID, Cycle: in.Cycle,
+		ChallengeID: row.ChallengeID, TaskID: row.TaskID, Question: waitQuestion,
+		Questions: []ChildQuestion{{Question: text, Options: ra.Options}},
+		// 答えを返す resume の引数を、答えを記録する前に埋める（埋められなければ、答えは記録せず失敗の記録にして上げる）。
+		Prepare: func(answers []SVAnswer) error {
+			if !resumeCarriesAnswer(connector) {
+				return errors.New("宣言の resume は答えの差し込み（{answer}・{choice}）を含まない")
+			}
+			c, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, rep.ChallengeID, binding, contractAnswer{Choice: answers[0].Answer})
+			command = c
+			return err
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
-	holdOwner := func(reason string) (*ContractRunReport, error) {
-		q := contractWaitingQuestion(rep.ExternalRunID, rep.Summary, ra, resumeCarriesAnswer(connector))
-		if reason != "" {
-			q = reason + "\n\n" + q
-		}
-		held, err := s.holdContractWait(ctx, rep, q)
+	if !route.Answered {
+		q := formatChildQuestionHoldReason(route.Reason, waitQuestion)
+		held, err := s.holdContractWaitEscalated(ctx, rep, q, route.Escalation)
 		rep.Held = held
 		return rep, err
-	}
-	if !res.Answered {
-		return holdOwner(res.Reason)
-	}
-	d := res.Decisions[0]
-	answer := contractAnswer{Choice: j4AnswerText(d)}
-	if d.Option != nil && len(ra.Options) > 0 {
-		answer = contractAnswer{Choice: *d.Option}
-		if !blankStr(d.Answer) {
-			answer.Note = strings.TrimSpace(*d.Answer)
-		}
-	}
-	command, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, rep.ChallengeID, binding, answer)
-	if err != nil {
-		return holdOwner("親が答えたが、接続ツールへ答えを返す宣言の resume の引数を埋められなかった（" + err.Error() + "）。")
 	}
 	latest := *row
 	latest.State, latest.Summary, latest.CostMicros = rep.State, rep.Summary, usdToMicros(rep.CostTotalUSD)
@@ -812,7 +830,7 @@ func (s *Store) answerParentWait(ctx context.Context, in ContractPollInput, row 
 		rrep.Held = held
 		return rrep, err
 	}
-	// 答えを返した直後に同じ求めの waiting が返っても、その周では J4 を呼び直さない（次の周の読みで改めて扱う）。
+	// 答えを返した直後に同じ求めの waiting が返っても、その周ではスーパーバイザーを呼び直さない（次の周の読みで改めて扱う）。
 	if rrep.State == ContractStateWaiting && sameRequestedAction(&latest, rrep.RequestedAction) {
 		return rrep, nil
 	}

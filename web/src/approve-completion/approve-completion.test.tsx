@@ -81,6 +81,7 @@ function summary(over: Partial<ApprovalSummary> = {}): {
       release_held: true,
       releases: [],
       supervisor_hands_taken: {},
+      supervisor_questions: [],
       stages: STAGES,
       tasks: [],
       title: "題名",
