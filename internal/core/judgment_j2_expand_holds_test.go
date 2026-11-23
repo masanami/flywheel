@@ -51,6 +51,7 @@ func TestExpandHold_AddOverTheLimitHoldsTheChallengeAndWaitsForTheOwner(t *testi
 	if reason != string(holdReasonTaskAddOverLimit) || !h.Open() || h.FromStatus != StatusInProgress {
 		t.Errorf("hold = %+v reason %q, want an open task_add_over_limit hold from in_progress", h, reason)
 	}
+	wantLastHoldScopeNull(t, f.s) // AC-6
 	adds := f.additions(t)
 	if len(adds) != 1 || adds[0].State != TaskAdditionAwaitingOwner || adds[0].HoldID == nil || adds[0].Spec == nil {
 		t.Fatalf("additions = %+v, want one awaiting_owner with spec and hold", adds)
@@ -107,6 +108,7 @@ func TestExpandHold_AskHoldsWithTheQuestionAndKeepsTheAdditionPending(t *testing
 	if reason != string(holdReasonTaskAddQuestion) || h.Question != "どちらの方針で足しますか" || len(h.Options) != 0 || h.OptionRequired {
 		t.Errorf("hold = %+v reason %q, want the plain question without options", h, reason)
 	}
+	wantLastHoldScopeNull(t, f.s) // AC-4
 	adds := f.additions(t)
 	if len(adds) != 1 || adds[0].State != TaskAdditionPending || adds[0].HoldID == nil {
 		t.Fatalf("additions = %+v, want pending with hold_id", adds)

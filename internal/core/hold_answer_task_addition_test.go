@@ -254,6 +254,7 @@ func TestHoldAnswerTaskAddition_AddAfterTheEstimateGrewReissuesTheQuestionAndCha
 	if !h.Open() || reason != string(holdReasonTaskAddOverLimit) {
 		t.Errorf("hold = %+v reason=%s, want open task_add_over_limit", h, reason)
 	}
+	wantLastHoldScopeNull(t, f.s) // AC-84: 出し直しの相手は、課題を止める保留（足す依頼の問い）
 	if !strings.Contains(h.Question, "足した後の見込み: $16") || strings.Contains(h.Question, "足した後の見込み: $15\n") {
 		t.Errorf("question = %q, want the recomputed estimate $16", h.Question)
 	}

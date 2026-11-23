@@ -295,6 +295,7 @@ func TestUpRequest_AC161_WithoutTheReflectCommandTheChallengeIsHeld(t *testing.T
 		t.Fatalf("reason = %q, want reflect_unavailable", got)
 	}
 	wantLastHoldStop(t, f.s, stopNone) // AC-23: reflect_unavailable は対象にしない
+	wantLastHoldScopeNull(t, f.s)      // AC-10
 	q := f.holdQuestionsOf(t, id)
 	if strings.Contains(q, string(holdReasonReflectUnavailable)) || !strings.Contains(q, "commands.reflect") {
 		t.Fatalf("question = %q, want a plain-language question that names the missing command", q)
@@ -324,6 +325,7 @@ func TestUpRequest_AC162_AC163_AFailedReflectHoldsWithoutAnOpenRun(t *testing.T)
 		if got := f.lastReason(t, id); got != string(holdReasonReflectFailed) { // AC-162
 			t.Errorf("%s: reason = %q, want reflect_failed", name, got)
 		}
+		wantLastHoldScopeNull(t, f.s)                                                            // AC-9: 上げる依頼の保留は、課題を止める保留
 		wantLastHoldStop(t, f.s, stopNone)                                                       // AC-24: reflect_failed は対象にしない
 		if q := f.holdQuestionsOf(t, id); strings.Contains(q, string(holdReasonReflectFailed)) { // AC-237
 			t.Errorf("%s: question names the reason value: %q", name, q)
@@ -444,6 +446,7 @@ func TestUpRequest_AC196_AC197_AC198_AC199_AFailedRequestEndsTheRecordClosesTheO
 	if got := f.lastReason(t, id); got != string(holdReasonReflectFailed) {
 		t.Errorf("reason = %q, want reflect_failed", got)
 	}
+	wantLastHoldScopeNull(t, f.s) // AC-9
 	// 保留は検証中から直接立てる（遷移 1 つ）が、回答で戻る先は着手中（戻れば、次の委譲の段が上げる依頼を始め直す）。
 	var from string
 	readForTest(t, f.s, func(tx *sql.Tx) error {

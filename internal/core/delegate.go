@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -303,6 +304,20 @@ func selectDelegationTargetsFor(ctx context.Context, tx *sql.Tx, conn *Connector
 	challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusInProgress)
 	if err != nil {
 		return out, err
+	}
+	// タスクを止める保留だけが開いている課題（人間対応待ち）も、ほかのタスクを進めるので、対象に入れる（優先度→ID の昇順に混ぜる）。
+	held, err := loadTaskHeldChallenges(ctx, tx)
+	if err != nil {
+		return out, err
+	}
+	if len(held) > 0 {
+		challenges = append(challenges, held...)
+		sort.SliceStable(challenges, func(i, j int) bool {
+			a, _ := parseChallengeID(challenges[i].ID)
+			b, _ := parseChallengeID(challenges[j].ID)
+			return a < b
+		})
+		stableSortChallengesByPriority(challenges)
 	}
 	deps, err := evaluateDependencies(ctx, tx)
 	if err != nil {
