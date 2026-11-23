@@ -27,7 +27,7 @@ test("AC-105 #808: 課題の画面から課題の詳細へ移った後、ブラ�
 }) => {
   await page.goto("/#/a/alpha/challenges");
   await expect(page.getByTestId("challenge-frame").first()).toBeVisible();
-  await page.getByRole("link", { name: C28 }).click();
+  await page.getByRole("link", { name: C28, exact: true }).click();
   await expect(page.getByTestId("challenge-detail")).toBeVisible();
   expect(page.url()).toContain("/challenges/C-28");
   await page.goBack();

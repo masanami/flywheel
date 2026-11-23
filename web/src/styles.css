@@ -1215,6 +1215,30 @@ a.task-box:hover {
   overflow-wrap: anywhere;
 }
 
+/* 知らせ（最近起きたこと・対話の欄）。幅の狭い画面でも語が枠からはみ出さない。 */
+.notice-item {
+  overflow-wrap: anywhere;
+  list-style: none;
+}
+.notice-badge {
+  display: inline-block;
+  padding: 0 0.4em;
+  border: 1px solid currentColor;
+  border-radius: 0.6em;
+  font-size: 0.8em;
+}
+.now-ingest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5em;
+  margin-top: 0.5em;
+}
+.now-ingest-actions button {
+  max-width: 100%;
+  white-space: normal;
+}
+
 /* 意思決定の記録・スーパーバイザーの記録・足す依頼の行。狭い幅で語が枠からはみ出さないよう、長い語は折り返す。 */
 .decision-list,
 .sv-records,

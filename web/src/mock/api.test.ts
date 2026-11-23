@@ -58,14 +58,50 @@ describe("読み取り（types.gen.ts の形）", () => {
   });
 });
 
-describe("画面のボタンの口の枠（区切り S4d-2 の土台。中身は後続）", () => {
-  it("知らせは 0 件で返り、読めないワークスペースは失敗する", async () => {
-    expect(await api.notices("alpha")).toEqual({ notices: [] });
+describe("知らせと取り込みの偽の口", () => {
+  it("知らせは alpha だけが 4 種を新しい順に返し、読めないワークスペースは失敗する", async () => {
+    const { notices } = await api.notices("alpha");
+    expect(notices.map((n) => n.kind)).toEqual([
+      "supervisor_escalated",
+      "cycle_ended",
+      "released",
+      "task_added",
+    ]);
+    expect(await api.notices("beta")).toEqual({ notices: [] });
     expect(await codeOf(api.notices("nope"))).toBe("not_found");
   });
-  it("取り込みの口は、中身を置くまでは not_found で失敗する", async () => {
-    expect(await codeOf(api.ingest("alpha", { items: ["1"] }))).toBe(
-      "not_found",
+  it("取り込みの口は、空・重複・取り込めるものでない指定を 400 で断り、課題を足さない", async () => {
+    const store = new MockStore();
+    const a = createMockApi(store, { latencyMs: 0 });
+    const before = store.workspaces.alpha?.items.length;
+    expect(await codeOf(a.ingest("alpha", { items: [] }))).toBe(
+      "validation_failed",
+    );
+    expect(
+      await codeOf(
+        a.ingest("alpha", {
+          items: ["example/repo#904", "example/repo#904"],
+        }),
+      ),
+    ).toBe("validation_failed");
+    expect(await codeOf(a.ingest("alpha", { items: ["nope#1"] }))).toBe(
+      "validation_failed",
+    );
+    expect(store.workspaces.alpha?.items.length).toBe(before);
+  });
+  it("取り込みが成立すると、課題を 1 つ足し、子の数を返し、取り込めるものの一覧から外す", async () => {
+    const store = new MockStore();
+    const a = createMockApi(store, { latencyMs: 0 });
+    const res = await a.ingest("alpha", { items: ["example/repo#901"] });
+    expect(res.ingested).toHaveLength(1);
+    expect(res.ingested[0]?.children).toBe(2);
+    const added = store.workspaces.alpha?.items.some(
+      (m) => m.c.id === res.ingested[0]?.challenge_id,
+    );
+    expect(added).toBe(true);
+    const left = (await a.statusIngestable("alpha")).ingestable?.items ?? [];
+    expect(left.some((it) => it.external_key === "example/repo#901")).toBe(
+      false,
     );
   });
 });

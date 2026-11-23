@@ -10,7 +10,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
 import { type ApiClient, resetApi, setApi } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
-import type { ChatMessage, ChatResponse } from "../api/types.gen.ts";
+import type { ChatMessage, ChatResponse, Notice } from "../api/types.gen.ts";
 import { createMockApi } from "../mock/api.ts";
 import { MockStore } from "../mock/store.ts";
 import { FakeEventSource } from "../testing/fakes.ts";
@@ -33,6 +33,7 @@ let chatBody: ChatResponse;
 const calls: string[] = [];
 let sendError: ApiError | null = null;
 let sendBodies: unknown[] = [];
+let noticesBody: Notice[] = [];
 
 const chatOf = (o: Partial<ChatResponse> = {}): ChatResponse => ({
   cost_usd: 0,
@@ -49,12 +50,14 @@ beforeEach(() => {
   calls.length = 0;
   sendError = null;
   sendBodies = [];
+  noticesBody = [];
   vi.stubGlobal("EventSource", FakeEventSource);
   FakeEventSource.instances = [];
   const base = createMockApi(new MockStore(), { latencyMs: 0 });
   const api: ApiClient = {
     ...base,
     chat: async () => structuredClone(chatBody),
+    notices: async () => ({ notices: structuredClone(noticesBody) }),
     chatSend: async (_n, req) => {
       calls.push("send");
       sendBodies.push(req);
@@ -422,4 +425,102 @@ it("送っている間に打ち足した文は、送信の成功で消えない"
     expect(panel().getByRole("button", { name: "新しい会話" })).toBeEnabled(),
   );
   expect(input()).toHaveValue("最初の続き");
+});
+
+// ---- Issue #1184: 対話の欄の知らせ（AC-182〜AC-186・AC-191）----
+
+const notice = (at: string, over: Partial<Notice> = {}): Notice => ({
+  added_count: null,
+  at,
+  challenge_id: "C-1",
+  challenge_title: "課題の題名",
+  cycle_id: null,
+  end_reason: null,
+  kind: "released",
+  origin: null,
+  task_id: null,
+  task_title: null,
+  ...over,
+});
+const inPanel = () => panel().getAllByRole("listitem");
+
+it("AC-182: 会話が開いているとき、会話の始まりより後の知らせを、発言と合わせて時刻の順に出す", async () => {
+  chatBody = chatOf({
+    started_at: "2026-11-22T00:00:00.000Z",
+    session_id: "s",
+    messages: [
+      msg({
+        id: 1,
+        role: "owner",
+        body: "最初の発言",
+        created_at: "2026-11-22T01:00:00.000Z",
+      }),
+      msg({ id: 2, body: "返事", created_at: "2026-11-22T03:00:00.000Z" }),
+    ],
+  });
+  noticesBody = [
+    notice("2026-11-22T04:00:00.000Z", { challenge_title: "あとの課題" }),
+    notice("2026-11-22T02:00:00.000Z", { challenge_title: "間の課題" }),
+  ];
+  await open();
+  await panel().findByText(/間の課題/);
+  const texts = inPanel().map((li) => li.textContent ?? "");
+  expect(texts[0]).toContain("最初の発言");
+  expect(texts[1]).toContain("間の課題");
+  expect(texts[2]).toContain("返事");
+  expect(texts[3]).toContain("あとの課題");
+});
+
+it("AC-183: 会話が開いているとき、会話の始まりより前の知らせは出さない", async () => {
+  chatBody = chatOf({
+    started_at: "2026-11-22T00:00:00.000Z",
+    session_id: "s",
+    messages: [msg({ id: 1, role: "owner", body: "発言" })],
+  });
+  noticesBody = [
+    notice("2026-11-21T23:00:00.000Z", { challenge_title: "前の課題" }),
+    notice("2026-11-22T02:00:00.000Z", { challenge_title: "後の課題" }),
+  ];
+  await open();
+  await panel().findByText(/後の課題/);
+  expect(panel().queryByText(/前の課題/)).toBeNull();
+});
+
+it("AC-184: 会話が無いとき、直近の知らせを 3 件まで出す（古いものから 1 件落ちる）", async () => {
+  noticesBody = [1, 2, 3, 4].map((n) =>
+    notice(`2026-11-22T0${n}:00:00.000Z`, { challenge_title: `課題 ${n}` }),
+  );
+  await open();
+  await panel().findByText(/課題 4/);
+  expect(panel().queryByText(/課題 1/)).toBeNull();
+  expect(panel().getAllByTestId("notice-item")).toHaveLength(3);
+});
+
+it("AC-185: 欄の知らせに、「知らせ」の札が付く（発言には付かない）", async () => {
+  chatBody = chatOf({
+    started_at: "2026-11-22T00:00:00.000Z",
+    session_id: "s",
+    messages: [msg({ id: 1, role: "owner", body: "発言" })],
+  });
+  noticesBody = [notice("2026-11-22T02:00:00.000Z")];
+  await open();
+  const item = await panel().findByTestId("notice-item");
+  expect(within(item).getByTestId("notice-badge")).toHaveTextContent("知らせ");
+  expect(panel().getAllByTestId("notice-badge")).toHaveLength(1);
+});
+
+it("AC-186: 知らせが欄に出ているときも、送る要求の本文は、送った文だけになる（承認の印の検査そのもの〔AC-191〕はサーバの試験の範囲で、ここでは知らせが送る側に混ざらないことだけを確かめる）", async () => {
+  noticesBody = [
+    notice("2026-11-22T02:00:00.000Z", { challenge_title: "知らせの課題" }),
+  ];
+  await open();
+  await panel().findByText(/知らせの課題/);
+  fireEvent.change(input(), { target: { value: "送る文" } });
+  fireEvent.click(panel().getByRole("button", { name: "送る" }));
+  await waitFor(() => expect(sendBodies).toHaveLength(1));
+  expect(sendBodies[0]).toEqual({
+    text: "送る文",
+    viewing: undefined,
+  });
+  expect(JSON.stringify(sendBodies[0])).not.toContain("知らせの課題");
 });

@@ -19,6 +19,8 @@ export interface WaitingRow {
   hint?: string;
   // スロットの片付けの行だけ持つ。ターミナルのコマンドの案内の差し込み口を埋める値。
   slotId?: string;
+  // 回答の行だけ持つ。選択肢のボタンを置く課題。
+  challengeId?: string;
 }
 
 const challengeHref = (name: string, id: string) =>
@@ -65,6 +67,7 @@ export function buildWaitingRows(
             key: `answer:${c.id}`,
             title: c.title,
             href: challengeHref(name, c.id),
+            challengeId: c.id,
           },
         ];
       }
@@ -80,6 +83,7 @@ export function buildWaitingRows(
           key: `answer:${c.id}`,
           title: first.question,
           href: hrefOf(route),
+          challengeId: c.id,
           hint: [c.title, ...qs.slice(1).map((q) => q.question)].join(" / "),
         },
       ];

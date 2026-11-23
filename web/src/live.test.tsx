@@ -53,13 +53,15 @@ it("AC-87/204/206: workspace_changed は該当 ws の status/challenges/cycle �
       workspace: "alpha",
     }),
   );
-  await waitFor(() => expect(requests).toHaveLength(6));
+  // 開いている画面（いま進められること）が、知らせの口も読み直す（AC-187）。
+  await waitFor(() => expect(requests).toHaveLength(7));
   expect(requests.map((r) => r.url).sort()).toEqual(
     [
       "/api/v1/workspaces",
       "/api/v1/workspaces/alpha/status",
       "/api/v1/workspaces/alpha/challenges",
       "/api/v1/workspaces/alpha/cycle",
+      "/api/v1/workspaces/alpha/notices",
       "/api/v1/needs-human",
       "/api/v1/questions",
     ].sort(),
@@ -124,7 +126,7 @@ it("AC-90/91: 切断後に再接続を試み、つながったら全ワークス
   expect(FakeEventSource.instances.length).toBe(n + 1);
   requests.length = 0;
   act(() => FakeEventSource.latest.open());
-  await waitFor(() => expect(requests.length).toBe(9));
+  await waitFor(() => expect(requests.length).toBe(10));
   expect(requests.map((r) => r.url)).toEqual(
     expect.arrayContaining([
       "/api/v1/workspaces",
@@ -133,6 +135,7 @@ it("AC-90/91: 切断後に再接続を試み、つながったら全ワークス
       "/api/v1/workspaces/beta/status",
       "/api/v1/workspaces/beta/challenges",
       "/api/v1/workspaces/alpha/cycle",
+      "/api/v1/workspaces/alpha/notices",
       "/api/v1/workspaces/beta/cycle",
       "/api/v1/needs-human",
       "/api/v1/questions",
@@ -198,11 +201,12 @@ it("AC-206a: visible の間、59 秒では発行せず 60 秒ごとに各 ws の
   act(() => {
     vi.advanceTimersByTime(1000);
   });
-  await waitFor(() => expect(requests).toHaveLength(4));
+  await waitFor(() => expect(requests).toHaveLength(5));
   expect(requests.map((r) => r.url).sort()).toEqual(
     [
       "/api/v1/workspaces/alpha/challenges",
       "/api/v1/workspaces/alpha/cycle",
+      "/api/v1/workspaces/alpha/notices",
       "/api/v1/workspaces/beta/challenges",
       "/api/v1/workspaces/beta/cycle",
     ].sort(),
@@ -212,7 +216,7 @@ it("AC-206a: visible の間、59 秒では発行せず 60 秒ごとに各 ws の
   act(() => {
     vi.advanceTimersByTime(POLL_MS);
   });
-  await waitFor(() => expect(requests).toHaveLength(4));
+  await waitFor(() => expect(requests).toHaveLength(5));
 });
 
 it("AC-206b: hidden の間は 60 秒の何倍進めても発行しない", async () => {
