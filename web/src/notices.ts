@@ -95,7 +95,7 @@ export function noticeLine(n: Notice, agentName: string): NoticeLine {
       return {
         key,
         at: n.at,
-        // 課題を止める保留（タスクに結び付かない）のときは、タスクの題名を出さない。
+        // タスクに結び付かない保留のときは、タスクの題名を出さない。
         text:
           n.task_id === null
             ? `スーパーバイザーがあなたへ上げました（${challengeTitle}）。`

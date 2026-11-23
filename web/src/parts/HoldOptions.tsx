@@ -91,7 +91,7 @@ export function HoldOptions({
           <li key={o.id} data-option={o.id}>
             <b>{o.label}</b>
             {/* 説明が見出しと同じ文のときは、同じ語を 2 回並べない。 */}
-            {o.description !== "" && o.description !== o.label ? (
+            {o.description !== "" && o.description.trim() !== o.label.trim() ? (
               <Markdown text={o.description} />
             ) : null}
             {o.button !== true ? (
