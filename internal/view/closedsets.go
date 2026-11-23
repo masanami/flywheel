@@ -62,6 +62,10 @@ func ClosedSets() []ClosedSet {
 	for _, v := range core.CycleEndReasonValues() {
 		endReasons = append(endReasons, string(v))
 	}
+	noticeKinds := make([]string, 0, 4)
+	for _, v := range core.NoticeKindValues() {
+		noticeKinds = append(noticeKinds, string(v))
+	}
 	cycleStartReasons := make([]string, 0, 5)
 	for _, v := range core.CycleStartReasonValues() {
 		cycleStartReasons = append(cycleStartReasons, string(v))
@@ -127,7 +131,7 @@ func ClosedSets() []ClosedSet {
 		{Name: "CONFLICT_FIX_TARGET_CODES", Codes: conflictTargets},
 		{Name: "EXPECTED_KIND_CODES", Codes: expectedKinds},
 		{Name: "CYCLE_END_REASON_CODES", Codes: endReasons},
-		{Name: "NOTICE_KIND_CODES", Codes: core.NoticeKindValues()},
+		{Name: "NOTICE_KIND_CODES", Codes: noticeKinds},
 		{Name: "WATCH_STATE_CODES", Codes: watchStates},
 		{Name: "CYCLE_TRIGGER_CODES", Codes: core.CycleTriggerValues()},
 		{Name: "CYCLE_START_REASON_CODES", Codes: cycleStartReasons},
