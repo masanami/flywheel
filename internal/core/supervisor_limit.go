@@ -16,6 +16,9 @@ const supervisorActionLimit = 2
 
 // supervisorLimitHit は、上限に当たったときの対処の手（実行の順）を返す。当たらなければ nil。
 func supervisorLimitHit(ctx context.Context, tx *sql.Tx, challengeID int64, taskID *int64, kind StopKind) ([]SupervisorHand, error) {
+	if kind == StopKindChildQuestion {
+		return nil, nil // 子の問いは、この上限の対象にしない（答えによる再開の上限だけで止める）
+	}
 	task := ""
 	if taskID != nil {
 		task = formatTaskID(*taskID)
@@ -40,4 +43,42 @@ func supervisorLimitNotice(hands []SupervisorHand) string {
 		}
 	}
 	return fmt.Sprintf("スーパーバイザーが %d 回対処したが、進まなかった（手: %s）。", supervisorActionLimit, strings.Join(names, "、"))
+}
+
+// このファイルの後半は、答えによる再開（手 answer）の上限（区切り S4b-3）。1 つの課題で、最後のオーナーの回答より後に 3 回まで。
+// 数えるのは、その課題の、手が answer で結果が executed の対処の記録（止まり方・タスクは問わない。過去の J4 の実行の記録は数えない）。
+
+// supervisorAnswerLimit は、1 つの課題で、スーパーバイザーが答えて再開できる回数の上限。
+const supervisorAnswerLimit = 3
+
+// supervisorAnswerLimitNotice は、再開の上限で上げる保留の問いの先頭に付ける固定の 1 行。
+const supervisorAnswerLimitNotice = "スーパーバイザーが答えて再開できる回数の上限（3 回）に達した。"
+
+// supervisorAnswerLimitReached は、課題 challengeID の答えによる再開が上限に達しているかを返す。読み取りだけ。
+// 達しているときの子の問いは、判断点を呼ばず、問いの先頭に supervisorAnswerLimitNotice を付けた保留（対処の記録は作らない）にして、オーナーへ上げる。
+func supervisorAnswerLimitReached(ctx context.Context, tx *sql.Tx, challengeID int64) (bool, error) {
+	n, err := countSupervisorActions(ctx, tx, SupervisorActionCountQuery{
+		ChallengeID: formatChallengeID(challengeID), AnyTask: true, Hands: []SupervisorHand{HandAnswer},
+		ExecutedOnly: true, AfterLastOwnerAnswer: true,
+	})
+	return n >= supervisorAnswerLimit, err
+}
+
+// prefixSupervisorAnswerLimitQuestion は問いの先頭へ再開の上限の固定の 1 行を付ける（すでに付いていれば付けない）。
+func prefixSupervisorAnswerLimitQuestion(question string) string {
+	if strings.HasPrefix(question, supervisorAnswerLimitNotice+"\n") {
+		return question
+	}
+	return supervisorAnswerLimitNotice + "\n" + question
+}
+
+// answerLimitReached は supervisorAnswerLimitReached を、読み取りの 1 つのトランザクションで呼ぶ。
+func (s *Store) answerLimitReached(ctx context.Context, challengeID int64) (bool, error) {
+	var reached bool
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		var err error
+		reached, err = supervisorAnswerLimitReached(ctx, tx, challengeID)
+		return err
+	})
+	return reached, classifyReadWriteErr(err)
 }

@@ -23,7 +23,7 @@ const contractRequestedKindReview = "review"
 // contractRequestedKindObserve は、見守るだけの待ち（保留にせず読み直す）の requested_action.kind。
 const contractRequestedKindObserve = "observe"
 
-// contractRequestedKindAnswer は回答を求める待ち。contractDeciderParent は親が答える相手（J4）。
+// contractRequestedKindAnswer は回答を求める待ち。contractDeciderParent は親が答える相手（待ちの行き先は答える者によらない。contractWaitDestination）。
 const (
 	contractRequestedKindAnswer  = "answer"
 	contractRequestedKindApprove = "approve"

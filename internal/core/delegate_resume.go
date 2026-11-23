@@ -19,6 +19,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -112,7 +113,7 @@ type launchHistory struct {
 	Holds []holdRef
 	// Verifications は課題の J5 の run（id 昇順。全部の計画の版）。
 	Verifications []runRow
-	// J4Runs は課題の J4 の run（id 昇順。全部の計画の版）。
+	// J4Runs は課題の、子の問いへの答えの元になる run（J4 と、子の問いに答えたスーパーバイザーの run。id 昇順。全部の計画の版）。
 	J4Runs []runRow
 	// SendBacks は、スーパーバイザーの send_back の、結果が executed の対処の記録（古い順）。
 	SendBacks []sendBackRef
@@ -219,10 +220,17 @@ func loadLaunchHistory(ctx context.Context, tx *sql.Tx, challengeID int64) (*lau
 		}
 	}
 
+	// 答えを渡す再開の元になる run は、J4 の run（過去）と、スーパーバイザー（SV）の run（子の問いに答えたもの）。
 	j4ids, err := judgmentRunIDs(ctx, tx, challengeID, "J4")
 	if err != nil {
 		return nil, err
 	}
+	svids, err := answeredSVRunIDs(ctx, tx, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	j4ids = append(j4ids, svids...)
+	sort.Slice(j4ids, func(i, k int) bool { return j4ids[i] < j4ids[k] })
 	for _, id := range j4ids {
 		r, err := loadRunByID(ctx, tx, id)
 		if err != nil {
@@ -999,4 +1007,24 @@ func (s *Store) holdForReworkLimit(ctx context.Context, dc *delegationContext, c
 	}
 	return nil, &NotStarted{ChallengeID: dc.Challenge.ID, Reason: NotStartedReworkLimit,
 		Detail: fmt.Sprintf("%d J5 rejections (limit %d)", hit.Count, hit.Limit)}, nil
+}
+
+// answeredSVRunIDs は、課題の、子の問いに答えたスーパーバイザーの run の ID（昇順）。検査を通って記録された答え
+// （手が answer で結果が executed の対処の記録）が指す run だけを返す（記録の無い答え・検査に落ちた答えで再開しないため）。
+func answeredSVRunIDs(ctx context.Context, tx *sql.Tx, challengeID int64) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT run_id FROM supervisor_action
+		WHERE challenge_id = ? AND hand = 'answer' AND result = 'executed' AND run_id IS NOT NULL ORDER BY run_id ASC`, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

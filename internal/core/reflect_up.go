@@ -515,7 +515,7 @@ func (s *Store) startIntegrationReflect(ctx context.Context, in DelegateInput, c
 		_, err := s.holdContractWithReason(ctx, rep.RunID, challengeID, reflectFailedQuestion(detail), holdReasonReflectFailed)
 		return nil, nil, err
 	}
-	rs := &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, J4: in.Judgment != nil, Checks: in.Checks, Compare: in.Compare, Agent: in.AgentDecl}
+	rs := &contractReleaseSource{Reconcile: in.Reconcile, Decl: in.ConnDecl, ToSupervisor: canRouteToSupervisor(in.Judgment, in.AgentDecl), Checks: in.Checks, Compare: in.Compare, Agent: in.AgentDecl}
 	if err := s.afterContractRead(ctx, rep, connector, rs); err != nil {
 		return nil, nil, err
 	}

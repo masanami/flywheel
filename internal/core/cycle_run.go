@@ -127,7 +127,8 @@ type CyclePhaseResult struct {
 	ImproveItems []ImproveItem
 	// Backup は backup の段の結果（他の段は nil）。
 	Backup *BackupResult
-	// SuperviseProcessed は supervise の段が、スーパーバイザーの判断点を 1 回呼んだ保留の数（結果が failed・rejected のものを含む）。
+	// SuperviseProcessed は、スーパーバイザーの判断点を 1 回呼んだ保留・子の問いの数（結果が failed・rejected のものを含む。
+	// 子の問いの分は、段の中ではなく、サイクルの回りの終わりにまとめて足す。addChildQuestionSuperviseCounts）。
 	// SuperviseHands は、そのうち結果が executed の対処の手ごとの件数。他の段は 0・空。
 	SuperviseProcessed int
 	SuperviseHands     map[SupervisorHand]int
@@ -314,6 +315,10 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 	var phases []CyclePhaseResult
 	reason, err := s.runRounds(ctx, in, cycleID, jc, &phases, &executed)
 	if err != nil {
+		return nil, "", err
+	}
+	// 子の問いは、保留を作る前に、委譲・状態の確認の段の中でスーパーバイザーを呼ぶ。supervise の段の件数には、ここでまとめて足す。
+	if err := s.addChildQuestionSuperviseCounts(ctx, cycleID, phases); err != nil {
 		return nil, "", err
 	}
 

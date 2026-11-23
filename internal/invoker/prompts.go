@@ -54,7 +54,6 @@ var judgmentPromptFile = map[core.JudgmentPoint]string{
 	core.JudgmentJ1: "j1.md",
 	core.JudgmentJ2: "j2.md",
 	core.JudgmentJ3: "j3.md",
-	core.JudgmentJ4: "j4.md",
 	core.JudgmentJ5: "j5.md",
 	core.JudgmentJ6: "j6.md",
 	core.JudgmentJ8: "j8.md",
@@ -62,7 +61,7 @@ var judgmentPromptFile = map[core.JudgmentPoint]string{
 }
 
 // judgmentPromptLimit は判断点ごとの指示文の分量の上限（バイト。UTF-8）
-// （J1: 4KiB・J2: 13312B（13KiB）・J3: 8KiB・J4: 4KiB・J5: 11717B・J6: 6KiB・J8: 6KiB・SV: 6KiB。
+// （J1: 4KiB・J2: 13312B（13KiB）・J3: 8KiB・J5: 11717B・J6: 6KiB・J8: 6KiB・SV: 6KiB。
 // J5 は #466 で 8KiB、#565 で 9KiB、#563 で 9.5KiB、#654 で 10.5KiB、#629 で 11354B（#654 の 10752 に、#629 で j5.md へ足した 602 バイトを足した値）へ引き上げた。
 // J5 は core の見直し（区切り S3a）で、11354 に、j5.md へ足した区画「委譲先が値で返したこと」の説明の 363 バイトを足した値へ引き上げた。
 // J5 は S3b のタスクの検証で、j5.md へ足した区画「対応する取り込み元」の説明とタスクの検証の扱いの 629 バイトを足した 12346 へ引き上げた。
@@ -84,7 +83,6 @@ var judgmentPromptLimit = map[string]int{
 	"j1.md": 4096,
 	"j2.md": 16875,
 	"j3.md": 8192,
-	"j4.md": 4096,
 	"j5.md": 15048,
 	"j6.md": 6144,
 	"j8.md": 8192,

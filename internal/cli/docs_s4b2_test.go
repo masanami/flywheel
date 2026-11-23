@@ -125,8 +125,11 @@ func TestSpec_AC262_ArchSection215NotesRetryLimit(t *testing.T) {
 func TestSpec_AC263_ArchSection7TableHasSV(t *testing.T) {
 	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection7)
 	docLineWith(t, body, "| （想定外の止まり", "**SV スーパーバイザー**", "`judgment_budget_usd.SV`")
-	// 子の問いに答える判断点（J4）は、S4b-3 まで表に残す。
-	docLineWith(t, body, "| 3. 実行 |", "**J4 応答**")
+	// 子の問いに答える判断点（J4）は、S4b-3 で表から外した（AC-62）。
+	docLineWith(t, body, "| 3. 実行 |", "**J3 ブリーフ**")
+	if strings.Contains(body, "**J4 応答**") {
+		t.Errorf("AC-62: the §7 table still lists **J4 応答**")
+	}
 }
 
 // AC-264: §7 に、遷移 supervisor_resolve（T20）の注記がある。
@@ -162,4 +165,20 @@ func backticked(s string) []string {
 		out = append(out, parts[i])
 	}
 	return out
+}
+
+// AC-61: §21.5 に、J4 を外した旨の注記がある。
+func TestSpec_AC61_ArchSection215NotesJ4Removed(t *testing.T) {
+	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection215)
+	docLineWith(t, body, "J4 を外した旨", "`j4.md`")
+}
+
+// AC-60: architecture.md の §21 の実装済みの範囲に、S4b-3 が実装済みとして書かれている（「区切り S4b-3」の語があるだけでは足りない）。
+func TestSpec_AC60_ArchSection21NoteHasS4b3Implemented(t *testing.T) {
+	first := archS21First(t)
+	for _, want := range []string{"区切り S4b-3〔委譲先の問いに答える〕の範囲も実装済み", "区切り S4b-3 で実装した範囲は", "`child_question`", "`answer`"} {
+		if !strings.Contains(first, want) {
+			t.Errorf("AC-60: the opening note of §21 lacks %q", want)
+		}
+	}
 }

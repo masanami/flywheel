@@ -1208,7 +1208,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		item.Outcome = string(report.Outcome)
 	}
 	if recon != nil {
-		j4 := &j4Env{In: in, Cycle: jc, Ctx: ctx}
+		j4 := &childQuestionEnv{In: in, Cycle: jc, Ctx: ctx}
 		status, note, err := s.applyReconciliation(recordCtx, dc, assignment.RunID, recon, result, report, in.CycleID, j4)
 		if err != nil {
 			return nil, nil, err

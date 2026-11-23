@@ -189,3 +189,41 @@ func (s *Store) superviseOne(ctx context.Context, in CycleRunInput, cycleID stri
 	}
 	return superviseOneResult{}, nil
 }
+
+// addChildQuestionSuperviseCounts は、サイクル cycleID で、保留を作る前にスーパーバイザーの判断点を呼んだ子の問いを、
+// supervise の段の結果へ足す。処理した件数には、子の問いの対処の記録（結果を問わない。判断点を 1 回呼ぶごとに 1 行）の数を、
+// 手ごとの件数には、そのうち結果が executed のものを足す。判断点を呼ばずに上げた子の問いは、対処の記録が無いので入らない。
+func (s *Store) addChildQuestionSuperviseCounts(ctx context.Context, cycleID string, phases []CyclePhaseResult) error {
+	var p *CyclePhaseResult
+	for i := range phases {
+		if phases[i].Phase == CyclePhaseSupervise {
+			p = &phases[i]
+		}
+	}
+	if p == nil {
+		return nil
+	}
+	return classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT hand, result FROM supervisor_action WHERE cycle_id = ? AND stop_kind = ?`,
+			cycleDBIDOf(cycleID), string(StopKindChildQuestion))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var hand sql.NullString
+			var result string
+			if err := rows.Scan(&hand, &result); err != nil {
+				return err
+			}
+			p.SuperviseProcessed++
+			if result == string(ActionExecuted) && hand.Valid {
+				if p.SuperviseHands == nil {
+					p.SuperviseHands = map[SupervisorHand]int{}
+				}
+				p.SuperviseHands[SupervisorHand(hand.String)]++
+			}
+		}
+		return rows.Err()
+	}))
+}

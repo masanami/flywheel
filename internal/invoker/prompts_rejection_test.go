@@ -23,7 +23,7 @@ func TestInstructions_J3AndJ5DescribeTheRejectionSection(t *testing.T) {
 			}
 		}
 	}
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ4} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2} {
 		got, err := Instructions(j)
 		if err != nil {
 			t.Fatal(err)

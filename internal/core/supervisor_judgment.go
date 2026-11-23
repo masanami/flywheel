@@ -14,7 +14,7 @@ import (
 // Hand は選んだ手、Findings は調べたこと（必須）、Note は手に添える文、Basis は根拠の場所、Recommendation はオーナーへ上げるときの推奨
 // （Hand が escalate のとき必須）、Options はオーナーへ上げるときに付ける選択肢（escalate のときだけ。無くてもよい）、Conditions は
 // フォローアップへ回す条件の番号（入力の「回せる条件」の番号。split_followup のとき 1 件以上）。
-// 子の問いへの答え（answers）は S4b-3 で足す。
+// Answers は子の問いへの答え（Hand が answer のとき 1 件以上。問いの並びの順で、問いごとに 1 件）。
 type SVOutput struct {
 	Hand           SupervisorHand    `json:"hand"`
 	Findings       string            `json:"findings"`
@@ -23,6 +23,14 @@ type SVOutput struct {
 	Recommendation string            `json:"recommendation"`
 	Options        []SVOption        `json:"options"`
 	Conditions     []int             `json:"conditions"`
+	Answers        []SVAnswer        `json:"answers"`
+}
+
+// SVAnswer は子の問い 1 件への答え。Answer は、選択肢がある問いでは選んだ選択肢の見出し、無い問いでは回答の文。
+// Basis は根拠の場所（core が、ワークスペースの根の下の通常のファイルであることを確かめる）。
+type SVAnswer struct {
+	Answer string            `json:"answer"`
+	Basis  []SupervisorBasis `json:"basis"`
 }
 
 // SVOption はスーパーバイザーが付ける選択肢 1 つ（見出しと説明だけ。識別は core が並びの順に o1・o2… と振る）。
@@ -87,8 +95,31 @@ func svOutputSchema() []byte {
 				},
 			},
 			"conditions": map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 1}},
+			"answers": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"answer": map[string]any{"type": "string"},
+						"basis": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"path":    map[string]any{"type": "string"},
+									"locator": map[string]any{"type": "string"},
+								},
+								"required":             []string{"path", "locator"},
+								"additionalProperties": false,
+							},
+						},
+					},
+					"required":             []string{"answer", "basis"},
+					"additionalProperties": false,
+				},
+			},
 		},
-		"required":             []string{"hand", "findings", "note", "basis", "recommendation", "options", "conditions"},
+		"required":             []string{"hand", "findings", "note", "basis", "recommendation", "options", "conditions", "answers"},
 		"additionalProperties": false,
 	}
 	b, _ := json.Marshal(schema)
@@ -146,6 +177,17 @@ func ParseSVOutput(data []byte, allowed []SupervisorHand) (*SVOutput, error) {
 				return nil, fmt.Errorf("%w: condition numbers must be distinct integers from 1", ErrSVOutputInvalid)
 			}
 			seen[n] = true
+		}
+	}
+	switch {
+	case out.Hand == HandAnswer && len(out.Answers) == 0:
+		return nil, fmt.Errorf("%w: at least one answer is required for %s", ErrSVOutputInvalid, out.Hand)
+	case out.Hand != HandAnswer && len(out.Answers) > 0:
+		return nil, fmt.Errorf("%w: answers are only for %s", ErrSVOutputInvalid, HandAnswer)
+	}
+	for i, a := range out.Answers {
+		if strings.TrimSpace(a.Answer) == "" {
+			return nil, fmt.Errorf("%w: answer %d is empty", ErrSVOutputInvalid, i+1)
 		}
 	}
 	if len(out.Options) > 0 {

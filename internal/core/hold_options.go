@@ -20,11 +20,25 @@ type HoldOption struct {
 // ID が空の選択肢には、core が並びの順に o1・o2… を振る。Required は「識別の無い回答を断る」印（S4b の作り手は使わない）。
 // StopKind は止まり方（スーパーバイザーを呼ぶきっかけ。保留を作る呼び出し元が渡す。空は渡さない）、SupervisorEnabled は
 // 宣言の supervisor の値（呼び出し元が渡す）。StopKind があり SupervisorEnabled が真のときだけ、保留はスーパーバイザー待ち（pending）になる。
+//
+// 止まり方が child_question のとき、保留はスーパーバイザー待ちにならない（SupervisorEnabled を見ない。子の問いは保留を作る前に判断点を呼ぶ）。
+// Escalation があれば、スーパーバイザーが上げた保留（supervisor_state が escalated）として作る（子の問いだけ。判断点を呼ばずに上げるときは付けない）。
+// 答えによる再開の上限に達しているときは上限が優先で、Escalation は使わない（印は NULL・対処の記録は指さない。呼び出し元は上限を確かめてから判断点を呼ぶ）。
 type HoldOptionsInput struct {
 	Options           []HoldOption
 	Required          bool
 	StopKind          StopKind
 	SupervisorEnabled bool
+	Escalation        *HoldEscalation
+}
+
+// HoldEscalation は、子の問いをスーパーバイザーが上げた保留に残す値（調べたこと・推奨・対処の記録の ID）。
+// FailedQuestion が真なら、問いの先頭へ「判断できなかった」の固定の 1 行を付ける（対処の記録の結果が failed のとき）。
+type HoldEscalation struct {
+	Findings       string
+	Recommendation string
+	ActionID       int64
+	FailedQuestion bool
 }
 
 // ErrHoldOptionInvalid は、保留を作る入口が受けた選択肢が誤っている（識別の重なり・形の不正・見出しが空か複数行）ことを示す。

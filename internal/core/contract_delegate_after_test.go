@@ -18,7 +18,7 @@ func waitingOut(ra *ContractRequestedAction, cost *float64) ContractLaunchOutput
 }
 
 // decider と kind による写し分け: observe は読み直し、それ以外（human・parent・any の answer・approve）はオーナーの保留。
-// J4 の口（ContractPollInput.Judgment）が無いときは、decider が parent の answer もオーナーの保留へ写す（J4 の経路は judgment_j4_test.go）。
+// 判断の呼び出し（ContractPollInput.Judgment）が無いときは、answer の待ちもオーナーの保留へ写す（スーパーバイザーが受ける経路は supervisor_child_contract_test.go）。
 func TestPollContractRuns_WaitingIsMappedByKindAndDecider(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -26,7 +26,7 @@ func TestPollContractRuns_WaitingIsMappedByKindAndDecider(t *testing.T) {
 		wantHold      bool
 	}{
 		{"approve", "human", true}, {"answer", "human", true},
-		{"answer", "parent", true}, {"approve", "parent", true}, // J4 の口が無ければ answer もオーナーの保留。approve は常にオーナー
+		{"answer", "parent", true}, {"approve", "parent", true}, // 判断の呼び出しが無ければ answer もオーナーの保留。approve は常にオーナー
 		{"approve", "any", true}, {"answer", "any", true}, // 仕様に写し方の無い any は安全側の人の承認
 		{"observe", "human", false}, {"observe", "parent", false}, {"observe", "any", false},
 	}
@@ -52,7 +52,13 @@ func TestPollContractRuns_WaitingIsMappedByKindAndDecider(t *testing.T) {
 				t.Fatalf("holds = %d, want %d", n, wantHolds)
 			}
 			if c.wantHold {
-				wantLastHoldStop(t, f.s, stopNone) // AC-27: 契約の判断待ち（承認の待ち・答えの待ち）の保留は対象にしない
+				// S4b-2 の AC-27: 承認の待ちの保留は、止まり方を持たない。答えの待ちは、区切り S4b-3 で委譲先からの問い（child_question）になった。
+				// 判断点を呼ばずに上げた保留なので、印（supervisor_state）は付かない（オーナーの決定 2026-11-23）。
+				want := stopNone
+				if c.kind == "answer" {
+					want = "child_question/<null>"
+				}
+				wantLastHoldStop(t, f.s, want)
 			}
 		})
 	}

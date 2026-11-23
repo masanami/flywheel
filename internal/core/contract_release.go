@@ -21,8 +21,9 @@ import (
 type contractReleaseSource struct {
 	Reconcile UpstreamBranchSource
 	Decl      *ConnectorsDeclaration
-	// J4 は、親が答える待ち（decider が parent・kind が answer）を J4 へ回せるとき真（偽ならオーナーの保留へ写す）。
-	J4 bool
+	// ToSupervisor は、スーパーバイザーが先に受ける待ち（waitsForSupervisor）をスーパーバイザーへ回せるとき真
+	// （判断の呼び出しが渡されていて、宣言の supervisor が真。偽ならオーナーの保留へ写す）。
+	ToSupervisor bool
 	// Checks・Compare は、統合先へ入れる確かめ（チェック・取り込みだけかの比較・入った中身）の取得の口。nil なら確かめられない。
 	Checks  UpstreamCheckSource
 	Compare UpstreamCompareSource

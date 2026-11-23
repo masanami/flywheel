@@ -1,8 +1,8 @@
--- 0036_followup_task: スキーマ版 36。
+-- 0037_followup_task: スキーマ版 37。
 -- 区切り S4c-2 の 1。フォローアップを足す依頼の出どころにするため、足す依頼に followup_id と出どころがフォローアップのときの枠を、
 -- フォローアップに上げた先のタスク（promoted_task_id）を足す。出どころ followup を入れられるよう、足す依頼の origin の検査を広げる。
 -- 過去の行は書き換えない（新しい列は NULL。既存のフォローアップの promoted_task_id は NULL）。
--- スライスごとに 1 版。main へ入るときに、いまの最新の次の版へ並べ直す。
+-- スライスごとに 1 版。
 
 -- 他の表が task_addition を指しているので、表を作り直す間は外部キーの検査をコミットまで遅らせる。
 PRAGMA defer_foreign_keys = ON;

@@ -115,7 +115,7 @@ func TestApprovalSummaryForPlan(t *testing.T) {
 		"conditions_after_release": `[]`, "conditions_after_release_heading": `"本番反映で満たされる見込みの条件（この操作では本番反映が承認されないため、満たされないまま残る）:"`,
 		"pairs": `[]`, "stages": `{"actual":null,"expected":null,"figure":null,"issues":null,"issues_answer":null,"non_goals":null}`,
 		"added_tasks": `[]`, "conflict_fixes": `[]`, "followups": `[]`, "tasks": `[]`, "integration_ref": `null`, "uses_integration": `null`,
-		"supervisor_hands_taken": `{}`,
+		"supervisor_hands_taken": `{}`, "supervisor_questions": `[]`,
 	}
 	for k, w := range want {
 		if got[k] != w {
@@ -478,5 +478,36 @@ func TestApprovalSummaryForPlanHasNoScreenValues(t *testing.T) {
 		if !ok || len(v) != 0 {
 			t.Errorf("%s = %#v, want []", k, a[k])
 		}
+	}
+}
+
+func TestApprovalSummaryForCompletionShowsAnsweredChildQuestions(t *testing.T) {
+	ws := initWorkspace(t)
+	approvalFixture(t, ws, "awaiting_completion_approval")
+	cycle := coretest.InsertCycle(t, ws, "manual", 0, "2026-11-22T00:00:00.000Z")
+	coretest.InsertSupervisorActionWithQuestions(t, ws, cycle, 1, "executed",
+		`[{"question":"どちらの形式か","answer":"JSON","basis":[{"path":"docs/a.md","locator":"節"}]}]`, "2026-11-22T00:01:00.000Z")
+	// 答えていない（failed）記録の問いは出さない。
+	coretest.InsertSupervisorActionWithQuestions(t, ws, cycle, 1, "failed",
+		`[{"question":"出さない","answer":"x","basis":[]}]`, "2026-11-22T00:02:00.000Z")
+	dir, _ := writeFakeGH(t, ghRoutesPendingFor(1))
+	withGHOnPATH(t, dir)
+	port := approvalServer(t, ws)
+
+	code, body := apiGet(t, port, approvalPath)
+	if code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	var doc struct {
+		Approval struct {
+			Questions json.RawMessage `json:"supervisor_questions"`
+		} `json:"approval"`
+	}
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"answer":"JSON","basis":[{"locator":"節","path":"docs/a.md"}],"question":"どちらの形式か"}]`
+	if string(doc.Approval.Questions) != want {
+		t.Errorf("supervisor_questions = %s, want %s", doc.Approval.Questions, want)
 	}
 }

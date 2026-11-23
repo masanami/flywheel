@@ -247,6 +247,8 @@ type ChallengeDetail struct {
 	SupervisorActions []SupervisorAction
 	// SupervisorHandsTaken は打った手の件数（結果が executed の対処の記録を、手ごとに数えた値。failed・rejected は入れない。無ければ空の写像）。
 	SupervisorHandsTaken map[SupervisorHand]int
+	// SupervisorQuestions はスーパーバイザーが答えた子の問い（結果が executed の対処の記録の questions。古い順。無ければ空のスライス）。
+	SupervisorQuestions []SupervisorQuestion
 }
 
 // ChallengeDetailBudget は課題の詳細の予算。EstimateUSD は見込み（取りやめでないタスクの枠の合計）、LimitUSD は上限
@@ -954,6 +956,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		if detail.SupervisorActions, err = querySupervisorActions(ctx, tx, `WHERE challenge_id = ?`, cid); err != nil {
+			return err
+		}
+		if detail.SupervisorQuestions, err = executedSupervisorQuestions(ctx, tx, cid); err != nil {
 			return err
 		}
 		if detail.SupervisorHandsTaken, err = countExecutedSupervisorHands(ctx, tx, cid); err != nil {
