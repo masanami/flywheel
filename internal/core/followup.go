@@ -377,7 +377,8 @@ func FollowupAttestationTarget(ids []string) (string, bool) {
 	return strings.Join(parts, ","), len(parts) > 0
 }
 
-// loadOpenFollowups は ids を全部読み、1 つでも存在しなければ ErrNotFound、未でなければ ErrValidation を返す
+// loadOpenFollowups は ids を全部読み、1 つでも存在しなければ ErrNotFound、未でなければ ErrValidation、
+// 足す依頼がオーナー待ちなら ErrFollowupAwaitingOwner（ErrValidation の一種）を返す
 // （どれも変える前に呼ぶ）。
 func loadOpenFollowups(ctx context.Context, tx *sql.Tx, nums []int64) ([]*Followup, error) {
 	out := make([]*Followup, 0, len(nums))
@@ -391,6 +392,18 @@ func loadOpenFollowups(ctx context.Context, tx *sql.Tx, nums []int64) ([]*Follow
 	for _, f := range out {
 		if f.Status != FollowupStatusOpen {
 			return nil, ErrValidation
+		}
+	}
+	// 足す依頼がオーナー待ち（問いが回答待ち）のものは断る（1 件でもあれば全体を断り、何も書かない）。
+	for _, f := range out {
+		fid, _ := parseFollowupID(f.ID)
+		var awaiting int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_addition WHERE followup_id = ? AND state = ?`,
+			fid, string(TaskAdditionAwaitingOwner)).Scan(&awaiting); err != nil {
+			return nil, err
+		}
+		if awaiting > 0 {
+			return nil, ErrFollowupAwaitingOwner
 		}
 	}
 	return out, nil
