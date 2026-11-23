@@ -192,9 +192,26 @@ type ChallengeTree struct {
 // ChallengeTree は now の時点の課題のツリーを作る。agent は予算の上限をサイズごとの既定から決めるための宣言（nil 可。
 // nil で既定が要るときは BudgetUSD を nil にする）。
 func (s *Store) ChallengeTree(ctx context.Context, agent *AgentDeclaration, now time.Time) (*ChallengeTree, error) {
-	all, err := s.ListChallenges(ctx, ListOptions{})
+	var out *ChallengeTree
+	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		out, err = s.challengeTreeTx(ctx, tx, agent, now)
+		return err
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// challengeTreeTx は ChallengeTree の読み取り。課題の一覧・親子・前提・フォローアップ・タスク・実行の記録・保留を、
+// tx（読み取りのトランザクション 1 つ）の中の同じ時点から読む。
+func (s *Store) challengeTreeTx(ctx context.Context, tx *sql.Tx, agent *AgentDeclaration, now time.Time) (*ChallengeTree, error) {
+	all, err := listChallengesTx(ctx, tx, nil)
 	if err != nil {
 		return nil, err
+	}
+	if s.treeListRead != nil {
+		s.treeListRead()
 	}
 	var open, done []Challenge
 	for _, c := range all {
@@ -218,7 +235,7 @@ func (s *Store) ChallengeTree(ctx context.Context, agent *AgentDeclaration, now 
 		done = done[:recentDoneLimit]
 	}
 	picked := append(append([]Challenge{}, open...), done...)
-	nodes, err := s.buildTreeNodes(ctx, all, picked, agent, now)
+	nodes, err := s.buildTreeNodes(ctx, tx, all, picked, agent, nil, now)
 	if err != nil {
 		return nil, err
 	}
@@ -227,24 +244,41 @@ func (s *Store) ChallengeTree(ctx context.Context, agent *AgentDeclaration, now 
 
 // ChallengeTreeNode は課題 1 件のツリーの要素を作る（完了・取り下げの課題も作る）。課題が無い・ID の形が不正なら ErrNotFound。
 func (s *Store) ChallengeTreeNode(ctx context.Context, id string, agent *AgentDeclaration, now time.Time) (*TreeChallenge, error) {
+	return s.ChallengeTreeNodeWith(ctx, id, agent, now, nil)
+}
+
+// ChallengeTreeNodeWith は ChallengeTreeNode で、カードの導出に使う状況 ov を呼び出し側が渡す版（nil なら中で組み立てる）。
+// 1 回の要求の中で状況を組み立て直さないために使う。読み取りは 1 つのトランザクションの中で行う。
+func (s *Store) ChallengeTreeNodeWith(ctx context.Context, id string, agent *AgentDeclaration, now time.Time, ov *Overview) (*TreeChallenge, error) {
 	if _, ok := parseChallengeID(id); !ok {
 		return nil, ErrNotFound
 	}
-	all, err := s.ListChallenges(ctx, ListOptions{})
-	if err != nil {
+	var out *TreeChallenge
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		all, err := listChallengesTx(ctx, tx, nil)
+		if err != nil {
+			return err
+		}
+		if s.treeListRead != nil {
+			s.treeListRead()
+		}
+		for _, c := range all {
+			if c.ID != id {
+				continue
+			}
+			nodes, err := s.buildTreeNodes(ctx, tx, all, []Challenge{c}, agent, ov, now)
+			if err != nil {
+				return err
+			}
+			out = &nodes[0]
+			return nil
+		}
+		return ErrNotFound
+	})
+	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
-	for _, c := range all {
-		if c.ID != id {
-			continue
-		}
-		nodes, err := s.buildTreeNodes(ctx, all, []Challenge{c}, agent, now)
-		if err != nil {
-			return nil, err
-		}
-		return &nodes[0], nil
-	}
-	return nil, ErrNotFound
+	return out, nil
 }
 
 // treeShared は課題のツリーの全部の要素が使う、課題の全体にまたがる読み取り。
@@ -263,14 +297,17 @@ type treeShared struct {
 	reflecting map[int64]bool
 }
 
-func (s *Store) buildTreeNodes(ctx context.Context, all, picked []Challenge, agent *AgentDeclaration, now time.Time) ([]TreeChallenge, error) {
-	ov, err := s.GetOverviewFor(ctx, agent)
-	if err != nil {
-		return nil, err
+// buildTreeNodes は picked の課題のツリーの要素を、tx（読み取りのトランザクション）の中だけで作る。ov が nil なら tx から状況を組み立てる。
+func (s *Store) buildTreeNodes(ctx context.Context, tx *sql.Tx, all, picked []Challenge, agent *AgentDeclaration, ov *Overview, now time.Time) ([]TreeChallenge, error) {
+	if ov == nil {
+		var err error
+		if ov, err = overviewTx(ctx, tx, agent); err != nil {
+			return nil, err
+		}
 	}
 	actions := make([][]CardAction, len(picked))
 	for i, c := range picked {
-		runs, err := s.LoadCardRuns(ctx, c)
+		runs, err := s.loadCardRunsTx(ctx, tx, c)
 		if err != nil {
 			return nil, err
 		}
@@ -283,55 +320,49 @@ func (s *Store) buildTreeNodes(ctx context.Context, all, picked []Challenge, age
 	}
 
 	out := make([]TreeChallenge, 0, len(picked))
-	err = s.db.Read(ctx, func(tx *sql.Tx) error {
-		sh, err := loadTreeShared(ctx, tx)
-		if err != nil {
-			return err
-		}
-		for i, c := range picked {
-			cid, _ := parseChallengeID(c.ID)
-			n := TreeChallenge{
-				ID: c.ID, Title: c.Title, Status: c.Status, UpdatedAt: c.UpdatedAt, NextHumanActions: actions[i],
-				Tasks: []TreeTask{}, CostUSD: microsToUSD(sh.costByChall[cid]), FollowupsOpen: sh.followups[cid],
-				Dependencies: []TreeDependency{}, Children: []TreeRelative{},
-			}
-			if err := fillTreeTasks(ctx, tx, cid, agent, sh, &n); err != nil {
-				return err
-			}
-			// 課題の一覧（all）と、親子・前提（sh）は別の読み取りで読むので、その間に増えた課題を sh だけが指すことがある。
-			// 一覧に無い課題は、ID と題名が空の要素にせず飛ばす（親は nil のまま）。次の読み直しで出る。
-			for _, d := range sh.eval.Dependencies[cid] {
-				dep, ok := byID[formatChallengeID(d.DependsOn)]
-				if !ok {
-					continue
-				}
-				n.Dependencies = append(n.Dependencies, TreeDependency{ChallengeID: dep.ID, Title: dep.Title, Status: dep.Status, Satisfied: d.Met})
-			}
-			if p, ok := sh.parents[cid]; ok {
-				if pc, ok := byID[formatChallengeID(p)]; ok {
-					n.Parent = &TreeRelative{ChallengeID: pc.ID, Title: pc.Title, Status: pc.Status}
-				}
-			}
-			var kids []int64
-			for child, parent := range sh.parents {
-				if parent == cid {
-					kids = append(kids, child)
-				}
-			}
-			sort.Slice(kids, func(a, b int) bool { return kids[a] < kids[b] })
-			for _, k := range kids {
-				kc, ok := byID[formatChallengeID(k)]
-				if !ok {
-					continue
-				}
-				n.Children = append(n.Children, TreeRelative{ChallengeID: kc.ID, Title: kc.Title, Status: kc.Status})
-			}
-			out = append(out, n)
-		}
-		return nil
-	})
-	if err = classifyReadWriteErr(err); err != nil {
+	sh, err := loadTreeShared(ctx, tx)
+	if err != nil {
 		return nil, err
+	}
+	for i, c := range picked {
+		cid, _ := parseChallengeID(c.ID)
+		n := TreeChallenge{
+			ID: c.ID, Title: c.Title, Status: c.Status, UpdatedAt: c.UpdatedAt, NextHumanActions: actions[i],
+			Tasks: []TreeTask{}, CostUSD: microsToUSD(sh.costByChall[cid]), FollowupsOpen: sh.followups[cid],
+			Dependencies: []TreeDependency{}, Children: []TreeRelative{},
+		}
+		if err := fillTreeTasks(ctx, tx, cid, agent, sh, &n); err != nil {
+			return nil, err
+		}
+		// 一覧（all）と親子・前提（sh）は同じトランザクションの同じ時点で読むので食い違わないはずだが、念のため、
+		// 一覧に無い課題は ID と題名が空の要素にせず飛ばす（親は nil のまま）。
+		for _, d := range sh.eval.Dependencies[cid] {
+			dep, ok := byID[formatChallengeID(d.DependsOn)]
+			if !ok {
+				continue
+			}
+			n.Dependencies = append(n.Dependencies, TreeDependency{ChallengeID: dep.ID, Title: dep.Title, Status: dep.Status, Satisfied: d.Met})
+		}
+		if p, ok := sh.parents[cid]; ok {
+			if pc, ok := byID[formatChallengeID(p)]; ok {
+				n.Parent = &TreeRelative{ChallengeID: pc.ID, Title: pc.Title, Status: pc.Status}
+			}
+		}
+		var kids []int64
+		for child, parent := range sh.parents {
+			if parent == cid {
+				kids = append(kids, child)
+			}
+		}
+		sort.Slice(kids, func(a, b int) bool { return kids[a] < kids[b] })
+		for _, k := range kids {
+			kc, ok := byID[formatChallengeID(k)]
+			if !ok {
+				continue
+			}
+			n.Children = append(n.Children, TreeRelative{ChallengeID: kc.ID, Title: kc.Title, Status: kc.Status})
+		}
+		out = append(out, n)
 	}
 	return out, nil
 }

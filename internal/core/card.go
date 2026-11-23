@@ -76,44 +76,57 @@ type CardRuns struct {
 
 // LoadCardRuns は challenge の run をストアから読む。
 func (s *Store) LoadCardRuns(ctx context.Context, challenge Challenge) (*CardRuns, error) {
+	var out *CardRuns
+	if _, ok := parseChallengeID(challenge.ID); !ok {
+		return &CardRuns{stale: s.effectiveStaleAfter()}, nil
+	}
+	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		out, err = s.loadCardRunsTx(ctx, tx, challenge)
+		return err
+	})
+	if err = classifyReadWriteErr(err); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// loadCardRunsTx は LoadCardRuns の読み取り（読み取りのトランザクションの中で呼ぶ。ID の形が正しい課題だけ）。
+func (s *Store) loadCardRunsTx(ctx context.Context, tx *sql.Tx, challenge Challenge) (*CardRuns, error) {
 	var runs []*runRow
 	var slots []string
 	if id, ok := parseChallengeID(challenge.ID); ok {
-		err := s.db.Read(ctx, func(tx *sql.Tx) error {
-			rows, err := tx.QueryContext(ctx, runSelectColumns+" WHERE challenge_id = ? ORDER BY started_at ASC", id)
+		rows, err := tx.QueryContext(ctx, runSelectColumns+" WHERE challenge_id = ? ORDER BY started_at ASC", id)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			r, err := scanRunRow(rows)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			defer func() { _ = rows.Close() }()
-			for rows.Next() {
-				r, err := scanRunRow(rows)
-				if err != nil {
-					return err
-				}
-				runs = append(runs, r)
+			runs = append(runs, r)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		// スロットごとの直近の run がこの課題の run であるスロット（同時刻は id の大きい方を新しいとする）。
+		srows, err := tx.QueryContext(ctx, `SELECT DISTINCT r.slot_id FROM run r WHERE r.challenge_id = ? AND r.slot_id IS NOT NULL
+			AND NOT EXISTS (SELECT 1 FROM run r2 WHERE r2.slot_id = r.slot_id
+				AND (r2.started_at > r.started_at OR (r2.started_at = r.started_at AND r2.id > r.id)))
+			ORDER BY r.slot_id ASC`, id)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = srows.Close() }()
+		for srows.Next() {
+			var n int64
+			if err := srows.Scan(&n); err != nil {
+				return nil, err
 			}
-			if err := rows.Err(); err != nil {
-				return err
-			}
-			// スロットごとの直近の run がこの課題の run であるスロット（同時刻は id の大きい方を新しいとする）。
-			srows, err := tx.QueryContext(ctx, `SELECT DISTINCT r.slot_id FROM run r WHERE r.challenge_id = ? AND r.slot_id IS NOT NULL
-				AND NOT EXISTS (SELECT 1 FROM run r2 WHERE r2.slot_id = r.slot_id
-					AND (r2.started_at > r.started_at OR (r2.started_at = r.started_at AND r2.id > r.id)))
-				ORDER BY r.slot_id ASC`, id)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = srows.Close() }()
-			for srows.Next() {
-				var n int64
-				if err := srows.Scan(&n); err != nil {
-					return err
-				}
-				slots = append(slots, formatSlotID(n))
-			}
-			return srows.Err()
-		})
-		if err = classifyReadWriteErr(err); err != nil {
+			slots = append(slots, formatSlotID(n))
+		}
+		if err := srows.Err(); err != nil {
 			return nil, err
 		}
 	}

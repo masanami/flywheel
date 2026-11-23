@@ -75,7 +75,8 @@ func decodeApproveBody(r *http.Request) (int, bool) {
 
 // approveHandler は POST …/challenges/{id}/approve。計画承認待ちなら計画の承認、完了確認待ちなら
 // HoldRelease=true の完了の承認を行う。成立した後に、CLI の承認と同じ決まりでサイクルを始め（きっかけは approve）、応答に cycle を足す。
-func approveHandler(fleet *Fleet, checks *checkCache, now func() time.Time, start CycleStarter) http.HandlerFunc {
+func approveHandler(fleet *Fleet, checks *checkCache, cfg eventsConfig, start CycleStarter) http.HandlerFunc {
+	now := cfg.now
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusNotFound, CodeNotFound, "not found")
@@ -98,7 +99,7 @@ func approveHandler(fleet *Fleet, checks *checkCache, now func() time.Time, star
 		)
 		err := readForCards(ctx, fleet, r.PathValue("name"), func(st *core.Store) error {
 			var err error
-			d, runs, tree, read, err = approveAndRead(ctx, st, id, version, now())
+			d, runs, tree, read, err = approveAndRead(ctx, st, id, version, now(), cfg)
 			if err != nil {
 				return err
 			}
@@ -115,13 +116,15 @@ func approveHandler(fleet *Fleet, checks *checkCache, now func() time.Time, star
 			cyc = startDecidedCycle(path, core.CycleTriggerApprove, start)
 		}
 		ov := read.resolve(ctx, checks)
-		writeJSON(w, http.StatusOK, view.WithCycle{Body: view.FromChallengeDetailCard(d, runs.Derive(d.Challenge, ov, now()), *tree), Cycle: view.FromCycleStartReason(cyc)})
+		writeJSON(w, http.StatusOK, view.WithCycle{Body: view.FromApprovedChallengeDetailCard(d, runs.Derive(d.Challenge, ov, now()), tree), Cycle: view.FromCycleStartReason(cyc)})
 	}
 }
 
 // approveAndRead は状態から承認の種類を決めて承認し、承認後の課題の全体像を読む。
 // 種類の判定（①）で状態が対象外なら、版の違いより先に invalid_transition で拒否する。
-func approveAndRead(ctx context.Context, st *core.Store, id string, version int, now time.Time) (*core.ChallengeDetail, *core.CardRuns, *core.TreeChallenge, *cardRead, error) {
+// 状況（Overview）は承認の確定の後に 1 回だけ組み立てる。承認が確定した後の課題のツリーの読み直しが失敗しても、
+// 承認は通っているのでエラーにせず、ツリーだけを nil にして返す（失敗はログに残す。画面は次の読み直しでツリーを出す）。
+func approveAndRead(ctx context.Context, st *core.Store, id string, version int, now time.Time, cfg eventsConfig) (*core.ChallengeDetail, *core.CardRuns, *core.TreeChallenge, *cardRead, error) {
 	preview, err := st.PrepareApproval(ctx, id)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -149,11 +152,16 @@ func approveAndRead(ctx context.Context, st *core.Store, id string, version int,
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	tree, err := st.ChallengeTreeNode(ctx, d.ID, agentDeclOrNil(st), now)
+	ov, err := cfg.overview(ctx, st)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	read, err := loadCardOverview(ctx, st)
+	tree, err := cfg.treeNode(ctx, st, d.ID, now, ov)
+	if err != nil {
+		cfg.logFn()("approve %s: 承認は確定したが、課題のツリーの読み直しに失敗した（応答の tree は null）: %v", d.ID, err)
+		tree = nil
+	}
+	read, err := loadCardCandidates(ctx, st, ov)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

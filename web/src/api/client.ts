@@ -109,7 +109,11 @@ export interface ReadApi {
 }
 
 // 承認の応答は、承認後の課題（ShowCardResponse）に、サイクルを始めたかの結果 cycle を足した形。
-export type ApproveResponse = ShowCardResponse & { cycle: CycleStart };
+// tree は、承認が確定した後の課題のツリーの読み直しに失敗したとき null（応答は成功のまま。ツリーは次の読み直しで出す）。
+export type ApproveResponse = Omit<ShowCardResponse, "tree"> & {
+  tree: ShowCardResponse["tree"] | null;
+  cycle: CycleStart;
+};
 
 // 承認（計画の承認・完了の承認。2 段階）。① 要約と版を得る → ② 版を添えて承認する。
 export interface ApprovalApi {

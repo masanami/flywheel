@@ -1032,37 +1032,41 @@ func (s *Store) ListChallenges(ctx context.Context, opt ListOptions) ([]Challeng
 	}
 
 	var result []Challenge
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		query := challengeSelectColumns
-		var args []any
-		if status != nil {
-			query += " WHERE status = ?"
-			args = append(args, string(*status))
-		}
-		query += " ORDER BY id ASC"
-
-		rows, err := tx.QueryContext(ctx, query, args...)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = rows.Close() }()
-
-		for rows.Next() {
-			c, err := scanChallengeRow(rows)
-			if err != nil {
-				return err
-			}
-			result = append(result, *c)
-		}
-		return rows.Err()
+	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		result, err = listChallengesTx(ctx, tx, status)
+		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
 		return nil, err
 	}
-	if result == nil {
-		result = []Challenge{}
-	}
 	return result, nil
+}
+
+// listChallengesTx は ListChallenges の読み取り（読み取りのトランザクションの中で呼ぶ）。無ければ空で nil ではない。
+func listChallengesTx(ctx context.Context, tx *sql.Tx, status *Status) ([]Challenge, error) {
+	query := challengeSelectColumns
+	var args []any
+	if status != nil {
+		query += " WHERE status = ?"
+		args = append(args, string(*status))
+	}
+	query += " ORDER BY id ASC"
+
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := []Challenge{}
+	for rows.Next() {
+		c, err := scanChallengeRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *c)
+	}
+	return result, rows.Err()
 }
 
 // EditChallenge は人間記入欄（タイトル・説明・完了条件・緊急度）を変更する。

@@ -65,6 +65,11 @@ func loadCardOverview(ctx context.Context, st *core.Store) (*cardRead, error) {
 	if err != nil {
 		return nil, err
 	}
+	return loadCardCandidates(ctx, st, ov)
+}
+
+// loadCardCandidates は組み立て済みの Overview ov に、waiting_external の候補を添える（Overview は組み立て直さない）。
+func loadCardCandidates(ctx context.Context, st *core.Store, ov *core.Overview) (*cardRead, error) {
 	cands, err := st.WaitingExternalCandidates(ctx)
 	if err != nil {
 		return nil, err
@@ -156,7 +161,9 @@ func treeHandler(fleet *Fleet, now func() time.Time) http.HandlerFunc {
 	})
 }
 
-func challengeHandler(fleet *Fleet, checks *checkCache, now func() time.Time) http.HandlerFunc {
+// challengeHandler は GET …/challenges/{id}。状況（Overview）は 1 回の要求で 1 回だけ組み立て、カードとツリーで使い回す。
+func challengeHandler(fleet *Fleet, checks *checkCache, cfg eventsConfig) http.HandlerFunc {
+	now := cfg.now
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !getOnly(w, r) {
 			return
@@ -173,10 +180,14 @@ func challengeHandler(fleet *Fleet, checks *checkCache, now func() time.Time) ht
 			if runs, err = st.LoadCardRuns(ctx, d.Challenge); err != nil {
 				return err
 			}
-			if tree, err = st.ChallengeTreeNode(ctx, d.ID, agentDeclOrNil(st), now()); err != nil {
+			ov, err := cfg.overview(ctx, st)
+			if err != nil {
 				return err
 			}
-			read, err = loadCardOverview(ctx, st)
+			if tree, err = cfg.treeNode(ctx, st, d.ID, now(), ov); err != nil {
+				return err
+			}
+			read, err = loadCardCandidates(ctx, st, ov)
 			return err
 		})
 		if err != nil {

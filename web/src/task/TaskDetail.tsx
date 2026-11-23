@@ -48,6 +48,7 @@ import { whoOf } from "../who.ts";
 import { AddedMark } from "./AddedMark.tsx";
 import { DecisionRecords } from "./DecisionRecords.tsx";
 
+const REPORT_LOAD_FAILED_TEXT = "報告を読み込めませんでした。";
 // 委譲の実行（報告の API を呼ぶ対象）の種類。
 const DELEGATION_KINDS = ["delegate", "contract"];
 
@@ -559,19 +560,26 @@ function RunsView({
   latestDelegationId: string | null;
   latestEndedAt: string | null;
 }) {
-  // 報告は、そのタスクのいちばん新しい委譲の実行の ID で 1 回だけ読む（読めなければ出さない）。
+  // 報告は、そのタスクのいちばん新しい委譲の実行の ID で 1 回だけ読む。
+  // 読めなかったとき（通信の失敗・サーバのエラー）だけ、その旨を出す。実行が無い（not_found）のは「報告が無い」ので出さない。
   const [report, setReport] = useState<RunReport | null>(null);
+  const [reportFailed, setReportFailed] = useState(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: latestEndedAt は読み直しの合図
   useEffect(() => {
     // 実行が終わったとき（latestEndedAt が変わったとき）にも読み直す。走っている間の報告は空のことがある。
     setReport(null);
+    setReportFailed(false);
     if (latestDelegationId === null) return;
     let cancelled = false;
     api.runReport(agentName, latestDelegationId).then(
       (r) => {
         if (!cancelled) setReport(r.report);
       },
-      () => {},
+      (e) => {
+        if (cancelled) return;
+        if (e instanceof ApiError && e.code === "not_found") return;
+        setReportFailed(true);
+      },
     );
     return () => {
       cancelled = true;
@@ -611,6 +619,9 @@ function RunsView({
           </li>
         ))}
       </ul>
+      {reportFailed ? (
+        <p data-testid="run-report-error">{REPORT_LOAD_FAILED_TEXT}</p>
+      ) : null}
       {report !== null && report.assumptions.length > 0 ? (
         <div data-testid="run-assumptions">
           <h4>仮定</h4>

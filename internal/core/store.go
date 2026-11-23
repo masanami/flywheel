@@ -64,6 +64,10 @@ type Store struct {
 	// （読みと書き込みの間に別のプロセスの反映の段が動く並びを作る）。nil なら何もしない。
 	reopenReadDone func()
 
+	// treeListRead は、課題のツリーの読み取りが課題の一覧を読み終えた直後（同じ読み取りのトランザクションの中）に呼ぶテスト用の欄。
+	// nil なら何もしない。読み取りの途中に別の接続が書いても、結果が一覧と同じ時点でそろうことの確かめに使う。
+	treeListRead func()
+
 	// insertActivity はテストが作業ログへの書き込みを失敗させるためのフック。
 	// nil なら defaultInsertActivity を使う（#9 §A-3 の失敗注入。本番 API には
 	// 注入口を露出しない）。

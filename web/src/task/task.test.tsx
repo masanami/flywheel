@@ -566,6 +566,72 @@ it("AC-307 #810: 委譲の実行が 2 件あるとき、報告の API は、新�
   expect(calls.map((c) => c.url)).toEqual([`${BASE}/runs/R-2/report`]);
 });
 
+it("#837: 報告の API の読み込みが失敗したとき（サーバのエラー）、実行の記録の区画に「報告を読み込めませんでした。」が出る", async () => {
+  const { root } = await open(runsShow(), {
+    extra: {
+      [`${BASE}/runs/R-2/report`]: () =>
+        new Response(
+          JSON.stringify({ error: { code: "store_error", message: "boom" } }),
+          { status: 500 },
+        ),
+    },
+  });
+  const msg = await within(root).findByTestId("run-report-error");
+  expect(msg.textContent).toBe("報告を読み込めませんでした。");
+  expect(
+    within(within(root).getByTestId("task-runs")).getByTestId(
+      "run-report-error",
+    ),
+  ).toBe(msg);
+});
+
+it("#837: 報告の API が通信で失敗したときも、同じ文が出る", async () => {
+  const { root } = await open(runsShow(), {
+    extra: {
+      [`${BASE}/runs/R-2/report`]: () => {
+        throw new TypeError("network");
+      },
+    },
+  });
+  const msg = await within(root).findByTestId("run-report-error");
+  expect(msg.textContent).toBe("報告を読み込めませんでした。");
+});
+
+it("#837: 報告が無いとき（実行が無い not_found・報告の中身が空）は、読み込みの失敗の文を出さない", async () => {
+  const notFound = await open(runsShow(), {
+    extra: {
+      [`${BASE}/runs/R-2/report`]: () =>
+        new Response(
+          JSON.stringify({ error: { code: "not_found", message: "no" } }),
+          { status: 404 },
+        ),
+    },
+  });
+  await waitFor(() =>
+    expect(
+      notFound.requests.filter((r) => r.url.includes("/report")).length,
+    ).toBe(1),
+  );
+  await new Promise((r) => setTimeout(r, 20));
+  expect(within(notFound.root).queryByTestId("run-report-error")).toBeNull();
+  cleanup();
+
+  const empty = await open(runsShow(), {
+    extra: {
+      [`${BASE}/runs/R-2/report`]: {
+        report: { assumptions: [], run_id: "R-2", unverified: [] },
+      },
+    },
+  });
+  await waitFor(() =>
+    expect(empty.requests.filter((r) => r.url.includes("/report")).length).toBe(
+      1,
+    ),
+  );
+  await new Promise((r) => setTimeout(r, 20));
+  expect(within(empty.root).queryByTestId("run-report-error")).toBeNull();
+});
+
 it("AC-308 #810: 報告に仮定があるとき、実行の記録の区画に、その仮定が出る", async () => {
   const { root } = await open(runsShow(), { extra: withReport });
   const box = await within(root).findByTestId("run-assumptions");
