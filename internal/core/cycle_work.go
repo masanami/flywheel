@@ -338,12 +338,12 @@ func (s *Store) countRoundWork(ctx context.Context, agent *AgentDeclaration, con
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id JOIN task t ON t.id = k.task_id
 			WHERE k.ended_at IS NULL AND k.state = 'waiting' AND k.requested_kind = 'review' AND COALESCE(k.verified_ref, '') <> ''
 			AND NOT (k.land_delivered = 1 AND k.land_ref = k.verified_ref)
-			AND c.status = 'in_progress' AND COALESCE(c.uses_integration, 0) = 1 AND t.status = 'verifying'`).Scan(&landable); err != nil {
+			AND `+taskMayProceedSQL("c", "k.task_id")+` AND COALESCE(c.uses_integration, 0) = 1 AND t.status = 'verifying'`).Scan(&landable); err != nil {
 			return err
 		}
 		// 着手中の課題の、レビュー待ちの実行（差し戻しを返す番かは、下で決める）。
 		rs, err := tx.QueryContext(ctx, contractRunSelect+` WHERE ended_at IS NULL AND kind = 'task' AND state = 'waiting' AND requested_kind = 'review'
-			AND challenge_id IN (SELECT id FROM challenge WHERE status = 'in_progress') ORDER BY id`)
+			AND EXISTS (SELECT 1 FROM challenge c WHERE c.id = contract_run.challenge_id AND `+taskMayProceedSQL("c", "contract_run.task_id")+`) ORDER BY id`)
 		if err != nil {
 			return err
 		}

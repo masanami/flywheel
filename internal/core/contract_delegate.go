@@ -602,7 +602,15 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 			return ErrNotFound
 		}
 		if ch.Status != StatusInProgress {
-			return errDelegationNotEligible
+			// タスクを止める保留だけが開いている課題は、保留の無いタスクだけ起動できる。
+			if in.TaskID <= 0 {
+				return errDelegationNotEligible
+			}
+			if may, err := taskMayProceed(ctx, tx, cid, in.TaskID); err != nil {
+				return err
+			} else if !may {
+				return errDelegationNotEligible
+			}
 		}
 		if binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
 			return err
@@ -760,7 +768,14 @@ func (s *Store) beginContractRunMarked(ctx context.Context, cid int64, cycleID, 
 		}
 		if isStart {
 			if cur.Status != StatusInProgress {
-				return errDelegationNotEligible
+				if taskID == nil {
+					return errDelegationNotEligible
+				}
+				if may, err := taskMayProceed(ctx, tx, cid, *taskID); err != nil {
+					return err
+				} else if !may {
+					return errDelegationNotEligible
+				}
 			}
 			// 終わっていない契約の run のほか、保留に写し切れていない回収・失敗・中止も実行中として数える。起動するタスクが
 			// 決まっているときは、そのタスクの単位で見る（同じ課題の別のタスクの実行は妨げない。タスクに結び付かない実行との
@@ -1154,7 +1169,7 @@ func (s *Store) holdContractChallengeWide(ctx context.Context, runID, challengeI
 func (s *Store) holdContractWithStop(ctx context.Context, runID, challengeID, question string, reason holdReason, opts HoldOptionsInput) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), runID, challengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
-			if tc.current.Status != StatusInProgress {
+			if tc.current.Status != StatusInProgress && tc.current.Status != StatusAwaitingHuman {
 				return errReconcileNotEligible
 			}
 			// 保留は、止まった契約の run が結び付くタスクに結び付ける（同じ課題のほかのタスクの run では、そのタスクではない）。
@@ -1177,6 +1192,12 @@ func (s *Store) holdContractWithStop(ctx context.Context, runID, challengeID, qu
 			scoped, err := taskStopOptions(ctx, tc, opts)
 			if err != nil {
 				return err
+			}
+			if reason == holdReasonReflectFailed || reason == holdReasonReflectUnavailable {
+				scoped.Scope = "" // 上げる依頼の保留は、課題を止める保留
+			}
+			if tc.current.Status == StatusAwaitingHuman && scoped.Scope != HoldScopeTask {
+				return errReconcileNotEligible // 人間対応待ちに重ねられるのは、タスクを止める保留だけ
 			}
 			_, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", scoped)
 			return err
@@ -1528,7 +1549,7 @@ func (s *Store) sameTaskRunOpen(ctx context.Context, row *contractRunRow) (bool,
 // その run の開始時点で終わっていなかった」ことで行う。終わりと同じ時刻（ミリ秒）の run は start の run として扱う:
 // 契約の run を終わらせるのは成功した契約のコマンドの run（start・status・resume・cancel）で、成功以外の run は
 // 終わらせない。この条件は成功以外の run だけを選ぶから。課題が着手中でなくなっていれば（保留・取り下げ・完了）選ばない。
-const reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND c.status = 'in_progress'
+var reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND ` + taskMayProceedSQL("c", "r.task_id") + `
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.start_run_id = r.id)
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND COALESCE(k.task_id, 0) = COALESCE(r.task_id, 0) AND k.start_run_id < r.id
 		AND (k.ended_at IS NULL OR k.ended_at > r.started_at))
@@ -1539,7 +1560,7 @@ const reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS N
 // 後の保留は、そのタスクに結び付くもの（か、タスクに結び付かないもの）だけを数える（ほかのタスクの保留は、このタスクの作り損ねを隠さない）。
 // 開いたまま（ended_at が NULL）の行は選ばない（状態の確認が終わった記録にした後で拾う。NULL との比較は成り立たず、毎回選んでしまう）。
 // 取りやめにしたタスクの実行は、flywheel が取り消した（計画の作り直し・取り下げ）ので、保留にし損ねたものと数えない。
-const unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'cancelled') AND c.status = 'in_progress'
+var unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'cancelled') AND ` + taskMayProceedSQL("c", "k.task_id") + `
 	AND k.ended_at IS NOT NULL
 	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at
 		AND (h.task_id IS NULL OR k.task_id IS NULL OR h.task_id = k.task_id))

@@ -34,7 +34,10 @@ func (s *Store) recordSupervisorAnswer(ctx context.Context, req supervisorHandRe
 		if err != nil {
 			return err
 		}
-		executed = ch.Status == StatusInProgress
+		executed, err = childQuestionTargetMayProceed(ctx, tx, ch, req.Target.TaskID)
+		if err != nil {
+			return err
+		}
 		if !executed {
 			in = req.actionInput(HandAnswer, o.Findings, o.Note, basis, ActionRejected, RejectStateChanged)
 			in.HoldID = nil

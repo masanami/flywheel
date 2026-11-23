@@ -93,7 +93,10 @@ func (s *Store) recordSupervisorChildEscalate(ctx context.Context, req superviso
 		if err != nil {
 			return err
 		}
-		executed = ch.Status == StatusInProgress
+		executed, err = childQuestionTargetMayProceed(ctx, tx, ch, req.Target.TaskID)
+		if err != nil {
+			return err
+		}
 		in := req.actionInput(HandEscalate, o.Findings, o.Note, o.Basis, ActionExecuted, "")
 		if !executed {
 			in = req.actionInput(HandEscalate, o.Findings, o.Note, o.Basis, ActionRejected, RejectStateChanged)

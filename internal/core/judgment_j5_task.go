@@ -72,7 +72,7 @@ func needsTaskVerification(contentRef, verifiedRef sql.NullString) bool {
 
 // selectJ5TaskTargets は、検証するタスクの組を、課題の ID の昇順（課題の中ではタスクの ID の昇順）で返す。
 func selectJ5TaskTargets(ctx context.Context, tx *sql.Tx) ([]j5TaskTarget, error) {
-	challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusInProgress)
+	challenges, err := loadChallengesWithProceedableTasks(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func selectJ5TaskTargets(ctx context.Context, tx *sql.Tx) ([]j5TaskTarget, error
 // 終わっていない実行を持つタスク（タスクの検証・契約のコマンドの実行中）は、今は選ばない。
 func selectJ5TaskTargetsOf(ctx context.Context, tx *sql.Tx, ch Challenge) ([]j5TaskTarget, error) {
 	cid, ok := parseChallengeID(ch.ID)
-	if !ok || ch.Status != StatusInProgress {
+	if !ok || (ch.Status != StatusInProgress && ch.Status != StatusAwaitingHuman) {
 		return nil, nil
 	}
 	integ, err := challengeUsesIntegration(ctx, tx, cid)
@@ -111,6 +111,12 @@ func selectJ5TaskTargetsOf(ctx context.Context, tx *sql.Tx, ch Challenge) ([]j5T
 			continue
 		}
 		tid := taskIntID(&tasks[i])
+		// 保留が結び付くタスクは、その保留が閉じるまで検証しない（課題を止める保留が開いている課題は、そもそも対象に入らない）。
+		if may, err := taskMayProceed(ctx, tx, cid, tid); err != nil {
+			return nil, err
+		} else if !may {
+			continue
+		}
 		_, contentRef, verifiedRef, found, err := latestTaskContract(ctx, tx, cid, tid)
 		if err != nil {
 			return nil, err
@@ -138,16 +144,15 @@ func selectJ5TaskTargetsOf(ctx context.Context, tx *sql.Tx, ch Challenge) ([]j5T
 // loadJ5TaskScope はタスク taskID の検証の対象を読む。課題が着手中・統合先を使う・タスクが検証中・中身の識別が検証した中身と
 // 違う、のどれかを満たさなければ nil。
 func loadJ5TaskScope(ctx context.Context, tx *sql.Tx, cid, taskID int64) (*j5TaskScope, error) {
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, cid).Scan(&status); err != nil {
-		return nil, err
-	}
 	integ, err := challengeUsesIntegration(ctx, tx, cid)
 	if err != nil {
 		return nil, err
 	}
-	if Status(status) != StatusInProgress || integ == nil || !*integ {
+	if integ == nil || !*integ {
 		return nil, nil
+	}
+	if may, err := taskMayProceed(ctx, tx, cid, taskID); err != nil || !may {
+		return nil, err
 	}
 	task, err := loadTask(ctx, tx, taskID)
 	if err != nil {
@@ -189,14 +194,10 @@ func formatTaskSourceSection(c SourceChild) string {
 // j5TaskStillCurrent は、タスクの検証の結果を書く直前の読み直し（書き込みのトランザクションの中）。課題が着手中・タスクが
 // 検証中・タスクの契約の実行（最後の 1 件）の行と中身の識別が検証を始めたときと同じなら真。
 func j5TaskStillCurrent(ctx context.Context, tx *sql.Tx, cid int64, scope *j5TaskScope) (bool, error) {
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, cid).Scan(&status); err != nil {
+	tid := taskIntID(&scope.Task)
+	if may, err := taskMayProceed(ctx, tx, cid, tid); err != nil || !may {
 		return false, err
 	}
-	if Status(status) != StatusInProgress {
-		return false, nil
-	}
-	tid := taskIntID(&scope.Task)
 	var tstatus string
 	if err := tx.QueryRowContext(ctx, `SELECT status FROM task WHERE id = ?`, tid).Scan(&tstatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -216,7 +217,7 @@ func j5TaskStillCurrent(ctx context.Context, tx *sql.Tx, cid int64, scope *j5Tas
 
 // finalizeJ5TaskOutput は run が succeeded のときに、タスクの検証の出力を検査し直して書く。検査に落ちたら run の結果を
 // invalid_output にし、何も書かない。書かなかった（直前の読み直しで対象が変わっていた）ときは status が nil。
-// status は書いた後の課題の状態（満たした・満たしていないは着手中のまま。判断できない・差し戻しの上限に達したは保留）。
+// status は書いた後の課題の状態（満たした・満たしていないは、課題が着手中なら着手中のまま、ほかのタスクの保留で人間対応待ちならそのまま。判断できない・差し戻しの上限に達したは保留）。
 func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challengeIDDisplay string, structured []byte, scope *j5TaskScope, vh *j5VerifiedHeads, agent *AgentDeclaration) (outcome string, status *string, result RunResult, err error) {
 	v, ok := validateJ5Output(structured)
 	if !ok {
@@ -236,6 +237,14 @@ func (s *Store) finalizeJ5TaskOutput(ctx context.Context, runIDDisplay, challeng
 	st := string(StatusInProgress)
 	if v.Verdict == J5VerdictUncertain || held {
 		st = string(StatusAwaitingHuman)
+	} else if cid, ok := parseChallengeID(challengeIDDisplay); ok {
+		// 保留の無いタスクの検証は、ほかのタスクを止める保留が開いている間も行う。課題は人間対応待ちのままなので、書いた後の状態を読む。
+		var cur string
+		if rerr := s.db.Read(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, cid).Scan(&cur)
+		}); rerr == nil && cur != "" {
+			st = cur
+		}
 	}
 	return outcome, &st, RunResultSucceeded, nil
 }

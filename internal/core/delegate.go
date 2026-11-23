@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 )
 
@@ -301,23 +300,10 @@ type blockedChallenge struct {
 // selectDelegationTargetsFor は selectDelegationTargets の、委譲先の宣言 conn（nil なら、委譲先の形による判定をしない）を
 // 受け取り、進めようが無い課題も返す版。統合先を使う課題は、終わっていない実行をタスクの単位で見る（課題の単位では見ない）。
 func selectDelegationTargetsFor(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclaration) (out delegationTargets, err error) {
-	challenges, err := loadChallengesByStatusSorted(ctx, tx, StatusInProgress)
+	// 着手中の課題と、タスクを止める保留だけが開いている人間対応待ちの課題（保留が結び付くタスク以外を進める）。
+	challenges, err := loadChallengesWithProceedableTasks(ctx, tx)
 	if err != nil {
 		return out, err
-	}
-	// タスクを止める保留だけが開いている課題（人間対応待ち）も、ほかのタスクを進めるので、対象に入れる（優先度→ID の昇順に混ぜる）。
-	held, err := loadTaskHeldChallenges(ctx, tx)
-	if err != nil {
-		return out, err
-	}
-	if len(held) > 0 {
-		challenges = append(challenges, held...)
-		sort.SliceStable(challenges, func(i, j int) bool {
-			a, _ := parseChallengeID(challenges[i].ID)
-			b, _ := parseChallengeID(challenges[j].ID)
-			return a < b
-		})
-		stableSortChallengesByPriority(challenges)
 	}
 	deps, err := evaluateDependencies(ctx, tx)
 	if err != nil {
@@ -729,10 +715,24 @@ func (s *Store) runDelegationTasks(ctx context.Context, in DelegateInput) (*Dele
 		if err != nil {
 			return nil, err
 		}
-		if ch.Status != StatusInProgress {
-			return nil, ErrInvalidTransition
-		}
 		cid, _ := parseChallengeID(ch.ID)
+		if ch.Status != StatusInProgress {
+			// タスクを止める保留だけが開いている課題は、保留が結び付くタスク以外を進める（起動するタスクの選びで外す）。
+			var proceedable bool
+			if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+				var err error
+				proceedable = ch.Status == StatusAwaitingHuman
+				if proceedable {
+					proceedable, err = challengeHasOnlyTaskHolds(ctx, tx, cid)
+				}
+				return err
+			}); err != nil {
+				return nil, classifyReadWriteErr(err)
+			}
+			if !proceedable {
+				return nil, ErrInvalidTransition
+			}
+		}
 		var active bool
 		err = s.db.Read(ctx, func(tx *sql.Tx) error {
 			// 統合先を使う課題は、終わっていない実行をタスクの単位で見る（起動できるタスクを選ぶ所で見る）。
@@ -1014,7 +1014,9 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		if err != nil {
 			return 0, err
 		}
-		if cur.Status != StatusInProgress {
+		if may, err := taskMayProceed(ctx, tx, cid, taskID); err != nil {
+			return 0, err
+		} else if !may {
 			return 0, errDelegationNotEligible
 		}
 		if cycleIDInt != nil {
